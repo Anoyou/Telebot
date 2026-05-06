@@ -1,0 +1,167 @@
+#!/usr/bin/env bash
+# 一键生产部署：纯 docker compose
+#   - 检查 .env（密钥必须就位）
+#   - 构建并启动全部 4 个容器（postgres / redis / web / frontend）
+#   - 等待 web 健康检查通过
+#   - 打印访问地址
+#
+# 这是"生产/演示"模式：所有东西容器化，不依赖宿主机的 venv / pnpm。
+# 默认对外暴露 80 端口（可在 .env 设 WEB_PORT_PUBLISH=8080 等）。
+
+set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/_lib.sh"
+cd "$ROOT_DIR"
+
+# ── 1. 依赖与 .env ────────────────────────────────────────
+need_cmd docker "macOS Docker Desktop / Linux docker.io"
+docker info >/dev/null 2>&1 || die "docker 守护进程未启动"
+docker compose version >/dev/null 2>&1 || die "缺 docker compose v2 插件"
+
+if [[ ! -f .env ]]; then
+  warn ".env 不存在，自动调 bootstrap.sh 生成（需要 python3.12）"
+  "$SCRIPT_DIR/bootstrap.sh"
+fi
+
+# 强制 .env 权限 600（生产环境绝不能让其它本机用户读到）
+chmod 600 .env 2>/dev/null || true
+
+# 校验密钥已替换
+if grep -qE '^(MASTER_KEY|JWT_SECRET)=(changeme|$)' .env; then
+  err ".env 中 MASTER_KEY / JWT_SECRET 还是占位值！"
+  echo "  自动重新生成（不会动其它字段）..."
+  if command -v python3.12 >/dev/null 2>&1; then
+    PY=python3.12
+  elif [[ -x backend/.venv/bin/python ]]; then
+    PY=backend/.venv/bin/python
+  else
+    die "需要 python3.12 或已存在的 backend/.venv 来生成密钥"
+  fi
+  MK="$($PY -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())')"
+  JS="$($PY -c 'import secrets; print(secrets.token_urlsafe(64))')"
+  $PY - "$MK" "$JS" <<'PY'
+import sys, pathlib, re
+mk, js = sys.argv[1], sys.argv[2]
+p = pathlib.Path(".env")
+text = p.read_text()
+text = re.sub(r'^MASTER_KEY=(changeme.*)?$', f'MASTER_KEY={mk}', text, flags=re.MULTILINE)
+text = re.sub(r'^JWT_SECRET=(changeme.*)?$', f'JWT_SECRET={js}', text, flags=re.MULTILINE)
+p.write_text(text)
+PY
+  ok ".env 密钥已生成"
+fi
+
+# 校验 Postgres 密码不是默认弱密码（仅生产强制）
+_pg_pwd="$(grep -E '^POSTGRES_PASSWORD=' .env 2>/dev/null | head -n1 | cut -d= -f2- | tr -d ' "' || true)"
+_pg_user="$(grep -E '^POSTGRES_USER=' .env 2>/dev/null | head -n1 | cut -d= -f2- | tr -d ' "' || true)"
+_pg_user="${_pg_user:-telebot}"
+_pg_db="$(grep -E '^POSTGRES_DB=' .env 2>/dev/null | head -n1 | cut -d= -f2- | tr -d ' "' || true)"
+_pg_db="${_pg_db:-telebot}"
+_db_url="$(grep -E '^DATABASE_URL=' .env 2>/dev/null | head -n1 | cut -d= -f2- | tr -d ' "' || true)"
+
+# 弱密码黑名单（小写比较）
+_weak_list=("telebot" "postgres" "password" "changeme" "admin" "123456" "root" "")
+_pwd_lc="$(printf '%s' "$_pg_pwd" | tr '[:upper:]' '[:lower:]')"
+for w in "${_weak_list[@]}"; do
+  if [[ "$_pwd_lc" == "$w" ]]; then
+    err "POSTGRES_PASSWORD 是弱密码 / 默认值（'$_pg_pwd'），生产环境拒绝启动！"
+    echo "  请在 .env 中设置一个强密码，例如："
+    echo "    POSTGRES_PASSWORD=$(LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c 32 || echo "$(date +%s)$RANDOM")"
+    echo "  并同步更新 DATABASE_URL（用户名/密码段必须一致）。"
+    die "拒绝以默认/弱密码启动生产 Postgres"
+  fi
+done
+
+# 校验 DATABASE_URL 与 POSTGRES_USER/PASSWORD/DB 一致（避免 web 连不上）
+#
+# 走 Python urlparse 拆解，避免 substring 在密码含 @ : / + URL-encode 时假阴。
+# 校验 user / pwd / host / port / dbname 五段：
+#   - user / dbname 直接比对
+#   - pwd 用 urlencode 后再比（密码含特殊字符时合法）
+#   - host 必须是 'postgres'（compose 内部服务名），port 5432
+if [[ -n "$_db_url" ]]; then
+  if command -v python3.12 >/dev/null 2>&1; then
+    _PY=python3.12
+  elif [[ -x backend/.venv/bin/python ]]; then
+    _PY=backend/.venv/bin/python
+  else
+    _PY=python3
+  fi
+  if ! "$_PY" - "$_db_url" "$_pg_user" "$_pg_pwd" "${_pg_db:-telebot}" <<'PY'
+import sys
+from urllib.parse import urlparse, unquote, quote
+url, want_user, want_pwd, want_db = sys.argv[1:5]
+# asyncpg DSN 形如 postgresql+asyncpg://user:pwd@host:port/db
+u = urlparse(url)
+got_user = unquote(u.username or "")
+got_pwd  = unquote(u.password or "")
+got_host = u.hostname or ""
+got_port = u.port or 5432
+got_db   = (u.path or "").lstrip("/")
+problems = []
+if got_user != want_user:
+    problems.append(f"user 不一致: DSN={got_user!r} vs POSTGRES_USER={want_user!r}")
+if got_pwd != want_pwd:
+    problems.append(f"password 不一致 (urldecode 后)；密码含特殊字符时记得 urlencode 写到 DSN")
+if got_host not in ("postgres", "localhost", "127.0.0.1"):
+    problems.append(f"host={got_host!r}，compose 部署应是 'postgres'")
+if int(got_port) != 5432:
+    problems.append(f"port={got_port}，期望 5432")
+if got_db != want_db:
+    problems.append(f"db 不一致: DSN={got_db!r} vs POSTGRES_DB={want_db!r}")
+if problems:
+    print("DATABASE_URL 校验失败：", file=sys.stderr)
+    for p in problems:
+        print(f"  - {p}", file=sys.stderr)
+    print(f"  pwd urlencode 形式: {quote(want_pwd, safe='')}", file=sys.stderr)
+    sys.exit(1)
+PY
+  then
+    die "请修正 .env 中 DATABASE_URL 段位"
+  fi
+fi
+
+ok "Postgres 凭据校验通过（用户=$_pg_user）"
+
+# ── 2. 构建并启动 ────────────────────────────────────────
+log "构建 + 启动全部容器（首次约 3-5 分钟）"
+docker compose up -d --build
+
+# ── 3. 等待健康 ──────────────────────────────────────────
+log "等待 web 容器健康"
+wait_compose_healthy docker-compose.yml postgres 60 || die "postgres 不健康"
+wait_compose_healthy docker-compose.yml redis 30    || die "redis 不健康"
+
+# web 容器内 alembic upgrade 跑完才会健康，所以这里等更久
+i=0
+while (( i < 120 )); do
+  state="$(docker compose ps --format json web 2>/dev/null \
+            | python3 -c "import sys,json;
+data = sys.stdin.read().strip()
+if data.startswith('['):
+    arr = json.loads(data)
+else:
+    arr = [json.loads(l) for l in data.splitlines() if l.strip()]
+print((arr[0].get('Health') or arr[0].get('State') or 'unknown') if arr else 'missing')" 2>/dev/null)"
+  if [[ "$state" == "healthy" ]]; then break; fi
+  sleep 1
+  i=$((i + 1))
+done
+if [[ "$state" != "healthy" ]]; then
+  err "web 在 120s 内未健康，最近日志："
+  docker compose logs --tail=60 web >&2
+  exit 1
+fi
+ok "web 容器健康"
+
+PUBLISH_PORT="$(grep -E '^WEB_PORT_PUBLISH=' .env 2>/dev/null | cut -d= -f2 | tr -d ' "' || true)"
+PUBLISH_PORT="${PUBLISH_PORT:-80}"
+
+echo
+ok "生产栈已就绪 ${C_GRN}🎉${C_RST}"
+echo
+printf '  访问  ${C_BLU}http://localhost:%s${C_RST}\n' "$PUBLISH_PORT"
+echo
+dim "  实时日志：docker compose logs -f"
+dim "  停止栈：  make prod-down"
+dim "  完整重建：make prod-down && make prod-up"

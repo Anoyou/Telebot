@@ -1,0 +1,61 @@
+# 项目敏感与构建产物
+.env
+.env.local
+.env.*.local
+*.session
+*.session-journal
+sessions/
+
+# 密钥/备份文件（deploy/backup-keys.sh 生成）
+keys-backup-*.txt
+keys-backup-*.gpg
+keys-backup-*.age
+
+# 运行时数据：账号头像 / 第三方插件 / 缓存
+data/
+backend/data/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# Node
+node_modules/
+dist/
+dev-dist/
+build/
+.parcel-cache/
+.next/
+.pnpm-store/
+*.tsbuildinfo
+
+# IDE
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# Alma 内部
+.alma-snapshots
+
+# Claude Code 本地状态（每个用户机器特定）
+.claude/
+
+# 一键启停脚本运行态
+.run/
+logs/
+
+# 临时 / 系统
+*.log
+*.tmp
+*~
+archive/

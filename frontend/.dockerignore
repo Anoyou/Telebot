@@ -1,0 +1,16 @@
+# 前端构建上下文忽略清单
+node_modules
+dist
+.pnpm-store
+.parcel-cache
+.next
+.turbo
+.env
+.env.*
+.git
+.gitignore
+.DS_Store
+*.log
+.vscode
+.idea
+.alma-snapshots

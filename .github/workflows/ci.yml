@@ -1,0 +1,74 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: telebot
+          POSTGRES_PASSWORD: telebot_test
+          POSTGRES_DB: telebot
+        ports: ['5432:5432']
+        options: --health-cmd="pg_isready" --health-interval=10s --health-timeout=5s --health-retries=5
+      redis:
+        image: redis:7
+        ports: ['6379:6379']
+        options: --health-cmd="redis-cli ping" --health-interval=10s
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Install backend
+        working-directory: backend
+        run: |
+          pip install -e ".[dev]"
+
+      - name: Run alembic upgrade
+        working-directory: backend
+        env:
+          DATABASE_URL: postgresql+asyncpg://telebot:telebot_test@localhost:5432/telebot
+          MASTER_KEY: 0123456789abcdef0123456789abcdef
+          JWT_SECRET: ci_secret_only_for_test
+        run: alembic upgrade head
+
+      - name: Lint
+        working-directory: backend
+        run: ruff check .
+
+      - name: Test
+        working-directory: backend
+        env:
+          DATABASE_URL: postgresql+asyncpg://telebot:telebot_test@localhost:5432/telebot
+          REDIS_URL: redis://localhost:6379/0
+          MASTER_KEY: 0123456789abcdef0123456789abcdef
+          JWT_SECRET: ci_secret_only_for_test
+        run: pytest -q
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v3
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - working-directory: frontend
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm run build

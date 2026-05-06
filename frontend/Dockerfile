@@ -1,0 +1,31 @@
+# 前端镜像：多阶段构建
+#   - builder：node22 alpine，corepack 启用 pnpm，执行 pnpm build
+#   - runtime：nginx alpine，托管 dist 静态资源 + 反代后端
+# 暴露 80 端口；通过 docker-compose 中 ${WEB_PORT_PUBLISH:-80} 对外发布
+
+FROM node:22-alpine AS builder
+WORKDIR /app
+
+# 启用 corepack，使用与 lockfile 匹配的 pnpm 版本
+RUN corepack enable
+
+# 仅拷贝清单先装依赖，命中构建缓存；锁文件可能不存在则降级到普通安装
+COPY package.json pnpm-lock.yaml* ./
+RUN pnpm install --frozen-lockfile || pnpm install
+
+# 拷贝其余源码再构建
+COPY . .
+RUN pnpm build
+
+
+FROM nginx:1.27-alpine AS runtime
+
+# 静态资源
+COPY --from=builder /app/dist /usr/share/nginx/html
+# 站点配置：替换默认 default.conf
+COPY nginx.conf /etc/nginx/conf.d/default.conf
+
+EXPOSE 80
+
+# 健康检查：能拿到首页即可
+HEALTHCHECK --interval=10s --timeout=3s CMD wget -qO- http://localhost/ >/dev/null 2>&1 || exit 1

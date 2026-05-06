@@ -1,0 +1,81 @@
+name: 🐛 Bug 报告
+description: 项目崩了 / UI 出错 / 行为不符合预期
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢反馈！提交前请：
+        1. 搜一下 [Issues](../) 看是否已存在同类报告
+        2. 跑过 `make restart` + 浏览器硬刷（cmd+shift+r）确认不是版本不一致
+        3. 如果是 telethon / TG 协议层问题，先确认账号未被风控（`,status` 命令）
+
+  - type: input
+    id: version
+    attributes:
+      label: 版本号
+      description: 浏览器左下角 sidebar 显示，或 TG 内 `,version`
+      placeholder: "v0.5.0 · RC1"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: env
+    attributes:
+      label: 部署模式
+      options:
+        - 本机开发（make up + http://localhost:5173）
+        - 公网（HTTPS + Caddy 反代）
+        - 其它
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: 遇到了什么
+      description: 详细描述实际行为
+      placeholder: |
+        在「自定义命令模板」编辑某条 ai 命令保存时，前端报 500
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: 期望的行为
+      placeholder: 保存成功并刷新列表
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: 复现步骤
+      description: 越具体越快修
+      placeholder: |
+        1. 打开 /templates
+        2. 编辑现有 "ai" 类型模板
+        3. 改输出模板为 "{answer}"
+        4. 点保存 → 报红
+      value: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: 相关日志
+      description: |
+        - 后端：`tail -100 logs/uvicorn.log`
+        - worker：访问「日志中心 → 系统」过滤本账号
+        - 前端：浏览器 DevTools Console
+        敏感字段（api_key / session 字符串 / bot_token）请脱敏
+      render: shell
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: 其它信息
+      description: 截图 / 录屏 / 可疑配置

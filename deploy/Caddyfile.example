@@ -1,0 +1,25 @@
+telebot.example.com {
+    encode gzip
+
+    # 限流：每个 IP 每分钟 60 个写请求
+    @writes method POST PUT PATCH DELETE
+    rate_limit @writes 60r/m
+
+    # API 反代到本机后端（仅本地监听）
+    handle /api/* {
+        reverse_proxy 127.0.0.1:8000 {
+            header_up X-Real-IP {remote}
+            header_up X-Forwarded-For {remote}
+        }
+    }
+
+    # 前端静态资源（把路径改成你的真实路径）
+    handle {
+        root * /opt/telebot/frontend/dist
+        try_files {path} /index.html
+        file_server
+    }
+
+    # 安全响应头
+    header Strict-Transport-Security "max-age=31536000; includeSubDomains"
+}

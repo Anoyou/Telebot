@@ -1,0 +1,94 @@
+# 生产部署：postgres + redis + web (FastAPI + supervisor) + frontend (nginx)
+# 使用方式：
+#   1. cp .env.example .env  并填入 MASTER_KEY / JWT_SECRET 等
+#   2. docker compose up -d --build
+# 说明：
+#   - web 容器内含 supervisor，统一管理每账号的 worker 子进程，故 uvicorn 必须 --workers 1
+#   - 前端 nginx 通过容器名 web:8000 反代后端，无需暴露后端端口到宿主机
+
+services:
+  # ── PostgreSQL：主数据存储 ────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-telebot}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-telebot}
+      POSTGRES_DB: ${POSTGRES_DB:-telebot}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-telebot} -d $${POSTGRES_DB:-telebot}"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+  # ── Redis：IPC pub/sub + 限速令牌桶 ───────────────────────────
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+  # ── Web：FastAPI + supervisor，主进程内拉起每账号 worker 子进程 ─
+  web:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      # 容器内连接服务名（postgres / redis），覆盖 .env 中本机地址
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-telebot}:${POSTGRES_PASSWORD:-telebot}@postgres:5432/${POSTGRES_DB:-telebot}
+      REDIS_URL: redis://redis:6379/0
+      WEB_HOST: 0.0.0.0
+      WEB_PORT: "8000"
+      # #14：迁移只保留 command 里的那一次；应用启动期自动迁移关闭，避免重复执行
+      AUTO_MIGRATE_ON_STARTUP: "false"
+    # 让容器内能用 ``host.docker.internal`` 访问宿主机（Mac/Windows Docker Desktop
+    # 自带；Linux 需要这一行兜底）。如 .env 里 TG_DEFAULT_PROXY=socks5://host.docker.internal:1080
+    # 即可让容器透过宿主机的本地代理出去。
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      # session 加密文件落盘目录，volume 持久化
+      - sessions:/app/sessions
+    healthcheck:
+      # 用 /readyz 做真实探活：DB + Redis 任一异常即视为 unhealthy
+      # urlopen 显式 timeout=4：让应用层超时先于 docker 的 5s 触发，错误更清晰
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/readyz', timeout=4).read()"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    # 启动顺序：先跑 alembic 迁移再启 uvicorn（唯一迁移入口）
+    # ⚠ 必须 --workers 1：supervisor 在主进程内管子进程，多 worker 会重复拉起 worker 子进程
+    command: ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 1"]
+
+  # ── Frontend：nginx 静态托管 + 反代后端 ──────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      - web
+    ports:
+      # 对外发布端口，可在 .env 中通过 WEB_PORT_PUBLISH 覆盖（默认 80）
+      - "${WEB_PORT_PUBLISH:-80}:80"
+
+# ── 持久化卷 ──────────────────────────────────────────────────
+volumes:
+  pgdata:
+  redisdata:
+  sessions:

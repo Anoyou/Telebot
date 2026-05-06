@@ -1,0 +1,17 @@
+# 关闭"空白 issue"，强制走模板（bug / feature / 安全 单独走邮件）
+blank_issues_enabled: false
+
+contact_links:
+  - name: 💬 提问 / 讨论
+    url: https://github.com/yourusername/telebot/discussions
+    about: 用法疑问 / 交流想法 → 走 Discussions，不要开 issue
+
+  - name: 🔒 安全漏洞
+    url: https://github.com/yourusername/telebot/security/advisories/new
+    about: |
+      发现安全漏洞**不要**公开提 issue。走 GitHub Security Advisories
+      私下报告（Repo → Security → Report a vulnerability）。
+
+  - name: 📖 部署 / 配置问题
+    url: https://github.com/yourusername/telebot/blob/main/docs/DEPLOY-PUBLIC.md
+    about: 先看部署文档 + SECURITY-OPS.md，多数问题里面写过

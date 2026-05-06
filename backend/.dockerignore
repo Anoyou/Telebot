@@ -1,0 +1,22 @@
+# 后端构建上下文忽略清单：减小镜像体积、避免本地敏感文件入镜像
+__pycache__
+*.pyc
+*.pyo
+.venv
+venv
+.pytest_cache
+.ruff_cache
+.mypy_cache
+.alma-snapshots
+sessions
+*.db
+*.session
+*.session-journal
+.env
+.env.*
+.git
+.gitignore
+.DS_Store
+*.egg-info
+dist
+build

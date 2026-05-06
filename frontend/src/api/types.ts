@@ -1,0 +1,891 @@
+// 与后端 schema 对齐的关键类型（手写版）。OpenAPI 生成的 schema.ts 后续替换。
+
+// ===================== 鉴权 =====================
+export interface LoginRequest {
+  username: string;
+  password: string;
+  totp_code?: string | null;
+}
+export interface LoginResponse {
+  ok: boolean;
+  require_totp: boolean;
+}
+export interface CurrentUser {
+  id: number;
+  username: string;
+  has_totp: boolean;
+}
+
+// ===================== 账号 =====================
+export type AccountStatus =
+  | "active"
+  | "paused"
+  | "floodwait"
+  | "dead"
+  | "login_required";
+
+export interface ProxySummary {
+  id: number;
+  /** socks5 / http / mtproxy */
+  type: string;
+  host: string;
+  port: number;
+  /** 友好名字；后端目前给的是 host:port */
+  label?: string | null;
+  // ── 上次主动测的真实出口（30 min Redis 缓存）──
+  /** ISO-2 国家代码（CN / US / JP），无缓存时 null */
+  exit_country?: string | null;
+  exit_ip?: string | null;
+  /** epoch 秒；前端用来算"几分钟前测的" */
+  probed_at?: number | null;
+  /** 上次探测是否成功；null=从未探测 */
+  probe_ok?: boolean | null;
+}
+
+export interface AccountSummary {
+  id: number;
+  phone: string;
+  display_name: string | null;
+  /** Telegram 数字 ID（client.get_me().id），新账号登录后回填，老账号 worker 上线时自动同步 */
+  tg_user_id?: number | null;
+  /** Telegram 用户名（不含 @），用户可能未设置或随时修改 */
+  tg_username?: string | null;
+  status: AccountStatus;
+  tags?: string[] | null;
+  enabled_features: number;
+  cold_start_until: string | null;
+  created_at: string;
+  /** 该账号绑定的代理；null = 走主进程默认出口（DIRECT 或全局 TG_DEFAULT_PROXY） */
+  proxy?: ProxySummary | null;
+}
+
+export interface AccountDetail extends AccountSummary {
+  notes?: string | null;
+  template_id?: number | null;
+  proxy_id?: number | null;
+  /** 设备伪装 profile id，决定 TG 设备列表里看到的 device_model / system_version / app_version */
+  device_profile_id?: number | null;
+}
+
+export interface AccountStartLoginRequest {
+  api_id: number;
+  api_hash: string;
+  phone: string;
+  proxy_id?: number | null;
+  device_profile_id?: number | null;
+}
+export interface AccountStartLoginResponse {
+  login_token: string;
+  phone_code_hash?: string | null;
+}
+export interface AccountConfirmCodeRequest {
+  login_token: string;
+  code: string;
+}
+export interface AccountConfirm2FARequest {
+  login_token: string;
+  password: string;
+}
+export interface AccountConfirmResponse {
+  account_id: number;
+  require_2fa: boolean;
+  display_name?: string | null;
+}
+export interface AccountUpdateRequest {
+  display_name?: string | null;
+  notes?: string | null;
+  tags?: string[] | null;
+  template_id?: number | null;
+  proxy_id?: number | null;
+  device_profile_id?: number | null;
+}
+
+// ===================== 设备伪装 =====================
+export interface DeviceProfileOut {
+  id: number;
+  name: string;
+  device_model: string;
+  system_version: string;
+  app_version: string;
+  lang_code: string;
+  system_lang_code: string;
+  is_default: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DeviceProfileCreate {
+  name: string;
+  device_model: string;
+  system_version: string;
+  app_version: string;
+  lang_code?: string;
+  system_lang_code?: string;
+  is_default?: boolean;
+}
+
+export interface DeviceProfileUpdate {
+  name?: string;
+  device_model?: string;
+  system_version?: string;
+  app_version?: string;
+  lang_code?: string;
+  system_lang_code?: string;
+  is_default?: boolean;
+}
+export interface AccountCloneConfigRequest {
+  from_account_id: number;
+  features: string[];
+}
+
+// ===================== 功能 =====================
+export type FeatureState = "active" | "failed" | "disabled";
+
+export interface FeatureInfo {
+  key: string;
+  display_name: string;
+  is_builtin: boolean;
+  version?: string | null;
+}
+export interface AccountFeatureItem {
+  feature_key: string;
+  enabled: boolean;
+  state: FeatureState;
+  last_error?: string | null;
+  config: Record<string, unknown>;
+}
+export interface AccountFeatureToggle {
+  enabled: boolean;
+  config?: Record<string, unknown> | null;
+}
+export interface FeatureMatrixRow {
+  id: number;
+  name: string;
+  features: Record<string, FeatureState>;
+}
+export interface FeatureMatrixResponse {
+  features: FeatureInfo[];
+  accounts: FeatureMatrixRow[];
+}
+
+// ===================== 规则 =====================
+export interface RuleOut {
+  id: number;
+  account_id: number;
+  feature_key: string;
+  name: string;
+  enabled: boolean;
+  priority: number;
+  config: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+export interface RuleCreate {
+  name: string;
+  enabled?: boolean;
+  priority?: number;
+  config?: Record<string, unknown>;
+}
+export interface RuleUpdate {
+  name?: string;
+  enabled?: boolean;
+  priority?: number;
+  config?: Record<string, unknown>;
+}
+export interface RuleDryRunRequest {
+  sample_message: string;
+  sample_chat_type?: "private" | "group" | "channel";
+  sample_chat_id?: number;
+}
+export interface RuleDryRunResponse {
+  matched: boolean;
+  output?: string | null;
+  detail?: Record<string, unknown> | null;
+}
+export interface RuleCopyRequest {
+  rule_ids: number[];
+  target_account_ids: number[];
+}
+
+// ===================== 风控 =====================
+export type RatePolicy = "drop" | "queue" | "backoff" | "pause" | "notify";
+
+export interface RateLimitRuleConfig {
+  action: string;
+  per_second?: number | null;
+  per_minute?: number | null;
+  per_hour?: number | null;
+  per_day?: number | null;
+  same_peer_per_minute?: number | null;
+  policy: RatePolicy;
+  backoff_base_seconds: number;
+  backoff_max_seconds: number;
+  enabled: boolean;
+}
+export interface AccountRateLimitOut {
+  template_id: number | null;
+  rules: RateLimitRuleConfig[];
+}
+export interface UsageBucket {
+  action: string;
+  used: number;
+  limit: number | null;
+  pct: number;
+  warn?: boolean;
+}
+export interface UsageResponse {
+  window: string;
+  buckets: UsageBucket[];
+  active_overrides: Array<Record<string, unknown>>;
+}
+export interface StrictRequest {
+  multiplier?: number;
+  ttl_seconds?: number;
+}
+
+export interface TemplateOut {
+  id: number;
+  name: string;
+  is_default: boolean;
+  created_at: string;
+}
+
+// ===================== 代理 =====================
+export type ProxyType = "socks5" | "http" | "https" | "mtproxy";
+
+export interface ProxyOut {
+  id: number;
+  type: ProxyType;
+  host: string;
+  port: number;
+  username: string | null;
+  has_password: boolean;
+}
+
+export interface ProxyCreate {
+  type: ProxyType;
+  host: string;
+  port: number;
+  username?: string | null;
+  password?: string | null;
+}
+
+export interface ProxyUpdate {
+  type?: ProxyType;
+  host?: string;
+  port?: number;
+  username?: string | null;
+  password?: string | null;
+  clear_password?: boolean;
+}
+
+export interface ProxyTestResult {
+  ok: boolean;
+  latency_ms?: number | null;
+  exit_ip?: string | null;
+  country?: string | null;
+  region?: string | null;
+  city?: string | null;
+  error?: string | null;
+}
+
+/** ``GET /api/proxies/{id}/usage`` 单条引用——告诉用户"删了会断哪些"。 */
+export interface ProxyUsageItem {
+  /** "account" | "llm_provider" */
+  kind: string;
+  id: number;
+  name?: string | null;
+  /** account 给 phone；llm 给 default_model */
+  extra?: string | null;
+}
+
+export interface ProxyUsageResponse {
+  accounts: ProxyUsageItem[];
+  llm_providers: ProxyUsageItem[];
+  total: number;
+}
+
+// ===================== 网络环境 =====================
+export interface NetworkInfo {
+  ip: string | null;
+  country: string | null;
+  region: string | null;
+  city: string | null;
+  org: string | null;
+  cached_at: number;
+  fresh: boolean;
+  error?: string | null;
+}
+
+// ===================== 自动回复 rule.config =====================
+export type AutoReplyMatch = "keyword" | "regex";
+export type AutoReplyScope = "private" | "group_all" | "group_specific";
+
+export interface AutoReplyRuleConfig {
+  match: AutoReplyMatch;
+  patterns: string[];
+  scope: AutoReplyScope;
+  group_ids?: string[];
+  reply: string;
+  cooldown_seconds?: number;
+  whitelist?: string[];
+  blacklist?: string[];
+  case_sensitive?: boolean;
+  reply_to?: boolean;     // true = 以引用形式回复（默认）；false = 直接发新消息
+}
+
+// ===== Sprint2 #5 =====
+// 与后端 ``builtin/forward/manifest.py:config_schema`` 对齐的 rule.config 结构
+//
+// source_kind：
+//   - all       —— 任何 incoming 消息都进流水线
+//   - peers     —— 仅 source_peers 中的 chat_id 命中（支持 -100 / -bare / bare 等价展开）
+//   - keyword   —— 文本（小写）包含 keyword 时命中；空 keyword 视为不命中
+//
+// mode：
+//   - forward_native  —— 原生转发，保留原作者署名
+//   - copy_text       —— 复制文本，不显示原作者，可加 header 前缀
+//   - quote           —— 引用包装，自动 "📨 来自 X" 前缀
+//   - link_only       —— 公开超级群可点链接（私群退化为可读字符串）
+export type ForwardSourceKind = "all" | "peers" | "keyword";
+export type ForwardMode =
+  | "forward_native"
+  | "copy_text"
+  | "quote"
+  | "link_only";
+
+export interface ForwardRuleConfig {
+  source_kind: ForwardSourceKind;
+  /** chat_id 列表；前端用 string[] 编辑，提交时转成 number[] */
+  source_peers?: number[];
+  keyword?: string;
+  /** 必填：目标 chat_id（Telethon 形式） */
+  target_chat_id: number;
+  mode: ForwardMode;
+  /** 默认 true；false 时跳过含媒体消息（仅文本通过） */
+  include_media?: boolean;
+  /** copy / quote / link_only 模式下的固定前缀 */
+  header?: string;
+}
+
+// ===================== 日志 =====================
+export interface RuntimeLogItem {
+  id: number;
+  account_id: number | null;
+  level: string;
+  message: string;
+  created_at: string;
+  source?: string | null;
+}
+
+// 操作日志（Web 端写操作）
+export interface AuditLogItem {
+  id: number;
+  ts: string;
+  user_id: number | null;
+  action: string;
+  target?: string | null;
+  detail?: Record<string, unknown> | null;
+}
+
+// ===================== 系统设置 =====================
+export interface SystemSettings {
+  command_prefix: string;
+  kill_switch?: boolean;
+  api_qps_total?: number;
+}
+
+// ===================== 系统健康概览（Dashboard 用）=====================
+//
+// 与后端 ``app/api/system_health.py`` 对齐
+export interface DbStatus {
+  ok: boolean;
+  /** PostgreSQL 16.x 字串；失败时 null */
+  version?: string | null;
+  error?: string | null;
+}
+
+export interface AlembicStatus {
+  /** true = DB 当前版本就是代码 head；false = 需要跑 alembic upgrade head */
+  ok: boolean;
+  /** DB 里 alembic_version 表存的版本号 */
+  current?: string | null;
+  /** 代码仓库里 alembic 链的最新版本 */
+  head?: string | null;
+  /** 已写但还没 apply 的迁移版本号（按时间序） */
+  pending: string[];
+  error?: string | null;
+}
+
+export interface RedisStatus {
+  ok: boolean;
+  error?: string | null;
+}
+
+export interface ProvidersHealthStatus {
+  total: number;
+  with_api_key: number;
+  with_proxy: number;
+  /** {modality: count}，如 {"text":2,"vision":1} */
+  by_modality: Record<string, number>;
+  /** {cost_tier_str: count}，如 {"1":1,"2":2,"3":1} */
+  by_cost_tier: Record<string, number>;
+}
+
+export interface ProxiesHealthStatus {
+  total: number;
+  /** {type: count}，如 {"socks5":2,"http":1,"mtproxy":1} */
+  by_type: Record<string, number>;
+  /** 被任意 LLMProvider.proxy_id 引用的代理数量（去重） */
+  used_by_llm: number;
+}
+
+export interface WorkersHealthStatus {
+  total: number;
+  /** {status: count}，如 {"active":3,"paused":1,"login_required":1} */
+  by_status: Record<string, number>;
+}
+
+export interface HealthOverview {
+  db: DbStatus;
+  alembic: AlembicStatus;
+  redis: RedisStatus;
+  providers: ProvidersHealthStatus;
+  proxies: ProxiesHealthStatus;
+  workers: WorkersHealthStatus;
+}
+
+// 通用 list 包装（部分接口直接返数组，但为了后续兼容预留）
+export interface ListResponse<T> {
+  items: T[];
+  total?: number;
+}
+
+// ===================== Sprint2 #1：拟人化 humanize =====================
+// 与后端 ``HumanizeOut`` / ``HumanizeUpdate`` 对齐
+//   - active_window_*：``HH:MM[:SS]`` 字符串，``null`` = 不限活跃时段
+//   - typing_probability / jitter_pct：百分比 0-100
+//   - typing_min_ms <= typing_max_ms 由前端校验
+export interface HumanizeConfig {
+  jitter_pct: number;
+  typing_simulate: boolean;
+  typing_min_ms: number;
+  typing_max_ms: number;
+  typing_probability: number;
+  read_before_reply: boolean;
+  active_window_start?: string | null;
+  active_window_end?: string | null;
+  cold_start_days: number;
+}
+export type HumanizeUpdate = Partial<HumanizeConfig>;
+
+// ==================== Sprint2 #3 Ignored Peers ====================
+//
+// peer 类型：
+//   - private    1 对 1 私聊（chat_id 为正整数）
+//   - group      普通群（旧版小群，chat_id 为负数但非 -100 开头）
+//   - supergroup 超级群（chat_id 形如 -1001234567890）
+//   - channel    频道（chat_id 形如 -1001234567890）
+export type PeerKind = "private" | "group" | "supergroup" | "channel";
+
+/** 已忽略的 peer 一行（GET / POST 响应） */
+export interface IgnoredPeer {
+  id: number;
+  account_id: number;
+  /** Telethon chat_id；可正可负（supergroup 形如 -100xxx） */
+  peer_id: number;
+  peer_kind: PeerKind | string;
+  peer_label: string | null;
+  added_at: string;
+}
+
+/** 加入忽略名单的入参 */
+export interface IgnoredPeerCreate {
+  peer_id: number;
+  peer_kind?: PeerKind | string;
+  peer_label?: string | null;
+}
+
+/**
+ * worker 内存里"最近 50 个 incoming peer"的一条。
+ * - 重启 worker 后清空
+ * - worker 离线时后端返回空数组
+ */
+export interface RecentPeerItem {
+  peer_id: number;
+  peer_kind: PeerKind | string;
+  peer_label: string | null;
+  /** epoch 秒（time.time()），前端做相对时间显示 */
+  ts: number;
+}
+
+/**
+ * GET /recent-peers 包裹响应：把 "worker 是否在跑" 单独传一个布尔，
+ * 这样前端可以区分"worker 离线导致空"vs"worker 在跑只是没收到 incoming"
+ * 这两种 items=[] 的语义。
+ */
+export interface RecentPeersResponse {
+  worker_alive: boolean;
+  items: RecentPeerItem[];
+}
+
+// ==================== Sprint2 #2 Custom Commands ====================
+//
+// 4 种命令类型：
+//   - reply_text   收到 → 编辑原消息为文本（支持 {args} 占位）
+//   - forward_to   收到 → 转发被引用消息到指定 chat_id
+//   - run_plugin   占位：调插件方法（V1 暂未实装）
+//   - ai           收到 → 调 LLM provider → 编辑回原消息
+export type CommandTemplateType =
+  | "reply_text"
+  | "forward_to"
+  | "run_plugin"
+  | "ai";
+
+/** 命令模板出参（与 GET /api/commands/templates 对齐） */
+export interface CommandTemplateOut {
+  id: number;
+  /** ,name 触发名；命令前缀在系统设置里改 */
+  name: string;
+  type: CommandTemplateType;
+  /** 按 type 不同结构；前端按 type 切表单 */
+  config: Record<string, unknown>;
+  description: string | null;
+  aliases: string[];
+  created_at: string;
+}
+
+/** 新建模板入参（POST /api/commands/templates） */
+export interface CommandTemplateCreate {
+  name: string;
+  aliases?: string[];
+  type: CommandTemplateType;
+  config: Record<string, unknown>;
+  description?: string | null;
+}
+
+/** PATCH 更新（任意字段可选） */
+export interface CommandTemplateUpdate {
+  name?: string;
+  aliases?: string[];
+  type?: CommandTemplateType;
+  config?: Record<string, unknown>;
+  description?: string | null;
+}
+
+// 各 type 对应的 config 形状（仅做编辑/校验参考；后端 schema 校验是权威）
+export interface ReplyTextConfig {
+  /** 命令文本；支持 {args} 占位，被 ,name xxx yyy 的剩余参数替换 */
+  text: string;
+}
+
+export interface ForwardToConfig {
+  /** 目标会话的 chat_id（int / 字符串都可）；留空 / 缺省 = 转到触发消息所在的 chat */
+  target_chat_id?: number | string | null;
+  /** 转发成功后多少秒删命令消息；0 / 缺省 = 不删；上限 3600 */
+  delete_after?: number | null;
+}
+
+export interface RunPluginConfig {
+  plugin_key: string;
+  method?: string;
+  args?: unknown[];
+}
+
+export interface AICommandConfig {
+  /** 关联的 LLMProvider.id（fixed 模式下的固定 provider；auto 模式下没命中规则也用它兜底） */
+  provider_id: number;
+  /** 单次覆盖 provider.default_model；空 = 用 provider 默认 */
+  model?: string;
+  /** 拼 prompt 时引用被回复消息内容 */
+  quote_replied?: boolean;
+  system_prompt?: string;
+  max_tokens?: number;
+  // ── 路由（Sprint2 #2 路由扩展）──
+  /**
+   * fixed = 永远用 provider_id（V1 行为，默认）
+   * auto  = 看消息内容自动选 provider；规则全不命中时回退 fallback / classifier
+   */
+  routing_mode?: "fixed" | "auto";
+  /** auto 模式下规则与分类器都失败时使用的 provider id；缺省 = 用 provider_id 自身 */
+  routing_fallback_provider_id?: number;
+  /** auto 模式下分类器 provider id；指定后路由器规则未命中时调一个轻量小模型分类 */
+  classifier_provider_id?: number;
+  // ── 输出格式（决定 TG 里编辑成什么样）──
+  /**
+   * Telegram 解析模式；默认 html
+   * - html      Telethon 内置；支持 <b> <blockquote expandable> 等，能实现折叠引用块
+   * - markdown  Telegram 经典 Markdown v1（telethon 接受 'md'）
+   * - plain     不解析任何格式
+   *
+   * 老数据里可能存 'markdownv2'，后端读时自动归一到 'html'（telethon 1.36 不识别 v2）。
+   */
+  output_format?: "html" | "markdown" | "plain";
+  /** 输出模板字符串；null = 用默认（PRESET_SIMPLE） */
+  output_template?: string | null;
+  /** 是否对占位符的值做对应格式的转义；默认 true。html 模式下会转义 & < > */
+  escape_values?: boolean;
+}
+
+/** 账号详情 → 命令 tab 一行：模板内容 + 该账号是否启用 */
+export interface AccountCommandItem {
+  template: CommandTemplateOut;
+  enabled: boolean;
+}
+
+// ===== Sprint4 Wave1 =====
+export type Sprint4Wave1TypesMarker = "command-aliases";
+
+// ── LLM Provider ──
+export type LLMProviderKind = "openai" | "anthropic" | "ollama";
+
+/**
+ * API 协议（与 provider 厂商解耦；同一个反代 base_url 可能只支持其中某种）：
+ * - chat_completions    POST /chat/completions    OpenAI 经典协议
+ * - responses           POST /responses           OpenAI 2024 出的新协议
+ * - anthropic_messages  POST /v1/messages         Anthropic 协议
+ *
+ * 国内常见反代（如 anyrouter）有的只接 responses 而拒 chat_completions，
+ * 切到对应 api_format 即可解决报 404 / "模型不支持" 一类问题。
+ */
+export type LLMApiFormat = "chat_completions" | "responses" | "anthropic_messages";
+
+/**
+ * LLMProvider 下挂的一个候选模型条目（与后端 ProviderModel 对齐）。
+ *
+ * - id 是模型 ID（如 ``gpt-5.5`` / ``claude-haiku-4-5``）
+ * - enabled = 该模型是否会出现在下游"自定义命令 ai 子表单"的展开式 select 里
+ * - custom = true 表示用户手动加的；false 表示从 ``GET /v1/models`` fetch 拉的
+ * - label 是可选的展示名（默认就用 id）
+ */
+export interface ProviderModel {
+  id: string;
+  enabled: boolean;
+  custom: boolean;
+  label?: string | null;
+}
+
+/**
+ * 模态分类（与后端 ALL_LLM_MODALITIES 对齐）：
+ * - text       纯文本 LLM（绝大多数）
+ * - vision     视觉多模态（图文输入 → 文本输出，如 GPT-4V / Claude Vision）
+ * - audio      音频多模态（语音转写 / TTS，如 Whisper / GPT-4o realtime）
+ * - multimodal 全模态（图、音、视频同时输入，如 GPT-4o / Gemini-Pro）
+ */
+export type LLMModality = "text" | "vision" | "audio" | "multimodal";
+
+/**
+ * 路由标签集合（与后端 ALL_LLM_TAGS 对齐）：
+ * - chat / code / math / translate / vision    擅长领域
+ * - long_context                               大上下文（≥ 64K token）
+ * - reason / smart                             复杂推理 / 旗舰
+ * - cheap / fast                               量大优先 / 低延迟
+ * - classify                                   适合做"路由分类器"的轻量小模型
+ */
+export type LLMTag =
+  | "chat"
+  | "code"
+  | "math"
+  | "translate"
+  | "vision"
+  | "long_context"
+  | "reason"
+  | "smart"
+  | "cheap"
+  | "fast"
+  | "classify";
+
+/** GET /api/commands/llm-providers 出参；不含明文 api_key */
+export interface LLMProviderOut {
+  id: number;
+  name: string;
+  provider: LLMProviderKind | string;
+  has_api_key: boolean;
+  base_url: string | null;
+  default_model: string;
+  /** API 协议；老数据可能缺，前端按 chat_completions 兜底 */
+  api_format?: LLMApiFormat | string;
+  /** 模态；老数据可能缺，前端按 "text" 兜底 */
+  modality?: LLMModality | string;
+  /** 路由标签；老数据可能为空数组 */
+  tags?: string[];
+  /** 1=便宜 / 2=中 / 3=旗舰；老数据按 2 兜底 */
+  cost_tier?: number;
+  /** 运维备注 */
+  notes?: string | null;
+  /** 出口代理 id；null = 直连（DIRECT） */
+  proxy_id?: number | null;
+  /** 候选模型清单 */
+  models?: ProviderModel[];
+  created_at: string;
+}
+
+export interface LLMProviderCreate {
+  name: string;
+  provider: LLMProviderKind;
+  /** 空 / undefined → 不设；下发后由后端 Fernet 加密 */
+  api_key?: string | null;
+  base_url?: string | null;
+  default_model: string;
+  api_format?: LLMApiFormat;
+  modality?: LLMModality;
+  tags?: string[];
+  cost_tier?: number;
+  notes?: string | null;
+  /** 出口代理；不传 / null = 直连 */
+  proxy_id?: number | null;
+  /** 候选模型清单；通常新建时留空，建完用"Fetch 模型列表"按钮自动填 */
+  models?: ProviderModel[];
+}
+
+/**
+ * PATCH provider；api_key 行为：
+ * - 缺省 / undefined → 不动
+ * - "" 空串       → 清空
+ * - 非空字符串    → 替换并加密
+ *
+ * 路由字段（modality / tags / cost_tier / notes）：缺省 / undefined = 不动。
+ *
+ * proxy 切换语义：
+ * - 想换成另一条 proxy：``proxy_id: <id>``，``clear_proxy`` 不传或 false
+ * - 想切回 DIRECT（不走代理）：``clear_proxy: true``，``proxy_id`` 可不传
+ * - 不动：两个都不传
+ */
+export interface LLMProviderUpdate {
+  name?: string;
+  provider?: LLMProviderKind;
+  api_key?: string | null;
+  base_url?: string | null;
+  default_model?: string;
+  api_format?: LLMApiFormat;
+  modality?: LLMModality;
+  tags?: string[];
+  cost_tier?: number;
+  notes?: string | null;
+  proxy_id?: number | null;
+  clear_proxy?: boolean;
+  /** 整体替换式 PATCH——给 list（含空 list）就覆盖；undefined = 不动 */
+  models?: ProviderModel[];
+}
+
+/** ``POST /api/commands/llm-providers/{pid}/fetch-models`` 出参 */
+export interface FetchModelsResponse {
+  /** 从 ``GET {base_url}/models`` 拉到的模型条数 */
+  fetched: number;
+  /** 合并后最新 provider 出参 */
+  provider: LLMProviderOut;
+}
+
+/** ``POST /api/commands/llm-providers/fetch-models-preview`` 入参；
+ *  用编辑表单当前值（不必先保存）预览 fetch /models 的结果。 */
+export interface FetchModelsPreviewRequest {
+  provider: LLMProviderKind;
+  api_format?: LLMApiFormat;
+  base_url?: string | null;
+  /** 可空——若 pid 给了且 api_key 留空，后端会回落到 DB 里已存的 */
+  api_key?: string | null;
+  proxy_id?: number | null;
+  /** 已落库 provider 的 id（编辑模式才有）；用来回落到已存 api_key */
+  pid?: number | null;
+}
+
+/** ``POST /api/commands/llm-providers/fetch-models-preview`` 出参 */
+export interface FetchModelsPreviewResponse {
+  fetched: number;
+  ids: string[];
+}
+
+/** ``POST /api/commands/llm-providers/{pid}/test-model`` 入参 */
+export interface TestModelRequest {
+  model: string;
+}
+
+/** ``POST /api/commands/llm-providers/{pid}/test-model`` 出参 */
+export interface TestModelResponse {
+  ok: boolean;
+  /** 总耗时（毫秒） */
+  latency_ms: number;
+  /** API 实际返回的 model 名（可能带日期后缀） */
+  model?: string | null;
+  /** 返回 text 的前 80 字符；让用户一眼看出"模型确实回话了" */
+  preview?: string | null;
+  /** 失败时的错误消息（已脱敏） */
+  error?: string | null;
+}
+
+// ===== Sprint4 #2C =====
+export type SchedulerKind = "cron" | "once" | "interval";
+export type SchedulerActionType = "send_message" | "run_command" | "call_llm";
+
+export interface SchedulerActionConfig {
+  type: SchedulerActionType;
+  target_chat_id?: number;
+  text?: string;
+  command?: string;
+  provider_id?: number;
+  model?: string;
+  prompt?: string;
+  system_prompt?: string;
+  max_tokens?: number;
+}
+
+export interface SchedulerRuleConfig {
+  kind: SchedulerKind;
+  cron?: string;
+  fire_at?: string;
+  interval_sec?: number;
+  action: SchedulerActionConfig;
+  enabled?: boolean;
+  next_fire?: string | null;
+  last_fire?: string | null;
+  last_result?: "ok" | "error" | string;
+  last_error?: string | null;
+}
+
+// ===== Sprint4 #2D =====
+export interface NotifyBotOut {
+  id: number;
+  name: string;
+  default_chat_id: number;
+  enabled: boolean;
+  has_token: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface NotifyBotCreate {
+  name: string;
+  bot_token: string;
+  default_chat_id: number;
+  enabled?: boolean;
+}
+
+export interface NotifyBotUpdate {
+  name?: string;
+  default_chat_id?: number;
+  enabled?: boolean;
+  bot_token?: string;
+  clear_token?: boolean;
+}
+
+export interface NotifyBotTestRequest {
+  text?: string;
+}
+
+// ==================== Patch 0.4.1 ====================
+// 内置命令的元数据（只读）。前端在「自定义命令模板」编辑器里展示，
+// 让用户知道哪些 name / alias 已被占用，避免起名撞车。
+export interface BuiltinCommandItem {
+  name: string;
+  aliases: string[];
+  doc: string;
+}
+
+// ==================== Patch 0.4.2 ====================
+// GET /api/system/version 响应（public 端点，无鉴权）。
+// 前端启动 + 每 60s 拉一次，对比 lib/version.ts 的 APP_VERSION；
+// 不一致就在 GlobalAlertBar 弹红条提示「前后端版本不一致，请 make restart」。
+export interface BackendVersionInfo {
+  version: string;
+  stage: string | null;
+}

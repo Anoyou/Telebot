@@ -1,0 +1,59 @@
+name: ✨ 功能建议
+description: 提议新功能 / 改进现有体验
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        提交前请知悉本项目的取舍（节省你和我的时间）：
+
+        - 单租户超管模型，**不会**做多用户 / RBAC
+        - **不接** PagerMaid 插件（API 不兼容，迁移指南见 `docs/PLUGIN-DEV-GUIDE.md`）
+        - **不做**邮件通知通道 / 备份云端化 / Prometheus 集成（个人用 + TG-self 已够）
+        - 看 [README.md → Status](../README.md) —— Alpha 阶段，欢迎 fork 但暂不接大 PR
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: 你想解决的问题
+      description: 不要直接写"加一个 X 功能"，先写"我现在被什么坑了"
+      placeholder: |
+        例：自动回复有 N 条规则时，要从列表一条条点开看 patterns 才知道哪条命中关键词，没有全局搜索
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: 提议的方案
+      placeholder: |
+        例：自动回复列表页加搜索框，按 patterns / reply 文本模糊搜，命中行高亮
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: 已考虑的其它方案 / Workaround
+      placeholder: |
+        例：先用 ,id 取 chat_id 再到日志中心搜 —— 但要切两个页面
+
+  - type: dropdown
+    id: priority
+    attributes:
+      label: 优先级（自评）
+      options:
+        - 🔴 我自己已经在规避它，做了立即省事
+        - 🟡 nice-to-have，没也行
+        - 🟢 路过想到的
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: contribution
+    attributes:
+      label: 你愿意贡献吗
+      options:
+        - label: 我可以提 PR 实现这个
+        - label: 我能写测试 / 文档但代码要别人写
+        - label: 我只提建议

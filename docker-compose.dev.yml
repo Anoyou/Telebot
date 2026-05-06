@@ -1,0 +1,38 @@
+# 仅启动本地依赖（PostgreSQL + Redis），后端/前端用本机 venv + pnpm 跑
+# 使用： docker compose -f docker-compose.dev.yml up -d
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: telebot-postgres
+    environment:
+      POSTGRES_USER: telebot
+      POSTGRES_PASSWORD: telebot
+      POSTGRES_DB: telebot
+    ports:
+      - "5432:5432"
+    volumes:
+      - telebot-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U telebot -d telebot"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: telebot-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - telebot-redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  telebot-pgdata:
+  telebot-redisdata:

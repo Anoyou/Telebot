@@ -1,0 +1,586 @@
+"""主进程内：账号 worker 子进程的拉起 / 监控 / 重启 / 停止。
+
+被 main.py 的 lifespan 调用：
+  - startup:  ``await start_supervisor()``
+  - shutdown: ``await stop_all_workers()``
+
+接收 ``worker_global`` 上的 ``"start_worker"`` 指令（A Agent 在登录完成时发）。
+进程崩溃 → 指数退避重启（5/10/20/60/300s），连续 5 次失败置 ``status='dead'``。
+
+主进程同时在这里**消费** Redis stream（runtime_log / ratelimit_event）落库。
+（也可以拆到独立模块；此处合并，便于一个 supervisor 启动协程管全部。）
+
+⚠ 子进程通过 ``_MP_CTX.Process`` 拉起，``_MP_CTX`` 固定为 spawn context（不是
+默认的 mp.Process / Linux fork），见模块内 ``_MP_CTX`` 注释解释为什么不能 fork。
+
+⚠ 关停保护：注册 ``atexit`` 与 ``SIGTERM/SIGINT`` 处理，确保即使 lifespan 来不及
+跑（被 ``kill -9 uvicorn`` 等暴力中断），也尽量先把所有 worker 子进程 terminate
+掉，避免遗留同 session 的孤儿 worker（多实例 worker 会争抢同一个 TG client 事件）。
+
+⚠ 启动孤儿清理：``kill -9 uvicorn`` 时 atexit / signal handler 都不会跑，子进程
+就成了 PPID=1 的孤儿继续连着 TG。下次启动时多个 worker 抢同一个账号事件会写出
+互相覆盖的回答（典型症状："新 provider 后第 1-2 次能找到，第 3 次又找不到"）。
+所以 ``start_supervisor`` 现在会扫描 PID 文件目录，把上次启动留下的、命令行能
+对上号的 worker 进程显式 SIGTERM 掉，再起新的。
+"""
+from __future__ import annotations
+
+import asyncio
+import atexit
+import json
+import logging
+import multiprocessing as mp
+import os
+import shutil
+import signal
+import subprocess
+import time
+from collections.abc import Callable
+from dataclasses import dataclass
+from pathlib import Path
+
+from sqlalchemy import select, update
+
+from ..db.base import AsyncSessionLocal
+from ..db.models.account import (
+    ACCOUNT_STATUS_ACTIVE,
+    ACCOUNT_STATUS_DEAD,
+    Account,
+)
+from ..db.models.log import RuntimeLog
+from ..db.models.rate_limit import RateLimitEvent
+from ..redis_client import get_redis
+from .ipc import (
+    CMD_PAUSE,
+    CMD_RESUME,
+    CMD_STOP,
+    GLOBAL_CHANNEL,
+    RATELIMIT_EVENT_STREAM,
+    RUNTIME_LOG_STREAM,
+    IPCMessage,
+    cmd_channel,
+    make_cmd,
+)
+from .runtime import worker_main
+
+log = logging.getLogger(__name__)
+
+# ⚠ 强制 spawn 启动方式（不要 fork）
+#
+# Linux 默认是 fork，会把父进程的 asyncio event loop / SQLAlchemy engine /
+# Redis 连接池 / 已打开的 socket 一并继承到 worker 子进程，引发：
+#   - 子进程复用父 loop / engine 上的 fd，运行时随机炸 IPC
+#   - SQLAlchemy 异步引擎在 fork 后状态错乱
+#   - Redis 连接被两个进程同时使用，命令乱序
+#
+# spawn 起的是干净的 Python 解释器，符合本项目「主进程 + worker 完全独立」的契约。
+# 我们使用 ``get_context("spawn")`` 拿到一个独立 context 而不是
+# ``set_start_method`` 全局改，避免和宿主（uvicorn / pytest 等）冲突。
+_MP_CTX = mp.get_context("spawn")
+
+# 指数退避重启间隔（秒），用尽后置账号为 dead
+_BACKOFF = [5, 10, 20, 60, 300]
+
+
+# ── PID 文件：用于跨 uvicorn 重启识别+回收孤儿 worker ──────────────
+#
+# 放在用户目录而不是项目根，避免容器内只读 mount 之类的边界场景；目录不存在就自动建。
+# 命名 ``worker-{aid}.pid``，内容是该 worker 子进程的 PID。spawn 后立刻写入，
+# stop_worker 末尾删除——所以"还在的 PID 文件 + 文件里的 PID 还活着"= 上次启动遗留。
+_PID_DIR = Path.home() / ".telebot" / "worker-pids"
+
+
+def _pid_file(account_id: int) -> Path:
+    return _PID_DIR / f"worker-{account_id}.pid"
+
+
+def _write_pid_file(account_id: int, pid: int) -> None:
+    """worker spawn 成功后调一次；失败静默（PID 文件只是清理用，丢了也只是少一次清理）。"""
+    try:
+        _PID_DIR.mkdir(parents=True, exist_ok=True)
+        _pid_file(account_id).write_text(str(pid), encoding="ascii")
+    except OSError as exc:
+        log.warning("写 PID 文件失败 aid=%s: %s", account_id, exc)
+
+
+def _remove_pid_file(account_id: int) -> None:
+    """worker 优雅停止后清理；文件不存在视为已清理。"""
+    try:
+        _pid_file(account_id).unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
+def _is_our_worker_process(pid: int) -> bool:
+    """通过 ``ps`` 看命令行是否含本项目特征——避免 PID 复用误杀别人的进程。
+
+    macOS / Linux 通用：``ps -p PID -o command=`` 输出该进程完整命令行；
+    如果含 ``multiprocessing.spawn`` 或 ``app.worker.runtime`` 字样，认为是我们的。
+    任何 OSError / non-zero 退出码都视为"无法判定" → 谨慎不杀。
+    """
+    ps = shutil.which("ps")
+    if not ps:
+        return False
+    try:
+        out = subprocess.check_output(
+            [ps, "-p", str(pid), "-o", "command="],
+            stderr=subprocess.DEVNULL,
+            timeout=2.0,
+            text=True,
+        )
+    except (subprocess.SubprocessError, OSError):
+        return False
+    cmd = out.strip()
+    if not cmd:
+        return False
+    # spawn 出来的 worker cmdline 长这样（第一行 head 截断也包含）：
+    #   /path/python -c from multiprocessing.spawn import spawn_main; ...
+    # 老版本可能是 ``app.worker.runtime`` ——保留作兼容
+    return ("multiprocessing.spawn" in cmd) or ("app.worker.runtime" in cmd)
+
+
+def _kill_stale_workers() -> int:
+    """startup 时调一次：回收上一次 uvicorn 留下的 PID 文件指向的、还活着的 worker。
+
+    对每个 PID：
+      1. ``os.kill(pid, 0)`` 探活——失败说明进程已死，直接清 PID 文件
+      2. ``_is_our_worker_process(pid)`` 双确认是我们的 worker（防 PID 复用误杀）
+      3. SIGTERM；等 2s；仍活着就 SIGKILL
+      4. 不论 kill 是否成功，把 PID 文件删掉——下次又在这位置写新 PID
+
+    返回真正杀掉的个数（用于 startup 日志）。
+    """
+    if not _PID_DIR.exists():
+        return 0
+    killed = 0
+    for f in list(_PID_DIR.glob("worker-*.pid")):
+        try:
+            pid_text = f.read_text(encoding="ascii").strip()
+            pid = int(pid_text)
+        except (OSError, ValueError):
+            f.unlink(missing_ok=True)
+            continue
+        # 1) 探活
+        try:
+            os.kill(pid, 0)
+            alive = True
+        except ProcessLookupError:
+            alive = False
+        except PermissionError:
+            # 进程存在但跨用户——不是我们启的，skip
+            alive = False
+        if not alive:
+            f.unlink(missing_ok=True)
+            continue
+        # 2) 命令行验证（防 PID 复用：上次杀完，PID 被另一个无关进程拿走）
+        if not _is_our_worker_process(pid):
+            log.warning(
+                "PID 文件 %s 指向的 PID=%s 已被复用（命令行不匹配本项目），仅删 PID 文件",
+                f.name, pid,
+            )
+            f.unlink(missing_ok=True)
+            continue
+        # 3) 杀
+        log.warning("发现孤儿 worker pid=%s (file=%s)，发送 SIGTERM", pid, f.name)
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except ProcessLookupError:
+            f.unlink(missing_ok=True)
+            continue
+        except PermissionError:
+            log.warning("SIGTERM pid=%s 被拒（PermissionError），跳过", pid)
+            f.unlink(missing_ok=True)
+            continue
+        # 等 2s 给 worker 走 try/finally
+        deadline = time.time() + 2.0
+        while time.time() < deadline:
+            try:
+                os.kill(pid, 0)
+            except ProcessLookupError:
+                break
+            time.sleep(0.1)
+        # 仍活着 → SIGKILL
+        try:
+            os.kill(pid, 0)
+            os.kill(pid, signal.SIGKILL)
+            log.warning("孤儿 worker pid=%s 不响应 SIGTERM，已 SIGKILL", pid)
+        except ProcessLookupError:
+            pass
+        f.unlink(missing_ok=True)
+        killed += 1
+    return killed
+
+
+@dataclass
+class _WorkerHandle:
+    """单个账号 worker 的运行时句柄。"""
+
+    account_id: int
+    process: mp.Process | None = None
+    fail_count: int = 0
+    next_retry_at: float = 0.0
+    desired: str = "running"   # running | stopped
+
+
+# 全局状态：account_id → handle
+_WORKERS: dict[int, _WorkerHandle] = {}
+_WORKER_LOCKS: dict[int, asyncio.Lock] = {}
+# 后台协程列表（global listener / monitor / 两个 stream 消费者）
+_BG_TASKS: list[asyncio.Task] = []
+
+
+async def start_supervisor() -> None:
+    """FastAPI lifespan startup 调用。"""
+    # 0. 清理上次留下的孤儿 worker（kill -9 uvicorn 等情况下产生）。
+    #    必须在拉起新 worker **之前** 做，否则新老 worker 都会连同一个 TG account
+    #    并互相覆写命令回应。
+    try:
+        n_killed = _kill_stale_workers()
+        if n_killed:
+            log.warning("启动前清理了 %d 个孤儿 worker 进程", n_killed)
+    except Exception:  # noqa: BLE001
+        log.exception("清理孤儿 worker 失败（不阻塞启动，但可能存在并发响应问题）")
+
+    # 1. 拉起所有 active 账号
+    async with AsyncSessionLocal() as db:
+        rows = (
+            await db.execute(
+                select(Account).where(Account.status == ACCOUNT_STATUS_ACTIVE)
+            )
+        ).scalars().all()
+    for acc in rows:
+        await start_worker(acc.id)
+
+    # 2. 启动后台监听协程
+    _BG_TASKS.append(asyncio.create_task(_listen_global()))
+    _BG_TASKS.append(asyncio.create_task(_monitor_loop()))
+    _BG_TASKS.append(asyncio.create_task(_consume_runtime_log()))
+    _BG_TASKS.append(asyncio.create_task(_consume_ratelimit_event()))
+
+    # 3. 注册退出/信号 hook，避免 uvicorn 被暴力杀时遗留孤儿 worker
+    _install_kill_hooks()
+
+    log.info("supervisor 启动完成，托管 %d 个账号", len(rows))
+
+
+def _terminate_all_children_blocking() -> None:
+    """同步版本的 worker 进程清理：直接 terminate + join。
+
+    用于 atexit / signal handler 等无法 await 的场景，确保即使主进程异常退出也不留孤儿。
+    """
+    for h in list(_WORKERS.values()):
+        p = h.process
+        if p is None:
+            continue
+        try:
+            if p.is_alive():
+                p.terminate()
+        except Exception:  # noqa: BLE001
+            pass
+    # 给一点点时间走 SIGTERM 触发的 try/finally；之后 kill
+    deadline = time.time() + 2
+    for h in list(_WORKERS.values()):
+        p = h.process
+        if p is None:
+            continue
+        try:
+            timeout = max(0.0, deadline - time.time())
+            p.join(timeout=timeout)
+            if p.is_alive():
+                p.kill()
+                p.join(timeout=1)
+        except Exception:  # noqa: BLE001
+            pass
+    # 进程已经下去，PID 文件没用了，顺手清——不删也无害（下次启动 _kill_stale_workers
+    # 探到 PID 已死会自己 unlink），但清掉能让目录干净点。
+    for h in list(_WORKERS.values()):
+        _remove_pid_file(h.account_id)
+
+
+_HOOKS_INSTALLED = False
+
+
+def _install_kill_hooks() -> None:
+    global _HOOKS_INSTALLED
+    if _HOOKS_INSTALLED:
+        return
+    atexit.register(_terminate_all_children_blocking)
+
+    def _on_signal(signum, _frame):  # noqa: ANN001
+        log.warning("supervisor 收到信号 %s，正在 terminate 所有 worker…", signum)
+        _terminate_all_children_blocking()
+        # 让默认行为继续退出
+        signal.signal(signum, signal.SIG_DFL)
+        signal.raise_signal(signum)
+
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        try:
+            signal.signal(sig, _on_signal)
+        except (ValueError, OSError):
+            # 非主线程或受限环境会失败，忽略
+            pass
+    _HOOKS_INSTALLED = True
+
+
+async def stop_all_workers() -> None:
+    """FastAPI lifespan shutdown 调用：停止所有 worker 与后台协程。"""
+    for aid in list(_WORKERS.keys()):
+        await stop_worker(aid)
+    for t in _BG_TASKS:
+        t.cancel()
+    _BG_TASKS.clear()
+
+
+async def start_worker(account_id: int) -> None:
+    """拉起或恢复指定账号的 worker 子进程；幂等。"""
+    lock = _WORKER_LOCKS.setdefault(account_id, asyncio.Lock())
+    async with lock:
+        h = _WORKERS.get(account_id)
+        if not h:
+            h = _WorkerHandle(account_id=account_id)
+            _WORKERS[account_id] = h
+        h.desired = "running"
+        if h.process and h.process.is_alive():
+            return
+        p = _MP_CTX.Process(target=worker_main, args=(account_id,), daemon=False)
+        p.start()
+        h.process = p
+        # 写 PID 文件——下次启动时 ``_kill_stale_workers`` 据此回收孤儿。
+        # 失败不阻塞启动（最多失去一次孤儿清理机会）。
+        if p.pid is not None:
+            _write_pid_file(account_id, p.pid)
+        log.info("worker 启动: account=%d pid=%s", account_id, p.pid)
+
+
+async def stop_worker(account_id: int) -> None:
+    """停止指定账号的 worker：先发 IPC stop，等 5s 优雅退出，否则 terminate。"""
+    lock = _WORKER_LOCKS.setdefault(account_id, asyncio.Lock())
+    async with lock:
+        h = _WORKERS.get(account_id)
+        if not h:
+            return
+        h.desired = "stopped"
+        redis = get_redis()
+        await redis.publish(cmd_channel(account_id), make_cmd(CMD_STOP))
+        if h.process:
+            # 等 5s 优雅退出（每 100ms 探测一次）
+            for _ in range(50):
+                if not h.process.is_alive():
+                    break
+                await asyncio.sleep(0.1)
+            if h.process.is_alive():
+                h.process.terminate()
+                h.process.join(timeout=2)
+            h.process = None
+        # 进程已确认死掉 → 删 PID 文件，避免被下次启动当孤儿误杀（PID 复用情形）
+        _remove_pid_file(account_id)
+        log.info("worker 停止: account=%d", account_id)
+
+
+async def pause_worker(account_id: int) -> None:
+    """通过 IPC 让 worker 暂停主动动作。"""
+    redis = get_redis()
+    await redis.publish(cmd_channel(account_id), make_cmd(CMD_PAUSE))
+
+
+async def resume_worker(account_id: int) -> None:
+    """通过 IPC 让 worker 恢复主动动作。"""
+    redis = get_redis()
+    await redis.publish(cmd_channel(account_id), make_cmd(CMD_RESUME))
+
+
+async def _listen_global() -> None:
+    """监听 ``worker_global``：A Agent 登录完成会广播 ``start_worker`` 指令。"""
+    redis = get_redis()
+    pubsub = redis.pubsub()
+    await pubsub.subscribe(GLOBAL_CHANNEL)
+    try:
+        async for msg in pubsub.listen():
+            if msg.get("type") != "message":
+                continue
+            try:
+                cmd = IPCMessage.decode(msg["data"])
+            except Exception:
+                continue
+            if cmd.type == "start_worker":
+                aid = cmd.payload.get("account_id")
+                if aid:
+                    await start_worker(int(aid))
+    except asyncio.CancelledError:
+        pass
+    finally:
+        try:
+            await pubsub.unsubscribe(GLOBAL_CHANNEL)
+            await pubsub.close()
+        except Exception:
+            pass
+
+
+async def _monitor_loop() -> None:
+    """每 2s 检查每个 worker 是否活着；崩溃则按指数退避重启。"""
+    try:
+        while True:
+            await asyncio.sleep(2)
+            now = time.time()
+            for aid, h in list(_WORKERS.items()):
+                if h.desired != "running":
+                    continue
+                if h.process and h.process.is_alive():
+                    # 进程健康：清零失败计数
+                    h.fail_count = 0
+                    continue
+                # 进程死了
+                if now < h.next_retry_at:
+                    continue
+                h.fail_count += 1
+                if h.fail_count > len(_BACKOFF):
+                    log.error(
+                        "worker %d 连续失败 %d 次，置 dead", aid, h.fail_count
+                    )
+                    async with AsyncSessionLocal() as db:
+                        await db.execute(
+                            update(Account)
+                            .where(Account.id == aid)
+                            .values(status=ACCOUNT_STATUS_DEAD)
+                        )
+                        await db.commit()
+                    # 2-D: account dead 告警（若未配置 alert/default channel，send 返回 False）
+                    try:
+                        from ..services import notify_service
+
+                        await notify_service.send(
+                            "alert",
+                            f"⚠️ account {aid} crashed: 连续失败 {h.fail_count} 次，已置 dead",
+                        )
+                    except Exception:
+                        log.exception("发送 account dead 告警失败: aid=%d", aid)
+                    h.desired = "stopped"
+                    continue
+                wait = _BACKOFF[min(h.fail_count - 1, len(_BACKOFF) - 1)]
+                h.next_retry_at = now + wait
+                log.warning(
+                    "worker %d 崩溃，%ds 后第 %d 次重启",
+                    aid,
+                    wait,
+                    h.fail_count,
+                )
+                await start_worker(aid)
+    except asyncio.CancelledError:
+        pass
+
+
+async def _consume_runtime_log() -> None:
+    """从 Redis stream 可靠消费运行日志，落库 runtime_log。"""
+    await _consume_stream_reliable(
+        stream_key=RUNTIME_LOG_STREAM,
+        inflight_key=f"{RUNTIME_LOG_STREAM}:inflight",
+        build_row=_build_runtime_log_row,
+        consumer_name="runtime_log",
+    )
+
+
+async def _consume_ratelimit_event() -> None:
+    """从 Redis stream 可靠消费风控事件，落库 rate_limit_event。"""
+    await _consume_stream_reliable(
+        stream_key=RATELIMIT_EVENT_STREAM,
+        inflight_key=f"{RATELIMIT_EVENT_STREAM}:inflight",
+        build_row=_build_ratelimit_event_row,
+        consumer_name="ratelimit_event",
+    )
+
+
+def _build_runtime_log_row(raw: str) -> RuntimeLog | None:
+    """把 runtime_log 原始 JSON 转换成 ORM 行，坏数据返回 None。"""
+    try:
+        d = json.loads(raw)
+        return RuntimeLog(
+            account_id=d.get("account_id"),
+            level=d.get("level", "info"),
+            source=d.get("source"),
+            message=d.get("message", ""),
+            detail=d.get("detail"),
+        )
+    except Exception:
+        return None
+
+
+def _build_ratelimit_event_row(raw: str) -> RateLimitEvent | None:
+    """把 ratelimit_event 原始 JSON 转换成 ORM 行，坏数据返回 None。"""
+    try:
+        d = json.loads(raw)
+        return RateLimitEvent(
+            account_id=d["account_id"],
+            action=d["action"],
+            outcome=d["outcome"],
+            detail=d.get("detail"),
+        )
+    except Exception:
+        return None
+
+
+async def _consume_stream_reliable(
+    *,
+    stream_key: str,
+    inflight_key: str,
+    build_row: Callable[[str], object | None],
+    consumer_name: str,
+    batch_size: int = 50,
+) -> None:
+    """可靠消费通用 helper：LMOVE/BLMOVE 到 inflight，提交 DB 后 LREM ack。
+
+    语义：
+    - 从待消费队列原子移动到 inflight（避免处理前丢失）
+    - DB 提交成功后再从 inflight 删除（ack）
+    - DB 失败时 inflight 保留，下一轮重试
+    """
+    redis = get_redis()
+    try:
+        while True:
+            try:
+                inflight_len = await redis.llen(inflight_key)
+                if inflight_len == 0:
+                    first = await redis.blmove(
+                        stream_key,
+                        inflight_key,
+                        timeout=5,
+                        src="LEFT",
+                        dest="RIGHT",
+                    )
+                    if first is None:
+                        continue
+                for _ in range(batch_size - 1):
+                    moved = await redis.lmove(
+                        stream_key,
+                        inflight_key,
+                        src="LEFT",
+                        dest="RIGHT",
+                    )
+                    if moved is None:
+                        break
+                items = await redis.lrange(inflight_key, 0, batch_size - 1)
+                if not items:
+                    continue
+                rows: list[object] = []
+                ack_items: list[str] = []
+                for raw in items:
+                    row = build_row(raw)
+                    if row is None:
+                        # 无法解析的数据直接丢弃，避免毒消息永久阻塞队列。
+                        await redis.lrem(inflight_key, 1, raw)
+                        continue
+                    rows.append(row)
+                    ack_items.append(raw)
+                if not rows:
+                    continue
+                async with AsyncSessionLocal() as db:
+                    db.add_all(rows)
+                    await db.commit()
+                for raw in ack_items:
+                    await redis.lrem(inflight_key, 1, raw)
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                log.exception("%s 消费失败: %s", consumer_name, e)
+                await asyncio.sleep(1)
+    except asyncio.CancelledError:
+        pass

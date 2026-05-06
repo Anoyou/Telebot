@@ -1,0 +1,363 @@
+"""阶段 B 测试：plugin_install_service 的 zip 解析 / 验签 / 安装 / 升级 / 卸载。
+
+覆盖：
+- ``parse_zip`` 正常路径（顶层布局）
+- ``parse_zip`` "外面包了一层目录"自动展开
+- ``parse_zip`` 缺少必含文件 → InvalidZipStructure
+- ``parse_zip`` zip slip（含 ../）拒绝
+- ``parse_zip`` 体积超限拒绝
+- ``parse_zip`` manifest.key 与 builtin 冲突 → KeyConflict
+- ``parse_zip`` manifest.py 内不导出 MANIFEST → ManifestError
+- ``verify_signature`` 三态：无 sig / 通过 / 失败
+- ``install_zip`` 正常入库 + 文件落盘
+- ``install_zip`` 升级（同 key 第二次安装覆盖目录、保留 enabled）
+- ``set_enabled`` 签名失败时拒绝启用
+- ``uninstall`` 删表 + 删目录
+"""
+
+from __future__ import annotations
+
+import io
+import shutil
+import zipfile
+from pathlib import Path
+
+import pytest
+
+from app.db.models.feature import FEATURE_AUTO_REPLY
+from app.db.models.plugin import PluginInstall
+from app.services import plugin_install_service as pis
+
+
+# ─────────────────────────────────────────────────────
+# Fake DB：超薄实现，仅支持 PluginInstall 的 get/add/delete/flush/execute(select)
+# ─────────────────────────────────────────────────────
+class _FakeDB:
+    """用 dict 模拟 plugin_install 表的 PK=key 行为；其它表不实现。"""
+
+    def __init__(self) -> None:
+        self.rows: dict[str, PluginInstall] = {}
+        self.committed = False
+
+    async def get(self, model, pk):  # noqa: ANN001
+        if model is PluginInstall:
+            return self.rows.get(pk)
+        return None
+
+    def add(self, obj) -> None:  # noqa: ANN001
+        if isinstance(obj, PluginInstall):
+            self.rows[obj.key] = obj
+
+    async def delete(self, obj) -> None:  # noqa: ANN001
+        if isinstance(obj, PluginInstall):
+            self.rows.pop(obj.key, None)
+
+    async def flush(self) -> None:
+        return None
+
+    async def commit(self) -> None:
+        self.committed = True
+
+    async def rollback(self) -> None:
+        return None
+
+    async def execute(self, stmt):  # noqa: ANN001
+        # 只为 list_installed 服务（select PluginInstall order by key）
+        return _FakeResult(list(self.rows.values()))
+
+
+class _FakeResult:
+    def __init__(self, items: list) -> None:
+        self._items = items
+
+    def scalars(self):
+        return _FakeScalars(self._items)
+
+
+class _FakeScalars:
+    def __init__(self, items: list) -> None:
+        self._items = items
+
+    def all(self) -> list:
+        return list(self._items)
+
+
+# ─────────────────────────────────────────────────────
+# 工具：构造一个最小可用的合法 zip
+# ─────────────────────────────────────────────────────
+def _make_zip(
+    *,
+    key: str = "demo",
+    version: str = "0.1.0",
+    layout: str = "flat",  # flat | nested(包一层 outer/) | missing-plugin | missing-init
+    extra_members: list[tuple[str, bytes]] | None = None,
+) -> bytes:
+    """生成一个最小化的插件 zip 字节流。"""
+    manifest_py = (
+        "from app.worker.plugins.manifest import Manifest\n"
+        f"MANIFEST = Manifest(key={key!r}, display_name='Demo', version={version!r})\n"
+    ).encode()
+    init_py = (
+        b"from .plugin import DemoPlugin\n"
+        b"from .manifest import MANIFEST\n"
+        b"PLUGIN_CLASS = DemoPlugin\n"
+    )
+    plugin_py = (
+        "from app.worker.plugins.base import Plugin, register\n"
+        "@register\n"
+        "class DemoPlugin(Plugin):\n"
+        f"    key = {key!r}\n"
+        "    display_name = 'Demo'\n"
+    ).encode()
+
+    files: dict[str, bytes] = {
+        "manifest.py": manifest_py,
+        "__init__.py": init_py,
+        "plugin.py": plugin_py,
+    }
+    if layout == "missing-plugin":
+        files.pop("plugin.py")
+    elif layout == "missing-init":
+        files.pop("__init__.py")
+
+    prefix = ""
+    if layout == "nested":
+        prefix = "outer/"
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for name, data in files.items():
+            zf.writestr(prefix + name, data)
+        if extra_members:
+            for name, data in extra_members:
+                zf.writestr(name, data)
+    return buf.getvalue()
+
+
+# ─────────────────────────────────────────────────────
+# parse_zip 正常路径
+# ─────────────────────────────────────────────────────
+def test_parse_zip_flat_layout() -> None:
+    z = _make_zip(key="hello_world", version="1.2.3")
+    parsed = pis.parse_zip(z)
+    try:
+        assert parsed.manifest.key == "hello_world"
+        assert parsed.manifest.version == "1.2.3"
+        assert (parsed.extract_dir / "manifest.py").exists()
+        assert (parsed.extract_dir / "plugin.py").exists()
+        assert (parsed.extract_dir / "__init__.py").exists()
+    finally:
+        shutil.rmtree(parsed.extract_dir, ignore_errors=True)
+
+
+def test_parse_zip_nested_layout_auto_flattened() -> None:
+    """打包者外面包了一层目录 → 自动展开。"""
+    z = _make_zip(key="nested_demo", layout="nested")
+    parsed = pis.parse_zip(z)
+    try:
+        assert parsed.manifest.key == "nested_demo"
+        # 展平到顶层
+        assert (parsed.extract_dir / "manifest.py").exists()
+        # outer 子目录应已被消化掉
+        assert not (parsed.extract_dir / "outer").exists()
+    finally:
+        shutil.rmtree(parsed.extract_dir, ignore_errors=True)
+
+
+def test_parse_zip_missing_required_file() -> None:
+    z = _make_zip(layout="missing-plugin")
+    with pytest.raises(pis.InvalidZipStructure) as ex:
+        pis.parse_zip(z)
+    assert ex.value.code == "MISSING_REQUIRED_FILE"
+
+
+def test_parse_zip_path_traversal_rejected() -> None:
+    """包内成员含 ``..`` 必须被拒绝。"""
+    z = _make_zip(extra_members=[("../escape.txt", b"x")])
+    with pytest.raises(pis.InvalidZipStructure) as ex:
+        pis.parse_zip(z)
+    assert ex.value.code in ("ZIP_PATH_TRAVERSAL", "ZIP_ABS_PATH")
+
+
+def test_parse_zip_too_large(monkeypatch) -> None:
+    monkeypatch.setattr(pis.settings, "plugin_zip_max_bytes", 50)
+    z = _make_zip(key="too_big")
+    with pytest.raises(pis.ZipTooLarge):
+        pis.parse_zip(z)
+
+
+def test_parse_zip_key_conflicts_builtin() -> None:
+    z = _make_zip(key=FEATURE_AUTO_REPLY)
+    with pytest.raises(pis.KeyConflict) as ex:
+        pis.parse_zip(z)
+    assert ex.value.code == "KEY_CONFLICTS_BUILTIN"
+
+
+def test_parse_zip_manifest_missing_const(tmp_path) -> None:
+    """manifest.py 不导出 MANIFEST → ManifestError。"""
+    bad_manifest = b"x = 1\n"
+    init_py = b"PLUGIN_CLASS = None\nMANIFEST = None\n"
+    plugin_py = b"class X: pass\n"
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("manifest.py", bad_manifest)
+        zf.writestr("__init__.py", init_py)
+        zf.writestr("plugin.py", plugin_py)
+    with pytest.raises(pis.ManifestError) as ex:
+        pis.parse_zip(buf.getvalue())
+    assert ex.value.code in ("MANIFEST_MISSING_CONST", "BAD_MANIFEST")
+
+
+# ─────────────────────────────────────────────────────
+# 签名校验三态
+# ─────────────────────────────────────────────────────
+def _ed25519_keypair():
+    """生成一对 Ed25519 测试密钥（PEM 公钥 + 原始私钥），仅在测试用。"""
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
+    priv = Ed25519PrivateKey.generate()
+    pub_pem = priv.public_key().public_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PublicFormat.SubjectPublicKeyInfo,
+    ).decode("utf-8")
+    return priv, pub_pem
+
+
+def _sign_payload(payload: bytes) -> tuple[bytes, str]:
+    """返回 payload 的有效签名和对应公钥。"""
+    priv, pub_pem = _ed25519_keypair()
+    return priv.sign(payload), pub_pem
+
+
+def test_verify_signature_none_when_missing() -> None:
+    assert pis.verify_signature(b"x", None, "PEM...") is None
+    assert pis.verify_signature(b"x", b"sig", None) is None
+
+
+def test_verify_signature_valid_and_invalid() -> None:
+    priv, pub_pem = _ed25519_keypair()
+    payload = b"hello plugin"
+    sig = priv.sign(payload)
+    assert pis.verify_signature(payload, sig, pub_pem) is True
+    # 篡改 payload 后必失败
+    assert pis.verify_signature(payload + b"x", sig, pub_pem) is False
+
+
+# ─────────────────────────────────────────────────────
+# install_zip 正常落盘 + 升级 + 卸载
+# ─────────────────────────────────────────────────────
+@pytest.mark.asyncio
+async def test_install_zip_roundtrip(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(pis.settings, "plugins_installed_dir", str(tmp_path / "installed"))
+    z = _make_zip(key="my_demo", version="1.0.0")
+    sig, pub = _sign_payload(z)
+    monkeypatch.setattr(pis.settings, "plugin_pubkey", pub)
+    db = _FakeDB()
+    row = await pis.install_zip(db, zip_bytes=z, signature=sig)
+
+    assert row.key == "my_demo"
+    assert row.version == "1.0.0"
+    assert row.signature_ok is True
+    assert row.enabled is False
+    target = Path(row.installed_path)
+    assert target.is_dir()
+    assert (target / "manifest.py").is_file()
+    assert (target / "plugin.py").is_file()
+    assert "my_demo" in db.rows
+
+
+@pytest.mark.asyncio
+async def test_install_zip_upgrade_keeps_enabled(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(pis.settings, "plugins_installed_dir", str(tmp_path / "installed"))
+    db = _FakeDB()
+    z1 = _make_zip(key="upgr", version="1.0.0")
+    priv, pub = _ed25519_keypair()
+    sig1 = priv.sign(z1)
+    monkeypatch.setattr(pis.settings, "plugin_pubkey", pub)
+
+    # 1) 先装 1.0.0 + 开启
+    row = await pis.install_zip(db, zip_bytes=z1, signature=sig1)
+    row.enabled = True
+
+    # 2) 装 1.1.0 → 版本升级、enabled 保留 True
+    z2 = _make_zip(key="upgr", version="1.1.0")
+    sig2 = priv.sign(z2)
+    row2 = await pis.install_zip(db, zip_bytes=z2, signature=sig2)
+    assert row2.version == "1.1.0"
+    assert row2.enabled is True
+    assert db.rows["upgr"].version == "1.1.0"
+
+
+@pytest.mark.asyncio
+async def test_install_zip_signature_failed_force_disabled(tmp_path, monkeypatch) -> None:
+    """签名失败应在解析前直接拒绝。"""
+    monkeypatch.setattr(pis.settings, "plugins_installed_dir", str(tmp_path / "installed"))
+    _, pub = _ed25519_keypair()
+    monkeypatch.setattr(pis.settings, "plugin_pubkey", pub)
+
+    db = _FakeDB()
+    z = _make_zip(key="sig_demo", version="1.0.0")
+    bad_sig = b"\x00" * 64
+    with pytest.raises(pis.SignatureFailed) as ex:
+        await pis.install_zip(db, zip_bytes=z, signature=bad_sig)
+    assert ex.value.code == "SIGNATURE_FAILED"
+
+
+@pytest.mark.asyncio
+async def test_install_zip_rejects_unsigned_before_parse(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(pis.settings, "plugins_installed_dir", str(tmp_path / "installed"))
+    _, pub = _ed25519_keypair()
+    monkeypatch.setattr(pis.settings, "plugin_pubkey", pub)
+    db = _FakeDB()
+    z = _make_zip(key="unsigned", version="1.0.0")
+
+    called = False
+
+    def _boom(_zip_bytes: bytes):  # noqa: ANN001
+        nonlocal called
+        called = True
+        raise AssertionError("parse_zip 不应被调用")
+
+    monkeypatch.setattr(pis, "parse_zip", _boom)
+    with pytest.raises(pis.SignatureFailed):
+        await pis.install_zip(db, zip_bytes=z, signature=None)
+    assert called is False
+
+
+@pytest.mark.asyncio
+async def test_set_enabled_blocks_when_signature_failed(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(pis.settings, "plugins_installed_dir", str(tmp_path / "installed"))
+    z = _make_zip(key="locked", version="1.0.0")
+    priv, pub = _ed25519_keypair()
+    monkeypatch.setattr(pis.settings, "plugin_pubkey", pub)
+    db = _FakeDB()
+    row = await pis.install_zip(db, zip_bytes=z, signature=priv.sign(z))
+    row.signature_ok = False
+
+    with pytest.raises(pis.SignatureFailed):
+        await pis.set_enabled(db, "locked", True)
+
+
+@pytest.mark.asyncio
+async def test_uninstall_removes_row_and_dir(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(pis.settings, "plugins_installed_dir", str(tmp_path / "installed"))
+    db = _FakeDB()
+    z = _make_zip(key="bye", version="1.0.0")
+    sig, pub = _sign_payload(z)
+    monkeypatch.setattr(pis.settings, "plugin_pubkey", pub)
+    row = await pis.install_zip(db, zip_bytes=z, signature=sig)
+    target = Path(row.installed_path)
+    assert target.exists()
+
+    deleted = await pis.uninstall(db, "bye")
+    assert deleted is True
+    assert "bye" not in db.rows
+    assert not target.exists()
+
+
+@pytest.mark.asyncio
+async def test_uninstall_missing_returns_false() -> None:
+    db = _FakeDB()
+    deleted = await pis.uninstall(db, "ghost")
+    assert deleted is False
