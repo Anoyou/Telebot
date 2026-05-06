@@ -10,7 +10,26 @@
 
 ---
 
-## [0.5.1] — 2026-05-06 · RC2 · 兼容性修复与部署优化
+## [0.5.2] — 2026-05-07 · hotfix · AI provider 实时刷新与稳定性修复
+
+### Added
+- **AI inline 强制刷新命令**：新增 `,ai @refresh`（兼容 `@reload`）用于手动刷新 worker 内 `LLMProvider` 快照并回显最新 provider 列表。
+- **provider 列表用法提示增强**：`@list` 输出中新增 `@refresh` 用法提示，便于用户现场排障。
+
+### Changed
+- **provider 变更广播范围扩大**：`create/update/delete LLM provider` 后，reload 通知从“仅启用 ai 模板的账号”升级为“全账号广播”，降低边界场景漏刷风险。
+- **reload 发送策略收紧**：`notify_reload()` 改为逐账号发送并汇总失败账号，不再静默吞异常。
+
+### Fixed
+- **新增 provider 后 `,ai @list` 非实时问题**：`_run_ai` 在执行前继续主动刷新命令上下文，并在 provider miss 场景下触发一次兜底刷新后重查，修复“刚新增 provider 仍提示未找到”的问题。
+- **reload 失败不可见问题**：provider reload publish 失败现在会明确记录异常并抛出错误，避免“前端成功、worker 未刷新”的假成功状态。
+
+### Affected Files
+- `backend/app/api/commands.py`
+- `backend/app/services/command_service.py`
+- `backend/app/worker/command.py`
+- `backend/app/worker/inline_override.py`
+
 
 ### Added
 - **项目归档与预览支持**：

@@ -536,6 +536,23 @@ async def _run_ai(client, event, args, tpl: dict[str, Any], account_id: int) -> 
                 )
             )
             return
+        if inline.kind == "refresh":
+            try:
+                from .runtime import _refresh_command_context  # lazy import avoid cycle
+
+                await _refresh_command_context(_ctx.account_id)
+            except Exception as e:  # noqa: BLE001
+                log.exception("[ai] 手动刷新 provider 缓存失败 account=%s", _ctx.account_id)
+                await event.edit(f"✗ 刷新 provider 缓存失败：{type(e).__name__}: {e}")
+                return
+            await event.edit(
+                "✓ provider 缓存已刷新\n\n"
+                + format_provider_list(
+                    _ctx.providers,
+                    cmd_prefix=_cmd_prefix, template_name=_tpl_name,
+                )
+            )
+            return
         if inline.kind == "auto":
             inline_force_auto = True
         else:  # provider
@@ -631,8 +648,21 @@ async def _run_ai(client, event, args, tpl: dict[str, Any], account_id: int) -> 
 
     provider_dict = _ctx.providers.get(chosen_provider_id)
     if provider_dict is None:
+        # 兜底自愈：上下文可能过期，现场强刷一次再查（避免"刚新增 provider 就说不存在"）
+        try:
+            from .runtime import _refresh_command_context  # lazy import avoid cycle
+
+            await _refresh_command_context(_ctx.account_id)
+            provider_dict = _ctx.providers.get(chosen_provider_id)
+        except Exception as e:  # noqa: BLE001
+            log.exception("[ai] provider miss 时刷新失败 account=%s pid=%s", _ctx.account_id, chosen_provider_id)
+            await event.edit(f"✗ provider 刷新失败：{type(e).__name__}: {e}")
+            return
+
+    if provider_dict is None:
         await event.edit(
-            f"✗ provider_id={chosen_provider_id} 不存在或未加载（试着保存一次模板？)"
+            f"✗ provider_id={chosen_provider_id} 不存在或未加载\n\n"
+            + format_provider_list(_ctx.providers, cmd_prefix=_cmd_prefix, template_name=_tpl_name)
         )
         return
 

@@ -500,23 +500,36 @@ async def list_aids_with_ai_commands(db: AsyncSession) -> list[int]:
     return list(rows)
 
 
+async def list_all_account_ids(db: AsyncSession) -> list[int]:
+    """返回所有账号 id（用于 provider 变更时全量广播 reload）。"""
+    rows = (await db.execute(select(Account.id))).scalars().all()
+    return list(rows)
+
 async def notify_reload(account_ids: int | Sequence[int]) -> None:
     """对一个或多个账号发 ``CMD_RELOAD_COMMANDS`` IPC。
 
-    redis 不可用时静默；DB 已落地为准，下次 worker 启动会拉到最新数据。
+    0.5.2 行为收紧：不再静默吞异常。
+    - 逐账号 publish，单个失败不影响其它账号
+    - 汇总失败账号并抛 RuntimeError，让 API 层可见并记录
     """
     if isinstance(account_ids, int):
         aids: list[int] = [account_ids]
     else:
-        aids = list(account_ids)
+        aids = list(dict.fromkeys(account_ids))
     if not aids:
         return
-    try:
-        redis = get_redis()
-        for aid in aids:
+
+    redis = get_redis()
+    failed: list[int] = []
+    for aid in aids:
+        try:
             await redis.publish(cmd_channel(aid), make_cmd(CMD_RELOAD_COMMANDS))
-    except Exception:  # noqa: BLE001
-        log.debug("通知 worker reload_commands 失败 aids=%s", aids, exc_info=True)
+        except Exception:  # noqa: BLE001
+            failed.append(int(aid))
+            log.exception("通知 worker reload_commands 失败 aid=%s", aid)
+
+    if failed:
+        raise RuntimeError(f"reload_commands publish failed for aids={failed}")
 
 
 __all__ = [
@@ -529,7 +542,7 @@ __all__ = [
     "get_provider_row",
     "get_template",
     "list_active_for_worker",
-    "list_aids_with_ai_commands",
+    "list_all_account_ids",
     "list_for_account",
     "list_providers",
     "list_templates",

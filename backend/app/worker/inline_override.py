@@ -6,8 +6,9 @@
 
 - ``@<name>``               强制走 name=匹配项的 provider；模型用其 default_model
 - ``@<name>:<model>``        provider + 具体 model（model 必须在该 provider.models[].enabled 中）
-- ``@auto``                  本次强制 auto 路由（即使模板配的 fixed）
 - ``@list``                  返回"可用 provider 列表"——调用方应 edit 给用户看，不真的调 LLM
+- ``@auto``                  本次强制 auto 路由（即使模板配的 fixed）
+- ``@refresh``               立即从 DB 刷新 provider 快照并返回最新列表（排查"刚新增看不到"）
 
 匹配规则：
 - 大小写不敏感
@@ -44,11 +45,12 @@ def _normalize(s: str) -> str:
 class InlineOverride:
     """单次调用的 inline 覆盖参数。"""
 
-    kind: Literal["provider", "auto", "list"]
+    kind: Literal["provider", "auto", "list", "refresh"]
     """三类指令：
     - provider: 用户指定了具体 provider（含可选 model）
     - auto:     强制 auto 路由
     - list:     列出可用——调用方该返一个列表给用户
+    - refresh:  强制刷新 provider 快照后再列出
     """
     provider_id: int | None = None
     """kind=provider 时是匹配到的 provider 的 id；其它情况 None"""
@@ -100,6 +102,8 @@ def parse_inline_override(
         return InlineOverride(kind="list"), rest
     if raw.lower() == "auto":
         return InlineOverride(kind="auto"), rest
+    if raw.lower() in ("refresh", "reload"):
+        return InlineOverride(kind="refresh"), rest
 
     # provider[:model]
     if ":" in raw:
@@ -206,7 +210,7 @@ def format_provider_list(
     lines.append("")
     cmd = f"{cmd_prefix}{template_name}"
     lines.append(
-        f"用法：{cmd} @<name> 你的问题   /   {cmd} @<name>:<model> 你的问题   /   {cmd} @auto 你的问题"
+        f"用法：{cmd} @list   /   {cmd} @refresh   /   {cmd} @<name> 你的问题   /   {cmd} @<name>:<model> 你的问题   /   {cmd} @auto 你的问题"
     )
     return "\n".join(lines)
 

@@ -194,7 +194,7 @@ async def create_provider(
         detail={"name": out.name, "provider": out.provider, "default_model": out.default_model},
     )
     await db.commit()
-    aids = await command_service.list_aids_with_ai_commands(db)
+    aids = await command_service.list_all_account_ids(db)
     await command_service.notify_reload(aids)
     return out
 
@@ -231,7 +231,7 @@ async def update_provider(
     )
     await db.commit()
     # 通知所有启用了 ai 类型模板的账号热加载
-    aids = await command_service.list_aids_with_ai_commands(db)
+    aids = await command_service.list_all_account_ids(db)
     await command_service.notify_reload(aids)
     return out
 
@@ -246,7 +246,7 @@ async def delete_provider(
     模板下一次还会用 worker 内存里的旧条目跑（还能跑通），等用户疑惑为什么
     "我都删了它还在用"。
     """
-    aids = await command_service.list_aids_with_ai_commands(db)
+    aids = await command_service.list_all_account_ids(db)
     await command_service.delete_provider(db, pid)
     await audit.write(
         db,
@@ -588,7 +588,7 @@ async def fetch_models(
     await db.commit()
     await db.refresh(row)
     # 通知 worker reload；让下游能看到新模型清单
-    aids = await command_service.list_aids_with_ai_commands(db)
+    aids = await command_service.list_all_account_ids(db)
     await command_service.notify_reload(aids)
 
     return FetchModelsResponse(
