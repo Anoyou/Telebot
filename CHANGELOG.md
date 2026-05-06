@@ -10,6 +10,30 @@
 
 ---
 
+## [0.5.1] — 2026-05-06 · RC2 · 兼容性修复与部署优化
+
+### Added
+- **项目归档与预览支持**：
+  - 新增 `docs/screenshots/` 文件夹用于存放 UI 截图
+  - `.gitignore` 增加 `archive/` 与 `.github_backup/` 规则
+- **部署依赖**：`backend/pyproject.toml` 补全 `psycopg2-binary` 依赖，解决 Docker 模式下 Alembic 无法运行同步迁移的问题
+
+### Changed
+- **Claude API 协议优化**：`AnthropicClient` 切换为 **Streaming (SSE)** 模式调用，解决 Anyrouter 代理返回 400 的兼容性问题
+- **README 全面优化**：
+  - 更新为真实的用户名 `Anoyou`
+  - 增加 **Docker 部署（生产环境推荐）** 指南
+  - 增加 **Prerequisites**（API ID/Hash 申请与网络代理配置）
+  - 增加 **Configuration** 核心安全项说明
+- **Docker 构建优化**：前端镜像 Build Context 提升至项目根目录，支持构建时访问 `docs/` 进行文档打包
+
+### Fixed
+- **Worker 缓存过时**：在执行每个 AI 命令前强制从 DB 刷新 `LLMProvider` 列表，解决“前端新增 provider 后 ,ai @list 仍显示未找到”的问题
+- **Worker 环境补全**：修复 `_run_ai` 缺失 `api_format` 导致无法正确识别模型协议的 bug
+- **文件名大小写修复**：`Dashboard.png` -> `dashboard.png` 确保在 Linux 容器下正常渲染
+
+---
+
 ## [0.5.0] — 2026-05-06 · RC1 · 开源前打磨
 
 ### Added
