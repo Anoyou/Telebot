@@ -15,7 +15,7 @@ RUN pnpm install --frozen-lockfile || pnpm install
 
 # 拷贝其余源码与 docs 目录（Extensions.tsx 需要引用 docs/PLUGIN-DEV-GUIDE.md）
 COPY frontend/ .
-COPY docs/ /app/docs/
+COPY docs/ /docs/
 RUN pnpm build
 
 
@@ -24,7 +24,7 @@ FROM nginx:1.27-alpine AS runtime
 # 静态资源
 COPY --from=builder /app/dist /usr/share/nginx/html
 # 站点配置：替换默认 default.conf
-COPY nginx.conf /etc/nginx/conf.d/default.conf
+COPY frontend/nginx.conf /etc/nginx/conf.d/default.conf
 
 EXPOSE 80
 
