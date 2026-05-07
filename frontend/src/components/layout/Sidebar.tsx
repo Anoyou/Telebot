@@ -25,11 +25,11 @@ interface NavItem {
 }
 
 // 顶层导航条目；
-// 0.4.1: /matrix + /plugins 合并到 /extensions（功能矩阵 / 插件 / 开发指南 三 tab）
+// 0.4.1: /matrix + /plugins 合并到 /plugins（功能矩阵 / 插件 / 开发指南 三 tab）
 const NAV: NavItem[] = [
   { to: "/", label: "概览", icon: LayoutDashboard, end: true },
   { to: "/accounts", label: "账号", icon: Users },
-  { to: "/extensions", label: "扩展", icon: Boxes },
+  { to: "/plugins", label: "插件", icon: Boxes },
   { to: "/templates", label: "模板", icon: LayoutTemplate },
   { to: "/ai", label: "AI", icon: Sparkles },
   { to: "/logs", label: "日志", icon: ScrollText },

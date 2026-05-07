@@ -62,18 +62,14 @@ import {
   patchHumanize,
   strictRateLimit,
 } from "@/api/system";
+import { getFeatureMatrix } from "@/api/features";
 import { getErrMsg } from "@/lib/api";
 import { cn, formatDateTime } from "@/lib/utils";
 import { Select } from "@/components/ui/select";
 import type { HumanizeConfig, ProxyTestResult } from "@/api/types";
 import { actionHint, actionLabel } from "@/lib/rate-actions";
 
-// 5 个内置功能，与 plan 对齐
-const FEATURE_KEYS: { key: string; label: string }[] = [
-  { key: "auto_reply", label: "自动回复" },
-  { key: "forward", label: "消息转发" },
-  { key: "scheduler", label: "定时任务" },
-];
+// 功能列表从 feature-matrix API 动态获取，不再硬编码
 
 export function AccountDetail() {
   const params = useParams();
@@ -91,6 +87,13 @@ export function AccountDetail() {
     queryKey: ["account", aid, "features"],
     queryFn: () => listAccountFeatures(aid),
     enabled: !!aid,
+  });
+
+  // 动态获取已注册功能列表（替代硬编码 FEATURE_KEYS）
+  const featureListQ = useQuery({
+    queryKey: ["matrix"],
+    queryFn: getFeatureMatrix,
+    select: (data) => data.features,
   });
 
   const rateQ = useQuery({
@@ -340,13 +343,13 @@ export function AccountDetail() {
               </CardDescription>
             </CardHeader>
             <CardContent>
-              {featuresQ.isLoading ? (
+              {featuresQ.isLoading || featureListQ.isLoading ? (
                 <div className="flex h-20 items-center justify-center">
                   <Spinner className="text-primary" />
                 </div>
               ) : (
                 <ul className="divide-y">
-                  {FEATURE_KEYS.map((f) => {
+                  {(featureListQ.data ?? []).map((f) => {
                     const item = featuresQ.data?.find(
                       (x) => x.feature_key === f.key,
                     );
@@ -357,7 +360,7 @@ export function AccountDetail() {
                         className="flex items-center justify-between py-3"
                       >
                         <div>
-                          <div className="font-medium">{f.label}</div>
+                          <div className="font-medium">{f.display_name}</div>
                           <div className="text-xs text-muted-foreground">
                             {item?.state ? `状态：${item.state}` : "未启用"}
                             {item?.last_error

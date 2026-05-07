@@ -5,6 +5,7 @@
 *.session
 *.session-journal
 sessions/
+.workbuddy/
 
 # 密钥/备份文件（deploy/backup-keys.sh 生成）
 keys-backup-*.txt

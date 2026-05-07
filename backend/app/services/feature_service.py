@@ -3,6 +3,11 @@
 API 层调本服务而不直接读写 ORM，便于以后引入更复杂的状态机或缓存。
 所有需要"通知 worker 热重载"的写操作都会发一条 IPC ``CMD_RELOAD_CONFIG``，
 异常吞掉避免影响 DB 事务结果。
+
+热重载设计：
+- ``seed_builtin_features`` 每次调用时强制刷新 ``BUILTIN_FEATURES``（动态扫描 builtin 目录），
+  保证新增 builtin 插件目录后，主进程调用任意 API 都能立即把新行写入 ``feature`` 表。
+- worker 端 ``reload_account_config`` 也会刷新注册表后重激活，两侧相互独立。
 """
 
 from __future__ import annotations
@@ -34,8 +39,15 @@ log = logging.getLogger(__name__)
 async def seed_builtin_features(db: AsyncSession) -> int:
     """确保内置 feature 行存在；返回新增条数。
 
-    幂等：已经有同 key 的行就跳过；display_name 与 is_builtin 始终对齐到代码里的常量。
+    每次调用都先强制刷新 ``BUILTIN_FEATURES`` 字典（重新扫描 builtin 目录），
+    保证新增插件目录后不重启主进程也能被感知。
+
+    幂等：已存在的行只校正 display_name / is_builtin，不会触发额外 INSERT；
+    新行才增加计数并 commit。
     """
+    # 强制刷新动态字典，确保扫描到最新文件系统状态
+    BUILTIN_FEATURES.refresh()
+
     rows = (await db.execute(select(Feature))).scalars().all()
     existing: dict[str, Feature] = {f.key: f for f in rows}
     added = 0

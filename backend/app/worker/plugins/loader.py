@@ -3,7 +3,7 @@
 使用流程：
 1. ``run_worker`` 在 ``client.connect()`` 前调 ``load_plugins_for_account``，本模块会：
    - 触发内置插件 import（``@register`` 写入全局注册表）
-   - 在 ``client`` 上挂一个全局 ``NewMessage(incoming=True)`` 派发器，把消息广播给所有插件
+   - 在 ``client`` 上挂全局 ``NewMessage`` 派发器（incoming + outgoing），按各插件的 ``message_channels`` 声明过滤
    - 实例化该账号当前 ``account_feature.enabled=True`` 的所有插件，并把状态写回为 active
 2. 主进程通过 IPC ``CMD_RELOAD_CONFIG`` 触发 ``reload_account_config`` 实现热更新（拉新 rules / config，
    并对新增 / 移除的 feature 做差量加载与卸载）
@@ -286,57 +286,62 @@ async def load_plugins_for_account(
     await _load_ignored_peers(state)
 
     # ── 2) 全局事件派发 ──
-    @client.on(events.NewMessage(incoming=True))
-    async def _dispatch(event):  # noqa: ANN001 - telethon 类型由装饰器约束
-        # paused.is_set()==True 表示正常运行；False 时跳过被动派发，保持"暂停主动动作"语义
-        # 注：被动接收已由 telethon 自身处理；此处仅控制是否触发我们的插件回调
-        if state.paused is not None and not state.paused.is_set():
-            return
+    def _make_dispatcher(direction: str):  # "incoming" or "outgoing"
+        """创建消息派发闭包。direction 对应 Plugin.message_channels 的值。"""
+        kwargs = {"incoming": True} if direction == "incoming" else {"outgoing": True}
 
-        # ── Sprint2 #3 ── 在做任何插件分发 / 风控计费之前，先维护 LRU + 检查忽略名单
-        pid = event.chat_id
-        if pid is not None:
-            await _record_recent_peer(state, event)
-            if pid in state.ignored_peers:
-                # 忽略命中：直接早退，不写日志、不派发、不触发插件
-                # （写一条 debug 日志方便排查"为什么没回复"——但只走 logger，不写 runtime_log）
-                log.debug("[ignored] account=%s chat_id=%s", account_id, pid)
+        @client.on(events.NewMessage(**kwargs))
+        async def _dispatch(event):  # noqa: ANN001
+            if state.paused is not None and not state.paused.is_set():
                 return
 
-        # 调试日志：每条 incoming 消息都记一行（包含 chat_id 与前 80 字），方便排查"为什么没回复"
-        try:
-            peer_kind = (
-                "private" if event.is_private
-                else "channel" if event.is_channel
-                else "group" if event.is_group
-                else "?"
-            )
-            text_preview = (event.raw_text or "")[:80]
-            await _log(
-                redis,
-                account_id,
-                "info",
-                f"[event] {peer_kind} chat_id={event.chat_id} | {text_preview!r}",
-            )
-        except Exception:  # noqa: BLE001
-            pass
+            # incoming 消息需要 ignored_peer 检查和 LRU 维护
+            if direction == "incoming":
+                pid = event.chat_id
+                if pid is not None:
+                    await _record_recent_peer(state, event)
+                    if pid in state.ignored_peers:
+                        log.debug("[ignored] account=%s chat_id=%s", account_id, pid)
+                        return
+                # 调试日志：每条 incoming 消息记一行
+                try:
+                    peer_kind = (
+                        "private" if event.is_private
+                        else "channel" if event.is_channel
+                        else "group" if event.is_group
+                        else "?"
+                    )
+                    text_preview = (event.raw_text or "")[:80]
+                    await _log(
+                        redis,
+                        account_id,
+                        "info",
+                        f"[event] {peer_kind} chat_id={event.chat_id} | {text_preview!r}",
+                    )
+                except Exception:  # noqa: BLE001
+                    pass
 
-        # 拿一份当前 instances 的快照避免迭代过程中并发改动
-        for fkey, inst in list(state.instances.items()):
-            ctx = state.contexts.get(fkey)
-            if ctx is None:
-                continue
-            try:
-                await inst.on_message(ctx, event)
-            except Exception as exc:  # noqa: BLE001
-                # plugin 异常归"系统"——这是技术错误不是业务事件
-                await _log(
-                    redis,
-                    account_id,
-                    "error",
-                    f"插件 {fkey} on_message 异常: {type(exc).__name__}: {exc}",
-                    source="system",
-                )
+            for fkey, inst in list(state.instances.items()):
+                if direction not in inst.message_channels:
+                    continue
+                ctx = state.contexts.get(fkey)
+                if ctx is None:
+                    continue
+                try:
+                    await inst.on_message(ctx, event)
+                except Exception as exc:  # noqa: BLE001
+                    await _log(
+                        redis,
+                        account_id,
+                        "error",
+                        f"插件 {fkey} on_message({direction}) 异常: {type(exc).__name__}: {exc}",
+                        source="system",
+                    )
+
+        return _dispatch
+
+    _make_dispatcher("incoming")
+    _make_dispatcher("outgoing")
 
     # ── 3) 加载该账号所有已启用 feature ──
     async with AsyncSessionLocal() as db:
@@ -438,7 +443,9 @@ async def _activate(db, state: _AccountState, af: AccountFeature, redis: Any) ->
     state.contexts[af.feature_key] = ctx
 
     # 暴露插件命令到 TG 命令分发表
-    for cname, fn in (cls.commands or {}).items():
+    # 优先读实例属性（on_startup 可能动态设置），回退到类属性
+    cmds = getattr(inst, "commands", None) or cls.commands or {}
+    for cname, fn in cmds.items():
         register_plugin_command(cname, _wrap_cmd(fn, ctx))
 
     await db.execute(
@@ -476,8 +483,8 @@ def _make_logger(redis: Any, account_id: int):
 async def reload_account_config(account_id: int, payload: dict | None = None) -> None:
     """收到 IPC ``reload_config`` 时调用：
 
-    - **先重新扫描插件目录**：``discover_plugins()`` 会发现 ``data/plugins/installed``
-      下新解压的 zip 插件，并把它们注册到 ``_REGISTRY``，让后续 ``_activate`` 能找到
+    - **先刷新 BUILTIN_FEATURES**：动态重扫 builtin 目录，让新增插件立即可见
+    - **再重新扫描插件目录**：``discover_plugins()`` 把新发现的插件类注册进 ``_REGISTRY``
     - 已实例化的 feature：刷新 ``ctx.config`` / ``ctx.rules``；若该 feature 已被禁用则 shutdown
     - 数据库新增的 enabled feature：调 ``_activate`` 加载
 
@@ -487,6 +494,13 @@ async def reload_account_config(account_id: int, payload: dict | None = None) ->
     if state is None:
         return
     redis = state.redis or get_redis()
+
+    # 刷新动态发现的 BUILTIN_FEATURES，让新增 builtin 插件目录立即可见
+    try:
+        from ...db.models.feature import BUILTIN_FEATURES  # noqa: PLC0415
+        BUILTIN_FEATURES.refresh()
+    except Exception:  # noqa: BLE001
+        log.exception("reload_account_config 时刷新 BUILTIN_FEATURES 失败")
 
     # 阶段 B：先扫描一次目录，把新装的第三方插件注册进来；存量 builtin 走 import 缓存几乎零开销
     try:

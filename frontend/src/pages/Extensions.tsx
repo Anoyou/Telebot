@@ -1,10 +1,10 @@
-// 扩展中心：合并原「功能矩阵」+「插件管理」+「开发指南」三处入口
+// 插件中心：合并原「功能矩阵」+「插件管理」+「开发指南」三处入口
 //
 // Tab 1：功能矩阵 — 账号 × 功能 启停状态总览
 // Tab 2：已加载插件 — 插件列表 + enable/disable + uninstall
 // Tab 3：开发指南 — react-markdown 渲染 docs/PLUGIN-DEV-GUIDE.md
 //
-// 之前 /matrix 和 /plugins 两个独立菜单项被砍，访问会 redirect 到这里（App.tsx）。
+// 之前 /matrix 和 /extensions 两个独立菜单项被砍，访问会 redirect 到这里（App.tsx）。
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -53,7 +53,7 @@ import {
   uninstallPlugin,
 } from "@/api/plugins";
 import { getErrMsg } from "@/lib/api";
-import type { FeatureState } from "@/api/types";
+import type { FeatureMatrixResponse, FeatureState } from "@/api/types";
 import { cn, formatDateTime } from "@/lib/utils";
 
 const PLUGINS_QK = ["plugins", "installed-packages"] as const;
@@ -64,7 +64,7 @@ export function Extensions() {
   return (
     <div className="space-y-4">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">扩展中心</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">插件中心</h1>
         <p className="text-sm text-muted-foreground">
           功能矩阵 + 插件管理 + 开发指南。给开发者 / 想扩展功能的人看
         </p>
@@ -129,12 +129,41 @@ function FeatureMatrixTab() {
   const toggleMut = useMutation({
     mutationFn: async (vars: { aid: number; key: string; enabled: boolean }) =>
       toggleAccountFeature(vars.aid, vars.key, vars.enabled),
-    onSuccess: () => {
-      toast.success("已更新");
-      qc.invalidateQueries({ queryKey: ["matrix"] });
-      qc.invalidateQueries({ queryKey: ["accounts"] });
+    onSuccess: (_d, vars) => {
+      toast.success(vars.enabled ? "已启用（worker 激活中…）" : "已禁用");
+      // 乐观更新已在 onMutate 中完成；这里延迟刷新让 worker 有时间将 state 改为 active
+      setTimeout(() => {
+        qc.invalidateQueries({ queryKey: ["matrix"] });
+        qc.invalidateQueries({ queryKey: ["accounts"] });
+      }, 1500);
     },
-    onError: (err) => toast.error(getErrMsg(err)),
+    onError: (err, vars, ctx) => {
+      // 回滚乐观更新
+      if (ctx?.snapshot) qc.setQueryData(["matrix"], ctx.snapshot);
+      toast.error(getErrMsg(err));
+    },
+    onMutate: async (vars) => {
+      // 取消正在进行的 matrix 查询，避免覆盖乐观更新
+      await qc.cancelQueries({ queryKey: ["matrix"] });
+      const snapshot = qc.getQueryData<FeatureMatrixResponse>(["matrix"]);
+      if (snapshot) {
+        qc.setQueryData<FeatureMatrixResponse>(["matrix"], {
+          ...snapshot,
+          accounts: snapshot.accounts.map((row) =>
+            row.id === vars.aid
+              ? {
+                  ...row,
+                  features: {
+                    ...row.features,
+                    [vars.key]: vars.enabled ? "active" : "disabled",
+                  },
+                }
+              : row,
+          ),
+        });
+      }
+      return { snapshot };
+    },
   });
 
   const cloneMut = useMutation({
@@ -315,7 +344,16 @@ function FeatureMatrixTab() {
 // ── Tab 2：已加载插件 ──────────────────────────────────────────────
 function PluginsTab() {
   const qc = useQueryClient();
-  const listQ = useQuery({ queryKey: PLUGINS_QK, queryFn: listInstalledPackages });
+
+  // Builtin 插件列表（来自 feature-matrix 的 features 字段）
+  const builtinQ = useQuery({
+    queryKey: ["matrix"],
+    queryFn: getFeatureMatrix,
+    select: (data) => data.features.filter((f) => f.is_builtin),
+  });
+
+  // 第三方插件列表（来自 plugin_install 表）
+  const thirdPartyQ = useQuery({ queryKey: PLUGINS_QK, queryFn: listInstalledPackages });
 
   const enableMut = useMutation({
     mutationFn: (key: string) => enableInstall(key),
@@ -344,6 +382,10 @@ function PluginsTab() {
     onError: (err) => toast.error(getErrMsg(err)),
   });
 
+  const isLoading = builtinQ.isLoading || thirdPartyQ.isLoading;
+  const hasBuiltin = (builtinQ.data ?? []).length > 0;
+  const hasThirdParty = (thirdPartyQ.data ?? []).length > 0;
+
   return (
     <Card>
       <CardHeader>
@@ -353,79 +395,115 @@ function PluginsTab() {
         </CardDescription>
       </CardHeader>
       <CardContent>
-        {listQ.isLoading ? (
+        {isLoading ? (
           <div className="flex h-24 items-center justify-center">
             <Spinner className="text-primary" />
           </div>
-        ) : !listQ.data || listQ.data.length === 0 ? (
+        ) : !hasBuiltin && !hasThirdParty ? (
           <p className="rounded-md border border-dashed py-8 text-center text-xs text-muted-foreground">
             当前没有已安装插件
           </p>
         ) : (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Key</TableHead>
-                <TableHead>版本</TableHead>
-                <TableHead>来源</TableHead>
-                <TableHead>状态</TableHead>
-                <TableHead>安装时间</TableHead>
-                <TableHead className="text-right">操作</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {listQ.data.map((row) => (
-                <TableRow key={row.key}>
-                  <TableCell className="font-mono text-xs">{row.key}</TableCell>
-                  <TableCell>{row.version}</TableCell>
-                  <TableCell>
-                    <Badge variant="secondary">{row.source}</Badge>
-                  </TableCell>
-                  <TableCell>
-                    <Badge variant={row.enabled ? "default" : "outline"}>
-                      {row.enabled ? "已启用" : "未启用"}
-                    </Badge>
-                  </TableCell>
-                  <TableCell className="text-xs text-muted-foreground">
-                    {formatDateTime(row.installed_at)}
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <div className="flex justify-end gap-2">
-                      {row.enabled ? (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => disableMut.mutate(row.key)}
-                          disabled={disableMut.isPending}
-                        >
-                          禁用
-                        </Button>
-                      ) : (
-                        <Button
-                          size="sm"
-                          onClick={() => enableMut.mutate(row.key)}
-                          disabled={enableMut.isPending}
-                        >
-                          启用
-                        </Button>
-                      )}
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => {
-                          if (!confirm(`确认卸载插件「${row.key}」？`)) return;
-                          uninstallMut.mutate(row.key);
-                        }}
-                        disabled={uninstallMut.isPending}
-                      >
-                        卸载
-                      </Button>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+          <>
+            {/* Builtin 插件区 */}
+            {hasBuiltin && (
+              <>
+                <div className="mb-2 text-xs font-medium text-muted-foreground">内置插件</div>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Key</TableHead>
+                      <TableHead>名称</TableHead>
+                      <TableHead>类型</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {builtinQ.data!.map((f) => (
+                      <TableRow key={f.key}>
+                        <TableCell className="font-mono text-xs">{f.key}</TableCell>
+                        <TableCell>{f.display_name}</TableCell>
+                        <TableCell>
+                          <Badge variant="secondary">builtin</Badge>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </>
+            )}
+
+            {/* 第三方插件区 */}
+            {hasThirdParty && (
+              <>
+                {hasBuiltin && <div className="my-4 border-t" />}
+                <div className="mb-2 text-xs font-medium text-muted-foreground">第三方插件</div>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Key</TableHead>
+                      <TableHead>版本</TableHead>
+                      <TableHead>来源</TableHead>
+                      <TableHead>状态</TableHead>
+                      <TableHead>安装时间</TableHead>
+                      <TableHead className="text-right">操作</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {thirdPartyQ.data!.map((row) => (
+                      <TableRow key={row.key}>
+                        <TableCell className="font-mono text-xs">{row.key}</TableCell>
+                        <TableCell>{row.version}</TableCell>
+                        <TableCell>
+                          <Badge variant="secondary">{row.source}</Badge>
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant={row.enabled ? "default" : "outline"}>
+                            {row.enabled ? "已启用" : "未启用"}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="text-xs text-muted-foreground">
+                          {formatDateTime(row.installed_at)}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <div className="flex justify-end gap-2">
+                            {row.enabled ? (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => disableMut.mutate(row.key)}
+                                disabled={disableMut.isPending}
+                              >
+                                禁用
+                              </Button>
+                            ) : (
+                              <Button
+                                size="sm"
+                                onClick={() => enableMut.mutate(row.key)}
+                                disabled={enableMut.isPending}
+                              >
+                                启用
+                              </Button>
+                            )}
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => {
+                                if (!confirm(`确认卸载插件「${row.key}」？`)) return;
+                                uninstallMut.mutate(row.key);
+                              }}
+                              disabled={uninstallMut.isPending}
+                            >
+                              卸载
+                            </Button>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </>
+            )}
+          </>
         )}
       </CardContent>
     </Card>

@@ -1,5 +1,5 @@
 import React from "react";
-import { Navigate, Route, Routes } from "react-router-dom";
+import { Navigate, Route, Routes, useParams } from "react-router-dom";
 
 import { AppShell } from "@/components/layout/AppShell";
 import { RequireAuth } from "@/components/layout/RequireAuth";
@@ -12,6 +12,8 @@ import { AccountDetail } from "@/pages/Accounts/Detail";
 import { AutoReplyConfig } from "@/pages/Features/AutoReply";
 import { ForwardConfig } from "@/pages/Features/Forward";
 import { SchedulerConfig } from "@/pages/Features/Scheduler";
+import { Game24ConfigPage } from "@/pages/Features/Game24Config";
+import { FeatureTodoPage } from "@/pages/Features/TodoPage";
 import { Logs } from "@/pages/Logs";
 import { SettingsIndex } from "@/pages/Settings/Index";
 import { CommandTemplates } from "@/pages/Settings/CommandTemplates";
@@ -20,6 +22,25 @@ import { AISettings } from "@/pages/AISettings";
 import { Templates } from "@/pages/Templates";
 
 type AppErrorBoundaryState = { hasError: boolean };
+
+// 已知有专属配置页的 feature key 列表
+const FEATURE_CONFIG_PAGES: Record<string, { title: string; description: string }> = {
+  auto_reply: { title: "自动回复", description: "不存在专属配置页路由" },
+  forward: { title: "消息转发", description: "不存在专属配置页路由" },
+  scheduler: { title: "定时任务", description: "不存在专属配置页路由" },
+  game24: { title: "24 点游戏", description: "不存在专属配置页路由" },
+};
+
+// 通配路由组件：已知 feature 显示 TodoPage，未知 feature 也显示占位
+function FeatureCatchAll() {
+  const { featureKey } = useParams<{ featureKey: string }>();
+  const key = featureKey ?? "unknown";
+  const info = FEATURE_CONFIG_PAGES[key] ?? {
+    title: key,
+    description: `功能「${key}」的配置页面尚未实现。可通过 API 直连完成基础配置。`,
+  };
+  return <FeatureTodoPage title={info.title} description={info.description} />;
+}
 
 export class AppErrorBoundary extends React.Component<
   React.PropsWithChildren,
@@ -73,15 +94,22 @@ export default function App() {
             <Route path=":aid/features/auto_reply" element={<AutoReplyConfig />} />
             <Route path=":aid/features/forward" element={<ForwardConfig />} />
             <Route path=":aid/features/scheduler" element={<SchedulerConfig />} />
+            <Route path=":aid/features/game24" element={<Game24ConfigPage />} />
+            <Route
+              path=":aid/features/:featureKey"
+              element={
+                <FeatureCatchAll />
+              }
+            />
           </Route>
-          <Route path="extensions" element={<Extensions />} />
-          <Route path="matrix" element={<Navigate to="/extensions" replace />} />
-          <Route path="plugins" element={<Navigate to="/extensions" replace />} />
+          <Route path="plugins" element={<Extensions />} />
+          <Route path="matrix" element={<Navigate to="/plugins" replace />} />
+          <Route path="extensions" element={<Navigate to="/plugins" replace />} />
           <Route path="logs" element={<Logs />} />
           <Route path="settings" element={<SettingsIndex />} />
           <Route path="settings/commands" element={<CommandTemplates />} />
           <Route path="templates" element={<Templates />} />
-          <Route path="settings/plugins" element={<Navigate to="/extensions" replace />} />
+          <Route path="settings/plugins" element={<Navigate to="/plugins" replace />} />
           <Route path="ai" element={<AISettings />} />
           <Route
             path="settings/llm-providers"

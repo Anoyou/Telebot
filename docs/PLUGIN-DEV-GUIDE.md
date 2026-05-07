@@ -122,8 +122,14 @@ installed 插件中的 `ctx.client` 会被 `SandboxClient` 包装。你声明什
 可重写 hook：
 - `on_startup(ctx)`：插件实例激活时调用
 - `on_shutdown(ctx)`：卸载或停用时调用
-- `on_message(ctx, event)`：incoming 消息事件
+- `on_message(ctx, event)`：消息事件回调（接收哪些方向由 `message_channels` 控制）
 - `on_command(ctx, cmd, args, event)`：命令派发钩子（默认返回 False）
+
+类属性：
+- `key: str`：插件唯一标识
+- `display_name: str`：展示名
+- `message_channels: set[str]`：声明需要监听的消息方向，默认 `{"incoming"}`
+- `commands: dict`：TG 内命令注册表
 
 `PluginContext` 常用字段：
 - `account_id`
@@ -135,7 +141,39 @@ installed 插件中的 `ctx.client` 会被 `SandboxClient` 包装。你声明什
 - `redis`
 - `log`
 
-### 3.1 命令推荐走 `commands` 字典
+### 3.1 `message_channels`：声明消息监听方向
+
+插件通过类属性 `message_channels` 声明需要监听哪些方向的消息：
+
+```python
+class MyPlugin(Plugin):
+    # 默认值，只监听 incoming（别人发的消息）
+    message_channels = {"incoming"}
+
+class Game24Plugin(Plugin):
+    # 同时监听 incoming 和 outgoing
+    message_channels = {"incoming", "outgoing"}
+```
+
+可选值：
+- `"incoming"`（默认）：群/私聊中别人发的消息
+- `"outgoing"`：自己发送的消息
+
+在 `on_message` 内通过 `event.outgoing` 判断消息来源：
+
+```python
+async def on_message(self, ctx, event):
+    if event.outgoing:
+        # 处理自己发的消息
+        ...
+    else:
+        # 处理别人发的消息
+        ...
+```
+
+**重要原则**：不应该因为单个插件的需求去改框架核心（新增 hook、改 loader 逻辑等）。新功能应优先通过插件自身的声明（如 `message_channels`）和内部路由实现，让 loader 统一处理。这样开发新插件时不需要动其他文件。
+
+### 3.2 命令推荐走 `commands` 字典
 
 当前工程里，插件最稳定的命令接入方式是类属性 `commands`：
 
@@ -157,11 +195,12 @@ async def hello_handler(client, event, args, account_id, ctx):
 
 命令分发器会把它注册成 `,hello`（前缀可配置，默认是 `,`）。
 
-### 3.2 `on_message` 与 `commands` 的选择
+### 3.3 `on_message` 与 `commands` 的选择
 
-- 你要处理被动 incoming 消息：用 `on_message`
+- 你要处理被动 incoming 消息：用 `on_message`（默认）
+- 你要同时监听自己发的和别人的消息：设 `message_channels = {"incoming", "outgoing"}`，在 `on_message` 内用 `event.outgoing` 分流
 - 你要处理主动发出的命令（`,xxx`）：用 `commands`
-- 两者可并存
+- 以上可组合使用
 
 ---
 

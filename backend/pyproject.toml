@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "telebot-backend"
-version = "0.5.2"
+version = "0.6.0"
 description = "Telegram Userbot 管理系统后端"
 requires-python = ">=3.12"
 license = {text = "MIT"}

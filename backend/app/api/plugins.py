@@ -34,6 +34,8 @@ def _bad(code: str, message: str, status: int = 400) -> HTTPException:
 
 
 def _is_builtin(plugin_key: str) -> bool:
+    # BUILTIN_FEATURES 是惰性字典，首次访问时自动扫描；此后可通过 refresh() 强制刷新。
+    # 这里不主动 refresh，避免每次 API 请求都扫文件系统；seed_builtin_features 负责刷新。
     return plugin_key in BUILTIN_FEATURES
 
 

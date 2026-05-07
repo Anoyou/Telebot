@@ -56,8 +56,14 @@ class Plugin:
     子类必须设置类属性 ``key`` / ``display_name``；可重写以下 hook：
       - ``on_startup``：[账号 × feature] 被激活时调用一次
       - ``on_shutdown``：禁用 / 卸载 / 热重载前调用一次
-      - ``on_message``：每条 incoming 消息派发到本插件
+      - ``on_message``：消息派发回调，具体接收哪些方向由 ``message_channels`` 声明
       - ``on_command``：插件可声明的"账号内命令"；返回 True 表示已处理
+
+    ``message_channels`` 控制 loader 向该插件派发哪些方向的消息：
+      - ``"incoming"``（默认）：群/私聊中别人发的消息
+      - ``"outgoing"``：自己发送的消息
+      插件可设 ``{"incoming", "outgoing"}`` 同时监听两个方向，
+      在 ``on_message`` 内通过 ``event.outgoing`` 判断消息来源。
 
     插件如要追加 TG 内命令，可在类属性 ``commands`` 里登记
     （key 是命令名，value 是 ``async fn(client, event, args, account_id, ctx)``），
@@ -66,6 +72,8 @@ class Plugin:
 
     key: str = ""
     display_name: str = ""
+    # 声明插件需要监听的消息方向；loader 据此决定是否向该插件派发对应事件
+    message_channels: set[str] = {"incoming"}
     # 插件想暴露的 TG 内命令：cmd_name -> async handler
     # handler 签名: (client, event, args, account_id, ctx) -> None
     commands: dict[str, Callable[..., Awaitable[None]]] = {}
@@ -79,8 +87,11 @@ class Plugin:
         return None
 
     async def on_message(self, ctx: PluginContext, event: events.NewMessage.Event) -> None:
-        """每条 incoming NewMessage 事件回调；默认 no-op。"""
-        return None
+        """消息事件回调；默认 no-op。
+
+        接收的方向由 ``message_channels`` 类属性控制，
+        可通过 ``event.outgoing`` 区分消息来源。
+        """
 
     async def on_command(
         self,

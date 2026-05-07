@@ -10,6 +10,54 @@
 
 ---
 
+## [0.6.0] — 2026-05-07 · feature · 24 点游戏插件 & Builtin 插件热发现
+
+### Added
+- **24 点游戏插件**（`builtin/game24`）：群内互动小游戏，支持竞速答题与奖金发放
+  - 触发方式：`,24d <奖金金额>`（例：`,24d 2000`）— 由自己发送（outgoing），在群里触发
+  - 随机生成 4 个 1–13 的整数，保证有解（递归求解器验证）
+  - 双通道消息处理：`on_outgoing` 监听自己的触发指令，`on_message` 监听群内他人的答题
+  - 表达式安全求值：ast 白名单过滤，仅允许 `+ - * /` 和括号，禁止函数调用/属性访问/幂运算
+  - 支持用户输入运算符别名：`x` / `X` / `×` → `*`，`÷` → `/`
+  - 第一个答对者自动发奖：Bot 回复其消息 `+<奖金数量>`
+  - 超时机制：默认 500 秒，超时无人答对自动宣布结束
+  - per-chat 游戏状态隔离，同一群已有进行中游戏时拒绝开新局
+  - 可配置项：`trigger_pattern`（自定义触发正则）、`timeout`（限时秒数）
+  - 权限声明：`send_message` / `edit_message` / `read_chat` / `delete_message`
+
+### Changed
+- **插件框架 `message_channels` 声明式消息方向**：`Plugin` 基类新增 `message_channels` 类属性（默认 `{"incoming"}`），插件声明需要监听的方向后，loader 自动向其派发对应事件，无需重写新 hook；loader 统一 incoming/outgoing 两个 dispatcher，按插件声明过滤
+- **插件命令注册支持实例属性**：loader `_activate` 优先读取插件实例的 `commands`（`on_startup` 动态设置），回退到类属性，支持插件根据 config 动态注册不同命令名
+- **Builtin 插件动态发现与热重载**：`BUILTIN_FEATURES` 从静态常量改为运行时文件系统扫描，新增 builtin 插件无需重启后端进程即可生效
+  - 新增 `scan_builtin_manifests()`：动态扫描 `app/worker/plugins/builtin/` 目录，import 各子包 `manifest.py` 读取 `MANIFEST.key / display_name`
+  - 新增 `_LazyBuiltinFeatures(dict)`：继承 dict 的惰性字典，首次访问自动触发扫描，支持 `refresh()` 强制重扫
+  - 主进程侧：`seed_builtin_features()` 每次调用前 `BUILTIN_FEATURES.refresh()`，自动 seed 新插件行
+  - Worker 侧：`reload_account_config()` 第一步刷新 `BUILTIN_FEATURES`，配合 `discover_plugins()` 激活新插件
+  - 保留 `FEATURE_AUTO_REPLY / FORWARD / SCHEDULER / GAME24` 等具名常量向后兼容
+  - 修复 `builtin/__init__.py` 缺少 `game24` 导入
+- **功能矩阵启用后即时反馈**：toggle mutation 改用乐观更新（`onMutate` 立即改本地缓存），不再等 invalidateQueries；1.5 秒后再重新拉取确认 worker 已激活
+- **账号详情页功能开关动态化**：`FEATURE_KEYS` 硬编码列表改为从 feature-matrix API 动态获取，新增插件自动出现在开关列表
+- **已加载插件 Tab 显示内置插件**：数据源从 `installed-packages`（仅第三方）改为同时展示 builtin（来自 feature-matrix）和第三方插件
+- **Feature 配置页通配路由**：新增 `:aid/features/:featureKey` 通配路由，未实现配置页的 feature 统一显示 TodoPage 占位
+- **Game24 触发改为命令注册**：从正则匹配改为 `commands` 字典注册，指令名默认 `24d`（可通过 config.command 自定义），跟随系统命令前缀；答题保持 incoming `on_message`
+- **Game24 配置页面**：配置项从 `trigger_pattern` 改为 `command`（指令名），支持设置触发指令名和答题限时
+
+### Affected Files
+- `backend/app/worker/plugins/builtin/game24/__init__.py`
+- `backend/app/worker/plugins/builtin/game24/manifest.py`
+- `backend/app/worker/plugins/builtin/game24/plugin.py`
+- `backend/app/worker/plugins/base.py`（新增 `message_channels` 声明式属性）
+- `backend/app/worker/plugins/loader.py`（新增 outgoing 派发器 + `reload_account_config` 加 refresh）
+- `backend/app/db/models/feature.py`（`scan_builtin_manifests` / `_LazyBuiltinFeatures` / `BUILTIN_FEATURES` 重构）
+- `backend/app/services/feature_service.py`（`seed_builtin_features` 加 refresh）
+- `backend/app/worker/plugins/loader.py`（`reload_account_config` 加 refresh）
+- `frontend/src/pages/Extensions.tsx`（乐观更新 + builtin 插件列表）
+- `frontend/src/pages/Accounts/Detail.tsx`（FEATURE_KEYS 动态化）
+- `frontend/src/App.tsx`（通配 feature 路由）
+- `frontend/src/pages/Features/Game24Config.tsx`（game24 专属配置页）
+
+---
+
 ## [0.5.2] — 2026-05-07 · hotfix · AI provider 实时刷新与稳定性修复
 
 ### Added
