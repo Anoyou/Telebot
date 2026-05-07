@@ -232,7 +232,7 @@ class Game24Plugin(Plugin):
                 continue
 
         if prize <= 0:
-            await event.edit(f"⚠️ 请指定奖金金额")
+            await event.edit("⚠️ 请指定奖金金额")
             return
 
         chat_id = event.chat_id

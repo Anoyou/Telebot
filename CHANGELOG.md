@@ -37,6 +37,17 @@
 - CommandContext 新增 `sudo_users` 和 `sudo_prefix` 字段
 - runtime.py 加载 sudo 配置到命令派发上下文
 
+### Fixed
+- `runtime.py` 补充缺失的 `from typing import Any` 导入（F821）
+- `conversation.py` 将 `asyncio.TimeoutError` 改为内置 `TimeoutError`（Python 3.12 兼容）
+- 前端 `SudoManagement.tsx` / `AliasManagement.tsx` 修复 TypeScript 类型错误：queryFn 泛型、不存在的 AlertDialog 组件替换为 `window.confirm`、`getAccounts` → `listAccounts`
+- `ruff check` 自动修复存量 import 排序和无用 f-string 问题
+
+### Tests
+- 新增 `test_conversation.py`（10 用例）：超时、队列、context manager、handler 注册、send、click_button
+- 新增 `test_alias.py`（8 用例）：默认值、贪心最长匹配、参数透传、别名→内置/模板派发
+- 新增 `test_sudo.py`（13 用例）：权限检查全分支、generation guard 递增与匹配
+
 ---
 
 ## [0.7.1] — 2026-05-07 · patch · Docker 部署优化与前端构建修复

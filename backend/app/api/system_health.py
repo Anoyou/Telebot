@@ -19,7 +19,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, UploadFile, File
+from fastapi import APIRouter, File, UploadFile
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select, text
@@ -589,9 +589,16 @@ async def export_config(
     """导出配置为 JSON 文件下载。"""
     from .. import __version__
     from ..db.models import (
-        Account, AccountCommandLink, AccountFeature, CommandTemplate,
-        IgnoredPeer, LLMProvider, NotifyBot, RateLimitRule,
-        RateLimitTemplate, Rule,
+        Account,
+        AccountCommandLink,
+        AccountFeature,
+        CommandTemplate,
+        IgnoredPeer,
+        LLMProvider,
+        NotifyBot,
+        RateLimitRule,
+        RateLimitTemplate,
+        Rule,
     )
     from ..db.models.system import SystemSetting
 
@@ -661,13 +668,19 @@ async def import_config(
     file: UploadFile = File(...),
 ) -> ImportConfigResponse:
     """从上传的 JSON 文件导入配置。冲突策略：同名/同 ID 跳过并记录。"""
-    import io
     import json as _json
 
     from ..db.models import (
-        Account, AccountCommandLink, AccountFeature, CommandTemplate,
-        IgnoredPeer, LLMProvider, NotifyBot, RateLimitRule,
-        RateLimitTemplate, Rule,
+        Account,
+        AccountCommandLink,
+        AccountFeature,
+        CommandTemplate,
+        IgnoredPeer,
+        LLMProvider,
+        NotifyBot,
+        RateLimitRule,
+        RateLimitTemplate,
+        Rule,
     )
     from ..db.models.system import SystemSetting
 

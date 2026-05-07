@@ -69,7 +69,7 @@ class Conversation:
         t = timeout if timeout is not None else self._timeout
         try:
             return await asyncio.wait_for(self._queue.get(), timeout=t)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             raise ConversationTimeout(
                 f"等待 {self._peer} 回复超时（{t}s）"
             ) from None

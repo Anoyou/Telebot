@@ -13,6 +13,7 @@ from fastapi.responses import JSONResponse
 
 from . import __version__
 from .api import accounts as accounts_api
+from .api import alias as alias_api
 from .api import auth as auth_api
 from .api import device_profiles as device_profiles_api
 from .api import logs as logs_api
@@ -20,6 +21,7 @@ from .api import network as network_api
 from .api import notify_bots as notify_bots_api
 from .api import proxies as proxies_api
 from .api import rate_limit as rate_limit_api
+from .api import sudo as sudo_api
 from .services import notify_service
 from .services.login_service import cleanup_expired_loop
 from .settings import settings
@@ -222,6 +224,8 @@ app.include_router(proxies_api.router)      # 主会话补：代理 CRUD + 连�
 app.include_router(device_profiles_api.router)  # 设备伪装库：device_model / app_version / lang_code
 app.include_router(network_api.router)      # 主会话补：当前网络环境探测
 app.include_router(notify_bots_api.router)  # Sprint4 #2D：多 Telegram Bot 通知
+app.include_router(sudo_api.router)        # Sprint5：Sudo 用户管理
+app.include_router(alias_api.router)      # Sprint5：命令别名管理
 
 
 # ── 健康检查 ─────────────────────────────────────────────────────

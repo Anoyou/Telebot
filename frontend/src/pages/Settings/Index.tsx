@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Bell, ShieldCheck, SlidersHorizontal } from "lucide-react";
+import { Bell, Shield, ShieldCheck, SlidersHorizontal, UserPlus } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -24,6 +24,7 @@ import {
 } from "@/api/system";
 import { getErrMsg, api } from "@/lib/api";
 import { NotifyBots } from "./NotifyBots";
+import { SudoManagement } from "./SudoManagement";
 import { UserAccount } from "./UserAccount";
 import { ConfigBackup } from "./ConfigBackup";
 
@@ -33,7 +34,7 @@ interface KillSwitchState {
 
 export function SettingsIndex() {
   const qc = useQueryClient();
-  const [tab, setTab] = useState<"global" | "security" | "notify">("global");
+  const [tab, setTab] = useState<"global" | "security" | "sudo" | "notify">("global");
 
   const settingsQ = useQuery({
     queryKey: ["system", "settings"],
@@ -112,6 +113,9 @@ export function SettingsIndex() {
           </TabsTrigger>
           <TabsTrigger value="security" className="gap-1.5">
             <ShieldCheck className="h-4 w-4" /> 管理员账号
+          </TabsTrigger>
+          <TabsTrigger value="sudo" className="gap-1.5">
+            <UserPlus className="h-4 w-4" /> Sudo 用户
           </TabsTrigger>
           <TabsTrigger value="notify" className="gap-1.5">
             <Bell className="h-4 w-4" /> 通知渠道
@@ -194,6 +198,10 @@ export function SettingsIndex() {
 
         <TabsContent value="security">
           <UserAccount />
+        </TabsContent>
+
+        <TabsContent value="sudo">
+          <SudoManagement />
         </TabsContent>
 
         <TabsContent value="notify">

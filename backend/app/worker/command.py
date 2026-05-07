@@ -712,7 +712,7 @@ async def _run_template(client, event, args, tpl: dict[str, Any], account_id: in
                     else:
                         link = f"消息引用：chat={cid}, id={mid}"
                 else:
-                    link = f"消息引用：无法生成链接"
+                    link = "消息引用：无法生成链接"
                 await event.client.send_message(target, link)
             else:
                 await event.edit(f"✗ 未知转发方式：{mode}")

@@ -6,13 +6,13 @@ from datetime import date, datetime, time
 
 from sqlalchemy import (
     ARRAY,
+    JSON,
     BigInteger,
     Boolean,
     Date,
     DateTime,
     ForeignKey,
     Integer,
-    JSON,
     LargeBinary,
     SmallInteger,
     String,
