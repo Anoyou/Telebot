@@ -2,12 +2,12 @@ name: Frontend CI
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
     paths:
       - "frontend/**"
       - "docs/**"
   pull_request:
-    branches: [ main ]
+    branches: [main]
     paths:
       - "frontend/**"
       - "docs/**"
@@ -15,35 +15,19 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-
     steps:
       - uses: actions/checkout@v4
-
       - name: Install Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 22
-
       - name: Install pnpm
         run: |
           corepack enable
           corepack prepare pnpm@9.15.9 --activate
-
-      - name: Get pnpm store directory
-        shell: bash
-        run: echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
-
-      - uses: actions/cache@v4
-        name: Setup pnpm cache
-        with:
-          path: ${{ env.STORE_PATH }}
-          key: ${{ runner.os }}-pnpm-store-${{ hashFiles("**/pnpm-lock.yaml") }}
-          restore-keys: ${{ runner.os }}-pnpm-store-
-
       - name: Install dependencies
         working-directory: frontend
         run: pnpm install --frozen-lockfile
-
       - name: Build frontend
         working-directory: frontend
         run: pnpm build
