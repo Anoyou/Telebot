@@ -6,11 +6,13 @@ on:
     paths:
       - "frontend/**"
       - "docs/**"
+      - ".github/workflows/**"
   pull_request:
     branches: [main]
     paths:
       - "frontend/**"
       - "docs/**"
+      - ".github/workflows/**"
 
 jobs:
   build:
