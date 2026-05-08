@@ -1,381 +1,492 @@
-# Telebot 插件开发指南
+# TeleBot 插件开发指南
 
-## 0. 这是什么 / 不是什么
-
-这是 Telebot 的插件开发文档，目标是让你在不改主工程代码的前提下，为账号增加新能力。
-
-它是：
-- 一个稳定的插件目录约定（`__init__.py` + `manifest.py` + `plugin.py`）
-- 一套运行期契约（`Plugin`、`PluginContext`、`Manifest`）
-- 一个可复制到 `data/plugins/installed/` 的第三方加载机制
-
-它不是：
-- 远程插件市场（本项目当前不做 repo 订阅安装）
-- 可绕过权限控制的后门（installed 插件默认走沙箱）
+> 本文档涵盖插件开发全流程：本地插件、远程插件、框架约束、调试建议。
 
 ---
 
-## 1. 目录结构（最小骨架）
+## 目录
 
-每个插件一个目录，至少包含 3 个文件：
+1. [快速开始](#1-快速开始)
+2. [插件结构](#2-插件结构)
+3. [Plugin 基类](#3-plugin-基类)
+4. [PluginContext](#4-plugincontext)
+5. [Manifest 元数据](#5-manifest-元数据)
+6. [命令系统](#6-命令系统)
+7. [消息监听](#7-消息监听)
+8. [Conversation 工具](#8-conversation-工具)
+9. [远程插件](#9-远程插件)
+10. [清理生命周期（cleanup）](#10-清理生命周期cleanup)
+11. [安全边界](#11-安全边界)
+12. [前端集成](#12-前端集成)
+13. [调试建议](#13-调试建议)
+14. [安全与合规](#14-安全与合规)
+15. [完整示例](#15-完整示例)
 
-```text
-my_plugin/
-  __init__.py
-  manifest.py
-  plugin.py
+---
+
+## 1. 快速开始
+
+### 文件结构
+
+```
+plugins/installed/{插件名}/
+├── __init__.py        # 导出 PLUGIN_CLASS 和 MANIFEST
+├── manifest.py        # Manifest 元数据
+├── plugin.py          # 插件主类
+└── (其他模块)
 ```
 
-推荐再带一个 `README.md`：
+### 最小可运行插件
 
-```text
-my_plugin/
-  __init__.py
-  manifest.py
-  plugin.py
-  README.md
+**plugin.py：**
+```python
+from app.worker.plugins.base import Plugin, register
+
+@register
+class PingPlugin(Plugin):
+    key = "ping"
+    display_name = "Ping"
+
+    async def on_command(self, ctx, cmd, args, event) -> bool:
+        if cmd == "ping":
+            await event.edit("pong")
+            return True
+        return False
 ```
 
-### 1.1 `__init__.py`
+**manifest.py：**
+```python
+from app.worker.plugins.manifest import Manifest
 
-必须导出两个顶层常量：
-- `PLUGIN_CLASS`
-- `MANIFEST`
+MANIFEST = Manifest(
+    key="ping",
+    display_name="Ping",
+    version="0.1.0",
+    author="example",
+    description="响应 ping 命令",
+)
+```
 
-示例：
-
+**__init__.py：**
 ```python
 from .manifest import MANIFEST
-from .plugin import MyPlugin
+from .plugin import PingPlugin
 
-PLUGIN_CLASS = MyPlugin
-
+PLUGIN_CLASS = PingPlugin
 __all__ = ["PLUGIN_CLASS", "MANIFEST"]
 ```
 
-### 1.2 `manifest.py`
-
-定义插件元数据：key、版本、描述、权限、可选 schema。
-
-### 1.3 `plugin.py`
-
-写插件逻辑：消息回调、命令处理、启动/关闭钩子。
+放进 `plugins/installed/ping/` 后重启 worker 即可。
 
 ---
 
-## 2. Manifest 字段
+## 2. 插件结构
 
-`Manifest` 定义在 `backend/app/worker/plugins/manifest.py`。
+### 目录约定
 
-字段速查：
-- `key: str`：插件唯一标识，建议小写 snake_case
-- `display_name: str`：展示名
-- `version: str = "0.1.0"`
-- `author: str = "builtin"`
-- `description: str = ""`
-- `requires_features: list[str]`
-- `config_schema: dict | None`
-- `permissions: list[str]`
-- `on_install: str | None`
+```
+backend/app/worker/plugins/
+├── base.py              # Plugin 基类 + register 装饰器
+├── manifest.py          # Manifest 数据类
+├── loader.py            # 插件加载器 + 热重载 + generation guard
+└── builtin/             # 内置插件
+    ├── game24/
+    └── forward/
 
-示例：
+plugins/installed/       # 远程/用户安装的插件
+├── translate/
+└── (更多插件...)
+```
+
+### 生命周期
+
+```
+loader._load_all()
+  → scan builtin/ + plugins/installed/
+  → import plugin.py + manifest.py
+  → 验证 Manifest 合法性
+  → 实例化 Plugin 子类
+  → 调用 on_startup(ctx)
+
+热重载 (reload_plugin):
+  → state.generation += 1          # generation guard
+  → 旧插件: on_shutdown(ctx)
+  → 重新 import + 实例化
+  → 新插件: on_startup(ctx)
+
+消息派发:
+  → 检查 ctx.generation == state.generation
+  → 跳过过期 handler（竞态保护）
+  → 调用 on_command / on_message
+```
+
+---
+
+## 3. Plugin 基类
+
+```python
+class Plugin:
+    # === 必须设置 ===
+    key: str                          # 唯一标识
+    display_name: str                 # 显示名
+
+    # === 可选配置 ===
+    message_channels: list[str]       # 监听方向: ["group", "private", "channel", "outgoing"]
+    description: str = ""             # 描述（用于帮助系统）
+
+    # === 生命周期钩子 ===
+    async def on_startup(self, ctx: PluginContext) -> None:
+        """插件激活时调用一次。"""
+
+    async def on_shutdown(self, ctx: PluginContext) -> None:
+        """插件关停前调用一次。必须幂等。"""
+
+    # === 事件处理 ===
+    async def on_message(self, ctx: PluginContext, event) -> None:
+        """消息事件回调。"""
+
+    async def on_command(self, ctx: PluginContext, cmd: str, args: list[str], event) -> bool:
+        """命令派发回调。返回 True 表示已处理。"""
+        return False
+```
+
+### 注册
+
+```python
+@register
+class MyPlugin(Plugin):
+    key = "my_plugin"
+    ...
+```
+
+`@register` 装饰器把插件类注册到全局表，loader 通过 key 查找。
+
+---
+
+## 4. PluginContext
+
+```python
+@dataclass
+class PluginContext:
+    account_id: int
+    feature_key: str
+    config: dict           # rule.config
+    rules: list            # 规则列表
+    client: TelegramClient | None
+    engine: Any            # RateLimitEngine
+    redis: Any             # redis.asyncio.Redis
+    log: Callable          # 日志函数
+    generation: int        # generation guard 计数
+
+    # 工具方法
+    async def conversation(self, peer, timeout=30) -> Conversation:
+        """创建与 bot 的对话会话。"""
+```
+
+---
+
+## 5. Manifest 元数据
 
 ```python
 from app.worker.plugins.manifest import Manifest
 
 MANIFEST = Manifest(
-    key="translate",
-    display_name="翻译助手",
-    version="0.1.0",
-    author="example",
-    description="把回复消息翻译到目标语言",
-    permissions=["read_chat", "send_message", "edit_message"],
+    key="my_plugin",              # 必填：与 Plugin.key 一致
+    display_name="我的插件",      # 必填
+    version="0.1.0",              # 语义化版本
+    author="your_name",
+    description="插件功能描述",    # 必填：用于帮助系统
+    permissions=["send_message", "edit_message", "read_chat"],
+    config_schema=None,           # 可选：JSON Schema
+    requires_features=[],         # 可选：依赖的其他插件
 )
 ```
 
-### 2.1 `permissions` 如何写
+### Manifest 验证
 
-installed 插件中的 `ctx.client` 会被 `SandboxClient` 包装。你声明什么权限，决定能调哪些 Telethon 方法。
+安装插件时（远程插件），框架会验证：
 
-常见映射（简化）：
-- `send_message` -> `send_message` / `respond`
-- `edit_message` -> `edit` / `edit_message`
-- `read_chat` -> `get_messages` / `iter_messages` / `get_chat`
-- `send_file` -> `send_file`
-- `delete_message` -> `delete_messages`
-
-未声明直接调用会抛 `PermissionError`。
-
-### 2.2 `config_schema` 什么时候需要
-
-如果你的插件需要配 rule.config（比如转发规则），建议提供 JSON Schema，前端可基于它做表单和校验。
+```python
+def validate_manifest(manifest: dict) -> tuple[bool, str]:
+    required = ["key", "display_name", "description", "version"]
+    for field in required:
+        if not manifest.get(field):
+            return False, f"缺少必填字段: {field}"
+    return True, "ok"
+```
 
 ---
 
-## 3. Plugin 基类与上下文
+## 6. 命令系统
 
-基类在 `backend/app/worker/plugins/base.py`。
+### 命令派发流程
 
-可重写 hook：
-- `on_startup(ctx)`：插件实例激活时调用
-- `on_shutdown(ctx)`：卸载或停用时调用
-- `on_message(ctx, event)`：消息事件回调（接收哪些方向由 `message_channels` 控制）
-- `on_command(ctx, cmd, args, event)`：命令派发钩子（默认返回 False）
+1. 消息到达 → 检查前缀匹配
+2. 提取命令名和参数
+3. 检查别名（贪心最长匹配）
+4. 遍历已注册插件，调用 `on_command(ctx, cmd, args, event)`
+5. 第一个返回 True 的插件接管，后续不再传递
 
-类属性：
-- `key: str`：插件唯一标识
-- `display_name: str`：展示名
-- `message_channels: set[str]`：声明需要监听的消息方向，默认 `{"incoming"}`
-- `commands: dict`：TG 内命令注册表
+### on_command 签名
 
-`PluginContext` 常用字段：
-- `account_id`
-- `feature_key`
-- `config`
-- `rules`
-- `client`
-- `engine`
-- `redis`
-- `log`
+```python
+async def on_command(
+    self,
+    ctx: PluginContext,       # 上下文
+    cmd: str,                 # 命令名（如 "weather"）
+    args: list[str],          # 参数列表
+    event: NewMessage.Event,  # 原始事件
+) -> bool:
+    """返回 True 表示已处理。"""
+```
 
-### 3.1 `message_channels`：声明消息监听方向
+### 别名支持
 
-插件通过类属性 `message_channels` 声明需要监听哪些方向的消息：
+命令别名支持多词贪心匹配和参数透传：
+
+```
+用户: ,fy zh hello
+→ 别名 "fy zh" → "translate"
+→ 参数透传: translate hello
+```
+
+---
+
+## 7. 消息监听
 
 ```python
 class MyPlugin(Plugin):
-    # 默认值，只监听 incoming（别人发的消息）
-    message_channels = {"incoming"}
+    message_channels = ["group", "private"]
 
-class Game24Plugin(Plugin):
-    # 同时监听 incoming 和 outgoing
-    message_channels = {"incoming", "outgoing"}
+    async def on_message(self, ctx: PluginContext, event) -> None:
+        """监听所有匹配方向的消息。"""
+        if event.outgoing:
+            return  # 忽略自己发的
+        # 处理逻辑
 ```
 
-可选值：
-- `"incoming"`（默认）：群/私聊中别人发的消息
-- `"outgoing"`：自己发送的消息
+### channels 类型
 
-在 `on_message` 内通过 `event.outgoing` 判断消息来源：
+| 值 | 说明 |
+|---|------|
+| `group` | 群组消息 |
+| `private` | 私聊消息 |
+| `channel` | 频道消息 |
+| `outgoing` | 自己发出的消息 |
+
+---
+
+## 8. Conversation 工具
+
+与其他 Bot 交互的工具类（如 @BotFather）：
 
 ```python
-async def on_message(self, ctx, event):
-    if event.outgoing:
-        # 处理自己发的消息
-        ...
-    else:
-        # 处理别人发的消息
-        ...
+async with ctx.conversation("@BotFather") as conv:
+    await conv.send("/newbot")
+    resp = await conv.get_response(timeout=30)
+    print(resp.text)
+
+    # 点击内联按钮
+    await conv.click_button(msg, row=0, col=0)
 ```
 
-**重要原则**：不应该因为单个插件的需求去改框架核心（新增 hook、改 loader 逻辑等）。新功能应优先通过插件自身的声明（如 `message_channels`）和内部路由实现，让 loader 统一处理。这样开发新插件时不需要动其他文件。
+### API
 
-### 3.2 命令推荐走 `commands` 字典
+| 方法 | 说明 |
+|------|------|
+| `send(text, **kwargs)` | 发送文本/文件/图片 |
+| `get_response(timeout)` | 等对方回复 |
+| `click_button(msg, row, col)` | 点击 inline keyboard |
+| `mark_read()` | 标记已读 |
+| `close()` | 清理 handler |
 
-当前工程里，插件最稳定的命令接入方式是类属性 `commands`：
+### 超时处理
 
 ```python
-class MyPlugin(Plugin):
-    key = "my_plugin"
-    display_name = "我的插件"
-    commands = {
-        "hello": hello_handler,
+from app.worker.conversation import ConversationTimeout
+
+try:
+    resp = await conv.get_response(timeout=10)
+except ConversationTimeout:
+    await conv.send("超时了，请重试")
+```
+
+---
+
+## 9. 远程插件
+
+### 安装方式
+
+**通过 Web UI：**
+1. 进入远程插件页面
+2. 输入 GitHub 仓库地址或子目录 URL
+3. 点击安装
+
+**通过 Bot 命令：**
+```
+/plugin install https://github.com/user/repo
+/plugin list
+/plugin enable weather
+/plugin disable weather
+/plugin remove weather
+```
+
+### 远程插件规范
+
+远程仓库必须包含 `manifest.json`：
+
+```json
+{
+  "name": "weather",
+  "display_name": "天气查询",
+  "description": "查询天气信息",
+  "author": "community",
+  "version": "1.0.0",
+  "entry": "weather.py",
+  "min_telebot_version": "0.9.0",
+  "commands": ["weather", "w"],
+  "cleanup_mode": "no-op",
+  "tags": ["weather", "utility"]
+}
+```
+
+**必填字段：** name, display_name, description, author, version, entry
+
+### 安装流程
+
+```
+1. git clone 到 plugins/installed/{name}/
+2. 读取 manifest.json → validate_manifest() 验证
+3. 验证通过 → 注册到数据库
+4. 调用 reload_plugin() 热加载
+5. 验证失败 → 删除目录，返回错误
+```
+
+### Registry 机制
+
+支持从远程 registry 同步可用插件列表：
+
+```json
+{
+  "plugins": [
+    {
+      "name": "weather",
+      "display_name": "天气查询",
+      "source_url": "https://github.com/user/repo",
+      "version": "1.0.0"
     }
+  ]
+}
 ```
 
-handler 签名：
+---
+
+## 10. 清理生命周期（cleanup）
+
+参考 TeleBox 的三种风格：
+
+| 风格 | 适用场景 | cleanup 行为 |
+|------|---------|-------------|
+| `resource` | 持有定时器/子进程/网络连接 | 真正释放资源 |
+| `reset` | 持有 db/缓存/配置引用 | 引用置空 |
+| `no-op` | 流程型插件，无长期资源 | 空方法 + 注释说明 |
+
+### 统一约束
+
+- **必须幂等**：重复调用不报错
+- **不应依赖用户输入**
+- **不应误伤系统级资源**：systemd 服务、iptables 等不要在 reload 时停掉
+
+### 实现
 
 ```python
-async def hello_handler(client, event, args, account_id, ctx):
-    ...
+class MyPlugin(Plugin):
+    _timer = None
+    _db = None
+
+    async def on_startup(self, ctx):
+        self._timer = create_timer(...)
+        self._db = get_db()
+
+    async def on_shutdown(self, ctx):
+        """resource 风格：释放资源"""
+        if self._timer:
+            self._timer.cancel()
+            self._timer = None
+        if self._db:
+            self._db = None
 ```
 
-命令分发器会把它注册成 `,hello`（前缀可配置，默认是 `,`）。
+---
 
-### 3.3 `on_message` 与 `commands` 的选择
+## 11. 安全边界
 
-- 你要处理被动 incoming 消息：用 `on_message`（默认）
-- 你要同时监听自己发的和别人的消息：设 `message_channels = {"incoming", "outgoing"}`，在 `on_message` 内用 `event.outgoing` 分流
-- 你要处理主动发出的命令（`,xxx`）：用 `commands`
-- 以上可组合使用
+### 命令前缀
+
+- 所有命令必须有明确前缀（如 `,` 或自定义）
+- 前缀由 `ctx.config` 中的 `prefix` 控制
+
+### 权限声明
+
+Manifest 中的 `permissions` 字段声明插件需要的能力：
+
+| 权限 | 说明 |
+|------|------|
+| `send_message` | 发送消息 |
+| `edit_message` | 编辑消息 |
+| `read_chat` | 读取聊天历史 |
+
+默认给三类常用能力，内置插件漏写时不会被沙箱拦截。
+
+### 禁止行为
+
+- 不允许 `os.system` / `subprocess` 执行系统命令（除非显式声明）
+- 不允许把明文 key 写入日志
+- 不允许持久化完整隐私消息到外部系统
+- 对外部请求必须做超时和异常处理
 
 ---
 
-## 4. 风控 / 限流接入
+## 12. 前端集成
 
-插件主动发送消息前，建议调用风控引擎：
+### 新建插件页面
 
-```python
-decision = await ctx.engine.acquire(ctx.account_id, "send_message_group", peer_id=event.chat_id)
-if not decision.allowed:
-    return
-if decision.wait_seconds and decision.wait_seconds > 0:
-    await asyncio.sleep(float(decision.wait_seconds))
-```
+1. 创建 `frontend/src/pages/RemotePlugins/index.tsx`
+2. 创建 `frontend/src/api/remotePlugin.ts`
+3. 创建 `frontend/src/types/remotePlugin.ts`
+4. 在路由配置中添加 `/remote-plugins`
 
-建议：
-- 对每个会触发外发的路径都做 acquire
-- floodwait 异常单独处理，避免把整个插件打挂
-- 用 `ctx.log` 写可追踪日志，避免裸 `print`
+### 风格要求
+
+- 深色主题卡片布局
+- 与 TeleBot 现有页面风格一致
+- React + TypeScript + TailwindCSS
 
 ---
 
-## 5. Telethon API 速查（常用）
+## 13. 调试建议
 
-消息对象：
-- `event.raw_text`
-- `event.chat_id`
-- `event.sender_id`
-- `event.message`
+### 快速自检
 
-回复/发送：
-- `await event.reply(text)`
-- `await event.respond(text)`
-- `await event.edit(text)`
-- `await ctx.client.send_message(peer, text)`
+- [ ] `__init__.py` 是否导出 `PLUGIN_CLASS` 和 `MANIFEST`
+- [ ] `MANIFEST.key` 是否和插件 class key 一致
+- [ ] `permissions` 是否覆盖实际调用的方法
+- [ ] `on_command` 签名是否是 5 参数
+- [ ] 错误是否都被捕获并反馈给用户
 
-读取上下文：
-- `await event.get_reply_message()`
-- `await event.get_chat()`
-- `async for msg in client.iter_messages(peer, limit=N): ...`
+### 常见问题
 
-文件与媒体：
-- `await client.send_file(peer, file=...)`
-
-异常常见：
-- `telethon.errors.FloodWaitError`
+| 现象 | 原因 | 解决 |
+|------|------|------|
+| 插件被跳过 | MANIFEST 类型不对或导出缺失 | 检查 `__init__.py` |
+| 命令没反应 | feature 未启用或前缀不匹配 | 检查 rule 配置和前缀 |
+| 热重载后旧 handler 还在触发 | generation guard 未生效 | 检查 loader.py 版本 |
+| 远程插件安装失败 | manifest.json 缺必填字段 | 检查 name/description/entry |
+| cleanup 后插件状态异常 | cleanup 未幂等 | 重复调用测试 |
 
 ---
 
-## 6. 安装与启用
-
-### 6.1 内置插件（维护者路径）
-
-内置目录：
-- `backend/app/worker/plugins/builtin/<key>/`
-
-注意：并行开发时请避免多人同时改同一个 builtin。
-
-### 6.2 第三方插件（推荐）
-
-放到：
-- `data/plugins/installed/<key>/`
-
-示例：
-
-```bash
-cd /path/to/telebot/data/plugins/installed
-git clone https://github.com/somebody/my-telebot-plugin.git
-```
-
-重启 worker 或触发 reload 后，loader 会扫描并加载。
-
-### 6.3 卸载
-
-```bash
-rm -rf /path/to/telebot/data/plugins/installed/<key>
-```
-
-然后重启 worker 或 reload。
-
-### 6.4 启用/禁用
-
-插件目录可被扫描到，不代表账号一定启用。实际是否生效取决于对应账号 feature 开关。
-
----
-
-## 7. 沙箱权限声明
-
-installed 插件默认拿到的是 `SandboxClient` 而不是真实 `TelegramClient`。
-
-这意味着：
-- 你需要在 manifest 显式声明能力
-- 不声明的 client 方法不可调用
-- 权限不足时会抛 `PermissionError`
-
-建议实践：
-- 最小权限原则，只申请你真正要用的能力
-- 在 README 写明本插件依赖权限
-- 错误提示要清晰，方便使用者排查
-
----
-
-## 9. 完整样例：translate
-
-参考样例目录：
-- `examples/plugins/translate/`
-
-它演示了：
-- 如何声明 `PLUGIN_CLASS` + `MANIFEST`
-- 如何注册 `,fy` 命令
-- 如何读取被回复消息
-- 如何复用现有 `LLMProvider` / `build_client` 做翻译
-- 如何在失败时返回可读错误
-
-建议你从复制这个样例开始，改成自己的能力插件。
-
----
-
-## 10. 前端配置页规范
-
-插件的前端配置页（`frontend/src/pages/Features/` 下）需要注意以下规范：
-
-### 10.1 命令前缀必须动态获取
-
-如果配置页中需要展示命令示例（如 `{前缀}{指令名} 参数`），**禁止写死前缀字符**（如 `,`、`/`）。必须通过 `getSystemSettings` API 实时读取 `command_prefix`，保证与系统设置始终一致。
-
-```tsx
-import { getSystemSettings } from "@/api/system";
-
-// 在组件内
-const settingsQ = useQuery({
-  queryKey: ["system", "settings"],
-  queryFn: getSystemSettings,
-});
-const cmdPrefix = settingsQ.data?.command_prefix || ",";
-
-// 展示时
-<code>{cmdPrefix}{command} 参数</code>
-```
-
-### 10.2 其他注意事项
-
-- 配置说明、使用说明中所有涉及命令前缀的地方都要用 `cmdPrefix` 变量拼接
-- 如果用户修改了自定义指令名（如 `command` 配置项），示例中的指令名也要同步使用当前输入值
-- 参考 `CommandTemplates.tsx` 和 `Game24Config.tsx` 的实现方式
-
----
-
-## 11. 调试建议
-
-快速自检清单：
-- `__init__.py` 是否导出 `PLUGIN_CLASS` 和 `MANIFEST`
-- `MANIFEST.key` 是否和插件 class key 一致
-- `permissions` 是否覆盖实际调用的方法
-- 命令 handler 签名是否是 5 参数
-- 错误是否都被捕获并反馈给用户
-
-常见问题：
-- 插件被跳过：通常是 `MANIFEST` 类型不对或导出缺失
-- 命令没反应：通常是 feature 未启用或命令前缀不匹配
-- 调 LLM 失败：provider 不存在、没 key、模型名不对
-
----
-
-## 12. 版本与兼容建议
-
-建议语义化版本：
-- `0.x`：开发阶段，允许快速迭代
-- `1.x`：接口稳定后
-
-兼容性建议：
-- 不要依赖私有内部模块路径
-- 尽量只依赖 `Plugin` / `Manifest` / `PluginContext` 公开契约
-- 新增行为优先通过 `config` 可选项实现，减少破坏性变更
-
----
-
-## 13. 安全与合规建议
+## 14. 安全与合规
 
 - 不要把明文 key 写入日志
 - 不要把完整隐私消息持久化到外部系统
@@ -384,48 +495,88 @@ const cmdPrefix = settingsQ.data?.command_prefix || ",";
 
 ---
 
-## 14. 最小可运行模板
+## 15. 完整示例
 
-```python
-# plugin.py
-from __future__ import annotations
-
-from app.worker.plugins.base import Plugin, register
-
-
-async def ping_handler(client, event, args, account_id, ctx):
-    await event.edit("pong")
-
-
-@register
-class DemoPlugin(Plugin):
-    key = "demo"
-    display_name = "Demo"
-    commands = {"ping": ping_handler}
-```
+### 天气查询插件
 
 ```python
 # manifest.py
 from app.worker.plugins.manifest import Manifest
 
 MANIFEST = Manifest(
-    key="demo",
-    display_name="Demo",
-    version="0.1.0",
-    author="example",
-    description="最小示例",
-    permissions=["edit_message"],
+    key="weather",
+    display_name="天气查询",
+    version="1.0.0",
+    author="community",
+    description="查询天气信息，支持城市名",
+    permissions=["send_message"],
+    config_schema={
+        "type": "object",
+        "properties": {
+            "api_key": {"type": "string", "description": "可选的 API Key"},
+        },
+    },
 )
+```
+
+```python
+# plugin.py
+import httpx
+from app.worker.plugins.base import Plugin, register
+
+@register
+class WeatherPlugin(Plugin):
+    key = "weather"
+    display_name = "天气查询"
+    message_channels = ["group", "private"]
+
+    async def on_command(self, ctx, cmd, args, event) -> bool:
+        if cmd not in ("weather", "w"):
+            return False
+
+        city = " ".join(args) if args else "Beijing"
+        try:
+            async with httpx.AsyncClient() as client:
+                geo = await client.get(
+                    f"https://geocoding-api.open-meteo.com/v1/search?name={city}&count=1"
+                )
+                if not geo.json().get("results"):
+                    await event.edit(f"未找到: {city}")
+                    return True
+                lat = geo.json()["results"][0]["latitude"]
+                lon = geo.json()["results"][0]["longitude"]
+
+                weather = await client.get(
+                    f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&current_weather=true"
+                )
+                data = weather.json()["current_weather"]
+                temp = data["temperature"]
+                wmo = data["weathercode"]
+
+                await event.edit(f"🌤 {city}: {temp}°C (代码: {wmo})")
+        except Exception as e:
+            await event.edit(f"天气查询失败: {e}")
+
+        return True
 ```
 
 ```python
 # __init__.py
 from .manifest import MANIFEST
-from .plugin import DemoPlugin
+from .plugin import WeatherPlugin
 
-PLUGIN_CLASS = DemoPlugin
+PLUGIN_CLASS = WeatherPlugin
+MANIFEST_OBJ = MANIFEST
 
-__all__ = ["PLUGIN_CLASS", "MANIFEST"]
+__all__ = ["PLUGIN_CLASS", "MANIFEST_OBJ"]
 ```
 
-把目录放进 `data/plugins/installed/demo/` 后重启 worker，即可用 `,ping`。
+---
+
+## 版本与兼容
+
+- `0.x`：开发阶段，允许快速迭代
+- `1.x`：接口稳定后
+- 不要依赖私有内部模块路径
+- 尽量只依赖 `Plugin` / `Manifest` / `PluginContext` 公开契约
+- 新增行为优先通过 `config` 可选项实现
