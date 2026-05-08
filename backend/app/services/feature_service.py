@@ -52,8 +52,20 @@ async def seed_builtin_features(db: AsyncSession) -> int:
     existing: dict[str, Feature] = {f.key: f for f in rows}
     added = 0
     for key, name in BUILTIN_FEATURES.items():
+        # 尝试从 manifest 读取 config_schema 和 version
+        cfg_schema = None
+        ver = None
+        try:
+            import importlib
+            mod = importlib.import_module(f"app.worker.plugins.builtin.{key}.manifest")
+            m = getattr(mod, "MANIFEST", None)
+            if m is not None:
+                cfg_schema = getattr(m, "config_schema", None)
+                ver = getattr(m, "version", None)
+        except Exception:  # noqa: BLE001
+            pass
+
         if key in existing:
-            # 修正 display_name / is_builtin 标记（防御性同步）
             f = existing[key]
             changed = False
             if f.display_name != name:
@@ -62,10 +74,20 @@ async def seed_builtin_features(db: AsyncSession) -> int:
             if not f.is_builtin:
                 f.is_builtin = True
                 changed = True
+            if ver and f.version != ver:
+                f.version = ver
+                changed = True
+            if cfg_schema:
+                manifest = f.manifest or {}
+                if manifest.get("config_schema") != cfg_schema:
+                    manifest["config_schema"] = cfg_schema
+                    f.manifest = manifest
+                    changed = True
             if changed:
                 await db.flush()
             continue
-        db.add(Feature(key=key, display_name=name, is_builtin=True))
+        manifest_data = {"config_schema": cfg_schema} if cfg_schema else None
+        db.add(Feature(key=key, display_name=name, is_builtin=True, version=ver, manifest=manifest_data))
         added += 1
     if added:
         await db.commit()
@@ -202,6 +224,7 @@ async def feature_matrix(db: AsyncSession) -> dict[str, Any]:
                 "display_name": f.display_name,
                 "is_builtin": f.is_builtin,
                 "version": f.version,
+                "config_schema": (f.manifest or {}).get("config_schema"),
             }
             for f in features
         ],

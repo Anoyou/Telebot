@@ -146,6 +146,7 @@ export interface FeatureInfo {
   display_name: string;
   is_builtin: boolean;
   version?: string | null;
+  config_schema?: Record<string, unknown> | null;
 }
 export interface AccountFeatureItem {
   feature_key: string;

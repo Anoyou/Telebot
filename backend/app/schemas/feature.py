@@ -12,8 +12,20 @@ class FeatureInfo(BaseModel):
     display_name: str
     is_builtin: bool
     version: str | None = None
+    config_schema: dict[str, Any] | None = None
 
     model_config = ConfigDict(from_attributes=True)
+
+    @classmethod
+    def from_feature(cls, f: "Feature") -> "FeatureInfo":
+        manifest = getattr(f, "manifest", None) or {}
+        return cls(
+            key=f.key,
+            display_name=f.display_name,
+            is_builtin=f.is_builtin,
+            version=f.version,
+            config_schema=manifest.get("config_schema"),
+        )
 
 
 class AccountFeatureToggle(BaseModel):

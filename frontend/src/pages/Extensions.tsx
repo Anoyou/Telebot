@@ -50,6 +50,7 @@ import { Spinner } from "@/components/ui/misc";
 import { cn } from "@/lib/utils";
 import { getErrMsg } from "@/lib/api";
 import { formatDateTime } from "@/lib/utils";
+import { ConfigDialog } from "@/components/plugin/ConfigDialog";
 
 import { getFeatureMatrix } from "@/api/features";
 import { toggleAccountFeature } from "@/api/accounts";
@@ -127,6 +128,7 @@ function AccountPluginsTab() {
   });
 
   const [selectedAid, setSelectedAid] = useState<number | null>(null);
+  const [configDialog, setConfigDialog] = useState<{ key: string; name: string; schema: Record<string, unknown> | null } | null>(null);
 
   // 自动选第一个账号
   if (data && data.accounts.length > 0 && selectedAid === null) {
@@ -147,6 +149,7 @@ function AccountPluginsTab() {
   const features = data?.features ?? [];
 
   return (
+    <>
     <Card>
       <CardHeader>
         <CardTitle className="text-base">账号插件管理</CardTitle>
@@ -238,13 +241,11 @@ function AccountPluginsTab() {
                         <TableCell className="text-right">
                           <Button
                             size="sm"
-                            variant="ghost"
-                            className="text-xs"
-                            onClick={() =>
-                              nav(`/accounts/${selectedAccount.id}/features/${f.key}`)
-                            }
+                            variant="outline"
+                            className="h-9 px-3"
+                            onClick={() => setConfigDialog({ key: f.key, name: f.display_name, schema: (f.config_schema as Record<string, unknown>) ?? null })}
                           >
-                            配置
+                            配置 →
                           </Button>
                         </TableCell>
                       </TableRow>
@@ -257,6 +258,18 @@ function AccountPluginsTab() {
         )}
       </CardContent>
     </Card>
+
+    {/* 配置弹窗 */}
+    <ConfigDialog
+      open={!!configDialog}
+      onOpenChange={(v) => !v && setConfigDialog(null)}
+      pluginKey={configDialog?.key ?? ""}
+      pluginName={configDialog?.name ?? ""}
+      schema={configDialog?.schema ?? null}
+      accountName={selectedAccount?.name}
+      onSave={async () => { toast.success("配置已保存（功能开发中）"); }}
+    />
+    </>
   );
 }
 

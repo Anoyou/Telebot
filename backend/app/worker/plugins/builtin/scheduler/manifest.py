@@ -12,6 +12,18 @@ MANIFEST = Manifest(
     author="builtin",
     description="cron / once / interval 定时触发动作（send_message / run_command / call_llm）",
     permissions=["send_message", "send_file"],
+    config_schema={
+        "type": "object",
+        "properties": {
+            "default_notify": {
+                "type": "boolean", "title": "执行后通知", "default": True,
+            },
+            "max_tasks": {
+                "type": "integer", "title": "最大任务数", "default": 20,
+                "minimum": 1, "maximum": 100,
+            },
+        },
+    },
 )
 
 __all__ = ["MANIFEST"]

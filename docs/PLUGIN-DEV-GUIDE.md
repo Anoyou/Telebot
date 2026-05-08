@@ -187,20 +187,80 @@ class PluginContext:
 
 ## 5. Manifest 元数据
 
+### 必填字段
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `key` | str | 唯一标识，与 Plugin.key 一致 |
+| `display_name` | str | 显示名称 |
+| `version` | str | 语义化版本（如 `1.0.0`） |
+| `author` | str | 作者 |
+| `description` | str | 功能描述，用于帮助系统 |
+
+### 可选字段
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `permissions` | list | 权限声明，默认 `["send_message", "edit_message", "read_chat"]` |
+| `config_schema` | dict | JSON Schema，有配置的插件必须写 |
+| `requires_features` | list | 依赖的其他插件 key |
+
+### 完整示例
+
 ```python
 from app.worker.plugins.manifest import Manifest
 
 MANIFEST = Manifest(
-    key="my_plugin",              # 必填：与 Plugin.key 一致
-    display_name="我的插件",      # 必填
-    version="0.1.0",              # 语义化版本
+    key="my_plugin",
+    display_name="我的插件",
+    version="1.0.0",
     author="your_name",
-    description="插件功能描述",    # 必填：用于帮助系统
+    description="插件功能描述",
     permissions=["send_message", "edit_message", "read_chat"],
-    config_schema=None,           # 可选：JSON Schema
-    requires_features=[],         # 可选：依赖的其他插件
+    config_schema={
+        "type": "object",
+        "properties": {
+            "api_key": {
+                "type": "string",
+                "title": "API Key",
+                "level": "global",
+            },
+            "target_chat": {
+                "type": "string",
+                "title": "目标聊天 ID",
+                "level": "account",
+            },
+        },
+    },
+    requires_features=[],
 )
 ```
+
+### config_schema 配置规范
+
+`config_schema` 遵循 JSON Schema 规范，额外支持 `level` 字段控制配置的作用域：
+
+| level | 作用域 | 存储位置 | 说明 |
+|-------|--------|---------|------|
+| `global` | 全局（所有账号共享） | plugin_config | API Key、通用参数等 |
+| `account` | 单个账号 | rule.config | 聊天 ID、行为开关等 |
+| （不填） | 默认 account | rule.config | 向后兼容 |
+
+**优先级：** 账号级配置 > 插件全局配置 > config_schema 中的 default
+
+**前端渲染：** 有 config_schema 的插件，点击"配置"按钮会弹出 Dialog 表单：
+- `level: global` 的字段 → 全局配置区（所有账号共享）
+- `level: account` 的字段 → 账号配置区（按账号隔离）
+- 无 level 的字段 → 默认按账号隔离
+
+**必填字段验证清单（内置插件）：**
+
+| 插件 | config_schema | 状态 |
+|------|--------------|------|
+| forward | ✅ target_chat_id, mode | 已有 |
+| game24 | ✅ time_limit, prize, max_players | 已补 |
+| scheduler | ✅ default_notify, max_tasks | 已补 |
+| translate | ✅ default_lang, llm_provider | 已补 |
 
 ### Manifest 验证
 

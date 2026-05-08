@@ -208,7 +208,7 @@ export function SchedulerConfig() {
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-3">
-        <Button variant="ghost" size="sm" onClick={() => nav(`/accounts/${aid}`)}>
+        <Button variant="ghost" size="sm" onClick={() => nav(`/accounts/${aid}?tab=features`)}>
           <ArrowLeft className="mr-1 h-4 w-4" /> 返回账号
         </Button>
         <h1 className="text-2xl font-semibold tracking-tight">定时任务配置 · #{aid}</h1>

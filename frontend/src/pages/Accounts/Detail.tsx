@@ -1,6 +1,6 @@
-// 账号详情：3 个 Tab —— 概览 / 功能开关 / 风控
+// 账号详情：3 个 Tab —— 概览 / 插件启停 / 风控
 import { useEffect, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Activity,
@@ -17,6 +17,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
+import { ConfigDialog } from "@/components/plugin/ConfigDialog";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -73,6 +74,7 @@ import { actionHint, actionLabel } from "@/lib/rate-actions";
 
 export function AccountDetail() {
   const params = useParams();
+  const [searchParams] = useSearchParams();
   const aid = Number(params.aid);
   const nav = useNavigate();
   const qc = useQueryClient();
@@ -208,13 +210,13 @@ export function AccountDetail() {
         <AccountStatusBadge status={acc.status} />
       </div>
 
-      <Tabs defaultValue="overview">
+      <Tabs defaultValue={searchParams.get("tab") || "overview"}>
         <TabsList>
           <TabsTrigger value="overview" className="gap-1.5">
             <LayoutDashboard className="h-4 w-4" /> 概览
           </TabsTrigger>
           <TabsTrigger value="features" className="gap-1.5">
-            <Bot className="h-4 w-4" /> 功能开关
+            <Bot className="h-4 w-4" /> 插件启停
           </TabsTrigger>
           <TabsTrigger value="commands" className="gap-1.5">
             <Shield className="h-4 w-4" /> 命令
@@ -333,11 +335,11 @@ export function AccountDetail() {
           </Card>
         </TabsContent>
 
-        {/* 功能开关 */}
+        {/* 插件启停 */}
         <TabsContent value="features">
           <Card>
             <CardHeader>
-              <CardTitle className="text-base">功能开关</CardTitle>
+              <CardTitle className="text-base">插件启停</CardTitle>
               <CardDescription>
                 每个功能可独立启停。开启后跳到对应配置页配置规则
               </CardDescription>
@@ -379,9 +381,7 @@ export function AccountDetail() {
                             <Button
                               size="sm"
                               variant="outline"
-                              onClick={() =>
-                                nav(`/accounts/${aid}/features/${f.key}`)
-                              }
+                              onClick={() => setConfigDialog({ key: f.key, name: f.display_name, schema: (f.config_schema as Record<string, unknown>) ?? null })}
                             >
                               配置 →
                             </Button>
@@ -394,6 +394,16 @@ export function AccountDetail() {
               )}
             </CardContent>
           </Card>
+
+          <ConfigDialog
+            open={!!configDialog}
+            onOpenChange={(v) => !v && setConfigDialog(null)}
+            pluginKey={configDialog?.key ?? ""}
+            pluginName={configDialog?.name ?? ""}
+            schema={configDialog?.schema ?? null}
+            accountName={acc.display_name || acc.phone}
+            onSave={async () => { toast.success("配置已保存"); }}
+          />
         </TabsContent>
 
         {/* 自定义命令（账号 × 模板 启用关系） */}

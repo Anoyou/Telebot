@@ -91,7 +91,7 @@ export async function cloneConfig(
   });
 }
 
-// ===================== 功能开关 =====================
+// ===================== 插件启停 =====================
 export async function listAccountFeatures(
   aid: number,
 ): Promise<AccountFeatureItem[]> {
