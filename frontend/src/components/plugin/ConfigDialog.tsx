@@ -41,7 +41,7 @@ interface ConfigDialogProps {
   onOpenChange: (open: boolean) => void;
   pluginKey: string;
   pluginName: string;
-  schema: ConfigSchema | null;
+  schema: ConfigSchema | Record<string, unknown> | null;
   accountName?: string;
   globalConfig?: Record<string, unknown>;
   accountConfig?: Record<string, unknown>;
@@ -70,7 +70,8 @@ export function ConfigDialog({
     }
   }, [open, schema]);
 
-  if (!schema?.properties || Object.keys(schema.properties).length === 0) {
+  const s = schema as ConfigSchema | null;
+  if (!s?.properties || Object.keys(s.properties).length === 0) {
     return (
       <Dialog open={open} onOpenChange={onOpenChange}>
         <DialogContent>
@@ -84,8 +85,8 @@ export function ConfigDialog({
     );
   }
 
-  const globalFields = Object.entries(schema.properties).filter(([, f]) => f.level === "global");
-  const accountFields = Object.entries(schema.properties).filter(([, f]) => f.level !== "global");
+  const globalFields = Object.entries(s.properties).filter(([, f]) => f.level === "global");
+  const accountFields = Object.entries(s.properties).filter(([, f]) => f.level !== "global");
 
   const handleSave = async () => {
     if (!onSave) return;

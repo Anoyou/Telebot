@@ -85,6 +85,8 @@ export function AccountDetail() {
     enabled: !!aid,
   });
 
+  const [configDialog, setConfigDialog] = useState<{ key: string; name: string; schema: Record<string, unknown> | null } | null>(null);
+
   const featuresQ = useQuery({
     queryKey: ["account", aid, "features"],
     queryFn: () => listAccountFeatures(aid),
