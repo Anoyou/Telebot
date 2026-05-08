@@ -8,6 +8,7 @@ from .log import AuditLog, RuntimeLog
 from .notify import NotifyBot
 from .plugin import PluginInstall
 from .rate_limit import RateLimitEvent, RateLimitOverride, RateLimitRule, RateLimitTemplate
+from .remote_plugin import RemotePlugin
 from .rule import Rule
 from .system import NotificationChannel, SystemSetting
 from .user import WebUser
@@ -30,6 +31,7 @@ __all__ = [
     "RateLimitOverride",
     "RateLimitRule",
     "RateLimitTemplate",
+    "RemotePlugin",
     "Rule",
     "RuntimeLog",
     "SystemSetting",
