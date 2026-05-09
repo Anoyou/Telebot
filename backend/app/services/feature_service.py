@@ -36,7 +36,7 @@ from ..db.models.feature import (
 )
 from ..redis_client import get_redis
 from ..schemas.feature import ConfigValidationError, ConfigValidationResponse
-from ..worker.ipc import CMD_RELOAD_CONFIG, cmd_channel, make_cmd
+from ..worker.ipc import CMD_RELOAD_CONFIG, publish_cmd_with_ack
 
 log = logging.getLogger(__name__)
 
@@ -264,7 +264,9 @@ async def _notify_reload(account_id: int) -> None:
     """对指定 worker 发 ``CMD_RELOAD_CONFIG``；redis 不可用时静默。"""
     try:
         redis = get_redis()
-        await redis.publish(cmd_channel(account_id), make_cmd(CMD_RELOAD_CONFIG))
+        ok = await publish_cmd_with_ack(redis, account_id, CMD_RELOAD_CONFIG)
+        if not ok:
+            log.debug("worker reload_config 未确认 account=%s，将由周期 reconcile 收敛", account_id)
     except Exception:  # noqa: BLE001
         log.debug("通知 worker reload 失败 account=%s", account_id, exc_info=True)
 

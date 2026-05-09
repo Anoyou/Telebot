@@ -593,17 +593,37 @@ async def get_system_settings(db: DBSession, _user: CurrentUser) -> dict[str, An
         prefix = str(prefix_val)
     kill_val = await _get_setting(db, "kill_switch", {"enabled": False})
     qps_val = await _get_setting(db, "global_api_qps", {"api_qps_total": 0})
+    tz_val = await _get_setting(db, "timezone", {"value": ""})
+    llm_val = await _get_setting(db, "llm_limits", {})
+    tz = str(tz_val.get("value", "")) if isinstance(tz_val, dict) else str(tz_val)
+    llm_limits = llm_val if isinstance(llm_val, dict) else {}
     return {
         "command_prefix": prefix,
         "kill_switch": bool(kill_val.get("enabled", False)) if isinstance(kill_val, dict) else bool(kill_val),
         "api_qps_total": int(qps_val.get("api_qps_total", 0)) if isinstance(qps_val, dict) else int(qps_val),
+        "timezone": tz or "",
+        "llm_limits": {
+            "per_minute": max(0, int(llm_limits.get("per_minute", 0) or 0)),
+            "daily_requests": max(0, int(llm_limits.get("daily_requests", 0) or 0)),
+            "daily_tokens": max(0, int(llm_limits.get("daily_tokens", 0) or 0)),
+            "premium_daily": max(0, int(llm_limits.get("premium_daily", 0) or 0)),
+        },
     }
+
+
+class _LLMLimitsPatch(BaseModel):
+    per_minute: int | None = None
+    daily_requests: int | None = None
+    daily_tokens: int | None = None
+    premium_daily: int | None = None
 
 
 class _SettingsPatch(BaseModel):
     """前端只会传子集；未传字段保持不变。"""
 
     command_prefix: str | None = None
+    timezone: str | None = None
+    llm_limits: _LLMLimitsPatch | None = None
 
 
 @router.patch("/api/system/settings")
@@ -620,6 +640,31 @@ async def patch_system_settings(
         await _audit(db, user.id, "set_command_prefix", target="system", detail={"value": prefix})
         # 让所有 worker 热加载新前缀
         await _broadcast_reload()
+    if payload.timezone is not None:
+        tz = payload.timezone.strip()
+        # 校验：空字符串（使用浏览器时区）或合法 IANA 时区
+        if tz and tz not in __import__("zoneinfo").available_timezones():  # noqa: PLC0415
+            raise _bad("invalid_timezone", f"无效时区：{tz}")
+        await _set_setting(db, "timezone", {"value": tz})
+    if payload.llm_limits is not None:
+        current = await _get_setting(db, "llm_limits", {})
+        if not isinstance(current, dict):
+            current = {}
+        data = payload.llm_limits.model_dump(exclude_unset=True)
+        next_limits = {
+            "per_minute": max(0, int(current.get("per_minute", 0) or 0)),
+            "daily_requests": max(0, int(current.get("daily_requests", 0) or 0)),
+            "daily_tokens": max(0, int(current.get("daily_tokens", 0) or 0)),
+            "premium_daily": max(0, int(current.get("premium_daily", 0) or 0)),
+        }
+        for key, value in data.items():
+            if value is None:
+                continue
+            if value < 0:
+                raise _bad("invalid_llm_limit", "LLM 限额不能为负数")
+            next_limits[key] = int(value)
+        await _set_setting(db, "llm_limits", next_limits)
+        await _audit(db, user.id, "set_llm_limits", target="system", detail=next_limits)
     return await get_system_settings(db, user)
 
 

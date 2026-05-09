@@ -294,6 +294,7 @@ async def test_dispatch_skips_ignored_peer(monkeypatch) -> None:
     class _SpyPlugin(Plugin):
         key = "_test_ignored_spy_1"
         display_name = "测试占位"
+        owner_only = False
         on_message_calls = 0
 
         async def on_startup(self, ctx: PluginContext) -> None:
@@ -357,6 +358,7 @@ async def test_dispatch_passes_through_when_not_ignored(monkeypatch) -> None:
     class _SpyPlugin(Plugin):
         key = "_test_ignored_spy_2"
         display_name = "测试占位"
+        owner_only = False
         on_message_calls = 0
 
         async def on_startup(self, ctx: PluginContext) -> None:

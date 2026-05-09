@@ -1,18 +1,20 @@
 import { useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Pencil, Play, Plus, Trash2 } from "lucide-react";
+import { ArrowLeft, Pencil, Play, Plus, Trash2, Zap } from "lucide-react";
 import { toast } from "sonner";
 
 import { listAccountFeatures, toggleAccountFeature } from "@/api/accounts";
+import { getSystemSettings } from "@/api/system";
 import {
   createRule,
   deleteRule,
   dryRunRule,
+  executeRule,
   listRules,
   updateRule,
 } from "@/api/features";
-import type { RuleOut, SchedulerRuleConfig } from "@/api/types";
+import type { RuleDryRunResponse, RuleExecuteResponse, RuleOut, SchedulerRuleConfig } from "@/api/types";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -45,6 +47,8 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { getErrMsg } from "@/lib/api";
+import { formatDateTime } from "@/lib/utils";
+import { DryRunDetail } from "@/components/DryRunDetail";
 
 function defaultConfig(): SchedulerRuleConfig {
   return {
@@ -62,6 +66,7 @@ function defaultConfig(): SchedulerRuleConfig {
       prompt: "今天要做什么？",
       system_prompt: "你是简洁有用的中文助手。",
       max_tokens: 256,
+      delete_after: null,
     },
     next_fire: null,
   };
@@ -87,6 +92,12 @@ export function SchedulerConfig() {
   const aid = Number(params.aid);
   const nav = useNavigate();
   const qc = useQueryClient();
+
+  const tzQ = useQuery({
+    queryKey: ["system", "settings"],
+    queryFn: getSystemSettings,
+  });
+  const tz = tzQ.data?.timezone || "";
 
   const featuresQ = useQuery({
     queryKey: ["account", aid, "features"],
@@ -162,6 +173,9 @@ export function SchedulerConfig() {
         if (!cfg.action.provider_id) throw new Error("call_llm 的 provider_id 必填");
         if (!(cfg.action.prompt || "").trim()) throw new Error("call_llm 的 prompt 必填");
       }
+      if (cfg.action.delete_after != null && cfg.action.delete_after > 3600) {
+        throw new Error("delete_after 上限为 3600 秒");
+      }
 
       if (!editing) await createRule(aid, "scheduler", payload);
       else await updateRule(aid, "scheduler", editing.id, payload);
@@ -185,7 +199,7 @@ export function SchedulerConfig() {
 
   const [dryOpen, setDryOpen] = useState(false);
   const [dryRule, setDryRule] = useState<RuleOut | null>(null);
-  const [dryResult, setDryResult] = useState<{ matched: boolean; output?: string | null } | null>(null);
+  const [dryResult, setDryResult] = useState<RuleDryRunResponse | null>(null);
 
   function openDryRun(rule: RuleOut) {
     setDryRule(rule);
@@ -200,6 +214,27 @@ export function SchedulerConfig() {
         sample_chat_type: "private",
       }),
     onSuccess: (res) => setDryResult(res),
+    onError: (err) => toast.error(getErrMsg(err)),
+  });
+
+  const [execOpen, setExecOpen] = useState(false);
+  const [execRule, setExecRule] = useState<RuleOut | null>(null);
+  const [execResult, setExecResult] = useState<RuleExecuteResponse | null>(null);
+
+  function openExec(rule: RuleOut) {
+    setExecRule(rule);
+    setExecResult(null);
+    setExecOpen(true);
+  }
+
+  const execMut = useMutation({
+    mutationFn: () => executeRule(aid, "scheduler", execRule!.id),
+    onSuccess: (res) => {
+      setExecResult(res);
+      if (res.ok) {
+        qc.invalidateQueries({ queryKey: ["account", aid, "rules", "scheduler"] });
+      }
+    },
     onError: (err) => toast.error(getErrMsg(err)),
   });
 
@@ -231,7 +266,7 @@ export function SchedulerConfig() {
           <div className="flex items-center justify-between">
             <div>
               <CardTitle className="text-base">规则</CardTitle>
-              <CardDescription>支持 cron / once / interval，触发动作 send_message / run_command / call_llm</CardDescription>
+              <CardDescription>支持 cron 定时 / once 单次 / interval 间隔，触发动作：发送消息 / 执行命令 / 调用 LLM</CardDescription>
             </div>
             <Button onClick={openCreate}><Plus className="mr-1 h-4 w-4" /> 新建规则</Button>
           </div>
@@ -249,6 +284,8 @@ export function SchedulerConfig() {
                   <TableHead>触发</TableHead>
                   <TableHead>动作</TableHead>
                   <TableHead>下次触发</TableHead>
+                  <TableHead>上次触发</TableHead>
+                  <TableHead>状态</TableHead>
                   <TableHead className="text-right">操作</TableHead>
                 </TableRow>
               </TableHeader>
@@ -261,12 +298,37 @@ export function SchedulerConfig() {
                       <TableCell><Badge variant={r.enabled ? "success" : "secondary"}>{r.enabled ? "ON" : "OFF"}</Badge></TableCell>
                       <TableCell>{r.priority}</TableCell>
                       <TableCell>{triggerLabel(cfg)}</TableCell>
-                      <TableCell>{cfg.action?.type || "send_message"}</TableCell>
-                      <TableCell className="text-xs font-mono">{cfg.next_fire || "-"}</TableCell>
+                      <TableCell>
+                        <div className="flex flex-col gap-0.5">
+                          <span>{ACTION_TYPE_LABELS[cfg.action?.type || "send_message"] || cfg.action?.type}</span>
+                          {cfg.action?.delete_after ? (
+                            <span className="text-xs text-muted-foreground">自动删除: {cfg.action.delete_after}s</span>
+                          ) : null}
+                        </div>
+                      </TableCell>
+                      <TableCell className="text-xs font-mono">{formatDateTime(cfg.next_fire, tz)}</TableCell>
+                      <TableCell className="text-xs font-mono">{formatDateTime(cfg.last_fire, tz)}</TableCell>
+                      <TableCell>
+                        {cfg.last_result ? (
+                          <div className="flex flex-col gap-0.5">
+                            <Badge variant={cfg.last_result === "ok" ? "success" : "destructive"}>
+                              {cfg.last_result === "ok" ? "成功" : "失败"}
+                            </Badge>
+                            {cfg.last_error ? (
+                              <span className="max-w-[160px] truncate text-xs text-destructive" title={cfg.last_error}>
+                                {cfg.last_error}
+                              </span>
+                            ) : null}
+                          </div>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">未执行</span>
+                        )}
+                      </TableCell>
                       <TableCell className="text-right">
                         <div className="inline-flex gap-1">
                           <Button size="sm" variant="ghost" onClick={() => openEdit(r)}><Pencil className="mr-1 h-3.5 w-3.5" /> 编辑</Button>
                           <Button size="sm" variant="ghost" onClick={() => openDryRun(r)}><Play className="mr-1 h-3.5 w-3.5" /> 试运行</Button>
+                          <Button size="sm" variant="ghost" onClick={() => openExec(r)}><Zap className="mr-1 h-3.5 w-3.5" /> 执行</Button>
                           <Button size="sm" variant="ghost" className="text-destructive" onClick={() => { if (confirm(`删除规则 ${r.name}？`)) delMut.mutate(r.id); }}>
                             <Trash2 className="mr-1 h-3.5 w-3.5" /> 删除
                           </Button>
@@ -318,27 +380,33 @@ export function SchedulerConfig() {
                   }))
                 }
               >
-                <option value="cron">cron</option>
-                <option value="once">once</option>
-                <option value="interval">interval</option>
+              <option value="cron">cron 定时</option>
+              <option value="once">once 单次</option>
+              <option value="interval">interval 间隔</option>
               </Select>
             </div>
             {form.config.kind === "cron" ? (
               <div className="space-y-1">
                 <Label>cron 表达式</Label>
-                <Input value={form.config.cron || ""} onChange={(e) => setForm((s) => ({ ...s, config: { ...s.config, cron: e.target.value } }))} placeholder="*/1 * * * *" />
+                <Input value={form.config.cron || ""} onChange={(e) => setForm((s) => ({ ...s, config: { ...s.config, cron: e.target.value } }))} placeholder="*/5 * * * *" />
+                <p className="text-xs text-muted-foreground">
+                  示例：<code className="rounded bg-muted px-1">*/5 * * * *</code> 每5分钟 
+                  <code className="rounded bg-muted px-1">0 9 * * 1-5</code> 工作日9点 
+                  <code className="rounded bg-muted px-1">0 0 1 * *</code> 每月1号零点 
+                  <code className="rounded bg-muted px-1">*/30 * * * *</code> 每30分钟
+                </p>
               </div>
             ) : null}
             {form.config.kind === "once" ? (
               <div className="space-y-1">
-                <Label>触发时间（ISO）</Label>
+                <Label>触发时间</Label>
                 <Input value={form.config.fire_at || ""} onChange={(e) => setForm((s) => ({ ...s, config: { ...s.config, fire_at: e.target.value } }))} placeholder="2026-05-10T15:30:00+08:00" />
               </div>
             ) : null}
             {form.config.kind === "interval" ? (
               <div className="space-y-1">
                 <Label>间隔秒数</Label>
-                <Input type="number" value={form.config.interval_sec || 0} onChange={(e) => setForm((s) => ({ ...s, config: { ...s.config, interval_sec: Number(e.target.value || 0) } }))} />
+                <Input type="number" value={form.config.interval_sec || 0} onChange={(e) => setForm((s) => ({ ...s, config: { ...s.config, interval_sec: Number(e.target.value || 0) } }))} placeholder="300" />
               </div>
             ) : null}
           </div>
@@ -360,28 +428,37 @@ export function SchedulerConfig() {
                 }))
               }
             >
-              <option value="send_message">send_message</option>
-              <option value="run_command">run_command</option>
-              <option value="call_llm">call_llm</option>
+              <option value="send_message">发送消息</option>
+              <option value="run_command">执行命令</option>
+              <option value="call_llm">调用 LLM</option>
             </Select>
 
             {(form.config.action.type === "send_message" || form.config.action.type === "call_llm") ? (
               <div className="space-y-1">
-                <Label>target_chat_id</Label>
+                <Label>目标聊天 ID</Label>
                 <Input type="number" value={form.config.action.target_chat_id || 0} onChange={(e) => setForm((s) => ({ ...s, config: { ...s.config, action: { ...s.config.action, target_chat_id: Number(e.target.value || 0) } } }))} />
               </div>
             ) : null}
 
             {form.config.action.type === "send_message" ? (
-              <div className="space-y-1">
-                <Label>text</Label>
-                <Textarea value={form.config.action.text || ""} onChange={(e) => setForm((s) => ({ ...s, config: { ...s.config, action: { ...s.config.action, text: e.target.value } } }))} rows={4} />
-              </div>
+              <>
+                <div className="space-y-1">
+                  <Label>消息内容</Label>
+                  <Textarea value={form.config.action.text || ""} onChange={(e) => setForm((s) => ({ ...s, config: { ...s.config, action: { ...s.config.action, text: e.target.value } } }))} rows={4} />
+                </div>
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                  <div className="space-y-1">
+                    <Label>自动删除（秒）</Label>
+                    <Input type="number" min={0} max={3600} value={form.config.action.delete_after ?? 0} onChange={(e) => setForm((s) => ({ ...s, config: { ...s.config, action: { ...s.config.action, delete_after: Number(e.target.value) || 0 } } }))} placeholder="0 = 不删除" />
+                    <p className="text-xs text-muted-foreground">发送后多少秒自动删除，0 或留空 = 不删除，上限 3600</p>
+                  </div>
+                </div>
+              </>
             ) : null}
 
             {form.config.action.type === "run_command" ? (
               <div className="space-y-1">
-                <Label>command</Label>
+                <Label>命令</Label>
                 <Input value={form.config.action.command || ""} onChange={(e) => setForm((s) => ({ ...s, config: { ...s.config, action: { ...s.config.action, command: e.target.value } } }))} placeholder=",ai 今天天气" />
               </div>
             ) : null}
@@ -390,21 +467,28 @@ export function SchedulerConfig() {
               <>
                 <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
                   <div className="space-y-1">
-                    <Label>provider_id</Label>
+                    <Label>服务商 ID</Label>
                     <Input type="number" value={form.config.action.provider_id || 0} onChange={(e) => setForm((s) => ({ ...s, config: { ...s.config, action: { ...s.config.action, provider_id: Number(e.target.value || 0) } } }))} />
                   </div>
                   <div className="space-y-1">
-                    <Label>max_tokens</Label>
+                    <Label>最大 Token 数</Label>
                     <Input type="number" value={form.config.action.max_tokens || 256} onChange={(e) => setForm((s) => ({ ...s, config: { ...s.config, action: { ...s.config.action, max_tokens: Number(e.target.value || 0) } } }))} />
                   </div>
                 </div>
                 <div className="space-y-1">
-                  <Label>system_prompt</Label>
+                  <Label>系统提示词</Label>
                   <Textarea value={form.config.action.system_prompt || ""} onChange={(e) => setForm((s) => ({ ...s, config: { ...s.config, action: { ...s.config.action, system_prompt: e.target.value } } }))} rows={2} />
                 </div>
                 <div className="space-y-1">
-                  <Label>prompt</Label>
+                  <Label>提示词</Label>
                   <Textarea value={form.config.action.prompt || ""} onChange={(e) => setForm((s) => ({ ...s, config: { ...s.config, action: { ...s.config.action, prompt: e.target.value } } }))} rows={4} />
+                </div>
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                  <div className="space-y-1">
+                    <Label>自动删除（秒）</Label>
+                    <Input type="number" min={0} max={3600} value={form.config.action.delete_after ?? 0} onChange={(e) => setForm((s) => ({ ...s, config: { ...s.config, action: { ...s.config.action, delete_after: Number(e.target.value) || 0 } } }))} placeholder="0 = 不删除" />
+                    <p className="text-xs text-muted-foreground">发送后多少秒自动删除，0 或留空 = 不删除，上限 3600</p>
+                  </div>
                 </div>
               </>
             ) : null}
@@ -418,17 +502,42 @@ export function SchedulerConfig() {
       </Dialog>
 
       <Dialog open={dryOpen} onOpenChange={setDryOpen}>
-        <DialogContent>
+        <DialogContent className="max-w-lg">
           <DialogHeader>
             <DialogTitle>试运行</DialogTitle>
             <DialogDescription>{dryRule ? `规则：${dryRule.name}` : ""}</DialogDescription>
           </DialogHeader>
-          <div className="space-y-2 text-sm">
-            <Button onClick={() => dryMut.mutate()} disabled={!dryRule || dryMut.isPending}>{dryMut.isPending ? "运行中..." : "执行 dry-run"}</Button>
+          <div className="space-y-3 text-sm">
+            <Button onClick={() => dryMut.mutate()} disabled={!dryRule || dryMut.isPending}>{dryMut.isPending ? "运行中..." : "执行试运行"}</Button>
             {dryResult ? (
+              <>
+                <div className="rounded-md border p-3 space-y-1">
+                  <div>匹配：<b>{dryResult.matched ? "是" : "否"}</b></div>
+                  {dryResult.output && (
+                    <div className="text-xs text-muted-foreground">{dryResult.output}</div>
+                  )}
+                </div>
+                <DryRunDetail detail={dryResult.detail} />
+              </>
+            ) : null}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={execOpen} onOpenChange={setExecOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>立即执行</DialogTitle>
+            <DialogDescription>{execRule ? `规则：${execRule.name} — 将真实发送消息/执行动作` : ""}</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 text-sm">
+            <Button onClick={() => execMut.mutate()} disabled={!execRule || execMut.isPending}>{execMut.isPending ? "执行中..." : "立即执行"}</Button>
+            {execResult ? (
               <div className="rounded-md border p-3 space-y-1">
-                <div>matched: <b>{String(dryResult.matched)}</b></div>
-                <div className="text-xs text-muted-foreground">{dryResult.output || "(no output)"}</div>
+                <div>结果：<b className={execResult.ok ? "text-green-600" : "text-destructive"}>{execResult.ok ? "成功" : "失败"}</b></div>
+                {execResult.error && (
+                  <div className="text-xs text-destructive">错误：{execResult.error}</div>
+                )}
               </div>
             ) : null}
           </div>
@@ -439,7 +548,13 @@ export function SchedulerConfig() {
 }
 
 function triggerLabel(cfg: SchedulerRuleConfig): string {
-  if (cfg.kind === "once") return `once @ ${cfg.fire_at || "-"}`;
-  if (cfg.kind === "interval") return `every ${cfg.interval_sec || 0}s`;
-  return cfg.cron || "(invalid cron)";
+  if (cfg.kind === "once") return `单次 @ ${cfg.fire_at || "-"}`;
+  if (cfg.kind === "interval") return `每 ${cfg.interval_sec || 0} 秒`;
+  return cfg.cron || "(无效 cron)";
 }
+
+const ACTION_TYPE_LABELS: Record<string, string> = {
+  send_message: "发送消息",
+  run_command: "执行命令",
+  call_llm: "调用 LLM",
+};

@@ -38,8 +38,9 @@ from typing import Any
 from sqlalchemy import select, update
 from telethon import TelegramClient, events
 
+from ... import __version__ as TELEBOT_VERSION
 from ...db.base import AsyncSessionLocal
-from ...db.models.account import Account, HumanizeConfig
+from ...db.models.account import Account, HumanizeConfig, SudoUser
 from ...db.models.feature import (
     FEATURE_STATE_ACTIVE,
     FEATURE_STATE_DISABLED,
@@ -140,6 +141,30 @@ def _is_safe_plugin_key(plugin_key: str) -> bool:
     return bool(re.fullmatch(r"[A-Za-z0-9_.-]+", plugin_key or ""))
 
 
+def _version_tuple(v: str | None) -> tuple[int, ...]:
+    """把 ``0.9.6`` / ``v0.9.6-beta`` 转成可比较 tuple。"""
+    if not v:
+        return ()
+    parts = [int(p) for p in re.findall(r"\d+", str(v))]
+    return tuple(parts[:3])
+
+
+def _manifest_compatible(manifest: Manifest) -> tuple[bool, str | None]:
+    """检查 manifest 的版本和插件依赖声明。"""
+    min_version = getattr(manifest, "min_telebot_version", None)
+    if min_version and _version_tuple(TELEBOT_VERSION) < _version_tuple(min_version):
+        return False, f"需要 telebot >= {min_version}，当前 {TELEBOT_VERSION}"
+
+    missing = [
+        key for key in list(getattr(manifest, "requires_features", None) or [])
+        if key not in all_plugins()
+    ]
+    if missing:
+        return False, f"缺少依赖插件: {', '.join(missing)}"
+
+    return True, None
+
+
 def _load_dir(path: Path, source: str) -> dict[str, type[Plugin]]:
     """从单个插件目录加载 ``PLUGIN_CLASS`` 与 ``MANIFEST``；失败返回 {} 并写日志。
 
@@ -200,6 +225,10 @@ def _load_dir(path: Path, source: str) -> dict[str, type[Plugin]]:
             path,
             type(manifest).__name__,
         )
+        return {}
+    ok, reason = _manifest_compatible(manifest)
+    if not ok:
+        log.warning("插件 %s manifest 不兼容，跳过: %s", manifest.key, reason)
         return {}
 
     # 把 manifest / source 挂到 plugin 类上，方便 API 层暴露给前端
@@ -275,6 +304,8 @@ class _AccountState:
         self.paused: asyncio.Event | None = None
         # Sprint2 #3：忽略 peer 名单（int set），从 ignored_peer 表加载，IPC 触发热更
         self.ignored_peers: set[int] = set()
+        self.owner_tg_user_id: int | None = None
+        self.sudo_users: dict[int, dict[str, Any]] = {}
         # Sprint2 #3：最近活跃 peer 的 LRU（peer_id -> {peer_kind, peer_label, ts}）
         # 仅 worker 内存维护；重启后清空。前端不能假设它持久。
         self.recent_peers: collections.OrderedDict[int, dict[str, Any]] = collections.OrderedDict()
@@ -282,6 +313,37 @@ class _AccountState:
 
 # 进程级状态字典（一个 worker 进程通常只服务一个账号；用 dict 是为了灵活）
 _STATES: dict[int, _AccountState] = {}
+
+
+async def _event_sender_id(event: Any) -> int | None:
+    sender = getattr(event, "sender", None)
+    sender_id = getattr(sender, "id", None)
+    if sender_id is not None:
+        return int(sender_id)
+    try:
+        sender = await event.get_sender()
+        sender_id = getattr(sender, "id", None)
+        return int(sender_id) if sender_id is not None else None
+    except Exception:  # noqa: BLE001
+        return None
+
+
+async def _event_allowed_for_owner_only(state: _AccountState, event: Any) -> bool:
+    """owner_only 插件的统一消息门禁：账号本人或授权 sudo 用户才可触发。"""
+    if bool(getattr(event, "outgoing", False)):
+        return True
+    sender_id = await _event_sender_id(event)
+    if sender_id is None:
+        return False
+    if state.owner_tg_user_id is not None and sender_id == state.owner_tg_user_id:
+        return True
+    sudo_cfg = state.sudo_users.get(sender_id)
+    if sudo_cfg is None:
+        return False
+    allowed_chats = sudo_cfg.get("allowed_chat_ids") or []
+    if allowed_chats and getattr(event, "chat_id", None) not in allowed_chats:
+        return False
+    return True
 
 
 # ─────────────────────────────────────────────────────
@@ -313,6 +375,18 @@ async def load_plugins_for_account(
     async with AsyncSessionLocal() as db:
         acc = await db.get(Account, account_id)
         humanize_row = await db.get(HumanizeConfig, account_id)
+        sudo_rows = (
+            await db.execute(select(SudoUser).where(SudoUser.account_id == account_id))
+        ).scalars().all()
+    owner_id = getattr(acc, "tg_user_id", None)
+    state.owner_tg_user_id = int(owner_id) if owner_id else None
+    state.sudo_users = {
+        int(r.tg_user_id): {
+            "allowed_chat_ids": list(r.allowed_chat_ids or []),
+            "allowed_commands": list(r.allowed_commands or []),
+        }
+        for r in sudo_rows
+    }
     opts = HumanizeOpts(
         jitter_pct=humanize_row.jitter_pct if humanize_row else 15,
         typing_simulate=bool(humanize_row.typing_simulate) if humanize_row else True,
@@ -375,6 +449,10 @@ async def load_plugins_for_account(
             for fkey, inst in list(state.instances.items()):
                 if direction not in inst.message_channels:
                     continue
+                if getattr(inst, "owner_only", True):
+                    allowed = await _event_allowed_for_owner_only(state, event)
+                    if not allowed:
+                        continue
                 ctx = state.contexts.get(fkey)
                 if ctx is None:
                     continue
@@ -696,6 +774,20 @@ async def reload_account_config(account_id: int, payload: dict | None = None) ->
             _clear_installed_module_cache(raw_key)
 
     async with AsyncSessionLocal() as db:
+        acc = await db.get(Account, account_id)
+        owner_id = getattr(acc, "tg_user_id", None)
+        state.owner_tg_user_id = int(owner_id) if owner_id else None
+        sudo_rows = (
+            await db.execute(select(SudoUser).where(SudoUser.account_id == account_id))
+        ).scalars().all()
+        state.sudo_users = {
+            int(r.tg_user_id): {
+                "allowed_chat_ids": list(r.allowed_chat_ids or []),
+                "allowed_commands": list(r.allowed_commands or []),
+            }
+            for r in sudo_rows
+        }
+
         # 1) 现有实例：刷新或卸载
         for fkey, inst in list(state.instances.items()):
             af = (

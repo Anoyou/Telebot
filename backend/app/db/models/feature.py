@@ -20,6 +20,8 @@ FEATURE_AUTO_REPLY = "auto_reply"
 FEATURE_FORWARD = "forward"
 FEATURE_SCHEDULER = "scheduler"
 FEATURE_GAME24 = "game24"
+FEATURE_AUTOREPEAT = "autorepeat"
+FEATURE_CODEX_IMAGE = "codex_image"
 
 # 历史功能 key —— 已在 v0.4.0 砍掉对应 builtin 目录与前端页面，
 # 但保留常量用于迁移期间识别 / 清理 DB 旧行（迁移 0014 会清空对应 account_feature 行）

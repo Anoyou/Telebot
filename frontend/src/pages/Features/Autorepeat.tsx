@@ -1,7 +1,4 @@
-// 转发规则配置：列出该账号的 forward rule，CRUD + 试运行
-//
-// 与 AutoReply.tsx 结构保持一致（左侧规则表 + 右侧编辑 Dialog + 底部 dry-run）。
-// rule.config 的字段语义见 backend/app/worker/plugins/builtin/forward/manifest.py。
+// 自动复读配置：列出该账号的 autorepeat rule，CRUD + 试运行
 import { useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -10,10 +7,8 @@ import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
-import { Select } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import {
   Card,
@@ -49,48 +44,39 @@ import {
 import { listAccountFeatures, toggleAccountFeature } from "@/api/accounts";
 import { getErrMsg } from "@/lib/api";
 import type {
-  ForwardMode,
-  ForwardRuleConfig,
-  ForwardSourceKind,
+  AutorepeatRuleConfig,
   RuleDryRunResponse,
   RuleOut,
 } from "@/api/types";
 import { DryRunDetail } from "@/components/DryRunDetail";
 
-// rule.config 默认值（新建规则时用）
-function defaultConfig(): ForwardRuleConfig {
+// rule.config 默认值
+function defaultConfig(): AutorepeatRuleConfig {
   return {
-    source_kind: "all",
-    source_peers: [],
-    keyword: "",
-    duplicate_window: 60,
-    duplicate_threshold: 3,
     target_chat_id: 0,
-    mode: "forward_native",
-    include_media: true,
-    header: "",
+    time_window: 300,
+    min_users: 5,
   };
 }
 
-function readConfig(c: Record<string, unknown> | undefined): ForwardRuleConfig {
-  // 把后端 rule.config 强转为前端类型；缺失字段补默认
+function readConfig(c: Record<string, unknown> | undefined): AutorepeatRuleConfig {
   const def = defaultConfig();
   if (!c) return def;
-  return { ...def, ...(c as Partial<ForwardRuleConfig>) };
+  return { ...def, ...(c as Partial<AutorepeatRuleConfig>) };
 }
 
 interface FormState {
   name: string;
   enabled: boolean;
   priority: number;
-  config: ForwardRuleConfig;
+  config: AutorepeatRuleConfig;
 }
 
 function emptyForm(): FormState {
   return { name: "", enabled: true, priority: 100, config: defaultConfig() };
 }
 
-export function ForwardConfig() {
+export function AutorepeatConfig() {
   const params = useParams();
   const aid = Number(params.aid);
   const nav = useNavigate();
@@ -101,19 +87,17 @@ export function ForwardConfig() {
     queryFn: () => listAccountFeatures(aid),
     enabled: !!aid,
   });
-  const featureItem = featuresQ.data?.find(
-    (x) => x.feature_key === "forward",
-  );
+  const featureItem = featuresQ.data?.find((x) => x.feature_key === "autorepeat");
   const featureEnabled = !!featureItem?.enabled;
 
   const rulesQ = useQuery({
-    queryKey: ["account", aid, "rules", "forward"],
-    queryFn: () => listRules(aid, "forward"),
+    queryKey: ["account", aid, "rules", "autorepeat"],
+    queryFn: () => listRules(aid, "autorepeat"),
     enabled: !!aid,
   });
 
   const featureToggleMut = useMutation({
-    mutationFn: (next: boolean) => toggleAccountFeature(aid, "forward", next),
+    mutationFn: (next: boolean) => toggleAccountFeature(aid, "autorepeat", next),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["account", aid, "features"] });
       qc.invalidateQueries({ queryKey: ["matrix"] });
@@ -125,17 +109,10 @@ export function ForwardConfig() {
   const [editOpen, setEditOpen] = useState(false);
   const [editing, setEditing] = useState<RuleOut | null>(null);
   const [form, setForm] = useState<FormState>(emptyForm());
-  // source_peers 用独立 state 文本编辑，避免 #3 提到的「换行 bug」
-  // 保存时再 split + 转 int
-  const [peersText, setPeersText] = useState("");
-  // target_chat_id 同理：先用文本编辑，保存时转 number
-  const [targetText, setTargetText] = useState("");
 
   function openCreate() {
     setEditing(null);
     setForm(emptyForm());
-    setPeersText("");
-    setTargetText("");
     setEditOpen(true);
   }
   function openEdit(r: RuleOut) {
@@ -147,28 +124,19 @@ export function ForwardConfig() {
       priority: r.priority,
       config: cfg,
     });
-    setPeersText((cfg.source_peers || []).map(String).join("\n"));
-    setTargetText(cfg.target_chat_id ? String(cfg.target_chat_id) : "");
     setEditOpen(true);
   }
 
   function buildPayload() {
-    // peersText：每行 / 逗号 / 分号 分隔；忽略解析失败项
-    const peers = peersText
-      .split(/[\s,，;；]+/)
-      .map((s) => s.trim())
-      .filter(Boolean)
-      .map((s) => Number(s))
-      .filter((n) => Number.isFinite(n));
-    const target = Number(targetText.trim());
     return {
       name: form.name.trim(),
       enabled: form.enabled,
       priority: form.priority,
       config: {
         ...form.config,
-        source_peers: peers,
-        target_chat_id: Number.isFinite(target) ? target : 0,
+        target_chat_id: Number(form.config.target_chat_id) || 0,
+        time_window: Number(form.config.time_window) || 300,
+        min_users: Number(form.config.min_users) || 5,
       } as Record<string, unknown>,
     };
   }
@@ -177,38 +145,26 @@ export function ForwardConfig() {
     mutationFn: async () => {
       const payload = buildPayload();
       if (!payload.name) throw new Error("规则名称必填");
-      // payload.config 是 Record<string, unknown>，先 cast 到 unknown 再到 ForwardRuleConfig
-      // 才能通过 strict TS 检查（同类型断言两步走）
-      const cfg = payload.config as unknown as ForwardRuleConfig;
-      if (cfg.source_kind === "keyword" && !(cfg.keyword || "").trim())
-        throw new Error("关键词模式下 keyword 不能为空");
-      if (cfg.source_kind === "peers" && !(cfg.source_peers?.length ?? 0))
-        throw new Error("peers 模式下至少填一个 chat_id");
-      if (cfg.source_kind === "duplicate") {
-        if ((cfg.duplicate_window ?? 0) <= 0)
-          throw new Error("duplicate 模式下时间窗口必须 > 0");
-        if ((cfg.duplicate_threshold ?? 0) < 2)
-          throw new Error("duplicate 模式下不同用户数阈值至少为 2");
-      }
+      if (!payload.config.target_chat_id) throw new Error("群组 ID 必填");
       if (!editing) {
-        await createRule(aid, "forward", payload);
+        await createRule(aid, "autorepeat", payload);
       } else {
-        await updateRule(aid, "forward", editing.id, payload);
+        await updateRule(aid, "autorepeat", editing.id, payload);
       }
     },
     onSuccess: () => {
       toast.success("已保存");
-      qc.invalidateQueries({ queryKey: ["account", aid, "rules", "forward"] });
+      qc.invalidateQueries({ queryKey: ["account", aid, "rules", "autorepeat"] });
       setEditOpen(false);
     },
     onError: (err) => toast.error(getErrMsg(err)),
   });
 
   const delMut = useMutation({
-    mutationFn: (rid: number) => deleteRule(aid, "forward", rid),
+    mutationFn: (rid: number) => deleteRule(aid, "autorepeat", rid),
     onSuccess: () => {
       toast.success("已删除");
-      qc.invalidateQueries({ queryKey: ["account", aid, "rules", "forward"] });
+      qc.invalidateQueries({ queryKey: ["account", aid, "rules", "autorepeat"] });
     },
     onError: (err) => toast.error(getErrMsg(err)),
   });
@@ -225,20 +181,14 @@ export function ForwardConfig() {
     setDrySample("");
     setDryResult(null);
     const cfg = readConfig(rule.config);
-    // peers 模式下默认带上第一个 chat_id 作样本，方便看到命中
-    if (cfg.source_kind === "peers" && (cfg.source_peers || []).length) {
-      setDryChatId(String(cfg.source_peers![0]));
-    } else {
-      setDryChatId("");
-    }
+    setDryChatId(cfg.target_chat_id ? String(cfg.target_chat_id) : "");
     setDryOpen(true);
   }
 
   const dryMut = useMutation({
     mutationFn: () =>
-      dryRunRule(aid, "forward", dryRule!.id, {
+      dryRunRule(aid, "autorepeat", dryRule!.id, {
         sample_message: drySample,
-        // forward 不区分 chat type，固定 group 即可（后端只看 source_kind）
         sample_chat_type: "group",
         sample_chat_id: dryChatId ? Number(dryChatId) : undefined,
       }),
@@ -255,7 +205,7 @@ export function ForwardConfig() {
           <ArrowLeft className="mr-1 h-4 w-4" /> 返回账号
         </Button>
         <h1 className="text-2xl font-semibold tracking-tight">
-          消息转发配置 · #{aid}
+          自动复读配置 · #{aid}
         </h1>
       </div>
 
@@ -263,11 +213,11 @@ export function ForwardConfig() {
       <div className="rounded-md border border-blue-200 bg-blue-50/60 px-3 py-2 text-xs text-blue-800 space-y-1">
         <div>✅ 保存后立即生效，无需重启 worker。</div>
         <div>
-          ⚠ <b>仅响应别人发来的消息</b>（incoming）。本账号自己发的消息不会被转发。
+          📋 每条规则对应一个群组的复读配置。当 <b>指定时间内</b> 有 <b>指定人数</b> 的不同用户发送
+          完全相同的内容时，自动复读该内容。
         </div>
         <div>
-          🚦 每条转发都会过风控引擎；触发 FloodWait 会自动 sleep ≤60s
-          后重试一次，最终失败仅写日志，不会让 worker 崩溃。
+          🔁 同一内容同群每天只复读一次（UTC+8 0点重置）。匿名消息、非文本消息、自己发送的消息、机器人消息会被忽略。
         </div>
       </div>
 
@@ -278,7 +228,7 @@ export function ForwardConfig() {
             <div>
               <CardTitle className="text-base">功能总开关</CardTitle>
               <CardDescription>
-                关闭后所有转发规则都不会触发；启用即生效
+                关闭后所有规则都不会触发；启用即生效
               </CardDescription>
             </div>
             <Switch
@@ -295,9 +245,7 @@ export function ForwardConfig() {
           <div className="flex items-center justify-between">
             <div>
               <CardTitle className="text-base">规则</CardTitle>
-              <CardDescription>
-                按优先级排序；多条规则可同时命中（一对多）
-              </CardDescription>
+              <CardDescription>每条规则对应一个群组的复读配置</CardDescription>
             </div>
             <Button onClick={openCreate}>
               <Plus className="mr-1 h-4 w-4" /> 新建规则
@@ -316,9 +264,8 @@ export function ForwardConfig() {
                   <TableHead>名称</TableHead>
                   <TableHead>启用</TableHead>
                   <TableHead>优先级</TableHead>
-                  <TableHead>源</TableHead>
-                  <TableHead>目标</TableHead>
-                  <TableHead>方式</TableHead>
+                  <TableHead>群组 ID</TableHead>
+                  <TableHead>触发条件</TableHead>
                   <TableHead className="text-right">操作</TableHead>
                 </TableRow>
               </TableHeader>
@@ -334,11 +281,12 @@ export function ForwardConfig() {
                         </Badge>
                       </TableCell>
                       <TableCell>{r.priority}</TableCell>
-                      <TableCell>{sourceLabel(cfg)}</TableCell>
-                      <TableCell className="font-mono text-xs">
-                        {cfg.target_chat_id || <span className="text-muted-foreground">未设置</span>}
+                      <TableCell>
+                        <code className="text-xs">{cfg.target_chat_id || "—"}</code>
                       </TableCell>
-                      <TableCell>{modeLabel(cfg.mode)}</TableCell>
+                      <TableCell>
+                        {cfg.time_window ?? 300}秒 / {cfg.min_users ?? 5}人
+                      </TableCell>
                       <TableCell className="text-right">
                         <div className="inline-flex gap-1">
                           <Button
@@ -387,7 +335,7 @@ export function ForwardConfig() {
           <DialogHeader>
             <DialogTitle>{editing ? "编辑规则" : "新建规则"}</DialogTitle>
             <DialogDescription>
-              "原生转发"显示原作者；"复制 / 引用"不显示；"仅链接"对公开超级群可点
+              配置一个群组的自动复读参数
             </DialogDescription>
           </DialogHeader>
 
@@ -396,6 +344,7 @@ export function ForwardConfig() {
               <Input
                 value={form.name}
                 onChange={(e) => setForm({ ...form, name: e.target.value })}
+                placeholder="例：技术交流群"
               />
             </Field>
             <div className="grid grid-cols-2 gap-3">
@@ -421,172 +370,64 @@ export function ForwardConfig() {
               </Field>
             </div>
 
-            <Field label="源筛选">
-              <Select
-                value={form.config.source_kind}
-                onChange={(e) =>
-                  setForm({
-                    ...form,
-                    config: {
-                      ...form.config,
-                      source_kind: e.target.value as ForwardSourceKind,
-                    },
-                  })
-                }
-              >
-                <option value="all">所有 incoming 消息</option>
-                <option value="peers">指定 peer 列表</option>
-                <option value="keyword">关键词触发</option>
-                <option value="duplicate">复读检测（不同用户发相同文本）</option>
-              </Select>
-            </Field>
-
-            {form.config.source_kind === "peers" && (
-              <Field label="源 chat_id（每行 / 逗号 / 分号 分隔）">
-                <Textarea
-                  rows={4}
-                  placeholder={
-                    "例：\n" +
-                    "  -1001234567890\n" +
-                    "  1234567890\n" +
-                    "  -1234567890"
-                  }
-                  value={peersText}
-                  onChange={(e) => setPeersText(e.target.value)}
-                />
-              </Field>
-            )}
-
-            {form.config.source_kind === "keyword" && (
-              <Field label="关键词（不区分大小写；包含即命中）">
-                <Input
-                  value={form.config.keyword || ""}
-                  onChange={(e) =>
-                    setForm({
-                      ...form,
-                      config: { ...form.config, keyword: e.target.value },
-                    })
-                  }
-                  placeholder="例：紧急"
-                />
-              </Field>
-            )}
-
-            {form.config.source_kind === "duplicate" && (
-              <div className="rounded-md border border-amber-200 bg-amber-50/60 px-3 py-2 text-xs text-amber-800 space-y-1">
-                <div>
-                  <b>复读检测</b>：当同一群内 ≥N 个<b>不同用户</b>发送相同文本时触发转发（同一用户发多次只算 1 人）。
-                </div>
-                <div>同内容同群每天只触发一次（UTC+8 午夜重置），适用于复读、刷屏检测等场景。</div>
-              </div>
-            )}
-
-            {form.config.source_kind === "duplicate" && (
-              <div className="grid grid-cols-2 gap-3">
-                <Field label="时间窗口（秒）">
-                  <Input
-                    type="number"
-                    min={1}
-                    max={3600}
-                    value={form.config.duplicate_window ?? 60}
-                    onChange={(e) =>
-                      setForm({
-                        ...form,
-                        config: {
-                          ...form.config,
-                          duplicate_window: Number(e.target.value) || 60,
-                        },
-                      })
-                    }
-                    placeholder="60"
-                  />
-                  <p className="text-xs text-muted-foreground">默认 60 秒</p>
-                </Field>
-                <Field label="不同用户数阈值">
-                  <Input
-                    type="number"
-                    min={2}
-                    max={100}
-                    value={form.config.duplicate_threshold ?? 3}
-                    onChange={(e) =>
-                      setForm({
-                        ...form,
-                        config: {
-                          ...form.config,
-                          duplicate_threshold: Number(e.target.value) || 3,
-                        },
-                      })
-                    }
-                    placeholder="3"
-                  />
-                  <p className="text-xs text-muted-foreground">达到此人数时触发，同一用户多次只算 1 人</p>
-                </Field>
-              </div>
-            )}
-
-            <Field label="目标 chat_id（可选）">
+            <Field label="群组 ID">
               <Input
                 inputMode="numeric"
-                value={targetText}
-                onChange={(e) =>
-                  setTargetText(e.target.value.replace(/[^0-9-]/g, ""))
-                }
-                placeholder="留空 = 转发到消息来源的 chat；例：-1001234567890"
-              />
-            </Field>
-
-            <Field label="转发方式">
-              <Select
-                value={form.config.mode}
+                value={form.config.target_chat_id ? String(form.config.target_chat_id) : ""}
                 onChange={(e) =>
                   setForm({
                     ...form,
                     config: {
                       ...form.config,
-                      mode: e.target.value as ForwardMode,
+                      target_chat_id: Number(e.target.value.replace(/[^0-9-]/g, "") || 0),
                     },
                   })
                 }
-              >
-                <option value="forward_native">原生转发（携带原作者）</option>
-                <option value="copy_text">复制文本（不显示原作者）</option>
-                <option value="quote">引用包装（带"来自 X"前缀）</option>
-                <option value="link_only">仅发链接（公开群可点）</option>
-              </Select>
+                placeholder="例：-1001234567890"
+              />
+              <p className="mt-1 text-xs text-muted-foreground">
+                Telethon marked ID 格式（超级群组通常为 -100 开头的负数）
+              </p>
             </Field>
 
             <div className="grid grid-cols-2 gap-3">
-              <Field label="包含含媒体的消息">
-                <div className="flex h-10 items-center gap-2">
-                  <Switch
-                    checked={form.config.include_media !== false}
-                    onCheckedChange={(v) =>
-                      setForm({
-                        ...form,
-                        config: { ...form.config, include_media: v },
-                      })
-                    }
-                  />
-                  <span className="text-xs text-muted-foreground">
-                    关 = 仅纯文本通过
-                  </span>
-                </div>
+              <Field label="时间窗口（秒）">
+                <Input
+                  inputMode="numeric"
+                  value={(form.config.time_window ?? 300).toString()}
+                  onChange={(e) =>
+                    setForm({
+                      ...form,
+                      config: {
+                        ...form.config,
+                        time_window: Number(e.target.value.replace(/[^0-9]/g, "") || 300),
+                      },
+                    })
+                  }
+                />
+                <p className="mt-1 text-xs text-muted-foreground">
+                  统计相同消息的时间范围，默认 300（5分钟）
+                </p>
+              </Field>
+              <Field label="触发人数">
+                <Input
+                  inputMode="numeric"
+                  value={(form.config.min_users ?? 5).toString()}
+                  onChange={(e) =>
+                    setForm({
+                      ...form,
+                      config: {
+                        ...form.config,
+                        min_users: Number(e.target.value.replace(/[^0-9]/g, "") || 5),
+                      },
+                    })
+                  }
+                />
+                <p className="mt-1 text-xs text-muted-foreground">
+                  发送相同内容的不同用户数，默认 5
+                </p>
               </Field>
             </div>
-
-            <Field label="固定前缀（copy / quote / link_only 模式生效）">
-              <Textarea
-                rows={2}
-                value={form.config.header || ""}
-                onChange={(e) =>
-                  setForm({
-                    ...form,
-                    config: { ...form.config, header: e.target.value },
-                  })
-                }
-                placeholder="例：[团队预警] "
-              />
-            </Field>
           </div>
 
           <DialogFooter>
@@ -605,29 +446,29 @@ export function ForwardConfig() {
 
       {/* 试运行 */}
       <Dialog open={dryOpen} onOpenChange={setDryOpen}>
-        <DialogContent className="max-w-lg">
+        <DialogContent>
           <DialogHeader>
             <DialogTitle>试运行 · {dryRule?.name}</DialogTitle>
             <DialogDescription>
-              输入一条样例消息，验证 source_kind 是否命中（不会真的下发转发）
+              输入一条样例消息，验证规则是否命中
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3 text-sm">
             <Field label="样例消息">
-              <Textarea
-                rows={3}
+              <Input
                 value={drySample}
                 onChange={(e) => setDrySample(e.target.value)}
+                placeholder="输入要测试的文本内容"
               />
             </Field>
-            <Field label="样本来源 chat_id（peers 模式必填；其它可选）">
+            <Field label="样本群 ID">
               <Input
                 inputMode="numeric"
-                placeholder="例：-1001234567890"
                 value={dryChatId}
                 onChange={(e) =>
                   setDryChatId(e.target.value.replace(/[^0-9-]/g, ""))
                 }
+                placeholder="例：-1001234567890"
               />
             </Field>
 
@@ -678,34 +519,4 @@ function Field({
       {children}
     </div>
   );
-}
-
-function sourceLabel(cfg: ForwardRuleConfig): string {
-  switch (cfg.source_kind) {
-    case "all":
-      return "所有 incoming";
-    case "peers":
-      return `指定 peers (${cfg.source_peers?.length ?? 0})`;
-    case "keyword":
-      return `关键词「${cfg.keyword || ""}」`;
-    case "duplicate":
-      return `复读检测 (${cfg.duplicate_window ?? 60}s / ${cfg.duplicate_threshold ?? 3}人)`;
-    default:
-      return cfg.source_kind;
-  }
-}
-
-function modeLabel(m: ForwardMode): string {
-  switch (m) {
-    case "forward_native":
-      return "原生转发";
-    case "copy_text":
-      return "复制文本";
-    case "quote":
-      return "引用包装";
-    case "link_only":
-      return "仅链接";
-    default:
-      return m;
-  }
 }

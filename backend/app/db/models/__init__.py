@@ -5,6 +5,7 @@ from .command import AccountCommandLink, CommandTemplate, LLMProvider
 from .feature import AccountFeature, Feature
 from .ignored_peer import IgnoredPeer
 from .log import AuditLog, RuntimeLog
+from .llm_usage import LLMUsage
 from .notify import NotifyBot
 from .plugin import PluginInstall
 from .rate_limit import RateLimitEvent, RateLimitOverride, RateLimitRule, RateLimitTemplate
@@ -23,6 +24,7 @@ __all__ = [
     "HumanizeConfig",
     "IgnoredPeer",
     "LLMProvider",
+    "LLMUsage",
     "NotificationChannel",
     "NotifyBot",
     "PluginInstall",

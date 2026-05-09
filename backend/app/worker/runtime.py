@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import select
@@ -28,6 +29,7 @@ from ..redis_client import get_redis
 from ..settings import settings as app_settings
 from .command import CommandContext, make_command_handler, set_command_context
 from .ipc import (
+    CMD_EXECUTE_RULE,
     CMD_FETCH_AVATAR,
     CMD_GET_RECENT_PEERS,
     CMD_PAUSE,
@@ -39,6 +41,7 @@ from .ipc import (
     CMD_RESUME,
     CMD_STOP,
     EVT_LOGIN_REQUIRED,
+    EVT_ACK,
     EVT_PONG,
     EVT_STATUS,
     GCMD_KILL_SWITCH,
@@ -56,10 +59,18 @@ from .tg_client import build_client
 
 log = logging.getLogger(__name__)
 
+_CONFIG_RECONCILE_SECONDS = 60
+
 
 async def run_worker(account_id: int) -> None:
     """worker 主协程；返回即代表退出（supervisor 决定是否重启）。"""
     redis = get_redis()
+    try:
+        from ..services.llm_usage_service import ensure_llm_usage_callback_registered
+
+        ensure_llm_usage_callback_registered()
+    except Exception:  # noqa: BLE001
+        log.debug("LLM usage callback 注册失败", exc_info=True)
 
     # 启动时一次性读取账号 + 代理 + 设备伪装 profile
     async with AsyncSessionLocal() as db:
@@ -142,12 +153,13 @@ async def run_worker(account_id: int) -> None:
         # 后台协程：监听 IPC 指令通道与全局通道
         ipc_task = asyncio.create_task(_listen_cmd(redis, client, account_id, paused))
         global_task = asyncio.create_task(_listen_global(redis, account_id, paused))
+        reconcile_task = asyncio.create_task(_periodic_config_reconcile(redis, account_id))
 
         try:
             # 阻塞直到 client.disconnect() 被调用
             await client.run_until_disconnected()
         finally:
-            for t in (ipc_task, global_task):
+            for t in (ipc_task, global_task, reconcile_task):
                 t.cancel()
                 try:
                     await t
@@ -193,168 +205,307 @@ async def run_worker(account_id: int) -> None:
 
 
 async def _listen_cmd(redis, client, account_id: int, paused: asyncio.Event) -> None:
-    """监听 ``worker_cmd:{aid}`` 频道，处理 pause/resume/stop/ping/reload_*。"""
-    pubsub = redis.pubsub()
-    await pubsub.subscribe(cmd_channel(account_id))
-    try:
-        async for msg in pubsub.listen():
-            if msg.get("type") != "message":
-                continue
+    """监听 ``worker_cmd:{aid}`` 频道，处理 pause/resume/stop/ping/reload/*。
+
+    内置自动重连：Redis 连接断开（如 Docker 重启、网络抖动）时，
+    等待 3s 后重新 subscribe，不会让 IPC 命令通道永久失效。
+    仅在收到 CMD_STOP（主动退出）时才真正退出循环。
+    """
+    while True:
+        try:
+            pubsub = redis.pubsub()
+            await pubsub.subscribe(cmd_channel(account_id))
             try:
-                cmd = IPCMessage.decode(msg["data"])
-            except Exception:
-                continue
-            if cmd.type == CMD_PAUSE:
-                paused.clear()
-                await _publish(redis, account_id, EVT_STATUS, status="paused")
-                await _log(redis, account_id, "info", "已暂停")
-            elif cmd.type == CMD_RESUME:
-                paused.set()
-                await _publish(redis, account_id, EVT_STATUS, status="active")
-                await _log(redis, account_id, "info", "已恢复")
-            elif cmd.type == CMD_STOP:
-                await _log(redis, account_id, "info", "收到 stop 指令")
-                # ── 安全：先调用插件 on_shutdown，再断开 client ──
-                try:
-                    from .plugins.loader import _STATES  # 延迟 import 避免循环
-
-                    state = _STATES.get(account_id)
-                    if state is not None:
-                        for fkey, inst in list(state.instances.items()):
-                            ctx = state.contexts.get(fkey)
-                            if ctx is not None and inst is not None:
-                                try:
-                                    await inst.on_shutdown(ctx)
-                                except Exception:  # noqa: BLE001
-                                    log.exception("插件 %s on_shutdown 失败", fkey)
-                except ImportError:
-                    pass
-                except Exception:  # noqa: BLE001
-                    log.exception("stop 时插件清理失败")
-                await client.disconnect()
-                return
-            elif cmd.type == CMD_PING:
-                await _publish(redis, account_id, EVT_PONG)
-            elif cmd.type == CMD_RELOAD_CONFIG:
-                # 让 plugin loader 自己处理（如果存在）
-                try:
-                    from .plugins.loader import reload_account_config  # type: ignore
-
-                    await reload_account_config(account_id, cmd.payload)
-                except Exception:
-                    pass
-                await _log(redis, account_id, "info", "reload_config 完成")
-            elif cmd.type == CMD_RELOAD_PLUGIN:
-                try:
-                    from .plugins.loader import reload_plugin  # type: ignore
-
-                    await reload_plugin(account_id, cmd.payload.get("plugin_key"))
-                except Exception as e:
-                    await _log(redis, account_id, "error", f"reload_plugin 失败: {e}")
-            elif cmd.type == CMD_FETCH_AVATAR:
-                # 主进程懒加载头像：worker 端调用 download_profile_photo 写盘
-                # path 由主进程指定（绝对路径）；失败静默，前端会走首字母 fallback
-                target_path = cmd.payload.get("path")
-                if not target_path:
-                    continue
-                try:
-                    import os
-                    from pathlib import Path
-
-                    out = Path(str(target_path))
-                    out.parent.mkdir(parents=True, exist_ok=True)
-                    # download_profile_photo 默认拉大图；账号没头像时返回 None
-                    result = await client.download_profile_photo("me", file=str(out))
-                    if result is None and out.exists():
-                        # Telethon 在没头像时不会写文件，但保险起见若空文件则删
+                async for msg in pubsub.listen():
+                    if msg.get("type") != "message":
+                        continue
+                    try:
+                        cmd = IPCMessage.decode(msg["data"])
+                    except Exception:
+                        continue
+                    ack_ok = True
+                    ack_error: str | None = None
+                    if cmd.type == CMD_PAUSE:
+                        paused.clear()
+                        await _publish(redis, account_id, EVT_STATUS, status="paused")
+                        await _log(redis, account_id, "info", "已暂停")
+                    elif cmd.type == CMD_RESUME:
+                        paused.set()
+                        await _publish(redis, account_id, EVT_STATUS, status="active")
+                        await _log(redis, account_id, "info", "已恢复")
+                    elif cmd.type == CMD_STOP:
+                        await _log(redis, account_id, "info", "收到 stop 指令")
+                        # ── 安全：先调用插件 on_shutdown，再断开 client ──
                         try:
-                            if os.path.getsize(str(out)) == 0:
-                                out.unlink()
+                            from .plugins.loader import _STATES  # 延迟 import 避免循环
+
+                            state = _STATES.get(account_id)
+                            if state is not None:
+                                for fkey, inst in list(state.instances.items()):
+                                    ctx = state.contexts.get(fkey)
+                                    if ctx is not None and inst is not None:
+                                        try:
+                                            await inst.on_shutdown(ctx)
+                                        except Exception:  # noqa: BLE001
+                                            log.exception("插件 %s on_shutdown 失败", fkey)
+                        except ImportError:
+                            pass
+                        except Exception:  # noqa: BLE001
+                            log.exception("stop 时插件清理失败")
+                        # 主动退出前关闭 pubsub
+                        try:
+                            await pubsub.unsubscribe(cmd_channel(account_id))
+                            await pubsub.close()
                         except Exception:  # noqa: BLE001
                             pass
-                except Exception as e:  # noqa: BLE001
-                    await _log(redis, account_id, "warn", f"fetch_avatar 失败: {type(e).__name__}: {e}")
-            elif cmd.type == CMD_RELOAD_COMMANDS:
-                # Sprint2 #2：账号启用/禁用模板、LLM provider 增删后通知 worker 热加载
-                try:
-                    await _refresh_command_context(account_id)
-                except Exception as e:  # noqa: BLE001
-                    await _log(
-                        redis, account_id, "warn",
-                        f"reload_commands 失败: {type(e).__name__}: {e}",
-                    )
-                else:
-                    await _log(redis, account_id, "info", "reload_commands 完成")
-            elif cmd.type == CMD_RELOAD_IGNORED:
-                # Sprint2 #3：忽略名单变更后，让 plugin loader 从 DB 重拉 set
-                try:
-                    from .plugins.loader import reload_ignored_peers  # type: ignore
+                        await client.disconnect()
+                        return  # CMD_STOP → 正常退出，不重连
+                    elif cmd.type == CMD_PING:
+                        await _publish(redis, account_id, EVT_PONG)
+                    elif cmd.type == CMD_RELOAD_CONFIG:
+                        # 让 plugin loader 自己处理（如果存在）
+                        try:
+                            from .plugins.loader import reload_account_config  # type: ignore
 
-                    await reload_ignored_peers(account_id)
-                except Exception as e:  # noqa: BLE001
-                    await _log(
-                        redis, account_id, "warn", f"reload_ignored 失败: {type(e).__name__}: {e}"
-                    )
-            elif cmd.type == CMD_GET_RECENT_PEERS:
-                # Sprint2 #3 RPC：把内存里的最近活跃 peer 列表回发到 reply_to 频道
-                reply_to = cmd.payload.get("reply_to")
-                if not isinstance(reply_to, str) or not reply_to:
-                    continue
-                items: list[dict] = []
-                try:
-                    from .plugins.loader import get_recent_peers  # type: ignore
+                            await reload_account_config(account_id, cmd.payload)
+                        except Exception as e:  # noqa: BLE001
+                            ack_ok = False
+                            ack_error = f"{type(e).__name__}: {e}"
+                        await _log(redis, account_id, "info", "reload_config 完成")
+                    elif cmd.type == CMD_RELOAD_PLUGIN:
+                        try:
+                            from .plugins.loader import reload_plugin  # type: ignore
 
-                    items = get_recent_peers(account_id)
-                except Exception as e:  # noqa: BLE001
-                    await _log(
-                        redis, account_id, "warn",
-                        f"get_recent_peers 失败: {type(e).__name__}: {e}",
-                    )
+                            await reload_plugin(account_id, cmd.payload.get("plugin_key"))
+                        except Exception as e:
+                            ack_ok = False
+                            ack_error = f"{type(e).__name__}: {e}"
+                            await _log(redis, account_id, "error", f"reload_plugin 失败: {e}")
+                    elif cmd.type == CMD_FETCH_AVATAR:
+                        # 主进程懒加载头像：worker 端调用 download_profile_photo 写盘
+                        # path 由主进程指定（绝对路径）；失败静默，前端会走首字母 fallback
+                        target_path = cmd.payload.get("path")
+                        if not target_path:
+                            continue
+                        try:
+                            import os
+                            from pathlib import Path
+
+                            out = Path(str(target_path))
+                            out.parent.mkdir(parents=True, exist_ok=True)
+                            # download_profile_photo 默认拉大图；账号没头像时返回 None
+                            result = await client.download_profile_photo("me", file=str(out))
+                            if result is None and out.exists():
+                                # Telethon 在没头像时不会写文件，但保险起见若空文件则删
+                                try:
+                                    if os.path.getsize(str(out)) == 0:
+                                        out.unlink()
+                                except Exception:  # noqa: BLE001
+                                    pass
+                        except Exception as e:  # noqa: BLE001
+                            await _log(redis, account_id, "warn", f"fetch_avatar 失败: {type(e).__name__}: {e}")
+                    elif cmd.type == CMD_RELOAD_COMMANDS:
+                        # Sprint2 #2：账号启用/禁用模板、LLM provider 增删后通知 worker 热加载
+                        try:
+                            await _refresh_command_context(account_id)
+                        except Exception as e:  # noqa: BLE001
+                            ack_ok = False
+                            ack_error = f"{type(e).__name__}: {e}"
+                            await _log(
+                                redis, account_id, "warn",
+                                f"reload_commands 失败: {type(e).__name__}: {e}",
+                            )
+                        else:
+                            await _log(redis, account_id, "info", "reload_commands 完成")
+                    elif cmd.type == CMD_RELOAD_IGNORED:
+                        # Sprint2 #3：忽略名单变更后，让 plugin loader 从 DB 重拉 set
+                        try:
+                            from .plugins.loader import reload_ignored_peers  # type: ignore
+
+                            await reload_ignored_peers(account_id)
+                        except Exception as e:  # noqa: BLE001
+                            ack_ok = False
+                            ack_error = f"{type(e).__name__}: {e}"
+                            await _log(
+                                redis, account_id, "warn", f"reload_ignored 失败: {type(e).__name__}: {e}"
+                            )
+                    elif cmd.type == CMD_GET_RECENT_PEERS:
+                        # Sprint2 #3 RPC：把内存里的最近活跃 peer 列表回发到 reply_to 频道
+                        reply_to = cmd.payload.get("reply_to")
+                        if not isinstance(reply_to, str) or not reply_to:
+                            continue
+                        items: list[dict] = []
+                        try:
+                            from .plugins.loader import get_recent_peers  # type: ignore
+
+                            items = get_recent_peers(account_id)
+                        except Exception as e:  # noqa: BLE001
+                            await _log(
+                                redis, account_id, "warn",
+                                f"get_recent_peers 失败: {type(e).__name__}: {e}",
+                            )
+                        try:
+                            await redis.publish(reply_to, make_cmd(CMD_GET_RECENT_PEERS, items=items))
+                        except Exception:  # noqa: BLE001
+                            # 主进程超时后会自己关订阅；这里 publish 失败无所谓
+                            pass
+                    elif cmd.type == CMD_EXECUTE_RULE:
+                        # RPC：手动执行一条 scheduler 规则
+                        reply_to = cmd.payload.get("reply_to")
+                        rule_id = cmd.payload.get("rule_id")
+                        if not isinstance(reply_to, str) or not reply_to or not isinstance(rule_id, int):
+                            continue
+                        result_ok = False
+                        result_error: str | None = None
+                        try:
+                            from .plugins.loader import _STATES  # type: ignore
+
+                            state = _STATES.get(account_id)
+                            inst = state.instances.get("scheduler") if state else None
+                            ctx = state.contexts.get("scheduler") if state else None
+                            if inst is None or ctx is None:
+                                result_error = "scheduler 插件未加载"
+                            else:
+                                from app.db.base import AsyncSessionLocal
+                                from app.db.models.rule import Rule
+
+                                async with AsyncSessionLocal() as db:
+                                    rule_row = await db.get(Rule, rule_id)
+                                if rule_row is None or rule_row.account_id != account_id:
+                                    result_error = f"rule {rule_id} 不存在或不属于该账号"
+                                else:
+                                    cfg = dict(rule_row.config or {})
+                                    fired_at = datetime.now(UTC)
+                                    ok = await inst._fire(ctx, rule_id, cfg)
+                                    if ok:
+                                        from .plugins.builtin.scheduler.plugin import _get_system_tz
+
+                                        tz = await _get_system_tz()
+                                        cfg["last_fire"] = fired_at.isoformat()
+                                        cfg["last_result"] = "ok"
+                                        cfg["last_error"] = None
+                                        inst._advance_after_fire(cfg, fired_at, tz)
+                                        result_ok = True
+                                    else:
+                                        result_error = cfg.get("last_error", "执行失败")
+                                    # 持久化 config 变更
+                                    async with AsyncSessionLocal() as db:
+                                        row = await db.get(Rule, rule_id)
+                                        if row is not None:
+                                            row.config = cfg
+                                            await db.commit()
+                                    # 同步更新 ctx.rules 中对应 rule 的 in-memory config，
+                                    # 防止下一个 tick 读到旧的 next_fire 导致重复触发
+                                    for r in ctx.rules:
+                                        if r.id == rule_id:
+                                            r.config = cfg
+                                            break
+                        except Exception as e:  # noqa: BLE001
+                            result_error = f"{type(e).__name__}: {e}"
+                            await _log(redis, account_id, "warn", f"execute_rule 失败: {result_error}")
+                        try:
+                            await redis.publish(
+                                reply_to,
+                                make_cmd(CMD_EXECUTE_RULE, ok=result_ok, error=result_error),
+                            )
+                        except Exception:  # noqa: BLE001
+                            pass
+                    await _ack_cmd(redis, cmd, ok=ack_ok, error=ack_error)
+            finally:
                 try:
-                    await redis.publish(reply_to, make_cmd(CMD_GET_RECENT_PEERS, items=items))
+                    await pubsub.unsubscribe(cmd_channel(account_id))
+                    await pubsub.close()
                 except Exception:  # noqa: BLE001
-                    # 主进程超时后会自己关订阅；这里 publish 失败无所谓
                     pass
-    finally:
-        await pubsub.unsubscribe(cmd_channel(account_id))
-        await pubsub.close()
+        except Exception as exc:  # noqa: BLE001
+            # Redis 断连等异常 → 等 3s 后重新 subscribe
+            log.warning("worker_cmd listener 异常，3s 后重连: %s: %s", type(exc).__name__, exc)
+            await asyncio.sleep(3)
+
+
+async def _ack_cmd(redis, cmd: IPCMessage, *, ok: bool, error: str | None = None) -> None:
+    """向主进程回 ACK；没有 reply_to 的旧调用保持 fire-and-forget。"""
+    reply_to = cmd.payload.get("reply_to")
+    cmd_id = cmd.payload.get("cmd_id")
+    if not isinstance(reply_to, str) or not reply_to or not isinstance(cmd_id, str) or not cmd_id:
+        return
+    try:
+        await redis.publish(
+            reply_to,
+            make_event(EVT_ACK, cmd_id=cmd_id, cmd_type=cmd.type, ok=ok, error=error),
+        )
+    except Exception:  # noqa: BLE001
+        pass
+
+
+async def _periodic_config_reconcile(redis, account_id: int) -> None:
+    """周期性从 DB 重拉可变配置，给 Redis pub/sub 控制面做丢消息兜底。
+
+    这不替代实时 IPC；它保证 reload_config / reload_commands / reload_ignored
+    类消息即使在 worker 重连窗口丢失，也会在下一轮 reconcile 内收敛。
+    """
+    while True:
+        await asyncio.sleep(_CONFIG_RECONCILE_SECONDS)
+        try:
+            await _refresh_command_context(account_id)
+        except Exception as e:  # noqa: BLE001
+            await _log(redis, account_id, "warn", f"periodic reload_commands 失败: {type(e).__name__}: {e}")
+        try:
+            from .plugins.loader import reload_account_config, reload_ignored_peers  # type: ignore
+
+            await reload_account_config(account_id, {"source": "periodic_reconcile"})
+            await reload_ignored_peers(account_id)
+        except Exception as e:  # noqa: BLE001
+            await _log(redis, account_id, "warn", f"periodic plugin reload 失败: {type(e).__name__}: {e}")
 
 
 async def _listen_global(redis, account_id: int, paused: asyncio.Event) -> None:
-    """监听全局广播通道（kill switch / 全局配置 reload）。"""
-    pubsub = redis.pubsub()
-    await pubsub.subscribe(GLOBAL_CHANNEL)
-    try:
-        async for msg in pubsub.listen():
-            if msg.get("type") != "message":
-                continue
+    """监听全局广播通道（kill switch / 全局配置 reload）。
+
+    内置自动重连逻辑，与 _listen_cmd 一致。
+    """
+    while True:
+        try:
+            pubsub = redis.pubsub()
+            await pubsub.subscribe(GLOBAL_CHANNEL)
             try:
-                cmd = IPCMessage.decode(msg["data"])
-            except Exception:
-                continue
-            if cmd.type == GCMD_KILL_SWITCH:
-                if cmd.payload.get("enabled"):
-                    paused.clear()
-                    await _log(redis, account_id, "warn", "全局 kill switch 已启动")
-                else:
-                    paused.set()
-                    await _log(redis, account_id, "info", "全局 kill switch 已解除")
-            elif cmd.type == GCMD_RELOAD_GLOBAL:
-                # 命令前缀 / 风控模板等全局设置变更后，主进程广播这条让所有 worker 重拉
-                # 当前主要刷的是 system_setting.command_prefix（写到 ctx.command_prefix）
-                # 风控相关 reload 由 ratelimit 模块自己监听，不在这里处理
+                async for msg in pubsub.listen():
+                    if msg.get("type") != "message":
+                        continue
+                    try:
+                        cmd = IPCMessage.decode(msg["data"])
+                    except Exception:
+                        continue
+                    if cmd.type == GCMD_KILL_SWITCH:
+                        if cmd.payload.get("enabled"):
+                            paused.clear()
+                            await _log(redis, account_id, "warn", "全局 kill switch 已启动")
+                        else:
+                            paused.set()
+                            await _log(redis, account_id, "info", "全局 kill switch 已解除")
+                    elif cmd.type == GCMD_RELOAD_GLOBAL:
+                        # 命令前缀 / 风控模板等全局设置变更后，主进程广播这条让所有 worker 重拉
+                        # 当前主要刷的是 system_setting.command_prefix（写到 ctx.command_prefix）
+                        # 风控相关 reload 由 ratelimit 模块自己监听，不在这里处理
+                        try:
+                            await _refresh_command_context(account_id)
+                        except Exception as e:  # noqa: BLE001
+                            await _log(
+                                redis, account_id, "warn",
+                                f"reload_global 失败: {type(e).__name__}: {e}",
+                            )
+                        else:
+                            await _log(redis, account_id, "info", "reload_global 完成（命令前缀等）")
+            finally:
                 try:
-                    await _refresh_command_context(account_id)
-                except Exception as e:  # noqa: BLE001
-                    await _log(
-                        redis, account_id, "warn",
-                        f"reload_global 失败: {type(e).__name__}: {e}",
-                    )
-                else:
-                    await _log(redis, account_id, "info", "reload_global 完成（命令前缀等）")
-    finally:
-        await pubsub.unsubscribe(GLOBAL_CHANNEL)
-        await pubsub.close()
+                    await pubsub.unsubscribe(GLOBAL_CHANNEL)
+                    await pubsub.close()
+                except Exception:  # noqa: BLE001
+                    pass
+        except Exception as exc:  # noqa: BLE001
+            # Redis 断连等异常 → 等 3s 后重新 subscribe
+            log.warning("worker_global listener 异常，3s 后重连: %s: %s", type(exc).__name__, exc)
+            await asyncio.sleep(3)
 
 
 async def _publish(redis, account_id: int, type_: str, **payload):

@@ -11,8 +11,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import time
+import uuid
 from dataclasses import asdict, dataclass, field
 from typing import Any, Literal
 
@@ -48,6 +50,8 @@ CMD_FETCH_AVATAR = "fetch_avatar"
 CMD_RELOAD_IGNORED = "reload_ignored"
 # RPC：拉 worker 内存中的最近活跃 peer（payload: {"reply_to": <一次性应答频道>}）
 CMD_GET_RECENT_PEERS = "get_recent_peers"
+# RPC：手动执行 scheduler 规则（payload: {"rule_id": int, "reply_to": <应答频道>}）
+CMD_EXECUTE_RULE = "execute_rule"
 
 # ── 事件类型（worker→主） ──────────────────────────────────────
 EVT_STATUS = "status"                      # payload: {status: active|paused|...}
@@ -56,6 +60,7 @@ EVT_RATELIMIT = "ratelimit"                # payload: {action, outcome, detail}
 EVT_PLUGIN_STATE = "plugin_state"          # payload: {feature_key, state, last_error?}
 EVT_LOGIN_REQUIRED = "login_required"      # session 失效
 EVT_PONG = "pong"
+EVT_ACK = "ack"                            # payload: {cmd_id, cmd_type, ok, error?}
 
 
 # ── 全局指令 ────────────────────────────────────────────────
@@ -89,6 +94,58 @@ def make_cmd(type_: str, **payload: Any) -> str:
 
 def make_event(type_: str, **payload: Any) -> str:
     return IPCMessage(type=type_, payload=payload).encode()
+
+
+def ack_channel(account_id: int, cmd_id: str) -> str:
+    return f"worker_ack:{account_id}:{cmd_id}"
+
+
+async def publish_cmd_with_ack(
+    redis: Any,
+    account_id: int,
+    type_: str,
+    *,
+    timeout: float = 2.0,
+    **payload: Any,
+) -> bool:
+    """发布 worker 指令并等待可选 ACK。
+
+    worker 离线或旧版本 worker 不回 ACK 时返回 False；调用方可继续依赖
+    DB 持久状态和周期 reconcile 收敛，不把用户请求硬失败。
+    """
+    cmd_id = str(uuid.uuid4())
+    reply_to = ack_channel(account_id, cmd_id)
+    pubsub = redis.pubsub()
+    try:
+        await pubsub.subscribe(reply_to)
+        await redis.publish(
+            cmd_channel(account_id),
+            make_cmd(type_, cmd_id=cmd_id, reply_to=reply_to, **payload),
+        )
+        deadline = time.monotonic() + max(0.1, timeout)
+        while time.monotonic() < deadline:
+            remaining = max(0.05, deadline - time.monotonic())
+            msg = await asyncio.wait_for(
+                pubsub.get_message(ignore_subscribe_messages=True, timeout=remaining),
+                timeout=remaining + 0.1,
+            )
+            if not msg:
+                continue
+            ack = IPCMessage.decode(msg["data"])
+            if ack.type == EVT_ACK and ack.payload.get("cmd_id") == cmd_id:
+                return bool(ack.payload.get("ok", False))
+        return False
+    except TimeoutError:
+        return False
+    finally:
+        try:
+            await pubsub.unsubscribe(reply_to)
+        finally:
+            close = getattr(pubsub, "aclose", None) or getattr(pubsub, "close", None)
+            if close is not None:
+                ret = close()
+                if hasattr(ret, "__await__"):
+                    await ret
 
 
 # Worker -> 主进程：限速事件结构（也用于直接写 RATELIMIT_EVENT_STREAM）

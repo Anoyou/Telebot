@@ -93,6 +93,8 @@ class Plugin:
     display_name: str = ""
     # 声明插件需要监听的消息方向；loader 据此决定是否向该插件派发对应事件
     message_channels: set[str] = {"incoming"}
+    # 默认只允许账号本人/授权 sudo 触发 on_message；需要处理群内普通成员消息的插件应显式设为 False
+    owner_only: bool = True
     # 插件想暴露的 TG 内命令：cmd_name -> async handler
     # handler 签名: (client, event, args, account_id, ctx) -> None
     commands: dict[str, Callable[..., Awaitable[None]]] = {}

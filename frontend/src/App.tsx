@@ -10,6 +10,8 @@ import { AccountList } from "@/pages/Accounts/List";
 import { AccountWizard } from "@/pages/Accounts/Wizard";
 import { AccountDetail } from "@/pages/Accounts/Detail";
 import { AutoReplyConfig } from "@/pages/Features/AutoReply";
+import { AutorepeatConfig } from "@/pages/Features/Autorepeat";
+import { CodexImageConfigPage } from "@/pages/Features/CodexImageConfig";
 import { ForwardConfig } from "@/pages/Features/Forward";
 import { SchedulerConfig } from "@/pages/Features/Scheduler";
 import { Game24ConfigPage } from "@/pages/Features/Game24Config";
@@ -26,6 +28,8 @@ type AppErrorBoundaryState = { hasError: boolean };
 // 已知有专属配置页的 feature key 列表
 const FEATURE_CONFIG_PAGES: Record<string, { title: string; description: string }> = {
   auto_reply: { title: "自动回复", description: "不存在专属配置页路由" },
+  autorepeat: { title: "自动复读", description: "不存在专属配置页路由" },
+  codex_image: { title: "Codex 图片生成", description: "不存在专属配置页路由" },
   forward: { title: "消息转发", description: "不存在专属配置页路由" },
   scheduler: { title: "定时任务", description: "不存在专属配置页路由" },
   game24: { title: "24 点游戏", description: "不存在专属配置页路由" },
@@ -92,6 +96,8 @@ export default function App() {
             <Route path="new" element={<AccountWizard />} />
             <Route path=":aid" element={<AccountDetail />} />
             <Route path=":aid/features/auto_reply" element={<AutoReplyConfig />} />
+            <Route path=":aid/features/autorepeat" element={<AutorepeatConfig />} />
+            <Route path=":aid/features/codex_image" element={<CodexImageConfigPage />} />
             <Route path=":aid/features/forward" element={<ForwardConfig />} />
             <Route path=":aid/features/scheduler" element={<SchedulerConfig />} />
             <Route path=":aid/features/game24" element={<Game24ConfigPage />} />

@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 from datetime import UTC, datetime, timedelta
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from croniter import CroniterBadCronError, croniter
 from fastapi import APIRouter, HTTPException
@@ -20,6 +21,8 @@ from ..db.models.account import Account
 from ..db.models.feature import (
     BUILTIN_FEATURES,
     FEATURE_AUTO_REPLY,
+    FEATURE_AUTOREPEAT,
+    FEATURE_CODEX_IMAGE,
     FEATURE_FORWARD,
     FEATURE_SCHEDULER,
     Feature,
@@ -36,8 +39,10 @@ from ..schemas.rule import (
     RuleUpdate,
 )
 from ..services import audit
-from ..worker.ipc import CMD_RELOAD_CONFIG, cmd_channel, make_cmd
+from ..worker.ipc import CMD_RELOAD_CONFIG, cmd_channel, make_cmd, publish_cmd_with_ack
 from ..worker.plugins.builtin.auto_reply import _dry_run_match
+from ..worker.plugins.builtin.autorepeat.plugin import _dry_run_match as _autorepeat_dry_run_match
+from ..worker.plugins.builtin.codex_image.plugin import _dry_run_match as _codex_image_dry_run_match
 from ..worker.plugins.builtin.forward.plugin import _dry_run_match as _forward_dry_run_match
 
 log = logging.getLogger(__name__)
@@ -70,7 +75,9 @@ async def _notify_reload(aid: int) -> None:
     """规则变化后通知对应 worker 热加载。redis 不可用静默。"""
     try:
         redis = get_redis()
-        await redis.publish(cmd_channel(aid), make_cmd(CMD_RELOAD_CONFIG))
+        ok = await publish_cmd_with_ack(redis, aid, CMD_RELOAD_CONFIG)
+        if not ok:
+            log.debug("worker reload_config 未确认 aid=%s，将由周期 reconcile 收敛", aid)
     except Exception:  # noqa: BLE001
         log.debug("通知 worker reload 失败 aid=%s", aid, exc_info=True)
 
@@ -97,6 +104,32 @@ def _parse_scheduler_dt(raw: Any) -> datetime | None:
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=UTC)
     return dt.astimezone(UTC)
+
+
+async def _get_system_tz(db) -> ZoneInfo | None:
+    """从 system_setting 读取用户配置的时区。"""
+    from ..db.models.system import SystemSetting
+
+    row = await db.get(SystemSetting, "timezone")
+    if row and isinstance(row.value, dict):
+        tz_str = str(row.value.get("value", "")).strip()
+        if tz_str:
+            return ZoneInfo(tz_str)
+    return None
+
+
+def _croniter_next_dryrun(
+    expr: str, start_utc: datetime, tz: ZoneInfo | None
+) -> datetime | None:
+    """与 plugin._croniter_next 逻辑一致：按时区计算后返回 UTC。"""
+    try:
+        if tz is not None:
+            local_now = start_utc.astimezone(tz)
+            next_local: datetime = croniter(expr, local_now).get_next(datetime)
+            return next_local.astimezone(UTC)
+        return croniter(expr, start_utc).get_next(datetime)
+    except (CroniterBadCronError, ValueError):
+        return None
 
 
 # ─────────────────────────────────────────────────────
@@ -264,81 +297,276 @@ async def dry_run_rule(
     rule = await _load_rule(db, aid, key, rid)
     if key == FEATURE_AUTO_REPLY:
         chat_type = payload.sample_chat_type or "private"
+        cfg = rule.config or {}
         matched, output = _dry_run_match(
-            rule.config or {},
+            cfg,
             payload.sample_message,
             chat_type,
             payload.sample_chat_id,
         )
+        logs: list[dict[str, str]] = [
+            {"step": "scope", "msg": f"会话类型：{chat_type}"},
+            {"step": "scope", "msg": f"规则 scope：{cfg.get('scope', 'all')}"},
+        ]
+        if chat_type == "group" and payload.sample_chat_id:
+            logs.append({"step": "scope", "msg": f"样本 chat_id：{payload.sample_chat_id}"})
+        if cfg.get("scope") in ("group_specific", "groups"):
+            gids = cfg.get("group_ids", cfg.get("groups", []))
+            logs.append({"step": "scope", "msg": f"规则 group_ids：{gids}"})
+        logs.append({"step": "match", "msg": f"匹配模式：{cfg.get('match_mode', 'contains')}"})
+        logs.append({"step": "match", "msg": f"关键词：{cfg.get('keyword', '(any)')}"})
+        if not matched:
+            logs.append({"step": "result", "msg": "未命中：scope 检查或关键词匹配失败"})
+        else:
+            logs.append({"step": "result", "msg": "命中"})
         return RuleDryRunResponse(
             matched=matched,
             output=output,
-            detail={"feature": key, "rule_id": rid},
+            detail={"feature": key, "rule_id": rid, "logs": logs},
         )
     if key == FEATURE_FORWARD:
-        # forward 的 dry-run 只关心"源是否命中"，不真正下发任何消息
+        cfg = rule.config or {}
         matched, output = _forward_dry_run_match(
-            rule.config or {},
+            cfg,
             payload.sample_message,
             payload.sample_chat_id,
         )
+        logs = [
+            {"step": "source", "msg": f"source_kind：{cfg.get('source_kind', 'all')}"},
+        ]
+        sk = cfg.get("source_kind", "all")
+        if sk == "peers":
+            logs.append({"step": "source", "msg": f"source_peers：{cfg.get('source_peers', [])}"})
+            logs.append({"step": "source", "msg": f"样本 chat_id：{payload.sample_chat_id or '(未填)'}"})
+        elif sk == "keyword":
+            logs.append({"step": "source", "msg": f"关键词：{cfg.get('keyword', '')}"})
+            logs.append({"step": "source", "msg": f"样本文本长度：{len(payload.sample_message)}"})
+        elif sk == "duplicate":
+            logs.append({"step": "source", "msg": f"duplicate_window：{cfg.get('duplicate_window', 60)}s"})
+            logs.append({"step": "source", "msg": f"duplicate_threshold：{cfg.get('duplicate_threshold', 3)}"})
+        logs.append({"step": "mode", "msg": f"转发方式：{cfg.get('mode', 'forward_native')}"})
+        logs.append({"step": "mode", "msg": f"目标 chat_id：{cfg.get('target_chat_id', '(未设置)')}"})
+        if not matched:
+            logs.append({"step": "result", "msg": "未命中"})
+        else:
+            logs.append({"step": "result", "msg": "命中"})
         return RuleDryRunResponse(
             matched=matched,
             output=output,
-            detail={"feature": key, "rule_id": rid},
+            detail={"feature": key, "rule_id": rid, "logs": logs},
         )
     if key == FEATURE_SCHEDULER:
         cfg = rule.config or {}
         kind = str(cfg.get("kind") or "cron").lower()
         action = cfg.get("action") if isinstance(cfg.get("action"), dict) else {}
         now = datetime.now(UTC)
+        tz = await _get_system_tz(db)
         next_fire: datetime | None = None
+        logs: list[dict[str, str]] = [
+            {"step": "kind", "msg": f"触发类型：{kind}"},
+            {"step": "now", "msg": f"当前 UTC 时间：{now.isoformat()}"},
+        ]
+        if tz is not None:
+            logs.append({"step": "now", "msg": f"cron 解析时区：{tz}"})
+            logs.append({"step": "now", "msg": f"当前本地时间：{now.astimezone(tz).isoformat()}"})
 
         try:
             if kind == "once":
-                next_fire = _parse_scheduler_dt(cfg.get("fire_at"))
+                fire_at = _parse_scheduler_dt(cfg.get("fire_at"))
+                logs.append({"step": "once", "msg": f"fire_at：{fire_at.isoformat() if fire_at else '(无效)'}"})
+                next_fire = fire_at
+                if cfg.get("last_fire"):
+                    logs.append({"step": "once", "msg": "已执行过（last_fire 存在），跳过"})
+                elif fire_at and fire_at <= now:
+                    logs.append({"step": "once", "msg": "已到期，应触发"})
+                elif fire_at:
+                    logs.append({"step": "once", "msg": f"未到期，还差 {(fire_at - now).total_seconds():.0f}s"})
             elif kind == "interval":
                 interval_sec = int(cfg.get("interval_sec") or 0)
                 last_fire = _parse_scheduler_dt(cfg.get("last_fire"))
+                logs.append({"step": "interval", "msg": f"interval_sec：{interval_sec}"})
+                logs.append({"step": "interval", "msg": f"last_fire：{last_fire.isoformat() if last_fire else '(无，将立即触发)'}"})
                 if interval_sec > 0:
                     next_fire = (last_fire if last_fire is not None else now).astimezone(UTC)
                     if last_fire is not None:
                         next_fire = next_fire + timedelta(seconds=interval_sec)
+                        logs.append({"step": "interval", "msg": f"计算 next_fire：{next_fire.isoformat()}"})
+                    else:
+                        logs.append({"step": "interval", "msg": "首次运行，将立即触发"})
             else:
                 expr = str(cfg.get("cron") or "").strip()
+                logs.append({"step": "cron", "msg": f"cron 表达式：{expr or '(空)'}"})
+                logs.append({"step": "cron", "msg": f"已存 next_fire：{cfg.get('next_fire') or '(无，首次将只计算不触发)'}"})
                 if expr:
-                    next_fire = croniter(expr, now).get_next(datetime)
+                    next_fire = _croniter_next_dryrun(expr, now, tz)
+                    if next_fire:
+                        logs.append({"step": "cron", "msg": f"计算 next_fire(UTC)：{next_fire.isoformat()}"})
+                        if tz is not None:
+                            logs.append({"step": "cron", "msg": f"计算 next_fire(本地)：{next_fire.astimezone(tz).isoformat()}"})
+                    else:
+                        logs.append({"step": "cron", "msg": "cron 表达式无效"})
         except (ValueError, CroniterBadCronError) as exc:
+            logs.append({"step": "error", "msg": f"解析失败：{type(exc).__name__}: {exc}"})
             return RuleDryRunResponse(
                 matched=False,
                 output=None,
-                detail={"feature": key, "rule_id": rid, "error": f"{type(exc).__name__}: {exc}"},
+                detail={"feature": key, "rule_id": rid, "logs": logs, "error": str(exc)},
             )
 
-        due = bool(next_fire and next_fire <= now)
+        # action 详情
         action_type = str(action.get("type") or "send_message")
         target = action.get("target_chat_id")
+        logs.append({"step": "action", "msg": f"动作类型：{action_type}"})
+        logs.append({"step": "action", "msg": f"target_chat_id：{target or '(未设置)'}"})
+        if action_type == "call_llm":
+            logs.append({"step": "action", "msg": f"provider_id：{action.get('provider_id', '(未设置)')}"})
+        if action_type in ("send_message", "call_llm"):
+            da = action.get("delete_after")
+            if da:
+                logs.append({"step": "action", "msg": f"delete_after：{da}s"})
+
+        due = bool(next_fire and next_fire <= now)
         output = (
             f"would fire {action_type} to {target}"
             if due
             else f"next fire at {next_fire.isoformat() if next_fire else 'N/A'}"
         )
+        logs.append({"step": "result", "msg": f"{'应触发' if due else '未到期'}"})
+        # 运行时状态
+        logs.append({"step": "state", "msg": f"last_fire：{cfg.get('last_fire') or '(无)'}"})
+        logs.append({"step": "state", "msg": f"last_result：{cfg.get('last_result') or '(无)'}"})
+        err = cfg.get("last_error")
+        if err:
+            logs.append({"step": "state", "msg": f"last_error：{err}"})
+        logs.append({"step": "state", "msg": f"enabled：{cfg.get('enabled', True)}"})
         return RuleDryRunResponse(
             matched=due,
             output=output,
             detail={
                 "feature": key,
                 "rule_id": rid,
-                "kind": kind,
-                "next_fire": next_fire.isoformat() if next_fire else None,
-                "due": due,
+                "logs": logs,
             },
+        )
+    # ── autorepeat dry-run ──
+    if key == FEATURE_AUTOREPEAT:
+        cfg = rule.config or {}
+        matched, output = _autorepeat_dry_run_match(
+            cfg,
+            payload.sample_message,
+            payload.sample_chat_id,
+        )
+        logs = [
+            {"step": "target", "msg": f"目标群组：{cfg.get('target_chat_id', '(未设置)')}"},
+            {"step": "config", "msg": f"时间窗口：{cfg.get('time_window', 300)}s"},
+            {"step": "config", "msg": f"触发人数：{cfg.get('min_users', 5)}"},
+            {"step": "sample", "msg": f"样本 chat_id：{payload.sample_chat_id or '(未填)'}"},
+        ]
+        if not matched:
+            logs.append({"step": "result", "msg": "未命中"})
+        else:
+            logs.append({"step": "result", "msg": "命中"})
+        return RuleDryRunResponse(
+            matched=matched,
+            output=output,
+            detail={"feature": key, "rule_id": rid, "logs": logs},
+        )
+    # ── codex_image dry-run ──
+    if key == FEATURE_CODEX_IMAGE:
+        cfg = rule.config or {}
+        matched, output = _codex_image_dry_run_match(
+            cfg,
+            payload.sample_message,
+            payload.sample_chat_id,
+        )
+        logs = [
+            {"step": "auth", "msg": f"Token：{'已配置' if cfg.get('access_token') else '未配置'}"},
+            {"step": "config", "msg": f"模型：{cfg.get('model', 'gpt-5.4')}"},
+            {"step": "config", "msg": f"最大等待：{cfg.get('max_wait_seconds', 600)}s"},
+            {"step": "sample", "msg": f"提示词长度：{len(payload.sample_message)}"},
+        ]
+        if not matched:
+            logs.append({"step": "result", "msg": "未命中（缺 access_token）"})
+        else:
+            logs.append({"step": "result", "msg": "命中"})
+        return RuleDryRunResponse(
+            matched=matched,
+            output=output,
+            detail={"feature": key, "rule_id": rid, "logs": logs},
         )
     return RuleDryRunResponse(
         matched=False,
         output=None,
         detail={"feature": key, "note": "dry-run for this feature is not implemented yet"},
     )
+
+
+# ─────────────────────────────────────────────────────
+# 手动执行规则（仅 scheduler）
+# ─────────────────────────────────────────────────────
+@router.post(
+    "/api/accounts/{aid}/features/{key}/rules/{rid}/execute",
+    response_model=dict,
+)
+async def execute_rule(
+    aid: int,
+    key: str,
+    rid: int,
+    db: DBSession,
+    _user: CurrentUser,
+) -> dict[str, Any]:
+    """手动执行一条 scheduler 规则。
+
+    通过 IPC RPC 让 worker 端立即执行 rule 的 action，
+    等待结果返回（超时 15s）。
+    """
+    if key != FEATURE_SCHEDULER:
+        raise _bad("unsupported", "仅 scheduler 规则支持手动执行", 400)
+
+    await _ensure_account(db, aid)
+    rule = await db.get(Rule, rid)
+    if rule is None or rule.account_id != aid or rule.feature_key != key:
+        raise _bad("RULE_NOT_FOUND", "规则不存在", 404)
+
+    # 通过 IPC RPC 让 worker 执行
+    import asyncio
+    import secrets
+
+    from ..worker.ipc import CMD_EXECUTE_RULE, IPCMessage, cmd_channel, make_cmd
+
+    reply_channel = f"worker_reply:{aid}:exec_rule:{secrets.token_hex(8)}"
+    redis = get_redis()
+    if redis is None:
+        raise _bad("NO_REDIS", "Redis 不可用，无法连接 worker", 503)
+
+    pubsub = redis.pubsub()
+    try:
+        await pubsub.subscribe(reply_channel)
+        await redis.publish(
+            cmd_channel(aid),
+            make_cmd(CMD_EXECUTE_RULE, rule_id=rid, reply_to=reply_channel),
+        )
+        deadline = asyncio.get_event_loop().time() + 15.0
+        while True:
+            remaining = deadline - asyncio.get_event_loop().time()
+            if remaining <= 0:
+                return {"ok": False, "error": "worker 响应超时（可能未启动）"}
+            msg = await asyncio.wait_for(
+                pubsub.get_message(ignore_subscribe_messages=True, timeout=remaining),
+                timeout=remaining,
+            )
+            if msg is None or msg.get("type") != "message":
+                continue
+            payload = IPCMessage.decode(msg["data"]).payload
+            ok = bool(payload.get("ok"))
+            error = payload.get("error")
+            return {"ok": ok, "error": error}
+    finally:
+        try:
+            await pubsub.unsubscribe(reply_channel)
+            await pubsub.close()
+        except Exception:  # noqa: BLE001
+            pass
 
 
 # ─────────────────────────────────────────────────────

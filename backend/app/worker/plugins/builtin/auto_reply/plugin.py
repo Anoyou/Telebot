@@ -46,6 +46,7 @@ class AutoReplyPlugin(Plugin):
 
     key = FEATURE_AUTO_REPLY
     display_name = "自动回复"
+    owner_only = False
 
     async def on_message(
         self, ctx: PluginContext, event: events.NewMessage.Event

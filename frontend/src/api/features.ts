@@ -6,6 +6,7 @@ import type {
   RuleCreate,
   RuleDryRunRequest,
   RuleDryRunResponse,
+  RuleExecuteResponse,
   RuleOut,
   RuleUpdate,
 } from "@/api/types";
@@ -123,6 +124,17 @@ export async function dryRunRule(
   const { data } = await api.post<RuleDryRunResponse>(
     `/api/accounts/${aid}/features/${feature}/rules/${rid}/dry-run`,
     payload,
+  );
+  return data;
+}
+
+export async function executeRule(
+  aid: number,
+  feature: string,
+  rid: number,
+): Promise<RuleExecuteResponse> {
+  const { data } = await api.post<RuleExecuteResponse>(
+    `/api/accounts/${aid}/features/${feature}/rules/${rid}/execute`,
   );
   return data;
 }

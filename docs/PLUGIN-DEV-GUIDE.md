@@ -18,6 +18,12 @@
 10. [清理生命周期（cleanup）](#10-清理生命周期cleanup)
 11. [安全边界](#11-安全边界)
 12. [前端集成](#12-前端集成)
+    - [模式概览](#模式概览)
+    - [模式 A：规则驱动配置页](#模式-a规则驱动配置页forward--autoreply--scheduler--autorepeat)
+    - [模式 A 补充：后端 Dry-Run 适配](#模式-a-补充后端-dry-run-适配)
+    - [模式 B：单配置对象页](#模式-b单配置对象页game24)
+    - [模式 C：Schema 驱动弹窗](#模式-cschema-驱动弹窗configdialog)
+    - [适配自检清单](#适配自检清单)
 13. [调试建议](#13-调试建议)
 14. [安全与合规](#14-安全与合规)
 15. [完整示例](#15-完整示例)
@@ -509,18 +515,252 @@ Manifest 中的 `permissions` 字段声明插件需要的能力：
 
 ## 12. 前端集成
 
-### 新建插件页面
+插件前端配置页分三种模式，按复杂度递增：
 
-1. 创建 `frontend/src/pages/RemotePlugins/index.tsx`
-2. 创建 `frontend/src/api/remotePlugin.ts`
-3. 创建 `frontend/src/types/remotePlugin.ts`
-4. 在路由配置中添加 `/remote-plugins`
+### 模式概览
+
+| 模式 | 适用场景 | 典型插件 | 配置入口 |
+|------|---------|---------|---------|
+| **A — 规则驱动** | 每条规则独立配置，需 CRUD + 试运行 | forward、auto_reply、scheduler、autorepeat | 专属配置页 |
+| **B — 单配置对象** | 整个插件一份配置，无规则概念 | game24 | 专属配置页 |
+| **C — Schema 驱动** | 轻量插件，不需要专属页面 | 无 config_schema 的插件 / 远程插件 | ConfigDialog 弹窗 |
+
+**关键判断**：插件是否有 `config_schema` 且需要按「规则」管理多份配置？是 → 模式 A；只有一份全局/账号配置 → 模式 B；无专属页面需求 → 模式 C。
+
+---
+
+### 模式 A：规则驱动配置页（Forward / AutoReply / Scheduler / Autorepeat）
+
+规则驱动插件每条 rule 存储独立的 `config` JSON，通过 CRUD API 管理。前端专属页面提供：规则列表 + 创建/编辑对话框 + 试运行（dry-run）。
+
+#### 适配清单（6 处必改）
+
+| # | 文件 | 修改内容 |
+|---|------|---------|
+| 1 | `frontend/src/api/types.ts` | 添加 `XxxRuleConfig` 接口（描述单条规则的 config 字段） |
+| 2 | `frontend/src/pages/Features/XxxConfig.tsx` | **新建**：规则列表页（参考 `AutoReply.tsx` 或 `Forward.tsx`） |
+| 3 | `frontend/src/App.tsx` | ① import 新页面组件 ② 添加路由 `:aid/features/xxx` ③ 在 `FEATURE_CONFIG_PAGES` 中添加 key |
+| 4 | `frontend/src/pages/Accounts/Detail.tsx` | 在 `FEATURE_CONFIG_PAGE_KEYS` Set 中添加 key |
+| 5 | `frontend/src/pages/Extensions.tsx` | 在 `FEATURE_CONFIG_PAGE_KEYS` Set 中添加 key |
+| 6 | `backend/app/db/models/feature.py` | 添加 `FEATURE_XXX = "xxx"` 常量（如已有可跳过） |
+
+#### 1. types.ts — RuleConfig 接口
+
+```typescript
+// frontend/src/api/types.ts
+export interface AutorepeatRuleConfig {
+  target_chat_id: number;   // 必填
+  time_window?: number;     // 可选，默认 300
+  min_users?: number;       // 可选，默认 5
+}
+```
+
+接口字段应与 `manifest.py` 中 `config_schema.properties` 一一对应，必填字段不加 `?`。
+
+#### 2. 新建配置页面
+
+创建 `frontend/src/pages/Features/XxxConfig.tsx`，核心结构：
+
+```tsx
+// 标准页面骨架（以 AutoReply 为模板）
+import { useParams } from "react-router-dom";
+// ... UI 组件导入
+
+export function XxxConfig() {
+  const { aid } = useParams<{ aid: string }>();
+  const queryClient = useQueryClient();
+
+  // ① 规则列表查询
+  const { data: rules } = useQuery({
+    queryKey: ["rules", Number(aid), "xxx"],
+    queryFn: () => api.getRules(Number(aid), "xxx"),
+  });
+
+  // ② 创建/编辑对话框状态
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [editing, setEditing] = useState<RuleOut | null>(null);
+
+  // ③ CRUD mutations（create / update / delete）
+  // ④ 试运行 mutation（dry-run）
+  // ⑤ 表单渲染 + 规则表格
+}
+```
+
+**页面要素**：
+- 顶部：返回按钮 + 标题 + 新建按钮
+- 主体：规则表格（序号 / 关键字段 / 启用状态 / 操作按钮）
+- 对话框：创建/编辑表单，字段来自 RuleConfig
+- 试运行：选规则 → 填样本消息 → 显示命中结果
+
+#### 3. App.tsx — 路由 + 注册
+
+```tsx
+// ① import
+import { XxxConfig } from "@/pages/Features/XxxConfig";
+
+// ② 路由（在 <Route path=":aid/features/game24"> 之后添加）
+<Route path=":aid/features/xxx" element={<XxxConfig />} />
+
+// ③ FEATURE_CONFIG_PAGES 注册
+const FEATURE_CONFIG_PAGES: Record<string, { title: string; description: string }> = {
+  auto_reply: { title: "自动回复", description: "..." },
+  xxx:        { title: "插件显示名", description: "..." },
+  // ...
+};
+```
+
+路由路径格式固定为 `:aid/features/{plugin_key}`，`plugin_key` 必须与 `MANIFEST.key` 一致。
+
+#### 4 & 5. FEATURE_CONFIG_PAGE_KEYS — 两个入口点
+
+两个文件中的 `FEATURE_CONFIG_PAGE_KEYS` 必须同步添加：
+
+```tsx
+// Detail.tsx（账号详情页 → 插件列表"配置"按钮）
+const FEATURE_CONFIG_PAGE_KEYS = new Set([
+  "auto_reply", "autorepeat", "forward", "scheduler", "game24",
+  "xxx",  // ← 新增
+]);
+
+// Extensions.tsx（插件中心 → 账号插件"配置"按钮）
+const FEATURE_CONFIG_PAGE_KEYS = new Set([
+  "auto_reply", "autorepeat", "forward", "scheduler", "game24",
+  "xxx",  // ← 新增
+]);
+```
+
+**作用**：Set 中的 key 会让"配置"按钮跳转到专属页面路由 `/:aid/features/xxx`；
+不在 Set 中的 key 会弹 `ConfigDialog`（模式 C）。
+
+#### 6. feature.py — 后端常量
+
+```python
+# backend/app/db/models/feature.py
+FEATURE_XXX = "xxx"
+```
+
+此常量供 `rules.py` dry-run 分支和其它模块引用。
+
+---
+
+### 模式 A 补充：后端 Dry-Run 适配
+
+规则驱动页面通常需要试运行功能，后端需同步适配 `rules.py`：
+
+#### 插件侧导出 _dry_run_match
+
+```python
+# backend/app/worker/plugins/builtin/xxx/plugin.py
+
+def _dry_run_match(cfg: dict, text: str, chat_id: int | None = None) -> tuple[bool, str | None]:
+    """纯函数：给定规则 config + 样本消息，返回 (matched, output)。
+    不访问 DB / Redis / 网络，仅做模式匹配逻辑判断。
+    """
+    # 匹配逻辑（与 on_message 中使用的判断一致）
+    if cfg.get("target_chat_id") and chat_id == cfg["target_chat_id"]:
+        return True, "命中目标群组"
+    return False, None
+```
+
+```python
+# backend/app/worker/plugins/builtin/xxx/__init__.py
+from .plugin import _dry_run_match  # noqa: F401 — 供 API dry-run 导入
+```
+
+#### rules.py — 添加 dry-run 分支
+
+```python
+# backend/app/api/rules.py
+
+# ① import
+from ..db.models.feature import FEATURE_XXX
+from ..worker.plugins.builtin.xxx.plugin import _dry_run_match as _xxx_dry_run_match
+
+# ② 在 dry_run_rule() 函数中，在 fallback return 之前添加分支
+#    ⚠️ 必须放在最后的 `return RuleDryRunResponse(matched=False, ...)` 之前！
+
+if key == FEATURE_XXX:
+    cfg = rule.config or {}
+    matched, output = _xxx_dry_run_match(cfg, payload.sample_message, payload.sample_chat_id)
+    logs = [
+        {"step": "config", "msg": f"关键字段：{cfg.get('xxx_field', '(未设置)')}"},
+        # ... 更多诊断步骤
+    ]
+    if not matched:
+        logs.append({"step": "result", "msg": "未命中"})
+    else:
+        logs.append({"step": "result", "msg": "命中"})
+    return RuleDryRunResponse(
+        matched=matched,
+        output=output,
+        detail={"feature": key, "rule_id": rid, "logs": logs},
+    )
+```
+
+**常见错误**：dry-run 分支放在 `return RuleDryRunResponse(matched=False, ...)` 之后 → 永远不可达。
+**正确位置**：在所有已实现的 dry-run 分支之后、fallback return 之前。
+
+---
+
+### 模式 B：单配置对象页（Game24）
+
+只有一份配置、无规则列表的插件，使用专属页面但不需要 CRUD 和 dry-run：
+
+- 创建 `frontend/src/pages/Features/XxxConfig.tsx`，直接展示/编辑单个 config 对象
+- 其余适配步骤与模式 A 相同（App.tsx 路由 + FEATURE_CONFIG_PAGES + 两个 PAGE_KEYS）
+- 后端不需要 dry-run 分支
+
+---
+
+### 模式 C：Schema 驱动弹窗（ConfigDialog）
+
+无专属页面的插件，在"配置"按钮点击后弹出 `ConfigDialog`，自动根据 `manifest.py` 中的 `config_schema` 渲染表单：
+
+- `level: "global"` 的字段 → 全局配置区
+- `level: "account"` 或无 level → 账号配置区
+- **不需要**添加到 `FEATURE_CONFIG_PAGE_KEYS`，不需要创建页面文件
+- `config_schema` 写好即可，ConfigDialog 自动渲染
+
+```python
+# config_schema 示例（适用于 ConfigDialog 自动渲染）
+config_schema={
+    "type": "object",
+    "properties": {
+        "api_key": {
+            "type": "string",
+            "title": "API Key",
+            "level": "global",
+        },
+        "threshold": {
+            "type": "number",
+            "title": "阈值",
+            "default": 5,
+        },
+    },
+}
+```
+
+---
 
 ### 风格要求
 
 - 深色主题卡片布局
 - 与 TeleBot 现有页面风格一致
 - React + TypeScript + TailwindCSS
+- 新页面参考 `AutoReply.tsx`（规则驱动）或 `Game24Config.tsx`（单配置）的代码结构
+
+### 适配自检清单
+
+新增插件前端配置页后，逐项检查：
+
+- [ ] `types.ts` 中 `XxxRuleConfig` 接口与 `manifest.py` config_schema 字段一致
+- [ ] `App.tsx` 中路由路径 `:aid/features/{key}` 与插件 key 一致
+- [ ] `App.tsx` 中 `FEATURE_CONFIG_PAGES` 包含该 key
+- [ ] `Detail.tsx` 中 `FEATURE_CONFIG_PAGE_KEYS` 包含该 key
+- [ ] `Extensions.tsx` 中 `FEATURE_CONFIG_PAGE_KEYS` 包含该 key
+- [ ] 如需 dry-run：`plugin.py` 导出 `_dry_run_match`，`__init__.py` re-export，`rules.py` 在 fallback 之前添加分支
+- [ ] 如需 dry-run：`feature.py` 中有 `FEATURE_XXX` 常量
+- [ ] 前端 `pnpm build` 通过
 
 ---
 

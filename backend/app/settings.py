@@ -61,6 +61,17 @@ class Settings(BaseSettings):
     kill_switch: bool = False
     global_api_qps: int = 0  # 0 表示不限制
 
+    # ── LLM 成本控制 ───────────────────────────────────────────────
+    # 以下限制按账号生效，0 表示关闭该项限制。限制在 worker 调用 LLM 前检查，
+    # 防止 scheduler / sudo / 误配置高价模型造成不可追踪的成本飙升。
+    llm_per_minute_request_limit_per_account: int = 0
+    llm_daily_request_limit_per_account: int = 0
+    llm_daily_token_limit_per_account: int = 0
+    # cost_tier >= 3 视为高价模型；0 表示不限制。
+    llm_premium_daily_request_limit_per_account: int = 0
+    # 0 表示不覆盖调用方传入的 max_tokens。
+    llm_max_output_tokens: int = 0
+
     # ── 启动期自动迁移 ────────────────────────────────────────────
     # True = backend 启动时自动 ``alembic upgrade head``，把 DB schema 升到代码期望的版本
     #        适合单实例或开发环境

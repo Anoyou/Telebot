@@ -78,7 +78,7 @@ import { actionHint, actionLabel } from "@/lib/rate-actions";
 import type { ConfigSchema } from "@/components/plugin/ConfigDialog";
 
 // 功能列表从 feature-matrix API 动态获取，不再硬编码
-const FEATURE_CONFIG_PAGE_KEYS = new Set(["auto_reply", "forward", "scheduler", "game24"]);
+const FEATURE_CONFIG_PAGE_KEYS = new Set(["auto_reply", "autorepeat", "codex_image", "forward", "scheduler", "game24"]);
 
 function featureConfigPath(aid: number, key: string): string | null {
   if (!aid || !FEATURE_CONFIG_PAGE_KEYS.has(key)) return null;

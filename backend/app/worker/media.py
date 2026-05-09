@@ -44,6 +44,23 @@ def _doc_mime(msg: Any) -> str:
     return ""
 
 
+def _has_url_entity(msg: Any) -> bool:
+    """检查消息是否包含 URL 类型的 entity（表示用户发了链接）。
+
+    用于区分「用户主动上传的图」与「Telegram 从 URL 自动内联的预览图」。
+    典型场景：用户发送 ```,ai https://example.com/photo.jpg```，
+    Telegram 下载图片并以 MessageMediaPhoto 形式内联展示——
+    但这不是用户主动上传的图，不应触发 vision 路由。
+    """
+    entities = getattr(msg, "entities", None) or []
+    for e in entities:
+        # Telethon TL 类型名：MessageEntityUrl / MessageEntityTextUrl
+        e_type_name = type(e).__name__
+        if e_type_name in ("MessageEntityUrl", "MessageEntityTextUrl"):
+            return True
+    return False
+
+
 def message_has_image(msg: Any) -> bool:
     """判断一条 telethon Message 是否含**可识别的静态图**。
 
@@ -53,10 +70,37 @@ def message_has_image(msg: Any) -> bool:
     - ``sticker`` mime=image/webp  静态贴纸（动态贴纸 .tgs / video webm 不算——vision 模型读不了）
 
     不算图的：voice / video / video_note / animation(gif) / 动态贴纸 / poll 等。
+    不算图的：URL 网页预览缩略图（telethon msg.photo 会返回 web_preview.photo，
+              但这是 Telegram 自动生成的链接预览，不是用户主动发送的图片）。
+    不算图的：Telegram 从 URL 自动内联的图片（如直接发送 .jpg/.png 链接时，
+              Telegram 会下载图片并以 MessageMediaPhoto 形式展示，但这不是用户
+              主动上传的图，不应触发 vision 路由）。
     """
     if msg is None:
         return False
+    media_type_name = type(getattr(msg, "media", None)).__name__
+
+    # 排除 URL 预览缩略图：telethon 的 msg.photo 会包含 web_preview.photo，
+    # 但网页预览图不算用户主动发送的图，应跳过。
+    # 覆盖两种场景：
+    #   1. MessageMediaWebPage — 标准 URL 预览（原有逻辑）
+    #   2. MessageMediaPhoto + URL entity — Telegram 从 URL 自动内联的图片
+    #      （如用户发送 ,ai https://xxx.jpg 时 Telegram 下载图片并以 Photo 形式展示）
+    is_web_preview = media_type_name == "MessageMediaWebPage"
+    if is_web_preview:
+        return False
+
     if getattr(msg, "photo", None) is not None:
+        # 如果消息中有 URL 类型的 entity，且 media 是 MessageMediaPhoto，
+        # 很可能是 Telegram 自动从 URL 解析出的预览图，不算用户主动发送的图片。
+        # 典型场景：用户发送 ,ai https://example.com/photo.jpg，
+        # Telegram 自动下载图片并内联展示为 MessageMediaPhoto。
+        if media_type_name == "MessageMediaPhoto" and _has_url_entity(msg):
+            log.info(
+                "[media] skipping MessageMediaPhoto with URL entity — "
+                "likely auto-inlined preview, not user-uploaded image"
+            )
+            return False
         return True
     mime = _doc_mime(msg)
     # sticker 与 image-document 共用 document 字段；sticker 字段额外是 DocumentAttributeSticker

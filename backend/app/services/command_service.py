@@ -36,7 +36,7 @@ from ..schemas.command import (
     LLMProviderOut,
     LLMProviderUpdate,
 )
-from ..worker.ipc import CMD_RELOAD_COMMANDS, cmd_channel, make_cmd
+from ..worker.ipc import CMD_RELOAD_COMMANDS, publish_cmd_with_ack
 
 log = logging.getLogger(__name__)
 
@@ -523,7 +523,9 @@ async def notify_reload(account_ids: int | Sequence[int]) -> None:
     failed: list[int] = []
     for aid in aids:
         try:
-            await redis.publish(cmd_channel(aid), make_cmd(CMD_RELOAD_COMMANDS))
+            ok = await publish_cmd_with_ack(redis, int(aid), CMD_RELOAD_COMMANDS)
+            if not ok:
+                log.debug("worker reload_commands 未确认 aid=%s，将由周期 reconcile 收敛", aid)
         except Exception:  # noqa: BLE001
             failed.append(int(aid))
             log.exception("通知 worker reload_commands 失败 aid=%s", aid)

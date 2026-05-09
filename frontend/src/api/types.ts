@@ -203,6 +203,10 @@ export interface RuleDryRunResponse {
   output?: string | null;
   detail?: Record<string, unknown> | null;
 }
+export interface RuleExecuteResponse {
+  ok: boolean;
+  error?: string | null;
+}
 export interface RuleCopyRequest {
   rule_ids: number[];
   target_account_ids: number[];
@@ -342,13 +346,14 @@ export interface AutoReplyRuleConfig {
 //   - all       —— 任何 incoming 消息都进流水线
 //   - peers     —— 仅 source_peers 中的 chat_id 命中（支持 -100 / -bare / bare 等价展开）
 //   - keyword   —— 文本（小写）包含 keyword 时命中；空 keyword 视为不命中
+//   - duplicate —— 复读检测：同一 chat 内 ≥N 个不同用户发送相同文本时触发，每日去重
 //
 // mode：
 //   - forward_native  —— 原生转发，保留原作者署名
 //   - copy_text       —— 复制文本，不显示原作者，可加 header 前缀
 //   - quote           —— 引用包装，自动 "📨 来自 X" 前缀
 //   - link_only       —— 公开超级群可点链接（私群退化为可读字符串）
-export type ForwardSourceKind = "all" | "peers" | "keyword";
+export type ForwardSourceKind = "all" | "peers" | "keyword" | "duplicate";
 export type ForwardMode =
   | "forward_native"
   | "copy_text"
@@ -360,6 +365,10 @@ export interface ForwardRuleConfig {
   /** chat_id 列表；前端用 string[] 编辑，提交时转成 number[] */
   source_peers?: number[];
   keyword?: string;
+  /** duplicate 模式：时间窗口（秒），默认 60 */
+  duplicate_window?: number;
+  /** duplicate 模式：不同用户数阈值（同一用户多次发送只算1人），默认 3 */
+  duplicate_threshold?: number;
   /** 必填：目标 chat_id（Telethon 形式） */
   target_chat_id: number;
   mode: ForwardMode;
@@ -367,6 +376,26 @@ export interface ForwardRuleConfig {
   include_media?: boolean;
   /** copy / quote / link_only 模式下的固定前缀 */
   header?: string;
+}
+
+// ===== 自动复读 =====
+// 与后端 ``builtin/autorepeat/manifest.py:config_schema`` 对齐的 rule.config 结构
+export interface AutorepeatRuleConfig {
+  /** 必填：监控的群组 chat_id（Telethon marked ID 格式） */
+  target_chat_id: number;
+  /** 时间窗口（秒），默认 300 */
+  time_window?: number;
+  /** 触发复读所需的不同用户数，默认 5 */
+  min_users?: number;
+}
+
+export interface CodexImageConfig {
+  /** Codex Access Token，用于鉴权 */
+  access_token: string;
+  /** 模型名称，默认 gpt-5.4 */
+  model?: string;
+  /** 最大等待时间（秒），默认 600 */
+  max_wait_seconds?: number;
 }
 
 // ===================== 日志 =====================
@@ -394,6 +423,14 @@ export interface SystemSettings {
   command_prefix: string;
   kill_switch?: boolean;
   api_qps_total?: number;
+  /** IANA 时区标识，如 "Asia/Shanghai"；空字符串 = 使用浏览器本地时区 */
+  timezone?: string;
+  llm_limits?: {
+    per_minute: number;
+    daily_requests: number;
+    daily_tokens: number;
+    premium_daily: number;
+  };
 }
 
 // ===================== 系统健康概览（Dashboard 用）=====================
@@ -828,6 +865,8 @@ export interface SchedulerActionConfig {
   prompt?: string;
   system_prompt?: string;
   max_tokens?: number;
+  /** 触发后多少秒自动删除发送的消息，0 或留空 = 不删除，上限 3600 */
+  delete_after?: number | null;
 }
 
 export interface SchedulerRuleConfig {

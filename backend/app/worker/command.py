@@ -1063,10 +1063,16 @@ async def _run_template(client, event, args, tpl: dict[str, Any], account_id: in
         return
 
     if t == "run_plugin":
-        # V1 占位：等 Sprint2 #4 插件模块化完成后再接
-        await event.edit(
-            f"⏳ run_plugin 占位：插件={cfg.get('plugin_key')!r}, 方法={cfg.get('method')!r}"
-        )
+        plugin_key = str(cfg.get("plugin_key") or "").strip()
+        method = str(cfg.get("method") or cfg.get("command") or plugin_key).strip()
+        if not plugin_key or not method:
+            await event.edit("✗ run_plugin 需要配置 plugin_key 和 method/command")
+            return
+        pcmd = _PLUGIN_COMMANDS.get(method)
+        if pcmd is None or pcmd.owner_plugin_key != plugin_key:
+            await event.edit(f"✗ 插件命令不可用：{plugin_key}.{method}")
+            return
+        await pcmd.handler(client, event, args, account_id)
         return
 
     await event.edit(f"✗ 未知模板类型：{t}")
@@ -1219,6 +1225,7 @@ async def _run_ai(client, event, args, tpl: dict[str, Any], account_id: int) -> 
     else:
         routing_mode = str(cfg.get("routing_mode") or "fixed").lower()
     routing_note: str | None = None  # 自动路由时附加在结尾的说明
+    routing_matched_tag: str | None = None
     chosen_provider_id = (
         inline_provider_override
         if inline_provider_override is not None
@@ -1251,6 +1258,7 @@ async def _run_ai(client, event, args, tpl: dict[str, Any], account_id: int) -> 
             return
         chosen_provider_id = decision.provider_id
         routing_note = f"auto · {decision.reason}"
+        routing_matched_tag = getattr(decision, "matched_tag", None)
     elif inline_provider_override is not None:
         # 给 footer 一个标记，让用户知道是 inline 覆盖来的（而不是模板默认）
         prov_name = _ctx.providers.get(chosen_provider_id, {}).get("name") or chosen_provider_id
@@ -1383,34 +1391,28 @@ async def _run_ai(client, event, args, tpl: dict[str, Any], account_id: int) -> 
     except Exception:  # noqa: BLE001
         pass
 
-    # build_client 在内部解密 api_key；导入时点放函数内，避免循环依赖
+    # build_client 在内部解密 api_key；导入时点放函数内，避免循环依赖。
+    # complete 调用走 llm_runtime，以获得 retry + fallback；STT 仍直接使用选中的 provider。
     from ..db.models.command import LLMProvider as LLMProviderModel
-    from ..services.llm_client import LLMCallFailed, LLMError, build_client
+    from ..services.llm_client import LLMCallFailed, LLMError, LLMResult, build_client
     from ..services.llm_dto import LLMProviderDTO
+    from ..services.llm_runtime import build_fallback_chain, call_with_fallback
 
     # 使用 LLMProviderDTO 替代手搓 fake ORM row
-    provider_dto = LLMProviderDTO(
-        id=int(chosen_provider_id),
-        name=str(provider_dict.get("name", "")),
-        provider=str(provider_dict.get("provider", "")),
-        api_format=provider_dict.get("api_format"),
-        base_url=provider_dict.get("base_url"),
-        default_model=str(provider_dict.get("default_model", "")),
-        api_key_enc=provider_dict.get("api_key_enc"),
-        proxy_url=provider_dict.get("proxy_url"),
-        modality=str(provider_dict.get("modality", "text")),
-        tags=list(provider_dict.get("tags") or []),
-        cost_tier=int(provider_dict.get("cost_tier", 2) or 2),
-    )
-
-    try:
-        llm = build_client(
-            _dto_to_fake_row(provider_dto),
-            override_model=override_model,
-            proxy_url=provider_dict.get("proxy_url"),
-        )
-    except Exception as e:  # noqa: BLE001
-        await event.edit(f"✗ AI 客户端构造失败：{type(e).__name__}: {str(e)[:120]}")
+    provider_dtos: dict[int, LLMProviderDTO] = {}
+    for pid, raw_provider in (_ctx.providers or {}).items():
+        try:
+            data = dict(raw_provider)
+            data["id"] = int(data.get("id") or pid)
+            dto = LLMProviderDTO.from_dict(data)
+            if image_bytes_list and dto.modality.lower() not in ("vision", "multimodal"):
+                continue
+            provider_dtos[dto.id] = dto
+        except Exception:  # noqa: BLE001
+            continue
+    provider_dto = provider_dtos.get(int(chosen_provider_id))
+    if provider_dto is None:
+        await event.edit(f"✗ AI provider 配置异常：provider_id={chosen_provider_id} 不可用于当前请求")
         return
 
     # ── STT：先把音频转写为文字，再走标准 chat 流程 ──────────
@@ -1419,6 +1421,11 @@ async def _run_ai(client, event, args, tpl: dict[str, Any], account_id: int) -> 
     if has_any_audio and not has_any_image:
         stt_model = str(cfg.get("transcribe_model") or "whisper-1").strip()
         try:
+            llm = build_client(
+                _dto_to_fake_row(provider_dto),
+                override_model=override_model,
+                proxy_url=provider_dto.proxy_url,
+            )
             transcribed_text = await llm.transcribe(audio_data, model=stt_model)
         except NotImplementedError:
             await event.edit(
@@ -1466,13 +1473,49 @@ async def _run_ai(client, event, args, tpl: dict[str, Any], account_id: int) -> 
         else:
             user_msg = user_q or "请简要总结你能想到的内容"
 
+    fallback_provider_id_raw = cfg.get("routing_fallback_provider_id")
+    if routing_mode == "auto":
+        fallback_provider_id_raw = cfg.get("routing_fallback_provider_id") or provider_id
     try:
-        result = await llm.complete(
+        fallback_provider_id = int(fallback_provider_id_raw) if fallback_provider_id_raw else None
+    except (TypeError, ValueError):
+        fallback_provider_id = None
+
+    chain = build_fallback_chain(
+        provider_dto,
+        providers=provider_dtos,
+        fallback_provider_id=fallback_provider_id,
+        matched_tag=routing_matched_tag,
+    )
+
+    def _build_runtime_client(
+        dto: LLMProviderDTO,
+        *,
+        override_model: str | None = None,
+        proxy_url: str | None = None,
+    ):
+        return build_client(
+            _dto_to_fake_row(dto),
+            override_model=override_model,
+            proxy_url=proxy_url or dto.proxy_url,
+        )
+
+    try:
+        result, used_provider_dto, used_fallback = await call_with_fallback(
+            chain,
             system,
             user_msg,
+            override_model=override_model,
             max_tokens=max_tokens,
             images=image_bytes_list or None,
+            client_factory=_build_runtime_client,
+            account_id=account_id,
+            source=f"command:{tpl.get('name') or 'ai'}",
         )
+        if used_provider_dto.id != provider_dto.id:
+            provider_dict = _ctx.providers.get(used_provider_dto.id) or used_provider_dto.to_dict()
+            fb_note = f"fallback → @{used_provider_dto.name or used_provider_dto.id}"
+            routing_note = f"{routing_note} · {fb_note}" if routing_note else fb_note
     except LLMCallFailed as e:
         # message 已在 LLMError 内脱敏；LLMCallFailed 包含 provider 信息
         err_msg = str(e)
@@ -1487,6 +1530,185 @@ async def _run_ai(client, event, args, tpl: dict[str, Any], account_id: int) -> 
     except Exception as e:  # noqa: BLE001
         await event.edit(f"✗ AI 调用失败：{type(e).__name__}: {str(e)[:120]}")
         return
+
+    # ── 处理 LLM 生成的图片（如 Grok 文生图）────────────────────
+    if result.image_urls or result.image_data:
+        import base64 as _b64
+        import httpx as _httpx
+        import io as _io
+        import os as _os
+        gen_image_bytes: list[bytes] = []
+        gen_image_exts: list[str] = []  # 与 gen_image_bytes 一一对应的文件扩展名
+
+        # 优先使用 grok-bridge 通过 Safari 抓取的 base64 图片数据
+        # （Safari 有 grok.com 的 cookie，可以下载私有图片；直接
+        # HTTP 下载 assets.grok.com 会因缺少认证而 403）
+        for data_uri in result.image_data[:3]:
+            try:
+                # data URI 格式: "data:image/jpeg;base64,/9j/4AAQ..."
+                if data_uri and data_uri.startswith("data:") and ";base64," in data_uri:
+                    # 从 data URI 中提取 MIME 类型，推断文件扩展名
+                    mime_part = data_uri[len("data:"):data_uri.index(";")]
+                    ext_map = {"image/jpeg": ".jpg", "image/png": ".png",
+                               "image/webp": ".webp", "image/gif": ".gif",
+                               "image/svg+xml": ".svg"}
+                    img_ext = ext_map.get(mime_part, ".jpg")
+
+                    b64_part = data_uri.split(";base64,", 1)[1]
+                    img_bytes = _b64.b64decode(b64_part)
+                    if len(img_bytes) > 100:
+                        gen_image_bytes.append(img_bytes)
+                        gen_image_exts.append(img_ext)
+                        log.info("[ai] Got generated image from base64 data: %d bytes (%s)", len(img_bytes), mime_part)
+                    else:
+                        log.warning("[ai] Base64 decoded image too small: %d bytes", len(img_bytes))
+                else:
+                    log.warning("[ai] Invalid data URI format, skipping")
+            except Exception as e:
+                log.warning("[ai] Failed to decode base64 image data: %s: %s", type(e).__name__, e)
+
+        # 如果 base64 数据不可用或全部解码失败，尝试 HTTP 下载
+        if not gen_image_bytes and result.image_urls:
+            # 下载图片：优先使用 provider 配置的 proxy_url，其次手动从
+            # 环境变量读取代理（HTTP_PROXY/HTTPS_PROXY）。
+            # 注意：不使用 httpx 的 trust_env=True，因为 NO_PROXY 中的
+            # IPv6 CIDR（如 ::1/128）会导致 httpx URL 解析崩溃
+            # （InvalidURL: Invalid port ':1'）。
+            img_proxy = provider_dict.get("proxy_url")
+            if not img_proxy:
+                for _ek in ("HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy", "ALL_PROXY", "all_proxy"):
+                    _ev = _os.environ.get(_ek)
+                    if _ev:
+                        img_proxy = _ev
+                        break
+            for img_url in result.image_urls[:3]:
+                try:
+                    dl_kwargs: dict[str, object] = {"timeout": _httpx.Timeout(30.0, connect=10.0)}
+                    if img_proxy:
+                        # httpx trust_env=True 会解析 NO_PROXY 中的 IPv6 CIDR
+                        # （如 ::1/128），导致 URL 解析崩溃（Invalid port ':1'）。
+                        # 因此用 trust_env=False + mounts 传入代理 transport，绕过
+                        # proxy_map 构建中对 NO_PROXY 的解析。
+                        dl_kwargs["trust_env"] = False
+                        dl_kwargs["mounts"] = {"all://": _httpx.AsyncHTTPTransport(proxy=img_proxy)}
+                    else:
+                        dl_kwargs["trust_env"] = False
+                    async with _httpx.AsyncClient(**dl_kwargs) as dl_cli:
+                        img_resp = await dl_cli.get(img_url)
+                        if img_resp.status_code == 200 and len(img_resp.content) > 100:
+                            # 从 URL 或 Content-Type 推断扩展名
+                            _url_ext = _os.path.splitext(_os.path.basename(img_url.split("?")[0]))[1].lower()
+                            if _url_ext not in (".jpg", ".jpeg", ".png", ".webp", ".gif"):
+                                _ct = img_resp.headers.get("content-type", "")
+                                _url_ext = ".jpg" if "png" not in _ct else ".png" if "jpeg" not in _ct else ".jpg"
+                            gen_image_bytes.append(img_resp.content)
+                            gen_image_exts.append(_url_ext)
+                        else:
+                            log.warning(
+                                "[ai] Generated image download failed: url=%s status=%d size=%d",
+                                img_url[:80], img_resp.status_code, len(img_resp.content),
+                            )
+                except Exception as e:
+                    log.warning("[ai] Failed to download generated image: %s: %s url=%s", type(e).__name__, e, img_url[:80])
+
+        if gen_image_bytes:
+            # 渲染文字 caption（复用现有模板系统）
+            from ..services.llm_format import DEFAULT_TEMPLATE, render_output
+            template = cfg.get("output_template") or DEFAULT_TEMPLATE
+            raw_format = (cfg.get("output_format") or "html").lower()
+            output_format = "html" if raw_format == "markdownv2" else raw_format
+            escape_values = bool(cfg.get("escape_values", True))
+            render_ctx = {
+                "answer": result.text or "",
+                "question": user_q,
+                "quoted": replied_text or "",
+                "model": result.model or "",
+                "provider": provider_dict.get("name", ""),
+                "provider_kind": provider_dict.get("provider", ""),
+                "in_tokens": result.input_tokens,
+                "out_tokens": result.output_tokens,
+                "total_tokens": result.input_tokens + result.output_tokens,
+                "routing_note": (routing_note or "").replace("auto · ", ""),
+            }
+            if escape_values and output_format == "html":
+                escape_format: str | None = "html"
+            else:
+                escape_format = None
+            caption = render_output(template, render_ctx, escape_format=escape_format)
+            # Telegram caption 上限 1024 字符
+            if len(caption) > 1024:
+                caption = caption[:1020] + "..."
+            parse_mode_arg: str | None
+            if output_format == "html":
+                parse_mode_arg = "html"
+            elif output_format in ("markdown", "markdown_v1", "md"):
+                parse_mode_arg = "md"
+            else:
+                parse_mode_arg = None
+            # 发送第一张图 + caption
+            # 用 BytesIO 包装并设置 .name 属性，让 Telethon 根据后缀识别为图片
+            # （否则纯 bytes 会被当作无名文件发送，TG 显示为 "unnamed" 而非图片预览）
+            _buf0 = _io.BytesIO(gen_image_bytes[0])
+            _buf0.name = f"grok_image{gen_image_exts[0]}" if gen_image_exts else "grok_image.jpg"
+            try:
+                await client.send_file(
+                    event.chat_id, _buf0,
+                    caption=caption, parse_mode=parse_mode_arg,
+                )
+            except Exception:
+                try:
+                    await client.send_file(
+                        event.chat_id, _buf0,
+                        caption=caption[:1024],
+                    )
+                except Exception:
+                    try:
+                        await event.edit(caption[:4000])
+                    except Exception:
+                        pass
+            # 后续图片无 caption
+            for idx, extra_bytes in enumerate(gen_image_bytes[1:], start=1):
+                try:
+                    _buf = _io.BytesIO(extra_bytes)
+                    _ext = gen_image_exts[idx] if idx < len(gen_image_exts) else ".jpg"
+                    _buf.name = f"grok_image{_ext}"
+                    await client.send_file(event.chat_id, _buf)
+                except Exception:
+                    pass
+            # 删掉 "思考中..." 命令消息
+            try:
+                await event.delete()
+            except Exception:
+                pass
+            return
+        # 图片下载全部失败 → 在文本中附加图片 URL，而不是静默丢图
+        # （用户看到 HTML 格式的文本就是因为这里静默 fall through 了）
+        log.warning(
+            "[ai] All %d generated image(s) failed to download; "
+            "appending URL links to text response. URLs: %s",
+            len(result.image_urls),
+            [u[:80] for u in result.image_urls[:3]],
+        )
+        if result.image_urls and not result.text:
+            result = LLMResult(  # type: ignore[call-arg]
+                text="图片已生成但下载失败，请手动查看：\n"
+                     + "\n".join(f"· {u}" for u in result.image_urls[:3]),
+                model=result.model,
+                input_tokens=result.input_tokens,
+                output_tokens=result.output_tokens,
+                image_urls=[],
+                image_data=[],
+            )
+        elif result.image_urls:
+            result = LLMResult(  # type: ignore[call-arg]
+                text=result.text + "\n\n📷 图片已生成但下载失败：\n"
+                     + "\n".join(f"· {u}" for u in result.image_urls[:3]),
+                model=result.model,
+                input_tokens=result.input_tokens,
+                output_tokens=result.output_tokens,
+                image_urls=[],
+                image_data=[],
+            )
 
     # ── 用 output_template 渲染最终消息 ─────────────────────────
     # 默认走 HTML：Telethon 1.36 的 sanitize_parse_mode 不接受 'markdownv2' 字符串
@@ -1610,7 +1832,8 @@ async def _run_ai(client, event, args, tpl: dict[str, Any], account_id: int) -> 
 def make_command_handler(client: TelegramClient, account_id: int, prefix: str | None = None):
     """创建并注册 TG 命令派发 handler。
 
-    监听 ``outgoing=True`` 即只对本人发送的消息生效，避免误触发其他用户的同前缀消息。
+    普通命令监听 ``outgoing=True``；sudo 命令额外监听 ``incoming=True``，
+    允许白名单用户用 sudo_prefix 触发命令。
 
     前缀热加载：handler 每次拦截消息时**从 ctx 读 prefix**，不再用闭包里固定 pattern。
     系统设置改前缀 → 主进程广播 IPC ``reload_global`` → runtime 重拉 ctx → 下一条消息立刻按
@@ -1618,38 +1841,23 @@ def make_command_handler(client: TelegramClient, account_id: int, prefix: str | 
     """
     fallback_prefix = prefix or settings.command_prefix or ","
 
-    @client.on(events.NewMessage(outgoing=True))
-    async def _h(event):
-        text = event.raw_text or ""
-        
-        # 先尝试 sudo_prefix 匹配（sudo 模式）
-        sudo_p = (_ctx.sudo_prefix if _ctx else "") or "."
-        pattern_sudo = re.compile(rf"^{re.escape(sudo_p)}(\w+)(?:\s+(.*))?$", re.S)
-        m = pattern_sudo.match(text)
-        use_sudo = False
-        if m:
-            use_sudo = True
-            cmd = m.group(1)
-            args_raw = (m.group(2) or "").strip()
-        else:
-            # 再尝试 command_prefix 匹配（普通模式）
-            p = (_ctx.command_prefix if _ctx else "") or fallback_prefix
-            pattern = re.compile(rf"^{re.escape(p)}(\w+)(?:\s+(.*))?$", re.S)
-            m = pattern.match(text)
-            if not m:
-                return
-            cmd = m.group(1)
-            args_raw = (m.group(2) or "").strip()
-        
-        args = args_raw.split() if args_raw else []
-        
-        # 如果是 sudo 模式，检查权限
-        if use_sudo:
-            allowed, error_msg = await _check_sudo_permission(event, cmd, account_id)
-            if not allowed:
-                await event.edit(f"✗ Sudo 权限拒绝：{error_msg}")
-                return
+    class _IncomingSudoEvent:
+        """把 incoming sudo 的 edit() 转成 respond()，避免尝试编辑他人消息。"""
 
+        def __init__(self, inner):
+            self._inner = inner
+
+        def __getattr__(self, name):
+            return getattr(self._inner, name)
+
+        async def edit(self, *args, **kwargs):
+            responder = getattr(self._inner, "respond", None) or getattr(self._inner, "reply", None)
+            if responder is None:
+                return None
+            return await responder(*args, **kwargs)
+
+    async def _dispatch(event, cmd: str, args_raw: str, *, help_prefix: str) -> None:
+        args = args_raw.split() if args_raw else []
         # 1. 内置命令优先
         primary = _BUILTIN_ALIAS_TO_PRIMARY.get(cmd)
         item = _BUILTIN.get(primary) if primary else None
@@ -1721,8 +1929,48 @@ def make_command_handler(client: TelegramClient, account_id: int, prefix: str | 
 
         # 4. 未知命令
         try:
-            await event.edit(f"未知命令：{cmd}（{p}help 查看可用列表）")
+            await event.edit(f"未知命令：{cmd}（{help_prefix}help 查看可用列表）")
         except Exception:
             pass
+
+    async def _handle(event, *, allow_normal: bool, incoming_sudo: bool = False):
+        text = event.raw_text or ""
+        sudo_p = (_ctx.sudo_prefix if _ctx else "") or "."
+        pattern_sudo = re.compile(rf"^{re.escape(sudo_p)}(\w+)(?:\s+(.*))?$", re.S)
+        m = pattern_sudo.match(text)
+        if m:
+            cmd = m.group(1)
+            args_raw = (m.group(2) or "").strip()
+            allowed, error_msg = await _check_sudo_permission(event, cmd, account_id)
+            if not allowed:
+                if incoming_sudo:
+                    try:
+                        await event.respond(f"✗ Sudo 权限拒绝：{error_msg}")
+                    except Exception:
+                        pass
+                else:
+                    await event.edit(f"✗ Sudo 权限拒绝：{error_msg}")
+                return
+            dispatch_event = _IncomingSudoEvent(event) if incoming_sudo else event
+            await _dispatch(dispatch_event, cmd, args_raw, help_prefix=sudo_p)
+            return
+
+        if not allow_normal:
+            return
+
+        p = (_ctx.command_prefix if _ctx else "") or fallback_prefix
+        pattern = re.compile(rf"^{re.escape(p)}(\w+)(?:\s+(.*))?$", re.S)
+        m = pattern.match(text)
+        if not m:
+            return
+        await _dispatch(event, m.group(1), (m.group(2) or "").strip(), help_prefix=p)
+
+    @client.on(events.NewMessage(incoming=True))
+    async def _sudo_incoming_h(event):
+        await _handle(event, allow_normal=False, incoming_sudo=True)
+
+    @client.on(events.NewMessage(outgoing=True))
+    async def _h(event):
+        await _handle(event, allow_normal=True, incoming_sudo=False)
 
     return _h

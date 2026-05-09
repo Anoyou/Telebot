@@ -18,14 +18,21 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta
 import inspect
-from typing import TYPE_CHECKING, Any, Callable, Coroutine
+from typing import TYPE_CHECKING, Any, Awaitable, Callable, Coroutine
+
+from sqlalchemy import func, select
 
 if TYPE_CHECKING:
     from .llm_client import LLMClient, LLMResult
     from .llm_dto import LLMProviderDTO
 
 from .llm_client import build_client_from_dto
+from ..db.base import AsyncSessionLocal
+from ..db.models.llm_usage import LLMUsage
+from ..db.models.system import SystemSetting
+from ..settings import settings
 
 log = logging.getLogger(__name__)
 
@@ -43,6 +50,7 @@ _RETRY_MAX_DELAY = 30.0
 class UsageRecord:
     """单次 LLM 调用的 usage 记录。"""
     provider_id: int | None = None
+    account_id: int | None = None
     provider_name: str | None = None
     model: str | None = None
     input_tokens: int = 0
@@ -50,6 +58,7 @@ class UsageRecord:
     latency_ms: int = 0
     success: bool = False
     error_type: str | None = None
+    source: str | None = None
     used_fallback: bool = False
     fallback_chain: list[str] = field(default_factory=list)
 
@@ -173,6 +182,9 @@ async def call_with_fallback(
     *,
     # 隐私控制
     log_prompt_preview: bool = False,  # 设为 True 时只记录前 100 字符
+    client_factory: Callable[..., Any | Awaitable[Any]] | None = None,
+    account_id: int | None = None,
+    source: str | None = None,
     # 调试
     _debug: bool = False,
 ) -> tuple[LLMResult, LLMProviderDTO, bool]:
@@ -205,6 +217,29 @@ async def call_with_fallback(
     from .llm_client import LLMCallFailed
 
     all_providers = chain.all_providers
+    max_tokens = _apply_output_token_cap(max_tokens)
+    budget_error = await _check_budget(account_id, all_providers[0])
+    if budget_error:
+        usage_record = UsageRecord(
+            provider_id=all_providers[0].id if all_providers else None,
+            account_id=account_id,
+            provider_name=all_providers[0].name if all_providers else None,
+            model=override_model or (all_providers[0].default_model if all_providers else None),
+            success=False,
+            error_type="budget_exceeded",
+            source=source,
+            used_fallback=False,
+            fallback_chain=chain.get_provider_names(),
+        )
+        await _emit_usage(usage_record)
+        raise LLMCallFailed(
+            budget_error,
+            provider_id=all_providers[0].id if all_providers else None,
+            provider_name=all_providers[0].name if all_providers else None,
+            error_type="budget_exceeded",
+            retryable=False,
+        )
+
     tried_providers: list[str] = []
     last_error: Exception | None = None
     last_status_code: int | None = None
@@ -230,17 +265,20 @@ async def call_with_fallback(
                 max_tokens=max_tokens,
                 images=images,
                 log_prompt_preview=log_prompt_preview,
+                client_factory=client_factory,
             )
             # 成功
             used_fallback = is_fallback
             # 记录 usage
             usage_record = UsageRecord(
                 provider_id=provider_dto.id,
+                account_id=account_id,
                 provider_name=provider_dto.name,
                 model=result.model,
                 input_tokens=result.input_tokens,
                 output_tokens=result.output_tokens,
                 success=True,
+                source=source,
                 used_fallback=used_fallback,
                 fallback_chain=chain.get_provider_names(),
             )
@@ -273,10 +311,12 @@ async def call_with_fallback(
                 # 记录失败 usage
                 usage_record = UsageRecord(
                     provider_id=provider_dto.id,
+                    account_id=account_id,
                     provider_name=provider_dto.name,
                     model=override_model or provider_dto.default_model,
                     success=False,
                     error_type=error_type,
+                    source=source,
                     used_fallback=is_fallback,
                     fallback_chain=chain.get_provider_names(),
                 )
@@ -299,6 +339,112 @@ async def call_with_fallback(
     )
 
 
+def _apply_output_token_cap(max_tokens: int) -> int:
+    """应用全局 LLM 输出 token 上限；0 表示不限制。"""
+    cap = int(getattr(settings, "llm_max_output_tokens", 0) or 0)
+    if cap <= 0:
+        return max_tokens
+    if max_tokens <= 0:
+        return cap
+    return min(max_tokens, cap)
+
+
+async def _check_budget(account_id: int | None, provider_dto: "LLMProviderDTO") -> str | None:
+    """检查账号级 LLM 预算。
+
+    这是成本控制的硬门禁：限制命中时不再调用任何 provider。DB 查询失败时
+    不阻断业务，只打 debug，让生产在迁移窗口内仍可降级运行。
+    """
+    if account_id is None:
+        return None
+
+    now = datetime.now(UTC)
+    minute_start = now - timedelta(minutes=1)
+    day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+
+    try:
+        async with AsyncSessionLocal() as db:
+            limits = await _load_budget_limits(db)
+            per_minute = int(limits["per_minute"])
+            daily_requests = int(limits["daily_requests"])
+            daily_tokens = int(limits["daily_tokens"])
+            premium_daily = int(limits["premium_daily"])
+            if per_minute <= 0 and daily_requests <= 0 and daily_tokens <= 0 and premium_daily <= 0:
+                return None
+
+            if per_minute > 0:
+                minute_count = await db.scalar(
+                    select(func.count(LLMUsage.id)).where(
+                        LLMUsage.account_id == account_id,
+                        LLMUsage.created_at >= minute_start,
+                    )
+                )
+                if int(minute_count or 0) >= per_minute:
+                    return f"LLM 每分钟调用次数已达上限（{per_minute}/min），请稍后再试。"
+
+            if daily_requests > 0:
+                day_count = await db.scalar(
+                    select(func.count(LLMUsage.id)).where(
+                        LLMUsage.account_id == account_id,
+                        LLMUsage.created_at >= day_start,
+                    )
+                )
+                if int(day_count or 0) >= daily_requests:
+                    return f"LLM 今日调用次数已达上限（{daily_requests}/day）。"
+
+            if daily_tokens > 0:
+                used_tokens = await db.scalar(
+                    select(func.coalesce(func.sum(LLMUsage.input_tokens + LLMUsage.output_tokens), 0)).where(
+                        LLMUsage.account_id == account_id,
+                        LLMUsage.created_at >= day_start,
+                        LLMUsage.success.is_(True),
+                    )
+                )
+                if int(used_tokens or 0) >= daily_tokens:
+                    return f"LLM 今日 token 用量已达上限（{daily_tokens}/day）。"
+
+            if premium_daily > 0 and int(getattr(provider_dto, "cost_tier", 2) or 2) >= 3:
+                premium_count = await db.scalar(
+                    select(func.count(LLMUsage.id)).where(
+                        LLMUsage.account_id == account_id,
+                        LLMUsage.created_at >= day_start,
+                        LLMUsage.success.is_(True),
+                        LLMUsage.provider_id == provider_dto.id,
+                    )
+                )
+                if int(premium_count or 0) >= premium_daily:
+                    return f"高价 LLM 今日调用次数已达上限（{premium_daily}/day）。"
+    except Exception:  # noqa: BLE001
+        log.debug("LLM budget 检查失败，降级为不阻断 account=%s", account_id, exc_info=True)
+        return None
+    return None
+
+
+async def _load_budget_limits(db) -> dict[str, int]:
+    """读取 DB 覆盖的 LLM 限额；没有配置时回落到环境变量。"""
+    limits = {
+        "per_minute": int(getattr(settings, "llm_per_minute_request_limit_per_account", 0) or 0),
+        "daily_requests": int(getattr(settings, "llm_daily_request_limit_per_account", 0) or 0),
+        "daily_tokens": int(getattr(settings, "llm_daily_token_limit_per_account", 0) or 0),
+        "premium_daily": int(getattr(settings, "llm_premium_daily_request_limit_per_account", 0) or 0),
+    }
+    row = await db.get(SystemSetting, "llm_limits")
+    value = row.value if row is not None else None
+    if isinstance(value, dict):
+        limits["per_minute"] = _non_negative_int(value.get("per_minute"), limits["per_minute"])
+        limits["daily_requests"] = _non_negative_int(value.get("daily_requests"), limits["daily_requests"])
+        limits["daily_tokens"] = _non_negative_int(value.get("daily_tokens"), limits["daily_tokens"])
+        limits["premium_daily"] = _non_negative_int(value.get("premium_daily"), limits["premium_daily"])
+    return limits
+
+
+def _non_negative_int(value: Any, default: int) -> int:
+    try:
+        return max(0, int(value))
+    except (TypeError, ValueError):
+        return default
+
+
 async def _call_with_retry(
     provider_dto: "LLMProviderDTO",
     system: str,
@@ -307,6 +453,7 @@ async def _call_with_retry(
     max_tokens: int,
     images: list[bytes] | None,
     log_prompt_preview: bool,
+    client_factory: Callable[..., Any | Awaitable[Any]] | None = None,
     max_retries: int = _MAX_RETRIES,
 ) -> "LLMResult":
     """使用指数退避重试调用单个 provider。"""
@@ -323,9 +470,11 @@ async def _call_with_retry(
         start_time = time.monotonic()
 
         try:
-            client = build_client_from_dto(
+            builder = client_factory or build_client_from_dto
+            client = builder(
                 provider_dto,
                 override_model=override_model,
+                proxy_url=provider_dto.proxy_url,
             )
             if inspect.isawaitable(client):
                 client = await client

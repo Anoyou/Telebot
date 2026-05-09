@@ -49,8 +49,10 @@ import type {
   AutoReplyMatch,
   AutoReplyRuleConfig,
   AutoReplyScope,
+  RuleDryRunResponse,
   RuleOut,
 } from "@/api/types";
+import { DryRunDetail } from "@/components/DryRunDetail";
 
 // rule.config 默认值
 function defaultConfig(): AutoReplyRuleConfig {
@@ -195,10 +197,7 @@ export function AutoReplyConfig() {
   const [drySample, setDrySample] = useState("");
   const [dryChat, setDryChat] = useState<"private" | "group">("private");
   const [dryChatId, setDryChatId] = useState("");
-  const [dryResult, setDryResult] = useState<{
-    matched: boolean;
-    output?: string | null;
-  } | null>(null);
+  const [dryResult, setDryResult] = useState<RuleDryRunResponse | null>(null);
 
   // 打开试运行：根据规则 scope 推导默认会话类型 + 默认 chat_id
   function openDryRun(rule: RuleOut) {
@@ -625,17 +624,20 @@ export function AutoReplyConfig() {
             )}
 
             {dryResult && (
-              <div className="rounded-md border bg-muted/40 p-3 text-xs">
-                <div className="mb-1">
-                  命中：
-                  <Badge variant={dryResult.matched ? "success" : "secondary"}>
-                    {dryResult.matched ? "是" : "否"}
-                  </Badge>
+              <>
+                <div className="rounded-md border bg-muted/40 p-3 text-xs">
+                  <div className="mb-1">
+                    命中：
+                    <Badge variant={dryResult.matched ? "success" : "secondary"}>
+                      {dryResult.matched ? "是" : "否"}
+                    </Badge>
+                  </div>
+                  {dryResult.output != null && (
+                    <pre className="whitespace-pre-wrap">{dryResult.output}</pre>
+                  )}
                 </div>
-                {dryResult.matched && dryResult.output != null && (
-                  <pre className="whitespace-pre-wrap">{dryResult.output}</pre>
-                )}
-              </div>
+                <DryRunDetail detail={dryResult.detail} />
+              </>
             )}
           </div>
           <DialogFooter>

@@ -18,7 +18,7 @@ from __future__ import annotations
 import base64
 import json
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import httpx
 
@@ -35,6 +35,8 @@ from .llm_dto import LLMProviderDTO
 
 # 默认调用超时；prompt 较长 / TG 端用户体验角度都不宜过长
 _HTTP_TIMEOUT = httpx.Timeout(30.0, connect=10.0)
+# 本地桥接（如 grok-bridge）需要等待浏览器 JS 执行 + LLM 生成，超时更长
+_LOCAL_TIMEOUT = httpx.Timeout(180.0, connect=10.0)
 
 # ── Retry 策略常量 ──────────────────────────────────────────
 # 最大重试次数（不含首次调用）
@@ -53,6 +55,8 @@ class LLMResult:
     model: str          # 实际使用的模型名（便于 TG 内回显）
     input_tokens: int   # 入 tokens；若供应商不返就给 0
     output_tokens: int  # 出 tokens；若供应商不返就给 0
+    image_urls: list = field(default_factory=list)  # LLM 生成的图片 URL（如 Grok 文生图）
+    image_data: list = field(default_factory=list)  # LLM 生成的图片 base64 data URI（如 Grok 文生图）
 
 
 def _sniff_image_mime(data: bytes) -> str:
@@ -172,9 +176,16 @@ class OpenAIClient(LLMClient):
             "max_tokens": max_tokens,
         }
         # httpx 0.28+ 用 proxy=<str> 单参数；socks5 需要 httpx[socks] 安装的 socksio
-        client_kwargs: dict[str, object] = {"timeout": _HTTP_TIMEOUT}
+        # 当 proxy_url 为空时，显式 trust_env=False 避免 httpx 读取环境变量中的
+        # HTTP_PROXY / NO_PROXY（NO_PROXY 含 ::1 会导致 httpx InvalidURL 崩溃）
+        # 本地桥接（grok-bridge 等 localhost 服务）需要更长超时：浏览器 JS 执行 +
+        # LLM 生成 + 图片 XHR 下载，整个过程可能超过 30 秒
+        _is_local = "127.0.0.1" in self._base_url or "localhost" in self._base_url
+        client_kwargs: dict[str, object] = {"timeout": _LOCAL_TIMEOUT if _is_local else _HTTP_TIMEOUT}
         if self._proxy_url:
             client_kwargs["proxy"] = self._proxy_url
+        else:
+            client_kwargs["trust_env"] = False
         try:
             async with httpx.AsyncClient(**client_kwargs) as cli:
                 resp = await cli.post(url, headers=headers, json=body)
@@ -207,11 +218,29 @@ class OpenAIClient(LLMClient):
             raise LLMError(f"OpenAI 返回结构异常: {exc}") from None
 
         usage = data.get("usage") or {}
+        raw_images = data.get("images") or []
+        if not isinstance(raw_images, list):
+            raw_images = []
+        # 兼容两种格式：
+        #   旧: ["url1", "url2"]（纯 URL 列表）
+        #   新: [{"url": "url1", "data": "base64..."}, ...]（带 base64 数据）
+        image_urls = []
+        image_data = []
+        for item in raw_images:
+            if isinstance(item, dict):
+                if item.get("url"):
+                    image_urls.append(item["url"])
+                if item.get("data"):
+                    image_data.append(item["data"])
+            elif isinstance(item, str):
+                image_urls.append(item)
         return LLMResult(
             text=text.strip(),
             model=str(data.get("model", self._model)),
             input_tokens=int(usage.get("prompt_tokens") or 0),
             output_tokens=int(usage.get("completion_tokens") or 0),
+            image_urls=image_urls,
+            image_data=image_data,
         )
 
     async def transcribe(self, audio: bytes, model: str) -> str:
@@ -233,9 +262,12 @@ class OpenAIClient(LLMClient):
             "file": ("audio.ogg", audio, "audio/ogg"),
         }
         data = {"model": model, "response_format": "json"}
-        client_kwargs: dict[str, object] = {"timeout": _HTTP_TIMEOUT}
+        _is_local = "127.0.0.1" in self._base_url or "localhost" in self._base_url
+        client_kwargs: dict[str, object] = {"timeout": _LOCAL_TIMEOUT if _is_local else _HTTP_TIMEOUT}
         if self._proxy_url:
             client_kwargs["proxy"] = self._proxy_url
+        else:
+            client_kwargs["trust_env"] = False
         try:
             async with httpx.AsyncClient(**client_kwargs) as cli:
                 resp = await cli.post(url, headers=headers, files=files, data=data)
@@ -331,9 +363,12 @@ class AnthropicClient(LLMClient):
             # 使用流式（SSE）模式；Anyrouter 等 Claude Code 反代依赖流式协议分发
             "stream": True,
         }
-        client_kwargs: dict[str, object] = {"timeout": _HTTP_TIMEOUT}
+        _is_local = "127.0.0.1" in self._base_url or "localhost" in self._base_url
+        client_kwargs: dict[str, object] = {"timeout": _LOCAL_TIMEOUT if _is_local else _HTTP_TIMEOUT}
         if self._proxy_url:
             client_kwargs["proxy"] = self._proxy_url
+        else:
+            client_kwargs["trust_env"] = False
 
         # ── SSE 流式响应解析 ──────────────────────────────
         # 事件流生命周期：
@@ -481,9 +516,12 @@ class ResponsesClient(LLMClient):
             "max_output_tokens": max_tokens,
         }
 
-        client_kwargs: dict[str, object] = {"timeout": _HTTP_TIMEOUT}
+        _is_local = "127.0.0.1" in self._base_url or "localhost" in self._base_url
+        client_kwargs: dict[str, object] = {"timeout": _LOCAL_TIMEOUT if _is_local else _HTTP_TIMEOUT}
         if self._proxy_url:
             client_kwargs["proxy"] = self._proxy_url
+        else:
+            client_kwargs["trust_env"] = False
         try:
             async with httpx.AsyncClient(**client_kwargs) as cli:
                 resp = await cli.post(url, headers=headers, json=body)

@@ -28,6 +28,7 @@ class Manifest:
     key: str
     display_name: str
     version: str = "0.1.0"
+    min_telebot_version: str | None = None
     author: str = "builtin"
     description: str = ""
     # 依赖其它插件的 key（先加载它们再加载本插件；阶段 A 暂不强制校验）
@@ -48,6 +49,7 @@ class Manifest:
             "key": self.key,
             "display_name": self.display_name,
             "version": self.version,
+            "min_telebot_version": self.min_telebot_version,
             "author": self.author,
             "description": self.description,
             "requires_features": list(self.requires_features),

@@ -50,8 +50,24 @@ export function SettingsIndex() {
   });
 
   const [prefix, setPrefix] = useState("");
+  const [timezone, setTimezone] = useState("");
+  const [llmLimits, setLlmLimits] = useState({
+    per_minute: "0",
+    daily_requests: "0",
+    daily_tokens: "0",
+    premium_daily: "0",
+  });
   useEffect(() => {
-    if (settingsQ.data) setPrefix(settingsQ.data.command_prefix ?? ",");
+    if (settingsQ.data) {
+      setPrefix(settingsQ.data.command_prefix ?? ",");
+      setTimezone(settingsQ.data.timezone ?? "");
+      setLlmLimits({
+        per_minute: String(settingsQ.data.llm_limits?.per_minute ?? 0),
+        daily_requests: String(settingsQ.data.llm_limits?.daily_requests ?? 0),
+        daily_tokens: String(settingsQ.data.llm_limits?.daily_tokens ?? 0),
+        premium_daily: String(settingsQ.data.llm_limits?.premium_daily ?? 0),
+      });
+    }
   }, [settingsQ.data]);
 
   const [qps, setQps] = useState("0");
@@ -63,6 +79,31 @@ export function SettingsIndex() {
     mutationFn: () => patchSystemSettings({ command_prefix: prefix }),
     onSuccess: () => {
       toast.success("命令前缀已保存（worker 将热加载）");
+      qc.invalidateQueries({ queryKey: ["system", "settings"] });
+    },
+    onError: (err) => toast.error(getErrMsg(err)),
+  });
+
+  const saveTimezone = useMutation({
+    mutationFn: () => patchSystemSettings({ timezone }),
+    onSuccess: () => {
+      toast.success("时区已保存");
+      qc.invalidateQueries({ queryKey: ["system", "settings"] });
+    },
+    onError: (err) => toast.error(getErrMsg(err)),
+  });
+
+  const saveLlmLimits = useMutation({
+    mutationFn: () => patchSystemSettings({
+      llm_limits: {
+        per_minute: Number(llmLimits.per_minute) || 0,
+        daily_requests: Number(llmLimits.daily_requests) || 0,
+        daily_tokens: Number(llmLimits.daily_tokens) || 0,
+        premium_daily: Number(llmLimits.premium_daily) || 0,
+      },
+    }),
+    onSuccess: () => {
+      toast.success("LLM 限额已保存");
       qc.invalidateQueries({ queryKey: ["system", "settings"] });
     },
     onError: (err) => toast.error(getErrMsg(err)),
@@ -187,6 +228,81 @@ export function SettingsIndex() {
                   />
                 </div>
                 <Button onClick={() => saveQps.mutate()} disabled={saveQps.isPending}>
+                  保存
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">时区设置</CardTitle>
+              <CardDescription>
+                全局时区，影响定时任务"下次触发/上次触发"等时间显示。留空则使用浏览器本地时区。
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="flex max-w-sm items-end gap-2">
+                <div className="flex-1 space-y-1.5">
+                  <Label>IANA 时区</Label>
+                  <Input
+                    value={timezone}
+                    onChange={(e) => setTimezone(e.target.value)}
+                    placeholder="如 Asia/Shanghai，留空为浏览器时区"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    当前浏览器时区：<b>{Intl.DateTimeFormat().resolvedOptions().timeZone}</b>
+                  </p>
+                </div>
+                <Button onClick={() => saveTimezone.mutate()} disabled={saveTimezone.isPending}>
+                  保存
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">LLM 成本限额</CardTitle>
+              <CardDescription>0 = 不限制；按账号统计，worker 调用前生效</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="grid gap-3 md:grid-cols-4">
+                <div className="space-y-1.5">
+                  <Label>每分钟调用</Label>
+                  <Input
+                    inputMode="numeric"
+                    value={llmLimits.per_minute}
+                    onChange={(e) => setLlmLimits((v) => ({ ...v, per_minute: e.target.value.replace(/[^0-9]/g, "") }))}
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>每日调用</Label>
+                  <Input
+                    inputMode="numeric"
+                    value={llmLimits.daily_requests}
+                    onChange={(e) => setLlmLimits((v) => ({ ...v, daily_requests: e.target.value.replace(/[^0-9]/g, "") }))}
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>每日 Token</Label>
+                  <Input
+                    inputMode="numeric"
+                    value={llmLimits.daily_tokens}
+                    onChange={(e) => setLlmLimits((v) => ({ ...v, daily_tokens: e.target.value.replace(/[^0-9]/g, "") }))}
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>高价每日调用</Label>
+                  <Input
+                    inputMode="numeric"
+                    value={llmLimits.premium_daily}
+                    onChange={(e) => setLlmLimits((v) => ({ ...v, premium_daily: e.target.value.replace(/[^0-9]/g, "") }))}
+                  />
+                </div>
+              </div>
+              <div className="mt-3">
+                <Button onClick={() => saveLlmLimits.mutate()} disabled={saveLlmLimits.isPending}>
                   保存
                 </Button>
               </div>

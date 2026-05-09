@@ -802,8 +802,8 @@ function CommandEditDialog({
 
           {form.type === "run_plugin" && (
             <div className="space-y-3">
-              <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
-                ⏳ run_plugin 占位类型：V1 接口未实装，此处配置仅会保存到 DB；待 Sprint2 #4 插件模块化完成后接入
+              <div className="rounded-md border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+                调用已加载插件注册的命令；method 留空时默认使用 plugin_key 同名命令。
               </div>
               <div className="space-y-1.5">
                 <Label>plugin_key *</Label>

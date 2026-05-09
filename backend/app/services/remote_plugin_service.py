@@ -39,7 +39,7 @@ from ..db.models.account import Account
 from ..db.models.feature import AccountFeature, Feature
 from ..db.models.remote_plugin import RemotePlugin
 from ..settings import settings
-from ..worker.ipc import CMD_RELOAD_CONFIG, cmd_channel, make_cmd
+from ..worker.ipc import CMD_RELOAD_CONFIG, publish_cmd_with_ack
 
 # 直接复用现有 loader 的配置热更新路径；installed 插件在 loader 里按 DB 双开关按需加载
 from ..worker.plugins.loader import reload_account_config
@@ -388,10 +388,9 @@ async def _trigger_reload(db: AsyncSession, name: str) -> None:
         redis = get_redis()
         for aid in aids:
             try:
-                await redis.publish(
-                    cmd_channel(aid),
-                    make_cmd(CMD_RELOAD_CONFIG, plugin_key=name),
-                )
+                ok = await publish_cmd_with_ack(redis, aid, CMD_RELOAD_CONFIG, plugin_key=name)
+                if not ok:
+                    log.debug("worker reload_config 未确认 aid=%s plugin=%s，将由周期 reconcile 收敛", aid, name)
             except Exception:  # noqa: BLE001
                 log.debug("redis 广播 reload_config 失败 aid=%s", aid, exc_info=True)
     except Exception:  # noqa: BLE001

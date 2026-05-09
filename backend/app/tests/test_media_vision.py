@@ -38,6 +38,7 @@ def _msg(**kw):
         contact=kw.pop("contact", None),
         poll=kw.pop("poll", None),
         file=kw.pop("file", None),
+        media=kw.pop("media", None),
         grouped_id=kw.pop("grouped_id", None),
         download_media=kw.pop("download_media", AsyncMock(return_value=b"data")),
         **kw,
@@ -80,6 +81,24 @@ def test_message_has_image_skips_video_voice() -> None:
     assert _media.message_has_image(_msg(voice=object())) is False
     assert _media.message_has_image(_msg(geo=object())) is False
     assert _media.message_has_image(None) is False
+
+
+def test_message_has_image_skips_web_preview() -> None:
+    """URL 网页预览缩略图不算用户主动发的图。
+
+    Telegram 为 URL 生成预览时，telethon 的 msg.photo 会返回 web_preview.photo，
+    但这是自动生成的链接预览图，不应该触发 vision 路径。
+    """
+    # 构造一个类名为 MessageMediaWebPage 的 media 对象
+    class MessageMediaWebPage:
+        pass
+    web_media = MessageMediaWebPage()
+    # 即使 msg.photo 不为空（因为 telethon 会返回 web_preview.photo），
+    # 也不应该被识别为"含图"
+    assert _media.message_has_image(_msg(photo=object(), media=web_media)) is False
+    # 没有 web preview 时，photo 正常识别
+    assert _media.message_has_image(_msg(photo=object(), media=None)) is True
+    assert _media.message_has_image(_msg(photo=object())) is True
 
 
 def test_message_has_image_uses_file_mime_fallback() -> None:
