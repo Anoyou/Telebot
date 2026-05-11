@@ -161,6 +161,16 @@ class PluginMetadata:
     version: str = "0.0.0"
     entry: str = "plugin.py"
     permissions: list[str] = field(default_factory=list)
+    config_schema: dict[str, Any] | None = None
+
+
+def _feature_manifest_from_meta(meta: PluginMetadata) -> dict[str, Any] | None:
+    manifest: dict[str, Any] = {}
+    if meta.config_schema:
+        manifest["config_schema"] = meta.config_schema
+    if meta.permissions:
+        manifest["permissions"] = list(meta.permissions)
+    return manifest or None
 
 
 # ─────────────────────────────────────────────────────
@@ -376,6 +386,7 @@ def _read_plugin_metadata(plugin_dir: Path, *, fallback_name: str) -> PluginMeta
         version=str(validated.version or "0.0.0"),
         entry=str(validated.entry or "plugin.py"),
         permissions=list(validated.permissions or []),
+        config_schema=validated.config_schema,
     )
 
 
@@ -540,12 +551,14 @@ async def install(
                 display_name=meta.display_name or final_name,
                 is_builtin=False,
                 version=meta.version,
+                manifest=_feature_manifest_from_meta(meta),
             ))
         else:
             # 已存在则校正 display_name 和 version
             feat.display_name = meta.display_name or final_name
             feat.version = meta.version
             feat.is_builtin = False
+            feat.manifest = _feature_manifest_from_meta(meta)
 
         await db.flush()
 
@@ -723,6 +736,14 @@ async def update(db: AsyncSession, name: str) -> RemotePlugin:
     row.description = meta.description
     row.author = meta.author or row.author
     row.version = meta.version or row.version
+    feat = (
+        await db.execute(select(Feature).where(Feature.key == name))
+    ).scalar_one_or_none()
+    if feat is not None:
+        feat.display_name = meta.display_name or name
+        feat.version = meta.version or feat.version
+        feat.is_builtin = False
+        feat.manifest = _feature_manifest_from_meta(meta)
     await db.flush()
 
     await _trigger_reload(db, name)

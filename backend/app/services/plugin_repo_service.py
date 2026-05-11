@@ -42,6 +42,7 @@ from .remote_plugin_service import (
     InvalidPluginMetadata,
     RemotePluginError,
     _derive_name_from_url,
+    _feature_manifest_from_meta,
     _plugin_dir,
     _read_plugin_metadata,
     _run_git,
@@ -419,12 +420,14 @@ async def install_plugin_from_repo(
                     display_name=meta.display_name or final_name,
                     is_builtin=False,
                     version=meta.version,
+                    manifest=_feature_manifest_from_meta(meta),
                 )
             )
         else:
             feat.display_name = meta.display_name or final_name
             feat.version = meta.version
             feat.is_builtin = False
+            feat.manifest = _feature_manifest_from_meta(meta)
 
         await db.flush()
 
