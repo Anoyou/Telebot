@@ -6,6 +6,8 @@ from pathlib import Path
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
 
 class Settings(BaseSettings):
     """应用配置，所有字段都可通过环境变量覆盖（pydantic-settings 自动映射）。"""
@@ -87,7 +89,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=(
             # 优先从仓库根目录 .env 加载
-            Path(__file__).resolve().parents[2] / ".env",
+            PROJECT_ROOT / ".env",
             ".env",
         ),
         env_file_encoding="utf-8",
@@ -104,6 +106,17 @@ class Settings(BaseSettings):
     def database_url_sync(self) -> str:
         """Alembic 用的同步 DSN（去掉 +asyncpg 后缀，psycopg2/psycopg 都能识别）。"""
         return self.database_url.replace("+asyncpg", "")
+
+    def resolve_project_path(self, raw: str) -> Path:
+        """把相对路径固定解析到仓库根目录，避免主进程/worker cwd 不同导致分裂。"""
+        path = Path(raw)
+        if path.is_absolute():
+            return path.resolve()
+        return (PROJECT_ROOT / path).resolve()
+
+    @property
+    def plugins_installed_path(self) -> Path:
+        return self.resolve_project_path(self.plugins_installed_dir)
 
 
 @lru_cache

@@ -305,7 +305,7 @@ async def install_zip(
     parsed = parse_zip(zip_bytes)
     try:
         # 路径计算
-        installed_root = Path(settings.plugins_installed_dir).resolve()
+        installed_root = settings.plugins_installed_path
         installed_root.mkdir(parents=True, exist_ok=True)
         final_dir = (installed_root / parsed.manifest.key).resolve()
         # 防御性：再校验 final_dir 一定在 installed_root 之下（避免 manifest.key 含路径符）

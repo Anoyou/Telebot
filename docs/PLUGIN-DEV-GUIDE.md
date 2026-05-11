@@ -26,9 +26,17 @@
     - [模式 C：Schema 驱动弹窗](#模式-cschema-驱动弹窗configdialog)
     - [基础能力：平台内置功能](#基础能力平台内置功能scheduler)
     - [适配自检清单](#适配自检清单)
-14. [调试建议](#14-调试建议)
-15. [安全与合规](#15-安全与合规)
-16. [完整示例](#16-完整示例)
+14. [插件工程规范](#14-插件工程规范)
+    - [消息发送能力边界](#消息发送能力边界)
+    - [并发与抢答标准模板](#并发与抢答标准模板)
+    - [统一配置项命名与校验](#统一配置项命名与校验)
+    - [定时任务与后台任务生命周期](#定时任务与后台任务生命周期)
+    - [奖惩系统接入约定](#奖惩系统接入约定)
+    - [插件最小测试清单](#插件最小测试清单)
+    - [可复制的游戏插件骨架](#可复制的游戏插件骨架)
+15. [调试建议](#15-调试建议)
+16. [安全与合规](#16-安全与合规)
+17. [完整示例](#17-完整示例)
 
 ---
 
@@ -140,6 +148,9 @@ class Plugin:
 
     # === 可选配置 ===
     message_channels: set[str]        # 监听方向: {"incoming"} / {"outgoing"} / 二者都监听
+    owner_only: bool = True           # on_message 是否只允许账号本人/授权 sudo 触发
+    commands: dict = {}               # TG 内命令: command_name -> 5 参数 handler
+    command_config_keys: set[str] = set()  # 这些配置变化后需要重载并重新注册命令
     description: str = ""             # 描述（用于帮助系统）
 
     # === 生命周期钩子 ===
@@ -178,18 +189,21 @@ class MyPlugin(Plugin):
 class PluginContext:
     account_id: int
     feature_key: str
-    config: dict           # rule.config
+    config: dict           # 当前账号的插件配置
     rules: list            # 规则列表
     client: TelegramClient | None
     engine: Any            # RateLimitEngine
     redis: Any             # redis.asyncio.Redis
     log: Callable          # 日志函数
+    scheduler: Any         # 平台调度器 facade
     generation: int        # generation guard 计数
 
     # 工具方法
     async def conversation(self, peer, timeout=30) -> Conversation:
         """创建与 bot 的对话会话。"""
 ```
+
+注意：内置插件会拿到完整运行时能力；远程/第三方插件的 `ctx.client` 会被 `SandboxClient` 包装，`ctx.engine` 和 `ctx.redis` 为 `None`，只能通过声明过的权限和 `ctx.scheduler` facade 使用有限能力。
 
 ---
 
@@ -212,6 +226,7 @@ class PluginContext:
 | `permissions` | list | 权限声明，默认 `["send_message", "edit_message", "read_chat"]` |
 | `config_schema` | dict | JSON Schema，有配置的插件必须写 |
 | `requires_features` | list | 依赖的其他插件 key |
+| `min_telebot_version` | str | 最低 TeleBot 版本要求，远程插件建议填写 |
 
 ### 完整示例
 
@@ -277,16 +292,19 @@ MANIFEST = Manifest(
 
 ### Manifest 验证
 
-安装插件时（远程插件），框架会验证：
+远程插件安装阶段验证的是 `plugin.json`，不会执行 Python：
 
 ```python
-def validate_manifest(manifest: dict) -> tuple[bool, str]:
-    required = ["key", "display_name", "description", "version"]
-    for field in required:
-        if not manifest.get(field):
-            return False, f"缺少必填字段: {field}"
-    return True, "ok"
+required = ["name 或 key", "version"]
+name_pattern = r"^[A-Za-z0-9_][A-Za-z0-9_-]*$"
+version_pattern = r"^\d+\.\d+\.\d+"
 ```
+
+运行阶段 loader 会 import `__init__.py`，并检查：
+
+- `PLUGIN_CLASS` 是 `Plugin` 子类
+- `MANIFEST` 是 `Manifest` 实例
+- `MANIFEST.key` 与插件 key / 目录名保持一致
 
 ---
 
@@ -482,18 +500,18 @@ await ctx.log("error", f"failed: {raw_exception_with_token}")
 2. 输入 GitHub 仓库地址或子目录 URL
 3. 点击安装
 
-**通过 Bot 命令：**
+**通过 REST API：**
 ```
-/plugin install https://github.com/user/repo
-/plugin list
-/plugin enable weather
-/plugin disable weather
-/plugin remove weather
+POST /api/remote-plugins/install
+POST /api/remote-plugins/{name}/enable
+POST /api/remote-plugins/{name}/enable-accounts
+POST /api/remote-plugins/{name}/update
+DELETE /api/remote-plugins/{name}
 ```
 
 ### 远程插件规范
 
-远程仓库必须包含 `manifest.json`：
+远程仓库必须包含 `plugin.json`，同时运行时必须提供 `manifest.py` / `plugin.py` / `__init__.py`：
 
 ```json
 {
@@ -502,24 +520,34 @@ await ctx.log("error", f"failed: {raw_exception_with_token}")
   "description": "查询天气信息",
   "author": "community",
   "version": "1.0.0",
-  "entry": "weather.py",
+  "entry": "plugin.py",
   "min_telebot_version": "0.9.0",
   "commands": ["weather", "w"],
   "cleanup_mode": "no-op",
-  "tags": ["weather", "utility"]
+  "tags": ["weather", "utility"],
+  "permissions": ["send_message", "read_chat"]
 }
 ```
 
-**必填字段：** name, display_name, description, author, version, entry
+**最小必填：** `name` / `key` 二选一，`version` 必填。`display_name`、`description`、`author`、`entry` 强烈建议填写，`entry` 未填时默认 `plugin.py`。
+
+安全约束：
+
+- 安装阶段只静态解析 `plugin.json`，不会执行 `manifest.py` 或其它 Python 文件。
+- `name` / `key` 只能包含字母、数字、`_`、`-`，不能包含路径分隔符。
+- 运行阶段由 loader import `__init__.py`，此时必须导出 `PLUGIN_CLASS` 和 `MANIFEST`。
+- 不再兼容旧的“只有 plugin.json + plugin.py”单文件远程插件；缺少 `manifest.py` 或 `__init__.py` 会在安装/更新阶段被拒绝。
+- 相对安装目录会按项目根目录解析，不要依赖后端进程当前工作目录。
 
 ### 安装流程
 
 ```
 1. git clone 到 plugins/installed/{name}/
-2. 读取 manifest.json → validate_manifest() 验证
-3. 验证通过 → 注册到数据库
-4. 调用 reload_plugin() 热加载
-5. 验证失败 → 删除目录，返回错误
+2. 读取 plugin.json → Pydantic 校验（安装阶段不执行 Python）
+3. 静态检查 `manifest.py` / `plugin.py` / `__init__.py` 是否齐全
+4. 验证通过 → 注册到数据库
+5. 广播 CMD_RELOAD_CONFIG，worker 重新扫描 installed 插件
+6. 验证失败 → 删除目录，返回错误
 ```
 
 ### Registry 机制
@@ -1009,7 +1037,471 @@ class DemoPlugin(Plugin):
 
 ---
 
-## 14. 调试建议
+## 14. 插件工程规范
+
+这一章是给插件作者看的“不要踩坑”规范。只要插件涉及发消息、抢答、后台任务、奖励或远程发布，都建议先按这里的模板走。
+
+### 消息发送能力边界
+
+不同回调能拿到的对象不同，不要在没有 `event` 的地方调用 `event.reply`，也不要尝试编辑别人的 incoming 消息。推荐按下表选择发送方式：
+
+| 场景 | 有 `event` | 推荐方式 | 适用说明 | 远程插件权限 |
+|------|------------|----------|----------|--------------|
+| `on_command` 命令回调 | 有 | `event.edit(...)` | 把用户发出的命令改成状态/结果，适合 UserBot 自己发出的命令 | `edit_message` |
+| `on_command` 需要另发一条 | 有 | `event.respond(...)` 或 `ctx.client.send_message(event.chat_id, ...)` | 不想覆盖原命令，或命令消息可能已删除 | `send_message` |
+| `on_message` 回复触发消息 | 有 | `event.reply(...)` | 自动回复、答题奖励、引用原消息 | `send_message` |
+| `on_message` 普通发送 | 有 | `event.respond(...)` | 在同一聊天里发新消息，不引用原消息 | `send_message` |
+| 跨聊天发送/转发 | 有或无 | `ctx.client.send_message(target_chat_id, ...)` / `ctx.client.send_file(...)` | 转发、通知、发图、调度任务 | `send_message` / `send_file` |
+| `ctx.scheduler` 定时回调 | 无 | `ctx.client.send_message(chat_id, ...)` | 定时任务没有原始 `event`，必须从配置或规则里拿 `chat_id` | `send_message` |
+| `on_startup` / `on_shutdown` | 无 | 默认不发；确需通知时用 `ctx.client.send_message(...)` | 启停阶段容易重复触发，必须有显式配置开关 | `send_message` |
+| `ctx.conversation()` | conversation 内部 | `conv.send(...)` / `conv.get_response(...)` | 与 BotFather 或其它 bot 进行会话 | 取决于底层发送/读取能力 |
+
+#### 安全回复模板
+
+群组、频道、匿名频道消息里，`event.reply` 可能失败。需要强可靠发送时，使用“reply 优先，send_message 兜底”的写法：
+
+```python
+async def safe_reply(ctx, event, text: str, *, chat_id: int, reply_to_id: int | None = None) -> bool:
+    try:
+        reply = getattr(event, "reply", None)
+        if callable(reply):
+            await reply(text)
+            return True
+    except Exception as exc:
+        if ctx.log:
+            await ctx.log(
+                "warn",
+                "引用回复失败，准备改用普通发送兜底。",
+                error=type(exc).__name__,
+                chat_id=chat_id,
+                reply_to_id=reply_to_id,
+            )
+
+    if ctx.client is None:
+        return False
+
+    try:
+        await ctx.client.send_message(chat_id, text, reply_to=reply_to_id)
+        return True
+    except Exception:
+        await ctx.client.send_message(chat_id, text)
+        return True
+```
+
+注意：
+
+- `event.edit(...)` 只适合编辑当前账号自己发出的命令/状态消息；不要用它编辑别人发来的 incoming 消息。
+- 远程插件安装阶段只读 `plugin.json`，但运行时仍会受 `manifest.py` 的 `permissions` 沙箱限制。
+- 第三方插件不要把 `event.reply/respond/edit` 当作绕过权限的路径；凡是会发送、编辑、删除、读取消息的行为，都必须在 `permissions` 中声明对应能力。
+- 需要发送图片、文件时，为 `BytesIO` 设置 `name`，例如 `image_file.name = "result.png"`，否则 Telegram 客户端可能显示无后缀文件。
+- 长消息要按 Telegram 4096 字符限制分段；HTML 模式下切分前要保证标签闭合，失败时应降级为纯文本。
+
+### 并发与抢答标准模板
+
+抢答类、竞猜类、抽奖类插件都要处理并发：多个人几乎同时答对时，只能有一个人获胜。推荐使用 `chat_id -> asyncio.Lock`，并在加锁后再次检查状态。
+
+```python
+import asyncio
+from collections import defaultdict
+
+
+class QuizPlugin(Plugin):
+    key = "quiz"
+    display_name = "抢答示例"
+    message_channels = {"incoming"}
+    owner_only = False
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._games: dict[int, dict] = {}
+        self._locks: dict[int, asyncio.Lock] = defaultdict(asyncio.Lock)
+
+    async def on_message(self, ctx: PluginContext, event) -> None:
+        chat_id = int(getattr(event, "chat_id", 0) or 0)
+        text = str(getattr(event, "raw_text", "") or "").strip()
+        if not chat_id or not text:
+            return
+
+        lock = self._locks[chat_id]
+        async with lock:
+            # 第一次检查：是否有进行中的局
+            game = self._games.get(chat_id)
+            if not game or game.get("answered"):
+                return
+
+            # 判断可能比较耗 CPU 时，尽量先做轻量过滤，再进入重计算
+            if not self._is_correct(text, game):
+                return
+
+            # 第二次状态变更必须在锁内完成，防止两个答对者同时发奖
+            game["answered"] = True
+            self._games.pop(chat_id, None)
+
+        # 发消息可以放到锁外，避免网络慢时阻塞同群后续消息
+        await safe_reply(ctx, event, f"答对了，奖励 {game['reward']} 分！", chat_id=chat_id)
+
+    def _is_correct(self, text: str, game: dict) -> bool:
+        ...
+```
+
+常见竞态：
+
+- 只在锁外检查 `answered`：两个协程都看到未答对，最后发两次奖励。
+- 在锁内等待网络请求：一个群的消息会被长时间阻塞。
+- 超时任务和答题消息同时结束一局：超时回调也要拿同一把锁，再二次检查。
+- 热重载没有清理状态：旧任务继续执行，和新插件实例抢状态。
+
+### 统一配置项命名与校验
+
+新增插件尽量复用以下字段名，减少前端、文档、Bot 命令和用户认知的分裂。
+
+| 字段 | 类型 | 推荐默认值 | 推荐范围/校验 | 说明 |
+|------|------|------------|---------------|------|
+| `command` | string | 插件短名 | 1-32 字符，不含空白，支持中文 | 触发指令名，配合 `command_config_keys = {"command"}` |
+| `reward` | integer | `0` | `0` 到业务允许上限 | 奖励值；无积分系统时仅作为文案奖励 |
+| `timeout` | integer | `60` | 10-86400 秒 | 用户可理解的超时秒数；已有插件沿用该字段 |
+| `auto_next` | boolean | `false` | 布尔 | 游戏/任务结束后是否自动开下一轮 |
+| `message_template` | string | 内置模板 | 建议限制最大长度 | 用户可编辑输出消息模板 |
+| `status_interval_seconds` | integer | `30` | 10-300 秒 | 状态编辑频率，避免频繁编辑触发风控 |
+| `allowed_chat_ids` | array[int] | `[]` | 留空表示不限制 | 限制插件只在指定聊天生效 |
+| `delete_command_message` | boolean | `false` | 布尔 | 命令完成后是否删除原命令 |
+
+示例：
+
+```python
+class GamePlugin(Plugin):
+    key = "game"
+    command_config_keys = {"command"}
+
+
+config_schema={
+    "type": "object",
+    "x-ui-mode": "single",
+    "properties": {
+        "command": {
+            "type": "string",
+            "title": "触发指令名",
+            "default": "game",
+            "minLength": 1,
+            "maxLength": 32,
+            "pattern": r"^\S+$",
+            "description": "跟在系统命令前缀后使用，支持中文；不要包含空格。",
+        },
+        "reward": {
+            "type": "integer",
+            "title": "默认奖励",
+            "default": 0,
+            "minimum": 0,
+        },
+        "timeout": {
+            "type": "integer",
+            "title": "超时时间（秒）",
+            "default": 60,
+            "minimum": 10,
+            "maximum": 86400,
+        },
+        "auto_next": {
+            "type": "boolean",
+            "title": "结束后自动下一轮",
+            "default": False,
+        },
+    },
+}
+```
+
+### 定时任务与后台任务生命周期
+
+优先使用平台调度器：
+
+- 重复执行、cron、一次性延迟任务：用 `ctx.scheduler.register(...)`。
+- 插件禁用、热重载、worker 退出时，loader 会清理该插件名下的调度任务。
+- 调度回调没有 `event`，必须从 `job.config` 或插件状态里拿 `chat_id`、模板、目标参数。
+
+只有短期后台动作才建议自己 `asyncio.create_task`，例如“本轮游戏 60 秒后超时”。自建 task 必须集中管理并在 `on_shutdown` 取消：
+
+```python
+class RoundPlugin(Plugin):
+    key = "round"
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._tasks: set[asyncio.Task] = set()
+
+    def _track_task(self, task: asyncio.Task) -> None:
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
+
+    async def on_command(self, ctx, cmd, args, event) -> bool:
+        if cmd != "round":
+            return False
+        task = asyncio.create_task(self._round_timeout(ctx, event.chat_id, timeout=60))
+        self._track_task(task)
+        await event.edit("已开局")
+        return True
+
+    async def on_shutdown(self, ctx) -> None:
+        for task in list(self._tasks):
+            task.cancel()
+        if self._tasks:
+            await asyncio.gather(*self._tasks, return_exceptions=True)
+        self._tasks.clear()
+
+    async def _round_timeout(self, ctx, chat_id: int, timeout: int) -> None:
+        try:
+            await asyncio.sleep(timeout)
+            # 超时前必须再次检查该局是否仍存在
+        except asyncio.CancelledError:
+            raise
+```
+
+不要这样做：
+
+- `while True: await asyncio.sleep(...)` 的永久循环。
+- task 不保存引用，导致卸载时无法取消。
+- `on_shutdown` 里只 `cancel()` 不 `await gather()`。
+- 超时任务不做二次状态检查，导致已答对后仍发超时消息。
+
+### 奖惩系统接入约定
+
+当前 TeleBot 没有统一积分服务时，插件奖励分三类：
+
+| 模式 | 适用场景 | 推荐做法 |
+|------|----------|----------|
+| 文案奖励 | 游戏娱乐、无真实积分 | 只发送“奖励 X 分/金币”的消息，并写插件日志 |
+| 插件内记分 | 插件自己维护排行榜 | 仅写自己插件的配置/状态文件或专属表，不直接改其它插件数据 |
+| 统一积分接口 | 后续平台提供积分服务后 | 通过平台 service/event 接口发放，插件不直接操作 DB |
+
+奖励日志建议统一字段：
+
+```python
+await ctx.log(
+    "info",
+    "抢答成功，准备发放奖励。",
+    chat_id=chat_id,
+    winner_id=sender_id,
+    reward=reward,
+    reward_mode="text_only",
+    round_id=round_id,
+)
+```
+
+约束：
+
+- 不要在日志里记录完整昵称、完整消息正文或隐私文本。
+- 真正记分前必须保证“首个答对”已经在锁内原子判定。
+- 奖励发送失败要写 `warn/error` 日志，并说明是否已经兜底发送普通消息。
+
+### 插件最小测试清单
+
+发布前至少覆盖这些路径：
+
+- [ ] 命令能触发，命令名改配置后能热重载生效。
+- [ ] 命令冲突时只由一个插件处理，`on_command` 正确返回 `True/False`。
+- [ ] 群聊、私聊、频道/匿名频道场景下不崩溃。
+- [ ] `event` 兼容裸 `Message`：不直接假设 `event.outgoing`、`event.message.id` 存在。
+- [ ] 重复开局/重复创建规则会给出明确提示。
+- [ ] 抢答并发：两个答对消息同时到达只奖励一次。
+- [ ] 超时任务和答题消息同时发生时，只结束一次。
+- [ ] 插件禁用、热重载、worker shutdown 后没有幽灵 task。
+- [ ] 远程插件 `plugin.json`、`manifest.py`、`__init__.py`、`plugin.py` 均可被加载。
+- [ ] 远程插件不是单文件旧结构；缺少 `manifest.py` 或 `__init__.py` 会被安装阶段拒绝。
+- [ ] 缺权限时远程插件会收到可理解的 `PermissionError`，不会访问 session/Redis/engine。
+- [ ] 所有外部 HTTP 请求有 timeout，错误提示不泄露 token、路径、session。
+- [ ] 插件日志能说明“收到什么、判断了什么、为什么跳过/为什么执行、失败在哪一步”。
+
+### 可复制的游戏插件骨架
+
+下面是一个最小抢答游戏骨架，包含命令注册、状态管理、并发锁、超时、日志和清理。真实插件可以从这里删改。
+
+**plugin.py：**
+
+```python
+from __future__ import annotations
+
+import asyncio
+import random
+from collections import defaultdict
+from dataclasses import dataclass
+from typing import Any
+
+from app.worker.plugins.base import Plugin, PluginContext, register
+
+
+@dataclass
+class RoundState:
+    chat_id: int
+    answer: str
+    reward: int
+    timeout: int
+    answered: bool = False
+
+
+def _event_text(event: Any) -> str:
+    msg = getattr(event, "message", event)
+    return str(getattr(event, "raw_text", None) or getattr(msg, "raw_text", None) or "").strip()
+
+
+@register
+class GuessNumberPlugin(Plugin):
+    key = "guess_number"
+    display_name = "猜数字"
+    message_channels = {"incoming"}
+    owner_only = False
+    command_config_keys = {"command"}
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._rounds: dict[int, RoundState] = {}
+        self._locks: dict[int, asyncio.Lock] = defaultdict(asyncio.Lock)
+        self._tasks: set[asyncio.Task] = set()
+
+    async def on_startup(self, ctx: PluginContext) -> None:
+        self.commands = {self._command(ctx): self._cmd_start}
+        if ctx.log:
+            await ctx.log("info", "猜数字插件已启动。", command=self._command(ctx))
+
+    async def on_shutdown(self, ctx: PluginContext) -> None:
+        for task in list(self._tasks):
+            task.cancel()
+        if self._tasks:
+            await asyncio.gather(*self._tasks, return_exceptions=True)
+        self._tasks.clear()
+        self._rounds.clear()
+        self._locks.clear()
+
+    async def _cmd_start(self, client, event, args: list[str], account_id: int, ctx: PluginContext) -> None:
+        chat_id = int(getattr(event, "chat_id", 0) or 0)
+        reward = int(ctx.config.get("reward", 0) or 0)
+        timeout = int(ctx.config.get("timeout", 60) or 60)
+
+        async with self._locks[chat_id]:
+            if chat_id in self._rounds:
+                await event.edit("当前聊天已有进行中的游戏。")
+                return
+            answer = str(random.randint(1, 9))
+            self._rounds[chat_id] = RoundState(chat_id, answer, reward, timeout)
+
+        task = asyncio.create_task(self._timeout_round(ctx, chat_id, timeout))
+        self._track_task(task)
+        await event.edit(f"猜一个 1-9 的数字，限时 {timeout} 秒。")
+
+    async def on_message(self, ctx: PluginContext, event) -> None:
+        chat_id = int(getattr(event, "chat_id", 0) or 0)
+        text = _event_text(event)
+        if not chat_id or not text:
+            return
+
+        async with self._locks[chat_id]:
+            state = self._rounds.get(chat_id)
+            if not state or state.answered:
+                return
+            if text != state.answer:
+                return
+            state.answered = True
+            self._rounds.pop(chat_id, None)
+
+        if ctx.log:
+            await ctx.log("info", "猜数字答对，准备发送奖励文案。", chat_id=chat_id, reward=state.reward)
+        prize_text = f"答对了！奖励 {state.reward}。"
+        try:
+            await event.reply(prize_text)
+        except Exception:
+            if ctx.client:
+                await ctx.client.send_message(chat_id, prize_text)
+
+    async def _timeout_round(self, ctx: PluginContext, chat_id: int, timeout: int) -> None:
+        try:
+            await asyncio.sleep(timeout)
+            async with self._locks[chat_id]:
+                state = self._rounds.get(chat_id)
+                if not state or state.answered:
+                    return
+                self._rounds.pop(chat_id, None)
+            if ctx.client:
+                await ctx.client.send_message(chat_id, f"本轮超时，答案是 {state.answer}。")
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            if ctx.log:
+                await ctx.log("error", "猜数字超时任务异常，本轮已跳过。", chat_id=chat_id, error=type(exc).__name__)
+
+    def _track_task(self, task: asyncio.Task) -> None:
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
+
+    def _command(self, ctx: PluginContext) -> str:
+        return str(ctx.config.get("command") or "guess")
+```
+
+**manifest.py：**
+
+```python
+from app.worker.plugins.manifest import Manifest
+
+MANIFEST = Manifest(
+    key="guess_number",
+    display_name="猜数字",
+    version="0.1.0",
+    author="example",
+    description="一个可作为游戏插件模板的猜数字抢答插件。",
+    permissions=["send_message", "edit_message", "read_chat"],
+    config_schema={
+        "type": "object",
+        "x-ui-mode": "single",
+        "properties": {
+            "command": {
+                "type": "string",
+                "title": "触发指令名",
+                "default": "guess",
+                "minLength": 1,
+                "maxLength": 32,
+                "pattern": r"^\S+$",
+            },
+            "reward": {
+                "type": "integer",
+                "title": "奖励文案数值",
+                "default": 0,
+                "minimum": 0,
+            },
+            "timeout": {
+                "type": "integer",
+                "title": "答题限时（秒）",
+                "default": 60,
+                "minimum": 10,
+                "maximum": 86400,
+            },
+        },
+    },
+)
+```
+
+**plugin.json（远程安装元数据）：**
+
+```json
+{
+  "name": "guess_number",
+  "display_name": "猜数字",
+  "description": "一个可作为游戏插件模板的猜数字抢答插件。",
+  "author": "example",
+  "version": "0.1.0",
+  "entry": "plugin.py",
+  "permissions": ["send_message", "edit_message", "read_chat"]
+}
+```
+
+**__init__.py：**
+
+```python
+from .manifest import MANIFEST
+from .plugin import GuessNumberPlugin
+
+PLUGIN_CLASS = GuessNumberPlugin
+__all__ = ["PLUGIN_CLASS", "MANIFEST"]
+```
+
+---
+
+## 15. 调试建议
 
 ### 快速自检
 
@@ -1026,12 +1518,12 @@ class DemoPlugin(Plugin):
 | 插件被跳过 | MANIFEST 类型不对或导出缺失 | 检查 `__init__.py` |
 | 命令没反应 | feature 未启用或前缀不匹配 | 检查 rule 配置和前缀 |
 | 热重载后旧 handler 还在触发 | generation guard 未生效 | 检查 loader.py 版本 |
-| 远程插件安装失败 | manifest.json 缺必填字段 | 检查 name/description/entry |
+| 远程插件安装失败 | plugin.json 缺必填字段或格式不合法 | 检查 name/description/version/entry |
 | cleanup 后插件状态异常 | cleanup 未幂等 | 重复调用测试 |
 
 ---
 
-## 15. 安全与合规
+## 16. 安全与合规
 
 - 不要把明文 key 写入日志
 - 不要把完整隐私消息持久化到外部系统
@@ -1040,7 +1532,7 @@ class DemoPlugin(Plugin):
 
 ---
 
-## 16. 完整示例
+## 17. 完整示例
 
 ### 天气查询插件
 
@@ -1073,7 +1565,6 @@ from app.worker.plugins.base import Plugin, register
 class WeatherPlugin(Plugin):
     key = "weather"
     display_name = "天气查询"
-    message_channels = ["group", "private"]
 
     async def on_command(self, ctx, cmd, args, event) -> bool:
         if cmd not in ("weather", "w"):
@@ -1081,7 +1572,7 @@ class WeatherPlugin(Plugin):
 
         city = " ".join(args) if args else "Beijing"
         try:
-            async with httpx.AsyncClient() as client:
+            async with httpx.AsyncClient(timeout=10.0) as client:
                 geo = await client.get(
                     f"https://geocoding-api.open-meteo.com/v1/search?name={city}&count=1"
                 )
@@ -1111,9 +1602,8 @@ from .manifest import MANIFEST
 from .plugin import WeatherPlugin
 
 PLUGIN_CLASS = WeatherPlugin
-MANIFEST_OBJ = MANIFEST
 
-__all__ = ["PLUGIN_CLASS", "MANIFEST_OBJ"]
+__all__ = ["PLUGIN_CLASS", "MANIFEST"]
 ```
 
 ---

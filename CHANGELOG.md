@@ -10,6 +10,46 @@
 
 ---
 
+## [0.10.2] — 2026-05-11 · fix · 远程插件契约收紧 + 开发文档发布
+
+### Added
+- 远程插件文档明确升级为“远程安装规范 + 主插件开发指南”的双文档契约：
+  - `REMOTE-PLUGIN-GUIDE.md` 负责安装、更新、沙箱、账号启用、插件仓库等远程插件专属流程；
+  - `PLUGIN-DEV-GUIDE.md` 负责运行时 API、配置命名、消息发送边界、并发抢答、调度生命周期、日志、测试清单等通用开发规范；
+  - 从本版本开始，不再兼容旧版“只有 `plugin.json` + `plugin.py`”的单文件远程插件结构。
+- 插件开发指南补齐插件工程规范：
+  - 新增“命令回调 / on_message / 定时任务”的可用对象矩阵，说明什么时候用 `event.reply`，什么时候用 `ctx.client` / `ctx.scheduler`；
+  - 新增抢答类插件标准模板：`chat_id -> asyncio.Lock` + 二次状态检查，避免并发双发奖；
+  - 新增统一配置字段建议：`command`、`reward`、`timeout`、`auto_next`、`message_template`、`status_interval_seconds` 等；
+  - 新增后台任务与调度生命周期说明，避免插件卸载后遗留幽灵任务；
+  - 新增奖惩系统接入约定、发布前最小测试清单、可复制的游戏插件骨架。
+
+### Changed
+- 远程插件安装与更新改为强校验标准插件包结构：
+  - 安装阶段仍只解析静态 `plugin.json`，不会 import 未信任 Python；
+  - 同时要求仓库内必须存在 `manifest.py`、`plugin.py`、`__init__.py`；
+  - 缺少运行期文件时返回可读错误，并引导开发者按 `docs/REMOTE-PLUGIN-GUIDE.md` 更新插件。
+- 插件安装目录解析统一锚定项目根目录，避免不同启动目录下把远程插件写到错误位置。
+- 远程插件更新流程支持从插件仓库的子目录重新安装覆盖，更新前后都会重新校验运行期结构。
+- 插件中心的远程插件交互收口：
+  - 已安装插件如果仓库版本更高，显示“可更新”并把按钮切换为“更新”；
+  - 已安装远程插件增加“按账号管理”入口；
+  - 账号级启用远程插件前会检查全局远程插件开关，避免 UI 提示已启用但 worker 找不到实现；
+  - 更新 / 卸载按钮样式与禁用态统一。
+
+### Fixed
+- 修复 Codex 生图发送图片时引用了未定义 `reply_msg`，导致 Telegram 发送阶段报 `NameError` 的问题。
+- 修复 Codex 生图图片发送回归测试缺口：新增测试覆盖显式 `reply_to_id`、PNG 文件名和后缀。
+- 修复前端 API 错误解析不识别 FastAPI `{ detail: { code, message } }` 的问题，现在远程插件安装失败能显示后端给出的明确原因。
+
+### Verification
+- 后端定向测试通过：`backend/.venv/bin/python -m pytest backend/app/tests/test_plugin_security_regression.py backend/app/tests/test_codex_image_errors.py`。
+- 后端静态检查通过：`backend/.venv/bin/python -m ruff check backend/app/settings.py backend/app/services/remote_plugin_service.py backend/app/services/plugin_install_service.py backend/app/services/plugin_repo_service.py backend/app/worker/plugins/loader.py backend/app/tests/test_plugin_security_regression.py`。
+- 前端类型检查通过：`pnpm -C frontend exec tsc -b --noEmit`。
+- 前端生产构建通过：`pnpm -C frontend build`。
+
+---
+
 ## [0.10.1] — 2026-05-11 · feature · 插件仓库系统 + 调度平台化 + Codex 生图增强
 
 ### Added

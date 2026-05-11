@@ -183,8 +183,8 @@ def _humanize_codex_error(status_code: int, detail: str) -> str:
 
     if status_code == 429:
         return (
-            f"❌ Codex 请求太频繁，被限流了。\n"
-            f"💡 等几分钟再试。如果经常出现，说明当前 Token 的并发/频率配额不够，可以换个 Token。"
+            "❌ Codex 请求太频繁，被限流了。\n"
+            "💡 等几分钟再试。如果经常出现，说明当前 Token 的并发/频率配额不够，可以换个 Token。"
         )
 
     if status_code == 404:
@@ -211,18 +211,18 @@ def _humanize_codex_error(status_code: int, detail: str) -> str:
         lowered = message.lower()
         if "safety" in lowered or "content_policy" in lowered or "unsafe" in lowered:
             return (
-                f"❌ 图片被 Codex 安全审核拦截了。\n"
-                f"💡 提示词可能触发了内容安全策略，换个描述试试。"
+                "❌ 图片被 Codex 安全审核拦截了。\n"
+                "💡 提示词可能触发了内容安全策略，换个描述试试。"
             )
         if "timeout" in lowered or "timed out" in lowered:
             return (
-                f"❌ Codex 生成超时了。\n"
-                f"💡 可能是图片太复杂或服务器繁忙，试试简化提示词，或把最大等待时间调大。"
+                "❌ Codex 生成超时了。\n"
+                "💡 可能是图片太复杂或服务器繁忙，试试简化提示词，或把最大等待时间调大。"
             )
         if "quota" in lowered or "insufficient" in lowered:
             return (
-                f"❌ Codex 余额不足。\n"
-                f"💡 账户没钱了或额度用完了，去 OpenAI 后台看看，或者换个有额度的 Token。"
+                "❌ Codex 余额不足。\n"
+                "💡 账户没钱了或额度用完了，去 OpenAI 后台看看，或者换个有额度的 Token。"
             )
         return f"❌ Codex 请求失败：{message}"
 
@@ -843,7 +843,8 @@ class CodexImagePlugin(Plugin):
             )
             return
 
-        await self._cmd_generate(ctx, prompt, event, image_opts, reference_image)
+        reply_to_id = getattr(reply_msg, "id", None) if reply_msg else getattr(event, "id", None)
+        await self._cmd_generate(ctx, prompt, event, image_opts, reference_image, reply_to_id=reply_to_id)
 
     # ── Token 管理 ────────────────────────────────────
 
@@ -870,7 +871,14 @@ class CodexImagePlugin(Plugin):
     # ── 图片生成 ──────────────────────────────────────
 
     async def _cmd_generate(
-        self, ctx: PluginContext, prompt: str, event, image_opts: dict[str, str] | None = None, reference_image: dict[str, Any] | None = None
+        self,
+        ctx: PluginContext,
+        prompt: str,
+        event,
+        image_opts: dict[str, str] | None = None,
+        reference_image: dict[str, Any] | None = None,
+        *,
+        reply_to_id: int | None = None,
     ) -> None:
         # 获取 token
         token = _get_config_value(ctx, "access_token", "")
@@ -1065,6 +1073,7 @@ class CodexImagePlugin(Plugin):
                 return
             ext = _image_ext_from_bytes(image_bytes, image_format)
             file_name = f"codex_image_{int(time.time())}{ext}"
+            send_reply_to = reply_to_id or getattr(event, "id", None)
 
             try:
                 image_file = io.BytesIO(image_bytes)
@@ -1074,7 +1083,7 @@ class CodexImagePlugin(Plugin):
                     image_file,
                     caption=caption,
                     parse_mode="html",
-                    reply_to=reply_msg.id if reply_msg else event.id,
+                    reply_to=send_reply_to,
                     force_document=False,
                 )
             except Exception as send_exc:
@@ -1091,7 +1100,7 @@ class CodexImagePlugin(Plugin):
                     event.chat_id,
                     image_file,
                     caption=_strip_html_tags(caption)[:1024],
-                    reply_to=reply_msg.id if reply_msg else event.id,
+                    reply_to=send_reply_to,
                     force_document=False,
                 )
 

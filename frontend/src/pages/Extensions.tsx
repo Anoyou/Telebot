@@ -159,6 +159,7 @@ function AccountPluginsTab() {
     queryKey: ["matrix"],
     queryFn: getFeatureMatrix,
   });
+  const remoteQ = useQuery({ queryKey: REMOTE_QK, queryFn: fetchRemotePlugins });
 
   const [selectedAid, setSelectedAid] = useState<number | null>(null);
   const [configDialog, setConfigDialog] = useState<{
@@ -188,6 +189,7 @@ function AccountPluginsTab() {
   const features = data?.features ?? [];
   const pluginFeatures = features.filter((f) => !isPlatformFeature(f));
   const platformFeatures = features.filter((f) => isPlatformFeature(f));
+  const remoteByName = new Map((remoteQ.data ?? []).map((p) => [p.name, p]));
 
   // 获取 global config
   const globalConfigQ = useQuery({
@@ -337,6 +339,8 @@ function AccountPluginsTab() {
                           {grouped.map((f) => {
                             const state = (selectedAccount.features[f.key] ?? "disabled") as string;
                             const isActive = state === "active";
+                            const remotePlugin = !f.is_builtin ? remoteByName.get(f.key) : undefined;
+                            const blockedByGlobalRemote = !!remotePlugin && !remotePlugin.enabled;
                             return (
                               <TableRow key={f.key}>
                                 <TableCell>
@@ -355,13 +359,16 @@ function AccountPluginsTab() {
                                       isActive ? "bg-primary" : "bg-muted-foreground/55 dark:bg-muted"
                                     )}
                                     onClick={() =>
-                                      toggleMut.mutate({
-                                        aid: selectedAccount.id,
-                                        key: f.key,
-                                        enabled: !isActive,
-                                      })
+                                      blockedByGlobalRemote
+                                        ? toast.warning("请先在「插件管理」里启用该远程插件的全局开关")
+                                        : toggleMut.mutate({
+                                            aid: selectedAccount.id,
+                                            key: f.key,
+                                            enabled: !isActive,
+                                          })
                                     }
                                     disabled={toggleMut.isPending}
+                                    title={blockedByGlobalRemote ? "远程插件全局开关未启用" : undefined}
                                   >
                                     <span
                                       className={cn(
@@ -529,6 +536,18 @@ function RemoteInstallCard() {
       toast.success(`已安装 ${row.name} v${row.version}`);
       qc.invalidateQueries({ queryKey: REMOTE_QK });
       qc.invalidateQueries({ queryKey: PLUGINS_QK });
+      qc.invalidateQueries({ queryKey: ["matrix"] });
+      qc.invalidateQueries({ queryKey: ["repo-plugins", expandedRepoId] });
+    },
+    onError: (err) => toast.error(getErrMsg(err)),
+  });
+
+  const updateFromRepoMut = useMutation({
+    mutationFn: (name: string) => updateRemotePlugin(name),
+    onSuccess: (row) => {
+      toast.success(`已更新 ${row.name} → v${row.version}`);
+      qc.invalidateQueries({ queryKey: REMOTE_QK });
+      qc.invalidateQueries({ queryKey: ["matrix"] });
       qc.invalidateQueries({ queryKey: ["repo-plugins", expandedRepoId] });
     },
     onError: (err) => toast.error(getErrMsg(err)),
@@ -627,34 +646,52 @@ function RemoteInstallCard() {
                       <p className="py-2 text-center text-sm text-muted-foreground">仓库内未找到插件</p>
                     ) : (
                       <div className="space-y-1">
-                        {(pluginsQ.data ?? []).map((p) => (
+                        {(pluginsQ.data ?? []).map((p) => {
+                          const canUpdate = !!p.installed && !!p.update_available;
+                          return (
                           <div
                             key={p.name}
-                            className="flex items-center gap-2 rounded px-2 py-1.5 hover:bg-accent/30"
+                            className="flex flex-col gap-2 rounded px-2 py-1.5 hover:bg-accent/30 sm:flex-row sm:items-center"
                           >
                             <div className="flex-1 min-w-0">
                               <div className="flex items-center gap-2">
                                 <span className="text-sm font-medium">{p.display_name || p.name}</span>
                                 <span className="font-mono text-xs text-muted-foreground">v{p.version}</span>
-                                {p.installed && (
+                                {canUpdate ? (
+                                  <Badge variant="default" className="text-xs">可更新</Badge>
+                                ) : p.installed ? (
                                   <Badge variant="secondary" className="text-xs">已安装</Badge>
-                                )}
+                                ) : null}
                               </div>
                               {p.description && (
                                 <p className="truncate text-xs text-muted-foreground">{p.description}</p>
                               )}
+                              {canUpdate && p.installed_version && (
+                                <p className="text-xs text-muted-foreground">
+                                  当前 {formatPluginVersion(p.installed_version)}，仓库 {formatPluginVersion(p.version)}
+                                </p>
+                              )}
                             </div>
                             <Button
                               size="sm"
-                              variant={p.installed ? "outline" : "default"}
-                              className="shrink-0 h-7"
-                              disabled={p.installed || installFromRepoMut.isPending}
-                              onClick={() => installFromRepoMut.mutate({ repoId: repo.id, name: p.name })}
+                              variant={canUpdate ? "default" : p.installed ? "outline" : "default"}
+                              className="h-7 shrink-0"
+                              disabled={
+                                (p.installed && !canUpdate)
+                                || installFromRepoMut.isPending
+                                || updateFromRepoMut.isPending
+                              }
+                              onClick={() =>
+                                canUpdate
+                                  ? updateFromRepoMut.mutate(p.name)
+                                  : installFromRepoMut.mutate({ repoId: repo.id, name: p.name })
+                              }
                             >
-                              {p.installed ? "已安装" : "安装"}
+                              {canUpdate ? "更新" : p.installed ? "已安装" : "安装"}
                             </Button>
                           </div>
-                        ))}
+                        );
+                        })}
                       </div>
                     )}
                   </div>
@@ -699,22 +736,38 @@ function InstalledPluginsSection({ onManageAccounts }: { onManageAccounts: () =>
 
   const enableRMMut = useMutation({
     mutationFn: (name: string) => enableRemotePlugin(name),
-    onSuccess: () => { toast.success("已启用"); qc.invalidateQueries({ queryKey: REMOTE_QK }); },
+    onSuccess: () => {
+      toast.success("已启用全局开关，请到「账号插件管理」选择账号启用");
+      qc.invalidateQueries({ queryKey: REMOTE_QK });
+      qc.invalidateQueries({ queryKey: ["matrix"] });
+    },
     onError: (err) => toast.error(getErrMsg(err)),
   });
   const disableRMMut = useMutation({
     mutationFn: (name: string) => disableRemotePlugin(name),
-    onSuccess: () => { toast.success("已禁用"); qc.invalidateQueries({ queryKey: REMOTE_QK }); },
+    onSuccess: () => {
+      toast.success("已禁用全局开关");
+      qc.invalidateQueries({ queryKey: REMOTE_QK });
+      qc.invalidateQueries({ queryKey: ["matrix"] });
+    },
     onError: (err) => toast.error(getErrMsg(err)),
   });
   const updateRMMut = useMutation({
     mutationFn: (name: string) => updateRemotePlugin(name),
-    onSuccess: (row) => { toast.success(`已更新 → v${row.version}`); qc.invalidateQueries({ queryKey: REMOTE_QK }); },
+    onSuccess: (row) => {
+      toast.success(`已更新 ${row.name} → v${row.version}`);
+      qc.invalidateQueries({ queryKey: REMOTE_QK });
+      qc.invalidateQueries({ queryKey: ["matrix"] });
+    },
     onError: (err) => toast.error(getErrMsg(err)),
   });
   const uninstallRMMut = useMutation({
     mutationFn: (name: string) => uninstallRemotePlugin(name),
-    onSuccess: (_r, name) => { toast.success(`已卸载 ${name}`); qc.invalidateQueries({ queryKey: REMOTE_QK }); },
+    onSuccess: (_r, name) => {
+      toast.success(`已卸载 ${name}`);
+      qc.invalidateQueries({ queryKey: REMOTE_QK });
+      qc.invalidateQueries({ queryKey: ["matrix"] });
+    },
     onError: (err) => toast.error(getErrMsg(err)),
   });
 
@@ -805,16 +858,29 @@ function InstalledPluginsSection({ onManageAccounts }: { onManageAccounts: () =>
                     </Badge>
                   </TableCell>
                   <TableCell className="text-right">
-                    <div className="flex justify-end gap-2">
+                    <div className="flex flex-wrap justify-end gap-2">
                       {p.enabled ? (
                         <Button size="sm" variant="outline" onClick={() => disableRMMut.mutate(p.name)} disabled={disableRMMut.isPending}>禁用</Button>
                       ) : (
                         <Button size="sm" onClick={() => enableRMMut.mutate(p.name)} disabled={enableRMMut.isPending}>启用</Button>
                       )}
-                      <Button size="sm" variant="outline" onClick={() => updateRMMut.mutate(p.name)} disabled={updateRMMut.isPending} title="从远程更新">
-                        <RefreshCw className="h-3 w-3" />
+                      <Button size="sm" variant="outline" onClick={onManageAccounts}>
+                        按账号管理
                       </Button>
-                      <Button size="sm" variant="ghost" className="text-destructive" onClick={() => { if (confirm(`确认卸载「${p.name}」？`)) uninstallRMMut.mutate(p.name); }} disabled={uninstallRMMut.isPending}>卸载</Button>
+                      <Button size="sm" variant="outline" onClick={() => updateRMMut.mutate(p.name)} disabled={updateRMMut.isPending} title="从远程更新">
+                        <RefreshCw className="mr-1 h-3 w-3" />
+                        更新
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                        onClick={() => { if (confirm(`确认卸载「${p.name}」？`)) uninstallRMMut.mutate(p.name); }}
+                        disabled={uninstallRMMut.isPending}
+                      >
+                        <Trash2 className="mr-1 h-3 w-3" />
+                        卸载
+                      </Button>
                     </div>
                   </TableCell>
                 </TableRow>

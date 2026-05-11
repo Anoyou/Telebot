@@ -27,6 +27,7 @@ import json
 import logging
 import re
 import shutil
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -170,7 +171,7 @@ _NAME_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_-]*$")  # no dots to prevent .. 
 
 def _installed_root() -> Path:
     """安装根目录（与 worker loader 的 ``_installed_dir`` 同源）。"""
-    return Path(settings.plugins_installed_dir).resolve()
+    return settings.plugins_installed_path
 
 
 def _plugin_dir(name: str) -> Path:
@@ -188,6 +189,23 @@ def _plugin_dir(name: str) -> Path:
             "BAD_PLUGIN_NAME",
             f"插件名派生路径越界: {name!r}",
         )
+    return target
+
+
+def _legacy_plugin_dir(name: str) -> Path:
+    """旧版本在 backend/ 工作目录下运行时可能写到 backend/plugins/installed。"""
+    backend_root = Path(__file__).resolve().parents[2]
+    return (backend_root / "plugins" / "installed" / name).resolve()
+
+
+def _existing_plugin_dir(name: str) -> Path:
+    """返回当前插件实际目录；兼容已安装到旧 backend/plugins/installed 的插件。"""
+    target = _plugin_dir(name)
+    if target.exists():
+        return target
+    legacy = _legacy_plugin_dir(name)
+    if legacy.exists():
+        return legacy
     return target
 
 
@@ -361,6 +379,36 @@ def _read_plugin_metadata(plugin_dir: Path, *, fallback_name: str) -> PluginMeta
     )
 
 
+def _validate_runtime_plugin_shape(plugin_dir: Path, meta: PluginMetadata) -> None:
+    """校验远程插件运行期结构，避免安装后 worker 找不到实现。
+
+    安装阶段仍不执行 Python，只检查必要文件存在。远程插件必须按新版文档
+    提供完整包结构：plugin.json + manifest.py + plugin.py + __init__.py。
+    """
+    missing: list[str] = []
+    for filename in ("manifest.py", "plugin.py", "__init__.py"):
+        if not (plugin_dir / filename).is_file():
+            missing.append(filename)
+
+    entry = str(meta.entry or "plugin.py")
+    if "/" in entry or "\\" in entry or not entry.endswith(".py"):
+        raise InvalidPluginMetadata(
+            "BAD_PLUGIN_ENTRY",
+            f"plugin.json entry 必须是当前插件目录下的 .py 文件，得到 {entry!r}。请按 docs/REMOTE-PLUGIN-GUIDE.md 更新插件结构。",
+        )
+    if not (plugin_dir / entry).is_file():
+        missing.append(entry)
+
+    if missing:
+        unique = sorted(set(missing))
+        raise InvalidPluginMetadata(
+            "PLUGIN_RUNTIME_FILES_MISSING",
+            "远程插件缺少运行期文件："
+            + ", ".join(unique)
+            + "。新版远程插件必须包含 plugin.json、manifest.py、plugin.py、__init__.py；请按 docs/REMOTE-PLUGIN-GUIDE.md 更新插件后再安装。",
+        )
+
+
 # ─────────────────────────────────────────────────────
 # 触发 worker 热加载
 # ─────────────────────────────────────────────────────
@@ -449,7 +497,8 @@ async def install(
         raise DuplicatePluginName(
             "PLUGIN_EXISTS", f"插件 {final_name!r} 已安装"
         )
-    if target.exists():
+    legacy_target = _legacy_plugin_dir(final_name)
+    if target.exists() or legacy_target.exists():
         raise DuplicatePluginName(
             "DIR_EXISTS", f"目录已存在但 DB 无记录: {target}（请先手动清理）"
         )
@@ -468,6 +517,7 @@ async def install(
 
     try:
         meta = _read_plugin_metadata(target, fallback_name=final_name)
+        _validate_runtime_plugin_shape(target, meta)
         row = RemotePlugin(
             name=final_name,
             display_name=meta.display_name or final_name,
@@ -562,7 +612,7 @@ async def uninstall(db: AsyncSession, name: str) -> bool:
 
     # 文件系统清理：失败仅记日志，不阻塞 DB
     try:
-        target = _plugin_dir(name)
+        target = _existing_plugin_dir(name)
         if target.exists():
             shutil.rmtree(target)
     except Exception:  # noqa: BLE001
@@ -612,17 +662,62 @@ async def update(db: AsyncSession, name: str) -> RemotePlugin:
     if row is None:
         raise RemotePluginNotFound("PLUGIN_NOT_FOUND", f"插件不存在: {name}")
 
-    target = _plugin_dir(name)
+    target = _existing_plugin_dir(name)
     if not target.exists():
         raise RemotePluginError(
             "DIR_MISSING",
             f"插件目录已丢失: {target}（请先 uninstall 再 install）",
         )
 
-    # git pull（带 timeout）
-    await _run_git("pull", "--ff-only", cwd=target, timeout=60.0)
+    # git pull（带 timeout）。如果插件是从多插件仓库子目录复制安装的，
+    # 安装目录没有 .git，此时临时 clone source_url 后按 plugin.json.name 定位子目录覆盖。
+    if (target / ".git").exists():
+        await _run_git("pull", "--ff-only", cwd=target, timeout=60.0)
+    else:
+        with tempfile.TemporaryDirectory(prefix="telebot-plugin-update-") as tmp:
+            repo_dir = Path(tmp) / "repo"
+            await _run_git("clone", "--depth", "1", row.source_url, str(repo_dir), timeout=180.0)
+
+            candidates = [repo_dir]
+            candidates.extend([p for p in repo_dir.iterdir() if p.is_dir() and not p.name.startswith(".")])
+            source_dir: Path | None = None
+            for candidate in candidates:
+                if not (candidate / "plugin.json").is_file():
+                    continue
+                try:
+                    candidate_meta = _read_plugin_metadata(candidate, fallback_name=candidate.name)
+                except InvalidPluginMetadata:
+                    continue
+                if candidate_meta.name == name:
+                    source_dir = candidate
+                    break
+            if source_dir is None:
+                raise RemotePluginError(
+                    "PLUGIN_NOT_IN_REPO",
+                    f"仓库 {row.source_url!r} 内未找到插件 {name!r}",
+                )
+
+            backup = target.with_name(f"{target.name}.bak-update")
+            if backup.exists():
+                shutil.rmtree(backup, ignore_errors=True)
+            target.rename(backup)
+            try:
+                shutil.copytree(
+                    source_dir,
+                    target,
+                    ignore=shutil.ignore_patterns(".git", ".gitignore", "__pycache__"),
+                )
+            except Exception:
+                if target.exists():
+                    shutil.rmtree(target, ignore_errors=True)
+                backup.rename(target)
+                raise
+            finally:
+                if backup.exists():
+                    shutil.rmtree(backup, ignore_errors=True)
 
     meta = _read_plugin_metadata(target, fallback_name=name)
+    _validate_runtime_plugin_shape(target, meta)
     if meta.display_name:
         row.display_name = meta.display_name
     row.description = meta.description

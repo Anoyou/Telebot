@@ -44,5 +44,7 @@ class PluginRepoPlugin(BaseModel):
     author: str = ""
     version: str = "0.0.0"
     installed: bool = False
+    installed_version: str | None = None
+    update_available: bool = False
     # 该插件在仓库内的相对子目录（用于安装时定位）；若插件位于仓库根目录则为 ""
     subdir: str = ""

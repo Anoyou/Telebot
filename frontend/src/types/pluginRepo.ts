@@ -20,6 +20,8 @@ export interface PluginRepoPlugin {
   author: string;
   version: string;
   installed: boolean;
+  installed_version?: string | null;
+  update_available?: boolean;
   subdir: string;
 }
 

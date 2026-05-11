@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import base64
 import json
 
+import app.worker.plugins.builtin.codex_image.plugin as codex_image_plugin
+from app.worker.plugins.base import PluginContext
 from app.worker.plugins.builtin.codex_image.plugin import (
+    CodexImagePlugin,
     _edit_html,
     _humanize_codex_error,
     _humanize_codex_exception,
@@ -100,3 +104,72 @@ async def test_codex_status_edit_fallback_strips_html_tags() -> None:
     event = Event()
     await _edit_html(event, "<b>状态:</b> 正在生成")
     assert event.calls[-1] == ("状态: 正在生成", {})
+
+
+async def test_codex_image_send_uses_explicit_reply_to_id(monkeypatch) -> None:
+    class Client:
+        def __init__(self) -> None:
+            self.files: list[tuple[int, str, dict[str, object]]] = []
+
+        async def send_file(self, chat_id: int, image_file, **kwargs: object) -> None:
+            self.files.append((chat_id, image_file.name, kwargs))
+
+    class Event:
+        chat_id = 12345
+        id = 67890
+
+        def __init__(self) -> None:
+            self.edits: list[tuple[str, dict[str, object]]] = []
+            self.deleted = False
+
+        async def edit(self, text: str, **kwargs: object) -> None:
+            self.edits.append((text, kwargs))
+
+        async def delete(self) -> None:
+            self.deleted = True
+
+    async def fake_call_codex_image(**kwargs: object) -> dict[str, str]:
+        png_header = b"\x89PNG\r\n\x1a\n" + b"0" * 16
+        return {
+            "image_base64": base64.b64encode(png_header).decode("ascii"),
+            "revised_prompt": "",
+            "status": "completed",
+            "response_id": "resp_test",
+        }
+
+    monkeypatch.setattr(codex_image_plugin, "_call_codex_image", fake_call_codex_image)
+
+    client = Client()
+    event = Event()
+    logs: list[tuple[str, str, dict[str, object]]] = []
+
+    async def log(level: str, message: str, **detail: object) -> None:
+        logs.append((level, message, detail))
+
+    ctx = PluginContext(
+        account_id=1,
+        feature_key="codex_image",
+        config={
+            "access_token": "test-token",
+            "delete_command_message": False,
+            "status_interval_seconds": 300,
+        },
+        client=client,  # type: ignore[arg-type]
+        log=log,
+    )
+
+    plugin = CodexImagePlugin()
+    await plugin._cmd_generate(
+        ctx,
+        "画一只猫",
+        event,
+        {"image_size": "1024x1024", "aspect_ratio": "1:1", "image_format": "png"},
+        None,
+        reply_to_id=999,
+    )
+
+    assert client.files
+    assert client.files[0][1].endswith(".png")
+    assert client.files[0][2]["reply_to"] == 999
+    assert event.edits[-1][0] == "✅ 图片生成完成"
+    assert any(message == "[codex_image] generation completed" for _, message, _ in logs)

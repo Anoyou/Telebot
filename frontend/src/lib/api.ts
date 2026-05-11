@@ -21,15 +21,26 @@ api.interceptors.response.use(
   },
 );
 
-// 后端错误统一形态：{ error: { code, message } }
-type ApiErrorPayload = { error?: { code?: string; message?: string } };
+// 后端错误统一形态：{ error: { code, message } }；FastAPI HTTPException 常见为 { detail: { code, message } }
+type ApiErrorPayload = {
+  error?: { code?: string; message?: string };
+  detail?: { code?: string; message?: string } | string;
+};
 
 export function getErrMsg(err: unknown): string {
   const e = err as AxiosError<ApiErrorPayload>;
-  return e?.response?.data?.error?.message || e?.message || "请求失败";
+  const detail = e?.response?.data?.detail;
+  return (
+    e?.response?.data?.error?.message
+    || (typeof detail === "object" ? detail?.message : undefined)
+    || (typeof detail === "string" ? detail : undefined)
+    || e?.message
+    || "请求失败"
+  );
 }
 
 export function getErrCode(err: unknown): string | undefined {
   const e = err as AxiosError<ApiErrorPayload>;
-  return e?.response?.data?.error?.code;
+  const detail = e?.response?.data?.detail;
+  return e?.response?.data?.error?.code || (typeof detail === "object" ? detail?.code : undefined);
 }

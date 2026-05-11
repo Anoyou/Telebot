@@ -71,6 +71,7 @@ RECENT_PEERS_LIMIT = 50
 
 # 内置插件根目录：``backend/app/worker/plugins/builtin``
 _BUILTIN_DIR: Path = Path(__file__).parent / "builtin"
+_BACKEND_DIR: Path = Path(__file__).resolve().parents[3]
 
 
 def _installed_dir() -> Path:
@@ -82,7 +83,7 @@ def _installed_dir() -> Path:
     try:
         from ...settings import settings  # 延迟 import 避免循环
 
-        return Path(settings.plugins_installed_dir).resolve()
+        return settings.plugins_installed_path
     except Exception:  # noqa: BLE001
         # settings 加载失败时退化到默认相对路径
         return Path("./plugins/installed").resolve()
@@ -263,7 +264,20 @@ def _load_installed_plugin(plugin_key: str) -> dict[str, type[Plugin]]:
         log.warning("installed 插件路径越界，拒绝加载: %s", path)
         return {}
     if not path.is_dir():
-        return {}
+        legacy_path = (_BACKEND_DIR / "plugins" / "installed" / plugin_key).resolve()
+        try:
+            legacy_path.relative_to((_BACKEND_DIR / "plugins" / "installed").resolve())
+        except ValueError:
+            return {}
+        if not legacy_path.is_dir():
+            return {}
+        log.warning(
+            "installed 插件 %s 位于旧路径 %s；建议移动到 %s",
+            plugin_key,
+            legacy_path,
+            path,
+        )
+        path = legacy_path
     return _load_dir(path, source="installed")
 
 

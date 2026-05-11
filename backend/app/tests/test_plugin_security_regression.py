@@ -91,6 +91,40 @@ class TestRemotePluginSecurity:
 
         assert "EVIL_RUNTIME_DISCOVERY" not in _os.environ
 
+    def test_remote_plugin_requires_runtime_package_files(self, tmp_path):
+        """远程插件必须按新版文档提供完整运行期包结构。"""
+        plugin_dir = tmp_path / "installed" / "single_file"
+        plugin_dir.mkdir(parents=True)
+        (plugin_dir / "plugin.json").write_text(
+            """
+            {
+              "name": "single_file",
+              "display_name": "单文件插件",
+              "version": "1.0.0",
+              "entry": "plugin.py",
+              "permissions": ["send_message"]
+            }
+            """,
+            encoding="utf-8",
+        )
+        (plugin_dir / "plugin.py").write_text(
+            "from app.worker.plugins.base import Plugin, register\n"
+            "@register\n"
+            "class SingleFilePlugin(Plugin):\n"
+            "    key = 'single_file'\n"
+            "    display_name = '单文件插件'\n",
+            encoding="utf-8",
+        )
+
+        meta = svc._read_plugin_metadata(plugin_dir, fallback_name="single_file")
+        with pytest.raises(svc.InvalidPluginMetadata) as ex:
+            svc._validate_runtime_plugin_shape(plugin_dir, meta)
+
+        assert ex.value.code == "PLUGIN_RUNTIME_FILES_MISSING"
+        assert "manifest.py" in ex.value.message
+        assert "__init__.py" in ex.value.message
+        assert "REMOTE-PLUGIN-GUIDE" in ex.value.message
+
     # ── 2. source_url scheme 白名单 ───────────────────────────────
 
     def test_validate_source_url_rejects_file_scheme(self):

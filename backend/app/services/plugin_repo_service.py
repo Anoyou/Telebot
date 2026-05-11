@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import re
 import shutil
 from pathlib import Path
 
@@ -45,6 +46,7 @@ from .remote_plugin_service import (
     _read_plugin_metadata,
     _run_git,
     _trigger_reload,
+    _validate_runtime_plugin_shape,
     _validate_source_url,
 )
 
@@ -80,7 +82,7 @@ class PluginNotInRepo(PluginRepoError):
 # ─────────────────────────────────────────────────────
 def _cache_root() -> Path:
     """所有仓库克隆的缓存根目录。"""
-    root = Path(settings.plugin_repos_cache_dir).resolve()
+    root = settings.resolve_project_path(settings.plugin_repos_cache_dir)
     root.mkdir(parents=True, exist_ok=True)
     return root
 
@@ -168,6 +170,10 @@ def _scan_plugins(repo_dir: Path) -> list[tuple[str, Path]]:
     return results
 
 
+def _version_tuple(raw: str | None) -> tuple[int, ...]:
+    return tuple(int(p) for p in re.findall(r"\d+", str(raw or ""))[:3])
+
+
 async def list_plugins_in_repo(
     db: AsyncSession, repo_id: int
 ) -> list[PluginRepoPlugin]:
@@ -185,9 +191,10 @@ async def list_plugins_in_repo(
     repo_dir = await _ensure_repo_cached(row.url)
     raw = _scan_plugins(repo_dir)
 
-    installed_names = set(
-        (await db.execute(select(RemotePlugin.name))).scalars().all()
-    )
+    installed_rows = (
+        await db.execute(select(RemotePlugin.name, RemotePlugin.version))
+    ).all()
+    installed_versions = {str(name): str(version or "") for name, version in installed_rows}
 
     out: list[PluginRepoPlugin] = []
     for default_name, plugin_dir in raw:
@@ -201,6 +208,7 @@ async def list_plugins_in_repo(
             if plugin_dir == repo_dir
             else str(plugin_dir.relative_to(repo_dir))
         )
+        installed_version = installed_versions.get(meta.name)
         out.append(
             PluginRepoPlugin(
                 name=meta.name,
@@ -208,7 +216,12 @@ async def list_plugins_in_repo(
                 description=meta.description,
                 author=meta.author,
                 version=meta.version,
-                installed=meta.name in installed_names,
+                installed=installed_version is not None,
+                installed_version=installed_version,
+                update_available=(
+                    installed_version is not None
+                    and _version_tuple(meta.version) > _version_tuple(installed_version)
+                ),
                 subdir=subdir,
             )
         )
@@ -342,6 +355,7 @@ async def install_plugin_from_repo(
 
     # 重读元数据（已校验通过；再读一次以拿到完整字段）
     meta = _read_plugin_metadata(target_dir, fallback_name=plugin_name)
+    _validate_runtime_plugin_shape(target_dir, meta)
     final_name = meta.name
 
     # 单插件仓库（target_dir == repo_dir）走 remote_plugin_service.install 复用 clone
