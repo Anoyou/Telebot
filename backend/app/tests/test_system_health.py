@@ -300,7 +300,12 @@ def test_probe_alembic_db_connect_failure() -> None:
 
 
 def test_read_process_stats_prefers_psutil(monkeypatch) -> None:
-    """资源面板优先用 psutil 读取进程 CPU/RSS，避免 Linux/Oracle 上 ps 输出差异。"""
+    """资源面板优先用 psutil 读取进程 CPU/RSS，避免 Linux/Oracle 上 ps 输出差异。
+
+    首次调用会初始化 ``cpu_percent`` 采样窗口，按 psutil 语义返回 None；
+    第二次调用复用缓存的 Process 实例，给出真实差分 CPU%。这样跨 Dashboard
+    轮询既能拿到准确值，又不需要旧实现里的 ``time.sleep(0.05)``。
+    """
 
     class _FakeProcess:
         pid = 123
@@ -311,14 +316,24 @@ def test_read_process_stats_prefers_psutil(monkeypatch) -> None:
         def memory_info(self):
             return SimpleNamespace(rss=128 * 1024 * 1024)
 
+        def is_running(self):
+            return True
+
+        def create_time(self):
+            return 1.0
+
     fake_psutil = SimpleNamespace(Process=lambda pid: _FakeProcess())
     monkeypatch.setitem(sys.modules, "psutil", fake_psutil)
-    monkeypatch.setattr(sh.time, "sleep", lambda _seconds: None)
     monkeypatch.setattr(sh, "_read_process_stats_with_ps", lambda _pids: {123: (0.0, 0.0)})
+    # 避免本测试受其他用例的进程缓存污染
+    sh._PROC_CACHE.clear()
 
-    out = sh._read_process_stats([123])
+    first = sh._read_process_stats([123])
+    second = sh._read_process_stats([123])
 
-    assert out == {123: (7.5, 128.0)}
+    assert first == {123: (None, 128.0)}
+    assert second == {123: (7.5, 128.0)}
+    sh._PROC_CACHE.clear()
 
 
 def test_read_process_stats_falls_back_to_ps(monkeypatch) -> None:

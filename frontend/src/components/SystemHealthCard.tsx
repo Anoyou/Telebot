@@ -53,7 +53,10 @@ export function SystemHealthCard() {
   const q = useQuery({
     queryKey: ["system", "health-overview"],
     queryFn: getHealthOverview,
-    refetchInterval: 30_000,
+    // 60s 默认（原 30s）：health-overview 内部并行 6 路探测，对小机器是周期性脉冲。
+    // 与 HealthDot 共享 cache key —— 一次请求两个组件复用。
+    refetchInterval: 60_000,
+    refetchIntervalInBackground: false,
     refetchOnWindowFocus: true,
   });
 
@@ -435,6 +438,7 @@ function MainProcessEgressBlock() {
     queryFn: getNetworkInfo,
     staleTime: 60_000,
     refetchInterval: 5 * 60_000,
+    refetchIntervalInBackground: false,
   });
   const refreshMut = useMutation({
     mutationFn: refreshNetworkInfo,

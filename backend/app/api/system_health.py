@@ -369,6 +369,28 @@ def _read_memory_percent() -> tuple[float | None, int | None]:
     return None, None
 
 
+# PID -> psutil.Process 实例缓存。
+#
+# 重要：psutil.Process.cpu_percent(interval=None) 的第一次调用只是初始化采样窗口
+# ——返回 0；下一次调用才能给出"自上次以来"的真实 CPU 使用率。
+# 旧实现用 ``time.sleep(0.05)`` 强行造一个差分窗口，这在 1C 小机器上 5s 一次轮询
+# 累积下来就是固定的额外阻塞。改成跨请求缓存 Process 实例后：
+#   - 首次拉取一个 PID：返回 cpu=None（前端会展示 "-"）
+#   - 后续拉取：返回真实差分 cpu%，不再 sleep
+#
+# 用 ``create_time`` 鉴别 PID 复用——两个进程 PID 相同但 create_time 不同时，
+# 把缓存的旧 Process 替换。Worker exit 时也会因为下一次 stats 调用拿不到 process
+# 而被 ``_purge_stale_process_cache`` 清掉。
+_PROC_CACHE: dict[int, tuple[Any, float]] = {}
+
+
+def _purge_stale_process_cache(active_pids: set[int]) -> None:
+    """请求结束时把已退出的 worker 进程从缓存里清掉，防止字典无限增长。"""
+    for pid in list(_PROC_CACHE.keys()):
+        if pid not in active_pids:
+            _PROC_CACHE.pop(pid, None)
+
+
 def _read_process_stats_with_psutil(pids: list[int]) -> dict[int, tuple[float | None, float | None]] | None:
     """用 psutil 读取 PID -> (cpu%, rssMB)。
 
@@ -381,28 +403,34 @@ def _read_process_stats_with_psutil(pids: list[int]) -> dict[int, tuple[float | 
     except Exception:
         return None
 
-    processes: list[Any] = []
+    rows: dict[int, tuple[float | None, float | None]] = {}
     for pid in pids:
         try:
-            proc = psutil.Process(int(pid))
-            proc.cpu_percent(interval=None)
-            processes.append(proc)
-        except Exception:
-            continue
-    if not processes:
-        return {}
-
-    # process.cpu_percent 第一次调用只是初始化采样窗口；短暂停顿后第二次才有可读值。
-    time.sleep(0.05)
-
-    rows: dict[int, tuple[float | None, float | None]] = {}
-    for proc in processes:
-        try:
-            pid = int(proc.pid)
+            proc = None
+            create_time: float | None = None
+            try:
+                cached = _PROC_CACHE.get(pid)
+                if cached is not None:
+                    proc, create_time = cached
+                    # 探活 + 反 PID-reuse：create_time 不同说明 PID 被复用
+                    if not proc.is_running() or proc.create_time() != create_time:
+                        proc = None
+            except Exception:
+                proc = None
+            if proc is None:
+                proc = psutil.Process(int(pid))
+                # 初始化采样窗口；首次返回的 0 我们不展示，记一次后再用
+                proc.cpu_percent(interval=None)
+                _PROC_CACHE[pid] = (proc, proc.create_time())
+                # 首次见到该 PID：rss 现在就能读，但 cpu% 此时无差分可言
+                rss_mb = float(proc.memory_info().rss) / (1024 * 1024)
+                rows[pid] = (None, round(max(0.0, rss_mb), 2))
+                continue
             cpu = float(proc.cpu_percent(interval=None))
             rss_mb = float(proc.memory_info().rss) / (1024 * 1024)
             rows[pid] = (round(max(0.0, cpu), 2), round(max(0.0, rss_mb), 2))
         except Exception:
+            _PROC_CACHE.pop(pid, None)
             continue
     return rows
 
@@ -479,6 +507,7 @@ async def _snapshot_dashboard_workers() -> tuple[list[WorkerRuntimeResource], Pr
     main_pid = os.getpid()
     worker_pids = [int(r["pid"]) for r in runtime if isinstance(r.get("pid"), int)]
     stats = _read_process_stats([main_pid, *worker_pids])
+    _purge_stale_process_cache({main_pid, *worker_pids})
 
     main_cpu, main_rss = stats.get(main_pid, (None, None))
     main = ProcessResource(pid=main_pid, cpu_percent=main_cpu, rss_mb=main_rss)
@@ -506,7 +535,18 @@ async def _snapshot_dashboard_workers() -> tuple[list[WorkerRuntimeResource], Pr
     return workers, main
 
 
+_RUNTIME_LOG_STATS_CACHE: tuple[float, RuntimeLogStats] = (0.0, RuntimeLogStats())
+_RUNTIME_LOG_STATS_TTL = 10.0  # Dashboard 默认 15s+ 轮询，10s memo 几乎不影响数据新鲜度
+
+
 async def _snapshot_runtime_log_stats() -> RuntimeLogStats:
+    """读取过去 5 分钟 runtime_log 行数。Dashboard 高频轮询时短缓存避免 N+1 count。"""
+
+    global _RUNTIME_LOG_STATS_CACHE
+    now = time.monotonic()
+    cached_at, cached = _RUNTIME_LOG_STATS_CACHE
+    if cached and now - cached_at < _RUNTIME_LOG_STATS_TTL:
+        return cached
     try:
         from datetime import UTC, timedelta
 
@@ -526,7 +566,9 @@ async def _snapshot_runtime_log_stats() -> RuntimeLogStats:
             total = int((await db.execute(total_stmt)).scalar() or 0)
             warn = int((await db.execute(warn_stmt)).scalar() or 0)
             err = int((await db.execute(err_stmt)).scalar() or 0)
-        return RuntimeLogStats(last_5m_total=total, last_5m_warn=warn, last_5m_error=err)
+        result = RuntimeLogStats(last_5m_total=total, last_5m_warn=warn, last_5m_error=err)
+        _RUNTIME_LOG_STATS_CACHE = (now, result)
+        return result
     except Exception:
         return RuntimeLogStats()
 

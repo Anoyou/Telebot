@@ -18,8 +18,9 @@ COPY pyproject.toml /app/
 COPY app /app/app
 
 # 升级 pip 并安装本项目（含全部 runtime 依赖：fastapi/telethon/cryptg/python-socks 等）
+# --no-compile：跳过 .pyc 写盘，由 runtime 阶段统一控制（缩小最终镜像 30-60MB）
 RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir .
+    pip install --no-cache-dir --no-compile .
 
 
 FROM python:3.12-slim AS runtime
@@ -37,6 +38,10 @@ COPY --from=builder /usr/local/bin /usr/local/bin
 
 # 拷贝完整源码（含 alembic 迁移脚本、app/ 等）
 COPY . /app
+
+# 清理 site-packages 里残留的 __pycache__（builder 阶段 --no-compile 已少建一批，
+# 这里再扫一遍兜底；运行时 PYTHONDONTWRITEBYTECODE=1 阻止再次生成）。
+RUN find /usr/local/lib/python3.12 -type d -name __pycache__ -prune -exec rm -rf {} + 2>/dev/null || true
 
 # 关闭 pyc 写盘 + 立即刷新 stdout，便于 docker logs 实时查看
 ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1

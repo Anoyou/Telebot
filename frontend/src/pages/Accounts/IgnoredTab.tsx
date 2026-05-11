@@ -62,6 +62,7 @@ export function IgnoredTab({ aid }: { aid: number }) {
     queryKey: ["recent-peers", aid],
     queryFn: () => listRecentPeers(aid),
     refetchInterval: 5_000, // 5s 轮询；worker 写入是内存级，足够快
+    refetchIntervalInBackground: false,
   });
   const ignoredQ = useQuery({
     queryKey: ["ignored-peers", aid],

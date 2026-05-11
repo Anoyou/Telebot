@@ -235,6 +235,7 @@ function LogTable({
     queryKey: ["logs", filters],
     queryFn: () => listRuntimeLogs(filters),
     refetchInterval: autoRefresh ? 5_000 : false,
+    refetchIntervalInBackground: false,
   });
 
   // 关键词过滤：纯前端 substring（不区分大小写）。在 200 条窗口内做，零延时。

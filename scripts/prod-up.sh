@@ -123,6 +123,10 @@ fi
 
 ok "Postgres 凭据校验通过（用户=$_pg_user）"
 
+# ── 1.5 自适应内存档位：tiny / small / large ────────────────────
+# 仅在 .env 没有 ``MEMORY_TIER=`` 时注入；用户后续可任意修改或改 manual 禁用。
+auto_tune_env .env
+
 # ── 2. 构建并启动 ────────────────────────────────────────
 log "构建 + 启动全部容器（首次约 3-5 分钟）"
 docker compose up -d --build

@@ -174,18 +174,45 @@ docker compose up -d --build
 
 ### 小 VPS 内存建议
 
-生产 Compose 默认采用偏保守的资源参数：PostgreSQL 缓存、Redis 上限、后端 DB/Redis 连接池都按单人自托管场景收紧。每个已激活 Telegram 账号仍会常驻一个独立 worker 进程，账号数是内存占用的主要变量；小机器上建议只启用实际需要在线的账号和插件。
+`scripts/_lib.sh::auto_tune_env` 在 `make up` / `make prod-up` 启动时会按宿主机
+RAM 自动写入档位（`tiny` ≤ 1.2 GiB / `small` 1.2-2.5 GiB / `large` > 2.5 GiB），
+并把 `mem_limit`、Postgres 缓存、Redis 上限、连接池都按档位收紧到 `.env`。
+在 `.env` 中设 `MEMORY_TIER=manual` 即可禁用自动覆写，所有键都按你手动设置生效。
 
-可在 `.env` 里继续压低：
+进一步可以在 `.env` 里继续压低（适用于把 1G 机器压到极限的场景）：
 
 ```bash
-DB_POOL_SIZE=3
-DB_MAX_OVERFLOW=1
-REDIS_MAX_CONNECTIONS=8
-REDIS_MAXMEMORY=32mb
-POSTGRES_SHARED_BUFFERS=32MB
-POSTGRES_MAX_CONNECTIONS=24
+MEMORY_TIER=manual           # 自动档让出控制权
+WEB_MEM_LIMIT=288m
+POSTGRES_MEM_LIMIT=128m
+REDIS_MEM_LIMIT=32m
+DB_POOL_SIZE=2
+DB_MAX_OVERFLOW=0
+DB_POOL_SIZE_WORKER=1
+DB_MAX_OVERFLOW_WORKER=0
+REDIS_MAX_CONNECTIONS=6
+REDIS_MAX_CONNECTIONS_WORKER=2
+REDIS_MAXMEMORY=24mb
+POSTGRES_SHARED_BUFFERS=24MB
+POSTGRES_MAX_CONNECTIONS=12
+WORKER_RECONCILE_SECONDS=300
+LOG_INCOMING_MESSAGES_DEFAULT=false   # 默认就是 false；若需要排查再改 true
 ```
+
+每个已激活 Telegram 账号仍会常驻一个独立 worker 进程，账号数是内存占用的主要变量；
+小机器上建议只启用实际需要在线的账号和插件。
+
+更细的减负开关：
+
+- `LOG_INCOMING_MESSAGES_DEFAULT=false`（默认）— 不再为每条 incoming 消息额外
+  写一行可见性 runtime_log；命令派发、插件错误、业务事件等独立日志一律保留。
+  排查时可在系统设置 `system_setting` 里把 key=`log_incoming_messages` 设为
+  `{"enabled": true}` 临时打开。
+- `WORKER_RECONCILE_SECONDS=180`（默认）— worker 周期性重拉命令模板/规则的
+  IPC 兜底间隔；纯热更新场景 reload 是即时的，180 秒足够兜底。
+- `DB_POOL_SIZE_WORKER=1` / `REDIS_MAX_CONNECTIONS_WORKER=4`（默认）— 每个
+  worker 子进程独立的连接池上限；多账号时直接乘以账号数，故按 worker 真实
+  并发收紧很关键。
 
 ## 配置重点
 

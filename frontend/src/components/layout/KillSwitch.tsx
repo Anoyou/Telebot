@@ -22,6 +22,7 @@ export function KillSwitch() {
     queryKey: ["system", "kill-switch"],
     queryFn: fetchKillSwitch,
     refetchInterval: 30_000,
+    refetchIntervalInBackground: false,
   });
   const enabled = !!data?.enabled;
 

@@ -122,3 +122,127 @@ except Exception:
 need_cmd() {
   command -v "$1" >/dev/null 2>&1 || die "缺少命令：$1（$2）"
 }
+
+# ════════════════════════════════════════════════════════════
+# 自适应内存档位：根据宿主机 RAM 选 tiny / small / large。
+# 用法：
+#   tier="$(detect_memory_tier)"   # echo: tiny|small|large
+#   auto_tune_env .env             # 仅当 .env 中没有 MEMORY_TIER 时注入一段
+#
+# 用户可在 .env 写 ``MEMORY_TIER=manual``（或任意非 tiny/small/large 的值）
+# 来禁用自动注入；之后所有 *_MEM_LIMIT / DB_POOL_SIZE 等都不再被脚本覆盖。
+# ════════════════════════════════════════════════════════════
+
+detect_memory_tier() {
+  local mem_kb=0
+  if [[ -r /proc/meminfo ]]; then
+    mem_kb="$(awk '/^MemTotal:/ {print $2; exit}' /proc/meminfo 2>/dev/null || echo 0)"
+  elif command -v sysctl >/dev/null 2>&1; then
+    # macOS：sysctl 输出字节，转 kB
+    local b
+    b="$(sysctl -n hw.memsize 2>/dev/null || echo 0)"
+    mem_kb=$(( b / 1024 ))
+  fi
+  if (( mem_kb <= 0 )); then
+    # 拿不到内存信息时按 small（中档）兜底，行为最接近原默认
+    echo "small"
+    return 0
+  fi
+  # 1.2 GiB ≈ 1258291 kB；2.5 GiB ≈ 2621440 kB
+  if (( mem_kb <= 1258291 )); then
+    echo "tiny"
+  elif (( mem_kb <= 2621440 )); then
+    echo "small"
+  else
+    echo "large"
+  fi
+}
+
+# 把档位翻译成具体配置块；写到 stdout（被调用方追加到 .env）
+_memory_tier_block() {
+  local tier="$1"
+  case "$tier" in
+    tiny)
+      cat <<'EOF'
+# ── 自适应内存档位：tiny（≤ 1.2 GiB 宿主机）────────────────────
+# 删除该 ## auto-tuned 块，或手动改 MEMORY_TIER=manual 即可禁用自动覆盖。
+MEMORY_TIER=tiny
+WEB_MEM_LIMIT=320m
+POSTGRES_MEM_LIMIT=160m
+REDIS_MEM_LIMIT=48m
+FRONTEND_MEM_LIMIT=24m
+DB_POOL_SIZE=2
+DB_MAX_OVERFLOW=0
+REDIS_MAX_CONNECTIONS=8
+POSTGRES_SHARED_BUFFERS=32MB
+POSTGRES_EFFECTIVE_CACHE_SIZE=96MB
+POSTGRES_MAX_CONNECTIONS=20
+POSTGRES_WORK_MEM=1MB
+POSTGRES_MAINTENANCE_WORK_MEM=16MB
+REDIS_MAXMEMORY=24mb
+EOF
+      ;;
+    small)
+      cat <<'EOF'
+# ── 自适应内存档位：small（1.2 - 2.5 GiB）─────────────────────
+# 删除该 ## auto-tuned 块，或手动改 MEMORY_TIER=manual 即可禁用自动覆盖。
+MEMORY_TIER=small
+WEB_MEM_LIMIT=512m
+POSTGRES_MEM_LIMIT=256m
+REDIS_MEM_LIMIT=96m
+FRONTEND_MEM_LIMIT=32m
+DB_POOL_SIZE=3
+DB_MAX_OVERFLOW=1
+REDIS_MAX_CONNECTIONS=12
+POSTGRES_SHARED_BUFFERS=64MB
+POSTGRES_EFFECTIVE_CACHE_SIZE=192MB
+POSTGRES_MAX_CONNECTIONS=30
+REDIS_MAXMEMORY=64mb
+EOF
+      ;;
+    large)
+      cat <<'EOF'
+# ── 自适应内存档位：large（> 2.5 GiB）─────────────────────────
+# 删除该 ## auto-tuned 块，或手动改 MEMORY_TIER=manual 即可禁用自动覆盖。
+MEMORY_TIER=large
+WEB_MEM_LIMIT=1024m
+POSTGRES_MEM_LIMIT=512m
+REDIS_MEM_LIMIT=192m
+FRONTEND_MEM_LIMIT=64m
+DB_POOL_SIZE=5
+DB_MAX_OVERFLOW=2
+REDIS_MAX_CONNECTIONS=16
+POSTGRES_SHARED_BUFFERS=128MB
+POSTGRES_EFFECTIVE_CACHE_SIZE=384MB
+POSTGRES_MAX_CONNECTIONS=40
+REDIS_MAXMEMORY=128mb
+EOF
+      ;;
+  esac
+}
+
+auto_tune_env() {
+  local env_file="${1:-.env}"
+  [[ -f "$env_file" ]] || { warn "auto_tune_env：$env_file 不存在，跳过"; return 0; }
+  # 已显式设置过非空值——保持不动（开发自定义、回滚都靠它）。
+  # 空值（``MEMORY_TIER=``）视为「未设置」，继续走自适应注入。
+  # 用 ``tail -n1`` 保证拿到 dotenv 实际生效的「最后一次定义」（多行同 key 时
+  # python-dotenv / pydantic-settings 都按最后一次值走）。
+  local cur=""
+  if grep -qE '^MEMORY_TIER=' "$env_file" 2>/dev/null; then
+    cur="$(grep -E '^MEMORY_TIER=' "$env_file" | tail -n1 | cut -d= -f2- | tr -d ' "')"
+  fi
+  if [[ -n "$cur" ]]; then
+    dim "MEMORY_TIER 已存在（=$cur）→ 跳过自适应注入"
+    return 0
+  fi
+  local tier
+  tier="$(detect_memory_tier)"
+  log "检测到宿主机内存档位：${C_GRN}${tier}${C_RST}（自动写入 $env_file 末尾）"
+  {
+    printf '\n## auto-tuned BEGIN — 由 scripts/_lib.sh 自适应注入；改 MEMORY_TIER=manual 禁用\n'
+    _memory_tier_block "$tier"
+    printf '## auto-tuned END\n'
+  } >> "$env_file"
+  ok "已写入 ${tier} 档位的 mem_limit / DB / Redis 默认值"
+}

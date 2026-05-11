@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import asyncio
+import gc
 import logging
 from typing import Any
 
@@ -59,7 +60,7 @@ from .tg_client import build_client
 
 log = logging.getLogger(__name__)
 
-_CONFIG_RECONCILE_SECONDS = 60
+_CONFIG_RECONCILE_SECONDS = max(30, int(app_settings.worker_reconcile_seconds or 180))
 
 
 async def run_worker(account_id: int) -> None:
@@ -171,6 +172,13 @@ async def run_worker(account_id: int) -> None:
         global_task = asyncio.create_task(_listen_global(redis, account_id, paused))
         reconcile_task = asyncio.create_task(_periodic_config_reconcile(redis, account_id))
         scheduler_task = asyncio.create_task(platform_scheduler.run())
+
+        # 启动期临时对象（迁移、insp、Telethon TLS handshake buffer 等）此时已不再需要；
+        # 主动 GC 一次让 RSS 在长跑前先收一收，对小机器多账号场景能稳定省 5-15MB。
+        try:
+            gc.collect()
+        except Exception:  # noqa: BLE001
+            pass
 
         try:
             # 阻塞直到 client.disconnect() 被调用

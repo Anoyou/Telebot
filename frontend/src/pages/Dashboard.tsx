@@ -21,7 +21,10 @@ export function Dashboard() {
   const resourceQ = useQuery({
     queryKey: ["system", "resource-dashboard"],
     queryFn: getResourceDashboard,
-    refetchInterval: 5_000,
+    // 15s 默认（原 5s）：1C 机器上每 5s 跑一次进程扫描 + 5min log count 是常驻负担。
+    // refetchIntervalInBackground=false：tab 切走后停止轮询，省 VPS 资源。
+    refetchInterval: 15_000,
+    refetchIntervalInBackground: false,
     refetchOnWindowFocus: true,
   });
 
@@ -41,7 +44,7 @@ export function Dashboard() {
         <CardHeader className="pb-2">
           <CardTitle className="text-base">资源占用</CardTitle>
           <p className="text-sm text-muted-foreground">
-            主机、主进程与 worker 资源快照（5 秒刷新）
+            主机、主进程与 worker 资源快照（15 秒刷新）
           </p>
         </CardHeader>
         <CardContent className="space-y-4 pt-0">

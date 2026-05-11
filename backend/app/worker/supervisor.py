@@ -52,6 +52,7 @@ from ..db.models.log import RuntimeLog
 from ..db.models.rate_limit import RateLimitEvent
 from ..db.models.system import SystemSetting
 from ..redis_client import get_redis
+from .entry import worker_entry
 from .ipc import (
     CMD_PAUSE,
     CMD_RESUME,
@@ -63,7 +64,6 @@ from .ipc import (
     cmd_channel,
     make_cmd,
 )
-from .runtime import worker_main
 
 log = logging.getLogger(__name__)
 
@@ -474,7 +474,7 @@ async def start_worker(account_id: int) -> None:
         h.desired = "running"
         if h.process and h.process.is_alive():
             return
-        p = _MP_CTX.Process(target=worker_main, args=(account_id,), daemon=False)
+        p = _MP_CTX.Process(target=worker_entry, args=(account_id,), daemon=False)
         p.start()
         h.process = p
         # 写 PID 文件——下次启动时 ``_kill_stale_workers`` 据此回收孤儿。

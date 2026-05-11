@@ -92,4 +92,28 @@ export default defineConfig({
     host: true,
     port: 5173,
   },
+  // 把几个偏大的依赖单独拆 chunk：浏览器可缓存命中率更高，
+  // 不会每次首屏都把 echarts/highlight 整个 bundle 下下来。
+  // - echarts：~600KB（已通过 echarts/core 子路径 tree-shaken，但仍偏大）
+  // - highlight.js + rehype-highlight：~250KB（仅 Extensions 页用）
+  // - react-markdown + remark-gfm：~200KB（同 Extensions 页）
+  // - radix-ui 系列：复用率高，单独成块利于 long-term cache
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          echarts: ["echarts/core", "echarts/charts", "echarts/components", "echarts/renderers"],
+          markdown: ["react-markdown", "remark-gfm", "rehype-highlight", "highlight.js"],
+          radix: [
+            "@radix-ui/react-dialog",
+            "@radix-ui/react-dropdown-menu",
+            "@radix-ui/react-label",
+            "@radix-ui/react-slot",
+            "@radix-ui/react-switch",
+            "@radix-ui/react-tabs",
+          ],
+        },
+      },
+    },
+  },
 });

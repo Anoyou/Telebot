@@ -41,6 +41,7 @@ function VersionMismatchBar() {
     queryKey: ["system", "version"],
     queryFn: getBackendVersion,
     refetchInterval: 60_000, // 1 分钟轮询；不一致时由用户手动操作即可
+    refetchIntervalInBackground: false,
     retry: 1,
     // 后端短暂不可达时不弹红条（重启间隙），仅在拿到响应且不一致时弹
     refetchOnWindowFocus: true,
@@ -93,6 +94,7 @@ function KillSwitchBar() {
     queryKey: ["system", "kill-switch"],
     queryFn: fetchKillSwitch,
     refetchInterval: 30_000,
+    refetchIntervalInBackground: false,
   });
 
   const mut = useMutation({

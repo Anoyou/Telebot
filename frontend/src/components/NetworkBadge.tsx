@@ -29,6 +29,7 @@ export function NetworkBadge() {
     queryFn: getNetworkInfo,
     staleTime: 60_000,
     refetchInterval: 5 * 60_000,
+    refetchIntervalInBackground: false,
   });
   const refreshMut = useMutation({
     mutationFn: refreshNetworkInfo,

@@ -157,6 +157,11 @@ fi
 
 ensure_dirs
 
+# ── 4.5 自适应内存档位（仅在 .env 未含 MEMORY_TIER 时注入） ─────────
+# 让 ``make up`` 在小机器开发场景也得到合理的 DB pool / Postgres / Redis
+# 默认。生产 ``make prod-up`` 也会再调一次（幂等）。
+auto_tune_env .env
+
 # ── 5. 收紧 .env 权限（含敏感密钥，必须 600） ───────────────────────
 # 即便 umask 默认 022 让 .env 落成 644，这里也强制收紧；
 # 多次执行无副作用——chmod 是幂等的。

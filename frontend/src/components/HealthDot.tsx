@@ -64,7 +64,9 @@ export function HealthDot() {
   const q = useQuery({
     queryKey: ["system", "health-overview"],
     queryFn: getHealthOverview,
-    refetchInterval: 30_000,
+    // 与 SystemHealthCard 共享 cache key；保持周期一致以充分复用。
+    refetchInterval: 60_000,
+    refetchIntervalInBackground: false,
   });
 
   const tone: Tone = q.isLoading

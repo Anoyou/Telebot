@@ -35,6 +35,7 @@ export function AccountStatusBadge({ status }: { status: AccountStatus }) {
     queryKey: ["system", "kill-switch"],
     queryFn: fetchKill,
     refetchInterval: 30_000,
+    refetchIntervalInBackground: false,
   });
 
   // 总闸开 + 当前 active → 显示为"总闸暂停"，引导用户去顶部恢复

@@ -52,8 +52,10 @@ from ...db.models.feature import (
 from ...db.models.ignored_peer import IgnoredPeer
 from ...db.models.remote_plugin import RemotePlugin
 from ...db.models.rule import Rule
+from ...db.models.system import SystemSetting
 from ...redis_client import get_redis
 from ...services.rate_limit_service import get_effective
+from ...settings import settings as app_settings
 from ...util.sudo_permissions import sudo_chat_allowed
 from ..command import register_plugin_command, unregister_plugin_command
 from ..ipc import RUNTIME_LOG_STREAM, RuntimeLogPayload
@@ -63,6 +65,31 @@ from .base import Plugin, PluginContext, all_plugins, get_plugin
 from .manifest import Manifest
 
 log = logging.getLogger(__name__)
+
+
+# 不在每次消息都查 DB；启动 + reload 时刷新一次，足够快
+async def _load_log_incoming_messages_setting() -> bool:
+    """从 ``system_setting`` 读取「是否记录每条 incoming 消息」开关。
+
+    支持两种存储格式（兼容前端不同 toggle 实现）：
+      - ``{"enabled": true}``
+      - ``{"value": true}``
+      - ``true`` / ``false`` 直接 JSON 布尔
+    缺失或异常一律按 ``app_settings.log_incoming_messages_default`` 处理（默认 False）。
+    """
+    try:
+        async with AsyncSessionLocal() as db:
+            row = await db.get(SystemSetting, "log_incoming_messages")
+        if row is None:
+            return bool(app_settings.log_incoming_messages_default)
+        v = row.value
+        if isinstance(v, dict):
+            return bool(v.get("enabled", v.get("value", app_settings.log_incoming_messages_default)))
+        if isinstance(v, bool):
+            return v
+        return bool(app_settings.log_incoming_messages_default)
+    except Exception:  # noqa: BLE001
+        return bool(app_settings.log_incoming_messages_default)
 
 
 # worker 内存里维护的最近活跃 peer 数量上限（超过则按 LRU 丢弃最旧）
@@ -347,6 +374,11 @@ class _AccountState:
         # Sprint2 #3：最近活跃 peer 的 LRU（peer_id -> {peer_kind, peer_label, ts}）
         # 仅 worker 内存维护；重启后清空。前端不能假设它持久。
         self.recent_peers: collections.OrderedDict[int, dict[str, Any]] = collections.OrderedDict()
+        # 是否对每条 incoming 消息都额外写一行可见性 runtime_log。
+        # 默认 False（小机器场景能省大量 Redis stream + DB 写入）。
+        # 通过 system_setting key=``log_incoming_messages`` 全局打开，账号
+        # 启动 / reload_config 时同步。命令派发、插件错误、业务事件不受影响。
+        self.log_incoming_messages: bool = False
 
 
 # 进程级状态字典（一个 worker 进程通常只服务一个账号；用 dict 是为了灵活）
@@ -407,6 +439,7 @@ async def load_plugins_for_account(
     state.paused = paused
     state.redis = redis
     state.scheduler = scheduler
+    state.log_incoming_messages = await _load_log_incoming_messages_setting()
     _STATES[account_id] = state
 
     # ── 1) 拉取拟人化 + 账号信息构造 engine ──
@@ -471,30 +504,33 @@ async def load_plugins_for_account(
                     if pid in state.ignored_peers:
                         log.debug("[ignored] account=%s chat_id=%s", account_id, pid)
                         return
-                # 调试日志：每条 incoming 消息记一行
-                try:
-                    peer_kind = (
-                        "private" if event.is_private
-                        else "channel" if event.is_channel
-                        else "group" if event.is_group
-                        else "?"
-                    )
-                    text_preview = (event.raw_text or "")[:80]
-                    await _log(
-                        redis,
-                        account_id,
-                        "info",
-                        (
-                            f"收到一条{peer_kind}消息：聊天 ID={event.chat_id}，"
-                            f"内容预览={text_preview!r}。已进入插件分发流程。"
-                        ),
-                        source="event",
-                        chat_id=event.chat_id,
-                        peer_kind=peer_kind,
-                        message_preview=text_preview,
-                    )
-                except Exception:  # noqa: BLE001
-                    pass
+                # 调试日志：每条 incoming 消息记一行；
+                # 默认关闭，small VPS 上活跃账号能产生数百条/分钟。
+                # 在 system_setting.log_incoming_messages = true 时打开。
+                if state.log_incoming_messages:
+                    try:
+                        peer_kind = (
+                            "private" if event.is_private
+                            else "channel" if event.is_channel
+                            else "group" if event.is_group
+                            else "?"
+                        )
+                        text_preview = (event.raw_text or "")[:80]
+                        await _log(
+                            redis,
+                            account_id,
+                            "info",
+                            (
+                                f"收到一条{peer_kind}消息：聊天 ID={event.chat_id}，"
+                                f"内容预览={text_preview!r}。已进入插件分发流程。"
+                            ),
+                            source="event",
+                            chat_id=event.chat_id,
+                            peer_kind=peer_kind,
+                            message_preview=text_preview,
+                        )
+                    except Exception:  # noqa: BLE001
+                        pass
 
             for fkey, inst in list(state.instances.items()):
                 if direction not in inst.message_channels:
@@ -843,6 +879,9 @@ async def reload_account_config(account_id: int, payload: dict | None = None) ->
         return
     state.generation += 1
     redis = state.redis or get_redis()
+
+    # 同步全局开关：让 reload_config 也能让 incoming-message 可见性日志即时生效
+    state.log_incoming_messages = await _load_log_incoming_messages_setting()
 
     # 刷新动态发现的 BUILTIN_FEATURES，让新增 builtin 插件目录立即可见
     try:

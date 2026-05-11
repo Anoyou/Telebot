@@ -5,25 +5,33 @@
 # 说明：
 #   - web 容器内含 supervisor，统一管理每账号的 worker 子进程，故 uvicorn 必须 --workers 1
 #   - 前端 nginx 通过容器名 web:8000 反代后端，无需暴露后端端口到宿主机
+#   - mem_limit / 各组件 Postgres 内存参数 / Redis 上限默认偏小（1G VPS 友好），
+#     脚本 ``scripts/_lib.sh::auto_tune_env`` 会按宿主机内存档位自动覆写到 .env
 
 services:
   # ── PostgreSQL：主数据存储 ────────────────────────────────────
   postgres:
     image: postgres:16-alpine
     restart: unless-stopped
+    # synchronous_commit=off：单机自托管场景以小幅崩溃数据丢失换显著吞吐 + 内存
+    # huge_pages=off：1G 机器上几乎不会有 huge pages 配额，关掉避免日志噪声
     command:
       [
         "postgres",
-        "-c", "shared_buffers=${POSTGRES_SHARED_BUFFERS:-64MB}",
-        "-c", "effective_cache_size=${POSTGRES_EFFECTIVE_CACHE_SIZE:-192MB}",
+        "-c", "shared_buffers=${POSTGRES_SHARED_BUFFERS:-32MB}",
+        "-c", "effective_cache_size=${POSTGRES_EFFECTIVE_CACHE_SIZE:-96MB}",
         "-c", "work_mem=${POSTGRES_WORK_MEM:-2MB}",
-        "-c", "maintenance_work_mem=${POSTGRES_MAINTENANCE_WORK_MEM:-32MB}",
-        "-c", "max_connections=${POSTGRES_MAX_CONNECTIONS:-40}",
+        "-c", "maintenance_work_mem=${POSTGRES_MAINTENANCE_WORK_MEM:-16MB}",
+        "-c", "max_connections=${POSTGRES_MAX_CONNECTIONS:-20}",
+        "-c", "synchronous_commit=off",
+        "-c", "huge_pages=off",
       ]
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-telebot}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-telebot}
       POSTGRES_DB: ${POSTGRES_DB:-telebot}
+    mem_limit: ${POSTGRES_MEM_LIMIT:-160m}
+    mem_reservation: ${POSTGRES_MEM_RESERVATION:-96m}
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -41,9 +49,11 @@ services:
         "redis-server",
         "--appendonly", "${REDIS_APPENDONLY:-no}",
         "--save", "${REDIS_SAVE:-}",
-        "--maxmemory", "${REDIS_MAXMEMORY:-64mb}",
+        "--maxmemory", "${REDIS_MAXMEMORY:-32mb}",
         "--maxmemory-policy", "${REDIS_MAXMEMORY_POLICY:-allkeys-lru}",
       ]
+    mem_limit: ${REDIS_MEM_LIMIT:-48m}
+    mem_reservation: ${REDIS_MEM_RESERVATION:-32m}
     volumes:
       - redisdata:/data
     healthcheck:
@@ -58,20 +68,26 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     restart: unless-stopped
+    # init: true 让 PID 1 是 docker-init/tini，自动回收 multiprocessing.spawn 出来的
+    # worker 子进程僵尸；之前依赖 supervisor 的 atexit/signal hook 兜底，遇到
+    # OOM-Kill 等暴力终止时不一定生效。
+    init: true
     env_file: .env
     environment:
       # 容器内连接服务名（postgres / redis），覆盖 .env 中本机地址
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-telebot}:${POSTGRES_PASSWORD:-telebot}@postgres:5432/${POSTGRES_DB:-telebot}
       REDIS_URL: redis://redis:6379/0
-      DB_POOL_SIZE: ${DB_POOL_SIZE:-5}
-      DB_MAX_OVERFLOW: ${DB_MAX_OVERFLOW:-2}
+      DB_POOL_SIZE: ${DB_POOL_SIZE:-3}
+      DB_MAX_OVERFLOW: ${DB_MAX_OVERFLOW:-1}
       DB_POOL_TIMEOUT: ${DB_POOL_TIMEOUT:-30}
-      REDIS_MAX_CONNECTIONS: ${REDIS_MAX_CONNECTIONS:-16}
+      REDIS_MAX_CONNECTIONS: ${REDIS_MAX_CONNECTIONS:-12}
       MALLOC_ARENA_MAX: ${MALLOC_ARENA_MAX:-2}
       WEB_HOST: 0.0.0.0
       WEB_PORT: "8000"
       # #14：迁移只保留 command 里的那一次；应用启动期自动迁移关闭，避免重复执行
       AUTO_MIGRATE_ON_STARTUP: "false"
+    mem_limit: ${WEB_MEM_LIMIT:-512m}
+    mem_reservation: ${WEB_MEM_RESERVATION:-256m}
     # 让容器内能用 ``host.docker.internal`` 访问宿主机（Mac/Windows Docker Desktop
     # 自带；Linux 需要这一行兜底）。如 .env 里 TG_DEFAULT_PROXY=socks5://host.docker.internal:1080
     # 即可让容器透过宿主机的本地代理出去。
@@ -94,7 +110,8 @@ services:
       retries: 5
     # 启动顺序：先跑 alembic 迁移再启 uvicorn（唯一迁移入口）
     # ⚠ 必须 --workers 1：supervisor 在主进程内管子进程，多 worker 会重复拉起 worker 子进程
-    command: ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 1 --loop asyncio --http h11 --no-access-log"]
+    # --limit-concurrency / --backlog：1C 机器上限制突发并发，避免请求堆积导致 OOM
+    command: ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 1 --loop asyncio --http h11 --no-access-log --limit-concurrency 64 --backlog 64"]
 
   # ── Frontend：nginx 静态托管 + 反代后端 ──────────────────────
   frontend:
@@ -102,6 +119,8 @@ services:
       context: .
       dockerfile: frontend/Dockerfile
     restart: unless-stopped
+    mem_limit: ${FRONTEND_MEM_LIMIT:-32m}
+    mem_reservation: ${FRONTEND_MEM_RESERVATION:-16m}
     depends_on:
       - web
     ports:
