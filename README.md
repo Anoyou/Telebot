@@ -14,7 +14,7 @@ TeleBot 是一个自托管的 Telegram UserBot 多账号管理平台。它用 We
 - 多账号管理：每个 Telegram 账号独立登录、独立配置、独立 worker 子进程运行。
 - Web 控制台：账号、插件、模板、AI、日志、系统设置集中管理，支持浅色 / 深色 / 跟随系统主题。
 - PWA 体验：支持安装到桌面或手机主屏幕，针对 iPhone 安全区、窄屏 Tab 和自适应排版做了优化。
-- 插件系统：内置插件、远程插件、插件热加载、generation guard、生命周期钩子、配置 schema。
+- 插件系统：内置插件、远程插件、插件热加载、generation guard、生命周期钩子、配置 schema。更多插件在路上...
 - 规则驱动插件：自动回复、消息转发、自动复读等按规则匹配并执行。
 - 单配置对象插件：Codex 图片生成等以账号级配置页管理。
 - 平台基础能力：定时任务调度器作为 worker 常驻能力运行，插件和系统页面可复用。
@@ -25,28 +25,32 @@ TeleBot 是一个自托管的 Telegram UserBot 多账号管理平台。它用 We
 
 ## 截图
 
-> 下面截图按最新功能区组织。若你在本地更新截图，直接覆盖同名文件即可。
-
+> 浅色/深色/跟随系统 主题展示
 <p align="center">
   <img src="docs/screenshots/dashboard-light.png" width="45%" alt="浅色主题系统概览与资源占用" />
   <img src="docs/screenshots/dashboard-dark.png" width="45%" alt="暗色主题系统概览与资源占用" />
 </p>
+> 插件中心的插件管理（更多插件在路上...）/支持远程插件装配（开发 ing...）
 <p align="center">
   <img src="docs/screenshots/plugin-center-1.png" width="45%" alt="插件中心与账号插件管理" />
   <img src="docs/screenshots/plugin-center-2.png" width="45%" alt="支持远程插件安装与管理" />
 </p>
+> 插件配置展示/日志支持插件日志独立筛选排查
 <p align="center">
   <img src="docs/screenshots/codex-image-config.png" width="45%" alt="Codex 生图片生成配置页展示" />
   <img src="docs/screenshots/plugin-logs.png" width="45%" alt="插件日志与筛选" />
 </p>
+> 账号级隔离的 Bot 联动支持/ LLM 配置展示
 <p align="center">
   <img src="docs/screenshots/account-bot.png" width="45%" alt="账号 Bot 联动配置" />
   <img src="docs/screenshots/ai-module.png" width="45%" alt="AI Provider 与模型路由设置" />
 </p>
+> 账号详情页风控展示/支持自定义命令
 <p align="center">
   <img src="docs/screenshots/account-detail.png" width="45%" alt="账号详情页和风控管理" />
   <img src="docs/screenshots/command-template.png" width="45%" alt="支持自定义命令模板" />
 </p>
+> iPhone PWA 适配展示
 <p align="center">
   <img src="docs/screenshots/pwa-mobile-1.png" width="32%" alt="iPhone PWA 移动端适配展示 1" />
   <img src="docs/screenshots/pwa-mobile-2.png" width="32%" alt="iPhone PWA 移动端适配展示 2" />
