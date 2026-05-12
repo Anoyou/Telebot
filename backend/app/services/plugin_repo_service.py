@@ -31,7 +31,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db.models.account import Account
-from ..db.models.feature import AccountFeature, Feature
+from ..db.models.feature import FEATURE_STATE_DISABLED, AccountFeature, Feature
 from ..db.models.plugin_repo import PluginRepo
 from ..db.models.remote_plugin import RemotePlugin
 from ..schemas.plugin_repo import PluginRepoPlugin
@@ -46,7 +46,6 @@ from .remote_plugin_service import (
     _plugin_dir,
     _read_plugin_metadata,
     _run_git,
-    _trigger_reload,
     _validate_runtime_plugin_shape,
     _validate_source_url,
 )
@@ -405,7 +404,7 @@ async def install_plugin_from_repo(
             author=meta.author,
             source_url=row.url,
             version=meta.version,
-            enabled=False,
+            enabled=bool(default_enabled),
             default_enabled=default_enabled,
         )
         db.add(rp_row)
@@ -448,7 +447,7 @@ async def install_plugin_from_repo(
                             account_id=int(aid),
                             feature_key=final_name,
                             enabled=True,
-                            state="active",
+                            state=FEATURE_STATE_DISABLED,
                         )
                     )
             await db.flush()
@@ -457,7 +456,6 @@ async def install_plugin_from_repo(
         shutil.rmtree(install_path, ignore_errors=True)
         raise
 
-    await _trigger_reload(db, final_name)
     return rp_row
 
 

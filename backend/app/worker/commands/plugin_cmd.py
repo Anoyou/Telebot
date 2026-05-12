@@ -124,15 +124,20 @@ async def _subcmd_install(event, url: str, *, default_enabled: bool = False) -> 
     try:
         async with AsyncSessionLocal() as db:
             row = await svc.install(db, url, default_enabled=default_enabled)
+            plugin_name = row.name
+            version = row.version
+            author = row.author
+            enabled = row.enabled
             await db.commit()
-        status = "已启用" if row.enabled else "已禁用（需 ,plugin enable 启用）"
+            await svc.trigger_reload(db, plugin_name)
+        status = "已启用" if enabled else "已禁用（需 ,plugin enable 启用）"
         if default_enabled:
             status = "已为所有账号启用"
         await event.edit(
             f"✅ 安装成功\n"
-            f"名称: {row.name}\n"
-            f"版本: {row.version}\n"
-            f"作者: {row.author or '未知'}\n"
+            f"名称: {plugin_name}\n"
+            f"版本: {version}\n"
+            f"作者: {author or '未知'}\n"
             f"状态: {status}"
         )
     except DuplicatePluginName as e:
@@ -157,6 +162,8 @@ async def _subcmd_remove(event, name: str) -> None:
         async with AsyncSessionLocal() as db:
             found = await svc.uninstall(db, name)
             await db.commit()
+            if found:
+                await svc.trigger_reload(db, name)
         if found:
             await event.edit(f"✅ 已卸载：{name}")
         else:
@@ -173,9 +180,11 @@ async def _subcmd_enable(event, name: str) -> None:
 
     try:
         async with AsyncSessionLocal() as db:
-            await svc.enable(db, name)
+            row = await svc.enable(db, name, bootstrap_accounts=True)
+            plugin_name = row.name
             await db.commit()
-        await event.edit(f"✅ 已启用：{name}")
+            await svc.trigger_reload(db, plugin_name)
+        await event.edit(f"✅ 已启用：{plugin_name}")
     except RemotePluginNotFound:
         await event.edit(f"❌ 插件不存在：{name}")
     except Exception as e:  # noqa: BLE001
@@ -190,9 +199,11 @@ async def _subcmd_disable(event, name: str) -> None:
 
     try:
         async with AsyncSessionLocal() as db:
-            await svc.disable(db, name)
+            row = await svc.disable(db, name)
+            plugin_name = row.name
             await db.commit()
-        await event.edit(f"⏸️ 已禁用：{name}")
+            await svc.trigger_reload(db, plugin_name)
+        await event.edit(f"⏸️ 已禁用：{plugin_name}")
     except RemotePluginNotFound:
         await event.edit(f"❌ 插件不存在：{name}")
     except Exception as e:  # noqa: BLE001
@@ -214,8 +225,11 @@ async def _subcmd_update(event, name: str) -> None:
     try:
         async with AsyncSessionLocal() as db:
             row = await svc.update(db, name)
+            plugin_name = row.name
+            version = row.version
             await db.commit()
-        await event.edit(f"✅ 已更新：{name}  →  v{row.version}")
+            await svc.trigger_reload(db, plugin_name)
+        await event.edit(f"✅ 已更新：{plugin_name}  →  v{version}")
     except RemotePluginNotFound:
         await event.edit(f"❌ 插件不存在：{name}")
     except GitOperationFailed as e:

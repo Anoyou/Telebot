@@ -42,6 +42,7 @@ async def api_install_plugin(
         )
         await db.commit()
         await db.refresh(row)
+        await svc.trigger_reload(db, row.name)
         return row
     except DuplicatePluginName as e:
         raise HTTPException(409, detail={"code": e.code, "message": e.message}) from e
@@ -59,9 +60,11 @@ async def api_install_plugin(
 async def api_enable(name: str, db: DBSession):
     """启用指定远程插件（全局开关）。"""
     try:
-        row = await svc.enable(db, name)
+        row = await svc.enable(db, name, bootstrap_accounts=True)
+        plugin_name = row.name
         await db.commit()
-        return {"ok": True, "name": row.name, "enabled": True}
+        await svc.trigger_reload(db, plugin_name)
+        return {"ok": True, "name": plugin_name, "enabled": True}
     except RemotePluginNotFound as e:
         raise HTTPException(404, detail={"code": e.code, "message": e.message}) from e
 
@@ -71,8 +74,10 @@ async def api_disable(name: str, db: DBSession):
     """禁用指定远程插件（全局开关）。"""
     try:
         row = await svc.disable(db, name)
+        plugin_name = row.name
         await db.commit()
-        return {"ok": True, "name": row.name, "enabled": False}
+        await svc.trigger_reload(db, plugin_name)
+        return {"ok": True, "name": plugin_name, "enabled": False}
     except RemotePluginNotFound as e:
         raise HTTPException(404, detail={"code": e.code, "message": e.message}) from e
 
@@ -111,6 +116,7 @@ async def api_update(name: str, db: DBSession):
         row = await svc.update(db, name)
         await db.commit()
         await db.refresh(row)
+        await svc.trigger_reload(db, row.name)
         return row
     except RemotePluginNotFound as e:
         raise HTTPException(404, detail={"code": e.code, "message": e.message}) from e
@@ -124,9 +130,11 @@ async def api_update(name: str, db: DBSession):
 async def api_uninstall(name: str, db: DBSession):
     """卸载并删除指定远程插件（同时清理 Feature/AccountFeature 行）。"""
     found = await svc.uninstall(db, name)
+    await db.commit()
+    if found:
+        await svc.trigger_reload(db, name)
     if not found:
         raise HTTPException(
             404, detail={"code": "PLUGIN_NOT_FOUND", "message": f"插件 {name} 不存在"}
         )
-    await db.commit()
     return {"ok": True, "name": name}

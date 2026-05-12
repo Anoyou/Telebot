@@ -15,6 +15,10 @@ keys-backup-*.age
 # 运行时数据：账号头像 / 第三方插件 / 缓存
 data/
 backend/data/
+backend/plugins/
+plugins/installed/*
+!plugins/installed/translate/
+!plugins/installed/translate/**
 
 # Python
 __pycache__/

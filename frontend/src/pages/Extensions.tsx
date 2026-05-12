@@ -18,6 +18,7 @@ import {
   GitFork,
   Package2,
   Plus,
+  Power,
   Puzzle,
   RefreshCw,
   Trash2,
@@ -737,7 +738,7 @@ function InstalledPluginsSection({ onManageAccounts }: { onManageAccounts: () =>
   const enableRMMut = useMutation({
     mutationFn: (name: string) => enableRemotePlugin(name),
     onSuccess: () => {
-      toast.success("已启用全局开关，请到「账号插件管理」选择账号启用");
+      toast.success("已启用；可到「账号插件管理」调整账号范围");
       qc.invalidateQueries({ queryKey: REMOTE_QK });
       qc.invalidateQueries({ queryKey: ["matrix"] });
     },
@@ -859,18 +860,21 @@ function InstalledPluginsSection({ onManageAccounts }: { onManageAccounts: () =>
                   </TableCell>
                   <TableCell className="text-right">
                     <div className="flex flex-wrap justify-end gap-2">
-                      {p.enabled ? (
-                        <Button size="sm" variant="outline" onClick={() => disableRMMut.mutate(p.name)} disabled={disableRMMut.isPending}>禁用</Button>
-                      ) : (
-                        <Button size="sm" onClick={() => enableRMMut.mutate(p.name)} disabled={enableRMMut.isPending}>启用</Button>
-                      )}
-                      <Button size="sm" variant="outline" onClick={onManageAccounts}>
-                        按账号管理
-                      </Button>
                       <Button size="sm" variant="outline" onClick={() => updateRMMut.mutate(p.name)} disabled={updateRMMut.isPending} title="从远程更新">
                         <RefreshCw className="mr-1 h-3 w-3" />
                         更新
                       </Button>
+                      {p.enabled ? (
+                        <Button size="sm" variant="outline" onClick={() => disableRMMut.mutate(p.name)} disabled={disableRMMut.isPending}>
+                          <X className="mr-1 h-3 w-3" />
+                          禁用
+                        </Button>
+                      ) : (
+                        <Button size="sm" onClick={() => enableRMMut.mutate(p.name)} disabled={enableRMMut.isPending}>
+                          <Power className="mr-1 h-3 w-3" />
+                          启用
+                        </Button>
+                      )}
                       <Button
                         size="sm"
                         variant="outline"
@@ -880,6 +884,9 @@ function InstalledPluginsSection({ onManageAccounts }: { onManageAccounts: () =>
                       >
                         <Trash2 className="mr-1 h-3 w-3" />
                         卸载
+                      </Button>
+                      <Button size="sm" variant="outline" onClick={onManageAccounts}>
+                        按账号管理
                       </Button>
                     </div>
                   </TableCell>

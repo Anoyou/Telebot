@@ -37,7 +37,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db.models.account import Account
-from ..db.models.feature import AccountFeature, Feature
+from ..db.models.feature import FEATURE_STATE_DISABLED, AccountFeature, Feature
 from ..db.models.remote_plugin import RemotePlugin
 from ..settings import settings
 from ..worker.ipc import CMD_RELOAD_CONFIG, publish_cmd_with_ack
@@ -463,6 +463,37 @@ async def _trigger_reload(db: AsyncSession, name: str) -> None:
             log.debug("inproc reload_config 失败 aid=%s name=%s", aid, name, exc_info=True)
 
 
+async def trigger_reload(db: AsyncSession, name: str) -> None:
+    """提交事务后通知 worker 热加载远程插件。"""
+    await _trigger_reload(db, name)
+
+
+async def _enable_for_all_accounts_if_unclaimed(db: AsyncSession, name: str) -> int:
+    """首次全局启用远程插件时，为现有账号创建账号级启用行。
+
+    已经存在任何 account_feature 行时保留用户的账号级选择；这避免后续全局开关
+    反复开关时，把用户手动关闭的账号重新打开。
+    """
+    existing = (
+        await db.execute(select(AccountFeature).where(AccountFeature.feature_key == name))
+    ).scalars().all()
+    if existing:
+        return 0
+
+    aids = (await db.execute(select(Account.id))).scalars().all()
+    for aid in aids:
+        db.add(
+            AccountFeature(
+                account_id=int(aid),
+                feature_key=name,
+                enabled=True,
+                state=FEATURE_STATE_DISABLED,
+            )
+        )
+    await db.flush()
+    return len(aids)
+
+
 # ─────────────────────────────────────────────────────
 # 核心动作
 # ─────────────────────────────────────────────────────
@@ -536,7 +567,7 @@ async def install(
             author=meta.author,
             source_url=source_url,
             version=meta.version,
-            enabled=bool(enable),
+            enabled=bool(enable or default_enabled),
             default_enabled=default_enabled,
         )
         db.add(row)
@@ -579,7 +610,7 @@ async def install(
                         account_id=int(aid),
                         feature_key=final_name,
                         enabled=True,
-                        state="active",
+                        state=FEATURE_STATE_DISABLED,
                     ))
             await db.flush()
 
@@ -588,8 +619,6 @@ async def install(
         shutil.rmtree(target, ignore_errors=True)
         raise
 
-    # 触发 worker 热加载（失败已在 _trigger_reload 内吞掉）
-    await _trigger_reload(db, final_name)
     return row
 
 
@@ -631,16 +660,11 @@ async def uninstall(db: AsyncSession, name: str) -> bool:
     except Exception:  # noqa: BLE001
         log.exception("卸载 %s 时删除目录失败", name)
 
-    # 通知 worker 重新加载（让其知晓该插件已被移除）
-    try:
-        await _trigger_reload(db, name)
-    except Exception:  # noqa: BLE001
-        log.debug("uninstall 后 reload 广播失败 name=%s", name, exc_info=True)
     return True
 
 
 async def set_enabled(
-    db: AsyncSession, name: str, *, enabled: bool
+    db: AsyncSession, name: str, *, enabled: bool, bootstrap_accounts: bool = False
 ) -> RemotePlugin:
     """翻转 ``enabled`` 标志。``name`` 不存在抛 ``RemotePluginNotFound``。"""
     row = (
@@ -649,14 +673,17 @@ async def set_enabled(
     if row is None:
         raise RemotePluginNotFound("PLUGIN_NOT_FOUND", f"插件不存在: {name}")
     row.enabled = bool(enabled)
+    if row.enabled and bootstrap_accounts:
+        await _enable_for_all_accounts_if_unclaimed(db, name)
     await db.flush()
-    await _trigger_reload(db, name)
     return row
 
 
-async def enable(db: AsyncSession, name: str) -> RemotePlugin:
+async def enable(
+    db: AsyncSession, name: str, *, bootstrap_accounts: bool = False
+) -> RemotePlugin:
     """启用插件 = ``set_enabled(..., enabled=True)``。"""
-    return await set_enabled(db, name, enabled=True)
+    return await set_enabled(db, name, enabled=True, bootstrap_accounts=bootstrap_accounts)
 
 
 async def disable(db: AsyncSession, name: str) -> RemotePlugin:
@@ -746,7 +773,6 @@ async def update(db: AsyncSession, name: str) -> RemotePlugin:
         feat.manifest = _feature_manifest_from_meta(meta)
     await db.flush()
 
-    await _trigger_reload(db, name)
     return row
 
 
@@ -780,6 +806,7 @@ __all__ = [
     "install",
     "list_installed",
     "set_enabled",
+    "trigger_reload",
     "uninstall",
     "update",
 ]

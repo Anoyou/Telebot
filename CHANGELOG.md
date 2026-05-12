@@ -10,7 +10,77 @@
 
 ---
 
-## [1.1.0] — 2026-05-12 · hotfix · Sudo 安全收紧 + 远程插件文档规范
+## [0.11.4] — 2026-05-12 · fix · 远程插件模板预览
+
+### Fixed
+- 远程插件 `ConfigDialog` 中的 `template_preview` / `*_preview` 不再渲染为可编辑输入框，改为使用 `TelegramHtmlPreview` 展示只读 HTML 预览卡片。
+- `readOnly: true`、`template_preview`、`*_preview`、`template_placeholders` 字段统一只读展示，并在保存配置时过滤掉，避免把预览和说明写回运行配置。
+- `message_template` / `*_template` 保持可编辑多行输入，继续兼容现有远程插件 schema。
+
+### Documentation
+- 插件开发指南和远程插件指南补充自动弹窗对 `readOnly`、`template_placeholders`、`template_preview` / `*_preview` 的渲染规则。
+
+### Verification
+- 前端构建通过：`pnpm --dir frontend build`。
+
+---
+
+## [0.11.3] — 2026-05-12 · docs · 插件文案模板规范
+
+### Documentation
+- 修正插件消息模板预览规范：基础表单风格可参考 LLM / 自定义命令配置页，但消息模板预览应对齐“通用模板 → 自定义命令模板”的输出模板预览。
+- 明确所有会发送、编辑或回复给 Telegram 用户看的插件文案都必须模板化，包括开局、进行中、答对、超时、取消、错误提示、媒体 caption 和重复触发提示。
+- 明确用户可见文案不应硬编码在 `plugin.py` 中；代码里只保留模板默认值、不可恢复兜底错误、内部日志和开发者调试信息。
+- 版本线说明：`1.1.x` 曾是误写；由于 `0.10.2` 后的 Sudo / 远程插件链路修复属于重要稳定性修复，版本线按 `0.11.0 -> 0.11.1 -> 0.11.2 -> 0.11.3` 延续。
+
+### Verification
+- 文档和版本号同步检查通过。
+
+---
+
+## [0.11.2] — 2026-05-12 · polish · 远程插件配置弹窗与文档
+
+### Changed
+- 远程插件 `ConfigDialog` 对齐自定义命令 / LLM 配置弹窗的宽度、滚动高度、字段间距和统一表单控件风格。
+- 消息模板、提示词、正文、长文本等 schema 字段在自动配置弹窗中使用多行文本输入，减少模板编辑时的拥挤感。
+- 运行期远程插件安装目录加入 `.gitignore`，避免本地安装/更新插件产生未跟踪文件；保留仓库内已有的 `translate` 示例。
+
+### Documentation
+- 插件开发指南补充 Schema 驱动弹窗的 UI 约定，要求自动配置弹窗对齐 LLM 配置页体验。
+- 远程插件指南补充模板字段的占位符说明、示例值和只读预览建议。
+
+### Verification
+- 前端构建通过：`pnpm --dir frontend build`。
+
+---
+
+## [0.11.1] — 2026-05-12 · fix · 远程插件启用与热更新修复
+
+### Added
+- 插件开发指南新增“发布与交互体验检查清单”，覆盖版本同步、消息复用、状态管理、防滥用、公平性、资源清理和降级策略。
+- 远程插件指南补充版本一致性、热更新确认、模板占位符、冷却、清理延迟和结束命令等发布前检查项。
+- 新增远程插件启用流程测试，覆盖首次全局启用自动补账号级启用行，以及已有账号选择不被覆盖。
+
+### Changed
+- 远程插件首次在“插件管理”点“启用”时，如果还没有任何账号级配置，会自动为现有账号创建启用行，减少“已启用但不能触发”的误解。
+- 远程插件 install / enable / update / uninstall 的 worker reload 通知改为事务提交后执行，确保 worker 热加载时读到已提交的版本、开关和账号配置。
+- 远程插件从仓库安装时，`default_enabled=true` 会同步打开远程插件全局开关，并把账号级状态设为等待 worker 激活的 disabled，而不是提前标 active。
+- 插件管理页远程插件按钮顺序调整为“更新 / 启用或禁用 / 卸载 / 按账号管理”，并为启用、禁用、卸载补齐图标。
+
+### Fixed
+- 修复 `owner_only=False` 的远程插件命令无法被群内 incoming 消息直接触发的问题，例如群成员发送 `。cy 100` 能进入公开插件命令分发。
+- 修复远程插件更新后偶发仍运行旧版本的问题：installed 插件 reload 会清理模块缓存、注册表旧类和 `__pycache__`。
+- 修复配置默认值合并前后不一致导致热重载误判命令配置变化的问题。
+- 修复远程插件禁用、更新、卸载后 reload 时机过早，worker 可能读到旧数据库状态的问题。
+
+### Verification
+- 后端定向测试通过：`cd backend && .venv/bin/pytest app/tests/test_plugin_loader.py app/tests/test_plugin_security_regression.py -q`。
+- 后端静态检查通过：`cd backend && .venv/bin/ruff check app/services/remote_plugin_service.py app/services/plugin_repo_service.py app/api/remote_plugin.py app/api/plugin_repo.py app/worker/commands/plugin_cmd.py app/worker/plugins/loader.py app/tests/test_plugin_loader.py app/tests/test_plugin_security_regression.py`。
+- 前端类型检查通过：`cd frontend && pnpm -s exec tsc --noEmit`。
+
+---
+
+## [0.11.0] — 2026-05-12 · hotfix · Sudo 安全收紧 + 远程插件文档规范
 
 ### Added
 - 远程插件指南补充配置弹窗数据来源说明：

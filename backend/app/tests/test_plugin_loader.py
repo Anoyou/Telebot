@@ -25,7 +25,9 @@ from app.worker.plugins import loader as loader_mod
 from app.worker.plugins.base import Plugin, PluginContext
 from app.worker.plugins.loader import (
     _BUILTIN_MODULES,
+    _clear_installed_module_cache,
     _import_builtins,
+    _parse_prefixed_command,
     load_plugins_for_account,
     reload_account_config,
 )
@@ -85,6 +87,12 @@ class _FakeRule:
     enabled: bool = True
     priority: int = 100
     config: dict | None = None
+
+
+@dataclass
+class _FakeFeature:
+    key: str
+    manifest: dict | None = None
 
 
 # ─────────────────────────────────────────────────────
@@ -191,6 +199,73 @@ def test_builtin_modules_constant_is_complete() -> None:
     } <= set(_BUILTIN_MODULES)
 
 
+def test_clear_installed_module_cache_drops_registered_class() -> None:
+    """installed 插件更新时不能只清 sys.modules，还要丢掉注册表里的旧 class。"""
+    from app.worker.plugins.base import _REGISTRY, register
+
+    @register
+    class _TempInstalledPlugin(Plugin):
+        key = "_test_installed_reload"
+        display_name = "installed reload"
+
+    _TempInstalledPlugin._source = "installed"
+    try:
+        assert _REGISTRY["_test_installed_reload"] is _TempInstalledPlugin
+        _clear_installed_module_cache("_test_installed_reload")
+        assert "_test_installed_reload" not in _REGISTRY
+    finally:
+        _REGISTRY.pop("_test_installed_reload", None)
+
+
+def test_clear_installed_module_cache_removes_pycache(monkeypatch, tmp_path) -> None:
+    """git pull 后旧 __pycache__ 也要清掉，避免重新 import 仍读旧字节码。"""
+
+    plugin_dir = tmp_path / "installed" / "_test_installed_reload"
+    cache_dir = plugin_dir / "__pycache__"
+    cache_dir.mkdir(parents=True)
+    (cache_dir / "plugin.cpython-312.pyc").write_bytes(b"stale")
+    monkeypatch.setattr(loader_mod, "_installed_dir", lambda: tmp_path / "installed")
+
+    _clear_installed_module_cache("_test_installed_reload")
+
+    assert not cache_dir.exists()
+
+
+def test_parse_prefixed_command_accepts_unicode_prefix() -> None:
+    assert _parse_prefixed_command("。cy 100", "。") == ("cy", ["100"])
+    assert _parse_prefixed_command(",cy 100", "。") is None
+
+
+@pytest.mark.asyncio
+async def test_public_incoming_plugin_command_dispatches(monkeypatch) -> None:
+    calls: list[tuple[list[str], int]] = []
+
+    async def handler(client, event, args, account_id, ctx):  # noqa: ANN001
+        calls.append((args, account_id))
+
+    class _PublicCommandPlugin(Plugin):
+        key = "_test_public_command"
+        display_name = "公开命令测试"
+        owner_only = False
+        commands = {"cy": handler}
+
+    class _Event:
+        raw_text = "。cy 100"
+        chat_id = -1001
+        sender_id = 42
+
+    state = loader_mod._AccountState(7)
+    ctx = PluginContext(account_id=7, feature_key="_test_public_command", client=object())
+    monkeypatch.setattr(loader_mod, "_current_command_prefix", lambda: "。")
+
+    handled = await loader_mod._dispatch_public_plugin_command(
+        state, "_test_public_command", _PublicCommandPlugin(), ctx, _Event()
+    )
+
+    assert handled is True
+    assert calls == [(["100"], 7)]
+
+
 # ─────────────────────────────────────────────────────
 # 用例 2：load_plugins_for_account 调到 on_startup
 # ─────────────────────────────────────────────────────
@@ -284,3 +359,73 @@ async def test_reload_account_config_shutdown_disabled(monkeypatch) -> None:
     await reload_account_config(account_id=1)
 
     shutdown_spy.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_reload_account_config_keeps_merged_defaults_stable(monkeypatch) -> None:
+    """首次激活和后续热更新应使用同一套合并配置，避免每次 reload 都误重启插件。"""
+    from app.worker.plugins.base import _REGISTRY, register
+
+    startup_configs: list[dict[str, Any]] = []
+    shutdown_spy = AsyncMock()
+
+    @register
+    class _TempConfigPlugin(Plugin):
+        key = "_test_config_stable"
+        display_name = "配置稳定性测试"
+        command_config_keys = {"command", "timeout"}
+
+        async def on_startup(self, ctx: PluginContext) -> None:  # noqa: D401
+            startup_configs.append(dict(ctx.config))
+
+        async def on_shutdown(self, ctx: PluginContext) -> None:  # noqa: D401
+            await shutdown_spy(ctx)
+
+    fake_db = _FakeDB(
+        accounts={1: _FakeAcc(id=1)},
+        humanize={1: None},
+        afs=[
+            _FakeAF(
+                account_id=1,
+                feature_key="_test_config_stable",
+                enabled=True,
+                config={"command": "ct"},
+            )
+        ],
+        rules=[],
+        features={
+            "_test_config_stable": _FakeFeature(
+                key="_test_config_stable",
+                manifest={
+                    "config_schema": {
+                        "properties": {
+                            "command": {"default": "dicegrid"},
+                            "timeout": {"default": 90},
+                        }
+                    }
+                },
+            )
+        },
+    )
+    monkeypatch.setattr(
+        loader_mod, "AsyncSessionLocal", lambda: _fake_session_factory(fake_db)
+    )
+
+    client = MagicMock()
+    client.on = lambda f: (lambda fn: fn)
+    paused = asyncio.Event()
+    paused.set()
+    redis = _FakeRedis()
+
+    try:
+        await load_plugins_for_account(client, account_id=1, paused=paused, redis=redis)
+        state = loader_mod._STATES[1]
+        before_generation = state.generation
+        await reload_account_config(account_id=1)
+
+        assert startup_configs == [{"command": "ct", "timeout": 90}]
+        assert state.generation == before_generation + 1
+        assert state.contexts["_test_config_stable"].generation == state.generation
+        shutdown_spy.assert_not_awaited()
+    finally:
+        _REGISTRY.pop("_test_config_stable", None)

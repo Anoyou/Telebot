@@ -12,9 +12,11 @@
 from __future__ import annotations
 
 import asyncio
+from types import SimpleNamespace
 
 import pytest
 
+from app.db.models.feature import FEATURE_STATE_DISABLED, AccountFeature
 from app.services import remote_plugin_service as svc
 
 
@@ -319,6 +321,100 @@ class TestPluginCommandLifecycle:
         assert "cmd2" not in _PLUGIN_COMMANDS
         # other_plugin 的命令应该保留
         assert "cmd3" in _PLUGIN_COMMANDS
+
+
+class _FakeScalars:
+    def __init__(self, items):
+        self._items = items
+
+    def all(self):
+        return list(self._items)
+
+
+class _FakeResult:
+    def __init__(self, items):
+        self._items = items
+
+    def scalar_one_or_none(self):
+        return self._items[0] if self._items else None
+
+    def scalars(self):
+        return _FakeScalars(self._items)
+
+
+class _FakeRemotePluginDB:
+    def __init__(self, *, account_features=None):
+        self.remote = SimpleNamespace(name="idiom_chain", enabled=False)
+        self.accounts = [1, 2]
+        self.account_features = list(account_features or [])
+        self.added = []
+        self.flush_count = 0
+
+    async def execute(self, stmt):
+        text = str(stmt).lower()
+        if "remote_plugin" in text:
+            return _FakeResult([self.remote])
+        if "account_feature" in text:
+            return _FakeResult(self.account_features)
+        if "from account" in text:
+            return _FakeResult(self.accounts)
+        return _FakeResult([])
+
+    def add(self, row):
+        self.added.append(row)
+        if isinstance(row, AccountFeature):
+            self.account_features.append(row)
+
+    async def flush(self):
+        self.flush_count += 1
+
+
+class TestRemotePluginEnableFlow:
+    """远程插件启用流程测试。"""
+
+    @pytest.mark.asyncio
+    async def test_first_enable_creates_account_feature_rows(self, monkeypatch):
+        """新远程插件首次启用后，应能直接被现有账号加载。"""
+
+        async def _fail_reload(*_args, **_kwargs):
+            raise AssertionError("reload must happen after commit in callers")
+
+        monkeypatch.setattr(svc, "_trigger_reload", _fail_reload)
+        db = _FakeRemotePluginDB()
+
+        row = await svc.enable(db, "idiom_chain", bootstrap_accounts=True)
+
+        assert row.enabled is True
+        assert [(af.account_id, af.feature_key, af.enabled, af.state) for af in db.added] == [
+            (1, "idiom_chain", True, FEATURE_STATE_DISABLED),
+            (2, "idiom_chain", True, FEATURE_STATE_DISABLED),
+        ]
+
+    @pytest.mark.asyncio
+    async def test_enable_preserves_existing_account_choices(self):
+        """已有账号级记录时，不用全局启用覆盖用户选择。"""
+        existing = AccountFeature(
+            account_id=1,
+            feature_key="idiom_chain",
+            enabled=False,
+            state=FEATURE_STATE_DISABLED,
+        )
+        db = _FakeRemotePluginDB(account_features=[existing])
+
+        await svc.enable(db, "idiom_chain", bootstrap_accounts=True)
+
+        assert db.added == []
+        assert existing.enabled is False
+
+    @pytest.mark.asyncio
+    async def test_internal_enable_does_not_bootstrap_accounts_by_default(self):
+        """账号级入口只打开全局开关，不应顺带启用所有账号。"""
+        db = _FakeRemotePluginDB()
+
+        await svc.enable(db, "idiom_chain")
+
+        assert db.remote.enabled is True
+        assert db.added == []
 
 
 class TestPluginMetadataSchema:

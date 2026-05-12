@@ -20,6 +20,7 @@ from ..services.remote_plugin_service import (
     InvalidPluginMetadata,
     InvalidSourceUrl,
     RemotePluginError,
+    trigger_reload,
 )
 
 router = APIRouter(prefix="/api/plugin-repos", tags=["plugin-repos"])
@@ -110,6 +111,7 @@ async def install_plugin_from_repo(
         )
         await db.commit()
         await db.refresh(row)
+        await trigger_reload(db, row.name)
         return row
     except PluginRepoNotFound as e:
         raise HTTPException(404, detail={"code": e.code, "message": e.message}) from e

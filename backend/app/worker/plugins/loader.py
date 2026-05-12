@@ -31,6 +31,7 @@ import importlib
 import importlib.util
 import logging
 import re
+import shutil
 import time
 import traceback
 from pathlib import Path
@@ -57,7 +58,7 @@ from ...redis_client import get_redis
 from ...services.rate_limit_service import get_effective
 from ...settings import settings as app_settings
 from ...util.sudo_permissions import sudo_chat_allowed
-from ..command import register_plugin_command, unregister_plugin_command
+from ..command import get_command_context, register_plugin_command, unregister_plugin_command
 from ..ipc import RUNTIME_LOG_STREAM, RuntimeLogPayload
 from ..ratelimit.engine import RateLimitEngine
 from ..ratelimit.humanize import HumanizeOpts
@@ -170,13 +171,32 @@ def _installed_module_name(plugin_key: str) -> str:
 
 
 def _clear_installed_module_cache(plugin_key: str) -> None:
-    """清掉第三方插件包及其子模块缓存，保证热加载读到磁盘最新代码。"""
+    """清掉第三方插件包、子模块和注册表旧类，保证热加载读到磁盘最新代码。"""
+    import importlib as _importlib
     import sys as _sys
 
     mod_name = _installed_module_name(plugin_key)
     for name in list(_sys.modules):
         if name == mod_name or name.startswith(f"{mod_name}."):
             _sys.modules.pop(name, None)
+    _importlib.invalidate_caches()
+    try:
+        from .base import _REGISTRY
+
+        cls = _REGISTRY.get(plugin_key)
+        if cls is not None and getattr(cls, "_source", None) == "installed":
+            _REGISTRY.pop(plugin_key, None)
+    except Exception:  # noqa: BLE001
+        log.debug("清理 installed 插件注册表失败 plugin=%s", plugin_key, exc_info=True)
+    try:
+        root = _installed_dir().resolve()
+        path = (root / plugin_key).resolve()
+        path.relative_to(root)
+        if path.is_dir():
+            for cache_dir in path.rglob("__pycache__"):
+                shutil.rmtree(cache_dir, ignore_errors=True)
+    except Exception:  # noqa: BLE001
+        log.debug("清理 installed 插件 pycache 失败 plugin=%s", plugin_key, exc_info=True)
 
 
 def _is_safe_plugin_key(plugin_key: str) -> bool:
@@ -416,6 +436,63 @@ async def _event_allowed_for_owner_only(state: _AccountState, event: Any) -> boo
     return True
 
 
+def _current_command_prefix() -> str:
+    try:
+        ctx = get_command_context()
+        if ctx is not None and ctx.command_prefix:
+            return str(ctx.command_prefix)
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        from ...settings import settings  # noqa: PLC0415
+
+        return settings.command_prefix or ","
+    except Exception:  # noqa: BLE001
+        return ","
+
+
+def _parse_prefixed_command(text: str, prefix: str) -> tuple[str, list[str]] | None:
+    if not prefix:
+        return None
+    pattern = re.compile(rf"^{re.escape(prefix)}(\S+)(?:\s+(.*))?$", re.S)
+    match = pattern.match(text or "")
+    if match is None:
+        return None
+    cmd = match.group(1)
+    args_raw = (match.group(2) or "").strip()
+    return cmd, args_raw.split() if args_raw else []
+
+
+async def _dispatch_public_plugin_command(
+    state: _AccountState,
+    fkey: str,
+    inst: Plugin,
+    ctx: PluginContext,
+    event: Any,
+) -> bool:
+    """让 owner_only=False 的插件命令可由群内 incoming 消息触发。"""
+    if getattr(inst, "owner_only", True):
+        return False
+    parsed = _parse_prefixed_command(getattr(event, "raw_text", "") or "", _current_command_prefix())
+    if parsed is None:
+        return False
+    cmd, args = parsed
+    commands = getattr(inst, "commands", None) or getattr(type(inst), "commands", None) or {}
+    fn = commands.get(cmd)
+    if fn is None:
+        return False
+    if ctx.log:
+        await ctx.log(
+            "info",
+            f"[{fkey}] 收到公开插件命令：{cmd}",
+            command=cmd,
+            chat_id=getattr(event, "chat_id", None),
+            sender_id=getattr(event, "sender_id", None),
+        )
+    await fn(ctx.client or state.client, event, args, state.account_id, ctx)
+    return True
+
+
 # ─────────────────────────────────────────────────────
 # 主入口：load_plugins_for_account
 # ─────────────────────────────────────────────────────
@@ -545,6 +622,10 @@ async def load_plugins_for_account(
                 if ctx.generation != state.generation:
                     continue
                 try:
+                    if direction == "incoming" and await _dispatch_public_plugin_command(
+                        state, fkey, inst, ctx, event
+                    ):
+                        continue
                     await inst.on_message(ctx, event)
                 except Exception as exc:  # noqa: BLE001
                     await _log(
@@ -718,10 +799,14 @@ async def _activate(db, state: _AccountState, af: AccountFeature, redis: Any) ->
             state.client, perms, plugin_key=af.feature_key
         )
 
+    effective_config = await _merge_plugin_config(
+        db, state.account_id, af.feature_key, dict(af.config or {})
+    )
+
     ctx = PluginContext(
         account_id=state.account_id,
         feature_key=af.feature_key,
-        config=dict(af.config or {}),
+        config=effective_config,
         rules=list(rules),
         client=plugin_client,
         engine=state.engine if plugin_source != "installed" else None,
@@ -877,7 +962,7 @@ async def reload_account_config(account_id: int, payload: dict | None = None) ->
     state = _STATES.get(account_id)
     if state is None:
         return
-    state.generation += 1
+    next_generation = state.generation + 1
     redis = state.redis or get_redis()
 
     # 同步全局开关：让 reload_config 也能让 incoming-message 可见性日志即时生效
@@ -1024,6 +1109,14 @@ async def reload_account_config(account_id: int, payload: dict | None = None) ->
         for af in afs:
             if af.feature_key not in state.instances:
                 await _activate(db, state, af, redis)
+
+    state.generation = next_generation
+    for fkey, ctx in state.contexts.items():
+        ctx.generation = next_generation
+        ctx.scheduler = (
+            state.scheduler.for_plugin(fkey, next_generation)
+            if state.scheduler is not None else None
+        )
 
     await _log(redis, account_id, "info", "插件配置已热更新")
 
