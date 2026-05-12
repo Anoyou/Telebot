@@ -124,7 +124,7 @@ need_cmd() {
 }
 
 # ════════════════════════════════════════════════════════════
-# 自适应内存档位：根据宿主机 RAM 选 tiny / small / large。
+# 自适应内存档位：根据 Docker 可用 RAM 选 tiny / small / large。
 # 用法：
 #   tier="$(detect_memory_tier)"   # echo: tiny|small|large
 #   auto_tune_env .env             # 仅当 .env 中没有 MEMORY_TIER 时注入一段
@@ -135,9 +135,18 @@ need_cmd() {
 
 detect_memory_tier() {
   local mem_kb=0
-  if [[ -r /proc/meminfo ]]; then
+  if command -v docker >/dev/null 2>&1; then
+    # macOS + OrbStack / Docker Desktop 场景下，sysctl 读到的是 Mac 宿主机内存，
+    # 不是 Docker VM 的内存上限；docker info 的 MemTotal 更贴近 compose 实际可用值。
+    local docker_mem_bytes
+    docker_mem_bytes="$(docker info --format '{{.MemTotal}}' 2>/dev/null || echo 0)"
+    if [[ "$docker_mem_bytes" =~ ^[0-9]+$ ]] && (( docker_mem_bytes > 0 )); then
+      mem_kb=$(( docker_mem_bytes / 1024 ))
+    fi
+  fi
+  if (( mem_kb <= 0 )) && [[ -r /proc/meminfo ]]; then
     mem_kb="$(awk '/^MemTotal:/ {print $2; exit}' /proc/meminfo 2>/dev/null || echo 0)"
-  elif command -v sysctl >/dev/null 2>&1; then
+  elif (( mem_kb <= 0 )) && command -v sysctl >/dev/null 2>&1; then
     # macOS：sysctl 输出字节，转 kB
     local b
     b="$(sysctl -n hw.memsize 2>/dev/null || echo 0)"
