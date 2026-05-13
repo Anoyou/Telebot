@@ -10,6 +10,33 @@
 
 ---
 
+## [0.12.0] — 2026-05-13 · feature · 小 VPS 资源预算与失败隔离
+
+### Added
+- 生产 `docker-compose.yml` 为 web / postgres / redis / frontend 增加明确的 `mem_limit` / `mem_reservation`，用于小 VPS 场景的资源预算与失败隔离。
+- 新增 `scripts/_lib.sh::auto_tune_env`，在 `.env` 未显式设置 `MEMORY_TIER` 时按 Docker 可用内存写入 tiny / small / large 档位。
+- worker 子进程新增独立 DB / Redis 连接池默认值，并通过 `app.worker.entry.worker_entry` 在导入 runtime 前标记 `TELEBOT_WORKER_PROC=1`。
+- 新增 `log_incoming_messages_default` 与系统设置热加载开关，默认关闭逐条 incoming message 可见性日志。
+
+### Changed
+- PostgreSQL / Redis 默认资源参数收紧，降低小部署的峰值占用；web 增加 `init: true` 与 uvicorn `--limit-concurrency 64 --backlog 64`。
+- worker 配置 reconcile 默认间隔从 60s 调整为 180s，并在插件加载完成后主动 GC 一次。
+- Dashboard 资源面板和健康状态轮询降频，所有轮询查询在后台标签页停止 refetch。
+- 前端非首屏路由改为 lazy load，Vite 将 markdown / radix 拆分为独立 chunk，降低首屏 JS 压力。
+- `system_health` 进程采样缓存 psutil `Process` 实例，移除每次读取时的固定 `sleep(0.05)`；runtime_log 5 分钟计数增加短 TTL memo。
+
+### Fixed
+- 修复本地 OrbStack / Docker Desktop 场景下内存档位误读 Mac 宿主机 RAM 的问题：`detect_memory_tier` 现在优先读取 `docker info .MemTotal`。
+- 撤回 `pip --no-compile` / 删除 `__pycache__` 的镜像瘦身尝试，避免冷启动现场编译依赖导致 web RSS 明显升高。
+
+### Verification
+- 本地 OrbStack 约 1GiB / 1CPU 环境：PR fixed 总峰值约 `152.0 MiB`，低于 main fresh 的 `178.3 MiB`；平均总占用略高，定位为资源预算 / 峰值削平 / 失败隔离收益，而非平均 RSS 显著下降。
+- VPS forced-tiny smoke：web 约 `210-215 MiB / 320 MiB`，postgres / redis / frontend 均在各自限制内。
+- VPS 10 分钟轻负载验证：所有容器保持 healthy，`OOMKilled=false`，`RestartCount=0`。
+- 后端 / 前端验证沿用优化 PR 验证：`ruff check backend/app`、`pytest backend`、`tsc -b --noEmit`、`vite build`。
+
+---
+
 ## [0.11.4] — 2026-05-12 · fix · 远程插件模板预览
 
 ### Fixed
