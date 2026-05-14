@@ -33,6 +33,13 @@ from app.services.llm_client import (
 )
 from app.worker import command as wcmd
 
+
+@pytest.fixture(autouse=True)
+def _disable_ai_refresh(monkeypatch):
+    from app.worker import runtime as worker_runtime
+
+    monkeypatch.setattr(worker_runtime, "_refresh_command_context", AsyncMock(return_value=None))
+
 # ════════════════════════════════════════════════════════════
 # 1) 加密 + 出参屏蔽
 # ════════════════════════════════════════════════════════════
