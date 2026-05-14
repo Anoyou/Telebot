@@ -19,6 +19,8 @@ from typing import Any
 
 from telethon import TelegramClient, events
 
+from ..db.base import AsyncSessionLocal
+from ..services import audit as audit_svc
 from ..redis_client import get_redis
 from ..settings import settings
 from ..util.sudo_permissions import (
@@ -429,6 +431,38 @@ async def _check_sudo_permission(event, cmd: str, account_id: int) -> tuple[bool
     return await _check_sudo_permission_impl(_ctx, event, cmd)
 
 
+async def _write_sudo_audit_log(
+    account_id: int,
+    status: str,
+    *,
+    subcommand: str | None = None,
+    row_count: int | None = None,
+) -> None:
+    """写入 sudo 查询审计日志；失败不影响命令语义。"""
+    detail: dict[str, Any] = {"status": status}
+    if subcommand is not None:
+        detail["subcommand"] = subcommand
+    if row_count is not None:
+        detail["row_count"] = row_count
+    try:
+        async with AsyncSessionLocal() as db:
+            await audit_svc.write(
+                db,
+                None,
+                "worker.sudo",
+                target=f"account:{account_id}",
+                detail=detail,
+            )
+            await db.commit()
+    except Exception:  # noqa: BLE001
+        log.warning(
+            "写 sudo audit_log 失败 account_id=%s status=%s",
+            account_id,
+            status,
+            exc_info=True,
+        )
+
+
 def _should_report_incoming_sudo_denial(error_msg: str) -> bool:
     return _should_report_incoming_sudo_denial_impl(error_msg)
 
@@ -784,10 +818,10 @@ async def _cmd_sudo(client, event, args, account_id):
     """查看 sudo 用户（超级用户，可代表账号执行命令）授权摘要。"""
     from sqlalchemy import select
 
-    from ..db.base import AsyncSessionLocal
     from ..db.models.account import SudoUser
 
     if not args:
+        await _write_sudo_audit_log(account_id, "usage")
         await event.edit("用法：,sudo ls（仅只读查询）")
         return
 
@@ -801,6 +835,7 @@ async def _cmd_sudo(client, event, args, account_id):
                 )
             ).scalars().all()
         if not rows:
+            await _write_sudo_audit_log(account_id, "empty", subcommand=sub, row_count=0)
             await event.edit("当前没有任何 sudo 用户")
             return
         lines = []
@@ -810,9 +845,16 @@ async def _cmd_sudo(client, event, args, account_id):
             lines.append(f"• TG用户 {r.tg_user_id}（{r.display_name or '无'}）\n"
                          f"  允许对话：{chat_str}\n"
                          f"  允许命令：{cmd_str}")
+        await _write_sudo_audit_log(
+            account_id,
+            "ok",
+            subcommand=sub,
+            row_count=len(rows),
+        )
         await event.edit("Sudo 用户列表：\n" + "\n".join(lines))
         return
 
+    await _write_sudo_audit_log(account_id, "invalid_subcommand", subcommand=sub)
     await event.edit("仅支持只读查询：,sudo ls")
 
 

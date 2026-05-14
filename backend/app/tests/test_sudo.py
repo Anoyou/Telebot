@@ -663,30 +663,87 @@ def test_generation_guard_increment():
     assert state.generation == 3
 
 
+class _Rows:
+    def __init__(self, rows):
+        self._rows = rows
+
+    def scalars(self):
+        return self
+
+    def all(self):
+        return self._rows
+
+
+class _FakeSession:
+    def __init__(self, rows=None):
+        self._rows = rows or []
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+    async def execute(self, _stmt):
+        return _Rows(self._rows)
+
+    async def commit(self):
+        return None
+
+
 @pytest.mark.asyncio
 async def test_builtin_sudo_add_and_del_are_removed():
     """高危 sudo add/del 不再可用。"""
     from app.worker.command import _BUILTIN
+    from app.worker import command as wcmd
 
     client = AsyncMock()
     event = AsyncMock()
-    await _BUILTIN["sudo"].handler(client, event, ["add", "123"], 1)
-    event.edit.assert_called_once_with("仅支持只读查询：,sudo ls")
+    audit_write = AsyncMock(return_value=None)
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(wcmd, "AsyncSessionLocal", lambda: _FakeSession())
+    monkeypatch.setattr(wcmd.audit_svc, "write", audit_write)
+    try:
+        await _BUILTIN["sudo"].handler(client, event, ["add", "123"], 1)
+        event.edit.assert_called_once_with("仅支持只读查询：,sudo ls")
+        audit_write.assert_awaited_once()
+        assert audit_write.await_args.kwargs["detail"] == {
+            "status": "invalid_subcommand",
+            "subcommand": "add",
+        }
 
-    event2 = AsyncMock()
-    await _BUILTIN["sudo"].handler(client, event2, ["del", "123"], 1)
-    event2.edit.assert_called_once_with("仅支持只读查询：,sudo ls")
+        event2 = AsyncMock()
+        audit_write.reset_mock()
+        await _BUILTIN["sudo"].handler(client, event2, ["del", "123"], 1)
+        event2.edit.assert_called_once_with("仅支持只读查询：,sudo ls")
+        audit_write.assert_awaited_once()
+        assert audit_write.await_args.kwargs["detail"] == {
+            "status": "invalid_subcommand",
+            "subcommand": "del",
+        }
+    finally:
+        monkeypatch.undo()
 
 
 @pytest.mark.asyncio
 async def test_builtin_sudo_without_args_shows_readonly_usage():
     """空参数时返回只读用法提示，不直接列出用户。"""
     from app.worker.command import _BUILTIN
+    from app.worker import command as wcmd
 
     client = AsyncMock()
     event = AsyncMock()
-    await _BUILTIN["sudo"].handler(client, event, [], 1)
-    event.edit.assert_called_once_with("用法：,sudo ls（仅只读查询）")
+    audit_write = AsyncMock(return_value=None)
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(wcmd, "AsyncSessionLocal", lambda: _FakeSession())
+    monkeypatch.setattr(wcmd.audit_svc, "write", audit_write)
+    try:
+        await _BUILTIN["sudo"].handler(client, event, [], 1)
+        event.edit.assert_called_once_with("用法：,sudo ls（仅只读查询）")
+        audit_write.assert_awaited_once()
+        assert audit_write.await_args.kwargs["detail"] == {"status": "usage"}
+    finally:
+        monkeypatch.undo()
 
 
 @pytest.mark.asyncio
@@ -695,37 +752,24 @@ async def test_builtin_sudo_ls_still_works_with_summary(monkeypatch):
     from types import SimpleNamespace
 
     from app.worker.command import _BUILTIN
+    from app.worker import command as wcmd
 
-    class _Rows:
-        def __init__(self, rows):
-            self._rows = rows
-
-        def scalars(self):
-            return self
-
-        def all(self):
-            return self._rows
-
-    class _FakeSession:
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, exc_type, exc, tb):
-            return False
-
-        async def execute(self, _stmt):
-            return _Rows(
-                [
-                    SimpleNamespace(
-                        tg_user_id=111,
-                        display_name="alice",
-                        allowed_chat_ids=["*"],
-                        allowed_commands=["ping", "help"],
-                    )
-                ]
-            )
-
-    monkeypatch.setattr("app.db.base.AsyncSessionLocal", lambda: _FakeSession())
+    audit_write = AsyncMock(return_value=None)
+    monkeypatch.setattr(
+        wcmd,
+        "AsyncSessionLocal",
+        lambda: _FakeSession(
+            [
+                SimpleNamespace(
+                    tg_user_id=111,
+                    display_name="alice",
+                    allowed_chat_ids=["*"],
+                    allowed_commands=["ping", "help"],
+                )
+            ]
+        ),
+    )
+    monkeypatch.setattr(wcmd.audit_svc, "write", audit_write)
 
     client = AsyncMock()
     event = AsyncMock()
@@ -735,3 +779,9 @@ async def test_builtin_sudo_ls_still_works_with_summary(monkeypatch):
     assert "TG用户 111（alice）" in msg
     assert "允许对话：全部（显式）" in msg
     assert ("允许命令：help,ping" in msg) or ("允许命令：ping,help" in msg)
+    audit_write.assert_awaited_once()
+    assert audit_write.await_args.kwargs["detail"] == {
+        "status": "ok",
+        "subcommand": "ls",
+        "row_count": 1,
+    }
