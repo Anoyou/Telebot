@@ -37,12 +37,20 @@ from .commands.sudo_guard import (
     looks_like_command_name as _looks_like_command_name_impl,
     should_report_incoming_sudo_denial as _should_report_incoming_sudo_denial_impl,
 )
+from .commands.formatting import (
+    _LONG_MESSAGE_SAFE_THRESHOLD,
+    _LONG_MESSAGE_THRESHOLD,
+    _dto_to_fake_row,
+    _ensure_html_safe,
+    _humanize_llm_error,
+    _replied_media_placeholder,
+    _safe_exception_text,
+    _safe_log_text,
+    _send_long_message,
+    _split_long_message,
+)
 
 log = logging.getLogger(__name__)
-
-# 长消息分段常量
-_LONG_MESSAGE_THRESHOLD = 3900  # TG 单条上限约 4096，预留缓冲
-_LONG_MESSAGE_SAFE_THRESHOLD = 3900
 
 BuiltinHandler = Callable[..., Awaitable[None]]
 
@@ -59,40 +67,25 @@ class PluginCmd:
     """插件命令记录（用于追踪和注销）。"""
 
     handler: BuiltinHandler
-    owner_plugin_key: str  # 所属插件的 key
-    generation: int  # 插件实例的 generation，用于检测旧 handler
+    owner_plugin_key: str
+    generation: int
 
 
-# key 是主命令名（不含前缀）
 _BUILTIN: dict[str, BuiltinCmd] = {}
-# key 是"主命令 + alias"全集，value 是主命令名
 _BUILTIN_ALIAS_TO_PRIMARY: dict[str, str] = {}
-
-# 插件命令注册表：追踪命令 -> (plugin_key, generation, handler)
-# 用于插件 reload/disable 时注销旧命令
 _PLUGIN_COMMANDS: dict[str, PluginCmd] = {}
 
 
-# ── 模板命令派发上下文 ──────────────────────────────────────────
-# 由 runtime.py 在 worker 启动 / IPC reload 时填充；handler 直接读
 @dataclass
 class CommandContext:
-    """worker-local 命令派发上下文。
-
-    - ``account_id``      当前 worker 服务的账号 id
-    - ``templates``       {模板名: 模板 dict}；模板 dict 由 ``runtime.py`` 从 DB 拉出后投递
-    - ``providers``       {provider_id: provider dict}；同样从 DB 拉，含 api_key 加密 token
-    - ``command_prefix``  当前生效的命令前缀（``,`` / ``-`` / ``/`` 等）；
-                          系统设置改了 → 主进程发 IPC 让 ``runtime`` 重拉，再写到这里
-                          → handler 每次匹配时从 ctx 取，所以前缀热加载对已注册 handler 也生效
-    """
+    """worker-local 命令派发上下文。"""
 
     account_id: int
     templates: dict[str, dict[str, Any]]
     providers: dict[int, dict[str, Any]]
     command_prefix: str = ","
-    aliases: dict[str, str] = None  # type: ignore[assignment]  # {alias: target}
-    sudo_users: dict[int, dict[str, Any]] = None  # type: ignore[assignment]  # {tg_user_id: config}
+    aliases: dict[str, str] = None  # type: ignore[assignment]
+    sudo_users: dict[int, dict[str, Any]] = None  # type: ignore[assignment]
     sudo_prefix: str = "."
     sudo_enabled: bool = False
     self_tg_user_id: int | None = None
@@ -104,19 +97,15 @@ class CommandContext:
             self.sudo_users = {}
 
 
-# 全局 ctx 由 runtime.py 在 worker 进程启动时初始化并通过闭包传给 handler；
-# 同一进程只服务一个 account_id，所以可以直接用模块级单例
 _ctx: CommandContext | None = None
 
 
 def set_command_context(ctx: CommandContext) -> None:
-    """runtime.py 启动 worker 后调用一次，IPC reload 时也调用更新内容。"""
     global _ctx
     _ctx = ctx
 
 
 def get_command_context() -> CommandContext | None:
-    """主要供测试 / 调试使用。"""
     return _ctx
 
 
@@ -150,282 +139,6 @@ def _register_builtin_aliases() -> None:
         _BUILTIN_ALIAS_TO_PRIMARY[name] = name
         for alias in item.aliases:
             _BUILTIN_ALIAS_TO_PRIMARY[alias] = name
-
-
-def _safe_exception_text(e: BaseException, max_len: int = 200) -> str:
-    """把异常信息净化成"安全可在 TG 里显示"的短字符串。
-
-    具体做：
-    - 去掉文件绝对路径（``/Users/.../foo.py`` / ``C:\\...\\foo.py``）—— 暴露目录结构是
-      安全 & 隐私问题（用户截图里就泄漏过 ``/Users/anoyou/Desktop/telebot/...``）
-    - 去掉 ``sk-`` / ``Bearer xxx`` 一类 token 字样
-    - 截断到 ``max_len`` 字符
-    """
-    import re
-
-    msg = f"{type(e).__name__}: {e}"
-    # 去 unix 绝对路径 (含括号包裹的也匹配)
-    msg = re.sub(r"\(?/[^()\s'\"]+\.py\)?", "<path>", msg)
-    # 去 windows 绝对路径
-    msg = re.sub(r"\(?[A-Za-z]:[\\/][^()\s'\"]+\.py\)?", "<path>", msg)
-    # 去常见 token
-    msg = re.sub(r"sk-[A-Za-z0-9_-]{8,}", "<redacted>", msg)
-    msg = re.sub(r"Bearer\s+[A-Za-z0-9_.\-]{8,}", "Bearer <redacted>", msg)
-    if len(msg) > max_len:
-        msg = msg[:max_len] + "…"
-    return msg
-
-
-def _humanize_llm_error(e: BaseException, max_len: int = 360) -> str:
-    """把 LLM 调用错误翻译成用户可执行的提示，同时复用脱敏规则。"""
-    raw = str(e)
-    text = _safe_exception_text(e, max_len=max_len)
-    lowered = raw.lower()
-
-    if "budget_exceeded" in lowered or "已达上限" in raw:
-        return _safe_exception_text(RuntimeError(raw), max_len=max_len)
-    if "usage_limit" in lowered or "quota" in lowered or "insufficient_quota" in lowered:
-        return "模型服务额度已用完或账户余额不足。请更换 provider / API Key，或等待额度恢复。"
-    if "429" in raw or "rate_limit" in lowered or "too many requests" in lowered:
-        return "模型服务正在限流。请稍后重试，或切换到备用 provider。"
-    if "401" in raw or "403" in raw or "unauthorized" in lowered or "forbidden" in lowered or "auth" in lowered:
-        return "模型鉴权失败：API Key 无效、过期，或当前账号没有权限。请检查 provider 配置。"
-    if "404" in raw or "model not found" in lowered:
-        return "模型或接口不存在。请检查 provider endpoint、api_format 和模型名称。"
-    if "timeout" in lowered:
-        return "模型响应超时。请稍后重试，或调低 max_tokens / 换更快的 provider。"
-    if "connect" in lowered or "network" in lowered or "proxy" in lowered or "ssl" in lowered:
-        return "连接模型服务失败。请检查网络、代理和 provider endpoint。"
-    if "所有 provider 都失败" in raw:
-        return "所有可用 provider 都调用失败。请检查主 provider 和 fallback provider 配置。"
-    return text
-
-
-def _safe_log_text(text: str, max_len: int = 200) -> str:
-    """把用户内容净化成"可安全记录日志"的形式。
-
-    不记录完整原文，只记录长度和前 N 个字符的预览。
-    用于 debug 日志，避免完整私聊内容被写入日志。
-    """
-    if not text:
-        return "<empty>"
-    if not isinstance(text, str):
-        text = str(text)
-    length = len(text)
-    preview_len = max(0, max_len - 1) if len(text) > max_len else max_len
-    preview = text[:preview_len] if len(text) > max_len else text
-    # 对预览做简单脱敏（去掉可能的 token）
-    import re
-    preview = re.sub(r"sk-[A-Za-z0-9_-]{4,}", "<sk>", preview)
-    if length > max_len:
-        return f'<len={length}> "{preview}..."'
-    return f'<len={length}> "{preview}"'
-
-
-def _dto_to_fake_row(dto) -> Any:
-    """将 LLMProviderDTO 转为临时 ORM 行（向后兼容 build_client）。"""
-    from ..db.models.command import LLMProvider as LLMProviderModel
-
-    return LLMProviderModel(
-        id=dto.id,
-        name=dto.name,
-        provider=dto.provider,
-        api_key_enc=dto.api_key_enc,
-        base_url=dto.base_url,
-        default_model=dto.default_model,
-        api_format=dto.api_format,
-    )
-
-
-def _split_long_message(
-    text: str,
-    threshold: int = _LONG_MESSAGE_THRESHOLD,
-) -> list[str]:
-    """将长文本分割为多个短消息。
-
-    策略：
-    1. 如果文本长度 <= threshold，直接返回单段
-    2. 否则按段落/句子分割，确保每段不超过 threshold
-    3. 优先按双换行分割（段落），其次按单换行，最后按句子
-
-    Args:
-        text: 原始文本
-        threshold: 每段最大字符数（默认 3900）
-
-    Returns:
-        分割后的文本列表
-    """
-    if len(text) <= threshold:
-        return [text]
-
-    parts: list[str] = []
-
-    # 策略 1: 按双换行分割（段落）
-    paragraphs = text.split("\n\n")
-    current = ""
-    for para in paragraphs:
-        if len(current) + len(para) + 2 <= threshold:
-            current = (current + "\n\n" + para).strip()
-        else:
-            if current:
-                parts.append(current)
-            # 单段落超长，继续分割
-            if len(para) > threshold:
-                current = _split_single_block(para, threshold)
-            else:
-                current = para
-
-    if current:
-        parts.append(current)
-
-    # 合并策略 2: 如果分割后仍然有过长的段，进一步拆分
-    final_parts: list[str] = []
-    for part in parts:
-        if len(part) <= threshold:
-            final_parts.append(part)
-        else:
-            final_parts.extend(_split_single_block(part, threshold))
-
-    return final_parts
-
-
-def _split_single_block(text: str, threshold: int) -> str:
-    """分割超长文本块，优先按换行，其次按句子。"""
-    if len(text) <= threshold:
-        return text
-
-    # 尝试按换行分割
-    lines = text.split("\n")
-    current = ""
-    for line in lines:
-        if len(current) + len(line) + 1 <= threshold:
-            current = (current + "\n" + line).strip()
-        else:
-            if current:
-                # 递归处理剩余部分
-                remaining = "\n".join(lines[lines.index(line):])
-                return current + "\n\n" + _split_single_block(remaining, threshold)
-            # 单行就超长，按句子分割
-            return _split_by_sentence(text, threshold)
-
-    return current
-
-
-def _split_by_sentence(text: str, threshold: int) -> str:
-    """按句子分割超长文本。"""
-    import re
-    sentences = re.split(r"([。！？.!?\n])", text)
-    current = ""
-    result_parts: list[str] = []
-
-    for i in range(0, len(sentences) - 1, 2):
-        sent = sentences[i] + (sentences[i + 1] if i + 1 < len(sentences) else "")
-        if len(current) + len(sent) <= threshold:
-            current += sent
-        else:
-            if current:
-                result_parts.append(current)
-            if len(sent) > threshold:
-                # 超长句子，按字符硬截断
-                result_parts.append(sent[:threshold])
-                current = sent[threshold:]
-            else:
-                current = sent
-
-    if current:
-        result_parts.append(current)
-
-    return "\n\n".join(result_parts)
-
-
-async def _send_long_message(
-    client,
-    chat_id: int,
-    text: str,
-    first_msg_id: int | None,
-    parse_mode: str | None = None,
-    *,
-    _max_chunk: int = _LONG_MESSAGE_THRESHOLD,
-) -> None:
-    """发送长消息，自动分段。
-
-    策略：
-    1. 将消息分割成多个短段落
-    2. 第一段用 edit_message（保留 reply 链）
-    3. 后续段落用 send_message
-
-    Args:
-        client: Telegram client
-        chat_id: 目标 chat ID
-        text: 消息文本
-        first_msg_id: 原始命令消息 ID（用于第一段 edit）
-        parse_mode: parse_mode（'html' / 'md' / None）
-    """
-    chunks = _split_long_message(text, _max_chunk)
-
-    if not chunks:
-        return
-
-    first = chunks[0]
-    remaining = chunks[1:]
-
-    # 第一段：优先用 edit
-    if first_msg_id:
-        try:
-            await client.edit_message(chat_id, first_msg_id, first, parse_mode=parse_mode)
-        except Exception:
-            # edit 失败时降级为纯文本
-            try:
-                await client.edit_message(chat_id, first_msg_id, first)
-            except Exception:
-                # 再失败就发送新消息
-                await client.send_message(chat_id, first)
-    else:
-        await client.send_message(chat_id, first, parse_mode=parse_mode)
-
-    # 后续段落：send_message
-    for chunk in remaining:
-        # 检查是否是 HTML 模式，如果是，需要确保标签闭合
-        if parse_mode == "html":
-            chunk = _ensure_html_safe(chunk)
-        try:
-            await client.send_message(chat_id, chunk, parse_mode=parse_mode)
-        except Exception:
-            # 发送失败时降级为纯文本
-            try:
-                await client.send_message(chat_id, chunk)
-            except Exception:
-                # 最坏情况：丢弃该段落
-                pass
-
-
-def _ensure_html_safe(text: str) -> str:
-    """确保 HTML 文本安全（避免截断导致标签不闭合）。
-
-    策略：
-    1. 检测未闭合的标签
-    2. 补全或移除未闭合标签
-    """
-    import re
-
-    # 检测可能未闭合的标签
-    # 匹配 <tag...> 但没有对应的 </tag>
-    unclosed_patterns = [
-        (r"<b>(?!</b>)", "</b>"),
-        (r"<i>(?!</i>)", "</i>"),
-        (r"<code>(?!</code>)", "</code>"),
-        (r"<pre>(?!</pre>)", "</pre>"),
-        (r"<blockquote>(?!</blockquote>)", "</blockquote>"),
-    ]
-
-    result = text
-    for pattern, closing in unclosed_patterns:
-        if re.search(pattern, result) and closing not in result:
-            # 找到未闭合标签，在文本末尾补上
-            result = result + "\n" + closing
-
-    return result
-
 
 async def _check_sudo_permission(event, cmd: str, account_id: int) -> tuple[bool, str]:
     return await _check_sudo_permission_impl(_ctx, event, cmd)
@@ -482,42 +195,6 @@ def _has_dispatch_target(cmd: str, args_raw: str = "") -> bool:
 
 def _is_self_chat(event) -> bool:
     return _is_self_chat_impl(event, ctx=_ctx)
-
-
-def _replied_media_placeholder(msg: Any) -> str:
-    """被回复消息没正文（媒体类）时返回个 emoji+标签占位字符串。
-
-    用途：
-    - UI 上 ``{quoted}`` blockquote 不至于显示空白
-    - LLM 收到 ``[原文]\\n📷 [图片]`` 时知道用户在问图，能体面地说"我看不到图片"
-
-    支持的媒体类型与 telethon 1.36 ``Message`` 上对应字段同名（``photo`` / ``video`` /
-    ``voice`` / ``sticker`` / ``audio`` / ``gif`` / ``document`` / ``geo`` / ``contact``
-    / ``poll`` / ``video_note``）。匹配不到任何媒体返回空串。
-    """
-    if getattr(msg, "photo", None) is not None:
-        return "📷 [图片]"
-    if getattr(msg, "video_note", None) is not None:
-        return "📹 [视频留言]"
-    if getattr(msg, "video", None) is not None:
-        return "🎬 [视频]"
-    if getattr(msg, "voice", None) is not None:
-        return "🎤 [语音]"
-    if getattr(msg, "sticker", None) is not None:
-        return "[贴纸]"
-    if getattr(msg, "audio", None) is not None:
-        return "🎵 [音频]"
-    if getattr(msg, "gif", None) is not None:
-        return "🖼️ [GIF]"
-    if getattr(msg, "document", None) is not None:
-        return "📎 [文件]"
-    if getattr(msg, "geo", None) is not None:
-        return "📍 [位置]"
-    if getattr(msg, "contact", None) is not None:
-        return "👤 [联系人]"
-    if getattr(msg, "poll", None) is not None:
-        return "📊 [投票]"
-    return ""
 
 
 @builtin("help", aliases=("h",), doc="显示可用命令列表")
