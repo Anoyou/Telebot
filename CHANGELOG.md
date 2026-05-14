@@ -10,6 +10,20 @@
 
 ---
 
+## [0.12.1] — 2026-05-14 · refactor · Feature 配置页 CRUD 骨架抽取
+
+### Changed
+- 把 AutoReply / Autorepeat / Forward / Scheduler 四个 feature 配置页中重复的 rule CRUD 骨架（features+rules 查询、save/delete/toggle/dry-run mutation、规则编辑 Dialog 外壳、Dry-run Dialog 外壳）抽到 `frontend/src/pages/Features/_shared/` 共享模块。
+- 新增 `useRuleCrud` hook 与 `RulePageHeader` / `RuleFeatureToggleCard` / `RuleInfoBox` / `Field` / `RuleEditDialogShell` / `DryRunDialogShell` 共享组件。
+- 三个简单页面按字符数瘦身 27–35%：AutoReply -29%、Autorepeat -35%、Forward -27%；Scheduler 因深层嵌套 `setForm` 被 prettier 风格展开行数表观增加，CRUD/Dialog 逻辑已迁移到 hook，等效精简。
+- 后续新增 feature 配置页时复用共享骨架即可，无需再复制 200+ 行 CRUD/Dialog 模板。
+
+### Verification
+- `tsc -b --noEmit` 通过。
+- 浏览器手测：自动回复 / 自动复读 / 转发 / 调度四个页面的 CRUD、dry-run、立即执行行为均与重构前等价；不改任何对外行为。
+
+---
+
 ## [0.12.0] — 2026-05-13 · feature · 小 VPS 资源预算与失败隔离
 
 ### Added
