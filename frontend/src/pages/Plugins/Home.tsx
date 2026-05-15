@@ -130,31 +130,43 @@ export function PluginsHome() {
         <CardHeader>
           <CardTitle>插件中心</CardTitle>
           <CardDescription>
-            一个账号一套开关；同一套命令、消息和 AI 模板可以给多个账号复用，不用每个账号重新配一遍。
+            把常用回复、转发和 AI 命令整理成模板后，可以按账号一键启用复用，不用每个号都从头再配一次。
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="grid gap-2 md:grid-cols-3">
-            <Button variant="outline" className="h-auto justify-start py-3 text-left" onClick={() => nav("/plugins/templates")}>
+          <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
+            <Button
+              variant="outline"
+              className="h-full min-h-[96px] justify-start whitespace-normal px-4 py-3 text-left"
+              onClick={() => nav("/plugins/templates")}
+            >
               <span>
                 <span className="block font-medium">命令模板</span>
-                <span className="block text-xs text-muted-foreground">
-                  先把账号 A 调好的回复、转发、AI 命令做成模板，再分配给其他账号复用。
+                <span className="mt-1 block text-xs leading-5 text-muted-foreground">
+                  先把常用回复、转发、AI 命令整理成一套模板，再按账号开启复用。
                 </span>
               </span>
             </Button>
-            <Button variant="outline" className="h-auto justify-start py-3 text-left" onClick={() => nav("/plugins/aliases")}>
+            <Button
+              variant="outline"
+              className="h-full min-h-[96px] justify-start whitespace-normal px-4 py-3 text-left"
+              onClick={() => nav("/plugins/aliases")}
+            >
               <span>
                 <span className="block font-medium">命令别名</span>
-                <span className="block text-xs text-muted-foreground">
+                <span className="mt-1 block text-xs leading-5 text-muted-foreground">
                   给常用命令起短名字，减少不同账号之间重复记命令。
                 </span>
               </span>
             </Button>
-            <Button variant="outline" className="h-auto justify-start py-3 text-left" onClick={() => nav("/plugins/scheduler")}>
+            <Button
+              variant="outline"
+              className="h-full min-h-[96px] justify-start whitespace-normal px-4 py-3 text-left"
+              onClick={() => nav("/plugins/scheduler")}
+            >
               <span>
                 <span className="block font-medium">定时任务</span>
-                <span className="block text-xs text-muted-foreground">
+                <span className="mt-1 block text-xs leading-5 text-muted-foreground">
                   按账号定时发消息、跑命令或调用 AI，适合固定周期的自动动作。
                 </span>
               </span>

@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowRight, Bot, CheckCircle2, HelpCircle, Package, Plus, Power, Trash2 } from "lucide-react";
+import { ArrowLeft, ArrowRight, Bot, CheckCircle2, HelpCircle, Package, Plus, Power, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -84,9 +84,21 @@ export function AccountList() {
       <NewAccountGuideDialog
         open={guideOpen}
         onOpenChange={setGuideOpen}
-        onCreate={() => {
+        onRunStep={(step) => {
           setGuideOpen(false);
-          nav("/accounts/new");
+          if (step === 0) {
+            nav("/accounts/new");
+            return;
+          }
+          if (step === 1) {
+            nav("/plugins/templates");
+            return;
+          }
+          if (step === 2) {
+            nav("/plugins");
+            return;
+          }
+          nav("/logs");
         }}
       />
 
@@ -170,70 +182,100 @@ export function AccountList() {
 function NewAccountGuideDialog({
   open,
   onOpenChange,
-  onCreate,
+  onRunStep,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onCreate: () => void;
+  onRunStep: (step: number) => void;
 }) {
+  const [currentStep, setCurrentStep] = useState(0);
   const steps = [
     {
       icon: Plus,
       title: "1. 绑定账号",
       desc: "先新增 Telegram 账号，系统会为它启动一个独立 worker。",
+      actionLabel: "去新增账号",
     },
     {
       icon: Package,
       title: "2. 复用模板",
       desc: "去插件中心把已有账号的命令、消息、AI 模板分配给新账号。",
+      actionLabel: "去插件中心 / 命令模板",
     },
     {
       icon: Bot,
       title: "3. 开启插件",
       desc: "按账号开启自动回复、转发、定时任务等能力，再少量测试。",
+      actionLabel: "去插件中心",
     },
     {
       icon: CheckCircle2,
       title: "4. 看日志确认",
       desc: "最后看日志和最近调用，确认命令和 AI 调用真的跑通。",
+      actionLabel: "去日志",
     },
   ];
+  const step = steps[currentStep];
+  const percent = ((currentStep + 1) / steps.length) * 100;
+
+  useEffect(() => {
+    if (open) setCurrentStep(0);
+  }, [open]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl overflow-hidden">
+      <DialogContent className="max-w-xl overflow-hidden">
         <DialogHeader>
           <DialogTitle>新账号怎么开始？</DialogTitle>
           <DialogDescription>
-            按这 4 步走：先把账号接进来，再复用已有模板，最后小范围验证。
+            一次做一步，做完就点下一步，不用一次记住全部流程。
           </DialogDescription>
         </DialogHeader>
 
-        <div className="relative rounded-2xl border bg-gradient-to-br from-sky-50 via-background to-emerald-50 p-4 dark:from-sky-950/30 dark:via-background dark:to-emerald-950/20">
-          <div className="absolute left-8 right-8 top-10 hidden h-0.5 bg-gradient-to-r from-sky-300 via-emerald-300 to-amber-300 md:block" />
-          <div className="grid gap-3 md:grid-cols-4">
-            {steps.map((step, idx) => (
-              <div
-                key={step.title}
-                className="relative rounded-xl border bg-card/90 p-3 shadow-sm animate-page-enter"
-                style={{ animationDelay: `${idx * 90}ms` }}
-              >
-                <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-sm">
-                  <step.icon className="h-5 w-5" />
-                </div>
-                <div className="text-sm font-semibold">{step.title}</div>
-                <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{step.desc}</p>
-              </div>
-            ))}
+        <div className="space-y-3 rounded-2xl border bg-gradient-to-br from-sky-50 via-background to-emerald-50 p-4 dark:from-sky-950/30 dark:via-background dark:to-emerald-950/20">
+          <div className="flex items-center justify-between text-xs text-muted-foreground">
+            <span>
+              第 {currentStep + 1} 步 / 共 {steps.length} 步
+            </span>
+            <span>{Math.round(percent)}%</span>
+          </div>
+          <div className="h-2 overflow-hidden rounded-full bg-muted">
+            <div
+              className="h-full rounded-full bg-primary transition-all duration-300"
+              style={{ width: `${percent}%` }}
+            />
+          </div>
+          <div className="rounded-xl border bg-card/90 p-4 shadow-sm animate-page-enter">
+            <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-sm">
+              <step.icon className="h-5 w-5" />
+            </div>
+            <div className="text-sm font-semibold">{step.title}</div>
+            <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{step.desc}</p>
           </div>
         </div>
 
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
-            先看看
-          </Button>
-          <Button onClick={onCreate}>
-            去新增账号 <ArrowRight className="ml-1 h-4 w-4" />
+        <DialogFooter className="gap-2 sm:justify-between">
+          <div className="flex flex-wrap gap-2">
+            <Button
+              variant="outline"
+              onClick={() => setCurrentStep((s) => Math.max(0, s - 1))}
+              disabled={currentStep === 0}
+            >
+              <ArrowLeft className="mr-1 h-4 w-4" /> 上一步
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => setCurrentStep((s) => Math.min(steps.length - 1, s + 1))}
+              disabled={currentStep === steps.length - 1}
+            >
+              下一步 <ArrowRight className="ml-1 h-4 w-4" />
+            </Button>
+            <Button variant="ghost" onClick={() => onOpenChange(false)}>
+              先看看
+            </Button>
+          </div>
+          <Button onClick={() => onRunStep(currentStep)}>
+            {step.actionLabel} <ArrowRight className="ml-1 h-4 w-4" />
           </Button>
         </DialogFooter>
       </DialogContent>

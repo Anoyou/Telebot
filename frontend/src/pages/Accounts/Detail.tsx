@@ -389,9 +389,11 @@ export function AccountDetail() {
               </CardDescription>
             </CardHeader>
             <CardContent className="grid gap-3 md:grid-cols-3">
-              <div className="rounded-lg border p-4">
-                <div className="text-xs text-muted-foreground">已启用插件</div>
-                <div className="mt-1 text-2xl font-semibold">{enabledPluginCount}</div>
+              <div className="relative rounded-lg border p-4">
+                <div className="pr-12 text-xs text-muted-foreground">已启用插件</div>
+                <div className="absolute right-4 top-3 text-2xl font-semibold leading-none">
+                  {enabledPluginCount}
+                </div>
                 <div className="mt-1 text-sm text-muted-foreground">
                   新账号通常先开自动回复、转发或定时任务。
                 </div>
