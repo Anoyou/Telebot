@@ -207,6 +207,42 @@ class PluginContext:
 
 注意：内置插件会拿到完整运行时能力；远程/第三方插件的 `ctx.client` 会被 `SandboxClient` 包装，`ctx.engine` 和 `ctx.redis` 为 `None`，只能通过声明过的权限和 `ctx.scheduler` facade 使用有限能力。
 
+### 4.1 可用上下文与访问方式（PluginContext Contract）
+
+插件请只从 `PluginContext` 读取运行时信息，不要跨层 import worker 私有实现。
+
+| 字段 | 访问方式 | 说明 |
+|------|----------|------|
+| `ctx.account_id` | `ctx.account_id` | 当前账号 ID（账号级隔离边界） |
+| `ctx.feature_key` | `ctx.feature_key` | 当前插件 feature key |
+| `ctx.config` | `ctx.config.get("k")` | 插件配置（账号/全局已合并后的可见配置） |
+| `ctx.rules` | 遍历 `ctx.rules` | 当前账号 + 当前插件已启用规则 |
+| `ctx.client` | `await ctx.client.send_message(...)` | Telegram 客户端；第三方插件场景会是 `SandboxClient` 包装 |
+| `ctx.engine` | `await ctx.engine.acquire(...)` | 仅内置插件可用；第三方插件通常为 `None` |
+| `ctx.redis` | `await ctx.redis.get(...)` | 仅内置插件可用；第三方插件通常为 `None` |
+| `ctx.log` | `await ctx.log("info", "...", **detail)` | 运行日志写入器 |
+| `ctx.scheduler` | `ctx.scheduler.register(job_id, schedule, callback, *, replace=True)` / `ctx.scheduler.unregister(job_id)` | 调度 facade（按权限/能力边界开放） |
+| `ctx.conversation(...)` | `async with ctx.conversation(peer)` | 与目标 peer 建立会话 |
+
+### 4.2 权限边界与禁止事项
+
+1. 第三方插件必须遵循 `manifest.permissions` 最小授权，未声明的客户端能力不可调用。
+2. 第三方插件不得假设 `ctx.engine`、`ctx.redis` 恒可用；访问前必须判空。
+3. 禁止通过插件绕过账号边界：不要读写其他账号配置、规则、会话状态。
+4. 禁止在插件中执行系统级/运维级动作（如重启进程、安装/卸载插件、修改权限模型）。
+5. 禁止依赖 worker 私有模块或 monkey patch 运行时对象来“扩权”。
+6. 禁止把敏感凭据直接打到日志；`ctx.log` 只记录最小必要信息。
+
+### 4.3 配置/账号/运行时数据访问建议
+
+1. 配置：通过 `ctx.config` 读取；按 `config_schema` 的 `level` 设计字段，不自行拼接跨账号配置。
+2. 账号：通过 `ctx.account_id` 做所有业务隔离键，不缓存到跨账号全局变量。
+3. 运行时：仅使用 `ctx.client` / `ctx.scheduler` / `ctx.conversation` 提供的公开入口。
+4. 日志：统一用 `ctx.log`，并在 `detail` 里带结构化字段（如 `chat_id`、`action`）。
+5. 兜底：对可选能力（`engine`/`redis`）做 feature-detection，保证第三方插件在受限上下文也能安全降级。
+
+最小示例见：[docs/examples/plugin_context_minimal.py](./examples/plugin_context_minimal.py)。
+
 ---
 
 ## 5. Manifest 元数据
