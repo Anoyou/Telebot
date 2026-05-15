@@ -140,7 +140,11 @@ export function AccountList() {
               新手指引
             </Button>
             <Button
-              className={guideActive && currentStep === 0 ? "siri-glow" : undefined}
+              className={
+                guideActive && currentStep === 0
+                  ? "siri-glow text-primary-foreground hover:text-primary-foreground"
+                  : undefined
+              }
               onClick={() => nav("/accounts/new")}
             >
               <Plus className="mr-1 h-4 w-4" /> 新增账号
@@ -300,7 +304,7 @@ function GuideContextCard({
         aria-label="展开当前步骤"
       >
         <Sparkles className="h-4 w-4" />
-        第 1 步：先添加账号
+        新手指引：当前第 {currentStep + 1} 步，点击展开详情
       </button>
     );
   }

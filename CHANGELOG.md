@@ -17,6 +17,23 @@
 
 ---
 
+## [0.14.11] — 2026-05-16 · polish · 资源占用与新手引导细化
+
+### Changed
+- 概览页资源占用改为突出展示 TeleBot 本项目合计 CPU / 内存，并补充主进程、worker、整机资源对照。
+- 命令前缀触发预览限制为略大于手机屏幕的宽度，让 Telegram 对话示例更接近真实手机观感。
+- 设置页“猜你想要？”里的“绑定机器人”改为点击后再选择账号；只有一个账号时直接进入该账号 Bot 联动页。
+- 新手指引小条统一补充“点击展开详情”，并修复第一步“新增账号”和第二步“保存”按钮文字可见性。
+- 插件中心“账号视角”改为“选择配置的账号”，并移入“账号插件启用详情与配置”容器。
+
+### Verification
+- `git diff --check` 通过。
+- `PYTHONPYCACHEPREFIX=/private/tmp/telebot_pycache backend/.venv/bin/python -m py_compile backend/app/__init__.py` 通过。
+- `pnpm --dir frontend exec tsc -b --noEmit` 通过。
+- `pnpm --dir frontend build` 通过。
+
+---
+
 ## [0.14.10] — 2026-05-16 · patch · 完成 B2 下沉与文档同步
 
 ### Changed

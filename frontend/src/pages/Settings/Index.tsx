@@ -10,6 +10,14 @@ import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
   Card,
   CardContent,
   CardDescription,
@@ -73,6 +81,7 @@ export function SettingsIndex() {
   const [tab, setTab] = useState<"account" | "platform" | "security" | "migration">("account");
   const [guideExpanded, setGuideExpanded] = useState(false);
   const [quickAid, setQuickAid] = useState("");
+  const [quickBindOpen, setQuickBindOpen] = useState(false);
   const guideActive = searchParams.get("guide") === "1";
   const currentStep = useMemo(
     () => getGuideStepByPath(location.pathname, location.search),
@@ -128,6 +137,17 @@ export function SettingsIndex() {
       });
     }
   }, [settingsQ.data]);
+
+  useEffect(() => {
+    const accounts = accountsQ.data ?? [];
+    if (accounts.length === 0) {
+      setQuickAid("");
+      return;
+    }
+    if (!quickAid || !accounts.some((a) => String(a.id) === quickAid)) {
+      setQuickAid(String(accounts[0].id));
+    }
+  }, [accountsQ.data, quickAid]);
 
   const [qps, setQps] = useState("0");
   useEffect(() => {
@@ -250,34 +270,64 @@ export function SettingsIndex() {
           <Button asChild variant="outline" size="sm">
             <Link to="/plugins/templates">添加命令</Link>
           </Button>
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-            <Select
-              value={quickAid}
-              onChange={(e) => setQuickAid(e.target.value)}
-              className="w-full sm:w-56"
-              disabled={(accountsQ.data ?? []).length === 0}
-            >
-              {(accountsQ.data ?? []).length === 0 ? (
-                <option value="">暂无账号</option>
-              ) : (
-                (accountsQ.data ?? []).map((a) => (
-                  <option key={a.id} value={a.id}>
-                    {a.display_name || (a.tg_username ? `@${a.tg_username}` : a.phone)}
-                  </option>
-                ))
-              )}
-            </Select>
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={!quickAid}
-              onClick={() => nav(quickAid ? `/accounts/${quickAid}?tab=bot` : "/accounts")}
-            >
-              <Bot className="mr-1 h-4 w-4" /> 绑定机器人
-            </Button>
-          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={(accountsQ.data ?? []).length === 0}
+            onClick={() => {
+              const accounts = accountsQ.data ?? [];
+              if (accounts.length === 1) {
+                nav(`/accounts/${accounts[0].id}?tab=bot`);
+                return;
+              }
+              setQuickBindOpen(true);
+            }}
+          >
+            <Bot className="mr-1 h-4 w-4" /> 绑定机器人
+          </Button>
         </CardContent>
       </Card>
+
+      <Dialog open={quickBindOpen} onOpenChange={setQuickBindOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>选择要绑定机器人的账号</DialogTitle>
+            <DialogDescription>
+              请选择一个账号，进入该账号的 Bot 联动配置页。
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Label htmlFor="quick-bind-account">账号</Label>
+            <Select
+              id="quick-bind-account"
+              value={quickAid}
+              onChange={(e) => setQuickAid(e.target.value)}
+              className="w-full"
+              disabled={(accountsQ.data ?? []).length === 0}
+            >
+              {(accountsQ.data ?? []).map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.display_name || (a.tg_username ? `@${a.tg_username}` : a.phone)}
+                </option>
+              ))}
+            </Select>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setQuickBindOpen(false)}>
+              取消
+            </Button>
+            <Button
+              disabled={!quickAid}
+              onClick={() => {
+                setQuickBindOpen(false);
+                nav(`/accounts/${quickAid}?tab=bot`);
+              }}
+            >
+              前往配置
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Tabs value={tab} onValueChange={(v) => setTab(v as typeof tab)}>
         <TabsList>
@@ -319,7 +369,11 @@ export function SettingsIndex() {
                   />
                 </div>
                 <Button
-                  className={guideActive && currentStep === 1 ? "siri-glow" : undefined}
+                  className={
+                    guideActive && currentStep === 1
+                      ? "siri-glow text-primary-foreground hover:text-primary-foreground"
+                      : undefined
+                  }
                   onClick={() => prefix && savePrefix.mutate()}
                   disabled={savePrefix.isPending}
                 >
@@ -337,7 +391,7 @@ export function SettingsIndex() {
                 />
               </div>
               ) : null}
-              <div className="mt-4 rounded-xl border bg-background p-3 text-xs">
+              <div className="mt-4 max-w-[460px] rounded-xl border bg-background p-3 text-xs">
                 <div className="mb-3 font-medium">触发预览</div>
                 <div className="rounded-2xl border bg-gradient-to-b from-sky-50 to-emerald-50 p-3 dark:from-sky-950/30 dark:to-emerald-950/20">
                   <div className="space-y-3">
@@ -615,7 +669,7 @@ function GuideInlineCard({
         aria-label="打开新手指引"
       >
         <Sparkles className="h-4 w-4" />
-        新手指引：当前第 2 步
+        新手指引：当前第 2 步，点击展开详情
       </button>
     );
   }

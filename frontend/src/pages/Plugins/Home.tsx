@@ -214,20 +214,6 @@ export function PluginsHome() {
           />
           ) : null}
 
-          {accounts.length > 0 ? (
-            <div className="flex flex-col items-stretch gap-2 sm:flex-row sm:items-center">
-              <span className="text-sm text-muted-foreground">账号视角：</span>
-              <Select
-                value={selectedAid?.toString() ?? ""}
-                onChange={(e) => setSelectedAid(Number(e.target.value))}
-                className="w-full sm:w-64"
-              >
-                {accounts.map((a) => (
-                  <option key={a.id} value={a.id}>{a.name}</option>
-                ))}
-              </Select>
-            </div>
-          ) : null}
         </CardContent>
       </Card>
 
@@ -245,44 +231,68 @@ export function PluginsHome() {
         </Card>
       ) : null}
 
-      <div
-        className={`grid gap-4 rounded-2xl transition lg:grid-cols-2 ${
+      <Card
+        className={`transition ${
           guideActive ? "siri-glow-soft" : ""
         }`}
       >
-        <FeatureZone
-          title="平台能力"
-          hint="系统底层能力，通常不用手动配置。"
-          icon={<Settings2 className="h-4 w-4" />}
-          features={grouped.platform}
-          selectedAccountId={selectedAccount?.id}
-          selectedFeatures={selectedAccount?.features ?? {}}
-        />
-        <FeatureZone
-          title="内置插件"
-          hint="常用自动化能力，按账号开启后再配置规则。"
-          icon={<Package2 className="h-4 w-4" />}
-          features={grouped.builtin}
-          selectedAccountId={selectedAccount?.id}
-          selectedFeatures={selectedAccount?.features ?? {}}
-        />
-        <FeatureZone
-          title="远程插件"
-          hint="从外部仓库安装的扩展能力。"
-          icon={<SatelliteDish className="h-4 w-4" />}
-          features={grouped.remote}
-          selectedAccountId={selectedAccount?.id}
-          selectedFeatures={selectedAccount?.features ?? {}}
-        />
-        <FeatureZone
-          title="实验性"
-          hint="还在试验中的能力，适合先小范围账号测试。"
-          icon={<FlaskConical className="h-4 w-4" />}
-          features={grouped.experimental}
-          selectedAccountId={selectedAccount?.id}
-          selectedFeatures={selectedAccount?.features ?? {}}
-        />
-      </div>
+        <CardHeader>
+          <CardTitle>账号插件启用详情与配置</CardTitle>
+          <CardDescription>
+            先选择要配置的账号，再查看每类插件在该账号上的启用状态与配置入口。
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {accounts.length > 0 ? (
+            <div className="flex flex-col items-stretch gap-2 sm:flex-row sm:items-center">
+              <span className="text-sm text-muted-foreground">选择配置的账号：</span>
+              <Select
+                value={selectedAid?.toString() ?? ""}
+                onChange={(e) => setSelectedAid(Number(e.target.value))}
+                className="w-full sm:w-64"
+              >
+                {accounts.map((a) => (
+                  <option key={a.id} value={a.id}>{a.name}</option>
+                ))}
+              </Select>
+            </div>
+          ) : null}
+          <div className="grid gap-4 lg:grid-cols-2">
+            <FeatureZone
+              title="平台能力"
+              hint="系统底层能力，通常不用手动配置。"
+              icon={<Settings2 className="h-4 w-4" />}
+              features={grouped.platform}
+              selectedAccountId={selectedAccount?.id}
+              selectedFeatures={selectedAccount?.features ?? {}}
+            />
+            <FeatureZone
+              title="内置插件"
+              hint="常用自动化能力，按账号开启后再配置规则。"
+              icon={<Package2 className="h-4 w-4" />}
+              features={grouped.builtin}
+              selectedAccountId={selectedAccount?.id}
+              selectedFeatures={selectedAccount?.features ?? {}}
+            />
+            <FeatureZone
+              title="远程插件"
+              hint="从外部仓库安装的扩展能力。"
+              icon={<SatelliteDish className="h-4 w-4" />}
+              features={grouped.remote}
+              selectedAccountId={selectedAccount?.id}
+              selectedFeatures={selectedAccount?.features ?? {}}
+            />
+            <FeatureZone
+              title="实验性"
+              hint="还在试验中的能力，适合先小范围账号测试。"
+              icon={<FlaskConical className="h-4 w-4" />}
+              features={grouped.experimental}
+              selectedAccountId={selectedAccount?.id}
+              selectedFeatures={selectedAccount?.features ?? {}}
+            />
+          </div>
+        </CardContent>
+      </Card>
     </div>
   );
 }
@@ -309,7 +319,7 @@ function GuideContextCard({
         aria-label="打开新手指引"
       >
         <Sparkles className="h-4 w-4" />
-        新手指引：最后一步
+        新手指引：当前第 3 步，点击展开详情
       </button>
     );
   }

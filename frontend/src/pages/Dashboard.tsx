@@ -42,9 +42,9 @@ export function Dashboard() {
 
       <Card>
         <CardHeader className="pb-2">
-          <CardTitle className="text-base">资源占用</CardTitle>
+          <CardTitle className="text-base">本项目资源占用</CardTitle>
           <p className="text-sm text-muted-foreground">
-            主机与本项目整体资源快照（15 秒刷新）
+            统计 TeleBot 主进程 + 全部账号 worker 在这台服务器里实际占用的 CPU 和内存（15 秒刷新）
           </p>
         </CardHeader>
         <CardContent className="space-y-4 pt-0">
@@ -65,15 +65,50 @@ export function Dashboard() {
             </div>
           ) : (
             <>
-              <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-                <Metric label="主机 CPU" value={percent(resourceQ.data.host.cpu_percent)} />
-                <Metric label="主机内存" value={percent(resourceQ.data.host.memory_used_percent)} />
-                <Metric label="磁盘使用" value={percent(resourceQ.data.host.disk_used_percent)} />
-                <Metric label="磁盘剩余" value={gb(resourceQ.data.host.disk_free_gb)} />
+              <div className="grid gap-3 lg:grid-cols-[1.2fr_0.8fr]">
+                <div className="rounded-2xl border bg-gradient-to-br from-sky-50 via-background to-emerald-50 p-4 dark:from-sky-950/20 dark:to-emerald-950/10">
+                  <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                    TeleBot 本项目合计
+                  </p>
+                  <div className="mt-3 grid grid-cols-2 gap-3">
+                    <BigMetric
+                      label="CPU 占用"
+                      value={percent(resourceQ.data.project_total.cpu_percent)}
+                      hint="主进程 + 所有账号 worker"
+                    />
+                    <BigMetric
+                      label="内存占用"
+                      value={mb(resourceQ.data.project_total.rss_mb)}
+                      hint={projectMemoryHint(
+                        resourceQ.data.project_total.rss_mb,
+                        resourceQ.data.host.memory_total_mb,
+                      )}
+                    />
+                  </div>
+                </div>
+                <div className="rounded-2xl border bg-muted/20 p-4">
+                  <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                    服务器总览
+                  </p>
+                  <div className="mt-3 grid grid-cols-2 gap-3">
+                    <Metric label="整机 CPU 负载" value={percent(resourceQ.data.host.cpu_percent)} />
+                    <Metric
+                      label="整机内存"
+                      value={hostMemoryLabel(
+                        resourceQ.data.host.memory_used_percent,
+                        resourceQ.data.host.memory_total_mb,
+                      )}
+                    />
+                    <Metric label="磁盘使用" value={percent(resourceQ.data.host.disk_used_percent)} />
+                    <Metric label="磁盘剩余" value={gb(resourceQ.data.host.disk_free_gb)} />
+                  </div>
+                </div>
               </div>
               <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-                <Metric label="项目 CPU" value={percent(resourceQ.data.project_total.cpu_percent)} />
-                <Metric label="项目内存" value={mb(resourceQ.data.project_total.rss_mb)} />
+                <Metric
+                  label="主进程"
+                  value={`CPU ${percent(resourceQ.data.main_process.cpu_percent)} · ${mb(resourceQ.data.main_process.rss_mb)}`}
+                />
                 <Metric
                   label="Worker 存活/应运行"
                   value={`${resourceQ.data.worker_alive}/${resourceQ.data.worker_desired_running}`}
@@ -85,7 +120,9 @@ export function Dashboard() {
               </div>
               {resourceQ.data.workers.length > 0 ? (
                 <div className="space-y-2">
-                  <p className="text-xs text-muted-foreground">Worker 内存 Top（最多 8 个）</p>
+                  <p className="text-xs text-muted-foreground">
+                    Worker 进程明细（按内存排序，最多 8 个）
+                  </p>
                   <div className="space-y-1">
                     {resourceQ.data.workers.map((w) => (
                       <div
@@ -153,11 +190,47 @@ function gb(v: number | null | undefined): string {
   return typeof v === "number" ? `${v.toFixed(2)} GB` : "-";
 }
 
+function projectMemoryHint(
+  rssMb: number | null | undefined,
+  totalMb: number | null | undefined,
+): string {
+  if (typeof rssMb !== "number" || typeof totalMb !== "number" || totalMb <= 0) {
+    return "服务器总内存占比未知";
+  }
+  return `约占服务器总内存 ${((rssMb / totalMb) * 100).toFixed(1)}%`;
+}
+
+function hostMemoryLabel(
+  usedPercent: number | null | undefined,
+  totalMb: number | null | undefined,
+): string {
+  const percentText = percent(usedPercent);
+  return typeof totalMb === "number" ? `${percentText} / ${mb(totalMb)}` : percentText;
+}
+
 function Metric({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded border bg-muted/20 p-2">
       <p className="text-[11px] text-muted-foreground">{label}</p>
       <p className="text-sm font-medium">{value}</p>
+    </div>
+  );
+}
+
+function BigMetric({
+  label,
+  value,
+  hint,
+}: {
+  label: string;
+  value: string;
+  hint: string;
+}) {
+  return (
+    <div className="rounded-xl border bg-background/80 p-3 shadow-sm">
+      <p className="text-xs text-muted-foreground">{label}</p>
+      <p className="mt-1 text-2xl font-semibold tracking-tight">{value}</p>
+      <p className="mt-1 text-[11px] leading-4 text-muted-foreground">{hint}</p>
     </div>
   );
 }
