@@ -344,13 +344,22 @@ export function ConfigBackup() {
 
       <Card>
       <CardHeader>
-        <CardTitle className="text-base">Config Bundle</CardTitle>
-        <CardDescription>账号级配置包导出与 dry-run（仅预览，不写入）</CardDescription>
+        <CardTitle className="text-base">账号配置包（Config Bundle）</CardTitle>
+        <CardDescription>
+          大白话：把 A 账号的规则、插件配置、自定义命令绑定打包成一个 JSON 文件，再拿去给 B 账号套用。
+          上传后会先演练对比，不会立刻改数据；只有点“确认写入”才会真正保存到目标账号。
+        </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
-        <div className="space-y-3">
+        <div className="space-y-3 rounded-md border bg-muted/30 px-3 py-3">
+          <div>
+            <div className="text-sm font-medium">第 1 步：从一个账号导出配置包</div>
+            <p className="text-xs text-muted-foreground">
+              适合“我已经把 1 号账号调好了，想把同一套规则复制给 2 号账号”的场景。不会导出 session、API key、Bot Token 等敏感密钥。
+            </p>
+          </div>
           <div className="space-y-1.5 max-w-md">
-            <Label>导出源账号</Label>
+            <Label>源账号（从谁那里复制配置）</Label>
             <Select value={bundleSourceAid} onChange={(e) => setBundleSourceAid(e.target.value)}>
               <option value="">-- 选择账号 --</option>
               {accountsQ.data?.map((a) => (
@@ -366,15 +375,21 @@ export function ConfigBackup() {
             className="gap-1.5"
           >
             <Download className="h-4 w-4" />
-            {exportBundleMut.isPending ? "导出中..." : "导出 Config Bundle"}
+            {exportBundleMut.isPending ? "导出中..." : "导出账号配置包"}
           </Button>
         </div>
 
         <div className="border-t" />
 
-        <div className="space-y-3">
+        <div className="space-y-3 rounded-md border bg-muted/30 px-3 py-3">
+          <div>
+            <div className="text-sm font-medium">第 2 步：上传配置包，先看会改什么</div>
+            <p className="text-xs text-muted-foreground">
+              dry-run 就是“先排练一遍”：系统会告诉你目标账号会新增哪些配置、跳过哪些配置、哪些地方有冲突，但这一步不会写入数据库。
+            </p>
+          </div>
           <div className="space-y-1.5 max-w-md">
-            <Label>dry-run 目标账号</Label>
+            <Label>目标账号（要把配置复制给谁）</Label>
             <Select value={bundleTargetAid} onChange={(e) => setBundleTargetAid(e.target.value)}>
               <option value="">-- 选择账号 --</option>
               {accountsQ.data?.map((a) => (
@@ -398,11 +413,12 @@ export function ConfigBackup() {
             className="gap-1.5"
           >
             <Upload className="h-4 w-4" />
-            {dryRunBundleMut.isPending ? "分析中..." : "上传 bundle 做 dry-run"}
+            {dryRunBundleMut.isPending ? "分析中..." : "上传配置包并预览差异"}
           </Button>
 
           {bundleResult && (
             <div className="space-y-3 rounded-md border px-3 py-3">
+              <div className="text-sm font-medium">预览结果：现在还没有写入，只是在告诉你会发生什么</div>
               <div className="flex flex-wrap gap-3 text-sm">
                 <span className="flex items-center gap-1 text-emerald-600 dark:text-emerald-300">
                   <CheckCircle2 className="h-4 w-4" />
@@ -461,14 +477,18 @@ export function ConfigBackup() {
                 <div className="flex items-center justify-between rounded-md border px-3 py-2">
                   <div>
                     <Label className="text-sm">应用冲突项</Label>
-                    <p className="text-xs text-muted-foreground">关闭时仅写入新增项，冲突项保持不变</p>
+                    <p className="text-xs text-muted-foreground">
+                      大白话：如果目标账号已经有同名配置，是否用配置包里的版本覆盖它。关闭时只复制全新的配置，不碰已有冲突项。
+                    </p>
                   </div>
                   <Switch checked={applyConflicts} onCheckedChange={setApplyConflicts} />
                 </div>
                 <div className="flex items-center justify-between rounded-md border px-3 py-2">
                   <div>
                     <Label className="text-sm">确认 chat_id 冲突</Label>
-                    <p className="text-xs text-muted-foreground">若存在 chat_id 变更且应用冲突，必须手动确认</p>
+                    <p className="text-xs text-muted-foreground">
+                      大白话：群 ID / 聊天 ID 变了可能会把消息发到不同群，所以这里必须单独确认，防止误发。
+                    </p>
                   </div>
                   <Switch
                     checked={confirmChatIdConflicts}
@@ -482,7 +502,7 @@ export function ConfigBackup() {
                   className="gap-1.5"
                 >
                   <CheckCircle2 className="h-4 w-4" />
-                  {confirmBundleMut.isPending ? "写入中..." : "confirm 写入目标账号"}
+                  {confirmBundleMut.isPending ? "写入中..." : "确认写入目标账号"}
                 </Button>
                 {bundleConfirmResult && (
                   <div className="rounded-md border px-2 py-2 text-xs text-muted-foreground">

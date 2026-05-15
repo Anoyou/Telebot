@@ -4,7 +4,8 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from .llm_client import LLMResult, build_client_from_dto
+from . import llm_client
+from .llm_client import LLMResult
 from .llm_dto import LLMProviderDTO
 from .llm_runtime import build_fallback_chain, call_with_fallback
 
@@ -45,7 +46,7 @@ async def invoke(
                 override_model=override_model,
                 proxy_url=proxy_url or provider_dto.proxy_url,
             )
-        return build_client_from_dto(
+        return llm_client.build_client(
             provider_dto,
             override_model=override_model,
             proxy_url=proxy_url or provider_dto.proxy_url,

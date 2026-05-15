@@ -75,6 +75,24 @@ docker compose -f docker-compose.dev.yml up -d >/dev/null
 wait_compose_healthy docker-compose.dev.yml postgres 60 || die "PostgreSQL 未就绪，看 docker logs telebot-postgres"
 wait_compose_healthy docker-compose.dev.yml redis 30   || die "Redis 未就绪，看 docker logs telebot-redis"
 
+# 本地 dev compose 把 Postgres/Redis 映射到 15432/16379，避免撞宿主机已有服务。
+# .env.example 仍保留 5432/6379，方便生产/容器内默认值；make up 只在当前进程
+# 环境里做开发端口映射，不回写 .env，也不影响 prod-up。
+if [[ -f .env ]]; then
+  DEV_DATABASE_URL="$(grep -E '^DATABASE_URL=' .env | tail -n1 | cut -d= -f2- | tr -d ' "' || true)"
+  DEV_REDIS_URL="$(grep -E '^REDIS_URL=' .env | tail -n1 | cut -d= -f2- | tr -d ' "' || true)"
+  if [[ -n "$DEV_DATABASE_URL" ]]; then
+    DEV_DATABASE_URL="${DEV_DATABASE_URL/@localhost:5432/@localhost:15432}"
+    DEV_DATABASE_URL="${DEV_DATABASE_URL/@127.0.0.1:5432/@127.0.0.1:15432}"
+    export DATABASE_URL="$DEV_DATABASE_URL"
+  fi
+  if [[ -n "$DEV_REDIS_URL" ]]; then
+    DEV_REDIS_URL="${DEV_REDIS_URL/localhost:6379/localhost:16379}"
+    DEV_REDIS_URL="${DEV_REDIS_URL/127.0.0.1:6379/127.0.0.1:16379}"
+    export REDIS_URL="$DEV_REDIS_URL"
+  fi
+fi
+
 # ── 4. 迁移 ────────────────────────────────────────────────
 log "执行 alembic 迁移"
 ( cd backend && . .venv/bin/activate && alembic upgrade head ) \

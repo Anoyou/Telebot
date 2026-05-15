@@ -8,7 +8,7 @@ from typing import Any
 from sqlalchemy import JSON, BigInteger, Boolean, DateTime, ForeignKey, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column
 
-from ...feature_registry import BUILTIN_FEATURES
+from ...feature_registry import BUILTIN_FEATURES  # noqa: F401 - 兼容旧导入路径的 re-export
 from ..base import Base
 
 # ── 历史功能常量（各处 import 用；不再有新增必要，以后新 builtin 直接建目录即可）──

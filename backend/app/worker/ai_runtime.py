@@ -326,7 +326,7 @@ async def invoke(client, event, args, tpl: dict[str, Any], account_id: int) -> N
         LLMCallFailed,
         LLMError,
         LLMResult,
-        build_client_from_dto,
+        build_client,
     )
     from ..services.llm_dto import LLMProviderDTO
 
@@ -353,7 +353,7 @@ async def invoke(client, event, args, tpl: dict[str, Any], account_id: int) -> N
     if has_any_audio and not has_any_image:
         stt_model = str(cfg.get("transcribe_model") or "whisper-1").strip()
         try:
-            llm = build_client_from_dto(
+            llm = build_client(
                 provider_dto,
                 override_model=override_model,
                 proxy_url=provider_dto.proxy_url,

@@ -20,23 +20,31 @@ from typing import Any
 from telethon import TelegramClient, events
 
 from ..db.base import AsyncSessionLocal
-from ..services import audit as audit_svc
 from ..redis_client import get_redis
+from ..services import audit as audit_svc
 from ..settings import settings
 from ..util.sudo_permissions import (
     normalize_sudo_chat_ids,
     normalize_sudo_commands,
     sudo_scope_all,
 )
-from .ipc import CMD_PAUSE, CMD_RESUME, cmd_channel, make_cmd
 from . import ai_runtime
 from .commands.sudo_guard import (
     check_sudo_permission as _check_sudo_permission_impl,
+)
+from .commands.sudo_guard import (
     has_dispatch_target as _has_dispatch_target_impl,
+)
+from .commands.sudo_guard import (
     is_self_chat as _is_self_chat_impl,
+)
+from .commands.sudo_guard import (
     looks_like_command_name as _looks_like_command_name_impl,
+)
+from .commands.sudo_guard import (
     should_report_incoming_sudo_denial as _should_report_incoming_sudo_denial_impl,
 )
+from .ipc import CMD_PAUSE, CMD_RESUME, cmd_channel, make_cmd
 
 log = logging.getLogger(__name__)
 

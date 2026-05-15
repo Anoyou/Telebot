@@ -26,9 +26,17 @@ from app.worker.command import (
 )
 from app.worker.commands.sudo_guard import (
     check_sudo_permission as guard_check_sudo_permission,
+)
+from app.worker.commands.sudo_guard import (
     has_dispatch_target as guard_has_dispatch_target,
+)
+from app.worker.commands.sudo_guard import (
     is_self_chat as guard_is_self_chat,
+)
+from app.worker.commands.sudo_guard import (
     looks_like_command_name as guard_looks_like_command_name,
+)
+from app.worker.commands.sudo_guard import (
     should_report_incoming_sudo_denial as guard_should_report_incoming_sudo_denial,
 )
 
@@ -694,8 +702,8 @@ class _FakeSession:
 @pytest.mark.asyncio
 async def test_builtin_sudo_add_and_del_are_removed():
     """高危 sudo add/del 不再可用。"""
-    from app.worker.command import _BUILTIN
     from app.worker import command as wcmd
+    from app.worker.command import _BUILTIN
 
     client = AsyncMock()
     event = AsyncMock()
@@ -728,8 +736,8 @@ async def test_builtin_sudo_add_and_del_are_removed():
 @pytest.mark.asyncio
 async def test_builtin_sudo_without_args_shows_readonly_usage():
     """空参数时返回只读用法提示，不直接列出用户。"""
-    from app.worker.command import _BUILTIN
     from app.worker import command as wcmd
+    from app.worker.command import _BUILTIN
 
     client = AsyncMock()
     event = AsyncMock()
@@ -751,8 +759,8 @@ async def test_builtin_sudo_ls_still_works_with_summary(monkeypatch):
     """sudo ls 仍可用，返回授权摘要。"""
     from types import SimpleNamespace
 
-    from app.worker.command import _BUILTIN
     from app.worker import command as wcmd
+    from app.worker.command import _BUILTIN
 
     audit_write = AsyncMock(return_value=None)
     monkeypatch.setattr(

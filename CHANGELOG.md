@@ -17,6 +17,26 @@
 
 ---
 
+## [0.13.1] — 2026-05-16 · fix · 本地启动与 0.13 可见性修复
+
+### Fixed
+- 修复本地 `make up` 首次启动时 `.env.example` 默认 `localhost:5432/6379` 与 `docker-compose.dev.yml` 暴露端口 `15432/16379` 不一致导致 Alembic 连接失败的问题；开发启动脚本现在只在当前进程环境中映射端口，不回写 `.env`，也不影响生产部署。
+- 修复 `scripts/_lib.sh::auto_tune_env` 在已有 `MEMORY_TIER` 时因 shell 变量边界解析触发 `unbound variable` 的问题。
+- 修复 `ai_runtime.invoke()` 收口后测试与旧调用约定无法 monkeypatch 默认 LLM client 的问题，恢复 AI inline provider override、图片/贴纸、语音转写路径的本地测试稳定性。
+- 修复内置 feature 旧行更新 manifest 时未可靠写回 `x-experimental` 的问题，确保 `codex_image` 的“实验性”标识能从后端正确下发到插件列表和账号 feature 列表。
+- 恢复 `app.db.models.feature.BUILTIN_FEATURES` 兼容导出，避免旧调用点导入失败。
+
+### Changed
+- 将 Config Bundle 从“系统设置 → 全局控制”底部移到独立的“备份恢复”Tab，降低入口隐藏感。
+- 为 Config Bundle 补充大白话说明，明确它用于把 A 账号的规则、插件配置和自定义命令绑定复制到 B 账号；上传配置包只做预览，只有点击“确认写入目标账号”才会真正改数据。
+
+### Verification
+- `ruff check backend/app` 通过。
+- `pytest backend` 通过：548 passed, 2 skipped。
+- `pnpm --dir frontend build` 通过。
+
+---
+
 ## [0.13.0] — 2026-05-15 · refactor · TelePilot 安全 / 架构 / Config Bundle 主线收口
 
 ### Changed

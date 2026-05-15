@@ -242,7 +242,7 @@ auto_tune_env() {
     cur="$(grep -E '^MEMORY_TIER=' "$env_file" | tail -n1 | cut -d= -f2- | tr -d ' "')"
   fi
   if [[ -n "$cur" ]]; then
-    dim "MEMORY_TIER 已存在（=$cur）→ 跳过自适应注入"
+    dim "MEMORY_TIER 已存在（=${cur}）→ 跳过自适应注入"
     return 0
   fi
   local tier

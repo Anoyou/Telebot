@@ -62,6 +62,7 @@ async def seed_builtin_features(db: AsyncSession) -> int:
     rows = (await db.execute(select(Feature))).scalars().all()
     existing: dict[str, Feature] = {f.key: f for f in rows}
     added = 0
+    changed_existing = False
     for key, name in BUILTIN_FEATURES.items():
         # 尝试从 manifest 读取 config_schema 和 version
         cfg_schema = None
@@ -86,7 +87,7 @@ async def seed_builtin_features(db: AsyncSession) -> int:
                 f.version = ver
                 changed = True
             if cfg_schema or experimental:
-                manifest = f.manifest or {}
+                manifest = dict(f.manifest or {})
                 if manifest.get("config_schema") != cfg_schema:
                     manifest["config_schema"] = cfg_schema
                     changed = True
@@ -95,6 +96,7 @@ async def seed_builtin_features(db: AsyncSession) -> int:
                     changed = True
                 f.manifest = manifest
             if changed:
+                changed_existing = True
                 await db.flush()
             continue
         manifest_data: dict[str, Any] | None = None
@@ -106,6 +108,8 @@ async def seed_builtin_features(db: AsyncSession) -> int:
         db.add(Feature(key=key, display_name=name, is_builtin=True, version=ver, manifest=manifest_data))
         added += 1
     if added:
+        await db.commit()
+    elif changed_existing:
         await db.commit()
     return added
 

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Bell, Shield, ShieldCheck, SlidersHorizontal, UserPlus } from "lucide-react";
+import { Bell, Download, ShieldCheck, SlidersHorizontal, UserPlus } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -37,7 +37,7 @@ type RuntimeLogLevel = "debug" | "info" | "warn" | "error";
 
 export function SettingsIndex() {
   const qc = useQueryClient();
-  const [tab, setTab] = useState<"global" | "security" | "sudo" | "notify">("global");
+  const [tab, setTab] = useState<"global" | "security" | "sudo" | "notify" | "backup">("global");
 
   const settingsQ = useQuery({
     queryKey: ["system", "settings"],
@@ -191,6 +191,9 @@ export function SettingsIndex() {
           </TabsTrigger>
           <TabsTrigger value="notify" className="gap-1.5">
             <Bell className="h-4 w-4" /> 通知渠道
+          </TabsTrigger>
+          <TabsTrigger value="backup" className="gap-1.5">
+            <Download className="h-4 w-4" /> 备份恢复
           </TabsTrigger>
         </TabsList>
 
@@ -419,8 +422,6 @@ export function SettingsIndex() {
               </div>
             </CardContent>
           </Card>
-
-          <ConfigBackup />
         </TabsContent>
 
         <TabsContent value="security">
@@ -433,6 +434,10 @@ export function SettingsIndex() {
 
         <TabsContent value="notify">
           <NotifyBots />
+        </TabsContent>
+
+        <TabsContent value="backup">
+          <ConfigBackup />
         </TabsContent>
       </Tabs>
     </div>
