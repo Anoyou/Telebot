@@ -1,19 +1,6 @@
-// 日志中心：runtime_log 拆成三个 tab —— 消息日志 / 插件日志 / 系统日志
-//
-// 消息日志（source=event）：incoming 消息进来、命令派发等业务事件，
-// 适合用于"为什么我的 auto_reply 没回复 / 转发到底有没有发出"这类问题排查。
-//
-// 插件日志（source=plugin）：插件自己的 ctx.log 输出、插件 on_message 异常、命中/跳过原因，
-// 适合用于"某个插件为什么没按预期工作"这类问题排查。
-//
-// 系统日志（source=system）：worker 启停、IPC reload、风控状态、技术异常，
-// 适合用于"账号是不是真的 active / kill switch 是不是真的下发了"这类问题排查。
-//
-// 两个 tab 共享下方账号 / level / 关键词过滤；切换 tab 不重置过滤；自动刷新只在当前
-// tab 上拉，避免重复请求。关键词搜索是**前端 substring 匹配**——后端拉 200 条之内
-// 在浏览器里 grep；不打 DB 是为了让搜索响应零延时。
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { isAxiosError } from "axios";
 import { Search } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -39,10 +26,10 @@ import {
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Spinner } from "@/components/ui/misc";
-import { listRuntimeLogs } from "@/api/system";
+import { listAuditLogs, listRuntimeLogs } from "@/api/system";
 import { listAccounts } from "@/api/accounts";
 import { formatDateTime } from "@/lib/utils";
-import type { RuntimeLogItem } from "@/api/types";
+import type { AuditLogItem, RuntimeLogItem } from "@/api/types";
 
 const LEVEL_VARIANT: Record<
   string,
@@ -55,7 +42,8 @@ const LEVEL_VARIANT: Record<
   error: "destructive",
 };
 
-type LogTab = "event" | "plugin" | "system";
+type MainTab = "runtime" | "audit";
+type RuntimeSourceTab = "event" | "plugin" | "system";
 
 const BUILTIN_PLUGIN_KEYS = [
   "auto_reply",
@@ -67,12 +55,18 @@ const BUILTIN_PLUGIN_KEYS = [
 ];
 
 export function Logs() {
-  const [tab, setTab] = useState<LogTab>("event");
-  const [accountId, setAccountId] = useState("");
-  const [level, setLevel] = useState("");
-  const [autoRefresh, setAutoRefresh] = useState(true);
-  const [search, setSearch] = useState("");
-  const [pluginKey, setPluginKey] = useState("");
+  const [mainTab, setMainTab] = useState<MainTab>("runtime");
+
+  const [runtimeTab, setRuntimeTab] = useState<RuntimeSourceTab>("event");
+  const [runtimeAccountId, setRuntimeAccountId] = useState("");
+  const [runtimeLevel, setRuntimeLevel] = useState("");
+  const [runtimePluginKey, setRuntimePluginKey] = useState("");
+  const [runtimeSearch, setRuntimeSearch] = useState("");
+  const [runtimeAutoRefresh, setRuntimeAutoRefresh] = useState(true);
+
+  const [auditUserId, setAuditUserId] = useState("");
+  const [auditAction, setAuditAction] = useState("");
+  const [auditSearch, setAuditSearch] = useState("");
 
   const accountsQ = useQuery({
     queryKey: ["accounts"],
@@ -84,130 +78,149 @@ export function Logs() {
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">日志中心</h1>
         <p className="text-sm text-muted-foreground">
-          消息、插件、系统三类日志分开看；默认 5 秒自动刷新
+          Runtime 与 Audit 分开展示，避免混查；默认轻量查询窗口
         </p>
       </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">过滤</CardTitle>
-          <CardDescription>账号 / 级别 / 关键词 / 自动刷新——两 tab 共用</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5 lg:items-end">
-            <div className="space-y-1.5">
-              <Label>账号</Label>
-              <Select
-                value={accountId}
-                onChange={(e) => setAccountId(e.target.value)}
-              >
-                <option value="">全部</option>
-                {accountsQ.data?.map((a) => (
-                  <option key={a.id} value={a.id}>
-                    {a.display_name || a.phone}
-                  </option>
-                ))}
-              </Select>
-            </div>
-            <div className="space-y-1.5">
-              <Label>级别</Label>
-              <Select value={level} onChange={(e) => setLevel(e.target.value)}>
-                <option value="">全部</option>
-                <option value="debug">debug</option>
-                <option value="info">info</option>
-                <option value="warning">warning</option>
-                <option value="error">error</option>
-              </Select>
-            </div>
-            <div className="space-y-1.5">
-              <Label>插件</Label>
-              <PluginSelect value={pluginKey} onChange={setPluginKey} />
-            </div>
-            <div className="space-y-1.5 lg:col-span-1">
-              <Label>关键词搜索</Label>
-              <div className="relative">
-                <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                <Input
-                  className="pl-8 pr-8"
-                  placeholder="比如：FloodWait / template_id=3 / sk-..."
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                />
-                {search ? (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="absolute right-1 top-1/2 h-6 -translate-y-1/2 px-2 text-xs text-muted-foreground"
-                    onClick={() => setSearch("")}
-                    title="清空"
-                  >
-                    ✕
-                  </Button>
-                ) : null}
-              </div>
-            </div>
-            <div className="space-y-1.5">
-              <Label>自动刷新</Label>
-              <div className="flex h-10 items-center gap-2">
-                <Switch checked={autoRefresh} onCheckedChange={setAutoRefresh} />
-                <span className="text-sm text-muted-foreground">
-                  {autoRefresh ? "5s 拉取一次" : "已停止"}
-                </span>
-              </div>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      <Tabs value={tab} onValueChange={(v) => setTab(v as LogTab)}>
+      <Tabs value={mainTab} onValueChange={(v) => setMainTab(v as MainTab)}>
         <TabsList>
-          <TabsTrigger value="event">消息日志</TabsTrigger>
-          <TabsTrigger value="plugin">插件日志</TabsTrigger>
-          <TabsTrigger value="system">系统日志</TabsTrigger>
+          <TabsTrigger value="runtime">Runtime</TabsTrigger>
+          <TabsTrigger value="audit">Audit</TabsTrigger>
         </TabsList>
 
-        <TabsContent value="event">
-          <LogTable
-            source="event"
-            accountId={accountId}
-            level={level}
-            pluginKey=""
-            search={search}
-            autoRefresh={autoRefresh && tab === "event"}
-            description="收到消息、命令分发等入口事件。先确认消息有没有进入系统。"
-          />
+        <TabsContent value="runtime" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Runtime 过滤</CardTitle>
+              <CardDescription>账号 / 级别 / 插件 / 关键词 / 自动刷新</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5 lg:items-end">
+                <div className="space-y-1.5">
+                  <Label>账号</Label>
+                  <Select
+                    value={runtimeAccountId}
+                    onChange={(e) => setRuntimeAccountId(e.target.value)}
+                  >
+                    <option value="">全部</option>
+                    {accountsQ.data?.map((a) => (
+                      <option key={a.id} value={a.id}>
+                        {a.display_name || a.phone}
+                      </option>
+                    ))}
+                  </Select>
+                </div>
+                <div className="space-y-1.5">
+                  <Label>级别</Label>
+                  <Select
+                    value={runtimeLevel}
+                    onChange={(e) => setRuntimeLevel(e.target.value)}
+                  >
+                    <option value="">全部</option>
+                    <option value="debug">debug</option>
+                    <option value="info">info</option>
+                    <option value="warning">warning</option>
+                    <option value="error">error</option>
+                  </Select>
+                </div>
+                <div className="space-y-1.5">
+                  <Label>插件</Label>
+                  <PluginSelect value={runtimePluginKey} onChange={setRuntimePluginKey} />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>关键词搜索</Label>
+                  <SearchInput value={runtimeSearch} onChange={setRuntimeSearch} />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>自动刷新</Label>
+                  <div className="flex h-10 items-center gap-2">
+                    <Switch
+                      checked={runtimeAutoRefresh}
+                      onCheckedChange={setRuntimeAutoRefresh}
+                    />
+                    <span className="text-sm text-muted-foreground">
+                      {runtimeAutoRefresh ? "5s 拉取一次" : "已停止"}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Tabs
+            value={runtimeTab}
+            onValueChange={(v) => setRuntimeTab(v as RuntimeSourceTab)}
+          >
+            <TabsList>
+              <TabsTrigger value="event">消息日志</TabsTrigger>
+              <TabsTrigger value="plugin">插件日志</TabsTrigger>
+              <TabsTrigger value="system">系统日志</TabsTrigger>
+            </TabsList>
+
+            <TabsContent value="event">
+              <RuntimeLogTable
+                source="event"
+                accountId={runtimeAccountId}
+                level={runtimeLevel}
+                pluginKey=""
+                search={runtimeSearch}
+                autoRefresh={runtimeAutoRefresh && mainTab === "runtime" && runtimeTab === "event"}
+                description="收到消息、命令分发等入口事件。"
+              />
+            </TabsContent>
+
+            <TabsContent value="plugin">
+              <RuntimeLogTable
+                source="plugin"
+                accountId={runtimeAccountId}
+                level={runtimeLevel}
+                pluginKey={runtimePluginKey}
+                search={runtimeSearch}
+                autoRefresh={runtimeAutoRefresh && mainTab === "runtime" && runtimeTab === "plugin"}
+                description="插件运行记录和异常。"
+              />
+            </TabsContent>
+
+            <TabsContent value="system">
+              <RuntimeLogTable
+                source="system"
+                accountId={runtimeAccountId}
+                level={runtimeLevel}
+                pluginKey=""
+                search={runtimeSearch}
+                autoRefresh={runtimeAutoRefresh && mainTab === "runtime" && runtimeTab === "system"}
+                description="worker 启停、IPC reload、平台级异常。"
+              />
+            </TabsContent>
+          </Tabs>
         </TabsContent>
 
-        <TabsContent value="plugin">
-          <LogTable
-            source="plugin"
-            accountId={accountId}
-            level={level}
-            pluginKey={pluginKey}
-            search={search}
-            autoRefresh={autoRefresh && tab === "plugin"}
-            description="插件自己的运行记录和异常。排查「24 点、自动回复、转发为什么没反应」优先看这里。"
-          />
-        </TabsContent>
+        <TabsContent value="audit" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Audit 过滤</CardTitle>
+              <CardDescription>用户 / action / 关键词（与 Runtime 过滤独立）</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <AuditFilters
+                userId={auditUserId}
+                onUserIdChange={setAuditUserId}
+                action={auditAction}
+                onActionChange={setAuditAction}
+                search={auditSearch}
+                onSearchChange={setAuditSearch}
+              />
+            </CardContent>
+          </Card>
 
-        <TabsContent value="system">
-          <LogTable
-            source="system"
-            accountId={accountId}
-            level={level}
-            pluginKey=""
-            search={search}
-            autoRefresh={autoRefresh && tab === "system"}
-            description="worker 启停、IPC reload、风控状态、平台级异常。排查「账号是不是活着」看这里。"
-          />
+          <AuditLogTable userId={auditUserId} action={auditAction} search={auditSearch} />
         </TabsContent>
       </Tabs>
     </div>
   );
 }
 
-// ── 单个 tab 的日志表 ─────────────────────────────────────────────
-function LogTable({
+function RuntimeLogTable({
   source,
   accountId,
   level,
@@ -216,7 +229,7 @@ function LogTable({
   autoRefresh,
   description,
 }: {
-  source: "event" | "plugin" | "system";
+  source: RuntimeSourceTab;
   accountId: string;
   level: string;
   pluginKey: string;
@@ -229,17 +242,15 @@ function LogTable({
     account_id: accountId || undefined,
     level: level || undefined,
     plugin_key: source === "plugin" && pluginKey ? pluginKey : undefined,
-    limit: 200,
+    limit: 100,
   };
   const logsQ = useQuery({
-    queryKey: ["logs", filters],
+    queryKey: ["logs", "runtime", filters],
     queryFn: () => listRuntimeLogs(filters),
     refetchInterval: autoRefresh ? 5_000 : false,
     refetchIntervalInBackground: false,
   });
 
-  // 关键词过滤：纯前端 substring（不区分大小写）。在 200 条窗口内做，零延时。
-  // 更高级的 regex / 字段联检后续可加；先满足"找到那条"的核心需求。
   const filtered = useMemo(() => {
     const all = logsQ.data ?? [];
     const q = search.trim().toLowerCase();
@@ -257,18 +268,13 @@ function LogTable({
     <Card>
       <CardHeader>
         <CardTitle className="text-base">
-          {source === "event"
-            ? "消息日志"
-            : source === "plugin"
-              ? "插件日志"
-              : "系统日志"}
+          {source === "event" ? "消息日志" : source === "plugin" ? "插件日志" : "系统日志"}
         </CardTitle>
         <CardDescription className="flex items-center justify-between gap-2">
           <span>{description}</span>
           {search.trim() || (source === "plugin" && pluginKey) ? (
             <span className="shrink-0 text-xs text-muted-foreground">
-              已过滤 <strong className="text-foreground">{showCount}</strong> /
-              {" "}{totalCount}
+              已过滤 <strong className="text-foreground">{showCount}</strong> / {totalCount}
             </span>
           ) : null}
         </CardDescription>
@@ -291,28 +297,18 @@ function LogTable({
             <TableBody>
               {filtered.map((l: RuntimeLogItem) => (
                 <TableRow key={l.id}>
-                  <TableCell className="font-mono text-xs">
-                    {formatDateTime(l.created_at)}
-                  </TableCell>
+                  <TableCell className="font-mono text-xs">{formatDateTime(l.created_at)}</TableCell>
                   <TableCell>
-                    <Badge
-                      variant={
-                        LEVEL_VARIANT[l.level.toLowerCase()] ?? "secondary"
-                      }
-                    >
+                    <Badge variant={LEVEL_VARIANT[l.level.toLowerCase()] ?? "secondary"}>
                       {l.level.toUpperCase()}
                     </Badge>
                   </TableCell>
-                  <TableCell className="text-muted-foreground">
-                    {l.account_id ? `#${l.account_id}` : "—"}
-                  </TableCell>
+                  <TableCell className="text-muted-foreground">{l.account_id ? `#${l.account_id}` : "—"}</TableCell>
                   <TableCell className="text-xs whitespace-pre-wrap">
                     <div className="font-mono">
                       <HighlightedMessage text={l.message} keyword={search} />
                     </div>
-                    {l.detail ? (
-                      <LogDetail detail={l.detail} keyword={search} />
-                    ) : null}
+                    {l.detail ? <LogDetail detail={l.detail} keyword={search} /> : null}
                   </TableCell>
                 </TableRow>
               ))}
@@ -324,22 +320,192 @@ function LogTable({
               <>
                 没找到匹配 <code className="font-mono">{search}</code> 的日志
                 <br />
-                <span className="text-xs">（仅在已加载的 {totalCount} 条窗口内搜索；想扩窗口可清空过滤）</span>
+                <span className="text-xs">（仅在已加载的 {totalCount} 条窗口内搜索）</span>
               </>
             ) : (
-              <>
-                该分类暂无日志
-                {source === "event"
-                  ? " — 让人给本账号发条消息，再回来看"
-                  : source === "plugin"
-                    ? " — 插件还没有输出运行记录"
-                    : " — 没有错误是好事"}
-              </>
+              <>该分类暂无日志</>
             )}
           </p>
         )}
       </CardContent>
     </Card>
+  );
+}
+
+function AuditFilters({
+  userId,
+  onUserIdChange,
+  action,
+  onActionChange,
+  search,
+  onSearchChange,
+}: {
+  userId: string;
+  onUserIdChange: (v: string) => void;
+  action: string;
+  onActionChange: (v: string) => void;
+  search: string;
+  onSearchChange: (v: string) => void;
+}) {
+  const actionsQ = useQuery({
+    queryKey: ["logs", "audit", "actions"],
+    queryFn: () => listAuditLogs({ limit: 100 }),
+    staleTime: 30_000,
+  });
+
+  const actions = useMemo(() => {
+    const discovered = new Set<string>();
+    for (const row of actionsQ.data ?? []) {
+      if (row.action.trim()) discovered.add(row.action.trim());
+    }
+    return [...discovered].sort();
+  }, [actionsQ.data]);
+
+  return (
+    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 lg:items-end">
+      <div className="space-y-1.5">
+        <Label>用户 ID</Label>
+        <Input
+          placeholder="例如：1"
+          value={userId}
+          onChange={(e) => onUserIdChange(e.target.value)}
+        />
+      </div>
+      <div className="space-y-1.5">
+        <Label>Action</Label>
+        <Select value={action} onChange={(e) => onActionChange(e.target.value)}>
+          <option value="">全部</option>
+          {actions.map((a) => (
+            <option key={a} value={a}>
+              {a}
+            </option>
+          ))}
+        </Select>
+      </div>
+      <div className="space-y-1.5">
+        <Label>关键词搜索</Label>
+        <SearchInput value={search} onChange={onSearchChange} />
+      </div>
+    </div>
+  );
+}
+
+function AuditLogTable({
+  userId,
+  action,
+  search,
+}: {
+  userId: string;
+  action: string;
+  search: string;
+}) {
+  const uid = Number(userId);
+  const qUserId = Number.isInteger(uid) && uid > 0 ? uid : undefined;
+
+  const logsQ = useQuery({
+    queryKey: ["logs", "audit", { user_id: qUserId, limit: 100 }],
+    queryFn: () => listAuditLogs({ user_id: qUserId, limit: 100 }),
+  });
+
+  const filtered = useMemo(() => {
+    const all = logsQ.data ?? [];
+    const q = search.trim().toLowerCase();
+    return all.filter((l) => {
+      if (action && l.action !== action) return false;
+      if (!q) return true;
+      const detailText = l.detail ? JSON.stringify(l.detail).toLowerCase() : "";
+      const targetText = (l.target || "").toLowerCase();
+      return l.action.toLowerCase().includes(q) || targetText.includes(q) || detailText.includes(q);
+    });
+  }, [logsQ.data, action, search]);
+
+  const endpointMissing = isAxiosError(logsQ.error) &&
+    (logsQ.error.response?.status === 404 || logsQ.error.response?.status === 405);
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base">Audit 日志</CardTitle>
+        <CardDescription>列：ts / user_id / action / target / detail 摘要</CardDescription>
+      </CardHeader>
+      <CardContent>
+        {logsQ.isLoading ? (
+          <div className="flex h-20 items-center justify-center">
+            <Spinner className="text-primary" />
+          </div>
+        ) : endpointMissing ? (
+          <p className="py-8 text-center text-sm text-muted-foreground">
+            当前环境未提供审计日志 endpoint（预期：/api/logs/audit）
+          </p>
+        ) : filtered.length > 0 ? (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="w-40">ts</TableHead>
+                <TableHead className="w-20">user_id</TableHead>
+                <TableHead className="w-48">action</TableHead>
+                <TableHead className="w-44">target</TableHead>
+                <TableHead>detail</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {filtered.map((l: AuditLogItem) => (
+                <TableRow key={l.id}>
+                  <TableCell className="font-mono text-xs">{formatDateTime(l.ts)}</TableCell>
+                  <TableCell className="font-mono text-xs text-muted-foreground">
+                    {l.user_id ?? "—"}
+                  </TableCell>
+                  <TableCell className="font-mono text-xs">{l.action}</TableCell>
+                  <TableCell className="font-mono text-xs text-muted-foreground break-all">
+                    {l.target || "—"}
+                  </TableCell>
+                  <TableCell className="text-xs whitespace-pre-wrap">
+                    {l.detail ? (
+                      <AuditDetail detail={l.detail} keyword={search} />
+                    ) : (
+                      <span className="text-muted-foreground">—</span>
+                    )}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        ) : (
+          <p className="py-8 text-center text-sm text-muted-foreground">暂无符合条件的 audit 日志</p>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function SearchInput({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <div className="relative">
+      <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+      <Input
+        className="pl-8 pr-8"
+        placeholder="关键词"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+      />
+      {value ? (
+        <Button
+          variant="ghost"
+          size="sm"
+          className="absolute right-1 top-1/2 h-6 -translate-y-1/2 px-2 text-xs text-muted-foreground"
+          onClick={() => onChange("")}
+          title="清空"
+        >
+          ✕
+        </Button>
+      ) : null}
+    </div>
   );
 }
 
@@ -352,7 +518,7 @@ function PluginSelect({
 }) {
   const logsQ = useQuery({
     queryKey: ["logs", "plugin-keys"],
-    queryFn: () => listRuntimeLogs({ source: "plugin", limit: 200 }),
+    queryFn: () => listRuntimeLogs({ source: "plugin", limit: 100 }),
     staleTime: 30_000,
   });
   const keys = useMemo(() => {
@@ -397,6 +563,27 @@ function LogDetail({
   );
 }
 
+function AuditDetail({
+  detail,
+  keyword,
+}: {
+  detail: Record<string, unknown>;
+  keyword: string;
+}) {
+  const rows = Object.entries(detail).filter(([, value]) => value !== undefined && value !== null);
+  if (!rows.length) return <span className="text-muted-foreground">—</span>;
+  return (
+    <div className="grid gap-1 rounded-md bg-muted/60 px-2 py-1.5 font-mono text-[11px] text-muted-foreground">
+      {rows.slice(0, 5).map(([key, value]) => (
+        <div key={key} className="break-all">
+          <span className="text-foreground/70">{key}: </span>
+          <HighlightedMessage text={formatDetailValue(value)} keyword={keyword} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function formatDetailValue(value: unknown): string {
   if (typeof value === "string") return value;
   try {
@@ -406,11 +593,9 @@ function formatDetailValue(value: unknown): string {
   }
 }
 
-// ── 关键词高亮：把匹配段落用 <mark> 包起来，便于一眼定位 ──
 function HighlightedMessage({ text, keyword }: { text: string; keyword: string }) {
   const q = keyword.trim();
   if (!q) return <>{text}</>;
-  // 分块：保留原大小写但匹配大小写不敏感
   const lower = text.toLowerCase();
   const needle = q.toLowerCase();
   const parts: React.ReactNode[] = [];
@@ -432,7 +617,6 @@ function HighlightedMessage({ text, keyword }: { text: string; keyword: string }
       </mark>,
     );
     i = idx + needle.length;
-    // 防御：避免空 needle 死循环
     if (needle.length === 0) break;
   }
   return <>{parts}</>;

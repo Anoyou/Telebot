@@ -1,4 +1,5 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   AlertTriangle,
@@ -57,6 +58,7 @@ const CATEGORIES: CategoryDef[] = [
 ];
 
 export function ConfigBackup() {
+  const [searchParams] = useSearchParams();
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [includeSensitive, setIncludeSensitive] = useState(false);
   const [importResult, setImportResult] = useState<{
@@ -73,11 +75,26 @@ export function ConfigBackup() {
   const [bundleFile, setBundleFile] = useState<File | null>(null);
   const [applyConflicts, setApplyConflicts] = useState(false);
   const [confirmChatIdConflicts, setConfirmChatIdConflicts] = useState(false);
+  const appliedSourceParamRef = useRef<string | null>(null);
 
   const accountsQ = useQuery({
     queryKey: ["accounts"],
     queryFn: listAccounts,
   });
+
+  const sourceParam = searchParams.get("source");
+  useEffect(() => {
+    const accounts = accountsQ.data ?? [];
+    if (!sourceParam || accounts.length === 0 || appliedSourceParamRef.current === sourceParam) {
+      return;
+    }
+
+    appliedSourceParamRef.current = sourceParam;
+    const sourceAid = Number(sourceParam);
+    if (Number.isInteger(sourceAid) && accounts.some((a) => a.id === sourceAid)) {
+      setBundleSourceAid(String(sourceAid));
+    }
+  }, [accountsQ.data, sourceParam]);
 
   const toggleCategory = (key: string) => {
     setSelected((prev) => {

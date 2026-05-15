@@ -17,11 +17,17 @@
 
 ---
 
-## [0.14.0] — 2026-05-16 · feature · 前端 IA 导航骨架
+## [0.14.0] — 2026-05-16 · feature · 前端 IA 中心化
 
 ### Changed
 - 前端顶层导航从 8 个入口收敛为 6 个用户目标导向入口：概览、账号、插件、AI、日志、系统；调度与模板不再占据顶层菜单，为后续 Plugins 中心化做路由落点。
-- 新增 `/plugins/templates`、`/plugins/aliases`、`/plugins/scheduler` 与 `/ai/providers` 路由骨架，暂时复用现有页面文件，不移动页面内容。
+- 新增 Plugins 中心页，将平台能力、内置插件、远程插件、实验性能力分区展示；`codex_image` 固定进入实验性区，让 0.13 的 experimental 标识在前端更显眼。
+- 将命令模板、别名、调度能力接入 `/plugins/templates`、`/plugins/aliases`、`/plugins/scheduler`，并保留旧入口重定向，避免旧书签失效。
+- 新增 AI 顶级入口 `/ai`，拆出 Provider、Routing、Usage 三个子入口；Usage 页以最小表格展示最近调用，并在后端接口尚未开放时提供温和空状态。
+- Settings 瘦身为账号、平台、安全、迁移四组，隐藏 LLM Providers、命令模板、别名管理旧入口，并提供“已搬家”跳转提示。
+- 账号详情概览增加能力与迁移入口卡片：启用插件数、启用命令数、复制配置；旧命令 Tab 降级为迁移提示页。
+- Config Bundle 支持从 `/settings?tab=backup&source=:aid` 预填源账号；Plugins 支持 `/plugins?account=:aid` 按账号视角打开。
+- Logs 页新增 Runtime / Audit 顶层 Tab，Audit 接入 `/api/logs/audit` 并支持动态 action 过滤，便于查看 sudo、Config Bundle confirm、account_bot confirm 等安全决策记录。
 - 旧入口 `/scheduler`、`/templates`、`/settings/commands`、`/settings/aliases`、`/settings/llm-providers`、`/ai-settings` 保留重定向，避免旧书签失效。
 
 ### Verification

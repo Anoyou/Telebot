@@ -26,12 +26,15 @@ const Game24ConfigPage = lazy(() => import("@/pages/Features/Game24Config").then
 const FeatureTodoPage = lazy(() => import("@/pages/Features/TodoPage").then(m => ({ default: m.FeatureTodoPage })));
 const Logs = lazy(() => import("@/pages/Logs").then(m => ({ default: m.Logs })));
 const SettingsIndex = lazy(() => import("@/pages/Settings/Index").then(m => ({ default: m.SettingsIndex })));
-const CommandTemplates = lazy(() => import("@/pages/Settings/CommandTemplates").then(m => ({ default: m.CommandTemplates })));
-const AliasManagement = lazy(() => import("@/pages/Settings/AliasManagement").then(m => ({ default: m.AliasManagement })));
-const LLMProviders = lazy(() => import("@/pages/Settings/LLMProviders").then(m => ({ default: m.LLMProviders })));
-const Extensions = lazy(() => import("@/pages/Extensions").then(m => ({ default: m.Extensions })));
-const AISettings = lazy(() => import("@/pages/AISettings").then(m => ({ default: m.AISettings })));
-const Templates = lazy(() => import("@/pages/Templates").then(m => ({ default: m.Templates })));
+const PluginsHome = lazy(() => import("@/pages/Plugins").then(m => ({ default: m.PluginsHome })));
+const PluginsTemplatesPage = lazy(() => import("@/pages/Plugins").then(m => ({ default: m.PluginsTemplatesPage })));
+const PluginsAliasesPage = lazy(() => import("@/pages/Plugins").then(m => ({ default: m.PluginsAliasesPage })));
+const PluginsSchedulerPage = lazy(() => import("@/pages/Plugins").then(m => ({ default: m.PluginsSchedulerPage })));
+const PluginsLegacyExtensionsPage = lazy(() => import("@/pages/Plugins").then(m => ({ default: m.PluginsLegacyExtensionsPage })));
+const AIIndex = lazy(() => import("@/pages/AI/Index").then(m => ({ default: m.AIIndex })));
+const AIProviders = lazy(() => import("@/pages/AI/Providers").then(m => ({ default: m.AIProviders })));
+const AIRouting = lazy(() => import("@/pages/AI/Routing").then(m => ({ default: m.AIRouting })));
+const AIUsage = lazy(() => import("@/pages/AI/Usage").then(m => ({ default: m.AIUsage })));
 
 type AppErrorBoundaryState = { hasError: boolean };
 
@@ -188,7 +191,7 @@ export default function App() {
             path="plugins"
             element={
               <Suspense fallback={<PageFallback />}>
-                <Extensions />
+                <PluginsHome />
               </Suspense>
             }
           />
@@ -196,7 +199,7 @@ export default function App() {
             path="plugins/templates"
             element={
               <Suspense fallback={<PageFallback />}>
-                <CommandTemplates />
+                <PluginsTemplatesPage />
               </Suspense>
             }
           />
@@ -204,7 +207,7 @@ export default function App() {
             path="plugins/aliases"
             element={
               <Suspense fallback={<PageFallback />}>
-                <AliasManagement />
+                <PluginsAliasesPage />
               </Suspense>
             }
           />
@@ -212,7 +215,15 @@ export default function App() {
             path="plugins/scheduler"
             element={
               <Suspense fallback={<PageFallback />}>
-                <SchedulerConfig />
+                <PluginsSchedulerPage />
+              </Suspense>
+            }
+          />
+          <Route
+            path="plugins-legacy"
+            element={
+              <Suspense fallback={<PageFallback />}>
+                <PluginsLegacyExtensionsPage />
               </Suspense>
             }
           />
@@ -253,7 +264,7 @@ export default function App() {
             path="ai"
             element={
               <Suspense fallback={<PageFallback />}>
-                <AISettings />
+                <AIIndex />
               </Suspense>
             }
           />
@@ -262,11 +273,26 @@ export default function App() {
             path="ai/providers"
             element={
               <Suspense fallback={<PageFallback />}>
-                <LLMProviders />
+                <AIProviders />
               </Suspense>
             }
           />
-          <Route path="ai/routing" element={<Navigate to="/ai" replace />} />
+          <Route
+            path="ai/routing"
+            element={
+              <Suspense fallback={<PageFallback />}>
+                <AIRouting />
+              </Suspense>
+            }
+          />
+          <Route
+            path="ai/usage"
+            element={
+              <Suspense fallback={<PageFallback />}>
+                <AIUsage />
+              </Suspense>
+            }
+          />
           <Route
             path="settings/llm-providers"
             element={<Navigate to="/ai/providers" replace />}

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Link, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Bell, Download, ShieldCheck, SlidersHorizontal, UserPlus } from "lucide-react";
 import { toast } from "sonner";
@@ -37,7 +38,8 @@ type RuntimeLogLevel = "debug" | "info" | "warn" | "error";
 
 export function SettingsIndex() {
   const qc = useQueryClient();
-  const [tab, setTab] = useState<"global" | "security" | "sudo" | "notify" | "backup">("global");
+  const [searchParams] = useSearchParams();
+  const [tab, setTab] = useState<"account" | "platform" | "security" | "migration">("account");
 
   const settingsQ = useQuery({
     queryKey: ["system", "settings"],
@@ -89,6 +91,17 @@ export function SettingsIndex() {
   useEffect(() => {
     if (limitsQ.data) setQps(String(limitsQ.data.api_qps_total ?? 0));
   }, [limitsQ.data]);
+
+  useEffect(() => {
+    const tabParam = searchParams.get("tab");
+    if (tabParam === "backup") {
+      setTab("migration");
+      return;
+    }
+    if (tabParam === "account" || tabParam === "platform" || tabParam === "security" || tabParam === "migration") {
+      setTab(tabParam);
+    }
+  }, [searchParams]);
 
   const savePrefix = useMutation({
     mutationFn: () => patchSystemSettings({ command_prefix: prefix }),
@@ -174,30 +187,52 @@ export function SettingsIndex() {
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">系统设置</h1>
         <p className="text-sm text-muted-foreground">
-          按用途拆分为全局控制、管理员账号、通知渠道，减少跨页面跳转。
+          按账号、平台、安全、迁移拆分，保留常用入口并收敛历史配置位。
         </p>
       </div>
 
+      <Card className="border-dashed">
+        <CardHeader>
+          <CardTitle className="text-base">已搬家</CardTitle>
+          <CardDescription>
+            LLM Providers、命令模板、别名管理已迁移到新位置，旧入口已隐藏。
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-wrap gap-2">
+          <Button asChild variant="outline" size="sm">
+            <Link to="/ai/providers">前往 AI Providers</Link>
+          </Button>
+          <Button asChild variant="outline" size="sm">
+            <Link to="/plugins/templates">前往命令模板</Link>
+          </Button>
+          <Button asChild variant="outline" size="sm">
+            <Link to="/plugins/aliases">前往别名管理</Link>
+          </Button>
+        </CardContent>
+      </Card>
+
       <Tabs value={tab} onValueChange={(v) => setTab(v as typeof tab)}>
         <TabsList>
-          <TabsTrigger value="global" className="gap-1.5">
-            <SlidersHorizontal className="h-4 w-4" /> 全局控制
+          <TabsTrigger value="account" className="gap-1.5">
+            <ShieldCheck className="h-4 w-4" /> 账号
+          </TabsTrigger>
+          <TabsTrigger value="platform" className="gap-1.5">
+            <SlidersHorizontal className="h-4 w-4" /> 平台
           </TabsTrigger>
           <TabsTrigger value="security" className="gap-1.5">
-            <ShieldCheck className="h-4 w-4" /> 管理员账号
+            <UserPlus className="h-4 w-4" /> 安全
           </TabsTrigger>
-          <TabsTrigger value="sudo" className="gap-1.5">
-            <UserPlus className="h-4 w-4" /> Sudo 用户
-          </TabsTrigger>
-          <TabsTrigger value="notify" className="gap-1.5">
-            <Bell className="h-4 w-4" /> 通知渠道
-          </TabsTrigger>
-          <TabsTrigger value="backup" className="gap-1.5">
-            <Download className="h-4 w-4" /> 备份恢复
+          <TabsTrigger value="migration" className="gap-1.5">
+            <Download className="h-4 w-4" /> 迁移
           </TabsTrigger>
         </TabsList>
 
-        <TabsContent value="global" className="space-y-6">
+        <TabsContent value="account" className="space-y-6">
+          <UserAccount />
+          <SudoManagement />
+        </TabsContent>
+
+        <TabsContent value="platform" className="space-y-6">
           <Card>
             <CardHeader>
               <CardTitle className="text-base">命令前缀</CardTitle>
@@ -225,6 +260,18 @@ export function SettingsIndex() {
             </CardContent>
           </Card>
 
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">通知渠道</CardTitle>
+              <CardDescription>设置系统事件的推送目标与通知机器人。</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <NotifyBots />
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="security" className="space-y-6">
           <Card>
             <CardHeader>
               <CardTitle className="text-base">全局总闸（Kill Switch）</CardTitle>
@@ -289,54 +336,6 @@ export function SettingsIndex() {
                   </p>
                 </div>
                 <Button onClick={() => saveTimezone.mutate()} disabled={saveTimezone.isPending}>
-                  保存
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">LLM 成本限额</CardTitle>
-              <CardDescription>0 = 不限制；按账号统计，worker 调用前生效</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="grid gap-3 md:grid-cols-4">
-                <div className="space-y-1.5">
-                  <Label>每分钟调用</Label>
-                  <Input
-                    inputMode="numeric"
-                    value={llmLimits.per_minute}
-                    onChange={(e) => setLlmLimits((v) => ({ ...v, per_minute: e.target.value.replace(/[^0-9]/g, "") }))}
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label>每日调用</Label>
-                  <Input
-                    inputMode="numeric"
-                    value={llmLimits.daily_requests}
-                    onChange={(e) => setLlmLimits((v) => ({ ...v, daily_requests: e.target.value.replace(/[^0-9]/g, "") }))}
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label>每日 Token</Label>
-                  <Input
-                    inputMode="numeric"
-                    value={llmLimits.daily_tokens}
-                    onChange={(e) => setLlmLimits((v) => ({ ...v, daily_tokens: e.target.value.replace(/[^0-9]/g, "") }))}
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label>高价每日调用</Label>
-                  <Input
-                    inputMode="numeric"
-                    value={llmLimits.premium_daily}
-                    onChange={(e) => setLlmLimits((v) => ({ ...v, premium_daily: e.target.value.replace(/[^0-9]/g, "") }))}
-                  />
-                </div>
-              </div>
-              <div className="mt-3">
-                <Button onClick={() => saveLlmLimits.mutate()} disabled={saveLlmLimits.isPending}>
                   保存
                 </Button>
               </div>
@@ -422,21 +421,57 @@ export function SettingsIndex() {
               </div>
             </CardContent>
           </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">LLM 成本限额</CardTitle>
+              <CardDescription>0 = 不限制；按账号统计，worker 调用前生效</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="grid gap-3 md:grid-cols-4">
+                <div className="space-y-1.5">
+                  <Label>每分钟调用</Label>
+                  <Input
+                    inputMode="numeric"
+                    value={llmLimits.per_minute}
+                    onChange={(e) => setLlmLimits((v) => ({ ...v, per_minute: e.target.value.replace(/[^0-9]/g, "") }))}
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>每日调用</Label>
+                  <Input
+                    inputMode="numeric"
+                    value={llmLimits.daily_requests}
+                    onChange={(e) => setLlmLimits((v) => ({ ...v, daily_requests: e.target.value.replace(/[^0-9]/g, "") }))}
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>每日 Token</Label>
+                  <Input
+                    inputMode="numeric"
+                    value={llmLimits.daily_tokens}
+                    onChange={(e) => setLlmLimits((v) => ({ ...v, daily_tokens: e.target.value.replace(/[^0-9]/g, "") }))}
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>高价每日调用</Label>
+                  <Input
+                    inputMode="numeric"
+                    value={llmLimits.premium_daily}
+                    onChange={(e) => setLlmLimits((v) => ({ ...v, premium_daily: e.target.value.replace(/[^0-9]/g, "") }))}
+                  />
+                </div>
+              </div>
+              <div className="mt-3">
+                <Button onClick={() => saveLlmLimits.mutate()} disabled={saveLlmLimits.isPending}>
+                  保存
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
         </TabsContent>
 
-        <TabsContent value="security">
-          <UserAccount />
-        </TabsContent>
-
-        <TabsContent value="sudo">
-          <SudoManagement />
-        </TabsContent>
-
-        <TabsContent value="notify">
-          <NotifyBots />
-        </TabsContent>
-
-        <TabsContent value="backup">
+        <TabsContent value="migration">
           <ConfigBackup />
         </TabsContent>
       </Tabs>

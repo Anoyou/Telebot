@@ -1,6 +1,6 @@
 // 账号详情：3 个 Tab —— 概览 / 插件启停 / 风控
 import { useEffect, useState } from "react";
-import { useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Activity,
@@ -58,6 +58,7 @@ import {
   toggleAccountFeature,
   updateAccountFeatureConfig,
 } from "@/api/accounts";
+import { listAccountCommands } from "@/api/commands";
 import {
   getPluginGlobalConfig,
   setPluginGlobalConfig,
@@ -113,6 +114,11 @@ export function AccountDetail() {
   const featuresQ = useQuery({
     queryKey: ["account", aid, "features"],
     queryFn: () => listAccountFeatures(aid),
+    enabled: !!aid,
+  });
+  const commandsQ = useQuery({
+    queryKey: ["account", aid, "commands"],
+    queryFn: () => listAccountCommands(aid),
     enabled: !!aid,
   });
 
@@ -234,6 +240,11 @@ export function AccountDetail() {
   if (!detailQ.data) return <p>账号不存在</p>;
 
   const acc = detailQ.data;
+  const featureMetaMap = new Map((featureListQ.data ?? []).map((f) => [f.key, f]));
+  const enabledPluginCount = (featuresQ.data ?? []).filter(
+    (item) => item.enabled && !isPlatformFeature(featureMetaMap.get(item.feature_key) ?? item.feature_key),
+  ).length;
+  const enabledCommandCount = (commandsQ.data ?? []).filter((item) => item.enabled).length;
   // 老账号 / 异常账号可能 tg_user_id / tg_username 都是 null：worker 启动时
   // 会调 client.get_me() 自动回填（runtime.py:107）。这里给个友好提示，让用户
   // 明白"为什么这两栏是空的"以及怎么解。
@@ -380,6 +391,47 @@ export function AccountDetail() {
                   }}
                 >
                   <Trash2 className="mr-1 h-4 w-4" /> 删除账号
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">能力与迁移入口</CardTitle>
+              <CardDescription>插件、命令模板与配置复制已统一到新入口。</CardDescription>
+            </CardHeader>
+            <CardContent className="grid gap-3 md:grid-cols-3">
+              <div className="rounded-lg border p-4">
+                <div className="text-xs text-muted-foreground">启用插件数</div>
+                <div className="mt-1 text-2xl font-semibold">{enabledPluginCount}</div>
+                <Button asChild size="sm" variant="outline" className="mt-3 w-full justify-between">
+                  <Link to={`/plugins?account=${aid}`}>
+                    管理插件
+                    <ChevronRight className="h-4 w-4" />
+                  </Link>
+                </Button>
+              </div>
+              <div className="rounded-lg border p-4">
+                <div className="text-xs text-muted-foreground">启用命令数</div>
+                <div className="mt-1 text-2xl font-semibold">{enabledCommandCount}</div>
+                <Button asChild size="sm" variant="outline" className="mt-3 w-full justify-between">
+                  <Link to={`/plugins/templates?account=${aid}`}>
+                    管理命令模板
+                    <ChevronRight className="h-4 w-4" />
+                  </Link>
+                </Button>
+              </div>
+              <div className="rounded-lg border p-4">
+                <div className="text-xs text-muted-foreground">配置迁移</div>
+                <div className="mt-1 text-sm text-muted-foreground">
+                  复制插件/模板配置到其他账号。
+                </div>
+                <Button asChild size="sm" variant="outline" className="mt-3 w-full justify-between">
+                  <Link to={`/settings?tab=backup&source=${aid}`}>
+                    复制配置
+                    <ChevronRight className="h-4 w-4" />
+                  </Link>
                 </Button>
               </div>
             </CardContent>
