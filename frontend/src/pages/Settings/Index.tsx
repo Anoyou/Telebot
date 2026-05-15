@@ -36,7 +36,6 @@ interface KillSwitchState {
 }
 
 type RuntimeLogLevel = "debug" | "info" | "warn" | "error";
-const NEW_ACCOUNT_GUIDE_SEEN_KEY = "telebot.accounts.new_account_guide_seen.v4";
 
 const GUIDE_STEPS = [
   {
@@ -74,6 +73,7 @@ export function SettingsIndex() {
   const [tab, setTab] = useState<"account" | "platform" | "security" | "migration">("account");
   const [guideExpanded, setGuideExpanded] = useState(false);
   const [quickAid, setQuickAid] = useState("");
+  const guideActive = searchParams.get("guide") === "1";
   const currentStep = useMemo(
     () => getGuideStepByPath(location.pathname, location.search),
     [location.pathname, location.search],
@@ -144,12 +144,6 @@ export function SettingsIndex() {
       setTab(tabParam);
     }
   }, [searchParams]);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    if (localStorage.getItem(NEW_ACCOUNT_GUIDE_SEEN_KEY) !== "1") return;
-    setGuideExpanded(false);
-  }, []);
 
   useEffect(() => {
     const accounts = accountsQ.data ?? [];
@@ -307,7 +301,7 @@ export function SettingsIndex() {
         </TabsContent>
 
         <TabsContent value="platform" className="space-y-6">
-          <Card className={currentStep === 1 ? "ring-2 ring-primary/30" : undefined}>
+          <Card className={guideActive && currentStep === 1 ? "siri-glow-soft" : undefined}>
             <CardHeader>
               <CardTitle className="text-base">命令前缀</CardTitle>
               <CardDescription>
@@ -325,22 +319,24 @@ export function SettingsIndex() {
                   />
                 </div>
                 <Button
-                  className={currentStep === 1 ? "animate-pulse shadow-lg shadow-primary/20" : undefined}
+                  className={guideActive && currentStep === 1 ? "siri-glow" : undefined}
                   onClick={() => prefix && savePrefix.mutate()}
                   disabled={savePrefix.isPending}
                 >
                   保存
                 </Button>
               </div>
+              {guideActive ? (
               <div className="mt-3">
                 <GuideInlineCard
                   expanded={guideExpanded}
                   currentStep={currentStep}
                   onToggle={() => setGuideExpanded((v) => !v)}
-                  onPrimary={() => nav(GUIDE_STEPS[2].actionTo)}
-                  onSkip={() => nav(GUIDE_STEPS[2].actionTo)}
+                  onPrimary={() => nav("/plugins?guide=1")}
+                  onSkip={() => nav("/plugins?guide=1")}
                 />
               </div>
+              ) : null}
               <div className="mt-4 rounded-xl border bg-background p-3 text-xs">
                 <div className="mb-3 font-medium">触发预览</div>
                 <div className="rounded-2xl border bg-gradient-to-b from-sky-50 to-emerald-50 p-3 dark:from-sky-950/30 dark:to-emerald-950/20">
@@ -618,7 +614,7 @@ function GuideInlineCard({
         className="inline-flex items-center gap-2 rounded-full border border-primary/30 bg-primary/10 px-3 py-1.5 text-xs font-medium text-primary shadow-sm shadow-primary/20 transition hover:bg-primary/15"
         aria-label="打开新手指引"
       >
-        <Sparkles className="h-4 w-4 animate-pulse" />
+        <Sparkles className="h-4 w-4" />
         新手指引：当前第 2 步
       </button>
     );

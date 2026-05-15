@@ -137,6 +137,75 @@
 }
 
 @layer utilities {
+  .siri-glow {
+    position: relative;
+    isolation: isolate;
+    box-shadow: 0 0 0 1px hsl(var(--background)), 0 10px 30px hsl(var(--primary) / 0.18);
+  }
+
+  .siri-glow::before {
+    content: "";
+    position: absolute;
+    inset: -3px;
+    z-index: -1;
+    border-radius: inherit;
+    background: conic-gradient(
+      from var(--siri-angle, 0deg),
+      #4cc9f0,
+      #7c3aed,
+      #ff4ecd,
+      #ffb703,
+      #37d67a,
+      #4cc9f0
+    );
+    animation: siri-orbit 2.4s linear infinite;
+  }
+
+  .siri-glow::after {
+    content: "";
+    position: absolute;
+    inset: 1px;
+    z-index: -1;
+    border-radius: inherit;
+    background: hsl(var(--card));
+  }
+
+  .siri-glow-soft {
+    position: relative;
+    isolation: isolate;
+  }
+
+  .siri-glow-soft::before {
+    content: "";
+    position: absolute;
+    inset: -4px;
+    z-index: -1;
+    border-radius: 1.15rem;
+    background: conic-gradient(
+      from var(--siri-angle, 0deg),
+      #4cc9f0,
+      #7c3aed,
+      #ff4ecd,
+      #ffb703,
+      #37d67a,
+      #4cc9f0
+    );
+    opacity: 0.9;
+    animation: siri-orbit 3s linear infinite;
+  }
+
+  @property --siri-angle {
+    syntax: "<angle>";
+    inherits: false;
+    initial-value: 0deg;
+  }
+
+  @keyframes siri-orbit {
+    to {
+      --siri-angle: 360deg;
+    }
+  }
+
   .keep-words {
     word-break: keep-all;
     overflow-wrap: normal;

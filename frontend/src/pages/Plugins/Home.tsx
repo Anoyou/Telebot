@@ -34,6 +34,7 @@ export function PluginsHome() {
   const [searchParams] = useSearchParams();
   const [selectedAid, setSelectedAid] = useState<number | null>(null);
   const [guideExpanded, setGuideExpanded] = useState(false);
+  const guideActive = searchParams.get("guide") === "1";
   const [bannerVisible, setBannerVisible] = useState(() => {
     if (typeof window === "undefined") return false;
     return localStorage.getItem(DANGEROUS_CMD_BANNER_KEY) !== "1";
@@ -146,7 +147,7 @@ export function PluginsHome() {
             <Button
               variant="outline"
               className={`h-full min-h-[96px] justify-start whitespace-normal px-4 py-3 text-left ${
-                guideExpanded ? "animate-pulse shadow-lg shadow-primary/20 ring-2 ring-primary/30" : ""
+                guideActive ? "siri-glow" : ""
               }`}
               onClick={() => nav("/plugins/templates")}
             >
@@ -184,7 +185,7 @@ export function PluginsHome() {
             <Button
               variant="outline"
               className={`h-full min-h-[96px] justify-start whitespace-normal px-4 py-3 text-left ${
-                guideExpanded ? "animate-pulse shadow-lg shadow-primary/20 ring-2 ring-primary/30" : ""
+                guideActive ? "siri-glow" : ""
               }`}
               onClick={() => nav("/plugins/manage?tab=plugins")}
             >
@@ -196,17 +197,22 @@ export function PluginsHome() {
               </span>
             </Button>
           </div>
+          {guideActive ? (
           <GuideContextCard
             expanded={guideExpanded}
             onToggle={() => setGuideExpanded((v) => !v)}
-            onInstall={() => nav("/plugins/manage?tab=plugins")}
+            onInstall={() => nav("/plugins/manage?tab=plugins&guide=1")}
             onDone={() => {
               if (typeof window !== "undefined") {
                 localStorage.setItem("telebot.accounts.new_account_guide_seen.v4", "1");
               }
+              const next = new URLSearchParams(searchParams);
+              next.delete("guide");
+              nav(`/plugins${next.toString() ? `?${next.toString()}` : ""}`, { replace: true });
               setGuideExpanded(false);
             }}
           />
+          ) : null}
 
           {accounts.length > 0 ? (
             <div className="flex flex-col items-stretch gap-2 sm:flex-row sm:items-center">
@@ -241,7 +247,7 @@ export function PluginsHome() {
 
       <div
         className={`grid gap-4 rounded-2xl transition lg:grid-cols-2 ${
-          guideExpanded ? "ring-2 ring-primary/30 ring-offset-4 ring-offset-background" : ""
+          guideActive ? "siri-glow-soft" : ""
         }`}
       >
         <FeatureZone
@@ -302,7 +308,7 @@ function GuideContextCard({
         className="inline-flex items-center gap-2 rounded-full border border-primary/30 bg-primary/10 px-3 py-1.5 text-xs font-medium text-primary shadow-sm shadow-primary/20 transition hover:bg-primary/15"
         aria-label="打开新手指引"
       >
-        <Sparkles className="h-4 w-4 animate-pulse" />
+        <Sparkles className="h-4 w-4" />
         新手指引：最后一步
       </button>
     );

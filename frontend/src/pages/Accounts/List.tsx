@@ -1,6 +1,6 @@
 // 账号列表：卡片网格形式（移动端单列），含启停 / 详情 / 删除（二次确认）操作
 import { useMemo, useState } from "react";
-import { Link, useLocation, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowRight,
@@ -67,8 +67,11 @@ function getGuideStepByPath(pathname: string, search: string): number {
 export function AccountList() {
   const nav = useNavigate();
   const location = useLocation();
+  const [searchParams, setSearchParams] = useSearchParams();
   const qc = useQueryClient();
+  const [guideLauncherOpen, setGuideLauncherOpen] = useState(false);
   const [guideExpanded, setGuideExpanded] = useState(false);
+  const guideActive = searchParams.get("guide") === "1";
   const currentStep = useMemo(
     () => getGuideStepByPath(location.pathname, location.search),
     [location.pathname, location.search],
@@ -98,6 +101,22 @@ export function AccountList() {
     onError: (err) => toast.error(getErrMsg(err)),
   });
 
+  function startGuide() {
+    const next = new URLSearchParams(searchParams);
+    next.set("guide", "1");
+    setSearchParams(next);
+    setGuideLauncherOpen(false);
+    setGuideExpanded(false);
+  }
+
+  function stopGuide() {
+    const next = new URLSearchParams(searchParams);
+    next.delete("guide");
+    setSearchParams(next);
+    setGuideLauncherOpen(false);
+    setGuideExpanded(false);
+  }
+
   return (
     <div className="space-y-6 pb-24">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -107,32 +126,46 @@ export function AccountList() {
             每个账号 = 一个 session = 一个独立 worker 进程
           </p>
         </div>
-        <div className="flex flex-col items-stretch gap-2 sm:items-end">
+        <div className="relative flex flex-col items-stretch gap-2 sm:items-end">
           <div className="flex flex-wrap gap-2">
             <Button
               variant="outline"
-              size="icon"
-              className={guideExpanded ? "ring-2 ring-primary/30" : undefined}
-              onClick={() => setGuideExpanded((v) => !v)}
+              size="sm"
+              className={guideActive ? "siri-glow" : undefined}
+              onClick={() => setGuideLauncherOpen((v) => !v)}
               aria-label="打开新手指引"
               title="新手指引"
             >
-              <Sparkles className="h-4 w-4 animate-pulse text-primary" />
+              <Sparkles className="mr-1 h-4 w-4 text-primary" />
+              新手指引
             </Button>
             <Button
-              className={currentStep === 0 ? "animate-pulse shadow-lg shadow-primary/20 ring-2 ring-primary/30" : undefined}
+              className={guideActive && currentStep === 0 ? "siri-glow" : undefined}
               onClick={() => nav("/accounts/new")}
             >
               <Plus className="mr-1 h-4 w-4" /> 新增账号
             </Button>
           </div>
-          <GuideContextCard
-            expanded={guideExpanded}
-            currentStep={currentStep}
-            onToggle={() => setGuideExpanded((v) => !v)}
-            onGo={() => nav(GUIDE_STEPS[currentStep].actionTo)}
-            onSkip={() => nav(GUIDE_STEPS[Math.min(currentStep + 1, GUIDE_STEPS.length - 1)].actionTo)}
-          />
+          {guideLauncherOpen ? (
+            <GuideLauncher
+              active={guideActive}
+              onStart={startGuide}
+              onStop={stopGuide}
+              onClose={() => setGuideLauncherOpen(false)}
+            />
+          ) : null}
+          {guideActive ? (
+            <GuideContextCard
+              expanded={guideExpanded}
+              currentStep={currentStep}
+              onToggle={() => setGuideExpanded((v) => !v)}
+              onGo={() => nav(`${GUIDE_STEPS[currentStep].actionTo}${GUIDE_STEPS[currentStep].actionTo.includes("?") ? "&" : "?"}guide=1`)}
+              onSkip={() => {
+                const nextStep = GUIDE_STEPS[Math.min(currentStep + 1, GUIDE_STEPS.length - 1)];
+                nav(`${nextStep.actionTo}${nextStep.actionTo.includes("?") ? "&" : "?"}guide=1`);
+              }}
+            />
+          ) : null}
         </div>
       </div>
 
@@ -213,6 +246,35 @@ export function AccountList() {
   );
 }
 
+function GuideLauncher({
+  active,
+  onStart,
+  onStop,
+  onClose,
+}: {
+  active: boolean;
+  onStart: () => void;
+  onStop: () => void;
+  onClose: () => void;
+}) {
+  return (
+    <div className="absolute right-0 top-full z-40 mt-2 w-[19rem] rounded-2xl border bg-card/95 p-4 text-left shadow-xl backdrop-blur">
+      <div className="mb-1 text-sm font-semibold">开启新手指引模式？</div>
+      <p className="text-xs leading-relaxed text-muted-foreground">
+        开启后会在当前页面用小条提示下一步，并用七彩流光高亮你要点击的位置。
+      </p>
+      <div className="mt-3 flex flex-wrap gap-2">
+        <Button size="sm" onClick={active ? onStop : onStart}>
+          {active ? "退出指引" : "开始指引"}
+        </Button>
+        <Button size="sm" variant="outline" onClick={onClose}>
+          先不用
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 function GuideContextCard({
   expanded,
   currentStep,
@@ -229,10 +291,22 @@ function GuideContextCard({
   const step = GUIDE_STEPS[currentStep];
   const percent = ((currentStep + 1) / GUIDE_STEPS.length) * 100;
 
-  if (!expanded) return null;
+  if (!expanded) {
+    return (
+      <button
+        type="button"
+        onClick={onToggle}
+        className="absolute right-0 top-full z-30 mt-2 inline-flex items-center gap-2 rounded-full border border-primary/30 bg-card/95 px-3 py-1.5 text-xs font-medium text-primary shadow-lg backdrop-blur transition hover:bg-primary/10"
+        aria-label="展开当前步骤"
+      >
+        <Sparkles className="h-4 w-4" />
+        第 1 步：先添加账号
+      </button>
+    );
+  }
 
   return (
-    <div className="w-full max-w-xs rounded-2xl border bg-card/95 p-4 text-left shadow-lg shadow-primary/10 backdrop-blur">
+    <div className="absolute right-0 top-full z-30 mt-2 w-[19rem] rounded-2xl border bg-card/95 p-4 text-left shadow-xl backdrop-blur">
       <div className="mb-2 flex items-center justify-between text-xs text-muted-foreground">
         <span>新手指引</span>
         <button type="button" onClick={onToggle} className="hover:text-foreground">

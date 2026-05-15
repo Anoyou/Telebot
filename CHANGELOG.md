@@ -17,6 +17,21 @@
 
 ---
 
+## [0.14.9] — 2026-05-16 · polish · 新手指引开关与流光高亮
+
+### Changed
+- 账号页“新手指引”恢复为带文字的大按钮，点击后先询问是否开始指引模式，不再默认强制开启。
+- 第一阶段的小条提醒恢复到“新增账号”按钮附近，并改为浮层定位，展开后不再把账号卡片向下挤压。
+- 新手指引通过 `guide=1` 显式进入指引模式；未开启时不显示步骤提示，也不高亮按钮。
+- 高亮效果从普通呼吸动画改成类似 Siri 的七彩流光边框，应用于当前步骤的目标按钮和插件状态区域。
+
+### Verification
+- `git diff --check` 通过。
+- `pnpm --dir frontend build` 通过。
+- `PYTHONPYCACHEPREFIX=/private/tmp/telebot_pycache backend/.venv/bin/python -m py_compile backend/app/__init__.py` 通过。
+
+---
+
 ## [0.14.8] — 2026-05-16 · polish · 插件中心第三步指引
 
 ### Changed

@@ -98,6 +98,7 @@ export function Extensions() {
   const tabParam = searchParams.get("tab");
   const [tab, setTab] = useState<TabValue>(() => parseManageTab(tabParam));
   const [guideExpanded, setGuideExpanded] = useState(false);
+  const guideActive = searchParams.get("guide") === "1";
 
   useEffect(() => {
     setTab(parseManageTab(tabParam));
@@ -117,17 +118,22 @@ export function Extensions() {
         </div>
       </div>
 
+      {guideActive ? (
       <PluginInstallGuide
         expanded={guideExpanded}
         onToggle={() => setGuideExpanded((v) => !v)}
-        onBack={() => nav("/plugins")}
+        onBack={() => nav("/plugins?guide=1")}
         onDone={() => {
           if (typeof window !== "undefined") {
             localStorage.setItem(NEW_ACCOUNT_GUIDE_SEEN_KEY, "1");
           }
+          const next = new URLSearchParams(searchParams);
+          next.delete("guide");
+          nav(`/plugins/manage${next.toString() ? `?${next.toString()}` : ""}`, { replace: true });
           setGuideExpanded(false);
         }}
       />
+      ) : null}
 
       <Tabs value={tab} onValueChange={(v) => setTab(v as TabValue)}>
         <TabsList>
@@ -169,7 +175,7 @@ function PluginInstallGuide({
         className="inline-flex items-center gap-2 rounded-full border border-primary/30 bg-primary/10 px-3 py-1.5 text-xs font-medium text-primary shadow-sm shadow-primary/20 transition hover:bg-primary/15"
         aria-label="打开新手指引"
       >
-        <Sparkles className="h-4 w-4 animate-pulse" />
+        <Sparkles className="h-4 w-4" />
         新手指引：安装后回插件中心启用
       </button>
     );
