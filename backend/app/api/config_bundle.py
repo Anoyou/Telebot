@@ -140,10 +140,19 @@ async def confirm_config_bundle(
     aid: int,
     db: DBSession,
     user: CurrentUser,
+    request: Request,
     file: UploadFile = File(...),
     apply_conflicts: bool = Form(False),
     confirm_chat_id_conflicts: bool = Form(False),
 ) -> ConfigBundleConfirmResponse:
+    content_length = request.headers.get("content-length")
+    if content_length is not None:
+        try:
+            if int(content_length) > 1_048_576:
+                raise _bad("BUNDLE_TOO_LARGE", "bundle 超过 1MB，请拆分后再导入", 413)
+        except ValueError:
+            pass
+
     content = await file.read()
     if len(content) > 1_048_576:
         raise _bad("BUNDLE_TOO_LARGE", "bundle 超过 1MB，请拆分后再导入", 413)

@@ -235,6 +235,27 @@ async def test_dry_run_rejects_oversize_before_reading_body(monkeypatch: pytest.
     assert exc_info.value.detail["code"] == "BUNDLE_TOO_LARGE"
 
 
+@pytest.mark.asyncio
+async def test_confirm_rejects_oversize_before_reading_body() -> None:
+    db = SimpleNamespace()
+    user = SimpleNamespace()
+    file = UploadFile(file=BytesIO(b"{}"), filename="bundle.json", headers=Headers({}))
+    file.read = AsyncMock(side_effect=AssertionError("should not read body"))  # type: ignore[method-assign]
+    request = SimpleNamespace(headers={"content-length": "1048577"})
+
+    with pytest.raises(HTTPException) as exc_info:
+        await config_bundle_api.confirm_config_bundle(
+            aid=1,
+            db=db,
+            user=user,
+            request=request,  # type: ignore[arg-type]
+            file=file,
+        )
+
+    assert exc_info.value.status_code == 413
+    assert exc_info.value.detail["code"] == "BUNDLE_TOO_LARGE"
+
+
 class _FakeScalarResult:
     def __init__(self, rows):
         self._rows = rows
