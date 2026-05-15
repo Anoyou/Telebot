@@ -1,17 +1,19 @@
 import { useCallback, useRef, useState } from "react";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   AlertTriangle,
   Download,
   Upload,
   CheckCircle2,
   XCircle,
+  AlertCircle,
 } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import { Select } from "@/components/ui/select";
 import {
   Card,
   CardContent,
@@ -21,6 +23,8 @@ import {
 } from "@/components/ui/card";
 import { api } from "@/lib/api";
 import { getErrMsg } from "@/lib/api";
+import { dryRunConfigBundle, exportConfigBundle, listAccounts } from "@/api/accounts";
+import type { ConfigBundleDryRunResponse } from "@/api/types";
 
 interface CategoryDef {
   key: string;
@@ -53,6 +57,15 @@ export function ConfigBackup() {
     warnings: string[];
   } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const bundleFileRef = useRef<HTMLInputElement>(null);
+  const [bundleSourceAid, setBundleSourceAid] = useState("");
+  const [bundleTargetAid, setBundleTargetAid] = useState("");
+  const [bundleResult, setBundleResult] = useState<ConfigBundleDryRunResponse | null>(null);
+
+  const accountsQ = useQuery({
+    queryKey: ["accounts"],
+    queryFn: listAccounts,
+  });
 
   const toggleCategory = (key: string) => {
     setSelected((prev) => {
@@ -111,6 +124,36 @@ export function ConfigBackup() {
     onError: (err) => toast.error(getErrMsg(err)),
   });
 
+  const exportBundleMut = useMutation({
+    mutationFn: async () => {
+      const res = await exportConfigBundle(Number(bundleSourceAid));
+      const disposition = res.headers["content-disposition"] || "";
+      const match = disposition.match(/filename="?(.+?)"?(?:;|$)/);
+      const filename = match ? match[1] : `telebot-config-bundle-${bundleSourceAid}.json`;
+      const url = URL.createObjectURL(res.data as Blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    },
+    onSuccess: () => toast.success("Config Bundle 已导出"),
+    onError: (err) => toast.error(getErrMsg(err)),
+  });
+
+  const dryRunBundleMut = useMutation({
+    mutationFn: async (file: File) => dryRunConfigBundle(Number(bundleTargetAid), file),
+    onSuccess: (data) => {
+      setBundleResult(data);
+      toast.success(
+        `dry-run 完成：新增 ${data.counts.add}，跳过 ${data.counts.skip}，冲突 ${data.counts.conflict}`,
+      );
+    },
+    onError: (err) => toast.error(getErrMsg(err)),
+  });
+
   const handleFileChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
@@ -123,8 +166,20 @@ export function ConfigBackup() {
     [importMut],
   );
 
+  const handleBundleFileChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      setBundleResult(null);
+      dryRunBundleMut.mutate(file);
+      e.target.value = "";
+    },
+    [dryRunBundleMut],
+  );
+
   return (
-    <Card>
+    <>
+      <Card>
       <CardHeader>
         <CardTitle className="text-base">备份与恢复</CardTitle>
         <CardDescription>导出或导入系统配置（可选是否包含敏感数据）</CardDescription>
@@ -252,6 +307,128 @@ export function ConfigBackup() {
           )}
         </div>
       </CardContent>
-    </Card>
+      </Card>
+
+      <Card>
+      <CardHeader>
+        <CardTitle className="text-base">Config Bundle</CardTitle>
+        <CardDescription>账号级配置包导出与 dry-run（仅预览，不写入）</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-6">
+        <div className="space-y-3">
+          <div className="space-y-1.5 max-w-md">
+            <Label>导出源账号</Label>
+            <Select value={bundleSourceAid} onChange={(e) => setBundleSourceAid(e.target.value)}>
+              <option value="">-- 选择账号 --</option>
+              {accountsQ.data?.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.display_name || a.phone}
+                </option>
+              ))}
+            </Select>
+          </div>
+          <Button
+            onClick={() => exportBundleMut.mutate()}
+            disabled={!bundleSourceAid || exportBundleMut.isPending}
+            className="gap-1.5"
+          >
+            <Download className="h-4 w-4" />
+            {exportBundleMut.isPending ? "导出中..." : "导出 Config Bundle"}
+          </Button>
+        </div>
+
+        <div className="border-t" />
+
+        <div className="space-y-3">
+          <div className="space-y-1.5 max-w-md">
+            <Label>dry-run 目标账号</Label>
+            <Select value={bundleTargetAid} onChange={(e) => setBundleTargetAid(e.target.value)}>
+              <option value="">-- 选择账号 --</option>
+              {accountsQ.data?.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.display_name || a.phone}
+                </option>
+              ))}
+            </Select>
+          </div>
+          <input
+            ref={bundleFileRef}
+            type="file"
+            accept=".json,application/json"
+            onChange={handleBundleFileChange}
+            className="hidden"
+          />
+          <Button
+            variant="outline"
+            onClick={() => bundleFileRef.current?.click()}
+            disabled={!bundleTargetAid || dryRunBundleMut.isPending}
+            className="gap-1.5"
+          >
+            <Upload className="h-4 w-4" />
+            {dryRunBundleMut.isPending ? "分析中..." : "上传 bundle 做 dry-run"}
+          </Button>
+
+          {bundleResult && (
+            <div className="space-y-3 rounded-md border px-3 py-3">
+              <div className="flex flex-wrap gap-3 text-sm">
+                <span className="flex items-center gap-1 text-emerald-600 dark:text-emerald-300">
+                  <CheckCircle2 className="h-4 w-4" />
+                  新增 {bundleResult.counts.add}
+                </span>
+                <span className="flex items-center gap-1 text-muted-foreground">
+                  <XCircle className="h-4 w-4" />
+                  跳过 {bundleResult.counts.skip}
+                </span>
+                <span className="flex items-center gap-1 text-red-600 dark:text-red-300">
+                  <AlertCircle className="h-4 w-4" />
+                  冲突 {bundleResult.counts.conflict}
+                </span>
+              </div>
+              <div className="text-xs text-muted-foreground">
+                bundle 大小 {Math.round(bundleResult.size_bytes / 1024)} KB
+              </div>
+              {bundleResult.warnings.length > 0 && (
+                <div className="space-y-1 text-xs text-amber-600 dark:text-amber-300">
+                  {bundleResult.warnings.map((w, i) => (
+                    <p key={i}>{w}</p>
+                  ))}
+                </div>
+              )}
+              <div className="max-h-72 space-y-1 overflow-auto text-xs">
+                {bundleResult.items.slice(0, 40).map((item, i) => (
+                  <div
+                    key={`${item.entity}-${item.key}-${i}`}
+                    className={[
+                      "rounded border px-2 py-1",
+                      item.action === "conflict"
+                        ? "border-red-300 bg-red-50 text-red-800 dark:border-red-900 dark:bg-red-950/40 dark:text-red-200"
+                        : item.action === "add"
+                          ? "border-emerald-300 bg-emerald-50 text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-200"
+                          : "border-border text-muted-foreground",
+                    ].join(" ")}
+                  >
+                    <span className="font-medium">{item.entity}</span>
+                    {" · "}
+                    <span>{item.key}</span>
+                    {" · "}
+                    <span>{item.action}</span>
+                    {item.fields.length > 0 && (
+                      <span className="ml-2">[{item.fields.join(", ")}]</span>
+                    )}
+                    {item.note && <span className="ml-2">{item.note}</span>}
+                  </div>
+                ))}
+              </div>
+              {bundleResult.items.length > 40 && (
+                <p className="text-xs text-muted-foreground">
+                  ... 还有 {bundleResult.items.length - 40} 条结果
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+      </CardContent>
+      </Card>
+    </>
   );
 }

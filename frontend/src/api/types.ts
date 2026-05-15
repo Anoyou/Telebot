@@ -187,6 +187,66 @@ export interface AccountCloneConfigRequest {
   features: string[];
 }
 
+// ===================== Config Bundle =====================
+export interface ConfigBundleSourceAccount {
+  id: number;
+  label: string;
+}
+
+export interface ConfigBundleFeatureItem {
+  feature_key: string;
+  enabled: boolean;
+  config: Record<string, unknown>;
+}
+
+export interface ConfigBundleRuleItem {
+  feature_key: string;
+  name: string;
+  enabled: boolean;
+  priority: number;
+  config: Record<string, unknown>;
+}
+
+export interface ConfigBundleCommandLinkItem {
+  template_id: number;
+  template_name: string;
+  aliases: string[];
+  type: string;
+  enabled: boolean;
+}
+
+export interface ConfigBundleExport {
+  version: "1";
+  source_account: ConfigBundleSourceAccount;
+  rules: ConfigBundleRuleItem[];
+  features: Record<string, ConfigBundleFeatureItem>;
+  command_links: ConfigBundleCommandLinkItem[];
+}
+
+export interface ConfigBundleDiffCounts {
+  add: number;
+  skip: number;
+  conflict: number;
+}
+
+export interface ConfigBundleDiffItem {
+  entity: "feature" | "rule" | "command_link";
+  key: string;
+  action: "add" | "skip" | "conflict";
+  fields: string[];
+  note?: string | null;
+}
+
+export interface ConfigBundleDryRunResponse {
+  version: "1";
+  source_account: ConfigBundleSourceAccount;
+  target_account: ConfigBundleSourceAccount;
+  size_bytes: number;
+  counts: ConfigBundleDiffCounts;
+  items: ConfigBundleDiffItem[];
+  warnings: string[];
+}
+
 // ===================== 功能 =====================
 export type FeatureState = "active" | "failed" | "disabled";
 
