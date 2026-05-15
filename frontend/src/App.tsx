@@ -27,6 +27,8 @@ const FeatureTodoPage = lazy(() => import("@/pages/Features/TodoPage").then(m =>
 const Logs = lazy(() => import("@/pages/Logs").then(m => ({ default: m.Logs })));
 const SettingsIndex = lazy(() => import("@/pages/Settings/Index").then(m => ({ default: m.SettingsIndex })));
 const CommandTemplates = lazy(() => import("@/pages/Settings/CommandTemplates").then(m => ({ default: m.CommandTemplates })));
+const AliasManagement = lazy(() => import("@/pages/Settings/AliasManagement").then(m => ({ default: m.AliasManagement })));
+const LLMProviders = lazy(() => import("@/pages/Settings/LLMProviders").then(m => ({ default: m.LLMProviders })));
 const Extensions = lazy(() => import("@/pages/Extensions").then(m => ({ default: m.Extensions })));
 const AISettings = lazy(() => import("@/pages/AISettings").then(m => ({ default: m.AISettings })));
 const Templates = lazy(() => import("@/pages/Templates").then(m => ({ default: m.Templates })));
@@ -191,12 +193,32 @@ export default function App() {
             }
           />
           <Route
-            path="scheduler"
+            path="plugins/templates"
+            element={
+              <Suspense fallback={<PageFallback />}>
+                <CommandTemplates />
+              </Suspense>
+            }
+          />
+          <Route
+            path="plugins/aliases"
+            element={
+              <Suspense fallback={<PageFallback />}>
+                <AliasManagement />
+              </Suspense>
+            }
+          />
+          <Route
+            path="plugins/scheduler"
             element={
               <Suspense fallback={<PageFallback />}>
                 <SchedulerConfig />
               </Suspense>
             }
+          />
+          <Route
+            path="scheduler"
+            element={<Navigate to="/plugins/scheduler" replace />}
           />
           <Route path="matrix" element={<Navigate to="/plugins" replace />} />
           <Route path="extensions" element={<Navigate to="/plugins" replace />} />
@@ -219,20 +241,13 @@ export default function App() {
           />
           <Route
             path="settings/commands"
-            element={
-              <Suspense fallback={<PageFallback />}>
-                <CommandTemplates />
-              </Suspense>
-            }
+            element={<Navigate to="/plugins/templates" replace />}
           />
           <Route
             path="templates"
-            element={
-              <Suspense fallback={<PageFallback />}>
-                <Templates />
-              </Suspense>
-            }
+            element={<Navigate to="/plugins/templates" replace />}
           />
+          <Route path="settings/aliases" element={<Navigate to="/plugins/aliases" replace />} />
           <Route path="settings/plugins" element={<Navigate to="/plugins" replace />} />
           <Route
             path="ai"
@@ -242,9 +257,19 @@ export default function App() {
               </Suspense>
             }
           />
+          <Route path="ai-settings" element={<Navigate to="/ai" replace />} />
+          <Route
+            path="ai/providers"
+            element={
+              <Suspense fallback={<PageFallback />}>
+                <LLMProviders />
+              </Suspense>
+            }
+          />
+          <Route path="ai/routing" element={<Navigate to="/ai" replace />} />
           <Route
             path="settings/llm-providers"
-            element={<Navigate to="/ai" replace />}
+            element={<Navigate to="/ai/providers" replace />}
           />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>

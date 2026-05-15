@@ -17,6 +17,18 @@
 
 ---
 
+## [0.14.0] — 2026-05-16 · feature · 前端 IA 导航骨架
+
+### Changed
+- 前端顶层导航从 8 个入口收敛为 6 个用户目标导向入口：概览、账号、插件、AI、日志、系统；调度与模板不再占据顶层菜单，为后续 Plugins 中心化做路由落点。
+- 新增 `/plugins/templates`、`/plugins/aliases`、`/plugins/scheduler` 与 `/ai/providers` 路由骨架，暂时复用现有页面文件，不移动页面内容。
+- 旧入口 `/scheduler`、`/templates`、`/settings/commands`、`/settings/aliases`、`/settings/llm-providers`、`/ai-settings` 保留重定向，避免旧书签失效。
+
+### Verification
+- `pnpm --dir frontend build` 通过。
+
+---
+
 ## [0.13.1] — 2026-05-16 · fix · 本地启动与 0.13 可见性修复
 
 ### Fixed
