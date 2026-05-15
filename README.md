@@ -75,12 +75,20 @@ flowchart LR
   AccountBot --> BotAPI["Telegram Bot API"]
 ```
 
+架构图详细说明见 [docs/TELEPILOT-ARCHITECTURE.md](docs/TELEPILOT-ARCHITECTURE.md)。
+
 ### 运行模型
 
 - FastAPI 主进程负责 Web API、认证、配置管理、账号 Bot polling runtime 和 worker supervisor。
 - 每个账号一个独立 worker 子进程，负责 Telethon 客户端、插件派发、定时任务和 Telegram 消息处理。
 - Redis 用于 IPC、热加载通知、限速令牌桶和部分确认 payload。
 - PostgreSQL 保存账号、规则、模板、插件、日志、审计和加密后的敏感字段。
+
+### TelePilot 文档线说明
+
+- 当前仓库名与运行时代码仍是 `TeleBot`；`TelePilot` 仅作为重构阶段文档线名称。
+- PluginContext 约束与最小示例请参考 [docs/PLUGIN-DEV-GUIDE.md](docs/PLUGIN-DEV-GUIDE.md)（PR9）。
+- 本 README 的架构部分聚焦系统组件关系，避免与 PluginContext 细节重复。
 
 ## 内置功能
 
