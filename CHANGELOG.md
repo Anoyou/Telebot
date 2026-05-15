@@ -17,6 +17,21 @@
 
 ---
 
+## [0.14.1] — 2026-05-16 · fix · 前端 IA 追补与资源展示修正
+
+### Changed
+- 调整 AI 中心首页文案：将“路由策略”卡片改为“AI 帮助”，说明聚焦“工作原理 / 术语速查 / 推荐配置”，避免与“模型提供商”入口语义重叠。
+- 调整 `/ai/help` 页面定位与标题文案为“AI 帮助”，移除重复的“模型提供商列表”Tab，仅保留“工作原理”“术语速查”“推荐配置”三个 Tab。
+- Dashboard 资源占用从“主进程 CPU / 主进程内存”改为“项目 CPU / 项目内存”，统计口径改为 FastAPI 主进程 + 全部账号 worker 子进程合计。
+- 账号详情概览将“能力与迁移入口”改为“快捷入口”，用大白话说明它用于跳转到插件、命令模板和配置复制。
+- 账号详情页移除过渡性质的“命令”Tab，命令管理统一从 `/plugins/templates?account=:aid` 进入。
+
+### Verification
+- `backend/.venv/bin/python -m pytest -q backend/app/tests/test_system_health.py` 通过：17 passed。
+- `pnpm --dir frontend build` 通过。
+
+---
+
 ## [0.14.0] — 2026-05-16 · feature · 前端 IA 中心化
 
 ### Changed

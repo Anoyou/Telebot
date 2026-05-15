@@ -50,7 +50,7 @@ export function AIUsage() {
             <CardTitle className="inline-flex items-center gap-2">
               <History className="h-4 w-4" /> 最近调用
             </CardTitle>
-            <CardDescription>暂时无法读取模型提供商列表：{getErrMsg(providersQ.error)}</CardDescription>
+            <CardDescription>暂时无法读取模型提供商：{getErrMsg(providersQ.error)}</CardDescription>
           </CardHeader>
         </Card>
       </AIUsageShell>

@@ -652,6 +652,7 @@ export interface RuntimeLogStatsStatus {
 export interface ResourceDashboard {
   host: HostResourceStatus;
   main_process: ProcessResourceStatus;
+  project_total: ProcessResourceStatus;
   workers: WorkerRuntimeResourceStatus[];
   worker_alive: number;
   worker_desired_running: number;

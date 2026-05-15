@@ -347,6 +347,38 @@ def test_read_process_stats_falls_back_to_ps(monkeypatch) -> None:
     assert out == {456: (1.25, 64.0)}
 
 
+def test_sum_project_resource_includes_main_and_workers() -> None:
+    """资源面板的项目占用应是主进程 + 全部账号 worker 的合计。"""
+
+    main = sh.ProcessResource(pid=1, cpu_percent=2.5, rss_mb=100.0)
+    workers = [
+        sh.WorkerRuntimeResource(
+            account_id=1,
+            pid=11,
+            alive=True,
+            desired="running",
+            fail_count=0,
+            cpu_percent=3.0,
+            rss_mb=64.5,
+        ),
+        sh.WorkerRuntimeResource(
+            account_id=2,
+            pid=12,
+            alive=True,
+            desired="running",
+            fail_count=0,
+            cpu_percent=None,
+            rss_mb=32.0,
+        ),
+    ]
+
+    out = sh._sum_project_resource(main, workers)
+
+    assert out.pid is None
+    assert out.cpu_percent == 5.5
+    assert out.rss_mb == 196.5
+
+
 # ════════════════════════════════════════════════════════════
 # 8) 顶层 endpoint：超时与并行
 # ════════════════════════════════════════════════════════════

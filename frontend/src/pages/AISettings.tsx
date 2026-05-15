@@ -2,9 +2,8 @@
 // 顶部展示路由原理 + 模型推荐配置；下半部是 LLMProviders 子组件做增删改查。
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { BookOpen, ListChecks, Package, Sparkles } from "lucide-react";
+import { BookOpen, ListChecks, Sparkles } from "lucide-react";
 
-import { LLMProviders } from "@/pages/Settings/LLMProviders";
 import { getSystemSettings } from "@/api/system";
 import {
   Card,
@@ -24,7 +23,7 @@ import {
 } from "@/components/ui/table";
 
 export function AISettings() {
-  const [tab, setTab] = useState<"guide" | "glossary" | "recommend" | "providers">("guide");
+  const [tab, setTab] = useState<"guide" | "glossary" | "recommend">("guide");
   // 实时拉系统命令前缀，渲染时用——避免硬编码 `,` 与系统设置里的真实前缀不同步
   const settingsQ = useQuery({
     queryKey: ["system", "settings"],
@@ -35,9 +34,9 @@ export function AISettings() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">路由策略</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">AI 帮助</h1>
         <p className="text-sm text-muted-foreground">
-          管理模型提供商凭据和路由元数据。这些配置会被「AI 类自定义命令」复用
+          了解 AI 命令工作原理、术语定义和推荐配置，帮助你更快完成设置。
         </p>
       </div>
 
@@ -52,9 +51,6 @@ export function AISettings() {
           <TabsTrigger value="recommend" className="gap-1.5">
             <Sparkles className="h-4 w-4" /> 推荐配置
           </TabsTrigger>
-          <TabsTrigger value="providers" className="gap-1.5">
-            <Package className="h-4 w-4" /> 模型提供商列表
-          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="guide">
@@ -65,9 +61,6 @@ export function AISettings() {
         </TabsContent>
         <TabsContent value="recommend">
           <Card><RecommendedSetupCard cmdPrefix={cmdPrefix} /></Card>
-        </TabsContent>
-        <TabsContent value="providers">
-          <LLMProviders />
         </TabsContent>
       </Tabs>
     </div>
@@ -105,7 +98,7 @@ function HowItWorksCard({ cmdPrefix }: { cmdPrefix: string }) {
               模型名 · in/out tokens</code>，自动路由模式还会标 <code>auto · 决策原因</code>
           </li>
           <li>
-            两步配置才能用：先在右侧 <strong>模型提供商列表</strong>  新建并配置好（填 API Key 等），
+            两步配置才能用：先到 <strong>AI 中心 → 模型提供商</strong> 新建并配置好（填 API Key 等），
             再去 <span className="font-medium">插件 → 命令模板</span> 新建 例如 type=ai
             的模板（命名为 <code>ai</code>），最后在账号详情勾选启用
           </li>
@@ -279,7 +272,7 @@ function RecommendedSetupCard({ cmdPrefix }: { cmdPrefix: string }) {
     <>
       <CardHeader>
         <CardDescription>
-          给四个模型建议的 模态 / 标签 / 推理成本档 组合；按下方填到 模型提供商列表 里即可。
+          给四个模型建议的 模态 / 标签 / 推理成本档 组合；按下方填到 AI 中心的模型提供商里即可。
           也可以全部建好后在自定义命令里把一条 <code>{cmdPrefix}ai</code> 设成 auto 模式 +
           GLM 做 classifier，自动路由到合适模型
         </CardDescription>

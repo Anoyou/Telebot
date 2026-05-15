@@ -165,6 +165,7 @@ class RuntimeLogStats(BaseModel):
 class ResourceDashboard(BaseModel):
     host: HostResource
     main_process: ProcessResource
+    project_total: ProcessResource
     workers: list[WorkerRuntimeResource] = Field(default_factory=list)
     worker_alive: int = 0
     worker_desired_running: int = 0
@@ -496,7 +497,22 @@ def _snapshot_dashboard_host() -> HostResource:
     )
 
 
-async def _snapshot_dashboard_workers() -> tuple[list[WorkerRuntimeResource], ProcessResource]:
+def _sum_resource_values(values: list[float | None]) -> float | None:
+    known = [v for v in values if v is not None]
+    if not known:
+        return None
+    return round(sum(known), 2)
+
+
+def _sum_project_resource(main: ProcessResource, workers: list[WorkerRuntimeResource]) -> ProcessResource:
+    return ProcessResource(
+        pid=None,
+        cpu_percent=_sum_resource_values([main.cpu_percent, *(w.cpu_percent for w in workers)]),
+        rss_mb=_sum_resource_values([main.rss_mb, *(w.rss_mb for w in workers)]),
+    )
+
+
+async def _snapshot_dashboard_workers() -> tuple[list[WorkerRuntimeResource], ProcessResource, ProcessResource]:
     try:
         from ..worker.supervisor import get_worker_runtime_snapshot
 
@@ -532,7 +548,7 @@ async def _snapshot_dashboard_workers() -> tuple[list[WorkerRuntimeResource], Pr
         key=lambda w: (0.0 if w.rss_mb is None else w.rss_mb),
         reverse=True,
     )
-    return workers, main
+    return workers, main, _sum_project_resource(main, workers)
 
 
 _RUNTIME_LOG_STATS_CACHE: tuple[float, RuntimeLogStats] = (0.0, RuntimeLogStats())
@@ -614,11 +630,12 @@ async def get_resource_dashboard(_user: CurrentUser) -> ResourceDashboard:
     """V1 资源占用概览：主机 + 进程 + worker + 5 分钟日志量。"""
 
     host = _snapshot_dashboard_host()
-    workers, main = await _snapshot_dashboard_workers()
+    workers, main, project_total = await _snapshot_dashboard_workers()
     logs = await _snapshot_runtime_log_stats()
     return ResourceDashboard(
         host=host,
         main_process=main,
+        project_total=project_total,
         workers=workers[:8],
         worker_alive=sum(1 for w in workers if w.alive),
         worker_desired_running=sum(1 for w in workers if w.desired == "running"),

@@ -44,7 +44,7 @@ export function Dashboard() {
         <CardHeader className="pb-2">
           <CardTitle className="text-base">资源占用</CardTitle>
           <p className="text-sm text-muted-foreground">
-            主机、主进程与 worker 资源快照（15 秒刷新）
+            主机与本项目整体资源快照（15 秒刷新）
           </p>
         </CardHeader>
         <CardContent className="space-y-4 pt-0">
@@ -72,8 +72,8 @@ export function Dashboard() {
                 <Metric label="磁盘剩余" value={gb(resourceQ.data.host.disk_free_gb)} />
               </div>
               <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-                <Metric label="主进程 CPU" value={percent(resourceQ.data.main_process.cpu_percent)} />
-                <Metric label="主进程内存" value={mb(resourceQ.data.main_process.rss_mb)} />
+                <Metric label="项目 CPU" value={percent(resourceQ.data.project_total.cpu_percent)} />
+                <Metric label="项目内存" value={mb(resourceQ.data.project_total.rss_mb)} />
                 <Metric
                   label="Worker 存活/应运行"
                   value={`${resourceQ.data.worker_alive}/${resourceQ.data.worker_desired_running}`}

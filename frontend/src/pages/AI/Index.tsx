@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
-import { ArrowRight, Bot, GitBranch, History, Package } from "lucide-react";
+import { ArrowRight, Bot, CircleHelp, History, Package } from "lucide-react";
 
 import { listLLMProviders } from "@/api/commands";
 import { Button } from "@/components/ui/button";
@@ -30,7 +30,7 @@ export function AIIndex() {
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">AI 中心</h1>
-        <p className="text-sm text-muted-foreground">统一管理模型提供商、路由策略和最近调用记录。</p>
+        <p className="text-sm text-muted-foreground">统一管理模型提供商、使用帮助和最近调用记录。</p>
       </div>
 
       <div className="grid gap-4 md:grid-cols-3">
@@ -55,15 +55,15 @@ export function AIIndex() {
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="inline-flex items-center gap-2 text-base">
-              <GitBranch className="h-4 w-4" /> 路由策略
+              <CircleHelp className="h-4 w-4" /> AI 帮助
             </CardTitle>
-            <CardDescription>查看规则命中与推荐配置</CardDescription>
+            <CardDescription>查看工作原理、术语速查与推荐配置</CardDescription>
           </CardHeader>
           <CardContent className="space-y-2">
             <Badge variant="secondary">已迁移到 AI 中心</Badge>
             <Button size="sm" variant="outline" asChild>
-              <Link to="/ai/routing">
-                打开路由策略 <ArrowRight className="ml-1 h-4 w-4" />
+              <Link to="/ai/help">
+                打开 AI 帮助 <ArrowRight className="ml-1 h-4 w-4" />
               </Link>
             </Button>
           </CardContent>

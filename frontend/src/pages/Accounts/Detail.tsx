@@ -14,7 +14,6 @@ import {
   MessageCircle,
   Network,
   Power,
-  Shield,
   Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -46,7 +45,6 @@ import { AccountAvatar } from "@/components/AccountAvatar";
 import { AccountStatusBadge } from "@/components/AccountStatusBadge";
 import { MaskedPhone } from "@/components/MaskedPhone";
 import { IgnoredTab } from "@/pages/Accounts/IgnoredTab";
-import { CommandsTab } from "@/pages/Accounts/CommandsTab";
 import { BotTab } from "@/pages/Accounts/BotTab";
 import {
   deleteAccount,
@@ -58,7 +56,6 @@ import {
   toggleAccountFeature,
   updateAccountFeatureConfig,
 } from "@/api/accounts";
-import { listAccountCommands } from "@/api/commands";
 import {
   getPluginGlobalConfig,
   setPluginGlobalConfig,
@@ -86,6 +83,10 @@ import { featureConfigPath } from "@/pages/Plugins/_shared/featureConfig";
 export function AccountDetail() {
   const params = useParams();
   const [searchParams] = useSearchParams();
+  const tabParam = searchParams.get("tab") || "overview";
+  const defaultTab = ["overview", "features", "bot", "rate", "proxy", "ignored"].includes(tabParam)
+    ? tabParam
+    : "overview";
   const aid = Number(params.aid);
   const nav = useNavigate();
   const qc = useQueryClient();
@@ -107,11 +108,6 @@ export function AccountDetail() {
   const featuresQ = useQuery({
     queryKey: ["account", aid, "features"],
     queryFn: () => listAccountFeatures(aid),
-    enabled: !!aid,
-  });
-  const commandsQ = useQuery({
-    queryKey: ["account", aid, "commands"],
-    queryFn: () => listAccountCommands(aid),
     enabled: !!aid,
   });
 
@@ -237,7 +233,6 @@ export function AccountDetail() {
   const enabledPluginCount = (featuresQ.data ?? []).filter(
     (item) => item.enabled && !isPlatformFeature(featureMetaMap.get(item.feature_key) ?? item.feature_key),
   ).length;
-  const enabledCommandCount = (commandsQ.data ?? []).filter((item) => item.enabled).length;
   // 老账号 / 异常账号可能 tg_user_id / tg_username 都是 null：worker 启动时
   // 会调 client.get_me() 自动回填（runtime.py:107）。这里给个友好提示，让用户
   // 明白"为什么这两栏是空的"以及怎么解。
@@ -262,16 +257,13 @@ export function AccountDetail() {
         <AccountStatusBadge status={acc.status} />
       </div>
 
-      <Tabs defaultValue={searchParams.get("tab") || "overview"}>
+      <Tabs defaultValue={defaultTab}>
         <TabsList className="flex w-full justify-start gap-1 overflow-x-auto whitespace-nowrap sm:w-auto">
           <TabsTrigger value="overview" className="shrink-0 gap-1.5">
             <LayoutDashboard className="h-4 w-4" /> 概览
           </TabsTrigger>
           <TabsTrigger value="features" className="shrink-0 gap-1.5">
             <Bot className="h-4 w-4" /> 插件启停
-          </TabsTrigger>
-          <TabsTrigger value="commands" className="shrink-0 gap-1.5">
-            <Shield className="h-4 w-4" /> 命令
           </TabsTrigger>
           <TabsTrigger value="bot" className="shrink-0 gap-1.5">
             <MessageCircle className="h-4 w-4" /> Bot 联动
@@ -391,8 +383,8 @@ export function AccountDetail() {
 
           <Card>
             <CardHeader>
-              <CardTitle className="text-base">能力与迁移入口</CardTitle>
-              <CardDescription>插件、命令模板与配置复制已统一到新入口。</CardDescription>
+              <CardTitle className="text-base">快捷入口</CardTitle>
+              <CardDescription>从这里直接跳到插件、命令模板和配置复制。</CardDescription>
             </CardHeader>
             <CardContent className="grid gap-3 md:grid-cols-3">
               <div className="rounded-lg border p-4">
@@ -406,8 +398,10 @@ export function AccountDetail() {
                 </Button>
               </div>
               <div className="rounded-lg border p-4">
-                <div className="text-xs text-muted-foreground">启用命令数</div>
-                <div className="mt-1 text-2xl font-semibold">{enabledCommandCount}</div>
+                <div className="text-xs text-muted-foreground">命令模板入口</div>
+                <div className="mt-1 text-sm text-muted-foreground">
+                  去模板中心按账号筛选、启停和维护命令。
+                </div>
                 <Button asChild size="sm" variant="outline" className="mt-3 w-full justify-between">
                   <Link to={`/plugins/templates?account=${aid}`}>
                     管理命令模板
@@ -662,11 +656,6 @@ export function AccountDetail() {
               qc.invalidateQueries({ queryKey: ["matrix"] });
             }}
           />
-        </TabsContent>
-
-        {/* 自定义命令（账号 × 模板 启用关系） */}
-        <TabsContent value="commands">
-          <CommandsTab aid={aid} />
         </TabsContent>
 
         {/* 账号绑定普通 Bot 联动 */}

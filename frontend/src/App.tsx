@@ -31,7 +31,7 @@ const PluginsAliasesPage = lazy(() => import("@/pages/Plugins").then(m => ({ def
 const PluginsSchedulerPage = lazy(() => import("@/pages/Plugins").then(m => ({ default: m.PluginsSchedulerPage })));
 const AIIndex = lazy(() => import("@/pages/AI/Index").then(m => ({ default: m.AIIndex })));
 const AIProviders = lazy(() => import("@/pages/AI/Providers").then(m => ({ default: m.AIProviders })));
-const AIRouting = lazy(() => import("@/pages/AI/Routing").then(m => ({ default: m.AIRouting })));
+const AIHelp = lazy(() => import("@/pages/AI/Help").then(m => ({ default: m.AIHelp })));
 const AIUsage = lazy(() => import("@/pages/AI/Usage").then(m => ({ default: m.AIUsage })));
 
 type AppErrorBoundaryState = { hasError: boolean };
@@ -221,10 +221,10 @@ export default function App() {
             }
           />
           <Route
-            path="ai/routing"
+            path="ai/help"
             element={
               <Suspense fallback={<PageFallback />}>
-                <AIRouting />
+                <AIHelp />
               </Suspense>
             }
           />
