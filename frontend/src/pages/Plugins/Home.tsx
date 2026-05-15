@@ -145,7 +145,9 @@ export function PluginsHome() {
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
             <Button
               variant="outline"
-              className="h-full min-h-[96px] justify-start whitespace-normal px-4 py-3 text-left"
+              className={`h-full min-h-[96px] justify-start whitespace-normal px-4 py-3 text-left ${
+                guideExpanded ? "animate-pulse shadow-lg shadow-primary/20 ring-2 ring-primary/30" : ""
+              }`}
               onClick={() => nav("/plugins/templates")}
             >
               <span>
@@ -237,7 +239,11 @@ export function PluginsHome() {
         </Card>
       ) : null}
 
-      <div className="grid gap-4 lg:grid-cols-2">
+      <div
+        className={`grid gap-4 rounded-2xl transition lg:grid-cols-2 ${
+          guideExpanded ? "ring-2 ring-primary/30 ring-offset-4 ring-offset-background" : ""
+        }`}
+      >
         <FeatureZone
           title="平台能力"
           hint="系统底层能力，通常不用手动配置。"
@@ -312,8 +318,13 @@ function GuideContextCard({
       </div>
       <div className="mb-2 text-sm font-semibold">3. 启用命令模板或调用插件</div>
       <p className="text-xs leading-relaxed text-muted-foreground">
-        在本页选账号，启用需要的模板或插件；远程插件先点“安装插件”添加。
+        这一页主要看三处：先用“命令模板”复用命令；再看下方插件卡片，按账号启用和配置；需要外部能力时点“安装插件”添加远程插件。
       </p>
+      <div className="mt-3 grid gap-2 text-xs text-muted-foreground sm:grid-cols-3">
+        <div className="rounded-lg border bg-muted/30 p-2">A. 命令模板</div>
+        <div className="rounded-lg border bg-muted/30 p-2">B. 插件启用状态</div>
+        <div className="rounded-lg border bg-muted/30 p-2">C. 安装插件</div>
+      </div>
       <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-muted">
         <div
           className="h-full rounded-full bg-primary transition-all"
@@ -325,7 +336,7 @@ function GuideContextCard({
           安装远程插件 <ArrowRight className="ml-1 h-4 w-4" />
         </Button>
         <Button size="sm" variant="outline" onClick={onDone}>
-          跳过这步
+          我学会了！
         </Button>
       </div>
     </div>

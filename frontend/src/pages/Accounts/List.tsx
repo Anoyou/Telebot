@@ -1,10 +1,9 @@
 // 账号列表：卡片网格形式（移动端单列），含启停 / 详情 / 删除（二次确认）操作
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowRight,
-  HelpCircle,
   Package,
   Plus,
   Power,
@@ -16,14 +15,6 @@ import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/misc";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { AccountSummaryCard } from "@/components/AccountSummaryCard";
 import {
   deleteAccount,
@@ -33,8 +24,6 @@ import {
 } from "@/api/accounts";
 import { getErrMsg } from "@/lib/api";
 import { formatDateTime } from "@/lib/utils";
-
-const NEW_ACCOUNT_GUIDE_SEEN_KEY = "telebot.accounts.new_account_guide_seen.v4";
 
 type GuideStep = {
   icon: typeof Plus;
@@ -79,7 +68,6 @@ export function AccountList() {
   const nav = useNavigate();
   const location = useLocation();
   const qc = useQueryClient();
-  const [guideOpen, setGuideOpen] = useState(false);
   const [guideExpanded, setGuideExpanded] = useState(false);
   const currentStep = useMemo(
     () => getGuideStepByPath(location.pathname, location.search),
@@ -90,16 +78,6 @@ export function AccountList() {
     queryKey: ["accounts"],
     queryFn: listAccounts,
   });
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    if (localStorage.getItem(NEW_ACCOUNT_GUIDE_SEEN_KEY) === "1") {
-      setGuideExpanded(false);
-      return;
-    }
-    setGuideOpen(true);
-    localStorage.setItem(NEW_ACCOUNT_GUIDE_SEEN_KEY, "1");
-  }, []);
 
   const toggleMut = useMutation({
     mutationFn: async (vars: { aid: number; pause: boolean }) =>
@@ -131,8 +109,15 @@ export function AccountList() {
         </div>
         <div className="flex flex-col items-stretch gap-2 sm:items-end">
           <div className="flex flex-wrap gap-2">
-            <Button variant="outline" size="sm" onClick={() => setGuideOpen(true)}>
-              <HelpCircle className="mr-1 h-4 w-4" /> 新手指引
+            <Button
+              variant="outline"
+              size="icon"
+              className={guideExpanded ? "ring-2 ring-primary/30" : undefined}
+              onClick={() => setGuideExpanded((v) => !v)}
+              aria-label="打开新手指引"
+              title="新手指引"
+            >
+              <Sparkles className="h-4 w-4 animate-pulse text-primary" />
             </Button>
             <Button
               className={currentStep === 0 ? "animate-pulse shadow-lg shadow-primary/20 ring-2 ring-primary/30" : undefined}
@@ -141,27 +126,15 @@ export function AccountList() {
               <Plus className="mr-1 h-4 w-4" /> 新增账号
             </Button>
           </div>
-          {!guideOpen ? (
-            <GuideContextCard
-              expanded={guideExpanded}
-              currentStep={currentStep}
-              onToggle={() => setGuideExpanded((v) => !v)}
-              onGo={() => nav(GUIDE_STEPS[currentStep].actionTo)}
-              onSkip={() => nav(GUIDE_STEPS[Math.min(currentStep + 1, GUIDE_STEPS.length - 1)].actionTo)}
-            />
-          ) : null}
+          <GuideContextCard
+            expanded={guideExpanded}
+            currentStep={currentStep}
+            onToggle={() => setGuideExpanded((v) => !v)}
+            onGo={() => nav(GUIDE_STEPS[currentStep].actionTo)}
+            onSkip={() => nav(GUIDE_STEPS[Math.min(currentStep + 1, GUIDE_STEPS.length - 1)].actionTo)}
+          />
         </div>
       </div>
-
-      <NewAccountGuideDialog
-        open={guideOpen}
-        onOpenChange={setGuideOpen}
-        currentStep={currentStep}
-        onRunStep={(step) => {
-          setGuideOpen(false);
-          nav(GUIDE_STEPS[step].actionTo);
-        }}
-      />
 
       {isLoading ? (
         <div className="flex h-32 items-center justify-center">
@@ -240,71 +213,6 @@ export function AccountList() {
   );
 }
 
-function NewAccountGuideDialog({
-  open,
-  onOpenChange,
-  currentStep,
-  onRunStep,
-}: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  currentStep: number;
-  onRunStep: (step: number) => void;
-}) {
-  const step = GUIDE_STEPS[currentStep];
-  const percent = ((currentStep + 1) / GUIDE_STEPS.length) * 100;
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-xl overflow-hidden">
-        <DialogHeader>
-          <DialogTitle>新账号怎么开始？</DialogTitle>
-          <DialogDescription>
-            现在是三步流程，先做当前这一步，完成后继续下一步。
-          </DialogDescription>
-        </DialogHeader>
-
-        <div className="space-y-3 rounded-2xl border bg-gradient-to-br from-sky-50 via-background to-emerald-50 p-4 dark:from-sky-950/30 dark:via-background dark:to-emerald-950/20">
-          <div className="flex items-center justify-between text-xs text-muted-foreground">
-            <span>
-              第 {currentStep + 1} 步 / 共 {GUIDE_STEPS.length} 步
-            </span>
-            <span>{Math.round(percent)}%</span>
-          </div>
-          <div className="h-2 overflow-hidden rounded-full bg-muted">
-            <div
-              className="h-full rounded-full bg-primary transition-all duration-300"
-              style={{ width: `${percent}%` }}
-            />
-          </div>
-          <div className="rounded-xl border bg-card/90 p-4 shadow-sm animate-page-enter">
-            <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-sm">
-              <step.icon className="h-5 w-5" />
-            </div>
-            <div className="text-sm font-semibold">{step.title}</div>
-            <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{step.desc}</p>
-          </div>
-        </div>
-
-        <DialogFooter className="gap-2 sm:justify-between">
-          <Button variant="ghost" onClick={() => onOpenChange(false)}>
-            先看看
-          </Button>
-          <Button
-            variant="outline"
-            onClick={() => onRunStep(Math.min(currentStep + 1, GUIDE_STEPS.length - 1))}
-          >
-            跳过这步
-          </Button>
-          <Button onClick={() => onRunStep(currentStep)}>
-            {step.actionLabel} <ArrowRight className="ml-1 h-4 w-4" />
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
 function GuideContextCard({
   expanded,
   currentStep,
@@ -321,19 +229,7 @@ function GuideContextCard({
   const step = GUIDE_STEPS[currentStep];
   const percent = ((currentStep + 1) / GUIDE_STEPS.length) * 100;
 
-  if (!expanded) {
-    return (
-      <button
-        type="button"
-        onClick={onToggle}
-        className="inline-flex items-center gap-2 self-end rounded-full border border-primary/30 bg-primary/10 px-3 py-1.5 text-xs font-medium text-primary shadow-sm shadow-primary/20 transition hover:bg-primary/15"
-        aria-label="打开新手指引"
-      >
-        <Sparkles className="h-4 w-4 animate-pulse" />
-        新手指引：从这里开始
-      </button>
-    );
-  }
+  if (!expanded) return null;
 
   return (
     <div className="w-full max-w-xs rounded-2xl border bg-card/95 p-4 text-left shadow-lg shadow-primary/10 backdrop-blur">

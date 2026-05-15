@@ -188,7 +188,7 @@ function PluginInstallGuide({
           返回插件中心 <ChevronRight className="ml-1 h-4 w-4" />
         </Button>
         <Button size="sm" variant="outline" onClick={onDone}>
-          跳过这步
+          我学会了！
         </Button>
         <Button size="sm" variant="ghost" onClick={onToggle}>
           收起

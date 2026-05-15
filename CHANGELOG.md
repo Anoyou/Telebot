@@ -17,6 +17,21 @@
 
 ---
 
+## [0.14.8] — 2026-05-16 · polish · 插件中心第三步指引
+
+### Changed
+- 新手指引不再首次进入账号页时强制弹窗，改为原“新手指引”按钮位置的小星星开关，需要时再展开。
+- 插件中心第三步同时高亮“命令模板”“插件启用状态网格”“安装插件”三处，并补充 A/B/C 三点说明。
+- 新手指引最后一步按钮从“跳过这步”改为“我学会了！”，更符合已到最后一步的语义。
+- 插件安装页的新手指引完成按钮同样改为“我学会了！”。
+
+### Verification
+- `git diff --check` 通过。
+- `pnpm --dir frontend build` 通过。
+- `PYTHONPYCACHEPREFIX=/private/tmp/telebot_pycache backend/.venv/bin/python -m py_compile backend/app/__init__.py` 通过。
+
+---
+
 ## [0.14.7] — 2026-05-16 · polish · 设置快捷入口与新手指引贴边
 
 ### Changed
