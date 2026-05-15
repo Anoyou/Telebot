@@ -221,7 +221,7 @@ class PluginContext:
 | `ctx.engine` | `await ctx.engine.acquire(...)` | 仅内置插件可用；第三方插件通常为 `None` |
 | `ctx.redis` | `await ctx.redis.get(...)` | 仅内置插件可用；第三方插件通常为 `None` |
 | `ctx.log` | `await ctx.log("info", "...", **detail)` | 运行日志写入器 |
-| `ctx.scheduler` | `ctx.scheduler.register_*` | 调度 facade（按权限/能力边界开放） |
+| `ctx.scheduler` | `ctx.scheduler.register(job_id, schedule, callback, *, replace=True)` / `ctx.scheduler.unregister(job_id)` | 调度 facade（按权限/能力边界开放） |
 | `ctx.conversation(...)` | `async with ctx.conversation(peer)` | 与目标 peer 建立会话 |
 
 ### 4.2 权限边界与禁止事项
