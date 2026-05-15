@@ -6,7 +6,6 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from app.crypto import encrypt_str
 from app.db.models.account_bot import AccountBot
 from app.schemas.account_bot import AccountBotConfigUpdate
 from app.services import account_bot_runtime, account_bot_service
@@ -15,7 +14,7 @@ from app.services import account_bot_runtime, account_bot_service
 def test_account_bot_config_response_hides_plain_token() -> None:
     """配置出参只暴露 has_token，不返回明文 token 或加密串。"""
 
-    row = AccountBot(account_id=1, bot_token_enc=encrypt_str("123456:secret-token"))
+    row = AccountBot(account_id=1, bot_token_enc="encrypted-placeholder")
     out = account_bot_service.config_to_response(row)
 
     assert out.has_token is True
@@ -116,6 +115,9 @@ async def test_confirm_action_token_can_only_be_consumed_once(monkeypatch) -> No
         def __init__(self) -> None:
             self.value = '{"account_id":1,"tg_user_id":42,"action":"restart","payload":{}}'
 
+        async def get(self, _key: str) -> str | None:
+            return self.value
+
         async def getdel(self, _key: str) -> str | None:
             v = self.value
             self.value = None
@@ -135,7 +137,8 @@ async def test_confirm_action_token_can_only_be_consumed_once(monkeypatch) -> No
     )
     answer = AsyncMock()
     execute = AsyncMock()
-    monkeypatch.setattr(account_bot_runtime, "get_redis", lambda: _Redis())
+    redis = _Redis()
+    monkeypatch.setattr(account_bot_runtime, "get_redis", lambda: redis)
     monkeypatch.setattr(account_bot_service, "answer_callback", answer)
     monkeypatch.setattr(account_bot_runtime, "_execute_confirmed_action", execute)
     monkeypatch.setattr(account_bot_runtime, "_audit_confirm_event", AsyncMock())
@@ -151,6 +154,9 @@ async def test_confirm_action_token_can_only_be_consumed_once(monkeypatch) -> No
 @pytest.mark.asyncio
 async def test_confirm_action_expired_token_is_rejected(monkeypatch) -> None:
     class _Redis:
+        async def get(self, _key: str) -> str | None:
+            return None
+
         async def getdel(self, _key: str) -> str | None:
             return None
 
@@ -176,3 +182,111 @@ async def test_confirm_action_expired_token_is_rejected(monkeypatch) -> None:
 
     assert answer.await_count == 1
     assert answer.await_args.kwargs.get("text") == "确认已过期"
+
+
+@pytest.mark.asyncio
+async def test_confirm_action_owner_mismatch_does_not_consume_token(monkeypatch) -> None:
+    class _Redis:
+        def __init__(self) -> None:
+            self.value = '{"account_id":1,"tg_user_id":99,"action":"restart","payload":{}}'
+            self.getdel_called = 0
+
+        async def get(self, _key: str) -> str | None:
+            return self.value
+
+        async def getdel(self, _key: str) -> str | None:
+            self.getdel_called += 1
+            v = self.value
+            self.value = None
+            return v
+
+    redis = _Redis()
+    incoming = account_bot_runtime.Incoming(
+        account_id=1,
+        token="bot-token",
+        update_id=1,
+        user_id=42,
+        chat_id=1,
+        message_id=2,
+        text="",
+        callback_id="cb-1",
+        callback_data="ab:1:confirm:restart:nonce",
+        display_name=None,
+    )
+    answer = AsyncMock()
+    execute = AsyncMock()
+    monkeypatch.setattr(account_bot_runtime, "get_redis", lambda: redis)
+    monkeypatch.setattr(account_bot_service, "answer_callback", answer)
+    monkeypatch.setattr(account_bot_runtime, "_execute_confirmed_action", execute)
+    monkeypatch.setattr(account_bot_runtime, "_audit_confirm_event", AsyncMock())
+
+    await account_bot_runtime._confirm_action(incoming, "admin", "restart", "nonce")
+
+    assert redis.getdel_called == 0
+    assert redis.value is not None
+    assert execute.await_count == 0
+    assert answer.await_count == 1
+    assert answer.await_args.kwargs.get("text") == "只能由原用户确认"
+
+
+@pytest.mark.asyncio
+async def test_toggle_feature_operator_can_toggle_non_builtin_without_confirm(monkeypatch) -> None:
+    class _RemotePlugin:
+        enabled = False
+
+    class _DBResult:
+        def scalar_one_or_none(self):
+            return None
+
+    class _DB:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+        async def get(self, model, key):  # noqa: ANN001
+            return type("FeatureRow", (), {"is_builtin": False, "display_name": "DemoPlugin"})()
+
+        async def execute(self, _stmt):  # noqa: ANN001
+            return _DBResult()
+
+        async def commit(self):
+            return None
+
+    incoming = account_bot_runtime.Incoming(
+        account_id=1,
+        token="bot-token",
+        update_id=1,
+        user_id=42,
+        chat_id=1,
+        message_id=2,
+        text="",
+        callback_id="cb-1",
+        callback_data="ab:1:feature_toggle:demo",
+        display_name=None,
+    )
+
+    answer = AsyncMock()
+    show_features = AsyncMock()
+    req_confirm = AsyncMock()
+    set_feature = AsyncMock()
+    enable_remote = AsyncMock()
+    write_audit = AsyncMock()
+    monkeypatch.setattr(account_bot_runtime, "AsyncSessionLocal", lambda: _DB())
+    monkeypatch.setattr(account_bot_service, "answer_callback", answer)
+    monkeypatch.setattr(account_bot_runtime, "_show_features", show_features)
+    monkeypatch.setattr(account_bot_runtime, "_request_confirm", req_confirm)
+    monkeypatch.setattr(account_bot_runtime.feature_service, "set_account_feature", set_feature)
+    monkeypatch.setattr(account_bot_runtime.remote_plugin_service, "get_by_name", AsyncMock(return_value=_RemotePlugin()))
+    monkeypatch.setattr(account_bot_runtime.remote_plugin_service, "enable", enable_remote)
+    monkeypatch.setattr(account_bot_runtime.audit, "write", write_audit)
+
+    await account_bot_runtime._toggle_feature(incoming, "operator", "demo")
+
+    assert req_confirm.await_count == 0
+    assert set_feature.await_count == 1
+    assert enable_remote.await_count == 1
+    assert write_audit.await_count == 1
+    assert answer.await_count == 1
+    assert answer.await_args.kwargs.get("text") == "已更新"

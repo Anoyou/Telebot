@@ -133,6 +133,10 @@ async def _consume_confirm_payload(redis: Any, token: str) -> str | None:
     )
 
 
+async def _read_confirm_payload(redis: Any, token: str) -> str | None:
+    return await redis.get(_confirm_redis_key(token))
+
+
 async def start_account_bot_manager() -> None:
     """启动所有 enabled 的账号 Bot polling task。"""
 
@@ -805,6 +809,23 @@ async def _toggle_feature(incoming: Incoming, role: str, key: str) -> None:
         ).scalar_one_or_none()
         enabled = not bool(current and current.enabled)
         if not feature.is_builtin:
+            if not account_bot_service.role_allows(role, ACCOUNT_BOT_ROLE_ADMIN):
+                if enabled:
+                    remote = await remote_plugin_service.get_by_name(db, key)
+                    if remote is not None and not remote.enabled:
+                        await remote_plugin_service.enable(db, key)
+                await feature_service.set_account_feature(db, incoming.account_id, key, enabled)
+                await audit.write(
+                    db,
+                    None,
+                    "account_bot.feature_toggle",
+                    target=f"account:{incoming.account_id}/feature:{key}",
+                    detail=_audit_detail(incoming, role, {"enabled": enabled}),
+                )
+                await db.commit()
+                await account_bot_service.answer_callback(incoming.token, incoming.callback_id or "", text="已更新")
+                await _show_features(incoming, role, edit=True)
+                return
             if incoming.callback_id:
                 await account_bot_service.answer_callback(incoming.token, incoming.callback_id, text="请确认")
             await _request_confirm(
@@ -1000,14 +1021,14 @@ async def _request_confirm(
     _require(role, ACCOUNT_BOT_ROLE_ADMIN)
     nonce = secrets.token_urlsafe(8)
     redis = get_redis()
-    payload = {
+    confirm_payload = {
         "account_id": incoming.account_id,
         "tg_user_id": incoming.user_id,
         "action": action,
         "label": label,
         "payload": payload or {},
     }
-    await redis.setex(_confirm_redis_key(nonce), _CONFIRM_TTL_SECONDS, json.dumps(payload, ensure_ascii=False))
+    await redis.setex(_confirm_redis_key(nonce), _CONFIRM_TTL_SECONDS, json.dumps(confirm_payload, ensure_ascii=False))
     await _audit_confirm_event(
         incoming,
         role,
@@ -1040,7 +1061,7 @@ async def _confirm_action(
         await account_bot_service.answer_callback(incoming.token, incoming.callback_id or "", text="确认已过期", show_alert=True)
         return
     redis = get_redis()
-    raw = await _consume_confirm_payload(redis, nonce)
+    raw = await _read_confirm_payload(redis, nonce)
     if not raw:
         await _audit_confirm_event(
             incoming,
@@ -1072,13 +1093,24 @@ async def _confirm_action(
         )
         await account_bot_service.answer_callback(incoming.token, incoming.callback_id or "", text="确认资源不匹配", show_alert=True)
         return
+    consumed = await _consume_confirm_payload(redis, nonce)
+    if not consumed:
+        await _audit_confirm_event(
+            incoming,
+            role,
+            "account_bot.confirm_expired",
+            action=resource,
+            extra={"reason": "already_consumed"},
+        )
+        await account_bot_service.answer_callback(incoming.token, incoming.callback_id or "", text="确认已过期", show_alert=True)
+        return
     await _audit_confirm_event(
         incoming,
         role,
         "account_bot.confirm_consumed",
         action=resource,
     )
-    await _execute_confirmed_action(incoming, role, data)
+    await _execute_confirmed_action(incoming, role, json.loads(consumed))
 
 
 async def _restart_account_worker(incoming: Incoming, role: str) -> None:
@@ -1262,4 +1294,4 @@ async def _audit_confirm_event(
             )
             await db.commit()
     except Exception:
-        log.debug("account bot confirm audit failed aid=%s event=%s", incoming.account_id, event, exc_info=True)
+        log.warning("account bot confirm audit failed aid=%s event=%s", incoming.account_id, event, exc_info=True)
