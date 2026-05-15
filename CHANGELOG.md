@@ -13,10 +13,23 @@
 ## [Unreleased]
 
 ### Changed
-- PR1 安全收敛：删除高危 Telegram 命令入口，不再支持通过普通 Telegram 命令触发项目级 `,reboot/,rb`、远程插件运维 `,plugin install/remove/enable/disable/update`、以及 `,sudo add/,sudo del`。
-- 保留 `,sudo ls` 作为只读查询入口。
+- （空）
+
+---
+
+## [0.13.0] — 2026-05-15 · refactor · TelePilot 安全 / 架构 / Config Bundle 主线收口
+
+### Changed
+- PR1 安全收敛：删除高危 Telegram 命令入口，不再支持通过普通 Telegram 命令触发项目级 `,reboot/,rb`、远程插件运维 `,plugin install/remove/enable/disable/update`、以及 `,sudo add/,sudo del`；`sudo ls` 保留为只读查询。
+- PR2 命令层拆分目标落地：将 `worker/command.py` 相关逻辑按 dispatcher / builtin / template / sudo_gate / long_message 分层拆分，降低耦合并保持对外行为一致。
+- PR3 引入 `ai_runtime.invoke()` 统一标准 AI 调用入口，减少多路径调用漂移。
+- PR4 补齐 sudo 关键路径 audit 记录，保证拒绝与关键操作可审计。
 - PR5 收敛内置 feature 注册表：将动态扫描与惰性缓存逻辑抽离到 `backend/app/feature_registry.py`，`BUILTIN_FEATURES` 既有访问方式保持不变。
 - PR6 将内置 `codex_image` 标记为 experimental（`x-experimental: true`），前端扩展列表与配置页增加实验性提示，不改变运行逻辑。
+- PR7/PR8 Config Bundle 收口：支持 export/import 1MB 限制、dry-run 与 confirm 显式确认流程，并记录确认审计。
+- PR9 补充 PluginContext 契约文档，明确字段能力边界与推荐访问模式。
+- PR10 收口 account_bot confirm：token 改为 hashed + single-use，并修正 owner/action mismatch 时序。
+- PR11 文档线收口：README 与 TelePilot 架构文档明确当前仓库与运行形态仍为 TeleBot，未承诺 rename/workflow/artifact/template renderer/marketplace。
 
 ---
 
