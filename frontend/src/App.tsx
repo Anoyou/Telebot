@@ -29,6 +29,7 @@ const PluginsHome = lazy(() => import("@/pages/Plugins").then(m => ({ default: m
 const PluginsTemplatesPage = lazy(() => import("@/pages/Plugins").then(m => ({ default: m.PluginsTemplatesPage })));
 const PluginsAliasesPage = lazy(() => import("@/pages/Plugins").then(m => ({ default: m.PluginsAliasesPage })));
 const PluginsSchedulerPage = lazy(() => import("@/pages/Plugins").then(m => ({ default: m.PluginsSchedulerPage })));
+const PluginsManagePage = lazy(() => import("@/pages/Extensions").then(m => ({ default: m.Extensions })));
 const AIIndex = lazy(() => import("@/pages/AI/Index").then(m => ({ default: m.AIIndex })));
 const AIProviders = lazy(() => import("@/pages/AI/Providers").then(m => ({ default: m.AIProviders })));
 const AIHelp = lazy(() => import("@/pages/AI/Help").then(m => ({ default: m.AIHelp })));
@@ -185,6 +186,14 @@ export default function App() {
             element={
               <Suspense fallback={<PageFallback />}>
                 <PluginsSchedulerPage />
+              </Suspense>
+            }
+          />
+          <Route
+            path="plugins/manage"
+            element={
+              <Suspense fallback={<PageFallback />}>
+                <PluginsManagePage />
               </Suspense>
             }
           />

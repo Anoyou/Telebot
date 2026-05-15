@@ -111,8 +111,8 @@ export function PluginsHome() {
             >
               前往账号 Bot
             </Button>
-            <Button size="sm" variant="outline" onClick={() => nav("/plugins/templates")}>
-              前往命令模板
+            <Button size="sm" variant="outline" onClick={() => nav("/plugins/manage?tab=plugins")}>
+              前往插件安装
             </Button>
             <Button
               size="sm"
@@ -134,7 +134,7 @@ export function PluginsHome() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
             <Button
               variant="outline"
               className="h-full min-h-[96px] justify-start whitespace-normal px-4 py-3 text-left"
@@ -168,6 +168,18 @@ export function PluginsHome() {
                 <span className="block font-medium">定时任务</span>
                 <span className="mt-1 block text-xs leading-5 text-muted-foreground">
                   按账号定时发消息、跑命令或调用 AI，适合固定周期的自动动作。
+                </span>
+              </span>
+            </Button>
+            <Button
+              variant="outline"
+              className="h-full min-h-[96px] justify-start whitespace-normal px-4 py-3 text-left"
+              onClick={() => nav("/plugins/manage?tab=plugins")}
+            >
+              <span>
+                <span className="block font-medium">安装插件</span>
+                <span className="mt-1 block text-xs leading-5 text-muted-foreground">
+                  添加 Git 仓库，安装、更新或卸载远程插件；装好后再按账号启用。
                 </span>
               </span>
             </Button>

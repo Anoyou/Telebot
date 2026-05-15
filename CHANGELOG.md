@@ -17,6 +17,24 @@
 
 ---
 
+## [0.14.5] — 2026-05-16 · fix · 恢复远程插件安装入口
+
+### Added
+- Plugins 中心新增“安装插件”入口，统一进入 `/plugins/manage?tab=plugins` 管理 Git 仓库、远程插件安装、更新、启用、禁用和卸载。
+- 新增 `/api/llm/usage/recent`，AI 中心“最近调用”可直接读取 `llm_usage` 表，不再停留在接口预留空态。
+
+### Changed
+- 0.13 安全迁移提示里的远程插件运维入口改为“前往插件安装”，补齐 Telegram 高危插件命令移除后的 Web 替代路径。
+- 插件安装与管理页默认停留在“安装与更新”Tab，并用更明确的中文说明远程插件安装后还需要按账号启用。
+- AI Usage 表格补充来源、模型提供商名称、耗时和 fallback 状态，便于验证命令 / scheduler 的 LLM 调用。
+
+### Verification
+- `git diff --check` 通过。
+- `pnpm --dir frontend build` 通过。
+- `PYTHONPYCACHEPREFIX=/private/tmp/telebot_pycache backend/.venv/bin/python -m py_compile backend/app/api/llm_usage.py backend/app/main.py` 通过。
+
+---
+
 ## [0.14.4] — 2026-05-16 · polish · 两步新账号指引
 
 ### Changed

@@ -1,22 +1,17 @@
 import { useQuery } from "@tanstack/react-query";
-import { isAxiosError } from "axios";
 import { Link, useNavigate } from "react-router-dom";
 import type { ReactNode } from "react";
 import { ArrowLeft, ArrowRight, History } from "lucide-react";
 
 import { listRecentLLMUsage } from "@/api/llmUsage";
 import { listLLMProviders } from "@/api/commands";
-import { getErrCode, getErrMsg } from "@/lib/api";
+import { getErrMsg } from "@/lib/api";
 import { Spinner } from "@/components/ui/misc";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { goBackOr } from "@/lib/navigation";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-
-function getHttpStatus(err: unknown): number | undefined {
-  return isAxiosError(err) ? err.response?.status : undefined;
-}
 
 export function AIUsage() {
   const nav = useNavigate();
@@ -83,19 +78,13 @@ export function RecentUsageContent() {
   }
 
   if (usageQ.isError) {
-    const code = getErrCode(usageQ.error);
-    const isNotImplemented = getHttpStatus(usageQ.error) === 404 || code === "not_found";
     return (
       <Card>
         <CardHeader>
           <CardTitle className="inline-flex items-center gap-2">
             <History className="h-4 w-4" /> 最近调用
           </CardTitle>
-          <CardDescription>
-            {isNotImplemented
-              ? "当前后端尚未开放调用记录查询接口。页面已预留，后端上线后会自动展示数据。"
-              : `暂时无法读取调用记录：${getErrMsg(usageQ.error)}`}
-          </CardDescription>
+          <CardDescription>暂时无法读取调用记录：{getErrMsg(usageQ.error)}</CardDescription>
         </CardHeader>
       </Card>
     );
@@ -120,9 +109,11 @@ export function RecentUsageContent() {
             <TableHeader>
               <TableRow>
                 <TableHead>时间</TableHead>
+                <TableHead>来源</TableHead>
                 <TableHead>模型提供商</TableHead>
                 <TableHead>模型</TableHead>
                 <TableHead>Token 数</TableHead>
+                <TableHead>耗时</TableHead>
                 <TableHead>状态</TableHead>
               </TableRow>
             </TableHeader>
@@ -130,11 +121,15 @@ export function RecentUsageContent() {
               {rows.map((r) => (
                 <TableRow key={r.id}>
                   <TableCell className="text-xs text-muted-foreground">{new Date(r.created_at).toLocaleString()}</TableCell>
-                  <TableCell>#{r.provider_id}</TableCell>
+                  <TableCell className="font-mono text-xs">{r.source || "-"}</TableCell>
+                  <TableCell>{r.provider_name || (r.provider_id ? `#${r.provider_id}` : "-")}</TableCell>
                   <TableCell className="font-mono text-xs">{r.model || "-"}</TableCell>
                   <TableCell>{(r.input_tokens || 0) + (r.output_tokens || 0)}</TableCell>
+                  <TableCell>{r.latency_ms != null ? `${r.latency_ms}ms` : "-"}</TableCell>
                   <TableCell>
-                    <Badge variant={r.success ? "success" : "warn"}>{r.success ? "成功" : "失败"}</Badge>
+                    <Badge variant={r.success ? "success" : "warn"}>
+                      {r.success ? (r.used_fallback ? "成功 · fallback" : "成功") : (r.error_type || "失败")}
+                    </Badge>
                   </TableCell>
                 </TableRow>
               ))}

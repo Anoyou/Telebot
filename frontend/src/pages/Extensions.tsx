@@ -7,8 +7,8 @@
 // 之前 /matrix 和 /extensions 两个独立菜单项被砍，访问会 redirect 到这里（App.tsx）。
 // 远程插件原为独立 /remote-plugins 页面，现合并到 Tab 2。
 // 功能矩阵已废弃，替换为账号级插件管理。
-import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   BookOpen,
@@ -104,26 +104,38 @@ function formatPluginVersion(version?: string | null) {
   return v.startsWith("v") ? v : `v${v}`;
 }
 
+function parseManageTab(value: string | null): TabValue {
+  return value === "accounts" || value === "plugins" || value === "guide"
+    ? value
+    : "plugins";
+}
+
 // ── 顶层组件 ──────────────────────────────────────────────────────
 export function Extensions() {
-  const [tab, setTab] = useState<TabValue>("accounts");
+  const [searchParams] = useSearchParams();
+  const tabParam = searchParams.get("tab");
+  const [tab, setTab] = useState<TabValue>(() => parseManageTab(tabParam));
+
+  useEffect(() => {
+    setTab(parseManageTab(tabParam));
+  }, [tabParam]);
 
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">插件中心</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">插件安装与管理</h1>
         <p className="text-sm text-muted-foreground">
-          账号插件管理 + 插件管理 + 开发指南
+          远程插件从这里安装、更新、卸载；安装后再按账号启用和配置。
         </p>
       </div>
 
       <Tabs value={tab} onValueChange={(v) => setTab(v as TabValue)}>
         <TabsList>
           <TabsTrigger value="accounts" className="gap-1.5">
-            <Users className="h-4 w-4" /> 账号插件管理
+            <Users className="h-4 w-4" /> 按账号启用
           </TabsTrigger>
           <TabsTrigger value="plugins" className="gap-1.5">
-            <Puzzle className="h-4 w-4" /> 插件管理
+            <Puzzle className="h-4 w-4" /> 安装与更新
           </TabsTrigger>
           <TabsTrigger value="guide" className="gap-1.5">
             <BookOpen className="h-4 w-4" /> 开发指南

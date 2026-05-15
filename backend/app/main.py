@@ -18,6 +18,7 @@ from .api import alias as alias_api
 from .api import auth as auth_api
 from .api import config_bundle as config_bundle_api
 from .api import device_profiles as device_profiles_api
+from .api import llm_usage as llm_usage_api
 from .api import logs as logs_api
 from .api import network as network_api
 from .api import notify_bots as notify_bots_api
@@ -240,6 +241,7 @@ app.include_router(notify_bots_api.router)  # Sprint4 #2D：多 Telegram Bot 通
 app.include_router(sudo_api.router)        # Sprint5：Sudo 用户管理
 app.include_router(alias_api.router)      # Sprint5：命令别名管理
 app.include_router(config_bundle_api.router)  # B1：Config Bundle export / dry-run
+app.include_router(llm_usage_api.router)  # AI 中心：最近 LLM 调用记录
 
 
 # ── 健康检查 ─────────────────────────────────────────────────────

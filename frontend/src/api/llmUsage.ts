@@ -2,15 +2,17 @@ import { api } from "@/lib/api";
 
 export interface LLMUsageRecord {
   id: number;
-  account_id: number;
-  provider_id: number;
-  model: string;
+  account_id: number | null;
+  provider_id: number | null;
+  provider_name?: string | null;
+  model: string | null;
+  source?: string | null;
   input_tokens: number;
   output_tokens: number;
   latency_ms?: number | null;
   success: boolean;
-  error_code?: string | null;
-  error_message?: string | null;
+  error_type?: string | null;
+  used_fallback?: boolean;
   created_at: string;
 }
 
