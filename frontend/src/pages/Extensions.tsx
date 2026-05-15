@@ -16,6 +16,7 @@ import {
   Power,
   Puzzle,
   RefreshCw,
+  Sparkles,
   Trash2,
   X,
 } from "lucide-react";
@@ -76,6 +77,7 @@ type TabValue = "plugins" | "guide";
 const PLUGINS_QK = ["installed-packages"] as const;
 const REMOTE_QK = ["remote-plugins"] as const;
 const PLUGIN_REPOS_QK = ["plugin-repos"] as const;
+const NEW_ACCOUNT_GUIDE_SEEN_KEY = "telebot.accounts.new_account_guide_seen.v4";
 
 function formatPluginVersion(version?: string | null) {
   const v = (version || "").trim();
@@ -95,6 +97,7 @@ export function Extensions() {
   const [searchParams] = useSearchParams();
   const tabParam = searchParams.get("tab");
   const [tab, setTab] = useState<TabValue>(() => parseManageTab(tabParam));
+  const [guideExpanded, setGuideExpanded] = useState(false);
 
   useEffect(() => {
     setTab(parseManageTab(tabParam));
@@ -114,6 +117,18 @@ export function Extensions() {
         </div>
       </div>
 
+      <PluginInstallGuide
+        expanded={guideExpanded}
+        onToggle={() => setGuideExpanded((v) => !v)}
+        onBack={() => nav("/plugins")}
+        onDone={() => {
+          if (typeof window !== "undefined") {
+            localStorage.setItem(NEW_ACCOUNT_GUIDE_SEEN_KEY, "1");
+          }
+          setGuideExpanded(false);
+        }}
+      />
+
       <Tabs value={tab} onValueChange={(v) => setTab(v as TabValue)}>
         <TabsList>
           <TabsTrigger value="plugins" className="gap-1.5">
@@ -132,6 +147,54 @@ export function Extensions() {
         </TabsContent>
       </Tabs>
     </div>
+  );
+}
+
+function PluginInstallGuide({
+  expanded,
+  onToggle,
+  onBack,
+  onDone,
+}: {
+  expanded: boolean;
+  onToggle: () => void;
+  onBack: () => void;
+  onDone: () => void;
+}) {
+  if (!expanded) {
+    return (
+      <button
+        type="button"
+        onClick={onToggle}
+        className="inline-flex items-center gap-2 rounded-full border border-primary/30 bg-primary/10 px-3 py-1.5 text-xs font-medium text-primary shadow-sm shadow-primary/20 transition hover:bg-primary/15"
+        aria-label="打开新手指引"
+      >
+        <Sparkles className="h-4 w-4 animate-pulse" />
+        新手指引：安装后回插件中心启用
+      </button>
+    );
+  }
+
+  return (
+    <Card className="max-w-2xl border-primary/30 bg-card/95 shadow-lg shadow-primary/10">
+      <CardHeader className="pb-2">
+        <CardTitle className="text-base">3. 启用命令模板或调用插件</CardTitle>
+        <CardDescription>
+          这里只负责安装、更新和卸载远程插件。安装完成后，回插件中心选择账号，再启用和配置对应插件。
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="flex flex-wrap gap-2">
+        <Button size="sm" onClick={onBack}>
+          返回插件中心 <ChevronRight className="ml-1 h-4 w-4" />
+        </Button>
+        <Button size="sm" variant="outline" onClick={onDone}>
+          跳过这步
+        </Button>
+        <Button size="sm" variant="ghost" onClick={onToggle}>
+          收起
+        </Button>
+      </CardContent>
+    </Card>
   );
 }
 

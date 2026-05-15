@@ -34,7 +34,7 @@ import {
 import { getErrMsg } from "@/lib/api";
 import { formatDateTime } from "@/lib/utils";
 
-const NEW_ACCOUNT_GUIDE_SEEN_KEY = "telebot.accounts.new_account_guide_seen.v3";
+const NEW_ACCOUNT_GUIDE_SEEN_KEY = "telebot.accounts.new_account_guide_seen.v4";
 
 type GuideStep = {
   icon: typeof Plus;
@@ -129,13 +129,27 @@ export function AccountList() {
             每个账号 = 一个 session = 一个独立 worker 进程
           </p>
         </div>
-        <div className="flex flex-wrap gap-2">
-          <Button variant="outline" size="sm" onClick={() => setGuideOpen(true)}>
-            <HelpCircle className="mr-1 h-4 w-4" /> 新手指引
-          </Button>
-          <Button onClick={() => nav("/accounts/new")}>
-            <Plus className="mr-1 h-4 w-4" /> 新增账号
-          </Button>
+        <div className="flex flex-col items-stretch gap-2 sm:items-end">
+          <div className="flex flex-wrap gap-2">
+            <Button variant="outline" size="sm" onClick={() => setGuideOpen(true)}>
+              <HelpCircle className="mr-1 h-4 w-4" /> 新手指引
+            </Button>
+            <Button
+              className={currentStep === 0 ? "animate-pulse shadow-lg shadow-primary/20 ring-2 ring-primary/30" : undefined}
+              onClick={() => nav("/accounts/new")}
+            >
+              <Plus className="mr-1 h-4 w-4" /> 新增账号
+            </Button>
+          </div>
+          {!guideOpen ? (
+            <GuideContextCard
+              expanded={guideExpanded}
+              currentStep={currentStep}
+              onToggle={() => setGuideExpanded((v) => !v)}
+              onGo={() => nav(GUIDE_STEPS[currentStep].actionTo)}
+              onSkip={() => nav(GUIDE_STEPS[Math.min(currentStep + 1, GUIDE_STEPS.length - 1)].actionTo)}
+            />
+          ) : null}
         </div>
       </div>
 
@@ -148,15 +162,6 @@ export function AccountList() {
           nav(GUIDE_STEPS[step].actionTo);
         }}
       />
-
-      {!guideOpen ? (
-        <GuideFloatingCard
-          expanded={guideExpanded}
-          currentStep={currentStep}
-          onToggle={() => setGuideExpanded((v) => !v)}
-          onGo={() => nav(GUIDE_STEPS[currentStep].actionTo)}
-        />
-      ) : null}
 
       {isLoading ? (
         <div className="flex h-32 items-center justify-center">
@@ -285,6 +290,12 @@ function NewAccountGuideDialog({
           <Button variant="ghost" onClick={() => onOpenChange(false)}>
             先看看
           </Button>
+          <Button
+            variant="outline"
+            onClick={() => onRunStep(Math.min(currentStep + 1, GUIDE_STEPS.length - 1))}
+          >
+            跳过这步
+          </Button>
           <Button onClick={() => onRunStep(currentStep)}>
             {step.actionLabel} <ArrowRight className="ml-1 h-4 w-4" />
           </Button>
@@ -294,16 +305,18 @@ function NewAccountGuideDialog({
   );
 }
 
-function GuideFloatingCard({
+function GuideContextCard({
   expanded,
   currentStep,
   onToggle,
   onGo,
+  onSkip,
 }: {
   expanded: boolean;
   currentStep: number;
   onToggle: () => void;
   onGo: () => void;
+  onSkip: () => void;
 }) {
   const step = GUIDE_STEPS[currentStep];
   const percent = ((currentStep + 1) / GUIDE_STEPS.length) * 100;
@@ -313,16 +326,17 @@ function GuideFloatingCard({
       <button
         type="button"
         onClick={onToggle}
-        className="fixed bottom-4 left-4 z-40 rounded-full border bg-primary p-3 text-primary-foreground shadow-lg transition hover:scale-105"
+        className="inline-flex items-center gap-2 self-end rounded-full border border-primary/30 bg-primary/10 px-3 py-1.5 text-xs font-medium text-primary shadow-sm shadow-primary/20 transition hover:bg-primary/15"
         aria-label="打开新手指引"
       >
-        <Sparkles className="h-5 w-5 animate-pulse" />
+        <Sparkles className="h-4 w-4 animate-pulse" />
+        新手指引：从这里开始
       </button>
     );
   }
 
   return (
-    <div className="fixed bottom-4 left-4 z-40 w-[300px] rounded-2xl border bg-card/95 p-4 shadow-xl backdrop-blur">
+    <div className="w-full max-w-xs rounded-2xl border bg-card/95 p-4 text-left shadow-lg shadow-primary/10 backdrop-blur">
       <div className="mb-2 flex items-center justify-between text-xs text-muted-foreground">
         <span>新手指引</span>
         <button type="button" onClick={onToggle} className="hover:text-foreground">
@@ -337,9 +351,14 @@ function GuideFloatingCard({
           style={{ width: `${percent}%` }}
         />
       </div>
-      <Button className="mt-3 w-full" size="sm" onClick={onGo}>
-        {step.actionLabel} <ArrowRight className="ml-1 h-4 w-4" />
-      </Button>
+      <div className="mt-3 flex flex-wrap gap-2">
+        <Button size="sm" onClick={onGo}>
+          {step.actionLabel} <ArrowRight className="ml-1 h-4 w-4" />
+        </Button>
+        <Button size="sm" variant="outline" onClick={onSkip}>
+          跳过这步
+        </Button>
+      </div>
     </div>
   );
 }

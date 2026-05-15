@@ -138,7 +138,7 @@ export function PluginsHome() {
         <CardHeader>
           <CardTitle>插件中心</CardTitle>
           <CardDescription>
-            把常用回复、转发和 AI 命令整理成模板后，可以按账号一键启用复用，不用每个号都从头再配一次。
+            先在这里沉淀一套好用的命令、消息和 AI 模板，再按账号启用复用；新账号不用从零重配。
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -181,17 +181,30 @@ export function PluginsHome() {
             </Button>
             <Button
               variant="outline"
-              className="h-full min-h-[96px] justify-start whitespace-normal px-4 py-3 text-left"
+              className={`h-full min-h-[96px] justify-start whitespace-normal px-4 py-3 text-left ${
+                guideExpanded ? "animate-pulse shadow-lg shadow-primary/20 ring-2 ring-primary/30" : ""
+              }`}
               onClick={() => nav("/plugins/manage?tab=plugins")}
             >
               <span>
                 <span className="block font-medium">安装插件</span>
                 <span className="mt-1 block text-xs leading-5 text-muted-foreground">
-                  添加 Git 仓库，安装、更新或卸载远程插件；装好后再按账号启用。
+                  添加 Git 仓库安装远程插件；安装完成后回到本页按账号启用和配置。
                 </span>
               </span>
             </Button>
           </div>
+          <GuideContextCard
+            expanded={guideExpanded}
+            onToggle={() => setGuideExpanded((v) => !v)}
+            onInstall={() => nav("/plugins/manage?tab=plugins")}
+            onDone={() => {
+              if (typeof window !== "undefined") {
+                localStorage.setItem("telebot.accounts.new_account_guide_seen.v4", "1");
+              }
+              setGuideExpanded(false);
+            }}
+          />
 
           {accounts.length > 0 ? (
             <div className="flex flex-col items-stretch gap-2 sm:flex-row sm:items-center">
@@ -258,23 +271,20 @@ export function PluginsHome() {
           selectedFeatures={selectedAccount?.features ?? {}}
         />
       </div>
-      <GuideFloatingCard
-        expanded={guideExpanded}
-        onToggle={() => setGuideExpanded((v) => !v)}
-        onGo={() => nav("/plugins/manage?tab=plugins")}
-      />
     </div>
   );
 }
 
-function GuideFloatingCard({
+function GuideContextCard({
   expanded,
   onToggle,
-  onGo,
+  onInstall,
+  onDone,
 }: {
   expanded: boolean;
   onToggle: () => void;
-  onGo: () => void;
+  onInstall: () => void;
+  onDone: () => void;
 }) {
   const percent = 100;
 
@@ -283,16 +293,17 @@ function GuideFloatingCard({
       <button
         type="button"
         onClick={onToggle}
-        className="fixed bottom-4 left-4 z-40 rounded-full border bg-primary p-3 text-primary-foreground shadow-lg transition hover:scale-105"
+        className="inline-flex items-center gap-2 rounded-full border border-primary/30 bg-primary/10 px-3 py-1.5 text-xs font-medium text-primary shadow-sm shadow-primary/20 transition hover:bg-primary/15"
         aria-label="打开新手指引"
       >
-        <Sparkles className="h-5 w-5 animate-pulse" />
+        <Sparkles className="h-4 w-4 animate-pulse" />
+        新手指引：最后一步
       </button>
     );
   }
 
   return (
-    <div className="fixed bottom-4 left-4 z-40 w-[300px] rounded-2xl border bg-card/95 p-4 shadow-xl backdrop-blur">
+    <div className="max-w-lg rounded-2xl border bg-card/95 p-4 shadow-lg shadow-primary/10 backdrop-blur">
       <div className="mb-2 flex items-center justify-between text-xs text-muted-foreground">
         <span>新手指引</span>
         <button type="button" onClick={onToggle} className="hover:text-foreground">
@@ -309,9 +320,14 @@ function GuideFloatingCard({
           style={{ width: `${percent}%` }}
         />
       </div>
-      <Button className="mt-3 w-full" size="sm" onClick={onGo}>
-        安装远程插件 <ArrowRight className="ml-1 h-4 w-4" />
-      </Button>
+      <div className="mt-3 flex flex-wrap gap-2">
+        <Button size="sm" onClick={onInstall}>
+          安装远程插件 <ArrowRight className="ml-1 h-4 w-4" />
+        </Button>
+        <Button size="sm" variant="outline" onClick={onDone}>
+          跳过这步
+        </Button>
+      </div>
     </div>
   );
 }

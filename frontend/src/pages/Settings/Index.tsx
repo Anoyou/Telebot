@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link, useLocation, useSearchParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowRight, Bell, Download, ShieldCheck, SlidersHorizontal, Sparkles, UserPlus } from "lucide-react";
+import { ArrowRight, Bot, Download, ShieldCheck, SlidersHorizontal, Sparkles, UserPlus } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -24,6 +24,7 @@ import {
   patchSystemSettings,
   putGlobalLimits,
 } from "@/api/system";
+import { listAccounts } from "@/api/accounts";
 import { getErrMsg, api } from "@/lib/api";
 import { NotifyBots } from "./NotifyBots";
 import { SudoManagement } from "./SudoManagement";
@@ -35,7 +36,7 @@ interface KillSwitchState {
 }
 
 type RuntimeLogLevel = "debug" | "info" | "warn" | "error";
-const NEW_ACCOUNT_GUIDE_SEEN_KEY = "telebot.accounts.new_account_guide_seen.v3";
+const NEW_ACCOUNT_GUIDE_SEEN_KEY = "telebot.accounts.new_account_guide_seen.v4";
 
 const GUIDE_STEPS = [
   {
@@ -68,9 +69,11 @@ function getGuideStepByPath(pathname: string, search: string): number {
 export function SettingsIndex() {
   const qc = useQueryClient();
   const location = useLocation();
+  const nav = useNavigate();
   const [searchParams] = useSearchParams();
   const [tab, setTab] = useState<"account" | "platform" | "security" | "migration">("account");
   const [guideExpanded, setGuideExpanded] = useState(false);
+  const [quickAid, setQuickAid] = useState("");
   const currentStep = useMemo(
     () => getGuideStepByPath(location.pathname, location.search),
     [location.pathname, location.search],
@@ -87,6 +90,10 @@ export function SettingsIndex() {
   const killQ = useQuery<KillSwitchState>({
     queryKey: ["system", "kill-switch"],
     queryFn: async () => (await api.get("/api/system/kill-switch")).data,
+  });
+  const accountsQ = useQuery({
+    queryKey: ["accounts"],
+    queryFn: listAccounts,
   });
 
   const [prefix, setPrefix] = useState("");
@@ -143,6 +150,12 @@ export function SettingsIndex() {
     if (localStorage.getItem(NEW_ACCOUNT_GUIDE_SEEN_KEY) !== "1") return;
     setGuideExpanded(false);
   }, []);
+
+  useEffect(() => {
+    const accounts = accountsQ.data ?? [];
+    if (quickAid || accounts.length === 0) return;
+    setQuickAid(String(accounts[0].id));
+  }, [accountsQ.data, quickAid]);
 
   const savePrefix = useMutation({
     mutationFn: () => patchSystemSettings({ command_prefix: prefix }),
@@ -234,21 +247,41 @@ export function SettingsIndex() {
 
       <Card className="border-dashed">
         <CardHeader>
-          <CardTitle className="text-base">已搬家</CardTitle>
-          <CardDescription>
-            模型提供商、命令模板、别名管理已迁移到新位置，旧入口已隐藏。
-          </CardDescription>
+          <CardTitle className="text-base">猜你想要？</CardTitle>
         </CardHeader>
-        <CardContent className="flex flex-wrap gap-2">
+        <CardContent className="flex flex-col gap-3 lg:flex-row lg:items-center">
           <Button asChild variant="outline" size="sm">
-            <Link to="/ai/providers">前往模型提供商</Link>
+            <Link to="/ai/providers">添加模型</Link>
           </Button>
           <Button asChild variant="outline" size="sm">
-            <Link to="/plugins/templates">前往命令模板</Link>
+            <Link to="/plugins/templates">添加命令</Link>
           </Button>
-          <Button asChild variant="outline" size="sm">
-            <Link to="/plugins/aliases">前往别名管理</Link>
-          </Button>
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+            <Select
+              value={quickAid}
+              onChange={(e) => setQuickAid(e.target.value)}
+              className="w-full sm:w-56"
+              disabled={(accountsQ.data ?? []).length === 0}
+            >
+              {(accountsQ.data ?? []).length === 0 ? (
+                <option value="">暂无账号</option>
+              ) : (
+                (accountsQ.data ?? []).map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.display_name || (a.tg_username ? `@${a.tg_username}` : a.phone)}
+                  </option>
+                ))
+              )}
+            </Select>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={!quickAid}
+              onClick={() => nav(quickAid ? `/accounts/${quickAid}?tab=bot` : "/accounts")}
+            >
+              <Bot className="mr-1 h-4 w-4" /> 绑定机器人
+            </Button>
+          </div>
         </CardContent>
       </Card>
 
@@ -274,7 +307,7 @@ export function SettingsIndex() {
         </TabsContent>
 
         <TabsContent value="platform" className="space-y-6">
-          <Card>
+          <Card className={currentStep === 1 ? "ring-2 ring-primary/30" : undefined}>
             <CardHeader>
               <CardTitle className="text-base">命令前缀</CardTitle>
               <CardDescription>
@@ -292,35 +325,45 @@ export function SettingsIndex() {
                   />
                 </div>
                 <Button
+                  className={currentStep === 1 ? "animate-pulse shadow-lg shadow-primary/20" : undefined}
                   onClick={() => prefix && savePrefix.mutate()}
                   disabled={savePrefix.isPending}
                 >
                   保存
                 </Button>
               </div>
+              <div className="mt-3">
+                <GuideInlineCard
+                  expanded={guideExpanded}
+                  currentStep={currentStep}
+                  onToggle={() => setGuideExpanded((v) => !v)}
+                  onPrimary={() => nav(GUIDE_STEPS[2].actionTo)}
+                  onSkip={() => nav(GUIDE_STEPS[2].actionTo)}
+                />
+              </div>
               <div className="mt-4 rounded-xl border bg-background p-3 text-xs">
                 <div className="mb-3 font-medium">触发预览</div>
                 <div className="rounded-2xl border bg-gradient-to-b from-sky-50 to-emerald-50 p-3 dark:from-sky-950/30 dark:to-emerald-950/20">
                   <div className="space-y-3">
-                    <div className="ml-auto max-w-[86%] rounded-2xl rounded-br-md bg-sky-500 px-3 py-2 text-white shadow-sm">
-                      <div className="mb-1 rounded-lg border-l-2 border-white/70 bg-white/15 px-2 py-1 text-[11px] leading-relaxed text-white/90">
+                    <div className="ml-auto w-fit max-w-[68%] rounded-2xl rounded-br-md bg-sky-500 px-3 py-2 text-white shadow-sm sm:max-w-[52%]">
+                      <div className="mb-1 inline-block max-w-full rounded-lg border-l-2 border-white/70 bg-white/15 px-2 py-1 text-[11px] leading-relaxed text-white/90">
                         这是一段被回复的原文。
                       </div>
                       <div className="font-mono">{prefix || ","}ai 请总结这段内容</div>
                     </div>
-                    <div className="max-w-[92%] rounded-2xl rounded-bl-md border bg-card px-3 py-2 text-foreground shadow-sm">
+                    <div className="w-fit max-w-[78%] rounded-2xl rounded-bl-md border bg-card px-3 py-2 text-foreground shadow-sm sm:max-w-[66%]">
                       <div className="font-semibold">(๑•̌.•̑๑)ˀ̣ˀ̣ˀ̣ 好奇</div>
-                      <div className="mt-2 rounded-lg border-l-2 bg-muted/40 px-2 py-1 text-muted-foreground">
+                      <div className="mt-2 inline-block max-w-full rounded-lg border-l-2 bg-muted/40 px-2 py-1 text-muted-foreground">
                         这是一段被回复的原文。
                       </div>
-                      <div className="mt-2 rounded-lg border-l-2 bg-muted/40 px-2 py-1 text-muted-foreground">
+                      <div className="mt-2 block w-fit max-w-full rounded-lg border-l-2 bg-muted/40 px-2 py-1 text-muted-foreground">
                         请总结这段内容
                       </div>
                       <div className="mt-3 font-semibold">ᕦ(ˇò_ó)ᕤ 回答</div>
                       <p className="mt-2 text-muted-foreground">
                         这是 AI 回答示例，已按当前消息模板渲染。
                       </p>
-                      <div className="mt-2 rounded-lg border-l-2 bg-muted/40 px-2 py-1 text-muted-foreground">
+                      <div className="mt-2 inline-block max-w-full rounded-lg border-l-2 bg-muted/40 px-2 py-1 text-muted-foreground">
                         这里是从第三行开始的回答内容。
                       </div>
                       <div className="my-3 text-center text-muted-foreground">━━━━━━━━━━━━━━━</div>
@@ -547,26 +590,24 @@ export function SettingsIndex() {
           <ConfigBackup />
         </TabsContent>
       </Tabs>
-      <GuideFloatingCard
-        expanded={guideExpanded}
-        currentStep={currentStep}
-        onToggle={() => setGuideExpanded((v) => !v)}
-      />
     </div>
   );
 }
 
-function GuideFloatingCard({
+function GuideInlineCard({
   expanded,
   currentStep,
   onToggle,
+  onPrimary,
+  onSkip,
 }: {
   expanded: boolean;
   currentStep: number;
   onToggle: () => void;
+  onPrimary: () => void;
+  onSkip: () => void;
 }) {
   const step = GUIDE_STEPS[currentStep];
-  const action = currentStep === 1 ? GUIDE_STEPS[2] : step;
   const percent = ((currentStep + 1) / GUIDE_STEPS.length) * 100;
 
   if (!expanded) {
@@ -574,16 +615,17 @@ function GuideFloatingCard({
       <button
         type="button"
         onClick={onToggle}
-        className="fixed bottom-4 left-4 z-40 rounded-full border bg-primary p-3 text-primary-foreground shadow-lg transition hover:scale-105"
+        className="inline-flex items-center gap-2 rounded-full border border-primary/30 bg-primary/10 px-3 py-1.5 text-xs font-medium text-primary shadow-sm shadow-primary/20 transition hover:bg-primary/15"
         aria-label="打开新手指引"
       >
-        <Sparkles className="h-5 w-5 animate-pulse" />
+        <Sparkles className="h-4 w-4 animate-pulse" />
+        新手指引：当前第 2 步
       </button>
     );
   }
 
   return (
-    <div className="fixed bottom-4 left-4 z-40 w-[300px] rounded-2xl border bg-card/95 p-4 shadow-xl backdrop-blur">
+    <div className="max-w-md rounded-2xl border bg-card/95 p-4 shadow-lg shadow-primary/10">
       <div className="mb-2 flex items-center justify-between text-xs text-muted-foreground">
         <span>新手指引</span>
         <button type="button" onClick={onToggle} className="hover:text-foreground">
@@ -598,12 +640,14 @@ function GuideFloatingCard({
           style={{ width: `${percent}%` }}
         />
       </div>
-      <Button className="mt-3 w-full" size="sm" asChild>
-        <Link to={action.actionTo}>
-          {currentStep === 1 ? "下一步：去插件中心" : action.actionLabel}
-          <ArrowRight className="ml-1 h-4 w-4" />
-        </Link>
-      </Button>
+      <div className="mt-3 flex flex-wrap gap-2">
+        <Button size="sm" onClick={onPrimary}>
+          下一步：去插件中心 <ArrowRight className="ml-1 h-4 w-4" />
+        </Button>
+        <Button size="sm" variant="outline" onClick={onSkip}>
+          跳过这步
+        </Button>
+      </div>
     </div>
   );
 }
