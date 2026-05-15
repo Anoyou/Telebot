@@ -1,5 +1,6 @@
 // 账号 API 包装
 import { api } from "@/lib/api";
+import type { AxiosResponse } from "axios";
 import type {
   AccountConfirm2FARequest,
   AccountConfirmCodeRequest,
@@ -10,6 +11,7 @@ import type {
   AccountSummary,
   AccountUpdateRequest,
   AccountFeatureItem,
+  ConfigBundleDryRunResponse,
 } from "@/api/types";
 
 export async function listAccounts(): Promise<AccountSummary[]> {
@@ -98,6 +100,30 @@ export async function cloneConfig(
     from_account_id: fromAid,
     features,
   });
+}
+
+export async function exportConfigBundle(
+  aid: number,
+): Promise<AxiosResponse<Blob>> {
+  return api.get<Blob>(`/api/accounts/${aid}/config-bundle/export`, {
+    responseType: "blob",
+  });
+}
+
+export async function dryRunConfigBundle(
+  aid: number,
+  file: File,
+): Promise<ConfigBundleDryRunResponse> {
+  const form = new FormData();
+  form.append("file", file);
+  const { data } = await api.post<ConfigBundleDryRunResponse>(
+    `/api/accounts/${aid}/config-bundle/dry-run`,
+    form,
+    {
+      headers: { "Content-Type": "multipart/form-data" },
+    },
+  );
+  return data;
 }
 
 // ===================== 插件启停 =====================
