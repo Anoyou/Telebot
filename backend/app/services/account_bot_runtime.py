@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import secrets
@@ -110,6 +111,30 @@ def _parse_callback(data: str) -> tuple[int, str, str, str | None] | None:
     except ValueError:
         return None
     return aid, parts[2], parts[3], parts[4] if len(parts) == 5 else None
+
+
+def _confirm_token_hash(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def _confirm_redis_key(token: str) -> str:
+    return _CONFIRM_PREFIX + _confirm_token_hash(token)
+
+
+async def _consume_confirm_payload(redis: Any, token: str) -> str | None:
+    key = _confirm_redis_key(token)
+    getdel = getattr(redis, "getdel", None)
+    if callable(getdel):
+        return await getdel(key)
+    return await redis.eval(
+        "local v=redis.call('GET',KEYS[1]); if v then redis.call('DEL',KEYS[1]); end; return v;",
+        1,
+        key,
+    )
+
+
+async def _read_confirm_payload(redis: Any, token: str) -> str | None:
+    return await redis.get(_confirm_redis_key(token))
 
 
 async def start_account_bot_manager() -> None:
@@ -783,7 +808,35 @@ async def _toggle_feature(incoming: Incoming, role: str, key: str) -> None:
             )
         ).scalar_one_or_none()
         enabled = not bool(current and current.enabled)
-        if enabled and not feature.is_builtin:
+        if not feature.is_builtin:
+            if not account_bot_service.role_allows(role, ACCOUNT_BOT_ROLE_ADMIN):
+                if enabled:
+                    remote = await remote_plugin_service.get_by_name(db, key)
+                    if remote is not None and not remote.enabled:
+                        await remote_plugin_service.enable(db, key)
+                await feature_service.set_account_feature(db, incoming.account_id, key, enabled)
+                await audit.write(
+                    db,
+                    None,
+                    "account_bot.feature_toggle",
+                    target=f"account:{incoming.account_id}/feature:{key}",
+                    detail=_audit_detail(incoming, role, {"enabled": enabled}),
+                )
+                await db.commit()
+                await account_bot_service.answer_callback(incoming.token, incoming.callback_id or "", text="已更新")
+                await _show_features(incoming, role, edit=True)
+                return
+            if incoming.callback_id:
+                await account_bot_service.answer_callback(incoming.token, incoming.callback_id, text="请确认")
+            await _request_confirm(
+                incoming,
+                role,
+                "plugin_toggle",
+                f"{'启用' if enabled else '停用'}插件 {feature.display_name}",
+                payload={"feature_key": key, "enabled": enabled},
+            )
+            return
+        if enabled:
             remote = await remote_plugin_service.get_by_name(db, key)
             if remote is not None and not remote.enabled:
                 await remote_plugin_service.enable(db, key)
@@ -968,14 +1021,21 @@ async def _request_confirm(
     _require(role, ACCOUNT_BOT_ROLE_ADMIN)
     nonce = secrets.token_urlsafe(8)
     redis = get_redis()
-    payload = {
+    confirm_payload = {
         "account_id": incoming.account_id,
         "tg_user_id": incoming.user_id,
         "action": action,
         "label": label,
         "payload": payload or {},
     }
-    await redis.setex(_CONFIRM_PREFIX + nonce, _CONFIRM_TTL_SECONDS, json.dumps(payload, ensure_ascii=False))
+    await redis.setex(_confirm_redis_key(nonce), _CONFIRM_TTL_SECONDS, json.dumps(confirm_payload, ensure_ascii=False))
+    await _audit_confirm_event(
+        incoming,
+        role,
+        "account_bot.confirm_requested",
+        action=action,
+        extra={"label": label},
+    )
     rows = [
         [
             _button("确认执行", "confirm", action, aid=incoming.account_id, nonce=nonce),
@@ -1001,19 +1061,56 @@ async def _confirm_action(
         await account_bot_service.answer_callback(incoming.token, incoming.callback_id or "", text="确认已过期", show_alert=True)
         return
     redis = get_redis()
-    raw = await redis.get(_CONFIRM_PREFIX + nonce)
+    raw = await _read_confirm_payload(redis, nonce)
     if not raw:
+        await _audit_confirm_event(
+            incoming,
+            role,
+            "account_bot.confirm_expired",
+            action=resource,
+            extra={"reason": "missing_or_expired"},
+        )
         await account_bot_service.answer_callback(incoming.token, incoming.callback_id or "", text="确认已过期", show_alert=True)
         return
     data = json.loads(raw)
     if data.get("account_id") != incoming.account_id or data.get("tg_user_id") != incoming.user_id:
+        await _audit_confirm_event(
+            incoming,
+            role,
+            "account_bot.confirm_rejected",
+            action=resource,
+            extra={"reason": "owner_mismatch"},
+        )
         await account_bot_service.answer_callback(incoming.token, incoming.callback_id or "", text="只能由原用户确认", show_alert=True)
         return
     if data.get("action") != resource:
+        await _audit_confirm_event(
+            incoming,
+            role,
+            "account_bot.confirm_rejected",
+            action=resource,
+            extra={"reason": "action_mismatch"},
+        )
         await account_bot_service.answer_callback(incoming.token, incoming.callback_id or "", text="确认资源不匹配", show_alert=True)
         return
-    await redis.delete(_CONFIRM_PREFIX + nonce)
-    await _execute_confirmed_action(incoming, role, data)
+    consumed = await _consume_confirm_payload(redis, nonce)
+    if not consumed:
+        await _audit_confirm_event(
+            incoming,
+            role,
+            "account_bot.confirm_expired",
+            action=resource,
+            extra={"reason": "already_consumed"},
+        )
+        await account_bot_service.answer_callback(incoming.token, incoming.callback_id or "", text="确认已过期", show_alert=True)
+        return
+    await _audit_confirm_event(
+        incoming,
+        role,
+        "account_bot.confirm_consumed",
+        action=resource,
+    )
+    await _execute_confirmed_action(incoming, role, json.loads(consumed))
 
 
 async def _restart_account_worker(incoming: Incoming, role: str) -> None:
@@ -1095,6 +1192,33 @@ async def _execute_confirmed_action(
         await account_bot_service.answer_callback(incoming.token, incoming.callback_id or "", text="插件已卸载")
         await _show_plugins(incoming, role, edit=True)
         return
+    if action == "plugin_toggle":
+        key = str(payload.get("feature_key") or "").strip()
+        enabled = bool(payload.get("enabled"))
+        if not key:
+            await account_bot_service.answer_callback(incoming.token, incoming.callback_id or "", text="缺少插件 key", show_alert=True)
+            return
+        async with AsyncSessionLocal() as db:
+            feature = await db.get(Feature, key)
+            if feature is None or feature.is_builtin:
+                await account_bot_service.answer_callback(incoming.token, incoming.callback_id or "", text="插件不存在", show_alert=True)
+                return
+            if enabled:
+                remote = await remote_plugin_service.get_by_name(db, key)
+                if remote is not None and not remote.enabled:
+                    await remote_plugin_service.enable(db, key)
+            await feature_service.set_account_feature(db, incoming.account_id, key, enabled)
+            await audit.write(
+                db,
+                None,
+                "account_bot.feature_toggle",
+                target=f"account:{incoming.account_id}/feature:{key}",
+                detail=_audit_detail(incoming, role, {"enabled": enabled}),
+            )
+            await db.commit()
+        await account_bot_service.answer_callback(incoming.token, incoming.callback_id or "", text="已更新")
+        await _show_plugins(incoming, role, edit=True)
+        return
     await account_bot_service.answer_callback(incoming.token, incoming.callback_id or "", text="未知确认动作", show_alert=True)
 
 
@@ -1146,3 +1270,28 @@ def _audit_detail(
     if extra:
         detail.update(extra)
     return detail
+
+
+async def _audit_confirm_event(
+    incoming: Incoming,
+    role: str,
+    event: str,
+    *,
+    action: str,
+    extra: dict[str, Any] | None = None,
+) -> None:
+    detail = _audit_detail(incoming, role, {"confirm_action": action})
+    if extra:
+        detail.update(extra)
+    try:
+        async with AsyncSessionLocal() as db:
+            await audit.write(
+                db,
+                None,
+                event,
+                target=f"account:{incoming.account_id}",
+                detail=detail,
+            )
+            await db.commit()
+    except Exception:
+        log.warning("account bot confirm audit failed aid=%s event=%s", incoming.account_id, event, exc_info=True)
