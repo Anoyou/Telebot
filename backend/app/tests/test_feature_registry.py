@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from app import feature_registry
-from app.feature_registry import LazyBuiltinFeatures, scan_builtin_manifest_objects
+from app.feature_registry import BUILTIN_FEATURES, LazyBuiltinFeatures, scan_builtin_manifest_objects
 
 
 def _write_manifest(dir_path: Path, content: str) -> None:
@@ -32,8 +32,9 @@ def test_lazy_registry_loads_display_name_and_manifest(monkeypatch, tmp_path) ->
     registry = LazyBuiltinFeatures()
     assert "demo_key" in registry
     assert registry["demo_key"] == "Demo Display"
-    assert registry.manifest_for("demo_key") is not None
-    assert getattr(registry.manifest_for("demo_key"), "key") == "demo_key"
+    manifest = registry.manifest_for("demo_key")
+    assert manifest is not None
+    assert manifest.key == "demo_key"
 
 
 def test_lazy_registry_refresh_picks_latest_manifest(monkeypatch, tmp_path) -> None:
@@ -62,3 +63,9 @@ def test_lazy_registry_refresh_picks_latest_manifest(monkeypatch, tmp_path) -> N
     registry.refresh()
     assert registry["alpha"] == "Alpha V2"
 
+
+def test_builtin_registry_marks_codex_image_experimental() -> None:
+    BUILTIN_FEATURES.refresh()
+    manifest = BUILTIN_FEATURES.manifest_for("codex_image")
+    assert manifest is not None
+    assert getattr(manifest, "experimental", False) is True

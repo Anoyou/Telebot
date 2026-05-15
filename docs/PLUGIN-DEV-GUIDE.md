@@ -288,7 +288,7 @@ MANIFEST = Manifest(
 | auto_reply | 规则通过 Rules API 管理 | `rules` fallback | 已有 |
 | autorepeat | ✅ trigger / repeat / chat 配置 | `rules` | 已有 |
 | game24 | ✅ command, timeout | `single` | 已补 |
-| codex_image | ✅ command, access_token, model, message_template, image_size/aspect_ratio/image_format, timeout/status/output/instructions | `single` | 已补 |
+| codex_image | ✅ command, access_token, model, message_template, image_size/aspect_ratio/image_format, timeout/status/output/instructions | `single` | 已补（experimental） |
 | scheduler | ✅ default_notify, max_tasks | `platform` | 已迁移为平台基础能力 |
 | translate | ✅ default_lang, llm_provider | `schema` | 已补 |
 
@@ -921,6 +921,8 @@ config_schema={
 | `codex_image` | `command`, `access_token`, `model`, `message_template`, `image_size`, `aspect_ratio`, `image_format`, `max_wait_seconds`, `status_interval_seconds`, `delete_command_message`, `show_revised_prompt`, `reasoning_effort`, `custom_instructions` | 触发指令、鉴权、模型、消息模板、图片尺寸/比例/格式、等待与状态提示、输出行为、自定义生成指令 |
 
 专属页面字段应与运行时实际读取的配置保持一致；`manifest.config_schema` 也要同步，避免 ConfigDialog、接口校验和文档出现三套口径。
+
+`codex_image` 目前仍是 builtin，但会通过 `experimental` / `x-experimental` 标记在 UI 和文档中提示风险；后续若下沉为可选插件，仍需保留同一组配置键以兼容现有账号数据。
 
 ---
 

@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from app.schemas.feature import FeatureInfo
 from app.services.feature_service import (
     get_plugin_global_config,
     validate_config_against_schema,
@@ -260,6 +261,23 @@ class TestGetPluginGlobalConfig:
         with pytest.mock.patch("app.services.feature_service.seed_builtin_features", AsyncMock()):
             result = await get_plugin_global_config(db, "game24")
             assert result == {"time_limit": 60, "prize": 100}
+
+
+class TestFeatureInfo:
+    def test_from_feature_marks_experimental_manifest(self) -> None:
+        feature = MagicMock()
+        feature.key = "codex_image"
+        feature.display_name = "Codex 图片生成"
+        feature.is_builtin = True
+        feature.version = "1.1.0"
+        feature.manifest = {
+            "config_schema": {"type": "object"},
+            "x-experimental": True,
+        }
+
+        info = FeatureInfo.from_feature(feature)
+        assert info.experimental is True
+        assert info.config_schema == {"type": "object"}
 
 
 class TestSetPluginGlobalConfig:

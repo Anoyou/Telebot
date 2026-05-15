@@ -75,7 +75,7 @@ import {
 import { getFeatureMatrix } from "@/api/features";
 import { getErrMsg } from "@/lib/api";
 import { cn, formatDateTime } from "@/lib/utils";
-import { isPlatformFeature, pluginMode, PLUGIN_MODE_META, type PluginMode } from "@/lib/plugin-modes";
+import { isExperimentalFeature, isPlatformFeature, pluginMode, PLUGIN_MODE_META, type PluginMode } from "@/lib/plugin-modes";
 import { Select } from "@/components/ui/select";
 import type { HumanizeConfig, ProxyTestResult } from "@/api/types";
 import { actionHint, actionLabel } from "@/lib/rate-actions";
@@ -490,17 +490,27 @@ export function AccountDetail() {
                               const enabled = !!item?.enabled;
                               return (
                                 <TableRow key={f.key}>
-                                  <TableCell>
+                                <TableCell>
+                                  <div className="flex items-center gap-2">
                                     <div className="font-medium">{f.display_name}</div>
-                                    <div className="font-mono text-xs text-muted-foreground">
-                                      {f.key}
-                                      {" · "}
-                                      {item?.state ? `状态：${item.state}` : "未启用"}
-                                      {item?.last_error
-                                        ? ` · 最近错误：${item.last_error}`
-                                        : ""}
+                                    {isExperimentalFeature(f) && (
+                                      <Badge variant="warn">实验性</Badge>
+                                    )}
+                                  </div>
+                                  <div className="font-mono text-xs text-muted-foreground">
+                                    {f.key}
+                                    {" · "}
+                                    {item?.state ? `状态：${item.state}` : "未启用"}
+                                    {item?.last_error
+                                      ? ` · 最近错误：${item.last_error}`
+                                      : ""}
+                                  </div>
+                                  {isExperimentalFeature(f) && (
+                                    <div className="text-xs text-muted-foreground">
+                                      依赖非公开 API，启用前请确认可接受后续迁移或失效风险。
                                     </div>
-                                  </TableCell>
+                                  )}
+                                </TableCell>
                                   <TableCell>
                                     <Badge variant={f.is_builtin ? "secondary" : "outline"}>
                                       {f.is_builtin ? "内置" : "第三方"}

@@ -34,7 +34,11 @@ from ..db.models.feature import (
     Feature,
 )
 from ..redis_client import get_redis
-from ..schemas.feature import ConfigValidationError, ConfigValidationResponse
+from ..schemas.feature import (
+    ConfigValidationError,
+    ConfigValidationResponse,
+    FeatureInfo,
+)
 from ..worker.ipc import CMD_RELOAD_CONFIG, publish_cmd_with_ack
 
 log = logging.getLogger(__name__)
@@ -62,10 +66,12 @@ async def seed_builtin_features(db: AsyncSession) -> int:
         # 尝试从 manifest 读取 config_schema 和 version
         cfg_schema = None
         ver = None
+        experimental = False
         m = BUILTIN_FEATURES.manifest_for(key)
         if m is not None:
             cfg_schema = getattr(m, "config_schema", None)
             ver = getattr(m, "version", None)
+            experimental = bool(getattr(m, "experimental", False))
 
         if key in existing:
             f = existing[key]
@@ -79,16 +85,24 @@ async def seed_builtin_features(db: AsyncSession) -> int:
             if ver and f.version != ver:
                 f.version = ver
                 changed = True
-            if cfg_schema:
+            if cfg_schema or experimental:
                 manifest = f.manifest or {}
                 if manifest.get("config_schema") != cfg_schema:
                     manifest["config_schema"] = cfg_schema
-                    f.manifest = manifest
                     changed = True
+                if manifest.get("x-experimental") != experimental:
+                    manifest["x-experimental"] = experimental
+                    changed = True
+                f.manifest = manifest
             if changed:
                 await db.flush()
             continue
-        manifest_data = {"config_schema": cfg_schema} if cfg_schema else None
+        manifest_data: dict[str, Any] | None = None
+        if cfg_schema or experimental:
+            manifest_data = {}
+            if cfg_schema:
+                manifest_data["config_schema"] = cfg_schema
+            manifest_data["x-experimental"] = experimental
         db.add(Feature(key=key, display_name=name, is_builtin=True, version=ver, manifest=manifest_data))
         added += 1
     if added:
@@ -220,16 +234,7 @@ async def feature_matrix(db: AsyncSession) -> dict[str, Any]:
         )
 
     return {
-        "features": [
-            {
-                "key": f.key,
-                "display_name": f.display_name,
-                "is_builtin": f.is_builtin,
-                "version": f.version,
-                "config_schema": (f.manifest or {}).get("config_schema"),
-            }
-            for f in features
-        ],
+        "features": [FeatureInfo.from_feature(f).model_dump() for f in features],
         "accounts": rows,
     }
 

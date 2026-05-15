@@ -16,6 +16,7 @@ class FeatureInfo(BaseModel):
     is_builtin: bool
     version: str | None = None
     config_schema: dict[str, Any] | None = None
+    experimental: bool = False
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -28,6 +29,9 @@ class FeatureInfo(BaseModel):
             is_builtin=f.is_builtin,
             version=f.version,
             config_schema=manifest.get("config_schema"),
+            experimental=bool(
+                manifest.get("x-experimental") or manifest.get("experimental")
+            ),
         )
 
 

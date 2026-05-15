@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Loader2, Eye, EyeOff } from "lucide-react";
+import { AlertTriangle, ArrowLeft, Loader2, Eye, EyeOff } from "lucide-react";
 import { toast } from "sonner";
 
 import { listAccountFeatures } from "@/api/accounts";
@@ -294,6 +294,16 @@ export function CodexImageConfigPage() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6 max-w-lg">
+          <div className="flex items-start gap-2 rounded-md border px-3 py-2 text-xs alert-warning">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+            <div>
+              <div className="font-medium">实验性能力</div>
+              <div className="mt-0.5 text-muted-foreground">
+                依赖非公开 API，后续可能随上游变化而迁移、降级或失效。
+              </div>
+            </div>
+          </div>
+
           {/* 状态 */}
           {feature && (
             <div className="rounded-md border bg-muted/30 p-3 text-xs">

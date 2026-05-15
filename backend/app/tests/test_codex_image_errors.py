@@ -5,6 +5,7 @@ import json
 
 import app.worker.plugins.builtin.codex_image.plugin as codex_image_plugin
 from app.worker.plugins.base import PluginContext
+from app.worker.plugins.builtin.codex_image.manifest import MANIFEST
 from app.worker.plugins.builtin.codex_image.plugin import (
     CodexImagePlugin,
     _edit_html,
@@ -76,6 +77,11 @@ def test_codex_image_ext_detects_image_magic_bytes() -> None:
     assert _image_ext_from_bytes(b"\x89PNG\r\n\x1a\nxxxx", "jpeg") == ".png"
     assert _image_ext_from_bytes(b"\xff\xd8\xffxxxx", "png") == ".jpg"
     assert _image_ext_from_bytes(b"RIFFxxxxWEBPxxxx", "png") == ".webp"
+
+
+def test_codex_image_manifest_is_marked_experimental() -> None:
+    assert MANIFEST.experimental is True
+    assert MANIFEST.to_dict()["x-experimental"] is True
 
 
 async def test_codex_status_edit_uses_html_parse_mode() -> None:

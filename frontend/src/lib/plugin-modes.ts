@@ -35,3 +35,7 @@ export function pluginMode(feature: Pick<FeatureInfo, "key" | "config_schema">):
   if (FALLBACK_SINGLE_KEYS.has(feature.key)) return "single";
   return "schema";
 }
+
+export function isExperimentalFeature(feature: Pick<FeatureInfo, "experimental">): boolean {
+  return feature.experimental;
+}

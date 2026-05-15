@@ -56,7 +56,7 @@ import { Spinner } from "@/components/ui/misc";
 import { cn } from "@/lib/utils";
 import { getErrMsg } from "@/lib/api";
 import { formatDateTime } from "@/lib/utils";
-import { isPlatformFeature, pluginMode, PLUGIN_MODE_META, type PluginMode } from "@/lib/plugin-modes";
+import { isExperimentalFeature, isPlatformFeature, pluginMode, PLUGIN_MODE_META, type PluginMode } from "@/lib/plugin-modes";
 import { ConfigDialog } from "@/components/plugin/ConfigDialog";
 
 import { getFeatureMatrix } from "@/api/features";
@@ -345,8 +345,18 @@ function AccountPluginsTab() {
                             return (
                               <TableRow key={f.key}>
                                 <TableCell>
-                                  <div className="font-medium">{f.display_name}</div>
+                                  <div className="flex items-center gap-2">
+                                    <div className="font-medium">{f.display_name}</div>
+                                    {isExperimentalFeature(f) && (
+                                      <Badge variant="warn">实验性</Badge>
+                                    )}
+                                  </div>
                                   <div className="font-mono text-xs text-muted-foreground">{f.key}</div>
+                                  {isExperimentalFeature(f) && (
+                                    <div className="text-xs text-muted-foreground">
+                                      依赖非公开 API，可能失效或在后续版本迁移为可选安装插件。
+                                    </div>
+                                  )}
                                 </TableCell>
                                 <TableCell>
                                   <Badge variant={f.is_builtin ? "secondary" : "outline"}>
