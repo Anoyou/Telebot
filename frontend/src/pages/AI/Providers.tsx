@@ -3,7 +3,7 @@ import { ArrowLeft } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { goBackOr } from "@/lib/navigation";
-import { LLMProviders } from "@/pages/Settings/LLMProviders";
+import { LLMProviders } from "@/pages/AI/LLMProviders";
 
 export function AIProviders() {
   const nav = useNavigate();

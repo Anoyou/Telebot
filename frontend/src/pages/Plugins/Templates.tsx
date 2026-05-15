@@ -3,7 +3,7 @@ import { ArrowLeft } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { goBackOr } from "@/lib/navigation";
-import { CommandTemplates } from "@/pages/Settings/CommandTemplates";
+import { CommandTemplates } from "@/pages/Plugins/TemplatesEditor";
 
 export function PluginsTemplatesPage() {
   const nav = useNavigate();

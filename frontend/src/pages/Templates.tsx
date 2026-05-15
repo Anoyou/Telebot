@@ -4,8 +4,8 @@ import { Command, Fingerprint, Shield, Tags, Waypoints } from "lucide-react";
 import { RateTemplates } from "@/pages/Settings/RateTemplates";
 import { ProxyManager } from "@/pages/Settings/ProxyManager";
 import { DeviceProfileManager } from "@/pages/Settings/DeviceProfileManager";
-import { CommandTemplates } from "@/pages/Settings/CommandTemplates";
-import { AliasManagement } from "@/pages/Settings/AliasManagement";
+import { CommandTemplates } from "@/pages/Plugins/TemplatesEditor";
+import { AliasManagement } from "@/pages/Plugins/AliasManagement";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 export function Templates() {

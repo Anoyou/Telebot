@@ -44,6 +44,7 @@ from ... import __version__ as TELEBOT_VERSION
 from ...db.base import AsyncSessionLocal
 from ...db.models.account import Account, HumanizeConfig, SudoUser
 from ...db.models.feature import (
+    FEATURE_CODEX_IMAGE,
     FEATURE_SCHEDULER,
     FEATURE_STATE_ACTIVE,
     FEATURE_STATE_DISABLED,
@@ -351,6 +352,27 @@ def _load_installed_plugin(plugin_key: str) -> dict[str, type[Plugin]]:
         )
         path = legacy_path
     return _load_dir(path, source="installed")
+
+
+def _installed_plugin_exists(plugin_key: str) -> bool:
+    """判断 installed 插件目录是否存在；仅用于兼容旧 account_feature 行。"""
+    if not _is_safe_plugin_key(plugin_key):
+        return False
+    root = _installed_dir().resolve()
+    path = (root / plugin_key).resolve()
+    try:
+        path.relative_to(root)
+    except ValueError:
+        return False
+    if path.is_dir():
+        return True
+    legacy_root = (_BACKEND_DIR / "plugins" / "installed").resolve()
+    legacy_path = (legacy_root / plugin_key).resolve()
+    try:
+        legacy_path.relative_to(legacy_root)
+    except ValueError:
+        return False
+    return legacy_path.is_dir()
 
 
 def _load_builtin_plugin(plugin_key: str) -> dict[str, type[Plugin]]:
@@ -740,6 +762,15 @@ async def _activate(db, state: _AccountState, af: AccountFeature, redis: Any) ->
                 return
             _load_installed_plugin(af.feature_key)
             cls = get_plugin(af.feature_key)
+        elif af.feature_key == FEATURE_CODEX_IMAGE and _installed_plugin_exists(af.feature_key):
+            await _log(
+                redis,
+                state.account_id,
+                "info",
+                "codex_image 已下沉到 plugins/installed，以兼容模式加载旧账号配置",
+            )
+            _load_installed_plugin(af.feature_key)
+            cls = get_plugin(af.feature_key)
     if cls is None:
         last_error, log_message = _missing_plugin_error(af.feature_key)
         await _log(
@@ -769,15 +800,25 @@ async def _activate(db, state: _AccountState, af: AccountFeature, redis: Any) ->
             )
         ).scalar_one_or_none()
         if rp is None:
-            await _log(
-                redis,
-                state.account_id,
-                "warn",
-                f"feature {af.feature_key} 是 installed 插件但 remote_plugin 行不存在",
-            )
-            return
-        if not rp.enabled:
-            # RemotePlugin.enabled=False 时跳过加载（DB 状态已是 disabled）
+            if af.feature_key == FEATURE_CODEX_IMAGE:
+                await _log(
+                    redis,
+                    state.account_id,
+                    "info",
+                    "codex_image installed 代码已就位但 remote_plugin 行不存在；按内置下沉兼容模式继续加载",
+                )
+                rp = None
+            else:
+                await _log(
+                    redis,
+                    state.account_id,
+                    "warn",
+                    f"feature {af.feature_key} 是 installed 插件但 remote_plugin 行不存在",
+                )
+                return
+        if rp is None:
+            pass
+        elif not rp.enabled:
             await _log(
                 redis,
                 state.account_id,

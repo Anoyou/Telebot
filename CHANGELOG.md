@@ -17,6 +17,26 @@
 
 ---
 
+## [0.14.10] — 2026-05-16 · patch · 完成 B2 下沉与文档同步
+
+### Changed
+- 新手指引的 Siri 流光高亮改为细外框跑马灯，不再把整个按钮或卡片填成彩色，避免遮挡按钮文字。
+- `codex_image` 从 builtin 物理下沉到 `plugins/installed/codex_image/`，builtin registry 不再自动包含它；旧账号已启用时会按 installed 兼容模式加载，缺少本地代码时进入 failed 并写 runtime log。
+- `codex_image` dry-run import 改为 installed 路径，并补齐 installed 插件元数据与 `send_file` 权限声明。
+- 前端真实移动 Settings / Features 旧实现文件到 Plugins / AI 目录，减少“新入口壳页面继续引用旧目录”的双维护状态。
+- README 与插件开发文档同步 0.14 当前状态，明确 TelePilot 完整 rename 仍属于后续 0.15。
+
+### Verification
+- `git diff --check` 通过。
+- `backend/.venv/bin/ruff check backend/app` 通过。
+- `PYTHONPYCACHEPREFIX=/private/tmp/telebot_pycache backend/.venv/bin/python -m py_compile backend/app/worker/plugins/loader.py backend/app/api/rules.py backend/app/tests/test_codex_image_errors.py backend/app/tests/test_feature_registry.py plugins/installed/codex_image/__init__.py plugins/installed/codex_image/manifest.py plugins/installed/codex_image/plugin.py` 通过。
+- `pnpm --dir frontend exec tsc -b --noEmit` 通过。
+- `pnpm --dir frontend build` 通过。
+- `PYTHONPYCACHEPREFIX=/private/tmp/telebot_pycache backend/.venv/bin/python -m pytest backend/app/tests/test_codex_image_errors.py backend/app/tests/test_plugin_loader.py backend/app/tests/test_feature_registry.py backend/app/tests/test_feature_service.py` 通过，38 passed。
+- `PYTHONPYCACHEPREFIX=/private/tmp/telebot_pycache backend/.venv/bin/python -m pytest backend` 通过，551 passed, 2 skipped。
+
+---
+
 ## [0.14.9] — 2026-05-16 · polish · 新手指引开关与流光高亮
 
 ### Changed

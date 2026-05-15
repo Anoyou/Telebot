@@ -64,11 +64,9 @@ def test_lazy_registry_refresh_picks_latest_manifest(monkeypatch, tmp_path) -> N
     assert registry["alpha"] == "Alpha V2"
 
 
-def test_builtin_registry_marks_codex_image_experimental() -> None:
+def test_builtin_registry_excludes_codex_image_after_installed_migration() -> None:
     BUILTIN_FEATURES.refresh()
-    manifest = BUILTIN_FEATURES.manifest_for("codex_image")
-    assert manifest is not None
-    assert getattr(manifest, "experimental", False) is True
+    assert "codex_image" not in set(BUILTIN_FEATURES.keys())
 
 
 def test_builtin_registry_excludes_legacy_feature_keys() -> None:

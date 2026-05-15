@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/misc";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { LLMProviders } from "@/pages/Settings/LLMProviders";
+import { LLMProviders } from "@/pages/AI/LLMProviders";
 import { RecentUsageContent } from "@/pages/AI/Usage";
 
 export function AIIndex() {

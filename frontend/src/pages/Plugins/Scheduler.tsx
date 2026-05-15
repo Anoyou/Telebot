@@ -3,7 +3,7 @@ import { ArrowLeft } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { goBackOr } from "@/lib/navigation";
-import { SchedulerConfig } from "@/pages/Features/Scheduler";
+import { SchedulerConfig } from "@/pages/Plugins/configs/Scheduler";
 
 export function PluginsSchedulerPage() {
   const nav = useNavigate();

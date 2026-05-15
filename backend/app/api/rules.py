@@ -101,7 +101,7 @@ def _autorepeat_dry_run_match(*args):
 
 
 def _codex_image_dry_run_match(*args):
-    from ..worker.plugins.builtin.codex_image.plugin import _dry_run_match
+    from plugins.installed.codex_image.plugin import _dry_run_match
 
     return _dry_run_match(*args)
 

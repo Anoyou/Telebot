@@ -3,10 +3,9 @@ from __future__ import annotations
 import base64
 import json
 
-import app.worker.plugins.builtin.codex_image.plugin as codex_image_plugin
-from app.worker.plugins.base import PluginContext
-from app.worker.plugins.builtin.codex_image.manifest import MANIFEST
-from app.worker.plugins.builtin.codex_image.plugin import (
+import plugins.installed.codex_image.plugin as codex_image_plugin
+from plugins.installed.codex_image.manifest import MANIFEST
+from plugins.installed.codex_image.plugin import (
     CodexImagePlugin,
     _edit_html,
     _humanize_codex_error,
@@ -15,6 +14,8 @@ from app.worker.plugins.builtin.codex_image.plugin import (
     _parse_generation_args,
     _safe_error_text,
 )
+
+from app.worker.plugins.base import PluginContext
 
 
 def test_codex_usage_limit_error_is_human_readable() -> None:

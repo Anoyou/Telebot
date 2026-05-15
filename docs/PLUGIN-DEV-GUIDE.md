@@ -722,7 +722,7 @@ config_schema={
 | # | 文件 | 修改内容 |
 |---|------|---------|
 | 1 | `frontend/src/api/types.ts` | 添加 `XxxRuleConfig` 接口（描述单条规则的 config 字段） |
-| 2 | `frontend/src/pages/Features/XxxConfig.tsx` | **新建**：规则列表页（参考 `AutoReply.tsx` 或 `Forward.tsx`） |
+| 2 | `frontend/src/pages/Plugins/configs/XxxConfig.tsx` | **新建**：规则列表页（参考 `AutoReply.tsx` 或 `Forward.tsx`） |
 | 3 | `backend/app/worker/plugins/builtin/xxx/manifest.py` | `config_schema["x-ui-mode"] = "rules"` |
 | 4 | `frontend/src/App.tsx` | ① import 新页面组件 ② 添加路由 `:aid/features/xxx` ③ 在 `FEATURE_CONFIG_PAGES` 中添加 key |
 | 5 | `frontend/src/pages/Plugins/_shared/featureConfig.ts` | 在共享的 `FEATURE_CONFIG_PAGE_KEYS` Set 中添加 key |
@@ -743,7 +743,7 @@ export interface AutorepeatRuleConfig {
 
 #### 2. 新建配置页面
 
-创建 `frontend/src/pages/Features/XxxConfig.tsx`，核心结构：
+创建 `frontend/src/pages/Plugins/configs/XxxConfig.tsx`，核心结构：
 
 ```tsx
 // 标准页面骨架（以 AutoReply 为模板）
@@ -793,7 +793,7 @@ config_schema={
 
 ```tsx
 // ① import
-import { XxxConfig } from "@/pages/Features/XxxConfig";
+import { XxxConfig } from "@/pages/Plugins/configs/XxxConfig";
 
 // ② 路由
 <Route path=":aid/features/xxx" element={<XxxConfig />} />
@@ -896,7 +896,7 @@ if key == FEATURE_XXX:
 
 只有一份配置、无规则列表的插件，使用专属页面但不需要 CRUD 和 dry-run：
 
-- 创建 `frontend/src/pages/Features/XxxConfig.tsx`，直接展示/编辑单个 config 对象
+- 创建 `frontend/src/pages/Plugins/configs/XxxConfig.tsx`，直接展示/编辑单个 config 对象
 - `manifest.py` 中声明 `config_schema["x-ui-mode"] = "single"`
 - 其余适配步骤与模式 A 相同（App.tsx 路由 + FEATURE_CONFIG_PAGES + 两个 PAGE_KEYS）
 - 后端不需要 dry-run 分支
@@ -951,7 +951,7 @@ config_schema={
 
 专属页面字段应与运行时实际读取的配置保持一致；`manifest.config_schema` 也要同步，避免 ConfigDialog、接口校验和文档出现三套口径。
 
-`codex_image` 目前仍保留 builtin 实现，但会通过 `experimental` / `x-experimental` 标记在 UI 和文档中提示风险。0.14.0 已补兼容检测：若旧账号启用过 `codex_image` 但运行节点缺少实现，worker 会把该功能标记为 failed 并写入 runtime log，Plugins 页会显示恢复提示；真实下沉到 installed 前仍需同步 dry-run 导入路径和旧账号数据迁移策略。
+`codex_image` 已从 builtin 下沉到 `plugins/installed/codex_image/`。全新部署不会把它作为内置能力自动 seed；旧账号若仍有 `account_feature(feature_key="codex_image")` 且本地代码存在，worker 会按 installed 兼容模式加载。若运行节点缺少代码，worker 会把该功能标记为 failed 并写入 runtime log，Plugins 页会显示恢复提示。`codex_image` 的 dry-run import 也已改为 installed 路径，避免 builtin 目录再次成为隐性依赖。
 
 ---
 

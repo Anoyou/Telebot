@@ -3,7 +3,7 @@ import { ArrowLeft } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { goBackOr } from "@/lib/navigation";
-import { AliasManagement } from "@/pages/Settings/AliasManagement";
+import { AliasManagement } from "@/pages/Plugins/AliasManagement";
 
 export function PluginsAliasesPage() {
   const nav = useNavigate();

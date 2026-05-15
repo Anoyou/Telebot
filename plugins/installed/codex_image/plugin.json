@@ -1,0 +1,35 @@
+{
+  "name": "codex_image",
+  "display_name": "Codex 图片生成",
+  "version": "1.1.0",
+  "description": "通过 Codex API 调用 GPT 图片生成模型，支持纯文生图和参考图生成。",
+  "author": "TeleBoxOrg",
+  "entry": "plugin.py",
+  "permissions": ["send_message", "edit_message", "read_chat", "send_file"],
+  "tags": ["ai", "image", "experimental"],
+  "config_schema": {
+    "type": "object",
+    "x-ui-mode": "single",
+    "properties": {
+      "command": {
+        "type": "string",
+        "title": "触发指令名",
+        "default": "cximg"
+      },
+      "access_token": {
+        "type": "string",
+        "title": "Codex Access Token"
+      },
+      "model": {
+        "type": "string",
+        "title": "主模型",
+        "default": "gpt-5.4"
+      },
+      "image_model": {
+        "type": "string",
+        "title": "底层图片模型",
+        "default": "auto"
+      }
+    }
+  }
+}

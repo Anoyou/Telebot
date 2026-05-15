@@ -17,12 +17,12 @@ import { Spinner } from "@/components/ui/misc";
 //     单独拆 chunk，大依赖只在用到的页面拉一次。
 const AccountWizard = lazy(() => import("@/pages/Accounts/Wizard").then(m => ({ default: m.AccountWizard })));
 const AccountDetail = lazy(() => import("@/pages/Accounts/Detail").then(m => ({ default: m.AccountDetail })));
-const AutoReplyConfig = lazy(() => import("@/pages/Features/AutoReply").then(m => ({ default: m.AutoReplyConfig })));
-const AutorepeatConfig = lazy(() => import("@/pages/Features/Autorepeat").then(m => ({ default: m.AutorepeatConfig })));
-const CodexImageConfigPage = lazy(() => import("@/pages/Features/CodexImageConfig").then(m => ({ default: m.CodexImageConfigPage })));
-const ForwardConfig = lazy(() => import("@/pages/Features/Forward").then(m => ({ default: m.ForwardConfig })));
-const SchedulerConfig = lazy(() => import("@/pages/Features/Scheduler").then(m => ({ default: m.SchedulerConfig })));
-const Game24ConfigPage = lazy(() => import("@/pages/Features/Game24Config").then(m => ({ default: m.Game24ConfigPage })));
+const AutoReplyConfig = lazy(() => import("@/pages/Plugins/configs/AutoReply").then(m => ({ default: m.AutoReplyConfig })));
+const AutorepeatConfig = lazy(() => import("@/pages/Plugins/configs/Autorepeat").then(m => ({ default: m.AutorepeatConfig })));
+const CodexImageConfigPage = lazy(() => import("@/pages/Plugins/configs/CodexImageConfig").then(m => ({ default: m.CodexImageConfigPage })));
+const ForwardConfig = lazy(() => import("@/pages/Plugins/configs/Forward").then(m => ({ default: m.ForwardConfig })));
+const SchedulerConfig = lazy(() => import("@/pages/Plugins/configs/Scheduler").then(m => ({ default: m.SchedulerConfig })));
+const Game24ConfigPage = lazy(() => import("@/pages/Plugins/configs/Game24Config").then(m => ({ default: m.Game24ConfigPage })));
 const Logs = lazy(() => import("@/pages/Logs").then(m => ({ default: m.Logs })));
 const SettingsIndex = lazy(() => import("@/pages/Settings/Index").then(m => ({ default: m.SettingsIndex })));
 const PluginsHome = lazy(() => import("@/pages/Plugins").then(m => ({ default: m.PluginsHome })));

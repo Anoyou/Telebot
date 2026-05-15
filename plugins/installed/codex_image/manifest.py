@@ -21,7 +21,7 @@ MANIFEST = Manifest(
     author="TeleBoxOrg",
     description="通过 Codex API 调用 GPT 图片生成模型，支持纯文生图和参考图生成",
     experimental=True,
-    permissions=["send_message", "edit_message", "read_chat"],
+    permissions=["send_message", "edit_message", "read_chat", "send_file"],
     config_schema={
         "type": "object",
         "x-ui-mode": "single",
