@@ -247,6 +247,16 @@ export interface ConfigBundleDryRunResponse {
   warnings: string[];
 }
 
+export interface ConfigBundleConfirmResponse {
+  version: "1";
+  source_account: ConfigBundleSourceAccount;
+  target_account: ConfigBundleSourceAccount;
+  imported: number;
+  skipped: number;
+  conflicts: number;
+  warnings: string[];
+}
+
 // ===================== 功能 =====================
 export type FeatureState = "active" | "failed" | "disabled";
 

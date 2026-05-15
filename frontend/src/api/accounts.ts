@@ -10,6 +10,7 @@ import type {
   AccountStartLoginResponse,
   AccountSummary,
   AccountUpdateRequest,
+  ConfigBundleConfirmResponse,
   AccountFeatureItem,
   ConfigBundleDryRunResponse,
 } from "@/api/types";
@@ -118,6 +119,25 @@ export async function dryRunConfigBundle(
   form.append("file", file);
   const { data } = await api.post<ConfigBundleDryRunResponse>(
     `/api/accounts/${aid}/config-bundle/dry-run`,
+    form,
+    {
+      headers: { "Content-Type": "multipart/form-data" },
+    },
+  );
+  return data;
+}
+
+export async function confirmConfigBundle(
+  aid: number,
+  file: File,
+  options: { applyConflicts: boolean; confirmChatIdConflicts: boolean },
+): Promise<ConfigBundleConfirmResponse> {
+  const form = new FormData();
+  form.append("file", file);
+  form.append("apply_conflicts", String(options.applyConflicts));
+  form.append("confirm_chat_id_conflicts", String(options.confirmChatIdConflicts));
+  const { data } = await api.post<ConfigBundleConfirmResponse>(
+    `/api/accounts/${aid}/config-bundle/confirm`,
     form,
     {
       headers: { "Content-Type": "multipart/form-data" },

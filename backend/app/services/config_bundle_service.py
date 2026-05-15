@@ -5,6 +5,12 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from sqlalchemy import delete, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from ..db.models.command import AccountCommandLink, CommandTemplate
+from ..db.models.feature import AccountFeature
+from ..db.models.rule import Rule
 from ..schemas.config_bundle import (
     ConfigBundleCommandLinkItem,
     ConfigBundleDiffCounts,
@@ -36,6 +42,15 @@ class BundleTooLarge(ValueError):
     def __init__(self, size_bytes: int) -> None:
         super().__init__(f"bundle too large: {size_bytes}")
         self.size_bytes = size_bytes
+
+
+class BundleConfirmError(ValueError):
+    """confirm 阶段的业务校验错误。"""
+
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+        self.message = message
 
 
 def _is_sensitive_key(key: str) -> bool:
@@ -284,3 +299,127 @@ def compare_bundles(
         items=items,
         warnings=warnings,
     )
+
+
+async def apply_bundle_confirm(
+    db: AsyncSession,
+    *,
+    account_id: int,
+    source: ConfigBundleExport,
+    dry_run: ConfigBundleDryRunResponse,
+    available_command_templates: dict[str, dict[str, Any]],
+    apply_conflicts: bool,
+    confirm_chat_id_conflicts: bool,
+) -> tuple[int, int, int, list[str]]:
+    """按 dry-run 结果把 bundle 写入目标账号。"""
+    imported = 0
+    skipped = 0
+    conflicts = 0
+    warnings: list[str] = []
+    src_features = source.features
+    src_rules = {f"{item.feature_key}:{item.name}": item for item in source.rules}
+    src_cmds = {item.template_name: item for item in source.command_links}
+
+    if apply_conflicts and not confirm_chat_id_conflicts:
+        has_chat_id_conflict = any(
+            item.action == "conflict" and item.entity == "rule" and "chat_id" in set(item.fields)
+            for item in dry_run.items
+        )
+        if has_chat_id_conflict:
+            raise BundleConfirmError(
+                "CHAT_ID_CONFIRM_REQUIRED",
+                "存在 chat_id 冲突，请先确认后再写入",
+            )
+
+    template_rows = (await db.execute(select(CommandTemplate))).scalars().all()
+    template_by_name = {row.name: row for row in template_rows}
+
+    for item in dry_run.items:
+        key = item.key
+        if item.action == "skip":
+            skipped += 1
+            continue
+        if item.action == "conflict" and not apply_conflicts:
+            conflicts += 1
+            continue
+
+        if item.entity == "feature":
+            src = src_features.get(key)
+            if src is None:
+                conflicts += 1
+                warnings.append(f"missing feature payload: {key}")
+                continue
+            await db.execute(
+                delete(AccountFeature).where(
+                    AccountFeature.account_id == account_id,
+                    AccountFeature.feature_key == key,
+                )
+            )
+            db.add(
+                AccountFeature(
+                    account_id=account_id,
+                    feature_key=src.feature_key,
+                    enabled=src.enabled,
+                    config=dict(src.config or {}),
+                )
+            )
+            imported += 1
+            continue
+
+        if item.entity == "rule":
+            src_rule = src_rules.get(key)
+            if src_rule is None:
+                conflicts += 1
+                warnings.append(f"missing rule payload: {key}")
+                continue
+            await db.execute(
+                delete(Rule).where(
+                    Rule.account_id == account_id,
+                    Rule.feature_key == src_rule.feature_key,
+                    Rule.name == src_rule.name,
+                )
+            )
+            db.add(
+                Rule(
+                    account_id=account_id,
+                    feature_key=src_rule.feature_key,
+                    name=src_rule.name,
+                    enabled=src_rule.enabled,
+                    priority=src_rule.priority,
+                    config=dict(src_rule.config or {}),
+                )
+            )
+            imported += 1
+            continue
+
+        if item.entity == "command_link":
+            src_cmd = src_cmds.get(key)
+            if src_cmd is None:
+                conflicts += 1
+                warnings.append(f"missing command payload: {key}")
+                continue
+            tpl = template_by_name.get(src_cmd.template_name)
+            if tpl is None or src_cmd.template_name not in available_command_templates:
+                conflicts += 1
+                warnings.append(f"command template not found: {src_cmd.template_name}")
+                continue
+            await db.execute(
+                delete(AccountCommandLink).where(
+                    AccountCommandLink.account_id == account_id,
+                    AccountCommandLink.template_id == int(tpl.id),
+                )
+            )
+            db.add(
+                AccountCommandLink(
+                    account_id=account_id,
+                    template_id=int(tpl.id),
+                    enabled=True,
+                )
+            )
+            imported += 1
+            continue
+
+        conflicts += 1
+        warnings.append(f"unknown entity: {item.entity}")
+
+    return imported, skipped, conflicts, warnings

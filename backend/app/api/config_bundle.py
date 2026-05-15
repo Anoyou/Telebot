@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.responses import Response
 from sqlalchemy import select
 
@@ -13,10 +13,16 @@ from ..db.models.command import AccountCommandLink, CommandTemplate
 from ..db.models.feature import AccountFeature, Feature
 from ..db.models.rule import Rule
 from ..deps import CurrentUser, DBSession
-from ..schemas.config_bundle import ConfigBundleDryRunResponse, ConfigBundleExport
-from ..services import feature_service
+from ..schemas.config_bundle import (
+    ConfigBundleConfirmResponse,
+    ConfigBundleDryRunResponse,
+    ConfigBundleExport,
+)
+from ..services import audit, feature_service
 from ..services.config_bundle_service import (
+    BundleConfirmError,
     BundleTooLarge,
+    apply_bundle_confirm,
     assert_bundle_size,
     build_config_bundle,
     compare_bundles,
@@ -115,4 +121,78 @@ async def dry_run_config_bundle(
         target_bundle,
         available_features=await _available_feature_map(db),
         available_command_templates=await _available_command_templates(db),
+    )
+
+
+@router.post(
+    "/api/accounts/{aid}/config-bundle/confirm",
+    response_model=ConfigBundleConfirmResponse,
+)
+async def confirm_config_bundle(
+    aid: int,
+    db: DBSession,
+    user: CurrentUser,
+    file: UploadFile = File(...),
+    apply_conflicts: bool = Form(False),
+    confirm_chat_id_conflicts: bool = Form(False),
+) -> ConfigBundleConfirmResponse:
+    content = await file.read()
+    if len(content) > 1_048_576:
+        raise _bad("BUNDLE_TOO_LARGE", "bundle 超过 1MB，请拆分后再导入", 413)
+    try:
+        payload = json.loads(content)
+    except Exception as exc:  # noqa: BLE001
+        raise _bad("BUNDLE_INVALID_JSON", "bundle 不是合法 JSON") from exc
+
+    try:
+        source_bundle = ConfigBundleExport.model_validate(payload)
+    except Exception as exc:  # noqa: BLE001
+        raise _bad("BUNDLE_INVALID", "bundle 结构不符合规范") from exc
+
+    target_bundle = await _load_bundle(db, aid)
+    available_features = await _available_feature_map(db)
+    available_templates = await _available_command_templates(db)
+    dry_run = compare_bundles(
+        source_bundle,
+        target_bundle,
+        available_features=available_features,
+        available_command_templates=available_templates,
+    )
+
+    try:
+        imported, skipped, conflicts, warnings = await apply_bundle_confirm(
+            db,
+            account_id=aid,
+            source=source_bundle,
+            dry_run=dry_run,
+            available_command_templates=available_templates,
+            apply_conflicts=apply_conflicts,
+            confirm_chat_id_conflicts=confirm_chat_id_conflicts,
+        )
+    except BundleConfirmError as exc:
+        raise _bad(exc.code, exc.message) from exc
+
+    await audit.write(
+        db,
+        user.id,
+        "account.config_bundle.confirm",
+        target=f"account:{aid}",
+        detail={
+            "source_account_id": source_bundle.source_account.id,
+            "apply_conflicts": apply_conflicts,
+            "confirm_chat_id_conflicts": confirm_chat_id_conflicts,
+            "imported": imported,
+            "skipped": skipped,
+            "conflicts": conflicts,
+        },
+    )
+    await db.commit()
+
+    return ConfigBundleConfirmResponse(
+        source_account=source_bundle.source_account,
+        target_account=target_bundle.source_account,
+        imported=imported,
+        skipped=skipped,
+        conflicts=conflicts,
+        warnings=warnings,
     )

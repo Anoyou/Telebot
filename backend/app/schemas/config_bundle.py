@@ -64,3 +64,13 @@ class ConfigBundleDryRunResponse(BaseModel):
     counts: ConfigBundleDiffCounts
     items: list[ConfigBundleDiffItem] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
+
+
+class ConfigBundleConfirmResponse(BaseModel):
+    version: Literal["1"] = "1"
+    source_account: ConfigBundleSourceAccount
+    target_account: ConfigBundleSourceAccount
+    imported: int
+    skipped: int
+    conflicts: int
+    warnings: list[str] = Field(default_factory=list)

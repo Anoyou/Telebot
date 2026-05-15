@@ -23,8 +23,16 @@ import {
 } from "@/components/ui/card";
 import { api } from "@/lib/api";
 import { getErrMsg } from "@/lib/api";
-import { dryRunConfigBundle, exportConfigBundle, listAccounts } from "@/api/accounts";
-import type { ConfigBundleDryRunResponse } from "@/api/types";
+import {
+  confirmConfigBundle,
+  dryRunConfigBundle,
+  exportConfigBundle,
+  listAccounts,
+} from "@/api/accounts";
+import type {
+  ConfigBundleConfirmResponse,
+  ConfigBundleDryRunResponse,
+} from "@/api/types";
 
 interface CategoryDef {
   key: string;
@@ -61,6 +69,10 @@ export function ConfigBackup() {
   const [bundleSourceAid, setBundleSourceAid] = useState("");
   const [bundleTargetAid, setBundleTargetAid] = useState("");
   const [bundleResult, setBundleResult] = useState<ConfigBundleDryRunResponse | null>(null);
+  const [bundleConfirmResult, setBundleConfirmResult] = useState<ConfigBundleConfirmResponse | null>(null);
+  const [bundleFile, setBundleFile] = useState<File | null>(null);
+  const [applyConflicts, setApplyConflicts] = useState(false);
+  const [confirmChatIdConflicts, setConfirmChatIdConflicts] = useState(false);
 
   const accountsQ = useQuery({
     queryKey: ["accounts"],
@@ -154,6 +166,23 @@ export function ConfigBackup() {
     onError: (err) => toast.error(getErrMsg(err)),
   });
 
+  const confirmBundleMut = useMutation({
+    mutationFn: async () => {
+      if (!bundleFile) throw new Error("请先上传 bundle 并完成 dry-run");
+      return confirmConfigBundle(Number(bundleTargetAid), bundleFile, {
+        applyConflicts,
+        confirmChatIdConflicts,
+      });
+    },
+    onSuccess: (data) => {
+      setBundleConfirmResult(data);
+      toast.success(
+        `confirm 完成：写入 ${data.imported}，跳过 ${data.skipped}，冲突 ${data.conflicts}`,
+      );
+    },
+    onError: (err) => toast.error(getErrMsg(err)),
+  });
+
   const handleFileChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
@@ -171,6 +200,10 @@ export function ConfigBackup() {
       const file = e.target.files?.[0];
       if (!file) return;
       setBundleResult(null);
+      setBundleConfirmResult(null);
+      setBundleFile(file);
+      setApplyConflicts(false);
+      setConfirmChatIdConflicts(false);
       dryRunBundleMut.mutate(file);
       e.target.value = "";
     },
@@ -424,6 +457,40 @@ export function ConfigBackup() {
                   ... 还有 {bundleResult.items.length - 40} 条结果
                 </p>
               )}
+              <div className="space-y-3 border-t pt-3">
+                <div className="flex items-center justify-between rounded-md border px-3 py-2">
+                  <div>
+                    <Label className="text-sm">应用冲突项</Label>
+                    <p className="text-xs text-muted-foreground">关闭时仅写入新增项，冲突项保持不变</p>
+                  </div>
+                  <Switch checked={applyConflicts} onCheckedChange={setApplyConflicts} />
+                </div>
+                <div className="flex items-center justify-between rounded-md border px-3 py-2">
+                  <div>
+                    <Label className="text-sm">确认 chat_id 冲突</Label>
+                    <p className="text-xs text-muted-foreground">若存在 chat_id 变更且应用冲突，必须手动确认</p>
+                  </div>
+                  <Switch
+                    checked={confirmChatIdConflicts}
+                    onCheckedChange={setConfirmChatIdConflicts}
+                    disabled={!applyConflicts}
+                  />
+                </div>
+                <Button
+                  onClick={() => confirmBundleMut.mutate()}
+                  disabled={!bundleFile || !bundleTargetAid || confirmBundleMut.isPending}
+                  className="gap-1.5"
+                >
+                  <CheckCircle2 className="h-4 w-4" />
+                  {confirmBundleMut.isPending ? "写入中..." : "confirm 写入目标账号"}
+                </Button>
+                {bundleConfirmResult && (
+                  <div className="rounded-md border px-2 py-2 text-xs text-muted-foreground">
+                    已写入 {bundleConfirmResult.imported}，跳过 {bundleConfirmResult.skipped}，冲突{" "}
+                    {bundleConfirmResult.conflicts}
+                  </div>
+                )}
+              </div>
             </div>
           )}
         </div>
