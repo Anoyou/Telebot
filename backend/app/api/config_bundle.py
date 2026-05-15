@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, File, HTTPException, Request, UploadFile
 from fastapi.responses import Response
 from sqlalchemy import select
 
@@ -14,7 +14,6 @@ from ..db.models.feature import AccountFeature, Feature
 from ..db.models.rule import Rule
 from ..deps import CurrentUser, DBSession
 from ..schemas.config_bundle import ConfigBundleDryRunResponse, ConfigBundleExport
-from ..services import feature_service
 from ..services.config_bundle_service import (
     BundleTooLarge,
     assert_bundle_size,
@@ -49,7 +48,6 @@ async def _load_bundle(db, aid: int) -> ConfigBundleExport:
 
 
 async def _available_feature_map(db) -> dict[str, str]:
-    await feature_service.seed_builtin_features(db)
     rows = (await db.execute(select(Feature))).scalars().all()
     return {row.key: row.display_name for row in rows}
 
@@ -94,8 +92,17 @@ async def dry_run_config_bundle(
     aid: int,
     db: DBSession,
     _user: CurrentUser,
+    request: Request,
     file: UploadFile = File(...),
 ) -> ConfigBundleDryRunResponse:
+    content_length = request.headers.get("content-length")
+    if content_length is not None:
+        try:
+            if int(content_length) > 1_048_576:
+                raise _bad("BUNDLE_TOO_LARGE", "bundle 超过 1MB，请拆分后再导入", 413)
+        except ValueError:
+            pass
+
     content = await file.read()
     if len(content) > 1_048_576:
         raise _bad("BUNDLE_TOO_LARGE", "bundle 超过 1MB，请拆分后再导入", 413)

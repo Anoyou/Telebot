@@ -2,10 +2,16 @@
 
 from __future__ import annotations
 
+from io import BytesIO
 from types import SimpleNamespace
+from unittest.mock import AsyncMock, Mock
 
 import pytest
+from fastapi import HTTPException
+from starlette.datastructures import Headers, UploadFile
 
+from app.api import config_bundle as config_bundle_api
+from app.db.models.feature import Feature
 from app.schemas.config_bundle import (
     ConfigBundleCommandLinkItem,
     ConfigBundleExport,
@@ -186,3 +192,42 @@ def test_compare_bundles_returns_add_skip_and_conflict() -> None:
     assert any(i.entity == "feature" and i.key == "forward" and i.action == "conflict" for i in report.items)
     assert any(i.entity == "rule" and i.key == "scheduler:job" and i.action == "add" for i in report.items)
     assert any(i.entity == "command_link" and i.key == "missing_cmd" and i.action == "conflict" for i in report.items)
+
+
+@pytest.mark.asyncio
+async def test_available_feature_map_is_read_only_without_seed(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_rows = [SimpleNamespace(key="auto_reply", display_name="Auto Reply")]
+
+    class _Result:
+        def scalars(self):
+            return self
+
+        def all(self):
+            return fake_rows
+
+    db = SimpleNamespace(execute=AsyncMock(return_value=_Result()))
+    select_spy = Mock(return_value=Feature)
+    monkeypatch.setattr(config_bundle_api, "select", select_spy)
+    await config_bundle_api._available_feature_map(db)
+    select_spy.assert_called_once_with(Feature)
+
+
+@pytest.mark.asyncio
+async def test_dry_run_rejects_oversize_before_reading_body(monkeypatch: pytest.MonkeyPatch) -> None:
+    db = SimpleNamespace()
+    user = SimpleNamespace()
+    file = UploadFile(file=BytesIO(b"{}"), filename="bundle.json", headers=Headers({}))
+    file.read = AsyncMock(side_effect=AssertionError("should not read body"))  # type: ignore[method-assign]
+    request = SimpleNamespace(headers={"content-length": "1048577"})
+
+    with pytest.raises(HTTPException) as exc_info:
+        await config_bundle_api.dry_run_config_bundle(
+            aid=1,
+            db=db,
+            _user=user,
+            request=request,  # type: ignore[arg-type]
+            file=file,
+        )
+
+    assert exc_info.value.status_code == 413
+    assert exc_info.value.detail["code"] == "BUNDLE_TOO_LARGE"
