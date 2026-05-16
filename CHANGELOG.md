@@ -17,6 +17,16 @@
 
 ---
 
+## [0.15.5] — 2026-05-16 · fix · 修复 CI 插件导入路径
+
+### Fixed
+- 为 backend CI job 设置 `PYTHONPATH=..`，确保从 `backend/` 工作目录运行 pytest 时可导入仓库根目录的第三方插件包。
+
+### Verification
+- `PYTHONPATH=.. MASTER_KEY=... JWT_SECRET=... ../backend/.venv/bin/python -m pytest app/tests/test_codex_image_errors.py` 通过。
+
+---
+
 ## [0.15.4] — 2026-05-16 · fix · 修复 CI 测试环境变量
 
 ### Fixed
