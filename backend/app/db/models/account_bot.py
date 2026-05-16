@@ -5,12 +5,12 @@ from __future__ import annotations
 from datetime import datetime
 
 from sqlalchemy import (
+    JSON,
     BigInteger,
     Boolean,
     DateTime,
     ForeignKey,
     Index,
-    JSON,
     String,
     Text,
     UniqueConstraint,

@@ -17,6 +17,16 @@
 
 ---
 
+## [0.15.3] — 2026-05-16 · fix · 修复 CI 后端 lint
+
+### Fixed
+- 修复 `account_bot` 数据模型 import 排序，使新增 backend CI gate 在远端环境通过。
+
+### Verification
+- `backend/.venv/bin/ruff check backend/app/db/models/account_bot.py` 通过。
+
+---
+
 ## [0.15.2] — 2026-05-16 · fix · 完成审查后续收口
 
 ### Fixed
