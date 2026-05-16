@@ -17,6 +17,24 @@
 
 ---
 
+## [0.14.14] — 2026-05-16 · fix · 明确旧密钥导致的账号与 Bot 失效
+
+### Fixed
+- 账号恢复前会先验证 session / api_id / api_hash 是否能用当前 `MASTER_KEY` 解密；失败时直接置为 `login_required` 并提示恢复原 `MASTER_KEY` 或重新登录账号，不再启动后反复 down。
+- worker 启动阶段遇到账号凭据解密失败时，会写入清晰运行日志并停止自动重启该账号。
+- 账号 Bot 启用时会校验已保存 Bot Token 是否还能解密；旧 `MASTER_KEY` 加密的 token 会提示“重新保存 Bot Token”，不再只显示泛泛的 422。
+- 前端错误解析支持 FastAPI 校验数组，减少 `Request failed with status code 422` 这类无效提示。
+
+### Verification
+- `git diff --check` 通过。
+- `backend/.venv/bin/ruff check backend/app` 通过。
+- `PYTHONPYCACHEPREFIX=/private/tmp/telebot_pycache backend/.venv/bin/python -m py_compile backend/app/services/account_service.py backend/app/services/account_bot_service.py backend/app/worker/runtime.py backend/app/worker/supervisor.py backend/app/__init__.py` 通过。
+- `PYTHONPYCACHEPREFIX=/private/tmp/telebot_pycache backend/.venv/bin/python -m pytest backend/app/tests/test_account_service.py backend/app/tests/test_account_bot.py backend/app/tests/test_kill_switch_supervisor.py` 通过（21 passed）。
+- `pnpm --dir frontend exec tsc -b --noEmit` 通过。
+- `pnpm --dir frontend build` 通过。
+
+---
+
 ## [0.14.13] — 2026-05-16 · fix · 修复账号启停与紧急停用
 
 ### Fixed

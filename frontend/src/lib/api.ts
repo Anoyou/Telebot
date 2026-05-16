@@ -24,15 +24,20 @@ api.interceptors.response.use(
 // 后端错误统一形态：{ error: { code, message } }；FastAPI HTTPException 常见为 { detail: { code, message } }
 type ApiErrorPayload = {
   error?: { code?: string; message?: string };
-  detail?: { code?: string; message?: string } | string;
+  detail?: { code?: string; message?: string } | string | Array<{ msg?: string; message?: string }>;
 };
 
 export function getErrMsg(err: unknown): string {
   const e = err as AxiosError<ApiErrorPayload>;
   const detail = e?.response?.data?.detail;
+  const detailMessage = Array.isArray(detail)
+    ? detail.map((item) => item.message || item.msg).filter(Boolean).join("；")
+    : typeof detail === "object"
+      ? detail?.message
+      : undefined;
   return (
     e?.response?.data?.error?.message
-    || (typeof detail === "object" ? detail?.message : undefined)
+    || detailMessage
     || (typeof detail === "string" ? detail : undefined)
     || e?.message
     || "请求失败"
@@ -42,5 +47,5 @@ export function getErrMsg(err: unknown): string {
 export function getErrCode(err: unknown): string | undefined {
   const e = err as AxiosError<ApiErrorPayload>;
   const detail = e?.response?.data?.detail;
-  return e?.response?.data?.error?.code || (typeof detail === "object" ? detail?.code : undefined);
+  return e?.response?.data?.error?.code || (!Array.isArray(detail) && typeof detail === "object" ? detail?.code : undefined);
 }

@@ -91,7 +91,18 @@ async def run_worker(account_id: int) -> None:
     paused = asyncio.Event()
     paused.set()
 
-    client = build_client(account, proxy, device_profile)
+    try:
+        client = build_client(account, proxy, device_profile)
+    except ValueError as exc:
+        await _mark_login_required(account_id)
+        await _log(
+            redis,
+            account_id,
+            "error",
+            "账号登录凭据无法解密，请恢复原 MASTER_KEY 或重新登录该账号。",
+            detail={"error": str(exc)},
+        )
+        return
     make_command_handler(client, account_id)
 
     # 初始化命令派发上下文（含模板 + LLM provider 字典；由 IPC reload_commands 热更新）
@@ -510,6 +521,18 @@ async def _listen_global(redis, account_id: int, paused: asyncio.Event) -> None:
 async def _publish(redis, account_id: int, type_: str, **payload):
     """向 worker_event:{aid} 发一条事件。"""
     await redis.publish(event_channel(account_id), make_event(type_, **payload))
+
+
+async def _mark_login_required(account_id: int) -> None:
+    """worker 自检发现凭据不可用时，直接把账号置为需要重新登录。"""
+
+    from ..db.models.account import ACCOUNT_STATUS_LOGIN_REQUIRED
+
+    async with AsyncSessionLocal() as db:
+        account = await db.get(Account, account_id)
+        if account is not None:
+            account.status = ACCOUNT_STATUS_LOGIN_REQUIRED
+            await db.commit()
 
 
 def _build_proxy_url(

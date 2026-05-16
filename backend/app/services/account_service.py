@@ -25,6 +25,7 @@ from telethon.sessions import StringSession
 from ..crypto import decrypt_bytes, decrypt_str
 from ..db.models.account import (
     ACCOUNT_STATUS_ACTIVE,
+    ACCOUNT_STATUS_LOGIN_REQUIRED,
     ACCOUNT_STATUS_PAUSED,
     Account,
     Proxy,
@@ -224,6 +225,16 @@ async def resume(db: AsyncSession, aid: int) -> None:
     acc = await db.get(Account, aid)
     if not acc:
         raise _not_found()
+    try:
+        _ensure_account_secrets_decryptable(acc)
+    except ValueError as exc:
+        acc.status = ACCOUNT_STATUS_LOGIN_REQUIRED
+        await db.commit()
+        raise _err(
+            "ACCOUNT_SESSION_DECRYPT_FAILED",
+            "账号登录凭据无法解密，通常是 MASTER_KEY 已变更。请恢复原 MASTER_KEY，或重新登录该账号。",
+            422,
+        ) from exc
     acc.status = ACCOUNT_STATUS_ACTIVE
     await db.commit()
     if await _kill_switch_enabled(db):
@@ -246,6 +257,14 @@ async def _kill_switch_enabled(db: AsyncSession) -> bool:
     if isinstance(value, dict):
         return bool(value.get("enabled", False))
     return bool(value)
+
+
+def _ensure_account_secrets_decryptable(acc: Account) -> None:
+    """恢复前先验证账号核心密钥，避免 worker 启动后立刻 down。"""
+
+    decrypt_bytes(acc.session_enc)
+    decrypt_str(acc.api_id_enc)
+    decrypt_str(acc.api_hash_enc)
 
 
 # ── 删除 ──────────────────────────────────────────────────────────

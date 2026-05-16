@@ -65,6 +65,21 @@ def test_account_bot_token_payload_trims_whitespace() -> None:
     assert payload.bot_token == "123456:secret-token"
 
 
+def test_decrypt_bot_token_failure_is_user_fixable(monkeypatch) -> None:
+    row = AccountBot(account_id=1, bot_token_enc="old-key-token")
+    monkeypatch.setattr(
+        account_bot_service,
+        "decrypt_str",
+        lambda _value: (_ for _ in ()).throw(ValueError("解密失败：可能 MASTER_KEY 已变更")),
+    )
+
+    with pytest.raises(account_bot_service.HTTPException) as exc_info:
+        account_bot_service.decrypt_bot_token(row)
+
+    assert exc_info.value.status_code == 422
+    assert exc_info.value.detail["code"] == "ACCOUNT_BOT_TOKEN_DECRYPT_FAILED"
+
+
 def test_confirm_redis_key_uses_hash_not_plain_token() -> None:
     nonce = "plain-confirm-token"
     key = account_bot_runtime._confirm_redis_key(nonce)

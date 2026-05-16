@@ -134,6 +134,14 @@ async def update_bot_config(
             row.status = ACCOUNT_BOT_STATUS_DISABLED
     if row.enabled and not row.bot_token_enc:
         raise _bad("ACCOUNT_BOT_TOKEN_REQUIRED", "启用 Bot 前必须填写 Bot Token", 422)
+    if row.enabled:
+        try:
+            decrypt_bot_token(row)
+        except HTTPException:
+            row.enabled = False
+            row.status = ACCOUNT_BOT_STATUS_ERROR
+            row.last_error = "Bot Token 解密失败，请重新保存"
+            raise
     await db.flush()
     return row
 
@@ -222,7 +230,7 @@ def decrypt_bot_token(row: AccountBot) -> str:
     try:
         return decrypt_str(row.bot_token_enc)
     except ValueError as exc:
-        raise _bad("ACCOUNT_BOT_TOKEN_DECRYPT_FAILED", "Bot Token 解密失败，请重新保存", 500) from exc
+        raise _bad("ACCOUNT_BOT_TOKEN_DECRYPT_FAILED", "Bot Token 解密失败，请重新保存", 422) from exc
 
 
 async def call_bot_api(

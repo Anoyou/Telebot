@@ -562,6 +562,14 @@ async def _kill_switch_enabled() -> bool:
         return False
 
 
+async def _account_status(account_id: int) -> str | None:
+    try:
+        async with AsyncSessionLocal() as db:
+            return await db.scalar(select(Account.status).where(Account.id == account_id))
+    except Exception:  # noqa: BLE001
+        return None
+
+
 async def _listen_global() -> None:
     """监听 ``worker_global``：A Agent 登录完成会广播 ``start_worker`` 指令。"""
     redis = get_redis()
@@ -609,6 +617,11 @@ async def _monitor_loop() -> None:
                     continue
                 # 进程死了
                 if now < h.next_retry_at:
+                    continue
+                status = await _account_status(aid)
+                if status != ACCOUNT_STATUS_ACTIVE:
+                    h.desired = "stopped"
+                    log.info("worker %d 已退出且账号状态为 %s，停止自动重启", aid, status)
                     continue
                 h.fail_count += 1
                 if h.fail_count > len(_BACKOFF):

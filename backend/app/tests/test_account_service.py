@@ -118,6 +118,7 @@ async def test_resume_starts_supervisor_worker_when_kill_switch_off(monkeypatch:
     start_worker = AsyncMock()
     monkeypatch.setattr(supervisor, "start_worker", start_worker)
     monkeypatch.setattr(account_service, "_kill_switch_enabled", AsyncMock(return_value=False))
+    monkeypatch.setattr(account_service, "_ensure_account_secrets_decryptable", lambda _acc: None)
 
     await account_service.resume(db, 4)
 
@@ -137,9 +138,39 @@ async def test_resume_does_not_start_worker_when_kill_switch_on(monkeypatch: pyt
     start_worker = AsyncMock()
     monkeypatch.setattr(supervisor, "start_worker", start_worker)
     monkeypatch.setattr(account_service, "_kill_switch_enabled", AsyncMock(return_value=True))
+    monkeypatch.setattr(account_service, "_ensure_account_secrets_decryptable", lambda _acc: None)
 
     await account_service.resume(db, 5)
 
     assert acc.status == account_service.ACCOUNT_STATUS_ACTIVE
     db.commit.assert_awaited_once()
     start_worker.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_resume_marks_login_required_when_session_cannot_decrypt(monkeypatch: pytest.MonkeyPatch) -> None:
+    """MASTER_KEY 不匹配时，恢复账号应直接提示重新登录，而不是启动后反复 down。"""
+    acc = SimpleNamespace(
+        id=6,
+        status=account_service.ACCOUNT_STATUS_PAUSED,
+        session_enc=b"bad-session",
+        api_id_enc="bad-api-id",
+        api_hash_enc="bad-api-hash",
+    )
+    db = AsyncMock()
+    db.get = AsyncMock(return_value=acc)
+    db.commit = AsyncMock(return_value=None)
+
+    monkeypatch.setattr(
+        account_service,
+        "decrypt_bytes",
+        lambda _value: (_ for _ in ()).throw(ValueError("解密失败：可能 MASTER_KEY 已变更")),
+    )
+
+    with pytest.raises(account_service.HTTPException) as exc_info:
+        await account_service.resume(db, 6)
+
+    assert acc.status == account_service.ACCOUNT_STATUS_LOGIN_REQUIRED
+    db.commit.assert_awaited_once()
+    assert exc_info.value.status_code == 422
+    assert exc_info.value.detail["code"] == "ACCOUNT_SESSION_DECRYPT_FAILED"
