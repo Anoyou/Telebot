@@ -104,12 +104,19 @@ class CommandContext:
     sudo_prefix: str = "."
     sudo_enabled: bool = False
     self_tg_user_id: int | None = None
+    scheduler_command_whitelist: list[str] = None  # type: ignore[assignment]
 
     def __post_init__(self) -> None:
         if self.aliases is None:
             self.aliases = {}
         if self.sudo_users is None:
             self.sudo_users = {}
+        if self.scheduler_command_whitelist is None:
+            self.scheduler_command_whitelist = []
+        else:
+            self.scheduler_command_whitelist = normalize_command_whitelist(
+                self.scheduler_command_whitelist
+            )
 
 
 # 全局 ctx 由 runtime.py 在 worker 进程启动时初始化并通过闭包传给 handler；
@@ -140,6 +147,49 @@ def _format_sudo_command_scope(values: Any) -> str:
         return "全部（显式）"
     commands = normalize_sudo_commands(values)
     return ",".join(commands) or "未授权"
+
+
+def normalize_command_whitelist(values: Any) -> list[str]:
+    out: list[str] = []
+    seen: set[str] = set()
+    for item in values or []:
+        key = str(item or "").strip()
+        if not key or key in seen:
+            continue
+        out.append(key)
+        seen.add(key)
+    return out
+
+
+def parse_command_key_from_text(text: str, prefix: str) -> str | None:
+    raw = str(text or "").strip()
+    if not raw or not prefix or not raw.startswith(prefix):
+        return None
+    rest = raw[len(prefix):].lstrip()
+    if not rest:
+        return None
+    token = rest.split(None, 1)[0].strip()
+    if not token:
+        return None
+    if not _looks_like_command_name(token, prefix=prefix):
+        return None
+    return token
+
+
+def should_allow_auto_command_text(text: str, *, prefix: str | None = None) -> tuple[bool, str | None]:
+    effective_prefix = (
+        prefix
+        if prefix is not None
+        else ((_ctx.command_prefix if _ctx is not None else "") or settings.command_prefix or ",")
+    )
+    cmd_key = parse_command_key_from_text(text, effective_prefix)
+    if cmd_key is None:
+        return True, None
+    raw_whitelist = _ctx.scheduler_command_whitelist if _ctx is not None else []
+    whitelist = set(normalize_command_whitelist(raw_whitelist))
+    if cmd_key in whitelist:
+        return True, cmd_key
+    return False, cmd_key
 
 
 def builtin(name: str, *, aliases: tuple[str, ...] = (), doc: str = ""):

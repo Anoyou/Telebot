@@ -10,6 +10,7 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     Index,
+    JSON,
     String,
     Text,
     UniqueConstraint,
@@ -55,6 +56,7 @@ class AccountBot(Base):
     last_update_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     username: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    remote_plugin_policy: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

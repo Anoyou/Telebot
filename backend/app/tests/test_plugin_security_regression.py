@@ -219,6 +219,31 @@ class TestSandboxClientSecurity:
             _ = sandbox.__dict__
         assert "禁止访问" in str(ex.value)
 
+    @pytest.mark.asyncio
+    async def test_plugin_command_handler_receives_sandbox_client(self):
+        """插件命令 handler 不能收到 dispatcher 传入的原始 Telethon client。"""
+        from app.worker.plugins.base import PluginContext
+        from app.worker.plugins.loader import _wrap_cmd
+        from app.worker.plugins.sandbox import SandboxClient
+
+        raw_client = SimpleNamespace(session="REAL_SESSION_OBJECT")
+        sandbox = SandboxClient(raw_client, [], plugin_key="demo")
+        seen = {}
+
+        async def _handler(client, event, args, account_id, ctx):
+            seen["client"] = client
+            seen["account_id"] = account_id
+            seen["ctx"] = ctx
+
+        ctx = PluginContext(account_id=7, feature_key="demo", client=sandbox)
+        wrapped = _wrap_cmd(_handler, ctx)
+        await wrapped(raw_client, object(), [], 7)
+
+        assert seen["client"] is sandbox
+        assert seen["client"] is not raw_client
+        assert seen["account_id"] == 7
+        assert seen["ctx"] is ctx
+
     def test_sandbox_blocks_private_attrs(self):
         """禁止访问私有属性。"""
         sandbox = self._make_sandbox()

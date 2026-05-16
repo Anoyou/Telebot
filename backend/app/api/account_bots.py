@@ -10,6 +10,7 @@ from ..deps import CurrentUser, DBSession
 from ..schemas.account_bot import (
     AccountBotConfigResponse,
     AccountBotConfigUpdate,
+    AccountBotRemotePluginPolicy,
     AccountBotRuntimeResponse,
     AccountBotTestRequest,
     AccountBotTestResponse,
@@ -40,6 +41,7 @@ async def get_account_bot(
             enabled=False,
             status=ACCOUNT_BOT_STATUS_DISABLED,
             has_token=False,
+            remote_plugin_policy=AccountBotRemotePluginPolicy(),
         )
     return account_bot_service.config_to_response(row)
 
@@ -62,6 +64,7 @@ async def update_account_bot(
         detail={
             "enabled": payload.enabled,
             "token_changed": bool(payload.bot_token or payload.clear_token),
+            "remote_plugin_policy_changed": payload.remote_plugin_policy is not None,
         },
     )
     await db.commit()

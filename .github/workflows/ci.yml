@@ -1,0 +1,86 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: python -m pip install -e ".[dev]"
+
+      - name: Lint backend
+        working-directory: backend
+        run: ruff check app
+
+      - name: Test backend
+        working-directory: backend
+        run: pytest
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install pnpm
+        run: |
+          corepack enable
+          corepack prepare pnpm@9.15.9 --activate
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: pnpm install --frozen-lockfile
+
+      - name: Build frontend
+        working-directory: frontend
+        run: pnpm build
+
+  version-sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check release version sync
+        run: |
+          python - <<'PY'
+          import json
+          import re
+          from pathlib import Path
+
+          backend_init = Path("backend/app/__init__.py").read_text()
+          backend_pyproject = Path("backend/pyproject.toml").read_text()
+          frontend_version = Path("frontend/src/lib/version.ts").read_text()
+          frontend_package = json.loads(Path("frontend/package.json").read_text())
+          changelog = Path("CHANGELOG.md").read_text()
+
+          versions = {
+              "backend/app/__init__.py": re.search(r'__version__ = "([^"]+)"', backend_init).group(1),
+              "backend/pyproject.toml": re.search(r'version = "([^"]+)"', backend_pyproject).group(1),
+              "frontend/src/lib/version.ts": re.search(r'APP_VERSION = "([^"]+)"', frontend_version).group(1),
+              "frontend/package.json": frontend_package["version"],
+          }
+          unique = set(versions.values())
+          if len(unique) != 1:
+              raise SystemExit(f"版本号不一致: {versions}")
+          version = unique.pop()
+          if f"## [{version}]" not in changelog and "## [Unreleased]" not in changelog:
+              raise SystemExit(f"CHANGELOG.md 缺少版本 {version} 或 Unreleased 段")
+          print(f"version sync ok: {version}")
+          PY

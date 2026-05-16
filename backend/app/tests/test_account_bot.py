@@ -19,6 +19,8 @@ def test_account_bot_config_response_hides_plain_token() -> None:
 
     assert out.has_token is True
     assert "token" not in out.model_dump()
+    assert out.remote_plugin_policy.enabled is False
+    assert out.remote_plugin_policy.install is False
 
 
 def test_account_bot_role_matrix() -> None:
@@ -63,6 +65,27 @@ def test_account_bot_error_sanitizer_masks_token() -> None:
 def test_account_bot_token_payload_trims_whitespace() -> None:
     payload = AccountBotConfigUpdate(bot_token="  123456:secret-token  ")
     assert payload.bot_token == "123456:secret-token"
+
+
+def test_account_bot_remote_plugin_policy_defaults_closed() -> None:
+    policy = account_bot_service.normalize_remote_plugin_policy(None)
+    assert policy == {
+        "enabled": False,
+        "install": False,
+        "update": False,
+        "uninstall": False,
+        "enable_disable": False,
+    }
+
+
+def test_account_bot_remote_plugin_policy_update_is_partial() -> None:
+    policy = account_bot_service.normalize_remote_plugin_policy(
+        {"enabled": True, "install": True, "unknown": True}
+    )
+    assert policy["enabled"] is True
+    assert policy["install"] is True
+    assert policy["update"] is False
+    assert "unknown" not in policy
 
 
 def test_decrypt_bot_token_failure_is_user_fixable(monkeypatch) -> None:
@@ -245,7 +268,7 @@ async def test_confirm_action_owner_mismatch_does_not_consume_token(monkeypatch)
 
 
 @pytest.mark.asyncio
-async def test_toggle_feature_operator_can_toggle_non_builtin_without_confirm(monkeypatch) -> None:
+async def test_toggle_feature_operator_cannot_toggle_remote_plugin(monkeypatch) -> None:
     class _RemotePlugin:
         enabled = False
 
@@ -300,8 +323,9 @@ async def test_toggle_feature_operator_can_toggle_non_builtin_without_confirm(mo
     await account_bot_runtime._toggle_feature(incoming, "operator", "demo")
 
     assert req_confirm.await_count == 0
-    assert set_feature.await_count == 1
-    assert enable_remote.await_count == 1
-    assert write_audit.await_count == 1
+    assert set_feature.await_count == 0
+    assert enable_remote.await_count == 0
+    assert write_audit.await_count == 0
     assert answer.await_count == 1
-    assert answer.await_args.kwargs.get("text") == "已更新"
+    assert answer.await_args.kwargs.get("show_alert") is True
+    assert "仅 admin" in answer.await_args.kwargs.get("text")

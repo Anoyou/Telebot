@@ -29,6 +29,7 @@ from app.db.models.rule import Rule
 from app.services.ai_runtime import invoke as invoke_ai_runtime
 from app.services.llm_client import LLMCallFailed, LLMError
 from app.services.llm_dto import LLMProviderDTO
+from app.worker.command import should_allow_auto_command_text
 from app.worker.plugins.base import PluginContext
 
 log = logging.getLogger(__name__)
@@ -57,6 +58,10 @@ class SchedulerExecutionResult:
 
 ScheduleCallback = Callable[[ScheduledJob], Awaitable[None] | None]
 LogWriter = Callable[..., Awaitable[None]]
+
+
+class SchedulerCommandBlockedError(RuntimeError):
+    """scheduler 尝试触发不在白名单中的命令。"""
 
 
 @dataclass
@@ -291,6 +296,11 @@ class SchedulerRuleExecutor:
             else:
                 raise ValueError(f"unknown action.type={action_type}")
             return True
+        except SchedulerCommandBlockedError as exc:
+            cfg["last_error"] = str(exc)
+            if ctx.log is not None:
+                await ctx.log("info", f"[scheduler] rule={rule_id} blocked: {exc}")
+            return False
         except Exception as exc:  # noqa: BLE001
             cfg["last_error"] = f"{type(exc).__name__}: {exc}"
             if ctx.log is not None:
@@ -386,6 +396,11 @@ class SchedulerRuleExecutor:
     async def send_with_ratelimit(
         self, ctx: PluginContext, peer: int | str, text: str
     ) -> Any | None:
+        allowed, command_key = should_allow_auto_command_text(text)
+        if not allowed:
+            raise SchedulerCommandBlockedError(
+                f"auto command blocked by whitelist: {command_key}"
+            )
         peer_id = int(peer) if isinstance(peer, int) else None
         decision = await ctx.engine.acquire(
             ctx.account_id,

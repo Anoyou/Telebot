@@ -4,7 +4,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from ..deps import DBSession
+from ..deps import CurrentUser, DBSession
 from ..schemas.remote_plugin import RemotePluginCreate, RemotePluginOut
 from ..services import feature_service
 from ..services import remote_plugin_service as svc
@@ -21,7 +21,7 @@ router = APIRouter(prefix="/api/remote-plugins", tags=["remote-plugins"])
 
 
 @router.get("", response_model=list[RemotePluginOut])
-async def list_remote_plugins(db: DBSession):
+async def list_remote_plugins(db: DBSession, _user: CurrentUser):
     """列出所有已安装远程插件。"""
     rows = await svc.list_installed(db)
     return rows
@@ -29,7 +29,7 @@ async def list_remote_plugins(db: DBSession):
 
 @router.post("/install", response_model=RemotePluginOut, status_code=201)
 async def api_install_plugin(
-    body: RemotePluginCreate, db: DBSession
+    body: RemotePluginCreate, db: DBSession, _user: CurrentUser
 ):
     """从 Git URL 克隆并安装远程插件。
 
@@ -57,7 +57,7 @@ async def api_install_plugin(
 
 
 @router.post("/{name}/enable")
-async def api_enable(name: str, db: DBSession):
+async def api_enable(name: str, db: DBSession, _user: CurrentUser):
     """启用指定远程插件（全局开关）。"""
     try:
         row = await svc.enable(db, name, bootstrap_accounts=True)
@@ -70,7 +70,7 @@ async def api_enable(name: str, db: DBSession):
 
 
 @router.post("/{name}/disable")
-async def api_disable(name: str, db: DBSession):
+async def api_disable(name: str, db: DBSession, _user: CurrentUser):
     """禁用指定远程插件（全局开关）。"""
     try:
         row = await svc.disable(db, name)
@@ -87,7 +87,7 @@ class AccountPluginAction(BaseModel):
 
 
 @router.post("/{name}/enable-accounts")
-async def api_enable_accounts(name: str, body: AccountPluginAction, db: DBSession):
+async def api_enable_accounts(name: str, body: AccountPluginAction, db: DBSession, _user: CurrentUser):
     """按账号启用远程插件（写入 AccountFeature 行，功能矩阵可见）。"""
     # 先确认远程插件存在
     rp = await svc.get_by_name(db, name)
@@ -99,7 +99,7 @@ async def api_enable_accounts(name: str, body: AccountPluginAction, db: DBSessio
 
 
 @router.post("/{name}/disable-accounts")
-async def api_disable_accounts(name: str, body: AccountPluginAction, db: DBSession):
+async def api_disable_accounts(name: str, body: AccountPluginAction, db: DBSession, _user: CurrentUser):
     """按账号禁用远程插件。"""
     rp = await svc.get_by_name(db, name)
     if rp is None:
@@ -110,7 +110,7 @@ async def api_disable_accounts(name: str, body: AccountPluginAction, db: DBSessi
 
 
 @router.post("/{name}/update", response_model=RemotePluginOut)
-async def api_update(name: str, db: DBSession):
+async def api_update(name: str, db: DBSession, _user: CurrentUser):
     """从远程仓库 git pull 并更新插件元数据。"""
     try:
         row = await svc.update(db, name)
@@ -127,7 +127,7 @@ async def api_update(name: str, db: DBSession):
 
 
 @router.delete("/{name}")
-async def api_uninstall(name: str, db: DBSession):
+async def api_uninstall(name: str, db: DBSession, _user: CurrentUser):
     """卸载并删除指定远程插件（同时清理 Feature/AccountFeature 行）。"""
     found = await svc.uninstall(db, name)
     await db.commit()

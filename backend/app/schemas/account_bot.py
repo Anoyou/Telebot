@@ -12,6 +12,22 @@ from ..db.models.account_bot import ACCOUNT_BOT_ROLES
 AccountBotRole = Literal["viewer", "operator", "admin"]
 
 
+class AccountBotRemotePluginPolicy(BaseModel):
+    enabled: bool = False
+    install: bool = False
+    update: bool = False
+    uninstall: bool = False
+    enable_disable: bool = False
+
+
+class AccountBotRemotePluginPolicyUpdate(BaseModel):
+    enabled: bool | None = None
+    install: bool | None = None
+    update: bool | None = None
+    uninstall: bool | None = None
+    enable_disable: bool | None = None
+
+
 class AccountBotConfigResponse(BaseModel):
     """账号 Bot 配置出参；永不返回明文 token。"""
 
@@ -20,6 +36,7 @@ class AccountBotConfigResponse(BaseModel):
     status: str
     has_token: bool
     username: str | None = None
+    remote_plugin_policy: AccountBotRemotePluginPolicy
     last_update_id: int | None = None
     last_error: str | None = None
     created_at: datetime | None = None
@@ -32,6 +49,7 @@ class AccountBotConfigUpdate(BaseModel):
     bot_token: str | None = Field(default=None, min_length=10, max_length=256)
     clear_token: bool = False
     enabled: bool | None = None
+    remote_plugin_policy: AccountBotRemotePluginPolicyUpdate | None = None
 
     @field_validator("bot_token")
     @classmethod

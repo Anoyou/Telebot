@@ -929,7 +929,8 @@ def _wrap_cmd(fn, ctx: PluginContext):
     """把插件 ``commands`` 里登记的 5 参数 handler 包成命令分发期望的 4 参数签名。"""
 
     async def w(client, event, args, account_id):  # noqa: ANN001
-        await fn(client, event, args, account_id, ctx)
+        plugin_client = ctx.client if ctx.client is not None else client
+        await fn(plugin_client, event, args, account_id, ctx)
 
     return w
 

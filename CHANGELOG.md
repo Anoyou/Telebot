@@ -17,6 +17,27 @@
 
 ---
 
+## [0.15.1] — 2026-05-16 · fix · 收紧远程插件与自动命令安全边界
+
+### Fixed
+- 远程插件与插件仓库 API 现在要求 Web 登录态，避免未登录请求触发安装、启停、更新、卸载等高风险操作。
+- 第三方插件命令 handler 现在接收沙箱 client，不再绕过 manifest 权限拿到原始 Telethon client。
+- account_bot 的 Telegram 远程插件 install/update/uninstall/第三方启停改为 admin-only，并新增 Web 端细粒度高风险开关；默认全部关闭，执行前仍需二次确认。
+- scheduler 与自动回复触发命令时新增账号级白名单控制；非白名单命令会被拦截并记录，不再默认复用 Telegram 命令分发。
+
+### Added
+- 新增 account_bot 远程插件高风险策略迁移与前端配置入口。
+- 新增主 CI workflow，覆盖后端 ruff/pytest、前端 build 与版本号同步检查。
+- 新增远程插件鉴权、插件沙箱命令 client、account_bot 远程插件策略、自动命令白名单相关回归测试。
+
+### Verification
+- `backend/.venv/bin/ruff check backend/app/api/account_bots.py backend/app/api/plugin_repo.py backend/app/api/remote_plugin.py backend/app/schemas/account_bot.py backend/app/services/account_bot_runtime.py backend/app/services/account_bot_service.py backend/app/worker/command.py backend/app/worker/plugins/loader.py backend/app/worker/scheduler_runtime.py backend/app/worker/runtime.py backend/app/worker/plugins/builtin/auto_reply/plugin.py backend/app/tests/test_account_bot.py backend/app/tests/test_plugin_security_regression.py backend/app/tests/test_remote_plugin_repo_auth.py backend/app/tests/test_worker_command.py` 通过。
+- `PYTHONPYCACHEPREFIX=/private/tmp/telepilot_pycache backend/.venv/bin/python -m pytest backend/app/tests/test_account_bot.py backend/app/tests/test_plugin_security_regression.py backend/app/tests/test_remote_plugin_repo_auth.py backend/app/tests/test_worker_command.py backend/app/tests/test_scheduler_runtime.py` 通过（64 passed）。
+- `PYTHONPYCACHEPREFIX=/private/tmp/telepilot_pycache backend/.venv/bin/python -m pytest backend` 通过（576 passed, 2 skipped）。
+- `pnpm --dir frontend build` 通过。
+
+---
+
 ## [0.15.0] — 2026-05-16 · feature · TelePilot rename 收口
 
 ### Changed

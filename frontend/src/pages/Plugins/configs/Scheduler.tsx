@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Pencil, Play, Plus, Trash2, Zap } from "lucide-react";
@@ -6,11 +6,16 @@ import { toast } from "sonner";
 
 import { getSystemSettings } from "@/api/system";
 import { listAccounts } from "@/api/accounts";
-import { executeRule } from "@/api/features";
+import {
+  executeRule,
+  getEffectiveConfig,
+  updateAccountFeatureConfig,
+} from "@/api/features";
 import type {
   RuleDryRunResponse,
   RuleExecuteResponse,
   RuleOut,
+  SchedulerFeatureConfig,
   SchedulerRuleConfig,
 } from "@/api/types";
 import { Button } from "@/components/ui/button";
@@ -112,6 +117,14 @@ export function SchedulerConfig() {
     queryFn: getSystemSettings,
   });
   const tz = tzQ.data?.timezone || "";
+  const schedulerCfgQ = useQuery({
+    queryKey: ["features", aid, "scheduler", "config"],
+    queryFn: () =>
+      getEffectiveConfig(aid, "scheduler") as Promise<SchedulerFeatureConfig>,
+    enabled: aid > 0,
+  });
+  const [whitelistText, setWhitelistText] = useState("");
+  const [whitelistDirty, setWhitelistDirty] = useState(false);
 
   // Scheduler 不需要 featureKey（没有"功能总开关"语义）
   const crud = useRuleCrud({ aid, ruleKind: "scheduler" });
@@ -231,6 +244,15 @@ export function SchedulerConfig() {
   const [execRule, setExecRule] = useState<RuleOut | null>(null);
   const [execResult, setExecResult] = useState<RuleExecuteResponse | null>(null);
 
+  const schedulerWhitelist = (
+    schedulerCfgQ.data?.allowed_command_whitelist || []
+  ).join("\n");
+  useEffect(() => {
+    if (!whitelistDirty) {
+      setWhitelistText(schedulerWhitelist);
+    }
+  }, [schedulerWhitelist, whitelistDirty]);
+
   function openExec(rule: RuleOut) {
     setExecRule(rule);
     setExecResult(null);
@@ -244,6 +266,24 @@ export function SchedulerConfig() {
       if (res.ok) {
         crud.rulesQ.refetch();
       }
+    },
+    onError: (err) => toast.error(getErrMsg(err)),
+  });
+
+  const saveWhitelistMut = useMutation({
+    mutationFn: async () => {
+      const whitelist = whitelistText
+        .split("\n")
+        .map((s) => s.trim())
+        .filter(Boolean);
+      await updateAccountFeatureConfig(aid, "scheduler", {
+        allowed_command_whitelist: whitelist,
+      });
+    },
+    onSuccess: async () => {
+      setWhitelistDirty(false);
+      await schedulerCfgQ.refetch();
+      toast.success("命令白名单已保存");
     },
     onError: (err) => toast.error(getErrMsg(err)),
   });
@@ -314,6 +354,41 @@ export function SchedulerConfig() {
             </span>
           </div>
         </CardHeader>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">自动命令白名单</CardTitle>
+          <CardDescription>
+            scheduler/自动动作触发命令时，仅允许此处命令 key（每行一个，不带前缀）。
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <Textarea
+            value={whitelistText}
+            onChange={(e) => {
+              setWhitelistText(e.target.value);
+              setWhitelistDirty(true);
+            }}
+            placeholder={"测试\nhelp"}
+            rows={5}
+          />
+          <div className="flex justify-end">
+            <Button
+              onClick={() => saveWhitelistMut.mutate()}
+              disabled={
+                !whitelistDirty ||
+                saveWhitelistMut.isPending ||
+                schedulerCfgQ.isLoading
+              }
+            >
+              {saveWhitelistMut.isPending ? (
+                <Spinner className="mr-2" />
+              ) : null}
+              保存白名单
+            </Button>
+          </div>
+        </CardContent>
       </Card>
 
       <Card>

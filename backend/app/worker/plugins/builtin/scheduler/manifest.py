@@ -34,6 +34,14 @@ MANIFEST = Manifest(
                 "minimum": 1, "maximum": 100,
                 "level": "global",
             },
+            "allowed_command_whitelist": {
+                "type": "array",
+                "title": "自动命令白名单",
+                "items": {"type": "string"},
+                "default": [],
+                "description": "仅这些命令 key 允许由 scheduler/自动动作触发；示例：测试（不要写前缀）。",
+                "level": "account",
+            },
         },
     },
 )

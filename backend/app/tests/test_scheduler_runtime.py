@@ -9,6 +9,7 @@ import pytest
 
 from app.services.llm_client import LLMResult
 from app.services.llm_dto import LLMProviderDTO
+from app.worker.command import CommandContext, set_command_context
 from app.worker.scheduler_runtime import PlatformScheduler, SchedulerRuleExecutor
 
 
@@ -178,3 +179,31 @@ async def test_action_call_llm_uses_shared_service_invoke(monkeypatch) -> None:
     assert system == "sys"
     assert user == "hello"
     send_mock.assert_awaited_once_with(ctx, 123, "done")
+
+
+@pytest.mark.asyncio
+async def test_scheduler_send出口_blocks_non_whitelisted_command_text() -> None:
+    set_command_context(
+        CommandContext(
+            account_id=42,
+            templates={},
+            providers={},
+            command_prefix="。",
+            scheduler_command_whitelist=["允许"],
+        )
+    )
+    executor = SchedulerRuleExecutor()
+    ctx = SimpleNamespace(account_id=42, engine=AsyncMock(), client=AsyncMock(), log=AsyncMock())
+    cfg = {
+        "action": {
+            "type": "send_message",
+            "target_chat_id": 123,
+            "text": "。禁止",
+        }
+    }
+
+    ok = await executor.fire(ctx, 9, cfg)
+
+    assert ok is False
+    assert "blocked by whitelist" in cfg["last_error"]
+    ctx.client.send_message.assert_not_awaited()

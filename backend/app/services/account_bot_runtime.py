@@ -55,6 +55,7 @@ _TASK_LOCK = asyncio.Lock()
 _CONFIRM_PREFIX = "account_bot_confirm:"
 _CONFIRM_TTL_SECONDS = 300
 _MAX_BUTTON_ROWS = 24
+_REMOTE_POLICY_HINT = "该功能默认关闭，请管理员在 Web 控制台启用后重试（高风险操作，仍需二次确认）。"
 
 
 @dataclass(slots=True)
@@ -537,7 +538,7 @@ async def _show_help(incoming: Incoming, role: str, *, edit: bool = False) -> No
         "/status 查看账号、worker 与最近错误\n"
         "/features 查看并启停账号功能\n"
         "/commands 查看并启停自定义命令模板\n"
-        "/plugins 查看插件入口，复杂安装/卸载请用 GUI\n"
+        "/plugins 查看插件入口（远程插件高风险能力默认关闭）\n"
         "/rules 查看规则，scheduler 规则可手动执行\n"
         "/logs 查看最近运行日志\n"
         "/pause /resume 暂停或恢复账号\n"
@@ -614,6 +615,14 @@ async def _show_features(incoming: Incoming, role: str, *, edit: bool = False) -
 
 
 async def _show_plugins(incoming: Incoming, role: str, *, edit: bool = False) -> None:
+    policy = await _get_remote_plugin_policy(incoming.account_id)
+    policy_summary = (
+        f"总开关：{'开' if policy['enabled'] else '关'}，"
+        f"install：{'开' if policy['install'] else '关'}，"
+        f"update：{'开' if policy['update'] else '关'}，"
+        f"uninstall：{'开' if policy['uninstall'] else '关'}，"
+        f"第三方启停：{'开' if policy['enable_disable'] else '关'}"
+    )
     async with AsyncSessionLocal() as db:
         features = await feature_service.list_features(db)
         afs = await feature_service.get_account_features(db, incoming.account_id)
@@ -627,6 +636,7 @@ async def _show_plugins(incoming: Incoming, role: str, *, edit: bool = False) ->
         "<code>/plugins install &lt;git-url&gt;</code>",
         "<code>/plugins update &lt;name&gt;</code>",
         "<code>/plugins uninstall &lt;name&gt;</code>",
+        f"远程高风险开关：{policy_summary}",
         "",
     ]
     rows: list[list[dict[str, str]]] = []
@@ -669,6 +679,10 @@ async def _handle_plugins_command(incoming: Incoming, role: str) -> None:
     sub = parts[0].lower()
     value = parts[1].strip() if len(parts) > 1 else ""
     if sub == "install" and value:
+        allowed, message = await _check_remote_plugin_permission(incoming.account_id, role, "install")
+        if not allowed:
+            await _send(incoming, message, reply_markup=_main_keyboard(incoming.account_id))
+            return
         await _request_confirm(
             incoming,
             role,
@@ -678,6 +692,10 @@ async def _handle_plugins_command(incoming: Incoming, role: str) -> None:
         )
         return
     if sub == "update" and value:
+        allowed, message = await _check_remote_plugin_permission(incoming.account_id, role, "update")
+        if not allowed:
+            await _send(incoming, message, reply_markup=_main_keyboard(incoming.account_id))
+            return
         await _request_confirm(
             incoming,
             role,
@@ -687,6 +705,10 @@ async def _handle_plugins_command(incoming: Incoming, role: str) -> None:
         )
         return
     if sub in {"uninstall", "remove", "delete"} and value:
+        allowed, message = await _check_remote_plugin_permission(incoming.account_id, role, "uninstall")
+        if not allowed:
+            await _send(incoming, message, reply_markup=_main_keyboard(incoming.account_id))
+            return
         await _request_confirm(
             incoming,
             role,
@@ -809,22 +831,14 @@ async def _toggle_feature(incoming: Incoming, role: str, key: str) -> None:
         ).scalar_one_or_none()
         enabled = not bool(current and current.enabled)
         if not feature.is_builtin:
-            if not account_bot_service.role_allows(role, ACCOUNT_BOT_ROLE_ADMIN):
-                if enabled:
-                    remote = await remote_plugin_service.get_by_name(db, key)
-                    if remote is not None and not remote.enabled:
-                        await remote_plugin_service.enable(db, key)
-                await feature_service.set_account_feature(db, incoming.account_id, key, enabled)
-                await audit.write(
-                    db,
-                    None,
-                    "account_bot.feature_toggle",
-                    target=f"account:{incoming.account_id}/feature:{key}",
-                    detail=_audit_detail(incoming, role, {"enabled": enabled}),
+            allowed, message = await _check_remote_plugin_permission(incoming.account_id, role, "enable_disable")
+            if not allowed:
+                await account_bot_service.answer_callback(
+                    incoming.token,
+                    incoming.callback_id or "",
+                    text=message[:100],
+                    show_alert=True,
                 )
-                await db.commit()
-                await account_bot_service.answer_callback(incoming.token, incoming.callback_id or "", text="已更新")
-                await _show_features(incoming, role, edit=True)
                 return
             if incoming.callback_id:
                 await account_bot_service.answer_callback(incoming.token, incoming.callback_id, text="请确认")
@@ -1142,6 +1156,12 @@ async def _execute_confirmed_action(
         await _restart_account_worker(incoming, role)
         return
     if action == "plugin_install":
+        allowed, message = await _check_remote_plugin_permission(incoming.account_id, role, "install")
+        if not allowed:
+            await account_bot_service.answer_callback(
+                incoming.token, incoming.callback_id or "", text=message[:100], show_alert=True
+            )
+            return
         source_url = str(payload.get("source_url") or "").strip()
         if not source_url:
             await account_bot_service.answer_callback(incoming.token, incoming.callback_id or "", text="缺少 Git URL", show_alert=True)
@@ -1160,6 +1180,12 @@ async def _execute_confirmed_action(
         await _show_plugins(incoming, role, edit=True)
         return
     if action == "plugin_update":
+        allowed, message = await _check_remote_plugin_permission(incoming.account_id, role, "update")
+        if not allowed:
+            await account_bot_service.answer_callback(
+                incoming.token, incoming.callback_id or "", text=message[:100], show_alert=True
+            )
+            return
         name = str(payload.get("name") or "").strip()
         async with AsyncSessionLocal() as db:
             row = await remote_plugin_service.update(db, name)
@@ -1175,6 +1201,12 @@ async def _execute_confirmed_action(
         await _show_plugins(incoming, role, edit=True)
         return
     if action == "plugin_uninstall":
+        allowed, message = await _check_remote_plugin_permission(incoming.account_id, role, "uninstall")
+        if not allowed:
+            await account_bot_service.answer_callback(
+                incoming.token, incoming.callback_id or "", text=message[:100], show_alert=True
+            )
+            return
         name = str(payload.get("name") or "").strip()
         async with AsyncSessionLocal() as db:
             found = await remote_plugin_service.uninstall(db, name)
@@ -1193,6 +1225,12 @@ async def _execute_confirmed_action(
         await _show_plugins(incoming, role, edit=True)
         return
     if action == "plugin_toggle":
+        allowed, message = await _check_remote_plugin_permission(incoming.account_id, role, "enable_disable")
+        if not allowed:
+            await account_bot_service.answer_callback(
+                incoming.token, incoming.callback_id or "", text=message[:100], show_alert=True
+            )
+            return
         key = str(payload.get("feature_key") or "").strip()
         enabled = bool(payload.get("enabled"))
         if not key:
@@ -1220,6 +1258,28 @@ async def _execute_confirmed_action(
         await _show_plugins(incoming, role, edit=True)
         return
     await account_bot_service.answer_callback(incoming.token, incoming.callback_id or "", text="未知确认动作", show_alert=True)
+
+
+async def _get_remote_plugin_policy(account_id: int) -> dict[str, bool]:
+    async with AsyncSessionLocal() as db:
+        row = (
+            await db.execute(select(AccountBot).where(AccountBot.account_id == account_id))
+        ).scalar_one_or_none()
+    return account_bot_service.normalize_remote_plugin_policy(
+        row.remote_plugin_policy if row is not None else None
+    )
+
+
+async def _check_remote_plugin_permission(account_id: int, role: str, action: str) -> tuple[bool, str]:
+    if not account_bot_service.role_allows(role, ACCOUNT_BOT_ROLE_ADMIN):
+        return False, "仅 admin 可执行远程插件高风险操作。"
+    policy = await _get_remote_plugin_policy(account_id)
+    if not policy.get("enabled", False):
+        return False, _REMOTE_POLICY_HINT
+    key = action if action in {"install", "update", "uninstall", "enable_disable"} else ""
+    if key and not policy.get(key, False):
+        return False, f"远程插件 {key} 未开启。{_REMOTE_POLICY_HINT}"
+    return True, ""
 
 
 async def _send(

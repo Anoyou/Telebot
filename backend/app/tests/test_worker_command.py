@@ -9,7 +9,13 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from app.worker.command import _BUILTIN, CommandContext, set_command_context
+from app.worker.command import (
+    _BUILTIN,
+    CommandContext,
+    parse_command_key_from_text,
+    set_command_context,
+    should_allow_auto_command_text,
+)
 
 
 @pytest.mark.asyncio
@@ -236,3 +242,41 @@ async def test_help_hides_removed_high_risk_commands():
     assert "sudo add" not in msg
     assert "sudo del" not in msg
     assert "restart" in msg
+
+
+def test_parse_command_key_from_text() -> None:
+    assert parse_command_key_from_text("。测试", "。") == "测试"
+    assert parse_command_key_from_text("。测试 参数", "。") == "测试"
+    assert parse_command_key_from_text("测试", "。") is None
+
+
+def test_should_allow_auto_command_text_by_whitelist() -> None:
+    set_command_context(
+        CommandContext(
+            account_id=1,
+            templates={},
+            providers={},
+            command_prefix="。",
+            scheduler_command_whitelist=["测试"],
+        )
+    )
+    allowed, key = should_allow_auto_command_text("。测试")
+    assert allowed is True
+    assert key == "测试"
+
+    denied, denied_key = should_allow_auto_command_text("。帮助")
+    assert denied is False
+    assert denied_key == "帮助"
+
+
+def test_should_block_auto_command_text_when_ctx_missing() -> None:
+    from app.worker import command as wcmd
+
+    old_ctx = wcmd._ctx  # type: ignore[attr-defined]
+    wcmd._ctx = None  # type: ignore[attr-defined]
+    try:
+        allowed, key = should_allow_auto_command_text(",help")
+        assert allowed is False
+        assert key == "help"
+    finally:
+        wcmd._ctx = old_ctx  # type: ignore[attr-defined]

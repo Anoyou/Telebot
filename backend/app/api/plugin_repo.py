@@ -4,7 +4,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from ..deps import DBSession
+from ..deps import CurrentUser, DBSession
 from ..schemas.plugin_repo import PluginRepoCreate, PluginRepoOut, PluginRepoPlugin
 from ..schemas.remote_plugin import RemotePluginOut
 from ..services import plugin_repo_service as svc
@@ -27,13 +27,13 @@ router = APIRouter(prefix="/api/plugin-repos", tags=["plugin-repos"])
 
 
 @router.get("", response_model=list[PluginRepoOut])
-async def list_plugin_repos(db: DBSession):
+async def list_plugin_repos(db: DBSession, _user: CurrentUser):
     """列出所有保存的插件仓库。"""
     return await svc.list_repos(db)
 
 
 @router.post("", response_model=PluginRepoOut, status_code=201)
-async def create_plugin_repo(body: PluginRepoCreate, db: DBSession):
+async def create_plugin_repo(body: PluginRepoCreate, db: DBSession, _user: CurrentUser):
     """保存一个新仓库（仅写库；浏览插件请单独调 ``/{id}/plugins``）。"""
     try:
         row = await svc.create_repo(
@@ -53,7 +53,7 @@ async def create_plugin_repo(body: PluginRepoCreate, db: DBSession):
 
 
 @router.delete("/{repo_id}")
-async def delete_plugin_repo(repo_id: int, db: DBSession):
+async def delete_plugin_repo(repo_id: int, db: DBSession, _user: CurrentUser):
     """删除仓库（**不**联动卸载已安装的插件，只是从“目录索引”里摘掉）。"""
     found = await svc.delete_repo(db, repo_id)
     if not found:
@@ -66,7 +66,7 @@ async def delete_plugin_repo(repo_id: int, db: DBSession):
 
 
 @router.get("/{repo_id}/plugins", response_model=list[PluginRepoPlugin])
-async def list_repo_plugins(repo_id: int, db: DBSession):
+async def list_repo_plugins(repo_id: int, db: DBSession, _user: CurrentUser):
     """列出指定仓库内所有可装插件。
 
     首次访问会触发 ``git clone``；后续访问只做 ``git fetch + reset``，比较快。
@@ -97,6 +97,7 @@ async def install_plugin_from_repo(
     repo_id: int,
     plugin_name: str,
     db: DBSession,
+    _user: CurrentUser,
     body: InstallFromRepoBody | None = None,
 ):
     """安装仓库中指定名字的插件。

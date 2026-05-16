@@ -24,10 +24,16 @@ from ..crypto import decrypt_str
 from ..db.base import AsyncSessionLocal
 from ..db.models.account import Account, Proxy, SudoUser
 from ..db.models.command import AccountCommandLink, CommandAlias, CommandTemplate, LLMProvider
+from ..db.models.feature import FEATURE_SCHEDULER, AccountFeature
 from ..db.models.system import SystemSetting
 from ..redis_client import get_redis
 from ..settings import settings as app_settings
-from .command import CommandContext, make_command_handler, set_command_context
+from .command import (
+    CommandContext,
+    make_command_handler,
+    normalize_command_whitelist,
+    set_command_context,
+)
 from .ipc import (
     CMD_EXECUTE_RULE,
     CMD_FETCH_AVATAR,
@@ -585,6 +591,7 @@ async def _refresh_command_context(account_id: int) -> None:
     sudo_prefix: str = "."
     sudo_enabled = False
     self_tg_user_id: int | None = None
+    scheduler_command_whitelist: list[str] = []
     async with AsyncSessionLocal() as db:
         # 0) 命令前缀（系统设置）
         try:
@@ -736,6 +743,19 @@ async def _refresh_command_context(account_id: int) -> None:
                 "allowed_commands": list(r.allowed_commands or []),
             }
 
+        # 5) scheduler 命令白名单（账号级 feature config）
+        af_scheduler = (
+            await db.execute(
+                select(AccountFeature).where(
+                    AccountFeature.account_id == account_id,
+                    AccountFeature.feature_key == FEATURE_SCHEDULER,
+                )
+            )
+        ).scalar_one_or_none()
+        if af_scheduler is not None and isinstance(af_scheduler.config, dict):
+            raw_whitelist = af_scheduler.config.get("allowed_command_whitelist")
+            scheduler_command_whitelist = normalize_command_whitelist(raw_whitelist)
+
     set_command_context(
         CommandContext(
             account_id=account_id,
@@ -747,6 +767,7 @@ async def _refresh_command_context(account_id: int) -> None:
             sudo_prefix=sudo_prefix,
             sudo_enabled=sudo_enabled,
             self_tg_user_id=self_tg_user_id,
+            scheduler_command_whitelist=scheduler_command_whitelist,
         )
     )
 

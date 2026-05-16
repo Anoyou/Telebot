@@ -36,6 +36,7 @@ from telethon import events
 # 模块化重构后改用绝对 import：第三方插件解压到 data/plugins/installed/{key}/
 # 时也只能走绝对 import，因此 builtin 同样统一用绝对路径以保持一致性。
 from app.db.models.feature import FEATURE_AUTO_REPLY
+from app.worker.command import should_allow_auto_command_text
 from app.worker.plugins.base import Plugin, PluginContext, register
 from app.worker.ratelimit.humanize import simulate_read, simulate_typing
 
@@ -165,6 +166,16 @@ class AutoReplyPlugin(Plugin):
             text_out = _render(cfg.get("reply", ""), sender, chat, text)
             if not text_out:
                 # 无内容直接 return：也算命中并消耗冷却
+                return
+            allowed, command_key = should_allow_auto_command_text(text_out)
+            if not allowed:
+                if ctx.log is not None:
+                    await ctx.log(
+                        "info",
+                        f"[auto_reply] 规则 #{rule.id} 跳过：命令不在白名单（{command_key}）",
+                        rule_id=rule.id,
+                        command=command_key,
+                    )
                 return
 
             # 8) 真正发送 + Telegram 异常回灌 engine

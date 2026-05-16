@@ -28,6 +28,7 @@ from ..db.models.account_bot import (
 from ..schemas.account_bot import (
     AccountBotConfigResponse,
     AccountBotConfigUpdate,
+    AccountBotRemotePluginPolicy,
     AccountBotUserCreate,
     AccountBotUserUpdate,
 )
@@ -69,13 +70,35 @@ def sanitize_bot_error(exc: BaseException | str, *, token: str | None = None) ->
     return text or type(exc).__name__
 
 
+def default_remote_plugin_policy() -> dict[str, bool]:
+    return {
+        "enabled": False,
+        "install": False,
+        "update": False,
+        "uninstall": False,
+        "enable_disable": False,
+    }
+
+
+def normalize_remote_plugin_policy(raw: Any) -> dict[str, bool]:
+    base = default_remote_plugin_policy()
+    if not isinstance(raw, dict):
+        return base
+    for key in base:
+        if key in raw:
+            base[key] = bool(raw[key])
+    return base
+
+
 def config_to_response(row: AccountBot, *, account_id: int | None = None) -> AccountBotConfigResponse:
+    remote_plugin_policy = normalize_remote_plugin_policy(row.remote_plugin_policy)
     return AccountBotConfigResponse(
         account_id=int(account_id or row.account_id),
         enabled=bool(row.enabled),
         status=row.status or ACCOUNT_BOT_STATUS_DISABLED,
         has_token=bool(row.bot_token_enc),
         username=row.username,
+        remote_plugin_policy=AccountBotRemotePluginPolicy(**remote_plugin_policy),
         last_update_id=row.last_update_id,
         last_error=row.last_error,
         created_at=row.created_at,
@@ -102,9 +125,12 @@ async def get_bot_config(db: AsyncSession, aid: int, *, create: bool = True) -> 
             account_id=aid,
             enabled=False,
             status=ACCOUNT_BOT_STATUS_DISABLED,
+            remote_plugin_policy=default_remote_plugin_policy(),
         )
         db.add(row)
         await db.flush()
+    elif not row.remote_plugin_policy:
+        row.remote_plugin_policy = default_remote_plugin_policy()
     return row
 
 
@@ -132,6 +158,11 @@ async def update_bot_config(
         row.enabled = bool(payload.enabled)
         if not row.enabled:
             row.status = ACCOUNT_BOT_STATUS_DISABLED
+    if payload.remote_plugin_policy is not None:
+        current = normalize_remote_plugin_policy(row.remote_plugin_policy)
+        patch = payload.remote_plugin_policy.model_dump(exclude_unset=True)
+        merged = {**current, **{k: bool(v) for k, v in patch.items()}}
+        row.remote_plugin_policy = normalize_remote_plugin_policy(merged)
     if row.enabled and not row.bot_token_enc:
         raise _bad("ACCOUNT_BOT_TOKEN_REQUIRED", "启用 Bot 前必须填写 Bot Token", 422)
     if row.enabled:

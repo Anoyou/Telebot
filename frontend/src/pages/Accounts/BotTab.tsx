@@ -45,7 +45,11 @@ import {
   updateAccountBot,
   updateAccountBotUser,
 } from "@/api/accountBots";
-import type { AccountBotRole, AccountBotUserCreate } from "@/api/types";
+import type {
+  AccountBotRemotePluginPolicy,
+  AccountBotRole,
+  AccountBotUserCreate,
+} from "@/api/types";
 import { getErrMsg } from "@/lib/api";
 import { formatDateTime } from "@/lib/utils";
 
@@ -65,11 +69,22 @@ const HELP_PREVIEW = `/start  打开主菜单
 /pause /resume 暂停或恢复账号
 /restart 重启账号 worker（admin + 二次确认）`;
 
+const DEFAULT_REMOTE_POLICY: AccountBotRemotePluginPolicy = {
+  enabled: false,
+  install: false,
+  update: false,
+  uninstall: false,
+  enable_disable: false,
+};
+
 export function BotTab({ aid }: { aid: number }) {
   const qc = useQueryClient();
   const [enabled, setEnabled] = useState(false);
   const [token, setToken] = useState("");
   const [clearToken, setClearToken] = useState(false);
+  const [remotePolicy, setRemotePolicy] = useState<AccountBotRemotePluginPolicy>(
+    DEFAULT_REMOTE_POLICY,
+  );
   const [newUser, setNewUser] = useState<AccountBotUserCreate>({
     tg_user_id: 0,
     display_name: "",
@@ -94,8 +109,9 @@ export function BotTab({ aid }: { aid: number }) {
       setEnabled(botQ.data.enabled);
       setClearToken(false);
       setToken("");
+      setRemotePolicy(botQ.data.remote_plugin_policy ?? DEFAULT_REMOTE_POLICY);
     }
-  }, [botQ.data?.enabled, botQ.data?.has_token]);
+  }, [botQ.data?.enabled, botQ.data?.has_token, botQ.data?.remote_plugin_policy]);
 
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ["account", aid, "bot"] });
@@ -108,6 +124,7 @@ export function BotTab({ aid }: { aid: number }) {
         enabled,
         clear_token: clearToken,
         bot_token: token.trim() || null,
+        remote_plugin_policy: remotePolicy,
       }),
     onSuccess: () => {
       toast.success("Bot 配置已保存");
@@ -198,6 +215,34 @@ export function BotTab({ aid }: { aid: number }) {
           <CardContent className="space-y-4">
             <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
               安全提示：涉及重启、安装等危险操作时，需在 Telegram 内完成二次确认后才会执行。
+            </div>
+            <div className="space-y-3 rounded-md border border-red-300 bg-red-50 px-3 py-3">
+              <div className="text-sm font-medium text-red-900">远程插件高风险开关（admin）</div>
+              <div className="text-xs text-red-800">
+                默认全部关闭；即使开启后，Telegram 内仍需二次确认才会执行 install/update/uninstall/第三方启停。
+              </div>
+              <div className="grid gap-2 text-sm md:grid-cols-2">
+                {[
+                  ["enabled", "总开关"],
+                  ["install", "允许 install"],
+                  ["update", "允许 update"],
+                  ["uninstall", "允许 uninstall"],
+                  ["enable_disable", "允许第三方 enable/disable"],
+                ].map(([key, label]) => (
+                  <label key={key} className="flex items-center justify-between rounded border bg-white px-3 py-2">
+                    <span>{label}</span>
+                    <Switch
+                      checked={remotePolicy[key as keyof AccountBotRemotePluginPolicy]}
+                      onCheckedChange={(checked) =>
+                        setRemotePolicy((prev) => ({
+                          ...prev,
+                          [key]: checked,
+                        }))
+                      }
+                    />
+                  </label>
+                ))}
+              </div>
             </div>
             <div className="grid gap-3 sm:grid-cols-2">
               <div className="space-y-1.5">
