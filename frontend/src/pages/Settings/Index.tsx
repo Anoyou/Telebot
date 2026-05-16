@@ -381,28 +381,33 @@ export function SettingsIndex() {
                 </Button>
               </div>
               {guideActive ? (
-              <div className="mt-3">
-                <GuideInlineCard
-                  expanded={guideExpanded}
-                  currentStep={currentStep}
-                  onToggle={() => setGuideExpanded((v) => !v)}
-                  onPrimary={() => nav("/plugins?guide=1")}
-                  onSkip={() => nav("/plugins?guide=1")}
-                />
-              </div>
+                <div className="mt-3">
+                  <GuideInlineCard
+                    expanded={guideExpanded}
+                    currentStep={currentStep}
+                    onToggle={() => setGuideExpanded((v) => !v)}
+                    onPrimary={() => nav("/plugins?guide=1")}
+                    onSkip={() => nav("/plugins?guide=1")}
+                  />
+                </div>
               ) : null}
               <div className="mt-4 max-w-[460px] rounded-xl border bg-background p-3 text-xs">
                 <div className="mb-3 font-medium">触发预览</div>
                 <div className="rounded-2xl border bg-gradient-to-b from-sky-50 to-emerald-50 p-3 dark:from-sky-950/30 dark:to-emerald-950/20">
                   <div className="space-y-3">
+                    <div className="w-fit max-w-[78%] rounded-2xl rounded-bl-md border bg-card px-3 py-2 text-foreground shadow-sm sm:max-w-[66%]">
+                      <div className="font-mono">
+                        这是一段被回复的原文。
+                      </div>
+                    </div>
                     <div className="ml-auto w-fit max-w-[68%] rounded-2xl rounded-br-md bg-sky-500 px-3 py-2 text-white shadow-sm sm:max-w-[52%]">
                       <div className="mb-1 inline-block max-w-full rounded-lg border-l-2 border-white/70 bg-white/15 px-2 py-1 text-[11px] leading-relaxed text-white/90">
                         这是一段被回复的原文。
                       </div>
                       <div className="font-mono">{prefix || ","}ai 请总结这段内容</div>
                     </div>
-                    <div className="w-fit max-w-[78%] rounded-2xl rounded-bl-md border bg-card px-3 py-2 text-foreground shadow-sm sm:max-w-[66%]">
-                      <div className="font-semibold">(๑•̌.•̑๑)ˀ̣ˀ̣ˀ̣ 好奇</div>
+                    <div className="ml-auto w-fit max-w-[78%] rounded-2xl rounded-br-md border bg-card px-3 py-2 text-foreground shadow-sm sm:max-w-[66%]">
+                      <div className="font-semibold">{prefix || ","}(๑•̌.•̑๑)ˀ̣ˀ̣ˀ̣ 好奇</div>
                       <div className="mt-2 inline-block max-w-full rounded-lg border-l-2 bg-muted/40 px-2 py-1 text-muted-foreground">
                         这是一段被回复的原文。
                       </div>
@@ -416,8 +421,8 @@ export function SettingsIndex() {
                       <div className="mt-2 inline-block max-w-full rounded-lg border-l-2 bg-muted/40 px-2 py-1 text-muted-foreground">
                         这里是从第三行开始的回答内容。
                       </div>
-                      <div className="my-3 text-center text-muted-foreground">━━━━━━━━━━━━━━━</div>
-                      <div className="text-center font-semibold">✦ gpt-5.4 · OpenAI ✦</div>
+                      <div className="my-3 text-left text-muted-foreground">━━━━━━━━━━━━━━━</div>
+                      <div className="text-left font-semibold">✦ GPT-5.5 · OpenAI ✦</div>
                     </div>
                   </div>
                 </div>

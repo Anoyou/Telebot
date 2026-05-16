@@ -9,6 +9,7 @@ import pytest
 
 from app.schemas.account import AccountUpdateRequest
 from app.services import account_service
+from app.worker import supervisor
 
 
 @pytest.mark.asyncio
@@ -83,3 +84,62 @@ async def test_update_account_not_found() -> None:
         await account_service.update_account(db, 404, AccountUpdateRequest(display_name="x"))
     assert exc_info.value.status_code == 404
     assert exc_info.value.detail["code"] == "ACCOUNT_NOT_FOUND"
+
+
+@pytest.mark.asyncio
+async def test_pause_stops_supervisor_worker(monkeypatch: pytest.MonkeyPatch) -> None:
+    """暂停账号必须真正停止 supervisor 托管的 worker。"""
+    acc = SimpleNamespace(id=3, status=account_service.ACCOUNT_STATUS_ACTIVE)
+    db = AsyncMock()
+    db.get = AsyncMock(return_value=acc)
+    db.commit = AsyncMock(return_value=None)
+
+    stop_worker = AsyncMock()
+    publish = AsyncMock()
+    monkeypatch.setattr(supervisor, "stop_worker", stop_worker)
+    monkeypatch.setattr(account_service, "_publish", publish)
+
+    await account_service.pause(db, 3)
+
+    assert acc.status == account_service.ACCOUNT_STATUS_PAUSED
+    db.commit.assert_awaited_once()
+    stop_worker.assert_awaited_once_with(3)
+    publish.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_resume_starts_supervisor_worker_when_kill_switch_off(monkeypatch: pytest.MonkeyPatch) -> None:
+    """恢复账号时，总闸关闭才会立即拉起对应 worker。"""
+    acc = SimpleNamespace(id=4, status=account_service.ACCOUNT_STATUS_PAUSED)
+    db = AsyncMock()
+    db.get = AsyncMock(return_value=acc)
+    db.commit = AsyncMock(return_value=None)
+
+    start_worker = AsyncMock()
+    monkeypatch.setattr(supervisor, "start_worker", start_worker)
+    monkeypatch.setattr(account_service, "_kill_switch_enabled", AsyncMock(return_value=False))
+
+    await account_service.resume(db, 4)
+
+    assert acc.status == account_service.ACCOUNT_STATUS_ACTIVE
+    db.commit.assert_awaited_once()
+    start_worker.assert_awaited_once_with(4)
+
+
+@pytest.mark.asyncio
+async def test_resume_does_not_start_worker_when_kill_switch_on(monkeypatch: pytest.MonkeyPatch) -> None:
+    """紧急停用开启时，恢复账号只写 active 状态，不绕过总闸启动 worker。"""
+    acc = SimpleNamespace(id=5, status=account_service.ACCOUNT_STATUS_PAUSED)
+    db = AsyncMock()
+    db.get = AsyncMock(return_value=acc)
+    db.commit = AsyncMock(return_value=None)
+
+    start_worker = AsyncMock()
+    monkeypatch.setattr(supervisor, "start_worker", start_worker)
+    monkeypatch.setattr(account_service, "_kill_switch_enabled", AsyncMock(return_value=True))
+
+    await account_service.resume(db, 5)
+
+    assert acc.status == account_service.ACCOUNT_STATUS_ACTIVE
+    db.commit.assert_awaited_once()
+    start_worker.assert_not_awaited()

@@ -535,21 +535,31 @@ async def get_kill_switch(db: DBSession, _user: CurrentUser) -> dict[str, bool]:
 
 @router.post("/api/system/kill-switch")
 async def post_kill_switch(payload: KillSwitchRequest, db: DBSession, user: CurrentUser) -> dict[str, bool]:
-    await _set_setting(db, "kill_switch", {"enabled": bool(payload.enabled)})
+    enabled = bool(payload.enabled)
+    await _set_setting(db, "kill_switch", {"enabled": enabled})
     await _audit(
         db,
         user.id,
         "kill_switch",
         target="system",
-        detail={"enabled": payload.enabled},
+        detail={"enabled": enabled},
     )
-    # 全局广播给所有 worker
+    try:
+        from ..worker import supervisor
+
+        if enabled:
+            await supervisor.stop_running_workers()
+        else:
+            await supervisor.start_active_workers()
+    except Exception:  # noqa: BLE001
+        pass
+    # 全局广播给其它监听者 / 多进程场景
     try:
         redis = get_redis()
-        await redis.publish(GLOBAL_CHANNEL, make_cmd(GCMD_KILL_SWITCH, enabled=bool(payload.enabled)))
+        await redis.publish(GLOBAL_CHANNEL, make_cmd(GCMD_KILL_SWITCH, enabled=enabled))
     except Exception:
         pass
-    return {"enabled": payload.enabled}
+    return {"enabled": enabled}
 
 
 @router.get("/api/system/global-limits")

@@ -17,6 +17,36 @@
 
 ---
 
+## [0.14.13] — 2026-05-16 · fix · 修复账号启停与紧急停用
+
+### Fixed
+- 账号暂停现在会通过 supervisor 真正停止对应 worker，不再只写 DB 状态或仅发送 worker 自己可能收不到的 pause 消息。
+- 账号恢复现在会通过 supervisor 直接拉起对应 worker；kill switch 开启期间不会误拉起 worker。
+- 全局紧急停用现在会停止当前所有 worker，并阻止 active 账号在总闸开启期间被自动拉起；解除后自动恢复 active 账号 worker。
+- 更新紧急停用相关前端文案，从“暂停”改为“停止”，与实际控制语义一致。
+
+### Verification
+- `git diff --check` 通过。
+- `backend/.venv/bin/ruff check backend/app` 通过。
+- `PYTHONPYCACHEPREFIX=/private/tmp/telebot_pycache backend/.venv/bin/python -m py_compile backend/app/services/account_service.py backend/app/worker/supervisor.py backend/app/api/rate_limit.py backend/app/__init__.py` 通过。
+- `PYTHONPYCACHEPREFIX=/private/tmp/telebot_pycache backend/.venv/bin/python -m pytest backend/app/tests/test_account_service.py backend/app/tests/test_kill_switch_supervisor.py backend/app/tests/test_system_health.py` 通过（25 passed，1 个 Alembic 配置弃用警告）。
+- `pnpm --dir frontend exec tsc -b --noEmit` 通过。
+- `pnpm --dir frontend build` 通过。
+
+---
+
+## [0.14.12] — 2026-05-16 · fix · 修复命令前缀预览
+
+### Fixed
+- 修复设置页命令前缀触发预览的 JSX 语法错误，恢复三段式 Telegram 对话预览。
+- 预览中补齐“被回复原文 → 用户触发命令 → AI 回复结果”的顺序，并在回复标题中展示当前命令前缀。
+
+### Verification
+- `pnpm --dir frontend exec tsc -b --noEmit` 通过。
+- `pnpm --dir frontend build` 通过。
+
+---
+
 ## [0.14.11] — 2026-05-16 · polish · 资源占用与新手引导细化
 
 ### Changed

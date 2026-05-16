@@ -124,7 +124,7 @@ function KillSwitchBar() {
         <ShieldAlert className="h-4 w-4 shrink-0" />
         <span className="font-medium">全局总闸已开启</span>
         <span className="hidden text-muted-foreground sm:inline">
-          所有账号 worker 已暂停，仅保留接收
+          所有账号 worker 已停止，解除后自动恢复 active 账号
         </span>
       </div>
       <Button

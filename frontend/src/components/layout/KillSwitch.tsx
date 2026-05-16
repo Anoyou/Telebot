@@ -31,7 +31,7 @@ export function KillSwitch() {
       await api.post("/api/system/kill-switch", { enabled: next });
     },
     onSuccess: (_, next) => {
-      toast.success(next ? "已开启紧急停用：所有 worker 已暂停" : "已恢复运行");
+      toast.success(next ? "已开启紧急停用：所有账号 worker 已停止" : "已恢复运行");
       qc.invalidateQueries({ queryKey: ["system", "kill-switch"] });
       qc.invalidateQueries({ queryKey: ["accounts"] });
     },
@@ -46,7 +46,7 @@ export function KillSwitch() {
       onClick={() => {
         if (mut.isPending) return;
         const next = !enabled;
-        if (next && !confirm("确认要紧急停用所有账号？所有 worker 立即暂停。")) return;
+        if (next && !confirm("确认要紧急停用所有账号？所有 worker 会立即停止。")) return;
         mut.mutate(next);
       }}
     >
