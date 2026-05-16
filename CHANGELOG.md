@@ -17,6 +17,17 @@
 
 ---
 
+## [0.15.4] — 2026-05-16 · fix · 修复 CI 测试环境变量
+
+### Fixed
+- 为 backend CI job 注入测试专用 `MASTER_KEY` 与 `JWT_SECRET`，避免远端 pytest 在 settings collection 阶段因缺少必填配置失败。
+
+### Verification
+- `backend/.venv/bin/ruff check backend/app` 通过。
+- `pnpm --dir frontend build` 通过。
+
+---
+
 ## [0.15.3] — 2026-05-16 · fix · 修复 CI 后端 lint
 
 ### Fixed

@@ -9,6 +9,9 @@ on:
 jobs:
   backend:
     runs-on: ubuntu-latest
+    env:
+      MASTER_KEY: "4QAy7kFzv2mkHRXTHwL_FEZABz0R3sqat5rBl4vDLXk="
+      JWT_SECRET: "telepilot-ci-jwt-secret-only-for-tests"
     steps:
       - uses: actions/checkout@v4
 
