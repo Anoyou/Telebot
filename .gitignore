@@ -17,8 +17,8 @@ data/
 backend/data/
 backend/plugins/
 plugins/installed/*
-!plugins/installed/translate/
-!plugins/installed/translate/**
+!plugins/installed/codex_image/
+!plugins/installed/codex_image/**
 
 # Python
 __pycache__/

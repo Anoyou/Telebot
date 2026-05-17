@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import binascii
 import io
 import json
 import re
@@ -30,6 +31,7 @@ from typing import Any
 
 import httpx
 
+from app.worker.command import current_command_prefix
 from app.worker.plugins.base import Plugin, PluginContext, register
 
 # ─── 常量 ───────────────────────────────────────────────
@@ -78,6 +80,11 @@ _STREAM_RECOVERABLE_ERRORS = (
     httpx.ConnectError,
     httpx.ConnectTimeout,
 )
+_CODEX_HEADERS_BASE = {
+    "User-Agent": "TelePilot codex_image/1.1",
+    "Origin": "https://chatgpt.com",
+    "Referer": "https://chatgpt.com/codex",
+}
 
 # ─── 工具函数 ───────────────────────────────────────────
 
@@ -96,6 +103,20 @@ def _html_escape(text: str) -> str:
 def _strip_html_tags(text: str) -> str:
     """HTML 解析失败时兜底展示纯文本，避免把标签原样发到 Telegram。"""
     return re.sub(r"</?[^>]+>", "", str(text or ""))
+
+
+def _looks_like_html(text: str, content_type: str = "") -> bool:
+    sample = str(text or "").lstrip()[:300].lower()
+    ctype = str(content_type or "").lower()
+    return "text/html" in ctype or sample.startswith("<!doctype html") or sample.startswith("<html")
+
+
+def _compact_html_text(text: str, max_len: int = 160) -> str:
+    cleaned = _strip_html_tags(text)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    if len(cleaned) > max_len:
+        cleaned = cleaned[:max_len] + "…"
+    return cleaned
 
 
 async def _edit_html(event: Any, text: str) -> None:
@@ -123,6 +144,81 @@ def _safe_error_text(text: str, max_len: int = 500) -> str:
     return out
 
 
+def _with_error_prefix(text: str) -> str:
+    msg = str(text or "").strip()
+    if msg.startswith("❌"):
+        return msg
+    return f"❌ {msg}" if msg else "❌ 操作失败"
+
+
+def _is_probably_image_base64(value: str) -> bool:
+    raw = str(value or "").strip()
+    if len(raw) < 64:
+        return False
+    if not re.fullmatch(r"[A-Za-z0-9+/=\s_-]+", raw):
+        return False
+    normalized = raw.replace("-", "+").replace("_", "/")
+    normalized = re.sub(r"\s+", "", normalized)
+    padding = "=" * (-len(normalized) % 4)
+    try:
+        head = base64.b64decode((normalized + padding)[:256], validate=False)
+    except (binascii.Error, ValueError):
+        return False
+    return (
+        head.startswith(b"\x89PNG\r\n\x1a\n")
+        or head.startswith(b"\xff\xd8\xff")
+        or (head[:4] == b"RIFF" and head[8:12] == b"WEBP")
+    )
+
+
+def _extract_codex_artifacts(value: Any) -> tuple[str | None, str | None, str | None]:
+    """Extract image/error fields from Codex/Responses shaped payloads."""
+    image_base64: str | None = None
+    revised_prompt: str | None = None
+    error_info: str | None = None
+
+    def visit(node: Any, parent_type: str = "") -> None:
+        nonlocal image_base64, revised_prompt, error_info
+        if node is None:
+            return
+        if isinstance(node, list):
+            for item in node:
+                visit(item, parent_type)
+            return
+        if not isinstance(node, dict):
+            return
+
+        node_type = str(node.get("type") or parent_type or "")
+        for key in ("partial_image_b64", "image_base64", "b64_json"):
+            candidate = node.get(key)
+            if isinstance(candidate, str) and candidate:
+                image_base64 = candidate
+        result = node.get("result")
+        if (
+            isinstance(result, str)
+            and result
+            and ("image_generation" in node_type or _is_probably_image_base64(result))
+        ):
+            image_base64 = result
+
+        revised = node.get("revised_prompt")
+        if isinstance(revised, str) and revised:
+            revised_prompt = revised
+
+        err = node.get("error")
+        if isinstance(err, dict):
+            error_info = str(err.get("message") or err.get("code") or err)
+        elif isinstance(err, str) and err:
+            error_info = err
+
+        for nested in node.values():
+            if isinstance(nested, (dict, list)):
+                visit(nested, node_type)
+
+    visit(value)
+    return image_base64, revised_prompt, error_info
+
+
 def _format_seconds(seconds: Any) -> str | None:
     try:
         total = max(0, int(seconds))
@@ -141,9 +237,18 @@ def _format_seconds(seconds: Any) -> str | None:
     return "".join(parts) or "不到1分钟"
 
 
-def _humanize_codex_error(status_code: int, detail: str) -> str:
+def _humanize_codex_error(status_code: int, detail: str, *, content_type: str = "") -> str:
     """把 Codex API 错误翻译成人话，避免原始 JSON 和敏感信息外泄。"""
     safe_detail = _safe_error_text(detail)
+    if _looks_like_html(detail, content_type):
+        html_hint = _compact_html_text(detail)
+        status_hint = f"HTTP {status_code}" if status_code else "非 JSON/SSE 响应"
+        return (
+            f"❌ Codex 返回了网页而不是 API 数据（{status_hint}）。\n"
+            "💡 通常是 Access Token 失效/复制错、ChatGPT 登录态过期、或网络/代理被防护页拦截。"
+            "请重新从 `.codex/auth.json` 复制 `access_token` 保存；如果后端跑在 Docker/服务器里，也要确认它能通过可用代理访问 `chatgpt.com`。\n"
+            f"页面摘要：{_safe_error_text(html_hint)}"
+        )
     payload: Any = None
     try:
         payload = json.loads(detail)
@@ -519,8 +624,10 @@ async def _call_codex_image(
     }
 
     headers = {
+        **_CODEX_HEADERS_BASE,
         "Authorization": f"Bearer {token}",
         "Content-Type": "application/json",
+        "Accept": "text/event-stream, application/json",
     }
 
     result: dict[str, str | None] = {
@@ -538,7 +645,20 @@ async def _call_codex_image(
             async with client.stream("POST", CODEX_URL, json=payload, headers=headers) as resp:
                 if resp.status_code != 200:
                     body = await resp.aread()
-                    raise CodexApiError(resp.status_code, body.decode("utf-8", errors="replace")[:500])
+                    raise CodexApiError(
+                        resp.status_code,
+                        body.decode("utf-8", errors="replace")[:500],
+                        content_type=resp.headers.get("content-type", ""),
+                    )
+
+                content_type = resp.headers.get("content-type", "")
+                if "text/event-stream" not in content_type.lower() and "json" not in content_type.lower():
+                    body = await resp.aread()
+                    raise CodexApiError(
+                        resp.status_code,
+                        body.decode("utf-8", errors="replace")[:500],
+                        content_type=content_type,
+                    )
 
                 buffer = ""
                 async for raw_chunk in resp.aiter_text():
@@ -561,6 +681,11 @@ async def _call_codex_image(
                                 continue
 
                             event_type = obj.get("type", "")
+                            image_b64, revised, error_info = _extract_codex_artifacts(obj)
+                            result["image_base64"] = image_b64 or result["image_base64"]
+                            result["revised_prompt"] = revised or result["revised_prompt"]
+                            if error_info:
+                                raise CodexApiError(200, error_info)
                             if event_type == "response.created":
                                 result["response_id"] = (obj.get("response") or {}).get("id") or result["response_id"]
                                 result["status"] = (obj.get("response") or {}).get("status") or result["status"]
@@ -614,7 +739,20 @@ async def _call_codex_image(
 
         # 有错误信息 → 直接报错，不再空等
         if polled.get("error"):
-            raise RuntimeError(_humanize_codex_error(0, polled["error"]))
+            poll_status = int(polled.get("error_status_code") or 0)
+            poll_content_type = str(polled.get("error_content_type") or "")
+            # Auth/login/html responses will not become a valid image by waiting.
+            if poll_status in {401, 403, 404} or _looks_like_html(str(polled["error"]), poll_content_type):
+                raise RuntimeError(
+                    _humanize_codex_error(
+                        poll_status,
+                        str(polled["error"]),
+                        content_type=poll_content_type,
+                    )
+                )
+            if update_status:
+                await update_status(f"⚠️ 轮询返回异常，继续等待 Codex 结果...（第 {attempt} 次）")
+            continue
 
         # 状态不再是 in_progress → 可能完成也可能失败
         if polled.get("status") and polled["status"] not in ("in_progress", "queued", "completed"):
@@ -650,7 +788,9 @@ async def _poll_codex_response(
     """轮询 Codex 响应状态。"""
     remaining_timeout = max(1.0, min(60.0, deadline - time.monotonic()))
     headers = {
+        **_CODEX_HEADERS_BASE,
         "Authorization": f"Bearer {token}",
+        "Accept": "application/json",
     }
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(remaining_timeout)) as client:
@@ -662,48 +802,35 @@ async def _poll_codex_response(
                     err_body = resp.json()
                     err_msg = (err_body.get("error", {}) or {}).get("message") if isinstance(err_body.get("error"), dict) else err_body.get("error")
                 except Exception:
-                    err_msg = resp.text[:200] if resp.text else f"HTTP {resp.status_code}"
+                    err_msg = resp.text[:500] if resp.text else f"HTTP {resp.status_code}"
                 return {
                     "image_base64": None,
                     "revised_prompt": None,
                     "status": "failed",
                     "response_id": response_id,
                     "error": str(err_msg) if err_msg else f"HTTP {resp.status_code}",
+                    "error_status_code": str(resp.status_code),
+                    "error_content_type": resp.headers.get("content-type", ""),
                 }
 
-            data = resp.json().get("response", resp.json())
+            content_type = resp.headers.get("content-type", "")
+            if _looks_like_html(resp.text[:500], content_type):
+                return {
+                    "image_base64": None,
+                    "revised_prompt": None,
+                    "status": "failed",
+                    "response_id": response_id,
+                    "error": resp.text[:500],
+                    "error_status_code": str(resp.status_code),
+                    "error_content_type": content_type,
+                }
+
+            body = resp.json()
+            data = body.get("response", body)
             if not data or not isinstance(data, dict):
                 return None
 
-            image_base64: str | None = None
-            revised_prompt: str | None = None
-
-            def visit(value: Any) -> None:
-                nonlocal image_base64, revised_prompt
-                if not value or not isinstance(value, (dict, list)):
-                    return
-                if isinstance(value, list):
-                    for item in value:
-                        visit(item)
-                    return
-                # dict
-                if isinstance(value.get("partial_image_b64"), str) and value["partial_image_b64"]:
-                    image_base64 = value["partial_image_b64"]
-                if isinstance(value.get("revised_prompt"), str) and value["revised_prompt"]:
-                    revised_prompt = value["revised_prompt"]
-                for v in value.values():
-                    if isinstance(v, (dict, list)):
-                        visit(v)
-
-            visit(data)
-
-            # 提取错误信息
-            error_info: str | None = None
-            error_obj = data.get("error")
-            if isinstance(error_obj, dict):
-                error_info = error_obj.get("message") or error_obj.get("code") or str(error_obj)
-            elif isinstance(error_obj, str):
-                error_info = error_obj
+            image_base64, revised_prompt, error_info = _extract_codex_artifacts(data)
 
             return {
                 "image_base64": image_base64,
@@ -711,6 +838,8 @@ async def _poll_codex_response(
                 "status": data.get("status") if isinstance(data.get("status"), str) else None,
                 "response_id": data.get("id") if isinstance(data.get("id"), str) else response_id,
                 "error": error_info,
+                "error_status_code": None,
+                "error_content_type": None,
             }
     except Exception:
         return None
@@ -722,9 +851,10 @@ async def _poll_codex_response(
 class CodexApiError(Exception):
     """Codex API 调用失败。"""
 
-    def __init__(self, status_code: int, detail: str) -> None:
+    def __init__(self, status_code: int, detail: str, *, content_type: str = "") -> None:
         self.status_code = status_code
         self.detail = detail
+        self.content_type = content_type
         super().__init__(f"Codex API 错误 ({status_code}): {detail}")
 
 
@@ -735,10 +865,10 @@ HELP_TEXT = """<b>Codex 图片生成插件</b>
 通过 Codex API 调用 GPT 图片生成模型。
 
 <b>用法：</b>
-<code>,cximg 提示词</code> — 纯文本生成图片
-回复图片后发送 <code>,cximg 提示词</code> — 参考图生成
-<code>,cximg token 你的 access token</code> — 保存 Token
-<code>,cximg token</code> — 查看当前 Token
+<code>{prefix}cximg 提示词</code> — 纯文本生成图片
+回复图片后发送 <code>{prefix}cximg 提示词</code> — 参考图生成
+<code>{prefix}cximg token 你的 access token</code> — 保存 Token
+<code>{prefix}cximg token</code> — 查看当前 Token
 
 <b>Token 获取：</b>
 通常在 <code>.codex/auth.json</code> 文件中找到 access_token"""
@@ -751,7 +881,7 @@ HELP_TEXT = """<b>Codex 图片生成插件</b>
 class CodexImagePlugin(Plugin):
     key = "codex_image"
     display_name = "Codex 图片生成"
-    description = HELP_TEXT
+    description = "通过 Codex API 调用 GPT 图片生成模型，命令前缀跟随系统设置。"
     message_channels = {"incoming", "outgoing"}
     owner_only = True
     command_config_keys = {"command"}
@@ -832,14 +962,15 @@ class CodexImagePlugin(Plugin):
 
         prompt, image_opts = _parse_generation_args(args, ctx, reference_size, reference_ratio)
         cmd = _command_name(ctx)
+        usage_cmd = f"{_html_escape(current_command_prefix())}{_html_escape(cmd)}"
         if not prompt:
             await _edit_html(
                 event,
-                f"❌ 请输入提示词，例如：<code>,{_html_escape(cmd)} 一只戴墨镜的柴犬坐在跑车里</code>\n"
-                f"• 指定比例：<code>,{_html_escape(cmd)} --比例 4:3 云海里的城市</code>\n"
-                f"• 指定尺寸/格式：<code>,{_html_escape(cmd)} --size 1536x1024 --format jpeg 海边日落</code>\n"
-                f"• 使用原图尺寸：<code>,{_html_escape(cmd)} --size 原图 云海里的城市</code>（回复图片时）\n"
-                f"• 设置 Token：<code>,{_html_escape(cmd)} token 你的codex access token</code>"
+                f"❌ 请输入提示词，例如：<code>{usage_cmd} 一只戴墨镜的柴犬坐在跑车里</code>\n"
+                f"• 指定比例：<code>{usage_cmd} --比例 4:3 云海里的城市</code>\n"
+                f"• 指定尺寸/格式：<code>{usage_cmd} --size 1536x1024 --format jpeg 海边日落</code>\n"
+                f"• 使用原图尺寸：<code>{usage_cmd} --size 原图 云海里的城市</code>（回复图片时）\n"
+                f"• 设置 Token：<code>{usage_cmd} token 你的codex access token</code>"
             )
             return
 
@@ -854,12 +985,13 @@ class CodexImagePlugin(Plugin):
         token_value = " ".join(args).strip()
         current_token = _get_config_value(ctx, "access_token", "")
         cmd = _command_name(ctx)
+        usage_cmd = f"{_html_escape(current_command_prefix())}{_html_escape(cmd)}"
 
         if not token_value:
             await _edit_html(
                 event,
                 f"🔐 当前 Token：{_mask_token(current_token)}\n"
-                f"• 设置方式：<code>,{_html_escape(cmd)} token 你的codex access token（通常在 .codex/auth.json）</code>"
+                f"• 设置方式：<code>{usage_cmd} token 你的codex access token（通常在 .codex/auth.json）</code>"
             )
             return
 
@@ -883,10 +1015,11 @@ class CodexImagePlugin(Plugin):
         # 获取 token
         token = _get_config_value(ctx, "access_token", "")
         cmd = _command_name(ctx)
+        usage_cmd = f"{_html_escape(current_command_prefix())}{_html_escape(cmd)}"
         if not token:
             await _edit_html(
                 event,
-                f"❌ 缺少鉴权，请先使用 <code>,{_html_escape(cmd)} token 你的codex access token（通常在 .codex/auth.json）</code> 保存 Token"
+                f"❌ 缺少鉴权，请先使用 <code>{usage_cmd} token 你的codex access token（通常在 .codex/auth.json）</code> 保存 Token"
             )
             return
 
@@ -1013,7 +1146,7 @@ class CodexImagePlugin(Plugin):
                 )
             await _edit_html(
                 event,
-                f"❌ {_html_escape(_humanize_codex_error(exc.status_code, exc.detail))}\n⏱️ 耗时：{elapsed}"
+                f"{_html_escape(_with_error_prefix(_humanize_codex_error(exc.status_code, exc.detail, content_type=exc.content_type)))}\n⏱️ 耗时：{elapsed}"
             )
             return
         except TimeoutError as exc:
@@ -1022,7 +1155,7 @@ class CodexImagePlugin(Plugin):
             elapsed = _format_duration((time.monotonic() - started_at) * 1000)
             if ctx.log:
                 await ctx.log("warn", "[codex_image] timeout", elapsed=elapsed)
-            await _edit_html(event, f"❌ {_html_escape(_safe_error_text(str(exc)))}\n⏱️ 耗时：{elapsed}")
+            await _edit_html(event, f"{_html_escape(_with_error_prefix(_safe_error_text(str(exc))))}\n⏱️ 耗时：{elapsed}")
             return
         except Exception as exc:
             heartbeat_stop = True
@@ -1035,7 +1168,7 @@ class CodexImagePlugin(Plugin):
                     error=type(exc).__name__,
                     elapsed=elapsed,
                 )
-            await _edit_html(event, f"❌ {_html_escape(_humanize_codex_exception(exc))}\n⏱️ 耗时：{elapsed}")
+            await _edit_html(event, f"{_html_escape(_with_error_prefix(_humanize_codex_exception(exc)))}\n⏱️ 耗时：{elapsed}")
             return
 
         heartbeat_stop = True
@@ -1204,6 +1337,7 @@ __all__ = [
     "CodexImagePlugin",
     "PLUGIN_CLASS",
     "_dry_run_match",
+    "_extract_codex_artifacts",
     "_image_ext_from_bytes",
     "_parse_generation_args",
 ]

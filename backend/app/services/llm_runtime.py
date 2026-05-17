@@ -180,6 +180,8 @@ async def call_with_fallback(
     override_model: str | None = None,
     max_tokens: int = 512,
     images: list[bytes] | None = None,
+    web_search: bool = False,
+    web_search_context_size: str | None = None,
     *,
     # 隐私控制
     log_prompt_preview: bool = False,  # 设为 True 时只记录前 100 字符
@@ -265,6 +267,8 @@ async def call_with_fallback(
                 override_model=override_model,
                 max_tokens=max_tokens,
                 images=images,
+                web_search=web_search,
+                web_search_context_size=web_search_context_size,
                 log_prompt_preview=log_prompt_preview,
                 client_factory=client_factory,
             )
@@ -453,6 +457,8 @@ async def _call_with_retry(
     override_model: str | None,
     max_tokens: int,
     images: list[bytes] | None,
+    web_search: bool,
+    web_search_context_size: str | None,
     log_prompt_preview: bool,
     client_factory: Callable[..., Any | Awaitable[Any]] | None = None,
     max_retries: int = _MAX_RETRIES,
@@ -478,12 +484,22 @@ async def _call_with_retry(
             )
             if inspect.isawaitable(client):
                 client = await client
-            result = await client.complete(
-                system,
-                user,
-                max_tokens=max_tokens,
-                images=images,
-            )
+            if web_search:
+                result = await client.complete(
+                    system,
+                    user,
+                    max_tokens=max_tokens,
+                    images=images,
+                    web_search=True,
+                    web_search_context_size=web_search_context_size,
+                )
+            else:
+                result = await client.complete(
+                    system,
+                    user,
+                    max_tokens=max_tokens,
+                    images=images,
+                )
             latency_ms = int((time.monotonic() - start_time) * 1000)
 
             if attempt > 0:

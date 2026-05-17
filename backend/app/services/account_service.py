@@ -299,14 +299,29 @@ async def _logout_best_effort(db: AsyncSession, acc: Account) -> None:
     if acc.proxy_id:
         proxy = await db.get(Proxy, acc.proxy_id)
         if proxy:
-            proxy_tuple = (
-                proxy.type,
-                proxy.host,
-                proxy.port,
-                True,
-                proxy.username,
-                decrypt_str(proxy.password_enc) if proxy.password_enc else None,
-            )
+            password = decrypt_str(proxy.password_enc) if proxy.password_enc else None
+            if "://" in proxy.host:
+                from ..util.proxy import parse_proxy_url
+                proxy_tuple = parse_proxy_url(proxy.host)
+                if proxy_tuple is not None:
+                    ptype, host, port, rdns, parsed_user, parsed_password = proxy_tuple
+                    proxy_tuple = (
+                        ptype,
+                        host,
+                        port,
+                        rdns,
+                        proxy.username or parsed_user,
+                        password or parsed_password,
+                    )
+            if proxy_tuple is None:
+                proxy_tuple = (
+                    proxy.type,
+                    proxy.host,
+                    proxy.port,
+                    True,
+                    proxy.username,
+                    password,
+                )
 
     client = TelegramClient(StringSession(session_str), api_id, api_hash, proxy=proxy_tuple)
     try:

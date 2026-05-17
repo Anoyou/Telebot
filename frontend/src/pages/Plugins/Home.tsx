@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowRight,
   FlaskConical,
@@ -10,7 +10,16 @@ import {
   Sparkles,
 } from "lucide-react";
 
-import { getFeatureMatrix } from "@/api/features";
+import {
+  getFeatureMatrix,
+  getPluginGlobalConfig,
+  setPluginGlobalConfig,
+  updateAccountFeatureConfig,
+} from "@/api/features";
+import { getSystemSettings } from "@/api/system";
+import { listAccountFeatures } from "@/api/accounts";
+import type { FeatureInfo } from "@/api/types";
+import { ConfigDialog, type ConfigSchema } from "@/components/plugin/ConfigDialog";
 import { Spinner } from "@/components/ui/misc";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -31,9 +40,17 @@ const DANGEROUS_CMD_BANNER_KEY = "telebot.plugins_home.banner.v0_13_dangerous_cm
 
 export function PluginsHome() {
   const nav = useNavigate();
+  const qc = useQueryClient();
   const [searchParams] = useSearchParams();
   const [selectedAid, setSelectedAid] = useState<number | null>(null);
   const [guideExpanded, setGuideExpanded] = useState(false);
+  const [configDialog, setConfigDialog] = useState<{
+    key: string;
+    name: string;
+    schema: Record<string, unknown> | null;
+    globalConfig: Record<string, unknown>;
+    accountConfig: Record<string, unknown>;
+  } | null>(null);
   const guideActive = searchParams.get("guide") === "1";
   const [bannerVisible, setBannerVisible] = useState(() => {
     if (typeof window === "undefined") return false;
@@ -43,9 +60,18 @@ export function PluginsHome() {
     queryKey: ["matrix"],
     queryFn: getFeatureMatrix,
   });
+  const settingsQ = useQuery({
+    queryKey: ["system", "settings"],
+    queryFn: getSystemSettings,
+  });
 
   const accounts = matrixQ.data?.accounts ?? [];
   const features = matrixQ.data?.features ?? [];
+  const accountFeaturesQ = useQuery({
+    queryKey: ["account", selectedAid, "features"],
+    queryFn: () => listAccountFeatures(selectedAid as number),
+    enabled: selectedAid != null,
+  });
 
   useEffect(() => {
     if (accounts.length === 0) return;
@@ -69,6 +95,7 @@ export function PluginsHome() {
   const selectedAccount = accounts.find((a) => a.id === selectedAid) ?? null;
   const codexImageFeature = features.find((f) => f.key === "codex_image");
   const codexImageState = selectedAccount?.features?.codex_image ?? "disabled";
+  const cmdPrefix = settingsQ.data?.command_prefix || ",";
 
   const grouped = useMemo(() => {
     const zones: Record<Zone, typeof features> = {
@@ -94,6 +121,26 @@ export function PluginsHome() {
     return zones;
   }, [features]);
 
+  async function openGenericConfig(feature: FeatureInfo) {
+    if (!selectedAccount) return;
+    const accountFeatureData =
+      accountFeaturesQ.data ?? (await accountFeaturesQ.refetch()).data ?? [];
+    const item = accountFeatureData.find((x) => x.feature_key === feature.key);
+    let globalConfig: Record<string, unknown> = {};
+    try {
+      globalConfig = await getPluginGlobalConfig(feature.key);
+    } catch {
+      globalConfig = {};
+    }
+    setConfigDialog({
+      key: feature.key,
+      name: feature.display_name,
+      schema: feature.config_schema ?? null,
+      globalConfig,
+      accountConfig: item?.config ?? {},
+    });
+  }
+
   if (matrixQ.isLoading) {
     return (
       <div className="flex h-[40vh] items-center justify-center">
@@ -109,7 +156,7 @@ export function PluginsHome() {
           <CardHeader className="pb-2">
             <CardTitle className="text-base">0.13 安全变更提醒</CardTitle>
             <CardDescription className="text-amber-900/90">
-              Telegram 内高危命令（如 <code>,reboot</code>、<code>,plugin install</code>）已移除，请改为在 Web 控制台或账号 Bot 内执行。
+              Telegram 内高危命令（如 <code>{cmdPrefix}reboot</code>、<code>{cmdPrefix}plugin install</code>）已移除，请改为在 Web 控制台或账号 Bot 内执行。
             </CardDescription>
           </CardHeader>
           <CardContent className="flex flex-wrap items-center gap-2">
@@ -121,7 +168,7 @@ export function PluginsHome() {
               前往账号 Bot
             </Button>
             <Button size="sm" variant="outline" onClick={() => nav("/plugins/manage?tab=plugins")}>
-              前往插件安装
+              前往模块安装
             </Button>
             <Button
               size="sm"
@@ -137,7 +184,7 @@ export function PluginsHome() {
       ) : null}
       <Card>
         <CardHeader>
-          <CardTitle>插件中心</CardTitle>
+          <CardTitle>模块中心</CardTitle>
           <CardDescription>
             先在这里沉淀一套好用的命令、消息和 AI 模板，再按账号启用复用；新账号不用从零重配。
           </CardDescription>
@@ -184,18 +231,50 @@ export function PluginsHome() {
             </Button>
             <Button
               variant="outline"
+              className="h-full min-h-[96px] justify-start whitespace-normal px-4 py-3 text-left"
+              onClick={() => nav("/plugins/auto-command-whitelist")}
+            >
+              <span>
+                <span className="block font-medium">自动命令白名单</span>
+                <span className="mt-1 block text-xs leading-5 text-muted-foreground">
+                  控制定时任务和自动动作能触发哪些命令，避免误执行高风险操作。
+                </span>
+              </span>
+            </Button>
+            <Button
+              variant="outline"
               className={`h-full min-h-[96px] justify-start whitespace-normal px-4 py-3 text-left ${
                 guideActive ? "siri-glow" : ""
               }`}
               onClick={() => nav("/plugins/manage?tab=plugins")}
             >
               <span>
-                <span className="block font-medium">安装插件</span>
+                <span className="block font-medium">安装模块</span>
                 <span className="mt-1 block text-xs leading-5 text-muted-foreground">
-                  添加 Git 仓库安装远程插件；安装完成后回到本页按账号启用和配置。
+                  添加 Git 仓库安装远程模块；安装完成后回到本页按账号启用和配置。
                 </span>
               </span>
             </Button>
+          </div>
+          <div className="rounded-lg border px-4 py-3">
+            <div className="text-sm font-medium">AI 模块入口</div>
+            <p className="mt-1 text-xs leading-5 text-muted-foreground">
+              AI 能力属于模块配置：先在模型提供商里配置凭据，再按账号在模块里调用；调用记录与排障在 AI 用量查看。
+            </p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <Button size="sm" onClick={() => nav("/ai")}>
+                AI 总览
+              </Button>
+              <Button size="sm" variant="outline" onClick={() => nav("/ai/providers")}>
+                模型提供商
+              </Button>
+              <Button size="sm" variant="outline" onClick={() => nav("/ai/usage")}>
+                AI 用量
+              </Button>
+              <Button size="sm" variant="outline" onClick={() => nav("/ai/help")}>
+                AI 帮助
+              </Button>
+            </div>
           </div>
           {guideActive ? (
           <GuideContextCard
@@ -237,9 +316,9 @@ export function PluginsHome() {
         }`}
       >
         <CardHeader>
-          <CardTitle>账号插件启用详情与配置</CardTitle>
+          <CardTitle>账号模块启用详情与配置</CardTitle>
           <CardDescription>
-            先选择要配置的账号，再查看每类插件在该账号上的启用状态与配置入口。
+            先选择要配置的账号，再查看每类模块在该账号上的启用状态与配置入口。
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -260,27 +339,30 @@ export function PluginsHome() {
           <div className="grid gap-4 lg:grid-cols-2">
             <FeatureZone
               title="平台能力"
-              hint="系统底层能力，通常不用手动配置。"
+              hint="系统级基础模块，入口集中在这里；需要时可进入配置或查看运行状态。"
               icon={<Settings2 className="h-4 w-4" />}
               features={grouped.platform}
               selectedAccountId={selectedAccount?.id}
               selectedFeatures={selectedAccount?.features ?? {}}
+              onConfigure={openGenericConfig}
             />
             <FeatureZone
-              title="内置插件"
-              hint="常用自动化能力，按账号开启后再配置规则。"
+              title="内置模块"
+              hint="常用自动化模块，按账号开启后再配置规则。"
               icon={<Package2 className="h-4 w-4" />}
               features={grouped.builtin}
               selectedAccountId={selectedAccount?.id}
               selectedFeatures={selectedAccount?.features ?? {}}
+              onConfigure={openGenericConfig}
             />
             <FeatureZone
-              title="远程插件"
-              hint="从外部仓库安装的扩展能力。"
+              title="远程模块"
+              hint="从外部仓库安装的扩展模块能力。"
               icon={<SatelliteDish className="h-4 w-4" />}
               features={grouped.remote}
               selectedAccountId={selectedAccount?.id}
               selectedFeatures={selectedAccount?.features ?? {}}
+              onConfigure={openGenericConfig}
             />
             <FeatureZone
               title="实验性"
@@ -289,10 +371,47 @@ export function PluginsHome() {
               features={grouped.experimental}
               selectedAccountId={selectedAccount?.id}
               selectedFeatures={selectedAccount?.features ?? {}}
+              onConfigure={openGenericConfig}
             />
           </div>
         </CardContent>
       </Card>
+      <ConfigDialog
+        open={!!configDialog}
+        onOpenChange={(v) => !v && setConfigDialog(null)}
+        pluginKey={configDialog?.key ?? ""}
+        pluginName={configDialog?.name ?? ""}
+        schema={(configDialog?.schema as unknown as ConfigSchema) ?? null}
+        accountName={selectedAccount?.name}
+        accountId={selectedAccount?.id}
+        globalConfig={configDialog?.globalConfig ?? {}}
+        accountConfig={configDialog?.accountConfig ?? {}}
+        onSave={async (globalVals, accountVals) => {
+          if (!configDialog || !selectedAccount) return;
+          const schema = configDialog.schema as unknown as ConfigSchema | null;
+          if (schema?.properties) {
+            const globalFields = Object.entries(schema.properties)
+              .filter(([, f]) => f.level === "global")
+              .map(([k]) => k);
+            const hasGlobalChanges = globalFields.some(
+              (k) => globalVals[k] !== configDialog.globalConfig[k],
+            );
+            if (hasGlobalChanges) {
+              const globalOnlyVals: Record<string, unknown> = {};
+              for (const k of globalFields) {
+                globalOnlyVals[k] = globalVals[k];
+              }
+              await setPluginGlobalConfig(configDialog.key, globalOnlyVals);
+            }
+          }
+          if (Object.keys(accountVals).length > 0) {
+            await updateAccountFeatureConfig(selectedAccount.id, configDialog.key, accountVals);
+          }
+          qc.invalidateQueries({ queryKey: ["account", selectedAccount.id, "features"] });
+          qc.invalidateQueries({ queryKey: ["matrix"] });
+          qc.invalidateQueries({ queryKey: ["plugin", "global", configDialog.key] });
+        }}
+      />
     </div>
   );
 }
@@ -332,14 +451,14 @@ function GuideContextCard({
           收起
         </button>
       </div>
-      <div className="mb-2 text-sm font-semibold">3. 启用命令模板或调用插件</div>
+      <div className="mb-2 text-sm font-semibold">3. 启用命令模板或调用模块</div>
       <p className="text-xs leading-relaxed text-muted-foreground">
-        这一页主要看三处：先用“命令模板”复用命令；再看下方插件卡片，按账号启用和配置；需要外部能力时点“安装插件”添加远程插件。
+        这一页主要看三处：先用“命令模板”复用命令；再看下方模块卡片，按账号启用和配置；需要外部能力时点“安装模块”添加远程模块。
       </p>
       <div className="mt-3 grid gap-2 text-xs text-muted-foreground sm:grid-cols-3">
         <div className="rounded-lg border bg-muted/30 p-2">A. 命令模板</div>
-        <div className="rounded-lg border bg-muted/30 p-2">B. 插件启用状态</div>
-        <div className="rounded-lg border bg-muted/30 p-2">C. 安装插件</div>
+        <div className="rounded-lg border bg-muted/30 p-2">B. 模块启用状态</div>
+        <div className="rounded-lg border bg-muted/30 p-2">C. 安装模块</div>
       </div>
       <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-muted">
         <div
@@ -349,7 +468,7 @@ function GuideContextCard({
       </div>
       <div className="mt-3 flex flex-wrap gap-2">
         <Button size="sm" onClick={onInstall}>
-          安装远程插件 <ArrowRight className="ml-1 h-4 w-4" />
+          安装远程模块 <ArrowRight className="ml-1 h-4 w-4" />
         </Button>
         <Button size="sm" variant="outline" onClick={onDone}>
           我学会了！
@@ -366,17 +485,15 @@ function FeatureZone({
   features,
   selectedAccountId,
   selectedFeatures,
+  onConfigure,
 }: {
   title: string;
   hint: string;
   icon: React.ReactNode;
-  features: Array<{
-    key: string;
-    display_name: string;
-    version?: string | null;
-  }>;
+  features: FeatureInfo[];
   selectedAccountId?: number;
   selectedFeatures: Record<string, string>;
+  onConfigure: (feature: FeatureInfo) => void;
 }) {
   const nav = useNavigate();
 
@@ -398,6 +515,7 @@ function FeatureZone({
             {features.map((f) => {
               const status = selectedFeatures[f.key] ?? "disabled";
               const path = featureConfigPath(selectedAccountId, f.key);
+              const canConfigure = Boolean(path || f.config_schema);
               return (
                 <div key={f.key} className="flex items-center justify-between rounded-md border p-2">
                   <div>
@@ -408,8 +526,18 @@ function FeatureZone({
                     <Badge variant={status === "active" ? "default" : "outline"}>
                       {status === "active" ? "已启用" : "未启用"}
                     </Badge>
-                    {path ? (
-                      <Button size="sm" variant="outline" onClick={() => nav(path)}>
+                    {canConfigure ? (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => {
+                          if (path) {
+                            nav(path);
+                            return;
+                          }
+                          onConfigure(f);
+                        }}
+                      >
                         配置
                       </Button>
                     ) : null}

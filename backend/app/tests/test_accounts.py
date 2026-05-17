@@ -56,10 +56,13 @@ def _stub_device_profile():
         yield
 
 
-def _make_fake_client(*, send_code_exc=None) -> AsyncMock:
+def _make_fake_client(*, connect_exc=None, send_code_exc=None) -> AsyncMock:
     """构造一个 mock TelegramClient；可注入 send_code_request 抛出的异常。"""
     client = AsyncMock()
-    client.connect = AsyncMock(return_value=None)
+    if connect_exc is not None:
+        client.connect = AsyncMock(side_effect=connect_exc)
+    else:
+        client.connect = AsyncMock(return_value=None)
     client.disconnect = AsyncMock(return_value=None)
     if send_code_exc is not None:
         client.send_code_request = AsyncMock(side_effect=send_code_exc)
@@ -119,6 +122,21 @@ async def test_start_login_phone_invalid_disconnects_and_raises():
         with pytest.raises(login_service.HTTPException) as exc_info:
             await login_service.start_login(db, api_id=1, api_hash="h", phone="bad")
     assert exc_info.value.detail["code"] == "PHONE_INVALID"
+    fake_client.disconnect.assert_awaited()
+
+
+@pytest.mark.asyncio
+async def test_start_login_connect_error_is_structured_and_disconnects():
+    """Telegram 连接失败应返回结构化错误，不再冒泡成 500。"""
+    fake_client = _make_fake_client(connect_exc=ConnectionError("Connection to Telegram failed 5 time(s)"))
+    db = AsyncMock()
+    with patch.object(login_service, "TelegramClient", return_value=fake_client):
+        with pytest.raises(login_service.HTTPException) as exc_info:
+            await login_service.start_login(db, api_id=1, api_hash="h", phone="+1")
+
+    assert exc_info.value.status_code == 502
+    assert exc_info.value.detail["code"] == "LOGIN_START_FAILED"
+    assert "检查代理与标识" in exc_info.value.detail["message"]
     fake_client.disconnect.assert_awaited()
 
 

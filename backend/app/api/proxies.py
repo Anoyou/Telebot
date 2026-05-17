@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import socket
 import time as _time
+from urllib.parse import unquote, urlsplit
 
 import httpx
 from fastapi import APIRouter, HTTPException, status
@@ -94,6 +95,32 @@ def _validate_type(t: str) -> None:
         raise _err("INVALID_PROXY_TYPE", f"代理类型必须是 {', '.join(sorted(_VALID_TYPES))}")
 
 
+def _parse_proxy_url(value: str) -> dict[str, str | int] | None:
+    """Accept pasted proxy URLs and split them into the stored fields."""
+
+    raw = value.strip()
+    if "://" not in raw:
+        return None
+    parsed = urlsplit(raw)
+    scheme = parsed.scheme.lower()
+    if scheme not in _VALID_TYPES:
+        raise _err("INVALID_PROXY_TYPE", f"代理 URL 类型必须是 {', '.join(sorted(_VALID_TYPES))}")
+    if not parsed.hostname:
+        raise _err("INVALID_PROXY_HOST", "代理 URL 缺少主机名")
+
+    data: dict[str, str | int] = {
+        "type": scheme,
+        "host": parsed.hostname,
+    }
+    if parsed.port is not None:
+        data["port"] = parsed.port
+    if parsed.username is not None:
+        data["username"] = unquote(parsed.username)
+    if parsed.password is not None:
+        data["password"] = unquote(parsed.password)
+    return data
+
+
 # ── CRUD ─────────────────────────────────────────────────────────
 @router.get("", response_model=list[ProxyOut])
 async def list_proxies(db: DBSession, _user: CurrentUser) -> list[ProxyOut]:
@@ -103,13 +130,28 @@ async def list_proxies(db: DBSession, _user: CurrentUser) -> list[ProxyOut]:
 
 @router.post("", response_model=ProxyOut, status_code=status.HTTP_201_CREATED)
 async def create_proxy(payload: ProxyCreate, db: DBSession, user: CurrentUser) -> ProxyOut:
-    _validate_type(payload.type)
-    if payload.port <= 0 or payload.port > 65535:
+    parsed = _parse_proxy_url(payload.host)
+    proxy_type = str(parsed.get("type", payload.type)) if parsed else payload.type
+    host = str(parsed.get("host", payload.host)).strip() if parsed else payload.host.strip()
+    port = int(parsed.get("port", payload.port)) if parsed else payload.port
+    username = (
+        str(parsed["username"])
+        if parsed and "username" in parsed and payload.username is None
+        else payload.username
+    )
+    password = (
+        str(parsed["password"])
+        if parsed and "password" in parsed and payload.password is None
+        else payload.password
+    )
+
+    _validate_type(proxy_type)
+    if port <= 0 or port > 65535:
         raise _err("INVALID_PORT", "端口范围必须是 1-65535")
     p = Proxy(
-        type=payload.type, host=payload.host, port=payload.port,
-        username=payload.username,
-        password_enc=encrypt_str(payload.password) if payload.password else None,
+        type=proxy_type, host=host, port=port,
+        username=username,
+        password_enc=encrypt_str(password) if password else None,
     )
     db.add(p)
     await db.commit()
@@ -133,12 +175,22 @@ async def patch_proxy(pid: int, payload: ProxyUpdate, db: DBSession, user: Curre
     p = await db.get(Proxy, pid)
     if not p:
         raise _err("NOT_FOUND", "代理不存在", 404)
-    if payload.type is not None:
+    parsed = _parse_proxy_url(payload.host) if payload.host is not None else None
+    if parsed is not None:
+        p.type = str(parsed.get("type", p.type))
+        p.host = str(parsed["host"])
+        if "port" in parsed:
+            p.port = int(parsed["port"])
+        if "username" in parsed and "username" not in payload.model_fields_set:
+            p.username = str(parsed["username"]) or None
+        if "password" in parsed and "password" not in payload.model_fields_set:
+            p.password_enc = encrypt_str(str(parsed["password"]))
+    if payload.type is not None and parsed is None:
         _validate_type(payload.type)
         p.type = payload.type
-    if payload.host is not None:
+    if payload.host is not None and parsed is None:
         p.host = payload.host
-    if payload.port is not None:
+    if payload.port is not None and not (parsed is not None and "port" in parsed):
         if payload.port <= 0 or payload.port > 65535:
             raise _err("INVALID_PORT", "端口范围必须是 1-65535")
         p.port = payload.port
@@ -191,6 +243,37 @@ _TG_HOST = "149.154.167.50"
 _TG_PORT = 443
 
 
+async def _probe_proxy_endpoint(host: str, port: int) -> str | None:
+    """先探测代理入口本身是否可达，返回错误文案或 None。
+
+    python-socks 在入口地址不可达时会把底层 socket 错误包装得比较晦涩；
+    这里先做一次普通 TCP 连接，让用户看到明确的“后端连不到代理入口”。
+    """
+
+    writer = None
+    try:
+        _reader, writer = await asyncio.wait_for(
+            asyncio.open_connection(host, port),
+            timeout=3.0,
+        )
+        return None
+    except OSError as e:
+        return (
+            f"代理入口不可达：后端无法连接 {host}:{port}（{e}）。"
+            "请确认代理客户端正在运行，并已允许局域网/容器访问；"
+            "如果后端在 Docker 内，通常要使用 host.docker.internal 或宿主机可达地址。"
+        )
+    except TimeoutError:
+        return f"代理入口不可达：连接 {host}:{port} 超时（3s）。"
+    finally:
+        if writer is not None:
+            writer.close()
+            try:
+                await writer.wait_closed()
+            except Exception:
+                pass
+
+
 async def _resolve_country(client_factory) -> dict[str, str | None]:
     """通过给定 client 拿到出口 IP + 国家/地区。优先 ip-api.com，失败回退 ipinfo.io。"""
     try:
@@ -234,6 +317,9 @@ async def test_proxy(pid: int, db: DBSession, _user: CurrentUser) -> ProxyTestRe
     # 第一步：try TCP connect 到 Telegram DC2:443，记录延迟
     t0 = _time.monotonic()
     try:
+        endpoint_error = await _probe_proxy_endpoint(p.host, p.port)
+        if endpoint_error:
+            return ProxyTestResult(ok=False, error=endpoint_error)
         if p.type in ("socks5", "http", "https"):
             ptype = {"socks5": ProxyType.SOCKS5, "http": ProxyType.HTTP,
                      "https": ProxyType.HTTP}[p.type]

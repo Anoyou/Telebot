@@ -29,7 +29,9 @@ from ..db.models.feature import AccountFeature, Feature
 from ..db.models.log import LEVEL_ERROR, LEVEL_WARN, RuntimeLog
 from ..db.models.remote_plugin import RemotePlugin
 from ..db.models.rule import Rule
+from ..db.models.system import SystemSetting
 from ..redis_client import get_redis
+from ..settings import settings
 from ..worker.ipc import (
     CMD_EXECUTE_RULE,
     CMD_RELOAD_CONFIG,
@@ -56,6 +58,20 @@ _CONFIRM_PREFIX = "account_bot_confirm:"
 _CONFIRM_TTL_SECONDS = 300
 _MAX_BUTTON_ROWS = 24
 _REMOTE_POLICY_HINT = "该功能默认关闭，请管理员在 Web 控制台启用后重试（高风险操作，仍需二次确认）。"
+
+
+async def _load_command_prefix(db) -> str:
+    prefix = settings.command_prefix or ","
+    row = await db.get(SystemSetting, "command_prefix")
+    if row is not None:
+        raw = row.value
+        if isinstance(raw, dict):
+            value = str(raw.get("value", "") or "").strip()
+        else:
+            value = str(raw or "").strip()
+        if value:
+            prefix = value
+    return prefix
 
 
 @dataclass(slots=True)
@@ -730,19 +746,20 @@ async def _handle_plugins_command(incoming: Incoming, role: str) -> None:
 
 async def _show_commands(incoming: Incoming, role: str, *, edit: bool = False) -> None:
     async with AsyncSessionLocal() as db:
+        cmd_prefix = await _load_command_prefix(db)
         items = await command_service.list_for_account(db, incoming.account_id)
     lines = ["⌨️ <b>自定义命令模板</b>", "点击按钮可启停当前账号的模板。", ""]
     rows: list[list[dict[str, str]]] = []
     for item in items[:_MAX_BUTTON_ROWS]:
         tpl = item.template
         lines.append(
-            f"{'✅' if item.enabled else '⬜️'} <code>,{account_bot_service.html_text(tpl.name)}</code>"
+            f"{'✅' if item.enabled else '⬜️'} <code>{account_bot_service.html_text(cmd_prefix)}{account_bot_service.html_text(tpl.name)}</code>"
             f" · {account_bot_service.html_text(tpl.type)}"
         )
         if account_bot_service.role_allows(role, ACCOUNT_BOT_ROLE_OPERATOR):
             rows.append([
                 _button(
-                    f"{'停用' if item.enabled else '启用'} ,{tpl.name}"[:32],
+                    f"{'停用' if item.enabled else '启用'} {cmd_prefix}{tpl.name}"[:32],
                     "command_toggle",
                     str(tpl.id),
                     aid=incoming.account_id,

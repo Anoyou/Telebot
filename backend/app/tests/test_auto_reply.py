@@ -24,6 +24,7 @@ from app.worker.plugins.builtin.auto_reply import (
     _render,
     _scope_ok,
 )
+from app.worker.command import CommandContext, set_command_context
 from app.worker.ratelimit.engine import RateLimitDecision
 from app.worker.ratelimit.humanize import HumanizeOpts
 
@@ -97,6 +98,7 @@ def _make_event(text: str, *, is_private: bool = True, chat_id: int = 100):
     event.get_sender = AsyncMock(return_value=sender)
     event.get_chat = AsyncMock(return_value=chat)
     event.respond = AsyncMock()
+    event.reply = AsyncMock()
     return event
 
 
@@ -240,6 +242,50 @@ async def test_blacklist_chat_skipped() -> None:
 
     engine.acquire.assert_not_called()
     event.respond.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_auto_reply_command_text_dispatches_directly() -> None:
+    """自动回复生成白名单命令时应直接派发，不依赖 outgoing update 回流。"""
+    set_command_context(
+        CommandContext(
+            account_id=1,
+            templates={
+                "hello": {
+                    "name": "hello",
+                    "type": "reply_text",
+                    "config": {"text": "命令已执行 {args}"},
+                }
+            },
+            providers={},
+            command_prefix=",",
+            scheduler_command_whitelist=["hello"],
+        )
+    )
+    rule = _FakeRule(
+        id=6,
+        config={
+            "match_type": "keyword",
+            "patterns": ["go"],
+            "scope": "all",
+            "reply": ",hello world",
+            "cooldown_seconds": 0,
+            "reply_to": False,
+        },
+    )
+    engine = _make_engine()
+    ctx = _make_ctx([rule], engine, _FakeRedis())
+    event = _make_event("go")
+
+    try:
+        await AutoReplyPlugin().on_message(ctx, event)
+
+        event.respond.assert_awaited_once_with("命令已执行 world")
+        event.reply.assert_not_called()
+    finally:
+        set_command_context(
+            CommandContext(account_id=1, templates={}, providers={}, command_prefix=",")
+        )
 
 
 # ─────────────────────────────────────────────────────

@@ -50,6 +50,7 @@ import {
   testProviderModel,
 } from "@/api/commands";
 import { listProxies } from "@/api/proxies";
+import { getSystemSettings } from "@/api/system";
 import type { LLMApiFormat, LLMModality, LLMProviderKind, LLMProviderOut, LLMTag, ProviderModel, ProxyOut } from "@/api/types";
 import { getErrMsg } from "@/lib/api";
 
@@ -289,7 +290,7 @@ export function LLMProviders() {
                 <strong>「Fetch 模型列表」</strong>就能自动拉取并可手动选择要启用的模型。<br />
                 <span className="text-muted-foreground/80">
                   modality（模态）+ tags（标签）+ cost_tier（成本档）这三项决定「自动路由」模式下
-                  该模型提供商所配置的模型是否被选中——详见 AI 中心顶部的推荐配置。
+                  该模型提供商所配置的模型是否被选中——详见 AI 模块顶部的推荐配置。
                 </span>
               </CardDescription>
             </div>
@@ -468,6 +469,11 @@ function ProviderEditDialog({
   const llmUsableProxies: ProxyOut[] = (proxiesQ.data || []).filter(
     (p) => (p.type || "").toLowerCase() !== "mtproxy",
   );
+  const settingsQ = useQuery({
+    queryKey: ["system", "settings"],
+    queryFn: getSystemSettings,
+  });
+  const cmdPrefix = settingsQ.data?.command_prefix || ",";
 
   const toggleTag = (tag: LLMTag) => {
     const has = form.tags.includes(tag);
@@ -605,7 +611,7 @@ function ProviderEditDialog({
             <div>
               <Label className="text-sm font-semibold">路由元数据</Label>
               <p className="text-xs text-muted-foreground">
-                这些字段决定「自动路由」模式下，一条 ,ai 命令的请求是否会被分配给本 provider。
+                这些字段决定「自动路由」模式下，一条 {cmdPrefix}ai 命令的请求是否会被分配给本 provider。
                 只用 fixed 模式可以全留默认。
               </p>
             </div>

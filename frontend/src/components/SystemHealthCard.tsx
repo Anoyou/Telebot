@@ -14,6 +14,7 @@ import { Badge } from "@/components/ui/badge";
 import { Spinner } from "@/components/ui/misc";
 import {
   getHealthOverview,
+  getSystemSettings,
 } from "@/api/system";
 import { getNetworkInfo, refreshNetworkInfo } from "@/api/network";
 import type { HealthOverview, NetworkInfo } from "@/api/types";
@@ -69,7 +70,6 @@ export function SystemHealthCard() {
     refetchIntervalInBackground: false,
     refetchOnWindowFocus: true,
   });
-
   return (
     <Card>
       <CardHeader>
@@ -134,6 +134,11 @@ export function SystemHealthCard() {
 }
 
 function HealthGrid({ data }: { data: HealthOverview }) {
+  const settingsQ = useQuery({
+    queryKey: ["system", "settings"],
+    queryFn: getSystemSettings,
+  });
+  const cmdPrefix = settingsQ.data?.command_prefix || ",";
   const dbTone: Tone = data.db.ok ? "ok" : "err";
   const redisTone: Tone = data.redis.ok ? "ok" : "err";
   const alembicTone: Tone = data.alembic.ok
@@ -281,11 +286,11 @@ function HealthGrid({ data }: { data: HealthOverview }) {
       {/* LLM Providers —— "AI 模型" */}
       <HealthBlock
         title={
-          <Link to="/ai" className="hover:underline">
+          <Link to="/ai/providers" className="hover:underline">
             AI 模型
           </Link>
         }
-        subtitle="供 ,ai 命令调用的大语言模型供应商"
+        subtitle={`供 ${cmdPrefix}ai 命令调用的大语言模型供应商`}
         tone={
           data.providers.total === 0
             ? "warn"
@@ -304,9 +309,9 @@ function HealthGrid({ data }: { data: HealthOverview }) {
           <>
             <ToneText tone="warn" text="⚠ 还没配 AI 模型" />
             <div className="mt-1 text-xs text-muted-foreground">
-              想用 <code>,ai</code> 命令？去{" "}
-              <Link to="/ai" className="underline">
-                AI 中心
+              想用 <code>{cmdPrefix}ai</code> 命令？去{" "}
+              <Link to="/ai/providers" className="underline">
+                模型提供商
               </Link>{" "}
               添加至少一个。
             </div>
@@ -365,7 +370,11 @@ function HealthGrid({ data }: { data: HealthOverview }) {
             <ToneText tone="warn" text="⚠ 代理库为空" />
             <div className="mt-1 text-xs text-muted-foreground">
               如果你在中国大陆访问 OpenAI / Anthropic，需要至少配一条
-              socks5/http；去「系统设置 → 代理」加。
+              socks5/http；去{" "}
+              <Link to="/settings?tab=proxy-identity" className="text-primary hover:underline">
+                系统设置 → 代理与标识
+              </Link>
+              {" "}加。
             </div>
           </>
         ) : (

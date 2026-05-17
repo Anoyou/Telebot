@@ -320,6 +320,7 @@ async def _listen_cmd(
                             from .plugins.loader import reload_account_config  # type: ignore
 
                             await reload_account_config(account_id, cmd.payload)
+                            await _refresh_command_context(account_id)
                         except Exception as e:  # noqa: BLE001
                             ack_ok = False
                             ack_error = f"{type(e).__name__}: {e}"

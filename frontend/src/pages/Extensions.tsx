@@ -111,9 +111,9 @@ export function Extensions() {
           <ArrowLeft className="mr-1 h-4 w-4" /> 返回上一页
         </Button>
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">插件安装与管理</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">模块安装与管理</h1>
           <p className="text-sm text-muted-foreground">
-            这里负责安装、更新、卸载远程插件；装好后回插件中心按账号启用和配置。
+            这里负责安装、更新、卸载远程模块；装好后回模块中心按账号启用和配置。
           </p>
         </div>
       </div>
@@ -176,7 +176,7 @@ function PluginInstallGuide({
         aria-label="打开新手指引"
       >
         <Sparkles className="h-4 w-4" />
-        新手指引：安装后回插件中心启用
+        新手指引：安装后回模块中心启用
       </button>
     );
   }
@@ -184,14 +184,14 @@ function PluginInstallGuide({
   return (
     <Card className="max-w-2xl border-primary/30 bg-card/95 shadow-lg shadow-primary/10">
       <CardHeader className="pb-2">
-        <CardTitle className="text-base">3. 启用命令模板或调用插件</CardTitle>
+        <CardTitle className="text-base">3. 启用命令模板或调用模块</CardTitle>
         <CardDescription>
-          这里只负责安装、更新和卸载远程插件。安装完成后，回插件中心选择账号，再启用和配置对应插件。
+          这里只负责安装、更新和卸载远程模块。安装完成后，回模块中心选择账号，再启用和配置对应模块。
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-wrap gap-2">
         <Button size="sm" onClick={onBack}>
-          返回插件中心 <ChevronRight className="ml-1 h-4 w-4" />
+          返回模块中心 <ChevronRight className="ml-1 h-4 w-4" />
         </Button>
         <Button size="sm" variant="outline" onClick={onDone}>
           我学会了！
@@ -286,9 +286,9 @@ function RemoteInstallCard() {
   return (
     <Card>
       <CardHeader className="pb-3">
-        <CardTitle className="text-base">插件仓库</CardTitle>
+        <CardTitle className="text-base">模块仓库</CardTitle>
         <CardDescription>
-          添加 Git 仓库后浏览并安装插件
+          添加 Git 仓库后浏览并安装模块
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -373,7 +373,7 @@ function RemoteInstallCard() {
                         加载失败：{getErrMsg(pluginsQ.error)}
                       </p>
                     ) : (pluginsQ.data ?? []).length === 0 ? (
-                      <p className="py-2 text-center text-sm text-muted-foreground">仓库内未找到插件</p>
+                      <p className="py-2 text-center text-sm text-muted-foreground">仓库内未找到模块</p>
                     ) : (
                       <div className="space-y-1">
                         {(pluginsQ.data ?? []).map((p) => {
@@ -468,7 +468,7 @@ function InstalledPluginsSection() {
   const enableRMMut = useMutation({
     mutationFn: (name: string) => enableRemotePlugin(name),
     onSuccess: () => {
-      toast.success("已启用；回插件中心按账号开启和配置");
+      toast.success("已启用；回模块中心按账号开启和配置");
       qc.invalidateQueries({ queryKey: REMOTE_QK });
       qc.invalidateQueries({ queryKey: ["matrix"] });
     },
@@ -510,21 +510,21 @@ function InstalledPluginsSection() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-base">已安装插件</CardTitle>
+        <CardTitle className="text-base">已安装模块</CardTitle>
         <CardDescription>
-          这里管理插件包本身；账号级启停和配置统一回插件中心处理。
+          这里管理模块包本身；账号级启停和配置统一回模块中心处理。
         </CardDescription>
       </CardHeader>
       <CardContent>
         {isLoading ? (
           <div className="flex h-24 items-center justify-center"><Spinner className="text-primary" /></div>
         ) : builtin.length === 0 && thirdParty.length === 0 && remote.length === 0 ? (
-          <p className="py-8 text-center text-sm text-muted-foreground">暂无已安装插件</p>
+          <p className="py-8 text-center text-sm text-muted-foreground">暂无已安装模块</p>
         ) : (
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>插件</TableHead>
+                <TableHead>模块</TableHead>
                 <TableHead>类型</TableHead>
                 <TableHead>版本</TableHead>
                 <TableHead>状态</TableHead>
@@ -544,7 +544,7 @@ function InstalledPluginsSection() {
                   <TableCell><Badge variant="default">内置</Badge></TableCell>
                   <TableCell className="text-right">
                     <Button size="sm" variant="outline" onClick={() => nav("/plugins")}>
-                      去插件中心
+                      去模块中心
                     </Button>
                   </TableCell>
                 </TableRow>
@@ -616,7 +616,7 @@ function InstalledPluginsSection() {
                         卸载
                       </Button>
                       <Button size="sm" variant="outline" onClick={() => nav("/plugins")}>
-                        去插件中心
+                        去模块中心
                       </Button>
                     </div>
                   </TableCell>
@@ -637,7 +637,7 @@ function DevGuideTab() {
   return (
     <Card className="overflow-hidden">
       <CardHeader>
-        <CardTitle className="text-base">插件开发指南</CardTitle>
+        <CardTitle className="text-base">模块开发指南</CardTitle>
         <CardDescription>
           源文件：<code>docs/PLUGIN-DEV-GUIDE.md</code>（远程安装与沙箱规则见
           <code className="ml-1">docs/REMOTE-PLUGIN-GUIDE.md</code>）

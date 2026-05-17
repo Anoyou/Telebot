@@ -8,11 +8,13 @@ from plugins.installed.codex_image.manifest import MANIFEST
 from plugins.installed.codex_image.plugin import (
     CodexImagePlugin,
     _edit_html,
+    _extract_codex_artifacts,
     _humanize_codex_error,
     _humanize_codex_exception,
     _image_ext_from_bytes,
     _parse_generation_args,
     _safe_error_text,
+    _with_error_prefix,
 )
 
 from app.worker.plugins.base import PluginContext
@@ -52,6 +54,43 @@ def test_codex_stream_error_is_human_readable() -> None:
     )
     assert "流式连接中断" in msg
     assert "incomplete chunked read" not in msg
+
+
+def test_codex_html_error_is_human_readable() -> None:
+    msg = _humanize_codex_error(
+        403,
+        "<html><head><meta name='viewport'></head><body>Please enable JavaScript</body></html>",
+        content_type="text/html; charset=utf-8",
+    )
+    assert "网页而不是 API 数据" in msg
+    assert "<html>" not in msg
+    assert "Access Token" in msg
+
+
+def test_codex_error_prefix_is_not_duplicated() -> None:
+    assert _with_error_prefix("❌ 已失败") == "❌ 已失败"
+    assert _with_error_prefix("已失败") == "❌ 已失败"
+
+
+def test_codex_completed_response_result_is_extracted() -> None:
+    png_b64 = base64.b64encode(b"\x89PNG\r\n\x1a\n" + b"0" * 64).decode("ascii")
+    image, revised, error = _extract_codex_artifacts(
+        {
+            "type": "response.completed",
+            "response": {
+                "output": [
+                    {
+                        "type": "image_generation_call",
+                        "result": png_b64,
+                        "revised_prompt": "cat",
+                    }
+                ]
+            },
+        }
+    )
+    assert image == png_b64
+    assert revised == "cat"
+    assert error is None
 
 
 def test_codex_image_command_options_are_extracted() -> None:

@@ -16,6 +16,7 @@ from typing import Any
 
 from telethon import events
 
+from app.worker.command import current_command_prefix
 from app.worker.plugins.base import Plugin, PluginContext, register
 
 DEFAULT_COMMAND = "24d"
@@ -382,7 +383,9 @@ class Game24Plugin(Plugin):
 
         prize = self._parse_prize(args)
         if prize <= 0:
-            await event.edit("⚠️ 请指定奖金金额，例如：,24d 2000")
+            await event.edit(
+                f"⚠️ 请指定奖金金额，例如：{current_command_prefix()}{self._config.command} 2000"
+            )
             return
 
         chat_id = _event_chat_id(event)

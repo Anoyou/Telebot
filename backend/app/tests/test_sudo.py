@@ -713,7 +713,7 @@ async def test_builtin_sudo_add_and_del_are_removed():
     monkeypatch.setattr(wcmd.audit_svc, "write", audit_write)
     try:
         await _BUILTIN["sudo"].handler(client, event, ["add", "123"], 1)
-        event.edit.assert_called_once_with("仅支持只读查询：,sudo ls")
+        event.edit.assert_called_once_with("仅支持只读查询：.sudo ls")
         audit_write.assert_awaited_once()
         assert audit_write.await_args.kwargs["detail"] == {
             "status": "invalid_subcommand",
@@ -723,7 +723,7 @@ async def test_builtin_sudo_add_and_del_are_removed():
         event2 = AsyncMock()
         audit_write.reset_mock()
         await _BUILTIN["sudo"].handler(client, event2, ["del", "123"], 1)
-        event2.edit.assert_called_once_with("仅支持只读查询：,sudo ls")
+        event2.edit.assert_called_once_with("仅支持只读查询：.sudo ls")
         audit_write.assert_awaited_once()
         assert audit_write.await_args.kwargs["detail"] == {
             "status": "invalid_subcommand",
@@ -747,7 +747,7 @@ async def test_builtin_sudo_without_args_shows_readonly_usage():
     monkeypatch.setattr(wcmd.audit_svc, "write", audit_write)
     try:
         await _BUILTIN["sudo"].handler(client, event, [], 1)
-        event.edit.assert_called_once_with("用法：,sudo ls（仅只读查询）")
+        event.edit.assert_called_once_with("用法：.sudo ls（仅只读查询）")
         audit_write.assert_awaited_once()
         assert audit_write.await_args.kwargs["detail"] == {"status": "usage"}
     finally:

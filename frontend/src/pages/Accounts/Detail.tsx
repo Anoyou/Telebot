@@ -15,6 +15,7 @@ import {
   MessageCircle,
   Network,
   Power,
+  Terminal,
   Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -65,7 +66,13 @@ import {
 import { listProxies, testProxy } from "@/api/proxies";
 import { listDeviceProfiles } from "@/api/device-profiles";
 import {
+  disableAccountCommand,
+  enableAccountCommand,
+  listAccountCommands,
+} from "@/api/commands";
+import {
   getAccountRateLimit,
+  getSystemSettings,
   getHumanize,
   patchAccountRateLimit,
   patchHumanize,
@@ -81,11 +88,18 @@ import { actionHint, actionLabel } from "@/lib/rate-actions";
 import type { ConfigSchema } from "@/components/plugin/ConfigDialog";
 import { featureConfigPath } from "@/pages/Plugins/_shared/featureConfig";
 
+const COMMAND_TYPE_LABELS: Record<string, string> = {
+  reply_text: "回复文本",
+  forward_to: "转发",
+  run_plugin: "调用模块",
+  ai: "AI",
+};
+
 export function AccountDetail() {
   const params = useParams();
   const [searchParams] = useSearchParams();
   const tabParam = searchParams.get("tab") || "overview";
-  const defaultTab = ["overview", "features", "bot", "rate", "proxy", "ignored"].includes(tabParam)
+  const defaultTab = ["overview", "commands", "features", "bot", "rate", "proxy", "ignored"].includes(tabParam)
     ? tabParam
     : "overview";
   const aid = Number(params.aid);
@@ -266,6 +280,9 @@ export function AccountDetail() {
           <TabsTrigger value="features" className="shrink-0 gap-1.5">
             <Bot className="h-4 w-4" /> 插件启停
           </TabsTrigger>
+          <TabsTrigger value="commands" className="shrink-0 gap-1.5">
+            <Terminal className="h-4 w-4" /> 自定义命令
+          </TabsTrigger>
           <TabsTrigger value="bot" className="shrink-0 gap-1.5">
             <MessageCircle className="h-4 w-4" /> Bot 联动
           </TabsTrigger>
@@ -431,8 +448,8 @@ export function AccountDetail() {
                   把账号 A 已经调好的回复、转发、AI 命令分配给这个账号。
                 </div>
                 <Button asChild size="sm" variant="outline" className="mt-auto w-full justify-between">
-                  <Link to={`/plugins/templates?account=${aid}`}>
-                    管理命令模板
+                  <Link to={`/accounts/${aid}?tab=commands`}>
+                    启用命令模板
                     <ChevronRight className="h-4 w-4" />
                   </Link>
                 </Button>
@@ -453,6 +470,11 @@ export function AccountDetail() {
               </div>
             </CardContent>
           </Card>
+        </TabsContent>
+
+        {/* 自定义命令 */}
+        <TabsContent value="commands">
+          <AccountCommandsTab aid={aid} />
         </TabsContent>
 
         {/* 插件启停 */}
@@ -777,6 +799,135 @@ export function AccountDetail() {
         </TabsContent>
       </Tabs>
     </div>
+  );
+}
+
+function AccountCommandsTab({ aid }: { aid: number }) {
+  const nav = useNavigate();
+  const qc = useQueryClient();
+  const commandsQ = useQuery({
+    queryKey: ["account", aid, "commands"],
+    queryFn: () => listAccountCommands(aid),
+    enabled: !!aid,
+  });
+  const settingsQ = useQuery({
+    queryKey: ["system", "settings"],
+    queryFn: getSystemSettings,
+  });
+  const cmdPrefix = settingsQ.data?.command_prefix || ",";
+
+  const toggleMut = useMutation({
+    mutationFn: async (vars: { templateId: number; enabled: boolean }) => {
+      if (vars.enabled) {
+        await enableAccountCommand(aid, vars.templateId);
+      } else {
+        await disableAccountCommand(aid, vars.templateId);
+      }
+    },
+    onSuccess: (_data, vars) => {
+      toast.success(vars.enabled ? "已启用命令模板" : "已停用命令模板");
+      qc.invalidateQueries({ queryKey: ["account", aid, "commands"] });
+    },
+    onError: (err) => toast.error(getErrMsg(err)),
+  });
+
+  const rows = commandsQ.data ?? [];
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <CardTitle className="text-base">自定义命令</CardTitle>
+            <CardDescription>
+              这里决定当前账号能不能使用全局命令模板。开启后 worker 会热加载，直接在 Telegram 内用对应命令触发。
+            </CardDescription>
+          </div>
+          <Button size="sm" variant="outline" onClick={() => nav("/plugins/templates")}>
+            管理模板库
+          </Button>
+        </div>
+      </CardHeader>
+      <CardContent>
+        {commandsQ.isLoading ? (
+          <div className="flex h-20 items-center justify-center">
+            <Spinner className="text-primary" />
+          </div>
+        ) : rows.length > 0 ? (
+          <div className="overflow-x-auto">
+            <Table className="min-w-[44rem] table-fixed">
+              <colgroup>
+                <col className="w-[22%]" />
+                <col className="w-[16%]" />
+                <col className="w-[26%]" />
+                <col className="w-[18%]" />
+                <col className="w-[18%]" />
+              </colgroup>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>命令</TableHead>
+                  <TableHead>类型</TableHead>
+                  <TableHead>说明</TableHead>
+                  <TableHead>别名</TableHead>
+                  <TableHead className="text-center">当前账号启用</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {rows.map((item) => {
+                  const tpl = item.template;
+                  return (
+                    <TableRow key={tpl.id}>
+                      <TableCell className="font-mono text-sm">
+                        {cmdPrefix}{tpl.name}
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant="secondary">
+                          {COMMAND_TYPE_LABELS[tpl.type] || tpl.type}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="truncate text-xs text-muted-foreground">
+                        {tpl.description || "—"}
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex flex-wrap gap-1">
+                          {(tpl.aliases || []).length > 0 ? (
+                            tpl.aliases.map((alias) => (
+                              <Badge key={alias} variant="outline" className="font-mono text-[11px]">
+                                {cmdPrefix}{alias}
+                              </Badge>
+                            ))
+                          ) : (
+                            <span className="text-xs text-muted-foreground">—</span>
+                          )}
+                        </div>
+                      </TableCell>
+                      <TableCell className="text-center">
+                        <Switch
+                          checked={item.enabled}
+                          disabled={toggleMut.isPending}
+                          onCheckedChange={(enabled) =>
+                            toggleMut.mutate({ templateId: tpl.id, enabled })
+                          }
+                        />
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </div>
+        ) : (
+          <div className="rounded-md border border-dashed px-4 py-8 text-center text-sm text-muted-foreground">
+            还没有任何自定义命令模板。先去模板库新建一条，再回到这里给当前账号启用。
+            <div className="mt-3">
+              <Button size="sm" onClick={() => nav("/plugins/templates")}>
+                新建命令模板
+              </Button>
+            </div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 

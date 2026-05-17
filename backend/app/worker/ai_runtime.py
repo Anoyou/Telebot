@@ -9,6 +9,29 @@ log = logging.getLogger(__name__)
 _LONG_MESSAGE_THRESHOLD = 3900
 
 
+def _format_llm_sources(sources: Any) -> str:
+    """把 LLMResult.sources 转成模板可直接展示的纯文本来源列表。"""
+    if not isinstance(sources, list) or not sources:
+        return ""
+    lines: list[str] = []
+    seen: set[str] = set()
+    for item in sources:
+        if isinstance(item, dict):
+            url = str(item.get("url") or "").strip()
+            title = str(item.get("title") or "").strip()
+        else:
+            url = str(item or "").strip()
+            title = ""
+        if not url or url in seen:
+            continue
+        seen.add(url)
+        label = title or url
+        lines.append(f"{len(lines) + 1}. {label}\n{url}")
+        if len(lines) >= 8:
+            break
+    return "\n".join(lines)
+
+
 async def invoke(client, event, args, tpl: dict[str, Any], account_id: int) -> None:
     from .command import (
         _humanize_llm_error,
@@ -414,6 +437,8 @@ async def invoke(client, event, args, tpl: dict[str, Any], account_id: int) -> N
         fallback_provider_id = None
 
     try:
+        web_search = bool(cfg.get("web_search", False))
+        web_search_context_size = str(cfg.get("web_search_context_size") or "medium")
         result, used_provider_dto, used_fallback = await invoke_ai_runtime(
             provider_dto,
             provider_dtos,
@@ -422,6 +447,8 @@ async def invoke(client, event, args, tpl: dict[str, Any], account_id: int) -> N
             override_model=override_model,
             max_tokens=max_tokens,
             images=image_bytes_list or None,
+            web_search=web_search,
+            web_search_context_size=web_search_context_size,
             account_id=account_id,
             source=f"command:{tpl.get('name') or 'ai'}",
             fallback_provider_id=fallback_provider_id,
@@ -543,6 +570,7 @@ async def invoke(client, event, args, tpl: dict[str, Any], account_id: int) -> N
                 "out_tokens": result.output_tokens,
                 "total_tokens": result.input_tokens + result.output_tokens,
                 "routing_note": (routing_note or "").replace("auto · ", ""),
+                "sources": _format_llm_sources(result.sources),
             }
             if escape_values and output_format == "html":
                 escape_format: str | None = "html"
@@ -661,6 +689,7 @@ async def invoke(client, event, args, tpl: dict[str, Any], account_id: int) -> N
         "out_tokens": result.output_tokens,
         "total_tokens": result.input_tokens + result.output_tokens,
         "routing_note": (routing_note or "").replace("auto · ", ""),  # 去掉前缀让模板自己加
+        "sources": _format_llm_sources(result.sources),
     }
 
     # 转义模式：html 走 HTML 转义；plain / markdown_v1 不转义；老 mdv2 也不进这里（已映射到 html）

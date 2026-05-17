@@ -19,6 +19,7 @@ import base64
 import json
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+from typing import Any
 
 import httpx
 
@@ -57,6 +58,7 @@ class LLMResult:
     output_tokens: int  # 出 tokens；若供应商不返就给 0
     image_urls: list = field(default_factory=list)  # LLM 生成的图片 URL（如 Grok 文生图）
     image_data: list = field(default_factory=list)  # LLM 生成的图片 base64 data URI（如 Grok 文生图）
+    sources: list = field(default_factory=list)  # 联网搜索来源：[{url,title?}, ...]
 
 
 def _sniff_image_mime(data: bytes) -> str:
@@ -90,6 +92,53 @@ def _to_data_url(data: bytes) -> str:
     return f"data:{mime};base64,{b64}"
 
 
+def _extract_response_sources(data: Any) -> list[dict[str, str]]:
+    """从 Responses API 返回体里提取联网搜索来源。
+
+    OpenAI Responses 的来源可能出现在两类位置：
+    - ``output[].content[].annotations[]`` 的 ``url_citation``；
+    - ``web_search_call.action.sources``（当请求 include 了 sources）。
+    兼容反代时字段名可能略有差异，所以递归扫描常见 key。
+    """
+    out: list[dict[str, str]] = []
+    seen: set[str] = set()
+
+    def add(url: Any, title: Any = None) -> None:
+        if not isinstance(url, str):
+            return
+        u = url.strip()
+        if not u or u in seen:
+            return
+        seen.add(u)
+        item = {"url": u}
+        if isinstance(title, str) and title.strip():
+            item["title"] = title.strip()
+        out.append(item)
+
+    def walk(node: Any) -> None:
+        if isinstance(node, dict):
+            typ = str(node.get("type") or "")
+            if typ in {"url_citation", "citation"}:
+                add(node.get("url"), node.get("title"))
+            if isinstance(node.get("url"), str) and (
+                "title" in node or "source" in typ or "citation" in typ
+            ):
+                add(node.get("url"), node.get("title"))
+            web = node.get("web")
+            if isinstance(web, dict):
+                add(web.get("uri") or web.get("url"), web.get("title"))
+            for key in ("sources", "annotations", "grounding_chunks", "groundingChunks", "output", "content", "action"):
+                value = node.get(key)
+                if value is not None:
+                    walk(value)
+        elif isinstance(node, list):
+            for item in node:
+                walk(item)
+
+    walk(data)
+    return out[:12]
+
+
 class LLMClient(ABC):
     """provider-agnostic 调用接口。"""
 
@@ -100,6 +149,8 @@ class LLMClient(ABC):
         user: str,
         max_tokens: int = 512,
         images: list[bytes] | None = None,
+        web_search: bool = False,
+        web_search_context_size: str | None = None,
     ) -> LLMResult:
         """以 system + user 拼 prompt（可附图），返回回答与 token 统计。
 
@@ -150,7 +201,11 @@ class OpenAIClient(LLMClient):
         user: str,
         max_tokens: int = 512,
         images: list[bytes] | None = None,
+        web_search: bool = False,
+        web_search_context_size: str | None = None,
     ) -> LLMResult:
+        if web_search:
+            raise LLMError("联网搜索需要使用 OpenAI Responses API（api_format=responses）")
         url = f"{self._base_url}/chat/completions"
         # Ollama 部署可能不需要 api_key；为空时不下发 Authorization 头
         headers = {"Content-Type": "application/json"}
@@ -324,7 +379,11 @@ class AnthropicClient(LLMClient):
         user: str,
         max_tokens: int = 512,
         images: list[bytes] | None = None,
+        web_search: bool = False,
+        web_search_context_size: str | None = None,
     ) -> LLMResult:
+        if web_search:
+            raise LLMError("当前 Anthropic 调用路径尚未接入联网搜索；请使用 OpenAI Responses provider")
         url = f"{self._base_url}/messages"
         headers = {
             "x-api-key": self._api_key,
@@ -488,6 +547,8 @@ class ResponsesClient(LLMClient):
         user: str,
         max_tokens: int = 512,
         images: list[bytes] | None = None,
+        web_search: bool = False,
+        web_search_context_size: str | None = None,
     ) -> LLMResult:
         url = f"{self._base_url}/responses"
         headers = {"Content-Type": "application/json"}
@@ -515,6 +576,12 @@ class ResponsesClient(LLMClient):
             # Responses API 用 max_output_tokens（不是 max_tokens）
             "max_output_tokens": max_tokens,
         }
+        if web_search:
+            size = (web_search_context_size or "medium").lower()
+            if size not in {"low", "medium", "high"}:
+                size = "medium"
+            body["tools"] = [{"type": "web_search", "search_context_size": size}]
+            body["include"] = ["web_search_call.action.sources"]
 
         _is_local = "127.0.0.1" in self._base_url or "localhost" in self._base_url
         client_kwargs: dict[str, object] = {"timeout": _LOCAL_TIMEOUT if _is_local else _HTTP_TIMEOUT}
@@ -577,6 +644,7 @@ class ResponsesClient(LLMClient):
             model=str(data.get("model", self._model)),
             input_tokens=int(usage.get("input_tokens") or 0),
             output_tokens=int(usage.get("output_tokens") or 0),
+            sources=_extract_response_sources(data),
         )
 
     async def transcribe(self, audio: bytes, model: str) -> str:

@@ -29,11 +29,18 @@ const PluginsHome = lazy(() => import("@/pages/Plugins").then(m => ({ default: m
 const PluginsTemplatesPage = lazy(() => import("@/pages/Plugins").then(m => ({ default: m.PluginsTemplatesPage })));
 const PluginsAliasesPage = lazy(() => import("@/pages/Plugins").then(m => ({ default: m.PluginsAliasesPage })));
 const PluginsSchedulerPage = lazy(() => import("@/pages/Plugins").then(m => ({ default: m.PluginsSchedulerPage })));
+const PluginsAutoCommandWhitelistPage = lazy(() => import("@/pages/Plugins").then(m => ({ default: m.PluginsAutoCommandWhitelistPage })));
 const PluginsManagePage = lazy(() => import("@/pages/Extensions").then(m => ({ default: m.Extensions })));
 const AIIndex = lazy(() => import("@/pages/AI/Index").then(m => ({ default: m.AIIndex })));
 const AIProviders = lazy(() => import("@/pages/AI/Providers").then(m => ({ default: m.AIProviders })));
 const AIHelp = lazy(() => import("@/pages/AI/Help").then(m => ({ default: m.AIHelp })));
 const AIUsage = lazy(() => import("@/pages/AI/Usage").then(m => ({ default: m.AIUsage })));
+const AIChat = lazy(() => import("@/pages/AI/Chat").then(m => ({ default: m.AIChat })));
+const AIRouting = lazy(() => import("@/pages/AI/Routing").then(m => ({ default: m.AIRouting })));
+const AISearch = lazy(() => import("@/pages/AI/Search").then(m => ({ default: m.AISearch })));
+const AIVision = lazy(() => import("@/pages/AI/Vision").then(m => ({ default: m.AIVision })));
+const AIImages = lazy(() => import("@/pages/AI/Images").then(m => ({ default: m.AIImages })));
+const AIOutput = lazy(() => import("@/pages/AI/Output").then(m => ({ default: m.AIOutput })));
 
 type AppErrorBoundaryState = { hasError: boolean };
 
@@ -190,6 +197,14 @@ export default function App() {
             }
           />
           <Route
+            path="plugins/auto-command-whitelist"
+            element={
+              <Suspense fallback={<PageFallback />}>
+                <PluginsAutoCommandWhitelistPage />
+              </Suspense>
+            }
+          />
+          <Route
             path="plugins/manage"
             element={
               <Suspense fallback={<PageFallback />}>
@@ -226,6 +241,54 @@ export default function App() {
             element={
               <Suspense fallback={<PageFallback />}>
                 <AIProviders />
+              </Suspense>
+            }
+          />
+          <Route
+            path="ai/chat"
+            element={
+              <Suspense fallback={<PageFallback />}>
+                <AIChat />
+              </Suspense>
+            }
+          />
+          <Route
+            path="ai/routing"
+            element={
+              <Suspense fallback={<PageFallback />}>
+                <AIRouting />
+              </Suspense>
+            }
+          />
+          <Route
+            path="ai/search"
+            element={
+              <Suspense fallback={<PageFallback />}>
+                <AISearch />
+              </Suspense>
+            }
+          />
+          <Route
+            path="ai/vision"
+            element={
+              <Suspense fallback={<PageFallback />}>
+                <AIVision />
+              </Suspense>
+            }
+          />
+          <Route
+            path="ai/images"
+            element={
+              <Suspense fallback={<PageFallback />}>
+                <AIImages />
+              </Suspense>
+            }
+          />
+          <Route
+            path="ai/output"
+            element={
+              <Suspense fallback={<PageFallback />}>
+                <AIOutput />
               </Suspense>
             }
           />

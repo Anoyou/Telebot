@@ -859,6 +859,10 @@ export interface AICommandConfig {
   output_template?: string | null;
   /** 是否对占位符的值做对应格式的转义；默认 true。html 模式下会转义 & < > */
   escape_values?: boolean;
+  /** 使用模型工具联网搜索；目前仅 OpenAI Responses API 生效 */
+  web_search?: boolean;
+  /** 联网搜索上下文强度 */
+  web_search_context_size?: "low" | "medium" | "high";
 }
 
 /** 账号详情 → 命令 tab 一行：模板内容 + 该账号是否启用 */

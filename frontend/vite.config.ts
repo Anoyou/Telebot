@@ -21,11 +21,9 @@ export default defineConfig({
         type: "module",
         navigateFallback: "index.html",
       },
-      includeAssets: [
-        "favicon.ico",
-        "apple-touch-icon.png",
-        "robots.txt",
-      ],
+      // public 下的 PNG 图标会被 workbox globPatterns 收进 precache；
+      // 这里保持为空，避免 favicon / touch icon 在 sw.js 里重复出现。
+      includeAssets: [],
       manifest: {
         name: "TelePilot",
         short_name: "Userbot",

@@ -152,6 +152,14 @@ class CommandTemplateBase(BaseModel):
             ev = v.get("escape_values", True)
             if not isinstance(ev, bool):
                 raise ValueError("escape_values 必须是布尔值")
+            ws = v.get("web_search", False)
+            if not isinstance(ws, bool):
+                raise ValueError("web_search 必须是布尔值")
+            v["web_search"] = ws
+            wscs = v.get("web_search_context_size", "medium")
+            if wscs not in ("low", "medium", "high"):
+                raise ValueError("web_search_context_size 只能是 low / medium / high")
+            v["web_search_context_size"] = wscs
             # 发送方式：edit（默认，原地编辑命令消息保留 reply 链）/ send_new
             # （删命令重发新消息，不带 reply_to——避免在被回复方那里留下回复痕迹）
             sm = v.get("send_mode", "edit")

@@ -64,7 +64,7 @@ export function AppShell() {
             pr-[max(0.5rem,env(safe-area-inset-right))]
           "
         >
-          <div className="grid h-14 grid-cols-4 gap-1 px-1">
+          <div className="grid h-14 grid-cols-3 gap-1 px-1">
             {MOBILE_PRIMARY_NAV.map((item) => (
               <NavLink
                 key={item.to}

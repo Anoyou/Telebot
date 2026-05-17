@@ -96,6 +96,12 @@ async def _build_proxy_tuple(db: AsyncSession, proxy_id: int | None):
         from ..util.proxy import get_default_proxy_tuple
         return get_default_proxy_tuple()
     password = decrypt_str(proxy.password_enc) if proxy.password_enc else None
+    if "://" in proxy.host:
+        from ..util.proxy import parse_proxy_url
+        parsed = parse_proxy_url(proxy.host)
+        if parsed is not None:
+            ptype, host, port, rdns, parsed_user, parsed_password = parsed
+            return (ptype, host, port, rdns, proxy.username or parsed_user, password or parsed_password)
     return (
         proxy.type,        # "socks5" | "http" | "mtproxy"
         proxy.host,
@@ -149,8 +155,8 @@ async def start_login(
         proxy=proxy_tuple,
         **profile.telethon_kwargs(),
     )
-    await client.connect()
     try:
+        await client.connect()
         sent = await client.send_code_request(phone)
     except FloodWaitError as e:
         await _safe_disconnect(client)
@@ -161,7 +167,11 @@ async def start_login(
     except Exception as e:  # noqa: BLE001
         # 其它错误（网络、API 凭据错等）也要先回收 client，再向上抛
         await _safe_disconnect(client)
-        raise _err("LOGIN_START_FAILED", f"发起登录失败：{e}") from e
+        raise _err(
+            "LOGIN_START_FAILED",
+            f"发起登录失败：无法连接 Telegram，请检查代理与标识里的代理配置或服务器网络。原始错误：{e}",
+            502,
+        ) from e
 
     token = secrets.token_urlsafe(24)
     async with _LOCK:

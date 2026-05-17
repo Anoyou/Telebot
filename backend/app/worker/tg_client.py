@@ -18,7 +18,7 @@ from telethon.sessions import StringSession
 from ..crypto import decrypt_bytes, decrypt_str
 from ..db.models.account import Account, Proxy
 from ..services.device_profile import HARDCODED_FALLBACK, ResolvedDeviceProfile
-from ..util.proxy import get_default_proxy_tuple
+from ..util.proxy import get_default_proxy_tuple, parse_proxy_url
 
 
 def build_proxy_tuple(proxy: Proxy | None):
@@ -30,13 +30,19 @@ def build_proxy_tuple(proxy: Proxy | None):
     """
     if not proxy:
         return get_default_proxy_tuple()
+    password = decrypt_str(proxy.password_enc) if proxy.password_enc else None
+    if "://" in proxy.host:
+        parsed = parse_proxy_url(proxy.host)
+        if parsed is not None:
+            ptype, host, port, rdns, parsed_user, parsed_password = parsed
+            return (ptype, host, port, rdns, proxy.username or parsed_user, password or parsed_password)
     return (
         proxy.type,                  # "socks5" | "http" | "mtproxy"
         proxy.host,
         proxy.port,
         True,                        # 强制走远端 DNS，避免本地 DNS 泄漏
         proxy.username,
-        decrypt_str(proxy.password_enc) if proxy.password_enc else None,
+        password,
     )
 
 

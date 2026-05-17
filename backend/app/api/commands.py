@@ -339,6 +339,22 @@ async def _resolve_proxy_url(db, proxy_id: int | None) -> str | None:
     p = await db.get(Proxy, proxy_id)
     if p is None:
         return None
+    if "://" in p.host:
+        from ..util.proxy import parse_proxy_url
+        parsed = parse_proxy_url(p.host)
+        if parsed is not None:
+            ptype, host, port, _rdns, parsed_user, parsed_password = parsed
+            if ptype not in ("socks5", "http"):
+                return None
+            user = p.username or parsed_user
+            pwd = decrypt_str(p.password_enc) if p.password_enc else (parsed_password or "")
+            auth = ""
+            if user:
+                auth = quote(user, safe="")
+                if pwd:
+                    auth = f"{auth}:{quote(pwd, safe='')}"
+                auth = f"{auth}@"
+            return f"{ptype}://{auth}{host}:{int(port)}"
     t = (p.type or "").lower()
     if t == "socks5":
         scheme = "socks5"

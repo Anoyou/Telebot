@@ -1,7 +1,17 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowRight, Bot, Download, ShieldCheck, SlidersHorizontal, Sparkles, UserPlus } from "lucide-react";
+import {
+  ArrowRight,
+  Bot,
+  ChevronDown,
+  Download,
+  ShieldCheck,
+  SlidersHorizontal,
+  Sparkles,
+  UserPlus,
+  Waypoints,
+} from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -35,6 +45,9 @@ import {
 import { listAccounts } from "@/api/accounts";
 import { getErrMsg, api } from "@/lib/api";
 import { NotifyBots } from "./NotifyBots";
+import { DeviceProfileManager } from "./DeviceProfileManager";
+import { ProxyManager } from "./ProxyManager";
+import { RateTemplates } from "./RateTemplates";
 import { SudoManagement } from "./SudoManagement";
 import { UserAccount } from "./UserAccount";
 import { ConfigBackup } from "./ConfigBackup";
@@ -59,9 +72,9 @@ const GUIDE_STEPS = [
     actionTo: "/settings?tab=platform",
   },
   {
-    title: "3. 启用命令模板或调用插件",
-    desc: "去插件中心启用模板或插件，然后就能在 Telegram 里直接调用。",
-    actionLabel: "去插件中心",
+    title: "3. 启用命令模板或调用模块",
+    desc: "去模块中心启用模板或模块，然后就能在 Telegram 里直接调用。",
+    actionLabel: "去模块中心",
     actionTo: "/plugins",
   },
 ];
@@ -78,7 +91,8 @@ export function SettingsIndex() {
   const location = useLocation();
   const nav = useNavigate();
   const [searchParams] = useSearchParams();
-  const [tab, setTab] = useState<"account" | "platform" | "security" | "migration">("account");
+  const [tab, setTab] = useState<"account" | "platform" | "proxy-identity" | "security" | "migration">("account");
+  const [rateExpanded, setRateExpanded] = useState(false);
   const [guideExpanded, setGuideExpanded] = useState(false);
   const [quickAid, setQuickAid] = useState("");
   const [quickBindOpen, setQuickBindOpen] = useState(false);
@@ -160,8 +174,21 @@ export function SettingsIndex() {
       setTab("migration");
       return;
     }
-    if (tabParam === "account" || tabParam === "platform" || tabParam === "security" || tabParam === "migration") {
-      setTab(tabParam);
+    if (tabParam === "proxy" || tabParam === "device" || tabParam === "resource" || tabParam === "proxy-identity") {
+      setTab("proxy-identity");
+      return;
+    }
+    if (tabParam === "rate") {
+      setTab("security");
+      return;
+    }
+    if (
+      tabParam === "account" ||
+      tabParam === "platform" ||
+      tabParam === "security" ||
+      tabParam === "migration"
+    ) {
+      setTab(tabParam as "account" | "platform" | "security" | "migration");
     }
   }, [searchParams]);
 
@@ -337,6 +364,9 @@ export function SettingsIndex() {
           <TabsTrigger value="platform" className="gap-1.5">
             <SlidersHorizontal className="h-4 w-4" /> 平台
           </TabsTrigger>
+          <TabsTrigger value="proxy-identity" className="gap-1.5">
+            <Waypoints className="h-4 w-4" /> 代理与标识
+          </TabsTrigger>
           <TabsTrigger value="security" className="gap-1.5">
             <UserPlus className="h-4 w-4" /> 安全
           </TabsTrigger>
@@ -371,7 +401,7 @@ export function SettingsIndex() {
                 <Button
                   className={
                     guideActive && currentStep === 1
-                      ? "siri-glow text-primary-foreground hover:text-primary-foreground"
+                      ? "siri-glow border border-primary/25 bg-background text-primary shadow-sm hover:bg-primary/10 hover:text-primary"
                       : undefined
                   }
                   onClick={() => prefix && savePrefix.mutate()}
@@ -443,6 +473,11 @@ export function SettingsIndex() {
           </Card>
         </TabsContent>
 
+        <TabsContent value="proxy-identity" className="space-y-6">
+          <ProxyManager />
+          <DeviceProfileManager />
+        </TabsContent>
+
         <TabsContent value="security" className="space-y-6">
           <Card>
             <CardHeader>
@@ -486,6 +521,29 @@ export function SettingsIndex() {
               </div>
             </CardContent>
           </Card>
+
+          <div className="rounded-lg border bg-card">
+            <div className="p-6">
+              <button
+                type="button"
+                className="flex w-full items-center justify-between gap-2 text-left"
+                onClick={() => setRateExpanded((v) => !v)}
+              >
+                <div>
+                  <CardTitle className="text-base">频控模板</CardTitle>
+                  <CardDescription>管理历史的速率限制模板，默认收起。</CardDescription>
+                </div>
+                <ChevronDown
+                  className={`h-4 w-4 text-muted-foreground transition-transform ${rateExpanded ? "rotate-180" : ""}`}
+                />
+              </button>
+            </div>
+            {rateExpanded ? (
+              <div className="border-t p-4">
+                <RateTemplates />
+              </div>
+            ) : null}
+          </div>
 
           <Card>
             <CardHeader>
@@ -664,7 +722,18 @@ function GuideInlineCard({
   onPrimary: () => void;
   onSkip: () => void;
 }) {
-  const step = GUIDE_STEPS[currentStep];
+  const settingsQ = useQuery({
+    queryKey: ["system", "settings"],
+    queryFn: getSystemSettings,
+  });
+  const cmdPrefix = settingsQ.data?.command_prefix || ",";
+  const step = {
+    ...GUIDE_STEPS[currentStep],
+    desc:
+      currentStep === 1
+        ? `在系统设置里确定命令开头字符，比如 ${cmdPrefix}ai。`
+        : GUIDE_STEPS[currentStep].desc,
+  };
   const percent = ((currentStep + 1) / GUIDE_STEPS.length) * 100;
 
   if (!expanded) {
@@ -699,7 +768,7 @@ function GuideInlineCard({
       </div>
       <div className="mt-3 flex flex-wrap gap-2">
         <Button size="sm" onClick={onPrimary}>
-          下一步：去插件中心 <ArrowRight className="ml-1 h-4 w-4" />
+          下一步：去模块中心 <ArrowRight className="ml-1 h-4 w-4" />
         </Button>
         <Button size="sm" variant="outline" onClick={onSkip}>
           跳过这步

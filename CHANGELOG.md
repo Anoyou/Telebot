@@ -17,6 +17,235 @@
 
 ---
 
+## [0.15.23] — 2026-05-17 · feature · AI 能力页可操作化
+
+### Added
+- AI 模块新增聊天问答、能力路由、联网搜索、视觉理解、图片生成、输出模板等独立能力页入口。
+- 输出模板页支持选择 AI 命令后直接编辑解析模式、消息模板、占位符转义和预览，并保存到对应命令模板。
+- 联网搜索页支持直接为 AI 命令启用/关闭 `web_search`，并调整搜索上下文强度。
+- 能力路由页支持直接切换固定模型/自动路由，并配置自动路由失败时的兜底 Provider。
+
+### Changed
+- 自定义命令编辑器的 AI 消息格式编辑区抽取为通用输出模板组件，供命令模板页与 AI 输出模板页复用。
+
+### Verification
+- `pnpm --dir frontend build` 通过。
+
+---
+
+## [0.15.22] — 2026-05-17 · fix · AI 入口可见性
+
+### Added
+- 左侧主导航新增“AI”入口，直达 AI 模块总览页。
+- 模块中心的“AI 模块入口”区域新增“AI 总览”按钮，避免只能进入模型提供商、用量或帮助页。
+
+### Verification
+- `pnpm --dir frontend build` 通过。
+- `git diff --check` 通过。
+
+---
+
+## [0.15.21] — 2026-05-17 · feature · AI 模块能力化
+
+### Added
+- AI 模块首页重构为能力控制台，集中展示模型提供商、AI 命令模板、联网搜索、视觉理解、能力路由和输出模板入口。
+- 自定义 AI 命令模板新增“联网搜索”开关与搜索上下文强度配置，支持在输出模板里使用 `{sources}` 显示搜索来源。
+- OpenAI Responses 调用链支持 `web_search` 工具，并从 Responses 返回体中提取来源链接。
+
+### Changed
+- 标准 LLM runtime 增加联网搜索参数透传，worker 渲染 AI 回复时会把搜索来源注入模板上下文。
+
+### Fixed
+- 修复 AI 模块首页首次加载后因 React hooks 调用顺序变化导致 `/ai` 页面打不开的问题。
+
+### Verification
+- `backend/.venv/bin/python -m pytest backend/app/tests/test_commands.py -q` 通过。
+- `pnpm --dir frontend build` 通过。
+
+---
+
+## [0.15.20] — 2026-05-17 · fix · 自定义命令启用入口
+
+### Fixed
+- 账号详情新增“自定义命令”页签，可按当前账号启用或停用全局命令模板，开启后 worker 热加载生效。
+- 账号概览中的“复用命令模板”入口改为直达账号级启用页，模板库文案同步为“账号详情 → 自定义命令页签”。
+
+### Verification
+- `pnpm --dir frontend build` 通过。
+- `git diff --check` 通过。
+
+---
+
+## [0.15.19] — 2026-05-17 · fix · Codex 生图错误处理
+
+### Fixed
+- Codex 生图插件对齐原始 TeleBox 插件的轮询容错：普通轮询异常会继续等待，鉴权/HTML 登录页/防护页会给出明确提示，不再把整段网页源码显示成 `HTTP 0`。
+- Codex 生图插件支持从 Responses 完成事件里递归提取最终 `image_generation_call.result` 图片，减少只依赖轮询造成的失败。
+- 生图失败提示去掉重复的 `❌ ❌` 前缀，并补充 Token 失效、ChatGPT 防护页、后端网络/代理不可达等可操作排查提示。
+
+### Verification
+- `backend/.venv/bin/python -m pytest backend/app/tests/test_codex_image_errors.py` 通过。
+- `backend/.venv/bin/python -m py_compile plugins/installed/codex_image/plugin.py` 通过。
+- `backend/.venv/bin/ruff check plugins/installed/codex_image/plugin.py backend/app/tests/test_codex_image_errors.py` 通过。
+- `pnpm --dir frontend build` 通过。
+- `git diff --check` 通过。
+
+---
+
+## [0.15.18] — 2026-05-17 · fix · 命令示例跟随前缀
+
+### Fixed
+- TG 内置命令、游戏插件、图片生成插件、账号 Bot 与前端配置页中的命令示例改为读取当前命令前缀，不再固定显示逗号前缀。
+- 九宫格骰子竞猜模板新增 `{prefix}` 占位符，进行中提示和奖励参数错误提示可随系统前缀热加载变化。
+
+### Verification
+- `backend/.venv/bin/python -m pytest backend/app/tests/test_auto_reply.py backend/app/tests/test_worker_command.py backend/app/tests/test_sudo.py backend/app/tests/test_scheduler_runtime.py` 通过。
+- `backend/.venv/bin/python -m pytest backend/app/tests/test_account_bot.py` 通过。
+- `pnpm --dir frontend build` 通过。
+- `git diff --check` 通过。
+
+---
+
+## [0.15.17] — 2026-05-17 · fix · 自动回复命令直接派发
+
+### Fixed
+- 自动回复生成白名单内命令文本时，会直接进入 worker 命令派发器执行，不再依赖插件发送出的消息再次回流为 outgoing 事件。
+
+### Verification
+- `backend/.venv/bin/python -m pytest backend/app/tests/test_auto_reply.py backend/app/tests/test_worker_command.py backend/app/tests/test_scheduler_runtime.py` 通过。
+- `pnpm --dir frontend build` 通过。
+
+---
+
+## [0.15.16] — 2026-05-17 · fix · 自动命令白名单实时热加载
+
+### Fixed
+- worker 收到 `reload_config` 后会同步刷新命令上下文，自动命令白名单保存后立即生效，不再等周期性 reconcile。
+
+### Verification
+- `backend/.venv/bin/python -m pytest backend/app/tests/test_scheduler_runtime.py backend/app/tests/test_feature_registry.py` 通过。
+- `pnpm --dir frontend build` 通过。
+
+---
+
+## [0.15.15] — 2026-05-17 · changed · 自动命令白名单独立入口
+
+### Changed
+- 自动命令白名单从定时任务规则页拆出，模块中心新增独立入口，按账号配置自动动作允许触发的命令。
+- 模块中心“平台能力”说明改为系统级基础模块的集中入口，不再暗示无需手动配置。
+
+### Fixed
+- 本地已存在于 `plugins/installed` 的模块会同步登记到 feature 表；`codex_image` 等随项目落盘的实验模块可在模块中心出现并按账号启用配置。
+
+### Verification
+- `pnpm --dir frontend build` 通过。
+- `backend/.venv/bin/python -m pytest backend/app/tests/test_feature_registry.py` 通过。
+
+---
+
+## [0.15.14] — 2026-05-17 · fix · 远程模块配置入口
+
+### Fixed
+- 模块中心的“远程模块”卡片支持显示“配置”按钮；没有专用配置页的远程模块会打开通用配置弹窗，并保存账号级模块配置。
+
+### Verification
+- `pnpm --dir frontend build` 通过。
+
+---
+
+## [0.15.13] — 2026-05-17 · fix · 代理 URL 自动归一化
+
+### Fixed
+- 新增或编辑代理时支持直接粘贴完整代理 URL（如 `http://10.10.8.33:6152`、`socks5://127.0.0.1:6153`），后端会自动拆分类型、主机、端口与认证信息，避免把完整 URL 当作主机名导致测试连接失败。
+- 账号登录、账号退出与 LLM 代理解析兼容历史上已保存为完整 URL 的代理主机字段。
+- 代理管理页的主机输入提示同步为支持完整 URL 粘贴。
+
+### Verification
+- `backend/.venv/bin/python -m pytest backend/app/tests/test_proxy_url_normalization.py backend/app/tests/test_accounts.py` 通过。
+- `pnpm --dir frontend build` 通过。
+
+---
+
+## [0.15.12] — 2026-05-17 · feature · 代理配置可编辑
+
+### Added
+- 代理与标识页的已添加代理支持行内编辑，可修改类型、主机、端口、用户名和密码，并支持清空已保存密码。
+
+### Verification
+- `backend/.venv/bin/python -m pytest backend/app/tests/test_accounts.py` 通过。
+- `pnpm --dir frontend build` 通过。
+
+---
+
+## [0.15.11] — 2026-05-17 · fix · 代理入口不可达提示
+
+### Fixed
+- 代理连通性测试先探测代理入口 TCP 可达性；当后端连不到代理地址时，返回“代理入口不可达”与 Docker/局域网访问提示，不再只显示底层 python-socks 错误。
+
+### Verification
+- `backend/.venv/bin/python -m pytest backend/app/tests/test_accounts.py` 通过。
+- `pnpm --dir frontend build` 通过。
+
+---
+
+## [0.15.10] — 2026-05-17 · fix · 新增账号网络错误提示
+
+### Fixed
+- 新增账号发起登录时，后端连接 Telegram 失败会返回结构化 `LOGIN_START_FAILED` 错误，不再冒泡成“服务器内部错误”。
+- 新增账号向导的代理提示同步到“系统设置 → 代理与标识”。
+
+### Verification
+- `backend/.venv/bin/python -m pytest backend/app/tests/test_accounts.py` 通过。
+- `pnpm --dir frontend build` 通过。
+
+---
+
+## [0.15.9] — 2026-05-16 · feature · 首页承载账号管理
+
+### Changed
+- 抽离账号管理复用面板，统一承载账号列表高频操作：新增账号、新手指引、启停、详情、删除与空状态。
+- 首页 Dashboard 直接接入账号管理面板，首页可完成核心账号管理流程，不再仅展示状态卡。
+- `/accounts` 路由改为复用同一面板实现，保持原有交互与路径兼容。
+
+### Verification
+- `pnpm --dir frontend build` 通过。
+
+---
+
+## [0.15.8] — 2026-05-16 · feature · 模块中心与 AI 入口文案收口
+
+### Changed
+- `/plugins` 与 `/plugins/manage` 前端展示文案从“插件”统一收口为“模块”（仅 UI 文案，后端/API/plugin 命名保持不变）。
+- 模块中心首页新增 AI 入口卡，提供“模型提供商 / AI 用量 / AI 帮助”直达入口，并明确 AI 能力属于模块配置流程。
+- 保留现有 `/ai/*` 页面实现与路径兼容，未调整 Settings/Dashboard/Sidebar/App 路由。
+
+### Verification
+- `pnpm --dir frontend build` 通过。
+
+---
+
+## [0.15.7] — 2026-05-16 · fix · 恢复代理与标识配置入口
+
+### Fixed
+- 系统设置新增“代理与标识”页签，恢复代理库与设备标识模板入口，避免后端已实现的代理配置在前端不可达。
+- 风控模板移入“安全”页签并默认折叠，避免系统设置首屏过长。
+- 健康概览的代理库为空提示改为可点击入口，直接跳到系统设置“代理与标识”页。
+
+### Verification
+- `pnpm --dir frontend build` 通过。
+
+---
+
+## [0.15.6] — 2026-05-16 · fix · 修复新手指引按钮文字可见性
+
+### Fixed
+- 账号管理页“新增账号”和系统设置平台页“保存”在新手指引高亮时改为浅底描边强调样式，避免流光高亮下文字变白不可见。
+
+### Verification
+- `pnpm --dir frontend build` 通过。
+
+---
+
 ## [0.15.5] — 2026-05-16 · fix · 修复 CI 插件导入路径
 
 ### Fixed

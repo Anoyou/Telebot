@@ -6,11 +6,10 @@ import { NavLink } from "react-router-dom";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import {
   Boxes,
+  BrainCircuit,
   Cog,
-  LayoutDashboard,
+  Home,
   ScrollText,
-  Sparkles,
-  Users,
   X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -24,18 +23,17 @@ interface NavItem {
 }
 
 // 顶层导航条目；
-// 0.14.0: 顶层只保留用户目标导向的 6 个入口；调度 / 模板等能力收敛到 Plugins。
+// 首页承载概览 + 账号操作，AI 能力收敛到模块中心。
 const NAV: NavItem[] = [
-  { to: "/", label: "概览", icon: LayoutDashboard, end: true },
-  { to: "/accounts", label: "账号", icon: Users },
-  { to: "/plugins", label: "插件", icon: Boxes },
-  { to: "/ai", label: "AI", icon: Sparkles },
+  { to: "/", label: "首页", icon: Home, end: true },
+  { to: "/plugins", label: "模块", icon: Boxes },
+  { to: "/ai", label: "AI", icon: BrainCircuit },
   { to: "/logs", label: "日志", icon: ScrollText },
   { to: "/settings", label: "系统", icon: Cog },
 ];
 
 export const MOBILE_PRIMARY_NAV: NavItem[] = NAV.filter(
-  (item) => item.to === "/" || item.to === "/accounts" || item.to === "/plugins" || item.to === "/logs",
+  (item) => item.to === "/" || item.to === "/plugins" || item.to === "/logs",
 );
 
 function NavList({ onNavigate }: { onNavigate?: () => void }) {
@@ -66,7 +64,7 @@ function SidebarBody({ onNavigate }: { onNavigate?: () => void }) {
   return (
     <>
       <div className="flex h-14 shrink-0 items-center border-b px-4 text-base font-semibold">
-        Telegram Userbot
+        TelePilot
       </div>
       <NavList onNavigate={onNavigate} />
       <div className="shrink-0 border-t p-3 text-xs text-muted-foreground">

@@ -795,6 +795,69 @@ async def test_responses_client_parses_output_array_form() -> None:
 
 
 @pytest.mark.asyncio
+async def test_responses_client_web_search_body_and_sources() -> None:
+    """开启 web_search 时应下发工具，并把来源提取到 LLMResult.sources。"""
+    from app.services.llm_client import ResponsesClient
+
+    cli = ResponsesClient(api_key="sk", base_url=None, model="gpt-5.5")
+
+    class _Resp:
+        status_code = 200
+
+        @staticmethod
+        def json():
+            return {
+                "model": "gpt-5.5",
+                "output_text": "searched",
+                "output": [
+                    {
+                        "type": "message",
+                        "content": [
+                            {
+                                "type": "output_text",
+                                "text": "searched",
+                                "annotations": [
+                                    {
+                                        "type": "url_citation",
+                                        "url": "https://example.com/a",
+                                        "title": "A",
+                                    }
+                                ],
+                            }
+                        ],
+                    },
+                    {
+                        "type": "web_search_call",
+                        "action": {
+                            "sources": [
+                                {"url": "https://example.com/b", "title": "B"}
+                            ]
+                        },
+                    },
+                ],
+                "usage": {"input_tokens": 10, "output_tokens": 4},
+            }
+
+    fake = AsyncMock()
+    fake.__aenter__.return_value = fake
+    fake.post = AsyncMock(return_value=_Resp())
+    with patch("app.services.llm_client.httpx.AsyncClient", return_value=fake):
+        result = await cli.complete(
+            "sys",
+            "user",
+            web_search=True,
+            web_search_context_size="high",
+        )
+    body = fake.post.await_args.kwargs["json"]
+    assert body["tools"] == [{"type": "web_search", "search_context_size": "high"}]
+    assert body["include"] == ["web_search_call.action.sources"]
+    assert result.sources == [
+        {"url": "https://example.com/a", "title": "A"},
+        {"url": "https://example.com/b", "title": "B"},
+    ]
+
+
+@pytest.mark.asyncio
 async def test_responses_client_proxy_passed_to_httpx() -> None:
     """ResponsesClient 也要把 proxy 透传给 httpx（与 OpenAIClient 一致）。"""
     from app.services.llm_client import ResponsesClient

@@ -98,7 +98,7 @@ function HowItWorksCard({ cmdPrefix }: { cmdPrefix: string }) {
               模型名 · in/out tokens</code>，自动路由模式还会标 <code>auto · 决策原因</code>
           </li>
           <li>
-            两步配置才能用：先到 <strong>AI 中心 → 模型提供商</strong> 新建并配置好（填 API Key 等），
+            两步配置才能用：先到 <strong>AI 模块 → 模型提供商</strong> 新建并配置好（填 API Key 等），
             再去 <span className="font-medium">插件 → 命令模板</span> 新建 例如 type=ai
             的模板（命名为 <code>ai</code>），最后在账号详情勾选启用
           </li>
@@ -272,7 +272,7 @@ function RecommendedSetupCard({ cmdPrefix }: { cmdPrefix: string }) {
     <>
       <CardHeader>
         <CardDescription>
-          给四个模型建议的 模态 / 标签 / 推理成本档 组合；按下方填到 AI 中心的模型提供商里即可。
+          给四个模型建议的 模态 / 标签 / 推理成本档 组合；按下方填到 AI 模块的模型提供商里即可。
           也可以全部建好后在自定义命令里把一条 <code>{cmdPrefix}ai</code> 设成 auto 模式 +
           GLM 做 classifier，自动路由到合适模型
         </CardDescription>

@@ -1,23 +1,16 @@
-// Dashboard：系统状态总览 + 账号状态卡
+// Dashboard：系统状态总览 + 首页账号管理
 //
 // 顶部新加 SystemHealthCard：DB / alembic / Redis / providers / proxies / workers
 // 用 30s 轮询自动刷新，让"配置改动 / 子服务挂掉"这类变化几十秒内可见。
-import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { AccountSummaryCard } from "@/components/AccountSummaryCard";
 import { SystemHealthCard } from "@/components/SystemHealthCard";
+import { AccountManagementPanel } from "@/components/accounts/AccountManagementPanel";
 import { Spinner } from "@/components/ui/misc";
-import { listAccounts } from "@/api/accounts";
 import { getResourceDashboard } from "@/api/system";
 
 export function Dashboard() {
-  const accountsQ = useQuery({
-    queryKey: ["accounts"],
-    queryFn: listAccounts,
-  });
   const resourceQ = useQuery({
     queryKey: ["system", "resource-dashboard"],
     queryFn: getResourceDashboard,
@@ -31,9 +24,9 @@ export function Dashboard() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">系统概览</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">首页</h1>
         <p className="text-sm text-muted-foreground">
-          系统状态 + 多账号运行状态一览
+          系统状态、资源占用和账号管理都在这里。
         </p>
       </div>
 
@@ -145,35 +138,10 @@ export function Dashboard() {
         </CardContent>
       </Card>
 
-      {/* 账号状态卡 */}
-      <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="text-base">账号状态</CardTitle>
-          <p className="text-sm text-muted-foreground">
-            多账号运行状态一览与快捷入口
-          </p>
-        </CardHeader>
-        <CardContent className="pt-0">
-          {accountsQ.isLoading ? (
-            <div className="flex h-24 items-center justify-center">
-              <Spinner className="text-primary" />
-            </div>
-          ) : accountsQ.data && accountsQ.data.length > 0 ? (
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-              {accountsQ.data.map((a) => (
-                <AccountSummaryCard key={a.id} account={a} />
-              ))}
-            </div>
-          ) : (
-            <div className="flex flex-col items-center justify-center gap-3 py-10 text-sm text-muted-foreground">
-              <span>尚未绑定任何 TG 账号</span>
-              <Button asChild size="sm">
-                <Link to="/accounts/new">立即绑定</Link>
-              </Button>
-            </div>
-          )}
-        </CardContent>
-      </Card>
+      <AccountManagementPanel
+        title="账号管理"
+        description="在首页直接完成新增、新手引导与账号启停等高频操作"
+      />
     </div>
   );
 }

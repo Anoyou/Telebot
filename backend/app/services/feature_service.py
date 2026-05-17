@@ -17,6 +17,7 @@ Global Config 设计：
 
 from __future__ import annotations
 
+import json
 import logging
 from collections.abc import Iterable
 from typing import Any
@@ -48,10 +49,11 @@ log = logging.getLogger(__name__)
 # Feature 表 seed
 # ─────────────────────────────────────────────────────
 async def seed_builtin_features(db: AsyncSession) -> int:
-    """确保内置 feature 行存在；返回新增条数。
+    """确保内置和本地 installed feature 行存在；返回新增条数。
 
     每次调用都先强制刷新 ``BUILTIN_FEATURES`` 字典（重新扫描 builtin 目录），
-    保证新增插件目录后不重启主进程也能被感知。
+    并扫描 ``plugins/installed`` 里的 ``plugin.json``。这样像 codex_image 这种
+    已随项目落盘的实验模块，不需要再通过远程安装流程才能在模块中心出现。
 
     幂等：已存在的行只校正 display_name / is_builtin，不会触发额外 INSERT；
     新行才增加计数并 commit。
@@ -107,11 +109,92 @@ async def seed_builtin_features(db: AsyncSession) -> int:
             manifest_data["x-experimental"] = experimental
         db.add(Feature(key=key, display_name=name, is_builtin=True, version=ver, manifest=manifest_data))
         added += 1
+    installed_added, installed_changed = await _seed_local_installed_features(db, existing)
+    added += installed_added
+    changed_existing = changed_existing or installed_changed
     if added:
         await db.commit()
     elif changed_existing:
         await db.commit()
     return added
+
+
+async def _seed_local_installed_features(
+    db: AsyncSession,
+    existing: dict[str, Feature],
+) -> tuple[int, bool]:
+    """把本地 ``plugins/installed`` 目录中已有 plugin.json 同步到 feature 表。
+
+    这里只登记元数据，不自动启用插件；运行期是否加载仍由账号 feature 开关和
+    loader 的安全策略决定。
+    """
+
+    try:
+        from ..settings import settings
+
+        root = settings.plugins_installed_path
+    except Exception:  # noqa: BLE001
+        return 0, False
+    if not root.exists():
+        return 0, False
+
+    added = 0
+    changed = False
+    for plugin_json in sorted(root.glob("*/plugin.json")):
+        try:
+            meta = json.loads(plugin_json.read_text(encoding="utf-8"))
+        except Exception:  # noqa: BLE001
+            log.warning("读取本地 installed 模块元数据失败: %s", plugin_json, exc_info=True)
+            continue
+        key = str(meta.get("name") or plugin_json.parent.name).strip()
+        if not key or "/" in key or "\\" in key:
+            continue
+        display_name = str(meta.get("display_name") or key)
+        version = str(meta.get("version") or "") or None
+        cfg_schema = meta.get("config_schema")
+        tags = meta.get("tags") or []
+        experimental = bool(meta.get("experimental")) or "experimental" in tags
+        manifest: dict[str, Any] = {}
+        if cfg_schema:
+            manifest["config_schema"] = cfg_schema
+        if experimental:
+            manifest["x-experimental"] = True
+        if meta.get("permissions"):
+            manifest["permissions"] = list(meta.get("permissions") or [])
+        manifest_data = manifest or None
+
+        if key in existing:
+            row = existing[key]
+            if row.is_builtin:
+                # 本地 installed 目录不能覆盖 builtin 元数据；同名目录交给安装流程拒绝/处理。
+                continue
+            row_changed = False
+            if row.display_name != display_name:
+                row.display_name = display_name
+                row_changed = True
+            if version and row.version != version:
+                row.version = version
+                row_changed = True
+            current_manifest = dict(row.manifest or {})
+            if manifest_data and current_manifest != manifest_data:
+                row.manifest = manifest_data
+                row_changed = True
+            if row_changed:
+                await db.flush()
+                changed = True
+            continue
+
+        row = Feature(
+            key=key,
+            display_name=display_name,
+            is_builtin=False,
+            version=version,
+            manifest=manifest_data,
+        )
+        db.add(row)
+        existing[key] = row
+        added += 1
+    return added, changed
 
 
 # ─────────────────────────────────────────────────────

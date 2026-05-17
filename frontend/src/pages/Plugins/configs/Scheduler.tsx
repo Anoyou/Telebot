@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Pencil, Play, Plus, Trash2, Zap } from "lucide-react";
@@ -8,14 +8,11 @@ import { getSystemSettings } from "@/api/system";
 import { listAccounts } from "@/api/accounts";
 import {
   executeRule,
-  getEffectiveConfig,
-  updateAccountFeatureConfig,
 } from "@/api/features";
 import type {
   RuleDryRunResponse,
   RuleExecuteResponse,
   RuleOut,
-  SchedulerFeatureConfig,
   SchedulerRuleConfig,
 } from "@/api/types";
 import { Button } from "@/components/ui/button";
@@ -36,6 +33,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/misc";
 import { Select } from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Table,
   TableBody,
@@ -44,7 +42,6 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { getErrMsg } from "@/lib/api";
 import { formatDateTime } from "@/lib/utils";
@@ -56,7 +53,7 @@ import {
   useRuleCrud,
 } from "./_shared";
 
-function defaultConfig(): SchedulerRuleConfig {
+function defaultConfig(commandPrefix = ","): SchedulerRuleConfig {
   return {
     kind: "cron",
     cron: "*/5 * * * *",
@@ -67,7 +64,7 @@ function defaultConfig(): SchedulerRuleConfig {
       type: "send_message",
       target_chat_id: 0,
       text: "tick",
-      command: ",help",
+      command: `${commandPrefix}help`,
       provider_id: 0,
       prompt: "今天要做什么？",
       system_prompt: "你是简洁有用的中文助手。",
@@ -78,8 +75,8 @@ function defaultConfig(): SchedulerRuleConfig {
   };
 }
 
-function readConfig(c: Record<string, unknown> | undefined): SchedulerRuleConfig {
-  return { ...defaultConfig(), ...(c as Partial<SchedulerRuleConfig> | undefined) };
+function readConfig(c: Record<string, unknown> | undefined, commandPrefix = ","): SchedulerRuleConfig {
+  return { ...defaultConfig(commandPrefix), ...(c as Partial<SchedulerRuleConfig> | undefined) };
 }
 
 interface FormState {
@@ -89,8 +86,8 @@ interface FormState {
   config: SchedulerRuleConfig;
 }
 
-function emptyForm(): FormState {
-  return { name: "", enabled: true, priority: 100, config: defaultConfig() };
+function emptyForm(commandPrefix = ","): FormState {
+  return { name: "", enabled: true, priority: 100, config: defaultConfig(commandPrefix) };
 }
 
 export function SchedulerConfig() {
@@ -117,25 +114,17 @@ export function SchedulerConfig() {
     queryFn: getSystemSettings,
   });
   const tz = tzQ.data?.timezone || "";
-  const schedulerCfgQ = useQuery({
-    queryKey: ["features", aid, "scheduler", "config"],
-    queryFn: () =>
-      getEffectiveConfig(aid, "scheduler") as Promise<SchedulerFeatureConfig>,
-    enabled: aid > 0,
-  });
-  const [whitelistText, setWhitelistText] = useState("");
-  const [whitelistDirty, setWhitelistDirty] = useState(false);
-
+  const cmdPrefix = tzQ.data?.command_prefix || ",";
   // Scheduler 不需要 featureKey（没有"功能总开关"语义）
   const crud = useRuleCrud({ aid, ruleKind: "scheduler" });
 
   const [editOpen, setEditOpen] = useState(false);
   const [editing, setEditing] = useState<RuleOut | null>(null);
-  const [form, setForm] = useState<FormState>(emptyForm());
+  const [form, setForm] = useState<FormState>(() => emptyForm(cmdPrefix));
 
   function openCreate() {
     setEditing(null);
-    setForm(emptyForm());
+    setForm(emptyForm(cmdPrefix));
     setEditOpen(true);
   }
 
@@ -145,7 +134,7 @@ export function SchedulerConfig() {
       name: r.name,
       enabled: r.enabled,
       priority: r.priority,
-      config: readConfig(r.config),
+      config: readConfig(r.config, cmdPrefix),
     });
     setEditOpen(true);
   }
@@ -244,15 +233,6 @@ export function SchedulerConfig() {
   const [execRule, setExecRule] = useState<RuleOut | null>(null);
   const [execResult, setExecResult] = useState<RuleExecuteResponse | null>(null);
 
-  const schedulerWhitelist = (
-    schedulerCfgQ.data?.allowed_command_whitelist || []
-  ).join("\n");
-  useEffect(() => {
-    if (!whitelistDirty) {
-      setWhitelistText(schedulerWhitelist);
-    }
-  }, [schedulerWhitelist, whitelistDirty]);
-
   function openExec(rule: RuleOut) {
     setExecRule(rule);
     setExecResult(null);
@@ -266,24 +246,6 @@ export function SchedulerConfig() {
       if (res.ok) {
         crud.rulesQ.refetch();
       }
-    },
-    onError: (err) => toast.error(getErrMsg(err)),
-  });
-
-  const saveWhitelistMut = useMutation({
-    mutationFn: async () => {
-      const whitelist = whitelistText
-        .split("\n")
-        .map((s) => s.trim())
-        .filter(Boolean);
-      await updateAccountFeatureConfig(aid, "scheduler", {
-        allowed_command_whitelist: whitelist,
-      });
-    },
-    onSuccess: async () => {
-      setWhitelistDirty(false);
-      await schedulerCfgQ.refetch();
-      toast.success("命令白名单已保存");
     },
     onError: (err) => toast.error(getErrMsg(err)),
   });
@@ -358,41 +320,6 @@ export function SchedulerConfig() {
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">自动命令白名单</CardTitle>
-          <CardDescription>
-            scheduler/自动动作触发命令时，仅允许此处命令 key（每行一个，不带前缀）。
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          <Textarea
-            value={whitelistText}
-            onChange={(e) => {
-              setWhitelistText(e.target.value);
-              setWhitelistDirty(true);
-            }}
-            placeholder={"测试\nhelp"}
-            rows={5}
-          />
-          <div className="flex justify-end">
-            <Button
-              onClick={() => saveWhitelistMut.mutate()}
-              disabled={
-                !whitelistDirty ||
-                saveWhitelistMut.isPending ||
-                schedulerCfgQ.isLoading
-              }
-            >
-              {saveWhitelistMut.isPending ? (
-                <Spinner className="mr-2" />
-              ) : null}
-              保存白名单
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
           <div className="flex items-center justify-between">
             <div>
               <CardTitle className="text-base">规则</CardTitle>
@@ -427,7 +354,7 @@ export function SchedulerConfig() {
               </TableHeader>
               <TableBody>
                 {crud.rulesQ.data.map((r) => {
-                  const cfg = readConfig(r.config);
+                  const cfg = readConfig(r.config, cmdPrefix);
                   return (
                     <TableRow key={r.id}>
                       <TableCell className="font-medium">{r.name}</TableCell>
@@ -704,7 +631,7 @@ export function SchedulerConfig() {
                     },
                   }))
                 }
-                placeholder=",ai 今天天气"
+                placeholder={`${cmdPrefix}ai 今天天气`}
               />
             </Field>
           ) : null}

@@ -36,7 +36,7 @@ from telethon import events
 # 模块化重构后改用绝对 import：第三方插件解压到 data/plugins/installed/{key}/
 # 时也只能走绝对 import，因此 builtin 同样统一用绝对路径以保持一致性。
 from app.db.models.feature import FEATURE_AUTO_REPLY
-from app.worker.command import should_allow_auto_command_text
+from app.worker.command import dispatch_auto_command_text, should_allow_auto_command_text
 from app.worker.plugins.base import Plugin, PluginContext, register
 from app.worker.ratelimit.humanize import simulate_read, simulate_typing
 
@@ -178,6 +178,23 @@ class AutoReplyPlugin(Plugin):
                     )
                 return
 
+            if command_key is not None:
+                dispatched = await dispatch_auto_command_text(
+                    ctx.client,
+                    _AutoReplyCommandEvent(event, text_out),
+                    text_out,
+                    account_id=ctx.account_id,
+                )
+                if dispatched:
+                    if ctx.log is not None:
+                        await ctx.log(
+                            "info",
+                            f"[auto_reply] 规则 #{rule.id} 已触发自动命令（{command_key}）",
+                            rule_id=rule.id,
+                            command=command_key,
+                        )
+                    return
+
             # 8) 真正发送 + Telegram 异常回灌 engine
             #    reply_to 默认 True：以"引用"形式回复触发消息（视觉上挂在那条消息下方）；
             #    cfg.reply_to=False 时退化成普通新消息（event.respond）
@@ -197,6 +214,36 @@ class AutoReplyPlugin(Plugin):
                 # 这里手动包装：因为我们没用 @rate_limited 装饰器
                 await _handle_send_exception(ctx, action, chat_id, exc)
             return  # 命中一条即止
+
+
+class _AutoReplyCommandEvent:
+    """把自动回复生成的命令文本伪装成可派发事件。
+
+    命令执行里的 ``event.edit(...)`` 对真实 incoming 消息不可用；这里把它转换成
+    对原会话的 respond/reply，让自动命令直接产出执行结果。
+    """
+
+    def __init__(self, source: events.NewMessage.Event, raw_text: str) -> None:
+        self._source = source
+        self.raw_text = raw_text
+        self.client = getattr(source, "client", None)
+        self.chat_id = getattr(source, "chat_id", None)
+        self.is_private = getattr(source, "is_private", False)
+        self.is_group = getattr(source, "is_group", False)
+        self.is_channel = getattr(source, "is_channel", False)
+        self.outgoing = True
+
+    def __getattr__(self, name: str):
+        return getattr(self._source, name)
+
+    async def edit(self, *args, **kwargs):
+        responder = getattr(self._source, "respond", None) or getattr(self._source, "reply", None)
+        if responder is None:
+            client = self.client
+            if client is not None and self.chat_id is not None:
+                return await client.send_message(self.chat_id, *args, **kwargs)
+            return None
+        return await responder(*args, **kwargs)
 
 
 # ─────────────────────────────────────────────────────

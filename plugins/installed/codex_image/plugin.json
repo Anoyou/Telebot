@@ -1,7 +1,7 @@
 {
   "name": "codex_image",
   "display_name": "Codex 图片生成",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "通过 Codex API 调用 GPT 图片生成模型，支持纯文生图和参考图生成。",
   "author": "TeleBoxOrg",
   "entry": "plugin.py",

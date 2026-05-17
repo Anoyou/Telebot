@@ -33,6 +33,7 @@ from typing import Any
 from telethon import utils as tl_utils
 from telethon.tl.types import Channel, Chat, User
 
+from app.worker.command import current_command_prefix
 from app.worker.plugins.base import Plugin, PluginContext, register
 
 # ─── 工具函数 ───────────────────────────────────────────
@@ -82,15 +83,19 @@ HELP_TEXT = """<b>自动复读插件使用说明</b>
 通过前端「账号 → 自动复读」页面添加规则，每条规则对应一个群组。
 
 <b>指令列表（快捷操作）：</b>
-<code>,autorepeat on [群组ID / @群组名]</code> - 添加规则开启群组
-<code>,autorepeat off [群组ID / @群组名]</code> - 删除规则关闭群组
-<code>,autorepeat list</code> - 查看已开启的群组
-<code>,autorepeat</code> - 查看当前群组状态
+<code>{prefix}autorepeat on [群组ID / @群组名]</code> - 添加规则开启群组
+<code>{prefix}autorepeat off [群组ID / @群组名]</code> - 删除规则关闭群组
+<code>{prefix}autorepeat list</code> - 查看已开启的群组
+<code>{prefix}autorepeat</code> - 查看当前群组状态
 
 <b>复读规则：</b>
 • <b>触发条件</b>：指定时间内有指定人数的不同用户发送完全相同的内容
 • <b>每日限制</b>：同一群组内，相同内容每天只会自动复读一次 (UTC+8 0点重置)
 • <b>忽略规则</b>：匿名消息、非文本消息、自己发送的消息、机器人消息会被忽略"""
+
+
+def _help_text() -> str:
+    return HELP_TEXT.format(prefix=_html_escape(current_command_prefix()))
 
 
 # ─── 插件主类 ───────────────────────────────────────────
@@ -100,7 +105,7 @@ HELP_TEXT = """<b>自动复读插件使用说明</b>
 class AutoRepeatPlugin(Plugin):
     key = "autorepeat"
     display_name = "自动复读"
-    description = HELP_TEXT
+    description = "当群组中多名用户在指定时间内发送相同内容时自动复读。"
     message_channels = {"incoming"}
     owner_only = False
 
@@ -332,7 +337,7 @@ class AutoRepeatPlugin(Plugin):
             if _is_group_chat(event):
                 await self._cmd_status(ctx, event)
             else:
-                await event.edit(HELP_TEXT)
+                await event.edit(_help_text())
 
     # ── 子命令实现 ────────────────────────────────────
 

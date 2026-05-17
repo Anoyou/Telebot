@@ -135,6 +135,16 @@ def get_command_context() -> CommandContext | None:
     return _ctx
 
 
+def current_command_prefix(*, fallback: str | None = None) -> str:
+    """Return the worker's live command prefix for user-facing examples."""
+    return ((_ctx.command_prefix if _ctx is not None else "") or fallback or settings.command_prefix or ",")
+
+
+def current_sudo_prefix(*, fallback: str | None = None) -> str:
+    """Return the worker's live sudo prefix for user-facing examples."""
+    return ((_ctx.sudo_prefix if _ctx is not None else "") or fallback or ".")
+
+
 def _format_sudo_chat_scope(values: Any) -> str:
     if sudo_scope_all(values):
         return "全部（显式）"
@@ -180,7 +190,7 @@ def should_allow_auto_command_text(text: str, *, prefix: str | None = None) -> t
     effective_prefix = (
         prefix
         if prefix is not None
-        else ((_ctx.command_prefix if _ctx is not None else "") or settings.command_prefix or ",")
+        else current_command_prefix()
     )
     cmd_key = parse_command_key_from_text(text, effective_prefix)
     if cmd_key is None:
@@ -585,7 +595,7 @@ async def _cmd_help(client, event, args, account_id):
     每个 builtin 取其 docstring 第一行作为说明；插件注册的命令同样支持。
     模板命令也合并展示，标记 [模板]。
     """
-    p = (_ctx.command_prefix if _ctx else "") or settings.command_prefix or ","
+    p = current_command_prefix()
     try:
         raw_text = getattr(event, "raw_text", "")
         text = raw_text.strip() if isinstance(raw_text, str) else ""
@@ -646,7 +656,7 @@ async def _cmd_status(client, event, args, account_id):
     db_status = "-"
     proxy_text = "DIRECT"
     profile_text = "默认"
-    prefix = (_ctx.command_prefix if _ctx else "") or settings.command_prefix or ","
+    prefix = current_command_prefix()
 
     try:
         async with AsyncSessionLocal() as db:
@@ -760,11 +770,12 @@ async def _cmd_version(client, event, args, account_id):
     await event.edit(text)
 
 
-@builtin("del", doc="撤回自己最近 N 条消息（见 ,del N）")
+@builtin("del", doc="撤回自己最近 N 条消息")
 async def _cmd_del(client, event, args, account_id):
     """撤回自己在当前会话最近发出的 N 条消息。"""
+    p = current_command_prefix()
     if not args or not args[0].isdigit():
-        await event.edit("用法：,del <数字>，例如 ,del 5")
+        await event.edit(f"用法：{p}del <数字>，例如 {p}del 5")
         return
     n = int(args[0])
     if n <= 0 or n > 100:
@@ -791,8 +802,9 @@ async def _cmd_alias(client, event, args, account_id):
     from ..db.base import AsyncSessionLocal
     from ..db.models.command import CommandAlias
 
+    p = current_command_prefix()
     if not args:
-        await event.edit("用法：,alias set <别名> <目标> / ,alias del <别名> / ,alias ls")
+        await event.edit(f"用法：{p}alias set <别名> <目标> / {p}alias del <别名> / {p}alias ls")
         return
 
     sub = args[0]
@@ -817,7 +829,7 @@ async def _cmd_alias(client, event, args, account_id):
     if sub == "del":
         alias_name = " ".join(args[1:]).strip()
         if not alias_name:
-            await event.edit("用法：,alias del <别名>")
+            await event.edit(f"用法：{p}alias del <别名>")
             return
         async with AsyncSessionLocal() as db:
             result = await db.execute(
@@ -843,7 +855,7 @@ async def _cmd_alias(client, event, args, account_id):
         else:
             tokens = rest.split()
             if len(tokens) < 2:
-                await event.edit("用法：,alias set <别名> -> <目标命令>")
+                await event.edit(f"用法：{p}alias set <别名> -> <目标命令>")
                 return
             alias_name = tokens[0]
             target_name = " ".join(tokens[1:])
@@ -878,9 +890,10 @@ async def _cmd_sudo(client, event, args, account_id):
 
     from ..db.models.account import SudoUser
 
+    sudo_p = current_sudo_prefix()
     if not args:
         await _write_sudo_audit_log(account_id, "usage")
-        await event.edit("用法：,sudo ls（仅只读查询）")
+        await event.edit(f"用法：{sudo_p}sudo ls（仅只读查询）")
         return
 
     sub = args[0].lower()
@@ -913,7 +926,7 @@ async def _cmd_sudo(client, event, args, account_id):
         return
 
     await _write_sudo_audit_log(account_id, "invalid_subcommand", subcommand=sub)
-    await event.edit("仅支持只读查询：,sudo ls")
+    await event.edit(f"仅支持只读查询：{sudo_p}sudo ls")
 
 
 _register_builtin_aliases()
@@ -1118,6 +1131,125 @@ async def _run_ai(client, event, args, tpl: dict[str, Any], account_id: int) -> 
     await ai_runtime.invoke(client, event, args, tpl, account_id)
 
 
+async def _dispatch_command(
+    client: TelegramClient,
+    event,
+    cmd: str,
+    args_raw: str,
+    *,
+    account_id: int,
+    help_prefix: str,
+) -> None:
+    args = args_raw.split() if args_raw else []
+    # 1. 内置命令优先
+    primary = _BUILTIN_ALIAS_TO_PRIMARY.get(cmd)
+    item = _BUILTIN.get(primary) if primary else None
+    if item is not None:
+        try:
+            await item.handler(client, event, args, account_id)
+        except Exception as e:  # noqa: BLE001
+            # 命令执行异常时，把错误原地写回消息，方便排查（消息已脱敏：去路径/token）
+            try:
+                await event.edit(f"✗ 执行失败：{_safe_exception_text(e)}")
+            except Exception:
+                pass
+        return
+
+    # 2. 别名解析（贪心最长匹配）
+    if _ctx is not None and _ctx.aliases:
+        # 尝试从 "cmd arg1 arg2..." 中匹配最长的别名
+        full_rest = f"{cmd} {args_raw}".strip() if args_raw else cmd
+        matched_alias: str | None = None
+        for alias in sorted(_ctx.aliases.keys(), key=len, reverse=True):
+            if full_rest == alias or full_rest.startswith(alias + " "):
+                matched_alias = alias
+                break
+        if matched_alias is not None:
+            target = _ctx.aliases[matched_alias]
+            remaining = full_rest[len(matched_alias):].strip()
+            # 重新拼接：target + remaining args
+            new_text = f"{target} {remaining}".strip() if remaining else target
+            new_parts = new_text.split(None, 1)
+            new_cmd = new_parts[0] if new_parts else ""
+            new_args_raw = new_parts[1] if len(new_parts) > 1 else ""
+            new_args = new_args_raw.split() if new_args_raw else []
+            # 重新派发到 builtin
+            primary2 = _BUILTIN_ALIAS_TO_PRIMARY.get(new_cmd)
+            item2 = _BUILTIN.get(primary2) if primary2 else None
+            if item2 is not None:
+                try:
+                    await item2.handler(client, event, new_args, account_id)
+                except Exception as e:  # noqa: BLE001
+                    try:
+                        await event.edit(f"✗ 执行失败：{_safe_exception_text(e)}")
+                    except Exception:
+                        pass
+                return
+            # 重新派发到模板
+            tpl2 = _ctx.templates.get(new_cmd)
+            if tpl2 is not None:
+                try:
+                    await _run_template(client, event, new_args, tpl2, account_id)
+                except Exception as e:  # noqa: BLE001
+                    try:
+                        await event.edit(f"✗ 执行失败：{_safe_exception_text(e)}")
+                    except Exception:
+                        pass
+                return
+
+    # 3. 模板命令（按 name 查 worker-local ctx）
+    if _ctx is not None:
+        tpl = _ctx.templates.get(cmd)
+        if tpl is not None:
+            try:
+                await _run_template(client, event, args, tpl, account_id)
+            except Exception as e:  # noqa: BLE001
+                try:
+                    await event.edit(f"✗ 执行失败：{_safe_exception_text(e)}")
+                except Exception:
+                    pass
+            return
+
+    # 4. 未知命令
+    try:
+        await event.edit(f"未知命令：{cmd}（{help_prefix}help 查看可用列表）")
+    except Exception:
+        pass
+
+
+async def dispatch_auto_command_text(
+    client: TelegramClient,
+    event,
+    text: str,
+    *,
+    account_id: int,
+    prefix: str | None = None,
+) -> bool:
+    """直接派发自动动作生成的命令文本。
+
+    自动回复 / scheduler 这类代码路径自己调用 ``send_message`` 时，不应依赖
+    Telegram 再把本账号发出的消息回流成 outgoing update；这里直接复用命令派发。
+    返回 True 表示 ``text`` 是一条可解析命令并已进入派发逻辑。
+    """
+
+    effective_prefix = prefix if prefix is not None else current_command_prefix()
+    cmd = parse_command_key_from_text(text, effective_prefix)
+    if cmd is None or not _looks_like_command_name(cmd, prefix=effective_prefix):
+        return False
+    rest = str(text or "").strip()[len(effective_prefix):].lstrip()
+    parts = rest.split(None, 1)
+    args_raw = parts[1].strip() if len(parts) > 1 else ""
+    await _dispatch_command(
+        client,
+        event,
+        cmd,
+        args_raw,
+        account_id=account_id,
+        help_prefix=effective_prefix,
+    )
+    return True
+
+
 def make_command_handler(client: TelegramClient, account_id: int, prefix: str | None = None):
     """创建并注册 TG 命令派发 handler。
 
@@ -1145,86 +1277,9 @@ def make_command_handler(client: TelegramClient, account_id: int, prefix: str | 
                 return None
             return await responder(*args, **kwargs)
 
-    async def _dispatch(event, cmd: str, args_raw: str, *, help_prefix: str) -> None:
-        args = args_raw.split() if args_raw else []
-        # 1. 内置命令优先
-        primary = _BUILTIN_ALIAS_TO_PRIMARY.get(cmd)
-        item = _BUILTIN.get(primary) if primary else None
-        if item is not None:
-            try:
-                await item.handler(client, event, args, account_id)
-            except Exception as e:  # noqa: BLE001
-                # 命令执行异常时，把错误原地写回消息，方便排查（消息已脱敏：去路径/token）
-                try:
-                    await event.edit(f"✗ 执行失败：{_safe_exception_text(e)}")
-                except Exception:
-                    pass
-            return
-
-        # 2. 别名解析（贪心最长匹配）
-        if _ctx is not None and _ctx.aliases:
-            # 尝试从 "cmd arg1 arg2..." 中匹配最长的别名
-            full_rest = f"{cmd} {args_raw}".strip() if args_raw else cmd
-            matched_alias: str | None = None
-            for alias in sorted(_ctx.aliases.keys(), key=len, reverse=True):
-                if full_rest == alias or full_rest.startswith(alias + " "):
-                    matched_alias = alias
-                    break
-            if matched_alias is not None:
-                target = _ctx.aliases[matched_alias]
-                remaining = full_rest[len(matched_alias):].strip()
-                # 重新拼接：target + remaining args
-                new_text = f"{target} {remaining}".strip() if remaining else target
-                new_parts = new_text.split(None, 1)
-                new_cmd = new_parts[0] if new_parts else ""
-                new_args_raw = new_parts[1] if len(new_parts) > 1 else ""
-                new_args = new_args_raw.split() if new_args_raw else []
-                # 重新派发到 builtin
-                primary2 = _BUILTIN_ALIAS_TO_PRIMARY.get(new_cmd)
-                item2 = _BUILTIN.get(primary2) if primary2 else None
-                if item2 is not None:
-                    try:
-                        await item2.handler(client, event, new_args, account_id)
-                    except Exception as e:  # noqa: BLE001
-                        try:
-                            await event.edit(f"✗ 执行失败：{_safe_exception_text(e)}")
-                        except Exception:
-                            pass
-                    return
-                # 重新派发到模板
-                tpl2 = _ctx.templates.get(new_cmd)
-                if tpl2 is not None:
-                    try:
-                        await _run_template(client, event, new_args, tpl2, account_id)
-                    except Exception as e:  # noqa: BLE001
-                        try:
-                            await event.edit(f"✗ 执行失败：{_safe_exception_text(e)}")
-                        except Exception:
-                            pass
-                    return
-
-        # 3. 模板命令（按 name 查 worker-local ctx）
-        if _ctx is not None:
-            tpl = _ctx.templates.get(cmd)
-            if tpl is not None:
-                try:
-                    await _run_template(client, event, args, tpl, account_id)
-                except Exception as e:  # noqa: BLE001
-                    try:
-                        await event.edit(f"✗ 执行失败：{_safe_exception_text(e)}")
-                    except Exception:
-                        pass
-                return
-
-        # 4. 未知命令
-        try:
-            await event.edit(f"未知命令：{cmd}（{help_prefix}help 查看可用列表）")
-        except Exception:
-            pass
-
     async def _handle(event, *, allow_normal: bool, incoming_sudo: bool = False):
         text = event.raw_text or ""
-        sudo_p = (_ctx.sudo_prefix if _ctx else "") or "."
+        sudo_p = current_sudo_prefix()
         pattern_sudo = re.compile(rf"^{re.escape(sudo_p)}(\S+)(?:\s+(.*))?$", re.S)
         m = pattern_sudo.match(text)
         if m and incoming_sudo:
@@ -1249,13 +1304,20 @@ def make_command_handler(client: TelegramClient, account_id: int, prefix: str | 
                     await event.edit(f"✗ Sudo 权限拒绝：{error_msg}")
                 return
             dispatch_event = _IncomingSudoEvent(event) if incoming_sudo else event
-            await _dispatch(dispatch_event, cmd, args_raw, help_prefix=sudo_p)
+            await _dispatch_command(
+                client,
+                dispatch_event,
+                cmd,
+                args_raw,
+                account_id=account_id,
+                help_prefix=sudo_p,
+            )
             return
 
         if not allow_normal:
             return
 
-        p = (_ctx.command_prefix if _ctx else "") or fallback_prefix
+        p = current_command_prefix(fallback=fallback_prefix)
         pattern = re.compile(rf"^{re.escape(p)}(\S+)(?:\s+(.*))?$", re.S)
         m = pattern.match(text)
         if not m:
@@ -1263,7 +1325,14 @@ def make_command_handler(client: TelegramClient, account_id: int, prefix: str | 
         cmd = m.group(1)
         if not _looks_like_command_name(cmd, prefix=p):
             return
-        await _dispatch(event, cmd, (m.group(2) or "").strip(), help_prefix=p)
+        await _dispatch_command(
+            client,
+            event,
+            cmd,
+            (m.group(2) or "").strip(),
+            account_id=account_id,
+            help_prefix=p,
+        )
 
     @client.on(events.NewMessage(incoming=True))
     async def _sudo_incoming_h(event):

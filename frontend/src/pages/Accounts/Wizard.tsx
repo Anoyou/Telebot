@@ -292,7 +292,7 @@ export function AccountWizard() {
                 ))}
               </Select>
               <p className="text-xs text-muted-foreground">
-                若代理列表为空，先到「系统设置 → 代理库」创建
+                若代理列表为空，先到「系统设置 → 代理与标识」创建
               </p>
             </div>
             <div className="sm:col-span-2 flex justify-end">
