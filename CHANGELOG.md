@@ -19,7 +19,7 @@
 
 ---
 
-## [0.17.0] — 2026-05-17 · feature · 插件模板配置分组
+## [0.16.9] — 2026-05-17 · changed · 插件模板配置分组
 
 ### Added
 - 插件通用配置弹窗会按字段名自动归类：普通配置保留在顶部，`*_template` 模板进入“消息模板”折叠组，`*_preview` 预览进入底部“预览结果”。
@@ -27,9 +27,17 @@
 
 ### Changed
 - 每个模板预览都使用独立的 `TelegramHtmlPreview` 气泡展示，方便同时检查开局、进行中、成功、超时、取消和错误提示等多条消息。
+- 版本号口径校正为 `0.16.9`，避免误标为 `0.17.0`。
+
+### Fixed
+- 修复后端 CI 的 ruff import 排序与测试写法问题。
+- 修复完整 pytest 在 `backend/` 目录运行时无法导入仓库根目录 `plugins.installed.codex_image` 的问题。
+- 修复旧测试替身或自定义 `build_client` 不接受 `api_format_override` 时导致 inline provider override 测试失败的问题。
 
 ### Verification
 - `pnpm --dir frontend build` 通过。
+- `cd backend && .venv/bin/ruff check app` 通过。
+- `cd backend && .venv/bin/python -m pytest -q` 通过。
 - `git diff --check` 通过。
 
 ---

@@ -16,6 +16,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from app.worker.command import CommandContext, set_command_context
 from app.worker.plugins.base import PluginContext
 from app.worker.plugins.builtin.auto_reply import (
     AutoReplyPlugin,
@@ -24,7 +25,6 @@ from app.worker.plugins.builtin.auto_reply import (
     _render,
     _scope_ok,
 )
-from app.worker.command import CommandContext, set_command_context
 from app.worker.ratelimit.engine import RateLimitDecision
 from app.worker.ratelimit.humanize import HumanizeOpts
 

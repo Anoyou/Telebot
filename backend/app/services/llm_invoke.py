@@ -5,13 +5,13 @@ import inspect
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from . import llm_client
 from ..db.models.command import (
     LLM_API_FORMAT_CHAT_COMPLETIONS,
     LLM_API_FORMAT_RESPONSES,
     LLM_PROVIDER_OPENAI,
     LLM_WEB_SEARCH_API_FORMAT_AUTO,
 )
+from . import llm_client
 from .llm_client import LLMResult
 from .llm_dto import LLMProviderDTO
 from .llm_runtime import build_fallback_chain, call_with_fallback
@@ -61,12 +61,13 @@ async def invoke(
             if _accepts_kwarg(client_factory, "api_format_override"):
                 kwargs["api_format_override"] = api_format_override
             return client_factory(provider_dto, **kwargs)
-        return llm_client.build_client(
-            provider_dto,
-            override_model=override_model,
-            proxy_url=proxy_url or provider_dto.proxy_url,
-            api_format_override=api_format_override,
-        )
+        kwargs = {
+            "override_model": override_model,
+            "proxy_url": proxy_url or provider_dto.proxy_url,
+        }
+        if _accepts_kwarg(llm_client.build_client, "api_format_override"):
+            kwargs["api_format_override"] = api_format_override
+        return llm_client.build_client(provider_dto, **kwargs)
 
     return await call_with_fallback(
         chain,

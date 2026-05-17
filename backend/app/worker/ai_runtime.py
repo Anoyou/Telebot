@@ -454,7 +454,6 @@ async def invoke(client, event, args, tpl: dict[str, Any], account_id: int) -> N
 
     # build_client 在内部解密 api_key；导入时点放函数内，避免循环依赖。
     # 标准 LLM 调用统一走 services.llm_invoke.invoke()，STT 仍直接使用选中的 provider。
-    from ..services.llm_invoke import invoke as invoke_ai_runtime
     from ..services.llm_client import (
         LLMCallFailed,
         LLMError,
@@ -462,6 +461,7 @@ async def invoke(client, event, args, tpl: dict[str, Any], account_id: int) -> N
         build_client,
     )
     from ..services.llm_dto import LLMProviderDTO
+    from ..services.llm_invoke import invoke as invoke_ai_runtime
 
     # 使用 LLMProviderDTO 替代手搓 fake ORM row
     provider_dtos: dict[int, LLMProviderDTO] = {}

@@ -32,8 +32,8 @@ from ..schemas.command import (
     FetchModelsResponse,
     LLMProviderCreate,
     LLMProviderOut,
-    ProtocolProbeResult,
     LLMProviderUpdate,
+    ProtocolProbeResult,
     TestModelRequest,
     TestModelResponse,
 )

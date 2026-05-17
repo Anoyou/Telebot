@@ -344,8 +344,10 @@ command_config_keys = {"command"}
 模板类字段应提供占位符说明和示例值。比如答题插件的开局模板可说明：
 
 ```text
-可用占位符：{round}=轮次，例如 1；{reward}=奖励，例如 100；{timeout}=限时秒数，例如 60；{command}=当前命令，例如 game。
+可用占位符：{round}=轮次，例如 1；{reward}=奖励，例如 100；{timeout}=限时秒数，例如 60；{command}=当前命令，例如 game；{prefix}=系统命令前缀，例如 ,。
 ```
+
+`{prefix}` 是平台约定的系统级占位符，表示“系统设置 → 命令前缀”的当前值。插件运行时要展示命令示例时，应使用 worker 当前命令前缀；前端配置预览会从 `getSystemSettings().command_prefix` 注入该值，只有未加载到系统设置时才兜底为 `,`。插件文案不要把 `,` 当成固定命令前缀写死。
 
 如果插件有专属配置页，建议提供只读预览字段，用示例上下文渲染最终文案。预览应参考“通用模板 → 自定义命令模板”的输出模板预览：展示占位符替换后的最终 Telegram 消息效果，而不是简单展示默认值或说明文字。没有专属页面时，至少在 `description` 中给出完整示例。
 
@@ -358,7 +360,8 @@ command_config_keys = {"command"}
 - 如果插件提供专属页面，模板输入、占位符说明/按钮、只读预览应放在同一个配置上下文里，预览只用模拟数据渲染，不读取真实消息，也不实际发送。
 - 消息模板预览交互应对齐“自定义命令模板”，不是 LLM Provider 配置页；LLM 配置页只作为基础表单宽度、间距和控件风格的参考。
 - 消息预览必须展示替换占位符后的最终 Telegram 消息效果，视觉上使用浅色聊天背景、左侧示例用户消息、右侧 TelePilot 蓝色气泡和时间状态；实现优先复用 `frontend/src/components/TelegramHtmlPreview.tsx`。
-- 自动弹窗会按字段名兼容已有 schema：`message_template` / `*_template` 渲染为可编辑多行输入，`template_placeholders` 渲染为只读占位符说明，`template_preview` / `*_preview` 渲染为 `TelegramHtmlPreview` 预览卡片。
+- 自动弹窗会按字段名兼容已有 schema：普通配置字段展示在顶部，`message_template` / `*_message_template` / `*_template` 进入“消息模板”折叠组，`template_placeholders` 渲染为只读占位符说明，`template_preview` / `*_preview` 进入底部“预览结果”。
+- 多个 `*_preview` 字段应合并到同一个 Telegram 风格预览场景里，按字段顺序展示为多条气泡；如果模板使用 `{prefix}`，预览必须使用系统设置里的命令前缀渲染。
 - `readOnly: true` 字段统一只读展示，不会渲染为可编辑控件，也不会在保存时写回配置。
 - 没有专属页面时，至少通过字段标题、默认值和 `description` 让自动弹窗能呈现出清晰的模板说明和示例效果。
 

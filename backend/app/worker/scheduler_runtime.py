@@ -26,9 +26,9 @@ from app.db.base import AsyncSessionLocal
 from app.db.models.command import LLMProvider
 from app.db.models.feature import FEATURE_SCHEDULER
 from app.db.models.rule import Rule
-from app.services.llm_invoke import invoke as invoke_ai_runtime
 from app.services.llm_client import LLMCallFailed, LLMError
 from app.services.llm_dto import LLMProviderDTO
+from app.services.llm_invoke import invoke as invoke_ai_runtime
 from app.worker.command import should_allow_auto_command_text
 from app.worker.plugins.base import PluginContext
 

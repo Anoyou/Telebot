@@ -43,7 +43,7 @@ def test_parse_proxy_url_rejects_unknown_scheme() -> None:
     with pytest.raises(Exception) as exc_info:
         _parse_proxy_url("ftp://10.10.8.33:6152")
 
-    assert getattr(exc_info.value, "detail")["code"] == "INVALID_PROXY_TYPE"
+    assert exc_info.value.detail["code"] == "INVALID_PROXY_TYPE"
 
 
 @pytest.mark.asyncio

@@ -23,8 +23,8 @@ from ..db.models.command import (
     COMMAND_TYPE_REPLY_TEXT,
     COMMAND_TYPE_RUN_PLUGIN,
     LLM_API_FORMAT_CHAT_COMPLETIONS,
-    LLM_WEB_SEARCH_API_FORMAT_AUTO,
     LLM_MODALITY_TEXT,
+    LLM_WEB_SEARCH_API_FORMAT_AUTO,
 )
 
 # ── 命令名校验正则：与 worker/command.py 中的 \w+ 派发兼容 ─────

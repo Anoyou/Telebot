@@ -10,9 +10,11 @@
  * schema defaults < globalConfig < accountConfig
  */
 import { useState, useEffect, useCallback, type ReactNode } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { toast } from "sonner";
 import { TelegramHtmlPreview, TelegramHtmlPreviewThread } from "@/components/TelegramHtmlPreview";
+import { getSystemSettings } from "@/api/system";
 import { getErrMsg } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import {
@@ -71,6 +73,12 @@ export function ConfigDialog({
   const [globalVals, setGlobalVals] = useState<Record<string, unknown>>({});
   const [accountVals, setAccountVals] = useState<Record<string, unknown>>({});
   const [saving, setSaving] = useState(false);
+  const settingsQ = useQuery({
+    queryKey: ["system", "settings"],
+    queryFn: getSystemSettings,
+    enabled: open,
+  });
+  const commandPrefix = settingsQ.data?.command_prefix || ",";
 
   const handleSave = useCallback(async () => {
     if (!onSave) return;
@@ -144,6 +152,7 @@ export function ConfigDialog({
               description="所有账号共享"
               fields={globalFields}
               values={globalVals}
+              commandPrefix={commandPrefix}
               onChange={(key, value) => setGlobalVals((p) => ({ ...p, [key]: value }))}
             />
           )}
@@ -153,6 +162,7 @@ export function ConfigDialog({
               description={accountName ? accountName + " 专属" : "按账号隔离"}
               fields={accountFields}
               values={accountVals}
+              commandPrefix={commandPrefix}
               onChange={(key, value) => setAccountVals((p) => ({ ...p, [key]: value }))}
             />
           )}
@@ -175,6 +185,7 @@ interface ConfigScopeSectionProps {
   description: string;
   fields: FieldEntry[];
   values: Record<string, unknown>;
+  commandPrefix: string;
   onChange: (key: string, value: unknown) => void;
 }
 
@@ -183,6 +194,7 @@ function ConfigScopeSection({
   description,
   fields,
   values,
+  commandPrefix,
   onChange,
 }: ConfigScopeSectionProps) {
   const [openTemplates, setOpenTemplates] = useState<Record<string, boolean>>({});
@@ -268,7 +280,7 @@ function ConfigScopeSection({
           <TelegramHtmlPreviewThread
             messages={groups.previews.map(([key, field]) => ({
               title: field.title || key,
-              value: renderPreviewValue(key, field, fields, values),
+              value: renderPreviewValue(key, field, fields, values, commandPrefix),
               mode: "html",
             }))}
           />
@@ -493,12 +505,13 @@ function renderPreviewValue(
   previewField: ConfigField,
   fields: FieldEntry[],
   values: Record<string, unknown>,
+  commandPrefix: string,
 ): string {
   const templateKey = findTemplateKeyForPreview(previewKey, fields);
   const templateField = templateKey ? fields.find(([key]) => key === templateKey)?.[1] : undefined;
   const templateValue = templateKey ? values[templateKey] : undefined;
   const template = formatConfigValue(templateValue ?? templateField?.default ?? previewField.default);
-  return renderTemplateSample(template, values);
+  return renderTemplateSample(template, values, commandPrefix);
 }
 
 function findTemplateKeyForPreview(previewKey: string, fields: FieldEntry[]): string | null {
@@ -517,9 +530,14 @@ function findTemplateKeyForPreview(previewKey: string, fields: FieldEntry[]): st
   return candidates.find((key) => keys.has(key)) ?? null;
 }
 
-function renderTemplateSample(template: string, values: Record<string, unknown>): string {
+function renderTemplateSample(
+  template: string,
+  values: Record<string, unknown>,
+  commandPrefix: string,
+): string {
   const sample: Record<string, string> = {
     version: "1.0.0",
+    prefix: commandPrefix || ",",
     command: formatConfigValue(values.command) || "dicegrid",
     force_stop_command: formatConfigValue(values.force_stop_command) || "stop",
     target_sum: "17",

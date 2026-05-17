@@ -651,7 +651,7 @@ class MyPlugin(Plugin):
 ### 命令前缀
 
 - 所有命令必须有明确前缀（如 `,` 或自定义）
-- 前缀由 `ctx.config` 中的 `prefix` 控制
+- 前缀由系统设置里的 `command_prefix` 控制；插件配置中不要再单独硬编码 `prefix`
 
 ### 权限声明
 
@@ -965,8 +965,10 @@ config_schema={
 - **不需要**添加到 `FEATURE_CONFIG_PAGE_KEYS`，不需要创建页面文件
 - `config_schema["x-ui-mode"]` 可写 `schema`，ConfigDialog 自动渲染
 - 弹窗宽度、滚动高度、字段间距和控件风格应与自定义命令 / LLM 等系统配置弹窗保持一致：使用统一的 `Input`、`Select`、`Switch`、`Textarea`、`Label` 视觉语言，不在字段标题里放 emoji 或临时说明块
-- `message_template`、`*_message_template`、`prompt`、`content`、`text` 等长文案字段会按多行文本体验展示；字段描述里应写清占位符和示例值
-- `field.readOnly === true`、`template_preview`、`*_preview`、`template_placeholders` 会自动按只读块渲染，不会保存回配置；其中预览字段使用 `TelegramHtmlPreview` 展示最终 HTML 消息效果
+- 普通配置字段展示在配置区顶部；`message_template` / `*_message_template` / `*_template` 等消息模板字段进入“消息模板”折叠组；`template_preview` / `*_preview` 进入底部“预览结果”。
+- `message_template`、`*_message_template`、`prompt`、`content`、`text` 等长文案字段会按多行文本体验展示；字段描述里应写清占位符和示例值。
+- `field.readOnly === true`、`template_preview`、`*_preview`、`template_placeholders` 会自动按只读块渲染，不会保存回配置；其中预览字段使用 `TelegramHtmlPreview` 展示最终 HTML 消息效果。
+- 多个预览字段应在同一个 Telegram 风格预览场景里按字段顺序展示为多条气泡，方便同时检查开局、进行中、答对、超时、取消和错误提示等模板。
 
 ```python
 # config_schema 示例（适用于 ConfigDialog 自动渲染）
@@ -1321,10 +1323,13 @@ config_schema={
         "{round}=轮次，例如 1；"
         "{reward}=本轮奖励，例如 100；"
         "{timeout}=限时秒数，例如 60；"
-        "{command}=当前触发命令，例如 game。"
+        "{command}=当前触发命令，例如 game；"
+        "{prefix}=系统命令前缀，例如 ,。"
     ),
 }
 ```
+
+`{prefix}` 是平台约定的系统级占位符，表示“系统设置 → 命令前缀”的当前值。运行时需要展示命令示例时，优先从 worker 的当前命令前缀读取；前端配置预览中应通过 `getSystemSettings().command_prefix` 注入示例上下文，接口未返回时才兜底使用 `,`。不要把逗号硬编码成固定前缀。
 
 如果插件有专属配置页，建议提供只读预览：用户修改模板后，用示例上下文渲染一段 `template_preview`。预览应展示“模板 + 示例上下文”替换后的最终消息效果，而不是简单重复默认值或字段说明。没有专属页面时，也至少在字段描述里给出一条完整示例，避免用户猜最终效果。
 
@@ -1335,13 +1340,14 @@ config_schema={
 模板预览用于回答一个问题：“这段模板最终发到 Telegram 里大概长什么样？”它不是字段说明，也不是原始模板文本回显。
 
 - 预览必须使用示例上下文渲染最终消息，例如把 `{answer}`、`{question}`、`{sources}` 等占位符替换成模拟值。
+- 如果模板支持 `{prefix}`，预览必须使用系统设置里的 `command_prefix` 渲染，不要硬编码为 `,`。
 - 预览必须使用 Telegram 风格聊天场景：浅色聊天背景、左侧示例用户消息、右侧 TelePilot 蓝色气泡、时间和已读状态。不要只用普通灰色文本框展示。
 - HTML 模式允许展示 Telegram 常用标签效果：`<b>`、`<i>`、`<code>`、`<pre>`、`<blockquote expandable>`；不支持的标签应被转义为普通文本。
 - Markdown / plain 模式在同一气泡里按纯文本预览，不尝试模拟完整 Telegram Markdown 解析。
 - 预览只使用模拟数据，不读取真实聊天、账号、用户资料，也不触发发送或编辑消息。
 - 如果插件或页面需要做消息模板预览，优先直接使用 `TelegramHtmlPreview`；只有需要嵌入极小空间时，才使用更轻量的纯内容预览。
 
-自动弹窗兼容已有 schema 约定：`message_template` / `*_template` 是可编辑多行模板；`template_placeholders` 是只读占位符说明；`template_preview` / `*_preview` 是只读渲染预览。插件只需在 schema 中提供这些字段和默认值，不需要额外协议。
+自动弹窗兼容已有 schema 约定：`message_template` / `*_template` 是可编辑多行模板；`template_placeholders` 是只读占位符说明；`template_preview` / `*_preview` 是只读渲染预览。插件只需在 schema 中提供这些字段和默认值，不需要额外协议。多个 `*_preview` 字段会合并到同一个预览区域，以多条 Telegram 气泡展示。
 
 ### 定时任务与后台任务生命周期
 
