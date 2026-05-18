@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 from unittest.mock import AsyncMock, Mock
 
 import pytest
@@ -105,6 +106,76 @@ async def test_ai_runtime_ai_subcommand_image_consumes_mode(monkeypatch) -> None
 
     dispatched.assert_awaited_once()
     assert dispatched.call_args.args[2] == ["画一只猫"]
+
+
+@pytest.mark.asyncio
+async def test_ai_runtime_image_llm_uses_native_image_generation(monkeypatch) -> None:
+    img_b64 = base64.b64encode(b"\x89PNG\r\n\x1a\n" + b"0" * 128).decode("ascii")
+    fake_result = LLMResult(
+        text="",
+        model="gpt-5.5",
+        input_tokens=3,
+        output_tokens=0,
+        image_data=[f"data:image/png;base64,{img_b64}"],
+    )
+    invoke_mock = AsyncMock(
+        return_value=(
+            fake_result,
+            LLMProviderDTO(id=1, name="primary", provider="openai", default_model="gpt-5.5"),
+            False,
+        )
+    )
+    monkeypatch.setattr(service_ai_runtime, "invoke", invoke_mock)
+    monkeypatch.setattr("app.worker.runtime._refresh_command_context", AsyncMock(return_value=None))
+
+    wcmd.set_command_context(
+        CommandContext(
+            account_id=1,
+            templates={},
+            providers={
+                1: {
+                    "id": 1,
+                    "name": "primary",
+                    "provider": "openai",
+                    "default_model": "gpt-5.5",
+                    "api_format": "responses",
+                    "api_key_enc": None,
+                    "modality": "text",
+                    "tags": [],
+                    "cost_tier": 2,
+                    "models": [],
+                }
+            },
+        )
+    )
+
+    client = AsyncMock()
+    event = AsyncMock()
+    event.chat_id = 123
+    event.get_reply_message = AsyncMock(return_value=None)
+    event.message = AsyncMock()
+    event.message.photo = None
+    event.message.document = None
+    event.message.voice = None
+    event.message.audio = None
+    tpl = {
+        "name": "image",
+        "type": "ai",
+        "config": {"mode": "image", "image_backend": "llm", "provider_id": 1, "max_tokens": 1024},
+    }
+
+    await ai_runtime.invoke(client, event, ["画一只猫"], tpl, 1)
+
+    invoke_mock.assert_awaited_once()
+    kwargs = invoke_mock.await_args.kwargs
+    assert kwargs["native_image"] is True
+    assert kwargs["max_tokens"] == 1024
+    system = invoke_mock.await_args.args[2]
+    assert "严格规则" not in system
+    client.send_file.assert_awaited_once()
+    sent_file = client.send_file.await_args.args[1]
+    assert sent_file.name == "ai_image.png"
+    event.delete.assert_awaited()
 
 
 def test_ai_runtime_model_display_name_prefers_label() -> None:

@@ -890,7 +890,7 @@ export interface AICommandConfig {
   web_search_context_size?: "low" | "medium" | "high";
   /** edit = 原地编辑命令消息；send_new = 删除命令并另发一条 */
   send_mode?: "edit" | "send_new";
-  /** image 模式后端：codex_image 复用图片生成插件；llm 预留给后续 Provider 原生生图 */
+  /** image 模式后端：codex_image 复用图片生成模块；llm 调用 Provider 原生生图 */
   image_backend?: "codex_image" | "llm";
 }
 

@@ -18,6 +18,23 @@
 
 ---
 
+## [0.18.2] — 2026-05-18 · fixed · AI 原生生图后端接入
+
+### Added
+- AI 指令 `image + LLM Provider 原生生图` 接入真实调用链：Responses 协议会调用 `image_generation` 工具，OpenAI-compatible chat 协议会尝试 `/images/generations`。
+- LLM fallback / retry / usage 统一调用层新增 `native_image` 分支，原生生图结果会复用现有图片发送逻辑，把 base64 data URI 或图片 URL 发回 Telegram。
+
+### Changed
+- 原生生图模式不再附加识图反幻觉提示词，避免把“只描述真实图像”的约束混入生图提示词。
+- AI 模板编辑页移除“原生生图（预留）”文案，并提示 Responses / Images API 两种实际调用路径。
+
+### Verification
+- `backend/.venv/bin/python -m py_compile backend/app/services/llm_client.py backend/app/services/llm_runtime.py backend/app/services/llm_invoke.py backend/app/worker/ai_runtime.py backend/app/tests/test_ai_runtime.py backend/app/tests/test_commands.py`
+- `backend/.venv/bin/python -m pytest backend/app/tests/test_ai_runtime.py backend/app/tests/test_commands.py -q` 通过，84 passed。
+- `git diff --check`
+
+---
+
 ## [0.18.1] — 2026-05-18 · fixed · Codex 生图恢复内置发布
 
 ### Fixed

@@ -9,6 +9,7 @@
 """
 from __future__ import annotations
 
+import base64
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
 
@@ -792,6 +793,74 @@ async def test_responses_client_parses_output_array_form() -> None:
     assert result.text == "part1 part2"
     assert result.input_tokens == 10
     assert result.output_tokens == 4
+
+
+@pytest.mark.asyncio
+async def test_responses_client_generate_image_uses_image_generation_tool() -> None:
+    """原生生图：Responses 应下发 image_generation 工具并解析 result 图片。"""
+    from app.services.llm_client import ResponsesClient
+
+    img_b64 = base64.b64encode(b"\x89PNG\r\n\x1a\n" + b"0" * 128).decode("ascii")
+    cli = ResponsesClient(api_key="sk", base_url=None, model="gpt-5.5")
+
+    class _Resp:
+        status_code = 200
+
+        @staticmethod
+        def json():
+            return {
+                "model": "gpt-5.5",
+                "output": [
+                    {"type": "image_generation_call", "result": img_b64},
+                    {
+                        "type": "message",
+                        "content": [{"type": "output_text", "text": "done"}],
+                    },
+                ],
+                "usage": {"input_tokens": 8, "output_tokens": 2},
+            }
+
+    fake = AsyncMock()
+    fake.__aenter__.return_value = fake
+    fake.post = AsyncMock(return_value=_Resp())
+    with patch("app.services.llm_client.httpx.AsyncClient", return_value=fake):
+        result = await cli.generate_image("sys", "画猫")
+
+    body = fake.post.call_args.kwargs["json"]
+    assert body["tools"] == [{"type": "image_generation", "action": "generate"}]
+    assert body["tool_choice"] == {"type": "image_generation"}
+    assert body["instructions"] == "sys"
+    assert result.image_data == [f"data:image/png;base64,{img_b64}"]
+    assert result.text == "done"
+    assert result.input_tokens == 8
+    assert result.output_tokens == 2
+
+
+@pytest.mark.asyncio
+async def test_openai_client_generate_image_uses_images_api() -> None:
+    """OpenAI-compatible 原生生图：chat 协议 Provider 走 /images/generations。"""
+    img_b64 = base64.b64encode(b"\x89PNG\r\n\x1a\n" + b"0" * 128).decode("ascii")
+    cli = OpenAIClient(api_key="sk", base_url="https://api.example.com/v1", model="gpt-image-2")
+
+    class _Resp:
+        status_code = 200
+
+        @staticmethod
+        def json():
+            return {"data": [{"b64_json": img_b64}], "usage": {"input_tokens": 7}}
+
+    fake = AsyncMock()
+    fake.__aenter__.return_value = fake
+    fake.post = AsyncMock(return_value=_Resp())
+    with patch("app.services.llm_client.httpx.AsyncClient", return_value=fake):
+        result = await cli.generate_image("sys", "画猫")
+
+    assert fake.post.call_args.args[0] == "https://api.example.com/v1/images/generations"
+    body = fake.post.call_args.kwargs["json"]
+    assert body["model"] == "gpt-image-2"
+    assert "用户需求：画猫" in body["prompt"]
+    assert result.image_data == [f"data:image/png;base64,{img_b64}"]
+    assert result.input_tokens == 7
 
 
 @pytest.mark.asyncio

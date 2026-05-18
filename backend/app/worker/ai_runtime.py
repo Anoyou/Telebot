@@ -163,6 +163,8 @@ async def invoke(client, event, args, tpl: dict[str, Any], account_id: int) -> N
         await event.edit("✗ AI video 模式尚未接入。当前可先使用 chat/search/image；video 会作为下一阶段接入。")
         return
 
+    native_image_mode = command_mode == "image" and str(cfg.get("image_backend") or "codex_image") == "llm"
+
     if command_mode == "image" and str(cfg.get("image_backend") or "codex_image") == "codex_image":
         dispatched = await dispatch_plugin_command(
             client,
@@ -295,6 +297,9 @@ async def invoke(client, event, args, tpl: dict[str, Any], account_id: int) -> N
         _safe_log_text(user_q),
         has_replied_image, has_self_image, has_replied_audio, has_self_audio,
     )
+    if native_image_mode and not user_q and not replied_text and not has_any_image:
+        await event.edit("✗ 请提供图片提示词，例如：,image 一只戴飞行员护目镜的机器人")
+        return
 
     # ── 决策 provider_id（fixed / auto）────────────────────────
     # inline @override 在前面已解析；优先级：
@@ -440,8 +445,17 @@ async def invoke(client, event, args, tpl: dict[str, Any], account_id: int) -> N
         )
 
     # ── 系统提示：基础值 + 反幻觉硬约束 ─────────────────────────
-    # 永远附加，无视用户配置——不能让用户改成"请发挥想象"
-    base_system = cfg.get("system_prompt") or "你是简洁有用的中文助手。回答控制在 100 字内。"
+    # 普通 chat/search/vision 永远附加反幻觉约束；原生生图路径不附加，
+    # 否则会把"只描述真实图像"之类的识图约束混进生成提示词。
+    default_image_system = (
+        "你是 TelePilot 的图片生成助手。用户会给出图片需求，你应尽可能调用当前"
+        "模型或提供商的原生图片生成能力直接生成图片。优先保留用户原始创意，"
+        "并补全必要的光线、构图、材质、色彩、镜头和氛围细节，让画面清晰、"
+        "主体明确、审美稳定。"
+    )
+    base_system = cfg.get("system_prompt") or (
+        default_image_system if native_image_mode else "你是简洁有用的中文助手。回答控制在 100 字内。"
+    )
     _ANTI_HALLUCINATION = (
         "\n\n[严格规则]\n"
         "1. 当且仅当 user 输入包含真实图像数据时，才描述图像。\n"
@@ -449,7 +463,7 @@ async def invoke(client, event, args, tpl: dict[str, Any], account_id: int) -> N
         "必须直接回答\"未收到图像数据，无法识别\"，绝对禁止臆测、编造或推断图像内容。\n"
         "3. 同样禁止仅凭 user 提问中出现的关键词（如\"这是 X 的封面\"）就肯定它是 X。"
     )
-    system = base_system + _ANTI_HALLUCINATION
+    system = base_system if native_image_mode else base_system + _ANTI_HALLUCINATION
     max_tokens = int(cfg.get("max_tokens") or 512)
     temperature = _optional_float(cfg.get("temperature"), min_value=0.0, max_value=2.0)
     reasoning_effort = _optional_reasoning_effort(cfg.get("reasoning_effort"))
@@ -587,6 +601,7 @@ async def invoke(client, event, args, tpl: dict[str, Any], account_id: int) -> N
             temperature=temperature,
             reasoning_effort=reasoning_effort,
             timeout_seconds=timeout_seconds,
+            native_image=native_image_mode,
             account_id=account_id,
             source=f"command:{tpl.get('name') or 'ai'}",
             fallback_provider_id=fallback_provider_id,
@@ -735,7 +750,7 @@ async def invoke(client, event, args, tpl: dict[str, Any], account_id: int) -> N
             # 用 BytesIO 包装并设置 .name 属性，让 Telethon 根据后缀识别为图片
             # （否则纯 bytes 会被当作无名文件发送，TG 显示为 "unnamed" 而非图片预览）
             _buf0 = _io.BytesIO(gen_image_bytes[0])
-            _buf0.name = f"grok_image{gen_image_exts[0]}" if gen_image_exts else "grok_image.jpg"
+            _buf0.name = f"ai_image{gen_image_exts[0]}" if gen_image_exts else "ai_image.jpg"
             try:
                 await client.send_file(
                     event.chat_id, _buf0,
@@ -757,7 +772,7 @@ async def invoke(client, event, args, tpl: dict[str, Any], account_id: int) -> N
                 try:
                     _buf = _io.BytesIO(extra_bytes)
                     _ext = gen_image_exts[idx] if idx < len(gen_image_exts) else ".jpg"
-                    _buf.name = f"grok_image{_ext}"
+                    _buf.name = f"ai_image{_ext}"
                     await client.send_file(event.chat_id, _buf)
                 except Exception:
                     pass

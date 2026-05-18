@@ -185,6 +185,7 @@ async def call_with_fallback(
     temperature: float | None = None,
     reasoning_effort: str | None = None,
     timeout_seconds: int | None = None,
+    native_image: bool = False,
     *,
     # 隐私控制
     log_prompt_preview: bool = False,  # 设为 True 时只记录前 100 字符
@@ -209,6 +210,7 @@ async def call_with_fallback(
         override_model: 覆盖模型名
         max_tokens: 最大输出 token 数
         images: 图片字节列表（vision 模型用）
+        native_image: True 时调用 provider 的原生生图入口，而不是普通文本 complete
         log_prompt_preview: 是否在日志中记录 prompt 预览
 
     Returns:
@@ -275,6 +277,7 @@ async def call_with_fallback(
                 temperature=temperature,
                 reasoning_effort=reasoning_effort,
                 timeout_seconds=timeout_seconds,
+                native_image=native_image,
                 log_prompt_preview=log_prompt_preview,
                 client_factory=client_factory,
             )
@@ -468,6 +471,7 @@ async def _call_with_retry(
     temperature: float | None,
     reasoning_effort: str | None,
     timeout_seconds: int | None,
+    native_image: bool,
     log_prompt_preview: bool,
     client_factory: Callable[..., Any | Awaitable[Any]] | None = None,
     max_retries: int = _MAX_RETRIES,
@@ -503,7 +507,10 @@ async def _call_with_retry(
             if web_search:
                 kwargs["web_search"] = True
                 kwargs["web_search_context_size"] = web_search_context_size
-            result = await _call_complete_compat(client, system, user, kwargs)
+            if native_image:
+                result = await _call_generate_image_compat(client, system, user, kwargs)
+            else:
+                result = await _call_complete_compat(client, system, user, kwargs)
             latency_ms = int((time.monotonic() - start_time) * 1000)
 
             if attempt > 0:
@@ -585,6 +592,27 @@ async def _call_complete_compat(
     allowed = set(sig.parameters)
     filtered = {key: value for key, value in kwargs.items() if key in allowed}
     return await complete(system, user, **filtered)
+
+
+async def _call_generate_image_compat(
+    client: Any,
+    system: str,
+    user: str,
+    kwargs: dict[str, Any],
+) -> LLMResult:
+    """Call ``generate_image`` while tolerating test doubles with fewer kwargs."""
+    generate_image = getattr(client, "generate_image", None)
+    if generate_image is None:
+        raise NotImplementedError("当前 provider client 没有 generate_image 方法")
+    try:
+        sig = inspect.signature(generate_image)
+    except (TypeError, ValueError):
+        return await generate_image(system, user, **kwargs)
+    if any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()):
+        return await generate_image(system, user, **kwargs)
+    allowed = set(sig.parameters)
+    filtered = {key: value for key, value in kwargs.items() if key in allowed}
+    return await generate_image(system, user, **filtered)
 
 
 # ── 辅助函数 ────────────────────────────────────────────────

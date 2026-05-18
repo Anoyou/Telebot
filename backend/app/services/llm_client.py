@@ -112,6 +112,75 @@ def _to_data_url(data: bytes) -> str:
     return f"data:{mime};base64,{b64}"
 
 
+def _normalize_image_data_uri(value: str, default_mime: str = "image/png") -> str:
+    """把裸 base64 或 data URI 统一成 data URI，便于 worker 发送图片。"""
+    raw = str(value or "").strip()
+    if raw.startswith("data:") and ";base64," in raw:
+        return raw
+    return f"data:{default_mime};base64,{raw}"
+
+
+def _extract_response_image_outputs(data: Any) -> tuple[list[str], list[str], str]:
+    """从 Responses / 兼容返回体中提取生图结果。
+
+    返回 ``(image_data, image_urls, output_text)``：
+    - ``image_data`` 始终是 data URI；
+    - ``image_urls`` 是可下载 URL；
+    - ``output_text`` 用作图片 caption 或失败时的错误提示上下文。
+    """
+    image_data: list[str] = []
+    image_urls: list[str] = []
+    text_parts: list[str] = []
+
+    def add_text(value: Any) -> None:
+        if isinstance(value, str) and value:
+            text_parts.append(value)
+
+    def walk(node: Any) -> None:
+        if isinstance(node, dict):
+            node_type = str(node.get("type") or "")
+            if "image_generation" in node_type or node_type in {"image", "output_image"}:
+                for key in ("result", "b64_json", "image_base64", "partial_image_b64"):
+                    value = node.get(key)
+                    if isinstance(value, str) and value.strip():
+                        image_data.append(_normalize_image_data_uri(value.strip()))
+                for key in ("url", "image_url"):
+                    value = node.get(key)
+                    if isinstance(value, str) and value.strip():
+                        image_urls.append(value.strip())
+            if node_type in {"output_text", "text"}:
+                add_text(node.get("text"))
+            if (
+                isinstance(node.get("text"), str)
+                and "image_generation" not in node_type
+                and node_type not in {"output_text", "text"}
+            ):
+                add_text(node.get("text"))
+            for key in ("output", "content", "response", "data", "result", "message"):
+                if key in node:
+                    walk(node.get(key))
+        elif isinstance(node, list):
+            for item in node:
+                walk(item)
+
+    if isinstance(data, dict):
+        add_text(data.get("output_text"))
+    walk(data)
+
+    # 去重并保持顺序
+    def unique(items: list[str]) -> list[str]:
+        seen: set[str] = set()
+        out: list[str] = []
+        for item in items:
+            if item in seen:
+                continue
+            seen.add(item)
+            out.append(item)
+        return out
+
+    return unique(image_data), unique(image_urls), "".join(text_parts).strip()
+
+
 def _extract_response_sources(data: Any) -> list[dict[str, str]]:
     """从 Responses API 返回体里提取联网搜索来源。
 
@@ -193,6 +262,26 @@ class LLMClient(ABC):
         raise NotImplementedError(
             "本 provider 不支持语音转写（仅 OpenAI 兼容 /audio/transcriptions 端点支持）"
         )
+
+    async def generate_image(
+        self,
+        system: str,
+        user: str,
+        max_tokens: int = 512,
+        images: list[bytes] | None = None,
+        web_search: bool = False,
+        web_search_context_size: str | None = None,
+        temperature: float | None = None,
+        reasoning_effort: str | None = None,
+        timeout_seconds: int | None = None,
+    ) -> LLMResult:
+        """原生图片生成入口。
+
+        默认不支持；具体协议实现可返回 ``LLMResult.image_data`` 或
+        ``LLMResult.image_urls``。参数列表刻意与 ``complete`` 对齐，方便
+        fallback 调用层复用同一套 provider / retry / usage 管线。
+        """
+        raise NotImplementedError("当前 provider 协议尚未接入原生图片生成")
 
 
 # ────────────────────────────────────────────────────────────
@@ -379,6 +468,94 @@ class OpenAIClient(LLMClient):
         if not isinstance(text, str):
             raise LLMError(f"STT 返回缺少 text 字段：{str(payload)[:200]}")
         return text.strip()
+
+    async def generate_image(
+        self,
+        system: str,
+        user: str,
+        max_tokens: int = 512,
+        images: list[bytes] | None = None,
+        web_search: bool = False,
+        web_search_context_size: str | None = None,
+        temperature: float | None = None,
+        reasoning_effort: str | None = None,
+        timeout_seconds: int | None = None,
+    ) -> LLMResult:
+        """OpenAI-compatible Images API: ``POST /images/generations``.
+
+        这条路径适合把模板模型直接设为 ``gpt-image-*`` / ``dall-e-*`` 的
+        Provider。若要用普通主模型配 ``image_generation`` 工具，请使用
+        ``api_format=responses``，由 ``ResponsesClient.generate_image`` 处理。
+        """
+        if web_search:
+            raise LLMError("图片生成不支持联网搜索，请关闭 web_search")
+        if images:
+            raise LLMError("当前 /images/generations 路径暂不支持参考图；请改用 api_format=responses 的 Provider")
+
+        url = f"{self._base_url}/images/generations"
+        headers = {"Content-Type": "application/json"}
+        if self._api_key:
+            headers["Authorization"] = f"Bearer {self._api_key}"
+
+        prompt = user.strip()
+        if system.strip():
+            prompt = f"{system.strip()}\n\n用户需求：{prompt}"
+        body = {
+            "model": self._model,
+            "prompt": prompt,
+            "n": 1,
+        }
+
+        client_kwargs: dict[str, object] = {"timeout": _timeout_for_call(self._base_url, timeout_seconds)}
+        if self._proxy_url:
+            client_kwargs["proxy"] = self._proxy_url
+        else:
+            client_kwargs["trust_env"] = False
+        try:
+            async with httpx.AsyncClient(**client_kwargs) as cli:
+                resp = await cli.post(url, headers=headers, json=body)
+        except httpx.HTTPError as exc:
+            raise LLMError(
+                _safe_error_message(
+                    _describe_http_error(exc, self._base_url),
+                    self._api_key,
+                )
+            ) from None
+        if resp.status_code >= 400:
+            raise LLMError(
+                _safe_error_message(
+                    f"Images 接口返回 {resp.status_code}: {resp.text[:200]}{_hint_for_status(resp.status_code)}",
+                    self._api_key,
+                )
+            )
+        try:
+            data = resp.json()
+        except json.JSONDecodeError as exc:
+            raise LLMError(f"Images 返回非 JSON: {exc}") from None
+
+        image_data: list[str] = []
+        image_urls: list[str] = []
+        for item in data.get("data") or []:
+            if not isinstance(item, dict):
+                continue
+            b64 = item.get("b64_json") or item.get("base64") or item.get("data")
+            if isinstance(b64, str) and b64.strip():
+                image_data.append(_normalize_image_data_uri(b64.strip()))
+            url_value = item.get("url")
+            if isinstance(url_value, str) and url_value.strip():
+                image_urls.append(url_value.strip())
+        if not image_data and not image_urls:
+            raise LLMError(f"Images 返回中没有图片数据：{str(data)[:200]}")
+
+        usage = data.get("usage") or {}
+        return LLMResult(
+            text="",
+            model=str(data.get("model") or self._model),
+            input_tokens=int(usage.get("input_tokens") or usage.get("prompt_tokens") or 0),
+            output_tokens=int(usage.get("output_tokens") or usage.get("completion_tokens") or 0),
+            image_urls=image_urls,
+            image_data=image_data,
+        )
 
 
 # ────────────────────────────────────────────────────────────
@@ -696,6 +873,107 @@ class ResponsesClient(LLMClient):
         直接复用 Whisper 协议（与 ``OpenAIClient.transcribe`` 同实现）。"""
         # 复用 OpenAIClient 的 transcribe；二者只差 chat/responses 那条主 endpoint
         return await OpenAIClient.transcribe(self, audio, model)  # type: ignore[arg-type]
+
+    async def generate_image(
+        self,
+        system: str,
+        user: str,
+        max_tokens: int = 512,
+        images: list[bytes] | None = None,
+        web_search: bool = False,
+        web_search_context_size: str | None = None,
+        temperature: float | None = None,
+        reasoning_effort: str | None = None,
+        timeout_seconds: int | None = None,
+    ) -> LLMResult:
+        """Responses API image_generation tool: ``POST /responses``.
+
+        这条路径适合普通主模型（例如 gpt-5.x）调用原生图片生成工具。无参考图
+        时显式 ``action=generate``，有参考图时交给 ``auto``，让上游决定生成或编辑。
+        """
+        if web_search:
+            raise LLMError("图片生成不支持联网搜索，请关闭 web_search")
+        url = f"{self._base_url}/responses"
+        headers = {"Content-Type": "application/json"}
+        if self._api_key:
+            headers["Authorization"] = f"Bearer {self._api_key}"
+
+        if images:
+            input_content: object = [
+                {"type": "input_text", "text": user},
+                *[
+                    {"type": "input_image", "image_url": _to_data_url(img)}
+                    for img in images
+                ],
+            ]
+        else:
+            input_content = user
+
+        image_tool: dict[str, Any] = {"type": "image_generation"}
+        if images:
+            image_tool["action"] = "auto"
+        else:
+            image_tool["action"] = "generate"
+
+        body = {
+            "model": self._model,
+            "instructions": system,
+            "input": [
+                {"role": "user", "content": input_content},
+            ],
+            "tools": [image_tool],
+            "tool_choice": {"type": "image_generation"},
+            "max_output_tokens": max_tokens,
+        }
+        normalized_temperature = _normalize_temperature(temperature)
+        if normalized_temperature is not None:
+            body["temperature"] = normalized_temperature
+        normalized_effort = _normalize_reasoning_effort(reasoning_effort)
+        if normalized_effort is not None:
+            body["reasoning"] = {"effort": normalized_effort}
+
+        client_kwargs: dict[str, object] = {"timeout": _timeout_for_call(self._base_url, timeout_seconds)}
+        if self._proxy_url:
+            client_kwargs["proxy"] = self._proxy_url
+        else:
+            client_kwargs["trust_env"] = False
+        try:
+            async with httpx.AsyncClient(**client_kwargs) as cli:
+                resp = await cli.post(url, headers=headers, json=body)
+        except httpx.HTTPError as exc:
+            raise LLMError(
+                _safe_error_message(
+                    _describe_http_error(exc, self._base_url),
+                    self._api_key,
+                )
+            ) from None
+
+        if resp.status_code >= 400:
+            raise LLMError(
+                _safe_error_message(
+                    f"Responses 生图接口返回 {resp.status_code}: {resp.text[:200]}{_hint_for_status(resp.status_code)}",
+                    self._api_key,
+                )
+            )
+        try:
+            data = resp.json()
+        except json.JSONDecodeError as exc:
+            raise LLMError(f"Responses 生图返回非 JSON: {exc}") from None
+
+        image_data, image_urls, output_text = _extract_response_image_outputs(data)
+        if not image_data and not image_urls:
+            hint = output_text or str(data)[:200]
+            raise LLMError(f"Responses 生图返回中没有图片数据：{hint}")
+        usage = data.get("usage") or {}
+        return LLMResult(
+            text=output_text,
+            model=str(data.get("model") or self._model),
+            input_tokens=int(usage.get("input_tokens") or 0),
+            output_tokens=int(usage.get("output_tokens") or 0),
+            image_urls=image_urls,
+            image_data=image_data,
+            sources=_extract_response_sources(data),
+        )
 
 
 # ────────────────────────────────────────────────────────────

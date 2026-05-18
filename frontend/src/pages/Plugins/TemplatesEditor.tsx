@@ -1198,7 +1198,7 @@ function CommandEditDialog({
                     <span className="font-medium text-foreground">search</span>：专门搜索指令，保存时固定启用联网搜索；需要支持 OpenAI Responses API（api_format=responses）的 Provider，适合 <CommandBadge>{cmdPrefix}search</CommandBadge> 或 <CommandBadge>{cmdPrefix}ai search</CommandBadge>。
                   </p>
                   <p className="mt-1">
-                    <span className="font-medium text-foreground">image</span>：图片生成；当前推荐桥接 codex_image 模块，可直接做 <CommandBadge>{cmdPrefix}image</CommandBadge>。
+                    <span className="font-medium text-foreground">image</span>：图片生成；可桥接 codex_image 模块，也可使用 LLM Provider 原生生图，适合 <CommandBadge>{cmdPrefix}image</CommandBadge>。
                   </p>
                   <p className="mt-1">
                     <span className="font-medium text-foreground">video</span>：视频生成预留入口，运行时会提示下一阶段接入。
@@ -1219,12 +1219,21 @@ function CommandEditDialog({
                     }
                   >
                     <option value="codex_image">codex_image 模块（当前推荐）</option>
-                    <option value="llm">LLM Provider 原生生图（预留）</option>
+                    <option value="llm">LLM Provider 原生生图</option>
                   </Select>
                   <p className="text-xs text-muted-foreground">
-                    codex_image 使用账号模块里的 Codex Access Token、尺寸和发送配置；本模板只负责把
-                    <CommandBadge className="mx-1">{cmdPrefix}{form.name || "image"}</CommandBadge>
-                    转到该模块。
+                    {form.ai_image_backend === "codex_image" ? (
+                      <>
+                        codex_image 使用账号模块里的 Codex Access Token、尺寸和发送配置；本模板只负责把
+                        <CommandBadge className="mx-1">{cmdPrefix}{form.name || "image"}</CommandBadge>
+                        转到该模块。
+                      </>
+                    ) : (
+                      <>
+                        原生生图会优先走 Responses 的 image_generation 工具；OpenAI-compatible chat 协议会尝试
+                        <code className="mx-1">/images/generations</code>。建议选择支持图片生成的模型，并把超时时间调到 180 秒以上。
+                      </>
+                    )}
                   </p>
                 </div>
               )}
