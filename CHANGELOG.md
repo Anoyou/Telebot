@@ -18,6 +18,18 @@
 
 ---
 
+## [0.18.4] — 2026-05-18 · fixed · CI 后端 lint 收口
+
+### Fixed
+- 整理 Codex 生图错误处理测试的 import 顺序，修复 GitHub Actions 后端 `ruff check app` 未通过的问题。
+
+### Verification
+- `backend/.venv/bin/ruff check backend/app`
+- `backend/.venv/bin/python -m py_compile backend/app/tests/test_codex_image_errors.py`
+- `git diff --check`
+
+---
+
 ## [0.18.3] — 2026-05-18 · fixed · 生产环境远程模块库拉取
 
 ### Fixed
