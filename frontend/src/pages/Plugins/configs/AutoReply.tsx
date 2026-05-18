@@ -1,7 +1,7 @@
 // 自动回复配置：列出该账号的 auto_reply rule，CRUD + 试运行
 import { useState } from "react";
-import { useParams } from "react-router-dom";
-import { Plus, Pencil, Trash2, Play } from "lucide-react";
+import { useNavigate, useParams } from "react-router-dom";
+import { Plus, Pencil, Trash2, Play, ShieldCheck } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -74,6 +74,7 @@ function emptyForm(): FormState {
 
 export function AutoReplyConfig() {
   const params = useParams();
+  const nav = useNavigate();
   const aid = Number(params.aid);
 
   const crud = useRuleCrud({
@@ -200,6 +201,27 @@ export function AutoReplyConfig() {
           条，会显示 <code>[event]</code> 收到了什么、<code>[auto_reply]</code> 跳过的具体原因。
         </li>
       </RuleInfoBox>
+
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="flex items-center gap-2 text-base">
+            <ShieldCheck className="h-4 w-4" />
+            自动指令白名单
+          </CardTitle>
+          <CardDescription>
+            如果回复内容是指令，例如“我要玩 24 点”命中后回复 {",24d 100"}，
+            需要先把 <code>24d</code> 加入本账号白名单；普通成员仍不能直接触发模块指令。
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Button
+            variant="outline"
+            onClick={() => nav(`/plugins/auto-command-whitelist?aid=${aid}`)}
+          >
+            配置自动指令白名单
+          </Button>
+        </CardContent>
+      </Card>
 
       <RuleFeatureToggleCard
         enabled={crud.isFeatureEnabled}

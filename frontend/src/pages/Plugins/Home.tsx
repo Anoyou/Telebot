@@ -197,7 +197,13 @@ export function PluginsHome() {
             <Button
               variant="outline"
               className="h-full min-h-[96px] justify-start whitespace-normal px-4 py-3 text-left"
-              onClick={() => nav("/plugins/auto-command-whitelist")}
+              onClick={() =>
+                nav(
+                  selectedAid
+                    ? `/plugins/auto-command-whitelist?aid=${selectedAid}`
+                    : "/plugins/auto-command-whitelist",
+                )
+              }
             >
               <span>
                 <span className="block font-medium">自动指令白名单</span>
