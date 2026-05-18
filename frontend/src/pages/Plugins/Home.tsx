@@ -275,13 +275,13 @@ export function PluginsHome() {
       {codexImageFeature && codexImageState === "failed" ? (
         <Card className="border-amber-500/40 bg-amber-50/60">
           <CardHeader className="pb-2">
-            <CardTitle className="text-base text-amber-900">codex_image 兼容提示</CardTitle>
+            <CardTitle className="text-base text-amber-900">codex_image 加载提示</CardTitle>
             <CardDescription className="text-amber-800">
-              当前账号历史上启用了 codex_image，但运行节点未检测到本地实现。系统已自动降级为失败态并保持 worker 持续运行。
+              当前账号启用了 codex_image，但 worker 未能加载这个内置实验模块。系统已自动降级为失败态并保持 worker 持续运行。
             </CardDescription>
           </CardHeader>
           <CardContent className="pt-0 text-sm text-amber-900">
-            如需恢复，请确认目标节点是否已安装 codex_image 对应模块包，或先在该账号关闭此功能开关。
+            如需恢复，请确认当前后端镜像包含 builtin/codex_image，并检查该账号的 Codex 配置或运行日志。
           </CardContent>
         </Card>
       ) : null}

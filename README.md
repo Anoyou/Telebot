@@ -17,7 +17,7 @@ TelePilot 是一个自托管的 Telegram UserBot 多账号管理平台。它用 
 - 模块中心：平台能力、内置模块、远程模块、实验性能力分区展示，支持按账号视角查看和配置。
 - 模块系统：代码层仍基于 `Plugin` / `feature`，用户界面统一称“模块”；支持内置模块、远程模块、热加载、generation guard、生命周期钩子、配置 schema。模块前端模式推荐使用 `rules` / `single` / `platform`；旧 `schema` 仅作为兼容别名或普通单配置独立页的字段来源。第三方模块推荐使用 `min_telepilot_version`，旧 `min_telebot_version` 仍兼容。
 - 规则驱动模块：自动回复、消息转发、自动复读等按规则匹配并执行。
-- 单配置对象模块：Game24 等以账号级配置页管理；Codex 图片生成已下沉为 installed 实验模块，旧账号保留兼容加载。
+- 单配置对象模块：Game24、Codex 图片生成等以账号级配置页管理；Codex 图片生成作为实验性内置模块随生产镜像发布。
 - 平台基础能力：定时任务调度器作为 worker 常驻能力运行，模块和系统页面可复用。
 - AI 中心：Providers、Routing、Usage 分入口管理，支持多 provider、fallback、retry、usage 记录、预算限制、自定义 AI 指令与 Telegram 长回复分段。
 - 账号 Bot 联动：每个 UserBot 账号可绑定一个普通 Bot，作为移动端/远程运维入口，支持授权用户、角色和常用操作。
@@ -104,7 +104,7 @@ flowchart LR
 | 模块 | 自动回复 | 关键词 / 正则 / 作用域 / 冷却 / 白名单 |
 | 模块 | 消息转发 | 原生转发、复制、引用、仅链接等模式 |
 | 模块 | 自动复读 | 群聊重复消息检测和自动复读 |
-| 模块 | Codex 图片生成 | 已下沉到 `plugins/installed/codex_image/`，旧账号兼容加载；支持模板、尺寸、比例、格式和指令覆盖，当前标记为实验性 |
+| 模块 | Codex 图片生成 | 真正内置在 `backend/app/worker/plugins/builtin/codex_image/`，支持模板、尺寸、比例、格式和指令覆盖，当前标记为实验性 |
 | 平台 | 定时任务 | cron / once / interval，作为 worker 平台调度能力运行 |
 | AI | 自定义指令模板 | reply_text / forward_to / run_plugin / ai 多类型模板，provider 缺失会在前端显式提示 |
 | AI | LLM Provider | OpenAI 兼容、Anthropic、Ollama、自定义 endpoint、proxy、tag 路由 |
@@ -273,7 +273,7 @@ TelePilot 用户界面统一称“模块”，代码层仍使用 `Plugin` / `fea
 | 形态 | 说明 | 示例 |
 | --- | --- | --- |
 | 规则驱动 | 多条规则匹配后执行动作 | auto_reply, forward, autorepeat |
-| 通用独立配置页 | 每账号保存一份配置，像一个工具面板；没有专属页面的轻量模块也走通用独立页 | game24；codex_image 作为 installed 实验模块兼容保留；轻量远程模块 |
+| 通用独立配置页 | 每账号保存一份配置，像一个工具面板；没有专属页面的轻量模块也走通用独立页 | game24；codex_image 实验性内置模块；轻量远程模块 |
 | 平台基础能力 | 随 worker 初始化，为系统和模块提供能力 | scheduler |
 
 不再新增“Schema 弹窗”类模块。`config_schema` 仍是字段、默认值、校验和配置页渲染的数据来源；旧 `x-ui-mode: "schema"` 只作为兼容别名处理，新增模块请优先声明 `rules`、`single` 或 `platform`。配置页必须使用独立页面，并按“顶部配置操作 → 使用说明 → 功能总开关 → 配置主体”的顺序组织。

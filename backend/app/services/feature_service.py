@@ -52,8 +52,8 @@ async def seed_builtin_features(db: AsyncSession) -> int:
     """确保内置和本地 installed feature 行存在；返回新增条数。
 
     每次调用都先强制刷新 ``BUILTIN_FEATURES`` 字典（重新扫描 builtin 目录），
-    并扫描 ``plugins/installed`` 里的 ``plugin.json``。这样像 codex_image 这种
-    已随项目落盘的实验模块，不需要再通过远程安装流程才能在模块中心出现。
+    并扫描 ``plugins/installed`` 里的 ``plugin.json``。这样本地已安装的远程模块
+    不需要再次走安装流程，也能在模块中心出现。
 
     幂等：已存在的行只校正 display_name / is_builtin，不会触发额外 INSERT；
     新行才增加计数并 commit。

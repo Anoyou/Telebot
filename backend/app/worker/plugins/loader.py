@@ -151,10 +151,10 @@ def _missing_plugin_error(feature_key: str) -> tuple[str, str]:
     """为缺失插件提供统一错误码与可读日志，便于前端/运维识别。"""
     if feature_key == "codex_image":
         return (
-            "plugin codex_image not found (possible migration to installed plugin)",
+            "builtin plugin codex_image not found",
             (
-                "feature codex_image 已启用但本地未找到插件实现。"
-                "这通常是 codex_image 下沉到 installed 后代码未就位；"
+                "feature codex_image 已启用但未找到内置模块实现。"
+                "请确认当前镜像包含 backend/app/worker/plugins/builtin/codex_image；"
                 "已跳过加载并保持 worker 运行。"
             ),
         )
@@ -799,7 +799,7 @@ async def _activate(db, state: _AccountState, af: AccountFeature, redis: Any) ->
                 redis,
                 state.account_id,
                 "info",
-                "codex_image 已下沉到 plugins/installed，以兼容模式加载旧账号配置",
+                "检测到旧版 plugins/installed/codex_image 残留，按历史兼容路径加载",
             )
             _load_installed_plugin(af.feature_key)
             cls = get_plugin(af.feature_key)
@@ -837,7 +837,7 @@ async def _activate(db, state: _AccountState, af: AccountFeature, redis: Any) ->
                     redis,
                     state.account_id,
                     "info",
-                    "codex_image installed 代码已就位但 remote_plugin 行不存在；按内置下沉兼容模式继续加载",
+                    "codex_image 来自旧版 installed 残留且 remote_plugin 行不存在；按历史兼容路径继续加载",
                 )
                 rp = None
             else:

@@ -3,9 +3,9 @@ from __future__ import annotations
 import base64
 import json
 
-import plugins.installed.codex_image.plugin as codex_image_plugin
-from plugins.installed.codex_image.manifest import MANIFEST
-from plugins.installed.codex_image.plugin import (
+import app.worker.plugins.builtin.codex_image.plugin as codex_image_plugin
+from app.worker.plugins.builtin.codex_image.manifest import MANIFEST
+from app.worker.plugins.builtin.codex_image.plugin import (
     CodexImagePlugin,
     _edit_html,
     _effective_prompt,

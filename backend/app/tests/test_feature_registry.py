@@ -64,9 +64,13 @@ def test_lazy_registry_refresh_picks_latest_manifest(monkeypatch, tmp_path) -> N
     assert registry["alpha"] == "Alpha V2"
 
 
-def test_builtin_registry_excludes_codex_image_after_installed_migration() -> None:
+def test_builtin_registry_includes_codex_image_as_experimental_builtin() -> None:
     BUILTIN_FEATURES.refresh()
-    assert "codex_image" not in set(BUILTIN_FEATURES.keys())
+    assert "codex_image" in set(BUILTIN_FEATURES.keys())
+    manifest = BUILTIN_FEATURES.manifest_for("codex_image")
+    assert manifest is not None
+    assert manifest.experimental is True
+    assert manifest.config_schema["x-ui-mode"] == "single"
 
 
 def test_builtin_registry_excludes_legacy_feature_keys() -> None:

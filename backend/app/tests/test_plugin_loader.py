@@ -194,9 +194,10 @@ def test_import_builtins_registers_all_three() -> None:
 
 
 def test_builtin_modules_constant_is_complete() -> None:
-    """_BUILTIN_MODULES 应当至少覆盖 3 个内置模块。"""
+    """_BUILTIN_MODULES 应当覆盖核心内置模块。"""
     assert {
         "auto_reply",
+        "codex_image",
         "forward",
         "scheduler",
     } <= set(_BUILTIN_MODULES)
@@ -239,10 +240,11 @@ def test_parse_prefixed_command_accepts_unicode_prefix() -> None:
     assert _parse_prefixed_command(",cy 100", "。") is None
 
 
-def test_missing_plugin_error_uses_codex_image_migration_hint() -> None:
+def test_missing_plugin_error_uses_codex_image_builtin_hint() -> None:
     err, message = _missing_plugin_error("codex_image")
     assert "codex_image" in err
-    assert "下沉" in message or "installed" in message
+    assert "内置模块" in message
+    assert "builtin/codex_image" in message
 
 
 def test_manifest_min_telepilot_version_is_preferred() -> None:

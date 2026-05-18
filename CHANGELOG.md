@@ -18,6 +18,20 @@
 
 ---
 
+## [0.18.1] — 2026-05-18 · fixed · Codex 生图恢复内置发布
+
+### Fixed
+- 将 Codex 图片生成从 `plugins/installed/codex_image/` 恢复为真正的内置实验模块，代码放回 `backend/app/worker/plugins/builtin/codex_image/`，确保生产 Docker 镜像和一键部署会随包带上该模块。
+- 更新 codex_image dry-run、测试导入、builtin registry 断言和缺失模块提示，不再把它描述为 installed 下沉兼容模块。
+- 清理 README、模块开发文档和模块中心失败提示中的旧 installed 口径，明确 Codex 图片生成现在由 builtin registry 自动 seed，旧账号无需迁移。
+
+### Verification
+- `backend/.venv/bin/python -m py_compile backend/app/worker/plugins/loader.py backend/app/api/rules.py backend/app/tests/test_codex_image_errors.py backend/app/tests/test_feature_registry.py backend/app/tests/test_plugin_loader.py backend/app/worker/plugins/builtin/codex_image/__init__.py backend/app/worker/plugins/builtin/codex_image/manifest.py backend/app/worker/plugins/builtin/codex_image/plugin.py`
+- `backend/.venv/bin/python -m pytest backend/app/tests/test_codex_image_errors.py backend/app/tests/test_feature_registry.py backend/app/tests/test_plugin_loader.py -q` 通过，32 passed。
+- `git diff --check`
+
+---
+
 ## [0.18.0] — 2026-05-18 · feature · 前端信息架构与资源占用面板重构
 
 ### Added

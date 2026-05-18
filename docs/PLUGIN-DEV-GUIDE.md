@@ -1027,7 +1027,7 @@ config_schema={
 
 专属页面字段应与运行时实际读取的配置保持一致；`manifest.config_schema` 也要同步，避免通用配置页、接口校验和文档出现三套口径。
 
-`codex_image` 已从 builtin 下沉到 `plugins/installed/codex_image/`。全新部署不会把它作为内置能力自动 seed；旧账号若仍有 `account_feature(feature_key="codex_image")` 且本地代码存在，worker 会按 installed 兼容模式加载。若运行节点缺少代码，worker 会把该功能标记为 failed 并写入 runtime log，模块中心会显示恢复提示。`codex_image` 的 dry-run import 也已改为 installed 路径，避免 builtin 目录再次成为隐性依赖。
+`codex_image` 已恢复为真正的内置实验模块，代码位于 `backend/app/worker/plugins/builtin/codex_image/`，会随后端镜像发布并由 builtin registry 自动 seed。旧数据库里的 `account_feature(feature_key="codex_image")` 不需要迁移，worker 会按普通内置模块路径加载；若未来再次作为远程模块发布，必须另起 key 或先设计清晰迁移策略，避免和 builtin key 冲突。
 
 ---
 
