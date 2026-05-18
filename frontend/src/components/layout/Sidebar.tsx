@@ -5,6 +5,8 @@
 import { useState } from "react";
 import { NavLink } from "react-router-dom";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import {
   Boxes,
   Cog,
@@ -22,6 +24,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import { APP_VERSION_LABEL } from "@/lib/version";
+import changelogRaw from "../../../../CHANGELOG.md?raw";
 
 interface NavItem {
   to: string;
@@ -149,6 +152,7 @@ function SidebarBody({
 }
 
 function ChangelogMenu() {
+  const sections = extractRecentChangelogSections(changelogRaw, 4);
   return (
     <DropdownMenuContent
       side="right"
@@ -164,42 +168,42 @@ function ChangelogMenu() {
         </div>
       </div>
       <div className="space-y-5 p-4">
-        <div>
-          <div className="text-sm font-semibold">v0.18.0 · 前端信息架构与资源占用面板重构</div>
-          <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-muted-foreground">
-            <li>概览页重构账号 Worker、系统状态、新手指引和资源占用入口。</li>
-            <li>PWA 顶栏、底栏、Logo、紧急停用确认和小屏浮层体验统一优化。</li>
-            <li>资源占用新增进程、worker、子进程和项目容器内存明细。</li>
-            <li>新增服务器开箱部署脚本，SSH 后可一条命令安装并启动生产栈。</li>
-          </ul>
-        </div>
-        <div>
-          <div className="text-sm font-semibold">v0.17.1 · PWA 导航与 ChatGPT2API 配置体验</div>
-          <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-muted-foreground">
-            <li>ChatGPT2API 配置页新增消息模板、占位符快捷插入和 Telegram HTML 预览。</li>
-            <li>PWA 底栏、选项卡、侧边栏和导航选中态统一为更柔和的视觉。</li>
-            <li>修复 PWA 模式下移动侧边栏只出现遮罩、不显示抽屉的问题。</li>
-          </ul>
-        </div>
-        <div>
-          <div className="text-sm font-semibold">v0.17.0 · ChatGPT2API 实验性模块</div>
-          <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-muted-foreground">
-            <li>新增实验性内置模块 ChatGPT2API，支持图片生成、图片编辑和额度管理。</li>
-            <li>Token 池改为逐条管理，并支持从 session JSON 自动提取 accessToken。</li>
-            <li>PWA 名称与图标统一为 TelePilot。</li>
-          </ul>
-        </div>
-        <div>
-          <div className="text-sm font-semibold">v0.16.10 · AI 模板与 Codex 生图稳定性</div>
-          <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-muted-foreground">
-            <li>AI 自定义指令模板新增协议、来源和运行信息占位符。</li>
-            <li>敏感输入框改用黑点占位展示，留空保存保留现有密钥。</li>
-            <li>Codex 图片生成在连接早断时会自动重试并返回更准确的中文错误。</li>
-          </ul>
-        </div>
+        {sections.length > 0 ? (
+          sections.map((sec) => (
+            <div key={sec.title}>
+              <div className="text-sm font-semibold">{sec.title}</div>
+              <article className="prose prose-sm mt-2 max-w-none text-sm text-muted-foreground dark:prose-invert">
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>{sec.body}</ReactMarkdown>
+              </article>
+            </div>
+          ))
+        ) : (
+          <p className="text-sm text-muted-foreground">未解析到更新日志内容，请检查 CHANGELOG.md。</p>
+        )}
       </div>
     </DropdownMenuContent>
   );
+}
+
+function extractRecentChangelogSections(md: string, limit: number): Array<{ title: string; body: string }> {
+  const lines = md.split(/\r?\n/);
+  const starts: Array<{ idx: number; title: string }> = [];
+  for (let i = 0; i < lines.length; i += 1) {
+    const m = lines[i].match(/^##\s+\[(.+?)\].*$/);
+    if (!m) continue;
+    const title = lines[i].replace(/^##\s+/, "").trim();
+    if (m[1].toLowerCase() === "unreleased") continue;
+    starts.push({ idx: i, title });
+  }
+  const out: Array<{ title: string; body: string }> = [];
+  for (let i = 0; i < starts.length && out.length < limit; i += 1) {
+    const begin = starts[i].idx + 1;
+    const end = i + 1 < starts.length ? starts[i + 1].idx : lines.length;
+    const body = lines.slice(begin, end).join("\n").trim();
+    if (!body) continue;
+    out.push({ title: starts[i].title, body });
+  }
+  return out;
 }
 
 // 桌面常驻侧栏：< md 隐藏，由 MobileSidebar 接管

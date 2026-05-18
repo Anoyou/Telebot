@@ -20,7 +20,6 @@ const AutoReplyConfig = lazy(() => import("@/pages/Plugins/configs/AutoReply").t
 const AutorepeatConfig = lazy(() => import("@/pages/Plugins/configs/Autorepeat").then(m => ({ default: m.AutorepeatConfig })));
 const CodexImageConfigPage = lazy(() => import("@/pages/Plugins/configs/CodexImageConfig").then(m => ({ default: m.CodexImageConfigPage })));
 const ChatGPTImageConfigPage = lazy(() => import("@/pages/Plugins/configs/ChatGPTImageConfig").then(m => ({ default: m.ChatGPTImageConfigPage })));
-const ForwardConfig = lazy(() => import("@/pages/Plugins/configs/Forward").then(m => ({ default: m.ForwardConfig })));
 const SchedulerConfig = lazy(() => import("@/pages/Plugins/configs/Scheduler").then(m => ({ default: m.SchedulerConfig })));
 const Game24ConfigPage = lazy(() => import("@/pages/Plugins/configs/Game24Config").then(m => ({ default: m.Game24ConfigPage })));
 const GenericPluginConfigPage = lazy(() => import("@/pages/Plugins/configs/GenericPluginConfig").then(m => ({ default: m.GenericPluginConfigPage })));
@@ -28,7 +27,6 @@ const Logs = lazy(() => import("@/pages/Logs").then(m => ({ default: m.Logs })))
 const SettingsIndex = lazy(() => import("@/pages/Settings/Index").then(m => ({ default: m.SettingsIndex })));
 const PluginsHome = lazy(() => import("@/pages/Plugins").then(m => ({ default: m.PluginsHome })));
 const PluginsTemplatesPage = lazy(() => import("@/pages/Plugins").then(m => ({ default: m.PluginsTemplatesPage })));
-const PluginsAliasesPage = lazy(() => import("@/pages/Plugins").then(m => ({ default: m.PluginsAliasesPage })));
 const PluginsSchedulerPage = lazy(() => import("@/pages/Plugins").then(m => ({ default: m.PluginsSchedulerPage })));
 const PluginsAutoCommandWhitelistPage = lazy(() => import("@/pages/Plugins").then(m => ({ default: m.PluginsAutoCommandWhitelistPage })));
 const PluginsManagePage = lazy(() => import("@/pages/Extensions").then(m => ({ default: m.Extensions })));
@@ -151,14 +149,6 @@ export default function App() {
               }
             />
             <Route
-              path=":aid/features/forward"
-              element={
-                <Suspense fallback={<PageFallback />}>
-                  <ForwardConfig />
-                </Suspense>
-              }
-            />
-            <Route
               path=":aid/features/scheduler"
               element={
                 <Suspense fallback={<PageFallback />}>
@@ -196,14 +186,6 @@ export default function App() {
             element={
               <Suspense fallback={<PageFallback />}>
                 <PluginsTemplatesPage />
-              </Suspense>
-            }
-          />
-          <Route
-            path="plugins/aliases"
-            element={
-              <Suspense fallback={<PageFallback />}>
-                <PluginsAliasesPage />
               </Suspense>
             }
           />

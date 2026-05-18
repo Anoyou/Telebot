@@ -136,7 +136,7 @@ export function Dashboard() {
           icon={Boxes}
           title="模块中心"
           value="指令与插件"
-          description="管理指令、别名和自动化"
+          description="管理指令和自动化"
           to="/plugins"
         />
         <OverviewTile
@@ -173,6 +173,7 @@ function AccountWorkerTile({
   onOpenChange: (open: boolean) => void;
 }) {
   const compactAccounts = useCompactOverlay();
+  const singleAccount = accounts.length <= 1;
 
   return (
     <DropdownMenu open={open} onOpenChange={onOpenChange}>
@@ -190,7 +191,11 @@ function AccountWorkerTile({
         align="center"
         collisionPadding={12}
         sideOffset={8}
-        className="max-h-[min(72vh,42rem)] w-[min(54rem,calc(100vw-1rem))] p-0 data-[state=open]:animate-none sm:w-[min(54rem,calc(100vw-2rem))]"
+        className={
+          singleAccount
+            ? "max-h-[min(72vh,42rem)] w-[min(30rem,calc(100vw-1rem))] p-0 data-[state=open]:animate-none sm:w-[min(30rem,calc(100vw-2rem))]"
+            : "max-h-[min(72vh,42rem)] w-[min(54rem,calc(100vw-1rem))] p-0 data-[state=open]:animate-none sm:w-[min(54rem,calc(100vw-2rem))]"
+        }
         style={{ overflowY: "auto" }}
       >
         <div className="border-b px-4 py-3">
@@ -215,7 +220,7 @@ function AccountWorkerTile({
               ))}
             </div>
           ) : (
-            <div className="grid gap-3 lg:grid-cols-2">
+            <div className={singleAccount ? "grid max-w-[28rem] gap-3" : "grid gap-3 lg:grid-cols-2"}>
               {accounts.map((account) => (
                 <AccountSummaryCard key={account.id} account={account} />
               ))}

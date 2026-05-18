@@ -1,4 +1,4 @@
-// 账号详情 → 允许群组 tab：左侧最近活跃会话（一键加入），右侧已允许列表（手填+移除）
+// 账号详情 → 允许会话 tab：左侧最近活跃会话（一键加入），右侧已允许列表（手填+移除）
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -84,7 +84,7 @@ export function IgnoredTab({ aid }: { aid: number }) {
     () => recentItems.filter((p) => !ignoredSet.has(p.peer_id)),
     [recentItems, ignoredSet],
   );
-  // 被过滤掉的数量——空状态文案要告诉用户"不是没有最近活跃，是都已加入允许名单"
+  // 被过滤掉的数量——空状态文案要告诉用户"不是没有最近活跃，是都已加入允许会话"
   const hiddenIgnoredCount = recentItems.length - visibleRecentItems.length;
 
   // ── mutation ──
@@ -95,7 +95,7 @@ export function IgnoredTab({ aid }: { aid: number }) {
       peer_label?: string | null;
     }) => addIgnoredPeer(aid, vars),
     onSuccess: () => {
-      toast.success("已加入允许名单");
+      toast.success("已加入允许会话");
       qc.invalidateQueries({ queryKey: ["ignored-peers", aid] });
     },
     onError: (err) => toast.error(getErrMsg(err)),
@@ -110,7 +110,7 @@ export function IgnoredTab({ aid }: { aid: number }) {
     onError: (err) => toast.error(getErrMsg(err)),
   });
 
-  // ── 手填 peer_id 加入允许名单 ──
+  // ── 手填 peer_id 加入允许会话 ──
   const [manualId, setManualId] = useState("");
   const [manualKind, setManualKind] = useState<PeerKind | "">("");
   const handleAddManual = () => {
@@ -203,7 +203,7 @@ function RecentCard({
     </>
   ) : hiddenIgnoredCount > 0 ? (
     <>
-      最近 <span className="font-medium">{hiddenIgnoredCount}</span> 条活跃会话全部已在允许名单。
+      最近 <span className="font-medium">{hiddenIgnoredCount}</span> 条活跃会话全部已在允许会话。
       <br />
       <span className="text-xs">右侧"已允许会话"可以查看 / 移除。</span>
     </>
@@ -212,7 +212,7 @@ function RecentCard({
       worker 已在跑，但内存里还没有最近活跃会话。
       <br />
       <span className="text-xs">
-        让小号 / 群组里发条消息给这个账号试试；或在右侧手动输入 ID 加入允许名单。
+        让小号 / 群组里发条消息给这个账号试试；或在右侧手动输入 ID 加入允许会话。
       </span>
     </>
   );
@@ -222,7 +222,7 @@ function RecentCard({
       <CardHeader>
         <CardTitle className="text-base">最近活跃会话</CardTitle>
         <CardDescription className="flex items-center gap-2">
-          worker 内存中最近 50 个 incoming 会话；已加入允许名单的不再出现在这里
+          worker 内存中最近 50 个 incoming 会话；已加入允许会话的不再出现在这里
           {!loading ? (
             workerAlive ? (
               <Badge
@@ -276,7 +276,7 @@ function RecentCard({
                   disabled={adding}
                   onClick={() => onAdd(p)}
                 >
-                  加入允许
+                  允许此会话
                 </Button>
               </li>
             ))}
@@ -357,7 +357,7 @@ function IgnoredCard({
           </div>
         ) : items.length === 0 ? (
           <p className="py-6 text-center text-sm text-muted-foreground">
-            允许名单为空：当前默认允许全部会话
+            允许会话为空：当前默认允许全部会话
           </p>
         ) : (
           <ul className="divide-y">

@@ -87,6 +87,13 @@ def _cache_root() -> Path:
     return root
 
 
+def _local_import_root() -> Path:
+    """本地调试插件目录：开发者把插件目录放到这里后可在 Web 一键导入。"""
+    root = settings.resolve_project_path("./plugins/local_imports")
+    root.mkdir(parents=True, exist_ok=True)
+    return root
+
+
 def _cache_dir_for(url: str) -> Path:
     """单个仓库 URL 对应的缓存目录。
 
@@ -459,6 +466,138 @@ async def install_plugin_from_repo(
     return rp_row
 
 
+def list_local_import_candidates() -> list[PluginRepoPlugin]:
+    """列出 ``plugins/local_imports`` 下可导入的本地插件目录。"""
+    root = _local_import_root()
+    out: list[PluginRepoPlugin] = []
+    for default_name, plugin_dir in _scan_plugins(root):
+        try:
+            meta = _read_plugin_metadata(plugin_dir, fallback_name=default_name)
+        except InvalidPluginMetadata:
+            log.warning("跳过本地非法插件目录: %s", plugin_dir)
+            continue
+        out.append(
+            PluginRepoPlugin(
+                name=meta.name,
+                display_name=meta.display_name or meta.name,
+                description=meta.description,
+                author=meta.author,
+                version=meta.version,
+                installed=False,
+                subdir=str(plugin_dir.relative_to(root)),
+            )
+        )
+    out.sort(key=lambda p: p.name)
+    return out
+
+
+async def install_local_plugin(
+    db: AsyncSession,
+    plugin_name: str,
+    *,
+    default_enabled: bool = False,
+) -> RemotePlugin:
+    """从 ``plugins/local_imports`` 导入指定本地插件。"""
+    root = _local_import_root()
+    target_dir: Path | None = None
+    for default_name, plugin_dir in _scan_plugins(root):
+        try:
+            meta = _read_plugin_metadata(plugin_dir, fallback_name=default_name)
+        except InvalidPluginMetadata:
+            continue
+        if meta.name == plugin_name:
+            target_dir = plugin_dir
+            break
+    if target_dir is None:
+        raise PluginNotInRepo("PLUGIN_NOT_FOUND_LOCAL", f"本地目录里未找到插件: {plugin_name}")
+
+    meta = _read_plugin_metadata(target_dir, fallback_name=plugin_name)
+    _validate_runtime_plugin_shape(target_dir, meta)
+    final_name = meta.name
+    install_path = _plugin_dir(final_name)
+
+    existing = (
+        await db.execute(select(RemotePlugin).where(RemotePlugin.name == final_name))
+    ).scalar_one_or_none()
+    if existing is not None:
+        raise DuplicatePluginName("PLUGIN_EXISTS", f"插件 {final_name!r} 已安装")
+    if install_path.exists():
+        raise DuplicatePluginName("DIR_EXISTS", f"目录已存在但 DB 无记录: {install_path}")
+
+    install_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        shutil.copytree(
+            target_dir,
+            install_path,
+            ignore=shutil.ignore_patterns(".git", ".gitignore", "__pycache__"),
+        )
+    except Exception as exc:
+        if install_path.exists():
+            shutil.rmtree(install_path, ignore_errors=True)
+        raise PluginRepoError("COPY_FAILED", f"复制本地插件目录失败: {exc}") from exc
+
+    try:
+        rp_row = RemotePlugin(
+            name=final_name,
+            display_name=meta.display_name or final_name,
+            description=meta.description,
+            author=meta.author,
+            source_url=f"local://local_imports/{final_name}",
+            version=meta.version,
+            enabled=bool(default_enabled),
+            default_enabled=default_enabled,
+        )
+        db.add(rp_row)
+
+        feat = (
+            await db.execute(select(Feature).where(Feature.key == final_name))
+        ).scalar_one_or_none()
+        if feat is None:
+            db.add(
+                Feature(
+                    key=final_name,
+                    display_name=meta.display_name or final_name,
+                    is_builtin=False,
+                    version=meta.version,
+                    manifest=_feature_manifest_from_meta(meta),
+                )
+            )
+        else:
+            feat.display_name = meta.display_name or final_name
+            feat.version = meta.version
+            feat.is_builtin = False
+            feat.manifest = _feature_manifest_from_meta(meta)
+
+        await db.flush()
+
+        if default_enabled:
+            aids = (await db.execute(select(Account.id))).scalars().all()
+            for aid in aids:
+                af = (
+                    await db.execute(
+                        select(AccountFeature).where(
+                            AccountFeature.account_id == int(aid),
+                            AccountFeature.feature_key == final_name,
+                        )
+                    )
+                ).scalar_one_or_none()
+                if af is None:
+                    db.add(
+                        AccountFeature(
+                            account_id=int(aid),
+                            feature_key=final_name,
+                            enabled=True,
+                            state=FEATURE_STATE_DISABLED,
+                        )
+                    )
+            await db.flush()
+    except Exception:
+        shutil.rmtree(install_path, ignore_errors=True)
+        raise
+
+    return rp_row
+
+
 __all__ = [
     "DuplicatePluginRepo",
     "PluginNotInRepo",
@@ -468,6 +607,8 @@ __all__ = [
     "delete_repo",
     "get_repo",
     "install_plugin_from_repo",
+    "install_local_plugin",
     "list_plugins_in_repo",
+    "list_local_import_candidates",
     "list_repos",
 ]

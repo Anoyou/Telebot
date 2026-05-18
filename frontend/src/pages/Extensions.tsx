@@ -68,7 +68,9 @@ import {
   addPluginRepo,
   deletePluginRepo,
   fetchPluginRepos,
+  fetchLocalPlugins,
   fetchRepoPlugins,
+  installLocalPlugin,
   installFromRepo,
 } from "@/api/pluginRepo";
 
@@ -213,9 +215,66 @@ function PluginInstallGuide({
 function PluginsManagementTab() {
   return (
     <div className="space-y-6">
+      <LocalImportCard />
       <RemoteInstallCard />
       <InstalledPluginsSection />
     </div>
+  );
+}
+
+function LocalImportCard() {
+  const qc = useQueryClient();
+  const localQ = useQuery({ queryKey: ["local-plugins"], queryFn: fetchLocalPlugins });
+  const installLocalMut = useMutation({
+    mutationFn: (name: string) => installLocalPlugin(name),
+    onSuccess: (row) => {
+      toast.success(`已导入本地插件 ${row.name} v${row.version}`);
+      qc.invalidateQueries({ queryKey: REMOTE_QK });
+      qc.invalidateQueries({ queryKey: PLUGINS_QK });
+      qc.invalidateQueries({ queryKey: ["matrix"] });
+      qc.invalidateQueries({ queryKey: ["local-plugins"] });
+    },
+    onError: (err) => toast.error(getErrMsg(err)),
+  });
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="text-base">本地导入</CardTitle>
+        <CardDescription>
+          把按开发文档编写好的插件目录放到 <code>plugins/local_imports/</code>，然后在这里一键导入用于本地调试。
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        {localQ.isLoading ? (
+          <div className="flex h-16 items-center justify-center">
+            <Spinner className="text-primary" />
+          </div>
+        ) : (localQ.data ?? []).length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            还没发现可导入插件。请先把插件目录放入 <code>plugins/local_imports/</code>（目录内需包含 <code>plugin.json</code>）。
+          </p>
+        ) : (
+          <div className="space-y-2">
+            {(localQ.data ?? []).map((p) => (
+              <div key={p.name} className="flex items-center justify-between gap-3 rounded-md border px-3 py-2">
+                <div className="min-w-0">
+                  <div className="truncate text-sm font-medium">{p.display_name || p.name}</div>
+                  <div className="truncate text-xs text-muted-foreground">{p.subdir || p.name} · v{p.version}</div>
+                </div>
+                <Button
+                  size="sm"
+                  disabled={installLocalMut.isPending || p.installed}
+                  onClick={() => installLocalMut.mutate(p.name)}
+                >
+                  {p.installed ? "已导入" : "导入"}
+                </Button>
+              </div>
+            ))}
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 
@@ -445,7 +504,7 @@ function InstalledPluginsSection() {
   const builtinQ = useQuery({
     queryKey: ["matrix"],
     queryFn: getFeatureMatrix,
-    select: (data) => data.features.filter((f) => f.is_builtin),
+    select: (data) => data.features.filter((f) => f.is_builtin && f.key !== "forward"),
   });
 
   const thirdPartyQ = useQuery({ queryKey: PLUGINS_QK, queryFn: listInstalledPackages });
@@ -589,7 +648,13 @@ function InstalledPluginsSection() {
                     <div className="font-medium">{p.display_name || p.name}</div>
                     <div className="font-mono text-xs text-muted-foreground">{p.name}</div>
                   </TableCell>
-                  <TableCell><Badge variant="outline"><GitFork className="inline h-3 w-3 mr-1" />远程</Badge></TableCell>
+                  <TableCell>
+                    {p.source_url?.startsWith("local://") ? (
+                      <Badge variant="secondary">本地导入</Badge>
+                    ) : (
+                      <Badge variant="outline"><GitFork className="inline h-3 w-3 mr-1" />远程</Badge>
+                    )}
+                  </TableCell>
                   <TableCell>{formatPluginVersion(p.version)}</TableCell>
                   <TableCell>
                     <Badge variant={p.enabled ? "default" : "outline"}>
@@ -603,7 +668,13 @@ function InstalledPluginsSection() {
                   </TableCell>
                   <TableCell className="text-right">
                     <div className="flex flex-wrap justify-end gap-2">
-                      <Button size="sm" variant="outline" onClick={() => updateRMMut.mutate(p.name)} disabled={updateRMMut.isPending} title="从远程更新">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => updateRMMut.mutate(p.name)}
+                        disabled={updateRMMut.isPending || p.source_url?.startsWith("local://")}
+                        title={p.source_url?.startsWith("local://") ? "本地导入插件不支持远程更新" : "从远程更新"}
+                      >
                         <RefreshCw className="mr-1 h-3 w-3" />
                         更新
                       </Button>

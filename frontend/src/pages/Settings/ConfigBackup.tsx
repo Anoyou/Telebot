@@ -53,7 +53,7 @@ const CATEGORIES: CategoryDef[] = [
   { key: "rate_limit_rules", label: "风控规则", desc: "账号级限速配置" },
   { key: "feature_config", label: "模块功能配置", desc: "各账号的模块开关和配置" },
   { key: "account_settings", label: "账号设置", desc: "拟人化、标签等（不含登录信息）", sensitive: ["session", "api_id", "api_hash", "phone"] },
-  { key: "ignored_peers", label: "忽略列表", desc: "自动回复/转发忽略的 peer" },
+  { key: "ignored_peers", label: "允许会话", desc: "自动回复/转发允许通过的会话白名单" },
   { key: "notify_bots", label: "通知 Bot", desc: "通知机器人配置", sensitive: ["bot_token"] },
 ];
 
@@ -61,7 +61,7 @@ const BUNDLE_ENTITY_LABEL: Record<string, string> = {
   feature: "模块配置",
   rule: "模块规则",
   command_link: "指令绑定",
-  ignored_peer: "忽略列表",
+  ignored_peer: "允许会话",
 };
 
 export function ConfigBackup() {
@@ -388,7 +388,7 @@ export function ConfigBackup() {
       <CardHeader>
         <CardTitle className="text-base">账号配置包（Config Bundle）</CardTitle>
         <CardDescription>
-          大白话：把 A 账号的规则、模块配置、自定义指令绑定、忽略列表打包成一个 JSON 文件，再拿去给 B 账号套用。
+          大白话：把 A 账号的规则、模块配置、自定义指令绑定、允许会话打包成一个 JSON 文件，再拿去给 B 账号套用。
           上传后会先演练对比，不会立刻改数据；只有点“确认写入”才会真正保存到目标账号。
         </CardDescription>
       </CardHeader>
@@ -397,7 +397,7 @@ export function ConfigBackup() {
           <div>
             <div className="text-sm font-medium">第 1 步：从一个账号导出配置包</div>
             <p className="text-xs text-muted-foreground">
-              适合“我已经把 1 号账号调好了，想把同一套规则和忽略群组复制给 2 号账号”的场景。不会导出 session、API key、Bot Token 等敏感密钥。
+              适合“我已经把 1 号账号调好了，想把同一套规则和允许会话复制给 2 号账号”的场景。不会导出 session、API key、Bot Token 等敏感密钥。
             </p>
           </div>
           <div className="space-y-1.5 max-w-md">

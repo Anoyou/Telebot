@@ -6,7 +6,7 @@ import type {
   RecentPeersResponse,
 } from "@/api/types";
 
-/** 列出账号已忽略的 peer */
+/** 列出账号已配置的允许会话 peer */
 export async function listIgnoredPeers(aid: number): Promise<IgnoredPeer[]> {
   const { data } = await api.get<IgnoredPeer[]>(
     `/api/accounts/${aid}/ignored-peers`,
@@ -14,7 +14,7 @@ export async function listIgnoredPeers(aid: number): Promise<IgnoredPeer[]> {
   return data;
 }
 
-/** 加入忽略名单（幂等：同 peer_id 已存在则后端返回原行） */
+/** 加入允许会话名单（幂等：同 peer_id 已存在则后端返回原行） */
 export async function addIgnoredPeer(
   aid: number,
   payload: IgnoredPeerCreate,

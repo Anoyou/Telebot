@@ -46,3 +46,21 @@ export async function installFromRepo(
   );
   return data;
 }
+
+export async function fetchLocalPlugins(): Promise<PluginRepoPlugin[]> {
+  const { data } = await api.get<PluginRepoPlugin[]>(
+    `${BASE}/local/plugins`,
+  );
+  return data;
+}
+
+export async function installLocalPlugin(
+  pluginName: string,
+  body?: InstallFromRepoBody,
+): Promise<RemotePlugin> {
+  const { data } = await api.post<RemotePlugin>(
+    `${BASE}/local/plugins/${encodeURIComponent(pluginName)}/install`,
+    body ?? {},
+  );
+  return data;
+}

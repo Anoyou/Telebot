@@ -1,15 +1,14 @@
 import { useState } from "react";
-import { Command, Fingerprint, Shield, Tags, Waypoints } from "lucide-react";
+import { Command, Fingerprint, Shield, Waypoints } from "lucide-react";
 
 import { RateTemplates } from "@/pages/Settings/RateTemplates";
 import { ProxyManager } from "@/pages/Settings/ProxyManager";
 import { DeviceProfileManager } from "@/pages/Settings/DeviceProfileManager";
 import { CommandTemplates } from "@/pages/Plugins/TemplatesEditor";
-import { AliasManagement } from "@/pages/Plugins/AliasManagement";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 export function Templates() {
-  const [tab, setTab] = useState<"rate" | "proxy" | "device" | "command" | "alias">("rate");
+  const [tab, setTab] = useState<"rate" | "proxy" | "device" | "command">("rate");
 
   return (
     <div className="space-y-6">
@@ -34,9 +33,6 @@ export function Templates() {
           <TabsTrigger value="command" className="gap-1.5">
             <Command className="h-4 w-4" /> 自定义指令模板
           </TabsTrigger>
-          <TabsTrigger value="alias" className="gap-1.5">
-            <Tags className="h-4 w-4" /> 指令别名
-          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="rate">
@@ -50,9 +46,6 @@ export function Templates() {
         </TabsContent>
         <TabsContent value="command">
           <CommandTemplates />
-        </TabsContent>
-        <TabsContent value="alias">
-          <AliasManagement />
         </TabsContent>
       </Tabs>
     </div>

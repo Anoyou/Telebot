@@ -739,7 +739,7 @@ export type HumanizeUpdate = Partial<HumanizeConfig>;
 //   - channel    频道（chat_id 形如 -1001234567890）
 export type PeerKind = "private" | "group" | "supergroup" | "channel";
 
-/** 已忽略的 peer 一行（GET / POST 响应） */
+/** 已配置允许会话的 peer 一行（GET / POST 响应） */
 export interface IgnoredPeer {
   id: number;
   account_id: number;
@@ -750,7 +750,7 @@ export interface IgnoredPeer {
   added_at: string;
 }
 
-/** 加入忽略名单的入参 */
+/** 加入允许会话名单的入参 */
 export interface IgnoredPeerCreate {
   peer_id: number;
   peer_kind?: PeerKind | string;

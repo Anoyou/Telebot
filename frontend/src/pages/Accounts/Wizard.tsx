@@ -161,7 +161,6 @@ export function AccountWizard() {
     mutationFn: () =>
       cloneConfig(createdAid!, Number(cloneFrom), [
         "auto_reply",
-        "forward",
         "scheduler",
       ]),
     onSuccess: () => {
@@ -197,7 +196,7 @@ export function AccountWizard() {
         <Card className="border-amber-200 bg-amber-50/70 dark:border-amber-900 dark:bg-amber-950/25">
           <CardContent className="pt-4 text-sm text-amber-950 dark:text-amber-100">
             这次不会新建账号，也不会删除原配置。成功后只覆盖当前账号的
-            session、API 凭据和运行状态，忽略群组、模块规则、指令绑定都会保留。
+            session、API 凭据和运行状态，允许会话、模块规则、指令绑定都会保留。
           </CardContent>
         </Card>
       ) : null}

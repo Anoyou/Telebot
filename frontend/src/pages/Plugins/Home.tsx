@@ -89,6 +89,7 @@ export function PluginsHome() {
     };
 
     for (const feature of features) {
+      if (feature.key === "forward") continue;
       const forceExperimental = feature.key === "codex_image";
       if (forceExperimental || feature.experimental) {
         zones.experimental.push(feature);
@@ -167,18 +168,6 @@ export function PluginsHome() {
                 <span className="block font-medium">指令模板</span>
                 <span className="mt-1 block text-xs leading-5 text-muted-foreground">
                   先把常用回复、转发、AI 指令整理成一套模板，再按账号开启复用。
-                </span>
-              </span>
-            </Button>
-            <Button
-              variant="outline"
-              className="h-full min-h-[96px] justify-start whitespace-normal px-4 py-3 text-left"
-              onClick={() => nav("/plugins/aliases")}
-            >
-              <span>
-                <span className="block font-medium">指令别名</span>
-                <span className="mt-1 block text-xs leading-5 text-muted-foreground">
-                  给常用指令起短名字，减少不同账号之间重复记忆。
                 </span>
               </span>
             </Button>

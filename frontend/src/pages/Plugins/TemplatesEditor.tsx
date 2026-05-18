@@ -54,6 +54,7 @@ import {
   listLLMProviders,
   patchCommandTemplate,
 } from "@/api/commands";
+import { listAccounts } from "@/api/accounts";
 import { getSystemSettings, patchSystemSettings } from "@/api/system";
 import type {
   CommandTemplateOut,
@@ -431,6 +432,10 @@ export function CommandTemplates() {
     queryKey: ["llm-providers"],
     queryFn: listLLMProviders,
   });
+  const accountsQ = useQuery({
+    queryKey: ["accounts"],
+    queryFn: listAccounts,
+  });
   // 实时拉系统指令前缀，用在编辑器的"`,name` 触发"那行提示——避免硬编码逗号
   // 跟系统设置改了不一致
   const settingsQ = useQuery({
@@ -453,6 +458,8 @@ export function CommandTemplates() {
   );
 
   const [editing, setEditing] = useState<FormState | null>(null);
+  const [enableTargetTemplate, setEnableTargetTemplate] = useState<CommandTemplateOut | null>(null);
+  const [targetAid, setTargetAid] = useState("");
   const [focusCapability, setFocusCapability] = useState<AiCapability | null>(null);
   const returnToRef = useRef<string | null>(null);
 
@@ -468,6 +475,16 @@ export function CommandTemplates() {
   const clearFocusCapability = useCallback(() => {
     setFocusCapability(null);
   }, []);
+
+  const openEnableFlow = (tpl: CommandTemplateOut) => {
+    const accounts = accountsQ.data ?? [];
+    if (accounts.length === 1) {
+      nav(`/accounts/${accounts[0].id}?tab=commands`);
+      return;
+    }
+    setEnableTargetTemplate(tpl);
+    setTargetAid(accounts[0]?.id ? String(accounts[0].id) : "");
+  };
 
   useEffect(() => {
     const editId = searchParams.get("edit");
@@ -754,6 +771,13 @@ export function CommandTemplates() {
                     </TableCell>
                     <TableCell className="space-x-2 text-right">
                       <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => openEnableFlow(t)}
+                      >
+                        启用
+                      </Button>
+                      <Button
                         variant="ghost"
                         size="sm"
                         onClick={() => {
@@ -826,6 +850,43 @@ export function CommandTemplates() {
             onGoProviders={() => nav("/ai?tab=providers")}
           />
         )}
+        <Dialog open={!!enableTargetTemplate} onOpenChange={(v) => !v && setEnableTargetTemplate(null)}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle>选择要启用的账号</DialogTitle>
+              <DialogDescription>
+                将跳转到账号详情的“自定义指令”页签，快捷启用模板
+                {enableTargetTemplate ? `「${enableTargetTemplate.name}」` : ""}。
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-2">
+              <Label>目标账号</Label>
+              <Select value={targetAid} onChange={(e) => setTargetAid(e.target.value)}>
+                <option value="">-- 选择账号 --</option>
+                {(accountsQ.data ?? []).map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.display_name || a.phone || `#${a.id}`}
+                  </option>
+                ))}
+              </Select>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setEnableTargetTemplate(null)}>
+                取消
+              </Button>
+              <Button
+                disabled={!targetAid}
+                onClick={() => {
+                  if (!targetAid) return;
+                  nav(`/accounts/${targetAid}?tab=commands`);
+                  setEnableTargetTemplate(null);
+                }}
+              >
+                前往启用
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </Card>
     </div>
   );

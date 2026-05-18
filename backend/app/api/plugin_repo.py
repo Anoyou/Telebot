@@ -82,6 +82,12 @@ async def list_repo_plugins(repo_id: int, db: DBSession, _user: CurrentUser):
         raise HTTPException(400, detail={"code": e.code, "message": e.message}) from e
 
 
+@router.get("/local/plugins", response_model=list[PluginRepoPlugin])
+async def list_local_plugins(_user: CurrentUser):
+    """列出 ``plugins/local_imports`` 下可导入的本地插件。"""
+    return svc.list_local_import_candidates()
+
+
 class InstallFromRepoBody(BaseModel):
     """``POST /{id}/plugins/{name}/install`` 的可选 body。"""
 
@@ -122,5 +128,34 @@ async def install_plugin_from_repo(
         raise HTTPException(409, detail={"code": e.code, "message": e.message}) from e
     except (GitOperationFailed, InvalidPluginMetadata) as e:
         raise HTTPException(400, detail={"code": e.code, "message": e.message}) from e
+    except (PluginRepoError, RemotePluginError) as e:
+        raise HTTPException(400, detail={"code": e.code, "message": e.message}) from e
+
+
+@router.post(
+    "/local/plugins/{plugin_name}/install",
+    response_model=RemotePluginOut,
+    status_code=201,
+)
+async def install_local_plugin(
+    plugin_name: str,
+    db: DBSession,
+    _user: CurrentUser,
+    body: InstallFromRepoBody | None = None,
+):
+    """从 ``plugins/local_imports`` 导入本地插件。"""
+    default_enabled = bool(body.default_enabled) if body else False
+    try:
+        row = await svc.install_local_plugin(
+            db, plugin_name, default_enabled=default_enabled,
+        )
+        await db.commit()
+        await db.refresh(row)
+        await trigger_reload(db, row.name)
+        return row
+    except PluginNotInRepo as e:
+        raise HTTPException(404, detail={"code": e.code, "message": e.message}) from e
+    except DuplicatePluginName as e:
+        raise HTTPException(409, detail={"code": e.code, "message": e.message}) from e
     except (PluginRepoError, RemotePluginError) as e:
         raise HTTPException(400, detail={"code": e.code, "message": e.message}) from e

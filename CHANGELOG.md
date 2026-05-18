@@ -18,6 +18,28 @@
 
 ---
 
+## [0.18.9] — 2026-05-19 · changed · 指令与模块入口收口及本地导入
+
+### Added
+- 模块安装页新增“本地导入”能力：支持扫描 `plugins/local_imports/` 下符合开发规范的插件目录并一键导入，用于本地调试。
+- 新增本地导入插件 API：可列出本地候选插件并执行导入安装，导入后自动触发热加载。
+- 自定义指令模板列表新增“启用”快捷按钮：单账号环境下直接跳转到该账号的“自定义指令”页签；多账号环境下先选择目标账号再跳转。
+
+### Changed
+- 账号 Worker 弹层在仅有一个账号时改为窄宽度自适应展示，不再使用双账号宽度的固定大面板。
+- 侧边栏版本号弹出的“更新日志”改为自动读取本地 `CHANGELOG.md`，不再维护手写静态版本摘要。
+- 允许会话术语继续全站统一（账号页、向导页、配置包页等口径一致）。
+
+### Removed
+- 模块中心与主要导航中下线“指令别名”入口。
+- 前端主路径中下线“消息转发（forward）”配置入口与相关展示，避免与自定义指令转发能力重复。
+
+### Verification
+- `pnpm --dir frontend exec tsc -b --noEmit`
+- `backend/.venv/bin/python -m py_compile backend/app/services/plugin_repo_service.py backend/app/api/plugin_repo.py`
+
+---
+
 ## [0.18.8] — 2026-05-19 · fixed · 允许群组白名单与 Bot 联动稳定性修复
 
 ### Changed

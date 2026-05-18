@@ -5,7 +5,6 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Activity,
   ArrowLeft,
-  Ban,
   Bot,
   ChevronRight,
   Gauge,
@@ -15,6 +14,7 @@ import {
   MessageCircle,
   Network,
   Power,
+  ShieldCheck,
   Terminal,
   Trash2,
 } from "lucide-react";
@@ -259,7 +259,7 @@ export function AccountDetail() {
               <Network className="h-4 w-4" /> 出口/伪装
             </TabsTrigger>
             <TabsTrigger value="ignored" className="shrink-0 gap-1.5">
-              <Ban className="h-4 w-4" /> 允许群组
+              <ShieldCheck className="h-4 w-4" /> 允许会话
             </TabsTrigger>
           </TabsList>
         </div>
@@ -520,7 +520,7 @@ export function AccountDetail() {
                   })()}
                   {(() => {
                     const grouped = [...(featureListQ.data ?? [])]
-                      .filter((f) => !isPlatformFeature(f))
+                      .filter((f) => !isPlatformFeature(f) && f.key !== "forward")
                       .sort(compareFeatureKey);
                     if (grouped.length === 0) return null;
                     return (
@@ -699,7 +699,7 @@ export function AccountDetail() {
           />
         </TabsContent>
 
-        {/* 忽略群组 / peer */}
+        {/* 允许会话 / peer */}
         <TabsContent value="ignored">
           <IgnoredTab aid={aid} />
         </TabsContent>

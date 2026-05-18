@@ -16,6 +16,14 @@ import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import {
   Card,
   CardContent,
   CardDescription,
@@ -219,7 +227,36 @@ export function BotTab({ aid }: { aid: number }) {
               安全提示：涉及重启、安装等危险操作时，需在 Telegram 内完成二次确认后才会执行。
             </div>
             <div className="space-y-3 rounded-md border border-red-300/70 bg-red-50 px-3 py-3 dark:border-red-400/40 dark:bg-red-950/30">
-              <div className="text-sm font-medium text-red-900 dark:text-red-100">远程模块高风险开关（admin）</div>
+              <div className="flex items-center gap-2">
+                <div className="text-sm font-medium text-red-900 dark:text-red-100">远程模块高风险开关（admin）</div>
+                <Dialog>
+                  <DialogTrigger asChild>
+                    <button
+                      type="button"
+                      className="text-xs font-medium text-red-700 underline underline-offset-2 hover:text-red-800 dark:text-red-200 dark:hover:text-red-100"
+                    >
+                      详情
+                    </button>
+                  </DialogTrigger>
+                  <DialogContent className="max-h-[85vh] w-[calc(100vw-2rem)] max-w-xl overflow-y-auto rounded-xl">
+                    <DialogHeader>
+                      <DialogTitle className="text-base">远程模块高风险开关说明</DialogTitle>
+                      <DialogDescription>
+                        这是账号 Bot 联动里的高风险远程模块总闸，采用“Web 策略开关 + Telegram 内二次确认”双重防护。
+                      </DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-3 text-sm text-foreground/90">
+                      <div><strong>总开关 enabled：</strong>关闭时所有高风险远程模块动作都不允许从 TG Bot 发起；开启后才会继续检查子开关。</div>
+                      <div><strong>允许 install：</strong>控制 <code>/plugins install &lt;git-url&gt;</code>。</div>
+                      <div><strong>允许 update：</strong>控制 <code>/plugins update &lt;name&gt;</code>。</div>
+                      <div><strong>允许 uninstall：</strong>控制 <code>/plugins uninstall &lt;name&gt;</code>。</div>
+                      <div><strong>允许第三方 enable/disable：</strong>控制第三方远程模块启停操作。</div>
+                      <div><strong>权限边界：</strong>仅 <code>admin</code> 可操作；<code>viewer/operator</code> 会被拦截。</div>
+                      <div><strong>执行机制：</strong>开关只代表“允许发起请求”，真正执行前仍需在 Telegram 内二次确认，且确认有时效并绑定发起人。</div>
+                    </div>
+                  </DialogContent>
+                </Dialog>
+              </div>
               <div className="text-xs text-red-800 dark:text-red-200">
                 默认全部关闭；即使开启后，Telegram 内仍需二次确认才会执行 install/update/uninstall/第三方启停。
               </div>
