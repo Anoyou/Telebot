@@ -30,6 +30,7 @@ dependencies = [
 
     # Telegram 客户端：Telethon（活跃维护、类型注解完备）
     "telethon>=1.43,<2.0.0",
+    "Pillow>=10.0.0",
     "cryptg>=0.4.0",            # C 加速 AES-IGE（Telethon）
     "python-socks[asyncio]>=2.4.4",  # SOCKS5/HTTP/MTProxy 出口代理
 

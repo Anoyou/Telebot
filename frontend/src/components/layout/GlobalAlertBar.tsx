@@ -9,6 +9,7 @@
 //  - 都不显示时返回 null（不占空间）
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { RefreshCw, ShieldAlert } from "lucide-react";
+import { useEffect, useRef } from "react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -53,6 +54,49 @@ function VersionMismatchBar() {
   // 一致就闭嘴
   if (data.version === APP_VERSION) return null;
 
+  return <VersionMismatchContent backendVersion={data.version} />;
+}
+
+async function hardRefreshWithoutSw(): Promise<void> {
+  // 先注销 SW，避免继续命中旧缓存
+  if ("serviceWorker" in navigator) {
+    try {
+      const registrations = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(registrations.map((reg) => reg.unregister()));
+    } catch {
+      // 忽略并继续强刷
+    }
+  }
+
+  // 再清理 Cache Storage
+  if ("caches" in window) {
+    try {
+      const keys = await caches.keys();
+      await Promise.all(keys.map((key) => caches.delete(key)));
+    } catch {
+      // 忽略并继续强刷
+    }
+  }
+
+  // 强制整页重载
+  window.location.replace(`${window.location.pathname}?_v=${Date.now()}${window.location.hash}`);
+}
+
+function VersionMismatchContent({ backendVersion }: { backendVersion: string }) {
+  const autoAttemptedRef = useRef(false);
+
+  useEffect(() => {
+    if (autoAttemptedRef.current) return;
+    autoAttemptedRef.current = true;
+
+    // 每个版本差异组合仅自动修复一次，避免极端情况下循环刷新。
+    const guardKey = `telepilot-version-sync-attempt:${APP_VERSION}->${backendVersion}`;
+    if (sessionStorage.getItem(guardKey) === "1") return;
+    sessionStorage.setItem(guardKey, "1");
+
+    void hardRefreshWithoutSw();
+  }, [backendVersion]);
+
   return (
     <div
       role="alert"
@@ -66,22 +110,17 @@ function VersionMismatchBar() {
         <RefreshCw className="h-4 w-4 shrink-0" />
         <span className="font-medium">前后端版本不一致</span>
         <span className="hidden text-amber-700 dark:text-amber-200 sm:inline">
-          前端 v{APP_VERSION} · 后端 v{data.version}
-          {" — 请到终端跑 "}
-          <code className="rounded bg-amber-100 px-1 font-mono dark:bg-amber-900/50">make restart</code>
-          {" 然后浏览器硬刷（cmd+shift+r）"}
+          前端 v{APP_VERSION} · 后端 v{backendVersion}
+          {" — 正在自动清缓存并刷新，如未恢复可手动修复"}
         </span>
       </div>
       <Button
         size="sm"
         variant="outline"
         className="shrink-0 border-amber-400 bg-amber-100 hover:bg-amber-200 dark:border-amber-800 dark:bg-amber-950/50 dark:hover:bg-amber-900/50"
-        onClick={() => {
-          // 强制重新加载（不走 SW 缓存）
-          window.location.reload();
-        }}
+        onClick={() => void hardRefreshWithoutSw()}
       >
-        硬刷新
+        手动修复
       </Button>
     </div>
   );
