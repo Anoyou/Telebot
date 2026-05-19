@@ -25,6 +25,7 @@ from typing import Any
 from jsonschema import Draft7Validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm.attributes import flag_modified
 
 from ..db.models.account import Account
 from ..db.models.feature import (
@@ -176,9 +177,14 @@ async def _seed_local_installed_features(
                 row.version = version
                 row_changed = True
             current_manifest = dict(row.manifest or {})
-            if manifest_data and current_manifest != manifest_data:
-                row.manifest = manifest_data
-                row_changed = True
+            if manifest_data:
+                next_manifest = dict(manifest_data)
+                if "global_config" in current_manifest:
+                    next_manifest["global_config"] = current_manifest["global_config"]
+                if current_manifest != next_manifest:
+                    row.manifest = next_manifest
+                    flag_modified(row, "manifest")
+                    row_changed = True
             if row_changed:
                 await db.flush()
                 changed = True
@@ -415,6 +421,7 @@ async def set_plugin_global_config(
     manifest = dict(feature.manifest or {})
     manifest["global_config"] = global_config
     feature.manifest = manifest
+    flag_modified(feature, "manifest")
     await db.commit()
 
     # 通知所有使用该插件的账号的 worker reload
