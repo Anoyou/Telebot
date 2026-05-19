@@ -18,6 +18,23 @@
 
 ---
 
+## [0.18.11] — 2026-05-19 · fixed · 运行日志与 24 点发奖排障修复
+
+### Changed
+- 24 点游戏发奖失败日志新增可读排障提示，会区分无发言权限、引用消息不可回复、慢速模式和 FloodWait 等常见原因。
+- 24 点游戏发奖失败日志的 detail 追加 `exc_type`、`exc_repr` 和 `hint`，便于从运行日志里直接定位失败原因。
+
+### Fixed
+- 运行日志落库兼容 Python logging 数字级别，插件传 `10/20/30/40` 或字符串数字时会规范化为 `debug/info/warn/error`。
+- 修复 CI 后端 lint 中 `.encode("utf-8")` 在 Python 3.12 / Ruff 规则下报错的问题。
+
+### Verification
+- `backend/.venv/bin/ruff check backend/app`
+- `backend/.venv/bin/python -m pytest backend/app/tests/test_supervisor_reliable_consumer.py backend/app/tests/test_commands.py::test_run_template_forward_to_delete_immediately_skips_success_edit -q`
+- `git diff --check`
+
+---
+
 ## [0.18.10] — 2026-05-19 · fixed · 原生生图调用链与超时体验修复
 
 ### Fixed

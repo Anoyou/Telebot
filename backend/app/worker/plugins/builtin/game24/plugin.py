@@ -539,6 +539,20 @@ class Game24Plugin(Plugin):
         """发奖：优先回复答题消息，失败再用 client.send_message 兜底。"""
 
         prize_text = f"+{gs.prize}"
+
+        def _send_fail_hint(exc: Exception) -> str:
+            name = type(exc).__name__
+            msg = str(exc)
+            if "ChatWriteForbidden" in name or "CHAT_WRITE_FORBIDDEN" in msg.upper():
+                return "当前账号在该会话无发言权限（常见于频道评论区/被禁言）。"
+            if "MessageIdInvalid" in name or "REPLY_MESSAGE_ID_INVALID" in msg.upper():
+                return "引用的消息不可回复（消息已删除/不可见/跨会话）。"
+            if "SlowModeWait" in name:
+                return "会话处于慢速模式，当前发送被限流。"
+            if "FloodWait" in name:
+                seconds = getattr(exc, "seconds", None)
+                return f"触发 FloodWait，需等待 {seconds or '?'} 秒。"
+            return "请检查会话权限、发言限制和消息可见性。"
         reply = getattr(event, "reply", None)
         if callable(reply):
             try:
@@ -557,11 +571,17 @@ class Game24Plugin(Plugin):
                 await self._log(
                     ctx,
                     "warn",
-                    f"24 点游戏用 reply 发奖失败，准备改用 send_message 兜底。原因：{type(exc).__name__}: {exc}",
+                    (
+                        f"24 点游戏用 reply 发奖失败，准备改用 send_message 兜底。"
+                        f"原因：{type(exc).__name__}: {exc}。提示：{_send_fail_hint(exc)}"
+                    ),
                     chat_id=gs.chat_id,
                     sender_id=msg.sender_id,
                     winner_msg_id=msg.message_id,
                     send_method="event.reply",
+                    exc_type=type(exc).__name__,
+                    exc_repr=repr(exc),
+                    hint=_send_fail_hint(exc),
                 )
 
         if msg.message_id is not None:
@@ -585,11 +605,18 @@ class Game24Plugin(Plugin):
                 await self._log(
                     ctx,
                     "warn",
-                    f"24 点游戏用 reply_to 发奖失败，准备改成普通消息发送。频道/匿名频道消息经常会走到这里。原因：{type(exc).__name__}: {exc}",
+                    (
+                        "24 点游戏用 reply_to 发奖失败，准备改成普通消息发送。"
+                        f"频道/匿名频道消息经常会走到这里。原因：{type(exc).__name__}: {exc}。"
+                        f"提示：{_send_fail_hint(exc)}"
+                    ),
                     chat_id=gs.chat_id,
                     sender_id=msg.sender_id,
                     winner_msg_id=msg.message_id,
                     send_method="client.send_message.reply_to",
+                    exc_type=type(exc).__name__,
+                    exc_repr=repr(exc),
+                    hint=_send_fail_hint(exc),
                 )
 
         try:
@@ -608,12 +635,18 @@ class Game24Plugin(Plugin):
             await self._log(
                 ctx,
                 "error",
-                f"24 点游戏发奖失败：已经识别 {msg.sender_name} 答对，但奖励消息 {prize_text} 没发出去。原因：{type(exc).__name__}: {exc}",
+                (
+                    f"24 点游戏发奖失败：已经识别 {msg.sender_name} 答对，但奖励消息 {prize_text} 没发出去。"
+                    f"原因：{type(exc).__name__}: {exc}。提示：{_send_fail_hint(exc)}"
+                ),
                 chat_id=gs.chat_id,
                 sender_id=msg.sender_id,
                 winner_msg_id=msg.message_id,
                 prize=gs.prize,
                 send_method="client.send_message",
+                exc_type=type(exc).__name__,
+                exc_repr=repr(exc),
+                hint=_send_fail_hint(exc),
             )
             return False
 

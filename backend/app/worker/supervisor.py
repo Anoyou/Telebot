@@ -155,9 +155,25 @@ def _truncate_detail(value: object, max_chars: int) -> object:
 
 
 def _normalize_runtime_log_level(level: object) -> str:
+    # 兼容插件传 logging 数值级别（10/20/30/40）或对应字符串数字。
+    try:
+        if isinstance(level, (int, float)) or (isinstance(level, str) and str(level).strip().isdigit()):
+            iv = int(float(level))
+            if iv >= 40:
+                return "error"
+            if iv >= 30:
+                return "warn"
+            if iv >= 20:
+                return "info"
+            return "debug"
+    except Exception:
+        pass
+
     raw = str(level or "info").strip().lower()
     if raw == "warning":
         return "warn"
+    if raw in {"critical", "fatal"}:
+        return "error"
     if raw in {"debug", "info", "warn", "error"}:
         return raw
     return "info"

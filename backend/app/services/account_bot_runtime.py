@@ -255,7 +255,7 @@ async def notify_runtime_log(row: RuntimeLog) -> None:
     source = account_bot_service.html_text(row.source or "worker")
     message = account_bot_service.html_text(row.message)
     digest = hashlib.sha256(
-        f"{int(row.account_id)}|{row.level}|{row.source or 'worker'}|{row.message}".encode("utf-8")
+        f"{int(row.account_id)}|{row.level}|{row.source or 'worker'}|{row.message}".encode()
     ).hexdigest()
     dedupe_key = f"{_RUNTIME_NOTIFY_DEDUPE_PREFIX}{int(row.account_id)}:{digest}"
     redis = get_redis()

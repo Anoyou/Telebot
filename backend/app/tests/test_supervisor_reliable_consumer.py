@@ -248,3 +248,29 @@ async def test_runtime_log_row_redacts_message_and_detail(monkeypatch: pytest.Mo
     assert row is not None
     assert "abcdefghijklmn" not in row.message
     assert row.detail["access_token"] == "***"
+
+
+@pytest.mark.asyncio
+async def test_runtime_log_row_normalizes_numeric_level_to_debug(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def _fake_cfg():
+        return {
+            "runtime_log_retention_days": 30,
+            "runtime_log_max_message_chars": 2000,
+            "runtime_log_max_detail_chars": 8000,
+            "runtime_log_min_level": "debug",
+        }
+
+    monkeypatch.setattr(supervisor, "_get_log_retention_config", _fake_cfg)
+    payload = json.dumps(
+        {
+            "account_id": 9,
+            "level": 10,  # logging.DEBUG
+            "source": "plugin",
+            "message": "debug details",
+            "detail": {"step": "send_bonus"},
+        }
+    )
+
+    row = await supervisor._build_runtime_log_row_with_retention(payload)
+    assert row is not None
+    assert row.level == "debug"
