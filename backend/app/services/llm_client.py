@@ -51,7 +51,13 @@ _RETRY_MAX_DELAY = 30.0
 def _timeout_for_call(base_url: str, timeout_seconds: int | None) -> httpx.Timeout:
     if timeout_seconds and timeout_seconds > 0:
         seconds = float(max(1, timeout_seconds))
-        return httpx.Timeout(seconds, connect=min(10.0, seconds))
+        return httpx.Timeout(
+            seconds,
+            connect=min(5.0, seconds),
+            pool=min(5.0, seconds),
+            write=min(15.0, seconds),
+            read=seconds,
+        )
     if "127.0.0.1" in base_url or "localhost" in base_url:
         return _LOCAL_TIMEOUT
     return _HTTP_TIMEOUT

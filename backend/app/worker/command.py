@@ -346,6 +346,9 @@ def _humanize_llm_error(e: BaseException, max_len: int = 360) -> str:
     if "connect" in lowered or "network" in lowered or "proxy" in lowered or "ssl" in lowered:
         return "连接模型服务失败。请检查网络、代理和 provider endpoint。"
     if "所有 provider 都失败" in raw:
+        detail = raw.split("最后错误:", 1)[1].strip() if "最后错误:" in raw else ""
+        if detail:
+            return f"所有可用 provider 都调用失败。最后错误：{_safe_exception_text(RuntimeError(detail), max_len=max_len)}"
         return "所有可用 provider 都调用失败。请检查主 provider 和 fallback provider 配置。"
     return text
 

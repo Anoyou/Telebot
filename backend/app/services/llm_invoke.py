@@ -53,7 +53,12 @@ async def invoke(
         override_model: str | None = None,
         proxy_url: str | None = None,
     ):
-        api_format_override = _api_format_for_call(provider_dto, web_search=web_search)
+        api_format_override = _api_format_for_call(
+            provider_dto,
+            web_search=web_search,
+            native_image=native_image,
+            override_model=override_model,
+        )
         if client_factory is not None:
             kwargs = {
                 "override_model": override_model,
@@ -99,12 +104,28 @@ def _accepts_kwarg(fn: Callable[..., Any], name: str) -> bool:
     )
 
 
-def _api_format_for_call(provider: LLMProviderDTO, *, web_search: bool) -> str | None:
+def _api_format_for_call(
+    provider: LLMProviderDTO,
+    *,
+    web_search: bool,
+    native_image: bool = False,
+    override_model: str | None = None,
+) -> str | None:
     """Return a per-call API format override.
 
     Default chat can stay on /chat/completions while web-search calls switch to
     /responses for OpenAI-compatible providers that support both protocols.
     """
+    if native_image:
+        current = (provider.api_format or "").strip().lower()
+        model = (override_model or provider.default_model or "").strip().lower()
+        if (
+            provider.provider.lower() == LLM_PROVIDER_OPENAI
+            and current == LLM_API_FORMAT_CHAT_COMPLETIONS
+            and not _is_images_api_model(model)
+        ):
+            return LLM_API_FORMAT_RESPONSES
+
     if not web_search:
         return None
 
@@ -129,3 +150,9 @@ def resolved_api_format_for_call(provider: LLMProviderDTO, *, web_search: bool) 
     from ..db.models.command import default_api_format_for
 
     return default_api_format_for(provider.provider)
+
+
+def _is_images_api_model(model: str) -> bool:
+    """True when the model should be sent to OpenAI-compatible Images API."""
+    normalized = model.strip().lower()
+    return normalized.startswith("gpt-image-") or normalized.startswith("dall-e-")

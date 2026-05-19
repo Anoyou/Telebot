@@ -16,6 +16,7 @@ import pytest
 
 from app.services.llm_client import LLMCallFailed, LLMError
 from app.services.llm_dto import LLMProviderDTO
+from app.services.llm_invoke import _api_format_for_call
 from app.services.llm_runtime import (
     FallbackChain,
     UsageRecord,
@@ -61,6 +62,32 @@ def test_dto_from_dict() -> None:
     assert dto.modality == "text"
     assert dto.tags == ["chat", "code"]
     assert dto.cost_tier == 2
+
+
+def test_native_image_openai_chat_provider_uses_responses_for_text_model() -> None:
+    """原生生图绑定普通 OpenAI 主模型时，应走 Responses image_generation 工具。"""
+    dto = LLMProviderDTO(
+        id=1,
+        name="ChatGPT",
+        provider="openai",
+        default_model="gpt-5.5",
+        api_format="chat_completions",
+    )
+
+    assert _api_format_for_call(dto, web_search=False, native_image=True) == "responses"
+
+
+def test_native_image_openai_chat_provider_keeps_images_api_for_image_model() -> None:
+    """gpt-image / dall-e 模型仍走 /images/generations。"""
+    dto = LLMProviderDTO(
+        id=1,
+        name="Images",
+        provider="openai",
+        default_model="gpt-image-2",
+        api_format="chat_completions",
+    )
+
+    assert _api_format_for_call(dto, web_search=False, native_image=True) is None
 
 
 def test_dto_from_dict_missing_fields() -> None:

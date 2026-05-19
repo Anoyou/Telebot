@@ -14,10 +14,22 @@
 
 ## [Unreleased]
 
-### Fixed
-- 修复带 `config_schema` 的远程模块在模块中心不显示“配置”按钮的问题，通用配置页入口不再只依赖硬编码模块白名单。
+暂无。
 
 ---
+
+## [0.18.10] — 2026-05-19 · fixed · 原生生图调用链与超时体验修复
+
+### Fixed
+- 修复带 `config_schema` 的远程模块在模块中心不显示“配置”按钮的问题，通用配置页入口不再只依赖硬编码模块白名单。
+- 修复 AI 原生生图绑定普通 OpenAI 主模型时误走 `/images/generations` 的问题；现在会自动切换到 Responses `image_generation` 工具，`gpt-image-*` / `dall-e-*` 模型仍保留 Images API 路径。
+- 修复 LLM 调用失败时只显示“所有 provider 都失败”的泛化提示；现在会透出脱敏后的最后错误，方便区分接口、模型、代理和网络问题。
+- 原生生图的超时控制拆分连接、写入、读取阶段：连接 / 代理 / 连接池快速失败，长等待只留给已连接后的生图响应读取。
+
+### Verification
+- `backend/.venv/bin/ruff check backend/app/services/llm_client.py backend/app/services/llm_invoke.py backend/app/worker/command.py backend/app/tests/test_llm_runtime.py`
+- `backend/.venv/bin/python -m pytest backend/app/tests/test_llm_runtime.py backend/app/tests/test_commands.py::test_responses_client_generate_image_uses_image_generation_tool backend/app/tests/test_commands.py::test_openai_client_generate_image_uses_images_api backend/app/tests/test_ai_runtime.py::test_ai_runtime_image_llm_uses_native_image_generation -q`
+- `git diff --check`
 
 ## [0.18.9] — 2026-05-19 · changed · 指令与模块入口收口及本地导入
 
