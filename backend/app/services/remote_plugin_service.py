@@ -182,6 +182,23 @@ def _feature_manifest_from_meta(meta: PluginMetadata) -> dict[str, Any] | None:
     return manifest or None
 
 
+def _merge_feature_manifest_preserving_global_config(
+    current: dict[str, Any] | None,
+    meta: PluginMetadata,
+) -> dict[str, Any] | None:
+    """Build feature manifest from plugin metadata while preserving saved global config.
+
+    Remote plugin install/update refreshes manifest metadata from plugin.json. Global
+    plugin config is stored inside Feature.manifest["global_config"], so replacing
+    the whole manifest would otherwise erase shared settings such as API keys.
+    """
+    next_manifest = _feature_manifest_from_meta(meta)
+    if current and "global_config" in current:
+        next_manifest = dict(next_manifest or {})
+        next_manifest["global_config"] = current["global_config"]
+    return next_manifest
+
+
 # ─────────────────────────────────────────────────────
 # 内部工具：路径与 Git
 # ─────────────────────────────────────────────────────
@@ -655,7 +672,7 @@ async def install(
             feat.display_name = meta.display_name or final_name
             feat.version = meta.version
             feat.is_builtin = False
-            feat.manifest = _feature_manifest_from_meta(meta)
+            feat.manifest = _merge_feature_manifest_preserving_global_config(feat.manifest, meta)
 
         await db.flush()
 
@@ -836,7 +853,7 @@ async def update(db: AsyncSession, name: str) -> RemotePlugin:
         feat.display_name = meta.display_name or name
         feat.version = meta.version or feat.version
         feat.is_builtin = False
-        feat.manifest = _feature_manifest_from_meta(meta)
+        feat.manifest = _merge_feature_manifest_preserving_global_config(feat.manifest, meta)
     await db.flush()
 
     return row
