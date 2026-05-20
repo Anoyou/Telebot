@@ -35,13 +35,17 @@ export function getErrMsg(err: unknown): string {
     : typeof detail === "object"
       ? detail?.message
       : undefined;
-  return (
+  const message = (
     e?.response?.data?.error?.message
     || detailMessage
     || (typeof detail === "string" ? detail : undefined)
     || e?.message
     || "请求失败"
   );
+  if (message.includes("terminated by other getUpdates request") || message.includes("Conflict:")) {
+    return "Bot polling 冲突：同一个 Bot token 正在被另一个实例监听。请确认它没有被其他账号、本地/Docker/VPS 中的另一套 TelePilot，或其他程序同时使用。";
+  }
+  return message;
 }
 
 export function getErrCode(err: unknown): string | undefined {

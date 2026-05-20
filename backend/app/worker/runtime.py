@@ -11,9 +11,11 @@ from __future__ import annotations
 import asyncio
 import gc
 import logging
+import re
 from typing import Any
 
 from sqlalchemy import select
+from telethon import events
 from telethon.errors import (
     AuthKeyUnregisteredError,
     SessionRevokedError,
@@ -27,6 +29,7 @@ from ..db.models.command import AccountCommandLink, CommandAlias, CommandTemplat
 from ..db.models.feature import FEATURE_SCHEDULER, AccountFeature
 from ..db.models.system import SystemSetting
 from ..redis_client import get_redis
+from ..services import interaction_bot_service
 from ..settings import settings as app_settings
 from .command import (
     CommandContext,
@@ -68,6 +71,8 @@ from .tg_client import build_client
 log = logging.getLogger(__name__)
 
 _CONFIG_RECONCILE_SECONDS = max(30, int(app_settings.worker_reconcile_seconds or 180))
+_ACCOUNT_BOT_AUTO_AWARD_DEDUPE_PREFIX = "account_bot:auto_award:"
+_ACCOUNT_BOT_AUTO_AWARD_DEDUPE_TTL_SECONDS = 3600
 
 
 def _httpx_proxy_url_from_proxy(proxy: Proxy | None) -> str | None:
@@ -99,6 +104,175 @@ def _httpx_proxy_url_from_proxy(proxy: Proxy | None) -> str | None:
             password or parsed_password or "",
         )
     return _build_proxy_url(proxy.type, proxy.host, proxy.port, proxy.username, password)
+
+
+def _normalize_tg_username(value: str | None) -> str | None:
+    username = str(value or "").strip().lstrip("@").lower()
+    return username or None
+
+
+def _parse_account_bot_winner_notice(text: str) -> int | None:
+    """解析 Bbot 的算数题中奖公告，返回应回复发放的奖金金额。"""
+
+    if "答对了" not in text or "题目" not in text or "奖金" not in text:
+        return None
+    match = re.search(r"奖金\s*[:：]\s*\+?(\d{1,9})\b", text)
+    if not match:
+        return None
+    prize = int(match.group(1))
+    return prize if prize > 0 else None
+
+
+async def _load_account_bot_auto_award_config(account_id: int) -> dict[str, Any] | None:
+    """读取临时交互 Bot 算数题自动发奖配置。"""
+
+    async with AsyncSessionLocal() as db:
+        row = await db.get(SystemSetting, interaction_bot_service.transfer_notice_setting_key(account_id))
+        cfg = interaction_bot_service.normalize_transfer_notice_config(
+            row.value if row is not None and isinstance(row.value, dict) else {}
+        )
+    if not bool(cfg.get("enabled")):
+        return None
+    bot_username = _normalize_tg_username(str(cfg.get("interaction_bot_username") or ""))
+    if not bot_username:
+        return None
+    math_chat_ids: list[int] = []
+    raw_rules = cfg.get("rules")
+    if isinstance(raw_rules, list):
+        for rule in raw_rules:
+            if not isinstance(rule, dict) or not bool(rule.get("enabled", True)):
+                continue
+            action = str(rule.get("action") or "")
+            module_key = str(rule.get("module_key") or "")
+            if action == "math10" or (action == "module" and module_key == "game24"):
+                raw_rule_chat_ids = rule.get("chat_ids") or cfg.get("chat_ids")
+                if isinstance(raw_rule_chat_ids, list):
+                    for item in raw_rule_chat_ids:
+                        try:
+                            chat_id = int(item)
+                        except (TypeError, ValueError):
+                            continue
+                        if chat_id not in math_chat_ids:
+                            math_chat_ids.append(chat_id)
+    if math_chat_ids:
+        return {
+            "bot_username": bot_username,
+            "chat_ids": math_chat_ids,
+        }
+    if not math_chat_ids:
+        if str(cfg.get("action") or "") != "math10":
+            return None
+    try:
+        raw_chat_ids = cfg.get("chat_ids")
+        if isinstance(raw_chat_ids, list) and raw_chat_ids:
+            chat_ids = [int(item) for item in raw_chat_ids]
+        elif cfg.get("chat_id") not in (None, ""):
+            chat_ids = [int(cfg["chat_id"])]
+        else:
+            chat_ids = []
+    except (TypeError, ValueError):
+        chat_ids = []
+    if not chat_ids:
+        return None
+    return {
+        "bot_username": bot_username,
+        "chat_ids": chat_ids,
+    }
+
+
+async def _try_account_bot_auto_award(client: Any, redis: Any, account_id: int, event: Any) -> bool:
+    """userbot 监听 Bbot 中奖公告，并回复被引用答案消息发奖。"""
+
+    text = str(getattr(event, "raw_text", "") or "")
+    prize = _parse_account_bot_winner_notice(text)
+    if prize is None:
+        return False
+    reply_to_msg_id = getattr(event, "reply_to_msg_id", None)
+    if reply_to_msg_id is None:
+        return False
+
+    cfg = await _load_account_bot_auto_award_config(account_id)
+    if cfg is None:
+        return False
+    chat_id = getattr(event, "chat_id", None)
+    cfg_chat_ids = cfg.get("chat_ids")
+    if not isinstance(cfg_chat_ids, list):
+        cfg_chat_ids = [cfg["chat_id"]] if cfg.get("chat_id") is not None else []
+    if int(chat_id or 0) not in {int(item) for item in cfg_chat_ids}:
+        return False
+
+    sender = getattr(event, "sender", None)
+    if sender is None:
+        try:
+            sender = await event.get_sender()
+        except Exception:  # noqa: BLE001
+            sender = None
+    sender_username = _normalize_tg_username(getattr(sender, "username", None))
+    if sender_username is None or sender_username != cfg.get("bot_username"):
+        return False
+
+    message_id = getattr(event, "id", None) or getattr(getattr(event, "message", None), "id", None)
+    dedupe_key = f"{_ACCOUNT_BOT_AUTO_AWARD_DEDUPE_PREFIX}{account_id}:{chat_id}:{reply_to_msg_id}:{prize}"
+    try:
+        acquired = await redis.set(
+            dedupe_key,
+            "1",
+            ex=_ACCOUNT_BOT_AUTO_AWARD_DEDUPE_TTL_SECONDS,
+            nx=True,
+        )
+        if not acquired:
+            return True
+    except Exception:  # noqa: BLE001
+        log.debug("account bot auto award dedupe failed account=%s", account_id, exc_info=True)
+        await _log(
+            redis,
+            account_id,
+            "warn",
+            "临时算数题自动发奖：幂等检查失败，已跳过本次自动发奖。",
+            source="event",
+            chat_id=chat_id,
+            winner_msg_id=reply_to_msg_id,
+            notice_msg_id=message_id,
+            prize=prize,
+        )
+        return True
+
+    await client.send_message(
+        entity=chat_id,
+        message=f"+{prize}",
+        reply_to=reply_to_msg_id,
+    )
+    await _log(
+        redis,
+        account_id,
+        "info",
+        f"临时算数题自动发奖：已回复中奖答案消息 {reply_to_msg_id}，内容 +{prize}。",
+        source="event",
+        chat_id=chat_id,
+        winner_msg_id=reply_to_msg_id,
+        notice_msg_id=message_id,
+        prize=prize,
+    )
+    return True
+
+
+def _register_account_bot_auto_award(client: Any, account_id: int, redis: Any) -> None:
+    """注册临时联动发奖监听器；Bbot 负责判题，userbot 负责回复发奖。"""
+
+    @client.on(events.NewMessage(incoming=True))
+    async def _account_bot_auto_award(event):  # noqa: ANN001
+        try:
+            await _try_account_bot_auto_award(client, redis, account_id, event)
+        except Exception as exc:  # noqa: BLE001
+            await _log(
+                redis,
+                account_id,
+                "warn",
+                f"临时算数题自动发奖失败：{type(exc).__name__}: {exc}",
+                source="event",
+                chat_id=getattr(event, "chat_id", None),
+                message_preview=(getattr(event, "raw_text", "") or "")[:200],
+            )
 
 
 async def run_worker(account_id: int) -> None:
@@ -187,6 +361,8 @@ async def run_worker(account_id: int) -> None:
             await _log(redis, account_id, "warn", "插件系统尚未就绪（D Agent 待完成）")
         except Exception as e:
             await _log(redis, account_id, "error", f"加载插件失败: {e}")
+
+        _register_account_bot_auto_award(client, account_id, redis)
 
         me = await client.get_me()
         # 顺便回填 tg_user_id / tg_username（旧账号迁移 + 用户在 TG 改用户名时同步）

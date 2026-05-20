@@ -164,6 +164,80 @@ export interface AccountBotTestResponse {
   message: string;
 }
 
+export interface AccountBotTestRequest {
+  text?: string | null;
+  chat_id?: number | null;
+  bot_token_override?: string | null;
+}
+
+export interface AccountBotInteractionRule {
+  id: string;
+  name: string;
+  enabled: boolean;
+  chat_ids?: number[];
+  trigger_mode?: "payment" | "keyword" | "both";
+  trigger_texts?: string[];
+  module_start_keywords?: string[];
+  receiver_text?: string | null;
+  amount?: number | null;
+  amount_match_mode?: "eq" | "gte";
+  action: "notice" | "math10" | "module";
+  math_prize: number;
+  module_key?: string | null;
+  module_action?: string | null;
+  module_prize?: number | null;
+  module_start_text?: string | null;
+  open_commands?: string[];
+  close_commands?: string[];
+  status_commands?: string[];
+  disabled_message?: string | null;
+  valid_seconds?: number | null;
+  concurrency?: "chat" | "user" | "none";
+  response_template: string;
+}
+
+export interface AccountBotInteractionConfig {
+  enabled: boolean;
+  chat_id?: number | null;
+  chat_ids?: number[];
+  interaction_bot_token?: string | null;
+  clear_interaction_bot_token?: boolean;
+  has_interaction_bot_token?: boolean;
+  interaction_bot_username?: string | null;
+  interaction_bot_id?: number | null;
+  interaction_running?: boolean;
+  interaction_runtime_status?: "running" | "stopped";
+  interaction_last_update_id?: number | null;
+  interaction_last_error?: string | null;
+  trusted_bot_id?: number | null;
+  transfer_bot_token?: string | null;
+  clear_transfer_bot_token?: boolean;
+  has_transfer_bot_token?: boolean;
+  trigger_mode?: "payment" | "keyword" | "both";
+  trigger_text: string;
+  trigger_texts?: string[];
+  module_start_keywords?: string[];
+  receiver_text?: string | null;
+  amount?: number | null;
+  amount_match_mode?: "eq" | "gte";
+  action: "notice" | "math10" | "module";
+  math_prize: number;
+  module_key?: string | null;
+  module_action?: string | null;
+  module_prize?: number | null;
+  module_start_text?: string | null;
+  open_commands?: string[];
+  close_commands?: string[];
+  status_commands?: string[];
+  disabled_message?: string | null;
+  valid_seconds?: number | null;
+  concurrency?: "chat" | "user" | "none";
+  response_template: string;
+  rules?: AccountBotInteractionRule[];
+}
+
+export type AccountBotTransferNoticeConfig = AccountBotInteractionConfig;
+
 // ===================== 设备伪装 =====================
 export interface DeviceProfileOut {
   id: number;
@@ -284,6 +358,16 @@ export interface ConfigBundleConfirmResponse {
 
 // ===================== 功能 =====================
 export type FeatureState = "active" | "failed" | "disabled";
+export type FeatureCategory = "interactive" | "automation" | "utility";
+
+export interface FeatureInteractionEntry {
+  key: string;
+  title?: string | null;
+  label?: string | null;
+  description?: string | null;
+  session_scope?: "chat" | "user" | "none" | string | null;
+  input_schema?: Record<string, unknown> | null;
+}
 
 export interface FeatureInfo {
   key: string;
@@ -291,6 +375,8 @@ export interface FeatureInfo {
   is_builtin: boolean;
   version?: string | null;
   config_schema?: Record<string, unknown> | null;
+  category?: FeatureCategory | string | null;
+  interaction_entries?: FeatureInteractionEntry[];
   experimental: boolean;
 }
 export interface AccountFeatureItem {

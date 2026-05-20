@@ -11,6 +11,7 @@
 3. [Plugin 基类](#3-plugin-基类)
 4. [PluginContext](#4-plugincontext)
 5. [Manifest 元数据](#5-manifest-元数据)
+   - [交互 Bot 兼容声明](#交互-bot-兼容声明interaction-entries)
 6. [指令系统（command API）](#6-指令系统command-api)
 7. [消息监听](#7-消息监听)
 8. [Conversation 工具](#8-conversation-工具)
@@ -349,6 +350,138 @@ version_pattern = r"^\d+\.\d+\.\d+"
 - `PLUGIN_CLASS` 是 `Plugin` 子类
 - `MANIFEST` 是 `Manifest` 实例
 - `MANIFEST.key` 与模块 key / 目录名保持一致
+
+### 交互 Bot 兼容声明（interaction entries）
+
+交互 Bot 用来承接群内高频互动，不能直接复用 UserBot 插件命令作为启动入口；否则高频游戏又会回到 UserBot 账号身上，违背风控隔离目标。后续模块要支持“转账命中后启动”，应通过 Manifest 声明一个或多个交互入口，由平台统一适配。
+
+推荐在 `manifest.py` 顶层声明 `category` 和 `interaction_entries`；旧写法也兼容 `config_schema["x-category"]` 与 `config_schema["x-interaction-entries"]`。这是声明式协议，不要求模块自己解析转账通知、Bot Token 或群消息格式。
+
+模块分类只保留三类，前端会按中文分组展示：
+
+| category | 中文分组 | 适用模块 |
+| --- | --- | --- |
+| `interactive` | 互动娱乐 | 游戏、群内娱乐、需要交互 Bot 承接高频消息的模块 |
+| `automation` | 自动化 | 自动回复、转发、定时任务等账号自动化能力 |
+| `utility` | 工具能力 | AI、媒体生成、查询、辅助工具等能力 |
+
+`category` 只决定展示分组；是否能被交互 Bot 启动，只看是否声明了 `interaction_entries`。
+
+```python
+MANIFEST = Manifest(
+    key="game24",
+    display_name="24点游戏",
+    version="1.1.0",
+    category="interactive",
+    interaction_entries=[
+        {
+            "key": "start_paid_game",
+            "title": "付费开局",
+            "description": "转账命中或模块关键词命中后，由交互 Bot 开启一局游戏。",
+            "session_scope": "chat",
+            "input_schema": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "prize": {
+                        "type": "integer",
+                        "title": "奖金",
+                        "default": 123,
+                        "minimum": 1,
+                    },
+                    "timeout": {
+                        "type": "integer",
+                        "title": "答题限时（秒）",
+                        "default": 500,
+                        "minimum": 30,
+                        "maximum": 3600,
+                    },
+                },
+                "required": ["prize"],
+            },
+        }
+    ],
+    config_schema={
+        "type": "object",
+        "x-ui-mode": "single",
+        "properties": {
+            "command": {"type": "string", "title": "触发指令名", "default": "24d"},
+            "timeout": {"type": "integer", "title": "答题限时（秒）", "default": 500},
+        },
+    },
+)
+```
+
+`interaction_entries` 中的 `session_scope` 建议使用：
+
+- `chat`：同一个群内同一时间只开一局，适合 24 点这类公共抢答。
+- `user`：同一个用户一条会话，适合个人答题或私聊流程。
+- `none`：模块自己不提供并发隔离，由平台按全局规则限制。
+
+#### 配置合并顺序
+
+交互入口的实际参数按以下顺序合并，越靠后优先级越高：
+
+```text
+input_schema default
+< 模块全局配置
+< 账号级模块配置
+< 交互规则 module_config
+< 转账事件动态参数（payer / receiver / amount / chat_id 等）
+```
+
+其中 `module_config` 只保存当前交互规则的覆盖项，例如“这条门票规则奖金为 200”；模块自身的通用配置仍放在模块配置页中。
+
+#### 标准事件输入
+
+平台调用交互入口时，会向适配层提供标准事件对象。模块不要依赖转账通知原文。
+
+```json
+{
+  "account_id": 1,
+  "chat_id": -100123,
+  "rule_id": "game24-ticket",
+  "payer_user_id": 111,
+  "payer_name": "AAA",
+  "receiver_name": "BBB",
+  "amount": 100,
+  "source_message_id": 80,
+  "notice_message_id": 81
+}
+```
+
+#### 标准动作输出
+
+交互入口或适配器应返回平台可执行的标准动作，而不是直接调用 Telegram API。交互 Bot runtime 统一负责发送、编辑、回复、持久化状态和幂等处理。
+
+```json
+[
+  {
+    "type": "send_message",
+    "text": "24 点开始...",
+    "state_key": "game24",
+    "state": {"numbers": [1, 5, 5, 5], "prize": 123}
+  },
+  {
+    "type": "wait_answer",
+    "state_key": "game24",
+    "answer_type": "game24_expression"
+  },
+  {
+    "type": "award_notice",
+    "text": "答对了：AAA\n题目：24 点 [1 5 5 5]\n奖金：123",
+    "reply_to": "winner_message"
+  }
+]
+```
+
+#### 兼容边界
+
+1. 原模块本体不得为了交互 Bot 直接改写 `commands` / `on_message` 语义；UserBot 入口和交互 Bot 入口是两套边界。
+2. 可以把纯业务逻辑抽到共享函数，例如题目生成、答案校验、渲染模板；UserBot 插件和交互 Bot 适配器共同调用这些纯函数。
+3. 模块不处理 Bot Token、Abot 通知格式、转账过滤、发奖账号；这些都属于平台层职责。
+4. 交互 Bot 中奖公告必须引用赢家的答案消息，方便 UserBot 账号按公告自动回复发奖。
+5. 若模块未声明 `x-interaction-entries`，前端不应把它展示为可由交互 Bot 启动的模块。
 
 ---
 

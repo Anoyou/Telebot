@@ -15,6 +15,35 @@ MANIFEST = Manifest(
     version="1.1.0",
     author="builtin",
     description="随机生成 24 点题目，群内竞速答题，第一名获得奖金",
+    category="interactive",
+    interaction_entries=[
+        {
+            "key": "start_paid_game",
+            "title": "付费开局",
+            "description": "转账命中或模块关键词触发后，由交互 Bot 开启一局 24 点。",
+            "session_scope": "chat",
+            "input_schema": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "prize": {
+                        "type": "integer",
+                        "title": "奖金",
+                        "default": 123,
+                        "minimum": 1,
+                    },
+                    "timeout": {
+                        "type": "integer",
+                        "title": "答题限时（秒）",
+                        "default": 500,
+                        "minimum": 30,
+                        "maximum": 3600,
+                    },
+                },
+                "required": ["prize"],
+            },
+        }
+    ],
     permissions=["send_message", "edit_message", "read_chat", "delete_message"],
     config_schema={
         "type": "object",

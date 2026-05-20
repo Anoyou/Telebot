@@ -14,7 +14,34 @@
 
 ## [Unreleased]
 
-暂无。
+### Added
+- 新增独立交互 Bot 配置与运行入口，管理 Bot 保持原有远程管理职责，交互 Bot 专门负责群内高频互动。
+- 新增转账联动规则列表，支持多监听群、多关键词、金额过滤、通知/十以内算数题动作、奖金与通知模板配置。
+- 新增测试用转账结果通知 Bot，可在群内回复 `+数字` 时生成模拟“转账成功”通知，正式群也可只配置官方通知 Bot 用户 ID 作为信任来源。
+- 新增临时算数题中奖后自动派奖链路：交互 Bot 公告赢家并引用赢家答案，userbot 识别公告后回复中奖消息发放奖金。
+- 新增交互规则“启动模块”动作，命中转账规则后由交互 Bot 自己启动模块流程；首个样板接入为 24 点游戏。
+- 新增模块 `category` 与 `interaction_entries` 声明，模块中心按“互动娱乐 / 自动化 / 工具能力”三类汉化分组，交互 Bot 只允许选择声明了交互入口的模块。
+- 新增交互规则触发方式、模块启动关键词、付费门槛、金额匹配方式、开关指令、关闭提示、参与有效期和并发策略配置。
+
+### Changed
+- 账号 Bot 页面拆分为“管理 Bot”和“交互 Bot / 转账联动测试”两块配置，交互 Bot 可单独保存/清空身份配置，转账结果通知 Bot 作为可选测试配置。
+- 交互配置保存会保留规则列表，顶层旧字段自动从规则汇总，兼容旧接口 `/bot/transfer-notice`。
+- 交互 Bot 启停生命周期从管理 Bot runtime 中拆出，前端显示配置启用状态和实际 polling 运行状态。
+- 交互 Bot 模块动作与 userbot 管理/插件命令解耦，userbot 只保留最后根据中奖公告自动回复发奖的职责。
+- 24 点仅补充交互入口声明与交互 Bot 适配，不改动原 UserBot 模块交互逻辑。
+- 插件开发指南补充交互 Bot 兼容规范，第三方模块需显式声明分类和交互入口后才可接入交互 Bot。
+
+### Fixed
+- 修复交互 Bot 实际可响应但前端可能显示为已停止/状态不清的问题。
+- 修复交互配置未加载完成时保存可能用默认规则覆盖现有规则的问题。
+- 修复 userbot 自动发奖的 `+奖金` 回复可能被交互 Bot 误识别为新一轮转账的问题。
+
+### Verification
+- `backend/.venv/bin/python -m pytest backend/app/tests -q`
+- `backend/.venv/bin/python -m py_compile backend/app/api/account_bots.py backend/app/main.py backend/app/schemas/account_bot.py backend/app/services/account_bot_runtime.py backend/app/services/interaction_bot_runtime.py backend/app/services/interaction_bot_service.py backend/app/worker/runtime.py`
+- `pnpm exec tsc --noEmit`（frontend）
+- `pnpm build`（frontend）
+- `git diff --check`
 
 ---
 

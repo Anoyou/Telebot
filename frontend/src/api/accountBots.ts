@@ -2,6 +2,8 @@ import { api } from "@/lib/api";
 import type {
   AccountBotConfig,
   AccountBotConfigUpdate,
+  AccountBotInteractionConfig,
+  AccountBotTestRequest,
   AccountBotTestResponse,
   AccountBotUser,
   AccountBotUserCreate,
@@ -23,17 +25,41 @@ export async function updateAccountBot(
 
 export async function testAccountBot(
   aid: number,
-  text?: string,
+  payload?: AccountBotTestRequest,
 ): Promise<AccountBotTestResponse> {
-  const { data } = await api.post<AccountBotTestResponse>(`/api/accounts/${aid}/bot/test`, {
-    text,
-  });
+  const { data } = await api.post<AccountBotTestResponse>(
+    `/api/accounts/${aid}/bot/test`,
+    payload ?? {},
+  );
   return data;
 }
 
 export async function restartAccountBotRuntime(aid: number): Promise<void> {
   await api.post(`/api/accounts/${aid}/bot/restart-runtime`);
 }
+
+export async function getInteractionBotConfig(
+  aid: number,
+): Promise<AccountBotInteractionConfig> {
+  const { data } = await api.get<AccountBotInteractionConfig>(
+    `/api/accounts/${aid}/interaction-bot`,
+  );
+  return data;
+}
+
+export async function updateInteractionBotConfig(
+  aid: number,
+  payload: AccountBotInteractionConfig,
+): Promise<AccountBotInteractionConfig> {
+  const { data } = await api.put<AccountBotInteractionConfig>(
+    `/api/accounts/${aid}/interaction-bot`,
+    payload,
+  );
+  return data;
+}
+
+export const getTransferNoticeConfig = getInteractionBotConfig;
+export const updateTransferNoticeConfig = updateInteractionBotConfig;
 
 export async function listAccountBotUsers(aid: number): Promise<AccountBotUser[]> {
   const { data } = await api.get<AccountBotUser[]>(`/api/accounts/${aid}/bot/users`);

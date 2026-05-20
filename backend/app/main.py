@@ -25,7 +25,7 @@ from .api import notify_bots as notify_bots_api
 from .api import proxies as proxies_api
 from .api import rate_limit as rate_limit_api
 from .api import sudo as sudo_api
-from .services import account_bot_runtime, notify_service
+from .services import account_bot_runtime, interaction_bot_runtime, notify_service
 from .services.login_service import cleanup_expired_loop
 from .settings import settings
 
@@ -152,10 +152,21 @@ async def lifespan(app: FastAPI):
     except Exception:  # noqa: BLE001
         logging.exception("启动 account bot manager 失败")
 
+    # 2-F: 高频群互动使用独立交互 Bot runtime，避免和管理 Bot 生命周期混在一起。
+    try:
+        interaction_count = await interaction_bot_runtime.start_interaction_bot_manager()
+        logging.info("interaction bot manager started: %d task(s)", interaction_count)
+    except Exception:  # noqa: BLE001
+        logging.exception("启动 interaction bot manager 失败")
+
     try:
         yield
     finally:
         # 3) 退出：取消清理任务 + 关停所有 worker
+        try:
+            await interaction_bot_runtime.stop_interaction_bot_manager()
+        except Exception:  # noqa: BLE001
+            logging.exception("停止 interaction bot manager 失败")
         try:
             await account_bot_runtime.stop_account_bot_manager()
         except Exception:  # noqa: BLE001

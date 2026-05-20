@@ -23,6 +23,7 @@ MANIFEST = Manifest(
     version="0.1.0",
     author="builtin",
     description="实验性：按 chatgpt2api 的核心思路在 Telegram 内完成 ChatGPT 图片生成、编辑与 token 池管理。",
+    category="utility",
     experimental=True,
     permissions=["send_message", "edit_message", "read_chat", "send_file"],
     config_schema={

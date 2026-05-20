@@ -10,17 +10,37 @@ from ..deps import CurrentUser, DBSession
 from ..schemas.account_bot import (
     AccountBotConfigResponse,
     AccountBotConfigUpdate,
+    AccountBotInteractionConfig,
     AccountBotRemotePluginPolicy,
     AccountBotRuntimeResponse,
     AccountBotTestRequest,
     AccountBotTestResponse,
+    AccountBotTransferNoticeConfig,
     AccountBotUserCreate,
     AccountBotUserResponse,
     AccountBotUserUpdate,
 )
-from ..services import account_bot_runtime, account_bot_service, audit
+from ..services import (
+    account_bot_runtime,
+    account_bot_service,
+    audit,
+    interaction_bot_runtime,
+    interaction_bot_service,
+)
 
 router = APIRouter(prefix="/api/accounts", tags=["account-bots"])
+
+
+def _with_interaction_runtime_state(aid: int, data: dict) -> dict:
+    running = interaction_bot_runtime.is_interaction_bot_running(aid)
+    if not data.get("enabled") or not data.get("has_interaction_bot_token"):
+        running = False
+        data = {**data, "interaction_last_error": None}
+    return {
+        **data,
+        "interaction_running": running,
+        "interaction_runtime_status": "running" if running else "stopped",
+    }
 
 
 @router.get("/{aid}/bot", response_model=AccountBotConfigResponse)
@@ -80,38 +100,89 @@ async def test_account_bot(
     db: DBSession,
     user: CurrentUser,
 ) -> AccountBotTestResponse:
-    """向已授权且有 last_chat_id 的通知用户发送测试消息。"""
+    """发送测试消息。
 
-    row = await account_bot_service.get_bot_config(db, aid, create=False)
-    token = account_bot_service.decrypt_bot_token(row)
-    users = await account_bot_service.list_bot_users(db, aid)
-    targets = [
-        u for u in users
-        if u.enabled and u.notify_enabled and u.last_chat_id is not None
-    ]
-    if not targets:
-        raise HTTPException(
-            400,
-            detail={
-                "code": "ACCOUNT_BOT_NO_TARGET",
-                "message": "没有可发送的授权用户。请先让授权用户给这个 Bot 发送 /start。",
-            },
-        )
+    - 默认发给已授权且有 last_chat_id 的通知用户
+    - 传 ``chat_id`` 时改为直发指定会话
+    - 传 ``bot_token_override`` 时改用一次性临时 token（不落库）
+    """
+
+    token: str
+    account_token: str | None = None
+    if payload.bot_token_override:
+        token = payload.bot_token_override
+        try:
+            row = await account_bot_service.get_bot_config(db, aid, create=False)
+            account_token = account_bot_service.decrypt_bot_token(row)
+        except Exception:  # noqa: BLE001
+            account_token = None
+    else:
+        row = await account_bot_service.get_bot_config(db, aid, create=False)
+        token = account_bot_service.decrypt_bot_token(row)
+        account_token = token
+
     text = payload.text or "✅ TelePilot 账号 Bot 测试消息发送成功。"
     sent = 0
     last_error = None
-    for target in targets:
+
+    if payload.chat_id is not None:
         try:
-            await account_bot_service.send_message(token, int(target.last_chat_id), text)
-            sent += 1
+            result = await account_bot_service.send_message(token, int(payload.chat_id), text)
+            sent = 1
+            from_user = result.get("from") if isinstance(result, dict) else None
+            sender_id = (
+                int(from_user["id"])
+                if isinstance(from_user, dict) and from_user.get("id") is not None
+                else None
+            )
+            message_id = (
+                int(result["message_id"])
+                if isinstance(result, dict) and result.get("message_id") is not None
+                else None
+            )
+            if payload.bot_token_override and account_token and sender_id is not None:
+                await interaction_bot_runtime.handle_transfer_notice_probe(
+                    db,
+                    account_id=aid,
+                    token=account_token,
+                    chat_id=int(payload.chat_id),
+                    sender_id=sender_id,
+                    text=text,
+                    message_id=message_id,
+                )
         except Exception as exc:  # noqa: BLE001
             last_error = account_bot_service.sanitize_bot_error(exc, token=token)
+    else:
+        users = await account_bot_service.list_bot_users(db, aid)
+        targets = [
+            u for u in users
+            if u.enabled and u.notify_enabled and u.last_chat_id is not None
+        ]
+        if not targets:
+            raise HTTPException(
+                400,
+                detail={
+                    "code": "ACCOUNT_BOT_NO_TARGET",
+                    "message": "没有可发送的授权用户。请先让授权用户给这个 Bot 发送 /start。",
+                },
+            )
+        for target in targets:
+            try:
+                await account_bot_service.send_message(token, int(target.last_chat_id), text)
+                sent += 1
+            except Exception as exc:  # noqa: BLE001
+                last_error = account_bot_service.sanitize_bot_error(exc, token=token)
+
     await audit.write(
         db,
         user.id,
         "account_bot.test",
         target=f"account:{aid}/bot",
-        detail={"sent": sent},
+        detail={
+            "sent": sent,
+            "chat_id": payload.chat_id,
+            "token_override": bool(payload.bot_token_override),
+        },
     )
     await db.commit()
     if sent <= 0:
@@ -122,7 +193,83 @@ async def test_account_bot(
                 "message": last_error or "测试发送失败",
             },
         )
-    return AccountBotTestResponse(ok=True, sent=sent, message="测试消息已发送")
+    return AccountBotTestResponse(
+        ok=True,
+        sent=sent,
+        message="测试消息已发送到指定会话" if payload.chat_id is not None else "测试消息已发送",
+    )
+
+
+@router.get("/{aid}/interaction-bot", response_model=AccountBotInteractionConfig)
+@router.get("/{aid}/bot/interaction", response_model=AccountBotInteractionConfig)
+async def get_account_bot_interaction(
+    aid: int,
+    db: DBSession,
+    _user: CurrentUser,
+) -> AccountBotInteractionConfig:
+    """读取交互 Bot / 转账联动测试配置。"""
+
+    data = await interaction_bot_service.get_interaction_bot_config(db, aid)
+    data = _with_interaction_runtime_state(aid, data)
+    return AccountBotInteractionConfig(**data)
+
+
+@router.put("/{aid}/interaction-bot", response_model=AccountBotInteractionConfig)
+@router.put("/{aid}/bot/interaction", response_model=AccountBotInteractionConfig)
+async def update_account_bot_interaction(
+    aid: int,
+    payload: AccountBotInteractionConfig,
+    db: DBSession,
+    user: CurrentUser,
+) -> AccountBotInteractionConfig:
+    """保存交互 Bot / 转账联动测试配置。"""
+
+    data = await interaction_bot_service.update_interaction_bot_config(
+        db,
+        aid,
+        payload.model_dump(),
+    )
+    await audit.write(
+        db,
+        user.id,
+        "account_bot.transfer_notice_update",
+        target=f"account:{aid}/bot/transfer_notice",
+        detail={
+            "enabled": data.get("enabled"),
+            "chat_id": data.get("chat_id"),
+            "interaction_bot_id": data.get("interaction_bot_id"),
+            "interaction_bot_username": data.get("interaction_bot_username"),
+            "trusted_bot_id": data.get("trusted_bot_id"),
+            "amount": data.get("amount"),
+        },
+    )
+    await db.commit()
+    await interaction_bot_runtime.restart_interaction_bot(aid)
+    data = _with_interaction_runtime_state(aid, data)
+    return AccountBotInteractionConfig(**data)
+
+
+@router.get("/{aid}/bot/transfer-notice", response_model=AccountBotTransferNoticeConfig)
+async def get_account_bot_transfer_notice(
+    aid: int,
+    db: DBSession,
+    user: CurrentUser,
+) -> AccountBotTransferNoticeConfig:
+    """兼容旧前端入口；新代码请使用 ``/interaction-bot``。"""
+
+    return await get_account_bot_interaction(aid, db, user)
+
+
+@router.put("/{aid}/bot/transfer-notice", response_model=AccountBotTransferNoticeConfig)
+async def update_account_bot_transfer_notice(
+    aid: int,
+    payload: AccountBotTransferNoticeConfig,
+    db: DBSession,
+    user: CurrentUser,
+) -> AccountBotTransferNoticeConfig:
+    """兼容旧前端入口；新代码请使用 ``/interaction-bot``。"""
+
+    return await update_account_bot_interaction(aid, payload, db, user)
 
 
 @router.post("/{aid}/bot/restart-runtime", response_model=AccountBotRuntimeResponse)

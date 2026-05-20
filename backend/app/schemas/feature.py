@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 if TYPE_CHECKING:
     from ..db.models.feature import Feature
@@ -16,6 +16,8 @@ class FeatureInfo(BaseModel):
     is_builtin: bool
     version: str | None = None
     config_schema: dict[str, Any] | None = None
+    category: str = "utility"
+    interaction_entries: list[dict[str, Any]] = Field(default_factory=list)
     experimental: bool = False
 
     model_config = ConfigDict(from_attributes=True)
@@ -23,12 +25,23 @@ class FeatureInfo(BaseModel):
     @classmethod
     def from_feature(cls, f: Feature) -> FeatureInfo:
         manifest = getattr(f, "manifest", None) or {}
+        config_schema = manifest.get("config_schema")
+        schema_meta = config_schema if isinstance(config_schema, dict) else {}
+        category = str(manifest.get("category") or schema_meta.get("x-category") or "utility")
+        if category not in {"interactive", "automation", "utility"}:
+            category = "utility"
+        raw_entries = manifest.get("interaction_entries")
+        if raw_entries is None:
+            raw_entries = schema_meta.get("x-interaction-entries")
+        entries = raw_entries if isinstance(raw_entries, list) else []
         return cls(
             key=f.key,
             display_name=f.display_name,
             is_builtin=f.is_builtin,
             version=f.version,
-            config_schema=manifest.get("config_schema"),
+            config_schema=config_schema,
+            category=category,
+            interaction_entries=[item for item in entries if isinstance(item, dict)],
             experimental=bool(
                 manifest.get("x-experimental") or manifest.get("experimental")
             ),

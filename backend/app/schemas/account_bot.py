@@ -10,6 +10,9 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from ..db.models.account_bot import ACCOUNT_BOT_ROLES
 
 AccountBotRole = Literal["viewer", "operator", "admin"]
+InteractionTriggerMode = Literal["payment", "keyword", "both"]
+InteractionAmountMatchMode = Literal["eq", "gte"]
+InteractionConcurrency = Literal["chat", "user", "none"]
 
 
 class AccountBotRemotePluginPolicy(BaseModel):
@@ -68,12 +71,208 @@ class AccountBotTestRequest(BaseModel):
     """测试发送请求。"""
 
     text: str | None = Field(default=None, max_length=1000)
+    chat_id: int | None = None
+    bot_token_override: str | None = Field(default=None, min_length=10, max_length=256)
+
+    @field_validator("bot_token_override")
+    @classmethod
+    def _trim_override_token(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        token = v.strip()
+        if not token:
+            return None
+        if "\n" in token or "\r" in token:
+            raise ValueError("Bot Token 不能包含换行")
+        return token
 
 
 class AccountBotTestResponse(BaseModel):
     ok: bool
     sent: int = 0
     message: str | None = None
+
+
+class AccountBotInteractionRule(BaseModel):
+    """交互 Bot 规则；用于后续把不同模块拆成互不干扰的多条规则。"""
+
+    id: str = Field(default="default", max_length=64)
+    name: str = Field(default="默认规则", max_length=64)
+    enabled: bool = True
+    chat_ids: list[int] = Field(default_factory=list, max_length=20)
+    trigger_mode: InteractionTriggerMode = "payment"
+    trigger_texts: list[str] = Field(default_factory=lambda: ["转账成功"], max_length=20)
+    module_start_keywords: list[str] = Field(default_factory=list, max_length=20)
+    receiver_text: str | None = Field(default=None, max_length=128)
+    amount: int | None = Field(default=None, ge=1)
+    amount_match_mode: InteractionAmountMatchMode = "eq"
+    action: Literal["notice", "math10", "module"] = "notice"
+    math_prize: int = Field(default=123, ge=1)
+    module_key: str | None = Field(default=None, max_length=64)
+    module_action: str | None = Field(default=None, max_length=64)
+    module_prize: int | None = Field(default=None, ge=1)
+    module_start_text: str | None = Field(default=None, max_length=500)
+    open_commands: list[str] = Field(default_factory=list, max_length=20)
+    close_commands: list[str] = Field(default_factory=list, max_length=20)
+    status_commands: list[str] = Field(default_factory=list, max_length=20)
+    disabled_message: str | None = Field(default="规则已关闭，暂时不能开启该模块。", max_length=500)
+    valid_seconds: int = Field(default=600, ge=30, le=86400)
+    concurrency: InteractionConcurrency = "chat"
+    response_template: str = Field(
+        default="检测到 {payer_name} 向 {receiver_name} 转账 {amount}，已进入游戏流程。",
+        max_length=1000,
+    )
+
+    @field_validator("id", "name", "response_template")
+    @classmethod
+    def _trim_required_text(cls, v: str) -> str:
+        value = str(v or "").strip()
+        if not value:
+            raise ValueError("不能为空")
+        return value
+
+    @field_validator("receiver_text", "module_key", "module_action", "module_start_text", "disabled_message")
+    @classmethod
+    def _trim_optional_text(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        value = v.strip()
+        if value and "\n" in value:
+            raise ValueError("不能包含换行")
+        return value or None
+
+    @field_validator("chat_ids")
+    @classmethod
+    def _normalize_chat_ids(cls, v: list[int]) -> list[int]:
+        return _normalize_chat_id_list(v)
+
+    @field_validator("trigger_texts")
+    @classmethod
+    def _normalize_trigger_texts(cls, v: list[str]) -> list[str]:
+        return _normalize_string_list(v, default=["转账成功"])
+
+    @field_validator("module_start_keywords", "open_commands", "close_commands", "status_commands")
+    @classmethod
+    def _normalize_optional_string_list(cls, v: list[str]) -> list[str]:
+        return _normalize_string_list(v)
+
+
+def _normalize_string_list(v: list[str], *, default: list[str] | None = None) -> list[str]:
+    out: list[str] = []
+    seen: set[str] = set()
+    for raw in v or []:
+        value = str(raw or "").strip()
+        if not value or "\n" in value or value in seen:
+            continue
+        seen.add(value)
+        out.append(value)
+    return out or list(default or [])
+
+
+def _normalize_chat_id_list(v: list[int]) -> list[int]:
+    out: list[int] = []
+    seen: set[int] = set()
+    for raw in v or []:
+        value = int(raw)
+        if value in seen:
+            continue
+        seen.add(value)
+        out.append(value)
+    return out
+
+
+class AccountBotInteractionConfig(BaseModel):
+    """交互 Bot / 转账联动测试配置。
+
+    用于测试阶段：
+    - 交互 Bot 监听群内回复 ``+数字``，用 Abot token 发出模拟转账通知
+    - 转账通知命中后，交互 Bot 可继续发出简单算数题
+    """
+
+    enabled: bool = False
+    chat_id: int | None = None
+    chat_ids: list[int] = Field(default_factory=list, max_length=20)
+    interaction_bot_token: str | None = Field(default=None, min_length=10, max_length=256)
+    clear_interaction_bot_token: bool = False
+    has_interaction_bot_token: bool = False
+    interaction_bot_username: str | None = None
+    interaction_bot_id: int | None = None
+    interaction_running: bool = False
+    interaction_runtime_status: Literal["running", "stopped"] = "stopped"
+    interaction_last_update_id: int | None = None
+    interaction_last_error: str | None = None
+    trusted_bot_id: int | None = None
+    transfer_bot_token: str | None = Field(default=None, min_length=10, max_length=256)
+    clear_transfer_bot_token: bool = False
+    has_transfer_bot_token: bool = False
+    trigger_mode: InteractionTriggerMode = "payment"
+    trigger_text: str = Field(default="转账成功", max_length=64)
+    trigger_texts: list[str] = Field(default_factory=lambda: ["转账成功"], max_length=20)
+    module_start_keywords: list[str] = Field(default_factory=list, max_length=20)
+    receiver_text: str | None = Field(default=None, max_length=128)
+    amount: int | None = Field(default=None, ge=1)
+    amount_match_mode: InteractionAmountMatchMode = "eq"
+    action: Literal["notice", "math10", "module"] = "notice"
+    math_prize: int = Field(default=123, ge=1)
+    module_key: str | None = Field(default=None, max_length=64)
+    module_action: str | None = Field(default=None, max_length=64)
+    module_prize: int | None = Field(default=None, ge=1)
+    module_start_text: str | None = Field(default=None, max_length=500)
+    open_commands: list[str] = Field(default_factory=list, max_length=20)
+    close_commands: list[str] = Field(default_factory=list, max_length=20)
+    status_commands: list[str] = Field(default_factory=list, max_length=20)
+    disabled_message: str | None = Field(default="规则已关闭，暂时不能开启该模块。", max_length=500)
+    valid_seconds: int = Field(default=600, ge=30, le=86400)
+    concurrency: InteractionConcurrency = "chat"
+    response_template: str = Field(
+        default="检测到 {payer_name} 向 {receiver_name} 转账 {amount}，已进入游戏流程。",
+        max_length=1000,
+    )
+    rules: list[AccountBotInteractionRule] = Field(default_factory=list, max_length=20)
+
+    @field_validator(
+        "receiver_text",
+        "interaction_bot_token",
+        "transfer_bot_token",
+        "module_key",
+        "module_action",
+        "module_start_text",
+        "disabled_message",
+    )
+    @classmethod
+    def _trim_optional_text(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        value = v.strip()
+        if value and "\n" in value:
+            raise ValueError("不能包含换行")
+        return value or None
+
+    @field_validator("trigger_text", "response_template")
+    @classmethod
+    def _trim_required_text(cls, v: str) -> str:
+        value = str(v or "").strip()
+        if not value:
+            raise ValueError("不能为空")
+        return value
+
+    @field_validator("chat_ids")
+    @classmethod
+    def _normalize_chat_ids(cls, v: list[int]) -> list[int]:
+        return _normalize_chat_id_list(v)
+
+    @field_validator("trigger_texts")
+    @classmethod
+    def _normalize_trigger_texts(cls, v: list[str]) -> list[str]:
+        return _normalize_string_list(v, default=["转账成功"])
+
+    @field_validator("module_start_keywords", "open_commands", "close_commands", "status_commands")
+    @classmethod
+    def _normalize_optional_string_list(cls, v: list[str]) -> list[str]:
+        return _normalize_string_list(v)
+
+
+AccountBotTransferNoticeConfig = AccountBotInteractionConfig
 
 
 class AccountBotRuntimeResponse(BaseModel):

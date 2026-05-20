@@ -4,11 +4,9 @@ import { useQuery } from "@tanstack/react-query";
 import {
   ArrowRight,
   BookOpen,
-  FlaskConical,
   History,
   Package2,
   Package,
-  SatelliteDish,
   Settings2,
   Sparkles,
 } from "lucide-react";
@@ -28,11 +26,27 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Select } from "@/components/ui/select";
-import { isPlatformFeature } from "@/lib/plugin-modes";
 
 import { featureConfigPath } from "./_shared/featureConfig";
 
-type Zone = "platform" | "builtin" | "remote" | "experimental";
+type ModuleCategory = "interactive" | "automation" | "utility";
+const CATEGORY_META: Record<ModuleCategory, { title: string; hint: string; icon: React.ReactNode }> = {
+  interactive: {
+    title: "互动娱乐",
+    hint: "声明了交互入口的游戏、娱乐和群内互动模块。",
+    icon: <Sparkles className="h-4 w-4" />,
+  },
+  automation: {
+    title: "自动化",
+    hint: "自动回复、转发、定时等账号自动化能力。",
+    icon: <Settings2 className="h-4 w-4" />,
+  },
+  utility: {
+    title: "工具能力",
+    hint: "AI、媒体生成和其他辅助工具模块。",
+    icon: <Package2 className="h-4 w-4" />,
+  },
+};
 const DANGEROUS_CMD_BANNER_KEY = "telebot.plugins_home.banner.v0_13_dangerous_cmds_closed";
 
 export function PluginsHome() {
@@ -81,25 +95,18 @@ export function PluginsHome() {
   const cmdPrefix = settingsQ.data?.command_prefix || ",";
 
   const grouped = useMemo(() => {
-    const zones: Record<Zone, typeof features> = {
-      platform: [],
-      builtin: [],
-      remote: [],
-      experimental: [],
+    const zones: Record<ModuleCategory, typeof features> = {
+      interactive: [],
+      automation: [],
+      utility: [],
     };
 
     for (const feature of features) {
       if (feature.key === "forward") continue;
-      const forceExperimental = feature.key === "codex_image";
-      if (forceExperimental || feature.experimental) {
-        zones.experimental.push(feature);
-      } else if (isPlatformFeature(feature)) {
-        zones.platform.push(feature);
-      } else if (feature.is_builtin) {
-        zones.builtin.push(feature);
-      } else {
-        zones.remote.push(feature);
-      }
+      const category = feature.category === "interactive" || feature.category === "automation"
+        ? feature.category
+        : "utility";
+      zones[category].push(feature);
     }
 
     return zones;
@@ -308,38 +315,17 @@ export function PluginsHome() {
             </div>
           ) : null}
           <div className="grid gap-4 lg:grid-cols-2">
-            <FeatureZone
-              title="平台能力"
-              hint="系统级基础模块，入口集中在这里；需要时可进入配置或查看运行状态。"
-              icon={<Settings2 className="h-4 w-4" />}
-              features={grouped.platform}
-              selectedAccountId={selectedAccount?.id}
-              selectedFeatures={selectedAccount?.features ?? {}}
-            />
-            <FeatureZone
-              title="内置模块"
-              hint="常用自动化模块，按账号开启后再配置规则。"
-              icon={<Package2 className="h-4 w-4" />}
-              features={grouped.builtin}
-              selectedAccountId={selectedAccount?.id}
-              selectedFeatures={selectedAccount?.features ?? {}}
-            />
-            <FeatureZone
-              title="远程模块"
-              hint="从外部仓库安装的扩展模块能力。"
-              icon={<SatelliteDish className="h-4 w-4" />}
-              features={grouped.remote}
-              selectedAccountId={selectedAccount?.id}
-              selectedFeatures={selectedAccount?.features ?? {}}
-            />
-            <FeatureZone
-              title="实验性"
-              hint="还在试验中的能力，适合先小范围账号测试。"
-              icon={<FlaskConical className="h-4 w-4" />}
-              features={grouped.experimental}
-              selectedAccountId={selectedAccount?.id}
-              selectedFeatures={selectedAccount?.features ?? {}}
-            />
+            {(Object.keys(CATEGORY_META) as ModuleCategory[]).map((category) => (
+              <FeatureZone
+                key={category}
+                title={CATEGORY_META[category].title}
+                hint={CATEGORY_META[category].hint}
+                icon={CATEGORY_META[category].icon}
+                features={grouped[category]}
+                selectedAccountId={selectedAccount?.id}
+                selectedFeatures={selectedAccount?.features ?? {}}
+              />
+            ))}
           </div>
         </CardContent>
       </Card>
@@ -479,7 +465,11 @@ function FeatureZone({
               return (
                 <div key={f.key} className="flex items-center justify-between rounded-md border p-2">
                   <div>
-                    <div className="text-sm font-medium">{f.display_name}</div>
+                    <div className="flex flex-wrap items-center gap-1.5 text-sm font-medium">
+                      {f.display_name}
+                      {f.experimental ? <Badge variant="outline">实验性</Badge> : null}
+                      {f.interaction_entries?.length ? <Badge variant="secondary">交互入口</Badge> : null}
+                    </div>
                     <div className="font-mono text-xs text-muted-foreground">{f.key}</div>
                   </div>
                   <div className="flex items-center gap-2">
