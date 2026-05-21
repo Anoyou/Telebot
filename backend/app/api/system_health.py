@@ -16,6 +16,7 @@ import asyncio
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import time
@@ -1084,6 +1085,36 @@ GIT_WORKTREE_UNAVAILABLE_MESSAGE = (
     "如果你使用 Docker / 一键部署，请在服务器上进入部署目录，重新拉取镜像或运行部署脚本更新。"
 )
 
+RUNTIME_LOCAL_SOURCE = "local_source"
+RUNTIME_PROD_CONTAINER_WITH_UPDATER = "prod_container_with_updater"
+RUNTIME_PROD_CONTAINER_MANUAL = "prod_container_manual"
+RUNTIME_UNSUPPORTED = "unsupported"
+
+_DOC_SUFFIXES = (".md", ".rst", ".txt")
+_FULL_UPDATE_BASENAMES = {
+    ".dockerignore",
+    "docker-compose.yml",
+    "docker-compose.dev.yml",
+    "docker-compose.prod.yml",
+    "Dockerfile",
+    "Makefile",
+    ".npmrc",
+    "package.json",
+    "pyproject.toml",
+    "requirements.txt",
+    "poetry.lock",
+    "Pipfile.lock",
+    "package-lock.json",
+    "yarn.lock",
+    "pnpm-lock.yaml",
+}
+_FULL_UPDATE_PREFIXES = (
+    "deploy/",
+    "scripts/",
+    "scripts/deploy",
+    "scripts/prod",
+)
+
 
 def _run_git(*args: str, timeout: int = 30) -> tuple[str, str, int]:
     """同步执行 git 命令，返回 (stdout, stderr, returncode)。"""
@@ -1105,12 +1136,181 @@ def _run_git(*args: str, timeout: int = 30) -> tuple[str, str, int]:
         return "", str(e), 1
 
 
+def _is_container_runtime() -> bool:
+    """检测当前是否运行在容器内。"""
+    if Path("/.dockerenv").exists():
+        return True
+    try:
+        cgroup = Path("/proc/1/cgroup")
+        if cgroup.exists():
+            text = cgroup.read_text(encoding="utf-8", errors="ignore").lower()
+            return any(marker in text for marker in ("docker", "containerd", "kubepods", "podman"))
+    except Exception:
+        pass
+    return False
+
+
+def _resolve_host_updater() -> str | None:
+    """返回可执行的宿主机更新器路径。"""
+    candidates: list[str] = []
+    env_path = (os.getenv("TELEPILOT_HOST_UPDATER") or "").strip()
+    if env_path:
+        candidates.append(env_path)
+    candidates.append("/app/host-updater/prod-update")
+    for path_str in candidates:
+        path = Path(path_str)
+        if path.exists() and os.access(path, os.X_OK):
+            return str(path)
+    return None
+
+
+def _detect_runtime_mode() -> tuple[str, str | None, Path | None]:
+    root = _git_root()
+    in_container = _is_container_runtime()
+    updater = _resolve_host_updater()
+
+    if not in_container and root and (root / "Makefile").exists():
+        return RUNTIME_LOCAL_SOURCE, updater, root
+    if in_container and updater:
+        return RUNTIME_PROD_CONTAINER_WITH_UPDATER, updater, root
+    if in_container:
+        return RUNTIME_PROD_CONTAINER_MANUAL, updater, root
+    return RUNTIME_UNSUPPORTED, updater, root
+
+
+def _normalize_changed_file(path: str) -> str:
+    return path.strip().lstrip("./")
+
+
+def _is_docs_file(path: str) -> bool:
+    normalized = _normalize_changed_file(path)
+    lowered = normalized.lower()
+    name = Path(normalized).name.lower()
+    if normalized in {"CHANGELOG.md", "docs/PLUGIN-DEV-GUIDE.md"}:
+        return False
+    return lowered.startswith("docs/") or lowered.startswith("readme") or name.endswith(_DOC_SUFFIXES)
+
+
+def _is_full_update_file(path: str) -> bool:
+    normalized = _normalize_changed_file(path)
+    name = Path(normalized).name
+    if name in _FULL_UPDATE_BASENAMES:
+        return True
+    return any(normalized.startswith(prefix) for prefix in _FULL_UPDATE_PREFIXES)
+
+
+def _classify_changed_files(changed_files: list[str]) -> tuple[list[str], bool, bool]:
+    files = [_normalize_changed_file(path) for path in changed_files if path.strip()]
+    if not files:
+        return ["none"], False, False
+
+    requires_full_update = any(_is_full_update_file(path) for path in files)
+    requires_backup = any(path.startswith("backend/alembic/versions/") for path in files)
+
+    if all(_is_docs_file(path) for path in files):
+        components = ["docs_only"]
+    else:
+        components: list[str] = []
+        if any(path.startswith("frontend/") or path in {"CHANGELOG.md", "docs/PLUGIN-DEV-GUIDE.md"} for path in files):
+            components.append("frontend")
+        if any(path.startswith("backend/") or path.startswith("plugins/") for path in files):
+            components.append("backend")
+        if not components:
+            components.append("docs_only")
+
+    if requires_full_update:
+        components = ["full_update", *[x for x in components if x != "full_update"]]
+    return components, requires_full_update, requires_backup
+
+
+def _manual_command_for_runtime(runtime_mode: str, updater: str | None) -> str | None:
+    if runtime_mode == RUNTIME_PROD_CONTAINER_MANUAL:
+        return "cd /opt/telepilot && make prod-update"
+    return None
+
+
+def _action_required_for_plan(
+    runtime_mode: str,
+    has_update: bool,
+    components: list[str],
+    requires_full_update: bool,
+) -> str:
+    if not has_update:
+        return "none"
+    if runtime_mode == RUNTIME_PROD_CONTAINER_MANUAL:
+        return "manual"
+    if runtime_mode == RUNTIME_UNSUPPORTED:
+        return "unsupported"
+    if requires_full_update or "full_update" in components:
+        return "full_update"
+    if components == ["docs_only"] or "docs_only" in components:
+        return "docs_only"
+    has_backend = "backend" in components
+    has_frontend = "frontend" in components
+    if has_backend and has_frontend:
+        return "mixed"
+    if has_backend:
+        return "backend"
+    if has_frontend:
+        return "frontend"
+    return "full_update"
+
+
+def _plan_text(
+    runtime_mode: str,
+    has_update: bool,
+    components: list[str],
+    requires_full_update: bool,
+    requires_backup: bool,
+    can_apply: bool,
+) -> tuple[str, str]:
+    if not has_update:
+        return "已是最新版本", "当前代码与 origin/main 一致，无需更新。"
+
+    label = "检测到可更新变更"
+    detail_parts: list[str] = []
+    if components and components != ["none"]:
+        detail_parts.append(f"变更分类：{', '.join(components)}")
+    if requires_backup:
+        detail_parts.append("包含数据库迁移，建议先备份数据库。")
+    if requires_full_update:
+        detail_parts.append("涉及部署/依赖关键文件，建议完整更新流程。")
+
+    if runtime_mode == RUNTIME_LOCAL_SOURCE:
+        if can_apply:
+            detail_parts.append("可直接在当前节点执行应用更新。")
+            label = "可直接应用更新"
+        else:
+            detail_parts.append("当前变更建议走完整更新流程。")
+            label = "建议完整更新"
+    elif runtime_mode == RUNTIME_PROD_CONTAINER_WITH_UPDATER:
+        detail_parts.append("当前运行于容器，需调用宿主机更新器。")
+        label = "需调用宿主机更新器"
+    elif runtime_mode == RUNTIME_PROD_CONTAINER_MANUAL:
+        detail_parts.append("当前运行于容器且无更新器，需人工在宿主机执行更新。")
+        label = "需人工更新"
+    else:
+        detail_parts.append("当前运行环境不支持自动更新。")
+        label = "环境不支持自动更新"
+
+    return label, " ".join(detail_parts)
+
+
 class CheckUpdateResponse(BaseModel):
     has_update: bool = False
     current_commit: str | None = None
     remote_commit: str | None = None
     ahead: int = 0
+    runtime_mode: str = RUNTIME_UNSUPPORTED
+    action_required: str = "none"
+    plan_label: str = ""
+    plan_detail: str = ""
     changed_files: list[str] = Field(default_factory=list)
+    components: list[str] = Field(default_factory=lambda: ["none"])
+    requires_full_update: bool = False
+    requires_backup: bool = False
+    can_apply: bool = False
+    manual_command: str | None = None
     error: str | None = None
 
 
@@ -1118,6 +1318,16 @@ class PullUpdateResponse(BaseModel):
     success: bool = False
     new_commit: str | None = None
     summary: str | None = None
+    runtime_mode: str = RUNTIME_UNSUPPORTED
+    action_required: str = "none"
+    plan_label: str = ""
+    plan_detail: str = ""
+    changed_files: list[str] = Field(default_factory=list)
+    components: list[str] = Field(default_factory=lambda: ["none"])
+    requires_full_update: bool = False
+    requires_backup: bool = False
+    can_apply: bool = False
+    manual_command: str | None = None
     error: str | None = None
 
 
@@ -1129,116 +1339,311 @@ class RestartResponse(BaseModel):
 @router.post("/check-update", response_model=CheckUpdateResponse)
 async def check_update(_user: CurrentUser) -> CheckUpdateResponse:
     """仅 git fetch + 对比本地/远程 commit，不拉取代码。"""
+    runtime_mode, updater, root = _detect_runtime_mode()
+    can_apply = runtime_mode in {RUNTIME_LOCAL_SOURCE, RUNTIME_PROD_CONTAINER_WITH_UPDATER}
+    manual_command = _manual_command_for_runtime(runtime_mode, updater)
+
     try:
-        if _git_root() is None:
-            return CheckUpdateResponse(error=GIT_WORKTREE_UNAVAILABLE_MESSAGE)
+        if runtime_mode == RUNTIME_LOCAL_SOURCE and root is None:
+            return CheckUpdateResponse(
+                runtime_mode=runtime_mode,
+                can_apply=can_apply,
+                manual_command=manual_command,
+                plan_label="环境检测失败",
+                plan_detail=GIT_WORKTREE_UNAVAILABLE_MESSAGE,
+                error=GIT_WORKTREE_UNAVAILABLE_MESSAGE,
+            )
 
-        fetch_out, fetch_err, fetch_rc = await asyncio.to_thread(
-            _run_git, "fetch", "origin", "main:refs/remotes/origin/main", timeout=30
+        if root:
+            fetch_out, fetch_err, fetch_rc = await asyncio.to_thread(
+                _run_git, "fetch", "origin", "main:refs/remotes/origin/main", timeout=30
+            )
+            if fetch_rc != 0:
+                return CheckUpdateResponse(
+                    runtime_mode=runtime_mode,
+                    can_apply=can_apply,
+                    manual_command=manual_command,
+                    plan_label="更新检查失败",
+                    plan_detail="执行 git fetch 失败，请先排查仓库网络与权限。",
+                    error=f"git fetch 失败: {fetch_err or fetch_out}",
+                )
+
+            head_out, _, head_rc = await asyncio.to_thread(
+                _run_git, "rev-parse", "HEAD", timeout=10
+            )
+            if head_rc != 0:
+                return CheckUpdateResponse(
+                    runtime_mode=runtime_mode,
+                    can_apply=can_apply,
+                    manual_command=manual_command,
+                    plan_label="更新检查失败",
+                    plan_detail="无法读取当前代码版本。",
+                    error="无法获取当前 commit",
+                )
+
+            remote_out, _, remote_rc = await asyncio.to_thread(
+                _run_git, "rev-parse", "origin/main", timeout=10
+            )
+            if remote_rc != 0:
+                return CheckUpdateResponse(
+                    runtime_mode=runtime_mode,
+                    can_apply=can_apply,
+                    manual_command=manual_command,
+                    plan_label="更新检查失败",
+                    plan_detail="无法读取远程版本（仅检查 origin/main）。",
+                    error="无法获取远程 commit（仅检查 origin/main）",
+                )
+
+            current = head_out[:12]
+            remote = remote_out[:12]
+            has_update = head_out != remote_out
+
+            # 计算本地落后远程多少个 commit；前端展示的是待拉取数量。
+            behind_out, _, behind_rc = await asyncio.to_thread(
+                _run_git, "rev-list", "--count", f"{head_out}..{remote_out}", timeout=10
+            )
+            behind = int(behind_out) if not behind_rc else 0
+            changed_out, _, changed_rc = await asyncio.to_thread(
+                _run_git, "diff", "--name-only", "HEAD..origin/main", timeout=10
+            )
+            changed_files = (
+                changed_out.splitlines()[:80] if changed_rc == 0 and changed_out else []
+            )
+            components, requires_full_update, requires_backup = _classify_changed_files(
+                changed_files
+            )
+            has_update = has_update and behind > 0
+            if has_update and requires_full_update and runtime_mode == RUNTIME_LOCAL_SOURCE:
+                can_apply = False
+                manual_command = (
+                    f"cd {shlex.quote(str(root))} && "
+                    "git pull --ff-only origin main && make install && make restart"
+                )
+            action_required = _action_required_for_plan(
+                runtime_mode,
+                has_update,
+                components,
+                requires_full_update,
+            )
+            plan_label, plan_detail = _plan_text(
+                runtime_mode=runtime_mode,
+                has_update=has_update,
+                components=components,
+                requires_full_update=requires_full_update,
+                requires_backup=requires_backup,
+                can_apply=can_apply,
+            )
+            return CheckUpdateResponse(
+                has_update=has_update,
+                current_commit=current,
+                remote_commit=remote,
+                ahead=behind,
+                changed_files=changed_files,
+                runtime_mode=runtime_mode,
+                action_required=action_required,
+                plan_label=plan_label,
+                plan_detail=plan_detail,
+                components=components,
+                requires_full_update=requires_full_update,
+                requires_backup=requires_backup,
+                can_apply=can_apply,
+                manual_command=manual_command,
+            )
+
+        # 非 Git 工作树环境（常见于容器镜像运行态）：返回运行计划，不报错。
+        components = ["full_update"]
+        requires_full_update = runtime_mode in {
+            RUNTIME_PROD_CONTAINER_MANUAL,
+            RUNTIME_PROD_CONTAINER_WITH_UPDATER,
+        }
+        has_update = runtime_mode in {
+            RUNTIME_PROD_CONTAINER_MANUAL,
+            RUNTIME_PROD_CONTAINER_WITH_UPDATER,
+        }
+        action_required = _action_required_for_plan(
+            runtime_mode,
+            has_update,
+            components,
+            requires_full_update,
         )
-        if fetch_rc != 0:
-            return CheckUpdateResponse(error=f"git fetch 失败: {fetch_err or fetch_out}")
-
-        head_out, _, head_rc = await asyncio.to_thread(
-            _run_git, "rev-parse", "HEAD", timeout=10
+        plan_label, plan_detail = _plan_text(
+            runtime_mode=runtime_mode,
+            has_update=has_update,
+            components=components,
+            requires_full_update=requires_full_update,
+            requires_backup=False,
+            can_apply=can_apply,
         )
-        if head_rc != 0:
-            return CheckUpdateResponse(error="无法获取当前 commit")
-
-        remote_out, _, remote_rc = await asyncio.to_thread(
-            _run_git, "rev-parse", "origin/main", timeout=10
-        )
-        if remote_rc != 0:
-            return CheckUpdateResponse(error="无法获取远程 commit（仅检查 origin/main）")
-
-        current = head_out[:12]
-        remote = remote_out[:12]
-        has_update = head_out != remote_out
-
-        # 计算本地落后远程多少个 commit；前端展示的是待拉取数量。
-        behind_out, _, behind_rc = await asyncio.to_thread(
-            _run_git, "rev-list", "--count", f"{head_out}..{remote_out}", timeout=10
-        )
-        behind = int(behind_out) if not behind_rc else 0
-        changed_out, _, changed_rc = await asyncio.to_thread(
-            _run_git, "diff", "--name-only", "HEAD..origin/main", timeout=10
-        )
-        changed_files = changed_out.splitlines()[:80] if changed_rc == 0 and changed_out else []
-
         return CheckUpdateResponse(
-            has_update=has_update and behind > 0,
-            current_commit=current,
-            remote_commit=remote,
-            ahead=behind,
-            changed_files=changed_files,
+            has_update=has_update,
+            runtime_mode=runtime_mode,
+            action_required=action_required,
+            plan_label=plan_label,
+            plan_detail=plan_detail,
+            components=components,
+            requires_full_update=requires_full_update,
+            requires_backup=False,
+            can_apply=can_apply,
+            manual_command=manual_command,
+            error=(
+                None
+                if runtime_mode != RUNTIME_UNSUPPORTED
+                else "当前环境不支持自动更新检查，请人工执行部署流程。"
+            ),
         )
     except Exception as e:  # noqa: BLE001
-        return CheckUpdateResponse(error=f"{type(e).__name__}: {str(e)[:200]}")
+        return CheckUpdateResponse(
+            runtime_mode=runtime_mode,
+            can_apply=can_apply,
+            manual_command=manual_command,
+            error=f"{type(e).__name__}: {str(e)[:200]}",
+        )
 
 
 @router.post("/pull-update", response_model=PullUpdateResponse)
 async def pull_update(_user: CurrentUser) -> PullUpdateResponse:
-    """仅执行 git pull，不重启。"""
+    """执行应用更新（保留历史路由名 /pull-update）。"""
+    runtime_mode, updater, _root = _detect_runtime_mode()
+    manual_command = _manual_command_for_runtime(runtime_mode, updater)
+    can_apply = runtime_mode in {RUNTIME_LOCAL_SOURCE, RUNTIME_PROD_CONTAINER_WITH_UPDATER}
+
     try:
-        if _git_root() is None:
-            return PullUpdateResponse(error=GIT_WORKTREE_UNAVAILABLE_MESSAGE)
+        if runtime_mode == RUNTIME_LOCAL_SOURCE:
+            if _git_root() is None:
+                return PullUpdateResponse(
+                    runtime_mode=runtime_mode,
+                    can_apply=can_apply,
+                    manual_command=manual_command,
+                    plan_label="环境检测失败",
+                    plan_detail=GIT_WORKTREE_UNAVAILABLE_MESSAGE,
+                    error=GIT_WORKTREE_UNAVAILABLE_MESSAGE,
+                )
 
-        out, err, rc = await asyncio.to_thread(
-            _run_git, "pull", "origin", "main", timeout=60
-        )
-        if rc != 0:
-            return PullUpdateResponse(error=f"git pull 失败: {err or out}")
+            out, err, rc = await asyncio.to_thread(
+                _run_git, "pull", "--ff-only", "origin", "main", timeout=60
+            )
+            if rc != 0:
+                return PullUpdateResponse(
+                    runtime_mode=runtime_mode,
+                    can_apply=can_apply,
+                    manual_command=manual_command,
+                    plan_label="应用更新失败",
+                    plan_detail="git pull 失败，请先处理冲突或网络问题。",
+                    error=f"git pull 失败: {err or out}",
+                )
 
-        # 获取最新 commit
-        head_out, _, _ = await asyncio.to_thread(
-            _run_git, "rev-parse", "HEAD", timeout=10
-        )
-        # 获取简短 summary
-        summary_out, _, _ = await asyncio.to_thread(
-            _run_git, "log", "-1", "--oneline", timeout=10
-        )
+            # 获取最新 commit
+            head_out, _, _ = await asyncio.to_thread(
+                _run_git, "rev-parse", "HEAD", timeout=10
+            )
+            # 获取简短 summary
+            summary_out, _, _ = await asyncio.to_thread(
+                _run_git, "log", "-1", "--oneline", timeout=10
+            )
+            root = _git_root()
+            if root and (root / "Makefile").exists():
+                subprocess.Popen(
+                    ["make", "restart"],
+                    cwd=str(root),
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    start_new_session=True,
+                )
+
+            return PullUpdateResponse(
+                success=True,
+                new_commit=head_out[:12] if head_out else None,
+                summary=summary_out or None,
+                runtime_mode=runtime_mode,
+                action_required="none",
+                plan_label="更新已应用",
+                plan_detail="已执行 git pull --ff-only，并触发后台 make restart。",
+                can_apply=True,
+            )
+
+        if runtime_mode == RUNTIME_PROD_CONTAINER_WITH_UPDATER and updater:
+            result = await asyncio.to_thread(
+                subprocess.run,
+                [updater],
+                capture_output=True,
+                text=True,
+                timeout=180,
+            )
+            merged = (result.stdout or "").strip() or (result.stderr or "").strip()
+            if result.returncode != 0:
+                return PullUpdateResponse(
+                    runtime_mode=runtime_mode,
+                    action_required="full_update",
+                    can_apply=True,
+                    manual_command=manual_command,
+                    plan_label="宿主机更新器执行失败",
+                    plan_detail="请检查 updater 日志并在宿主机重试。",
+                    summary=merged[:240] or None,
+                    error=f"updater 失败，退出码 {result.returncode}",
+                )
+            return PullUpdateResponse(
+                success=True,
+                runtime_mode=runtime_mode,
+                can_apply=True,
+                plan_label="已触发宿主机更新器",
+                plan_detail="更新器已执行，具体重启/部署结果请查看宿主机日志。",
+                summary=merged[:240] or "updater executed",
+                manual_command=manual_command,
+            )
+
+        if runtime_mode == RUNTIME_PROD_CONTAINER_MANUAL:
+            return PullUpdateResponse(
+                success=False,
+                runtime_mode=runtime_mode,
+                action_required="manual",
+                can_apply=False,
+                manual_command=manual_command,
+                plan_label="容器内不可直接应用更新",
+                plan_detail="当前容器没有可用更新器，请在宿主机执行完整更新流程。",
+                error="当前容器内不支持自动更新",
+            )
 
         return PullUpdateResponse(
-            success=True,
-            new_commit=head_out[:12] if head_out else None,
-            summary=summary_out or None,
+            success=False,
+            runtime_mode=runtime_mode,
+            action_required="unsupported",
+            can_apply=False,
+            plan_label="环境不支持自动更新",
+            plan_detail="请人工执行部署流程。",
+            error="当前环境不支持自动更新",
         )
     except Exception as e:  # noqa: BLE001
-        return PullUpdateResponse(error=f"{type(e).__name__}: {str(e)[:200]}")
+        return PullUpdateResponse(
+            runtime_mode=runtime_mode,
+            can_apply=can_apply,
+            manual_command=manual_command,
+            error=f"{type(e).__name__}: {str(e)[:200]}",
+        )
 
 
 @router.post("/restart", response_model=RestartResponse)
 async def restart_app(_user: CurrentUser) -> RestartResponse:
     """触发应用重启。使用 subprocess detach 避免阻塞当前进程。"""
     try:
-        root = _git_root()
-        if not root:
-            return RestartResponse(error=GIT_WORKTREE_UNAVAILABLE_MESSAGE)
-
-        # 检测运行方式：有 docker-compose.yml 用 docker，否则用 make
-        compose = root / "docker-compose.yml"
-        makefile = root / "Makefile"
-
-        if compose.exists():
-            cmd = ["docker", "compose", "restart"]
-        elif makefile.exists():
-            cmd = ["make", "restart"]
-        else:
-            # 直接杀进程，依赖 systemd/docker 等外部重启机制
-            import os
-            import signal
-
-            os.kill(os.getpid(), signal.SIGTERM)
+        runtime_mode, updater, root = _detect_runtime_mode()
+        if runtime_mode == RUNTIME_LOCAL_SOURCE and root and (root / "Makefile").exists():
+            subprocess.Popen(
+                ["make", "restart"],
+                cwd=str(root),
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
+            )
             return RestartResponse(success=True)
 
-        subprocess.Popen(
-            cmd,
-            cwd=str(root),
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            start_new_session=True,
-        )
-        return RestartResponse(success=True)
+        if runtime_mode == RUNTIME_PROD_CONTAINER_WITH_UPDATER:
+            command_hint = updater or "/app/host-updater/prod-update"
+            return RestartResponse(error=f"容器内不执行 docker compose，请改用更新器：{command_hint}")
+        if runtime_mode == RUNTIME_PROD_CONTAINER_MANUAL:
+            return RestartResponse(
+                error="容器内不执行 docker compose，请在宿主机部署目录手工执行更新与重启。"
+            )
+        return RestartResponse(error="当前环境不支持自动重启，请人工执行部署流程。")
     except Exception as e:  # noqa: BLE001
         return RestartResponse(error=f"{type(e).__name__}: {str(e)[:200]}")
 

@@ -12,15 +12,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential gcc libffi-dev && \
     rm -rf /var/lib/apt/lists/*
 
-# 先拷贝依赖清单与源码（pyproject.toml 中 [tool.setuptools] packages = ["app"]，
-# 故必须将 app 包目录一并放入构建上下文，pip 才能识别本项目并解析依赖）
+# 先拷贝依赖清单并安装 runtime 依赖。不要在这一层拷贝 app/，否则任意后端
+# 代码变更都会打穿依赖安装缓存，生产增量更新会被迫重装 Telethon / cryptg 等包。
 COPY pyproject.toml /app/
-COPY app /app/app
+RUN pip install --no-cache-dir --upgrade pip
+RUN python -c 'import tomllib; from pathlib import Path; data = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8")); print("\n".join(data["project"]["dependencies"]))' \
+    > /tmp/requirements.txt && \
+    pip install --no-cache-dir -r /tmp/requirements.txt
 
-# 升级 pip 并安装本项目（含全部 runtime 依赖：fastapi/telethon/cryptg/python-socks 等）
-# 保留默认 .pyc 编译：镜像会略大，但避免容器首次 import 现场编译大量依赖导致 RSS 抬高。
-RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir .
+# 再拷贝源码并安装本项目本身；这里会随业务代码变更重跑，但不再重装三方依赖。
+COPY app /app/app
+RUN pip install --no-cache-dir --no-deps .
 
 
 FROM python:3.12-slim AS runtime

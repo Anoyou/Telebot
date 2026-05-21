@@ -16,12 +16,35 @@ import type {
   PullUpdateResult,
 } from "@/api/types";
 
+type UpdateActionRequired =
+  | "none"
+  | "docs_only"
+  | "frontend"
+  | "backend"
+  | "mixed"
+  | "full_update"
+  | "manual"
+  | "unsupported"
+  | "restart";
+
+interface UpdatePlanMeta {
+  runtimeMode: string | null;
+  actionRequired: UpdateActionRequired;
+  planLabel: string | null;
+  planDetail: string | null;
+  components: string[];
+  requiresFullUpdate: boolean;
+  requiresBackup: boolean;
+  canApply: boolean;
+  manualCommand: string | null;
+}
+
 type Step =
   | { kind: "checking" }
   | { kind: "up_to_date"; commit: string }
-  | { kind: "has_update"; current: string; remote: string; ahead: number; changedFiles: string[] }
+  | { kind: "has_update"; current: string; remote: string; ahead: number; changedFiles: string[]; plan: UpdatePlanMeta }
   | { kind: "pulling" }
-  | { kind: "pulled"; newCommit: string | null; summary: string | null }
+  | { kind: "pulled"; newCommit: string | null; summary: string | null; plan: UpdatePlanMeta }
   | { kind: "pull_failed"; error: string }
   | { kind: "check_failed"; error: string }
   | { kind: "restarting"; countdown: number };
@@ -34,6 +57,52 @@ interface UpdateDialogProps {
 export function UpdateDialog({ open, onOpenChange }: UpdateDialogProps) {
   const [step, setStep] = useState<Step | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval>>();
+
+  const normalizeAction = (raw: CheckUpdateResult["action_required"]): UpdateActionRequired => {
+    return typeof raw === "string" ? raw : "none";
+  };
+
+  const parsePlanMeta = (res: CheckUpdateResult | PullUpdateResult): UpdatePlanMeta => ({
+    runtimeMode: res.runtime_mode ?? null,
+    actionRequired: normalizeAction(res.action_required),
+    planLabel: res.plan_label ?? null,
+    planDetail: res.plan_detail ?? null,
+    components: res.components ?? [],
+    requiresFullUpdate: Boolean(res.requires_full_update),
+    requiresBackup: Boolean(res.requires_backup),
+    canApply: res.can_apply ?? true,
+    manualCommand: res.manual_command ?? null,
+  });
+
+  const getPrimaryActionLabel = (plan: UpdatePlanMeta) => {
+    if (plan.manualCommand || plan.actionRequired === "manual" || plan.actionRequired === "unsupported") {
+      return "查看服务器命令";
+    }
+    if (!plan.canApply) {
+      return "查看更新说明";
+    }
+    switch (plan.actionRequired) {
+      case "restart":
+        return "重启使更新生效";
+      case "backend":
+        if (plan.runtimeMode === "local_source") return "拉取并重启使更新生效";
+        return "增量重建并重启后端";
+      case "frontend":
+        if (plan.runtimeMode === "local_source") return "拉取并重启使更新生效";
+        return "增量重建前端";
+      case "full_update":
+        if (plan.runtimeMode === "local_source") return "拉取并重启使更新生效";
+        return "执行完整更新";
+      case "mixed":
+        if (plan.runtimeMode === "local_source") return "拉取并重启使更新生效";
+        return "执行增量更新";
+      case "docs_only":
+        return "应用文档更新";
+      case "none":
+      default:
+        return "应用更新";
+    }
+  };
 
   // 打开时自动检查更新
   const doCheck = useCallback(async () => {
@@ -51,6 +120,7 @@ export function UpdateDialog({ open, onOpenChange }: UpdateDialogProps) {
           remote: res.remote_commit || "?",
           ahead: res.ahead,
           changedFiles: res.changed_files ?? [],
+          plan: parsePlanMeta(res),
         });
       }
     } catch (e) {
@@ -84,7 +154,7 @@ export function UpdateDialog({ open, onOpenChange }: UpdateDialogProps) {
     try {
       const res: PullUpdateResult = await pullUpdate();
       if (res.success) {
-        setStep({ kind: "pulled", newCommit: res.new_commit, summary: res.summary });
+        setStep({ kind: "pulled", newCommit: res.new_commit, summary: res.summary, plan: parsePlanMeta(res) });
       } else {
         setStep({ kind: "pull_failed", error: res.error || "未知错误" });
       }
@@ -119,6 +189,22 @@ export function UpdateDialog({ open, onOpenChange }: UpdateDialogProps) {
     }
   };
 
+  const doPrimaryAction = async (plan: UpdatePlanMeta) => {
+    if (plan.actionRequired === "restart") {
+      await doRestart();
+      return;
+    }
+    if (plan.manualCommand || plan.actionRequired === "manual" || plan.actionRequired === "unsupported") {
+      if (plan.manualCommand && navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(plan.manualCommand);
+      } else {
+        window.alert("请按弹窗中的命令在服务器上手动执行。");
+      }
+      return;
+    }
+    await doPull();
+  };
+
   const isActionable =
     step?.kind === "has_update" ||
     step?.kind === "pulled" ||
@@ -134,8 +220,8 @@ export function UpdateDialog({ open, onOpenChange }: UpdateDialogProps) {
             {step?.kind === "checking" && "正在检查远程仓库..."}
             {step?.kind === "up_to_date" && "当前已是最新版本"}
             {step?.kind === "has_update" && "发现新版本可用"}
-            {step?.kind === "pulling" && "正在拉取代码..."}
-            {step?.kind === "pulled" && "代码已拉取成功"}
+            {step?.kind === "pulling" && "正在应用更新计划..."}
+            {step?.kind === "pulled" && "更新计划已执行"}
             {step?.kind === "pull_failed" && "拉取失败"}
             {step?.kind === "check_failed" && "检查失败"}
             {step?.kind === "restarting" && "正在重启应用..."}
@@ -168,10 +254,41 @@ export function UpdateDialog({ open, onOpenChange }: UpdateDialogProps) {
                 <AlertCircle className="h-5 w-5" />
                 <span>远程有 {step.ahead} 个新 commit</span>
               </div>
+              {step.plan.planLabel && (
+                <p className="rounded-md border bg-background px-3 py-2">
+                  {step.plan.planLabel}
+                </p>
+              )}
+              {step.plan.planDetail && (
+                <p className="text-muted-foreground">{step.plan.planDetail}</p>
+              )}
               <div className="rounded-md bg-muted px-3 py-2 font-mono text-xs space-y-1">
                 <p>当前: {step.current}</p>
                 <p>远程: {step.remote}</p>
+                {step.plan.runtimeMode && <p>运行模式: {step.plan.runtimeMode}</p>}
               </div>
+              {step.plan.components.length > 0 && (
+                <div className="rounded-md border bg-background px-3 py-2">
+                  <p className="mb-1 text-xs text-muted-foreground">变更组件</p>
+                  <div className="flex flex-wrap gap-1">
+                    {step.plan.components.map((name) => (
+                      <span key={name} className="rounded bg-muted px-2 py-0.5 text-xs">{name}</span>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {(step.plan.requiresBackup || step.plan.requiresFullUpdate) && (
+                <div className="rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs space-y-1">
+                  {step.plan.requiresBackup && <p>建议先备份数据后再执行更新。</p>}
+                  {step.plan.requiresFullUpdate && <p>该更新需要完整更新流程，耗时会更长。</p>}
+                </div>
+              )}
+              {step.plan.manualCommand && (
+                <div className="rounded-md border bg-background px-3 py-2">
+                  <p className="mb-1 text-xs text-muted-foreground">服务器命令</p>
+                  <pre className="text-xs overflow-x-auto font-mono">{step.plan.manualCommand}</pre>
+                </div>
+              )}
               {step.changedFiles.length > 0 && (
                 <div className="rounded-md border bg-background px-3 py-2">
                   <p className="mb-1 text-xs text-muted-foreground">
@@ -193,7 +310,7 @@ export function UpdateDialog({ open, onOpenChange }: UpdateDialogProps) {
           {step?.kind === "pulling" && (
             <div className="flex items-center gap-3 text-muted-foreground">
               <Loader2 className="h-5 w-5 animate-spin" />
-              <span className="text-sm">git pull origin main ...</span>
+              <span className="text-sm">正在执行更新计划，请稍候...</span>
             </div>
           )}
 
@@ -201,11 +318,29 @@ export function UpdateDialog({ open, onOpenChange }: UpdateDialogProps) {
             <div className="flex items-center gap-3 text-emerald-600 dark:text-emerald-300">
               <CheckCircle2 className="h-5 w-5" />
               <div className="text-sm space-y-1">
-                <p>已拉取到 <code className="bg-muted px-1 rounded">{step.newCommit}</code></p>
+                {step.newCommit ? (
+                  <p>已更新到 <code className="bg-muted px-1 rounded">{step.newCommit}</code></p>
+                ) : (
+                  <p>更新计划已执行</p>
+                )}
                 {step.summary && (
                   <p className="text-muted-foreground">{step.summary}</p>
                 )}
-                <p className="text-amber-600 dark:text-amber-300">需要重启应用才能生效</p>
+                {step.plan.planDetail && (
+                  <p className="text-muted-foreground">{step.plan.planDetail}</p>
+                )}
+                {step.plan.actionRequired === "restart" ? (
+                  <p className="text-amber-600 dark:text-amber-300">需要重启应用才能生效</p>
+                ) : (
+                  <p className="text-amber-600 dark:text-amber-300">
+                    更新已提交，请按提示刷新页面或等待服务完成重启。
+                  </p>
+                )}
+                {step.plan.manualCommand && (
+                  <pre className="rounded bg-muted px-3 py-2 text-xs overflow-x-auto font-mono text-foreground">
+                    {step.plan.manualCommand}
+                  </pre>
+                )}
               </div>
             </div>
           )}
@@ -242,9 +377,17 @@ export function UpdateDialog({ open, onOpenChange }: UpdateDialogProps) {
               </Button>
             )}
             {step?.kind === "has_update" && (
-              <Button size="sm" onClick={doPull}>
-                <RefreshCw className="mr-1 h-3.5 w-3.5" />
-                拉取更新
+              <Button
+                size="sm"
+                onClick={() => void doPrimaryAction(step.plan)}
+                disabled={!step.plan.canApply && !step.plan.manualCommand}
+              >
+                {step.plan.actionRequired === "restart" ? (
+                  <RotateCcw className="mr-1 h-3.5 w-3.5" />
+                ) : (
+                  <RefreshCw className="mr-1 h-3.5 w-3.5" />
+                )}
+                {getPrimaryActionLabel(step.plan)}
               </Button>
             )}
             {step?.kind === "pulled" && (
@@ -252,10 +395,17 @@ export function UpdateDialog({ open, onOpenChange }: UpdateDialogProps) {
                 <Button variant="outline" size="sm" onClick={doCheck}>
                   再次检查
                 </Button>
-                <Button size="sm" onClick={doRestart}>
-                  <RotateCcw className="mr-1 h-3.5 w-3.5" />
-                  重启应用
-                </Button>
+                {!step.plan.runtimeMode || step.plan.actionRequired === "restart" ? (
+                  <Button size="sm" onClick={doRestart}>
+                    <RotateCcw className="mr-1 h-3.5 w-3.5" />
+                    重启应用
+                  </Button>
+                ) : (
+                  <Button size="sm" onClick={() => window.location.reload()}>
+                    <RefreshCw className="mr-1 h-3.5 w-3.5" />
+                    刷新页面
+                  </Button>
+                )}
               </>
             )}
           </DialogFooter>

@@ -327,6 +327,78 @@ def test_run_git_without_worktree_returns_deploy_hint(monkeypatch) -> None:
     assert "git root not found" not in err
 
 
+def test_classify_changed_files_marks_full_update_and_backup() -> None:
+    """更新计划分类应识别 full_update 与 alembic 备份风险。"""
+
+    components, requires_full_update, requires_backup = sh._classify_changed_files(
+        [
+            "backend/alembic/versions/20260520_add_table.py",
+            "deploy/prod-up.sh",
+            "frontend/src/pages/system.tsx",
+        ]
+    )
+
+    assert components[0] == "full_update"
+    assert "backend" in components
+    assert "frontend" in components
+    assert requires_full_update is True
+    assert requires_backup is True
+
+
+def test_classify_changed_files_docs_only() -> None:
+    """纯文档变更应归类 docs_only。"""
+
+    components, requires_full_update, requires_backup = sh._classify_changed_files(
+        ["docs/ops/update.md", "README.md"]
+    )
+
+    assert components == ["docs_only"]
+    assert requires_full_update is False
+    assert requires_backup is False
+
+
+def test_classify_changed_files_frontend_bundled_docs() -> None:
+    """前端打包读取的文档应触发 frontend 更新，而不是 docs_only。"""
+
+    components, requires_full_update, requires_backup = sh._classify_changed_files(
+        ["docs/PLUGIN-DEV-GUIDE.md", "CHANGELOG.md"]
+    )
+
+    assert components == ["frontend"]
+    assert requires_full_update is False
+    assert requires_backup is False
+
+
+def test_classify_changed_files_makefile_requires_full_update() -> None:
+    """Makefile / 部署脚本变更应回退完整更新。"""
+
+    components, requires_full_update, requires_backup = sh._classify_changed_files(
+        ["Makefile", "scripts/bootstrap.sh"]
+    )
+
+    assert components[0] == "full_update"
+    assert requires_full_update is True
+    assert requires_backup is False
+
+
+@pytest.mark.asyncio
+async def test_restart_app_in_container_does_not_run_docker_compose() -> None:
+    """容器环境下 restart 不应伪装执行 docker compose restart。"""
+
+    with (
+        patch(
+            "app.api.system_health._detect_runtime_mode",
+            return_value=(sh.RUNTIME_PROD_CONTAINER_MANUAL, None, None),
+        ),
+        patch("app.api.system_health.subprocess.Popen") as popen,
+    ):
+        out = await sh.restart_app(_user=None)  # type: ignore[arg-type]
+
+    assert out.success is False
+    assert out.error and "docker compose" in out.error
+    popen.assert_not_called()
+
+
 def test_read_process_stats_prefers_psutil(monkeypatch) -> None:
     """资源面板优先用 psutil 读取进程 CPU/RSS/USS，避免 Linux/Oracle 上 ps 输出差异。
 

@@ -5,16 +5,18 @@
 #   make logs        实时跟踪后端 + 前端日志
 #   make status      四组件状态总览
 #   make prod-up     一键生产部署（纯 docker compose）
+#   make prod-update 增量更新生产栈（按变更重建必要服务）
 #   make nuke        彻底清理（删数据 + venv + node_modules + .env）
 #   make help        全部命令清单
 
 .PHONY: help up down restart logs status nuke bootstrap \
         dev-up dev-down dev-logs install migrate makemigration backend frontend \
-        test lint codegen build prod-build prod-up prod-down backup clean
+        test lint codegen build prod-build prod-up prod-update prod-down backup clean
 
 PYTHON := python3.12
 VENV := backend/.venv
 ACTIVATE := . $(VENV)/bin/activate
+PROD_UPDATE_ARGS ?=
 
 help:
 	@echo "════════════ 一键命令（推荐） ════════════"
@@ -25,6 +27,7 @@ help:
 	@echo "  make logs be|fe|db 单独看某个组件日志"
 	@echo "  make status        四组件状态总览"
 	@echo "  make prod-up       一键生产部署（纯 docker compose 4 容器）"
+	@echo "  make prod-update   增量更新生产栈（按变更重建必要服务）"
 	@echo "  make prod-down     停止生产栈"
 	@echo "  make nuke          ⚠ 彻底清理（含数据库）"
 	@echo ""
@@ -71,6 +74,9 @@ bootstrap:
 
 prod-up:
 	@./scripts/prod-up.sh
+
+prod-update:
+	@./scripts/prod-update.sh $(PROD_UPDATE_ARGS)
 
 prod-down:
 	docker compose down

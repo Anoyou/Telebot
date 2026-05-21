@@ -85,8 +85,19 @@ sudo systemctl reload caddy
 
 ```bash
 cd /opt/telepilot
-git pull --ff-only
-make prod-up
+make prod-update
+```
+
+`make prod-update` 会先检查远程变更，再按文件范围选择增量动作：仅后端变更时只重建
+`web`，仅前端变更时只重建 `frontend`，纯文档变更不重启服务；如果涉及 Dockerfile、
+Compose、依赖锁文件或部署脚本，会自动回退到完整 `make prod-up`。更新前如果工作区
+存在未提交改动会拒绝执行，避免覆盖服务器上的本地修改。
+
+想先看本次会走哪条路径，可以执行：
+
+```bash
+cd /opt/telepilot
+make prod-update PROD_UPDATE_ARGS=--dry-run
 ```
 
 回滚到指定版本：

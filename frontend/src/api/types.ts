@@ -1336,12 +1336,50 @@ export interface CheckUpdateResult {
   remote_commit: string | null;
   ahead: number;
   changed_files: string[];
+  runtime_mode?: string | null;
+  action_required?:
+    | "none"
+    | "docs_only"
+    | "frontend"
+    | "backend"
+    | "mixed"
+    | "full_update"
+    | "manual"
+    | "unsupported"
+    | "restart"
+    | null;
+  plan_label?: string | null;
+  plan_detail?: string | null;
+  components?: string[] | null;
+  requires_full_update?: boolean | null;
+  requires_backup?: boolean | null;
+  can_apply?: boolean | null;
+  manual_command?: string | null;
   error: string | null;
 }
 export interface PullUpdateResult {
   success: boolean;
   new_commit: string | null;
   summary: string | null;
+  runtime_mode?: string | null;
+  action_required?:
+    | "none"
+    | "docs_only"
+    | "frontend"
+    | "backend"
+    | "mixed"
+    | "full_update"
+    | "manual"
+    | "unsupported"
+    | "restart"
+    | null;
+  plan_label?: string | null;
+  plan_detail?: string | null;
+  components?: string[] | null;
+  requires_full_update?: boolean | null;
+  requires_backup?: boolean | null;
+  can_apply?: boolean | null;
+  manual_command?: string | null;
   error: string | null;
 }
 export interface RestartResult {

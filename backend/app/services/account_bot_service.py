@@ -88,6 +88,8 @@ def label_bot_polling_error(clean: str, *, role: str) -> str:
         return clean
     if role == "interaction":
         return "交互 Bot polling 冲突：同一个 Bbot token 正在被另一个实例监听。请确认它没有被管理 Bot、其他账号、本地/Docker/VPS 中的另一套 TelePilot，或其他程序同时使用。"
+    if role == "transfer_test":
+        return "转账结果通知 Bot polling 冲突：同一个测试 Abot token 正在被另一个实例监听。请确认它没有被管理 Bot、交互 Bot、其他账号、本地/Docker/VPS 中的另一套 TelePilot，或其他程序同时使用。"
     return "管理 Bot polling 冲突：同一个管理 Bot token 正在被另一个实例监听。请确认它没有被交互 Bot、其他账号、本地/Docker/VPS 中的另一套 TelePilot，或其他程序同时使用。"
 
 
@@ -139,6 +141,8 @@ def default_transfer_notice_config() -> dict[str, Any]:
         "transfer_bot_id": None,
         "transfer_bot_token_enc": None,
         "has_transfer_bot_token": False,
+        "transfer_last_update_id": None,
+        "transfer_last_error": None,
         "trigger_mode": "payment",
         "trigger_text": "转账成功",
         "trigger_texts": ["转账成功"],
@@ -179,6 +183,7 @@ def normalize_transfer_notice_config(raw: Any) -> dict[str, Any]:
         "interaction_last_update_id",
         "trusted_bot_id",
         "transfer_bot_id",
+        "transfer_last_update_id",
         "amount",
         "math_prize",
         "module_prize",
@@ -231,6 +236,8 @@ def normalize_transfer_notice_config(raw: Any) -> dict[str, Any]:
         base["interaction_runtime_status"] = "stopped"
         base["interaction_last_error"] = None
     base["has_transfer_bot_token"] = bool(base.get("transfer_bot_token_enc"))
+    transfer_error = str(base.get("transfer_last_error") or "").strip()
+    base["transfer_last_error"] = label_bot_polling_error(transfer_error, role="transfer_test") if transfer_error else None
     trigger = str(base.get("trigger_text") or "").strip()
     base["trigger_text"] = trigger or "转账成功"
     triggers: list[str] = []

@@ -65,6 +65,7 @@ log = logging.getLogger(__name__)
 
 _TASKS: dict[int, asyncio.Task[None]] = {}
 _INTERACTION_TASKS: dict[int, asyncio.Task[None]] = {}
+_TRANSFER_TEST_TASKS: dict[int, asyncio.Task[None]] = {}
 _TASK_LOCK = asyncio.Lock()
 _CONFIRM_PREFIX = "account_bot_confirm:"
 _CONFIRM_TTL_SECONDS = 300
@@ -295,7 +296,7 @@ async def start_interaction_bot_manager() -> int:
         except ValueError:
             continue
         cfg = account_bot_service.normalize_transfer_notice_config(row.value)
-        if cfg.get("enabled") and cfg.get("interaction_bot_token_enc"):
+        if cfg.get("enabled") and (cfg.get("interaction_bot_token_enc") or cfg.get("transfer_bot_token_enc")):
             await restart_interaction_bot(aid)
             count += 1
     return count
@@ -305,8 +306,9 @@ async def stop_interaction_bot_manager() -> None:
     """停止所有交互 Bot polling task。"""
 
     async with _TASK_LOCK:
-        tasks = list(_INTERACTION_TASKS.values())
+        tasks = list(_INTERACTION_TASKS.values()) + list(_TRANSFER_TEST_TASKS.values())
         _INTERACTION_TASKS.clear()
+        _TRANSFER_TEST_TASKS.clear()
     for task in tasks:
         task.cancel()
     if tasks:
@@ -325,20 +327,33 @@ async def restart_interaction_bot(aid: int) -> None:
 
     async with _TASK_LOCK:
         old = _INTERACTION_TASKS.pop(aid, None)
+        old_transfer = _TRANSFER_TEST_TASKS.pop(aid, None)
         if old is not None:
             old.cancel()
+        if old_transfer is not None:
+            old_transfer.cancel()
         should_start = False
+        should_start_transfer = False
         async with AsyncSessionLocal() as db:
             cfg = await account_bot_service.get_transfer_notice_config(db, aid)
             should_start = bool(cfg.get("enabled") and cfg.get("has_interaction_bot_token"))
+            should_start_transfer = bool(cfg.get("enabled") and cfg.get("has_transfer_bot_token"))
             await _set_interaction_runtime_state(db, aid, error=None)
+            await _set_transfer_test_runtime_state(db, aid, error=None)
         if should_start:
             _INTERACTION_TASKS[aid] = asyncio.create_task(
                 _interaction_polling_loop(aid),
                 name=f"interaction-bot:{aid}",
             )
+        if should_start_transfer:
+            _TRANSFER_TEST_TASKS[aid] = asyncio.create_task(
+                _transfer_test_polling_loop(aid),
+                name=f"transfer-test-bot:{aid}",
+            )
     if old is not None:
         await asyncio.gather(old, return_exceptions=True)
+    if old_transfer is not None:
+        await asyncio.gather(old_transfer, return_exceptions=True)
 
 
 async def notify_account(account_id: int, text: str) -> int:
@@ -523,6 +538,31 @@ async def _set_interaction_runtime_state(
     await db.commit()
 
 
+async def _load_transfer_test_runtime_config(aid: int) -> tuple[str | None, dict[str, Any]]:
+    async with AsyncSessionLocal() as db:
+        cfg = await account_bot_service.get_transfer_notice_config(db, aid)
+        token = await account_bot_service.get_transfer_bot_token(db, aid)
+    return token, cfg
+
+
+async def _set_transfer_test_runtime_state(
+    db: Any,
+    aid: int,
+    *,
+    last_update_id: int | None = None,
+    error: str | None = None,
+) -> None:
+    row = await db.get(SystemSetting, account_bot_service.transfer_notice_setting_key(aid))
+    if row is None or not isinstance(row.value, dict):
+        return
+    data = account_bot_service.normalize_transfer_notice_config(row.value)
+    if last_update_id is not None:
+        data["transfer_last_update_id"] = last_update_id
+    data["transfer_last_error"] = error
+    row.value = data
+    await db.commit()
+
+
 async def _interaction_polling_loop(aid: int) -> None:
     backoff = 2.0
     token = ""
@@ -572,6 +612,58 @@ async def _interaction_polling_loop(aid: int) -> None:
     except asyncio.CancelledError:
         async with AsyncSessionLocal() as db:
             await _set_interaction_runtime_state(db, aid, error="已停止")
+        raise
+
+
+async def _transfer_test_polling_loop(aid: int) -> None:
+    backoff = 2.0
+    token = ""
+    try:
+        while True:
+            token_opt, cfg = await _load_transfer_test_runtime_config(aid)
+            if not cfg.get("enabled") or not token_opt:
+                async with AsyncSessionLocal() as db:
+                    await _set_transfer_test_runtime_state(db, aid, error=None)
+                return
+            token = token_opt
+            offset = (int(cfg["transfer_last_update_id"]) + 1) if cfg.get("transfer_last_update_id") is not None else None
+
+            try:
+                result = await account_bot_service.call_bot_api(
+                    token,
+                    "getUpdates",
+                    {
+                        "offset": offset,
+                        "timeout": 25,
+                        "allowed_updates": ["message"],
+                    },
+                )
+                updates = result.get("result") if isinstance(result, dict) else result
+                if not isinstance(updates, list):
+                    updates = []
+                backoff = 2.0
+                for update in updates:
+                    update_id = int(update.get("update_id", 0))
+                    try:
+                        await _handle_transfer_test_update(aid, token, update)
+                    except Exception:  # noqa: BLE001
+                        log.exception("transfer test bot update failed aid=%s update_id=%s", aid, update_id)
+                    finally:
+                        async with AsyncSessionLocal() as db:
+                            await _set_transfer_test_runtime_state(db, aid, last_update_id=update_id, error=None)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # noqa: BLE001
+                clean = account_bot_service.sanitize_bot_error(exc, token=token)
+                clean = account_bot_service.label_bot_polling_error(clean, role="transfer_test")
+                async with AsyncSessionLocal() as db:
+                    await _set_transfer_test_runtime_state(db, aid, error=clean)
+                log.warning("transfer test bot polling error aid=%s: %s", aid, clean)
+                await asyncio.sleep(backoff)
+                backoff = min(backoff * 2, 60.0)
+    except asyncio.CancelledError:
+        async with AsyncSessionLocal() as db:
+            await _set_transfer_test_runtime_state(db, aid, error="已停止")
         raise
 
 
@@ -625,8 +717,6 @@ async def _handle_interaction_update(aid: int, token: str, update: dict[str, Any
     if incoming is None:
         return
     async with AsyncSessionLocal() as db:
-        if await _try_handle_transfer_command(db, incoming):
-            return
         if await _try_handle_transfer_notice(db, incoming):
             return
         if await _try_handle_interaction_rule_command_or_keyword(db, incoming):
@@ -635,6 +725,14 @@ async def _handle_interaction_update(aid: int, token: str, update: dict[str, Any
             return
         if await _try_handle_math_answer(incoming):
             return
+
+
+async def _handle_transfer_test_update(aid: int, token: str, update: dict[str, Any]) -> None:
+    incoming = _extract_incoming(aid, token, update)
+    if incoming is None:
+        return
+    async with AsyncSessionLocal() as db:
+        await _try_handle_transfer_command(db, incoming)
 
 
 def _parse_transfer_notice(text: str) -> dict[str, Any] | None:
@@ -1299,10 +1397,6 @@ async def _select_transfer_command_receiver(
             continue
         if not _rule_trigger_mode_allows(rule, "payment"):
             continue
-        if not _rule_amount_matches(rule, amount):
-            continue
-        if not await _is_interaction_rule_open(incoming.account_id, rule, incoming.chat_id):
-            continue
         receiver_filter = await _rule_receiver_filter(db, incoming.account_id, rule)
         if not receiver_filter.get("explicit"):
             continue
@@ -1321,18 +1415,27 @@ async def _select_transfer_command_receiver(
     return None
 
 
-async def _transfer_command_can_emit_notice(db: Any, incoming: Incoming, cfg: dict[str, Any], amount: int) -> bool:
+def _transfer_command_chat_is_monitored(incoming: Incoming, cfg: dict[str, Any]) -> bool:
+    if incoming.chat_id is None:
+        return False
+    if _interaction_chat_matches(cfg, incoming.chat_id):
+        return True
     for rule in _interaction_rules(cfg):
         if not _rule_chat_matches(rule, incoming.chat_id or 0):
             continue
-        if not _rule_trigger_mode_allows(rule, "payment"):
-            continue
-        if not _rule_amount_matches(rule, amount):
-            continue
-        if not await _is_interaction_rule_open(incoming.account_id, rule, incoming.chat_id):
-            continue
         return True
     return False
+
+
+def _is_configured_bot_user_id(cfg: dict[str, Any], user_id: int | None) -> bool:
+    if user_id is None:
+        return False
+    bot_ids = {
+        int(value)
+        for value in (cfg.get("interaction_bot_id"), cfg.get("transfer_bot_id"), cfg.get("trusted_bot_id"))
+        if value not in (None, "")
+    }
+    return int(user_id) in bot_ids
 
 
 async def _select_transfer_notice_rule(
@@ -1922,16 +2025,6 @@ async def _try_handle_transfer_command(db: Any, incoming: Incoming) -> bool:
     if amount is None:
         return False
 
-    if await _is_account_user_sender(db, incoming.account_id, incoming.user_id):
-        log.info(
-            "transfer command skipped: sender is payout account aid=%s chat_id=%s sender_id=%s amount=%s",
-            incoming.account_id,
-            incoming.chat_id,
-            incoming.user_id,
-            amount,
-        )
-        return True
-
     log.info(
         "transfer command candidate aid=%s chat_id=%s sender_id=%s amount=%s reply_to=%s",
         incoming.account_id,
@@ -1945,7 +2038,15 @@ async def _try_handle_transfer_command(db: Any, incoming: Incoming) -> bool:
     if not cfg.get("enabled"):
         log.info("transfer command skipped: disabled aid=%s", incoming.account_id)
         return False
-    if not await _transfer_command_can_emit_notice(db, incoming, cfg, amount):
+    if _is_configured_bot_user_id(cfg, incoming.user_id) or _is_configured_bot_user_id(cfg, incoming.reply_to_user_id):
+        log.info(
+            "transfer command skipped: bot sender/receiver aid=%s incoming_user=%s reply_to=%s",
+            incoming.account_id,
+            incoming.user_id,
+            incoming.reply_to_user_id,
+        )
+        return False
+    if not _transfer_command_chat_is_monitored(incoming, cfg):
         log.info(
             "transfer command skipped: chat not monitored aid=%s incoming_chat=%s amount=%s",
             incoming.account_id,
@@ -1978,15 +2079,6 @@ async def _try_handle_transfer_command(db: Any, incoming: Incoming) -> bool:
         payer_user_id=incoming.user_id,
         receiver_user_id=_int_or_none(receiver_info.get("receiver_user_id")),
     )
-    probe_notice = _render_transfer_bot_notice(
-        str(cfg.get("transfer_notice_template") or DEFAULT_TRANSFER_NOTICE_TEMPLATE),
-        payer,
-        receiver,
-        amount,
-        payer_user_id=incoming.user_id,
-        receiver_user_id=_int_or_none(receiver_info.get("receiver_user_id")),
-        escape_html=False,
-    )
     result = await account_bot_service.send_message(transfer_token, incoming.chat_id, notice)
     log.info(
         "transfer command emitted notice aid=%s chat_id=%s payer=%r receiver=%r amount=%s",
@@ -2014,19 +2106,6 @@ async def _try_handle_transfer_command(db: Any, incoming: Incoming) -> bool:
                 cfg_bot_id,
             )
         await _remember_transfer_bot_id(db, incoming.account_id, sender_id)
-
-    probe_sender_id = sender_id or _int_or_none(cfg.get("transfer_bot_id")) or _int_or_none(cfg.get("trusted_bot_id"))
-    probe_message_id = _int_or_none(result.get("message_id")) if isinstance(result, dict) else None
-    if probe_sender_id is not None:
-        await handle_transfer_notice_probe(
-            db,
-            account_id=incoming.account_id,
-            token=incoming.token,
-            chat_id=incoming.chat_id,
-            sender_id=probe_sender_id,
-            text=probe_notice,
-            message_id=probe_message_id,
-        )
 
     return True
 
