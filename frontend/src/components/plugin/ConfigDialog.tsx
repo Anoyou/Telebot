@@ -527,7 +527,7 @@ function renderPreviewValue(
   const templateField = templateKey ? fields.find(([key]) => key === templateKey)?.[1] : undefined;
   const templateValue = templateKey ? values[templateKey] : undefined;
   const template = formatConfigValue(templateValue ?? templateField?.default ?? previewField.default);
-  return renderTemplateSample(template, values, commandPrefix);
+  return renderTemplateSample(normalizePreviewEscapes(template), values, commandPrefix);
 }
 
 function findTemplateKeyForPreview(previewKey: string, fields: FieldEntry[]): string | null {
@@ -564,6 +564,18 @@ function renderTemplateSample(
     winner: "小明",
     elapsed: "8.2",
     example: "100",
+    round: "12",
+    number: "3",
+    count: "5",
+    cost: "50003",
+    pool: "188888",
+    winners: "2",
+    payout: "53888",
+    history_limit: formatConfigValue(values.history_show_limit) || "5",
+    draw_numbers: formatConfigValue(values.draw_numbers) || "1,2,3,4,5,6",
+    draw_time: `${padClockValue(values.draw_hour, "21")}:${padClockValue(values.draw_minute, "00")}`,
+    close_minutes: formatConfigValue(values.close_minutes_before_draw) || "1",
+    interval: formatConfigValue(values.auto_draw_interval_sec) || "86400",
   };
   sample.title = "九宫格竞猜";
   sample.target_line = `目标点数：<b>${sample.target_sum}</b>（9 格里唯一）`;
@@ -571,6 +583,20 @@ function renderTemplateSample(
   sample.reward_line = `首个答对者奖励：<b>+${sample.prize}</b> · 超时 ${sample.timeout} 秒`;
 
   return template.replace(/\{([a-zA-Z0-9_]+)\}/g, (match, key: string) => sample[key] ?? match);
+}
+
+function normalizePreviewEscapes(value: string): string {
+  return value
+    .replace(/\\r\\n/g, "\n")
+    .replace(/\\n/g, "\n")
+    .replace(/\\r/g, "\n");
+}
+
+function padClockValue(value: unknown, fallback: string): string {
+  const raw = formatConfigValue(value) || fallback;
+  const num = Number(raw);
+  if (!Number.isFinite(num)) return fallback;
+  return String(Math.max(0, Math.floor(num))).padStart(2, "0");
 }
 
 function formatConfigValue(value: unknown): string {
