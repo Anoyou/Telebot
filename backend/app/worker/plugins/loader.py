@@ -8,7 +8,7 @@
 使用流程：
 1. ``run_worker`` 在 ``client.connect()`` 前调 ``load_plugins_for_account``，本模块会：
    - 触发内置插件 import（``@register`` 写入全局注册表）
-   - 在 ``client`` 上挂全局 ``NewMessage`` 派发器（incoming + outgoing），按各插件的 ``message_channels`` 声明过滤
+   - 在 ``client`` 上挂全局消息派发器（incoming + outgoing），按各插件的 ``message_channels`` 声明过滤
    - 实例化该账号当前 RemotePlugin.enabled=True AND AccountFeature.enabled=True 的所有插件，并把状态写回为 active
 2. 主进程通过 IPC ``CMD_RELOAD_CONFIG`` 触发 ``reload_account_config`` 实现热更新（拉新 rules / config，
    并对新增 / 移除的 feature 做差量加载与卸载）
@@ -566,7 +566,7 @@ async def load_plugins_for_account(
     步骤：
       1. 构造账号插件运行态
       2. 构造 ``RateLimitEngine``（依赖 humanize 配置 + service 层 ``get_effective``）
-      3. 在 client 上注册全局 NewMessage 派发，把每条消息按 instances 顺序广播
+      3. 在 client 上注册全局消息派发，把每条消息按 instances 顺序广播
       4. 加载该账号已启用的 features → ``_activate`` 按需导入对应插件
     """
     state = _AccountState(account_id)
@@ -623,11 +623,14 @@ async def load_plugins_for_account(
     await _load_ignored_peers(state)
 
     # ── 2) 全局事件派发 ──
-    def _make_dispatcher(direction: str):  # "incoming" or "outgoing"
+    def _make_dispatcher(direction: str, *, edited: bool = False):  # "incoming" or "outgoing"
         """创建消息派发闭包。direction 对应 Plugin.message_channels 的值。"""
         kwargs = {"incoming": True} if direction == "incoming" else {"outgoing": True}
+        handler_name = "on_message_edited" if edited else "on_message"
+        event_label = f"{direction}_edited" if edited else direction
+        event_builder = events.MessageEdited if edited else events.NewMessage
 
-        @client.on(events.NewMessage(**kwargs))
+        @client.on(event_builder(**kwargs))
         async def _dispatch(event):  # noqa: ANN001
             if state.paused is not None and not state.paused.is_set():
                 return
@@ -653,22 +656,24 @@ async def load_plugins_for_account(
                             else "?"
                         )
                         text_preview = (event.raw_text or "")[:80]
+                        edit_label = "编辑" if edited else ""
                         await _log(
                             redis,
                             account_id,
                             "info",
                             (
-                                f"收到一条{peer_kind}消息：聊天 ID={event.chat_id}，"
+                                f"收到一条{peer_kind}{edit_label}消息：聊天 ID={event.chat_id}，"
                                 f"内容预览={text_preview!r}。已进入插件分发流程。"
                             ),
                             source="event",
                             chat_id=event.chat_id,
                             peer_kind=peer_kind,
                             message_preview=text_preview,
+                            edited=edited,
                         )
                     except Exception:  # noqa: BLE001
                         pass
-                if await _interaction_bot_owns_incoming_text(state, event):
+                if not edited and await _interaction_bot_owns_incoming_text(state, event):
                     return
 
             for fkey, inst in list(state.instances.items()):
@@ -683,21 +688,26 @@ async def load_plugins_for_account(
                     continue
                 if ctx.generation != state.generation:
                     continue
+                handler = getattr(inst, handler_name, None)
+                if handler is None:
+                    continue
+                if edited and getattr(type(inst), handler_name, None) is getattr(Plugin, handler_name, None):
+                    continue
                 try:
-                    await inst.on_message(ctx, event)
+                    await handler(ctx, event)
                 except Exception as exc:  # noqa: BLE001
                     await _log(
                         redis,
                         account_id,
                         "error",
                         (
-                            f"插件 {fkey} 处理{direction}消息时出错："
+                            f"插件 {fkey} 处理{event_label}消息时出错："
                             f"{type(exc).__name__}: {exc}。"
                             "这条消息已跳过，其他插件和 worker 会继续运行。"
                         ),
                         source="plugin",
                         plugin_key=fkey,
-                        direction=direction,
+                        direction=event_label,
                         chat_id=getattr(event, "chat_id", None),
                         sender_id=getattr(event, "sender_id", None),
                         message_preview=(getattr(event, "raw_text", "") or "")[:200],
@@ -706,6 +716,8 @@ async def load_plugins_for_account(
 
         return _dispatch
 
+    _make_dispatcher("outgoing", edited=True)
+    _make_dispatcher("incoming", edited=True)
     _make_dispatcher("outgoing")
     _make_dispatcher("incoming")
 

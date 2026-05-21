@@ -161,6 +161,49 @@ def _croniter_for_scheduler(expr: str, start: datetime) -> croniter:
     return croniter(expr, start, **kwargs)
 
 
+def _scheduler_dt_iso(dt: datetime | None) -> str | None:
+    if dt is None:
+        return None
+    return dt.astimezone(UTC).isoformat()
+
+
+async def _normalize_scheduler_config_for_save(
+    db,
+    config: dict[str, Any],
+) -> dict[str, Any]:
+    """保存时刷新调度运行态，避免前端带回旧 next_fire。"""
+    cfg = dict(config or {})
+    kind = str(cfg.get("kind") or "cron").lower()
+    now = datetime.now(UTC)
+    tz = await _get_system_tz(db)
+
+    if kind == "once":
+        cfg["next_fire"] = _scheduler_dt_iso(_parse_scheduler_dt(cfg.get("fire_at")))
+        return cfg
+
+    if kind == "interval":
+        try:
+            interval = int(cfg.get("interval_sec") or 0)
+        except (TypeError, ValueError):
+            interval = 0
+        last_fire = _parse_scheduler_dt(cfg.get("last_fire"))
+        if interval <= 0:
+            cfg["next_fire"] = None
+        elif last_fire is not None:
+            cfg["next_fire"] = _scheduler_dt_iso(last_fire + timedelta(seconds=interval))
+        else:
+            cfg["next_fire"] = _scheduler_dt_iso(now)
+        return cfg
+
+    expr = str(cfg.get("cron") or "").strip()
+    cfg["_last_cron"] = expr
+    cfg["_cron_seconds_mode"] = len(expr.split()) in (6, 7)
+    cfg["_cron_timezone"] = getattr(tz, "key", None) or "UTC"
+    cfg.pop("_config_dirty", None)
+    cfg["next_fire"] = _scheduler_dt_iso(_croniter_next_dryrun(expr, now, tz)) if expr else None
+    return cfg
+
+
 # ─────────────────────────────────────────────────────
 # 列表 / 创建
 # ─────────────────────────────────────────────────────
@@ -199,13 +242,16 @@ async def create_rule(
     """新建一条 rule。"""
     await _ensure_account(db, aid)
     await _ensure_feature(db, key)
+    config = dict(payload.config or {})
+    if key == FEATURE_SCHEDULER:
+        config = await _normalize_scheduler_config_for_save(db, config)
     rule = Rule(
         account_id=aid,
         feature_key=key,
         name=payload.name,
         enabled=payload.enabled,
         priority=payload.priority,
-        config=dict(payload.config or {}),
+        config=config,
     )
     db.add(rule)
     await db.commit()
@@ -262,6 +308,8 @@ async def patch_rule(
     await _ensure_feature(db, key)
     rule = await _load_rule(db, aid, key, rid)
     data = payload.model_dump(exclude_unset=True)
+    if key == FEATURE_SCHEDULER and data.get("config") is not None:
+        data["config"] = await _normalize_scheduler_config_for_save(db, dict(data["config"]))
     for k, v in data.items():
         setattr(rule, k, dict(v) if k == "config" and v is not None else v)
     await db.commit()

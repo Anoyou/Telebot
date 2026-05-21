@@ -79,6 +79,7 @@ class Plugin:
       - ``on_startup``：[账号 × feature] 被激活时调用一次
       - ``on_shutdown``：禁用 / 卸载 / 热重载前调用一次
       - ``on_message``：消息派发回调，具体接收哪些方向由 ``message_channels`` 声明
+      - ``on_message_edited``：可选的消息编辑事件回调；未重写时不会收到编辑消息
       - ``on_command``：插件可声明的"账号内命令"；返回 True 表示已处理
 
     ``message_channels`` 控制 loader 向该插件派发哪些方向的消息：
@@ -115,6 +116,13 @@ class Plugin:
 
         接收的方向由 ``message_channels`` 类属性控制，
         可通过 ``event.outgoing`` 区分消息来源。
+        """
+
+    async def on_message_edited(self, ctx: PluginContext, event: events.MessageEdited.Event) -> None:
+        """消息编辑事件回调；默认 no-op。
+
+        loader 只会把编辑消息派发给显式重写该方法的插件，避免改变既有
+        ``on_message`` 语义。
         """
 
     async def on_command(

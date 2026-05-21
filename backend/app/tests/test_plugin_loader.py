@@ -340,6 +340,75 @@ async def test_owner_only_false_incoming_command_text_does_not_dispatch_command(
         unregister_all_plugin_commands(owner_plugin_key="_test_public_command")
 
 
+@pytest.mark.asyncio
+async def test_message_edited_dispatches_dedicated_hook(monkeypatch) -> None:
+    from app.worker.plugins.base import _REGISTRY, register
+
+    message_calls: list[str] = []
+    edited_calls: list[str] = []
+
+    @register
+    class _EditedPlugin(Plugin):
+        key = "_test_edited_message"
+        display_name = "编辑消息测试"
+        message_channels = {"incoming"}
+        owner_only = False
+
+        async def on_message(self, ctx: PluginContext, event: Any) -> None:
+            message_calls.append(str(getattr(event, "raw_text", "")))
+
+        async def on_message_edited(self, ctx: PluginContext, event: Any) -> None:
+            edited_calls.append(str(getattr(event, "raw_text", "")))
+
+    class _Event:
+        raw_text = "edited text"
+        chat_id = -1001
+        sender_id = 42
+        is_private = False
+        is_group = True
+        is_channel = False
+
+        async def get_chat(self):
+            return None
+
+    fake_db = _FakeDB(
+        accounts={8: _FakeAcc(id=8)},
+        humanize={8: None},
+        afs=[_FakeAF(account_id=8, feature_key="_test_edited_message", enabled=True, config={})],
+        rules=[],
+    )
+    interaction_owned = AsyncMock(return_value=True)
+    monkeypatch.setattr(loader_mod, "AsyncSessionLocal", lambda: _fake_session_factory(fake_db))
+    monkeypatch.setattr(loader_mod, "_load_log_incoming_messages_setting", AsyncMock(return_value=False))
+    monkeypatch.setattr(loader_mod, "_interaction_bot_owns_incoming_text", interaction_owned)
+
+    captured: list[Any] = []
+
+    def _on(_filter):
+        def _wrap(fn):
+            captured.append(fn)
+            return fn
+
+        return _wrap
+
+    client = MagicMock()
+    client.on = _on
+    paused = asyncio.Event()
+    paused.set()
+
+    try:
+        await load_plugins_for_account(client, account_id=8, paused=paused, redis=_FakeRedis())
+        incoming_edited_dispatch = captured[1]
+        await incoming_edited_dispatch(_Event())
+
+        assert message_calls == []
+        assert edited_calls == ["edited text"]
+        interaction_owned.assert_not_awaited()
+    finally:
+        loader_mod._STATES.pop(8, None)
+        _REGISTRY.pop("_test_edited_message", None)
+
+
 # ─────────────────────────────────────────────────────
 # 用例 2：load_plugins_for_account 调到 on_startup
 # ─────────────────────────────────────────────────────

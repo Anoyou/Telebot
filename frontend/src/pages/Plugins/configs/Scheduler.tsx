@@ -80,6 +80,21 @@ function readConfig(c: Record<string, unknown> | undefined, commandPrefix = ",")
   return { ...defaultConfig(commandPrefix), ...(c as Partial<SchedulerRuleConfig> | undefined) };
 }
 
+function configForSave(config: SchedulerRuleConfig): Record<string, unknown> {
+  const {
+    next_fire: _nextFire,
+    last_fire: _lastFire,
+    last_result: _lastResult,
+    last_error: _lastError,
+    ...rest
+  } = config as SchedulerRuleConfig & Record<string, unknown>;
+  delete rest._last_cron;
+  delete rest._cron_seconds_mode;
+  delete rest._cron_timezone;
+  delete rest._config_dirty;
+  return rest;
+}
+
 interface FormState {
   name: string;
   enabled: boolean;
@@ -205,7 +220,7 @@ export function SchedulerConfig() {
         name: form.name.trim(),
         enabled: form.enabled,
         priority: form.priority,
-        config: form.config as unknown as Record<string, unknown>,
+        config: configForSave(form.config),
       },
       onSuccess: () => setEditOpen(false),
     });
