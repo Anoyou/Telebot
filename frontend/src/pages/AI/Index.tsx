@@ -5,6 +5,8 @@ import {
   ArrowRight,
   BookOpen,
   Bot,
+  ChevronDown,
+  ChevronRight,
   CheckCircle2,
   FileText,
   History,
@@ -19,11 +21,11 @@ import { listAccounts } from "@/api/accounts";
 import { listRecentLLMUsage } from "@/api/llmUsage";
 import { getSystemSettings } from "@/api/system";
 import type { AccountSummary, CommandTemplateOut, LLMProviderOut } from "@/api/types";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Spinner } from "@/components/ui/misc";
+import { MetaBadge } from "@/components/ui/meta-badge";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -67,6 +69,7 @@ export function AIIndex() {
   const navigate = useNavigate();
   const [accountPickerOpen, setAccountPickerOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(searchParams.get("help") === "1");
+  const [quickStartOpen, setQuickStartOpen] = useState(false);
   const activeTab = normalizeTab(searchParams.get("tab"));
   const providersQ = useQuery({
     queryKey: ["llm-providers"],
@@ -193,7 +196,7 @@ export function AIIndex() {
         cmdPrefix={cmdPrefix}
       />
 
-      <div className="grid gap-3 md:grid-cols-3">
+      <div className="grid gap-2 md:grid-cols-3">
         <StatusCard
           icon={Package}
           label="Provider 就绪"
@@ -218,41 +221,60 @@ export function AIIndex() {
       </div>
 
       <Card>
-        <CardHeader>
-          <CardTitle className="text-base">三步走</CardTitle>
-          <CardDescription>按顺序完成后，你的 Telegram 账号就能用 AI 指令回复消息。</CardDescription>
-        </CardHeader>
-        <CardContent className="grid gap-3 lg:grid-cols-3">
-          <SetupStep
-            no="1"
-            title="添加模型提供商"
-            desc="配置 OpenAI、Anthropic、Ollama 或兼容接口，确认至少一个模型可调用。"
-            done={providerCount > 0}
-            action="去配置"
-            href="/ai?tab=providers&newProvider=1"
-          />
-          <SetupStep
-            no="2"
-            title="创建一条 AI 指令"
-            desc={<>建议先建 <CommandBadge>{cmdPrefix}ai</CommandBadge>，绑定默认模型或开启 auto 路由。</>}
-            done={aiTemplates.length > 0}
-            action="去创建"
-            href="/plugins/templates?new=ai&returnTo=/ai"
-          />
-          <SetupStep
-            no="3"
-            title="在账号上启用指令"
-            desc={
-              totalAccountCount > 0
-                ? `已有 ${enabledAccountCount}/${totalAccountCount} 个账号启用了至少一条 AI 指令。`
-                : "还没有账号；创建账号后到账号详情的指令 tab 勾选模板。"
-            }
-            done={enabledAccountCount > 0}
-            action="去启用"
-            onAction={handleEnableCommand}
-            actionLoading={accountsQ.isFetching}
-          />
-        </CardContent>
+        <button
+          type="button"
+          className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left"
+          onClick={() => setQuickStartOpen((v) => !v)}
+          aria-expanded={quickStartOpen}
+        >
+          <span>
+            <span className="flex items-center gap-2 text-base font-semibold">
+              <Sparkles className="h-4 w-4 text-primary" />
+              快速上手
+            </span>
+            <span className="mt-1 block text-sm text-muted-foreground">
+              按顺序完成后，你的 Telegram 账号就能用 AI 指令回复消息。
+            </span>
+          </span>
+          {quickStartOpen ? (
+            <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
+          ) : (
+            <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
+          )}
+        </button>
+        {quickStartOpen ? (
+          <CardContent className="grid gap-3 pt-0 lg:grid-cols-3">
+            <SetupStep
+              no="1"
+              title="添加模型提供商"
+              desc="配置 OpenAI、Anthropic、Ollama 或兼容接口，确认至少一个模型可调用。"
+              done={providerCount > 0}
+              action="去配置"
+              href="/ai?tab=providers&newProvider=1"
+            />
+            <SetupStep
+              no="2"
+              title="创建一条 AI 指令"
+              desc={<>建议先建 <CommandBadge>{cmdPrefix}ai</CommandBadge>，绑定默认模型或开启 auto 路由。</>}
+              done={aiTemplates.length > 0}
+              action="去创建"
+              href="/plugins/templates?new=ai&returnTo=/ai"
+            />
+            <SetupStep
+              no="3"
+              title="在账号上启用指令"
+              desc={
+                totalAccountCount > 0
+                  ? `已有 ${enabledAccountCount}/${totalAccountCount} 个账号启用了至少一条 AI 指令。`
+                  : "还没有账号；创建账号后到账号详情的指令 tab 勾选模板。"
+              }
+              done={enabledAccountCount > 0}
+              action="去启用"
+              onAction={handleEnableCommand}
+              actionLoading={accountsQ.isFetching}
+            />
+          </CardContent>
+        ) : null}
       </Card>
 
       <Dialog open={accountPickerOpen} onOpenChange={setAccountPickerOpen}>
@@ -285,7 +307,10 @@ export function AIIndex() {
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">你的 AI 指令</CardTitle>
+          <CardTitle className="inline-flex items-center gap-2 text-base">
+            <FileText className="h-4 w-4 text-primary" />
+            你的 AI 指令
+          </CardTitle>
           <CardDescription>展示 type=ai 的指令模板；编辑会带 returnTo=/ai 回到总览。</CardDescription>
         </CardHeader>
         <CardContent>
@@ -323,9 +348,9 @@ export function AIIndex() {
                         <TableCell className="whitespace-nowrap font-mono">{cmdPrefix}{template.name}</TableCell>
                         <TableCell>{modelText}</TableCell>
                         <TableCell>
-                          <Badge variant={template.config?.routing_mode === "auto" ? "success" : "secondary"}>
+                          <MetaBadge tone={template.config?.routing_mode === "auto" ? "success" : "neutral"}>
                             {commandModeLabel(template)}
-                          </Badge>
+                          </MetaBadge>
                         </TableCell>
                         <TableCell className="max-w-[22rem] truncate text-sm text-muted-foreground">
                           {template.description || "未填写说明"}
@@ -354,7 +379,10 @@ function AIHeader() {
   return (
     <div>
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">AI 中心</h1>
+        <h1 className="inline-flex items-center gap-2 text-2xl font-semibold tracking-tight">
+          <Sparkles className="h-5 w-5 text-primary" />
+          AI 中心
+        </h1>
         <p className="text-sm text-muted-foreground">
           把模型、指令模板、调用记录和帮助信息集中管理。
         </p>
@@ -464,14 +492,14 @@ function StatusCard({
 }) {
   return (
     <Card className={ready ? "border-emerald-500/40 bg-emerald-500/5" : undefined}>
-      <CardHeader className="p-4 pb-2">
+      <CardHeader className="p-3 pb-1.5">
         <CardDescription className="inline-flex items-center gap-2">
           <Icon className="h-4 w-4" />
           {label}
         </CardDescription>
-        <CardTitle className="text-xl">{value}</CardTitle>
+        <CardTitle className="text-lg">{value}</CardTitle>
       </CardHeader>
-      <CardContent className="px-4 pb-4 text-xs text-muted-foreground">{hint}</CardContent>
+      <CardContent className="px-3 pb-3 text-xs text-muted-foreground">{hint}</CardContent>
     </Card>
   );
 }

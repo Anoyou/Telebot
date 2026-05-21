@@ -7,6 +7,7 @@ import {
   ArrowRight,
   Boxes,
   Cpu,
+  LayoutDashboard,
   Plus,
   Sparkles,
   type LucideIcon,
@@ -80,7 +81,10 @@ export function Dashboard() {
     <div className="space-y-5 pb-24 md:space-y-6">
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">概览</h1>
+          <h1 className="inline-flex items-center gap-2 text-3xl font-bold tracking-tight">
+            <LayoutDashboard className="h-6 w-6 text-primary" />
+            概览
+          </h1>
           <p className="mt-1 text-base text-muted-foreground">
             集中查看 TelePilot 的账号、模块、AI 和资源运行情况。
           </p>
@@ -340,7 +344,10 @@ function GuidePanel({
     <Card className="siri-glow-soft">
       <CardHeader className="flex-row items-start justify-between gap-3 space-y-0">
         <div>
-          <CardTitle className="text-xl">新手指引</CardTitle>
+          <CardTitle className="inline-flex items-center gap-2 text-xl">
+            <Sparkles className="h-5 w-5 text-primary" />
+            新手指引
+          </CardTitle>
           <CardDescription className="mt-1">
             只保留大内容指引：从账号接入、前缀通知到模块启用，一次看清。
           </CardDescription>
@@ -407,13 +414,13 @@ function TileCard({
     <Card className="h-full transition duration-200 hover:-translate-y-0.5 hover:shadow-[0_1px_2px_hsl(220_20%_20%/0.04),0_22px_54px_hsl(220_20%_20%/0.09)]">
       <CardHeader className="flex-row items-start justify-between space-y-0">
         <div className="min-w-0">
-          <CardTitle className="truncate">{title}</CardTitle>
+          <CardTitle className="inline-flex max-w-full items-center gap-2 truncate">
+            <Icon className="h-4 w-4 shrink-0 text-primary" />
+            <span className="truncate">{title}</span>
+          </CardTitle>
           <CardDescription className="mt-3 text-sm leading-5">
             {description}
           </CardDescription>
-        </div>
-        <div className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-primary/10 text-primary">
-          <Icon className="h-4 w-4" />
         </div>
       </CardHeader>
       <CardFooter className="pt-0">
@@ -437,7 +444,10 @@ function ResourceUsageCard({
       <CardHeader className="pb-2">
         <div className="flex items-start justify-between gap-3">
           <div>
-            <CardTitle>资源占用</CardTitle>
+            <CardTitle className="inline-flex items-center gap-2">
+              <Activity className="h-4 w-4 text-primary" />
+              资源占用
+            </CardTitle>
             <CardDescription className="mt-1">
               上方是 TelePilot 应用占用；下方是宿主机/服务器整体资源。
             </CardDescription>

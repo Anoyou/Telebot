@@ -1,6 +1,5 @@
 import { ListChecks } from "lucide-react";
 
-import { Badge } from "@/components/ui/badge";
 import {
   Card,
   CardContent,
@@ -8,6 +7,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { MetaBadge } from "@/components/ui/meta-badge";
 
 export function Glossary({ defaultOpen = false }: { defaultOpen?: boolean }) {
   return (
@@ -25,10 +25,10 @@ export function Glossary({ defaultOpen = false }: { defaultOpen?: boolean }) {
             <section>
               <h4 className="mb-1.5 font-semibold">模态 modality</h4>
               <ul className="space-y-1 text-xs text-muted-foreground">
-                <li><Badge variant="outline" className="mr-1.5">text</Badge>纯文本输入输出。</li>
-                <li><Badge variant="outline" className="mr-1.5">vision</Badge>支持图文输入到文本输出。</li>
-                <li><Badge variant="outline" className="mr-1.5">audio</Badge>支持语音转写、合成或实时语音。</li>
-                <li><Badge variant="outline" className="mr-1.5">multimodal</Badge>支持图、音、视频等多种输入。</li>
+                <li><MetaBadge className="mr-1.5">text</MetaBadge>纯文本输入输出。</li>
+                <li><MetaBadge className="mr-1.5">vision</MetaBadge>支持图文输入到文本输出。</li>
+                <li><MetaBadge className="mr-1.5">audio</MetaBadge>支持语音转写、合成或实时语音。</li>
+                <li><MetaBadge className="mr-1.5">multimodal</MetaBadge>支持图、音、视频等多种输入。</li>
               </ul>
             </section>
 
@@ -52,9 +52,9 @@ export function Glossary({ defaultOpen = false }: { defaultOpen?: boolean }) {
             <section>
               <h4 className="mb-1.5 font-semibold">推理成本档 cost_tier</h4>
               <ul className="space-y-1 text-xs text-muted-foreground">
-                <li><Badge variant="secondary" className="mr-1.5">tier 1</Badge>便宜量产档，适合 chat、classify、translate。</li>
-                <li><Badge variant="secondary" className="mr-1.5">tier 2</Badge>默认中档，适合大多数场景。</li>
-                <li><Badge variant="secondary" className="mr-1.5">tier 3</Badge>旗舰档，适合 reason、smart、复杂代码与长文。</li>
+                <li><MetaBadge className="mr-1.5">tier 1</MetaBadge>便宜量产档，适合 chat、classify、translate。</li>
+                <li><MetaBadge className="mr-1.5">tier 2</MetaBadge>默认中档，适合大多数场景。</li>
+                <li><MetaBadge className="mr-1.5">tier 3</MetaBadge>旗舰档，适合 reason、smart、复杂代码与长文。</li>
               </ul>
             </section>
           </CardContent>
@@ -67,7 +67,7 @@ export function Glossary({ defaultOpen = false }: { defaultOpen?: boolean }) {
 function TagDef({ tag, desc }: { tag: string; desc: string }) {
   return (
     <span className="inline-flex items-center gap-1.5 rounded-md border bg-background px-2 py-1">
-      <Badge variant="outline" className="font-mono">{tag}</Badge>
+      <MetaBadge mono>{tag}</MetaBadge>
       <span className="text-muted-foreground">{desc}</span>
     </span>
   );

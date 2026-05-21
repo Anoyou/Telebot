@@ -11,6 +11,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft,
   BookOpen,
+  ChevronDown,
   ChevronRight,
   GitFork,
   Power,
@@ -44,7 +45,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Badge } from "@/components/ui/badge";
+import { MetaBadge } from "@/components/ui/meta-badge";
 import { Spinner } from "@/components/ui/misc";
 import { cn } from "@/lib/utils";
 import { goBackOr } from "@/lib/navigation";
@@ -99,6 +100,22 @@ function toastPluginLintWarnings(row: RemotePlugin) {
   toast.warning(`模块 ${row.name} 有 ${warnings.length} 条开发规范警告`, {
     description: warnings[0],
   });
+}
+
+function remoteVersionLabel(plugin: RemotePlugin) {
+  if (plugin.update_available) return "不是最新版";
+  if (plugin.last_update_check_error) return "检查失败";
+  if (plugin.source_url?.startsWith("local://")) return "本地导入";
+  if (plugin.last_update_check_at) return "已是最新版";
+  return "未检查";
+}
+
+function remoteVersionTone(plugin: RemotePlugin): "neutral" | "success" | "warn" | "outline" {
+  if (plugin.update_available) return "warn";
+  if (plugin.last_update_check_error) return "warn";
+  if (plugin.source_url?.startsWith("local://")) return "outline";
+  if (plugin.last_update_check_at) return "success";
+  return "neutral";
 }
 
 function parseManageTab(value: string | null): TabValue {
@@ -501,9 +518,9 @@ function RemoteInstallCard() {
                       {repo.url}
                     </span>
                   )}
-                  <Badge variant="outline" className="shrink-0">
+                  <MetaBadge tone="outline" className="shrink-0">
                     {expandedRepoId === repo.id && pluginsQ.isLoading ? "加载中…" : "仓库"}
-                  </Badge>
+                  </MetaBadge>
                   <Button
                     variant="ghost"
                     size="sm"
@@ -544,9 +561,9 @@ function RemoteInstallCard() {
                                 <span className="text-sm font-medium">{p.display_name || p.name}</span>
                                 <span className="font-mono text-xs text-muted-foreground">v{p.version}</span>
                                 {canUpdate ? (
-                                  <Badge variant="default" className="text-xs">可更新</Badge>
+                                  <MetaBadge tone="success">可更新</MetaBadge>
                                 ) : p.installed ? (
-                                  <Badge variant="secondary" className="text-xs">已安装</Badge>
+                                  <MetaBadge>已安装</MetaBadge>
                                 ) : null}
                               </div>
                               {p.description && (
@@ -661,6 +678,7 @@ function InstalledPluginsSection() {
   });
 
   const isLoading = builtinQ.isLoading || thirdPartyQ.isLoading || remoteQ.isLoading;
+  const [expandedWarnings, setExpandedWarnings] = useState<Set<string>>(() => new Set());
   const builtin = builtinQ.data ?? [];
   const thirdParty = thirdPartyQ.data ?? [];
   const remote = remoteQ.data ?? [];
@@ -669,6 +687,14 @@ function InstalledPluginsSection() {
   const accountCount = accounts.length;
   const remoteEnabledCount = (name: string) =>
     accounts.filter((account) => account.features[name] && account.features[name] !== "disabled").length;
+  const toggleWarnings = (name: string) => {
+    setExpandedWarnings((prev) => {
+      const next = new Set(prev);
+      if (next.has(name)) next.delete(name);
+      else next.add(name);
+      return next;
+    });
+  };
 
   return (
     <Card>
@@ -690,7 +716,7 @@ function InstalledPluginsSection() {
                 <TableHead>模块</TableHead>
                 <TableHead>类型</TableHead>
                 <TableHead>版本</TableHead>
-                <TableHead>状态</TableHead>
+                <TableHead>版本状态</TableHead>
                 <TableHead className="text-right">操作</TableHead>
               </TableRow>
             </TableHeader>
@@ -702,9 +728,9 @@ function InstalledPluginsSection() {
                     <div className="font-medium">{f.display_name}</div>
                     <div className="font-mono text-xs text-muted-foreground">{f.key}</div>
                   </TableCell>
-                  <TableCell><Badge variant="secondary">内置</Badge></TableCell>
+                  <TableCell><MetaBadge>内置</MetaBadge></TableCell>
                   <TableCell>{formatPluginVersion(f.version)}</TableCell>
-                  <TableCell><Badge variant="default">内置</Badge></TableCell>
+                  <TableCell><MetaBadge tone="success">随系统更新</MetaBadge></TableCell>
                   <TableCell className="text-right">
                     <Button size="sm" variant="outline" onClick={() => nav("/plugins")}>
                       去模块中心
@@ -718,12 +744,13 @@ function InstalledPluginsSection() {
                   <TableCell>
                     <div className="font-medium">{row.key}</div>
                   </TableCell>
-                  <TableCell><Badge variant="outline">第三方</Badge></TableCell>
+                  <TableCell><MetaBadge>第三方</MetaBadge></TableCell>
                   <TableCell>{formatPluginVersion(row.version)}</TableCell>
                   <TableCell>
-                    <Badge variant={row.enabled ? "default" : "outline"}>
-                      {row.enabled ? "已启用" : "未启用"}
-                    </Badge>
+                    <MetaBadge tone="outline">本地安装</MetaBadge>
+                    <div className="mt-1 text-xs text-muted-foreground">
+                      状态 {row.enabled ? "已启用" : "未启用"}
+                    </div>
                   </TableCell>
                   <TableCell className="text-right">
                     <div className="flex justify-end gap-2">
@@ -743,8 +770,25 @@ function InstalledPluginsSection() {
                   <TableCell>
                     <div className="flex flex-wrap items-center gap-2">
                       <div className="font-medium">{p.display_name || p.name}</div>
-                      {p.update_available ? <Badge variant="default">有更新</Badge> : null}
-                      {(p.lint_warnings?.length ?? 0) > 0 ? <Badge variant="outline">规范警告</Badge> : null}
+                      {p.update_available ? <MetaBadge tone="warn">有新版本</MetaBadge> : null}
+                      {(p.lint_warnings?.length ?? 0) > 0 ? (
+                        <button
+                          type="button"
+                          className="inline-flex"
+                          onClick={() => toggleWarnings(p.name)}
+                          aria-expanded={expandedWarnings.has(p.name)}
+                        >
+                          <MetaBadge tone="warn">
+                            规范警告
+                            <ChevronDown
+                              className={cn(
+                                "h-3 w-3 transition-transform",
+                                expandedWarnings.has(p.name) && "rotate-180",
+                              )}
+                            />
+                          </MetaBadge>
+                        </button>
+                      ) : null}
                     </div>
                     <div className="font-mono text-xs text-muted-foreground">{p.name}</div>
                     {p.update_available && p.latest_version ? (
@@ -757,25 +801,34 @@ function InstalledPluginsSection() {
                         更新检查失败：{p.last_update_check_error}
                       </div>
                     ) : null}
-                    {(p.lint_warnings?.length ?? 0) > 0 ? (
-                      <div className="mt-1 text-xs text-amber-700">
-                        {p.lint_warnings?.[0]}
+                    {(p.lint_warnings?.length ?? 0) > 0 && expandedWarnings.has(p.name) ? (
+                      <div className="mt-2 space-y-1 rounded-md border border-amber-500/30 bg-amber-50/70 px-3 py-2 text-xs text-amber-900 dark:bg-amber-950/20 dark:text-amber-200">
+                        {p.lint_warnings?.map((warning, index) => (
+                          <div key={`${p.name}-warning-${index}`} className="leading-5">
+                            {warning}
+                          </div>
+                        ))}
                       </div>
                     ) : null}
                   </TableCell>
                   <TableCell>
                     {p.source_url?.startsWith("local://") ? (
-                      <Badge variant="secondary">本地导入</Badge>
+                      <MetaBadge>本地导入</MetaBadge>
                     ) : (
-                      <Badge variant="outline"><GitFork className="inline h-3 w-3 mr-1" />远程</Badge>
+                      <MetaBadge><GitFork className="h-3 w-3" />远程</MetaBadge>
                     )}
                   </TableCell>
                   <TableCell>{formatPluginVersion(p.version)}</TableCell>
                   <TableCell>
-                    <Badge variant={p.enabled ? "default" : "outline"}>
-                      {p.enabled ? "全局已启用" : "全局未启用"}
-                    </Badge>
-                    {p.enabled && accountCount > 0 ? (
+                    <MetaBadge tone={remoteVersionTone(p)}>
+                      {remoteVersionLabel(p)}
+                    </MetaBadge>
+                    {p.update_available && p.latest_version ? (
+                      <div className="mt-1 text-xs text-muted-foreground">
+                        远程 {formatPluginVersion(p.latest_version)}
+                      </div>
+                    ) : null}
+                    {accountCount > 0 ? (
                       <div className="mt-1 text-xs text-muted-foreground">
                         账号启用 {remoteEnabledCount(p.name)}/{accountCount}
                       </div>

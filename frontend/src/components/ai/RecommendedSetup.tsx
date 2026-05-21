@@ -1,6 +1,5 @@
 import { Sparkles } from "lucide-react";
 
-import { Badge } from "@/components/ui/badge";
 import {
   Card,
   CardContent,
@@ -8,6 +7,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { MetaBadge } from "@/components/ui/meta-badge";
 import {
   Table,
   TableBody,
@@ -96,11 +96,11 @@ export function RecommendedSetup({ cmdPrefix = ",", defaultOpen = false }: { cmd
                   <TableRow key={r.name}>
                     <TableCell className="font-medium">{r.name}</TableCell>
                     <TableCell className="font-mono text-xs">{r.protocol}</TableCell>
-                    <TableCell><Badge variant="outline">{r.modality}</Badge></TableCell>
+                    <TableCell><MetaBadge>{r.modality}</MetaBadge></TableCell>
                     <TableCell className="space-x-1">
-                      {r.tags.map((t) => <Badge key={t} variant="outline" className="text-xs">{t}</Badge>)}
+                      {r.tags.map((t) => <MetaBadge key={t}>{t}</MetaBadge>)}
                     </TableCell>
-                    <TableCell><Badge variant="secondary">{r.tier}</Badge></TableCell>
+                    <TableCell><MetaBadge>tier {r.tier}</MetaBadge></TableCell>
                     <TableCell className="text-xs">
                       <div className="font-medium">{r.role}</div>
                       <div className="text-muted-foreground">{r.note}</div>

@@ -14,6 +14,21 @@
 
 ## [Unreleased]
 
+## [0.23.1] — 2026-05-22 · patch · README 轻量部署与界面细节
+
+### Changed
+- 统一 AI 与模块管理页面的标签胶囊样式，优化模块规范警告展开、远程模块版本状态、AI 快速上手折叠和概览标题图标。
+- README 新增最轻量 Docker Compose 启动示例，折叠截图、架构、调优等繁杂内容，并说明启动密钥、数据库命名、Web 面板可配置项和仍需保留在启动或反代配置中的内容。
+
+### Fixed
+- 修正生产容器未挂载 Git 工作树时的更新弹窗文案，不再显示“远程有 0 个新 commit”和未知 commit，而是提示需在宿主机执行更新命令。
+
+### Verification
+- `pnpm --dir frontend exec tsc -b --pretty false`
+- `PYTHONPYCACHEPREFIX=.tmp/pycache python3.12 -m py_compile backend/app/api/system_health.py`
+- `pnpm --dir frontend build`
+- `git diff --check`
+
 ## [0.23.0] — 2026-05-22 · minor · 远程模块更新检查与配置体验
 
 ### Added

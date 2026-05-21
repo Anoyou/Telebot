@@ -75,7 +75,10 @@ export function UpdateDialog({ open, onOpenChange }: UpdateDialogProps) {
   });
 
   const getPrimaryActionLabel = (plan: UpdatePlanMeta) => {
-    if (plan.manualCommand || plan.actionRequired === "manual" || plan.actionRequired === "unsupported") {
+    if (plan.manualCommand) {
+      return "复制服务器命令";
+    }
+    if (plan.actionRequired === "manual" || plan.actionRequired === "unsupported") {
       return "查看服务器命令";
     }
     if (!plan.canApply) {
@@ -102,6 +105,18 @@ export function UpdateDialog({ open, onOpenChange }: UpdateDialogProps) {
       default:
         return "应用更新";
     }
+  };
+
+  const isManualRuntime = (plan: UpdatePlanMeta) =>
+    plan.actionRequired === "manual" ||
+    plan.actionRequired === "unsupported" ||
+    plan.runtimeMode === "prod_container_manual";
+
+  const describeUpdateState = (plan: UpdatePlanMeta, ahead: number) => {
+    if (isManualRuntime(plan) && ahead <= 0) {
+      return "需要在服务器执行更新";
+    }
+    return "发现新版本可用";
   };
 
   // 打开时自动检查更新
@@ -197,6 +212,7 @@ export function UpdateDialog({ open, onOpenChange }: UpdateDialogProps) {
     if (plan.manualCommand || plan.actionRequired === "manual" || plan.actionRequired === "unsupported") {
       if (plan.manualCommand && navigator.clipboard?.writeText) {
         await navigator.clipboard.writeText(plan.manualCommand);
+        window.alert("服务器命令已复制。");
       } else {
         window.alert("请按弹窗中的命令在服务器上手动执行。");
       }
@@ -219,7 +235,7 @@ export function UpdateDialog({ open, onOpenChange }: UpdateDialogProps) {
           <DialogDescription>
             {step?.kind === "checking" && "正在检查远程仓库..."}
             {step?.kind === "up_to_date" && "当前已是最新版本"}
-            {step?.kind === "has_update" && "发现新版本可用"}
+            {step?.kind === "has_update" && describeUpdateState(step.plan, step.ahead)}
             {step?.kind === "pulling" && "正在应用更新计划..."}
             {step?.kind === "pulled" && "更新计划已执行"}
             {step?.kind === "pull_failed" && "拉取失败"}
@@ -252,7 +268,11 @@ export function UpdateDialog({ open, onOpenChange }: UpdateDialogProps) {
             <div className="space-y-2 text-sm">
               <div className="flex items-center gap-2 text-amber-600 dark:text-amber-300">
                 <AlertCircle className="h-5 w-5" />
-                <span>远程有 {step.ahead} 个新 commit</span>
+                {step.ahead > 0 ? (
+                  <span>远程有 {step.ahead} 个新 commit</span>
+                ) : (
+                  <span>容器内无法直接检查远程 commit</span>
+                )}
               </div>
               {step.plan.planLabel && (
                 <p className="rounded-md border bg-background px-3 py-2">
@@ -263,13 +283,21 @@ export function UpdateDialog({ open, onOpenChange }: UpdateDialogProps) {
                 <p className="text-muted-foreground">{step.plan.planDetail}</p>
               )}
               <div className="rounded-md bg-muted px-3 py-2 font-mono text-xs space-y-1">
-                <p>当前: {step.current}</p>
-                <p>远程: {step.remote}</p>
+                {(step.current !== "?" || step.remote !== "?") ? (
+                  <>
+                    <p>当前: {step.current}</p>
+                    <p>远程: {step.remote}</p>
+                  </>
+                ) : (
+                  <p>代码版本: 请在宿主机查看</p>
+                )}
                 {step.plan.runtimeMode && <p>运行模式: {step.plan.runtimeMode}</p>}
               </div>
               {step.plan.components.length > 0 && (
                 <div className="rounded-md border bg-background px-3 py-2">
-                  <p className="mb-1 text-xs text-muted-foreground">变更组件</p>
+                  <p className="mb-1 text-xs text-muted-foreground">
+                    {step.changedFiles.length > 0 ? "变更组件" : "建议更新方式"}
+                  </p>
                   <div className="flex flex-wrap gap-1">
                     {step.plan.components.map((name) => (
                       <span key={name} className="rounded bg-muted px-2 py-0.5 text-xs">{name}</span>

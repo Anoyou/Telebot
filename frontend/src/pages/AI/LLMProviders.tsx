@@ -8,7 +8,7 @@ import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
-import { Plus, Trash2, KeyRound, Edit3, Download, Loader2, CheckCircle2, XCircle, Star, ChevronDown, ChevronRight, Filter, X } from "lucide-react";
+import { Plus, Trash2, KeyRound, Edit3, Download, Loader2, CheckCircle2, XCircle, Star, ChevronDown, ChevronRight, Filter, X, Package } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { CommandBadge } from "@/components/CommandBadge";
@@ -17,7 +17,7 @@ import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
-import { Badge } from "@/components/ui/badge";
+import { MetaBadge } from "@/components/ui/meta-badge";
 import { Spinner } from "@/components/ui/misc";
 import {
   Card,
@@ -354,7 +354,10 @@ export function LLMProviders({
         <CardHeader>
           <div className="flex items-start justify-between gap-3">
             <div>
-              <CardTitle className="text-base">模型提供商</CardTitle>
+              <CardTitle className="inline-flex items-center gap-2 text-base">
+                <Package className="h-4 w-4 text-primary" />
+                模型提供商
+              </CardTitle>
               <CardDescription>
                 一行 = 一个模型供应商凭据。配完 API Key + Base URL 后，在编辑里点
                 <strong>「Fetch 模型列表」</strong>就能自动拉取并可手动选择要启用的模型。<br />
@@ -411,31 +414,31 @@ export function LLMProviders({
                       <TableCell className="font-medium">{p.name}</TableCell>
                       <TableCell className="font-mono text-xs">{p.provider}</TableCell>
                       <TableCell className="text-xs">
-                        <Badge variant="outline" className="font-mono">
+                        <MetaBadge mono>
                           {p.api_format || "chat_completions"}
-                        </Badge>
+                        </MetaBadge>
                       </TableCell>
                       <TableCell className="text-xs">
-                        <Badge variant={(p.web_search_api_format || "auto") === "auto" ? "secondary" : "outline"} className="font-mono">
+                        <MetaBadge mono tone={(p.web_search_api_format || "auto") === "auto" ? "neutral" : "outline"}>
                           {p.web_search_api_format || "auto"}
-                        </Badge>
+                        </MetaBadge>
                       </TableCell>
                       <TableCell className="font-mono text-xs">{p.default_model}</TableCell>
                       <TableCell>
-                        <Badge variant={enabledModels.length > 0 ? "secondary" : "warn"}>
+                        <MetaBadge tone={enabledModels.length > 0 ? "neutral" : "warn"}>
                           {enabledModels.length} / {(p.models || []).length}
-                        </Badge>
+                        </MetaBadge>
                       </TableCell>
                       <TableCell className="space-x-1 text-xs">
-                        <Badge variant="outline">{p.modality || "text"}</Badge>
-                        <Badge variant="secondary">tier {p.cost_tier ?? 2}</Badge>
+                        <MetaBadge>{p.modality || "text"}</MetaBadge>
+                        <MetaBadge>tier {p.cost_tier ?? 2}</MetaBadge>
                       </TableCell>
                       <TableCell className="space-x-1">
                         {(p.tags || []).length > 0 ? (
                           (p.tags || []).slice(0, 4).map((t) => (
-                            <Badge key={t} variant="outline" className="text-xs">
+                            <MetaBadge key={t}>
                               {t}
-                            </Badge>
+                            </MetaBadge>
                           ))
                         ) : (
                           <span className="text-xs text-muted-foreground">—</span>
@@ -449,29 +452,29 @@ export function LLMProviders({
                       <TableCell>
                         {p.proxy_id != null ? (
                           proxyById.has(p.proxy_id) ? (
-                            <Badge variant="outline" className="font-mono text-xs">
+                            <MetaBadge mono>
                               {proxyById.get(p.proxy_id)!.type}://
                               {proxyById.get(p.proxy_id)!.host}:
                               {proxyById.get(p.proxy_id)!.port}
-                            </Badge>
+                            </MetaBadge>
                           ) : (
-                            <Badge variant="warn" className="text-xs">
+                            <MetaBadge tone="warn">
                               #{p.proxy_id} 已删除
-                            </Badge>
+                            </MetaBadge>
                           )
                         ) : (
-                          <Badge variant="secondary" className="text-xs">
+                          <MetaBadge>
                             DIRECT
-                          </Badge>
+                          </MetaBadge>
                         )}
                       </TableCell>
                       <TableCell>
                         {p.has_api_key ? (
-                          <Badge variant="success" className="gap-1">
+                          <MetaBadge tone="success">
                             <KeyRound className="h-3 w-3" /> 已配置
-                          </Badge>
+                          </MetaBadge>
                         ) : (
-                          <Badge variant="secondary">未配置</Badge>
+                          <MetaBadge>未配置</MetaBadge>
                         )}
                       </TableCell>
                       <TableCell className="space-x-2 text-right">
@@ -822,10 +825,10 @@ function ProviderEditDialog({
                       onClick={() => toggleTag(opt.value)}
                       title={opt.hint}
                       className={
-                        "rounded-full border px-2.5 py-0.5 text-xs transition-colors " +
+                        "inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-xs font-semibold leading-5 transition-colors " +
                         (active
-                          ? "bg-primary text-primary-foreground border-transparent"
-                          : "bg-background hover:bg-muted")
+                          ? "border-transparent bg-primary text-primary-foreground"
+                          : "border-transparent bg-muted text-foreground hover:bg-muted/70")
                       }
                     >
                       {opt.label}
@@ -928,11 +931,11 @@ function ProtocolDetectionPanel({ result }: { result: DetectProviderProtocolsRes
         <div className="font-medium text-foreground">协议检测结果</div>
         {result.recommended_api_format ? (
           <div className="text-muted-foreground">
-            推荐：<Badge variant="secondary" className="font-mono">{result.recommended_api_format}</Badge>
+            推荐：<MetaBadge mono>{result.recommended_api_format}</MetaBadge>
             {" "}· 联网{" "}
-            <Badge variant="secondary" className="font-mono">
+            <MetaBadge mono>
               {result.recommended_web_search_api_format || "auto"}
-            </Badge>
+            </MetaBadge>
           </div>
         ) : null}
       </div>
@@ -952,9 +955,9 @@ function ProbeRow({ label, probe }: { label: string; probe: ProtocolProbeResult 
     <div className="rounded-md border bg-background px-2 py-1.5">
       <div className="flex items-center justify-between gap-2">
         <span className="font-mono">{label}</span>
-        <Badge variant={probe.ok ? "success" : "warn"} className="font-mono">
+        <MetaBadge mono tone={probe.ok ? "success" : "warn"}>
           {probe.ok ? "OK" : probe.status_code ? `HTTP ${probe.status_code}` : "FAIL"}
-        </Badge>
+        </MetaBadge>
       </div>
       <div className="mt-1 text-muted-foreground">{probe.latency_ms} ms</div>
       {probe.error ? <div className="mt-1 break-words text-muted-foreground">{probe.error}</div> : null}
@@ -1146,28 +1149,28 @@ function ProviderModelsSection({
           {m.id}
         </span>
         {m.custom ? (
-          <Badge variant="outline" className="text-[10px]">custom</Badge>
+          <MetaBadge tone="outline" className="text-[10px] leading-4">custom</MetaBadge>
         ) : null}
         {result ? (
           result.ok ? (
-            <Badge variant="success" className="gap-1 text-[10px]">
+            <MetaBadge tone="success" className="text-[10px] leading-4">
               <CheckCircle2 className="h-3 w-3" />
               {result.latency_ms} ms
-            </Badge>
+            </MetaBadge>
           ) : (
-            <Badge
-              variant="destructive"
-              className="gap-1 text-[10px]"
+            <MetaBadge
+              tone="danger"
+              className="text-[10px] leading-4"
               title={result.error || ""}
             >
               <XCircle className="h-3 w-3" />
               失败
-            </Badge>
+            </MetaBadge>
           )
         ) : null}
         {/* 槽位 1：设默认动作（非默认 → ⭐ 按钮；默认 → 默认徽章） */}
         {isDefault ? (
-          <Badge variant="success" className="text-[10px]">默认</Badge>
+          <MetaBadge tone="success" className="text-[10px] leading-4">默认</MetaBadge>
         ) : (
           <Button
             type="button"

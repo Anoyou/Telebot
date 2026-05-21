@@ -4,10 +4,14 @@ import { useQuery } from "@tanstack/react-query";
 import {
   ArrowRight,
   BookOpen,
+  CalendarClock,
+  FileText,
   History,
   Package2,
   Package,
+  PackagePlus,
   Settings2,
+  ShieldCheck,
   Sparkles,
 } from "lucide-react";
 
@@ -16,8 +20,8 @@ import { getSystemSettings } from "@/api/system";
 import type { FeatureInfo } from "@/api/types";
 import { CommandBadge } from "@/components/CommandBadge";
 import { Spinner } from "@/components/ui/misc";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { MetaBadge } from "@/components/ui/meta-badge";
 import {
   Card,
   CardContent,
@@ -172,7 +176,10 @@ export function PluginsHome() {
               onClick={() => nav("/plugins/templates")}
             >
               <span>
-                <span className="block font-medium">指令模板</span>
+                <span className="flex items-center gap-2 font-medium">
+                  <FileText className="h-4 w-4 text-primary" />
+                  指令模板
+                </span>
                 <span className="mt-1 block text-xs leading-5 text-muted-foreground">
                   先把常用回复、转发、AI 指令整理成一套模板，再按账号开启复用。
                 </span>
@@ -184,7 +191,10 @@ export function PluginsHome() {
               onClick={() => nav("/plugins/scheduler")}
             >
               <span>
-                <span className="block font-medium">定时任务</span>
+                <span className="flex items-center gap-2 font-medium">
+                  <CalendarClock className="h-4 w-4 text-primary" />
+                  定时任务
+                </span>
                 <span className="mt-1 block text-xs leading-5 text-muted-foreground">
                   按账号定时发消息、跑指令或调用 AI 模型，适合固定周期的自动动作。
                 </span>
@@ -202,7 +212,10 @@ export function PluginsHome() {
               }
             >
               <span>
-                <span className="block font-medium">自动指令白名单</span>
+                <span className="flex items-center gap-2 font-medium">
+                  <ShieldCheck className="h-4 w-4 text-primary" />
+                  自动指令白名单
+                </span>
                 <span className="mt-1 block text-xs leading-5 text-muted-foreground">
                   控制定时任务和自动动作能触发哪些指令，避免误执行高风险操作。
                 </span>
@@ -216,7 +229,10 @@ export function PluginsHome() {
               onClick={() => nav("/plugins/manage?tab=plugins")}
             >
               <span>
-                <span className="block font-medium">安装模块</span>
+                <span className="flex items-center gap-2 font-medium">
+                  <PackagePlus className="h-4 w-4 text-primary" />
+                  安装模块
+                </span>
                 <span className="mt-1 block text-xs leading-5 text-muted-foreground">
                   添加 Git 仓库安装远程模块；安装完成后回到本页按账号启用和配置。
                 </span>
@@ -224,7 +240,10 @@ export function PluginsHome() {
             </Button>
           </div>
           <div className="rounded-lg border px-4 py-3">
-            <div className="text-sm font-medium">AI 模块入口</div>
+            <div className="inline-flex items-center gap-2 text-sm font-medium">
+              <Sparkles className="h-4 w-4 text-primary" />
+              AI 模块入口
+            </div>
             <p className="mt-1 text-xs leading-5 text-muted-foreground">
               AI 属于模块配置：先配置模型凭据，再创建指令模板，最后按账号启用；调用记录与排障集中在同一个工作台。
             </p>
@@ -449,7 +468,7 @@ function FeatureZone({
         <CardTitle className="flex items-center gap-2 text-base">
           {icon}
           {title}
-          <Badge variant="secondary">{features.length}</Badge>
+          <MetaBadge>{features.length}</MetaBadge>
         </CardTitle>
         <CardDescription>{hint}</CardDescription>
       </CardHeader>
@@ -469,9 +488,9 @@ function FeatureZone({
                   <div>
                     <div className="flex flex-wrap items-center gap-1.5 text-sm font-medium">
                       {f.display_name}
-                      {f.experimental ? <Badge variant="outline">实验性</Badge> : null}
-                      {f.interaction_entries?.length ? <Badge variant="secondary">交互入口</Badge> : null}
-                      {f.update_available ? <Badge variant="default">有更新</Badge> : null}
+                      {f.experimental ? <MetaBadge>实验性</MetaBadge> : null}
+                      {f.interaction_entries?.length ? <MetaBadge>交互入口</MetaBadge> : null}
+                      {f.update_available ? <MetaBadge tone="success">有更新</MetaBadge> : null}
                     </div>
                     <div className="font-mono text-xs text-muted-foreground">{f.key}</div>
                     {f.update_available && f.latest_version ? (
@@ -486,9 +505,9 @@ function FeatureZone({
                     ) : null}
                   </div>
                   <div className="flex items-center gap-2">
-                    <Badge variant={status === "active" ? "default" : "outline"}>
+                    <MetaBadge tone={status === "active" ? "success" : "neutral"}>
                       {status === "active" ? "已启用" : "未启用"}
-                    </Badge>
+                    </MetaBadge>
                     {canConfigure ? (
                       <Button
                         size="sm"

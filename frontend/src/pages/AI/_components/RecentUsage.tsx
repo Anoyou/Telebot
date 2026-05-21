@@ -7,7 +7,7 @@ import { listLLMProviders } from "@/api/commands";
 import { getErrMsg } from "@/lib/api";
 import { Spinner } from "@/components/ui/misc";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
+import { MetaBadge } from "@/components/ui/meta-badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 
@@ -60,7 +60,9 @@ export function RecentUsageContent() {
     return (
       <Card>
         <CardHeader>
-          <CardTitle>近期调用</CardTitle>
+          <CardTitle className="inline-flex items-center gap-2">
+            <History className="h-4 w-4" /> 近期调用
+          </CardTitle>
           <CardDescription>先配置至少一个模型提供商，才会产生可查看的调用记录。</CardDescription>
         </CardHeader>
         <CardContent>
@@ -143,7 +145,7 @@ export function RecentUsageContent() {
                     <TableCell>{tokens}</TableCell>
                     <TableCell>{r.latency_ms != null ? `${r.latency_ms}ms` : "-"}</TableCell>
                     <TableCell>
-                      <Badge variant={r.success ? "success" : "warn"}>{r.success ? "成功" : "失败"}</Badge>
+                      <MetaBadge tone={r.success ? "success" : "warn"}>{r.success ? "成功" : "失败"}</MetaBadge>
                     </TableCell>
                     <TableCell>{r.used_fallback ? "已使用" : "-"}</TableCell>
                     <TableCell className="font-mono text-xs">{r.error_type || "-"}</TableCell>

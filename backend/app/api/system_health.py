@@ -1287,8 +1287,8 @@ def _plan_text(
         detail_parts.append("当前运行于容器，需调用宿主机更新器。")
         label = "需调用宿主机更新器"
     elif runtime_mode == RUNTIME_PROD_CONTAINER_MANUAL:
-        detail_parts.append("当前运行于容器且无更新器，需人工在宿主机执行更新。")
-        label = "需人工更新"
+        detail_parts.append("当前运行于容器且无更新器，无法在容器内直接检查 Git 远程差异；需人工在宿主机执行更新。")
+        label = "需在宿主机更新"
     else:
         detail_parts.append("当前运行环境不支持自动更新。")
         label = "环境不支持自动更新"

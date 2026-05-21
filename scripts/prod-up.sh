@@ -60,7 +60,7 @@ _pg_db="${_pg_db:-telebot}"
 _db_url="$(grep -E '^DATABASE_URL=' .env 2>/dev/null | head -n1 | cut -d= -f2- | tr -d ' "' || true)"
 
 # 弱密码黑名单（小写比较）
-_weak_list=("telebot" "postgres" "password" "changeme" "admin" "123456" "root" "")
+_weak_list=("telepilot" "telebot" "postgres" "password" "changeme" "admin" "123456" "root" "")
 _pwd_lc="$(printf '%s' "$_pg_pwd" | tr '[:upper:]' '[:lower:]')"
 for w in "${_weak_list[@]}"; do
   if [[ "$_pwd_lc" == "$w" ]]; then
