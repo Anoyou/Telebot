@@ -623,11 +623,14 @@ async def load_plugins_for_account(
     await _load_ignored_peers(state)
 
     # ── 2) 全局事件派发 ──
-    def _make_dispatcher(direction: str):  # "incoming" or "outgoing"
+    def _make_dispatcher(direction: str, *, edited: bool = False):  # "incoming" or "outgoing"
         """创建消息派发闭包。direction 对应 Plugin.message_channels 的值。"""
         kwargs = {"incoming": True} if direction == "incoming" else {"outgoing": True}
+        handler_name = "on_message_edited" if edited else "on_message"
+        event_label = f"{direction}_edited" if edited else direction
+        event_builder = events.MessageEdited if edited else events.NewMessage
 
-        @client.on(events.NewMessage(**kwargs))
+        @client.on(event_builder(**kwargs))
         async def _dispatch(event):  # noqa: ANN001
             if state.paused is not None and not state.paused.is_set():
                 return
@@ -665,6 +668,7 @@ async def load_plugins_for_account(
                             chat_id=event.chat_id,
                             peer_kind=peer_kind,
                             message_preview=text_preview,
+                            edited=edited,
                         )
                     except Exception:  # noqa: BLE001
                         pass
@@ -683,21 +687,24 @@ async def load_plugins_for_account(
                     continue
                 if ctx.generation != state.generation:
                     continue
+                handler = getattr(inst, handler_name, None)
+                if handler is None:
+                    continue
                 try:
-                    await inst.on_message(ctx, event)
+                    await handler(ctx, event)
                 except Exception as exc:  # noqa: BLE001
                     await _log(
                         redis,
                         account_id,
                         "error",
                         (
-                            f"插件 {fkey} 处理{direction}消息时出错："
+                            f"插件 {fkey} 处理{event_label}消息时出错："
                             f"{type(exc).__name__}: {exc}。"
                             "这条消息已跳过，其他插件和 worker 会继续运行。"
                         ),
                         source="plugin",
                         plugin_key=fkey,
-                        direction=direction,
+                        direction=event_label,
                         chat_id=getattr(event, "chat_id", None),
                         sender_id=getattr(event, "sender_id", None),
                         message_preview=(getattr(event, "raw_text", "") or "")[:200],
@@ -706,6 +713,8 @@ async def load_plugins_for_account(
 
         return _dispatch
 
+    _make_dispatcher("outgoing", edited=True)
+    _make_dispatcher("incoming", edited=True)
     _make_dispatcher("outgoing")
     _make_dispatcher("incoming")
 
