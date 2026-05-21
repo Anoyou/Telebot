@@ -106,6 +106,15 @@ export function GenericPluginConfigPage() {
       accountFields: Object.entries(properties).filter(([, field]) => field.level !== "global") as Array<[string, ConfigField]>,
     };
   }, [schema]);
+  const usageGuide = useMemo(
+    () => buildUsageGuide({
+      schema,
+      values: { ...globalVals, ...accountVals },
+      commandPrefix,
+      interactionEntries: feature?.interaction_entries,
+    }),
+    [schema, globalVals, accountVals, commandPrefix, feature?.interaction_entries],
+  );
 
   const saveMut = useMutation({
     mutationFn: async () => {
@@ -228,14 +237,31 @@ export function GenericPluginConfigPage() {
       <Card>
         <CardHeader>
           <CardTitle className="text-base">使用说明</CardTitle>
-          <CardDescription>按字段填写当前账号的模块配置，保存后由 worker 热加载。</CardDescription>
+          <CardDescription>{usageGuide.description}</CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="rounded-md border bg-muted/20 p-3 text-xs text-muted-foreground">
+          <div className="space-y-3 rounded-md border bg-muted/20 p-3 text-xs text-muted-foreground">
+            {usageGuide.customText ? (
+              <div className="whitespace-pre-wrap leading-relaxed text-foreground">
+                {usageGuide.customText}
+              </div>
+            ) : null}
+            {usageGuide.commandExamples.length > 0 ? (
+              <div>
+                <div className="mb-1 font-medium text-foreground">常用命令</div>
+                <div className="space-y-1">
+                  {usageGuide.commandExamples.map((item) => (
+                    <div key={item} className="rounded border bg-background px-2 py-1 font-mono text-[11px] text-foreground">
+                      {item}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : null}
             <ul className="list-inside list-disc space-y-1">
-              <li>全局配置对所有账号共享，账号配置仅影响当前账号。</li>
-              <li>命令类字段只填写命令名，不需要包含系统命令前缀。</li>
-              <li>消息模板字段可使用页面中的占位符和预览检查最终发送效果。</li>
+              {usageGuide.notes.map((item) => (
+                <li key={item}>{item}</li>
+              ))}
             </ul>
           </div>
         </CardContent>
@@ -311,4 +337,118 @@ export function GenericPluginConfigPage() {
       )}
     </div>
   );
+}
+
+interface UsageGuide {
+  description: string;
+  customText: string;
+  commandExamples: string[];
+  notes: string[];
+}
+
+function buildUsageGuide({
+  schema,
+  values,
+  commandPrefix,
+  interactionEntries,
+}: {
+  schema: ConfigSchema | null;
+  values: Record<string, unknown>;
+  commandPrefix: string;
+  interactionEntries?: Array<{ title?: string | null; description?: string | null; key?: string | null }>;
+}): UsageGuide {
+  const properties = schema?.properties ?? {};
+  const command = configString(values.command ?? properties.command?.default) || "command";
+  const sample = { prefix: commandPrefix || ",", command };
+  const customText = renderUsageText(configString(values.usage_preview ?? properties.usage_preview?.default), sample);
+  const aliasExamples = buildCommandExamples(properties, values, sample.prefix, command);
+  const interactionNotes = (interactionEntries ?? [])
+    .map((entry) => {
+      const title = entry.title || entry.key;
+      const description = entry.description;
+      if (!title && !description) return "";
+      return `交互入口：${[title, description].filter(Boolean).join("，")}`;
+    })
+    .filter(Boolean);
+
+  const notes = [
+    ...interactionNotes,
+    "全局配置对所有账号共享，账号配置仅影响当前账号。",
+    "命令类字段只填写命令名，不需要包含系统命令前缀。",
+    "消息模板字段可使用页面中的占位符和预览检查最终发送效果。",
+  ];
+
+  return {
+    description: customText ? "来自模块 schema 的使用说明；保存后由 worker 热加载。" : "按字段填写当前账号的模块配置，保存后由 worker 热加载。",
+    customText,
+    commandExamples: aliasExamples.length > 0 ? aliasExamples : [`${sample.prefix}${command}`],
+    notes,
+  };
+}
+
+function buildCommandExamples(
+  properties: Record<string, ConfigField>,
+  values: Record<string, unknown>,
+  prefix: string,
+  command: string,
+): string[] {
+  const knownArgs: Record<string, string> = {
+    buy_aliases: "3 5",
+    history_aliases: "5",
+    sponsor_aliases: "10000",
+    unsponsor_aliases: "10000",
+    refund_aliases: "1",
+  };
+  const priority = [
+    "help_aliases",
+    "buy_aliases",
+    "my_aliases",
+    "pool_aliases",
+    "hot_aliases",
+    "stats_aliases",
+    "history_aliases",
+    "draw_aliases",
+    "reset_aliases",
+    "sponsor_aliases",
+    "unsponsor_aliases",
+    "refund_aliases",
+  ];
+  const aliasKeys = Object.keys(properties).filter((key) => /(^|_)aliases$/i.test(key));
+  const orderedKeys = [
+    ...priority.filter((key) => aliasKeys.includes(key)),
+    ...aliasKeys.filter((key) => !priority.includes(key)).sort(),
+  ];
+  return orderedKeys
+    .map((key) => {
+      const alias = firstAlias(values[key] ?? properties[key]?.default);
+      if (!alias) return "";
+      const suffix = knownArgs[key] ? ` ${knownArgs[key]}` : "";
+      return `${prefix}${command} ${alias}${suffix}`;
+    })
+    .filter(Boolean)
+    .slice(0, 8);
+}
+
+function renderUsageText(value: string, sample: { prefix: string; command: string }): string {
+  return normalizeUsageEscapes(value)
+    .replace(/\{prefix\}/g, sample.prefix)
+    .replace(/\{command\}/g, sample.command)
+    .trim();
+}
+
+function normalizeUsageEscapes(value: string): string {
+  return value
+    .replace(/\\r\\n/g, "\n")
+    .replace(/\\n/g, "\n")
+    .replace(/\\r/g, "\n");
+}
+
+function firstAlias(value: unknown): string {
+  return configString(value).split(/\s+/).map((item) => item.trim()).find(Boolean) || "";
+}
+
+function configString(value: unknown): string {
+  if (value == null) return "";
+  if (Array.isArray(value)) return value.map((item) => String(item)).join(" ");
+  return String(value);
 }
