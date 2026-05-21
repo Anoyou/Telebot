@@ -662,6 +662,27 @@ class Game24Plugin(Plugin):
 
 **安全底线：普通指令只能由当前 UserBot 账号自己发出的 outgoing 消息触发。** 群成员、普通用户、频道消息等 incoming 消息不能直接触发模块 `commands`。`owner_only=False` 只表示模块的 `on_message` 可以监听普通成员消息，不表示开放指令执行权限。
 
+**前缀底线：模块不能在用户可见文案、帮助、错误提示、配置默认值、预览或示例里硬编码英文逗号 `,` 作为指令前缀。** 指令名配置只保存裸命令名，例如 `game`、`help`、`cancel`；真正展示给用户时必须使用 `{prefix}` 占位符或运行时当前前缀拼接。
+
+必须使用当前命令前缀的场景：
+
+- 帮助/用法模板：写 `{prefix}{command}`，不要写 `,{command}` 或 `,game`。
+- 错误提示里的示例：运行时用 `current_command_prefix()` 拼接，例如 `f"{current_command_prefix()}{command} 100"`。
+- 配置页预览：从 `getSystemSettings().command_prefix` 注入 `{prefix}`，接口未返回时才用 `,` 兜底。
+- `plugin.json` / `manifest.py` / `config_schema` 的默认模板：默认值应包含 `{prefix}`，不要包含固定 `,` 前缀。
+- 交互 Bot、通知 Bot、定时任务或自动回复里展示“如何发送命令”的文字：同样使用 `{prefix}` 渲染。
+
+允许保存为配置项的是“裸命令名”，不是完整命令文本：
+
+```python
+# 推荐：command 只保存裸指令名，模板使用 {prefix}
+"command": {"type": "string", "default": "game"}
+"help_message_template": {"type": "string", "default": "{prefix}{command} 100 - 开始一局"}
+
+# 不推荐：默认值、帮助或预览写死英文逗号
+"help_message_template": {"type": "string", "default": ",game 100 - 开始一局"}
+```
+
 红包、抢答、24 点、猜数字这类“公共参与 + 私有管理”的模块必须按这个模型设计：
 
 - 开局、发红包、撤销、强制结束、查看管理状态等管理动作写成 `commands`，只能由本账号 outgoing 指令触发。

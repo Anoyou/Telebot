@@ -25,7 +25,7 @@ from .api import notify_bots as notify_bots_api
 from .api import proxies as proxies_api
 from .api import rate_limit as rate_limit_api
 from .api import sudo as sudo_api
-from .services import account_bot_runtime, interaction_bot_runtime, notify_service
+from .services import account_bot_runtime, interaction_bot_runtime, notify_service, remote_plugin_service
 from .services.login_service import cleanup_expired_loop
 from .settings import settings
 
@@ -125,6 +125,7 @@ async def lifespan(app: FastAPI):
 
     # 1) 启动登录会话清理后台任务（每 60s 扫一次）
     cleanup_task = asyncio.create_task(cleanup_expired_loop())
+    remote_plugin_update_task = asyncio.create_task(remote_plugin_service.auto_update_check_loop())
 
     # 2) 拉起 worker supervisor；导入失败时跳过，服务仍启动以便排查。
     stop_all_workers = None
@@ -172,8 +173,13 @@ async def lifespan(app: FastAPI):
         except Exception:  # noqa: BLE001
             logging.exception("停止 account bot manager 失败")
         cleanup_task.cancel()
+        remote_plugin_update_task.cancel()
         try:
             await cleanup_task
+        except (asyncio.CancelledError, Exception):  # noqa: BLE001
+            pass
+        try:
+            await remote_plugin_update_task
         except (asyncio.CancelledError, Exception):  # noqa: BLE001
             pass
         if stop_all_workers is not None:

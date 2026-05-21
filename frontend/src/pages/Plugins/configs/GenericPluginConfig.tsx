@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, Loader2, Save } from "lucide-react";
 import { toast } from "sonner";
@@ -31,6 +31,7 @@ import {
 import { Spinner } from "@/components/ui/misc";
 import { Switch } from "@/components/ui/switch";
 import { getErrMsg } from "@/lib/api";
+import { featureConfigBackTarget } from "@/pages/Plugins/_shared/featureConfig";
 
 function isConfigSchema(schema: unknown): schema is ConfigSchema {
   const candidate = schema as Record<string, unknown> | null | undefined;
@@ -52,6 +53,7 @@ export function GenericPluginConfigPage() {
   const aid = Number(params.aid);
   const featureKey = params.featureKey ?? "";
   const nav = useNavigate();
+  const location = useLocation();
   const qc = useQueryClient();
 
   const accountQ = useQuery({
@@ -165,6 +167,7 @@ export function GenericPluginConfigPage() {
     accountQ.data?.display_name ||
     (accountQ.data?.tg_username ? `@${accountQ.data.tg_username}` : `#${aid}`);
   const hasSchemaFields = Boolean(schema && Object.keys(schema.properties).length > 0);
+  const backTarget = featureConfigBackTarget(aid, location.search);
 
   function resetForm() {
     if (!schema) return;
@@ -177,8 +180,8 @@ export function GenericPluginConfigPage() {
   return (
     <div className="space-y-6 pb-24">
       <div className="flex flex-wrap items-center gap-3">
-        <Button variant="ghost" size="sm" onClick={() => nav(`/accounts/${aid}?tab=features`)}>
-          <ArrowLeft className="mr-1 h-4 w-4" /> 返回账号
+        <Button variant="ghost" size="sm" onClick={() => nav(backTarget.backHref)}>
+          <ArrowLeft className="mr-1 h-4 w-4" /> {backTarget.backLabel}
         </Button>
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">

@@ -1,6 +1,6 @@
 // Codex 图片生成配置：按账号管理 access_token / model / max_wait
 import { useEffect, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, ArrowLeft, Loader2, Eye, EyeOff } from "lucide-react";
 import { toast } from "sonner";
@@ -24,6 +24,7 @@ import { Select } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { getErrMsg } from "@/lib/api";
+import { featureConfigBackTarget } from "@/pages/Plugins/_shared/featureConfig";
 
 const MASKED_SECRET_PLACEHOLDER = "••••••••••••••••";
 
@@ -133,6 +134,7 @@ export function CodexImageConfigPage() {
   const params = useParams();
   const aid = Number(params.aid);
   const nav = useNavigate();
+  const location = useLocation();
   const qc = useQueryClient();
 
   const featuresQ = useQuery({
@@ -306,15 +308,17 @@ export function CodexImageConfigPage() {
     );
   }
 
+  const backTarget = featureConfigBackTarget(aid, location.search);
+
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center gap-3">
         <Button
           variant="ghost"
           size="sm"
-          onClick={() => nav(`/accounts/${aid}?tab=features`)}
+          onClick={() => nav(backTarget.backHref)}
         >
-          <ArrowLeft className="mr-1 h-4 w-4" /> 返回账号
+          <ArrowLeft className="mr-1 h-4 w-4" /> {backTarget.backLabel}
         </Button>
         <h1 className="text-2xl font-semibold tracking-tight">
           Codex 图片生成

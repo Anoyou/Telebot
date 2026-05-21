@@ -611,6 +611,11 @@ async def get_system_settings(db: DBSession, _user: CurrentUser) -> dict[str, An
     kill_val = await _get_setting(db, "kill_switch", {"enabled": False})
     qps_val = await _get_setting(db, "global_api_qps", {"api_qps_total": 0})
     tz_val = await _get_setting(db, "timezone", {"value": "Asia/Shanghai"})
+    remote_update_val = await _get_setting(
+        db,
+        "remote_plugin_update_check",
+        {"enabled": True, "interval_minutes": 360},
+    )
     llm_val = await _get_setting(db, "llm_limits", {})
     log_val = await _get_setting(db, "log_retention", {})
     sudo_val = await _get_setting(db, "sudo_enabled", {"enabled": False})
@@ -626,11 +631,20 @@ async def get_system_settings(db: DBSession, _user: CurrentUser) -> dict[str, An
     tz = str(tz_val.get("value", "")) if isinstance(tz_val, dict) else str(tz_val)
     llm_limits = llm_val if isinstance(llm_val, dict) else {}
     log_retention = log_val if isinstance(log_val, dict) else {}
+    remote_update = remote_update_val if isinstance(remote_update_val, dict) else {}
+    try:
+        remote_update_interval = int(remote_update.get("interval_minutes", 360) or 360)
+    except (TypeError, ValueError):
+        remote_update_interval = 360
     return {
         "command_prefix": prefix,
         "kill_switch": bool(kill_val.get("enabled", False)) if isinstance(kill_val, dict) else bool(kill_val),
         "api_qps_total": int(qps_val.get("api_qps_total", 0)) if isinstance(qps_val, dict) else int(qps_val),
         "timezone": tz or "Asia/Shanghai",
+        "remote_plugin_update_check": {
+            "enabled": bool(remote_update.get("enabled", True)),
+            "interval_minutes": max(30, min(10080, remote_update_interval)),
+        },
         "sudo_enabled": bool(sudo_val.get("enabled", False)) if isinstance(sudo_val, dict) else bool(sudo_val),
         "command_echo_guard_previous_messages": _normalize_command_echo_guard_limit(echo_guard_source),
         "llm_limits": {
@@ -673,6 +687,11 @@ class _LogRetentionPatch(BaseModel):
     runtime_log_min_level: str | None = None
 
 
+class _RemotePluginUpdateCheckPatch(BaseModel):
+    enabled: bool | None = None
+    interval_minutes: int | None = None
+
+
 class _SettingsPatch(BaseModel):
     """前端只会传子集；未传字段保持不变。"""
 
@@ -680,6 +699,7 @@ class _SettingsPatch(BaseModel):
     timezone: str | None = None
     sudo_enabled: bool | None = None
     command_echo_guard_previous_messages: int | None = None
+    remote_plugin_update_check: _RemotePluginUpdateCheckPatch | None = None
     llm_limits: _LLMLimitsPatch | None = None
     log_retention: _LogRetentionPatch | None = None
 
@@ -709,6 +729,33 @@ async def patch_system_settings(
         await _set_setting(db, "sudo_enabled", {"enabled": enabled})
         await _audit(db, user.id, "set_sudo_enabled", target="system", detail={"enabled": enabled})
         await _broadcast_reload()
+    if payload.remote_plugin_update_check is not None:
+        raw = payload.remote_plugin_update_check
+        current = await _get_setting(
+            db,
+            "remote_plugin_update_check",
+            {"enabled": True, "interval_minutes": 360},
+        )
+        current = current if isinstance(current, dict) else {}
+        enabled = bool(current.get("enabled", True)) if raw.enabled is None else bool(raw.enabled)
+        interval_source = (
+            current.get("interval_minutes", 360)
+            if raw.interval_minutes is None
+            else raw.interval_minutes
+        )
+        interval = max(30, min(10080, int(interval_source or 360)))
+        await _set_setting(
+            db,
+            "remote_plugin_update_check",
+            {"enabled": enabled, "interval_minutes": interval},
+        )
+        await _audit(
+            db,
+            user.id,
+            "set_remote_plugin_update_check",
+            target="system",
+            detail={"enabled": enabled, "interval_minutes": interval},
+        )
     if payload.command_echo_guard_previous_messages is not None:
         limit = int(payload.command_echo_guard_previous_messages)
         if limit < 0 or limit > 50:

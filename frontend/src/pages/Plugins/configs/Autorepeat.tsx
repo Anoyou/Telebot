@@ -1,6 +1,6 @@
 // 自动复读配置：列出该账号的 autorepeat rule，CRUD + 试运行
 import { useState } from "react";
-import { useParams } from "react-router-dom";
+import { useLocation, useParams } from "react-router-dom";
 import { Plus, Pencil, Trash2, Play } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -27,6 +27,7 @@ import type {
   RuleDryRunResponse,
   RuleOut,
 } from "@/api/types";
+import { featureConfigBackTarget } from "@/pages/Plugins/_shared/featureConfig";
 import {
   DryRunDialogShell,
   Field,
@@ -60,6 +61,7 @@ function emptyForm(): FormState {
 
 export function AutorepeatConfig() {
   const params = useParams();
+  const location = useLocation();
   const aid = Number(params.aid);
 
   const crud = useRuleCrud({
@@ -140,12 +142,14 @@ export function AutorepeatConfig() {
   }
 
   if (!aid) return <p>账号 ID 不合法</p>;
+  const backTarget = featureConfigBackTarget(aid, location.search);
 
   return (
     <div className="space-y-6">
       <RulePageHeader
         title={`自动复读配置 · #${aid}`}
-        backHref={`/accounts/${aid}?tab=features`}
+        backLabel={backTarget.backLabel}
+        backHref={backTarget.backHref}
       />
 
       <RuleInfoBox>

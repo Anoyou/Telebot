@@ -35,6 +35,7 @@ from ..db.models.feature import (
     AccountFeature,
     Feature,
 )
+from ..db.models.remote_plugin import RemotePlugin
 from ..redis_client import get_redis
 from ..schemas.feature import (
     ConfigValidationError,
@@ -327,6 +328,8 @@ async def feature_matrix(db: AsyncSession) -> dict[str, Any]:
     """
     # 1) 保证内置 feature 行齐全
     features = await list_features(db)
+    remote_rows = (await db.execute(select(RemotePlugin))).scalars().all()
+    remote_by_name = {row.name: row for row in remote_rows}
 
     # 2) 拿全部账号 + 全部 account_feature
     accounts = (
@@ -357,7 +360,10 @@ async def feature_matrix(db: AsyncSession) -> dict[str, Any]:
         )
 
     return {
-        "features": [FeatureInfo.from_feature(f).model_dump() for f in features],
+        "features": [
+            FeatureInfo.from_feature(f, remote_by_name.get(f.key)).model_dump()
+            for f in features
+        ],
         "accounts": rows,
     }
 

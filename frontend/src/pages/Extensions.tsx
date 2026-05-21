@@ -62,8 +62,10 @@ import {
   enableRemotePlugin,
   disableRemotePlugin,
   updateRemotePlugin,
+  checkRemotePluginUpdates,
   uninstallRemotePlugin,
 } from "@/api/remotePlugin";
+import { getSystemSettings, patchSystemSettings } from "@/api/system";
 import {
   addPluginRepo,
   deletePluginRepo,
@@ -73,6 +75,10 @@ import {
   installLocalPlugin,
   installFromRepo,
 } from "@/api/pluginRepo";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
+import type { RemotePlugin } from "@/types/remotePlugin";
 
 // ── 常量 ──────────────────────────────────────────────────────────
 type TabValue = "plugins" | "guide";
@@ -85,6 +91,14 @@ function formatPluginVersion(version?: string | null) {
   const v = (version || "").trim();
   if (!v) return "-";
   return v.startsWith("v") ? v : `v${v}`;
+}
+
+function toastPluginLintWarnings(row: RemotePlugin) {
+  const warnings = row.lint_warnings ?? [];
+  if (!warnings.length) return;
+  toast.warning(`模块 ${row.name} 有 ${warnings.length} 条开发规范警告`, {
+    description: warnings[0],
+  });
 }
 
 function parseManageTab(value: string | null): TabValue {
@@ -215,10 +229,88 @@ function PluginInstallGuide({
 function PluginsManagementTab() {
   return (
     <div className="space-y-6">
+      <RemoteUpdateSettingsCard />
       <LocalImportCard />
       <RemoteInstallCard />
       <InstalledPluginsSection />
     </div>
+  );
+}
+
+function RemoteUpdateSettingsCard() {
+  const qc = useQueryClient();
+  const settingsQ = useQuery({ queryKey: ["system", "settings"], queryFn: getSystemSettings });
+  const cfg = settingsQ.data?.remote_plugin_update_check ?? { enabled: true, interval_minutes: 360 };
+  const [enabled, setEnabled] = useState(cfg.enabled);
+  const [interval, setInterval] = useState(String(cfg.interval_minutes));
+
+  useEffect(() => {
+    setEnabled(cfg.enabled);
+    setInterval(String(cfg.interval_minutes));
+  }, [cfg.enabled, cfg.interval_minutes]);
+
+  const saveMut = useMutation({
+    mutationFn: () =>
+      patchSystemSettings({
+        remote_plugin_update_check: {
+          enabled,
+          interval_minutes: Number(interval) || 360,
+        },
+      }),
+    onSuccess: () => {
+      toast.success("远程模块自动检查设置已保存");
+      qc.invalidateQueries({ queryKey: ["system", "settings"] });
+    },
+    onError: (err) => toast.error(getErrMsg(err)),
+  });
+
+  const checkMut = useMutation({
+    mutationFn: checkRemotePluginUpdates,
+    onSuccess: (res) => {
+      toast.success(`检查完成：${res.update_available} 个模块有更新`);
+      qc.invalidateQueries({ queryKey: REMOTE_QK });
+      qc.invalidateQueries({ queryKey: ["matrix"] });
+    },
+    onError: (err) => toast.error(getErrMsg(err)),
+  });
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="text-base">远程模块更新检查</CardTitle>
+        <CardDescription>
+          后台只检查是否有新版本，不会自动安装；发现更新后会在模块中心和已安装模块里提示。
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-3 md:flex-row md:items-end">
+        <div className="flex items-center gap-3 rounded-md border px-3 py-2">
+          <Switch checked={enabled} onCheckedChange={setEnabled} />
+          <div>
+            <div className="text-sm font-medium">自动检查</div>
+            <div className="text-xs text-muted-foreground">{enabled ? "已开启" : "已关闭"}</div>
+          </div>
+        </div>
+        <div className="w-full space-y-1.5 md:w-56">
+          <Label>检查间隔（分钟）</Label>
+          <Input
+            inputMode="numeric"
+            value={interval}
+            onChange={(e) => setInterval(e.target.value.replace(/[^0-9]/g, ""))}
+            placeholder="360"
+          />
+          <div className="text-xs text-muted-foreground">最小 30，最大 10080</div>
+        </div>
+        <div className="flex gap-2">
+          <Button onClick={() => saveMut.mutate()} disabled={saveMut.isPending}>
+            保存
+          </Button>
+          <Button variant="outline" onClick={() => checkMut.mutate()} disabled={checkMut.isPending}>
+            {checkMut.isPending ? <Spinner className="mr-2 h-4 w-4" /> : <RefreshCw className="mr-2 h-4 w-4" />}
+            立即检查
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 
@@ -229,6 +321,7 @@ function LocalImportCard() {
     mutationFn: (name: string) => installLocalPlugin(name),
     onSuccess: (row) => {
       toast.success(`已导入本地插件 ${row.name} v${row.version}`);
+      toastPluginLintWarnings(row);
       qc.invalidateQueries({ queryKey: REMOTE_QK });
       qc.invalidateQueries({ queryKey: PLUGINS_QK });
       qc.invalidateQueries({ queryKey: ["matrix"] });
@@ -325,6 +418,7 @@ function RemoteInstallCard() {
       installFromRepo(repoId, name),
     onSuccess: (row) => {
       toast.success(`已安装 ${row.name} v${row.version}`);
+      toastPluginLintWarnings(row);
       qc.invalidateQueries({ queryKey: REMOTE_QK });
       qc.invalidateQueries({ queryKey: PLUGINS_QK });
       qc.invalidateQueries({ queryKey: ["matrix"] });
@@ -337,6 +431,7 @@ function RemoteInstallCard() {
     mutationFn: (name: string) => updateRemotePlugin(name),
     onSuccess: (row) => {
       toast.success(`已更新 ${row.name} → v${row.version}`);
+      toastPluginLintWarnings(row);
       qc.invalidateQueries({ queryKey: REMOTE_QK });
       qc.invalidateQueries({ queryKey: ["matrix"] });
       qc.invalidateQueries({ queryKey: ["repo-plugins", expandedRepoId] });
@@ -549,6 +644,7 @@ function InstalledPluginsSection() {
     mutationFn: (name: string) => updateRemotePlugin(name),
     onSuccess: (row) => {
       toast.success(`已更新 ${row.name} → v${row.version}`);
+      toastPluginLintWarnings(row);
       qc.invalidateQueries({ queryKey: REMOTE_QK });
       qc.invalidateQueries({ queryKey: ["matrix"] });
     },
@@ -645,8 +741,27 @@ function InstalledPluginsSection() {
               {remote.map((p) => (
                 <TableRow key={`rm-${p.name}`}>
                   <TableCell>
-                    <div className="font-medium">{p.display_name || p.name}</div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <div className="font-medium">{p.display_name || p.name}</div>
+                      {p.update_available ? <Badge variant="default">有更新</Badge> : null}
+                      {(p.lint_warnings?.length ?? 0) > 0 ? <Badge variant="outline">规范警告</Badge> : null}
+                    </div>
                     <div className="font-mono text-xs text-muted-foreground">{p.name}</div>
+                    {p.update_available && p.latest_version ? (
+                      <div className="mt-1 text-xs text-muted-foreground">
+                        当前 {formatPluginVersion(p.version)}，远程 {formatPluginVersion(p.latest_version)}
+                      </div>
+                    ) : null}
+                    {p.last_update_check_error ? (
+                      <div className="mt-1 text-xs text-destructive">
+                        更新检查失败：{p.last_update_check_error}
+                      </div>
+                    ) : null}
+                    {(p.lint_warnings?.length ?? 0) > 0 ? (
+                      <div className="mt-1 text-xs text-amber-700">
+                        {p.lint_warnings?.[0]}
+                      </div>
+                    ) : null}
                   </TableCell>
                   <TableCell>
                     {p.source_url?.startsWith("local://") ? (
@@ -670,13 +785,13 @@ function InstalledPluginsSection() {
                     <div className="flex flex-wrap justify-end gap-2">
                       <Button
                         size="sm"
-                        variant="outline"
+                        variant={p.update_available ? "default" : "outline"}
                         onClick={() => updateRMMut.mutate(p.name)}
                         disabled={updateRMMut.isPending || p.source_url?.startsWith("local://")}
                         title={p.source_url?.startsWith("local://") ? "本地导入插件不支持远程更新" : "从远程更新"}
                       >
                         <RefreshCw className="mr-1 h-3 w-3" />
-                        更新
+                        {p.update_available ? "更新到新版" : "更新"}
                       </Button>
                       {p.enabled ? (
                         <Button size="sm" variant="outline" onClick={() => disableRMMut.mutate(p.name)} disabled={disableRMMut.isPending}>

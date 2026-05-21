@@ -1,7 +1,7 @@
 // 转发规则配置：列出该账号的 forward rule，CRUD + 试运行
 // rule.config 的字段语义见 backend/app/worker/plugins/builtin/forward/manifest.py。
 import { useState } from "react";
-import { useParams } from "react-router-dom";
+import { useLocation, useParams } from "react-router-dom";
 import { toast } from "sonner";
 import { Plus, Pencil, Trash2, Play } from "lucide-react";
 
@@ -34,6 +34,7 @@ import type {
   RuleDryRunResponse,
   RuleOut,
 } from "@/api/types";
+import { featureConfigBackTarget } from "@/pages/Plugins/_shared/featureConfig";
 import {
   DryRunDialogShell,
   Field,
@@ -77,6 +78,7 @@ function emptyForm(): FormState {
 
 export function ForwardConfig() {
   const params = useParams();
+  const location = useLocation();
   const aid = Number(params.aid);
 
   const crud = useRuleCrud({
@@ -199,12 +201,14 @@ export function ForwardConfig() {
   }
 
   if (!aid) return <p>账号 ID 不合法</p>;
+  const backTarget = featureConfigBackTarget(aid, location.search);
 
   return (
     <div className="space-y-6">
       <RulePageHeader
         title={`消息转发配置 · #${aid}`}
-        backHref={`/accounts/${aid}?tab=features`}
+        backLabel={backTarget.backLabel}
+        backHref={backTarget.backHref}
       />
 
       <RuleInfoBox>

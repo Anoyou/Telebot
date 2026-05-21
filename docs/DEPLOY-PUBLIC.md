@@ -1,10 +1,53 @@
-# 公网部署指南（Docker Compose + Caddy）
+# 公网部署指南
 
-本指南用于把 TelePilot Web / PWA 控制台安全暴露到公网。当前推荐路径是：生产栈统一由 Docker Compose 启动，`frontend` 容器用 nginx 托管前端并反代后端，公网 HTTPS 由 Caddy 负责。
+这篇文档讲的是：**怎么把 TelePilot 放到一台服务器上，并让浏览器可以访问**。
+
+如果你只是自己测试，可以先用 README 里的 `make up` 或一条命令安装，不一定要一开始就配置域名和 HTTPS。
+
+## 先选部署方式
+
+| 方式 | 适合谁 | 说明 |
+| --- | --- | --- |
+| 一条命令安装 | 大多数 VPS 用户 | 脚本自动安装依赖、生成配置、启动服务 |
+| Docker Compose | 想自己控制配置的人 | 稳定、好更新、好备份，也是当前推荐生产方式 |
+| 源码混合运行 | 不想全套 Docker 的人 | 后端/前端跑在宿主机，PostgreSQL / Redis 可用 Docker 或已有服务 |
+| Caddy / Nginx 反代 | 需要公网 HTTPS 的人 | 在服务跑起来之后，再加域名和证书 |
+
+当前推荐的正式部署路径是：TelePilot 服务由 Docker Compose 启动，公网 HTTPS 由 Caddy 或 Nginx 负责。
 
 仓库里部分默认卷名、数据库名和环境标记仍保留 `telebot` 兼容命名，不影响对外产品名 `TelePilot`。
 
-## 1. 推荐拓扑
+## 1. 最省心：一条命令安装
+
+SSH 到 Debian / Ubuntu 服务器后执行：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Anoyou/telebot/main/scripts/install-server.sh | bash
+```
+
+脚本会做这些事：
+
+- 安装 Git、Make、Docker 和 Docker Compose v2。
+- 拉取 TelePilot 到 `/opt/telepilot`。
+- 生成生产用 `.env`。
+- 启动数据库、Redis、后端和前端。
+
+如果 80 端口被占用，可以指定别的端口：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Anoyou/telebot/main/scripts/install-server.sh \
+  | env WEB_PORT_PUBLISH=8080 bash
+```
+
+启动后，访问：
+
+```text
+http://服务器IP:端口
+```
+
+如果你要挂域名和 HTTPS，继续看下面的反代配置。
+
+## 2. 推荐公网结构
 
 - 公网入口：`https://telepilot.example.com`
 - Caddy：监听服务器 `80/443`，自动申请 TLS
@@ -12,9 +55,9 @@
 - TelePilot web 容器：仅在 Docker 网络内提供 `web:8000`
 - PostgreSQL / Redis / sessions / 远程模块目录：Docker volume 持久化
 
-## 2. 一条命令安装
+## 3. 带 HTTPS 的安装方式
 
-SSH 到 Debian / Ubuntu 服务器后，先用开箱部署脚本安装并启动生产栈：
+如果你已经准备好域名，并打算用 Caddy / Nginx 做 HTTPS，建议让 TelePilot 只监听本机端口：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Anoyou/telebot/main/scripts/install-server.sh \
@@ -42,7 +85,7 @@ WEB_PORT_PUBLISH=127.0.0.1:8080
 
 `WEB_PORT_PUBLISH=127.0.0.1:8080` 可以避免 nginx 前端容器直接裸露到公网，只让 Caddy 作为唯一外部入口。
 
-## 3. Caddy 配置
+## 4. Caddy 配置
 
 安装 Caddy：
 
@@ -79,7 +122,33 @@ sudo systemctl enable --now caddy
 sudo systemctl reload caddy
 ```
 
-## 4. 升级与回滚
+也可以用 Nginx、宝塔面板或其它反向代理，只要把公网 HTTPS 请求转发到 `127.0.0.1:8080` 即可。
+
+## 5. 不想全套 Docker 怎么办
+
+可以用源码混合方式：
+
+```bash
+make bootstrap
+make dev-up
+make migrate
+```
+
+然后开两个终端：
+
+```bash
+# 终端 1
+make backend
+
+# 终端 2
+make frontend
+```
+
+如果你已经有自己的 PostgreSQL / Redis，就在 `.env` 里配置 `DATABASE_URL` / `REDIS_URL`，然后跳过 `make dev-up`。
+
+生产环境仍建议至少把数据库、session、`.env` 做好备份。
+
+## 6. 升级与回滚
 
 升级：
 
@@ -110,7 +179,7 @@ make prod-up
 
 `make prod-up` 会重新构建镜像、启动容器，并在 `web` 容器启动时执行 `alembic upgrade head`。
 
-## 5. 备份
+## 7. 备份
 
 至少备份三类数据：
 
@@ -126,7 +195,7 @@ make prod-up
 
 `MASTER_KEY` 必须和数据库备份分开保存。丢失 `MASTER_KEY` 后，已有 Telegram session、api_id、api_hash、TOTP secret 和 Bot Token 都无法解密。
 
-## 6. 验收清单
+## 8. 验收清单
 
 1. `docker compose ps` 中 `postgres` / `redis` / `web` / `frontend` 均为 running 或 healthy。
 2. `curl -I http://127.0.0.1:8080` 能返回前端响应。
@@ -135,7 +204,7 @@ make prod-up
 5. 服务器安全组只对公网开放 `80/tcp` 和 `443/tcp`，不要额外开放 `8000`。
 6. 登录后概览页资源占用能看到应用进程与服务器资源。
 
-## 7. 常见问题
+## 9. 常见问题
 
 Q: HTTPS 证书申请失败怎么办？  
 A: 检查域名 A 记录是否指向服务器公网 IP，安全组是否放通 80/443，以及是否有其它服务占用这两个端口。

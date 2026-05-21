@@ -70,6 +70,45 @@ class TestRemotePluginSecurity:
             svc._read_plugin_metadata(plugin_dir, fallback_name="bad")
         assert ex.value.code == "PLUGIN_JSON_NOT_FOUND"
 
+    def test_metadata_lint_warns_hardcoded_command_prefix_without_executing_manifest(self, tmp_path, monkeypatch):
+        """安装/更新阶段静态 lint 能提示硬编码逗号前缀，且不执行 manifest.py。"""
+        import os as _os
+
+        monkeypatch.delenv("LINT_MANIFEST_EXECUTED", raising=False)
+
+        plugin_dir = tmp_path / "installed" / "lint_demo"
+        plugin_dir.mkdir(parents=True)
+        (plugin_dir / "plugin.json").write_text(
+            """
+            {
+              "name": "lint_demo",
+              "version": "1.0.0",
+              "config_schema": {
+                "type": "object",
+                "properties": {
+                  "help_message_template": {
+                    "type": "string",
+                    "default": ",game 100 - 开始一局"
+                  }
+                }
+              }
+            }
+            """,
+            encoding="utf-8",
+        )
+        (plugin_dir / "manifest.py").write_text(
+            'import os\n'
+            'os.environ["LINT_MANIFEST_EXECUTED"] = "1"\n'
+            'MANIFEST = {"config_schema": {"properties": {"x": {"default": ",help"}}}}\n',
+            encoding="utf-8",
+        )
+
+        warnings = svc.lint_plugin_metadata_files(plugin_dir)
+
+        assert any("plugin.json" in item and ",game" in item for item in warnings)
+        assert any("manifest.py" in item and ",help" in item for item in warnings)
+        assert "LINT_MANIFEST_EXECUTED" not in _os.environ
+
     def test_runtime_discovery_does_not_execute_installed_by_default(self, monkeypatch, tmp_path):
         """worker 刷新 builtin 注册表时不能顺手执行 installed 插件代码。"""
         import os as _os

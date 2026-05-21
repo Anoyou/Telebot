@@ -420,6 +420,10 @@ export interface FeatureInfo {
   category?: FeatureCategory | string | null;
   interaction_entries?: FeatureInteractionEntry[];
   experimental: boolean;
+  update_available?: boolean;
+  latest_version?: string | null;
+  last_update_check_at?: string | null;
+  last_update_check_error?: string | null;
 }
 export interface AccountFeatureItem {
   feature_key: string;
@@ -702,6 +706,10 @@ export interface SystemSettings {
   api_qps_total?: number;
   /** IANA 时区标识，如 "Asia/Shanghai"；默认 Asia/Shanghai */
   timezone?: string;
+  remote_plugin_update_check?: {
+    enabled: boolean;
+    interval_minutes: number;
+  };
   llm_limits?: {
     per_minute: number;
     daily_requests: number;

@@ -19,11 +19,15 @@ class FeatureInfo(BaseModel):
     category: str = "utility"
     interaction_entries: list[dict[str, Any]] = Field(default_factory=list)
     experimental: bool = False
+    update_available: bool = False
+    latest_version: str | None = None
+    last_update_check_at: Any | None = None
+    last_update_check_error: str | None = None
 
     model_config = ConfigDict(from_attributes=True)
 
     @classmethod
-    def from_feature(cls, f: Feature) -> FeatureInfo:
+    def from_feature(cls, f: Feature, remote_plugin: Any | None = None) -> FeatureInfo:
         manifest = getattr(f, "manifest", None) or {}
         config_schema = manifest.get("config_schema")
         schema_meta = config_schema if isinstance(config_schema, dict) else {}
@@ -45,6 +49,10 @@ class FeatureInfo(BaseModel):
             experimental=bool(
                 manifest.get("x-experimental") or manifest.get("experimental")
             ),
+            update_available=bool(getattr(remote_plugin, "update_available", False)),
+            latest_version=getattr(remote_plugin, "latest_version", None),
+            last_update_check_at=getattr(remote_plugin, "last_update_check_at", None),
+            last_update_check_error=getattr(remote_plugin, "last_update_check_error", None),
         )
 
 

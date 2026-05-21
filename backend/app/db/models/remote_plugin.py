@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Integer, String, Text, func
+from sqlalchemy import JSON, Boolean, DateTime, Integer, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from ..base import Base
@@ -36,6 +36,21 @@ class RemotePlugin(Base):
     author: Mapped[str] = mapped_column(String(255), nullable=False, default="")
     source_url: Mapped[str] = mapped_column(Text, nullable=False)
     version: Mapped[str] = mapped_column(String(64), nullable=False, default="0.0.0")
+    latest_version: Mapped[str | None] = mapped_column(
+        String(64), nullable=True, comment="最近一次检查到的远程版本"
+    )
+    update_available: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, comment="最近一次检查是否发现可更新版本"
+    )
+    last_update_check_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, comment="最近一次检查远程更新的时间"
+    )
+    last_update_check_error: Mapped[str | None] = mapped_column(
+        Text, nullable=True, comment="最近一次检查更新失败原因"
+    )
+    lint_warnings: Mapped[list[str]] = mapped_column(
+        JSON, nullable=False, default=list, comment="安装/更新时静态 lint 警告"
+    )
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     default_enabled: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False,

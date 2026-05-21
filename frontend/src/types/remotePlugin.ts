@@ -6,6 +6,11 @@ export interface RemotePlugin {
   author: string;
   source_url: string;
   version: string;
+  latest_version?: string | null;
+  update_available?: boolean;
+  last_update_check_at?: string | null;
+  last_update_check_error?: string | null;
+  lint_warnings?: string[];
   enabled: boolean;
   default_enabled: boolean;
   installed_at: string | null;
@@ -18,4 +23,11 @@ export interface InstallRequest {
 
 export interface AccountPluginAction {
   account_ids: number[];
+}
+
+export interface RemotePluginUpdateCheckResponse {
+  total: number;
+  checked: number;
+  update_available: number;
+  failed: number;
 }

@@ -1,28 +1,43 @@
-# TelePilot - 多账号 Telegram UserBot 管理控制台
+# TelePilot - Telegram 多账号管理面板
 
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/Python-3.12+-3776ab.svg)](backend/pyproject.toml)
 [![React](https://img.shields.io/badge/React-18-61dafb.svg)](frontend/package.json)
 [![Status](https://img.shields.io/badge/status-alpha-orange.svg)](#项目状态)
 
-TelePilot 是一个自托管的 Telegram UserBot 多账号管理平台。它用 Web GUI 管理多个 Telegram 个人账号，每个账号独立运行 worker 子进程，并提供模块、规则、AI 指令、风控、日志、账号 Bot 联动与 PWA 管理体验。当前 0.18 线已经完成 TelePilot 品牌、PWA 导航、概览信息架构、资源占用面板和模块配置页体验的收口，同时保留旧数据卷、数据库默认名、模块旧字段和旧前端请求头的兼容。
+TelePilot 是一个给 Telegram UserBot 用的网页管理面板。你可以把多个 Telegram 账号放进一个 Web 控制台里管理，给每个账号开关模块、配置自动回复/转发/AI 指令、查看日志，也可以接入普通 Bot 来做群内互动。
 
-> 这是个人 Vibe 自用取向的项目，仍处于 Alpha 阶段。UserBot 使用的是 Telegram MTProto 用户账号能力，不是 Bot API；请自行评估账号风控、合规和安全风险。
+一句话：**它适合想自己托管、自己控制 Telegram 自动化流程的人**。
+如果你只是想找一个“注册即用”的云服务，这个项目可能会显得偏折腾。
+
+> 项目仍在快速迭代。UserBot 使用的是 Telegram 个人账号能力，不是普通 Bot API；请自行评估账号风控、合规和安全风险。
 
 ## 核心能力
 
-- 多账号管理：每个 Telegram 账号独立登录、独立配置、独立 worker 子进程运行。
-- Web 控制台：概览、模块、AI、日志、系统设置集中管理，支持浅色 / 深色 / 跟随系统主题。
-- PWA 体验：支持安装到桌面或手机主屏幕，针对 iPhone 安全区、窄屏 Tab 和自适应排版做了优化。
-- 模块中心：平台能力、内置模块、远程模块、实验性能力分区展示，支持按账号视角查看和配置。
-- 模块系统：代码层仍基于 `Plugin` / `feature`，用户界面统一称“模块”；支持内置模块、远程模块、热加载、generation guard、生命周期钩子、配置 schema。模块前端模式推荐使用 `rules` / `single` / `platform`；旧 `schema` 仅作为兼容别名或普通单配置独立页的字段来源。第三方模块推荐使用 `min_telepilot_version`，旧 `min_telebot_version` 仍兼容。
-- 规则驱动模块：自动回复、消息转发、自动复读等按规则匹配并执行。
-- 单配置对象模块：Game24、Codex 图片生成等以账号级配置页管理；Codex 图片生成作为实验性内置模块随生产镜像发布。
-- 平台基础能力：定时任务调度器作为 worker 常驻能力运行，模块和系统页面可复用。
-- AI 中心：Providers、Routing、Usage 分入口管理，支持多 provider、fallback、retry、usage 记录、预算限制、自定义 AI 指令与 Telegram 长回复分段。
-- 账号 Bot 联动：每个 UserBot 账号可绑定一个普通 Bot，作为移动端/远程运维入口，支持授权用户、角色和常用操作。
-- 可观测性：系统状态、资源占用、Runtime 日志、Audit 审计日志、模块筛选与日志保留策略。
-- 安全基础：Fernet 加密 session / api_id / api_hash / Bot Token，JWT 登录，TOTP，Sudo 默认拒绝，高危 Telegram 指令移除，account_bot 危险操作二次确认，远程模块安装阶段静态 manifest 校验。
+- 多账号：一个面板管理多个 Telegram 账号，每个账号独立配置。
+- 模块：自动回复、消息转发、复读、24 点、算数题、远程模块等都可以在页面里开关和配置。
+- AI：可以接 OpenAI 兼容接口、Anthropic、Ollama 等，用来自定义 AI 指令。
+- 群互动 Bot：用普通 Bot 承接高频群互动，减少 UserBot 高频发言风险。
+- 日志和状态：出问题时可以在页面里看运行日志、审计日志和系统健康状态。
+- 手机管理：Web 控制台支持 PWA，可以添加到手机主屏幕。
+
+## 先跑起来
+
+本机试用：
+
+```bash
+git clone https://github.com/Anoyou/telebot telepilot
+cd telepilot
+make up
+```
+
+VPS 上自己用：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Anoyou/telebot/main/scripts/install-server.sh | bash
+```
+
+如果你不想全套 Docker，或者已经有自己的 PostgreSQL / Redis，往下看“详细启动方式”。
 
 ## 截图
 
@@ -59,6 +74,8 @@ TelePilot 是一个自托管的 Telegram UserBot 多账号管理平台。它用 
 
 
 ## 架构概览
+
+如果你只是想部署使用，可以先跳过这一段；它主要给想改代码或排查问题的人看。
 
 ```mermaid
 flowchart LR
@@ -120,43 +137,35 @@ flowchart LR
 - AI：多 provider router, retry/fallback, usage record, token/cost limit
 - 部署：Docker Compose, Nginx frontend, FastAPI web, PostgreSQL, Redis
 
-## 快速开始
+## 详细启动方式
+
+先选一种你舒服的方式：
+
+| 场景 | 推荐方式 | 适合谁 |
+| --- | --- | --- |
+| 只是本机试用 / 开发 | `make up` | 有 Docker Desktop / Docker Engine，想先跑起来看看 |
+| VPS 上自己用 | 一条命令安装 | Ubuntu / Debian 服务器，想少配一点东西 |
+| 已经克隆仓库 | `make prod-up` | 熟悉一点命令行，想自己控制 `.env` |
+| 不想全套 Docker | 源码混合运行 | 已有 PostgreSQL / Redis，或只想 Docker 跑数据库 |
 
 ### 1. 准备 Telegram API 凭据
 
 到 [my.telegram.org](https://my.telegram.org) 申请 `API ID` 和 `API Hash`。每个账号绑定时会在 Web 向导中填写，敏感字段会加密落库。
 
-### 2. 初始化环境变量
+### 2. 本机最快跑起来
 
 ```bash
 git clone https://github.com/Anoyou/telebot telepilot
 cd telepilot
-cp .env.example .env
-```
-
-至少修改 `.env` 中这些值：
-
-```bash
-MASTER_KEY=replace-with-fernet-key
-JWT_SECRET=replace-with-long-random-secret
-POSTGRES_PASSWORD=replace-in-production
-COOKIE_SECURE=false
-```
-
-生成密钥示例：
-
-```bash
-python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
-python -c "import secrets; print(secrets.token_urlsafe(64))"
-```
-
-### 3. 本地开发启动
-
-推荐使用项目 Makefile：
-
-```bash
 make up
 ```
+
+首次启动会自动生成 `.env`、安装依赖，并启动数据库、Redis、后端和前端。
+
+打开：
+
+- 前端：http://localhost:5173
+- 后端：http://localhost:8000
 
 常用命令：
 
@@ -167,45 +176,70 @@ make restart
 make down
 ```
 
-默认访问：
-
-- 前端：http://localhost:5173
-- 后端：http://localhost:8000
-
-首次打开登录页时，如果系统还没有管理员账号，可以直接创建管理员。
-
-### 4. 服务器开箱部署
-
-SSH 到 Debian / Ubuntu 服务器后，可直接执行：
+### 3. VPS 一条命令安装
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Anoyou/telebot/main/scripts/install-server.sh | bash
 ```
 
-这条命令会自动安装基础依赖与 Docker Compose v2、拉取仓库、生成生产 `.env`，然后调用 `make prod-up` 启动 `postgres` / `redis` / `web` / `frontend` 四个容器。默认安装到 `/opt/telepilot`，默认对外发布 80 端口；如果端口已被占用，脚本会自动改用可用端口并写入 `.env`。
+这条命令会安装需要的基础依赖、拉取仓库、生成生产 `.env`，并启动服务。默认安装到 `/opt/telepilot`。
 
-可通过环境变量覆盖安装目录、分支或端口：
+想指定端口或安装目录：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Anoyou/telebot/main/scripts/install-server.sh \
   | env TELEPILOT_DIR=/opt/telepilot WEB_PORT_PUBLISH=8080 TELEPILOT_BRANCH=main bash
 ```
 
-如果是非 apt 系发行版，请先手动安装 Docker Compose v2、Git、Make 和 Python 3，再执行同一条命令。
+公网 HTTPS、域名和反代配置见 [公网部署指南](docs/DEPLOY-PUBLIC.md)。
 
-### 5. 已克隆仓库内 Docker 部署
+### 4. 已克隆仓库的生产部署
 
 ```bash
 cp .env.example .env
-# 修改 MASTER_KEY / JWT_SECRET / POSTGRES_PASSWORD / COOKIE_SECURE 等
+# 至少修改 MASTER_KEY / JWT_SECRET / POSTGRES_PASSWORD
 make prod-up
 ```
 
-`make prod-up` 会检查生产配置、自动调优 `.env`，并通过 Docker Compose 构建启动 `postgres` / `redis` / `web` / `frontend` 四个容器。也可以直接执行 `docker compose up -d --build`。
+`make prod-up` 会用 Docker Compose 启动 `postgres` / `redis` / `web` / `frontend` 四个服务。
 
-默认前端监听宿主机 80 端口。公网 HTTPS 部署请参考 [docs/DEPLOY-PUBLIC.md](docs/DEPLOY-PUBLIC.md)。
+最少要关心这几个配置：
 
-Compose 会持久化数据库、Redis、Telegram session、远程模块安装目录和模块仓库缓存。不要把 `plugins/installed`、`data/plugin_repos` 改成容器内临时目录，否则重建 web 容器后远程模块文件会丢失，表现为“指令能收到但模块没有反应”。
+```bash
+MASTER_KEY=用于加密敏感数据，不能丢
+JWT_SECRET=网页登录签名密钥
+POSTGRES_PASSWORD=数据库密码，生产环境不要用默认值
+COOKIE_SECURE=false  # HTTPS 部署改 true
+```
+
+生成密钥示例：
+
+```bash
+python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+python -c "import secrets; print(secrets.token_urlsafe(64))"
+```
+
+### 5. 不想全套 Docker：源码混合运行
+
+如果你不想把后端和前端都放进 Docker，也可以只用 Docker 跑 PostgreSQL / Redis：
+
+```bash
+make bootstrap
+make dev-up
+make migrate
+```
+
+然后开两个终端：
+
+```bash
+# 终端 1
+make backend
+
+# 终端 2
+make frontend
+```
+
+如果你已经有自己的 PostgreSQL / Redis，可以直接在 `.env` 里改 `DATABASE_URL` / `REDIS_URL`，然后跳过 `make dev-up`。
 
 ### 小 VPS 内存建议
 
@@ -321,7 +355,7 @@ pnpm -C frontend build
 
 ## 项目状态
 
-当前版本：`v0.18.0 · feature`
+当前版本：`v0.23.0 · minor`
 
 项目处于 Alpha / 个人自用阶段。核心链路已经能跑，但仍在快速迭代中，接口、页面和模块规范可能继续调整。欢迎 fork、参考和提 issue；大规模 PR 建议先开 issue 对齐方向。
 

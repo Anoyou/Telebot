@@ -22,6 +22,7 @@
 
 from __future__ import annotations
 
+import ast
 import asyncio
 import json
 import logging
@@ -29,6 +30,7 @@ import re
 import shutil
 import tempfile
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -36,9 +38,11 @@ from pydantic import BaseModel, field_validator, model_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..db.base import AsyncSessionLocal
 from ..db.models.account import Account
 from ..db.models.feature import FEATURE_STATE_DISABLED, AccountFeature, Feature
 from ..db.models.remote_plugin import RemotePlugin
+from ..db.models.system import SystemSetting
 from ..settings import settings
 from ..worker.ipc import CMD_RELOAD_CONFIG, publish_cmd_with_ack
 
@@ -52,6 +56,8 @@ log = logging.getLogger(__name__)
 # 安全常量：source_url 允许的 scheme
 # ─────────────────────────────────────────────────────
 _ALLOWED_URL_SCHEMES: frozenset[str] = frozenset({"https", "git+ssh"})
+_REMOTE_UPDATE_DEFAULT_INTERVAL_MINUTES = 360
+_HARDCODED_PREFIX_RE = re.compile(r"(?<![A-Za-z0-9_{}])[,，][A-Za-z0-9_\u4e00-\u9fff][^\s<>{}]{0,31}")
 
 
 # ─────────────────────────────────────────────────────
@@ -167,6 +173,14 @@ class PluginMetadata:
     config_schema: dict[str, Any] | None = None
     min_telepilot_version: str | None = None
     min_telebot_version: str | None = None
+
+
+@dataclass(slots=True)
+class RemotePluginUpdateCheckSummary:
+    total: int = 0
+    checked: int = 0
+    update_available: int = 0
+    failed: int = 0
 
 
 def _feature_manifest_from_meta(meta: PluginMetadata) -> dict[str, Any] | None:
@@ -465,6 +479,189 @@ def _validate_runtime_plugin_shape(plugin_dir: Path, meta: PluginMetadata) -> No
         )
 
 
+def _version_tuple(raw: str | None) -> tuple[int, ...]:
+    return tuple(int(p) for p in re.findall(r"\d+", str(raw or ""))[:3])
+
+
+def _has_newer_version(latest: str | None, current: str | None) -> bool:
+    latest_tuple = _version_tuple(latest)
+    current_tuple = _version_tuple(current)
+    return bool(latest_tuple and current_tuple and latest_tuple > current_tuple)
+
+
+def _iter_json_strings(value: Any, path: str = "$"):
+    if isinstance(value, str):
+        yield path, value
+    elif isinstance(value, dict):
+        for key, item in value.items():
+            yield from _iter_json_strings(item, f"{path}.{key}")
+    elif isinstance(value, list):
+        for idx, item in enumerate(value):
+            yield from _iter_json_strings(item, f"{path}[{idx}]")
+
+
+def _iter_manifest_string_literals(manifest_text: str):
+    try:
+        tree = ast.parse(manifest_text)
+    except SyntaxError:
+        return
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            yield getattr(node, "lineno", 0), node.value
+
+
+def _warn_hardcoded_prefix(source: str, location: str, text: str) -> str | None:
+    if "{prefix}" in text:
+        return None
+    match = _HARDCODED_PREFIX_RE.search(text)
+    if not match:
+        return None
+    snippet = text.strip().replace("\n", " ")
+    if len(snippet) > 100:
+        snippet = snippet[:97] + "..."
+    return f"{source} {location} 疑似硬编码命令前缀 {match.group(0)!r}：{snippet}"
+
+
+def lint_plugin_metadata_files(plugin_dir: Path) -> list[str]:
+    """静态 lint plugin.json / manifest.py，发现疑似硬编码命令前缀时给 warning。
+
+    该 lint 只提示不阻断安装；manifest.py 只做 AST 解析，不执行任何代码。
+    """
+    warnings: list[str] = []
+    pj = plugin_dir / "plugin.json"
+    if pj.is_file():
+        try:
+            data = json.loads(pj.read_text(encoding="utf-8"))
+            for path, text in _iter_json_strings(data):
+                warning = _warn_hardcoded_prefix("plugin.json", path, text)
+                if warning:
+                    warnings.append(warning)
+        except Exception:  # noqa: BLE001
+            pass
+
+    manifest = plugin_dir / "manifest.py"
+    if manifest.is_file():
+        try:
+            text = manifest.read_text(encoding="utf-8")
+            for lineno, literal in _iter_manifest_string_literals(text):
+                warning = _warn_hardcoded_prefix("manifest.py", f"line {lineno}", literal)
+                if warning:
+                    warnings.append(warning)
+        except Exception:  # noqa: BLE001
+            pass
+
+    # 去重并限制数量，避免一个坏模板刷屏。
+    unique: list[str] = []
+    for item in warnings:
+        if item not in unique:
+            unique.append(item)
+    return unique[:10]
+
+
+def _find_plugin_metadata_in_repo(repo_dir: Path, name: str) -> tuple[PluginMetadata, Path]:
+    candidates = [repo_dir]
+    candidates.extend([p for p in repo_dir.iterdir() if p.is_dir() and not p.name.startswith(".")])
+    for candidate in candidates:
+        if not (candidate / "plugin.json").is_file():
+            continue
+        try:
+            meta = _read_plugin_metadata(candidate, fallback_name=candidate.name)
+        except InvalidPluginMetadata:
+            continue
+        if meta.name == name:
+            return meta, candidate
+    raise RemotePluginError(
+        "PLUGIN_NOT_IN_REPO",
+        f"仓库内未找到插件 {name!r}",
+    )
+
+
+async def check_remote_plugin_update(db: AsyncSession, row: RemotePlugin) -> RemotePlugin:
+    """检查单个远程模块是否有更新，并把状态写回 remote_plugin 行。"""
+    row.last_update_check_at = datetime.now(UTC)
+    row.last_update_check_error = None
+    try:
+        if str(row.source_url or "").startswith("local://"):
+            target = _existing_plugin_dir(row.name)
+            row.lint_warnings = lint_plugin_metadata_files(target) if target.exists() else []
+            row.latest_version = row.version
+            row.update_available = False
+            await db.flush()
+            return row
+
+        with tempfile.TemporaryDirectory(prefix="telepilot-plugin-check-") as tmp:
+            repo_dir = Path(tmp) / "repo"
+            await _run_git("clone", "--depth", "1", row.source_url, str(repo_dir), timeout=180.0)
+            meta, plugin_dir = _find_plugin_metadata_in_repo(repo_dir, row.name)
+            row.latest_version = meta.version
+            row.update_available = _has_newer_version(meta.version, row.version)
+            row.lint_warnings = lint_plugin_metadata_files(plugin_dir)
+    except Exception as exc:  # noqa: BLE001
+        row.last_update_check_error = f"{type(exc).__name__}: {exc}"
+        row.update_available = False
+    await db.flush()
+    return row
+
+
+async def check_updates(
+    db: AsyncSession,
+    *,
+    name: str | None = None,
+) -> RemotePluginUpdateCheckSummary:
+    """检查已安装远程模块更新状态；只更新标记，不自动安装新版本。"""
+    stmt = select(RemotePlugin).order_by(RemotePlugin.name)
+    if name:
+        stmt = stmt.where(RemotePlugin.name == name)
+    rows = (await db.execute(stmt)).scalars().all()
+    summary = RemotePluginUpdateCheckSummary(total=len(rows))
+    for row in rows:
+        await check_remote_plugin_update(db, row)
+        summary.checked += 1
+        if row.update_available:
+            summary.update_available += 1
+        if row.last_update_check_error:
+            summary.failed += 1
+    return summary
+
+
+async def _load_update_check_setting() -> tuple[bool, int]:
+    try:
+        async with AsyncSessionLocal() as db:
+            row = await db.get(SystemSetting, "remote_plugin_update_check")
+            value = row.value if row is not None else {}
+    except Exception:  # noqa: BLE001
+        return True, _REMOTE_UPDATE_DEFAULT_INTERVAL_MINUTES
+    if not isinstance(value, dict):
+        value = {}
+    enabled = bool(value.get("enabled", True))
+    try:
+        interval = int(value.get("interval_minutes") or _REMOTE_UPDATE_DEFAULT_INTERVAL_MINUTES)
+    except (TypeError, ValueError):
+        interval = _REMOTE_UPDATE_DEFAULT_INTERVAL_MINUTES
+    interval = max(30, min(interval, 10080))
+    return enabled, interval
+
+
+async def auto_update_check_loop() -> None:
+    """后台自动检查远程模块是否有可更新版本。"""
+    await asyncio.sleep(15)
+    last_run_at: datetime | None = None
+    while True:
+        enabled, interval = await _load_update_check_setting()
+        now = datetime.now(UTC)
+        due = last_run_at is None or (now - last_run_at).total_seconds() >= interval * 60
+        if enabled and due:
+            try:
+                async with AsyncSessionLocal() as db:
+                    await check_updates(db)
+                    await db.commit()
+                last_run_at = datetime.now(UTC)
+            except Exception:  # noqa: BLE001
+                last_run_at = datetime.now(UTC)
+                log.warning("远程模块自动检查更新失败", exc_info=True)
+        await asyncio.sleep(60)
+
+
 # ─────────────────────────────────────────────────────
 # 触发 worker 热加载
 # ─────────────────────────────────────────────────────
@@ -643,6 +840,7 @@ async def install(
     try:
         meta = _read_plugin_metadata(target, fallback_name=final_name)
         _validate_runtime_plugin_shape(target, meta)
+        lint_warnings = lint_plugin_metadata_files(target)
         row = RemotePlugin(
             name=final_name,
             display_name=meta.display_name or final_name,
@@ -650,6 +848,9 @@ async def install(
             author=meta.author,
             source_url=source_url,
             version=meta.version,
+            latest_version=meta.version,
+            update_available=False,
+            lint_warnings=lint_warnings,
             enabled=bool(enable or default_enabled),
             default_enabled=default_enabled,
         )
@@ -841,11 +1042,17 @@ async def update(db: AsyncSession, name: str) -> RemotePlugin:
 
     meta = _read_plugin_metadata(target, fallback_name=name)
     _validate_runtime_plugin_shape(target, meta)
+    lint_warnings = lint_plugin_metadata_files(target)
     if meta.display_name:
         row.display_name = meta.display_name
     row.description = meta.description
     row.author = meta.author or row.author
     row.version = meta.version or row.version
+    row.latest_version = row.version
+    row.update_available = False
+    row.last_update_check_error = None
+    row.last_update_check_at = datetime.now(UTC)
+    row.lint_warnings = lint_warnings
     feat = (
         await db.execute(select(Feature).where(Feature.key == name))
     ).scalar_one_or_none()
@@ -883,6 +1090,10 @@ __all__ = [
     "PluginMetadataSchema",
     "RemotePluginError",
     "RemotePluginNotFound",
+    "RemotePluginUpdateCheckSummary",
+    "auto_update_check_loop",
+    "check_remote_plugin_update",
+    "check_updates",
     "disable",
     "enable",
     "get_by_name",

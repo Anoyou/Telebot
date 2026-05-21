@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
@@ -33,6 +33,7 @@ import { Select } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { getErrMsg } from "@/lib/api";
+import { featureConfigBackTarget } from "@/pages/Plugins/_shared/featureConfig";
 
 type TokenEntry = {
   token: string;
@@ -269,6 +270,7 @@ export function ChatGPTImageConfigPage() {
   const params = useParams();
   const aid = Number(params.aid);
   const nav = useNavigate();
+  const location = useLocation();
   const qc = useQueryClient();
 
   const featuresQ = useQuery({
@@ -504,6 +506,8 @@ export function ChatGPTImageConfigPage() {
     );
   }
 
+  const backTarget = featureConfigBackTarget(aid, location.search);
+
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center gap-3">
@@ -511,9 +515,9 @@ export function ChatGPTImageConfigPage() {
           <Button
             variant="ghost"
             size="sm"
-            onClick={() => nav(`/accounts/${aid}?tab=features`)}
+            onClick={() => nav(backTarget.backHref)}
           >
-            <ArrowLeft className="mr-1 h-4 w-4" /> 返回账号
+            <ArrowLeft className="mr-1 h-4 w-4" /> {backTarget.backLabel}
           </Button>
           <div>
             <h1 className="text-2xl font-semibold tracking-tight">ChatGPT2API</h1>

@@ -87,6 +87,13 @@ class AccountPluginAction(BaseModel):
     account_ids: list[int]
 
 
+class RemotePluginUpdateCheckResponse(BaseModel):
+    total: int
+    checked: int
+    update_available: int
+    failed: int
+
+
 @router.post("/{name}/enable-accounts")
 async def api_enable_accounts(name: str, body: AccountPluginAction, db: DBSession, _user: CurrentUser):
     """按账号启用远程插件（写入 AccountFeature 行，功能矩阵可见）。"""
@@ -125,6 +132,19 @@ async def api_update(name: str, db: DBSession, _user: CurrentUser):
         raise HTTPException(400, detail={"code": e.code, "message": e.message}) from e
     except RemotePluginError as e:
         raise HTTPException(400, detail={"code": e.code, "message": e.message}) from e
+
+
+@router.post("/check-updates", response_model=RemotePluginUpdateCheckResponse)
+async def api_check_updates(db: DBSession, _user: CurrentUser):
+    """手动检查所有远程模块是否有更新；只更新提示状态，不自动安装。"""
+    summary = await svc.check_updates(db)
+    await db.commit()
+    return RemotePluginUpdateCheckResponse(
+        total=summary.total,
+        checked=summary.checked,
+        update_available=summary.update_available,
+        failed=summary.failed,
+    )
 
 
 @router.delete("/{name}")

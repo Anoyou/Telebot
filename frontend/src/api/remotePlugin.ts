@@ -1,5 +1,5 @@
 import { api } from "@/lib/api";
-import type { RemotePlugin, InstallRequest, AccountPluginAction } from "@/types/remotePlugin";
+import type { RemotePlugin, InstallRequest, AccountPluginAction, RemotePluginUpdateCheckResponse } from "@/types/remotePlugin";
 
 const BASE = "/api/remote-plugins";
 
@@ -57,6 +57,11 @@ export async function updateRemotePlugin(name: string): Promise<RemotePlugin> {
   const { data } = await api.post<RemotePlugin>(
     `${BASE}/${encodeURIComponent(name)}/update`
   );
+  return data;
+}
+
+export async function checkRemotePluginUpdates(): Promise<RemotePluginUpdateCheckResponse> {
+  const { data } = await api.post<RemotePluginUpdateCheckResponse>(`${BASE}/check-updates`);
   return data;
 }
 

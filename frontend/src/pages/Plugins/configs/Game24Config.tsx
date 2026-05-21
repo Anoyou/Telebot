@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, Loader2 } from "lucide-react";
 import { toast } from "sonner";
@@ -20,6 +20,7 @@ import { Label } from "@/components/ui/label";
 import { Spinner } from "@/components/ui/misc";
 import { Switch } from "@/components/ui/switch";
 import { getErrMsg } from "@/lib/api";
+import { featureConfigBackTarget } from "@/pages/Plugins/_shared/featureConfig";
 
 interface Game24Config {
   command: string;
@@ -47,6 +48,7 @@ export function Game24ConfigPage() {
   const params = useParams();
   const aid = Number(params.aid);
   const nav = useNavigate();
+  const location = useLocation();
   const qc = useQueryClient();
 
   const featuresQ = useQuery({
@@ -130,11 +132,13 @@ export function Game24ConfigPage() {
     );
   }
 
+  const backTarget = featureConfigBackTarget(aid, location.search);
+
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center gap-3">
-        <Button variant="ghost" size="sm" onClick={() => nav(`/accounts/${aid}?tab=features`)}>
-          <ArrowLeft className="mr-1 h-4 w-4" /> 返回账号
+        <Button variant="ghost" size="sm" onClick={() => nav(backTarget.backHref)}>
+          <ArrowLeft className="mr-1 h-4 w-4" /> {backTarget.backLabel}
         </Button>
         <h1 className="text-2xl font-semibold tracking-tight">24 点游戏</h1>
       </div>

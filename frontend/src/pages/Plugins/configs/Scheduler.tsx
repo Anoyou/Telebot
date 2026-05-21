@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Pencil, Play, Plus, Trash2, Zap } from "lucide-react";
 import { toast } from "sonner";
@@ -46,6 +46,7 @@ import { Badge } from "@/components/ui/badge";
 import { getErrMsg } from "@/lib/api";
 import { formatDateTime } from "@/lib/utils";
 import { DryRunDetail } from "@/components/DryRunDetail";
+import { featureConfigBackTarget } from "@/pages/Plugins/_shared/featureConfig";
 import {
   Field,
   RuleInfoBox,
@@ -108,6 +109,7 @@ function emptyForm(commandPrefix = ","): FormState {
 
 export function SchedulerConfig() {
   const params = useParams();
+  const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
   const aidFromPath = Number(params.aid);
   const aidFromQuery = Number(searchParams.get("aid"));
@@ -119,6 +121,7 @@ export function SchedulerConfig() {
         : 0;
   const fromAccountRoute = Number.isFinite(aidFromPath) && aidFromPath > 0;
   const nav = useNavigate();
+  const accountBackTarget = featureConfigBackTarget(aid, location.search);
 
   const accountsQ = useQuery({
     queryKey: ["accounts"],
@@ -318,8 +321,8 @@ export function SchedulerConfig() {
     <div className="space-y-6">
       <RulePageHeader
         title={`定时任务 · 账号 #${aid}`}
-        backLabel={fromAccountRoute ? "返回账号" : "返回定时任务"}
-        backHref={fromAccountRoute ? `/accounts/${aid}?tab=features` : "/plugins/scheduler"}
+        backLabel={fromAccountRoute ? accountBackTarget.backLabel : "返回定时任务"}
+        backHref={fromAccountRoute ? accountBackTarget.backHref : "/plugins/scheduler"}
       />
 
       <RuleInfoBox>
@@ -498,6 +501,7 @@ export function SchedulerConfig() {
               <option value="once">once 单次</option>
               <option value="interval">interval 间隔</option>
             </Select>
+            {form.config.kind === "cron" ? <CronExamples /> : null}
           </Field>
           {form.config.kind === "cron" ? (
             <Field label="cron 表达式">
@@ -512,13 +516,6 @@ export function SchedulerConfig() {
                 placeholder="*/5 * * * *"
               />
               <CronPreview preview={cronPreview} timezone={tz} />
-              <p className="text-xs text-muted-foreground">
-                示例：<code className="rounded bg-muted px-1">*/5 * * * *</code> 每5分钟
-                <code className="rounded bg-muted px-1">0 9 * * 1-5</code> 工作日9点
-                <code className="rounded bg-muted px-1">0 5 11 * * *</code> 每天11:05:00
-                <code className="rounded bg-muted px-1">0 0 1 * *</code> 每月1号零点
-                <code className="rounded bg-muted px-1">*/30 * * * *</code> 每30分钟
-              </p>
             </Field>
           ) : null}
           {form.config.kind === "once" ? (
@@ -839,6 +836,28 @@ interface CronPreviewResult {
   fieldHint: string;
   summary: string;
   next: Date[];
+}
+
+const CRON_EXAMPLES = [
+  { expr: "*/5 * * * *", label: "每5分钟" },
+  { expr: "0 9 * * 1-5", label: "工作日9点" },
+  { expr: "0 5 11 * * *", label: "每天11:05:00" },
+  { expr: "0 0 1 * *", label: "每月1号零点" },
+  { expr: "*/30 * * * *", label: "每30分钟" },
+];
+
+function CronExamples() {
+  return (
+    <div className="mt-2 space-y-1 text-xs text-muted-foreground">
+      <div>示例：</div>
+      {CRON_EXAMPLES.map((item) => (
+        <div key={item.expr} className="flex items-center gap-2">
+          <code className="shrink-0 rounded bg-muted px-1">{item.expr}</code>
+          <span>{item.label}</span>
+        </div>
+      ))}
+    </div>
+  );
 }
 
 function CronPreview({ preview, timezone }: { preview: CronPreviewResult; timezone: string }) {

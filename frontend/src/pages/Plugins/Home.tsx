@@ -460,7 +460,9 @@ function FeatureZone({
           <div className="space-y-2">
             {features.map((f) => {
               const status = selectedFeatures[f.key] ?? "disabled";
-              const path = featureConfigPath(selectedAccountId, f.key, f);
+              const path = featureConfigPath(selectedAccountId, f.key, f, {
+                source: "plugins",
+              });
               const canConfigure = Boolean(path);
               return (
                 <div key={f.key} className="flex items-center justify-between rounded-md border p-2">
@@ -469,8 +471,19 @@ function FeatureZone({
                       {f.display_name}
                       {f.experimental ? <Badge variant="outline">实验性</Badge> : null}
                       {f.interaction_entries?.length ? <Badge variant="secondary">交互入口</Badge> : null}
+                      {f.update_available ? <Badge variant="default">有更新</Badge> : null}
                     </div>
                     <div className="font-mono text-xs text-muted-foreground">{f.key}</div>
+                    {f.update_available && f.latest_version ? (
+                      <div className="mt-1 text-xs text-muted-foreground">
+                        远程模块有新版 {f.latest_version}，请到“安装模块”更新。
+                      </div>
+                    ) : null}
+                    {f.last_update_check_error ? (
+                      <div className="mt-1 text-xs text-destructive">
+                        更新检查失败：{f.last_update_check_error}
+                      </div>
+                    ) : null}
                   </div>
                   <div className="flex items-center gap-2">
                     <Badge variant={status === "active" ? "default" : "outline"}>

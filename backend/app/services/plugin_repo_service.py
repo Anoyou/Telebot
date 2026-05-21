@@ -48,6 +48,7 @@ from .remote_plugin_service import (
     _run_git,
     _validate_runtime_plugin_shape,
     _validate_source_url,
+    lint_plugin_metadata_files,
 )
 
 log = logging.getLogger(__name__)
@@ -411,6 +412,9 @@ async def install_plugin_from_repo(
             author=meta.author,
             source_url=row.url,
             version=meta.version,
+            latest_version=meta.version,
+            update_available=False,
+            lint_warnings=lint_plugin_metadata_files(install_path),
             enabled=bool(default_enabled),
             default_enabled=default_enabled,
         )
@@ -544,6 +548,9 @@ async def install_local_plugin(
             author=meta.author,
             source_url=f"local://local_imports/{final_name}",
             version=meta.version,
+            latest_version=meta.version,
+            update_available=False,
+            lint_warnings=lint_plugin_metadata_files(install_path),
             enabled=bool(default_enabled),
             default_enabled=default_enabled,
         )
