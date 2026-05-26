@@ -350,6 +350,21 @@ class TestSandboxClientSecurity:
         # send_message 是声明的权限，必须可用
         assert callable(sandbox.send_message)
 
+    def test_sandbox_resolve_entity_requires_explicit_permission(self):
+        """实体解析必须单独声明 resolve_entity，不能混入普通 read_chat。"""
+        from app.worker.plugins.sandbox import SandboxClient
+
+        class FakeClient:
+            def get_entity(self, *args, **kwargs):
+                return None
+
+        read_only = SandboxClient(FakeClient(), ["read_chat"], plugin_key="demo")
+        with pytest.raises(PermissionError):
+            _ = read_only.get_entity
+
+        resolver = SandboxClient(FakeClient(), ["resolve_entity"], plugin_key="demo")
+        assert callable(resolver.get_entity)
+
     def test_sandbox_blocks_undelared_attrs(self):
         """未声明的属性访问必须被拒绝。"""
         sandbox = self._make_sandbox()

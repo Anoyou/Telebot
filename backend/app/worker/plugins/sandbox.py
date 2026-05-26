@@ -21,6 +21,7 @@
 - ``send_message``    : ``send_message`` / ``respond`` / ``reply``
 - ``edit_message``    : ``edit`` / ``edit_message``
 - ``read_chat``       : ``get_messages`` / ``get_chat`` / ``iter_messages``
+- ``resolve_entity``  : ``get_entity``
 - ``send_file``       : ``send_file``
 - ``join_chat``       : ``join_chat``
 - ``delete_message``  : ``delete_messages``
@@ -47,6 +48,7 @@ ALLOWED_API: dict[str, frozenset[str]] = {
     "send_message": frozenset({"send_message", "respond", "reply"}),
     "edit_message": frozenset({"edit", "edit_message"}),
     "read_chat": frozenset({"get_messages", "get_chat", "iter_messages"}),
+    "resolve_entity": frozenset({"get_entity"}),
     "send_file": frozenset({"send_file"}),
     "join_chat": frozenset({"join_chat"}),
     "delete_message": frozenset({"delete_messages"}),

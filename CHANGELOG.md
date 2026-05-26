@@ -14,6 +14,15 @@
 
 ## [Unreleased]
 
+## [0.24.1] — 2026-05-26 · patch · 插件 AI 配置与沙箱实体解析
+
+### Added
+- 远程模块沙箱新增 `resolve_entity` 能力，允许明确声明该能力的插件调用 Telethon `client.get_entity`，避免实体解析被误归入普通聊天读取权限。
+- 插件配置页支持 `llm-provider-select` 与 `llm-model-select` 动态控件，可直接选择 TelePilot 已配置的 AI Provider 和已启用模型。
+
+### Fixed
+- 修复 `sum` 等远程模块在真实 Telegram 事件流程中触发实体解析时仍报缺少 `client.get_entity` 权限的问题。
+
 ## [0.24.0] — 2026-05-26 · minor · 安全加固与模块体验升级
 
 ### Added

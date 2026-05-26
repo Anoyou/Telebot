@@ -14,7 +14,9 @@ import { useQuery } from "@tanstack/react-query";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { toast } from "sonner";
 import { TelegramHtmlPreview, TelegramHtmlPreviewThread } from "@/components/TelegramHtmlPreview";
+import { listLLMProviders } from "@/api/commands";
 import { getSystemSettings } from "@/api/system";
+import type { LLMProviderOut } from "@/api/types";
 import { getErrMsg } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import {
@@ -40,6 +42,7 @@ export interface ConfigField {
   type: string;
   format?: string;
   "x-ui-widget"?: string;
+  "x-ui-provider-field"?: string;
   enum?: Array<string | number | boolean>;
   enumNames?: string[];
   enumDescriptions?: string[];
@@ -83,6 +86,12 @@ export function ConfigDialog({
     queryKey: ["system", "settings"],
     queryFn: getSystemSettings,
     enabled: open,
+  });
+  const hasLLMSelect = schemaHasLLMSelect(schema);
+  const llmProvidersQ = useQuery({
+    queryKey: ["llm-providers"],
+    queryFn: listLLMProviders,
+    enabled: open && hasLLMSelect,
   });
   const commandPrefix = settingsQ.data?.command_prefix || ",";
 
@@ -149,6 +158,8 @@ export function ConfigDialog({
               fields={globalFields}
               values={globalVals}
               commandPrefix={commandPrefix}
+              llmProviders={llmProvidersQ.data}
+              llmProvidersLoading={llmProvidersQ.isLoading}
               onChange={(key, value) => setGlobalVals((p) => ({ ...p, [key]: value }))}
             />
           )}
@@ -159,6 +170,8 @@ export function ConfigDialog({
               fields={accountFields}
               values={accountVals}
               commandPrefix={commandPrefix}
+              llmProviders={llmProvidersQ.data}
+              llmProvidersLoading={llmProvidersQ.isLoading}
               onChange={(key, value) => setAccountVals((p) => ({ ...p, [key]: value }))}
             />
           )}
@@ -182,6 +195,8 @@ interface ConfigScopeSectionProps {
   fields: FieldEntry[];
   values: Record<string, unknown>;
   commandPrefix: string;
+  llmProviders?: LLMProviderOut[];
+  llmProvidersLoading?: boolean;
   onChange: (key: string, value: unknown) => void;
 }
 
@@ -191,6 +206,8 @@ export function ConfigScopeSection({
   fields,
   values,
   commandPrefix,
+  llmProviders,
+  llmProvidersLoading = false,
   onChange,
 }: ConfigScopeSectionProps) {
   const [openTemplates, setOpenTemplates] = useState<Record<string, boolean>>({});
@@ -211,6 +228,9 @@ export function ConfigScopeSection({
               fk={key}
               field={field}
               value={values[key]}
+              values={values}
+              llmProviders={llmProviders}
+              llmProvidersLoading={llmProvidersLoading}
               onChange={(value) => onChange(key, value)}
             />
           ))}
@@ -229,6 +249,9 @@ export function ConfigScopeSection({
               fk={key}
               field={field}
               value={values[key]}
+              values={values}
+              llmProviders={llmProviders}
+              llmProvidersLoading={llmProvidersLoading}
               onChange={(value) => onChange(key, value)}
             />
           ))}
@@ -256,6 +279,9 @@ export function ConfigScopeSection({
                         fk={key}
                         field={field}
                         value={values[key]}
+                        values={values}
+                        llmProviders={llmProviders}
+                        llmProvidersLoading={llmProvidersLoading}
                         onChange={(value) => onChange(key, value)}
                       />
                     </div>
@@ -317,11 +343,23 @@ interface FieldInputProps {
   fk: string;
   field: ConfigField;
   value: unknown;
+  values?: Record<string, unknown>;
+  llmProviders?: LLMProviderOut[];
+  llmProvidersLoading?: boolean;
   previewValue?: string;
   onChange: (v: unknown) => void;
 }
 
-function FieldInput({ fk, field, value, previewValue, onChange }: FieldInputProps) {
+function FieldInput({
+  fk,
+  field,
+  value,
+  values = {},
+  llmProviders,
+  llmProvidersLoading = false,
+  previewValue,
+  onChange,
+}: FieldInputProps) {
   const label = field.title || fk;
   const description = field.description;
   const inputId = `plugin-config-${fk}`;
@@ -358,6 +396,37 @@ function FieldInput({ fk, field, value, previewValue, onChange }: FieldInputProp
           {textValue || defaultValue || "未设置"}
         </pre>
       </ReadOnlyField>
+    );
+  }
+
+  if (field["x-ui-widget"] === "llm-provider-select") {
+    return (
+      <LLMProviderSelectField
+        inputId={inputId}
+        label={label}
+        description={description}
+        value={value}
+        providers={llmProviders}
+        loading={llmProvidersLoading}
+        onChange={onChange}
+      />
+    );
+  }
+
+  if (field["x-ui-widget"] === "llm-model-select") {
+    const providerField = field["x-ui-provider-field"];
+    const providerValue = providerField ? values[providerField] : undefined;
+    return (
+      <LLMModelSelectField
+        inputId={inputId}
+        label={label}
+        description={description}
+        value={value}
+        providerValue={providerValue}
+        providers={llmProviders}
+        loading={llmProvidersLoading}
+        onChange={onChange}
+      />
     );
   }
 
@@ -498,6 +567,150 @@ function FieldInput({ fk, field, value, previewValue, onChange }: FieldInputProp
       />
     </div>
   );
+}
+
+function LLMProviderSelectField({
+  inputId,
+  label,
+  description,
+  value,
+  providers,
+  loading,
+  onChange,
+}: {
+  inputId: string;
+  label: string;
+  description?: string;
+  value: unknown;
+  providers?: LLMProviderOut[];
+  loading: boolean;
+  onChange: (v: unknown) => void;
+}) {
+  const selected = formatConfigValue(value);
+  const hasSelectedProvider = Boolean(selected) && Boolean(findLLMProviderBySelector(providers, selected));
+
+  return (
+    <div className="space-y-1.5">
+      <Label htmlFor={inputId}>{label}</Label>
+      {description && <p className="text-xs text-muted-foreground">{description}</p>}
+      <Select
+        id={inputId}
+        value={selected}
+        disabled={loading}
+        onChange={(e) => onChange(e.target.value)}
+      >
+        <option value="">{loading ? "正在加载 TelePilot Provider..." : "自动路由"}</option>
+        {providers?.map((provider) => (
+          <option key={provider.id} value={String(provider.id)}>
+            {formatLLMProviderOptionLabel(provider)}
+          </option>
+        ))}
+        {selected && !hasSelectedProvider && (
+          <option value={selected}>当前值：{selected}</option>
+        )}
+      </Select>
+      {!loading && (!providers || providers.length === 0) && (
+        <p className="text-xs text-muted-foreground">
+          尚未配置 TelePilot AI Provider；请先到 AI 模型提供商中添加。
+        </p>
+      )}
+    </div>
+  );
+}
+
+function LLMModelSelectField({
+  inputId,
+  label,
+  description,
+  value,
+  providerValue,
+  providers,
+  loading,
+  onChange,
+}: {
+  inputId: string;
+  label: string;
+  description?: string;
+  value: unknown;
+  providerValue: unknown;
+  providers?: LLMProviderOut[];
+  loading: boolean;
+  onChange: (v: unknown) => void;
+}) {
+  const selected = formatConfigValue(value);
+  const provider = findLLMProviderBySelector(providers, formatConfigValue(providerValue));
+  const rows = provider ? buildLLMModelOptions(provider) : [];
+  const hasSelectedModel = Boolean(selected) && rows.some((row) => row.value === selected);
+
+  return (
+    <div className="space-y-1.5">
+      <Label htmlFor={inputId}>{label}</Label>
+      {description && <p className="text-xs text-muted-foreground">{description}</p>}
+      <Select
+        id={inputId}
+        value={selected}
+        disabled={loading || !provider}
+        onChange={(e) => onChange(e.target.value)}
+      >
+        <option value="">
+          {provider ? "使用 Provider 默认模型" : loading ? "正在加载 TelePilot Provider..." : "跟随自动路由"}
+        </option>
+        {rows.map((row) => (
+          <option key={row.value} value={row.value}>
+            {row.label}
+          </option>
+        ))}
+        {selected && !hasSelectedModel && (
+          <option value={selected}>当前值：{selected}</option>
+        )}
+      </Select>
+      {!loading && !provider && (
+        <p className="text-xs text-muted-foreground">
+          先选择固定 TelePilot Provider 后，才能选择该 Provider 下已启用的模型。
+        </p>
+      )}
+    </div>
+  );
+}
+
+function schemaHasLLMSelect(schema: ConfigSchema | Record<string, unknown> | null): boolean {
+  if (!schema || typeof schema !== "object" || !("properties" in schema)) return false;
+  const properties = (schema as ConfigSchema).properties ?? {};
+  return Object.values(properties).some((field) => {
+    const widget = field?.["x-ui-widget"];
+    return widget === "llm-provider-select" || widget === "llm-model-select";
+  });
+}
+
+function findLLMProviderBySelector(providers: LLMProviderOut[] | undefined, selector: string): LLMProviderOut | null {
+  const raw = selector.trim();
+  if (!raw) return null;
+  const lowered = raw.toLowerCase();
+  return providers?.find((provider) => (
+    String(provider.id) === raw ||
+    provider.name.toLowerCase() === lowered ||
+    String(provider.provider).toLowerCase() === lowered
+  )) ?? null;
+}
+
+function formatLLMProviderOptionLabel(provider: LLMProviderOut): string {
+  const tags = provider.tags && provider.tags.length > 0 ? ` · ${provider.tags.join(",")}` : "";
+  const keyState = provider.has_api_key || provider.provider === "ollama" ? "" : " · 未配置 API Key";
+  return `${provider.name}（${provider.provider} · ${provider.default_model}${tags}${keyState}）`;
+}
+
+function buildLLMModelOptions(provider: LLMProviderOut): Array<{ value: string; label: string }> {
+  const enabled = (provider.models ?? []).filter((model) => model.enabled);
+  const seen = new Set<string>();
+  const rows: Array<{ value: string; label: string }> = [];
+  for (const model of enabled) {
+    const value = model.id.trim();
+    if (!value || seen.has(value)) continue;
+    seen.add(value);
+    const label = model.label && model.label !== model.id ? `${model.label}（${model.id}）` : model.id;
+    rows.push({ value, label });
+  }
+  return rows;
 }
 
 function isTemplateField(key: string): boolean {
