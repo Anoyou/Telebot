@@ -14,8 +14,32 @@
 
 ## [Unreleased]
 
+## [0.25.0-rc.2] — 2026-05-27 · rc · 插件安装表切换与配置表拆分
+
+### Added
+- 新增 `plugin_global_config` 独立配置表与迁移 `0028`，插件全局配置读写改走独立表，并保留从 `feature.manifest["global_config"]` 回退读取的兼容路径。
+- 新增 LLM 用量 `triggered_by_account_id` 字段与迁移 `0027`，为交互 Bot 触发链路后续归属真实账号预留审计字段。
+- 新增存量插件 lint 回填脚本，可对已安装插件重新扫描 metadata lint warning 并写入 `installed_plugin.lint_warnings`。
+
 ### Changed
 - ⚠️ 升级提示：手工拷贝到 `plugins/installed/<key>/` 但未通过安装接口的目录现在被识别为"孤立目录"，不再出现在模块中心，也无法启用。请改用模块仓库安装或 zip 安装。
+- 插件 loader 授权切换为单读 `installed_plugin` 表，不再依赖 `PluginInstall` / `RemotePlugin` 运行时状态。
+- `PluginInstall` 与 `RemotePlugin` 转为只读兼容快照，zip、Git、仓库和本地导入安装、更新、启停、卸载统一写入 `InstalledPlugin`；迁移 `0029` 会从老表回填缺失安装记录。
+- 模块中心 `FeatureInfo` 暴露 `lint_warnings`，前端模块卡片可折叠展示 lint 提醒。
+- `ctx.ai.complete()` 移除 `provider_hint` 兼容入口，并对 `tag` / `tags` 别名发出 `DeprecationWarning`；新模块应使用 `provider_tag`。
+- 插件 HTTP facade 的策略错误与响应过大错误会带上 `plugin_key`，便于从日志定位触发插件。
+- installed 插件模块缓存清理改为维护已加载模块名集合，减少 reload 时全量扫描 `sys.modules` 的开销。
+
+### Fixed
+- 修复 `SandboxClient` 子类无法被 loader 识别为已沙箱化 client 的问题，改用 `_is_sandboxed` marker 判断。
+- 为声明但当前未支持的 facade 权限（如 `ai_vision` / `ai_image` / `ai_stt`）写入 runtime warning，避免 manifest 权限被静默忽略。
+- 明确插件 AI quota 跨午夜释放语义，按 acquire 当天的 daily key 回滚，保持软上限记账一致。
+- 补齐前端 `pnpm typecheck` 脚本，使项目约定的类型检查命令可直接运行。
+
+### Docs
+- 拆分 `PLUGIN-DEV-GUIDE.md` 为概览、API 参考、HTTP、远程模块、安全与速查页，并清理旧锚点引用。
+- `PLUGIN-AI.md` 补充 `plugin_ai_quota` 配置示例、Redis 降级行为、软上限误差与跨日记账说明。
+- 远程模块文档改为说明 `InstalledPlugin.enabled` 是当前安装状态来源，老表仅保留兼容读取。
 
 ## [0.25.0-rc.1] — 2026-05-27 · rc · 插件运行时安全基线与 AI/HTTP facade
 
