@@ -5,6 +5,7 @@ import { ArrowLeft, Loader2, Save } from "lucide-react";
 import { toast } from "sonner";
 
 import { getAccount, listAccountFeatures, toggleAccountFeature } from "@/api/accounts";
+import { listLLMProviders } from "@/api/commands";
 import {
   getFeatureMatrix,
   getPluginGlobalConfig,
@@ -15,6 +16,7 @@ import { getSystemSettings } from "@/api/system";
 import {
   buildScopedConfigValues,
   ConfigScopeSection,
+  schemaHasLLMSelect,
   type ConfigField,
   type ConfigSchema,
   withoutReadOnlyValues,
@@ -87,6 +89,11 @@ export function GenericPluginConfigPage() {
   const globalConfig = globalConfigQ.data ?? {};
   const accountConfig = accountFeature?.config ?? {};
   const commandPrefix = settingsQ.data?.command_prefix || ",";
+  const llmProvidersQ = useQuery({
+    queryKey: ["llm-providers"],
+    queryFn: listLLMProviders,
+    enabled: Boolean(schema && schemaHasLLMSelect(schema)),
+  });
 
   const [globalVals, setGlobalVals] = useState<Record<string, unknown>>({});
   const [accountVals, setAccountVals] = useState<Record<string, unknown>>({});
@@ -314,6 +321,8 @@ export function GenericPluginConfigPage() {
                 fields={globalFields}
                 values={globalVals}
                 commandPrefix={commandPrefix}
+                llmProviders={llmProvidersQ.data}
+                llmProvidersLoading={llmProvidersQ.isLoading || llmProvidersQ.isFetching}
                 onChange={(key, value) => {
                   setGlobalVals((prev) => ({ ...prev, [key]: value }));
                   setDirty(true);
@@ -327,6 +336,8 @@ export function GenericPluginConfigPage() {
                 fields={accountFields}
                 values={accountVals}
                 commandPrefix={commandPrefix}
+                llmProviders={llmProvidersQ.data}
+                llmProvidersLoading={llmProvidersQ.isLoading || llmProvidersQ.isFetching}
                 onChange={(key, value) => {
                   setAccountVals((prev) => ({ ...prev, [key]: value }));
                   setDirty(true);

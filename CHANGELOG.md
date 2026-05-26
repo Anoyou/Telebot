@@ -14,6 +14,16 @@
 
 ## [Unreleased]
 
+## [0.24.2] — 2026-05-26 · patch · 插件配置页 AI 下拉与模板预览
+
+### Changed
+- 通用插件独立配置页接入 TelePilot LLM Provider 查询，`llm-provider-select` / `llm-model-select` 不再只在弹窗模式可用。
+- 模型下拉支持按字段声明过滤文本模型，避免文本插件误选 `gpt-image-*` 等图像模型。
+
+### Fixed
+- 修复部分插件在独立配置页里 Provider 下拉显示“尚未配置 TelePilot AI Provider”但实际已配置的问题。
+- 补齐模板预览示例上下文中的总结类占位符（`chat_display`、`time`、`message_count`、`summary`），使输出模板预览与运行时更一致。
+
 ## [0.24.1] — 2026-05-26 · patch · 插件 AI 配置与沙箱实体解析
 
 ### Added

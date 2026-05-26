@@ -43,6 +43,7 @@ export interface ConfigField {
   format?: string;
   "x-ui-widget"?: string;
   "x-ui-provider-field"?: string;
+  "x-ui-model-modality"?: string;
   enum?: Array<string | number | boolean>;
   enumNames?: string[];
   enumDescriptions?: string[];
@@ -425,6 +426,7 @@ function FieldInput({
         providerValue={providerValue}
         providers={llmProviders}
         loading={llmProvidersLoading}
+        modelModality={field["x-ui-model-modality"]}
         onChange={onChange}
       />
     );
@@ -626,6 +628,7 @@ function LLMModelSelectField({
   providerValue,
   providers,
   loading,
+  modelModality,
   onChange,
 }: {
   inputId: string;
@@ -635,11 +638,12 @@ function LLMModelSelectField({
   providerValue: unknown;
   providers?: LLMProviderOut[];
   loading: boolean;
+  modelModality?: string;
   onChange: (v: unknown) => void;
 }) {
   const selected = formatConfigValue(value);
   const provider = findLLMProviderBySelector(providers, formatConfigValue(providerValue));
-  const rows = provider ? buildLLMModelOptions(provider) : [];
+  const rows = provider ? buildLLMModelOptions(provider, modelModality) : [];
   const hasSelectedModel = Boolean(selected) && rows.some((row) => row.value === selected);
 
   return (
@@ -673,7 +677,7 @@ function LLMModelSelectField({
   );
 }
 
-function schemaHasLLMSelect(schema: ConfigSchema | Record<string, unknown> | null): boolean {
+export function schemaHasLLMSelect(schema: ConfigSchema | Record<string, unknown> | null): boolean {
   if (!schema || typeof schema !== "object" || !("properties" in schema)) return false;
   const properties = (schema as ConfigSchema).properties ?? {};
   return Object.values(properties).some((field) => {
@@ -699,8 +703,10 @@ function formatLLMProviderOptionLabel(provider: LLMProviderOut): string {
   return `${provider.name}（${provider.provider} · ${provider.default_model}${tags}${keyState}）`;
 }
 
-function buildLLMModelOptions(provider: LLMProviderOut): Array<{ value: string; label: string }> {
-  const enabled = (provider.models ?? []).filter((model) => model.enabled);
+function buildLLMModelOptions(provider: LLMProviderOut, modelModality?: string): Array<{ value: string; label: string }> {
+  const enabled = (provider.models ?? []).filter((model) => (
+    model.enabled && modelMatchesModality(model.id, modelModality)
+  ));
   const seen = new Set<string>();
   const rows: Array<{ value: string; label: string }> = [];
   for (const model of enabled) {
@@ -711,6 +717,16 @@ function buildLLMModelOptions(provider: LLMProviderOut): Array<{ value: string; 
     rows.push({ value, label });
   }
   return rows;
+}
+
+function modelMatchesModality(modelId: string, modelModality?: string): boolean {
+  if ((modelModality || "").trim().toLowerCase() !== "text") return true;
+  const normalized = modelId.trim().toLowerCase();
+  return !(
+    normalized.startsWith("gpt-image-") ||
+    normalized.startsWith("dall-e-") ||
+    normalized.includes("image")
+  );
 }
 
 function isTemplateField(key: string): boolean {
@@ -789,6 +805,11 @@ function renderTemplateSample(
     draw_time: `${padClockValue(values.draw_hour, "21")}:${padClockValue(values.draw_minute, "00")}`,
     close_minutes: formatConfigValue(values.close_minutes_before_draw) || "1",
     interval: formatConfigValue(values.auto_draw_interval_sec) || "86400",
+    chat_id: "-1001234567890",
+    chat_display: "示例工作群",
+    summary: "1) 讨论了版本回滚原因\n2) 确认改为平台 AI 路由\n3) 约定今天内回归验证",
+    time: "2026-05-26 14:30",
+    message_count: formatConfigValue(values.default_count) || "100",
   };
   sample.title = "九宫格竞猜";
   sample.target_line = `目标点数：<b>${sample.target_sum}</b>（9 格里唯一）`;
