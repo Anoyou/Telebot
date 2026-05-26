@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import logging
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import Any
@@ -101,19 +100,6 @@ class _FakeFeature:
 
 
 @dataclass
-class _FakePluginInstall:
-    key: str
-    enabled: bool = True
-    signature_ok: bool | None = True
-
-
-@dataclass
-class _FakeRemotePlugin:
-    name: str
-    enabled: bool = True
-
-
-@dataclass
 class _FakeInstalledPlugin:
     key: str
     enabled: bool = True
@@ -135,8 +121,6 @@ class _FakeDB:
         afs: list[_FakeAF],
         rules: list[_FakeRule],
         features: dict[str, Any] | None = None,
-        plugin_installs: dict[str, Any] | None = None,
-        remote_plugins: dict[str, Any] | None = None,
         installed_plugins: dict[str, Any] | None = None,
     ) -> None:
         self.accounts = accounts
@@ -144,8 +128,6 @@ class _FakeDB:
         self.afs = afs
         self.rules = rules
         self.features = features or {}
-        self.plugin_installs = plugin_installs or {}
-        self.remote_plugins = remote_plugins or {}
         self.installed_plugins = installed_plugins or {}
         # 记录 update 调用，便于断言 state 改动
         self.update_calls: list[Any] = []
@@ -161,8 +143,6 @@ class _FakeDB:
             return self.humanize.get(pk)
         if name == "feature":
             return self.features.get(pk)
-        if name == "plugin_install":
-            return self.plugin_installs.get(pk)
         if name == "installed_plugin":
             return self.installed_plugins.get(pk)
         return None
@@ -193,8 +173,6 @@ class _FakeDB:
                     for key, value in values.items():
                         setattr(af, key, value)
             return _FakeResult([])
-        if "remote_plugin" in text:
-            return _FakeResult([(row,) for row in self.remote_plugins.values()])
         # select account_feature where account_id = X
         if "account_feature" in text:
             return _FakeResult([(af,) for af in self.afs])
@@ -458,7 +436,7 @@ def test_clear_installed_module_cache_removes_pycache(monkeypatch, tmp_path) -> 
 
 @pytest.mark.asyncio
 async def test_authorize_installed_plugin_rejects_orphan_directory() -> None:
-    """磁盘/Feature 中有 installed 插件但没有安装记录时，必须按孤儿插件拒绝。"""
+    """磁盘/Feature 中有 installed 插件但没有 installed_plugin 记录时，必须拒绝。"""
 
     db = _FakeDB(accounts={}, humanize={}, afs=[], rules=[])
 
@@ -466,23 +444,24 @@ async def test_authorize_installed_plugin_rejects_orphan_directory() -> None:
 
     assert auth.allowed is False
     assert auth.state == "failed"
-    assert "orphan plugin" in (auth.last_error or "")
+    assert "installed_plugin missing" in (auth.last_error or "")
 
 
 @pytest.mark.asyncio
-async def test_authorize_installed_plugin_honors_plugin_install_enabled() -> None:
-    """zip 安装表的 enabled=false 必须成为运行期硬门禁。"""
+async def test_authorize_installed_plugin_honors_installed_plugin_enabled() -> None:
+    """installed_plugin.enabled=false 必须成为运行期硬门禁。"""
 
     db = _FakeDB(
         accounts={},
         humanize={},
         afs=[],
         rules=[],
-        plugin_installs={
-            "zip_demo": _FakePluginInstall(
+        installed_plugins={
+            "zip_demo": _FakeInstalledPlugin(
                 key="zip_demo",
                 enabled=False,
                 signature_ok=True,
+                trust_tier="community",
             )
         },
     )
@@ -491,7 +470,7 @@ async def test_authorize_installed_plugin_honors_plugin_install_enabled() -> Non
 
     assert auth.allowed is False
     assert auth.state == "disabled"
-    assert "PluginInstall.enabled=False" in (auth.last_error or "")
+    assert "installed_plugin.enabled=False" in (auth.last_error or "")
 
 
 @pytest.mark.asyncio
@@ -503,11 +482,12 @@ async def test_authorize_installed_plugin_rejects_failed_signature() -> None:
         humanize={},
         afs=[],
         rules=[],
-        plugin_installs={
-            "bad_sig": _FakePluginInstall(
+        installed_plugins={
+            "bad_sig": _FakeInstalledPlugin(
                 key="bad_sig",
                 enabled=True,
                 signature_ok=False,
+                trust_tier="community",
             )
         },
     )
@@ -529,11 +509,12 @@ async def test_authorize_installed_plugin_allows_legacy_unsigned_when_enabled(mo
         humanize={},
         afs=[],
         rules=[],
-        plugin_installs={
-            "legacy_unsigned": _FakePluginInstall(
+        installed_plugins={
+            "legacy_unsigned": _FakeInstalledPlugin(
                 key="legacy_unsigned",
                 enabled=True,
                 signature_ok=None,
+                trust_tier="community",
             )
         },
     )
@@ -553,11 +534,12 @@ async def test_authorize_installed_plugin_rejects_legacy_unsigned_when_disabled(
         humanize={},
         afs=[],
         rules=[],
-        plugin_installs={
-            "legacy_unsigned": _FakePluginInstall(
+        installed_plugins={
+            "legacy_unsigned": _FakeInstalledPlugin(
                 key="legacy_unsigned",
                 enabled=True,
                 signature_ok=None,
+                trust_tier="community",
             )
         },
     )
@@ -570,124 +552,69 @@ async def test_authorize_installed_plugin_rejects_legacy_unsigned_when_disabled(
 
 
 @pytest.mark.asyncio
-async def test_authorize_installed_plugin_requires_remote_enabled() -> None:
-    """远程 Git 插件仍必须尊重 RemotePlugin.enabled 全局开关。"""
+async def test_authorize_installed_plugin_rejects_last_install_error() -> None:
+    """installed_plugin.last_install_error 非空时不能加载。"""
 
     db = _FakeDB(
         accounts={},
         humanize={},
         afs=[],
         rules=[],
-        remote_plugins={
-            "remote_demo": _FakeRemotePlugin(name="remote_demo", enabled=False)
+        installed_plugins={
+            "remote_demo": _FakeInstalledPlugin(
+                key="remote_demo",
+                enabled=True,
+                signature_ok=True,
+                trust_tier="community",
+                last_install_error="clone failed",
+            )
         },
     )
 
     auth = await loader_mod._authorize_installed_plugin(db, "remote_demo")
 
     assert auth.allowed is False
-    assert auth.state == "disabled"
-    assert "RemotePlugin.enabled=False" in (auth.last_error or "")
+    assert auth.state == "failed"
+    assert "PLUGIN_INSTALL_FAILED" in (auth.last_error or "")
 
 
 @pytest.mark.asyncio
-async def test_authorize_installed_plugin_logs_mismatch_when_installed_plugin_disabled(caplog) -> None:
-    """installed_plugin 与 legacy 决策冲突时，仍以 legacy 为准并记录 mismatch。"""
+async def test_authorize_installed_plugin_rejects_orphan_trust_tier() -> None:
+    """trust_tier=orphan 的 installed_plugin 记录仍不能被 worker 加载。"""
 
-    redis = _FakeRedis()
-    plugin_key = "zip_enabled_legacy"
+    plugin_key = "orphan_tier"
     db = _FakeDB(
         accounts={},
         humanize={},
         afs=[],
         rules=[],
-        plugin_installs={
-            plugin_key: _FakePluginInstall(
-                key=plugin_key,
-                enabled=True,
-                signature_ok=True,
-            )
-        },
         installed_plugins={
             plugin_key: _FakeInstalledPlugin(
                 key=plugin_key,
-                enabled=False,
-                signature_ok=True,
-                trust_tier="community",
-            )
-        },
-    )
-
-    with caplog.at_level(logging.WARNING, logger=loader_mod.__name__):
-        auth = await loader_mod._authorize_installed_plugin(
-            db, plugin_key, redis=redis, account_id=1
-        )
-
-    assert auth.allowed is True
-    assert auth.state == "active"
-    assert any("authorize mismatch plugin=zip_enabled_legacy" in rec.message for rec in caplog.records)
-    decoded_logs = [json.loads(payload) for _, payload in redis.list_pushes]
-    assert any(
-        log["level"] == "warn"
-        and "authorize mismatch plugin=zip_enabled_legacy" in log["message"]
-        for log in decoded_logs
-    )
-
-
-@pytest.mark.asyncio
-async def test_authorize_installed_plugin_logs_mismatch_when_installed_plugin_missing(caplog) -> None:
-    """installed_plugin 缺失但 PluginInstall 存在时，legacy 仍放行并记录 mismatch。"""
-
-    redis = _FakeRedis()
-    plugin_key = "zip_only_legacy"
-    db = _FakeDB(
-        accounts={},
-        humanize={},
-        afs=[],
-        rules=[],
-        plugin_installs={
-            plugin_key: _FakePluginInstall(
-                key=plugin_key,
                 enabled=True,
                 signature_ok=True,
+                trust_tier="orphan",
             )
         },
     )
 
-    with caplog.at_level(logging.WARNING, logger=loader_mod.__name__):
-        auth = await loader_mod._authorize_installed_plugin(
-            db, plugin_key, redis=redis, account_id=1
-        )
+    auth = await loader_mod._authorize_installed_plugin(db, plugin_key)
 
-    assert auth.allowed is True
-    assert auth.state == "active"
-    assert any("authorize mismatch plugin=zip_only_legacy" in rec.message for rec in caplog.records)
-    decoded_logs = [json.loads(payload) for _, payload in redis.list_pushes]
-    assert any(
-        log["level"] == "warn"
-        and "authorize mismatch plugin=zip_only_legacy" in log["message"]
-        for log in decoded_logs
-    )
+    assert auth.allowed is False
+    assert auth.state == "failed"
+    assert "PLUGIN_LOAD_ORPHAN" in (auth.last_error or "")
 
 
 @pytest.mark.asyncio
-async def test_authorize_installed_plugin_no_mismatch_when_tables_consistent(caplog) -> None:
-    """两张表决策一致时，不应产出 mismatch 日志。"""
+async def test_authorize_installed_plugin_allows_installed_plugin_when_valid() -> None:
+    """installed_plugin 记录完整且可用时允许加载。"""
 
-    redis = _FakeRedis()
     plugin_key = "zip_consistent"
     db = _FakeDB(
         accounts={},
         humanize={},
         afs=[],
         rules=[],
-        plugin_installs={
-            plugin_key: _FakePluginInstall(
-                key=plugin_key,
-                enabled=True,
-                signature_ok=True,
-            )
-        },
         installed_plugins={
             plugin_key: _FakeInstalledPlugin(
                 key=plugin_key,
@@ -699,16 +626,10 @@ async def test_authorize_installed_plugin_no_mismatch_when_tables_consistent(cap
         },
     )
 
-    with caplog.at_level(logging.WARNING, logger=loader_mod.__name__):
-        auth = await loader_mod._authorize_installed_plugin(
-            db, plugin_key, redis=redis, account_id=1
-        )
+    auth = await loader_mod._authorize_installed_plugin(db, plugin_key)
 
     assert auth.allowed is True
     assert auth.state == "active"
-    assert all("authorize mismatch plugin=zip_consistent" not in rec.message for rec in caplog.records)
-    decoded_logs = [json.loads(payload) for _, payload in redis.list_pushes]
-    assert not any("authorize mismatch plugin=zip_consistent" in log["message"] for log in decoded_logs)
 
 
 @pytest.mark.asyncio
@@ -737,7 +658,7 @@ async def test_activate_marks_orphan_installed_plugin_failed(monkeypatch, tmp_pa
     assert af.state == "failed"
     assert af.last_error is not None
     assert "PLUGIN_LOAD_ORPHAN" in af.last_error
-    assert any("没有 PluginInstall" in payload for _, payload in redis.list_pushes)
+    assert any("缺少 installed_plugin" in payload for _, payload in redis.list_pushes)
 
 
 @pytest.mark.asyncio
@@ -764,8 +685,13 @@ async def test_reload_account_config_unloads_installed_plugin_when_authorization
         humanize={1: None},
         afs=[af],
         rules=[],
-        remote_plugins={
-            plugin_key: _FakeRemotePlugin(name=plugin_key, enabled=False)
+        installed_plugins={
+            plugin_key: _FakeInstalledPlugin(
+                key=plugin_key,
+                enabled=False,
+                signature_ok=True,
+                trust_tier="community",
+            )
         },
     )
     monkeypatch.setattr(loader_mod, "AsyncSessionLocal", lambda: _fake_session_factory(db))
@@ -787,7 +713,7 @@ async def test_reload_account_config_unloads_installed_plugin_when_authorization
     shutdown_spy.assert_awaited_once_with(ctx)
     assert plugin_key not in state.instances
     assert af.state == "disabled"
-    assert af.last_error == "PLUGIN_DISABLED: RemotePlugin.enabled=False"
+    assert af.last_error == "PLUGIN_DISABLED: installed_plugin.enabled=False"
 
 
 @pytest.mark.asyncio
@@ -815,7 +741,14 @@ async def test_reload_account_config_force_reload_clears_installed_module_cache(
         humanize={1: None},
         afs=[af],
         rules=[],
-        remote_plugins={plugin_key: _FakeRemotePlugin(name=plugin_key, enabled=True)},
+        installed_plugins={
+            plugin_key: _FakeInstalledPlugin(
+                key=plugin_key,
+                enabled=True,
+                signature_ok=True,
+                trust_tier="community",
+            )
+        },
     )
     monkeypatch.setattr(loader_mod, "AsyncSessionLocal", lambda: _fake_session_factory(db))
     monkeypatch.setattr(loader_mod, "_clear_installed_module_cache", lambda key: cleared.append(key))
@@ -1143,11 +1076,12 @@ async def test_activate_logs_reserved_unsupported_facade_permission() -> None:
         humanize={1: None},
         afs=[af],
         rules=[],
-        plugin_installs={
-            plugin_key: _FakePluginInstall(
+        installed_plugins={
+            plugin_key: _FakeInstalledPlugin(
                 key=plugin_key,
                 enabled=True,
                 signature_ok=True,
+                trust_tier="community",
             )
         },
     )

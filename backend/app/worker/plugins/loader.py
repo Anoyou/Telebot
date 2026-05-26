@@ -52,8 +52,7 @@ from ...db.models.feature import (
     AccountFeature,
 )
 from ...db.models.ignored_peer import IgnoredPeer
-from ...db.models.plugin import InstalledPlugin, PluginInstall, PLUGIN_TRUST_ORPHAN
-from ...db.models.remote_plugin import RemotePlugin
+from ...db.models.plugin import PLUGIN_TRUST_ORPHAN, InstalledPlugin
 from ...db.models.rule import Rule
 from ...db.models.system import SystemSetting
 from ...redis_client import get_redis
@@ -526,7 +525,7 @@ def _installed_plugin_exists(plugin_key: str) -> bool:
 async def _authorize_via_installed_plugin(
     db: Any, plugin_key: str
 ) -> _InstalledPluginAuthorization:
-    """按 installed_plugin 表做一次并行授权判断（用于双读一致性比对）。"""
+    """按 installed_plugin 表做 installed 插件授权判断。"""
 
     installed_plugin = await db.get(InstalledPlugin, plugin_key)
     if installed_plugin is None:
@@ -602,94 +601,13 @@ async def _authorize_installed_plugin(
 ) -> _InstalledPluginAuthorization:
     """统一判断 installed 插件是否允许被 worker 加载。
 
-    第三方插件目录可能来自 zip、Git 远程仓库、历史本地残留或手工拷贝。
-    worker 只认数据库里的安装记录；磁盘上有目录但两张安装表都没有记录时，
-    一律视为 orphan 并拒绝加载。
+    第三方插件目录可能来自 zip、Git 远程仓库、历史本地残留或手工拷贝。worker 只认
+    installed_plugin 里的权威安装状态；磁盘上有目录但缺少 installed_plugin 记录时，
+    一律视为 orphan 并拒绝加载。``redis`` / ``account_id`` 保留在签名中，供调用方
+    统一传参和未来扩展 runtime_log 使用。
     """
 
-    plugin_install = await db.get(PluginInstall, plugin_key)
-    remote_plugin = (
-        await db.execute(select(RemotePlugin).where(RemotePlugin.name == plugin_key))
-    ).scalar_one_or_none()
-
-    legacy = _InstalledPluginAuthorization(allowed=True)
-    if plugin_install is None and remote_plugin is None:
-        legacy = _InstalledPluginAuthorization(
-            allowed=False,
-            state=FEATURE_STATE_FAILED,
-            last_error="PLUGIN_LOAD_ORPHAN: orphan plugin (no install record)",
-            log_level="warn",
-            log_message=(
-                f"installed 插件 {plugin_key} 在磁盘/feature 中存在，但没有 PluginInstall "
-                "或 RemotePlugin 安装记录，已拒绝加载"
-            ),
-        )
-    elif plugin_install is not None:
-        if not bool(getattr(plugin_install, "enabled", False)):
-            legacy = _InstalledPluginAuthorization(
-                allowed=False,
-                state=FEATURE_STATE_DISABLED,
-                last_error="PLUGIN_DISABLED: PluginInstall.enabled=False",
-                log_level="info",
-                log_message=f"installed 插件 {plugin_key} 的 PluginInstall.enabled=False，跳过加载",
-            )
-        else:
-            signature_ok = getattr(plugin_install, "signature_ok", None)
-            if signature_ok is False:
-                legacy = _InstalledPluginAuthorization(
-                    allowed=False,
-                    state=FEATURE_STATE_FAILED,
-                    last_error="PLUGIN_SIGNATURE_FAILED: PluginInstall.signature_ok=False",
-                    log_level="warn",
-                    log_message=f"installed 插件 {plugin_key} 签名校验失败，已拒绝加载",
-                )
-            elif signature_ok is None and not bool(app_settings.plugin_allow_legacy_unsigned_plugins):
-                legacy = _InstalledPluginAuthorization(
-                    allowed=False,
-                    state=FEATURE_STATE_FAILED,
-                    last_error="PLUGIN_SIGNATURE_UNKNOWN: legacy unsigned plugin is not allowed",
-                    log_level="warn",
-                    log_message=(
-                        f"installed 插件 {plugin_key} 是历史未签名插件，"
-                        "且 plugin_allow_legacy_unsigned_plugins=False，已拒绝加载"
-                    ),
-                )
-
-    if legacy.allowed and remote_plugin is not None and not bool(getattr(remote_plugin, "enabled", False)):
-        legacy = _InstalledPluginAuthorization(
-            allowed=False,
-            state=FEATURE_STATE_DISABLED,
-            last_error="PLUGIN_DISABLED: RemotePlugin.enabled=False",
-            log_level="info",
-            log_message=f"installed 插件 {plugin_key} 的 RemotePlugin.enabled=False，跳过加载",
-        )
-
-    new = await _authorize_via_installed_plugin(db, plugin_key)
-    legacy_decision = (legacy.allowed, legacy.state)
-    new_decision = (new.allowed, new.state)
-    if legacy_decision != new_decision:
-        log.warning(
-            "authorize mismatch plugin=%s legacy=%s new=%s",
-            plugin_key,
-            legacy_decision,
-            new_decision,
-        )
-        if redis is not None:
-            await _log(
-                redis,
-                account_id,
-                "warn",
-                (
-                    f"authorize mismatch plugin={plugin_key} "
-                    f"legacy={legacy_decision} new={new_decision}"
-                ),
-                source="system",
-                plugin_key=plugin_key,
-                legacy={"allowed": legacy.allowed, "state": legacy.state},
-                new={"allowed": new.allowed, "state": new.state},
-            )
-
-    return legacy
+    return await _authorize_via_installed_plugin(db, plugin_key)
 
 
 async def _write_account_feature_load_state(
@@ -1078,7 +996,7 @@ async def _activate(db, state: _AccountState, af: AccountFeature, redis: Any) ->
 
     **安全：加载授权检查**
     - builtin 插件只看 AccountFeature.enabled
-    - installed 插件必须有 PluginInstall 或 RemotePlugin 安装记录
+    - installed 插件必须有 installed_plugin 安装记录
     - installed 插件的全局开关、签名状态、账号开关都允许时才加载
 
     Args:
