@@ -415,6 +415,7 @@ export interface FeatureInfo {
   key: string;
   display_name: string;
   is_builtin: boolean;
+  source_type?: "local" | "remote" | string;
   version?: string | null;
   config_schema?: Record<string, unknown> | null;
   category?: FeatureCategory | string | null;
@@ -440,6 +441,7 @@ export interface FeatureMatrixRow {
   id: number;
   name: string;
   features: Record<string, FeatureState>;
+  feature_enabled?: Record<string, boolean>;
 }
 export interface FeatureMatrixResponse {
   features: FeatureInfo[];

@@ -134,6 +134,9 @@ interface FormState {
   ai_web_search: boolean;
   ai_web_search_context_size: "low" | "medium" | "high";
   ai_image_backend: "codex_image" | "llm";
+  ai_video_backend: "plugin";
+  ai_video_plugin_key: string;
+  ai_video_plugin_method: string;
   // ── 发送方式 ──
   // edit:    原地编辑 ,ai 指令消息（默认；保留 reply 链）
   // send_new: 删指令、发新消息（不带 reply_to）——避免在被回复方那里留下"你回复了我"痕迹
@@ -171,6 +174,9 @@ const EMPTY_FORM: FormState = {
   ai_web_search: false,
   ai_web_search_context_size: "medium",
   ai_image_backend: "codex_image",
+  ai_video_backend: "plugin",
+  ai_video_plugin_key: "video_bridge",
+  ai_video_plugin_method: "",
   ai_send_mode: "edit",
 };
 
@@ -279,6 +285,11 @@ function formFromTemplate(t: CommandTemplateOut): FormState {
         ? cfg.web_search_context_size
         : "medium",
     ai_image_backend: cfg.image_backend === "llm" ? "llm" : "codex_image",
+    ai_video_backend: "plugin",
+    ai_video_plugin_key:
+      typeof cfg.video_plugin_key === "string" ? cfg.video_plugin_key : EMPTY_FORM.ai_video_plugin_key,
+    ai_video_plugin_method:
+      typeof cfg.video_plugin_method === "string" ? cfg.video_plugin_method : "",
     ai_send_mode: cfg.send_mode === "send_new" ? "send_new" : "edit",
   };
 }
@@ -349,7 +360,8 @@ function buildPayload(form: FormState): {
   // ai
   const pid = Number(form.ai_provider_id);
   const usesCodexImage = form.ai_mode === "image" && form.ai_image_backend === "codex_image";
-  if (!usesCodexImage && (!Number.isInteger(pid) || pid <= 0))
+  const usesVideoPlugin = form.ai_mode === "video" && form.ai_video_backend === "plugin";
+  if (!usesCodexImage && !usesVideoPlugin && (!Number.isInteger(pid) || pid <= 0))
     return { ok: false, errMsg: "AI 类型必须选择模型提供商" };
   const mt = form.ai_max_tokens.trim();
   const temperature = form.ai_temperature.trim();
@@ -365,6 +377,15 @@ function buildPayload(form: FormState): {
   }
   if (form.ai_mode === "image") {
     cfg.image_backend = form.ai_image_backend;
+  }
+  if (form.ai_mode === "video") {
+    const pluginKey = form.ai_video_plugin_key.trim();
+    if (!pluginKey) return { ok: false, errMsg: "视频模式必须填写插件 key" };
+    cfg.video_backend = "plugin";
+    cfg.video_plugin_key = pluginKey;
+    if (form.ai_video_plugin_method.trim()) {
+      cfg.video_plugin_method = form.ai_video_plugin_method.trim();
+    }
   }
   if (form.ai_model.trim()) cfg.model = form.ai_model.trim();
   if (mt) cfg.max_tokens = Number(mt) || 512;
@@ -693,7 +714,7 @@ export function CommandTemplates() {
         <CardContent>
           {providerUnavailable ? (
             <div className="mb-3 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
-              chat/search/video 类 AI 指令需要先添加模型提供商；image + codex_image 可先使用模块配置。
+              chat/search 类 AI 指令需要先添加模型提供商；image + codex_image 与 video + 插件后端可先使用模块配置。
               <Button
                 type="button"
                 variant="link"
@@ -833,9 +854,10 @@ export function CommandTemplates() {
               if (
                 editing.type === "ai" &&
                 providerUnavailable &&
-                !(editing.ai_mode === "image" && editing.ai_image_backend === "codex_image")
+                !(editing.ai_mode === "image" && editing.ai_image_backend === "codex_image") &&
+                !(editing.ai_mode === "video" && editing.ai_video_backend === "plugin")
               ) {
-                toast.error("chat/search/video 模式需要先添加模型提供商");
+                toast.error("chat/search 模式需要先添加模型提供商");
                 return;
               }
               if (editing.id) {
@@ -1073,7 +1095,7 @@ function CommandEditDialog({
               </Select>
               {providerUnavailable ? (
                 <p className="text-xs text-amber-700">
-                  chat/search/video 需要模型提供商；image 模式可先桥接 codex_image 模块。
+                  chat/search 需要模型提供商；image 和 video 可先桥接账号插件。
                   <Button
                     type="button"
                     variant="link"
@@ -1245,7 +1267,7 @@ function CommandEditDialog({
                   <option value="chat">chat · 普通问答</option>
                   <option value="search">search · 联网搜索</option>
                   <option value="image">image · 图片生成</option>
-                  <option value="video">video · 视频生成（预留）</option>
+                  <option value="video">video · 视频生成</option>
                 </Select>
                 <p className="text-xs text-muted-foreground">
                   可创建 <CommandBadge>{cmdPrefix}ai image 提示词</CommandBadge> 这类二级指令，也可新建名为
@@ -1262,7 +1284,7 @@ function CommandEditDialog({
                     <span className="font-medium text-foreground">image</span>：图片生成；可桥接 codex_image 模块，也可使用 LLM Provider 原生生图，适合 <CommandBadge>{cmdPrefix}image</CommandBadge>。
                   </p>
                   <p className="mt-1">
-                    <span className="font-medium text-foreground">video</span>：视频生成预留入口，运行时会提示下一阶段接入。
+                    <span className="font-medium text-foreground">video</span>：视频生成；转发到账号已启用的视频插件，适合 <CommandBadge>{cmdPrefix}video</CommandBadge>。
                   </p>
                 </div>
               </div>
@@ -1299,7 +1321,34 @@ function CommandEditDialog({
                 </div>
               )}
 
-              {!(form.ai_mode === "image" && form.ai_image_backend === "codex_image") && (
+              {form.ai_mode === "video" && (
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="space-y-1.5">
+                    <Label>视频插件 key *</Label>
+                    <Input
+                      value={form.ai_video_plugin_key}
+                      maxLength={64}
+                      onChange={(e) => setField("ai_video_plugin_key", e.target.value)}
+                      placeholder="video_bridge"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      运行时会把提示词转给该插件；插件负责调用视频服务并发送视频。
+                    </p>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>视频插件 method（可选）</Label>
+                    <Input
+                      value={form.ai_video_plugin_method}
+                      maxLength={64}
+                      onChange={(e) => setField("ai_video_plugin_method", e.target.value)}
+                      placeholder="留空 = 插件默认指令"
+                    />
+                  </div>
+                </div>
+              )}
+
+              {!(form.ai_mode === "image" && form.ai_image_backend === "codex_image") &&
+                !(form.ai_mode === "video" && form.ai_video_backend === "plugin") && (
                 <div className="space-y-1.5">
                   <Label>
                     {form.ai_routing_mode === "auto"

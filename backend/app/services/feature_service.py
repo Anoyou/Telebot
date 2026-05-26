@@ -337,25 +337,32 @@ async def feature_matrix(db: AsyncSession) -> dict[str, Any]:
     ).scalars().all()
     afs = (await db.execute(select(AccountFeature))).scalars().all()
     by_aid: dict[int, dict[str, str]] = {}
+    enabled_by_aid: dict[int, dict[str, bool]] = {}
     for af in afs:
+        enabled = bool(af.enabled)
         # 默认按 state 显示；若 enabled=False 则强制 disabled，避免脏状态混淆
-        if not af.enabled:
+        if not enabled:
             cell = FEATURE_STATE_DISABLED
         else:
             cell = af.state or FEATURE_STATE_ACTIVE
         by_aid.setdefault(af.account_id, {})[af.feature_key] = cell
+        enabled_by_aid.setdefault(af.account_id, {})[af.feature_key] = enabled
 
     rows: list[dict[str, Any]] = []
     for acc in accounts:
         cells: dict[str, str] = {}
+        enabled_cells: dict[str, bool] = {}
         existing = by_aid.get(acc.id, {})
+        existing_enabled = enabled_by_aid.get(acc.id, {})
         for f in features:
             cells[f.key] = existing.get(f.key, FEATURE_STATE_DISABLED)
+            enabled_cells[f.key] = existing_enabled.get(f.key, False)
         rows.append(
             {
                 "id": acc.id,
                 "name": acc.display_name or acc.phone,
                 "features": cells,
+                "feature_enabled": enabled_cells,
             }
         )
 

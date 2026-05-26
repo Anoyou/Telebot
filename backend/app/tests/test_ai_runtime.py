@@ -109,6 +109,53 @@ async def test_ai_runtime_ai_subcommand_image_consumes_mode(monkeypatch) -> None
 
 
 @pytest.mark.asyncio
+async def test_ai_runtime_video_mode_bridges_to_plugin(monkeypatch) -> None:
+    from app.worker import command as worker_command
+
+    wcmd.set_command_context(CommandContext(account_id=1, templates={}, providers={}))
+    dispatched = AsyncMock(return_value=True)
+    monkeypatch.setattr(worker_command, "dispatch_plugin_command", dispatched)
+
+    client = AsyncMock()
+    event = AsyncMock()
+    tpl = {
+        "name": "video",
+        "type": "ai",
+        "config": {"mode": "video", "video_plugin_key": "video_bridge"},
+    }
+
+    await ai_runtime.invoke(client, event, ["生成 5 秒海浪"], tpl, 1)
+
+    dispatched.assert_awaited_once_with(
+        client,
+        event,
+        ["生成 5 秒海浪"],
+        1,
+        plugin_key="video_bridge",
+        method=None,
+    )
+    event.edit.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_ai_runtime_ai_subcommand_video_consumes_mode(monkeypatch) -> None:
+    from app.worker import command as worker_command
+
+    wcmd.set_command_context(CommandContext(account_id=1, templates={}, providers={}))
+    dispatched = AsyncMock(return_value=True)
+    monkeypatch.setattr(worker_command, "dispatch_plugin_command", dispatched)
+
+    client = AsyncMock()
+    event = AsyncMock()
+    tpl = {"name": "ai", "type": "ai", "config": {"mode": "chat", "provider_id": 1}}
+
+    await ai_runtime.invoke(client, event, ["video", "生成 5 秒海浪"], tpl, 1)
+
+    dispatched.assert_awaited_once()
+    assert dispatched.call_args.args[2] == ["生成 5 秒海浪"]
+
+
+@pytest.mark.asyncio
 async def test_ai_runtime_image_llm_uses_native_image_generation(monkeypatch) -> None:
     img_b64 = base64.b64encode(b"\x89PNG\r\n\x1a\n" + b"0" * 128).decode("ascii")
     fake_result = LLMResult(

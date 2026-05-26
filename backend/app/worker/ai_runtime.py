@@ -160,7 +160,16 @@ async def invoke(client, event, args, tpl: dict[str, Any], account_id: int) -> N
             args = args[1:]
 
     if command_mode == "video":
-        await event.edit("✗ AI video 模式尚未接入。当前可先使用 chat/search/image；video 会作为下一阶段接入。")
+        dispatched = await dispatch_plugin_command(
+            client,
+            event,
+            args,
+            account_id,
+            plugin_key=str(cfg.get("video_plugin_key") or "video_bridge"),
+            method=str(cfg.get("video_plugin_method") or "") or None,
+        )
+        if not dispatched:
+            await event.edit("✗ 视频生成后端不可用：请先安装并在账号插件中启用 video_bridge，或在模板里填写可用的视频插件。")
         return
 
     native_image_mode = command_mode == "image" and str(cfg.get("image_backend") or "codex_image") == "llm"

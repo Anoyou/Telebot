@@ -1135,6 +1135,21 @@ def test_ai_command_image_codex_allows_missing_provider() -> None:
     assert tpl.config["image_backend"] == "codex_image"
 
 
+def test_ai_command_video_plugin_allows_missing_provider() -> None:
+    """video 先走独立插件后端，不强制绑定 LLM Provider。"""
+    from app.schemas.command import CommandTemplateCreate
+
+    tpl = CommandTemplateCreate(
+        name="video",
+        type="ai",
+        config={"mode": "video", "video_plugin_key": "video_bridge"},
+    )
+
+    assert tpl.config["mode"] == "video"
+    assert tpl.config["video_backend"] == "plugin"
+    assert tpl.config["video_plugin_key"] == "video_bridge"
+
+
 def test_ai_command_search_forces_web_search() -> None:
     """search 模式保存时强制开启 web_search。"""
     from app.schemas.command import CommandTemplateCreate

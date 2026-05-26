@@ -6,6 +6,14 @@ from httpx import ASGITransport, AsyncClient
 from app.main import app
 
 
+def _csrf_headers() -> dict[str, str]:
+    return {
+        "X-Requested-With": "telepilot-ui",
+        "X-CSRF-Token": "test-token",
+        "Cookie": "csrf_token=test-token",
+    }
+
+
 @pytest.mark.asyncio
 async def test_remote_plugin_routes_require_login() -> None:
     transport = ASGITransport(app=app)
@@ -16,7 +24,7 @@ async def test_remote_plugin_routes_require_login() -> None:
 
         r = await c.post(
             "/api/remote-plugins/install",
-            headers={"X-Requested-With": "telepilot-ui"},
+            headers=_csrf_headers(),
             json={"source_url": "https://github.com/example/plugin.git"},
         )
         assert r.status_code == 401
@@ -33,7 +41,7 @@ async def test_plugin_repo_routes_require_login() -> None:
 
         r = await c.post(
             "/api/plugin-repos",
-            headers={"X-Requested-With": "telepilot-ui"},
+            headers=_csrf_headers(),
             json={"url": "https://github.com/example/plugins.git"},
         )
         assert r.status_code == 401

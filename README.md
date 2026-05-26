@@ -116,7 +116,7 @@ flowchart LR
 
 - 0.15.0 起，产品名、Web/PWA 标题、前后端包名、启动通知和指令输出统一为 `TelePilot`。
 - 为避免老用户升级后“看起来启动成功但数据不见”，Docker volume、数据库默认账号/库名、`TELEBOT_WORKER_PROC` 环境标记等底层兼容名暂时保留。
-- 前端默认发送 `X-Requested-With: telepilot-ui`，后端过渡期同时接受旧的 `telebot-ui`，避免旧页面缓存或脚本直接 403。
+- 前端默认发送 `X-Requested-With: telepilot-ui` 并自动携带 double-submit CSRF token；后端过渡期同时接受旧的 `telebot-ui` 自定义头，避免旧页面缓存或脚本直接 403。
 - 用户界面统一使用“模块 / 指令”口径；代码、API、数据库和开发文档中仍可保留 `plugin` / `feature` / `command` 等稳定内部名。
 - 模块最低版本字段推荐使用 `min_telepilot_version`；旧模块里的 `min_telebot_version` 仍作为 legacy alias 解析。
 - 0.18 线主要入口已收敛为“概览 / 模块 / AI / 日志 / 系统”，账号操作集中到概览和账号详情抽屉入口，独立账号页已退出主导航。
@@ -243,7 +243,7 @@ python -c "import secrets; print(secrets.token_urlsafe(64))"
 
 这几个字段的含义：
 
-- `MASTER_KEY`：Fernet 加密主密钥，用来加密 Telegram session、API Hash、Bot Token、LLM API Key 等敏感数据。它必须长期保存；换掉后旧密文无法解密，已登录账号通常要重新绑定。
+- `MASTER_KEY`：Fernet 加密主密钥，用来加密 Telegram session、API Hash、Bot Token、LLM API Key 等敏感数据。它必须长期保存；计划内轮换可使用 `python -m app.scripts.rekey`，但丢失后旧密文仍无法恢复。
 - `JWT_SECRET`：Web 登录 cookie/JWT 的签名密钥，用来证明“这个登录态是服务器签发的”。泄露后别人可能伪造登录态；更换后所有已登录浏览器会退出。
 - `POSTGRES_USER` / `POSTGRES_DB`：PostgreSQL 的用户名和数据库名。新部署建议用小写 `telepilot`；旧文档和默认 compose 里偶尔能看到 `telebot`，那是项目改名以前留下的兼容默认值。已有部署保持原值即可，不要为了改名直接改这两项，否则会连到一个新的空数据库或导致连接失败。
 - `POSTGRES_PASSWORD`：PostgreSQL 数据库密码，随便生成一段强随机字符串即可，不要用 `telepilot`、`telebot`、`password` 这类弱密码。

@@ -128,7 +128,21 @@ class CommandTemplateBase(BaseModel):
                 raise ValueError("image_backend 只能是 codex_image / llm")
             if mode == "image":
                 v["image_backend"] = image_backend
-            needs_provider = mode != "image" or image_backend != "codex_image"
+            video_backend = str(v.get("video_backend", "plugin") or "plugin").strip()
+            if video_backend != "plugin":
+                raise ValueError("video_backend 当前只能是 plugin")
+            if mode == "video":
+                plugin_key = str(v.get("video_plugin_key") or "video_bridge").strip()
+                if not plugin_key:
+                    raise ValueError("video 模式必须配置 video_plugin_key")
+                v["video_backend"] = video_backend
+                v["video_plugin_key"] = plugin_key
+                plugin_method = str(v.get("video_plugin_method") or "").strip()
+                if plugin_method:
+                    v["video_plugin_method"] = plugin_method
+                else:
+                    v.pop("video_plugin_method", None)
+            needs_provider = (mode != "image" or image_backend != "codex_image") and mode != "video"
             if not v.get("provider_id"):
                 if needs_provider:
                     raise ValueError("ai 类型必须配置 provider_id（在系统设置 → LLM Provider 里建）")

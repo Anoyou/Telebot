@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from app.db.models.feature import FEATURE_STATE_DISABLED
 from app.schemas.feature import FeatureInfo
 from app.services.feature_service import (
+    feature_matrix,
     get_plugin_global_config,
     set_plugin_global_config,
     validate_config_against_schema,
@@ -207,6 +210,7 @@ class TestEffectiveConfigMerge:
         result.update(account_config)
         assert result == {"field1": 10, "field2": 20}
 
+
     @pytest.mark.asyncio
     async def test_only_global_fields_in_manifest(self) -> None:
         """验证 global config 只保存 level="global" 的字段。"""
@@ -229,6 +233,55 @@ class TestEffectiveConfigMerge:
 
         global_config = {k: v for k, v in user_config.items() if k in global_fields}
         assert global_config == {"global_field": 100}
+
+
+@pytest.mark.asyncio
+async def test_feature_matrix_separates_enabled_switch_from_runtime_state(monkeypatch) -> None:
+    """矩阵要同时返回账号开关和 worker 运行状态，避免前端把二者混用。"""
+
+    class Result:
+        def __init__(self, rows):
+            self.rows = rows
+
+        def scalars(self):
+            return self
+
+        def all(self):
+            return self.rows
+
+    feature = SimpleNamespace(
+        key="guess_number",
+        display_name="猜数字",
+        is_builtin=False,
+        version="1.0.4",
+        manifest={},
+    )
+    account = SimpleNamespace(id=1, display_name="你心里没点数?", phone="+10086")
+    account_feature = SimpleNamespace(
+        account_id=1,
+        feature_key="guess_number",
+        enabled=True,
+        state=FEATURE_STATE_DISABLED,
+    )
+
+    monkeypatch.setattr(
+        "app.services.feature_service.list_features",
+        AsyncMock(return_value=[feature]),
+    )
+    db = AsyncMock()
+    db.execute = AsyncMock(
+        side_effect=[
+            Result([]),  # RemotePlugin
+            Result([account]),
+            Result([account_feature]),
+        ],
+    )
+
+    data = await feature_matrix(db)
+
+    row = data["accounts"][0]
+    assert row["features"]["guess_number"] == FEATURE_STATE_DISABLED
+    assert row["feature_enabled"]["guess_number"] is True
 
 
 # ─────────────────────────────────────────────────────

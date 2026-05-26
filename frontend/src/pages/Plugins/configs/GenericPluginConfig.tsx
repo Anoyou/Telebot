@@ -32,6 +32,7 @@ import { Spinner } from "@/components/ui/misc";
 import { Switch } from "@/components/ui/switch";
 import { getErrMsg } from "@/lib/api";
 import { featureConfigBackTarget } from "@/pages/Plugins/_shared/featureConfig";
+import { featureRuntimeText, featureSwitchText } from "./_shared/featureStatus";
 
 function isConfigSchema(schema: unknown): schema is ConfigSchema {
   const candidate = schema as Record<string, unknown> | null | undefined;
@@ -275,9 +276,9 @@ export function GenericPluginConfigPage() {
               <CardDescription>关闭后模块不会在当前账号运行；配置保存后会由 worker 热加载。</CardDescription>
               <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                 <Badge variant={accountFeature?.enabled ? "default" : "outline"}>
-                  {accountFeature?.enabled ? "已启用" : "未启用"}
+                  {featureSwitchText(accountFeature)}
                 </Badge>
-                {accountFeature?.state ? <span>状态：{accountFeature.state}</span> : null}
+                <span>运行状态：{featureRuntimeText(accountFeature)}</span>
                 {accountFeature?.last_error ? (
                   <span className="text-destructive">最近错误：{accountFeature.last_error}</span>
                 ) : null}
@@ -367,7 +368,7 @@ function buildUsageGuide({
       const title = entry.title || entry.key;
       const description = entry.description;
       if (!title && !description) return "";
-      return `交互入口：${[title, description].filter(Boolean).join("，")}`;
+      return `可交互：${[title, description].filter(Boolean).join("，")}`;
     })
     .filter(Boolean);
 

@@ -14,6 +14,21 @@
 
 ## [Unreleased]
 
+## [0.24.0] — 2026-05-26 · minor · 安全加固与模块体验升级
+
+### Added
+- 新增 `python -m app.scripts.rekey` 运维脚本，支持 MASTER_KEY dry-run 验证与原子重钥，覆盖账号、代理、Bot、LLM、TOTP 与转账通知相关密文字段。
+- AI `video` 模式改为独立视频插件后端入口，可配置 `video_bridge` 等插件承接生成视频，不再误挂到现有文本/图片 LLM Provider。
+
+### Changed
+- Web 写操作升级为 `X-Requested-With` + double-submit CSRF token 校验，前端会自动获取并回传 `csrf_token`。
+- 前端 Nginx 与后端 API 补充 CSP、nosniff、Referrer-Policy、Permissions-Policy 等安全响应头，并同步更新安全运维文档。
+- 账号模块启用详情列表新增本地/远程来源与版本号标签，缩小并固定标签列宽；更新说明收进“有更新”标签的悬停/点击提示里。
+
+### Fixed
+- 收窄远程模块规范扫描的逗号命令识别范围，避免普通中文标点和逗号分隔配置被误报为硬编码指令前缀。
+- 修正模块中心把 worker 运行状态误当成账号开关状态的问题，避免详情页显示已启用而列表仍显示未启用。
+
 ## [0.23.1] — 2026-05-22 · patch · README 轻量部署与界面细节
 
 ### Changed

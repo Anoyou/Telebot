@@ -28,7 +28,7 @@ export function Glossary({ defaultOpen = false }: { defaultOpen?: boolean }) {
                 <li><MetaBadge className="mr-1.5">text</MetaBadge>纯文本输入输出。</li>
                 <li><MetaBadge className="mr-1.5">vision</MetaBadge>支持图文输入到文本输出。</li>
                 <li><MetaBadge className="mr-1.5">audio</MetaBadge>支持语音转写、合成或实时语音。</li>
-                <li><MetaBadge className="mr-1.5">multimodal</MetaBadge>支持图、音、视频等多种输入。</li>
+                <li><MetaBadge className="mr-1.5">multimodal</MetaBadge>支持图、音等多种输入；视频生成由独立插件后端承接。</li>
               </ul>
             </section>
 

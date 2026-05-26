@@ -34,6 +34,7 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { getErrMsg } from "@/lib/api";
 import { featureConfigBackTarget } from "@/pages/Plugins/_shared/featureConfig";
+import { featureRuntimeText, featureSwitchText } from "./_shared/featureStatus";
 
 type TokenEntry = {
   token: string;
@@ -522,7 +523,7 @@ export function ChatGPTImageConfigPage() {
           <div>
             <h1 className="text-2xl font-semibold tracking-tight">ChatGPT2API</h1>
             <p className="text-sm text-muted-foreground">
-              实验性 · 状态：{feature?.enabled ? "已启用" : "未启用"} · {feature?.state || "unknown"}
+              实验性 · 开关：{featureSwitchText(feature)} · 运行状态：{featureRuntimeText(feature)}
             </p>
           </div>
         </div>
@@ -588,9 +589,9 @@ export function ChatGPTImageConfigPage() {
               <CardDescription>关闭后 ChatGPT2API 图片生成不会响应当前账号的触发指令。</CardDescription>
               <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                 <Badge variant={feature?.enabled ? "default" : "outline"}>
-                  {feature?.enabled ? "已启用" : "未启用"}
+                  {featureSwitchText(feature)}
                 </Badge>
-                {feature?.state ? <span>状态：{feature.state}</span> : null}
+                <span>运行状态：{featureRuntimeText(feature)}</span>
                 {feature?.last_error ? (
                   <span className="text-destructive">最近错误：{feature.last_error}</span>
                 ) : null}

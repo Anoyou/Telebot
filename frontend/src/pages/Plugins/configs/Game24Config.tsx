@@ -21,6 +21,7 @@ import { Spinner } from "@/components/ui/misc";
 import { Switch } from "@/components/ui/switch";
 import { getErrMsg } from "@/lib/api";
 import { featureConfigBackTarget } from "@/pages/Plugins/_shared/featureConfig";
+import { featureRuntimeText } from "./_shared/featureStatus";
 
 interface Game24Config {
   command: string;
@@ -187,7 +188,7 @@ export function Game24ConfigPage() {
               <CardTitle className="text-base">功能总开关</CardTitle>
               <CardDescription>
                 关闭后 24 点游戏不会响应当前账号的触发指令。
-                {game24Feature?.state ? ` · 状态：${game24Feature.state}` : ""}
+                {` · 运行状态：${featureRuntimeText(game24Feature)}`}
                 {game24Feature?.last_error ? ` · 最近错误：${game24Feature.last_error}` : ""}
               </CardDescription>
             </div>

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import secrets
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -35,6 +36,14 @@ logging.basicConfig(level=getattr(logging, settings.log_level.upper(), logging.I
 _MIGRATION_ADVISORY_LOCK_KEY = 730140129
 _CSRF_HEADER_NAME = "X-Requested-With"
 _CSRF_HEADER_VALUES = {"telepilot-ui", "telebot-ui"}
+_CSRF_TOKEN_COOKIE = "csrf_token"
+_CSRF_TOKEN_HEADER = "X-CSRF-Token"
+_SECURITY_HEADERS = {
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "Referrer-Policy": "same-origin",
+    "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
+}
 
 
 def _is_container_env() -> bool:
@@ -207,12 +216,44 @@ def _csrf_required(method: str) -> bool:
     return method.upper() not in {"GET", "HEAD", "OPTIONS"}
 
 
+def _set_csrf_cookie(response: JSONResponse) -> JSONResponse:
+    """下发 double-submit CSRF token：JS 可读 cookie + 写请求 header 回传。"""
+    response.set_cookie(
+        key=_CSRF_TOKEN_COOKIE,
+        value=secrets.token_urlsafe(32),
+        max_age=12 * 3600,
+        httponly=False,
+        samesite="lax",
+        secure=settings.cookie_secure,
+    )
+    return response
+
+
+def _with_security_headers(response):
+    for key, value in _SECURITY_HEADERS.items():
+        response.headers.setdefault(key, value)
+    if settings.cookie_secure:
+        response.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+    return response
+
+
+@app.get("/api/auth/csrf")
+async def csrf_token() -> JSONResponse:
+    return _set_csrf_cookie(JSONResponse(content={"ok": True}))
+
+
+@app.middleware("http")
+async def security_headers_middleware(request: Request, call_next):
+    response = await call_next(request)
+    return _with_security_headers(response)
+
+
 @app.middleware("http")
 async def csrf_header_middleware(request: Request, call_next):
     if _csrf_required(request.method):
         header_val = request.headers.get(_CSRF_HEADER_NAME, "")
         if header_val not in _CSRF_HEADER_VALUES:
-            return JSONResponse(
+            return _with_security_headers(JSONResponse(
                 status_code=403,
                 content={
                     "error": {
@@ -220,7 +261,19 @@ async def csrf_header_middleware(request: Request, call_next):
                         "message": f"缺少或非法请求头 {_CSRF_HEADER_NAME}",
                     }
                 },
-            )
+            ))
+        csrf_cookie = request.cookies.get(_CSRF_TOKEN_COOKIE, "")
+        csrf_header = request.headers.get(_CSRF_TOKEN_HEADER, "")
+        if not csrf_cookie or not csrf_header or not secrets.compare_digest(csrf_cookie, csrf_header):
+            return _with_security_headers(JSONResponse(
+                status_code=403,
+                content={
+                    "error": {
+                        "code": "CSRF_TOKEN_REQUIRED",
+                        "message": f"缺少或非法请求头 {_CSRF_TOKEN_HEADER}",
+                    }
+                },
+            ))
     return await call_next(request)
 
 

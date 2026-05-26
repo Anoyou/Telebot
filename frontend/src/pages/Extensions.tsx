@@ -686,7 +686,7 @@ function InstalledPluginsSection() {
   const accounts = matrixQ.data?.accounts ?? [];
   const accountCount = accounts.length;
   const remoteEnabledCount = (name: string) =>
-    accounts.filter((account) => account.features[name] && account.features[name] !== "disabled").length;
+    accounts.filter((account) => account.feature_enabled?.[name] ?? account.features[name] !== "disabled").length;
   const toggleWarnings = (name: string) => {
     setExpandedWarnings((prev) => {
       const next = new Set(prev);

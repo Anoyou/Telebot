@@ -43,20 +43,21 @@ bash deploy/backup-keys.sh           # 默认 gpg 对称加密，输出 keys-bac
 ### 1.4 网络与传输
 
 - **HTTPS**：前端必须走 https。任意可拿到 LAN/中间环节的人都能拿到 cookie 里的 JWT。
-- **CSP**：在反代或 FastAPI 中间件层加 `Content-Security-Policy: default-src 'self'`，至少阻断第三方 JS 注入。
+- **CSP**：默认前端 Nginx 已下发 CSP；若使用自定义反代或 CDN，保持 `default-src 'self'` 起步并按需放行。
 - **CORS**：`CORS_ORIGINS` 只放真实前端域名，不要 `*`。
 - **TG 出口代理**：要么 VPS 在能直连 TG 的网络，要么走自有可信代理；不要用公开 SOCKS5。
 
 ---
 
-## 2. 已知接受风险（V1 不修，V1.5 排期）
+## 2. 已知风险与当前缓解
 
-V1 的目标是上线，不是零风险。以下三项是**已识别 + 已评估 + 已接受**的现状：
+以下项目是已识别风险及当前缓解方式；生产环境仍需按第 1 节完成 HTTPS、强密钥与备份隔离。
 
-### 2.1 CSRF：已实现 header-based gate，double-submit 作为增强项
+### 2.1 CSRF：已实现 header gate + double-submit token
 
-**现状**：后端已实现基于请求头的 CSRF gate：写操作除 cookie 外还要求前端附带受控自定义头，
-并结合 `Content-Type: application/json` 与 `SameSite` 策略形成双重门槛。普通跨站 form/图片请求无法满足该 gate。
+**现状**：后端写操作除 cookie 外还要求前端附带 `X-Requested-With: telepilot-ui`
+以及 `X-CSRF-Token`；前端先从 `/api/auth/csrf` 获取 JS 可读 `csrf_token` cookie，
+再把同值写入请求头，后端校验两侧一致。过渡期仍接受旧缓存页面使用的 `telebot-ui` 自定义头。
 
 **风险范围**：低。攻击路径仍需要：
 1. 用户在登录态访问到一个**与本站同源**的被注入页面（XSS 或子域名失控），
@@ -65,39 +66,39 @@ V1 的目标是上线，不是零风险。以下三项是**已识别 + 已评估
 **缓解措施**：
 - 不嵌入第三方 iframe；CSP 严格化。
 - 子域名最小化，避免 `*.your-domain.com` 共享 cookie。
-- Web 端写操作均要求 `Content-Type: application/json` + 受控自定义头 + `withCredentials`。
-- 后端对缺失 gate 头的写请求直接拒绝。
+- Web 端写操作均要求受控自定义头 + double-submit token + `withCredentials`。
+- 后端对缺失 gate 头或 token 不一致的写请求直接拒绝。
 
-**未来计划**：V1.5 可在现有 gate 之上叠加 double-submit cookie token（前端从 cookie 读取 csrf_token，
-作为请求头回传，后端校验两侧一致），进一步收紧浏览器边界。
+### 2.2 MASTER_KEY 轮换
 
-### 2.2 MASTER_KEY 轮换未实现
+**现状**：已提供 `python -m app.scripts.rekey`，可把库内 Fernet 密文字段用旧
+`MASTER_KEY` 解密后再用新 `MASTER_KEY` 加密。脚本支持 `--dry-run`，生产执行前必须先验证。
 
-**现状**：单密钥 Fernet 加密所有 secret。轮换需 dual-key 解密 → 重写库 → 切单密钥，
-脚本 `app.scripts.rekey` 尚未交付。
+```bash
+python -m app.scripts.rekey --old "$OLD_MASTER_KEY" --new "$NEW_MASTER_KEY" --dry-run
+python -m app.scripts.rekey --old "$OLD_MASTER_KEY" --new "$NEW_MASTER_KEY"
+```
 
-**风险范围**：中。日常使用没问题；只有怀疑密钥泄露时才阻塞。
+覆盖字段：账号 API ID/API Hash/session、代理密码、LLM API Key、通知 Bot Token、账号 Bot Token、
+Web TOTP secret，以及 `account_bot_transfer_notice:*` 系统设置内的交互/转账 Bot Token。
 
-**应急 SOP（密钥泄露时怎么办）**：参见第 3 节 §3.3。
+**风险范围**：中低。计划内轮换可平滑完成；若确认 `MASTER_KEY` 与数据库备份同时泄露，
+攻击者可能已解开旧密文，仍需按 §3.3 评估是否强制重绑账号与轮换第三方 token。
 
-**未来计划**：V1.5 提供 `python -m app.scripts.rekey --old=<旧> --new=<新>`，
-原子地把库中所有加密字段用旧密钥解、新密钥加密，落库后切 .env。
+### 2.3 pending_totp 已迁到 Redis
 
-### 2.3 pending_totp 用 cookie 存
+**现状**：登录第一步通过后，后端在 Redis 中写入 5 分钟 TTL 的 `auth:pending_totp:*`
+挂起状态，cookie 只保存随机 token；第二步用 token 换正式 JWT。旧实现残留的 `pending_totp`
+cookie 会在新流程中主动清理。
 
-**现状**：登录第一步通过后，签发一个 5 分钟 TTL 的 `pending_totp` cookie，
-带 HttpOnly + Secure（视 `COOKIE_SECURE`）+ SameSite=Lax。第二步用它换正式 JWT。
-
-**风险**：5 分钟窗口内若用户机器被劫持（恶意浏览器扩展 / 物理接触），
-攻击者拿到该 cookie 即可绕过 TOTP。
+**风险**：5 分钟窗口内若用户机器被劫持（恶意浏览器扩展 / 物理接触），攻击者仍可能复用该
+token，但服务端 TTL 和 Redis 删除让窗口更短，也便于主动作废。
 
 **缓解**：
 - HttpOnly：JS 偷不到（要绕需要更深层的浏览器漏洞）。
 - SameSite=Lax：阻断 CSRF。
 - 5 分钟 TTL：远小于一次正常登录耗时。
-
-**未来计划**：V1.5 把 pending 状态迁到 Redis（key=随机 token，value=username + 已通过
-密码标志），cookie 只放 token，server 端也能主动作废。
+- Redis 端保存状态：cookie 不再承载用户名和已通过密码标志。
 
 ---
 
@@ -140,8 +141,9 @@ curl -X DELETE https://<host>/api/accounts/<aid>
 
 ### 3.3 .env 泄露 / MASTER_KEY 泄露
 
-> **当前**：`rekey` 脚本未交付（见 §2.2）。下面流程是 **V1 的应急做法**，
-> 目标是「让旧密钥的有效信息全部作废」，而不是「就地换密钥」。
+> 若只是计划内轮换或怀疑 `.env` 暴露但没有证据表明数据库也泄露，优先走 rekey 平滑轮换。
+> 若确认 `MASTER_KEY` 与数据库备份同时落入攻击者手中，旧 session / Bot Token 可能已经被解密，
+> rekey 只能保护后续数据，仍应考虑强制重绑账号与轮换第三方 token。
 
 ```bash
 # 1. 立即停服
@@ -155,12 +157,23 @@ chmod 600 /root/secure-store/env.<incident-ts>
 # 3. 生成新密钥
 python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 
-# 4. 编辑 .env：用新值覆盖 MASTER_KEY、JWT_SECRET、POSTGRES_PASSWORD
+# 4. 先用旧/新 MASTER_KEY 做 dry-run，确认所有密文字段可解
+docker compose run --rm web python -m app.scripts.rekey \
+  --old '<旧 MASTER_KEY>' \
+  --new '<新 MASTER_KEY>' \
+  --dry-run
+
+# 5. 执行重钥；脚本遇到任何无法解密字段会回滚，不会半写
+docker compose run --rm web python -m app.scripts.rekey \
+  --old '<旧 MASTER_KEY>' \
+  --new '<新 MASTER_KEY>'
+
+# 6. 编辑 .env：用新值覆盖 MASTER_KEY、JWT_SECRET、POSTGRES_PASSWORD
 vi .env
 chmod 600 .env
 
-# 5. 因为 DB 里 session 还是用旧密钥加密的，新密钥起服后会全部解不开 →
-#    只能让所有 TG 账号重新走绑定向导。两条路径任选：
+# 7. 如果确认 DB + MASTER_KEY 已同时泄露，重钥后还要让所有 TG 账号重新走绑定向导。
+#    否则可跳过这一步。两条路径任选：
 #
 #    A) 全清重来（推荐，最干净）：
 psql "$DATABASE_URL" -c "TRUNCATE account, audit_log, runtime_log, rate_limit_event CASCADE;"
@@ -169,15 +182,15 @@ psql "$DATABASE_URL" -c "TRUNCATE account, audit_log, runtime_log, rate_limit_ev
 psql "$DATABASE_URL" -c "UPDATE account
   SET session_enc='', api_id_enc='', api_hash_enc='', status='login_required';"
 
-# 6. JWT_SECRET 已换 → 所有 web 用户的 cookie 自动失效，下次登录强制重输密码
+# 8. JWT_SECRET 已换 → 所有 web 用户的 cookie 自动失效，下次登录强制重输密码
 
-# 7. 写一条入侵审计
+# 9. 写一条入侵审计
 psql "$DATABASE_URL" -c "
   INSERT INTO audit_log (ts, user_id, action, target, detail)
   VALUES (now(), NULL, 'security.master_key_rotated', 'system',
           '{\"reason\":\"<事件说明>\"}'::jsonb);"
 
-# 8. 启服
+# 10. 启服
 docker compose start
 ```
 

@@ -14,6 +14,7 @@ class FeatureInfo(BaseModel):
     key: str
     display_name: str
     is_builtin: bool
+    source_type: str = "local"
     version: str | None = None
     config_schema: dict[str, Any] | None = None
     category: str = "utility"
@@ -29,6 +30,8 @@ class FeatureInfo(BaseModel):
     @classmethod
     def from_feature(cls, f: Feature, remote_plugin: Any | None = None) -> FeatureInfo:
         manifest = getattr(f, "manifest", None) or {}
+        source_url = str(getattr(remote_plugin, "source_url", "") or "")
+        source_type = "remote" if remote_plugin is not None and not source_url.startswith("local://") else "local"
         config_schema = manifest.get("config_schema")
         schema_meta = config_schema if isinstance(config_schema, dict) else {}
         category = str(manifest.get("category") or schema_meta.get("x-category") or "utility")
@@ -42,6 +45,7 @@ class FeatureInfo(BaseModel):
             key=f.key,
             display_name=f.display_name,
             is_builtin=f.is_builtin,
+            source_type=source_type,
             version=f.version,
             config_schema=config_schema,
             category=category,
@@ -86,6 +90,7 @@ class FeatureMatrixRow(BaseModel):
     id: int
     name: str
     features: dict[str, str]  # feature_key -> state
+    feature_enabled: dict[str, bool] = Field(default_factory=dict)  # feature_key -> account switch
 
 
 class FeatureMatrixResponse(BaseModel):

@@ -1,5 +1,38 @@
 // axios 客户端：携带 cookie；遇 401 自动跳登录页；统一错误信息提取
-import axios, { type AxiosError } from "axios";
+import axios, { AxiosHeaders, type AxiosError, type InternalAxiosRequestConfig } from "axios";
+
+const CSRF_COOKIE = "csrf_token";
+const CSRF_HEADER = "X-CSRF-Token";
+
+let csrfFetch: Promise<string | null> | null = null;
+
+function readCookie(name: string): string | null {
+  if (typeof document === "undefined") return null;
+  const prefix = `${name}=`;
+  const item = document.cookie
+    .split(";")
+    .map((part) => part.trim())
+    .find((part) => part.startsWith(prefix));
+  return item ? decodeURIComponent(item.slice(prefix.length)) : null;
+}
+
+function needsCsrf(config: InternalAxiosRequestConfig) {
+  const method = (config.method || "get").toUpperCase();
+  return !["GET", "HEAD", "OPTIONS"].includes(method);
+}
+
+async function ensureCsrfToken(): Promise<string | null> {
+  const existing = readCookie(CSRF_COOKIE);
+  if (existing) return existing;
+  if (!csrfFetch) {
+    csrfFetch = api.get("/api/auth/csrf", { timeout: 5000 })
+      .then(() => readCookie(CSRF_COOKIE))
+      .finally(() => {
+        csrfFetch = null;
+      });
+  }
+  return csrfFetch;
+}
 
 export const api = axios.create({
   baseURL: import.meta.env.VITE_API_BASE || "/",
@@ -8,6 +41,17 @@ export const api = axios.create({
   headers: {
     "X-Requested-With": "telepilot-ui",
   },
+});
+
+api.interceptors.request.use(async (config) => {
+  if (needsCsrf(config)) {
+    const token = await ensureCsrfToken();
+    if (token) {
+      config.headers = AxiosHeaders.from(config.headers);
+      config.headers.set(CSRF_HEADER, token);
+    }
+  }
+  return config;
 });
 
 api.interceptors.response.use(

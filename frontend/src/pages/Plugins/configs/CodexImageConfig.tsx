@@ -25,6 +25,7 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { getErrMsg } from "@/lib/api";
 import { featureConfigBackTarget } from "@/pages/Plugins/_shared/featureConfig";
+import { featureRuntimeText } from "./_shared/featureStatus";
 
 const MASKED_SECRET_PLACEHOLDER = "••••••••••••••••";
 
@@ -395,7 +396,7 @@ export function CodexImageConfigPage() {
               <CardTitle className="text-base">功能总开关</CardTitle>
               <CardDescription>
                 关闭后 Codex 图片生成不会响应当前账号的触发指令。
-                {feature?.state ? ` · 状态：${feature.state}` : ""}
+                {` · 运行状态：${featureRuntimeText(feature)}`}
                 {feature?.last_error ? ` · 最近错误：${feature.last_error}` : ""}
               </CardDescription>
             </div>

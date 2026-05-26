@@ -57,7 +57,19 @@ log = logging.getLogger(__name__)
 # ─────────────────────────────────────────────────────
 _ALLOWED_URL_SCHEMES: frozenset[str] = frozenset({"https", "git+ssh"})
 _REMOTE_UPDATE_DEFAULT_INTERVAL_MINUTES = 360
-_HARDCODED_PREFIX_RE = re.compile(r"(?<![A-Za-z0-9_{}])[,，][A-Za-z0-9_\u4e00-\u9fff][^\s<>{}]{0,31}")
+_COMMAND_PLACEHOLDER_RE = (
+    r"\{(?:command|cmd|name|help_command|cancel_command|undo_command|"
+    r"force_stop_command|admin_command|edit_command|example)\}"
+)
+# 只检查英文逗号命令示例，避免把中文正文标点、CSV 配置值误报为硬编码前缀。
+_HARDCODED_PREFIX_RE = re.compile(
+    r"(?:^|(?<=[\s:：(<\[【\"'`>]))"
+    r"(,(?:"
+    + _COMMAND_PLACEHOLDER_RE
+    + r"|[A-Za-z_][A-Za-z0-9_-]{0,31}"
+    + r"|[\u4e00-\u9fff]{1,12}(?=$|[\s<。！？!?、，,；;：:）)\]}\"'`>])"
+    + r"))"
+)
 
 
 # ─────────────────────────────────────────────────────

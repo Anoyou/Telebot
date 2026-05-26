@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
+import { toast } from "sonner";
 import {
   ArrowRight,
   BookOpen,
@@ -37,7 +38,7 @@ type ModuleCategory = "interactive" | "automation" | "utility";
 const CATEGORY_META: Record<ModuleCategory, { title: string; hint: string; icon: React.ReactNode }> = {
   interactive: {
     title: "互动娱乐",
-    hint: "声明了交互入口的游戏、娱乐和群内互动模块。",
+    hint: "可交互的游戏、娱乐和群内互动模块。",
     icon: <Sparkles className="h-4 w-4" />,
   },
   automation: {
@@ -52,6 +53,32 @@ const CATEGORY_META: Record<ModuleCategory, { title: string; hint: string; icon:
   },
 };
 const DANGEROUS_CMD_BANNER_KEY = "telebot.plugins_home.banner.v0_13_dangerous_cmds_closed";
+
+function moduleRuntimeLabel(status: string, enabled: boolean) {
+  if (!enabled) return "已停用";
+  if (status === "active") return "运行中";
+  if (status === "failed") return "异常";
+  return "等待 worker 生效";
+}
+
+function moduleSourceLabel(feature: FeatureInfo) {
+  return feature.source_type === "remote" ? "远程" : "本地";
+}
+
+function moduleVersionLabel(version?: string | null) {
+  const value = (version || "").trim();
+  if (!value) return "v-";
+  return value.startsWith("v") || value.startsWith("V") ? value : `v${value}`;
+}
+
+function moduleUpdateMessage(feature: FeatureInfo) {
+  const current = moduleVersionLabel(feature.version);
+  const latest = moduleVersionLabel(feature.latest_version);
+  if (feature.latest_version) {
+    return `当前 ${current}，远程 ${latest}；请到“安装模块”更新。`;
+  }
+  return "远程模块有新版，请到“安装模块”更新。";
+}
 
 export function PluginsHome() {
   const nav = useNavigate();
@@ -343,12 +370,56 @@ export function PluginsHome() {
                 features={grouped[category]}
                 selectedAccountId={selectedAccount?.id}
                 selectedFeatures={selectedAccount?.features ?? {}}
+                selectedFeatureEnabled={selectedAccount?.feature_enabled ?? {}}
               />
             ))}
           </div>
         </CardContent>
       </Card>
     </div>
+  );
+}
+
+function FeatureCapabilityBadge({
+  show,
+  tone = "neutral",
+  title,
+  onClick,
+  children,
+}: {
+  show: boolean;
+  tone?: "neutral" | "success" | "warn" | "danger" | "outline";
+  title?: string;
+  onClick?: () => void;
+  children: React.ReactNode;
+}) {
+  const interactive = Boolean(show && onClick);
+  return (
+    <MetaBadge
+      tone={tone}
+      className={
+        show
+          ? "h-7 w-full justify-center px-0 text-[10px]"
+          : "invisible h-7 w-full justify-center px-0 text-[10px]"
+      }
+      aria-hidden={show ? undefined : true}
+      role={interactive ? "button" : undefined}
+      tabIndex={interactive ? 0 : undefined}
+      title={title}
+      onClick={interactive ? onClick : undefined}
+      onKeyDown={
+        interactive
+          ? (event) => {
+              if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                onClick?.();
+              }
+            }
+          : undefined
+      }
+    >
+      {children}
+    </MetaBadge>
   );
 }
 
@@ -452,6 +523,7 @@ function FeatureZone({
   features,
   selectedAccountId,
   selectedFeatures,
+  selectedFeatureEnabled,
 }: {
   title: string;
   hint: string;
@@ -459,6 +531,7 @@ function FeatureZone({
   features: FeatureInfo[];
   selectedAccountId?: number;
   selectedFeatures: Record<string, string>;
+  selectedFeatureEnabled: Record<string, boolean>;
 }) {
   const nav = useNavigate();
 
@@ -479,34 +552,64 @@ function FeatureZone({
           <div className="space-y-2">
             {features.map((f) => {
               const status = selectedFeatures[f.key] ?? "disabled";
+              const enabled = selectedFeatureEnabled[f.key] ?? status !== "disabled";
+              const runtimeLabel = moduleRuntimeLabel(status, enabled);
               const path = featureConfigPath(selectedAccountId, f.key, f, {
                 source: "plugins",
               });
               const canConfigure = Boolean(path);
               return (
-                <div key={f.key} className="flex items-center justify-between rounded-md border p-2">
-                  <div>
-                    <div className="flex flex-wrap items-center gap-1.5 text-sm font-medium">
+                <div key={f.key} className="flex flex-col gap-3 rounded-md border p-2 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-sm font-medium" title={f.display_name}>
                       {f.display_name}
-                      {f.experimental ? <MetaBadge>实验性</MetaBadge> : null}
-                      {f.interaction_entries?.length ? <MetaBadge>交互入口</MetaBadge> : null}
-                      {f.update_available ? <MetaBadge tone="success">有更新</MetaBadge> : null}
                     </div>
                     <div className="font-mono text-xs text-muted-foreground">{f.key}</div>
-                    {f.update_available && f.latest_version ? (
-                      <div className="mt-1 text-xs text-muted-foreground">
-                        远程模块有新版 {f.latest_version}，请到“安装模块”更新。
-                      </div>
-                    ) : null}
                     {f.last_update_check_error ? (
                       <div className="mt-1 text-xs text-destructive">
                         更新检查失败：{f.last_update_check_error}
                       </div>
                     ) : null}
                   </div>
-                  <div className="flex items-center gap-2">
-                    <MetaBadge tone={status === "active" ? "success" : "neutral"}>
-                      {status === "active" ? "已启用" : "未启用"}
+                  <div className="grid max-w-full shrink-0 grid-cols-[154px_118px_50px_auto] items-center gap-2 overflow-x-auto">
+                    <div className="grid w-[154px] grid-cols-[46px_48px_44px] items-center gap-2">
+                      <FeatureCapabilityBadge
+                        show={Boolean(f.update_available)}
+                        tone="success"
+                        title={f.update_available ? moduleUpdateMessage(f) : undefined}
+                        onClick={() => toast.info(moduleUpdateMessage(f))}
+                      >
+                        有更新
+                      </FeatureCapabilityBadge>
+                      <FeatureCapabilityBadge show={Boolean(f.interaction_entries?.length)}>
+                        可交互
+                      </FeatureCapabilityBadge>
+                      <FeatureCapabilityBadge show={Boolean(f.experimental)}>
+                        实验性
+                      </FeatureCapabilityBadge>
+                    </div>
+                    <div className="grid w-[118px] grid-cols-[38px_72px] items-center gap-2">
+                      <MetaBadge
+                        tone={f.source_type === "remote" ? "outline" : "neutral"}
+                        className="h-7 justify-center px-0 text-[10px]"
+                      >
+                        {moduleSourceLabel(f)}
+                      </MetaBadge>
+                      <MetaBadge
+                        mono
+                        tone="outline"
+                        className="h-7 justify-center truncate px-0 text-[10px]"
+                        title={moduleVersionLabel(f.version)}
+                      >
+                        {moduleVersionLabel(f.version)}
+                      </MetaBadge>
+                    </div>
+                    <MetaBadge
+                      tone={!enabled ? "neutral" : status === "failed" ? "warn" : "success"}
+                      className="h-7 w-[50px] justify-center px-0 text-[10px]"
+                      title={`开关：${enabled ? "已启用" : "未启用"}；运行状态：${runtimeLabel}`}
+                    >
+                      {enabled ? "已启用" : "未启用"}
                     </MetaBadge>
                     {canConfigure ? (
                       <Button

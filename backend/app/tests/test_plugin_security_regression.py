@@ -89,6 +89,10 @@ class TestRemotePluginSecurity:
                   "help_message_template": {
                     "type": "string",
                     "default": ",game 100 - 开始一局"
+                  },
+                  "stop_message_template": {
+                    "type": "string",
+                    "default": "<code>,{command} stop</code>"
                   }
                 }
               }
@@ -106,8 +110,44 @@ class TestRemotePluginSecurity:
         warnings = svc.lint_plugin_metadata_files(plugin_dir)
 
         assert any("plugin.json" in item and ",game" in item for item in warnings)
+        assert any("plugin.json" in item and ",{command}" in item for item in warnings)
         assert any("manifest.py" in item and ",help" in item for item in warnings)
         assert "LINT_MANIFEST_EXECUTED" not in _os.environ
+
+    def test_metadata_lint_ignores_chinese_punctuation_and_csv_values(self, tmp_path):
+        """普通中文逗号和逗号分隔值不能被误判成硬编码命令前缀。"""
+        plugin_dir = tmp_path / "installed" / "lint_clean"
+        plugin_dir.mkdir(parents=True)
+        (plugin_dir / "plugin.json").write_text(
+            """
+            {
+              "name": "lint_clean",
+              "version": "1.0.0",
+              "description": "群内小游戏，支持下注、开奖和历史统计",
+              "config_schema": {
+                "type": "object",
+                "properties": {
+                  "draw_numbers": {
+                    "type": "string",
+                    "default": "1,2,3,4,5,6"
+                  },
+                  "help_message_template": {
+                    "type": "string",
+                    "default": "{prefix}{command} 100 - 开始一局"
+                  }
+                }
+              }
+            }
+            """,
+            encoding="utf-8",
+        )
+        (plugin_dir / "manifest.py").write_text(
+            'MANIFEST = {"description": "插件说明，支持多种玩法", '
+            '"config_schema": {"properties": {"x": {"default": "A,B,C"}}}}\n',
+            encoding="utf-8",
+        )
+
+        assert svc.lint_plugin_metadata_files(plugin_dir) == []
 
     def test_runtime_discovery_does_not_execute_installed_by_default(self, monkeypatch, tmp_path):
         """worker 刷新 builtin 注册表时不能顺手执行 installed 插件代码。"""
