@@ -241,10 +241,27 @@ def test_builtin_modules_constant_is_complete() -> None:
     """_BUILTIN_MODULES 应当覆盖核心内置模块。"""
     assert {
         "auto_reply",
+        "autorepeat",
+        "chatgpt_image",
         "codex_image",
         "forward",
+        "game24",
         "scheduler",
     } <= set(_BUILTIN_MODULES)
+
+
+def test_builtin_rule_and_platform_manifests_are_explicit() -> None:
+    """规则/平台类内置 manifest 应声明封闭 schema，避免配置页和校验语义漂移。"""
+    from app.worker.plugins.builtin.autorepeat.manifest import MANIFEST as AUTOREPEAT_MANIFEST
+    from app.worker.plugins.builtin.forward.manifest import MANIFEST as FORWARD_MANIFEST
+    from app.worker.plugins.builtin.scheduler.manifest import MANIFEST as SCHEDULER_MANIFEST
+
+    for manifest in (AUTOREPEAT_MANIFEST, FORWARD_MANIFEST, SCHEDULER_MANIFEST):
+        schema = manifest.config_schema or {}
+        assert schema.get("type") == "object"
+        assert schema.get("additionalProperties") is False
+
+    assert "resolve_entity" in AUTOREPEAT_MANIFEST.permissions
 
 
 def test_clear_installed_module_cache_drops_registered_class() -> None:

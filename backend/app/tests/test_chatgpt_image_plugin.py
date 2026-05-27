@@ -45,6 +45,11 @@ def test_chatgpt_image_manifest_has_chinese_config_descriptions() -> None:
     assert "notify_chat_id" not in props
     assert props["edit_command"]["default"] == "edit"
     assert props["admin_command"]["default"] == "gptimg"
+    assert props["usage_preview"]["readOnly"] is True
+    assert "子命令固定为 ping、models、status" in props["usage_preview"]["description"]
+    assert props["template_placeholders"]["readOnly"] is True
+    assert "兼容字段" in props["template_placeholders"]["description"]
+    assert props["usage_preview"]["default"] == props["template_placeholders"]["default"]
 
 
 def test_chatgpt_image_config_and_args_are_customizable() -> None:

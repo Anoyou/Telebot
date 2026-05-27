@@ -166,8 +166,16 @@ def test_codex_image_ext_detects_image_magic_bytes() -> None:
 
 
 def test_codex_image_manifest_is_marked_experimental() -> None:
+    schema = MANIFEST.config_schema or {}
+    props = schema["properties"]
+
     assert MANIFEST.experimental is True
     assert MANIFEST.to_dict()["x-experimental"] is True
+    assert "delete_message" in MANIFEST.permissions
+    assert schema["additionalProperties"] is False
+    assert props["usage_preview"]["readOnly"] is True
+    assert props["usage_preview"]["level"] == "account"
+    assert all(field.get("level") == "account" for field in props.values())
 
 
 async def test_codex_status_edit_uses_html_parse_mode() -> None:

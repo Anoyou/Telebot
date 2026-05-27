@@ -14,6 +14,15 @@
 
 ## [Unreleased]
 
+## [0.25.0-rc.5] — 2026-05-28 · rc · 内置插件 manifest 规范化
+
+### Changed
+- ChatGPT2API 与 Codex 图片生成内置插件统一使用 `usage_preview` 提供配置页顶部说明，并保留 `template_placeholders` 兼容旧读取路径。
+- 通用插件配置页会把 `usage_preview` / `ai_usage_guide` / `template_placeholders` 作为只读说明展示，不再重复渲染到配置字段区，并支持替换非敏感 schema 字段占位符。
+- Codex 图片生成 manifest 补齐 `delete_message` 权限、封闭配置 schema，并为所有配置字段显式标注账号级作用域。
+- 自动复读、消息转发和定时任务内置 manifest 的规则/平台 schema 改为封闭对象；自动复读补齐 `resolve_entity` 权限声明。
+- 内置插件包索引补齐 `chatgpt_image`，保持动态扫描结果与包索引一致。
+
 ## [0.25.0-rc.4] — 2026-05-27 · rc · 插件目录自愈与工作台布局统一
 
 ### Changed

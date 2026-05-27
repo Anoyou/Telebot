@@ -27,6 +27,7 @@ MANIFEST = Manifest(
     config_schema={
         "type": "object",
         "x-ui-mode": "rules",
+        "additionalProperties": False,
         "required": ["target_chat_id", "mode"],
         "properties": {
             # 源筛选：all = 任何 incoming；peers = 指定 chat_id 列表；keyword = 文本包含关键词；duplicate = 重复消息检测

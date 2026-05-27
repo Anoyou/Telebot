@@ -25,6 +25,7 @@ MANIFEST = Manifest(
     config_schema={
         "type": "object",
         "x-ui-mode": "platform",
+        "additionalProperties": False,
         "properties": {
             "default_notify": {
                 "type": "boolean", "title": "执行后通知", "default": True,

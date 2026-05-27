@@ -326,6 +326,14 @@ MANIFEST = Manifest(
             "template_placeholders": {
                 "type": "string",
                 "title": "命令说明",
+                "description": "兼容字段：保留给旧前端读取。请优先使用 usage_preview。",
+                "default": "文生图：,{command} [-m 模型] [-n 数量] [-s 风格] [--size 画幅] 提示词\n图片编辑：回复图片后 ,{edit_command} 提示词；或 ,{edit_command} last 提示词\n管理：,{admin_command} ping/models/status/version/refresh/token/import/proxy",
+                "readOnly": True,
+                "level": "account",
+            },
+            "usage_preview": {
+                "type": "string",
+                "title": "命令说明",
                 "description": "只读说明：所有主命令都可自定义，子命令固定为 ping、models、status、version、refresh、token、import、proxy。",
                 "default": "文生图：,{command} [-m 模型] [-n 数量] [-s 风格] [--size 画幅] 提示词\n图片编辑：回复图片后 ,{edit_command} 提示词；或 ,{edit_command} last 提示词\n管理：,{admin_command} ping/models/status/version/refresh/token/import/proxy",
                 "readOnly": True,

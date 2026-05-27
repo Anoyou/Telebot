@@ -109,9 +109,17 @@ export function GenericPluginConfigPage() {
 
   const { globalFields, accountFields } = useMemo(() => {
     const properties = schema?.properties ?? {};
+    const isGuideField = (key: string) =>
+      key === "usage_preview" ||
+      key === "ai_usage_guide" ||
+      key === "template_placeholders";
     return {
-      globalFields: Object.entries(properties).filter(([, field]) => field.level === "global") as Array<[string, ConfigField]>,
-      accountFields: Object.entries(properties).filter(([, field]) => field.level !== "global") as Array<[string, ConfigField]>,
+      globalFields: Object.entries(properties).filter(
+        ([key, field]) => !isGuideField(key) && field.level === "global",
+      ) as Array<[string, ConfigField]>,
+      accountFields: Object.entries(properties).filter(
+        ([key, field]) => !isGuideField(key) && field.level !== "global",
+      ) as Array<[string, ConfigField]>,
     };
   }, [schema]);
   const usageGuide = useMemo(
@@ -371,9 +379,16 @@ function buildUsageGuide({
 }): UsageGuide {
   const properties = schema?.properties ?? {};
   const command = configString(values.command ?? properties.command?.default) || "command";
-  const sample = { prefix: commandPrefix || ",", command };
-  const customText = renderUsageText(configString(values.usage_preview ?? properties.usage_preview?.default), sample);
-  const aliasExamples = buildCommandExamples(properties, values, sample.prefix, command);
+  const usageVariables = buildUsageVariables(properties, values, commandPrefix || ",", command);
+  const customText = renderUsageText(
+    firstUsageGuideText([
+      values.usage_preview ?? properties.usage_preview?.default,
+      values.ai_usage_guide ?? properties.ai_usage_guide?.default,
+      values.template_placeholders ?? properties.template_placeholders?.default,
+    ]),
+    usageVariables,
+  );
+  const aliasExamples = buildCommandExamples(properties, values, usageVariables.prefix, command);
   const interactionNotes = (interactionEntries ?? [])
     .map((entry) => {
       const title = entry.title || entry.key;
@@ -393,7 +408,7 @@ function buildUsageGuide({
   return {
     description: customText ? "来自模块 schema 的使用说明；保存后由 worker 热加载。" : "按字段填写当前账号的模块配置，保存后由 worker 热加载。",
     customText,
-    commandExamples: aliasExamples.length > 0 ? aliasExamples : [`${sample.prefix}${command}`],
+    commandExamples: aliasExamples.length > 0 ? aliasExamples : [`${usageVariables.prefix}${command}`],
     notes,
   };
 }
@@ -441,11 +456,35 @@ function buildCommandExamples(
     .slice(0, 8);
 }
 
-function renderUsageText(value: string, sample: { prefix: string; command: string }): string {
-  return normalizeUsageEscapes(value)
-    .replace(/\{prefix\}/g, sample.prefix)
-    .replace(/\{command\}/g, sample.command)
-    .trim();
+function renderUsageText(value: string, variables: Record<string, string>): string {
+  let text = normalizeUsageEscapes(value);
+  for (const [key, replacement] of Object.entries(variables)) {
+    text = text.replace(new RegExp(`\\{${escapeRegExp(key)}\\}`, "g"), replacement);
+  }
+  return text.trim();
+}
+
+function buildUsageVariables(
+  properties: Record<string, ConfigField>,
+  values: Record<string, unknown>,
+  prefix: string,
+  command: string,
+): Record<string, string> {
+  const variables: Record<string, string> = { prefix, command };
+  for (const [key, field] of Object.entries(properties)) {
+    if (isSensitiveUsageVariableKey(key)) continue;
+    const text = usageVariableText(values[key] ?? field.default);
+    if (text) variables[key] = text;
+  }
+  return variables;
+}
+
+function firstUsageGuideText(values: unknown[]): string {
+  for (const value of values) {
+    const text = formatUsageGuideValue(value).trim();
+    if (text) return text;
+  }
+  return "";
 }
 
 function normalizeUsageEscapes(value: string): string {
@@ -453,6 +492,31 @@ function normalizeUsageEscapes(value: string): string {
     .replace(/\\r\\n/g, "\n")
     .replace(/\\n/g, "\n")
     .replace(/\\r/g, "\n");
+}
+
+function formatUsageGuideValue(value: unknown): string {
+  if (value == null) return "";
+  if (typeof value === "string") return value;
+  if (Array.isArray(value)) {
+    return value.map((item) => formatUsageGuideValue(item)).filter(Boolean).join("\n");
+  }
+  if (typeof value === "object") {
+    return JSON.stringify(value, null, 2);
+  }
+  return String(value);
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function usageVariableText(value: unknown): string {
+  if (value == null || Array.isArray(value) || typeof value === "object") return "";
+  return String(value);
+}
+
+function isSensitiveUsageVariableKey(key: string): boolean {
+  return /(^|_)(api_key|access_token|auth_token|bot_token|token|tokens|secret|password|passwd|pwd)$/i.test(key);
 }
 
 function firstAlias(value: unknown): string {

@@ -18,10 +18,11 @@ MANIFEST = Manifest(
     author="TeleBoxOrg",
     description="当群组中多名用户在指定时间内发送相同内容时自动复读",
     category="automation",
-    permissions=["send_message", "edit_message", "read_chat"],
+    permissions=["send_message", "edit_message", "read_chat", "resolve_entity"],
     config_schema={
         "type": "object",
         "x-ui-mode": "rules",
+        "additionalProperties": False,
         "required": ["target_chat_id"],
         "properties": {
             "target_chat_id": {
