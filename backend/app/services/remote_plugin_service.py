@@ -849,6 +849,78 @@ def _find_plugin_metadata_in_repo(repo_dir: Path, name: str) -> tuple[PluginMeta
     )
 
 
+async def _copy_plugin_from_source_url(
+    *,
+    name: str,
+    source_url: str,
+    target: Path,
+    replace_existing: bool,
+) -> None:
+    """Clone ``source_url`` and copy plugin ``name`` into ``target``.
+
+    Used by update for multi-plugin repos and as a self-healing path for legacy
+    rows whose installed directory was missing after the InstalledPlugin cutover.
+    """
+
+    if not source_url:
+        raise RemotePluginError("SOURCE_URL_MISSING", f"插件 {name} 缺少 source_url，无法更新")
+    if source_url.startswith("local://"):
+        raise RemotePluginError(
+            "DIR_MISSING",
+            f"插件目录已丢失: {target}；本地导入插件无法从 {source_url!r} 自动恢复，请重新导入。",
+        )
+    _validate_source_url(source_url)
+
+    staging = target.with_name(f"{target.name}.installing")
+    backup = target.with_name(f"{target.name}.bak-update")
+    if staging.exists():
+        shutil.rmtree(staging, ignore_errors=True)
+    if backup.exists():
+        shutil.rmtree(backup, ignore_errors=True)
+    target.parent.mkdir(parents=True, exist_ok=True)
+
+    swapped = False
+    try:
+        with tempfile.TemporaryDirectory(prefix="telepilot-plugin-update-") as tmp:
+            repo_dir = Path(tmp) / "repo"
+            await _run_git("clone", "--depth", "1", source_url, str(repo_dir), timeout=180.0)
+            _, source_dir = _find_plugin_metadata_in_repo(repo_dir, name)
+            shutil.copytree(
+                source_dir,
+                staging,
+                ignore=shutil.ignore_patterns(".git", ".gitignore", "__pycache__"),
+            )
+            staged_meta = _read_plugin_metadata(staging, fallback_name=name)
+            if staged_meta.name != name:
+                raise RemotePluginError(
+                    "PLUGIN_NAME_MISMATCH",
+                    f"仓库 {source_url!r} 中匹配到的插件名为 {staged_meta.name!r}，预期 {name!r}",
+                )
+            _validate_runtime_plugin_shape(staging, staged_meta)
+
+        if replace_existing and target.exists():
+            target.rename(backup)
+        staging.rename(target)
+        swapped = True
+    except Exception:
+        if staging.exists():
+            shutil.rmtree(staging, ignore_errors=True)
+        if replace_existing:
+            if target.exists():
+                shutil.rmtree(target, ignore_errors=True)
+            if backup.exists():
+                backup.rename(target)
+        raise
+    finally:
+        if staging.exists():
+            shutil.rmtree(staging, ignore_errors=True)
+        if backup.exists():
+            if swapped:
+                shutil.rmtree(backup, ignore_errors=True)
+            elif replace_existing and not target.exists():
+                backup.rename(target)
+
+
 async def check_remote_plugin_update(db: AsyncSession, row: InstalledPlugin) -> InstalledPlugin:
     """检查单个远程模块是否有更新，并把状态写回 installed_plugin 行。"""
     try:
@@ -1283,75 +1355,27 @@ async def update(db: AsyncSession, name: str) -> RemotePluginView:
         raise RemotePluginNotFound("PLUGIN_NOT_FOUND", f"插件不存在: {name}")
 
     target = Path(row.installed_path or _existing_plugin_dir(name))
+    restored_from_source = False
     if not target.exists():
-        raise RemotePluginError(
-            "DIR_MISSING",
-            f"插件目录已丢失: {target}（请先 uninstall 再 install）",
+        await _copy_plugin_from_source_url(
+            name=name,
+            source_url=str(row.source_url or ""),
+            target=target,
+            replace_existing=False,
         )
+        restored_from_source = True
 
     # git pull（带 timeout）。如果插件是从多插件仓库子目录复制安装的，
     # 安装目录没有 .git，此时临时 clone source_url 后按 plugin.json.name 定位子目录覆盖。
     if (target / ".git").exists():
         await _run_git("pull", "--ff-only", cwd=target, timeout=60.0)
-    else:
-        source_url = str(row.source_url or "")
-        if not source_url:
-            raise RemotePluginError("SOURCE_URL_MISSING", f"插件 {name} 缺少 source_url，无法更新")
-        with tempfile.TemporaryDirectory(prefix="telepilot-plugin-update-") as tmp:
-            repo_dir = Path(tmp) / "repo"
-            await _run_git("clone", "--depth", "1", source_url, str(repo_dir), timeout=180.0)
-
-            candidates = [repo_dir]
-            candidates.extend([p for p in repo_dir.iterdir() if p.is_dir() and not p.name.startswith(".")])
-            source_dir: Path | None = None
-            for candidate in candidates:
-                if not (candidate / "plugin.json").is_file():
-                    continue
-                try:
-                    candidate_meta = _read_plugin_metadata(candidate, fallback_name=candidate.name)
-                except InvalidPluginMetadata:
-                    continue
-                if candidate_meta.name == name:
-                    source_dir = candidate
-                    break
-        if source_dir is None:
-            raise RemotePluginError(
-                "PLUGIN_NOT_IN_REPO",
-                f"仓库 {source_url!r} 内未找到插件 {name!r}",
-            )
-
-        staging = target.with_name(f"{target.name}.installing")
-        backup = target.with_name(f"{target.name}.bak-update")
-        if staging.exists():
-            shutil.rmtree(staging, ignore_errors=True)
-        if backup.exists():
-            shutil.rmtree(backup, ignore_errors=True)
-        swapped = False
-        try:
-            shutil.copytree(
-                source_dir,
-                staging,
-                ignore=shutil.ignore_patterns(".git", ".gitignore", "__pycache__"),
-            )
-            staged_meta = _read_plugin_metadata(staging, fallback_name=name)
-            _validate_runtime_plugin_shape(staging, staged_meta)
-            target.rename(backup)
-            staging.rename(target)
-            swapped = True
-        except Exception:
-            if target.exists():
-                shutil.rmtree(target, ignore_errors=True)
-            if backup.exists():
-                backup.rename(target)
-            raise
-        finally:
-            if staging.exists():
-                shutil.rmtree(staging, ignore_errors=True)
-            if backup.exists():
-                if swapped:
-                    shutil.rmtree(backup, ignore_errors=True)
-                elif not target.exists():
-                    backup.rename(target)
+    elif not restored_from_source:
+        await _copy_plugin_from_source_url(
+            name=name,
+            source_url=str(row.source_url or ""),
+            target=target,
+            replace_existing=True,
+        )
 
     meta = _read_plugin_metadata(target, fallback_name=name)
     _validate_runtime_plugin_shape(target, meta)

@@ -65,7 +65,7 @@ export function AppShell() {
         >
           <div
             key={location.pathname}
-            className="mx-auto min-h-full w-full max-w-[1380px] animate-page-enter"
+            className="min-h-full w-full animate-page-enter"
           >
             <Outlet />
           </div>

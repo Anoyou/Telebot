@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -965,6 +966,47 @@ class TestRemotePluginEnableFlow:
         assert installed.enabled is False
         assert installed.source_url == "https://example.com/update_demo.git"
         assert any("requests.post" in item and "timeout" in item for item in installed.lint_warnings)
+
+    @pytest.mark.asyncio
+    async def test_update_restores_missing_installed_plugin_dir(self, monkeypatch, tmp_path):
+        """InstalledPlugin 切换后的旧记录缺目录时，更新应从 source_url 自动恢复。"""
+        monkeypatch.setattr(svc.settings, "plugins_installed_dir", str(tmp_path / "installed"))
+        target = tmp_path / "installed" / "sum"
+        clone_calls = 0
+
+        async def _fake_clone(*args, **_kwargs):  # noqa: ANN001
+            nonlocal clone_calls
+            clone_calls += 1
+            assert args[:3] == ("clone", "--depth", "1")
+            repo_dir = Path(args[-1])
+            _write_runtime_plugin(repo_dir / "sum", key="sum", version="1.1.11")
+            return ""
+
+        monkeypatch.setattr(svc, "_run_git", _fake_clone)
+        db = _FakeRemoteInstallDB()
+        db.installed_rows["sum"] = InstalledPlugin(
+            key="sum",
+            source="repo",
+            source_url="https://example.com/plugin-repo.git",
+            installed_path=str(target),
+            version="1.1.10",
+            enabled=True,
+            trust_tier="community",
+            source_label="Plugin Repo",
+        )
+
+        row = await svc.update(db, "sum")
+
+        installed = db.installed_rows["sum"]
+        assert clone_calls == 1
+        assert target.is_dir()
+        assert (target / "plugin.json").is_file()
+        assert row.version == "1.1.11"
+        assert installed.version == "1.1.11"
+        assert installed.installed_path == str(target)
+        assert installed.enabled is True
+        assert not (tmp_path / "installed" / "sum.installing").exists()
+        assert not (tmp_path / "installed" / "sum.bak-update").exists()
 
     @pytest.mark.asyncio
     async def test_uninstall_removes_installed_plugin_row(self, tmp_path, monkeypatch):

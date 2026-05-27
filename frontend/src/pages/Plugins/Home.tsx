@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import {
   ArrowRight,
   BookOpen,
+  Boxes,
   CalendarClock,
   FileText,
   History,
@@ -25,6 +26,7 @@ import type { AccountFeatureItem, FeatureInfo } from "@/api/types";
 import type { PluginInstallOut } from "@/api/plugins";
 import type { PluginLLMUsageSummaryItem } from "@/api/llmUsage";
 import { CommandBadge } from "@/components/CommandBadge";
+import { PageHeader, PageShell } from "@/components/layout/PageScaffold";
 import { Spinner } from "@/components/ui/misc";
 import { Button } from "@/components/ui/button";
 import { MetaBadge } from "@/components/ui/meta-badge";
@@ -261,7 +263,7 @@ export function PluginsHome() {
   }
 
   return (
-    <div className="space-y-6 pb-24">
+    <PageShell className="pb-24">
       {bannerVisible ? (
         <Card className="border-amber-300 bg-amber-50">
           <CardHeader className="pb-2">
@@ -294,12 +296,12 @@ export function PluginsHome() {
         </Card>
       ) : null}
 
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight">模块中心</h1>
-        <p className="mt-1 text-base text-muted-foreground">
-          先在这里沉淀一套好用的指令、消息和 AI 模板，再按账号启用复用；新账号不用从零重配。
-        </p>
-      </div>
+      <PageHeader
+        title="模块中心"
+        description="先在这里沉淀一套好用的指令、消息和 AI 模板，再按账号启用复用；新账号不用从零重配。"
+        icon={Boxes}
+        size="hero"
+      />
 
       <Card>
         <CardContent className="space-y-4 !pt-5">
@@ -503,7 +505,7 @@ export function PluginsHome() {
           </div>
         </CardContent>
       </Card>
-    </div>
+    </PageShell>
   );
 }
 
@@ -521,15 +523,12 @@ function FeatureCapabilityBadge({
   children: React.ReactNode;
 }) {
   const interactive = Boolean(show && onClick);
+  if (!show) return null;
+
   return (
     <MetaBadge
       tone={tone}
-      className={
-        show
-          ? "h-7 w-full justify-center px-0 text-[10px]"
-          : "invisible h-7 w-full justify-center px-0 text-[10px]"
-      }
-      aria-hidden={show ? undefined : true}
+      className="h-7 shrink-0 justify-center px-2 text-[10px]"
       role={interactive ? "button" : undefined}
       tabIndex={interactive ? 0 : undefined}
       title={title}
@@ -750,44 +749,42 @@ function FeatureZone({
               return (
                 <div
                   key={f.key}
-                  className={`rounded-md border p-2 ${
+                  className={`rounded-md border p-3 ${
                     status === "failed" ? "border-destructive/40 bg-destructive/5" : ""
                   }`}
                 >
-                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                    <div className="min-w-0 flex-1">
-                      <div className="truncate text-sm font-medium" title={f.display_name}>
-                        {f.display_name}
-                      </div>
-                      <div className="font-mono text-xs text-muted-foreground">{f.key}</div>
-                      {pluginUsage ? (
-                        <div className="mt-1 flex flex-wrap gap-1 text-[11px] text-muted-foreground">
-                          <span className="rounded-full border bg-muted/40 px-2 py-0.5">
-                            AI {formatCompactNumber(pluginUsage.total_tokens)} tokens
-                          </span>
-                          <span className="rounded-full border bg-muted/40 px-2 py-0.5">
-                            {pluginUsage.request_count} 次调用
-                          </span>
-                          {pluginUsage.failed_count > 0 ? (
-                            <span className="rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-amber-800">
-                              失败 {pluginUsage.failed_count}
-                            </span>
-                          ) : null}
-                        </div>
-                      ) : null}
-                      {f.last_update_check_error ? (
-                        <div className="mt-1 text-xs text-destructive">
-                          更新检查失败：{f.last_update_check_error}
-                        </div>
-                      ) : null}
-                      {status === "failed" ? (
-                        <div className="mt-1 rounded-md border border-destructive/30 bg-destructive/10 px-2 py-1 text-xs leading-5 text-destructive">
-                          加载异常{lastError ? `：${lastError}` : "：后端未返回错误详情"}
-                        </div>
-                      ) : null}
+                  <div className="min-w-0">
+                    <div className="break-words text-sm font-medium leading-5" title={f.display_name}>
+                      {f.display_name}
                     </div>
-                    <div className="grid max-w-full shrink-0 grid-cols-[154px_142px_50px_auto] items-center gap-2 overflow-x-auto">
-                      <div className="grid w-[154px] grid-cols-[46px_48px_44px] items-center gap-2">
+                    <div className="break-all font-mono text-xs leading-5 text-muted-foreground">{f.key}</div>
+                    {f.last_update_check_error ? (
+                      <div className="mt-1 text-xs text-destructive">
+                        更新检查失败：{f.last_update_check_error}
+                      </div>
+                    ) : null}
+                    {status === "failed" ? (
+                      <div className="mt-1 rounded-md border border-destructive/30 bg-destructive/10 px-2 py-1 text-xs leading-5 text-destructive">
+                        加载异常{lastError ? `：${lastError}` : "：后端未返回错误详情"}
+                      </div>
+                    ) : null}
+                    <div className="mt-3 grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
+                      <div className="flex min-w-0 flex-wrap items-center gap-2">
+                        {pluginUsage ? (
+                          <>
+                            <span className="shrink-0 rounded-full border bg-muted/40 px-2 py-0.5 text-[11px] text-muted-foreground">
+                              AI {formatCompactNumber(pluginUsage.total_tokens)} tokens
+                            </span>
+                            <span className="shrink-0 rounded-full border bg-muted/40 px-2 py-0.5 text-[11px] text-muted-foreground">
+                              {pluginUsage.request_count} 次调用
+                            </span>
+                            {pluginUsage.failed_count > 0 ? (
+                              <span className="shrink-0 rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[11px] text-amber-800">
+                                失败 {pluginUsage.failed_count}
+                              </span>
+                            ) : null}
+                          </>
+                        ) : null}
                         <FeatureCapabilityBadge
                           show={Boolean(f.update_available)}
                           tone="success"
@@ -802,11 +799,9 @@ function FeatureZone({
                         <FeatureCapabilityBadge show={Boolean(f.experimental)}>
                           实验性
                         </FeatureCapabilityBadge>
-                      </div>
-                      <div className="grid w-[142px] grid-cols-[62px_72px] items-center gap-2">
                         <MetaBadge
                           tone={trustBadge.tone}
-                          className="h-7 justify-center px-0 text-[10px]"
+                          className="h-7 shrink-0 justify-center px-2 text-[10px]"
                           title={`${trustBadge.title} 来源：${moduleSourceLabel(f)}`}
                         >
                           {trustBadge.label}
@@ -814,23 +809,24 @@ function FeatureZone({
                         <MetaBadge
                           mono
                           tone="outline"
-                          className="h-7 justify-center truncate px-0 text-[10px]"
+                          className="h-7 shrink-0 justify-center px-2 text-[10px]"
                           title={moduleVersionLabel(f.version)}
                         >
                           {moduleVersionLabel(f.version)}
                         </MetaBadge>
+                        <MetaBadge
+                          tone={!enabled ? "neutral" : status === "failed" ? "danger" : "success"}
+                          className="h-7 shrink-0 justify-center px-2 text-[10px]"
+                          title={`开关：${enabled ? "已启用" : "未启用"}；运行状态：${runtimeLabel}${lastError ? `；最近错误：${lastError}` : ""}`}
+                        >
+                          {enabled ? "已启用" : "未启用"}
+                        </MetaBadge>
                       </div>
-                      <MetaBadge
-                        tone={!enabled ? "neutral" : status === "failed" ? "danger" : "success"}
-                        className="h-7 w-[50px] justify-center px-0 text-[10px]"
-                        title={`开关：${enabled ? "已启用" : "未启用"}；运行状态：${runtimeLabel}${lastError ? `；最近错误：${lastError}` : ""}`}
-                      >
-                        {enabled ? "已启用" : "未启用"}
-                      </MetaBadge>
                       {canConfigure ? (
                         <Button
                           size="sm"
                           variant="outline"
+                          className="justify-self-end"
                           onClick={() => {
                             if (path) {
                               nav(path);

@@ -119,41 +119,43 @@ export function RecentUsageContent() {
             暂无调用记录。触发一次 AI 指令后再回来查看。
           </p>
         ) : (
-          <Table className="min-w-[900px]">
-            <TableHeader>
-              <TableRow>
-                <TableHead>时间</TableHead>
-                <TableHead>来源</TableHead>
-                <TableHead>模型提供商</TableHead>
-                <TableHead>模型</TableHead>
-                <TableHead>Token</TableHead>
-                <TableHead>耗时</TableHead>
-                <TableHead>结果</TableHead>
-                <TableHead>fallback</TableHead>
-                <TableHead>错误</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {rows.map((r) => {
-                const tokens = (r.input_tokens || 0) + (r.output_tokens || 0);
-                return (
-                  <TableRow key={r.id}>
-                    <TableCell className="text-xs text-muted-foreground">{new Date(r.created_at).toLocaleString()}</TableCell>
-                    <TableCell className="font-mono text-xs">{r.source || "-"}</TableCell>
-                    <TableCell>{r.provider_name || (r.provider_id ? `#${r.provider_id}` : "-")}</TableCell>
-                    <TableCell className="font-mono text-xs">{r.model || "-"}</TableCell>
-                    <TableCell>{tokens}</TableCell>
-                    <TableCell>{r.latency_ms != null ? `${r.latency_ms}ms` : "-"}</TableCell>
-                    <TableCell>
-                      <MetaBadge tone={r.success ? "success" : "warn"}>{r.success ? "成功" : "失败"}</MetaBadge>
-                    </TableCell>
-                    <TableCell>{r.used_fallback ? "已使用" : "-"}</TableCell>
-                    <TableCell className="font-mono text-xs">{r.error_type || "-"}</TableCell>
-                  </TableRow>
-                );
-              })}
-            </TableBody>
-          </Table>
+          <div className="overflow-x-auto">
+            <Table className="min-w-[900px]">
+              <TableHeader>
+                <TableRow>
+                  <TableHead>时间</TableHead>
+                  <TableHead>来源</TableHead>
+                  <TableHead>模型提供商</TableHead>
+                  <TableHead>模型</TableHead>
+                  <TableHead>Token</TableHead>
+                  <TableHead>耗时</TableHead>
+                  <TableHead>结果</TableHead>
+                  <TableHead>fallback</TableHead>
+                  <TableHead>错误</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {rows.map((r) => {
+                  const tokens = (r.input_tokens || 0) + (r.output_tokens || 0);
+                  return (
+                    <TableRow key={r.id}>
+                      <TableCell className="text-xs text-muted-foreground">{new Date(r.created_at).toLocaleString()}</TableCell>
+                      <TableCell className="font-mono text-xs">{r.source || "-"}</TableCell>
+                      <TableCell>{r.provider_name || (r.provider_id ? `#${r.provider_id}` : "-")}</TableCell>
+                      <TableCell className="font-mono text-xs">{r.model || "-"}</TableCell>
+                      <TableCell>{tokens}</TableCell>
+                      <TableCell>{r.latency_ms != null ? `${r.latency_ms}ms` : "-"}</TableCell>
+                      <TableCell>
+                        <MetaBadge tone={r.success ? "success" : "warn"}>{r.success ? "成功" : "失败"}</MetaBadge>
+                      </TableCell>
+                      <TableCell>{r.used_fallback ? "已使用" : "-"}</TableCell>
+                      <TableCell className="font-mono text-xs">{r.error_type || "-"}</TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </div>
         )}
       </CardContent>
     </Card>

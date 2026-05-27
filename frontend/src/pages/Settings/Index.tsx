@@ -5,6 +5,7 @@ import {
   ArrowRight,
   Bot,
   ChevronDown,
+  Cog,
   Download,
   ShieldCheck,
   SlidersHorizontal,
@@ -36,6 +37,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Spinner } from "@/components/ui/misc";
+import { PageHeader, PageShell } from "@/components/layout/PageScaffold";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   getGlobalLimits,
@@ -284,13 +286,12 @@ export function SettingsIndex() {
   }
 
   return (
-    <div className="space-y-6 pb-24">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">系统设置</h1>
-        <p className="text-sm text-muted-foreground">
-          按用户管理、前缀通知、网络身份、风控限额和备份恢复拆分，保留常用入口并收敛历史配置位。
-        </p>
-      </div>
+    <PageShell className="pb-24">
+      <PageHeader
+        title="系统设置"
+        description="按用户管理、前缀通知、网络身份、风控限额和备份恢复拆分，保留常用入口并收敛历史配置位。"
+        icon={Cog}
+      />
 
       <Card className="border-dashed">
         <CardHeader>
@@ -711,7 +712,7 @@ export function SettingsIndex() {
           <ConfigBackup />
         </TabsContent>
       </Tabs>
-    </div>
+    </PageShell>
   );
 }
 

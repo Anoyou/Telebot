@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { isAxiosError } from "axios";
-import { Activity, MessageSquareText, Puzzle, Search, ServerCog, ShieldCheck } from "lucide-react";
+import { Activity, MessageSquareText, Puzzle, Search, ScrollText, ServerCog, ShieldCheck } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -25,6 +25,7 @@ import {
 } from "@/components/ui/table";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
+import { PageHeader, PageShell } from "@/components/layout/PageScaffold";
 import { Spinner } from "@/components/ui/misc";
 import { getSystemSettings, listAuditLogs, listRuntimeLogs } from "@/api/system";
 import { listAccounts } from "@/api/accounts";
@@ -79,13 +80,12 @@ export function Logs() {
   const timezone = settingsQ.data?.timezone || "";
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">日志中心</h1>
-        <p className="text-sm text-muted-foreground">
-          运行日志与审计日志分开展示，避免混查；默认轻量查询窗口
-        </p>
-      </div>
+    <PageShell>
+      <PageHeader
+        title="日志中心"
+        description="运行日志与审计日志分开展示，避免混查；默认轻量查询窗口。"
+        icon={ScrollText}
+      />
 
       <Tabs value={mainTab} onValueChange={(v) => setMainTab(v as MainTab)}>
         <TabsList>
@@ -234,7 +234,7 @@ export function Logs() {
           <AuditLogTable userId={auditUserId} action={auditAction} search={auditSearch} timezone={timezone} />
         </TabsContent>
       </Tabs>
-    </div>
+    </PageShell>
   );
 }
 
@@ -305,35 +305,37 @@ function RuntimeLogTable({
             <Spinner className="text-primary" />
           </div>
         ) : filtered.length > 0 ? (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="w-40">时间</TableHead>
-                <TableHead className="w-20">级别</TableHead>
-                <TableHead className="w-24">账号</TableHead>
-                <TableHead>发生了什么</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {filtered.map((l: RuntimeLogItem) => (
-                <TableRow key={l.id}>
-                  <TableCell className="font-mono text-xs">{formatDateTime(l.created_at, timezone)}</TableCell>
-                  <TableCell>
-                    <Badge variant={LEVEL_VARIANT[l.level.toLowerCase()] ?? "secondary"}>
-                      {l.level.toUpperCase()}
-                    </Badge>
-                  </TableCell>
-                  <TableCell className="text-muted-foreground">{l.account_id ? `#${l.account_id}` : "—"}</TableCell>
-                  <TableCell className="text-xs whitespace-pre-wrap">
-                    <div className="font-mono">
-                      <HighlightedMessage text={l.message} keyword={search} />
-                    </div>
-                    {l.detail ? <LogDetail detail={l.detail} keyword={search} /> : null}
-                  </TableCell>
+          <div className="overflow-x-auto">
+            <Table className="min-w-[760px]">
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="w-40">时间</TableHead>
+                  <TableHead className="w-20">级别</TableHead>
+                  <TableHead className="w-24">账号</TableHead>
+                  <TableHead>发生了什么</TableHead>
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+              </TableHeader>
+              <TableBody>
+                {filtered.map((l: RuntimeLogItem) => (
+                  <TableRow key={l.id}>
+                    <TableCell className="font-mono text-xs">{formatDateTime(l.created_at, timezone)}</TableCell>
+                    <TableCell>
+                      <Badge variant={LEVEL_VARIANT[l.level.toLowerCase()] ?? "secondary"}>
+                        {l.level.toUpperCase()}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="text-muted-foreground">{l.account_id ? `#${l.account_id}` : "—"}</TableCell>
+                    <TableCell className="text-xs whitespace-pre-wrap">
+                      <div className="font-mono">
+                        <HighlightedMessage text={l.message} keyword={search} />
+                      </div>
+                      {l.detail ? <LogDetail detail={l.detail} keyword={search} /> : null}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
         ) : (
           <p className="py-8 text-center text-sm text-muted-foreground">
             {search.trim() ? (
@@ -464,38 +466,40 @@ function AuditLogTable({
             当前环境未提供审计日志 endpoint（预期：/api/logs/audit）
           </p>
         ) : filtered.length > 0 ? (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="w-40">ts</TableHead>
-                <TableHead className="w-20">user_id</TableHead>
-                <TableHead className="w-48">action</TableHead>
-                <TableHead className="w-44">target</TableHead>
-                <TableHead>detail</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {filtered.map((l: AuditLogItem) => (
-                <TableRow key={l.id}>
-                  <TableCell className="font-mono text-xs">{formatDateTime(l.ts, timezone)}</TableCell>
-                  <TableCell className="font-mono text-xs text-muted-foreground">
-                    {l.user_id ?? "—"}
-                  </TableCell>
-                  <TableCell className="font-mono text-xs">{l.action}</TableCell>
-                  <TableCell className="font-mono text-xs text-muted-foreground break-all">
-                    {l.target || "—"}
-                  </TableCell>
-                  <TableCell className="text-xs whitespace-pre-wrap">
-                    {l.detail ? (
-                      <AuditDetail detail={l.detail} keyword={search} />
-                    ) : (
-                      <span className="text-muted-foreground">—</span>
-                    )}
-                  </TableCell>
+          <div className="overflow-x-auto">
+            <Table className="min-w-[860px]">
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="w-40">ts</TableHead>
+                  <TableHead className="w-20">user_id</TableHead>
+                  <TableHead className="w-48">action</TableHead>
+                  <TableHead className="w-44">target</TableHead>
+                  <TableHead>detail</TableHead>
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+              </TableHeader>
+              <TableBody>
+                {filtered.map((l: AuditLogItem) => (
+                  <TableRow key={l.id}>
+                    <TableCell className="font-mono text-xs">{formatDateTime(l.ts, timezone)}</TableCell>
+                    <TableCell className="font-mono text-xs text-muted-foreground">
+                      {l.user_id ?? "—"}
+                    </TableCell>
+                    <TableCell className="font-mono text-xs">{l.action}</TableCell>
+                    <TableCell className="font-mono text-xs text-muted-foreground break-all">
+                      {l.target || "—"}
+                    </TableCell>
+                    <TableCell className="text-xs whitespace-pre-wrap">
+                      {l.detail ? (
+                        <AuditDetail detail={l.detail} keyword={search} />
+                      ) : (
+                        <span className="text-muted-foreground">—</span>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
         ) : (
           <p className="py-8 text-center text-sm text-muted-foreground">暂无符合条件的 audit 日志</p>
         )}

@@ -37,6 +37,7 @@ import { CommandBadge } from "@/components/CommandBadge";
 import { Glossary } from "@/components/ai/Glossary";
 import { HowItWorks } from "@/components/ai/HowItWorks";
 import { RecommendedSetup } from "@/components/ai/RecommendedSetup";
+import { PageHeader, PageShell } from "@/components/layout/PageScaffold";
 import { LLMProviders } from "@/pages/AI/LLMProviders";
 import { RecentUsageContent } from "@/pages/AI/_components/RecentUsage";
 
@@ -155,7 +156,7 @@ export function AIIndex() {
 
   if (activeTab === "providers") {
     return (
-      <div className="space-y-6">
+      <PageShell>
         <AIHeader />
         <Subnav
           activeTab={activeTab}
@@ -167,13 +168,13 @@ export function AIIndex() {
           已配置 {providerCount} 个模型提供商，其中 {readyCount} 个可调用。联网搜索需要 api_format=responses 的 OpenAI provider。
         </div>
         <LLMProviders />
-      </div>
+      </PageShell>
     );
   }
 
   if (activeTab === "usage") {
     return (
-      <div className="space-y-6">
+      <PageShell>
         <AIHeader />
         <Subnav
           activeTab={activeTab}
@@ -182,12 +183,12 @@ export function AIIndex() {
           cmdPrefix={cmdPrefix}
         />
         <RecentUsageContent />
-      </div>
+      </PageShell>
     );
   }
 
   return (
-    <div className="space-y-6">
+    <PageShell>
       <AIHeader />
       <Subnav
         activeTab={activeTab}
@@ -371,23 +372,17 @@ export function AIIndex() {
           )}
         </CardContent>
       </Card>
-    </div>
+    </PageShell>
   );
 }
 
 function AIHeader() {
   return (
-    <div>
-      <div>
-        <h1 className="inline-flex items-center gap-2 text-2xl font-semibold tracking-tight">
-          <Sparkles className="h-5 w-5 text-primary" />
-          AI 中心
-        </h1>
-        <p className="text-sm text-muted-foreground">
-          把模型、指令模板、调用记录和帮助信息集中管理。
-        </p>
-      </div>
-    </div>
+    <PageHeader
+      title="AI 中心"
+      description="把模型、指令模板、调用记录和帮助信息集中管理。"
+      icon={Sparkles}
+    />
   );
 }
 

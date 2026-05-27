@@ -29,6 +29,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { AccountSummaryCard } from "@/components/AccountSummaryCard";
+import { PageHeader, PageShell } from "@/components/layout/PageScaffold";
 import { Spinner } from "@/components/ui/misc";
 import { listAccounts } from "@/api/accounts";
 import { listLLMProviders } from "@/api/commands";
@@ -78,18 +79,14 @@ export function Dashboard() {
       : "0";
 
   return (
-    <div className="space-y-5 pb-24 md:space-y-6">
-      <div className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <h1 className="inline-flex items-center gap-2 text-3xl font-bold tracking-tight">
-            <LayoutDashboard className="h-6 w-6 text-primary" />
-            概览
-          </h1>
-          <p className="mt-1 text-base text-muted-foreground">
-            集中查看 TelePilot 的账号、模块、AI 和资源运行情况。
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-2">
+    <PageShell className="pb-24 md:space-y-6">
+      <PageHeader
+        title="概览"
+        description="集中查看 TelePilot 的账号、模块、AI 和资源运行情况。"
+        icon={LayoutDashboard}
+        size="hero"
+        actions={
+          <>
           <Button
             variant="outline"
             className={guideActive ? "siri-glow" : undefined}
@@ -104,8 +101,9 @@ export function Dashboard() {
               新增账号
             </Link>
           </Button>
-        </div>
-      </div>
+          </>
+        }
+      />
 
       {guideActive ? (
         <GuidePanel
@@ -159,7 +157,7 @@ export function Dashboard() {
           error={resourceQ.error}
         />
       </div>
-    </div>
+    </PageShell>
   );
 }
 
