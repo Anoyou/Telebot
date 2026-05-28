@@ -1,32 +1,48 @@
 // 插件安装与管理：插件包安装/更新/卸载 + 开发指南
 //
 // Tab 1：安装与更新 — 本地内置插件 + 远程插件（安装/卸载/更新）
-// Tab 2：开发指南 — react-markdown 渲染 docs/PLUGIN-DEV-GUIDE.md
+// Tab 2：开发指南 — 内置完整模块开发文档工作台
 //
 // 账号级启停与配置统一回 /plugins 首页，避免“安装页”和“插件中心”双入口重复。
 // 远程插件原为独立 /remote-plugins 页面，现在统一收口到 /plugins/manage。
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft,
+  Brain,
   BookOpen,
   ChevronDown,
   ChevronRight,
+  Code2,
+  FileText,
   GitFork,
+  Globe2,
+  ListChecks,
+  Network,
   Power,
   Puzzle,
   RefreshCw,
+  ShieldCheck,
   Sparkles,
   Trash2,
   X,
 } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import { toast } from "sonner";
 import ReactMarkdown from "react-markdown";
+import type { Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
 import "highlight.js/styles/github.css";
+import aiGuideMd from "../../../docs/PLUGIN-AI.md?raw";
+import apiReferenceMd from "../../../docs/PLUGIN-API-REFERENCE.md?raw";
+import cheatsheetMd from "../../../docs/PLUGIN-CHEATSHEET.md?raw";
 import devGuideMd from "../../../docs/PLUGIN-DEV-GUIDE.md?raw";
+import httpGuideMd from "../../../docs/PLUGIN-HTTP.md?raw";
+import overviewMd from "../../../docs/PLUGIN-OVERVIEW.md?raw";
+import remoteGuideMd from "../../../docs/PLUGIN-REMOTE.md?raw";
+import safetyGuideMd from "../../../docs/PLUGIN-SAFETY.md?raw";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -84,10 +100,111 @@ import type { RemotePlugin } from "@/types/remotePlugin";
 
 // ── 常量 ──────────────────────────────────────────────────────────
 type TabValue = "plugins" | "guide";
+type DevDocId =
+  | "all"
+  | "dev-guide"
+  | "overview"
+  | "api-reference"
+  | "http"
+  | "safety"
+  | "remote"
+  | "cheatsheet"
+  | "ai";
+
+type DevDoc = {
+  id: DevDocId;
+  title: string;
+  description: string;
+  path: string;
+  markdown: string;
+  icon: LucideIcon;
+};
+
 const PLUGINS_QK = ["installed-packages"] as const;
 const REMOTE_QK = ["remote-plugins"] as const;
 const PLUGIN_REPOS_QK = ["plugin-repos"] as const;
 const NEW_ACCOUNT_GUIDE_SEEN_KEY = "telebot.accounts.new_account_guide_seen.v4";
+const DEV_DOCS: DevDoc[] = [
+  {
+    id: "dev-guide",
+    title: "索引与路线",
+    description: "模块市场路线、文档分篇和 0.x 安全策略入口。",
+    path: "docs/PLUGIN-DEV-GUIDE.md",
+    markdown: devGuideMd,
+    icon: BookOpen,
+  },
+  {
+    id: "overview",
+    title: "模块概览",
+    description: "快速开始、模块结构、Route A 与 Route B 的边界。",
+    path: "docs/PLUGIN-OVERVIEW.md",
+    markdown: overviewMd,
+    icon: FileText,
+  },
+  {
+    id: "api-reference",
+    title: "API 参考",
+    description: "Plugin、Manifest、PluginContext、配置、派发、日志和前端集成。",
+    path: "docs/PLUGIN-API-REFERENCE.md",
+    markdown: apiReferenceMd,
+    icon: Code2,
+  },
+  {
+    id: "http",
+    title: "HTTP facade",
+    description: "第三方模块访问外部 HTTP 的权限、配额和调用约束。",
+    path: "docs/PLUGIN-HTTP.md",
+    markdown: httpGuideMd,
+    icon: Network,
+  },
+  {
+    id: "safety",
+    title: "安全边界",
+    description: "权限声明、交互 Bot、工程规范和安全合规要求。",
+    path: "docs/PLUGIN-SAFETY.md",
+    markdown: safetyGuideMd,
+    icon: ShieldCheck,
+  },
+  {
+    id: "remote",
+    title: "远程模块",
+    description: "远程安装、manifest 读取、worker loader 与更新回滚。",
+    path: "docs/PLUGIN-REMOTE.md",
+    markdown: remoteGuideMd,
+    icon: Globe2,
+  },
+  {
+    id: "cheatsheet",
+    title: "速查表",
+    description: "最常用契约、文件结构、权限和验证命令的短清单。",
+    path: "docs/PLUGIN-CHEATSHEET.md",
+    markdown: cheatsheetMd,
+    icon: ListChecks,
+  },
+  {
+    id: "ai",
+    title: "AI facade",
+    description: "ctx.ai 文本能力、权限声明、降级路径和运行时约束。",
+    path: "docs/PLUGIN-AI.md",
+    markdown: aiGuideMd,
+    icon: Brain,
+  },
+];
+
+const DOC_LINK_TO_ID: Record<string, DevDocId> = DEV_DOCS.reduce<Record<string, DevDocId>>(
+  (acc, doc) => {
+    const pathParts = doc.path.split("/");
+    const filename = pathParts[pathParts.length - 1];
+    if (filename) {
+      acc[filename] = doc.id;
+      acc[`./${filename}`] = doc.id;
+      acc[`docs/${filename}`] = doc.id;
+      acc[`../docs/${filename}`] = doc.id;
+    }
+    return acc;
+  },
+  {},
+);
 
 function formatPluginVersion(version?: string | null) {
   const v = (version || "").trim();
@@ -123,6 +240,25 @@ function parseManageTab(value: string | null): TabValue {
   return value === "plugins" || value === "guide"
     ? value
     : "plugins";
+}
+
+function stripFirstHeading(markdown: string) {
+  return markdown.replace(/^#\s+.*(?:\r?\n)+/, "").trim();
+}
+
+function buildCompleteDevGuide() {
+  return DEV_DOCS.map((doc, index) => {
+    const level = index === 0 ? "#" : "##";
+    return `${level} ${doc.title}\n\n> 源文件：\`${doc.path}\`\n\n${stripFirstHeading(doc.markdown)}`;
+  }).join("\n\n---\n\n");
+}
+
+function normalizeDocHref(href?: string) {
+  if (!href) return null;
+  const [pathPart, anchorPart] = href.split("#");
+  const normalizedPath = pathPart.replace(/^\.\//, "");
+  const id = DOC_LINK_TO_ID[pathPart] ?? DOC_LINK_TO_ID[normalizedPath];
+  return id ? { id, anchor: anchorPart ? `#${anchorPart}` : "" } : null;
 }
 
 // ── 顶层组件 ──────────────────────────────────────────────────────
@@ -899,23 +1035,145 @@ function InstalledPluginsSection() {
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// Tab 3：开发指南
+// Tab 2：开发指南
 // ═══════════════════════════════════════════════════════════════════
 function DevGuideTab() {
+  const completeDoc = useMemo<DevDoc>(
+    () => ({
+      id: "all",
+      title: "完整文档",
+      description: "把模块索引、概览、API、HTTP、安全、远程、速查和 AI facade 合并为一份可滚动正文。",
+      path: "docs/PLUGIN-*.md",
+      markdown: buildCompleteDevGuide(),
+      icon: Sparkles,
+    }),
+    [],
+  );
+  const docs = useMemo(() => [completeDoc, ...DEV_DOCS], [completeDoc]);
+  const [activeDocId, setActiveDocId] = useState<DevDocId>("all");
+  const contentRef = useRef<HTMLDivElement | null>(null);
+  const activeDoc = docs.find((doc) => doc.id === activeDocId) ?? completeDoc;
+  const ActiveIcon = activeDoc.icon;
+  const markdownComponents = useMemo<Components>(
+    () => ({
+      a({ href, children, ...props }) {
+        const target = normalizeDocHref(href);
+        if (target) {
+          return (
+            <button
+              type="button"
+              className="font-medium text-primary underline decoration-primary/35 underline-offset-4 transition-colors hover:text-primary/80"
+              onClick={() => setActiveDocId(target.id)}
+              title={target.anchor ? `${DOC_LINK_TO_ID[href ?? ""] ?? target.id}${target.anchor}` : undefined}
+            >
+              {children}
+            </button>
+          );
+        }
+        const external = href?.startsWith("http://") || href?.startsWith("https://");
+        return (
+          <a
+            {...props}
+            href={href}
+            target={external ? "_blank" : undefined}
+            rel={external ? "noreferrer" : undefined}
+          >
+            {children}
+          </a>
+        );
+      },
+    }),
+    [],
+  );
+
+  useEffect(() => {
+    contentRef.current?.scrollTo({ top: 0 });
+  }, [activeDocId]);
+
   return (
     <Card className="overflow-hidden">
-      <CardHeader>
-        <CardTitle className="text-base">模块开发指南</CardTitle>
-        <CardDescription>
-          源文件：<code>docs/PLUGIN-DEV-GUIDE.md</code>（已合并内置模块、远程模块、沙箱与交互 Bot 声明规范）
-        </CardDescription>
+      <CardHeader className="gap-4">
+        <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+          <div className="min-w-0">
+            <CardTitle className="text-base">模块开发文档</CardTitle>
+            <CardDescription className="mt-1">
+              内置完整开发文档，支持直接阅读合集，也可以按主题查看每个分篇。
+            </CardDescription>
+          </div>
+          <div className="flex flex-wrap gap-2 md:justify-end">
+            <SignalPill tone="primary" label="文档" value={`${DEV_DOCS.length} 篇`} />
+            <SignalPill tone="neutral" label="当前" value={activeDoc.title} />
+          </div>
+        </div>
       </CardHeader>
-      <CardContent className="min-w-0 overflow-hidden">
-        <article className="prose prose-sm prose-pwa-safe max-w-none dark:prose-invert">
-          <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]}>
-            {devGuideMd}
-          </ReactMarkdown>
-        </article>
+      <CardContent className="p-0">
+        <div className="grid min-h-[680px] border-t border-border/70 lg:grid-cols-[260px_minmax(0,1fr)]">
+          <aside className="border-b border-border/70 bg-muted/20 p-3 lg:border-b-0 lg:border-r">
+            <nav className="flex gap-2 overflow-x-auto pb-1 lg:block lg:space-y-1 lg:overflow-visible lg:pb-0">
+              {docs.map((doc) => {
+                const Icon = doc.icon;
+                const active = doc.id === activeDoc.id;
+                return (
+                  <button
+                    key={doc.id}
+                    type="button"
+                    className={cn(
+                      "group flex min-w-[11rem] items-start gap-3 rounded-lg border px-3 py-3 text-left text-sm transition lg:w-full",
+                      active
+                        ? "border-primary/30 bg-primary/10 text-foreground shadow-sm"
+                        : "border-transparent bg-background/65 text-muted-foreground hover:border-border hover:bg-background hover:text-foreground",
+                    )}
+                    onClick={() => setActiveDocId(doc.id)}
+                  >
+                    <span
+                      className={cn(
+                        "mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-md border",
+                        active
+                          ? "border-primary/25 bg-primary/10 text-primary"
+                          : "border-border/70 bg-muted/60 text-muted-foreground group-hover:text-foreground",
+                      )}
+                    >
+                      <Icon className="h-4 w-4" />
+                    </span>
+                    <span className="min-w-0">
+                      <span className="block truncate font-medium">{doc.title}</span>
+                      <span className="mt-1 block text-xs leading-5 text-muted-foreground">
+                        {doc.description}
+                      </span>
+                    </span>
+                  </button>
+                );
+              })}
+            </nav>
+          </aside>
+          <section className="min-w-0 bg-background">
+            <div className="border-b border-border/70 px-5 py-4">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-border/70 bg-muted/60 text-primary">
+                  <ActiveIcon className="h-4 w-4" />
+                </span>
+                <h3 className="min-w-0 text-base font-semibold tracking-tight">{activeDoc.title}</h3>
+                <MetaBadge tone="outline" mono className="max-w-full truncate">
+                  {activeDoc.path}
+                </MetaBadge>
+              </div>
+              <p className="mt-2 max-w-3xl text-sm leading-6 text-muted-foreground">
+                {activeDoc.description}
+              </p>
+            </div>
+            <div ref={contentRef} className="max-h-[72vh] min-h-[560px] overflow-auto px-5 py-5 md:px-7">
+              <article className="prose prose-sm prose-pwa-safe max-w-none dark:prose-invert">
+                <ReactMarkdown
+                  remarkPlugins={[remarkGfm]}
+                  rehypePlugins={[rehypeHighlight]}
+                  components={markdownComponents}
+                >
+                  {activeDoc.markdown}
+                </ReactMarkdown>
+              </article>
+            </div>
+          </section>
+        </div>
       </CardContent>
     </Card>
   );

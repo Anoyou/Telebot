@@ -412,6 +412,26 @@ def test_account_bot_interaction_rules_normalize_new_rule_fields() -> None:
     assert rule["disabled_message"] == "今天休息"
 
 
+def test_account_bot_math10_rule_gets_default_start_keywords() -> None:
+    cfg = account_bot_service.normalize_transfer_notice_config(
+        {
+            "enabled": True,
+            "rules": [
+                {
+                    "id": "math10",
+                    "enabled": True,
+                    "trigger_mode": "payment",
+                    "action": "math10",
+                }
+            ],
+        }
+    )
+
+    rule = cfg["rules"][0]
+    assert rule["trigger_mode"] == "both"
+    assert rule["module_start_keywords"] == ["发十以内算数", "十以内算数", "开算数题"]
+
+
 def test_disabled_or_cleared_interaction_bot_hides_stale_conflict_error() -> None:
     raw = {
         "enabled": False,
@@ -454,6 +474,32 @@ def test_account_bot_interaction_rule_normalizes_module_action() -> None:
     assert rule["module_key"] == "game24"
     assert rule["module_prize"] == 456
     assert rule["module_start_text"] == "正在开启 24 点"
+
+
+def test_account_bot_interaction_rule_strips_rule_owned_module_config() -> None:
+    cfg = account_bot_service.normalize_transfer_notice_config(
+        {
+            "enabled": True,
+            "module_config": {"prize": 1, "timeout": 2, "theme": "dark"},
+            "rules": [
+                {
+                    "id": "dice-ticket",
+                    "enabled": True,
+                    "action": "module",
+                    "module_key": "dice_grid_hunt",
+                    "module_config": {
+                        "prize": 123,
+                        "timeout": 500,
+                        "valid_seconds": 600,
+                        "theme": "classic",
+                    },
+                }
+            ],
+        }
+    )
+
+    assert cfg["module_config"] == {"theme": "classic"}
+    assert cfg["rules"][0]["module_config"] == {"theme": "classic"}
 
 
 def test_account_bot_transfer_notice_parser() -> None:
@@ -729,6 +775,37 @@ async def test_resolve_payout_mode_accepts_math10_module_rule(monkeypatch) -> No
                         "enabled": True,
                         "action": "module",
                         "module_key": "math10",
+                        "chat_ids": [-100123],
+                    }
+                ],
+            }
+        ),
+    )
+
+    assert await account_bot_runtime._resolve_payout_mode(1, -100123) == "auto"
+
+
+@pytest.mark.asyncio
+async def test_resolve_payout_mode_accepts_dice_grid_module_rule(monkeypatch) -> None:
+    class _DB:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+    monkeypatch.setattr(account_bot_runtime, "AsyncSessionLocal", lambda: _DB())
+    monkeypatch.setattr(
+        account_bot_service,
+        "get_transfer_notice_config",
+        AsyncMock(
+            return_value={
+                "enabled": True,
+                "rules": [
+                    {
+                        "enabled": True,
+                        "action": "module",
+                        "module_key": "dice_grid_hunt",
                         "chat_ids": [-100123],
                     }
                 ],
@@ -1602,6 +1679,73 @@ async def test_transfer_notice_uses_first_matching_interaction_rule(monkeypatch)
 
 
 @pytest.mark.asyncio
+async def test_transfer_notice_matches_html_code_language_marker(monkeypatch) -> None:
+    class _DB:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+        async def commit(self):
+            return None
+
+        async def get(self, model, *_args):  # noqa: ANN002
+            if model is Account:
+                return SimpleNamespace(tg_username="answer", display_name="答案", tg_user_id=999)
+            return None
+
+    start_math = AsyncMock()
+    send = AsyncMock()
+    monkeypatch.setattr(account_bot_runtime, "AsyncSessionLocal", lambda: _DB())
+    monkeypatch.setattr(account_bot_runtime, "_start_math_game", start_math)
+    monkeypatch.setattr(account_bot_service, "send_message", send)
+    monkeypatch.setattr(account_bot_runtime.audit, "write", AsyncMock())
+    monkeypatch.setattr(
+        account_bot_service,
+        "get_transfer_notice_config",
+        AsyncMock(
+            return_value={
+                "enabled": True,
+                "trusted_bot_id": 456,
+                "rules": [
+                    {
+                        "id": "math-language-marker",
+                        "enabled": True,
+                        "chat_ids": [-100123],
+                        "trigger_texts": ["转账成功"],
+                        "receiver_text": "你心里已经有答案了",
+                        "amount": 1,
+                        "action": "math10",
+                        "math_prize": 456,
+                    },
+                ],
+            }
+        ),
+    )
+
+    text = "Yy 射出 1 蝌蚪\n你心里已经有答案了 接收 1 蝌蚪"
+    await account_bot_runtime._handle_interaction_update(
+        1,
+        "bbot-token",
+        {
+            "update_id": 61,
+            "message": {
+                "message_id": 610,
+                "text": text,
+                "entities": [{"type": "pre", "offset": 0, "length": len(text), "language": "language-转账成功"}],
+                "from": {"id": 456, "is_bot": True, "first_name": "Abot"},
+                "chat": {"id": -100123, "type": "supergroup"},
+            },
+        },
+    )
+
+    assert start_math.await_count == 1
+    assert start_math.await_args.kwargs == {"prize": 456}
+    assert send.await_count == 0
+
+
+@pytest.mark.asyncio
 async def test_transfer_notice_skips_closed_rule_and_uses_next_open_match(monkeypatch) -> None:
     class _DB:
         async def __aenter__(self):
@@ -2391,6 +2535,62 @@ async def test_interaction_rule_open_close_commands_require_account_owner(monkey
 
     sent_texts = [call.args[2] for call in send.await_args_list]
     assert any(text.startswith("规则「游戏」已关闭，") for text in sent_texts)
+
+
+@pytest.mark.asyncio
+async def test_math10_builtin_action_starts_from_default_keyword(monkeypatch) -> None:
+    class _DB:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+        async def get(self, *_args):  # noqa: ANN002
+            return None
+
+    start_math = AsyncMock()
+    monkeypatch.setattr(account_bot_runtime, "AsyncSessionLocal", lambda: _DB())
+    monkeypatch.setattr(account_bot_runtime, "get_redis", lambda: _MemoryRedis())
+    monkeypatch.setattr(account_bot_runtime, "_start_math_game", start_math)
+    monkeypatch.setattr(
+        account_bot_service,
+        "get_transfer_notice_config",
+        AsyncMock(
+            return_value=account_bot_service.normalize_transfer_notice_config(
+                {
+                    "enabled": True,
+                    "rules": [
+                        {
+                            "id": "math10",
+                            "enabled": True,
+                            "chat_ids": [-100123],
+                            "trigger_mode": "payment",
+                            "action": "math10",
+                            "math_prize": 456,
+                        }
+                    ],
+                }
+            )
+        ),
+    )
+
+    await account_bot_runtime._handle_interaction_update(
+        1,
+        "bbot-token",
+        {
+            "update_id": 998,
+            "message": {
+                "message_id": 9980,
+                "text": "发十以内算数",
+                "from": {"id": 111, "first_name": "User"},
+                "chat": {"id": -100123, "type": "supergroup"},
+            },
+        },
+    )
+
+    assert start_math.await_count == 1
+    assert start_math.await_args.kwargs == {"prize": 456}
 
 
 @pytest.mark.asyncio

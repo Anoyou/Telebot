@@ -48,6 +48,8 @@ TRANSFER_NOTICE_SETTING_PREFIX = "account_bot_transfer_notice:"
 VALID_TRIGGER_MODES = {"payment", "keyword", "both"}
 VALID_AMOUNT_MATCH_MODES = {"eq", "gte"}
 VALID_CONCURRENCY = {"chat", "user", "none"}
+RULE_CONTROLLED_MODULE_CONFIG_KEYS = {"prize", "timeout", "valid_seconds"}
+DEFAULT_MATH10_START_KEYWORDS = ["发十以内算数", "十以内算数", "开算数题"]
 
 ROLE_RANK = {
     ACCOUNT_BOT_ROLE_VIEWER: 0,
@@ -120,6 +122,16 @@ def normalize_remote_plugin_policy(raw: Any) -> dict[str, bool]:
         if key in raw:
             base[key] = bool(raw[key])
     return base
+
+
+def _strip_rule_controlled_module_config(raw: Any) -> dict[str, Any]:
+    if not isinstance(raw, dict):
+        return {}
+    return {
+        str(key): value
+        for key, value in raw.items()
+        if str(key) not in RULE_CONTROLLED_MODULE_CONFIG_KEYS
+    }
 
 
 def transfer_notice_setting_key(aid: int) -> str:
@@ -223,6 +235,7 @@ def normalize_transfer_notice_config(raw: Any) -> dict[str, Any]:
     base["valid_seconds"] = min(int(base["valid_seconds"]), 86400)
     if base.get("module_prize") is not None and int(base["module_prize"]) <= 0:
         base["module_prize"] = None
+    base["module_config"] = _strip_rule_controlled_module_config(base.get("module_config"))
     for key in ("module_key", "module_action", "module_start_text", "disabled_message"):
         value = str(base.get(key) or "").strip()
         base[key] = value or None
@@ -398,9 +411,13 @@ def normalize_interaction_rules(raw: Any) -> list[dict[str, Any]]:
         action = str(item.get("action") or "notice").strip()
         if action not in {"notice", "math10", "module"}:
             action = "notice"
+        if action == "math10" and not module_start_keywords:
+            module_start_keywords = list(DEFAULT_MATH10_START_KEYWORDS)
+        if action == "math10" and amount is None and trigger_mode == "payment" and item.get("trigger_mode") in (None, "", "payment"):
+            trigger_mode = "both"
         module_key = str(item.get("module_key") or "").strip() or None
         module_action = str(item.get("module_action") or "").strip() or None
-        module_config = item.get("module_config") if isinstance(item.get("module_config"), dict) else {}
+        module_config = _strip_rule_controlled_module_config(item.get("module_config"))
         module_start_text = str(item.get("module_start_text") or "").strip() or None
         try:
             module_prize = int(item["module_prize"]) if item.get("module_prize") not in (None, "") else None
@@ -429,7 +446,7 @@ def normalize_interaction_rules(raw: Any) -> list[dict[str, Any]]:
                 "module_key": module_key,
                 "module_action": module_action,
                 "module_prize": module_prize if module_prize is None or module_prize > 0 else None,
-                "module_config": dict(module_config),
+                "module_config": module_config,
                 "module_start_text": module_start_text,
                 "open_commands": open_commands,
                 "close_commands": close_commands,

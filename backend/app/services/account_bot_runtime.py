@@ -78,6 +78,7 @@ _MATH_GAME_TTL_SECONDS = 900
 _INTERACTION_RULE_STATE_PREFIX = "account_bot:interaction_rule_state:"
 _INTERACTION_TRIGGER_DEDUPE_PREFIX = "account_bot:interaction_trigger:"
 _INTERACTION_SESSION_PREFIX = "account_bot:interaction_session:"
+AUTO_PAYOUT_MODULE_KEYS = {"game24", "math10", "dice_grid_hunt"}
 
 
 async def _load_command_prefix(db) -> str:
@@ -111,6 +112,8 @@ class Incoming:
     reply_to_user_id: int | None = None
     reply_to_display_name: str | None = None
     reply_to_username: str | None = None
+    reply_to_text: str | None = None
+    entity_languages: tuple[str, ...] = ()
 
 
 @dataclass
@@ -152,6 +155,8 @@ class InteractionEvent:
     reply_to_user_id: int | None = None
     reply_to_display_name: str | None = None
     reply_to_username: str | None = None
+    reply_to_text: str | None = None
+    entity_languages: tuple[str, ...] = ()
     data: dict[str, Any] | None = None
 
 
@@ -962,6 +967,43 @@ def _rule_matches_trigger(rule: dict[str, Any], text: str) -> bool:
     return _message_line_equals_any(text, _rule_triggers(rule))
 
 
+def _incoming_trigger_texts(incoming: Incoming) -> list[str]:
+    texts: list[str] = []
+    for value in (incoming.text, incoming.reply_to_text, *incoming.entity_languages):
+        text = str(value or "").strip()
+        if text and text not in texts:
+            texts.append(text)
+    return texts
+
+
+def _entity_languages(*entity_lists: Any) -> tuple[str, ...]:
+    languages: list[str] = []
+    for entity_list in entity_lists:
+        if not isinstance(entity_list, list):
+            continue
+        for entity in entity_list:
+            if not isinstance(entity, dict):
+                continue
+            language = str(entity.get("language") or "").strip()
+            if not language:
+                continue
+            candidates = [language]
+            if language.startswith("language-"):
+                candidates.append(language.removeprefix("language-").strip())
+            for candidate in candidates:
+                if candidate and candidate not in languages:
+                    languages.append(candidate)
+    return tuple(languages)
+
+
+def _incoming_matches_interaction_trigger(cfg: dict[str, Any], incoming: Incoming) -> bool:
+    return any(_matches_interaction_trigger(cfg, text) for text in _incoming_trigger_texts(incoming))
+
+
+def _rule_matches_incoming_trigger(rule: dict[str, Any], incoming: Incoming) -> bool:
+    return any(_rule_matches_trigger(rule, text) for text in _incoming_trigger_texts(incoming))
+
+
 def _rule_amount_matches(rule: dict[str, Any], amount: int) -> bool:
     expected = rule.get("amount")
     if expected is None:
@@ -1253,7 +1295,7 @@ async def _resolve_payout_mode(account_id: int, chat_id: int | None) -> str:
         module_key = str(rule.get("module_key") or "").strip()
         if action not in {"math10", "module"}:
             continue
-        if action == "module" and module_key not in {"game24", "math10"}:
+        if action == "module" and module_key not in AUTO_PAYOUT_MODULE_KEYS:
             continue
         if _rule_chat_matches(rule, int(chat_id)):
             return "auto"
@@ -1506,7 +1548,7 @@ async def _select_transfer_notice_rule(
             continue
         if not _rule_chat_matches(rule, incoming.chat_id or 0):
             continue
-        if not _rule_matches_trigger(rule, incoming.text):
+        if not _rule_matches_incoming_trigger(rule, incoming):
             continue
         if not _rule_amount_matches(rule, parsed_amount):
             continue
@@ -1867,6 +1909,8 @@ def _interaction_event_payload(
         reply_to_user_id=incoming.reply_to_user_id,
         reply_to_display_name=incoming.reply_to_display_name,
         reply_to_username=incoming.reply_to_username,
+        reply_to_text=incoming.reply_to_text,
+        entity_languages=incoming.entity_languages,
         data=dict(data or {}),
     )
     return asdict(event)
@@ -1904,6 +1948,8 @@ def _interaction_module_payload(
             "sender_name": incoming.display_name,
             "sender_username": incoming.username,
             "message_id": incoming.message_id,
+            "reply_to_text": incoming.reply_to_text,
+            "entity_languages": list(incoming.entity_languages),
             "prize": prize,
         }
     )
@@ -2217,7 +2263,7 @@ async def _try_handle_transfer_notice(db: Any, incoming: Incoming) -> bool:
     if not cfg.get("enabled"):
         return False
     if not _trusted_transfer_notice_sender_matches(cfg, incoming.user_id):
-        if _matches_interaction_trigger(cfg, incoming.text):
+        if _incoming_matches_interaction_trigger(cfg, incoming):
             log.info(
                 "transfer notice skipped: sender mismatch aid=%s incoming_user=%s trusted_bot_id=%s transfer_bot_id=%s",
                 incoming.account_id,
@@ -2230,10 +2276,10 @@ async def _try_handle_transfer_notice(db: Any, incoming: Incoming) -> bool:
     if not any(
         _rule_trigger_mode_allows(rule, "payment")
         and _rule_chat_matches(rule, incoming.chat_id)
-        and _rule_matches_trigger(rule, incoming.text)
+        and _rule_matches_incoming_trigger(rule, incoming)
         for rule in _interaction_rules(cfg)
     ):
-        if _matches_interaction_trigger(cfg, incoming.text):
+        if _incoming_matches_interaction_trigger(cfg, incoming):
             log.info(
                 "transfer notice skipped: no chat/trigger rule matched aid=%s incoming_chat=%s",
                 incoming.account_id,
@@ -2325,6 +2371,7 @@ def _extract_incoming(aid: int, token: str, update: dict[str, Any]) -> Incoming 
     chat = msg.get("chat") or {}
     reply = msg.get("reply_to_message") if isinstance(msg.get("reply_to_message"), dict) else {}
     reply_from = reply.get("from") if isinstance(reply.get("from"), dict) else {}
+    reply_text = str(reply.get("text") or reply.get("caption") or "").strip()
     return Incoming(
         account_id=aid,
         token=token,
@@ -2333,12 +2380,19 @@ def _extract_incoming(aid: int, token: str, update: dict[str, Any]) -> Incoming 
         chat_id=_int_or_none(chat.get("id")),
         chat_type=str(chat.get("type") or "") or None,
         message_id=_int_or_none(msg.get("message_id")),
-        text=str(msg.get("text") or "").strip(),
+        text=str(msg.get("text") or msg.get("caption") or "").strip(),
         display_name=_format_user_name(from_user),
         username=str(from_user.get("username") or "").strip() or None,
         reply_to_user_id=_int_or_none(reply_from.get("id")),
         reply_to_display_name=_format_user_name(reply_from) if reply_from else None,
         reply_to_username=str(reply_from.get("username") or "").strip() or None,
+        reply_to_text=reply_text or None,
+        entity_languages=_entity_languages(
+            msg.get("entities"),
+            msg.get("caption_entities"),
+            reply.get("entities"),
+            reply.get("caption_entities"),
+        ),
     )
 
 

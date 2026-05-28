@@ -182,6 +182,39 @@ async def test_load_account_bot_auto_award_config_reads_math10_module_rule(monke
 
 
 @pytest.mark.asyncio
+async def test_load_account_bot_auto_award_config_reads_dice_grid_module_rule(monkeypatch) -> None:
+    class _DB:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+        async def get(self, _model, _key):  # noqa: ANN001
+            return SimpleNamespace(
+                value={
+                    "enabled": True,
+                    "interaction_bot_id": 8807483916,
+                    "interaction_bot_username": "Bbot",
+                    "rules": [
+                        {
+                            "enabled": True,
+                            "action": "module",
+                            "module_key": "dice_grid_hunt",
+                            "chat_ids": [-100789],
+                        },
+                    ],
+                }
+            )
+
+    monkeypatch.setattr(runtime, "AsyncSessionLocal", lambda: _DB())
+
+    cfg = await runtime._load_account_bot_auto_award_config(1)
+
+    assert cfg == {"bot_id": 8807483916, "bot_username": "bbot", "chat_ids": [-100789]}
+
+
+@pytest.mark.asyncio
 async def test_account_bot_auto_award_replies_when_sender_id_matches(monkeypatch) -> None:
     class _Redis:
         async def set(self, key, value, *, ex, nx):  # noqa: ANN001

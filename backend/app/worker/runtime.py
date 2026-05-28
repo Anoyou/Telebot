@@ -74,6 +74,7 @@ log = logging.getLogger(__name__)
 _CONFIG_RECONCILE_SECONDS = max(30, int(app_settings.worker_reconcile_seconds or 180))
 _ACCOUNT_BOT_AUTO_AWARD_DEDUPE_PREFIX = "account_bot:auto_award:"
 _ACCOUNT_BOT_AUTO_AWARD_DEDUPE_TTL_SECONDS = 86400
+_ACCOUNT_BOT_AUTO_AWARD_MODULE_KEYS = {"game24", "math10", "dice_grid_hunt"}
 
 
 def _httpx_proxy_url_from_proxy(proxy: Proxy | None) -> str | None:
@@ -149,7 +150,7 @@ async def _load_account_bot_auto_award_config(account_id: int) -> dict[str, Any]
                 continue
             action = str(rule.get("action") or "")
             module_key = str(rule.get("module_key") or "")
-            if action == "math10" or (action == "module" and module_key in {"game24", "math10"}):
+            if action == "math10" or (action == "module" and module_key in _ACCOUNT_BOT_AUTO_AWARD_MODULE_KEYS):
                 raw_rule_chat_ids = rule.get("chat_ids") or cfg.get("chat_ids")
                 if isinstance(raw_rule_chat_ids, list):
                     for item in raw_rule_chat_ids:

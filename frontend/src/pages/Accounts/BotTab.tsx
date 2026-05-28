@@ -3,6 +3,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Bell,
   Bot,
+  ChevronRight,
+  Code2,
   Copy,
   KeyRound,
   Loader2,
@@ -107,6 +109,8 @@ const DEFAULT_REMOTE_POLICY: AccountBotRemotePluginPolicy = {
 const DEFAULT_INTERACTION_DISABLED_MESSAGE = "本条互动规则已暂停，暂时不能开启。";
 const DEFAULT_INTERACTION_RESPONSE_TEMPLATE = "已收到 {payer_name} 给 {receiver_name} 的转账 {amount}，互动流程已准备就绪。";
 const DEFAULT_INTERACTION_MODULE_START_TEXT = "正在启动互动模块...";
+const DEFAULT_MATH10_START_KEYWORDS = "发十以内算数\n十以内算数\n开算数题";
+const RULE_CONTROLLED_MODULE_CONFIG_KEYS = new Set(["prize", "timeout", "valid_seconds"]);
 const DEFAULT_TRANSFER_NOTICE_TEMPLATE = [
   "转账成功",
   "付款人：{payer_name}",
@@ -177,7 +181,6 @@ type InteractionRuleForm = {
   moduleKey: string;
   moduleAction: string;
   moduleConfig: string;
-  modulePrize: string;
   moduleStartText: string;
   openCommands: string;
   closeCommands: string;
@@ -207,7 +210,6 @@ function defaultRuleForm(index = 0): InteractionRuleForm {
     moduleKey: "game24",
     moduleAction: "",
     moduleConfig: "{}",
-    modulePrize: "123",
     moduleStartText: DEFAULT_INTERACTION_MODULE_START_TEXT,
     openCommands: "",
     closeCommands: "",
@@ -297,12 +299,19 @@ function defaultModuleConfigFromEntry(entry?: FeatureInteractionEntry): Record<s
   }
   const config: Record<string, unknown> = {};
   for (const [key, rawField] of Object.entries(properties)) {
+    if (RULE_CONTROLLED_MODULE_CONFIG_KEYS.has(key)) continue;
     if (!rawField || typeof rawField !== "object" || Array.isArray(rawField)) continue;
     if ("default" in rawField) {
       config[key] = (rawField as { default?: unknown }).default;
     }
   }
   return config;
+}
+
+function stripRuleControlledModuleConfig(config: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(config).filter(([key]) => !RULE_CONTROLLED_MODULE_CONFIG_KEYS.has(key)),
+  );
 }
 
 function uniqueIntValues(values: number[]): number[] {
@@ -319,6 +328,9 @@ function ruleFormFromRule(
   fallbackChatIds: number[] = [],
 ): InteractionRuleForm {
   const chatIds = rule.chat_ids?.length ? rule.chat_ids : fallbackChatIds;
+  const prize = rule.action === "module" && rule.module_prize != null
+    ? rule.module_prize
+    : rule.math_prize || 123;
   return {
     id: rule.id || `rule-${index + 1}`,
     name: rule.name || `规则 ${index + 1}`,
@@ -334,11 +346,10 @@ function ruleFormFromRule(
     amount: rule.amount == null ? "" : String(rule.amount),
     amountMatchMode: rule.amount_match_mode || "eq",
     action: rule.action || "notice",
-    mathPrize: String(rule.math_prize || 123),
+    mathPrize: String(prize),
     moduleKey: rule.module_key || "game24",
     moduleAction: rule.module_action || "",
-    moduleConfig: formatJsonObject(rule.module_config ?? {}),
-    modulePrize: rule.module_prize == null ? String(rule.math_prize || 123) : String(rule.module_prize),
+    moduleConfig: formatJsonObject(stripRuleControlledModuleConfig(rule.module_config ?? {})),
     moduleStartText: rule.module_start_text ?? "",
     openCommands: rule.open_commands?.join("\n") || "",
     closeCommands: rule.close_commands?.join("\n") || "",
@@ -391,12 +402,9 @@ function ruleFromForm(
 ): AccountBotInteractionRule {
   const triggerTexts = parseTextLines(form.triggerTexts);
   const name = form.name.trim() || `规则 ${index + 1}`;
-  const modulePrize = form.action === "module"
-    ? parseOptionalPositiveInt(form.modulePrize, `${name} 模块奖金`)
-    : null;
   const mathPrize = parseOptionalPositiveInt(form.mathPrize, `${name} 奖金`) || 123;
   const moduleConfig = form.action === "module"
-    ? parseJsonObject(form.moduleConfig, `${name} 模块入口参数`)
+    ? stripRuleControlledModuleConfig(parseJsonObject(form.moduleConfig, `${name} 模块入口参数`))
     : {};
   return {
     id: form.id || `rule-${index + 1}`,
@@ -416,7 +424,7 @@ function ruleFromForm(
     module_action: form.action === "module" ? form.moduleAction.trim() || null : null,
     module_config: moduleConfig,
     module_prize: form.action === "module"
-      ? modulePrize || mathPrize
+      ? mathPrize
       : null,
     module_start_text: form.action === "module" ? form.moduleStartText.trim() || null : null,
     open_commands: parseTextLines(form.openCommands),
@@ -1178,6 +1186,14 @@ export function BotTab({ aid }: { aid: number }) {
                               : e.target.value === "math10"
                                 ? "math10"
                                 : "notice",
+                            ...(e.target.value === "math10"
+                              ? {
+                                  triggerMode: rule.triggerMode === "payment" ? "both" : rule.triggerMode,
+                                  moduleStartKeywords: rule.moduleStartKeywords.trim()
+                                    ? rule.moduleStartKeywords
+                                    : DEFAULT_MATH10_START_KEYWORDS,
+                                }
+                              : {}),
                           })
                         }
                       >
@@ -1275,12 +1291,6 @@ export function BotTab({ aid }: { aid: number }) {
                               const selected = interactionEntries.find((item) => item.value === e.target.value);
                               if (!selected) return;
                               const nextModuleConfig = defaultModuleConfigFromEntry(selected.entry);
-                              if (Object.prototype.hasOwnProperty.call(nextModuleConfig, "prize")) {
-                                const numericPrize = Number(rule.modulePrize || rule.mathPrize || 123);
-                                nextModuleConfig.prize = Number.isFinite(numericPrize) && numericPrize > 0
-                                  ? numericPrize
-                                  : 123;
-                              }
                               updateInteractionRule(index, {
                                 moduleKey: selected.featureKey,
                                 moduleAction: selected.entry.key,
@@ -1312,26 +1322,30 @@ export function BotTab({ aid }: { aid: number }) {
                             <option value="none">不并发</option>
                           </Select>
                         </div>
-                        <div className="space-y-1.5">
-                          <Label>模块奖金</Label>
-                          <Input
-                            inputMode="numeric"
-                            value={rule.modulePrize}
-                            onChange={(e) => updateInteractionRule(index, { modulePrize: e.target.value })}
-                          />
-                        </div>
-                        <div className="space-y-1.5 sm:col-span-2">
-                          <Label>模块入口参数（module_config，JSON 对象）</Label>
-                          <Textarea
-                            rows={5}
-                            spellCheck={false}
-                            value={rule.moduleConfig}
-                            onChange={(e) => updateInteractionRule(index, { moduleConfig: e.target.value })}
-                          />
-                          <div className="text-xs text-muted-foreground">
-                            保存到当前规则的 <code>module_config</code>，运行时会和入口 <code>input_schema</code> 默认值、模块配置及事件参数合并后传给后端。
+                        <details className="group sm:col-span-2 rounded-md border bg-muted/30 px-3 py-2">
+                          <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-sm font-medium [&::-webkit-details-marker]:hidden">
+                            <span className="flex items-center gap-2">
+                              <Code2 className="h-4 w-4 text-muted-foreground" />
+                              模块高级参数
+                            </span>
+                            <span className="flex items-center gap-2 text-xs font-normal text-muted-foreground">
+                              奖金和参与有效期已自动传入
+                              <ChevronRight className="h-4 w-4 transition-transform group-open:rotate-90" />
+                            </span>
+                          </summary>
+                          <div className="mt-3 space-y-2">
+                            <Label>额外入口参数（JSON 对象）</Label>
+                            <Textarea
+                              rows={5}
+                              spellCheck={false}
+                              value={rule.moduleConfig}
+                              onChange={(e) => updateInteractionRule(index, { moduleConfig: e.target.value })}
+                            />
+                            <div className="text-xs text-muted-foreground">
+                              通常不用填写。<code>prize</code>、<code>timeout</code> 和 <code>valid_seconds</code> 会由上方“奖金”和“参与有效期”自动生成。
+                            </div>
                           </div>
-                        </div>
+                        </details>
                         <div className="space-y-1.5 sm:col-span-2">
                           <Label>模块启动关键词（玩家整条消息必须完整匹配）</Label>
                           <Textarea
@@ -1350,6 +1364,17 @@ export function BotTab({ aid }: { aid: number }) {
                           />
                         </div>
                       </>
+                    ) : null}
+                    {rule.action === "math10" ? (
+                      <div className="space-y-1.5 sm:col-span-2">
+                        <Label>算数题启动关键词（玩家整条消息必须完整匹配）</Label>
+                        <Textarea
+                          rows={3}
+                          placeholder={DEFAULT_MATH10_START_KEYWORDS}
+                          value={rule.moduleStartKeywords}
+                          onChange={(e) => updateInteractionRule(index, { moduleStartKeywords: e.target.value })}
+                        />
+                      </div>
                     ) : null}
                     <div className="space-y-1.5">
                       <Label>指定收款人用户 ID（优先）</Label>
