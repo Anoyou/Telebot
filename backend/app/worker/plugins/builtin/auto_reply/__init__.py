@@ -11,6 +11,7 @@ from .plugin import (
     AutoReplyPlugin,
     _dry_run_match,
     _match,
+    _parse_duration_seconds,
     _render,
     _scope_ok,
 )
@@ -24,6 +25,7 @@ __all__ = [
     "PLUGIN_CLASS",
     "_dry_run_match",
     "_match",
+    "_parse_duration_seconds",
     "_render",
     "_scope_ok",
 ]

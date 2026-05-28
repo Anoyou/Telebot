@@ -27,6 +27,7 @@ import {
 import { Spinner } from "@/components/ui/misc";
 import type {
   AutoReplyMatch,
+  AutoReplyCooldownScope,
   AutoReplyRuleConfig,
   AutoReplyScope,
   RuleDryRunResponse,
@@ -51,6 +52,11 @@ function defaultConfig(): AutoReplyRuleConfig {
     scope: "private",
     reply: "",
     cooldown_seconds: 0,
+    cooldown_scope: "chat",
+    daily_limit_per_user: 0,
+    usage_label: "",
+    cooldown_notice_enabled: true,
+    daily_limit_notice_enabled: true,
     case_sensitive: false,
     reply_to: true,    // 默认以引用形式回复
   };
@@ -201,6 +207,28 @@ export function AutoReplyConfig() {
           <b>不会触发</b>——必须用其他账号在群里 / 私聊里发。
         </li>
         <li>
+          正则模式支持捕获参数：模式 <code>^置顶\s+(\d+)$</code>，回复内容填
+          <code>{"{prefix}"}pt {"{1}"}</code>，群友发 <code>置顶 12345</code> 时会由本账号代发白名单指令。
+        </li>
+        <li>
+          不懂正则时选“变量模式”：模式写 <code>置顶 id=数字</code>，群友发
+          <code>置顶 id=12345</code>，回复写 <code>{"{prefix}"}pt {"{id}"}</code>；游戏金额可写
+          <code>我要猜骰 num=数字</code>。
+        </li>
+        <li>
+          可选参数支持默认值：模式 <code>^我要猜骰\s*(\d+)?$</code>，回复内容填
+          <code>。ct {"{1|1000}"}</code>，没带数字时自动使用 <code>1000</code>。
+        </li>
+        <li>
+          频率限制支持按群或按用户冷却，也可以设置“每人每日上限”。例如每个群友一天最多 2 次：冷却对象选“每个用户”，冷却时间填 <code>6h</code>，每人每日上限填 2。
+        </li>
+        <li>
+          冷却中会提示剩余 CD 和今日次数；达到每日上限时会提示当日无法再次使用。规则名称或“提示名称”会进入文案，例如 <code>置顶</code> 会显示“今日已置顶 1/2 次”。
+        </li>
+        <li>
+          管理员可在群里回复某个群友的消息发送 <code>命令前缀 + arcd</code> 重置相关会话/用户冷却和他的今日次数；也可发送 <code>命令前缀 + arcd 123456789</code> 按用户 ID 重置。
+        </li>
+        <li>
           不命中时去「日志中心」筛 source=plugin/worker 的 info
           条，会显示 <code>[event]</code> 收到了什么、<code>[auto_reply]</code> 跳过的具体原因。
         </li>
@@ -277,7 +305,7 @@ export function AutoReplyConfig() {
                       </TableCell>
                       <TableCell>{r.priority}</TableCell>
                       <TableCell>
-                        {cfg.match === "regex" ? "正则" : "关键词"}（
+                        {cfg.match === "regex" ? "正则" : cfg.match === "template" ? "变量" : "关键词"}（
                         {cfg.patterns?.length ?? 0}）
                       </TableCell>
                       <TableCell>{scopeLabel(cfg.scope)}</TableCell>
@@ -319,7 +347,7 @@ export function AutoReplyConfig() {
         open={editOpen}
         onOpenChange={setEditOpen}
         editing={editing}
-        description={"支持变量：{sender} {chat} {text}"}
+        description={"支持变量：{sender} {chat} {text} {prefix}；变量模式可写 置顶 id=数字，回复用 {id}；问号表示可选参数，例如 num=数字?。规则名称会用于冷却提示，也可单独填写提示名称。"}
         name={form.name}
         enabled={form.enabled}
         priority={form.priority}
@@ -341,6 +369,7 @@ export function AutoReplyConfig() {
               }
             >
               <option value="keyword">关键词</option>
+              <option value="template">变量模式</option>
               <option value="regex">正则</option>
             </Select>
           </Field>
@@ -383,7 +412,11 @@ export function AutoReplyConfig() {
             value={patternsText}
             onChange={(e) => setPatternsText(e.target.value)}
             placeholder={
-              form.config.match === "regex" ? "例：^/start.*$" : "例：你好\n在吗"
+              form.config.match === "regex"
+                ? "例：^置顶\\s+(\\d+)$"
+                : form.config.match === "template"
+                  ? "例：置顶 id=数字\n我要猜骰 num=数字?"
+                  : "例：你好\n在吗"
             }
           />
         </Field>
@@ -395,27 +428,118 @@ export function AutoReplyConfig() {
             onChange={(e) =>
               setForm({ ...form, config: { ...form.config, reply: e.target.value } })
             }
-            placeholder="支持变量：{sender}、{chat}、{text}"
+            placeholder="支持变量：{sender}、{chat}、{text}、{prefix}"
           />
+          <p className="text-xs leading-5 text-muted-foreground">
+            正则模式可把捕获组写进回复内容，例如 <code>{"{prefix}"}pt {"{1}"}</code>；
+            变量模式在“模式”里写 <code>置顶 id=数字</code>，群友消息应写 <code>置顶 id=12345</code>，回复内容写 <code>{"{prefix}"}pt {"{id}"}</code>。
+            <code>num=数字</code> 会提取 <code>num=</code> 后面的数字；末尾加 <code>?</code> 表示这个参数可以不填；
+            默认值写作 <code>{"{num|1000}"}</code>。若回复内容是指令，仍必须先加入自动指令白名单，并受本规则冷却限制。
+          </p>
+        </Field>
+
+        <Field label="提示名称（用于冷却和上限文案）">
+          <Input
+            placeholder="例：置顶、猜骰、推广"
+            value={form.config.usage_label ?? ""}
+            onChange={(e) =>
+              setForm({
+                ...form,
+                config: { ...form.config, usage_label: e.target.value },
+              })
+            }
+          />
+          <p className="text-xs leading-5 text-muted-foreground">
+            留空时使用规则名称。填 <code>置顶</code> 后，冷却中会显示
+            <code>今日已置顶 1/2 次</code>；达到上限时会显示不能再次使用置顶功能。
+          </p>
         </Field>
 
         <div className="grid grid-cols-2 gap-3">
-          <Field label="冷却秒数">
+          <Field label="冷却时间（0 不限制）">
             <Input
-              inputMode="numeric"
+              inputMode="text"
+              placeholder="0、30s、5m、6h、2d"
               value={(form.config.cooldown_seconds ?? 0).toString()}
               onChange={(e) =>
                 setForm({
                   ...form,
                   config: {
                     ...form.config,
-                    cooldown_seconds: Number(
+                    cooldown_seconds: e.target.value.trim(),
+                  },
+                })
+              }
+            />
+            <p className="text-xs leading-5 text-muted-foreground">
+              支持 s/m/h/d：例如 <code>30s</code>、<code>5m</code>、<code>6h</code>、<code>2d</code>。纯数字仍按秒计算。
+            </p>
+          </Field>
+          <Field label="冷却对象">
+            <Select
+              value={form.config.cooldown_scope ?? "chat"}
+              onChange={(e) =>
+                setForm({
+                  ...form,
+                  config: {
+                    ...form.config,
+                    cooldown_scope: e.target.value as AutoReplyCooldownScope,
+                  },
+                })
+              }
+            >
+              <option value="chat">当前会话</option>
+              <option value="user">每个用户</option>
+            </Select>
+          </Field>
+          <Field label="每人每日上限（0 不限制）">
+            <Input
+              inputMode="numeric"
+              value={(form.config.daily_limit_per_user ?? 0).toString()}
+              onChange={(e) =>
+                setForm({
+                  ...form,
+                  config: {
+                    ...form.config,
+                    daily_limit_per_user: Number(
                       e.target.value.replace(/[^0-9]/g, "") || 0,
                     ),
                   },
                 })
               }
             />
+          </Field>
+          <Field label="冷却中提示">
+            <div className="flex h-10 items-center gap-2">
+              <Switch
+                checked={form.config.cooldown_notice_enabled !== false}
+                onCheckedChange={(v) =>
+                  setForm({
+                    ...form,
+                    config: { ...form.config, cooldown_notice_enabled: v },
+                  })
+                }
+              />
+              <span className="text-xs text-muted-foreground">
+                显示剩余 CD 和今日次数
+              </span>
+            </div>
+          </Field>
+          <Field label="每日上限提示">
+            <div className="flex h-10 items-center gap-2">
+              <Switch
+                checked={form.config.daily_limit_notice_enabled !== false}
+                onCheckedChange={(v) =>
+                  setForm({
+                    ...form,
+                    config: { ...form.config, daily_limit_notice_enabled: v },
+                  })
+                }
+              />
+              <span className="text-xs text-muted-foreground">
+                达到上限时提醒联系管理员
+              </span>
+            </div>
           </Field>
           <Field label="区分大小写">
             <div className="flex h-10 items-center">

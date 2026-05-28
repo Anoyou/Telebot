@@ -976,6 +976,23 @@ def _incoming_trigger_texts(incoming: Incoming) -> list[str]:
     return texts
 
 
+def _incoming_notice_texts(incoming: Incoming) -> list[str]:
+    texts: list[str] = []
+    for value in (incoming.text, incoming.reply_to_text):
+        text = str(value or "").strip()
+        if text and text not in texts:
+            texts.append(text)
+    return texts
+
+
+def _parse_incoming_transfer_notice(incoming: Incoming) -> dict[str, Any] | None:
+    for text in _incoming_notice_texts(incoming):
+        parsed = _parse_transfer_notice(text)
+        if parsed is not None:
+            return parsed
+    return None
+
+
 def _entity_languages(*entity_lists: Any) -> tuple[str, ...]:
     languages: list[str] = []
     for entity_list in entity_lists:
@@ -2209,7 +2226,12 @@ async def _try_handle_transfer_command(db: Any, incoming: Incoming) -> bool:
             error=error_text,
             template=raw_notice_template[:1000],
         )
-    result = await account_bot_service.send_message(transfer_token, incoming.chat_id, notice)
+    result = await account_bot_service.send_message(
+        transfer_token,
+        incoming.chat_id,
+        notice,
+        reply_to_message_id=incoming.message_id,
+    )
     log.info(
         "transfer command emitted notice aid=%s chat_id=%s payer=%r receiver=%r amount=%s",
         incoming.account_id,
@@ -2287,7 +2309,7 @@ async def _try_handle_transfer_notice(db: Any, incoming: Incoming) -> bool:
             )
         return False
 
-    parsed = _parse_transfer_notice(incoming.text)
+    parsed = _parse_incoming_transfer_notice(incoming)
     if parsed is None:
         log.info(
             "transfer notice skipped: parse failed aid=%s chat_id=%s sender_id=%s",

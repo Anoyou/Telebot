@@ -106,6 +106,36 @@ async def test_dns_preflight_happens_before_transport_connect() -> None:
 
 
 @pytest.mark.asyncio
+async def test_account_proxy_mode_allows_proxy_fake_ip_dns_answer() -> None:
+    async def _resolver(_host: str, _port: int) -> list[str]:
+        return ["198.18.5.204"]
+
+    http = PluginHTTP(
+        allowed_hosts=["www.qingwapt.com"],
+        account_proxy_url="http://10.10.8.33:6152",
+        network_mode="account_proxy",
+        resolver=_resolver,
+    )
+
+    await http._validate_url(httpx.URL("https://www.qingwapt.com/details.php?id=1"))
+
+
+@pytest.mark.asyncio
+async def test_direct_mode_still_blocks_proxy_fake_ip_dns_answer() -> None:
+    async def _resolver(_host: str, _port: int) -> list[str]:
+        return ["198.18.5.204"]
+
+    http = PluginHTTP(
+        allowed_hosts=["www.qingwapt.com"],
+        network_mode="direct",
+        resolver=_resolver,
+    )
+
+    with pytest.raises(PluginHTTPPolicyError):
+        await http._validate_url(httpx.URL("https://www.qingwapt.com/details.php?id=1"))
+
+
+@pytest.mark.asyncio
 async def test_streaming_response_size_cap_rejects_before_full_body() -> None:
     async def _handler(_request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, stream=_ChunkStream([b"abc", b"def"]))

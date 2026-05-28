@@ -606,16 +606,26 @@ export interface NetworkInfo {
 }
 
 // ===================== 自动回复 rule.config =====================
-export type AutoReplyMatch = "keyword" | "regex";
+export type AutoReplyMatch = "keyword" | "template" | "regex";
 export type AutoReplyScope = "private" | "group_all" | "group_specific";
+export type AutoReplyCooldownScope = "chat" | "user";
 
 export interface AutoReplyRuleConfig {
   match: AutoReplyMatch;
   patterns: string[];
   scope: AutoReplyScope;
   group_ids?: string[];
+  // 正则模式可在 reply 中使用 {1} / {name} / {1|默认值}
   reply: string;
-  cooldown_seconds?: number;
+  cooldown_seconds?: number | string;
+  cooldown_scope?: AutoReplyCooldownScope;
+  daily_limit_per_user?: number;
+  usage_label?: string;
+  cooldown_notice_enabled?: boolean;
+  daily_limit_notice_enabled?: boolean;
+  cooldown_message_template?: string;
+  daily_limit_message_template?: string;
+  daily_limit_final_message_template?: string;
   whitelist?: string[];
   blacklist?: string[];
   case_sensitive?: boolean;

@@ -1098,6 +1098,7 @@ async def test_plus_amount_falls_back_to_receiver_config_when_reply_missing(monk
         -100123,
         "模拟到账\n付款人：AAA\n收款人：BBB\n金额：100",
     )
+    assert send.await_args_list[0].kwargs["reply_to_message_id"] == 30
 
 
 @pytest.mark.asyncio
@@ -1736,6 +1737,77 @@ async def test_transfer_notice_matches_html_code_language_marker(monkeypatch) ->
                 "entities": [{"type": "pre", "offset": 0, "length": len(text), "language": "language-转账成功"}],
                 "from": {"id": 456, "is_bot": True, "first_name": "Abot"},
                 "chat": {"id": -100123, "type": "supergroup"},
+            },
+        },
+    )
+
+    assert start_math.await_count == 1
+    assert start_math.await_args.kwargs == {"prize": 456}
+    assert send.await_count == 0
+
+
+@pytest.mark.asyncio
+async def test_transfer_notice_parses_amount_from_replied_message(monkeypatch) -> None:
+    class _DB:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+        async def commit(self):
+            return None
+
+        async def get(self, model, *_args):  # noqa: ANN002
+            if model is Account:
+                return SimpleNamespace(tg_username="answer", display_name="答案", tg_user_id=999)
+            return None
+
+    start_math = AsyncMock()
+    send = AsyncMock()
+    monkeypatch.setattr(account_bot_runtime, "AsyncSessionLocal", lambda: _DB())
+    monkeypatch.setattr(account_bot_runtime, "_start_math_game", start_math)
+    monkeypatch.setattr(account_bot_service, "send_message", send)
+    monkeypatch.setattr(account_bot_runtime.audit, "write", AsyncMock())
+    monkeypatch.setattr(
+        account_bot_service,
+        "get_transfer_notice_config",
+        AsyncMock(
+            return_value={
+                "enabled": True,
+                "trusted_bot_id": 456,
+                "rules": [
+                    {
+                        "id": "math-reply-transfer",
+                        "enabled": True,
+                        "chat_ids": [-100123],
+                        "trigger_texts": ["转账成功"],
+                        "receiver_text": "你心里已经有答案了",
+                        "amount": 1,
+                        "action": "math10",
+                        "math_prize": 456,
+                    },
+                ],
+            }
+        ),
+    )
+
+    transfer_text = "Yy 射出 1 蝌蚪\n你心里已经有答案了 接收 1 蝌蚪"
+    await account_bot_runtime._handle_interaction_update(
+        1,
+        "bbot-token",
+        {
+            "update_id": 62,
+            "message": {
+                "message_id": 620,
+                "text": "转账成功",
+                "from": {"id": 456, "is_bot": True, "first_name": "Abot"},
+                "chat": {"id": -100123, "type": "supergroup"},
+                "reply_to_message": {
+                    "message_id": 619,
+                    "text": transfer_text,
+                    "from": {"id": 999, "is_bot": False, "first_name": "Yy"},
+                },
             },
         },
     )
@@ -3465,6 +3537,7 @@ async def test_transfer_test_bot_accepts_plus_amount_from_account_user(monkeypat
         -100123,
         "转账成功\nPayoutUser 射出 123\nWinner 接收 123",
     )
+    assert send.await_args_list[0].kwargs["reply_to_message_id"] == 50
 
 
 @pytest.mark.asyncio

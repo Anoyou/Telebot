@@ -36,6 +36,9 @@ Resolver = Callable[[str, int], Awaitable[Sequence[str]] | Sequence[str]]
 
 DEFAULT_TIMEOUT_SECONDS = 15.0
 DEFAULT_MAX_RESPONSE_BYTES = 2 * 1024 * 1024
+_FAKE_IP_NETWORKS = (
+    ipaddress.ip_network("198.18.0.0/15"),
+)
 _REQUEST_KWARG_ALLOWLIST = frozenset(
     {
         "auth",
@@ -157,6 +160,25 @@ def _assert_public_ip(value: str, *, plugin_key: str = "?") -> None:
         raise PluginHTTPPolicyError(_policy_message(plugin_key, f"DNS 返回了非法 IP: {value}")) from exc
     if _is_blocked_ip(ip):
         raise PluginHTTPPolicyError(_policy_message(plugin_key, f"HTTP 目标解析到受保护地址: {value}"))
+
+
+def _is_proxy_fake_ip(value: str) -> bool:
+    """Return True for local proxy fake-ip DNS answers.
+
+    Clash/Surge-style TUN fake-ip commonly uses 198.18.0.0/15. Direct egress
+    must still reject that reserved range. When a plugin request is routed
+    through the account proxy, the proxy resolves the original hostname, so the
+    local fake-ip answer should not block a host that already passed
+    ``allowed_hosts``.
+    """
+
+    try:
+        ip = _normalize_ip(ipaddress.ip_address(value))
+    except ValueError:
+        return False
+    if not isinstance(ip, ipaddress.IPv4Address):
+        return False
+    return any(ip in network for network in _FAKE_IP_NETWORKS)
 
 
 async def _default_resolver(host: str, port: int) -> Sequence[str]:
@@ -353,6 +375,12 @@ class PluginHTTP:
             if not answers:
                 raise self._policy_error(f"HTTP host 无 DNS 解析结果: {host}") from None
             for answer in answers:
+                if (
+                    self.network_mode == "account_proxy"
+                    and self.account_proxy_url
+                    and _is_proxy_fake_ip(str(answer))
+                ):
+                    continue
                 _assert_public_ip(str(answer), plugin_key=self._plugin_key)
         else:
             if _is_blocked_ip(literal):
