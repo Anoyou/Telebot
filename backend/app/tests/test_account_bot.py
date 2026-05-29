@@ -3617,7 +3617,8 @@ async def test_run_worker_interaction_entry_returns_timeout(monkeypatch) -> None
             return 1
 
     redis = _Redis()
-    ticks = iter([0.0, 0.0, 6.0])
+    timeout = account_bot_runtime._INTERACTION_ENTRY_TIMEOUT_SECONDS
+    ticks = iter([0.0, 0.0, timeout + 1.0])
     monkeypatch.setattr(account_bot_runtime, "get_redis", lambda: redis)
     monkeypatch.setattr(account_bot_runtime.time, "time", lambda: next(ticks, 6.0))
     incoming = account_bot_runtime.Incoming(
@@ -3642,6 +3643,77 @@ async def test_run_worker_interaction_entry_returns_timeout(monkeypatch) -> None
     assert actions == []
     assert redis.published
     assert redis.pubsub_obj.unsubscribed == redis.pubsub_obj.subscribed
+    assert redis.pubsub_obj.closed is True
+
+
+@pytest.mark.asyncio
+async def test_run_worker_interaction_entry_waits_for_slow_plugin_reply(monkeypatch) -> None:
+    class _PubSub:
+        def __init__(self) -> None:
+            self.calls = 0
+            self.closed = False
+
+        async def subscribe(self, _channel: str) -> None:
+            return None
+
+        async def get_message(self, **_kwargs):  # noqa: ANN003
+            self.calls += 1
+            if self.calls == 1:
+                return None
+            return {
+                "data": account_bot_runtime.make_cmd(
+                    account_bot_runtime.CMD_RUN_INTERACTION_ENTRY,
+                    ok=True,
+                    error=None,
+                    actions=[
+                        {"type": "send_message", "text": "置顶成功"},
+                        {"type": "result", "success": True},
+                        {"type": "no_session"},
+                    ],
+                )
+            }
+
+        async def unsubscribe(self, _channel: str) -> None:
+            return None
+
+        async def close(self) -> None:
+            self.closed = True
+
+    class _Redis:
+        def __init__(self) -> None:
+            self.pubsub_obj = _PubSub()
+
+        def pubsub(self):
+            return self.pubsub_obj
+
+        async def publish(self, _channel: str, _payload: str) -> int:
+            return 1
+
+    redis = _Redis()
+    ticks = iter([0.0, 0.0, 6.0])
+    monkeypatch.setattr(account_bot_runtime, "get_redis", lambda: redis)
+    monkeypatch.setattr(account_bot_runtime.time, "time", lambda: next(ticks, 6.0))
+    incoming = account_bot_runtime.Incoming(
+        account_id=1,
+        token="bbot-token",
+        update_id=1,
+        user_id=456,
+        chat_id=-100123,
+        message_id=10,
+        text="",
+    )
+
+    ok, error, actions = await account_bot_runtime._run_worker_interaction_entry(
+        incoming,
+        plugin_key="pt_promote",
+        entry_key="promote_torrent",
+        payload={"chat_id": -100123, "id": "134100"},
+    )
+
+    assert ok is True
+    assert error is None
+    assert actions[0]["text"] == "置顶成功"
+    assert actions[1] == {"type": "result", "success": True}
     assert redis.pubsub_obj.closed is True
 
 

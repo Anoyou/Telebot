@@ -81,6 +81,7 @@ _INTERACTION_SESSION_PREFIX = "account_bot:interaction_session:"
 _INTERACTION_USER_COOLDOWN_PREFIX = "account_bot:interaction_user_cooldown:"
 _INTERACTION_USER_DAILY_PREFIX = "account_bot:interaction_user_daily:"
 _INTERACTION_USER_PENDING_PREFIX = "account_bot:interaction_user_pending:"
+_INTERACTION_ENTRY_TIMEOUT_SECONDS = 60.0
 AUTO_PAYOUT_MODULE_KEYS = {"game24", "math10", "dice_grid_hunt"}
 
 
@@ -2306,7 +2307,7 @@ async def _run_worker_interaction_entry(
                 reply_to=reply_channel,
             ),
         )
-        deadline = time.time() + 5.0
+        deadline = time.time() + _INTERACTION_ENTRY_TIMEOUT_SECONDS
         while time.time() < deadline:
             msg = await pubsub.get_message(ignore_subscribe_messages=True, timeout=0.5)
             if not msg:
