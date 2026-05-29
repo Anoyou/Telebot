@@ -2434,6 +2434,72 @@ async def test_interaction_keyword_user_cooldown_and_daily_limit_mark_only_after
 
 
 @pytest.mark.asyncio
+async def test_interaction_keyword_module_result_false_does_not_mark_usage(monkeypatch) -> None:
+    class _DB:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+        async def get(self, *_args):  # noqa: ANN002
+            return None
+
+    rule = {
+        "id": "pt-promote",
+        "name": "置顶促销",
+        "enabled": True,
+        "chat_ids": [-100123],
+        "trigger_mode": "keyword",
+        "trigger_texts": ["转账成功"],
+        "module_start_keywords": ["置顶 id=数字"],
+        "action": "module",
+        "module_key": "pt_promote",
+        "module_action": "promote_torrent",
+        "concurrency": "user",
+        "user_cooldown_seconds": "6h",
+        "daily_limit_per_user": 2,
+    }
+    redis = _MemoryRedis()
+    send = AsyncMock()
+    run_entry = AsyncMock(
+        return_value=(
+            True,
+            None,
+            [
+                {"type": "send_message", "text": "ℹ️ ID 为 12345 的种子已处于置顶状态，本次不再处理。"},
+                {"type": "result", "success": False},
+                {"type": "no_session"},
+            ],
+        )
+    )
+    monkeypatch.setattr(account_bot_runtime, "AsyncSessionLocal", lambda: _DB())
+    monkeypatch.setattr(account_bot_runtime, "_run_worker_interaction_entry", run_entry)
+    monkeypatch.setattr(account_bot_runtime, "get_redis", lambda: redis)
+    monkeypatch.setattr(account_bot_service, "send_message", send)
+    monkeypatch.setattr(
+        account_bot_service,
+        "get_transfer_notice_config",
+        AsyncMock(return_value={"enabled": True, "rules": [rule]}),
+    )
+
+    message = {
+        "from": {"id": 111, "first_name": "Alice"},
+        "chat": {"id": -100123, "type": "supergroup"},
+    }
+    await account_bot_runtime._handle_interaction_update(
+        1,
+        "bbot-token",
+        {"update_id": 1001, "message": {"message_id": 10010, "text": "置顶 id=12345", **message}},
+    )
+
+    assert run_entry.await_count == 1
+    assert "本次不再处理" in send.await_args.args[2]
+    assert not any(key.startswith("account_bot:interaction_user_cooldown:") for key in redis.data)
+    assert not any(key.startswith("account_bot:interaction_user_daily:") for key in redis.data)
+
+
+@pytest.mark.asyncio
 async def test_interaction_module_start_text_is_sent_before_module_actions(monkeypatch) -> None:
     send = AsyncMock()
     run_entry = AsyncMock(

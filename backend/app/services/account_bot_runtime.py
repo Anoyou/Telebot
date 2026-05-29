@@ -2355,10 +2355,21 @@ def _interaction_actions_request_no_session(actions: list[dict[str, Any]]) -> bo
     return any(str(action.get("type") or "").strip() in _INTERACTION_CONTROL_ACTIONS for action in actions)
 
 
+def _interaction_actions_mark_success(actions: list[dict[str, Any]]) -> bool:
+    markers = [
+        action.get("success")
+        for action in actions
+        if str(action.get("type") or "").strip() == "result"
+    ]
+    if markers:
+        return any(bool(marker) for marker in markers)
+    return True
+
+
 async def _apply_interaction_actions(incoming: Incoming, actions: list[dict[str, Any]]) -> None:
     for action in actions[:10]:
         action_type = str(action.get("type") or "").strip()
-        if action_type in _INTERACTION_CONTROL_ACTIONS:
+        if action_type in _INTERACTION_CONTROL_ACTIONS or action_type == "result":
             continue
         raw_reply_to = action.get("reply_to_message_id")
         reply_to_message_id = _int_or_none(raw_reply_to)
@@ -2430,7 +2441,7 @@ async def _run_interaction_module(
         return False, False
     keep_session = not _interaction_actions_request_no_session(actions)
     await _apply_interaction_actions(incoming, actions)
-    return True, keep_session
+    return _interaction_actions_mark_success(actions), keep_session
 
 
 async def _start_interaction_module(
