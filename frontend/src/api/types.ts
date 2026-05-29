@@ -189,6 +189,8 @@ export interface AccountBotInteractionRule {
   module_config?: Record<string, unknown> | null;
   module_prize?: number | null;
   module_start_text?: string | null;
+  user_cooldown_seconds?: string | null;
+  daily_limit_per_user?: number | null;
   open_commands?: string[];
   close_commands?: string[];
   status_commands?: string[];
@@ -231,6 +233,8 @@ export interface AccountBotInteractionConfig {
   module_config?: Record<string, unknown> | null;
   module_prize?: number | null;
   module_start_text?: string | null;
+  user_cooldown_seconds?: string | null;
+  daily_limit_per_user?: number | null;
   open_commands?: string[];
   close_commands?: string[];
   status_commands?: string[];
@@ -267,6 +271,8 @@ export type AccountBotInteractionConfigUpdate = Pick<
   | "module_config"
   | "module_prize"
   | "module_start_text"
+  | "user_cooldown_seconds"
+  | "daily_limit_per_user"
   | "open_commands"
   | "close_commands"
   | "status_commands"
@@ -625,6 +631,7 @@ export interface AutoReplyRuleConfig {
   daily_limit_notice_enabled?: boolean;
   cooldown_message_template?: string;
   daily_limit_message_template?: string;
+  daily_limit_success_message_template?: string;
   daily_limit_final_message_template?: string;
   whitelist?: string[];
   blacklist?: string[];

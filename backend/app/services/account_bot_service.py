@@ -170,6 +170,8 @@ def default_transfer_notice_config() -> dict[str, Any]:
         "module_prize": None,
         "module_config": {},
         "module_start_text": None,
+        "user_cooldown_seconds": None,
+        "daily_limit_per_user": None,
         "open_commands": [],
         "close_commands": [],
         "status_commands": [],
@@ -199,6 +201,7 @@ def normalize_transfer_notice_config(raw: Any) -> dict[str, Any]:
         "amount",
         "math_prize",
         "module_prize",
+        "daily_limit_per_user",
         "valid_seconds",
         "receiver_user_id",
     ):
@@ -235,6 +238,8 @@ def normalize_transfer_notice_config(raw: Any) -> dict[str, Any]:
     base["valid_seconds"] = min(int(base["valid_seconds"]), 86400)
     if base.get("module_prize") is not None and int(base["module_prize"]) <= 0:
         base["module_prize"] = None
+    if base.get("daily_limit_per_user") is not None and int(base["daily_limit_per_user"]) <= 0:
+        base["daily_limit_per_user"] = None
     base["module_config"] = _strip_rule_controlled_module_config(base.get("module_config"))
     for key in ("module_key", "module_action", "module_start_text", "disabled_message"):
         value = str(base.get(key) or "").strip()
@@ -296,6 +301,8 @@ def normalize_transfer_notice_config(raw: Any) -> dict[str, Any]:
                 "module_prize": base["module_prize"],
                 "module_config": dict(base["module_config"]) if isinstance(base.get("module_config"), dict) else {},
                 "module_start_text": base["module_start_text"],
+                "user_cooldown_seconds": base.get("user_cooldown_seconds"),
+                "daily_limit_per_user": base.get("daily_limit_per_user"),
                 "open_commands": list(base["open_commands"]),
                 "close_commands": list(base["close_commands"]),
                 "status_commands": list(base["status_commands"]),
@@ -323,6 +330,8 @@ def normalize_transfer_notice_config(raw: Any) -> dict[str, Any]:
     base["module_prize"] = first_enabled.get("module_prize")
     base["module_config"] = dict(first_enabled.get("module_config") or {})
     base["module_start_text"] = first_enabled.get("module_start_text")
+    base["user_cooldown_seconds"] = first_enabled.get("user_cooldown_seconds")
+    base["daily_limit_per_user"] = first_enabled.get("daily_limit_per_user")
     base["open_commands"] = list(first_enabled.get("open_commands") or [])
     base["close_commands"] = list(first_enabled.get("close_commands") or [])
     base["status_commands"] = list(first_enabled.get("status_commands") or [])
@@ -390,6 +399,7 @@ def normalize_interaction_rules(raw: Any) -> list[dict[str, Any]]:
             receiver_user_id = int(item["receiver_user_id"]) if item.get("receiver_user_id") not in (None, "") else None
         except (TypeError, ValueError):
             receiver_user_id = None
+        receiver_text = str(item.get("receiver_text") or "").strip() or None
         amount_match_mode = str(item.get("amount_match_mode") or "eq").strip()
         if amount_match_mode not in VALID_AMOUNT_MATCH_MODES:
             amount_match_mode = "eq"
@@ -415,18 +425,29 @@ def normalize_interaction_rules(raw: Any) -> list[dict[str, Any]]:
             module_start_keywords = list(DEFAULT_MATH10_START_KEYWORDS)
         if action == "math10" and amount is None and trigger_mode == "payment" and item.get("trigger_mode") in (None, "", "payment"):
             trigger_mode = "both"
+        if trigger_mode == "keyword":
+            amount = None
+            receiver_user_id = None
+            receiver_text = None
         module_key = str(item.get("module_key") or "").strip() or None
         module_action = str(item.get("module_action") or "").strip() or None
         module_config = _strip_rule_controlled_module_config(item.get("module_config"))
         module_start_text = str(item.get("module_start_text") or "").strip() or None
+        user_cooldown_seconds = str(item.get("user_cooldown_seconds") or "").strip() or None
         try:
             module_prize = int(item["module_prize"]) if item.get("module_prize") not in (None, "") else None
         except (TypeError, ValueError):
             module_prize = None
+        try:
+            daily_limit_per_user = int(item["daily_limit_per_user"]) if item.get("daily_limit_per_user") not in (None, "") else None
+        except (TypeError, ValueError):
+            daily_limit_per_user = None
+        if concurrency != "user":
+            user_cooldown_seconds = None
+            daily_limit_per_user = None
         response_template = str(item.get("response_template") or "").strip()
         if not response_template:
             response_template = default_transfer_notice_config()["response_template"]
-        receiver_text = str(item.get("receiver_text") or "").strip() or None
         disabled_message = str(item.get("disabled_message") or "").strip() or None
         out.append(
             {
@@ -448,6 +469,8 @@ def normalize_interaction_rules(raw: Any) -> list[dict[str, Any]]:
                 "module_prize": module_prize if module_prize is None or module_prize > 0 else None,
                 "module_config": module_config,
                 "module_start_text": module_start_text,
+                "user_cooldown_seconds": user_cooldown_seconds,
+                "daily_limit_per_user": daily_limit_per_user if daily_limit_per_user is None or daily_limit_per_user > 0 else None,
                 "open_commands": open_commands,
                 "close_commands": close_commands,
                 "status_commands": status_commands,

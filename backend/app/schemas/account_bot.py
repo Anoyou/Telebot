@@ -119,6 +119,8 @@ class AccountBotInteractionRule(BaseModel):
     module_prize: int | None = Field(default=None, ge=1)
     module_config: dict[str, Any] = Field(default_factory=dict)
     module_start_text: str | None = Field(default=None, max_length=500)
+    user_cooldown_seconds: str | None = Field(default=None, max_length=16)
+    daily_limit_per_user: int | None = Field(default=None, ge=1, le=1000)
     open_commands: list[str] = Field(default_factory=list, max_length=20)
     close_commands: list[str] = Field(default_factory=list, max_length=20)
     status_commands: list[str] = Field(default_factory=list, max_length=20)
@@ -138,7 +140,7 @@ class AccountBotInteractionRule(BaseModel):
             raise ValueError("不能为空")
         return value
 
-    @field_validator("receiver_text", "module_key", "module_action", "module_start_text", "disabled_message")
+    @field_validator("receiver_text", "module_key", "module_action", "module_start_text", "user_cooldown_seconds", "disabled_message")
     @classmethod
     def _trim_optional_text(cls, v: str | None) -> str | None:
         if v is None:
@@ -228,6 +230,8 @@ class AccountBotInteractionConfig(BaseModel):
     module_prize: int | None = Field(default=None, ge=1)
     module_config: dict[str, Any] = Field(default_factory=dict)
     module_start_text: str | None = Field(default=None, max_length=500)
+    user_cooldown_seconds: str | None = Field(default=None, max_length=16)
+    daily_limit_per_user: int | None = Field(default=None, ge=1, le=1000)
     open_commands: list[str] = Field(default_factory=list, max_length=20)
     close_commands: list[str] = Field(default_factory=list, max_length=20)
     status_commands: list[str] = Field(default_factory=list, max_length=20)
@@ -251,6 +255,7 @@ class AccountBotInteractionConfig(BaseModel):
         "module_key",
         "module_action",
         "module_start_text",
+        "user_cooldown_seconds",
         "disabled_message",
     )
     @classmethod

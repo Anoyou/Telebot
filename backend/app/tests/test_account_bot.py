@@ -412,6 +412,41 @@ def test_account_bot_interaction_rules_normalize_new_rule_fields() -> None:
     assert rule["disabled_message"] == "今天休息"
 
 
+def test_keyword_rules_drop_hidden_payment_filters_and_non_user_limits() -> None:
+    cfg = account_bot_service.normalize_transfer_notice_config(
+        {
+            "enabled": True,
+            "rules": [
+                {
+                    "id": "pt",
+                    "enabled": True,
+                    "chat_ids": [-100123],
+                    "trigger_mode": "keyword",
+                    "trigger_texts": ["转账成功"],
+                    "module_start_keywords": ["置顶 id=数字"],
+                    "receiver_user_id": "111",
+                    "receiver_text": "BBB",
+                    "amount": "100",
+                    "action": "module",
+                    "module_key": "pt_promote",
+                    "module_action": "promote_torrent",
+                    "concurrency": "chat",
+                    "user_cooldown_seconds": "6h",
+                    "daily_limit_per_user": 2,
+                }
+            ],
+        }
+    )
+
+    rule = cfg["rules"][0]
+    assert rule["trigger_mode"] == "keyword"
+    assert rule["amount"] is None
+    assert rule["receiver_user_id"] is None
+    assert rule["receiver_text"] is None
+    assert rule["user_cooldown_seconds"] is None
+    assert rule["daily_limit_per_user"] is None
+
+
 def test_account_bot_math10_rule_gets_default_start_keywords() -> None:
     cfg = account_bot_service.normalize_transfer_notice_config(
         {
@@ -727,6 +762,11 @@ def test_interaction_rule_keywords_match_exact_text_or_notice_line() -> None:
     assert account_bot_runtime._message_equals_any("123", ["123"])
     assert account_bot_runtime._message_equals_any("123456", ["123"]) is False
     assert account_bot_runtime._message_equals_any("aa123", ["123"]) is False
+    assert account_bot_runtime._message_match_keyword_pattern("置顶 id=12345", ["置顶 id=数字"]) == {"id": "12345"}
+    assert account_bot_runtime._message_match_keyword_pattern("置顶 id = 12345", ["置顶 id = 数字"]) == {"id": "12345"}
+    assert account_bot_runtime._message_match_keyword_pattern("猜骰 num=1000", ["猜骰 num=数字"]) == {"num": "1000"}
+    assert account_bot_runtime._message_match_keyword_pattern("置顶 id=abc", ["置顶 id=数字"]) is None
+    assert account_bot_runtime._message_match_keyword_pattern("置顶 id=1 id=2", ["置顶 id=数字 id=数字"]) is None
 
 
 def test_interaction_payment_payload_preserves_payer_user_id() -> None:
@@ -2317,6 +2357,83 @@ async def test_interaction_keyword_invokes_module_interaction_entry_and_payment_
 
 
 @pytest.mark.asyncio
+async def test_interaction_keyword_user_cooldown_and_daily_limit_mark_only_after_success(monkeypatch) -> None:
+    class _DB:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+        async def get(self, *_args):  # noqa: ANN002
+            return None
+
+    rule = {
+        "id": "pt-promote",
+        "name": "置顶促销",
+        "enabled": True,
+        "chat_ids": [-100123],
+        "trigger_mode": "keyword",
+        "trigger_texts": ["转账成功"],
+        "module_start_keywords": ["置顶 id=数字"],
+        "action": "module",
+        "module_key": "pt_promote",
+        "module_action": "promote_torrent",
+        "concurrency": "user",
+        "user_cooldown_seconds": "6h",
+        "daily_limit_per_user": 2,
+    }
+    redis = _MemoryRedis()
+    run_entry = AsyncMock(
+        side_effect=[
+            (False, "模块启动失败", []),
+            (True, None, [{"type": "send_message", "text": "置顶成功"}, {"type": "no_session"}]),
+        ]
+    )
+    send = AsyncMock()
+    monkeypatch.setattr(account_bot_runtime, "AsyncSessionLocal", lambda: _DB())
+    monkeypatch.setattr(account_bot_runtime, "_run_worker_interaction_entry", run_entry)
+    monkeypatch.setattr(account_bot_runtime, "get_redis", lambda: redis)
+    monkeypatch.setattr(account_bot_service, "send_message", send)
+    monkeypatch.setattr(
+        account_bot_service,
+        "get_transfer_notice_config",
+        AsyncMock(return_value={"enabled": True, "rules": [rule]}),
+    )
+
+    base_message = {
+        "from": {"id": 111, "first_name": "Alice"},
+        "chat": {"id": -100123, "type": "supergroup"},
+    }
+    await account_bot_runtime._handle_interaction_update(
+        1,
+        "bbot-token",
+        {"update_id": 1001, "message": {"message_id": 10010, "text": "置顶 id=12345", **base_message}},
+    )
+    assert run_entry.await_count == 1
+    assert not any(key.startswith("account_bot:interaction_user_") for key in redis.data)
+
+    await account_bot_runtime._handle_interaction_update(
+        1,
+        "bbot-token",
+        {"update_id": 1002, "message": {"message_id": 10020, "text": "置顶 id=12345", **base_message}},
+    )
+    assert run_entry.await_count == 2
+    assert send.await_args.args[:3] == ("bbot-token", -100123, "置顶成功")
+    assert any(key.startswith("account_bot:interaction_user_cooldown:") for key in redis.data)
+    assert any(key.startswith("account_bot:interaction_user_daily:") for key in redis.data)
+
+    await account_bot_runtime._handle_interaction_update(
+        1,
+        "bbot-token",
+        {"update_id": 1003, "message": {"message_id": 10030, "text": "置顶 id=12345", **base_message}},
+    )
+    assert run_entry.await_count == 2
+    assert "今日已成功置顶促销 1/2 次" in send.await_args.args[2]
+    assert "距离下次可用 CD 还剩 6小时" in send.await_args.args[2]
+
+
+@pytest.mark.asyncio
 async def test_interaction_module_start_text_is_sent_before_module_actions(monkeypatch) -> None:
     send = AsyncMock()
     run_entry = AsyncMock(
@@ -2955,12 +3072,12 @@ async def test_interaction_control_and_start_keywords_do_not_route_as_plain_mess
             return None
 
     run_entry = AsyncMock()
-    start_module = AsyncMock()
+    run_module = AsyncMock(return_value=(True, True))
     send = AsyncMock()
     monkeypatch.setattr(account_bot_runtime, "AsyncSessionLocal", lambda: _DB())
     monkeypatch.setattr(account_bot_runtime, "get_redis", lambda: _MemoryRedis())
     monkeypatch.setattr(account_bot_runtime, "_run_worker_interaction_entry", run_entry)
-    monkeypatch.setattr(account_bot_runtime, "_start_interaction_module", start_module)
+    monkeypatch.setattr(account_bot_runtime, "_run_interaction_module", run_module)
     monkeypatch.setattr(account_bot_runtime, "_close_active_interaction_games", AsyncMock(return_value=0))
     monkeypatch.setattr(account_bot_service, "send_message", send)
     monkeypatch.setattr(
@@ -3011,8 +3128,8 @@ async def test_interaction_control_and_start_keywords_do_not_route_as_plain_mess
         )
 
     assert run_entry.await_count == 0
-    assert start_module.await_count == 1
-    assert start_module.await_args.args[0].text == "开始猜骰"
+    assert run_module.await_count == 1
+    assert run_module.await_args.args[0].text == "开始猜骰"
 
 
 @pytest.mark.asyncio
@@ -3174,6 +3291,86 @@ async def test_transfer_notice_module_rule_starts_game24_with_interaction_bot(mo
     assert payload["prize"] == 888
     assert send.await_count == 1
     assert send.await_args.args[:3] == ("bbot-token", -100123, "24 点开始\n奖金：888")
+
+
+@pytest.mark.asyncio
+async def test_transfer_notice_module_rule_counts_payer_daily_limit(monkeypatch) -> None:
+    class _DB:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+        async def commit(self):
+            return None
+
+        async def get(self, *_args):  # noqa: ANN002
+            return None
+
+    redis = _MemoryRedis()
+    send = AsyncMock()
+    run_entry = AsyncMock(
+        return_value=(
+            True,
+            None,
+            [{"type": "send_message", "text": "置顶成功"}, {"type": "no_session"}],
+        )
+    )
+    monkeypatch.setattr(account_bot_runtime, "AsyncSessionLocal", lambda: _DB())
+    monkeypatch.setattr(account_bot_runtime, "get_redis", lambda: redis)
+    monkeypatch.setattr(account_bot_service, "send_message", send)
+    monkeypatch.setattr(account_bot_runtime.audit, "write", AsyncMock())
+    monkeypatch.setattr(account_bot_runtime, "_run_worker_interaction_entry", run_entry)
+    monkeypatch.setattr(
+        account_bot_service,
+        "get_transfer_notice_config",
+        AsyncMock(
+            return_value={
+                "enabled": True,
+                "trusted_bot_id": 456,
+                "rules": [
+                    {
+                        "id": "pt-promote",
+                        "name": "置顶促销",
+                        "enabled": True,
+                        "chat_ids": [-100123],
+                        "trigger_mode": "payment",
+                        "trigger_texts": ["转账成功"],
+                        "receiver_text": "BBB",
+                        "amount": 100,
+                        "action": "module",
+                        "module_key": "pt_promote",
+                        "module_action": "promote_torrent",
+                        "concurrency": "user",
+                        "daily_limit_per_user": 1,
+                    },
+                ],
+            }
+        ),
+    )
+
+    for update_id, message_id in [(71, 710), (72, 720)]:
+        await account_bot_runtime._handle_interaction_update(
+            1,
+            "bbot-token",
+            {
+                "update_id": update_id,
+                "message": {
+                    "message_id": message_id,
+                    "text": "转账成功\n付款人：AAA\n付款人ID：111\n收款人：BBB\n金额：100",
+                    "from": {"id": 456, "is_bot": True, "first_name": "Abot"},
+                    "chat": {"id": -100123, "type": "supergroup"},
+                },
+            },
+        )
+
+    assert run_entry.await_count == 1
+    assert send.await_args.args[:3] == (
+        "bbot-token",
+        -100123,
+        "AAA 今日已成功置顶促销 1/1 次，当日无法再次使用。",
+    )
 
 
 @pytest.mark.asyncio

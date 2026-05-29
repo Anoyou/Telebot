@@ -78,6 +78,9 @@ _MATH_GAME_TTL_SECONDS = 900
 _INTERACTION_RULE_STATE_PREFIX = "account_bot:interaction_rule_state:"
 _INTERACTION_TRIGGER_DEDUPE_PREFIX = "account_bot:interaction_trigger:"
 _INTERACTION_SESSION_PREFIX = "account_bot:interaction_session:"
+_INTERACTION_USER_COOLDOWN_PREFIX = "account_bot:interaction_user_cooldown:"
+_INTERACTION_USER_DAILY_PREFIX = "account_bot:interaction_user_daily:"
+_INTERACTION_USER_PENDING_PREFIX = "account_bot:interaction_user_pending:"
 AUTO_PAYOUT_MODULE_KEYS = {"game24", "math10", "dice_grid_hunt"}
 
 
@@ -1057,6 +1060,38 @@ def _message_equals_any(text: str, candidates: list[str]) -> bool:
     return bool(clean and any(clean == candidate for candidate in candidates))
 
 
+def _message_match_keyword_pattern(text: str, candidates: list[str]) -> dict[str, str] | None:
+    clean = text.strip()
+    if not clean:
+        return None
+    for candidate in candidates:
+        pattern = candidate.strip()
+        if not pattern:
+            continue
+        if clean == pattern:
+            return {}
+        regex = re.escape(pattern)
+        regex = re.sub(
+            r"id(?:\\ )*=(?:\\ )*数字",
+            lambda _match: r"id\s*=\s*(?P<id>\d+)",
+            regex,
+        )
+        regex = re.sub(
+            r"num(?:\\ )*=(?:\\ )*数字",
+            lambda _match: r"num\s*=\s*(?P<num>\d+)",
+            regex,
+        )
+        if regex == re.escape(pattern):
+            continue
+        try:
+            match = re.fullmatch(regex, clean, flags=re.IGNORECASE)
+        except re.error:
+            continue
+        if match:
+            return {key: value for key, value in match.groupdict().items() if value}
+    return None
+
+
 def _message_line_equals_any(text: str, candidates: list[str]) -> bool:
     units = [text.strip(), *(line.strip() for line in text.splitlines())]
     return any(_message_equals_any(unit, candidates) for unit in units if unit)
@@ -1093,6 +1128,54 @@ def _interaction_session_ttl(rule: dict[str, Any]) -> int:
     except (TypeError, ValueError):
         ttl = 600
     return min(max(ttl, 30), 86400)
+
+
+def _duration_seconds(value: Any, default: int = 0) -> int:
+    text = str(value or "").strip().lower()
+    if not text:
+        return default
+    match = re.fullmatch(r"(\d+)\s*([smhd]?)", text)
+    if not match:
+        return default
+    amount = int(match.group(1))
+    unit = match.group(2) or "s"
+    multiplier = {"s": 1, "m": 60, "h": 3600, "d": 86400}[unit]
+    return max(0, min(amount * multiplier, 30 * 86400))
+
+
+def _format_duration(seconds: int) -> str:
+    seconds = max(0, int(seconds or 0))
+    if seconds >= 86400:
+        days, rest = divmod(seconds, 86400)
+        hours = rest // 3600
+        return f"{days}天{hours}小时" if hours else f"{days}天"
+    if seconds >= 3600:
+        hours, rest = divmod(seconds, 3600)
+        minutes = rest // 60
+        return f"{hours}小时{minutes}分钟" if minutes else f"{hours}小时"
+    if seconds >= 60:
+        minutes, rest = divmod(seconds, 60)
+        return f"{minutes}分钟{rest}秒" if rest else f"{minutes}分钟"
+    return f"{seconds}秒"
+
+
+def _seconds_until_local_midnight(now: float | None = None) -> int:
+    ts = time.time() if now is None else now
+    current = time.localtime(ts)
+    next_midnight = time.mktime(
+        (
+            current.tm_year,
+            current.tm_mon,
+            current.tm_mday + 1,
+            0,
+            0,
+            0,
+            current.tm_wday,
+            current.tm_yday,
+            current.tm_isdst,
+        )
+    )
+    return max(60, int(next_midnight - ts))
 
 
 def _interaction_session_user_id(incoming: Incoming, data: dict[str, Any] | None = None) -> int | None:
@@ -1415,6 +1498,188 @@ async def _claim_interaction_trigger(incoming: Incoming, rule: dict[str, Any], k
         return True
 
 
+def _interaction_user_usage_identity(incoming: Incoming, data: dict[str, Any] | None = None) -> tuple[str, str] | None:
+    payload = data if isinstance(data, dict) else {}
+    payer_id = _int_or_none(payload.get("payer_user_id"))
+    if payer_id is not None:
+        label = str(payload.get("payer_name") or payer_id).strip()
+        return f"id:{payer_id}", account_bot_service.html_text(label)
+    payer_name = str(payload.get("payer_name") or "").strip()
+    if payer_name:
+        return f"name:{payer_name.casefold()}", account_bot_service.html_text(payer_name)
+    if incoming.user_id is None:
+        return None
+    return f"id:{incoming.user_id}", _interaction_user_label(incoming)
+
+
+def _interaction_user_usage_keys(
+    incoming: Incoming,
+    rule: dict[str, Any],
+    data: dict[str, Any] | None = None,
+) -> tuple[str, str, str] | None:
+    identity = _interaction_user_usage_identity(incoming, data)
+    if identity is None:
+        return None
+    identity_key, _label = identity
+    raw = f"{incoming.account_id}:{incoming.chat_id or 0}:{rule.get('id') or 'legacy'}:{identity_key}"
+    digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()
+    today = time.strftime("%Y%m%d", time.localtime())
+    return (
+        f"{_INTERACTION_USER_COOLDOWN_PREFIX}{digest}",
+        f"{_INTERACTION_USER_DAILY_PREFIX}{today}:{digest}",
+        f"{_INTERACTION_USER_PENDING_PREFIX}{digest}",
+    )
+
+
+def _interaction_user_usage_limits(rule: dict[str, Any]) -> tuple[int, int]:
+    if str(rule.get("concurrency") or "chat") != "user":
+        return 0, 0
+    return (
+        _duration_seconds(rule.get("user_cooldown_seconds"), 0),
+        _int_or_none(rule.get("daily_limit_per_user")) or 0,
+    )
+
+
+def _interaction_user_pending_ttl(cooldown_seconds: int) -> int:
+    return min(max(int(cooldown_seconds or 0), 30), 300)
+
+
+def _interaction_user_label(incoming: Incoming) -> str:
+    if incoming.username:
+        return account_bot_service.html_text(f"@{incoming.username.strip().lstrip('@')}")
+    if incoming.display_name:
+        return account_bot_service.html_text(incoming.display_name)
+    if incoming.user_id is not None:
+        return str(incoming.user_id)
+    return "该用户"
+
+
+def _interaction_rule_feature_label(rule: dict[str, Any]) -> str:
+    return account_bot_service.html_text(str(rule.get("name") or "该功能").strip() or "该功能")
+
+
+async def _interaction_user_usage_block_message(
+    incoming: Incoming,
+    rule: dict[str, Any],
+    data: dict[str, Any] | None = None,
+) -> str | None:
+    keys = _interaction_user_usage_keys(incoming, rule, data)
+    if keys is None:
+        return None
+    cooldown_seconds, daily_limit = _interaction_user_usage_limits(rule)
+    if cooldown_seconds <= 0 and daily_limit <= 0:
+        return None
+    cooldown_key, daily_key, pending_key = keys
+    identity = _interaction_user_usage_identity(incoming, data)
+    user = identity[1] if identity is not None else _interaction_user_label(incoming)
+    feature = _interaction_rule_feature_label(rule)
+    try:
+        redis = get_redis()
+        raw_count = await redis.get(daily_key)
+        if isinstance(raw_count, bytes):
+            raw_count = raw_count.decode("utf-8", errors="ignore")
+        count = max(0, int(raw_count or 0))
+        if daily_limit > 0 and count >= daily_limit:
+            return f"{user} 今日已成功{feature} {count}/{daily_limit} 次，当日无法再次使用。"
+        if await redis.get(pending_key):
+            remaining = _interaction_user_pending_ttl(cooldown_seconds)
+            ttl_fn = getattr(redis, "ttl", None)
+            if callable(ttl_fn):
+                try:
+                    ttl_value = int(await ttl_fn(pending_key))
+                    if ttl_value > 0:
+                        remaining = ttl_value
+                except Exception:  # noqa: BLE001
+                    remaining = _interaction_user_pending_ttl(cooldown_seconds)
+            return f"{user} 正在处理{feature}，请稍后再试（预计 {_format_duration(remaining)}）。"
+        if cooldown_seconds > 0 and await redis.get(cooldown_key):
+            ttl_fn = getattr(redis, "ttl", None)
+            remaining = cooldown_seconds
+            if callable(ttl_fn):
+                try:
+                    ttl_value = int(await ttl_fn(cooldown_key))
+                    if ttl_value > 0:
+                        remaining = ttl_value
+                except Exception:  # noqa: BLE001
+                    remaining = cooldown_seconds
+            limit_part = f" {count}/{daily_limit} 次，" if daily_limit > 0 else "，"
+            return f"{user} 今日已成功{feature}{limit_part}距离下次可用 CD 还剩 {_format_duration(remaining)}。"
+    except Exception:  # noqa: BLE001
+        log.debug("interaction user usage check failed aid=%s rule=%s", incoming.account_id, rule.get("id"), exc_info=True)
+    return None
+
+
+async def _claim_interaction_user_usage(
+    incoming: Incoming,
+    rule: dict[str, Any],
+    data: dict[str, Any] | None = None,
+) -> tuple[bool, str | None]:
+    keys = _interaction_user_usage_keys(incoming, rule, data)
+    if keys is None:
+        return True, None
+    cooldown_seconds, daily_limit = _interaction_user_usage_limits(rule)
+    if cooldown_seconds <= 0 and daily_limit <= 0:
+        return True, None
+    _cooldown_key, _daily_key, pending_key = keys
+    try:
+        redis = get_redis()
+        claimed = await redis.set(
+            pending_key,
+            "1",
+            ex=_interaction_user_pending_ttl(cooldown_seconds),
+            nx=True,
+        )
+        return bool(claimed), pending_key if claimed else None
+    except Exception:  # noqa: BLE001
+        log.debug("interaction user usage claim failed aid=%s rule=%s", incoming.account_id, rule.get("id"), exc_info=True)
+        return True, None
+
+
+async def _release_interaction_user_usage_claim(pending_key: str | None) -> None:
+    if not pending_key:
+        return
+    try:
+        redis = get_redis()
+        delete = getattr(redis, "delete", None)
+        if callable(delete):
+            await delete(pending_key)
+    except Exception:  # noqa: BLE001
+        log.debug("interaction user usage claim release failed", exc_info=True)
+
+
+async def _mark_interaction_user_usage(
+    incoming: Incoming,
+    rule: dict[str, Any],
+    data: dict[str, Any] | None = None,
+) -> None:
+    keys = _interaction_user_usage_keys(incoming, rule, data)
+    if keys is None:
+        return
+    cooldown_seconds, daily_limit = _interaction_user_usage_limits(rule)
+    if cooldown_seconds <= 0 and daily_limit <= 0:
+        return
+    cooldown_key, daily_key, _pending_key = keys
+    try:
+        redis = get_redis()
+        if cooldown_seconds > 0:
+            await redis.set(cooldown_key, "1", ex=cooldown_seconds)
+        if daily_limit > 0:
+            incr = getattr(redis, "incr", None)
+            expire = getattr(redis, "expire", None)
+            if callable(incr):
+                count = int(await incr(daily_key))
+                if count == 1 and callable(expire):
+                    await expire(daily_key, _seconds_until_local_midnight())
+            else:
+                raw_count = await redis.get(daily_key)
+                if isinstance(raw_count, bytes):
+                    raw_count = raw_count.decode("utf-8", errors="ignore")
+                count = max(0, int(raw_count or 0)) + 1
+                await redis.set(daily_key, str(count), ex=_seconds_until_local_midnight())
+    except Exception:  # noqa: BLE001
+        log.debug("interaction user usage mark failed aid=%s rule=%s", incoming.account_id, rule.get("id"), exc_info=True)
+
+
 def _receiver_name_matches(receiver_filter: str | None, receiver_name: str) -> bool:
     if not receiver_filter:
         return True
@@ -1595,10 +1860,15 @@ async def _execute_interaction_rule(
         await _start_math_game(incoming, prize=int(rule.get("math_prize") or 123))
         return True
     if rule.get("action") == "module":
-        started = await _start_interaction_module(incoming, rule, parsed=parsed, event_type=event_type)
-        if started:
+        ok, keep_session = await _run_interaction_module(
+            incoming,
+            rule,
+            parsed=parsed,
+            event_type=event_type,
+        )
+        if ok and keep_session:
             await _save_interaction_session(incoming, rule, event_type, parsed)
-        return started
+        return ok
     text = _render_transfer_notice_response(str(rule.get("response_template") or ""), parsed or {})
     await _send(incoming, text)
     return True
@@ -1648,7 +1918,11 @@ async def _try_handle_interaction_rule_command_or_keyword(db: Any, incoming: Inc
             return True
         if not _rule_trigger_mode_allows(rule, "keyword"):
             continue
-        if not _message_equals_any(incoming.text, _rule_keyword_list(rule, "module_start_keywords")):
+        keyword_payload = _message_match_keyword_pattern(
+            incoming.text,
+            _rule_keyword_list(rule, "module_start_keywords"),
+        )
+        if keyword_payload is None:
             continue
         if not await _is_interaction_rule_open(incoming.account_id, rule, incoming.chat_id):
             message = str(rule.get("disabled_message") or "").strip()
@@ -1662,9 +1936,33 @@ async def _try_handle_interaction_rule_command_or_keyword(db: Any, incoming: Inc
                 reply_to_message_id=incoming.message_id,
             )
             return True
-        if not await _claim_interaction_trigger(incoming, rule, "keyword", incoming.text):
+        usage_block = await _interaction_user_usage_block_message(incoming, rule)
+        if usage_block:
+            await _send(incoming, usage_block, reply_to_message_id=incoming.message_id)
             return True
-        await _execute_interaction_rule(incoming, rule, event_type="keyword")
+        claimed_usage, usage_pending_key = await _claim_interaction_user_usage(incoming, rule)
+        if not claimed_usage:
+            usage_block = await _interaction_user_usage_block_message(incoming, rule)
+            await _send(
+                incoming,
+                usage_block or "该用户正在处理该功能，请稍后再试。",
+                reply_to_message_id=incoming.message_id,
+            )
+            return True
+        if not await _claim_interaction_trigger(incoming, rule, "keyword", incoming.text):
+            await _release_interaction_user_usage_claim(usage_pending_key)
+            return True
+        try:
+            executed = await _execute_interaction_rule(
+                incoming,
+                rule,
+                parsed=keyword_payload or None,
+                event_type="keyword",
+            )
+            if executed:
+                await _mark_interaction_user_usage(incoming, rule)
+        finally:
+            await _release_interaction_user_usage_claim(usage_pending_key)
         return True
     return False
 
@@ -2102,18 +2400,18 @@ async def _apply_interaction_actions(incoming: Incoming, actions: list[dict[str,
         )
 
 
-async def _start_interaction_module(
+async def _run_interaction_module(
     incoming: Incoming,
     rule: dict[str, Any],
     *,
     parsed: dict[str, Any] | None = None,
     event_type: str = "payment_confirmed",
-) -> bool:
+) -> tuple[bool, bool]:
     module_key = str(rule.get("module_key") or "").strip()
     entry_key = str(rule.get("module_action") or "").strip()
     if not module_key or not entry_key:
         await _send(incoming, "模块启动失败：请先选择模块和交互入口。")
-        return False
+        return False, False
     start_text = str(rule.get("module_start_text") or "").strip()
     if start_text:
         await _send(incoming, start_text, reply_to_message_id=incoming.message_id)
@@ -2129,9 +2427,25 @@ async def _start_interaction_module(
             incoming,
             f"模块启动失败：{account_bot_service.html_text(error or f'{module_key}.{entry_key} 不可用')}",
         )
-        return False
+        return False, False
     keep_session = not _interaction_actions_request_no_session(actions)
     await _apply_interaction_actions(incoming, actions)
+    return True, keep_session
+
+
+async def _start_interaction_module(
+    incoming: Incoming,
+    rule: dict[str, Any],
+    *,
+    parsed: dict[str, Any] | None = None,
+    event_type: str = "payment_confirmed",
+) -> bool:
+    _ok, keep_session = await _run_interaction_module(
+        incoming,
+        rule,
+        parsed=parsed,
+        event_type=event_type,
+    )
     return keep_session
 
 
@@ -2333,8 +2647,27 @@ async def _try_handle_transfer_notice(db: Any, incoming: Incoming) -> bool:
     if not await _claim_interaction_trigger(incoming, rule, "transfer_notice", parsed):
         log.info("transfer notice skipped: duplicate aid=%s rule=%s", incoming.account_id, rule.get("id"))
         return True
+    usage_block = await _interaction_user_usage_block_message(incoming, rule, parsed)
+    if usage_block:
+        await _send(incoming, usage_block, reply_to_message_id=incoming.message_id)
+        return True
+    claimed_usage, usage_pending_key = await _claim_interaction_user_usage(incoming, rule, parsed)
+    if not claimed_usage:
+        usage_block = await _interaction_user_usage_block_message(incoming, rule, parsed)
+        await _send(
+            incoming,
+            usage_block or "该用户正在处理该功能，请稍后再试。",
+            reply_to_message_id=incoming.message_id,
+        )
+        return True
 
-    await _execute_interaction_rule(incoming, rule, parsed)
+    executed = False
+    try:
+        executed = await _execute_interaction_rule(incoming, rule, parsed)
+        if executed:
+            await _mark_interaction_user_usage(incoming, rule, parsed)
+    finally:
+        await _release_interaction_user_usage_claim(usage_pending_key)
     await _audit_transfer_notice(db, incoming, parsed)
     log.info(
         "transfer notice matched aid=%s chat_id=%s sender_id=%s amount=%s",

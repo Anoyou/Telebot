@@ -506,6 +506,7 @@ async def test_auto_reply_failed_command_does_not_mark_usage() -> None:
             "cooldown_seconds": "6h",
             "cooldown_scope": "user",
             "daily_limit_per_user": 2,
+            "usage_label": "置顶促销",
             "reply_to": False,
         },
     )
@@ -555,6 +556,7 @@ async def test_auto_reply_missing_seed_id_usage_does_not_mark_usage() -> None:
             "cooldown_seconds": "6h",
             "cooldown_scope": "user",
             "daily_limit_per_user": 2,
+            "usage_label": "置顶促销",
             "reply_to": False,
         },
     )
@@ -604,6 +606,7 @@ async def test_auto_reply_successful_command_marks_usage() -> None:
             "cooldown_seconds": "6h",
             "cooldown_scope": "user",
             "daily_limit_per_user": 2,
+            "usage_label": "置顶促销",
             "reply_to": False,
         },
     )
@@ -611,11 +614,19 @@ async def test_auto_reply_successful_command_marks_usage() -> None:
     engine = _make_engine()
     ctx = _make_ctx([rule], engine, redis)
     event = _make_event("置顶 id=12345", is_private=False, chat_id=-100123, sender_id=111)
+    sent = _FakeSentMessage()
+    event.respond.return_value = sent
 
     try:
         await AutoReplyPlugin().on_message(ctx, event)
 
         event.respond.assert_awaited_once_with("✅ 置顶促销成功！\n种子：12345")
+        sent.edit.assert_awaited_once()
+        success_notice = sent.edit.await_args.args[0]
+        assert success_notice.startswith("✅ 置顶促销成功！\n种子：12345")
+        assert "今日已成功置顶促销 1/2 次" in success_notice
+        assert "距离下次可用 CD 还剩 6小时" in success_notice
+        assert "本次是第" not in success_notice
         assert redis.kv["ar:cool:1:13:user:-100123:111"] == "1"
         quota_keys = [key for key in redis.kv if key.startswith("ar:quota:1:13:")]
         assert len(quota_keys) == 1
@@ -704,10 +715,13 @@ async def test_auto_reply_command_edits_merge_and_append_final_limit_notice() ->
         await event.edit(f"⏳ 正在获取 ID 为 {seed_id} 的种子的促销信息...")
         await event.edit(
             f"✅ 种子置顶促销成功！\n\n"
-            f"种子 ID：{seed_id}\n"
+            f"种子：<a href=\"https://www.qingwapt.com/details.php?id={seed_id}\">测试标题</a>"
+            f"（ID：<code>{seed_id}</code>）\n"
+            f"副标题：测试副标题\n"
             f"促销类型：Free\n"
             f"促销时长：1 天\n"
-            f"消耗：8,000 蝌蚪"
+            f"消耗：8,000 蝌蚪",
+            parse_mode="html",
         )
 
     register_plugin_command("mergept", _merge_command, owner_plugin_key="test_auto_reply")
@@ -731,6 +745,7 @@ async def test_auto_reply_command_edits_merge_and_append_final_limit_notice() ->
             "cooldown_seconds": 0,
             "cooldown_scope": "user",
             "daily_limit_per_user": 1,
+            "usage_label": "置顶促销",
             "reply_to": False,
         },
     )
@@ -750,10 +765,12 @@ async def test_auto_reply_command_edits_merge_and_append_final_limit_notice() ->
         assert sent.edit.await_args_list[0].args[0].startswith("✅ 种子置顶促销成功！")
         final_text = sent.edit.await_args_list[1].args[0]
         assert final_text.startswith("✅ 种子置顶促销成功！")
-        assert "种子 ID：31420" in final_text
-        assert "今日已置顶 1/1 次" in final_text
-        assert "本次是第 1 次" in final_text
-        assert "当日无法再次使用置顶功能" in final_text
+        assert "种子：<a href=\"https://www.qingwapt.com/details.php?id=31420\">测试标题</a>" in final_text
+        assert "副标题：测试副标题" in final_text
+        assert "今日已成功置顶促销 1/1 次" in final_text
+        assert "本次是第" not in final_text
+        assert "当日无法再次使用置顶促销功能" in final_text
+        assert sent.edit.await_args_list[1].kwargs == {"parse_mode": "html"}
     finally:
         unregister_plugin_command("mergept", owner_plugin_key="test_auto_reply")
         set_command_context(
@@ -774,6 +791,7 @@ async def test_auto_reply_cooldown_notice_reports_remaining_and_count() -> None:
             "cooldown_seconds": "6h",
             "cooldown_scope": "user",
             "daily_limit_per_user": 2,
+            "usage_label": "置顶促销",
             "reply_to": False,
         },
     )
@@ -788,8 +806,8 @@ async def test_auto_reply_cooldown_notice_reports_remaining_and_count() -> None:
 
     first.respond.assert_awaited_once_with("ok 12345")
     notice = second.respond.await_args.args[0]
-    assert "今日已置顶 1/2 次" in notice
-    assert "本次是第 1 次" in notice
+    assert "今日已成功置顶促销 1/2 次" in notice
+    assert "本次是第" not in notice
     assert "6小时" in notice
 
 

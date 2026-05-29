@@ -209,11 +209,11 @@ class AutoReplyPlugin(Plugin):
                                 )
                             return
                         await _mark_usage(ctx, rule.id, chat_id, sender_id, cfg, usage)
-                        final_notice = await self._render_final_limit_notice(
+                        success_notice = await self._render_success_usage_notice(
                             event, rule, cfg, text, match_vars, usage
                         )
-                        if final_notice:
-                            await command_event.append_notice(final_notice)
+                        if success_notice:
+                            await command_event.append_notice(success_notice)
                         if ctx.log is not None:
                             await ctx.log(
                                 "info",
@@ -239,8 +239,8 @@ class AutoReplyPlugin(Plugin):
                             f"auto_reply 命中规则 #{rule.id} (reply_to={reply_to_msg})",
                             rule_id=rule.id,
                         )
-                    await self._send_final_limit_notice(
-                        ctx, event, rule, cfg, text, match_vars, usage
+                    await self._send_success_usage_notice(
+                        ctx, event, rule, cfg, text, match_vars, usage, include_non_final=False
                     )
                 except Exception as exc:  # noqa: BLE001
                     # 这里手动包装：因为我们没用 @rate_limited 装饰器
@@ -277,7 +277,7 @@ class AutoReplyPlugin(Plugin):
             return
         await self._send_notice(ctx, event, rule, cfg, trigger_text, match_vars, usage, template)
 
-    async def _send_final_limit_notice(
+    async def _send_success_usage_notice(
         self,
         ctx: PluginContext,
         event: events.NewMessage.Event,
@@ -286,14 +286,16 @@ class AutoReplyPlugin(Plugin):
         trigger_text: str,
         match_vars: dict[str, str],
         usage: _UsageStatus,
+        *,
+        include_non_final: bool = True,
     ) -> None:
-        text_out = await self._render_final_limit_notice(
-            event, rule, cfg, trigger_text, match_vars, usage
+        text_out = await self._render_success_usage_notice(
+            event, rule, cfg, trigger_text, match_vars, usage, include_non_final=include_non_final
         )
         if text_out:
             await self._send_notice_text(ctx, event, cfg, text_out)
 
-    async def _render_final_limit_notice(
+    async def _render_success_usage_notice(
         self,
         event: events.NewMessage.Event,
         rule: Any,
@@ -301,12 +303,21 @@ class AutoReplyPlugin(Plugin):
         trigger_text: str,
         match_vars: dict[str, str],
         usage: _UsageStatus,
+        *,
+        include_non_final: bool = True,
     ) -> str | None:
-        if not usage.final_use or cfg.get("daily_limit_notice_enabled") is False:
+        if usage.daily_limit <= 0 or cfg.get("daily_limit_notice_enabled") is False:
             return None
-        template = str(
-            cfg.get("daily_limit_final_message_template") or _DEFAULT_DAILY_LIMIT_FINAL_NOTICE
-        )
+        if not include_non_final and not usage.final_use:
+            return None
+        if usage.final_use:
+            template = str(
+                cfg.get("daily_limit_final_message_template") or _DEFAULT_DAILY_LIMIT_FINAL_NOTICE
+            )
+        else:
+            template = str(
+                cfg.get("daily_limit_success_message_template") or _DEFAULT_DAILY_LIMIT_SUCCESS_NOTICE
+            )
         return await self._render_notice_text(event, rule, cfg, trigger_text, match_vars, usage, template)
 
     async def _render_notice_text(
@@ -429,15 +440,19 @@ class AutoReplyPlugin(Plugin):
 
 _DEFAULT_COOLDOWN_NOTICE = "{user} 当前规则还在冷却中，距离下次可用 CD 还剩 {remaining}。"
 _DEFAULT_COOLDOWN_NOTICE_WITH_LIMIT = (
-    "{user} 今日已{action} {count}/{limit} 次，本次是第 {count} 次，"
+    "{user} 今日已成功{action} {count}/{limit} 次，"
     "距离下次可用 CD 还剩 {remaining}。"
 )
 _DEFAULT_DAILY_LIMIT_NOTICE = (
-    "{user} 今日已{action} {count}/{limit} 次，当日无法再次使用{feature}，"
+    "{user} 今日已成功{action} {count}/{limit} 次，当日无法再次使用{feature}，"
     "如需使用请联系管理员或明日再用。"
 )
+_DEFAULT_DAILY_LIMIT_SUCCESS_NOTICE = (
+    "{user} 今日已成功{action} {count}/{limit} 次，"
+    "距离下次可用 CD 还剩 {remaining}。"
+)
 _DEFAULT_DAILY_LIMIT_FINAL_NOTICE = (
-    "{user} 今日已{action} {count}/{limit} 次，本次是第 {count} 次，"
+    "{user} 今日已成功{action} {count}/{limit} 次，"
     "当日无法再次使用{feature}，如需使用请联系管理员或明日再用。"
 )
 
@@ -472,6 +487,7 @@ class _AutoReplyCommandEvent:
         self.is_channel = getattr(source, "is_channel", False)
         self.outgoing = True
         self.outputs: list[str] = []
+        self._last_parse_mode: Any | None = None
         self._sent_message: Any | None = None
 
     def __getattr__(self, name: str):
@@ -510,8 +526,9 @@ class _AutoReplyCommandEvent:
         if not notice:
             return
         base = self.outputs[-1] if self.outputs else ""
-        merged = f"{base.rstrip()}\n\n{notice}" if base.strip() else notice
-        await self.edit(merged)
+        merged = f"{base.rstrip()}\n{notice}" if base.strip() else notice
+        kwargs = {"parse_mode": self._last_parse_mode} if self._last_parse_mode else {}
+        await self.edit(merged, **kwargs)
 
     async def _send_first(
         self,
@@ -549,6 +566,9 @@ class _AutoReplyCommandEvent:
             text = kwargs.get("message") or kwargs.get("text") or ""
         if text is not None:
             self.outputs.append(str(text))
+        parse_mode = kwargs.get("parse_mode")
+        if parse_mode:
+            self._last_parse_mode = parse_mode
 
     def _remember_sent_message(self, sent: Any) -> None:
         if sent is not None and hasattr(sent, "edit"):
@@ -570,6 +590,12 @@ def _command_output_is_failure(text: str) -> bool:
         "没有种子ID",
         "未提供种子 ID",
         "未提供种子ID",
+        "冷却",
+        "正在处理",
+        "重复触发",
+        "重复消耗",
+        "已处于置顶状态",
+        "不再处理",
     )
     return any(marker in raw for marker in failure_markers)
 
@@ -1238,14 +1264,17 @@ def _usage_template_vars(
     count = usage.next_count if usage.allowed and usage.next_count else usage.count_today
     if usage.reason == "daily_limit":
         count = usage.daily_limit or usage.count_today
+    remaining_seconds = usage.remaining_seconds
+    if usage.allowed and remaining_seconds <= 0:
+        remaining_seconds = usage.cooldown_seconds
     return {
         "user": _sender_display(sender, sender_id),
         "action": action,
         "feature": feature,
         "count": str(max(0, count)),
         "limit": str(max(0, usage.daily_limit)),
-        "remaining": _format_remaining(usage.remaining_seconds),
-        "remaining_seconds": str(max(0, usage.remaining_seconds)),
+        "remaining": _format_remaining(remaining_seconds),
+        "remaining_seconds": str(max(0, remaining_seconds)),
         "next_count": str(max(0, usage.next_count)),
     }
 
