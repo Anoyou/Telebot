@@ -484,6 +484,14 @@ async def run_worker(account_id: int) -> None:
         await _publish(redis, account_id, EVT_STATUS, status="stopped")
 
 
+async def _next_pubsub_message(pubsub: Any, *, timeout: float = 1.0) -> dict[str, Any] | None:
+    try:
+        msg = await pubsub.get_message(ignore_subscribe_messages=True, timeout=timeout)
+    except TimeoutError:
+        return None
+    return msg if isinstance(msg, dict) else None
+
+
 async def _listen_cmd(
     redis,
     client,
@@ -502,8 +510,9 @@ async def _listen_cmd(
             pubsub = redis.pubsub()
             await pubsub.subscribe(cmd_channel(account_id))
             try:
-                async for msg in pubsub.listen():
-                    if msg.get("type") != "message":
+                while True:
+                    msg = await _next_pubsub_message(pubsub)
+                    if not msg or msg.get("type") != "message":
                         continue
                     try:
                         cmd = IPCMessage.decode(msg["data"])
@@ -750,8 +759,9 @@ async def _listen_global(redis, account_id: int, paused: asyncio.Event) -> None:
             pubsub = redis.pubsub()
             await pubsub.subscribe(GLOBAL_CHANNEL)
             try:
-                async for msg in pubsub.listen():
-                    if msg.get("type") != "message":
+                while True:
+                    msg = await _next_pubsub_message(pubsub)
+                    if not msg or msg.get("type") != "message":
                         continue
                     try:
                         cmd = IPCMessage.decode(msg["data"])

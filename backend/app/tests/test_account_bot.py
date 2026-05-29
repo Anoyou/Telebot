@@ -16,6 +16,7 @@ from app.db.models.account_bot import AccountBot
 from app.db.models.log import RuntimeLog
 from app.schemas.account_bot import AccountBotConfigUpdate, AccountBotTestRequest
 from app.services import account_bot_runtime, account_bot_service, audit
+from app.worker import runtime as worker_runtime
 from app.worker.plugins import loader as plugin_loader
 from app.worker.plugins.builtin.chatgpt_image.manifest import MANIFEST as CHATGPT_IMAGE_MANIFEST
 from app.worker.plugins.builtin.codex_image.manifest import MANIFEST as CODEX_IMAGE_MANIFEST
@@ -49,6 +50,15 @@ class _MemoryRedis:
     async def rpush(self, key: str, value: str | bytes):
         self.data.setdefault(key, "")
         return 1
+
+
+@pytest.mark.asyncio
+async def test_worker_pubsub_idle_timeout_is_treated_as_no_message() -> None:
+    class _PubSub:
+        async def get_message(self, **_kwargs):  # noqa: ANN003
+            raise TimeoutError("idle")
+
+    assert await worker_runtime._next_pubsub_message(_PubSub()) is None
 
 
 def test_account_bot_config_response_hides_plain_token() -> None:

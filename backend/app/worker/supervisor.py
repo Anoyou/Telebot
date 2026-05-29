@@ -794,13 +794,16 @@ async def _consume_stream_reliable(
             try:
                 inflight_len = await redis.llen(inflight_key)
                 if inflight_len == 0:
-                    first = await redis.blmove(
-                        stream_key,
-                        inflight_key,
-                        timeout=5,
-                        src="LEFT",
-                        dest="RIGHT",
-                    )
+                    try:
+                        first = await redis.blmove(
+                            stream_key,
+                            inflight_key,
+                            timeout=5,
+                            src="LEFT",
+                            dest="RIGHT",
+                        )
+                    except TimeoutError:
+                        continue
                     if first is None:
                         continue
                 for _ in range(batch_size - 1):
