@@ -81,7 +81,7 @@ export function SignalPill({
   return (
     <div
       className={cn(
-        "inline-flex min-h-9 max-w-full items-center gap-2 rounded-full border px-3 text-xs shadow-sm",
+        "inline-flex min-h-9 max-w-full items-center gap-2 whitespace-nowrap rounded-full border px-3 text-xs shadow-sm",
         toneClass.pill,
         className,
       )}
@@ -199,7 +199,7 @@ export function StatusSummaryPanel({
       )}
     >
       <div className="absolute inset-0 pointer-events-none bg-[radial-gradient(circle_at_8%_0%,hsl(var(--primary)/0.10),transparent_28rem),linear-gradient(115deg,hsl(var(--card)),hsl(var(--muted)/0.45))]" />
-      <div className="relative grid gap-6 p-5 md:grid-cols-[minmax(0,1fr)_auto] md:p-6 lg:p-7">
+      <div className="relative grid gap-6 p-5 lg:grid-cols-[minmax(0,1fr)_auto] md:p-6 lg:p-7">
         <div className="min-w-0">
           <div className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-border/70 bg-background/80 text-primary shadow-sm">
             <Icon className="h-5 w-5" />
@@ -213,9 +213,9 @@ export function StatusSummaryPanel({
           {signals ? <div className="mt-5 flex flex-wrap gap-2">{signals}</div> : null}
         </div>
         {(aside || actions) ? (
-          <div className="flex flex-col justify-between gap-4 md:min-w-64 md:items-end">
+          <div className="flex flex-col justify-between gap-4 lg:min-w-64 lg:items-end">
             {aside}
-            {actions ? <div className="flex flex-wrap gap-2 md:justify-end">{actions}</div> : null}
+            {actions ? <div className="flex flex-wrap gap-2 lg:justify-end">{actions}</div> : null}
           </div>
         ) : null}
       </div>
@@ -239,8 +239,8 @@ export function SectionHeader({
   className?: string;
 }) {
   return (
-    <div className={cn("flex items-start justify-between gap-3", className)}>
-      <div className="min-w-0">
+    <div className={cn("flex flex-col gap-3 md:flex-row md:items-start md:justify-between", className)}>
+      <div className="min-w-0 flex-1">
         <div className="flex min-w-0 items-center gap-2">
           {Icon ? <Icon className="h-4 w-4 shrink-0 text-primary" /> : null}
           <div className="min-w-0 truncate text-base font-semibold tracking-tight">
@@ -254,7 +254,7 @@ export function SectionHeader({
         ) : null}
       </div>
       {(meta || actions) ? (
-        <div className="flex shrink-0 items-center gap-2">
+        <div className="flex w-full min-w-0 flex-wrap items-center gap-2 md:w-auto md:shrink-0 md:justify-end">
           {meta}
           {actions}
         </div>

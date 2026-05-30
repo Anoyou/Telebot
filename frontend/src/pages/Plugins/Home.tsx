@@ -9,6 +9,7 @@ import {
   CalendarClock,
   FileText,
   History,
+  MessageSquareText,
   Package2,
   Package,
   PackagePlus,
@@ -500,17 +501,34 @@ export function PluginsHome() {
             </div>
           ) : null}
           {accounts.length > 0 ? (
-            <div className="flex flex-col items-stretch gap-2 sm:flex-row sm:items-center">
-              <span className="text-sm text-muted-foreground">选择配置的账号：</span>
-              <Select
-                value={selectedAid?.toString() ?? ""}
-                onChange={(e) => setSelectedAid(Number(e.target.value))}
-                className="w-full sm:w-64"
+            <div className="flex flex-col items-stretch gap-2 lg:flex-row lg:items-center lg:justify-between">
+              <div className="flex flex-col items-stretch gap-2 sm:flex-row sm:items-center">
+                <span className="text-sm text-muted-foreground">选择配置的账号：</span>
+                <Select
+                  value={selectedAid?.toString() ?? ""}
+                  onChange={(e) => setSelectedAid(Number(e.target.value))}
+                  className="w-full sm:w-64"
+                >
+                  {accounts.map((a) => (
+                    <option key={a.id} value={a.id}>{a.name}</option>
+                  ))}
+                </Select>
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                className="justify-center"
+                onClick={() =>
+                  nav(
+                    selectedAid
+                      ? `/plugins/message-template-lab?aid=${selectedAid}`
+                      : "/plugins/message-template-lab",
+                  )
+                }
               >
-                {accounts.map((a) => (
-                  <option key={a.id} value={a.id}>{a.name}</option>
-                ))}
-              </Select>
+                <MessageSquareText className="mr-1 h-4 w-4" />
+                消息模板测试
+              </Button>
             </div>
           ) : null}
           <div className="grid gap-4 lg:grid-cols-2">

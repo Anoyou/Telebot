@@ -77,11 +77,16 @@ export function TelegramHtmlPreview({
         </div>
       </div>
       {hints && hints.length > 0 ? (
-        <div className="mt-3 grid gap-1.5 rounded-xl border border-border/70 bg-background/75 p-2.5 text-[11px]">
+        <div className="mt-3 grid min-w-0 gap-1.5 rounded-xl border border-border/70 bg-background/75 p-2.5 text-[11px]">
           {hints.map((hint) => (
-            <div key={`${hint.label}-${hint.value}`} className="flex items-start gap-1.5">
-              <span className="text-muted-foreground">{hint.label}</span>
-              <code className="font-mono text-foreground">{hint.value}</code>
+            <div
+              key={`${hint.label}-${hint.value}`}
+              className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-start gap-x-1.5 gap-y-0.5"
+            >
+              <span className="shrink-0 text-muted-foreground">{hint.label}</span>
+              <code className="min-w-0 whitespace-normal break-all rounded bg-muted/70 px-1 py-0.5 font-mono text-foreground">
+                {hint.value}
+              </code>
             </div>
           ))}
         </div>

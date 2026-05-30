@@ -29,6 +29,7 @@ const PluginsHome = lazy(() => import("@/pages/Plugins").then(m => ({ default: m
 const PluginsTemplatesPage = lazy(() => import("@/pages/Plugins").then(m => ({ default: m.PluginsTemplatesPage })));
 const PluginsSchedulerPage = lazy(() => import("@/pages/Plugins").then(m => ({ default: m.PluginsSchedulerPage })));
 const PluginsAutoCommandWhitelistPage = lazy(() => import("@/pages/Plugins").then(m => ({ default: m.PluginsAutoCommandWhitelistPage })));
+const MessageTemplateLabPage = lazy(() => import("@/pages/Plugins").then(m => ({ default: m.MessageTemplateLabPage })));
 const PluginsManagePage = lazy(() => import("@/pages/Extensions").then(m => ({ default: m.Extensions })));
 const AIIndex = lazy(() => import("@/pages/AI/Index").then(m => ({ default: m.AIIndex })));
 
@@ -202,6 +203,14 @@ export default function App() {
             element={
               <Suspense fallback={<PageFallback />}>
                 <PluginsAutoCommandWhitelistPage />
+              </Suspense>
+            }
+          />
+          <Route
+            path="plugins/message-template-lab"
+            element={
+              <Suspense fallback={<PageFallback />}>
+                <MessageTemplateLabPage />
               </Suspense>
             }
           />
