@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  ArrowDown,
+  ArrowUp,
   Bell,
   Bot,
   ChevronRight,
@@ -8,6 +10,7 @@ import {
   Copy,
   KeyRound,
   Loader2,
+  Plus,
   RefreshCw,
   Send,
   ShieldCheck,
@@ -71,7 +74,7 @@ import type {
   AccountBotUserCreate,
 } from "@/api/types";
 import { getErrMsg } from "@/lib/api";
-import { formatDateTime } from "@/lib/utils";
+import { cn, formatDateTime } from "@/lib/utils";
 
 const MASKED_SECRET_PLACEHOLDER = "••••••••••••••••";
 
@@ -194,6 +197,18 @@ type InteractionRuleForm = {
   validSeconds: string;
   concurrency: NonNullable<AccountBotInteractionRule["concurrency"]>;
   responseTemplate: string;
+};
+
+type InteractionEntryOption = {
+  featureKey: string;
+  featureName: string;
+  entry: FeatureInteractionEntry;
+  value: string;
+  label: string;
+};
+
+type ResolvedInteractionEntry = InteractionEntryOption & {
+  inferred: boolean;
 };
 
 function defaultRuleForm(index = 0): InteractionRuleForm {
@@ -330,12 +345,79 @@ function stripRuleControlledModuleConfig(config: Record<string, unknown>): Recor
   );
 }
 
+function defaultInteractionEntryForModule(
+  entries: InteractionEntryOption[],
+  moduleKey: string,
+): InteractionEntryOption | undefined {
+  const matches = entries.filter((item) => item.featureKey === moduleKey);
+  return matches.length === 1 ? matches[0] : undefined;
+}
+
 function uniqueIntValues(values: number[]): number[] {
   const out: number[] = [];
   for (const value of values) {
     if (!out.includes(value)) out.push(value);
   }
   return out;
+}
+
+function countDelimitedTextItems(value: string): number {
+  return new Set(
+    value
+      .split(/[\n,，\s]+/)
+      .map((item) => item.trim())
+      .filter(Boolean),
+  ).size;
+}
+
+function getRuleActionLabel(action: AccountBotInteractionRule["action"]): string {
+  if (action === "module") return "启动模块";
+  if (action === "math10") return "算数题";
+  return "只发通知";
+}
+
+function getRuleTriggerModeLabel(mode: NonNullable<AccountBotInteractionRule["trigger_mode"]>): string {
+  if (mode === "keyword") return "仅关键词";
+  if (mode === "both") return "转账或关键词";
+  return "仅转账通知";
+}
+
+function getRuleConcurrencyLabel(mode: NonNullable<AccountBotInteractionRule["concurrency"]>): string {
+  if (mode === "user") return "按用户";
+  if (mode === "none") return "不并发";
+  return "按群聊";
+}
+
+function resolveRuleModuleSelection(
+  rule: InteractionRuleForm,
+  interactionEntries: InteractionEntryOption[],
+): ResolvedInteractionEntry | undefined {
+  const explicit = interactionEntries.find((item) =>
+    item.featureKey === rule.moduleKey
+    && item.entry.key === rule.moduleAction,
+  );
+  if (explicit) {
+    return { ...explicit, inferred: false };
+  }
+  const inferred = defaultInteractionEntryForModule(interactionEntries, rule.moduleKey || "game24");
+  if (!inferred) return undefined;
+  return {
+    ...inferred,
+    inferred: true,
+  };
+}
+
+function describeRuleModuleSelection(
+  rule: InteractionRuleForm,
+  selection?: ResolvedInteractionEntry,
+): string {
+  if (!selection) {
+    return rule.moduleKey.trim() ? `模块 ${rule.moduleKey} / 入口未选` : "模块入口未选";
+  }
+  const entryLabel = selection.entry.title || selection.entry.label || selection.entry.key;
+  return selection.inferred || !rule.moduleAction.trim()
+    ? `${selection.featureName} / 自动推断 ${selection.entry.key}`
+    : `${selection.featureName} / ${entryLabel}`;
 }
 
 function ruleFormFromRule(
@@ -421,6 +503,7 @@ function legacyRuleFromConfig(config: AccountBotInteractionConfig): AccountBotIn
 function ruleFromForm(
   form: InteractionRuleForm,
   index: number,
+  interactionEntries: InteractionEntryOption[] = [],
 ): AccountBotInteractionRule {
   const triggerTexts = parseTextLines(form.triggerTexts);
   const name = form.name.trim() || `规则 ${index + 1}`;
@@ -432,6 +515,15 @@ function ruleFromForm(
   const moduleConfig = action === "module"
     ? stripRuleControlledModuleConfig(parseJsonObject(form.moduleConfig, `${name} 模块入口参数`))
     : {};
+  const moduleKey = form.moduleKey.trim() || "game24";
+  const moduleAction = form.moduleAction.trim()
+    || defaultInteractionEntryForModule(interactionEntries, moduleKey)?.entry.key
+    || "";
+  const inferredEntry = interactionEntries.find((item) => item.featureKey === moduleKey && item.entry.key === moduleAction)?.entry;
+  const moduleSessionScope = form.moduleSessionScope
+    || (inferredEntry?.session_scope === "user" || inferredEntry?.session_scope === "none"
+      ? inferredEntry.session_scope
+      : "chat");
   return {
     id: form.id || `rule-${index + 1}`,
     name,
@@ -448,9 +540,9 @@ function ruleFromForm(
     amount_match_mode: form.amountMatchMode,
     action,
     math_prize: mathPrize,
-    module_key: action === "module" ? form.moduleKey.trim() || "game24" : null,
-    module_action: action === "module" ? form.moduleAction.trim() || null : null,
-    module_session_scope: action === "module" ? form.moduleSessionScope : null,
+    module_key: action === "module" ? moduleKey : null,
+    module_action: action === "module" ? moduleAction || null : null,
+    module_session_scope: action === "module" ? moduleSessionScope : null,
     module_config: moduleConfig,
     module_prize: action === "module"
       ? mathPrize
@@ -468,6 +560,502 @@ function ruleFromForm(
     concurrency: action === "module" ? form.concurrency : "chat",
     response_template: form.responseTemplate.trim() || DEFAULT_INTERACTION_BOT.response_template,
   };
+}
+
+function InteractionRuleEditor({
+  rule,
+  index,
+  ruleCount,
+  interactionEntries,
+  onPatch,
+  onMove,
+  onCopy,
+  onRemove,
+}: {
+  rule: InteractionRuleForm;
+  index: number;
+  ruleCount: number;
+  interactionEntries: InteractionEntryOption[];
+  onPatch: (patch: Partial<InteractionRuleForm>) => void;
+  onMove: (direction: -1 | 1) => void;
+  onCopy: () => void;
+  onRemove: () => void;
+}) {
+  const selectedModule = resolveRuleModuleSelection(rule, interactionEntries);
+  const selectedInteractionEntry = selectedModule?.entry;
+  const effectiveTriggerMode = rule.action === "notice" ? "payment" : rule.triggerMode;
+  const showsPaymentFields = effectiveTriggerMode !== "keyword";
+  const showsKeywordFields = effectiveTriggerMode !== "payment" && rule.action !== "notice";
+  const hasPaidThreshold = rule.amount.trim().length > 0;
+  const showsRuntimeSettings = rule.action !== "notice";
+  const showsPrize = showsPaymentFields && (
+    rule.action === "math10"
+    || (rule.action === "module" && interactionEntryHasField(selectedInteractionEntry, "prize"))
+  );
+  const showsUserLimits = rule.action === "module" && rule.concurrency === "user";
+  const moduleActionLabel = selectedModule
+    ? selectedModule.entry.title || selectedModule.entry.label || selectedModule.entry.key
+    : rule.moduleAction || "待选择";
+  const moduleActionValue = rule.moduleAction.trim() || selectedModule?.entry.key || "";
+
+  const updateAction = (value: string) => {
+    const nextAction: InteractionRuleForm["action"] = value === "module"
+      ? "module"
+      : value === "math10"
+        ? "math10"
+        : "notice";
+    const patch: Partial<InteractionRuleForm> = { action: nextAction };
+    if (nextAction === "notice") {
+      patch.triggerMode = "payment";
+    }
+    if (nextAction === "math10") {
+      patch.triggerMode = rule.triggerMode === "payment" ? "both" : rule.triggerMode;
+      patch.moduleStartKeywords = rule.moduleStartKeywords.trim()
+        ? rule.moduleStartKeywords
+        : DEFAULT_MATH10_START_KEYWORDS;
+    }
+    if (nextAction === "module" && !rule.moduleAction) {
+      const entryOption = defaultInteractionEntryForModule(interactionEntries, rule.moduleKey || "game24");
+      if (entryOption) {
+        patch.moduleKey = entryOption.featureKey;
+        patch.moduleAction = entryOption.entry.key;
+        patch.moduleSessionScope = (entryOption.entry.session_scope === "user" || entryOption.entry.session_scope === "none"
+          ? entryOption.entry.session_scope
+          : "chat") as InteractionRuleForm["moduleSessionScope"];
+        patch.moduleConfig = formatJsonObject(defaultModuleConfigFromEntry(entryOption.entry));
+      }
+    }
+    onPatch(patch);
+  };
+
+  return (
+    <div className="min-w-0 space-y-3 rounded-md border bg-background p-3 shadow-sm">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div className="grid min-w-0 flex-1 gap-3 sm:grid-cols-[minmax(0,1fr)_180px_96px]">
+          <div className="space-y-1.5">
+            <Label>规则名称</Label>
+            <Input
+              value={rule.name}
+              onChange={(e) => onPatch({ name: e.target.value })}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label>命中后动作</Label>
+            <Select
+              value={rule.action}
+              onChange={(e) => updateAction(e.target.value)}
+            >
+              <option value="notice">只发通知</option>
+              <option value="math10">发十以内算数题</option>
+              <option value="module">启动模块</option>
+            </Select>
+          </div>
+          <label className="flex items-end justify-between gap-2 text-sm sm:pb-2">
+            <span>启用</span>
+            <Switch
+              checked={rule.enabled}
+              onCheckedChange={(checked) => onPatch({ enabled: checked })}
+            />
+          </label>
+        </div>
+        <div className="flex flex-wrap gap-2 lg:justify-end">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => onMove(-1)}
+            disabled={index === 0}
+          >
+            <ArrowUp className="mr-1 h-4 w-4" />
+            上移
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => onMove(1)}
+            disabled={index === ruleCount - 1}
+          >
+            <ArrowDown className="mr-1 h-4 w-4" />
+            下移
+          </Button>
+          <Button type="button" variant="outline" size="sm" onClick={onCopy}>
+            <Copy className="mr-1 h-4 w-4" />
+            复制
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={onRemove}
+            disabled={ruleCount <= 1}
+          >
+            <Trash2 className="mr-1 h-4 w-4" />
+            删除
+          </Button>
+        </div>
+      </div>
+
+      <div className="grid gap-3 2xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+        <section className="space-y-3 rounded-md border bg-muted/20 p-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="text-sm font-medium">触发条件</div>
+            <Badge variant={rule.chatIds.trim() ? "secondary" : "destructive"}>
+              {rule.chatIds.trim() ? `${countDelimitedTextItems(rule.chatIds)} 个群` : "缺少 Chat ID"}
+            </Badge>
+          </div>
+          <div className="grid gap-3 md:grid-cols-[minmax(0,1.1fr)_180px]">
+            <div className="space-y-1.5">
+              <Label>监听群 Chat ID</Label>
+              <Textarea
+                rows={3}
+                placeholder={"-1001234567890\n-1009876543210"}
+                value={rule.chatIds}
+                onChange={(e) => onPatch({ chatIds: e.target.value })}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label>触发方式</Label>
+              <Select
+                value={effectiveTriggerMode}
+                onChange={(e) => onPatch({ triggerMode: e.target.value as InteractionRuleForm["triggerMode"] })}
+              >
+                <option value="payment">仅转账通知</option>
+                {rule.action !== "notice" ? (
+                  <>
+                    <option value="keyword">仅模块关键词</option>
+                    <option value="both">转账或关键词</option>
+                  </>
+                ) : null}
+              </Select>
+            </div>
+          </div>
+          {showsPaymentFields ? (
+            <div className="space-y-1.5">
+              <Label>转账通知关键词</Label>
+              <Textarea
+                rows={3}
+                placeholder={"转账成功\n交易成功"}
+                value={rule.triggerTexts}
+                onChange={(e) => onPatch({ triggerTexts: e.target.value })}
+              />
+            </div>
+          ) : null}
+          {rule.action === "module" && showsKeywordFields ? (
+            <div className="space-y-1.5">
+              <Label>模块启动文本/模板</Label>
+              <Textarea
+                rows={3}
+                placeholder={"开24点\n置顶 id=数字\n猜骰 num=数字"}
+                value={rule.moduleStartKeywords}
+                onChange={(e) => onPatch({ moduleStartKeywords: e.target.value })}
+              />
+              <div className="text-xs text-muted-foreground">
+                固定词直接写一行；需要提取数字时写 <code>id=数字</code> 或 <code>num=数字</code>。
+              </div>
+            </div>
+          ) : null}
+          {rule.action === "math10" && showsKeywordFields ? (
+            <div className="space-y-1.5">
+              <Label>算数题启动关键词</Label>
+              <Textarea
+                rows={3}
+                placeholder={DEFAULT_MATH10_START_KEYWORDS}
+                value={rule.moduleStartKeywords}
+                onChange={(e) => onPatch({ moduleStartKeywords: e.target.value })}
+              />
+            </div>
+          ) : null}
+        </section>
+
+        <section className="space-y-3 rounded-md border bg-muted/20 p-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="text-sm font-medium">动作与入口</div>
+            <Badge variant={rule.enabled ? "secondary" : "outline"}>
+              {rule.enabled ? getRuleActionLabel(rule.action) : "已暂停"}
+            </Badge>
+          </div>
+          {rule.action === "notice" ? (
+            <div className="space-y-1.5">
+              <Label>通知模板</Label>
+              <Textarea
+                rows={5}
+                placeholder={DEFAULT_INTERACTION_RESPONSE_TEMPLATE}
+                value={rule.responseTemplate}
+                onChange={(e) => onPatch({ responseTemplate: e.target.value })}
+              />
+            </div>
+          ) : null}
+          {rule.action === "math10" ? (
+            <div className="rounded-md border bg-background px-3 py-2 text-sm text-muted-foreground">
+              内置测试动作会在触发后发十以内算数题，适合先确认交互 Bot 的监听链路。
+            </div>
+          ) : null}
+          {rule.action === "module" ? (
+            <>
+              <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_160px]">
+                <div className="space-y-1.5">
+                  <Label>模块入口</Label>
+                  <Select
+                    value={selectedModule?.value ?? ""}
+                    onChange={(e) => {
+                      const selected = interactionEntries.find((item) => item.value === e.target.value);
+                      if (!selected) return;
+                      onPatch({
+                        moduleKey: selected.featureKey,
+                        moduleAction: selected.entry.key,
+                        moduleSessionScope: (selected.entry.session_scope === "user" || selected.entry.session_scope === "none"
+                          ? selected.entry.session_scope
+                          : "chat") as InteractionRuleForm["moduleSessionScope"],
+                        moduleConfig: formatJsonObject(defaultModuleConfigFromEntry(selected.entry)),
+                      });
+                    }}
+                  >
+                    {interactionEntries.length <= 0 ? (
+                      <option value="">暂无声明交互入口的模块</option>
+                    ) : null}
+                    {interactionEntries.map((item) => (
+                      <option key={item.value} value={item.value}>
+                        {item.label}
+                      </option>
+                    ))}
+                  </Select>
+                </div>
+                <div className="space-y-1.5">
+                  <Label>会话范围</Label>
+                  <Select
+                    value={rule.moduleSessionScope}
+                    onChange={(e) => onPatch({ moduleSessionScope: e.target.value as InteractionRuleForm["moduleSessionScope"] })}
+                  >
+                    <option value="chat">按群会话</option>
+                    <option value="user">按用户会话</option>
+                    <option value="none">不保存会话</option>
+                  </Select>
+                </div>
+              </div>
+              <div className="grid gap-2 text-xs text-muted-foreground sm:grid-cols-2">
+                <div className="min-w-0 rounded-md border bg-background px-3 py-2">
+                  <div className="mb-1 font-medium text-foreground">module_key</div>
+                  <code className="block truncate">{rule.moduleKey || selectedModule?.featureKey || "未选择"}</code>
+                </div>
+                <div className="min-w-0 rounded-md border bg-background px-3 py-2">
+                  <div className="mb-1 font-medium text-foreground">module_action</div>
+                  <code className="block truncate">{moduleActionValue || "保存时尝试推断"}</code>
+                  {!rule.moduleAction.trim() && selectedModule ? (
+                    <div className="mt-1 text-[11px] text-amber-700 dark:text-amber-300">
+                      当前由唯一入口自动推断：{selectedModule.entry.key}
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+              <div className="grid gap-3 md:grid-cols-[160px_minmax(0,1fr)]">
+                <div className="space-y-1.5">
+                  <Label>并发策略</Label>
+                  <Select
+                    value={rule.concurrency}
+                    onChange={(e) => onPatch({ concurrency: e.target.value as InteractionRuleForm["concurrency"] })}
+                  >
+                    <option value="chat">按群聊</option>
+                    <option value="user">按用户</option>
+                    <option value="none">不并发</option>
+                  </Select>
+                </div>
+                <div className="space-y-1.5">
+                  <Label>启动占位消息</Label>
+                  <Input
+                    placeholder={DEFAULT_INTERACTION_MODULE_START_TEXT}
+                    value={rule.moduleStartText}
+                    onChange={(e) => onPatch({ moduleStartText: e.target.value })}
+                  />
+                </div>
+              </div>
+              <div className="text-xs text-muted-foreground">
+                当前入口：{moduleActionLabel}
+              </div>
+            </>
+          ) : null}
+        </section>
+      </div>
+
+      {showsPaymentFields ? (
+        <section className="space-y-3 rounded-md border bg-muted/20 p-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="text-sm font-medium">付费与收款限制</div>
+            <Badge variant={hasPaidThreshold ? "secondary" : "outline"}>
+              {hasPaidThreshold ? `门槛 ${rule.amount}` : "不限制金额"}
+            </Badge>
+          </div>
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            <div className="space-y-1.5">
+              <Label>付费参与门槛</Label>
+              <Input
+                inputMode="numeric"
+                placeholder="留空表示任意金额通知都可触发"
+                value={rule.amount}
+                onChange={(e) => onPatch({ amount: e.target.value })}
+              />
+            </div>
+            {hasPaidThreshold ? (
+              <div className="space-y-1.5">
+                <Label>金额匹配</Label>
+                <Select
+                  value={rule.amountMatchMode}
+                  onChange={(e) => onPatch({ amountMatchMode: e.target.value as InteractionRuleForm["amountMatchMode"] })}
+                >
+                  <option value="eq">等于门槛</option>
+                  <option value="gte">大于等于门槛</option>
+                </Select>
+              </div>
+            ) : null}
+            <div className="space-y-1.5">
+              <Label>指定收款人用户 ID</Label>
+              <Input
+                inputMode="numeric"
+                placeholder="留空时默认使用 userbot 本账户 ID"
+                value={rule.receiverUserId}
+                onChange={(e) => onPatch({ receiverUserId: e.target.value })}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label>指定收款人用户名/名称</Label>
+              <Input
+                placeholder="可填 @username；无 ID 时作为辅助匹配"
+                value={rule.receiverText}
+                onChange={(e) => onPatch({ receiverText: e.target.value })}
+              />
+            </div>
+          </div>
+        </section>
+      ) : null}
+
+      {showsRuntimeSettings ? (
+        <section className="space-y-3 rounded-md border bg-muted/20 p-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="text-sm font-medium">运行与限流</div>
+            <Badge variant="outline">
+              有效期 {rule.validSeconds || "默认"} 秒
+            </Badge>
+          </div>
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            <div className="space-y-1.5">
+              <Label>参与有效期（秒）</Label>
+              <Input
+                inputMode="numeric"
+                value={rule.validSeconds}
+                onChange={(e) => onPatch({ validSeconds: e.target.value })}
+              />
+            </div>
+            {showsPrize ? (
+              <div className="space-y-1.5">
+                <Label>奖金</Label>
+                <Input
+                  inputMode="numeric"
+                  value={rule.mathPrize}
+                  onChange={(e) => onPatch({ mathPrize: e.target.value })}
+                />
+              </div>
+            ) : null}
+            {showsUserLimits ? (
+              <>
+                <div className="space-y-1.5">
+                  <Label>每用户 CD</Label>
+                  <Input
+                    placeholder="例如 6h，留空不限制"
+                    value={rule.userCooldownSeconds}
+                    onChange={(e) => onPatch({ userCooldownSeconds: e.target.value })}
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>每用户每日上限</Label>
+                  <Input
+                    inputMode="numeric"
+                    placeholder="例如 2，留空不限制"
+                    value={rule.dailyLimitPerUser}
+                    onChange={(e) => onPatch({ dailyLimitPerUser: e.target.value })}
+                  />
+                </div>
+              </>
+            ) : null}
+          </div>
+        </section>
+      ) : null}
+
+      {rule.action === "module" ? (
+        <details className="group rounded-md border bg-muted/20 px-3 py-2">
+          <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-sm font-medium [&::-webkit-details-marker]:hidden">
+            <span className="flex min-w-0 items-center gap-2">
+              <Code2 className="h-4 w-4 shrink-0 text-muted-foreground" />
+              <span className="truncate">模块高级参数</span>
+            </span>
+            <span className="flex shrink-0 items-center gap-2 text-xs font-normal text-muted-foreground">
+              通常不用填写
+              <ChevronRight className="h-4 w-4 transition-transform group-open:rotate-90" />
+            </span>
+          </summary>
+          <div className="mt-3 space-y-2">
+            <Label>额外入口参数（JSON 对象）</Label>
+            <Textarea
+              rows={5}
+              spellCheck={false}
+              value={rule.moduleConfig}
+              onChange={(e) => onPatch({ moduleConfig: e.target.value })}
+            />
+            <div className="text-xs text-muted-foreground">
+              <code>prize</code>、<code>timeout</code> 和 <code>valid_seconds</code> 会由上方配置自动生成；只有插件入口声明了额外字段时才需要填写。
+            </div>
+          </div>
+        </details>
+      ) : null}
+
+      <details className="group rounded-md border bg-muted/20 px-3 py-2">
+        <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-sm font-medium [&::-webkit-details-marker]:hidden">
+          <span>规则管理指令</span>
+          <span className="flex shrink-0 items-center gap-2 text-xs font-normal text-muted-foreground">
+            管理员临时开关时使用
+            <ChevronRight className="h-4 w-4 transition-transform group-open:rotate-90" />
+          </span>
+        </summary>
+        <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          <div className="space-y-1.5">
+            <Label>开启指令</Label>
+            <Textarea
+              rows={2}
+              placeholder={"比如：\n开启24点\n打开游戏"}
+              value={rule.openCommands}
+              onChange={(e) => onPatch({ openCommands: e.target.value })}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label>关闭指令</Label>
+            <Textarea
+              rows={2}
+              placeholder={"比如：\n关闭24点\n暂停游戏"}
+              value={rule.closeCommands}
+              onChange={(e) => onPatch({ closeCommands: e.target.value })}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label>状态指令</Label>
+            <Textarea
+              rows={2}
+              placeholder="比如：24点状态"
+              value={rule.statusCommands}
+              onChange={(e) => onPatch({ statusCommands: e.target.value })}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label>关闭提示</Label>
+            <Textarea
+              rows={2}
+              placeholder={DEFAULT_INTERACTION_DISABLED_MESSAGE}
+              value={rule.disabledMessage}
+              onChange={(e) => onPatch({ disabledMessage: e.target.value })}
+            />
+          </div>
+        </div>
+      </details>
+    </div>
+  );
 }
 
 export function BotTab({ aid }: { aid: number }) {
@@ -488,6 +1076,7 @@ export function BotTab({ aid }: { aid: number }) {
   const [interactionRules, setInteractionRules] = useState<InteractionRuleForm[]>([
     defaultRuleForm(0),
   ]);
+  const [selectedInteractionRuleId, setSelectedInteractionRuleId] = useState<string | null>(null);
   const [newUser, setNewUser] = useState<AccountBotUserCreate>({
     tg_user_id: 0,
     display_name: "",
@@ -516,7 +1105,7 @@ export function BotTab({ aid }: { aid: number }) {
     queryFn: getFeatureMatrix,
   });
 
-  const interactionEntries = (matrixQ.data?.features ?? []).flatMap((feature) =>
+  const interactionEntries: InteractionEntryOption[] = (matrixQ.data?.features ?? []).flatMap((feature) =>
     (feature.interaction_entries ?? []).map((entry: FeatureInteractionEntry) => ({
       featureKey: feature.key,
       featureName: feature.display_name,
@@ -552,9 +1141,23 @@ export function BotTab({ aid }: { aid: number }) {
         : interactionQ.data.chat_id == null
           ? []
           : [interactionQ.data.chat_id];
-      setInteractionRules(sourceRules.map((rule, index) => ruleFormFromRule(rule, index, fallbackChatIds)));
+      const nextRules = sourceRules.map((rule, index) => ruleFormFromRule(rule, index, fallbackChatIds));
+      setInteractionRules(nextRules);
+      setSelectedInteractionRuleId((current) =>
+        nextRules.some((rule) => rule.id === current)
+          ? current
+          : nextRules[0]?.id ?? null,
+      );
     }
   }, [interactionQ.data]);
+
+  useEffect(() => {
+    setSelectedInteractionRuleId((current) =>
+      interactionRules.some((rule) => rule.id === current)
+        ? current
+        : interactionRules[0]?.id ?? null,
+    );
+  }, [interactionRules]);
 
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ["account", aid, "bot"] });
@@ -596,7 +1199,7 @@ export function BotTab({ aid }: { aid: number }) {
     const existingInteractionBotToken = Boolean(interactionQ.data?.has_interaction_bot_token) && !clearInteractionBotToken;
     const nextInteractionBotToken = interactionBotToken.trim();
     const nextTransferBotToken = transferBotToken.trim();
-    const rules = interactionRules.map((rule, index) => ruleFromForm(rule, index));
+    const rules = interactionRules.map((rule, index) => ruleFromForm(rule, index, interactionEntries));
     const chatIds = uniqueIntValues(rules.flatMap((rule) => rule.chat_ids ?? []));
     if (rules.length <= 0) {
       throw new Error("至少需要保留一条规则");
@@ -714,19 +1317,25 @@ export function BotTab({ aid }: { aid: number }) {
   };
 
   const addInteractionRule = () => {
-    setInteractionRules((rules) => [...rules, defaultRuleForm(rules.length)]);
+    setInteractionRules((rules) => {
+      const nextRule = defaultRuleForm(rules.length);
+      setSelectedInteractionRuleId(nextRule.id);
+      return [...rules, nextRule];
+    });
   };
 
   const copyInteractionRule = (index: number) => {
     setInteractionRules((rules) => {
       const source = rules[index];
       if (!source) return rules;
-      const next = [...rules];
-      next.splice(index + 1, 0, {
+      const nextRule = {
         ...source,
         id: `rule-${Date.now()}-${index + 2}`,
         name: `${source.name || `规则 ${index + 1}`} 副本`,
-      });
+      };
+      const next = [...rules];
+      next.splice(index + 1, 0, nextRule);
+      setSelectedInteractionRuleId(nextRule.id);
       return next;
     });
   };
@@ -737,7 +1346,12 @@ export function BotTab({ aid }: { aid: number }) {
         toast.error("至少需要保留一条规则");
         return rules;
       }
-      return rules.filter((_, i) => i !== index);
+      const removedRule = rules[index];
+      const next = rules.filter((_, i) => i !== index);
+      if (removedRule?.id === selectedInteractionRuleId) {
+        setSelectedInteractionRuleId(next[Math.min(index, next.length - 1)]?.id ?? null);
+      }
+      return next;
     });
   };
 
@@ -807,6 +1421,9 @@ export function BotTab({ aid }: { aid: number }) {
   const transferReady =
     hasRuleChatIds
     && (hasInteractionToken || Boolean(interactionBotToken.trim()));
+  const selectedInteractionRuleIndex = interactionRules.findIndex((rule) => rule.id === selectedInteractionRuleId);
+  const selectedInteractionRuleIndexSafe = selectedInteractionRuleIndex >= 0 ? selectedInteractionRuleIndex : 0;
+  const selectedInteractionRule = interactionRules[selectedInteractionRuleIndexSafe];
 
   return (
     <div className="space-y-6">
@@ -1189,445 +1806,149 @@ export function BotTab({ aid }: { aid: number }) {
           <div className="space-y-3 rounded-md border p-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
-                <div className="text-sm font-medium">规则列表（{interactionRules.length} 条）</div>
+                <div className="text-sm font-medium">规则工作台（{interactionRules.length} 条）</div>
                 <div className="text-xs text-muted-foreground">
-                  按从上到下的顺序匹配，第一条命中的规则会执行对应动作；可通过点击上移/下移调整优先级。
+                  左边看摘要和顺序，右边只编辑当前选中的一条。module_action 留空时会按唯一入口自动推断。
                 </div>
               </div>
               <Button type="button" variant="outline" onClick={addInteractionRule}>
+                <Plus className="mr-1 h-4 w-4" />
                 新增规则
               </Button>
             </div>
 
-            <div className="space-y-3">
-              {interactionRules.map((rule, index) => {
-                const selectedInteractionEntry = interactionEntries.find((item) =>
-                  item.featureKey === rule.moduleKey
-                  && (!rule.moduleAction || item.entry.key === rule.moduleAction)
-                )?.entry;
-                const effectiveTriggerMode = rule.action === "notice" ? "payment" : rule.triggerMode;
-                const showsPaymentFields = effectiveTriggerMode !== "keyword";
-                const showsKeywordFields = effectiveTriggerMode !== "payment" && rule.action !== "notice";
-                const hasPaidThreshold = rule.amount.trim().length > 0;
-                const showsRuntimeSettings = rule.action !== "notice";
-                const showsPrize = showsPaymentFields && (
-                  rule.action === "math10"
-                  || (rule.action === "module" && interactionEntryHasField(selectedInteractionEntry, "prize"))
-                );
-                const showsUserLimits = rule.action === "module" && rule.concurrency === "user";
-
-                return (
-                  <div key={rule.id} className="space-y-3 rounded-md border px-3 py-3">
-                    <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_170px_120px]">
-                      <div className="space-y-1.5">
-                        <Label>规则名称</Label>
-                        <Input
-                          value={rule.name}
-                          onChange={(e) => updateInteractionRule(index, { name: e.target.value })}
-                        />
-                      </div>
-                      <div className="space-y-1.5">
-                        <Label>命中后动作</Label>
-                        <Select
-                          value={rule.action}
-                          onChange={(e) =>
-                            updateInteractionRule(index, {
-                              action: e.target.value === "module"
-                                ? "module"
-                                : e.target.value === "math10"
-                                  ? "math10"
-                                  : "notice",
-                              ...(e.target.value === "notice"
-                                ? {
-                                    triggerMode: "payment" as InteractionRuleForm["triggerMode"],
-                                  }
-                                : {}),
-                              ...(e.target.value === "math10"
-                                ? {
-                                    triggerMode: rule.triggerMode === "payment" ? "both" : rule.triggerMode,
-                                    moduleStartKeywords: rule.moduleStartKeywords.trim()
-                                      ? rule.moduleStartKeywords
-                                      : DEFAULT_MATH10_START_KEYWORDS,
-                                  }
-                                : {}),
-                            })
-                          }
-                        >
-                          <option value="notice">只发通知</option>
-                          <option value="math10">发十以内算数题（内置测试）</option>
-                          <option value="module">启动模块</option>
-                        </Select>
-                      </div>
-                      <label className="flex items-end justify-between gap-2 text-sm md:pb-2">
-                        <span>启用</span>
-                        <Switch
-                          checked={rule.enabled}
-                          onCheckedChange={(checked) => updateInteractionRule(index, { enabled: checked })}
-                        />
-                      </label>
-                    </div>
-
-                    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                      <div className="space-y-1.5 sm:col-span-2">
-                        <Label>监听群的 Chat ID（-开头的一串数字，不是@开头的）</Label>
-                        <Textarea
-                          rows={3}
-                          placeholder={"-1001234567890\n-1009876543210"}
-                          value={rule.chatIds}
-                          onChange={(e) => updateInteractionRule(index, { chatIds: e.target.value })}
-                        />
-                      </div>
-                      <div className="space-y-1.5">
-                        <Label>触发方式</Label>
-                        <Select
-                          value={effectiveTriggerMode}
-                          onChange={(e) => updateInteractionRule(index, { triggerMode: e.target.value as InteractionRuleForm["triggerMode"] })}
-                        >
-                          <option value="payment">仅转账通知</option>
-                          {rule.action !== "notice" ? (
-                            <>
-                              <option value="keyword">仅模块关键词</option>
-                              <option value="both">转账或关键词</option>
-                            </>
-                          ) : null}
-                        </Select>
-                      </div>
-
-                      {showsPaymentFields ? (
-                        <div className="space-y-1.5 sm:col-span-2">
-                          <Label>转账通知关键词（按通知消息中的单独一行完整匹配）</Label>
-                          <Textarea
-                            rows={3}
-                            placeholder={"转账成功\n交易成功"}
-                            value={rule.triggerTexts}
-                            onChange={(e) => updateInteractionRule(index, { triggerTexts: e.target.value })}
-                          />
+            <div className="grid gap-3 xl:grid-cols-[320px_minmax(0,1fr)]">
+              <div className="space-y-2 rounded-md border bg-muted/20 p-2 xl:max-h-[72vh] xl:overflow-y-auto">
+                {interactionRules.map((rule, index) => {
+                  const resolvedModule = resolveRuleModuleSelection(rule, interactionEntries);
+                  const effectiveTriggerMode = rule.action === "notice" ? "payment" : rule.triggerMode;
+                  const isSelected = rule.id === selectedInteractionRule?.id;
+                  return (
+                    <div
+                      key={rule.id}
+                      className={cn(
+                        "rounded-md border bg-background p-2 transition-colors",
+                        isSelected ? "border-primary/40 bg-primary/5 shadow-sm" : "border-border/70",
+                      )}
+                    >
+                      <button
+                        type="button"
+                        className="flex w-full items-start gap-3 text-left"
+                        onClick={() => setSelectedInteractionRuleId(rule.id)}
+                      >
+                        <div className={cn(
+                          "grid h-7 w-7 shrink-0 place-items-center rounded-md border text-xs font-semibold",
+                          isSelected ? "border-primary/40 bg-primary/10 text-primary" : "border-border bg-muted/40 text-muted-foreground",
+                        )}>
+                          {index + 1}
                         </div>
-                      ) : null}
-
-                      {rule.action === "module" ? (
-                        <>
-                          <div className="space-y-1.5 sm:col-span-2">
-                            <Label>启动模块</Label>
-                            <Select
-                              value={
-                                interactionEntries.find((item) =>
-                                  item.featureKey === rule.moduleKey
-                                  && (!rule.moduleAction || item.entry.key === rule.moduleAction)
-                                )?.value ?? ""
-                              }
-                              onChange={(e) => {
-                                const selected = interactionEntries.find((item) => item.value === e.target.value);
-                                if (!selected) return;
-                                const nextModuleConfig = defaultModuleConfigFromEntry(selected.entry);
-                                updateInteractionRule(index, {
-                                  moduleKey: selected.featureKey,
-                                  moduleAction: selected.entry.key,
-                                  moduleSessionScope: (selected.entry.session_scope === "user" || selected.entry.session_scope === "none"
-                                    ? selected.entry.session_scope
-                                    : "chat") as InteractionRuleForm["moduleSessionScope"],
-                                  moduleConfig: formatJsonObject(nextModuleConfig),
-                                });
-                              }}
-                            >
-                              {interactionEntries.length <= 0 ? (
-                                <option value="">暂无声明交互入口的模块</option>
-                              ) : null}
-                              {interactionEntries.map((item) => (
-                                <option key={item.value} value={item.value}>
-                                  {item.label}
-                                </option>
-                              ))}
-                            </Select>
-                          </div>
-                          <div className="space-y-1.5">
-                            <Label>并发策略</Label>
-                            <Select
-                              value={rule.concurrency}
-                              onChange={(e) => updateInteractionRule(index, { concurrency: e.target.value as InteractionRuleForm["concurrency"] })}
-                            >
-                              <option value="chat">按群聊</option>
-                              <option value="user">按用户</option>
-                              <option value="none">不并发</option>
-                            </Select>
-                          </div>
-                        </>
-                      ) : null}
-
-                      {rule.action === "notice" ? (
-                        <div className="space-y-1.5 sm:col-span-2 xl:col-span-4">
-                          <Label>通知模板</Label>
-                          <Textarea
-                            rows={3}
-                            placeholder={DEFAULT_INTERACTION_RESPONSE_TEMPLATE}
-                            value={rule.responseTemplate}
-                            onChange={(e) => updateInteractionRule(index, { responseTemplate: e.target.value })}
-                          />
-                        </div>
-                      ) : null}
-
-                      {rule.action === "module" && showsKeywordFields ? (
-                        <div className="space-y-1.5 sm:col-span-2 xl:col-span-4">
-                          <Label>模块启动文本/模板（玩家整条消息必须完整匹配）</Label>
-                          <Textarea
-                            rows={3}
-                            placeholder={"开24点\n置顶 id=数字\n猜骰 num=数字"}
-                            value={rule.moduleStartKeywords}
-                            onChange={(e) => updateInteractionRule(index, { moduleStartKeywords: e.target.value })}
-                          />
-                          <div className="text-xs text-muted-foreground">
-                            固定词直接写一行；需要提取数字时写 <code>id=数字</code> 或 <code>num=数字</code>，例如“置顶 id=12345”会把 <code>id</code> 传给模块。
-                          </div>
-                        </div>
-                      ) : null}
-
-                      {rule.action === "math10" && showsKeywordFields ? (
-                        <div className="space-y-1.5 sm:col-span-2 xl:col-span-4">
-                          <Label>算数题启动关键词（玩家整条消息必须完整匹配）</Label>
-                          <Textarea
-                            rows={3}
-                            placeholder={DEFAULT_MATH10_START_KEYWORDS}
-                            value={rule.moduleStartKeywords}
-                            onChange={(e) => updateInteractionRule(index, { moduleStartKeywords: e.target.value })}
-                          />
-                        </div>
-                      ) : null}
-
-                      {showsUserLimits ? (
-                        <>
-                          <div className="space-y-1.5">
-                            <Label>每用户 CD</Label>
-                            <Input
-                              placeholder="例如 6h，留空不限制"
-                              value={rule.userCooldownSeconds}
-                              onChange={(e) => updateInteractionRule(index, { userCooldownSeconds: e.target.value })}
-                            />
-                          </div>
-                          <div className="space-y-1.5">
-                            <Label>每用户每日上限</Label>
-                            <Input
-                              inputMode="numeric"
-                              placeholder="例如 2，留空不限制"
-                              value={rule.dailyLimitPerUser}
-                              onChange={(e) => updateInteractionRule(index, { dailyLimitPerUser: e.target.value })}
-                            />
-                          </div>
-                        </>
-                      ) : null}
-
-                      {showsPaymentFields ? (
-                        <details className="group rounded-md border bg-muted/20 px-3 py-2 sm:col-span-2 xl:col-span-4">
-                          <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-sm font-medium [&::-webkit-details-marker]:hidden">
-                            <span>付费与收款限制</span>
-                            <span className="flex items-center gap-2 text-xs font-normal text-muted-foreground">
-                              {hasPaidThreshold ? `门槛 ${rule.amount}` : "不限制金额"}
-                              <ChevronRight className="h-4 w-4 transition-transform group-open:rotate-90" />
-                            </span>
-                          </summary>
-                          <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                            <div className="space-y-1.5">
-                              <Label>付费参与的门槛</Label>
-                              <Input
-                                inputMode="numeric"
-                                placeholder="留空表示任意金额通知都可触发"
-                                value={rule.amount}
-                                onChange={(e) => updateInteractionRule(index, { amount: e.target.value })}
-                              />
-                            </div>
-                            {hasPaidThreshold ? (
-                              <div className="space-y-1.5">
-                                <Label>金额匹配</Label>
-                                <Select
-                                  value={rule.amountMatchMode}
-                                  onChange={(e) => updateInteractionRule(index, { amountMatchMode: e.target.value as InteractionRuleForm["amountMatchMode"] })}
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="min-w-0">
+                              <div className="truncate text-sm font-medium">{rule.name || `规则 ${index + 1}`}</div>
+                              <div className="mt-1 flex flex-wrap gap-1.5">
+                                <Badge variant={rule.enabled ? "secondary" : "outline"} className="h-6 px-2">
+                                  {rule.enabled ? "启用" : "暂停"}
+                                </Badge>
+                                <Badge
+                                  variant={rule.action === "module" ? "default" : rule.action === "math10" ? "secondary" : "outline"}
+                                  className="h-6 px-2"
                                 >
-                                  <option value="eq">等于门槛</option>
-                                  <option value="gte">大于等于门槛</option>
-                                </Select>
+                                  {getRuleActionLabel(rule.action)}
+                                </Badge>
+                                <Badge variant={effectiveTriggerMode === "payment" ? "secondary" : "outline"} className="h-6 px-2">
+                                  {getRuleTriggerModeLabel(effectiveTriggerMode)}
+                                </Badge>
                               </div>
-                            ) : null}
-                            <div className="space-y-1.5">
-                              <Label>指定收款人用户 ID（优先）</Label>
-                              <Input
-                                inputMode="numeric"
-                                placeholder="留空时默认使用 userbot 本账户 ID"
-                                value={rule.receiverUserId}
-                                onChange={(e) => updateInteractionRule(index, { receiverUserId: e.target.value })}
-                              />
-                            </div>
-                            <div className="space-y-1.5">
-                              <Label>指定收款人用户名/名称（辅助）</Label>
-                              <Input
-                                placeholder="可填 @username；无 ID 时作为辅助匹配"
-                                value={rule.receiverText}
-                                onChange={(e) => updateInteractionRule(index, { receiverText: e.target.value })}
-                              />
                             </div>
                           </div>
-                        </details>
-                      ) : null}
-
-                      {showsRuntimeSettings ? (
-                        <details className="group rounded-md border bg-muted/20 px-3 py-2 sm:col-span-2 xl:col-span-4">
-                          <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-sm font-medium [&::-webkit-details-marker]:hidden">
-                            <span>运行参数</span>
-                            <span className="flex items-center gap-2 text-xs font-normal text-muted-foreground">
-                              有效期 {rule.validSeconds || "默认"} 秒{showsPrize ? ` · 奖金 ${rule.mathPrize || "默认"}` : ""}
-                              <ChevronRight className="h-4 w-4 transition-transform group-open:rotate-90" />
-                            </span>
-                          </summary>
-                          <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                            <div className="space-y-1.5">
-                              <Label>参与有效期（秒）</Label>
-                              <Input
-                                inputMode="numeric"
-                                value={rule.validSeconds}
-                                onChange={(e) => updateInteractionRule(index, { validSeconds: e.target.value })}
-                              />
+                          <div className="mt-2 space-y-1 text-xs text-muted-foreground">
+                            <div className="truncate">
+                              {rule.chatIds.trim() ? `${countDelimitedTextItems(rule.chatIds)} 个群 · ${rule.action === "notice" ? "通知" : rule.action === "module" ? "模块" : "算数题"}` : "未填写监听群"}
                             </div>
-                            {showsPrize ? (
-                              <div className="space-y-1.5">
-                                <Label>奖金</Label>
-                                <Input
-                                  inputMode="numeric"
-                                  value={rule.mathPrize}
-                                  onChange={(e) => updateInteractionRule(index, { mathPrize: e.target.value })}
-                                />
-                              </div>
-                            ) : null}
-                            {rule.action === "module" ? (
-                              <div className="space-y-1.5 sm:col-span-2">
-                                <Label>启动占位消息</Label>
-                                <Input
-                                  placeholder={DEFAULT_INTERACTION_MODULE_START_TEXT}
-                                  value={rule.moduleStartText}
-                                  onChange={(e) => updateInteractionRule(index, { moduleStartText: e.target.value })}
-                                />
-                              </div>
-                            ) : null}
-                          </div>
-                        </details>
-                      ) : null}
-
-                      {rule.action === "module" ? (
-                        <details className="group rounded-md border bg-muted/20 px-3 py-2 sm:col-span-2 xl:col-span-4">
-                          <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-sm font-medium [&::-webkit-details-marker]:hidden">
-                            <span className="flex items-center gap-2">
-                              <Code2 className="h-4 w-4 text-muted-foreground" />
-                              模块高级参数
-                            </span>
-                            <span className="flex items-center gap-2 text-xs font-normal text-muted-foreground">
-                              通常不用填写
-                              <ChevronRight className="h-4 w-4 transition-transform group-open:rotate-90" />
-                            </span>
-                          </summary>
-                          <div className="mt-3 space-y-2">
-                            <Label>额外入口参数（JSON 对象）</Label>
-                            <Textarea
-                              rows={5}
-                              spellCheck={false}
-                              value={rule.moduleConfig}
-                              onChange={(e) => updateInteractionRule(index, { moduleConfig: e.target.value })}
-                            />
-                            <div className="text-xs text-muted-foreground">
-                              <code>prize</code>、<code>timeout</code> 和 <code>valid_seconds</code> 会由上方配置自动生成；只有插件入口声明了额外字段时才需要填写。
+                            <div className="truncate">
+                              {rule.action === "module"
+                                ? describeRuleModuleSelection(rule, resolvedModule)
+                                : rule.action === "notice"
+                                  ? "只发通知"
+                                  : `关键词 ${countDelimitedTextItems(rule.moduleStartKeywords)} 条`}
                             </div>
-                          </div>
-                        </details>
-                      ) : null}
-
-                      <details className="group rounded-md border bg-muted/20 px-3 py-2 sm:col-span-2 xl:col-span-4">
-                        <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-sm font-medium [&::-webkit-details-marker]:hidden">
-                          <span>规则管理指令</span>
-                          <span className="flex items-center gap-2 text-xs font-normal text-muted-foreground">
-                            管理员临时开关时使用
-                            <ChevronRight className="h-4 w-4 transition-transform group-open:rotate-90" />
-                          </span>
-                        </summary>
-                        <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                          <div className="space-y-1.5">
-                            <Label>开启本条规则的指令（管理员整条消息必须完整匹配）</Label>
-                            <Textarea
-                              rows={2}
-                              placeholder={"比如：\n开启24点\n打开游戏"}
-                              value={rule.openCommands}
-                              onChange={(e) => updateInteractionRule(index, { openCommands: e.target.value })}
-                            />
-                          </div>
-                          <div className="space-y-1.5">
-                            <Label>关闭本条规则的指令（管理员整条消息必须完整匹配）</Label>
-                            <Textarea
-                              rows={2}
-                              placeholder={"比如：\n关闭24点\n暂停游戏"}
-                              value={rule.closeCommands}
-                              onChange={(e) => updateInteractionRule(index, { closeCommands: e.target.value })}
-                            />
-                          </div>
-                          <div className="space-y-1.5">
-                            <Label>状态指令（整条消息必须完整匹配）</Label>
-                            <Textarea
-                              rows={2}
-                              placeholder="比如：24点状态"
-                              value={rule.statusCommands}
-                              onChange={(e) => updateInteractionRule(index, { statusCommands: e.target.value })}
-                            />
-                          </div>
-                          <div className="space-y-1.5">
-                            <Label>关闭提示</Label>
-                            <Textarea
-                              rows={2}
-                              placeholder={DEFAULT_INTERACTION_DISABLED_MESSAGE}
-                              value={rule.disabledMessage}
-                              onChange={(e) => updateInteractionRule(index, { disabledMessage: e.target.value })}
-                            />
                           </div>
                         </div>
-                      </details>
-                    </div>
+                      </button>
 
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div className="text-xs text-muted-foreground">
-                      规则 #{index + 1}
+                      <div className="mt-2 flex flex-wrap justify-end gap-1">
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8"
+                          title="上移"
+                          aria-label="上移规则"
+                          onClick={() => moveInteractionRule(index, -1)}
+                          disabled={index === 0}
+                        >
+                          <ArrowUp className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8"
+                          title="下移"
+                          aria-label="下移规则"
+                          onClick={() => moveInteractionRule(index, 1)}
+                          disabled={index === interactionRules.length - 1}
+                        >
+                          <ArrowDown className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8"
+                          title="复制"
+                          aria-label="复制规则"
+                          onClick={() => copyInteractionRule(index)}
+                        >
+                          <Copy className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8"
+                          title="删除"
+                          aria-label="删除规则"
+                          onClick={() => removeInteractionRule(index)}
+                          disabled={interactionRules.length <= 1}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
                     </div>
-                    <div className="flex flex-wrap gap-2">
-                      <Button
-                        type="button"
-                        variant="outline"
-                        onClick={() => moveInteractionRule(index, -1)}
-                        disabled={index === 0}
-                      >
-                        上移
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        onClick={() => moveInteractionRule(index, 1)}
-                        disabled={index === interactionRules.length - 1}
-                      >
-                        下移
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        onClick={() => copyInteractionRule(index)}
-                      >
-                        <Copy className="mr-1 h-4 w-4" />
-                        复制规则
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        onClick={() => removeInteractionRule(index)}
-                        disabled={interactionRules.length <= 1}
-                      >
-                        <Trash2 className="mr-1 h-4 w-4" />
-                        删除
-                      </Button>
-                    </div>
+                  );
+                })}
+              </div>
+
+              <div className="min-w-0">
+                {selectedInteractionRule ? (
+                  <InteractionRuleEditor
+                    rule={selectedInteractionRule}
+                    index={selectedInteractionRuleIndexSafe}
+                    ruleCount={interactionRules.length}
+                    interactionEntries={interactionEntries}
+                    onPatch={(patch) => updateInteractionRule(selectedInteractionRuleIndexSafe, patch)}
+                    onMove={(direction) => moveInteractionRule(selectedInteractionRuleIndexSafe, direction)}
+                    onCopy={() => copyInteractionRule(selectedInteractionRuleIndexSafe)}
+                    onRemove={() => removeInteractionRule(selectedInteractionRuleIndexSafe)}
+                  />
+                ) : (
+                  <div className="rounded-md border bg-muted/20 p-6 text-sm text-muted-foreground">
+                    当前没有可编辑的规则。
                   </div>
-                </div>
-                );
-              })}
+                )}
+              </div>
             </div>
           </div>
 

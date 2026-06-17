@@ -380,6 +380,44 @@ def _entry_session_scope_from_entries(entries: Any, entry_key: str | None) -> st
     return None
 
 
+def _entry_key_from_entries(entries: Any) -> str | None:
+    if not isinstance(entries, list):
+        return None
+    keys: list[str] = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        key = str(entry.get("key") or "").strip()
+        if key and key not in keys:
+            keys.append(key)
+    return keys[0] if len(keys) == 1 else None
+
+
+def _declared_module_single_entry_key(module_key: str | None) -> str | None:
+    if not module_key:
+        return None
+    try:
+        manifest = BUILTIN_FEATURES.manifest_for(module_key)
+        key = _entry_key_from_entries(getattr(manifest, "interaction_entries", None))
+        if key:
+            return key
+    except Exception:  # noqa: BLE001
+        log.debug("读取 builtin 模块交互入口失败: %s", module_key, exc_info=True)
+    try:
+        plugin_json = settings.plugins_installed_path / module_key / "plugin.json"
+        if plugin_json.exists():
+            meta = json.loads(plugin_json.read_text(encoding="utf-8"))
+            raw_entries = meta.get("interaction_entries")
+            if raw_entries is None and isinstance(meta.get("config_schema"), dict):
+                raw_entries = meta["config_schema"].get("x-interaction-entries")
+            key = _entry_key_from_entries(raw_entries)
+            if key:
+                return key
+    except Exception:  # noqa: BLE001
+        log.debug("读取 installed 模块交互入口失败: %s", module_key, exc_info=True)
+    return None
+
+
 def _declared_module_entry_session_scope(module_key: str | None, module_action: str | None) -> str | None:
     if not module_key or not module_action:
         return None
@@ -485,6 +523,8 @@ def normalize_interaction_rules(raw: Any) -> list[dict[str, Any]]:
             receiver_text = None
         module_key = str(item.get("module_key") or "").strip() or None
         module_action = str(item.get("module_action") or "").strip() or None
+        if action == "module" and module_key and module_action is None:
+            module_action = _declared_module_single_entry_key(module_key)
         module_session_scope = str(item.get("module_session_scope") or "").strip() or None
         if module_session_scope not in VALID_CONCURRENCY:
             module_session_scope = None

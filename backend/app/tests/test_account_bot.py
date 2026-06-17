@@ -522,6 +522,33 @@ def test_account_bot_interaction_rule_normalizes_module_action() -> None:
     assert rule["module_start_text"] == "正在开启 24 点"
 
 
+def test_account_bot_interaction_rule_infers_single_module_action() -> None:
+    cfg = account_bot_service.normalize_transfer_notice_config(
+        {
+            "enabled": True,
+            "rules": [
+                {
+                    "id": "game24-ticket",
+                    "enabled": True,
+                    "chat_ids": ["-100123"],
+                    "trigger_mode": "both",
+                    "trigger_texts": ["转账成功"],
+                    "module_start_keywords": ["开24点"],
+                    "amount": "100",
+                    "action": "module",
+                    "module_key": "game24",
+                    "module_prize": "888",
+                }
+            ],
+        }
+    )
+
+    rule = cfg["rules"][0]
+    assert rule["module_key"] == "game24"
+    assert rule["module_action"] == "start_paid_game"
+    assert rule["module_session_scope"] == "chat"
+
+
 def test_interaction_rule_uses_declared_installed_entry_session_scope(monkeypatch, tmp_path) -> None:
     plugin_dir = tmp_path / "new_game"
     plugin_dir.mkdir()
