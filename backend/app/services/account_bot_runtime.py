@@ -1559,8 +1559,6 @@ def _interaction_user_usage_keys(
 
 
 def _interaction_user_usage_limits(rule: dict[str, Any]) -> tuple[int, int]:
-    if str(rule.get("concurrency") or "chat") != "user":
-        return 0, 0
     return (
         _duration_seconds(rule.get("user_cooldown_seconds"), 0),
         _int_or_none(rule.get("daily_limit_per_user")) or 0,

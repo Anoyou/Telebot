@@ -423,7 +423,7 @@ def test_account_bot_interaction_rules_normalize_new_rule_fields() -> None:
     assert rule["disabled_message"] == "今天休息"
 
 
-def test_keyword_rules_drop_hidden_payment_filters_and_non_user_limits() -> None:
+def test_keyword_rules_drop_hidden_payment_filters_but_keep_user_limits() -> None:
     cfg = account_bot_service.normalize_transfer_notice_config(
         {
             "enabled": True,
@@ -454,8 +454,8 @@ def test_keyword_rules_drop_hidden_payment_filters_and_non_user_limits() -> None
     assert rule["amount"] is None
     assert rule["receiver_user_id"] is None
     assert rule["receiver_text"] is None
-    assert rule["user_cooldown_seconds"] is None
-    assert rule["daily_limit_per_user"] is None
+    assert rule["user_cooldown_seconds"] == "6h"
+    assert rule["daily_limit_per_user"] == 2
 
 
 def test_account_bot_math10_rule_gets_default_start_keywords() -> None:
@@ -1061,7 +1061,8 @@ async def test_payment_interaction_session_uses_payer_user_scope(monkeypatch) ->
         "id": "lotto-ticket",
         "module_key": "lottery_plus",
         "module_action": "start_lottery_plus",
-        "concurrency": "user",
+        "module_session_scope": "user",
+        "concurrency": "chat",
         "valid_seconds": 600,
     }
 
@@ -2512,7 +2513,7 @@ async def test_interaction_keyword_user_cooldown_and_daily_limit_mark_only_after
         "action": "module",
         "module_key": "pt_promote",
         "module_action": "promote_torrent",
-        "concurrency": "user",
+        "concurrency": "chat",
         "user_cooldown_seconds": "6h",
         "daily_limit_per_user": 2,
     }

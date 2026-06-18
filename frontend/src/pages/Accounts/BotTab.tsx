@@ -615,7 +615,7 @@ function ruleFromForm(
   const action = form.action === "module" ? "module" : form.action === "math10" ? "math10" : "notice";
   const triggerMode = action === "notice" ? "payment" : form.triggerMode;
   const savesPaymentFilters = triggerMode !== "keyword";
-  const savesUserLimits = action === "module" && form.concurrency === "user";
+  const savesUserLimits = action !== "notice";
   const mathPrize = parseOptionalPositiveInt(form.mathPrize, `${name} 奖金`) || 123;
   const moduleKey = form.moduleKey.trim() || "game24";
   const moduleAction = form.moduleAction.trim()
@@ -655,14 +655,14 @@ function ruleFromForm(
     module_start_text: action === "module" ? form.moduleStartText.trim() || null : null,
     user_cooldown_seconds: savesUserLimits ? form.userCooldownSeconds.trim() || null : null,
     daily_limit_per_user: savesUserLimits
-      ? parseOptionalPositiveInt(form.dailyLimitPerUser, `${name} 每用户每日上限`)
+      ? parseOptionalPositiveInt(form.dailyLimitPerUser, `${name} 每用户日上限`)
       : null,
     open_commands: parseTextLines(form.openCommands),
     close_commands: parseTextLines(form.closeCommands),
     status_commands: parseTextLines(form.statusCommands),
     disabled_message: form.disabledMessage.trim() || null,
     valid_seconds: parseOptionalPositiveInt(form.validSeconds, `${name} 参与有效期`) || 600,
-    concurrency: action === "module" ? form.concurrency : "chat",
+    concurrency: action !== "notice" ? form.concurrency : "chat",
     response_template: form.responseTemplate.trim() || DEFAULT_INTERACTION_BOT.response_template,
   };
 }
@@ -693,12 +693,12 @@ function InteractionRuleEditor({
   const showsPaymentFields = effectiveTriggerMode !== "keyword";
   const showsKeywordFields = effectiveTriggerMode !== "payment" && rule.action !== "notice";
   const hasPaidThreshold = rule.amount.trim().length > 0;
-  const showsRuntimeSettings = rule.action !== "notice";
-  const showsPrize = showsPaymentFields && (
+  const showsPrize = (
     rule.action === "math10"
     || (rule.action === "module" && interactionEntryHasField(selectedInteractionEntry, "prize"))
   );
-  const showsUserLimits = rule.action === "module" && rule.concurrency === "user";
+  const showsEntryParams = rule.action !== "notice";
+  const showsUserLimits = rule.action !== "notice";
   const moduleActionLabel = selectedModule
     ? selectedModule.entry.title || selectedModule.entry.label || selectedModule.entry.key
     : rule.moduleAction || "待选择";
@@ -755,6 +755,86 @@ function InteractionRuleEditor({
     }
     onPatch(patch);
   };
+
+  const entryParamsSection = showsEntryParams ? (
+    <div className="space-y-3 rounded-md border bg-muted/30 p-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <div className="text-sm font-semibold">入口参数</div>
+          <p className="text-xs text-muted-foreground">
+            {rule.action === "module"
+              ? "奖金、会话有效期和用户限流由平台统一注入；插件只保留额外玩法参数。"
+              : "内置互动也使用同一套入口参数，便于和插件规则保持一致。"}
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-1.5">
+          <Badge variant="outline">
+            有效期 {rule.validSeconds || "默认"} 秒
+          </Badge>
+          {showsUserLimits ? (
+            <Badge variant={rule.userCooldownSeconds || rule.dailyLimitPerUser ? "secondary" : "outline"}>
+              用户限流
+            </Badge>
+          ) : null}
+        </div>
+      </div>
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        <div className="space-y-1.5">
+          <Label>参与有效期（秒）</Label>
+          <Input
+            inputMode="numeric"
+            value={rule.validSeconds}
+            onChange={(e) => onPatch({ validSeconds: e.target.value })}
+          />
+        </div>
+        {showsPrize ? (
+          <div className="space-y-1.5">
+            <Label>奖金</Label>
+            <Input
+              inputMode="numeric"
+              value={rule.mathPrize}
+              onChange={(e) => onPatch({ mathPrize: e.target.value })}
+            />
+          </div>
+        ) : null}
+        {showsUserLimits ? (
+          <>
+            <div className="space-y-1.5">
+              <Label>每用户 CD</Label>
+              <Input
+                placeholder="例如 6h，留空不限制"
+                value={rule.userCooldownSeconds}
+                onChange={(e) => onPatch({ userCooldownSeconds: e.target.value })}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label>每用户日上限</Label>
+              <Input
+                inputMode="numeric"
+                placeholder="例如 2，留空不限制"
+                value={rule.dailyLimitPerUser}
+                onChange={(e) => onPatch({ dailyLimitPerUser: e.target.value })}
+              />
+            </div>
+          </>
+        ) : null}
+        <div className="space-y-1.5">
+          <Label>并发策略</Label>
+          <Select
+            value={rule.concurrency}
+            onChange={(e) => onPatch({ concurrency: e.target.value as InteractionRuleForm["concurrency"] })}
+          >
+            <option value="chat">按群聊</option>
+            <option value="user">按用户</option>
+            <option value="none">不并发</option>
+          </Select>
+        </div>
+      </div>
+      <div className="text-xs text-muted-foreground">
+        用户限流按付款人或消息发送者计算，不会改变插件会话范围。群局入口仍可保持按群会话。
+      </div>
+    </div>
+  ) : null;
 
   return (
     <div className="min-w-0 space-y-4 rounded-lg border bg-background p-3 shadow-sm sm:p-4">
@@ -860,7 +940,7 @@ function InteractionRuleEditor({
           <div>
             <div className="text-sm font-medium">触发条件</div>
             <div className="text-xs text-muted-foreground">
-              先定义监听群，再补充转账通知关键词或模块启动关键词。
+              定义规则如何被命中；转账金额和收款人只用于匹配触发事件。
             </div>
           </div>
           <div className="flex flex-wrap gap-1.5">
@@ -870,6 +950,11 @@ function InteractionRuleEditor({
             {showsPaymentFields ? (
               <Badge variant="outline">
                 {triggerTextCount > 0 ? `${triggerTextCount} 条通知词` : "默认通知词"}
+              </Badge>
+            ) : null}
+            {showsPaymentFields ? (
+              <Badge variant={hasPaidThreshold ? "secondary" : "outline"}>
+                {hasPaidThreshold ? `门槛 ${rule.amount}` : "任意金额"}
               </Badge>
             ) : null}
             {showsKeywordFields ? (
@@ -906,14 +991,54 @@ function InteractionRuleEditor({
           </div>
         </div>
         {showsPaymentFields ? (
-          <div className="space-y-1.5">
-            <Label>转账通知关键词</Label>
-            <Textarea
-              rows={3}
-              placeholder={"转账成功\n交易成功"}
-              value={rule.triggerTexts}
-              onChange={(e) => onPatch({ triggerTexts: e.target.value })}
-            />
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            <div className="space-y-1.5 md:col-span-2">
+              <Label>转账通知关键词</Label>
+              <Textarea
+                rows={3}
+                placeholder={"转账成功\n交易成功"}
+                value={rule.triggerTexts}
+                onChange={(e) => onPatch({ triggerTexts: e.target.value })}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label>转账金额门槛</Label>
+              <Input
+                inputMode="numeric"
+                placeholder="留空表示任意金额"
+                value={rule.amount}
+                onChange={(e) => onPatch({ amount: e.target.value })}
+              />
+            </div>
+            {hasPaidThreshold ? (
+              <div className="space-y-1.5">
+                <Label>金额匹配</Label>
+                <Select
+                  value={rule.amountMatchMode}
+                  onChange={(e) => onPatch({ amountMatchMode: e.target.value as InteractionRuleForm["amountMatchMode"] })}
+                >
+                  <option value="eq">等于门槛</option>
+                  <option value="gte">大于等于门槛</option>
+                </Select>
+              </div>
+            ) : null}
+            <div className="space-y-1.5">
+              <Label>收款人用户 ID</Label>
+              <Input
+                inputMode="numeric"
+                placeholder="留空默认当前账号"
+                value={rule.receiverUserId}
+                onChange={(e) => onPatch({ receiverUserId: e.target.value })}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label>收款人用户名/名称</Label>
+              <Input
+                placeholder="@username 或显示名"
+                value={rule.receiverText}
+                onChange={(e) => onPatch({ receiverText: e.target.value })}
+              />
+            </div>
           </div>
         ) : null}
         {rule.action === "module" && showsKeywordFields ? (
@@ -971,6 +1096,7 @@ function InteractionRuleEditor({
             内置测试动作会在触发后发十以内算数题，适合先确认交互 Bot 的监听链路。
           </div>
         ) : null}
+        {entryParamsSection}
         {rule.action === "module" ? (
           <div className="space-y-3">
             <div className="space-y-2">
@@ -1239,8 +1365,8 @@ function InteractionRuleEditor({
                 {Object.keys(interactionSchemaProperties(selectedInteractionEntry)).length > 0 ? (
                   <div className="space-y-2">
                     <ConfigScopeSection
-                      title="入口参数"
-                      description="这里只显示插件入口自己的参数，奖金、会话、限流由平台统一管理。"
+                      title="插件参数"
+                      description="这里只显示该入口额外声明的玩法参数。"
                       fields={Object.entries(interactionSchemaProperties(selectedInteractionEntry))}
                       values={buildEntryConfigValues(selectedInteractionEntry, rule.moduleConfig)}
                       commandPrefix="."
@@ -1253,7 +1379,7 @@ function InteractionRuleEditor({
                     />
                     {ruleControlledModuleConfigHint(selectedInteractionEntry).length > 0 ? (
                       <div className="text-xs text-muted-foreground">
-                        由平台统一管理：{ruleControlledModuleConfigHint(selectedInteractionEntry).map((key) => (
+                        已移入平台入口参数：{ruleControlledModuleConfigHint(selectedInteractionEntry).map((key) => (
                           <code key={key} className="mr-1">{key}</code>
                         ))}
                       </div>
@@ -1266,18 +1392,7 @@ function InteractionRuleEditor({
                 )}
               </div>
             ) : null}
-            <div className="grid gap-3 xl:grid-cols-[160px_minmax(0,1fr)]">
-              <div className="space-y-1.5">
-                <Label>并发策略</Label>
-                <Select
-                  value={rule.concurrency}
-                  onChange={(e) => onPatch({ concurrency: e.target.value as InteractionRuleForm["concurrency"] })}
-                >
-                  <option value="chat">按群聊</option>
-                  <option value="user">按用户</option>
-                  <option value="none">不并发</option>
-                </Select>
-              </div>
+            <div className="grid gap-3">
               <div className="space-y-1.5">
                 <Label>启动占位消息</Label>
                 <Input
@@ -1290,109 +1405,6 @@ function InteractionRuleEditor({
           </div>
         ) : null}
       </section>
-
-      {showsPaymentFields ? (
-        <section className="space-y-3 rounded-lg border bg-muted/20 p-3">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="text-sm font-medium">付费与收款限制</div>
-            <Badge variant={hasPaidThreshold ? "secondary" : "outline"}>
-              {hasPaidThreshold ? `门槛 ${rule.amount}` : "不限制金额"}
-            </Badge>
-          </div>
-          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-            <div className="space-y-1.5">
-              <Label>付费参与门槛</Label>
-              <Input
-                inputMode="numeric"
-                placeholder="留空表示任意金额通知都可触发"
-                value={rule.amount}
-                onChange={(e) => onPatch({ amount: e.target.value })}
-              />
-            </div>
-            {hasPaidThreshold ? (
-              <div className="space-y-1.5">
-                <Label>金额匹配</Label>
-                <Select
-                  value={rule.amountMatchMode}
-                  onChange={(e) => onPatch({ amountMatchMode: e.target.value as InteractionRuleForm["amountMatchMode"] })}
-                >
-                  <option value="eq">等于门槛</option>
-                  <option value="gte">大于等于门槛</option>
-                </Select>
-              </div>
-            ) : null}
-            <div className="space-y-1.5">
-              <Label>指定收款人用户 ID</Label>
-              <Input
-                inputMode="numeric"
-                placeholder="留空时默认使用 userbot 本账户 ID"
-                value={rule.receiverUserId}
-                onChange={(e) => onPatch({ receiverUserId: e.target.value })}
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label>指定收款人用户名/名称</Label>
-              <Input
-                placeholder="可填 @username；无 ID 时作为辅助匹配"
-                value={rule.receiverText}
-                onChange={(e) => onPatch({ receiverText: e.target.value })}
-              />
-            </div>
-          </div>
-        </section>
-      ) : null}
-
-      {showsRuntimeSettings ? (
-        <section className="space-y-3 rounded-lg border bg-muted/20 p-3">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="text-sm font-medium">运行与限流</div>
-            <Badge variant="outline">
-              有效期 {rule.validSeconds || "默认"} 秒
-            </Badge>
-          </div>
-          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-            <div className="space-y-1.5">
-              <Label>参与有效期（秒）</Label>
-              <Input
-                inputMode="numeric"
-                value={rule.validSeconds}
-                onChange={(e) => onPatch({ validSeconds: e.target.value })}
-              />
-            </div>
-            {showsPrize ? (
-              <div className="space-y-1.5">
-                <Label>奖金</Label>
-                <Input
-                  inputMode="numeric"
-                  value={rule.mathPrize}
-                  onChange={(e) => onPatch({ mathPrize: e.target.value })}
-                />
-              </div>
-            ) : null}
-            {showsUserLimits ? (
-              <>
-                <div className="space-y-1.5">
-                  <Label>每用户 CD</Label>
-                  <Input
-                    placeholder="例如 6h，留空不限制"
-                    value={rule.userCooldownSeconds}
-                    onChange={(e) => onPatch({ userCooldownSeconds: e.target.value })}
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label>每用户每日上限</Label>
-                  <Input
-                    inputMode="numeric"
-                    placeholder="例如 2，留空不限制"
-                    value={rule.dailyLimitPerUser}
-                    onChange={(e) => onPatch({ dailyLimitPerUser: e.target.value })}
-                  />
-                </div>
-              </>
-            ) : null}
-          </div>
-        </section>
-      ) : null}
 
       <details className="group rounded-lg border bg-muted/20 px-3 py-2">
         <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-sm font-medium [&::-webkit-details-marker]:hidden">

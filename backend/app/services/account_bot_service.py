@@ -648,9 +648,6 @@ def normalize_interaction_rules(raw: Any) -> list[dict[str, Any]]:
             daily_limit_per_user = int(item["daily_limit_per_user"]) if item.get("daily_limit_per_user") not in (None, "") else None
         except (TypeError, ValueError):
             daily_limit_per_user = None
-        if concurrency != "user":
-            user_cooldown_seconds = None
-            daily_limit_per_user = None
         response_template = str(item.get("response_template") or "").strip()
         if not response_template:
             response_template = default_transfer_notice_config()["response_template"]
