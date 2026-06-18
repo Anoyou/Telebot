@@ -70,6 +70,7 @@ import {
   updateInteractionBotConfig,
 } from "@/api/accountBots";
 import { getFeatureMatrix } from "@/api/features";
+import { listIgnoredPeers } from "@/api/ignored_peers";
 import type {
   AccountBotInteractionConfig,
   AccountBotInteractionConfigUpdate,
@@ -79,6 +80,7 @@ import type {
   AccountBotRemotePluginPolicy,
   AccountBotRole,
   AccountBotUserCreate,
+  IgnoredPeer,
 } from "@/api/types";
 import { getErrMsg } from "@/lib/api";
 import { cn, formatDateTime } from "@/lib/utils";
@@ -219,6 +221,25 @@ type ResolvedInteractionEntry = InteractionEntryOption & {
 
 type InteractionEntrySchema = ConfigSchema;
 
+const PEER_KIND_LABEL: Record<string, string> = {
+  private: "私聊",
+  group: "普通群",
+  supergroup: "超级群",
+  channel: "频道",
+};
+
+function peerKindLabel(kind: string): string {
+  return PEER_KIND_LABEL[kind] || kind || "会话";
+}
+
+function allowedPeerDisplayName(peer: IgnoredPeer): string {
+  return peer.peer_label?.trim() || `${peerKindLabel(String(peer.peer_kind))} ${peer.peer_id}`;
+}
+
+function chatIdTextItems(value: string): string[] {
+  return parseTextLines(value);
+}
+
 function RuleEditorSection({
   step,
   title,
@@ -245,6 +266,84 @@ function RuleEditorSection({
       </div>
       {children}
     </section>
+  );
+}
+
+function AllowedPeerMultiSelect({
+  peers,
+  selectedText,
+  loading,
+  onChange,
+}: {
+  peers: IgnoredPeer[];
+  selectedText: string;
+  loading: boolean;
+  onChange: (value: string) => void;
+}) {
+  const selected = new Set(chatIdTextItems(selectedText));
+  const togglePeer = (peer: IgnoredPeer) => {
+    const id = String(peer.peer_id);
+    const next = chatIdTextItems(selectedText);
+    const existingIndex = next.indexOf(id);
+    if (existingIndex >= 0) {
+      next.splice(existingIndex, 1);
+    } else {
+      next.push(id);
+    }
+    onChange(next.join("\n"));
+  };
+
+  if (loading) {
+    return (
+      <div className="flex h-10 items-center rounded-md border bg-background px-2 text-xs text-muted-foreground">
+        <Spinner className="mr-2 h-3.5 w-3.5 text-primary" />
+        正在读取已允许会话
+      </div>
+    );
+  }
+
+  if (peers.length === 0) {
+    return (
+      <div className="rounded-md border border-dashed bg-background px-2 py-2 text-xs text-muted-foreground">
+        暂无已允许会话，可先手填 Chat ID。
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-1.5">
+      <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
+        <span>从已允许会话选择</span>
+        <span>{selected.size} 个已选</span>
+      </div>
+      <div className="flex max-h-24 flex-wrap gap-1.5 overflow-y-auto rounded-md border bg-background p-1.5">
+        {peers.map((peer) => {
+          const id = String(peer.peer_id);
+          const active = selected.has(id);
+          return (
+            <button
+              key={peer.id}
+              type="button"
+              className={cn(
+                "min-w-0 max-w-full rounded-md border px-2 py-1.5 text-left text-xs transition-colors",
+                active
+                  ? "border-primary bg-primary/10 text-primary"
+                  : "border-border bg-muted/30 text-muted-foreground [@media(hover:hover)]:hover:border-primary/40 [@media(hover:hover)]:hover:text-foreground",
+              )}
+              title={`${allowedPeerDisplayName(peer)} · ${id}`}
+              onClick={() => togglePeer(peer)}
+            >
+              <span className="block max-w-[210px] truncate font-medium">
+                {allowedPeerDisplayName(peer)}
+              </span>
+              <span className="mt-0.5 block font-mono text-[11px] opacity-75">
+                {peerKindLabel(String(peer.peer_kind))} · {id}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 
@@ -702,22 +801,16 @@ function ruleFromForm(
 
 function InteractionRuleEditor({
   rule,
-  index,
-  ruleCount,
   interactionEntries,
+  allowedPeers,
+  allowedPeersLoading,
   onPatch,
-  onMove,
-  onCopy,
-  onRemove,
 }: {
   rule: InteractionRuleForm;
-  index: number;
-  ruleCount: number;
   interactionEntries: InteractionEntryOption[];
+  allowedPeers: IgnoredPeer[];
+  allowedPeersLoading: boolean;
   onPatch: (patch: Partial<InteractionRuleForm>) => void;
-  onMove: (direction: -1 | 1) => void;
-  onCopy: () => void;
-  onRemove: () => void;
 }) {
   const selectedModule = resolveRuleModuleSelection(rule, interactionEntries);
   const selectedInteractionEntry = selectedModule?.entry;
@@ -864,74 +957,24 @@ function InteractionRuleEditor({
   return (
     <div className="min-w-0 space-y-4 rounded-lg border bg-background p-3 shadow-sm sm:p-4">
       <div className="space-y-3 rounded-lg border bg-muted/20 p-3">
-        <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
-          <div className="grid min-w-0 flex-1 gap-3 sm:grid-cols-2 xl:grid-cols-[minmax(0,1fr)_180px_104px]">
-            <div className="space-y-1.5">
-              <Label>规则名称</Label>
-              <Input
-                value={rule.name}
-                onChange={(e) => onPatch({ name: e.target.value })}
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label>命中后做什么</Label>
-              <Select
-                value={rule.action}
-                onChange={(e) => updateAction(e.target.value)}
-              >
-                <option value="notice">只发通知</option>
-                <option value="math10">发算数题</option>
-                <option value="module">启动玩法</option>
-              </Select>
-            </div>
-            <label className="flex items-end justify-between gap-2 rounded-md border bg-background px-3 py-2 text-sm sm:self-end">
-              <span>{rule.enabled ? "已启用" : "已暂停"}</span>
-              <Switch
-                checked={rule.enabled}
-                onCheckedChange={(checked) => onPatch({ enabled: checked })}
-              />
-            </label>
+        <div className="grid min-w-0 gap-3 sm:grid-cols-2 xl:grid-cols-[minmax(0,1fr)_180px]">
+          <div className="space-y-1.5">
+            <Label>规则名称</Label>
+            <Input
+              value={rule.name}
+              onChange={(e) => onPatch({ name: e.target.value })}
+            />
           </div>
-          <div className="flex flex-wrap gap-1.5 xl:justify-end">
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              className="h-9 w-9"
-              title="上移"
-              aria-label="上移规则"
-              onClick={() => onMove(-1)}
-              disabled={index === 0}
+          <div className="space-y-1.5">
+            <Label>命中后做什么</Label>
+            <Select
+              value={rule.action}
+              onChange={(e) => updateAction(e.target.value)}
             >
-              <ArrowUp className="h-4 w-4" />
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              className="h-9 w-9"
-              title="下移"
-              aria-label="下移规则"
-              onClick={() => onMove(1)}
-              disabled={index === ruleCount - 1}
-            >
-              <ArrowDown className="h-4 w-4" />
-            </Button>
-            <Button type="button" variant="ghost" size="icon" className="h-9 w-9" title="复制" aria-label="复制规则" onClick={onCopy}>
-              <Copy className="h-4 w-4" />
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              className="h-9 w-9 text-destructive"
-              title="删除"
-              aria-label="删除规则"
-              onClick={onRemove}
-              disabled={ruleCount <= 1}
-            >
-              <Trash2 className="h-4 w-4" />
-            </Button>
+              <option value="notice">只发通知</option>
+              <option value="math10">发算数题</option>
+              <option value="module">启动玩法</option>
+            </Select>
           </div>
         </div>
         <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
@@ -961,14 +1004,21 @@ function InteractionRuleEditor({
         title="触发"
         description="先决定交互 Bot 在哪些群里监听，以及群友用转账还是关键词触发。"
       >
-        <div className="grid gap-3 lg:grid-cols-[minmax(0,1.1fr)_190px]">
+        <div className="grid gap-2 lg:max-w-[720px] lg:grid-cols-[minmax(220px,1fr)_168px]">
           <div className="space-y-1.5">
             <Label>监听群 Chat ID</Label>
             <Textarea
-              rows={3}
-              placeholder={"-1001234567890\n-1009876543210"}
+              rows={1}
+              className="h-10 !min-h-10 resize-y py-2 font-mono text-xs leading-5"
+              placeholder="-1001234567890"
               value={rule.chatIds}
               onChange={(e) => onPatch({ chatIds: e.target.value })}
+            />
+            <AllowedPeerMultiSelect
+              peers={allowedPeers}
+              selectedText={rule.chatIds}
+              loading={allowedPeersLoading}
+              onChange={(chatIds) => onPatch({ chatIds })}
             />
           </div>
           <div className="space-y-1.5">
@@ -993,10 +1043,11 @@ function InteractionRuleEditor({
         </div>
 
         {showsKeywordFields ? (
-          <div className="space-y-1.5">
+          <div className="max-w-[720px] space-y-1.5">
             <Label>{rule.action === "math10" ? "算数题启动关键词" : "玩法启动关键词"}</Label>
             <Textarea
-              rows={3}
+              rows={2}
+              className="h-14 !min-h-14 resize-y py-2 text-xs leading-5"
               placeholder={rule.action === "math10" ? DEFAULT_MATH10_START_KEYWORDS : "开24点\n猜骰 num=数字"}
               value={rule.moduleStartKeywords}
               onChange={(e) => onPatch({ moduleStartKeywords: e.target.value })}
@@ -1016,11 +1067,12 @@ function InteractionRuleEditor({
                 <ChevronRight className="h-4 w-4 transition-transform group-open:rotate-90" />
               </span>
             </summary>
-            <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-4">
               <div className="space-y-1.5 md:col-span-2">
                 <Label>转账通知关键词</Label>
                 <Textarea
-                  rows={3}
+                  rows={2}
+                  className="h-14 !min-h-14 resize-y py-2 text-xs leading-5"
                   placeholder={"转账成功\n交易成功"}
                   value={rule.triggerTexts}
                   onChange={(e) => onPatch({ triggerTexts: e.target.value })}
@@ -1438,6 +1490,11 @@ export function BotTab({ aid, mode = "management" }: { aid: number; mode?: "mana
     queryFn: () => getInteractionBotConfig(aid),
     enabled: !!aid,
   });
+  const allowedPeersQ = useQuery({
+    queryKey: ["ignored-peers", aid],
+    queryFn: () => listIgnoredPeers(aid),
+    enabled: !!aid,
+  });
   const matrixQ = useQuery({
     queryKey: ["feature-matrix"],
     queryFn: getFeatureMatrix,
@@ -1570,7 +1627,7 @@ export function BotTab({ aid, mode = "management" }: { aid: number; mode?: "mana
       chat_ids: chatIds,
       interaction_bot_token: nextInteractionBotToken || null,
       clear_interaction_bot_token: clearInteractionBotToken,
-      trusted_bot_id: parseOptionalUserId(transferBotId, "转账结果通知 Bot 用户 ID"),
+      trusted_bot_id: parseOptionalUserId(transferBotId, "转账结果通知 Bot ID"),
       transfer_bot_token: nextTransferBotToken || null,
       clear_transfer_bot_token: clearTransferBotToken,
       trigger_mode: firstRule.trigger_mode,
@@ -1774,6 +1831,8 @@ export function BotTab({ aid, mode = "management" }: { aid: number; mode?: "mana
   const transferReady =
     hasRuleChatIds
     && (hasInteractionToken || Boolean(interactionBotToken.trim()));
+  const isInteractionConfigSaveDisabled =
+    saveTransferMut.isPending || !interactionQ.data || (transferEnabled && !transferReady);
   const selectedInteractionRuleIndex = interactionRules.findIndex((rule) => rule.id === selectedInteractionRuleId);
   const selectedInteractionRuleIndexSafe = selectedInteractionRuleIndex >= 0 ? selectedInteractionRuleIndex : 0;
   const selectedInteractionRule = interactionRules[selectedInteractionRuleIndexSafe];
@@ -2170,7 +2229,7 @@ export function BotTab({ aid, mode = "management" }: { aid: number; mode?: "mana
                   <div>
                     <div className="text-sm font-medium">转账结果通知 Bot</div>
                     <div className="text-xs text-muted-foreground">
-                      正式群里已有官方转账通知 Bot 时，只填写用户 ID 作为信任来源；测试环境才需要额外 Token。
+                      正式群里已有官方转账通知 Bot 时，只填写 Bot ID 作为信任来源；测试环境才需要额外 Token。
                     </div>
                   </div>
                   <Badge variant={hasTransferToken || transferBotToken.trim() || transferBotId.trim() ? "secondary" : "outline"}>
@@ -2179,7 +2238,7 @@ export function BotTab({ aid, mode = "management" }: { aid: number; mode?: "mana
                 </div>
                 <div className="grid gap-3">
                   <div className="space-y-1.5">
-                    <Label>用户 ID（一串数字，不是@开头的）</Label>
+                    <Label>Bot ID（一串数字，不是@开头的）</Label>
                     <Input
                       inputMode="numeric"
                       placeholder="可选；填写后只信任该通知 Bot"
@@ -2309,10 +2368,29 @@ export function BotTab({ aid, mode = "management" }: { aid: number; mode?: "mana
                   先在左侧挑规则，再到右侧按触发、启动内容、奖励限制配置当前规则。
                 </div>
               </div>
-              <Button type="button" variant="outline" className="sm:min-w-[116px]" onClick={addInteractionRule}>
-                <Plus className="mr-1 h-4 w-4" />
-                新增规则
-              </Button>
+              <div className="flex w-full flex-wrap gap-2 sm:w-auto sm:justify-end">
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="flex-1 sm:flex-none sm:min-w-[116px]"
+                  onClick={() => saveTransferMut.mutate()}
+                  disabled={isInteractionConfigSaveDisabled}
+                >
+                  {saveTransferMut.isPending ? (
+                    <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+                  ) : null}
+                  保存规则
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="flex-1 sm:flex-none sm:min-w-[116px]"
+                  onClick={addInteractionRule}
+                >
+                  <Plus className="mr-1 h-4 w-4" />
+                  新增规则
+                </Button>
+              </div>
             </div>
 
             <div className="grid gap-3 2xl:grid-cols-[300px_minmax(0,1fr)]">
@@ -2345,9 +2423,6 @@ export function BotTab({ aid, mode = "management" }: { aid: number; mode?: "mana
                             <div className="min-w-0">
                               <div className="line-clamp-2 break-words text-sm font-medium">{rule.name || `规则 ${index + 1}`}</div>
                               <div className="mt-1 flex flex-wrap gap-1.5">
-                                <Badge variant={rule.enabled ? "secondary" : "outline"} className="h-6 px-2">
-                                  {rule.enabled ? "启用" : "暂停"}
-                                </Badge>
                                 <Badge
                                   variant={rule.action === "module" ? "default" : rule.action === "math10" ? "secondary" : "outline"}
                                   className="h-6 px-2"
@@ -2375,54 +2450,73 @@ export function BotTab({ aid, mode = "management" }: { aid: number; mode?: "mana
                         </div>
                       </button>
 
-                      <div className="mt-2 flex flex-wrap justify-end gap-1">
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          className="h-8 w-8"
-                          title="上移"
-                          aria-label="上移规则"
-                          onClick={() => moveInteractionRule(index, -1)}
-                          disabled={index === 0}
-                        >
-                          <ArrowUp className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          className="h-8 w-8"
-                          title="下移"
-                          aria-label="下移规则"
-                          onClick={() => moveInteractionRule(index, 1)}
-                          disabled={index === interactionRules.length - 1}
-                        >
-                          <ArrowDown className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          className="h-8 w-8"
-                          title="复制"
-                          aria-label="复制规则"
-                          onClick={() => copyInteractionRule(index)}
-                        >
-                          <Copy className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          className="h-8 w-8"
-                          title="删除"
-                          aria-label="删除规则"
-                          onClick={() => removeInteractionRule(index)}
-                          disabled={interactionRules.length <= 1}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
+                      <div className="mt-2 flex items-center justify-between gap-2 border-t pt-2">
+                        <div className="flex min-w-0 items-center gap-2 rounded-md bg-muted/40 px-2 py-1.5">
+                          <Switch
+                            id={`interaction-rule-enabled-${rule.id}`}
+                            checked={rule.enabled}
+                            onCheckedChange={(checked) => updateInteractionRule(index, { enabled: checked })}
+                            aria-label={`${rule.name || `规则 ${index + 1}`} ${rule.enabled ? "已启用" : "已暂停"}`}
+                          />
+                          <label
+                            htmlFor={`interaction-rule-enabled-${rule.id}`}
+                            className={cn(
+                              "truncate text-xs font-medium",
+                              rule.enabled ? "text-foreground" : "text-muted-foreground",
+                            )}
+                          >
+                            {rule.enabled ? "已启用" : "已暂停"}
+                          </label>
+                        </div>
+                        <div className="flex shrink-0 flex-wrap justify-end gap-1">
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8"
+                            title="上移"
+                            aria-label="上移规则"
+                            onClick={() => moveInteractionRule(index, -1)}
+                            disabled={index === 0}
+                          >
+                            <ArrowUp className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8"
+                            title="下移"
+                            aria-label="下移规则"
+                            onClick={() => moveInteractionRule(index, 1)}
+                            disabled={index === interactionRules.length - 1}
+                          >
+                            <ArrowDown className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8"
+                            title="复制"
+                            aria-label="复制规则"
+                            onClick={() => copyInteractionRule(index)}
+                          >
+                            <Copy className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8"
+                            title="删除"
+                            aria-label="删除规则"
+                            onClick={() => removeInteractionRule(index)}
+                            disabled={interactionRules.length <= 1}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
                       </div>
                     </div>
                   );
@@ -2433,13 +2527,10 @@ export function BotTab({ aid, mode = "management" }: { aid: number; mode?: "mana
                 {selectedInteractionRule ? (
                   <InteractionRuleEditor
                     rule={selectedInteractionRule}
-                    index={selectedInteractionRuleIndexSafe}
-                    ruleCount={interactionRules.length}
                     interactionEntries={interactionEntries}
+                    allowedPeers={allowedPeersQ.data ?? []}
+                    allowedPeersLoading={allowedPeersQ.isLoading}
                     onPatch={(patch) => updateInteractionRule(selectedInteractionRuleIndexSafe, patch)}
-                    onMove={(direction) => moveInteractionRule(selectedInteractionRuleIndexSafe, direction)}
-                    onCopy={() => copyInteractionRule(selectedInteractionRuleIndexSafe)}
-                    onRemove={() => removeInteractionRule(selectedInteractionRuleIndexSafe)}
                   />
                 ) : (
                   <div className="rounded-md border bg-muted/20 p-6 text-sm text-muted-foreground">
@@ -2490,7 +2581,7 @@ export function BotTab({ aid, mode = "management" }: { aid: number; mode?: "mana
                 variant="outline"
                 className="w-full sm:w-auto sm:min-w-[156px]"
                 onClick={() => saveTransferMut.mutate()}
-                disabled={saveTransferMut.isPending || !interactionQ.data || (transferEnabled && !transferReady)}
+                disabled={isInteractionConfigSaveDisabled}
               >
                 {saveTransferMut.isPending ? (
                   <Loader2 className="mr-1 h-4 w-4 animate-spin" />

@@ -875,6 +875,7 @@ export interface HostResourceStatus {
   disk_used_percent?: number | null;
   disk_free_gb?: number | null;
   sampled_at: number;
+  uptime_seconds?: number | null;
 }
 
 export interface ProcessResourceStatus {

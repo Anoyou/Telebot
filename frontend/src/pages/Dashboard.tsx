@@ -36,6 +36,14 @@ import {
   DropdownMenuContent,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 import { AccountSummaryCard } from "@/components/AccountSummaryCard";
 import { PageShell } from "@/components/layout/PageScaffold";
 import { Spinner } from "@/components/ui/misc";
@@ -102,6 +110,7 @@ export function Dashboard() {
         logWarnCount={resourceQ.data?.logs.last_5m_warn ?? 0}
         logsLoading={resourceQ.isLoading}
         sampledAt={resourceQ.data?.host.sampled_at}
+        uptimeSeconds={resourceQ.data?.host.uptime_seconds}
         guideActive={guideActive}
         onGuideToggle={() => setGuideActive(!guideActive)}
       />
@@ -179,6 +188,7 @@ function DashboardHero({
   logWarnCount,
   logsLoading,
   sampledAt,
+  uptimeSeconds,
   guideActive,
   onGuideToggle,
 }: {
@@ -194,12 +204,14 @@ function DashboardHero({
   logWarnCount: number;
   logsLoading: boolean;
   sampledAt?: number | null;
+  uptimeSeconds?: number | null;
   guideActive: boolean;
   onGuideToggle: () => void;
 }) {
   const sampledLabel = sampledAt
     ? new Date(sampledAt * 1000).toLocaleTimeString()
     : "等待采样";
+  const uptimeLabel = formatUptime(uptimeSeconds);
   const accountTone = overviewTone(activeAccounts, totalAccounts, accountsLoading);
   const providerTone = overviewTone(readyProviders, totalProviders, providersLoading);
   const logStatusTone: VisualTone = logsLoading
@@ -231,7 +243,10 @@ function DashboardHero({
           <div className="rounded-lg border border-border/70 bg-background/80 p-3 shadow-sm">
             <div className="text-xs font-medium text-muted-foreground">资源采样</div>
             <div className="mt-1 text-lg font-semibold tracking-tight">{sampledLabel}</div>
-            <div className="mt-1 text-[11px] text-muted-foreground">自动每 15 秒刷新</div>
+            <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-muted-foreground">
+              <span>自动每 15 秒刷新</span>
+              {uptimeLabel ? <span>已正常运行 {uptimeLabel}</span> : null}
+            </div>
           </div>
         ) : null
       }
@@ -274,19 +289,38 @@ function AccountWorkerTile({
 }) {
   const compactAccounts = useCompactOverlay();
   const singleAccount = accounts.length <= 1;
+  const trigger = (
+    <button type="button" className="block w-full min-w-0 text-left">
+      <TileCard
+        icon={Users}
+        title="账号 Worker"
+        value={value}
+        description="运行中 / 总账号，点击查看全部账号"
+        tone={tone}
+      />
+    </button>
+  );
+
+  if (compactAccounts) {
+    return (
+      <Dialog open={open} onOpenChange={onOpenChange}>
+        <DialogTrigger asChild>{trigger}</DialogTrigger>
+        <DialogContent className="bottom-0 top-auto max-h-[86dvh] w-full translate-y-0 gap-0 overflow-hidden rounded-b-none border-border/80 p-0 shadow-2xl sm:bottom-auto sm:top-[50%] sm:max-w-lg sm:translate-y-[-50%] sm:rounded-lg">
+          <AccountWorkerPanel
+            accounts={accounts}
+            isLoading={isLoading}
+            compact
+            className="max-h-[calc(86dvh-5rem)] overflow-y-auto"
+          />
+        </DialogContent>
+      </Dialog>
+    );
+  }
 
   return (
     <DropdownMenu open={open} onOpenChange={onOpenChange}>
       <DropdownMenuTrigger asChild>
-        <button type="button" className="block w-full min-w-0 text-left">
-          <TileCard
-            icon={Users}
-            title="账号 Worker"
-            value={value}
-            description="运行中 / 总账号，点击查看全部账号"
-            tone={tone}
-          />
-        </button>
+        {trigger}
       </DropdownMenuTrigger>
       <DropdownMenuContent
         align="center"
@@ -294,42 +328,71 @@ function AccountWorkerTile({
         sideOffset={8}
         className={
           singleAccount
-            ? "max-h-[min(72vh,42rem)] w-[min(30rem,calc(100vw-1rem))] p-0 data-[state=open]:animate-none sm:w-[min(30rem,calc(100vw-2rem))]"
-            : "max-h-[min(72vh,42rem)] w-[min(54rem,calc(100vw-1rem))] p-0 data-[state=open]:animate-none sm:w-[min(54rem,calc(100vw-2rem))]"
+            ? "max-h-[min(72vh,42rem)] w-[min(30rem,calc(100vw-1rem))] border-primary/45 bg-card p-0 shadow-2xl shadow-primary/10 ring-1 ring-primary/35 data-[state=open]:animate-none sm:w-[min(30rem,calc(100vw-2rem))]"
+            : "max-h-[min(72vh,42rem)] w-[min(54rem,calc(100vw-1rem))] border-primary/45 bg-card p-0 shadow-2xl shadow-primary/10 ring-1 ring-primary/35 data-[state=open]:animate-none sm:w-[min(54rem,calc(100vw-2rem))]"
         }
         style={{ overflowY: "auto" }}
       >
-        <div className="border-b px-4 py-3">
+        <AccountWorkerPanel accounts={accounts} isLoading={isLoading} compact={false} />
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+function AccountWorkerPanel({
+  accounts,
+  isLoading,
+  compact,
+  className,
+}: {
+  accounts: Awaited<ReturnType<typeof listAccounts>>;
+  isLoading: boolean;
+  compact: boolean;
+  className?: string;
+}) {
+  const singleAccount = accounts.length <= 1;
+
+  return (
+    <div>
+      {compact ? (
+        <DialogHeader className="border-b bg-card px-4 py-4 pr-12">
+          <DialogTitle className="text-base">账号 Worker</DialogTitle>
+          <DialogDescription>
+            所有 Telegram 账号的运行状态、出网信息和快捷入口。
+          </DialogDescription>
+        </DialogHeader>
+      ) : (
+        <div className="border-b bg-primary/5 px-4 py-3">
           <div className="text-base font-semibold">账号 Worker</div>
           <div className="mt-1 text-sm text-muted-foreground">
             所有 Telegram 账号的运行状态、出网信息和快捷入口。
           </div>
         </div>
-        <div className="p-4">
-          {isLoading ? (
-            <div className="flex h-36 items-center justify-center">
-              <Spinner className="text-primary" />
-            </div>
-          ) : accounts.length === 0 ? (
-            <div className="rounded-xl border border-dashed p-8 text-center text-sm text-muted-foreground">
-              尚未绑定账号，请从概览顶部新增账号。
-            </div>
-          ) : compactAccounts ? (
-            <div className="space-y-2">
-              {accounts.map((account) => (
-                <CompactAccountRow key={account.id} account={account} />
-              ))}
-            </div>
-          ) : (
-            <div className={singleAccount ? "grid max-w-[28rem] gap-3" : "grid gap-3 lg:grid-cols-2"}>
-              {accounts.map((account) => (
-                <AccountSummaryCard key={account.id} account={account} />
-              ))}
-            </div>
-          )}
-        </div>
-      </DropdownMenuContent>
-    </DropdownMenu>
+      )}
+      <div className={cn("p-4", className)}>
+        {isLoading ? (
+          <div className="flex h-36 items-center justify-center">
+            <Spinner className="text-primary" />
+          </div>
+        ) : accounts.length === 0 ? (
+          <div className="rounded-xl border border-dashed p-8 text-center text-sm text-muted-foreground">
+            尚未绑定账号，请从概览顶部新增账号。
+          </div>
+        ) : compact ? (
+          <div className="space-y-2">
+            {accounts.map((account) => (
+              <CompactAccountRow key={account.id} account={account} />
+            ))}
+          </div>
+        ) : (
+          <div className={singleAccount ? "grid max-w-[28rem] gap-3" : "grid gap-3 lg:grid-cols-2"}>
+            {accounts.map((account) => (
+              <AccountSummaryCard key={account.id} account={account} />
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -714,6 +777,24 @@ function logTone(data: ResourceDashboard | undefined): VisualTone {
   if (data.logs.last_5m_error > 0) return "danger";
   if (data.logs.last_5m_warn > 0) return "warn";
   return "success";
+}
+
+function formatUptime(seconds: number | null | undefined): string | null {
+  if (typeof seconds !== "number" || !Number.isFinite(seconds) || seconds < 0) {
+    return null;
+  }
+  const totalMinutes = Math.floor(seconds / 60);
+  if (totalMinutes < 1) return "不足 1 分钟";
+  const days = Math.floor(totalMinutes / 1440);
+  const hours = Math.floor((totalMinutes % 1440) / 60);
+  const minutes = totalMinutes % 60;
+  if (days > 0) {
+    return hours > 0 ? `${days} 天 ${hours} 小时` : `${days} 天`;
+  }
+  if (hours > 0) {
+    return minutes > 0 ? `${hours} 小时 ${minutes} 分钟` : `${hours} 小时`;
+  }
+  return `${minutes} 分钟`;
 }
 
 function resourceTone(value: number | null | undefined): VisualTone {

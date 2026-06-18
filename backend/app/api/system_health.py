@@ -151,6 +151,7 @@ class HostResource(BaseModel):
     disk_used_percent: float | None = None
     disk_free_gb: float | None = None
     sampled_at: int
+    uptime_seconds: int | None = None
 
 
 class ProcessResource(BaseModel):
@@ -595,7 +596,24 @@ def _snapshot_dashboard_host() -> HostResource:
         disk_used_percent=disk_used_percent,
         disk_free_gb=disk_free_gb,
         sampled_at=int(time.time()),
+        uptime_seconds=_read_host_uptime_seconds(),
     )
+
+
+def _read_host_uptime_seconds() -> int | None:
+    try:
+        import psutil  # type: ignore[import-not-found]
+
+        return max(0, int(time.time() - float(psutil.boot_time())))
+    except Exception:
+        pass
+
+    try:
+        with open("/proc/uptime", encoding="utf-8") as fh:
+            first = fh.read().split()[0]
+        return max(0, int(float(first)))
+    except Exception:
+        return None
 
 
 def _read_host_cpu_percent() -> float | None:

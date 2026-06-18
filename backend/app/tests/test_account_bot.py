@@ -11,8 +11,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from app.api import account_bots
 from app.account_bot_defaults import DEFAULT_TRANSFER_NOTICE_TEMPLATE, LEGACY_TRANSFER_NOTICE_TEMPLATE
+from app.api import account_bots
 from app.db.models.account import Account
 from app.db.models.account_bot import AccountBot
 from app.db.models.log import RuntimeLog
