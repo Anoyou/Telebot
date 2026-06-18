@@ -484,6 +484,12 @@ function getRuleConcurrencyLabel(mode: NonNullable<AccountBotInteractionRule["co
   return "按群聊";
 }
 
+function getModuleSessionScopeLabel(mode: NonNullable<AccountBotInteractionRule["module_session_scope"]>): string {
+  if (mode === "user") return "按用户会话";
+  if (mode === "none") return "不保存会话";
+  return "按群会话";
+}
+
 function formatInteractionResultMeta(item: AccountBotInteractionResultItem): string {
   const parts: string[] = [];
   if (item.plugin_key) parts.push(item.plugin_key);
@@ -818,7 +824,7 @@ function InteractionRuleEditor({
           </>
         ) : null}
         <div className="space-y-1.5">
-          <Label>并发策略</Label>
+          <Label>规则占用</Label>
           <Select
             value={rule.concurrency}
             onChange={(e) => onPatch({ concurrency: e.target.value as InteractionRuleForm["concurrency"] })}
@@ -830,7 +836,7 @@ function InteractionRuleEditor({
         </div>
       </div>
       <div className="text-xs text-muted-foreground">
-        用户限流按付款人或消息发送者计算，不会改变插件会话范围。群局入口仍可保持按群会话。
+        规则占用只决定同一规则能否并行启动；用户 CD 和日上限按付款人或消息发送者计算，不改变插件自己的会话范围。
       </div>
     </div>
   ) : null;
@@ -926,7 +932,7 @@ function InteractionRuleEditor({
             </div>
           </div>
           <div className="rounded-md border bg-background px-3 py-2">
-            <div className="text-xs text-muted-foreground">并发策略</div>
+            <div className="text-xs text-muted-foreground">规则占用</div>
             <div className="mt-1 text-sm font-medium">
               {getRuleConcurrencyLabel(rule.concurrency)}
             </div>
@@ -1283,23 +1289,10 @@ function InteractionRuleEditor({
                 </div>
               )}
             </div>
-            <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_160px]">
-              <div className="space-y-1.5">
-                <Label>当前模块入口</Label>
-                <div className="rounded-md border bg-background px-3 py-2 text-sm">
-                  {moduleActionLabel}
-                </div>
-              </div>
-              <div className="space-y-1.5">
-                <Label>会话范围</Label>
-                <Select
-                  value={rule.moduleSessionScope}
-                  onChange={(e) => onPatch({ moduleSessionScope: e.target.value as InteractionRuleForm["moduleSessionScope"] })}
-                >
-                  <option value="chat">按群会话</option>
-                  <option value="user">按用户会话</option>
-                  <option value="none">不保存会话</option>
-                </Select>
+            <div className="space-y-1.5">
+              <Label>当前模块入口</Label>
+              <div className="rounded-md border bg-background px-3 py-2 text-sm">
+                {moduleActionLabel}
               </div>
             </div>
             {selectedInteractionEntry ? (
@@ -1358,6 +1351,25 @@ function InteractionRuleEditor({
                           当前由唯一入口自动推断：{selectedModule.entry.key}
                         </div>
                       ) : null}
+                    </div>
+                    <div className="min-w-0 rounded-md border bg-muted/20 px-3 py-2 sm:col-span-2">
+                      <div className="mb-1 font-medium text-foreground">插件会话范围</div>
+                      <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_160px] sm:items-center">
+                        <div>
+                          <div>{getModuleSessionScopeLabel(rule.moduleSessionScope)}</div>
+                          <div className="mt-1 text-[11px] text-muted-foreground">
+                            默认跟随插件入口声明；只有玩法状态隔离异常时才需要调整。
+                          </div>
+                        </div>
+                        <Select
+                          value={rule.moduleSessionScope}
+                          onChange={(e) => onPatch({ moduleSessionScope: e.target.value as InteractionRuleForm["moduleSessionScope"] })}
+                        >
+                          <option value="chat">按群会话</option>
+                          <option value="user">按用户会话</option>
+                          <option value="none">不保存会话</option>
+                        </Select>
+                      </div>
                     </div>
                   </div>
                 </details>
@@ -2062,7 +2074,7 @@ export function BotTab({ aid }: { aid: number }) {
               <div>
                 <div className="text-sm font-medium">状态总览</div>
                 <div className="text-xs text-muted-foreground">
-                  先看联动是否就绪，再进入身份配置、规则编辑和插件入口参数。
+                  先看联动是否就绪，再进入身份配置、规则编辑和入口参数。
                 </div>
               </div>
               <label className="flex items-center justify-between gap-2 rounded-md border bg-background px-3 py-2 text-sm sm:min-w-[136px]">
