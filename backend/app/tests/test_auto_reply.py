@@ -128,6 +128,7 @@ def _make_event(text: str, *, is_private: bool = True, chat_id: int = 100, sende
     sender.first_name = "Alice"
     sender.username = None
     sender.id = sender_id
+    sender.contact = False
     chat = MagicMock()
     chat.title = "PrivChat" if not is_private else None
     chat.first_name = "Alice"
@@ -942,10 +943,16 @@ def test_scope_ok_variants() -> None:
 
 
 def test_render_variables() -> None:
-    sender = MagicMock(first_name="Bob", username=None, id=2)
+    sender = MagicMock(first_name="Bob", username=None, id=2, contact=False)
     chat = MagicMock(title="Room", first_name=None, id=3)
     text = _render("hello {sender} in {chat}: {text}", sender, chat, "wave")
     assert text == "hello Bob in Room: wave"
+
+
+def test_render_sender_hides_contact_remark_name() -> None:
+    sender = MagicMock(first_name="备注名", username="public_user", id=2, contact=True)
+    text = _render("hello {sender}", sender, None, "wave")
+    assert text == "hello public_user"
 
 
 def test_render_regex_capture_variables_and_defaults() -> None:

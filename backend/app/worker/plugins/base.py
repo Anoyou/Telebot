@@ -19,6 +19,54 @@ from typing import Any
 from telethon import TelegramClient, events
 
 
+def _clean_text(value: Any) -> str:
+    return value.strip() if isinstance(value, str) else ""
+
+
+def public_entity_display_name(
+    entity: Any,
+    *,
+    fallback_id: int | str | None = None,
+    default: str = "用户",
+    include_at: bool = False,
+) -> str:
+    """Return a display label that avoids leaking local contact remarks.
+
+    Telethon user entities can expose the account owner's saved contact name
+    through first_name/last_name. For saved contacts, prefer public username or
+    numeric id instead of rendering that local-only name.
+    """
+
+    if entity is not None:
+        title = _clean_text(getattr(entity, "title", None))
+        if title:
+            return title
+
+        username = _clean_text(getattr(entity, "username", None)).lstrip("@")
+        if username:
+            return f"@{username}" if include_at else username
+
+        entity_id = getattr(entity, "id", None)
+        is_contact = bool(getattr(entity, "contact", False))
+        if not is_contact:
+            name = " ".join(
+                part
+                for part in (
+                    _clean_text(getattr(entity, "first_name", None)),
+                    _clean_text(getattr(entity, "last_name", None)),
+                )
+                if part
+            )
+            if name:
+                return name
+        if entity_id not in (None, ""):
+            return str(entity_id)
+
+    if fallback_id not in (None, ""):
+        return str(fallback_id)
+    return default
+
+
 # ─────────────────────────────────────────────────────
 # 运行时上下文（每个 [账号 × feature] 一份）
 # ─────────────────────────────────────────────────────
@@ -200,5 +248,6 @@ __all__ = [
     "PluginContext",
     "all_plugins",
     "get_plugin",
+    "public_entity_display_name",
     "register",
 ]

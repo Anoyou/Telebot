@@ -46,7 +46,7 @@ from app.worker.command import (
     dispatch_auto_command_text,
     should_allow_auto_command_text,
 )
-from app.worker.plugins.base import Plugin, PluginContext, register
+from app.worker.plugins.base import Plugin, PluginContext, public_entity_display_name, register
 from app.worker.ratelimit.humanize import simulate_read, simulate_typing
 
 
@@ -1165,18 +1165,10 @@ def _render(
     """
     sender_name = ""
     if sender is not None:
-        sender_name = (
-            getattr(sender, "first_name", None)
-            or getattr(sender, "username", None)
-            or str(getattr(sender, "id", "") or "")
-        )
+        sender_name = public_entity_display_name(sender, default="")
     chat_name = ""
     if chat is not None:
-        chat_name = (
-            getattr(chat, "title", None)
-            or getattr(chat, "first_name", None)
-            or str(getattr(chat, "id", "") or "")
-        )
+        chat_name = public_entity_display_name(chat, default="")
     values = {
         **(match_vars or {}),
         "sender": str(sender_name),
@@ -1201,23 +1193,7 @@ def _render(
 
 
 def _sender_display(sender: Any, sender_id: int | None = None) -> str:
-    if sender is not None:
-        username = getattr(sender, "username", None)
-        if isinstance(username, str) and username:
-            return f"@{username}"
-        first_name = getattr(sender, "first_name", None)
-        last_name = getattr(sender, "last_name", None)
-        full_name = " ".join(
-            x.strip()
-            for x in (first_name, last_name)
-            if isinstance(x, str) and x.strip()
-        )
-        if full_name:
-            return full_name
-        sid = getattr(sender, "id", None)
-        if sid is not None:
-            return str(sid)
-    return str(sender_id or "")
+    return public_entity_display_name(sender, fallback_id=sender_id, default="", include_at=True)
 
 
 def _rule_usage_labels(rule: Any, cfg: dict[str, Any]) -> tuple[str, str]:

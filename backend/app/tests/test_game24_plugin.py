@@ -507,7 +507,7 @@ async def test_game24_announce_when_prize_send_failed() -> None:
         raw_text="(1+2+3)*4",
         sender_id=42,
         id=99,
-        get_sender=AsyncMock(return_value=SimpleNamespace(first_name="alice", id=42)),
+        get_sender=AsyncMock(return_value=SimpleNamespace(first_name="我的备注", username="alice_public", contact=True, id=42)),
         reply=AsyncMock(side_effect=RuntimeError("reply blocked")),
     )
     client = AsyncMock()
@@ -523,6 +523,8 @@ async def test_game24_announce_when_prize_send_failed() -> None:
     await plugin.on_message(ctx, event)
 
     text = client.edit_message.call_args.kwargs["text"]
+    assert "alice_public" in text
+    assert "我的备注" not in text
     assert "奖励消息发送失败" in text
     assert "已发放" not in text
 

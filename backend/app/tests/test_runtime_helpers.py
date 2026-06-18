@@ -1,7 +1,28 @@
 """worker.runtime 私有 helper 的单元测试（不连真 DB）。"""
 from __future__ import annotations
 
+from types import SimpleNamespace
+
+from app.worker.plugins.base import public_entity_display_name
 from app.worker.runtime import _build_proxy_url
+
+
+def test_public_entity_display_name_keeps_non_contact_public_name() -> None:
+    entity = SimpleNamespace(id=42, first_name="公开名", last_name="尾名", username=None, contact=False)
+
+    assert public_entity_display_name(entity) == "公开名 尾名"
+
+
+def test_public_entity_display_name_hides_contact_remark_name() -> None:
+    entity = SimpleNamespace(id=42, first_name="我给他的备注", last_name="", username="public_user", contact=True)
+
+    assert public_entity_display_name(entity) == "public_user"
+
+
+def test_public_entity_display_name_contact_without_username_falls_back_to_id() -> None:
+    entity = SimpleNamespace(id=42, first_name="我给他的备注", last_name="", username=None, contact=True)
+
+    assert public_entity_display_name(entity) == "42"
 
 
 def test_build_proxy_url_socks5_with_auth() -> None:

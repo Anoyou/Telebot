@@ -45,6 +45,7 @@ from .commands.sudo_guard import (
     should_report_incoming_sudo_denial as _should_report_incoming_sudo_denial_impl,
 )
 from .ipc import CMD_PAUSE, CMD_RESUME, cmd_channel, make_cmd
+from .plugins.base import public_entity_display_name
 
 log = logging.getLogger(__name__)
 
@@ -1142,11 +1143,9 @@ async def _run_template(client, event, args, tpl: dict[str, Any], account_id: in
                     src = await replied.get_chat()
                 except Exception:  # noqa: BLE001
                     src = None
-                chat_label = (
-                    getattr(src, "title", None)
-                    or getattr(src, "username", None)
-                    or getattr(src, "first_name", None)
-                    or str(replied.chat_id if hasattr(replied, "chat_id") else "?")
+                chat_label = public_entity_display_name(
+                    src,
+                    fallback_id=replied.chat_id if hasattr(replied, "chat_id") else "?",
                 )
                 body = f"📨 来自 {chat_label}\n\n{replied.text or '(no text)'}"
                 await event.client.send_message(target, body)

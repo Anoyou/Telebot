@@ -779,6 +779,17 @@ def test_account_bot_transfer_notice_template_renders_parseable_notice() -> None
     }
 
 
+def test_format_user_name_uses_public_name_without_username() -> None:
+    assert (
+        account_bot_runtime._format_user_name(  # noqa: SLF001
+            {"first_name": "你心里已经有答案了", "last_name": "", "username": "uhaveanswer"}
+        )
+        == "你心里已经有答案了"
+    )
+    assert account_bot_runtime._format_user_name({"first_name": "A", "last_name": "B", "username": "ab"}) == "A B"  # noqa: SLF001
+    assert account_bot_runtime._format_user_name({"username": "only_username"}) is None  # noqa: SLF001
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("template", "error_type"),
@@ -1234,7 +1245,11 @@ async def test_reply_plus_amount_sends_transfer_notice_with_abot_token(monkeypat
     assert send.await_args_list[0].args[:3] == (
         "abot-token",
         -100123,
-        "转账成功\n付款人：AAA\n付款人ID：111\n收款人：BBB\n金额：254\n收款人ID：222",
+        '<pre><code class="language-转账成功">付款人：AAA\n'
+        "付款人ID：111\n"
+        "收款人：BBB\n"
+        "金额：254\n"
+        "收款人ID：222</code></pre>",
     )
 
 
@@ -1574,7 +1589,11 @@ async def test_reply_plus_amount_emits_test_notice_without_triggering_module(mon
     assert send.await_args.args[:3] == (
         "abot-token",
         -100123,
-        "转账成功\n付款人：AAA\n付款人ID：111\n收款人：B\n金额：100\n收款人ID：222",
+        '<pre><code class="language-转账成功">付款人：AAA\n'
+        "付款人ID：111\n"
+        "收款人：B\n"
+        "金额：100\n"
+        "收款人ID：222</code></pre>",
     )
     assert run_entry.await_count == 0
 
@@ -1716,7 +1735,11 @@ async def test_transfer_test_bot_only_emits_notice_without_starting_module(monke
     assert send.await_args_list[0].args[:3] == (
         "abot-token",
         -100123,
-        "转账成功\n付款人：你心里已经有答案了 (@uhaveanswer)\n付款人ID：1682400007\n收款人：你心里没点数？ (@uhavebnum)\n金额：111\n收款人ID：8629045843",
+        '<pre><code class="language-转账成功">付款人：你心里已经有答案了\n'
+        "付款人ID：1682400007\n"
+        "收款人：你心里没点数？\n"
+        "金额：111\n"
+        "收款人ID：8629045843</code></pre>",
     )
     assert run_entry.await_count == 0
 

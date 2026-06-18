@@ -65,7 +65,7 @@ from ..command import register_plugin_command, unregister_plugin_command
 from ..ipc import RUNTIME_LOG_STREAM, RuntimeLogPayload
 from ..ratelimit.engine import RateLimitEngine
 from ..ratelimit.humanize import HumanizeOpts
-from .base import Plugin, PluginContext, all_plugins, get_plugin
+from .base import Plugin, PluginContext, all_plugins, get_plugin, public_entity_display_name
 from .manifest import Manifest
 
 log = logging.getLogger(__name__)
@@ -1668,12 +1668,7 @@ async def _record_recent_peer(state: _AccountState, event: Any) -> None:
         label: str | None
         try:
             chat = await event.get_chat()
-            label = (
-                getattr(chat, "title", None)
-                or getattr(chat, "username", None)
-                or getattr(chat, "first_name", None)
-                or str(pid)
-            )
+            label = public_entity_display_name(chat, fallback_id=pid)
         except Exception:  # noqa: BLE001
             label = str(pid)
         state.recent_peers[pid] = {

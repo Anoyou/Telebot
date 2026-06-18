@@ -3302,10 +3302,7 @@ def _int_or_none(value: Any) -> int | None:
 def _format_user_name(raw: dict[str, Any]) -> str | None:
     first = str(raw.get("first_name") or "").strip()
     last = str(raw.get("last_name") or "").strip()
-    username = str(raw.get("username") or "").strip()
     name = " ".join(x for x in [first, last] if x)
-    if username:
-        return f"{name} (@{username})" if name else f"@{username}"
     return name or None
 
 

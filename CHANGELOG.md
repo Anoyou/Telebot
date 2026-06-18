@@ -14,6 +14,14 @@
 
 ## [Unreleased]
 
+## [0.29.5] — 2026-06-19 · patch · 用户展示名隐私收敛
+
+### Fixed
+- 转账测试与通知 Bot 生成收款结果时，付款人和收款人展示名只使用 Telegram 本人的 `first_name` / `last_name`，不再把 `@username` 拼进“付款人/收款人”文案；规则匹配仍保留用户 ID 与 username 元数据，避免影响现有收款人识别。
+- 新增插件运行时公开展示名 helper：Telethon/UserBot 实体标记为联系人时，不再把 `first_name` / `last_name` 当作玩家名公开输出，优先使用公开 username（按场景不带 @ 或保留 @），没有 username 时回退用户 ID。
+- 内置 `game24`、`auto_reply`、`forward` 与最近会话标签统一接入公开展示名策略，避免玩家公告、自动回复模板或私聊标签泄露账号本地联系人备注。
+- 补充账号 Bot、自动回复、24 点与运行时 helper 回归测试，覆盖带 username 的付款人/收款人仍输出纯展示名、联系人备注不会进入玩家公告，并保持 `language-转账成功` 代码块标识。
+
 ## [0.29.4] — 2026-06-18 · patch · 联动规则配置收敛
 
 ### Changed

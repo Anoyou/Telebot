@@ -21,7 +21,7 @@ from typing import Any
 from telethon import events
 
 from app.worker.command import current_command_prefix
-from app.worker.plugins.base import Plugin, PluginContext, register
+from app.worker.plugins.base import Plugin, PluginContext, public_entity_display_name, register
 
 DEFAULT_COMMAND = "24d"
 DEFAULT_TIMEOUT = 500
@@ -442,11 +442,7 @@ async def _event_sender_name(event: Any) -> str:
         except Exception:
             sender = None
 
-    return (
-        getattr(sender, "first_name", "")
-        or getattr(sender, "username", "")
-        or str(getattr(sender, "id", _event_sender_id(event) or "未知用户"))
-    )
+    return public_entity_display_name(sender, fallback_id=_event_sender_id(event), default="未知用户")
 
 
 async def _adapt_incoming_message(event: Any) -> IncomingMessage:

@@ -45,7 +45,7 @@ from telethon import events
 # 模块化重构后统一用绝对 import，方便第三方插件解压到 data/plugins/installed/
 # 时也能复用同一套写法。
 from app.db.models.feature import FEATURE_FORWARD
-from app.worker.plugins.base import Plugin, PluginContext, register
+from app.worker.plugins.base import Plugin, PluginContext, public_entity_display_name, register
 
 
 @register
@@ -163,12 +163,7 @@ class ForwardPlugin(Plugin):
                 src = await event.get_chat()
             except Exception:  # noqa: BLE001
                 src = None
-            chat_label = (
-                getattr(src, "title", None)
-                or getattr(src, "username", None)
-                or getattr(src, "first_name", None)
-                or str(event.chat_id)
-            )
+            chat_label = public_entity_display_name(src, fallback_id=event.chat_id)
             body_text = event.message.text or "(no text)"
             body = f"{header}📨 来自 {chat_label}\n\n{body_text}"
             await client.send_message(target, body)
