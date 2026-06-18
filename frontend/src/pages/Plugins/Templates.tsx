@@ -20,7 +20,7 @@ export function PluginsTemplatesPage() {
           <SectionHeader
             icon={FileText}
             title="指令模板"
-            description="统一维护常用回复、转发和 AI 指令模板，供模块中心按账号复用。"
+            description="统一维护常用回复、转发和 AI 指令模板，供插件中心按账号复用。"
           />
         </CardHeader>
       </Card>

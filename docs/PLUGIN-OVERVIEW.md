@@ -1,13 +1,13 @@
-# TelePilot 模块概览
+# TelePilot 插件概览
 
-本文保留旧版开发指南中“路线、快速开始、模块结构”的原文内容。
+本文是当前维护的插件开发入口，统一说明插件路线、快速开始和基础目录结构。项目对外统一使用“插件”指代可安装、可启停、可配置的扩展能力；“模块化”只描述 TelePilot 的架构特色。
 
 ## 插件市场路线：Route A vs Route B
 
 TelePilot 插件市场分两条路线推进，0.x 阶段明确选择 **Route A**：
 
-- **Route A：受信/签名模块市场。** 仅接收 TelePilot/Anoyou 审核过的模块源，安装包需要签名或可信来源记录，模块在同一 worker 进程内运行，通过 `Manifest.permissions`、`ctx.client`、`ctx.http`、`ctx.ai` 等 facade 收口能力。它适合 0.x 快速稳定迭代，把重点放在模块 API、安装体验、权限声明、审计日志和回滚能力上。
-- **Route B：开放社区市场。** 面向任意第三方上传或未经人工审核的模块，需要 subprocess/容器隔离、资源配额、文件系统/网络沙箱、供应链扫描和更完整的安全策略。它不属于 0.x 默认方案，若 1.0 之后开放社区市场，应作为独立 Epic 设计和验收。
+- **Route A：受信/签名插件市场。** 仅接收 TelePilot/Anoyou 审核过的插件源，安装包需要签名或可信来源记录，插件在同一 worker 进程内运行，通过 `Manifest.permissions`、`ctx.client`、`ctx.http`、`ctx.ai` 等 facade 收口能力。它适合 0.x 快速稳定迭代，把重点放在插件 API、安装体验、权限声明、审计日志和回滚能力上。
+- **Route B：开放社区市场。** 面向任意第三方上传或未经人工审核的插件，需要 subprocess/容器隔离、资源配额、文件系统/网络沙箱、供应链扫描和更完整的安全策略。它不属于 0.x 默认方案，若 1.0 之后开放社区市场，应作为独立 Epic 设计和验收。
 
 因此，本文当前所有示例、CI 和安全边界都按 Route A 编写；不要把 Route A 的 facade 误读为零信任沙箱。
 
@@ -18,14 +18,14 @@ TelePilot 插件市场分两条路线推进，0.x 阶段明确选择 **Route A**
 ### 文件结构
 
 ```
-plugins/installed/{模块名}/
+plugins/installed/{插件名}/
 ├── __init__.py        # 导出 PLUGIN_CLASS 和 MANIFEST
 ├── manifest.py        # Manifest 元数据
-├── plugin.py          # 模块主类
-└── (其他模块)
+├── plugin.py          # 插件主类
+└── (其他插件)
 ```
 
-### 最小可运行模块
+### 最小可运行插件
 
 **plugin.py：**
 ```python
@@ -70,7 +70,7 @@ __all__ = ["PLUGIN_CLASS", "MANIFEST"]
 
 ---
 
-## 2. 模块结构（Plugin 包）
+## 2. 插件结构（Plugin 包）
 
 ### 目录约定
 
@@ -78,14 +78,14 @@ __all__ = ["PLUGIN_CLASS", "MANIFEST"]
 backend/app/worker/plugins/
 ├── base.py              # Plugin 基类 + register 装饰器
 ├── manifest.py          # Manifest 数据类
-├── loader.py            # 模块加载器 + 热重载 + generation guard
-└── builtin/             # 内置模块
+├── loader.py            # 插件加载器 + 热重载 + generation guard
+└── builtin/             # 内置插件
     ├── game24/
     └── forward/
 
-plugins/installed/       # 远程/用户安装的模块
+plugins/installed/       # 远程/用户安装的插件
 ├── guess_number/
-└── (更多模块...)
+└── (更多插件...)
 ```
 
 ### 生命周期
@@ -100,9 +100,9 @@ loader._load_all()
 
 热重载 (reload_plugin):
   → state.generation += 1          # generation guard
-  → 旧模块: on_shutdown(ctx)
+  → 旧插件: on_shutdown(ctx)
   → 重新 import + 实例化
-  → 新模块: on_startup(ctx)
+  → 新插件: on_startup(ctx)
 
 消息派发:
   → 检查 ctx.generation == state.generation

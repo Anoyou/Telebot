@@ -148,7 +148,7 @@ export function Dashboard() {
         />
         <OverviewTile
           icon={Boxes}
-          title="模块中心"
+          title="插件中心"
           value="指令与插件"
           description="管理指令和自动化"
           tone="primary"
@@ -226,7 +226,7 @@ function DashboardHero({
     <StatusSummaryPanel
       icon={LayoutDashboard}
       title="概览"
-      description="集中查看 TelePilot 的账号、模块、AI 和资源运行情况；优先暴露需要处理的信号。"
+      description="集中查看 TelePilot 的账号、插件、AI 和资源运行情况；优先暴露需要处理的信号。"
       signals={
         <>
           <SignalPill tone={accountTone} label="账号运行" value={workerValue} />
@@ -511,7 +511,7 @@ function GuidePanel({
             新手指引
           </CardTitle>
           <CardDescription className="mt-1">
-            只保留大内容指引：从账号接入、前缀通知到模块启用，一次看清。
+            只保留大内容指引：从账号接入、前缀通知到插件启用，一次看清。
           </CardDescription>
         </div>
         <Button variant="ghost" size="sm" onClick={onDone}>
@@ -525,8 +525,8 @@ function GuidePanel({
         <GuideStep no="2" title="设置前缀与通知" onAction={onGoSettings} action="去设置">
           确认触发前缀，并把重要事件推送到合适的通知渠道。
         </GuideStep>
-        <GuideStep no="3" title="启用模块与指令" onAction={onGoPlugins} action="打开模块">
-          在模块中心启用指令、插件和自动化能力，再按账号配置。
+        <GuideStep no="3" title="启用插件与指令" onAction={onGoPlugins} action="打开插件">
+          在插件中心启用指令、插件和自动化能力，再按账号配置。
         </GuideStep>
       </CardContent>
     </Card>

@@ -34,10 +34,10 @@ interface NavItem {
 }
 
 // 顶层导航条目；
-// 首页承载概览 + 账号操作，AI 能力收敛到模块中心。
+// 首页承载概览 + 账号操作，AI 能力收敛到插件中心。
 const NAV: NavItem[] = [
   { to: "/", label: "概览", icon: Home, end: true },
-  { to: "/plugins", label: "模块", icon: Boxes },
+  { to: "/plugins", label: "插件", icon: Boxes },
   { to: "/ai", label: "AI", icon: Sparkles },
   { to: "/logs", label: "日志", icon: ScrollText },
   { to: "/settings", label: "系统", icon: Cog },

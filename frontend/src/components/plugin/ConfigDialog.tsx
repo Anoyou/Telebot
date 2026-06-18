@@ -130,7 +130,7 @@ export function ConfigDialog({
         <DialogContent className="max-w-2xl">
           <DialogHeader>
             <DialogTitle>{pluginName} — 配置</DialogTitle>
-            <DialogDescription>该模块没有可配置的选项。</DialogDescription>
+            <DialogDescription>该插件没有可配置的选项。</DialogDescription>
           </DialogHeader>
           <DialogFooter><Button onClick={() => onOpenChange(false)}>关闭</Button></DialogFooter>
         </DialogContent>
@@ -147,7 +147,7 @@ export function ConfigDialog({
         <DialogHeader>
           <DialogTitle>{pluginName} — 配置</DialogTitle>
           <DialogDescription>
-            模块: <code className="text-xs">{pluginKey}</code>
+            插件: <code className="text-xs">{pluginKey}</code>
             {accountName && <> · 账号: {accountName}</>}
           </DialogDescription>
         </DialogHeader>

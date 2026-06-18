@@ -50,15 +50,15 @@ const CATEGORIES: CategoryDef[] = [
   { key: "auto_reply_rules", label: "自动回复规则", desc: "自动回复配置" },
   { key: "rate_limit_templates", label: "风控模板", desc: "限速规则模板" },
   { key: "rate_limit_rules", label: "风控规则", desc: "账号级限速配置" },
-  { key: "feature_config", label: "模块功能配置", desc: "各账号的模块开关和配置" },
+  { key: "feature_config", label: "插件功能配置", desc: "各账号的插件开关和配置" },
   { key: "account_settings", label: "账号设置", desc: "拟人化、标签等（不含登录信息）", sensitive: ["session", "api_id", "api_hash", "phone"] },
   { key: "ignored_peers", label: "允许会话", desc: "自动回复/转发允许通过的会话白名单" },
   { key: "notify_bots", label: "通知 Bot", desc: "通知机器人配置", sensitive: ["bot_token"] },
 ];
 
 const BUNDLE_ENTITY_LABEL: Record<string, string> = {
-  feature: "模块配置",
-  rule: "模块规则",
+  feature: "插件配置",
+  rule: "插件规则",
   command_link: "指令绑定",
   ignored_peer: "允许会话",
 };
@@ -396,7 +396,7 @@ export function ConfigBackup() {
       <CardHeader>
         <SectionHeader
           title="账号配置包（Config Bundle）"
-          description="把 A 账号的规则、模块配置、自定义指令绑定、允许会话打包成 JSON，再给 B 账号套用；上传后会先演练对比，确认写入才会真正落库。"
+          description="把 A 账号的规则、插件配置、自定义指令绑定、允许会话打包成 JSON，再给 B 账号套用；上传后会先演练对比，确认写入才会真正落库。"
         />
       </CardHeader>
       <CardContent className="space-y-6">

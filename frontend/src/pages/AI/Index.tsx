@@ -387,7 +387,7 @@ export function AIIndex() {
                     const provider = providerById.get(Number(template.config?.provider_id));
                     const modelText =
                       template.config?.mode === "image" && template.config?.image_backend === "codex_image"
-                        ? "codex_image 模块"
+                        ? "codex_image 插件"
                         : providerLabel(provider, template.config?.model);
                     return (
                       <TableRow key={template.id}>

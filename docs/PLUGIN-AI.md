@@ -1,12 +1,12 @@
 # TelePilot 插件 AI facade
 
-`ctx.ai` 已作为第三方模块可用的受控文本 AI facade。模块需要在 `plugin.json` 和 `manifest.py` 中声明 `permissions=["ai_text"]`，运行时才会注入 `ctx.ai`。
+`ctx.ai` 已作为第三方插件可用的受控文本 AI facade。插件需要在 `plugin.json` 和 `manifest.py` 中声明 `permissions=["ai_text"]`，运行时才会注入 `ctx.ai`。
 
 ## 推荐写法
 
 ```python
 if ctx.ai is None:
-    await event.edit("本模块需要 ai_text 权限")
+    await event.edit("本插件需要 ai_text 权限")
     return
 
 providers = await ctx.ai.list_providers()
@@ -24,7 +24,7 @@ await event.edit(result.text)
 
 - `provider_tag`：推荐写法。按用途标签选择 provider，平台会在可用 provider 中挑选成本优先的匹配项。
 - `provider`：需要固定 provider 时可传 provider id 或 provider name。
-- `tag` / `tags`：兼容别名，已 deprecated；新模块请使用 `provider_tag`。
+- `tag` / `tags`：兼容别名，已 deprecated；新插件请使用 `provider_tag`。
 
 ## Quota 与脱敏
 

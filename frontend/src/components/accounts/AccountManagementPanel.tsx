@@ -52,9 +52,9 @@ const GUIDE_STEPS: GuideStep[] = [
   },
   {
     icon: Package,
-    title: "3. 启用指令模板或调用模块",
-    desc: "去模块中心启用模板或模块，然后就能在 Telegram 里直接调用。",
-    actionLabel: "去模块中心",
+    title: "3. 启用指令模板或调用插件",
+    desc: "去插件中心启用模板或插件，然后就能在 Telegram 里直接调用。",
+    actionLabel: "去插件中心",
     actionTo: "/plugins",
   },
 ];

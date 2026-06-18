@@ -103,7 +103,7 @@ export function Logs() {
             <CardHeader>
               <SectionHeader
                 title="运行日志过滤"
-                description="账号 / 级别 / 模块 / 关键词 / 自动刷新"
+                description="账号 / 级别 / 插件 / 关键词 / 自动刷新"
                 meta={(
                   <SignalPill
                     tone={runtimeAutoRefresh ? "success" : "neutral"}
@@ -143,7 +143,7 @@ export function Logs() {
                   </Select>
                 </div>
                 <div className="space-y-1.5">
-                  <Label>模块</Label>
+                  <Label>插件</Label>
                   <PluginSelect value={runtimePluginKey} onChange={setRuntimePluginKey} />
                 </div>
                 <div className="space-y-1.5">
@@ -175,7 +175,7 @@ export function Logs() {
                 <MessageSquareText className="h-4 w-4" /> 消息日志
               </TabsTrigger>
               <TabsTrigger value="plugin" className="gap-1.5">
-                <Puzzle className="h-4 w-4" /> 模块日志
+                <Puzzle className="h-4 w-4" /> 插件日志
               </TabsTrigger>
               <TabsTrigger value="system" className="gap-1.5">
                 <ServerCog className="h-4 w-4" /> 系统日志
@@ -204,7 +204,7 @@ export function Logs() {
                 search={runtimeSearch}
                 autoRefresh={runtimeAutoRefresh && mainTab === "runtime" && runtimeTab === "plugin"}
                 timezone={timezone}
-                description="模块运行记录和异常。"
+                description="插件运行记录和异常。"
               />
             </TabsContent>
 
@@ -301,7 +301,7 @@ function RuntimeLogTable({
     <Card>
       <CardHeader>
         <SectionHeader
-          title={source === "event" ? "消息日志" : source === "plugin" ? "模块日志" : "系统日志"}
+          title={source === "event" ? "消息日志" : source === "plugin" ? "插件日志" : "系统日志"}
           description={description}
           meta={(
             <div className="flex flex-wrap items-center justify-end gap-1.5">
@@ -591,7 +591,7 @@ function PluginSelect({
 
   return (
     <Select value={value} onChange={(e) => onChange(e.target.value)}>
-      <option value="">全部模块</option>
+      <option value="">全部插件</option>
       {keys.map((key) => (
         <option key={key} value={key}>
           {key}

@@ -81,9 +81,9 @@ const GUIDE_STEPS: Array<{
     actionTo: "/settings?tab=platform",
   },
   {
-    title: "3. 启用指令模板或调用模块",
-    desc: "去模块中心启用模板或模块，然后就能在 Telegram 里直接调用。",
-    actionLabel: "去模块中心",
+    title: "3. 启用指令模板或调用插件",
+    desc: "去插件中心启用模板或插件，然后就能在 Telegram 里直接调用。",
+    actionLabel: "去插件中心",
     actionTo: "/plugins",
   },
 ];
@@ -667,7 +667,7 @@ export function SettingsIndex() {
                     <option value="error">error（只看错误）</option>
                   </Select>
                   <p className="text-xs text-muted-foreground">
-                    debug 会记录模块排障细节；info 适合日常；warn/error 只保留异常。
+                    debug 会记录插件排障细节；info 适合日常；warn/error 只保留异常。
                   </p>
                 </div>
               </div>
@@ -797,7 +797,7 @@ function GuideInlineCard({
       </div>
       <div className="mt-3 flex flex-wrap gap-2">
         <Button size="sm" onClick={onPrimary}>
-          下一步：去模块中心 <ArrowRight className="ml-1 h-4 w-4" />
+          下一步：去插件中心 <ArrowRight className="ml-1 h-4 w-4" />
         </Button>
         <Button size="sm" variant="outline" onClick={onSkip}>
           跳过这步

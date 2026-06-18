@@ -1,6 +1,6 @@
 # TelePilot 插件 HTTP facade
 
-本文保留旧版开发指南中 `ctx.http` 相关说明。`ctx.ai` 的完整说明仍见 [PLUGIN-AI.md](./PLUGIN-AI.md)。
+本文是当前维护的 `ctx.http` facade 参考；`ctx.ai` 的完整说明仍见 [PLUGIN-AI.md](./PLUGIN-AI.md)。
 
 ## 4. PluginContext
 
@@ -9,7 +9,7 @@
 class PluginContext:
     account_id: int
     feature_key: str
-    config: dict           # 当前账号的模块配置
+    config: dict           # 当前账号的插件配置
     rules: list            # 规则列表
     client: TelegramClient | None
     engine: Any            # RateLimitEngine
@@ -23,27 +23,27 @@ class PluginContext:
         """创建与 bot 的对话会话。"""
 ```
 
-注意：内置模块会拿到完整运行时能力；远程/第三方模块拿到的是受限上下文：`ctx.client` 为 `SandboxClient`，指令 handler 中传入的 `client` 参数与 `ctx.client` 同源（同样是 sandbox client），`ctx.engine` 和 `ctx.redis` 为 `None`，只能通过声明过的权限和 `ctx.scheduler` facade 使用有限能力。
+注意：内置插件会拿到完整运行时能力；远程/第三方插件拿到的是受限上下文：`ctx.client` 为 `SandboxClient`，指令 handler 中传入的 `client` 参数与 `ctx.client` 同源（同样是 sandbox client），`ctx.engine` 和 `ctx.redis` 为 `None`，只能通过声明过的权限和 `ctx.scheduler` facade 使用有限能力。
 
 ### 4.0 受控 facade：ctx.http 与 ctx.ai
 
-第三方模块可以使用两个受控 facade，但必须在 Manifest 中显式声明权限；未声明或策略不完整时字段会是 `None`：
+第三方插件可以使用两个受控 facade，但必须在 Manifest 中显式声明权限；未声明或策略不完整时字段会是 `None`：
 
 - `ctx.http`：声明 `permissions=["external_http"]` 且填写 `allowed_hosts` 后注入。它限制协议、域名、超时、响应大小，并在发起请求前阻断 localhost/内网/链路本地地址。默认走账号代理；只有 Manifest 的 `http={"allow_direct": true}` 且账号配置请求 direct 时才允许直连。
 - `ctx.ai`：声明 `permissions=["ai_text"]` 后注入。它复用 TelePilot 的 LLM Provider 池、fallback 链、账号级预算和 usage 记录；插件只能拿到脱敏 provider 元数据，不能读取 `api_key_enc`、`base_url` 或代理 URL。
-- `ctx.ai.complete()` 推荐用 `provider_tag` 按用途选择 provider；`tag` / `tags` 是兼容别名且已 deprecated，新模块不要依赖它们作为主要入口。
+- `ctx.ai.complete()` 推荐用 `provider_tag` 按用途选择 provider；`tag` / `tags` 是兼容别名且已 deprecated，新插件不要依赖它们作为主要入口。
 - `ctx.ai.list_providers()` 可用于展示当前账号可见的脱敏 provider 摘要；更完整的 AI facade 说明见 `docs/PLUGIN-AI.md`。
 
 示例：
 
 ```python
 if ctx.http is None:
-    await event.edit("本模块需要 external_http 权限和 allowed_hosts")
+    await event.edit("本插件需要 external_http 权限和 allowed_hosts")
     return True
 response = await ctx.http.get("https://api.github.com/zen")
 
 if ctx.ai is None:
-    await event.edit("本模块需要 ai_text 权限")
+    await event.edit("本插件需要 ai_text 权限")
     return True
 providers = await ctx.ai.list_providers()
 result = await ctx.ai.complete(
@@ -74,4 +74,4 @@ result = await ctx.ai.complete(
 
 ## 代理与 direct mode
 
-默认网络模式是 `account_proxy`，会使用账号代理。只有 Manifest 显式声明 `http={"allow_direct": true}`，并且账号配置请求 `network_mode="direct"` 时，模块才可以直连；否则 direct 会被拒绝。
+默认网络模式是 `account_proxy`，会使用账号代理。只有 Manifest 显式声明 `http={"allow_direct": true}`，并且账号配置请求 `network_mode="direct"` 时，插件才可以直连；否则 direct 会被拒绝。

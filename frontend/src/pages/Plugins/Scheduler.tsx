@@ -20,7 +20,7 @@ export function PluginsSchedulerPage() {
           <SectionHeader
             icon={CalendarClock}
             title="定时任务"
-            description="按账号编排定时动作与调度策略，和模块中心启用状态保持一致。"
+            description="按账号编排定时动作与调度策略，和插件中心启用状态保持一致。"
           />
         </CardHeader>
       </Card>

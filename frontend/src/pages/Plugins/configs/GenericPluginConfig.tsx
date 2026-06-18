@@ -289,7 +289,7 @@ export function GenericPluginConfigPage() {
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
               <CardTitle className="text-base">功能总开关</CardTitle>
-              <CardDescription>关闭后模块不会在当前账号运行；配置保存后会由 worker 热加载。</CardDescription>
+              <CardDescription>关闭后插件不会在当前账号运行；配置保存后会由 worker 热加载。</CardDescription>
               <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                 <Badge variant={accountFeature?.enabled ? "default" : "outline"}>
                   {featureSwitchText(accountFeature)}
@@ -407,7 +407,7 @@ function buildUsageGuide({
   ];
 
   return {
-    description: customText ? "来自模块 schema 的使用说明；保存后由 worker 热加载。" : "按字段填写当前账号的模块配置，保存后由 worker 热加载。",
+    description: customText ? "来自插件 schema 的使用说明；保存后由 worker 热加载。" : "按字段填写当前账号的插件配置，保存后由 worker 热加载。",
     customText,
     commandExamples: aliasExamples.length > 0 ? aliasExamples : [`${usageVariables.prefix}${command}`],
     notes,

@@ -1,6 +1,6 @@
 # with_ai
 
-最小 AI facade 示例，展示第三方模块如何声明并使用平台统一的文本 LLM 能力。
+最小 AI facade 示例，展示第三方插件如何声明并使用平台统一的文本 LLM 能力。
 
 ## 重点
 
@@ -14,7 +14,7 @@
 
 ## 使用
 
-安装到 `plugins/installed/with_ai/` 后启用模块，可发送：
+安装到 `plugins/installed/with_ai/` 后启用插件，可发送：
 
 ```text
 ,ai_providers
@@ -23,7 +23,7 @@
 查看当前账号可见的脱敏 provider 摘要。
 
 ```text
-,ai_complete 用一句话解释什么是 TelePilot 模块
+,ai_complete 用一句话解释什么是 TelePilot 插件
 ```
 
 通过 `ctx.ai.complete()` 调用平台统一 LLM 池，并把回答编辑回命令消息。

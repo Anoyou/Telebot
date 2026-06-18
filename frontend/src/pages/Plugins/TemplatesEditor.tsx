@@ -72,7 +72,7 @@ const ALIAS_RE = /^[a-zA-Z0-9_]{1,16}$/;
 const TYPE_LABELS: Record<CommandTemplateType, string> = {
   reply_text: "回复文本",
   forward_to: "转发到",
-  run_plugin: "调模块",
+  run_plugin: "调插件",
   ai: "AI",
 };
 
@@ -727,7 +727,7 @@ export function CommandTemplates() {
         <CardContent>
           {providerUnavailable ? (
             <div className="mb-3 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
-              chat/search 类 AI 指令需要先添加模型提供商；image + codex_image 与 video + 插件后端可先使用模块配置。
+              chat/search 类 AI 指令需要先添加模型提供商；image + codex_image 与 video + 插件后端可先使用插件配置。
               <Button
                 type="button"
                 variant="link"
@@ -1248,7 +1248,7 @@ function CommandEditDialog({
           {form.type === "run_plugin" && (
             <div className="space-y-3">
               <div className="rounded-md border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
-                调用已加载模块注册的指令；method 留空时默认使用 plugin_key 同名指令。
+                调用已加载插件注册的指令；method 留空时默认使用 plugin_key 同名指令。
               </div>
               <div className="space-y-1.5">
                 <Label>plugin_key *</Label>
@@ -1310,7 +1310,7 @@ function CommandEditDialog({
                     <span className="font-medium text-foreground">search</span>：专门搜索指令，保存时固定启用联网搜索；需要支持 OpenAI Responses API（api_format=responses）的 Provider，适合 <CommandBadge>{cmdPrefix}search</CommandBadge> 或 <CommandBadge>{cmdPrefix}ai search</CommandBadge>。
                   </p>
                   <p className="mt-1">
-                    <span className="font-medium text-foreground">image</span>：图片生成；可桥接 codex_image 模块，也可使用 LLM Provider 原生生图，适合 <CommandBadge>{cmdPrefix}image</CommandBadge>。
+                    <span className="font-medium text-foreground">image</span>：图片生成；可桥接 codex_image 插件，也可使用 LLM Provider 原生生图，适合 <CommandBadge>{cmdPrefix}image</CommandBadge>。
                   </p>
                   <p className="mt-1">
                     <span className="font-medium text-foreground">video</span>：视频生成；转发到账号已启用的视频插件，适合 <CommandBadge>{cmdPrefix}video</CommandBadge>。
@@ -1330,15 +1330,15 @@ function CommandEditDialog({
                       )
                     }
                   >
-                    <option value="codex_image">codex_image 模块（当前推荐）</option>
+                    <option value="codex_image">codex_image 插件（当前推荐）</option>
                     <option value="llm">LLM Provider 原生生图</option>
                   </Select>
                   <p className="text-xs text-muted-foreground">
                     {form.ai_image_backend === "codex_image" ? (
                       <>
-                        codex_image 使用账号模块里的 Codex Access Token、尺寸和发送配置；本模板只负责把
+                        codex_image 使用账号插件里的 Codex Access Token、尺寸和发送配置；本模板只负责把
                         <CommandBadge className="mx-1">{cmdPrefix}{form.name || "image"}</CommandBadge>
-                        转到该模块。
+                        转到该插件。
                       </>
                     ) : (
                       <>

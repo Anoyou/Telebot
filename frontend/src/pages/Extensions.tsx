@@ -1,7 +1,7 @@
 // 插件安装与管理：插件包安装/更新/卸载 + 开发指南
 //
 // Tab 1：安装与更新 — 本地内置插件 + 远程插件（安装/卸载/更新）
-// Tab 2：开发指南 — 内置完整模块开发文档工作台
+// Tab 2：开发指南 — 内置完整插件开发文档工作台
 //
 // 账号级启停与配置统一回 /plugins 首页，避免“安装页”和“插件中心”双入口重复。
 // 远程插件原为独立 /remote-plugins 页面，现在统一收口到 /plugins/manage。
@@ -128,15 +128,15 @@ const DEV_DOCS: DevDoc[] = [
   {
     id: "dev-guide",
     title: "索引与路线",
-    description: "模块市场路线、文档分篇和 0.x 安全策略入口。",
+    description: "插件市场路线、文档分篇和 0.x 安全策略入口。",
     path: "docs/PLUGIN-DEV-GUIDE.md",
     markdown: devGuideMd,
     icon: BookOpen,
   },
   {
     id: "overview",
-    title: "模块概览",
-    description: "快速开始、模块结构、Route A 与 Route B 的边界。",
+    title: "插件概览",
+    description: "快速开始、插件结构、Route A 与 Route B 的边界。",
     path: "docs/PLUGIN-OVERVIEW.md",
     markdown: overviewMd,
     icon: FileText,
@@ -152,7 +152,7 @@ const DEV_DOCS: DevDoc[] = [
   {
     id: "http",
     title: "HTTP facade",
-    description: "第三方模块访问外部 HTTP 的权限、配额和调用约束。",
+    description: "第三方插件访问外部 HTTP 的权限、配额和调用约束。",
     path: "docs/PLUGIN-HTTP.md",
     markdown: httpGuideMd,
     icon: Network,
@@ -167,7 +167,7 @@ const DEV_DOCS: DevDoc[] = [
   },
   {
     id: "remote",
-    title: "远程模块",
+    title: "远程插件",
     description: "远程安装、manifest 读取、worker loader 与更新回滚。",
     path: "docs/PLUGIN-REMOTE.md",
     markdown: remoteGuideMd,
@@ -215,7 +215,7 @@ function formatPluginVersion(version?: string | null) {
 function toastPluginLintWarnings(row: RemotePlugin) {
   const warnings = row.lint_warnings ?? [];
   if (!warnings.length) return;
-  toast.warning(`模块 ${row.name} 有 ${warnings.length} 条开发规范警告`, {
+  toast.warning(`插件 ${row.name} 有 ${warnings.length} 条开发规范警告`, {
     description: warnings[0],
   });
 }
@@ -284,8 +284,8 @@ export function Extensions() {
           <CardHeader>
             <SectionHeader
               icon={Puzzle}
-              title="模块安装与管理"
-              description="这里负责安装、更新、卸载远程模块；装好后回模块中心按账号启用和配置。"
+              title="插件安装与管理"
+              description="这里负责安装、更新、卸载远程插件；装好后回插件中心按账号启用和配置。"
             />
           </CardHeader>
         </Card>
@@ -351,7 +351,7 @@ function PluginInstallGuide({
         aria-label="打开新手指引"
       >
         <Sparkles className="h-4 w-4" />
-        新手指引：安装后回模块中心启用
+        新手指引：安装后回插件中心启用
       </Button>
     );
   }
@@ -359,14 +359,14 @@ function PluginInstallGuide({
   return (
     <Card className="max-w-2xl border-primary/30 bg-card/95 shadow-lg shadow-primary/10">
       <CardHeader className="pb-2">
-        <CardTitle className="text-base">3. 启用指令模板或调用模块</CardTitle>
+        <CardTitle className="text-base">3. 启用指令模板或调用插件</CardTitle>
         <CardDescription>
-          这里只负责安装、更新和卸载远程模块。安装完成后，回模块中心选择账号，再启用和配置对应模块。
+          这里只负责安装、更新和卸载远程插件。安装完成后，回插件中心选择账号，再启用和配置对应插件。
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-wrap gap-2">
         <Button size="sm" onClick={onBack}>
-          返回模块中心 <ChevronRight className="ml-1 h-4 w-4" />
+          返回插件中心 <ChevronRight className="ml-1 h-4 w-4" />
         </Button>
         <Button size="sm" variant="outline" onClick={onDone}>
           我学会了！
@@ -415,7 +415,7 @@ function RemoteUpdateSettingsCard() {
         },
       }),
     onSuccess: () => {
-      toast.success("远程模块自动检查设置已保存");
+      toast.success("远程插件自动检查设置已保存");
       qc.invalidateQueries({ queryKey: ["system", "settings"] });
     },
     onError: (err) => toast.error(getErrMsg(err)),
@@ -424,7 +424,7 @@ function RemoteUpdateSettingsCard() {
   const checkMut = useMutation({
     mutationFn: checkRemotePluginUpdates,
     onSuccess: (res) => {
-      toast.success(`检查完成：${res.update_available} 个模块有更新`);
+      toast.success(`检查完成：${res.update_available} 个插件有更新`);
       qc.invalidateQueries({ queryKey: REMOTE_QK });
       qc.invalidateQueries({ queryKey: ["matrix"] });
     },
@@ -436,8 +436,8 @@ function RemoteUpdateSettingsCard() {
       <CardHeader className="pb-3">
         <SectionHeader
           icon={RefreshCw}
-          title="远程模块更新检查"
-          description="后台只检查是否有新版本，不会自动安装；发现更新后会在模块中心和已安装模块里提示。"
+          title="远程插件更新检查"
+          description="后台只检查是否有新版本，不会自动安装；发现更新后会在插件中心和已安装插件里提示。"
         />
       </CardHeader>
       <CardContent className="flex flex-col gap-3 md:flex-row md:items-end">
@@ -603,8 +603,8 @@ function RemoteInstallCard() {
       <CardHeader className="pb-3">
         <SectionHeader
           icon={GitFork}
-          title="模块仓库"
-          description="添加 Git 仓库后浏览并安装模块"
+          title="插件仓库"
+          description="添加 Git 仓库后浏览并安装插件"
         />
       </CardHeader>
       <CardContent className="space-y-4">
@@ -689,7 +689,7 @@ function RemoteInstallCard() {
                         加载失败：{getErrMsg(pluginsQ.error)}
                       </p>
                     ) : (pluginsQ.data ?? []).length === 0 ? (
-                      <p className="py-2 text-center text-sm text-muted-foreground">仓库内未找到模块</p>
+                      <p className="py-2 text-center text-sm text-muted-foreground">仓库内未找到插件</p>
                     ) : (
                       <div className="space-y-1">
                         {(pluginsQ.data ?? []).map((p) => {
@@ -785,7 +785,7 @@ function InstalledPluginsSection() {
     mutationFn: (name: string) => enableRemotePlugin(name),
     onSuccess: (res) => {
       const suffix = typeof res.applied === "number" ? `，已同步 ${res.applied} 个账号` : "";
-      toast.success(`已启用远程模块${suffix}`);
+      toast.success(`已启用远程插件${suffix}`);
       qc.invalidateQueries({ queryKey: REMOTE_QK });
       qc.invalidateQueries({ queryKey: ["matrix"] });
     },
@@ -844,8 +844,8 @@ function InstalledPluginsSection() {
       <CardHeader>
         <SectionHeader
           icon={Puzzle}
-          title="已安装模块"
-          description="这里管理模块包本身；账号级启停和配置统一回模块中心处理。"
+          title="已安装插件"
+          description="这里管理插件包本身；账号级启停和配置统一回插件中心处理。"
           meta={(
             <SignalPill
               tone="neutral"
@@ -860,12 +860,12 @@ function InstalledPluginsSection() {
         {isLoading ? (
           <div className="flex h-24 items-center justify-center"><Spinner className="text-primary" /></div>
         ) : builtin.length === 0 && thirdParty.length === 0 && remote.length === 0 ? (
-          <p className="py-8 text-center text-sm text-muted-foreground">暂无已安装模块</p>
+          <p className="py-8 text-center text-sm text-muted-foreground">暂无已安装插件</p>
         ) : (
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>模块</TableHead>
+                <TableHead>插件</TableHead>
                 <TableHead>类型</TableHead>
                 <TableHead>版本</TableHead>
                 <TableHead>版本状态</TableHead>
@@ -885,7 +885,7 @@ function InstalledPluginsSection() {
                   <TableCell><MetaBadge tone="success">随系统更新</MetaBadge></TableCell>
                   <TableCell className="text-right">
                     <Button size="sm" variant="outline" onClick={() => nav("/plugins")}>
-                      去模块中心
+                      去插件中心
                     </Button>
                   </TableCell>
                 </TableRow>
@@ -1020,7 +1020,7 @@ function InstalledPluginsSection() {
                         卸载
                       </Button>
                       <Button size="sm" variant="outline" onClick={() => nav("/plugins")}>
-                        去模块中心
+                        去插件中心
                       </Button>
                     </div>
                   </TableCell>
@@ -1042,7 +1042,7 @@ function DevGuideTab() {
     () => ({
       id: "all",
       title: "完整文档",
-      description: "把模块索引、概览、API、HTTP、安全、远程、速查和 AI facade 合并为一份可滚动正文。",
+      description: "把插件索引、概览、API、HTTP、安全、远程、速查和 AI facade 合并为一份可滚动正文。",
       path: "docs/PLUGIN-*.md",
       markdown: buildCompleteDevGuide(),
       icon: Sparkles,
@@ -1095,7 +1095,7 @@ function DevGuideTab() {
       <CardHeader className="gap-4">
         <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
           <div className="min-w-0">
-            <CardTitle className="text-base">模块开发文档</CardTitle>
+            <CardTitle className="text-base">插件开发文档</CardTitle>
             <CardDescription className="mt-1">
               内置完整开发文档，支持直接阅读合集，也可以按主题查看每个分篇。
             </CardDescription>

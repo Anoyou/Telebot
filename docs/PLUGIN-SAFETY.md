@@ -1,17 +1,17 @@
-# TelePilot 模块安全边界
+# TelePilot 插件安全边界
 
-本文保留旧版开发指南中安全边界、工程规范、安全合规相关章节的原文内容。
+本文是当前维护的插件安全边界与工程规范，覆盖权限声明、运行时限制、日志脱敏和发布前检查。
 
 ## 12. 安全边界
 
 ### 指令前缀（command_prefix）
 
 - 所有 Telegram 指令必须有明确前缀（如 `,` 或自定义）
-- 前缀由系统设置里的 `command_prefix` 控制；模块配置中不要再单独硬编码 `prefix`
+- 前缀由系统设置里的 `command_prefix` 控制；插件配置中不要再单独硬编码 `prefix`
 
 ### 权限声明
 
-Manifest 中的 `permissions` 字段声明模块需要的能力：
+Manifest 中的 `permissions` 字段声明插件需要的能力：
 
 | 权限 | 典型方法 | 说明 |
 |------|----------|------|
@@ -27,7 +27,7 @@ Manifest 中的 `permissions` 字段声明模块需要的能力：
 | `external_http_bypass_proxy` | direct 网络出口 | 预留高危权限；当前直连还必须通过 Manifest `http.allow_direct` 和账号配置共同开启 |
 | `ai_text` | `ctx.ai.complete` / `ctx.ai.list_providers` | 平台文本 LLM facade；返回脱敏 provider 元数据 |
 
-`permissions` 默认是空列表。第三方模块漏写权限时不会注入对应 facade，也不能调用未声明的 `ctx.client` / `event` helper 能力；内置模块也建议显式写全，方便审计和后续迁移。
+`permissions` 默认是空列表。第三方插件漏写权限时不会注入对应 facade，也不能调用未声明的 `ctx.client` / `event` helper 能力；内置插件也建议显式写全，方便审计和后续迁移。
 
 ### 禁止行为
 
@@ -38,26 +38,26 @@ Manifest 中的 `permissions` 字段声明模块需要的能力：
 
 ---
 
-## 14. 模块工程规范（Plugin 实现）
+## 14. 插件工程规范（Plugin 实现）
 
-这一章是给模块作者看的“不要踩坑”规范。只要模块涉及发消息、抢答、后台任务、奖励或远程发布，都建议先按这里的模板走。
+这一章是给插件作者看的“不要踩坑”规范。只要插件涉及发消息、抢答、后台任务、奖励或远程发布，都建议先按这里的模板走。
 
 ### 发布与交互体验检查清单
 
-这部分是发布前的产品质量门槛。模块能跑起来只是第一步；能被用户确认版本、理解状态、稳定退出、少刷屏，才算适合放进模块市场。
+这部分是发布前的产品质量门槛。插件能跑起来只是第一步；能被用户确认版本、理解状态、稳定退出、少刷屏，才算适合放进插件市场。
 
 #### 版本与发布
 
-- 远程模块发布时必须同步更新所有元数据入口的版本号：`plugin.json.version`、`manifest.py` 里的 `MANIFEST.version`、Registry 索引中的 `version`。
+- 远程插件发布时必须同步更新所有元数据入口的版本号：`plugin.json.version`、`manifest.py` 里的 `MANIFEST.version`、Registry 索引中的 `version`。
 - `plugin.json` 是安装/更新阶段的静态来源，`manifest.py` 是运行阶段的真实 Manifest。两者版本不一致时，市场展示、配置缓存和运行日志会很难排查。
-- 需要热更新验证的模块，建议在 `on_startup` 日志和主要业务消息中暴露版本，例如 `"[quiz] 已启动 v1.2.3，指令：quiz"`。
+- 需要热更新验证的插件，建议在 `on_startup` 日志和主要业务消息中暴露版本，例如 `"[quiz] 已启动 v1.2.3，指令：quiz"`。
 - 发布说明里要写清最低 TelePilot 版本、权限、依赖库、是否需要 `send_file` / `delete_message` 等敏感能力；版本字段优先写 `min_telepilot_version`。
 
 #### 消息与交互
 
 - 优先复用用户触发指令消息或已有业务消息：指令状态用 `event.edit(...)`，题面进度用编辑原题面消息，答对奖励再回复答题者消息。
-- 模块进行中时，重复触发指令必须给出明确提示，并说明下一步：继续当前流程、等待超时、或使用 `stop` / `cancel` / `结束`。
-- 指令型模块必须提供帮助入口或帮助子命令，例如 `help` / `status` / 空参数展示帮助；帮助内容要显示当前配置的指令名和当前系统指令前缀。
+- 插件进行中时，重复触发指令必须给出明确提示，并说明下一步：继续当前流程、等待超时、或使用 `stop` / `cancel` / `结束`。
+- 指令型插件必须提供帮助入口或帮助子命令，例如 `help` / `status` / 空参数展示帮助；帮助内容要显示当前配置的指令名和当前系统指令前缀。
 - 视觉题、图片题、文件题不要在文本说明、alt 文案、日志或 preview 中泄露答案；文本只说明规则和限时。
 - 避免连续发送多条含义重复的消息。降级发送时也要保证“同一事件只产生一个用户可见结果”。
 
@@ -70,15 +70,15 @@ Manifest 中的 `permissions` 字段声明模块需要的能力：
 
 #### 防滥用与公平性
 
-- 抢答、竞猜、投票、抽奖等高频交互模块，应设计用户级或聊天级冷却，避免刷屏、暴力枚举和误触抢占。
+- 抢答、竞猜、投票、抽奖等高频交互插件，应设计用户级或聊天级冷却，避免刷屏、暴力枚举和误触抢占。
 - 冷却、限流、超时等策略尽量配置化，并在开局文案中说明关键规则，例如“每人每 3 秒可答一次，限时 60 秒”。
-- 游戏类/互动类模块建议使用 `plugin.json.tags` 标记为 `game`、`quiz`、`interactive`，后续平台可按标签做统一启停、限流或分组展示。当前不要自己发明全局开关协议，先复用模块全局开关、账号级开关和配置项。
+- 游戏类/互动类插件建议使用 `plugin.json.tags` 标记为 `game`、`quiz`、`interactive`，后续平台可按标签做统一启停、限流或分组展示。当前不要自己发明全局开关协议，先复用插件全局开关、账号级开关和配置项。
 - 媒体型题面必须保证可观测、可辨认、不遮挡；如果图片或文件发送失败，应降级为明确错误提示，而不是泄露答案。
 
 #### 资源清理与降级
 
-- 模块产生的临时消息、图片、文件、后台任务、定时器，应在完成、取消、超时、禁用、热重载和卸载时清理。
-- 群聊类模块建议提供消息清理策略，例如 `cleanup_mode` / `cleanup_delay_seconds` / `delete_command_message`，并允许用户选择保留记录；其中 `cleanup_mode` 目前只是模块 manifest/config 的约定字段，不是平台自动执行的运行时协议。
+- 插件产生的临时消息、图片、文件、后台任务、定时器，应在完成、取消、超时、禁用、热重载和卸载时清理。
+- 群聊类插件建议提供消息清理策略，例如 `cleanup_mode` / `cleanup_delay_seconds` / `delete_command_message`，并允许用户选择保留记录；其中 `cleanup_mode` 目前只是插件 manifest/config 的约定字段，不是平台自动执行的运行时协议。
 - 平台不支持编辑、删除、发媒体时，应降级为回复文本或普通发送；降级路径要写日志，并避免发送多条重复消息。
 - 可配置指令发生变化时，建议保留常用历史别名一段时间，或在重复触发/未知指令提示里告诉用户新指令。
 
@@ -86,7 +86,7 @@ Manifest 中的 `permissions` 字段声明模块需要的能力：
 
 `owner_only` 不是“公开指令开关”。框架约定如下：
 
-- `commands` 只处理当前账号 outgoing 指令；普通群成员直接发送 `{prefix}{command}` 不会触发模块命令。
+- `commands` 只处理当前账号 outgoing 指令；普通群成员直接发送 `{prefix}{command}` 不会触发插件命令。
 - `owner_only=False` 只开放 `on_message`，用于答题、口令、领取码、关键词参与等普通消息监听。
 - 平台内部动作（自动回复、scheduler）如果需要触发指令，应通过内部命令派发能力执行，并把返回结果转成回复/普通发送；不要要求用户直接发送管理指令。
 - 指令 handler 内可以假设事件来自当前账号 outgoing 消息，因此可以优先 `event.edit(...)`；`on_message` 处理 incoming 消息时不要 `event.edit(...)`。
@@ -96,8 +96,8 @@ Manifest 中的 `permissions` 字段声明模块需要的能力：
 ```text
 用户: 我想玩 24 点
 自动回复规则: 命中关键词后由 TelePilot 内部执行 "{prefix}24d 100"
-模块 commands: 本账号开局
-模块 on_message: 普通成员提交答案，答对后反馈奖励
+插件 commands: 本账号开局
+插件 on_message: 普通成员提交答案，答对后反馈奖励
 ```
 
 自动回复需要带参数时，使用正则捕获组渲染到回复内容里，并继续依赖自动指令白名单和冷却：
@@ -109,7 +109,7 @@ Manifest 中的 `permissions` 字段声明模块需要的能力：
   模式: ^置顶\s+(\d+)$
   回复内容: {prefix}pt {1}
   冷却: 30 秒
-模块 commands: 本账号执行 pt_promote 置顶
+插件 commands: 本账号执行 pt_promote 置顶
 ```
 
 可选参数可以写默认值，例如 `回复内容: {prefix}ct {1|1000}`，群友只发“我要猜骰”时会使用 `1000`。
@@ -137,7 +137,7 @@ Manifest 中的 `permissions` 字段声明模块需要的能力：
 
 ```text
 用户: {prefix}24d 100
-模块: 直接开局
+插件: 直接开局
 ```
 
 普通成员要参与流程，应发答案、口令或关键词，而不是发送系统指令。
@@ -146,7 +146,7 @@ Manifest 中的 `permissions` 字段声明模块需要的能力：
 
 不同回调能拿到的对象不同，不要在没有 `event` 的地方调用 `event.reply`，也不要尝试编辑别人的 incoming 消息。推荐按下表选择发送方式：
 
-| 场景 | 有 `event` | 推荐方式 | 适用说明 | 远程模块权限 |
+| 场景 | 有 `event` | 推荐方式 | 适用说明 | 远程插件权限 |
 |------|------------|----------|----------|--------------|
 | `on_command` 指令回调 | 有 | `event.edit(...)` | 把用户发出的指令改成状态/结果，适合 UserBot 自己发出的指令 | `edit_message` |
 | `on_command` 需要另发一条 | 有 | `event.respond(...)` 或 `ctx.client.send_message(event.chat_id, ...)` | 不想覆盖原指令，或指令消息可能已删除 | `send_message` |
@@ -193,14 +193,14 @@ async def safe_reply(ctx, event, text: str, *, chat_id: int, reply_to_id: int | 
 注意：
 
 - `event.edit(...)` 只适合编辑当前账号自己发出的指令/状态消息；不要用它编辑别人发来的 incoming 消息。
-- 远程模块安装阶段只读 `plugin.json`，但运行时仍会受 `manifest.py` 的 `permissions` 沙箱限制。
-- 第三方模块不要把 `event.reply/respond/edit` 当作绕过权限的路径；凡是会发送、编辑、删除、读取消息的行为，都必须在 `permissions` 中声明对应能力。
+- 远程插件安装阶段只读 `plugin.json`，但运行时仍会受 `manifest.py` 的 `permissions` 沙箱限制。
+- 第三方插件不要把 `event.reply/respond/edit` 当作绕过权限的路径；凡是会发送、编辑、删除、读取消息的行为，都必须在 `permissions` 中声明对应能力。
 - 需要发送图片、文件时，为 `BytesIO` 设置 `name`，例如 `image_file.name = "result.png"`，否则 Telegram 客户端可能显示无后缀文件。
 - 长消息要按 Telegram 4096 字符限制分段；HTML 模式下切分前要保证标签闭合，失败时应降级为纯文本。
 
 ### 并发与抢答标准模板
 
-抢答类、竞猜类、抽奖类模块都要处理并发：多个人几乎同时答对时，只能有一个人获胜。推荐使用 `chat_id -> asyncio.Lock`，并在加锁后再次检查状态。
+抢答类、竞猜类、抽奖类插件都要处理并发：多个人几乎同时答对时，只能有一个人获胜。推荐使用 `chat_id -> asyncio.Lock`，并在加锁后再次检查状态。
 
 ```python
 import asyncio
@@ -251,11 +251,11 @@ class QuizPlugin(Plugin):
 - 只在锁外检查 `answered`：两个协程都看到未答对，最后发两次奖励。
 - 在锁内等待网络请求：一个群的消息会被长时间阻塞。
 - 超时任务和答题消息同时结束一局：超时回调也要拿同一把锁，再二次检查。
-- 热重载没有清理状态：旧任务继续执行，和新模块实例抢状态。
+- 热重载没有清理状态：旧任务继续执行，和新插件实例抢状态。
 
 ### 配置项完整性原则
 
-模块作者要尽量把“用户可能合理想改”的行为做成配置项，而不是写死在代码里。尤其是互动类、游戏类、生成类和通知类模块，至少检查这些能力是否需要外露：
+插件作者要尽量把“用户可能合理想改”的行为做成配置项，而不是写死在代码里。尤其是互动类、游戏类、生成类和通知类插件，至少检查这些能力是否需要外露：
 
 - 指令名：主指令、帮助子命令、取消/结束命令、撤销命令、管理子命令。
 - 自动删除：是否删除触发指令、是否删除中间状态、完成后多久清理、失败时是否保留排障信息。
@@ -276,15 +276,15 @@ class QuizPlugin(Plugin):
 
 ### 统一配置项命名与校验
 
-新增模块尽量复用以下字段名，减少前端、文档、Bot 指令和用户认知的分裂。
+新增插件尽量复用以下字段名，减少前端、文档、Bot 指令和用户认知的分裂。
 
 | 字段 | 类型 | 推荐默认值 | 推荐范围/校验 | 说明 |
 |------|------|------------|---------------|------|
-| `command` | string | 模块短名 | 1-32 字符，不含空白，支持中文 | 触发指令名，配合 `command_config_keys = {"command"}` |
+| `command` | string | 插件短名 | 1-32 字符，不含空白，支持中文 | 触发指令名，配合 `command_config_keys = {"command"}` |
 | `help_command` | string | `help` | 1-32 字符，不含空白 | 帮助子命令或独立帮助指令名 |
 | `help_message_template` | string | 内置模板 | 建议限制最大长度 | 帮助文本模板，必须支持 `{prefix}` 和 `{command}` |
-| `default_reward` | integer | `0` | `0` 到业务允许上限 | 可选默认奖励；抢答/下注类模块的单局奖励优先由指令参数传入 |
-| `timeout` | integer | `60` | 10-86400 秒 | 用户可理解的超时秒数；已有模块沿用该字段 |
+| `default_reward` | integer | `0` | `0` 到业务允许上限 | 可选默认奖励；抢答/下注类插件的单局奖励优先由指令参数传入 |
+| `timeout` | integer | `60` | 10-86400 秒 | 用户可理解的超时秒数；已有插件沿用该字段 |
 | `auto_next` | boolean | `false` | 布尔 | 游戏/任务结束后是否自动开下一轮 |
 | `message_template` | string | 内置模板 | 建议限制最大长度 | 用户可编辑输出消息模板 |
 | `template_preview` | string | 只读示例 | 由前端/后端生成 | 展示模板渲染后的示例文本，不参与运行时配置 |
@@ -297,10 +297,10 @@ class QuizPlugin(Plugin):
 | `cleanup_delay_seconds` | integer | `0` | 0-86400 秒 | 流程结束后延迟清理临时消息 |
 | `cancel_commands` | array[string] | `["stop", "cancel", "结束"]` | 每项 1-32 字符，不含空白 | 取消/强制结束指令别名 |
 | `undo_command` | string | `undo` | 1-32 字符，不含空白 | 撤销上一步、撤回本轮或回滚最近动作的指令名 |
-| `allowed_chat_ids` | array[int] | `[]` | 留空表示不限制 | 限制模块只在指定聊天生效 |
+| `allowed_chat_ids` | array[int] | `[]` | 留空表示不限制 | 限制插件只在指定聊天生效 |
 | `delete_command_message` | boolean | `false` | 布尔 | 指令完成后是否删除原指令 |
-| `auto_delete_enabled` | boolean | `false` | 布尔 | 是否自动删除模块产生的临时消息 |
-| `auto_delete_delay_seconds` | integer | `0` | 0-86400 秒 | 自动删除延迟；0 表示立即或不启用，按模块语义说明 |
+| `auto_delete_enabled` | boolean | `false` | 布尔 | 是否自动删除插件产生的临时消息 |
+| `auto_delete_delay_seconds` | integer | `0` | 0-86400 秒 | 自动删除延迟；0 表示立即或不启用，按插件语义说明 |
 
 示例：
 
@@ -350,7 +350,7 @@ config_schema={
 
 ### 模板配置与占位符
 
-凡是会向 Telegram 用户发送、编辑或回复文案的模块，都必须把用户可见文案模板化，尤其是开局文案、进行中文案、答对文案、超时文案、取消文案和错误提示。模板配置要参考“通用模板 → 自定义指令模板”的输出模板编辑体验，告诉用户可用占位符、含义和示例。
+凡是会向 Telegram 用户发送、编辑或回复文案的插件，都必须把用户可见文案模板化，尤其是开局文案、进行中文案、答对文案、超时文案、取消文案和错误提示。模板配置要参考“通用模板 → 自定义指令模板”的输出模板编辑体验，告诉用户可用占位符、含义和示例。
 
 不要把面向用户的句子硬编码在 `plugin.py` 里。代码里只能保留模板默认值、不可恢复的兜底错误、内部日志和开发者调试信息；只要这段文字可能在群聊、私聊、指令回复、状态编辑或媒体 caption 中出现，就应该有对应的 `*_message_template` 配置项，或至少复用一个通用 `message_template`。
 
@@ -387,7 +387,7 @@ config_schema={
 
 `{prefix}` 是平台约定的系统级占位符，表示“系统设置 → 指令前缀”的当前值。运行时需要展示指令示例、帮助列表、错误提示里的用法示例时，优先从 worker 的当前指令前缀读取；前端配置预览中应通过 `getSystemSettings().command_prefix` 注入示例上下文，接口未返回时才兜底使用 `,`。不要把逗号硬编码成固定前缀。
 
-如果模块有专属配置页，建议提供只读预览：用户修改模板后，用示例上下文渲染一段 `template_preview`。预览应展示“模板 + 示例上下文”替换后的最终消息效果，而不是简单重复默认值或字段说明。没有专属页面时，也至少在字段描述里给出一条完整示例，避免用户猜最终效果。
+如果插件有专属配置页，建议提供只读预览：用户修改模板后，用示例上下文渲染一段 `template_preview`。预览应展示“模板 + 示例上下文”替换后的最终消息效果，而不是简单重复默认值或字段说明。没有专属页面时，也至少在字段描述里给出一条完整示例，避免用户猜最终效果。
 
 配置页里的模板预览体验应对齐自定义指令模板：模板输入、占位符说明/按钮、最终消息预览三者放在同一个配置上下文里。预览只使用模拟数据，不读取真实群消息，也不触发实际发送；如果模板支持 Telegram HTML，应复用 `frontend/src/components/TelegramHtmlPreview.tsx`。
 
@@ -401,17 +401,17 @@ config_schema={
 - HTML 模式允许展示 Telegram 常用标签效果：`<b>`、`<i>`、`<code>`、`<pre>`、`<blockquote expandable>`；不支持的标签应被转义为普通文本。
 - Markdown / plain 模式在同一气泡里按纯文本预览，不尝试模拟完整 Telegram Markdown 解析。
 - 预览只使用模拟数据，不读取真实聊天、账号、用户资料，也不触发发送或编辑消息。
-- 如果模块或页面需要做消息模板预览，优先直接使用 `TelegramHtmlPreview`；只有需要嵌入极小空间时，才使用更轻量的纯内容预览。
+- 如果插件或页面需要做消息模板预览，优先直接使用 `TelegramHtmlPreview`；只有需要嵌入极小空间时，才使用更轻量的纯内容预览。
 
-通用独立配置页兼容已有 schema 约定：`message_template` / `*_template` 是可编辑多行模板；`template_placeholders` 是只读占位符说明；`template_preview` / `*_preview` 是只读渲染预览。模块只需在 schema 中提供这些字段和默认值，不需要额外协议。多个 `*_preview` 字段会合并到同一个预览区域，以多条 Telegram 气泡展示。
+通用独立配置页兼容已有 schema 约定：`message_template` / `*_template` 是可编辑多行模板；`template_placeholders` 是只读占位符说明；`template_preview` / `*_preview` 是只读渲染预览。插件只需在 schema 中提供这些字段和默认值，不需要额外协议。多个 `*_preview` 字段会合并到同一个预览区域，以多条 Telegram 气泡展示。
 
 ### 定时任务与后台任务生命周期
 
 优先使用平台调度器：
 
 - 重复执行、cron、一次性延迟任务：用 `ctx.scheduler.register(...)`。
-- 模块禁用、热重载、worker 退出时，loader 会清理该模块名下的调度任务。
-- 调度回调没有 `event`，必须从 `job.config` 或模块状态里拿 `chat_id`、模板、目标参数。
+- 插件禁用、热重载、worker 退出时，loader 会清理该插件名下的调度任务。
+- 调度回调没有 `event`，必须从 `job.config` 或插件状态里拿 `chat_id`、模板、目标参数。
 
 只有短期后台动作才建议自己 `asyncio.create_task`，例如“本轮游戏 60 秒后超时”。自建 task 必须集中管理并在 `on_shutdown` 取消：
 
@@ -459,13 +459,13 @@ class RoundPlugin(Plugin):
 
 ### 奖惩系统接入约定
 
-当前 TelePilot 没有统一积分服务时，模块奖励分三类：
+当前 TelePilot 没有统一积分服务时，插件奖励分三类：
 
 | 模式 | 适用场景 | 推荐做法 |
 |------|----------|----------|
-| 文案奖励 | 游戏娱乐、无真实积分 | 只发送“奖励 X 分/金币”的消息，并写模块日志 |
-| 模块内记分 | 模块自己维护排行榜 | 仅写自己模块的配置/状态文件或专属表，不直接改其它模块数据 |
-| 统一积分接口 | 后续平台提供积分服务后 | 通过平台 service/event 接口发放，模块不直接操作 DB |
+| 文案奖励 | 游戏娱乐、无真实积分 | 只发送“奖励 X 分/金币”的消息，并写插件日志 |
+| 插件内记分 | 插件自己维护排行榜 | 仅写自己插件的配置/状态文件或专属表，不直接改其它插件数据 |
+| 统一积分接口 | 后续平台提供积分服务后 | 通过平台 service/event 接口发放，插件不直接操作 DB |
 
 奖励日志建议统一字段：
 
@@ -485,39 +485,39 @@ await ctx.log(
 
 - 不要在日志里记录完整昵称、完整消息正文或隐私文本。
 - 真正记分前必须保证“首个答对”已经在锁内原子判定。
-- 奖励金额不建议作为抢答类模块的固定配置项；优先由触发指令携带，例如 `{prefix}game 100`。
+- 奖励金额不建议作为抢答类插件的固定配置项；优先由触发指令携带，例如 `{prefix}game 100`。
 - 开局时把本轮奖励写入局状态，例如 `RoundState.reward`；一局进行中不要再读取运行时可变配置，避免配置变更导致结算金额漂移。
 - 答对后建议两步反馈：先回复答对者消息发送纯文本奖励（如 `+100`），再编辑原题目消息追加答对者、正确答案、奖励金额、耗时等结算信息。
-- 图片题面模块必须在 `plugin.json` 和 `manifest.py` 的 `permissions` 中声明 `send_file`，并给发送的文件设置明确后缀名。
-- 图片题面模块不要隐式依赖未声明系统库；如果不用 Pillow，可以说明使用标准库生成 PNG；如果必须使用 Pillow、numpy 等第三方库，要在 README 或模块说明中写清安装约束。
+- 图片题面插件必须在 `plugin.json` 和 `manifest.py` 的 `permissions` 中声明 `send_file`，并给发送的文件设置明确后缀名。
+- 图片题面插件不要隐式依赖未声明系统库；如果不用 Pillow，可以说明使用标准库生成 PNG；如果必须使用 Pillow、numpy 等第三方库，要在 README 或插件说明中写清安装约束。
 - 奖励发送失败要写 `warn/error` 日志，并说明是否已经兜底发送普通消息。
 
-### 模块最小测试清单
+### 插件最小测试清单
 
 发布前至少覆盖这些路径：
 
 - [ ] 指令能触发，指令名改配置后能热重载生效。
-- [ ] 指令冲突时只由一个模块处理，`on_command` 正确返回 `True/False`。
+- [ ] 指令冲突时只由一个插件处理，`on_command` 正确返回 `True/False`。
 - [ ] 群聊、私聊、频道/匿名频道场景下不崩溃。
 - [ ] `event` 兼容裸 `Message`：不直接假设 `event.outgoing`、`event.message.id` 存在。
 - [ ] 重复开局/重复创建规则会给出明确提示。
 - [ ] 抢答并发：两个答对消息同时到达只奖励一次。
 - [ ] 超时任务和答题消息同时发生时，只结束一次。
-- [ ] 模块禁用、热重载、worker shutdown 后没有幽灵 task。
-- [ ] 远程模块 `plugin.json`、`manifest.py`、`__init__.py`、`plugin.py` 均可被加载。
-- [ ] 远程模块 `plugin.json.version`、`MANIFEST.version`、Registry `version` 一致。
-- [ ] 远程模块不是单文件旧结构；缺少 `manifest.py` 或 `__init__.py` 会被安装阶段拒绝。
-- [ ] 缺权限时远程模块会收到可理解的 `PermissionError`，不会访问 session/Redis/engine。
-- [ ] 主要交互消息或启动日志能显示当前模块版本，便于确认热更新是否生效。
+- [ ] 插件禁用、热重载、worker shutdown 后没有幽灵 task。
+- [ ] 远程插件 `plugin.json`、`manifest.py`、`__init__.py`、`plugin.py` 均可被加载。
+- [ ] 远程插件 `plugin.json.version`、`MANIFEST.version`、Registry `version` 一致。
+- [ ] 远程插件不是单文件旧结构；缺少 `manifest.py` 或 `__init__.py` 会被安装阶段拒绝。
+- [ ] 缺权限时远程插件会收到可理解的 `PermissionError`，不会访问 session/Redis/engine。
+- [ ] 主要交互消息或启动日志能显示当前插件版本，便于确认热更新是否生效。
 - [ ] 模板类配置包含占位符说明和示例预览。
-- [ ] 高频交互模块有冷却/限流/超时策略，并在用户文案里说明关键规则。
+- [ ] 高频交互插件有冷却/限流/超时策略，并在用户文案里说明关键规则。
 - [ ] 取消、完成、超时、禁用、热重载路径都会清理状态和后台任务。
 - [ ] 所有外部 HTTP 请求有 timeout，错误提示不泄露 token、路径、session。
-- [ ] 模块日志能说明“收到什么、判断了什么、为什么跳过/为什么执行、失败在哪一步”。
+- [ ] 插件日志能说明“收到什么、判断了什么、为什么跳过/为什么执行、失败在哪一步”。
 
-### 可复制的游戏模块骨架
+### 可复制的游戏插件骨架
 
-下面是一个最小抢答游戏骨架，包含指令注册、状态管理、并发锁、超时、日志和清理。真实模块可以从这里删改。
+下面是一个最小抢答游戏骨架，包含指令注册、状态管理、并发锁、超时、日志和清理。真实插件可以从这里删改。
 
 **plugin.py：**
 
@@ -564,7 +564,7 @@ class GuessNumberPlugin(Plugin):
     async def on_startup(self, ctx: PluginContext) -> None:
         self.commands = {self._command(ctx): self._cmd_start}
         if ctx.log:
-            await ctx.log("info", "猜数字模块已启动。", command=self._command(ctx))
+            await ctx.log("info", "猜数字插件已启动。", command=self._command(ctx))
 
     async def on_shutdown(self, ctx: PluginContext) -> None:
         for task in list(self._tasks):
@@ -651,7 +651,7 @@ MANIFEST = Manifest(
     display_name="猜数字",
     version="0.1.0",
     author="example",
-    description="一个可作为游戏模块模板的猜数字抢答模块。",
+    description="一个可作为游戏插件模板的猜数字抢答插件。",
     permissions=["send_message", "edit_message", "read_chat"],
     config_schema={
         "type": "object",
@@ -690,7 +690,7 @@ MANIFEST = Manifest(
 {
   "name": "guess_number",
   "display_name": "猜数字",
-  "description": "一个可作为游戏模块模板的猜数字抢答模块。",
+  "description": "一个可作为游戏插件模板的猜数字抢答插件。",
   "author": "example",
   "version": "0.1.0",
   "entry": "plugin.py",

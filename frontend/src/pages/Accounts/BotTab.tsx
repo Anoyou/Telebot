@@ -104,7 +104,7 @@ const HELP_PREVIEW = `/start  打开主菜单
 /status 查看账号、worker 与最近错误
 /features 查看并启停账号功能
 /commands 查看并启停自定义指令模板
-/plugins 查看模块入口
+/plugins 查看插件入口
 /rules 查看规则，scheduler 规则可手动执行
 /logs 查看最近运行日志
 /pause /resume 暂停或恢复账号
@@ -120,7 +120,7 @@ const DEFAULT_REMOTE_POLICY: AccountBotRemotePluginPolicy = {
 
 const DEFAULT_INTERACTION_DISABLED_MESSAGE = "本条互动规则已暂停，暂时不能开启。";
 const DEFAULT_INTERACTION_RESPONSE_TEMPLATE = "已收到 {payer_name} 给 {receiver_name} 的转账 {amount}，互动流程已准备就绪。";
-const DEFAULT_INTERACTION_MODULE_START_TEXT = "正在启动互动模块...";
+const DEFAULT_INTERACTION_MODULE_START_TEXT = "正在启动互动插件...";
 const DEFAULT_MATH10_START_KEYWORDS = "发十以内算数\n十以内算数\n开算数题";
 const RULE_CONTROLLED_MODULE_CONFIG_KEYS = new Set(["prize", "timeout", "valid_seconds"]);
 const DEFAULT_TRANSFER_NOTICE_TEMPLATE = [
@@ -594,7 +594,7 @@ function countDelimitedTextItems(value: string): number {
 }
 
 function getRuleActionLabel(action: AccountBotInteractionRule["action"]): string {
-  if (action === "module") return "启动模块";
+  if (action === "module") return "启动插件";
   if (action === "math10") return "算数题";
   return "只发通知";
 }
@@ -649,7 +649,7 @@ function describeRuleModuleSelection(
   selection?: ResolvedInteractionEntry,
 ): string {
   if (!selection) {
-    return rule.moduleKey.trim() ? `模块 ${rule.moduleKey} / 入口未选` : "模块入口未选";
+    return rule.moduleKey.trim() ? `插件 ${rule.moduleKey} / 入口未选` : "插件入口未选";
   }
   const entryLabel = selection.entry.title || selection.entry.label || selection.entry.key;
   return selection.inferred || !rule.moduleAction.trim()
@@ -1889,7 +1889,7 @@ export function BotTab({ aid, mode = "management" }: { aid: number; mode?: "mana
             </div>
             <div className="space-y-3 rounded-md border border-red-300/70 bg-red-50 px-3 py-3 dark:border-red-400/40 dark:bg-red-950/30">
               <div className="flex items-center gap-2">
-                <div className="text-sm font-medium text-red-900 dark:text-red-100">远程模块高风险开关（admin）</div>
+                <div className="text-sm font-medium text-red-900 dark:text-red-100">远程插件高风险开关（admin）</div>
                 <Dialog>
                   <DialogTrigger asChild>
                     <button
@@ -1901,17 +1901,17 @@ export function BotTab({ aid, mode = "management" }: { aid: number; mode?: "mana
                   </DialogTrigger>
                   <DialogContent className="max-h-[85vh] w-[calc(100vw-2rem)] max-w-xl overflow-y-auto rounded-xl">
                     <DialogHeader>
-                      <DialogTitle className="text-base">远程模块高风险开关说明</DialogTitle>
+                      <DialogTitle className="text-base">远程插件高风险开关说明</DialogTitle>
                       <DialogDescription>
-                        这是管理 Bot 里的高风险远程模块总闸，采用“Web 策略开关 + Telegram 内二次确认”双重防护。
+                        这是管理 Bot 里的高风险远程插件总闸，采用“Web 策略开关 + Telegram 内二次确认”双重防护。
                       </DialogDescription>
                     </DialogHeader>
                     <div className="space-y-3 text-sm text-foreground/90">
-                      <div><strong>总开关 enabled：</strong>关闭时所有高风险远程模块动作都不允许从 TG Bot 发起；开启后才会继续检查子开关。</div>
+                      <div><strong>总开关 enabled：</strong>关闭时所有高风险远程插件动作都不允许从 TG Bot 发起；开启后才会继续检查子开关。</div>
                       <div><strong>允许 install：</strong>控制 <code>/plugins install &lt;git-url&gt;</code>。</div>
                       <div><strong>允许 update：</strong>控制 <code>/plugins update &lt;name&gt;</code>。</div>
                       <div><strong>允许 uninstall：</strong>控制 <code>/plugins uninstall &lt;name&gt;</code>。</div>
-                      <div><strong>允许第三方 enable/disable：</strong>控制第三方远程模块启停操作。</div>
+                      <div><strong>允许第三方 enable/disable：</strong>控制第三方远程插件启停操作。</div>
                       <div><strong>权限边界：</strong>仅 <code>admin</code> 可操作；<code>viewer/operator</code> 会被拦截。</div>
                       <div><strong>执行机制：</strong>开关只代表“允许发起请求”，真正执行前仍需在 Telegram 内二次确认，且确认有时效并绑定发起人。</div>
                     </div>
@@ -2066,7 +2066,7 @@ export function BotTab({ aid, mode = "management" }: { aid: number; mode?: "mana
             <Bot className="h-4 w-4" /> 联动交互 Bot
           </CardTitle>
           <CardDescription>
-            为了减少娱乐模块的高频率 API 调用会对人形 Bot 产生封号的风险，特有此方案。<br />
+            为了减少娱乐插件的高频率 API 调用会对人形 Bot 产生封号的风险，特有此方案。<br />
             通过给人形 Bot 发特定格式消息, 实现娱乐功能。<br />
             交互 Bot 能帮你独立监听指定群里的 “+数字“这类消息，然后帮你互动；转账结果通知 Bot 可用于发模拟转账通知。
           </CardDescription>
@@ -2134,7 +2134,7 @@ export function BotTab({ aid, mode = "management" }: { aid: number; mode?: "mana
             </div>
             <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
               <div className="rounded-md border bg-background px-3 py-2 text-sm text-muted-foreground">
-                模块规则 <span className="font-medium text-foreground">{moduleRuleCount}</span> 条
+                插件规则 <span className="font-medium text-foreground">{moduleRuleCount}</span> 条
               </div>
               <div className="rounded-md border bg-background px-3 py-2 text-sm text-muted-foreground">
                 关键词触发 <span className="font-medium text-foreground">{keywordRuleCount}</span> 条
@@ -2437,7 +2437,7 @@ export function BotTab({ aid, mode = "management" }: { aid: number; mode?: "mana
                           </div>
                           <div className="mt-2 space-y-1 text-xs text-muted-foreground">
                             <div className="line-clamp-2 break-words">
-                              {rule.chatIds.trim() ? `${countDelimitedTextItems(rule.chatIds)} 个群 · ${rule.action === "notice" ? "通知" : rule.action === "module" ? "模块" : "算数题"}` : "未填写监听群"}
+                              {rule.chatIds.trim() ? `${countDelimitedTextItems(rule.chatIds)} 个群 · ${rule.action === "notice" ? "通知" : rule.action === "module" ? "插件" : "算数题"}` : "未填写监听群"}
                             </div>
                             <div className="line-clamp-2 break-words">
                               {rule.action === "module"

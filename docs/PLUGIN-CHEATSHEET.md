@@ -1,12 +1,12 @@
-# TelePilot 模块速查表
+# TelePilot 插件速查表
 
-- 路线默认值：0.x 走 Route A，受信/签名模块同进程运行。
-- 产品文案统一叫“模块”，代码契约仍是 `Plugin` / `Manifest` / `PluginContext`。
+- 路线默认值：0.x 走 Route A，受信/签名插件同进程运行。
+- 产品文案统一叫“插件”，代码契约仍是 `Plugin` / `Manifest` / `PluginContext`。
 - 最小目录：`__init__.py`、`manifest.py`、`plugin.py`。
 - `__init__.py` 导出 `PLUGIN_CLASS` 和 `MANIFEST`。
-- `Manifest.key` 要和模块类 `key` 一致。
+- `Manifest.key` 要和插件类 `key` 一致。
 - `permissions` 不写就不会注入对应能力。
-- `ctx.client` 是主运行入口；远程模块拿到的是受限 `SandboxClient`。
+- `ctx.client` 是主运行入口；远程插件拿到的是受限 `SandboxClient`。
 - `ctx.http` 需要 `external_http` + `allowed_hosts`。
 - `ctx.ai` 需要 `ai_text`，细节见 `docs/PLUGIN-AI.md`。
 - `command` 只保存裸指令名，不保存前缀。
@@ -33,16 +33,16 @@
 - `settlement` 只描述中奖/奖金/对账结果，交互 Bot 不直接执行钱相关动作。
 - `preserve_command_trigger=true` 是硬规则；加交互入口不能影响插件原有命令触发。
 - `command_fallback` 只能提示或受控回退，不能让普通 incoming 消息直接进入 `on_command`。
-- 规则 `concurrency=user` 只表示每用户 CD/每日上限，不等于模块会话也按用户。
+- 规则 `concurrency=user` 只表示每用户 CD/每日上限，不等于插件会话也按用户。
 - 自动回复和交互 Bot 都只是触发器；业务逻辑放插件本体，UserBot 命令和 `on_interaction` 调同一份业务函数。
 - 长表单页要把“使用说明 → 功能总开关 → 配置”拆成三张卡。
 - 有保存字段的页面要放顶部冻结“配置操作”条。
 - 规则驱动页用 `rules`，单配置页用 `single`，平台能力用 `platform`。
-- 旧 `schema` 只保留给老模块兼容。
-- 远程模块要有 `plugin.json`、`manifest.py`、`plugin.py`、`__init__.py`。
+- 旧 `schema` 只保留给老插件兼容。
+- 远程插件要有 `plugin.json`、`manifest.py`、`plugin.py`、`__init__.py`。
 - `plugin.json` 只做静态安装元数据，不执行 Python。
-- 远程模块安装后还要看 `manifest.py` 的真实 `MANIFEST`。
-- 远程模块的 `version`、`category`、`interaction_entries` 要前后一致。
+- 远程插件安装后还要看 `manifest.py` 的真实 `MANIFEST`。
+- 远程插件的 `version`、`category`、`interaction_entries` 要前后一致。
 - `plugin.json` 和 `manifest.py` 里的交互入口字段要同步，尤其 `launch_mode`、`events`、`session_scope`、`result_contract`。
 - 已接入的 installed 互动插件可跑 `python scripts/validate-installed-interaction-plugins.py` 做一次静态对齐检查。
 - 抢答/竞猜/抽奖要用锁和二次检查，避免重复发奖。
@@ -50,4 +50,4 @@
 - 外部请求必须有 timeout。
 - 日志里不要放 token、session、完整路径或完整隐私消息。
 - 普通指令只由当前账号 outgoing 触发，不能直接让群成员触发管理命令。
-- 需要更多细节时，分别看概览、API、HTTP、安全和远程模块文档。
+- 需要更多细节时，分别看概览、API、HTTP、安全和远程插件文档。

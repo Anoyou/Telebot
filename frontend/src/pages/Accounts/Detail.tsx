@@ -1,4 +1,4 @@
-// 账号详情：3 个 Tab —— 概览 / 模块启停 / 风控
+// 账号详情：3 个 Tab —— 概览 / 插件启停 / 风控
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -85,7 +85,7 @@ import { featureConfigPath } from "@/pages/Plugins/_shared/featureConfig";
 const COMMAND_TYPE_LABELS: Record<string, string> = {
   reply_text: "回复文本",
   forward_to: "转发",
-  run_plugin: "调用模块",
+  run_plugin: "调用插件",
   ai: "AI",
 };
 
@@ -246,7 +246,7 @@ export function AccountDetail() {
           label="Worker"
           value={acc.status}
         />
-        <SignalPill tone="primary" label="已启用模块" value={`${enabledPluginCount} 项`} />
+        <SignalPill tone="primary" label="已启用插件" value={`${enabledPluginCount} 项`} />
         <SignalPill tone={idMissing ? "warn" : "success"} label="TG 身份" value={idMissing ? "待同步" : "已同步"} />
       </div>
 
@@ -257,7 +257,7 @@ export function AccountDetail() {
               <LayoutDashboard className="h-4 w-4" /> 概览
             </TabsTrigger>
             <TabsTrigger value="features" className="shrink-0 gap-1.5">
-              <Bot className="h-4 w-4" /> 模块启停
+              <Bot className="h-4 w-4" /> 插件启停
             </TabsTrigger>
             <TabsTrigger value="commands" className="shrink-0 gap-1.5">
               <Terminal className="h-4 w-4" /> 自定义指令
@@ -402,13 +402,13 @@ export function AccountDetail() {
             <CardHeader>
               <CardTitle className="text-base">新账号下一步</CardTitle>
               <CardDescription>
-                这个区域主要给新账号配置时用：复用模板、开启模块、把成熟账号的配置复制过来。
+                这个区域主要给新账号配置时用：复用模板、开启插件、把成熟账号的配置复制过来。
               </CardDescription>
             </CardHeader>
             <CardContent className="grid gap-3 md:grid-cols-3">
               <div className="relative flex min-h-[11rem] flex-col rounded-lg border p-4">
                 <div className="pr-12 text-base font-semibold text-foreground">
-                  已启用模块
+                  已启用插件
                 </div>
                 <div className="absolute right-4 top-3 text-2xl font-semibold leading-none">
                   {enabledPluginCount}
@@ -418,7 +418,7 @@ export function AccountDetail() {
                 </div>
                 <Button asChild size="sm" variant="outline" className="mt-auto w-full justify-between">
                   <Link to={`/plugins?account=${aid}`}>
-                    管理模块
+                    管理插件
                     <ChevronRight className="h-4 w-4" />
                   </Link>
                 </Button>
@@ -442,7 +442,7 @@ export function AccountDetail() {
                   复制成熟配置
                 </div>
                 <div className="mt-1 text-sm text-muted-foreground">
-                  适合新账号：从一个已跑顺的账号复制规则和模块配置。
+                  适合新账号：从一个已跑顺的账号复制规则和插件配置。
                 </div>
                 <Button asChild size="sm" variant="outline" className="mt-auto w-full justify-between">
                   <Link to={`/settings?tab=backup&source=${aid}`}>
@@ -460,11 +460,11 @@ export function AccountDetail() {
           <AccountCommandsTab aid={aid} />
         </TabsContent>
 
-        {/* 模块启停 */}
+        {/* 插件启停 */}
         <TabsContent value="features">
           <Card>
             <CardHeader>
-              <CardTitle className="text-base">模块启停</CardTitle>
+              <CardTitle className="text-base">插件启停</CardTitle>
               <CardDescription>
                 每个功能可独立启停。开启后跳到对应配置页配置规则
               </CardDescription>
@@ -486,7 +486,7 @@ export function AccountDetail() {
                         <div>
                           <div className="text-sm font-medium">基础能力 · 平台内置</div>
                           <p className="text-xs text-muted-foreground">
-                            不像普通模块那样按开关决定是否运行；它随 worker 初始化，为模块和系统页面提供底层能力。
+                            不像普通插件那样按开关决定是否运行；它随 worker 初始化，为插件和系统页面提供底层能力。
                           </p>
                         </div>
                         <Table className="min-w-[42rem] table-fixed">
@@ -542,7 +542,7 @@ export function AccountDetail() {
                     return (
                       <section className="space-y-2">
                         <div>
-                          <div className="text-sm font-medium">模块</div>
+                          <div className="text-sm font-medium">插件</div>
                           <p className="text-xs text-muted-foreground">统一启停与配置入口；具体规则或表单在独立配置页中管理。</p>
                         </div>
                         <Table className="min-w-[42rem] table-fixed">

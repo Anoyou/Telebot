@@ -444,7 +444,7 @@ export function SudoManagement() {
             />
 
             <p className="text-xs text-muted-foreground">
-              模块配置页里的自定义触发词不一定属于指令模板；若没有出现在这里，可以先到对应模块配置页确认触发词。
+              插件配置页里的自定义触发词不一定属于指令模板；若没有出现在这里，可以先到对应插件配置页确认触发词。
             </p>
 
             {!form.allow_all_commands && selectedCommands.size > 0 && (

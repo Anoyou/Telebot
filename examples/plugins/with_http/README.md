@@ -1,6 +1,6 @@
 # with_http
 
-最小 HTTP facade 示例，展示第三方模块如何声明并使用受控 HTTP 能力。
+最小 HTTP facade 示例，展示第三方插件如何声明并使用受控 HTTP 能力。
 
 ## 重点
 
@@ -12,10 +12,10 @@
 
 ## 使用
 
-安装到 `plugins/installed/with_http/` 后启用模块，发送：
+安装到 `plugins/installed/with_http/` 后启用插件，发送：
 
 ```text
 ,http_status
 ```
 
-模块会请求 `https://api.github.com/zen` 并把状态码与响应片段编辑回命令消息。CI 只会导入 manifest 和实例化插件类，不会执行该命令或访问网络。
+插件会请求 `https://api.github.com/zen` 并把状态码与响应片段编辑回命令消息。CI 只会导入 manifest 和实例化插件类，不会执行该命令或访问网络。

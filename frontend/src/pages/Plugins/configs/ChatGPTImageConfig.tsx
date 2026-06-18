@@ -749,7 +749,7 @@ export function ChatGPTImageConfigPage() {
               <div className="flex items-center justify-between gap-3">
                 <div>
                   <Label>记录提示词摘要</Label>
-                  <p className="text-xs text-muted-foreground">模块日志只记录截断后的提示词摘要。</p>
+                  <p className="text-xs text-muted-foreground">插件日志只记录截断后的提示词摘要。</p>
                 </div>
                 <Switch checked={logPromptPreview} onCheckedChange={(v) => { setLogPromptPreview(v); markDirty(); }} />
               </div>
@@ -762,7 +762,7 @@ export function ChatGPTImageConfigPage() {
         <CardHeader>
           <CardTitle className="text-base">网络与 Token 池</CardTitle>
           <CardDescription>
-            模块网络出口跟随当前账号代理；这里逐条管理 ChatGPT access token。
+            插件网络出口跟随当前账号代理；这里逐条管理 ChatGPT access token。
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-5">
@@ -918,7 +918,7 @@ export function ChatGPTImageConfigPage() {
               <div className="flex items-center justify-between gap-3 rounded-md border p-3">
                 <div>
                   <Label>启用健康检测</Label>
-                  <p className="text-xs text-muted-foreground">定时刷新 token 额度与代理可用性，只写模块日志。</p>
+                  <p className="text-xs text-muted-foreground">定时刷新 token 额度与代理可用性，只写插件日志。</p>
                 </div>
                 <Switch checked={healthCheckEnabled} onCheckedChange={(v) => { setHealthCheckEnabled(v); markDirty(); }} />
               </div>

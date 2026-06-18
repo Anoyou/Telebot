@@ -52,7 +52,7 @@ type ModuleCategory = "interactive" | "automation" | "utility";
 const CATEGORY_META: Record<ModuleCategory, { title: string; hint: string; icon: React.ReactNode }> = {
   interactive: {
     title: "互动娱乐",
-    hint: "可交互的游戏、娱乐和群内互动模块。",
+    hint: "可交互的游戏、娱乐和群内互动插件。",
     icon: <Sparkles className="h-4 w-4" />,
   },
   automation: {
@@ -62,7 +62,7 @@ const CATEGORY_META: Record<ModuleCategory, { title: string; hint: string; icon:
   },
   utility: {
     title: "工具能力",
-    hint: "AI、媒体生成和其他辅助工具模块。",
+    hint: "AI、媒体生成和其他辅助工具插件。",
     icon: <Package2 className="h-4 w-4" />,
   },
 };
@@ -95,14 +95,14 @@ function moduleTrustBadge(
     return {
       label: "孤立目录",
       tone: "danger",
-      title: "磁盘或 feature 表存在该模块，但后端没有找到可信安装记录。",
+      title: "磁盘或 feature 表存在该插件，但后端没有找到可信安装记录。",
     };
   }
   if (feature.is_builtin) {
     return {
       label: "内置核心",
       tone: "success",
-      title: "随 TelePilot 一起发布的内置模块。",
+      title: "随 TelePilot 一起发布的内置插件。",
     };
   }
   if (signatureOk === true) {
@@ -137,8 +137,8 @@ function moduleTrustBadge(
     label: install ? "本地安装" : "本地/孤立",
     tone: "neutral",
     title: install
-      ? "本地安装模块；当前未拿到可验证签名结果。"
-      : "feature-matrix 中存在该模块，但已安装包接口没有对应记录，来源需以后端补充字段确认。",
+      ? "本地安装插件；当前未拿到可验证签名结果。"
+      : "feature-matrix 中存在该插件，但已安装包接口没有对应记录，来源需以后端补充字段确认。",
   };
 }
 
@@ -152,9 +152,9 @@ function moduleUpdateMessage(feature: FeatureInfo) {
   const current = moduleVersionLabel(feature.version);
   const latest = moduleVersionLabel(feature.latest_version);
   if (feature.latest_version) {
-    return `当前 ${current}，远程 ${latest}；请到“安装模块”更新。`;
+    return `当前 ${current}，远程 ${latest}；请到“安装插件”更新。`;
   }
-  return "远程模块有新版，请到“安装模块”更新。";
+  return "远程插件有新版，请到“安装插件”更新。";
 }
 
 function formatCompactNumber(value: number) {
@@ -288,7 +288,7 @@ export function PluginsHome() {
               前往管理 Bot
             </Button>
             <Button size="sm" variant="outline" onClick={() => nav("/plugins/manage?tab=plugins")}>
-              前往模块安装
+              前往插件安装
             </Button>
             <Button
               size="sm"
@@ -305,11 +305,11 @@ export function PluginsHome() {
 
       <StatusSummaryPanel
         icon={Boxes}
-        title="模块中心"
+        title="插件中心"
         description="先在这里沉淀一套好用的指令、消息和 AI 模板，再按账号启用复用；新账号不用从零重配。"
         signals={(
           <>
-            <SignalPill tone="primary" label="模块总数" value={features.length} />
+            <SignalPill tone="primary" label="插件总数" value={features.length} />
             <SignalPill tone="success" label="账号数量" value={accounts.length} />
             <SignalPill tone="neutral" label="当前账号" value={selectedAccount?.name ?? "未选择"} />
           </>
@@ -382,10 +382,10 @@ export function PluginsHome() {
               <span>
                 <span className="flex items-center gap-2 font-medium">
                   <PackagePlus className="h-4 w-4 text-primary" />
-                  安装模块
+                  安装插件
                 </span>
                 <span className="mt-1 block text-xs leading-5 text-muted-foreground">
-                  添加 Git 仓库安装远程模块；安装完成后回到本页按账号启用和配置。
+                  添加 Git 仓库安装远程插件；安装完成后回到本页按账号启用和配置。
                 </span>
               </span>
             </Button>
@@ -393,8 +393,8 @@ export function PluginsHome() {
           <div className="rounded-lg border px-4 py-3">
             <SectionHeader
               icon={Sparkles}
-              title="AI 模块入口"
-              description="AI 属于模块配置：先配置模型凭据，再创建指令模板，最后按账号启用；调用记录与排障集中在同一个工作台。"
+              title="AI 插件入口"
+              description="AI 属于插件配置：先配置模型凭据，再创建指令模板，最后按账号启用；调用记录与排障集中在同一个工作台。"
             />
             <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-4">
               <ToneRailCard
@@ -455,7 +455,7 @@ export function PluginsHome() {
           <CardHeader className="pb-2">
             <CardTitle className="text-base text-amber-900">codex_image 加载提示</CardTitle>
             <CardDescription className="text-amber-800">
-              当前账号启用了 codex_image，但 worker 未能加载这个内置实验模块。系统已自动降级为失败态并保持 worker 持续运行。
+              当前账号启用了 codex_image，但 worker 未能加载这个内置实验插件。系统已自动降级为失败态并保持 worker 持续运行。
             </CardDescription>
           </CardHeader>
           <CardContent className="pt-0 text-sm text-amber-900">
@@ -472,8 +472,8 @@ export function PluginsHome() {
         <CardHeader>
           <SectionHeader
             icon={Package2}
-            title="账号模块启用详情与配置"
-            description="先选择要配置的账号，再查看每类模块在该账号上的启用状态与配置入口。"
+            title="账号插件启用详情与配置"
+            description="先选择要配置的账号，再查看每类插件在该账号上的启用状态与配置入口。"
             meta={(
               <SignalPill
                 tone="neutral"
@@ -487,7 +487,7 @@ export function PluginsHome() {
         <CardContent className="space-y-4">
           {accountFeaturesQ.isError ? (
             <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-              当前账号模块状态加载失败，暂时无法显示最近错误详情。
+              当前账号插件状态加载失败，暂时无法显示最近错误详情。
             </div>
           ) : null}
           {pluginUsageQ.isLoading ? (
@@ -615,7 +615,7 @@ function ModuleLintWarnings({ warnings }: { warnings?: string[] }) {
       >
         <span className="flex min-w-0 items-center gap-2">
           <MetaBadge tone="warn" className="shrink-0">
-            模块 lint
+            插件 lint
           </MetaBadge>
           <span className="truncate">⚠ {cleanWarnings.length} 条 lint 提醒</span>
         </span>
@@ -682,14 +682,14 @@ function GuideContextCard({
           收起
         </button>
       </div>
-      <div className="mb-2 text-sm font-semibold">3. 启用指令模板或调用模块</div>
+      <div className="mb-2 text-sm font-semibold">3. 启用指令模板或调用插件</div>
       <p className="text-xs leading-relaxed text-muted-foreground">
-        这一页主要看三处：先用“指令模板”复用指令；再看下方模块卡片，按账号启用和配置；需要外部能力时点“安装模块”添加远程模块。
+        这一页主要看三处：先用“指令模板”复用指令；再看下方插件卡片，按账号启用和配置；需要外部能力时点“安装插件”添加远程插件。
       </p>
       <div className="mt-3 grid gap-2 text-xs text-muted-foreground sm:grid-cols-3">
         <div className="rounded-lg border bg-muted/30 p-2">A. 指令模板</div>
-        <div className="rounded-lg border bg-muted/30 p-2">B. 模块启用状态</div>
-        <div className="rounded-lg border bg-muted/30 p-2">C. 安装模块</div>
+        <div className="rounded-lg border bg-muted/30 p-2">B. 插件启用状态</div>
+        <div className="rounded-lg border bg-muted/30 p-2">C. 安装插件</div>
       </div>
       <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-muted">
         <div
@@ -699,7 +699,7 @@ function GuideContextCard({
       </div>
       <div className="mt-3 flex flex-wrap gap-2">
         <Button size="sm" onClick={onInstall}>
-          安装远程模块 <ArrowRight className="ml-1 h-4 w-4" />
+          安装远程插件 <ArrowRight className="ml-1 h-4 w-4" />
         </Button>
         <Button size="sm" variant="outline" onClick={onDone}>
           我学会了！
@@ -741,7 +741,7 @@ function FeatureZone({
           meta={(
             <div className="flex items-center gap-2">
               <MetaBadge>{features.length}</MetaBadge>
-              <SignalPill tone="neutral" label="模块" value={features.length} className="h-8" />
+              <SignalPill tone="neutral" label="插件" value={features.length} className="h-8" />
             </div>
           )}
         />

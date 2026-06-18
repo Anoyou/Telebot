@@ -33,7 +33,7 @@ export function featureConfigBackTarget(
   if (source === "plugins") {
     const params = new URLSearchParams({ account: String(aid) });
     return {
-      backLabel: "返回模块中心",
+      backLabel: "返回插件中心",
       backHref: `/plugins?${params.toString()}`,
     };
   }

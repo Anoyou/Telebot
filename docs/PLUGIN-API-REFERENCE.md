@@ -1,13 +1,13 @@
-# TelePilot 模块 API 参考
+# TelePilot 插件 API 参考
 
-本文保留旧版开发指南中 API、配置、派发、日志、前端集成、调试和示例相关章节的原文内容。
+本文是当前维护的插件 API 参考，覆盖配置、派发、日志、前端集成、调试和示例。用户界面与开发文档统一使用“插件”指代可安装、可启停、可配置的扩展能力；历史代码字段名仍按兼容要求保留。
 
 ## 3. Plugin 基类
 
 ```python
 class Plugin:
     # === 必须设置 ===
-    key: str                          # 唯一标识，也是模块 key
+    key: str                          # 唯一标识，也是插件 key
     display_name: str                 # 显示名
 
     # === 可选配置 ===
@@ -19,10 +19,10 @@ class Plugin:
 
     # === 生命周期钩子 ===
     async def on_startup(self, ctx: PluginContext) -> None:
-        """模块激活时调用一次。"""
+        """插件激活时调用一次。"""
 
     async def on_shutdown(self, ctx: PluginContext) -> None:
-        """模块关停前调用一次。必须幂等。"""
+        """插件关停前调用一次。必须幂等。"""
 
     # === 事件处理 ===
     async def on_message(self, ctx: PluginContext, event) -> None:
@@ -44,7 +44,7 @@ class MyPlugin(Plugin):
     ...
 ```
 
-`@register` 装饰器把模块类注册到全局表，loader 通过 key 查找。
+`@register` 装饰器把插件类注册到全局表，loader 通过 key 查找。
 
 ---
 
@@ -55,7 +55,7 @@ class MyPlugin(Plugin):
 class PluginContext:
     account_id: int
     feature_key: str
-    config: dict           # 当前账号的模块配置
+    config: dict           # 当前账号的插件配置
     rules: list            # 规则列表
     client: TelegramClient | None
     engine: Any            # RateLimitEngine
@@ -69,27 +69,27 @@ class PluginContext:
         """创建与 bot 的对话会话。"""
 ```
 
-注意：内置模块会拿到完整运行时能力；远程/第三方模块拿到的是受限上下文：`ctx.client` 为 `SandboxClient`，指令 handler 中传入的 `client` 参数与 `ctx.client` 同源（同样是 sandbox client），`ctx.engine` 和 `ctx.redis` 为 `None`，只能通过声明过的权限和 `ctx.scheduler` facade 使用有限能力。
+注意：内置插件会拿到完整运行时能力；远程/第三方插件拿到的是受限上下文：`ctx.client` 为 `SandboxClient`，指令 handler 中传入的 `client` 参数与 `ctx.client` 同源（同样是 sandbox client），`ctx.engine` 和 `ctx.redis` 为 `None`，只能通过声明过的权限和 `ctx.scheduler` facade 使用有限能力。
 
 ### 4.0 受控 facade：ctx.http 与 ctx.ai
 
-第三方模块可以使用两个受控 facade，但必须在 Manifest 中显式声明权限；未声明或策略不完整时字段会是 `None`：
+第三方插件可以使用两个受控 facade，但必须在 Manifest 中显式声明权限；未声明或策略不完整时字段会是 `None`：
 
 - `ctx.http`：声明 `permissions=["external_http"]` 且填写 `allowed_hosts` 后注入。它限制协议、域名、超时、响应大小，并在发起请求前阻断 localhost/内网/链路本地地址。默认走账号代理；只有 Manifest 的 `http={"allow_direct": true}` 且账号配置请求 direct 时才允许直连。
 - `ctx.ai`：声明 `permissions=["ai_text"]` 后注入。它复用 TelePilot 的 LLM Provider 池、fallback 链、账号级预算和 usage 记录；插件只能拿到脱敏 provider 元数据，不能读取 `api_key_enc`、`base_url` 或代理 URL。
-- `ctx.ai.complete()` 推荐用 `provider_tag` 按用途选择 provider；`tag` / `tags` 是兼容别名且已 deprecated，新模块不要依赖它们作为主要入口。
+- `ctx.ai.complete()` 推荐用 `provider_tag` 按用途选择 provider；`tag` / `tags` 是兼容别名且已 deprecated，新插件不要依赖它们作为主要入口。
 - `ctx.ai.list_providers()` 可用于展示当前账号可见的脱敏 provider 摘要；更完整的 AI facade 说明见 `docs/PLUGIN-AI.md`。
 
 示例：
 
 ```python
 if ctx.http is None:
-    await event.edit("本模块需要 external_http 权限和 allowed_hosts")
+    await event.edit("本插件需要 external_http 权限和 allowed_hosts")
     return True
 response = await ctx.http.get("https://api.github.com/zen")
 
 if ctx.ai is None:
-    await event.edit("本模块需要 ai_text 权限")
+    await event.edit("本插件需要 ai_text 权限")
     return True
 providers = await ctx.ai.list_providers()
 result = await ctx.ai.complete(
@@ -102,30 +102,30 @@ result = await ctx.ai.complete(
 
 ### 4.1 可用上下文与访问方式（PluginContext Contract）
 
-模块请只从 `PluginContext` 读取运行时信息，不要跨层 import worker 私有实现。
+插件请只从 `PluginContext` 读取运行时信息，不要跨层 import worker 私有实现。
 
 | 字段 | 访问方式 | 说明 |
 |------|----------|------|
 | `ctx.account_id` | `ctx.account_id` | 当前账号 ID（账号级隔离边界） |
-| `ctx.feature_key` | `ctx.feature_key` | 当前模块 feature key |
-| `ctx.config` | `ctx.config.get("k")` | 模块配置（账号/全局已合并后的可见配置） |
-| `ctx.rules` | 遍历 `ctx.rules` | 当前账号 + 当前模块已启用规则 |
-| `ctx.client` | `await ctx.client.send_message(...)` | Telegram 客户端；第三方模块场景会是 `SandboxClient` 包装 |
-| `ctx.engine` | `await ctx.engine.acquire(...)` | 仅内置模块可用；第三方模块通常为 `None` |
-| `ctx.redis` | `await ctx.redis.get(...)` | 仅内置模块可用；第三方模块通常为 `None` |
+| `ctx.feature_key` | `ctx.feature_key` | 当前插件 feature key |
+| `ctx.config` | `ctx.config.get("k")` | 插件配置（账号/全局已合并后的可见配置） |
+| `ctx.rules` | 遍历 `ctx.rules` | 当前账号 + 当前插件已启用规则 |
+| `ctx.client` | `await ctx.client.send_message(...)` | Telegram 客户端；第三方插件场景会是 `SandboxClient` 包装 |
+| `ctx.engine` | `await ctx.engine.acquire(...)` | 仅内置插件可用；第三方插件通常为 `None` |
+| `ctx.redis` | `await ctx.redis.get(...)` | 仅内置插件可用；第三方插件通常为 `None` |
 | `ctx.log` | `await ctx.log("info", "...", **detail)` | 运行日志写入器 |
 | `ctx.scheduler` | `ctx.scheduler.register(job_id, schedule, callback, *, replace=True)` / `ctx.scheduler.unregister(job_id)` | 调度 facade（按权限/能力边界开放） |
-| `ctx.http` | `await ctx.http.get(url, params={...})` / `await ctx.http.post(url, json={...})` | 安全 HTTP facade；第三方模块需声明 `external_http` + `allowed_hosts` |
-| `ctx.ai` | `await ctx.ai.complete(system="...", user="...")` | 文本 LLM facade；第三方模块需声明 `ai_text` |
+| `ctx.http` | `await ctx.http.get(url, params={...})` / `await ctx.http.post(url, json={...})` | 安全 HTTP facade；第三方插件需声明 `external_http` + `allowed_hosts` |
+| `ctx.ai` | `await ctx.ai.complete(system="...", user="...")` | 文本 LLM facade；第三方插件需声明 `ai_text` |
 | `ctx.conversation(...)` | `async with ctx.conversation(peer)` | 与目标 peer 建立会话 |
 
 ### 4.2 权限边界与禁止事项
 
-1. 第三方模块必须遵循 `manifest.permissions` 最小授权，未声明的客户端能力不可调用。
-2. 第三方模块不得假设 `ctx.engine`、`ctx.redis` 恒可用；访问前必须判空。
-3. 禁止通过模块绕过账号边界：不要读写其他账号配置、规则、会话状态。
-4. 禁止在模块中执行系统级/运维级动作（如重启进程、安装/卸载模块、修改权限模型）。
-5. 禁止依赖 worker 私有模块或 monkey patch 运行时对象来“扩权”。
+1. 第三方插件必须遵循 `manifest.permissions` 最小授权，未声明的客户端能力不可调用。
+2. 第三方插件不得假设 `ctx.engine`、`ctx.redis` 恒可用；访问前必须判空。
+3. 禁止通过插件绕过账号边界：不要读写其他账号配置、规则、会话状态。
+4. 禁止在插件中执行系统级/运维级动作（如重启进程、安装/卸载插件、修改权限模型）。
+5. 禁止依赖 worker 私有实现或 monkey patch 运行时对象来“扩权”。
 6. 禁止把敏感凭据直接打到日志；`ctx.log` 只记录最小必要信息。
 
 ### 4.3 配置/账号/运行时数据访问建议
@@ -134,7 +134,7 @@ result = await ctx.ai.complete(
 2. 账号：通过 `ctx.account_id` 做所有业务隔离键，不缓存到跨账号全局变量。
 3. 运行时：仅使用 `ctx.client` / `ctx.scheduler` / `ctx.conversation` 提供的公开入口。
 4. 日志：统一用 `ctx.log`，并在 `detail` 里带结构化字段（如 `chat_id`、`action`）。
-5. 兜底：对可选能力（`engine`/`redis`）做 feature-detection，保证第三方模块在受限上下文也能安全降级。
+5. 兜底：对可选能力（`engine`/`redis`）做 feature-detection，保证第三方插件在受限上下文也能安全降级。
 
 最小示例见：[docs/examples/plugin_context_minimal.py](./examples/plugin_context_minimal.py)。
 
@@ -156,11 +156,11 @@ result = await ctx.ai.complete(
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
-| `permissions` | list | 权限声明，默认 `[]`；第三方模块必须显式声明需要的能力 |
-| `config_schema` | dict | JSON Schema，有配置的模块必须写 |
-| `requires_features` | list | 依赖的其他模块 key |
-| `min_telepilot_version` | str | 最低 TelePilot 版本要求，远程模块建议填写 |
-| `min_telebot_version` | str | 旧字段名，0.15 起仅作为兼容别名保留，新模块不要再新增 |
+| `permissions` | list | 权限声明，默认 `[]`；第三方插件必须显式声明需要的能力 |
+| `config_schema` | dict | JSON Schema，有配置的插件必须写 |
+| `requires_features` | list | 依赖的其他插件 key |
+| `min_telepilot_version` | str | 最低 TelePilot 版本要求，远程插件建议填写 |
+| `min_telebot_version` | str | 旧字段名，0.15 起仅作为兼容别名保留，新插件不要再新增 |
 
 ### 完整示例
 
@@ -169,10 +169,10 @@ from app.worker.plugins.manifest import Manifest
 
 MANIFEST = Manifest(
     key="my_plugin",
-    display_name="我的模块",
+    display_name="我的插件",
     version="1.0.0",
     author="your_name",
-    description="模块功能描述",
+    description="插件功能描述",
     permissions=["send_message", "edit_message", "read_chat"],
     config_schema={
         "type": "object",
@@ -203,34 +203,34 @@ MANIFEST = Manifest(
 | `account` | 单个账号 | rule.config | 聊天 ID、行为开关等 |
 | （不填） | 默认 account | rule.config | 向后兼容 |
 
-**优先级：** 账号级配置 > 模块全局配置 > config_schema 中的 default
+**优先级：** 账号级配置 > 插件全局配置 > config_schema 中的 default
 
-**前端渲染：** `config_schema["x-ui-mode"]` 决定模块配置入口：
+**前端渲染：** `config_schema["x-ui-mode"]` 决定插件配置入口：
 - `rules` → 规则驱动独立配置页，适合多条规则 CRUD 和 dry-run
-- `single` → 单配置对象独立配置页；没有专属页面的轻量模块也应按通用独立配置页处理
-- `platform` → 平台基础能力页，不混在普通模块列表里
-- `schema` → 兼容旧模块的别名；不再代表“Schema 弹窗”类，按通用单配置独立页读取字段
+- `single` → 单配置对象独立配置页；没有专属页面的轻量插件也应按通用独立配置页处理
+- `platform` → 平台基础能力页，不混在普通插件列表里
+- `schema` → 兼容旧插件的别名；不再代表“Schema 弹窗”类，按通用单配置独立页读取字段
 - `level: global` 的字段 → 全局配置区（所有账号共享）
 - `level: account` 的字段 → 账号配置区（按账号隔离）
 - 无 level 的字段 → 默认按账号隔离
 
-**必填字段验证清单（内置模块）：**
+**必填字段验证清单（内置插件）：**
 
-| 模块 | config_schema | UI 模式 | 状态 |
+| 插件 | config_schema | UI 模式 | 状态 |
 |------|--------------|---------|------|
 | forward | ✅ target_chat_id, mode | `rules` | 已有 |
 | auto_reply | 规则通过 Rules API 管理 | `rules` fallback | 已有 |
 | autorepeat | ✅ trigger / repeat / chat 配置 | `rules` | 已有 |
 | game24 | ✅ command, timeout | `single` | 已补 |
 | math10 | ✅ interaction_entries.start_math_game / prize | `single` | 交互 Bot 可启动 |
-| codex_image | ✅ command, access_token, model, message_template, image_size/aspect_ratio/image_format, timeout/status/output/instructions | `single` | 内置图片模块 |
+| codex_image | ✅ command, access_token, model, message_template, image_size/aspect_ratio/image_format, timeout/status/output/instructions | `single` | 内置图片插件 |
 | scheduler | ✅ default_notify, max_tasks | `platform` | 已迁移为平台基础能力 |
 
-`examples/plugins/translate` 是历史示例目录，不属于当前内置模块清单；其中直接复用后端私有 LLM 链路的写法也不是第三方模块推荐模板。新增第三方模块应优先参考本文的远程模块骨架；需要 HTTP 时参考 `examples/plugins/with_http`，需要 AI 文本能力时参考 `examples/plugins/with_ai`，需要原命令与交互 Bot 双兼容时参考 `examples/plugins/with_interaction`。
+`examples/plugins/translate` 是历史示例目录，不属于当前内置插件清单；其中直接复用后端私有 LLM 链路的写法也不是第三方插件推荐模板。新增第三方插件应优先参考本文的远程插件骨架；需要 HTTP 时参考 `examples/plugins/with_http`，需要 AI 文本能力时参考 `examples/plugins/with_ai`，需要原命令与交互 Bot 双兼容时参考 `examples/plugins/with_interaction`。
 
 ### Manifest 验证
 
-远程模块安装阶段验证的是 `plugin.json`，不会执行 Python：
+远程插件安装阶段验证的是 `plugin.json`，不会执行 Python：
 
 ```python
 required = ["name 或 key", "version"]
@@ -242,13 +242,13 @@ version_pattern = r"^\d+\.\d+\.\d+"
 
 - `PLUGIN_CLASS` 是 `Plugin` 子类
 - `MANIFEST` 是 `Manifest` 实例
-- `MANIFEST.key` 与模块 key / 目录名保持一致
+- `MANIFEST.key` 与插件 key / 目录名保持一致
 
 ### 交互 Bot 兼容声明（interaction entries）
 
-交互 Bot 用来承接群内高频互动，不能直接复用 UserBot 插件命令作为启动入口；否则高频游戏又会回到 UserBot 账号身上，违背风控隔离目标。后续模块要支持“转账命中后启动”，应通过 Manifest 声明一个或多个交互入口，并实现 `on_interaction` 返回平台标准动作。
+交互 Bot 用来承接群内高频互动，不能直接复用 UserBot 插件命令作为启动入口；否则高频游戏又会回到 UserBot 账号身上，违背风控隔离目标。后续插件要支持“转账命中后启动”，应通过 Manifest 声明一个或多个交互入口，并实现 `on_interaction` 返回平台标准动作。
 
-推荐在 `manifest.py` 顶层声明 `category` 和 `interaction_entries`；旧写法也兼容 `config_schema["x-category"]` 与 `config_schema["x-interaction-entries"]`。这是声明式协议，不要求模块自己解析转账通知、Bot Token 或群消息格式。
+推荐在 `manifest.py` 顶层声明 `category` 和 `interaction_entries`；旧写法也兼容 `config_schema["x-category"]` 与 `config_schema["x-interaction-entries"]`。这是声明式协议，不要求插件自己解析转账通知、Bot Token 或群消息格式。
 
 ### 三角联动里的 UserBot 角色
 
@@ -256,23 +256,23 @@ version_pattern = r"^\d+\.\d+\.\d+"
 
 `outgoing` 的频率控制，指的是当前 `UserBot` 账号自己发出的消息要保持低频、可解释、可回溯，避免把大量游戏交互都压回账号本身。`incoming` 订阅则只表示这个账号愿意看见哪些外部消息，用来做公告监听、状态同步和必要的自动回复，不表示这些消息都能直接触发指令，更不表示可以绕过风控做批量互动。
 
-原则上，`Bbot` 不碰钱，只负责公告、命中、对账提示和规则事件；真正的奖金发放仍由 `UserBot` 根据 `Bbot` 公告去回复完成。模块如果要做发奖、结算或红包类动作，也应把钱相关动作留在 `UserBot` 侧，不要把转账、发奖、催付这些动作混进交互 Bot 的高频入口里。
+原则上，`Bbot` 不碰钱，只负责公告、命中、对账提示和规则事件；真正的奖金发放仍由 `UserBot` 根据 `Bbot` 公告去回复完成。插件如果要做发奖、结算或红包类动作，也应把钱相关动作留在 `UserBot` 侧，不要把转账、发奖、催付这些动作混进交互 Bot 的高频入口里。
 
-模块分类只保留三类，前端会按中文分组展示：
+插件分类只保留三类，前端会按中文分组展示：
 
-| category | 中文分组 | 适用模块 |
+| category | 中文分组 | 适用插件 |
 | --- | --- | --- |
-| `interactive` | 互动娱乐 | 游戏、群内娱乐、需要交互 Bot 承接高频消息的模块 |
+| `interactive` | 互动娱乐 | 游戏、群内娱乐、需要交互 Bot 承接高频消息的插件 |
 | `automation` | 自动化 | 自动回复、转发、定时任务等账号自动化能力 |
 | `utility` | 工具能力 | AI、媒体生成、查询、辅助工具等能力 |
 
 `category` 只决定展示分组；是否能被交互 Bot 启动，只看是否声明了 `interaction_entries`。
 
-注意：`interaction_entries` 只负责“让前端知道这个模块有哪些交互入口可选”。真正运行时，worker 会调用插件实例的 `on_interaction(ctx, entry_key, payload)`。如果模块只声明入口但没有实现这个 hook，交互 Bot 会提示“模块尚未实现交互入口”。
+注意：`interaction_entries` 只负责“让前端知道这个插件有哪些交互入口可选”。真正运行时，worker 会调用插件实例的 `on_interaction(ctx, entry_key, payload)`。如果插件只声明入口但没有实现这个 hook，交互 Bot 会提示“插件尚未实现交互入口”。
 
-交互 Bot 运行时采用事件路由模型：Bbot 负责接收群消息、转账通知和规则指令；平台只把命中规则且存在活跃会话的事件投递给对应模块，不会把所有群消息广播给所有模块。模块应在同一个 `on_interaction` 中按 `payload["event"]["type"]` 区分事件。
+交互 Bot 运行时采用事件路由模型：Bbot 负责接收群消息、转账通知和规则指令；平台只把命中规则且存在活跃会话的事件投递给对应插件，不会把所有群消息广播给所有插件。插件应在同一个 `on_interaction` 中按 `payload["event"]["type"]` 区分事件。
 
-交互入口是新增触发面，不是命令系统的替代品。模块原有 `commands`、`on_command`、`message_channels` 和 `on_message` 语义必须保持不变；任何新入口都不得让普通 incoming 消息绕过 UserBot outgoing 指令边界。需要复用能力时，把业务逻辑抽成共享函数，由 UserBot 命令和交互入口分别调用。
+交互入口是新增触发面，不是命令系统的替代品。插件原有 `commands`、`on_command`、`message_channels` 和 `on_message` 语义必须保持不变；任何新入口都不得让普通 incoming 消息绕过 UserBot outgoing 指令边界。需要复用能力时，把业务逻辑抽成共享函数，由 UserBot 命令和交互入口分别调用。
 
 #### 平台、规则、插件的职责边界
 
@@ -282,7 +282,7 @@ version_pattern = r"^\d+\.\d+\.\d+"
 | --- | --- | --- |
 | 自动回复 | 轻量关键词/变量触发，把消息转换成普通回复或白名单命令 | 不承载复杂业务状态，不直接实现插件业务 |
 | 交互 Bot 规则 | 匹配群、关键词、转账通知、金额/收款人过滤、每用户冷却、每日次数、开关命令、会话路由 | 不生成题目、不查询 PT、不校验答案、不发奖 |
-| 插件 `on_interaction` | 真正业务逻辑：开局、查询、校验答案、渲染结果、维护模块内部状态 | 不解析 Bot Token、不解析转账通知原文、不自己做规则级冷却/每日次数 |
+| 插件 `on_interaction` | 真正业务逻辑：开局、查询、校验答案、渲染结果、维护插件内部状态 | 不解析 Bot Token、不解析转账通知原文、不自己做规则级冷却/每日次数 |
 | UserBot 命令 | 管理员手动触发同一业务能力，例如 `{prefix}pt 12345` 或 `{prefix}24d 100` | 不承接群友高频互动 |
 
 因此，同一个能力推荐有多个触发器，但只有一份业务实现：
@@ -304,9 +304,9 @@ version_pattern = r"^\d+\.\d+\.\d+"
 | event.type | 触发时机 | 说明 |
 | --- | --- | --- |
 | `payment_confirmed` | 转账通知命中规则 | 常用于付费开局 |
-| `keyword` | 模块启动关键词命中且无付费门槛 | 常用于免费开局 |
+| `keyword` | 插件启动关键词命中且无付费门槛 | 常用于免费开局 |
 | `message` | 规则已有活跃会话后的普通群消息 | 常用于答题、猜测、继续流程 |
-| `session_close` | 规则被关闭或会话被强制结束 | 模块可清理状态，第一版可按需实现 |
+| `session_close` | 规则被关闭或会话被强制结束 | 插件可清理状态，第一版可按需实现 |
 
 #### interaction_entries 字段
 
@@ -335,14 +335,14 @@ version_pattern = r"^\d+\.\d+\.\d+"
 | `session_game` | 群局抢答、竞猜、填空、算题、24 点等单局互动玩法 |
 | `challenge_game` | 双人/多人对战、轮流操作的互动玩法 |
 | `reward_pool` | 红包、奖池、下注开奖这类多人结算玩法 |
-| `utility_trigger` | 只借交互 Bot 做入口，但主体不是群局玩法的工具模块 |
+| `utility_trigger` | 只借交互 Bot 做入口，但主体不是群局玩法的工具插件 |
 
 `launch_mode` 的含义：
 
 | launch_mode | 启动路径 | 适用场景 |
 | --- | --- | --- |
 | `bridge` | 交互 Bot 收到事件，平台组装信封后调用插件 `on_interaction` | 群局、抢答、抽奖、转账命中开局等高频群内流程 |
-| `direct` | UserBot 原有命令或模块内部调用直接执行业务，不经过交互 Bot | 管理员命令、私有工具、无需 Bbot 规则的能力 |
+| `direct` | UserBot 原有命令或插件内部调用直接执行业务，不经过交互 Bot | 管理员命令、私有工具、无需 Bbot 规则的能力 |
 | `hybrid` | 同一能力同时支持 `bridge` 和 `direct`，但两边仍是独立触发边界 | 既允许管理员 `{prefix}24d 100` 开局，也允许群友关键词/转账由交互 Bot 开局 |
 
 `direct` 和 `hybrid` 都不表示普通群友 incoming 消息可以直接触发 `commands`。`command_fallback` 只用于平台提示或受控内部派发，不能把群友文本原样送入 `on_command`。如果启用回退，必须同时声明 `preserve_command_trigger: true`，并保证原命令名、参数格式、权限和 outgoing 限制保持兼容。
@@ -357,7 +357,7 @@ MANIFEST = Manifest(
         {
             "key": "start_paid_game",
             "title": "付费开局",
-            "description": "转账命中或模块关键词命中后，由交互 Bot 开启一局游戏。",
+            "description": "转账命中或插件关键词命中后，由交互 Bot 开启一局游戏。",
             "launch_mode": "hybrid",
             "session_scope": "chat",
             "events": ["payment_confirmed", "keyword", "message", "session_close"],
@@ -418,7 +418,7 @@ MANIFEST = Manifest(
 )
 ```
 
-`input_schema` 描述的是某个交互入口允许接收的参数形态和默认值，不是模块的全局配置。Web 端在交互规则里保存的是 `module_config`：它只属于当前规则，只保存这条规则对入口参数的覆盖值，并会随规则 payload 一起提交给后端。
+`input_schema` 描述的是某个交互入口允许接收的参数形态和默认值，不是插件的全局配置。Web 端在交互规则里保存的是 `module_config`：它只属于当前规则，只保存这条规则对入口参数的覆盖值，并会随规则 payload 一起提交给后端。
 
 例如某条规则可以绑定 `game24 / start_paid_game`，并保存：
 
@@ -433,7 +433,7 @@ MANIFEST = Manifest(
 }
 ```
 
-运行时入口收到的 payload 会包含当前规则的 `module_config` 字段，并把其中的键平铺到 payload 顶层；Web 端会在选择入口时用 `input_schema.properties.*.default` 辅助生成初始 JSON。模块应从 `payload.get("prize")` / `payload.get("timeout")` 读取本次规则参数；模块自身的账号级配置仍通过 `ctx.config` 读取。
+运行时入口收到的 payload 会包含当前规则的 `module_config` 字段，并把其中的键平铺到 payload 顶层；Web 端会在选择入口时用 `input_schema.properties.*.default` 辅助生成初始 JSON。插件应从 `payload.get("prize")` / `payload.get("timeout")` 读取本次规则参数；插件自身的账号级配置仍通过 `ctx.config` 读取。
 
 ### on_interaction 实现
 
@@ -490,7 +490,7 @@ class GuessNumberPlugin(Plugin):
 | `send_message` | `send_via` | 可选但必须在入口 `result_contract.send_via` 白名单内 |
 | `send_photo` / `send_file` | `photo_base64` / `file_base64` | 由交互 Bot 发送图片/文件字节，适合题图 |
 | `send_photo` / `send_file` | `filename`、`caption`、`reply_to_message_id` | 可选，文件名、说明文字、回复目标 |
-| `end_session` | 无 | 本次入口处理完成后不保留交互会话，适合彩票、红包等长期轮回模块 |
+| `end_session` | 无 | 本次入口处理完成后不保留交互会话，适合彩票、红包等长期轮回插件 |
 
 `send_via` 是发送者白名单，不是插件自由选择账号的能力。推荐只使用这些值：
 
@@ -509,7 +509,7 @@ class GuessNumberPlugin(Plugin):
 | `type` | 事件类型，如 `payment_confirmed`、`message` |
 | `account_id` / `chat_id` | 账号与群 ID |
 | `rule_id` / `rule_name` | 命中的交互规则 |
-| `module_key` / `entry_key` | 规则绑定的模块与入口 |
+| `module_key` / `entry_key` | 规则绑定的插件与入口 |
 | `update_id` / `message_id` | Telegram update 与消息 ID |
 | `user_id` / `display_name` / `username` | 触发事件的用户身份 |
 | `text` | 原始消息文本 |
@@ -518,7 +518,7 @@ class GuessNumberPlugin(Plugin):
 
 #### 标准 payload 信封
 
-新版交互入口使用“信封 + event + 参数”的结构。旧字段仍可兼容平铺读取，但新模块应优先读取这些对象：
+新版交互入口使用“信封 + event + 参数”的结构。旧字段仍可兼容平铺读取，但新插件应优先读取这些对象：
 
 ```json
 {
@@ -577,18 +577,18 @@ class GuessNumberPlugin(Plugin):
 
 `payload_contract` 用来声明插件对上述信封的要求。平台和前端可以据此校验规则是否能保存，排障时也能判断是“事件没到”还是“字段不满足”。不要把敏感原文、Bot Token、完整付款通知文本写进信封；只传插件业务需要的结构化字段。
 
-`interaction_entries` 中的 `session_scope` 是模块会话作用域，必须按模块业务形态声明。它和交互规则里的 `concurrency` 不是一回事：
+`interaction_entries` 中的 `session_scope` 是插件会话作用域，必须按插件业务形态声明。它和交互规则里的 `concurrency` 不是一回事：
 
 | 字段 | 归属 | 含义 | 示例 |
 | --- | --- | --- | --- |
-| `interaction_entries[].session_scope` | 插件入口声明 | 模块会话怎么保存和路由后续 `message` 事件 | 九宫格、24 点、猜数字填 `chat` |
+| `interaction_entries[].session_scope` | 插件入口声明 | 插件会话怎么保存和路由后续 `message` 事件 | 九宫格、24 点、猜数字填 `chat` |
 | 交互规则 `concurrency` | 规则层 | 规则的触发/限流对象，用于每用户 CD、每日次数、触发去重 | 群友每天最多置顶 2 次可填 `user` |
 
 可选值：
 
 - `chat`：同一个群内同一时间只开一局，适合 24 点、九宫格、猜数字、诗词填空、红包这类公共抢答或公共流程。
 - `user`：同一个用户一条会话，适合个人查询、个人表单、每个人互不影响的私有流程，例如 `pt_promote.promote_torrent`。
-- `none`：入口本身不需要平台保存会话，适合只执行一次就结束的动作；模块仍可在内部维护自己的长期状态。
+- `none`：入口本身不需要平台保存会话，适合只执行一次就结束的动作；插件仍可在内部维护自己的长期状态。
 
 后端保存规则时会优先读取 `plugin.json` / `manifest.py` 中声明的 `session_scope`，并写入规则的 `module_session_scope`。这样即使规则为了“每个群友 6 小时 CD、每日 2 次”设置了 `concurrency=user`，九宫格这类 `session_scope=chat` 的群局也仍然会按群保存会话，其他群友回复 `1-9` 才能进入同一局。
 
@@ -596,14 +596,14 @@ class GuessNumberPlugin(Plugin):
 
 #### 入口参数来源
 
-交互入口 payload 由平台运行时组装，当前不会在后端再次读取 manifest 默认值或模块账号级配置做自动合并。有效来源如下，越靠后越容易覆盖同名字段：
+交互入口 payload 由平台运行时组装，当前不会在后端再次读取 manifest 默认值或插件账号级配置做自动合并。有效来源如下，越靠后越容易覆盖同名字段：
 
 ```text
 交互规则 module_config
 < 转账事件动态参数（payer / receiver / amount / chat_id 等）
 ```
 
-`input_schema` 的默认值主要给前端表单预填使用；旧规则、API 直接写入或第三方客户端不一定会带上这些默认值，所以模块仍应在代码里为关键参数提供兜底。`module_config` 只保存当前交互规则的覆盖项，例如“这条门票规则奖金为 200”。模块自身的通用配置仍放在模块配置页中，运行时从 `ctx.config` 读取，不能混进规则的 `module_config`。
+`input_schema` 的默认值主要给前端表单预填使用；旧规则、API 直接写入或第三方客户端不一定会带上这些默认值，所以插件仍应在代码里为关键参数提供兜底。`module_config` 只保存当前交互规则的覆盖项，例如“这条门票规则奖金为 200”。插件自身的通用配置仍放在插件配置页中，运行时从 `ctx.config` 读取，不能混进规则的 `module_config`。
 
 `session_policy` 用来告诉平台和维护者会话如何结束、重复触发如何处理、TTL 多久。常见写法：
 
@@ -620,7 +620,7 @@ class GuessNumberPlugin(Plugin):
 
 #### 标准事件输入
 
-平台调用交互入口时，会提供标准信封；历史适配层或旧规则还可能同时提供下面这种平铺事件对象。模块不要依赖转账通知原文，新模块应优先读取 `source` / `actor` / `reply_to` / `trigger` / `session` 信封。
+平台调用交互入口时，会提供标准信封；历史适配层或旧规则还可能同时提供下面这种平铺事件对象。插件不要依赖转账通知原文，新插件应优先读取 `source` / `actor` / `reply_to` / `trigger` / `session` 信封。
 
 ```json
 {
@@ -638,7 +638,7 @@ class GuessNumberPlugin(Plugin):
 
 #### 标准动作输出
 
-交互入口或适配器应返回平台可执行的标准动作，而不是直接调用 Telegram API。交互 Bot runtime 统一负责发送、回复与基础动作执行；业务状态和幂等锁由模块自己放在 `ctx.redis`。
+交互入口或适配器应返回平台可执行的标准动作，而不是直接调用 Telegram API。交互 Bot runtime 统一负责发送、回复与基础动作执行；业务状态和幂等锁由插件自己放在 `ctx.redis`。
 
 ```json
 [
@@ -671,7 +671,7 @@ class GuessNumberPlugin(Plugin):
 
 #### 端到端示例：24 点交互入口
 
-下面是 `payment_confirmed` / `keyword` 开局、`message` 答题、`session_close` 清理的最小形态。真实模块可以把 `generate_24_puzzle()`、`check_answer()`、`render_start()` 拆成纯函数复用。
+下面是 `payment_confirmed` / `keyword` 开局、`message` 答题、`session_close` 清理的最小形态。真实插件可以把 `generate_24_puzzle()`、`check_answer()`、`render_start()` 拆成纯函数复用。
 
 ```python
 import json
@@ -747,13 +747,13 @@ class Game24Plugin(Plugin):
 
 #### 兼容边界
 
-1. 原模块本体不得为了交互 Bot 直接改写 `commands` / `on_message` 语义；UserBot 入口和交互 Bot 入口是两套边界。
+1. 原插件本体不得为了交互 Bot 直接改写 `commands` / `on_message` 语义；UserBot 入口和交互 Bot 入口是两套边界。
 2. 可以把纯业务逻辑抽到共享函数，例如题目生成、答案校验、渲染模板；UserBot 插件和交互 Bot 适配器共同调用这些纯函数。
-3. 模块不处理 Bot Token、Bbot 通知格式、转账过滤、发奖账号；这些都属于平台层职责，钱相关动作也不该放进交互 Bot 的高频入口。
+3. 插件不处理 Bot Token、Bbot 通知格式、转账过滤、发奖账号；这些都属于平台层职责，钱相关动作也不该放进交互 Bot 的高频入口。
 4. 交互 Bot 中奖公告必须引用赢家的答案消息，方便 `UserBot` 账号按 `Bbot` 公告自动回复发奖或补发奖金。
-5. 若模块未声明 `interaction_entries`，前端不应把它展示为可由交互 Bot 启动的模块。旧 `config_schema["x-interaction-entries"]` 仅作为兼容入口，新模块不要再用旧字段。
+5. 若插件未声明 `interaction_entries`，前端不应把它展示为可由交互 Bot 启动的插件。旧 `config_schema["x-interaction-entries"]` 仅作为兼容入口，新插件不要再用旧字段。
 6. `interaction_entries[].session_scope` 必须和插件内部状态 key 一致：群局状态 key 应包含 `chat_id`，用户私有流程状态 key 应同时包含 `chat_id` 和 `user_id`。
-7. 返回 `end_session` / `close_session` / `no_session` 时，平台会清理规则会话；模块自己的 Redis 状态仍由模块负责清理。
+7. 返回 `end_session` / `close_session` / `no_session` 时，平台会清理规则会话；插件自己的 Redis 状态仍由插件负责清理。
 8. `preserve_command_trigger` 必须保持为 `true`。交互入口新增后，原本能用的 UserBot 指令仍要按原指令名、原参数和原权限工作。
 9. `send_via` 必须命中入口声明的白名单；插件不得通过动作结果临时指定未声明发送者。
 10. `settlement` / `result_contract` 只描述可对账结果和平台动作，不得把发奖、转账、催付等钱相关动作塞进交互 Bot 高频入口。
@@ -762,9 +762,9 @@ class Game24Plugin(Plugin):
 
 ## 6. 指令系统（command API）
 
-**安全底线：普通指令只能由当前 UserBot 账号自己发出的 outgoing 消息触发。** 群成员、普通用户、频道消息等 incoming 消息不能直接触发模块 `commands`。`owner_only=False` 只表示模块的 `on_message` 可以监听普通成员消息，不表示开放指令执行权限。
+**安全底线：普通指令只能由当前 UserBot 账号自己发出的 outgoing 消息触发。** 群成员、普通用户、频道消息等 incoming 消息不能直接触发插件 `commands`。`owner_only=False` 只表示插件的 `on_message` 可以监听普通成员消息，不表示开放指令执行权限。
 
-**前缀底线：模块不能在用户可见文案、帮助、错误提示、配置默认值、预览或示例里硬编码英文逗号 `,` 作为指令前缀。** 指令名配置只保存裸命令名，例如 `game`、`help`、`cancel`；真正展示给用户时必须使用 `{prefix}` 占位符或运行时当前前缀拼接。
+**前缀底线：插件不能在用户可见文案、帮助、错误提示、配置默认值、预览或示例里硬编码英文逗号 `,` 作为指令前缀。** 指令名配置只保存裸命令名，例如 `game`、`help`、`cancel`；真正展示给用户时必须使用 `{prefix}` 占位符或运行时当前前缀拼接。
 
 必须使用当前命令前缀的场景：
 
@@ -785,7 +785,7 @@ class Game24Plugin(Plugin):
 "help_message_template": {"type": "string", "default": ",game 100 - 开始一局"}
 ```
 
-红包、抢答、24 点、猜数字这类“公共参与 + 私有管理”的模块必须按这个模型设计：
+红包、抢答、24 点、猜数字这类“公共参与 + 私有管理”的插件必须按这个模型设计：
 
 - 开局、发红包、撤销、强制结束、查看管理状态等管理动作写成 `commands`，只能由本账号 outgoing 指令触发。
 - 领取口令、答题、参与投票等普通成员行为写在 `on_message`，通过普通文本判断，不要求用户发送系统指令前缀。
@@ -797,8 +797,8 @@ class Game24Plugin(Plugin):
 1. 当前账号 outgoing 消息到达 → 检查前缀匹配
 2. 提取指令名和参数
 3. 检查别名（贪心最长匹配）
-4. 遍历已注册模块，调用 `on_command(ctx, cmd, args, event)`
-5. 第一个返回 True 的模块接管，后续不再传递
+4. 遍历已注册插件，调用 `on_command(ctx, cmd, args, event)`
+5. 第一个返回 True 的插件接管，后续不再传递
 
 ### on_command 签名
 
@@ -851,7 +851,7 @@ class MyPlugin(Plugin):
 
 ### 事件对象兼容写法
 
-模块收到的对象通常是 `events.NewMessage.Event`，但在测试、热重载、Telethon 代理属性等场景里，也可能表现得更像裸 `Message`。因此建议用 `getattr` 做兼容，不要直接假设 `event.outgoing`、`event.message.id` 一定存在：
+插件收到的对象通常是 `events.NewMessage.Event`，但在测试、热重载、Telethon 代理属性等场景里，也可能表现得更像裸 `Message`。因此建议用 `getattr` 做兼容，不要直接假设 `event.outgoing`、`event.message.id` 一定存在：
 
 ```python
 def event_message(event):
@@ -907,13 +907,13 @@ except ConversationTimeout:
 
 ---
 
-## 9. 模块日志
+## 9. 插件日志
 
-模块日志会进入后台的“日志中心 → Runtime → 模块日志”分页，和“消息日志”“系统日志”分开显示；涉及 sudo、Config Bundle confirm、userbot_reply confirm 等安全决策的记录则在“日志中心 → Audit”查看。
+插件日志会进入后台的“日志中心 → Runtime → 插件日志”分页，和“消息日志”“系统日志”分开显示；涉及 sudo、Config Bundle confirm、userbot_reply confirm 等安全决策的记录则在“日志中心 → Audit”查看。
 
 ### 如何写日志
 
-模块运行时通过 `ctx.log(level, message, **detail)` 输出日志：
+插件运行时通过 `ctx.log(level, message, **detail)` 输出日志：
 
 ```python
 await ctx.log(
@@ -958,9 +958,9 @@ await ctx.log(
 await ctx.log("error", f"failed: {raw_exception_with_token}")
 ```
 
-### loader 自动记录的模块异常
+### loader 自动记录的插件异常
 
-如果模块 `on_message` 抛异常，loader 会自动写一条模块日志，并附带：
+如果插件 `on_message` 抛异常，loader 会自动写一条插件日志，并附带：
 
 - `plugin_key`
 - `direction`
@@ -969,7 +969,7 @@ await ctx.log("error", f"failed: {raw_exception_with_token}")
 - `message_preview`
 - `traceback`
 
-这类异常不会让 worker 崩溃，当前消息会被跳过，其它模块继续运行。
+这类异常不会让 worker 崩溃，当前消息会被跳过，其它插件继续运行。
 
 ---
 
@@ -981,7 +981,7 @@ await ctx.log("error", f"failed: {raw_exception_with_token}")
 |------|---------|-------------|
 | `resource` | 持有定时器/子进程/网络连接 | 真正释放资源 |
 | `reset` | 持有 db/缓存/配置引用 | 引用置空 |
-| `no-op` | 流程型模块，无长期资源 | 空方法 + 注释说明 |
+| `no-op` | 流程型插件，无长期资源 | 空方法 + 注释说明 |
 
 ### 统一约束
 
@@ -1013,21 +1013,21 @@ class MyPlugin(Plugin):
 
 ## 13. 前端集成
 
-模块前端配置推荐分为两种配置形态，另有一类平台内置基础能力。历史 `schema` 只作为兼容别名保留，不再新增“Schema 弹窗”类模块。后续新增模块时，优先通过 `manifest.py` 的 `config_schema["x-ui-mode"]` 声明分类，前端会自动归类展示。
+插件前端配置推荐分为两种配置形态，另有一类平台内置基础能力。历史 `schema` 只作为兼容别名保留，不再新增“Schema 弹窗”类插件。后续新增插件时，优先通过 `manifest.py` 的 `config_schema["x-ui-mode"]` 声明分类，前端会自动归类展示。
 
 ### 配置形态概览
 
 | 分类 | 适用场景 | 大白话 | 典型功能 | 配置入口 |
 |------|---------|--------|---------|---------|
 | **规则驱动配置页** | 多条规则独立配置，需 CRUD + 试运行 | 像自动化流水线：先建规则，再按匹配条件触发动作 | forward、auto_reply、autorepeat | 专属配置页 |
-| **单配置对象 / 通用独立配置页** | 每个账号只保存一份模块配置，或轻量模块只需要字段表单 | 像一个工具面板：配置好触发指令和参数，直接运行；普通字段由 schema 驱动渲染 | game24、codex_image、简单远程模块 / 小工具模块 | 专属或通用独立配置页 |
-| **基础能力 — 平台内置** | 系统运行时常驻能力，不作为普通模块展示 | 像底座服务：给模块或平台调用，不强调启停 | scheduler | 平台功能页 |
+| **单配置对象 / 通用独立配置页** | 每个账号只保存一份插件配置，或轻量插件只需要字段表单 | 像一个工具面板：配置好触发指令和参数，直接运行；普通字段由 schema 驱动渲染 | game24、codex_image、简单远程插件 / 小工具插件 | 专属或通用独立配置页 |
+| **基础能力 — 平台内置** | 系统运行时常驻能力，不作为普通插件展示 | 像底座服务：给插件或平台调用，不强调启停 | scheduler | 平台功能页 |
 
-**关键判断**：需要维护多条规则 → `rules`；只有一份账号配置或普通字段表单足够 → `single`；旧模块已经写了 `schema` → 按 `single` 通用独立页兼容；像调度器这种系统服务 → `platform`。
+**关键判断**：需要维护多条规则 → `rules`；只有一份账号配置或普通字段表单足够 → `single`；旧插件已经写了 `schema` → 按 `single` 通用独立页兼容；像调度器这种系统服务 → `platform`。
 
 #### 自动分类规则
 
-新增模块应在 `config_schema` 顶层声明 `x-ui-mode`：
+新增插件应在 `config_schema` 顶层声明 `x-ui-mode`：
 
 ```python
 config_schema={
@@ -1041,22 +1041,22 @@ config_schema={
 
 | `x-ui-mode` | 展示位置 | 说明 |
 |-------------|----------|------|
-| `rules` | 规则驱动配置页 | 规则驱动模块，通常有规则列表、创建/编辑、dry-run |
+| `rules` | 规则驱动配置页 | 规则驱动插件，通常有规则列表、创建/编辑、dry-run |
 | `single` | 单配置对象 / 通用独立配置页 | 单配置对象或通用独立配置页，字段可由 `config_schema` 驱动 |
-| `schema` | legacy alias | 旧别名；不要在新模块中使用，不再表示弹窗类 |
-| `platform` | 基础能力 | 平台内置能力，不混在普通模块列表里 |
+| `schema` | legacy alias | 旧别名；不要在新插件中使用，不再表示弹窗类 |
+| `platform` | 基础能力 | 平台内置能力，不混在普通插件列表里 |
 
-前端统一从 `frontend/src/lib/plugin-modes.ts` 读取分类。旧内置模块仍保留 key fallback，但新模块不要依赖 fallback。
+前端统一从 `frontend/src/lib/plugin-modes.ts` 读取分类。旧内置插件仍保留 key fallback，但新插件不要依赖 fallback。
 
 ---
 
 ### 统一配置页样式规范
 
-所有账号级模块配置入口都使用独立页面，不再新增 Schema 弹窗或内部分类的用户可见分组。账号详情的“模块启停”页只展示“基础能力 · 平台内置”和“模块”两组，模块列表按 `feature.key` 首字母排序；用户界面统一称“模块”，代码、API、数据库字段和 Manifest 仍保留 `plugin` / `feature` 命名。
+所有账号级插件配置入口都使用独立页面，不再新增 Schema 弹窗或内部分类的用户可见分组。账号详情的“插件启停”页只展示“基础能力 · 平台内置”和“插件”两组，插件列表按 `feature.key` 首字母排序；用户界面和文档统一称“插件”，代码、API、数据库字段和 Manifest 仍保留 `plugin` / `feature` 命名。
 
 配置页从上到下固定为：
 
-1. 返回按钮 + 模块标题
+1. 返回按钮 + 插件标题
 2. 顶部冻结“配置操作”条（只有存在可保存配置的页面需要）
 3. 使用说明
 4. 功能总开关
@@ -1097,7 +1097,7 @@ config_schema={
 
 #### 功能总开关卡片
 
-“功能总开关”也必须是独立 `Card`，放在“使用说明”之后、“配置”之前。卡片右侧放 `Switch`，左侧展示说明、启用 Badge、`state` 和 `last_error`。关闭总开关表示当前账号不运行该模块，但仍允许进入配置页提前填写配置。
+“功能总开关”也必须是独立 `Card`，放在“使用说明”之后、“配置”之前。卡片右侧放 `Switch`，左侧展示说明、启用 Badge、`state` 和 `last_error`。关闭总开关表示当前账号不运行该插件，但仍允许进入配置页提前填写配置。
 
 规则驱动页面复用 `RuleFeatureToggleCard`；单配置和通用页面按同样布局实现。不要再使用旧的“运行状态”卡片替代总开关。
 
@@ -1117,13 +1117,13 @@ config_schema={
 - 不在账号详情页展示内部分类名或 legacy schema 分组。
 - 不把“使用说明”“功能总开关”“配置”合并到同一张卡片。
 - 不把保存按钮只放在长表单底部。
-- 不在用户界面继续使用“插件”指代可启停能力；面向用户称“模块”。
+- 不在用户界面继续使用“模块”指代可启停能力；面向用户统一称“插件”。
 
 ---
 
 ### 规则驱动配置页（Forward / AutoReply / Autorepeat）
 
-规则驱动模块每条 rule 存储独立的 `config` JSON，通过 CRUD API 管理。前端专属页面提供：规则列表 + 创建/编辑对话框 + 试运行（dry-run）。
+规则驱动插件每条 rule 存储独立的 `config` JSON，通过 CRUD API 管理。前端专属页面提供：规则列表 + 创建/编辑对话框 + 试运行（dry-run）。
 
 #### 适配清单（6 处必改）
 
@@ -1179,7 +1179,7 @@ export function XxxConfig() {
 ```
 
 **页面要素**：
-- 顶部：返回按钮 + 模块标题
+- 顶部：返回按钮 + 插件标题
 - 使用说明：独立 `Card`，复用 `RuleInfoBox`，写清触发方向、指令/规则用法和排障入口
 - 功能总开关：独立 `Card`，复用 `RuleFeatureToggleCard`，展示启用 Badge、运行状态和最近错误
 - 规则卡片：标题为“规则”，右侧放新建按钮，主体为规则表格（序号 / 关键字段 / 启用状态 / 操作按钮）
@@ -1211,7 +1211,7 @@ import { XxxConfig } from "@/pages/Plugins/configs/XxxConfig";
 // ③ FEATURE_CONFIG_PAGES 注册
 const FEATURE_CONFIG_PAGES: Record<string, { title: string; description: string }> = {
   auto_reply: { title: "自动回复", description: "..." },
-  xxx:        { title: "模块显示名", description: "..." },
+  xxx:        { title: "插件显示名", description: "..." },
   // ...
 };
 ```
@@ -1220,7 +1220,7 @@ const FEATURE_CONFIG_PAGES: Record<string, { title: string; description: string 
 
 #### 5. FEATURE_CONFIG_PAGE_KEYS — 共享入口点
 
-0.18.0 起，账号详情与模块中心统一复用同一个 helper，不再维护两份 Set。新增专属配置页时只改这一处：
+0.18.0 起，账号详情与插件中心统一复用同一个 helper，不再维护两份 Set。新增专属配置页时只改这一处：
 
 ```tsx
 // frontend/src/pages/Plugins/_shared/featureConfig.ts
@@ -1230,7 +1230,7 @@ const FEATURE_CONFIG_PAGE_KEYS = new Set([
 ]);
 ```
 
-**作用**：Set 中的 key 会让账号详情和模块中心的“配置”按钮跳转到专属页面路由 `/accounts/:aid/features/xxx`；不在 Set 中的 key 应进入通用独立配置页。历史代码和旧文档中出现的 `ConfigDialog` 只代表通用 schema 表单实现，不再是一类模块形态。
+**作用**：Set 中的 key 会让账号详情和插件中心的“配置”按钮跳转到专属页面路由 `/accounts/:aid/features/xxx`；不在 Set 中的 key 应进入通用独立配置页。历史代码和旧文档中出现的 `ConfigDialog` 只代表通用 schema 表单实现，不再是一类插件形态。
 
 #### 6. feature.py — 后端常量
 
@@ -1239,7 +1239,7 @@ const FEATURE_CONFIG_PAGE_KEYS = new Set([
 FEATURE_XXX = "xxx"
 ```
 
-此常量供 `rules.py` dry-run 分支和其它模块引用。
+此常量供 `rules.py` dry-run 分支和其它插件引用。
 
 ---
 
@@ -1247,7 +1247,7 @@ FEATURE_XXX = "xxx"
 
 规则驱动页面通常需要试运行功能，后端需同步适配 `rules.py`：
 
-#### 模块侧导出 _dry_run_match
+#### 插件侧导出 _dry_run_match
 
 ```python
 # backend/app/worker/plugins/builtin/xxx/plugin.py
@@ -1304,7 +1304,7 @@ if key == FEATURE_XXX:
 
 ### 单配置对象页（Game24 / Codex Image）
 
-只有一份配置、无规则列表的模块，使用专属页面但不需要 CRUD 和 dry-run：
+只有一份配置、无规则列表的插件，使用专属页面但不需要 CRUD 和 dry-run：
 
 - 创建 `frontend/src/pages/Plugins/configs/XxxConfig.tsx`，直接展示/编辑单个 config 对象
 - `manifest.py` 中声明 `config_schema["x-ui-mode"] = "single"`
@@ -1315,17 +1315,17 @@ if key == FEATURE_XXX:
 
 单配置对象页参考 `Game24Config.tsx`、`CodexImageConfig.tsx` 与 `ChatGPTImageConfig.tsx`，并遵守“统一配置页样式规范”。页面从上到下固定为：
 
-1. 返回按钮 + 模块标题
+1. 返回按钮 + 插件标题
 2. 顶部冻结“配置操作”条（保存配置 / 撤销，滚动长表单时保持可见）
 3. 使用说明（真实触发指令示例、参数示例、注意事项）
 4. 功能总开关（当前账号是否启用、关键运行状态、最近错误）
 5. 配置表单（账号级配置为主，必要时展示全局配置）
 
-“使用说明 → 功能总开关 → 配置”要作为三张独立卡片，不要把总开关塞进说明或配置里。单配置模块通常靠指令触发，用户最关心的是“怎么叫它”“现在能不能用”“要改哪些参数”，所以顺序保持稳定。配置字段要按可用屏幕宽度展开，避免窄表单造成长配置反复滚动。
+“使用说明 → 功能总开关 → 配置”要作为三张独立卡片，不要把总开关塞进说明或配置里。单配置插件通常靠指令触发，用户最关心的是“怎么叫它”“现在能不能用”“要改哪些参数”，所以顺序保持稳定。配置字段要按可用屏幕宽度展开，避免窄表单造成长配置反复滚动。
 
-#### 指令型模块配置
+#### 指令型插件配置
 
-如果模块支持自定义触发指令，应同时做三件事：
+如果插件支持自定义触发指令，应同时做三件事：
 
 ```python
 class XxxPlugin(Plugin):
@@ -1348,31 +1348,31 @@ config_schema={
 }
 ```
 
-- `command_config_keys` 用于告诉 loader：指令字段变化后要重启该模块并重新注册指令。
+- `command_config_keys` 用于告诉 loader：指令字段变化后要重启该插件并重新注册指令。
 - 指令名支持中文，例如 `,画图 一只猫`；但不能包含空格，因为指令解析以第一个空白分隔指令和参数。
 - 说明文案必须用当前配置中的指令动态生成，不要把 `,cximg`、`,24d` 写死。
 
-#### 已有单配置模块字段参考
+#### 已有单配置插件字段参考
 
-| 模块 | 推荐字段 | 说明 |
+| 插件 | 推荐字段 | 说明 |
 |------|---------|------|
 | `game24` | `command`, `timeout` | 触发指令名、答题限时 |
 | `codex_image` | `command`, `access_token`, `model`, `message_template`, `image_size`, `aspect_ratio`, `image_format`, `max_wait_seconds`, `status_interval_seconds`, `delete_command_message`, `show_revised_prompt`, `reasoning_effort`, `custom_instructions` | 触发指令、鉴权、模型、消息模板、图片尺寸/比例/格式、等待与状态提示、输出行为、自定义生成指令 |
 
 专属页面字段应与运行时实际读取的配置保持一致；`manifest.config_schema` 也要同步，避免通用配置页、接口校验和文档出现三套口径。
 
-`codex_image` 是内置图片模块，代码位于 `backend/app/worker/plugins/builtin/codex_image/`，会随后端镜像发布并由 builtin registry 自动 seed。旧数据库里的 `account_feature(feature_key="codex_image")` 不需要迁移，worker 会按普通内置模块路径加载；若未来再次作为远程模块发布，必须另起 key 或先设计清晰迁移策略，避免和 builtin key 冲突。
+`codex_image` 是内置图片插件，代码位于 `backend/app/worker/plugins/builtin/codex_image/`，会随后端镜像发布并由 builtin registry 自动 seed。旧数据库里的 `account_feature(feature_key="codex_image")` 不需要迁移，worker 会按普通内置插件路径加载；若未来再次作为远程插件发布，必须另起 key 或先设计清晰迁移策略，避免和 builtin key 冲突。
 
 ---
 
 ### 通用 Schema 驱动独立页（legacy schema 兼容）
 
-不再新增“Schema 弹窗”类模块。历史上无专属页面的模块可能声明 `x-ui-mode: "schema"`，现在应把它理解为“由 `config_schema` 提供字段的通用单配置独立页”：
+不再新增“Schema 弹窗”类插件。历史上无专属页面的插件可能声明 `x-ui-mode: "schema"`，现在应把它理解为“由 `config_schema` 提供字段的通用单配置独立页”：
 
 - `level: "global"` 的字段 → 全局配置区
 - `level: "account"` 或无 level → 账号配置区
-- **不需要**添加到 `FEATURE_CONFIG_PAGE_KEYS`，不需要创建模块专属页面文件
-- 新模块请优先写 `config_schema["x-ui-mode"] = "single"`；`schema` 只保留为旧模块兼容别名
+- **不需要**添加到 `FEATURE_CONFIG_PAGE_KEYS`，不需要创建插件专属页面文件
+- 新插件请优先写 `config_schema["x-ui-mode"] = "single"`；`schema` 只保留为旧插件兼容别名
 - 页面同样使用“使用说明 → 功能总开关 → 配置”的独立卡片顺序，并在有可保存字段时显示顶部冻结“配置操作”条
 - 页面宽度、滚动高度、字段间距和控件风格应与 ChatGPT2API / 自定义指令 / LLM 等系统配置页保持一致：使用统一的 `Input`、`Select`、`Switch`、`Textarea`、`Label` 视觉语言，不在字段标题里放 emoji 或临时说明块
 - 普通配置字段展示在配置区顶部；`message_template` / `*_message_template` / `*_template` 等消息模板字段进入“消息模板”折叠组；`template_preview` / `*_preview` 进入底部“预览结果”。
@@ -1404,19 +1404,19 @@ config_schema={
 
 ### 基础能力：平台内置功能（Scheduler）
 
-基础能力不是普通模块卡片，而是系统运行时一起初始化的服务。比如 `scheduler` 现在属于平台内置调度能力：页面仍可配置定时任务，但不再强调“作为模块启停”。
+基础能力不是普通插件卡片，而是系统运行时一起初始化的服务。比如 `scheduler` 现在属于平台内置调度能力：页面仍可配置定时任务，但不再强调“作为插件启停”。
 
 适配规则：
 
 - `manifest.py` 声明 `config_schema["x-ui-mode"] = "platform"`
-- 前端会在账号详情和模块中心里放到“基础能力 / 平台内置”分组
+- 前端会在账号详情和插件中心里放到“基础能力 / 平台内置”分组
 - 如果有专属页面，仍需 `App.tsx` 路由和共享 `FEATURE_CONFIG_PAGE_KEYS`
-- 后端运行时由 `PlatformScheduler` 常驻初始化；调度算法与 action 执行在平台层，`scheduler` 模块壳只保留兼容入口或配置入口
-- 普通模块需要定时执行时，不要自己 `create_task` 写永久循环，优先使用 `ctx.scheduler`
+- 后端运行时由 `PlatformScheduler` 常驻初始化；调度算法与 action 执行在平台层，`scheduler` 插件壳只保留兼容入口或配置入口
+- 普通插件需要定时执行时，不要自己 `create_task` 写永久循环，优先使用 `ctx.scheduler`
 
-#### 模块调用平台调度器
+#### 插件调用平台调度器
 
-`ctx.scheduler` 是绑定到当前模块的最小 capability facade。模块只能注册 / 注销自己名下的任务，热重载、禁用、worker 退出时 loader 会统一清理，避免旧 callback 继续触发。
+`ctx.scheduler` 是绑定到当前插件的最小 capability facade。插件只能注册 / 注销自己名下的任务，热重载、禁用、worker 退出时 loader 会统一清理，避免旧 callback 继续触发。
 
 ```python
 from app.worker.scheduler_runtime import ScheduledJob
@@ -1439,7 +1439,7 @@ class DemoPlugin(Plugin):
             ctx.scheduler.unregister_all()
 
     async def _send_daily_digest(self, job: ScheduledJob) -> None:
-        # callback 可闭包引用模块自己的状态，也可以在 config 中保存轻量参数
+        # callback 可闭包引用插件自己的状态，也可以在 config 中保存轻量参数
         ...
 ```
 
@@ -1453,11 +1453,11 @@ class DemoPlugin(Plugin):
 
 注意：
 
-- callback 异常会写入模块日志，并保留任务等待下次 tick；不要把异常吞掉后静默失败
-- `ctx.scheduler` 注册的是运行期任务；worker 重启后会由模块 `on_startup` 重新注册，若需要精确保存 `last_fire` / `next_fire`，模块应把状态写回自己的配置或规则表
-- 如果任务依赖模块配置，配置变更后建议触发模块热重载，或在 callback 中读取最新 `ctx.config`
-- 第三方模块拿到的是 scheduler facade，不会直接获得 Redis / DB / Telethon session
-- GUI 定时任务页仍走 `Rule(feature_key="scheduler")`，由同一个 `PlatformScheduler` 调度；后续新增模块不要依赖 `SchedulerPlugin`，只依赖 `ctx.scheduler`
+- callback 异常会写入插件日志，并保留任务等待下次 tick；不要把异常吞掉后静默失败
+- `ctx.scheduler` 注册的是运行期任务；worker 重启后会由插件 `on_startup` 重新注册，若需要精确保存 `last_fire` / `next_fire`，插件应把状态写回自己的配置或规则表
+- 如果任务依赖插件配置，配置变更后建议触发插件热重载，或在 callback 中读取最新 `ctx.config`
+- 第三方插件拿到的是 scheduler facade，不会直接获得 Redis / DB / Telethon session
+- GUI 定时任务页仍走 `Rule(feature_key="scheduler")`，由同一个 `PlatformScheduler` 调度；后续新增插件不要依赖 `SchedulerPlugin`，只依赖 `ctx.scheduler`
 
 ---
 
@@ -1469,26 +1469,26 @@ class DemoPlugin(Plugin):
 - 使用说明、功能总开关、配置主体必须是独立卡片，顺序固定为“使用说明 → 功能总开关 → 配置”
 - 有可保存字段的长表单必须使用顶部冻结“配置操作”条，按钮文案统一为“保存配置”“撤销”
 - 配置区域宽度随页面自适应，不使用窄 `max-w-*` 限制；字段多时使用响应式 grid
-- 表格列宽要稳定，账号详情页和模块中心的同类列表要纵向对齐
-- 配置按钮不依赖启用状态；即使模块当前关闭，也应允许先配置
-- 用户界面统一称“模块”，开发文档、API、代码标识可以继续使用 plugin / feature
+- 表格列宽要稳定，账号详情页和插件中心的同类列表要纵向对齐
+- 配置按钮不依赖启用状态；即使插件当前关闭，也应允许先配置
+- 用户界面和文档统一称“插件”，开发文档、API、代码标识可以继续使用 plugin / feature
 
 ### 适配自检清单
 
-新增模块前端配置页后，逐项检查：
+新增插件前端配置页后，逐项检查：
 
-- [ ] `manifest.py` 中 `config_schema["x-ui-mode"]` 已声明：推荐 `rules` / `single` / `platform`；仅旧模块保留 `schema`
+- [ ] `manifest.py` 中 `config_schema["x-ui-mode"]` 已声明：推荐 `rules` / `single` / `platform`；仅旧插件保留 `schema`
 - [ ] `types.ts` 中 `XxxRuleConfig` 接口与 `manifest.py` config_schema 字段一致
-- [ ] 如果有专属页面：`App.tsx` 中路由路径 `:aid/features/{key}` 与模块 key 一致
+- [ ] 如果有专属页面：`App.tsx` 中路由路径 `:aid/features/{key}` 与插件 key 一致
 - [ ] 如果有专属页面：`App.tsx` 中 `FEATURE_CONFIG_PAGES` 包含该 key
 - [ ] 如果有专属页面：`frontend/src/pages/Plugins/_shared/featureConfig.ts` 的 `FEATURE_CONFIG_PAGE_KEYS` 包含该 key
-- [ ] 如果是指令型模块：`command` 字段可配置，`Plugin.command_config_keys = {"command"}`，说明文案动态读取当前指令
-- [ ] 指令型模块的帮助、取消/结束、撤销、自动删除、冷却/超时、消息模板等用户常调行为已尽量配置化；帮助模板支持 `{prefix}`，不硬编码 `,命令`
+- [ ] 如果是指令型插件：`command` 字段可配置，`Plugin.command_config_keys = {"command"}`，说明文案动态读取当前指令
+- [ ] 指令型插件的帮助、取消/结束、撤销、自动删除、冷却/超时、消息模板等用户常调行为已尽量配置化；帮助模板支持 `{prefix}`，不硬编码 `,命令`
 - [ ] `owner_only=False` 仅用于开放 `on_message`，没有把普通 incoming 消息当成管理指令入口
 - [ ] 页面按“使用说明 → 功能总开关 → 配置”的独立卡片顺序排布；不要把说明、总开关和配置混在一张卡片
 - [ ] 有可保存字段的页面使用顶部冻结“配置操作”条；长配置不只在底部放保存按钮
 - [ ] 配置主体宽度自适应屏幕宽度，字段用响应式 grid 或分组，不使用窄 `max-w-*` 限制
-- [ ] 用户可见文案使用“模块”，不展示内部分类名或“Schema 弹窗”
+- [ ] 用户可见文案使用“插件”，不展示内部分类名或“Schema 弹窗”
 - [ ] 如需 dry-run：`plugin.py` 导出 `_dry_run_match`，`__init__.py` re-export，`rules.py` 在 fallback 之前添加分支
 - [ ] 如需 dry-run：`feature.py` 中有 `FEATURE_XXX` 常量
 - [ ] 前端 `pnpm -C frontend exec tsc -b --noEmit` 和 `pnpm -C frontend build` 通过
@@ -1500,7 +1500,7 @@ class DemoPlugin(Plugin):
 ### 快速自检
 
 - [ ] `__init__.py` 是否导出 `PLUGIN_CLASS` 和 `MANIFEST`
-- [ ] `MANIFEST.key` 是否和模块 class key 一致
+- [ ] `MANIFEST.key` 是否和插件 class key 一致
 - [ ] `permissions` 是否覆盖实际调用的方法
 - [ ] `on_command` 签名是否是 5 参数
 - [ ] 错误是否都被捕获并反馈给用户
@@ -1509,33 +1509,33 @@ class DemoPlugin(Plugin):
 
 按这条顺序排查，基本能定位 90% 的交互 Bot 问题：
 
-- `InstalledPlugin.enabled`：远程模块是否已安装并启用（旧 `RemotePlugin` 表仅作只读兼容）。
-- `AccountFeature.enabled`：当前账号是否启用了这个模块。
+- `InstalledPlugin.enabled`：远程插件是否已安装并启用（旧 `RemotePlugin` 表仅作只读兼容）。
+- `AccountFeature.enabled`：当前账号是否启用了这个插件。
 - 规则动作是否是 `action == "module"`，不是普通通知或算数题。
 - `module_key` 是否和 `MANIFEST.key` 完全一致，`module_action` 是否等于 `interaction_entries[].key`。
 - 当前群 `chat_id` 是否在规则 `chat_ids` 内；未配置时才表示所有群。
 - 触发模式是否匹配：付费通知走 `payment_confirmed`，免费关键词走 `keyword`，已有会话后的群消息才走 `message`。
 - 群局插件是否声明了 `interaction_entries[].session_scope = "chat"`；如果漏写，规则设置 `concurrency=user` 后，后续群友消息可能找不到会话。
 - 用户私有流程是否声明了 `session_scope = "user"`，并在插件内部状态 key 中包含用户 ID。
-- worker 是否在线；离线时交互 Bot 会返回“模块启动失败：worker 调用超时”。
+- worker 是否在线；离线时交互 Bot 会返回“插件启动失败：worker 调用超时”。
 - 日志页搜索 `run_interaction_entry`、`interaction module`、`unsupported type`，未知 action type 会写入 runtime log，便于发现返回了平台尚不支持的动作。
 
 ### 常见问题
 
 | 现象 | 原因 | 解决 |
 |------|------|------|
-| 模块被跳过 | MANIFEST 类型不对或导出缺失 | 检查 `__init__.py` |
+| 插件被跳过 | MANIFEST 类型不对或导出缺失 | 检查 `__init__.py` |
 | 指令没反应 | feature 未启用或前缀不匹配 | 检查 rule 配置和前缀 |
 | 热重载后旧 handler 还在触发 | generation guard 未生效 | 检查 loader.py 版本 |
-| 远程模块安装失败 | plugin.json 缺必填字段或格式不合法 | 检查 name/description/version/entry |
+| 远程插件安装失败 | plugin.json 缺必填字段或格式不合法 | 检查 name/description/version/entry |
 | 群友回复数字/答案没反应 | 群局入口漏写 `session_scope=chat`，或规则没有保存活跃会话 | 补齐 `plugin.json` / `manifest.py` 的 `interaction_entries[].session_scope`，检查规则有效期 |
-| cleanup 后模块状态异常 | cleanup 未幂等 | 重复调用测试 |
+| cleanup 后插件状态异常 | cleanup 未幂等 | 重复调用测试 |
 
 ---
 
 ## 17. 完整示例
 
-### 天气查询模块
+### 天气查询插件
 
 ```python
 # manifest.py
@@ -1591,7 +1591,7 @@ class WeatherPlugin(Plugin):
 
         city = " ".join(args) if args else str(ctx.config.get("default_city") or "Beijing")
         try:
-            # 第三方模块发布时应声明 external_http + allowed_hosts，并优先使用 ctx.http。
+            # 第三方插件发布时应声明 external_http + allowed_hosts，并优先使用 ctx.http。
             async with httpx.AsyncClient(timeout=10.0) as client:
                 geo = await client.get(
                     "https://geocoding-api.open-meteo.com/v1/search",
@@ -1634,6 +1634,6 @@ __all__ = ["PLUGIN_CLASS", "MANIFEST"]
 
 - `0.x`：开发阶段，允许快速迭代
 - `1.x`：接口稳定后
-- 不要依赖私有内部模块路径
+- 不要依赖私有内部插件路径
 - 尽量只依赖 `Plugin` / `Manifest` / `PluginContext` 公开契约
 - 新增行为优先通过 `config` 可选项实现
