@@ -240,6 +240,7 @@ export interface AccountBotInteractionConfig {
   open_commands?: string[];
   close_commands?: string[];
   status_commands?: string[];
+  query_commands?: string[];
   disabled_message?: string | null;
   valid_seconds?: number | null;
   concurrency?: "chat" | "user" | "none";
@@ -257,35 +258,6 @@ export interface AccountBotInteractionSettlement {
   payout_account_label?: string | null;
   status?: "pending" | "announced" | "settled" | "failed";
   data?: Record<string, unknown>;
-}
-
-export interface AccountBotInteractionResultItem {
-  ts: string;
-  account_id: number;
-  chat_id?: number | null;
-  message_id?: number | null;
-  rule_id?: string | null;
-  rule_name?: string | null;
-  plugin_key?: string | null;
-  entry_key?: string | null;
-  session_key?: string | null;
-  session_scope?: "chat" | "user" | "none" | string | null;
-  action_type?: string | null;
-  send_via?: "interaction_bot" | "userbot_reply" | "bbot_notice" | string | null;
-  execution?: string | null;
-  status?: string | null;
-  winner_user_id?: number | null;
-  winner_name?: string | null;
-  winner_message_id?: number | null;
-  delivered_message_id?: number | null;
-  reply_to_message_id?: number | null;
-  amount?: number | null;
-  currency?: string | null;
-  payout_mode?: string | null;
-  payout_account_label?: string | null;
-  delivery_error?: string | null;
-  settlement?: AccountBotInteractionSettlement | null;
-  result?: Record<string, unknown>;
 }
 
 export type AccountBotInteractionConfigUpdate = Pick<
@@ -319,6 +291,7 @@ export type AccountBotInteractionConfigUpdate = Pick<
   | "open_commands"
   | "close_commands"
   | "status_commands"
+  | "query_commands"
   | "disabled_message"
   | "valid_seconds"
   | "concurrency"

@@ -2,17 +2,15 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Query
-from sqlalchemy import desc, select
+from fastapi import APIRouter, HTTPException
+from sqlalchemy import select
 
 from ..db.models.account_bot import ACCOUNT_BOT_STATUS_DISABLED, AccountBot
-from ..db.models.log import RuntimeLog
 from ..deps import CurrentUser, DBSession
 from ..schemas.account_bot import (
     AccountBotConfigResponse,
     AccountBotConfigUpdate,
     AccountBotInteractionConfig,
-    AccountBotInteractionResultItem,
     AccountBotRemotePluginPolicy,
     AccountBotRuntimeResponse,
     AccountBotTestRequest,
@@ -190,68 +188,6 @@ async def get_account_bot_interaction(
     data = await interaction_bot_service.get_interaction_bot_config(db, aid)
     data = _with_interaction_runtime_state(aid, data)
     return AccountBotInteractionConfig(**data)
-
-
-@router.get("/{aid}/interaction-results", response_model=list[AccountBotInteractionResultItem])
-async def list_account_bot_interaction_results(
-    aid: int,
-    db: DBSession,
-    _user: CurrentUser,
-    limit: int = Query(20, ge=1, le=100),
-) -> list[AccountBotInteractionResultItem]:
-    """返回最近互动结果，供发奖/核对使用。"""
-
-    await account_bot_service.ensure_account(db, aid)
-    rows = (
-        await db.execute(
-            select(RuntimeLog)
-            .where(
-                RuntimeLog.account_id == aid,
-                RuntimeLog.source == "event",
-                RuntimeLog.message == "interaction result reported",
-            )
-            .order_by(desc(RuntimeLog.ts))
-            .limit(limit)
-        )
-    ).scalars().all()
-    items: list[AccountBotInteractionResultItem] = []
-    for row in rows:
-        payload = account_bot_runtime.parse_interaction_result_log(row)
-        if payload is None:
-            continue
-        items.append(
-            AccountBotInteractionResultItem(
-                ts=row.ts,
-                account_id=aid,
-                chat_id=payload.get("chat_id"),
-                message_id=payload.get("message_id"),
-                rule_id=payload.get("rule_id"),
-                rule_name=payload.get("rule_name"),
-                plugin_key=payload.get("plugin_key"),
-                entry_key=payload.get("entry_key"),
-                session_key=payload.get("session_key"),
-                session_scope=payload.get("session_scope"),
-                action_type=payload.get("action_type"),
-                send_via=payload.get("send_via"),
-                execution=payload.get("execution"),
-                status=payload.get("status"),
-                winner_user_id=payload.get("winner_user_id"),
-                winner_name=payload.get("winner_name"),
-                winner_message_id=payload.get("winner_message_id"),
-                delivered_message_id=payload.get("delivered_message_id"),
-                reply_to_message_id=payload.get("reply_to_message_id"),
-                amount=payload.get("amount"),
-                currency=payload.get("currency"),
-                payout_mode=payload.get("payout_mode"),
-                payout_account_label=payload.get("payout_account_label"),
-                delivery_error=payload.get("delivery_error"),
-                settlement=payload.get("settlement"),
-                result=payload.get("result") if isinstance(payload.get("result"), dict) else {},
-            )
-        )
-        if len(items) >= limit:
-            break
-    return items
 
 
 @router.put("/{aid}/interaction-bot", response_model=AccountBotInteractionConfig)

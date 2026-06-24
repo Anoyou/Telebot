@@ -475,28 +475,48 @@ async def test_dice_grid_hunt_on_interaction_returns_result_from_standard_envelo
     assert start_actions[0]["filename"] == "dice_grid_hunt.png"
     assert start_actions[0]["reply_to_message_id"] == 70
 
-    answer_actions = await plugin.on_interaction(
+    first_guess_actions = await plugin.on_interaction(
+        ctx,
+        "start_dice_grid_hunt",
+        {
+            "source": {"type": "message", "chat_id": -100123, "message_id": 98, "text": "5"},
+            "actor": {"user_id": 111, "display_name": "AAA"},
+            "settlement": {"mode": "auto", "payout_account_label": "@owner"},
+        },
+    )
+    assert first_guess_actions == []
+
+    throttled_actions = await plugin.on_interaction(
         ctx,
         "start_dice_grid_hunt",
         {
             "source": {"type": "message", "chat_id": -100123, "message_id": 99, "text": "6"},
             "actor": {"user_id": 111, "display_name": "AAA"},
-            "sender_user_id": 111,
             "settlement": {"mode": "auto", "payout_account_label": "@owner"},
         },
     )
+    assert throttled_actions == []
 
+    answer_actions = await plugin.on_interaction(
+        ctx,
+        "start_dice_grid_hunt",
+        {
+            "source": {"type": "message", "chat_id": -100123, "message_id": 100, "text": "6"},
+            "actor": {"user_id": 222, "display_name": "BBB"},
+            "settlement": {"mode": "auto", "payout_account_label": "@owner"},
+        },
+    )
     assert answer_actions[0]["type"] == "send_message"
-    assert "答对了：AAA" in answer_actions[0]["text"]
-    assert answer_actions[0]["reply_to_message_id"] == 99
+    assert "答对了：BBB" in answer_actions[0]["text"]
+    assert answer_actions[0]["reply_to_message_id"] == 100
     assert answer_actions[1] == {
         "type": "result",
         "success": True,
         "result": {
             "status": "winner",
-            "winner_user_id": 111,
-            "winner_name": "AAA",
-            "winner_message_id": 99,
+            "winner_user_id": 222,
+            "winner_name": "BBB",
+            "winner_message_id": 100,
             "target_sum": 17,
             "answer_index": 6,
             "prize": 777,
@@ -506,8 +526,8 @@ async def test_dice_grid_hunt_on_interaction_returns_result_from_standard_envelo
         "settlement": {
             "mode": "auto",
             "amount": 777,
-            "winner_user_id": 111,
-            "winner_name": "AAA",
+            "winner_user_id": 222,
+            "winner_name": "BBB",
             "payout_account_label": "@owner",
             "status": "announced",
         },

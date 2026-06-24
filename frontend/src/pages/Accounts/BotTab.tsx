@@ -63,7 +63,6 @@ import {
   deleteAccountBotUser,
   getAccountBot,
   getInteractionBotConfig,
-  listInteractionResults,
   listAccountBotUsers,
   restartAccountBotRuntime,
   testAccountBot,
@@ -76,7 +75,6 @@ import { listIgnoredPeers } from "@/api/ignored_peers";
 import type {
   AccountBotInteractionConfig,
   AccountBotInteractionConfigUpdate,
-  AccountBotInteractionResultItem,
   AccountBotInteractionRule,
   FeatureInteractionEntry,
   AccountBotRemotePluginPolicy,
@@ -124,6 +122,7 @@ const DEFAULT_INTERACTION_DISABLED_MESSAGE = "本条互动规则已暂停，暂�
 const DEFAULT_INTERACTION_RESPONSE_TEMPLATE = "已收到 {payer_name} 给 {receiver_name} 的转账 {amount}，互动流程已准备就绪。";
 const DEFAULT_INTERACTION_MODULE_START_TEXT = "正在启动互动插件...";
 const DEFAULT_MATH10_START_KEYWORDS = "发十以内算数\n十以内算数\n开算数题";
+const DEFAULT_INTERACTION_QUERY_COMMANDS = "。玩法\n。联动玩法";
 const RULE_CONTROLLED_MODULE_CONFIG_KEYS = new Set(["prize", "timeout", "valid_seconds"]);
 const DEFAULT_TRANSFER_NOTICE_TEMPLATE = [
   '<pre><code class="language-转账成功">付款人：{payer_name}',
@@ -180,6 +179,7 @@ const DEFAULT_INTERACTION_BOT: AccountBotInteractionConfig = {
   open_commands: [],
   close_commands: [],
   status_commands: [],
+  query_commands: parseTextLines(DEFAULT_INTERACTION_QUERY_COMMANDS),
   disabled_message: DEFAULT_INTERACTION_DISABLED_MESSAGE,
   valid_seconds: 600,
   concurrency: "chat",
@@ -633,14 +633,6 @@ function getModuleSessionScopeLabel(mode: NonNullable<AccountBotInteractionRule[
   if (mode === "user") return "按用户会话";
   if (mode === "none") return "不保存会话";
   return "按群会话";
-}
-
-function formatInteractionResultMeta(item: AccountBotInteractionResultItem): string {
-  const parts: string[] = [];
-  if (item.plugin_key) parts.push(item.plugin_key);
-  if (item.rule_name) parts.push(item.rule_name);
-  if (item.entry_key) parts.push(item.entry_key);
-  return parts.join(" / ") || "未命名结果";
 }
 
 function resolveRuleModuleSelection(
@@ -1481,6 +1473,7 @@ export function BotTab({ aid, mode = "management" }: { aid: number; mode?: "mana
   const [transferBotToken, setTransferBotToken] = useState("");
   const [clearTransferBotToken, setClearTransferBotToken] = useState(false);
   const [transferNoticeTemplate, setTransferNoticeTemplate] = useState(DEFAULT_TRANSFER_NOTICE_TEMPLATE);
+  const [interactionQueryCommands, setInteractionQueryCommands] = useState(DEFAULT_INTERACTION_QUERY_COMMANDS);
   const [interactionRules, setInteractionRules] = useState<InteractionRuleForm[]>([
     defaultRuleForm(0),
   ]);
@@ -1517,12 +1510,6 @@ export function BotTab({ aid, mode = "management" }: { aid: number; mode?: "mana
     queryKey: ["feature-matrix"],
     queryFn: getFeatureMatrix,
   });
-  const interactionResultsQ = useQuery({
-    queryKey: ["account", aid, "interaction-results"],
-    queryFn: () => listInteractionResults(aid, 12),
-    enabled: !!aid,
-  });
-
   const interactionEntries: InteractionEntryOption[] = (matrixQ.data?.features ?? []).flatMap((feature) =>
     (feature.interaction_entries ?? []).map((entry: FeatureInteractionEntry) => ({
       featureKey: feature.key,
@@ -1560,6 +1547,11 @@ export function BotTab({ aid, mode = "management" }: { aid: number; mode?: "mana
       setTransferBotToken("");
       setClearTransferBotToken(false);
       setTransferNoticeTemplate(interactionQ.data.transfer_notice_template || DEFAULT_TRANSFER_NOTICE_TEMPLATE);
+      setInteractionQueryCommands(
+        interactionQ.data.query_commands?.length
+          ? interactionQ.data.query_commands.join("\n")
+          : DEFAULT_INTERACTION_QUERY_COMMANDS,
+      );
       const sourceRules = interactionQ.data.rules?.length
         ? interactionQ.data.rules
         : [legacyRuleFromConfig(interactionQ.data)];
@@ -1590,7 +1582,6 @@ export function BotTab({ aid, mode = "management" }: { aid: number; mode?: "mana
     qc.invalidateQueries({ queryKey: ["account", aid, "bot"] });
     qc.invalidateQueries({ queryKey: ["account", aid, "bot", "users"] });
     qc.invalidateQueries({ queryKey: ["account", aid, "interaction-bot"] });
-    qc.invalidateQueries({ queryKey: ["account", aid, "interaction-results"] });
   };
 
   const saveMut = useMutation({
@@ -1668,6 +1659,7 @@ export function BotTab({ aid, mode = "management" }: { aid: number; mode?: "mana
       open_commands: firstRule.open_commands ?? [],
       close_commands: firstRule.close_commands ?? [],
       status_commands: firstRule.status_commands ?? [],
+      query_commands: parseTextLines(interactionQueryCommands),
       disabled_message: firstRule.disabled_message ?? null,
       valid_seconds: firstRule.valid_seconds ?? 600,
       concurrency: firstRule.concurrency ?? "chat",
@@ -2312,83 +2304,6 @@ export function BotTab({ aid, mode = "management" }: { aid: number; mode?: "mana
           </section>
 
           <section className="space-y-3 rounded-lg border p-3 sm:p-4">
-            <div className="flex flex-wrap items-start justify-between gap-2">
-              <div>
-                <div className="text-sm font-medium">最近互动结果</div>
-                <div className="text-xs text-muted-foreground">
-                  这里直接展示最近赢家、奖金和应回复的消息 ID，方便核对和发奖。
-                </div>
-              </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <Badge variant="outline">
-                  {interactionResultsQ.data?.length ?? 0} 条
-                </Badge>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() => interactionResultsQ.refetch()}
-                  disabled={interactionResultsQ.isFetching}
-                >
-                  {interactionResultsQ.isFetching ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-1 h-4 w-4" />}
-                  刷新
-                </Button>
-              </div>
-            </div>
-            <div className="space-y-2">
-              {interactionResultsQ.isLoading ? (
-                <div className="rounded-md border bg-muted/20 px-3 py-4 text-sm text-muted-foreground">
-                  正在读取最近互动结果...
-                </div>
-              ) : interactionResultsQ.data?.length ? (
-                interactionResultsQ.data.map((item, index) => (
-                  <div key={`${item.ts}-${item.plugin_key || "unknown"}-${index}`} className="rounded-md border bg-muted/20 p-3">
-                    <div className="flex flex-wrap items-start justify-between gap-2">
-                      <div className="min-w-0">
-                        <div className="text-sm font-medium break-words">{formatInteractionResultMeta(item)}</div>
-                        <div className="mt-1 text-xs text-muted-foreground">
-                          {formatDateTime(item.ts)}
-                        </div>
-                      </div>
-                      <div className="flex flex-wrap gap-1.5">
-                        {item.status ? <Badge variant="secondary">{item.status}</Badge> : null}
-                        {item.send_via ? <Badge variant="outline">{item.send_via}</Badge> : null}
-                      </div>
-                    </div>
-                    <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-4 text-sm">
-                      <div className="rounded-md border bg-background px-3 py-2">
-                        <div className="text-xs text-muted-foreground">赢家</div>
-                        <div className="mt-1 break-words font-medium">{item.winner_name || item.winner_user_id || "未记录"}</div>
-                      </div>
-                      <div className="rounded-md border bg-background px-3 py-2">
-                        <div className="text-xs text-muted-foreground">奖金</div>
-                        <div className="mt-1 font-medium">{item.amount ?? item.settlement?.amount ?? "未记录"}</div>
-                      </div>
-                      <div className="rounded-md border bg-background px-3 py-2">
-                        <div className="text-xs text-muted-foreground">赢家消息 ID</div>
-                        <div className="mt-1 font-medium">{item.winner_message_id ?? "未记录"}</div>
-                      </div>
-                      <div className="rounded-md border bg-background px-3 py-2">
-                        <div className="text-xs text-muted-foreground">发奖账号</div>
-                        <div className="mt-1 break-words font-medium">{item.payout_account_label || item.settlement?.payout_account_label || "未记录"}</div>
-                      </div>
-                    </div>
-                    {item.delivery_error ? (
-                      <div className="mt-2 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
-                        发送异常：{item.delivery_error}
-                      </div>
-                    ) : null}
-                  </div>
-                ))
-              ) : (
-                <div className="rounded-md border bg-muted/20 px-3 py-4 text-sm text-muted-foreground">
-                  暂无近期互动结果。
-                </div>
-              )}
-            </div>
-          </section>
-
-          <section className="space-y-3 rounded-lg border p-3 sm:p-4">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
                 <div className="text-sm font-medium">规则列表</div>
@@ -2401,25 +2316,28 @@ export function BotTab({ aid, mode = "management" }: { aid: number; mode?: "mana
                   type="button"
                   variant="outline"
                   className="flex-1 sm:flex-none sm:min-w-[116px]"
-                  onClick={() => saveTransferMut.mutate()}
-                  disabled={isInteractionConfigSaveDisabled}
-                >
-                  {saveTransferMut.isPending ? (
-                    <Loader2 className="mr-1 h-4 w-4 animate-spin" />
-                  ) : (
-                    <Save className="mr-1 h-4 w-4" />
-                  )}
-                  保存规则
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="flex-1 sm:flex-none sm:min-w-[116px]"
                   onClick={addInteractionRule}
                 >
                   <Plus className="mr-1 h-4 w-4" />
                   新增规则
                 </Button>
+              </div>
+            </div>
+
+            <div className="grid gap-3 rounded-md border bg-muted/20 p-3 lg:grid-cols-[minmax(220px,360px)_minmax(0,1fr)] lg:items-start">
+              <div className="space-y-1.5">
+                <Label>玩法查询指令</Label>
+                <Textarea
+                  rows={2}
+                  className="h-16 !min-h-16 resize-y py-2 text-xs leading-5"
+                  placeholder={DEFAULT_INTERACTION_QUERY_COMMANDS}
+                  value={interactionQueryCommands}
+                  onChange={(e) => setInteractionQueryCommands(e.target.value)}
+                />
+              </div>
+              <div className="rounded-md border bg-background px-3 py-2 text-xs leading-5 text-muted-foreground">
+                群友发送这些指令时，交互 Bot 会回复当前群已开启的玩法、关键词/转账条件、奖金、每用户 CD 和日上限。
+                一行一个指令；留空则不开放群内玩法查询。
               </div>
             </div>
 
@@ -2639,6 +2557,22 @@ export function BotTab({ aid, mode = "management" }: { aid: number; mode?: "mana
               </Button>
             </div>
           </section>
+          <Button
+            type="button"
+            size="sm"
+            className="fixed bottom-4 right-4 z-40 h-10 rounded-full px-4 shadow-lg shadow-black/15 sm:bottom-6 sm:right-6"
+            onClick={() => saveTransferMut.mutate()}
+            disabled={isInteractionConfigSaveDisabled}
+            title="保存规则"
+            aria-label="保存规则"
+          >
+            {saveTransferMut.isPending ? (
+              <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+            ) : (
+              <Save className="mr-1 h-4 w-4" />
+            )}
+            保存规则
+          </Button>
         </CardContent>
       </Card>
     </div>

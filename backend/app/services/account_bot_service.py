@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..account_bot_defaults import (
     DEFAULT_INTERACTION_DISABLED_MESSAGE,
+    DEFAULT_INTERACTION_QUERY_COMMANDS,
     DEFAULT_INTERACTION_RESPONSE_TEMPLATE,
     DEFAULT_TRANSFER_NOTICE_TEMPLATE,
     LEGACY_TRANSFER_NOTICE_TEMPLATE,
@@ -190,6 +191,7 @@ def default_transfer_notice_config() -> dict[str, Any]:
         "open_commands": [],
         "close_commands": [],
         "status_commands": [],
+        "query_commands": list(DEFAULT_INTERACTION_QUERY_COMMANDS),
         "disabled_message": DEFAULT_INTERACTION_DISABLED_MESSAGE,
         "valid_seconds": 600,
         "concurrency": "chat",
@@ -297,6 +299,12 @@ def normalize_transfer_notice_config(raw: Any) -> dict[str, Any]:
     base["open_commands"] = _normalize_string_list(base.get("open_commands"))
     base["close_commands"] = _normalize_string_list(base.get("close_commands"))
     base["status_commands"] = _normalize_string_list(base.get("status_commands"))
+    raw_query_commands = base.get("query_commands")
+    base["query_commands"] = (
+        _normalize_string_list(raw_query_commands)
+        if isinstance(raw_query_commands, list)
+        else list(DEFAULT_INTERACTION_QUERY_COMMANDS)
+    )
     receiver = str(base.get("receiver_text") or "").strip()
     base["receiver_text"] = receiver or None
     template = str(base.get("response_template") or "").strip()
@@ -360,6 +368,7 @@ def normalize_transfer_notice_config(raw: Any) -> dict[str, Any]:
     base["open_commands"] = list(first_enabled.get("open_commands") or [])
     base["close_commands"] = list(first_enabled.get("close_commands") or [])
     base["status_commands"] = list(first_enabled.get("status_commands") or [])
+    base["query_commands"] = _normalize_string_list(base.get("query_commands"))
     base["disabled_message"] = first_enabled.get("disabled_message")
     base["valid_seconds"] = first_enabled.get("valid_seconds") or 600
     base["concurrency"] = first_enabled.get("concurrency") or "chat"

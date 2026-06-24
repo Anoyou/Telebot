@@ -1117,6 +1117,117 @@ def _message_line_equals_any(text: str, candidates: list[str]) -> bool:
     return any(_message_equals_any(unit, candidates) for unit in units if unit)
 
 
+def _interaction_query_commands(cfg: dict[str, Any]) -> list[str]:
+    raw = cfg.get("query_commands")
+    if not isinstance(raw, list):
+        return []
+    out: list[str] = []
+    for item in raw:
+        command = str(item or "").strip()
+        if command and command not in out:
+            out.append(command)
+    return out
+
+
+def _interaction_rule_kind_label(rule: dict[str, Any]) -> str:
+    action = str(rule.get("action") or "")
+    if action == "math10":
+        return "算数题"
+    if action == "module":
+        module_key = str(rule.get("module_key") or "").strip()
+        return f"玩法 <code>{account_bot_service.html_text(module_key)}</code>" if module_key else "玩法"
+    return "通知"
+
+
+def _interaction_trigger_mode_label(rule: dict[str, Any]) -> str:
+    mode = str(rule.get("trigger_mode") or "payment")
+    if mode == "both":
+        return "转账或关键词"
+    if mode == "keyword":
+        return "关键词"
+    return "转账"
+
+
+def _interaction_amount_condition_label(rule: dict[str, Any]) -> str | None:
+    amount = rule.get("amount")
+    if amount is None:
+        return None
+    prefix = "≥" if str(rule.get("amount_match_mode") or "eq") == "gte" else "="
+    return f"金额 {prefix} <code>{account_bot_service.html_text(amount)}</code>"
+
+
+def _interaction_receiver_condition_label(rule: dict[str, Any]) -> str:
+    receiver_text = str(rule.get("receiver_text") or "").strip()
+    receiver_user_id = _int_or_none(rule.get("receiver_user_id"))
+    if receiver_text:
+        return f"收款人 {account_bot_service.html_text(receiver_text)}"
+    if receiver_user_id is not None:
+        return f"收款人 ID <code>{receiver_user_id}</code>"
+    return "收款人 当前账号"
+
+
+def _interaction_rule_limit_label(rule: dict[str, Any]) -> str:
+    parts: list[str] = []
+    prize = rule.get("module_prize") if str(rule.get("action") or "") == "module" else rule.get("math_prize")
+    if prize is not None:
+        parts.append(f"奖金 <code>{account_bot_service.html_text(prize)}</code>")
+    if rule.get("valid_seconds") is not None:
+        parts.append(f"限时 <code>{account_bot_service.html_text(rule.get('valid_seconds'))}</code> 秒")
+    cooldown = str(rule.get("user_cooldown_seconds") or "").strip()
+    if cooldown:
+        parts.append(f"每用户 CD <code>{account_bot_service.html_text(cooldown)}</code>")
+    if rule.get("daily_limit_per_user") is not None:
+        parts.append(f"每用户日上限 <code>{account_bot_service.html_text(rule.get('daily_limit_per_user'))}</code>")
+    return "；".join(parts) if parts else "无限制"
+
+
+def _interaction_rule_trigger_labels(rule: dict[str, Any]) -> list[str]:
+    labels = [f"方式：{_interaction_trigger_mode_label(rule)}"]
+    if _rule_trigger_mode_allows(rule, "keyword"):
+        keywords = _rule_keyword_list(rule, "module_start_keywords")
+        if keywords:
+            labels.append("关键词：" + " / ".join(f"<code>{account_bot_service.html_text(item)}</code>" for item in keywords[:5]))
+        else:
+            labels.append("关键词：未配置")
+    if _rule_trigger_mode_allows(rule, "payment"):
+        triggers = _rule_triggers(rule)
+        labels.append("转账通知：" + " / ".join(f"<code>{account_bot_service.html_text(item)}</code>" for item in triggers[:5]))
+        amount_label = _interaction_amount_condition_label(rule)
+        if amount_label:
+            labels.append(amount_label)
+        labels.append(_interaction_receiver_condition_label(rule))
+    return labels
+
+
+async def _render_interaction_rules_query(_db: Any, incoming: Incoming, cfg: dict[str, Any]) -> str | None:
+    if incoming.chat_id is None:
+        return None
+    matched: list[tuple[dict[str, Any], bool]] = []
+    for rule in _interaction_rules(cfg):
+        if not _rule_chat_matches(rule, incoming.chat_id):
+            continue
+        if str(rule.get("action") or "") not in {"math10", "module"}:
+            continue
+        matched.append((rule, await _is_interaction_rule_open(incoming.account_id, rule, incoming.chat_id)))
+    if not matched:
+        return None
+
+    open_rules = [rule for rule, open_ in matched if open_]
+    if not open_rules:
+        return "当前群暂无开启中的联动玩法。"
+
+    lines = ["<b>当前可用联动玩法</b>"]
+    for index, rule in enumerate(open_rules, start=1):
+        name = account_bot_service.html_text(str(rule.get("name") or rule.get("id") or f"玩法 {index}"))
+        lines.append(f"\n{index}. <b>{name}</b> · {_interaction_rule_kind_label(rule)}")
+        lines.append("触发：" + "；".join(_interaction_rule_trigger_labels(rule)))
+        lines.append("限制：" + _interaction_rule_limit_label(rule))
+    closed_count = len(matched) - len(open_rules)
+    if closed_count > 0:
+        lines.append(f"\n另有 {closed_count} 个玩法已临时关闭。")
+    return "\n".join(lines)
+
+
 def _rule_state_key(account_id: int, rule: dict[str, Any], chat_id: int | None) -> str:
     scope = str(rule.get("concurrency") or "chat")
     if scope == "none":
@@ -1914,6 +2025,12 @@ async def _try_handle_interaction_rule_command_or_keyword(db: Any, incoming: Inc
     cfg = await account_bot_service.get_transfer_notice_config(db, incoming.account_id)
     if not cfg.get("enabled"):
         return False
+    if _message_equals_any(incoming.text, _interaction_query_commands(cfg)):
+        message = await _render_interaction_rules_query(db, incoming, cfg)
+        if message is not None:
+            await _send(incoming, message, reply_to_message_id=incoming.message_id)
+            return True
+        return False
     for rule in _interaction_rules(cfg):
         if not _rule_chat_matches(rule, incoming.chat_id):
             continue
@@ -2052,6 +2169,13 @@ async def _try_handle_interaction_module_message(db: Any, incoming: Incoming) ->
             entry_key=entry_key,
             payload=payload,
         )
+        if not ok and _should_try_local_interaction_fallback(module_key, error):
+            ok, error, actions = await _run_local_interaction_entry_fallback(
+                incoming,
+                plugin_key=module_key,
+                entry_key=entry_key,
+                payload=payload,
+            )
         if not ok:
             log.info(
                 "interaction module message ignored aid=%s plugin=%s entry=%s error=%s",
@@ -2486,6 +2610,56 @@ async def _run_worker_interaction_entry(
     return False, "worker 调用超时", []
 
 
+async def _run_local_interaction_entry_fallback(
+    incoming: Incoming,
+    *,
+    plugin_key: str,
+    entry_key: str,
+    payload: dict[str, Any],
+) -> tuple[bool, str | None, list[dict[str, Any]]]:
+    """Run lightweight builtin interaction entries that do not need userbot state."""
+
+    if plugin_key != "math10":
+        return False, None, []
+    try:
+        from app.worker.plugins.base import PluginContext
+        from app.worker.plugins.builtin.math10.plugin import Math10Plugin
+
+        async def _log(level: str, message: str, **detail: Any) -> None:
+            await _write_interaction_runtime_log(
+                incoming,
+                level,
+                message,
+                source="plugin",
+                plugin_key=plugin_key,
+                **detail,
+            )
+
+        plugin = Math10Plugin()
+        ctx = PluginContext(
+            account_id=incoming.account_id,
+            feature_key=plugin_key,
+            redis=get_redis(),
+            log=_log,
+        )
+        await plugin.on_startup(ctx)
+        actions = await plugin.on_interaction(ctx, entry_key, dict(payload or {}))
+        if actions is None:
+            return False, f"模块尚未实现交互入口：{plugin_key}.{entry_key}", []
+        if not isinstance(actions, list) or not all(isinstance(item, dict) for item in actions):
+            return False, "交互入口必须返回 list[dict] 标准动作", []
+        return True, None, [dict(item) for item in actions]
+    except Exception as exc:  # noqa: BLE001
+        return False, f"{type(exc).__name__}: {exc}", []
+
+
+def _should_try_local_interaction_fallback(plugin_key: str, error: str | None) -> bool:
+    if plugin_key != "math10":
+        return False
+    text = str(error or "")
+    return "模块未加载或未启用" in text
+
+
 async def _run_worker_interaction_action(
     incoming: Incoming,
     *,
@@ -2571,42 +2745,6 @@ def _interaction_trace_context(payload: dict[str, Any] | None) -> dict[str, Any]
     }
 
 
-def _interaction_result_summary_from_log(detail: Any) -> dict[str, Any] | None:
-    if not isinstance(detail, dict):
-        return None
-    result = detail.get("result")
-    if not isinstance(result, dict):
-        return None
-    settlement = result.get("settlement") if isinstance(result.get("settlement"), dict) else None
-    payload = {
-        "chat_id": _int_or_none(detail.get("chat_id")),
-        "message_id": _int_or_none(detail.get("message_id")),
-        "rule_id": str(detail.get("rule_id") or "").strip() or None,
-        "rule_name": str(detail.get("rule_name") or "").strip() or None,
-        "plugin_key": str(detail.get("plugin_key") or "").strip() or None,
-        "entry_key": str(detail.get("entry_key") or "").strip() or None,
-        "session_key": str(detail.get("session_key") or "").strip() or None,
-        "session_scope": str(detail.get("session_scope") or "").strip() or None,
-        "action_type": str(result.get("action_type") or "").strip() or None,
-        "send_via": str(result.get("send_via") or "").strip() or None,
-        "execution": str(result.get("execution") or "").strip() or None,
-        "status": str(result.get("status") or "").strip() or None,
-        "winner_user_id": _int_or_none(result.get("winner_user_id")),
-        "winner_name": str(result.get("winner_name") or "").strip() or None,
-        "winner_message_id": _int_or_none(result.get("winner_message_id")),
-        "delivered_message_id": _int_or_none(result.get("delivered_message_id")),
-        "reply_to_message_id": _int_or_none(result.get("reply_to_message_id")),
-        "amount": _int_or_none(result.get("amount")),
-        "currency": str(result.get("currency") or "").strip() or None,
-        "payout_mode": str(result.get("payout_mode") or "").strip() or None,
-        "payout_account_label": str(result.get("payout_account_label") or "").strip() or None,
-        "delivery_error": str(result.get("delivery_error") or "").strip() or None,
-        "settlement": settlement,
-        "result": result,
-    }
-    return payload
-
-
 _INTERACTION_CONTROL_ACTIONS = {"end_session", "close_session", "no_session"}
 _INTERACTION_SEND_VIA = {"interaction_bot", "userbot_reply", "bbot_notice"}
 
@@ -2640,62 +2778,10 @@ async def _resolve_interaction_action_token(incoming: Incoming, send_via: str) -
     return incoming.token
 
 
-def _interaction_result_payload(
-    action: dict[str, Any],
-    *,
-    send_via: str,
-    execution: str,
-    delivered_message_id: int | None = None,
-    delivery_error: str | None = None,
-) -> dict[str, Any] | None:
-    action_type = str(action.get("type") or "").strip()
-    result = action.get("result")
-    if isinstance(result, dict):
-        payload = dict(result)
-    elif action_type == "result":
-        payload = {k: v for k, v in action.items() if k not in {"type", "send_via", "reply_to_message_id", "settlement", "data"}}
-    elif isinstance(action.get("settlement"), dict):
-        settlement = dict(action["settlement"])
-        payload = {
-            "status": settlement.get("status") or "pending",
-            "winner_user_id": settlement.get("winner_user_id"),
-            "winner_name": settlement.get("winner_name"),
-            "amount": settlement.get("amount"),
-            "currency": settlement.get("currency"),
-        }
-    else:
-        return None
-
-    payload["action_type"] = action_type
-    payload["send_via"] = send_via
-    payload["execution"] = execution
-    if delivered_message_id is not None:
-        payload["delivered_message_id"] = delivered_message_id
-    reply_to_message_id = _int_or_none(action.get("reply_to_message_id"))
-    if reply_to_message_id is not None:
-        payload["reply_to_message_id"] = reply_to_message_id
-    if delivery_error:
-        payload["delivery_error"] = delivery_error
-    settlement = action.get("settlement")
-    if isinstance(settlement, dict):
-        payload["settlement"] = dict(settlement)
-    return payload
-
-
 def _interaction_delivery_message_id(result: dict[str, Any] | Any) -> int | None:
     if not isinstance(result, dict):
         return None
     return _int_or_none(result.get("message_id"))
-
-
-def _interaction_delivery_error(result: dict[str, Any] | Any) -> str | None:
-    if not isinstance(result, dict):
-        return None
-    error = result.get("error")
-    if error is None:
-        return None
-    text = str(error).strip()
-    return text or None
 
 
 async def _delete_interaction_placeholder(
@@ -2864,40 +2950,6 @@ async def _record_interaction_settlement(incoming: Incoming, action: dict[str, A
     )
 
 
-async def _record_interaction_result(
-    incoming: Incoming,
-    action: dict[str, Any],
-    *,
-    send_via: str,
-    execution: str,
-    delivered_message_id: int | None = None,
-    delivery_error: str | None = None,
-) -> None:
-    payload = _interaction_result_payload(
-        action,
-        send_via=send_via,
-        execution=execution,
-        delivered_message_id=delivered_message_id,
-        delivery_error=delivery_error,
-    )
-    if payload is None:
-        return
-    await _write_interaction_runtime_log(
-        incoming,
-        "info",
-        "interaction result reported",
-        result=payload,
-        **_interaction_log_context(incoming),
-        **_interaction_trace_context(action.get("context")),
-    )
-
-
-def parse_interaction_result_log(row: RuntimeLog) -> dict[str, Any] | None:
-    if row.source != "event" or not isinstance(row.detail, dict):
-        return None
-    return _interaction_result_summary_from_log(row.detail)
-
-
 async def _apply_interaction_actions(
     incoming: Incoming,
     actions: list[dict[str, Any]],
@@ -2912,13 +2964,6 @@ async def _apply_interaction_actions(
         action_type = str(action.get("type") or "").strip()
         await _record_interaction_settlement(incoming, action)
         if action_type in _INTERACTION_CONTROL_ACTIONS or action_type == "result":
-            if action_type == "result":
-                await _record_interaction_result(
-                    incoming,
-                    action,
-                    send_via=_interaction_action_send_via(action),
-                    execution="local",
-                )
             continue
         if action_type == "settlement":
             continue
@@ -2937,7 +2982,7 @@ async def _apply_interaction_actions(
             elif replace_message_id is not None:
                 delete_message_id = replace_message_id
                 replace_message_id = None
-            ok, result = await _send_interaction_action_message(
+            ok, _result = await _send_interaction_action_message(
                 incoming,
                 text,
                 reply_to_message_id=reply_to_message_id,
@@ -2946,14 +2991,6 @@ async def _apply_interaction_actions(
             )
             if ok and delete_message_id is not None:
                 await _delete_interaction_placeholder(incoming, delete_message_id)
-            await _record_interaction_result(
-                incoming,
-                action,
-                send_via=send_via,
-                execution="userbot" if send_via == "userbot_reply" else "bot",
-                delivered_message_id=_interaction_delivery_message_id(result) if ok else None,
-                delivery_error=_interaction_delivery_error(result) if not ok else None,
-            )
             continue
         if action_type in {"send_photo", "send_file"}:
             raw_photo = str(action.get("photo_base64") or action.get("file_base64") or "").strip()
@@ -2968,7 +3005,7 @@ async def _apply_interaction_actions(
                 continue
             filename = str(action.get("filename") or "interaction.png").strip() or "interaction.png"
             caption = str(action.get("caption") or action.get("text") or "").strip() or None
-            ok, result = await _send_interaction_action_photo(
+            ok, _result = await _send_interaction_action_photo(
                 incoming,
                 photo,
                 filename=filename,
@@ -2979,14 +3016,6 @@ async def _apply_interaction_actions(
             if ok and replace_message_id is not None:
                 await _delete_interaction_placeholder(incoming, replace_message_id)
                 replace_message_id = None
-            await _record_interaction_result(
-                incoming,
-                action,
-                send_via=send_via,
-                execution="userbot" if send_via == "userbot_reply" else "bot",
-                delivered_message_id=_interaction_delivery_message_id(result) if ok else None,
-                delivery_error=_interaction_delivery_error(result) if not ok else None,
-            )
             continue
         log.info("interaction action ignored: unsupported type=%s aid=%s", action_type, incoming.account_id)
         await _write_interaction_runtime_log(
@@ -3024,6 +3053,13 @@ async def _run_interaction_module(
         entry_key=entry_key,
         payload=payload,
     )
+    if not ok and _should_try_local_interaction_fallback(module_key, error):
+        ok, error, actions = await _run_local_interaction_entry_fallback(
+            incoming,
+            plugin_key=module_key,
+            entry_key=entry_key,
+            payload=payload,
+        )
     if not ok:
         await _send(
             incoming,

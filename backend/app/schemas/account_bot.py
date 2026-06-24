@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from ..account_bot_defaults import (
     DEFAULT_INTERACTION_DISABLED_MESSAGE,
+    DEFAULT_INTERACTION_QUERY_COMMANDS,
     DEFAULT_INTERACTION_RESPONSE_TEMPLATE,
     DEFAULT_TRANSFER_NOTICE_TEMPLATE,
 )
@@ -75,17 +76,6 @@ class AccountBotInteractionSettlement(BaseModel):
     data: dict[str, Any] = Field(default_factory=dict)
 
 
-class AccountBotInteractionResultSettlement(BaseModel):
-    mode: str | None = None
-    amount: int | None = None
-    currency: str | None = Field(default=None, max_length=16)
-    winner_user_id: int | None = None
-    winner_name: str | None = Field(default=None, max_length=128)
-    payout_account_label: str | None = Field(default=None, max_length=128)
-    status: str | None = None
-    data: dict[str, Any] = Field(default_factory=dict)
-
-
 class AccountBotInteractionAction(BaseModel):
     type: str = Field(max_length=64)
     text: str | None = Field(default=None, max_length=4000)
@@ -93,35 +83,6 @@ class AccountBotInteractionAction(BaseModel):
     reply_to_message_id: int | None = None
     settlement: AccountBotInteractionSettlement | None = None
     data: dict[str, Any] = Field(default_factory=dict)
-
-
-class AccountBotInteractionResultItem(BaseModel):
-    ts: datetime
-    account_id: int
-    chat_id: int | None = None
-    message_id: int | None = None
-    rule_id: str | None = None
-    rule_name: str | None = None
-    plugin_key: str | None = None
-    entry_key: str | None = None
-    session_key: str | None = None
-    session_scope: str | None = None
-    action_type: str | None = None
-    send_via: str | None = None
-    execution: str | None = None
-    status: str | None = None
-    winner_user_id: int | None = None
-    winner_name: str | None = None
-    winner_message_id: int | None = None
-    delivered_message_id: int | None = None
-    reply_to_message_id: int | None = None
-    amount: int | None = None
-    currency: str | None = None
-    payout_mode: str | None = None
-    payout_account_label: str | None = None
-    delivery_error: str | None = None
-    settlement: AccountBotInteractionResultSettlement | None = None
-    result: dict[str, Any] = Field(default_factory=dict)
 
 
 class AccountBotRemotePluginPolicy(BaseModel):
@@ -341,6 +302,7 @@ class AccountBotInteractionConfig(BaseModel):
     open_commands: list[str] = Field(default_factory=list, max_length=20)
     close_commands: list[str] = Field(default_factory=list, max_length=20)
     status_commands: list[str] = Field(default_factory=list, max_length=20)
+    query_commands: list[str] = Field(default_factory=lambda: list(DEFAULT_INTERACTION_QUERY_COMMANDS), max_length=20)
     disabled_message: str | None = Field(default=DEFAULT_INTERACTION_DISABLED_MESSAGE, max_length=500)
     valid_seconds: int = Field(default=600, ge=30, le=86400)
     concurrency: InteractionConcurrency = "chat"
@@ -392,7 +354,7 @@ class AccountBotInteractionConfig(BaseModel):
     def _normalize_trigger_texts(cls, v: list[str]) -> list[str]:
         return _normalize_string_list(v, default=["转账成功"])
 
-    @field_validator("module_start_keywords", "open_commands", "close_commands", "status_commands")
+    @field_validator("module_start_keywords", "open_commands", "close_commands", "status_commands", "query_commands")
     @classmethod
     def _normalize_optional_string_list(cls, v: list[str]) -> list[str]:
         return _normalize_string_list(v)

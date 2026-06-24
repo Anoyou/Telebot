@@ -208,6 +208,7 @@ def test_account_bot_transfer_notice_config_normalizes_values() -> None:
             "trusted_bot_id": "456",
             "trigger_text": " 转账成功 ",
             "trigger_texts": [" 转账成功 ", "交易成功", "转账成功"],
+            "query_commands": [" 。玩法 ", "。玩法", "玩法菜单"],
             "receiver_text": " 我 ",
             "amount": "100",
             "response_template": " 检测到 {amount} ",
@@ -221,6 +222,7 @@ def test_account_bot_transfer_notice_config_normalizes_values() -> None:
     assert cfg["trusted_bot_id"] == 456
     assert cfg["trigger_text"] == "转账成功"
     assert cfg["trigger_texts"] == ["转账成功", "交易成功"]
+    assert cfg["query_commands"] == ["。玩法", "玩法菜单"]
     assert cfg["receiver_text"] == "我"
     assert cfg["amount"] == 100
     assert cfg["response_template"] == "检测到 {amount}"
@@ -3070,6 +3072,209 @@ async def test_math10_builtin_action_starts_from_default_keyword(monkeypatch) ->
 
 
 @pytest.mark.asyncio
+async def test_math10_module_rule_falls_back_when_worker_plugin_not_loaded(monkeypatch) -> None:
+    from app.worker.plugins.builtin.math10 import plugin as math10_plugin
+
+    monkeypatch.setattr(math10_plugin, "_new_math_question", lambda: ("3 + 4", 7))
+    monkeypatch.setattr(account_bot_runtime, "get_redis", lambda: _MemoryRedis())
+    monkeypatch.setattr(account_bot_runtime, "_load_account_holder_label", AsyncMock(return_value="@owner"))
+    monkeypatch.setattr(account_bot_runtime, "_resolve_payout_mode", AsyncMock(return_value="manual"))
+    monkeypatch.setattr(
+        account_bot_runtime,
+        "_run_worker_interaction_entry",
+        AsyncMock(return_value=(False, "RuntimeError: 模块未加载或未启用：math10", [])),
+    )
+    send = AsyncMock(return_value={"message_id": 88})
+    edit = AsyncMock(return_value={"message_id": 88})
+    monkeypatch.setattr(account_bot_service, "send_message", send)
+    monkeypatch.setattr(account_bot_service, "edit_message", edit)
+    incoming = account_bot_runtime.Incoming(
+        account_id=1,
+        token="bbot-token",
+        update_id=1,
+        user_id=456,
+        chat_id=-100123,
+        message_id=10,
+        text="开算数题",
+        display_name="AAA",
+    )
+
+    ok, keep_session = await account_bot_runtime._run_interaction_module(
+        incoming,
+        {
+            "id": "math10-module",
+            "name": "算数题",
+            "action": "module",
+            "module_key": "math10",
+            "module_action": "start_math_game",
+            "module_prize": 456,
+            "module_start_text": "正在启动互动模块...",
+        },
+        event_type="keyword",
+    )
+
+    assert ok is True
+    assert keep_session is True
+    send.assert_awaited_once()
+    assert send.await_args.args[:3] == ("bbot-token", -100123, "正在启动互动模块...")
+    edit.assert_awaited_once()
+    assert edit.await_args.args[:4] == (
+        "bbot-token",
+        -100123,
+        88,
+        "算数题测试开始\n题目：3 + 4 = ?\n奖金：456\n直接发送数字答案，答对后我会公告赢家。",
+    )
+
+
+@pytest.mark.asyncio
+async def test_interaction_query_command_lists_current_chat_games(monkeypatch) -> None:
+    class _DB:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+    send = AsyncMock()
+    monkeypatch.setattr(account_bot_runtime, "AsyncSessionLocal", lambda: _DB())
+    monkeypatch.setattr(account_bot_runtime, "get_redis", lambda: _MemoryRedis())
+    monkeypatch.setattr(account_bot_service, "send_message", send)
+    monkeypatch.setattr(
+        account_bot_service,
+        "get_transfer_notice_config",
+        AsyncMock(
+            return_value=account_bot_service.normalize_transfer_notice_config(
+                {
+                    "enabled": True,
+                    "query_commands": ["玩法菜单"],
+                    "rules": [
+                        {
+                            "id": "dice",
+                            "name": "九宫格",
+                            "enabled": True,
+                            "chat_ids": [-100123],
+                            "trigger_mode": "both",
+                            "trigger_texts": ["转账成功"],
+                            "module_start_keywords": ["。ct num=数字"],
+                            "receiver_text": "owner",
+                            "amount": 123,
+                            "amount_match_mode": "eq",
+                            "action": "module",
+                            "module_key": "dice_grid_hunt",
+                            "module_action": "start_dice_grid_hunt",
+                            "module_prize": 123,
+                            "user_cooldown_seconds": "10s",
+                            "daily_limit_per_user": 2,
+                            "valid_seconds": 90,
+                        },
+                        {
+                            "id": "math",
+                            "name": "其他群算数题",
+                            "enabled": True,
+                            "chat_ids": [-100999],
+                            "trigger_mode": "keyword",
+                            "module_start_keywords": ["算数题"],
+                            "action": "math10",
+                            "math_prize": 88,
+                        },
+                        {
+                            "id": "notice",
+                            "name": "通知",
+                            "enabled": True,
+                            "chat_ids": [-100123],
+                            "action": "notice",
+                        },
+                    ],
+                }
+            )
+        ),
+    )
+
+    await account_bot_runtime._handle_interaction_update(
+        1,
+        "bbot-token",
+        {
+            "update_id": 1001,
+            "message": {
+                "message_id": 10010,
+                "text": "玩法菜单",
+                "from": {"id": 111, "first_name": "User"},
+                "chat": {"id": -100123, "type": "supergroup"},
+            },
+        },
+    )
+
+    assert send.await_count == 1
+    text = send.await_args.args[2]
+    assert "当前可用联动玩法" in text
+    assert "九宫格" in text
+    assert "dice_grid_hunt" in text
+    assert "。ct num=数字" in text
+    assert "金额 = <code>123</code>" in text
+    assert "每用户 CD <code>10s</code>" in text
+    assert "每用户日上限 <code>2</code>" in text
+    assert "其他群算数题" not in text
+    assert "<b>通知</b>" not in text
+    assert send.await_args.kwargs["reply_to_message_id"] == 10010
+
+
+@pytest.mark.asyncio
+async def test_interaction_query_command_ignores_uncovered_chat(monkeypatch) -> None:
+    class _DB:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+    send = AsyncMock()
+    monkeypatch.setattr(account_bot_runtime, "AsyncSessionLocal", lambda: _DB())
+    monkeypatch.setattr(account_bot_runtime, "get_redis", lambda: _MemoryRedis())
+    monkeypatch.setattr(account_bot_service, "send_message", send)
+    monkeypatch.setattr(
+        account_bot_service,
+        "get_transfer_notice_config",
+        AsyncMock(
+            return_value=account_bot_service.normalize_transfer_notice_config(
+                {
+                    "enabled": True,
+                    "query_commands": ["玩法菜单"],
+                    "rules": [
+                        {
+                            "id": "dice",
+                            "name": "九宫格",
+                            "enabled": True,
+                            "chat_ids": [-100123],
+                            "trigger_mode": "keyword",
+                            "module_start_keywords": ["。ct num=数字"],
+                            "action": "module",
+                            "module_key": "dice_grid_hunt",
+                            "module_action": "start_dice_grid_hunt",
+                        }
+                    ],
+                }
+            )
+        ),
+    )
+
+    await account_bot_runtime._handle_interaction_update(
+        1,
+        "bbot-token",
+        {
+            "update_id": 1002,
+            "message": {
+                "message_id": 10020,
+                "text": "玩法菜单",
+                "from": {"id": 111, "first_name": "User"},
+                "chat": {"id": -100999, "type": "supergroup"},
+            },
+        },
+    )
+
+    assert send.await_count == 0
+
+
+@pytest.mark.asyncio
 async def test_worker_suppresses_interaction_bot_owned_keyword(monkeypatch) -> None:
     class _DB:
         async def __aenter__(self):
@@ -4140,14 +4345,13 @@ async def test_interaction_action_send_via_bbot_notice_and_logs_settlement(monke
     assert send.await_args.args[:3] == ("abot-token", -100123, "结算公告")
     assert send.await_args.kwargs["reply_to_message_id"] == 9
     delete.assert_awaited_once_with("bbot-token", -100123, 77)
-    assert write_log.await_count == 2
+    assert write_log.await_count == 1
     assert write_log.await_args_list[0].args[1:3] == ("info", "interaction settlement reported")
-    assert write_log.await_args_list[1].args[1:3] == ("info", "interaction result reported")
     assert write_log.await_args_list[0].kwargs["settlement"]["amount"] == 123
 
 
 @pytest.mark.asyncio
-async def test_interaction_action_send_via_userbot_reply_uses_worker_rpc_and_logs_result(monkeypatch) -> None:
+async def test_interaction_action_send_via_userbot_reply_uses_worker_rpc_and_logs_settlement(monkeypatch) -> None:
     run_action = AsyncMock(return_value=(True, None, {"message_id": 91}))
     write_log = AsyncMock()
     monkeypatch.setattr(account_bot_runtime, "_run_worker_interaction_action", run_action)
@@ -4186,11 +4390,8 @@ async def test_interaction_action_send_via_userbot_reply_uses_worker_rpc_and_log
     assert payload["action_type"] == "send_message"
     assert payload["chat_id"] == -100123
     assert payload["reply_to_message_id"] == 9
-    assert write_log.await_count == 2
+    assert write_log.await_count == 1
     assert write_log.await_args_list[0].args[1:3] == ("info", "interaction settlement reported")
-    assert write_log.await_args_list[1].args[1:3] == ("info", "interaction result reported")
-    assert write_log.await_args_list[1].kwargs["result"]["execution"] == "userbot"
-    assert write_log.await_args_list[1].kwargs["result"]["delivered_message_id"] == 91
 
 
 @pytest.mark.asyncio
