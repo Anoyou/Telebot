@@ -18,6 +18,8 @@ from typing import Any
 from sqlalchemy import desc, select
 
 from ..account_bot_defaults import (
+    DEFAULT_INTERACTION_QUERY_EMPTY_MESSAGE,
+    DEFAULT_INTERACTION_QUERY_RESPONSE_TEMPLATE,
     DEFAULT_INTERACTION_RESPONSE_TEMPLATE,
     DEFAULT_TRANSFER_NOTICE_TEMPLATE,
 )
@@ -1168,7 +1170,18 @@ def _interaction_receiver_condition_label(rule: dict[str, Any]) -> str:
 
 def _interaction_rule_limit_label(rule: dict[str, Any]) -> str:
     parts: list[str] = []
-    prize = rule.get("module_prize") if str(rule.get("action") or "") == "module" else rule.get("math_prize")
+    action = str(rule.get("action") or "")
+    prize = rule.get("module_prize") if action == "module" else rule.get("math_prize")
+    if (
+        action == "module"
+        and prize is not None
+        and account_bot_service.declared_module_entry_has_field(
+            str(rule.get("module_key") or "").strip() or None,
+            str(rule.get("module_action") or "").strip() or None,
+            "prize",
+        ) is False
+    ):
+        prize = None
     if prize is not None:
         parts.append(f"奖金 <code>{account_bot_service.html_text(prize)}</code>")
     if rule.get("valid_seconds") is not None:
@@ -1199,6 +1212,18 @@ def _interaction_rule_trigger_labels(rule: dict[str, Any]) -> list[str]:
     return labels
 
 
+def _interaction_query_template_value(cfg: dict[str, Any], key: str, fallback: str) -> str:
+    value = str(cfg.get(key) or "").strip()
+    return value or fallback
+
+
+def _render_interaction_query_template(template: str, values: dict[str, str]) -> str:
+    def repl(match: re.Match[str]) -> str:
+        return values.get(match.group(1), match.group(0))
+
+    return re.sub(r"\{([a-zA-Z_][a-zA-Z0-9_]*)\}", repl, template).strip()
+
+
 async def _render_interaction_rules_query(_db: Any, incoming: Incoming, cfg: dict[str, Any]) -> str | None:
     if incoming.chat_id is None:
         return None
@@ -1214,18 +1239,31 @@ async def _render_interaction_rules_query(_db: Any, incoming: Incoming, cfg: dic
 
     open_rules = [rule for rule, open_ in matched if open_]
     if not open_rules:
-        return "当前群暂无开启中的联动玩法。"
+        return _interaction_query_template_value(cfg, "query_empty_message", DEFAULT_INTERACTION_QUERY_EMPTY_MESSAGE)
 
-    lines = ["<b>当前可用联动玩法</b>"]
+    lines: list[str] = []
     for index, rule in enumerate(open_rules, start=1):
         name = account_bot_service.html_text(str(rule.get("name") or rule.get("id") or f"玩法 {index}"))
-        lines.append(f"\n{index}. <b>{name}</b> · {_interaction_rule_kind_label(rule)}")
+        lines.append(f"{index}. <b>{name}</b> · {_interaction_rule_kind_label(rule)}")
         lines.append("触发：" + "；".join(_interaction_rule_trigger_labels(rule)))
         lines.append("限制：" + _interaction_rule_limit_label(rule))
     closed_count = len(matched) - len(open_rules)
     if closed_count > 0:
-        lines.append(f"\n另有 {closed_count} 个玩法已临时关闭。")
-    return "\n".join(lines)
+        lines.append(f"另有 {closed_count} 个玩法已临时关闭。")
+    template = _interaction_query_template_value(
+        cfg,
+        "query_response_template",
+        DEFAULT_INTERACTION_QUERY_RESPONSE_TEMPLATE,
+    )
+    return _render_interaction_query_template(
+        template,
+        {
+            "items": "\n".join(lines),
+            "count": account_bot_service.html_text(len(open_rules)),
+            "closed_count": account_bot_service.html_text(closed_count),
+            "chat_id": account_bot_service.html_text(incoming.chat_id),
+        },
+    )
 
 
 def _rule_state_key(account_id: int, rule: dict[str, Any], chat_id: int | None) -> str:

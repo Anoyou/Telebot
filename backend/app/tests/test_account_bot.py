@@ -3218,6 +3218,98 @@ async def test_interaction_query_command_lists_current_chat_games(monkeypatch) -
     assert send.await_args.kwargs["reply_to_message_id"] == 10010
 
 
+def test_interaction_rule_drops_stale_module_prize_for_no_prize_entry() -> None:
+    cfg = account_bot_service.normalize_transfer_notice_config(
+        {
+            "enabled": True,
+            "query_commands": ["玩法菜单"],
+            "rules": [
+                {
+                    "id": "pt",
+                    "name": "置顶促销",
+                    "enabled": True,
+                    "chat_ids": [-100123],
+                    "trigger_mode": "keyword",
+                    "module_start_keywords": ["促销 id=12345"],
+                    "action": "module",
+                    "module_key": "pt_promote",
+                    "module_action": "promote_torrent",
+                    "module_prize": 123,
+                    "valid_seconds": 600,
+                }
+            ],
+        }
+    )
+
+    assert cfg["rules"][0]["module_prize"] is None
+    assert cfg["module_prize"] is None
+
+
+@pytest.mark.asyncio
+async def test_interaction_query_template_hides_prize_for_no_prize_entry(monkeypatch) -> None:
+    class _DB:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+    send = AsyncMock()
+    monkeypatch.setattr(account_bot_runtime, "AsyncSessionLocal", lambda: _DB())
+    monkeypatch.setattr(account_bot_runtime, "get_redis", lambda: _MemoryRedis())
+    monkeypatch.setattr(account_bot_service, "send_message", send)
+    monkeypatch.setattr(
+        account_bot_service,
+        "get_transfer_notice_config",
+        AsyncMock(
+            return_value=account_bot_service.normalize_transfer_notice_config(
+                {
+                    "enabled": True,
+                    "query_commands": ["玩法菜单"],
+                    "query_response_template": "当前 {count} 个玩法\n{items}\n关闭 {closed_count} 个",
+                    "rules": [
+                        {
+                            "id": "pt",
+                            "name": "置顶促销",
+                            "enabled": True,
+                            "chat_ids": [-100123],
+                            "trigger_mode": "keyword",
+                            "module_start_keywords": ["促销 id=12345"],
+                            "action": "module",
+                            "module_key": "pt_promote",
+                            "module_action": "promote_torrent",
+                            "module_prize": 123,
+                            "user_cooldown_seconds": "12h",
+                            "valid_seconds": 600,
+                        }
+                    ],
+                }
+            )
+        ),
+    )
+
+    await account_bot_runtime._handle_interaction_update(
+        1,
+        "bbot-token",
+        {
+            "update_id": 10011,
+            "message": {
+                "message_id": 10011,
+                "text": "玩法菜单",
+                "from": {"id": 111, "first_name": "User"},
+                "chat": {"id": -100123, "type": "supergroup"},
+            },
+        },
+    )
+
+    assert send.await_count == 1
+    text = send.await_args.args[2]
+    assert "当前 1 个玩法" in text
+    assert "置顶促销" in text
+    assert "奖金" not in text
+    assert "每用户 CD <code>12h</code>" in text
+
+
 @pytest.mark.asyncio
 async def test_interaction_query_command_ignores_uncovered_chat(monkeypatch) -> None:
     class _DB:

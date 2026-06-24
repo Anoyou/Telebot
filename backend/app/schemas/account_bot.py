@@ -10,6 +10,8 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from ..account_bot_defaults import (
     DEFAULT_INTERACTION_DISABLED_MESSAGE,
     DEFAULT_INTERACTION_QUERY_COMMANDS,
+    DEFAULT_INTERACTION_QUERY_EMPTY_MESSAGE,
+    DEFAULT_INTERACTION_QUERY_RESPONSE_TEMPLATE,
     DEFAULT_INTERACTION_RESPONSE_TEMPLATE,
     DEFAULT_TRANSFER_NOTICE_TEMPLATE,
 )
@@ -303,6 +305,14 @@ class AccountBotInteractionConfig(BaseModel):
     close_commands: list[str] = Field(default_factory=list, max_length=20)
     status_commands: list[str] = Field(default_factory=list, max_length=20)
     query_commands: list[str] = Field(default_factory=lambda: list(DEFAULT_INTERACTION_QUERY_COMMANDS), max_length=20)
+    query_response_template: str = Field(
+        default=DEFAULT_INTERACTION_QUERY_RESPONSE_TEMPLATE,
+        max_length=2000,
+    )
+    query_empty_message: str = Field(
+        default=DEFAULT_INTERACTION_QUERY_EMPTY_MESSAGE,
+        max_length=500,
+    )
     disabled_message: str | None = Field(default=DEFAULT_INTERACTION_DISABLED_MESSAGE, max_length=500)
     valid_seconds: int = Field(default=600, ge=30, le=86400)
     concurrency: InteractionConcurrency = "chat"
@@ -336,7 +346,7 @@ class AccountBotInteractionConfig(BaseModel):
             raise ValueError("不能包含换行")
         return value or None
 
-    @field_validator("trigger_text", "response_template", "transfer_notice_template")
+    @field_validator("trigger_text", "query_response_template", "query_empty_message", "response_template", "transfer_notice_template")
     @classmethod
     def _trim_required_text(cls, v: str) -> str:
         value = str(v or "").strip()

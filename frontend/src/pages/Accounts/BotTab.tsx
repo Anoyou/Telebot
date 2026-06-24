@@ -123,6 +123,8 @@ const DEFAULT_INTERACTION_RESPONSE_TEMPLATE = "已收到 {payer_name} 给 {recei
 const DEFAULT_INTERACTION_MODULE_START_TEXT = "正在启动互动插件...";
 const DEFAULT_MATH10_START_KEYWORDS = "发十以内算数\n十以内算数\n开算数题";
 const DEFAULT_INTERACTION_QUERY_COMMANDS = "。玩法\n。联动玩法";
+const DEFAULT_INTERACTION_QUERY_RESPONSE_TEMPLATE = "<b>当前可用联动玩法</b>\n{items}";
+const DEFAULT_INTERACTION_QUERY_EMPTY_MESSAGE = "当前群暂无开启中的联动玩法。";
 const RULE_CONTROLLED_MODULE_CONFIG_KEYS = new Set(["prize", "timeout", "valid_seconds"]);
 const DEFAULT_TRANSFER_NOTICE_TEMPLATE = [
   '<pre><code class="language-转账成功">付款人：{payer_name}',
@@ -180,6 +182,8 @@ const DEFAULT_INTERACTION_BOT: AccountBotInteractionConfig = {
   close_commands: [],
   status_commands: [],
   query_commands: parseTextLines(DEFAULT_INTERACTION_QUERY_COMMANDS),
+  query_response_template: DEFAULT_INTERACTION_QUERY_RESPONSE_TEMPLATE,
+  query_empty_message: DEFAULT_INTERACTION_QUERY_EMPTY_MESSAGE,
   disabled_message: DEFAULT_INTERACTION_DISABLED_MESSAGE,
   valid_seconds: 600,
   concurrency: "chat",
@@ -460,6 +464,25 @@ function renderTransferNoticeTemplatePreview(template: string): string {
   return source.replace(/\{(\w+)\}/g, (match, key: string) => (
     TRANSFER_NOTICE_TEMPLATE_SAMPLE_VALUES[key] ?? match
   ));
+}
+
+function renderInteractionQueryTemplatePreview(template: string): string {
+  const source = template.trim() || DEFAULT_INTERACTION_QUERY_RESPONSE_TEMPLATE;
+  const sampleItems = [
+    "1. <b>九宫格</b> · 玩法 <code>dice_grid_hunt</code>",
+    "触发：方式：转账或关键词；关键词：<code>。ct num=数字</code>；金额 = <code>123</code>；收款人 当前账号",
+    "限制：奖金 <code>123</code>；限时 <code>90</code> 秒；每用户 CD <code>10s</code>；每用户日上限 <code>2</code>",
+    "2. <b>置顶促销</b> · 玩法 <code>pt_promote</code>",
+    "触发：方式：关键词；关键词：<code>促销 id=12345</code>",
+    "限制：限时 <code>600</code> 秒；每用户 CD <code>12h</code>",
+  ].join("\n");
+  const sampleValues: Record<string, string> = {
+    items: sampleItems,
+    count: "2",
+    closed_count: "0",
+    chat_id: "-1001234567890",
+  };
+  return source.replace(/\{(\w+)\}/g, (match, key: string) => sampleValues[key] ?? match);
 }
 
 function isInteractionEntrySchema(schema: unknown): schema is InteractionEntrySchema {
@@ -764,6 +787,7 @@ function ruleFromForm(
     || defaultInteractionEntryForModule(interactionEntries, moduleKey)?.entry.key
     || "";
   const inferredEntry = interactionEntries.find((item) => item.featureKey === moduleKey && item.entry.key === moduleAction)?.entry;
+  const supportsModulePrize = interactionEntryHasField(inferredEntry, "prize");
   const moduleConfig = action === "module"
     ? mergeEntryConfigValues(inferredEntry, form.moduleConfig)
     : {};
@@ -791,7 +815,7 @@ function ruleFromForm(
     module_action: action === "module" ? moduleAction || null : null,
     module_session_scope: action === "module" ? moduleSessionScope : null,
     module_config: moduleConfig,
-    module_prize: action === "module"
+    module_prize: action === "module" && supportsModulePrize
       ? mathPrize
       : null,
     module_start_text: action === "module" ? form.moduleStartText.trim() || null : null,
@@ -1474,6 +1498,8 @@ export function BotTab({ aid, mode = "management" }: { aid: number; mode?: "mana
   const [clearTransferBotToken, setClearTransferBotToken] = useState(false);
   const [transferNoticeTemplate, setTransferNoticeTemplate] = useState(DEFAULT_TRANSFER_NOTICE_TEMPLATE);
   const [interactionQueryCommands, setInteractionQueryCommands] = useState(DEFAULT_INTERACTION_QUERY_COMMANDS);
+  const [interactionQueryResponseTemplate, setInteractionQueryResponseTemplate] = useState(DEFAULT_INTERACTION_QUERY_RESPONSE_TEMPLATE);
+  const [interactionQueryEmptyMessage, setInteractionQueryEmptyMessage] = useState(DEFAULT_INTERACTION_QUERY_EMPTY_MESSAGE);
   const [interactionRules, setInteractionRules] = useState<InteractionRuleForm[]>([
     defaultRuleForm(0),
   ]);
@@ -1551,6 +1577,12 @@ export function BotTab({ aid, mode = "management" }: { aid: number; mode?: "mana
         interactionQ.data.query_commands?.length
           ? interactionQ.data.query_commands.join("\n")
           : DEFAULT_INTERACTION_QUERY_COMMANDS,
+      );
+      setInteractionQueryResponseTemplate(
+        interactionQ.data.query_response_template || DEFAULT_INTERACTION_QUERY_RESPONSE_TEMPLATE,
+      );
+      setInteractionQueryEmptyMessage(
+        interactionQ.data.query_empty_message || DEFAULT_INTERACTION_QUERY_EMPTY_MESSAGE,
       );
       const sourceRules = interactionQ.data.rules?.length
         ? interactionQ.data.rules
@@ -1660,6 +1692,8 @@ export function BotTab({ aid, mode = "management" }: { aid: number; mode?: "mana
       close_commands: firstRule.close_commands ?? [],
       status_commands: firstRule.status_commands ?? [],
       query_commands: parseTextLines(interactionQueryCommands),
+      query_response_template: interactionQueryResponseTemplate.trim() || DEFAULT_INTERACTION_QUERY_RESPONSE_TEMPLATE,
+      query_empty_message: interactionQueryEmptyMessage.trim() || DEFAULT_INTERACTION_QUERY_EMPTY_MESSAGE,
       disabled_message: firstRule.disabled_message ?? null,
       valid_seconds: firstRule.valid_seconds ?? 600,
       concurrency: firstRule.concurrency ?? "chat",
@@ -2324,7 +2358,7 @@ export function BotTab({ aid, mode = "management" }: { aid: number; mode?: "mana
               </div>
             </div>
 
-            <div className="grid gap-3 rounded-md border bg-muted/20 p-3 lg:grid-cols-[minmax(220px,360px)_minmax(0,1fr)] lg:items-start">
+            <div className="grid gap-3 rounded-md border bg-muted/20 p-3 xl:grid-cols-[minmax(180px,260px)_minmax(280px,1fr)_minmax(300px,420px)] xl:items-start">
               <div className="space-y-1.5">
                 <Label>玩法查询指令</Label>
                 <Textarea
@@ -2334,10 +2368,50 @@ export function BotTab({ aid, mode = "management" }: { aid: number; mode?: "mana
                   value={interactionQueryCommands}
                   onChange={(e) => setInteractionQueryCommands(e.target.value)}
                 />
+                <div className="text-xs leading-5 text-muted-foreground">
+                  一行一个指令；留空则不开放群内玩法查询。
+                </div>
               </div>
-              <div className="rounded-md border bg-background px-3 py-2 text-xs leading-5 text-muted-foreground">
-                群友发送这些指令时，交互 Bot 会回复当前群已开启的玩法、关键词/转账条件、奖金、每用户 CD 和日上限。
-                一行一个指令；留空则不开放群内玩法查询。
+              <div className="space-y-1.5">
+                <Label>玩法查询消息模板</Label>
+                <Textarea
+                  rows={5}
+                  className="min-h-[116px] resize-y py-2 text-xs leading-5"
+                  placeholder={DEFAULT_INTERACTION_QUERY_RESPONSE_TEMPLATE}
+                  value={interactionQueryResponseTemplate}
+                  onChange={(e) => setInteractionQueryResponseTemplate(e.target.value)}
+                />
+                <div className="grid gap-1 text-xs text-muted-foreground sm:grid-cols-2">
+                  <span><code>{"{items}"}</code>：玩法列表</span>
+                  <span><code>{"{count}"}</code>：开启数量</span>
+                  <span><code>{"{closed_count}"}</code>：临时关闭数量</span>
+                  <span><code>{"{chat_id}"}</code>：当前群 ID</span>
+                </div>
+                <div className="space-y-1.5">
+                  <Label>无可用玩法提示</Label>
+                  <Input
+                    value={interactionQueryEmptyMessage}
+                    placeholder={DEFAULT_INTERACTION_QUERY_EMPTY_MESSAGE}
+                    onChange={(e) => setInteractionQueryEmptyMessage(e.target.value)}
+                  />
+                </div>
+              </div>
+              <div className="rounded-md border bg-background p-3 text-xs">
+                <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                  <div className="font-medium">查询预览</div>
+                  <span className="text-[11px] text-muted-foreground">示例变量渲染</span>
+                </div>
+                <TelegramHtmlPreview
+                  value={renderInteractionQueryTemplatePreview(interactionQueryResponseTemplate)}
+                  mode="html"
+                  title="交互 Bot"
+                  caption="玩法查询"
+                  hints={[
+                    { label: "count", value: "2" },
+                    { label: "closed", value: "0" },
+                    { label: "chat", value: "-1001234567890" },
+                  ]}
+                />
               </div>
             </div>
 
@@ -2487,6 +2561,24 @@ export function BotTab({ aid, mode = "management" }: { aid: number; mode?: "mana
                 )}
               </div>
             </div>
+            <div className="pointer-events-none sticky bottom-3 z-30 mt-3 flex justify-end pb-[env(safe-area-inset-bottom)]">
+              <Button
+                type="button"
+                size="sm"
+                className="pointer-events-auto h-10 rounded-full px-4 shadow-lg shadow-black/15"
+                onClick={() => saveTransferMut.mutate()}
+                disabled={isInteractionConfigSaveDisabled}
+                title="保存规则"
+                aria-label="保存规则"
+              >
+                {saveTransferMut.isPending ? (
+                  <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+                ) : (
+                  <Save className="mr-1 h-4 w-4" />
+                )}
+                保存规则
+              </Button>
+            </div>
           </section>
 
           <section className="space-y-3 rounded-lg border p-3 sm:p-4">
@@ -2557,22 +2649,6 @@ export function BotTab({ aid, mode = "management" }: { aid: number; mode?: "mana
               </Button>
             </div>
           </section>
-          <Button
-            type="button"
-            size="sm"
-            className="fixed bottom-4 right-4 z-40 h-10 rounded-full px-4 shadow-lg shadow-black/15 sm:bottom-6 sm:right-6"
-            onClick={() => saveTransferMut.mutate()}
-            disabled={isInteractionConfigSaveDisabled}
-            title="保存规则"
-            aria-label="保存规则"
-          >
-            {saveTransferMut.isPending ? (
-              <Loader2 className="mr-1 h-4 w-4 animate-spin" />
-            ) : (
-              <Save className="mr-1 h-4 w-4" />
-            )}
-            保存规则
-          </Button>
         </CardContent>
       </Card>
     </div>

@@ -18,6 +18,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..account_bot_defaults import (
     DEFAULT_INTERACTION_DISABLED_MESSAGE,
     DEFAULT_INTERACTION_QUERY_COMMANDS,
+    DEFAULT_INTERACTION_QUERY_EMPTY_MESSAGE,
+    DEFAULT_INTERACTION_QUERY_RESPONSE_TEMPLATE,
     DEFAULT_INTERACTION_RESPONSE_TEMPLATE,
     DEFAULT_TRANSFER_NOTICE_TEMPLATE,
     LEGACY_TRANSFER_NOTICE_TEMPLATE,
@@ -192,6 +194,8 @@ def default_transfer_notice_config() -> dict[str, Any]:
         "close_commands": [],
         "status_commands": [],
         "query_commands": list(DEFAULT_INTERACTION_QUERY_COMMANDS),
+        "query_response_template": DEFAULT_INTERACTION_QUERY_RESPONSE_TEMPLATE,
+        "query_empty_message": DEFAULT_INTERACTION_QUERY_EMPTY_MESSAGE,
         "disabled_message": DEFAULT_INTERACTION_DISABLED_MESSAGE,
         "valid_seconds": 600,
         "concurrency": "chat",
@@ -270,6 +274,14 @@ def normalize_transfer_notice_config(raw: Any) -> dict[str, Any]:
     for key in ("module_key", "module_action", "module_start_text", "disabled_message"):
         value = str(base.get(key) or "").strip()
         base[key] = value or None
+    if base["action"] == "module" and base.get("module_key") and base.get("module_action") is None:
+        base["module_action"] = _declared_module_single_entry_key(base.get("module_key"))
+    if (
+        base["action"] == "module"
+        and base.get("module_prize") is not None
+        and declared_module_entry_has_field(base.get("module_key"), base.get("module_action"), "prize") is False
+    ):
+        base["module_prize"] = None
     base["has_interaction_bot_token"] = bool(base.get("interaction_bot_token_enc"))
     username = str(base.get("interaction_bot_username") or "").strip().lstrip("@")
     base["interaction_bot_username"] = username or None
@@ -305,6 +317,12 @@ def normalize_transfer_notice_config(raw: Any) -> dict[str, Any]:
         if isinstance(raw_query_commands, list)
         else list(DEFAULT_INTERACTION_QUERY_COMMANDS)
     )
+    query_response_template = str(base.get("query_response_template") or "").strip()
+    base["query_response_template"] = query_response_template or DEFAULT_INTERACTION_QUERY_RESPONSE_TEMPLATE
+    base["query_response_template"] = base["query_response_template"][:2000]
+    query_empty_message = str(base.get("query_empty_message") or "").strip()
+    base["query_empty_message"] = query_empty_message or DEFAULT_INTERACTION_QUERY_EMPTY_MESSAGE
+    base["query_empty_message"] = base["query_empty_message"][:500]
     receiver = str(base.get("receiver_text") or "").strip()
     base["receiver_text"] = receiver or None
     template = str(base.get("response_template") or "").strip()
@@ -477,6 +495,25 @@ def _entry_events_from_entries(entries: Any, entry_key: str | None) -> list[str]
     return []
 
 
+def _entry_has_field_from_entries(entries: Any, entry_key: str | None, field_name: str) -> bool | None:
+    if not entry_key or not isinstance(entries, list):
+        return None
+    for raw_entry in entries:
+        entry = normalize_interaction_entry_manifest(raw_entry)
+        if entry is None:
+            continue
+        if str(entry.get("key") or "").strip() != entry_key:
+            continue
+        schema = entry.get("input_schema")
+        if not isinstance(schema, dict):
+            return None
+        properties = schema.get("properties")
+        if not isinstance(properties, dict):
+            return None
+        return field_name in properties
+    return None
+
+
 def _entry_key_from_entries(entries: Any) -> str | None:
     if not isinstance(entries, list):
         return None
@@ -491,6 +528,19 @@ def _entry_key_from_entries(entries: Any) -> str | None:
     return keys[0] if len(keys) == 1 else None
 
 
+def _plugin_json_interaction_entries(module_key: str | None) -> Any:
+    if not module_key:
+        return None
+    plugin_json = settings.plugins_installed_path / module_key / "plugin.json"
+    if not plugin_json.exists():
+        return None
+    meta = json.loads(plugin_json.read_text(encoding="utf-8"))
+    raw_entries = meta.get("interaction_entries")
+    if raw_entries is None and isinstance(meta.get("config_schema"), dict):
+        raw_entries = meta["config_schema"].get("x-interaction-entries")
+    return raw_entries
+
+
 def _declared_module_single_entry_key(module_key: str | None) -> str | None:
     if not module_key:
         return None
@@ -502,15 +552,9 @@ def _declared_module_single_entry_key(module_key: str | None) -> str | None:
     except Exception:  # noqa: BLE001
         log.debug("读取 builtin 模块交互入口失败: %s", module_key, exc_info=True)
     try:
-        plugin_json = settings.plugins_installed_path / module_key / "plugin.json"
-        if plugin_json.exists():
-            meta = json.loads(plugin_json.read_text(encoding="utf-8"))
-            raw_entries = meta.get("interaction_entries")
-            if raw_entries is None and isinstance(meta.get("config_schema"), dict):
-                raw_entries = meta["config_schema"].get("x-interaction-entries")
-            key = _entry_key_from_entries(raw_entries)
-            if key:
-                return key
+        key = _entry_key_from_entries(_plugin_json_interaction_entries(module_key))
+        if key:
+            return key
     except Exception:  # noqa: BLE001
         log.debug("读取 installed 模块交互入口失败: %s", module_key, exc_info=True)
     return None
@@ -527,15 +571,9 @@ def _declared_module_entry_session_scope(module_key: str | None, module_action: 
     except Exception:  # noqa: BLE001
         log.debug("读取 builtin 模块交互入口作用域失败: %s.%s", module_key, module_action, exc_info=True)
     try:
-        plugin_json = settings.plugins_installed_path / module_key / "plugin.json"
-        if plugin_json.exists():
-            meta = json.loads(plugin_json.read_text(encoding="utf-8"))
-            raw_entries = meta.get("interaction_entries")
-            if raw_entries is None and isinstance(meta.get("config_schema"), dict):
-                raw_entries = meta["config_schema"].get("x-interaction-entries")
-            scope = _entry_session_scope_from_entries(raw_entries, module_action)
-            if scope:
-                return scope
+        scope = _entry_session_scope_from_entries(_plugin_json_interaction_entries(module_key), module_action)
+        if scope:
+            return scope
     except Exception:  # noqa: BLE001
         log.debug("读取 installed 模块交互入口作用域失败: %s.%s", module_key, module_action, exc_info=True)
     if (module_key, module_action) in FALLBACK_CHAT_SESSION_MODULE_ENTRIES:
@@ -554,18 +592,33 @@ def declared_module_entry_events(module_key: str | None, module_action: str | No
     except Exception:  # noqa: BLE001
         log.debug("读取 builtin 模块交互入口事件失败: %s.%s", module_key, module_action, exc_info=True)
     try:
-        plugin_json = settings.plugins_installed_path / module_key / "plugin.json"
-        if plugin_json.exists():
-            meta = json.loads(plugin_json.read_text(encoding="utf-8"))
-            raw_entries = meta.get("interaction_entries")
-            if raw_entries is None and isinstance(meta.get("config_schema"), dict):
-                raw_entries = meta["config_schema"].get("x-interaction-entries")
-            events = _entry_events_from_entries(raw_entries, module_action)
-            if events:
-                return events
+        events = _entry_events_from_entries(_plugin_json_interaction_entries(module_key), module_action)
+        if events:
+            return events
     except Exception:  # noqa: BLE001
         log.debug("读取 installed 模块交互入口事件失败: %s.%s", module_key, module_action, exc_info=True)
     return []
+
+
+def declared_module_entry_has_field(module_key: str | None, module_action: str | None, field_name: str) -> bool | None:
+    """返回入口 schema 是否声明字段；未知入口返回 None 以保留旧配置兼容。"""
+
+    if not module_key or not module_action or not field_name:
+        return None
+    try:
+        manifest = BUILTIN_FEATURES.manifest_for(module_key)
+        declared = _entry_has_field_from_entries(getattr(manifest, "interaction_entries", None), module_action, field_name)
+        if declared is not None:
+            return declared
+    except Exception:  # noqa: BLE001
+        log.debug("读取 builtin 模块交互入口字段失败: %s.%s", module_key, module_action, exc_info=True)
+    try:
+        declared = _entry_has_field_from_entries(_plugin_json_interaction_entries(module_key), module_action, field_name)
+        if declared is not None:
+            return declared
+    except Exception:  # noqa: BLE001
+        log.debug("读取 installed 模块交互入口字段失败: %s.%s", module_key, module_action, exc_info=True)
+    return None
 
 
 def normalize_interaction_rules(raw: Any) -> list[dict[str, Any]]:
@@ -659,6 +712,12 @@ def normalize_interaction_rules(raw: Any) -> list[dict[str, Any]]:
         try:
             module_prize = int(item["module_prize"]) if item.get("module_prize") not in (None, "") else None
         except (TypeError, ValueError):
+            module_prize = None
+        if (
+            action == "module"
+            and module_prize is not None
+            and declared_module_entry_has_field(module_key, module_action, "prize") is False
+        ):
             module_prize = None
         try:
             daily_limit_per_user = int(item["daily_limit_per_user"]) if item.get("daily_limit_per_user") not in (None, "") else None

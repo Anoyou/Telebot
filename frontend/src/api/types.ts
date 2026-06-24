@@ -241,6 +241,8 @@ export interface AccountBotInteractionConfig {
   close_commands?: string[];
   status_commands?: string[];
   query_commands?: string[];
+  query_response_template?: string;
+  query_empty_message?: string;
   disabled_message?: string | null;
   valid_seconds?: number | null;
   concurrency?: "chat" | "user" | "none";
@@ -292,6 +294,8 @@ export type AccountBotInteractionConfigUpdate = Pick<
   | "close_commands"
   | "status_commands"
   | "query_commands"
+  | "query_response_template"
+  | "query_empty_message"
   | "disabled_message"
   | "valid_seconds"
   | "concurrency"
