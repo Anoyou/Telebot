@@ -79,6 +79,12 @@ _ACCOUNT_BOT_AUTO_AWARD_DEDUPE_TTL_SECONDS = 86400
 _ACCOUNT_BOT_AUTO_AWARD_MODULE_KEYS = {"game24", "math10", "dice_grid_hunt", "guess_number", "poetry_blank"}
 
 
+def _should_defer_interaction_entry_error_log(plugin_key: str, error: str | None) -> bool:
+    """math10 可在主进程本地 fallback，worker 不应先写误导性 WARN。"""
+
+    return plugin_key == "math10" and "模块未加载或未启用" in str(error or "")
+
+
 def _httpx_proxy_url_from_proxy(proxy: Proxy | None) -> str | None:
     """把账号 Telegram 代理转换成 httpx 可用的 HTTP/SOCKS 出口。
 
@@ -753,7 +759,9 @@ async def _listen_cmd(
                             result_ok = True
                         except Exception as e:  # noqa: BLE001
                             result_error = f"{type(e).__name__}: {e}"
-                            await _log(redis, account_id, "warn", f"run_interaction_entry 失败: {result_error}")
+                            plugin_key = str(cmd.payload.get("plugin_key") or "")
+                            if not _should_defer_interaction_entry_error_log(plugin_key, result_error):
+                                await _log(redis, account_id, "warn", f"run_interaction_entry 失败: {result_error}")
                         try:
                             await redis.publish(
                                 reply_to,

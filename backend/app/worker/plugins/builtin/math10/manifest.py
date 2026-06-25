@@ -20,7 +20,7 @@ MANIFEST = Manifest(
             "interaction_profile": "session_game",
             "launch_mode": "bridge",
             "session_scope": "chat",
-            "events": ["payment_confirmed", "keyword", "message", "session_close"],
+            "events": ["payment_confirmed", "keyword", "message", "callback_query", "session_close"],
             "preserve_command_trigger": True,
             "payload_contract": {
                 "required_envelope": ["source", "actor", "trigger", "session"],

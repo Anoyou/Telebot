@@ -24,7 +24,7 @@ MANIFEST = Manifest(
             "description": "转账命中或模块关键词触发后，由交互 Bot 开启一局 24 点。",
             "interaction_profile": "session_game",
             "launch_mode": "hybrid",
-            "events": ["payment_confirmed", "keyword", "message", "session_close"],
+            "events": ["payment_confirmed", "keyword", "message", "callback_query", "session_close"],
             "session_scope": "chat",
             "preserve_command_trigger": True,
             "command_fallback": {

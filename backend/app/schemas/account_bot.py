@@ -21,7 +21,7 @@ AccountBotRole = Literal["viewer", "operator", "admin"]
 InteractionTriggerMode = Literal["payment", "keyword", "both"]
 InteractionAmountMatchMode = Literal["eq", "gte"]
 InteractionConcurrency = Literal["chat", "user", "none"]
-InteractionEventType = Literal["payment_confirmed", "keyword", "message", "session_close"]
+InteractionEventType = Literal["payment_confirmed", "keyword", "message", "callback_query", "session_close"]
 InteractionSendVia = Literal["interaction_bot", "userbot_reply", "bbot_notice"]
 
 
@@ -33,6 +33,8 @@ class AccountBotInteractionEnvelopeSource(BaseModel):
     update_id: int | None = None
     message_id: int | None = None
     text: str = ""
+    callback_query_id: str | None = None
+    callback_data: str | None = None
     entity_languages: list[str] = Field(default_factory=list)
 
 
@@ -83,6 +85,7 @@ class AccountBotInteractionAction(BaseModel):
     text: str | None = Field(default=None, max_length=4000)
     send_via: InteractionSendVia | None = None
     reply_to_message_id: int | None = None
+    reply_markup: dict[str, Any] | None = None
     settlement: AccountBotInteractionSettlement | None = None
     data: dict[str, Any] = Field(default_factory=dict)
 

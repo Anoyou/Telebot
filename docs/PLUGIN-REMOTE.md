@@ -62,7 +62,7 @@ guess_number/
       "description": "由交互 Bot 在群内开启一局游戏。",
       "launch_mode": "hybrid",
       "session_scope": "chat",
-      "events": ["keyword", "payment_confirmed", "message", "session_close"],
+      "events": ["keyword", "payment_confirmed", "message", "callback_query", "session_close"],
       "preserve_command_trigger": true,
       "command_fallback": {
         "enabled": true,
@@ -150,7 +150,7 @@ guess_number/
 | `description` | 推荐 | 告诉用户这个入口做什么 |
 | `launch_mode` | 是 | `bridge` / `direct` / `hybrid`，决定交互 Bot 如何启动插件 |
 | `session_scope` | 是 | `chat` / `user` / `none`，决定平台如何保存会话和路由后续消息 |
-| `events` | 是 | 支持的事件白名单，例如 `keyword`、`payment_confirmed`、`message`、`session_close` |
+| `events` | 是 | 支持的事件白名单，例如 `keyword`、`payment_confirmed`、`message`、`callback_query`、`session_close` |
 | `command_fallback` | 按需 | 交互入口不可用时是否提示或受控回退到原 UserBot 命令 |
 | `preserve_command_trigger` | 是 | 必须为 `true`，表示原有命令触发不受交互入口影响 |
 | `session_policy` | 推荐 | TTL、重复触发、关闭条件、并发策略 |
@@ -244,7 +244,7 @@ MANIFEST = Manifest(
             "description": "由交互 Bot 在群内开启一局游戏。",
             "launch_mode": "hybrid",
             "session_scope": "chat",
-            "events": ["keyword", "payment_confirmed", "message", "session_close"],
+            "events": ["keyword", "payment_confirmed", "message", "callback_query", "session_close"],
             "preserve_command_trigger": True,
             "command_fallback": {
                 "enabled": True,

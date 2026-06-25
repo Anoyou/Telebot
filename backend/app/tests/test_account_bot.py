@@ -1045,7 +1045,7 @@ def test_interaction_entry_manifest_normalizes_command_fallback() -> None:
             "key": "start_paid_game",
             "launch_mode": "hybrid",
             "session_scope": "chat",
-            "events": ["payment_confirmed", "bad", "message"],
+            "events": ["payment_confirmed", "bad", "message", "callback_query"],
             "command_fallback": {"enabled": True, "command": "24d", "mode": "hint_only"},
             "result_contract": {"send_via": ["interaction_bot", "bad", "userbot_reply", "interaction_bot"]},
         }
@@ -1053,10 +1053,58 @@ def test_interaction_entry_manifest_normalizes_command_fallback() -> None:
 
     assert entry is not None
     assert entry["launch_mode"] == "hybrid"
-    assert entry["events"] == ["payment_confirmed", "message"]
+    assert entry["events"] == ["payment_confirmed", "message", "callback_query"]
     assert entry["preserve_command_trigger"] is True
     assert entry["command_fallback"] == {"enabled": True, "command": "24d", "mode": "hint_only"}
     assert entry["result_contract"]["send_via"] == ["interaction_bot", "userbot_reply"]
+
+
+@pytest.mark.asyncio
+async def test_interaction_polling_requests_callback_query_updates(monkeypatch) -> None:
+    class _DB:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+    captured_payloads: list[dict[str, object]] = []
+
+    async def _load_config(_aid: int):
+        return "bbot-token", {
+            "enabled": True,
+            "interaction_last_update_id": None,
+        }
+
+    async def _call_bot_api(_token: str, _method: str, payload: dict[str, object]):
+        captured_payloads.append(payload)
+        raise asyncio.CancelledError()
+
+    monkeypatch.setattr(account_bot_runtime, "_load_interaction_runtime_config", _load_config)
+    monkeypatch.setattr(account_bot_runtime, "AsyncSessionLocal", lambda: _DB())
+    monkeypatch.setattr(account_bot_runtime, "_set_interaction_runtime_state", AsyncMock())
+    monkeypatch.setattr(account_bot_service, "call_bot_api", _call_bot_api)
+
+    with pytest.raises(asyncio.CancelledError):
+        await account_bot_runtime._interaction_polling_loop(1)
+
+    assert captured_payloads
+    assert captured_payloads[0]["allowed_updates"] == ["message", "callback_query"]
+
+
+def test_worker_defer_interaction_entry_error_log_only_for_math10_fallback() -> None:
+    assert worker_runtime._should_defer_interaction_entry_error_log(
+        "math10",
+        "RuntimeError: 模块未加载或未启用：math10",
+    )
+    assert not worker_runtime._should_defer_interaction_entry_error_log(
+        "game24",
+        "RuntimeError: 模块未加载或未启用：game24",
+    )
+    assert not worker_runtime._should_defer_interaction_entry_error_log(
+        "math10",
+        "RuntimeError: 其他错误",
+    )
 
 
 def test_rule_entry_allows_event_when_declared_events_missing_for_compatibility(monkeypatch) -> None:
@@ -3516,6 +3564,164 @@ async def test_interaction_plain_message_routes_to_worker_entry_as_message(monke
 
 
 @pytest.mark.asyncio
+async def test_interaction_callback_routes_to_worker_entry_and_answers_callback(monkeypatch) -> None:
+    class _DB:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+        async def get(self, *_args):  # noqa: ANN002
+            return None
+
+    run_entry = AsyncMock(
+        return_value=(
+            True,
+            None,
+            [
+                {
+                    "type": "send_message",
+                    "text": "已记录按钮选择",
+                    "reply_markup": {"inline_keyboard": [[{"text": "继续", "callback_data": "next"}]]},
+                }
+            ],
+        )
+    )
+    send = AsyncMock()
+    answer = AsyncMock()
+    monkeypatch.setattr(account_bot_runtime, "AsyncSessionLocal", lambda: _DB())
+    monkeypatch.setattr(account_bot_runtime, "get_redis", lambda: _MemoryRedis())
+    monkeypatch.setattr(account_bot_runtime, "_run_worker_interaction_entry", run_entry)
+    monkeypatch.setattr(account_bot_runtime, "_load_interaction_session", AsyncMock(return_value={"rule_id": "button-game"}))
+    monkeypatch.setattr(account_bot_service, "send_message", send)
+    monkeypatch.setattr(account_bot_service, "answer_callback", answer)
+    monkeypatch.setattr(
+        account_bot_service,
+        "declared_module_entry_events",
+        lambda module_key, entry_key: ["message", "callback_query"]
+        if module_key == "button_game" and entry_key == "play"
+        else [],
+    )
+    monkeypatch.setattr(
+        account_bot_service,
+        "get_transfer_notice_config",
+        AsyncMock(
+            return_value={
+                "enabled": True,
+                "rules": [
+                    {
+                        "id": "button-game",
+                        "enabled": True,
+                        "chat_ids": [-100777],
+                        "action": "module",
+                        "module_key": "button_game",
+                        "module_action": "play",
+                        "module_prize": 456,
+                    },
+                ],
+            }
+        ),
+    )
+
+    await account_bot_runtime._handle_interaction_update(
+        1,
+        "bbot-token",
+        {
+            "update_id": 1368,
+            "callback_query": {
+                "id": "callback-1",
+                "data": "pick:3",
+                "from": {"id": 111, "first_name": "AAA", "username": "aaa"},
+                "message": {
+                    "message_id": 13680,
+                    "text": "请选择一个选项",
+                    "chat": {"id": -100777, "type": "supergroup"},
+                },
+            },
+        },
+    )
+
+    assert run_entry.await_count == 1
+    assert run_entry.await_args.kwargs["plugin_key"] == "button_game"
+    payload = run_entry.await_args.kwargs["payload"]
+    assert payload["event_type"] == "callback_query"
+    assert payload["event"]["type"] == "callback_query"
+    assert payload["event"]["text"] == "请选择一个选项"
+    assert payload["event"]["callback_query_id"] == "callback-1"
+    assert payload["event"]["callback_data"] == "pick:3"
+    assert payload["message_text"] == "请选择一个选项"
+    assert payload["source"]["callback_data"] == "pick:3"
+    assert payload["callback_query_id"] == "callback-1"
+    assert payload["callback_data"] == "pick:3"
+    assert payload["sender_user_id"] == 111
+    assert send.await_args.args[:3] == ("bbot-token", -100777, "已记录按钮选择")
+    assert send.await_args.kwargs["reply_markup"] == {
+        "inline_keyboard": [[{"text": "继续", "callback_data": "next"}]]
+    }
+    answer.assert_awaited_once_with("bbot-token", "callback-1")
+
+
+@pytest.mark.asyncio
+async def test_interaction_callback_without_actions_is_still_acknowledged(monkeypatch) -> None:
+    class _DB:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+        async def get(self, *_args):  # noqa: ANN002
+            return None
+
+    run_entry = AsyncMock(return_value=(True, None, []))
+    answer = AsyncMock()
+    monkeypatch.setattr(account_bot_runtime, "AsyncSessionLocal", lambda: _DB())
+    monkeypatch.setattr(account_bot_runtime, "get_redis", lambda: _MemoryRedis())
+    monkeypatch.setattr(account_bot_runtime, "_run_worker_interaction_entry", run_entry)
+    monkeypatch.setattr(account_bot_runtime, "_load_interaction_session", AsyncMock(return_value={"rule_id": "button-game"}))
+    monkeypatch.setattr(account_bot_service, "send_message", AsyncMock())
+    monkeypatch.setattr(account_bot_service, "answer_callback", answer)
+    monkeypatch.setattr(account_bot_service, "declared_module_entry_events", lambda *_args: ["callback_query"])
+    monkeypatch.setattr(
+        account_bot_service,
+        "get_transfer_notice_config",
+        AsyncMock(
+            return_value={
+                "enabled": True,
+                "rules": [
+                    {
+                        "id": "button-game",
+                        "enabled": True,
+                        "chat_ids": [-100777],
+                        "action": "module",
+                        "module_key": "button_game",
+                        "module_action": "play",
+                    },
+                ],
+            }
+        ),
+    )
+
+    await account_bot_runtime._handle_interaction_update(
+        1,
+        "bbot-token",
+        {
+            "update_id": 1369,
+            "callback_query": {
+                "id": "callback-2",
+                "data": "noop",
+                "from": {"id": 111, "first_name": "AAA"},
+                "message": {"message_id": 13690, "chat": {"id": -100777, "type": "supergroup"}},
+            },
+        },
+    )
+
+    assert run_entry.await_count == 1
+    answer.assert_awaited_once_with("bbot-token", "callback-2")
+
+
+@pytest.mark.asyncio
 async def test_interaction_plain_message_skips_entries_without_message_event(monkeypatch) -> None:
     class _DB:
         async def __aenter__(self):
@@ -4391,6 +4597,55 @@ async def test_interaction_action_can_send_photo(monkeypatch) -> None:
         "reply_to_message_id": 9,
     }
     delete.assert_awaited_once_with("bbot-token", -100123, 77)
+
+
+@pytest.mark.asyncio
+async def test_interaction_action_send_message_passes_reply_markup(monkeypatch) -> None:
+    send = AsyncMock()
+    monkeypatch.setattr(account_bot_service, "send_message", send)
+    incoming = account_bot_runtime.Incoming(
+        account_id=1,
+        token="bbot-token",
+        update_id=1,
+        user_id=456,
+        chat_id=-100123,
+        message_id=10,
+        text="",
+    )
+    reply_markup = {"inline_keyboard": [[{"text": "选 A", "callback_data": "pick:a"}]]}
+
+    await account_bot_runtime._apply_interaction_actions(
+        incoming,
+        [{"type": "send_message", "text": "请选择", "reply_markup": reply_markup}],
+    )
+
+    assert send.await_args.args[:3] == ("bbot-token", -100123, "请选择")
+    assert send.await_args.kwargs["reply_markup"] == reply_markup
+
+
+@pytest.mark.asyncio
+async def test_interaction_action_edit_message_passes_reply_markup(monkeypatch) -> None:
+    edit = AsyncMock()
+    monkeypatch.setattr(account_bot_service, "edit_message", edit)
+    incoming = account_bot_runtime.Incoming(
+        account_id=1,
+        token="bbot-token",
+        update_id=1,
+        user_id=456,
+        chat_id=-100123,
+        message_id=10,
+        text="",
+    )
+    reply_markup = {"inline_keyboard": [[{"text": "选 B", "callback_data": "pick:b"}]]}
+
+    await account_bot_runtime._apply_interaction_actions(
+        incoming,
+        [{"type": "send_message", "text": "请选择", "reply_markup": reply_markup}],
+        replace_message_id=77,
+    )
+
+    assert edit.await_args.args[:4] == ("bbot-token", -100123, 77, "请选择")
+    assert edit.await_args.kwargs["reply_markup"] == reply_markup
 
 
 @pytest.mark.asyncio

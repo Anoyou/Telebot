@@ -14,6 +14,18 @@
 
 ## [Unreleased]
 
+## [0.31.3] — 2026-06-25 · patch · 交互 Bot 按钮与插件运行修复
+
+### Added
+- 交互 Bot runtime 支持插件返回 `send_message.reply_markup` 发送 inline keyboard，并将按钮点击作为 `callback_query` 事件路由回对应活跃会话。
+
+### Changed
+- 插件交互 payload 补充 `callback_query_id`、`callback_data` 和按钮原消息文本；插件开发文档同步补齐按钮事件与 `reply_markup` 规范。
+
+### Fixed
+- 修复交互 Bot 轮询未订阅 `callback_query`、模块消息路由跳过按钮事件，导致 inline keyboard 无法使用的问题。
+- 修复内置算术题 `math10` 通过主进程 fallback 成功时，worker 仍提前写入“模块未加载或未启用” WARN 的误导日志。
+
 ## [0.31.2] — 2026-06-25 · patch · 联动玩法查询列表精简
 
 ### Changed

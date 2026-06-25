@@ -17,8 +17,9 @@
 - `on_message` 里别直接假设 `event.outgoing` 一定存在，先 `getattr`。
 - `on_interaction` 用于交互 Bot，按 `entry_key` 和 `payload["event"]["type"]` 分流。
 - `interaction_entries[].launch_mode` 必填：`bridge` 走交互 Bot，`direct` 走原命令/内部调用，`hybrid` 两边都支持。
-- 常见事件：`payment_confirmed`、`keyword`、`message`、`session_close`。
+- 常见事件：`payment_confirmed`、`keyword`、`message`、`callback_query`、`session_close`。
 - 常见动作：`send_message`、`send_photo`、`send_file`、`end_session`。
+- `send_message.reply_markup` 可用于 inline keyboard；按钮点击会作为 `callback_query` 事件回到同一活跃会话。
 - `interaction_entries[].session_scope` 必填：群局写 `chat`，个人流程写 `user`，一次性动作写 `none`。
 - `interaction_entries[].events` 是事件白名单，别让插件自己猜会收到什么。
 - 交互 payload 优先看 `source`、`actor`、`reply_to`、`trigger`、`session` 信封；旧平铺字段只做兼容。

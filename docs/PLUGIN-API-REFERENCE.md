@@ -306,6 +306,7 @@ version_pattern = r"^\d+\.\d+\.\d+"
 | `payment_confirmed` | 转账通知命中规则 | 常用于付费开局 |
 | `keyword` | 插件启动关键词命中且无付费门槛 | 常用于免费开局 |
 | `message` | 规则已有活跃会话后的普通群消息 | 常用于答题、猜测、继续流程 |
+| `callback_query` | 规则已有活跃会话后的 inline keyboard 按钮点击 | 常用于按钮选择、翻页、确认操作 |
 | `session_close` | 规则被关闭或会话被强制结束 | 插件可清理状态，第一版可按需实现 |
 
 #### interaction_entries 字段
@@ -317,7 +318,7 @@ version_pattern = r"^\d+\.\d+\.\d+"
 | `key` | 是 | 传给插件 `on_interaction(ctx, entry_key, payload)` 的入口名 |
 | `title` / `description` | 推荐 | 前端选择器、实验室和日志里展示给人的说明 |
 | `launch_mode` | 是 | `bridge` / `direct` / `hybrid`，决定交互 Bot 如何启动插件 |
-| `events` | 是 | 入口接受的事件白名单，例如 `keyword`、`payment_confirmed`、`message`、`session_close` |
+| `events` | 是 | 入口接受的事件白名单，例如 `keyword`、`payment_confirmed`、`message`、`callback_query`、`session_close` |
 | `session_scope` | 是 | `chat` / `user` / `none`，决定平台如何保存会话和路由后续消息 |
 | `session_policy` | 推荐 | 会话 TTL、重复触发、关闭策略、并发策略的声明 |
 | `payload_contract` | 推荐 | 插件要求平台提供的输入信封与必填字段 |
@@ -360,7 +361,7 @@ MANIFEST = Manifest(
             "description": "转账命中或插件关键词命中后，由交互 Bot 开启一局游戏。",
             "launch_mode": "hybrid",
             "session_scope": "chat",
-            "events": ["payment_confirmed", "keyword", "message", "session_close"],
+            "events": ["payment_confirmed", "keyword", "message", "callback_query", "session_close"],
             "preserve_command_trigger": True,
             "command_fallback": {
                 "enabled": True,
@@ -488,6 +489,7 @@ class GuessNumberPlugin(Plugin):
 | `send_message` | `text` | 由交互 Bot 在命中的群里发送消息 |
 | `send_message` | `reply_to_message_id` | 可选，指定回复哪条消息 |
 | `send_message` | `send_via` | 可选但必须在入口 `result_contract.send_via` 白名单内 |
+| `send_message` | `reply_markup` | 可选，Bot API inline keyboard；只有 `send_via=interaction_bot` / `bbot_notice` 会透传，`userbot_reply` 不承接按钮 |
 | `send_photo` / `send_file` | `photo_base64` / `file_base64` | 由交互 Bot 发送图片/文件字节，适合题图 |
 | `send_photo` / `send_file` | `filename`、`caption`、`reply_to_message_id` | 可选，文件名、说明文字、回复目标 |
 | `end_session` | 无 | 本次入口处理完成后不保留交互会话，适合彩票、红包等长期轮回插件 |
@@ -756,7 +758,8 @@ class Game24Plugin(Plugin):
 7. 返回 `end_session` / `close_session` / `no_session` 时，平台会清理规则会话；插件自己的 Redis 状态仍由插件负责清理。
 8. `preserve_command_trigger` 必须保持为 `true`。交互入口新增后，原本能用的 UserBot 指令仍要按原指令名、原参数和原权限工作。
 9. `send_via` 必须命中入口声明的白名单；插件不得通过动作结果临时指定未声明发送者。
-10. `settlement` / `result_contract` 只描述可对账结果和平台动作，不得把发奖、转账、催付等钱相关动作塞进交互 Bot 高频入口。
+10. 使用 inline keyboard 时，入口必须声明 `callback_query` 事件；按钮动作只通过 `send_message.reply_markup` 交给交互 Bot 或通知 Bot 发送，`userbot_reply` 不承接按钮。
+11. `settlement` / `result_contract` 只描述可对账结果和平台动作，不得把发奖、转账、催付等钱相关动作塞进交互 Bot 高频入口。
 
 ---
 

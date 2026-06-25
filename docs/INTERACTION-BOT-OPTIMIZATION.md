@@ -298,6 +298,8 @@
 - `result`
 - `end_session`
 
+`send_message` 可携带 Bot API `reply_markup`（inline keyboard）。按钮点击会以 `callback_query` 事件回到对应活跃会话，payload 会同时包含 `callback_query_id`、`callback_data` 和原按钮消息的 `message_id` / `message_text`。
+
 ### 7.1 标准动作与发送通道
 
 动作可带 `send_via`，但必须命中入口声明的白名单。当前推荐白名单只有：
@@ -537,7 +539,8 @@
 6. 返回结果必须带结构化赢家信息，不依赖文本解析。
 7. 涉及奖金的入口必须写 `settlement`，但不能在插件里直接发钱。
 8. `send_via` 只能命中声明白名单。
-9. 业务逻辑可抽共享函数，UserBot 命令与交互入口共同调用。
+9. 使用 inline keyboard 时必须声明 `callback_query` 事件，并通过 `send_message.reply_markup` 返回按钮。
+10. 业务逻辑可抽共享函数，UserBot 命令与交互入口共同调用。
 
 ## 12. 迁移步骤
 

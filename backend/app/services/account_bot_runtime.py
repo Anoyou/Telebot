@@ -161,6 +161,8 @@ class InteractionEvent:
     display_name: str | None
     username: str | None
     text: str
+    callback_query_id: str | None = None
+    callback_data: str | None = None
     reply_to_user_id: int | None = None
     reply_to_message_id: int | None = None
     reply_to_display_name: str | None = None
@@ -597,7 +599,7 @@ async def _interaction_polling_loop(aid: int) -> None:
                     {
                         "offset": offset,
                         "timeout": 25,
-                        "allowed_updates": ["message"],
+                        "allowed_updates": ["message", "callback_query"],
                     },
                 )
                 updates = result.get("result") if isinstance(result, dict) else result
@@ -2169,9 +2171,14 @@ async def _try_handle_interaction_rule_command_or_keyword(db: Any, incoming: Inc
 
 
 async def _try_handle_interaction_module_message(db: Any, incoming: Incoming) -> bool:
-    if incoming.callback_id or incoming.chat_id is None or not incoming.text.strip():
+    is_callback = bool(incoming.callback_id)
+    event_type = "callback_query" if is_callback else "message"
+    if incoming.chat_id is None:
         return False
-    if incoming.text.startswith("/") or incoming.text.startswith(","):
+    text = str(incoming.callback_data if is_callback else incoming.text or "").strip()
+    if not text:
+        return False
+    if not is_callback and (text.startswith("/") or text.startswith(",")):
         return False
     cfg = await account_bot_service.get_transfer_notice_config(db, incoming.account_id)
     if not cfg.get("enabled"):
@@ -2187,31 +2194,34 @@ async def _try_handle_interaction_module_message(db: Any, incoming: Incoming) ->
         entry_key = str(rule.get("module_action") or "").strip()
         if not module_key or not entry_key:
             continue
-        if not _rule_entry_allows_event(rule, "message"):
+        if not _rule_entry_allows_event(rule, event_type):
             continue
         session = await _load_interaction_session(incoming, rule)
         if session is None:
             continue
-        if _message_equals_any(incoming.text, _rule_keyword_list(rule, "open_commands")):
-            continue
-        if _message_equals_any(incoming.text, _rule_keyword_list(rule, "close_commands")):
-            continue
-        if _message_equals_any(incoming.text, _rule_keyword_list(rule, "status_commands")):
-            continue
-        if _message_equals_any(incoming.text, _rule_keyword_list(rule, "module_start_keywords")):
-            continue
+        if not is_callback:
+            if _message_equals_any(text, _rule_keyword_list(rule, "open_commands")):
+                continue
+            if _message_equals_any(text, _rule_keyword_list(rule, "close_commands")):
+                continue
+            if _message_equals_any(text, _rule_keyword_list(rule, "status_commands")):
+                continue
+            if _message_equals_any(text, _rule_keyword_list(rule, "module_start_keywords")):
+                continue
         payload = await _interaction_module_payload_async(
             incoming,
             rule,
             {
                 "message_text": incoming.text,
+                "callback_query_id": incoming.callback_id,
+                "callback_data": incoming.callback_data,
                 "sender_user_id": incoming.user_id,
                 "sender_name": incoming.display_name,
                 "sender_username": incoming.username,
                 "message_id": incoming.message_id,
                 "session": session,
             },
-            event_type="message",
+            event_type=event_type,
         )
         ok, error, actions = await _run_worker_interaction_entry(
             incoming,
@@ -2236,12 +2246,17 @@ async def _try_handle_interaction_module_message(db: Any, incoming: Incoming) ->
             )
             continue
         if not actions:
+            if is_callback:
+                await account_bot_service.answer_callback(incoming.token, incoming.callback_id or "")
+                return True
             continue
         await _apply_interaction_actions(
             incoming,
             actions,
             context=_interaction_trace_context(payload),
         )
+        if is_callback:
+            await account_bot_service.answer_callback(incoming.token, incoming.callback_id or "")
         if _interaction_actions_request_no_session(actions):
             await _clear_loaded_interaction_session(
                 incoming.account_id,
@@ -2436,6 +2451,8 @@ def _interaction_event_payload(
         display_name=incoming.display_name,
         username=incoming.username,
         text=incoming.text,
+        callback_query_id=incoming.callback_id,
+        callback_data=incoming.callback_data,
         reply_to_user_id=incoming.reply_to_user_id,
         reply_to_message_id=incoming.reply_to_message_id,
         reply_to_display_name=incoming.reply_to_display_name,
@@ -2456,6 +2473,8 @@ def _interaction_source_envelope(incoming: Incoming, event_type: str) -> dict[st
         "update_id": incoming.update_id,
         "message_id": incoming.message_id,
         "text": incoming.text,
+        "callback_query_id": incoming.callback_id,
+        "callback_data": incoming.callback_data,
         "entity_languages": list(incoming.entity_languages),
     }
 
@@ -2582,6 +2601,8 @@ def _interaction_module_payload(
             "source_update_id": incoming.update_id,
             "source_message_id": incoming.message_id,
             "message_text": incoming.text,
+            "callback_query_id": incoming.callback_id,
+            "callback_data": incoming.callback_data,
             "sender_user_id": incoming.user_id,
             "sender_name": incoming.display_name,
             "sender_username": incoming.username,
@@ -2864,6 +2885,7 @@ async def _send_interaction_action_message(
     reply_to_message_id: int | None,
     send_via: str,
     edit_message_id: int | None = None,
+    reply_markup: dict[str, Any] | None = None,
 ) -> tuple[bool, dict[str, Any]]:
     if incoming.chat_id is None:
         return False, {}
@@ -2905,6 +2927,7 @@ async def _send_interaction_action_message(
                 incoming.chat_id,
                 edit_message_id,
                 text,
+                reply_markup=reply_markup,
             )
             return True, result
         except Exception as exc:  # noqa: BLE001
@@ -2922,6 +2945,7 @@ async def _send_interaction_action_message(
         incoming.chat_id,
         text,
         reply_to_message_id=reply_to_message_id,
+        reply_markup=reply_markup,
     )
     if send_via == "interaction_bot" and edit_message_id is not None:
         await _delete_interaction_placeholder(incoming, edit_message_id)
@@ -3020,6 +3044,8 @@ async def _apply_interaction_actions(
         raw_reply_to = action.get("reply_to_message_id")
         reply_to_message_id = _int_or_none(raw_reply_to)
         send_via = _interaction_action_send_via(action)
+        raw_reply_markup = action.get("reply_markup")
+        reply_markup = raw_reply_markup if isinstance(raw_reply_markup, dict) else None
         if action_type == "send_message":
             text = str(action.get("text") or "").strip()
             if not text:
@@ -3038,6 +3064,7 @@ async def _apply_interaction_actions(
                 reply_to_message_id=reply_to_message_id,
                 send_via=send_via,
                 edit_message_id=edit_message_id,
+                reply_markup=reply_markup,
             )
             if ok and delete_message_id is not None:
                 await _delete_interaction_placeholder(incoming, delete_message_id)
@@ -3406,7 +3433,7 @@ def _extract_incoming(aid: int, token: str, update: dict[str, Any]) -> Incoming 
             chat_id=_int_or_none(chat.get("id")),
             chat_type=str(chat.get("type") or "") or None,
             message_id=_int_or_none(msg.get("message_id")),
-            text="",
+            text=str(msg.get("text") or msg.get("caption") or "").strip(),
             callback_id=str(cq.get("id") or ""),
             callback_data=str(cq.get("data") or ""),
             display_name=_format_user_name(from_user),
