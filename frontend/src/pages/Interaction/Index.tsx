@@ -2,12 +2,9 @@ import { useEffect, useMemo } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  Activity,
   AlertTriangle,
   ArrowRight,
   Bot,
-  Clock3,
-  ListChecks,
   MessageSquare,
   RefreshCw,
   Route,
@@ -28,7 +25,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Spinner } from "@/components/ui/misc";
 import { Select } from "@/components/ui/select";
-import { SignalPill, ToneRailCard } from "@/components/ui/status";
+import { SignalPill } from "@/components/ui/status";
 import { BotTab } from "@/pages/Accounts/BotTab";
 
 function accountLabel(account: AccountSummary): string {
@@ -45,20 +42,6 @@ function countRuleChats(rules: AccountBotInteractionRule[]): number {
       (rule.chat_ids ?? []).filter((chatId): chatId is number => Number.isFinite(chatId)),
     ),
   ).size;
-}
-
-function countKeywordRules(rules: AccountBotInteractionRule[]): number {
-  return rules.filter((rule) => {
-    const mode = rule.action === "notice" ? "payment" : (rule.trigger_mode ?? "payment");
-    return mode !== "payment";
-  }).length;
-}
-
-function countSessionRules(rules: AccountBotInteractionRule[]): number {
-  return rules.filter((rule) =>
-    rule.action === "module"
-    && (rule.module_session_scope ?? rule.concurrency ?? "chat") !== "none",
-  ).length;
 }
 
 function runtimeLabel(config?: AccountBotInteractionConfig): string {
@@ -114,10 +97,7 @@ export function InteractionIndex() {
   const config = interactionQ.data;
   const rules = config?.rules ?? [];
   const activeRules = rules.filter((rule) => rule.enabled).length;
-  const moduleRules = rules.filter((rule) => rule.action === "module").length;
   const chatCoverage = countRuleChats(rules);
-  const keywordRules = countKeywordRules(rules);
-  const sessionRules = countSessionRules(rules);
   const hasInteractionToken = Boolean(config?.has_interaction_bot_token);
   const lastError = config?.interaction_last_error?.trim();
 
@@ -237,49 +217,20 @@ export function InteractionIndex() {
               <SignalPill
                 tone={activeRules > 0 ? "primary" : "neutral"}
                 label="启用规则"
-                value={`${activeRules}/${rules.length}`}
+                value={`${activeRules}/${rules.length} · ${chatCoverage} 群`}
+              />
+              <SignalPill
+                tone={config?.interaction_last_update_id ? "success" : "neutral"}
+                label="最近触发"
+                value={lastUpdateLabel(config)}
+              />
+              <SignalPill
+                tone={lastError ? "danger" : "success"}
+                label="最近错误"
+                value={lastError ? "有错误" : "无错误"}
               />
             </div>
           </section>
-
-          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-            <ToneRailCard
-              icon={Activity}
-              title="会话状态"
-              value={runtimeLabel(config)}
-              description={
-                sessionRules > 0
-                  ? `${sessionRules} 条插件规则会建立会话，按钮回调由交互 Bot 承接。`
-                  : "当前没有需要保持会话的插件规则。"
-              }
-              tone={runtimeTone(config)}
-              valueClassName="truncate text-lg font-semibold"
-            />
-            <ToneRailCard
-              icon={ListChecks}
-              title="规则覆盖"
-              value={`${rules.length} 条`}
-              description={`${moduleRules} 条插件规则，${keywordRules} 条关键词触发，覆盖 ${chatCoverage} 个群。`}
-              tone={rules.length > 0 ? "primary" : "neutral"}
-              valueClassName="truncate text-lg font-semibold"
-            />
-            <ToneRailCard
-              icon={Clock3}
-              title="最近触发"
-              value={lastUpdateLabel(config)}
-              description="来自交互 Bot polling 的最近 update id，用于判断是否有新事件进入。"
-              tone={config?.interaction_last_update_id ? "success" : "neutral"}
-              valueClassName="truncate text-lg font-semibold"
-            />
-            <ToneRailCard
-              icon={AlertTriangle}
-              title="最近错误"
-              value={lastError ? "有错误" : "无错误"}
-              description={lastError || "交互 Bot 运行面暂未报告错误。"}
-              tone={lastError ? "danger" : "success"}
-              valueClassName="truncate text-lg font-semibold"
-            />
-          </div>
 
           <Card className="overflow-hidden">
             <CardHeader className="border-b bg-muted/30">
@@ -308,7 +259,7 @@ export function InteractionIndex() {
               </div>
             </CardHeader>
             <CardContent className="p-3 sm:p-4">
-              {selectedAid !== null ? <BotTab aid={selectedAid} mode="interaction" /> : null}
+              {selectedAid !== null ? <BotTab aid={selectedAid} mode="interaction" presentation="center" /> : null}
             </CardContent>
           </Card>
         </>

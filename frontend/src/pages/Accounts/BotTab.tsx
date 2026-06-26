@@ -1537,7 +1537,18 @@ function InteractionRuleEditor({
   );
 }
 
-export function BotTab({ aid, mode = "management" }: { aid: number; mode?: "management" | "interaction" }) {
+type BotTabPresentation = "full" | "center";
+
+export function BotTab({
+  aid,
+  mode = "management",
+  presentation = "full",
+}: {
+  aid: number;
+  mode?: "management" | "interaction";
+  presentation?: BotTabPresentation;
+}) {
+  const isInteractionCenter = mode === "interaction" && presentation === "center";
   const qc = useQueryClient();
   const [enabled, setEnabled] = useState(false);
   const [token, setToken] = useState("");
@@ -2160,9 +2171,10 @@ export function BotTab({ aid, mode = "management" }: { aid: number; mode?: "mana
   );
 
   const interactionContent = (
-    <div className="space-y-6">
-      {interactionStatus}
-      <Card>
+    <div className={cn(isInteractionCenter ? "space-y-4" : "space-y-6")}>
+      {isInteractionCenter ? null : interactionStatus}
+      <Card className={cn(isInteractionCenter && "border-0 bg-transparent shadow-none")}>
+        {isInteractionCenter ? null : (
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
             <Bot className="h-4 w-4" /> 联动交互 Bot
@@ -2173,7 +2185,9 @@ export function BotTab({ aid, mode = "management" }: { aid: number; mode?: "mana
             交互 Bot 能帮你独立监听指定群里的 “+数字“这类消息，然后帮你互动；转账结果通知 Bot 可用于发模拟转账通知。
           </CardDescription>
         </CardHeader>
-        <CardContent className="space-y-4">
+        )}
+        <CardContent className={cn("space-y-4", isInteractionCenter && "flex flex-col gap-4 space-y-0 p-0")}>
+          {isInteractionCenter ? null : (
           <section className="space-y-3 rounded-lg border bg-muted/20 p-3 sm:p-4">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
               <div>
@@ -2249,6 +2263,7 @@ export function BotTab({ aid, mode = "management" }: { aid: number; mode?: "mana
               </div>
             </div>
           </section>
+          )}
 
           {interactionQ.data?.interaction_last_error ? (
             <div className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
@@ -2256,7 +2271,7 @@ export function BotTab({ aid, mode = "management" }: { aid: number; mode?: "mana
             </div>
           ) : null}
 
-          <section className="space-y-4 rounded-lg border p-3 sm:p-4">
+          <section className={cn("space-y-4 rounded-lg border p-3 sm:p-4", isInteractionCenter && "order-2")}>
             <div className="flex flex-wrap items-start justify-between gap-2">
               <div>
                 <div className="text-sm font-medium">身份配置</div>
@@ -2264,9 +2279,17 @@ export function BotTab({ aid, mode = "management" }: { aid: number; mode?: "mana
                   交互 Bot 负责收更新与发互动消息；转账结果通知 Bot 只在测试模拟通知时需要 Token。
                 </div>
               </div>
-              <Badge variant={hasInteractionToken || interactionBotToken.trim() ? "secondary" : "destructive"}>
-                {hasInteractionToken || interactionBotToken.trim() ? "交互 Bot 已配置" : "交互 Bot 缺少 Token"}
-              </Badge>
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge variant={hasInteractionToken || interactionBotToken.trim() ? "secondary" : "destructive"}>
+                  {hasInteractionToken || interactionBotToken.trim() ? "交互 Bot 已配置" : "交互 Bot 缺少 Token"}
+                </Badge>
+                {isInteractionCenter ? (
+                  <label className="flex items-center gap-2 rounded-md border bg-background px-3 py-1.5 text-sm">
+                    <span>启用联动</span>
+                    <Switch checked={transferEnabled} onCheckedChange={setTransferEnabled} />
+                  </label>
+                ) : null}
+              </div>
             </div>
 
             <div className="grid gap-3 2xl:grid-cols-2">
@@ -2393,7 +2416,7 @@ export function BotTab({ aid, mode = "management" }: { aid: number; mode?: "mana
             </div>
           </section>
 
-          <section className="space-y-3 rounded-lg border p-3 sm:p-4">
+          <section className={cn("space-y-3 rounded-lg border p-3 sm:p-4", isInteractionCenter && "order-1")}>
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
                 <div className="text-sm font-medium">规则列表</div>
@@ -2414,7 +2437,59 @@ export function BotTab({ aid, mode = "management" }: { aid: number; mode?: "mana
               </div>
             </div>
 
-            <div className="grid gap-3 rounded-md border bg-muted/20 p-3 xl:grid-cols-[minmax(180px,260px)_minmax(280px,1fr)_minmax(300px,420px)] xl:items-start">
+            {isInteractionCenter ? (
+              <details className="rounded-md border bg-muted/20">
+                <summary className="cursor-pointer px-3 py-2 text-sm font-medium">
+                  玩法查询设置
+                  <span className="ml-2 text-xs font-normal text-muted-foreground">
+                    群内查询指令、列表模板和空状态提示
+                  </span>
+                </summary>
+                <div className="grid gap-3 border-t p-3 lg:grid-cols-[minmax(180px,260px)_minmax(280px,1fr)]">
+                  <div className="space-y-1.5">
+                    <Label>玩法查询指令</Label>
+                    <Textarea
+                      rows={2}
+                      className="h-16 !min-h-16 resize-y py-2 text-xs leading-5"
+                      placeholder={DEFAULT_INTERACTION_QUERY_COMMANDS}
+                      value={interactionQueryCommands}
+                      onChange={(e) => setInteractionQueryCommands(e.target.value)}
+                    />
+                    <div className="text-xs leading-5 text-muted-foreground">
+                      一行一个指令；留空则不开放群内玩法查询。
+                    </div>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>玩法查询消息模板</Label>
+                    <Textarea
+                      rows={4}
+                      className="min-h-[96px] resize-y py-2 text-xs leading-5"
+                      placeholder={DEFAULT_INTERACTION_QUERY_RESPONSE_TEMPLATE}
+                      value={interactionQueryResponseTemplate}
+                      onChange={(e) => setInteractionQueryResponseTemplate(e.target.value)}
+                    />
+                    <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(220px,0.8fr)]">
+                      <div className="grid gap-1 text-xs text-muted-foreground sm:grid-cols-2">
+                        <span><code>{"{items}"}</code>：玩法列表</span>
+                        <span><code>{"{count}"}</code>：开启数量</span>
+                        <span><code>{"{closed_count}"}</code>：临时关闭数量</span>
+                        <span><code>{"{chat_id}"}</code>：当前群 ID</span>
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label>无可用玩法提示</Label>
+                        <Input
+                          value={interactionQueryEmptyMessage}
+                          placeholder={DEFAULT_INTERACTION_QUERY_EMPTY_MESSAGE}
+                          onChange={(e) => setInteractionQueryEmptyMessage(e.target.value)}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </details>
+            ) : null}
+
+            <div className={cn("grid gap-3 rounded-md border bg-muted/20 p-3 xl:grid-cols-[minmax(180px,260px)_minmax(280px,1fr)_minmax(300px,420px)] xl:items-start", isInteractionCenter && "hidden")}>
               <div className="space-y-1.5">
                 <Label>玩法查询指令</Label>
                 <Textarea
@@ -2471,8 +2546,8 @@ export function BotTab({ aid, mode = "management" }: { aid: number; mode?: "mana
               </div>
             </div>
 
-            <div className="grid gap-3 2xl:grid-cols-[300px_minmax(0,1fr)]">
-              <div className="space-y-2 rounded-md border bg-muted/20 p-2 2xl:max-h-[72vh] 2xl:overflow-y-auto">
+            <div className="grid gap-3 xl:grid-cols-[minmax(360px,440px)_minmax(0,1fr)]">
+              <div className="space-y-1.5 rounded-md border bg-muted/20 p-2 xl:max-h-[76vh] xl:overflow-y-auto">
                 {interactionRules.map((rule, index) => {
                   const resolvedModule = resolveRuleModuleSelection(rule, interactionEntries);
                   const effectiveTriggerMode = rule.action === "notice" ? "payment" : rule.triggerMode;
@@ -2494,66 +2569,60 @@ export function BotTab({ aid, mode = "management" }: { aid: number; mode?: "mana
                     <div
                       key={rule.id}
                       className={cn(
-                        "rounded-md border bg-background p-2.5 transition-colors",
+                        "rounded-md border bg-background transition-colors",
                         isSelected ? "border-primary/50 bg-primary/5 shadow-sm ring-1 ring-primary/10" : "border-border/70 hover:border-primary/25",
                       )}
                     >
-                      <button
-                        type="button"
-                        className="block w-full text-left"
-                        onClick={() => setSelectedInteractionRuleId(rule.id)}
-                      >
-                        <div className="flex items-start gap-2.5">
-                          <div className={cn(
-                            "grid h-8 w-8 shrink-0 place-items-center rounded-md border text-xs font-semibold",
-                            isSelected ? "border-primary/40 bg-primary/10 text-primary" : "border-border bg-muted/40 text-muted-foreground",
-                          )}>
-                            {index + 1}
-                          </div>
-                          <div className="min-w-0 flex-1">
-                            <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-                              <div className="min-w-0 flex-1 truncate text-sm font-semibold">
-                                {rule.name || `规则 ${index + 1}`}
-                              </div>
-                              <Badge
-                                variant={rule.enabled ? "success" : "secondary"}
-                                className="h-6 shrink-0 px-2"
-                              >
-                                {rule.enabled ? "启用" : "暂停"}
-                              </Badge>
+                      <div className="flex items-start gap-2 p-2">
+                        <button
+                          type="button"
+                          className="min-w-0 flex-1 text-left"
+                          onClick={() => setSelectedInteractionRuleId(rule.id)}
+                        >
+                          <div className="flex items-start gap-2.5">
+                            <div className={cn(
+                              "grid h-8 w-8 shrink-0 place-items-center rounded-md border text-xs font-semibold",
+                              isSelected ? "border-primary/40 bg-primary/10 text-primary" : "border-border bg-muted/40 text-muted-foreground",
+                            )}>
+                              {index + 1}
                             </div>
-                            <div className="mt-2 grid grid-cols-2 gap-1.5 text-xs sm:grid-cols-4 2xl:grid-cols-2">
-                              <div className="rounded border bg-muted/30 px-2 py-1">
-                                <div className="truncate text-[11px] text-muted-foreground">动作</div>
-                                <div className="truncate font-medium">{getRuleActionLabel(rule.action)}</div>
+                            <div className="min-w-0 flex-1">
+                              <div className="flex min-w-0 items-center gap-1.5">
+                                <div className="min-w-0 flex-1 truncate text-sm font-semibold">
+                                  {rule.name || `规则 ${index + 1}`}
+                                </div>
+                                <Badge
+                                  variant={rule.enabled ? "success" : "secondary"}
+                                  className="h-5 shrink-0 px-1.5 text-[11px]"
+                                >
+                                  {rule.enabled ? "启用" : "暂停"}
+                                </Badge>
                               </div>
-                              <div className="rounded border bg-muted/30 px-2 py-1">
-                                <div className="truncate text-[11px] text-muted-foreground">触发</div>
-                                <div className="truncate font-medium">{getRuleTriggerModeLabel(effectiveTriggerMode)}</div>
+                              <div className="mt-1 flex min-w-0 flex-wrap gap-1.5">
+                                <Badge variant={actionTone} className="h-5 px-1.5 text-[11px]">
+                                  {getRuleActionLabel(rule.action)}
+                                </Badge>
+                                <Badge
+                                  variant={effectiveTriggerMode === "payment" ? "secondary" : "outline"}
+                                  className="h-5 px-1.5 text-[11px]"
+                                >
+                                  {getRuleTriggerModeLabel(effectiveTriggerMode)}
+                                </Badge>
                               </div>
-                              <div className="rounded border bg-muted/30 px-2 py-1">
-                                <div className="truncate text-[11px] text-muted-foreground">监听群</div>
-                                <div className="truncate font-medium">{chatCount > 0 ? `${chatCount} 个` : "未填写"}</div>
+                              <div className="mt-1 flex min-w-0 flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                                <span className="whitespace-nowrap">群 {chatCount > 0 ? chatCount : "未填"}</span>
+                                <span className="whitespace-nowrap">关键词 {keywordCount}</span>
+                                <span className="min-w-0 truncate">{sessionSummary}</span>
                               </div>
-                              <div className="rounded border bg-muted/30 px-2 py-1">
-                                <div className="truncate text-[11px] text-muted-foreground">会话</div>
-                                <div className="truncate font-medium">{rule.action === "module" ? getModuleSessionScopeLabel(rule.moduleSessionScope) : getRuleConcurrencyLabel(rule.concurrency)}</div>
+                              <div className="mt-1 truncate text-xs text-muted-foreground">
+                                {moduleSummary}
                               </div>
-                            </div>
-                            <div className="mt-2 flex flex-wrap gap-1.5">
-                              <Badge variant={actionTone} className="h-6 min-w-0 max-w-full px-2">
-                                <span className="truncate">{moduleSummary}</span>
-                              </Badge>
-                              <Badge variant={effectiveTriggerMode === "payment" ? "secondary" : "outline"} className="h-6 min-w-0 max-w-full px-2">
-                                <span className="truncate">{sessionSummary}</span>
-                              </Badge>
                             </div>
                           </div>
-                        </div>
-                      </button>
+                        </button>
 
-                      <div className="mt-2 flex items-center justify-between gap-2 border-t pt-2">
-                        <div className="flex min-w-0 items-center gap-2 rounded-md bg-muted/40 px-2 py-1.5">
+                        <div className="flex shrink-0 flex-col items-end gap-1">
+                          <div className="flex h-7 items-center gap-1 rounded-md bg-muted/40 px-1.5">
                           <Switch
                             id={`interaction-rule-enabled-${rule.id}`}
                             checked={rule.enabled}
@@ -2569,13 +2638,13 @@ export function BotTab({ aid, mode = "management" }: { aid: number; mode?: "mana
                           >
                             {rule.enabled ? "已启用" : "已暂停"}
                           </label>
-                        </div>
-                        <div className="flex shrink-0 flex-wrap justify-end gap-1">
+                          </div>
+                          <div className="grid grid-cols-2 gap-1">
                           <Button
                             type="button"
                             variant="ghost"
                             size="icon"
-                            className="h-8 w-8"
+                            className="h-7 w-7"
                             title="上移"
                             aria-label="上移规则"
                             onClick={() => moveInteractionRule(index, -1)}
@@ -2587,7 +2656,7 @@ export function BotTab({ aid, mode = "management" }: { aid: number; mode?: "mana
                             type="button"
                             variant="ghost"
                             size="icon"
-                            className="h-8 w-8"
+                            className="h-7 w-7"
                             title="下移"
                             aria-label="下移规则"
                             onClick={() => moveInteractionRule(index, 1)}
@@ -2599,7 +2668,7 @@ export function BotTab({ aid, mode = "management" }: { aid: number; mode?: "mana
                             type="button"
                             variant="ghost"
                             size="icon"
-                            className="h-8 w-8"
+                            className="h-7 w-7"
                             title="复制"
                             aria-label="复制规则"
                             onClick={() => copyInteractionRule(index)}
@@ -2610,7 +2679,7 @@ export function BotTab({ aid, mode = "management" }: { aid: number; mode?: "mana
                             type="button"
                             variant="ghost"
                             size="icon"
-                            className="h-8 w-8"
+                            className="h-7 w-7"
                             title="删除"
                             aria-label="删除规则"
                             onClick={() => removeInteractionRule(index)}
@@ -2618,6 +2687,7 @@ export function BotTab({ aid, mode = "management" }: { aid: number; mode?: "mana
                           >
                             <Trash2 className="h-4 w-4" />
                           </Button>
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -2661,7 +2731,7 @@ export function BotTab({ aid, mode = "management" }: { aid: number; mode?: "mana
             </div>
           </section>
 
-          <section className="space-y-3 rounded-lg border p-3 sm:p-4">
+          <section className={cn("space-y-3 rounded-lg border p-3 sm:p-4", isInteractionCenter && "order-3")}>
             <div className="flex flex-wrap items-start justify-between gap-2">
               <div>
                 <div className="text-sm font-medium">高级设置</div>
