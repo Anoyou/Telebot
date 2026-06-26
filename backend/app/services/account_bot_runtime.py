@@ -744,6 +744,8 @@ async def _handle_interaction_update(aid: int, token: str, update: dict[str, Any
             return
         if await _try_handle_math_answer(incoming):
             return
+        if incoming.callback_id and incoming.callback_data:
+            await _try_handle_interaction_callback(incoming)
 
 
 async def _handle_transfer_test_update(aid: int, token: str, update: dict[str, Any]) -> None:
@@ -2194,6 +2196,40 @@ async def _try_handle_interaction_rule_command_or_keyword(db: Any, incoming: Inc
     return False
 
 
+async def _try_handle_interaction_callback(incoming: Incoming) -> None:
+    data = str(incoming.callback_data or "").strip()
+    if not data.startswith("dr_"): return
+    # 确认回调，避免按钮一直加载
+    await account_bot_service.answer_callback(incoming.token, incoming.callback_id)
+    # dr_shoot_<player_id> → 提取目标编号
+    parts = data.split("_")
+    if len(parts) < 2: return
+    async with AsyncSessionLocal() as db:
+        cfg = await account_bot_service.get_transfer_notice_config(db, incoming.account_id)
+        if not cfg.get("enabled"): return
+        for rule in _interaction_rules(cfg):
+            if not _rule_chat_matches(rule, incoming.chat_id): continue
+            if str(rule.get("action") or "") != "module": continue
+            if str(rule.get("module_key") or "") != "dead_revolver": continue
+            payload = await _interaction_module_payload_async(
+                incoming,
+                rule,
+                {"message_text": data, "sender_user_id": incoming.user_id,
+                 "sender_name": incoming.display_name, "sender_username": incoming.username,
+                 "message_id": incoming.message_id, "session": None},
+                event_type="message",
+            )
+            payload["message_text"] = data
+            payload["user_id"] = incoming.user_id
+            ok, error, actions = await _run_worker_interaction_entry(
+                incoming, plugin_key="dead_revolver", entry_key=str(rule.get("module_action") or ""), payload=payload,
+            )
+            if ok and actions:
+                trace_context = _interaction_trace_context(payload)
+                await _apply_interaction_actions(incoming, actions, context=trace_context)
+            return
+
+
 async def _try_handle_interaction_module_message(db: Any, incoming: Incoming) -> bool:
     is_callback = bool(incoming.callback_id)
     event_type = "callback_query" if is_callback else "message"
@@ -3083,15 +3119,15 @@ async def _apply_interaction_actions(
             text = str(action.get("text") or "").strip()
             if not text:
                 continue
-            edit_message_id = None
+            edit_message_id = _int_or_none(action.get("edit_message_id"))
             delete_message_id = None
-            if replace_message_id is not None and send_via == "interaction_bot":
+            if edit_message_id is None and replace_message_id is not None and send_via == "interaction_bot":
                 edit_message_id = replace_message_id
                 replace_message_id = None
-            elif replace_message_id is not None:
+            elif edit_message_id is None and replace_message_id is not None:
                 delete_message_id = replace_message_id
                 replace_message_id = None
-            ok, _result = await _send_interaction_action_message(
+            ok, result = await _send_interaction_action_message(
                 incoming,
                 text,
                 reply_to_message_id=reply_to_message_id,
@@ -3101,6 +3137,26 @@ async def _apply_interaction_actions(
             )
             if ok and delete_message_id is not None:
                 await _delete_interaction_placeholder(incoming, delete_message_id)
+            # 支持插件请求置顶消息（新发或编辑后均可）
+            if ok and send_via == "interaction_bot" and action.get("pin"):
+                msg_id = edit_message_id or _interaction_delivery_message_id(result)
+                if msg_id is not None and incoming.chat_id is not None:
+                    token = await _resolve_interaction_action_token(incoming, send_via)
+                    if token:
+                        try:
+                            await account_bot_service.call_bot_api(
+                                token, "pinChatMessage",
+                                {"chat_id": incoming.chat_id, "message_id": msg_id},
+                            )
+                        except Exception:
+                            pass
+            # 插件可声明一个 Redis key，平台自动写入消息 ID 供后续编辑
+            save_key = str(action.get("save_message_id_key") or "").strip()
+            if ok and save_key:
+                msg_id = _interaction_delivery_message_id(result)
+                if msg_id is not None:
+                    redis_client = get_redis()
+                    await redis_client.set(save_key, str(msg_id), ex=7200)
             continue
         if action_type in {"send_photo", "send_file"}:
             raw_photo = str(action.get("photo_base64") or action.get("file_base64") or "").strip()

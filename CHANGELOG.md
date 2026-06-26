@@ -14,6 +14,16 @@
 
 ## [Unreleased]
 
+## [0.31.6] — 2026-06-26 · patch · 交互 Bot 按钮回调与消息编辑增强
+
+### Added
+- 交互 Bot runtime 新增 `_try_handle_interaction_callback` 函数，支持将按钮点击回调路由到对应插件的 `on_interaction` 入口。
+- `_apply_interaction_actions` 新增支持 `edit_message_id` 字段（插件可指定编辑目标消息）、`pin` 字段（发送后自动置顶）和 `save_message_id_key` 字段（发送后自动将 message_id 写入 Redis 供后续编辑）。
+
+### Changed
+- 交互 Bot 轮询配置新增 `callback_query` 事件订阅，确保按钮点击回调能被正确接收。
+- 交互 Bot 更新处理器中添加回调路由逻辑，当收到回调查询时调用 `_try_handle_interaction_callback`。
+
 ## [0.31.5] — 2026-06-26 · patch · 交互玩法付款人归属修复
 
 ### Fixed
