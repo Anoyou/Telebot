@@ -1,162 +1,318 @@
-import { Link } from "react-router-dom";
+import { useEffect, useMemo } from "react";
+import { Link, useSearchParams } from "react-router-dom";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  Activity,
+  AlertTriangle,
   ArrowRight,
   Bot,
-  Braces,
-  Cable,
-  CheckCircle2,
-  ClipboardList,
-  GitBranch,
-  MousePointerClick,
+  Clock3,
+  ListChecks,
+  MessageSquare,
+  RefreshCw,
   Route,
   ShieldCheck,
 } from "lucide-react";
 
+import { getInteractionBotConfig } from "@/api/accountBots";
+import { listAccounts } from "@/api/accounts";
+import type {
+  AccountBotInteractionConfig,
+  AccountBotInteractionRule,
+  AccountSummary,
+} from "@/api/types";
+import { AccountStatusBadge } from "@/components/AccountStatusBadge";
+import { PageHeader, PageShell } from "@/components/layout/PageScaffold";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { PageHeader, PageShell } from "@/components/layout/PageScaffold";
-import { SectionHeader, SignalPill, StatusSummaryPanel, ToneRailCard } from "@/components/ui/status";
+import { Spinner } from "@/components/ui/misc";
+import { Select } from "@/components/ui/select";
+import { SignalPill, ToneRailCard } from "@/components/ui/status";
+import { BotTab } from "@/pages/Accounts/BotTab";
 
-const pipeline = [
-  { title: "消息渠道", desc: "UserBot、交互 Bot、通知 Bot 都进入统一事件信封。", icon: Cable },
-  { title: "插件入口", desc: "插件通过 interaction_entries 声明事件、会话和结果契约。", icon: Braces },
-  { title: "动作执行", desc: "ctx.messages 产出标准动作，平台统一校验、限流和发送。", icon: Route },
-  { title: "审计收口", desc: "越权通道、按钮错投和未知动作写入运行时日志。", icon: ShieldCheck },
-];
+function accountLabel(account: AccountSummary): string {
+  const name = account.display_name?.trim();
+  const handle = account.tg_username ? `@${account.tg_username}` : null;
+  return [name || handle || account.phone, name || handle ? account.phone : null]
+    .filter(Boolean)
+    .join(" · ");
+}
 
-const channels = [
-  {
-    name: "interaction_bot",
-    role: "普通 Bot 承接高频群内互动、按钮回调、题面和结果消息。",
-  },
-  {
-    name: "userbot_reply",
-    role: "账号 worker 代发低频、敏感或需要人形身份的回复，不承接按钮。",
-  },
-  {
-    name: "bbot_notice",
-    role: "通知 Bot 发送转账模拟、结果通知和平台公告，可承接按钮。",
-  },
-] as const;
+function countRuleChats(rules: AccountBotInteractionRule[]): number {
+  return new Set(
+    rules.flatMap((rule) =>
+      (rule.chat_ids ?? []).filter((chatId): chatId is number => Number.isFinite(chatId)),
+    ),
+  ).size;
+}
 
-const actionRows = [
-  ["send_message", "发送或编辑文本消息，可携带 inline keyboard。"],
-  ["send_photo / send_file", "发送媒体结果，仍受 send_via 白名单约束。"],
-  ["delete_message / pin_message", "删除或置顶交互 Bot 侧消息。"],
-  ["answer_callback", "回应普通 Bot 按钮回调，避免插件重复写 Bot API。"],
-  ["result / settlement", "汇报成功、会话结束和可对账结算结果。"],
-];
+function countKeywordRules(rules: AccountBotInteractionRule[]): number {
+  return rules.filter((rule) => {
+    const mode = rule.action === "notice" ? "payment" : (rule.trigger_mode ?? "payment");
+    return mode !== "payment";
+  }).length;
+}
+
+function countSessionRules(rules: AccountBotInteractionRule[]): number {
+  return rules.filter((rule) =>
+    rule.action === "module"
+    && (rule.module_session_scope ?? rule.concurrency ?? "chat") !== "none",
+  ).length;
+}
+
+function runtimeLabel(config?: AccountBotInteractionConfig): string {
+  if (!config) return "读取中";
+  if (config.interaction_running) return "运行中";
+  if (config.enabled) return "未运行";
+  return "未启用";
+}
+
+function runtimeTone(config?: AccountBotInteractionConfig): "success" | "warn" | "neutral" {
+  if (config?.interaction_running) return "success";
+  if (config?.enabled) return "warn";
+  return "neutral";
+}
+
+function lastUpdateLabel(config?: AccountBotInteractionConfig): string {
+  if (!config?.interaction_last_update_id) return "暂无触发";
+  return `update #${config.interaction_last_update_id}`;
+}
 
 export function InteractionIndex() {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const queryClient = useQueryClient();
+
+  const accountsQ = useQuery({
+    queryKey: ["accounts"],
+    queryFn: () => listAccounts(),
+  });
+
+  const accounts = accountsQ.data ?? [];
+  const aidParam = Number(searchParams.get("aid"));
+  const selectedAccount = useMemo(() => {
+    if (!accounts.length) return null;
+    const byParam = accounts.find((account) => account.id === aidParam);
+    return byParam ?? accounts[0];
+  }, [accounts, aidParam]);
+  const selectedAid = selectedAccount?.id ?? null;
+
+  useEffect(() => {
+    if (!selectedAid) return;
+    if (selectedAid === aidParam) return;
+    const next = new URLSearchParams(searchParams);
+    next.set("aid", String(selectedAid));
+    setSearchParams(next, { replace: true });
+  }, [aidParam, searchParams, selectedAid, setSearchParams]);
+
+  const interactionQ = useQuery({
+    queryKey: ["account", selectedAid, "interaction-bot"],
+    queryFn: () => getInteractionBotConfig(selectedAid as number),
+    enabled: selectedAid !== null,
+  });
+
+  const config = interactionQ.data;
+  const rules = config?.rules ?? [];
+  const activeRules = rules.filter((rule) => rule.enabled).length;
+  const moduleRules = rules.filter((rule) => rule.action === "module").length;
+  const chatCoverage = countRuleChats(rules);
+  const keywordRules = countKeywordRules(rules);
+  const sessionRules = countSessionRules(rules);
+  const hasInteractionToken = Boolean(config?.has_interaction_bot_token);
+  const lastError = config?.interaction_last_error?.trim();
+
+  const refresh = () => {
+    void queryClient.invalidateQueries({ queryKey: ["accounts"] });
+    if (selectedAid !== null) {
+      void queryClient.invalidateQueries({ queryKey: ["account", selectedAid, "interaction-bot"] });
+    }
+  };
+
+  if (accountsQ.isLoading) {
+    return (
+      <PageShell>
+        <PageHeader
+          icon={Bot}
+          title="交互中心"
+          description="正在读取账号与交互 Bot 配置。"
+        />
+        <div className="flex h-36 items-center justify-center rounded-lg border bg-card">
+          <Spinner className="text-primary" />
+        </div>
+      </PageShell>
+    );
+  }
+
   return (
     <PageShell>
       <PageHeader
         icon={Bot}
-        title="交互框架"
-        description="把 Telegram 消息渠道、插件业务逻辑和平台受控发送能力放到同一个框架页管理。"
+        title="交互中心"
+        description="按账号管理交互 Bot、插件玩法入口、触发规则和会话运行状态。"
         actions={
           <>
-            <Button asChild variant="outline" size="sm">
-              <Link to="/plugins/manage?tab=guide">插件指南</Link>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={refresh}
+              disabled={accountsQ.isFetching || interactionQ.isFetching}
+            >
+              <RefreshCw className={accountsQ.isFetching || interactionQ.isFetching ? "mr-1 h-4 w-4 animate-spin" : "mr-1 h-4 w-4"} />
+              刷新
             </Button>
-            <Button asChild size="sm">
-              <Link to="/?accounts=1">
-                配置账号
-                <ArrowRight className="ml-2 h-4 w-4" />
-              </Link>
-            </Button>
+            {selectedAid !== null ? (
+              <Button asChild variant="outline" size="sm">
+                <Link to={`/accounts/${selectedAid}?tab=interaction-bot`}>
+                  账号详情入口
+                  <ArrowRight className="ml-1 h-4 w-4" />
+                </Link>
+              </Button>
+            ) : null}
           </>
         }
       />
 
-      <StatusSummaryPanel
-        icon={GitBranch}
-        title="TelePilot 交互运行面"
-        titleLevel="h2"
-        description="插件不再需要直接拿 Bot Token、底层客户端或自己拼按钮回调。它声明输入输出契约，平台负责把事件投递给插件，再把标准动作发到正确通道。"
-        signals={
-          <>
-            <SignalPill tone="success" label="事件" value="keyword / message / callback_query" />
-            <SignalPill tone="primary" label="发送" value="ctx.messages" />
-            <SignalPill tone="warn" label="守卫" value="result_contract.send_via" />
-          </>
-        }
-        aside={
-          <div className="w-full rounded-md border border-border/70 bg-background/80 p-3 text-sm">
-            <div className="font-semibold">推荐插件模型</div>
-            <div className="mt-2 text-muted-foreground">
-              UserBot 负责感知和低频身份动作，普通 Bot 负责高频互动，插件只写业务状态机。
-            </div>
-          </div>
-        }
-      />
-
-      <div className="grid gap-3 md:grid-cols-4">
-        {pipeline.map((item) => (
-          <ToneRailCard
-            key={item.title}
-            icon={item.icon}
-            title={item.title}
-            value={<CheckCircle2 className="h-5 w-5 text-emerald-500" />}
-            description={item.desc}
-            tone="neutral"
-            valueClassName="text-sm font-medium text-muted-foreground"
-          />
-        ))}
-      </div>
-
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_22rem]">
+      {accounts.length === 0 ? (
         <Card>
           <CardHeader>
-            <SectionHeader
-              icon={ClipboardList}
-              title="插件动作契约"
-              description="插件通过 result_contract 声明能返回什么动作、能走哪些发送通道。运行时会按契约过滤越权动作。"
-            />
-          </CardHeader>
-          <CardContent>
-            <div className="overflow-hidden rounded-md border">
-              <div className="grid grid-cols-[8rem_minmax(0,1fr)] bg-muted/50 px-3 py-2 text-xs font-semibold text-muted-foreground sm:grid-cols-[12rem_minmax(0,1fr)]">
-                <div>动作</div>
-                <div>用途</div>
-              </div>
-              {actionRows.map(([name, desc]) => (
-                <div key={name} className="grid grid-cols-[8rem_minmax(0,1fr)] border-t px-3 py-2 text-sm sm:grid-cols-[12rem_minmax(0,1fr)]">
-                  <code className="min-w-0 truncate text-xs text-primary">{name}</code>
-                  <div className="min-w-0 text-muted-foreground">{desc}</div>
-                </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle className="inline-flex items-center gap-2">
-              <MousePointerClick className="h-4 w-4 text-primary" />
-              按钮回调
+            <CardTitle className="flex items-center gap-2 text-base">
+              <AlertTriangle className="h-4 w-4 text-amber-500" />
+              暂无账号
             </CardTitle>
           </CardHeader>
-          <CardContent className="space-y-3 text-sm text-muted-foreground">
-            <p>按钮点击会作为 callback_query 回到活跃会话。</p>
-            <p>插件可用 ctx.messages.answer_callback 回应按钮，再用 ctx.messages.edit 或 send 更新消息。</p>
-            <p>userbot_reply 通道会自动移除 reply_markup，防止按钮发到不承接回调的通道。</p>
+          <CardContent className="flex flex-col gap-3 text-sm text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
+            <span>交互中心需要先绑定一个 Telegram 账号，再配置对应的交互 Bot 和规则。</span>
+            <Button asChild size="sm">
+              <Link to="/accounts/new">添加账号</Link>
+            </Button>
           </CardContent>
         </Card>
-      </div>
+      ) : (
+        <>
+          <section className="grid gap-4 rounded-lg border bg-card p-4 shadow-sm lg:grid-cols-[minmax(280px,420px)_minmax(0,1fr)]">
+            <div className="space-y-2">
+              <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                当前账号 / 交互 Bot
+              </div>
+              <Select
+                value={selectedAid ? String(selectedAid) : ""}
+                onChange={(event) => {
+                  const next = new URLSearchParams(searchParams);
+                  next.set("aid", event.target.value);
+                  setSearchParams(next);
+                }}
+              >
+                {accounts.map((account) => (
+                  <option key={account.id} value={account.id}>
+                    {accountLabel(account)}
+                  </option>
+                ))}
+              </Select>
+              {selectedAccount ? (
+                <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                  <AccountStatusBadge status={selectedAccount.status} />
+                  <span>ID {selectedAccount.id}</span>
+                  {selectedAccount.tg_user_id ? <span>TG {selectedAccount.tg_user_id}</span> : null}
+                </div>
+              ) : null}
+            </div>
 
-      <div className="grid gap-3 md:grid-cols-3">
-        {channels.map((item) => (
-          <Card key={item.name}>
-            <CardHeader>
-              <CardTitle className="truncate">
-                <code>{item.name}</code>
-              </CardTitle>
+            <div className="flex flex-wrap items-center gap-2 lg:justify-end">
+              <SignalPill
+                tone={config?.enabled ? "primary" : "neutral"}
+                label="交互总闸"
+                value={config?.enabled ? "已启用" : "未启用"}
+              />
+              <SignalPill
+                tone={hasInteractionToken ? "success" : "warn"}
+                label="Bot Token"
+                value={hasInteractionToken ? "已配置" : "待配置"}
+              />
+              <SignalPill
+                tone={runtimeTone(config)}
+                label="监听状态"
+                value={runtimeLabel(config)}
+              />
+              <SignalPill
+                tone={activeRules > 0 ? "primary" : "neutral"}
+                label="启用规则"
+                value={`${activeRules}/${rules.length}`}
+              />
+            </div>
+          </section>
+
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            <ToneRailCard
+              icon={Activity}
+              title="会话状态"
+              value={runtimeLabel(config)}
+              description={
+                sessionRules > 0
+                  ? `${sessionRules} 条插件规则会建立会话，按钮回调由交互 Bot 承接。`
+                  : "当前没有需要保持会话的插件规则。"
+              }
+              tone={runtimeTone(config)}
+              valueClassName="truncate text-lg font-semibold"
+            />
+            <ToneRailCard
+              icon={ListChecks}
+              title="规则覆盖"
+              value={`${rules.length} 条`}
+              description={`${moduleRules} 条插件规则，${keywordRules} 条关键词触发，覆盖 ${chatCoverage} 个群。`}
+              tone={rules.length > 0 ? "primary" : "neutral"}
+              valueClassName="truncate text-lg font-semibold"
+            />
+            <ToneRailCard
+              icon={Clock3}
+              title="最近触发"
+              value={lastUpdateLabel(config)}
+              description="来自交互 Bot polling 的最近 update id，用于判断是否有新事件进入。"
+              tone={config?.interaction_last_update_id ? "success" : "neutral"}
+              valueClassName="truncate text-lg font-semibold"
+            />
+            <ToneRailCard
+              icon={AlertTriangle}
+              title="最近错误"
+              value={lastError ? "有错误" : "无错误"}
+              description={lastError || "交互 Bot 运行面暂未报告错误。"}
+              tone={lastError ? "danger" : "success"}
+              valueClassName="truncate text-lg font-semibold"
+            />
+          </div>
+
+          <Card className="overflow-hidden">
+            <CardHeader className="border-b bg-muted/30">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <CardTitle className="flex items-center gap-2 text-base">
+                    <Route className="h-4 w-4 text-primary" />
+                    规则与插件入口
+                  </CardTitle>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    新增规则、选择插件入口、配置触发词和参数都在这里完成，保存后当前账号立即使用这套交互规则。
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {config?.interaction_bot_username ? (
+                    <Badge variant="outline" className="h-7">
+                      <MessageSquare className="mr-1 h-3.5 w-3.5" />
+                      @{config.interaction_bot_username}
+                    </Badge>
+                  ) : null}
+                  <Badge variant={lastError ? "destructive" : "secondary"} className="h-7">
+                    <ShieldCheck className="mr-1 h-3.5 w-3.5" />
+                    Contract Guard
+                  </Badge>
+                </div>
+              </div>
             </CardHeader>
-            <CardContent className="text-sm leading-6 text-muted-foreground">{item.role}</CardContent>
+            <CardContent className="p-3 sm:p-4">
+              {selectedAid !== null ? <BotTab aid={selectedAid} mode="interaction" /> : null}
+            </CardContent>
           </Card>
-        ))}
-      </div>
+        </>
+      )}
     </PageShell>
   );
 }

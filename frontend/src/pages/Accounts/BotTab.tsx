@@ -2477,52 +2477,76 @@ export function BotTab({ aid, mode = "management" }: { aid: number; mode?: "mana
                   const resolvedModule = resolveRuleModuleSelection(rule, interactionEntries);
                   const effectiveTriggerMode = rule.action === "notice" ? "payment" : rule.triggerMode;
                   const isSelected = rule.id === selectedInteractionRule?.id;
+                  const chatCount = countDelimitedTextItems(rule.chatIds);
+                  const keywordCount = countDelimitedTextItems(rule.moduleStartKeywords);
+                  const actionTone = rule.action === "module" ? "default" : rule.action === "math10" ? "secondary" : "outline";
+                  const moduleSummary = rule.action === "module"
+                    ? describeRuleModuleSelection(rule, resolvedModule)
+                    : rule.action === "notice"
+                      ? "命中后只发送通知消息"
+                      : keywordCount > 0
+                        ? `${keywordCount} 条启动关键词`
+                        : "未填写启动关键词";
+                  const sessionSummary = rule.action === "module"
+                    ? `${getModuleSessionScopeLabel(rule.moduleSessionScope)} · ${getParticipantPolicyLabel(rule.participantPolicy)}`
+                    : `${getRuleConcurrencyLabel(rule.concurrency)} · ${rule.validSeconds || "不限"} 秒有效`;
                   return (
                     <div
                       key={rule.id}
                       className={cn(
-                        "rounded-md border bg-background p-2 transition-colors",
-                        isSelected ? "border-primary/40 bg-primary/5 shadow-sm" : "border-border/70",
+                        "rounded-md border bg-background p-2.5 transition-colors",
+                        isSelected ? "border-primary/50 bg-primary/5 shadow-sm ring-1 ring-primary/10" : "border-border/70 hover:border-primary/25",
                       )}
                     >
                       <button
                         type="button"
-                        className="flex w-full items-start gap-3 text-left"
+                        className="block w-full text-left"
                         onClick={() => setSelectedInteractionRuleId(rule.id)}
                       >
-                        <div className={cn(
-                          "grid h-7 w-7 shrink-0 place-items-center rounded-md border text-xs font-semibold",
-                          isSelected ? "border-primary/40 bg-primary/10 text-primary" : "border-border bg-muted/40 text-muted-foreground",
-                        )}>
-                          {index + 1}
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-start justify-between gap-2">
-                            <div className="min-w-0">
-                              <div className="line-clamp-2 break-words text-sm font-medium">{rule.name || `规则 ${index + 1}`}</div>
-                              <div className="mt-1 flex flex-wrap gap-1.5">
-                                <Badge
-                                  variant={rule.action === "module" ? "default" : rule.action === "math10" ? "secondary" : "outline"}
-                                  className="h-6 px-2"
-                                >
-                                  {getRuleActionLabel(rule.action)}
-                                </Badge>
-                                <Badge variant={effectiveTriggerMode === "payment" ? "secondary" : "outline"} className="h-6 px-2">
-                                  {getRuleTriggerModeLabel(effectiveTriggerMode)}
-                                </Badge>
+                        <div className="flex items-start gap-2.5">
+                          <div className={cn(
+                            "grid h-8 w-8 shrink-0 place-items-center rounded-md border text-xs font-semibold",
+                            isSelected ? "border-primary/40 bg-primary/10 text-primary" : "border-border bg-muted/40 text-muted-foreground",
+                          )}>
+                            {index + 1}
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+                              <div className="min-w-0 flex-1 truncate text-sm font-semibold">
+                                {rule.name || `规则 ${index + 1}`}
+                              </div>
+                              <Badge
+                                variant={rule.enabled ? "success" : "secondary"}
+                                className="h-6 shrink-0 px-2"
+                              >
+                                {rule.enabled ? "启用" : "暂停"}
+                              </Badge>
+                            </div>
+                            <div className="mt-2 grid grid-cols-2 gap-1.5 text-xs sm:grid-cols-4 2xl:grid-cols-2">
+                              <div className="rounded border bg-muted/30 px-2 py-1">
+                                <div className="truncate text-[11px] text-muted-foreground">动作</div>
+                                <div className="truncate font-medium">{getRuleActionLabel(rule.action)}</div>
+                              </div>
+                              <div className="rounded border bg-muted/30 px-2 py-1">
+                                <div className="truncate text-[11px] text-muted-foreground">触发</div>
+                                <div className="truncate font-medium">{getRuleTriggerModeLabel(effectiveTriggerMode)}</div>
+                              </div>
+                              <div className="rounded border bg-muted/30 px-2 py-1">
+                                <div className="truncate text-[11px] text-muted-foreground">监听群</div>
+                                <div className="truncate font-medium">{chatCount > 0 ? `${chatCount} 个` : "未填写"}</div>
+                              </div>
+                              <div className="rounded border bg-muted/30 px-2 py-1">
+                                <div className="truncate text-[11px] text-muted-foreground">会话</div>
+                                <div className="truncate font-medium">{rule.action === "module" ? getModuleSessionScopeLabel(rule.moduleSessionScope) : getRuleConcurrencyLabel(rule.concurrency)}</div>
                               </div>
                             </div>
-                          </div>
-                          <div className="mt-2 space-y-1 text-xs text-muted-foreground">
-                            <div className="line-clamp-2 break-words">
-                              {rule.chatIds.trim() ? `${countDelimitedTextItems(rule.chatIds)} 个群 · ${rule.action === "notice" ? "通知" : rule.action === "module" ? "插件" : "算数题"}` : "未填写监听群"}
-                            </div>
-                            <div className="line-clamp-2 break-words">
-                              {rule.action === "module"
-                                ? describeRuleModuleSelection(rule, resolvedModule)
-                                : rule.action === "notice"
-                                  ? "只发通知"
-                                  : `关键词 ${countDelimitedTextItems(rule.moduleStartKeywords)} 条`}
+                            <div className="mt-2 flex flex-wrap gap-1.5">
+                              <Badge variant={actionTone} className="h-6 min-w-0 max-w-full px-2">
+                                <span className="truncate">{moduleSummary}</span>
+                              </Badge>
+                              <Badge variant={effectiveTriggerMode === "payment" ? "secondary" : "outline"} className="h-6 min-w-0 max-w-full px-2">
+                                <span className="truncate">{sessionSummary}</span>
+                              </Badge>
                             </div>
                           </div>
                         </div>
