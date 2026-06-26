@@ -17,7 +17,7 @@
 - `on_command(ctx, cmd, args, event) -> bool`，返回 `True` 表示接管。
 - `on_message` 里别直接假设 `event.outgoing` 一定存在，先 `getattr`。
 - `on_interaction` 用于群内玩法、高频按钮和付款后开局，按 `entry_key` 和 `payload["event"]["type"]` 分流。
-- `interaction_entries[].launch_mode` 必填：`bridge` 走交互 Bot，`direct` 走原命令/内部调用，`hybrid` 两边都支持。
+- `interaction_entries[].launch_mode` 建议显式写：`bridge` 走交互 Bot，`direct` 走原命令/内部调用，`hybrid` 两边都支持；新插件同时写 `dispatch_modes` 更清楚。
 - 新入口建议补 `dispatch_modes`：`admin_command` 表示管理员带前缀命令触发，后续默认由 userbot 交互；`public_keyword` 表示群友关键词触发，后续默认由交互 Bot 交互。
 - 新入口建议补 `message_channels`：`{"admin_command": "userbot_reply", "public_keyword": "interaction_bot"}`；`money_channel` 固定用 `userbot_reply`，普通 Bot 不处理转账。
 - 常见事件：`payment_confirmed`、`keyword`、`message`、`callback_query`、`session_close`。
@@ -52,7 +52,7 @@
 - `plugin.json` 只做静态安装元数据，不执行 Python。
 - 远程插件安装后还要看 `manifest.py` 的真实 `MANIFEST`。
 - 远程插件的 `version`、`category`、`interaction_entries` 要前后一致。
-- `plugin.json` 和 `manifest.py` 里的交互入口字段要同步，尤其 `launch_mode`、`events`、`session_scope`、`result_contract`。
+- `plugin.json` 和 `manifest.py` 里的交互入口字段要同步，尤其 `launch_mode`、`dispatch_modes`、`message_channels`、`money_channel`、`events`、`session_scope`、`result_contract`。
 - 已接入的 installed 互动插件可跑 `python scripts/validate-installed-interaction-plugins.py` 做一次静态对齐检查。
 - 抢答/竞猜/抽奖要用锁和二次检查，避免重复发奖。
 - 超时任务、禁用、热重载、卸载都要清理状态。

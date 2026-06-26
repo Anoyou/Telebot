@@ -138,7 +138,7 @@ async def _ensure_repo_cached(url: str, *, force_refresh: bool = False) -> Path:
             raise
         return target
 
-    # 缓存命中：尝试 git fetch + reset 到 origin/HEAD，失败时不至于阻塞读取列表
+    # 缓存命中：普通列表读取允许用旧副本兜底；强制刷新必须暴露失败，避免 UI 误报成功。
     try:
         await _run_git("fetch", "--all", "--prune", cwd=target, timeout=60.0)
         # 用 origin 的默认分支做硬重置；--ff-only 在分支变更时会失败，硬重置更鲁棒
@@ -148,6 +148,8 @@ async def _ensure_repo_cached(url: str, *, force_refresh: bool = False) -> Path:
         # symbolic-ref 输出形如 "refs/remotes/origin/main"
         await _run_git("reset", "--hard", head, cwd=target, timeout=30.0)
     except Exception:  # noqa: BLE001
+        if force_refresh:
+            raise
         log.warning("刷新仓库缓存失败，继续使用旧副本: %s", url, exc_info=True)
     return target
 

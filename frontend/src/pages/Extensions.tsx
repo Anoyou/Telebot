@@ -140,7 +140,7 @@ const DEV_DOCS: DevDoc[] = [
   {
     id: "overview",
     title: "插件概览",
-    description: "快速开始、插件结构、Route A 与 Route B 的边界。",
+    description: "快速开始、插件结构、个人可信插件标准模式与交互入口边界。",
     path: "docs/PLUGIN-OVERVIEW.md",
     markdown: overviewMd,
     icon: FileText,

@@ -27,11 +27,13 @@ from .api import notify_bots as notify_bots_api
 from .api import proxies as proxies_api
 from .api import rate_limit as rate_limit_api
 from .api import sudo as sudo_api
+from .logging_redaction import install_sensitive_log_filter
 from .services import account_bot_runtime, interaction_bot_runtime, notify_service, remote_plugin_service
 from .services.login_service import cleanup_expired_loop
 from .settings import settings
 
 logging.basicConfig(level=getattr(logging, settings.log_level.upper(), logging.INFO))
+install_sensitive_log_filter()
 
 # Postgres advisory lock key（固定值，避免不同进程 key 漂移）
 _MIGRATION_ADVISORY_LOCK_KEY = 730140129

@@ -4,7 +4,7 @@
 
 ## 10. 远程插件
 
-远程插件与内置插件共用同一套 Plugin API、`Manifest`、`PluginContext`、权限沙箱、配置 schema、插件分类和交互 Bot 声明。区别只在安装来源：远程插件从 Git 仓库安装到 `plugins/installed/{name}/`，安装阶段先静态读取 `plugin.json`，不会执行 Python；运行阶段再由 worker loader 加载 `manifest.py` / `plugin.py`。
+远程插件与内置插件共用同一套 Plugin API、`Manifest`、`PluginContext`、能力 facade、配置 schema、插件分类和交互 Bot 声明。区别只在安装来源：远程插件从 Git 仓库安装到 `plugins/installed/{name}/`，安装阶段先静态读取 `plugin.json`，不会执行 Python；运行阶段再由 worker loader 加载 `manifest.py` / `plugin.py`。
 
 旧文档 `docs/REMOTE-PLUGIN-GUIDE.md` 只保留跳转说明，远程插件开发与安装规范以本章节为准。
 
@@ -22,7 +22,7 @@
 - `plugin.json` 作为安装阶段静态元数据。
 - `manifest.py` 作为运行阶段真实 Manifest。
 - `Plugin` / `PluginContext` 作为运行时 API。
-- 第三方插件使用 `SandboxClient`，按 `permissions` 最小授权。
+- 第三方插件使用受控客户端 facade，按 `permissions` 决定可见能力；这不是公共市场式强沙箱，插件业务风险仍由管理员自行承担。
 
 ### 远程插件结构
 
@@ -484,7 +484,7 @@ plugin.json.config_schema
 
 ### 示例与 CI 建议
 
-当前 CI 已校验 `examples/plugins/with_http`、`examples/plugins/with_ai` 和 `examples/plugins/with_interaction`，分别用于演示 `ctx.http` / `external_http` / `allowed_hosts` 的最小组合，`ctx.ai` / `ai_text` / 平台统一 LLM 池的推荐接入方式，以及“原命令 + 交互 Bot 入口”双兼容的最小交互契约。`examples/plugins/translate` 是历史示例，尚未迁移到受限 `PluginContext` + sandbox 权限模型，因此在示例校验脚本中明确跳过。
+当前 CI 已校验 `examples/plugins/with_http`、`examples/plugins/with_ai` 和 `examples/plugins/with_interaction`，分别用于演示 `ctx.http` / `external_http` / `allowed_hosts` 的最小组合，`ctx.ai` / `ai_text` / 平台统一 LLM 池的推荐接入方式，以及“原命令 + 交互 Bot 入口”双兼容的最小交互契约。`examples/plugins/translate` 是历史示例，尚未迁移到当前 `PluginContext` + facade 权限模型，因此在示例校验脚本中明确跳过。
 
 新增示例时请同步更新 `scripts/validate-plugin-examples.py`：
 
