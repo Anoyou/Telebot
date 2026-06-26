@@ -1,4 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
+import { Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowDown,
@@ -270,8 +271,9 @@ function RuleEditorSection({
   children: ReactNode;
 }) {
   return (
-    <section className="space-y-3 rounded-lg border bg-muted/20 p-3">
-      <div className="flex items-start gap-3">
+    <details className="group rounded-lg border bg-muted/20">
+      <summary className="flex cursor-pointer list-none items-start justify-between gap-3 p-3 [&::-webkit-details-marker]:hidden">
+        <div className="flex min-w-0 items-start gap-3">
         <div className="grid h-7 w-7 shrink-0 place-items-center rounded-md border bg-background text-xs font-semibold text-muted-foreground">
           {step}
         </div>
@@ -281,24 +283,33 @@ function RuleEditorSection({
             <div className="mt-0.5 text-xs text-muted-foreground">{description}</div>
           ) : null}
         </div>
-      </div>
-      {children}
-    </section>
+        </div>
+        <ChevronRight className="mt-1 h-4 w-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-90" />
+      </summary>
+      <div className="space-y-3 border-t p-3">{children}</div>
+    </details>
   );
 }
 
 function AllowedPeerMultiSelect({
+  aid,
   peers,
   selectedText,
   loading,
   onChange,
 }: {
+  aid: number;
   peers: IgnoredPeer[];
   selectedText: string;
   loading: boolean;
   onChange: (value: string) => void;
 }) {
   const selected = new Set(chatIdTextItems(selectedText));
+  const knownPeerIds = new Set(peers.map((peer) => String(peer.peer_id)));
+  const unknownSelected = chatIdTextItems(selectedText).filter((id) => !knownPeerIds.has(id));
+  const removeSelectedId = (id: string) => {
+    onChange(chatIdTextItems(selectedText).filter((item) => item !== id).join("\n"));
+  };
   const togglePeer = (peer: IgnoredPeer) => {
     const id = String(peer.peer_id);
     const next = chatIdTextItems(selectedText);
@@ -322,8 +333,12 @@ function AllowedPeerMultiSelect({
 
   if (peers.length === 0) {
     return (
-      <div className="rounded-md border border-dashed bg-background px-2 py-2 text-xs text-muted-foreground">
-        暂无已允许会话，可先手填 Chat ID。
+      <div className="rounded-md border border-dashed bg-background px-3 py-2 text-xs leading-5 text-muted-foreground">
+        暂无已允许会话。没有找到想选择的会话时，请先去{" "}
+        <Link to={`/accounts/${aid}?tab=ignored`} className="font-medium text-primary hover:underline">
+          账号详情页的允许会话
+        </Link>{" "}
+        添加。
       </div>
     );
   }
@@ -360,6 +375,28 @@ function AllowedPeerMultiSelect({
             </button>
           );
         })}
+      </div>
+      {unknownSelected.length > 0 ? (
+        <div className="flex flex-wrap gap-1.5 rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5 text-xs text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
+          {unknownSelected.map((id) => (
+            <button
+              key={id}
+              type="button"
+              className="rounded border border-amber-300/70 px-1.5 py-0.5 font-mono hover:bg-amber-100 dark:border-amber-800 dark:hover:bg-amber-900/40"
+              title="从本规则移除这个未在允许会话中的 Chat ID"
+              onClick={() => removeSelectedId(id)}
+            >
+              {id} ×
+            </button>
+          ))}
+        </div>
+      ) : null}
+      <div className="text-xs leading-5 text-muted-foreground">
+        没有找到想选择的会话？去{" "}
+        <Link to={`/accounts/${aid}?tab=ignored`} className="font-medium text-primary hover:underline">
+          账号详情页的允许会话
+        </Link>{" "}
+        添加后再回来选择。
       </div>
     </div>
   );
@@ -890,12 +927,14 @@ function ruleFromForm(
 }
 
 function InteractionRuleEditor({
+  aid,
   rule,
   interactionEntries,
   allowedPeers,
   allowedPeersLoading,
   onPatch,
 }: {
+  aid: number;
   rule: InteractionRuleForm;
   interactionEntries: InteractionEntryOption[];
   allowedPeers: IgnoredPeer[];
@@ -1049,24 +1088,13 @@ function InteractionRuleEditor({
   return (
     <div className="min-w-0 space-y-4 rounded-lg border bg-background p-3 shadow-sm sm:p-4">
       <div className="space-y-3 rounded-lg border bg-muted/20 p-3">
-        <div className="grid min-w-0 gap-3 sm:grid-cols-2 xl:grid-cols-[minmax(0,1fr)_180px]">
+        <div className="grid min-w-0 gap-3">
           <div className="space-y-1.5">
             <Label>规则名称</Label>
             <Input
               value={rule.name}
               onChange={(e) => onPatch({ name: e.target.value })}
             />
-          </div>
-          <div className="space-y-1.5">
-            <Label>命中后做什么</Label>
-            <Select
-              value={rule.action}
-              onChange={(e) => updateAction(e.target.value)}
-            >
-              <option value="notice">只发通知</option>
-              <option value="math10">发算数题</option>
-              <option value="module">启动玩法</option>
-            </Select>
           </div>
         </div>
         <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
@@ -1096,17 +1124,11 @@ function InteractionRuleEditor({
         title="触发"
         description="先决定交互 Bot 在哪些群里监听，以及群友用转账还是关键词触发。"
       >
-        <div className="grid gap-2 lg:max-w-[720px] lg:grid-cols-[minmax(220px,1fr)_168px]">
+        <div className="grid gap-3 lg:grid-cols-[minmax(240px,1fr)_168px_180px]">
           <div className="space-y-1.5">
-            <Label>监听群 Chat ID</Label>
-            <Textarea
-              rows={1}
-              className="h-10 !min-h-10 resize-y py-2 font-mono text-xs leading-5"
-              placeholder="-1001234567890"
-              value={rule.chatIds}
-              onChange={(e) => onPatch({ chatIds: e.target.value })}
-            />
+            <Label>监听群</Label>
             <AllowedPeerMultiSelect
+              aid={aid}
               peers={allowedPeers}
               selectedText={rule.chatIds}
               loading={allowedPeersLoading}
@@ -1131,6 +1153,17 @@ function InteractionRuleEditor({
                 </Badge>
               ) : null}
             </div>
+          </div>
+          <div className="space-y-1.5">
+            <Label>命中后做什么</Label>
+            <Select
+              value={rule.action}
+              onChange={(e) => updateAction(e.target.value)}
+            >
+              <option value="notice">只发通知</option>
+              <option value="math10">发算数题</option>
+              <option value="module">启动玩法</option>
+            </Select>
           </div>
         </div>
 
@@ -2633,8 +2666,8 @@ export function BotTab({
               </div>
             </div>
 
-            <div className="grid gap-3 xl:grid-cols-[minmax(360px,440px)_minmax(0,1fr)]">
-              <div className="space-y-1.5 rounded-md border bg-muted/20 p-2 xl:max-h-[76vh] xl:overflow-y-auto">
+            <div className="grid gap-3 xl:h-[calc(100vh-18rem)] xl:min-h-[560px] xl:max-h-[860px] xl:grid-cols-[minmax(300px,380px)_minmax(0,1fr)] xl:items-stretch">
+              <div className="space-y-1.5 rounded-md border bg-muted/20 p-2 xl:h-full xl:overflow-y-auto">
                 {interactionRules.map((rule, index) => {
                   const resolvedModule = resolveRuleModuleSelection(rule, interactionEntries);
                   const effectiveTriggerMode = rule.action === "notice" ? "payment" : rule.triggerMode;
@@ -2668,7 +2701,7 @@ export function BotTab({
                         >
                           <div className="flex items-start gap-2.5">
                             <div className={cn(
-                              "grid h-8 w-8 shrink-0 place-items-center rounded-md border text-xs font-semibold",
+                              "hidden h-8 w-8 shrink-0 place-items-center rounded-md border text-xs font-semibold sm:grid",
                               isSelected ? "border-primary/40 bg-primary/10 text-primary" : "border-border bg-muted/40 text-muted-foreground",
                             )}>
                               {index + 1}
@@ -2685,7 +2718,7 @@ export function BotTab({
                                   {rule.enabled ? "启用" : "暂停"}
                                 </Badge>
                               </div>
-                              <div className="mt-1 flex min-w-0 flex-wrap gap-1.5">
+                              <div className="mt-1 hidden min-w-0 flex-wrap gap-1.5 sm:flex">
                                 <Badge variant={actionTone} className="h-5 px-1.5 text-[11px]">
                                   {getRuleActionLabel(rule.action)}
                                 </Badge>
@@ -2696,12 +2729,12 @@ export function BotTab({
                                   {getRuleTriggerModeLabel(effectiveTriggerMode)}
                                 </Badge>
                               </div>
-                              <div className="mt-1 flex min-w-0 flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                              <div className="mt-1 hidden min-w-0 flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground sm:flex">
                                 <span className="whitespace-nowrap">群 {chatCount > 0 ? chatCount : "未填"}</span>
                                 <span className="whitespace-nowrap">关键词 {keywordCount}</span>
                                 <span className="min-w-0 truncate">{sessionSummary}</span>
                               </div>
-                              <div className="mt-1 truncate text-xs text-muted-foreground">
+                              <div className="mt-1 hidden truncate text-xs text-muted-foreground sm:block">
                                 {moduleSummary}
                               </div>
                             </div>
@@ -2782,9 +2815,10 @@ export function BotTab({
                 })}
               </div>
 
-              <div className="min-w-0">
+              <div className="min-w-0 xl:h-full xl:overflow-y-auto">
                 {selectedInteractionRule ? (
                   <InteractionRuleEditor
+                    aid={aid}
                     rule={selectedInteractionRule}
                     interactionEntries={interactionEntries}
                     allowedPeers={allowedPeersQ.data ?? []}

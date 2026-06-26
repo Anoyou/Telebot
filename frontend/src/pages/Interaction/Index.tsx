@@ -253,7 +253,7 @@ export function InteractionIndex() {
                   ) : null}
                   <Badge variant={lastError ? "destructive" : "secondary"} className="h-7">
                     <ShieldCheck className="mr-1 h-3.5 w-3.5" />
-                    Contract Guard
+                    契约守卫
                   </Badge>
                 </div>
               </div>
