@@ -17,6 +17,7 @@ from sqlalchemy import desc, select
 
 from ..account_bot_defaults import (
     DEFAULT_INTERACTION_QUERY_EMPTY_MESSAGE,
+    DEFAULT_INTERACTION_QUERY_ITEM_TEMPLATE,
     DEFAULT_INTERACTION_QUERY_RESPONSE_TEMPLATE,
     DEFAULT_INTERACTION_RESPONSE_TEMPLATE,
     DEFAULT_TRANSFER_NOTICE_TEMPLATE,
@@ -1315,7 +1316,18 @@ def _render_interaction_query_template(template: str, values: dict[str, str]) ->
     def repl(match: re.Match[str]) -> str:
         return values.get(match.group(1), match.group(0))
 
-    return re.sub(r"\{([a-zA-Z_][a-zA-Z0-9_]*)\}", repl, template).strip()
+    return re.sub(r"\{([a-zA-Z_][a-zA-Z0-9_]*|[\u4e00-\u9fa5]+)\}", repl, template).strip()
+
+
+def _render_rule_text_template(template: str, rule: dict[str, Any]) -> str:
+    rule_name = str(rule.get("name") or rule.get("id") or "互动玩法").strip()
+    return _render_interaction_query_template(
+        template,
+        {
+            "rule_name": account_bot_service.html_text(rule_name),
+            "规则名称": account_bot_service.html_text(rule_name),
+        },
+    )
 
 
 async def _render_interaction_rules_query(_db: Any, incoming: Incoming, cfg: dict[str, Any]) -> str | None:
@@ -1336,10 +1348,28 @@ async def _render_interaction_rules_query(_db: Any, incoming: Incoming, cfg: dic
         return _interaction_query_template_value(cfg, "query_empty_message", DEFAULT_INTERACTION_QUERY_EMPTY_MESSAGE)
 
     lines: list[str] = []
+    item_template = _interaction_query_template_value(
+        cfg,
+        "query_item_template",
+        DEFAULT_INTERACTION_QUERY_ITEM_TEMPLATE,
+    )
     for index, rule in enumerate(open_rules, start=1):
-        name = account_bot_service.html_text(str(rule.get("name") or rule.get("id") or f"玩法 {index}"))
-        lines.append(f"{index}. <b>{name}</b>")
-        lines.append("触发方式：" + _interaction_rule_query_trigger_label(rule))
+        raw_name = str(rule.get("name") or rule.get("id") or f"玩法 {index}")
+        lines.append(
+            _render_interaction_query_template(
+                item_template,
+                {
+                    "index": account_bot_service.html_text(index),
+                    "name": account_bot_service.html_text(raw_name),
+                    "trigger": _interaction_rule_query_trigger_label(rule),
+                    "kind": _interaction_rule_kind_label(rule),
+                    "limit": _interaction_rule_limit_label(rule),
+                    "module_key": account_bot_service.html_text(str(rule.get("module_key") or "")),
+                    "module_action": account_bot_service.html_text(str(rule.get("module_action") or "")),
+                    "chat_id": account_bot_service.html_text(incoming.chat_id),
+                },
+            )
+        )
     closed_count = len(matched) - len(open_rules)
     if closed_count > 0:
         lines.append(f"另有 {closed_count} 个玩法已临时关闭。")
@@ -3397,7 +3427,11 @@ async def _run_interaction_module(
     start_text = str(rule.get("module_start_text") or "").strip()
     start_message_id: int | None = None
     if start_text:
-        start_result = await _send(incoming, start_text, reply_to_message_id=incoming.message_id)
+        start_result = await _send(
+            incoming,
+            _render_rule_text_template(start_text, rule),
+            reply_to_message_id=incoming.message_id,
+        )
         start_message_id = _interaction_delivery_message_id(start_result)
     payload = await _interaction_module_payload_async(incoming, rule, parsed, event_type=event_type)
     trace_context = _interaction_trace_context(payload)

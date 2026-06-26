@@ -3476,13 +3476,13 @@ async def test_interaction_module_start_text_is_sent_before_module_actions(monke
             "name": "互动模块",
             "module_key": "game24",
             "module_action": "start_paid_game",
-            "module_start_text": "正在启动互动模块...",
+            "module_start_text": "正在启动{规则名称}",
         },
     )
 
     assert ok is True
     send.assert_awaited_once()
-    assert send.await_args.args[:3] == ("bbot-token", -100123, "正在启动互动模块...")
+    assert send.await_args.args[:3] == ("bbot-token", -100123, "正在启动互动模块")
     assert send.await_args.kwargs["reply_to_message_id"] == 10
     edit.assert_awaited_once()
     assert edit.await_args.args[:4] == ("bbot-token", -100123, 88, "模块已开始")
@@ -4036,6 +4036,7 @@ async def test_interaction_query_template_hides_prize_for_no_prize_entry(monkeyp
                     "enabled": True,
                     "query_commands": ["玩法菜单"],
                     "query_response_template": "当前 {count} 个玩法\n{items}\n关闭 {closed_count} 个",
+                    "query_item_template": "{index}) {name}｜{trigger}｜{limit}",
                     "rules": [
                         {
                             "id": "pt",
@@ -4074,11 +4075,10 @@ async def test_interaction_query_template_hides_prize_for_no_prize_entry(monkeyp
     assert send.await_count == 1
     text = send.await_args.args[2]
     assert "当前 1 个玩法" in text
-    assert "置顶促销" in text
-    assert "触发方式：关键词" in text
+    assert "1) 置顶促销｜关键词" in text
     assert "促销 id=12345" in text
+    assert "每用户 CD <code>12h</code>" in text
     assert "奖金" not in text
-    assert "每用户 CD <code>12h</code>" not in text
 
 
 @pytest.mark.asyncio

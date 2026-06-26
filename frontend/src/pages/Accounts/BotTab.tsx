@@ -120,10 +120,11 @@ const DEFAULT_REMOTE_POLICY: AccountBotRemotePluginPolicy = {
 
 const DEFAULT_INTERACTION_DISABLED_MESSAGE = "本条互动规则已暂停，暂时不能开启。";
 const DEFAULT_INTERACTION_RESPONSE_TEMPLATE = "已收到 {payer_name} 给 {receiver_name} 的转账 {amount}，互动流程已准备就绪。";
-const DEFAULT_INTERACTION_MODULE_START_TEXT = "正在启动互动插件...";
+const DEFAULT_INTERACTION_MODULE_START_TEXT = "正在启动{规则名称}";
 const DEFAULT_MATH10_START_KEYWORDS = "发十以内算数\n十以内算数\n开算数题";
 const DEFAULT_INTERACTION_QUERY_COMMANDS = "。玩法\n。联动玩法";
 const DEFAULT_INTERACTION_QUERY_RESPONSE_TEMPLATE = "<b>当前可用联动玩法</b>\n{items}";
+const DEFAULT_INTERACTION_QUERY_ITEM_TEMPLATE = "{index}. <b>{name}</b>\n触发方式：{trigger}";
 const DEFAULT_INTERACTION_QUERY_EMPTY_MESSAGE = "当前群暂无开启中的联动玩法。";
 const RULE_CONTROLLED_MODULE_CONFIG_KEYS = new Set(["prize", "timeout", "valid_seconds"]);
 const DEFAULT_TRANSFER_NOTICE_TEMPLATE = [
@@ -183,6 +184,7 @@ const DEFAULT_INTERACTION_BOT: AccountBotInteractionConfig = {
   status_commands: [],
   query_commands: parseTextLines(DEFAULT_INTERACTION_QUERY_COMMANDS),
   query_response_template: DEFAULT_INTERACTION_QUERY_RESPONSE_TEMPLATE,
+  query_item_template: DEFAULT_INTERACTION_QUERY_ITEM_TEMPLATE,
   query_empty_message: DEFAULT_INTERACTION_QUERY_EMPTY_MESSAGE,
   disabled_message: DEFAULT_INTERACTION_DISABLED_MESSAGE,
   valid_seconds: 600,
@@ -468,21 +470,42 @@ function renderTransferNoticeTemplatePreview(template: string): string {
   ));
 }
 
-function renderInteractionQueryTemplatePreview(template: string): string {
+function renderTemplateVariables(template: string, values: Record<string, string>): string {
+  return template.replace(/\{([\w\u4e00-\u9fa5]+)\}/g, (match, key: string) => values[key] ?? match);
+}
+
+function renderInteractionQueryTemplatePreview(template: string, itemTemplate: string): string {
   const source = template.trim() || DEFAULT_INTERACTION_QUERY_RESPONSE_TEMPLATE;
+  const itemSource = itemTemplate.trim() || DEFAULT_INTERACTION_QUERY_ITEM_TEMPLATE;
   const sampleItems = [
-    "1. <b>九宫格</b>",
-    "触发方式：转账或关键词；关键词：<code>。ct num=数字</code>；转账通知",
-    "2. <b>置顶促销</b>",
-    "触发方式：关键词；关键词：<code>促销 id=12345</code>",
-  ].join("\n");
+    {
+      index: "1",
+      name: "九宫格",
+      trigger: "转账或关键词；关键词：<code>。ct num=数字</code>；转账通知",
+      kind: "玩法 <code>dice_grid_hunt</code>",
+      limit: "限时 <code>600</code> 秒",
+      module_key: "dice_grid_hunt",
+      module_action: "start_dice_grid_hunt",
+      chat_id: "-1001234567890",
+    },
+    {
+      index: "2",
+      name: "置顶促销",
+      trigger: "关键词；关键词：<code>促销 id=12345</code>",
+      kind: "玩法 <code>pt_promote</code>",
+      limit: "每用户 CD <code>12h</code>",
+      module_key: "pt_promote",
+      module_action: "promote_torrent",
+      chat_id: "-1001234567890",
+    },
+  ].map((values) => renderTemplateVariables(itemSource, values)).join("\n");
   const sampleValues: Record<string, string> = {
     items: sampleItems,
     count: "2",
     closed_count: "0",
     chat_id: "-1001234567890",
   };
-  return source.replace(/\{(\w+)\}/g, (match, key: string) => sampleValues[key] ?? match);
+  return renderTemplateVariables(source, sampleValues);
 }
 
 function isInteractionEntrySchema(schema: unknown): schema is InteractionEntrySchema {
@@ -749,7 +772,7 @@ function ruleFormFromRule(
     moduleSessionScope,
     participantPolicy: rule.participant_policy || inferParticipantPolicy(selectedEntry?.entry, moduleSessionScope),
     moduleConfig: stripControlledEntryConfig(rule.module_config ?? {}),
-    moduleStartText: rule.module_start_text ?? "",
+    moduleStartText: rule.module_start_text ?? DEFAULT_INTERACTION_MODULE_START_TEXT,
     userCooldownSeconds: rule.user_cooldown_seconds ?? "",
     dailyLimitPerUser: rule.daily_limit_per_user == null ? "" : String(rule.daily_limit_per_user),
     openCommands: rule.open_commands?.join("\n") || "",
@@ -1237,12 +1260,17 @@ function InteractionRuleEditor({
               </div>
             </div>
 
-            <details className="group rounded-md border bg-background px-3 py-2" open={!selectedInteractionEntry}>
-              <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-sm font-medium [&::-webkit-details-marker]:hidden">
-                <span>更换玩法</span>
-                <span className="flex shrink-0 items-center gap-2 text-xs font-normal text-muted-foreground">
+            <details className="group rounded-lg border border-primary/35 bg-primary/5 px-3 py-2 shadow-sm" open={!selectedInteractionEntry}>
+              <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-sm font-semibold text-primary [&::-webkit-details-marker]:hidden">
+                <span className="min-w-0">
+                  更换玩法入口
+                  <span className="ml-2 font-normal text-muted-foreground">
+                    当前：{moduleActionLabel}
+                  </span>
+                </span>
+                <span className="flex shrink-0 items-center gap-2 rounded-full border border-primary/25 bg-background px-2.5 py-1 text-xs font-medium text-foreground">
                   {interactionEntries.length} 个可选入口
-                  <ChevronRight className="h-4 w-4 transition-transform group-open:rotate-90" />
+                  <ChevronRight className="h-4 w-4 text-primary transition-transform group-open:rotate-90" />
                 </span>
               </summary>
               <div className="mt-3 space-y-3">
@@ -1333,6 +1361,9 @@ function InteractionRuleEditor({
                 value={rule.moduleStartText}
                 onChange={(e) => onPatch({ moduleStartText: e.target.value })}
               />
+              <div className="text-xs text-muted-foreground">
+                可用 <code>{"{规则名称}"}</code> 或 <code>{"{rule_name}"}</code>，发送时会替换成当前规则名称。
+              </div>
             </div>
           </div>
         ) : null}
@@ -1565,6 +1596,7 @@ export function BotTab({
   const [transferNoticeTemplate, setTransferNoticeTemplate] = useState(DEFAULT_TRANSFER_NOTICE_TEMPLATE);
   const [interactionQueryCommands, setInteractionQueryCommands] = useState(DEFAULT_INTERACTION_QUERY_COMMANDS);
   const [interactionQueryResponseTemplate, setInteractionQueryResponseTemplate] = useState(DEFAULT_INTERACTION_QUERY_RESPONSE_TEMPLATE);
+  const [interactionQueryItemTemplate, setInteractionQueryItemTemplate] = useState(DEFAULT_INTERACTION_QUERY_ITEM_TEMPLATE);
   const [interactionQueryEmptyMessage, setInteractionQueryEmptyMessage] = useState(DEFAULT_INTERACTION_QUERY_EMPTY_MESSAGE);
   const [interactionRules, setInteractionRules] = useState<InteractionRuleForm[]>([
     defaultRuleForm(0),
@@ -1646,6 +1678,9 @@ export function BotTab({
       );
       setInteractionQueryResponseTemplate(
         interactionQ.data.query_response_template || DEFAULT_INTERACTION_QUERY_RESPONSE_TEMPLATE,
+      );
+      setInteractionQueryItemTemplate(
+        interactionQ.data.query_item_template || DEFAULT_INTERACTION_QUERY_ITEM_TEMPLATE,
       );
       setInteractionQueryEmptyMessage(
         interactionQ.data.query_empty_message || DEFAULT_INTERACTION_QUERY_EMPTY_MESSAGE,
@@ -1760,6 +1795,7 @@ export function BotTab({
       status_commands: firstRule.status_commands ?? [],
       query_commands: parseTextLines(interactionQueryCommands),
       query_response_template: interactionQueryResponseTemplate.trim() || DEFAULT_INTERACTION_QUERY_RESPONSE_TEMPLATE,
+      query_item_template: interactionQueryItemTemplate.trim() || DEFAULT_INTERACTION_QUERY_ITEM_TEMPLATE,
       query_empty_message: interactionQueryEmptyMessage.trim() || DEFAULT_INTERACTION_QUERY_EMPTY_MESSAGE,
       disabled_message: firstRule.disabled_message ?? null,
       valid_seconds: firstRule.valid_seconds ?? 600,
@@ -2445,7 +2481,7 @@ export function BotTab({
                     群内查询指令、列表模板和空状态提示
                   </span>
                 </summary>
-                <div className="grid gap-3 border-t p-3 lg:grid-cols-[minmax(180px,260px)_minmax(280px,1fr)]">
+                <div className="grid gap-3 border-t p-3 xl:grid-cols-[minmax(180px,250px)_minmax(260px,1fr)_minmax(260px,360px)]">
                   <div className="space-y-1.5">
                     <Label>玩法查询指令</Label>
                     <Textarea
@@ -2462,28 +2498,61 @@ export function BotTab({
                   <div className="space-y-1.5">
                     <Label>玩法查询消息模板</Label>
                     <Textarea
-                      rows={4}
-                      className="min-h-[96px] resize-y py-2 text-xs leading-5"
+                      rows={3}
+                      className="min-h-[78px] resize-y py-2 text-xs leading-5"
                       placeholder={DEFAULT_INTERACTION_QUERY_RESPONSE_TEMPLATE}
                       value={interactionQueryResponseTemplate}
                       onChange={(e) => setInteractionQueryResponseTemplate(e.target.value)}
                     />
-                    <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(220px,0.8fr)]">
-                      <div className="grid gap-1 text-xs text-muted-foreground sm:grid-cols-2">
-                        <span><code>{"{items}"}</code>：玩法列表</span>
-                        <span><code>{"{count}"}</code>：开启数量</span>
-                        <span><code>{"{closed_count}"}</code>：临时关闭数量</span>
-                        <span><code>{"{chat_id}"}</code>：当前群 ID</span>
-                      </div>
-                      <div className="space-y-1.5">
-                        <Label>无可用玩法提示</Label>
-                        <Input
-                          value={interactionQueryEmptyMessage}
-                          placeholder={DEFAULT_INTERACTION_QUERY_EMPTY_MESSAGE}
-                          onChange={(e) => setInteractionQueryEmptyMessage(e.target.value)}
-                        />
-                      </div>
+                    <div className="grid gap-1 text-xs text-muted-foreground sm:grid-cols-2">
+                      <span><code>{"{items}"}</code>：由右侧单项模板生成</span>
+                      <span><code>{"{count}"}</code>：开启数量</span>
+                      <span><code>{"{closed_count}"}</code>：临时关闭数量</span>
+                      <span><code>{"{chat_id}"}</code>：当前群 ID</span>
                     </div>
+                    <div className="space-y-1.5">
+                      <Label>玩法列表单项模板</Label>
+                      <Textarea
+                        rows={3}
+                        className="min-h-[78px] resize-y py-2 text-xs leading-5"
+                        placeholder={DEFAULT_INTERACTION_QUERY_ITEM_TEMPLATE}
+                        value={interactionQueryItemTemplate}
+                        onChange={(e) => setInteractionQueryItemTemplate(e.target.value)}
+                      />
+                    </div>
+                    <div className="grid gap-1 text-xs text-muted-foreground sm:grid-cols-2">
+                      <span><code>{"{index}"}</code>：序号</span>
+                      <span><code>{"{name}"}</code>：规则名称</span>
+                      <span><code>{"{trigger}"}</code>：触发方式</span>
+                      <span><code>{"{kind}"}</code>：玩法类型</span>
+                      <span><code>{"{limit}"}</code>：限制摘要</span>
+                      <span><code>{"{module_key}"}</code>：插件 key</span>
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label>无可用玩法提示</Label>
+                      <Input
+                        value={interactionQueryEmptyMessage}
+                        placeholder={DEFAULT_INTERACTION_QUERY_EMPTY_MESSAGE}
+                        onChange={(e) => setInteractionQueryEmptyMessage(e.target.value)}
+                      />
+                    </div>
+                  </div>
+                  <div className="rounded-md border bg-background p-3 text-xs">
+                    <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                      <div className="font-medium">查询预览</div>
+                      <span className="text-[11px] text-muted-foreground">示例变量渲染</span>
+                    </div>
+                    <TelegramHtmlPreview
+                      value={renderInteractionQueryTemplatePreview(interactionQueryResponseTemplate, interactionQueryItemTemplate)}
+                      mode="html"
+                      title="交互 Bot"
+                      caption="玩法查询"
+                      hints={[
+                        { label: "count", value: "2" },
+                        { label: "closed", value: "0" },
+                        { label: "chat", value: "-1001234567890" },
+                      ]}
+                    />
                   </div>
                 </div>
               </details>
@@ -2513,10 +2582,28 @@ export function BotTab({
                   onChange={(e) => setInteractionQueryResponseTemplate(e.target.value)}
                 />
                 <div className="grid gap-1 text-xs text-muted-foreground sm:grid-cols-2">
-                  <span><code>{"{items}"}</code>：玩法列表</span>
+                  <span><code>{"{items}"}</code>：由单项模板生成</span>
                   <span><code>{"{count}"}</code>：开启数量</span>
                   <span><code>{"{closed_count}"}</code>：临时关闭数量</span>
                   <span><code>{"{chat_id}"}</code>：当前群 ID</span>
+                </div>
+                <div className="space-y-1.5">
+                  <Label>玩法列表单项模板</Label>
+                  <Textarea
+                    rows={3}
+                    className="min-h-[78px] resize-y py-2 text-xs leading-5"
+                    placeholder={DEFAULT_INTERACTION_QUERY_ITEM_TEMPLATE}
+                    value={interactionQueryItemTemplate}
+                    onChange={(e) => setInteractionQueryItemTemplate(e.target.value)}
+                  />
+                </div>
+                <div className="grid gap-1 text-xs text-muted-foreground sm:grid-cols-2">
+                  <span><code>{"{index}"}</code>：序号</span>
+                  <span><code>{"{name}"}</code>：规则名称</span>
+                  <span><code>{"{trigger}"}</code>：触发方式</span>
+                  <span><code>{"{kind}"}</code>：玩法类型</span>
+                  <span><code>{"{limit}"}</code>：限制摘要</span>
+                  <span><code>{"{module_key}"}</code>：插件 key</span>
                 </div>
                 <div className="space-y-1.5">
                   <Label>无可用玩法提示</Label>
@@ -2533,7 +2620,7 @@ export function BotTab({
                   <span className="text-[11px] text-muted-foreground">示例变量渲染</span>
                 </div>
                 <TelegramHtmlPreview
-                  value={renderInteractionQueryTemplatePreview(interactionQueryResponseTemplate)}
+                  value={renderInteractionQueryTemplatePreview(interactionQueryResponseTemplate, interactionQueryItemTemplate)}
                   mode="html"
                   title="交互 Bot"
                   caption="玩法查询"
@@ -2711,7 +2798,14 @@ export function BotTab({
                 )}
               </div>
             </div>
-            <div className="pointer-events-none sticky bottom-3 z-30 mt-3 flex justify-end pb-[env(safe-area-inset-bottom)]">
+            <div
+              className={cn(
+                "pointer-events-none z-30 flex justify-end pb-[env(safe-area-inset-bottom)]",
+                isInteractionCenter
+                  ? "fixed bottom-6 right-6 sm:right-8"
+                  : "sticky bottom-3 mt-3",
+              )}
+            >
               <Button
                 type="button"
                 size="sm"

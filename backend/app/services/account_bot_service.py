@@ -19,6 +19,7 @@ from ..account_bot_defaults import (
     DEFAULT_INTERACTION_DISABLED_MESSAGE,
     DEFAULT_INTERACTION_QUERY_COMMANDS,
     DEFAULT_INTERACTION_QUERY_EMPTY_MESSAGE,
+    DEFAULT_INTERACTION_QUERY_ITEM_TEMPLATE,
     DEFAULT_INTERACTION_QUERY_RESPONSE_TEMPLATE,
     DEFAULT_INTERACTION_RESPONSE_TEMPLATE,
     DEFAULT_TRANSFER_NOTICE_TEMPLATE,
@@ -203,6 +204,7 @@ def default_transfer_notice_config() -> dict[str, Any]:
         "status_commands": [],
         "query_commands": list(DEFAULT_INTERACTION_QUERY_COMMANDS),
         "query_response_template": DEFAULT_INTERACTION_QUERY_RESPONSE_TEMPLATE,
+        "query_item_template": DEFAULT_INTERACTION_QUERY_ITEM_TEMPLATE,
         "query_empty_message": DEFAULT_INTERACTION_QUERY_EMPTY_MESSAGE,
         "disabled_message": DEFAULT_INTERACTION_DISABLED_MESSAGE,
         "valid_seconds": 600,
@@ -332,6 +334,9 @@ def normalize_transfer_notice_config(raw: Any) -> dict[str, Any]:
     query_response_template = str(base.get("query_response_template") or "").strip()
     base["query_response_template"] = query_response_template or DEFAULT_INTERACTION_QUERY_RESPONSE_TEMPLATE
     base["query_response_template"] = base["query_response_template"][:2000]
+    query_item_template = str(base.get("query_item_template") or "").strip()
+    base["query_item_template"] = query_item_template or DEFAULT_INTERACTION_QUERY_ITEM_TEMPLATE
+    base["query_item_template"] = base["query_item_template"][:1000]
     query_empty_message = str(base.get("query_empty_message") or "").strip()
     base["query_empty_message"] = query_empty_message or DEFAULT_INTERACTION_QUERY_EMPTY_MESSAGE
     base["query_empty_message"] = base["query_empty_message"][:500]
