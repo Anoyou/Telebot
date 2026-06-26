@@ -267,7 +267,7 @@ export function AccountDetail() {
               <MessageCircle className="h-4 w-4" /> 管理 Bot
             </TabsTrigger>
             <TabsTrigger value="interaction-bot" className="shrink-0 gap-1.5">
-              <Gamepad2 className="h-4 w-4" /> 联动交互 Bot
+              <Gamepad2 className="h-4 w-4" /> 交互通道
             </TabsTrigger>
             <TabsTrigger value="rate" className="shrink-0 gap-1.5">
               <Gauge className="h-4 w-4" /> 风控基础
@@ -640,7 +640,7 @@ export function AccountDetail() {
           <BotTab aid={aid} mode="management" />
         </TabsContent>
 
-        {/* 联动交互 Bot */}
+        {/* 交互 Bot 通道 */}
         <TabsContent value="interaction-bot">
           <BotTab aid={aid} mode="interaction" />
         </TabsContent>

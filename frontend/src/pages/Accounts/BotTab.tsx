@@ -2291,14 +2291,22 @@ export function BotTab({
       <Card className={cn(isInteractionCenter && "border-0 bg-transparent shadow-none")}>
         {isInteractionCenter ? null : (
         <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-base">
-            <Bot className="h-4 w-4" /> 联动交互 Bot
-          </CardTitle>
-          <CardDescription>
-            为了减少娱乐插件的高频率 API 调用会对人形 Bot 产生封号的风险，特有此方案。<br />
-            通过给人形 Bot 发特定格式消息, 实现娱乐功能。<br />
-            交互 Bot 能帮你独立监听指定群里的 “+数字“这类消息，然后帮你互动；转账结果通知 Bot 可用于发模拟转账通知。
-          </CardDescription>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div className="space-y-1">
+              <CardTitle className="flex items-center gap-2 text-base">
+                <Bot className="h-4 w-4" /> 交互 Bot 通道
+              </CardTitle>
+              <CardDescription>
+                这里维护当前账号的交互 Bot、通知 Bot 和通知模板。规则、玩法、触发词和运行状态请到交互中心统一配置。
+              </CardDescription>
+            </div>
+            <Button asChild variant="outline" size="sm" className="shrink-0">
+              <Link to={`/interaction?aid=${aid}`}>
+                进入交互中心
+                <ChevronRight className="ml-1 h-4 w-4" />
+              </Link>
+            </Button>
+          </div>
         </CardHeader>
         )}
         <CardContent className={cn("space-y-4", isInteractionCenter && "flex flex-col gap-4 space-y-0 p-0")}>
@@ -2308,7 +2316,7 @@ export function BotTab({
               <div>
                 <div className="text-sm font-medium">状态总览</div>
                 <div className="text-xs text-muted-foreground">
-                  先看联动是否就绪，再进入身份配置、规则编辑和奖励限制。
+                  先看账号通道是否就绪；规则、玩法和奖励限制建议在交互中心维护。
                 </div>
               </div>
               <label className="flex items-center justify-between gap-2 rounded-md border bg-background px-3 py-2 text-sm sm:min-w-[136px]">
@@ -2880,10 +2888,7 @@ export function BotTab({
             </div>
             <div
               className={cn(
-                "pointer-events-none z-30 flex justify-end pb-[env(safe-area-inset-bottom)]",
-                isInteractionCenter
-                  ? "fixed bottom-6 right-6 sm:right-8"
-                  : "sticky bottom-3 mt-3",
+                "pointer-events-none fixed bottom-[calc(5rem+env(safe-area-inset-bottom))] right-4 z-30 flex justify-end sm:bottom-6 sm:right-8",
               )}
             >
               <Button
