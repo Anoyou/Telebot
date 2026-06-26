@@ -150,6 +150,7 @@ guess_number/
 | `description` | 推荐 | 告诉用户这个入口做什么 |
 | `launch_mode` | 是 | `bridge` / `direct` / `hybrid`，决定交互 Bot 如何启动插件 |
 | `session_scope` | 是 | `chat` / `user` / `none`，决定平台如何保存会话和路由后续消息 |
+| `participant_policy` | 推荐 | `open_race` / `solo_owner` / `paid_pool` / `notify_only`，说明谁能参与后续互动 |
 | `events` | 是 | 支持的事件白名单，例如 `keyword`、`payment_confirmed`、`message`、`callback_query`、`session_close` |
 | `command_fallback` | 按需 | 交互入口不可用时是否提示或受控回退到原 UserBot 命令 |
 | `preserve_command_trigger` | 是 | 必须为 `true`，表示原有命令触发不受交互入口影响 |
@@ -208,8 +209,13 @@ guess_number/
 | `reply_to` | 应引用的原消息或被回复对象；中奖公告必须尽量保留 |
 | `trigger` | 命中的规则、入口、事件和消息，用于排障与幂等 |
 | `session` | 平台会话标识、作用域、TTL 和是否新建 |
+| `payment` | 可信转账通知 Bot 已确认到账后的结构化凭证；普通 `+金额` 文本不等于到账 |
+| `player` | 付费开局绑定的玩家身份，独玩/按钮玩法应优先读取它 |
+| `source_actor` | 实际发出事件消息的 Bot/用户，转账触发时通常是转账通知 Bot |
 
-`payload_contract` 声明插件需要哪些信封和事件字段，`input_schema` 只声明规则可覆盖参数。`source` 不代表中奖用户，`actor` 才是行为主体；`reply_to` 不等同于当前消息，通常用于让结果回复原答案；`trigger` 用来还原“为什么这次调用发生”；`session` 要和插件内部状态 key 的粒度一致。
+`payload_contract` 声明插件需要哪些信封和事件字段，`input_schema` 只声明规则可覆盖参数。`source` 不代表中奖用户，`source_actor` 不代表玩家，`actor` 是当前事件行为主体；付费开局时新插件优先用 `player`，到账判断只看 `payment.status=confirmed`。`reply_to` 不等同于当前消息，通常用于让结果回复原答案；`trigger` 用来还原“为什么这次调用发生”；`session` 要和插件内部状态 key 的粒度一致。
+
+付费触发是“双证据”模型：UserBot/回复上下文用于补充付款玩家 `user_id`，可信转账通知 Bot 用于确认真实到账、金额和收款人。余额不足、只发送 `+1000` 但没有转账通知时，平台不会生成 `payment_confirmed`。如果转账通知只有付款人名称，独玩或按钮玩法应声明 `participant_policy=solo_owner`，平台会要求付款人点击确认后再启动，避免把转账通知 Bot 误当玩家。
 
 插件返回动作时必须遵守 `result_contract`。`send_via` 是发送者白名单，常见值只有：
 
@@ -453,11 +459,12 @@ plugin.json.config_schema
 - [ ] 只有需要交互 Bot 规则触发的插件声明 `interaction_entries`；纯工具类和纯自动化类插件保持空或不填。
 - [ ] 交互入口声明了 `launch_mode`，且取值只用 `bridge` / `direct` / `hybrid`。
 - [ ] 交互入口声明了 `events`、`session_scope`、`session_policy`、`payload_contract`、`result_contract`，并与插件实现一致。
+- [ ] 独玩/按钮入口声明 `participant_policy=solo_owner`；抢答/竞猜入口声明或默认使用 `open_race`。
 - [ ] `preserve_command_trigger=true`；新增交互入口后，原有 UserBot 命令仍按原指令名、参数和权限触发。
 - [ ] 如声明 `command_fallback`，只做提示或受控回退，不让普通 incoming 消息直接进入 `on_command`。
 - [ ] 返回动作的 `send_via` 都命中 `result_contract.send_via` 白名单。
 - [ ] 涉及奖金/补发/对账的插件声明了 `settlement`，且交互 Bot 只公告结果，不直接执行钱相关动作。
-- [ ] 插件按 `source` / `actor` / `reply_to` / `trigger` / `session` 信封读取输入，不依赖转账通知原文或 Bot Token。
+- [ ] 插件按 `source` / `source_actor` / `actor` / `payment` / `player` / `reply_to` / `trigger` / `session` 信封读取输入，不依赖转账通知原文或 Bot Token。
 - [ ] 启动日志或主要交互消息包含当前插件版本，方便确认远程热更新是否生效。
 - [ ] `permissions` 覆盖实际调用的 `ctx.client` 方法。
 - [ ] 指令可触发，指令改名后热重载生效。

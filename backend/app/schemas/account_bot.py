@@ -21,6 +21,7 @@ AccountBotRole = Literal["viewer", "operator", "admin"]
 InteractionTriggerMode = Literal["payment", "keyword", "both"]
 InteractionAmountMatchMode = Literal["eq", "gte"]
 InteractionConcurrency = Literal["chat", "user", "none"]
+InteractionParticipantPolicy = Literal["open_race", "solo_owner", "paid_pool", "notify_only"]
 InteractionEventType = Literal["payment_confirmed", "keyword", "message", "callback_query", "session_close"]
 InteractionSendVia = Literal["interaction_bot", "userbot_reply", "bbot_notice"]
 
@@ -187,6 +188,7 @@ class AccountBotInteractionRule(BaseModel):
     module_key: str | None = Field(default=None, max_length=64)
     module_action: str | None = Field(default=None, max_length=64)
     module_session_scope: InteractionConcurrency | None = None
+    participant_policy: InteractionParticipantPolicy | None = None
     module_prize: int | None = Field(default=None, ge=1)
     module_config: dict[str, Any] = Field(default_factory=dict)
     module_start_text: str | None = Field(default=None, max_length=500)
@@ -299,6 +301,7 @@ class AccountBotInteractionConfig(BaseModel):
     module_key: str | None = Field(default=None, max_length=64)
     module_action: str | None = Field(default=None, max_length=64)
     module_session_scope: InteractionConcurrency | None = None
+    participant_policy: InteractionParticipantPolicy | None = None
     module_prize: int | None = Field(default=None, ge=1)
     module_config: dict[str, Any] = Field(default_factory=dict)
     module_start_text: str | None = Field(default=None, max_length=500)
@@ -336,6 +339,7 @@ class AccountBotInteractionConfig(BaseModel):
         "module_key",
         "module_action",
         "module_session_scope",
+        "participant_policy",
         "module_start_text",
         "user_cooldown_seconds",
         "disabled_message",

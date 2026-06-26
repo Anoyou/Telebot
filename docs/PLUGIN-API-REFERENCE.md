@@ -535,6 +535,25 @@ class GuessNumberPlugin(Plugin):
     "display_name": "AAA",
     "username": "aaa"
   },
+  "source_actor": {
+    "user_id": 8980553289,
+    "display_name": "转账通知 Bot"
+  },
+  "payment": {
+    "status": "confirmed",
+    "amount": 100,
+    "payer_user_id": 111,
+    "payer_name": "AAA",
+    "receiver_name": "BBB",
+    "notice_sender_user_id": 8980553289,
+    "notice_message_id": 81
+  },
+  "player": {
+    "user_id": 111,
+    "display_name": "AAA",
+    "identity_key": "tg:111",
+    "identity_confidence": "reply_context"
+  },
   "reply_to": {
     "message_id": 99,
     "user_id": 111
@@ -572,12 +591,26 @@ class GuessNumberPlugin(Plugin):
 | 字段 | 说明 |
 | --- | --- |
 | `source` | 事件来源和发送通道，不等同于中奖用户；用于判断来自交互 Bot、UserBot 还是平台内部 |
-| `actor` | 触发本次事件的人，答题、中奖、个人限流和审计应优先用它 |
+| `source_actor` | 实际发来本条 Telegram 消息的 Bot/用户。转账触发时通常是可信转账通知 Bot，不应当作玩家 |
+| `actor` | 当前事件的行为主体。答题、按钮点击、关键词触发时通常就是发送者；付费开局时平台会尽量映射到付款玩家以兼容旧插件 |
+| `payment` | 可信转账通知 Bot 已确认到账后的结构化凭证，包含金额、付款人、收款人和通知消息信息 |
+| `player` | 付费开局绑定的玩家身份。独玩/按钮玩法应优先读取它，并检查 `player.user_id` 是否存在 |
 | `reply_to` | 本动作应引用的原消息或被回复对象，中奖公告必须尽量带上 |
 | `trigger` | 命中的规则、入口、消息和触发类型；用于排障和幂等 |
 | `session` | 平台会话标识、作用域、TTL 和是否新建；插件内部状态 key 应与它一致 |
 
 `payload_contract` 用来声明插件对上述信封的要求。平台和前端可以据此校验规则是否能保存，排障时也能判断是“事件没到”还是“字段不满足”。不要把敏感原文、Bot Token、完整付款通知文本写进信封；只传插件业务需要的结构化字段。
+
+付费触发有两个证据源：UserBot/回复上下文负责补充付款玩家身份，可信转账通知 Bot 负责证明到账成功。插件不得把普通 `+金额` 文本当作到账依据；只有 `event.type=payment_confirmed` 且 `payment.status=confirmed` 才表示平台已经通过转账通知完成金额、收款人和规则校验。如果转账通知只提供付款人名称，平台会把 `player.identity_confidence` 标为 `name_only`；`participant_policy=solo_owner` 或 `paid_pool` 的入口会先要求付款人点击确认来获得真实 `player.user_id`。
+
+入口可声明 `participant_policy` 来描述参与边界：
+
+| 值 | 说明 |
+| --- | --- |
+| `open_race` | 一人付款/关键词开局，全群可参与抢答或竞猜 |
+| `solo_owner` | 只有开局付款人/触发人可继续操作，适合 21 点、个人按钮流程 |
+| `paid_pool` | 只有已确认付费的玩家池可参与，适合多人付费入场 |
+| `notify_only` | 只做通知或一次性动作，不建立玩家操作边界 |
 
 `interaction_entries` 中的 `session_scope` 是插件会话作用域，必须按插件业务形态声明。它和交互规则里的 `concurrency` 不是一回事：
 

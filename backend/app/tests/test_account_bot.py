@@ -916,8 +916,18 @@ def test_interaction_payment_payload_preserves_payer_user_id() -> None:
     assert payload["source"]["chat_id"] == -100123
     assert payload["actor"]["user_id"] == 111
     assert payload["actor"]["display_name"] == "AAA"
+    assert payload["source_actor"]["user_id"] == 456
+    assert payload["source_actor"]["display_name"] == "TransferBot"
+    assert payload["payment"]["amount"] == 10003
+    assert payload["payment"]["payer_user_id"] == 111
+    assert payload["payment"]["notice_sender_user_id"] == 456
+    assert payload["player"]["user_id"] == 111
+    assert payload["player"]["display_name"] == "AAA"
+    assert payload["player"]["identity_key"] == "tg:111"
+    assert payload["player"]["identity_confidence"] == "verified_user_id"
     assert payload["trigger"]["entry_key"] == "start_lottery_plus"
     assert payload["session"]["scope"] == "chat"
+    assert payload["session"]["participant_policy"] == "open_race"
     assert payload["session"]["ttl_seconds"] == 600
 
 
@@ -1205,10 +1215,62 @@ async def test_payment_interaction_payload_uses_replied_user_as_payer(monkeypatc
     assert payload["actor"]["user_id"] == 111
     assert payload["actor"]["display_name"] == "玩家A"
     assert payload["actor"]["username"] == "aaa"
+    assert payload["source_actor"]["user_id"] == 456
+    assert payload["player"]["user_id"] == 111
+    assert payload["player"]["identity_confidence"] == "reply_context"
+    assert payload["payment"]["payer_user_id"] == 111
+    assert payload["payment"]["notice_sender_user_id"] == 456
     assert payload["sender_user_id"] == 456
     assert payload["sender_name"] == "TransferBot"
     assert payload["session"]["key"] == account_bot_runtime._interaction_session_key(1, rule, -100123, 111)
     assert payload["settlement"]["winner_user_id"] == 111
+    assert payload["settlement"]["winner_name"] == "玩家A"
+
+
+@pytest.mark.asyncio
+async def test_payment_payload_name_only_does_not_fallback_payer_to_notice_bot(monkeypatch) -> None:
+    incoming = account_bot_runtime.Incoming(
+        account_id=1,
+        token="bbot-token",
+        update_id=10,
+        user_id=456,
+        chat_id=-100123,
+        message_id=70,
+        text="转账成功\n付款人：玩家A\n收款人：Owner\n金额：10",
+        display_name="TransferBot",
+    )
+    rule = {
+        "id": "game24-paid",
+        "name": "24 点",
+        "module_key": "game24",
+        "module_action": "start_paid_game",
+        "module_session_scope": "chat",
+        "participant_policy": "open_race",
+        "valid_seconds": 600,
+        "module_prize": 10,
+    }
+
+    monkeypatch.setattr(account_bot_runtime, "_load_account_holder_label", AsyncMock(return_value="Owner"))
+    monkeypatch.setattr(account_bot_runtime, "_resolve_payout_mode", AsyncMock(return_value="manual"))
+
+    payload = await account_bot_runtime._interaction_module_payload_async(
+        incoming,
+        rule,
+        {"payer_name": "玩家A", "receiver_name": "Owner", "amount": 10},
+        event_type="payment_confirmed",
+    )
+
+    assert payload["payer_user_id"] is None
+    assert payload["payer_name"] == "玩家A"
+    assert payload["actor"]["user_id"] is None
+    assert payload["actor"]["display_name"] == "玩家A"
+    assert payload["source_actor"]["user_id"] == 456
+    assert payload["player"]["user_id"] is None
+    assert payload["player"]["identity_key"] == "name:玩家a"
+    assert payload["player"]["identity_confidence"] == "name_only"
+    assert payload["payment"]["payer_user_id"] is None
+    assert payload["payment"]["notice_sender_user_id"] == 456
+    assert payload["settlement"]["winner_user_id"] is None
     assert payload["settlement"]["winner_name"] == "玩家A"
 
 
@@ -1993,6 +2055,12 @@ async def test_transfer_notice_reply_payer_is_used_for_module_owner(monkeypatch)
     assert payload["payer_name"] == "玩家A"
     assert payload["actor"]["user_id"] == 111
     assert payload["actor"]["display_name"] == "玩家A"
+    assert payload["source_actor"]["user_id"] == 456
+    assert payload["source_actor"]["display_name"] == "TransferBot"
+    assert payload["player"]["user_id"] == 111
+    assert payload["player"]["identity_confidence"] == "reply_context"
+    assert payload["payment"]["payer_user_id"] == 111
+    assert payload["payment"]["notice_sender_user_id"] == 456
     assert payload["sender_user_id"] == 456
     assert payload["sender_name"] == "TransferBot"
     assert payload["session"]["key"] == account_bot_runtime._interaction_session_key(
@@ -2010,6 +2078,332 @@ async def test_transfer_notice_reply_payer_is_used_for_module_owner(monkeypatch)
     assert payer_key in redis.data
     assert '"started_by_user_id": 111' in redis.data[payer_key]
     assert '"source_user_id": 456' in redis.data[payer_key]
+
+
+@pytest.mark.asyncio
+async def test_solo_payment_without_user_id_waits_for_payer_confirmation(monkeypatch) -> None:
+    class _DB:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+        async def commit(self):
+            return None
+
+        async def get(self, *_args):  # noqa: ANN002
+            return None
+
+    redis = _MemoryRedis()
+    run_entry = AsyncMock(return_value=(True, None, [{"type": "send_message", "text": "已开始"}]))
+    send = AsyncMock()
+    monkeypatch.setattr(account_bot_runtime, "AsyncSessionLocal", lambda: _DB())
+    monkeypatch.setattr(account_bot_runtime, "get_redis", lambda: redis)
+    monkeypatch.setattr(account_bot_runtime, "_run_worker_interaction_entry", run_entry)
+    monkeypatch.setattr(account_bot_service, "send_message", send)
+    monkeypatch.setattr(account_bot_runtime.audit, "write", AsyncMock())
+    monkeypatch.setattr(
+        account_bot_service,
+        "get_transfer_notice_config",
+        AsyncMock(
+            return_value={
+                "enabled": True,
+                "trusted_bot_id": 456,
+                "rules": [
+                    {
+                        "id": "blackjack-paid",
+                        "name": "21 点",
+                        "enabled": True,
+                        "chat_ids": [-100123],
+                        "trigger_mode": "payment",
+                        "trigger_texts": ["转账成功"],
+                        "receiver_text": "Owner",
+                        "amount": 10,
+                        "action": "module",
+                        "module_key": "blackjack",
+                        "module_action": "start_blackjack",
+                        "module_session_scope": "chat",
+                        "participant_policy": "solo_owner",
+                        "concurrency": "chat",
+                        "module_prize": 10,
+                    },
+                ],
+            }
+        ),
+    )
+
+    await account_bot_runtime._handle_interaction_update(
+        1,
+        "bbot-token",
+        {
+            "update_id": 12,
+            "message": {
+                "message_id": 120,
+                "text": "转账成功\n付款人：玩家A\n收款人：Owner\n金额：10",
+                "from": {"id": 456, "first_name": "TransferBot", "is_bot": True},
+                "chat": {"id": -100123, "type": "supergroup"},
+            },
+        },
+    )
+
+    run_entry.assert_not_awaited()
+    assert send.await_count == 1
+    assert "还需要绑定真实 Telegram 用户" in send.await_args.args[2]
+    reply_markup = send.await_args.kwargs["reply_markup"]
+    callback_data = reply_markup["inline_keyboard"][0][0]["callback_data"]
+    assert callback_data.startswith("ip:")
+    assert any(key.startswith("account_bot:interaction_payment_confirm:") for key in redis.data)
+
+
+@pytest.mark.asyncio
+async def test_payment_confirmation_callback_starts_solo_module_with_clicker_as_player(monkeypatch) -> None:
+    class _DB:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+        async def commit(self):
+            return None
+
+        async def get(self, *_args):  # noqa: ANN002
+            return None
+
+    rule = {
+        "id": "blackjack-paid",
+        "name": "21 点",
+        "enabled": True,
+        "chat_ids": [-100123],
+        "trigger_mode": "payment",
+        "trigger_texts": ["转账成功"],
+        "receiver_text": "Owner",
+        "amount": 10,
+        "action": "module",
+        "module_key": "blackjack",
+        "module_action": "start_blackjack",
+        "module_session_scope": "chat",
+        "participant_policy": "solo_owner",
+        "concurrency": "chat",
+        "module_prize": 10,
+    }
+    redis = _MemoryRedis()
+    nonce = "confirm-token"
+    redis.data[account_bot_runtime._interaction_payment_confirm_key(nonce)] = json.dumps(
+        {
+            "account_id": 1,
+            "rule": rule,
+            "parsed": {"payer_name": "玩家A", "receiver_name": "Owner", "amount": 10},
+            "incoming": {
+                "update_id": 12,
+                "user_id": 456,
+                "chat_id": -100123,
+                "chat_type": "supergroup",
+                "message_id": 120,
+                "text": "转账成功\n付款人：玩家A\n收款人：Owner\n金额：10",
+                "display_name": "TransferBot",
+                "entity_languages": [],
+            },
+        },
+        ensure_ascii=False,
+    )
+    run_entry = AsyncMock(return_value=(True, None, [{"type": "send_message", "text": "已开始"}]))
+    answer = AsyncMock()
+    send = AsyncMock()
+    monkeypatch.setattr(account_bot_runtime, "AsyncSessionLocal", lambda: _DB())
+    monkeypatch.setattr(account_bot_runtime, "get_redis", lambda: redis)
+    monkeypatch.setattr(account_bot_runtime, "_run_worker_interaction_entry", run_entry)
+    monkeypatch.setattr(account_bot_service, "send_message", send)
+    monkeypatch.setattr(account_bot_service, "answer_callback", answer)
+    monkeypatch.setattr(account_bot_runtime.audit, "write", AsyncMock())
+    monkeypatch.setattr(
+        account_bot_service,
+        "get_transfer_notice_config",
+        AsyncMock(return_value={"enabled": True, "trusted_bot_id": 456, "rules": [rule]}),
+    )
+
+    await account_bot_runtime._handle_interaction_update(
+        1,
+        "bbot-token",
+        {
+            "update_id": 13,
+            "callback_query": {
+                "id": "confirm-callback",
+                "data": f"ip:{nonce}",
+                "from": {"id": 111, "first_name": "玩家A", "username": "aaa"},
+                "message": {
+                    "message_id": 121,
+                    "text": "付款人请点击下方按钮确认开始。",
+                    "chat": {"id": -100123, "type": "supergroup"},
+                },
+            },
+        },
+    )
+
+    assert run_entry.await_count == 1
+    payload = run_entry.await_args.kwargs["payload"]
+    assert payload["payer_user_id"] == 111
+    assert payload["payer_name"] == "玩家A"
+    assert payload["actor"]["user_id"] == 111
+    assert payload["source_actor"]["user_id"] == 456
+    assert payload["player"]["user_id"] == 111
+    assert payload["player"]["identity_confidence"] == "callback_confirmed"
+    assert payload["payment"]["payer_user_id"] == 111
+    assert payload["payment"]["notice_sender_user_id"] == 456
+    assert account_bot_runtime._interaction_payment_confirm_key(nonce) not in redis.data
+    answer.assert_awaited_once_with("bbot-token", "confirm-callback", text="已确认，正在启动玩法。", show_alert=False)
+
+
+@pytest.mark.asyncio
+async def test_payment_confirmation_callback_name_mismatch_keeps_ticket(monkeypatch) -> None:
+    class _DB:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+    rule = {
+        "id": "blackjack-paid",
+        "name": "21 点",
+        "enabled": True,
+        "chat_ids": [-100123],
+        "action": "module",
+        "module_key": "blackjack",
+        "module_action": "start_blackjack",
+        "participant_policy": "solo_owner",
+    }
+    redis = _MemoryRedis()
+    nonce = "confirm-token"
+    key = account_bot_runtime._interaction_payment_confirm_key(nonce)
+    redis.data[key] = json.dumps(
+        {
+            "account_id": 1,
+            "rule": rule,
+            "parsed": {"payer_name": "玩家A", "receiver_name": "Owner", "amount": 10},
+            "incoming": {
+                "update_id": 12,
+                "user_id": 456,
+                "chat_id": -100123,
+                "chat_type": "supergroup",
+                "message_id": 120,
+                "text": "转账成功\n付款人：玩家A\n收款人：Owner\n金额：10",
+                "display_name": "TransferBot",
+            },
+        },
+        ensure_ascii=False,
+    )
+    run_entry = AsyncMock()
+    answer = AsyncMock()
+    monkeypatch.setattr(account_bot_runtime, "AsyncSessionLocal", lambda: _DB())
+    monkeypatch.setattr(account_bot_runtime, "get_redis", lambda: redis)
+    monkeypatch.setattr(account_bot_runtime, "_run_worker_interaction_entry", run_entry)
+    monkeypatch.setattr(account_bot_service, "answer_callback", answer)
+
+    await account_bot_runtime._handle_interaction_update(
+        1,
+        "bbot-token",
+        {
+            "update_id": 14,
+            "callback_query": {
+                "id": "confirm-callback",
+                "data": f"ip:{nonce}",
+                "from": {"id": 222, "first_name": "别人", "username": "other"},
+                "message": {
+                    "message_id": 121,
+                    "text": "付款人请点击下方按钮确认开始。",
+                    "chat": {"id": -100123, "type": "supergroup"},
+                },
+            },
+        },
+    )
+
+    run_entry.assert_not_awaited()
+    assert key in redis.data
+    answer.assert_awaited_once_with(
+        "bbot-token",
+        "confirm-callback",
+        text="这条到账通知的付款人名称与你不一致。",
+        show_alert=True,
+    )
+
+
+@pytest.mark.asyncio
+async def test_solo_owner_session_blocks_other_user_callback(monkeypatch) -> None:
+    class _DB:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+    rule = {
+        "id": "blackjack-paid",
+        "name": "21 点",
+        "enabled": True,
+        "chat_ids": [-100123],
+        "trigger_mode": "payment",
+        "action": "module",
+        "module_key": "blackjack",
+        "module_action": "start_blackjack",
+        "module_session_scope": "chat",
+        "participant_policy": "solo_owner",
+    }
+    redis = _MemoryRedis()
+    await redis.set(
+        account_bot_runtime._interaction_session_key(1, rule, -100123, None),
+        json.dumps(
+            {
+                "account_id": 1,
+                "chat_id": -100123,
+                "rule_id": "blackjack-paid",
+                "module_key": "blackjack",
+                "entry_key": "start_blackjack",
+                "started_by_user_id": 111,
+                "source_user_id": 456,
+                "event_type": "payment_confirmed",
+            },
+            ensure_ascii=False,
+        ),
+    )
+    run_entry = AsyncMock()
+    answer = AsyncMock()
+    monkeypatch.setattr(account_bot_runtime, "AsyncSessionLocal", lambda: _DB())
+    monkeypatch.setattr(account_bot_runtime, "get_redis", lambda: redis)
+    monkeypatch.setattr(account_bot_runtime, "_run_worker_interaction_entry", run_entry)
+    monkeypatch.setattr(account_bot_service, "answer_callback", answer)
+    monkeypatch.setattr(
+        account_bot_service,
+        "get_transfer_notice_config",
+        AsyncMock(return_value={"enabled": True, "trusted_bot_id": 456, "rules": [rule]}),
+    )
+
+    await account_bot_runtime._handle_interaction_update(
+        1,
+        "bbot-token",
+        {
+            "update_id": 15,
+            "callback_query": {
+                "id": "blackjack-callback",
+                "data": "hit",
+                "from": {"id": 222, "first_name": "别人", "username": "other"},
+                "message": {
+                    "message_id": 122,
+                    "text": "21 点",
+                    "chat": {"id": -100123, "type": "supergroup"},
+                },
+            },
+        },
+    )
+
+    run_entry.assert_not_awaited()
+    answer.assert_awaited_once_with(
+        "bbot-token",
+        "blackjack-callback",
+        text="这不是你的玩法，请由付款或开局本人操作。",
+        show_alert=True,
+    )
 
 
 @pytest.mark.asyncio
@@ -4789,6 +5183,41 @@ async def test_interaction_action_edit_message_passes_reply_markup(monkeypatch) 
 
     assert edit.await_args.args[:4] == ("bbot-token", -100123, 77, "请选择")
     assert edit.await_args.kwargs["reply_markup"] == reply_markup
+
+
+@pytest.mark.asyncio
+async def test_interaction_action_save_message_id_key_is_validated(monkeypatch) -> None:
+    redis = _MemoryRedis()
+    send = AsyncMock(return_value={"message_id": 88})
+    monkeypatch.setattr(account_bot_runtime, "get_redis", lambda: redis)
+    monkeypatch.setattr(account_bot_service, "send_message", send)
+    incoming = account_bot_runtime.Incoming(
+        account_id=1,
+        token="bbot-token",
+        update_id=1,
+        user_id=456,
+        chat_id=-100123,
+        message_id=10,
+        text="",
+    )
+
+    await account_bot_runtime._apply_interaction_actions(
+        incoming,
+        [
+            {
+                "type": "send_message",
+                "text": "大厅",
+                "save_message_id_key": "dead_revolver:msg:1:-100123",
+            },
+            {
+                "type": "send_message",
+                "text": "非法 key",
+                "save_message_id_key": "bad key\nother",
+            },
+        ],
+    )
+
+    assert redis.data == {"dead_revolver:msg:1:-100123": "88"}
 
 
 @pytest.mark.asyncio

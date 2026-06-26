@@ -187,6 +187,7 @@ export interface AccountBotInteractionRule {
   module_key?: string | null;
   module_action?: string | null;
   module_session_scope?: "chat" | "user" | "none" | null;
+  participant_policy?: "open_race" | "solo_owner" | "paid_pool" | "notify_only" | null;
   module_config?: Record<string, unknown> | null;
   module_prize?: number | null;
   module_start_text?: string | null;
@@ -232,6 +233,7 @@ export interface AccountBotInteractionConfig {
   module_key?: string | null;
   module_action?: string | null;
   module_session_scope?: "chat" | "user" | "none" | null;
+  participant_policy?: "open_race" | "solo_owner" | "paid_pool" | "notify_only" | null;
   module_config?: Record<string, unknown> | null;
   module_prize?: number | null;
   module_start_text?: string | null;
@@ -285,6 +287,7 @@ export type AccountBotInteractionConfigUpdate = Pick<
   | "module_key"
   | "module_action"
   | "module_session_scope"
+  | "participant_policy"
   | "module_config"
   | "module_prize"
   | "module_start_text"
@@ -437,6 +440,7 @@ export interface FeatureInteractionEntry {
   launch_mode?: "bridge" | "direct" | "hybrid" | string | null;
   events?: string[];
   session_scope?: "chat" | "user" | "none" | string | null;
+  participant_policy?: "open_race" | "solo_owner" | "paid_pool" | "notify_only" | string | null;
   preserve_command_trigger?: boolean | null;
   command_fallback?: {
     enabled?: boolean;

@@ -209,6 +209,7 @@ type InteractionRuleForm = {
   moduleKey: string;
   moduleAction: string;
   moduleSessionScope: NonNullable<AccountBotInteractionRule["module_session_scope"]>;
+  participantPolicy: NonNullable<AccountBotInteractionRule["participant_policy"]>;
   moduleConfig: Record<string, unknown>;
   moduleStartText: string;
   userCooldownSeconds: string;
@@ -396,6 +397,7 @@ function defaultRuleForm(index = 0): InteractionRuleForm {
     moduleKey: "game24",
     moduleAction: "",
     moduleSessionScope: "chat",
+    participantPolicy: "open_race",
     moduleConfig: {},
     moduleStartText: DEFAULT_INTERACTION_MODULE_START_TEXT,
     userCooldownSeconds: "",
@@ -604,6 +606,17 @@ function defaultInteractionEntryForModule(
   return matches.length === 1 ? matches[0] : undefined;
 }
 
+function inferParticipantPolicy(
+  entry: FeatureInteractionEntry | undefined,
+  sessionScope: AccountBotInteractionRule["module_session_scope"] | string | null | undefined,
+): InteractionRuleForm["participantPolicy"] {
+  const entryPolicy = String(entry?.participant_policy || "").trim();
+  if (entryPolicy === "solo_owner" || entryPolicy === "paid_pool" || entryPolicy === "notify_only") {
+    return entryPolicy;
+  }
+  return sessionScope === "user" ? "solo_owner" : "open_race";
+}
+
 function filterInteractionEntries(
   entries: InteractionEntryOption[],
   profile: string,
@@ -656,6 +669,13 @@ function getModuleSessionScopeLabel(mode: NonNullable<AccountBotInteractionRule[
   return "按群会话";
 }
 
+function getParticipantPolicyLabel(mode: NonNullable<AccountBotInteractionRule["participant_policy"]>): string {
+  if (mode === "solo_owner") return "仅付款/开局本人";
+  if (mode === "paid_pool") return "仅付费玩家";
+  if (mode === "notify_only") return "只通知";
+  return "全群可参与";
+}
+
 function resolveRuleModuleSelection(
   rule: InteractionRuleForm,
   interactionEntries: InteractionEntryOption[],
@@ -692,11 +712,22 @@ function ruleFormFromRule(
   rule: AccountBotInteractionRule,
   index: number,
   fallbackChatIds: number[] = [],
+  interactionEntries: InteractionEntryOption[] = [],
 ): InteractionRuleForm {
   const chatIds = rule.chat_ids?.length ? rule.chat_ids : fallbackChatIds;
   const prize = rule.action === "module" && rule.module_prize != null
     ? rule.module_prize
     : rule.math_prize || 123;
+  const moduleKey = rule.module_key || "game24";
+  const moduleAction = rule.module_action || "";
+  const selectedEntry = interactionEntries.find((item) =>
+    item.featureKey === moduleKey && item.entry.key === moduleAction,
+  ) ?? defaultInteractionEntryForModule(interactionEntries, moduleKey);
+  const moduleSessionScope = rule.module_session_scope || (
+    selectedEntry?.entry.session_scope === "user" || selectedEntry?.entry.session_scope === "none"
+      ? selectedEntry.entry.session_scope
+      : "chat"
+  );
   return {
     id: rule.id || `rule-${index + 1}`,
     name: rule.name || `规则 ${index + 1}`,
@@ -713,9 +744,10 @@ function ruleFormFromRule(
     amountMatchMode: rule.amount_match_mode || "eq",
     action: rule.action || "notice",
     mathPrize: String(prize),
-    moduleKey: rule.module_key || "game24",
-    moduleAction: rule.module_action || "",
-    moduleSessionScope: rule.module_session_scope || "chat",
+    moduleKey,
+    moduleAction,
+    moduleSessionScope,
+    participantPolicy: rule.participant_policy || inferParticipantPolicy(selectedEntry?.entry, moduleSessionScope),
     moduleConfig: stripControlledEntryConfig(rule.module_config ?? {}),
     moduleStartText: rule.module_start_text ?? "",
     userCooldownSeconds: rule.user_cooldown_seconds ?? "",
@@ -754,6 +786,7 @@ function legacyRuleFromConfig(config: AccountBotInteractionConfig): AccountBotIn
     module_key: config.module_key ?? null,
     module_action: config.module_action ?? null,
     module_session_scope: config.module_session_scope ?? null,
+    participant_policy: config.participant_policy ?? null,
     module_prize: config.module_prize ?? null,
     module_start_text: config.module_start_text ?? null,
     user_cooldown_seconds: config.user_cooldown_seconds ?? null,
@@ -793,6 +826,7 @@ function ruleFromForm(
     || (inferredEntry?.session_scope === "user" || inferredEntry?.session_scope === "none"
       ? inferredEntry.session_scope
       : "chat");
+  const participantPolicy = form.participantPolicy || inferParticipantPolicy(inferredEntry, moduleSessionScope);
   return {
     id: form.id || `rule-${index + 1}`,
     name,
@@ -812,6 +846,7 @@ function ruleFromForm(
     module_key: action === "module" ? moduleKey : null,
     module_action: action === "module" ? moduleAction || null : null,
     module_session_scope: action === "module" ? moduleSessionScope : null,
+    participant_policy: action === "module" ? participantPolicy : null,
     module_config: moduleConfig,
     module_prize: action === "module" && supportsModulePrize
       ? mathPrize
@@ -911,6 +946,7 @@ function InteractionRuleEditor({
         patch.moduleSessionScope = (entryOption.entry.session_scope === "user" || entryOption.entry.session_scope === "none"
           ? entryOption.entry.session_scope
           : "chat") as InteractionRuleForm["moduleSessionScope"];
+        patch.participantPolicy = inferParticipantPolicy(entryOption.entry, entryOption.entry.session_scope);
         patch.moduleConfig = defaultModuleConfigFromEntry(entryOption.entry);
       }
     }
@@ -924,6 +960,7 @@ function InteractionRuleEditor({
       moduleSessionScope: (item.entry.session_scope === "user" || item.entry.session_scope === "none"
         ? item.entry.session_scope
         : "chat") as InteractionRuleForm["moduleSessionScope"],
+      participantPolicy: inferParticipantPolicy(item.entry, item.entry.session_scope),
       moduleConfig: defaultModuleConfigFromEntry(item.entry),
     });
   };
@@ -1307,7 +1344,7 @@ function InteractionRuleEditor({
           title="奖励与限流"
           description="这里只保留平台统一控制的金额、有效期和每用户限制。插件自己的特殊参数在高级区。"
         >
-          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
             {showsPrize ? (
               <div className="space-y-1.5">
                 <Label>奖金</Label>
@@ -1354,9 +1391,23 @@ function InteractionRuleEditor({
                 <option value="none">不并发</option>
               </Select>
             </div>
+            {rule.action === "module" ? (
+              <div className="space-y-1.5">
+                <Label>参与者范围</Label>
+                <Select
+                  value={rule.participantPolicy}
+                  onChange={(e) => onPatch({ participantPolicy: e.target.value as InteractionRuleForm["participantPolicy"] })}
+                >
+                  <option value="open_race">全群可参与</option>
+                  <option value="solo_owner">仅付款/开局本人</option>
+                  <option value="paid_pool">仅付费玩家</option>
+                  <option value="notify_only">只通知</option>
+                </Select>
+              </div>
+            ) : null}
           </div>
           <div className="text-xs text-muted-foreground">
-            每用户 CD 和日上限按付款人或消息发送者计算；规则占用只决定同一规则能否并行启动。
+            每用户 CD 和日上限按付款人或消息发送者计算；规则占用决定能否并行启动，参与者范围决定活跃会话后谁能继续操作。
           </div>
         </RuleEditorSection>
       ) : null}
@@ -1407,6 +1458,12 @@ function InteractionRuleEditor({
               <div className="min-w-0 rounded-md border bg-background px-3 py-2 text-xs">
                 <div className="mb-1 font-medium">module_action</div>
                 <code className="block truncate text-muted-foreground">{moduleActionValue || "保存时尝试推断"}</code>
+              </div>
+              <div className="min-w-0 rounded-md border bg-background px-3 py-2 text-xs sm:col-span-2">
+                <div className="mb-1 font-medium">参与者策略</div>
+                <div className="text-muted-foreground">
+                  当前为 {getParticipantPolicyLabel(rule.participantPolicy)}，默认跟随插件入口声明。
+                </div>
               </div>
               <div className="min-w-0 rounded-md border bg-background px-3 py-2 text-xs sm:col-span-2">
                 <div className="mb-1 font-medium">插件会话范围</div>
@@ -1590,7 +1647,7 @@ export function BotTab({ aid, mode = "management" }: { aid: number; mode?: "mana
         : interactionQ.data.chat_id == null
           ? []
           : [interactionQ.data.chat_id];
-      const nextRules = sourceRules.map((rule, index) => ruleFormFromRule(rule, index, fallbackChatIds));
+      const nextRules = sourceRules.map((rule, index) => ruleFormFromRule(rule, index, fallbackChatIds, interactionEntries));
       setInteractionRules(nextRules);
       setSelectedInteractionRuleId((current) =>
         nextRules.some((rule) => rule.id === current)
@@ -1598,7 +1655,7 @@ export function BotTab({ aid, mode = "management" }: { aid: number; mode?: "mana
           : nextRules[0]?.id ?? null,
       );
     }
-  }, [interactionQ.data]);
+  }, [interactionQ.data, matrixQ.data]);
 
   useEffect(() => {
     setSelectedInteractionRuleId((current) =>
@@ -1681,6 +1738,7 @@ export function BotTab({ aid, mode = "management" }: { aid: number; mode?: "mana
       math_prize: firstRule.math_prize || 123,
       module_key: firstRule.module_key ?? null,
       module_action: firstRule.module_action ?? null,
+      participant_policy: firstRule.participant_policy ?? null,
       module_config: firstRule.module_config ?? {},
       module_prize: firstRule.module_prize ?? null,
       module_start_text: firstRule.module_start_text ?? null,

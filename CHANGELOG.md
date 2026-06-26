@@ -14,12 +14,19 @@
 
 ## [Unreleased]
 
+## [0.32.0] — 2026-06-27 · minor · 交互玩法身份与参与者策略
+
+### Fixed
+- 付费玩法新增 `payment` / `player` / `source_actor` 标准信封，明确区分到账证据、真实玩家和消息来源；独玩/按钮玩法缺少真实付款人 ID 时会先要求付款人点击确认，避免把未到账的 `+金额` 或转账通知 Bot 当成玩家。
+
+### Docs
+- 更新插件开发指南、远程插件规范和联动 Bot 优化方案，补充 `participant_policy`、双证据支付模型和 `payment_confirmed` 身份绑定规则。
+
 ## [0.31.6] — 2026-06-26 · patch · 交互玩法运行时增强
 
 ### Added
 - `_apply_interaction_actions` 新增通用 `send_message` 扩展字段：`edit_message_id`（插件指定编辑目标消息）、`pin`（发送后置顶，默认不置顶）、`save_message_id_key`（发送后将 message_id 写入 Redis 供后续编辑）。
 - 交互 Bot 轮询配置新增 `callback_query` 事件订阅，按钮回调通过通用 `_try_handle_interaction_module_message` 路由到插件。
-
 
 ## [0.31.5] — 2026-06-26 · patch · 交互玩法付款人归属修复
 

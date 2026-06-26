@@ -22,8 +22,10 @@
 - `send_message.reply_markup` 可用于 inline keyboard；按钮点击会作为 `callback_query` 事件回到同一活跃会话。
 - `interaction_entries[].session_scope` 必填：群局写 `chat`，个人流程写 `user`，一次性动作写 `none`。
 - `interaction_entries[].events` 是事件白名单，别让插件自己猜会收到什么。
-- 交互 payload 优先看 `source`、`actor`、`reply_to`、`trigger`、`session` 信封；旧平铺字段只做兼容。
-- `source` 是来源，`actor` 是触发人，`reply_to` 是要引用的消息，`trigger` 是命中的规则/入口，`session` 是会话边界。
+- 交互 payload 优先看 `source`、`actor`、`source_actor`、`payment`、`player`、`reply_to`、`trigger`、`session` 信封；旧平铺字段只做兼容。
+- `source` 是事件类型和消息上下文，`source_actor` 是实际发消息的 Bot/用户，`actor` 是本次事件行为主体，`player` 是付费开局绑定玩家，`payment` 是到账证据。
+- 付费玩法必须以可信转账通知 Bot 的 `payment.status=confirmed` 作为到账依据；UserBot/回复上下文只用于补充付款玩家 `user_id`。
+- 独玩或按钮玩法声明 `participant_policy=solo_owner`，缺少 `player.user_id` 时平台会先要求付款人点击确认；抢答类玩法用 `open_race`。
 - 新交互入口名尽量别再用泛化的 `start_game`，用 `start_<plugin_key>` 更清楚；历史别名只在插件内部兼容。
 - `interaction_profile` 建议显式写：`session_game`、`challenge_game`、`reward_pool`、`utility_trigger`。
 - `session_policy` 写 TTL、重复触发、关闭条件；插件内部状态 key 要和 `session_scope` 对齐。

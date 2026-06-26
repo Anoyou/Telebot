@@ -219,6 +219,9 @@
 
 - `source`
 - `actor`
+- `source_actor`
+- `payment`
+- `player`
 - `reply_to`
 - `trigger`
 - `session`
@@ -249,7 +252,35 @@
 - 谁回复
 - 谁应被记为赢家
 
-**平台的中奖主体一律以 `actor` 为准。**
+答题、按钮点击、关键词触发等普通行为事件的主体以 `actor` 为准；付费开局和独玩权限绑定优先看 `player`。
+
+付费开局还有一个独立的 `player` 信封。为了兼容旧插件，`payment_confirmed` 开局时 `actor` 会尽量映射为付款玩家；新插件应优先读取 `player`，并根据 `player.identity_confidence` 判断是否足够可信。`source_actor` 始终保留实际发出 Telegram 消息的一方，转账触发时通常是转账通知 Bot。
+
+### 6.2.1 payment / player
+
+转账联动采用“双证据”模型：
+
+- UserBot/回复上下文负责补充“玩家是谁”，例如付款人回复 `+1000` 时的真实 `user_id`；
+- 可信转账通知 Bot 负责证明“钱已到账”，包括金额、收款人和付款人显示名。
+
+只有可信转账通知命中规则后，平台才会生成 `event.type=payment_confirmed` 和 `payment.status=confirmed`。普通群友发送 `+金额` 只是支付意图，不会直接启动付费玩法。
+
+`player.identity_confidence` 当前可能是：
+
+- `verified_user_id`：转账通知或结构化数据里已有付款人 user_id；
+- `reply_context`：转账通知回复了付款人的原消息，平台从 reply_to 中取得 user_id；
+- `callback_confirmed`：到账通知只有名称，付款人点击确认按钮后绑定 user_id；
+- `name_only`：只有付款人名称，不足以安全限制独玩/按钮操作；
+- `unknown`：无法识别。
+
+入口可通过 `participant_policy` 声明后续参与边界：
+
+- `open_race`：一人付款或关键词开局，全群可抢答；
+- `solo_owner`：只有付款人/触发人能继续操作，适合 21 点、按钮个人局；
+- `paid_pool`：只有已确认付费玩家池可参与；
+- `notify_only`：只做通知或一次性动作。
+
+`solo_owner` / `paid_pool` 在缺少真实 `player.user_id` 时，平台会先发送确认按钮，付款人点击后再启动插件；这样不会把转账通知 Bot 当成玩家，也不会把余额不足但未到账的 `+金额` 当成成功支付。
 
 ### 6.3 reply_to
 

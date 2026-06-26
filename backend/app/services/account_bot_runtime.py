@@ -84,8 +84,17 @@ _INTERACTION_SESSION_PREFIX = "account_bot:interaction_session:"
 _INTERACTION_USER_COOLDOWN_PREFIX = "account_bot:interaction_user_cooldown:"
 _INTERACTION_USER_DAILY_PREFIX = "account_bot:interaction_user_daily:"
 _INTERACTION_USER_PENDING_PREFIX = "account_bot:interaction_user_pending:"
+_INTERACTION_PAYMENT_CONFIRM_PREFIX = "account_bot:interaction_payment_confirm:"
+_INTERACTION_PAYMENT_CONFIRM_TTL_SECONDS = 300
 _INTERACTION_ENTRY_TIMEOUT_SECONDS = 60.0
 AUTO_PAYOUT_MODULE_KEYS = {"game24", "math10", "dice_grid_hunt", "guess_number", "poetry_blank"}
+_INTERACTION_PAYMENT_CONFIRM_CALLBACK_PREFIX = "ip"
+_INTERACTION_ACTION_SAVE_KEY_MAX_LENGTH = 200
+_PLAYER_IDENTITY_CONFIDENCE_VERIFIED = "verified_user_id"
+_PLAYER_IDENTITY_CONFIDENCE_REPLY = "reply_context"
+_PLAYER_IDENTITY_CONFIDENCE_CALLBACK = "callback_confirmed"
+_PLAYER_IDENTITY_CONFIDENCE_NAME_ONLY = "name_only"
+_PLAYER_IDENTITY_CONFIDENCE_UNKNOWN = "unknown"
 
 
 async def _load_command_prefix(db) -> str:
@@ -212,6 +221,58 @@ def _parse_callback(data: str) -> tuple[int, str, str, str | None] | None:
     except ValueError:
         return None
     return aid, parts[2], parts[3], parts[4] if len(parts) == 5 else None
+
+
+def _interaction_payment_confirm_callback_data(nonce: str) -> str:
+    return f"{_INTERACTION_PAYMENT_CONFIRM_CALLBACK_PREFIX}:{nonce}"[:64]
+
+
+def _parse_interaction_payment_confirm_callback(data: str | None) -> str | None:
+    parts = str(data or "").split(":", 1)
+    if len(parts) != 2 or parts[0] != _INTERACTION_PAYMENT_CONFIRM_CALLBACK_PREFIX:
+        return None
+    nonce = parts[1].strip()
+    return nonce or None
+
+
+def _interaction_payment_confirm_key(nonce: str) -> str:
+    digest = hashlib.sha256(nonce.encode("utf-8")).hexdigest()
+    return _INTERACTION_PAYMENT_CONFIRM_PREFIX + digest
+
+
+async def _consume_interaction_payment_confirm_payload(redis: Any, nonce: str) -> str | None:
+    key = _interaction_payment_confirm_key(nonce)
+    getdel = getattr(redis, "getdel", None)
+    if callable(getdel):
+        raw = await getdel(key)
+        return raw.decode("utf-8", errors="ignore") if isinstance(raw, bytes) else raw
+    raw = await redis.get(key)
+    if raw:
+        delete = getattr(redis, "delete", None)
+        if callable(delete):
+            await delete(key)
+    return raw.decode("utf-8", errors="ignore") if isinstance(raw, bytes) else raw
+
+
+async def _read_interaction_payment_confirm_payload(redis: Any, nonce: str) -> str | None:
+    raw = await redis.get(_interaction_payment_confirm_key(nonce))
+    return raw.decode("utf-8", errors="ignore") if isinstance(raw, bytes) else raw
+
+
+def _payment_confirm_name_matches(expected: Any, incoming: Incoming) -> bool:
+    expected_name = str(expected or "").strip().casefold()
+    if not expected_name:
+        return True
+    actuals = {
+        str(value or "").strip().casefold()
+        for value in (
+            incoming.display_name,
+            incoming.username,
+            f"@{incoming.username}" if incoming.username else None,
+        )
+        if str(value or "").strip()
+    }
+    return expected_name in actuals
 
 
 def _confirm_token_hash(token: str) -> str:
@@ -733,6 +794,8 @@ async def _handle_interaction_update(aid: int, token: str, update: dict[str, Any
     if incoming is None:
         return
     async with AsyncSessionLocal() as db:
+        if await _try_handle_interaction_payment_confirm(db, incoming):
+            return
         cfg = await account_bot_service.get_transfer_notice_config(db, incoming.account_id)
         if incoming.user_id is not None and _int_or_none(cfg.get("interaction_bot_id")) == incoming.user_id:
             return
@@ -832,6 +895,21 @@ class _TemplateValues(dict[str, Any]):
 
 def _compact_rendered_template(text: str) -> str:
     return "\n".join(line.rstrip() for line in text.splitlines() if line.strip())
+
+
+def _plain_callback_text(text: str, *, limit: int = 180) -> str:
+    plain = re.sub(r"<[^>]+>", "", str(text or ""))
+    plain = re.sub(r"\s+", " ", plain).strip()
+    return plain[:limit]
+
+
+def _interaction_action_save_message_id_key(raw: Any) -> str | None:
+    key = str(raw or "").strip()
+    if not key or len(key) > _INTERACTION_ACTION_SAVE_KEY_MAX_LENGTH:
+        return None
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9:_.-]*", key):
+        return None
+    return key
 
 
 def _render_transfer_bot_notice_with_error(
@@ -1382,8 +1460,189 @@ def _interaction_payment_payer_name(incoming: Incoming, data: dict[str, Any] | N
     return str(payload.get("payer_name") or incoming.reply_to_display_name or "").strip()
 
 
+def _interaction_participant_policy(rule: dict[str, Any]) -> str:
+    raw = str(rule.get("participant_policy") or "").strip()
+    if raw in account_bot_service.VALID_INTERACTION_PARTICIPANT_POLICIES:
+        return raw
+    scope = str(rule.get("module_session_scope") or rule.get("concurrency") or "chat")
+    if scope == "user":
+        return "solo_owner"
+    return "open_race"
+
+
+def _interaction_requires_verified_player(rule: dict[str, Any]) -> bool:
+    return _interaction_participant_policy(rule) in {"solo_owner", "paid_pool"}
+
+
+def _interaction_payment_identity_confidence(incoming: Incoming, data: dict[str, Any] | None = None) -> str:
+    payload = data if isinstance(data, dict) else {}
+    if _int_or_none(payload.get("payer_user_id")) is not None:
+        return str(payload.get("payer_identity_confidence") or _PLAYER_IDENTITY_CONFIDENCE_VERIFIED)
+    event_type = str(payload.get("event_type") or "").strip()
+    if event_type == "payment_confirmed" and incoming.reply_to_user_id is not None:
+        return _PLAYER_IDENTITY_CONFIDENCE_REPLY
+    if _interaction_payment_payer_name(incoming, payload):
+        return _PLAYER_IDENTITY_CONFIDENCE_NAME_ONLY
+    return _PLAYER_IDENTITY_CONFIDENCE_UNKNOWN
+
+
+def _interaction_player_identity_key(
+    user_id: int | None,
+    display_name: str | None,
+    confidence: str,
+) -> str | None:
+    if user_id is not None:
+        return f"tg:{int(user_id)}"
+    name = str(display_name or "").strip()
+    if name:
+        return f"name:{name.casefold()}"
+    return f"unknown:{confidence}" if confidence else None
+
+
+def _interaction_payment_envelope(
+    incoming: Incoming,
+    data: dict[str, Any] | None = None,
+    *,
+    payer_user_id: int | None = None,
+    payer_name: str | None = None,
+) -> dict[str, Any]:
+    payload = data if isinstance(data, dict) else {}
+    receiver_user_id = _int_or_none(payload.get("receiver_user_id"))
+    amount = _int_or_none(payload.get("amount"))
+    return {
+        "status": "confirmed",
+        "amount": amount,
+        "payer_user_id": payer_user_id,
+        "payer_name": payer_name or None,
+        "receiver_user_id": receiver_user_id,
+        "receiver_name": str(payload.get("receiver_name") or "").strip() or None,
+        "notice_message_id": incoming.message_id,
+        "notice_sender_user_id": incoming.user_id,
+    }
+
+
+def _interaction_player_envelope(
+    incoming: Incoming,
+    data: dict[str, Any] | None = None,
+    *,
+    event_type: str | None = None,
+) -> dict[str, Any]:
+    payload = dict(data or {}) if isinstance(data, dict) else {}
+    if event_type:
+        payload.setdefault("event_type", event_type)
+    user_id = _interaction_payment_payer_user_id(incoming, payload)
+    display_name = _interaction_payment_payer_name(incoming, payload)
+    username = incoming.reply_to_username if user_id is not None and incoming.reply_to_user_id == user_id else None
+    confidence = _interaction_payment_identity_confidence(incoming, payload)
+    if user_id is None and str(payload.get("event_type") or "").strip() != "payment_confirmed":
+        user_id = _int_or_none(payload.get("sender_user_id")) or incoming.user_id
+        display_name = str(payload.get("sender_name") or incoming.display_name or "").strip()
+        username = str(payload.get("sender_username") or incoming.username or "").strip() or None
+        confidence = _PLAYER_IDENTITY_CONFIDENCE_VERIFIED if user_id is not None else _PLAYER_IDENTITY_CONFIDENCE_UNKNOWN
+    return {
+        "user_id": user_id,
+        "display_name": display_name or None,
+        "username": username,
+        "identity_key": _interaction_player_identity_key(user_id, display_name, confidence),
+        "identity_confidence": confidence,
+    }
+
+
+def _interaction_payment_needs_player_confirm(
+    incoming: Incoming,
+    rule: dict[str, Any],
+    parsed: dict[str, Any] | None,
+) -> bool:
+    if not _interaction_requires_verified_player(rule):
+        return False
+    data = dict(parsed or {})
+    data["event_type"] = "payment_confirmed"
+    return _interaction_payment_payer_user_id(incoming, data) is None
+
+
+async def _request_interaction_payment_player_confirm(
+    incoming: Incoming,
+    rule: dict[str, Any],
+    parsed: dict[str, Any],
+) -> None:
+    nonce = secrets.token_urlsafe(8)
+    payload = {
+        "account_id": incoming.account_id,
+        "rule": rule,
+        "parsed": parsed,
+        "incoming": {
+            "update_id": incoming.update_id,
+            "user_id": incoming.user_id,
+            "chat_id": incoming.chat_id,
+            "chat_type": incoming.chat_type,
+            "message_id": incoming.message_id,
+            "text": incoming.text,
+            "display_name": incoming.display_name,
+            "username": incoming.username,
+            "reply_to_message_id": incoming.reply_to_message_id,
+            "reply_to_text": incoming.reply_to_text,
+            "entity_languages": list(incoming.entity_languages),
+        },
+    }
+    redis = get_redis()
+    await redis.set(
+        _interaction_payment_confirm_key(nonce),
+        json.dumps(payload, ensure_ascii=False),
+        ex=_INTERACTION_PAYMENT_CONFIRM_TTL_SECONDS,
+    )
+    payer_name = account_bot_service.html_text(str(parsed.get("payer_name") or "付款人"))
+    amount = account_bot_service.html_text(str(parsed.get("amount") or ""))
+    rule_name = account_bot_service.html_text(str(rule.get("name") or rule.get("id") or "该玩法"))
+    await _send(
+        incoming,
+        (
+            f"已确认 {payer_name} 到账 {amount}，但还需要绑定真实 Telegram 用户后才能启动「{rule_name}」。\n"
+            "付款人请点击下方按钮确认开始。"
+        ),
+        reply_to_message_id=incoming.message_id,
+        reply_markup=_keyboard(
+            [[{"text": "我是付款人，开始玩法", "callback_data": _interaction_payment_confirm_callback_data(nonce)}]]
+        ),
+    )
+
+
+def _incoming_from_payment_confirm_payload(
+    token: str,
+    payload: dict[str, Any],
+    confirmer: Incoming,
+) -> Incoming | None:
+    raw_incoming = payload.get("incoming") if isinstance(payload.get("incoming"), dict) else {}
+    chat_id = _int_or_none(raw_incoming.get("chat_id"))
+    if chat_id is None:
+        return None
+    return Incoming(
+        account_id=int(payload.get("account_id") or confirmer.account_id),
+        token=token,
+        update_id=_int_or_none(raw_incoming.get("update_id")) or confirmer.update_id,
+        user_id=_int_or_none(raw_incoming.get("user_id")),
+        chat_id=chat_id,
+        chat_type=str(raw_incoming.get("chat_type") or "") or confirmer.chat_type,
+        message_id=_int_or_none(raw_incoming.get("message_id")),
+        text=str(raw_incoming.get("text") or ""),
+        display_name=str(raw_incoming.get("display_name") or "") or None,
+        username=str(raw_incoming.get("username") or "") or None,
+        reply_to_user_id=confirmer.user_id,
+        reply_to_message_id=confirmer.message_id,
+        reply_to_display_name=confirmer.display_name,
+        reply_to_username=confirmer.username,
+        reply_to_text=str(raw_incoming.get("reply_to_text") or "") or None,
+        entity_languages=tuple(
+            str(item)
+            for item in raw_incoming.get("entity_languages", [])
+            if str(item or "").strip()
+        ),
+    )
+
+
 def _interaction_session_user_id(incoming: Incoming, data: dict[str, Any] | None = None) -> int | None:
     payload = data if isinstance(data, dict) else {}
+    if str(payload.get("event_type") or "").strip() == "payment_confirmed":
+        return _interaction_payment_payer_user_id(incoming, payload)
     return (
         _interaction_payment_payer_user_id(incoming, payload)
         or _int_or_none(payload.get("sender_user_id"))
@@ -1450,6 +1709,45 @@ async def _load_interaction_session(incoming: Incoming, rule: dict[str, Any]) ->
     except Exception:  # noqa: BLE001
         log.debug("load interaction session failed aid=%s rule=%s", incoming.account_id, rule.get("id"), exc_info=True)
     return None
+
+
+def _interaction_session_participant_ids(session: dict[str, Any] | None) -> set[int]:
+    if not isinstance(session, dict):
+        return set()
+    ids: set[int] = set()
+    for key in ("started_by_user_id", "player_user_id", "payer_user_id"):
+        user_id = _int_or_none(session.get(key))
+        if user_id is not None:
+            ids.add(user_id)
+    for key in ("participant_user_ids", "paid_user_ids", "player_user_ids"):
+        raw = session.get(key)
+        if not isinstance(raw, list):
+            continue
+        for item in raw:
+            user_id = _int_or_none(item)
+            if user_id is not None:
+                ids.add(user_id)
+    return ids
+
+
+def _interaction_participant_block_message(
+    incoming: Incoming,
+    rule: dict[str, Any],
+    session: dict[str, Any] | None,
+) -> str | None:
+    policy = _interaction_participant_policy(rule)
+    if policy not in {"solo_owner", "paid_pool"}:
+        return None
+    if incoming.user_id is None:
+        return "请用真实 Telegram 用户身份操作该玩法。"
+    participant_ids = _interaction_session_participant_ids(session)
+    if not participant_ids:
+        return None
+    if int(incoming.user_id) in participant_ids:
+        return None
+    if policy == "paid_pool":
+        return "你不在本轮付费玩家列表中。"
+    return "这不是你的玩法，请由付款或开局本人操作。"
 
 
 async def _interaction_session_keys_for_rule(account_id: int, rule: dict[str, Any], chat_id: int | None) -> list[str]:
@@ -2095,6 +2393,135 @@ async def _execute_interaction_rule(
     return True
 
 
+async def _try_handle_interaction_payment_confirm(db: Any, incoming: Incoming) -> bool:
+    nonce = _parse_interaction_payment_confirm_callback(incoming.callback_data)
+    if nonce is None:
+        return False
+    if not incoming.callback_id:
+        return False
+    if incoming.user_id is None:
+        await account_bot_service.answer_callback(
+            incoming.token,
+            incoming.callback_id,
+            text="无法识别你的 Telegram 身份",
+            show_alert=True,
+        )
+        return True
+    redis = get_redis()
+    raw = await _read_interaction_payment_confirm_payload(redis, nonce)
+    if not raw:
+        await account_bot_service.answer_callback(
+            incoming.token,
+            incoming.callback_id,
+            text="确认已过期，请重新付款触发。",
+            show_alert=True,
+        )
+        return True
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError:
+        await account_bot_service.answer_callback(
+            incoming.token,
+            incoming.callback_id,
+            text="确认数据无效，请重新触发。",
+            show_alert=True,
+        )
+        return True
+    if not isinstance(payload, dict) or int(payload.get("account_id") or 0) != incoming.account_id:
+        await account_bot_service.answer_callback(
+            incoming.token,
+            incoming.callback_id,
+            text="确认票据不匹配。",
+            show_alert=True,
+        )
+        return True
+    if _int_or_none((payload.get("incoming") if isinstance(payload.get("incoming"), dict) else {}).get("chat_id")) != incoming.chat_id:
+        await account_bot_service.answer_callback(
+            incoming.token,
+            incoming.callback_id,
+            text="请在原群内确认。",
+            show_alert=True,
+        )
+        return True
+    rule = payload.get("rule") if isinstance(payload.get("rule"), dict) else None
+    parsed = payload.get("parsed") if isinstance(payload.get("parsed"), dict) else None
+    replay_incoming = _incoming_from_payment_confirm_payload(incoming.token, payload, incoming)
+    if rule is None or parsed is None or replay_incoming is None:
+        await account_bot_service.answer_callback(
+            incoming.token,
+            incoming.callback_id,
+            text="确认数据不完整，请重新触发。",
+            show_alert=True,
+        )
+        return True
+    if not _payment_confirm_name_matches(parsed.get("payer_name"), incoming):
+        await account_bot_service.answer_callback(
+            incoming.token,
+            incoming.callback_id,
+            text="这条到账通知的付款人名称与你不一致。",
+            show_alert=True,
+        )
+        return True
+    consumed = await _consume_interaction_payment_confirm_payload(redis, nonce)
+    if not consumed:
+        await account_bot_service.answer_callback(
+            incoming.token,
+            incoming.callback_id,
+            text="确认已被处理，请勿重复点击。",
+            show_alert=True,
+        )
+        return True
+    parsed = dict(parsed)
+    parsed["payer_user_id"] = incoming.user_id
+    parsed["payer_name"] = str(parsed.get("payer_name") or incoming.display_name or incoming.user_id)
+    parsed["payer_identity_confidence"] = _PLAYER_IDENTITY_CONFIDENCE_CALLBACK
+    replay_incoming.reply_to_user_id = incoming.user_id
+    replay_incoming.reply_to_display_name = incoming.display_name
+    replay_incoming.reply_to_username = incoming.username
+    usage_block = await _interaction_user_usage_block_message(replay_incoming, rule, parsed)
+    if usage_block:
+        await account_bot_service.answer_callback(
+            incoming.token,
+            incoming.callback_id,
+            text=_plain_callback_text(usage_block),
+            show_alert=True,
+        )
+        return True
+    claimed_usage, usage_pending_key = await _claim_interaction_user_usage(replay_incoming, rule, parsed)
+    if not claimed_usage:
+        await account_bot_service.answer_callback(
+            incoming.token,
+            incoming.callback_id,
+            text="你正在处理该功能，请稍后再试。",
+            show_alert=True,
+        )
+        return True
+    executed = False
+    try:
+        executed = await _execute_interaction_rule(replay_incoming, rule, parsed)
+        if executed:
+            await _mark_interaction_user_usage(replay_incoming, rule, parsed)
+    finally:
+        await _release_interaction_user_usage_claim(usage_pending_key)
+    await account_bot_service.answer_callback(
+        incoming.token,
+        incoming.callback_id,
+        text="已确认，正在启动玩法。" if executed else "玩法启动失败，请稍后重试。",
+        show_alert=not executed,
+    )
+    if executed:
+        await _write_interaction_runtime_log(
+            replay_incoming,
+            "info",
+            "interaction payment player confirmed",
+            payer_user_id=incoming.user_id,
+            payer_name=parsed.get("payer_name"),
+            rule_id=rule.get("id"),
+            **_interaction_log_context(replay_incoming),
+        )
+    return True
+
+
 async def _try_handle_interaction_rule_command_or_keyword(db: Any, incoming: Incoming) -> bool:
     if incoming.callback_id or incoming.chat_id is None:
         return False
@@ -2223,6 +2650,18 @@ async def _try_handle_interaction_module_message(db: Any, incoming: Incoming) ->
         session = await _load_interaction_session(incoming, rule)
         if session is None:
             continue
+        participant_block = _interaction_participant_block_message(incoming, rule, session)
+        if participant_block:
+            if is_callback:
+                await account_bot_service.answer_callback(
+                    incoming.token,
+                    incoming.callback_id or "",
+                    text=participant_block,
+                    show_alert=True,
+                )
+            else:
+                await _send(incoming, participant_block, reply_to_message_id=incoming.message_id)
+            return True
         if not is_callback:
             if _message_equals_any(text, _rule_keyword_list(rule, "open_commands")):
                 continue
@@ -2506,13 +2945,28 @@ def _interaction_source_envelope(incoming: Incoming, event_type: str) -> dict[st
 def _interaction_actor_envelope(incoming: Incoming, data: dict[str, Any] | None = None) -> dict[str, Any]:
     payload = data if isinstance(data, dict) else {}
     payer_user_id = _interaction_payment_payer_user_id(incoming, payload)
+    payer_name = _interaction_payment_payer_name(incoming, payload)
     if payer_user_id is not None:
-        payer_name = _interaction_payment_payer_name(incoming, payload)
         return {
             "user_id": payer_user_id,
             "display_name": payer_name or None,
             "username": incoming.reply_to_username,
         }
+    if str(payload.get("event_type") or "").strip() == "payment_confirmed" and payer_name:
+        return {
+            "user_id": None,
+            "display_name": payer_name,
+            "username": None,
+        }
+    return {
+        "user_id": _int_or_none(payload.get("sender_user_id")) or incoming.user_id,
+        "display_name": str(payload.get("sender_name") or incoming.display_name or "").strip() or None,
+        "username": str(payload.get("sender_username") or incoming.username or "").strip() or None,
+    }
+
+
+def _interaction_source_actor_envelope(incoming: Incoming, data: dict[str, Any] | None = None) -> dict[str, Any]:
+    payload = data if isinstance(data, dict) else {}
     return {
         "user_id": _int_or_none(payload.get("sender_user_id")) or incoming.user_id,
         "display_name": str(payload.get("sender_name") or incoming.display_name or "").strip() or None,
@@ -2564,6 +3018,7 @@ def _interaction_session_envelope(
     return {
         "key": _interaction_session_key(incoming.account_id, rule, incoming.chat_id, session_user_id),
         "scope": str(rule.get("module_session_scope") or rule.get("concurrency") or "chat"),
+        "participant_policy": _interaction_participant_policy(rule),
         "ttl_seconds": _interaction_session_ttl(rule),
         "active": True,
         "data": dict(session_data),
@@ -2580,8 +3035,11 @@ def _interaction_settlement_envelope(
     mode = str(payout_mode or "manual").strip().lower()
     if mode not in {"auto", "manual"}:
         mode = "manual"
-    winner_user_id = _int_or_none(data.get("payer_user_id") or data.get("sender_user_id"))
-    winner_name = str(data.get("payer_name") or data.get("sender_name") or "").strip() or None
+    is_payment = str(data.get("event_type") or "").strip() == "payment_confirmed"
+    winner_user_id = _int_or_none(data.get("payer_user_id") if is_payment else data.get("sender_user_id") or data.get("payer_user_id"))
+    winner_name = str(
+        data.get("payer_name") if is_payment else data.get("sender_name") or data.get("payer_name") or ""
+    ).strip() or None
     return {
         "mode": mode,
         "status": "pending",
@@ -2605,11 +3063,20 @@ def _interaction_module_payload(
     data.update(dict(parsed or {}))
     prize = int(rule.get("module_prize") or rule.get("math_prize") or 123)
     data["event_type"] = event_type
-    payer_user_id = _interaction_payment_payer_user_id(incoming, data) or incoming.user_id
-    payer_name = _interaction_payment_payer_name(incoming, data) or incoming.display_name or ""
+    resolved_payer_user_id = _interaction_payment_payer_user_id(incoming, data)
+    payer_user_id = resolved_payer_user_id if event_type == "payment_confirmed" else resolved_payer_user_id or incoming.user_id
+    payer_name = _interaction_payment_payer_name(incoming, data) or (incoming.display_name or "" if event_type != "payment_confirmed" else "")
     event = _interaction_event_payload(incoming, rule, event_type, parsed)
     source = _interaction_source_envelope(incoming, event_type)
     actor = _interaction_actor_envelope(incoming, data)
+    source_actor = _interaction_source_actor_envelope(incoming, data)
+    player = _interaction_player_envelope(incoming, data, event_type=event_type)
+    payment = _interaction_payment_envelope(
+        incoming,
+        data,
+        payer_user_id=_int_or_none(player.get("user_id")),
+        payer_name=str(player.get("display_name") or payer_name or "").strip() or None,
+    ) if event_type == "payment_confirmed" else None
     reply_to = _interaction_reply_to_envelope(incoming)
     trigger = _interaction_trigger_envelope(rule, event_type, parsed)
     session = _interaction_session_envelope(incoming, rule, data)
@@ -2618,6 +3085,9 @@ def _interaction_module_payload(
             "event": event,
             "source": source,
             "actor": actor,
+            "source_actor": source_actor,
+            "player": player,
+            "payment": payment,
             "reply_to": reply_to,
             "trigger": trigger,
             "session": session,
@@ -3101,18 +3571,26 @@ async def _apply_interaction_actions(
             )
             if ok and delete_message_id is not None:
                 await _delete_interaction_placeholder(incoming, delete_message_id)
-            # support pin action
             if ok and send_via == "interaction_bot" and action.get("pin"):
                 msg_id = edit_message_id or _interaction_delivery_message_id(result)
                 if msg_id is not None and incoming.chat_id is not None:
                     token = await _resolve_interaction_action_token(incoming, send_via)
                     if token:
                         try:
-                            await account_bot_service.call_bot_api(token, "pinChatMessage", {"chat_id": incoming.chat_id, "message_id": msg_id})
-                        except Exception:
-                            pass
-            # support save_message_id_key (save sent message ID to Redis for later edits)
-            save_key = str(action.get("save_message_id_key") or "").strip()
+                            await account_bot_service.call_bot_api(
+                                token,
+                                "pinChatMessage",
+                                {"chat_id": incoming.chat_id, "message_id": msg_id},
+                            )
+                        except Exception:  # noqa: BLE001
+                            log.debug(
+                                "interaction action pin message failed aid=%s chat_id=%s message_id=%s",
+                                incoming.account_id,
+                                incoming.chat_id,
+                                msg_id,
+                                exc_info=True,
+                            )
+            save_key = _interaction_action_save_message_id_key(action.get("save_message_id_key"))
             if ok and save_key:
                 msg_id = _interaction_delivery_message_id(result)
                 if msg_id is not None:
@@ -3416,6 +3894,17 @@ async def _try_handle_transfer_notice(db: Any, incoming: Incoming) -> bool:
         return True
     if not await _claim_interaction_trigger(incoming, rule, "transfer_notice", parsed):
         log.info("transfer notice skipped: duplicate aid=%s rule=%s", incoming.account_id, rule.get("id"))
+        return True
+    if _interaction_payment_needs_player_confirm(incoming, rule, parsed):
+        await _request_interaction_payment_player_confirm(incoming, rule, parsed)
+        await _audit_transfer_notice(db, incoming, parsed)
+        log.info(
+            "transfer notice waiting for payer confirm aid=%s chat_id=%s sender_id=%s amount=%s",
+            incoming.account_id,
+            incoming.chat_id,
+            incoming.user_id,
+            parsed.get("amount"),
+        )
         return True
     usage_block = await _interaction_user_usage_block_message(incoming, rule, parsed)
     if usage_block:

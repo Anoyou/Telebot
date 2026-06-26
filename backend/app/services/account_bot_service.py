@@ -58,6 +58,7 @@ VALID_CONCURRENCY = {"chat", "user", "none"}
 VALID_INTERACTION_EVENTS = {"payment_confirmed", "keyword", "message", "callback_query", "session_close"}
 VALID_INTERACTION_LAUNCH_MODES = {"bridge", "direct", "hybrid"}
 VALID_INTERACTION_SEND_VIA = {"interaction_bot", "userbot_reply", "bbot_notice"}
+VALID_INTERACTION_PARTICIPANT_POLICIES = {"open_race", "solo_owner", "paid_pool", "notify_only"}
 FALLBACK_CHAT_SESSION_MODULE_ENTRIES = {
     ("dice_grid_hunt", "start_dice_grid_hunt"),
     ("dice_grid_hunt", "answer_dice_grid_hunt"),
@@ -67,6 +68,9 @@ FALLBACK_CHAT_SESSION_MODULE_ENTRIES = {
 }
 FALLBACK_NO_PRIZE_MODULE_ENTRIES = {
     ("pt_promote", "promote_torrent"),
+}
+FALLBACK_SOLO_OWNER_MODULE_ENTRIES = {
+    ("blackjack", "start_blackjack"),
 }
 RULE_CONTROLLED_MODULE_CONFIG_KEYS = {"prize", "timeout", "valid_seconds"}
 DEFAULT_MATH10_START_KEYWORDS = ["发十以内算数", "十以内算数", "开算数题"]
@@ -188,6 +192,7 @@ def default_transfer_notice_config() -> dict[str, Any]:
         "module_key": None,
         "module_action": None,
         "module_session_scope": None,
+        "participant_policy": None,
         "module_prize": None,
         "module_config": {},
         "module_start_text": None,
@@ -266,6 +271,10 @@ def normalize_transfer_notice_config(raw: Any) -> dict[str, Any]:
     base["concurrency"] = concurrency if concurrency in VALID_CONCURRENCY else "chat"
     module_session_scope = str(base.get("module_session_scope") or "").strip() or None
     base["module_session_scope"] = module_session_scope if module_session_scope in VALID_CONCURRENCY else None
+    participant_policy = str(base.get("participant_policy") or "").strip() or None
+    base["participant_policy"] = (
+        participant_policy if participant_policy in VALID_INTERACTION_PARTICIPANT_POLICIES else None
+    )
     if base.get("valid_seconds") is None or int(base["valid_seconds"]) < 30:
         base["valid_seconds"] = 600
     base["valid_seconds"] = min(int(base["valid_seconds"]), 86400)
@@ -351,6 +360,7 @@ def normalize_transfer_notice_config(raw: Any) -> dict[str, Any]:
                 "module_key": base["module_key"],
                 "module_action": base["module_action"],
                 "module_session_scope": base.get("module_session_scope"),
+                "participant_policy": base.get("participant_policy"),
                 "module_prize": base["module_prize"],
                 "module_config": dict(base["module_config"]) if isinstance(base.get("module_config"), dict) else {},
                 "module_start_text": base["module_start_text"],
@@ -381,6 +391,7 @@ def normalize_transfer_notice_config(raw: Any) -> dict[str, Any]:
     base["module_key"] = first_enabled.get("module_key")
     base["module_action"] = first_enabled.get("module_action")
     base["module_session_scope"] = first_enabled.get("module_session_scope")
+    base["participant_policy"] = first_enabled.get("participant_policy")
     base["module_prize"] = first_enabled.get("module_prize")
     base["module_config"] = dict(first_enabled.get("module_config") or {})
     base["module_start_text"] = first_enabled.get("module_start_text")
@@ -444,6 +455,9 @@ def normalize_interaction_entry_manifest(raw: Any) -> dict[str, Any] | None:
     profile = str(raw.get("interaction_profile") or "").strip()
     if profile:
         out["interaction_profile"] = profile
+    participant_policy = str(raw.get("participant_policy") or "").strip()
+    if participant_policy in VALID_INTERACTION_PARTICIPANT_POLICIES:
+        out["participant_policy"] = participant_policy
     result_contract = raw.get("result_contract")
     if isinstance(result_contract, dict):
         normalized_result_contract = dict(result_contract)
@@ -475,6 +489,20 @@ def _entry_session_scope_from_entries(entries: Any, entry_key: str | None) -> st
         if str(entry.get("key") or "").strip() != entry_key:
             continue
         return str(entry.get("session_scope") or "chat")
+    return None
+
+
+def _entry_participant_policy_from_entries(entries: Any, entry_key: str | None) -> str | None:
+    if not entry_key or not isinstance(entries, list):
+        return None
+    for raw_entry in entries:
+        entry = normalize_interaction_entry_manifest(raw_entry)
+        if entry is None:
+            continue
+        if str(entry.get("key") or "").strip() != entry_key:
+            continue
+        policy = str(entry.get("participant_policy") or "").strip()
+        return policy if policy in VALID_INTERACTION_PARTICIPANT_POLICIES else None
     return None
 
 
@@ -581,6 +609,27 @@ def _declared_module_entry_session_scope(module_key: str | None, module_action: 
         log.debug("读取 installed 模块交互入口作用域失败: %s.%s", module_key, module_action, exc_info=True)
     if (module_key, module_action) in FALLBACK_CHAT_SESSION_MODULE_ENTRIES:
         return "chat"
+    return None
+
+
+def _declared_module_entry_participant_policy(module_key: str | None, module_action: str | None) -> str | None:
+    if not module_key or not module_action:
+        return None
+    try:
+        manifest = BUILTIN_FEATURES.manifest_for(module_key)
+        policy = _entry_participant_policy_from_entries(getattr(manifest, "interaction_entries", None), module_action)
+        if policy:
+            return policy
+    except Exception:  # noqa: BLE001
+        log.debug("读取 builtin 模块交互入口参与策略失败: %s.%s", module_key, module_action, exc_info=True)
+    try:
+        policy = _entry_participant_policy_from_entries(_plugin_json_interaction_entries(module_key), module_action)
+        if policy:
+            return policy
+    except Exception:  # noqa: BLE001
+        log.debug("读取 installed 模块交互入口参与策略失败: %s.%s", module_key, module_action, exc_info=True)
+    if (module_key, module_action) in FALLBACK_SOLO_OWNER_MODULE_ENTRIES:
+        return "solo_owner"
     return None
 
 
@@ -711,6 +760,9 @@ def normalize_interaction_rules(raw: Any) -> list[dict[str, Any]]:
             module_session_scope = None
         if module_session_scope is None:
             module_session_scope = _declared_module_entry_session_scope(module_key, module_action)
+        participant_policy = str(item.get("participant_policy") or "").strip() or None
+        if participant_policy not in VALID_INTERACTION_PARTICIPANT_POLICIES:
+            participant_policy = _declared_module_entry_participant_policy(module_key, module_action)
         module_config = _strip_rule_controlled_module_config(item.get("module_config"))
         module_start_text = str(item.get("module_start_text") or "").strip() or None
         user_cooldown_seconds = str(item.get("user_cooldown_seconds") or "").strip() or None
@@ -750,6 +802,7 @@ def normalize_interaction_rules(raw: Any) -> list[dict[str, Any]]:
                 "module_key": module_key,
                 "module_action": module_action,
                 "module_session_scope": module_session_scope,
+                "participant_policy": participant_policy,
                 "module_prize": module_prize if module_prize is None or module_prize > 0 else None,
                 "module_config": module_config,
                 "module_start_text": module_start_text,
