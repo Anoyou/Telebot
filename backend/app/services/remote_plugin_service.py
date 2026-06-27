@@ -753,6 +753,10 @@ def lint_plugin_metadata_files(plugin_dir: Path) -> list[str]:
     if pj.is_file():
         try:
             data = json.loads(pj.read_text(encoding="utf-8"))
+            if isinstance(data, dict) and isinstance(data.get("config_schema"), dict) and not _plugin_declares_usage_guide(data):
+                warnings.append(
+                    "高级规范警告：插件未声明详细使用说明。请在 config_schema 中提供 usage_preview、x-usage-guide 或 x-usage-steps。"
+                )
             for path, text in _iter_json_strings(data):
                 warning = _warn_hardcoded_prefix("plugin.json", path, text)
                 if warning:
@@ -829,6 +833,35 @@ def lint_plugin_metadata_files(plugin_dir: Path) -> list[str]:
         if item not in unique:
             unique.append(item)
     return unique[:10]
+
+
+def _plugin_declares_usage_guide(manifest: dict[str, Any]) -> bool:
+    schema = manifest.get("config_schema")
+    if not isinstance(schema, dict):
+        return False
+    for key in ("x-usage-guide", "x-usage-instructions", "x-usage-steps", "x-help"):
+        if _has_usage_content(schema.get(key)):
+            return True
+    properties = schema.get("properties")
+    if not isinstance(properties, dict):
+        return False
+    for key in ("usage_preview", "usage_guide", "usage_instructions", "ai_usage_guide"):
+        field = properties.get(key)
+        if isinstance(field, dict) and (
+            _has_usage_content(field.get("default")) or _has_usage_content(field.get("description"))
+        ):
+            return True
+    return False
+
+
+def _has_usage_content(value: Any) -> bool:
+    if isinstance(value, str):
+        return bool(value.strip())
+    if isinstance(value, list):
+        return any(_has_usage_content(item) for item in value)
+    if isinstance(value, dict):
+        return bool(value)
+    return False
 
 
 def _manifest_json_from_remote_meta(meta: PluginMetadata) -> dict[str, Any]:

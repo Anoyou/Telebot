@@ -42,6 +42,9 @@ export interface ConfigField {
   type: string;
   format?: string;
   "x-ui-widget"?: string;
+  "x-ui-section"?: string;
+  "x-ui-order"?: number;
+  "x-ui-columns"?: 1 | 2 | 3 | number;
   "x-ui-provider-field"?: string;
   "x-ui-model-modality"?: string;
   enum?: Array<string | number | boolean>;
@@ -60,6 +63,10 @@ export interface ConfigSchema {
   type: string;
   properties: Record<string, ConfigField>;
   required?: string[];
+  "x-usage-guide"?: unknown;
+  "x-usage-instructions"?: unknown;
+  "x-usage-steps"?: unknown;
+  "x-help"?: unknown;
 }
 
 interface ConfigDialogProps {
@@ -199,6 +206,7 @@ interface ConfigScopeSectionProps {
   commandPrefix: string;
   llmProviders?: LLMProviderOut[];
   llmProvidersLoading?: boolean;
+  showPreviews?: boolean;
   onChange: (key: string, value: unknown) => void;
 }
 
@@ -210,6 +218,7 @@ export function ConfigScopeSection({
   commandPrefix,
   llmProviders,
   llmProvidersLoading = false,
+  showPreviews = true,
   onChange,
 }: ConfigScopeSectionProps) {
   const [openTemplates, setOpenTemplates] = useState<Record<string, boolean>>({});
@@ -221,6 +230,30 @@ export function ConfigScopeSection({
         <div className="text-sm font-semibold">{title}</div>
         <p className="text-xs text-muted-foreground">{description}</p>
       </div>
+
+      {groups.sections.length > 0 && (
+        <div className="space-y-3">
+          {groups.sections.map((section) => (
+            <div key={section.key} className="space-y-3 rounded-md border bg-background p-3">
+              <div className="text-sm font-semibold">{section.title}</div>
+              <div className={configGridClass(section.columns)}>
+                {section.fields.map(([key, field]) => (
+                  <FieldInput
+                    key={key}
+                    fk={key}
+                    field={field}
+                    value={values[key]}
+                    values={values}
+                    llmProviders={llmProviders}
+                    llmProvidersLoading={llmProvidersLoading}
+                    onChange={(value) => onChange(key, value)}
+                  />
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
 
       {groups.basic.length > 0 && (
         <div className="space-y-4">
@@ -295,7 +328,7 @@ export function ConfigScopeSection({
         </div>
       )}
 
-      {groups.previews.length > 0 && (
+      {showPreviews && groups.previews.length > 0 && (
         <div className="space-y-3 rounded-md border bg-background p-3">
           <div>
             <div className="text-sm font-semibold">预览结果</div>
@@ -314,19 +347,47 @@ export function ConfigScopeSection({
   );
 }
 
-function groupConfigFields(fields: FieldEntry[]): {
+export function ConfigPreviewSection({
+  fields,
+  values,
+  commandPrefix,
+}: {
+  fields: FieldEntry[];
+  values: Record<string, unknown>;
+  commandPrefix: string;
+}) {
+  const groups = groupConfigFields(fields);
+  if (groups.previews.length === 0) return null;
+  return (
+    <div className="space-y-3">
+      <TelegramHtmlPreviewThread
+        messages={groups.previews.map(([key, field]) => ({
+          title: field.title || key,
+          value: renderPreviewValue(key, field, fields, values, commandPrefix),
+          mode: "html",
+        }))}
+      />
+    </div>
+  );
+}
+
+export function groupConfigFields(fields: FieldEntry[]): {
   basic: FieldEntry[];
   placeholders: FieldEntry[];
   templates: FieldEntry[];
   previews: FieldEntry[];
+  sections: Array<{ key: string; title: string; fields: FieldEntry[]; columns: number }>;
 } {
   const basic: FieldEntry[] = [];
   const placeholders: FieldEntry[] = [];
   const templates: FieldEntry[] = [];
   const previews: FieldEntry[] = [];
+  const sectionsByKey = new Map<string, { key: string; title: string; fields: FieldEntry[]; columns: number }>();
 
-  for (const entry of fields) {
-    const [key] = entry;
+  const sortedFields = [...fields].sort((a, b) => fieldOrder(a[1]) - fieldOrder(b[1]));
+
+  for (const entry of sortedFields) {
+    const [key, field] = entry;
     if (isPreviewField(key)) {
       previews.push(entry);
     } else if (isPlaceholderField(key)) {
@@ -335,10 +396,50 @@ function groupConfigFields(fields: FieldEntry[]): {
       templates.push(entry);
     } else {
       basic.push(entry);
+      const sectionName = typeof field["x-ui-section"] === "string" ? field["x-ui-section"].trim() : "";
+      if (sectionName) {
+        const sectionKey = sectionName.toLowerCase();
+        const current = sectionsByKey.get(sectionKey) ?? {
+          key: sectionKey,
+          title: sectionName,
+          fields: [],
+          columns: clampColumns(field["x-ui-columns"]),
+        };
+        current.fields.push(entry);
+        current.columns = Math.max(current.columns, clampColumns(field["x-ui-columns"]));
+        sectionsByKey.set(sectionKey, current);
+      }
     }
   }
 
-  return { basic, placeholders, templates, previews };
+  const sectionFieldKeys = new Set(
+    Array.from(sectionsByKey.values()).flatMap((section) => section.fields.map(([key]) => key)),
+  );
+  const unsectionedBasic = basic.filter(([key]) => !sectionFieldKeys.has(key));
+
+  return {
+    basic: unsectionedBasic,
+    placeholders,
+    templates,
+    previews,
+    sections: Array.from(sectionsByKey.values()),
+  };
+}
+
+function fieldOrder(field: ConfigField): number {
+  return Number.isFinite(field["x-ui-order"]) ? Number(field["x-ui-order"]) : 0;
+}
+
+function clampColumns(value: unknown): number {
+  const raw = Number(value);
+  if (!Number.isFinite(raw)) return 2;
+  return Math.min(3, Math.max(1, Math.floor(raw)));
+}
+
+function configGridClass(columns: number): string {
+  if (columns >= 3) return "grid gap-4 md:grid-cols-2 xl:grid-cols-3";
+  if (columns === 2) return "grid gap-4 md:grid-cols-2";
+  return "space-y-4";
 }
 
 interface FieldInputProps {

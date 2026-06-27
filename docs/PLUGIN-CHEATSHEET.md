@@ -44,8 +44,10 @@
 - `command_fallback` 只能提示或受控回退，不能让普通 incoming 消息直接进入 `on_command`。
 - 规则 `concurrency=user` 只表示每用户 CD/每日上限，不等于插件会话也按用户。
 - 自动回复和交互 Bot 都只是触发器；业务逻辑放插件本体，UserBot 命令和 `on_interaction` 调同一份业务函数。
-- 长表单页要把“使用说明 → 功能总开关 → 配置”拆成三张卡。
-- 有保存字段的页面要放顶部冻结“配置操作”条。
+- 长表单页要把“使用说明 → 功能总开关 → 插件配置 → 插件预览”拆成独立卡。
+- 有保存字段的页面要把 sticky“配置操作”条放在插件配置卡片底部。
+- 有 `config_schema` 的插件必须声明详细使用说明：优先 `x-usage-guide` / `x-usage-steps`，也可用只读 `usage_preview`。
+- 会发送消息的插件建议声明 `template_preview` 或 `*_preview`，没有预览不阻断运行。
 - 规则驱动页用 `rules`，单配置页用 `single`，平台能力用 `platform`。
 - 旧 `schema` 只保留给老插件兼容。
 - 远程插件要有 `plugin.json`、`manifest.py`、`plugin.py`、`__init__.py`。

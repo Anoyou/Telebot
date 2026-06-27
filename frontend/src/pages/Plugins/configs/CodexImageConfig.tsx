@@ -313,7 +313,7 @@ export function CodexImageConfigPage() {
   const backTarget = featureConfigBackTarget(aid, location.search);
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 pb-24">
       <div className="flex flex-wrap items-center gap-3">
         <Button
           variant="ghost"
@@ -325,30 +325,6 @@ export function CodexImageConfigPage() {
         <h1 className="text-2xl font-semibold tracking-tight">
           Codex 图片生成
         </h1>
-      </div>
-
-      <div className="sticky top-0 z-30 -mx-2 rounded-b-lg border bg-background/95 px-2 py-3 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-background/80">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="text-sm">
-            <div className="font-medium">配置操作</div>
-            <div className="text-xs text-muted-foreground">
-              {dirty ? "有未保存修改，保存后 worker 会热加载。" : "当前配置已同步。"}
-            </div>
-          </div>
-          <div className="flex items-center gap-4">
-            <Button disabled={!dirty || saveMut.isPending} onClick={handleSave}>
-              {saveMut.isPending ? (
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              ) : (
-                <Save className="mr-2 h-4 w-4" />
-              )}
-              保存配置
-            </Button>
-            <Button type="button" variant="ghost" disabled={!dirty || saveMut.isPending} onClick={resetForm} className="px-0">
-              撤销
-            </Button>
-          </div>
-        </div>
       </div>
 
       <Card>
@@ -416,12 +392,12 @@ export function CodexImageConfigPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">配置</CardTitle>
+          <CardTitle className="text-base">插件配置</CardTitle>
           <CardDescription>
             配置 Codex API 的鉴权 Token、模型和超时时间。修改后 worker 会自动热加载，无需重启。
           </CardDescription>
         </CardHeader>
-        <CardContent className="space-y-6">
+        <CardContent className="space-y-6 pb-0">
           <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
           <div className="space-y-1.5">
             <Label htmlFor="command">触发指令名</Label>
@@ -675,10 +651,6 @@ export function CodexImageConfigPage() {
                 setDirty(true);
               }}
             />
-            <div className="rounded-md border bg-background p-3 text-xs">
-              <div className="mb-1 font-medium">预览</div>
-              <TelegramHtmlPreview value={renderTemplate(messageTemplate, previewValues)} />
-            </div>
           </div>
 
           <div className="grid gap-3 sm:grid-cols-2">
@@ -739,6 +711,39 @@ export function CodexImageConfigPage() {
             />
           </div>
 
+        </CardContent>
+        <div className="sticky bottom-0 z-20 mt-4 rounded-b-lg border-t bg-background/95 px-6 py-3 shadow-[0_-8px_20px_rgba(15,23,42,0.06)] backdrop-blur supports-[backdrop-filter]:bg-background/85">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="text-sm">
+              <div className="font-medium">配置操作</div>
+              <div className="text-xs text-muted-foreground">
+                {dirty ? "有未保存修改，保存后 worker 会热加载。" : "当前配置已同步。"}
+              </div>
+            </div>
+            <div className="flex items-center gap-4">
+              <Button disabled={!dirty || saveMut.isPending} onClick={handleSave}>
+                {saveMut.isPending ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <Save className="mr-2 h-4 w-4" />
+                )}
+                保存配置
+              </Button>
+              <Button type="button" variant="ghost" disabled={!dirty || saveMut.isPending} onClick={resetForm} className="px-0">
+                撤销
+              </Button>
+            </div>
+          </div>
+        </div>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">插件预览</CardTitle>
+          <CardDescription>使用模拟上下文渲染当前消息模板，不会触发真实发送。</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <TelegramHtmlPreview value={renderTemplate(messageTemplate, previewValues)} />
         </CardContent>
       </Card>
     </div>

@@ -131,6 +131,7 @@ class TestRemotePluginSecurity:
               "description": "群内小游戏，支持下注、开奖和历史统计",
               "config_schema": {
                 "type": "object",
+                "x-usage-guide": "发送 {prefix}{command} 100 开始一局，支持群内下注、开奖和历史统计。",
                 "properties": {
                   "draw_numbers": {
                     "type": "string",
@@ -153,6 +154,59 @@ class TestRemotePluginSecurity:
         )
 
         assert svc.lint_plugin_metadata_files(plugin_dir) == []
+
+    def test_metadata_lint_warns_when_config_schema_lacks_usage_guide(self, tmp_path):
+        """有配置页的插件必须声明自有使用说明。"""
+        plugin_dir = tmp_path / "installed" / "missing_usage"
+        plugin_dir.mkdir(parents=True)
+        (plugin_dir / "plugin.json").write_text(
+            """
+            {
+              "name": "missing_usage",
+              "version": "1.0.0",
+              "config_schema": {
+                "type": "object",
+                "properties": {
+                  "command": {
+                    "type": "string",
+                    "default": "demo"
+                  }
+                }
+              }
+            }
+            """,
+            encoding="utf-8",
+        )
+
+        warnings = svc.lint_plugin_metadata_files(plugin_dir)
+        assert any("高级规范警告" in item and "未声明详细使用说明" in item for item in warnings)
+
+    def test_metadata_lint_accepts_usage_guide_declaration(self, tmp_path):
+        """x-usage-guide 或 usage_preview 可满足配置页说明要求。"""
+        plugin_dir = tmp_path / "installed" / "declared_usage"
+        plugin_dir.mkdir(parents=True)
+        (plugin_dir / "plugin.json").write_text(
+            """
+            {
+              "name": "declared_usage",
+              "version": "1.0.0",
+              "config_schema": {
+                "type": "object",
+                "x-usage-guide": "发送 {prefix}{command} 文本即可触发插件。",
+                "properties": {
+                  "command": {
+                    "type": "string",
+                    "default": "demo"
+                  }
+                }
+              }
+            }
+            """,
+            encoding="utf-8",
+        )
+
+        warnings = svc.lint_plugin_metadata_files(plugin_dir)
+        assert not any("未声明详细使用说明" in item for item in warnings)
 
     def test_runtime_discovery_does_not_execute_installed_by_default(self, monkeypatch, tmp_path):
         """worker 刷新 builtin 注册表时不能顺手执行 installed 插件代码。"""

@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
+  AlertTriangle,
   ArrowRight,
   BookOpen,
   Boxes,
@@ -45,6 +46,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Select } from "@/components/ui/select";
+import { pluginUsageGuideWarning, splitPluginWarnings } from "@/lib/plugin-config-contract";
 
 import { featureConfigPath } from "./_shared/featureConfig";
 
@@ -596,14 +598,22 @@ function FeatureCapabilityBadge({
 function ModuleLintWarnings({ warnings }: { warnings?: string[] }) {
   const [expanded, setExpanded] = useState(false);
   const [showAll, setShowAll] = useState(false);
-  const cleanWarnings = (warnings ?? []).filter((warning) => warning.trim().length > 0);
+  const warningGroups = splitPluginWarnings(warnings);
+  const cleanWarnings = warningGroups.all;
+  const hasHighWarnings = warningGroups.high.length > 0;
 
   if (cleanWarnings.length === 0) return null;
 
   const visibleWarnings = showAll ? cleanWarnings : cleanWarnings.slice(0, 3);
+  const panelClassName = hasHighWarnings
+    ? "mt-2 rounded-md border border-destructive/30 bg-destructive/10 px-2 py-1.5 text-xs text-destructive"
+    : "mt-2 rounded-md border border-amber-300 bg-amber-50/80 px-2 py-1.5 text-xs text-amber-900 dark:bg-amber-950/20 dark:text-amber-200";
+  const linkClassName = hasHighWarnings
+    ? "text-destructive underline underline-offset-2 hover:text-destructive/80"
+    : "text-amber-950 underline underline-offset-2 hover:text-amber-800 dark:text-amber-100";
 
   return (
-    <div className="mt-2 rounded-md border border-amber-300 bg-amber-50/80 px-2 py-1.5 text-xs text-amber-900 dark:bg-amber-950/20 dark:text-amber-200">
+    <div className={panelClassName}>
       <button
         type="button"
         className="flex w-full items-center justify-between gap-2 text-left"
@@ -614,12 +624,17 @@ function ModuleLintWarnings({ warnings }: { warnings?: string[] }) {
         aria-expanded={expanded}
       >
         <span className="flex min-w-0 items-center gap-2">
-          <MetaBadge tone="warn" className="shrink-0">
-            插件 lint
+          <MetaBadge tone={hasHighWarnings ? "danger" : "warn"} className="shrink-0">
+            {hasHighWarnings ? "高级规范警告" : "插件 lint"}
           </MetaBadge>
-          <span className="truncate">⚠ {cleanWarnings.length} 条 lint 提醒</span>
+          <span className="flex min-w-0 items-center gap-1 truncate">
+            {hasHighWarnings ? <AlertTriangle className="h-3.5 w-3.5 shrink-0" /> : null}
+            <span className="truncate">
+              {hasHighWarnings ? `${warningGroups.high.length} 条高级警告` : `${cleanWarnings.length} 条 lint 提醒`}
+            </span>
+          </span>
         </span>
-        <span className="shrink-0 text-amber-800 dark:text-amber-200">
+        <span className="shrink-0">
           {expanded ? "收起" : "展开"}
         </span>
       </button>
@@ -633,7 +648,7 @@ function ModuleLintWarnings({ warnings }: { warnings?: string[] }) {
           {cleanWarnings.length > 3 && !showAll ? (
             <button
               type="button"
-              className="text-amber-950 underline underline-offset-2 hover:text-amber-800 dark:text-amber-100"
+              className={linkClassName}
               onClick={() => setShowAll(true)}
             >
               查看全部 {cleanWarnings.length} 条
@@ -758,6 +773,11 @@ function FeatureZone({
               const accountFeature = accountFeatureByKey.get(f.key);
               const pluginUsage = pluginUsageByKey.get(f.key);
               const lastError = accountFeature?.last_error?.trim();
+              const usageWarning = pluginUsageGuideWarning(f);
+              const lintWarnings = [
+                ...(usageWarning ? [usageWarning] : []),
+                ...(f.lint_warnings ?? []),
+              ];
               const trustBadge = moduleTrustBadge(f, installByKey.get(f.key));
               const path = featureConfigPath(selectedAccountId, f.key, f, {
                 source: "plugins",
@@ -855,7 +875,7 @@ function FeatureZone({
                       ) : null}
                     </div>
                   </div>
-                  <ModuleLintWarnings warnings={f.lint_warnings} />
+                  <ModuleLintWarnings warnings={lintWarnings} />
                 </div>
               );
             })}

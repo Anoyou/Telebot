@@ -1107,17 +1107,17 @@ config_schema={
 配置页从上到下固定为：
 
 1. 返回按钮 + 插件标题
-2. 顶部冻结“配置操作”条（只有存在可保存配置的页面需要）
-3. 使用说明
-4. 功能总开关
-5. 配置主体（规则列表或字段表单）
+2. 使用说明
+3. 功能总开关
+4. 插件配置（规则列表或字段表单）
+5. 插件预览（建议项；没有预览时显示轻量提示）
 
-#### 顶部冻结“配置操作”
+#### 配置操作条
 
-长表单页必须把保存操作放在标题下方的 sticky 工具条中，参考 `ChatGPTImageConfig.tsx`、`CodexImageConfig.tsx`、`Game24Config.tsx` 和 `GenericPluginConfig.tsx`：
+长表单页必须把保存操作放在“插件配置”卡片底部的 sticky 工具条中，参考 `ChatGPTImageConfig.tsx`、`CodexImageConfig.tsx`、`Game24Config.tsx` 和 `GenericPluginConfig.tsx`：
 
 ```tsx
-<div className="sticky top-0 z-30 -mx-2 rounded-b-lg border bg-background/95 px-2 py-3 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-background/80">
+<div className="sticky bottom-0 z-20 mt-4 rounded-b-lg border-t bg-background/95 px-6 py-3 shadow-[0_-8px_20px_rgba(15,23,42,0.06)] backdrop-blur supports-[backdrop-filter]:bg-background/85">
   <div className="flex flex-wrap items-center justify-between gap-3">
     <div className="text-sm">
       <div className="font-medium">配置操作</div>
@@ -1145,15 +1145,17 @@ config_schema={
 
 规则驱动页面复用 `RuleInfoBox`，单配置和通用 schema 页面直接使用同样结构。指令示例必须读取当前系统前缀和当前配置中的指令名，不要写死 `,draw`、`,24d`、`,cximg`。
 
+通用 schema 配置页不再提供默认兜底说明。插件只要声明 `config_schema` 并进入配置页，就必须自带详细使用说明。推荐在 schema 顶层写 `x-usage-guide`、`x-usage-instructions` 或 `x-usage-steps`；也可以继续提供只读字段 `usage_preview`、`usage_guide`、`usage_instructions`、`ai_usage_guide`。缺少这些内容时，插件中心会显示红色“高级规范警告”，配置页也会用红色警告替代说明内容。
+
 #### 功能总开关卡片
 
 “功能总开关”也必须是独立 `Card`，放在“使用说明”之后、“配置”之前。卡片右侧放 `Switch`，左侧展示说明、启用 Badge、`state` 和 `last_error`。关闭总开关表示当前账号不运行该插件，但仍允许进入配置页提前填写配置。
 
 规则驱动页面复用 `RuleFeatureToggleCard`；单配置和通用页面按同样布局实现。不要再使用旧的“运行状态”卡片替代总开关。
 
-#### 配置主体与宽度
+#### 插件配置与宽度
 
-配置主体必须独立成“配置”或“规则”卡片，宽度跟随页面容器自适应，不要给表单区域加 `max-w-lg`、`max-w-3xl` 这类窄宽限制。字段多时用响应式网格：
+配置主体必须独立成“插件配置”或“规则”卡片，宽度跟随页面容器自适应，不要给表单区域加 `max-w-lg`、`max-w-3xl` 这类窄宽限制。字段多时用响应式网格：
 
 - 普通字段：`grid gap-4 md:grid-cols-2 xl:grid-cols-3`
 - 小型配置：`grid gap-6 md:grid-cols-2`
@@ -1161,12 +1163,22 @@ config_schema={
 
 字段控件统一使用项目内 `Input`、`Select`、`Switch`、`Textarea`、`Label`、`Button`、`Card`、`Badge`、`Table`。指令字段只填指令名，不填系统前缀；密码、Token 和只读预览字段要遵守现有脱敏和只读规则。
 
+通用 schema 页允许插件在平台容器内声明更自由的布局，但不能注入任意 HTML、外链样式或脚本。可用声明：
+
+- `x-ui-section`：把字段放进同名分组。
+- `x-ui-order`：控制字段排序，数值越小越靠前。
+- `x-ui-columns`：控制分组列数，允许 1 到 3。
+
+#### 插件预览
+
+“插件预览”是独立 `Card`，位于“插件配置”之后。预览不是强制项，但强烈建议所有会发送消息的插件声明 `template_preview` 或 `*_preview`，让用户能用模拟上下文看到最终 Telegram 消息效果。没有预览字段时，通用配置页只显示建议提示，不阻断保存或运行。
+
 #### 禁止回退
 
 - 不新增 Schema 配置弹窗；`ConfigDialog` 只作为通用 schema 表单实现细节或兼容代码存在。
 - 不在账号详情页展示内部分类名或 legacy schema 分组。
-- 不把“使用说明”“功能总开关”“配置”合并到同一张卡片。
-- 不把保存按钮只放在长表单底部。
+- 不把“使用说明”“功能总开关”“插件配置”“插件预览”合并到同一张卡片。
+- 不把保存按钮放到页面顶部，或只放在滚动到底才能看到的位置。
 - 不在用户界面继续使用“模块”指代可启停能力；面向用户统一称“插件”。
 
 ---
@@ -1366,12 +1378,12 @@ if key == FEATURE_XXX:
 单配置对象页参考 `Game24Config.tsx`、`CodexImageConfig.tsx` 与 `ChatGPTImageConfig.tsx`，并遵守“统一配置页样式规范”。页面从上到下固定为：
 
 1. 返回按钮 + 插件标题
-2. 顶部冻结“配置操作”条（保存配置 / 撤销，滚动长表单时保持可见）
-3. 使用说明（真实触发指令示例、参数示例、注意事项）
-4. 功能总开关（当前账号是否启用、关键运行状态、最近错误）
-5. 配置表单（账号级配置为主，必要时展示全局配置）
+2. 使用说明（真实触发指令示例、参数示例、注意事项）
+3. 功能总开关（当前账号是否启用、关键运行状态、最近错误）
+4. 插件配置（账号级配置为主，必要时展示全局配置；保存条固定在卡片底部）
+5. 插件预览（模板预览是建议项，没有预览时给出提示）
 
-“使用说明 → 功能总开关 → 配置”要作为三张独立卡片，不要把总开关塞进说明或配置里。单配置插件通常靠指令触发，用户最关心的是“怎么叫它”“现在能不能用”“要改哪些参数”，所以顺序保持稳定。配置字段要按可用屏幕宽度展开，避免窄表单造成长配置反复滚动。
+“使用说明 → 功能总开关 → 插件配置 → 插件预览”要作为独立卡片，不要把总开关塞进说明或配置里。单配置插件通常靠指令触发，用户最关心的是“怎么叫它”“现在能不能用”“要改哪些参数”“最终发出去是什么样”，所以顺序保持稳定。配置字段要按可用屏幕宽度展开，避免窄表单造成长配置反复滚动。
 
 #### 指令型插件配置
 
@@ -1423,12 +1435,14 @@ config_schema={
 - `level: "account"` 或无 level → 账号配置区
 - **不需要**添加到 `FEATURE_CONFIG_PAGE_KEYS`，不需要创建插件专属页面文件
 - 新插件请优先写 `config_schema["x-ui-mode"] = "single"`；`schema` 只保留为旧插件兼容别名
-- 页面同样使用“使用说明 → 功能总开关 → 配置”的独立卡片顺序，并在有可保存字段时显示顶部冻结“配置操作”条
+- 页面同样使用“使用说明 → 功能总开关 → 插件配置 → 插件预览”的独立卡片顺序，并在有可保存字段时把“配置操作”条固定在插件配置卡片底部
 - 页面宽度、滚动高度、字段间距和控件风格应与 ChatGPT2API / 自定义指令 / LLM 等系统配置页保持一致：使用统一的 `Input`、`Select`、`Switch`、`Textarea`、`Label` 视觉语言，不在字段标题里放 emoji 或临时说明块
-- 普通配置字段展示在配置区顶部；`message_template` / `*_message_template` / `*_template` 等消息模板字段进入“消息模板”折叠组；`template_preview` / `*_preview` 进入底部“预览结果”。
+- 普通配置字段展示在配置区顶部；`message_template` / `*_message_template` / `*_template` 等消息模板字段进入“消息模板”折叠组；`template_preview` / `*_preview` 进入独立“插件预览”卡片。
 - `message_template`、`*_message_template`、`prompt`、`content`、`text` 等长文案字段会按多行文本体验展示；字段描述里应写清占位符和示例值。
 - `field.readOnly === true`、`template_preview`、`*_preview`、`template_placeholders` 会自动按只读块渲染，不会保存回配置；其中预览字段使用 `TelegramHtmlPreview` 展示最终 HTML 消息效果。
 - 多个预览字段应在同一个 Telegram 风格预览场景里按字段顺序展示为多条气泡，方便同时检查开局、进行中、答对、超时、取消和错误提示等模板。
+- `usage_preview` / `usage_guide` / `usage_instructions` / `ai_usage_guide` 只用于“使用说明”卡片，不会再出现在插件配置字段区；`template_placeholders` 只作为只读占位符说明，不算详细使用说明。
+- 配置布局可使用 `x-ui-section`、`x-ui-order`、`x-ui-columns` 在平台容器内做分组、排序和列数控制。
 
 ```python
 # config_schema 示例（适用于通用独立配置页自动渲染）
@@ -1516,8 +1530,8 @@ class DemoPlugin(Plugin):
 - 与 TelePilot 现有页面风格一致
 - React + TypeScript + TailwindCSS
 - 新页面参考 `AutoReply.tsx`（规则驱动）、`Game24Config.tsx` / `CodexImageConfig.tsx` / `ChatGPTImageConfig.tsx`（单配置）或 `GenericPluginConfig.tsx`（通用 schema）的代码结构
-- 使用说明、功能总开关、配置主体必须是独立卡片，顺序固定为“使用说明 → 功能总开关 → 配置”
-- 有可保存字段的长表单必须使用顶部冻结“配置操作”条，按钮文案统一为“保存配置”“撤销”
+- 使用说明、功能总开关、插件配置、插件预览必须是独立卡片，顺序固定为“使用说明 → 功能总开关 → 插件配置 → 插件预览”
+- 有可保存字段的长表单必须在插件配置卡片底部使用 sticky“配置操作”条，按钮文案统一为“保存配置”“撤销”
 - 配置区域宽度随页面自适应，不使用窄 `max-w-*` 限制；字段多时使用响应式 grid
 - 表格列宽要稳定，账号详情页和插件中心的同类列表要纵向对齐
 - 配置按钮不依赖启用状态；即使插件当前关闭，也应允许先配置
@@ -1528,6 +1542,7 @@ class DemoPlugin(Plugin):
 新增插件前端配置页后，逐项检查：
 
 - [ ] `manifest.py` 中 `config_schema["x-ui-mode"]` 已声明：推荐 `rules` / `single` / `platform`；仅旧插件保留 `schema`
+- [ ] `config_schema` 已声明详细使用说明：优先使用 `x-usage-guide` / `x-usage-steps`，或只读 `usage_preview`
 - [ ] `types.ts` 中 `XxxRuleConfig` 接口与 `manifest.py` config_schema 字段一致
 - [ ] 如果有专属页面：`App.tsx` 中路由路径 `:aid/features/{key}` 与插件 key 一致
 - [ ] 如果有专属页面：`App.tsx` 中 `FEATURE_CONFIG_PAGES` 包含该 key
@@ -1535,8 +1550,9 @@ class DemoPlugin(Plugin):
 - [ ] 如果是指令型插件：`command` 字段可配置，`Plugin.command_config_keys = {"command"}`，说明文案动态读取当前指令
 - [ ] 指令型插件的帮助、取消/结束、撤销、自动删除、冷却/超时、消息模板等用户常调行为已尽量配置化；帮助模板支持 `{prefix}`，不硬编码 `,命令`
 - [ ] `owner_only=False` 仅用于开放 `on_message`，没有把普通 incoming 消息当成管理指令入口
-- [ ] 页面按“使用说明 → 功能总开关 → 配置”的独立卡片顺序排布；不要把说明、总开关和配置混在一张卡片
-- [ ] 有可保存字段的页面使用顶部冻结“配置操作”条；长配置不只在底部放保存按钮
+- [ ] 页面按“使用说明 → 功能总开关 → 插件配置 → 插件预览”的独立卡片顺序排布；不要把说明、总开关、配置和预览混在一张卡片
+- [ ] 有可保存字段的页面在插件配置卡片底部使用 sticky“配置操作”条；长配置不只在滚动到底才能保存
+- [ ] 如会发送消息，建议提供 `template_preview` 或 `*_preview`；没有预览不会阻断运行，但会降低配置体验
 - [ ] 配置主体宽度自适应屏幕宽度，字段用响应式 grid 或分组，不使用窄 `max-w-*` 限制
 - [ ] 用户可见文案使用“插件”，不展示内部分类名或“Schema 弹窗”
 - [ ] 如需 dry-run：`plugin.py` 导出 `_dry_run_match`，`__init__.py` re-export，`rules.py` 在 fallback 之前添加分支

@@ -390,9 +390,11 @@ config_schema={
 
 `{prefix}` 是平台约定的系统级占位符，表示“系统设置 → 指令前缀”的当前值。运行时需要展示指令示例、帮助列表、错误提示里的用法示例时，优先从 worker 的当前指令前缀读取；前端配置预览中应通过 `getSystemSettings().command_prefix` 注入示例上下文，接口未返回时才兜底使用 `,`。不要把逗号硬编码成固定前缀。
 
-如果插件有专属配置页，建议提供只读预览：用户修改模板后，用示例上下文渲染一段 `template_preview`。预览应展示“模板 + 示例上下文”替换后的最终消息效果，而不是简单重复默认值或字段说明。没有专属页面时，也至少在字段描述里给出一条完整示例，避免用户猜最终效果。
+只要插件声明 `config_schema` 并进入配置页，就必须声明详细使用说明。优先在 schema 顶层写 `x-usage-guide`、`x-usage-instructions` 或 `x-usage-steps`；也可以提供只读字段 `usage_preview`、`usage_guide`、`usage_instructions`、`ai_usage_guide`。平台不再给“全局配置共享、命令不写前缀、模板可预览”这类默认兜底说明；缺少说明会在插件中心和配置页显示红色高级规范警告。
 
-配置页里的模板预览体验应对齐自定义指令模板：模板输入、占位符说明/按钮、最终消息预览三者放在同一个配置上下文里。预览只使用模拟数据，不读取真实群消息，也不触发实际发送；如果模板支持 Telegram HTML，应复用 `frontend/src/components/TelegramHtmlPreview.tsx`。
+如果插件会发送消息，建议提供只读预览：用户修改模板后，用示例上下文渲染一段 `template_preview` 或 `*_preview`。预览应展示“模板 + 示例上下文”替换后的最终消息效果，而不是简单重复默认值或字段说明。预览不是强制项，没有预览不会阻断保存和运行，但至少应在字段描述里给出一条完整示例，避免用户猜最终效果。
+
+配置页里的模板预览体验应对齐自定义指令模板：模板输入和占位符说明放在“插件配置”里，最终消息预览放在独立“插件预览”卡片里。预览只使用模拟数据，不读取真实群消息，也不触发实际发送；如果模板支持 Telegram HTML，应复用 `frontend/src/components/TelegramHtmlPreview.tsx`。
 
 #### Telegram 消息预览规范
 
@@ -406,7 +408,7 @@ config_schema={
 - 预览只使用模拟数据，不读取真实聊天、账号、用户资料，也不触发发送或编辑消息。
 - 如果插件或页面需要做消息模板预览，优先直接使用 `TelegramHtmlPreview`；只有需要嵌入极小空间时，才使用更轻量的纯内容预览。
 
-通用独立配置页兼容已有 schema 约定：`message_template` / `*_template` 是可编辑多行模板；`template_placeholders` 是只读占位符说明；`template_preview` / `*_preview` 是只读渲染预览。插件只需在 schema 中提供这些字段和默认值，不需要额外协议。多个 `*_preview` 字段会合并到同一个预览区域，以多条 Telegram 气泡展示。
+通用独立配置页兼容已有 schema 约定：`message_template` / `*_template` 是可编辑多行模板；`template_placeholders` 是只读占位符说明；`usage_preview` / `usage_guide` / `usage_instructions` / `ai_usage_guide` 只进入“使用说明”；`template_preview` / `*_preview` 进入独立“插件预览”。多个 `*_preview` 字段会合并到同一个预览区域，以多条 Telegram 气泡展示。
 
 ### 定时任务与后台任务生命周期
 

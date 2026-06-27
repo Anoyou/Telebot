@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Loader2, Save } from "lucide-react";
+import { AlertTriangle, ArrowLeft, Loader2, Save } from "lucide-react";
 import { toast } from "sonner";
 
 import { getAccount, listAccountFeatures, toggleAccountFeature } from "@/api/accounts";
@@ -15,6 +15,7 @@ import {
 import { getSystemSettings } from "@/api/system";
 import {
   buildScopedConfigValues,
+  ConfigPreviewSection,
   ConfigScopeSection,
   schemaHasLLMSelect,
   type ConfigField,
@@ -33,6 +34,7 @@ import {
 import { Spinner } from "@/components/ui/misc";
 import { Switch } from "@/components/ui/switch";
 import { getErrMsg } from "@/lib/api";
+import { pluginUsageGuideWarning } from "@/lib/plugin-config-contract";
 import { featureConfigBackTarget } from "@/pages/Plugins/_shared/featureConfig";
 import { featureRuntimeText, featureSwitchText } from "./_shared/featureStatus";
 
@@ -107,19 +109,31 @@ export function GenericPluginConfigPage() {
     setDirty(false);
   }, [schema, globalConfig, accountConfig]);
 
-  const { globalFields, accountFields } = useMemo(() => {
+  const { globalFields, accountFields, previewFields } = useMemo(() => {
     const properties = schema?.properties ?? {};
     const isGuideField = (key: string) =>
       key === "usage_preview" ||
+      key === "usage_guide" ||
+      key === "usage_instructions" ||
+      key === "ai_usage_guide" ||
+      key === "template_placeholders" ||
+      key === "template_preview" ||
+      /_preview$/i.test(key);
+    const isUsageOnlyField = (key: string) =>
+      key === "usage_preview" ||
+      key === "usage_guide" ||
+      key === "usage_instructions" ||
       key === "ai_usage_guide" ||
       key === "template_placeholders";
+    const entries = Object.entries(properties) as Array<[string, ConfigField]>;
     return {
-      globalFields: Object.entries(properties).filter(
+      globalFields: entries.filter(
         ([key, field]) => !isGuideField(key) && field.level === "global",
-      ) as Array<[string, ConfigField]>,
-      accountFields: Object.entries(properties).filter(
+      ),
+      accountFields: entries.filter(
         ([key, field]) => !isGuideField(key) && field.level !== "global",
-      ) as Array<[string, ConfigField]>,
+      ),
+      previewFields: entries.filter(([key]) => !isUsageOnlyField(key)),
     };
   }, [schema]);
   const usageGuide = useMemo(
@@ -225,62 +239,48 @@ export function GenericPluginConfigPage() {
         </div>
       </div>
 
-      {hasSchemaFields ? (
-        <div className="sticky top-0 z-30 -mx-2 rounded-b-lg border bg-background/95 px-2 py-3 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-background/80">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="text-sm">
-              <div className="font-medium">配置操作</div>
-              <div className="text-xs text-muted-foreground">
-                {dirty ? "有未保存修改，保存后 worker 会热加载。" : "当前配置已同步。"}
-              </div>
-            </div>
-            <div className="flex items-center gap-4">
-              <Button onClick={() => saveMut.mutate()} disabled={saveMut.isPending || !dirty}>
-                {saveMut.isPending ? (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                ) : (
-                  <Save className="mr-2 h-4 w-4" />
-                )}
-                保存配置
-              </Button>
-              <Button type="button" variant="ghost" disabled={!dirty || saveMut.isPending} onClick={resetForm} className="px-0">
-                撤销
-              </Button>
-            </div>
-          </div>
-        </div>
-      ) : null}
-
       <Card>
         <CardHeader>
           <CardTitle className="text-base">使用说明</CardTitle>
           <CardDescription>{usageGuide.description}</CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="space-y-3 rounded-md border bg-muted/20 p-3 text-xs text-muted-foreground">
-            {usageGuide.customText ? (
+          {usageGuide.missing ? (
+            <div className="flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+              <div>
+                <div className="font-medium">高级规范警告</div>
+                <div className="mt-1 text-xs leading-5">
+                  {usageGuide.warning}
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-3 rounded-md border bg-muted/20 p-3 text-xs text-muted-foreground">
               <div className="whitespace-pre-wrap leading-relaxed text-foreground">
                 {usageGuide.customText}
               </div>
-            ) : null}
-            {usageGuide.commandExamples.length > 0 ? (
-              <div>
-                <div className="mb-1 font-medium text-foreground">常用命令</div>
-                <div className="space-y-1">
-                  {usageGuide.commandExamples.map((item) => (
-                    <div key={item} className="rounded border bg-background px-2 py-1 font-mono text-[11px] text-foreground">
-                      {item}
-                    </div>
-                  ))}
+              {usageGuide.commandExamples.length > 0 ? (
+                <div>
+                  <div className="mb-1 font-medium text-foreground">插件声明的指令参考</div>
+                  <div className="space-y-1">
+                    {usageGuide.commandExamples.map((item) => (
+                      <div key={item} className="rounded border bg-background px-2 py-1 font-mono text-[11px] text-foreground">
+                        {item}
+                      </div>
+                    ))}
+                  </div>
                 </div>
-              </div>
-            ) : null}
-            <ul className="list-inside list-disc space-y-1">
-              {usageGuide.notes.map((item) => (
-                <li key={item}>{item}</li>
-              ))}
-            </ul>
-          </div>
+              ) : null}
+              {usageGuide.notes.length > 0 ? (
+                <ul className="list-inside list-disc space-y-1">
+                  {usageGuide.notes.map((item) => (
+                    <li key={item}>{item}</li>
+                  ))}
+                </ul>
+              ) : null}
+            </div>
+          )}
         </CardContent>
       </Card>
 
@@ -312,26 +312,27 @@ export function GenericPluginConfigPage() {
       {!hasSchemaFields ? (
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">配置</CardTitle>
+            <CardTitle className="text-base">插件配置</CardTitle>
             <CardDescription>该功能没有可配置的 Schema 字段。</CardDescription>
           </CardHeader>
         </Card>
       ) : (
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">配置</CardTitle>
-            <CardDescription>全局配置对所有账号共享，账号配置仅影响当前账号。</CardDescription>
+            <CardTitle className="text-base">插件配置</CardTitle>
+            <CardDescription>字段由插件声明的 config_schema 渲染；保存后由 worker 热加载。</CardDescription>
           </CardHeader>
-          <CardContent className="space-y-4">
+          <CardContent className="space-y-4 pb-0">
             {globalFields.length > 0 ? (
               <ConfigScopeSection
                 title="全局配置"
-                description="所有账号共享"
+                description="所有账号共享，适合 Token、Provider、公共模板等跨账号配置。"
                 fields={globalFields}
                 values={globalVals}
                 commandPrefix={commandPrefix}
                 llmProviders={llmProvidersQ.data}
                 llmProvidersLoading={llmProvidersQ.isLoading || llmProvidersQ.isFetching}
+                showPreviews={false}
                 onChange={(key, value) => {
                   setGlobalVals((prev) => ({ ...prev, [key]: value }));
                   setDirty(true);
@@ -347,6 +348,7 @@ export function GenericPluginConfigPage() {
                 commandPrefix={commandPrefix}
                 llmProviders={llmProvidersQ.data}
                 llmProvidersLoading={llmProvidersQ.isLoading || llmProvidersQ.isFetching}
+                showPreviews={false}
                 onChange={(key, value) => {
                   setAccountVals((prev) => ({ ...prev, [key]: value }));
                   setDirty(true);
@@ -354,8 +356,54 @@ export function GenericPluginConfigPage() {
               />
             ) : null}
           </CardContent>
+          <div className="sticky bottom-0 z-20 mt-4 rounded-b-lg border-t bg-background/95 px-6 py-3 shadow-[0_-8px_20px_rgba(15,23,42,0.06)] backdrop-blur supports-[backdrop-filter]:bg-background/85">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="text-sm">
+                <div className="font-medium">配置操作</div>
+                <div className="text-xs text-muted-foreground">
+                  {dirty ? "有未保存修改，保存后 worker 会热加载。" : "当前配置已同步。"}
+                </div>
+              </div>
+              <div className="flex items-center gap-4">
+                <Button onClick={() => saveMut.mutate()} disabled={saveMut.isPending || !dirty}>
+                  {saveMut.isPending ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <Save className="mr-2 h-4 w-4" />
+                  )}
+                  保存配置
+                </Button>
+                <Button type="button" variant="ghost" disabled={!dirty || saveMut.isPending} onClick={resetForm} className="px-0">
+                  撤销
+                </Button>
+              </div>
+            </div>
+          </div>
         </Card>
       )}
+
+      {hasSchemaFields ? (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">插件预览</CardTitle>
+            <CardDescription>
+              插件可选声明的模板预览，使用模拟上下文渲染，不触发真实发送。
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <ConfigPreviewSection
+              fields={previewFields}
+              values={{ ...globalVals, ...accountVals }}
+              commandPrefix={commandPrefix}
+            />
+            {!hasPreviewFields(previewFields) ? (
+              <div className="rounded-md border border-dashed bg-muted/20 px-3 py-4 text-sm text-muted-foreground">
+                当前插件没有声明预览字段。建议在 schema 中提供 <code>template_preview</code> 或 <code>*_preview</code>，便于用户确认最终消息效果。
+              </div>
+            ) : null}
+          </CardContent>
+        </Card>
+      ) : null}
     </div>
   );
 }
@@ -365,6 +413,8 @@ interface UsageGuide {
   customText: string;
   commandExamples: string[];
   notes: string[];
+  missing: boolean;
+  warning: string;
 }
 
 function buildUsageGuide({
@@ -383,13 +433,20 @@ function buildUsageGuide({
   const usageVariables = buildUsageVariables(properties, values, commandPrefix || ",", command);
   const customText = renderUsageText(
     firstUsageGuideText([
+      schema?.["x-usage-guide"],
+      schema?.["x-usage-instructions"],
+      schema?.["x-usage-steps"],
+      schema?.["x-help"],
       values.usage_preview ?? properties.usage_preview?.default,
+      values.usage_guide ?? properties.usage_guide?.default,
+      values.usage_instructions ?? properties.usage_instructions?.default,
       values.ai_usage_guide ?? properties.ai_usage_guide?.default,
       values.template_placeholders ?? properties.template_placeholders?.default,
     ]),
     usageVariables,
   );
   const aliasExamples = buildCommandExamples(properties, values, usageVariables.prefix, command);
+  const missingWarning = pluginUsageGuideWarning({ config_schema: schema });
   const interactionNotes = (interactionEntries ?? [])
     .map((entry) => {
       const title = entry.title || entry.key;
@@ -401,17 +458,20 @@ function buildUsageGuide({
 
   const notes = [
     ...interactionNotes,
-    "全局配置对所有账号共享，账号配置仅影响当前账号。",
-    "命令类字段只填写命令名，不需要包含系统命令前缀。",
-    "消息模板字段可使用页面中的占位符和预览检查最终发送效果。",
   ];
 
   return {
-    description: customText ? "来自插件 schema 的使用说明；保存后由 worker 热加载。" : "按字段填写当前账号的插件配置，保存后由 worker 热加载。",
+    description: missingWarning ? "该插件缺少自声明使用说明，需要插件开发者补齐。" : "来自插件 schema 的自声明使用说明。",
     customText,
-    commandExamples: aliasExamples.length > 0 ? aliasExamples : [`${usageVariables.prefix}${command}`],
+    commandExamples: customText ? aliasExamples : [],
     notes,
+    missing: Boolean(missingWarning),
+    warning: missingWarning ?? "",
   };
+}
+
+function hasPreviewFields(fields: Array<[string, ConfigField]>): boolean {
+  return fields.some(([key]) => key === "template_preview" || /_preview$/i.test(key));
 }
 
 function buildCommandExamples(

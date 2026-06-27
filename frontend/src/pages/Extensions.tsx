@@ -9,6 +9,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  AlertTriangle,
   ArrowLeft,
   Brain,
   BookOpen,
@@ -71,6 +72,7 @@ import { SectionHeader, SignalPill } from "@/components/ui/status";
 import { cn } from "@/lib/utils";
 import { goBackOr } from "@/lib/navigation";
 import { getErrMsg } from "@/lib/api";
+import { splitPluginWarnings } from "@/lib/plugin-config-contract";
 
 import { getFeatureMatrix } from "@/api/features";
 import {
@@ -219,10 +221,16 @@ function formatPluginVersion(version?: string | null) {
 }
 
 function toastPluginLintWarnings(row: RemotePlugin) {
-  const warnings = row.lint_warnings ?? [];
-  if (!warnings.length) return;
-  toast.warning(`插件 ${row.name} 有 ${warnings.length} 条开发规范警告`, {
-    description: warnings[0],
+  const warnings = splitPluginWarnings(row.lint_warnings);
+  if (!warnings.all.length) return;
+  if (warnings.high.length > 0) {
+    toast.error(`插件 ${row.name} 有 ${warnings.high.length} 条高级规范警告`, {
+      description: warnings.high[0],
+    });
+    return;
+  }
+  toast.warning(`插件 ${row.name} 有 ${warnings.normal.length} 条开发规范警告`, {
+    description: warnings.normal[0],
   });
 }
 
@@ -1056,21 +1064,28 @@ function InstalledPluginsSection() {
                 </TableRow>
               ))}
               {/* 远程插件 */}
-              {remote.map((p) => (
+              {remote.map((p) => {
+                const warningGroups = splitPluginWarnings(p.lint_warnings);
+                const hasWarnings = warningGroups.all.length > 0;
+                const hasHighWarnings = warningGroups.high.length > 0;
+                return (
                 <TableRow key={`rm-${p.name}`}>
                   <TableCell>
                     <div className="flex flex-wrap items-center gap-2">
                       <div className="font-medium">{p.display_name || p.name}</div>
                       {p.update_available ? <MetaBadge tone="warn">有新版本</MetaBadge> : null}
-                      {(p.lint_warnings?.length ?? 0) > 0 ? (
+                      {hasWarnings ? (
                         <button
                           type="button"
                           className="inline-flex"
                           onClick={() => toggleWarnings(p.name)}
                           aria-expanded={expandedWarnings.has(p.name)}
                         >
-                          <MetaBadge tone="warn">
-                            规范警告
+                          <MetaBadge tone={hasHighWarnings ? "danger" : "warn"}>
+                            {hasHighWarnings ? (
+                              <AlertTriangle className="h-3 w-3" />
+                            ) : null}
+                            {hasHighWarnings ? "高级规范警告" : "规范警告"}
                             <ChevronDown
                               className={cn(
                                 "h-3 w-3 transition-transform",
@@ -1092,9 +1107,16 @@ function InstalledPluginsSection() {
                         更新检查失败：{p.last_update_check_error}
                       </div>
                     ) : null}
-                    {(p.lint_warnings?.length ?? 0) > 0 && expandedWarnings.has(p.name) ? (
-                      <div className="mt-2 space-y-1 rounded-md border border-amber-500/30 bg-amber-50/70 px-3 py-2 text-xs text-amber-900 dark:bg-amber-950/20 dark:text-amber-200">
-                        {p.lint_warnings?.map((warning, index) => (
+                    {hasWarnings && expandedWarnings.has(p.name) ? (
+                      <div
+                        className={cn(
+                          "mt-2 space-y-1 rounded-md border px-3 py-2 text-xs",
+                          hasHighWarnings
+                            ? "border-destructive/30 bg-destructive/10 text-destructive"
+                            : "border-amber-500/30 bg-amber-50/70 text-amber-900 dark:bg-amber-950/20 dark:text-amber-200",
+                        )}
+                      >
+                        {warningGroups.all.map((warning, index) => (
                           <div key={`${p.name}-warning-${index}`} className="leading-5">
                             {warning}
                           </div>
@@ -1164,7 +1186,8 @@ function InstalledPluginsSection() {
                     </div>
                   </TableCell>
                 </TableRow>
-              ))}
+                );
+              })}
             </TableBody>
           </Table>
         )}

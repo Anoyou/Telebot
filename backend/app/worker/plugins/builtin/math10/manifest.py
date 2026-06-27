@@ -61,6 +61,7 @@ MANIFEST = Manifest(
     config_schema={
         "type": "object",
         "x-ui-mode": "single",
+        "x-usage-guide": "随机算数题主要由交互规则启动：在交互中心选择“随机算数题”入口，配置群内关键词或付款触发后，普通 Bot 负责高频答题交互，奖金和结算说明仍由 userbot/平台通道承接。",
         "additionalProperties": False,
         "properties": {},
     },

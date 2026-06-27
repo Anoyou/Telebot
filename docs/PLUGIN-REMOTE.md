@@ -137,9 +137,13 @@ guess_number/
 | `category` | 推荐 | string | `interactive` / `automation` / `utility`，与 `manifest.py` 保持一致 |
 | `interaction_entries` | 按需 | array | 只有需要 TelePilot 调度管理员命令/群内玩法的插件才声明；工具/自动化插件保持空或不填 |
 | `permissions` | 推荐 | array | 插件能力说明，用于安装提示、审计和 UI 展示 |
-| `config_schema` | 推荐 | object | 配置表单和 API 校验依据 |
+| `config_schema` | 推荐 | object | 配置表单和 API 校验依据；只要声明配置页，就必须包含详细使用说明 |
 
 `plugin.json` 与 `manifest.py` 中的 `version`、`category`、`interaction_entries` 应保持一致；如果插件进入 Registry，Registry 里的 `version` 也要同步。交互入口的新规范还要求 `launch_mode`、`dispatch_modes`、`message_channels`、`money_channel`、`events`、`session_scope`、`session_policy`、`payload_contract`、`result_contract`、`settlement`、`command_fallback`、`preserve_command_trigger` 在两处含义一致，不能只写一边。
+
+如果插件提供 `config_schema`，必须声明自己的使用说明。推荐在 schema 顶层写 `x-usage-guide`、`x-usage-instructions` 或 `x-usage-steps`；也可以保留只读字段 `usage_preview`、`usage_guide`、`usage_instructions`、`ai_usage_guide`。缺少说明不会阻断安装，但会在插件中心和配置页显示红色高级规范警告。`template_placeholders` 只用于占位符说明，不算详细使用说明。
+
+配置页允许通过 schema hints 在平台容器内做轻量自定义：`x-ui-section` 用于字段分组，`x-ui-order` 用于排序，`x-ui-columns` 控制 1 到 3 列。不要尝试注入 HTML、外链样式或脚本。会发送消息的插件建议声明 `template_preview` 或 `*_preview`，平台会在独立“插件预览”卡片里用模拟上下文渲染。
 
 `interaction_entries` 是 TelePilot 调度入口声明。每个入口至少要写：
 
@@ -477,6 +481,8 @@ plugin.json.config_schema
 - [ ] 插件名、Manifest key、目录名一致。
 - [ ] `plugin.json.version`、`MANIFEST.version`、Registry `version` 一致。
 - [ ] `category` 在 `plugin.json` 与 `manifest.py` 中一致。
+- [ ] 如声明 `config_schema`，已提供 `x-usage-guide` / `x-usage-steps` 或只读 `usage_preview`，不会触发“未声明详细使用说明”的高级规范警告。
+- [ ] 如插件会发送消息，建议提供 `template_preview` 或 `*_preview`；预览只用模拟数据，不触发真实发送。
 - [ ] 只有需要交互 Bot 规则触发的插件声明 `interaction_entries`；纯工具类和纯自动化类插件保持空或不填。
 - [ ] 交互入口保留兼容 `launch_mode`，并建议声明 `dispatch_modes`、`message_channels`、`money_channel`。
 - [ ] 交互入口声明了 `events`、`session_scope`、`session_policy`、`payload_contract`、`result_contract`，并与插件实现一致。
@@ -494,7 +500,7 @@ plugin.json.config_schema
 - [ ] 抢答并发只奖励一次。
 - [ ] 超时和答题同时发生时只结束一次。
 - [ ] 高频交互有冷却/限流/超时策略，且用户可见文案说明关键规则。
-- [ ] 模板类配置有占位符说明和示例预览。
+- [ ] 模板类配置有占位符说明和建议的示例预览；缺少预览不阻断运行，但会降低配置体验。
 - [ ] 插件禁用、热重载、worker 退出后没有幽灵任务。
 - [ ] 取消、完成、超时、禁用、热重载都会清理临时消息、文件和后台任务。
 - [ ] 外部 HTTP 请求有 timeout，错误提示已脱敏。

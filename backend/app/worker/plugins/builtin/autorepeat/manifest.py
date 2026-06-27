@@ -22,6 +22,7 @@ MANIFEST = Manifest(
     config_schema={
         "type": "object",
         "x-ui-mode": "rules",
+        "x-usage-guide": "自动复读通过规则触发：每条规则绑定一个群组和复读条件。当指定时间窗口内有足够多不同用户发送完全相同文本时，账号会自动复读一次。规则只监听 incoming 文本消息，保存后立即生效。",
         "additionalProperties": False,
         "required": ["target_chat_id"],
         "properties": {

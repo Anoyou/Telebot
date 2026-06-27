@@ -77,6 +77,7 @@ MANIFEST = Manifest(
     config_schema={
         "type": "object",
         "x-ui-mode": "single",
+        "x-usage-guide": "24 点游戏支持两种调度：管理员可发送 {prefix}{command} 奖金金额 直接由 userbot 启动；群友也可通过交互中心配置的关键词或付款触发，由交互 Bot 承接答题，转账和发奖仍由 userbot/平台结算通道处理。",
         "additionalProperties": False,
         "properties": {
             "command": {
