@@ -356,7 +356,7 @@ export function GenericPluginConfigPage() {
               />
             ) : null}
           </CardContent>
-          <div className="sticky bottom-0 z-20 mt-4 rounded-b-lg border-t bg-background/95 px-6 py-3 shadow-[0_-8px_20px_rgba(15,23,42,0.06)] backdrop-blur supports-[backdrop-filter]:bg-background/85">
+          <div className="static z-20 mt-4 rounded-b-lg border-t bg-background/95 px-4 py-3 shadow-[0_-8px_20px_rgba(15,23,42,0.06)] backdrop-blur supports-[backdrop-filter]:bg-background/85 sm:sticky sm:bottom-0 sm:px-6">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="text-sm">
                 <div className="font-medium">配置操作</div>

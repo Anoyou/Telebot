@@ -547,7 +547,7 @@ export function ChatGPTImageConfigPage() {
           </div>
 
           <div className="rounded-md border bg-muted/20 p-3 text-xs text-muted-foreground">
-            <ul className="mt-1.5 list-inside list-disc space-y-0.5">
+            <ul className="mt-1.5 list-inside list-disc space-y-1 break-words">
               <li>文生图：<CommandBadge>{cmdPrefix}{effectiveCommand} 提示词</CommandBadge></li>
               <li>
                 指定模型/数量/风格：{" "}
@@ -921,7 +921,7 @@ export function ChatGPTImageConfigPage() {
           </CollapsibleSection>
           </section>
         </CardContent>
-        <div className="sticky bottom-0 z-20 mt-4 rounded-b-lg border-t bg-background/95 px-6 py-3 shadow-[0_-8px_20px_rgba(15,23,42,0.06)] backdrop-blur supports-[backdrop-filter]:bg-background/85">
+        <div className="static z-20 mt-4 rounded-b-lg border-t bg-background/95 px-4 py-3 shadow-[0_-8px_20px_rgba(15,23,42,0.06)] backdrop-blur supports-[backdrop-filter]:bg-background/85 sm:sticky sm:bottom-0 sm:px-6">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="text-sm">
               <div className="font-medium">配置操作</div>

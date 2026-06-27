@@ -151,7 +151,7 @@ export function Game24ConfigPage() {
         </CardHeader>
         <CardContent>
           <div className="rounded-md border bg-muted/20 p-3 text-xs text-muted-foreground">
-            <ul className="mt-1.5 list-inside list-disc space-y-0.5">
+            <ul className="mt-1.5 list-inside list-disc space-y-1 break-words">
               <li>在群内发送 <CommandBadge>{cmdPrefix}{command} 奖金金额</CommandBadge> 开始游戏（例：<CommandBadge>{cmdPrefix}{command} 2000</CommandBadge>）</li>
               <li>系统生成 4 个数字，第一个用算式答对的人获得奖金</li>
               <li>可用运算符：+ - * / ( )，也支持 x / ÷ / × 别名</li>
@@ -225,7 +225,7 @@ export function Game24ConfigPage() {
           </div>
 
         </CardContent>
-        <div className="sticky bottom-0 z-20 mt-4 rounded-b-lg border-t bg-background/95 px-6 py-3 shadow-[0_-8px_20px_rgba(15,23,42,0.06)] backdrop-blur supports-[backdrop-filter]:bg-background/85">
+        <div className="static z-20 mt-4 rounded-b-lg border-t bg-background/95 px-4 py-3 shadow-[0_-8px_20px_rgba(15,23,42,0.06)] backdrop-blur supports-[backdrop-filter]:bg-background/85 sm:sticky sm:bottom-0 sm:px-6">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="text-sm">
               <div className="font-medium">配置操作</div>
