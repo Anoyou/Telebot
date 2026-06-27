@@ -10,6 +10,7 @@ import type {
 } from "@/types/pluginRepo";
 
 const BASE = "/api/plugin-repos";
+const PLUGIN_REPO_GIT_TIMEOUT_MS = 120000;
 
 export async function fetchPluginRepos(): Promise<PluginRepo[]> {
   const { data } = await api.get<PluginRepo[]>(BASE);
@@ -41,6 +42,7 @@ export async function fetchRepoPlugins(
 ): Promise<PluginRepoPlugin[]> {
   const { data } = await api.get<PluginRepoPlugin[]>(
     `${BASE}/${repoId}/plugins`,
+    { timeout: PLUGIN_REPO_GIT_TIMEOUT_MS },
   );
   return data;
 }
@@ -50,6 +52,8 @@ export async function refreshRepoPlugins(
 ): Promise<PluginRepoPlugin[]> {
   const { data } = await api.post<PluginRepoPlugin[]>(
     `${BASE}/${repoId}/refresh`,
+    undefined,
+    { timeout: PLUGIN_REPO_GIT_TIMEOUT_MS },
   );
   return data;
 }
@@ -59,6 +63,8 @@ export async function updateInstalledPluginsFromRepo(
 ): Promise<PluginRepoBulkUpdateResult> {
   const { data } = await api.post<PluginRepoBulkUpdateResult>(
     `${BASE}/${repoId}/update-installed`,
+    undefined,
+    { timeout: PLUGIN_REPO_GIT_TIMEOUT_MS },
   );
   return data;
 }
@@ -71,6 +77,7 @@ export async function installFromRepo(
   const { data } = await api.post<RemotePlugin>(
     `${BASE}/${repoId}/plugins/${encodeURIComponent(pluginName)}/install`,
     body ?? {},
+    { timeout: PLUGIN_REPO_GIT_TIMEOUT_MS },
   );
   return data;
 }

@@ -83,7 +83,7 @@ async def test_ensure_repo_cached_passes_private_github_env(tmp_path, monkeypatc
     monkeypatch.setattr(svc, "_run_git", _run_git_capture)
 
     assert await svc._ensure_repo_cached(url, token="ghp_private123") == target
-    assert calls[0][0] == ("clone", url, str(target))
+    assert calls[0][0] == ("clone", "--depth", "1", url, str(target))
     assert calls[0][1]["GIT_CONFIG_VALUE_0"].startswith("Authorization: Basic ")
     assert "ghp_private123" not in calls[0][1]["GIT_CONFIG_VALUE_0"]
 
@@ -108,6 +108,8 @@ async def test_ensure_repo_cached_supports_github_tree_branch_url(tmp_path, monk
     assert await svc._ensure_repo_cached(url, token="ghp_private123") == target
     assert calls[0] == (
         "clone",
+        "--depth",
+        "1",
         "--branch",
         "feature/test-branch",
         "--single-branch",
@@ -135,7 +137,14 @@ async def test_ensure_repo_cached_refreshes_github_tree_branch_cache(tmp_path, m
 
     assert await svc._ensure_repo_cached(url, force_refresh=True) == target
     assert calls == [
-        ("fetch", "--all", "--prune"),
+        (
+            "fetch",
+            "--depth",
+            "1",
+            "--prune",
+            "origin",
+            "+refs/heads/codex-image-test:refs/remotes/origin/codex-image-test",
+        ),
         ("rev-parse", "--verify", "refs/remotes/origin/codex-image-test"),
         ("reset", "--hard", "refs/remotes/origin/codex-image-test"),
     ]

@@ -226,8 +226,8 @@ async def _ensure_repo_cached(
 ) -> Path:
     """确保仓库已克隆到本地缓存；返回缓存目录路径。
 
-    - 首次：``git clone <url>``
-    - 已存在：``git fetch + git reset --hard origin/HEAD``，保证内容最新
+    - 首次：浅克隆目标分支，插件仓库只需要当前版本文件
+    - 已存在：只刷新 origin 的目标引用并 reset，避免每次扫全量远端引用
     - 失败：清理半完成的克隆目录，向上抛 ``GitOperationFailed``
     """
     _validate_source_url(url)
@@ -241,11 +241,11 @@ async def _ensure_repo_cached(
             shutil.rmtree(target, ignore_errors=True)
         target.parent.mkdir(parents=True, exist_ok=True)
         try:
-            args = ["clone"]
+            args = ["clone", "--depth", "1"]
             if source.ref:
                 args.extend(["--branch", source.ref, "--single-branch"])
             args.extend([source.clone_url, str(target)])
-            await _run_git(*args, timeout=180.0, env=git_env)
+            await _run_git(*args, timeout=90.0, env=git_env)
         except Exception:
             if target.exists():
                 shutil.rmtree(target, ignore_errors=True)
@@ -254,12 +254,32 @@ async def _ensure_repo_cached(
 
     # 缓存命中：普通列表读取允许用旧副本兜底；强制刷新必须暴露失败，避免 UI 误报成功。
     try:
-        await _run_git("fetch", "--all", "--prune", cwd=target, timeout=60.0, env=git_env)
         if source.ref:
+            await _run_git(
+                "fetch",
+                "--depth",
+                "1",
+                "--prune",
+                "origin",
+                f"+refs/heads/{source.ref}:refs/remotes/origin/{source.ref}",
+                cwd=target,
+                timeout=30.0,
+                env=git_env,
+            )
             remote_ref = f"refs/remotes/origin/{source.ref}"
             await _run_git("rev-parse", "--verify", remote_ref, cwd=target, timeout=10.0)
             await _run_git("reset", "--hard", remote_ref, cwd=target, timeout=30.0)
         else:
+            await _run_git(
+                "fetch",
+                "--depth",
+                "1",
+                "--prune",
+                "origin",
+                cwd=target,
+                timeout=30.0,
+                env=git_env,
+            )
             # 用 origin 的默认分支做硬重置；--ff-only 在分支变更时会失败，硬重置更鲁棒
             head = (await _run_git(
                 "symbolic-ref", "refs/remotes/origin/HEAD", cwd=target, timeout=10.0,
