@@ -51,7 +51,7 @@ def test_math10_manifest_declares_interaction_entry() -> None:
     assert entry["launch_mode"] == "bridge"
     assert entry["preserve_command_trigger"] is True
     assert set(entry["events"]) >= {"payment_confirmed", "keyword", "message", "session_close"}
-    assert entry["result_contract"]["send_via"] == ["interaction_bot", "userbot_reply", "bbot_notice"]
+    assert entry["result_contract"]["send_via"] == ["interaction_bot", "userbot_reply"]
     assert "settlement" in entry
     assert "prize" in entry["input_schema"]["properties"]
 

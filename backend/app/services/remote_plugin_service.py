@@ -57,7 +57,7 @@ from ..worker.ipc import CMD_RELOAD_CONFIG, publish_cmd_with_ack
 
 # 直接复用现有 loader 的配置热更新路径；installed 插件在 loader 里按 DB 双开关按需加载
 from ..worker.plugins.loader import reload_account_config
-from .interaction.contracts import send_via_selector_options
+from .interaction.contracts import send_via_selector_options, unsupported_send_via_values
 from .redactor import redact_text
 
 log = logging.getLogger(__name__)
@@ -886,7 +886,10 @@ def lint_plugin_metadata_files(plugin_dir: Path) -> list[str]:
                     if isinstance(result_contract, dict):
                         send_via = result_contract.get("send_via")
                         send_via_items = send_via if isinstance(send_via, list) else [send_via]
-                        if send_via is not None and any(not send_via_selector_options(item) for item in send_via_items):
+                        if send_via is not None and (
+                            any(not send_via_selector_options(item) for item in send_via_items)
+                            or any(unsupported_send_via_values(item) for item in send_via_items)
+                        ):
                             warnings.append(f"plugin.json interaction_entries[{idx}] result_contract.send_via 含有未支持值")
                     raw_dispatch_modes = raw_entry.get("dispatch_modes")
                     if isinstance(raw_dispatch_modes, list) and raw_dispatch_modes:

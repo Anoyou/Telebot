@@ -20,22 +20,44 @@
 
 ## [Unreleased]
 
+## [0.36.0] — 2026-06-27 · minor（次版本） · 交互插件主动通道收束
+
+### Changed
+- 交互插件主动发送通道正式收束为 `interaction_bot` 与 `userbot_reply`：普通交互内容、结果公告、按钮、会话提示默认由交互 Bot 承接；确需账号身份或低频代发时由 UserBot 承接。
+- `auto` 默认候选顺序调整为 `interaction_bot -> userbot_reply`；带 inline keyboard 的动作只会保留 `interaction_bot`，避免按钮落到无法承接回调的通道。
+- 外部转账通知 Bot 不再是 TelePilot 的发送通道；它只作为群里已有的到账证据来源，被平台监听、解析和校验后生成 `payment_confirmed`。
+- 入口显式声明 `result_contract.send_via` 时不再自动兜底错误值；写错或写入已移除通道会触发 lint / Contract Guard 告警，并在运行时阻断不合规动作。
+
+### Removed
+- 移除 `bbot_notice`、`notice`、`notice_bot` 作为插件 `send_via` / `channel` / `channel_selector` 的合法发送通道或别名。
+- Delivery Executor 不再读取转账通知 Bot token 执行插件动作；删除、置顶、按钮回调等 Bot 能力只由交互 Bot 承接。
+
+### Fixed
+- 修复“转账通知 Bot”概念容易被误解为 TelePilot 可主动控制的通知发送者的问题；前端旧通道标签改为“已移除通道”，文档统一改为“外部转账通知来源 / 到账证据来源”。
+
+### Docs
+- 插件 API 参考、远程插件指南、安全边界、速查表、插件概览和交互框架说明同步更新为“主动双通道 + 外部转账证据来源”口径。
+- 插件开发文档明确：正常插件交互和结果消息若走普通 Bot，应由交互 Bot 发送；收款确认与发奖仍由 UserBot 或平台受控结算链路处理；转账通知 Bot 只用于确认是否到账。
+
+### Tests
+- 补充旧 `bbot_notice` / `notice` 通道被 Contract Guard 阻断、混合候选中已移除通道产生告警、Delivery Executor 不再使用转账通知 Bot token、远程插件 lint 拒绝已移除通道等回归测试。
+
 ## [0.35.2] — 2026-06-27 · patch（补丁版本） · 交互插件通道选择与回退
 
 ### Added
-- 交互插件标准动作新增受控通道候选能力：插件可通过 `send_via_options`、`channel` 或 `channel_selector` 声明 `interaction_bot` / `userbot_reply` / `bbot_notice` 的单通道、候选顺序和失败回退。
+- 交互插件标准动作新增受控通道候选能力：插件可通过 `send_via_options`、`channel` 或 `channel_selector` 声明单通道、候选顺序和失败回退。
 - `ctx.messages.send/edit/delete/pin` 支持 `channel=["interaction_bot", "userbot_reply"]` 与 `channel={"prefer": ["bot", "userbot"], "fallback": true}` 写法；旧的 `channel="interaction_bot"` 继续兼容。
-- Delivery Executor 现在会按候选顺序执行发送，交互 Bot 发送失败或 token 不可用时可回退到 userbot 或通知 Bot，并写入运行时日志。
+- Delivery Executor 现在会按候选顺序执行发送，交互 Bot 发送失败或 token 不可用时可按插件声明回退，并写入运行时日志。
 
 ### Changed
 - Contract Guard 从“单一 `send_via` 白名单”升级为“候选通道过滤”：不在 `result_contract.send_via` 白名单内的候选会被过滤，全部不命中才丢弃动作。
-- 带 inline keyboard 的动作会自动收窄到 `interaction_bot` / `bbot_notice` 等可承接按钮回调的 Bot 通道，避免把按钮发到 `userbot_reply` 后无法回调。
+- 带 inline keyboard 的动作会自动收窄到可承接按钮回调的 Bot 通道，避免把按钮发到 `userbot_reply` 后无法回调。
 - 交互入口的 `message_channels` 语义调整为“通道偏好”，不再表示插件后续回复必须绑定某个账号或 Bot；前端入口卡片同步显示“管理偏好 / 群内偏好”。
 
 ### Fixed
 - 标准动作中的 `chat_id` 现在会被 Delivery Executor 正确使用；插件可在平台校验下向指定会话发送，而不是总是落回触发会话。
 - 启动占位消息在发送通道回退到非交互 Bot 时会被清理，避免 Bot 发送失败后群里残留“正在启动”占位内容。
-- 远程插件 lint 和 manifest 归一化支持 `bot`、`userbot`、`notice`、`auto` 等通道别名，避免新规范写法被误判为不支持。
+- 远程插件 lint 和 manifest 归一化支持 `bot`、`userbot`、`auto` 等通道别名，避免新规范写法被误判为不支持。
 
 ### Docs
 - 插件 API 参考、远程插件指南、安全边界、速查表、插件概览和交互框架说明同步为“插件拥有通道选择权，框架拥有通道执行权”的新口径。

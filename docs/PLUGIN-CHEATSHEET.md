@@ -34,12 +34,13 @@
 - 新交互入口名尽量别再用泛化的 `start_game`，用 `start_<plugin_key>` 更清楚；历史别名只在插件内部兼容。
 - `interaction_profile` 建议显式写：`session_game`、`challenge_game`、`reward_pool`、`utility_trigger`。
 - `session_policy` 写 TTL、重复触发、关闭条件；插件内部状态 key 要和 `session_scope` 对齐。
-- `payload_contract` 描述输入要求，`result_contract` 描述插件主动收窄的动作和发送通道；不写时按可信插件标准允许平台三通道。
-- `send_via` 支持 `interaction_bot`、`userbot_reply`、`bbot_notice`；`channel` / `channel_selector` / `send_via_options` 可写候选顺序，例如 `["interaction_bot", "userbot_reply"]`。
+- `payload_contract` 描述输入要求，`result_contract` 描述插件主动收窄的动作和发送通道；不写时按可信插件标准允许交互 Bot / UserBot 双通道。
+- `send_via` 支持 `interaction_bot`、`userbot_reply`；`channel` / `channel_selector` / `send_via_options` 可写候选顺序，例如 `["interaction_bot", "userbot_reply"]`。
 - `ctx.messages.send(channel={"prefer": ["bot", "userbot"], "fallback": true}, text="...")` 表示优先 Bot、失败时回退人形。
 - 声明了 `result_contract.actions` 时，运行时会丢弃未声明动作；显式收窄 `send_via` 后不在白名单内的候选通道会被过滤。
 - `userbot_reply` 由账号 worker 的 userbot 代发；插件选择的是受控通道，不会拿到 token/session。
-- `userbot_reply` 不承接 `reply_markup`；候选里带按钮时平台会优先保留 `interaction_bot` / `bbot_notice`，避免按钮发到无法回调的通道。
+- `userbot_reply` 不承接 `reply_markup`；候选里带按钮时平台会优先保留 `interaction_bot`，避免按钮发到无法回调的通道。
+- `bbot_notice` / `notice` 已移除，不再作为插件主动发送通道；群里已有的转账结果通知 Bot 只作为外部付款证据来源。
 - `settlement` 只描述中奖/奖金/对账结果，普通 Bot 不直接执行钱相关动作；收款确认和发奖仍由 userbot / 平台受控结算完成。
 - `preserve_command_trigger=true` 是硬规则；加交互入口不能影响插件原有命令触发。
 - `command_fallback` 只能提示或受控回退，不能让普通 incoming 消息直接进入 `on_command`。

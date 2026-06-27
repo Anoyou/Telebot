@@ -1756,13 +1756,30 @@ def _normalize_interaction_action(raw: dict[str, Any]) -> dict[str, Any]:
     """保持旧动作兼容，同时给新版发送动作补齐默认发送通道。"""
 
     action = dict(raw)
+    raw_channel_selector = _raw_interaction_channel_selector(action)
     action_type = str(action.get("type") or "").strip()
     action["type"] = action_type
     if action_type in _INTERACTION_SEND_ACTIONS or action_type in _INTERACTION_CONTROL_ACTIONS:
         apply_action_send_via_options(action, action_send_via_options(action))
+        if raw_channel_selector is not None and _channel_selector_needs_guard_trace(raw_channel_selector):
+            action["channel_selector"] = raw_channel_selector
     if isinstance(action.get("settlement"), dict):
         action["settlement"] = dict(action["settlement"])
     return action
+
+
+def _raw_interaction_channel_selector(action: dict[str, Any]) -> Any:
+    if "channel_selector" in action:
+        return action.get("channel_selector")
+    if "channel" in action:
+        return action.get("channel")
+    if "send_via_options" in action:
+        return action.get("send_via_options")
+    return None
+
+
+def _channel_selector_needs_guard_trace(selector: Any) -> bool:
+    return isinstance(selector, (dict, list, tuple, set))
 
 
 def _normalize_interaction_actions(actions: list[dict[str, Any]]) -> list[dict[str, Any]]:

@@ -436,8 +436,8 @@ function interactionChannelLabel(channel?: string | string[] | { prefer?: string
   if (channel === "userbot") return "人形";
   if (channel === "interaction_bot") return "交互 Bot";
   if (channel === "bot") return "交互 Bot";
-  if (channel === "bbot_notice") return "通知 Bot";
-  if (channel === "notice") return "通知 Bot";
+  if (channel === "bbot_notice") return "已移除通道";
+  if (channel === "notice") return "已移除通道";
   if (channel === "auto") return "自动";
   return typeof channel === "string" && channel ? channel : "自动";
 }

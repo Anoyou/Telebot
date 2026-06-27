@@ -28,7 +28,7 @@ MANIFEST = Manifest(
             },
             "result_contract": {
                 "actions": ["send_message", "send_photo", "send_file", "end_session", "result", "settlement"],
-                "send_via": ["interaction_bot", "userbot_reply", "bbot_notice"],
+                "send_via": ["interaction_bot", "userbot_reply"],
             },
             "settlement": {
                 "mode": "announce_only",

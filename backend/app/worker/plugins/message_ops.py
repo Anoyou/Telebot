@@ -12,7 +12,7 @@ from typing import Any, Literal
 
 from ...services.interaction.contracts import action_send_via_options, apply_action_send_via_options
 
-MessageChannel = Literal["interaction_bot", "userbot_reply", "bbot_notice", "auto", "bot", "userbot", "notice"]
+MessageChannel = Literal["interaction_bot", "userbot_reply", "auto", "bot", "userbot"]
 MessageChannelSelector = MessageChannel | list[MessageChannel] | tuple[MessageChannel, ...] | dict[str, Any]
 
 

@@ -24,7 +24,7 @@ InteractionAmountMatchMode = Literal["eq", "gte"]
 InteractionConcurrency = Literal["chat", "user", "none"]
 InteractionParticipantPolicy = Literal["open_race", "solo_owner", "paid_pool", "notify_only"]
 InteractionEventType = Literal["payment_confirmed", "keyword", "message", "callback_query", "session_close"]
-InteractionSendVia = Literal["interaction_bot", "userbot_reply", "bbot_notice"]
+InteractionSendVia = Literal["interaction_bot", "userbot_reply"]
 
 
 class AccountBotInteractionEnvelopeSource(BaseModel):

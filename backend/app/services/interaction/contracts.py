@@ -5,22 +5,18 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-INTERACTION_SEND_VIA = {"interaction_bot", "userbot_reply", "bbot_notice"}
-INTERACTION_BUTTON_CHANNELS = {"interaction_bot", "bbot_notice"}
-TRUSTED_DEFAULT_SEND_VIA = ("interaction_bot", "userbot_reply", "bbot_notice")
+INTERACTION_SEND_VIA = {"interaction_bot", "userbot_reply"}
+INTERACTION_BUTTON_CHANNELS = {"interaction_bot"}
+TRUSTED_DEFAULT_SEND_VIA = ("interaction_bot", "userbot_reply")
 INTERACTION_SEND_VIA_ALIASES = {
     "auto": "auto",
     "bot": "interaction_bot",
     "interaction": "interaction_bot",
     "interaction_bot": "interaction_bot",
-    "bbot": "interaction_bot",
     "userbot": "userbot_reply",
     "userbot_reply": "userbot_reply",
     "user": "userbot_reply",
     "human": "userbot_reply",
-    "notice": "bbot_notice",
-    "notice_bot": "bbot_notice",
-    "bbot_notice": "bbot_notice",
 }
 
 WriteLog = Callable[[str, str], Awaitable[None]]
@@ -28,12 +24,14 @@ EntryManifestResolver = Callable[[str | None, str | None], dict[str, Any] | None
 
 
 def action_send_via(action: dict[str, Any]) -> str:
-    return action_send_via_options(action)[0]
+    return (action_send_via_options(action) or ["interaction_bot"])[0]
 
 
 def action_send_via_options(action: dict[str, Any]) -> list[str]:
     options = _raw_send_via_options(action)
-    return options or ["interaction_bot"]
+    if options:
+        return options
+    return [] if _has_explicit_send_via_selector(action) else ["interaction_bot"]
 
 
 def send_via_selector_options(selector: Any) -> list[str]:
@@ -51,8 +49,18 @@ def send_via_selector_options(selector: Any) -> list[str]:
     return _normalize_send_via_selector(selector)
 
 
+def unsupported_send_via_values(selector: Any) -> list[str]:
+    values: list[str] = []
+    _collect_unsupported_send_via_values(selector, values)
+    return values
+
+
 def apply_action_send_via_options(action: dict[str, Any], options: list[str]) -> dict[str, Any]:
-    clean = _dedupe_valid_send_via(options) or ["interaction_bot"]
+    clean = _dedupe_valid_send_via(options)
+    if not clean:
+        if _has_explicit_send_via_selector(action):
+            return action
+        clean = ["interaction_bot"]
     action["send_via"] = clean[0]
     if len(clean) > 1:
         action["send_via_options"] = clean
@@ -63,15 +71,27 @@ def apply_action_send_via_options(action: dict[str, Any], options: list[str]) ->
     return action
 
 
+def action_send_via_raw_selector(action: dict[str, Any]) -> Any:
+    return _raw_send_via_selector(action)
+
+
 def _raw_send_via_options(action: dict[str, Any]) -> list[str]:
+    return _normalize_send_via_selector(_raw_send_via_selector(action))
+
+
+def _raw_send_via_selector(action: dict[str, Any]) -> Any:
     selector = action.get("channel_selector")
     if selector is None and "channel" in action:
         selector = action.get("channel")
-    if selector is None:
+    if selector is None and "send_via_options" in action:
         selector = action.get("send_via_options")
-    if selector is None:
+    if selector is None and "send_via" in action:
         selector = action.get("send_via")
-    return _normalize_send_via_selector(selector)
+    return selector
+
+
+def _has_explicit_send_via_selector(action: dict[str, Any]) -> bool:
+    return _raw_send_via_selector(action) not in (None, "")
 
 
 def _normalize_send_via_selector(selector: Any) -> list[str]:
@@ -103,6 +123,28 @@ def _normalize_send_via_selector(selector: Any) -> list[str]:
     return []
 
 
+def _collect_unsupported_send_via_values(selector: Any, values: list[str]) -> None:
+    if selector is None or selector == "":
+        return
+    if isinstance(selector, dict):
+        raw = (
+            selector.get("prefer")
+            or selector.get("channels")
+            or selector.get("send_via")
+            or selector.get("channel")
+        )
+        _collect_unsupported_send_via_values(raw, values)
+        return
+    if isinstance(selector, str):
+        key = selector.strip().lower()
+        if key and key not in INTERACTION_SEND_VIA_ALIASES and key not in values:
+            values.append(key)
+        return
+    if isinstance(selector, (list, tuple, set)):
+        for item in selector:
+            _collect_unsupported_send_via_values(item, values)
+
+
 def _dedupe_valid_send_via(options: list[str]) -> list[str]:
     out: list[str] = []
     for option in options:
@@ -129,14 +171,17 @@ async def guard_interaction_actions(
         if isinstance(raw_actions, list)
         else set()
     )
-    raw_send_via = contract.get("send_via")
-    raw_send_via_items = raw_send_via if isinstance(raw_send_via, list) else [raw_send_via]
-    allowed_send_via = {
-        option
-        for item in raw_send_via_items
-        for option in send_via_selector_options(item)
-        if option in INTERACTION_SEND_VIA
-    } or set(TRUSTED_DEFAULT_SEND_VIA)
+    if "send_via" in contract:
+        raw_send_via = contract.get("send_via")
+        raw_send_via_items = raw_send_via if isinstance(raw_send_via, list) else [raw_send_via]
+        allowed_send_via = {
+            option
+            for item in raw_send_via_items
+            for option in send_via_selector_options(item)
+            if option in INTERACTION_SEND_VIA
+        }
+    else:
+        allowed_send_via = set(TRUSTED_DEFAULT_SEND_VIA)
     context = dict(log_context or {})
     guarded: list[dict[str, Any]] = []
     for raw_action in actions:
@@ -154,7 +199,19 @@ async def guard_interaction_actions(
             )
             continue
         if action_type in {"send_message", "send_photo", "send_file", "delete_message", "pin_message"}:
+            requested_raw = action_send_via_raw_selector(action)
             requested_send_via = action_send_via_options(action)
+            unsupported_send_via = unsupported_send_via_values(requested_raw)
+            if unsupported_send_via and requested_send_via:
+                await write_log(
+                    "warn",
+                    "interaction action contains unsupported send_via options",
+                    action_type=action_type,
+                    send_via=requested_send_via,
+                    unsupported_send_via=unsupported_send_via,
+                    requested_send_via_raw=requested_raw,
+                    **context,
+                )
             send_via_options = [item for item in requested_send_via if item in allowed_send_via]
             if not send_via_options:
                 await write_log(
@@ -162,6 +219,7 @@ async def guard_interaction_actions(
                     f"interaction action blocked by result_contract.send_via: {requested_send_via}",
                     action_type=action_type,
                     send_via=requested_send_via,
+                    requested_send_via_raw=requested_raw,
                     allowed_send_via=sorted(allowed_send_via),
                     **context,
                 )
@@ -222,7 +280,9 @@ __all__ = [
     "TRUSTED_DEFAULT_SEND_VIA",
     "action_send_via",
     "action_send_via_options",
+    "action_send_via_raw_selector",
     "apply_action_send_via_options",
     "guard_interaction_actions",
     "send_via_selector_options",
+    "unsupported_send_via_values",
 ]

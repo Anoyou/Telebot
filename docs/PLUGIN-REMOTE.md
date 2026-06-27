@@ -92,7 +92,7 @@ guess_number/
       },
       "result_contract": {
         "actions": ["send_message", "send_photo", "send_file", "end_session", "result", "settlement"],
-        "send_via": ["interaction_bot", "userbot_reply", "bbot_notice"]
+        "send_via": ["interaction_bot", "userbot_reply"]
       },
       "settlement": {
         "mode": "announce_only",
@@ -230,10 +230,11 @@ guess_number/
 | --- | --- |
 | `interaction_bot` | 交互 Bot 发送题面、答复、图片和会话提示，别名 `bot` |
 | `userbot_reply` | 当前账号的 userbot 由 worker 代发指定消息，别名 `userbot` |
-| `bbot_notice` | 通知 Bot 发公告、命中和对账提示，别名 `notice` |
 | `auto` | 平台默认候选顺序，仍受 `result_contract.send_via` 限制 |
 
-未声明 `result_contract.send_via` 时按个人可信插件标准处理，默认允许 `interaction_bot`、`userbot_reply`、`bbot_notice` 三个受控通道。声明了 `result_contract.actions` 时，运行时会丢弃未声明动作；显式收窄 `send_via` 后，不在白名单内的候选通道会被过滤，全部不命中时动作会被丢弃并写入 runtime log。`reply_markup` 只由 `interaction_bot` / `bbot_notice` 承接；如果候选里还有 `userbot_reply`，平台会自动收窄到可承接按钮的 Bot 通道。涉及奖金、补发、转账、催付的插件要写 `settlement`，但 `settlement` 只能描述结果和对账字段，不能让普通 Bot 直接拥有发奖权限。钱相关动作仍应由账号 worker 的 userbot 代发或由平台受控结算流程处理。
+未声明 `result_contract.send_via` 时按个人可信插件标准处理，默认允许 `interaction_bot`、`userbot_reply` 两个受控通道。声明了 `result_contract.actions` 时，运行时会丢弃未声明动作；显式收窄 `send_via` 后，不在白名单内的候选通道会被过滤，全部不命中时动作会被丢弃并写入 runtime log。`reply_markup` 只由 `interaction_bot` 承接；如果候选里还有 `userbot_reply`，平台会自动收窄到可承接按钮的交互 Bot 通道。`bbot_notice` / `notice` 已移除，不再作为插件主动发送通道。涉及奖金、补发、转账、催付的插件要写 `settlement`，但 `settlement` 只能描述结果和对账字段，不能让普通 Bot 直接拥有发奖权限。钱相关动作仍应由账号 worker 的 userbot 代发或由平台受控结算流程处理。
+
+> 群里已有的转账结果通知 Bot 只属于外部付款证据来源。TelePilot 监听并解析它的到账消息来生成 `payment_confirmed`，但不会把它的 Bot Token 交给插件，也不会用它发送插件结果。
 
 交互入口不得影响原有命令触发。远程插件可以把业务逻辑抽成共享函数，但 `commands`、`on_command`、`message_channels`、`on_message` 的既有语义必须保持；普通群成员 incoming 消息不能因为 `launch_mode=bridge/hybrid` 或 `command_fallback` 就直接进入 `on_command`。
 
@@ -491,7 +492,7 @@ plugin.json.config_schema
 - [ ] 独玩/按钮入口声明 `participant_policy=solo_owner`；抢答/竞猜入口声明或默认使用 `open_race`。
 - [ ] `preserve_command_trigger=true`；新增交互入口后，原有 UserBot 命令仍按原指令名、参数和权限触发。
 - [ ] 如声明 `command_fallback`，只做提示或受控回退，不让普通 incoming 消息直接进入 `on_command`。
-- [ ] 返回动作的 `send_via` / `channel` / `channel_selector` 使用平台受控通道：`interaction_bot`、`userbot_reply`、`bbot_notice`；需要主动收窄时再写 `result_contract.send_via`。
+- [ ] 返回动作的 `send_via` / `channel` / `channel_selector` 使用平台受控通道：`interaction_bot`、`userbot_reply`；需要主动收窄时再写 `result_contract.send_via`。
 - [ ] 涉及奖金/补发/对账的插件声明了 `settlement`，且交互 Bot 只公告结果，不直接执行钱相关动作。
 - [ ] 插件按 `source` / `source_actor` / `actor` / `payment` / `player` / `reply_to` / `trigger` / `session` 信封读取输入，不依赖转账通知原文或 Bot Token。
 - [ ] 启动日志或主要交互消息包含当前插件版本，方便确认远程热更新是否生效。

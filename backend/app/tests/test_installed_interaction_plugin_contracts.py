@@ -249,7 +249,7 @@ def test_guess_number_manifest_declares_interaction_contract() -> None:
     assert entry["session_scope"] == "chat"
     assert entry["preserve_command_trigger"] is True
     assert entry["command_fallback"]["command"] == "guess"
-    assert entry["result_contract"]["send_via"] == ["interaction_bot", "userbot_reply", "bbot_notice"]
+    assert entry["result_contract"]["send_via"] == ["interaction_bot", "userbot_reply"]
     assert "valid_seconds" in entry["input_schema"]["properties"]
 
 
@@ -266,7 +266,7 @@ def test_poetry_blank_manifest_declares_interaction_contract() -> None:
     assert entry["session_scope"] == "chat"
     assert entry["preserve_command_trigger"] is True
     assert entry["command_fallback"]["command"] == "poetry"
-    assert entry["result_contract"]["send_via"] == ["interaction_bot", "userbot_reply", "bbot_notice"]
+    assert entry["result_contract"]["send_via"] == ["interaction_bot", "userbot_reply"]
     assert "valid_seconds" in entry["input_schema"]["properties"]
 
 
@@ -283,7 +283,7 @@ def test_dice_grid_hunt_manifest_declares_interaction_contract() -> None:
     assert entry["session_scope"] == "chat"
     assert entry["preserve_command_trigger"] is True
     assert entry["command_fallback"]["command"] == "dicegrid"
-    assert entry["result_contract"]["send_via"] == ["interaction_bot", "userbot_reply", "bbot_notice"]
+    assert entry["result_contract"]["send_via"] == ["interaction_bot", "userbot_reply"]
     assert "valid_seconds" in entry["input_schema"]["properties"]
 
 
@@ -301,7 +301,7 @@ def test_lottery_plus_manifest_declares_interaction_contract() -> None:
     assert entry["events"] == ["payment_confirmed", "message", "session_close"]
     assert entry["preserve_command_trigger"] is True
     assert entry["command_fallback"]["command"] == "lotto"
-    assert entry["result_contract"]["send_via"] == ["interaction_bot", "userbot_reply", "bbot_notice"]
+    assert entry["result_contract"]["send_via"] == ["interaction_bot", "userbot_reply"]
     assert "message" in entry["input_schema"]["properties"]
 
 
@@ -319,7 +319,7 @@ def test_redpack_manifest_declares_interaction_contract() -> None:
     assert entry["events"] == ["keyword", "payment_confirmed", "message", "session_close"]
     assert entry["preserve_command_trigger"] is True
     assert entry["command_fallback"]["command"] == "redpack"
-    assert entry["result_contract"]["send_via"] == ["interaction_bot", "userbot_reply", "bbot_notice"]
+    assert entry["result_contract"]["send_via"] == ["interaction_bot", "userbot_reply"]
     assert "total_amount" in entry["input_schema"]["properties"]
     assert "count" in entry["input_schema"]["properties"]
 

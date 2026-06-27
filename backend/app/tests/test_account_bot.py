@@ -358,6 +358,23 @@ async def test_message_ops_buffers_channel_selector_with_fallback() -> None:
     ]
 
 
+def test_interaction_action_normalize_preserves_raw_selector_for_guard_trace() -> None:
+    action = plugin_loader._normalize_interaction_action(  # noqa: SLF001
+        {
+            "type": "send_message",
+            "channel": {"prefer": ["bot", "notice"], "fallback": True},
+            "text": "题面",
+        }
+    )
+
+    assert action == {
+        "type": "send_message",
+        "send_via": "interaction_bot",
+        "channel_selector": {"prefer": ["bot", "notice"], "fallback": True},
+        "text": "题面",
+    }
+
+
 @pytest.mark.asyncio
 async def test_interaction_result_contract_blocks_undeclared_channel(monkeypatch) -> None:
     incoming = account_bot_runtime.Incoming(
@@ -530,10 +547,19 @@ async def test_interaction_without_result_contract_trusts_standard_channels(monk
             {"type": "send_message", "send_via": "userbot_reply", "text": "admin path"},
             {"type": "send_message", "send_via": "interaction_bot", "text": "public path"},
             {"type": "send_message", "send_via": "bbot_notice", "text": "notice path"},
+            {"type": "send_message", "send_via": "notice", "text": "notice alias"},
         ],
     )
 
-    assert [item["send_via"] for item in guarded] == ["userbot_reply", "interaction_bot", "bbot_notice"]
+    assert [item["send_via"] for item in guarded] == ["userbot_reply", "interaction_bot"]
+    warn_calls = [
+        call
+        for call in account_bot_runtime._write_interaction_runtime_log.await_args_list
+        if "blocked by result_contract.send_via" in call.args[2]
+    ]
+    assert len(warn_calls) == 2
+    blocked_raw = [call.kwargs["requested_send_via_raw"] for call in warn_calls]
+    assert blocked_raw == ["bbot_notice", "notice"]
 
 
 @pytest.mark.asyncio
@@ -1502,10 +1528,10 @@ def test_interaction_entry_manifest_normalizes_command_fallback() -> None:
     assert entry["money_channel"] == "userbot_reply"
     assert entry["preserve_command_trigger"] is True
     assert entry["command_fallback"] == {"enabled": True, "command": "24d", "mode": "hint_only"}
-    assert entry["result_contract"]["send_via"] == ["interaction_bot", "userbot_reply"]
+    assert entry["result_contract"]["send_via"] == ["interaction_bot", "bad", "userbot_reply"]
 
 
-def test_interaction_entry_manifest_normalizes_trusted_send_via_default() -> None:
+def test_interaction_entry_manifest_keeps_invalid_declared_send_via_for_guard() -> None:
     entry = account_bot_service.normalize_interaction_entry_manifest(
         {
             "key": "trusted_game",
@@ -1518,7 +1544,7 @@ def test_interaction_entry_manifest_normalizes_trusted_send_via_default() -> Non
     assert entry is not None
     assert entry["dispatch_modes"] == ["public_keyword"]
     assert entry["message_channels"] == {"public_keyword": "interaction_bot"}
-    assert entry["result_contract"]["send_via"] == ["interaction_bot", "userbot_reply", "bbot_notice"]
+    assert entry["result_contract"]["send_via"] == ["bad"]
 
 
 def test_interaction_entry_manifest_accepts_channel_preferences_and_aliases() -> None:
@@ -1540,7 +1566,88 @@ def test_interaction_entry_manifest_accepts_channel_preferences_and_aliases() ->
         "admin_command": ["userbot_reply", "interaction_bot"],
         "public_keyword": {"prefer": ["interaction_bot", "userbot_reply"], "fallback": True},
     }
-    assert entry["result_contract"]["send_via"] == ["interaction_bot", "userbot_reply", "bbot_notice"]
+    assert entry["result_contract"]["send_via"] == ["interaction_bot", "userbot_reply", "notice"]
+
+
+@pytest.mark.asyncio
+async def test_interaction_result_contract_warns_unsupported_mixed_channel_options(monkeypatch) -> None:
+    incoming = account_bot_runtime.Incoming(
+        account_id=1,
+        token="123:token",
+        update_id=10,
+        user_id=20,
+        chat_id=-100,
+        message_id=30,
+        text="",
+    )
+    write_log = AsyncMock()
+    monkeypatch.setattr(account_bot_service, "declared_module_entry_manifest", lambda *_args: {})
+    monkeypatch.setattr(account_bot_runtime, "_write_interaction_runtime_log", write_log)
+
+    guarded = await account_bot_runtime._guard_interaction_actions(
+        incoming,
+        {"module_key": "demo", "module_action": "start"},
+        [
+            {
+                "type": "send_message",
+                "channel": {"prefer": ["bot", "notice"], "fallback": True},
+                "text": "ok",
+            },
+        ],
+    )
+
+    assert guarded == [
+        {
+            "type": "send_message",
+            "send_via": "interaction_bot",
+            "text": "ok",
+        }
+    ]
+    assert write_log.await_count == 1
+    assert write_log.await_args.args[1:3] == ("warn", "interaction action contains unsupported send_via options")
+    assert write_log.await_args.kwargs["unsupported_send_via"] == ["notice"]
+
+
+@pytest.mark.asyncio
+async def test_interaction_result_contract_ignores_removed_channel_in_manifest(monkeypatch) -> None:
+    incoming = account_bot_runtime.Incoming(
+        account_id=1,
+        token="123:token",
+        update_id=10,
+        user_id=20,
+        chat_id=-100,
+        message_id=30,
+        text="",
+    )
+    write_log = AsyncMock()
+    monkeypatch.setattr(
+        account_bot_service,
+        "declared_module_entry_manifest",
+        lambda *_args: {"result_contract": {"send_via": ["interaction_bot", "notice"]}},
+    )
+    monkeypatch.setattr(account_bot_runtime, "_write_interaction_runtime_log", write_log)
+
+    guarded = await account_bot_runtime._guard_interaction_actions(
+        incoming,
+        {"module_key": "demo", "module_action": "start"},
+        [
+            {
+                "type": "send_message",
+                "channel": {"prefer": ["bot", "notice"], "fallback": True},
+                "text": "ok",
+            },
+        ],
+    )
+
+    assert guarded == [
+        {
+            "type": "send_message",
+            "send_via": "interaction_bot",
+            "text": "ok",
+        }
+    ]
+    assert write_log.await_count == 1
+    assert write_log.await_args.kwargs["unsupported_send_via"] == ["notice"]
 
 
 def test_interaction_entry_manifest_accepts_result_contract_channel_selector() -> None:
@@ -5708,21 +5815,12 @@ async def test_interaction_action_save_message_id_key_is_validated(monkeypatch) 
 
 
 @pytest.mark.asyncio
-async def test_interaction_action_send_via_bbot_notice_and_logs_settlement(monkeypatch) -> None:
-    class _DB:
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, exc_type, exc, tb):
-            return None
-
+async def test_interaction_action_bbot_notice_no_longer_sends_or_uses_transfer_bot(monkeypatch) -> None:
     send = AsyncMock()
-    delete = AsyncMock()
     write_log = AsyncMock()
-    monkeypatch.setattr(account_bot_runtime, "AsyncSessionLocal", lambda: _DB())
-    monkeypatch.setattr(account_bot_service, "get_transfer_bot_token", AsyncMock(return_value="abot-token"))
+    get_transfer_bot_token = AsyncMock(return_value="abot-token")
+    monkeypatch.setattr(account_bot_service, "get_transfer_bot_token", get_transfer_bot_token)
     monkeypatch.setattr(account_bot_service, "send_message", send)
-    monkeypatch.setattr(account_bot_service, "delete_message", delete)
     monkeypatch.setattr(account_bot_runtime, "_write_interaction_runtime_log", write_log)
     incoming = account_bot_runtime.Incoming(
         account_id=1,
@@ -5753,10 +5851,8 @@ async def test_interaction_action_send_via_bbot_notice_and_logs_settlement(monke
         replace_message_id=77,
     )
 
-    assert send.await_count == 1
-    assert send.await_args.args[:3] == ("abot-token", -100123, "结算公告")
-    assert send.await_args.kwargs["reply_to_message_id"] == 9
-    delete.assert_awaited_once_with("bbot-token", -100123, 77)
+    send.assert_not_awaited()
+    get_transfer_bot_token.assert_not_awaited()
     assert write_log.await_count == 1
     assert write_log.await_args_list[0].args[1:3] == ("info", "interaction settlement reported")
     assert write_log.await_args_list[0].kwargs["settlement"]["amount"] == 123

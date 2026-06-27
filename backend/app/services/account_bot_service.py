@@ -47,7 +47,7 @@ from ..schemas.account_bot import (
     AccountBotUserUpdate,
 )
 from ..settings import settings
-from .interaction.contracts import send_via_selector_options
+from .interaction.contracts import send_via_selector_options, unsupported_send_via_values
 
 log = logging.getLogger(__name__)
 
@@ -59,10 +59,10 @@ VALID_AMOUNT_MATCH_MODES = {"eq", "gte"}
 VALID_CONCURRENCY = {"chat", "user", "none"}
 VALID_INTERACTION_EVENTS = {"payment_confirmed", "keyword", "message", "callback_query", "session_close"}
 VALID_INTERACTION_LAUNCH_MODES = {"bridge", "direct", "hybrid"}
-VALID_INTERACTION_SEND_VIA = {"interaction_bot", "userbot_reply", "bbot_notice"}
-TRUSTED_INTERACTION_SEND_VIA = ["interaction_bot", "userbot_reply", "bbot_notice"]
+VALID_INTERACTION_SEND_VIA = {"interaction_bot", "userbot_reply"}
+TRUSTED_INTERACTION_SEND_VIA = ["interaction_bot", "userbot_reply"]
 VALID_INTERACTION_DISPATCH_MODES = {"admin_command", "public_keyword"}
-VALID_INTERACTION_MESSAGE_CHANNELS = {"interaction_bot", "userbot_reply", "bbot_notice", "auto"}
+VALID_INTERACTION_MESSAGE_CHANNELS = {"interaction_bot", "userbot_reply", "auto"}
 VALID_INTERACTION_PARTICIPANT_POLICIES = {"open_race", "solo_owner", "paid_pool", "notify_only"}
 FALLBACK_CHAT_SESSION_MODULE_ENTRIES = {
     ("dice_grid_hunt", "start_dice_grid_hunt"),
@@ -507,8 +507,6 @@ def normalize_interaction_entry_manifest(raw: Any) -> dict[str, Any] | None:
         send_via = _normalize_result_contract_send_via(result_contract.get("send_via"))
         if send_via:
             normalized_result_contract["send_via"] = send_via
-        elif "send_via" in normalized_result_contract:
-            normalized_result_contract["send_via"] = list(TRUSTED_INTERACTION_SEND_VIA)
         out["result_contract"] = normalized_result_contract
     if isinstance(command_fallback, dict):
         out["command_fallback"] = dict(command_fallback)
@@ -540,6 +538,9 @@ def _normalize_result_contract_send_via(raw: Any) -> list[str]:
         options = send_via_selector_options(raw_item)
         for item in options:
             if item in VALID_INTERACTION_SEND_VIA and item not in send_via:
+                send_via.append(item)
+        for item in unsupported_send_via_values(raw_item):
+            if item not in send_via:
                 send_via.append(item)
     return send_via
 

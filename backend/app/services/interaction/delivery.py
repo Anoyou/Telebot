@@ -10,7 +10,6 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
 
-from ...db.base import AsyncSessionLocal
 from ...redis_client import get_redis
 from .. import account_bot_service
 from .contracts import action_send_via_options
@@ -348,7 +347,7 @@ class InteractionDeliveryExecutor:
         message_id = _int_or_none(action.get("message_id"))
         chat_id = _int_or_none(action.get("chat_id"))
         for send_via in action_send_via_options(action):
-            if send_via not in {"interaction_bot", "bbot_notice"}:
+            if send_via != "interaction_bot":
                 continue
             await self.delete_message(message_id, chat_id=chat_id, send_via=send_via)
             return
@@ -357,14 +356,14 @@ class InteractionDeliveryExecutor:
         message_id = _int_or_none(action.get("message_id"))
         chat_id = _int_or_none(action.get("chat_id"))
         for send_via in action_send_via_options(action):
-            if send_via not in {"interaction_bot", "bbot_notice"}:
+            if send_via != "interaction_bot":
                 continue
             await self._pin_message(message_id, chat_id=chat_id, send_via=send_via)
             return
 
     async def _pin_message(self, message_id: int | None, *, chat_id: int | None = None, send_via: str) -> None:
         target_chat_id = self._target_chat_id(chat_id)
-        if send_via not in {"interaction_bot", "bbot_notice"} or message_id is None or target_chat_id is None:
+        if send_via != "interaction_bot" or message_id is None or target_chat_id is None:
             return
         token = await self._resolve_token(send_via)
         if not token:
@@ -402,7 +401,7 @@ class InteractionDeliveryExecutor:
                 reply_to_message_id=reply_to_message_id,
                 send_via=send_via,
                 edit_message_id=edit_message_id if send_via == "interaction_bot" else None,
-                reply_markup=reply_markup if send_via in {"interaction_bot", "bbot_notice"} else None,
+                reply_markup=reply_markup if send_via == "interaction_bot" else None,
             )
             if ok:
                 return True, result, send_via
@@ -452,9 +451,6 @@ class InteractionDeliveryExecutor:
     async def _resolve_token(self, send_via: str) -> str | None:
         if send_via == "interaction_bot":
             return self.incoming.token
-        if send_via == "bbot_notice":
-            async with AsyncSessionLocal() as db:
-                return await account_bot_service.get_transfer_bot_token(db, self.incoming.account_id)
         return self.incoming.token
 
     async def _record_settlement(self, action: dict[str, Any]) -> None:
