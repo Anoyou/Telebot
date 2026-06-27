@@ -423,12 +423,23 @@ function interactionDispatchLabels(entry: FeatureInteractionEntry): string[] {
   return labels;
 }
 
-function interactionChannelLabel(channel?: string | null): string {
+function interactionChannelLabel(channel?: string | string[] | { prefer?: string[]; fallback?: boolean } | null): string {
+  if (Array.isArray(channel)) {
+    return channel.map((item) => interactionChannelLabel(item)).join(" / ");
+  }
+  if (typeof channel === "object" && channel !== null) {
+    const preferred = Array.isArray(channel.prefer) ? channel.prefer : [];
+    const label = preferred.length ? preferred.map((item) => interactionChannelLabel(item)).join(" / ") : "自动";
+    return channel.fallback === false ? label : `${label} 回退`;
+  }
   if (channel === "userbot_reply") return "人形";
+  if (channel === "userbot") return "人形";
   if (channel === "interaction_bot") return "交互 Bot";
+  if (channel === "bot") return "交互 Bot";
   if (channel === "bbot_notice") return "通知 Bot";
+  if (channel === "notice") return "通知 Bot";
   if (channel === "auto") return "自动";
-  return channel || "自动";
+  return typeof channel === "string" && channel ? channel : "自动";
 }
 
 const INTERACTION_PROFILE_ORDER: Array<NonNullable<FeatureInteractionEntry["interaction_profile"]>> = [
@@ -1081,12 +1092,12 @@ function InteractionRuleEditor({
               ))}
               {adminChannel ? (
                 <Badge variant="secondary" className="h-5 px-1.5 text-[11px]">
-                  管理:{interactionChannelLabel(adminChannel)}
+                  管理偏好:{interactionChannelLabel(adminChannel)}
                 </Badge>
               ) : null}
               {publicChannel ? (
                 <Badge variant="secondary" className="h-5 px-1.5 text-[11px]">
-                  群内:{interactionChannelLabel(publicChannel)}
+                  群内偏好:{interactionChannelLabel(publicChannel)}
                 </Badge>
               ) : null}
               {item.entry.money_channel ? (

@@ -24,7 +24,7 @@ from pathlib import Path
 
 import pytest
 
-from app.db.models.feature import FEATURE_AUTO_REPLY
+from app.db.models.feature import FEATURE_FORWARD
 from app.db.models.plugin import InstalledPlugin
 from app.services import plugin_install_service as pis
 
@@ -187,7 +187,7 @@ def test_parse_zip_too_large(monkeypatch) -> None:
 
 
 def test_parse_zip_key_conflicts_builtin() -> None:
-    z = _make_zip(key=FEATURE_AUTO_REPLY)
+    z = _make_zip(key=FEATURE_FORWARD)
     with pytest.raises(pis.KeyConflict) as ex:
         pis.parse_zip(z)
     assert ex.value.code == "KEY_CONFLICTS_BUILTIN"

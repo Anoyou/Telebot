@@ -61,12 +61,12 @@ from . import (
     feature_service,
     remote_plugin_service,
 )
-from .interaction import InteractionDeliveryExecutor
 from .interaction.contracts import guard_interaction_actions
 from .interaction.delivery import (
     INTERACTION_SESSION_CONTROL_ACTIONS as _INTERACTION_SESSION_CONTROL_ACTIONS,
 )
 from .interaction.delivery import (
+    InteractionDeliveryExecutor,
     action_save_message_id_key,
     delivery_message_id,
 )

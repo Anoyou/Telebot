@@ -66,7 +66,7 @@ class Manifest:
     # ctx.http 扩展策略，例如 {"allow_direct": true}。
     http: dict[str, Any] | None = None
     # 交互动作发送通道元数据，例如 {"interaction_bot", "userbot_reply", "bbot_notice"}。
-    # 其中 userbot_reply 表示由账号 worker 的 Telethon client 代发，不是插件任意选发送者。
+    # 插件可在动作里选择单通道或候选通道；平台负责执行、审计和能力边界。
     interaction_send_via: list[str] = field(default_factory=list)
     # 可选：安装钩子（python module path），阶段 B/C 启用
     on_install: str | None = None

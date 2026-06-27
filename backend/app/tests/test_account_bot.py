@@ -229,6 +229,99 @@ async def test_interaction_delivery_executor_routes_userbot_reply() -> None:
 
 
 @pytest.mark.asyncio
+async def test_interaction_delivery_executor_falls_back_between_plugin_channels(monkeypatch) -> None:
+    incoming = account_bot_runtime.Incoming(
+        account_id=1,
+        token="123:token",
+        update_id=10,
+        user_id=20,
+        chat_id=-100,
+        message_id=30,
+        text="",
+    )
+    send_message = AsyncMock(side_effect=RuntimeError("bot blocked"))
+    run_worker_action = AsyncMock(return_value=(True, None, {"message_id": 66}))
+    write_log = AsyncMock()
+    monkeypatch.setattr(account_bot_service, "send_message", send_message)
+    executor = InteractionDeliveryExecutor(
+        incoming=incoming,
+        write_log=write_log,
+        run_worker_action=run_worker_action,
+        log_context=account_bot_runtime._interaction_log_context,
+        trace_context=account_bot_runtime._interaction_trace_context,
+    )
+
+    await executor.apply([
+        {
+            "type": "send_message",
+            "send_via": "interaction_bot",
+            "send_via_options": ["interaction_bot", "userbot_reply"],
+            "chat_id": -200,
+            "text": "可回退消息",
+            "reply_to_message_id": 31,
+        }
+    ])
+
+    send_message.assert_awaited_once()
+    assert send_message.await_args.args[:3] == ("123:token", -200, "可回退消息")
+    run_worker_action.assert_awaited_once_with(
+        incoming,
+        payload={
+            "action_type": "send_message",
+            "chat_id": -200,
+            "text": "可回退消息",
+            "reply_to_message_id": 31,
+        },
+    )
+    assert any(call.args[2] == "interaction action send_via fallback" for call in write_log.await_args_list)
+
+
+@pytest.mark.asyncio
+async def test_interaction_delivery_executor_deletes_placeholder_from_trigger_chat(monkeypatch) -> None:
+    incoming = account_bot_runtime.Incoming(
+        account_id=1,
+        token="123:token",
+        update_id=10,
+        user_id=20,
+        chat_id=-100,
+        message_id=30,
+        text="",
+    )
+    send_message = AsyncMock(return_value={"message_id": 90})
+    delete_message = AsyncMock()
+    monkeypatch.setattr(account_bot_service, "send_message", send_message)
+    monkeypatch.setattr(account_bot_service, "delete_message", delete_message)
+    executor = InteractionDeliveryExecutor(
+        incoming=incoming,
+        write_log=AsyncMock(),
+        run_worker_action=AsyncMock(),
+        log_context=account_bot_runtime._interaction_log_context,
+        trace_context=account_bot_runtime._interaction_trace_context,
+    )
+
+    await executor.apply(
+        [
+            {
+                "type": "send_message",
+                "send_via": "interaction_bot",
+                "chat_id": -200,
+                "text": "发到目标群",
+            }
+        ],
+        replace_message_id=77,
+    )
+
+    send_message.assert_awaited_once_with(
+        "123:token",
+        -200,
+        "发到目标群",
+        reply_to_message_id=None,
+        reply_markup=None,
+    )
+    delete_message.assert_awaited_once_with("123:token", -100, 77)
+
+
+@pytest.mark.asyncio
 async def test_message_ops_buffers_standard_actions() -> None:
     ops = BufferedMessageOps()
 
@@ -240,6 +333,29 @@ async def test_message_ops_buffers_standard_actions() -> None:
     assert ops.actions[0]["send_via"] == "interaction_bot"
     assert ops.actions[0]["reply_markup"] == {"inline_keyboard": []}
     assert ops.actions[1]["callback_query_id"] == "cb-1"
+
+
+@pytest.mark.asyncio
+async def test_message_ops_buffers_channel_selector_with_fallback() -> None:
+    ops = BufferedMessageOps()
+
+    await ops.send(
+        channel={"prefer": ["bot", "userbot"], "fallback": True},
+        chat_id=-100,
+        text="题面",
+    )
+
+    assert ops.actions == [
+        {
+            "type": "send_message",
+            "send_via": "interaction_bot",
+            "send_via_options": ["interaction_bot", "userbot_reply"],
+            "channel_selector": {"prefer": ["bot", "userbot"], "fallback": True},
+            "chat_id": -100,
+            "text": "题面",
+            "reply_to_message_id": None,
+        }
+    ]
 
 
 @pytest.mark.asyncio
@@ -285,6 +401,111 @@ async def test_interaction_result_contract_blocks_undeclared_channel(monkeypatch
     assert guarded == [{"type": "send_message", "send_via": "interaction_bot", "text": "ok"}]
     assert any("send_via" in str(item["message"]) for item in logs)
     assert any("actions" in str(item["message"]) for item in logs)
+
+
+@pytest.mark.asyncio
+async def test_interaction_result_contract_filters_channel_options(monkeypatch) -> None:
+    incoming = account_bot_runtime.Incoming(
+        account_id=1,
+        token="123:token",
+        update_id=10,
+        user_id=20,
+        chat_id=-100,
+        message_id=30,
+        text="",
+    )
+    rule = {"module_key": "demo", "module_action": "start"}
+
+    monkeypatch.setattr(
+        account_bot_service,
+        "declared_module_entry_manifest",
+        lambda *_args: {"result_contract": {"send_via": ["userbot_reply"]}},
+    )
+    monkeypatch.setattr(account_bot_runtime, "_write_interaction_runtime_log", AsyncMock())
+
+    guarded = await account_bot_runtime._guard_interaction_actions(
+        incoming,
+        rule,
+        [
+            {
+                "type": "send_message",
+                "send_via": "interaction_bot",
+                "send_via_options": ["interaction_bot", "userbot_reply"],
+                "text": "fallback only",
+            },
+        ],
+    )
+
+    assert guarded == [{"type": "send_message", "send_via": "userbot_reply", "text": "fallback only"}]
+
+
+@pytest.mark.asyncio
+async def test_interaction_result_contract_accepts_channel_aliases_without_manifest_normalize(monkeypatch) -> None:
+    incoming = account_bot_runtime.Incoming(
+        account_id=1,
+        token="123:token",
+        update_id=10,
+        user_id=20,
+        chat_id=-100,
+        message_id=30,
+        text="",
+    )
+    monkeypatch.setattr(
+        account_bot_service,
+        "declared_module_entry_manifest",
+        lambda *_args: {"result_contract": {"send_via": ["userbot"]}},
+    )
+    monkeypatch.setattr(account_bot_runtime, "_write_interaction_runtime_log", AsyncMock())
+
+    guarded = await account_bot_runtime._guard_interaction_actions(
+        incoming,
+        {"module_key": "demo", "module_action": "start"},
+        [{"type": "send_message", "channel": {"prefer": ["bot", "userbot"], "fallback": True}, "text": "alias"}],
+    )
+
+    assert guarded == [{"type": "send_message", "send_via": "userbot_reply", "text": "alias"}]
+
+
+@pytest.mark.asyncio
+async def test_interaction_result_contract_narrows_buttons_to_bot_channels(monkeypatch) -> None:
+    incoming = account_bot_runtime.Incoming(
+        account_id=1,
+        token="123:token",
+        update_id=10,
+        user_id=20,
+        chat_id=-100,
+        message_id=30,
+        text="",
+    )
+    monkeypatch.setattr(
+        account_bot_service,
+        "declared_module_entry_manifest",
+        lambda *_args: {"result_contract": {"send_via": ["interaction_bot", "userbot_reply"]}},
+    )
+    monkeypatch.setattr(account_bot_runtime, "_write_interaction_runtime_log", AsyncMock())
+
+    guarded = await account_bot_runtime._guard_interaction_actions(
+        incoming,
+        {"module_key": "demo", "module_action": "start"},
+        [
+            {
+                "type": "send_message",
+                "send_via": "interaction_bot",
+                "send_via_options": ["userbot_reply", "interaction_bot"],
+                "text": "button path",
+                "reply_markup": {"inline_keyboard": []},
+            },
+        ],
+    )
+
+    assert guarded == [
+        {
+            "type": "send_message",
+            "send_via": "interaction_bot",
+            "text": "button path",
+            "reply_markup": {"inline_keyboard": []},
+        }
+    ]
 
 
 @pytest.mark.asyncio
@@ -1298,6 +1519,42 @@ def test_interaction_entry_manifest_normalizes_trusted_send_via_default() -> Non
     assert entry["dispatch_modes"] == ["public_keyword"]
     assert entry["message_channels"] == {"public_keyword": "interaction_bot"}
     assert entry["result_contract"]["send_via"] == ["interaction_bot", "userbot_reply", "bbot_notice"]
+
+
+def test_interaction_entry_manifest_accepts_channel_preferences_and_aliases() -> None:
+    entry = account_bot_service.normalize_interaction_entry_manifest(
+        {
+            "key": "trusted_game",
+            "launch_mode": "hybrid",
+            "session_scope": "chat",
+            "message_channels": {
+                "admin_command": ["userbot", "bot"],
+                "public_keyword": {"prefer": ["bot", "userbot"], "fallback": True},
+            },
+            "result_contract": {"send_via": ["bot", "userbot", "notice"]},
+        }
+    )
+
+    assert entry is not None
+    assert entry["message_channels"] == {
+        "admin_command": ["userbot_reply", "interaction_bot"],
+        "public_keyword": {"prefer": ["interaction_bot", "userbot_reply"], "fallback": True},
+    }
+    assert entry["result_contract"]["send_via"] == ["interaction_bot", "userbot_reply", "bbot_notice"]
+
+
+def test_interaction_entry_manifest_accepts_result_contract_channel_selector() -> None:
+    entry = account_bot_service.normalize_interaction_entry_manifest(
+        {
+            "key": "trusted_game",
+            "launch_mode": "bridge",
+            "session_scope": "chat",
+            "result_contract": {"send_via": {"prefer": ["bot", "userbot"], "fallback": True}},
+        }
+    )
+
+    assert entry is not None
+    assert entry["result_contract"]["send_via"] == ["interaction_bot", "userbot_reply"]
 
 
 @pytest.mark.asyncio

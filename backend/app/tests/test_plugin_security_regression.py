@@ -1350,3 +1350,31 @@ def test_lint_plugin_metadata_files_warns_on_bad_interaction_contract(tmp_path) 
     assert any("events" in item for item in warnings)
     assert any("result_contract.send_via" in item for item in warnings)
     assert any("interaction_profile" in item for item in warnings)
+
+
+def test_lint_plugin_metadata_files_accepts_channel_aliases(tmp_path) -> None:
+    plugin_dir = tmp_path / "plugin"
+    plugin_dir.mkdir()
+    (plugin_dir / "plugin.json").write_text(
+        """
+        {
+          "name": "good_interaction",
+          "version": "1.0.0",
+          "interaction_entries": [
+            {
+              "key": "start_good",
+              "session_scope": "chat",
+              "events": ["keyword", "message"],
+              "interaction_profile": "session_game",
+              "result_contract": {
+                "send_via": ["bot", {"prefer": ["userbot", "notice"], "fallback": true}, "auto"]
+              }
+            }
+          ]
+        }
+        """,
+        encoding="utf-8",
+    )
+
+    warnings = svc.lint_plugin_metadata_files(plugin_dir)
+    assert not any("result_contract.send_via" in item for item in warnings)

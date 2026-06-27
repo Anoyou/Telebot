@@ -20,6 +20,29 @@
 
 ## [Unreleased]
 
+## [0.35.2] — 2026-06-27 · patch（补丁版本） · 交互插件通道选择与回退
+
+### Added
+- 交互插件标准动作新增受控通道候选能力：插件可通过 `send_via_options`、`channel` 或 `channel_selector` 声明 `interaction_bot` / `userbot_reply` / `bbot_notice` 的单通道、候选顺序和失败回退。
+- `ctx.messages.send/edit/delete/pin` 支持 `channel=["interaction_bot", "userbot_reply"]` 与 `channel={"prefer": ["bot", "userbot"], "fallback": true}` 写法；旧的 `channel="interaction_bot"` 继续兼容。
+- Delivery Executor 现在会按候选顺序执行发送，交互 Bot 发送失败或 token 不可用时可回退到 userbot 或通知 Bot，并写入运行时日志。
+
+### Changed
+- Contract Guard 从“单一 `send_via` 白名单”升级为“候选通道过滤”：不在 `result_contract.send_via` 白名单内的候选会被过滤，全部不命中才丢弃动作。
+- 带 inline keyboard 的动作会自动收窄到 `interaction_bot` / `bbot_notice` 等可承接按钮回调的 Bot 通道，避免把按钮发到 `userbot_reply` 后无法回调。
+- 交互入口的 `message_channels` 语义调整为“通道偏好”，不再表示插件后续回复必须绑定某个账号或 Bot；前端入口卡片同步显示“管理偏好 / 群内偏好”。
+
+### Fixed
+- 标准动作中的 `chat_id` 现在会被 Delivery Executor 正确使用；插件可在平台校验下向指定会话发送，而不是总是落回触发会话。
+- 启动占位消息在发送通道回退到非交互 Bot 时会被清理，避免 Bot 发送失败后群里残留“正在启动”占位内容。
+- 远程插件 lint 和 manifest 归一化支持 `bot`、`userbot`、`notice`、`auto` 等通道别名，避免新规范写法被误判为不支持。
+
+### Docs
+- 插件 API 参考、远程插件指南、安全边界、速查表、插件概览和交互框架说明同步为“插件拥有通道选择权，框架拥有通道执行权”的新口径。
+
+### Tests
+- 补充通道候选归一化、按钮通道收窄、发送失败回退、指定 `chat_id` 发送、远程插件 lint 别名兼容等回归测试。
+
 ## [0.35.1] — 2026-06-27 · patch（补丁版本） · 插件仓库分支链接兼容
 
 ### Fixed

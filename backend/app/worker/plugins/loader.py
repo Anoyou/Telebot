@@ -58,6 +58,7 @@ from ...db.models.rule import Rule
 from ...db.models.system import SystemSetting
 from ...redis_client import get_redis
 from ...services import interaction_bot_service
+from ...services.interaction.contracts import action_send_via_options, apply_action_send_via_options
 from ...services.rate_limit_service import get_effective
 from ...settings import settings as app_settings
 from ...util.sudo_permissions import sudo_chat_allowed
@@ -1749,7 +1750,6 @@ def get_recent_peers(account_id: int) -> list[dict[str, Any]]:
 
 _INTERACTION_SEND_ACTIONS = {"send_message", "send_photo", "send_file"}
 _INTERACTION_CONTROL_ACTIONS = {"delete_message", "pin_message", "answer_callback"}
-_INTERACTION_SEND_VIA = {"interaction_bot", "userbot_reply", "bbot_notice"}
 
 
 def _normalize_interaction_action(raw: dict[str, Any]) -> dict[str, Any]:
@@ -1759,8 +1759,7 @@ def _normalize_interaction_action(raw: dict[str, Any]) -> dict[str, Any]:
     action_type = str(action.get("type") or "").strip()
     action["type"] = action_type
     if action_type in _INTERACTION_SEND_ACTIONS or action_type in _INTERACTION_CONTROL_ACTIONS:
-        send_via = str(action.get("send_via") or "interaction_bot").strip()
-        action["send_via"] = send_via if send_via in _INTERACTION_SEND_VIA else "interaction_bot"
+        apply_action_send_via_options(action, action_send_via_options(action))
     if isinstance(action.get("settlement"), dict):
         action["settlement"] = dict(action["settlement"])
     return action

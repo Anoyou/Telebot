@@ -86,6 +86,10 @@ class AccountBotInteractionAction(BaseModel):
     type: str = Field(max_length=64)
     text: str | None = Field(default=None, max_length=4000)
     send_via: InteractionSendVia | None = None
+    send_via_options: list[str] | None = None
+    channel: Any | None = None
+    channel_selector: Any | None = None
+    chat_id: int | None = None
     reply_to_message_id: int | None = None
     reply_markup: dict[str, Any] | None = None
     settlement: AccountBotInteractionSettlement | None = None

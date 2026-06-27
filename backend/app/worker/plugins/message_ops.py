@@ -10,7 +10,10 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
-MessageChannel = Literal["interaction_bot", "userbot_reply", "bbot_notice"]
+from ...services.interaction.contracts import action_send_via_options, apply_action_send_via_options
+
+MessageChannel = Literal["interaction_bot", "userbot_reply", "bbot_notice", "auto", "bot", "userbot", "notice"]
+MessageChannelSelector = MessageChannel | list[MessageChannel] | tuple[MessageChannel, ...] | dict[str, Any]
 
 
 @dataclass
@@ -20,7 +23,7 @@ class BufferedMessageOps:
     async def send(
         self,
         *,
-        channel: MessageChannel = "interaction_bot",
+        channel: MessageChannelSelector = "interaction_bot",
         chat_id: int | None = None,
         text: str,
         reply_to_message_id: int | None = None,
@@ -30,11 +33,11 @@ class BufferedMessageOps:
     ) -> dict[str, Any]:
         action: dict[str, Any] = {
             "type": "send_message",
-            "send_via": channel,
             "chat_id": chat_id,
             "text": text,
             "reply_to_message_id": reply_to_message_id,
         }
+        _apply_channel(action, channel)
         if reply_markup is not None:
             action["reply_markup"] = dict(reply_markup)
         if save_message_id_key:
@@ -47,7 +50,7 @@ class BufferedMessageOps:
     async def edit(
         self,
         *,
-        channel: MessageChannel = "interaction_bot",
+        channel: MessageChannelSelector = "interaction_bot",
         chat_id: int | None = None,
         message_id: int,
         text: str,
@@ -55,11 +58,11 @@ class BufferedMessageOps:
     ) -> dict[str, Any]:
         action: dict[str, Any] = {
             "type": "send_message",
-            "send_via": channel,
             "chat_id": chat_id,
             "edit_message_id": message_id,
             "text": text,
         }
+        _apply_channel(action, channel)
         if reply_markup is not None:
             action["reply_markup"] = dict(reply_markup)
         self.actions.append(action)
@@ -68,32 +71,32 @@ class BufferedMessageOps:
     async def delete(
         self,
         *,
-        channel: MessageChannel = "interaction_bot",
+        channel: MessageChannelSelector = "interaction_bot",
         chat_id: int | None = None,
         message_id: int,
     ) -> dict[str, Any]:
         action = {
             "type": "delete_message",
-            "send_via": channel,
             "chat_id": chat_id,
             "message_id": message_id,
         }
+        _apply_channel(action, channel)
         self.actions.append(action)
         return action
 
     async def pin(
         self,
         *,
-        channel: MessageChannel = "interaction_bot",
+        channel: MessageChannelSelector = "interaction_bot",
         chat_id: int | None = None,
         message_id: int,
     ) -> dict[str, Any]:
         action = {
             "type": "pin_message",
-            "send_via": channel,
             "chat_id": chat_id,
             "message_id": message_id,
         }
+        _apply_channel(action, channel)
         self.actions.append(action)
         return action
 
@@ -114,4 +117,11 @@ class BufferedMessageOps:
         return action
 
 
-__all__ = ["BufferedMessageOps", "MessageChannel"]
+def _apply_channel(action: dict[str, Any], channel: MessageChannelSelector) -> None:
+    action["channel_selector"] = channel
+    apply_action_send_via_options(action, action_send_via_options(action))
+    if isinstance(channel, (dict, list, tuple)) or str(channel or "").strip() == "auto":
+        action["channel_selector"] = channel
+
+
+__all__ = ["BufferedMessageOps", "MessageChannel", "MessageChannelSelector"]

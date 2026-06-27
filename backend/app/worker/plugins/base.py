@@ -207,12 +207,13 @@ class Plugin:
 
         标准动作约定：
         - ``send_message`` / ``send_photo`` / ``send_file``
-        - 可选 ``send_via``，默认由交互 Bot 发送；``userbot_reply`` 表示由账号 worker 的 userbot 代发
+        - 可选 ``send_via`` / ``channel`` / ``channel_selector``。插件可以声明单一通道，
+          也可以声明候选通道和回退顺序；平台负责校验、限流、审计和实际发送
         - ``end_session`` / ``close_session`` / ``no_session`` / ``result``
         - 可选 ``settlement``，供平台记录和后续结算
 
         新插件可优先使用 ``ctx.messages`` 生成受控消息动作，例如
-        ``await ctx.messages.send(channel="interaction_bot", chat_id=..., text="...")``。
+        ``await ctx.messages.send(channel=["interaction_bot", "userbot_reply"], chat_id=..., text="...")``。
         这些动作不会直接调用 Bot API 或 Telethon，而是随本 hook 的返回结果交给
         平台统一校验、限流、审计和发送。
         """
