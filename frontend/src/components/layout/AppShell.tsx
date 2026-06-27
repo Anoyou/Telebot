@@ -80,7 +80,10 @@ export function AppShell() {
             shadow-[0_-12px_32px_hsl(220_20%_20%/0.08)]
           "
         >
-          <div className="liquid-bottom-nav mx-auto grid h-16 w-full max-w-md grid-cols-5 gap-1 px-2 py-1.5">
+          <div
+            className="liquid-bottom-nav mx-auto grid h-16 w-full max-w-md gap-1 px-2 py-1.5"
+            style={{ gridTemplateColumns: `repeat(${MOBILE_PRIMARY_NAV.length}, minmax(0, 1fr))` }}
+          >
             {MOBILE_PRIMARY_NAV.map((item) => {
               const active = isMobileNavActive(item.to, item.end, mobileActivePath);
               const activate = () => {
