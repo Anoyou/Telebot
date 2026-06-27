@@ -37,3 +37,23 @@ export interface PluginRepoPlugin {
 export interface InstallFromRepoBody {
   default_enabled?: boolean;
 }
+
+export interface PluginRepoBulkUpdateItem {
+  name: string;
+  display_name: string;
+  from_version?: string | null;
+  to_version?: string | null;
+  status: "updated" | "skipped" | "failed" | string;
+  message: string;
+}
+
+export interface PluginRepoBulkUpdateResult {
+  repo_id: number;
+  repo_name: string;
+  checked: number;
+  update_available: number;
+  updated: number;
+  skipped: number;
+  failed: number;
+  items: PluginRepoBulkUpdateItem[];
+}

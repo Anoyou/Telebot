@@ -1172,6 +1172,65 @@ class TestPluginRepoInstallFlow:
         assert any("httpx.get" in item and "timeout" in item for item in installed.lint_warnings)
 
     @pytest.mark.asyncio
+    async def test_update_installed_plugins_from_repo_only_updates_newer_installed(
+        self,
+        monkeypatch,
+        tmp_path,
+    ):
+        monkeypatch.setattr(repo_svc.settings, "plugins_installed_dir", str(tmp_path / "installed"))
+        repo_dir = tmp_path / "repo"
+        _write_runtime_plugin(repo_dir / "update_demo", key="update_demo", version="1.2.0")
+        _write_runtime_plugin(repo_dir / "same_demo", key="same_demo", version="1.0.0")
+        _write_runtime_plugin(repo_dir / "new_demo", key="new_demo", version="9.9.9")
+        _write_runtime_plugin(tmp_path / "installed" / "update_demo", key="update_demo", version="1.0.0")
+
+        async def _cached(_url: str, **_kwargs):
+            return repo_dir
+
+        monkeypatch.setattr(repo_svc, "_ensure_repo_cached", _cached)
+        db = _FakePluginRepoDB(PluginRepo(id=1, url="https://example.com/repo.git", name="Repo"))
+        db.installed_rows["update_demo"] = InstalledPlugin(
+            key="update_demo",
+            source="repo",
+            source_url="https://example.com/old.git",
+            installed_path=str(tmp_path / "installed" / "update_demo"),
+            version="1.0.0",
+            enabled=True,
+            manifest_json={"name": "update_demo", "_telepilot_remote": {"default_enabled": True}},
+        )
+        db.installed_rows["same_demo"] = InstalledPlugin(
+            key="same_demo",
+            source="repo",
+            source_url="https://example.com/repo.git",
+            installed_path=str(tmp_path / "installed" / "same_demo"),
+            version="1.0.0",
+            enabled=False,
+            manifest_json={"name": "same_demo"},
+        )
+
+        result = await repo_svc.update_installed_plugins_from_repo(db, 1)
+
+        assert result.checked == 2
+        assert result.update_available == 1
+        assert result.updated == 1
+        assert result.skipped == 1
+        assert result.failed == 0
+        assert [(item.name, item.status, item.from_version, item.to_version) for item in result.items] == [
+            ("same_demo", "skipped", "1.0.0", "1.0.0"),
+            ("update_demo", "updated", "1.0.0", "1.2.0"),
+        ]
+        updated = db.installed_rows["update_demo"]
+        assert updated.version == "1.2.0"
+        assert updated.source == "repo"
+        assert updated.source_url == "https://example.com/repo.git"
+        assert updated.enabled is True
+        assert updated.manifest_json["_telepilot_remote"]["default_enabled"] is True
+        assert "new_demo" not in db.installed_rows
+        assert (tmp_path / "installed" / "update_demo" / "plugin.json").read_text(encoding="utf-8").find("1.2.0") >= 0
+        assert not (tmp_path / "installed" / "update_demo.installing").exists()
+        assert not (tmp_path / "installed" / "update_demo.bak-update").exists()
+
+    @pytest.mark.asyncio
     async def test_install_local_plugin_writes_installed_plugin(self, monkeypatch, tmp_path):
         monkeypatch.setattr(repo_svc.settings, "plugins_installed_dir", str(tmp_path / "installed"))
         local_root = tmp_path / "local_imports"

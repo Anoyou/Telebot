@@ -46,7 +46,11 @@ from ..db.models.plugin import (
     InstalledPlugin,
 )
 from ..db.models.plugin_repo import PluginRepo
-from ..schemas.plugin_repo import PluginRepoPlugin
+from ..schemas.plugin_repo import (
+    PluginRepoBulkUpdateItem,
+    PluginRepoBulkUpdateResult,
+    PluginRepoPlugin,
+)
 from ..settings import settings
 from .remote_plugin_service import (
     DuplicatePluginName,
@@ -57,6 +61,7 @@ from .remote_plugin_service import (
     _derive_name_from_url,
     _feature_manifest_from_meta,
     _manifest_json_from_remote_meta,
+    _merge_feature_manifest_preserving_global_config,
     _plugin_dir,
     _read_plugin_metadata,
     _run_git,
@@ -658,6 +663,198 @@ async def install_plugin_from_repo(
     return remote_plugin_view_from_installed(installed_row)
 
 
+async def _replace_installed_plugin_from_repo_dir(
+    db: AsyncSession,
+    *,
+    repo_url: str,
+    plugin_dir: Path,
+    meta: PluginMetadata,
+    installed: InstalledPlugin,
+) -> RemotePluginView:
+    """用仓库缓存中的插件目录覆盖已安装插件，并保留用户启停状态。"""
+
+    final_name = meta.name
+    install_path = Path(installed.installed_path or _plugin_dir(final_name))
+    staging = install_path.parent / f"{install_path.name}.installing"
+    backup = install_path.parent / f"{install_path.name}.bak-update"
+
+    if staging.exists():
+        shutil.rmtree(staging, ignore_errors=True)
+    if backup.exists():
+        shutil.rmtree(backup, ignore_errors=True)
+
+    install_path.parent.mkdir(parents=True, exist_ok=True)
+    swapped = False
+    try:
+        shutil.copytree(
+            plugin_dir,
+            staging,
+            ignore=shutil.ignore_patterns(".git", ".gitignore", "__pycache__"),
+        )
+        staged_meta = _read_plugin_metadata(staging, fallback_name=final_name)
+        if staged_meta.name != final_name:
+            raise PluginRepoError(
+                "PLUGIN_NAME_MISMATCH",
+                f"仓库中插件名为 {staged_meta.name!r}，预期 {final_name!r}",
+            )
+        _validate_runtime_plugin_shape(staging, staged_meta)
+        lint_warnings = lint_plugin_metadata_files(staging)
+
+        if install_path.exists():
+            install_path.rename(backup)
+        staging.rename(install_path)
+        swapped = True
+    except Exception as exc:
+        if staging.exists():
+            shutil.rmtree(staging, ignore_errors=True)
+        if swapped and install_path.exists():
+            shutil.rmtree(install_path, ignore_errors=True)
+        if backup.exists() and not install_path.exists():
+            backup.rename(install_path)
+        if isinstance(exc, PluginRepoError):
+            raise
+        raise PluginRepoError("COPY_FAILED", f"复制插件目录失败: {exc}") from exc
+    finally:
+        if staging.exists():
+            shutil.rmtree(staging, ignore_errors=True)
+        if backup.exists():
+            if swapped:
+                shutil.rmtree(backup, ignore_errors=True)
+            elif not install_path.exists():
+                backup.rename(install_path)
+
+    old_enabled = bool(installed.enabled)
+    old_default_enabled = remote_plugin_view_from_installed(installed).default_enabled
+
+    feat = (
+        await db.execute(select(Feature).where(Feature.key == final_name))
+    ).scalar_one_or_none()
+    if feat is None:
+        db.add(
+            Feature(
+                key=final_name,
+                display_name=meta.display_name or final_name,
+                is_builtin=False,
+                version=meta.version,
+                manifest=_feature_manifest_from_meta(meta),
+            )
+        )
+    else:
+        feat.display_name = meta.display_name or final_name
+        feat.version = meta.version
+        feat.is_builtin = False
+        feat.manifest = _merge_feature_manifest_preserving_global_config(feat.manifest, meta)
+
+    manifest_json = _with_remote_info(
+        _manifest_json_from_remote_meta(meta),
+        default_enabled=old_default_enabled,
+        latest_version=meta.version,
+        update_available=False,
+    )
+    row = await upsert_installed_plugin(
+        db,
+        key=final_name,
+        source=PLUGIN_SOURCE_REPO,
+        source_url=repo_url,
+        installed_path=str(install_path),
+        version=meta.version,
+        manifest_json=manifest_json,
+        enabled=old_enabled,
+        signature_ok=None,
+        trust_tier=PLUGIN_TRUST_COMMUNITY,
+        source_label="Plugin Repo",
+        last_install_error=None,
+        lint_warnings=lint_warnings,
+    )
+    await db.flush()
+    return remote_plugin_view_from_installed(row)
+
+
+async def update_installed_plugins_from_repo(
+    db: AsyncSession,
+    repo_id: int,
+) -> PluginRepoBulkUpdateResult:
+    """把仓库中版本更高的已安装插件批量升级到该仓库版本。"""
+
+    row = await _get_repo(db, repo_id)
+    repo_dir = await _ensure_repo_cached(
+        row.url,
+        force_refresh=True,
+        token=_repo_credential(row),
+    )
+    result = PluginRepoBulkUpdateResult(repo_id=row.id, repo_name=row.name)
+
+    for default_name, plugin_dir in _scan_plugins(repo_dir):
+        try:
+            meta = _read_plugin_metadata(plugin_dir, fallback_name=default_name)
+        except InvalidPluginMetadata as exc:
+            result.failed += 1
+            result.items.append(
+                PluginRepoBulkUpdateItem(
+                    name=default_name,
+                    status="failed",
+                    message=exc.message,
+                )
+            )
+            continue
+
+        installed = await db.get(InstalledPlugin, meta.name)
+        if installed is None:
+            continue
+        result.checked += 1
+        old_version = str(installed.version or "")
+        if _version_tuple(meta.version) <= _version_tuple(installed.version):
+            result.skipped += 1
+            result.items.append(
+                PluginRepoBulkUpdateItem(
+                    name=meta.name,
+                    display_name=meta.display_name or meta.name,
+                    from_version=old_version,
+                    to_version=meta.version,
+                    status="skipped",
+                    message="本地已是该仓库中的最新版本",
+                )
+            )
+            continue
+
+        result.update_available += 1
+        try:
+            updated = await _replace_installed_plugin_from_repo_dir(
+                db,
+                repo_url=row.url,
+                plugin_dir=plugin_dir,
+                meta=meta,
+                installed=installed,
+            )
+        except PluginRepoError as exc:
+            result.failed += 1
+            result.items.append(
+                PluginRepoBulkUpdateItem(
+                    name=meta.name,
+                    display_name=meta.display_name or meta.name,
+                    from_version=old_version,
+                    to_version=meta.version,
+                    status="failed",
+                    message=exc.message,
+                )
+            )
+            continue
+
+        result.updated += 1
+        result.items.append(
+            PluginRepoBulkUpdateItem(
+                name=updated.name,
+                display_name=updated.display_name or updated.name,
+                from_version=old_version,
+                to_version=updated.version,
+                status="updated",
+                message="已更新",
+            )
+        )
+
+    return result
+
+
 def list_local_import_candidates() -> list[PluginRepoPlugin]:
     """列出 ``plugins/local_imports`` 下可导入的本地插件目录。"""
     root = _local_import_root()
@@ -1051,4 +1248,5 @@ __all__ = [
     "list_plugins_in_repo",
     "list_local_import_candidates",
     "list_repos",
+    "update_installed_plugins_from_repo",
 ]

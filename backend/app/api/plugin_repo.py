@@ -6,6 +6,7 @@ from pydantic import BaseModel
 
 from ..deps import CurrentUser, DBSession
 from ..schemas.plugin_repo import (
+    PluginRepoBulkUpdateResult,
     PluginRepoCreate,
     PluginRepoCredentialUpdate,
     PluginRepoOut,
@@ -196,6 +197,28 @@ async def refresh_repo_plugins(repo_id: int, db: DBSession, _user: CurrentUser):
     """强制刷新仓库缓存并返回最新插件列表。"""
     try:
         return await svc.list_plugins_in_repo(db, repo_id, force_refresh=True)
+    except PluginRepoNotFound as e:
+        raise HTTPException(404, detail={"code": e.code, "message": e.message}) from e
+    except (GitOperationFailed, InvalidPluginMetadata) as e:
+        raise HTTPException(400, detail={"code": e.code, "message": e.message}) from e
+    except (PluginRepoError, RemotePluginError) as e:
+        raise HTTPException(400, detail={"code": e.code, "message": e.message}) from e
+
+
+@router.post("/{repo_id}/update-installed", response_model=PluginRepoBulkUpdateResult)
+async def update_installed_plugins_from_repo(
+    repo_id: int,
+    db: DBSession,
+    _user: CurrentUser,
+):
+    """更新该仓库里所有已安装且版本低于仓库版本的插件。"""
+    try:
+        result = await svc.update_installed_plugins_from_repo(db, repo_id)
+        await db.commit()
+        for item in result.items:
+            if item.status == "updated":
+                await trigger_reload(db, item.name)
+        return result
     except PluginRepoNotFound as e:
         raise HTTPException(404, detail={"code": e.code, "message": e.message}) from e
     except (GitOperationFailed, InvalidPluginMetadata) as e:

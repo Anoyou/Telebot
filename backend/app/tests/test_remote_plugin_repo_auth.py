@@ -78,3 +78,10 @@ async def test_plugin_repo_routes_require_login() -> None:
         )
         assert r.status_code == 401
         assert r.json()["error"]["code"] == "AUTH_REQUIRED"
+
+        r = await c.post(
+            "/api/plugin-repos/1/update-installed",
+            headers=_csrf_headers(),
+        )
+        assert r.status_code == 401
+        assert r.json()["error"]["code"] == "AUTH_REQUIRED"

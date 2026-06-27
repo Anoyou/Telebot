@@ -102,6 +102,7 @@ import {
   installLocalPlugin,
   installOfficialPlugin,
   installFromRepo,
+  updateInstalledPluginsFromRepo,
   updatePluginRepoCredential,
 } from "@/api/pluginRepo";
 import { Input } from "@/components/ui/input";
@@ -647,6 +648,7 @@ function RemoteInstallCard() {
   const [repoTokens, setRepoTokens] = useState<Record<number, string>>({});
   const [expandedRepoId, setExpandedRepoId] = useState<number | null>(null);
   const [refreshingRepoId, setRefreshingRepoId] = useState<number | null>(null);
+  const [updatingRepoId, setUpdatingRepoId] = useState<number | null>(null);
 
   // 已保存仓库列表（后端）
   const reposQ = useQuery({ queryKey: PLUGIN_REPOS_QK, queryFn: fetchPluginRepos });
@@ -751,6 +753,30 @@ function RemoteInstallCard() {
     onError: (err) => toast.error(getErrMsg(err)),
   });
 
+  const bulkUpdateRepoMut = useMutation({
+    mutationFn: async (repoId: number) => {
+      setUpdatingRepoId(repoId);
+      return updateInstalledPluginsFromRepo(repoId);
+    },
+    onSuccess: (res) => {
+      setExpandedRepoId(res.repo_id);
+      if (res.updated > 0) {
+        const failedSuffix = res.failed > 0 ? `，${res.failed} 个失败` : "";
+        toast.success(`已从 ${res.repo_name} 更新 ${res.updated} 个插件${failedSuffix}`);
+      } else if (res.failed > 0) {
+        toast.error(`${res.repo_name} 更新失败：${res.failed} 个插件未完成`);
+      } else {
+        toast.success(`${res.repo_name} 没有需要更新的已安装插件`);
+      }
+      qc.invalidateQueries({ queryKey: REMOTE_QK });
+      qc.invalidateQueries({ queryKey: PLUGINS_QK });
+      qc.invalidateQueries({ queryKey: ["matrix"] });
+      qc.invalidateQueries({ queryKey: ["repo-plugins", res.repo_id] });
+    },
+    onError: (err) => toast.error(getErrMsg(err)),
+    onSettled: () => setUpdatingRepoId(null),
+  });
+
   return (
     <Card>
       <CardHeader className="pb-3">
@@ -813,66 +839,99 @@ function RemoteInstallCard() {
           <p className="py-4 text-center text-sm text-muted-foreground">暂无已保存的仓库</p>
         ) : (
           <div className="space-y-2">
-            {repos.map((repo) => (
-              <div key={repo.id} className="rounded-md border">
-                <div
-                  className="flex cursor-pointer items-center gap-2 px-3 py-2 hover:bg-accent/50"
-                  onClick={() => setExpandedRepoId(expandedRepoId === repo.id ? null : repo.id)}
-                >
-                  <ChevronRight
-                    className={cn("h-4 w-4 shrink-0 transition-transform", expandedRepoId === repo.id && "rotate-90")}
-                  />
-                  <span className="flex-1 truncate text-sm font-medium">
-                    {repo.name || repo.url}
-                  </span>
-                  {repo.name && (
-                    <span className="truncate font-mono text-xs text-muted-foreground">
-                      {repo.url}
+            {repos.map((repo) => {
+              const expandedPlugins = expandedRepoId === repo.id ? pluginsQ.data : undefined;
+              const knownUpdateCount = expandedPlugins?.filter((p) => p.installed && p.update_available).length;
+              const bulkUpdating = bulkUpdateRepoMut.isPending && updatingRepoId === repo.id;
+              return (
+                <div key={repo.id} className="rounded-md border">
+                  <div
+                    className="flex cursor-pointer items-center gap-2 px-3 py-2 hover:bg-accent/50"
+                    onClick={() => setExpandedRepoId(expandedRepoId === repo.id ? null : repo.id)}
+                  >
+                    <ChevronRight
+                      className={cn("h-4 w-4 shrink-0 transition-transform", expandedRepoId === repo.id && "rotate-90")}
+                    />
+                    <span className="flex-1 truncate text-sm font-medium">
+                      {repo.name || repo.url}
                     </span>
-                  )}
-                  {repo.has_credentials ? (
-                    <MetaBadge tone="success" className="shrink-0">
-                      <KeyRound className="mr-1 h-3 w-3" />
-                      私有凭证
-                    </MetaBadge>
-                  ) : null}
-                  <MetaBadge tone="outline" className="shrink-0">
-                    {expandedRepoId === repo.id && pluginsQ.isLoading ? "加载中…" : "仓库"}
-                  </MetaBadge>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-6 w-6 shrink-0 p-0 text-muted-foreground hover:text-foreground"
-                    disabled={refreshRepoMut.isPending && refreshingRepoId === repo.id}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      refreshRepoMut.mutate(repo.id);
-                    }}
-                    aria-label={`刷新插件仓库 ${repo.name || repo.url}`}
-                    title="刷新仓库插件列表"
-                  >
-                    {refreshRepoMut.isPending && refreshingRepoId === repo.id ? (
-                      <Spinner className="h-3.5 w-3.5" />
-                    ) : (
-                      <RefreshCw className="h-3.5 w-3.5" />
+                    {repo.name && (
+                      <span className="truncate font-mono text-xs text-muted-foreground">
+                        {repo.url}
+                      </span>
                     )}
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-6 w-6 shrink-0 p-0 text-muted-foreground hover:text-destructive"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      delRepoMut.mutate(repo.id);
-                    }}
-                    title="移除仓库"
-                  >
-                    <X className="h-3.5 w-3.5" />
-                  </Button>
-                </div>
-                {/* 展开：仓库内插件列表 */}
-                {expandedRepoId === repo.id && (
-                  <div className="border-t px-3 py-2">
+                    {repo.has_credentials ? (
+                      <MetaBadge tone="success" className="shrink-0">
+                        <KeyRound className="mr-1 h-3 w-3" />
+                        私有凭证
+                      </MetaBadge>
+                    ) : null}
+                    <MetaBadge tone="outline" className="shrink-0">
+                      {expandedRepoId === repo.id && pluginsQ.isLoading ? "加载中…" : "仓库"}
+                    </MetaBadge>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-7 shrink-0 gap-1 px-2 text-xs"
+                      disabled={
+                        bulkUpdateRepoMut.isPending
+                        || (expandedPlugins !== undefined && knownUpdateCount === 0)
+                      }
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        bulkUpdateRepoMut.mutate(repo.id);
+                      }}
+                      aria-label={`更新插件仓库 ${repo.name || repo.url} 中可升级的已安装插件`}
+                      title={
+                        knownUpdateCount && knownUpdateCount > 0
+                          ? `更新 ${knownUpdateCount} 个可升级插件`
+                          : "刷新仓库并更新其中可升级的已安装插件"
+                      }
+                    >
+                      {bulkUpdating ? (
+                        <Spinner className="h-3.5 w-3.5" />
+                      ) : (
+                        <RefreshCw className="h-3.5 w-3.5" />
+                      )}
+                      <span className="hidden sm:inline">
+                        {knownUpdateCount && knownUpdateCount > 0 ? `更新 ${knownUpdateCount}` : "更新可升级"}
+                      </span>
+                      <span className="sm:hidden">更新</span>
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-6 w-6 shrink-0 p-0 text-muted-foreground hover:text-foreground"
+                      disabled={refreshRepoMut.isPending && refreshingRepoId === repo.id}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        refreshRepoMut.mutate(repo.id);
+                      }}
+                      aria-label={`刷新插件仓库 ${repo.name || repo.url}`}
+                      title="刷新仓库插件列表"
+                    >
+                      {refreshRepoMut.isPending && refreshingRepoId === repo.id ? (
+                        <Spinner className="h-3.5 w-3.5" />
+                      ) : (
+                        <RefreshCw className="h-3.5 w-3.5" />
+                      )}
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-6 w-6 shrink-0 p-0 text-muted-foreground hover:text-destructive"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        delRepoMut.mutate(repo.id);
+                      }}
+                      title="移除仓库"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                  {/* 展开：仓库内插件列表 */}
+                  {expandedRepoId === repo.id && (
+                    <div className="border-t px-3 py-2">
                     <div className="mb-3 grid gap-2 rounded-md bg-muted/30 p-2 sm:grid-cols-[minmax(180px,1fr)_auto_auto] sm:items-center">
                       <Input
                         className="h-8 rounded-md bg-background"
@@ -975,10 +1034,11 @@ function RemoteInstallCard() {
                         })}
                       </div>
                     )}
-                  </div>
-                )}
-              </div>
-            ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         )}
       </CardContent>

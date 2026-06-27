@@ -3,6 +3,7 @@ import type { RemotePlugin } from "@/types/remotePlugin";
 import type {
   InstallFromRepoBody,
   PluginRepo,
+  PluginRepoBulkUpdateResult,
   PluginRepoCreate,
   PluginRepoCredentialUpdate,
   PluginRepoPlugin,
@@ -49,6 +50,15 @@ export async function refreshRepoPlugins(
 ): Promise<PluginRepoPlugin[]> {
   const { data } = await api.post<PluginRepoPlugin[]>(
     `${BASE}/${repoId}/refresh`,
+  );
+  return data;
+}
+
+export async function updateInstalledPluginsFromRepo(
+  repoId: number,
+): Promise<PluginRepoBulkUpdateResult> {
+  const { data } = await api.post<PluginRepoBulkUpdateResult>(
+    `${BASE}/${repoId}/update-installed`,
   );
   return data;
 }

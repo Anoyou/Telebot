@@ -75,3 +75,27 @@ class PluginRepoPlugin(BaseModel):
     tags: list[str] = Field(default_factory=list)
     # 该插件在仓库内的相对子目录（用于安装时定位）；若插件位于仓库根目录则为 ""
     subdir: str = ""
+
+
+class PluginRepoBulkUpdateItem(BaseModel):
+    """仓库批量更新中单个插件的处理结果。"""
+
+    name: str
+    display_name: str = ""
+    from_version: str | None = None
+    to_version: str | None = None
+    status: str = Field(description="updated / skipped / failed")
+    message: str = ""
+
+
+class PluginRepoBulkUpdateResult(BaseModel):
+    """按仓库批量更新已安装插件的汇总结果。"""
+
+    repo_id: int
+    repo_name: str
+    checked: int = 0
+    update_available: int = 0
+    updated: int = 0
+    skipped: int = 0
+    failed: int = 0
+    items: list[PluginRepoBulkUpdateItem] = Field(default_factory=list)
