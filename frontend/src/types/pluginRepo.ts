@@ -30,6 +30,7 @@ export interface PluginRepoPlugin {
   installed: boolean;
   installed_version?: string | null;
   update_available?: boolean;
+  tags?: string[];
   subdir: string;
 }
 

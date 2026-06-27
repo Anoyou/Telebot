@@ -160,7 +160,6 @@ export function AccountWizard() {
   const cloneMut = useMutation({
     mutationFn: () =>
       cloneConfig(createdAid!, Number(cloneFrom), [
-        "auto_reply",
         "scheduler",
       ]),
     onSuccess: () => {

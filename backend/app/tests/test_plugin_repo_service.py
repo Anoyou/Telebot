@@ -89,6 +89,59 @@ async def test_ensure_repo_cached_passes_private_github_env(tmp_path, monkeypatc
 
 
 @pytest.mark.asyncio
+async def test_ensure_repo_cached_supports_github_tree_branch_url(tmp_path, monkeypatch) -> None:
+    url = "https://github.com/example/private-plugins/tree/feature/test-branch"
+    target = tmp_path / "cache" / "repo"
+    calls: list[tuple[str, ...]] = []
+
+    monkeypatch.setattr(svc, "_cache_root", lambda: tmp_path / "cache")
+    monkeypatch.setattr(svc, "_cache_dir_for", lambda _url: target)
+
+    async def _run_git_capture(*args, **_kwargs):
+        calls.append(tuple(args))
+        target.mkdir(parents=True, exist_ok=True)
+        (target / ".git").mkdir(exist_ok=True)
+        return ""
+
+    monkeypatch.setattr(svc, "_run_git", _run_git_capture)
+
+    assert await svc._ensure_repo_cached(url, token="ghp_private123") == target
+    assert calls[0] == (
+        "clone",
+        "--branch",
+        "feature/test-branch",
+        "--single-branch",
+        "https://github.com/example/private-plugins.git",
+        str(target),
+    )
+
+
+@pytest.mark.asyncio
+async def test_ensure_repo_cached_refreshes_github_tree_branch_cache(tmp_path, monkeypatch) -> None:
+    url = "https://github.com/example/plugins/tree/codex-image-test"
+    target = tmp_path / "cache" / "repo"
+    calls: list[tuple[str, ...]] = []
+    (target / ".git").mkdir(parents=True)
+    (target / "plugin.json").write_text("{}", encoding="utf-8")
+
+    monkeypatch.setattr(svc, "_cache_root", lambda: tmp_path / "cache")
+    monkeypatch.setattr(svc, "_cache_dir_for", lambda _url: target)
+
+    async def _run_git_capture(*args, **_kwargs):
+        calls.append(tuple(args))
+        return ""
+
+    monkeypatch.setattr(svc, "_run_git", _run_git_capture)
+
+    assert await svc._ensure_repo_cached(url, force_refresh=True) == target
+    assert calls == [
+        ("fetch", "--all", "--prune"),
+        ("rev-parse", "--verify", "refs/remotes/origin/codex-image-test"),
+        ("reset", "--hard", "refs/remotes/origin/codex-image-test"),
+    ]
+
+
+@pytest.mark.asyncio
 async def test_run_git_redacts_private_token_in_errors(monkeypatch) -> None:
     class _FakeProc:
         returncode = 128

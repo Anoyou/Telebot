@@ -34,6 +34,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from urllib.parse import unquote, urlparse
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 from sqlalchemy import select
@@ -45,6 +46,7 @@ from ..db.models.feature import FEATURE_STATE_DISABLED, AccountFeature, Feature
 from ..db.models.plugin import (
     PLUGIN_SOURCE_GIT,
     PLUGIN_SOURCE_LOCAL,
+    PLUGIN_SOURCE_OFFICIAL,
     PLUGIN_SOURCE_REPO,
     PLUGIN_TRUST_COMMUNITY,
     InstalledPlugin,
@@ -114,6 +116,52 @@ class InvalidSourceUrl(RemotePluginError):
     """source_url 不符合安全要求。"""
 
 
+@dataclass(frozen=True, slots=True)
+class GitSourceUrl:
+    """规范化后的 Git 拉取目标。
+
+    ``original_url`` 仍然可以原样存库；真正执行 git 时使用 ``clone_url``，
+    GitHub ``tree/<branch>`` 页面链接则额外带上 ``ref``。
+    """
+
+    clone_url: str
+    ref: str | None = None
+
+
+def normalize_git_source_url(url: str) -> GitSourceUrl:
+    """把用户可读的仓库 URL 规范化为可执行的 git clone 目标。
+
+    支持 GitHub 分支页：
+    ``https://github.com/user/repo/tree/feature/foo`` →
+    ``clone_url=https://github.com/user/repo.git`` + ``ref=feature/foo``。
+    """
+    raw = str(url or "").strip()
+    parsed = urlparse(raw)
+    if parsed.scheme.lower() == "https" and parsed.hostname in {"github.com", "www.github.com"}:
+        parts = [unquote(part) for part in parsed.path.strip("/").split("/") if part]
+        if len(parts) >= 3 and parts[2] == "tree":
+            if len(parts) < 4:
+                raise InvalidSourceUrl(
+                    "BAD_SOURCE_URL",
+                    "GitHub tree/<branch> 插件仓库链接缺少分支名。",
+                )
+            owner = parts[0].strip()
+            repo = parts[1].strip()
+            if repo.endswith(".git"):
+                repo = repo[:-4]
+            ref = "/".join(part.strip() for part in parts[3:] if part.strip())
+            if not owner or not repo or not ref:
+                raise InvalidSourceUrl(
+                    "BAD_SOURCE_URL",
+                    "GitHub tree/<branch> 插件仓库链接格式不正确。",
+                )
+            return GitSourceUrl(
+                clone_url=f"https://github.com/{owner}/{repo}.git",
+                ref=ref,
+            )
+    return GitSourceUrl(clone_url=raw)
+
+
 # ─────────────────────────────────────────────────────
 # 元数据模型（用于校验 plugin.json）
 # ─────────────────────────────────────────────────────
@@ -143,6 +191,7 @@ class PluginMetadataSchema(BaseModel):
     min_telepilot_version: str | None = None
     # 0.15 rename 前的旧字段，继续作为兼容别名解析。
     min_telebot_version: str | None = None
+    tags: list[str] = Field(default_factory=list)
 
     @field_validator("name", "key")
     @classmethod
@@ -213,6 +262,7 @@ class PluginMetadata:
     interaction_entries: list[dict[str, Any]] = field(default_factory=list)
     min_telepilot_version: str | None = None
     min_telebot_version: str | None = None
+    tags: list[str] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -307,6 +357,8 @@ def _set_remote_update_info(
 def _source_label_for_installed(row: InstalledPlugin) -> str:
     if row.source_label:
         return row.source_label
+    if row.source == PLUGIN_SOURCE_OFFICIAL:
+        return "Official"
     if row.source == PLUGIN_SOURCE_REPO:
         return "Plugin Repo"
     if row.source == PLUGIN_SOURCE_LOCAL:
@@ -436,7 +488,7 @@ def _validate_source_url(url: str) -> None:
     if not url or not url.strip():
         raise InvalidSourceUrl("BAD_SOURCE_URL", "source_url 不能为空")
 
-    url = url.strip()
+    url = normalize_git_source_url(url).clone_url
 
     # 解析 scheme
     if url.startswith("git+ssh://"):
@@ -473,10 +525,11 @@ def _validate_source_url(url: str) -> None:
 def _derive_name_from_url(url: str) -> str:
     """从 ``source_url`` 的最后一段推导插件名：
     - ``https://github.com/foo/bar.git`` → ``bar``
+    - ``https://github.com/foo/bar/tree/dev`` → ``bar``
     - ``git@github.com:foo/bar`` → ``bar``
     - ``./local/path`` → ``path``
     """
-    cleaned = url.rstrip("/").strip()
+    cleaned = normalize_git_source_url(url).clone_url.rstrip("/").strip()
     if cleaned.endswith(".git"):
         cleaned = cleaned[:-4]
     # 同时支持 ``/`` 与 ``:`` 作分隔（scp-like git URL）
@@ -541,6 +594,26 @@ async def _run_git(
             f"git {redact_text(' '.join(args))} 失败 (rc={proc.returncode}): {redact_text(msg)}",
         )
     return (stdout or b"").decode("utf-8", errors="replace")
+
+
+async def _clone_git_source(
+    source_url: str,
+    target: Path,
+    *,
+    depth: int | None = 1,
+    timeout: float = 180.0,
+    env: dict[str, str] | None = None,
+) -> None:
+    """Clone 插件源；GitHub tree/<branch> 页面链接会转为仓库 URL + 分支。"""
+    _validate_source_url(source_url)
+    source = normalize_git_source_url(source_url)
+    args = ["clone"]
+    if depth is not None:
+        args.extend(["--depth", str(depth)])
+    if source.ref:
+        args.extend(["--branch", source.ref, "--single-branch"])
+    args.extend([source.clone_url, str(target)])
+    await _run_git(*args, timeout=timeout, env=env)
 
 
 # ─────────────────────────────────────────────────────
@@ -620,6 +693,7 @@ def _read_plugin_metadata(plugin_dir: Path, *, fallback_name: str) -> PluginMeta
         interaction_entries=[item for item in validated.interaction_entries if isinstance(item, dict)],
         min_telepilot_version=validated.min_telepilot_version,
         min_telebot_version=validated.min_telebot_version,
+        tags=list(validated.tags or []),
     )
 
 
@@ -1013,7 +1087,7 @@ async def _copy_plugin_from_source_url(
     try:
         with tempfile.TemporaryDirectory(prefix="telepilot-plugin-update-") as tmp:
             repo_dir = Path(tmp) / "repo"
-            await _run_git("clone", "--depth", "1", source_url, str(repo_dir), timeout=180.0, env=git_env)
+            await _clone_git_source(source_url, repo_dir, timeout=180.0, env=git_env)
             _, source_dir = _find_plugin_metadata_in_repo(repo_dir, name)
             shutil.copytree(
                 source_dir,
@@ -1072,7 +1146,7 @@ async def check_remote_plugin_update(db: AsyncSession, row: InstalledPlugin) -> 
             if not source_url:
                 raise RemotePluginError("SOURCE_URL_MISSING", f"插件 {row.key} 缺少 source_url，无法检查更新")
             git_env = await _git_env_for_installed_source(db, source_url)
-            await _run_git("clone", "--depth", "1", source_url, str(repo_dir), timeout=180.0, env=git_env)
+            await _clone_git_source(source_url, repo_dir, timeout=180.0, env=git_env)
             meta, plugin_dir = _find_plugin_metadata_in_repo(repo_dir, row.key)
             _set_remote_update_info(
                 row,
@@ -1322,7 +1396,7 @@ async def install(
     renamed = False
     # 4. git clone 到 staging（带 timeout，防止挂起）
     try:
-        await _run_git("clone", "--depth", "1", source_url, str(staging), timeout=180.0)
+        await _clone_git_source(source_url, staging, timeout=180.0)
     except GitOperationFailed:
         # 失败时清理可能产生的部分目录
         if staging.exists():

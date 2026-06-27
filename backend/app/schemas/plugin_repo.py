@@ -29,7 +29,10 @@ class PluginRepoCreate(BaseModel):
     ``url`` 必填；``name``/``description`` 可选，缺省时服务端会从 URL 派生显示名。
     """
 
-    url: str = Field(..., description="git URL，如 https://github.com/foo/bar.git")
+    url: str = Field(
+        ...,
+        description="Git URL，如 https://github.com/foo/bar.git；也支持 GitHub tree/<branch> 分支页链接",
+    )
     name: str | None = Field(default=None, description="展示名；为空时从 URL 派生")
     description: str | None = Field(default=None, description="可选备注")
     credential: PluginRepoCredentialUpdate | None = Field(
@@ -69,5 +72,6 @@ class PluginRepoPlugin(BaseModel):
     installed: bool = False
     installed_version: str | None = None
     update_available: bool = False
+    tags: list[str] = Field(default_factory=list)
     # 该插件在仓库内的相对子目录（用于安装时定位）；若插件位于仓库根目录则为 ""
     subdir: str = ""

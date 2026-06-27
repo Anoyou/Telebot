@@ -58,7 +58,7 @@ docker compose up -d --build
   <img src="docs/screenshots/dashboard-light.png" width="45%" alt="浅色主题系统概览与资源占用" />
   <img src="docs/screenshots/dashboard-dark.png" width="45%" alt="暗色主题系统概览与资源占用" />
 </p>
-> 插件中心按平台能力 / 内置插件 / 远程插件 / 实验性能力分区，并支持远程插件装配
+> 插件中心按平台能力 / 官方可选插件 / 远程插件 / 实验性能力分区，并支持远程插件装配
 <p align="center">
   <img src="docs/screenshots/plugin-center-1.png" width="45%" alt="插件中心与账号插件管理" />
   <img src="docs/screenshots/plugin-center-2.png" width="45%" alt="支持远程插件安装与管理" />
@@ -137,10 +137,10 @@ flowchart LR
 | 账号 | 多账号绑定 | Web 向导输入 API ID / API Hash / 手机号，支持验证码和两步密码 |
 | 账号 | 代理与设备伪装 | 每账号可选择代理、设备 profile、语言参数 |
 | 账号 | 风控基础 | 全局限速、账号限速、FloodWait / PeerFlood 处理和拟人化发送 |
-| 插件 | 自动回复 | 关键词 / 正则 / 作用域 / 冷却 / 白名单 |
+| 官方推荐插件 | 自动回复 | 首次部署按需安装，支持关键词 / 正则 / 作用域 / 冷却 / 白名单，安装后可手动卸载 |
 | 插件 | 消息转发 | 原生转发、复制、引用、仅链接等模式 |
-| 插件 | 自动复读 | 群聊重复消息检测和自动复读 |
-| 插件 | Codex 图片生成 | 真正内置在 `backend/app/worker/plugins/builtin/codex_image/`，支持模板、尺寸、比例、格式和指令覆盖，当前标记为实验性 |
+| 官方推荐插件 | 自动复读 | 首次部署按需安装，支持群聊重复消息检测和自动复读，安装后可手动卸载 |
+| 官方可选插件 | ChatGPT2API / Codex 图片生成 / 24 点 / 随机算数题 | 随包提供在官方插件库，需在“安装插件”页按需安装，不再作为内置插件自动启用 |
 | 平台 | 定时任务 | cron / once / interval，作为 worker 平台调度能力运行 |
 | AI | 自定义指令模板 | reply_text / forward_to / run_plugin / ai 多类型模板，provider 缺失会在前端显式提示 |
 | AI | LLM Provider | OpenAI 兼容、Anthropic、Ollama、自定义 endpoint、proxy、tag 路由 |
@@ -261,7 +261,7 @@ docker compose up -d --build
 | Web 管理员、登录与 2FA | 首次访问 / 系统设置 |
 | Telegram 账号绑定、API ID / API Hash、验证码、两步密码 | 概览 → 新增账号 |
 | 账号代理、默认设备信息、风控和拟人化参数 | 账号详情 / 系统设置 |
-| 插件启停、自动回复、转发、复读、24 点、定时任务 | 插件中心 |
+| 插件启停、自动回复、转发、复读、24 点、定时任务 | 插件中心；自动回复、复读、24 点等官方可选插件需先到“安装插件”页按需安装 |
 | AI Provider、模型列表、API Key、路由标签和 AI 指令模板 | AI 中心 / 插件中心 |
 | 普通 Bot Token、群互动 Bot、授权用户 | 账号详情 → Bot |
 | 远程插件安装、更新、账号级启用和配置 | 插件中心 → 安装插件 |
@@ -406,15 +406,15 @@ TelePilot 用户界面和文档统一称“插件”，代码层仍使用 `Plugi
 
 | 形态 | 说明 | 示例 |
 | --- | --- | --- |
-| 规则驱动 | 多条规则匹配后执行动作 | auto_reply, forward, autorepeat |
-| 通用独立配置页 | 每账号保存一份配置，像一个工具面板；没有专属页面的轻量插件也走通用独立页 | game24；codex_image 实验性内置插件；轻量远程插件 |
+| 规则驱动 | 多条规则匹配后执行动作 | forward；官方可选 `auto_reply`、`autorepeat`；远程规则插件 |
+| 通用独立配置页 | 每账号保存一份配置，像一个工具面板；没有专属页面的轻量插件也走通用独立页 | 官方可选 `game24`、`math10`、`codex_image`、`chatgpt_image`；轻量远程插件 |
 | 平台基础能力 | 随 worker 初始化，为系统和插件提供能力 | scheduler |
 
 不再新增“Schema 弹窗”类插件。`config_schema` 仍是字段、默认值、校验和配置页渲染的数据来源；旧 `x-ui-mode: "schema"` 只作为兼容别名处理，新增插件请优先声明 `rules`、`single` 或 `platform`。配置页必须使用独立页面，并按“使用说明 → 功能总开关 → 插件配置 → 插件预览”的顺序组织；有保存字段时，配置操作条固定在“插件配置”卡片底部。插件必须自己声明详细使用说明，缺失时会显示红色高级规范警告；消息预览是建议项，不阻断运行。
 
 开发文档：
 
-- [插件开发指南（Plugin API，含内置插件与远程插件）](docs/PLUGIN-DEV-GUIDE.md)
+- [插件开发指南（Plugin API，含官方插件库与远程插件）](docs/PLUGIN-DEV-GUIDE.md)
 
 ## 安全边界
 
@@ -452,12 +452,12 @@ pnpm -C frontend build
 - [变更日志](CHANGELOG.md)
 - [公网部署](docs/DEPLOY-PUBLIC.md)
 - [安全运维](docs/SECURITY-OPS.md)
-- [插件开发指南（Plugin API，含内置插件与远程插件）](docs/PLUGIN-DEV-GUIDE.md)
+- [插件开发指南（Plugin API，含官方插件库与远程插件）](docs/PLUGIN-DEV-GUIDE.md)
 - [贡献指南](CONTRIBUTING.md)
 
 ## 项目状态
 
-当前版本：`v0.30.4 · patch`
+当前版本：`v0.35.1`
 
 项目处于 Alpha / 个人自用阶段。核心链路已经能跑，但仍在快速迭代中，接口、页面和插件规范可能继续调整。欢迎 fork、参考和提 issue；大规模 PR 建议先开 issue 对齐方向。
 

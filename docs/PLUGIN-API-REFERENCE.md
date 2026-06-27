@@ -69,7 +69,7 @@ class PluginContext:
         """创建与 bot 的对话会话。"""
 ```
 
-注意：内置插件会拿到完整运行时能力；远程/第三方插件拿到的是受控上下文：`ctx.client` 是平台提供的客户端 facade，指令 handler 中传入的 `client` 参数与 `ctx.client` 同源，`ctx.engine` 和 `ctx.redis` 为 `None`，只能通过声明过的权限以及 `ctx.scheduler`、`ctx.http`、`ctx.ai`、`ctx.messages` 等 facade 使用平台能力。它用于收口常用操作和审计，不是公共插件市场式强沙箱。
+注意：核心 builtin 兼容代码可能拿到完整运行时能力；远程/本地/官方可选安装型插件拿到的是受控上下文：`ctx.client` 是平台提供的客户端 facade，指令 handler 中传入的 `client` 参数与 `ctx.client` 同源，`ctx.engine` 和 `ctx.redis` 通常为 `None`，只能通过声明过的权限以及 `ctx.scheduler`、`ctx.http`、`ctx.ai`、`ctx.messages` 等 facade 使用平台能力。它用于收口常用操作和审计，不是公共插件市场式强沙箱。
 
 ### 4.0 受控 facade：ctx.http 与 ctx.ai
 
@@ -111,8 +111,8 @@ result = await ctx.ai.complete(
 | `ctx.config` | `ctx.config.get("k")` | 插件配置（账号/全局已合并后的可见配置） |
 | `ctx.rules` | 遍历 `ctx.rules` | 当前账号 + 当前插件已启用规则 |
 | `ctx.client` | `await ctx.client.send_message(...)` | UserBot 客户端 facade；常规命令和高级兼容场景可用，交互入口不推荐直接用它发消息 |
-| `ctx.engine` | `await ctx.engine.acquire(...)` | 仅内置插件可用；第三方插件通常为 `None` |
-| `ctx.redis` | `await ctx.redis.get(...)` | 仅内置插件可用；第三方插件通常为 `None` |
+| `ctx.engine` | `await ctx.engine.acquire(...)` | 仅核心 builtin 兼容代码可直接依赖；安装型插件通常为 `None` |
+| `ctx.redis` | `await ctx.redis.get(...)` | 仅核心 builtin 兼容代码可直接依赖；安装型插件通常为 `None` |
 | `ctx.log` | `await ctx.log("info", "...", **detail)` | 运行日志写入器 |
 | `ctx.scheduler` | `ctx.scheduler.register(job_id, schedule, callback, *, replace=True)` / `ctx.scheduler.unregister(job_id)` | 调度 facade（按权限/能力边界开放） |
 | `ctx.http` | `await ctx.http.get(url, params={...})` / `await ctx.http.post(url, json={...})` | 安全 HTTP facade；第三方插件需声明 `external_http` + `allowed_hosts` |
@@ -215,17 +215,17 @@ MANIFEST = Manifest(
 - `level: account` 的字段 → 账号配置区（按账号隔离）
 - 无 level 的字段 → 默认按账号隔离
 
-**必填字段验证清单（内置插件）：**
+**字段验证清单（核心能力与官方可选插件）：**
 
 | 插件 | config_schema | UI 模式 | 状态 |
 |------|--------------|---------|------|
-| forward | ✅ target_chat_id, mode | `rules` | 已有 |
-| auto_reply | 规则通过 Rules API 管理 | `rules` fallback | 已有 |
-| autorepeat | ✅ trigger / repeat / chat 配置 | `rules` | 已有 |
-| game24 | ✅ command, timeout | `single` | 已补 |
-| math10 | ✅ interaction_entries.start_math_game / prize | `single` | 交互 Bot 可启动 |
-| codex_image | ✅ command, access_token, model, message_template, image_size/aspect_ratio/image_format, timeout/status/output/instructions | `single` | 内置图片插件 |
-| scheduler | ✅ default_notify, max_tasks | `platform` | 已迁移为平台基础能力 |
+| forward | ✅ target_chat_id, mode | `rules` | 核心兼容插件 |
+| auto_reply | 规则通过 Rules API 管理 | `rules` | 官方推荐插件，按需安装 |
+| autorepeat | ✅ trigger / repeat / chat 配置 | `rules` | 官方推荐插件，按需安装 |
+| game24 | ✅ command, timeout | `single` | 官方可选插件，按需安装 |
+| math10 | ✅ interaction_entries.start_math_game / prize | `single` | 官方可选插件，交互 Bot 可启动 |
+| codex_image | ✅ command, access_token, model, message_template, image_size/aspect_ratio/image_format, timeout/status/output/instructions | `single` | 官方可选图片插件，按需安装 |
+| scheduler | ✅ default_notify, max_tasks | `platform` | 平台基础能力 |
 
 `examples/plugins/translate` 是历史示例目录，不属于当前内置插件清单；其中直接复用后端私有 LLM 链路的写法也不是第三方插件推荐模板。新增第三方插件应优先参考本文的远程插件骨架；需要 HTTP 时参考 `examples/plugins/with_http`，需要 AI 文本能力时参考 `examples/plugins/with_ai`，需要原命令与交互 Bot 双兼容时参考 `examples/plugins/with_interaction`。
 
@@ -1069,8 +1069,8 @@ class MyPlugin(Plugin):
 
 | 分类 | 适用场景 | 大白话 | 典型功能 | 配置入口 |
 |------|---------|--------|---------|---------|
-| **规则驱动配置页** | 多条规则独立配置，需 CRUD + 试运行 | 像自动化流水线：先建规则，再按匹配条件触发动作 | forward、auto_reply、autorepeat | 专属配置页 |
-| **单配置对象 / 通用独立配置页** | 每个账号只保存一份插件配置，或轻量插件只需要字段表单 | 像一个工具面板：配置好触发指令和参数，直接运行；普通字段由 schema 驱动渲染 | game24、codex_image、简单远程插件 / 小工具插件 | 专属或通用独立配置页 |
+| **规则驱动配置页** | 多条规则独立配置，需 CRUD + 试运行 | 像自动化流水线：先建规则，再按匹配条件触发动作 | forward、官方可选 auto_reply / autorepeat、远程规则插件 | 专属配置页 |
+| **单配置对象 / 通用独立配置页** | 每个账号只保存一份插件配置，或轻量插件只需要字段表单 | 像一个工具面板：配置好触发指令和参数，直接运行；普通字段由 schema 驱动渲染 | 官方可选 game24 / math10 / codex_image / chatgpt_image、简单远程插件 / 小工具插件 | 专属或通用独立配置页 |
 | **基础能力 — 平台内置** | 系统运行时常驻能力，不作为普通插件展示 | 像底座服务：给插件或平台调用，不强调启停 | scheduler | 平台功能页 |
 
 **关键判断**：需要维护多条规则 → `rules`；只有一份账号配置或普通字段表单足够 → `single`；旧插件已经写了 `schema` → 按 `single` 通用独立页兼容；像调度器这种系统服务 → `platform`。
@@ -1193,7 +1193,7 @@ config_schema={
 |---|------|---------|
 | 1 | `frontend/src/api/types.ts` | 添加 `XxxRuleConfig` 接口（描述单条规则的 config 字段） |
 | 2 | `frontend/src/pages/Plugins/configs/XxxConfig.tsx` | **新建**：规则列表页（参考 `AutoReply.tsx` 或 `Forward.tsx`） |
-| 3 | `backend/app/worker/plugins/builtin/xxx/manifest.py` | `config_schema["x-ui-mode"] = "rules"` |
+| 3 | 插件包内 `manifest.py` | `config_schema["x-ui-mode"] = "rules"`；新插件应放在远程仓库或 `plugins/local_imports/xxx/` 后由 Web 安装 |
 | 4 | `frontend/src/App.tsx` | ① import 新页面组件 ② 添加路由 `:aid/features/xxx` ③ 在 `FEATURE_CONFIG_PAGES` 中添加 key |
 | 5 | `frontend/src/pages/Plugins/_shared/featureConfig.ts` | 在共享的 `FEATURE_CONFIG_PAGE_KEYS` Set 中添加 key |
 | 6 | `backend/app/db/models/feature.py` | 添加 `FEATURE_XXX = "xxx"` 常量（如已有可跳过） |
@@ -1301,7 +1301,7 @@ const FEATURE_CONFIG_PAGE_KEYS = new Set([
 FEATURE_XXX = "xxx"
 ```
 
-此常量供 `rules.py` dry-run 分支和其它插件引用。
+此常量只在 TelePilot 主仓库为插件新增专属后端分支时需要。普通远程/本地插件不需要改 `feature.py`，安装流程会根据 `plugin.json` / `manifest.py` 自动登记 `Feature`。
 
 ---
 
@@ -1312,7 +1312,8 @@ FEATURE_XXX = "xxx"
 #### 插件侧导出 _dry_run_match
 
 ```python
-# backend/app/worker/plugins/builtin/xxx/plugin.py
+# plugins/local_imports/xxx/plugin.py
+# 或远程插件仓库中的 xxx/plugin.py
 
 def _dry_run_match(cfg: dict, text: str, chat_id: int | None = None) -> tuple[bool, str | None]:
     """纯函数：给定规则 config + 样本消息，返回 (matched, output)。
@@ -1325,7 +1326,7 @@ def _dry_run_match(cfg: dict, text: str, chat_id: int | None = None) -> tuple[bo
 ```
 
 ```python
-# backend/app/worker/plugins/builtin/xxx/__init__.py
+# 插件包 __init__.py
 from .plugin import _dry_run_match  # noqa: F401 — 供 API dry-run 导入
 ```
 
@@ -1336,7 +1337,8 @@ from .plugin import _dry_run_match  # noqa: F401 — 供 API dry-run 导入
 
 # ① import
 from ..db.models.feature import FEATURE_XXX
-from ..worker.plugins.builtin.xxx.plugin import _dry_run_match as _xxx_dry_run_match
+# 主仓库内置/官方插件可直接 import；普通远程插件建议先使用插件自身测试覆盖 dry-run，
+# 如确实要接入平台 rules.py，再通过稳定的服务函数按已安装插件目录加载。
 
 # ② 在 dry_run_rule() 函数中，在 fallback return 之前添加分支
 #    ⚠️ 必须放在最后的 `return RuleDryRunResponse(matched=False, ...)` 之前！
@@ -1423,7 +1425,7 @@ config_schema={
 
 专属页面字段应与运行时实际读取的配置保持一致；`manifest.config_schema` 也要同步，避免通用配置页、接口校验和文档出现三套口径。
 
-`codex_image` 是内置图片插件，代码位于 `backend/app/worker/plugins/builtin/codex_image/`，会随后端镜像发布并由 builtin registry 自动 seed。旧数据库里的 `account_feature(feature_key="codex_image")` 不需要迁移，worker 会按普通内置插件路径加载；若未来再次作为远程插件发布，必须另起 key 或先设计清晰迁移策略，避免和 builtin key 冲突。
+`codex_image` 现在是官方可选图片插件，源码随包放在 `backend/app/worker/plugins/official/codex_image/`，用户需在“安装插件”页安装后才会复制到 `plugins/installed/codex_image/` 并加载。旧数据库中已经启用或保存配置的 `codex_image` 会在 seed 阶段自动登记为 official installed 插件，保留账号配置和规则引用；未使用过的旧 builtin feature 行会被清理，避免误展示。
 
 ---
 
@@ -1556,7 +1558,7 @@ class DemoPlugin(Plugin):
 - [ ] 配置主体宽度自适应屏幕宽度，字段用响应式 grid 或分组，不使用窄 `max-w-*` 限制
 - [ ] 用户可见文案使用“插件”，不展示内部分类名或“Schema 弹窗”
 - [ ] 如需 dry-run：`plugin.py` 导出 `_dry_run_match`，`__init__.py` re-export，`rules.py` 在 fallback 之前添加分支
-- [ ] 如需 dry-run：`feature.py` 中有 `FEATURE_XXX` 常量
+- [ ] 如需接入平台 `rules.py` 专属 dry-run：`feature.py` 中有 `FEATURE_XXX` 常量；普通远程/本地插件可先用插件自身测试覆盖 dry-run 纯函数
 - [ ] 前端 `pnpm -C frontend exec tsc -b --noEmit` 和 `pnpm -C frontend build` 通过
 
 ---

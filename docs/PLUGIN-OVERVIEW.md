@@ -80,20 +80,23 @@ backend/app/worker/plugins/
 ├── base.py              # Plugin 基类 + register 装饰器
 ├── manifest.py          # Manifest 数据类
 ├── loader.py            # 插件加载器 + 热重载 + generation guard
-└── builtin/             # 内置插件
-    ├── game24/
-    └── forward/
+├── builtin/             # 核心平台/兼容代码，普通插件不要放这里
+│   ├── scheduler/        # 平台调度兼容壳，实际由 PlatformScheduler 执行
+│   └── forward/
+└── official/            # TelePilot 随包官方可选插件源，只用于 Web 安装
 
-plugins/installed/       # 远程/用户安装的插件
+plugins/installed/       # 远程/本地/官方可选安装后的运行目录
 ├── guess_number/
 └── (更多插件...)
 ```
+
+`backend/app/worker/plugins/builtin/` 中可能保留旧版本兼容目录，但扫描器只把核心平台能力纳入 builtin registry。`auto_reply`、`autorepeat`、`chatgpt_image`、`codex_image`、`game24`、`math10` 从 0.35 起走官方可选插件库：Web 安装后复制到 `plugins/installed/{key}/`，再按安装型插件加载。
 
 ### 生命周期
 
 ```
 loader._load_all()
-  → scan builtin/ + plugins/installed/
+  → scan 核心 builtin/ + plugins/installed/
   → import plugin.py + manifest.py
   → 验证 Manifest 合法性
   → 实例化 Plugin 子类

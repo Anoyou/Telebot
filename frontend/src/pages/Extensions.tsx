@@ -1,7 +1,7 @@
 // 插件安装与管理：插件包安装/更新/卸载 + 开发指南
 //
-// Tab 1：安装与更新 — 本地内置插件 + 远程插件（安装/卸载/更新）
-// Tab 2：开发指南 — 内置完整插件开发文档工作台
+// Tab 1：安装与更新 — 官方推荐插件 + 远程插件（安装/卸载/更新）
+// Tab 2：开发指南 — 完整插件开发文档工作台
 //
 // 账号级启停与配置统一回 /plugins 首页，避免“安装页”和“插件中心”双入口重复。
 // 远程插件原为独立 /remote-plugins 页面，现在统一收口到 /plugins/manage。
@@ -73,6 +73,7 @@ import { cn } from "@/lib/utils";
 import { goBackOr } from "@/lib/navigation";
 import { getErrMsg } from "@/lib/api";
 import { splitPluginWarnings } from "@/lib/plugin-config-contract";
+import { isPlatformFeature } from "@/lib/plugin-modes";
 
 import { getFeatureMatrix } from "@/api/features";
 import {
@@ -95,9 +96,11 @@ import {
   deletePluginRepo,
   fetchPluginRepos,
   fetchLocalPlugins,
+  fetchOfficialPlugins,
   fetchRepoPlugins,
   refreshRepoPlugins,
   installLocalPlugin,
+  installOfficialPlugin,
   installFromRepo,
   updatePluginRepoCredential,
 } from "@/api/pluginRepo";
@@ -131,6 +134,7 @@ type DevDoc = {
 const PLUGINS_QK = ["installed-packages"] as const;
 const REMOTE_QK = ["remote-plugins"] as const;
 const PLUGIN_REPOS_QK = ["plugin-repos"] as const;
+const OFFICIAL_PLUGINS_QK = ["official-plugins"] as const;
 const NEW_ACCOUNT_GUIDE_SEEN_KEY = "telebot.accounts.new_account_guide_seen.v4";
 const DEV_DOCS: DevDoc[] = [
   {
@@ -395,12 +399,13 @@ function PluginInstallGuide({
 
 
 // ═══════════════════════════════════════════════════════════════════
-// Tab 2：插件管理 — 内置插件 + 远程插件统一展示
+// Tab 2：插件管理 — 官方插件 + 远程插件统一展示
 // ═══════════════════════════════════════════════════════════════════
 function PluginsManagementTab() {
   return (
     <div className="space-y-6">
       <RemoteUpdateSettingsCard />
+      <OfficialPluginsCard />
       <LocalImportCard />
       <RemoteInstallCard />
       <InstalledPluginsSection />
@@ -482,6 +487,89 @@ function RemoteUpdateSettingsCard() {
             立即检查
           </Button>
         </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function OfficialPluginsCard() {
+  const qc = useQueryClient();
+  const officialQ = useQuery({ queryKey: OFFICIAL_PLUGINS_QK, queryFn: fetchOfficialPlugins });
+  const installOfficialMut = useMutation({
+    mutationFn: (name: string) => installOfficialPlugin(name),
+    onSuccess: (row) => {
+      toast.success(`已安装官方插件 ${row.display_name || row.name} v${row.version}`);
+      toastPluginLintWarnings(row);
+      qc.invalidateQueries({ queryKey: OFFICIAL_PLUGINS_QK });
+      qc.invalidateQueries({ queryKey: PLUGINS_QK });
+      qc.invalidateQueries({ queryKey: REMOTE_QK });
+      qc.invalidateQueries({ queryKey: ["matrix"] });
+    },
+    onError: (err) => toast.error(getErrMsg(err)),
+  });
+
+  const items = officialQ.data ?? [];
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <SectionHeader
+          icon={Sparkles}
+          title="官方推荐插件"
+          description="这些插件随 TelePilot 发布，但不再默认内置。首次部署建议按需安装，安装后可随时禁用或卸载。"
+          meta={<SignalPill tone="neutral" label="官方库" value={items.length} className="h-8" />}
+        />
+      </CardHeader>
+      <CardContent>
+        {officialQ.isLoading ? (
+          <div className="flex h-16 items-center justify-center">
+            <Spinner className="text-primary" />
+          </div>
+        ) : officialQ.isError ? (
+          <p className="py-3 text-sm text-destructive">官方插件库加载失败：{getErrMsg(officialQ.error)}</p>
+        ) : items.length === 0 ? (
+          <p className="py-3 text-sm text-muted-foreground">当前镜像未发现官方可选插件库。</p>
+        ) : (
+          <div className="grid gap-2 lg:grid-cols-2">
+            {items.map((plugin) => {
+              const recommended = (plugin.tags ?? []).includes("recommended");
+              return (
+                <div key={plugin.name} className="flex flex-col gap-3 rounded-md border px-3 py-3 sm:flex-row sm:items-center">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="font-medium">{plugin.display_name || plugin.name}</span>
+                      <span className="font-mono text-xs text-muted-foreground">v{plugin.version}</span>
+                      {recommended ? (
+                        <MetaBadge tone="success">首次推荐</MetaBadge>
+                      ) : (
+                        <MetaBadge tone="outline">官方库</MetaBadge>
+                      )}
+                      {plugin.installed ? <MetaBadge>已安装</MetaBadge> : null}
+                    </div>
+                    <div className="mt-1 font-mono text-xs text-muted-foreground">{plugin.name}</div>
+                    {plugin.description ? (
+                      <p className="mt-1 text-xs leading-5 text-muted-foreground">{plugin.description}</p>
+                    ) : null}
+                  </div>
+                  <Button
+                    size="sm"
+                    className="shrink-0"
+                    variant={plugin.installed ? "outline" : "default"}
+                    disabled={plugin.installed || installOfficialMut.isPending}
+                    onClick={() => installOfficialMut.mutate(plugin.name)}
+                  >
+                    {installOfficialMut.isPending ? (
+                      <Spinner className="mr-2 h-4 w-4" />
+                    ) : plugin.installed ? null : (
+                      <Download className="mr-2 h-4 w-4" />
+                    )}
+                    {plugin.installed ? "已安装" : "安装"}
+                  </Button>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </CardContent>
     </Card>
   );
@@ -684,7 +772,7 @@ function RemoteInstallCard() {
           />
           <Input
             className="h-9 rounded-md bg-background"
-            placeholder="https://github.com/user/repo.git"
+            placeholder="https://github.com/user/repo.git 或 /tree/branch"
             value={addUrl}
             onChange={(e) => setAddUrl(e.target.value)}
             onKeyDown={(e) => {
@@ -898,7 +986,7 @@ function RemoteInstallCard() {
   );
 }
 
-// ── 已安装插件列表（内置 + 远程） ────────────────────────────────
+// ── 已安装插件列表（官方 + 远程） ────────────────────────────────
 function InstalledPluginsSection() {
   const nav = useNavigate();
   const qc = useQueryClient();
@@ -906,7 +994,8 @@ function InstalledPluginsSection() {
   const builtinQ = useQuery({
     queryKey: ["matrix"],
     queryFn: getFeatureMatrix,
-    select: (data) => data.features.filter((f) => f.is_builtin && f.key !== "forward"),
+    select: (data) =>
+      data.features.filter((f) => f.is_builtin && f.key !== "forward" && !isPlatformFeature(f)),
   });
 
   const thirdPartyQ = useQuery({ queryKey: PLUGINS_QK, queryFn: listInstalledPackages });
@@ -914,17 +1003,32 @@ function InstalledPluginsSection() {
 
   const enableTPMut = useMutation({
     mutationFn: (key: string) => enableInstall(key),
-    onSuccess: () => { toast.success("已启用"); qc.invalidateQueries({ queryKey: PLUGINS_QK }); },
+    onSuccess: () => {
+      toast.success("已启用");
+      qc.invalidateQueries({ queryKey: PLUGINS_QK });
+      qc.invalidateQueries({ queryKey: OFFICIAL_PLUGINS_QK });
+      qc.invalidateQueries({ queryKey: ["matrix"] });
+    },
     onError: (err) => toast.error(getErrMsg(err)),
   });
   const disableTPMut = useMutation({
     mutationFn: (key: string) => disableInstall(key),
-    onSuccess: () => { toast.success("已禁用"); qc.invalidateQueries({ queryKey: PLUGINS_QK }); },
+    onSuccess: () => {
+      toast.success("已禁用");
+      qc.invalidateQueries({ queryKey: PLUGINS_QK });
+      qc.invalidateQueries({ queryKey: OFFICIAL_PLUGINS_QK });
+      qc.invalidateQueries({ queryKey: ["matrix"] });
+    },
     onError: (err) => toast.error(getErrMsg(err)),
   });
   const uninstallTPMut = useMutation({
     mutationFn: (key: string) => uninstallPlugin(key),
-    onSuccess: (_r, key) => { toast.success(`已卸载 ${key}`); qc.invalidateQueries({ queryKey: PLUGINS_QK }); },
+    onSuccess: (_r, key) => {
+      toast.success(`已卸载 ${key}`);
+      qc.invalidateQueries({ queryKey: PLUGINS_QK });
+      qc.invalidateQueries({ queryKey: OFFICIAL_PLUGINS_QK });
+      qc.invalidateQueries({ queryKey: ["matrix"] });
+    },
     onError: (err) => toast.error(getErrMsg(err)),
   });
 
@@ -1020,14 +1124,14 @@ function InstalledPluginsSection() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {/* 内置插件 */}
+              {/* 核心内置插件 */}
               {builtin.map((f) => (
                 <TableRow key={f.key}>
                   <TableCell>
                     <div className="font-medium">{f.display_name}</div>
                     <div className="font-mono text-xs text-muted-foreground">{f.key}</div>
                   </TableCell>
-                  <TableCell><MetaBadge>内置</MetaBadge></TableCell>
+                  <TableCell><MetaBadge>核心内置</MetaBadge></TableCell>
                   <TableCell>{formatPluginVersion(f.version)}</TableCell>
                   <TableCell><MetaBadge tone="success">随系统更新</MetaBadge></TableCell>
                   <TableCell className="text-right">
@@ -1043,7 +1147,11 @@ function InstalledPluginsSection() {
                   <TableCell>
                     <div className="font-medium">{row.key}</div>
                   </TableCell>
-                  <TableCell><MetaBadge>第三方</MetaBadge></TableCell>
+                  <TableCell>
+                    <MetaBadge tone={row.source === "official" ? "success" : "neutral"}>
+                      {row.source === "official" ? "官方插件" : "第三方"}
+                    </MetaBadge>
+                  </TableCell>
                   <TableCell>{formatPluginVersion(row.version)}</TableCell>
                   <TableCell>
                     <MetaBadge tone="outline">本地安装</MetaBadge>
@@ -1259,7 +1367,7 @@ function DevGuideTab() {
           <div className="min-w-0">
             <CardTitle className="text-base">插件开发文档</CardTitle>
             <CardDescription className="mt-1">
-              内置完整开发文档，支持直接阅读合集，也可以按主题查看每个分篇。
+              完整插件开发文档，支持直接阅读合集，也可以按主题查看每个分篇。
             </CardDescription>
           </div>
           <div className="flex flex-wrap gap-2 md:justify-end">

@@ -230,7 +230,6 @@ def test_import_builtins_registers_all_three() -> None:
 
     reg = all_plugins()
     for key in (
-        FEATURE_AUTO_REPLY,
         FEATURE_FORWARD,
         FEATURE_SCHEDULER,
     ):
@@ -240,14 +239,10 @@ def test_import_builtins_registers_all_three() -> None:
 def test_builtin_modules_constant_is_complete() -> None:
     """_BUILTIN_MODULES 应当覆盖核心内置模块。"""
     assert {
-        "auto_reply",
-        "autorepeat",
-        "chatgpt_image",
-        "codex_image",
         "forward",
-        "game24",
         "scheduler",
     } <= set(_BUILTIN_MODULES)
+    assert "codex_image" not in set(_BUILTIN_MODULES)
 
 
 def test_builtin_rule_and_platform_manifests_are_explicit() -> None:
@@ -800,11 +795,11 @@ async def test_reload_account_config_force_reload_clears_installed_module_cache(
     assert plugin_key in state.instances
 
 
-def test_missing_plugin_error_uses_codex_image_builtin_hint() -> None:
+def test_missing_plugin_error_uses_codex_image_official_hint() -> None:
     err, message = _missing_plugin_error("codex_image")
     assert "codex_image" in err
-    assert "内置模块" in message
-    assert "builtin/codex_image" in message
+    assert "官方可选插件" in message
+    assert "plugins/installed/codex_image" in message
 
 
 def test_manifest_min_telepilot_version_is_preferred() -> None:

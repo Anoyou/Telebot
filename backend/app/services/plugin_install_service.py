@@ -29,8 +29,9 @@ from pathlib import Path
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..db.models.feature import BUILTIN_FEATURES
+from ..db.models.feature import BUILTIN_FEATURES, AccountFeature, Feature
 from ..db.models.plugin import (
+    PLUGIN_SOURCE_OFFICIAL,
     PLUGIN_SOURCE_ZIP,
     PLUGIN_TRUST_COMMUNITY,
     PLUGIN_TRUST_VERIFIED,
@@ -44,6 +45,7 @@ from .remote_plugin_service import (
 )
 
 log = logging.getLogger(__name__)
+_PACKAGE_MANAGED_SOURCES = (PLUGIN_SOURCE_ZIP, PLUGIN_SOURCE_OFFICIAL)
 
 
 # ─────────────────────────────────────────────────────
@@ -363,9 +365,22 @@ async def install_zip(
 async def uninstall(db: AsyncSession, key: str) -> bool:
     """卸载指定 key：删表行 + 删目录。返回 True 表示真删了一行。"""
     row = await db.get(InstalledPlugin, key)
-    if row is None or row.source != PLUGIN_SOURCE_ZIP:
+    if row is None or row.source not in _PACKAGE_MANAGED_SOURCES:
         return False
     target = Path(row.installed_path or settings.plugins_installed_path / key)
+    if row.source == PLUGIN_SOURCE_OFFICIAL:
+        afs = (
+            await db.execute(
+                select(AccountFeature).where(AccountFeature.feature_key == key)
+            )
+        ).scalars().all()
+        for af in afs:
+            await db.delete(af)
+        feat = (
+            await db.execute(select(Feature).where(Feature.key == key))
+        ).scalar_one_or_none()
+        if feat is not None and not bool(feat.is_builtin):
+            await db.delete(feat)
     await db.delete(row)
     await db.flush()
     # 删目录失败不阻塞 DB 提交（但写日志方便排查）
@@ -380,7 +395,7 @@ async def uninstall(db: AsyncSession, key: str) -> bool:
 async def set_enabled(db: AsyncSession, key: str, enabled: bool) -> InstalledPlugin:
     """设置 enabled 标志；调用方负责后续向 worker 广播 reload_config。"""
     row = await db.get(InstalledPlugin, key)
-    if row is None or row.source != PLUGIN_SOURCE_ZIP:
+    if row is None or row.source not in _PACKAGE_MANAGED_SOURCES:
         raise PluginInstallError("PLUGIN_NOT_FOUND", f"插件不存在: {key}")
     if enabled and row.signature_ok is False:
         # 签名失败时不允许直接 enable；前端要显式"我知道风险"再调，会先把 signature_ok 置 None
@@ -394,11 +409,11 @@ async def set_enabled(db: AsyncSession, key: str, enabled: bool) -> InstalledPlu
 
 
 async def list_installed(db: AsyncSession) -> list[InstalledPlugin]:
-    """列出所有已安装的第三方插件，按 key 字典序。"""
+    """列出 zip 与官方可选安装包，按 key 字典序。"""
     rows = (
         await db.execute(
             select(InstalledPlugin)
-            .where(InstalledPlugin.source == PLUGIN_SOURCE_ZIP)
+            .where(InstalledPlugin.source.in_(_PACKAGE_MANAGED_SOURCES))
             .order_by(InstalledPlugin.key)
         )
     ).scalars().all()

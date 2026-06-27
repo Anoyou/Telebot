@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import logging
+import shutil
 from collections.abc import Iterable
 from copy import deepcopy
 from typing import Any
@@ -38,6 +39,8 @@ from ..db.models.feature import (
 )
 from ..db.models.plugin import InstalledPlugin
 from ..db.models.plugin_global_config import PluginGlobalConfig
+from ..db.models.rule import Rule
+from ..db.models.system import SystemSetting
 from ..redis_client import get_redis
 from ..schemas.feature import (
     ConfigValidationError,
@@ -48,6 +51,16 @@ from ..worker.ipc import CMD_RELOAD_CONFIG, publish_cmd_with_ack
 from .account_bot_service import normalize_interaction_entry_manifest
 
 log = logging.getLogger(__name__)
+_OPTIONAL_OFFICIAL_PLUGIN_KEYS: frozenset[str] = frozenset(
+    {
+        "auto_reply",
+        "autorepeat",
+        "chatgpt_image",
+        "codex_image",
+        "game24",
+        "math10",
+    }
+)
 
 
 # ─────────────────────────────────────────────────────
@@ -68,8 +81,9 @@ async def seed_builtin_features(db: AsyncSession) -> int:
 
     rows = (await db.execute(select(Feature))).scalars().all()
     existing: dict[str, Feature] = {f.key: f for f in rows}
+    migrated_count, migrated_changed = await _migrate_optional_builtin_features(db, existing)
     added = 0
-    changed_existing = False
+    changed_existing = migrated_changed
     for key, name in BUILTIN_FEATURES.items():
         # 尝试从 manifest 读取 config_schema 和 version
         cfg_schema = None
@@ -143,13 +157,164 @@ async def seed_builtin_features(db: AsyncSession) -> int:
         db.add(Feature(key=key, display_name=name, is_builtin=True, version=ver, manifest=manifest_data))
         added += 1
     installed_added, installed_changed = await _seed_local_installed_features(db, existing)
-    added += installed_added
+    added += migrated_count + installed_added
     changed_existing = changed_existing or installed_changed
     if added:
         await db.commit()
     elif changed_existing:
         await db.commit()
     return added
+
+
+async def _migrate_optional_builtin_features(
+    db: AsyncSession,
+    existing: dict[str, Feature],
+) -> tuple[int, bool]:
+    """把历史 builtin 可选插件收敛成 official installed 插件。
+
+    0.35 起这些插件不再作为 builtin 自动出现。若旧数据库里已经有账号开关、
+    规则引用、全局配置或交互规则引用，则自动登记为官方已安装包，保证旧配置
+    继续可用；若从未使用，则删除旧 feature 行，避免插件中心继续展示。
+    """
+
+    keys = sorted(key for key in _OPTIONAL_OFFICIAL_PLUGIN_KEYS if key in existing)
+    if not keys:
+        return 0, False
+
+    try:
+        from ..db.models.plugin import (
+            PLUGIN_SOURCE_OFFICIAL,
+            PLUGIN_TRUST_OFFICIAL,
+        )
+        from . import plugin_repo_service
+        from .remote_plugin_service import upsert_installed_plugin
+    except Exception:  # noqa: BLE001
+        log.warning("加载官方插件迁移工具失败，跳过本轮收敛", exc_info=True)
+        return 0, False
+
+    official_root = plugin_repo_service._official_plugin_root()
+    account_feature_rows = (
+        await db.execute(
+            select(AccountFeature).where(AccountFeature.feature_key.in_(keys))
+        )
+    ).scalars().all()
+    rule_rows = (
+        await db.execute(select(Rule).where(Rule.feature_key.in_(keys)))
+    ).scalars().all()
+    global_config_rows = (
+        await db.execute(
+            select(PluginGlobalConfig).where(PluginGlobalConfig.plugin_key.in_(keys))
+        )
+    ).scalars().all()
+    interaction_settings = (
+        await db.execute(
+            select(SystemSetting).where(SystemSetting.key.like("account_bot_transfer_notice:%"))
+        )
+    ).scalars().all()
+    used_keys = {row.feature_key for row in account_feature_rows}
+    used_keys.update(row.feature_key for row in rule_rows)
+    used_keys.update(row.plugin_key for row in global_config_rows)
+    for row in rule_rows:
+        cfg = row.config if isinstance(row.config, dict) else {}
+        module_key = str(cfg.get("module_key") or "").strip()
+        if module_key in _OPTIONAL_OFFICIAL_PLUGIN_KEYS:
+            used_keys.add(module_key)
+    for setting in interaction_settings:
+        value = setting.value if isinstance(setting.value, dict) else {}
+        module_key = str(value.get("module_key") or "").strip()
+        if module_key in _OPTIONAL_OFFICIAL_PLUGIN_KEYS:
+            used_keys.add(module_key)
+        raw_rules = value.get("rules")
+        if isinstance(raw_rules, list):
+            for item in raw_rules:
+                if not isinstance(item, dict):
+                    continue
+                module_key = str(item.get("module_key") or "").strip()
+                if module_key in _OPTIONAL_OFFICIAL_PLUGIN_KEYS:
+                    used_keys.add(module_key)
+
+    added = 0
+    changed = False
+    for key in keys:
+        feature = existing[key]
+        plugin_dir = official_root / key
+        plugin_json = plugin_dir / "plugin.json"
+        if key not in used_keys:
+            if bool(feature.is_builtin):
+                await db.delete(feature)
+                existing.pop(key, None)
+                changed = True
+            continue
+        if not plugin_json.exists():
+            log.warning("历史 builtin 插件 %s 已被使用，但官方插件库缺少 %s", key, plugin_json)
+            continue
+
+        try:
+            meta = plugin_repo_service._read_plugin_metadata(plugin_dir, fallback_name=key)
+            from ..feature_registry import _load_manifest_file
+
+            manifest_obj = _load_manifest_file(plugin_dir / "manifest.py")
+            manifest_json = plugin_repo_service._manifest_json_from_manifest_object(manifest_obj, meta)
+            feature_manifest = plugin_repo_service._feature_manifest_from_manifest_json(manifest_json)
+            lint_warnings = plugin_repo_service.lint_plugin_metadata_files(plugin_dir)
+        except Exception:  # noqa: BLE001
+            log.warning("迁移历史 builtin 插件 %s 到 official 失败", key, exc_info=True)
+            continue
+
+        if not (plugin_repo_service._plugin_dir(key)).exists():
+            try:
+                target = plugin_repo_service._plugin_dir(key)
+                staging = target.parent / f"{target.name}.installing"
+                if staging.exists():
+                    shutil.rmtree(staging, ignore_errors=True)
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copytree(
+                    plugin_dir,
+                    staging,
+                    ignore=shutil.ignore_patterns(".git", ".gitignore", "__pycache__"),
+                )
+                staging.rename(target)
+            except Exception:  # noqa: BLE001
+                log.warning("复制官方插件 %s 到 installed 失败", key, exc_info=True)
+                continue
+
+        if feature.is_builtin:
+            feature.is_builtin = False
+            changed = True
+        display_name = str(manifest_json.get("display_name") or meta.display_name or key)
+        version = str(manifest_json.get("version") or meta.version)
+        if feature.display_name != display_name:
+            feature.display_name = display_name
+            changed = True
+        if feature.version != version:
+            feature.version = version
+            changed = True
+        if (feature.manifest or {}) != (feature_manifest or {}):
+            feature.manifest = feature_manifest
+            changed = True
+
+        installed = await db.get(InstalledPlugin, key)
+        was_enabled = bool(getattr(installed, "enabled", False)) if installed is not None else bool(
+            any(row.feature_key == key and row.enabled for row in account_feature_rows)
+        )
+        await upsert_installed_plugin(
+            db,
+            key=key,
+            source=PLUGIN_SOURCE_OFFICIAL,
+            source_url=f"official://{key}",
+            installed_path=str(plugin_repo_service._plugin_dir(key)),
+            version=version,
+            manifest_json=manifest_json,
+            enabled=was_enabled,
+            signature_ok=True,
+            trust_tier=PLUGIN_TRUST_OFFICIAL,
+            source_label="Official",
+            last_install_error=None,
+            lint_warnings=lint_warnings,
+        )
+        added += 1 if installed is None else 0
+        await db.flush()
+    return added, changed
 
 
 async def _seed_local_installed_features(

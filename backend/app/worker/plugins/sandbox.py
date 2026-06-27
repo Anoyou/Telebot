@@ -1,7 +1,7 @@
 """插件运行时沙箱（阶段 C，阶段 E 安全加固）。
 
-目标：限制第三方插件 (``installed`` source) 能调用的 Telethon API 范围；
-内置 builtin 插件直接拿到原 ``TelegramClient``，不走沙箱。
+目标：限制安装型插件 (``installed`` source，含远程/本地/官方可选插件) 能调用的 Telethon API 范围；
+核心 builtin 兼容代码直接拿到原 ``TelegramClient``，不走沙箱。
 
 安全设计（阶段 E 修复）：
 - 移除 ``_ALWAYS_ALLOWED`` 中的 ``session``，防止第三方插件访问真实 session
@@ -31,7 +31,7 @@
 - 仅拦截顶层 ``getattr``；插件取到方法后多次调用都不再过 check（性能权衡）
 - 私有属性（`_` 前缀）默认拒绝，避免拿到真实 client 内部对象绕过白名单
 - 调用方 (loader) 在 ``installed`` 源 plugin 启动时把 ``ctx.client`` 替成
-  ``SandboxClient(real, perms)``；``builtin`` 不变
+  ``SandboxClient(real, perms)``；核心 ``builtin`` 兼容代码不变
 """
 
 from __future__ import annotations

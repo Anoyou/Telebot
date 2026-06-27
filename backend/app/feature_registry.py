@@ -10,6 +10,16 @@ log = logging.getLogger(__name__)
 
 # builtin 插件目录：backend/app/worker/plugins/builtin/
 _BUILTIN_PLUGIN_DIR: Path = Path(__file__).parent / "worker" / "plugins" / "builtin"
+_NON_CORE_BUILTIN_COMPAT_KEYS: frozenset[str] = frozenset(
+    {
+        "auto_reply",
+        "autorepeat",
+        "chatgpt_image",
+        "codex_image",
+        "game24",
+        "math10",
+    }
+)
 
 
 def _load_manifest_file(path: Path) -> Any | None:
@@ -38,6 +48,8 @@ def scan_builtin_manifest_objects() -> dict[str, Any]:
             continue
         manifest_file = sub / "manifest.py"
         if not manifest_file.exists():
+            continue
+        if sub.name in _NON_CORE_BUILTIN_COMPAT_KEYS:
             continue
         m = _load_manifest_file(manifest_file)
         if m is None:

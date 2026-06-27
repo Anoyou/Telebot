@@ -114,6 +114,16 @@ RECENT_PEERS_LIMIT = 50
 # 内置插件根目录：``backend/app/worker/plugins/builtin``
 _BUILTIN_DIR: Path = Path(__file__).parent / "builtin"
 _BACKEND_DIR: Path = Path(__file__).resolve().parents[3]
+_NON_CORE_BUILTIN_COMPAT_KEYS: frozenset[str] = frozenset(
+    {
+        "auto_reply",
+        "autorepeat",
+        "chatgpt_image",
+        "codex_image",
+        "game24",
+        "math10",
+    }
+)
 
 
 def _installed_dir() -> Path:
@@ -139,7 +149,15 @@ def _scan_builtin_dirs() -> list[Path]:
     if not _BUILTIN_DIR.exists():
         return []
     return sorted(
-        [p for p in _BUILTIN_DIR.iterdir() if p.is_dir() and not p.name.startswith("_")],
+        [
+            p
+            for p in _BUILTIN_DIR.iterdir()
+            if (
+                p.is_dir()
+                and not p.name.startswith("_")
+                and p.name not in _NON_CORE_BUILTIN_COMPAT_KEYS
+            )
+        ],
         key=lambda p: p.name,
     )
 
@@ -177,10 +195,10 @@ def _missing_plugin_error(feature_key: str) -> tuple[str, str]:
     """为缺失插件提供统一错误码与可读日志，便于前端/运维识别。"""
     if feature_key == "codex_image":
         return (
-            "builtin plugin codex_image not found",
+            "official plugin codex_image not installed",
             (
-                "feature codex_image 已启用但未找到内置模块实现。"
-                "请确认当前镜像包含 backend/app/worker/plugins/builtin/codex_image；"
+                "feature codex_image 已启用但未找到官方可选插件实现。"
+                "请先在“安装插件”页安装 Codex 图片生成，并确认 plugins/installed/codex_image 存在；"
                 "已跳过加载并保持 worker 运行。"
             ),
         )

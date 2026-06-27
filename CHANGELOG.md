@@ -20,6 +20,43 @@
 
 ## [Unreleased]
 
+## [0.35.1] — 2026-06-27 · patch（补丁版本） · 插件仓库分支链接兼容
+
+### Fixed
+- 插件仓库新增、刷新、安装和已安装插件检查更新现在支持 GitHub `tree/<branch>` 分支页链接；后端会保留用户填写的原始 URL，同时在 git 拉取时转换为真正的 clone URL 并 checkout 指定分支。
+- 远程插件直接安装同样支持 GitHub `tree/<branch>` 链接，避免临时插件分支必须先合入默认分支或手工改成 clone URL。
+
+### Docs
+- 插件仓库页面提示、API schema 和远程插件开发文档补充 GitHub 分支页 URL 的填写方式。
+
+### Tests
+- 补充插件仓库缓存刷新、远程插件安装和 source_url 校验的回归测试，覆盖普通 Git URL 与 GitHub `tree/<branch>` 链接。
+
+## [0.35.0] — 2026-06-27 · minor（次版本） · 官方可选插件库与平台能力收口
+
+### Added
+- 新增随包官方可选插件库：`auto_reply`、`autorepeat`、`chatgpt_image`、`codex_image`、`game24`、`math10` 不再作为 builtin 自动 seed，而是可在“插件安装与管理”页按需安装。
+- 插件中心首页新增首次部署推荐安装提醒：当自动回复、自动复读尚未安装时提示用户按需安装，用户也可以关闭提醒。
+- 新增官方插件库 API：`GET /api/plugin-repos/official/plugins` 和 `POST /api/plugin-repos/official/plugins/{plugin_name}/install`，安装后复制到 `plugins/installed/{key}/` 并登记为 `official` 来源。
+
+### Changed
+- `scheduler` 进一步收口为平台能力，不再按普通插件展示或卸载；普通插件需要后台任务时仍通过 `ctx.scheduler` facade 注册。
+- 官方可选插件安装后与远程/本地安装型插件走同一套运行目录、账号启用、配置页、卸载和 worker 热加载链路；已安装官方插件可手动禁用或卸载。
+- 插件中心和账号详情页来源展示调整为“平台内置 / 官方插件 / 第三方”，避免把官方可选插件误认为不可移除的 builtin。
+- 新账号配置复制不再默认复制自动回复，只保留平台定时任务配置，避免首次部署时无意启用官方可选插件。
+
+### Fixed
+- 旧数据库中已经启用、保存配置或被交互规则引用的历史 builtin 可选插件会自动迁移为 official installed 插件，保留账号配置、规则和全局配置；未使用过的旧 feature 行会被清理，避免插件中心误展示。
+- `codex_image` 缺失实现时的运行日志和前端提示改为引导安装官方可选插件，不再提示检查 builtin 目录。
+- 官方插件列表会从 `plugin.json.tags` 读取推荐标签，前端不再硬编码推荐插件 key。
+
+### Docs
+- README、插件概览、API 参考、HTTP facade、安全边界和远程插件指南同步更新为“平台能力 / 官方可选插件库 / 远程插件库”口径。
+- 插件开发指南明确新插件应走远程仓库或 `plugins/local_imports` 本地导入，不再指导开发者把新插件放进 builtin 目录。
+
+### Tests
+- 补充官方插件库鉴权、官方插件安装、builtin registry 排除可选插件、loader 核心 builtin 清单等回归测试。
+
 ## [0.34.6] — 2026-06-27 · patch（补丁版本） · PWA 底部导航修复
 
 ### Fixed

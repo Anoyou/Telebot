@@ -47,6 +47,7 @@ import {
 } from "@/components/ui/card";
 import { Select } from "@/components/ui/select";
 import { pluginUsageGuideWarning, splitPluginWarnings } from "@/lib/plugin-config-contract";
+import { isPlatformFeature } from "@/lib/plugin-modes";
 
 import { featureConfigPath } from "./_shared/featureConfig";
 
@@ -69,6 +70,8 @@ const CATEGORY_META: Record<ModuleCategory, { title: string; hint: string; icon:
   },
 };
 const DANGEROUS_CMD_BANNER_KEY = "telebot.plugins_home.banner.v0_13_dangerous_cmds_closed";
+const OFFICIAL_RECOMMENDED_INSTALL_BANNER_KEY = "telebot.plugins_home.official_recommended_install_closed.v0_35";
+const OFFICIAL_RECOMMENDED_KEYS = ["auto_reply", "autorepeat"] as const;
 
 function moduleRuntimeLabel(status: string, enabled: boolean) {
   if (!enabled) return "已停用";
@@ -78,6 +81,8 @@ function moduleRuntimeLabel(status: string, enabled: boolean) {
 }
 
 function moduleSourceLabel(feature: FeatureInfo) {
+  if (feature.source_label === "Official") return "官方";
+  if (feature.source_label === "core") return "平台";
   return feature.source_type === "remote" ? "远程" : "本地";
 }
 
@@ -104,7 +109,14 @@ function moduleTrustBadge(
     return {
       label: "内置核心",
       tone: "success",
-      title: "随 TelePilot 一起发布的内置插件。",
+      title: "随 TelePilot 一起发布的核心能力。",
+    };
+  }
+  if (feature.source_label === "Official" || install?.source === "official") {
+    return {
+      label: "官方插件",
+      tone: "success",
+      title: "来自 TelePilot 随包官方插件库，可手动卸载。",
     };
   }
   if (signatureOk === true) {
@@ -176,6 +188,10 @@ export function PluginsHome() {
     if (typeof window === "undefined") return false;
     return localStorage.getItem(DANGEROUS_CMD_BANNER_KEY) !== "1";
   });
+  const [officialInstallBannerVisible, setOfficialInstallBannerVisible] = useState(() => {
+    if (typeof window === "undefined") return false;
+    return localStorage.getItem(OFFICIAL_RECOMMENDED_INSTALL_BANNER_KEY) !== "1";
+  });
   const matrixQ = useQuery({
     queryKey: ["matrix"],
     queryFn: getFeatureMatrix,
@@ -195,6 +211,10 @@ export function PluginsHome() {
 
   const accounts = matrixQ.data?.accounts ?? [];
   const features = matrixQ.data?.features ?? [];
+  const pluginFeatures = useMemo(
+    () => features.filter((feature) => !isPlatformFeature(feature) && feature.key !== "forward"),
+    [features],
+  );
   useEffect(() => {
     if (accounts.length === 0) return;
 
@@ -220,7 +240,7 @@ export function PluginsHome() {
     queryFn: () => listAccountFeatures(selectedAid!),
     enabled: selectedAid !== null,
   });
-  const codexImageFeature = features.find((f) => f.key === "codex_image");
+  const codexImageFeature = pluginFeatures.find((f) => f.key === "codex_image");
   const codexImageState = selectedAccount?.features?.codex_image ?? "disabled";
   const cmdPrefix = settingsQ.data?.command_prefix || ",";
   const accountFeatureByKey = useMemo(() => {
@@ -237,6 +257,15 @@ export function PluginsHome() {
     }
     return map;
   }, [installedQ.data]);
+  const missingRecommendedOfficialPlugins = useMemo(
+    () => OFFICIAL_RECOMMENDED_KEYS.filter((key) => !installByKey.has(key)),
+    [installByKey],
+  );
+  const showOfficialInstallBanner =
+    officialInstallBannerVisible
+    && !installedQ.isLoading
+    && !installedQ.isError
+    && missingRecommendedOfficialPlugins.length > 0;
   const pluginUsageByKey = useMemo(() => {
     const map = new Map<string, PluginLLMUsageSummaryItem>();
     for (const item of pluginUsageQ.data?.items ?? []) {
@@ -252,8 +281,7 @@ export function PluginsHome() {
       utility: [],
     };
 
-    for (const feature of features) {
-      if (feature.key === "forward") continue;
+    for (const feature of pluginFeatures) {
       const category = feature.category === "interactive" || feature.category === "automation"
         ? feature.category
         : "utility";
@@ -261,7 +289,7 @@ export function PluginsHome() {
     }
 
     return zones;
-  }, [features]);
+  }, [pluginFeatures]);
 
   if (matrixQ.isLoading) {
     return (
@@ -305,13 +333,43 @@ export function PluginsHome() {
         </Card>
       ) : null}
 
+      {showOfficialInstallBanner ? (
+        <Card className="border-primary/30 bg-primary/5">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base">首次部署推荐安装</CardTitle>
+            <CardDescription>
+              自动回复和自动复读已改为官方推荐插件，不再默认内置。需要关键词回复或群内复读时，可以按需安装；安装后仍可随时卸载。
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="flex flex-wrap items-center gap-2">
+            <MetaBadge tone="outline">
+              待安装 {missingRecommendedOfficialPlugins.length}
+            </MetaBadge>
+            <Button size="sm" onClick={() => nav("/plugins/manage?tab=plugins")}>
+              <PackagePlus className="mr-1 h-4 w-4" />
+              去安装官方插件
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                localStorage.setItem(OFFICIAL_RECOMMENDED_INSTALL_BANNER_KEY, "1");
+                setOfficialInstallBannerVisible(false);
+              }}
+            >
+              暂不需要
+            </Button>
+          </CardContent>
+        </Card>
+      ) : null}
+
       <StatusSummaryPanel
         icon={Boxes}
         title="插件中心"
         description="先在这里沉淀一套好用的指令、消息和 AI 模板，再按账号启用复用；新账号不用从零重配。"
         signals={(
           <>
-            <SignalPill tone="primary" label="插件总数" value={features.length} />
+            <SignalPill tone="primary" label="插件总数" value={pluginFeatures.length} />
             <SignalPill tone="success" label="账号数量" value={accounts.length} />
             <SignalPill tone="neutral" label="当前账号" value={selectedAccount?.name ?? "未选择"} />
           </>
@@ -457,11 +515,11 @@ export function PluginsHome() {
           <CardHeader className="pb-2">
             <CardTitle className="text-base text-amber-900">codex_image 加载提示</CardTitle>
             <CardDescription className="text-amber-800">
-              当前账号启用了 codex_image，但 worker 未能加载这个内置实验插件。系统已自动降级为失败态并保持 worker 持续运行。
+              当前账号启用了 codex_image，但 worker 未能加载这个官方可选插件。系统已自动降级为失败态并保持 worker 持续运行。
             </CardDescription>
           </CardHeader>
           <CardContent className="pt-0 text-sm text-amber-900">
-            如需恢复，请确认当前后端镜像包含 builtin/codex_image，并检查该账号的 Codex 配置或运行日志。
+            如需恢复，请确认已在“安装插件”中安装 Codex 图片生成，并检查该账号的 Codex 配置或运行日志。
           </CardContent>
         </Card>
       ) : null}

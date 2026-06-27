@@ -94,6 +94,12 @@ function compareFeatureKey(a: FeatureInfo, b: FeatureInfo) {
   return a.key.localeCompare(b.key, "en", { sensitivity: "base" });
 }
 
+function featureSourceLabel(feature: Pick<FeatureInfo, "is_builtin" | "source_label">) {
+  if (feature.is_builtin) return "平台内置";
+  if (feature.source_label === "Official") return "官方插件";
+  return "第三方";
+}
+
 export function AccountDetail() {
   const params = useParams();
   const [searchParams] = useSearchParams();
@@ -592,7 +598,7 @@ export function AccountDetail() {
                                   </TableCell>
                                   <TableCell>
                                     <Badge variant={f.is_builtin ? "secondary" : "outline"}>
-                                      {f.is_builtin ? "内置" : "第三方"}
+                                      {featureSourceLabel(f)}
                                     </Badge>
                                   </TableCell>
                                   <TableCell className="text-center">

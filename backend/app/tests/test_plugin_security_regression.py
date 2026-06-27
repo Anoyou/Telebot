@@ -283,6 +283,17 @@ class TestRemotePluginSecurity:
         """https:// scheme 必须被允许。"""
         svc._validate_source_url("https://github.com/user/repo.git")
         svc._validate_source_url("https://gitlab.com/user/repo")
+        svc._validate_source_url("https://github.com/user/repo/tree/feature/demo")
+
+    def test_normalize_git_source_url_supports_github_tree_branch(self):
+        """GitHub tree/<branch> 页面链接应转为 clone URL + 分支。"""
+        source = svc.normalize_git_source_url(
+            "https://github.com/user/repo/tree/feature/demo"
+        )
+
+        assert source.clone_url == "https://github.com/user/repo.git"
+        assert source.ref == "feature/demo"
+        assert svc._derive_name_from_url("https://github.com/user/repo/tree/feature/demo") == "repo"
 
     def test_validate_source_url_allows_git_ssh(self):
         """git+ssh:// scheme 必须被允许。"""
@@ -970,6 +981,36 @@ class TestRemotePluginEnableFlow:
         assert any("httpx.get" in item and "timeout" in item for item in installed.lint_warnings)
 
     @pytest.mark.asyncio
+    async def test_install_supports_github_tree_branch_url(self, monkeypatch, tmp_path):
+        """GitHub tree/<branch> 分支链接安装时应 clone 仓库并指定分支。"""
+        monkeypatch.setattr(svc.settings, "plugins_installed_dir", str(tmp_path / "installed"))
+        calls: list[tuple[str, ...]] = []
+
+        async def _fake_clone(*args, **_kwargs):  # noqa: ANN001
+            calls.append(tuple(args))
+            plugin_dir = Path(args[-1])
+            plugin_dir.mkdir(parents=True)
+            _write_runtime_plugin(plugin_dir, key="git_demo", version="1.2.3")
+            return ""
+
+        monkeypatch.setattr(svc, "_run_git", _fake_clone)
+        db = _FakeRemoteInstallDB()
+
+        await svc.install(db, "https://github.com/example/git_demo/tree/feature/demo")
+
+        assert calls[0] == (
+            "clone",
+            "--depth",
+            "1",
+            "--branch",
+            "feature/demo",
+            "--single-branch",
+            "https://github.com/example/git_demo.git",
+            str(tmp_path / "installed" / "git_demo.installing"),
+        )
+        assert db.installed_rows["git_demo"].source_url == "https://github.com/example/git_demo/tree/feature/demo"
+
+    @pytest.mark.asyncio
     async def test_update_writes_installed_plugin(self, monkeypatch, tmp_path):
         """Git 更新成功后刷新 installed_plugin。"""
         monkeypatch.setattr(svc.settings, "plugins_installed_dir", str(tmp_path / "installed"))
@@ -1150,6 +1191,30 @@ class TestPluginRepoInstallFlow:
         assert installed.source_label == "Local"
         assert (tmp_path / "installed" / "local_demo").is_dir()
         assert not (tmp_path / "installed" / "local_demo.installing").exists()
+
+    @pytest.mark.asyncio
+    async def test_install_official_plugin_writes_official_install_record(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(repo_svc.settings, "plugins_installed_dir", str(tmp_path / "installed"))
+        official_root = tmp_path / "official"
+        _write_runtime_plugin(official_root / "official_demo", key="official_demo", version="4.0.0")
+        monkeypatch.setattr(repo_svc, "_official_plugin_root", lambda: official_root)
+        db = _FakePluginRepoDB()
+
+        row = await repo_svc.install_official_plugin(db, "official_demo", default_enabled=False)
+
+        installed = db.installed_rows["official_demo"]
+        feature = db.features["official_demo"]
+        assert row.name == "official_demo"
+        assert installed.source == "official"
+        assert installed.source_url == "official://official_demo"
+        assert installed.version == "4.0.0"
+        assert installed.enabled is False
+        assert installed.signature_ok is True
+        assert installed.trust_tier == "official"
+        assert installed.source_label == "Official"
+        assert feature.is_builtin is False
+        assert (tmp_path / "installed" / "official_demo").is_dir()
+        assert not (tmp_path / "installed" / "official_demo.installing").exists()
 
 
 class TestPluginMetadataSchema:
