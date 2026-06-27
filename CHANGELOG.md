@@ -20,6 +20,29 @@
 
 ## [Unreleased]
 
+## [0.37.0] — 2026-06-28 · minor（次版本） · 插件开放事件框架
+
+### Added
+- 交互插件 payload 正式收口为标准事件信封，统一下发 `source`、`message`、`chat`、`sender`、`actor`、`source_actor`、`reply_to`、`payment`、`player`、`session`、`trigger`、`raw` 等顶层字段，插件不再需要从旧平铺字段里猜消息来源、业务主体和付款玩家。
+- `event_from_interaction_payload(payload)` 补齐 `sender`、`source_actor`、`player` 等稳定引用，插件可直接转换成 TelePilot 事件对象后读取 `event.message`、`event.actor`、`event.payment`、`event.session`。
+- 交互中心新增“事件与动作调试”面板，展示最近一次下发给插件的 payload、插件返回 actions、平台处理后的 actions、Contract Guard 告警和插件失败原因。
+- 交互事件声明支持 `all_messages`，用于明确表示入口可接收当前会话内的所有消息事件。
+
+### Changed
+- TelePilot 交互插件框架明确采用个人可信插件标准：插件和插件仓库由账号主人主动安装，业务风险由安装者自行承担；平台负责风险提示、审计日志、调试告警、频控、急停、token/session 隔离和客观失败返回。
+- Contract Guard 从硬阻断改为软告警：插件调用未声明动作或未声明受控通道时，会记录 `guard_level=warning` 并继续按插件请求尝试可用通道；`result_contract` 现在是可见契约和调试依据，不再是公共插件市场式强沙箱。
+- `notice`、`bbot_notice`、`notice_bot` 明确为旧主动发送通道且不兼容：插件显式请求这些通道会得到 `guard_level=failed`、不可执行失败和迁移提示；正常插件消息请迁移到 `interaction_bot`、`userbot_reply` 或 `auto`。
+- 插件开发主路径改为直接读取标准事件信封或使用 `event_from_interaction_payload(payload)`；`payload["event"]` 和旧平铺字段只作为历史兼容来源，不再写入新插件指南的主路径。
+- Delivery Executor 增加旧/未知通道兜底防御：即使内部调用绕过 Contract Guard，也不会把 `bbot_notice` 等旧通道误当交互 Bot token 执行发送。
+
+### Docs
+- 更新插件开发指南、API 参考、远程插件规范、速查表、安全边界、交互 Bot 优化方案、README 和开放事件框架计划，统一说明标准事件信封、旧通道迁移、Contract Guard 软告警、外部转账通知 Bot 仅作为到账证据来源。
+- 补充插件作者迁移要点：付费玩法只以 `source.type == "payment_confirmed"` 且 `payment.status == "confirmed"` 作为到账依据；真实玩家身份优先读取 `player.user_id` 和 `player.identity_confidence`。
+- 补齐 `interaction_entries` 示例中的 `dispatch_modes`、`message_channels`、`money_channel`，并把远程插件示例里的旧平铺 payload 改成标准事件信封；需要持续状态的示例明确第三方插件不得默认依赖 `ctx.redis` 恒可用。
+
+### Tests
+- 补充标准事件信封字段、付款 display/source/reply 字段、`event_from_interaction_payload` 投影、Contract Guard 软告警、旧通道失败和 Delivery Executor 拒绝旧通道直达发送的回归测试。
+
 ## [0.36.2] — 2026-06-28 · patch（补丁版本） · 插件仓库更新超时修复
 
 ### Fixed
@@ -191,7 +214,7 @@
 
 ### Changed
 - TelePilot 标准模式明确调整为个人可信插件模式：管理员安装并启用插件后视为信任插件业务逻辑，平台保留频控、审计、急停、token/session 隔离和受控代发。
-- `result_contract.send_via` 从默认最小化为 `interaction_bot` 改为可信默认三通道：`interaction_bot`、`userbot_reply`、`bbot_notice`；插件主动声明白名单时仍会按白名单收窄。
+- `result_contract.send_via` 从默认最小化为 `interaction_bot` 改为可信默认三通道：`interaction_bot`、`userbot_reply`、`bbot_notice`；插件主动声明白名单时仍会按白名单收窄。（历史记录：`bbot_notice` 已在 0.36.0 起移除，0.37.0 起显式请求会返回迁移提示。）
 - 远程插件校验不再要求交互入口必须声明 `result_contract`，改为校验已声明的 `dispatch_modes` / `send_via` 是否使用平台支持值。
 - 插件开发指南、API 参考、远程插件规范、速查表和交互优化方案同步更新，明确 userbot 主控监听/资金动作、交互 Bot 承接群内高频互动的标准分工。
 

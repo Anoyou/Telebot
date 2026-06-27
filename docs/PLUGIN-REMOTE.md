@@ -61,6 +61,12 @@ guess_number/
       "title": "开始游戏",
       "description": "由交互 Bot 在群内开启一局游戏。",
       "launch_mode": "hybrid",
+      "dispatch_modes": ["admin_command", "public_keyword"],
+      "message_channels": {
+        "admin_command": "userbot_reply",
+        "public_keyword": "interaction_bot"
+      },
+      "money_channel": "userbot_reply",
       "session_scope": "chat",
       "events": ["keyword", "payment_confirmed", "message", "callback_query", "session_close"],
       "preserve_command_trigger": true,
@@ -163,7 +169,7 @@ guess_number/
 | `preserve_command_trigger` | 是 | 必须为 `true`，表示原有命令触发不受交互入口影响 |
 | `session_policy` | 推荐 | TTL、重复触发、关闭条件、并发策略 |
 | `payload_contract` | 推荐 | 平台提供的 `source` / `actor` / `reply_to` / `trigger` / `session` 信封要求 |
-| `result_contract` | 推荐 | 标准动作类型、`send_via` 白名单和结束语义 |
+| `result_contract` | 推荐 | 标准动作类型、预期 `send_via` 通道和结束语义；用于文档化契约、lint 与运行时告警，不是硬沙箱白名单 |
 | `settlement` | 按需 | 涉及奖金、补发、对账时声明结算责任和字段 |
 | `input_schema` | 推荐 | 当前规则可覆盖的入口参数，默认值用于前端预填 |
 
@@ -230,9 +236,9 @@ guess_number/
 | --- | --- |
 | `interaction_bot` | 交互 Bot 发送题面、答复、图片和会话提示，别名 `bot` |
 | `userbot_reply` | 当前账号的 userbot 由 worker 代发指定消息，别名 `userbot` |
-| `auto` | 平台默认候选顺序，仍受 `result_contract.send_via` 限制 |
+| `auto` | 平台默认候选顺序，当前等价于 `interaction_bot -> userbot_reply` |
 
-未声明 `result_contract.send_via` 时按个人可信插件标准处理，默认允许 `interaction_bot`、`userbot_reply` 两个受控通道。声明了 `result_contract.actions` 时，运行时会丢弃未声明动作；显式收窄 `send_via` 后，不在白名单内的候选通道会被过滤，全部不命中时动作会被丢弃并写入 runtime log。`reply_markup` 只由 `interaction_bot` 承接；如果候选里还有 `userbot_reply`，平台会自动收窄到可承接按钮的交互 Bot 通道。`bbot_notice` / `notice` 已移除，不再作为插件主动发送通道。涉及奖金、补发、转账、催付的插件要写 `settlement`，但 `settlement` 只能描述结果和对账字段，不能让普通 Bot 直接拥有发奖权限。钱相关动作仍应由账号 worker 的 userbot 代发或由平台受控结算流程处理。
+未声明 `result_contract.send_via` 时按个人可信插件标准处理，默认允许 `interaction_bot`、`userbot_reply` 两个受控通道。声明了 `result_contract.actions` 或 `result_contract.send_via` 时，运行时把它作为可见契约和调试依据：插件调用未声明动作或未声明通道会写入 runtime log、交互中心调试面板和插件 lint 告警，但不会因为“未声明”本身静默丢弃动作。`reply_markup` 只由 `interaction_bot` 承接；如果候选里还有 `userbot_reply`，平台会自动收窄到可承接按钮的交互 Bot 通道。`bbot_notice` / `notice` / `notice_bot` 已移除且不兼容，不再作为插件主动发送通道；插件显式请求这些旧通道会返回明确失败并提示迁移到 `interaction_bot` 或 `userbot_reply`。涉及奖金、补发、转账、催付的插件要写 `settlement`，但 `settlement` 只能描述结果和对账字段，不能让普通 Bot 直接拥有发奖权限。钱相关动作仍应由账号 worker 的 userbot 代发或由平台受控结算流程处理。
 
 > 群里已有的转账结果通知 Bot 只属于外部付款证据来源。TelePilot 监听并解析它的到账消息来生成 `payment_confirmed`，但不会把它的 Bot Token 交给插件，也不会用它发送插件结果。
 
@@ -258,6 +264,12 @@ MANIFEST = Manifest(
             "title": "开始游戏",
             "description": "由交互 Bot 在群内开启一局游戏。",
             "launch_mode": "hybrid",
+            "dispatch_modes": ["admin_command", "public_keyword"],
+            "message_channels": {
+                "admin_command": "userbot_reply",
+                "public_keyword": "interaction_bot",
+            },
+            "money_channel": "userbot_reply",
             "session_scope": "chat",
             "events": ["keyword", "payment_confirmed", "message", "callback_query", "session_close"],
             "preserve_command_trigger": True,

@@ -96,6 +96,19 @@ class AccountBotInteractionAction(BaseModel):
     data: dict[str, Any] = Field(default_factory=dict)
 
 
+class AccountBotInteractionDebugSnapshot(BaseModel):
+    ts: float | None = None
+    stage: str | None = None
+    chat_id: int | None = None
+    message_id: int | None = None
+    update_id: int | None = None
+    payload: dict[str, Any] = Field(default_factory=dict)
+    actions: list[dict[str, Any]] = Field(default_factory=list)
+    guarded_actions: list[dict[str, Any]] = Field(default_factory=list)
+    warnings: list[dict[str, Any]] = Field(default_factory=list)
+    error: str | None = None
+
+
 class AccountBotRemotePluginPolicy(BaseModel):
     enabled: bool = False
     install: bool = False
@@ -288,6 +301,7 @@ class AccountBotInteractionConfig(BaseModel):
     interaction_runtime_status: Literal["running", "stopped"] = "stopped"
     interaction_last_update_id: int | None = None
     interaction_last_error: str | None = None
+    interaction_debug: AccountBotInteractionDebugSnapshot = Field(default_factory=AccountBotInteractionDebugSnapshot)
     trusted_bot_id: int | None = None
     transfer_bot_id: int | None = None
     transfer_bot_token: str | None = Field(default=None, min_length=10, max_length=256)

@@ -12,7 +12,7 @@ from typing import Any
 
 from ...redis_client import get_redis
 from .. import account_bot_service
-from .contracts import action_send_via_options
+from .contracts import INTERACTION_SEND_VIA, action_send_via_options
 
 log = logging.getLogger(__name__)
 
@@ -123,6 +123,8 @@ class InteractionDeliveryExecutor:
         target_chat_id = self._target_chat_id(chat_id)
         if target_chat_id is None:
             return False, {}
+        if not self._is_supported_send_via(send_via):
+            return False, {"error": f"unsupported send_via: {send_via}"}
         if send_via == "userbot_reply":
             ok, error, result = await self.run_worker_action(
                 self.incoming,
@@ -201,6 +203,8 @@ class InteractionDeliveryExecutor:
         target_chat_id = self._target_chat_id(chat_id)
         if target_chat_id is None:
             return False, {}
+        if not self._is_supported_send_via(send_via):
+            return False, {"error": f"unsupported send_via: {send_via}"}
         if send_via == "userbot_reply":
             ok, error, result = await self.run_worker_action(
                 self.incoming,
@@ -451,7 +455,10 @@ class InteractionDeliveryExecutor:
     async def _resolve_token(self, send_via: str) -> str | None:
         if send_via == "interaction_bot":
             return self.incoming.token
-        return self.incoming.token
+        return None
+
+    def _is_supported_send_via(self, send_via: str) -> bool:
+        return send_via in INTERACTION_SEND_VIA
 
     async def _record_settlement(self, action: dict[str, Any]) -> None:
         settlement = action.get("settlement")

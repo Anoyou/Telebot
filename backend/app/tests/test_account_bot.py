@@ -277,6 +277,42 @@ async def test_interaction_delivery_executor_falls_back_between_plugin_channels(
 
 
 @pytest.mark.asyncio
+async def test_interaction_delivery_executor_rejects_removed_channel_before_send(monkeypatch) -> None:
+    incoming = account_bot_runtime.Incoming(
+        account_id=1,
+        token="123:token",
+        update_id=10,
+        user_id=20,
+        chat_id=-100,
+        message_id=30,
+        text="",
+    )
+    send_message = AsyncMock()
+    run_worker_action = AsyncMock()
+    write_log = AsyncMock()
+    monkeypatch.setattr(account_bot_service, "send_message", send_message)
+    executor = InteractionDeliveryExecutor(
+        incoming=incoming,
+        write_log=write_log,
+        run_worker_action=run_worker_action,
+        log_context=account_bot_runtime._interaction_log_context,
+        trace_context=account_bot_runtime._interaction_trace_context,
+    )
+
+    ok, result = await executor.send_message(
+        "旧通道",
+        chat_id=-100,
+        reply_to_message_id=None,
+        send_via="bbot_notice",
+    )
+
+    assert ok is False
+    assert result == {"error": "unsupported send_via: bbot_notice"}
+    send_message.assert_not_awaited()
+    run_worker_action.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_interaction_delivery_executor_deletes_placeholder_from_trigger_chat(monkeypatch) -> None:
     incoming = account_bot_runtime.Incoming(
         account_id=1,
@@ -376,7 +412,7 @@ def test_interaction_action_normalize_preserves_raw_selector_for_guard_trace() -
 
 
 @pytest.mark.asyncio
-async def test_interaction_result_contract_blocks_undeclared_channel(monkeypatch) -> None:
+async def test_interaction_result_contract_warns_undeclared_channel(monkeypatch) -> None:
     incoming = account_bot_runtime.Incoming(
         account_id=1,
         token="123:token",
@@ -409,19 +445,24 @@ async def test_interaction_result_contract_blocks_undeclared_channel(monkeypatch
         incoming,
         rule,
         [
-            {"type": "send_message", "send_via": "userbot_reply", "text": "blocked"},
+            {"type": "send_message", "send_via": "userbot_reply", "text": "allowed with warning"},
             {"type": "send_message", "send_via": "interaction_bot", "text": "ok"},
             {"type": "delete_message", "message_id": 30},
         ],
     )
 
-    assert guarded == [{"type": "send_message", "send_via": "interaction_bot", "text": "ok"}]
-    assert any("send_via" in str(item["message"]) for item in logs)
-    assert any("actions" in str(item["message"]) for item in logs)
+    assert guarded == [
+        {"type": "send_message", "send_via": "userbot_reply", "text": "allowed with warning"},
+        {"type": "send_message", "send_via": "interaction_bot", "text": "ok"},
+        {"type": "delete_message", "message_id": 30, "send_via": "interaction_bot"},
+    ]
+    assert any(item["message"] == "interaction action outside result_contract.send_via" for item in logs)
+    assert any(item["message"] == "interaction action outside result_contract.actions: delete_message" for item in logs)
+    assert all(item.get("guard_level") == "warning" for item in logs)
 
 
 @pytest.mark.asyncio
-async def test_interaction_result_contract_filters_channel_options(monkeypatch) -> None:
+async def test_interaction_result_contract_warns_but_keeps_channel_options(monkeypatch) -> None:
     incoming = account_bot_runtime.Incoming(
         account_id=1,
         token="123:token",
@@ -453,7 +494,16 @@ async def test_interaction_result_contract_filters_channel_options(monkeypatch) 
         ],
     )
 
-    assert guarded == [{"type": "send_message", "send_via": "userbot_reply", "text": "fallback only"}]
+    assert guarded == [
+        {
+            "type": "send_message",
+            "send_via": "interaction_bot",
+            "send_via_options": ["interaction_bot", "userbot_reply"],
+            "text": "fallback only",
+        }
+    ]
+    account_bot_runtime._write_interaction_runtime_log.assert_awaited_once()
+    assert account_bot_runtime._write_interaction_runtime_log.await_args.kwargs["guard_level"] == "warning"
 
 
 @pytest.mark.asyncio
@@ -480,7 +530,14 @@ async def test_interaction_result_contract_accepts_channel_aliases_without_manif
         [{"type": "send_message", "channel": {"prefer": ["bot", "userbot"], "fallback": True}, "text": "alias"}],
     )
 
-    assert guarded == [{"type": "send_message", "send_via": "userbot_reply", "text": "alias"}]
+    assert guarded == [
+        {
+            "type": "send_message",
+            "send_via": "interaction_bot",
+            "send_via_options": ["interaction_bot", "userbot_reply"],
+            "text": "alias",
+        }
+    ]
 
 
 @pytest.mark.asyncio
@@ -555,11 +612,13 @@ async def test_interaction_without_result_contract_trusts_standard_channels(monk
     warn_calls = [
         call
         for call in account_bot_runtime._write_interaction_runtime_log.await_args_list
-        if "blocked by result_contract.send_via" in call.args[2]
+        if "removed or unsupported send_via" in call.args[2]
     ]
     assert len(warn_calls) == 2
     blocked_raw = [call.kwargs["requested_send_via_raw"] for call in warn_calls]
     assert blocked_raw == ["bbot_notice", "notice"]
+    assert all(call.kwargs["guard_level"] == "failed" for call in warn_calls)
+    assert all("interaction_bot" in call.kwargs["migration_hint"] for call in warn_calls)
 
 
 @pytest.mark.asyncio
@@ -1351,6 +1410,7 @@ def test_interaction_payment_payload_preserves_payer_user_id() -> None:
         update_id=10,
         user_id=456,
         chat_id=-100123,
+        chat_type="group",
         message_id=70,
         text="转账成功",
         display_name="TransferBot",
@@ -1369,12 +1429,35 @@ def test_interaction_payment_payload_preserves_payer_user_id() -> None:
     assert payload["event"]["data"]["payer_user_id"] == 111
     assert payload["source"]["type"] == "payment_confirmed"
     assert payload["source"]["chat_id"] == -100123
+    assert payload["source"]["channel"] == "interaction_bot"
+    assert payload["source"]["driver"] == "telegram_bot_api"
+    assert payload["message"] == {
+        "chat_id": -100123,
+        "message_id": 70,
+        "text": "转账成功",
+        "entities": [],
+        "media": None,
+        "date": None,
+        "reply_to_message_id": None,
+    }
+    assert payload["chat"] == {
+        "id": -100123,
+        "type": "group",
+        "title": None,
+        "username": None,
+    }
     assert payload["actor"]["user_id"] == 111
     assert payload["actor"]["display_name"] == "AAA"
+    assert payload["sender"]["user_id"] == 456
+    assert payload["sender"]["display_name"] == "TransferBot"
     assert payload["source_actor"]["user_id"] == 456
     assert payload["source_actor"]["display_name"] == "TransferBot"
     assert payload["payment"]["amount"] == 10003
     assert payload["payment"]["payer_user_id"] == 111
+    assert payload["payment"]["payer_display_name"] == "AAA"
+    assert payload["payment"]["receiver_display_name"] is None
+    assert payload["payment"]["source_message_id"] == 70
+    assert payload["payment"]["reply_to_message_id"] is None
     assert payload["payment"]["notice_sender_user_id"] == 456
     assert payload["player"]["user_id"] == 111
     assert payload["player"]["display_name"] == "AAA"
@@ -1384,6 +1467,10 @@ def test_interaction_payment_payload_preserves_payer_user_id() -> None:
     assert payload["session"]["scope"] == "chat"
     assert payload["session"]["participant_policy"] == "open_race"
     assert payload["session"]["ttl_seconds"] == 600
+    assert payload["raw"]["event_type"] == "payment_confirmed"
+    assert payload["raw"]["module_key"] == ""
+    assert payload["raw"]["entry_key"] == "start_lottery_plus"
+    assert payload["raw"]["parsed"] == {"payer_name": "AAA", "payer_user_id": 111, "amount": 10003}
 
 
 @pytest.mark.asyncio
@@ -1780,6 +1867,7 @@ async def test_payment_interaction_payload_uses_replied_user_as_payer(monkeypatc
         text="转账成功\n付款人：玩家A\n收款人：Owner\n金额：10",
         display_name="TransferBot",
         reply_to_user_id=111,
+        reply_to_message_id=66,
         reply_to_display_name="玩家A",
         reply_to_username="aaa",
     )
@@ -1809,10 +1897,16 @@ async def test_payment_interaction_payload_uses_replied_user_as_payer(monkeypatc
     assert payload["actor"]["user_id"] == 111
     assert payload["actor"]["display_name"] == "玩家A"
     assert payload["actor"]["username"] == "aaa"
+    assert payload["sender"]["user_id"] == 456
+    assert payload["sender"]["display_name"] == "TransferBot"
     assert payload["source_actor"]["user_id"] == 456
     assert payload["player"]["user_id"] == 111
     assert payload["player"]["identity_confidence"] == "reply_context"
     assert payload["payment"]["payer_user_id"] == 111
+    assert payload["payment"]["payer_display_name"] == "玩家A"
+    assert payload["payment"]["receiver_display_name"] == "Owner"
+    assert payload["payment"]["source_message_id"] == 70
+    assert payload["payment"]["reply_to_message_id"] == 66
     assert payload["payment"]["notice_sender_user_id"] == 456
     assert payload["sender_user_id"] == 456
     assert payload["sender_name"] == "TransferBot"
@@ -4783,6 +4877,14 @@ async def test_interaction_callback_routes_to_worker_entry_and_answers_callback(
     assert payload["event"]["callback_data"] == "pick:3"
     assert payload["message_text"] == "请选择一个选项"
     assert payload["source"]["callback_data"] == "pick:3"
+    assert payload["message"]["text"] == "请选择一个选项"
+    assert payload["message"]["message_id"] == 13680
+    assert payload["chat"]["id"] == -100777
+    assert payload["sender"]["user_id"] == 111
+    assert payload["actor"]["user_id"] == 111
+    assert payload["source_actor"]["user_id"] == 111
+    assert payload["raw"]["callback_query_id"] == "callback-1"
+    assert payload["raw"]["callback_data"] == "pick:3"
     assert payload["callback_query_id"] == "callback-1"
     assert payload["callback_data"] == "pick:3"
     assert payload["sender_user_id"] == 111

@@ -215,6 +215,7 @@ export interface AccountBotInteractionConfig {
   interaction_runtime_status?: "running" | "stopped";
   interaction_last_update_id?: number | null;
   interaction_last_error?: string | null;
+  interaction_debug?: AccountBotInteractionDebugSnapshot;
   trusted_bot_id?: number | null;
   transfer_bot_id?: number | null;
   transfer_bot_token?: string | null;
@@ -252,6 +253,19 @@ export interface AccountBotInteractionConfig {
   response_template: string;
   transfer_notice_template: string;
   rules?: AccountBotInteractionRule[];
+}
+
+export interface AccountBotInteractionDebugSnapshot {
+  ts?: number | null;
+  stage?: string | null;
+  chat_id?: number | null;
+  message_id?: number | null;
+  update_id?: number | null;
+  payload?: Record<string, unknown>;
+  actions?: Record<string, unknown>[];
+  guarded_actions?: Record<string, unknown>[];
+  warnings?: Record<string, unknown>[];
+  error?: string | null;
 }
 
 export interface AccountBotInteractionSettlement {
@@ -443,7 +457,7 @@ export interface FeatureInteractionEntry {
   dispatch_modes?: Array<"admin_command" | "public_keyword" | string>;
   message_channels?: Partial<Record<"admin_command" | "public_keyword" | string, string | string[] | { prefer?: string[]; fallback?: boolean }>>;
   money_channel?: "userbot_reply" | string | null;
-  events?: string[];
+  events?: Array<"payment_confirmed" | "keyword" | "message" | "callback_query" | "session_close" | "all_messages" | string>;
   session_scope?: "chat" | "user" | "none" | string | null;
   participant_policy?: "open_race" | "solo_owner" | "paid_pool" | "notify_only" | string | null;
   preserve_command_trigger?: boolean | null;

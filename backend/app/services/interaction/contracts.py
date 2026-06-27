@@ -162,7 +162,13 @@ async def guard_interaction_actions(
     write_log: Callable[..., Awaitable[None]],
     log_context: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
-    """Apply ``result_contract`` limits before actions reach delivery."""
+    """Normalize actions and emit contract warnings before delivery.
+
+    TelePilot is a personal trusted-plugin system. ``result_contract`` is used
+    as a visible contract and debug aid, not as a public-market hard sandbox.
+    Invalid/removed channels still fail because they are no longer executable
+    platform capabilities.
+    """
 
     contract = _entry_result_contract(rule, resolve_entry_manifest)
     raw_actions = contract.get("actions")
@@ -192,12 +198,12 @@ async def guard_interaction_actions(
         if allowed_actions and action_type not in allowed_actions:
             await write_log(
                 "warn",
-                f"interaction action blocked by result_contract.actions: {action_type}",
+                f"interaction action outside result_contract.actions: {action_type}",
+                guard_level="warning",
                 action_type=action_type,
                 allowed_actions=sorted(allowed_actions),
                 **context,
             )
-            continue
         if action_type in {"send_message", "send_photo", "send_file", "delete_message", "pin_message"}:
             requested_raw = action_send_via_raw_selector(action)
             requested_send_via = action_send_via_options(action)
@@ -206,17 +212,44 @@ async def guard_interaction_actions(
                 await write_log(
                     "warn",
                     "interaction action contains unsupported send_via options",
+                    guard_level="warning",
                     action_type=action_type,
                     send_via=requested_send_via,
                     unsupported_send_via=unsupported_send_via,
                     requested_send_via_raw=requested_raw,
                     **context,
                 )
-            send_via_options = [item for item in requested_send_via if item in allowed_send_via]
+            if not requested_send_via:
+                await write_log(
+                    "warn",
+                    "interaction action failed: removed or unsupported send_via",
+                    guard_level="failed",
+                    action_type=action_type,
+                    requested_send_via_raw=requested_raw,
+                    unsupported_send_via=unsupported_send_via,
+                    migration_hint="请将旧 notice / bbot_notice 通道迁移到 interaction_bot 或 userbot_reply。",
+                    **context,
+                )
+                continue
+            send_via_options = list(requested_send_via)
+            undeclared_send_via = [item for item in send_via_options if item not in allowed_send_via]
+            if undeclared_send_via:
+                await write_log(
+                    "warn",
+                    "interaction action outside result_contract.send_via",
+                    guard_level="warning",
+                    action_type=action_type,
+                    send_via=requested_send_via,
+                    undeclared_send_via=undeclared_send_via,
+                    requested_send_via_raw=requested_raw,
+                    allowed_send_via=sorted(allowed_send_via),
+                    **context,
+                )
             if not send_via_options:
                 await write_log(
                     "warn",
-                    f"interaction action blocked by result_contract.send_via: {requested_send_via}",
+                    f"interaction action failed by send_via: {requested_send_via}",
+                    guard_level="failed",
                     action_type=action_type,
                     send_via=requested_send_via,
                     requested_send_via_raw=requested_raw,

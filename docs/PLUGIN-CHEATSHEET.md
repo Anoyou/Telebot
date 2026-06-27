@@ -8,7 +8,7 @@
 - `permissions` 主要用于安装提示、审计和 UI 展示；不要把它当成公共插件市场的强沙箱。
 - `ctx.client` 是管理员命令和高级兼容入口；远程插件仍不直接拿 token/session，由平台 facade 代发。
 - 交互入口优先用 `ctx.messages`，它只生成标准动作，不直接调用 Telegram API。
-- 通道原则：插件拥有通道选择权，框架拥有通道执行权；插件可声明单通道或候选通道，平台负责白名单、能力边界、频控和审计。
+- 通道原则：插件拥有通道选择权，框架拥有通道执行权；插件可声明单通道或候选通道，平台负责执行可用通道、记录告警、处理能力边界、频控和审计。
 - `ctx.http` 需要 `external_http` + `allowed_hosts`。
 - `ctx.ai` 需要 `ai_text`，细节见 `docs/PLUGIN-AI.md`。
 - `command` 只保存裸指令名，不保存前缀。
@@ -17,7 +17,7 @@
 - `incoming` 和 `outgoing` 是唯一的消息方向值。
 - `on_command(ctx, cmd, args, event) -> bool`，返回 `True` 表示接管。
 - `on_message` 里别直接假设 `event.outgoing` 一定存在，先 `getattr`。
-- `on_interaction` 用于群内玩法、高频按钮和付款后开局，按 `entry_key` 和 `payload["event"]["type"]` 分流。
+- `on_interaction` 用于群内玩法、高频按钮和付款后开局，按 `entry_key` 和 `payload["source"]["type"]` 分流；也可以用 `event_from_interaction_payload(payload)` 转成稳定事件对象。
 - `interaction_entries[].launch_mode` 建议显式写：`bridge` 走交互 Bot，`direct` 走原命令/内部调用，`hybrid` 两边都支持；新插件同时写 `dispatch_modes` 更清楚。
 - 新入口建议补 `dispatch_modes`：`admin_command` 表示管理员带前缀命令触发，`public_keyword` 表示群友关键词或转账规则触发；它描述入口来源，不绑死后续发送账号。
 - 新入口建议补 `message_channels`：`{"admin_command": "userbot_reply", "public_keyword": "interaction_bot"}`；这是通道偏好，不是能力范围。`money_channel` 写 `userbot_reply`，普通 Bot 不处理转账。
@@ -27,20 +27,20 @@
 - 按钮回调用 `ctx.messages.answer_callback(...)`，不要在插件里直接拼 Bot API。
 - `interaction_entries[].session_scope` 必填：群局写 `chat`，个人流程写 `user`，一次性动作写 `none`。
 - `interaction_entries[].events` 是事件白名单，别让插件自己猜会收到什么。
-- 交互 payload 优先看 `source`、`actor`、`source_actor`、`payment`、`player`、`reply_to`、`trigger`、`session` 信封；旧平铺字段只做兼容。
-- `source` 是事件类型和消息上下文，`source_actor` 是实际发消息的 Bot/用户，`actor` 是本次事件行为主体，`player` 是付费开局绑定玩家，`payment` 是到账证据。
+- 交互 payload 就是标准事件信封，优先看 `source`、`message`、`chat`、`sender`、`actor`、`source_actor`、`payment`、`player`、`reply_to`、`trigger`、`session`、`raw`；旧平铺字段不要作为新插件主路径。
+- `source` 是事件类型和消息索引，`sender` / `source_actor` 是实际发消息的 Bot/用户，`actor` 是本次事件行为主体，`player` 是付费开局绑定玩家，`payment` 是到账证据。
 - 付费玩法必须以可信转账通知 Bot 的 `payment.status=confirmed` 作为到账依据；UserBot/回复上下文只用于补充付款玩家 `user_id`。
 - 独玩或按钮玩法声明 `participant_policy=solo_owner`，缺少 `player.user_id` 时平台会先要求付款人点击确认；抢答类玩法用 `open_race`。
 - 新交互入口名尽量别再用泛化的 `start_game`，用 `start_<plugin_key>` 更清楚；历史别名只在插件内部兼容。
 - `interaction_profile` 建议显式写：`session_game`、`challenge_game`、`reward_pool`、`utility_trigger`。
 - `session_policy` 写 TTL、重复触发、关闭条件；插件内部状态 key 要和 `session_scope` 对齐。
-- `payload_contract` 描述输入要求，`result_contract` 描述插件主动收窄的动作和发送通道；不写时按可信插件标准允许交互 Bot / UserBot 双通道。
+- `payload_contract` 描述输入要求，`result_contract` 描述插件预期动作和发送通道；不写时按可信插件标准允许交互 Bot / UserBot 双通道。
 - `send_via` 支持 `interaction_bot`、`userbot_reply`；`channel` / `channel_selector` / `send_via_options` 可写候选顺序，例如 `["interaction_bot", "userbot_reply"]`。
 - `ctx.messages.send(channel={"prefer": ["bot", "userbot"], "fallback": true}, text="...")` 表示优先 Bot、失败时回退人形。
-- 声明了 `result_contract.actions` 时，运行时会丢弃未声明动作；显式收窄 `send_via` 后不在白名单内的候选通道会被过滤。
+- 声明了 `result_contract.actions` 或 `result_contract.send_via` 时，运行时会把它作为 Contract Guard 告警依据；未声明动作/通道会继续尝试执行可用通道并在日志、调试面板和 lint 中提示。
 - `userbot_reply` 由账号 worker 的 userbot 代发；插件选择的是受控通道，不会拿到 token/session。
 - `userbot_reply` 不承接 `reply_markup`；候选里带按钮时平台会优先保留 `interaction_bot`，避免按钮发到无法回调的通道。
-- `bbot_notice` / `notice` 已移除，不再作为插件主动发送通道；群里已有的转账结果通知 Bot 只作为外部付款证据来源。
+- `bbot_notice` / `notice` / `notice_bot` 已移除且不兼容，不再作为插件主动发送通道；群里已有的转账结果通知 Bot 只作为外部付款证据来源。旧插件请迁移到 `interaction_bot`、`userbot_reply` 或 `auto`。
 - `settlement` 只描述中奖/奖金/对账结果，普通 Bot 不直接执行钱相关动作；收款确认和发奖仍由 userbot / 平台受控结算完成。
 - `preserve_command_trigger=true` 是硬规则；加交互入口不能影响插件原有命令触发。
 - `command_fallback` 只能提示或受控回退，不能让普通 incoming 消息直接进入 `on_command`。

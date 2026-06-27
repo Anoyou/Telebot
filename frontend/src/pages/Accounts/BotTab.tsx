@@ -6,8 +6,10 @@ import {
   ArrowUp,
   Bell,
   Bot,
+  Braces,
   ChevronRight,
   Copy,
+  FileJson,
   KeyRound,
   Loader2,
   Plus,
@@ -95,6 +97,21 @@ function localizeBotRuntimeError(message: string): string {
   return message;
 }
 
+function formatDebugJson(value: unknown): string {
+  try {
+    return JSON.stringify(value ?? {}, null, 2);
+  } catch {
+    return String(value ?? "");
+  }
+}
+
+function debugStageLabel(stage?: string | null): string {
+  if (stage === "payload_built") return "已下发事件";
+  if (stage === "plugin_error") return "插件失败";
+  if (stage === "actions_guarded") return "动作已处理";
+  return stage || "暂无事件";
+}
+
 const ROLE_META: Record<AccountBotRole, { label: string; desc: string }> = {
   viewer: { label: "viewer", desc: "只读查看" },
   operator: { label: "operator", desc: "启停常用功能" },
@@ -158,6 +175,12 @@ const DEFAULT_INTERACTION_BOT: AccountBotInteractionConfig = {
   interaction_runtime_status: "stopped",
   interaction_last_update_id: null,
   interaction_last_error: null,
+  interaction_debug: {
+    payload: {},
+    actions: [],
+    guarded_actions: [],
+    warnings: [],
+  },
   trusted_bot_id: null,
   transfer_bot_id: null,
   transfer_bot_token: null,
@@ -2296,9 +2319,75 @@ export function BotTab({
     </div>
   );
 
+  const debug = interactionQ.data?.interaction_debug;
+  const debugWarnings = debug?.warnings ?? [];
+  const hasDebugSnapshot = Boolean(debug?.stage || debug?.error || Object.keys(debug?.payload ?? {}).length);
+
+  const interactionDebugContent = isInteractionCenter ? (
+    <Card className="order-1">
+      <CardHeader className="pb-3">
+        <div className="flex flex-wrap items-start justify-between gap-2">
+          <div>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <FileJson className="h-4 w-4" />
+              事件与动作调试
+            </CardTitle>
+            <CardDescription>
+              最近一次插件事件信封、插件动作、平台处理结果和契约告警。
+            </CardDescription>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Badge variant={hasDebugSnapshot ? "secondary" : "outline"}>
+              {debugStageLabel(debug?.stage)}
+            </Badge>
+            {debugWarnings.length > 0 ? (
+              <Badge variant="destructive">告警 {debugWarnings.length}</Badge>
+            ) : null}
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent className="grid gap-3 xl:grid-cols-3">
+        <div className="min-w-0 rounded-md border bg-muted/20 p-3">
+          <div className="mb-2 flex items-center gap-2 text-sm font-medium">
+            <Braces className="h-4 w-4" />
+            Payload
+          </div>
+          <pre className="max-h-72 overflow-auto rounded bg-background p-2 text-xs leading-5">
+            {formatDebugJson(debug?.payload ?? {})}
+          </pre>
+        </div>
+        <div className="min-w-0 rounded-md border bg-muted/20 p-3">
+          <div className="mb-2 flex items-center gap-2 text-sm font-medium">
+            <Braces className="h-4 w-4" />
+            Actions
+          </div>
+          <pre className="max-h-72 overflow-auto rounded bg-background p-2 text-xs leading-5">
+            {formatDebugJson({
+              returned: debug?.actions ?? [],
+              delivered: debug?.guarded_actions ?? [],
+            })}
+          </pre>
+        </div>
+        <div className="min-w-0 rounded-md border bg-muted/20 p-3">
+          <div className="mb-2 flex items-center gap-2 text-sm font-medium">
+            <ShieldCheck className="h-4 w-4" />
+            告警与失败
+          </div>
+          <pre className="max-h-72 overflow-auto rounded bg-background p-2 text-xs leading-5">
+            {formatDebugJson({
+              error: debug?.error ?? null,
+              warnings: debugWarnings,
+            })}
+          </pre>
+        </div>
+      </CardContent>
+    </Card>
+  ) : null;
+
   const interactionContent = (
     <div className={cn(isInteractionCenter ? "space-y-4" : "space-y-6")}>
       {isInteractionCenter ? null : interactionStatus}
+      {interactionDebugContent}
       <Card className={cn(isInteractionCenter && "border-0 bg-transparent shadow-none")}>
         {isInteractionCenter ? null : (
         <CardHeader>
@@ -2403,6 +2492,20 @@ export function BotTab({
             <div className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
               {localizeBotRuntimeError(interactionQ.data.interaction_last_error)}
             </div>
+          ) : null}
+
+          {isInteractionCenter ? (
+            <section className="rounded-lg border border-amber-300/70 bg-amber-50 px-3 py-3 text-sm text-amber-950 dark:border-amber-400/30 dark:bg-amber-950/20 dark:text-amber-100">
+              <div className="flex items-start gap-2">
+                <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0" />
+                <div>
+                  <div className="font-medium">可信插件风险提示</div>
+                  <div className="mt-1 text-xs leading-5">
+                    插件和插件库由账号主人主动安装与启用。平台会完整下发匹配范围内的消息事件，并提供交互 Bot / UserBot 双通道操作能力；插件风险由安装者自行判断，TelePilot 负责提示风险、记录行为、展示告警和返回客观失败原因。
+                  </div>
+                </div>
+              </div>
+            </section>
           ) : null}
 
           <section className={cn("space-y-4 rounded-lg border p-3 sm:p-4", isInteractionCenter && "order-2")}>

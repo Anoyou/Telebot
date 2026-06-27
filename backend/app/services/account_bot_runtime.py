@@ -95,6 +95,10 @@ _INTERACTION_USER_PENDING_PREFIX = "account_bot:interaction_user_pending:"
 _INTERACTION_PAYMENT_CONFIRM_PREFIX = "account_bot:interaction_payment_confirm:"
 _INTERACTION_PAYMENT_CONFIRM_TTL_SECONDS = 300
 _INTERACTION_ENTRY_TIMEOUT_SECONDS = 60.0
+_INTERACTION_DEBUG_STATE_PREFIX = "account_bot:interaction_debug:"
+_INTERACTION_DEBUG_WARNINGS_PREFIX = "account_bot:interaction_debug_warnings:"
+_INTERACTION_DEBUG_TTL_SECONDS = 86400
+_INTERACTION_DEBUG_WARNING_LIMIT = 20
 AUTO_PAYOUT_MODULE_KEYS = {"game24", "math10", "dice_grid_hunt", "guess_number", "poetry_blank"}
 _INTERACTION_PAYMENT_CONFIRM_CALLBACK_PREFIX = "ip"
 _PLAYER_IDENTITY_CONFIDENCE_VERIFIED = "verified_user_id"
@@ -1149,7 +1153,7 @@ def _rule_entry_allows_event(rule: dict[str, Any], event_type: str) -> bool:
     declared = _rule_entry_events(rule)
     if not declared:
         return True
-    return event_type in declared
+    return event_type in declared or "all_messages" in declared
 
 
 def _rule_keyword_list(rule: dict[str, Any], key: str) -> list[str]:
@@ -1545,9 +1549,13 @@ def _interaction_payment_envelope(
         "amount": amount,
         "payer_user_id": payer_user_id,
         "payer_name": payer_name or None,
+        "payer_display_name": payer_name or None,
         "receiver_user_id": receiver_user_id,
         "receiver_name": str(payload.get("receiver_name") or "").strip() or None,
+        "receiver_display_name": str(payload.get("receiver_name") or "").strip() or None,
         "notice_message_id": incoming.message_id,
+        "source_message_id": incoming.message_id,
+        "reply_to_message_id": incoming.reply_to_message_id,
         "notice_sender_user_id": incoming.user_id,
     }
 
@@ -2718,6 +2726,7 @@ async def _try_handle_interaction_module_message(db: Any, incoming: Incoming) ->
             },
             event_type=event_type,
         )
+        await _remember_interaction_debug_state(incoming, stage="payload_built", payload=payload)
         ok, error, actions = await _run_worker_interaction_entry(
             incoming,
             plugin_key=module_key,
@@ -2732,6 +2741,12 @@ async def _try_handle_interaction_module_message(db: Any, incoming: Incoming) ->
                 payload=payload,
             )
         if not ok:
+            await _remember_interaction_debug_state(
+                incoming,
+                stage="plugin_error",
+                payload=payload,
+                error=error,
+            )
             log.info(
                 "interaction module message ignored aid=%s plugin=%s entry=%s error=%s",
                 incoming.account_id,
@@ -2745,7 +2760,15 @@ async def _try_handle_interaction_module_message(db: Any, incoming: Incoming) ->
                 await account_bot_service.answer_callback(incoming.token, incoming.callback_id or "")
                 return True
             continue
+        raw_actions = [dict(action) for action in actions]
         actions = await _guard_interaction_actions(incoming, rule, actions)
+        await _remember_interaction_debug_state(
+            incoming,
+            stage="actions_guarded",
+            payload=payload,
+            raw_actions=raw_actions,
+            guarded_actions=actions,
+        )
         await _apply_interaction_actions(
             incoming,
             actions,
@@ -2963,6 +2986,8 @@ def _interaction_event_payload(
 def _interaction_source_envelope(incoming: Incoming, event_type: str) -> dict[str, Any]:
     return {
         "type": event_type,
+        "channel": "interaction_bot",
+        "driver": "telegram_bot_api",
         "account_id": incoming.account_id,
         "chat_id": incoming.chat_id,
         "chat_type": incoming.chat_type,
@@ -2972,6 +2997,27 @@ def _interaction_source_envelope(incoming: Incoming, event_type: str) -> dict[st
         "callback_query_id": incoming.callback_id,
         "callback_data": incoming.callback_data,
         "entity_languages": list(incoming.entity_languages),
+    }
+
+
+def _interaction_message_envelope(incoming: Incoming) -> dict[str, Any]:
+    return {
+        "chat_id": incoming.chat_id,
+        "message_id": incoming.message_id,
+        "text": incoming.text,
+        "entities": [],
+        "media": None,
+        "date": None,
+        "reply_to_message_id": incoming.reply_to_message_id,
+    }
+
+
+def _interaction_chat_envelope(incoming: Incoming) -> dict[str, Any]:
+    return {
+        "id": incoming.chat_id,
+        "type": incoming.chat_type,
+        "title": None,
+        "username": None,
     }
 
 
@@ -3021,6 +3067,31 @@ def _interaction_reply_to_envelope(incoming: Incoming) -> dict[str, Any] | None:
         "username": incoming.reply_to_username,
         "message_id": incoming.reply_to_message_id,
         "text": incoming.reply_to_text,
+    }
+
+
+def _interaction_raw_envelope(
+    incoming: Incoming,
+    rule: dict[str, Any],
+    parsed: dict[str, Any] | None,
+    event_type: str,
+) -> dict[str, Any]:
+    parsed_summary = {
+        str(key): value
+        for key, value in dict(parsed or {}).items()
+        if str(key) not in {"bot_token", "token", "session", "secret", "api_key"}
+    }
+    return {
+        "update_id": incoming.update_id,
+        "message_id": incoming.message_id,
+        "callback_query_id": incoming.callback_id,
+        "callback_data": incoming.callback_data,
+        "text": incoming.text,
+        "event_type": event_type,
+        "rule_id": str(rule.get("id") or ""),
+        "module_key": str(rule.get("module_key") or ""),
+        "entry_key": str(rule.get("module_action") or ""),
+        "parsed": parsed_summary,
     }
 
 
@@ -3101,6 +3172,8 @@ def _interaction_module_payload(
     payer_name = _interaction_payment_payer_name(incoming, data) or (incoming.display_name or "" if event_type != "payment_confirmed" else "")
     event = _interaction_event_payload(incoming, rule, event_type, parsed)
     source = _interaction_source_envelope(incoming, event_type)
+    message = _interaction_message_envelope(incoming)
+    chat = _interaction_chat_envelope(incoming)
     actor = _interaction_actor_envelope(incoming, data)
     source_actor = _interaction_source_actor_envelope(incoming, data)
     player = _interaction_player_envelope(incoming, data, event_type=event_type)
@@ -3113,10 +3186,14 @@ def _interaction_module_payload(
     reply_to = _interaction_reply_to_envelope(incoming)
     trigger = _interaction_trigger_envelope(rule, event_type, parsed)
     session = _interaction_session_envelope(incoming, rule, data)
+    raw = _interaction_raw_envelope(incoming, rule, parsed, event_type)
     data.update(
         {
             "event": event,
             "source": source,
+            "message": message,
+            "chat": chat,
+            "sender": source_actor,
             "actor": actor,
             "source_actor": source_actor,
             "player": player,
@@ -3124,6 +3201,7 @@ def _interaction_module_payload(
             "reply_to": reply_to,
             "trigger": trigger,
             "session": session,
+            "raw": raw,
             "event_type": event_type,
             "account_id": incoming.account_id,
             "chat_id": incoming.chat_id,
@@ -3315,6 +3393,8 @@ async def _write_interaction_runtime_log(
     **detail: Any,
 ) -> None:
     try:
+        if detail.get("guard_level"):
+            await _remember_interaction_debug_warning(incoming, level, message, detail)
         payload = RuntimeLogPayload(
             account_id=incoming.account_id,
             level=level,  # type: ignore[arg-type]
@@ -3350,6 +3430,103 @@ def _interaction_trace_context(payload: dict[str, Any] | None) -> dict[str, Any]
         "session_key": str(session.get("key") or "").strip() or None,
         "session_scope": str(session.get("scope") or "").strip() or None,
     }
+
+
+def _json_safe(value: Any, *, max_text: int = 1200) -> Any:
+    if isinstance(value, dict):
+        return {str(k): _json_safe(v, max_text=max_text) for k, v in list(value.items())[:80]}
+    if isinstance(value, list):
+        return [_json_safe(item, max_text=max_text) for item in value[:80]]
+    if isinstance(value, (tuple, set)):
+        return [_json_safe(item, max_text=max_text) for item in list(value)[:80]]
+    if isinstance(value, str):
+        return value[:max_text]
+    if isinstance(value, (int, float, bool)) or value is None:
+        return value
+    return str(value)[:max_text]
+
+
+def _interaction_debug_key(account_id: int) -> str:
+    return f"{_INTERACTION_DEBUG_STATE_PREFIX}{int(account_id)}"
+
+
+def _interaction_debug_warnings_key(account_id: int) -> str:
+    return f"{_INTERACTION_DEBUG_WARNINGS_PREFIX}{int(account_id)}"
+
+
+async def _remember_interaction_debug_state(
+    incoming: Incoming,
+    *,
+    stage: str,
+    payload: dict[str, Any] | None = None,
+    raw_actions: list[dict[str, Any]] | None = None,
+    guarded_actions: list[dict[str, Any]] | None = None,
+    error: str | None = None,
+) -> None:
+    snapshot = {
+        "ts": time.time(),
+        "stage": stage,
+        "chat_id": incoming.chat_id,
+        "message_id": incoming.message_id,
+        "update_id": incoming.update_id,
+        "payload": _json_safe(payload or {}),
+        "actions": _json_safe(raw_actions or []),
+        "guarded_actions": _json_safe(guarded_actions or []),
+        "error": error,
+    }
+    try:
+        await get_redis().set(
+            _interaction_debug_key(incoming.account_id),
+            json.dumps(snapshot, ensure_ascii=False),
+            ex=_INTERACTION_DEBUG_TTL_SECONDS,
+        )
+    except Exception:  # noqa: BLE001
+        log.debug("remember interaction debug state failed aid=%s", incoming.account_id, exc_info=True)
+
+
+async def _remember_interaction_debug_warning(incoming: Incoming, level: str, message: str, detail: dict[str, Any]) -> None:
+    item = {
+        "ts": time.time(),
+        "level": level,
+        "message": message,
+        "detail": _json_safe(detail),
+    }
+    try:
+        redis = get_redis()
+        key = _interaction_debug_warnings_key(incoming.account_id)
+        await redis.lpush(key, json.dumps(item, ensure_ascii=False))
+        await redis.ltrim(key, 0, _INTERACTION_DEBUG_WARNING_LIMIT - 1)
+        await redis.expire(key, _INTERACTION_DEBUG_TTL_SECONDS)
+    except Exception:  # noqa: BLE001
+        log.debug("remember interaction debug warning failed aid=%s", incoming.account_id, exc_info=True)
+
+
+async def get_interaction_debug_snapshot(account_id: int) -> dict[str, Any]:
+    """Return recent interaction payload/actions/warnings for the Web UI."""
+
+    try:
+        redis = get_redis()
+        raw = await redis.get(_interaction_debug_key(account_id))
+        if isinstance(raw, bytes):
+            raw = raw.decode("utf-8", errors="ignore")
+        snapshot = json.loads(raw) if raw else {}
+        warning_rows = await redis.lrange(_interaction_debug_warnings_key(account_id), 0, _INTERACTION_DEBUG_WARNING_LIMIT - 1)
+        warnings: list[dict[str, Any]] = []
+        for row in warning_rows:
+            if isinstance(row, bytes):
+                row = row.decode("utf-8", errors="ignore")
+            try:
+                parsed = json.loads(row)
+            except (TypeError, json.JSONDecodeError):
+                continue
+            if isinstance(parsed, dict):
+                warnings.append(parsed)
+        if warnings:
+            snapshot["warnings"] = warnings
+        return snapshot if isinstance(snapshot, dict) else {}
+    except Exception:  # noqa: BLE001
+        log.debug("read interaction debug snapshot failed aid=%s", account_id, exc_info=True)
+        return {}
 
 
 def _interaction_actions_request_no_session(actions: list[dict[str, Any]]) -> bool:
@@ -3434,6 +3611,7 @@ async def _run_interaction_module(
         )
         start_message_id = _interaction_delivery_message_id(start_result)
     payload = await _interaction_module_payload_async(incoming, rule, parsed, event_type=event_type)
+    await _remember_interaction_debug_state(incoming, stage="payload_built", payload=payload)
     trace_context = _interaction_trace_context(payload)
     ok, error, actions = await _run_worker_interaction_entry(
         incoming,
@@ -3449,12 +3627,26 @@ async def _run_interaction_module(
             payload=payload,
         )
     if not ok:
+        await _remember_interaction_debug_state(
+            incoming,
+            stage="plugin_error",
+            payload=payload,
+            error=error,
+        )
         await _send(
             incoming,
             f"模块启动失败：{account_bot_service.html_text(error or f'{module_key}.{entry_key} 不可用')}",
         )
         return False, False
+    raw_actions = [dict(action) for action in actions]
     actions = await _guard_interaction_actions(incoming, rule, actions)
+    await _remember_interaction_debug_state(
+        incoming,
+        stage="actions_guarded",
+        payload=payload,
+        raw_actions=raw_actions,
+        guarded_actions=actions,
+    )
     keep_session = not _interaction_actions_request_no_session(actions)
     await _apply_interaction_actions(
         incoming,

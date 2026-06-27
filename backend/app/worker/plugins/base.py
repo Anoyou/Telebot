@@ -200,15 +200,17 @@ class Plugin:
     ) -> list[dict[str, Any]] | None:
         """交互 Bot 入口；返回平台标准动作列表，默认表示未实现。
 
-        平台会尽量提供统一信封：
-        - ``event``: 兼容旧版的扁平事件对象
-        - ``source`` / ``actor`` / ``reply_to`` / ``trigger`` / ``session``: 新版标准信封
-        - 旧字段如 ``event_type`` / ``message_text`` / ``sender_name`` / ``reply_to_text`` 继续保留
+        平台会提供标准事件信封：
+        - ``source`` / ``message`` / ``chat`` / ``sender`` / ``actor`` /
+          ``source_actor`` / ``player`` / ``payment`` / ``reply_to`` /
+          ``trigger`` / ``session`` / ``raw`` 是新插件主路径
+        - ``event`` 和 ``event_type`` / ``message_text`` / ``sender_name`` 等
+          平铺字段只作为历史兼容来源
 
         标准动作约定：
         - ``send_message`` / ``send_photo`` / ``send_file``
         - 可选 ``send_via`` / ``channel`` / ``channel_selector``。插件可以声明单一通道，
-          也可以声明候选通道和回退顺序；平台负责校验、限流、审计和实际发送
+          也可以声明候选通道和回退顺序；平台负责告警、限流、审计和实际发送
         - ``end_session`` / ``close_session`` / ``no_session`` / ``result``
         - 可选 ``settlement``，供平台记录和后续结算
 

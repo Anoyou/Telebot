@@ -187,6 +187,7 @@ async def get_account_bot_interaction(
 
     data = await interaction_bot_service.get_interaction_bot_config(db, aid)
     data = _with_interaction_runtime_state(aid, data)
+    data["interaction_debug"] = await account_bot_runtime.get_interaction_debug_snapshot(aid)
     return AccountBotInteractionConfig(**data)
 
 
