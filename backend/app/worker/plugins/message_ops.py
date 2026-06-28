@@ -116,6 +116,29 @@ class BufferedMessageOps:
         self.actions.append(action)
         return action
 
+    async def answer_inline_query(
+        self,
+        *,
+        inline_query_id: str | None,
+        results: list[dict[str, Any]],
+        cache_time: int = 0,
+        is_personal: bool = True,
+        next_offset: str | None = None,
+        button: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        action: dict[str, Any] = {
+            "type": "answer_inline_query",
+            "inline_query_id": inline_query_id,
+            "results": list(results or []),
+            "cache_time": cache_time,
+            "is_personal": is_personal,
+            "next_offset": next_offset,
+        }
+        if button is not None:
+            action["button"] = dict(button)
+        self.actions.append(action)
+        return action
+
 
 def _apply_channel(action: dict[str, Any], channel: MessageChannelSelector) -> None:
     action["channel_selector"] = channel

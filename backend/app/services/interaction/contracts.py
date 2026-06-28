@@ -5,9 +5,14 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 from typing import Any
 
+from ..event_bus import EVENT_REASON_CODES
+
 INTERACTION_SEND_VIA = {"interaction_bot", "userbot_reply"}
 INTERACTION_BUTTON_CHANNELS = {"interaction_bot"}
 TRUSTED_DEFAULT_SEND_VIA = ("interaction_bot", "userbot_reply")
+DEPRECATED_SEND_VIA = {"notice", "bbot_notice", "notice_bot"}
+SEND_CHANNEL_DEPRECATED_REASON_CODE = "send_channel_deprecated"
+assert SEND_CHANNEL_DEPRECATED_REASON_CODE in EVENT_REASON_CODES
 INTERACTION_SEND_VIA_ALIASES = {
     "auto": "auto",
     "bot": "interaction_bot",
@@ -53,6 +58,10 @@ def unsupported_send_via_values(selector: Any) -> list[str]:
     values: list[str] = []
     _collect_unsupported_send_via_values(selector, values)
     return values
+
+
+def deprecated_send_via_values(selector: Any) -> list[str]:
+    return [item for item in unsupported_send_via_values(selector) if item in DEPRECATED_SEND_VIA]
 
 
 def apply_action_send_via_options(action: dict[str, Any], options: list[str]) -> dict[str, Any]:
@@ -208,11 +217,13 @@ async def guard_interaction_actions(
             requested_raw = action_send_via_raw_selector(action)
             requested_send_via = action_send_via_options(action)
             unsupported_send_via = unsupported_send_via_values(requested_raw)
+            deprecated_send_via = [item for item in unsupported_send_via if item in DEPRECATED_SEND_VIA]
             if unsupported_send_via and requested_send_via:
                 await write_log(
                     "warn",
                     "interaction action contains unsupported send_via options",
                     guard_level="warning",
+                    reason_code=SEND_CHANNEL_DEPRECATED_REASON_CODE if deprecated_send_via else "unsupported_send_via",
                     action_type=action_type,
                     send_via=requested_send_via,
                     unsupported_send_via=unsupported_send_via,
@@ -224,10 +235,14 @@ async def guard_interaction_actions(
                     "warn",
                     "interaction action failed: removed or unsupported send_via",
                     guard_level="failed",
+                    reason_code=SEND_CHANNEL_DEPRECATED_REASON_CODE if deprecated_send_via else "unsupported_send_via",
                     action_type=action_type,
                     requested_send_via_raw=requested_raw,
                     unsupported_send_via=unsupported_send_via,
-                    migration_hint="请将旧 notice / bbot_notice 通道迁移到 interaction_bot 或 userbot_reply。",
+                    migration_hint=(
+                        "notice/bbot_notice/notice_bot 已不是系统发送通道，请改用 "
+                        "interaction_bot、userbot_reply 或 auto；外部转账通知 Bot 仅作为消息来源。"
+                    ),
                     **context,
                 )
                 continue
@@ -310,11 +325,13 @@ __all__ = [
     "INTERACTION_BUTTON_CHANNELS",
     "INTERACTION_SEND_VIA",
     "INTERACTION_SEND_VIA_ALIASES",
+    "SEND_CHANNEL_DEPRECATED_REASON_CODE",
     "TRUSTED_DEFAULT_SEND_VIA",
     "action_send_via",
     "action_send_via_options",
     "action_send_via_raw_selector",
     "apply_action_send_via_options",
+    "deprecated_send_via_values",
     "guard_interaction_actions",
     "send_via_selector_options",
     "unsupported_send_via_values",

@@ -20,10 +20,13 @@ class FeatureInfo(BaseModel):
     orphan: bool = False
     signature_ok: bool | None = None
     version: str | None = None
+    usage: str | None = None
     config_schema: dict[str, Any] | None = None
     category: str = "utility"
     interaction_profile: str | None = None
     interaction_entries: list[dict[str, Any]] = Field(default_factory=list)
+    event_subscriptions: list[dict[str, Any]] = Field(default_factory=list)
+    capabilities: dict[str, Any] = Field(default_factory=dict)
     experimental: bool = False
     update_available: bool = False
     latest_version: str | None = None
@@ -63,6 +66,7 @@ class FeatureInfo(BaseModel):
             else:
                 source_label = "local-orphan" if manifest.get("x-orphan") else "local"
         config_schema = manifest.get("config_schema")
+        usage = str(manifest.get("usage") or "").strip() or None
         schema_meta = config_schema if isinstance(config_schema, dict) else {}
         category = str(manifest.get("category") or schema_meta.get("x-category") or "utility")
         if category not in {"interactive", "automation", "utility"}:
@@ -72,6 +76,10 @@ class FeatureInfo(BaseModel):
         if raw_entries is None:
             raw_entries = schema_meta.get("x-interaction-entries")
         entries = raw_entries if isinstance(raw_entries, list) else []
+        raw_event_subscriptions = manifest.get("event_subscriptions")
+        event_subscriptions = raw_event_subscriptions if isinstance(raw_event_subscriptions, list) else []
+        raw_capabilities = manifest.get("capabilities")
+        capabilities = raw_capabilities if isinstance(raw_capabilities, dict) else {}
         raw_lint_warnings = (
             getattr(installed_plugin, "lint_warnings", None)
             if installed_plugin is not None
@@ -98,10 +106,13 @@ class FeatureInfo(BaseModel):
                 getattr(plugin_install, "signature_ok", None),
             ),
             version=f.version,
+            usage=usage,
             config_schema=config_schema,
             category=category,
             interaction_profile=interaction_profile,
             interaction_entries=[item for item in entries if isinstance(item, dict)],
+            event_subscriptions=[item for item in event_subscriptions if isinstance(item, dict)],
+            capabilities=dict(capabilities),
             experimental=bool(
                 manifest.get("x-experimental") or manifest.get("experimental")
             ),

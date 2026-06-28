@@ -12,7 +12,14 @@ from typing import Any
 
 from ...redis_client import get_redis
 from .. import account_bot_service
-from .contracts import INTERACTION_SEND_VIA, action_send_via_options
+from ..event_trace import TRACE_STATUS_FAILED, TRACE_STATUS_OK, TRACE_STATUS_SKIPPED, record_action
+from .contracts import (
+    INTERACTION_SEND_VIA,
+    SEND_CHANNEL_DEPRECATED_REASON_CODE,
+    action_send_via_options,
+    action_send_via_raw_selector,
+    deprecated_send_via_values,
+)
 
 log = logging.getLogger(__name__)
 
@@ -46,14 +53,51 @@ class InteractionDeliveryExecutor:
             action_type = str(action.get("type") or "").strip()
             await self._record_settlement(action)
             if action_type in INTERACTION_SESSION_CONTROL_ACTIONS or action_type == "result":
+                await record_action(
+                    action.get("context"),
+                    action,
+                    TRACE_STATUS_SKIPPED,
+                    error_code="session_control_action",
+                    error=f"session control action: {action_type}",
+                )
                 continue
+            if action_type in {"send_message", "send_photo", "send_file", "delete_message", "pin_message"}:
+                deprecated_channels = deprecated_send_via_values(action_send_via_raw_selector(action))
+                if deprecated_channels:
+                    await record_action(
+                        action.get("context"),
+                        action,
+                        TRACE_STATUS_FAILED,
+                        error_code=SEND_CHANNEL_DEPRECATED_REASON_CODE,
+                        error="notice/bbot_notice/notice_bot channel is deprecated",
+                        deprecated_send_via=deprecated_channels,
+                    )
+                    await self.write_log(
+                        self.incoming,
+                        "warn",
+                        "interaction action failed: deprecated send_via",
+                        reason_code=SEND_CHANNEL_DEPRECATED_REASON_CODE,
+                        action_type=action_type,
+                        deprecated_send_via=deprecated_channels,
+                        **self.log_context(self.incoming),
+                    )
+                    continue
             if action_type == "settlement":
+                await record_action(
+                    action.get("context"),
+                    action,
+                    TRACE_STATUS_OK,
+                    actual_send_via="settlement",
+                )
                 continue
             reply_to_message_id = _int_or_none(action.get("reply_to_message_id"))
             raw_reply_markup = action.get("reply_markup")
             reply_markup = raw_reply_markup if isinstance(raw_reply_markup, dict) else None
             if action_type == "answer_callback":
                 await self._answer_callback(action)
+                continue
+            if action_type == "answer_inline_query":
+                await self._answer_inline_query(action)
                 continue
             if action_type == "delete_message":
                 await self._apply_delete_message(action)
@@ -77,6 +121,7 @@ class InteractionDeliveryExecutor:
                 )
                 continue
             log.info("interaction action ignored: unsupported type=%s aid=%s", action_type, self.incoming.account_id)
+            await record_action(action.get("context"), action, TRACE_STATUS_SKIPPED, error=f"unsupported type: {action_type}")
             await self.write_log(
                 self.incoming,
                 "info",
@@ -86,29 +131,31 @@ class InteractionDeliveryExecutor:
                 **self.log_context(self.incoming),
             )
 
-    async def delete_message(self, message_id: int | None, *, chat_id: int | None = None, send_via: str = "interaction_bot") -> None:
+    async def delete_message(self, message_id: int | None, *, chat_id: int | None = None, send_via: str = "interaction_bot") -> bool:
         target_chat_id = self._target_chat_id(chat_id)
         if target_chat_id is None or message_id is None:
-            return
+            return False
         token = await self._resolve_token(send_via)
         if not token:
-            return
+            return False
         try:
             await account_bot_service.delete_message(
                 token,
                 target_chat_id,
                 message_id,
             )
+            return True
         except Exception as exc:  # noqa: BLE001
             await self.write_log(
                 self.incoming,
                 "warn",
                 "interaction placeholder delete failed",
-                message_id=message_id,
+                target_message_id=message_id,
                 send_via=send_via,
                 error=str(exc),
                 **self.log_context(self.incoming),
             )
+            return False
 
     async def send_message(
         self,
@@ -261,6 +308,13 @@ class InteractionDeliveryExecutor:
     ) -> int | None:
         text = str(action.get("text") or "").strip()
         if not text:
+            await record_action(
+                action.get("context"),
+                action,
+                TRACE_STATUS_FAILED,
+                error_code="empty_message_text",
+                error="send_message text is empty",
+            )
             return replace_message_id
         chat_id = _int_or_none(action.get("chat_id"))
         target_chat_id = self._target_chat_id(chat_id)
@@ -300,6 +354,14 @@ class InteractionDeliveryExecutor:
             msg_id = delivery_message_id(result)
             if msg_id is not None:
                 await self.get_redis_client().set(save_key, str(msg_id), ex=7200)
+        await record_action(
+            action.get("context"),
+            action,
+            TRACE_STATUS_OK if ok else TRACE_STATUS_FAILED,
+            actual_send_via=used_send_via,
+            result=result,
+            error=result.get("error") if isinstance(result, dict) else None,
+        )
         return replace_message_id
 
     async def _apply_send_media(
@@ -311,13 +373,34 @@ class InteractionDeliveryExecutor:
     ) -> int | None:
         raw_photo = str(action.get("photo_base64") or action.get("file_base64") or "").strip()
         if not raw_photo:
+            await record_action(
+                action.get("context"),
+                action,
+                TRACE_STATUS_FAILED,
+                error_code="media_payload_missing",
+                error="photo_base64/file_base64 is empty",
+            )
             return replace_message_id
         try:
             photo = base64.b64decode(raw_photo, validate=True)
         except (binascii.Error, ValueError):
             log.info("interaction action ignored: invalid base64 media aid=%s", self.incoming.account_id)
+            await record_action(
+                action.get("context"),
+                action,
+                TRACE_STATUS_FAILED,
+                error_code="media_payload_invalid",
+                error="photo_base64/file_base64 is not valid base64",
+            )
             return replace_message_id
         if not photo:
+            await record_action(
+                action.get("context"),
+                action,
+                TRACE_STATUS_FAILED,
+                error_code="media_payload_empty",
+                error="decoded media payload is empty",
+            )
             return replace_message_id
         filename = str(action.get("filename") or "interaction.png").strip() or "interaction.png"
         caption = str(action.get("caption") or action.get("text") or "").strip() or None
@@ -334,18 +417,62 @@ class InteractionDeliveryExecutor:
         if ok and replace_message_id is not None:
             await self.delete_message(replace_message_id, chat_id=placeholder_chat_id)
             replace_message_id = None
+        await record_action(
+            action.get("context"),
+            action,
+            TRACE_STATUS_OK if ok else TRACE_STATUS_FAILED,
+            actual_send_via=_used_send_via,
+            result=_result,
+            error=_result.get("error") if isinstance(_result, dict) else None,
+        )
         return replace_message_id
 
     async def _answer_callback(self, action: dict[str, Any]) -> None:
         callback_query_id = str(action.get("callback_query_id") or self.incoming.callback_id or "").strip()
         if not callback_query_id:
+            await record_action(action.get("context"), action, TRACE_STATUS_FAILED, error="callback_query_id missing")
             return
-        await account_bot_service.answer_callback(
-            self.incoming.token,
-            callback_query_id,
-            text=str(action.get("text") or ""),
-            show_alert=bool(action.get("show_alert")),
-        )
+        try:
+            await account_bot_service.answer_callback(
+                self.incoming.token,
+                callback_query_id,
+                text=str(action.get("text") or ""),
+                show_alert=bool(action.get("show_alert")),
+            )
+        except Exception as exc:  # noqa: BLE001
+            await record_action(action.get("context"), action, TRACE_STATUS_FAILED, error=str(exc))
+            raise
+        await record_action(action.get("context"), action, TRACE_STATUS_OK, actual_send_via="interaction_bot")
+
+    async def _answer_inline_query(self, action: dict[str, Any]) -> None:
+        inline_query_id = str(action.get("inline_query_id") or getattr(self.incoming, "inline_query_id", "") or "").strip()
+        if not inline_query_id:
+            await record_action(action.get("context"), action, TRACE_STATUS_FAILED, error="inline_query_id missing")
+            return
+        results = action.get("results")
+        if not isinstance(results, list):
+            results = []
+        try:
+            await account_bot_service.answer_inline_query(
+                self.incoming.token,
+                inline_query_id,
+                results=[item for item in results if isinstance(item, dict)],
+                cache_time=_int_or_none(action.get("cache_time")) or 0,
+                is_personal=bool(action.get("is_personal", True)),
+                next_offset=str(action.get("next_offset") or ""),
+                button=action.get("button") if isinstance(action.get("button"), dict) else None,
+            )
+        except Exception as exc:  # noqa: BLE001
+            await record_action(action.get("context"), action, TRACE_STATUS_FAILED, error=str(exc))
+            await self.write_log(
+                self.incoming,
+                "warn",
+                "interaction inline query answer failed",
+                error=str(exc),
+                **self.log_context(self.incoming),
+            )
+            return
+        await record_action(action.get("context"), action, TRACE_STATUS_OK, actual_send_via="interaction_bot")
 
     async def _apply_delete_message(self, action: dict[str, Any]) -> None:
         message_id = _int_or_none(action.get("message_id"))
@@ -353,8 +480,10 @@ class InteractionDeliveryExecutor:
         for send_via in action_send_via_options(action):
             if send_via != "interaction_bot":
                 continue
-            await self.delete_message(message_id, chat_id=chat_id, send_via=send_via)
-            return
+            if await self.delete_message(message_id, chat_id=chat_id, send_via=send_via):
+                await record_action(action.get("context"), action, TRACE_STATUS_OK, actual_send_via=send_via)
+                return
+        await record_action(action.get("context"), action, TRACE_STATUS_FAILED, error="no supported send_via")
 
     async def _apply_pin_message(self, action: dict[str, Any]) -> None:
         message_id = _int_or_none(action.get("message_id"))
@@ -362,22 +491,25 @@ class InteractionDeliveryExecutor:
         for send_via in action_send_via_options(action):
             if send_via != "interaction_bot":
                 continue
-            await self._pin_message(message_id, chat_id=chat_id, send_via=send_via)
-            return
+            if await self._pin_message(message_id, chat_id=chat_id, send_via=send_via):
+                await record_action(action.get("context"), action, TRACE_STATUS_OK, actual_send_via=send_via)
+                return
+        await record_action(action.get("context"), action, TRACE_STATUS_FAILED, error="no supported send_via")
 
-    async def _pin_message(self, message_id: int | None, *, chat_id: int | None = None, send_via: str) -> None:
+    async def _pin_message(self, message_id: int | None, *, chat_id: int | None = None, send_via: str) -> bool:
         target_chat_id = self._target_chat_id(chat_id)
         if send_via != "interaction_bot" or message_id is None or target_chat_id is None:
-            return
+            return False
         token = await self._resolve_token(send_via)
         if not token:
-            return
+            return False
         try:
             await account_bot_service.call_bot_api(
                 token,
                 "pinChatMessage",
                 {"chat_id": target_chat_id, "message_id": message_id},
             )
+            return True
         except Exception:  # noqa: BLE001
             log.debug(
                 "interaction action pin message failed aid=%s chat_id=%s message_id=%s",
@@ -386,6 +518,7 @@ class InteractionDeliveryExecutor:
                 message_id,
                 exc_info=True,
             )
+            return False
 
     async def _try_send_message_options(
         self,
@@ -466,14 +599,16 @@ class InteractionDeliveryExecutor:
             settlement = {k: v for k, v in action.items() if k != "type"}
         if not isinstance(settlement, dict):
             return
+        context = self.log_context(self.incoming)
+        trace_context = self.trace_context(action.get("context"))
+        context.update({key: value for key, value in trace_context.items() if value is not None})
         await self.write_log(
             self.incoming,
             "info",
             "interaction settlement reported",
             action_type=str(action.get("type") or ""),
             settlement=settlement,
-            **self.log_context(self.incoming),
-            **self.trace_context(action.get("context")),
+            **context,
         )
 
 

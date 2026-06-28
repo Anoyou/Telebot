@@ -48,6 +48,13 @@ import {
 import { Select } from "@/components/ui/select";
 import { pluginUsageGuideWarning, splitPluginWarnings } from "@/lib/plugin-config-contract";
 import { isPlatformFeature } from "@/lib/plugin-modes";
+import {
+  compactUsageText,
+  pluginCapabilityLabels,
+  pluginContractRiskWarnings,
+  pluginEventSubscriptionLabels,
+  pluginHasHighRiskContract,
+} from "@/types/pluginContract";
 
 import { featureConfigPath } from "./_shared/featureConfig";
 
@@ -832,10 +839,15 @@ function FeatureZone({
               const pluginUsage = pluginUsageByKey.get(f.key);
               const lastError = accountFeature?.last_error?.trim();
               const usageWarning = pluginUsageGuideWarning(f);
+              const contractWarnings = pluginContractRiskWarnings(f);
               const lintWarnings = [
                 ...(usageWarning ? [usageWarning] : []),
+                ...contractWarnings,
                 ...(f.lint_warnings ?? []),
               ];
+              const eventLabels = pluginEventSubscriptionLabels(f.event_subscriptions);
+              const capabilityLabels = pluginCapabilityLabels(f.capabilities);
+              const highRiskContract = pluginHasHighRiskContract(f);
               const trustBadge = moduleTrustBadge(f, installByKey.get(f.key));
               const path = featureConfigPath(selectedAccountId, f.key, f, {
                 source: "plugins",
@@ -863,6 +875,9 @@ function FeatureZone({
                         加载异常{lastError ? `：${lastError}` : "：后端未返回错误详情"}
                       </div>
                     ) : null}
+                    <div className="mt-2 text-xs leading-5 text-muted-foreground">
+                      {compactUsageText(f.usage)}
+                    </div>
                     <div className="mt-3 grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
                       <div className="flex min-w-0 flex-wrap items-center gap-2">
                         {pluginUsage ? (
@@ -890,6 +905,26 @@ function FeatureZone({
                         </FeatureCapabilityBadge>
                         <FeatureCapabilityBadge show={Boolean(f.interaction_entries?.length)}>
                           可交互
+                        </FeatureCapabilityBadge>
+                        <FeatureCapabilityBadge
+                          show={eventLabels.length > 0}
+                          title={eventLabels.join(" / ")}
+                        >
+                          订阅 {eventLabels.length}
+                        </FeatureCapabilityBadge>
+                        <FeatureCapabilityBadge
+                          show={capabilityLabels.length > 0}
+                          tone={highRiskContract ? "warn" : "outline"}
+                          title={capabilityLabels.join(" / ")}
+                        >
+                          能力 {capabilityLabels.length}
+                        </FeatureCapabilityBadge>
+                        <FeatureCapabilityBadge
+                          show={highRiskContract}
+                          tone="danger"
+                          title={contractWarnings.join("；")}
+                        >
+                          高风险
                         </FeatureCapabilityBadge>
                         <FeatureCapabilityBadge show={Boolean(f.experimental)}>
                           实验性

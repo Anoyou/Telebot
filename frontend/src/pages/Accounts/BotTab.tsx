@@ -87,6 +87,13 @@ import type {
 } from "@/api/types";
 import { getErrMsg } from "@/lib/api";
 import { cn, formatDateTime } from "@/lib/utils";
+import {
+  pluginCapabilityLabels,
+  pluginContractRiskWarnings,
+  pluginEventSubscriptionLabels,
+  type PluginCapabilities,
+  type PluginEventSubscription,
+} from "@/types/pluginContract";
 
 const MASKED_SECRET_PLACEHOLDER = "••••••••••••••••";
 
@@ -252,6 +259,10 @@ type InteractionRuleForm = {
 type InteractionEntryOption = {
   featureKey: string;
   featureName: string;
+  featureUsage?: string | null;
+  eventSubscriptions?: PluginEventSubscription[];
+  capabilities?: PluginCapabilities;
+  lintWarnings?: string[];
   entry: FeatureInteractionEntry;
   value: string;
   label: string;
@@ -425,12 +436,44 @@ function AllowedPeerMultiSelect({
   );
 }
 
+function InteractionContractBlock({ title, items, empty }: { title: string; items: string[]; empty: string }) {
+  const cleanItems = [...new Set(items.map((item) => item.trim()).filter(Boolean))];
+  return (
+    <div className="min-w-0 rounded-md border bg-muted/20 px-2 py-1.5 text-xs">
+      <div className="mb-1 font-medium text-muted-foreground">{title}</div>
+      {cleanItems.length > 0 ? (
+        <div className="flex flex-wrap gap-1">
+          {cleanItems.slice(0, 6).map((item) => (
+            <Badge key={item} variant="secondary" className="max-w-full break-all px-1.5 text-[11px]">
+              {item}
+            </Badge>
+          ))}
+          {cleanItems.length > 6 ? <Badge variant="outline">+{cleanItems.length - 6}</Badge> : null}
+        </div>
+      ) : (
+        <div className="text-muted-foreground">{empty}</div>
+      )}
+    </div>
+  );
+}
+
 function interactionProfileLabel(profile?: string | null): string | null {
   if (profile === "session_game") return "群局抢答";
   if (profile === "challenge_game") return "对战玩法";
   if (profile === "reward_pool") return "奖池玩法";
   if (profile === "utility_trigger") return "工具触发";
   return null;
+}
+
+function interactionEventLabel(event?: string | null): string {
+  if (event === "all_messages") return "全部消息";
+  if (event === "callback_query") return "按钮回调";
+  if (event === "chosen_inline_result") return "Inline 选择";
+  if (event === "inline_query") return "Inline 查询";
+  if (event === "message") return "普通消息";
+  if (event === "payment_confirmed") return "付款确认";
+  if (event === "session_close") return "会话关闭";
+  return event || "未声明";
 }
 
 function interactionDispatchLabels(entry: FeatureInteractionEntry): string[] {
@@ -998,6 +1041,14 @@ function InteractionRuleEditor({
 }) {
   const selectedModule = resolveRuleModuleSelection(rule, interactionEntries);
   const selectedInteractionEntry = selectedModule?.entry;
+  const selectedEventLabels = pluginEventSubscriptionLabels(selectedModule?.eventSubscriptions);
+  const selectedCapabilityLabels = pluginCapabilityLabels(selectedModule?.capabilities);
+  const selectedContractWarnings = pluginContractRiskWarnings({
+    capabilities: selectedModule?.capabilities,
+    event_subscriptions: selectedModule?.eventSubscriptions,
+    lint_warnings: selectedModule?.lintWarnings,
+  });
+  const selectedEntryEvents = (selectedInteractionEntry?.events ?? []).map((event) => interactionEventLabel(event));
   const [entryProfileTab, setEntryProfileTab] = useState<string>("all");
   const effectiveTriggerMode = rule.action === "notice" ? "payment" : rule.triggerMode;
   const showsPaymentFields = effectiveTriggerMode !== "keyword";
@@ -1086,6 +1137,8 @@ function InteractionRuleEditor({
     const isActive = item.value === selectedModule?.value;
     const title = item.entry.title || item.entry.label || item.entry.key;
     const dispatchLabels = interactionDispatchLabels(item.entry);
+    const entryEvents = (item.entry.events ?? []).map((event) => interactionEventLabel(event));
+    const capabilityLabels = pluginCapabilityLabels(item.capabilities);
     const adminChannel = item.entry.message_channels?.admin_command;
     const publicChannel = item.entry.message_channels?.public_keyword;
     return (
@@ -1113,6 +1166,16 @@ function InteractionRuleEditor({
                   {label}
                 </Badge>
               ))}
+              {entryEvents.slice(0, 2).map((label) => (
+                <Badge key={`event-${label}`} variant="secondary" className="h-5 px-1.5 text-[11px]">
+                  Event:{label}
+                </Badge>
+              ))}
+              {capabilityLabels.length > 0 ? (
+                <Badge variant="outline" className="h-5 px-1.5 text-[11px]" title={capabilityLabels.join(" / ")}>
+                  能力 {capabilityLabels.length}
+                </Badge>
+              ) : null}
               {adminChannel ? (
                 <Badge variant="secondary" className="h-5 px-1.5 text-[11px]">
                   管理偏好:{interactionChannelLabel(adminChannel)}
@@ -1358,6 +1421,39 @@ function InteractionRuleEditor({
                   <div className="mt-1 break-words text-sm font-medium">{describeRuleModuleSelection(rule, selectedModule)}</div>
                   {selectedInteractionEntry?.description ? (
                     <div className="mt-1 text-xs text-muted-foreground">{selectedInteractionEntry.description}</div>
+                  ) : null}
+                  <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                    <InteractionContractBlock
+                      title="入口事件"
+                      items={selectedEntryEvents}
+                      empty="入口未声明 events"
+                    />
+                    <InteractionContractBlock
+                      title="Event Bus 订阅"
+                      items={selectedEventLabels}
+                      empty="插件未声明 event_subscriptions"
+                    />
+                    <InteractionContractBlock
+                      title="能力声明"
+                      items={selectedCapabilityLabels}
+                      empty="插件未声明 capabilities"
+                    />
+                    <InteractionContractBlock
+                      title="发送/模式"
+                      items={[
+                        selectedInteractionEntry?.launch_mode ? `launch:${selectedInteractionEntry.launch_mode}` : "",
+                        selectedInteractionEntry?.session_scope ? `session:${selectedInteractionEntry.session_scope}` : "",
+                        selectedInteractionEntry?.money_channel ? `money:${interactionChannelLabel(selectedInteractionEntry.money_channel)}` : "",
+                      ].filter(Boolean)}
+                      empty="使用默认交互模式"
+                    />
+                  </div>
+                  {selectedContractWarnings.length > 0 ? (
+                    <div className="mt-2 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs leading-5 text-destructive">
+                      {selectedContractWarnings.map((item) => (
+                        <div key={item}>{item}</div>
+                      ))}
+                    </div>
                   ) : null}
                 </div>
                 <div className="flex flex-wrap gap-1.5">
@@ -1751,6 +1847,10 @@ export function BotTab({
     (feature.interaction_entries ?? []).map((entry: FeatureInteractionEntry) => ({
       featureKey: feature.key,
       featureName: feature.display_name,
+      featureUsage: feature.usage,
+      eventSubscriptions: feature.event_subscriptions,
+      capabilities: feature.capabilities,
+      lintWarnings: feature.lint_warnings,
       entry,
       value: `${feature.key}:${entry.key}`,
       label: `${feature.display_name} / ${entry.title || entry.label || entry.key}`,

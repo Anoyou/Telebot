@@ -20,6 +20,43 @@
 
 ## [Unreleased]
 
+## [0.40.0] — 2026-06-29 · minor（次版本） · Event Bus 与 Trace 最终版框架
+
+### Added
+- 新增 `event_trace`、`event_span`、`event_action`、`plugin_runtime_status` 数据模型和迁移，日志中心可以按 `trace_id` 串起消息接收、标准化、订阅匹配、插件调用、动作执行和失败原因。
+- 新增统一 Event Bus 服务，把交互 Bot 消息、按钮回调、Inline Query、Inline 选择结果、外部付款通知和 UserBot 命令收敛为标准事件信封，并用稳定 `reason_code` 记录 matched / skipped / delivered。
+- 插件 manifest 支持 `usage`、`event_subscriptions`、`capabilities`，官方、内置、示例和远程插件字段链路同步贯通到后端 schema、feature matrix、前端类型和 WebUI 风险提示。
+- 新增可信插件 `telegram_native_raw` 能力边界：插件显式声明后才可拿到 JSON 兼容原生 Telegram 数据；日志默认只保存摘要和 `native_raw_meta`，完整 `native_raw` 需开启短保留期持久化。
+- Delivery Executor 和 MessageOps 增加 `answer_inline_query`、动作结果 Trace、旧通道失败 action、settlement 记录和实际发送通道留痕。
+- 日志中心重构为 Trace 视角，提供总览、消息链路、插件诊断、命令链路、动作发送和原始日志入口，并补齐 Inline、native_raw、Contract Guard、Telegram API 错误和插件加载失败展示。
+- 插件中心、插件配置页、远程插件仓库和交互中心展示插件使用说明、事件订阅、能力声明、高风险能力、废弃通道告警和一键更新风险信息。
+- 新增 `examples/plugins/event_bus_demo` 最终版示例，覆盖 message、command、callback、inline、chosen inline、payment fixtures，并演示 `ctx.messages`、`answer_inline_query` 和 `settlement`。
+
+### Changed
+- TelePilot 插件框架正式收敛为个人可信插件标准：账号主人主动安装和启用插件，业务风险由安装者承担；平台提供统一事件入口、统一消息操作出口、风险提示、审计、频控、急停和客观失败返回。
+- 旧交互规则继续可用，但语义收敛为 Event Bus 订阅条件和规则过滤，不再作为第二套插件调度真相。
+- 插件开发主路径切换为标准事件信封 + `ctx.messages` / 标准 action + Trace 排障；旧平铺 payload、`raw_event`、`event.reply/respond` 只作为迁移或历史说明。
+- 远程插件仓库、私有 GitHub 仓库、`tree/<branch>` URL、仓库刷新和单仓库一键更新都会保留 `usage`、`event_subscriptions`、`capabilities` 等最终版字段。
+- Trace 和 native_raw 保留策略接入系统设置；`native_raw_retention_days` 默认收紧为 1 天，Trace 清理会保留主链路记录并清理过期大字段。
+- Contract Guard 定位调整为契约记录器和客观失败保护层：越声明调用可告警放行，不支持或废弃能力明确失败，并输出中文说明与稳定 `reason_code`。
+
+### Fixed
+- 修复旧 `notice` / `bbot_notice` / `notice_bot` 可能被误当可执行发送通道的问题；运行时和 lint 均使用 `send_channel_deprecated` 明确失败，不会自动改写到交互 Bot。
+- 修复 `raw_event` 作为原生事件后门的风险；未声明 `telegram_native_raw` 的插件不会通过兼容 payload 拿到完整原生对象。
+- 修复插件动作失败缺少 `event_action` 的断链问题，空文本、非法媒体、缺 inline query id、Telegram API 错误等都会记录失败动作。
+- 修复插件加载失败只落旧 runtime log、日志页插件诊断不可见的问题；loader 失败会更新 `PluginRuntimeStatus`。
+- 修复 worker 交互入口 timeout 测试因全局 `time.time` monkeypatch 与 60 秒 timeout 不匹配导致全量测试卡住的问题。
+
+### Docs
+- 重写插件 API 参考、远程插件规范、速查表、安全边界、README 和最终版计划，统一为 Event Bus + Trace + MessageOps 口径。
+- 新增 `docs/TELEGRAM-FULL-EVENT-BUS-TRACE-PLAN.md` 和 `docs/release/0.40.0-final-evidence.md`，把最终版范围、Go / No-Go、证据台账、前端实测、部署回滚和残余风险写成可执行门禁。
+- 文档明确外部转账通知 Bot 只是群里已有到账证据来源，不是 TelePilot 的主动发送通道；普通交互由交互 Bot，收款确认和发奖由 UserBot 或 settlement 承接。
+
+### Tests
+- 后端全量测试覆盖 Event Bus、Trace、native_raw、Inline、旧通道失败、插件加载状态、远程插件字段贯通、MessageOps / Delivery、UserBot 命令 Trace 和交互 Bot 回归路径。
+- 插件示例验证脚本和已安装交互插件验证脚本补齐 `usage`、`event_subscriptions`、`capabilities`、废弃通道和旧风险字段检查。
+- 前端类型检查和生产构建覆盖日志中心、插件风险提示、交互中心、插件配置页和仓库字段展示。
+
 ## [0.37.0] — 2026-06-28 · minor（次版本） · 插件开放事件框架
 
 ### Added

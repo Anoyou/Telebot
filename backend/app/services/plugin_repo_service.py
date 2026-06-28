@@ -381,6 +381,7 @@ async def list_plugins_in_repo(
                 name=meta.name,
                 display_name=meta.display_name or meta.name,
                 description=meta.description,
+                usage=meta.usage,
                 author=meta.author,
                 version=meta.version,
                 installed=installed_version is not None,
@@ -389,6 +390,8 @@ async def list_plugins_in_repo(
                     installed_version is not None
                     and _version_tuple(meta.version) > _version_tuple(installed_version)
                 ),
+                event_subscriptions=[item for item in meta.event_subscriptions if isinstance(item, dict)],
+                capabilities=dict(meta.capabilities) if isinstance(meta.capabilities, dict) else {},
                 tags=list(meta.tags or []),
                 subdir=subdir,
             )
@@ -890,9 +893,12 @@ def list_local_import_candidates() -> list[PluginRepoPlugin]:
                 name=meta.name,
                 display_name=meta.display_name or meta.name,
                 description=meta.description,
+                usage=meta.usage,
                 author=meta.author,
                 version=meta.version,
                 installed=False,
+                event_subscriptions=[item for item in meta.event_subscriptions if isinstance(item, dict)],
+                capabilities=dict(meta.capabilities) if isinstance(meta.capabilities, dict) else {},
                 tags=list(meta.tags or []),
                 subdir=str(plugin_dir.relative_to(root)),
             )
@@ -927,6 +933,7 @@ async def list_official_plugins(db: AsyncSession) -> list[PluginRepoPlugin]:
                 name=meta.name,
                 display_name=meta.display_name or meta.name,
                 description=meta.description,
+                usage=meta.usage,
                 author=meta.author,
                 version=meta.version,
                 installed=installed_version is not None,
@@ -935,6 +942,8 @@ async def list_official_plugins(db: AsyncSession) -> list[PluginRepoPlugin]:
                     installed_version is not None
                     and _version_tuple(meta.version) > _version_tuple(installed_version)
                 ),
+                event_subscriptions=[item for item in meta.event_subscriptions if isinstance(item, dict)],
+                capabilities=dict(meta.capabilities) if isinstance(meta.capabilities, dict) else {},
                 tags=list(meta.tags or []),
                 subdir=str(plugin_dir.relative_to(root)),
             )

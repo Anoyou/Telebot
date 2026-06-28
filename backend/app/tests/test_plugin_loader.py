@@ -684,6 +684,71 @@ async def test_activate_marks_orphan_installed_plugin_failed(monkeypatch, tmp_pa
 
 
 @pytest.mark.asyncio
+async def test_write_account_feature_load_state_updates_plugin_runtime_status(monkeypatch) -> None:
+    af = _FakeAF(account_id=1, feature_key="demo_plugin", enabled=True, config={})
+    db = _FakeDB(
+        accounts={1: _FakeAcc(id=1)},
+        humanize={1: None},
+        afs=[af],
+        rules=[],
+    )
+    update_status = AsyncMock()
+    monkeypatch.setattr(loader_mod, "update_plugin_runtime_status", update_status)
+
+    await loader_mod._write_account_feature_load_state(
+        db,
+        1,
+        "demo_plugin",
+        state="failed",
+        last_error="boom",
+    )
+
+    update_status.assert_awaited_once_with(
+        account_id=1,
+        plugin_key="demo_plugin",
+        enabled=False,
+        load_status="failed",
+        last_load_error="boom",
+    )
+
+
+@pytest.mark.asyncio
+async def test_activate_installed_plugin_import_failure_updates_runtime_status(tmp_path, monkeypatch) -> None:
+    plugin_key = "_test_import_failed"
+    plugin_dir = tmp_path / "installed" / plugin_key
+    plugin_dir.mkdir(parents=True)
+    (plugin_dir / "__init__.py").write_text("raise RuntimeError('broken import')\n", encoding="utf-8")
+    monkeypatch.setattr(loader_mod, "_installed_dir", lambda: tmp_path / "installed")
+    update_status = AsyncMock()
+    monkeypatch.setattr(loader_mod, "update_plugin_runtime_status", update_status)
+
+    af = _FakeAF(account_id=1, feature_key=plugin_key, enabled=True, config={})
+    db = _FakeDB(
+        accounts={1: _FakeAcc(id=1)},
+        humanize={1: None},
+        afs=[af],
+        rules=[],
+        installed_plugins={plugin_key: _FakeInstalledPlugin(plugin_key)},
+    )
+    state = loader_mod._AccountState(account_id=1)
+    state.client = MagicMock()
+    redis = _FakeRedis()
+
+    await loader_mod._activate(db, state, af, redis)
+
+    assert plugin_key not in state.instances
+    assert af.state == "failed"
+    assert af.last_error == "PLUGIN_LOAD_FAILED: plugin import failed or manifest invalid"
+    update_status.assert_awaited_with(
+        account_id=1,
+        plugin_key=plugin_key,
+        enabled=False,
+        load_status="failed",
+        last_load_error="PLUGIN_LOAD_FAILED: plugin import failed or manifest invalid",
+    )
+
+
+@pytest.mark.asyncio
 async def test_reload_account_config_unloads_installed_plugin_when_authorization_denied(monkeypatch) -> None:
     """已加载插件若全局开关被关闭，reload 时要立即卸载并写回 disabled。"""
 

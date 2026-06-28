@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from app.services import event_trace
 from app.worker.command import (
     _BUILTIN,
     CommandContext,
@@ -53,6 +54,35 @@ async def test_ping():
     event = AsyncMock()
     await _BUILTIN["ping"].handler(client, event, [], 1)
     event.edit.assert_called_once_with("pong")
+
+
+@pytest.mark.asyncio
+async def test_dispatch_command_creates_trace(monkeypatch):
+    """UserBot 命令分发必须产生 Trace，避免命令链路成为日志盲区。"""
+    from app.worker import command as wcmd
+
+    trace = event_trace.TraceContext(trace_id="evt_cmd", account_id=1, event_type="command")
+    start_trace = AsyncMock(return_value=trace)
+    record_span = AsyncMock()
+    finish_trace = AsyncMock()
+    monkeypatch.setattr(wcmd, "_command_trace_enabled", AsyncMock(return_value=True))
+    monkeypatch.setattr(wcmd, "start_trace", start_trace)
+    monkeypatch.setattr(wcmd, "record_span", record_span)
+    monkeypatch.setattr(wcmd, "finish_trace", finish_trace)
+
+    client = AsyncMock()
+    event = AsyncMock()
+    event.raw_text = ",ping"
+    event.message = SimpleNamespace(id=1, chat_id=10, sender_id=20, text=",ping")
+
+    await wcmd._dispatch_command(client, event, "ping", "", account_id=1, help_prefix=",")
+
+    start_trace.assert_awaited_once()
+    assert start_trace.await_args.args[0]["source"]["type"] == "command"
+    assert start_trace.await_args.args[0]["trigger"]["command"] == "ping"
+    assert any(call.args[1] == "receive" for call in record_span.await_args_list)
+    assert any(call.args[1] == "command_parse" for call in record_span.await_args_list)
+    finish_trace.assert_awaited_once_with(trace, "ok")
 
 
 # ════════════════════════════════════════════════════════════

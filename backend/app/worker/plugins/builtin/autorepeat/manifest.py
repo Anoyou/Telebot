@@ -17,8 +17,18 @@ MANIFEST = Manifest(
     version="1.0.0",
     author="TeleBoxOrg",
     description="当群组中多名用户在指定时间内发送相同内容时自动复读",
+    usage="自动复读通过规则触发：每条规则绑定一个群组和复读条件。当指定时间窗口内有足够多不同用户发送完全相同文本时，账号会自动复读一次。规则只监听 incoming 文本消息，保存后立即生效。",
     category="automation",
     permissions=["send_message", "edit_message", "read_chat", "resolve_entity"],
+    event_subscriptions=[
+        {
+            "source": ["userbot"],
+            "events": ["message"],
+            "scope": "rule_bound",
+            "entry_key": "rules",
+        }
+    ],
+    capabilities={},
     config_schema={
         "type": "object",
         "x-ui-mode": "rules",

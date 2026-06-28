@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import logging
 import re
+import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
@@ -20,8 +21,18 @@ from typing import Any
 from telethon import TelegramClient, events
 
 from ..db.base import AsyncSessionLocal
+from ..db.models.system import SystemSetting
 from ..redis_client import get_redis
 from ..services import audit as audit_svc
+from ..services.event_bus import normalize_userbot_event
+from ..services.event_trace import (
+    TRACE_STATUS_FAILED,
+    TRACE_STATUS_OK,
+    TRACE_STATUS_SKIPPED,
+    finish_trace,
+    record_span,
+    start_trace,
+)
 from ..settings import settings
 from ..util.sudo_permissions import (
     normalize_sudo_chat_ids,
@@ -80,6 +91,7 @@ _BUILTIN_ALIAS_TO_PRIMARY: dict[str, str] = {}
 # 插件命令注册表：追踪命令 -> (plugin_key, generation, handler)
 # 用于插件 reload/disable 时注销旧命令
 _PLUGIN_COMMANDS: dict[str, PluginCmd] = {}
+_TRACE_FLAG_CACHE: tuple[float, bool] = (0.0, True)
 
 
 def normalize_command_echo_guard_limit(value: Any) -> int:
@@ -150,6 +162,24 @@ def get_command_context() -> CommandContext | None:
 def current_command_prefix(*, fallback: str | None = None) -> str:
     """Return the worker's live command prefix for user-facing examples."""
     return ((_ctx.command_prefix if _ctx is not None else "") or fallback or settings.command_prefix or ",")
+
+
+async def _command_trace_enabled() -> bool:
+    global _TRACE_FLAG_CACHE
+    now = time.monotonic()
+    cached_at, cached = _TRACE_FLAG_CACHE
+    if now - cached_at < 30:
+        return cached
+    enabled = True
+    try:
+        async with AsyncSessionLocal() as db:
+            row = await db.get(SystemSetting, "log_retention")
+        raw = row.value if row is not None and isinstance(row.value, dict) else {}
+        enabled = bool(raw.get("trace_enabled", True))
+    except Exception:  # noqa: BLE001
+        log.debug("load command trace setting failed, trace stays enabled", exc_info=True)
+    _TRACE_FLAG_CACHE = (now, enabled)
+    return enabled
 
 
 def current_sudo_prefix(*, fallback: str | None = None) -> str:
@@ -1264,7 +1294,98 @@ async def dispatch_plugin_command(
     return False
 
 
+def _command_dispatch_target(cmd: str, args_raw: str) -> tuple[str, str | None]:
+    if cmd in _PLUGIN_COMMANDS:
+        return "plugin_command", _PLUGIN_COMMANDS[cmd].owner_plugin_key or None
+    primary = _BUILTIN_ALIAS_TO_PRIMARY.get(cmd)
+    if primary and _BUILTIN.get(primary) is not None:
+        return "builtin", None
+    if _ctx is not None and _ctx.aliases:
+        full_rest = f"{cmd} {args_raw}".strip() if args_raw else cmd
+        for alias in sorted(_ctx.aliases.keys(), key=len, reverse=True):
+            if full_rest == alias or full_rest.startswith(alias + " "):
+                return "alias", None
+    if _ctx is not None and _ctx.templates.get(cmd) is not None:
+        tpl = _ctx.templates[cmd]
+        if str(tpl.get("type") or "").strip() == "run_plugin":
+            return "template_run_plugin", str((tpl.get("config") or {}).get("plugin_key") or "").strip() or None
+        return "template", None
+    return "unknown", None
+
+
 async def _dispatch_command(
+    client: TelegramClient,
+    event,
+    cmd: str,
+    args_raw: str,
+    *,
+    account_id: int,
+    help_prefix: str,
+) -> None:
+    target_type, plugin_key = _command_dispatch_target(cmd, args_raw)
+    trace = None
+    final_status = TRACE_STATUS_SKIPPED if target_type == "unknown" else TRACE_STATUS_OK
+    if await _command_trace_enabled():
+        trace = await start_trace(
+            normalize_userbot_event(
+                account_id,
+                event,
+                command_meta={
+                    "command": cmd,
+                    "args_raw": args_raw,
+                    "prefix": help_prefix,
+                    "target_type": target_type,
+                    "plugin_key": plugin_key,
+                },
+            )
+        )
+        try:
+            event.trace_id = trace.trace_id
+        except Exception:  # noqa: BLE001
+            pass
+        await record_span(
+            trace,
+            "receive",
+            TRACE_STATUS_OK,
+            component="userbot_command",
+            command=cmd,
+            args_raw=args_raw,
+        )
+        await record_span(
+            trace,
+            "command_parse",
+            TRACE_STATUS_OK if target_type != "unknown" else TRACE_STATUS_SKIPPED,
+            component="userbot_command",
+            reason_code="command_matched" if target_type != "unknown" else "command_not_found",
+            command=cmd,
+            target_type=target_type,
+            plugin_key=plugin_key,
+        )
+    try:
+        await _dispatch_command_inner(
+            client,
+            event,
+            cmd,
+            args_raw,
+            account_id=account_id,
+            help_prefix=help_prefix,
+        )
+    except Exception as exc:  # noqa: BLE001
+        final_status = TRACE_STATUS_FAILED
+        await record_span(
+            trace,
+            "finish",
+            TRACE_STATUS_FAILED,
+            component="userbot_command",
+            reason_code="handler_error",
+            error=f"{type(exc).__name__}: {exc}",
+        )
+        raise
+    finally:
+        await finish_trace(trace, final_status)
+
+
+async def _dispatch_command_inner(
     client: TelegramClient,
     event,
     cmd: str,

@@ -89,16 +89,25 @@ async def seed_builtin_features(db: AsyncSession) -> int:
         cfg_schema = None
         ver = None
         experimental = False
+        usage = None
         category = "utility"
         interaction_profile = None
         interaction_entries: list[dict[str, Any]] = []
+        event_subscriptions: list[dict[str, Any]] = []
+        capabilities: dict[str, Any] | None = None
         m = BUILTIN_FEATURES.manifest_for(key)
         if m is not None:
             cfg_schema = getattr(m, "config_schema", None)
             ver = getattr(m, "version", None)
             experimental = bool(getattr(m, "experimental", False))
+            usage = str(getattr(m, "usage", None) or "").strip() or None
             category = str(getattr(m, "category", None) or "utility")
             interaction_profile = str(getattr(m, "interaction_profile", None) or "").strip() or None
+            raw_subscriptions = getattr(m, "event_subscriptions", None) or []
+            if isinstance(raw_subscriptions, list):
+                event_subscriptions = [item for item in raw_subscriptions if isinstance(item, dict)]
+            raw_capabilities = getattr(m, "capabilities", None)
+            capabilities = dict(raw_capabilities) if isinstance(raw_capabilities, dict) else None
             raw_entries = getattr(m, "interaction_entries", None) or []
             if isinstance(raw_entries, list):
                 interaction_entries = [
@@ -121,10 +130,25 @@ async def seed_builtin_features(db: AsyncSession) -> int:
             if ver and f.version != ver:
                 f.version = ver
                 changed = True
-            if cfg_schema or experimental or category or interaction_entries or interaction_profile:
+            if (
+                cfg_schema
+                or experimental
+                or usage
+                or category
+                or interaction_entries
+                or event_subscriptions
+                or capabilities
+                or interaction_profile
+            ):
                 manifest = dict(f.manifest or {})
                 if manifest.get("config_schema") != cfg_schema:
                     manifest["config_schema"] = cfg_schema
+                    changed = True
+                if manifest.get("usage") != usage:
+                    if usage:
+                        manifest["usage"] = usage
+                    else:
+                        manifest.pop("usage", None)
                     changed = True
                 if manifest.get("category") != category:
                     manifest["category"] = category
@@ -135,6 +159,12 @@ async def seed_builtin_features(db: AsyncSession) -> int:
                 if manifest.get("interaction_entries") != interaction_entries:
                     manifest["interaction_entries"] = interaction_entries
                     changed = True
+                if manifest.get("event_subscriptions") != event_subscriptions:
+                    manifest["event_subscriptions"] = event_subscriptions
+                    changed = True
+                if manifest.get("capabilities") != capabilities:
+                    manifest["capabilities"] = capabilities
+                    changed = True
                 if manifest.get("x-experimental") != experimental:
                     manifest["x-experimental"] = experimental
                     changed = True
@@ -144,15 +174,21 @@ async def seed_builtin_features(db: AsyncSession) -> int:
                 await db.flush()
             continue
         manifest_data: dict[str, Any] | None = None
-        if cfg_schema or experimental or category or interaction_entries or interaction_profile:
+        if cfg_schema or experimental or usage or category or interaction_entries or event_subscriptions or capabilities or interaction_profile:
             manifest_data = {}
             if cfg_schema:
                 manifest_data["config_schema"] = cfg_schema
+            if usage:
+                manifest_data["usage"] = usage
             manifest_data["category"] = category
             if interaction_profile:
                 manifest_data["interaction_profile"] = interaction_profile
             if interaction_entries:
                 manifest_data["interaction_entries"] = interaction_entries
+            if event_subscriptions:
+                manifest_data["event_subscriptions"] = event_subscriptions
+            if capabilities:
+                manifest_data["capabilities"] = capabilities
             manifest_data["x-experimental"] = experimental
         db.add(Feature(key=key, display_name=name, is_builtin=True, version=ver, manifest=manifest_data))
         added += 1
@@ -368,6 +404,10 @@ async def _seed_local_installed_features(
             for item in raw_entries
             if (entry := normalize_interaction_entry_manifest(item)) is not None
         ] if isinstance(raw_entries, list) else []
+        raw_subscriptions = meta.get("event_subscriptions")
+        event_subscriptions = [item for item in raw_subscriptions if isinstance(item, dict)] if isinstance(raw_subscriptions, list) else []
+        raw_capabilities = meta.get("capabilities")
+        capabilities = dict(raw_capabilities) if isinstance(raw_capabilities, dict) else None
         tags = meta.get("tags") or []
         experimental = bool(meta.get("experimental")) or "experimental" in tags
         if is_orphan:
@@ -392,6 +432,10 @@ async def _seed_local_installed_features(
             manifest["interaction_profile"] = interaction_profile
         if interaction_entries:
             manifest["interaction_entries"] = interaction_entries
+        if event_subscriptions:
+            manifest["event_subscriptions"] = event_subscriptions
+        if capabilities:
+            manifest["capabilities"] = capabilities
         if experimental:
             manifest["x-experimental"] = True
         if meta.get("permissions"):

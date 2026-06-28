@@ -16,7 +16,8 @@ const USAGE_SCHEMA_KEYS = [
 
 const USAGE_WARNING_RE = /使用说明|usage(_|-| )?(preview|guide|instructions)|x-usage/i;
 
-export function hasDeclaredUsageGuide(schema: SchemaLike): boolean {
+export function hasDeclaredUsageGuide(schema: SchemaLike, usage?: unknown): boolean {
+  if (schemaHasContent(usage)) return true;
   if (!schema || typeof schema !== "object") return false;
   const schemaRecord = schema as Record<string, unknown>;
   for (const key of USAGE_SCHEMA_KEYS) {
@@ -35,10 +36,9 @@ export function hasDeclaredUsageGuide(schema: SchemaLike): boolean {
   });
 }
 
-export function pluginUsageGuideWarning(feature: { config_schema?: SchemaLike }): string | null {
-  if (!feature.config_schema || typeof feature.config_schema !== "object") return null;
-  if (hasDeclaredUsageGuide(feature.config_schema)) return null;
-  return "高级规范警告：插件未声明详细使用说明。请在 config_schema 中提供 usage_preview、x-usage-guide 或 x-usage-steps。";
+export function pluginUsageGuideWarning(feature: { config_schema?: SchemaLike; usage?: unknown }): string | null {
+  if (hasDeclaredUsageGuide(feature.config_schema, feature.usage)) return null;
+  return "高级规范警告：插件未声明详细使用说明。请在 plugin.json 中提供 usage，或在 config_schema 中提供 usage_preview、x-usage-guide 或 x-usage-steps。";
 }
 
 export function isHighSeverityPluginWarning(warning: string): boolean {

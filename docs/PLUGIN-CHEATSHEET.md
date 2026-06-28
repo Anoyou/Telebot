@@ -1,66 +1,35 @@
 # TelePilot 插件速查表
 
-- TelePilot 标准模式就是个人可信插件模式：管理员安装并启用插件后，视为信任插件业务逻辑；平台负责频控、审计、急停和通道代发。
-- 产品文案统一叫“插件”，代码契约仍是 `Plugin` / `Manifest` / `PluginContext`。
-- 最小目录：`__init__.py`、`manifest.py`、`plugin.py`。
-- `__init__.py` 导出 `PLUGIN_CLASS` 和 `MANIFEST`。
-- `Manifest.key` 要和插件类 `key` 一致。
-- `permissions` 主要用于安装提示、审计和 UI 展示；不要把它当成公共插件市场的强沙箱。
-- `ctx.client` 是管理员命令和高级兼容入口；远程插件仍不直接拿 token/session，由平台 facade 代发。
-- 交互入口优先用 `ctx.messages`，它只生成标准动作，不直接调用 Telegram API。
-- 通道原则：插件拥有通道选择权，框架拥有通道执行权；插件可声明单通道或候选通道，平台负责执行可用通道、记录告警、处理能力边界、频控和审计。
-- `ctx.http` 需要 `external_http` + `allowed_hosts`。
-- `ctx.ai` 需要 `ai_text`，细节见 `docs/PLUGIN-AI.md`。
-- `command` 只保存裸指令名，不保存前缀。
-- 帮助文案里用 `{prefix}`，不要硬编码 `,`。
-- `owner_only=False` 只开放 `on_message`，不开放普通用户管理指令。
-- `incoming` 和 `outgoing` 是唯一的消息方向值。
-- `on_command(ctx, cmd, args, event) -> bool`，返回 `True` 表示接管。
-- `on_message` 里别直接假设 `event.outgoing` 一定存在，先 `getattr`。
-- `on_interaction` 用于群内玩法、高频按钮和付款后开局，按 `entry_key` 和 `payload["source"]["type"]` 分流；也可以用 `event_from_interaction_payload(payload)` 转成稳定事件对象。
-- `interaction_entries[].launch_mode` 建议显式写：`bridge` 走交互 Bot，`direct` 走原命令/内部调用，`hybrid` 两边都支持；新插件同时写 `dispatch_modes` 更清楚。
-- 新入口建议补 `dispatch_modes`：`admin_command` 表示管理员带前缀命令触发，`public_keyword` 表示群友关键词或转账规则触发；它描述入口来源，不绑死后续发送账号。
-- 新入口建议补 `message_channels`：`{"admin_command": "userbot_reply", "public_keyword": "interaction_bot"}`；这是通道偏好，不是能力范围。`money_channel` 写 `userbot_reply`，普通 Bot 不处理转账。
-- 常见事件：`payment_confirmed`、`keyword`、`message`、`callback_query`、`session_close`。
-- 常见动作：`send_message`、`send_photo`、`send_file`、`delete_message`、`pin_message`、`answer_callback`、`end_session`。
-- `send_message.reply_markup` 可用于 inline keyboard；按钮点击会作为 `callback_query` 事件回到同一活跃会话。
-- 按钮回调用 `ctx.messages.answer_callback(...)`，不要在插件里直接拼 Bot API。
-- `interaction_entries[].session_scope` 必填：群局写 `chat`，个人流程写 `user`，一次性动作写 `none`。
-- `interaction_entries[].events` 是事件白名单，别让插件自己猜会收到什么。
-- 交互 payload 就是标准事件信封，优先看 `source`、`message`、`chat`、`sender`、`actor`、`source_actor`、`payment`、`player`、`reply_to`、`trigger`、`session`、`raw`；旧平铺字段不要作为新插件主路径。
-- `source` 是事件类型和消息索引，`sender` / `source_actor` 是实际发消息的 Bot/用户，`actor` 是本次事件行为主体，`player` 是付费开局绑定玩家，`payment` 是到账证据。
-- 付费玩法必须以可信转账通知 Bot 的 `payment.status=confirmed` 作为到账依据；UserBot/回复上下文只用于补充付款玩家 `user_id`。
-- 独玩或按钮玩法声明 `participant_policy=solo_owner`，缺少 `player.user_id` 时平台会先要求付款人点击确认；抢答类玩法用 `open_race`。
-- 新交互入口名尽量别再用泛化的 `start_game`，用 `start_<plugin_key>` 更清楚；历史别名只在插件内部兼容。
-- `interaction_profile` 建议显式写：`session_game`、`challenge_game`、`reward_pool`、`utility_trigger`。
-- `session_policy` 写 TTL、重复触发、关闭条件；插件内部状态 key 要和 `session_scope` 对齐。
-- `payload_contract` 描述输入要求，`result_contract` 描述插件预期动作和发送通道；不写时按可信插件标准允许交互 Bot / UserBot 双通道。
-- `send_via` 支持 `interaction_bot`、`userbot_reply`；`channel` / `channel_selector` / `send_via_options` 可写候选顺序，例如 `["interaction_bot", "userbot_reply"]`。
-- `ctx.messages.send(channel={"prefer": ["bot", "userbot"], "fallback": true}, text="...")` 表示优先 Bot、失败时回退人形。
-- 声明了 `result_contract.actions` 或 `result_contract.send_via` 时，运行时会把它作为 Contract Guard 告警依据；未声明动作/通道会继续尝试执行可用通道并在日志、调试面板和 lint 中提示。
-- `userbot_reply` 由账号 worker 的 userbot 代发；插件选择的是受控通道，不会拿到 token/session。
-- `userbot_reply` 不承接 `reply_markup`；候选里带按钮时平台会优先保留 `interaction_bot`，避免按钮发到无法回调的通道。
-- `bbot_notice` / `notice` / `notice_bot` 已移除且不兼容，不再作为插件主动发送通道；群里已有的转账结果通知 Bot 只作为外部付款证据来源。旧插件请迁移到 `interaction_bot`、`userbot_reply` 或 `auto`。
-- `settlement` 只描述中奖/奖金/对账结果，普通 Bot 不直接执行钱相关动作；收款确认和发奖仍由 userbot / 平台受控结算完成。
-- `preserve_command_trigger=true` 是硬规则；加交互入口不能影响插件原有命令触发。
-- `command_fallback` 只能提示或受控回退，不能让普通 incoming 消息直接进入 `on_command`。
-- 规则 `concurrency=user` 只表示每用户 CD/每日上限，不等于插件会话也按用户。
-- 自动回复和交互 Bot 都只是触发器；业务逻辑放插件本体，UserBot 命令和 `on_interaction` 调同一份业务函数。
-- 长表单页要把“使用说明 → 功能总开关 → 插件配置 → 插件预览”拆成独立卡。
-- 有保存字段的页面要把 sticky“配置操作”条放在插件配置卡片底部。
-- 有 `config_schema` 的插件必须声明详细使用说明：优先 `x-usage-guide` / `x-usage-steps`，也可用只读 `usage_preview`。
-- 会发送消息的插件建议声明 `template_preview` 或 `*_preview`，没有预览不阻断运行。
-- 规则驱动页用 `rules`，单配置页用 `single`，平台能力用 `platform`。
-- 旧 `schema` 只保留给老插件兼容。
-- 远程插件要有 `plugin.json`、`manifest.py`、`plugin.py`、`__init__.py`。
-- `plugin.json` 只做静态安装元数据，不执行 Python。
-- 远程插件安装后还要看 `manifest.py` 的真实 `MANIFEST`。
-- 远程插件的 `version`、`category`、`interaction_entries` 要前后一致。
-- `plugin.json` 和 `manifest.py` 里的交互入口字段要同步，尤其 `launch_mode`、`dispatch_modes`、`message_channels`、`money_channel`、`events`、`session_scope`、`result_contract`。
-- 已接入的 installed 互动插件可跑 `python scripts/validate-installed-interaction-plugins.py` 做一次静态对齐检查。
-- 抢答/竞猜/抽奖要用锁和二次检查，避免重复发奖。
-- 超时任务、禁用、热重载、卸载都要清理状态。
-- 外部请求必须有 timeout。
-- 日志里不要放 token、session、完整路径或完整隐私消息。
-- 普通指令只由当前账号 outgoing 触发，不能直接让群成员触发管理命令。
-- 需要更多细节时，分别看概览、API、HTTP、安全和远程插件文档。
+- TelePilot 插件按个人可信插件模式运行：管理员安装并启用后，视为信任插件业务逻辑；平台负责事件信封、MessageOps 代发、Trace、风险提示、急停和审计。
+- 新插件主路径是 Event Bus + Trace + MessageOps：`plugin.json` 写 `usage`、`event_subscriptions`、`capabilities`，插件只读标准事件信封，动作只通过 `ctx.messages` 或标准 action 返回。
+- `interaction_entries`、旧交互规则、旧平铺 payload、`notice` / `bbot_notice` / `notice_bot` 只用于迁移说明；不要作为新插件模板。
+- 最小目录：`plugin.json`、`manifest.py`、`plugin.py`、`__init__.py`。`plugin.json.name`、`MANIFEST.key`、插件类 `key` 必须一致。
+- `usage` 是插件中心展示的使用说明；有 `config_schema` 时也可以补 `x-usage-guide` / `x-usage-steps`，但不要只靠口头说明。
+- `usage` 缺失会触发高级规范警告；官方可选、官方远程和示例插件不能用空声明绕过。
+- `event_subscriptions[].events` 常用值：`message`、`command`、`callback_query`、`inline_query`、`chosen_inline_result`、`payment_confirmed`、`session_close`。
+- `event_subscriptions[].source` 常用值：`userbot`、`interaction_bot`、`external_payment_notice`。
+- `event_subscriptions[].scope` 常用值：`all_allowed_chats`、`owner_only`、`known_users`、`rule_bound`、`inline_all`；Inline 插件必须显式用 `inline_all`。
+- `capabilities.telegram_native_raw` 是高风险能力声明；需要原生 Telegram 字段时写 `enabled=true`、`reason`、`sources`，并处理 `native_raw_meta.enabled=false` 的降级。
+- 标准事件信封优先读：`source`、`message`、`chat`、`sender`、`actor`、`source_actor`、`player`、`payment`、`reply_to`、`trigger`、`session`、`native_raw_meta`。
+- 新插件读取文本用 `payload["message"]["text"]` 或 `event_from_interaction_payload(payload).message.text`；不要用 `payload["text"]` / `payload["chat_id"]` / `payload.get("message")` 当主路径。
+- `source` 描述事件类型和来源通道；`actor` 是当前行为主体；`sender` 是发出消息的人或 Bot；`source_actor` 可表示可信外部通知 Bot；`player` 是付款绑定玩家；`payment.status=confirmed` 才能作为到账依据。
+- 普通消息回复使用 `ctx.messages.send(...)` 或返回 `{"type": "send_message", ...}`；插件选择候选通道，平台执行真实通道并记录 action。
+- 按钮必须经 `send_message.reply_markup` 发出；按钮回调用 `answer_callback`，不要在插件里直接拼 Bot API。
+- Inline 插件返回 `answer_inline_query`；选择结果进入 `chosen_inline_result`，用于记录选择、结算或后续状态。
+- 付款/发奖插件返回 `settlement` 或 userbot 受控动作；普通 Bot 只公告结果，不直接执行转账、催付或发奖。
+- 常见 action：`send_message`、`send_photo`、`send_file`、`edit_message`、`delete_message`、`pin_message`、`answer_callback`、`answer_inline_query`、`settlement`、`result`、`end_session`。
+- `send_via` 只使用 `interaction_bot`、`userbot_reply` 或 `auto`；旧 `notice` 值应返回迁移错误，不能静默执行。
+- `ctx.http` 需要 `permissions=["external_http"]` 和 `allowed_hosts`。
+- `ctx.ai` 需要 `permissions=["ai_text"]`，复用平台 LLM Provider、fallback、预算和 usage 记录。
+- `ctx.client` 只保留给管理员命令和高级兼容场景；远程插件仍不能直接拿 token、session、Bot API client 或 live event。
+- `command` 只保存裸指令名，不保存前缀；帮助文案用 `{prefix}`。
+- `on_command(ctx, cmd, args, event) -> bool` 保留给账号主人/授权管理员命令；群友公开触发走 Event Bus 订阅。
+- `on_message` 是旧消息监听兼容 hook；新增 Telegram 交互优先写标准事件入口或 `on_interaction` 迁移桥。
+- 已有 `interaction_entries` 插件迁移时，要把入口事件映射到 `event_subscriptions`，把 `payload_contract/result_contract/settlement` 转成标准信封和标准 action。
+- `interaction_entries[].session_scope` 的迁移含义：群局映射为 `session.scope=chat`，个人流程映射为 `session.scope=user`，一次性动作映射为无持久 session。
+- 规则 `concurrency=user` 只是触发频控粒度，不等于插件会话 key。
+- 抢答、竞猜、抽奖要加锁和二次检查；禁用、热重载、超时和卸载都要清理状态。
+- 外部请求必须有 timeout；日志里不要写 token、session、完整原生 payload、隐私消息或完整文件路径。
+- 维护示例：新主模板看 `examples/plugins/event_bus_demo`；HTTP 看 `with_http`；AI 看 `with_ai`；旧交互迁移看 `with_interaction`。
+- 迁移边界：平台功能不伪装成插件；官方可选/官方远程插件必须完整声明；示例插件只用于学习和 CI；用户安装插件可保留代码但启用/更新时要提示规范警告。
+- 验证示例：`python scripts/validate-plugin-examples.py`；检查已安装互动插件：`python scripts/validate-installed-interaction-plugins.py`。

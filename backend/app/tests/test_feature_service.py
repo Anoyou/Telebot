@@ -470,6 +470,7 @@ class TestFeatureInfo:
         feature.version = "1.2.0"
         feature.manifest = {
             "category": "interactive",
+            "usage": "发送“开始九宫格”启动玩法；点击按钮或回复答案继续。",
             "interaction_profile": "session_game",
             "interaction_entries": [
                 {
@@ -480,10 +481,24 @@ class TestFeatureInfo:
                     "session_scope": "chat",
                 }
             ],
+            "event_subscriptions": [
+                {
+                    "source": ["interaction_bot"],
+                    "events": ["message", "callback_query"],
+                    "scope": "all_allowed_chats",
+                }
+            ],
+            "capabilities": {
+                "telegram_native_raw": {
+                    "enabled": True,
+                    "reason": "风控需要原始数字 ID",
+                }
+            },
         }
 
         info = FeatureInfo.from_feature(feature)
         assert info.category == "interactive"
+        assert info.usage == "发送“开始九宫格”启动玩法；点击按钮或回复答案继续。"
         assert info.interaction_profile == "session_game"
         assert info.interaction_entries == [
             {
@@ -494,6 +509,19 @@ class TestFeatureInfo:
                 "session_scope": "chat",
             }
         ]
+        assert info.event_subscriptions == [
+            {
+                "source": ["interaction_bot"],
+                "events": ["message", "callback_query"],
+                "scope": "all_allowed_chats",
+            }
+        ]
+        assert info.capabilities == {
+            "telegram_native_raw": {
+                "enabled": True,
+                "reason": "风控需要原始数字 ID",
+            }
+        }
 
 
 class TestSetPluginGlobalConfig:

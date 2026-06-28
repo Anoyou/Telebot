@@ -58,6 +58,7 @@ from ...db.models.rule import Rule
 from ...db.models.system import SystemSetting
 from ...redis_client import get_redis
 from ...services import interaction_bot_service
+from ...services.event_trace import update_plugin_runtime_status
 from ...services.interaction.contracts import action_send_via_options, apply_action_send_via_options
 from ...services.rate_limit_service import get_effective
 from ...settings import settings as app_settings
@@ -649,6 +650,13 @@ async def _write_account_feature_load_state(
         .values(state=state, last_error=last_error)
     )
     await db.commit()
+    await update_plugin_runtime_status(
+        account_id=account_id,
+        plugin_key=feature_key,
+        enabled=state == FEATURE_STATE_ACTIVE,
+        load_status="loaded" if state == FEATURE_STATE_ACTIVE else "failed",
+        last_load_error=last_error,
+    )
 
 
 async def _deny_installed_plugin_load(
@@ -1040,7 +1048,9 @@ async def _activate(db, state: _AccountState, af: AccountFeature, redis: Any) ->
         return
 
     cls = get_plugin(af.feature_key)
+    load_attempted = False
     if cls is None and _builtin_plugin_path(af.feature_key) is not None:
+        load_attempted = True
         _load_builtin_plugin(af.feature_key)
         cls = get_plugin(af.feature_key)
     if cls is None:
@@ -1060,10 +1070,15 @@ async def _activate(db, state: _AccountState, af: AccountFeature, redis: Any) ->
                     auth,
                 )
                 return
+            load_attempted = True
             _load_installed_plugin(af.feature_key)
             cls = get_plugin(af.feature_key)
     if cls is None:
-        last_error, log_message = _missing_plugin_error(af.feature_key)
+        if load_attempted:
+            last_error = "PLUGIN_LOAD_FAILED: plugin import failed or manifest invalid"
+            log_message = f"feature {af.feature_key} 插件目录存在但加载失败或 manifest 无效"
+        else:
+            last_error, log_message = _missing_plugin_error(af.feature_key)
         await _log(
             redis,
             state.account_id,
@@ -1205,6 +1220,14 @@ async def _activate(db, state: _AccountState, af: AccountFeature, redis: Any) ->
             .values(state=FEATURE_STATE_FAILED, last_error=str(exc))
         )
         await db.commit()
+        await update_plugin_runtime_status(
+            account_id=state.account_id,
+            plugin_key=af.feature_key,
+            enabled=True,
+            load_status="failed",
+            installed_version=str(getattr(plugin_manifest, "version", "") or "") or None,
+            last_load_error=str(exc),
+        )
         await _log(
             redis,
             state.account_id,
@@ -1236,6 +1259,14 @@ async def _activate(db, state: _AccountState, af: AccountFeature, redis: Any) ->
         .values(state=FEATURE_STATE_ACTIVE, last_error=None)
     )
     await db.commit()
+    await update_plugin_runtime_status(
+        account_id=state.account_id,
+        plugin_key=af.feature_key,
+        enabled=True,
+        load_status="loaded",
+        installed_version=str(getattr(plugin_manifest, "version", "") or "") or None,
+        last_load_error=None,
+    )
 
 
 def _wrap_cmd(fn, ctx: PluginContext):
@@ -1749,7 +1780,7 @@ def get_recent_peers(account_id: int) -> list[dict[str, Any]]:
 
 
 _INTERACTION_SEND_ACTIONS = {"send_message", "send_photo", "send_file"}
-_INTERACTION_CONTROL_ACTIONS = {"delete_message", "pin_message", "answer_callback"}
+_INTERACTION_CONTROL_ACTIONS = {"delete_message", "pin_message", "answer_callback", "answer_inline_query"}
 
 
 def _normalize_interaction_action(raw: dict[str, Any]) -> dict[str, Any]:
@@ -1809,12 +1840,24 @@ async def invoke_interaction_entry(
     from .message_ops import BufferedMessageOps
 
     previous_messages = ctx.messages
+    previous_log = ctx.log
     buffered_messages = BufferedMessageOps()
     ctx.messages = buffered_messages
+    trace_id = str((payload or {}).get("trace_id") or "").strip()
+
+    if previous_log is not None and trace_id:
+        async def _trace_log(level: str, message: str, **detail: Any) -> None:
+            detail.setdefault("trace_id", trace_id)
+            detail.setdefault("plugin_key", plugin_key)
+            detail.setdefault("entry_key", entry_key)
+            await previous_log(level, message, **detail)
+
+        ctx.log = _trace_log
     try:
         actions = await inst.on_interaction(ctx, entry_key, dict(payload or {}))
     finally:
         ctx.messages = previous_messages
+        ctx.log = previous_log
     if actions is None and not buffered_messages.actions:
         raise RuntimeError(f"模块尚未实现交互入口：{plugin_key}.{entry_key}")
     if actions is None:

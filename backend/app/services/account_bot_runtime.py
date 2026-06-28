@@ -61,6 +61,25 @@ from . import (
     feature_service,
     remote_plugin_service,
 )
+from .event_bus import (
+    EVENT_REASON_CODES,
+    dispatch_event,
+    normalize_bot_update,
+    normalize_event_subscription,
+    normalize_payment_notice,
+)
+from .event_trace import (
+    TRACE_STATUS_FAILED,
+    TRACE_STATUS_OK,
+    TRACE_STATUS_SKIPPED,
+    TRACE_STATUS_WARNING,
+    finish_trace,
+    record_action,
+    record_span,
+    start_trace,
+    trace_log_context,
+    update_plugin_runtime_status,
+)
 from .interaction.contracts import guard_interaction_actions
 from .interaction.delivery import (
     INTERACTION_SESSION_CONTROL_ACTIONS as _INTERACTION_SESSION_CONTROL_ACTIONS,
@@ -101,6 +120,7 @@ _INTERACTION_DEBUG_TTL_SECONDS = 86400
 _INTERACTION_DEBUG_WARNING_LIMIT = 20
 AUTO_PAYOUT_MODULE_KEYS = {"game24", "math10", "dice_grid_hunt", "guess_number", "poetry_blank"}
 _INTERACTION_PAYMENT_CONFIRM_CALLBACK_PREFIX = "ip"
+_EVENT_FRAMEWORK_FLAGS_CACHE: tuple[float, dict[str, bool]] = (0.0, {})
 _PLAYER_IDENTITY_CONFIDENCE_VERIFIED = "verified_user_id"
 _PLAYER_IDENTITY_CONFIDENCE_REPLY = "reply_context"
 _PLAYER_IDENTITY_CONFIDENCE_CALLBACK = "callback_confirmed"
@@ -122,6 +142,50 @@ async def _load_command_prefix(db) -> str:
     return prefix
 
 
+async def _event_framework_flags() -> dict[str, bool]:
+    """Read runtime safety switches for Trace/Event Bus/Inline delivery."""
+
+    global _EVENT_FRAMEWORK_FLAGS_CACHE
+    now = time.monotonic()
+    cached_at, cached = _EVENT_FRAMEWORK_FLAGS_CACHE
+    if cached and now - cached_at < 30:
+        return cached
+    defaults = {
+        "trace_enabled": True,
+        "event_bus_delivery_enabled": True,
+        "inline_updates_enabled": True,
+        "native_raw_persist_enabled": False,
+    }
+    try:
+        async with AsyncSessionLocal() as db:
+            row = await db.get(SystemSetting, "log_retention")
+        raw = row.value if row is not None and isinstance(row.value, dict) else {}
+        flags = {
+            "trace_enabled": bool(raw.get("trace_enabled", defaults["trace_enabled"])),
+            "event_bus_delivery_enabled": bool(
+                raw.get("event_bus_delivery_enabled", defaults["event_bus_delivery_enabled"])
+            ),
+            "inline_updates_enabled": bool(raw.get("inline_updates_enabled", defaults["inline_updates_enabled"])),
+            "native_raw_persist_enabled": bool(
+                raw.get("native_raw_persist_enabled", defaults["native_raw_persist_enabled"])
+            ),
+        }
+    except Exception:  # noqa: BLE001
+        log.debug("load event framework flags failed, using defaults", exc_info=True)
+        flags = defaults
+    _EVENT_FRAMEWORK_FLAGS_CACHE = (now, flags)
+    return flags
+
+
+def _inline_update_allowed_updates(flags: dict[str, bool], base: list[str]) -> list[str]:
+    updates = list(base)
+    if flags.get("inline_updates_enabled", True):
+        for item in ("inline_query", "chosen_inline_result"):
+            if item not in updates:
+                updates.append(item)
+    return updates
+
+
 @dataclass(slots=True)
 class Incoming:
     account_id: int
@@ -134,6 +198,11 @@ class Incoming:
     chat_type: str | None = None
     callback_id: str | None = None
     callback_data: str | None = None
+    inline_query_id: str | None = None
+    inline_query_text: str | None = None
+    inline_offset: str | None = None
+    inline_chat_type: str | None = None
+    chosen_inline_result_id: str | None = None
     display_name: str | None = None
     username: str | None = None
     reply_to_user_id: int | None = None
@@ -142,6 +211,8 @@ class Incoming:
     reply_to_username: str | None = None
     reply_to_text: str | None = None
     entity_languages: tuple[str, ...] = ()
+    trace_id: str | None = None
+    native_raw: dict[str, Any] | None = None
 
 
 @dataclass
@@ -536,6 +607,7 @@ async def _polling_loop(aid: int) -> None:
                     row.status = ACCOUNT_BOT_STATUS_RUNNING
                     row.last_error = None
                     await db.commit()
+                event_flags = await _event_framework_flags()
 
             try:
                 result = await account_bot_service.call_bot_api(
@@ -544,7 +616,10 @@ async def _polling_loop(aid: int) -> None:
                     {
                         "offset": offset,
                         "timeout": 25,
-                        "allowed_updates": ["message", "callback_query"],
+                        "allowed_updates": _inline_update_allowed_updates(
+                            event_flags,
+                            ["message", "callback_query"],
+                        ),
                     },
                 )
                 updates = result.get("result") if isinstance(result, dict) else result
@@ -663,6 +738,7 @@ async def _interaction_polling_loop(aid: int) -> None:
                 return
             token = token_opt
             offset = (int(cfg["interaction_last_update_id"]) + 1) if cfg.get("interaction_last_update_id") is not None else None
+            event_flags = await _event_framework_flags()
 
             try:
                 result = await account_bot_service.call_bot_api(
@@ -671,7 +747,10 @@ async def _interaction_polling_loop(aid: int) -> None:
                     {
                         "offset": offset,
                         "timeout": 25,
-                        "allowed_updates": ["message", "callback_query"],
+                        "allowed_updates": _inline_update_allowed_updates(
+                            event_flags,
+                            ["message", "callback_query"],
+                        ),
                     },
                 )
                 updates = result.get("result") if isinstance(result, dict) else result
@@ -759,36 +838,84 @@ async def _handle_update(aid: int, token: str, update: dict[str, Any]) -> None:
     incoming = _extract_incoming(aid, token, update)
     if incoming is None:
         return
-    async with AsyncSessionLocal() as db:
-        user = None
-        if incoming.user_id is not None:
-            user = await account_bot_service.find_bot_user(db, aid, incoming.user_id)
-        if user is None or not user.enabled:
-            if incoming.text.startswith("/start") or incoming.text.startswith("/help"):
-                await _send(
-                    incoming,
-                    "你还没有被授权使用这个账号 Bot。\n"
-                    f"请在 GUI 的账号详情 → Bot 联动里添加 Telegram 用户 ID：<code>{incoming.user_id}</code>",
-                    reply_markup=None,
-                )
-            elif incoming.callback_id:
-                await account_bot_service.answer_callback(token, incoming.callback_id, text="未授权", show_alert=True)
-            return
-        if incoming.chat_id is not None:
-            user.last_chat_id = incoming.chat_id
-        if incoming.display_name and not user.display_name:
-            user.display_name = incoming.display_name
-        await db.commit()
-        role = user.role
-
+    flags = await _event_framework_flags()
+    if (incoming.inline_query_id or incoming.chosen_inline_result_id) and not flags.get("inline_updates_enabled", True):
+        return
+    trace = None
+    if flags.get("trace_enabled", True):
+        trace = await start_trace(_incoming_trace_payload(incoming, channel="account_bot"))
+        incoming.trace_id = trace.trace_id
+        await record_span(trace, "receive", TRACE_STATUS_OK, component="account_bot", **_interaction_log_context(incoming))
+    final_status = TRACE_STATUS_SKIPPED
     try:
-        if incoming.callback_id and incoming.callback_data:
-            await _handle_callback(incoming, role)
-        else:
-            if not _should_route_text_to_account_commands(incoming):
+        async with AsyncSessionLocal() as db:
+            user = None
+            if incoming.user_id is not None:
+                user = await account_bot_service.find_bot_user(db, aid, incoming.user_id)
+            if user is None or not user.enabled:
+                await record_span(
+                    trace,
+                    "route",
+                    TRACE_STATUS_SKIPPED,
+                    component="account_bot",
+                    reason_code="account_bot_user_unauthorized",
+                )
+                if incoming.text.startswith("/start") or incoming.text.startswith("/help"):
+                    await _send(
+                        incoming,
+                        "你还没有被授权使用这个账号 Bot。\n"
+                        f"请在 GUI 的账号详情 → Bot 联动里添加 Telegram 用户 ID：<code>{incoming.user_id}</code>",
+                        reply_markup=None,
+                    )
+                elif incoming.callback_id:
+                    await account_bot_service.answer_callback(token, incoming.callback_id, text="未授权", show_alert=True)
                 return
-            await _handle_command(incoming, role)
+            if incoming.chat_id is not None:
+                user.last_chat_id = incoming.chat_id
+            if incoming.display_name and not user.display_name:
+                user.display_name = incoming.display_name
+            await db.commit()
+            role = user.role
+
+        if incoming.callback_id and incoming.callback_data:
+            await record_span(
+                trace,
+                "route",
+                TRACE_STATUS_OK,
+                component="account_bot_callback",
+                reason_code="callback_query",
+            )
+            await _handle_callback(incoming, role)
+            final_status = TRACE_STATUS_OK
+            return
+        if not _should_route_text_to_account_commands(incoming):
+            await record_span(
+                trace,
+                "route",
+                TRACE_STATUS_SKIPPED,
+                component="account_bot",
+                reason_code="command_not_matched",
+            )
+            return
+        await record_span(
+            trace,
+            "route",
+            TRACE_STATUS_OK,
+            component="account_bot_command",
+            reason_code="command_matched",
+        )
+        await _handle_command(incoming, role)
+        final_status = TRACE_STATUS_OK
     except PermissionError as exc:
+        final_status = TRACE_STATUS_FAILED
+        await record_span(
+            trace,
+            "finish",
+            TRACE_STATUS_FAILED,
+            component="account_bot",
+            reason_code="permission_denied",
+            error=str(exc),
+        )
         if incoming.callback_id:
             await account_bot_service.answer_callback(
                 incoming.token,
@@ -798,26 +925,98 @@ async def _handle_update(aid: int, token: str, update: dict[str, Any]) -> None:
             )
         else:
             await _send(incoming, f"权限不足：{account_bot_service.html_text(exc)}")
+    except Exception as exc:  # noqa: BLE001
+        final_status = TRACE_STATUS_FAILED
+        await record_span(
+            trace,
+            "finish",
+            TRACE_STATUS_FAILED,
+            component="account_bot",
+            reason_code="handler_error",
+            error=f"{type(exc).__name__}: {exc}",
+        )
+        raise
+    finally:
+        await finish_trace(trace, final_status)
 
 
 async def _handle_interaction_update(aid: int, token: str, update: dict[str, Any]) -> None:
     incoming = _extract_incoming(aid, token, update)
     if incoming is None:
         return
-    async with AsyncSessionLocal() as db:
-        if await _try_handle_interaction_payment_confirm(db, incoming):
-            return
-        cfg = await account_bot_service.get_transfer_notice_config(db, incoming.account_id)
-        if incoming.user_id is not None and _int_or_none(cfg.get("interaction_bot_id")) == incoming.user_id:
-            return
-        if await _try_handle_transfer_notice(db, incoming):
-            return
-        if await _try_handle_interaction_rule_command_or_keyword(db, incoming):
-            return
-        if await _try_handle_interaction_module_message(db, incoming):
-            return
-        if await _try_handle_math_answer(incoming):
-            return
+    flags = await _event_framework_flags()
+    if (incoming.inline_query_id or incoming.chosen_inline_result_id) and not flags.get("inline_updates_enabled", True):
+        return
+    trace = None
+    if flags.get("trace_enabled", True):
+        trace = await start_trace(_incoming_trace_payload(incoming))
+        incoming.trace_id = trace.trace_id
+        await record_span(trace, "receive", TRACE_STATUS_OK, component="interaction_bot", **_interaction_log_context(incoming))
+    final_status = TRACE_STATUS_SKIPPED
+    try:
+        async with AsyncSessionLocal() as db:
+            if await _try_handle_interaction_payment_confirm(db, incoming):
+                final_status = TRACE_STATUS_OK
+                await record_span(trace, "route", TRACE_STATUS_OK, component="interaction_payment_confirm")
+                return
+            cfg = await account_bot_service.get_transfer_notice_config(db, incoming.account_id)
+            if incoming.user_id is not None and _int_or_none(cfg.get("interaction_bot_id")) == incoming.user_id:
+                await record_span(trace, "route", TRACE_STATUS_SKIPPED, component="interaction_bot", reason_code="bot_self_message")
+                return
+            if await _try_handle_transfer_notice(db, incoming):
+                final_status = TRACE_STATUS_OK
+                await record_span(trace, "route", TRACE_STATUS_OK, component="transfer_notice")
+                return
+            event_bus_handled, event_bus_ok = (
+                await _try_handle_event_bus_subscriptions(db, incoming, cfg)
+                if flags.get("event_bus_delivery_enabled", True)
+                else (False, True)
+            )
+            if event_bus_handled:
+                final_status = TRACE_STATUS_OK if event_bus_ok else TRACE_STATUS_FAILED
+                await record_span(
+                    trace,
+                    "route",
+                    final_status,
+                    component="event_bus",
+                    reason_code=None if event_bus_ok else "plugin_runtime_error",
+                )
+                return
+            if not flags.get("event_bus_delivery_enabled", True):
+                await record_span(
+                    trace,
+                    "subscription_match",
+                    TRACE_STATUS_SKIPPED,
+                    component="event_bus",
+                    reason_code="event_bus_delivery_disabled",
+                    message="Event Bus 新投递路径已通过运行设置关闭，回退旧规则链路。",
+                )
+            if await _try_handle_interaction_rule_command_or_keyword(db, incoming):
+                final_status = TRACE_STATUS_OK
+                await record_span(trace, "route", TRACE_STATUS_OK, component="interaction_rule")
+                return
+            if await _try_handle_interaction_module_message(db, incoming):
+                final_status = TRACE_STATUS_OK
+                await record_span(trace, "route", TRACE_STATUS_OK, component="interaction_session")
+                return
+            if await _try_handle_math_answer(incoming):
+                final_status = TRACE_STATUS_OK
+                await record_span(trace, "route", TRACE_STATUS_OK, component="math_answer")
+                return
+            await record_span(trace, "route", TRACE_STATUS_SKIPPED, component="interaction_bot", reason_code="subscription_not_matched")
+    except Exception as exc:  # noqa: BLE001
+        final_status = TRACE_STATUS_FAILED
+        await record_span(
+            trace,
+            "finish",
+            TRACE_STATUS_FAILED,
+            component="interaction_bot",
+            reason_code="handler_error",
+            error=f"{type(exc).__name__}: {exc}",
+        )
+        raise
+    finally:
+        await finish_trace(trace, final_status)
 
 
 async def _handle_transfer_test_update(aid: int, token: str, update: dict[str, Any]) -> None:
@@ -2562,6 +2761,325 @@ async def _try_handle_interaction_payment_confirm(db: Any, incoming: Incoming) -
     return True
 
 
+async def _try_handle_event_bus_subscriptions(
+    db: Any,
+    incoming: Incoming,
+    cfg: dict[str, Any],
+) -> tuple[bool, bool]:
+    """Deliver interaction bot events to plugins that declare Event Bus subscriptions.
+
+    The legacy rule pipeline remains the fallback for plugins without
+    ``event_subscriptions``.  This path is intentionally narrow and trace-heavy:
+    every candidate produces a stable matched/skipped span.
+    """
+
+    try:
+        subscriptions = await _load_enabled_event_bus_subscriptions(db, incoming.account_id)
+    except Exception as exc:  # noqa: BLE001
+        await record_span(
+            trace_log_context(incoming.trace_id),
+            "subscription_match",
+            TRACE_STATUS_SKIPPED,
+            component="event_bus",
+            reason_code="subscription_load_failed",
+            message="加载 Event Bus 订阅失败，回退旧规则链路。",
+            error=f"{type(exc).__name__}: {exc}",
+        )
+        return False, True
+    if not subscriptions:
+        await record_span(
+            trace_log_context(incoming.trace_id),
+            "subscription_match",
+            TRACE_STATUS_SKIPPED,
+            component="event_bus",
+            reason_code="subscription_not_matched",
+            message="没有已启用插件声明 Event Bus 订阅。",
+        )
+        return False, True
+    event = _incoming_trace_payload(incoming)
+    event["trace_id"] = incoming.trace_id
+    account_state = await _event_bus_account_state(db, incoming, cfg)
+    result = dispatch_event(event, subscriptions, account_state)
+    handled = False
+    all_ok = True
+    for decision in result.decisions:
+        span_status = TRACE_STATUS_OK if decision.matched else TRACE_STATUS_SKIPPED
+        await record_span(
+            trace_log_context(incoming.trace_id),
+            "subscription_match",
+            span_status,
+            component="event_bus",
+            plugin_key=decision.plugin_key,
+            entry_key=decision.entry_key,
+            reason_code=decision.reason_code,
+            message=decision.reason_message,
+            dispatch_mode=decision.dispatch_mode,
+            scope=decision.scope,
+            filters=decision.filters,
+        )
+        if not decision.matched:
+            continue
+        handled = True
+        entry_key = str(decision.entry_key or "").strip()
+        if not entry_key:
+            all_ok = False
+            await record_span(
+                trace_log_context(incoming.trace_id),
+                "plugin_invoke",
+                TRACE_STATUS_SKIPPED,
+                component="event_bus",
+                plugin_key=decision.plugin_key,
+                reason_code="entry_key_missing",
+                message="Event Bus 订阅缺少 entry_key，无法投递给插件入口。",
+            )
+            continue
+        payload = _event_bus_plugin_payload(incoming, event, decision)
+        ok, error, actions = await _run_worker_interaction_entry(
+            incoming,
+            plugin_key=decision.plugin_key,
+            entry_key=entry_key,
+            payload=payload,
+        )
+        if not ok:
+            all_ok = False
+            await _remember_interaction_debug_state(incoming, stage="plugin_error", payload=payload, error=error)
+            continue
+        rule = _event_bus_virtual_rule(decision)
+        guarded = await _guard_interaction_actions(incoming, rule, actions)
+        await _apply_interaction_actions(
+            incoming,
+            guarded,
+            context=_interaction_trace_context(payload),
+        )
+    return handled, all_ok
+
+
+async def _try_handle_event_bus_payment_notice(
+    db: Any,
+    incoming: Incoming,
+    cfg: dict[str, Any],
+    parsed: dict[str, Any],
+) -> tuple[bool, bool]:
+    """Deliver external transfer notices to Event Bus payment subscribers.
+
+    Legacy payment rules remain the fallback when no plugin subscribes to the
+    payment event, but new plugins can now consume the same notice without
+    depending on interaction rules.
+    """
+
+    try:
+        subscriptions = await _load_enabled_event_bus_subscriptions(db, incoming.account_id)
+    except Exception as exc:  # noqa: BLE001
+        await record_span(
+            trace_log_context(incoming.trace_id),
+            "subscription_match",
+            TRACE_STATUS_SKIPPED,
+            component="event_bus_payment_notice",
+            reason_code="subscription_load_failed",
+            message="加载 Event Bus 付款订阅失败，回退旧付款规则。",
+            error=f"{type(exc).__name__}: {exc}",
+        )
+        return False, True
+    if not subscriptions:
+        return False, True
+    raw_update = incoming.native_raw if isinstance(incoming.native_raw, dict) else {
+        "update_id": incoming.update_id,
+        "message": {
+            "message_id": incoming.message_id,
+            "text": incoming.text,
+            "chat": {"id": incoming.chat_id, "type": incoming.chat_type},
+            "from": {
+                "id": incoming.user_id,
+                "first_name": incoming.display_name,
+                "username": incoming.username,
+            },
+        },
+    }
+    event = normalize_payment_notice(incoming.account_id, raw_update, parsed)
+    event["trace_id"] = incoming.trace_id
+    event["source_actor"] = {
+        "type": "external_bot",
+        "user_id": incoming.user_id,
+        "display_name": incoming.display_name,
+        "username": incoming.username,
+    }
+    event["actor"] = {
+        "user_id": parsed.get("payer_user_id"),
+        "display_name": parsed.get("payer_name"),
+    }
+    event["player"] = dict(event["actor"])
+    event["reply_to"] = {
+        "user_id": incoming.reply_to_user_id,
+        "message_id": incoming.reply_to_message_id,
+        "display_name": incoming.reply_to_display_name,
+        "username": incoming.reply_to_username,
+        "text": incoming.reply_to_text,
+    } if incoming.reply_to_message_id or incoming.reply_to_text else event.get("reply_to")
+    account_state = await _event_bus_account_state(db, incoming, cfg)
+    result = dispatch_event(event, subscriptions, account_state)
+    handled = False
+    all_ok = True
+    for decision in result.decisions:
+        await record_span(
+            trace_log_context(incoming.trace_id),
+            "subscription_match",
+            TRACE_STATUS_OK if decision.matched else TRACE_STATUS_SKIPPED,
+            component="event_bus_payment_notice",
+            plugin_key=decision.plugin_key,
+            entry_key=decision.entry_key,
+            reason_code=decision.reason_code,
+            message=decision.reason_message,
+            dispatch_mode=decision.dispatch_mode,
+            scope=decision.scope,
+            filters=decision.filters,
+        )
+        if not decision.matched:
+            continue
+        handled = True
+        entry_key = str(decision.entry_key or "").strip()
+        if not entry_key:
+            all_ok = False
+            await record_span(
+                trace_log_context(incoming.trace_id),
+                "plugin_invoke",
+                TRACE_STATUS_SKIPPED,
+                component="event_bus_payment_notice",
+                plugin_key=decision.plugin_key,
+                reason_code="entry_key_missing",
+                message="Event Bus 付款订阅缺少 entry_key，无法投递给插件入口。",
+            )
+            continue
+        payload = _event_bus_plugin_payload(incoming, event, decision)
+        payload["event_type"] = "payment_confirmed"
+        payload["payment"] = dict(parsed)
+        payload["source_actor"] = dict(event["source_actor"])
+        payload["actor"] = dict(event["actor"])
+        payload["player"] = dict(event["player"])
+        ok, error, actions = await _run_worker_interaction_entry(
+            incoming,
+            plugin_key=decision.plugin_key,
+            entry_key=entry_key,
+            payload=payload,
+        )
+        if not ok:
+            all_ok = False
+            await _remember_interaction_debug_state(incoming, stage="plugin_error", payload=payload, error=error)
+            continue
+        rule = _event_bus_virtual_rule(decision)
+        guarded = await _guard_interaction_actions(incoming, rule, actions)
+        await _apply_interaction_actions(
+            incoming,
+            guarded,
+            context=_interaction_trace_context(payload),
+        )
+    return handled, all_ok
+
+
+async def _load_enabled_event_bus_subscriptions(db: Any, account_id: int) -> list[Any]:
+    rows = (
+        await db.execute(
+            select(AccountFeature).where(
+                AccountFeature.account_id == account_id,
+                AccountFeature.enabled.is_(True),
+            )
+        )
+    ).scalars().all()
+    out: list[Any] = []
+    for row in rows:
+        plugin_key = str(getattr(row, "feature_key", "") or "").strip()
+        if not plugin_key:
+            continue
+        for raw in account_bot_service.declared_module_event_subscriptions(plugin_key):
+            subscription = normalize_event_subscription(raw, plugin_key=plugin_key)
+            out.append(subscription)
+    return out
+
+
+async def _event_bus_account_state(db: Any, incoming: Incoming, cfg: dict[str, Any]) -> dict[str, Any]:
+    owner_ids: list[int] = []
+    try:
+        account = await db.get(Account, incoming.account_id)
+        owner_id = _int_or_none(getattr(account, "tg_user_id", None))
+        if owner_id is not None:
+            owner_ids.append(owner_id)
+    except Exception:  # noqa: BLE001
+        log.debug("load event bus account owner failed aid=%s", incoming.account_id, exc_info=True)
+    return {
+        "allowed_chat_ids": _interaction_allowed_chat_ids(cfg),
+        "owner_user_ids": owner_ids,
+        "known_user_ids": owner_ids + ([incoming.user_id] if incoming.user_id is not None else []),
+    }
+
+
+def _interaction_allowed_chat_ids(cfg: dict[str, Any]) -> list[int]:
+    ids: list[int] = []
+    for key in ("chat_id",):
+        chat_id = _int_or_none(cfg.get(key))
+        if chat_id is not None and chat_id not in ids:
+            ids.append(chat_id)
+    raw_chat_ids = cfg.get("chat_ids")
+    if isinstance(raw_chat_ids, list):
+        for raw in raw_chat_ids:
+            chat_id = _int_or_none(raw)
+            if chat_id is not None and chat_id not in ids:
+                ids.append(chat_id)
+    for rule in _interaction_rules(cfg):
+        raw_rule_chat_ids = rule.get("chat_ids")
+        if not isinstance(raw_rule_chat_ids, list):
+            continue
+        for raw in raw_rule_chat_ids:
+            chat_id = _int_or_none(raw)
+            if chat_id is not None and chat_id not in ids:
+                ids.append(chat_id)
+    return ids
+
+
+def _event_bus_plugin_payload(incoming: Incoming, event: dict[str, Any], decision: Any) -> dict[str, Any]:
+    payload = dict(event)
+    sender = payload.get("sender") if isinstance(payload.get("sender"), dict) else {}
+    payload["trace_id"] = incoming.trace_id
+    payload["account_id"] = incoming.account_id
+    payload["chat_id"] = incoming.chat_id
+    payload["message_text"] = incoming.text
+    payload["callback_query_id"] = incoming.callback_id
+    payload["callback_data"] = incoming.callback_data
+    payload["sender_user_id"] = incoming.user_id
+    payload["sender_name"] = incoming.display_name
+    payload["sender_username"] = incoming.username
+    payload["actor"] = dict(sender)
+    payload["source_actor"] = dict(sender)
+    payload["player"] = dict(sender)
+    trigger = dict(payload.get("trigger") or {}) if isinstance(payload.get("trigger"), dict) else {}
+    trigger.update(
+        {
+            "rule_id": f"eventbus:{decision.plugin_key}:{decision.entry_key or 'main'}",
+            "rule_name": f"Event Bus / {decision.plugin_key}",
+            "module_key": decision.plugin_key,
+            "entry_key": decision.entry_key,
+            "dispatch_mode": decision.dispatch_mode,
+            "scope": decision.scope,
+            "filters": dict(decision.filters or {}),
+        }
+    )
+    payload["trigger"] = trigger
+    allowed = account_bot_service.plugin_declares_telegram_native_raw(decision.plugin_key, source="interaction_bot")
+    payload["native_raw_meta"] = _native_raw_meta(incoming, object_name="update", enabled=allowed)
+    payload["native_raw"] = incoming.native_raw if allowed else None
+    if not allowed:
+        payload.pop("raw_event", None)
+    return payload
+
+
+def _event_bus_virtual_rule(decision: Any) -> dict[str, Any]:
+    return {
+        "id": f"eventbus:{decision.plugin_key}:{decision.entry_key or 'main'}",
+        "name": f"Event Bus / {decision.plugin_key}",
+        "action": "module",
+        "module_key": decision.plugin_key,
+        "module_action": decision.entry_key,
+    }
+
+
 async def _try_handle_interaction_rule_command_or_keyword(db: Any, incoming: Incoming) -> bool:
     if incoming.callback_id or incoming.chat_id is None:
         return False
@@ -3187,8 +3705,11 @@ def _interaction_module_payload(
     trigger = _interaction_trigger_envelope(rule, event_type, parsed)
     session = _interaction_session_envelope(incoming, rule, data)
     raw = _interaction_raw_envelope(incoming, rule, parsed, event_type)
+    module_key = str(rule.get("module_key") or "").strip()
+    native_raw_allowed = account_bot_service.plugin_declares_telegram_native_raw(module_key, source="interaction_bot")
     data.update(
         {
+            "trace_id": incoming.trace_id,
             "event": event,
             "source": source,
             "message": message,
@@ -3202,6 +3723,10 @@ def _interaction_module_payload(
             "trigger": trigger,
             "session": session,
             "raw": raw,
+            "native_raw_meta": _native_raw_meta(incoming, object_name="update", enabled=native_raw_allowed),
+            "native_raw": incoming.native_raw if native_raw_allowed else None,
+            "inline_query": None,
+            "chosen_inline_result": None,
             "event_type": event_type,
             "account_id": incoming.account_id,
             "chat_id": incoming.chat_id,
@@ -3260,6 +3785,17 @@ async def _run_worker_interaction_entry(
     reply_channel = f"account_bot:interaction_entry:{incoming.account_id}:{secrets.token_hex(8)}"
     redis = get_redis()
     pubsub = redis.pubsub()
+    trace_ctx = _interaction_trace_context(payload)
+    trace_id = trace_ctx.get("trace_id") or incoming.trace_id
+    started = time.time()
+    await record_span(
+        trace_ctx,
+        "plugin_invoke",
+        TRACE_STATUS_OK,
+        component="worker",
+        plugin_key=plugin_key,
+        entry_key=entry_key,
+    )
     try:
         await pubsub.subscribe(reply_channel)
         await redis.publish(
@@ -3279,9 +3815,46 @@ async def _run_worker_interaction_entry(
                 continue
             response = IPCMessage.decode(msg["data"]).payload
             actions = response.get("actions") if isinstance(response.get("actions"), list) else []
-            return bool(response.get("ok")), response.get("error"), [item for item in actions if isinstance(item, dict)]
+            ok = bool(response.get("ok"))
+            error = response.get("error")
+            await record_span(
+                trace_ctx,
+                "plugin_return",
+                TRACE_STATUS_OK if ok else TRACE_STATUS_FAILED,
+                component="worker",
+                plugin_key=plugin_key,
+                entry_key=entry_key,
+                reason_code=None if ok else "plugin_load_failed",
+                error=error,
+                action_count=len(actions),
+                duration_ms=int((time.time() - started) * 1000),
+            )
+            await update_plugin_runtime_status(
+                account_id=incoming.account_id,
+                plugin_key=plugin_key,
+                last_invocation_status=TRACE_STATUS_OK if ok else TRACE_STATUS_FAILED,
+                last_trace_id=str(trace_id or ""),
+            )
+            return ok, error, [item for item in actions if isinstance(item, dict)]
     except Exception as exc:  # noqa: BLE001
         log.warning("interaction module ipc failed aid=%s plugin=%s entry=%s error=%s", incoming.account_id, plugin_key, entry_key, exc)
+        await record_span(
+            trace_ctx,
+            "plugin_return",
+            TRACE_STATUS_FAILED,
+            component="worker",
+            plugin_key=plugin_key,
+            entry_key=entry_key,
+            reason_code="plugin_load_failed",
+            error=f"{type(exc).__name__}: {exc}",
+            duration_ms=int((time.time() - started) * 1000),
+        )
+        await update_plugin_runtime_status(
+            account_id=incoming.account_id,
+            plugin_key=plugin_key,
+            last_invocation_status=TRACE_STATUS_FAILED,
+            last_trace_id=str(trace_id or ""),
+        )
         return False, f"{type(exc).__name__}: {exc}", []
     finally:
         try:
@@ -3292,6 +3865,23 @@ async def _run_worker_interaction_entry(
                 ret = close()
                 if hasattr(ret, "__await__"):
                     await ret
+    await record_span(
+        trace_ctx,
+        "plugin_return",
+        TRACE_STATUS_FAILED,
+        component="worker",
+        plugin_key=plugin_key,
+        entry_key=entry_key,
+        reason_code="plugin_load_failed",
+        error="worker 调用超时",
+        duration_ms=int((time.time() - started) * 1000),
+    )
+    await update_plugin_runtime_status(
+        account_id=incoming.account_id,
+        plugin_key=plugin_key,
+        last_invocation_status=TRACE_STATUS_FAILED,
+        last_trace_id=str(trace_id or ""),
+    )
     return False, "worker 调用超时", []
 
 
@@ -3393,6 +3983,8 @@ async def _write_interaction_runtime_log(
     **detail: Any,
 ) -> None:
     try:
+        if incoming.trace_id and not detail.get("trace_id"):
+            detail["trace_id"] = incoming.trace_id
         if detail.get("guard_level"):
             await _remember_interaction_debug_warning(incoming, level, message, detail)
         payload = RuntimeLogPayload(
@@ -3408,7 +4000,7 @@ async def _write_interaction_runtime_log(
 
 
 def _interaction_log_context(incoming: Incoming) -> dict[str, Any]:
-    return {
+    context = {
         "chat_id": incoming.chat_id,
         "message_id": incoming.message_id,
         "reply_to_message_id": incoming.reply_to_message_id,
@@ -3416,19 +4008,199 @@ def _interaction_log_context(incoming: Incoming) -> dict[str, Any]:
         "username": incoming.username,
         "display_name": incoming.display_name,
     }
+    if incoming.trace_id:
+        context["trace_id"] = incoming.trace_id
+    return context
+
+
+def _incoming_event_type(incoming: Incoming) -> str:
+    if incoming.inline_query_id:
+        return "inline_query"
+    if incoming.chosen_inline_result_id:
+        return "chosen_inline_result"
+    return "callback_query" if incoming.callback_id else "message"
+
+
+def _incoming_trace_payload(
+    incoming: Incoming,
+    *,
+    event_type: str | None = None,
+    channel: str = "interaction_bot",
+) -> dict[str, Any]:
+    kind = event_type or _incoming_event_type(incoming)
+    if isinstance(incoming.native_raw, dict):
+        payload = normalize_bot_update(incoming.account_id, incoming.native_raw, channel=channel)
+        payload["trace_id"] = incoming.trace_id
+        payload["event_type"] = kind
+        source = payload.get("source") if isinstance(payload.get("source"), dict) else {}
+        source.update(
+            {
+                "type": kind,
+                "channel": channel,
+                "account_id": incoming.account_id,
+                "chat_id": incoming.chat_id,
+                "message_id": incoming.message_id,
+                "callback_query_id": incoming.callback_id,
+                "callback_data": incoming.callback_data,
+                "inline_query_id": incoming.inline_query_id,
+            }
+        )
+        payload["source"] = source
+        message = payload.get("message") if isinstance(payload.get("message"), dict) else {}
+        message.update(
+            {
+                "chat_id": incoming.chat_id,
+                "message_id": incoming.message_id,
+                "text": incoming.text,
+                "reply_to_message_id": incoming.reply_to_message_id,
+            }
+        )
+        payload["message"] = message
+        payload["chat"] = {"id": incoming.chat_id, "type": incoming.chat_type}
+        payload["sender"] = {
+            "user_id": incoming.user_id,
+            "display_name": incoming.display_name,
+            "username": incoming.username,
+        }
+        payload["actor"] = dict(payload["sender"])
+        payload["source_actor"] = dict(payload["sender"])
+        payload["player"] = dict(payload["sender"])
+        payload["reply_to"] = {
+            "user_id": incoming.reply_to_user_id,
+            "message_id": incoming.reply_to_message_id,
+            "display_name": incoming.reply_to_display_name,
+            "username": incoming.reply_to_username,
+            "text": incoming.reply_to_text,
+        } if incoming.reply_to_message_id or incoming.reply_to_text else None
+        payload["raw"] = {
+            "update_id": incoming.update_id,
+            "message_id": incoming.message_id,
+            "callback_query_id": incoming.callback_id,
+            "callback_data": incoming.callback_data,
+            "inline_query_id": incoming.inline_query_id,
+            "chosen_inline_result_id": incoming.chosen_inline_result_id,
+            "text": incoming.text,
+            "event_type": kind,
+        }
+        payload["native_raw_meta"] = _native_raw_meta(incoming, object_name="update", enabled=False, source=channel)
+        payload["native_raw"] = None
+        return payload
+    return {
+        "trace_id": incoming.trace_id,
+        "source": {
+            "type": kind,
+            "channel": channel,
+            "driver": "telegram_bot_api",
+            "account_id": incoming.account_id,
+            "chat_id": incoming.chat_id,
+            "chat_type": incoming.chat_type,
+            "update_id": incoming.update_id,
+            "message_id": incoming.message_id,
+            "callback_query_id": incoming.callback_id,
+            "callback_data": incoming.callback_data,
+            "inline_query_id": incoming.inline_query_id,
+        },
+        "message": {
+            "chat_id": incoming.chat_id,
+            "message_id": incoming.message_id,
+            "text": incoming.text,
+            "reply_to_message_id": incoming.reply_to_message_id,
+        },
+        "chat": {
+            "id": incoming.chat_id,
+            "type": incoming.chat_type,
+        },
+        "sender": {
+            "user_id": incoming.user_id,
+            "display_name": incoming.display_name,
+            "username": incoming.username,
+        },
+        "inline_query": {
+            "id": incoming.inline_query_id,
+            "query": incoming.inline_query_text or incoming.text,
+            "offset": incoming.inline_offset or "",
+            "chat_type": incoming.inline_chat_type,
+            "from": {
+                "user_id": incoming.user_id,
+                "display_name": incoming.display_name,
+                "username": incoming.username,
+            },
+        } if incoming.inline_query_id else None,
+        "chosen_inline_result": {
+            "result_id": incoming.chosen_inline_result_id,
+            "query": incoming.inline_query_text or incoming.text,
+            "from": {
+                "user_id": incoming.user_id,
+                "display_name": incoming.display_name,
+                "username": incoming.username,
+            },
+        } if incoming.chosen_inline_result_id else None,
+        "reply_to": {
+            "user_id": incoming.reply_to_user_id,
+            "message_id": incoming.reply_to_message_id,
+            "display_name": incoming.reply_to_display_name,
+            "username": incoming.reply_to_username,
+            "text": incoming.reply_to_text,
+        } if incoming.reply_to_message_id or incoming.reply_to_text else None,
+        "raw": {
+            "update_id": incoming.update_id,
+            "message_id": incoming.message_id,
+            "callback_query_id": incoming.callback_id,
+            "callback_data": incoming.callback_data,
+            "inline_query_id": incoming.inline_query_id,
+            "chosen_inline_result_id": incoming.chosen_inline_result_id,
+            "text": incoming.text,
+            "event_type": kind,
+        },
+        "native_raw_meta": _native_raw_meta(incoming, object_name="update", enabled=False, source=channel),
+        "native_raw": None,
+    }
 
 
 def _interaction_trace_context(payload: dict[str, Any] | None) -> dict[str, Any]:
     data = payload if isinstance(payload, dict) else {}
     trigger = data.get("trigger") if isinstance(data.get("trigger"), dict) else {}
     session = data.get("session") if isinstance(data.get("session"), dict) else {}
+    trace_id = str(data.get("trace_id") or "").strip() or None
     return {
+        "trace_id": trace_id,
         "rule_id": str(trigger.get("rule_id") or "").strip() or None,
         "rule_name": str(trigger.get("rule_name") or "").strip() or None,
         "plugin_key": str(trigger.get("module_key") or "").strip() or None,
         "entry_key": str(trigger.get("entry_key") or "").strip() or None,
         "session_key": str(session.get("key") or "").strip() or None,
         "session_scope": str(session.get("scope") or "").strip() or None,
+    }
+
+
+def _native_raw_meta(
+    incoming: Incoming,
+    *,
+    object_name: str,
+    enabled: bool,
+    source: str = "interaction_bot",
+) -> dict[str, Any]:
+    raw = incoming.native_raw if isinstance(incoming.native_raw, dict) else None
+    try:
+        size = len(json.dumps(raw or {}, ensure_ascii=False, default=str).encode("utf-8")) if raw is not None else 0
+    except (TypeError, ValueError):
+        size = 0
+    if enabled and raw is None:
+        reason_code = "native_raw_skipped"
+    elif enabled:
+        reason_code = None
+    else:
+        reason_code = "native_raw_not_allowed"
+    if reason_code is not None and reason_code not in EVENT_REASON_CODES:
+        reason_code = "native_raw_skipped"
+    return {
+        "enabled": bool(enabled and raw is not None),
+        "source": source,
+        "driver": "telegram_bot_api",
+        "object": object_name,
+        "stored_in_trace": False,
+        "size_bytes": size,
+        "reason_code": reason_code,
     }
 
 
@@ -3553,18 +4325,80 @@ async def _guard_interaction_actions(
     rule: dict[str, Any],
     actions: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    return await guard_interaction_actions(
-        rule=rule,
-        actions=actions,
-        resolve_entry_manifest=account_bot_service.declared_module_entry_manifest,
-        write_log=lambda level, message, **detail: _write_interaction_runtime_log(
+    guard_events: list[tuple[str, str, dict[str, Any]]] = []
+
+    async def _guard_log(level: str, message: str, **detail: Any) -> None:
+        guard_events.append((level, message, dict(detail)))
+        await _write_interaction_runtime_log(
             incoming,
             level,
             message,
             **detail,
-        ),
+        )
+
+    await record_span(
+        trace_log_context(incoming.trace_id),
+        "contract_guard",
+        TRACE_STATUS_OK,
+        component="interaction_contract",
+        action_count=len(actions),
+        **_interaction_trace_context({"trace_id": incoming.trace_id, "trigger": {
+            "rule_id": rule.get("id"),
+            "rule_name": rule.get("name"),
+            "module_key": rule.get("module_key"),
+            "entry_key": rule.get("module_action"),
+        }}),
+    )
+    guarded = await guard_interaction_actions(
+        rule=rule,
+        actions=actions,
+        resolve_entry_manifest=account_bot_service.declared_module_entry_manifest,
+        write_log=_guard_log,
         log_context=_interaction_log_context(incoming),
     )
+    plugin_key = str(rule.get("module_key") or "").strip() or None
+    entry_key = str(rule.get("module_action") or "").strip() or None
+    for _level, message, detail in guard_events:
+        guard_level = str(detail.get("guard_level") or "").strip()
+        status = TRACE_STATUS_FAILED if guard_level == "failed" else TRACE_STATUS_WARNING
+        reason_code = str(detail.get("reason_code") or "contract_warning").strip()
+        await record_span(
+            trace_log_context(incoming.trace_id),
+            "contract_guard",
+            status,
+            component="interaction_contract",
+            plugin_key=plugin_key,
+            entry_key=entry_key,
+            reason_code=reason_code,
+            message=message,
+            guard_level=guard_level,
+            action_type=detail.get("action_type"),
+            unsupported_send_via=detail.get("unsupported_send_via"),
+            requested_send_via_raw=detail.get("requested_send_via_raw"),
+            migration_hint=detail.get("migration_hint"),
+        )
+        if guard_level == "failed":
+            await record_action(
+                trace_log_context(incoming.trace_id, plugin_key=plugin_key, entry_key=entry_key),
+                {
+                    "type": detail.get("action_type") or "unknown",
+                    "channel_selector": detail.get("requested_send_via_raw"),
+                },
+                TRACE_STATUS_FAILED,
+                plugin_key=plugin_key,
+                error_code=reason_code,
+                error_message=message,
+            )
+    await record_span(
+        trace_log_context(incoming.trace_id),
+        "contract_guard",
+        TRACE_STATUS_OK,
+        component="interaction_contract",
+        action_count=len(guarded),
+        plugin_key=plugin_key,
+        entry_key=entry_key,
+    )
+    return guarded
 
 
 def _interaction_delivery_message_id(result: dict[str, Any] | Any) -> int | None:
@@ -3613,6 +4447,18 @@ async def _run_interaction_module(
     payload = await _interaction_module_payload_async(incoming, rule, parsed, event_type=event_type)
     await _remember_interaction_debug_state(incoming, stage="payload_built", payload=payload)
     trace_context = _interaction_trace_context(payload)
+    native_raw_meta = payload.get("native_raw_meta") if isinstance(payload.get("native_raw_meta"), dict) else {}
+    if incoming.native_raw is not None and not payload.get("native_raw"):
+        await record_span(
+            trace_context,
+            "native_raw",
+            TRACE_STATUS_SKIPPED,
+            component="interaction_payload",
+            plugin_key=module_key,
+            entry_key=entry_key,
+            reason_code=str(native_raw_meta.get("reason_code") or "native_raw_not_allowed"),
+            message="插件未声明 telegram_native_raw，平台只下发 native_raw_meta。",
+        )
     ok, error, actions = await _run_worker_interaction_entry(
         incoming,
         plugin_key=module_key,
@@ -3833,6 +4679,28 @@ async def _try_handle_transfer_notice(db: Any, incoming: Incoming) -> bool:
             )
         return False
 
+    parsed = _parse_incoming_transfer_notice(incoming)
+    if parsed is None:
+        log.info(
+            "transfer notice skipped: parse failed aid=%s chat_id=%s sender_id=%s",
+            incoming.account_id,
+            incoming.chat_id,
+            incoming.user_id,
+        )
+        return False
+    event_bus_handled, event_bus_ok = await _try_handle_event_bus_payment_notice(db, incoming, cfg, parsed)
+    if event_bus_handled:
+        await _audit_transfer_notice(db, incoming, parsed)
+        if not event_bus_ok:
+            await record_span(
+                trace_log_context(incoming.trace_id),
+                "route",
+                TRACE_STATUS_FAILED,
+                component="event_bus_payment_notice",
+                reason_code="plugin_runtime_error",
+                message="外部转账通知已进入 Event Bus，但插件执行失败。",
+        )
+        return True
     if not any(
         _rule_trigger_mode_allows(rule, "payment")
         and _rule_chat_matches(rule, incoming.chat_id)
@@ -3845,16 +4713,6 @@ async def _try_handle_transfer_notice(db: Any, incoming: Incoming) -> bool:
                 incoming.account_id,
                 incoming.chat_id,
             )
-        return False
-
-    parsed = _parse_incoming_transfer_notice(incoming)
-    if parsed is None:
-        log.info(
-            "transfer notice skipped: parse failed aid=%s chat_id=%s sender_id=%s",
-            incoming.account_id,
-            incoming.chat_id,
-            incoming.user_id,
-        )
         return False
     rule = await _select_transfer_notice_rule(db, incoming, cfg, parsed)
     if rule is None:
@@ -3935,6 +4793,46 @@ async def _audit_transfer_notice(db: Any, incoming: Incoming, parsed: dict[str, 
 
 
 def _extract_incoming(aid: int, token: str, update: dict[str, Any]) -> Incoming | None:
+    if "inline_query" in update:
+        iq = update["inline_query"] or {}
+        from_user = iq.get("from") or {}
+        query = str(iq.get("query") or "")
+        return Incoming(
+            account_id=aid,
+            token=token,
+            update_id=int(update.get("update_id", 0)),
+            user_id=_int_or_none(from_user.get("id")),
+            chat_id=None,
+            chat_type=str(iq.get("chat_type") or "") or None,
+            message_id=None,
+            text=query,
+            inline_query_id=str(iq.get("id") or ""),
+            inline_query_text=query,
+            inline_offset=str(iq.get("offset") or ""),
+            inline_chat_type=str(iq.get("chat_type") or "") or None,
+            display_name=_format_user_name(from_user),
+            username=str(from_user.get("username") or "").strip() or None,
+            native_raw=dict(update),
+        )
+    if "chosen_inline_result" in update:
+        chosen = update["chosen_inline_result"] or {}
+        from_user = chosen.get("from") or {}
+        query = str(chosen.get("query") or "")
+        return Incoming(
+            account_id=aid,
+            token=token,
+            update_id=int(update.get("update_id", 0)),
+            user_id=_int_or_none(from_user.get("id")),
+            chat_id=None,
+            chat_type=None,
+            message_id=None,
+            text=query,
+            inline_query_text=query,
+            chosen_inline_result_id=str(chosen.get("result_id") or ""),
+            display_name=_format_user_name(from_user),
+            username=str(from_user.get("username") or "").strip() or None,
+            native_raw=dict(update),
+        )
     if "callback_query" in update:
         cq = update["callback_query"] or {}
         msg = cq.get("message") or {}
@@ -3953,6 +4851,7 @@ def _extract_incoming(aid: int, token: str, update: dict[str, Any]) -> Incoming 
             callback_data=str(cq.get("data") or ""),
             display_name=_format_user_name(from_user),
             username=str(from_user.get("username") or "").strip() or None,
+            native_raw=dict(update),
         )
     msg = update.get("message")
     if not isinstance(msg, dict):
@@ -3984,6 +4883,7 @@ def _extract_incoming(aid: int, token: str, update: dict[str, Any]) -> Incoming 
             reply.get("entities"),
             reply.get("caption_entities"),
         ),
+        native_raw=dict(update),
     )
 
 

@@ -10,7 +10,23 @@ MANIFEST = Manifest(
     version="1.0.0",
     author="builtin",
     description="由交互 Bot 开启一局 10 以内算数题，群内第一个答对者获得奖金",
+    usage="随机算数题主要由交互中心规则启动：群友通过关键词或付款触发后，交互 Bot 负责高频答题，奖金和结算说明仍由 userbot/平台结算通道处理。",
     category="interactive",
+    event_subscriptions=[
+        {
+            "source": ["interaction_bot"],
+            "events": ["message", "callback_query"],
+            "scope": "rule_bound",
+            "entry_key": "start_math_game",
+        },
+        {
+            "source": ["external_payment_notice", "userbot"],
+            "events": ["payment_confirmed"],
+            "scope": "rule_bound",
+            "entry_key": "start_math_game",
+        },
+    ],
+    capabilities={},
     interaction_profile="session_game",
     interaction_entries=[
         {

@@ -57,6 +57,14 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Table,
@@ -108,6 +116,13 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import {
+  compactUsageText,
+  pluginCapabilityLabels,
+  pluginContractRiskWarnings,
+  pluginEventSubscriptionLabels,
+} from "@/types/pluginContract";
+import type { PluginRepoPlugin } from "@/types/pluginRepo";
 import type { RemotePlugin } from "@/types/remotePlugin";
 
 // ── 常量 ──────────────────────────────────────────────────────────
@@ -649,6 +664,11 @@ function RemoteInstallCard() {
   const [expandedRepoId, setExpandedRepoId] = useState<number | null>(null);
   const [refreshingRepoId, setRefreshingRepoId] = useState<number | null>(null);
   const [updatingRepoId, setUpdatingRepoId] = useState<number | null>(null);
+  const [pendingBulkUpdate, setPendingBulkUpdate] = useState<{
+    repoId: number;
+    repoName: string;
+    plugins: PluginRepoPlugin[];
+  } | null>(null);
 
   // 已保存仓库列表（后端）
   const reposQ = useQuery({ queryKey: PLUGIN_REPOS_QK, queryFn: fetchPluginRepos });
@@ -660,6 +680,25 @@ function RemoteInstallCard() {
     queryFn: () => fetchRepoPlugins(expandedRepoId!),
     enabled: expandedRepoId !== null,
   });
+  const bulkPreviewPlugins = pendingBulkUpdate?.plugins.filter((p) => p.installed && p.update_available) ?? [];
+
+  const openBulkUpdatePreview = (repo: { id: number; name?: string | null; url: string }, plugins?: PluginRepoPlugin[]) => {
+    const available = plugins?.filter((p) => p.installed && p.update_available) ?? [];
+    if (!plugins) {
+      setExpandedRepoId(repo.id);
+      toast.info("请先展开或刷新该仓库，确认可升级插件和风险变化后再一键更新。");
+      return;
+    }
+    if (available.length === 0) {
+      toast.info("该仓库暂无可升级的已安装插件。");
+      return;
+    }
+    setPendingBulkUpdate({
+      repoId: repo.id,
+      repoName: repo.name || repo.url,
+      plugins: available,
+    });
+  };
 
   const refreshRepoMut = useMutation({
     mutationFn: async (repoId: number) => {
@@ -879,7 +918,7 @@ function RemoteInstallCard() {
                       }
                       onClick={(e) => {
                         e.stopPropagation();
-                        bulkUpdateRepoMut.mutate(repo.id);
+                        openBulkUpdatePreview(repo, expandedPlugins);
                       }}
                       aria-label={`更新插件仓库 ${repo.name || repo.url} 中可升级的已安装插件`}
                       title={
@@ -1041,6 +1080,68 @@ function RemoteInstallCard() {
             })}
           </div>
         )}
+        <Dialog open={pendingBulkUpdate !== null} onOpenChange={(open) => !open && setPendingBulkUpdate(null)}>
+          <DialogContent className="max-h-[85vh] max-w-2xl overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>确认批量更新插件</DialogTitle>
+              <DialogDescription>
+                将从 {pendingBulkUpdate?.repoName ?? "该仓库"} 更新 {bulkPreviewPlugins.length} 个已安装插件。更新前请确认版本变化和高风险能力变化。
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-3">
+              {bulkPreviewPlugins.map((plugin) => {
+                const events = pluginEventSubscriptionLabels(plugin.event_subscriptions);
+                const capabilities = pluginCapabilityLabels(plugin.capabilities);
+                const risks = pluginContractRiskWarnings({
+                  capabilities: plugin.capabilities,
+                  event_subscriptions: plugin.event_subscriptions,
+                });
+                return (
+                  <div key={plugin.name} className="rounded-md border border-border/70 p-3">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <div className="font-medium">{plugin.display_name || plugin.name}</div>
+                      <MetaBadge tone="outline">{formatPluginVersion(plugin.installed_version)} → {formatPluginVersion(plugin.version)}</MetaBadge>
+                      {risks.length > 0 ? <MetaBadge tone="danger">高风险能力</MetaBadge> : null}
+                    </div>
+                    <p className="mt-1 text-xs text-muted-foreground">{compactUsageText(plugin.usage)}</p>
+                    <div className="mt-2 flex flex-wrap gap-1.5">
+                      <MetaBadge tone="outline">订阅 {plugin.event_subscriptions?.length ?? 0}</MetaBadge>
+                      {events.slice(0, 4).map((label) => <MetaBadge key={label}>{label}</MetaBadge>)}
+                      <MetaBadge tone="outline">能力 {capabilities.length}</MetaBadge>
+                      {capabilities.slice(0, 3).map((label) => <MetaBadge key={label} tone="warn">{label}</MetaBadge>)}
+                    </div>
+                    {risks.length > 0 ? (
+                      <div className="mt-2 space-y-1 text-xs text-destructive">
+                        {risks.map((risk) => (
+                          <div key={risk} className="flex gap-1.5">
+                            <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                            <span>{risk}</span>
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                );
+              })}
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setPendingBulkUpdate(null)}>
+                取消
+              </Button>
+              <Button
+                onClick={() => {
+                  if (!pendingBulkUpdate) return;
+                  bulkUpdateRepoMut.mutate(pendingBulkUpdate.repoId);
+                  setPendingBulkUpdate(null);
+                }}
+                disabled={!pendingBulkUpdate || bulkUpdateRepoMut.isPending}
+              >
+                {bulkUpdateRepoMut.isPending ? <Spinner className="mr-2 h-4 w-4" /> : <RefreshCw className="mr-2 h-4 w-4" />}
+                确认更新
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </CardContent>
     </Card>
   );

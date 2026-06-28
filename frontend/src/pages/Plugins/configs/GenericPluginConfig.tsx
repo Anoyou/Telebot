@@ -35,6 +35,11 @@ import { Spinner } from "@/components/ui/misc";
 import { Switch } from "@/components/ui/switch";
 import { getErrMsg } from "@/lib/api";
 import { pluginUsageGuideWarning } from "@/lib/plugin-config-contract";
+import {
+  pluginCapabilityLabels,
+  pluginContractRiskWarnings,
+  pluginEventSubscriptionLabels,
+} from "@/types/pluginContract";
 import { featureConfigBackTarget } from "@/pages/Plugins/_shared/featureConfig";
 import { featureRuntimeText, featureSwitchText } from "./_shared/featureStatus";
 
@@ -139,12 +144,20 @@ export function GenericPluginConfigPage() {
   const usageGuide = useMemo(
     () => buildUsageGuide({
       schema,
+      usage: feature?.usage,
       values: { ...globalVals, ...accountVals },
       commandPrefix,
       interactionEntries: feature?.interaction_entries,
     }),
-    [schema, globalVals, accountVals, commandPrefix, feature?.interaction_entries],
+    [schema, feature?.usage, globalVals, accountVals, commandPrefix, feature?.interaction_entries],
   );
+  const eventLabels = pluginEventSubscriptionLabels(feature?.event_subscriptions);
+  const capabilityLabels = pluginCapabilityLabels(feature?.capabilities);
+  const contractWarnings = pluginContractRiskWarnings({
+    capabilities: feature?.capabilities,
+    event_subscriptions: feature?.event_subscriptions,
+    lint_warnings: feature?.lint_warnings,
+  });
 
   const saveMut = useMutation({
     mutationFn: async () => {
@@ -286,6 +299,26 @@ export function GenericPluginConfigPage() {
 
       <Card>
         <CardHeader>
+          <CardTitle className="text-base">最终版插件契约</CardTitle>
+          <CardDescription>来自 manifest 的事件订阅、能力声明和高风险边界。</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3 text-sm">
+          <div className="grid gap-3 md:grid-cols-2">
+            <ContractSummaryBlock title="事件订阅" items={eventLabels} empty="未声明 event_subscriptions" />
+            <ContractSummaryBlock title="能力声明" items={capabilityLabels} empty="未声明 capabilities" />
+          </div>
+          {contractWarnings.length > 0 ? (
+            <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs leading-5 text-destructive">
+              {contractWarnings.map((item) => (
+                <div key={item}>{item}</div>
+              ))}
+            </div>
+          ) : null}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
               <CardTitle className="text-base">功能总开关</CardTitle>
@@ -408,6 +441,26 @@ export function GenericPluginConfigPage() {
   );
 }
 
+function ContractSummaryBlock({ title, items, empty }: { title: string; items: string[]; empty: string }) {
+  return (
+    <div className="rounded-md border bg-muted/20 p-3">
+      <div className="mb-2 text-xs font-medium text-muted-foreground">{title}</div>
+      {items.length > 0 ? (
+        <div className="flex flex-wrap gap-1.5">
+          {items.slice(0, 8).map((item) => (
+            <Badge key={item} variant="secondary" className="max-w-full break-all">
+              {item}
+            </Badge>
+          ))}
+          {items.length > 8 ? <Badge variant="outline">+{items.length - 8}</Badge> : null}
+        </div>
+      ) : (
+        <div className="text-xs text-muted-foreground">{empty}</div>
+      )}
+    </div>
+  );
+}
+
 interface UsageGuide {
   description: string;
   customText: string;
@@ -419,11 +472,13 @@ interface UsageGuide {
 
 function buildUsageGuide({
   schema,
+  usage,
   values,
   commandPrefix,
   interactionEntries,
 }: {
   schema: ConfigSchema | null;
+  usage?: unknown;
   values: Record<string, unknown>;
   commandPrefix: string;
   interactionEntries?: Array<{ title?: string | null; description?: string | null; key?: string | null }>;
@@ -433,6 +488,7 @@ function buildUsageGuide({
   const usageVariables = buildUsageVariables(properties, values, commandPrefix || ",", command);
   const customText = renderUsageText(
     firstUsageGuideText([
+      usage,
       schema?.["x-usage-guide"],
       schema?.["x-usage-instructions"],
       schema?.["x-usage-steps"],
@@ -446,7 +502,7 @@ function buildUsageGuide({
     usageVariables,
   );
   const aliasExamples = buildCommandExamples(properties, values, usageVariables.prefix, command);
-  const missingWarning = pluginUsageGuideWarning({ config_schema: schema });
+  const missingWarning = pluginUsageGuideWarning({ config_schema: schema, usage });
   const interactionNotes = (interactionEntries ?? [])
     .map((entry) => {
       const title = entry.title || entry.key;

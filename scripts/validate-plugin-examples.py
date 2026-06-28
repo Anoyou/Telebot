@@ -21,7 +21,7 @@ for import_root in (ROOT, BACKEND_ROOT):
 from app.worker.plugins.base import Plugin  # noqa: E402
 from app.worker.plugins.manifest import Manifest  # noqa: E402
 
-INCLUDED_EXAMPLES = {"with_http", "with_ai", "with_interaction"}
+INCLUDED_EXAMPLES = {"event_bus_demo", "with_http", "with_ai", "with_interaction"}
 SKIPPED_EXAMPLES = {
     "translate": "历史示例仍依赖后端私有 LLM 链路，迁移到 ctx.ai 前不纳入稳定 API gate。",
 }
@@ -29,6 +29,28 @@ REQUIRED_FILES = {"plugin.json", "manifest.py", "plugin.py", "__init__.py"}
 REQUIRED_PERMISSIONS = {
     "with_ai": {"ai_text"},
     "with_http": {"external_http"},
+}
+EVENT_EXAMPLES = {"event_bus_demo", "with_interaction"}
+REQUIRED_EVENT_TYPES = {
+    "event_bus_demo": {
+        "message",
+        "command",
+        "callback_query",
+        "inline_query",
+        "chosen_inline_result",
+        "payment_confirmed",
+    },
+    "with_interaction": {"message", "callback_query", "payment_confirmed"},
+}
+DEPRECATED_RISK_TOKENS = ("bbot_notice", "notice_bot", "raw_event")
+DEPRECATED_SEND_VIA = {"notice", "bbot_notice", "notice_bot"}
+EVENT_FIXTURES = {
+    "message.json",
+    "command.json",
+    "callback_query.json",
+    "inline_query.json",
+    "chosen_inline_result.json",
+    "payment_confirmed.json",
 }
 
 
@@ -41,6 +63,94 @@ def _load_plugin_json(plugin_dir: Path) -> dict[str, Any]:
     if not isinstance(data, dict):
         raise AssertionError(f"{path}: plugin.json 顶层必须是 object")
     return data
+
+
+def _manifest_capabilities(manifest: Manifest) -> dict[str, Any]:
+    capabilities = getattr(manifest, "capabilities", None)
+    return dict(capabilities) if isinstance(capabilities, dict) else {}
+
+
+def _declared_events(subscriptions: list[dict[str, Any]]) -> set[str]:
+    events: set[str] = set()
+    for subscription in subscriptions:
+        raw_events = subscription.get("events")
+        if isinstance(raw_events, list):
+            events.update(str(item).strip() for item in raw_events if str(item).strip())
+    return events
+
+
+def _validate_usage(name: str, metadata: dict[str, Any]) -> None:
+    usage = str(metadata.get("usage") or "").strip()
+    if not usage:
+        raise AssertionError(f"{name}: plugin.json 必须声明 usage，不能只依赖旧配置说明")
+
+
+def _validate_event_contract(name: str, metadata: dict[str, Any], manifest: Manifest) -> None:
+    metadata_subscriptions = metadata.get("event_subscriptions")
+    if metadata_subscriptions is None:
+        metadata_subscriptions = []
+    if not isinstance(metadata_subscriptions, list):
+        raise AssertionError(f"{name}: plugin.json.event_subscriptions 必须是数组")
+    metadata_subscriptions = [item for item in metadata_subscriptions if isinstance(item, dict)]
+    manifest_subscriptions = list(getattr(manifest, "event_subscriptions", []) or [])
+    if metadata_subscriptions != manifest_subscriptions:
+        raise AssertionError(f"{name}: plugin.json.event_subscriptions 与 MANIFEST.event_subscriptions 不一致")
+
+    metadata_capabilities = metadata.get("capabilities")
+    if metadata_capabilities is None:
+        metadata_capabilities = {}
+    if not isinstance(metadata_capabilities, dict):
+        raise AssertionError(f"{name}: plugin.json.capabilities 必须是对象")
+    if dict(metadata_capabilities) != _manifest_capabilities(manifest):
+        raise AssertionError(f"{name}: plugin.json.capabilities 与 MANIFEST.capabilities 不一致")
+
+    if name in EVENT_EXAMPLES:
+        if not metadata_subscriptions:
+            raise AssertionError(f"{name}: Event Bus 示例必须声明 event_subscriptions")
+        missing_events = sorted(REQUIRED_EVENT_TYPES.get(name, set()) - _declared_events(metadata_subscriptions))
+        if missing_events:
+            raise AssertionError(f"{name}: event_subscriptions 缺少事件: {', '.join(missing_events)}")
+
+        raw_capability = metadata_capabilities.get("telegram_native_raw")
+        if not isinstance(raw_capability, dict):
+            raise AssertionError(f"{name}: capabilities.telegram_native_raw 必须显式声明为对象")
+        if raw_capability.get("enabled") is True and not str(raw_capability.get("reason") or "").strip():
+            raise AssertionError(f"{name}: telegram_native_raw.enabled=true 时必须说明 reason")
+
+
+def _validate_deprecated_risks(name: str, plugin_dir: Path, metadata: dict[str, Any]) -> None:
+    for path in sorted(plugin_dir.glob("*")):
+        if path.suffix not in {".py", ".json", ".md"}:
+            continue
+        text = path.read_text(encoding="utf-8")
+        for token in DEPRECATED_RISK_TOKENS:
+            if token in text:
+                raise AssertionError(f"{name}: {path.name} 仍包含旧风险字段 {token}")
+
+    raw_entries = metadata.get("interaction_entries")
+    if isinstance(raw_entries, list):
+        for index, entry in enumerate(raw_entries, start=1):
+            if not isinstance(entry, dict):
+                continue
+            contract = entry.get("result_contract") if isinstance(entry.get("result_contract"), dict) else {}
+            send_via = contract.get("send_via")
+            if isinstance(send_via, list) and any(str(item) in DEPRECATED_SEND_VIA for item in send_via):
+                raise AssertionError(f"{name}: interaction_entries[{index}] result_contract.send_via 包含旧 notice 通道")
+
+
+def _validate_event_fixtures(name: str, plugin_dir: Path) -> None:
+    if name != "event_bus_demo":
+        return
+    fixtures_dir = plugin_dir / "fixtures"
+    missing = sorted(file for file in EVENT_FIXTURES if not (fixtures_dir / file).is_file())
+    if missing:
+        raise AssertionError(f"{name}: fixtures 缺少 {', '.join(missing)}")
+    for fixture in sorted(fixtures_dir.glob("*.json")):
+        data = json.loads(fixture.read_text(encoding="utf-8"))
+        if not isinstance(data.get("source"), dict):
+            raise AssertionError(f"{name}: {fixture.name} 缺少 source 信封")
+        if "native_raw_meta" not in data:
+            raise AssertionError(f"{name}: {fixture.name} 缺少 native_raw_meta")
 
 
 def _validate_example(name: str) -> None:
@@ -79,6 +189,10 @@ def _validate_example(name: str) -> None:
         )
     if list(metadata.get("interaction_entries") or []) != list(manifest.interaction_entries):
         raise AssertionError(f"{name}: plugin.json.interaction_entries 与 MANIFEST.interaction_entries 不一致")
+    _validate_usage(name, metadata)
+    _validate_event_contract(name, metadata, manifest)
+    _validate_deprecated_risks(name, plugin_dir, metadata)
+    _validate_event_fixtures(name, plugin_dir)
 
     for field in ("permissions", "allowed_hosts"):
         expected = list(metadata.get(field) or [])

@@ -1,3 +1,5 @@
+import type { PluginCapabilities, PluginEventSubscription } from "@/types/pluginContract";
+
 export interface PluginRepo {
   id: number;
   name: string;
@@ -25,11 +27,14 @@ export interface PluginRepoPlugin {
   name: string;
   display_name: string;
   description: string;
+  usage?: string | null;
   author: string;
   version: string;
   installed: boolean;
   installed_version?: string | null;
   update_available?: boolean;
+  event_subscriptions?: PluginEventSubscription[];
+  capabilities?: PluginCapabilities;
   tags?: string[];
   subdir: string;
 }

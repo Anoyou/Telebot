@@ -654,6 +654,9 @@ async def get_system_settings(db: DBSession, _user: CurrentUser) -> dict[str, An
             "premium_daily": max(0, int(llm_limits.get("premium_daily", 0) or 0)),
         },
         "log_retention": {
+            "trace_enabled": bool(log_retention.get("trace_enabled", True)),
+            "event_bus_delivery_enabled": bool(log_retention.get("event_bus_delivery_enabled", True)),
+            "inline_updates_enabled": bool(log_retention.get("inline_updates_enabled", True)),
             "runtime_log_retention_days": max(
                 0, int(log_retention.get("runtime_log_retention_days", 30) or 0)
             ),
@@ -669,6 +672,16 @@ async def get_system_settings(db: DBSession, _user: CurrentUser) -> dict[str, An
                 in {"debug", "info", "warn", "error"}
                 else "info"
             ),
+            "trace_retention_days": max(
+                0, int(log_retention.get("trace_retention_days", 30) or 0)
+            ),
+            "trace_payload_snapshot_retention_days": max(
+                0, int(log_retention.get("trace_payload_snapshot_retention_days", 7) or 0)
+            ),
+            "native_raw_persist_enabled": bool(log_retention.get("native_raw_persist_enabled", False)),
+            "native_raw_retention_days": max(
+                0, int(log_retention.get("native_raw_retention_days", 1) or 0)
+            ),
         },
     }
 
@@ -681,10 +694,17 @@ class _LLMLimitsPatch(BaseModel):
 
 
 class _LogRetentionPatch(BaseModel):
+    trace_enabled: bool | None = None
+    event_bus_delivery_enabled: bool | None = None
+    inline_updates_enabled: bool | None = None
     runtime_log_retention_days: int | None = None
     runtime_log_max_message_chars: int | None = None
     runtime_log_max_detail_chars: int | None = None
     runtime_log_min_level: str | None = None
+    trace_retention_days: int | None = None
+    trace_payload_snapshot_retention_days: int | None = None
+    native_raw_persist_enabled: bool | None = None
+    native_raw_retention_days: int | None = None
 
 
 class _RemotePluginUpdateCheckPatch(BaseModel):
@@ -794,6 +814,9 @@ async def patch_system_settings(
             current = {}
         data = payload.log_retention.model_dump(exclude_unset=True)
         next_retention = {
+            "trace_enabled": bool(current.get("trace_enabled", True)),
+            "event_bus_delivery_enabled": bool(current.get("event_bus_delivery_enabled", True)),
+            "inline_updates_enabled": bool(current.get("inline_updates_enabled", True)),
             "runtime_log_retention_days": max(
                 0, int(current.get("runtime_log_retention_days", 30) or 0)
             ),
@@ -809,14 +832,31 @@ async def patch_system_settings(
                 in {"debug", "info", "warn", "error"}
                 else "info"
             ),
+            "trace_retention_days": max(
+                0, int(current.get("trace_retention_days", 30) or 0)
+            ),
+            "trace_payload_snapshot_retention_days": max(
+                0, int(current.get("trace_payload_snapshot_retention_days", 7) or 0)
+            ),
+            "native_raw_persist_enabled": bool(current.get("native_raw_persist_enabled", False)),
+            "native_raw_retention_days": max(
+                0, int(current.get("native_raw_retention_days", 1) or 0)
+            ),
         }
+        bool_keys = {"trace_enabled", "event_bus_delivery_enabled", "inline_updates_enabled", "native_raw_persist_enabled"}
         bounds = {
             "runtime_log_retention_days": (0, 3650),
             "runtime_log_max_message_chars": (200, 20000),
             "runtime_log_max_detail_chars": (0, 50000),
+            "trace_retention_days": (0, 3650),
+            "trace_payload_snapshot_retention_days": (0, 3650),
+            "native_raw_retention_days": (0, 30),
         }
         for key, value in data.items():
             if value is None:
+                continue
+            if key in bool_keys:
+                next_retention[key] = bool(value)
                 continue
             if key == "runtime_log_min_level":
                 norm = str(value).strip().lower()

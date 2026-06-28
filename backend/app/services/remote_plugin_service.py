@@ -179,6 +179,7 @@ class PluginMetadataSchema(BaseModel):
 
     display_name: str = ""
     description: str = ""
+    usage: str | None = None
     author: str = ""
     version: str = "0.0.0"
     # entry 是可选的，默认为 plugin.py
@@ -189,6 +190,8 @@ class PluginMetadataSchema(BaseModel):
     category: str | None = None
     interaction_profile: str | None = None
     interaction_entries: list[dict[str, Any]] = Field(default_factory=list)
+    event_subscriptions: list[dict[str, Any]] = Field(default_factory=list)
+    capabilities: dict[str, Any] | None = None
     min_telepilot_version: str | None = None
     # 0.15 rename 前的旧字段，继续作为兼容别名解析。
     min_telebot_version: str | None = None
@@ -253,6 +256,7 @@ class PluginMetadata:
     name: str
     display_name: str = ""
     description: str = ""
+    usage: str | None = None
     author: str = ""
     version: str = "0.0.0"
     entry: str = "plugin.py"
@@ -261,6 +265,8 @@ class PluginMetadata:
     category: str | None = None
     interaction_profile: str | None = None
     interaction_entries: list[dict[str, Any]] = field(default_factory=list)
+    event_subscriptions: list[dict[str, Any]] = field(default_factory=list)
+    capabilities: dict[str, Any] | None = None
     min_telepilot_version: str | None = None
     min_telebot_version: str | None = None
     tags: list[str] = field(default_factory=list)
@@ -282,6 +288,7 @@ class RemotePluginView:
     name: str
     display_name: str
     description: str
+    usage: str | None
     author: str
     source_url: str
     version: str
@@ -290,6 +297,8 @@ class RemotePluginView:
     last_update_check_at: datetime | None
     last_update_check_error: str | None
     lint_warnings: list[str]
+    event_subscriptions: list[dict[str, Any]]
+    capabilities: dict[str, Any]
     enabled: bool
     default_enabled: bool
     installed_at: datetime | None
@@ -381,6 +390,7 @@ def remote_plugin_view_from_installed(row: InstalledPlugin) -> RemotePluginView:
         name=row.key,
         display_name=str(manifest.get("display_name") or row.key),
         description=str(manifest.get("description") or ""),
+        usage=str(manifest.get("usage") or "").strip() or None,
         author=str(manifest.get("author") or ""),
         source_url=str(row.source_url or ""),
         version=row.version,
@@ -389,6 +399,10 @@ def remote_plugin_view_from_installed(row: InstalledPlugin) -> RemotePluginView:
         last_update_check_at=_remote_info_datetime(info.get("last_update_check_at")),
         last_update_check_error=info.get("last_update_check_error"),
         lint_warnings=[item for item in (row.lint_warnings or []) if isinstance(item, str)],
+        event_subscriptions=[
+            item for item in manifest.get("event_subscriptions", []) if isinstance(item, dict)
+        ] if isinstance(manifest.get("event_subscriptions"), list) else [],
+        capabilities=dict(manifest.get("capabilities")) if isinstance(manifest.get("capabilities"), dict) else {},
         enabled=bool(row.enabled),
         default_enabled=bool(info.get("default_enabled", False)),
         installed_at=row.installed_at,
@@ -399,12 +413,18 @@ def _feature_manifest_from_meta(meta: PluginMetadata) -> dict[str, Any] | None:
     manifest: dict[str, Any] = {}
     if meta.config_schema:
         manifest["config_schema"] = meta.config_schema
+    if meta.usage:
+        manifest["usage"] = meta.usage
     if meta.category:
         manifest["category"] = meta.category
     if meta.interaction_profile:
         manifest["interaction_profile"] = meta.interaction_profile
     if meta.interaction_entries:
         manifest["interaction_entries"] = [item for item in meta.interaction_entries if isinstance(item, dict)]
+    if meta.event_subscriptions:
+        manifest["event_subscriptions"] = [item for item in meta.event_subscriptions if isinstance(item, dict)]
+    if isinstance(meta.capabilities, dict) and meta.capabilities:
+        manifest["capabilities"] = dict(meta.capabilities)
     if meta.permissions:
         manifest["permissions"] = list(meta.permissions)
     if meta.min_telepilot_version:
@@ -684,6 +704,7 @@ def _read_plugin_metadata(plugin_dir: Path, *, fallback_name: str) -> PluginMeta
         name=name,
         display_name=str(validated.display_name or ""),
         description=str(validated.description or ""),
+        usage=str(validated.usage or "").strip() or None,
         author=str(validated.author or ""),
         version=str(validated.version or "0.0.0"),
         entry=str(validated.entry or "plugin.py"),
@@ -692,6 +713,8 @@ def _read_plugin_metadata(plugin_dir: Path, *, fallback_name: str) -> PluginMeta
         category=validated.category,
         interaction_profile=validated.interaction_profile,
         interaction_entries=[item for item in validated.interaction_entries if isinstance(item, dict)],
+        event_subscriptions=[item for item in validated.event_subscriptions if isinstance(item, dict)],
+        capabilities=dict(validated.capabilities) if isinstance(validated.capabilities, dict) else None,
         min_telepilot_version=validated.min_telepilot_version,
         min_telebot_version=validated.min_telebot_version,
         tags=list(validated.tags or []),
@@ -828,9 +851,9 @@ def lint_plugin_metadata_files(plugin_dir: Path) -> list[str]:
     if pj.is_file():
         try:
             data = json.loads(pj.read_text(encoding="utf-8"))
-            if isinstance(data, dict) and isinstance(data.get("config_schema"), dict) and not _plugin_declares_usage_guide(data):
+            if isinstance(data, dict) and not _plugin_declares_usage_guide(data):
                 warnings.append(
-                    "高级规范警告：插件未声明详细使用说明。请在 config_schema 中提供 usage_preview、x-usage-guide 或 x-usage-steps。"
+                    "高级规范警告：插件未声明详细使用说明。请在 plugin.json 中提供 usage，或在 config_schema 中提供 usage_preview、x-usage-guide 或 x-usage-steps。"
                 )
             for path, text in _iter_json_strings(data):
                 warning = _warn_hardcoded_prefix("plugin.json", path, text)
@@ -902,6 +925,47 @@ def lint_plugin_metadata_files(plugin_dir: Path) -> list[str]:
                             warnings.append(f"plugin.json interaction_entries[{idx}] dispatch_modes 含有未支持值")
                     if not raw_entry.get("interaction_profile"):
                         warnings.append(f"plugin.json interaction_entries[{idx}] 建议声明 interaction_profile")
+            subscriptions = data.get("event_subscriptions")
+            if isinstance(subscriptions, list) and subscriptions:
+                valid_events = {
+                    "message",
+                    "command",
+                    "callback_query",
+                    "inline_query",
+                    "chosen_inline_result",
+                    "payment_confirmed",
+                    "session_close",
+                    "all_messages",
+                }
+                valid_sources = {"userbot", "interaction_bot", "external_payment_notice"}
+                valid_scopes = {"all_allowed_chats", "owner_only", "known_users", "inline_all", "rule_bound"}
+                for idx, raw_subscription in enumerate(subscriptions, start=1):
+                    if not isinstance(raw_subscription, dict):
+                        warnings.append(f"plugin.json event_subscriptions[{idx}] 必须是对象")
+                        continue
+                    raw_events = raw_subscription.get("events")
+                    if not isinstance(raw_events, list) or not any(str(item or "").strip() in valid_events for item in raw_events):
+                        warnings.append(f"plugin.json event_subscriptions[{idx}] events 必须声明有效事件")
+                    raw_sources = raw_subscription.get("source")
+                    if raw_sources is not None:
+                        source_items = raw_sources if isinstance(raw_sources, list) else [raw_sources]
+                        if any(str(item or "").strip() not in valid_sources for item in source_items):
+                            warnings.append(f"plugin.json event_subscriptions[{idx}] source 含有未支持值")
+                    scope = str(raw_subscription.get("scope") or "all_allowed_chats").strip()
+                    if scope not in valid_scopes:
+                        warnings.append(f"plugin.json event_subscriptions[{idx}] scope 必须是 all_allowed_chats / owner_only / known_users / inline_all / rule_bound")
+            capabilities = data.get("capabilities")
+            if isinstance(capabilities, dict):
+                native_raw = capabilities.get("telegram_native_raw")
+                if native_raw is not None:
+                    if not isinstance(native_raw, dict):
+                        warnings.append("plugin.json capabilities.telegram_native_raw 必须是对象")
+                    else:
+                        if native_raw.get("enabled") is True and not str(native_raw.get("reason") or "").strip():
+                            warnings.append("plugin.json capabilities.telegram_native_raw.enabled=true 时必须说明 reason")
+                        sources = native_raw.get("sources")
+                        if sources is not None and not isinstance(sources, list):
+                            warnings.append("plugin.json capabilities.telegram_native_raw.sources 必须是数组")
 
     # 去重并限制数量，避免一个坏模板刷屏。
     unique: list[str] = []
@@ -912,6 +976,8 @@ def lint_plugin_metadata_files(plugin_dir: Path) -> list[str]:
 
 
 def _plugin_declares_usage_guide(manifest: dict[str, Any]) -> bool:
+    if _has_usage_content(manifest.get("usage")):
+        return True
     schema = manifest.get("config_schema")
     if not isinstance(schema, dict):
         return False
@@ -950,6 +1016,8 @@ def _manifest_json_from_remote_meta(meta: PluginMetadata) -> dict[str, Any]:
         "entry": meta.entry,
         "permissions": list(meta.permissions),
     }
+    if meta.usage:
+        data["usage"] = meta.usage
     if meta.config_schema is not None:
         data["config_schema"] = meta.config_schema
     if meta.category:
@@ -958,6 +1026,10 @@ def _manifest_json_from_remote_meta(meta: PluginMetadata) -> dict[str, Any]:
         data["interaction_profile"] = meta.interaction_profile
     if meta.interaction_entries:
         data["interaction_entries"] = [item for item in meta.interaction_entries if isinstance(item, dict)]
+    if meta.event_subscriptions:
+        data["event_subscriptions"] = [item for item in meta.event_subscriptions if isinstance(item, dict)]
+    if isinstance(meta.capabilities, dict) and meta.capabilities:
+        data["capabilities"] = dict(meta.capabilities)
     if meta.min_telepilot_version:
         data["min_telepilot_version"] = meta.min_telepilot_version
     if meta.min_telebot_version:

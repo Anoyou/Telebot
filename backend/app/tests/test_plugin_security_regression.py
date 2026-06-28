@@ -208,6 +208,24 @@ class TestRemotePluginSecurity:
         warnings = svc.lint_plugin_metadata_files(plugin_dir)
         assert not any("未声明详细使用说明" in item for item in warnings)
 
+    def test_metadata_lint_accepts_top_level_usage_declaration(self, tmp_path):
+        """新版 plugin.json 顶层 usage 可满足插件使用说明要求。"""
+        plugin_dir = tmp_path / "installed" / "declared_top_usage"
+        plugin_dir.mkdir(parents=True)
+        (plugin_dir / "plugin.json").write_text(
+            """
+            {
+              "name": "declared_top_usage",
+              "version": "1.0.0",
+              "usage": "在允许会话内发送“开始演示”启动插件。"
+            }
+            """,
+            encoding="utf-8",
+        )
+
+        warnings = svc.lint_plugin_metadata_files(plugin_dir)
+        assert not any("未声明详细使用说明" in item for item in warnings)
+
     def test_runtime_discovery_does_not_execute_installed_by_default(self, monkeypatch, tmp_path):
         """worker 刷新 builtin 注册表时不能顺手执行 installed 插件代码。"""
         import os as _os
@@ -1346,11 +1364,26 @@ class TestPluginMetadataSchema:
                     "result_contract": {"send_via": ["interaction_bot", "userbot_reply"]},
                 }
             ],
+            "event_subscriptions": [
+                {
+                    "source": ["interaction_bot"],
+                    "events": ["message", "callback_query"],
+                    "scope": "all_allowed_chats",
+                }
+            ],
+            "capabilities": {
+                "telegram_native_raw": {
+                    "enabled": True,
+                    "reason": "风控需要原始数字 ID",
+                }
+            },
         }
         schema = PluginMetadataSchema(**data)
         assert schema.category == "interactive"
         assert schema.interaction_profile == "session_game"
         assert schema.interaction_entries[0]["key"] == "start_game24"
+        assert schema.event_subscriptions[0]["events"] == ["message", "callback_query"]
+        assert schema.capabilities["telegram_native_raw"]["enabled"] is True
 
     def test_manifest_json_from_remote_meta_keeps_interaction_fields(self):
         from app.services.remote_plugin_service import PluginMetadata, _manifest_json_from_remote_meta
@@ -1358,6 +1391,7 @@ class TestPluginMetadataSchema:
         meta = PluginMetadata(
             name="dice_grid_hunt",
             display_name="九宫格猜骰",
+            usage="发送“开始九宫格”启动玩法；点击按钮或回复答案继续。",
             version="1.0.0",
             category="interactive",
             interaction_profile="session_game",
@@ -1368,9 +1402,23 @@ class TestPluginMetadataSchema:
                     "preserve_command_trigger": True,
                 }
             ],
+            event_subscriptions=[
+                {
+                    "source": ["interaction_bot"],
+                    "events": ["message", "callback_query"],
+                    "scope": "all_allowed_chats",
+                }
+            ],
+            capabilities={
+                "telegram_native_raw": {
+                    "enabled": True,
+                    "reason": "风控需要原始数字 ID",
+                }
+            },
         )
 
         manifest_json = _manifest_json_from_remote_meta(meta)
+        assert manifest_json["usage"] == "发送“开始九宫格”启动玩法；点击按钮或回复答案继续。"
         assert manifest_json["category"] == "interactive"
         assert manifest_json["interaction_profile"] == "session_game"
         assert manifest_json["interaction_entries"] == [
@@ -1380,6 +1428,14 @@ class TestPluginMetadataSchema:
                 "preserve_command_trigger": True,
             }
         ]
+        assert manifest_json["event_subscriptions"] == [
+            {
+                "source": ["interaction_bot"],
+                "events": ["message", "callback_query"],
+                "scope": "all_allowed_chats",
+            }
+        ]
+        assert manifest_json["capabilities"]["telegram_native_raw"]["enabled"] is True
 
 
 def test_lint_plugin_metadata_files_warns_on_bad_interaction_contract(tmp_path) -> None:

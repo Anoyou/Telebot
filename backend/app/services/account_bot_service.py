@@ -47,6 +47,7 @@ from ..schemas.account_bot import (
     AccountBotUserUpdate,
 )
 from ..settings import settings
+from .event_bus import VALID_EVENT_TYPES
 from .interaction.contracts import send_via_selector_options, unsupported_send_via_values
 
 log = logging.getLogger(__name__)
@@ -57,7 +58,7 @@ TRANSFER_NOTICE_SETTING_PREFIX = "account_bot_transfer_notice:"
 VALID_TRIGGER_MODES = {"payment", "keyword", "both"}
 VALID_AMOUNT_MATCH_MODES = {"eq", "gte"}
 VALID_CONCURRENCY = {"chat", "user", "none"}
-VALID_INTERACTION_EVENTS = {"payment_confirmed", "keyword", "message", "callback_query", "session_close", "all_messages"}
+VALID_INTERACTION_EVENTS = set(VALID_EVENT_TYPES)
 VALID_INTERACTION_LAUNCH_MODES = {"bridge", "direct", "hybrid"}
 VALID_INTERACTION_SEND_VIA = {"interaction_bot", "userbot_reply"}
 TRUSTED_INTERACTION_SEND_VIA = ["interaction_bot", "userbot_reply"]
@@ -637,17 +638,86 @@ def _entry_key_from_entries(entries: Any) -> str | None:
     return keys[0] if len(keys) == 1 else None
 
 
-def _plugin_json_interaction_entries(module_key: str | None) -> Any:
+def _plugin_json_metadata(module_key: str | None) -> dict[str, Any] | None:
     if not module_key:
         return None
     plugin_json = settings.plugins_installed_path / module_key / "plugin.json"
     if not plugin_json.exists():
         return None
     meta = json.loads(plugin_json.read_text(encoding="utf-8"))
+    return meta if isinstance(meta, dict) else None
+
+
+def _plugin_json_interaction_entries(module_key: str | None) -> Any:
+    meta = _plugin_json_metadata(module_key)
+    if not isinstance(meta, dict):
+        return None
     raw_entries = meta.get("interaction_entries")
     if raw_entries is None and isinstance(meta.get("config_schema"), dict):
         raw_entries = meta["config_schema"].get("x-interaction-entries")
     return raw_entries
+
+
+def declared_module_event_subscriptions(module_key: str | None) -> list[dict[str, Any]]:
+    """Return Event Bus subscriptions declared by builtin or installed plugin metadata."""
+
+    if not module_key:
+        return []
+    try:
+        manifest = BUILTIN_FEATURES.manifest_for(module_key)
+        raw_subscriptions = getattr(manifest, "event_subscriptions", None) if manifest is not None else None
+        if isinstance(raw_subscriptions, list):
+            subscriptions = [dict(item) for item in raw_subscriptions if isinstance(item, dict)]
+            if subscriptions:
+                return subscriptions
+    except Exception:  # noqa: BLE001
+        log.debug("读取 builtin 模块事件订阅失败: %s", module_key, exc_info=True)
+    try:
+        meta = _plugin_json_metadata(module_key)
+        raw_subscriptions = meta.get("event_subscriptions") if isinstance(meta, dict) else None
+        if isinstance(raw_subscriptions, list):
+            return [dict(item) for item in raw_subscriptions if isinstance(item, dict)]
+    except Exception:  # noqa: BLE001
+        log.debug("读取 installed 模块事件订阅失败: %s", module_key, exc_info=True)
+    return []
+
+
+def declared_plugin_capabilities(module_key: str | None) -> dict[str, Any]:
+    """Return high-risk capability declarations for a plugin."""
+
+    if not module_key:
+        return {}
+    try:
+        manifest = BUILTIN_FEATURES.manifest_for(module_key)
+        raw_capabilities = getattr(manifest, "capabilities", None) if manifest is not None else None
+        if isinstance(raw_capabilities, dict) and raw_capabilities:
+            return dict(raw_capabilities)
+    except Exception:  # noqa: BLE001
+        log.debug("读取 builtin 模块能力声明失败: %s", module_key, exc_info=True)
+    try:
+        meta = _plugin_json_metadata(module_key)
+        raw_capabilities = meta.get("capabilities") if isinstance(meta, dict) else None
+        if isinstance(raw_capabilities, dict) and raw_capabilities:
+            return dict(raw_capabilities)
+    except Exception:  # noqa: BLE001
+        log.debug("读取 installed 模块能力声明失败: %s", module_key, exc_info=True)
+    return {}
+
+
+def plugin_declares_telegram_native_raw(module_key: str | None, *, source: str = "interaction_bot") -> bool:
+    """Whether a plugin explicitly asks for native Telegram raw event payloads."""
+
+    capabilities = declared_plugin_capabilities(module_key)
+    raw = capabilities.get("telegram_native_raw")
+    if raw is True:
+        return True
+    if not isinstance(raw, dict) or not bool(raw.get("enabled")):
+        return False
+    sources = raw.get("sources")
+    if isinstance(sources, list) and sources:
+        allowed_sources = {str(item or "").strip() for item in sources}
+        return source in allowed_sources or "all" in allowed_sources
+    return True
 
 
 def _declared_module_single_entry_key(module_key: str | None) -> str | None:
@@ -1384,6 +1454,29 @@ async def answer_callback(
     if text:
         payload["text"] = text[:200]
     await call_bot_api(token, "answerCallbackQuery", payload, timeout=httpx.Timeout(10.0))
+
+
+async def answer_inline_query(
+    token: str,
+    inline_query_id: str,
+    *,
+    results: list[dict[str, Any]],
+    cache_time: int = 0,
+    is_personal: bool = True,
+    next_offset: str | None = None,
+    button: dict[str, Any] | None = None,
+) -> None:
+    payload: dict[str, Any] = {
+        "inline_query_id": inline_query_id,
+        "results": results[:50],
+        "cache_time": max(0, int(cache_time or 0)),
+        "is_personal": bool(is_personal),
+    }
+    if next_offset is not None:
+        payload["next_offset"] = str(next_offset)
+    if isinstance(button, dict):
+        payload["button"] = button
+    await call_bot_api(token, "answerInlineQuery", payload, timeout=httpx.Timeout(10.0))
 
 
 def html_text(value: Any) -> str:

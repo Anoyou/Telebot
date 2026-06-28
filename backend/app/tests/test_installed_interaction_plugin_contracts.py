@@ -88,7 +88,7 @@ def test_installed_interaction_validator_discovers_only_nonempty_interaction_ent
         pytest.skip("本机未安装交互插件样本")
     validate_installed_interactions = _load_validator_module()
 
-    assert validate_installed_interactions._installed_interaction_plugin_keys() == list(REQUIRED_INSTALLED_PLUGIN_KEYS)
+    assert validate_installed_interactions._installed_plugin_keys() == list(REQUIRED_INSTALLED_PLUGIN_KEYS)
 
 
 @pytest.mark.asyncio
@@ -101,7 +101,8 @@ async def test_example_with_interaction_preserves_original_command_trigger() -> 
     handled = await plugin.on_command(ctx, "with_interaction", [], event)
 
     assert handled is True
-    assert event.replies == ["原命令触发仍然可用"]
+    assert event.replies == []
+    ctx.log.assert_awaited()
 
     ignored = await plugin.on_command(ctx, "other_command", [], event)
     assert ignored is False
@@ -116,23 +117,24 @@ async def test_example_with_interaction_uses_message_ops_for_visible_reply() -> 
 
     actions = await plugin.on_interaction(
         ctx,
-        "start_with_interaction",
-        {
-            "message": "框架消息",
-            "source": {"type": "keyword", "chat_id": -100123},
-            "actor": {"user_id": 111, "display_name": "AAA"},
-        },
-    )
+            "start_with_interaction",
+            {
+                "message": {"chat_id": -100123, "text": "框架消息"},
+                "response_text": "你好，交互 Bot",
+                "source": {"type": "message", "chat_id": -100123},
+                "actor": {"user_id": 111, "display_name": "AAA"},
+            },
+        )
 
     assert messages.actions == [
         {
-            "type": "send_message",
-            "send_via": "interaction_bot",
-            "chat_id": -100123,
-            "text": "框架消息\n触发人：AAA",
-            "reply_to_message_id": None,
-        }
-    ]
+                "type": "send_message",
+                "send_via": "interaction_bot",
+                "chat_id": -100123,
+                "text": "你好，交互 Bot\n收到：框架消息\n触发人：AAA",
+                "reply_to_message_id": None,
+            }
+        ]
     assert actions == [
         {
             "type": "result",

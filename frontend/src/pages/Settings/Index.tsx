@@ -139,10 +139,17 @@ export function SettingsIndex() {
     premium_daily: "0",
   });
   const [logRetention, setLogRetention] = useState({
+    trace_enabled: true,
+    event_bus_delivery_enabled: true,
+    inline_updates_enabled: true,
     runtime_log_retention_days: "30",
     runtime_log_max_message_chars: "2000",
     runtime_log_max_detail_chars: "8000",
     runtime_log_min_level: "info" as RuntimeLogLevel,
+    trace_retention_days: "30",
+    trace_payload_snapshot_retention_days: "7",
+    native_raw_persist_enabled: false,
+    native_raw_retention_days: "1",
   });
   useEffect(() => {
     if (settingsQ.data) {
@@ -155,10 +162,17 @@ export function SettingsIndex() {
         premium_daily: String(settingsQ.data.llm_limits?.premium_daily ?? 0),
       });
       setLogRetention({
+        trace_enabled: Boolean(settingsQ.data.log_retention?.trace_enabled ?? true),
+        event_bus_delivery_enabled: Boolean(settingsQ.data.log_retention?.event_bus_delivery_enabled ?? true),
+        inline_updates_enabled: Boolean(settingsQ.data.log_retention?.inline_updates_enabled ?? true),
         runtime_log_retention_days: String(settingsQ.data.log_retention?.runtime_log_retention_days ?? 30),
         runtime_log_max_message_chars: String(settingsQ.data.log_retention?.runtime_log_max_message_chars ?? 2000),
         runtime_log_max_detail_chars: String(settingsQ.data.log_retention?.runtime_log_max_detail_chars ?? 8000),
         runtime_log_min_level: (settingsQ.data.log_retention?.runtime_log_min_level ?? "info") as RuntimeLogLevel,
+        trace_retention_days: String(settingsQ.data.log_retention?.trace_retention_days ?? 30),
+        trace_payload_snapshot_retention_days: String(settingsQ.data.log_retention?.trace_payload_snapshot_retention_days ?? 7),
+        native_raw_persist_enabled: Boolean(settingsQ.data.log_retention?.native_raw_persist_enabled ?? false),
+        native_raw_retention_days: String(settingsQ.data.log_retention?.native_raw_retention_days ?? 1),
       });
     }
   }, [settingsQ.data]);
@@ -246,10 +260,17 @@ export function SettingsIndex() {
   const saveLogRetention = useMutation({
     mutationFn: () => patchSystemSettings({
       log_retention: {
+        trace_enabled: Boolean(logRetention.trace_enabled),
+        event_bus_delivery_enabled: Boolean(logRetention.event_bus_delivery_enabled),
+        inline_updates_enabled: Boolean(logRetention.inline_updates_enabled),
         runtime_log_retention_days: Number(logRetention.runtime_log_retention_days) || 0,
         runtime_log_max_message_chars: Number(logRetention.runtime_log_max_message_chars) || 2000,
         runtime_log_max_detail_chars: Number(logRetention.runtime_log_max_detail_chars) || 0,
         runtime_log_min_level: logRetention.runtime_log_min_level,
+        trace_retention_days: Number(logRetention.trace_retention_days) || 0,
+        trace_payload_snapshot_retention_days: Number(logRetention.trace_payload_snapshot_retention_days) || 0,
+        native_raw_persist_enabled: Boolean(logRetention.native_raw_persist_enabled),
+        native_raw_retention_days: Number(logRetention.native_raw_retention_days) || 0,
       },
     }),
     onSuccess: () => {
@@ -674,6 +695,100 @@ export function SettingsIndex() {
                   <p className="text-xs text-muted-foreground">
                     debug 会记录插件排障细节；info 适合日常；warn/error 只保留异常。
                   </p>
+                </div>
+              </div>
+              <div className="mt-4 grid gap-3 md:grid-cols-3">
+                <div className="space-y-1.5 rounded-md border border-border/70 bg-muted/20 p-3">
+                  <Label>写入 Trace</Label>
+                  <div className="flex h-10 items-center">
+                    <Switch
+                      checked={logRetention.trace_enabled}
+                      onCheckedChange={(checked) =>
+                        setLogRetention((v) => ({ ...v, trace_enabled: checked }))
+                      }
+                    />
+                  </div>
+                  <p className="text-xs text-muted-foreground">关闭后保留旧运行日志；仅用于排查 Trace 存储异常。</p>
+                </div>
+                <div className="space-y-1.5 rounded-md border border-border/70 bg-muted/20 p-3">
+                  <Label>Event Bus 投递</Label>
+                  <div className="flex h-10 items-center">
+                    <Switch
+                      checked={logRetention.event_bus_delivery_enabled}
+                      onCheckedChange={(checked) =>
+                        setLogRetention((v) => ({ ...v, event_bus_delivery_enabled: checked }))
+                      }
+                    />
+                  </div>
+                  <p className="text-xs text-muted-foreground">关闭后回退旧交互规则链路，适合部署回滚观察。</p>
+                </div>
+                <div className="space-y-1.5 rounded-md border border-border/70 bg-muted/20 p-3">
+                  <Label>Inline 更新</Label>
+                  <div className="flex h-10 items-center">
+                    <Switch
+                      checked={logRetention.inline_updates_enabled}
+                      onCheckedChange={(checked) =>
+                        setLogRetention((v) => ({ ...v, inline_updates_enabled: checked }))
+                      }
+                    />
+                  </div>
+                  <p className="text-xs text-muted-foreground">关闭后不拉取 inline_query / chosen_inline_result。</p>
+                </div>
+              </div>
+              <div className="mt-4 grid gap-3 md:grid-cols-4">
+                <div className="space-y-1.5">
+                  <Label>Trace 保留天数</Label>
+                  <Input
+                    inputMode="numeric"
+                    value={logRetention.trace_retention_days}
+                    onChange={(e) =>
+                      setLogRetention((v) => ({
+                        ...v,
+                        trace_retention_days: e.target.value.replace(/[^0-9]/g, ""),
+                      }))
+                    }
+                  />
+                  <p className="text-xs text-muted-foreground">默认 30；0 = 不自动删除链路记录</p>
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Payload 快照保留天数</Label>
+                  <Input
+                    inputMode="numeric"
+                    value={logRetention.trace_payload_snapshot_retention_days}
+                    onChange={(e) =>
+                      setLogRetention((v) => ({
+                        ...v,
+                        trace_payload_snapshot_retention_days: e.target.value.replace(/[^0-9]/g, ""),
+                      }))
+                    }
+                  />
+                  <p className="text-xs text-muted-foreground">默认 7；到期只清空快照，保留主链路</p>
+                </div>
+                <div className="space-y-1.5">
+                  <Label>保存完整 native_raw</Label>
+                  <div className="flex h-10 items-center">
+                    <Switch
+                      checked={logRetention.native_raw_persist_enabled}
+                      onCheckedChange={(checked) =>
+                        setLogRetention((v) => ({ ...v, native_raw_persist_enabled: checked }))
+                      }
+                    />
+                  </div>
+                  <p className="text-xs text-muted-foreground">默认关闭；仅用于短期深度排障</p>
+                </div>
+                <div className="space-y-1.5">
+                  <Label>native_raw 保留天数</Label>
+                  <Input
+                    inputMode="numeric"
+                    value={logRetention.native_raw_retention_days}
+                    onChange={(e) =>
+                      setLogRetention((v) => ({
+                        ...v,
+                        native_raw_retention_days: e.target.value.replace(/[^0-9]/g, ""),
+                      }))
+                    }
+                  />
+                  <p className="text-xs text-muted-foreground">默认 1；当前默认不持久化完整内容</p>
                 </div>
               </div>
               <div className="mt-3">
