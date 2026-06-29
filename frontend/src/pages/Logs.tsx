@@ -1042,8 +1042,8 @@ function RawLogsPanel({ timezone }: { timezone?: string }) {
         <Card>
           <CardHeader>
             <SectionHeader
-              title="运行事件流"
-              description="按时间展示 worker、插件和消息事件的运行记录；先看摘要，需要时展开原始 detail。"
+              title="原始运行日志"
+              description="按时间展示原始运行记录；每条保留日志等级、正文和可展开 detail。"
             />
           </CardHeader>
           <CardContent>
@@ -1092,8 +1092,8 @@ function RawLogsPanel({ timezone }: { timezone?: string }) {
         <Card>
           <CardHeader>
             <SectionHeader
-              title="面板操作流"
-              description="记录 Web 面板里的启停、配置、插件更新和高风险操作，重点看谁在什么时候改了什么。"
+              title="原始审计日志"
+              description="记录 Web 面板里的启停、配置、插件更新和高风险操作；每条可展开查看 detail。"
             />
           </CardHeader>
           <CardContent>
@@ -1148,7 +1148,7 @@ function RuntimeLogTable({
       <CardHeader>
         <SectionHeader
           title="运行日志"
-          description="每条记录提取 trace、插件、会话和原因代码，原始字段放在展开详情里。"
+          description="连续日志流视图，适合按时间扫正文；detail 折叠在每条日志下方。"
           meta={<SignalPill tone="neutral" label="窗口" value="100 条" />}
         />
       </CardHeader>
@@ -1156,9 +1156,9 @@ function RuntimeLogTable({
         {logsQ.isLoading ? <InlineLoading /> : logsQ.isError ? (
           <ErrorHint text="运行日志加载失败" error={logsQ.error} />
         ) : filtered.length ? (
-          <div className="space-y-3">
+          <div className="overflow-hidden rounded-lg border border-border/70 bg-background font-mono text-xs">
             {filtered.map((row: RuntimeLogItem) => (
-              <RuntimeLogCard key={row.id} row={row} keyword={search} timezone={timezone} />
+              <RuntimeLogLine key={row.id} row={row} keyword={search} timezone={timezone} />
             ))}
           </div>
         ) : <EmptyHint text="该分类暂无运行日志" />}
@@ -1179,7 +1179,7 @@ function AuditLogTable({ action, search, timezone }: { action: string; search: s
       <CardHeader>
         <SectionHeader
           title="审计日志"
-          description="把 audit_log 翻译成可扫读的操作记录，展开后仍可查看原始 detail。"
+          description="连续操作日志视图，保留 action、target、操作人和可展开 detail。"
           meta={<SignalPill tone="neutral" label="窗口" value="100 条" />}
         />
       </CardHeader>
@@ -1189,9 +1189,9 @@ function AuditLogTable({ action, search, timezone }: { action: string; search: s
         ) : logsQ.isError ? (
           <ErrorHint text="审计日志加载失败" error={logsQ.error} />
         ) : logsQ.data?.length ? (
-          <div className="space-y-3">
+          <div className="overflow-hidden rounded-lg border border-border/70 bg-background font-mono text-xs">
             {logsQ.data.map((row: AuditLogItem) => (
-              <AuditLogCard key={row.id} row={row} keyword={search} timezone={timezone} />
+              <AuditLogLine key={row.id} row={row} keyword={search} timezone={timezone} />
             ))}
           </div>
         ) : <EmptyHint text="暂无审计日志" />}
@@ -1200,7 +1200,7 @@ function AuditLogTable({ action, search, timezone }: { action: string; search: s
   );
 }
 
-function RuntimeLogCard({
+function RuntimeLogLine({
   row,
   keyword,
   timezone,
@@ -1219,55 +1219,47 @@ function RuntimeLogCard({
   const actor = pickString(detail, ["display_name", "username", "user_id", "sender_user_id"]);
   const sourceLabel = runtimeSourceLabel(row.source);
   const level = row.level.toLowerCase();
+  const meta = [
+    row.account_id ? `account=#${row.account_id}` : null,
+    pluginKey ? `plugin=${pluginKey}` : null,
+    entryKey ? `entry=${entryKey}` : null,
+    chatId ? `chat=${chatId}` : null,
+    messageId ? `message=${messageId}` : null,
+    actor ? `actor=${actor}` : null,
+    reasonCode ? `reason=${reasonDisplay(reasonCode)}` : null,
+  ].filter(Boolean);
 
   return (
-    <article className="rounded-lg border bg-background p-3 transition-colors hover:border-primary/40 sm:p-4">
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+    <article className="border-b border-border/60 px-3 py-2 last:border-b-0 hover:bg-muted/25">
+      <div className="grid gap-2 lg:grid-cols-[11rem_5.5rem_minmax(0,1fr)] lg:items-start">
+        <time className="whitespace-nowrap text-muted-foreground">
+          {formatDateTime(row.created_at, timezone)}
+        </time>
+        <div className="flex flex-wrap items-center gap-1.5">
+          <Badge variant={LEVEL_VARIANT[level] ?? "secondary"} className="font-mono">{row.level.toUpperCase()}</Badge>
+          <span className="rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground">{sourceLabel}</span>
+        </div>
         <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-1.5">
-            <Badge variant={LEVEL_VARIANT[level] ?? "secondary"}>{row.level.toUpperCase()}</Badge>
-            <Badge variant="secondary">{sourceLabel}</Badge>
-            {pluginKey ? <Badge variant="secondary">{pluginKey}</Badge> : null}
-            {entryKey ? <Badge variant="secondary">入口 {entryKey}</Badge> : null}
-          </div>
-          <p className="mt-2 break-words text-sm font-medium leading-6">
+          <div className="break-words leading-5 text-foreground">
             <HighlightedMessage text={row.message} keyword={keyword} />
-          </p>
-          {reasonCode ? (
-            <p className="mt-1 text-sm text-muted-foreground">
-              原因：{reasonDisplay(reasonCode)}
-            </p>
-          ) : null}
+          </div>
+          <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[11px] leading-5 text-muted-foreground">
+            <span>id=#{row.id}</span>
+            {meta.map((item) => <span key={item}>{item}</span>)}
+            {traceId ? (
+              <Link className="text-primary hover:underline" to={`/logs?tab=events&trace_id=${encodeURIComponent(traceId)}`}>
+                trace={traceId}
+              </Link>
+            ) : null}
+          </div>
+          <DetailDisclosure title="详细记录" value={row.detail} />
         </div>
-        <div className="shrink-0 text-xs text-muted-foreground sm:text-right">
-          <div>{formatDateTime(row.created_at, timezone)}</div>
-          <div className="mt-1 font-mono">#{row.id}</div>
-        </div>
-      </div>
-
-      <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-        <InfoCell label="账号" value={row.account_id ? `#${row.account_id}` : "-"} />
-        <InfoCell label="Trace ID" value={traceId || "-"} />
-        <InfoCell label="会话" value={chatId || "-"} />
-        <InfoCell label="消息" value={messageId || "-"} />
-        {actor ? <InfoCell label="触发人" value={actor} /> : null}
-      </div>
-
-      <div className="mt-3 space-y-2">
-        {traceId ? (
-          <Button asChild variant="outline" size="sm">
-            <Link to={`/logs?tab=events&trace_id=${encodeURIComponent(traceId)}`}>
-              查看消息链路
-            </Link>
-          </Button>
-        ) : null}
-        <DetailDisclosure title="展开原始 detail" value={row.detail} />
       </div>
     </article>
   );
 }
 
-function AuditLogCard({
+function AuditLogLine({
   row,
   keyword,
   timezone,
@@ -1282,39 +1274,39 @@ function AuditLogCard({
   const status = pickString(detail, ["status", "state", "result"]);
   const version = pickString(detail, ["version", "new_version", "target_version"]);
   const summary = auditDetailSummary(detail, keyword);
+  const meta = [
+    row.user_id ? `user=#${row.user_id}` : null,
+    row.target ? `target=${row.target}` : null,
+    accountId ? `account=#${accountId}` : null,
+    pluginKey ? `plugin=${pluginKey}` : null,
+    version ? `version=${version}` : null,
+  ].filter(Boolean);
 
   return (
-    <article className="rounded-lg border bg-background p-3 transition-colors hover:border-primary/40 sm:p-4">
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+    <article className="border-b border-border/60 px-3 py-2 last:border-b-0 hover:bg-muted/25">
+      <div className="grid gap-2 lg:grid-cols-[11rem_5.5rem_minmax(0,1fr)] lg:items-start">
+        <time className="whitespace-nowrap text-muted-foreground">
+          {formatDateTime(row.ts, timezone)}
+        </time>
+        <div className="flex flex-wrap items-center gap-1.5">
+          <Badge variant={status ? (LEVEL_VARIANT[status.toLowerCase()] ?? "secondary") : "secondary"} className="font-mono">
+            {status ? status.toUpperCase() : "AUDIT"}
+          </Badge>
+        </div>
         <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-1.5">
-            <Badge variant="secondary">审计</Badge>
-            {status ? <StatusBadge status={status} /> : null}
-            {pluginKey ? <Badge variant="secondary">{pluginKey}</Badge> : null}
-          </div>
-          <p className="mt-2 break-words text-sm font-medium leading-6">
+          <div className="break-words leading-5 text-foreground">
             <HighlightedMessage text={auditActionTitle(row.action)} keyword={keyword} />
-          </p>
-          <p className="mt-1 break-words text-sm text-muted-foreground">
-            {summary || "该操作没有额外 detail。"}
-          </p>
+          </div>
+          <div className="mt-1 break-words leading-5 text-muted-foreground">
+            {summary || "detail 为空"}
+          </div>
+          <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[11px] leading-5 text-muted-foreground">
+            <span>id=#{row.id}</span>
+            <span>action={row.action}</span>
+            {meta.map((item) => <span key={item}>{item}</span>)}
+          </div>
+          <DetailDisclosure title="详细记录" value={row.detail} />
         </div>
-        <div className="shrink-0 text-xs text-muted-foreground sm:text-right">
-          <div>{formatDateTime(row.ts, timezone)}</div>
-          <div className="mt-1 font-mono">#{row.id}</div>
-        </div>
-      </div>
-
-      <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-        <InfoCell label="操作人" value={row.user_id ? `用户 #${row.user_id}` : "-"} />
-        <InfoCell label="Action" value={row.action} />
-        <InfoCell label="目标" value={row.target || "-"} />
-        <InfoCell label="账号" value={accountId ? `#${accountId}` : "-"} />
-        {version ? <InfoCell label="版本" value={version} /> : null}
-      </div>
-
-      <div className="mt-3">
-        <DetailDisclosure title="展开审计 detail" value={row.detail} />
       </div>
     </article>
   );
@@ -1323,12 +1315,12 @@ function AuditLogCard({
 function DetailDisclosure({ title, value }: { title: string; value?: Record<string, unknown> | null }) {
   if (!value || Object.keys(value).length === 0) return null;
   return (
-    <details className="group rounded-md border border-border/70 bg-muted/20 px-3 py-2">
-      <summary className="cursor-pointer select-none text-xs font-medium text-muted-foreground group-open:text-foreground">
+    <details className="group mt-1 rounded-md border border-border/70 bg-muted/20 px-2 py-1.5">
+      <summary className="cursor-pointer select-none text-[11px] font-medium text-muted-foreground group-open:text-foreground">
         {title}
       </summary>
-      <div className="mt-3">
-        <JsonBlock title="原始字段" value={value} />
+      <div className="mt-2">
+        <JsonBlock title="detail" value={value} />
       </div>
     </details>
   );
