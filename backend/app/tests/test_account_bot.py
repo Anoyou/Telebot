@@ -7421,6 +7421,64 @@ async def test_run_worker_interaction_entry_returns_timeout(monkeypatch) -> None
 
 
 @pytest.mark.asyncio
+async def test_local_interaction_fallback_log_ignores_duplicate_plugin_key(monkeypatch) -> None:
+    class _Redis:
+        def __init__(self) -> None:
+            self.items: list[str] = []
+
+        async def rpush(self, _key: str, value: str) -> int:
+            self.items.append(value)
+            return len(self.items)
+
+    class _Math10Plugin:
+        async def on_startup(self, _ctx) -> None:  # noqa: ANN001
+            return None
+
+        async def on_interaction(self, ctx, entry_key: str, _payload: dict) -> list[dict]:  # noqa: ANN001
+            await ctx.log(
+                "info",
+                "fallback log ok",
+                plugin_key="external",
+                source="plugin",
+                entry_key=entry_key,
+            )
+            return [{"type": "send_message", "text": "ok"}]
+
+    redis = _Redis()
+    monkeypatch.setattr(account_bot_runtime, "get_redis", lambda: redis)
+
+    import app.worker.plugins.builtin.math10.plugin as math10_module
+
+    monkeypatch.setattr(math10_module, "Math10Plugin", _Math10Plugin)
+    incoming = account_bot_runtime.Incoming(
+        account_id=1,
+        token="bbot-token",
+        update_id=1,
+        user_id=456,
+        chat_id=-100123,
+        message_id=10,
+        text="",
+    )
+
+    ok, error, actions = await account_bot_runtime._run_local_interaction_entry_fallback(
+        incoming,
+        plugin_key="math10",
+        entry_key="start_math10",
+        payload={},
+    )
+
+    assert ok is True
+    assert error is None
+    assert actions == [{"type": "send_message", "text": "ok"}]
+    assert redis.items
+    payload = json.loads(redis.items[-1])
+    assert payload["message"] == "fallback log ok"
+    assert payload["detail"]["plugin_key"] == "math10"
+    assert payload["detail"]["source"] == "plugin"
+    assert payload["detail"]["entry_key"] == "start_math10"
+
+
+@pytest.mark.asyncio
 async def test_run_worker_interaction_entry_waits_for_slow_plugin_reply(monkeypatch) -> None:
     class _PubSub:
         def __init__(self) -> None:

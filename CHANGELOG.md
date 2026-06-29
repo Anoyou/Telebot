@@ -20,6 +20,15 @@
 
 ## [Unreleased]
 
+## [0.41.4] — 2026-06-29 · patch（补丁版本） · 日志保留字段收口
+
+### Fixed
+- 继续收口绑定日志器的保留字段透传问题，避免 scheduler runtime 和 account bot 本地交互 fallback 在 detail 中重复携带 `plugin_key` / `source` 时触发 Python keyword 冲突。
+- 统一以平台绑定的插件身份为准记录运行日志，插件 detail 中的同名保留字段不会再覆盖或打断平台日志链路。
+
+### Tests
+- 补充 scheduler 上下文日志和 account bot 本地交互 fallback 日志的重复 `plugin_key` 回归测试。
+
 ## [0.41.3] — 2026-06-29 · patch（补丁版本） · 交互入口日志修复
 
 ### Fixed

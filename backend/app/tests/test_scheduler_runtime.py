@@ -173,6 +173,35 @@ async def test_runtime_job_failure_is_logged_and_kept(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
+async def test_scheduler_context_log_ignores_duplicate_plugin_key() -> None:
+    logs: list[tuple[tuple, dict]] = []
+
+    async def _log(*args, **kwargs) -> None:  # noqa: ANN002, ANN003
+        logs.append((args, kwargs))
+
+    paused = asyncio.Event()
+    paused.set()
+    runtime = PlatformScheduler(
+        account_id=42,
+        client=AsyncMock(),
+        redis=AsyncMock(),
+        paused=paused,
+        log_writer=_log,
+    )
+    runtime.engine = object()
+
+    ctx = await runtime._make_scheduler_context()
+    assert ctx is not None
+
+    await ctx.log("info", "scheduler log ok", plugin_key="external", source="plugin", entry_key="tick")
+
+    assert logs
+    assert logs[0][1]["source"] == "plugin"
+    assert logs[0][1]["plugin_key"] == scheduler_runtime.FEATURE_SCHEDULER
+    assert logs[0][1]["entry_key"] == "tick"
+
+
+@pytest.mark.asyncio
 async def test_action_call_llm_uses_shared_service_invoke(monkeypatch) -> None:
     executor = SchedulerRuleExecutor()
     row = SimpleNamespace(

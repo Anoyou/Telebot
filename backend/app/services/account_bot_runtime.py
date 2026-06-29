@@ -4037,11 +4037,13 @@ async def _run_local_interaction_entry_fallback(
         from app.worker.plugins.builtin.math10.plugin import Math10Plugin
 
         async def _log(level: str, message: str, **detail: Any) -> None:
+            source = str(detail.pop("source", "plugin"))
+            detail.pop("plugin_key", None)
             await _write_interaction_runtime_log(
                 incoming,
                 level,
                 message,
-                source="plugin",
+                source=source,
                 plugin_key=plugin_key,
                 **detail,
             )

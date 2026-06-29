@@ -984,6 +984,7 @@ class PlatformScheduler:
             return None
 
         async def ctx_log(level: str, message: str, **detail: Any) -> None:
+            detail.pop("plugin_key", None)
             await self._emit_log(
                 level,
                 message,
