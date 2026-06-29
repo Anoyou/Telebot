@@ -1168,6 +1168,127 @@ async def test_userbot_event_bus_ctx_client_send_message_records_action(monkeypa
 
 
 @pytest.mark.asyncio
+async def test_userbot_event_bus_unmatched_subscription_keeps_legacy_on_message(monkeypatch) -> None:
+    from app.worker.plugins.base import _REGISTRY, register
+
+    legacy_calls: list[str] = []
+
+    @register
+    class _UnmatchedSubscriptionPlugin(Plugin):
+        key = "_test_unmatched_subscription_legacy"
+        display_name = "订阅未命中兼容测试"
+        message_channels = {"incoming"}
+        owner_only = False
+
+        async def on_message(self, ctx: PluginContext, event: Any) -> None:
+            legacy_calls.append(str(getattr(event, "raw_text", "")))
+
+    _UnmatchedSubscriptionPlugin._manifest = Manifest(
+        key="_test_unmatched_subscription_legacy",
+        display_name="订阅未命中兼容测试",
+        event_subscriptions=[
+            {
+                "source": ["interaction_bot"],
+                "events": ["message"],
+                "scope": "rule_bound",
+                "entry_key": "main",
+            }
+        ],
+    )
+
+    class _Event:
+        raw_text = "9"
+        text = "9"
+        chat_id = -1001
+        sender_id = 42
+        id = 92
+        is_private = False
+        is_group = True
+        is_channel = False
+
+        async def get_chat(self):
+            return None
+
+    fake_db = _FakeDB(
+        accounts={13: _FakeAcc(id=13)},
+        humanize={13: None},
+        afs=[_FakeAF(account_id=13, feature_key="_test_unmatched_subscription_legacy", enabled=True, config={})],
+        rules=[],
+    )
+    trace = SimpleNamespace(trace_id="evt_loader_unmatched_legacy")
+    monkeypatch.setattr(loader_mod, "AsyncSessionLocal", lambda: _fake_session_factory(fake_db))
+    monkeypatch.setattr(loader_mod, "_load_log_incoming_messages_setting", AsyncMock(return_value=False))
+    monkeypatch.setattr(loader_mod, "_load_event_framework_flags", AsyncMock(return_value={
+        "trace_enabled": True,
+        "event_bus_delivery_enabled": True,
+    }))
+    monkeypatch.setattr(loader_mod, "start_trace", AsyncMock(return_value=trace))
+    record_span = AsyncMock()
+    monkeypatch.setattr(loader_mod, "record_span", record_span)
+    monkeypatch.setattr(loader_mod, "record_action", AsyncMock())
+    monkeypatch.setattr(loader_mod, "finish_trace", AsyncMock())
+    monkeypatch.setattr(loader_mod, "update_plugin_runtime_status", AsyncMock())
+
+    captured: list[Any] = []
+
+    def _on(_filter):
+        def _wrap(fn):
+            captured.append(fn)
+            return fn
+
+        return _wrap
+
+    client = MagicMock()
+    client.on = _on
+    paused = asyncio.Event()
+    paused.set()
+
+    try:
+        await load_plugins_for_account(client, account_id=13, paused=paused, redis=_FakeRedis())
+        incoming_dispatch = captured[-1]
+        await incoming_dispatch(_Event())
+
+        assert legacy_calls == ["9"]
+        assert any(
+            call.args[1] == "route"
+            and call.kwargs.get("component") == "event_bus"
+            and call.kwargs.get("reason_code") == "subscription_not_matched"
+            for call in record_span.await_args_list
+        )
+    finally:
+        loader_mod._STATES.pop(13, None)
+        _REGISTRY.pop("_test_unmatched_subscription_legacy", None)
+
+
+@pytest.mark.asyncio
+async def test_userbot_event_bus_deprecated_send_via_log_context_does_not_duplicate_plugin_key(monkeypatch) -> None:
+    state = loader_mod._AccountState(account_id=14)
+    redis = _FakeRedis()
+    trace = "evt_deprecated_send_via"
+    event = SimpleNamespace(chat_id=-1001, sender_id=42, raw_text="hello")
+    record_action = AsyncMock()
+    monkeypatch.setattr(loader_mod, "record_action", record_action)
+
+    failed = await loader_mod._apply_userbot_event_bus_actions(
+        state,
+        trace,
+        event,
+        plugin_key="dice_grid_hunt",
+        entry_key="start_dice_grid_hunt",
+        actions=[{"type": "send_message", "send_via": "notice", "text": "旧通道"}],
+        redis=redis,
+    )
+
+    assert failed is True
+    assert redis.list_pushes
+    payload = json.loads(redis.list_pushes[-1][1])
+    assert payload["detail"]["trace_id"] == "evt_deprecated_send_via"
+    assert payload["detail"]["plugin_key"] == "dice_grid_hunt"
+    assert payload["detail"]["entry_key"] == "start_dice_grid_hunt"
+    assert record_action.await_args.args[0]["trace_id"] == "evt_deprecated_send_via"
+
+
+@pytest.mark.asyncio
 async def test_userbot_event_bus_trace_switch_disables_trace(monkeypatch) -> None:
     from app.worker.plugins.base import _REGISTRY, register
 

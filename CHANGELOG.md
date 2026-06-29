@@ -20,6 +20,16 @@
 
 ## [Unreleased]
 
+## [0.41.2] — 2026-06-29 · patch（补丁版本） · 交互插件运行时修复
+
+### Fixed
+- 修复 UserBot Event Bus 日志路径中重复传入 `plugin_key` / `entry_key` 导致 `run_interaction_entry` 被 `TypeError: got multiple values for keyword argument 'plugin_key'` 打断的问题，避免平台日志错误掩盖真实插件异常。
+- 修复已声明 Event Bus 订阅的插件在订阅未命中时被错误跳过 legacy `on_message` 的问题；管理员命令启动的猜骰等旧兼容游戏，现在后续玩家回复会继续交给 userbot 插件处理并触发原有发奖逻辑。
+
+### Tests
+- 补充 UserBot Event Bus 订阅未命中回退 legacy `on_message` 的回归测试。
+- 补充废弃发送通道日志上下文不重复传参的回归测试，并复跑交互插件合约和账号 Bot 自动发奖测试。
+
 ## [0.41.1] — 2026-06-29 · patch（补丁版本） · AI 与日志页体验修正
 
 ### Fixed

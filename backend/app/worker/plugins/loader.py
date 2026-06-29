@@ -491,7 +491,7 @@ async def _start_userbot_message_trace(
             TRACE_STATUS_SKIPPED,
             component="event_bus",
             reason_code="subscription_not_matched",
-            message="Event Bus 未命中新入口；已声明订阅的插件不会继续走 legacy on_message。",
+            message="Event Bus 未命中新入口；legacy on_message 继续执行。",
         )
     return _UserbotEventBusDispatch(
         trace=trace,
@@ -650,7 +650,7 @@ async def _dispatch_userbot_event_bus_matches(
                 sender_id=getattr(event, "sender_id", None),
                 message_preview=(getattr(event, "raw_text", "") or "")[:200],
                 traceback=traceback.format_exc(limit=8),
-                **trace_log_context(trace, plugin_key=plugin_key, entry_key=entry_key),
+                **trace_log_context(trace),
             )
     return invoked_count, failed_count
 
@@ -817,7 +817,7 @@ async def _apply_userbot_event_bus_actions(
                     reason_code=SEND_CHANNEL_DEPRECATED_REASON_CODE,
                     action_type=action_type,
                     deprecated_send_via=deprecated_channels,
-                    **trace_log_context(trace, plugin_key=plugin_key, entry_key=entry_key),
+                    **trace_log_context(trace),
                 )
                 continue
         if action_type == "send_message":
@@ -2067,8 +2067,13 @@ async def load_plugins_for_account(
                 event_label=event_label,
                 redis=redis,
             )
+            matched_event_bus_plugin_keys = frozenset(
+                str(getattr(decision, "plugin_key", "") or "").strip()
+                for decision in dispatch_state.matched_decisions
+                if str(getattr(decision, "plugin_key", "") or "").strip()
+            )
             for fkey, inst in list(state.instances.items()):
-                if dispatch_state.event_bus_enabled and fkey in dispatch_state.subscribed_plugin_keys:
+                if dispatch_state.event_bus_enabled and fkey in matched_event_bus_plugin_keys:
                     continue
                 if direction not in inst.message_channels:
                     continue
@@ -2165,7 +2170,7 @@ async def load_plugins_for_account(
                         sender_id=getattr(event, "sender_id", None),
                         message_preview=(getattr(event, "raw_text", "") or "")[:200],
                         traceback=traceback.format_exc(limit=8),
-                        **trace_log_context(trace, plugin_key=fkey),
+                        **trace_log_context(trace),
                     )
                 finally:
                     ctx.client = previous_client
