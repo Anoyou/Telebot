@@ -318,8 +318,8 @@ class EventBusDemoPlugin(Plugin):
 发布前至少运行：
 
 ```bash
-python scripts/validate-plugin-examples.py
-python scripts/validate-installed-interaction-plugins.py
+backend/.venv/bin/python scripts/validate-plugin-examples.py
+backend/.venv/bin/python scripts/validate-installed-interaction-plugins.py
 ```
 
 示例校验会检查：

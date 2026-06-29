@@ -20,6 +20,23 @@
 
 ## [Unreleased]
 
+## [0.41.0] — 2026-06-29 · minor（次版本） · 插件开发者体验与日志可读性改版
+
+### Added
+- 新增 `docs/PLUGIN-QUICKSTART.md`，用 `hello_ping` 演示 5 分钟复制最小 Event Bus + MessageOps 插件。
+- 新增 `docs/PLUGIN-RULES.md`，把插件开发的必须、禁止、推荐规则整理成短契约。
+- 新增 `examples/plugins/hello_ping` 入门示例，并纳入 `scripts/validate-plugin-examples.py`，校验 `ping` 返回 `send_message/pong`、非命中文本不返回动作。
+- 在插件安装页开发指南 Tab 置顶 Quickstart、插件开发铁律和完整 API 参考三个入口。
+
+### Changed
+- 调整插件开发指南索引、README、速查表、插件概览和安全边界，明确安装、启用、禁用、更新、热重载和卸载的心智，并补充插件清理检查表。
+- 统一插件示例验证命令为 `backend/.venv/bin/python scripts/validate-plugin-examples.py`，减少未激活虚拟环境时的误导。
+- 统一主页面页眉样式，概览、插件中心、日志等页面使用同一工作台式标题区，减少页面标题风格漂移。
+- 重做日志中心“原始日志”里的运行日志和审计日志展示，从横向表格改为可扫读事件卡片，并把原始 detail 默认折叠。
+
+### Tests
+- 执行插件示例验证、前端类型检查、前端生产构建、文档旧词审计和 `git diff --check`。
+
 ## [0.40.6] — 2026-06-29 · patch（补丁版本） · 最终证据台账收束补丁
 
 ### Docs

@@ -416,7 +416,9 @@ TelePilot 用户界面和文档统一称“插件”，代码层仍使用 `Plugi
 
 开发文档：
 
-- [插件开发指南（Plugin API，含官方插件库与远程插件）](docs/PLUGIN-DEV-GUIDE.md)
+- [5 分钟写出第一个插件](docs/PLUGIN-QUICKSTART.md)
+- [插件开发铁律](docs/PLUGIN-RULES.md)
+- [插件开发指南（索引、完整 API、官方插件库与远程插件）](docs/PLUGIN-DEV-GUIDE.md)
 
 ## 安全边界
 
@@ -455,12 +457,14 @@ pnpm -C frontend build
 - [变更日志](CHANGELOG.md)
 - [公网部署](docs/DEPLOY-PUBLIC.md)
 - [安全运维](docs/SECURITY-OPS.md)
-- [插件开发指南（Plugin API，含官方插件库与远程插件）](docs/PLUGIN-DEV-GUIDE.md)
+- [插件 Quickstart](docs/PLUGIN-QUICKSTART.md)
+- [插件开发铁律](docs/PLUGIN-RULES.md)
+- [插件开发指南索引](docs/PLUGIN-DEV-GUIDE.md)
 - [贡献指南](CONTRIBUTING.md)
 
 ## 项目状态
 
-当前版本：`v0.40.6`
+当前版本：`v0.41.0`
 
 项目处于 Alpha / 个人自用阶段。核心链路已经能跑，但仍在快速迭代中，接口、页面和插件规范可能继续调整。欢迎 fork、参考和提 issue；大规模 PR 建议先开 issue 对齐方向。
 

@@ -24,7 +24,7 @@ for import_root in (ROOT, BACKEND_ROOT):
 from app.worker.plugins.base import Plugin  # noqa: E402
 from app.worker.plugins.manifest import Manifest  # noqa: E402
 
-INCLUDED_EXAMPLES = {"event_bus_demo", "with_http", "with_ai", "with_interaction"}
+INCLUDED_EXAMPLES = {"event_bus_demo", "hello_ping", "with_http", "with_ai", "with_interaction"}
 SKIPPED_EXAMPLES = {
     "translate": "历史示例仍依赖后端私有 LLM 链路，迁移到 ctx.ai 前不纳入稳定 API gate。",
 }
@@ -33,7 +33,8 @@ REQUIRED_PERMISSIONS = {
     "with_ai": {"ai_text"},
     "with_http": {"external_http"},
 }
-EVENT_EXAMPLES = {"event_bus_demo", "with_interaction"}
+EVENT_EXAMPLES = {"event_bus_demo", "hello_ping", "with_interaction"}
+NATIVE_RAW_EXAMPLES = {"event_bus_demo", "with_interaction"}
 REQUIRED_EVENT_TYPES = {
     "event_bus_demo": {
         "message",
@@ -43,6 +44,7 @@ REQUIRED_EVENT_TYPES = {
         "chosen_inline_result",
         "payment_confirmed",
     },
+    "hello_ping": {"message"},
     "with_interaction": {"message", "callback_query", "payment_confirmed"},
 }
 DEPRECATED_RISK_TOKENS = ("notice", "bbot_notice", "notice_bot", "raw_event")
@@ -129,10 +131,11 @@ def _validate_event_contract(name: str, metadata: dict[str, Any], manifest: Mani
             raise AssertionError(f"{name}: event_subscriptions 缺少事件: {', '.join(missing_events)}")
 
         raw_capability = metadata_capabilities.get("telegram_native_raw")
-        if not isinstance(raw_capability, dict):
-            raise AssertionError(f"{name}: capabilities.telegram_native_raw 必须显式声明为对象")
-        if raw_capability.get("enabled") is True and not str(raw_capability.get("reason") or "").strip():
-            raise AssertionError(f"{name}: telegram_native_raw.enabled=true 时必须说明 reason")
+        if name in NATIVE_RAW_EXAMPLES:
+            if not isinstance(raw_capability, dict):
+                raise AssertionError(f"{name}: capabilities.telegram_native_raw 必须显式声明为对象")
+            if raw_capability.get("enabled") is True and not str(raw_capability.get("reason") or "").strip():
+                raise AssertionError(f"{name}: telegram_native_raw.enabled=true 时必须说明 reason")
 
 
 def _validate_deprecated_risks(name: str, plugin_dir: Path, metadata: dict[str, Any]) -> None:
@@ -231,6 +234,42 @@ def _validate_event_demo_runtime(name: str, plugin_dir: Path, plugin: Plugin) ->
         raise AssertionError(f"{name}: deprecated_notice_action.json 未覆盖 send_channel_deprecated")
 
 
+def _validate_hello_ping_runtime(name: str, plugin: Plugin) -> None:
+    if name != "hello_ping":
+        return
+    ping_payload = {
+        "source": {
+            "type": "message",
+            "channel": "interaction_bot",
+            "account_id": 1,
+            "chat_id": -100123,
+            "message_id": 456,
+        },
+        "message": {
+            "chat_id": -100123,
+            "message_id": 456,
+            "text": "ping",
+        },
+        "chat": {"id": -100123, "type": "supergroup"},
+        "sender": {"user_id": 789, "display_name": "Alice"},
+    }
+    miss_payload = {
+        **ping_payload,
+        "message": {**ping_payload["message"], "text": "hello"},
+    }
+    actions = asyncio.run(_run_on_event(plugin, ping_payload))
+    if len(actions) != 1:
+        raise AssertionError(f"{name}: ping 必须只返回一条 action，实际 {len(actions)} 条")
+    action = actions[0]
+    if action.get("type") != "send_message" or action.get("text") != "pong":
+        raise AssertionError(f"{name}: ping 必须返回 send_message/pong，实际 {action}")
+    if action.get("chat_id") != -100123 or action.get("reply_to_message_id") != 456:
+        raise AssertionError(f"{name}: ping 回复必须引用原会话和原消息")
+    miss_actions = asyncio.run(_run_on_event(plugin, miss_payload))
+    if miss_actions:
+        raise AssertionError(f"{name}: 非 ping 文本不能返回 action")
+
+
 def _validate_example(name: str) -> None:
     plugin_dir = EXAMPLES_ROOT / name
     missing = sorted(file for file in REQUIRED_FILES if not (plugin_dir / file).is_file())
@@ -272,6 +311,7 @@ def _validate_example(name: str) -> None:
     _validate_deprecated_risks(name, plugin_dir, metadata)
     _validate_event_fixtures(name, plugin_dir)
     _validate_event_demo_runtime(name, plugin_dir, instance)
+    _validate_hello_ping_runtime(name, instance)
 
     for field in ("permissions", "allowed_hosts"):
         expected = list(metadata.get(field) or [])

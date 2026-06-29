@@ -26,7 +26,6 @@ import {
   MeterBar,
   SectionHeader,
   SignalPill,
-  StatusSummaryPanel,
   ToneRailCard,
   type VisualTone,
   toneClasses,
@@ -45,7 +44,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { AccountSummaryCard } from "@/components/AccountSummaryCard";
-import { PageShell } from "@/components/layout/PageScaffold";
+import { PageHeader, PageShell } from "@/components/layout/PageScaffold";
 import { Spinner } from "@/components/ui/misc";
 import { listAccounts } from "@/api/accounts";
 import { listLLMProviders } from "@/api/commands";
@@ -223,7 +222,7 @@ function DashboardHero({
         : "success";
 
   return (
-    <StatusSummaryPanel
+    <PageHeader
       icon={LayoutDashboard}
       title="概览"
       description="集中查看 TelePilot 的账号、插件、AI 和资源运行情况；优先暴露需要处理的信号。"

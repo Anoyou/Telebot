@@ -1,5 +1,5 @@
-import { useMemo, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useMemo, useState, type ReactNode } from "react";
+import { Link, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { isAxiosError } from "axios";
 import {
@@ -62,14 +62,6 @@ import { Select } from "@/components/ui/select";
 import { SectionHeader, SignalPill } from "@/components/ui/status";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { formatDateTime } from "@/lib/utils";
 
 const LEVEL_VARIANT: Record<
@@ -205,7 +197,7 @@ export function Logs() {
     <PageShell>
       <PageHeader
         title="日志中心"
-        description="按 trace_id 追踪消息、插件、命令和发送动作；旧运行日志保留在原始日志。"
+        description="按 trace_id 追踪消息、插件、命令和发送动作；原始日志用于展开查看底层运行和审计细节。"
         icon={ScrollText}
       />
 
@@ -1049,7 +1041,10 @@ function RawLogsPanel({ timezone }: { timezone?: string }) {
       <TabsContent value="runtime" className="space-y-4">
         <Card>
           <CardHeader>
-            <SectionHeader title="原始运行日志" description="旧 runtime_log 高级排障入口。" />
+            <SectionHeader
+              title="运行事件流"
+              description="按时间展示 worker、插件和消息事件的运行记录；先看摘要，需要时展开原始 detail。"
+            />
           </CardHeader>
           <CardContent>
             <div className="grid grid-cols-1 gap-3 md:grid-cols-4 md:items-end">
@@ -1096,12 +1091,15 @@ function RawLogsPanel({ timezone }: { timezone?: string }) {
       <TabsContent value="audit" className="space-y-4">
         <Card>
           <CardHeader>
-            <SectionHeader title="原始审计日志" description="Web 操作日志高级排障入口。" />
+            <SectionHeader
+              title="面板操作流"
+              description="记录 Web 面板里的启停、配置、插件更新和高风险操作，重点看谁在什么时候改了什么。"
+            />
           </CardHeader>
           <CardContent>
             <div className="grid grid-cols-1 gap-3 md:grid-cols-2 md:items-end">
               <div className="space-y-1.5">
-                <Label>Action</Label>
+                <Label>操作类型</Label>
                 <Input value={auditAction} onChange={(e) => setAuditAction(e.target.value)} placeholder="account_bot.test" />
               </div>
               <div className="space-y-1.5">
@@ -1148,38 +1146,22 @@ function RuntimeLogTable({
   return (
     <Card>
       <CardHeader>
-        <SectionHeader title="运行日志" description="旧 runtime_log 表格视图。" meta={<SignalPill tone="neutral" label="窗口" value="100 条" />} />
+        <SectionHeader
+          title="运行日志"
+          description="每条记录提取 trace、插件、会话和原因代码，原始字段放在展开详情里。"
+          meta={<SignalPill tone="neutral" label="窗口" value="100 条" />}
+        />
       </CardHeader>
       <CardContent>
         {logsQ.isLoading ? <InlineLoading /> : logsQ.isError ? (
           <ErrorHint text="运行日志加载失败" error={logsQ.error} />
         ) : filtered.length ? (
-          <div className="overflow-x-auto">
-            <Table className="min-w-[760px]">
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="w-40">时间</TableHead>
-                  <TableHead className="w-20">级别</TableHead>
-                  <TableHead className="w-24">账号</TableHead>
-                  <TableHead>内容</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {filtered.map((row: RuntimeLogItem) => (
-                  <TableRow key={row.id}>
-                    <TableCell className="font-mono text-xs">{formatDateTime(row.created_at, timezone)}</TableCell>
-                    <TableCell><Badge variant={LEVEL_VARIANT[row.level.toLowerCase()] ?? "secondary"}>{row.level.toUpperCase()}</Badge></TableCell>
-                    <TableCell className="text-muted-foreground">{row.account_id ? `#${row.account_id}` : "-"}</TableCell>
-                    <TableCell className="text-xs whitespace-pre-wrap">
-                      <HighlightedMessage text={row.message} keyword={search} />
-                      {row.detail ? <LogDetail detail={row.detail} keyword={search} /> : null}
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+          <div className="space-y-3">
+            {filtered.map((row: RuntimeLogItem) => (
+              <RuntimeLogCard key={row.id} row={row} keyword={search} timezone={timezone} />
+            ))}
           </div>
-        ) : <EmptyHint text="该分类暂无原始日志" />}
+        ) : <EmptyHint text="该分类暂无运行日志" />}
       </CardContent>
     </Card>
   );
@@ -1195,7 +1177,11 @@ function AuditLogTable({ action, search, timezone }: { action: string; search: s
   return (
     <Card>
       <CardHeader>
-        <SectionHeader title="审计日志" description="旧 audit_log 表格视图。" meta={<SignalPill tone="neutral" label="窗口" value="100 条" />} />
+        <SectionHeader
+          title="审计日志"
+          description="把 audit_log 翻译成可扫读的操作记录，展开后仍可查看原始 detail。"
+          meta={<SignalPill tone="neutral" label="窗口" value="100 条" />}
+        />
       </CardHeader>
       <CardContent>
         {logsQ.isLoading ? <InlineLoading /> : endpointMissing ? (
@@ -1203,34 +1189,198 @@ function AuditLogTable({ action, search, timezone }: { action: string; search: s
         ) : logsQ.isError ? (
           <ErrorHint text="审计日志加载失败" error={logsQ.error} />
         ) : logsQ.data?.length ? (
-          <div className="overflow-x-auto">
-            <Table className="min-w-[860px]">
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="w-40">ts</TableHead>
-                  <TableHead className="w-20">user_id</TableHead>
-                  <TableHead className="w-48">action</TableHead>
-                  <TableHead className="w-44">target</TableHead>
-                  <TableHead>detail</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {logsQ.data.map((row: AuditLogItem) => (
-                  <TableRow key={row.id}>
-                    <TableCell className="font-mono text-xs">{formatDateTime(row.ts, timezone)}</TableCell>
-                    <TableCell className="font-mono text-xs text-muted-foreground">{row.user_id ?? "-"}</TableCell>
-                    <TableCell className="font-mono text-xs">{row.action}</TableCell>
-                    <TableCell className="break-all font-mono text-xs text-muted-foreground">{row.target || "-"}</TableCell>
-                    <TableCell className="text-xs whitespace-pre-wrap">{row.detail ? <LogDetail detail={row.detail} keyword={search} /> : "-"}</TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+          <div className="space-y-3">
+            {logsQ.data.map((row: AuditLogItem) => (
+              <AuditLogCard key={row.id} row={row} keyword={search} timezone={timezone} />
+            ))}
           </div>
         ) : <EmptyHint text="暂无审计日志" />}
       </CardContent>
     </Card>
   );
+}
+
+function RuntimeLogCard({
+  row,
+  keyword,
+  timezone,
+}: {
+  row: RuntimeLogItem;
+  keyword: string;
+  timezone?: string;
+}) {
+  const detail = row.detail ?? {};
+  const traceId = pickString(detail, ["trace_id", "context.trace_id", "event.trace_id"]);
+  const pluginKey = pickString(detail, ["plugin_key", "feature_key", "module_key"]);
+  const entryKey = pickString(detail, ["entry_key", "entry", "handler"]);
+  const reasonCode = pickString(detail, ["reason_code", "error_code", "guard_level"]);
+  const chatId = pickString(detail, ["chat_id", "target_chat_id", "message.chat_id", "event.chat_id"]);
+  const messageId = pickString(detail, ["message_id", "target_message_id", "event.message_id"]);
+  const actor = pickString(detail, ["display_name", "username", "user_id", "sender_user_id"]);
+  const sourceLabel = runtimeSourceLabel(row.source);
+  const level = row.level.toLowerCase();
+
+  return (
+    <article className="rounded-lg border bg-background p-3 transition-colors hover:border-primary/40 sm:p-4">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <Badge variant={LEVEL_VARIANT[level] ?? "secondary"}>{row.level.toUpperCase()}</Badge>
+            <Badge variant="secondary">{sourceLabel}</Badge>
+            {pluginKey ? <Badge variant="secondary">{pluginKey}</Badge> : null}
+            {entryKey ? <Badge variant="secondary">入口 {entryKey}</Badge> : null}
+          </div>
+          <p className="mt-2 break-words text-sm font-medium leading-6">
+            <HighlightedMessage text={row.message} keyword={keyword} />
+          </p>
+          {reasonCode ? (
+            <p className="mt-1 text-sm text-muted-foreground">
+              原因：{reasonDisplay(reasonCode)}
+            </p>
+          ) : null}
+        </div>
+        <div className="shrink-0 text-xs text-muted-foreground sm:text-right">
+          <div>{formatDateTime(row.created_at, timezone)}</div>
+          <div className="mt-1 font-mono">#{row.id}</div>
+        </div>
+      </div>
+
+      <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+        <InfoCell label="账号" value={row.account_id ? `#${row.account_id}` : "-"} />
+        <InfoCell label="Trace ID" value={traceId || "-"} />
+        <InfoCell label="会话" value={chatId || "-"} />
+        <InfoCell label="消息" value={messageId || "-"} />
+        {actor ? <InfoCell label="触发人" value={actor} /> : null}
+      </div>
+
+      <div className="mt-3 space-y-2">
+        {traceId ? (
+          <Button asChild variant="outline" size="sm">
+            <Link to={`/logs?tab=events&trace_id=${encodeURIComponent(traceId)}`}>
+              查看消息链路
+            </Link>
+          </Button>
+        ) : null}
+        <DetailDisclosure title="展开原始 detail" value={row.detail} />
+      </div>
+    </article>
+  );
+}
+
+function AuditLogCard({
+  row,
+  keyword,
+  timezone,
+}: {
+  row: AuditLogItem;
+  keyword: string;
+  timezone?: string;
+}) {
+  const detail = row.detail ?? {};
+  const pluginKey = pickString(detail, ["plugin_key", "feature_key", "key"]);
+  const accountId = pickString(detail, ["account_id", "aid"]);
+  const status = pickString(detail, ["status", "state", "result"]);
+  const version = pickString(detail, ["version", "new_version", "target_version"]);
+  const summary = auditDetailSummary(detail, keyword);
+
+  return (
+    <article className="rounded-lg border bg-background p-3 transition-colors hover:border-primary/40 sm:p-4">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <Badge variant="secondary">审计</Badge>
+            {status ? <StatusBadge status={status} /> : null}
+            {pluginKey ? <Badge variant="secondary">{pluginKey}</Badge> : null}
+          </div>
+          <p className="mt-2 break-words text-sm font-medium leading-6">
+            <HighlightedMessage text={auditActionTitle(row.action)} keyword={keyword} />
+          </p>
+          <p className="mt-1 break-words text-sm text-muted-foreground">
+            {summary || "该操作没有额外 detail。"}
+          </p>
+        </div>
+        <div className="shrink-0 text-xs text-muted-foreground sm:text-right">
+          <div>{formatDateTime(row.ts, timezone)}</div>
+          <div className="mt-1 font-mono">#{row.id}</div>
+        </div>
+      </div>
+
+      <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+        <InfoCell label="操作人" value={row.user_id ? `用户 #${row.user_id}` : "-"} />
+        <InfoCell label="Action" value={row.action} />
+        <InfoCell label="目标" value={row.target || "-"} />
+        <InfoCell label="账号" value={accountId ? `#${accountId}` : "-"} />
+        {version ? <InfoCell label="版本" value={version} /> : null}
+      </div>
+
+      <div className="mt-3">
+        <DetailDisclosure title="展开审计 detail" value={row.detail} />
+      </div>
+    </article>
+  );
+}
+
+function DetailDisclosure({ title, value }: { title: string; value?: Record<string, unknown> | null }) {
+  if (!value || Object.keys(value).length === 0) return null;
+  return (
+    <details className="group rounded-md border border-border/70 bg-muted/20 px-3 py-2">
+      <summary className="cursor-pointer select-none text-xs font-medium text-muted-foreground group-open:text-foreground">
+        {title}
+      </summary>
+      <div className="mt-3">
+        <JsonBlock title="原始字段" value={value} />
+      </div>
+    </details>
+  );
+}
+
+function runtimeSourceLabel(source?: string | null): string {
+  const value = (source || "").toLowerCase();
+  if (value === "event" || value === "interaction" || value === "account_bot") return "消息事件";
+  if (value === "plugin" || value === "builtin") return "插件日志";
+  if (value === "system" || value === "worker") return "系统运行";
+  return source || "运行日志";
+}
+
+function auditActionTitle(action: string): string {
+  const labels: Record<string, string> = {
+    "account_bot.test": "测试账号 Bot",
+    "account_bot.save": "保存账号 Bot 配置",
+    "interaction.rule.save": "保存交互规则",
+    "plugin.install": "安装插件",
+    "plugin.update": "更新插件",
+    "plugin.remove": "移除插件",
+    "plugin.enable": "启用插件",
+    "plugin.disable": "停用插件",
+    "settings.update": "更新系统设置",
+  };
+  if (labels[action]) return labels[action];
+  return action.split(".").filter(Boolean).join(" / ") || action;
+}
+
+function auditDetailSummary(detail: Record<string, unknown>, keyword: string): ReactNode {
+  const preferred = [
+    "message",
+    "error",
+    "reason",
+    "plugin_key",
+    "feature_key",
+    "repo_url",
+    "branch",
+    "account_id",
+    "enabled",
+    "status",
+  ];
+  const picked = preferred
+    .filter((key) => key in detail)
+    .map((key) => `${key}: ${stringifyShort(detail[key])}`);
+  const fallback = Object.entries(detail)
+    .filter(([key]) => !preferred.includes(key))
+    .slice(0, Math.max(0, 4 - picked.length))
+    .map(([key, value]) => `${key}: ${stringifyShort(value)}`);
+  const summary = [...picked, ...fallback].slice(0, 4).join(" · ");
+  if (!summary) return null;
+  return <HighlightedMessage text={summary} keyword={keyword} />;
 }
 
 function InlineTraceSummary({

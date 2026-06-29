@@ -1,11 +1,13 @@
 # TelePilot 插件速查表
 
-- TelePilot 插件按个人可信插件模式运行：管理员安装并启用后，视为信任插件业务逻辑；平台负责事件信封、MessageOps 代发、Trace、风险提示、急停和审计。
-- 新插件主路径是 Event Bus + Trace + MessageOps：`plugin.json` 写 `usage`、`event_subscriptions`、`capabilities`，插件只读标准事件信封，动作只通过 `ctx.messages` 或标准 action 返回。
-- `interaction_entries`、旧交互规则、旧平铺 payload、`notice` / `bbot_notice` / `notice_bot` 只用于迁移说明；不要作为新插件模板。
-- 最小目录：`plugin.json`、`manifest.py`、`plugin.py`、`__init__.py`。`plugin.json.name`、`MANIFEST.key`、插件类 `key` 必须一致。
-- `usage` 是插件中心展示的使用说明；有 `config_schema` 时也可以补 `x-usage-guide` / `x-usage-steps`，但不要只靠口头说明。
-- `usage` 缺失会触发高级规范警告；官方可选、官方远程和示例插件不能用空声明绕过。
+先读 [插件开发铁律](./PLUGIN-RULES.md)，再用本页回忆字段名和常用模式。
+
+- 必须理解 TelePilot 插件按个人可信插件模式运行：管理员安装并启用后，视为信任插件业务逻辑；平台负责事件信封、MessageOps 代发、Trace、风险提示、急停和审计。
+- 必须把新 Telegram 插件写成 Event Bus + Trace + MessageOps：`plugin.json` 写 `usage`、`event_subscriptions`、`capabilities`，插件只读标准事件信封，动作只通过 `ctx.messages` 或标准 action 返回。
+- 禁止把 `interaction_entries`、旧交互规则、旧平铺 payload、`notice` / `bbot_notice` / `notice_bot` 作为新插件模板；这些只用于迁移说明。
+- 必须保留最小目录：`plugin.json`、`manifest.py`、`plugin.py`、`__init__.py`。`plugin.json.name`、`MANIFEST.key`、插件类 `key` 必须一致。
+- 必须把 `usage` 写成插件中心可展示的使用说明；有 `config_schema` 时也可以补 `x-usage-guide` / `x-usage-steps`，但不要只靠口头说明。
+- 禁止用空 `usage` 绕过检查；缺失会触发高级规范警告，官方可选、官方远程和示例插件都必须完整声明。
 - `event_subscriptions[].events` 常用值：`message`、`command`、`callback_query`、`inline_query`、`chosen_inline_result`、`payment_confirmed`、`session_close`。
 - `event_subscriptions[].source` 常用值：`userbot`、`interaction_bot`、`external_payment_notice`。
 - `event_subscriptions[].scope` 常用值：`all_allowed_chats`、`owner_only`、`known_users`、`rule_bound`、`inline_all`；Inline 插件必须显式用 `inline_all`。
@@ -32,7 +34,7 @@
 - 外部请求必须有 timeout；日志里不要写 token、session、完整原生 payload、隐私消息或完整文件路径。
 - 维护示例：新主模板看 `examples/plugins/event_bus_demo`；HTTP 看 `with_http`；AI 看 `with_ai`；旧交互迁移看 `with_interaction`。
 - 迁移边界：平台功能不伪装成插件；官方可选/官方远程插件必须完整声明；示例插件只用于学习和 CI；用户安装插件可保留代码但启用/更新时要提示规范警告。
-- 验证示例：`python scripts/validate-plugin-examples.py`；检查已安装互动插件：`python scripts/validate-installed-interaction-plugins.py`。
+- 验证示例：`backend/.venv/bin/python scripts/validate-plugin-examples.py`；检查已安装互动插件：`backend/.venv/bin/python scripts/validate-installed-interaction-plugins.py`。
 
 常见 `reason_code` 快查：
 

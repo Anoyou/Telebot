@@ -46,7 +46,9 @@ import cheatsheetMd from "../../../docs/PLUGIN-CHEATSHEET.md?raw";
 import devGuideMd from "../../../docs/PLUGIN-DEV-GUIDE.md?raw";
 import httpGuideMd from "../../../docs/PLUGIN-HTTP.md?raw";
 import overviewMd from "../../../docs/PLUGIN-OVERVIEW.md?raw";
+import quickstartMd from "../../../docs/PLUGIN-QUICKSTART.md?raw";
 import remoteGuideMd from "../../../docs/PLUGIN-REMOTE.md?raw";
+import rulesMd from "../../../docs/PLUGIN-RULES.md?raw";
 import safetyGuideMd from "../../../docs/PLUGIN-SAFETY.md?raw";
 
 import { Button } from "@/components/ui/button";
@@ -129,6 +131,8 @@ import type { RemotePlugin } from "@/types/remotePlugin";
 type TabValue = "plugins" | "guide";
 type DevDocId =
   | "all"
+  | "quickstart"
+  | "rules"
   | "dev-guide"
   | "overview"
   | "api-reference"
@@ -154,6 +158,30 @@ const OFFICIAL_PLUGINS_QK = ["official-plugins"] as const;
 const NEW_ACCOUNT_GUIDE_SEEN_KEY = "telebot.accounts.new_account_guide_seen.v4";
 const DEV_DOCS: DevDoc[] = [
   {
+    id: "quickstart",
+    title: "5 分钟 Quickstart",
+    description: "复制最小 hello_ping 插件，跑通 Event Bus + MessageOps。",
+    path: "docs/PLUGIN-QUICKSTART.md",
+    markdown: quickstartMd,
+    icon: Sparkles,
+  },
+  {
+    id: "rules",
+    title: "插件开发铁律",
+    description: "先确认必须、禁止、推荐的硬边界，避免后续返工。",
+    path: "docs/PLUGIN-RULES.md",
+    markdown: rulesMd,
+    icon: ShieldCheck,
+  },
+  {
+    id: "api-reference",
+    title: "完整 API 参考",
+    description: "查字段、facade、事件信封、MessageOps、Trace 和前端集成。",
+    path: "docs/PLUGIN-API-REFERENCE.md",
+    markdown: apiReferenceMd,
+    icon: Code2,
+  },
+  {
     id: "dev-guide",
     title: "索引与路线",
     description: "插件市场路线、文档分篇和 0.x 安全策略入口。",
@@ -168,14 +196,6 @@ const DEV_DOCS: DevDoc[] = [
     path: "docs/PLUGIN-OVERVIEW.md",
     markdown: overviewMd,
     icon: FileText,
-  },
-  {
-    id: "api-reference",
-    title: "API 参考",
-    description: "Plugin、Manifest、PluginContext、配置、派发、日志和前端集成。",
-    path: "docs/PLUGIN-API-REFERENCE.md",
-    markdown: apiReferenceMd,
-    icon: Code2,
   },
   {
     id: "http",
@@ -1503,7 +1523,7 @@ function DevGuideTab() {
     () => ({
       id: "all",
       title: "完整文档",
-      description: "把插件索引、概览、API、HTTP、安全、远程、速查和 AI facade 合并为一份可滚动正文。",
+      description: "把 Quickstart、铁律、索引、概览、API、HTTP、AI、安全、远程和速查合并为一份可滚动正文。",
       path: "docs/PLUGIN-*.md",
       markdown: buildCompleteDevGuide(),
       icon: Sparkles,
@@ -1558,13 +1578,59 @@ function DevGuideTab() {
           <div className="min-w-0">
             <CardTitle className="text-base">插件开发文档</CardTitle>
             <CardDescription className="mt-1">
-              完整插件开发文档，支持直接阅读合集，也可以按主题查看每个分篇。
+              先按 Quickstart、铁律、完整 API 三层阅读；需要时再按主题查看每个分篇。
             </CardDescription>
           </div>
           <div className="flex flex-wrap gap-2 md:justify-end">
             <SignalPill tone="primary" label="文档" value={`${DEV_DOCS.length} 篇`} />
             <SignalPill tone="neutral" label="当前" value={activeDoc.title} />
           </div>
+        </div>
+        <div className="grid gap-2 md:grid-cols-3">
+          {([
+            {
+              id: "quickstart",
+              icon: Sparkles,
+              title: "5 分钟 Quickstart",
+              text: "复制最小插件，先跑通 ping/pong。",
+            },
+            {
+              id: "rules",
+              icon: ShieldCheck,
+              title: "插件开发铁律",
+              text: "确认不能违反的能力边界。",
+            },
+            {
+              id: "api-reference",
+              icon: Code2,
+              title: "完整 API 参考",
+              text: "查字段、facade、事件信封和 MessageOps。",
+            },
+          ] as const).map((item) => {
+            const Icon = item.icon;
+            const active = activeDoc.id === item.id;
+            return (
+              <button
+                key={item.id}
+                type="button"
+                className={cn(
+                  "min-w-0 rounded-lg border px-3 py-3 text-left transition",
+                  active
+                    ? "border-primary/30 bg-primary/10"
+                    : "border-border/70 bg-background hover:border-primary/30 hover:bg-primary/5",
+                )}
+                onClick={() => setActiveDocId(item.id)}
+              >
+                <span className="flex min-w-0 items-center gap-2 text-sm font-medium">
+                  <Icon className="h-4 w-4 shrink-0 text-primary" />
+                  <span className="truncate">{item.title}</span>
+                </span>
+                <span className="mt-1 block text-xs leading-5 text-muted-foreground">
+                  {item.text}
+                </span>
+              </button>
+            );
+          })}
         </div>
       </CardHeader>
       <CardContent className="p-0">

@@ -8,22 +8,26 @@
 
 ## 目录
 
-- [概览](./PLUGIN-OVERVIEW.md)
-- [API 参考](./PLUGIN-API-REFERENCE.md)
+- [5 分钟 Quickstart](./PLUGIN-QUICKSTART.md)
+- [插件开发铁律](./PLUGIN-RULES.md)
+- [完整 API 参考](./PLUGIN-API-REFERENCE.md)
+- [插件概览](./PLUGIN-OVERVIEW.md)
 - [HTTP facade](./PLUGIN-HTTP.md)
-- [安全边界](./PLUGIN-SAFETY.md)
-- [远程插件](./PLUGIN-REMOTE.md)
-- [速查表](./PLUGIN-CHEATSHEET.md)
 - [AI facade](./PLUGIN-AI.md)
+- [远程插件](./PLUGIN-REMOTE.md)
+- [安全边界](./PLUGIN-SAFETY.md)
+- [速查表](./PLUGIN-CHEATSHEET.md)
 
 ## 读法
 
-1. 先看 [概览](./PLUGIN-OVERVIEW.md) 理清插件、远程插件和运行时边界。
-2. 新 Telegram 交互插件先看 [概览](./PLUGIN-OVERVIEW.md) 与 [速查表](./PLUGIN-CHEATSHEET.md) 的 Event Bus + MessageOps 最小模板，再看 [API 参考](./PLUGIN-API-REFERENCE.md) 查 `Plugin`、`PluginContext`、`Manifest`、标准事件信封、MessageOps、Trace 排障；指令、消息、Conversation 和旧 hook 示例主要用于管理员命令兼容或迁移。
-3. 需要外部网络能力时看 [HTTP facade](./PLUGIN-HTTP.md)，需要 AI 能力时看 [AI facade](./PLUGIN-AI.md)。
-4. 需要权限、前缀、消息发送、并发和清理约束时看 [安全边界](./PLUGIN-SAFETY.md)。
-5. 需要 Git 安装、`plugin.json`、Registry、发布检查时看 [远程插件](./PLUGIN-REMOTE.md)。
-6. 需要快速回忆字段名和常用模式时看 [速查表](./PLUGIN-CHEATSHEET.md)。
+1. 新人先看 [5 分钟 Quickstart](./PLUGIN-QUICKSTART.md)，复制 `hello_ping` 跑通最小 Event Bus + MessageOps 插件。
+2. 写真实插件前看 [插件开发铁律](./PLUGIN-RULES.md)，确认必须、禁止、推荐的边界。
+3. 查字段、facade、标准事件信封、MessageOps、Trace 和生命周期时看 [完整 API 参考](./PLUGIN-API-REFERENCE.md)。
+4. 需要理解个人可信插件标准模式、安装/启用/更新/卸载心智时看 [插件概览](./PLUGIN-OVERVIEW.md)。
+5. 需要外部网络能力时看 [HTTP facade](./PLUGIN-HTTP.md)，需要 AI 能力时看 [AI facade](./PLUGIN-AI.md)。
+6. 需要 Git 安装、`plugin.json`、Registry、发布检查时看 [远程插件](./PLUGIN-REMOTE.md)。
+7. 需要权限、前缀、消息发送、并发和清理约束时看 [安全边界](./PLUGIN-SAFETY.md)。
+8. 需要快速回忆字段名和常用模式时看 [速查表](./PLUGIN-CHEATSHEET.md)。
 
 ## 兼容说明
 

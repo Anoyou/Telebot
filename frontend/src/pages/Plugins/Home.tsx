@@ -28,14 +28,13 @@ import type { AccountFeatureItem, FeatureInfo } from "@/api/types";
 import type { PluginInstallOut } from "@/api/plugins";
 import type { PluginLLMUsageSummaryItem } from "@/api/llmUsage";
 import { CommandBadge } from "@/components/CommandBadge";
-import { PageShell } from "@/components/layout/PageScaffold";
+import { PageHeader, PageShell } from "@/components/layout/PageScaffold";
 import { Spinner } from "@/components/ui/misc";
 import { Button } from "@/components/ui/button";
 import { MetaBadge } from "@/components/ui/meta-badge";
 import {
   SectionHeader,
   SignalPill,
-  StatusSummaryPanel,
   ToneRailCard,
 } from "@/components/ui/status";
 import {
@@ -370,7 +369,7 @@ export function PluginsHome() {
         </Card>
       ) : null}
 
-      <StatusSummaryPanel
+      <PageHeader
         icon={Boxes}
         title="插件中心"
         description="先在这里沉淀一套好用的指令、消息和 AI 模板，再按账号启用复用；新账号不用从零重配。"
