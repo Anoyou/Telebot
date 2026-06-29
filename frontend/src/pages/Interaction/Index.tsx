@@ -29,12 +29,11 @@ import { Select } from "@/components/ui/select";
 import { SignalPill } from "@/components/ui/status";
 import { BotTab } from "@/pages/Accounts/BotTab";
 
-function accountLabel(account: AccountSummary): string {
+function accountOptionLabel(account: AccountSummary): string {
   const name = account.display_name?.trim();
-  const handle = account.tg_username ? `@${account.tg_username}` : null;
-  return [name || handle || account.phone, name || handle ? account.phone : null]
-    .filter(Boolean)
-    .join(" · ");
+  const username = account.tg_username?.trim();
+  const primary = name || (username ? `@${username}` : null) || `账号 #${account.id}`;
+  return account.phone ? `${primary} · ${account.phone}` : primary;
 }
 
 function countRuleChats(rules: AccountBotInteractionRule[]): number {
@@ -179,29 +178,31 @@ export function InteractionIndex() {
         </Card>
       ) : (
         <>
-          <section className="grid gap-4 rounded-lg border bg-card p-4 shadow-sm lg:grid-cols-[minmax(280px,420px)_minmax(0,1fr)]">
+          <section className="grid gap-4 rounded-lg border bg-card p-4 shadow-sm lg:grid-cols-[minmax(0,420px)_minmax(0,1fr)]">
             <div className="space-y-2">
-              <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                当前账号 / 交互 Bot
+              <div className="flex flex-col items-stretch gap-2 sm:flex-row sm:items-center">
+                <span className="text-sm text-muted-foreground">选择配置的账号：</span>
+                <Select
+                  value={selectedAid ? String(selectedAid) : ""}
+                  onChange={(event) => {
+                    const next = new URLSearchParams(searchParams);
+                    next.set("aid", event.target.value);
+                    setSearchParams(next);
+                  }}
+                  className="w-full sm:w-64"
+                >
+                  {accounts.map((account) => (
+                    <option key={account.id} value={account.id}>
+                      {accountOptionLabel(account)}
+                    </option>
+                  ))}
+                </Select>
               </div>
-              <Select
-                value={selectedAid ? String(selectedAid) : ""}
-                onChange={(event) => {
-                  const next = new URLSearchParams(searchParams);
-                  next.set("aid", event.target.value);
-                  setSearchParams(next);
-                }}
-              >
-                {accounts.map((account) => (
-                  <option key={account.id} value={account.id}>
-                    {accountLabel(account)}
-                  </option>
-                ))}
-              </Select>
               {selectedAccount ? (
                 <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                   <AccountStatusBadge status={selectedAccount.status} />
                   <span>ID {selectedAccount.id}</span>
+                  {selectedAccount.phone ? <span>{selectedAccount.phone}</span> : null}
                   {selectedAccount.tg_user_id ? <span>TG {selectedAccount.tg_user_id}</span> : null}
                 </div>
               ) : null}
