@@ -221,6 +221,19 @@ class Plugin:
         """
         return None
 
+    async def on_event(
+        self,
+        ctx: PluginContext,
+        payload: dict[str, Any],
+    ) -> list[dict[str, Any]] | None:
+        """Event Bus 主入口；新插件优先实现这个 hook。
+
+        ``payload`` 是 TelePilot 标准事件信封。插件可直接返回标准 action，
+        或使用 ``ctx.messages`` 缓冲发送、编辑、删除、置顶、callback ACK、
+        inline answer 等动作，由平台统一执行和记录 Trace。
+        """
+        return None
+
 
 # ─────────────────────────────────────────────────────
 # 全局注册表

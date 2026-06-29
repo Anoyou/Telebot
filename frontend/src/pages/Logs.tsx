@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { isAxiosError } from "axios";
 import {
@@ -39,8 +40,10 @@ import type {
   EventSpanItem,
   EventTraceSummary,
   HealthOverview,
+  PluginRuntimeDetail,
   PluginRuntimeStatusItem,
   RuntimeLogItem,
+  TraceOverview,
 } from "@/api/types";
 import { PageHeader, PageShell } from "@/components/layout/PageScaffold";
 import { Badge } from "@/components/ui/badge";
@@ -84,21 +87,37 @@ type MainTab = "overview" | "events" | "plugins" | "commands" | "actions" | "raw
 type RuntimeSourceTab = "event" | "plugin" | "system";
 type RawTab = "runtime" | "audit";
 
+function parseMainTab(value: string | null): MainTab {
+  if (value === "events" || value === "plugins" || value === "commands" || value === "actions" || value === "raw") {
+    return value;
+  }
+  return "overview";
+}
+
 export function Logs() {
-  const [mainTab, setMainTab] = useState<MainTab>("overview");
-  const [accountId, setAccountId] = useState("");
-  const [keyword, setKeyword] = useState("");
-  const [status, setStatus] = useState("");
-  const [pluginKey, setPluginKey] = useState("");
-  const [eventType, setEventType] = useState("");
-  const [chatId, setChatId] = useState("");
-  const [messageId, setMessageId] = useState("");
-  const [senderUserId, setSenderUserId] = useState("");
+  const [searchParams] = useSearchParams();
+  const initialTraceId = searchParams.get("trace_id") || "";
+  const [mainTab, setMainTab] = useState<MainTab>(() => {
+    const tab = parseMainTab(searchParams.get("tab"));
+    return initialTraceId && tab === "overview" ? "events" : tab;
+  });
+  const [accountId, setAccountId] = useState(() => searchParams.get("account_id") || searchParams.get("aid") || "");
+  const [keyword, setKeyword] = useState(() => searchParams.get("keyword") || "");
+  const [status, setStatus] = useState(() => searchParams.get("status") || "");
+  const [pluginKey, setPluginKey] = useState(() => searchParams.get("plugin_key") || "");
+  const [eventType, setEventType] = useState(() => searchParams.get("event_type") || "");
+  const [traceId, setTraceId] = useState(() => initialTraceId);
+  const [reasonCode, setReasonCode] = useState(() => searchParams.get("reason_code") || searchParams.get("error_code") || "");
+  const [chatId, setChatId] = useState(() => searchParams.get("chat_id") || "");
+  const [messageId, setMessageId] = useState(() => searchParams.get("message_id") || "");
+  const [senderUserId, setSenderUserId] = useState(() => searchParams.get("sender_user_id") || "");
   const [since, setSince] = useState("");
   const [until, setUntil] = useState("");
   const [autoRefresh, setAutoRefresh] = useState(true);
-  const [selectedTraceId, setSelectedTraceId] = useState("");
-  const [selectedPluginKey, setSelectedPluginKey] = useState("");
+  const [selectedTraceId, setSelectedTraceId] = useState(() => initialTraceId);
+  const [selectedPluginKey, setSelectedPluginKey] = useState(() => searchParams.get("plugin_key") || "");
+  const traceIdFilter = traceId.trim();
+  const reasonCodeFilter = reasonCode.trim();
 
   const accountsQ = useQuery({ queryKey: ["accounts"], queryFn: listAccounts });
   const matrixQ = useQuery({ queryKey: ["matrix"], queryFn: getFeatureMatrix });
@@ -110,6 +129,8 @@ export function Logs() {
     status: status || undefined,
     plugin_key: pluginKey || undefined,
     event_type: eventType || undefined,
+    trace_id: traceIdFilter || undefined,
+    reason_code: reasonCodeFilter || undefined,
     chat_id: chatId.trim() || undefined,
     message_id: messageId.trim() || undefined,
     sender_user_id: senderUserId.trim() || undefined,
@@ -155,24 +176,26 @@ export function Logs() {
     enabled: Boolean(selectedPluginKey),
   });
   const commandsQ = useQuery({
-    queryKey: ["logs", "trace", "commands", accountId, keyword, since, until],
+    queryKey: ["logs", "trace", "commands", accountId, keyword, since, until, reasonCodeFilter],
     queryFn: () => listCommandTraces({
       account_id: accountId || undefined,
       keyword: keyword || undefined,
       since: localDateTimeToIso(since),
       until: localDateTimeToIso(until),
+      reason_code: reasonCodeFilter || undefined,
       limit: 100,
     }),
     refetchInterval: autoRefresh && mainTab === "commands" ? 5_000 : false,
   });
   const actionsQ = useQuery({
-    queryKey: ["logs", "trace", "actions", accountId, pluginKey, status, selectedTraceId],
+    queryKey: ["logs", "trace", "actions", accountId, pluginKey, status, traceIdFilter, selectedTraceId, reasonCodeFilter],
     queryFn: () =>
       listEventActions({
         account_id: accountId || undefined,
         plugin_key: pluginKey || undefined,
         status: status || undefined,
-        trace_id: selectedTraceId || undefined,
+        trace_id: traceIdFilter || selectedTraceId || undefined,
+        reason_code: reasonCodeFilter || undefined,
         limit: 100,
       }),
     refetchInterval: autoRefresh && mainTab === "actions" ? 5_000 : false,
@@ -242,11 +265,31 @@ export function Logs() {
                 <option value="inline_query">inline_query</option>
                 <option value="chosen_inline_result">chosen_inline_result</option>
                 <option value="payment_confirmed">payment_confirmed</option>
+                <option value="session_close">session_close</option>
               </Select>
             </div>
             <div className="space-y-1.5">
-              <Label>关键词 / trace_id</Label>
+              <Label>关键词</Label>
               <SearchInput value={keyword} onChange={setKeyword} />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Trace ID</Label>
+              <Input
+                value={traceId}
+                onChange={(e) => {
+                  setTraceId(e.target.value.trim());
+                  setSelectedTraceId(e.target.value.trim());
+                }}
+                placeholder="evt_..."
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label>原因代码</Label>
+              <Input
+                value={reasonCode}
+                onChange={(e) => setReasonCode(e.target.value.trim())}
+                placeholder="send_channel_deprecated"
+              />
             </div>
             <div className="space-y-1.5">
               <Label>Chat ID</Label>
@@ -314,6 +357,7 @@ export function Logs() {
             timezone={timezone}
             onTraceSelect={(traceId) => {
               setSelectedTraceId(traceId);
+              setTraceId(traceId);
               setMainTab("events");
             }}
           />
@@ -325,7 +369,10 @@ export function Logs() {
             loading={eventsQ.isLoading}
             error={eventsQ.error}
             selectedTraceId={selectedTraceId}
-            onSelectTrace={setSelectedTraceId}
+            onSelectTrace={(nextTraceId) => {
+              setSelectedTraceId(nextTraceId);
+              setTraceId(nextTraceId);
+            }}
             detail={traceDetailQ.data}
             detailLoading={traceDetailQ.isLoading}
             detailError={traceDetailQ.error}
@@ -346,6 +393,7 @@ export function Logs() {
             timezone={timezone}
             onTraceSelect={(traceId) => {
               setSelectedTraceId(traceId);
+              setTraceId(traceId);
               setMainTab("events");
             }}
           />
@@ -361,6 +409,7 @@ export function Logs() {
             selectedTraceId={selectedTraceId}
             onSelectTrace={(traceId) => {
               setSelectedTraceId(traceId);
+              setTraceId(traceId);
               setMainTab("events");
             }}
             timezone={timezone}
@@ -375,6 +424,7 @@ export function Logs() {
             timezone={timezone}
             onTraceSelect={(traceId) => {
               setSelectedTraceId(traceId);
+              setTraceId(traceId);
               setMainTab("events");
             }}
           />
@@ -403,14 +453,7 @@ function OverviewPanel({
   health?: HealthOverview;
   healthLoading: boolean;
   healthError?: unknown;
-  data?: {
-    last_5m_total: number;
-    last_5m_failed: number;
-    last_5m_warning: number;
-    recent_errors: EventTraceSummary[];
-    recent_failed_actions: EventActionItem[];
-    recent_plugin_errors: PluginRuntimeStatusItem[];
-  };
+  data?: TraceOverview;
   timezone?: string;
   onTraceSelect: (traceId: string) => void;
 }) {
@@ -420,13 +463,14 @@ function OverviewPanel({
     last_5m_total: 0,
     last_5m_failed: 0,
     last_5m_warning: 0,
+    source_channel_counts: {},
     recent_errors: [],
     recent_failed_actions: [],
     recent_plugin_errors: [],
   };
   return (
     <div className="space-y-4">
-      <HealthOverviewStrip data={health} loading={healthLoading} error={healthError} />
+      <HealthOverviewStrip data={health} traceOverview={overview} loading={healthLoading} error={healthError} />
       <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
         <MetricCard title="最近 5 分钟事件" value={overview.last_5m_total} icon={Activity} tone="primary" />
         <MetricCard title="失败事件" value={overview.last_5m_failed} icon={AlertTriangle} tone="danger" />
@@ -467,10 +511,12 @@ function MetricCard({
 
 function HealthOverviewStrip({
   data,
+  traceOverview,
   loading,
   error,
 }: {
   data?: HealthOverview;
+  traceOverview?: Pick<TraceOverview, "source_channel_counts">;
   loading: boolean;
   error?: unknown;
 }) {
@@ -480,31 +526,47 @@ function HealthOverviewStrip({
   const workerValue = `${data.workers.runtime_desired_running_alive}/${data.workers.runtime_desired_running}`;
   const workerOk = data.workers.runtime_desired_running === data.workers.runtime_desired_running_alive &&
     data.workers.runtime_failing === 0;
+  const sourceCounts = traceOverview?.source_channel_counts ?? {};
+  const userbotCount = sourceCounts.userbot ?? 0;
+  const interactionBotCount = sourceCounts.interaction_bot ?? 0;
+  const externalNoticeCount = sourceCounts.external_payment_notice ?? 0;
   return (
-    <div className="grid grid-cols-1 gap-2 md:grid-cols-4">
+    <div className="grid grid-cols-1 gap-2 md:grid-cols-3 xl:grid-cols-6">
       <HealthTile
         label="DB"
-        ok={data.db.ok && data.alembic.ok}
+        tone={data.db.ok && data.alembic.ok ? "success" : "danger"}
         value={data.db.ok ? "可用" : "异常"}
         detail={data.alembic.ok ? "迁移一致" : data.alembic.error || "迁移待同步"}
       />
       <HealthTile
         label="Redis"
-        ok={data.redis.ok}
+        tone={data.redis.ok ? "success" : "danger"}
         value={data.redis.ok ? "可用" : "异常"}
         detail={data.redis.error || "队列连接正常"}
       />
       <HealthTile
-        label="Worker"
-        ok={workerOk}
+        label="UserBot"
+        tone={workerOk ? "success" : "danger"}
         value={workerValue}
-        detail={data.workers.runtime_failing > 0 ? `${data.workers.runtime_failing} 个失败` : "期望运行 / 已在线"}
+        detail={data.workers.runtime_failing > 0 ? `${data.workers.runtime_failing} 个 worker 失败` : "期望运行 / 已在线"}
       />
       <HealthTile
-        label="账号"
-        ok={(data.workers.by_status.dead ?? 0) === 0}
-        value={`${data.workers.total}`}
-        detail={Object.entries(data.workers.by_status).map(([key, count]) => `${key}:${count}`).join(" · ") || "暂无账号"}
+        label="交互 Bot"
+        tone={interactionBotCount > 0 ? "success" : "neutral"}
+        value={`${interactionBotCount}`}
+        detail={interactionBotCount > 0 ? "近 5 分钟链路活跃" : "近 5 分钟未见交互 Bot trace"}
+      />
+      <HealthTile
+        label="转账通知来源"
+        tone={externalNoticeCount > 0 ? "success" : "neutral"}
+        value={`${externalNoticeCount}`}
+        detail={externalNoticeCount > 0 ? "近 5 分钟有外部通知 trace" : "无近期外部转账通知 trace"}
+      />
+      <HealthTile
+        label="UserBot 事件"
+        tone={userbotCount > 0 ? "success" : data.workers.runtime_desired_running_alive > 0 ? "neutral" : "danger"}
+        value={`${userbotCount}`}
+        detail={userbotCount > 0 ? "近 5 分钟有 userbot trace" : "无近期 trace，按 worker 在线判断"}
       />
     </div>
   );
@@ -512,20 +574,31 @@ function HealthOverviewStrip({
 
 function HealthTile({
   label,
-  ok,
+  tone,
   value,
   detail,
 }: {
   label: string;
-  ok: boolean;
+  tone: "success" | "danger" | "neutral";
   value: string;
   detail: string;
 }) {
+  const className = tone === "success"
+    ? "border-emerald-200 bg-emerald-50/60"
+    : tone === "danger"
+      ? "border-destructive/30 bg-destructive/5"
+      : "border-border bg-muted/30";
   return (
-    <div className={`rounded-md border p-3 ${ok ? "border-emerald-200 bg-emerald-50/60" : "border-destructive/30 bg-destructive/5"}`}>
+    <div className={`rounded-md border p-3 ${className}`}>
       <div className="flex items-center justify-between gap-2">
         <span className="text-xs font-medium text-muted-foreground">{label}</span>
-        {ok ? <CheckCircle2 className="h-4 w-4 text-emerald-600" /> : <AlertTriangle className="h-4 w-4 text-destructive" />}
+        {tone === "success" ? (
+          <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+        ) : tone === "danger" ? (
+          <AlertTriangle className="h-4 w-4 text-destructive" />
+        ) : (
+          <Clock className="h-4 w-4 text-muted-foreground" />
+        )}
       </div>
       <div className="mt-1 text-lg font-semibold">{value}</div>
       <div className="mt-1 line-clamp-2 text-xs text-muted-foreground">{detail}</div>
@@ -744,7 +817,7 @@ function Timeline({
                 </div>
                 <span className="text-xs text-muted-foreground">{formatDateTime(item.span.started_at, timezone)}</span>
               </div>
-              <p className="text-sm">{item.span.message || reasonLabel(item.span.reason_code) || "阶段完成"}</p>
+              <p className="text-sm">{item.span.message || reasonDisplay(item.span.reason_code) || "阶段完成"}</p>
               <TraceMeta pluginKey={item.span.plugin_key} entryKey={item.span.entry_key} reasonCode={item.span.reason_code} />
             </div>
           ) : (
@@ -784,7 +857,7 @@ function PluginDiagnostics({
   error?: unknown;
   selectedPluginKey: string;
   onSelectPlugin: (key: string) => void;
-  detail?: import("@/api/types").PluginRuntimeDetail;
+  detail?: PluginRuntimeDetail;
   detailLoading: boolean;
   detailError?: unknown;
   timezone?: string;
@@ -829,12 +902,57 @@ function PluginDiagnostics({
         <CardContent className="space-y-3">
           {detailLoading ? <InlineLoading /> : detailError ? <ErrorHint text="插件详情加载失败" error={detailError} /> : detail ? (
             <>
+              <PluginStatusList statuses={detail.statuses} timezone={timezone} onTraceSelect={onTraceSelect} />
               <TraceMiniList traces={detail.recent_traces} timezone={timezone} onTraceSelect={onTraceSelect} />
               <JsonBlock title="最近 span" value={detail.recent_spans} />
             </>
           ) : <EmptyHint text="尚未选择插件" />}
         </CardContent>
       </Card>
+    </div>
+  );
+}
+
+function PluginStatusList({
+  statuses,
+  timezone,
+  onTraceSelect,
+}: {
+  statuses: PluginRuntimeStatusItem[];
+  timezone?: string;
+  onTraceSelect: (traceId: string) => void;
+}) {
+  if (!statuses.length) return <EmptyHint text="暂无运行状态记录" />;
+  return (
+    <div className="space-y-2">
+      <div className="text-sm font-medium">运行状态</div>
+      {statuses.map((status) => (
+        <div key={`${status.account_id ?? "global"}-${status.plugin_key}`} className="rounded-md border p-3 text-sm">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex flex-wrap items-center gap-1.5">
+              <StatusBadge status={status.last_invocation_status || status.load_status} />
+              <Badge variant={status.enabled ? "secondary" : "outline"}>{status.enabled ? "已启用" : "未启用"}</Badge>
+              {status.account_id ? <Badge variant="outline">账号 {status.account_id}</Badge> : null}
+            </div>
+            <span className="text-xs text-muted-foreground">{formatDateTime(status.updated_at, timezone)}</span>
+          </div>
+          <div className="mt-2 grid gap-2 text-xs text-muted-foreground md:grid-cols-3">
+            <InfoCell label="加载状态" value={status.load_status || "-"} />
+            <InfoCell label="版本" value={status.installed_version || "-"} />
+            <InfoCell label="最近调用" value={status.last_invoked_at ? formatDateTime(status.last_invoked_at, timezone) : "-"} />
+          </div>
+          {status.last_load_error ? (
+            <p className="mt-2 rounded-md border border-destructive/30 bg-destructive/10 px-2 py-1.5 text-xs text-destructive">
+              {status.last_load_error}
+            </p>
+          ) : null}
+          {status.last_trace_id ? (
+            <Button variant="ghost" size="sm" className="mt-2 px-0" onClick={() => onTraceSelect(status.last_trace_id as string)}>
+              查看最近 trace
+            </Button>
+          ) : null}
+        </div>
+      ))}
     </div>
   );
 }
@@ -882,7 +1000,12 @@ function ActionsPanel({
                   <InfoCell label="Inline 结果" value={inlineResultCountLabel(action)} />
                 </div>
                 {action.error_message || action.error_code ? (
-                  <p className="mt-2 text-sm text-destructive">{action.error_message || reasonLabel(action.error_code)}</p>
+                  <p className="mt-2 text-sm text-destructive">{actionErrorLabel(action)}</p>
+                ) : null}
+                {action.detail ? (
+                  <div className="mt-2">
+                    <JsonBlock title="动作详情" value={action.detail} />
+                  </div>
                 ) : null}
                 <Button variant="ghost" size="sm" className="mt-2 px-0" onClick={() => onTraceSelect(action.trace_id)}>
                   查看 trace
@@ -1138,7 +1261,7 @@ function InlineTraceSummary({
       </div>
       {failedAction ? (
         <div className="mt-2 rounded-md border border-destructive/30 bg-destructive/10 px-2 py-1.5 text-destructive">
-          失败原因：{failedAction.error_message || reasonLabel(failedAction.error_code) || failedAction.error_code || "Telegram API 返回失败"}
+          失败原因：{actionErrorLabel(failedAction)}
         </div>
       ) : null}
     </div>
@@ -1158,7 +1281,7 @@ function NativeRawSummary({ meta }: { meta?: EventTraceSummary["native_raw_meta"
       </div>
       {meta.reason_code ? (
         <div className="mt-2 rounded-md border border-amber-300 bg-amber-50 px-2 py-1.5 text-amber-900">
-          {reasonLabel(meta.reason_code) || meta.reason_code}
+          {reasonDisplay(meta.reason_code)}
         </div>
       ) : null}
     </div>
@@ -1262,7 +1385,7 @@ function RecentActionCard({
               <StatusBadge status={action.status} />
               <span className="text-xs text-muted-foreground">{formatDateTime(action.created_at, timezone)}</span>
             </div>
-            <p className="mt-2 text-sm">{action.error_message || action.error_code || action.action_type}</p>
+            <p className="mt-2 text-sm">{actionErrorLabel(action)}</p>
             <div className="mt-1 break-all font-mono text-xs text-muted-foreground">{action.plugin_key || action.trace_id}</div>
           </button>
         )) : <EmptyHint text="暂无记录" />}
@@ -1311,7 +1434,7 @@ function TraceMeta({ pluginKey, entryKey, reasonCode }: { pluginKey?: string | n
     <div className="flex flex-wrap gap-1.5 text-xs text-muted-foreground">
       {pluginKey ? <span>插件 {pluginKey}</span> : null}
       {entryKey ? <span>入口 {entryKey}</span> : null}
-      {reasonCode ? <span>{reasonLabel(reasonCode)}</span> : null}
+      {reasonCode ? <span>{reasonDisplay(reasonCode)}</span> : null}
     </div>
   );
 }
@@ -1474,12 +1597,20 @@ function stringifyShort(value: unknown): string {
 
 function actionDisplayText(action: EventActionItem): string {
   if (action.error_message || action.error_code) {
-    return action.error_message || reasonLabel(action.error_code) || action.error_code || "动作失败";
+    return actionErrorLabel(action);
   }
   if (action.action_type === "answer_inline_query") {
     return `Inline 回答已记录，结果 ${inlineResultCountLabel(action)}`;
   }
   return "动作已记录";
+}
+
+function actionErrorLabel(action: EventActionItem): string {
+  const label = reasonDisplay(action.error_code);
+  if (label && action.error_message && action.error_message !== reasonLabel(action.error_code)) {
+    return `${label}：${action.error_message}`;
+  }
+  return label || action.error_message || "动作失败";
 }
 
 function inlineResultCountLabel(action: EventActionItem): string {
@@ -1503,19 +1634,34 @@ function reasonLabel(code?: string | null): string {
   const labels: Record<string, string> = {
     action_failed: "动作执行失败",
     account_not_matched: "账号不匹配",
+    account_bot_user_unauthorized: "账号 Bot 用户未授权",
     bot_token_missing: "Bot token 缺失",
     bot_not_configured: "交互 Bot 未配置",
+    bot_self_message: "忽略交互 Bot 自身消息",
+    callback_query: "按钮回调",
+    command_matched: "命令已命中",
+    command_not_matched: "未命中命令",
     command_unauthorized: "命令权限不足",
     contract_failed: "契约失败",
     contract_warning: "契约告警",
+    callback_query_id_missing: "按钮回调 ID 缺失",
+    empty_message_text: "消息文本为空",
     entry_key_missing: "入口缺失",
+    event_bus_delivery_disabled: "Event Bus 投递已关闭",
     event_type_not_subscribed: "事件类型未订阅",
     filter_not_matched: "过滤条件未命中",
+    handler_error: "处理器异常",
     inline_disabled: "Inline 已关闭",
     inline_query_answer_failed: "Inline 回答失败",
+    inline_query_id_missing: "Inline Query ID 缺失",
     manifest_invalid: "Manifest 不合法",
+    matched: "已命中",
+    media_payload_empty: "媒体内容为空",
+    media_payload_invalid: "媒体内容格式无效",
+    media_payload_missing: "媒体内容缺失",
     native_raw_not_allowed: "未声明原生数据能力",
     native_raw_skipped: "原生数据未下发",
+    permission_denied: "权限不足",
     plugin_disabled: "插件未启用",
     plugin_load_failed: "插件加载失败",
     plugin_not_installed: "插件未安装",
@@ -1523,17 +1669,26 @@ function reasonLabel(code?: string | null): string {
     rate_limited: "触发频控",
     scope_not_matched: "范围不匹配",
     send_channel_deprecated: "发送通道已废弃",
+    session_control_action: "会话控制动作",
     settlement_requires_userbot: "结算需要 UserBot",
     session_expired: "会话已过期",
     session_not_found: "会话不存在",
     source_not_subscribed: "来源未订阅",
+    subscription_load_failed: "订阅加载失败",
     subscription_not_matched: "订阅未命中",
+    target_message_id_missing: "目标消息 ID 缺失",
     telegram_api_error: "Telegram API 错误",
     trace_write_failed: "Trace 写入降级",
     unsupported_send_via: "发送通道不支持",
     userbot_offline: "UserBot 离线",
   };
   return code ? labels[code] || code : "";
+}
+
+function reasonDisplay(code?: string | null): string {
+  if (!code) return "";
+  const label = reasonLabel(code);
+  return label && label !== code ? `${label} (${code})` : code;
 }
 
 function localDateTimeToIso(value: string): string | undefined {

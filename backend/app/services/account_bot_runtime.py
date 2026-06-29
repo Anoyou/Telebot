@@ -868,7 +868,7 @@ async def _handle_update(aid: int, token: str, update: dict[str, Any]) -> None:
                         reply_markup=None,
                     )
                 elif incoming.callback_id:
-                    await account_bot_service.answer_callback(token, incoming.callback_id, text="未授权", show_alert=True)
+                    await _answer_callback(incoming, text="未授权", show_alert=True)
                 return
             if incoming.chat_id is not None:
                 user.last_chat_id = incoming.chat_id
@@ -917,12 +917,7 @@ async def _handle_update(aid: int, token: str, update: dict[str, Any]) -> None:
             error=str(exc),
         )
         if incoming.callback_id:
-            await account_bot_service.answer_callback(
-                incoming.token,
-                incoming.callback_id,
-                text=str(exc),
-                show_alert=True,
-            )
+            await _answer_callback(incoming, text=str(exc), show_alert=True)
         else:
             await _send(incoming, f"权限不足：{account_bot_service.html_text(exc)}")
     except Exception as exc:  # noqa: BLE001
@@ -1874,6 +1869,7 @@ def _incoming_from_payment_confirm_payload(
             for item in raw_incoming.get("entity_languages", [])
             if str(item or "").strip()
         ),
+        trace_id=confirmer.trace_id,
     )
 
 
@@ -2207,19 +2203,64 @@ async def _close_active_interaction_games(incoming: Incoming, target_rule: dict[
                     {"session": session} if session is not None else None,
                     event_type="session_close",
                 )
-                ok, _error, actions = await _run_worker_interaction_entry(
-                    incoming,
-                    plugin_key=module_key,
-                    entry_key=entry_key,
-                    payload=payload,
-                )
-                if ok and actions:
-                    actions = await _guard_interaction_actions(incoming, rule, actions)
-                    await _apply_interaction_actions(
+                session_trace = None
+                session_status = TRACE_STATUS_SKIPPED
+                parent_trace_id = incoming.trace_id
+                try:
+                    flags = await _event_framework_flags()
+                    if flags.get("trace_enabled", True):
+                        trace_payload = dict(payload)
+                        trace_payload["trace_id"] = None
+                        session_trace = await start_trace(trace_payload)
+                        payload["trace_id"] = session_trace.trace_id
+                        incoming.trace_id = session_trace.trace_id
+                        _event, decision = _legacy_rule_event_bus_decision(incoming, rule, event_type="session_close")
+                        await record_span(
+                            session_trace,
+                            "receive",
+                            TRACE_STATUS_OK,
+                            component="interaction_session",
+                            plugin_key=module_key,
+                            entry_key=entry_key,
+                        )
+                        await record_span(
+                            session_trace,
+                            "subscription_match",
+                            TRACE_STATUS_OK if decision is not None and decision.matched else TRACE_STATUS_SKIPPED,
+                            component="interaction_session",
+                            plugin_key=module_key,
+                            entry_key=entry_key,
+                            reason_code=getattr(decision, "reason_code", "subscription_not_matched"),
+                            message=getattr(decision, "reason_message", "session_close 未通过 Event Bus rule_bound decision。"),
+                            dispatch_mode=getattr(decision, "dispatch_mode", "rule_bound"),
+                            scope=getattr(decision, "scope", "rule_bound"),
+                            filters=getattr(decision, "filters", {
+                                "rule_id": rule.get("id"),
+                                "event_type": "session_close",
+                                "chat_id": chat_id,
+                            }),
+                        )
+                        if decision is None or not decision.matched:
+                            continue
+                    ok, _error, actions = await _run_worker_interaction_entry(
                         incoming,
-                        actions,
-                        context=_interaction_trace_context(payload),
+                        plugin_key=module_key,
+                        entry_key=entry_key,
+                        payload=payload,
                     )
+                    session_status = TRACE_STATUS_OK if ok else TRACE_STATUS_FAILED
+                    if ok and actions:
+                        actions = await _guard_interaction_actions(incoming, rule, actions)
+                        await _apply_interaction_actions(
+                            incoming,
+                            actions,
+                            context=_interaction_trace_context(payload),
+                        )
+                finally:
+                    try:
+                        await finish_trace(session_trace, session_status)
+                    finally:
+                        incoming.trace_id = parent_trace_id
             closed += await _clear_interaction_sessions_for_rule(account_id, rule, chat_id)
     except Exception:  # noqa: BLE001
         log.debug("close interaction module sessions failed aid=%s chat_id=%s", account_id, chat_id, exc_info=True)
@@ -2639,9 +2680,8 @@ async def _try_handle_interaction_payment_confirm(db: Any, incoming: Incoming) -
     if not incoming.callback_id:
         return False
     if incoming.user_id is None:
-        await account_bot_service.answer_callback(
-            incoming.token,
-            incoming.callback_id,
+        await _answer_callback(
+            incoming,
             text="无法识别你的 Telegram 身份",
             show_alert=True,
         )
@@ -2649,9 +2689,8 @@ async def _try_handle_interaction_payment_confirm(db: Any, incoming: Incoming) -
     redis = get_redis()
     raw = await _read_interaction_payment_confirm_payload(redis, nonce)
     if not raw:
-        await account_bot_service.answer_callback(
-            incoming.token,
-            incoming.callback_id,
+        await _answer_callback(
+            incoming,
             text="确认已过期，请重新付款触发。",
             show_alert=True,
         )
@@ -2659,25 +2698,22 @@ async def _try_handle_interaction_payment_confirm(db: Any, incoming: Incoming) -
     try:
         payload = json.loads(raw)
     except json.JSONDecodeError:
-        await account_bot_service.answer_callback(
-            incoming.token,
-            incoming.callback_id,
+        await _answer_callback(
+            incoming,
             text="确认数据无效，请重新触发。",
             show_alert=True,
         )
         return True
     if not isinstance(payload, dict) or int(payload.get("account_id") or 0) != incoming.account_id:
-        await account_bot_service.answer_callback(
-            incoming.token,
-            incoming.callback_id,
+        await _answer_callback(
+            incoming,
             text="确认票据不匹配。",
             show_alert=True,
         )
         return True
     if _int_or_none((payload.get("incoming") if isinstance(payload.get("incoming"), dict) else {}).get("chat_id")) != incoming.chat_id:
-        await account_bot_service.answer_callback(
-            incoming.token,
-            incoming.callback_id,
+        await _answer_callback(
+            incoming,
             text="请在原群内确认。",
             show_alert=True,
         )
@@ -2686,26 +2722,23 @@ async def _try_handle_interaction_payment_confirm(db: Any, incoming: Incoming) -
     parsed = payload.get("parsed") if isinstance(payload.get("parsed"), dict) else None
     replay_incoming = _incoming_from_payment_confirm_payload(incoming.token, payload, incoming)
     if rule is None or parsed is None or replay_incoming is None:
-        await account_bot_service.answer_callback(
-            incoming.token,
-            incoming.callback_id,
+        await _answer_callback(
+            incoming,
             text="确认数据不完整，请重新触发。",
             show_alert=True,
         )
         return True
     if not _payment_confirm_name_matches(parsed.get("payer_name"), incoming):
-        await account_bot_service.answer_callback(
-            incoming.token,
-            incoming.callback_id,
+        await _answer_callback(
+            incoming,
             text="这条到账通知的付款人名称与你不一致。",
             show_alert=True,
         )
         return True
     consumed = await _consume_interaction_payment_confirm_payload(redis, nonce)
     if not consumed:
-        await account_bot_service.answer_callback(
-            incoming.token,
-            incoming.callback_id,
+        await _answer_callback(
+            incoming,
             text="确认已被处理，请勿重复点击。",
             show_alert=True,
         )
@@ -2719,18 +2752,16 @@ async def _try_handle_interaction_payment_confirm(db: Any, incoming: Incoming) -
     replay_incoming.reply_to_username = incoming.username
     usage_block = await _interaction_user_usage_block_message(replay_incoming, rule, parsed)
     if usage_block:
-        await account_bot_service.answer_callback(
-            incoming.token,
-            incoming.callback_id,
+        await _answer_callback(
+            incoming,
             text=_plain_callback_text(usage_block),
             show_alert=True,
         )
         return True
     claimed_usage, usage_pending_key = await _claim_interaction_user_usage(replay_incoming, rule, parsed)
     if not claimed_usage:
-        await account_bot_service.answer_callback(
-            incoming.token,
-            incoming.callback_id,
+        await _answer_callback(
+            incoming,
             text="你正在处理该功能，请稍后再试。",
             show_alert=True,
         )
@@ -2742,9 +2773,8 @@ async def _try_handle_interaction_payment_confirm(db: Any, incoming: Incoming) -
             await _mark_interaction_user_usage(replay_incoming, rule, parsed)
     finally:
         await _release_interaction_user_usage_claim(usage_pending_key)
-    await account_bot_service.answer_callback(
-        incoming.token,
-        incoming.callback_id,
+    await _answer_callback(
+        incoming,
         text="已确认，正在启动玩法。" if executed else "玩法启动失败，请稍后重试。",
         show_alert=not executed,
     )
@@ -2852,6 +2882,44 @@ async def _try_handle_event_bus_subscriptions(
             context=_interaction_trace_context(payload),
         )
     return handled, all_ok
+
+
+def _legacy_rule_event_bus_decision(
+    incoming: Incoming,
+    rule: dict[str, Any],
+    *,
+    event_type: str,
+) -> tuple[dict[str, Any], Any | None]:
+    module_key = str(rule.get("module_key") or "").strip()
+    entry_key = str(rule.get("module_action") or "").strip()
+    event = _incoming_trace_payload(incoming, event_type=event_type)
+    event["trace_id"] = incoming.trace_id
+    subscription = normalize_event_subscription(
+        {
+            "source": ["interaction_bot"],
+            "events": [event_type],
+            "scope": "rule_bound",
+            "entry_key": entry_key,
+            "dispatch_mode": "rule_bound",
+            "filters": {
+                "rule_id": rule.get("id"),
+                "event_type": event_type,
+                "chat_id": incoming.chat_id,
+            },
+        },
+        plugin_key=module_key,
+        entry_key=entry_key,
+    )
+    result = dispatch_event(
+        event,
+        [subscription],
+        {
+            "allowed_chat_ids": "*",
+            "known_user_ids": [incoming.user_id] if incoming.user_id is not None else [],
+            "trigger": {"rule_id": rule.get("id")},
+        },
+    )
+    return event, result.decisions[0] if result.decisions else None
 
 
 async def _try_handle_event_bus_payment_notice(
@@ -3211,9 +3279,8 @@ async def _try_handle_interaction_module_message(db: Any, incoming: Incoming) ->
         participant_block = _interaction_participant_block_message(incoming, rule, session)
         if participant_block:
             if is_callback:
-                await account_bot_service.answer_callback(
-                    incoming.token,
-                    incoming.callback_id or "",
+                await _answer_callback(
+                    incoming,
                     text=participant_block,
                     show_alert=True,
                 )
@@ -3229,6 +3296,27 @@ async def _try_handle_interaction_module_message(db: Any, incoming: Incoming) ->
                 continue
             if _message_equals_any(text, _rule_keyword_list(rule, "module_start_keywords")):
                 continue
+        _event, decision = _legacy_rule_event_bus_decision(incoming, rule, event_type=event_type)
+        reason_code = getattr(decision, "reason_code", None) or "subscription_not_matched"
+        decision_filters = dict(getattr(decision, "filters", None) or {})
+        decision_filters["session_id"] = (
+            session.get("session_id") if isinstance(session, dict) else getattr(session, "session_id", None)
+        )
+        await record_span(
+            trace_log_context(incoming.trace_id, plugin_key=module_key, entry_key=entry_key),
+            "subscription_match",
+            TRACE_STATUS_OK if decision is not None and decision.matched else TRACE_STATUS_SKIPPED,
+            component="interaction_session",
+            plugin_key=module_key,
+            entry_key=entry_key,
+            reason_code=reason_code,
+            message=getattr(decision, "reason_message", None) or "旧交互会话消息未命中 Event Bus rule_bound decision。",
+            dispatch_mode=getattr(decision, "dispatch_mode", None) or "rule_bound",
+            scope=getattr(decision, "scope", None) or "rule_bound",
+            filters=decision_filters,
+        )
+        if decision is None or not decision.matched:
+            continue
         payload = await _interaction_module_payload_async(
             incoming,
             rule,
@@ -3244,6 +3332,15 @@ async def _try_handle_interaction_module_message(db: Any, incoming: Incoming) ->
             },
             event_type=event_type,
         )
+        trigger = payload.get("trigger") if isinstance(payload.get("trigger"), dict) else {}
+        trigger.update(
+            {
+                "dispatch_mode": decision.dispatch_mode,
+                "scope": decision.scope,
+                "filters": dict(decision.filters or {}),
+            }
+        )
+        payload["trigger"] = trigger
         await _remember_interaction_debug_state(incoming, stage="payload_built", payload=payload)
         ok, error, actions = await _run_worker_interaction_entry(
             incoming,
@@ -3275,7 +3372,7 @@ async def _try_handle_interaction_module_message(db: Any, incoming: Incoming) ->
             continue
         if not actions:
             if is_callback:
-                await account_bot_service.answer_callback(incoming.token, incoming.callback_id or "")
+                await _answer_callback(incoming)
                 return True
             continue
         raw_actions = [dict(action) for action in actions]
@@ -3293,7 +3390,7 @@ async def _try_handle_interaction_module_message(db: Any, incoming: Incoming) ->
             context=_interaction_trace_context(payload),
         )
         if is_callback and not _interaction_actions_answer_callback(actions):
-            await account_bot_service.answer_callback(incoming.token, incoming.callback_id or "")
+            await _answer_callback(incoming)
         if _interaction_actions_request_no_session(actions):
             await _clear_loaded_interaction_session(
                 incoming.account_id,
@@ -4448,6 +4545,39 @@ async def _run_interaction_module(
     await _remember_interaction_debug_state(incoming, stage="payload_built", payload=payload)
     trace_context = _interaction_trace_context(payload)
     native_raw_meta = payload.get("native_raw_meta") if isinstance(payload.get("native_raw_meta"), dict) else {}
+    _event, decision = _legacy_rule_event_bus_decision(incoming, rule, event_type=event_type)
+    if decision is None or not decision.matched:
+        await record_span(
+            trace_context,
+            "subscription_match",
+            TRACE_STATUS_SKIPPED,
+            component="interaction_rule",
+            plugin_key=module_key,
+            entry_key=entry_key,
+            reason_code=getattr(decision, "reason_code", "subscription_not_matched"),
+            message=getattr(decision, "reason_message", "旧交互规则未通过 Event Bus rule_bound decision。"),
+            dispatch_mode="rule_bound",
+            scope="rule_bound",
+            filters={
+                "rule_id": rule.get("id"),
+                "event_type": event_type,
+                "chat_id": incoming.chat_id,
+            },
+        )
+        return False, False
+    await record_span(
+        trace_context,
+        "subscription_match",
+        TRACE_STATUS_OK,
+        component="interaction_rule",
+        plugin_key=decision.plugin_key,
+        entry_key=decision.entry_key,
+        reason_code=decision.reason_code,
+        message=decision.reason_message,
+        dispatch_mode=decision.dispatch_mode,
+        scope=decision.scope,
+        filters=decision.filters,
+    )
     if incoming.native_raw is not None and not payload.get("native_raw"):
         await record_span(
             trace_context,
@@ -4610,12 +4740,39 @@ async def _try_handle_transfer_command(db: Any, incoming: Incoming) -> bool:
             error=error_text,
             template=raw_notice_template[:1000],
         )
-    result = await account_bot_service.send_message(
-        transfer_token,
-        incoming.chat_id,
-        notice,
-        reply_to_message_id=incoming.message_id,
-    )
+    action = {
+        "type": "send_message",
+        "send_via": "transfer_test_notice",
+        "chat_id": incoming.chat_id,
+        "reply_to_message_id": incoming.message_id,
+        "text": notice,
+    }
+    try:
+        result = await account_bot_service.send_message(
+            transfer_token,
+            incoming.chat_id,
+            notice,
+            reply_to_message_id=incoming.message_id,
+        )
+        await record_action(
+            trace_log_context(incoming.trace_id),
+            action,
+            TRACE_STATUS_OK,
+            actual_send_via="transfer_test_notice",
+            result=result,
+            transfer_test_notice=True,
+        )
+    except Exception as exc:
+        await record_action(
+            trace_log_context(incoming.trace_id),
+            action,
+            TRACE_STATUS_FAILED,
+            actual_send_via="transfer_test_notice",
+            error_code="telegram_api_error",
+            error=f"{type(exc).__name__}: {exc}",
+            transfer_test_notice=True,
+        )
+        raise
     log.info(
         "transfer command emitted notice aid=%s chat_id=%s payer=%r receiver=%r amount=%s",
         incoming.account_id,
@@ -4937,15 +5094,15 @@ async def _handle_command(incoming: Incoming, role: str) -> None:
 async def _handle_callback(incoming: Incoming, role: str) -> None:
     parsed = _parse_callback(incoming.callback_data or "")
     if parsed is None:
-        await account_bot_service.answer_callback(incoming.token, incoming.callback_id or "", text="按钮已过期")
+        await _answer_callback(incoming, text="按钮已过期")
         return
     aid, action, resource, nonce = parsed
     if aid != incoming.account_id:
-        await account_bot_service.answer_callback(incoming.token, incoming.callback_id or "", text="账号不匹配", show_alert=True)
+        await _answer_callback(incoming, text="账号不匹配", show_alert=True)
         return
     try:
         if action == "view":
-            await account_bot_service.answer_callback(incoming.token, incoming.callback_id or "")
+            await _answer_callback(incoming)
             if resource == "status":
                 await _show_status(incoming, edit=True)
             elif resource == "features":
@@ -4977,18 +5134,17 @@ async def _handle_callback(incoming: Incoming, role: str) -> None:
         elif action == "confirm":
             await _confirm_action(incoming, role, resource, nonce)
         elif action == "cancel":
-            await account_bot_service.answer_callback(incoming.token, incoming.callback_id or "", text="已取消")
+            await _answer_callback(incoming, text="已取消")
             await _show_start(incoming, role, edit=True)
         else:
-            await account_bot_service.answer_callback(incoming.token, incoming.callback_id or "", text="按钮已过期")
+            await _answer_callback(incoming, text="按钮已过期")
     except PermissionError as exc:
-        await account_bot_service.answer_callback(incoming.token, incoming.callback_id or "", text=str(exc), show_alert=True)
+        await _answer_callback(incoming, text=str(exc), show_alert=True)
     except Exception as exc:  # noqa: BLE001
         clean = account_bot_service.sanitize_bot_error(exc, token=incoming.token)
         log.exception("account bot callback failed aid=%s action=%s", incoming.account_id, action)
-        await account_bot_service.answer_callback(
-            incoming.token,
-            incoming.callback_id or "",
+        await _answer_callback(
+            incoming,
             text=clean[:180],
             show_alert=True,
         )
@@ -5290,7 +5446,7 @@ async def _toggle_feature(incoming: Incoming, role: str, key: str) -> None:
     async with AsyncSessionLocal() as db:
         feature = await db.get(Feature, key)
         if feature is None:
-            await account_bot_service.answer_callback(incoming.token, incoming.callback_id or "", text="功能不存在", show_alert=True)
+            await _answer_callback(incoming, text="功能不存在", show_alert=True)
             return
         current = (
             await db.execute(
@@ -5304,15 +5460,14 @@ async def _toggle_feature(incoming: Incoming, role: str, key: str) -> None:
         if not feature.is_builtin:
             allowed, message = await _check_remote_plugin_permission(incoming.account_id, role, "enable_disable")
             if not allowed:
-                await account_bot_service.answer_callback(
-                    incoming.token,
-                    incoming.callback_id or "",
+                await _answer_callback(
+                    incoming,
                     text=message[:100],
                     show_alert=True,
                 )
                 return
             if incoming.callback_id:
-                await account_bot_service.answer_callback(incoming.token, incoming.callback_id, text="请确认")
+                await _answer_callback(incoming, text="请确认")
             await _request_confirm(
                 incoming,
                 role,
@@ -5334,7 +5489,7 @@ async def _toggle_feature(incoming: Incoming, role: str, key: str) -> None:
             detail=_audit_detail(incoming, role, {"enabled": enabled}),
         )
         await db.commit()
-    await account_bot_service.answer_callback(incoming.token, incoming.callback_id or "", text="已更新")
+    await _answer_callback(incoming, text="已更新")
     await _show_features(incoming, role, edit=True)
 
 
@@ -5343,7 +5498,7 @@ async def _toggle_command(incoming: Incoming, role: str, resource: str) -> None:
     try:
         tpl_id = int(resource)
     except ValueError:
-        await account_bot_service.answer_callback(incoming.token, incoming.callback_id or "", text="模板不存在", show_alert=True)
+        await _answer_callback(incoming, text="模板不存在", show_alert=True)
         return
     async with AsyncSessionLocal() as db:
         link = (
@@ -5369,7 +5524,7 @@ async def _toggle_command(incoming: Incoming, role: str, resource: str) -> None:
         )
         await db.commit()
         await command_service.notify_reload(incoming.account_id)
-    await account_bot_service.answer_callback(incoming.token, incoming.callback_id or "", text="已更新")
+    await _answer_callback(incoming, text="已更新")
     await _show_commands(incoming, role, edit=True)
 
 
@@ -5378,12 +5533,12 @@ async def _toggle_rule(incoming: Incoming, role: str, resource: str) -> None:
     try:
         rid = int(resource)
     except ValueError:
-        await account_bot_service.answer_callback(incoming.token, incoming.callback_id or "", text="规则不存在", show_alert=True)
+        await _answer_callback(incoming, text="规则不存在", show_alert=True)
         return
     async with AsyncSessionLocal() as db:
         rule = await db.get(Rule, rid)
         if rule is None or rule.account_id != incoming.account_id:
-            await account_bot_service.answer_callback(incoming.token, incoming.callback_id or "", text="规则不存在", show_alert=True)
+            await _answer_callback(incoming, text="规则不存在", show_alert=True)
             return
         rule.enabled = not bool(rule.enabled)
         await audit.write(
@@ -5399,7 +5554,7 @@ async def _toggle_rule(incoming: Incoming, role: str, resource: str) -> None:
             await publish_cmd_with_ack(redis, incoming.account_id, CMD_RELOAD_CONFIG)
         except Exception:
             log.debug("account bot rule reload failed aid=%s", incoming.account_id, exc_info=True)
-    await account_bot_service.answer_callback(incoming.token, incoming.callback_id or "", text="已更新")
+    await _answer_callback(incoming, text="已更新")
     await _show_rules(incoming, role, edit=True)
 
 
@@ -5408,12 +5563,12 @@ async def _execute_rule(incoming: Incoming, role: str, resource: str) -> None:
     try:
         rid = int(resource)
     except ValueError:
-        await account_bot_service.answer_callback(incoming.token, incoming.callback_id or "", text="规则不存在", show_alert=True)
+        await _answer_callback(incoming, text="规则不存在", show_alert=True)
         return
     async with AsyncSessionLocal() as db:
         rule = await db.get(Rule, rid)
         if rule is None or rule.account_id != incoming.account_id or rule.feature_key != "scheduler":
-            await account_bot_service.answer_callback(incoming.token, incoming.callback_id or "", text="仅 scheduler 规则可执行", show_alert=True)
+            await _answer_callback(incoming, text="仅 scheduler 规则可执行", show_alert=True)
             return
         await audit.write(
             db,
@@ -5453,9 +5608,8 @@ async def _execute_rule(incoming: Incoming, role: str, resource: str) -> None:
                 await ret
         except Exception:
             pass
-    await account_bot_service.answer_callback(
-        incoming.token,
-        incoming.callback_id or "",
+    await _answer_callback(
+        incoming,
         text="已执行" if ok else (str(error or "worker 响应超时")[:100]),
         show_alert=not ok,
     )
@@ -5474,7 +5628,7 @@ async def _pause_account(incoming: Incoming, role: str, *, edit: bool = False) -
         )
         await db.commit()
     if incoming.callback_id:
-        await account_bot_service.answer_callback(incoming.token, incoming.callback_id, text="已暂停")
+        await _answer_callback(incoming, text="已暂停")
     await _send(incoming, "账号已暂停。", reply_markup=_main_keyboard(incoming.account_id), edit=edit)
 
 
@@ -5491,7 +5645,7 @@ async def _resume_account(incoming: Incoming, role: str, *, edit: bool = False) 
         )
         await db.commit()
     if incoming.callback_id:
-        await account_bot_service.answer_callback(incoming.token, incoming.callback_id, text="已恢复")
+        await _answer_callback(incoming, text="已恢复")
     await _send(incoming, "账号已恢复。", reply_markup=_main_keyboard(incoming.account_id), edit=edit)
 
 
@@ -5543,7 +5697,7 @@ async def _confirm_action(
 ) -> None:
     _require(role, ACCOUNT_BOT_ROLE_ADMIN)
     if not nonce:
-        await account_bot_service.answer_callback(incoming.token, incoming.callback_id or "", text="确认已过期", show_alert=True)
+        await _answer_callback(incoming, text="确认已过期", show_alert=True)
         return
     redis = get_redis()
     raw = await _read_confirm_payload(redis, nonce)
@@ -5555,7 +5709,7 @@ async def _confirm_action(
             action=resource,
             extra={"reason": "missing_or_expired"},
         )
-        await account_bot_service.answer_callback(incoming.token, incoming.callback_id or "", text="确认已过期", show_alert=True)
+        await _answer_callback(incoming, text="确认已过期", show_alert=True)
         return
     data = json.loads(raw)
     if data.get("account_id") != incoming.account_id or data.get("tg_user_id") != incoming.user_id:
@@ -5566,7 +5720,7 @@ async def _confirm_action(
             action=resource,
             extra={"reason": "owner_mismatch"},
         )
-        await account_bot_service.answer_callback(incoming.token, incoming.callback_id or "", text="只能由原用户确认", show_alert=True)
+        await _answer_callback(incoming, text="只能由原用户确认", show_alert=True)
         return
     if data.get("action") != resource:
         await _audit_confirm_event(
@@ -5576,7 +5730,7 @@ async def _confirm_action(
             action=resource,
             extra={"reason": "action_mismatch"},
         )
-        await account_bot_service.answer_callback(incoming.token, incoming.callback_id or "", text="确认资源不匹配", show_alert=True)
+        await _answer_callback(incoming, text="确认资源不匹配", show_alert=True)
         return
     consumed = await _consume_confirm_payload(redis, nonce)
     if not consumed:
@@ -5587,7 +5741,7 @@ async def _confirm_action(
             action=resource,
             extra={"reason": "already_consumed"},
         )
-        await account_bot_service.answer_callback(incoming.token, incoming.callback_id or "", text="确认已过期", show_alert=True)
+        await _answer_callback(incoming, text="确认已过期", show_alert=True)
         return
     await _audit_confirm_event(
         incoming,
@@ -5612,7 +5766,7 @@ async def _restart_account_worker(incoming: Incoming, role: str) -> None:
     await redis.publish(cmd_channel(incoming.account_id), make_cmd("stop"))
     await redis.publish(GLOBAL_CHANNEL, make_cmd("start_worker", account_id=incoming.account_id))
     if incoming.callback_id:
-        await account_bot_service.answer_callback(incoming.token, incoming.callback_id, text="已下发重启")
+        await _answer_callback(incoming, text="已下发重启")
     await _send(incoming, "已下发账号 worker 重启。", reply_markup=_main_keyboard(incoming.account_id), edit=True)
 
 
@@ -5629,13 +5783,11 @@ async def _execute_confirmed_action(
     if action == "plugin_install":
         allowed, message = await _check_remote_plugin_permission(incoming.account_id, role, "install")
         if not allowed:
-            await account_bot_service.answer_callback(
-                incoming.token, incoming.callback_id or "", text=message[:100], show_alert=True
-            )
+            await _answer_callback(incoming, text=message[:100], show_alert=True)
             return
         source_url = str(payload.get("source_url") or "").strip()
         if not source_url:
-            await account_bot_service.answer_callback(incoming.token, incoming.callback_id or "", text="缺少 Git URL", show_alert=True)
+            await _answer_callback(incoming, text="缺少 Git URL", show_alert=True)
             return
         async with AsyncSessionLocal() as db:
             row = await remote_plugin_service.install(db, source_url, default_enabled=False)
@@ -5647,15 +5799,13 @@ async def _execute_confirmed_action(
                 detail=_audit_detail(incoming, role, {"name": row.name}),
             )
             await db.commit()
-        await account_bot_service.answer_callback(incoming.token, incoming.callback_id or "", text="插件已安装")
+        await _answer_callback(incoming, text="插件已安装")
         await _show_plugins(incoming, role, edit=True)
         return
     if action == "plugin_update":
         allowed, message = await _check_remote_plugin_permission(incoming.account_id, role, "update")
         if not allowed:
-            await account_bot_service.answer_callback(
-                incoming.token, incoming.callback_id or "", text=message[:100], show_alert=True
-            )
+            await _answer_callback(incoming, text=message[:100], show_alert=True)
             return
         name = str(payload.get("name") or "").strip()
         async with AsyncSessionLocal() as db:
@@ -5668,21 +5818,19 @@ async def _execute_confirmed_action(
                 detail=_audit_detail(incoming, role, {"name": row.name}),
             )
             await db.commit()
-        await account_bot_service.answer_callback(incoming.token, incoming.callback_id or "", text="插件已更新")
+        await _answer_callback(incoming, text="插件已更新")
         await _show_plugins(incoming, role, edit=True)
         return
     if action == "plugin_uninstall":
         allowed, message = await _check_remote_plugin_permission(incoming.account_id, role, "uninstall")
         if not allowed:
-            await account_bot_service.answer_callback(
-                incoming.token, incoming.callback_id or "", text=message[:100], show_alert=True
-            )
+            await _answer_callback(incoming, text=message[:100], show_alert=True)
             return
         name = str(payload.get("name") or "").strip()
         async with AsyncSessionLocal() as db:
             found = await remote_plugin_service.uninstall(db, name)
             if not found:
-                await account_bot_service.answer_callback(incoming.token, incoming.callback_id or "", text="插件不存在", show_alert=True)
+                await _answer_callback(incoming, text="插件不存在", show_alert=True)
                 return
             await audit.write(
                 db,
@@ -5692,25 +5840,23 @@ async def _execute_confirmed_action(
                 detail=_audit_detail(incoming, role, {"name": name}),
             )
             await db.commit()
-        await account_bot_service.answer_callback(incoming.token, incoming.callback_id or "", text="插件已卸载")
+        await _answer_callback(incoming, text="插件已卸载")
         await _show_plugins(incoming, role, edit=True)
         return
     if action == "plugin_toggle":
         allowed, message = await _check_remote_plugin_permission(incoming.account_id, role, "enable_disable")
         if not allowed:
-            await account_bot_service.answer_callback(
-                incoming.token, incoming.callback_id or "", text=message[:100], show_alert=True
-            )
+            await _answer_callback(incoming, text=message[:100], show_alert=True)
             return
         key = str(payload.get("feature_key") or "").strip()
         enabled = bool(payload.get("enabled"))
         if not key:
-            await account_bot_service.answer_callback(incoming.token, incoming.callback_id or "", text="缺少插件 key", show_alert=True)
+            await _answer_callback(incoming, text="缺少插件 key", show_alert=True)
             return
         async with AsyncSessionLocal() as db:
             feature = await db.get(Feature, key)
             if feature is None or feature.is_builtin:
-                await account_bot_service.answer_callback(incoming.token, incoming.callback_id or "", text="插件不存在", show_alert=True)
+                await _answer_callback(incoming, text="插件不存在", show_alert=True)
                 return
             if enabled:
                 remote = await remote_plugin_service.get_by_name(db, key)
@@ -5725,10 +5871,10 @@ async def _execute_confirmed_action(
                 detail=_audit_detail(incoming, role, {"enabled": enabled}),
             )
             await db.commit()
-        await account_bot_service.answer_callback(incoming.token, incoming.callback_id or "", text="已更新")
+        await _answer_callback(incoming, text="已更新")
         await _show_plugins(incoming, role, edit=True)
         return
-    await account_bot_service.answer_callback(incoming.token, incoming.callback_id or "", text="未知确认动作", show_alert=True)
+    await _answer_callback(incoming, text="未知确认动作", show_alert=True)
 
 
 async def _get_remote_plugin_policy(account_id: int) -> dict[str, bool]:
@@ -5763,24 +5909,117 @@ async def _send(
 ) -> dict[str, Any] | None:
     if incoming.chat_id is None:
         return None
+    action = {
+        "type": "edit_message" if edit and incoming.message_id is not None else "send_message",
+        "send_via": "interaction_bot",
+        "chat_id": incoming.chat_id,
+        "message_id": incoming.message_id if edit and incoming.message_id is not None else None,
+        "reply_to_message_id": reply_to_message_id,
+        "text": text,
+    }
     if edit and incoming.message_id is not None:
         try:
-            return await account_bot_service.edit_message(
+            result = await account_bot_service.edit_message(
                 incoming.token,
                 incoming.chat_id,
                 incoming.message_id,
                 text,
                 reply_markup=reply_markup,
             )
+            await record_action(
+                trace_log_context(incoming.trace_id),
+                action,
+                TRACE_STATUS_OK,
+                actual_send_via="interaction_bot",
+                result=result,
+            )
+            return result
         except Exception:
             log.debug("edit account bot message failed, fallback send", exc_info=True)
-    return await account_bot_service.send_message(
-        incoming.token,
-        incoming.chat_id,
-        text,
-        reply_markup=reply_markup,
-        reply_to_message_id=reply_to_message_id,
-    )
+            await record_action(
+                trace_log_context(incoming.trace_id),
+                action,
+                TRACE_STATUS_FAILED,
+                actual_send_via="interaction_bot",
+                error_code="telegram_api_error",
+                error="edit account bot message failed, fallback send",
+            )
+    send_action = {
+        "type": "send_message",
+        "send_via": "interaction_bot",
+        "chat_id": incoming.chat_id,
+        "reply_to_message_id": reply_to_message_id,
+        "text": text,
+    }
+    try:
+        result = await account_bot_service.send_message(
+            incoming.token,
+            incoming.chat_id,
+            text,
+            reply_markup=reply_markup,
+            reply_to_message_id=reply_to_message_id,
+        )
+        await record_action(
+            trace_log_context(incoming.trace_id),
+            send_action,
+            TRACE_STATUS_OK,
+            actual_send_via="interaction_bot",
+            result=result,
+        )
+        return result
+    except Exception as exc:
+        await record_action(
+            trace_log_context(incoming.trace_id),
+            send_action,
+            TRACE_STATUS_FAILED,
+            actual_send_via="interaction_bot",
+            error_code="telegram_api_error",
+            error=f"{type(exc).__name__}: {exc}",
+        )
+        raise
+
+
+async def _answer_callback(
+    incoming: Incoming,
+    *,
+    callback_id: str | None = None,
+    text: str = "",
+    show_alert: bool = False,
+) -> None:
+    query_id = str(callback_id or incoming.callback_id or "").strip()
+    action = {
+        "type": "answer_callback",
+        "callback_query_id": query_id,
+        "text": text,
+        "show_alert": show_alert,
+    }
+    if not query_id:
+        await record_action(
+            trace_log_context(incoming.trace_id),
+            action,
+            TRACE_STATUS_FAILED,
+            error_code="callback_query_id_missing",
+            error="callback query id is missing",
+        )
+        return
+    try:
+        await account_bot_service.answer_callback(incoming.token, query_id, text=text, show_alert=show_alert)
+        await record_action(
+            trace_log_context(incoming.trace_id),
+            action,
+            TRACE_STATUS_OK,
+            actual_send_via="interaction_bot",
+        )
+    except Exception as exc:
+        await record_action(
+            trace_log_context(incoming.trace_id),
+            action,
+            TRACE_STATUS_FAILED,
+            actual_send_via="interaction_bot",
+            error_code="telegram_api_error",
+            error=f"{type(exc).__name__}: {exc}",
+        )
+        raise
 
 
 def _require(role: str, required: str) -> None:

@@ -2,11 +2,14 @@
 
 本目录用于放置可维护的第三方插件示例。CI 只校验已经迁移到稳定公开 API 的示例，避免把历史写法或未合并接口误判为推荐模板。
 
-## 当前推荐
+## 最终版主模板
 
-- `with_http`：最小 HTTP facade 示例，演示 `manifest.py` 如何声明 `external_http`、`allowed_hosts`，以及运行时如何通过 `ctx.http` 发起受控请求。
-- `with_ai`：最小 AI facade 示例，演示 `manifest.py` 如何声明 `ai_text`，以及运行时如何通过 `ctx.ai.complete` / `ctx.ai.list_providers` 使用平台统一 LLM 池。
 - `event_bus_demo`：最终版主模板，演示 `usage` / `event_subscriptions` / `capabilities.telegram_native_raw`、message/command/callback/inline/payment fixtures、`answer_inline_query` 与 `settlement`。
+
+## Facade 兼容示例
+
+- `with_http`：最小 HTTP facade 示例，演示 `manifest.py` 如何声明 `external_http`、`allowed_hosts`，以及管理员命令兼容入口如何通过 `ctx.http` 发起受控请求。它不是公共群互动插件的新模板。
+- `with_ai`：最小 AI facade 示例，演示 `manifest.py` 如何声明 `ai_text`，以及管理员命令兼容入口如何通过 `ctx.ai.complete` / `ctx.ai.list_providers` 使用平台统一 LLM 池。它不是公共群互动插件的新模板。
 - `with_interaction`：旧交互入口迁移桥，演示原命令与交互 Bot 入口并存时如何补齐 Event Bus 字段，并修正历史 `payload["message"]` 字段冲突。
 
 ## 暂不纳入 CI 的示例

@@ -886,6 +886,7 @@ export interface TraceOverview {
   last_5m_total: number;
   last_5m_failed: number;
   last_5m_warning: number;
+  source_channel_counts: Record<string, number>;
   recent_errors: EventTraceSummary[];
   recent_failed_actions: EventActionItem[];
   recent_plugin_errors: PluginRuntimeStatusItem[];

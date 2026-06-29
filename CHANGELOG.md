@@ -20,6 +20,25 @@
 
 ## [Unreleased]
 
+## [0.40.1] — 2026-06-29 · patch（补丁版本） · 最终版封口与文档验收补强
+
+### Fixed
+- 补齐运行时实际使用的 `reason_code` 稳定字典、日志页中文映射和测试，防止 Trace 输出与文档/前端排障表漂移。
+- 修正 README 当前版本号仍停留在 `v0.37.0` 的发布材料不一致问题。
+- 修复付款二次确认 callback 重放玩法事件时未继承当前 `trace_id` 的断链风险，确保后续插件动作继续归属同一条 Trace。
+- 修复关闭交互会话时 `session_close` 子 Trace 污染父入口 Trace 的问题，确保最终确认消息仍归属原始入口链路。
+- 修复 Delivery Executor 占位清理和编辑失败回退只写 runtime log、不落独立 `event_action` 的问题，避免日志页把复合动作误判为完全成功。
+
+### Docs
+- 将插件概览的快速开始改为 Event Bus + MessageOps 最小示例，旧 `on_command` / `on_message` 降级为管理员命令和历史兼容说明。
+- 在插件速查表、API 参考和最终版计划中补充常见 `reason_code` 排障表。
+- 补充最终版封口计划、可实现性锁定和执行冻结清单，明确最终版只关闭入口、协议、动作、日志、文档、部署断点，部署、浏览器/PWA、真实链路和回滚演练缺一不可。
+
+### Tests
+- 强化 `event_bus_demo` 示例验证，新增 native_raw 与废弃 notice 探针 fixture，并让验证脚本实际调用 `on_event` 校验 message、command、callback、inline、payment 等 action 形状。
+- 补充插件注册命令的 Event Bus decision 回归测试，证明插件命令会记录 `admin_command` 订阅决策和 `event_action`。
+- 补充 `session_close` 父 Trace 归属、占位删除 action、编辑失败回退 action 的最终版门禁回归测试。
+
 ## [0.40.0] — 2026-06-29 · minor（次版本） · Event Bus 与 Trace 最终版框架
 
 ### Added

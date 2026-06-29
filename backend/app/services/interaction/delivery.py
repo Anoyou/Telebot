@@ -61,7 +61,7 @@ class InteractionDeliveryExecutor:
                     error=f"session control action: {action_type}",
                 )
                 continue
-            if action_type in {"send_message", "send_photo", "send_file", "delete_message", "pin_message"}:
+            if action_type in {"send_message", "send_photo", "send_file", "edit_message", "delete_message", "pin_message"}:
                 deprecated_channels = deprecated_send_via_values(action_send_via_raw_selector(action))
                 if deprecated_channels:
                     await record_action(
@@ -105,6 +105,9 @@ class InteractionDeliveryExecutor:
             if action_type == "pin_message":
                 await self._apply_pin_message(action)
                 continue
+            if action_type == "edit_message":
+                await self._apply_edit_message(action, reply_markup=reply_markup)
+                continue
             if action_type == "send_message":
                 replace_message_id = await self._apply_send_message(
                     action,
@@ -121,7 +124,13 @@ class InteractionDeliveryExecutor:
                 )
                 continue
             log.info("interaction action ignored: unsupported type=%s aid=%s", action_type, self.incoming.account_id)
-            await record_action(action.get("context"), action, TRACE_STATUS_SKIPPED, error=f"unsupported type: {action_type}")
+            await record_action(
+                action.get("context"),
+                action,
+                TRACE_STATUS_SKIPPED,
+                error_code="unsupported_send_via",
+                error=f"unsupported type: {action_type}",
+            )
             await self.write_log(
                 self.incoming,
                 "info",
@@ -131,12 +140,46 @@ class InteractionDeliveryExecutor:
                 **self.log_context(self.incoming),
             )
 
-    async def delete_message(self, message_id: int | None, *, chat_id: int | None = None, send_via: str = "interaction_bot") -> bool:
+    async def delete_message(
+        self,
+        message_id: int | None,
+        *,
+        chat_id: int | None = None,
+        send_via: str = "interaction_bot",
+        context: dict[str, Any] | None = None,
+        record: bool = False,
+    ) -> bool:
         target_chat_id = self._target_chat_id(chat_id)
+        action = {
+            "type": "delete_message",
+            "send_via": send_via,
+            "chat_id": target_chat_id if target_chat_id is not None else chat_id,
+            "message_id": message_id,
+        }
+        if context:
+            action["context"] = dict(context)
         if target_chat_id is None or message_id is None:
+            if record:
+                await record_action(
+                    context,
+                    action,
+                    TRACE_STATUS_FAILED,
+                    actual_send_via=send_via,
+                    error_code="target_message_id_missing" if message_id is None else "scope_not_matched",
+                    error="delete_message target chat_id or message_id is missing",
+                )
             return False
         token = await self._resolve_token(send_via)
         if not token:
+            if record:
+                await record_action(
+                    context,
+                    action,
+                    TRACE_STATUS_FAILED,
+                    actual_send_via=send_via,
+                    error_code="bot_token_missing",
+                    error="bot token unavailable",
+                )
             return False
         try:
             await account_bot_service.delete_message(
@@ -144,8 +187,25 @@ class InteractionDeliveryExecutor:
                 target_chat_id,
                 message_id,
             )
+            if record:
+                await record_action(
+                    context,
+                    action,
+                    TRACE_STATUS_OK,
+                    actual_send_via=send_via,
+                    result={"chat_id": target_chat_id, "message_id": message_id},
+                )
             return True
         except Exception as exc:  # noqa: BLE001
+            if record:
+                await record_action(
+                    context,
+                    action,
+                    TRACE_STATUS_FAILED,
+                    actual_send_via=send_via,
+                    error_code="telegram_api_error",
+                    error=str(exc),
+                )
             await self.write_log(
                 self.incoming,
                 "warn",
@@ -166,12 +226,13 @@ class InteractionDeliveryExecutor:
         send_via: str,
         edit_message_id: int | None = None,
         reply_markup: dict[str, Any] | None = None,
+        context: dict[str, Any] | None = None,
     ) -> tuple[bool, dict[str, Any]]:
         target_chat_id = self._target_chat_id(chat_id)
         if target_chat_id is None:
             return False, {}
         if not self._is_supported_send_via(send_via):
-            return False, {"error": f"unsupported send_via: {send_via}"}
+            return False, {"error": f"unsupported send_via: {send_via}", "error_code": "unsupported_send_via"}
         if send_via == "userbot_reply":
             ok, error, result = await self.run_worker_action(
                 self.incoming,
@@ -183,7 +244,7 @@ class InteractionDeliveryExecutor:
                 },
             )
             if not ok:
-                return False, {"error": error}
+                return False, {"error": error, "error_code": _worker_action_error_code(error)}
             return True, result
         token = await self._resolve_token(send_via)
         if not token:
@@ -194,8 +255,17 @@ class InteractionDeliveryExecutor:
                 send_via=send_via,
                 **self.log_context(self.incoming),
             )
-            return False, {"error": "bot token unavailable"}
+            return False, {"error": "bot token unavailable", "error_code": "bot_token_missing"}
         if send_via == "interaction_bot" and edit_message_id is not None:
+            edit_action = {
+                "type": "edit_message",
+                "send_via": send_via,
+                "chat_id": target_chat_id,
+                "message_id": edit_message_id,
+                "text": text,
+            }
+            if context:
+                edit_action["context"] = dict(context)
             try:
                 result = await account_bot_service.edit_message(
                     token,
@@ -204,8 +274,23 @@ class InteractionDeliveryExecutor:
                     text,
                     reply_markup=reply_markup,
                 )
+                await record_action(
+                    context,
+                    edit_action,
+                    TRACE_STATUS_OK,
+                    actual_send_via=send_via,
+                    result=result,
+                )
                 return True, result
             except Exception as exc:  # noqa: BLE001
+                await record_action(
+                    context,
+                    edit_action,
+                    TRACE_STATUS_FAILED,
+                    actual_send_via=send_via,
+                    error_code="telegram_api_error",
+                    error=str(exc),
+                )
                 await self.write_log(
                     self.incoming,
                     "warn",
@@ -232,10 +317,75 @@ class InteractionDeliveryExecutor:
                 error=str(exc),
                 **self.log_context(self.incoming),
             )
-            return False, {"error": str(exc)}
+            return False, {"error": str(exc), "error_code": "telegram_api_error"}
         if send_via == "interaction_bot" and edit_message_id is not None:
-            await self.delete_message(edit_message_id, chat_id=target_chat_id, send_via=send_via)
+            await self.delete_message(
+                edit_message_id,
+                chat_id=target_chat_id,
+                send_via=send_via,
+                context=context,
+                record=True,
+            )
         return True, result
+
+    async def edit_message(
+        self,
+        text: str,
+        *,
+        chat_id: int | None = None,
+        message_id: int | None,
+        send_via: str,
+        reply_markup: dict[str, Any] | None = None,
+    ) -> tuple[bool, dict[str, Any]]:
+        target_chat_id = self._target_chat_id(chat_id)
+        if target_chat_id is None:
+            return False, {}
+        if message_id is None:
+            return False, {"error": "message_id missing"}
+        if not self._is_supported_send_via(send_via):
+            return False, {"error": f"unsupported send_via: {send_via}", "error_code": "unsupported_send_via"}
+        if send_via == "userbot_reply":
+            ok, error, result = await self.run_worker_action(
+                self.incoming,
+                payload={
+                    "action_type": "edit_message",
+                    "chat_id": target_chat_id,
+                    "message_id": message_id,
+                    "text": text,
+                },
+            )
+            if not ok:
+                return False, {"error": error, "error_code": _worker_action_error_code(error)}
+            return True, result
+        token = await self._resolve_token(send_via)
+        if not token:
+            await self.write_log(
+                self.incoming,
+                "warn",
+                f"interaction action send_via={send_via} ignored: bot token unavailable",
+                send_via=send_via,
+                **self.log_context(self.incoming),
+            )
+            return False, {"error": "bot token unavailable", "error_code": "bot_token_missing"}
+        try:
+            result = await account_bot_service.edit_message(
+                token,
+                target_chat_id,
+                message_id,
+                text,
+                reply_markup=reply_markup if send_via == "interaction_bot" else None,
+            )
+            return True, result
+        except Exception as exc:  # noqa: BLE001
+            await self.write_log(
+                self.incoming,
+                "warn",
+                f"interaction action edit_message send_via={send_via} failed",
+                send_via=send_via,
+                error=str(exc),
+                **self.log_context(self.incoming),
+            )
+            return False, {"error": str(exc), "error_code": "telegram_api_error"}
 
     async def send_photo(
         self,
@@ -251,7 +401,7 @@ class InteractionDeliveryExecutor:
         if target_chat_id is None:
             return False, {}
         if not self._is_supported_send_via(send_via):
-            return False, {"error": f"unsupported send_via: {send_via}"}
+            return False, {"error": f"unsupported send_via: {send_via}", "error_code": "unsupported_send_via"}
         if send_via == "userbot_reply":
             ok, error, result = await self.run_worker_action(
                 self.incoming,
@@ -265,7 +415,7 @@ class InteractionDeliveryExecutor:
                 },
             )
             if not ok:
-                return False, {"error": error}
+                return False, {"error": error, "error_code": _worker_action_error_code(error)}
             return True, result
         token = await self._resolve_token(send_via)
         if not token:
@@ -276,7 +426,7 @@ class InteractionDeliveryExecutor:
                 send_via=send_via,
                 **self.log_context(self.incoming),
             )
-            return False, {"error": "bot token unavailable"}
+            return False, {"error": "bot token unavailable", "error_code": "bot_token_missing"}
         try:
             result = await account_bot_service.send_photo_bytes(
                 token,
@@ -295,7 +445,7 @@ class InteractionDeliveryExecutor:
                 error=str(exc),
                 **self.log_context(self.incoming),
             )
-            return False, {"error": str(exc)}
+            return False, {"error": str(exc), "error_code": "telegram_api_error"}
         return True, result
 
     async def _apply_send_message(
@@ -341,14 +491,22 @@ class InteractionDeliveryExecutor:
             send_via_options=send_via_options,
             edit_message_id=edit_message_id,
             reply_markup=reply_markup,
+            context=action.get("context") if isinstance(action.get("context"), dict) else None,
         )
         if ok and delete_message_id is not None:
-            await self.delete_message(delete_message_id, chat_id=placeholder_chat_id)
+            await self.delete_message(
+                delete_message_id,
+                chat_id=placeholder_chat_id,
+                context=action.get("context") if isinstance(action.get("context"), dict) else None,
+                record=True,
+            )
         if ok and delete_message_id is None and original_replace_message_id is not None and used_send_via != "interaction_bot":
-            await self.delete_message(original_replace_message_id, chat_id=placeholder_chat_id)
-        if ok and used_send_via == "interaction_bot" and action.get("pin"):
-            msg_id = edit_message_id or delivery_message_id(result)
-            await self._pin_message(msg_id, chat_id=chat_id, send_via=used_send_via)
+            await self.delete_message(
+                original_replace_message_id,
+                chat_id=placeholder_chat_id,
+                context=action.get("context") if isinstance(action.get("context"), dict) else None,
+                record=True,
+            )
         save_key = action_save_message_id_key(action.get("save_message_id_key"))
         if ok and save_key:
             msg_id = delivery_message_id(result)
@@ -360,9 +518,64 @@ class InteractionDeliveryExecutor:
             TRACE_STATUS_OK if ok else TRACE_STATUS_FAILED,
             actual_send_via=used_send_via,
             result=result,
+            error_code=None if ok else _result_error_code(result, "action_failed"),
             error=result.get("error") if isinstance(result, dict) else None,
         )
+        if ok and used_send_via == "interaction_bot" and action.get("pin"):
+            await self._apply_pin_message(
+                {
+                    "type": "pin_message",
+                    "message_id": edit_message_id or delivery_message_id(result),
+                    "chat_id": chat_id,
+                    "send_via": used_send_via,
+                    "context": action.get("context"),
+                }
+            )
         return replace_message_id
+
+    async def _apply_edit_message(
+        self,
+        action: dict[str, Any],
+        *,
+        reply_markup: dict[str, Any] | None,
+    ) -> None:
+        text = str(action.get("text") or "").strip()
+        if not text:
+            await record_action(
+                action.get("context"),
+                action,
+                TRACE_STATUS_FAILED,
+                error_code="empty_message_text",
+                error="edit_message text is empty",
+            )
+            return
+        message_id = _int_or_none(action.get("message_id") or action.get("edit_message_id"))
+        if message_id is None:
+            await record_action(
+                action.get("context"),
+                action,
+                TRACE_STATUS_FAILED,
+                error_code="target_message_id_missing",
+                error="edit_message message_id is missing",
+            )
+            return
+        chat_id = _int_or_none(action.get("chat_id"))
+        ok, result, used_send_via = await self._try_edit_message_options(
+            text,
+            chat_id=chat_id,
+            message_id=message_id,
+            send_via_options=action_send_via_options(action),
+            reply_markup=reply_markup,
+        )
+        await record_action(
+            action.get("context"),
+            action,
+            TRACE_STATUS_OK if ok else TRACE_STATUS_FAILED,
+            actual_send_via=used_send_via,
+            result=result,
+            error_code=None if ok else _result_error_code(result, "action_failed"),
+            error=result.get("error") if isinstance(result, dict) else None,
+        )
 
     async def _apply_send_media(
         self,
@@ -415,7 +628,12 @@ class InteractionDeliveryExecutor:
             send_via_options=action_send_via_options(action),
         )
         if ok and replace_message_id is not None:
-            await self.delete_message(replace_message_id, chat_id=placeholder_chat_id)
+            await self.delete_message(
+                replace_message_id,
+                chat_id=placeholder_chat_id,
+                context=action.get("context") if isinstance(action.get("context"), dict) else None,
+                record=True,
+            )
             replace_message_id = None
         await record_action(
             action.get("context"),
@@ -423,6 +641,7 @@ class InteractionDeliveryExecutor:
             TRACE_STATUS_OK if ok else TRACE_STATUS_FAILED,
             actual_send_via=_used_send_via,
             result=_result,
+            error_code=None if ok else _result_error_code(_result, "action_failed"),
             error=_result.get("error") if isinstance(_result, dict) else None,
         )
         return replace_message_id
@@ -430,7 +649,13 @@ class InteractionDeliveryExecutor:
     async def _answer_callback(self, action: dict[str, Any]) -> None:
         callback_query_id = str(action.get("callback_query_id") or self.incoming.callback_id or "").strip()
         if not callback_query_id:
-            await record_action(action.get("context"), action, TRACE_STATUS_FAILED, error="callback_query_id missing")
+            await record_action(
+                action.get("context"),
+                action,
+                TRACE_STATUS_FAILED,
+                error_code="callback_query_id_missing",
+                error="callback_query_id missing",
+            )
             return
         try:
             await account_bot_service.answer_callback(
@@ -440,14 +665,26 @@ class InteractionDeliveryExecutor:
                 show_alert=bool(action.get("show_alert")),
             )
         except Exception as exc:  # noqa: BLE001
-            await record_action(action.get("context"), action, TRACE_STATUS_FAILED, error=str(exc))
+            await record_action(
+                action.get("context"),
+                action,
+                TRACE_STATUS_FAILED,
+                error_code="telegram_api_error",
+                error=str(exc),
+            )
             raise
         await record_action(action.get("context"), action, TRACE_STATUS_OK, actual_send_via="interaction_bot")
 
     async def _answer_inline_query(self, action: dict[str, Any]) -> None:
         inline_query_id = str(action.get("inline_query_id") or getattr(self.incoming, "inline_query_id", "") or "").strip()
         if not inline_query_id:
-            await record_action(action.get("context"), action, TRACE_STATUS_FAILED, error="inline_query_id missing")
+            await record_action(
+                action.get("context"),
+                action,
+                TRACE_STATUS_FAILED,
+                error_code="inline_query_id_missing",
+                error="inline_query_id missing",
+            )
             return
         results = action.get("results")
         if not isinstance(results, list):
@@ -463,7 +700,13 @@ class InteractionDeliveryExecutor:
                 button=action.get("button") if isinstance(action.get("button"), dict) else None,
             )
         except Exception as exc:  # noqa: BLE001
-            await record_action(action.get("context"), action, TRACE_STATUS_FAILED, error=str(exc))
+            await record_action(
+                action.get("context"),
+                action,
+                TRACE_STATUS_FAILED,
+                error_code="telegram_api_error",
+                error=str(exc),
+            )
             await self.write_log(
                 self.incoming,
                 "warn",
@@ -477,48 +720,76 @@ class InteractionDeliveryExecutor:
     async def _apply_delete_message(self, action: dict[str, Any]) -> None:
         message_id = _int_or_none(action.get("message_id"))
         chat_id = _int_or_none(action.get("chat_id"))
+        target_chat_id = self._target_chat_id(chat_id)
+        if target_chat_id is None or message_id is None:
+            await record_action(
+                action.get("context"),
+                action,
+                TRACE_STATUS_FAILED,
+                error_code="target_message_id_missing",
+                error="delete_message target chat_id or message_id missing",
+            )
+            return
+        last_code = "unsupported_send_via"
+        last_error = "no supported send_via"
         for send_via in action_send_via_options(action):
             if send_via != "interaction_bot":
+                last_code = "unsupported_send_via"
+                last_error = f"delete_message does not support send_via={send_via}"
                 continue
-            if await self.delete_message(message_id, chat_id=chat_id, send_via=send_via):
+            token = await self._resolve_token(send_via)
+            if not token:
+                last_code = "bot_token_missing"
+                last_error = "interaction bot token unavailable"
+                continue
+            try:
+                await account_bot_service.delete_message(token, target_chat_id, message_id)
                 await record_action(action.get("context"), action, TRACE_STATUS_OK, actual_send_via=send_via)
                 return
-        await record_action(action.get("context"), action, TRACE_STATUS_FAILED, error="no supported send_via")
+            except Exception as exc:  # noqa: BLE001
+                last_code = "telegram_api_error"
+                last_error = f"{type(exc).__name__}: {exc}"
+                continue
+        await record_action(action.get("context"), action, TRACE_STATUS_FAILED, error_code=last_code, error=last_error)
 
     async def _apply_pin_message(self, action: dict[str, Any]) -> None:
         message_id = _int_or_none(action.get("message_id"))
         chat_id = _int_or_none(action.get("chat_id"))
+        target_chat_id = self._target_chat_id(chat_id)
+        if target_chat_id is None or message_id is None:
+            await record_action(
+                action.get("context"),
+                action,
+                TRACE_STATUS_FAILED,
+                error_code="target_message_id_missing",
+                error="pin_message target chat_id or message_id missing",
+            )
+            return
+        last_code = "unsupported_send_via"
+        last_error = "no supported send_via"
         for send_via in action_send_via_options(action):
             if send_via != "interaction_bot":
+                last_code = "unsupported_send_via"
+                last_error = f"pin_message does not support send_via={send_via}"
                 continue
-            if await self._pin_message(message_id, chat_id=chat_id, send_via=send_via):
+            token = await self._resolve_token(send_via)
+            if not token:
+                last_code = "bot_token_missing"
+                last_error = "interaction bot token unavailable"
+                continue
+            try:
+                await account_bot_service.call_bot_api(
+                    token,
+                    "pinChatMessage",
+                    {"chat_id": target_chat_id, "message_id": message_id},
+                )
                 await record_action(action.get("context"), action, TRACE_STATUS_OK, actual_send_via=send_via)
                 return
-        await record_action(action.get("context"), action, TRACE_STATUS_FAILED, error="no supported send_via")
-
-    async def _pin_message(self, message_id: int | None, *, chat_id: int | None = None, send_via: str) -> bool:
-        target_chat_id = self._target_chat_id(chat_id)
-        if send_via != "interaction_bot" or message_id is None or target_chat_id is None:
-            return False
-        token = await self._resolve_token(send_via)
-        if not token:
-            return False
-        try:
-            await account_bot_service.call_bot_api(
-                token,
-                "pinChatMessage",
-                {"chat_id": target_chat_id, "message_id": message_id},
-            )
-            return True
-        except Exception:  # noqa: BLE001
-            log.debug(
-                "interaction action pin message failed aid=%s chat_id=%s message_id=%s",
-                self.incoming.account_id,
-                target_chat_id,
-                message_id,
-                exc_info=True,
-            )
-            return False
+            except Exception as exc:  # noqa: BLE001
+                last_code = "telegram_api_error"
+                last_error = f"{type(exc).__name__}: {exc}"
+                continue
+        await record_action(action.get("context"), action, TRACE_STATUS_FAILED, error_code=last_code, error=last_error)
 
     async def _try_send_message_options(
         self,
@@ -529,6 +800,7 @@ class InteractionDeliveryExecutor:
         send_via_options: list[str],
         edit_message_id: int | None,
         reply_markup: dict[str, Any] | None,
+        context: dict[str, Any] | None = None,
     ) -> tuple[bool, dict[str, Any], str]:
         last_result: dict[str, Any] = {}
         for send_via in send_via_options:
@@ -538,6 +810,31 @@ class InteractionDeliveryExecutor:
                 reply_to_message_id=reply_to_message_id,
                 send_via=send_via,
                 edit_message_id=edit_message_id if send_via == "interaction_bot" else None,
+                reply_markup=reply_markup if send_via == "interaction_bot" else None,
+                context=context,
+            )
+            if ok:
+                return True, result, send_via
+            last_result = result
+            await self._log_send_via_fallback(send_via, result)
+        return False, last_result, send_via_options[0] if send_via_options else "interaction_bot"
+
+    async def _try_edit_message_options(
+        self,
+        text: str,
+        *,
+        chat_id: int | None,
+        message_id: int,
+        send_via_options: list[str],
+        reply_markup: dict[str, Any] | None,
+    ) -> tuple[bool, dict[str, Any], str]:
+        last_result: dict[str, Any] = {}
+        for send_via in send_via_options:
+            ok, result = await self.edit_message(
+                text,
+                chat_id=chat_id,
+                message_id=message_id,
+                send_via=send_via,
                 reply_markup=reply_markup if send_via == "interaction_bot" else None,
             )
             if ok:
@@ -634,6 +931,36 @@ def _int_or_none(value: Any) -> int | None:
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+def _result_error_code(result: Any, fallback: str) -> str:
+    if isinstance(result, dict):
+        code = str(result.get("error_code") or "").strip()
+        if code:
+            return code
+        error = str(result.get("error") or "").strip()
+        if error:
+            return _worker_action_error_code(error)
+    return fallback
+
+
+def _worker_action_error_code(error: Any) -> str:
+    text = str(error or "").strip().lower()
+    if not text:
+        return "action_failed"
+    if "message_id" in text or "消息" in text and "id" in text:
+        return "target_message_id_missing"
+    if "chat_id" in text:
+        return "scope_not_matched"
+    if "text" in text or "文本" in text:
+        return "empty_message_text"
+    if "base64" in text or "媒体" in text:
+        return "media_payload_invalid"
+    if "token" in text:
+        return "bot_token_missing"
+    if "unsupported" in text or "不支持" in text:
+        return "unsupported_send_via"
+    return "telegram_api_error"
 
 
 __all__ = [

@@ -3,10 +3,13 @@
 
 from __future__ import annotations
 
+import asyncio
 import importlib
 import json
+import re
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -42,7 +45,10 @@ REQUIRED_EVENT_TYPES = {
     },
     "with_interaction": {"message", "callback_query", "payment_confirmed"},
 }
-DEPRECATED_RISK_TOKENS = ("bbot_notice", "notice_bot", "raw_event")
+DEPRECATED_RISK_TOKENS = ("notice", "bbot_notice", "notice_bot", "raw_event")
+DEPRECATED_RISK_PATTERN = re.compile(
+    r"""(?P<quote>["'])(?:notice|bbot_notice|notice_bot|raw_event)(?P=quote)"""
+)
 DEPRECATED_SEND_VIA = {"notice", "bbot_notice", "notice_bot"}
 EVENT_FIXTURES = {
     "message.json",
@@ -51,6 +57,17 @@ EVENT_FIXTURES = {
     "inline_query.json",
     "chosen_inline_result.json",
     "payment_confirmed.json",
+    "native_raw_telethon_message.json",
+    "deprecated_notice_action.json",
+}
+EXPECTED_EVENT_ACTIONS = {
+    "message.json": {"send_message"},
+    "command.json": {"send_message"},
+    "callback_query.json": {"answer_callback"},
+    "inline_query.json": {"answer_inline_query"},
+    "chosen_inline_result.json": {"result"},
+    "payment_confirmed.json": {"settlement", "send_message"},
+    "native_raw_telethon_message.json": {"send_message"},
 }
 
 
@@ -122,10 +139,12 @@ def _validate_deprecated_risks(name: str, plugin_dir: Path, metadata: dict[str, 
     for path in sorted(plugin_dir.glob("*")):
         if path.suffix not in {".py", ".json", ".md"}:
             continue
+        if path.name == "deprecated_notice_action.json":
+            continue
         text = path.read_text(encoding="utf-8")
-        for token in DEPRECATED_RISK_TOKENS:
-            if token in text:
-                raise AssertionError(f"{name}: {path.name} 仍包含旧风险字段 {token}")
+        match = DEPRECATED_RISK_PATTERN.search(text)
+        if match:
+            raise AssertionError(f"{name}: {path.name} 仍包含旧风险字段 {match.group(0)}")
 
     raw_entries = metadata.get("interaction_entries")
     if isinstance(raw_entries, list):
@@ -151,6 +170,65 @@ def _validate_event_fixtures(name: str, plugin_dir: Path) -> None:
             raise AssertionError(f"{name}: {fixture.name} 缺少 source 信封")
         if "native_raw_meta" not in data:
             raise AssertionError(f"{name}: {fixture.name} 缺少 native_raw_meta")
+        if fixture.name == "native_raw_telethon_message.json":
+            if not data["native_raw_meta"].get("enabled"):
+                raise AssertionError(f"{name}: {fixture.name} 必须演示已声明 native_raw")
+            if not isinstance(data.get("native_raw"), dict):
+                raise AssertionError(f"{name}: {fixture.name} 必须包含 JSON 兼容 native_raw dict")
+        if fixture.name == "deprecated_notice_action.json":
+            expected = data.get("expected_action")
+            if not isinstance(expected, dict):
+                raise AssertionError(f"{name}: {fixture.name} 缺少 expected_action")
+            if expected.get("send_via") not in DEPRECATED_SEND_VIA:
+                raise AssertionError(f"{name}: {fixture.name} 必须使用废弃 send_via 作为探针")
+            if expected.get("reason_code") != "send_channel_deprecated":
+                raise AssertionError(f"{name}: {fixture.name} 必须声明 send_channel_deprecated 期望")
+
+
+async def _run_on_event(plugin: Plugin, payload: dict[str, Any]) -> list[dict[str, Any]]:
+    handler = getattr(plugin, "on_event", None)
+    if not callable(handler):
+        raise AssertionError(f"{plugin.key}: 缺少 on_event 示例入口")
+    ctx = SimpleNamespace(messages=None, log=None)
+    result = await handler(ctx, payload)
+    if not isinstance(result, list):
+        raise AssertionError(f"{plugin.key}: on_event 必须返回 action list")
+    actions = [item for item in result if isinstance(item, dict)]
+    if len(actions) != len(result):
+        raise AssertionError(f"{plugin.key}: on_event 返回值必须全部是 action dict")
+    return actions
+
+
+def _validate_event_demo_runtime(name: str, plugin_dir: Path, plugin: Plugin) -> None:
+    if name != "event_bus_demo":
+        return
+    fixtures_dir = plugin_dir / "fixtures"
+    for fixture_name, expected_actions in EXPECTED_EVENT_ACTIONS.items():
+        payload = json.loads((fixtures_dir / fixture_name).read_text(encoding="utf-8"))
+        actions = asyncio.run(_run_on_event(plugin, payload))
+        action_types = {str(action.get("type") or "").strip() for action in actions}
+        if not expected_actions <= action_types:
+            raise AssertionError(
+                f"{name}: {fixture_name} action 类型不足，期望 {sorted(expected_actions)}，实际 {sorted(action_types)}"
+            )
+        for action in actions:
+            action_type = str(action.get("type") or "").strip()
+            if action_type in {"send_message", "send_photo", "send_file"}:
+                send_via = action.get("send_via")
+                send_via_values = send_via if isinstance(send_via, list) else [send_via]
+                if any(str(item) in DEPRECATED_SEND_VIA for item in send_via_values):
+                    raise AssertionError(f"{name}: {fixture_name} 返回了旧 notice 发送通道")
+            if action_type == "answer_inline_query" and not str(action.get("inline_query_id") or "").strip():
+                raise AssertionError(f"{name}: {fixture_name} 缺少 inline_query_id")
+            if action_type == "answer_callback" and not str(action.get("callback_query_id") or "").strip():
+                raise AssertionError(f"{name}: {fixture_name} 缺少 callback_query_id")
+
+    deprecated_payload = json.loads((fixtures_dir / "deprecated_notice_action.json").read_text(encoding="utf-8"))
+    expected = deprecated_payload.get("expected_action") or {}
+    if expected.get("send_via") not in DEPRECATED_SEND_VIA:
+        raise AssertionError(f"{name}: deprecated_notice_action.json 未覆盖旧 notice 通道")
+    if expected.get("reason_code") != "send_channel_deprecated":
+        raise AssertionError(f"{name}: deprecated_notice_action.json 未覆盖 send_channel_deprecated")
 
 
 def _validate_example(name: str) -> None:
@@ -193,6 +271,7 @@ def _validate_example(name: str) -> None:
     _validate_event_contract(name, metadata, manifest)
     _validate_deprecated_risks(name, plugin_dir, metadata)
     _validate_event_fixtures(name, plugin_dir)
+    _validate_event_demo_runtime(name, plugin_dir, instance)
 
     for field in ("permissions", "allowed_hosts"):
         expected = list(metadata.get(field) or [])

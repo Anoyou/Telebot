@@ -57,9 +57,9 @@ class BufferedMessageOps:
         reply_markup: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         action: dict[str, Any] = {
-            "type": "send_message",
+            "type": "edit_message",
             "chat_id": chat_id,
-            "edit_message_id": message_id,
+            "message_id": message_id,
             "text": text,
         }
         _apply_channel(action, channel)

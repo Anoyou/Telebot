@@ -12,6 +12,7 @@ import asyncio
 import json
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
@@ -964,6 +965,255 @@ async def test_owner_only_false_incoming_command_text_does_not_dispatch_command(
         loader_mod._STATES.pop(7, None)
         _REGISTRY.pop("_test_public_command", None)
         unregister_all_plugin_commands(owner_plugin_key="_test_public_command")
+
+
+@pytest.mark.asyncio
+async def test_userbot_event_bus_dispatch_invokes_on_event_and_records_action(monkeypatch) -> None:
+    from app.worker.plugins.base import _REGISTRY, register
+
+    event_calls: list[str] = []
+    legacy_calls: list[str] = []
+
+    @register
+    class _TracePlugin(Plugin):
+        key = "_test_trace_dispatch"
+        display_name = "Trace 分发测试"
+        message_channels = {"incoming"}
+        owner_only = False
+
+        async def on_message(self, ctx: PluginContext, event: Any) -> None:
+            legacy_calls.append(str(getattr(event, "raw_text", "")))
+
+        async def on_event(self, ctx: PluginContext, payload: dict[str, Any]) -> list[dict[str, Any]]:
+            event_calls.append(str((payload.get("message") or {}).get("text") or ""))
+            await ctx.messages.send(channel="userbot_reply", text="event ok")
+            return []
+
+    _TracePlugin._manifest = Manifest(
+        key="_test_trace_dispatch",
+        display_name="Trace 分发测试",
+        event_subscriptions=[
+            {
+                "source": ["userbot"],
+                "events": ["message"],
+                "scope": "all_allowed_chats",
+                "entry_key": "main",
+            }
+        ],
+    )
+
+    class _Event:
+        raw_text = "hello trace"
+        text = "hello trace"
+        chat_id = -1001
+        sender_id = 42
+        id = 88
+        is_private = False
+        is_group = True
+        is_channel = False
+
+        async def get_chat(self):
+            return None
+
+    fake_db = _FakeDB(
+        accounts={9: _FakeAcc(id=9)},
+        humanize={9: None},
+        afs=[_FakeAF(account_id=9, feature_key="_test_trace_dispatch", enabled=True, config={})],
+        rules=[],
+    )
+    trace = SimpleNamespace(trace_id="evt_loader_trace")
+    monkeypatch.setattr(loader_mod, "AsyncSessionLocal", lambda: _fake_session_factory(fake_db))
+    monkeypatch.setattr(loader_mod, "_load_log_incoming_messages_setting", AsyncMock(return_value=False))
+    monkeypatch.setattr(loader_mod, "_load_event_framework_flags", AsyncMock(return_value={
+        "trace_enabled": True,
+        "event_bus_delivery_enabled": True,
+    }))
+    monkeypatch.setattr(loader_mod, "start_trace", AsyncMock(return_value=trace))
+    record_span = AsyncMock()
+    record_action = AsyncMock()
+    finish_trace = AsyncMock()
+    monkeypatch.setattr(loader_mod, "record_span", record_span)
+    monkeypatch.setattr(loader_mod, "record_action", record_action)
+    monkeypatch.setattr(loader_mod, "finish_trace", finish_trace)
+    monkeypatch.setattr(loader_mod, "update_plugin_runtime_status", AsyncMock())
+
+    captured: list[Any] = []
+
+    def _on(_filter):
+        def _wrap(fn):
+            captured.append(fn)
+            return fn
+
+        return _wrap
+
+    client = MagicMock()
+    client.on = _on
+    client.send_message = AsyncMock(return_value=SimpleNamespace(id=901))
+    paused = asyncio.Event()
+    paused.set()
+
+    try:
+        await load_plugins_for_account(client, account_id=9, paused=paused, redis=_FakeRedis())
+        incoming_dispatch = captured[-1]
+        await incoming_dispatch(_Event())
+
+        assert event_calls == ["hello trace"]
+        assert legacy_calls == []
+        phases = [call.args[1] for call in record_span.await_args_list]
+        assert "receive" in phases
+        assert "subscription_match" in phases
+        assert "plugin_invoke" in phases
+        assert "plugin_return" in phases
+        record_action.assert_awaited()
+        assert record_action.await_args.kwargs["actual_send_via"] == "userbot_reply"
+        finish_trace.assert_awaited_once()
+        assert finish_trace.await_args.args[:2] == (trace, loader_mod.TRACE_STATUS_OK)
+    finally:
+        loader_mod._STATES.pop(9, None)
+        _REGISTRY.pop("_test_trace_dispatch", None)
+
+
+@pytest.mark.asyncio
+async def test_userbot_event_bus_ctx_client_send_message_records_action(monkeypatch) -> None:
+    from app.worker.plugins.base import _REGISTRY, register
+
+    @register
+    class _ClientTracePlugin(Plugin):
+        key = "_test_client_trace_dispatch"
+        display_name = "Client Trace 分发测试"
+        message_channels = {"incoming"}
+        owner_only = False
+
+        async def on_event(self, ctx: PluginContext, payload: dict[str, Any]) -> list[dict[str, Any]]:
+            await ctx.client.send_message(  # type: ignore[union-attr]
+                chat_id=(payload.get("message") or {}).get("chat_id"),
+                message="client ok",
+            )
+            return []
+
+    _ClientTracePlugin._manifest = Manifest(
+        key="_test_client_trace_dispatch",
+        display_name="Client Trace 分发测试",
+        event_subscriptions=[
+            {
+                "source": ["userbot"],
+                "events": ["message"],
+                "scope": "all_allowed_chats",
+                "entry_key": "main",
+            }
+        ],
+    )
+
+    class _Event:
+        raw_text = "hello client trace"
+        text = "hello client trace"
+        chat_id = -1001
+        sender_id = 42
+        id = 89
+        is_private = False
+        is_group = True
+        is_channel = False
+
+        async def get_chat(self):
+            return None
+
+    fake_db = _FakeDB(
+        accounts={10: _FakeAcc(id=10)},
+        humanize={10: None},
+        afs=[_FakeAF(account_id=10, feature_key="_test_client_trace_dispatch", enabled=True, config={})],
+        rules=[],
+    )
+    trace = SimpleNamespace(trace_id="evt_loader_client_trace")
+    monkeypatch.setattr(loader_mod, "AsyncSessionLocal", lambda: _fake_session_factory(fake_db))
+    monkeypatch.setattr(loader_mod, "_load_log_incoming_messages_setting", AsyncMock(return_value=False))
+    monkeypatch.setattr(loader_mod, "_load_event_framework_flags", AsyncMock(return_value={
+        "trace_enabled": True,
+        "event_bus_delivery_enabled": True,
+    }))
+    monkeypatch.setattr(loader_mod, "start_trace", AsyncMock(return_value=trace))
+    monkeypatch.setattr(loader_mod, "record_span", AsyncMock())
+    record_action = AsyncMock()
+    monkeypatch.setattr(loader_mod, "record_action", record_action)
+    monkeypatch.setattr(loader_mod, "finish_trace", AsyncMock())
+    monkeypatch.setattr(loader_mod, "update_plugin_runtime_status", AsyncMock())
+
+    captured: list[Any] = []
+
+    def _on(_filter):
+        def _wrap(fn):
+            captured.append(fn)
+            return fn
+
+        return _wrap
+
+    client = MagicMock()
+    client.on = _on
+    client.send_message = AsyncMock(return_value=SimpleNamespace(id=902, chat_id=-1001))
+    paused = asyncio.Event()
+    paused.set()
+
+    try:
+        await load_plugins_for_account(client, account_id=10, paused=paused, redis=_FakeRedis())
+        incoming_dispatch = captured[-1]
+        await incoming_dispatch(_Event())
+
+        client.send_message.assert_awaited_once_with(-1001, "client ok")
+        record_action.assert_awaited_once()
+        assert record_action.await_args.args[1]["type"] == "send_message"
+        assert record_action.await_args.args[2] == loader_mod.TRACE_STATUS_OK
+        assert record_action.await_args.kwargs["actual_send_via"] == "userbot_reply"
+    finally:
+        loader_mod._STATES.pop(10, None)
+        _REGISTRY.pop("_test_client_trace_dispatch", None)
+
+
+def test_userbot_native_raw_boolean_true_is_not_explicit_capability() -> None:
+    class _Plugin(Plugin):
+        key = "_test_native_raw_bool"
+
+    _Plugin._manifest = Manifest(
+        key="_test_native_raw_bool",
+        display_name="Native Raw Bool",
+        capabilities={"telegram_native_raw": True},
+    )
+
+    assert loader_mod._plugin_declares_native_raw(_Plugin(), source="userbot") is False
+
+
+def test_userbot_native_raw_requires_enabled_object_and_source() -> None:
+    class _Plugin(Plugin):
+        key = "_test_native_raw_object"
+
+    _Plugin._manifest = Manifest(
+        key="_test_native_raw_object",
+        display_name="Native Raw Object",
+        capabilities={"telegram_native_raw": {"enabled": True, "sources": ["interaction_bot"]}},
+    )
+
+    assert loader_mod._plugin_declares_native_raw(_Plugin(), source="userbot") is False
+    assert loader_mod._plugin_declares_native_raw(_Plugin(), source="interaction_bot") is True
+
+
+@pytest.mark.asyncio
+async def test_plugin_command_ctx_client_send_message_records_action(monkeypatch) -> None:
+    record_action = AsyncMock()
+    monkeypatch.setattr(loader_mod, "record_action", record_action)
+    raw_client = MagicMock()
+    raw_client.send_message = AsyncMock(return_value=SimpleNamespace(id=903, chat_id=-1002))
+    ctx = PluginContext(account_id=11, feature_key="_test_command_trace", client=raw_client)
+
+    async def _handler(client, event, args, account_id, ctx):  # noqa: ANN001
+        await client.send_message(12345, "command client ok")
+
+    wrapped = loader_mod._wrap_cmd(_handler, ctx)
+    event = SimpleNamespace(trace_id="evt_command_client_trace", chat_id=12345, message=SimpleNamespace(id=7))
+
+    await wrapped(raw_client, event, [], 11)
+
+    raw_client.send_message.assert_awaited_once_with(12345, "command client ok")
+    record_action.assert_awaited_once()
+    assert record_action.await_args.args[1]["type"] == "send_message"
+    assert record_action.await_args.kwargs["actual_send_via"] == "userbot_reply"
 
 
 @pytest.mark.asyncio

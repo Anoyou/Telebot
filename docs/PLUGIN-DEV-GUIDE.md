@@ -19,7 +19,7 @@
 ## 读法
 
 1. 先看 [概览](./PLUGIN-OVERVIEW.md) 理清插件、远程插件和运行时边界。
-2. 再看 [API 参考](./PLUGIN-API-REFERENCE.md) 找 `Plugin`、`PluginContext`、`Manifest`、指令、消息、Conversation、前端集成和完整示例。
+2. 新 Telegram 交互插件先看 [概览](./PLUGIN-OVERVIEW.md) 与 [速查表](./PLUGIN-CHEATSHEET.md) 的 Event Bus + MessageOps 最小模板，再看 [API 参考](./PLUGIN-API-REFERENCE.md) 查 `Plugin`、`PluginContext`、`Manifest`、标准事件信封、MessageOps、Trace 排障；指令、消息、Conversation 和旧 hook 示例主要用于管理员命令兼容或迁移。
 3. 需要外部网络能力时看 [HTTP facade](./PLUGIN-HTTP.md)，需要 AI 能力时看 [AI facade](./PLUGIN-AI.md)。
 4. 需要权限、前缀、消息发送、并发和清理约束时看 [安全边界](./PLUGIN-SAFETY.md)。
 5. 需要 Git 安装、`plugin.json`、Registry、发布检查时看 [远程插件](./PLUGIN-REMOTE.md)。

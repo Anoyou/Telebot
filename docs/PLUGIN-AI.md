@@ -2,23 +2,42 @@
 
 `ctx.ai` 已作为第三方插件可用的受控文本 AI facade。插件需要在 `plugin.json` 和 `manifest.py` 中声明 `permissions=["ai_text"]`，运行时才会注入 `ctx.ai`。
 
-## 推荐写法
+## Event Bus 主路径写法
 
 ```python
-if ctx.ai is None:
-    await event.edit("本插件需要 ai_text 权限")
-    return
+async def on_event(self, ctx, payload):
+    message = payload["message"]
+    chat = payload["chat"]
+    chat_id = message.get("chat_id") or chat["id"]
+    reply_to = message.get("message_id")
 
-providers = await ctx.ai.list_providers()
-result = await ctx.ai.complete(
-    system="你是一个简洁助手。",
-    user="总结这段内容",
-    provider_tag="chat",
-    max_tokens=512,
-    timeout_seconds=30,
-)
-await event.edit(result.text)
+    if ctx.ai is None:
+        return [{
+            "type": "send_message",
+            "send_via": ["interaction_bot", "userbot_reply"],
+            "chat_id": chat_id,
+            "reply_to_message_id": reply_to,
+            "text": "本插件需要 ai_text 权限",
+        }]
+
+    providers = await ctx.ai.list_providers()
+    result = await ctx.ai.complete(
+        system="你是一个简洁助手。",
+        user=message.get("text") or "总结这段内容",
+        provider_tag="chat",
+        max_tokens=512,
+        timeout_seconds=30,
+    )
+    return [{
+        "type": "send_message",
+        "send_via": ["interaction_bot", "userbot_reply"],
+        "chat_id": chat_id,
+        "reply_to_message_id": reply_to,
+        "text": result.text,
+    }]
 ```
+
+也可以在交互入口中调用 `ctx.messages.send(...)` 缓存同等标准动作。最终版插件不应把 `event.edit(...)` 作为公共群互动或高频交互的主输出路径；命令式 `event.edit(...)` 只适合管理员命令兼容示例。
 
 ## Provider 选择
 

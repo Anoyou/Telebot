@@ -31,6 +31,17 @@ from ..db.models.feature import FEATURE_SCHEDULER, AccountFeature
 from ..db.models.system import SystemSetting
 from ..redis_client import get_redis
 from ..services import interaction_bot_service
+from ..services.event_bus import dispatch_event, normalize_event_subscription, normalize_userbot_event
+from ..services.event_trace import (
+    TRACE_STATUS_FAILED,
+    TRACE_STATUS_OK,
+    TRACE_STATUS_SKIPPED,
+    finish_trace,
+    record_action,
+    record_span,
+    start_trace,
+    trace_log_context,
+)
 from ..settings import settings as app_settings
 from .command import (
     CommandContext,
@@ -77,6 +88,108 @@ _CONFIG_RECONCILE_SECONDS = max(30, int(app_settings.worker_reconcile_seconds or
 _ACCOUNT_BOT_AUTO_AWARD_DEDUPE_PREFIX = "account_bot:auto_award:"
 _ACCOUNT_BOT_AUTO_AWARD_DEDUPE_TTL_SECONDS = 86400
 _ACCOUNT_BOT_AUTO_AWARD_MODULE_KEYS = {"game24", "math10", "dice_grid_hunt", "guess_number", "poetry_blank"}
+_ACCOUNT_BOT_AUTO_AWARD_TRACE_FLAGS_CACHE: tuple[float, bool] = (0.0, True)
+
+
+async def _account_bot_auto_award_trace_enabled() -> bool:
+    """Read the Trace switch without importing account_bot_runtime into worker."""
+
+    global _ACCOUNT_BOT_AUTO_AWARD_TRACE_FLAGS_CACHE
+    cached_at, cached = _ACCOUNT_BOT_AUTO_AWARD_TRACE_FLAGS_CACHE
+    now = asyncio.get_running_loop().time()
+    if now - cached_at < 30:
+        return cached
+    try:
+        async with AsyncSessionLocal() as db:
+            row = await db.get(SystemSetting, "log_retention")
+        raw = row.value if row is not None and isinstance(row.value, dict) else {}
+        enabled = bool(raw.get("trace_enabled", True))
+    except Exception:  # noqa: BLE001
+        log.debug("load auto award trace flag failed, using default", exc_info=True)
+        enabled = True
+    _ACCOUNT_BOT_AUTO_AWARD_TRACE_FLAGS_CACHE = (now, enabled)
+    return enabled
+
+
+def _account_bot_auto_award_event_payload(
+    account_id: int,
+    event: Any,
+    *,
+    chat_id: int | None,
+    message_id: int | None,
+    reply_to_msg_id: int,
+    prize: int,
+    sender_id: int | None,
+    sender_username: str | None,
+) -> dict[str, Any]:
+    payload = normalize_userbot_event(account_id, event)
+    source = payload.get("source") if isinstance(payload.get("source"), dict) else {}
+    source.update(
+        {
+            "type": "payment_confirmed",
+            "channel": "userbot",
+            "account_id": account_id,
+            "chat_id": chat_id,
+            "message_id": message_id,
+        }
+    )
+    payload["source"] = source
+    payload["event_type"] = "payment_confirmed"
+    message = payload.get("message") if isinstance(payload.get("message"), dict) else {}
+    message.update({"chat_id": chat_id, "message_id": message_id, "reply_to_message_id": reply_to_msg_id})
+    payload["message"] = message
+    sender = payload.get("sender") if isinstance(payload.get("sender"), dict) else {}
+    sender.update({"user_id": sender_id, "username": sender_username})
+    payload["sender"] = sender
+    payload["source_actor"] = dict(sender)
+    payload["actor"] = {"user_id": None, "display_name": None}
+    payload["player"] = dict(payload["actor"])
+    payload["payment"] = {
+        "amount": prize,
+        "source": "account_bot_auto_award",
+        "source_message_id": message_id,
+        "reply_to_message_id": reply_to_msg_id,
+        "notice_sender_user_id": sender_id,
+    }
+    payload["reply_to"] = {"message_id": reply_to_msg_id}
+    payload["trigger"] = {
+        "source": "account_bot_auto_award",
+        "rule_id": "account_bot_auto_award",
+        "notice_message_id": message_id,
+        "winner_message_id": reply_to_msg_id,
+        "prize": prize,
+    }
+    return payload
+
+
+def _account_bot_auto_award_event_bus_decision(
+    event_payload: dict[str, Any],
+    *,
+    chat_ids: list[int],
+    sender_id: int | None,
+) -> Any | None:
+    subscription = normalize_event_subscription(
+        {
+            "source": ["userbot"],
+            "events": ["payment_confirmed"],
+            "scope": "all_allowed_chats",
+            "entry_key": "auto_award",
+            "dispatch_mode": "account_bot_auto_award",
+            "filters": {"source": "account_bot_auto_award"},
+        },
+        plugin_key="account_bot_auto_award",
+        entry_key="auto_award",
+    )
+    result = dispatch_event(
+        event_payload,
+        [subscription],
+        {
+            "allowed_chat_ids": chat_ids,
+            "known_user_ids": [sender_id] if sender_id is not None else [],
+            "trigger": {"rule_id": "account_bot_auto_award"},
+        },
+    )
+    return result.decisions[0] if result.decisions else None
 
 
 def _should_defer_interaction_entry_error_log(plugin_key: str, error: str | None) -> bool:
@@ -155,6 +268,20 @@ async def _run_interaction_userbot_action(client: Any, payload: dict[str, Any]) 
         msg = await client.send_message(chat_id, text, reply_to=reply_to, parse_mode="html")
         return {
             "message_id": int(getattr(msg, "id", 0) or 0) or None,
+            "chat_id": chat_id,
+        }
+
+    if action_type == "edit_message":
+        text = str(payload.get("text") or "").strip()
+        if not text:
+            raise ValueError("缺少 text")
+        try:
+            message_id = int(payload["message_id"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValueError("缺少 message_id") from exc
+        msg = await client.edit_message(chat_id, message_id, text, parse_mode="html")
+        return {
+            "message_id": int(getattr(msg, "id", 0) or message_id) or None,
             "chat_id": chat_id,
         }
 
@@ -273,7 +400,8 @@ async def _try_account_bot_auto_award(client: Any, redis: Any, account_id: int, 
     cfg_chat_ids = cfg.get("chat_ids")
     if not isinstance(cfg_chat_ids, list):
         cfg_chat_ids = [cfg["chat_id"]] if cfg.get("chat_id") is not None else []
-    if int(chat_id or 0) not in {int(item) for item in cfg_chat_ids}:
+    configured_chat_ids = [int(item) for item in cfg_chat_ids]
+    if int(chat_id or 0) not in set(configured_chat_ids):
         return False
 
     sender = getattr(event, "sender", None)
@@ -330,11 +458,98 @@ async def _try_account_bot_auto_award(client: Any, redis: Any, account_id: int, 
         )
         return True
 
-    await client.send_message(
-        entity=chat_id,
-        message=f"+{prize}",
-        reply_to=reply_to_msg_id,
+    event_payload = _account_bot_auto_award_event_payload(
+        account_id,
+        event,
+        chat_id=chat_id,
+        message_id=message_id,
+        reply_to_msg_id=reply_to_msg_id,
+        prize=prize,
+        sender_id=sender_id,
+        sender_username=sender_username,
     )
+    decision = _account_bot_auto_award_event_bus_decision(
+        event_payload,
+        chat_ids=configured_chat_ids,
+        sender_id=sender_id,
+    )
+    trace = None
+    trace_enabled = await _account_bot_auto_award_trace_enabled()
+    if trace_enabled:
+        trace = await start_trace(event_payload)
+        await record_span(
+            trace,
+            "receive",
+            TRACE_STATUS_OK,
+            component="account_bot_auto_award",
+            chat_id=chat_id,
+            notice_message_id=message_id,
+            winner_message_id=reply_to_msg_id,
+            prize=prize,
+        )
+        await record_span(
+            trace,
+            "subscription_match",
+            TRACE_STATUS_OK if decision is not None and decision.matched else TRACE_STATUS_SKIPPED,
+            component="account_bot_auto_award",
+            plugin_key="account_bot_auto_award",
+            entry_key="auto_award",
+            reason_code=getattr(decision, "reason_code", None) or "subscription_not_matched",
+            message=getattr(decision, "reason_message", None) or "自动发奖事件未命中 Event Bus decision。",
+            dispatch_mode=getattr(decision, "dispatch_mode", None) or "account_bot_auto_award",
+            scope=getattr(decision, "scope", None) or "all_allowed_chats",
+            filters=dict(getattr(decision, "filters", None) or {}),
+        )
+    if decision is None or not decision.matched:
+        await finish_trace(trace, TRACE_STATUS_SKIPPED)
+        return True
+    action = {
+        "type": "send_message",
+        "send_via": "userbot_reply",
+        "chat_id": chat_id,
+        "reply_to_message_id": reply_to_msg_id,
+        "text": f"+{prize}",
+    }
+    try:
+        sent = await client.send_message(
+            entity=chat_id,
+            message=f"+{prize}",
+            reply_to=reply_to_msg_id,
+        )
+        await record_action(
+            trace_log_context(trace, plugin_key="account_bot_auto_award"),
+            action,
+            TRACE_STATUS_OK,
+            actual_send_via="userbot_reply",
+            result={"message_id": getattr(sent, "id", None) or getattr(sent, "message_id", None)},
+        )
+        await record_span(
+            trace,
+            "delivery",
+            TRACE_STATUS_OK,
+            component="account_bot_auto_award",
+            actual_send_via="userbot_reply",
+        )
+        await finish_trace(trace, TRACE_STATUS_OK)
+    except Exception as exc:  # noqa: BLE001
+        await record_action(
+            trace_log_context(trace, plugin_key="account_bot_auto_award"),
+            action,
+            TRACE_STATUS_FAILED,
+            actual_send_via="userbot_reply",
+            error_code="telegram_api_error",
+            error=f"{type(exc).__name__}: {exc}",
+        )
+        await record_span(
+            trace,
+            "delivery",
+            TRACE_STATUS_FAILED,
+            component="account_bot_auto_award",
+            reason_code="telegram_api_error",
+            error=f"{type(exc).__name__}: {exc}",
+        )
+        await finish_trace(trace, TRACE_STATUS_FAILED)
+        raise
     await _log(
         redis,
         account_id,
@@ -345,6 +560,7 @@ async def _try_account_bot_auto_award(client: Any, redis: Any, account_id: int, 
         winner_msg_id=reply_to_msg_id,
         notice_msg_id=message_id,
         prize=prize,
+        **trace_log_context(trace, plugin_key="account_bot_auto_award"),
     )
     return True
 

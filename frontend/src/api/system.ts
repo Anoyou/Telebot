@@ -106,6 +106,7 @@ export interface TraceQuery {
   plugin_key?: string;
   status?: string;
   trace_id?: string;
+  reason_code?: string;
   keyword?: string;
   since?: string;
   until?: string;
@@ -163,6 +164,8 @@ export interface ActionTraceQuery {
   plugin_key?: string;
   action_type?: string;
   status?: string;
+  reason_code?: string;
+  error_code?: string;
   limit?: number;
 }
 
@@ -176,7 +179,7 @@ export async function listEventActions(
 }
 
 export async function listCommandTraces(
-  q: Pick<TraceQuery, "account_id" | "keyword" | "since" | "until" | "limit"> = {},
+  q: Pick<TraceQuery, "account_id" | "keyword" | "since" | "until" | "reason_code" | "limit"> = {},
 ): Promise<EventTraceSummary[]> {
   const { data } = await api.get<EventTraceSummary[]>("/api/logs/trace/commands", {
     params: q,

@@ -10,6 +10,7 @@ import pytest
 
 from app.services.llm_client import LLMResult
 from app.services.llm_dto import LLMProviderDTO
+from app.worker import scheduler_runtime
 from app.worker.command import CommandContext, set_command_context
 from app.worker.scheduler_runtime import PlatformScheduler, SchedulerRuleExecutor, _croniter_next
 
@@ -235,7 +236,114 @@ async def test_action_call_llm_uses_shared_service_invoke(monkeypatch) -> None:
     assert system == "sys"
     assert user == "hello"
     assert invoke_mock.await_args.kwargs["triggered_by_account_id"] == 123
-    send_mock.assert_awaited_once_with(ctx, 123, "done")
+    send_mock.assert_awaited_once()
+    assert send_mock.await_args.args[:3] == (ctx, 123, "done")
+    assert send_mock.await_args.kwargs["action"]["type"] == "call_llm"
+
+
+@pytest.mark.asyncio
+async def test_scheduler_send_message_records_trace_action(monkeypatch) -> None:
+    executor = SchedulerRuleExecutor()
+    trace = "evt_scheduler_ok"
+    start_trace = AsyncMock(return_value=trace)
+    finish_trace = AsyncMock()
+    record_action = AsyncMock()
+    monkeypatch.setattr(scheduler_runtime, "start_trace", start_trace)
+    monkeypatch.setattr(scheduler_runtime, "finish_trace", finish_trace)
+    monkeypatch.setattr(scheduler_runtime, "record_action", record_action)
+    ctx = SimpleNamespace(
+        account_id=42,
+        feature_key="scheduler",
+        engine=SimpleNamespace(acquire=AsyncMock(return_value=SimpleNamespace(allowed=True, wait_seconds=0))),
+        client=SimpleNamespace(send_message=AsyncMock(return_value=SimpleNamespace(id=88))),
+        log=AsyncMock(),
+    )
+
+    ok = await executor.fire(ctx, 9, {"action": {"type": "send_message", "target_chat_id": 123, "text": "hello"}})
+
+    assert ok is True
+    start_trace.assert_awaited_once()
+    record_action.assert_awaited_once()
+    assert record_action.await_args.args[0]["trace_id"] == "evt_scheduler_ok"
+    assert record_action.await_args.args[1]["type"] == "send_message"
+    assert record_action.await_args.args[2] == scheduler_runtime.TRACE_STATUS_OK
+    finish_trace.assert_awaited_once_with(trace, scheduler_runtime.TRACE_STATUS_OK, rule_id=9, action_type="send_message")
+
+
+@pytest.mark.asyncio
+async def test_scheduler_send_message_failure_records_failed_action(monkeypatch) -> None:
+    executor = SchedulerRuleExecutor()
+    trace = "evt_scheduler_fail"
+    record_action = AsyncMock()
+    monkeypatch.setattr(scheduler_runtime, "start_trace", AsyncMock(return_value=trace))
+    monkeypatch.setattr(scheduler_runtime, "finish_trace", AsyncMock())
+    monkeypatch.setattr(scheduler_runtime, "record_action", record_action)
+    ctx = SimpleNamespace(
+        account_id=42,
+        feature_key="scheduler",
+        engine=SimpleNamespace(acquire=AsyncMock(return_value=SimpleNamespace(allowed=True, wait_seconds=0))),
+        client=SimpleNamespace(send_message=AsyncMock(side_effect=RuntimeError("telegram down"))),
+        log=AsyncMock(),
+    )
+    cfg = {"action": {"type": "send_message", "target_chat_id": 123, "text": "hello"}}
+
+    ok = await executor.fire(ctx, 9, cfg)
+
+    assert ok is False
+    assert "telegram down" in cfg["last_error"]
+    record_action.assert_awaited_once()
+    assert record_action.await_args.args[2] == scheduler_runtime.TRACE_STATUS_FAILED
+    assert record_action.await_args.kwargs["error_code"] == "telegram_api_error"
+
+
+@pytest.mark.asyncio
+async def test_scheduler_ratelimit_drop_records_skipped_action(monkeypatch) -> None:
+    executor = SchedulerRuleExecutor()
+    trace = "evt_scheduler_skip"
+    record_action = AsyncMock()
+    monkeypatch.setattr(scheduler_runtime, "start_trace", AsyncMock(return_value=trace))
+    monkeypatch.setattr(scheduler_runtime, "finish_trace", AsyncMock())
+    monkeypatch.setattr(scheduler_runtime, "record_action", record_action)
+    ctx = SimpleNamespace(
+        account_id=42,
+        feature_key="scheduler",
+        engine=SimpleNamespace(
+            acquire=AsyncMock(return_value=SimpleNamespace(allowed=False, wait_seconds=0, outcome="limited"))
+        ),
+        client=SimpleNamespace(send_message=AsyncMock()),
+        log=AsyncMock(),
+    )
+
+    ok = await executor.fire(ctx, 9, {"action": {"type": "send_message", "target_chat_id": 123, "text": "hello"}})
+
+    assert ok is True
+    ctx.client.send_message.assert_not_awaited()
+    record_action.assert_awaited_once()
+    assert record_action.await_args.args[2] == scheduler_runtime.TRACE_STATUS_SKIPPED
+    assert record_action.await_args.kwargs["error_code"] == "rate_limited"
+
+
+@pytest.mark.asyncio
+async def test_scheduler_delete_failure_records_failed_action(monkeypatch) -> None:
+    executor = SchedulerRuleExecutor()
+    record_action = AsyncMock()
+    monkeypatch.setattr(scheduler_runtime, "record_action", record_action)
+    monkeypatch.setattr(scheduler_runtime.asyncio, "sleep", AsyncMock())
+    ctx = SimpleNamespace(
+        account_id=42,
+        feature_key="scheduler",
+        client=SimpleNamespace(delete_messages=AsyncMock(side_effect=RuntimeError("forbidden"))),
+        log=AsyncMock(),
+    )
+    msg = SimpleNamespace(peer_id=123, id=88)
+
+    await executor.delete_message_after(ctx, msg, 1, action_context={"trace_id": "evt_scheduler_delete"})
+
+    record_action.assert_awaited_once()
+    assert record_action.await_args.args[1]["context"]["trace_id"] == "evt_scheduler_delete"
+    assert record_action.await_args.args[1]["type"] == "delete_message"
+    assert record_action.await_args.args[2] == scheduler_runtime.TRACE_STATUS_FAILED
+    assert record_action.await_args.kwargs["error_code"] == "telegram_api_error"
 
 
 @pytest.mark.asyncio

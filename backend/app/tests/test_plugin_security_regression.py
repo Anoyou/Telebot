@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -539,27 +540,38 @@ class TestSandboxClientSecurity:
         """installed 插件不能通过 event helper 绕过 SandboxClient 权限。"""
         from app.worker.plugins.sandbox import SandboxClient, SandboxEvent
 
-        calls: list[str] = []
+        calls: list[tuple[str, tuple, dict]] = []
 
         class RawEvent:
             raw_text = "hello"
             chat_id = 123
+            id = 777
 
             def __init__(self) -> None:
-                self.message = SimpleNamespace(reply=self.reply, text="hello")
+                self.message = SimpleNamespace(reply=self.reply, text="hello", chat_id=123, id=999)
 
             async def reply(self, *_args, **_kwargs):
-                calls.append("reply")
+                calls.append(("raw_reply", _args, _kwargs))
 
             async def edit(self, *_args, **_kwargs):
-                calls.append("edit")
+                calls.append(("raw_edit", _args, _kwargs))
 
             async def delete(self):
-                calls.append("delete")
+                calls.append(("raw_delete", (), {}))
 
             async def get_reply_message(self):
-                calls.append("get_reply_message")
+                calls.append(("get_reply_message", (), {}))
                 return SimpleNamespace(raw_text="reply")
+
+        class FakeClient:
+            async def send_message(self, *args, **kwargs):
+                calls.append(("send_message", args, kwargs))
+
+            async def edit_message(self, *args, **kwargs):
+                calls.append(("edit_message", args, kwargs))
+
+            async def delete_messages(self, *args, **kwargs):
+                calls.append(("delete_messages", args, kwargs))
 
         raw_event = RawEvent()
         denied = SandboxEvent(raw_event, SandboxClient(SimpleNamespace(), [], plugin_key="demo"), plugin_key="demo")
@@ -581,7 +593,7 @@ class TestSandboxClientSecurity:
         allowed = SandboxEvent(
             raw_event,
             SandboxClient(
-                SimpleNamespace(),
+                FakeClient(),
                 ["send_message", "edit_message", "delete_message", "read_chat"],
                 plugin_key="demo",
             ),
@@ -593,9 +605,48 @@ class TestSandboxClientSecurity:
         replied = await allowed.get_reply_message()
         await allowed.message.reply("x")
 
-        assert calls == ["reply", "edit", "delete", "get_reply_message", "reply"]
+        assert calls == [
+            ("send_message", (123, "x"), {"reply_to": 777}),
+            ("edit_message", (123, 777, "x"), {}),
+            ("delete_messages", (123, 777), {}),
+            ("get_reply_message", (), {}),
+            ("send_message", (123, "x"), {"reply_to": 999}),
+        ]
         with pytest.raises(PermissionError):
             _ = replied.__dict__
+
+    @pytest.mark.asyncio
+    async def test_sandbox_event_reply_routes_through_trace_client(self, monkeypatch):
+        """允许的 event.reply 必须走 trace-aware client 并记录 event_action。"""
+        from app.worker.plugins import loader as plugin_loader
+        from app.worker.plugins.sandbox import SandboxClient, SandboxEvent
+
+        class FakeClient:
+            async def send_message(self, *_args, **_kwargs):
+                return SimpleNamespace(id=42, chat_id=123)
+
+        record_action = AsyncMock()
+        monkeypatch.setattr(plugin_loader, "record_action", record_action)
+        sandbox_client = SandboxClient(FakeClient(), ["send_message"], plugin_key="demo")
+        trace_client = plugin_loader._trace_plugin_client(
+            sandbox_client,
+            "evt_sandbox_reply",
+            plugin_key="demo",
+            component="sandbox_event_test",
+        )
+        event = SandboxEvent(
+            SimpleNamespace(raw_text="hello", chat_id=123, id=777),
+            trace_client,
+            plugin_key="demo",
+        )
+
+        await event.reply("x")
+
+        record_action.assert_awaited_once()
+        assert record_action.await_args.args[0]["trace_id"] == "evt_sandbox_reply"
+        assert record_action.await_args.args[1]["type"] == "send_message"
+        assert record_action.await_args.args[1]["reply_to_message_id"] == 777
+        assert record_action.await_args.args[2] == plugin_loader.TRACE_STATUS_OK
 
     @pytest.mark.asyncio
     async def test_sandbox_event_message_layer_still_enforces_permissions(self):

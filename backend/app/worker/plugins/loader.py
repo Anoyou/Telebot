@@ -26,15 +26,19 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import binascii
 import collections
 import importlib
 import importlib.util
+import json
 import logging
 import re
 import shutil
 import time
 import traceback
 from dataclasses import dataclass
+from io import BytesIO
 from pathlib import Path
 from typing import Any
 
@@ -57,9 +61,26 @@ from ...db.models.plugin_global_config import PluginGlobalConfig
 from ...db.models.rule import Rule
 from ...db.models.system import SystemSetting
 from ...redis_client import get_redis
-from ...services import interaction_bot_service
-from ...services.event_trace import update_plugin_runtime_status
-from ...services.interaction.contracts import action_send_via_options, apply_action_send_via_options
+from ...services import account_bot_service, interaction_bot_service
+from ...services.event_bus import dispatch_event, normalize_event_subscription, normalize_userbot_event
+from ...services.event_trace import (
+    TRACE_STATUS_FAILED,
+    TRACE_STATUS_OK,
+    TRACE_STATUS_SKIPPED,
+    finish_trace,
+    record_action,
+    record_span,
+    start_trace,
+    trace_log_context,
+    update_plugin_runtime_status,
+)
+from ...services.interaction.contracts import (
+    SEND_CHANNEL_DEPRECATED_REASON_CODE,
+    action_send_via_options,
+    action_send_via_raw_selector,
+    apply_action_send_via_options,
+    deprecated_send_via_values,
+)
 from ...services.rate_limit_service import get_effective
 from ...settings import settings as app_settings
 from ...util.sudo_permissions import sudo_chat_allowed
@@ -82,6 +103,229 @@ class _InstalledPluginAuthorization:
     last_error: str | None = None
     log_level: str = "info"
     log_message: str = ""
+
+
+@dataclass(frozen=True)
+class _UserbotEventBusDispatch:
+    """UserBot 消息进入 Event Bus 后的可投递上下文。"""
+
+    trace: Any | None
+    event_payload: dict[str, Any]
+    event_bus_enabled: bool = False
+    matched_decisions: tuple[Any, ...] = ()
+    subscribed_plugin_keys: frozenset[str] = frozenset()
+
+
+class _TracePluginClient:
+    """Trace-aware facade for legacy plugin code that still calls ctx.client.
+
+    The facade preserves the familiar Telethon-ish surface for installed and
+    built-in plugins, while ensuring user-visible Telegram operations still
+    produce event_action rows. Read-only methods fall through to the wrapped
+    client via __getattr__.
+    """
+
+    def __init__(
+        self,
+        client: Any,
+        trace: Any,
+        *,
+        plugin_key: str,
+        entry_key: str | None = None,
+        component: str = "plugin_client",
+    ) -> None:
+        self._client = client
+        self._trace = trace
+        self._plugin_key = plugin_key
+        self._entry_key = entry_key
+        self._component = component
+        self._telepilot_trace_client = True
+        try:
+            self._allowed = object.__getattribute__(client, "_allowed")
+            self._perms = object.__getattribute__(client, "_perms")
+        except Exception:  # noqa: BLE001
+            self._allowed = frozenset()
+            self._perms = []
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._client, name)
+
+    async def send_message(self, chat_id: Any = None, message: Any = None, *args: Any, **kwargs: Any) -> Any:
+        if chat_id is None and "entity" in kwargs:
+            chat_id = kwargs.pop("entity")
+        text = message if message is not None else kwargs.pop("message", None)
+        action = self._action(
+            "send_message",
+            text=text,
+            chat_id=chat_id,
+            reply_to_message_id=kwargs.get("reply_to") or kwargs.get("reply_to_message_id"),
+        )
+        try:
+            result = await self._client.send_message(chat_id, text, *args, **kwargs)
+            await self._record(action, TRACE_STATUS_OK, actual_send_via="userbot_reply", result=_trace_client_result(result))
+            return result
+        except Exception as exc:  # noqa: BLE001
+            await self._record(
+                action,
+                TRACE_STATUS_FAILED,
+                actual_send_via="userbot_reply",
+                error_code="telegram_api_error",
+                error=f"{type(exc).__name__}: {exc}",
+            )
+            raise
+
+    async def send_file(self, chat_id: Any = None, file: Any = None, *args: Any, **kwargs: Any) -> Any:
+        if chat_id is None and "entity" in kwargs:
+            chat_id = kwargs.pop("entity")
+        action = self._action(
+            "send_file",
+            text=kwargs.get("caption"),
+            chat_id=chat_id,
+            reply_to_message_id=kwargs.get("reply_to") or kwargs.get("reply_to_message_id"),
+        )
+        action["filename"] = str(getattr(file, "name", "") or "") or None
+        try:
+            result = await self._client.send_file(chat_id, file, *args, **kwargs)
+            await self._record(action, TRACE_STATUS_OK, actual_send_via="userbot_reply", result=_trace_client_result(result))
+            return result
+        except Exception as exc:  # noqa: BLE001
+            await self._record(
+                action,
+                TRACE_STATUS_FAILED,
+                actual_send_via="userbot_reply",
+                error_code="telegram_api_error",
+                error=f"{type(exc).__name__}: {exc}",
+            )
+            raise
+
+    async def edit_message(self, entity: Any = None, message: Any = None, text: Any = None, *args: Any, **kwargs: Any) -> Any:
+        action = self._action(
+            "edit_message",
+            text=text if text is not None else kwargs.get("text"),
+            chat_id=entity,
+            message_id=message,
+        )
+        try:
+            result = await self._client.edit_message(entity, message, text, *args, **kwargs)
+            await self._record(action, TRACE_STATUS_OK, actual_send_via="userbot_reply", result=_trace_client_result(result))
+            return result
+        except Exception as exc:  # noqa: BLE001
+            await self._record(
+                action,
+                TRACE_STATUS_FAILED,
+                actual_send_via="userbot_reply",
+                error_code="telegram_api_error",
+                error=f"{type(exc).__name__}: {exc}",
+            )
+            raise
+
+    async def delete_messages(self, entity: Any, message_ids: Any, *args: Any, **kwargs: Any) -> Any:
+        message_id = message_ids[0] if isinstance(message_ids, list) and len(message_ids) == 1 else message_ids
+        action = self._action(
+            "delete_message",
+            chat_id=entity,
+            message_id=message_id if not isinstance(message_id, (list, tuple, set)) else None,
+        )
+        try:
+            result = await self._client.delete_messages(entity, message_ids, *args, **kwargs)
+            await self._record(
+                action,
+                TRACE_STATUS_OK,
+                actual_send_via="userbot_reply",
+                result=_trace_client_result(result),
+                message_ids=list(message_ids) if isinstance(message_ids, list) else message_ids,
+            )
+            return result
+        except Exception as exc:  # noqa: BLE001
+            await self._record(
+                action,
+                TRACE_STATUS_FAILED,
+                actual_send_via="userbot_reply",
+                error_code="telegram_api_error",
+                error=f"{type(exc).__name__}: {exc}",
+                message_ids=list(message_ids) if isinstance(message_ids, list) else message_ids,
+            )
+            raise
+
+    async def pin_message(self, entity: Any, message: Any, *args: Any, **kwargs: Any) -> Any:
+        action = self._action("pin_message", chat_id=entity, message_id=message)
+        try:
+            result = await self._client.pin_message(entity, message, *args, **kwargs)
+            await self._record(action, TRACE_STATUS_OK, actual_send_via="userbot_reply", result=_trace_client_result(result))
+            return result
+        except Exception as exc:  # noqa: BLE001
+            await self._record(
+                action,
+                TRACE_STATUS_FAILED,
+                actual_send_via="userbot_reply",
+                error_code="telegram_api_error",
+                error=f"{type(exc).__name__}: {exc}",
+            )
+            raise
+
+    def _action(
+        self,
+        action_type: str,
+        *,
+        text: Any = None,
+        chat_id: Any = None,
+        message_id: Any = None,
+        reply_to_message_id: Any = None,
+    ) -> dict[str, Any]:
+        action: dict[str, Any] = {
+            "type": action_type,
+            "send_via": "userbot_reply",
+            "send_method": f"ctx.client.{action_type}",
+            "context": trace_log_context(self._trace, plugin_key=self._plugin_key, entry_key=self._entry_key),
+        }
+        if text not in (None, ""):
+            action["text"] = str(text)[:4000]
+        if chat_id not in (None, ""):
+            action["chat_id"] = chat_id
+        if message_id not in (None, ""):
+            action["message_id"] = message_id
+        if reply_to_message_id not in (None, ""):
+            action["reply_to_message_id"] = reply_to_message_id
+        return action
+
+    async def _record(self, action: dict[str, Any], status: str, **detail: Any) -> None:
+        detail.setdefault("plugin_key", self._plugin_key)
+        if self._entry_key:
+            detail.setdefault("entry_key", self._entry_key)
+        detail.setdefault("component", self._component)
+        await record_action(action.get("context"), action, status, **detail)
+
+
+def _trace_client_result(result: Any) -> dict[str, Any]:
+    if isinstance(result, list):
+        first = result[0] if result else None
+        return {
+            "message_id": getattr(first, "id", None) or getattr(first, "message_id", None),
+            "chat_id": getattr(first, "chat_id", None),
+            "count": len(result),
+        }
+    return {
+        "message_id": getattr(result, "id", None) or getattr(result, "message_id", None),
+        "chat_id": getattr(result, "chat_id", None),
+    }
+
+
+def _trace_plugin_client(
+    client: Any,
+    trace: Any,
+    *,
+    plugin_key: str,
+    entry_key: str | None = None,
+    component: str = "plugin_client",
+) -> Any:
+    if client is None or trace is None:
+        return client
+    try:
+        if getattr(client, "_telepilot_trace_client", False) is True:
+            return client
+    except Exception:  # noqa: BLE001
+        pass
+    return _TracePluginClient(client, trace, plugin_key=plugin_key, entry_key=entry_key, component=component)
 
 
 # 不在每次消息都查 DB；启动 + reload 时刷新一次，足够快
@@ -107,6 +351,858 @@ async def _load_log_incoming_messages_setting() -> bool:
         return bool(app_settings.log_incoming_messages_default)
     except Exception:  # noqa: BLE001
         return bool(app_settings.log_incoming_messages_default)
+
+
+_EVENT_FRAMEWORK_FLAGS_CACHE: tuple[float, dict[str, bool]] = (0.0, {})
+
+
+async def _load_event_framework_flags() -> dict[str, bool]:
+    """Read Trace/Event Bus runtime switches for the UserBot plugin dispatcher."""
+
+    global _EVENT_FRAMEWORK_FLAGS_CACHE
+    now = time.monotonic()
+    cached_at, cached = _EVENT_FRAMEWORK_FLAGS_CACHE
+    if cached and now - cached_at < 30:
+        return cached
+    defaults = {
+        "trace_enabled": True,
+        "event_bus_delivery_enabled": True,
+    }
+    try:
+        async with AsyncSessionLocal() as db:
+            row = await db.get(SystemSetting, "log_retention")
+        raw = row.value if row is not None and isinstance(row.value, dict) else {}
+        flags = {
+            "trace_enabled": bool(raw.get("trace_enabled", defaults["trace_enabled"])),
+            "event_bus_delivery_enabled": bool(
+                raw.get("event_bus_delivery_enabled", defaults["event_bus_delivery_enabled"])
+            ),
+        }
+    except Exception:  # noqa: BLE001
+        log.debug("load plugin dispatcher event framework flags failed, using defaults", exc_info=True)
+        flags = defaults
+    _EVENT_FRAMEWORK_FLAGS_CACHE = (now, flags)
+    return flags
+
+
+def _event_bus_subscriptions_from_state(state: _AccountState) -> list[Any]:
+    subscriptions: list[Any] = []
+    for plugin_key, inst in list(state.instances.items()):
+        manifest = getattr(type(inst), "_manifest", None)
+        raw_subscriptions = getattr(manifest, "event_subscriptions", None)
+        if not isinstance(raw_subscriptions, list):
+            continue
+        for raw in raw_subscriptions:
+            if isinstance(raw, dict):
+                subscriptions.append(
+                    normalize_event_subscription(
+                        raw,
+                        plugin_key=plugin_key,
+                    )
+                )
+    return subscriptions
+
+
+def _event_bus_state_for_userbot_dispatch(state: _AccountState) -> dict[str, Any]:
+    sudo_ids = set(state.sudo_users)
+    owner_ids = [state.owner_tg_user_id] if state.owner_tg_user_id is not None else []
+    allowed_chat_ids: list[int] | str = sorted(state.ignored_peers) if state.ignored_peers else "*"
+    return {
+        "allowed_chat_ids": allowed_chat_ids,
+        "owner_user_ids": owner_ids,
+        "admin_user_ids": sorted(set(owner_ids) | sudo_ids),
+        "known_user_ids": sorted(set(owner_ids) | sudo_ids),
+    }
+
+
+async def _start_userbot_message_trace(
+    state: _AccountState,
+    event: Any,
+    *,
+    event_label: str,
+) -> _UserbotEventBusDispatch:
+    event_payload = normalize_userbot_event(state.account_id, event)
+    flags = await _load_event_framework_flags()
+    if not flags.get("trace_enabled", True):
+        return _UserbotEventBusDispatch(trace=None, event_payload=event_payload)
+    trace = await start_trace(event_payload)
+    event_payload["trace_id"] = trace.trace_id
+    await record_span(
+        trace,
+        "receive",
+        TRACE_STATUS_OK,
+        component="userbot_message",
+        direction=event_label,
+    )
+    if not flags.get("event_bus_delivery_enabled", True):
+        await record_span(
+            trace,
+            "subscription_match",
+            TRACE_STATUS_SKIPPED,
+            component="event_bus",
+            reason_code="event_bus_delivery_disabled",
+            message="Event Bus 新投递路径已通过运行设置关闭，legacy on_message 继续执行。",
+        )
+        return _UserbotEventBusDispatch(trace=trace, event_payload=event_payload)
+
+    subscriptions = _event_bus_subscriptions_from_state(state)
+    subscribed_plugin_keys = frozenset(
+        str(getattr(item, "plugin_key", "") or "").strip()
+        for item in subscriptions
+        if str(getattr(item, "plugin_key", "") or "").strip()
+    )
+    if not subscriptions:
+        await record_span(
+            trace,
+            "subscription_match",
+            TRACE_STATUS_SKIPPED,
+            component="event_bus",
+            reason_code="subscription_not_matched",
+            message="没有已启用插件声明 UserBot Event Bus 订阅。",
+        )
+        return _UserbotEventBusDispatch(
+            trace=trace,
+            event_payload=event_payload,
+            event_bus_enabled=True,
+            subscribed_plugin_keys=subscribed_plugin_keys,
+        )
+    result = dispatch_event(event_payload, subscriptions, _event_bus_state_for_userbot_dispatch(state))
+    matched_decisions: list[Any] = []
+    for decision in result.decisions:
+        if decision.matched:
+            matched_decisions.append(decision)
+        await record_span(
+            trace,
+            "subscription_match",
+            TRACE_STATUS_OK if decision.matched else TRACE_STATUS_SKIPPED,
+            component="event_bus",
+            plugin_key=decision.plugin_key,
+            entry_key=decision.entry_key,
+            reason_code=decision.reason_code,
+            message=decision.reason_message,
+            dispatch_mode=decision.dispatch_mode,
+            scope=decision.scope,
+            filters=decision.filters,
+        )
+    if not matched_decisions:
+        await record_span(
+            trace,
+            "route",
+            TRACE_STATUS_SKIPPED,
+            component="event_bus",
+            reason_code="subscription_not_matched",
+            message="Event Bus 未命中新入口；已声明订阅的插件不会继续走 legacy on_message。",
+        )
+    return _UserbotEventBusDispatch(
+        trace=trace,
+        event_payload=event_payload,
+        event_bus_enabled=True,
+        matched_decisions=tuple(matched_decisions),
+        subscribed_plugin_keys=subscribed_plugin_keys,
+    )
+
+
+async def _dispatch_userbot_event_bus_matches(
+    state: _AccountState,
+    dispatch: _UserbotEventBusDispatch,
+    event: Any,
+    *,
+    event_label: str,
+    redis: Any,
+) -> tuple[int, int]:
+    if not dispatch.event_bus_enabled or not dispatch.matched_decisions:
+        return 0, 0
+    invoked_count = 0
+    failed_count = 0
+    trace = dispatch.trace
+    for decision in dispatch.matched_decisions:
+        plugin_key = str(getattr(decision, "plugin_key", "") or "").strip()
+        entry_key = str(getattr(decision, "entry_key", "") or "").strip()
+        if not plugin_key:
+            continue
+        if not entry_key:
+            failed_count += 1
+            await record_span(
+                trace,
+                "plugin_invoke",
+                TRACE_STATUS_FAILED,
+                component="userbot_event_bus_dispatcher",
+                plugin_key=plugin_key,
+                reason_code="entry_key_missing",
+                message="Event Bus 订阅缺少 entry_key，无法投递插件入口。",
+            )
+            await update_plugin_runtime_status(
+                account_id=state.account_id,
+                plugin_key=plugin_key,
+                last_invocation_status=TRACE_STATUS_FAILED,
+                last_trace_id=getattr(trace, "trace_id", None),
+            )
+            continue
+        inst = state.instances.get(plugin_key)
+        ctx = state.contexts.get(plugin_key)
+        if inst is None or ctx is None or ctx.generation != state.generation:
+            failed_count += 1
+            await record_span(
+                trace,
+                "plugin_load",
+                TRACE_STATUS_FAILED,
+                component="userbot_event_bus_dispatcher",
+                plugin_key=plugin_key,
+                entry_key=entry_key,
+                reason_code="plugin_load_failed",
+                message="插件未加载、未启用或上下文 generation 已过期。",
+            )
+            await update_plugin_runtime_status(
+                account_id=state.account_id,
+                plugin_key=plugin_key,
+                last_invocation_status=TRACE_STATUS_FAILED,
+                last_trace_id=getattr(trace, "trace_id", None),
+            )
+            continue
+        payload = _userbot_event_payload_for_plugin(dispatch.event_payload, inst, plugin_key)
+        payload.setdefault("trigger", {})
+        if isinstance(payload["trigger"], dict):
+            payload["trigger"].update(
+                {
+                    "dispatch_mode": getattr(decision, "dispatch_mode", None),
+                    "entry_key": entry_key,
+                    "event_label": event_label,
+                    "scope": getattr(decision, "scope", None),
+                }
+            )
+        started = time.monotonic()
+        try:
+            actions = await _invoke_userbot_event_bus_entry(
+                inst,
+                ctx,
+                plugin_key=plugin_key,
+                entry_key=entry_key,
+                payload=payload,
+            )
+            invoked_count += 1
+            duration_ms = int((time.monotonic() - started) * 1000)
+            await record_span(
+                trace,
+                "plugin_invoke",
+                TRACE_STATUS_OK,
+                component="userbot_event_bus_dispatcher",
+                plugin_key=plugin_key,
+                entry_key=entry_key,
+                direction=event_label,
+                duration_ms=duration_ms,
+            )
+            await record_span(
+                trace,
+                "plugin_return",
+                TRACE_STATUS_OK,
+                component="userbot_event_bus_dispatcher",
+                plugin_key=plugin_key,
+                entry_key=entry_key,
+                action_count=len(actions),
+            )
+            action_failed = await _apply_userbot_event_bus_actions(
+                state,
+                trace,
+                event,
+                plugin_key=plugin_key,
+                entry_key=entry_key,
+                actions=actions,
+                redis=redis,
+            )
+            if action_failed:
+                failed_count += 1
+            await update_plugin_runtime_status(
+                account_id=state.account_id,
+                plugin_key=plugin_key,
+                last_invocation_status=TRACE_STATUS_FAILED if action_failed else TRACE_STATUS_OK,
+                last_trace_id=getattr(trace, "trace_id", None),
+            )
+        except Exception as exc:  # noqa: BLE001
+            failed_count += 1
+            await record_span(
+                trace,
+                "plugin_invoke",
+                TRACE_STATUS_FAILED,
+                component="userbot_event_bus_dispatcher",
+                plugin_key=plugin_key,
+                entry_key=entry_key,
+                direction=event_label,
+                reason_code="plugin_runtime_error",
+                error=f"{type(exc).__name__}: {exc}",
+                duration_ms=int((time.monotonic() - started) * 1000),
+            )
+            await update_plugin_runtime_status(
+                account_id=state.account_id,
+                plugin_key=plugin_key,
+                last_invocation_status=TRACE_STATUS_FAILED,
+                last_trace_id=getattr(trace, "trace_id", None),
+            )
+            await _log(
+                redis,
+                state.account_id,
+                "error",
+                f"插件 {plugin_key} 处理 Event Bus {event_label} 事件时出错：{type(exc).__name__}: {exc}。",
+                source="plugin",
+                plugin_key=plugin_key,
+                entry_key=entry_key,
+                direction=event_label,
+                chat_id=getattr(event, "chat_id", None),
+                sender_id=getattr(event, "sender_id", None),
+                message_preview=(getattr(event, "raw_text", "") or "")[:200],
+                traceback=traceback.format_exc(limit=8),
+                **trace_log_context(trace, plugin_key=plugin_key, entry_key=entry_key),
+            )
+    return invoked_count, failed_count
+
+
+async def _invoke_userbot_event_bus_entry(
+    inst: Plugin,
+    ctx: PluginContext,
+    *,
+    plugin_key: str,
+    entry_key: str,
+    payload: dict[str, Any],
+) -> list[dict[str, Any]]:
+    from .message_ops import BufferedMessageOps
+
+    previous_messages = ctx.messages
+    previous_log = ctx.log
+    previous_client = ctx.client
+    buffered_messages = BufferedMessageOps()
+    ctx.messages = buffered_messages
+    ctx.client = _trace_plugin_client(
+        previous_client,
+        payload.get("trace_id"),
+        plugin_key=plugin_key,
+        entry_key=entry_key,
+        component="userbot_event_bus_dispatcher",
+    )
+    trace_id = str(payload.get("trace_id") or "").strip()
+    if previous_log is not None and trace_id:
+        async def _trace_log(level: str, message: str, **detail: Any) -> None:
+            detail.setdefault("trace_id", trace_id)
+            detail.setdefault("plugin_key", plugin_key)
+            detail.setdefault("entry_key", entry_key)
+            await previous_log(level, message, **detail)
+
+        ctx.log = _trace_log
+    try:
+        event_handler = getattr(inst, "on_event", None)
+        base_event_handler = getattr(Plugin, "on_event", None)
+        has_event_handler = callable(event_handler) and getattr(type(inst), "on_event", None) is not base_event_handler
+        if has_event_handler:
+            actions = await event_handler(ctx, dict(payload))
+        elif getattr(type(inst), "on_interaction", None) is not getattr(Plugin, "on_interaction", None):
+            actions = await inst.on_interaction(ctx, entry_key, dict(payload))
+        else:
+            raise RuntimeError("插件未实现 on_event 或 on_interaction 入口")
+    finally:
+        ctx.messages = previous_messages
+        ctx.log = previous_log
+        ctx.client = previous_client
+    if actions is None:
+        actions = []
+    if not isinstance(actions, list) or not all(isinstance(item, dict) for item in actions):
+        raise TypeError("Event Bus 入口必须返回 list[dict] 标准动作")
+    return _normalize_interaction_actions([*buffered_messages.actions, *actions])
+
+
+def _userbot_event_payload_for_plugin(
+    event_payload: dict[str, Any],
+    inst: Plugin,
+    plugin_key: str,
+) -> dict[str, Any]:
+    payload = dict(event_payload or {})
+    trace_id = str(payload.get("trace_id") or "").strip()
+    if trace_id:
+        payload["trace_id"] = trace_id
+    native_raw = payload.get("native_raw")
+    allowed = _plugin_declares_native_raw(inst, source="userbot")
+    payload["native_raw_meta"] = _userbot_native_raw_meta(native_raw, enabled=allowed)
+    payload["native_raw"] = native_raw if allowed else None
+    if not allowed:
+        raw = payload.get("raw") if isinstance(payload.get("raw"), dict) else {}
+        raw = dict(raw)
+        raw["native_raw"] = "[omitted]"
+        raw["native_raw_reason_code"] = "native_raw_not_allowed"
+        payload["raw"] = raw
+    payload.setdefault("source", {})
+    if isinstance(payload["source"], dict):
+        payload["source"].setdefault("plugin_key", plugin_key)
+    return payload
+
+
+def _plugin_declares_native_raw(inst: Plugin, *, source: str) -> bool:
+    manifest = getattr(type(inst), "_manifest", None)
+    capabilities = getattr(manifest, "capabilities", None)
+    if not isinstance(capabilities, dict):
+        return False
+    raw = capabilities.get("telegram_native_raw")
+    if not isinstance(raw, dict) or not bool(raw.get("enabled")):
+        return False
+    sources = raw.get("sources")
+    if isinstance(sources, list) and sources:
+        allowed_sources = {str(item or "").strip() for item in sources}
+        return source in allowed_sources or "all" in allowed_sources
+    return True
+
+
+def _userbot_native_raw_meta(native_raw: Any, *, enabled: bool) -> dict[str, Any]:
+    size = 0
+    try:
+        size = len(json.dumps(native_raw, ensure_ascii=False, default=str).encode("utf-8")) if native_raw is not None else 0
+    except (TypeError, ValueError):
+        size = len(str(native_raw).encode("utf-8")) if native_raw is not None else 0
+    return {
+        "enabled": bool(enabled),
+        "source": "userbot",
+        "driver": "telethon",
+        "object": "message",
+        "stored_in_trace": False,
+        "size_bytes": size,
+        "reason_code": None if enabled else "native_raw_not_allowed",
+    }
+
+
+async def _apply_userbot_event_bus_actions(
+    state: _AccountState,
+    trace: Any | None,
+    event: Any,
+    *,
+    plugin_key: str,
+    entry_key: str,
+    actions: list[dict[str, Any]],
+    redis: Any,
+) -> bool:
+    failed = False
+    for raw_action in actions[:10]:
+        action = dict(raw_action)
+        action.setdefault(
+            "context",
+            trace_log_context(trace, plugin_key=plugin_key, entry_key=entry_key),
+        )
+        action_type = str(action.get("type") or "").strip()
+        if action_type in {"end_session", "close_session", "no_session", "result"}:
+            await record_action(
+                action.get("context"),
+                action,
+                TRACE_STATUS_SKIPPED,
+                error_code="session_control_action",
+                error=f"session control action: {action_type}",
+            )
+            continue
+        if action_type == "settlement":
+            await record_action(action.get("context"), action, TRACE_STATUS_OK, actual_send_via="settlement")
+            continue
+        if action_type in {"send_message", "send_photo", "send_file", "edit_message", "delete_message", "pin_message"}:
+            deprecated_channels = deprecated_send_via_values(action_send_via_raw_selector(action))
+            if deprecated_channels:
+                failed = True
+                await record_action(
+                    action.get("context"),
+                    action,
+                    TRACE_STATUS_FAILED,
+                    error_code=SEND_CHANNEL_DEPRECATED_REASON_CODE,
+                    error="notice/bbot_notice/notice_bot channel is deprecated",
+                    deprecated_send_via=deprecated_channels,
+                )
+                await _log(
+                    redis,
+                    state.account_id,
+                    "warn",
+                    "Event Bus action failed: deprecated send_via",
+                    source="plugin",
+                    plugin_key=plugin_key,
+                    entry_key=entry_key,
+                    reason_code=SEND_CHANNEL_DEPRECATED_REASON_CODE,
+                    action_type=action_type,
+                    deprecated_send_via=deprecated_channels,
+                    **trace_log_context(trace, plugin_key=plugin_key, entry_key=entry_key),
+                )
+                continue
+        if action_type == "send_message":
+            failed = not await _apply_userbot_send_message_action(state, event, action) or failed
+            continue
+        if action_type == "edit_message":
+            failed = not await _apply_userbot_edit_message_action(state, event, action) or failed
+            continue
+        if action_type in {"send_photo", "send_file"}:
+            failed = not await _apply_userbot_send_media_action(state, event, action) or failed
+            continue
+        if action_type == "delete_message":
+            failed = not await _apply_userbot_delete_message_action(state, event, action) or failed
+            continue
+        if action_type == "pin_message":
+            failed = not await _apply_userbot_pin_message_action(state, event, action) or failed
+            continue
+        if action_type == "answer_callback":
+            failed = not await _apply_userbot_answer_callback_action(state, action) or failed
+            continue
+        if action_type == "answer_inline_query":
+            failed = not await _apply_userbot_answer_inline_query_action(state, action) or failed
+            continue
+        failed = True
+        await record_action(
+            action.get("context"),
+            action,
+            TRACE_STATUS_SKIPPED,
+            error_code="unsupported_send_via",
+            error=f"unsupported action type: {action_type}",
+        )
+    return failed
+
+
+async def _apply_userbot_send_message_action(state: _AccountState, event: Any, action: dict[str, Any]) -> bool:
+    text = str(action.get("text") or "").strip()
+    if not text:
+        await record_action(action.get("context"), action, TRACE_STATUS_FAILED, error_code="empty_message_text", error="send_message text is empty")
+        return False
+    target_chat_id = _action_chat_id(action, event)
+    if target_chat_id is None:
+        await record_action(action.get("context"), action, TRACE_STATUS_FAILED, error_code="scope_not_matched", error="target chat_id missing")
+        return False
+    reply_to = _int_or_none(action.get("reply_to_message_id"))
+    reply_markup = action.get("reply_markup") if isinstance(action.get("reply_markup"), dict) else None
+    last_code = "unsupported_send_via"
+    last_error = "no supported send_via"
+    for send_via in action_send_via_options(action):
+        if send_via == "interaction_bot":
+            token = await _interaction_bot_token_for_account(state.account_id)
+            if not token:
+                last_code = "bot_token_missing"
+                last_error = "interaction bot token unavailable"
+                continue
+            try:
+                result = await account_bot_service.send_message(
+                    token,
+                    target_chat_id,
+                    text,
+                    reply_to_message_id=reply_to,
+                    reply_markup=reply_markup,
+                )
+                await record_action(action.get("context"), action, TRACE_STATUS_OK, actual_send_via="interaction_bot", result=result)
+                return True
+            except Exception as exc:  # noqa: BLE001
+                last_code = "telegram_api_error"
+                last_error = f"{type(exc).__name__}: {exc}"
+                continue
+        if send_via == "userbot_reply":
+            if state.client is None:
+                last_code = "userbot_offline"
+                last_error = "userbot client unavailable"
+                continue
+            try:
+                sent = await state.client.send_message(target_chat_id, text, reply_to=reply_to, parse_mode="html")
+                await record_action(
+                    action.get("context"),
+                    action,
+                    TRACE_STATUS_OK,
+                    actual_send_via="userbot_reply",
+                    result={"message_id": getattr(sent, "id", None), "chat_id": target_chat_id},
+                )
+                return True
+            except Exception as exc:  # noqa: BLE001
+                last_code = "telegram_api_error"
+                last_error = f"{type(exc).__name__}: {exc}"
+                continue
+    await record_action(action.get("context"), action, TRACE_STATUS_FAILED, error_code=last_code, error=last_error)
+    return False
+
+
+async def _apply_userbot_edit_message_action(state: _AccountState, event: Any, action: dict[str, Any]) -> bool:
+    text = str(action.get("text") or "").strip()
+    if not text:
+        await record_action(action.get("context"), action, TRACE_STATUS_FAILED, error_code="empty_message_text", error="edit_message text is empty")
+        return False
+    target_chat_id = _action_chat_id(action, event)
+    message_id = _int_or_none(action.get("message_id") or action.get("edit_message_id"))
+    if target_chat_id is None or message_id is None:
+        await record_action(
+            action.get("context"),
+            action,
+            TRACE_STATUS_FAILED,
+            error_code="target_message_id_missing",
+            error="target chat_id or message_id missing",
+        )
+        return False
+    reply_markup = action.get("reply_markup") if isinstance(action.get("reply_markup"), dict) else None
+    last_code = "unsupported_send_via"
+    last_error = "no supported send_via"
+    for send_via in action_send_via_options(action):
+        if send_via == "interaction_bot":
+            token = await _interaction_bot_token_for_account(state.account_id)
+            if not token:
+                last_code = "bot_token_missing"
+                last_error = "interaction bot token unavailable"
+                continue
+            try:
+                result = await account_bot_service.edit_message(
+                    token,
+                    target_chat_id,
+                    message_id,
+                    text,
+                    reply_markup=reply_markup,
+                )
+                await record_action(action.get("context"), action, TRACE_STATUS_OK, actual_send_via="interaction_bot", result=result)
+                return True
+            except Exception as exc:  # noqa: BLE001
+                last_code = "telegram_api_error"
+                last_error = f"{type(exc).__name__}: {exc}"
+                continue
+        if send_via == "userbot_reply":
+            if state.client is None:
+                last_code = "userbot_offline"
+                last_error = "userbot client unavailable"
+                continue
+            try:
+                result = await state.client.edit_message(target_chat_id, message_id, text, parse_mode="html")
+                await record_action(
+                    action.get("context"),
+                    action,
+                    TRACE_STATUS_OK,
+                    actual_send_via="userbot_reply",
+                    result={"message_id": getattr(result, "id", None) or message_id, "chat_id": target_chat_id},
+                )
+                return True
+            except Exception as exc:  # noqa: BLE001
+                last_code = "telegram_api_error"
+                last_error = f"{type(exc).__name__}: {exc}"
+                continue
+    await record_action(action.get("context"), action, TRACE_STATUS_FAILED, error_code=last_code, error=last_error)
+    return False
+
+
+async def _apply_userbot_send_media_action(state: _AccountState, event: Any, action: dict[str, Any]) -> bool:
+    raw_payload = str(action.get("photo_base64") or action.get("file_base64") or "").strip()
+    if not raw_payload:
+        await record_action(action.get("context"), action, TRACE_STATUS_FAILED, error_code="media_payload_missing", error="photo_base64/file_base64 is empty")
+        return False
+    try:
+        media_bytes = base64.b64decode(raw_payload, validate=True)
+    except (binascii.Error, ValueError):
+        await record_action(action.get("context"), action, TRACE_STATUS_FAILED, error_code="media_payload_invalid", error="photo_base64/file_base64 is not valid base64")
+        return False
+    if not media_bytes:
+        await record_action(action.get("context"), action, TRACE_STATUS_FAILED, error_code="media_payload_empty", error="decoded media payload is empty")
+        return False
+    target_chat_id = _action_chat_id(action, event)
+    if target_chat_id is None:
+        await record_action(action.get("context"), action, TRACE_STATUS_FAILED, error_code="scope_not_matched", error="target chat_id missing")
+        return False
+    reply_to = _int_or_none(action.get("reply_to_message_id"))
+    filename = str(action.get("filename") or ("interaction.png" if action.get("type") == "send_photo" else "interaction.bin")).strip()
+    caption = str(action.get("caption") or action.get("text") or "").strip() or None
+    last_code = "unsupported_send_via"
+    last_error = "no supported send_via"
+    for send_via in action_send_via_options(action):
+        if send_via == "interaction_bot" and action.get("type") == "send_photo":
+            token = await _interaction_bot_token_for_account(state.account_id)
+            if not token:
+                last_code = "bot_token_missing"
+                last_error = "interaction bot token unavailable"
+                continue
+            try:
+                result = await account_bot_service.send_photo_bytes(
+                    token,
+                    target_chat_id,
+                    media_bytes,
+                    filename=filename or "photo.png",
+                    caption=caption,
+                    reply_to_message_id=reply_to,
+                )
+                await record_action(action.get("context"), action, TRACE_STATUS_OK, actual_send_via="interaction_bot", result=result)
+                return True
+            except Exception as exc:  # noqa: BLE001
+                last_code = "telegram_api_error"
+                last_error = f"{type(exc).__name__}: {exc}"
+                continue
+        if send_via == "userbot_reply":
+            if state.client is None:
+                last_code = "userbot_offline"
+                last_error = "userbot client unavailable"
+                continue
+            try:
+                file_obj = BytesIO(media_bytes)
+                file_obj.name = filename or "interaction.bin"
+                kwargs: dict[str, Any] = {"reply_to": reply_to}
+                if caption:
+                    kwargs["caption"] = caption[:1024]
+                    kwargs["parse_mode"] = "html"
+                if action.get("type") == "send_photo":
+                    kwargs["force_document"] = False
+                sent = await state.client.send_file(target_chat_id, file_obj, **kwargs)
+                await record_action(
+                    action.get("context"),
+                    action,
+                    TRACE_STATUS_OK,
+                    actual_send_via="userbot_reply",
+                    result={"message_id": getattr(sent, "id", None), "chat_id": target_chat_id},
+                )
+                return True
+            except Exception as exc:  # noqa: BLE001
+                last_code = "telegram_api_error"
+                last_error = f"{type(exc).__name__}: {exc}"
+                continue
+    await record_action(action.get("context"), action, TRACE_STATUS_FAILED, error_code=last_code, error=last_error)
+    return False
+
+
+async def _apply_userbot_delete_message_action(state: _AccountState, event: Any, action: dict[str, Any]) -> bool:
+    target_chat_id = _action_chat_id(action, event)
+    message_id = _int_or_none(action.get("message_id"))
+    if target_chat_id is None or message_id is None:
+        await record_action(action.get("context"), action, TRACE_STATUS_FAILED, error_code="scope_not_matched", error="target chat_id or message_id missing")
+        return False
+    last_code = "unsupported_send_via"
+    last_error = "no supported send_via"
+    for send_via in action_send_via_options(action):
+        if send_via == "interaction_bot":
+            token = await _interaction_bot_token_for_account(state.account_id)
+            if not token:
+                last_code = "bot_token_missing"
+                last_error = "interaction bot token unavailable"
+                continue
+            try:
+                result = await account_bot_service.delete_message(token, target_chat_id, message_id)
+                await record_action(action.get("context"), action, TRACE_STATUS_OK, actual_send_via="interaction_bot", result=result)
+                return True
+            except Exception as exc:  # noqa: BLE001
+                last_code = "telegram_api_error"
+                last_error = f"{type(exc).__name__}: {exc}"
+                continue
+        if send_via == "userbot_reply":
+            if state.client is None:
+                last_code = "userbot_offline"
+                last_error = "userbot client unavailable"
+                continue
+            try:
+                await state.client.delete_messages(target_chat_id, [message_id])
+                await record_action(action.get("context"), action, TRACE_STATUS_OK, actual_send_via="userbot_reply")
+                return True
+            except Exception as exc:  # noqa: BLE001
+                last_code = "telegram_api_error"
+                last_error = f"{type(exc).__name__}: {exc}"
+                continue
+    await record_action(action.get("context"), action, TRACE_STATUS_FAILED, error_code=last_code, error=last_error)
+    return False
+
+
+async def _apply_userbot_pin_message_action(state: _AccountState, event: Any, action: dict[str, Any]) -> bool:
+    target_chat_id = _action_chat_id(action, event)
+    message_id = _int_or_none(action.get("message_id"))
+    if target_chat_id is None or message_id is None:
+        await record_action(action.get("context"), action, TRACE_STATUS_FAILED, error_code="scope_not_matched", error="target chat_id or message_id missing")
+        return False
+    last_code = "unsupported_send_via"
+    last_error = "no supported send_via"
+    for send_via in action_send_via_options(action):
+        if send_via == "interaction_bot":
+            token = await _interaction_bot_token_for_account(state.account_id)
+            if not token:
+                last_code = "bot_token_missing"
+                last_error = "interaction bot token unavailable"
+                continue
+            try:
+                result = await account_bot_service.call_bot_api(
+                    token,
+                    "pinChatMessage",
+                    {"chat_id": target_chat_id, "message_id": message_id},
+                )
+                await record_action(action.get("context"), action, TRACE_STATUS_OK, actual_send_via="interaction_bot", result=result)
+                return True
+            except Exception as exc:  # noqa: BLE001
+                last_code = "telegram_api_error"
+                last_error = f"{type(exc).__name__}: {exc}"
+                continue
+        if send_via == "userbot_reply":
+            if state.client is None:
+                last_code = "userbot_offline"
+                last_error = "userbot client unavailable"
+                continue
+            try:
+                await state.client.pin_message(target_chat_id, message_id, notify=False)
+                await record_action(action.get("context"), action, TRACE_STATUS_OK, actual_send_via="userbot_reply")
+                return True
+            except Exception as exc:  # noqa: BLE001
+                last_code = "telegram_api_error"
+                last_error = f"{type(exc).__name__}: {exc}"
+                continue
+    await record_action(action.get("context"), action, TRACE_STATUS_FAILED, error_code=last_code, error=last_error)
+    return False
+
+
+async def _apply_userbot_answer_callback_action(state: _AccountState, action: dict[str, Any]) -> bool:
+    callback_query_id = str(action.get("callback_query_id") or "").strip()
+    if not callback_query_id:
+        await record_action(action.get("context"), action, TRACE_STATUS_FAILED, error_code="callback_query_id_missing", error="callback_query_id missing")
+        return False
+    token = await _interaction_bot_token_for_account(state.account_id)
+    if not token:
+        await record_action(action.get("context"), action, TRACE_STATUS_FAILED, error_code="bot_token_missing", error="interaction bot token unavailable")
+        return False
+    try:
+        await account_bot_service.answer_callback(
+            token,
+            callback_query_id,
+            text=str(action.get("text") or ""),
+            show_alert=bool(action.get("show_alert")),
+        )
+    except Exception as exc:  # noqa: BLE001
+        await record_action(action.get("context"), action, TRACE_STATUS_FAILED, error_code="telegram_api_error", error=f"{type(exc).__name__}: {exc}")
+        return False
+    await record_action(action.get("context"), action, TRACE_STATUS_OK, actual_send_via="interaction_bot")
+    return True
+
+
+async def _apply_userbot_answer_inline_query_action(state: _AccountState, action: dict[str, Any]) -> bool:
+    inline_query_id = str(action.get("inline_query_id") or "").strip()
+    if not inline_query_id:
+        await record_action(action.get("context"), action, TRACE_STATUS_FAILED, error_code="inline_query_id_missing", error="inline_query_id missing")
+        return False
+    token = await _interaction_bot_token_for_account(state.account_id)
+    if not token:
+        await record_action(action.get("context"), action, TRACE_STATUS_FAILED, error_code="bot_token_missing", error="interaction bot token unavailable")
+        return False
+    results = action.get("results")
+    if not isinstance(results, list):
+        results = []
+    try:
+        await account_bot_service.answer_inline_query(
+            token,
+            inline_query_id,
+            results=[item for item in results if isinstance(item, dict)],
+            cache_time=_int_or_none(action.get("cache_time")) or 0,
+            is_personal=bool(action.get("is_personal", True)),
+            next_offset=str(action.get("next_offset") or ""),
+            button=action.get("button") if isinstance(action.get("button"), dict) else None,
+        )
+    except Exception as exc:  # noqa: BLE001
+        await record_action(action.get("context"), action, TRACE_STATUS_FAILED, error_code="telegram_api_error", error=f"{type(exc).__name__}: {exc}")
+        return False
+    await record_action(action.get("context"), action, TRACE_STATUS_OK, actual_send_via="interaction_bot")
+    return True
+
+
+async def _interaction_bot_token_for_account(account_id: int) -> str | None:
+    try:
+        async with AsyncSessionLocal() as db:
+            return await account_bot_service.get_interaction_bot_token(db, account_id)
+    except Exception:  # noqa: BLE001
+        log.debug("load interaction bot token failed account=%s", account_id, exc_info=True)
+        return None
+
+
+def _action_chat_id(action: dict[str, Any], event: Any) -> int | None:
+    return _int_or_none(action.get("chat_id")) or _int_or_none(getattr(event, "chat_id", None))
+
+
+def _int_or_none(value: Any) -> int | None:
+    try:
+        if value in (None, ""):
+            return None
+        return int(value)
+    except (TypeError, ValueError):
+        return None
 
 
 # worker 内存里维护的最近活跃 peer 数量上限（超过则按 LRU 丢弃最旧）
@@ -914,6 +2010,7 @@ async def load_plugins_for_account(
         async def _dispatch(event):  # noqa: ANN001
             if state.paused is not None and not state.paused.is_set():
                 return
+            trace = None
 
             # incoming 消息需要允许名单检查和 LRU 维护
             if direction == "incoming":
@@ -956,7 +2053,23 @@ async def load_plugins_for_account(
                 if not edited and await _interaction_bot_owns_incoming_text(state, event):
                     return
 
+            dispatch_state = await _start_userbot_message_trace(state, event, event_label=event_label)
+            trace = dispatch_state.trace
+            if trace is not None:
+                try:
+                    event.trace_id = trace.trace_id
+                except Exception:  # noqa: BLE001
+                    pass
+            invoked_count, failed_count = await _dispatch_userbot_event_bus_matches(
+                state,
+                dispatch_state,
+                event,
+                event_label=event_label,
+                redis=redis,
+            )
             for fkey, inst in list(state.instances.items()):
+                if dispatch_state.event_bus_enabled and fkey in dispatch_state.subscribed_plugin_keys:
+                    continue
                 if direction not in inst.message_channels:
                     continue
                 if getattr(inst, "owner_only", True):
@@ -973,10 +2086,69 @@ async def load_plugins_for_account(
                     continue
                 if edited and getattr(type(inst), handler_name, None) is getattr(Plugin, handler_name, None):
                     continue
+                await record_span(
+                    trace,
+                    "subscription_match",
+                    TRACE_STATUS_OK,
+                    component="legacy_userbot_dispatcher",
+                    plugin_key=fkey,
+                    reason_code="matched",
+                    message="legacy on_message 兼容入口已记录为 Event Bus 外层 decision 后投递。",
+                    dispatch_mode="legacy_compat",
+                    scope="legacy_message_channels",
+                    filters={
+                        "direction": direction,
+                        "edited": edited,
+                        "owner_only": getattr(inst, "owner_only", True),
+                        "message_channels": sorted(str(item) for item in getattr(inst, "message_channels", set())),
+                    },
+                )
+                previous_client = ctx.client
+                ctx.client = _trace_plugin_client(
+                    previous_client,
+                    trace,
+                    plugin_key=fkey,
+                    component="legacy_userbot_dispatcher",
+                )
                 plugin_event = _wrap_event_for_context(event, ctx)
+                started = time.monotonic()
                 try:
                     await handler(ctx, plugin_event)
+                    invoked_count += 1
+                    await record_span(
+                        trace,
+                        "plugin_invoke",
+                        TRACE_STATUS_OK,
+                        component="legacy_userbot_dispatcher",
+                        plugin_key=fkey,
+                        direction=event_label,
+                        duration_ms=int((time.monotonic() - started) * 1000),
+                    )
+                    await update_plugin_runtime_status(
+                        account_id=account_id,
+                        plugin_key=fkey,
+                        last_invocation_status=TRACE_STATUS_OK,
+                        last_trace_id=getattr(trace, "trace_id", None),
+                    )
                 except Exception as exc:  # noqa: BLE001
+                    failed_count += 1
+                    await record_span(
+                        trace,
+                        "plugin_invoke",
+                        TRACE_STATUS_FAILED,
+                        component="legacy_userbot_dispatcher",
+                        plugin_key=fkey,
+                        direction=event_label,
+                        reason_code="plugin_runtime_error",
+                        error=f"{type(exc).__name__}: {exc}",
+                        duration_ms=int((time.monotonic() - started) * 1000),
+                    )
+                    await update_plugin_runtime_status(
+                        account_id=account_id,
+                        plugin_key=fkey,
+                        last_invocation_status=TRACE_STATUS_FAILED,
+                        last_trace_id=getattr(trace, "trace_id", None),
+                    )
                     await _log(
                         redis,
                         account_id,
@@ -993,7 +2165,22 @@ async def load_plugins_for_account(
                         sender_id=getattr(event, "sender_id", None),
                         message_preview=(getattr(event, "raw_text", "") or "")[:200],
                         traceback=traceback.format_exc(limit=8),
+                        **trace_log_context(trace, plugin_key=fkey),
                     )
+                finally:
+                    ctx.client = previous_client
+            final_status = (
+                TRACE_STATUS_FAILED if failed_count
+                else TRACE_STATUS_OK if invoked_count
+                else TRACE_STATUS_SKIPPED
+            )
+            await finish_trace(
+                trace,
+                final_status,
+                invoked_count=invoked_count,
+                failed_count=failed_count,
+                direction=event_label,
+            )
 
         return _dispatch
 
@@ -1273,9 +2460,19 @@ def _wrap_cmd(fn, ctx: PluginContext):
     """把插件 ``commands`` 里登记的 5 参数 handler 包成命令分发期望的 4 参数签名。"""
 
     async def w(client, event, args, account_id):  # noqa: ANN001
-        plugin_client = ctx.client if ctx.client is not None else client
-        plugin_event = _wrap_event_for_context(event, ctx)
-        await fn(plugin_client, plugin_event, args, account_id, ctx)
+        trace_id = str(getattr(event, "trace_id", "") or "").strip() or None
+        previous_client = ctx.client
+        ctx.client = _trace_plugin_client(
+            previous_client if previous_client is not None else client,
+            trace_id,
+            plugin_key=ctx.feature_key,
+            component="plugin_command",
+        )
+        try:
+            plugin_event = _wrap_event_for_context(event, ctx)
+            await fn(ctx.client if ctx.client is not None else client, plugin_event, args, account_id, ctx)
+        finally:
+            ctx.client = previous_client
 
     return w
 
@@ -1779,7 +2976,7 @@ def get_recent_peers(account_id: int) -> list[dict[str, Any]]:
     return out
 
 
-_INTERACTION_SEND_ACTIONS = {"send_message", "send_photo", "send_file"}
+_INTERACTION_SEND_ACTIONS = {"send_message", "send_photo", "send_file", "edit_message"}
 _INTERACTION_CONTROL_ACTIONS = {"delete_message", "pin_message", "answer_callback", "answer_inline_query"}
 
 
@@ -1841,9 +3038,17 @@ async def invoke_interaction_entry(
 
     previous_messages = ctx.messages
     previous_log = ctx.log
+    previous_client = ctx.client
     buffered_messages = BufferedMessageOps()
     ctx.messages = buffered_messages
     trace_id = str((payload or {}).get("trace_id") or "").strip()
+    ctx.client = _trace_plugin_client(
+        previous_client,
+        trace_id,
+        plugin_key=plugin_key,
+        entry_key=entry_key,
+        component="interaction_entry",
+    )
 
     if previous_log is not None and trace_id:
         async def _trace_log(level: str, message: str, **detail: Any) -> None:
@@ -1858,6 +3063,7 @@ async def invoke_interaction_entry(
     finally:
         ctx.messages = previous_messages
         ctx.log = previous_log
+        ctx.client = previous_client
     if actions is None and not buffered_messages.actions:
         raise RuntimeError(f"模块尚未实现交互入口：{plugin_key}.{entry_key}")
     if actions is None:

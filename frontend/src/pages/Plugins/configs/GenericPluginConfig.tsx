@@ -331,6 +331,17 @@ export function GenericPluginConfigPage() {
                 {accountFeature?.last_error ? (
                   <span className="text-destructive">最近错误：{accountFeature.last_error}</span>
                 ) : null}
+                {accountFeature?.last_error ? (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 px-2 text-destructive hover:text-destructive"
+                    onClick={() => nav(`/logs?tab=plugins&account_id=${aid}&plugin_key=${encodeURIComponent(featureKey)}&status=failed`)}
+                  >
+                    查看日志
+                  </Button>
+                ) : null}
               </div>
             </div>
             <Switch
@@ -397,8 +408,8 @@ export function GenericPluginConfigPage() {
                   {dirty ? "有未保存修改，保存后 worker 会热加载。" : "当前配置已同步。"}
                 </div>
               </div>
-              <div className="flex items-center gap-4">
-                <Button onClick={() => saveMut.mutate()} disabled={saveMut.isPending || !dirty}>
+              <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center sm:gap-4">
+                <Button className="w-full sm:w-auto" onClick={() => saveMut.mutate()} disabled={saveMut.isPending || !dirty}>
                   {saveMut.isPending ? (
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                   ) : (
@@ -406,7 +417,13 @@ export function GenericPluginConfigPage() {
                   )}
                   保存配置
                 </Button>
-                <Button type="button" variant="ghost" disabled={!dirty || saveMut.isPending} onClick={resetForm} className="px-0">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  disabled={!dirty || saveMut.isPending}
+                  onClick={resetForm}
+                  className="w-full sm:w-auto sm:px-0"
+                >
                   撤销
                 </Button>
               </div>

@@ -14,7 +14,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import String, cast, desc, func, or_, select
 
 from ..db.models.log import AuditLog, EventAction, EventSpan, EventTrace, PluginRuntimeStatus, RuntimeLog
@@ -158,6 +158,9 @@ class EventTraceSummary(BaseModel):
     sender_user_id: int | None = None
     sender_name: str | None = None
     text_preview: str | None = None
+    inline_query: str | None = None
+    chosen_inline_result_id: str | None = None
+    chosen_inline_query: str | None = None
     status: str
     started_at: datetime
     ended_at: datetime | None = None
@@ -169,6 +172,7 @@ class EventTraceSummary(BaseModel):
 
     @classmethod
     def from_row(cls, row: EventTrace) -> EventTraceSummary:
+        inline_query, chosen_inline_result_id, chosen_inline_query = _inline_trace_summary(row)
         return cls(
             id=row.id,
             trace_id=row.trace_id,
@@ -182,12 +186,62 @@ class EventTraceSummary(BaseModel):
             sender_user_id=row.sender_user_id,
             sender_name=row.sender_name,
             text_preview=redact_text(row.text_preview or "") or None,
+            inline_query=inline_query,
+            chosen_inline_result_id=chosen_inline_result_id,
+            chosen_inline_query=chosen_inline_query,
             status=row.status,
             started_at=row.started_at,
             ended_at=row.ended_at,
             duration_ms=row.duration_ms,
             native_raw_meta=redact_value(row.native_raw_meta) if row.native_raw_meta is not None else None,
         )
+
+
+def _nested_text(source: Any, *path: str) -> str | None:
+    current = source
+    for key in path:
+        if not isinstance(current, dict):
+            return None
+        current = current.get(key)
+    if current is None:
+        return None
+    text = str(current).strip()
+    return redact_text(text) or None
+
+
+def _first_text(*values: Any) -> str | None:
+    for value in values:
+        if value is None:
+            continue
+        text = str(value).strip()
+        if text:
+            return redact_text(text) or None
+    return None
+
+
+def _inline_trace_summary(row: EventTrace) -> tuple[str | None, str | None, str | None]:
+    payload = row.payload_snapshot if isinstance(row.payload_snapshot, dict) else {}
+    raw = row.raw_summary if isinstance(row.raw_summary, dict) else {}
+    event_type = str(row.event_type or "")
+    inline_query = _first_text(
+        _nested_text(payload, "inline_query", "query"),
+        _nested_text(raw, "inline_query", "query"),
+        raw.get("query") if event_type == "inline_query" else None,
+        row.text_preview if event_type == "inline_query" else None,
+    )
+    chosen_inline_result_id = _first_text(
+        _nested_text(payload, "chosen_inline_result", "result_id"),
+        _nested_text(raw, "chosen_inline_result", "result_id"),
+        _nested_text(payload, "chosen_inline_result", "id"),
+        _nested_text(raw, "chosen_inline_result", "id"),
+    )
+    chosen_inline_query = _first_text(
+        _nested_text(payload, "chosen_inline_result", "query"),
+        _nested_text(raw, "chosen_inline_result", "query"),
+        raw.get("query") if event_type == "chosen_inline_result" else None,
+        row.text_preview if event_type == "chosen_inline_result" else None,
+    )
+    return inline_query, chosen_inline_result_id, chosen_inline_query
 
 
 class EventTraceDetail(EventTraceSummary):
@@ -232,6 +286,7 @@ class TraceOverview(BaseModel):
     last_5m_total: int = 0
     last_5m_failed: int = 0
     last_5m_warning: int = 0
+    source_channel_counts: dict[str, int] = Field(default_factory=dict)
     recent_errors: list[EventTraceSummary] = []
     recent_failed_actions: list[EventActionItem] = []
     recent_plugin_errors: list[PluginRuntimeStatusItem] = []
@@ -378,12 +433,26 @@ async def trace_overview(
         ).scalar_one()
         or 0
     )
+    source_channel_counts = {
+        str(channel or "unknown"): int(count or 0)
+        for channel, count in (
+            await db.execute(
+                select(EventTrace.source_channel, func.count(EventTrace.id))
+                .where(*base)
+                .group_by(EventTrace.source_channel)
+            )
+        ).all()
+    }
     error_stmt = select(EventTrace).where(EventTrace.status.in_(("failed", "error", "warning", "warn")))
     if account_id is not None:
         error_stmt = error_stmt.where(EventTrace.account_id == account_id)
     error_rows = (await db.execute(error_stmt.order_by(desc(EventTrace.started_at)).limit(8))).scalars().all()
 
     action_stmt = select(EventAction).where(EventAction.status.in_(("failed", "error")))
+    if account_id is not None:
+        action_stmt = action_stmt.where(
+            EventAction.trace_id.in_(select(EventTrace.trace_id).where(EventTrace.account_id == account_id))
+        )
     action_rows = (await db.execute(action_stmt.order_by(desc(EventAction.created_at)).limit(8))).scalars().all()
 
     plugin_stmt = select(PluginRuntimeStatus).where(
@@ -396,6 +465,7 @@ async def trace_overview(
         last_5m_total=total,
         last_5m_failed=failed,
         last_5m_warning=warning,
+        source_channel_counts=source_channel_counts,
         recent_errors=await _trace_summaries_with_counts(db, error_rows),
         recent_failed_actions=[EventActionItem.from_row(row) for row in action_rows],
         recent_plugin_errors=[PluginRuntimeStatusItem.from_row(row) for row in plugin_rows],
@@ -416,6 +486,7 @@ async def list_event_traces(
     plugin_key: str | None = Query(None),
     status: str | None = Query(None),
     trace_id: str | None = Query(None),
+    reason_code: str | None = Query(None),
     keyword: str | None = Query(None),
     since: datetime | None = Query(None),
     until: datetime | None = Query(None),
@@ -440,6 +511,17 @@ async def list_event_traces(
         stmt = stmt.where(EventTrace.status == status)
     if trace_id:
         stmt = stmt.where(EventTrace.trace_id == trace_id)
+    if reason_code:
+        stmt = stmt.where(
+            or_(
+                EventTrace.trace_id.in_(
+                    select(EventSpan.trace_id).where(EventSpan.reason_code == reason_code)
+                ),
+                EventTrace.trace_id.in_(
+                    select(EventAction.trace_id).where(EventAction.error_code == reason_code)
+                ),
+            )
+        )
     if since is not None:
         stmt = stmt.where(EventTrace.started_at >= since)
     if until is not None:
@@ -566,6 +648,10 @@ async def list_event_actions(
     plugin_key: str | None = Query(None),
     action_type: str | None = Query(None),
     status: str | None = Query(None),
+    reason_code: str | None = Query(None),
+    error_code: str | None = Query(None),
+    since: datetime | None = Query(None),
+    until: datetime | None = Query(None),
     limit: int = Query(100, ge=1, le=500),
 ) -> list[EventActionItem]:
     stmt = select(EventAction).order_by(desc(EventAction.created_at)).limit(limit)
@@ -577,6 +663,13 @@ async def list_event_actions(
         stmt = stmt.where(EventAction.action_type == action_type)
     if status:
         stmt = stmt.where(EventAction.status == status)
+    action_reason = reason_code or error_code
+    if action_reason:
+        stmt = stmt.where(EventAction.error_code == action_reason)
+    if since is not None:
+        stmt = stmt.where(EventAction.created_at >= since)
+    if until is not None:
+        stmt = stmt.where(EventAction.created_at <= until)
     if account_id is not None:
         stmt = stmt.where(
             EventAction.trace_id.in_(select(EventTrace.trace_id).where(EventTrace.account_id == account_id))
@@ -591,6 +684,9 @@ async def list_command_traces(
     _user: CurrentUser,
     account_id: int | None = Query(None),
     keyword: str | None = Query(None),
+    since: datetime | None = Query(None),
+    until: datetime | None = Query(None),
+    reason_code: str | None = Query(None),
     limit: int = Query(100, ge=1, le=500),
 ) -> list[EventTraceSummary]:
     stmt = (
@@ -604,6 +700,21 @@ async def list_command_traces(
     if keyword:
         like = f"%{keyword}%"
         stmt = stmt.where(or_(EventTrace.text_preview.ilike(like), EventTrace.trace_id.ilike(like)))
+    if since is not None:
+        stmt = stmt.where(EventTrace.started_at >= since)
+    if until is not None:
+        stmt = stmt.where(EventTrace.started_at <= until)
+    if reason_code:
+        stmt = stmt.where(
+            or_(
+                EventTrace.trace_id.in_(
+                    select(EventSpan.trace_id).where(EventSpan.reason_code == reason_code)
+                ),
+                EventTrace.trace_id.in_(
+                    select(EventAction.trace_id).where(EventAction.error_code == reason_code)
+                ),
+            )
+        )
     rows = (await db.execute(stmt)).scalars().all()
     return await _trace_summaries_with_counts(db, rows)
 

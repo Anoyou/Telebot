@@ -872,7 +872,20 @@ function FeatureZone({
                     ) : null}
                     {status === "failed" ? (
                       <div className="mt-1 rounded-md border border-destructive/30 bg-destructive/10 px-2 py-1 text-xs leading-5 text-destructive">
-                        加载异常{lastError ? `：${lastError}` : "：后端未返回错误详情"}
+                        <div>加载异常{lastError ? `：${lastError}` : "：后端未返回错误详情"}</div>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="mt-1 h-7 px-0 text-destructive hover:text-destructive"
+                          onClick={() => {
+                            const params = new URLSearchParams({ tab: "plugins", plugin_key: f.key, status: "failed" });
+                            if (selectedAccountId) params.set("account_id", String(selectedAccountId));
+                            nav(`/logs?${params.toString()}`);
+                          }}
+                        >
+                          查看日志
+                        </Button>
                       </div>
                     ) : null}
                     <div className="mt-2 text-xs leading-5 text-muted-foreground">

@@ -11,9 +11,12 @@ class PluginContext:
     feature_key: str
     config: dict           # 当前账号的插件配置
     rules: list            # 规则列表
-    client: TelegramClient | None
-    engine: Any            # RateLimitEngine
-    redis: Any             # redis.asyncio.Redis
+    client: Any | None     # 受控客户端 facade；新插件不要作为主动发送主路径
+    messages: Any | None   # MessageOps facade；发送/编辑/删除/按钮/Inline 主路径
+    http: Any | None       # HTTP facade；需要 external_http + allowed_hosts
+    ai: Any | None         # AI facade；需要 ai_text
+    engine: Any | None     # RateLimitEngine；安装型插件通常为 None
+    redis: Any | None      # redis.asyncio.Redis；安装型插件通常为 None
     log: Callable          # 日志函数
     scheduler: Any         # 平台调度器 facade
     generation: int        # generation guard 计数
@@ -34,25 +37,36 @@ class PluginContext:
 - `ctx.ai.complete()` 推荐用 `provider_tag` 按用途选择 provider；`tag` / `tags` 是兼容别名且已 deprecated，新插件不要依赖它们作为主要入口。
 - `ctx.ai.list_providers()` 可用于展示当前账号可见的脱敏 provider 摘要；更完整的 AI facade 说明见 `docs/PLUGIN-AI.md`。
 
-示例：
+Event Bus 主路径示例：
 
 ```python
-if ctx.http is None:
-    await event.edit("本插件需要 external_http 权限和 allowed_hosts")
-    return True
-response = await ctx.http.get("https://api.github.com/zen")
+async def on_event(self, ctx, payload):
+    message = payload["message"]
+    chat = payload["chat"]
+    chat_id = message.get("chat_id") or chat["id"]
+    reply_to = message.get("message_id")
 
-if ctx.ai is None:
-    await event.edit("本插件需要 ai_text 权限")
-    return True
-providers = await ctx.ai.list_providers()
-result = await ctx.ai.complete(
-    system="你是助手",
-    user="总结这段文本",
-    provider_tag="chat",
-    max_tokens=512,
-)
+    if ctx.http is None:
+        return [{
+            "type": "send_message",
+            "send_via": ["interaction_bot", "userbot_reply"],
+            "chat_id": chat_id,
+            "reply_to_message_id": reply_to,
+            "text": "本插件需要 external_http 权限和 allowed_hosts",
+        }]
+
+    response = await ctx.http.get("https://api.github.com/zen")
+    preview = response.text.strip().replace("\n", " ")[:120]
+    return [{
+        "type": "send_message",
+        "send_via": ["interaction_bot", "userbot_reply"],
+        "chat_id": chat_id,
+        "reply_to_message_id": reply_to,
+        "text": f"HTTP {response.status_code}: {preview}",
+    }]
 ```
+
+管理员命令兼容示例仍可以 `event.edit(...)` 更新命令消息，但公共群互动、按钮回调、Inline 或付款确认插件应返回标准 action，或通过 `ctx.messages` 生成标准 action。
 
 ## allowed_hosts 匹配规则
 

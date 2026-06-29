@@ -24,14 +24,21 @@ from ..db.base import AsyncSessionLocal
 from ..db.models.system import SystemSetting
 from ..redis_client import get_redis
 from ..services import audit as audit_svc
-from ..services.event_bus import normalize_userbot_event
+from ..services.event_bus import (
+    EventSubscription,
+    SubscriptionDecision,
+    dispatch_event,
+    normalize_userbot_event,
+)
 from ..services.event_trace import (
     TRACE_STATUS_FAILED,
     TRACE_STATUS_OK,
     TRACE_STATUS_SKIPPED,
     finish_trace,
+    record_action,
     record_span,
     start_trace,
+    trace_log_context,
 )
 from ..settings import settings
 from ..util.sudo_permissions import (
@@ -180,6 +187,337 @@ async def _command_trace_enabled() -> bool:
         log.debug("load command trace setting failed, trace stays enabled", exc_info=True)
     _TRACE_FLAG_CACHE = (now, enabled)
     return enabled
+
+
+class _TraceCommandEvent:
+    """Proxy command event methods that produce user-visible Telegram actions."""
+
+    def __init__(self, event: Any, trace: Any, *, command: str, plugin_key: str | None = None) -> None:
+        self._event = event
+        self._trace = trace
+        self._command = command
+        self._plugin_key = plugin_key
+        raw_client = getattr(event, "client", None)
+        self.client = _TraceCommandClient(raw_client, trace, command=command, plugin_key=plugin_key) if raw_client is not None else raw_client
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._event, name)
+
+    async def edit(self, text: Any = None, *args: Any, **kwargs: Any) -> Any:
+        return await self._call_event_action("edit_message", "edit", text, *args, **kwargs)
+
+    async def respond(self, text: Any = None, *args: Any, **kwargs: Any) -> Any:
+        return await self._call_event_action("send_message", "respond", text, *args, **kwargs)
+
+    async def reply(self, text: Any = None, *args: Any, **kwargs: Any) -> Any:
+        return await self._call_event_action("send_message", "reply", text, *args, **kwargs)
+
+    async def delete(self, *args: Any, **kwargs: Any) -> Any:
+        return await self._call_event_action("delete_message", "delete", None, *args, **kwargs)
+
+    async def get_reply_message(self, *args: Any, **kwargs: Any) -> Any:
+        result = await self._event.get_reply_message(*args, **kwargs)
+        if result is None:
+            return None
+        return _TraceForwardMessage(result, self._trace, command=self._command, plugin_key=self._plugin_key)
+
+    async def _call_event_action(self, action_type: str, method: str, text: Any, *args: Any, **kwargs: Any) -> Any:
+        action = _command_trace_action(
+            action_type,
+            command=self._command,
+            plugin_key=self._plugin_key,
+            text=text,
+            chat_id=getattr(self._event, "chat_id", None),
+            message_id=getattr(getattr(self._event, "message", None), "id", None) or getattr(self._event, "id", None),
+        )
+        try:
+            fn = getattr(self._event, method)
+            if text is None and action_type == "delete_message":
+                result = await fn(*args, **kwargs)
+            else:
+                result = await fn(text, *args, **kwargs)
+            await record_action(
+                trace_log_context(self._trace, plugin_key=self._plugin_key),
+                action,
+                TRACE_STATUS_OK,
+                actual_send_via="userbot_reply",
+                result=_command_result_payload(result),
+            )
+            return result
+        except Exception as exc:  # noqa: BLE001
+            await record_action(
+                trace_log_context(self._trace, plugin_key=self._plugin_key),
+                action,
+                TRACE_STATUS_FAILED,
+                actual_send_via="userbot_reply",
+                error_code="telegram_api_error",
+                error=f"{type(exc).__name__}: {exc}",
+            )
+            raise
+
+
+class _TraceCommandClient:
+    """Proxy client send methods used by command handlers."""
+
+    def __init__(self, client: Any, trace: Any, *, command: str, plugin_key: str | None = None) -> None:
+        self._client = client
+        self._trace = trace
+        self._command = command
+        self._plugin_key = plugin_key
+        self._telepilot_trace_client = True
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._client, name)
+
+    async def send_message(self, chat_id: Any, text: Any = None, *args: Any, **kwargs: Any) -> Any:
+        action = _command_trace_action(
+            "send_message",
+            command=self._command,
+            plugin_key=self._plugin_key,
+            text=text,
+            chat_id=chat_id,
+            reply_to_message_id=kwargs.get("reply_to") or kwargs.get("reply_to_message_id"),
+        )
+        try:
+            result = await self._client.send_message(chat_id, text, *args, **kwargs)
+            await record_action(
+                trace_log_context(self._trace, plugin_key=self._plugin_key),
+                action,
+                TRACE_STATUS_OK,
+                actual_send_via="userbot_reply",
+                result=_command_result_payload(result),
+            )
+            return result
+        except Exception as exc:  # noqa: BLE001
+            await record_action(
+                trace_log_context(self._trace, plugin_key=self._plugin_key),
+                action,
+                TRACE_STATUS_FAILED,
+                actual_send_via="userbot_reply",
+                error_code="telegram_api_error",
+                error=f"{type(exc).__name__}: {exc}",
+            )
+            raise
+
+    async def send_file(self, chat_id: Any, file: Any = None, *args: Any, **kwargs: Any) -> Any:
+        action = _command_trace_action(
+            "send_file",
+            command=self._command,
+            plugin_key=self._plugin_key,
+            text=kwargs.get("caption"),
+            chat_id=chat_id,
+            reply_to_message_id=kwargs.get("reply_to") or kwargs.get("reply_to_message_id"),
+        )
+        try:
+            result = await self._client.send_file(chat_id, file, *args, **kwargs)
+            await record_action(
+                trace_log_context(self._trace, plugin_key=self._plugin_key),
+                action,
+                TRACE_STATUS_OK,
+                actual_send_via="userbot_reply",
+                result=_command_result_payload(result),
+            )
+            return result
+        except Exception as exc:  # noqa: BLE001
+            await record_action(
+                trace_log_context(self._trace, plugin_key=self._plugin_key),
+                action,
+                TRACE_STATUS_FAILED,
+                actual_send_via="userbot_reply",
+                error_code="telegram_api_error",
+                error=f"{type(exc).__name__}: {exc}",
+            )
+            raise
+
+    async def edit_message(self, chat_id: Any, message_id: Any, text: Any = None, *args: Any, **kwargs: Any) -> Any:
+        action = _command_trace_action(
+            "edit_message",
+            command=self._command,
+            plugin_key=self._plugin_key,
+            text=text,
+            chat_id=chat_id,
+            message_id=message_id,
+        )
+        try:
+            result = await self._client.edit_message(chat_id, message_id, text, *args, **kwargs)
+            await record_action(
+                trace_log_context(self._trace, plugin_key=self._plugin_key),
+                action,
+                TRACE_STATUS_OK,
+                actual_send_via="userbot_reply",
+                result=_command_result_payload(result),
+            )
+            return result
+        except Exception as exc:  # noqa: BLE001
+            await record_action(
+                trace_log_context(self._trace, plugin_key=self._plugin_key),
+                action,
+                TRACE_STATUS_FAILED,
+                actual_send_via="userbot_reply",
+                error_code="telegram_api_error",
+                error=f"{type(exc).__name__}: {exc}",
+            )
+            raise
+
+    async def delete_messages(self, entity: Any, message_ids: Any, *args: Any, **kwargs: Any) -> Any:
+        message_id = message_ids[0] if isinstance(message_ids, list) and len(message_ids) == 1 else message_ids
+        action = _command_trace_action(
+            "delete_message",
+            command=self._command,
+            plugin_key=self._plugin_key,
+            chat_id=entity,
+            message_id=message_id if not isinstance(message_id, (list, tuple, set)) else None,
+        )
+        try:
+            result = await self._client.delete_messages(entity, message_ids, *args, **kwargs)
+            await record_action(
+                trace_log_context(self._trace, plugin_key=self._plugin_key),
+                action,
+                TRACE_STATUS_OK,
+                actual_send_via="userbot_reply",
+                result=_command_result_payload(result),
+                message_ids=list(message_ids) if isinstance(message_ids, list) else message_ids,
+            )
+            return result
+        except Exception as exc:  # noqa: BLE001
+            await record_action(
+                trace_log_context(self._trace, plugin_key=self._plugin_key),
+                action,
+                TRACE_STATUS_FAILED,
+                actual_send_via="userbot_reply",
+                error_code="telegram_api_error",
+                error=f"{type(exc).__name__}: {exc}",
+                message_ids=list(message_ids) if isinstance(message_ids, list) else message_ids,
+            )
+            raise
+
+    async def pin_message(self, entity: Any, message: Any, *args: Any, **kwargs: Any) -> Any:
+        action = _command_trace_action(
+            "pin_message",
+            command=self._command,
+            plugin_key=self._plugin_key,
+            chat_id=entity,
+            message_id=getattr(message, "id", None) or message,
+        )
+        try:
+            result = await self._client.pin_message(entity, message, *args, **kwargs)
+            await record_action(
+                trace_log_context(self._trace, plugin_key=self._plugin_key),
+                action,
+                TRACE_STATUS_OK,
+                actual_send_via="userbot_reply",
+                result=_command_result_payload(result),
+            )
+            return result
+        except Exception as exc:  # noqa: BLE001
+            await record_action(
+                trace_log_context(self._trace, plugin_key=self._plugin_key),
+                action,
+                TRACE_STATUS_FAILED,
+                actual_send_via="userbot_reply",
+                error_code="telegram_api_error",
+                error=f"{type(exc).__name__}: {exc}",
+            )
+            raise
+
+
+class _TraceForwardMessage:
+    """Proxy replied message native forwarding so command templates remain traceable."""
+
+    def __init__(self, message: Any, trace: Any, *, command: str, plugin_key: str | None = None) -> None:
+        self._message = message
+        self._trace = trace
+        self._command = command
+        self._plugin_key = plugin_key
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._message, name)
+
+    async def forward_to(self, target: Any, *args: Any, **kwargs: Any) -> Any:
+        action = _command_trace_action(
+            "send_message",
+            command=self._command,
+            plugin_key=self._plugin_key,
+            chat_id=target,
+        )
+        action["forward_mode"] = "forward_native"
+        source_chat_id = getattr(self._message, "chat_id", None)
+        source_message_id = getattr(self._message, "id", None)
+        if source_chat_id is not None:
+            action["source_chat_id"] = source_chat_id
+        if source_message_id is not None:
+            action["source_message_id"] = source_message_id
+        try:
+            result = await self._message.forward_to(target, *args, **kwargs)
+            await record_action(
+                trace_log_context(self._trace, plugin_key=self._plugin_key),
+                action,
+                TRACE_STATUS_OK,
+                actual_send_via="userbot_reply",
+                result=_command_result_payload(result),
+            )
+            return result
+        except Exception as exc:  # noqa: BLE001
+            await record_action(
+                trace_log_context(self._trace, plugin_key=self._plugin_key),
+                action,
+                TRACE_STATUS_FAILED,
+                actual_send_via="userbot_reply",
+                error_code="telegram_api_error",
+                error=f"{type(exc).__name__}: {exc}",
+            )
+            raise
+
+
+def _trace_command_io(client: TelegramClient, event: Any, trace: Any, *, command: str, plugin_key: str | None) -> tuple[Any, Any]:
+    if trace is None:
+        return client, event
+    return (
+        _TraceCommandClient(client, trace, command=command, plugin_key=plugin_key),
+        _TraceCommandEvent(event, trace, command=command, plugin_key=plugin_key),
+    )
+
+
+def _command_trace_action(
+    action_type: str,
+    *,
+    command: str,
+    plugin_key: str | None,
+    text: Any = None,
+    chat_id: Any = None,
+    message_id: Any = None,
+    reply_to_message_id: Any = None,
+) -> dict[str, Any]:
+    action: dict[str, Any] = {
+        "type": action_type,
+        "send_via": "userbot_reply",
+        "command": command,
+    }
+    if plugin_key:
+        action["plugin_key"] = plugin_key
+    if chat_id not in (None, ""):
+        action["chat_id"] = chat_id
+    if message_id not in (None, ""):
+        action["message_id"] = message_id
+    if reply_to_message_id not in (None, ""):
+        action["reply_to_message_id"] = reply_to_message_id
+    if text not in (None, ""):
+        action["text"] = str(text)[:4000]
+    return action
+
+
+def _command_result_payload(result: Any) -> dict[str, Any]:
+    if isinstance(result, list):
+        first = result[0] if result else None
+        return {
+            "message_id": getattr(first, "id", None) or getattr(first, "message_id", None),
+            "chat_id": getattr(first, "chat_id", None),
+            "count": len(result),
+        }
+    return {
+        "message_id": getattr(result, "id", None) or getattr(result, "message_id", None),
+        "chat_id": getattr(result, "chat_id", None),
+    }
 
 
 def current_sudo_prefix(*, fallback: str | None = None) -> str:
@@ -1313,6 +1651,55 @@ def _command_dispatch_target(cmd: str, args_raw: str) -> tuple[str, str | None]:
     return "unknown", None
 
 
+def _command_event_bus_decisions(
+    event_payload: dict[str, Any],
+    *,
+    cmd: str,
+    target_type: str,
+    plugin_key: str | None,
+) -> list[SubscriptionDecision]:
+    """Run administrator commands through a virtual Event Bus decision.
+
+    Builtin/template commands are not installed plugins, but final Trace must
+    still show a real Event Bus-style decision before the compatibility command
+    handler runs.
+    """
+
+    if target_type == "unknown":
+        return dispatch_event(event_payload, [], {"allowed_chat_ids": "*"}).decisions
+    sender = event_payload.get("sender") if isinstance(event_payload.get("sender"), dict) else {}
+    sender_user_id = sender.get("user_id")
+    scope = "owner_only" if sender_user_id is not None else "all_allowed_chats"
+    account_state = {"allowed_chat_ids": "*"}
+    if sender_user_id is not None:
+        account_state["owner_user_ids"] = [sender_user_id]
+    subscription = EventSubscription(
+        plugin_key=plugin_key or f"system:{target_type}",
+        entry_key=target_type,
+        sources=["userbot"],
+        events=["command"],
+        scope=scope,
+        filters={"commands": [cmd]},
+        dispatch_mode="admin_command",
+    )
+    return dispatch_event(event_payload, [subscription], account_state).decisions
+
+
+def _command_decisions_detail(decisions: list[SubscriptionDecision]) -> list[dict[str, Any]]:
+    return [
+        {
+            "plugin_key": item.plugin_key,
+            "entry_key": item.entry_key,
+            "matched": item.matched,
+            "reason_code": item.reason_code,
+            "dispatch_mode": item.dispatch_mode,
+            "scope": item.scope,
+            "filters": item.filters,
+        }
+        for item in decisions
+    ]
+
+
 async def _dispatch_command(
     client: TelegramClient,
     event,
@@ -1326,19 +1713,24 @@ async def _dispatch_command(
     trace = None
     final_status = TRACE_STATUS_SKIPPED if target_type == "unknown" else TRACE_STATUS_OK
     if await _command_trace_enabled():
-        trace = await start_trace(
-            normalize_userbot_event(
-                account_id,
-                event,
-                command_meta={
-                    "command": cmd,
-                    "args_raw": args_raw,
-                    "prefix": help_prefix,
-                    "target_type": target_type,
-                    "plugin_key": plugin_key,
-                },
-            )
+        event_payload = normalize_userbot_event(
+            account_id,
+            event,
+            command_meta={
+                "command": cmd,
+                "args_raw": args_raw,
+                "prefix": help_prefix,
+                "target_type": target_type,
+                "plugin_key": plugin_key,
+            },
         )
+        command_decisions = _command_event_bus_decisions(
+            event_payload,
+            cmd=cmd,
+            target_type=target_type,
+            plugin_key=plugin_key,
+        )
+        trace = await start_trace(event_payload)
         try:
             event.trace_id = trace.trace_id
         except Exception:  # noqa: BLE001
@@ -1356,15 +1748,37 @@ async def _dispatch_command(
             "command_parse",
             TRACE_STATUS_OK if target_type != "unknown" else TRACE_STATUS_SKIPPED,
             component="userbot_command",
-            reason_code="command_matched" if target_type != "unknown" else "command_not_found",
+            reason_code="command_matched" if target_type != "unknown" else "command_not_matched",
             command=cmd,
             target_type=target_type,
             plugin_key=plugin_key,
+            event_bus_decisions=_command_decisions_detail(command_decisions),
+        )
+        await record_span(
+            trace,
+            "subscription_match",
+            TRACE_STATUS_OK if target_type != "unknown" else TRACE_STATUS_SKIPPED,
+            component="userbot_command",
+            reason_code="command_matched" if target_type != "unknown" else "command_not_matched",
+            message="管理员命令已映射为 Event Bus command decision。",
+            command=cmd,
+            target_type=target_type,
+            plugin_key=plugin_key,
+            dispatch_mode="admin_command",
+            scope="owner_only",
+            event_bus_decisions=_command_decisions_detail(command_decisions),
         )
     try:
-        await _dispatch_command_inner(
+        traced_client, traced_event = _trace_command_io(
             client,
             event,
+            trace,
+            command=cmd,
+            plugin_key=plugin_key,
+        )
+        await _dispatch_command_inner(
+            traced_client,
+            traced_event,
             cmd,
             args_raw,
             account_id=account_id,
@@ -1383,6 +1797,94 @@ async def _dispatch_command(
         raise
     finally:
         await finish_trace(trace, final_status)
+
+
+async def _dispatch_sudo_denial(
+    client: TelegramClient,
+    event,
+    cmd: str,
+    args_raw: str,
+    *,
+    account_id: int,
+    help_prefix: str,
+    error_msg: str,
+    respond: bool,
+) -> None:
+    target_type, plugin_key = _command_dispatch_target(cmd, args_raw)
+    trace = None
+    if await _command_trace_enabled():
+        event_payload = normalize_userbot_event(
+            account_id,
+            event,
+            command_meta={
+                "command": cmd,
+                "args_raw": args_raw,
+                "prefix": help_prefix,
+                "target_type": target_type,
+                "plugin_key": plugin_key,
+                "sudo_denied": True,
+            },
+        )
+        command_decisions = _command_event_bus_decisions(
+            event_payload,
+            cmd=cmd,
+            target_type=target_type,
+            plugin_key=plugin_key,
+        )
+        trace = await start_trace(event_payload)
+        try:
+            event.trace_id = trace.trace_id
+        except Exception:  # noqa: BLE001
+            pass
+        await record_span(
+            trace,
+            "receive",
+            TRACE_STATUS_OK,
+            component="userbot_command",
+            command=cmd,
+            args_raw=args_raw,
+        )
+        await record_span(
+            trace,
+            "command_parse",
+            TRACE_STATUS_FAILED,
+            component="userbot_command",
+            reason_code="command_unauthorized",
+            command=cmd,
+            target_type=target_type,
+            plugin_key=plugin_key,
+            error=error_msg,
+            event_bus_decisions=_command_decisions_detail(command_decisions),
+        )
+        await record_span(
+            trace,
+            "subscription_match",
+            TRACE_STATUS_FAILED,
+            component="userbot_command",
+            reason_code="command_unauthorized",
+            message="管理员命令权限校验失败，未进入处理器。",
+            command=cmd,
+            target_type=target_type,
+            plugin_key=plugin_key,
+            dispatch_mode="admin_command",
+            scope="owner_only",
+            event_bus_decisions=_command_decisions_detail(command_decisions),
+        )
+    try:
+        _, traced_event = _trace_command_io(
+            client,
+            event,
+            trace,
+            command=cmd,
+            plugin_key=plugin_key,
+        )
+        text = f"✗ Sudo 权限拒绝：{error_msg}"
+        if respond:
+            await traced_event.respond(text)
+        else:
+            await traced_event.edit(text)
+    finally:
+        await finish_trace(trace, TRACE_STATUS_FAILED)
 
 
 async def _dispatch_command_inner(
@@ -1550,12 +2052,27 @@ def make_command_handler(client: TelegramClient, account_id: int, prefix: str | 
                 if incoming_sudo:
                     if not _should_report_incoming_sudo_denial(error_msg):
                         return
-                    try:
-                        await event.respond(f"✗ Sudo 权限拒绝：{error_msg}")
-                    except Exception:
-                        pass
+                    await _dispatch_sudo_denial(
+                        client,
+                        event,
+                        cmd,
+                        args_raw,
+                        account_id=account_id,
+                        help_prefix=sudo_p,
+                        error_msg=error_msg,
+                        respond=True,
+                    )
                 else:
-                    await event.edit(f"✗ Sudo 权限拒绝：{error_msg}")
+                    await _dispatch_sudo_denial(
+                        client,
+                        event,
+                        cmd,
+                        args_raw,
+                        account_id=account_id,
+                        help_prefix=sudo_p,
+                        error_msg=error_msg,
+                        respond=False,
+                    )
                 return
             dispatch_event = _IncomingSudoEvent(event) if incoming_sudo else event
             await _dispatch_command(

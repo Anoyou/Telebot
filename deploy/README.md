@@ -69,18 +69,40 @@ docker compose logs -f web
 
 ## 升级与回滚
 
-升级：
+稳定版升级：
 
 ```bash
-git pull --ff-only
-make prod-up
+cd /opt/telepilot
+./deploy/backup.sh
+cp .env "/var/backups/telebot/env-$(date +%Y%m%d-%H%M).bak"
+cp docker-compose.yml "/var/backups/telebot/docker-compose-$(date +%Y%m%d-%H%M).yml.bak"
+TELEPILOT_UPDATE_BRANCH=main make prod-update
+```
+
+测试发布候选分支时不要覆盖 `main`，必须显式指定分支：
+
+```bash
+cd /opt/telepilot
+TELEPILOT_UPDATE_BRANCH=codex/0.33-interaction-framework make prod-update
+```
+
+部署后至少验收：
+
+```bash
+git rev-parse HEAD
+docker compose ps
+curl -fsS http://127.0.0.1:8000/healthz
+docker compose logs --tail=100 web
 ```
 
 回滚：
 
 ```bash
+cd /opt/telepilot
 git checkout <tag-or-commit>
 make prod-up
 ```
+
+如果要恢复数据库或 sessions，先确认 `.env` 里的 `MASTER_KEY` 与备份时一致，再执行 `deploy/restore.sh`。
 
 部分 Docker 默认值、数据库默认名和 volume 名仍保留 `telebot` 历史兼容命名，不影响对外产品名 TelePilot。

@@ -397,7 +397,7 @@ export function SettingsIndex() {
               disabled={!quickAid}
               onClick={() => {
                 setQuickBindOpen(false);
-                nav(`/accounts/${quickAid}?tab=bot-management`);
+                nav(`/interaction?aid=${quickAid}`);
               }}
             >
               前往配置
@@ -407,7 +407,7 @@ export function SettingsIndex() {
       </Dialog>
 
       <Tabs value={tab} onValueChange={(v) => setTab(v as typeof tab)}>
-        <TabsList>
+        <TabsList className="flex h-auto flex-wrap justify-start gap-1">
           <TabsTrigger value="account" className="gap-1.5">
             <ShieldCheck className="h-4 w-4" /> 用户与管理
           </TabsTrigger>
@@ -627,9 +627,9 @@ export function SettingsIndex() {
 
           <Card>
             <CardHeader>
-              <CardTitle className="text-base">运行日志设置</CardTitle>
+              <CardTitle className="text-base">运行日志与 Trace / Event Bus 设置</CardTitle>
               <CardDescription>
-                控制运行日志等级、保留时间和单条日志长度。日志等级保存后立即影响新日志落库，0 天表示不自动删除。
+                控制运行日志、Trace、Event Bus、Inline 和 native_raw 保留策略。日志等级保存后立即影响新日志落库，0 天表示不自动删除。
               </CardDescription>
             </CardHeader>
             <CardContent>

@@ -8,6 +8,7 @@ import {
   MessageSquare,
   RefreshCw,
   Route,
+  ScrollText,
   ShieldCheck,
 } from "lucide-react";
 
@@ -128,7 +129,7 @@ export function InteractionIndex() {
       <PageHeader
         icon={Bot}
         title="交互中心"
-        description="按账号管理交互 Bot、插件玩法入口、触发规则和会话运行状态。"
+        description="按账号管理交互 Bot、Event Bus 订阅条件、插件入口和会话运行状态。"
         actions={
           <>
             <Button
@@ -141,6 +142,14 @@ export function InteractionIndex() {
               <RefreshCw className={accountsQ.isFetching || interactionQ.isFetching ? "mr-1 h-4 w-4 animate-spin" : "mr-1 h-4 w-4"} />
               刷新
             </Button>
+            {selectedAid !== null ? (
+              <Button asChild variant="outline" size="sm">
+                <Link to={`/logs?account_id=${selectedAid}`}>
+                  <ScrollText className="mr-1 h-4 w-4" />
+                  日志排障
+                </Link>
+              </Button>
+            ) : null}
             {selectedAid !== null ? (
               <Button asChild variant="outline" size="sm">
                 <Link to={`/accounts/${selectedAid}?tab=interaction-bot`}>
@@ -162,7 +171,7 @@ export function InteractionIndex() {
             </CardTitle>
           </CardHeader>
           <CardContent className="flex flex-col gap-3 text-sm text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
-            <span>交互中心需要先绑定一个 Telegram 账号，再配置对应的交互 Bot 和规则。</span>
+            <span>交互中心需要先绑定一个 Telegram 账号，再配置对应的交互 Bot 和 Event Bus 订阅条件。</span>
             <Button asChild size="sm">
               <Link to="/accounts/new">添加账号</Link>
             </Button>
@@ -216,7 +225,7 @@ export function InteractionIndex() {
               />
               <SignalPill
                 tone={activeRules > 0 ? "primary" : "neutral"}
-                label="启用规则"
+                label="启用订阅"
                 value={`${activeRules}/${rules.length} · ${chatCoverage} 群`}
               />
               <SignalPill
@@ -238,10 +247,10 @@ export function InteractionIndex() {
                 <div>
                   <CardTitle className="flex items-center gap-2 text-base">
                     <Route className="h-4 w-4 text-primary" />
-                    规则与插件入口
+                    Event Bus 订阅与插件入口
                   </CardTitle>
                   <p className="mt-1 text-sm text-muted-foreground">
-                    新增规则、选择插件入口、配置触发词和参数都在这里完成，保存后当前账号立即使用这套交互规则。
+                    在这里新增订阅条件、选择插件入口、配置触发词和参数；保存后会映射到当前账号的 Event Bus 投递链路。
                   </p>
                 </div>
                 <div className="flex flex-wrap gap-2">

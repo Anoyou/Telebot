@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import ast
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -31,10 +33,13 @@ def test_event_bus_exports_stable_status_and_reason_code_dictionary() -> None:
     } <= EVENT_TRACE_STATUSES
     assert {
         "account_not_matched",
+        "account_bot_user_unauthorized",
+        "action_failed",
         "plugin_not_installed",
         "plugin_disabled",
         "manifest_invalid",
         "plugin_load_failed",
+        "matched",
         "event_type_not_subscribed",
         "source_not_subscribed",
         "scope_not_matched",
@@ -42,17 +47,38 @@ def test_event_bus_exports_stable_status_and_reason_code_dictionary() -> None:
         "session_not_found",
         "session_expired",
         "rate_limited",
+        "callback_query",
+        "command_matched",
+        "command_not_matched",
         "command_unauthorized",
+        "contract_warning",
+        "callback_query_id_missing",
+        "entry_key_missing",
+        "empty_message_text",
+        "event_bus_delivery_disabled",
+        "handler_error",
         "inline_disabled",
+        "inline_query_answer_failed",
+        "inline_query_id_missing",
+        "media_payload_empty",
+        "media_payload_invalid",
+        "media_payload_missing",
         "native_raw_not_allowed",
         "native_raw_skipped",
+        "permission_denied",
         "send_channel_deprecated",
+        "session_control_action",
         "bot_not_configured",
+        "bot_self_message",
+        "bot_token_missing",
         "userbot_offline",
         "settlement_requires_userbot",
+        "subscription_load_failed",
+        "subscription_not_matched",
         "telegram_api_error",
         "plugin_runtime_error",
         "trace_write_failed",
+        "unsupported_send_via",
     } <= EVENT_REASON_CODES
     assert {
         "all_messages",
@@ -62,6 +88,44 @@ def test_event_bus_exports_stable_status_and_reason_code_dictionary() -> None:
         "command",
         "callback_query",
     } <= VALID_EVENT_TYPES
+
+
+def test_runtime_reason_code_literals_are_registered() -> None:
+    app_root = Path(__file__).resolve().parents[1]
+    used: set[str] = set()
+
+    def _collect_constant_strings(node: ast.AST) -> set[str]:
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            return {node.value}
+        if isinstance(node, ast.IfExp):
+            return _collect_constant_strings(node.body) | _collect_constant_strings(node.orelse)
+        if isinstance(node, ast.BoolOp):
+            out: set[str] = set()
+            for value in node.values:
+                out.update(_collect_constant_strings(value))
+            return out
+        if isinstance(node, ast.List | ast.Tuple | ast.Set):
+            out: set[str] = set()
+            for item in node.elts:
+                out.update(_collect_constant_strings(item))
+            return out
+        return set()
+
+    for path in app_root.rglob("*.py"):
+        if "tests" in path.parts:
+            continue
+        tree = ast.parse(path.read_text())
+        for node in ast.walk(tree):
+            if isinstance(node, ast.keyword) and node.arg == "reason_code":
+                used.update(_collect_constant_strings(node.value))
+            if isinstance(node, ast.Dict):
+                for key, value in zip(node.keys, node.values, strict=False):
+                    if (
+                        isinstance(key, ast.Constant)
+                        and key.value == "reason_code"
+                    ):
+                        used.update(_collect_constant_strings(value))
+    assert used <= EVENT_REASON_CODES
 
 
 def test_normalize_bot_update_projects_inline_query() -> None:

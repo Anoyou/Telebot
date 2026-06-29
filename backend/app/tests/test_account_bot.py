@@ -7,7 +7,7 @@ import base64
 import json
 import logging
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -262,6 +262,7 @@ async def test_interaction_delivery_delete_failure_records_failed_action(monkeyp
 
     record_action.assert_awaited_once()
     assert record_action.await_args.args[2] == "failed"
+    assert record_action.await_args.kwargs["error_code"] == "telegram_api_error"
 
 
 @pytest.mark.asyncio
@@ -427,9 +428,97 @@ async def test_interaction_delivery_executor_rejects_removed_channel_before_send
     )
 
     assert ok is False
-    assert result == {"error": "unsupported send_via: bbot_notice"}
+    assert result == {
+        "error": "unsupported send_via: bbot_notice",
+        "error_code": "unsupported_send_via",
+    }
     send_message.assert_not_awaited()
     run_worker_action.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_interaction_delivery_pin_missing_token_records_bot_token_missing(monkeypatch) -> None:
+    incoming = account_bot_runtime.Incoming(
+        account_id=1,
+        token="",
+        update_id=10,
+        user_id=20,
+        chat_id=-100,
+        message_id=30,
+        text="",
+    )
+    record_action = AsyncMock()
+    monkeypatch.setattr("app.services.interaction.delivery.record_action", record_action)
+    executor = InteractionDeliveryExecutor(
+        incoming=incoming,
+        write_log=AsyncMock(),
+        run_worker_action=AsyncMock(),
+        log_context=account_bot_runtime._interaction_log_context,
+        trace_context=account_bot_runtime._interaction_trace_context,
+    )
+
+    await executor.apply([
+        {
+            "type": "pin_message",
+            "send_via": "interaction_bot",
+            "message_id": 30,
+            "context": {"trace_id": "evt_test"},
+        }
+    ])
+
+    record_action.assert_awaited_once()
+    assert record_action.await_args.args[2] == "failed"
+    assert record_action.await_args.kwargs["error_code"] == "bot_token_missing"
+
+
+@pytest.mark.asyncio
+async def test_interaction_delivery_send_pin_failure_records_dedicated_action(monkeypatch) -> None:
+    incoming = account_bot_runtime.Incoming(
+        account_id=1,
+        token="123:token",
+        update_id=10,
+        user_id=20,
+        chat_id=-100,
+        message_id=30,
+        text="",
+    )
+    send_message = AsyncMock(return_value={"message_id": 31})
+    pin_message = AsyncMock(side_effect=RuntimeError("pin denied"))
+    record_action = AsyncMock()
+    monkeypatch.setattr(account_bot_service, "send_message", send_message)
+    monkeypatch.setattr(account_bot_service, "call_bot_api", pin_message)
+    monkeypatch.setattr("app.services.interaction.delivery.record_action", record_action)
+    executor = InteractionDeliveryExecutor(
+        incoming=incoming,
+        write_log=AsyncMock(),
+        run_worker_action=AsyncMock(),
+        log_context=account_bot_runtime._interaction_log_context,
+        trace_context=account_bot_runtime._interaction_trace_context,
+    )
+
+    await executor.apply([
+        {
+            "type": "send_message",
+            "send_via": "interaction_bot",
+            "text": "需要置顶",
+            "pin": True,
+            "context": {"trace_id": "evt_test"},
+        }
+    ])
+
+    assert record_action.await_count == 2
+    send_call, pin_call = record_action.await_args_list
+    assert send_call.args[1]["type"] == "send_message"
+    assert send_call.args[2] == "ok"
+    assert send_call.kwargs["actual_send_via"] == "interaction_bot"
+    assert pin_call.args[1]["type"] == "pin_message"
+    assert pin_call.args[2] == "failed"
+    assert pin_call.kwargs["error_code"] == "telegram_api_error"
+    pin_message.assert_awaited_once_with(
+        "123:token",
+        "pinChatMessage",
+        {"chat_id": -100, "message_id": 31},
+    )
 
 
 @pytest.mark.asyncio
@@ -445,8 +534,10 @@ async def test_interaction_delivery_executor_deletes_placeholder_from_trigger_ch
     )
     send_message = AsyncMock(return_value={"message_id": 90})
     delete_message = AsyncMock()
+    record_action = AsyncMock()
     monkeypatch.setattr(account_bot_service, "send_message", send_message)
     monkeypatch.setattr(account_bot_service, "delete_message", delete_message)
+    monkeypatch.setattr("app.services.interaction.delivery.record_action", record_action)
     executor = InteractionDeliveryExecutor(
         incoming=incoming,
         write_log=AsyncMock(),
@@ -462,6 +553,7 @@ async def test_interaction_delivery_executor_deletes_placeholder_from_trigger_ch
                 "send_via": "interaction_bot",
                 "chat_id": -200,
                 "text": "发到目标群",
+                "context": {"trace_id": "evt_placeholder"},
             }
         ],
         replace_message_id=77,
@@ -475,6 +567,12 @@ async def test_interaction_delivery_executor_deletes_placeholder_from_trigger_ch
         reply_markup=None,
     )
     delete_message.assert_awaited_once_with("123:token", -100, 77)
+    assert record_action.await_count == 2
+    action_types = [call.args[1]["type"] for call in record_action.await_args_list]
+    assert action_types == ["delete_message", "send_message"]
+    assert record_action.await_args_list[0].args[0] == {"trace_id": "evt_placeholder"}
+    assert record_action.await_args_list[0].args[2] == account_bot_runtime.TRACE_STATUS_OK
+    assert record_action.await_args_list[1].args[2] == account_bot_runtime.TRACE_STATUS_OK
 
 
 @pytest.mark.asyncio
@@ -482,13 +580,15 @@ async def test_message_ops_buffers_standard_actions() -> None:
     ops = BufferedMessageOps()
 
     await ops.send(channel="interaction_bot", chat_id=-100, text="题面", reply_markup={"inline_keyboard": []})
+    await ops.edit(channel="interaction_bot", chat_id=-100, message_id=41, text="新题面")
     await ops.answer_callback(callback_query_id="cb-1", text="收到")
     await ops.delete(message_id=42)
 
-    assert [item["type"] for item in ops.actions] == ["send_message", "answer_callback", "delete_message"]
+    assert [item["type"] for item in ops.actions] == ["send_message", "edit_message", "answer_callback", "delete_message"]
     assert ops.actions[0]["send_via"] == "interaction_bot"
     assert ops.actions[0]["reply_markup"] == {"inline_keyboard": []}
-    assert ops.actions[1]["callback_query_id"] == "cb-1"
+    assert ops.actions[1]["message_id"] == 41
+    assert ops.actions[2]["callback_query_id"] == "cb-1"
 
 
 @pytest.mark.asyncio
@@ -732,7 +832,7 @@ async def test_interaction_without_result_contract_trusts_standard_channels(monk
     warn_calls = [
         call
         for call in account_bot_runtime._write_interaction_runtime_log.await_args_list
-        if "removed or unsupported send_via" in call.args[2]
+        if "deprecated send_via" in call.args[2]
     ]
     assert len(warn_calls) == 2
     blocked_raw = [call.kwargs["requested_send_via_raw"] for call in warn_calls]
@@ -766,6 +866,33 @@ async def test_deprecated_notice_channels_record_failed_action_reason(monkeypatc
 
     assert guarded == []
     assert record_action.await_args.kwargs["error_code"] == "send_channel_deprecated"
+
+
+@pytest.mark.asyncio
+async def test_account_bot_answer_callback_records_event_action(monkeypatch) -> None:
+    answer = AsyncMock()
+    record_action = AsyncMock()
+    monkeypatch.setattr(account_bot_service, "answer_callback", answer)
+    monkeypatch.setattr(account_bot_runtime, "record_action", record_action)
+    incoming = account_bot_runtime.Incoming(
+        account_id=1,
+        token="123:token",
+        update_id=10,
+        user_id=20,
+        chat_id=-100,
+        message_id=30,
+        text="",
+        callback_id="cb-1",
+        trace_id="evt_callback",
+    )
+
+    await account_bot_runtime._answer_callback(incoming, text="已处理")
+
+    answer.assert_awaited_once_with("123:token", "cb-1", text="已处理", show_alert=False)
+    record_action.assert_awaited_once()
+    assert record_action.await_args.args[1]["type"] == "answer_callback"
+    assert record_action.await_args.args[2] == account_bot_runtime.TRACE_STATUS_OK
+    assert record_action.await_args.kwargs["actual_send_via"] == "interaction_bot"
 
 
 @pytest.mark.asyncio
@@ -1813,10 +1940,13 @@ async def test_interaction_result_contract_warns_unsupported_mixed_channel_optio
         chat_id=-100,
         message_id=30,
         text="",
+        trace_id="evt_mixed_notice",
     )
     write_log = AsyncMock()
+    record_action = AsyncMock()
     monkeypatch.setattr(account_bot_service, "declared_module_entry_manifest", lambda *_args: {})
     monkeypatch.setattr(account_bot_runtime, "_write_interaction_runtime_log", write_log)
+    monkeypatch.setattr(account_bot_runtime, "record_action", record_action)
 
     guarded = await account_bot_runtime._guard_interaction_actions(
         incoming,
@@ -1830,16 +1960,13 @@ async def test_interaction_result_contract_warns_unsupported_mixed_channel_optio
         ],
     )
 
-    assert guarded == [
-        {
-            "type": "send_message",
-            "send_via": "interaction_bot",
-            "text": "ok",
-        }
-    ]
+    assert guarded == []
     assert write_log.await_count == 1
-    assert write_log.await_args.args[1:3] == ("warn", "interaction action contains unsupported send_via options")
+    assert write_log.await_args.args[1:3] == ("warn", "interaction action failed: deprecated send_via")
+    assert write_log.await_args.kwargs["guard_level"] == "failed"
+    assert write_log.await_args.kwargs["reason_code"] == "send_channel_deprecated"
     assert write_log.await_args.kwargs["unsupported_send_via"] == ["notice"]
+    assert record_action.await_args.kwargs["error_code"] == "send_channel_deprecated"
 
 
 @pytest.mark.asyncio
@@ -1873,14 +2000,10 @@ async def test_interaction_result_contract_ignores_removed_channel_in_manifest(m
         ],
     )
 
-    assert guarded == [
-        {
-            "type": "send_message",
-            "send_via": "interaction_bot",
-            "text": "ok",
-        }
-    ]
+    assert guarded == []
     assert write_log.await_count == 1
+    assert write_log.await_args.kwargs["guard_level"] == "failed"
+    assert write_log.await_args.kwargs["reason_code"] == "send_channel_deprecated"
     assert write_log.await_args.kwargs["unsupported_send_via"] == ["notice"]
 
 
@@ -2101,6 +2224,27 @@ def test_event_bus_payload_includes_native_raw_only_for_declared_capability(monk
     assert payload["native_raw_meta"]["enabled"] is True
     assert payload["native_raw_meta"]["stored_in_trace"] is False
     assert payload["native_raw_meta"]["reason_code"] is None
+
+
+def test_telegram_native_raw_boolean_true_is_not_explicit_capability(monkeypatch) -> None:
+    monkeypatch.setattr(
+        account_bot_service,
+        "declared_plugin_capabilities",
+        lambda _module_key: {"telegram_native_raw": True},
+    )
+
+    assert account_bot_service.plugin_declares_telegram_native_raw("demo", source="interaction_bot") is False
+
+
+def test_telegram_native_raw_requires_enabled_object_and_source(monkeypatch) -> None:
+    monkeypatch.setattr(
+        account_bot_service,
+        "declared_plugin_capabilities",
+        lambda _module_key: {"telegram_native_raw": {"enabled": True, "sources": ["userbot"]}},
+    )
+
+    assert account_bot_service.plugin_declares_telegram_native_raw("demo", source="interaction_bot") is False
+    assert account_bot_service.plugin_declares_telegram_native_raw("demo", source="userbot") is True
 
 
 @pytest.mark.asyncio
@@ -3253,6 +3397,7 @@ async def test_transfer_notice_reply_payer_is_used_for_module_owner(monkeypatch)
 
     assert run_entry.await_count == 1
     payload = run_entry.await_args.kwargs["payload"]
+    assert payload["trace_id"]
     assert payload["payer_user_id"] == 111
     assert payload["payer_name"] == "玩家A"
     assert payload["actor"]["user_id"] == 111
@@ -4866,6 +5011,8 @@ async def test_math10_module_rule_falls_back_when_worker_plugin_not_loaded(monke
     monkeypatch.setattr(account_bot_runtime, "get_redis", lambda: _MemoryRedis())
     monkeypatch.setattr(account_bot_runtime, "_load_account_holder_label", AsyncMock(return_value="@owner"))
     monkeypatch.setattr(account_bot_runtime, "_resolve_payout_mode", AsyncMock(return_value="manual"))
+    dispatch_event = MagicMock(side_effect=account_bot_runtime.dispatch_event)
+    monkeypatch.setattr(account_bot_runtime, "dispatch_event", dispatch_event)
     monkeypatch.setattr(
         account_bot_runtime,
         "_run_worker_interaction_entry",
@@ -4902,6 +5049,8 @@ async def test_math10_module_rule_falls_back_when_worker_plugin_not_loaded(monke
 
     assert ok is True
     assert keep_session is True
+    dispatch_event.assert_called_once()
+    assert dispatch_event.call_args.args[1][0].dispatch_mode == "rule_bound"
     send.assert_awaited_once()
     assert send.await_args.args[:3] == ("bbot-token", -100123, "正在启动互动模块...")
     edit.assert_awaited_once()
@@ -5245,6 +5394,8 @@ async def test_interaction_plain_message_routes_to_worker_entry_as_message(monke
     send = AsyncMock()
     monkeypatch.setattr(account_bot_runtime, "AsyncSessionLocal", lambda: _DB())
     monkeypatch.setattr(account_bot_runtime, "get_redis", lambda: _MemoryRedis())
+    dispatch_event = MagicMock(side_effect=account_bot_runtime.dispatch_event)
+    monkeypatch.setattr(account_bot_runtime, "dispatch_event", dispatch_event)
     monkeypatch.setattr(account_bot_runtime, "_run_worker_interaction_entry", run_entry)
     monkeypatch.setattr(account_bot_runtime, "_load_interaction_session", AsyncMock(return_value={"rule_id": "dice-active"}))
     monkeypatch.setattr(account_bot_service, "send_message", send)
@@ -5290,6 +5441,8 @@ async def test_interaction_plain_message_routes_to_worker_entry_as_message(monke
     )
 
     assert run_entry.await_count == 1
+    dispatch_event.assert_called_once()
+    assert dispatch_event.call_args.args[1][0].dispatch_mode == "rule_bound"
     assert run_entry.await_args.kwargs["plugin_key"] == "dice_grid_hunt"
     assert run_entry.await_args.kwargs["entry_key"] == "answer_dice_grid_hunt"
     payload = run_entry.await_args.kwargs["payload"]
@@ -5331,6 +5484,8 @@ async def test_interaction_callback_routes_to_worker_entry_and_answers_callback(
     answer = AsyncMock()
     monkeypatch.setattr(account_bot_runtime, "AsyncSessionLocal", lambda: _DB())
     monkeypatch.setattr(account_bot_runtime, "get_redis", lambda: _MemoryRedis())
+    dispatch_event = MagicMock(side_effect=account_bot_runtime.dispatch_event)
+    monkeypatch.setattr(account_bot_runtime, "dispatch_event", dispatch_event)
     monkeypatch.setattr(account_bot_runtime, "_run_worker_interaction_entry", run_entry)
     monkeypatch.setattr(account_bot_runtime, "_load_interaction_session", AsyncMock(return_value={"rule_id": "button-game"}))
     monkeypatch.setattr(account_bot_service, "send_message", send)
@@ -5382,6 +5537,8 @@ async def test_interaction_callback_routes_to_worker_entry_and_answers_callback(
     )
 
     assert run_entry.await_count == 1
+    dispatch_event.assert_called_once()
+    assert dispatch_event.call_args.args[1][0].dispatch_mode == "rule_bound"
     assert run_entry.await_args.kwargs["plugin_key"] == "button_game"
     payload = run_entry.await_args.kwargs["payload"]
     assert payload["event_type"] == "callback_query"
@@ -5406,7 +5563,7 @@ async def test_interaction_callback_routes_to_worker_entry_and_answers_callback(
     assert send.await_args.kwargs["reply_markup"] == {
         "inline_keyboard": [[{"text": "继续", "callback_data": "next"}]]
     }
-    answer.assert_awaited_once_with("bbot-token", "callback-1")
+    answer.assert_awaited_once_with("bbot-token", "callback-1", text="", show_alert=False)
 
 
 @pytest.mark.asyncio
@@ -5465,7 +5622,7 @@ async def test_interaction_callback_without_actions_is_still_acknowledged(monkey
     )
 
     assert run_entry.await_count == 1
-    answer.assert_awaited_once_with("bbot-token", "callback-2")
+    answer.assert_awaited_once_with("bbot-token", "callback-2", text="", show_alert=False)
 
 
 @pytest.mark.asyncio
@@ -5745,9 +5902,28 @@ async def test_interaction_close_command_clears_user_scoped_sessions(monkeypatch
     redis.data[other_key] = "session-333"
     send = AsyncMock()
     run_entry = AsyncMock(return_value=(True, None, []))
+    trace_counter = {"value": 0}
+
+    async def _start_trace(payload):  # noqa: ANN001
+        trace_counter["value"] += 1
+        return SimpleNamespace(
+            trace_id=f"evt_{payload.get('event_type', 'message')}_{trace_counter['value']}",
+            account_id=payload.get("account_id"),
+            event_type=payload.get("event_type"),
+        )
+
+    start_trace = AsyncMock(side_effect=_start_trace)
+    record_span = AsyncMock()
+    record_action = AsyncMock()
+    finish_trace = AsyncMock()
     monkeypatch.setattr(account_bot_runtime, "AsyncSessionLocal", lambda: _DB())
     monkeypatch.setattr(account_bot_runtime, "get_redis", lambda: redis)
     monkeypatch.setattr(account_bot_runtime, "_run_worker_interaction_entry", run_entry)
+    monkeypatch.setattr(account_bot_runtime, "_event_framework_flags", AsyncMock(return_value={"trace_enabled": True}))
+    monkeypatch.setattr(account_bot_runtime, "start_trace", start_trace)
+    monkeypatch.setattr(account_bot_runtime, "record_span", record_span)
+    monkeypatch.setattr(account_bot_runtime, "record_action", record_action)
+    monkeypatch.setattr(account_bot_runtime, "finish_trace", finish_trace)
     monkeypatch.setattr(account_bot_service, "send_message", send)
     monkeypatch.setattr(
         account_bot_service,
@@ -5774,7 +5950,31 @@ async def test_interaction_close_command_clears_user_scoped_sessions(monkeypatch
     assert other_key in redis.data
     assert run_entry.await_count == 2
     assert all(call.kwargs["payload"]["event_type"] == "session_close" for call in run_entry.await_args_list)
+    assert all(str(call.kwargs["payload"].get("trace_id", "")).startswith("evt_session_close") for call in run_entry.await_args_list)
+    session_close_payloads = [
+        call.args[0]
+        for call in start_trace.await_args_list
+        if isinstance(call.args[0], dict) and call.args[0].get("event_type") == "session_close"
+    ]
+    assert len(session_close_payloads) == 2
+    assert any(
+        call.args[1] == "subscription_match"
+        and call.kwargs.get("reason_code") == "matched"
+        and call.kwargs.get("dispatch_mode") == "rule_bound"
+        for call in record_span.await_args_list
+    )
+    assert any(
+        getattr(call.args[0], "event_type", None) == "session_close" and call.args[1] == account_bot_runtime.TRACE_STATUS_OK
+        for call in finish_trace.await_args_list
+    )
     assert "已结束 2 个进行中的游戏。" in send.await_args.args[2]
+    close_confirm_actions = [
+        call
+        for call in record_action.await_args_list
+        if call.args[1].get("type") == "send_message" and "已结束 2 个进行中的游戏。" in call.args[1].get("text", "")
+    ]
+    assert close_confirm_actions
+    assert close_confirm_actions[-1].args[0]["trace_id"] == "evt_message_1"
 
 
 @pytest.mark.asyncio
@@ -6574,6 +6774,80 @@ async def test_interaction_action_edit_message_passes_reply_markup(monkeypatch) 
 
     assert edit.await_args.args[:4] == ("bbot-token", -100123, 77, "请选择")
     assert edit.await_args.kwargs["reply_markup"] == reply_markup
+
+
+@pytest.mark.asyncio
+async def test_interaction_action_edit_message_records_dedicated_action(monkeypatch) -> None:
+    edit = AsyncMock(return_value={"message_id": 77})
+    record_action = AsyncMock()
+    monkeypatch.setattr(account_bot_service, "edit_message", edit)
+    monkeypatch.setattr("app.services.interaction.delivery.record_action", record_action)
+    incoming = account_bot_runtime.Incoming(
+        account_id=1,
+        token="bbot-token",
+        update_id=1,
+        user_id=456,
+        chat_id=-100123,
+        message_id=10,
+        text="",
+        trace_id="evt_edit",
+    )
+
+    await account_bot_runtime._apply_interaction_actions(
+        incoming,
+        [{"type": "edit_message", "text": "已更新", "message_id": 77}],
+    )
+
+    edit.assert_awaited_once_with("bbot-token", -100123, 77, "已更新", reply_markup=None)
+    assert record_action.await_args.args[1]["type"] == "edit_message"
+    assert record_action.await_args.args[2] == account_bot_runtime.TRACE_STATUS_OK
+
+
+@pytest.mark.asyncio
+async def test_interaction_action_edit_placeholder_failure_records_failed_action(monkeypatch) -> None:
+    edit = AsyncMock(side_effect=RuntimeError("edit denied"))
+    send = AsyncMock(return_value={"message_id": 88})
+    delete = AsyncMock()
+    record_action = AsyncMock()
+    monkeypatch.setattr(account_bot_service, "edit_message", edit)
+    monkeypatch.setattr(account_bot_service, "send_message", send)
+    monkeypatch.setattr(account_bot_service, "delete_message", delete)
+    monkeypatch.setattr("app.services.interaction.delivery.record_action", record_action)
+    incoming = account_bot_runtime.Incoming(
+        account_id=1,
+        token="bbot-token",
+        update_id=1,
+        user_id=456,
+        chat_id=-100123,
+        message_id=10,
+        text="",
+        trace_id="evt_edit_fallback",
+    )
+
+    await account_bot_runtime._apply_interaction_actions(
+        incoming,
+        [{"type": "send_message", "text": "新消息", "context": {"trace_id": "evt_edit_fallback"}}],
+        replace_message_id=77,
+    )
+
+    edit.assert_awaited_once_with("bbot-token", -100123, 77, "新消息", reply_markup=None)
+    send.assert_awaited_once_with(
+        "bbot-token",
+        -100123,
+        "新消息",
+        reply_to_message_id=None,
+        reply_markup=None,
+    )
+    delete.assert_awaited_once_with("bbot-token", -100123, 77)
+    action_types = [call.args[1]["type"] for call in record_action.await_args_list]
+    statuses = [call.args[2] for call in record_action.await_args_list]
+    assert action_types == ["edit_message", "delete_message", "send_message"]
+    assert statuses == [
+        account_bot_runtime.TRACE_STATUS_FAILED,
+        account_bot_runtime.TRACE_STATUS_OK,
+        account_bot_runtime.TRACE_STATUS_OK,
+    ]
+    assert record_action.await_args_list[0].kwargs["error_code"] == "telegram_api_error"
 
 
 @pytest.mark.asyncio

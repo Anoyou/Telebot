@@ -709,8 +709,6 @@ def plugin_declares_telegram_native_raw(module_key: str | None, *, source: str =
 
     capabilities = declared_plugin_capabilities(module_key)
     raw = capabilities.get("telegram_native_raw")
-    if raw is True:
-        return True
     if not isinstance(raw, dict) or not bool(raw.get("enabled")):
         return False
     sources = raw.get("sources")

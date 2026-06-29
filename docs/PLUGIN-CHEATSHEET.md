@@ -33,3 +33,17 @@
 - 维护示例：新主模板看 `examples/plugins/event_bus_demo`；HTTP 看 `with_http`；AI 看 `with_ai`；旧交互迁移看 `with_interaction`。
 - 迁移边界：平台功能不伪装成插件；官方可选/官方远程插件必须完整声明；示例插件只用于学习和 CI；用户安装插件可保留代码但启用/更新时要提示规范警告。
 - 验证示例：`python scripts/validate-plugin-examples.py`；检查已安装互动插件：`python scripts/validate-installed-interaction-plugins.py`。
+
+常见 `reason_code` 快查：
+
+| reason_code | 含义 |
+| --- | --- |
+| `matched` | 订阅命中 |
+| `subscription_not_matched` / `filter_not_matched` | 没有订阅命中 / 过滤条件未命中 |
+| `plugin_disabled` / `plugin_load_failed` / `plugin_runtime_error` | 插件未启用 / 加载失败 / 运行异常 |
+| `command_matched` / `command_not_matched` / `command_unauthorized` | 命令命中 / 未命中 / 权限不足 |
+| `event_bus_delivery_disabled` / `inline_disabled` | 运维开关关闭 Event Bus 投递 / Inline |
+| `native_raw_not_allowed` / `native_raw_skipped` | 未声明原生数据能力 / 本次未下发 |
+| `send_channel_deprecated` / `unsupported_send_via` | 使用旧 notice 通道 / 未支持通道 |
+| `bot_not_configured` / `bot_token_missing` / `userbot_offline` | Bot 未配置 / token 缺失 / UserBot 离线 |
+| `telegram_api_error` / `trace_write_failed` | Telegram API 失败 / Trace 写入降级 |

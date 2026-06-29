@@ -26,22 +26,34 @@ plugins/installed/{插件名}/
 └── (其他插件)
 ```
 
-### 最小可运行插件
+### 最小 Event Bus 插件
 
 **plugin.py：**
 ```python
+from typing import Any
+
 from app.worker.plugins.base import Plugin, register
+from app.worker.plugins.events import event_from_interaction_payload
 
 @register
-class PingPlugin(Plugin):
-    key = "ping"
-    display_name = "Ping"
+class EventPingPlugin(Plugin):
+    key = "event_ping"
+    display_name = "Event Ping"
 
-    async def on_command(self, ctx, cmd, args, event) -> bool:
-        if cmd == "ping":
-            await event.edit("pong")
-            return True
-        return False
+    async def on_event(self, ctx, payload: dict[str, Any]) -> list[dict[str, Any]]:
+        event = event_from_interaction_payload(payload)
+        text = event.message.text or ""
+        if "ping" not in text.lower():
+            return []
+        return [
+            {
+                "type": "send_message",
+                "send_via": ["interaction_bot", "userbot_reply"],
+                "chat_id": event.message.chat_id,
+                "reply_to_message_id": event.message.message_id,
+                "text": "pong",
+            }
+        ]
 ```
 
 **manifest.py：**
@@ -49,25 +61,38 @@ class PingPlugin(Plugin):
 from app.worker.plugins.manifest import Manifest
 
 MANIFEST = Manifest(
-    key="ping",
-    display_name="Ping",
+    key="event_ping",
+    display_name="Event Ping",
     version="0.1.0",
     author="example",
-    description="响应 ping 指令",
-    permissions=["edit_message"],
+    description="演示 Event Bus + MessageOps 的最小插件",
+    usage="在允许会话内发送 ping，插件会通过交互 Bot 或 UserBot 回复 pong。",
+    permissions=["send_message"],
+    event_subscriptions=[
+        {
+            "source": ["userbot", "interaction_bot"],
+            "events": ["message"],
+            "scope": "all_allowed_chats",
+        }
+    ],
+    capabilities={},
 )
 ```
 
 **__init__.py：**
 ```python
 from .manifest import MANIFEST
-from .plugin import PingPlugin
+from .plugin import EventPingPlugin
 
-PLUGIN_CLASS = PingPlugin
+PLUGIN_CLASS = EventPingPlugin
 __all__ = ["PLUGIN_CLASS", "MANIFEST"]
 ```
 
-通过安装接口安装并在账号上启用后，worker 会在授权检查通过时加载它。仅手工拷贝到 `plugins/installed/ping/` 的目录会被标记为孤立目录（orphan）并拒绝加载。
+通过安装接口安装并在账号上启用后，Event Bus 会按 `event_subscriptions` 投递事件。插件只读取标准事件信封，并通过 `ctx.messages` 或标准 action 请求发送、编辑、删除、按钮 ACK、Inline answer 和 settlement。
+
+可直接参考最终版主模板：`examples/plugins/event_bus_demo`。它覆盖 message、command、callback、inline、chosen inline 和 payment fixtures。
+
+`on_command` / `on_message` 仍保留给管理员命令和历史插件迁移，不再作为新 Telegram 交互插件的快速开始路径。
 
 ---
 
@@ -108,10 +133,16 @@ loader._load_all()
   → 重新 import + 实例化
   → 新插件: on_startup(ctx)
 
-消息派发:
+事件派发:
+  → Source Adapter 生成标准事件信封
+  → Event Bus 按 event_subscriptions 匹配插件
   → 检查 ctx.generation == state.generation
   → 跳过过期 handler（竞态保护）
-  → 调用 on_command / on_message
+  → 调用 on_event / on_interaction 迁移桥
+  → 插件返回标准 action，经 MessageOps / Delivery Executor 执行
+
+兼容 hook:
+  → on_command / on_message 仅用于管理员命令、历史插件和高级兼容场景
 ```
 
 ---

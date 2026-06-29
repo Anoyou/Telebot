@@ -64,11 +64,15 @@ async def test_dispatch_command_creates_trace(monkeypatch):
     trace = event_trace.TraceContext(trace_id="evt_cmd", account_id=1, event_type="command")
     start_trace = AsyncMock(return_value=trace)
     record_span = AsyncMock()
+    record_action = AsyncMock()
     finish_trace = AsyncMock()
+    dispatch_event = MagicMock(side_effect=wcmd.dispatch_event)
     monkeypatch.setattr(wcmd, "_command_trace_enabled", AsyncMock(return_value=True))
     monkeypatch.setattr(wcmd, "start_trace", start_trace)
     monkeypatch.setattr(wcmd, "record_span", record_span)
+    monkeypatch.setattr(wcmd, "record_action", record_action)
     monkeypatch.setattr(wcmd, "finish_trace", finish_trace)
+    monkeypatch.setattr(wcmd, "dispatch_event", dispatch_event)
 
     client = AsyncMock()
     event = AsyncMock()
@@ -82,7 +86,88 @@ async def test_dispatch_command_creates_trace(monkeypatch):
     assert start_trace.await_args.args[0]["trigger"]["command"] == "ping"
     assert any(call.args[1] == "receive" for call in record_span.await_args_list)
     assert any(call.args[1] == "command_parse" for call in record_span.await_args_list)
+    assert any(
+        call.args[1] == "subscription_match"
+        and call.kwargs.get("reason_code") == "command_matched"
+        and call.kwargs.get("dispatch_mode") == "admin_command"
+        and call.kwargs.get("event_bus_decisions", [{}])[0].get("matched") is True
+        for call in record_span.await_args_list
+    )
+    dispatch_event.assert_called_once()
+    record_action.assert_awaited_once()
+    assert record_action.await_args.args[1]["type"] == "edit_message"
+    assert record_action.await_args.kwargs["actual_send_via"] == "userbot_reply"
     finish_trace.assert_awaited_once_with(trace, "ok")
+
+
+@pytest.mark.asyncio
+async def test_dispatch_plugin_command_creates_event_bus_decision(monkeypatch):
+    """插件注册命令也必须经过 command decision 后再调用 handler。"""
+    from app.worker import command as wcmd
+
+    trace = event_trace.TraceContext(trace_id="evt_plugin_cmd", account_id=1, event_type="command")
+    start_trace = AsyncMock(return_value=trace)
+    record_span = AsyncMock()
+    record_action = AsyncMock()
+    finish_trace = AsyncMock()
+    dispatch_event = MagicMock(side_effect=wcmd.dispatch_event)
+    monkeypatch.setattr(wcmd, "_command_trace_enabled", AsyncMock(return_value=True))
+    monkeypatch.setattr(wcmd, "start_trace", start_trace)
+    monkeypatch.setattr(wcmd, "record_span", record_span)
+    monkeypatch.setattr(wcmd, "record_action", record_action)
+    monkeypatch.setattr(wcmd, "finish_trace", finish_trace)
+    monkeypatch.setattr(wcmd, "dispatch_event", dispatch_event)
+
+    async def handler(_client, event, args, _account_id):
+        await event.edit(f"plugin ok {' '.join(args)}")
+
+    command_name = "demo_plugin_cmd"
+    wcmd.register_plugin_command(command_name, handler, owner_plugin_key="demo_plugin", generation=1)
+    try:
+        client = AsyncMock()
+        event = AsyncMock()
+        event.raw_text = f",{command_name} alpha"
+        event.message = SimpleNamespace(id=1, chat_id=10, sender_id=20, text=f",{command_name} alpha")
+
+        await wcmd._dispatch_command(client, event, command_name, "alpha", account_id=1, help_prefix=",")
+    finally:
+        wcmd.unregister_plugin_command(command_name, owner_plugin_key="demo_plugin")
+
+    dispatch_event.assert_called_once()
+    assert start_trace.await_args.args[0]["trigger"]["plugin_key"] == "demo_plugin"
+    assert any(
+        call.args[1] == "subscription_match"
+        and call.kwargs.get("plugin_key") == "demo_plugin"
+        and call.kwargs.get("event_bus_decisions", [{}])[0].get("plugin_key") == "demo_plugin"
+        and call.kwargs.get("event_bus_decisions", [{}])[0].get("matched") is True
+        for call in record_span.await_args_list
+    )
+    record_action.assert_awaited_once()
+    assert record_action.await_args.args[1]["type"] == "edit_message"
+    assert record_action.await_args.args[1]["plugin_key"] == "demo_plugin"
+    finish_trace.assert_awaited_once_with(trace, "ok")
+
+
+@pytest.mark.asyncio
+async def test_trace_command_client_pin_message_records_action(monkeypatch):
+    """命令 handler 通过 client 置顶消息也必须落 event_action。"""
+    from app.worker import command as wcmd
+
+    trace = event_trace.TraceContext(trace_id="evt_cmd_pin", account_id=1, event_type="command")
+    record_action = AsyncMock()
+    monkeypatch.setattr(wcmd, "record_action", record_action)
+    raw_client = AsyncMock()
+    raw_client.pin_message = AsyncMock(return_value=SimpleNamespace(id=55))
+    traced_client = wcmd._TraceCommandClient(raw_client, trace, command="pin", plugin_key="demo")
+
+    await traced_client.pin_message(-100, 55, notify=False)
+
+    raw_client.pin_message.assert_awaited_once_with(-100, 55, notify=False)
+    record_action.assert_awaited_once()
+    assert record_action.await_args.args[1]["type"] == "pin_message"
+    assert record_action.await_args.args[1]["message_id"] == 55
+    assert record_action.await_args.args[2] == "ok"
+    assert record_action.await_args.kwargs["actual_send_via"] == "userbot_reply"
 
 
 # ════════════════════════════════════════════════════════════
