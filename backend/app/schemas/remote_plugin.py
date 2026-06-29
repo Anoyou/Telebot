@@ -28,6 +28,7 @@ class RemotePluginOut(BaseModel):
     lint_warnings: list[str] = Field(default_factory=list)
     event_subscriptions: list[dict[str, Any]] = Field(default_factory=list)
     capabilities: dict[str, Any] = Field(default_factory=dict)
+    permissions: list[str] = Field(default_factory=list)
     enabled: bool
     default_enabled: bool = False
     installed_at: datetime | None = None

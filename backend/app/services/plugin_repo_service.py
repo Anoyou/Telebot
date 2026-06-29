@@ -414,6 +414,7 @@ async def list_plugins_in_repo(
                 ),
                 event_subscriptions=[item for item in meta.event_subscriptions if isinstance(item, dict)],
                 capabilities=dict(meta.capabilities) if isinstance(meta.capabilities, dict) else {},
+                permissions=list(meta.permissions or []),
                 tags=list(meta.tags or []),
                 subdir=subdir,
             )
@@ -921,6 +922,7 @@ def list_local_import_candidates() -> list[PluginRepoPlugin]:
                 installed=False,
                 event_subscriptions=[item for item in meta.event_subscriptions if isinstance(item, dict)],
                 capabilities=dict(meta.capabilities) if isinstance(meta.capabilities, dict) else {},
+                permissions=list(meta.permissions or []),
                 tags=list(meta.tags or []),
                 subdir=str(plugin_dir.relative_to(root)),
             )
@@ -1044,6 +1046,7 @@ async def list_official_plugins(db: AsyncSession) -> list[PluginRepoPlugin]:
                 ),
                 event_subscriptions=[item for item in meta.event_subscriptions if isinstance(item, dict)],
                 capabilities=dict(meta.capabilities) if isinstance(meta.capabilities, dict) else {},
+                permissions=list(meta.permissions or []),
                 tags=list(meta.tags or []),
                 subdir=str(source.plugin_dir.name),
             )
@@ -1243,7 +1246,7 @@ async def install_official_plugin(
 
     source = await _find_official_plugin_source(plugin_name)
     if source is None:
-        raise PluginNotInRepo("PLUGIN_NOT_FOUND_OFFICIAL", f"官方插件库里未找到插件: {plugin_name}")
+        raise PluginNotInRepo("PLUGIN_NOT_FOUND_OFFICIAL", f"推荐插件源里未找到插件: {plugin_name}")
 
     _validate_runtime_plugin_shape(source.plugin_dir, source.meta)
     final_name = source.meta.name
@@ -1292,7 +1295,7 @@ async def install_official_plugin(
             shutil.rmtree(staging, ignore_errors=True)
         if backed_up and backup.exists() and not install_path.exists():
             backup.rename(install_path)
-        raise PluginRepoError("COPY_FAILED", f"复制官方插件目录失败: {exc}") from exc
+        raise PluginRepoError("COPY_FAILED", f"复制推荐源插件目录失败: {exc}") from exc
     finally:
         if staging.exists():
             shutil.rmtree(staging, ignore_errors=True)

@@ -6,10 +6,11 @@ import { flushSync } from "react-dom";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 
-import { MOBILE_PRIMARY_NAV, MobileSidebar, Sidebar } from "./Sidebar";
+import { MobileSidebar, Sidebar, mobilePrimaryNavForAIState } from "./Sidebar";
 import { TopBar } from "./TopBar";
 import { GlobalAlertBar } from "./GlobalAlertBar";
 import { fetchMe } from "@/lib/auth";
+import { getSystemSettings } from "@/api/system";
 import { Spinner } from "@/components/ui/misc";
 import { cn } from "@/lib/utils";
 
@@ -29,6 +30,12 @@ export function AppShell() {
     queryKey: ["auth", "me"],
     queryFn: fetchMe,
   });
+  const settingsQ = useQuery({
+    queryKey: ["system", "settings"],
+    queryFn: getSystemSettings,
+    staleTime: 30_000,
+  });
+  const mobileNavItems = mobilePrimaryNavForAIState(settingsQ.data?.ai_enabled ?? true);
 
   if (isLoading) {
     return (
@@ -82,9 +89,9 @@ export function AppShell() {
         >
           <div
             className="liquid-bottom-nav mx-auto grid h-16 w-full max-w-md gap-1 px-2 py-1.5"
-            style={{ gridTemplateColumns: `repeat(${MOBILE_PRIMARY_NAV.length}, minmax(0, 1fr))` }}
+            style={{ gridTemplateColumns: `repeat(${mobileNavItems.length}, minmax(0, 1fr))` }}
           >
-            {MOBILE_PRIMARY_NAV.map((item) => {
+            {mobileNavItems.map((item) => {
               const active = isMobileNavActive(item.to, item.end, mobileActivePath);
               const activate = () => {
                 flushSync(() => setMobileActivePath(item.to));

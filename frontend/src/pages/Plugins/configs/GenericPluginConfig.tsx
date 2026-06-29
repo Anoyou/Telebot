@@ -36,9 +36,9 @@ import { Switch } from "@/components/ui/switch";
 import { getErrMsg } from "@/lib/api";
 import { pluginUsageGuideWarning } from "@/lib/plugin-config-contract";
 import {
-  pluginCapabilityLabels,
   pluginContractRiskWarnings,
   pluginEventSubscriptionLabels,
+  pluginOperationalCapabilityLabels,
 } from "@/types/pluginContract";
 import { featureConfigBackTarget } from "@/pages/Plugins/_shared/featureConfig";
 import { featureRuntimeText, featureSwitchText } from "./_shared/featureStatus";
@@ -152,7 +152,12 @@ export function GenericPluginConfigPage() {
     [schema, feature?.usage, globalVals, accountVals, commandPrefix, feature?.interaction_entries],
   );
   const eventLabels = pluginEventSubscriptionLabels(feature?.event_subscriptions);
-  const capabilityLabels = pluginCapabilityLabels(feature?.capabilities);
+  const capabilityLabels = pluginOperationalCapabilityLabels({
+    capabilities: feature?.capabilities,
+    permissions: feature?.permissions,
+    config_schema: feature?.config_schema,
+    usage: feature?.usage,
+  });
   const contractWarnings = pluginContractRiskWarnings({
     capabilities: feature?.capabilities,
     event_subscriptions: feature?.event_subscriptions,
@@ -299,21 +304,20 @@ export function GenericPluginConfigPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">最终版插件契约</CardTitle>
-          <CardDescription>来自 manifest 的事件订阅、能力声明和高风险边界。</CardDescription>
+          <CardTitle className="text-base">触发与权限</CardTitle>
+          <CardDescription>来自 manifest 的触发入口、可用能力和风险提示。</CardDescription>
         </CardHeader>
         <CardContent className="space-y-3 text-sm">
-          <div className="grid gap-3 md:grid-cols-2">
-            <ContractSummaryBlock title="事件订阅" items={eventLabels} empty="未声明 event_subscriptions" />
-            <ContractSummaryBlock title="能力声明" items={capabilityLabels} empty="未声明 capabilities" />
+          <div className="grid gap-3 md:grid-cols-3">
+            <ContractSummaryBlock title="触发入口" items={eventLabels} empty="插件未声明触发入口" />
+            <ContractSummaryBlock title="可用能力" items={capabilityLabels} empty="未声明可用能力" />
+            <ContractSummaryBlock
+              title="风险提示"
+              items={contractWarnings}
+              empty="未声明额外高风险能力"
+              variant="destructive"
+            />
           </div>
-          {contractWarnings.length > 0 ? (
-            <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs leading-5 text-destructive">
-              {contractWarnings.map((item) => (
-                <div key={item}>{item}</div>
-              ))}
-            </div>
-          ) : null}
         </CardContent>
       </Card>
 
@@ -458,14 +462,24 @@ export function GenericPluginConfigPage() {
   );
 }
 
-function ContractSummaryBlock({ title, items, empty }: { title: string; items: string[]; empty: string }) {
+function ContractSummaryBlock({
+  title,
+  items,
+  empty,
+  variant = "secondary",
+}: {
+  title: string;
+  items: string[];
+  empty: string;
+  variant?: "secondary" | "destructive";
+}) {
   return (
     <div className="rounded-md border bg-muted/20 p-3">
       <div className="mb-2 text-xs font-medium text-muted-foreground">{title}</div>
       {items.length > 0 ? (
         <div className="flex flex-wrap gap-1.5">
           {items.slice(0, 8).map((item) => (
-            <Badge key={item} variant="secondary" className="max-w-full break-all">
+            <Badge key={item} variant={variant} className="max-w-full break-all">
               {item}
             </Badge>
           ))}

@@ -861,10 +861,10 @@ async def test_reload_account_config_force_reload_clears_installed_module_cache(
     assert plugin_key in state.instances
 
 
-def test_missing_plugin_error_uses_codex_image_official_hint() -> None:
+def test_missing_plugin_error_uses_codex_image_repo_plugin_hint() -> None:
     err, message = _missing_plugin_error("codex_image")
     assert "codex_image" in err
-    assert "官方可选插件" in message
+    assert "插件库插件" in message
     assert "plugins/installed/codex_image" in message
 
 

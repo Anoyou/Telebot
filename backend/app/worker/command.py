@@ -125,6 +125,7 @@ class CommandContext:
     account_id: int
     templates: dict[str, dict[str, Any]]
     providers: dict[int, dict[str, Any]]
+    ai_enabled: bool = True
     command_prefix: str = ","
     aliases: dict[str, str] = None  # type: ignore[assignment]  # {alias: target}
     sudo_users: dict[int, dict[str, Any]] = None  # type: ignore[assignment]  # {tg_user_id: config}
@@ -1598,6 +1599,9 @@ async def _run_template(client, event, args, tpl: dict[str, Any], account_id: in
 
 
 async def _run_ai(client, event, args, tpl: dict[str, Any], account_id: int) -> None:
+    if _ctx is not None and not _ctx.ai_enabled:
+        await event.edit("✗ AI 能力已在系统设置中关闭。需要使用 AI 指令时，请先重新启用 AI 能力。")
+        return
     await ai_runtime.invoke(client, event, args, tpl, account_id)
 
 

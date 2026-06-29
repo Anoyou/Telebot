@@ -31,6 +31,7 @@ from ..db.models.feature import FEATURE_SCHEDULER, AccountFeature
 from ..db.models.system import SystemSetting
 from ..redis_client import get_redis
 from ..services import interaction_bot_service
+from ..services.ai_feature import is_ai_enabled
 from ..services.event_bus import dispatch_event, normalize_event_subscription, normalize_userbot_event
 from ..services.event_trace import (
     TRACE_STATUS_FAILED,
@@ -1188,7 +1189,8 @@ async def _refresh_command_context(account_id: int) -> None:
     """
     templates: dict[str, dict] = {}
     providers: dict[int, dict] = {}
-        # 命令前缀：DB 里 system_setting.command_prefix 优先，没有则用 .env 默认
+    ai_enabled = True
+    # 命令前缀：DB 里 system_setting.command_prefix 优先，没有则用 .env 默认
     prefix: str = app_settings.command_prefix or ","
     sudo_prefix: str = "."
     sudo_enabled = False
@@ -1251,6 +1253,13 @@ async def _refresh_command_context(account_id: int) -> None:
                 app_settings.command_echo_guard_previous_messages
             )
 
+        # 0.8) AI 能力热插拔开关。关闭时不加载 LLM provider，避免把密钥、
+        # proxy 和模型清单放进 worker 内存。
+        try:
+            ai_enabled = await is_ai_enabled(db)
+        except Exception:  # noqa: BLE001
+            ai_enabled = True
+
         # 1) 该账号启用中的命令模板
         rows = (
             await db.execute(
@@ -1279,59 +1288,60 @@ async def _refresh_command_context(account_id: int) -> None:
             for alias in (r.aliases or []):
                 templates[alias] = payload
 
-        # 2) 全部 LLM provider（AI 命令在调用时按 provider_id 索引；不预解密 key）
-        #    顺带把 proxy 信息一起拉出来，让 worker 端调 LLM 时也能走代理
-        prov_rows = (
-            await db.execute(select(LLMProvider))
-        ).scalars().all()
-
-        # 收集所有用到的 proxy_id 一次性查出
-        proxy_ids = {p.proxy_id for p in prov_rows if p.proxy_id is not None}
-        proxy_rows: dict[int, Proxy] = {}
-        if proxy_ids:
-            rows2 = (
-                await db.execute(select(Proxy).where(Proxy.id.in_(proxy_ids)))
+        if ai_enabled:
+            # 2) 全部 LLM provider（AI 命令在调用时按 provider_id 索引；不预解密 key）
+            #    顺带把 proxy 信息一起拉出来，让 worker 端调 LLM 时也能走代理
+            prov_rows = (
+                await db.execute(select(LLMProvider))
             ).scalars().all()
-            proxy_rows = {r.id: r for r in rows2}
 
-        for p in prov_rows:
-            proxy_url: str | None = None
-            if p.proxy_id is not None:
-                pr = proxy_rows.get(p.proxy_id)
-                if pr is not None and (pr.type or "").lower() != "mtproxy":
-                    # 主进程在这里就把 password 解密 + 拼成 httpx 接受的 URL；
-                    # 比把 password_enc 下发到 worker 让它再解密少一次往返，明文也只在
-                    # ctx 内存里活到 LLM 调用结束（worker 进程私有，不进 Redis / 日志）
-                    pwd = ""
-                    if pr.password_enc:
-                        try:
-                            pwd = decrypt_str(pr.password_enc)
-                        except Exception:  # noqa: BLE001
-                            # 密码解密失败时退化为无认证连接，避免一条坏 proxy 把所有 ai 命令打死
-                            pwd = ""
-                    proxy_url = _build_proxy_url(
-                        pr.type, pr.host, pr.port, pr.username, pwd
-                    )
-            providers[p.id] = {
-                "id": p.id,
-                "name": p.name,
-                "provider": p.provider,
-                "api_key_enc": p.api_key_enc,
-                "base_url": p.base_url,
-                "default_model": p.default_model,
-                # API 协议格式：build_client 据此决定走哪条 client 实现
-                "api_format": getattr(p, "api_format", None),
-                "web_search_api_format": getattr(p, "web_search_api_format", None),
-                # 路由元数据：worker 选 provider 时要看
-                "modality": getattr(p, "modality", None) or "text",
-                "tags": list(getattr(p, "tags", None) or []),
-                "cost_tier": int(getattr(p, "cost_tier", None) or 2),
-                "notes": getattr(p, "notes", None),
-                # 出口代理 URL；None = 直连（DIRECT）
-                "proxy_url": proxy_url,
-                # 候选模型清单（worker 通常不直接读，但保持一致）
-                "models": list(getattr(p, "models", None) or []),
-            }
+            # 收集所有用到的 proxy_id 一次性查出
+            proxy_ids = {p.proxy_id for p in prov_rows if p.proxy_id is not None}
+            proxy_rows: dict[int, Proxy] = {}
+            if proxy_ids:
+                rows2 = (
+                    await db.execute(select(Proxy).where(Proxy.id.in_(proxy_ids)))
+                ).scalars().all()
+                proxy_rows = {r.id: r for r in rows2}
+
+            for p in prov_rows:
+                proxy_url: str | None = None
+                if p.proxy_id is not None:
+                    pr = proxy_rows.get(p.proxy_id)
+                    if pr is not None and (pr.type or "").lower() != "mtproxy":
+                        # 主进程在这里就把 password 解密 + 拼成 httpx 接受的 URL；
+                        # 比把 password_enc 下发到 worker 让它再解密少一次往返，明文也只在
+                        # ctx 内存里活到 LLM 调用结束（worker 进程私有，不进 Redis / 日志）
+                        pwd = ""
+                        if pr.password_enc:
+                            try:
+                                pwd = decrypt_str(pr.password_enc)
+                            except Exception:  # noqa: BLE001
+                                # 密码解密失败时退化为无认证连接，避免一条坏 proxy 把所有 ai 命令打死
+                                pwd = ""
+                        proxy_url = _build_proxy_url(
+                            pr.type, pr.host, pr.port, pr.username, pwd
+                        )
+                providers[p.id] = {
+                    "id": p.id,
+                    "name": p.name,
+                    "provider": p.provider,
+                    "api_key_enc": p.api_key_enc,
+                    "base_url": p.base_url,
+                    "default_model": p.default_model,
+                    # API 协议格式：build_client 据此决定走哪条 client 实现
+                    "api_format": getattr(p, "api_format", None),
+                    "web_search_api_format": getattr(p, "web_search_api_format", None),
+                    # 路由元数据：worker 选 provider 时要看
+                    "modality": getattr(p, "modality", None) or "text",
+                    "tags": list(getattr(p, "tags", None) or []),
+                    "cost_tier": int(getattr(p, "cost_tier", None) or 2),
+                    "notes": getattr(p, "notes", None),
+                    # 出口代理 URL；None = 直连（DIRECT）
+                    "proxy_url": proxy_url,
+                    # 候选模型清单（worker 通常不直接读，但保持一致）
+                    "models": list(getattr(p, "models", None) or []),
+                }
 
         # 3) 命令别名
         alias_rows = (
@@ -1380,6 +1390,7 @@ async def _refresh_command_context(account_id: int) -> None:
             account_id=account_id,
             templates=templates,
             providers=providers,
+            ai_enabled=ai_enabled,
             command_prefix=prefix,
             aliases=aliases,
             sudo_users=sudo_users,

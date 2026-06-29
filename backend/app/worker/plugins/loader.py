@@ -1297,7 +1297,7 @@ def _missing_plugin_error(feature_key: str) -> tuple[str, str]:
         return (
             "official plugin codex_image not installed",
             (
-                "feature codex_image 已启用但未找到官方可选插件实现。"
+                "feature codex_image 已启用但未找到插件库插件实现。"
                 "请先在“安装插件”页安装 Codex 图片生成，并确认 plugins/installed/codex_image 存在；"
                 "已跳过加载并保持 worker 运行。"
             ),
@@ -2357,14 +2357,17 @@ async def _activate(db, state: _AccountState, af: AccountFeature, redis: Any) ->
             )
     plugin_ai: Any = None
     if plugin_manifest is not None and "ai_text" in plugin_permissions:
-        from .ai_facade import PluginAI  # 延迟 import，避免未用 AI 的插件增加依赖面
+        from ...services.ai_feature import is_ai_enabled
 
-        plugin_ai = PluginAI.from_context(
-            PluginContext(
-                account_id=state.account_id,
-                feature_key=af.feature_key,
+        if await is_ai_enabled(db):
+            from .ai_facade import PluginAI  # 延迟 import，避免未用 AI 的插件增加依赖面
+
+            plugin_ai = PluginAI.from_context(
+                PluginContext(
+                    account_id=state.account_id,
+                    feature_key=af.feature_key,
+                )
             )
-        )
     declared_facade_permissions = plugin_permissions & (
         _SUPPORTED_FACADE_PERMISSIONS | _RESERVED_UNSUPPORTED_FACADE_PERMISSIONS
     )

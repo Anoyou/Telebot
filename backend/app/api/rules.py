@@ -114,7 +114,7 @@ def _codex_image_dry_run_match(*args):
     if callable(dry_run):
         return dry_run(*args)
 
-    return False, "codex_image 官方可选插件未安装，无法执行图片插件 dry-run。"
+    return False, "codex_image 插件库插件未安装，无法执行图片插件 dry-run。"
 
 
 def _parse_scheduler_dt(raw: Any) -> datetime | None:

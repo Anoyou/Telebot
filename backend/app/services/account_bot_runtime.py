@@ -4115,7 +4115,7 @@ async def _run_local_interaction_entry_fallback(
         loaded = _load_installed_plugin(plugin_key)
         plugin_cls = loaded.get(plugin_key)
         if plugin_cls is None:
-            return False, "math10 官方可选插件未安装，请先在插件安装页安装随机算数题。", []
+            return False, "math10 插件库插件未安装，请先在插件安装页安装随机算数题。", []
 
         async def _log(level: str, message: str, **detail: Any) -> None:
             source = str(detail.pop("source", "plugin"))

@@ -49,10 +49,11 @@ import { pluginUsageGuideWarning, splitPluginWarnings } from "@/lib/plugin-confi
 import { isPlatformFeature } from "@/lib/plugin-modes";
 import {
   compactUsageText,
-  pluginCapabilityLabels,
   pluginContractRiskWarnings,
   pluginEventSubscriptionLabels,
   pluginHasHighRiskContract,
+  pluginOperationalCapabilityLabels,
+  pluginUsesAI,
 } from "@/types/pluginContract";
 
 import { featureConfigPath } from "./_shared/featureConfig";
@@ -87,7 +88,7 @@ function moduleRuntimeLabel(status: string, enabled: boolean) {
 }
 
 function moduleSourceLabel(feature: FeatureInfo) {
-  if (feature.source_label === "Official") return "官方";
+  if (feature.source_label === "Official") return "推荐源";
   if (feature.source_label === "core") return "平台";
   return feature.source_type === "remote" ? "远程" : "本地";
 }
@@ -120,9 +121,9 @@ function moduleTrustBadge(
   }
   if (feature.source_label === "Official" || install?.source === "official") {
     return {
-      label: "官方插件",
+      label: "推荐源",
       tone: "success",
-      title: "来自 TelePilot 随包官方插件库，可手动卸载。",
+      title: "来自 TelePilot 预置推荐来源，可手动卸载。",
     };
   }
   if (signatureOk === true) {
@@ -344,7 +345,7 @@ export function PluginsHome() {
           <CardHeader className="pb-2">
             <CardTitle className="text-base">首次部署推荐安装</CardTitle>
             <CardDescription>
-              自动回复和自动复读已改为官方推荐插件，不再默认内置。需要关键词回复或群内复读时，可以按需安装；安装后仍可随时卸载。
+              首次部署只推荐安装自动回复和自动复读。需要关键词回复或群内复读时，可以按需安装；安装后仍可随时卸载。
             </CardDescription>
           </CardHeader>
           <CardContent className="flex flex-wrap items-center gap-2">
@@ -353,7 +354,7 @@ export function PluginsHome() {
             </MetaBadge>
             <Button size="sm" onClick={() => nav("/plugins/manage?tab=plugins")}>
               <PackagePlus className="mr-1 h-4 w-4" />
-              去安装官方插件
+              去安装推荐插件
             </Button>
             <Button
               size="sm"
@@ -456,47 +457,49 @@ export function PluginsHome() {
               </span>
             </Button>
           </div>
-          <div className="rounded-lg border px-4 py-3">
-            <SectionHeader
-              icon={Sparkles}
-              title="AI 插件入口"
-              description="AI 属于插件配置：先配置模型凭据，再创建指令模板，最后按账号启用；调用记录与排障集中在同一个工作台。"
-            />
-            <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-4">
-              <ToneRailCard
+          {(settingsQ.data?.ai_enabled ?? true) ? (
+            <div className="rounded-lg border px-4 py-3">
+              <SectionHeader
                 icon={Sparkles}
-                title="AI 工作台"
-                value={<Button size="sm" variant="outline" onClick={() => nav("/ai")}>打开</Button>}
-                valueClassName="flex flex-wrap gap-2"
-                description="总览模型、指令模板和启用状态"
-                tone="primary"
+                title="AI 插件入口"
+                description="AI 属于插件配置：先配置模型凭据，再创建指令模板，最后按账号启用；调用记录与排障集中在同一个工作台。"
               />
-              <ToneRailCard
-                icon={Package}
-                title="模型提供商"
-                value={<Button size="sm" variant="outline" onClick={() => nav("/ai?tab=providers")}>配置</Button>}
-                valueClassName="flex flex-wrap gap-2"
-                description="配置 OpenAI、Anthropic、Ollama 等"
-                tone="neutral"
-              />
-              <ToneRailCard
-                icon={History}
-                title="近期调用"
-                value={<Button size="sm" variant="outline" onClick={() => nav("/ai?tab=usage")}>查看</Button>}
-                valueClassName="flex flex-wrap gap-2"
-                description="查看成功率、耗时和错误原因"
-                tone="success"
-              />
-              <ToneRailCard
-                icon={BookOpen}
-                title="帮助与示例"
-                value={<Button size="sm" variant="outline" onClick={() => nav("/ai?help=1")}>前往</Button>}
-                valueClassName="flex flex-wrap gap-2"
-                description="浮层查看原理、示例和术语"
-                tone="warn"
-              />
+              <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-4">
+                <ToneRailCard
+                  icon={Sparkles}
+                  title="AI 工作台"
+                  value={<Button size="sm" variant="outline" onClick={() => nav("/ai")}>打开</Button>}
+                  valueClassName="flex flex-wrap gap-2"
+                  description="总览模型、指令模板和启用状态"
+                  tone="primary"
+                />
+                <ToneRailCard
+                  icon={Package}
+                  title="模型提供商"
+                  value={<Button size="sm" variant="outline" onClick={() => nav("/ai?tab=providers")}>配置</Button>}
+                  valueClassName="flex flex-wrap gap-2"
+                  description="配置 OpenAI、Anthropic、Ollama 等"
+                  tone="neutral"
+                />
+                <ToneRailCard
+                  icon={History}
+                  title="近期调用"
+                  value={<Button size="sm" variant="outline" onClick={() => nav("/ai?tab=usage")}>查看</Button>}
+                  valueClassName="flex flex-wrap gap-2"
+                  description="查看成功率、耗时和错误原因"
+                  tone="success"
+                />
+                <ToneRailCard
+                  icon={BookOpen}
+                  title="帮助与示例"
+                  value={<Button size="sm" variant="outline" onClick={() => nav("/ai?help=1")}>前往</Button>}
+                  valueClassName="flex flex-wrap gap-2"
+                  description="浮层查看原理、示例和术语"
+                  tone="warn"
+                />
+              </div>
             </div>
-          </div>
+          ) : null}
           {guideActive ? (
             <GuideContextCard
               expanded={guideExpanded}
@@ -521,7 +524,7 @@ export function PluginsHome() {
           <CardHeader className="pb-2">
             <CardTitle className="text-base text-amber-900">codex_image 加载提示</CardTitle>
             <CardDescription className="text-amber-800">
-              当前账号启用了 codex_image，但 worker 未能加载这个官方可选插件。系统已自动降级为失败态并保持 worker 持续运行。
+              当前账号启用了 codex_image，但 worker 未能加载这个插件库插件。系统已自动降级为失败态并保持 worker 持续运行。
             </CardDescription>
           </CardHeader>
           <CardContent className="pt-0 text-sm text-amber-900">
@@ -845,7 +848,18 @@ function FeatureZone({
                 ...(f.lint_warnings ?? []),
               ];
               const eventLabels = pluginEventSubscriptionLabels(f.event_subscriptions);
-              const capabilityLabels = pluginCapabilityLabels(f.capabilities);
+              const capabilityLabels = pluginOperationalCapabilityLabels({
+                capabilities: f.capabilities,
+                permissions: f.permissions,
+                config_schema: f.config_schema,
+                usage: f.usage,
+              });
+              const usesAI = pluginUsesAI({
+                capabilities: f.capabilities,
+                permissions: f.permissions,
+                config_schema: f.config_schema,
+                usage: f.usage,
+              });
               const highRiskContract = pluginHasHighRiskContract(f);
               const trustBadge = moduleTrustBadge(f, installByKey.get(f.key));
               const path = featureConfigPath(selectedAccountId, f.key, f, {
@@ -930,6 +944,9 @@ function FeatureZone({
                           title={capabilityLabels.join(" / ")}
                         >
                           能力 {capabilityLabels.length}
+                        </FeatureCapabilityBadge>
+                        <FeatureCapabilityBadge show={usesAI} tone="warn" title="插件会调用 TelePilot 的 AI 能力">
+                          AI 调用
                         </FeatureCapabilityBadge>
                         <FeatureCapabilityBadge
                           show={highRiskContract}

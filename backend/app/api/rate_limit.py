@@ -54,6 +54,7 @@ from ..schemas.rate_limit import (
 from ..services import audit as audit_svc
 from ..services import event_trace
 from ..services import rate_limit_service as svc
+from ..services.ai_feature import AI_ENABLED_SETTING_KEY, normalize_ai_enabled
 from ..worker.ipc import GCMD_KILL_SWITCH, GCMD_RELOAD_GLOBAL, GLOBAL_CHANNEL, make_cmd
 from ..worker.ratelimit.buckets import TokenBuckets
 from ..worker.ratelimit.overrides import add_override, drop_override, list_active
@@ -617,6 +618,7 @@ async def get_system_settings(db: DBSession, _user: CurrentUser) -> dict[str, An
         "remote_plugin_update_check",
         {"enabled": True, "interval_minutes": 360},
     )
+    ai_enabled_val = await _get_setting(db, AI_ENABLED_SETTING_KEY, {"enabled": True})
     llm_val = await _get_setting(db, "llm_limits", {})
     log_val = await _get_setting(db, "log_retention", {})
     sudo_val = await _get_setting(db, "sudo_enabled", {"enabled": False})
@@ -647,6 +649,7 @@ async def get_system_settings(db: DBSession, _user: CurrentUser) -> dict[str, An
             "interval_minutes": max(30, min(10080, remote_update_interval)),
         },
         "sudo_enabled": bool(sudo_val.get("enabled", False)) if isinstance(sudo_val, dict) else bool(sudo_val),
+        "ai_enabled": normalize_ai_enabled(ai_enabled_val),
         "command_echo_guard_previous_messages": _normalize_command_echo_guard_limit(echo_guard_source),
         "llm_limits": {
             "per_minute": max(0, int(llm_limits.get("per_minute", 0) or 0)),
@@ -718,6 +721,7 @@ class _SettingsPatch(BaseModel):
 
     command_prefix: str | None = None
     timezone: str | None = None
+    ai_enabled: bool | None = None
     sudo_enabled: bool | None = None
     command_echo_guard_previous_messages: int | None = None
     remote_plugin_update_check: _RemotePluginUpdateCheckPatch | None = None
@@ -745,6 +749,11 @@ async def patch_system_settings(
         if tz and tz not in __import__("zoneinfo").available_timezones():  # noqa: PLC0415
             raise _bad("invalid_timezone", f"无效时区：{tz}")
         await _set_setting(db, "timezone", {"value": tz or "Asia/Shanghai"})
+    if payload.ai_enabled is not None:
+        enabled = bool(payload.ai_enabled)
+        await _set_setting(db, AI_ENABLED_SETTING_KEY, {"enabled": enabled})
+        await _audit(db, user.id, "set_ai_enabled", target="system", detail={"enabled": enabled})
+        await _broadcast_reload()
     if payload.sudo_enabled is not None:
         enabled = bool(payload.sudo_enabled)
         await _set_setting(db, "sudo_enabled", {"enabled": enabled})

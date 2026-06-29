@@ -4,6 +4,7 @@
 // 两者共享 NavList，移动端点击导航后自动关闭抽屉。
 import { useState } from "react";
 import { NavLink } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -25,6 +26,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import { APP_VERSION_LABEL } from "@/lib/version";
+import { getSystemSettings } from "@/api/system";
 import changelogRaw from "../../../../CHANGELOG.md?raw";
 
 interface NavItem {
@@ -45,9 +47,15 @@ const NAV: NavItem[] = [
   { to: "/settings", label: "系统", icon: Cog },
 ];
 
-export const MOBILE_PRIMARY_NAV: NavItem[] = NAV.filter(
+function navForAIState(aiEnabled: boolean): NavItem[] {
+  return NAV.filter((item) => aiEnabled || item.to !== "/ai");
+}
+
+export function mobilePrimaryNavForAIState(aiEnabled: boolean): NavItem[] {
+  return navForAIState(aiEnabled).filter(
   (item) => item.to === "/" || item.to === "/plugins" || item.to === "/interaction" || item.to === "/ai" || item.to === "/logs" || item.to === "/settings",
-);
+  );
+}
 
 function NavList({
   collapsed = false,
@@ -56,9 +64,16 @@ function NavList({
   collapsed?: boolean;
   onNavigate?: () => void;
 }) {
+  const settingsQ = useQuery({
+    queryKey: ["system", "settings"],
+    queryFn: getSystemSettings,
+    staleTime: 30_000,
+  });
+  const navItems = navForAIState(settingsQ.data?.ai_enabled ?? true);
+
   return (
     <nav className="flex-1 space-y-1.5 overflow-y-auto px-4 py-3 text-sm">
-      {NAV.map((item) => (
+      {navItems.map((item) => (
         <NavLink
           key={item.to}
           to={item.to}

@@ -462,10 +462,6 @@ export function CommandTemplates() {
     queryKey: ["cmd-tpl"],
     queryFn: listCommandTemplates,
   });
-  const providersQ = useQuery({
-    queryKey: ["llm-providers"],
-    queryFn: listLLMProviders,
-  });
   const accountsQ = useQuery({
     queryKey: ["accounts"],
     queryFn: listAccounts,
@@ -477,6 +473,13 @@ export function CommandTemplates() {
     queryFn: getSystemSettings,
   });
   const cmdPrefix = settingsQ.data?.command_prefix || ",";
+  const aiEnabled = settingsQ.data?.ai_enabled ?? true;
+  const providersQ = useQuery({
+    queryKey: ["llm-providers"],
+    queryFn: listLLMProviders,
+    enabled: !settingsQ.isLoading && aiEnabled,
+    retry: false,
+  });
   const providerIds = useMemo(
     () => new Set((providersQ.data || []).map((p) => p.id)),
     [providersQ.data],
@@ -538,6 +541,7 @@ export function CommandTemplates() {
       !!editId || shouldOpenNewAi || !!providerId || !!capability || !!returnTo;
 
     if (!hasConsumableQuery) return;
+    if (shouldOpenNewAi && settingsQ.isLoading) return;
     if (editId && !listQ.isSuccess) return;
 
     if (returnTo) {
@@ -563,11 +567,18 @@ export function CommandTemplates() {
         toast.error("未找到指定模板");
       }
     } else if (shouldOpenNewAi) {
-      setEditing({
-        ...EMPTY_FORM,
-        type: "ai",
-        ai_provider_id: providerId || EMPTY_FORM.ai_provider_id,
-      });
+      if (!aiEnabled) {
+        toast.error("AI 能力已关闭，请先到系统设置启用");
+        if (returnTo) {
+          nav(returnTo);
+        }
+      } else {
+        setEditing({
+          ...EMPTY_FORM,
+          type: "ai",
+          ai_provider_id: providerId || EMPTY_FORM.ai_provider_id,
+        });
+      }
     }
 
     const nextParams = new URLSearchParams(searchParams);
@@ -577,7 +588,7 @@ export function CommandTemplates() {
     nextParams.delete("aiCapability");
     nextParams.delete("returnTo");
     setSearchParams(nextParams, { replace: true });
-  }, [listQ.data, listQ.isSuccess, searchParams, setSearchParams]);
+  }, [aiEnabled, listQ.data, listQ.isSuccess, nav, searchParams, setSearchParams, settingsQ.isLoading]);
 
   const createMut = useMutation({
     mutationFn: (form: FormState) => {
@@ -726,7 +737,7 @@ export function CommandTemplates() {
           </div>
         </CardHeader>
         <CardContent>
-          {providerUnavailable ? (
+          {aiEnabled && providerUnavailable ? (
             <div className="mb-3 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
               chat/search 类 AI 指令需要先添加模型提供商；image + codex_image 与 video + 插件后端可先使用插件配置。
               <Button
@@ -867,6 +878,13 @@ export function CommandTemplates() {
               }
               if (
                 editing.type === "ai" &&
+                !aiEnabled
+              ) {
+                toast.error("AI 能力已关闭，请先到系统设置启用");
+                return;
+              }
+              if (
+                editing.type === "ai" &&
                 providerUnavailable &&
                 !(editing.ai_mode === "image" && editing.ai_image_backend === "codex_image") &&
                 !(editing.ai_mode === "video" && editing.ai_video_backend === "plugin")
@@ -882,6 +900,7 @@ export function CommandTemplates() {
             }}
             saving={createMut.isPending || updateMut.isPending}
             hasProviders={hasProviders}
+            aiEnabled={aiEnabled}
             providerUnavailable={providerUnavailable}
             onGoProviders={() => nav("/ai?tab=providers")}
           />
@@ -990,6 +1009,7 @@ function CommandEditDialog({
   onSave,
   saving,
   hasProviders,
+  aiEnabled,
   providerUnavailable,
   onGoProviders,
 }: {
@@ -1002,6 +1022,7 @@ function CommandEditDialog({
   onSave: () => void;
   saving: boolean;
   hasProviders: boolean;
+  aiEnabled: boolean;
   providerUnavailable: boolean;
   onGoProviders: () => void;
 }) {
@@ -1018,13 +1039,17 @@ function CommandEditDialog({
   const providersQ = useQuery({
     queryKey: ["llm-providers"],
     queryFn: listLLMProviders,
-    enabled: form.type === "ai",
+    enabled: aiEnabled && form.type === "ai",
+    retry: false,
   });
 
   // 切类型时清相邻字段，避免上次填的脏数据落到 config
   const typeOptions = useMemo(
-    () => Object.entries(TYPE_LABELS) as [CommandTemplateType, string][],
-    [],
+    () =>
+      (Object.entries(TYPE_LABELS) as [CommandTemplateType, string][]).filter(
+        ([type]) => aiEnabled || type !== "ai" || form.type === "ai",
+      ),
+    [aiEnabled, form.type],
   );
   const [openAiSections, setOpenAiSections] = useState<AiCapability[]>(() => {
     const defaults: AiCapability[] = [];
@@ -1107,7 +1132,11 @@ function CommandEditDialog({
                   </option>
                 ))}
               </Select>
-              {providerUnavailable ? (
+              {!aiEnabled ? (
+                <p className="text-xs text-muted-foreground">
+                  AI 能力已关闭，暂不提供 AI 类型；已有 AI 模板会保留。
+                </p>
+              ) : providerUnavailable ? (
                 <p className="text-xs text-amber-700">
                   chat/search 需要模型提供商；image 和 video 可先桥接账号插件。
                   <Button

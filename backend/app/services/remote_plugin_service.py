@@ -299,6 +299,7 @@ class RemotePluginView:
     lint_warnings: list[str]
     event_subscriptions: list[dict[str, Any]]
     capabilities: dict[str, Any]
+    permissions: list[str]
     enabled: bool
     default_enabled: bool
     installed_at: datetime | None
@@ -385,6 +386,12 @@ def remote_plugin_view_from_installed(row: InstalledPlugin) -> RemotePluginView:
 
     manifest = dict(row.manifest_json or {})
     info = _remote_info_from_manifest(manifest)
+    raw_permissions = manifest.get("permissions")
+    permissions = [
+        str(item)
+        for item in raw_permissions
+        if isinstance(item, str) and item.strip()
+    ] if isinstance(raw_permissions, list) else []
     return RemotePluginView(
         id=0,
         name=row.key,
@@ -403,6 +410,7 @@ def remote_plugin_view_from_installed(row: InstalledPlugin) -> RemotePluginView:
             item for item in manifest.get("event_subscriptions", []) if isinstance(item, dict)
         ] if isinstance(manifest.get("event_subscriptions"), list) else [],
         capabilities=dict(manifest.get("capabilities")) if isinstance(manifest.get("capabilities"), dict) else {},
+        permissions=permissions,
         enabled=bool(row.enabled),
         default_enabled=bool(info.get("default_enabled", False)),
         installed_at=row.installed_at,

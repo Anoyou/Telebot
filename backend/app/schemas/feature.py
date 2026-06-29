@@ -27,6 +27,7 @@ class FeatureInfo(BaseModel):
     interaction_entries: list[dict[str, Any]] = Field(default_factory=list)
     event_subscriptions: list[dict[str, Any]] = Field(default_factory=list)
     capabilities: dict[str, Any] = Field(default_factory=dict)
+    permissions: list[str] = Field(default_factory=list)
     experimental: bool = False
     update_available: bool = False
     latest_version: str | None = None
@@ -80,6 +81,8 @@ class FeatureInfo(BaseModel):
         event_subscriptions = raw_event_subscriptions if isinstance(raw_event_subscriptions, list) else []
         raw_capabilities = manifest.get("capabilities")
         capabilities = raw_capabilities if isinstance(raw_capabilities, dict) else {}
+        raw_permissions = manifest.get("permissions")
+        permissions = raw_permissions if isinstance(raw_permissions, list) else []
         raw_lint_warnings = (
             getattr(installed_plugin, "lint_warnings", None)
             if installed_plugin is not None
@@ -113,6 +116,7 @@ class FeatureInfo(BaseModel):
             interaction_entries=[item for item in entries if isinstance(item, dict)],
             event_subscriptions=[item for item in event_subscriptions if isinstance(item, dict)],
             capabilities=dict(capabilities),
+            permissions=[str(item) for item in permissions if isinstance(item, str) and item.strip()],
             experimental=bool(
                 manifest.get("x-experimental") or manifest.get("experimental")
             ),

@@ -38,8 +38,20 @@ from ..schemas.command import (
     TestModelResponse,
 )
 from ..services import audit, command_service
+from ..services.ai_feature import is_ai_enabled
 
 router = APIRouter(tags=["commands"])
+
+
+async def _require_ai_enabled(db: DBSession) -> None:
+    if not await is_ai_enabled(db):
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "AI_DISABLED",
+                "message": "AI 能力已在系统设置中关闭，请先启用后再配置或调用模型。",
+            },
+        )
 
 
 # ════════════════════════════════════════════════════════════
@@ -171,6 +183,7 @@ async def _aids_using_template(db, tpl_id: int) -> list[int]:
 )
 async def list_providers(db: DBSession, _user: CurrentUser) -> list[LLMProviderOut]:
     """列出全部 LLM provider；不含明文 key。"""
+    await _require_ai_enabled(db)
     return await command_service.list_providers(db)
 
 
@@ -188,6 +201,7 @@ async def create_provider(
     worker 重新拉一次 DB，新 provider 进 ctx.providers，下次模板 PATCH 触发的
     第二次 reload 也无害（重新拉同样数据）。
     """
+    await _require_ai_enabled(db)
     out = await command_service.create_provider(db, payload)
     await audit.write(
         db,
@@ -220,6 +234,7 @@ async def update_provider(
     通知 worker reload：所有启用了 type=ai 模板的账号都会被通知，
     避免 api_key / base_url / tags 改动后"TG 里没生效"。
     """
+    await _require_ai_enabled(db)
     out = await command_service.update_provider(db, pid, payload)
     audit_detail = payload.model_dump(
         exclude_unset=True, exclude={"api_key"}
@@ -250,6 +265,7 @@ async def delete_provider(
     模板下一次还会用 worker 内存里的旧条目跑（还能跑通），等用户疑惑为什么
     "我都删了它还在用"。
     """
+    await _require_ai_enabled(db)
     aids = await command_service.list_all_account_ids(db)
     await command_service.delete_provider(db, pid)
     await audit.write(
@@ -412,6 +428,8 @@ async def fetch_models_preview(
     2. 入参 ``api_key`` 留空 / None 且给了 ``pid`` → 用 DB 里已存的（解密）；
     3. 都没有 → 不带 Authorization（如本地 Ollama）。
     """
+    await _require_ai_enabled(db)
+
     from ..crypto import decrypt_str
     from ..db.models.command import LLM_API_FORMAT_ANTHROPIC_MESSAGES
 
@@ -504,6 +522,8 @@ async def detect_provider_protocols(
 
     探测结果不落库；用于新建/编辑 provider 时帮用户选择 api_format。
     """
+    await _require_ai_enabled(db)
+
     from ..crypto import decrypt_str
 
     api_key = (payload.api_key or "").strip()
@@ -695,6 +715,8 @@ async def fetch_models(
     合并策略：保留已有 enabled 状态 + 用户自定义条目；fetch 来的新条目默认 enabled=False，
     用户自己决定要启用哪些。
     """
+    await _require_ai_enabled(db)
+
     from ..crypto import decrypt_str
     from ..db.models.command import (
         LLM_API_FORMAT_ANTHROPIC_MESSAGES,
@@ -827,6 +849,8 @@ async def test_model(
     用 ``services.llm_client.build_client``（与正式 ai 命令同路径），
     一并验证 api_key / base_url / proxy_url 都对。
     """
+    await _require_ai_enabled(db)
+
     from ..services.llm_client import LLMError, build_client
 
     row = await command_service.get_provider_row(db, pid)

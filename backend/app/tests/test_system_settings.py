@@ -73,3 +73,21 @@ async def test_system_settings_log_retention_switches_roundtrip(monkeypatch) -> 
     assert result["log_retention"]["trace_enabled"] is False
     assert result["log_retention"]["event_bus_delivery_enabled"] is False
     assert result["log_retention"]["inline_updates_enabled"] is False
+
+
+@pytest.mark.asyncio
+async def test_system_settings_ai_enabled_hotplug_roundtrip(monkeypatch) -> None:
+    db = _FakeSettingsDB()
+    monkeypatch.setattr(rate_limit, "_audit", AsyncMock())
+    broadcast = AsyncMock()
+    monkeypatch.setattr(rate_limit, "_broadcast_reload", broadcast)
+
+    result = await rate_limit.patch_system_settings(
+        rate_limit._SettingsPatch(ai_enabled=False),
+        db,  # type: ignore[arg-type]
+        SimpleNamespace(id=1),
+    )
+
+    assert db.rows["ai_enabled"].value == {"enabled": False}
+    assert result["ai_enabled"] is False
+    broadcast.assert_awaited_once()

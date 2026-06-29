@@ -3,6 +3,7 @@ export type PluginCapabilities = Record<string, unknown>;
 
 const HIGH_RISK_TERMS = ["telegram_native_raw", "native_raw", "inline_all", "bbot_notice", "notice_bot"];
 const DEPRECATED_SEND_CHANNELS = ["notice", "bbot_notice", "notice_bot"];
+const AI_PERMISSION_TERMS = ["ai", "ai_text", "llm", "llm_text", "openai", "anthropic"];
 
 const EVENT_LABELS: Record<string, string> = {
   all_messages: "全部消息",
@@ -20,11 +21,26 @@ const EVENT_LABELS: Record<string, string> = {
 const CAPABILITY_LABELS: Record<string, string> = {
   answer_callback: "按钮 ACK",
   answer_inline_query: "Inline 回答",
+  ai: "AI 调用",
+  ai_text: "AI 文本",
+  llm: "AI 调用",
+  llm_text: "AI 文本",
   inline_all: "Inline 全量",
   settlement: "结算动作",
   telegram_native_raw: "native_raw",
   native_raw: "native_raw",
   userbot_reply: "人形回复",
+};
+
+const PERMISSION_LABELS: Record<string, string> = {
+  ai: "AI 调用",
+  ai_text: "AI 文本",
+  edit_message: "编辑消息",
+  external_http: "HTTP 请求",
+  read_chat: "读取消息",
+  resolve_entity: "解析会话",
+  send_file: "发送文件",
+  send_message: "发送消息",
 };
 
 export function pluginEventSubscriptionLabels(
@@ -57,6 +73,48 @@ export function pluginCapabilityLabels(capabilities?: PluginCapabilities | null)
     labels.add(CAPABILITY_LABELS[key] || key);
   }
   return [...labels];
+}
+
+export function pluginOperationalCapabilityLabels(input: {
+  capabilities?: PluginCapabilities | null;
+  permissions?: string[] | null;
+  config_schema?: Record<string, unknown> | null;
+  usage?: unknown;
+  description?: unknown;
+}): string[] {
+  const labels = new Set(pluginCapabilityLabels(input.capabilities));
+  for (const permission of input.permissions ?? []) {
+    const key = String(permission || "").trim();
+    if (!key) continue;
+    labels.add(PERMISSION_LABELS[key] || key);
+  }
+  if (pluginUsesAI(input)) labels.add("AI 调用");
+  return [...labels];
+}
+
+export function pluginUsesAI(input: {
+  capabilities?: PluginCapabilities | null;
+  permissions?: string[] | null;
+  config_schema?: Record<string, unknown> | null;
+  usage?: unknown;
+  description?: unknown;
+}): boolean {
+  const permissions = (input.permissions ?? []).map((item) => String(item || "").trim().toLowerCase());
+  if (permissions.some((item) => AI_PERMISSION_TERMS.includes(item) || item.startsWith("ai_") || item.startsWith("llm_"))) {
+    return true;
+  }
+  const capabilitiesText = JSON.stringify(input.capabilities ?? {}).toLowerCase();
+  if (AI_PERMISSION_TERMS.some((term) => capabilitiesText.includes(term))) return true;
+  const schemaText = JSON.stringify(input.config_schema ?? {}).toLowerCase();
+  if (
+    schemaText.includes("llm") ||
+    schemaText.includes("ai_provider") ||
+    schemaText.includes("llm_provider") ||
+    schemaText.includes("provider_tag") ||
+    schemaText.includes("ai_usage_guide")
+  ) return true;
+  const prose = `${String(input.usage ?? "")} ${String(input.description ?? "")}`.toLowerCase();
+  return prose.includes("ctx.ai") || prose.includes("llm") || prose.includes("ai provider") || prose.includes("ai 调用");
 }
 
 export function pluginContractRiskWarnings(input: {

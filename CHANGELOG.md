@@ -20,6 +20,29 @@
 
 ## [Unreleased]
 
+## [0.44.0] — 2026-06-30 · minor（次版本） · AI 能力热插拔与插件契约展示
+
+### Added
+- 新增全局 `ai_enabled` 设置，可在系统设置中热插拔 AI 能力包；关闭后侧边栏、移动底栏和插件首页会隐藏 AI 入口，`/ai` 直达会显示启用提示页。
+- LLM Provider 的 CRUD、拉取模型、协议探测和测试模型接口在 AI 关闭时统一返回 `AI_DISABLED`，避免继续发起外部模型请求。
+- worker 热加载时会读取 AI 能力开关；关闭后不再查询或加载 LLM Provider，不解密模型代理配置，也不会把 provider 放进 worker 内存。
+- AI 指令触发、插件 `ctx.ai` facade 和模板编辑器均接入 AI 开关：关闭时指令短路提示，声明 `ai_text` 的插件不会注入 `ctx.ai`，模板编辑器不再拉 provider 或允许新建 AI 模板。
+
+### Changed
+- 插件配置页的“最终版插件契约”改为“触发与权限”，以“触发入口 / 可用能力 / 风险提示”展示插件运行声明，避免直接暴露 `event_subscriptions`、`capabilities` 等开发者字段名。
+- 插件能力标签现在会结合 `capabilities`、`permissions`、config schema 和使用说明推断；声明 `ai_text` 或明显调用 `ctx.ai` / LLM 的插件会显示 `AI 调用` 标签。
+- 插件中心和插件安装页弱化“官方插件库”口径，面向用户改为“推荐插件 / 推荐源 / 插件库插件”；首次部署推荐只保留自动回复和自动复读。
+- 账号详情和交互 Bot 旧入口同步使用“触发入口 / 可用能力 / 推荐源”等新口径，减少内部字段名和“官方库”概念对用户的干扰。
+- 后端安装、dry-run、运行时缺插件等用户可见提示改为“插件库插件 / 推荐插件源”，内部兼容源枚举保持不变。
+- 插件安装页统一“卸载”按钮样式，推荐插件已安装后也可在推荐插件卡片中直接卸载。
+- 交互中心的账号选择器与插件中心保持一致，不再在下拉和摘要区展示账号手机号。
+
+### Tests
+- 补充 AI 能力开关的系统设置回归测试，以及 `ctx.ai` 在 AI 关闭时不加载 provider 的回归测试。
+- 执行前端类型检查：`./node_modules/.bin/tsc -b --pretty false`。
+- 执行前端生产构建：`./node_modules/.bin/vite build`。
+- 执行后端目标测试：`app/tests/test_system_settings.py`、`app/tests/test_plugin_ai_facade.py`、`app/tests/test_plugin_loader.py`。
+
 ## [0.43.2] — 2026-06-30 · patch（补丁版本） · 日志排查体验优化
 
 ### Changed

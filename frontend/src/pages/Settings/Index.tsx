@@ -131,6 +131,7 @@ export function SettingsIndex() {
   });
 
   const [prefix, setPrefix] = useState("");
+  const [aiEnabled, setAiEnabled] = useState(true);
   const [timezone, setTimezone] = useState("Asia/Shanghai");
   const [llmLimits, setLlmLimits] = useState({
     per_minute: "0",
@@ -154,6 +155,7 @@ export function SettingsIndex() {
   useEffect(() => {
     if (settingsQ.data) {
       setPrefix(settingsQ.data.command_prefix ?? ",");
+      setAiEnabled(settingsQ.data.ai_enabled ?? true);
       setTimezone(settingsQ.data.timezone ?? "Asia/Shanghai");
       setLlmLimits({
         per_minute: String(settingsQ.data.llm_limits?.per_minute ?? 0),
@@ -237,6 +239,18 @@ export function SettingsIndex() {
     onSuccess: () => {
       toast.success("时区已保存");
       qc.invalidateQueries({ queryKey: ["system", "settings"] });
+    },
+    onError: (err) => toast.error(getErrMsg(err)),
+  });
+
+  const saveAIEnabled = useMutation({
+    mutationFn: (enabled: boolean) => patchSystemSettings({ ai_enabled: enabled }),
+    onSuccess: (data) => {
+      setAiEnabled(data.ai_enabled ?? true);
+      toast.success((data.ai_enabled ?? true) ? "AI 能力已启用，worker 将热加载" : "AI 能力已关闭，worker 将卸载模型能力");
+      qc.invalidateQueries({ queryKey: ["system", "settings"] });
+      qc.invalidateQueries({ queryKey: ["llm-providers"] });
+      qc.invalidateQueries({ queryKey: ["llm-usage"] });
     },
     onError: (err) => toast.error(getErrMsg(err)),
   });
@@ -509,6 +523,36 @@ export function SettingsIndex() {
                     </div>
                   </div>
                 </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">AI 能力包</CardTitle>
+              <CardDescription>
+                热插拔启用模型提供商、AI 指令和插件 ctx.ai。关闭后 worker 不加载 LLM provider，也不会解密模型代理配置。
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="flex flex-col gap-3 rounded-md border border-border/70 bg-muted/20 p-3 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <div className="text-sm font-medium">当前：{aiEnabled ? "已启用" : "已关闭"}</div>
+                  <p className="mt-1 max-w-2xl text-xs leading-5 text-muted-foreground">
+                    已有 AI 模板会保留，关闭期间不会调用模型；声明 ai_text 权限的插件不会拿到 ctx.ai。
+                  </p>
+                </div>
+                <Switch
+                  checked={aiEnabled}
+                  disabled={saveAIEnabled.isPending}
+                  onCheckedChange={(checked) => {
+                    if (!checked && !confirm("关闭 AI 能力后，AI 指令和依赖 ctx.ai 的插件会立即停止调用模型。确认关闭？")) {
+                      return;
+                    }
+                    setAiEnabled(checked);
+                    saveAIEnabled.mutate(checked);
+                  }}
+                />
               </div>
             </CardContent>
           </Card>

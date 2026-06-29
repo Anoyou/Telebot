@@ -35,6 +35,7 @@ export interface PluginRepoPlugin {
   update_available?: boolean;
   event_subscriptions?: PluginEventSubscription[];
   capabilities?: PluginCapabilities;
+  permissions?: string[];
   tags?: string[];
   subdir: string;
 }

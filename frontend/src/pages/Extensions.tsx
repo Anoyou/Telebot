@@ -1,6 +1,6 @@
 // 插件安装与管理：插件包安装/更新/卸载 + 开发指南
 //
-// Tab 1：安装与更新 — 官方推荐插件 + 远程插件（安装/卸载/更新）
+// Tab 1：安装与更新 — 推荐插件 + 远程插件（安装/卸载/更新）
 // Tab 2：开发指南 — 完整插件开发文档工作台
 //
 // 账号级启停与配置统一回 /plugins 首页，避免“安装页”和“插件中心”双入口重复。
@@ -120,9 +120,9 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import {
   compactUsageText,
-  pluginCapabilityLabels,
   pluginContractRiskWarnings,
   pluginEventSubscriptionLabels,
+  pluginOperationalCapabilityLabels,
 } from "@/types/pluginContract";
 import type { PluginRepoPlugin } from "@/types/pluginRepo";
 import type { RemotePlugin } from "@/types/remotePlugin";
@@ -156,6 +156,8 @@ const REMOTE_QK = ["remote-plugins"] as const;
 const PLUGIN_REPOS_QK = ["plugin-repos"] as const;
 const OFFICIAL_PLUGINS_QK = ["official-plugins"] as const;
 const NEW_ACCOUNT_GUIDE_SEEN_KEY = "telebot.accounts.new_account_guide_seen.v4";
+const FIRST_RECOMMENDED_PLUGIN_KEYS = new Set(["auto_reply", "autorepeat"]);
+const DANGER_OUTLINE_BUTTON_CLASS = "border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive";
 const DEV_DOCS: DevDoc[] = [
   {
     id: "quickstart",
@@ -435,7 +437,7 @@ function PluginInstallGuide({
 
 
 // ═══════════════════════════════════════════════════════════════════
-// Tab 2：插件管理 — 官方插件 + 远程插件统一展示
+// Tab 2：插件管理 — 推荐源 + 远程插件统一展示
 // ═══════════════════════════════════════════════════════════════════
 function PluginsManagementTab() {
   return (
@@ -534,8 +536,19 @@ function OfficialPluginsCard() {
   const installOfficialMut = useMutation({
     mutationFn: (name: string) => installOfficialPlugin(name),
     onSuccess: (row) => {
-      toast.success(`已安装/更新官方插件 ${row.display_name || row.name} v${row.version}`);
+      toast.success(`已安装/更新推荐插件 ${row.display_name || row.name} v${row.version}`);
       toastPluginLintWarnings(row);
+      qc.invalidateQueries({ queryKey: OFFICIAL_PLUGINS_QK });
+      qc.invalidateQueries({ queryKey: PLUGINS_QK });
+      qc.invalidateQueries({ queryKey: REMOTE_QK });
+      qc.invalidateQueries({ queryKey: ["matrix"] });
+    },
+    onError: (err) => toast.error(getErrMsg(err)),
+  });
+  const uninstallOfficialMut = useMutation({
+    mutationFn: (key: string) => uninstallPlugin(key),
+    onSuccess: (_row, key) => {
+      toast.success(`已卸载 ${key}`);
       qc.invalidateQueries({ queryKey: OFFICIAL_PLUGINS_QK });
       qc.invalidateQueries({ queryKey: PLUGINS_QK });
       qc.invalidateQueries({ queryKey: REMOTE_QK });
@@ -551,9 +564,9 @@ function OfficialPluginsCard() {
       <CardHeader className="pb-3">
         <SectionHeader
           icon={Sparkles}
-          title="官方推荐插件"
-          description="这些插件由 TelePilot 官方远程插件仓库分发，不再默认内置。首次部署建议按需安装，安装后可随时禁用、更新或卸载。"
-          meta={<SignalPill tone="neutral" label="官方库" value={items.length} className="h-8" />}
+          title="推荐插件"
+          description="这里展示 TelePilot 预置的推荐插件来源。首次部署只建议安装自动回复和自动复读；其他插件按你的插件库规划自行选择。"
+          meta={<SignalPill tone="neutral" label="推荐源" value={items.length} className="h-8" />}
         />
       </CardHeader>
       <CardContent>
@@ -562,13 +575,13 @@ function OfficialPluginsCard() {
             <Spinner className="text-primary" />
           </div>
         ) : officialQ.isError ? (
-          <p className="py-3 text-sm text-destructive">官方插件库加载失败：{getErrMsg(officialQ.error)}</p>
+          <p className="py-3 text-sm text-destructive">推荐插件源加载失败：{getErrMsg(officialQ.error)}</p>
         ) : items.length === 0 ? (
-          <p className="py-3 text-sm text-muted-foreground">当前镜像未发现官方可选插件库。</p>
+          <p className="py-3 text-sm text-muted-foreground">当前镜像未发现推荐插件来源。</p>
         ) : (
           <div className="grid gap-2 lg:grid-cols-2">
             {items.map((plugin) => {
-              const recommended = (plugin.tags ?? []).includes("recommended");
+              const recommended = FIRST_RECOMMENDED_PLUGIN_KEYS.has(plugin.name);
               return (
                 <div key={plugin.name} className="flex flex-col gap-3 rounded-md border px-3 py-3 sm:flex-row sm:items-center">
                   <div className="min-w-0 flex-1">
@@ -578,7 +591,7 @@ function OfficialPluginsCard() {
                       {recommended ? (
                         <MetaBadge tone="success">首次推荐</MetaBadge>
                       ) : (
-                        <MetaBadge tone="outline">官方库</MetaBadge>
+                        <MetaBadge tone="outline">插件库</MetaBadge>
                       )}
                       {plugin.installed ? <MetaBadge>已安装</MetaBadge> : null}
                       {plugin.update_available ? <MetaBadge tone="warn">有更新</MetaBadge> : null}
@@ -588,20 +601,38 @@ function OfficialPluginsCard() {
                       <p className="mt-1 text-xs leading-5 text-muted-foreground">{plugin.description}</p>
                     ) : null}
                   </div>
-                  <Button
-                    size="sm"
-                    className="shrink-0"
-                    variant={plugin.installed ? "outline" : "default"}
-                    disabled={(plugin.installed && !plugin.update_available) || installOfficialMut.isPending}
-                    onClick={() => installOfficialMut.mutate(plugin.name)}
-                  >
-                    {installOfficialMut.isPending ? (
-                      <Spinner className="mr-2 h-4 w-4" />
-                    ) : plugin.installed && !plugin.update_available ? null : (
-                      <Download className="mr-2 h-4 w-4" />
-                    )}
-                    {plugin.installed ? (plugin.update_available ? "更新" : "已安装") : "安装"}
-                  </Button>
+                  <div className="flex shrink-0 flex-wrap justify-end gap-2">
+                    {plugin.installed ? (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className={DANGER_OUTLINE_BUTTON_CLASS}
+                        disabled={uninstallOfficialMut.isPending}
+                        onClick={() => {
+                          if (confirm(`确认卸载「${plugin.name}」？`)) uninstallOfficialMut.mutate(plugin.name);
+                        }}
+                      >
+                        <Trash2 className="mr-1 h-3 w-3" />
+                        卸载
+                      </Button>
+                    ) : null}
+                    {!plugin.installed || plugin.update_available ? (
+                      <Button
+                        size="sm"
+                        className="shrink-0"
+                        variant={plugin.installed ? "outline" : "default"}
+                        disabled={installOfficialMut.isPending}
+                        onClick={() => installOfficialMut.mutate(plugin.name)}
+                      >
+                        {installOfficialMut.isPending ? (
+                          <Spinner className="mr-2 h-4 w-4" />
+                        ) : (
+                          <Download className="mr-2 h-4 w-4" />
+                        )}
+                        {plugin.installed ? "更新" : "安装"}
+                      </Button>
+                    ) : null}
+                  </div>
                 </div>
               );
             })}
@@ -1044,7 +1075,12 @@ function RemoteInstallCard() {
                         {(pluginsQ.data ?? []).map((p) => {
                           const canUpdate = !!p.installed && !!p.update_available;
                           const events = pluginEventSubscriptionLabels(p.event_subscriptions);
-                          const capabilities = pluginCapabilityLabels(p.capabilities);
+                          const capabilities = pluginOperationalCapabilityLabels({
+                            capabilities: p.capabilities,
+                            permissions: p.permissions,
+                            usage: p.usage,
+                            description: p.description,
+                          });
                           const risks = pluginContractRiskWarnings({
                             capabilities: p.capabilities,
                             event_subscriptions: p.event_subscriptions,
@@ -1142,7 +1178,12 @@ function RemoteInstallCard() {
             <div className="space-y-3">
               {bulkPreviewPlugins.map((plugin) => {
                 const events = pluginEventSubscriptionLabels(plugin.event_subscriptions);
-                const capabilities = pluginCapabilityLabels(plugin.capabilities);
+                const capabilities = pluginOperationalCapabilityLabels({
+                  capabilities: plugin.capabilities,
+                  permissions: plugin.permissions,
+                  usage: plugin.usage,
+                  description: plugin.description,
+                });
                 const risks = pluginContractRiskWarnings({
                   capabilities: plugin.capabilities,
                   event_subscriptions: plugin.event_subscriptions,
@@ -1198,7 +1239,7 @@ function RemoteInstallCard() {
   );
 }
 
-// ── 已安装插件列表（官方 + 远程） ────────────────────────────────
+// ── 已安装插件列表（推荐源 + 远程） ────────────────────────────────
 function InstalledPluginsSection() {
   const nav = useNavigate();
   const qc = useQueryClient();
@@ -1361,7 +1402,7 @@ function InstalledPluginsSection() {
                   </TableCell>
                   <TableCell>
                     <MetaBadge tone={row.source === "official" ? "success" : "neutral"}>
-                      {row.source === "official" ? "官方插件" : "第三方"}
+                      {row.source === "official" ? "推荐源" : "第三方"}
                     </MetaBadge>
                   </TableCell>
                   <TableCell>{formatPluginVersion(row.version)}</TableCell>
@@ -1378,7 +1419,16 @@ function InstalledPluginsSection() {
                       ) : (
                         <Button size="sm" onClick={() => enableTPMut.mutate(row.key)} disabled={enableTPMut.isPending}>启用</Button>
                       )}
-                      <Button size="sm" variant="ghost" onClick={() => { if (confirm(`确认卸载「${row.key}」？`)) uninstallTPMut.mutate(row.key); }} disabled={uninstallTPMut.isPending}>卸载</Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className={DANGER_OUTLINE_BUTTON_CLASS}
+                        onClick={() => { if (confirm(`确认卸载「${row.key}」？`)) uninstallTPMut.mutate(row.key); }}
+                        disabled={uninstallTPMut.isPending}
+                      >
+                        <Trash2 className="mr-1 h-3 w-3" />
+                        卸载
+                      </Button>
                     </div>
                   </TableCell>
                 </TableRow>
@@ -1493,7 +1543,7 @@ function InstalledPluginsSection() {
                       <Button
                         size="sm"
                         variant="outline"
-                        className="border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                        className={DANGER_OUTLINE_BUTTON_CLASS}
                         onClick={() => { if (confirm(`确认卸载「${p.name}」？`)) uninstallRMMut.mutate(p.name); }}
                         disabled={uninstallRMMut.isPending}
                       >

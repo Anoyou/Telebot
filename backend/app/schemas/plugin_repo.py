@@ -76,6 +76,7 @@ class PluginRepoPlugin(BaseModel):
     update_available: bool = False
     event_subscriptions: list[dict[str, Any]] = Field(default_factory=list)
     capabilities: dict[str, Any] = Field(default_factory=dict)
+    permissions: list[str] = Field(default_factory=list)
     tags: list[str] = Field(default_factory=list)
     # 该插件在仓库内的相对子目录（用于安装时定位）；若插件位于仓库根目录则为 ""
     subdir: str = ""

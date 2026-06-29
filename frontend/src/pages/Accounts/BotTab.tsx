@@ -89,9 +89,9 @@ import type {
 import { getErrMsg } from "@/lib/api";
 import { cn, formatDateTime } from "@/lib/utils";
 import {
-  pluginCapabilityLabels,
   pluginContractRiskWarnings,
   pluginEventSubscriptionLabels,
+  pluginOperationalCapabilityLabels,
   type PluginCapabilities,
   type PluginEventSubscription,
 } from "@/types/pluginContract";
@@ -263,6 +263,7 @@ type InteractionEntryOption = {
   featureUsage?: string | null;
   eventSubscriptions?: PluginEventSubscription[];
   capabilities?: PluginCapabilities;
+  permissions?: string[];
   lintWarnings?: string[];
   entry: FeatureInteractionEntry;
   value: string;
@@ -1043,7 +1044,11 @@ function InteractionRuleEditor({
   const selectedModule = resolveRuleModuleSelection(rule, interactionEntries);
   const selectedInteractionEntry = selectedModule?.entry;
   const selectedEventLabels = pluginEventSubscriptionLabels(selectedModule?.eventSubscriptions);
-  const selectedCapabilityLabels = pluginCapabilityLabels(selectedModule?.capabilities);
+  const selectedCapabilityLabels = pluginOperationalCapabilityLabels({
+    capabilities: selectedModule?.capabilities,
+    permissions: selectedModule?.permissions,
+    usage: selectedModule?.featureUsage,
+  });
   const selectedContractWarnings = pluginContractRiskWarnings({
     capabilities: selectedModule?.capabilities,
     event_subscriptions: selectedModule?.eventSubscriptions,
@@ -1139,7 +1144,11 @@ function InteractionRuleEditor({
     const title = item.entry.title || item.entry.label || item.entry.key;
     const dispatchLabels = interactionDispatchLabels(item.entry);
     const entryEvents = (item.entry.events ?? []).map((event) => interactionEventLabel(event));
-    const capabilityLabels = pluginCapabilityLabels(item.capabilities);
+    const capabilityLabels = pluginOperationalCapabilityLabels({
+      capabilities: item.capabilities,
+      permissions: item.permissions,
+      usage: item.featureUsage,
+    });
     const adminChannel = item.entry.message_channels?.admin_command;
     const publicChannel = item.entry.message_channels?.public_keyword;
     return (
@@ -1425,19 +1434,19 @@ function InteractionRuleEditor({
                   ) : null}
                   <div className="mt-3 grid gap-2 sm:grid-cols-2">
                     <InteractionContractBlock
-                      title="入口事件"
+                      title="触发事件"
                       items={selectedEntryEvents}
-                      empty="入口未声明 events"
+                      empty="入口未声明触发事件"
                     />
                     <InteractionContractBlock
-                      title="Event Bus 订阅"
+                      title="触发入口"
                       items={selectedEventLabels}
-                      empty="插件未声明 event_subscriptions"
+                      empty="插件未声明触发入口"
                     />
                     <InteractionContractBlock
-                      title="能力声明"
+                      title="可用能力"
                       items={selectedCapabilityLabels}
-                      empty="插件未声明 capabilities"
+                      empty="未声明可用能力"
                     />
                     <InteractionContractBlock
                       title="发送/模式"
@@ -1838,6 +1847,7 @@ export function BotTab({
       featureUsage: feature.usage,
       eventSubscriptions: feature.event_subscriptions,
       capabilities: feature.capabilities,
+      permissions: feature.permissions,
       lintWarnings: feature.lint_warnings,
       entry,
       value: `${feature.key}:${entry.key}`,

@@ -490,6 +490,7 @@ export interface FeatureInfo {
   interaction_entries?: FeatureInteractionEntry[];
   event_subscriptions?: PluginEventSubscription[];
   capabilities?: PluginCapabilities;
+  permissions?: string[];
   experimental: boolean;
   update_available?: boolean;
   latest_version?: string | null;
@@ -896,6 +897,8 @@ export interface TraceOverview {
 export interface SystemSettings {
   command_prefix: string;
   kill_switch?: boolean;
+  /** 全局 AI 能力开关；关闭后不加载模型 provider，也不注入插件 ctx.ai */
+  ai_enabled?: boolean;
   sudo_enabled?: boolean;
   /** 群聊纯命令回声防误触检查前 N 条消息；0 = 关闭 */
   command_echo_guard_previous_messages?: number;

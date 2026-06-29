@@ -16,6 +16,7 @@ export interface RemotePlugin {
   lint_warnings?: string[];
   event_subscriptions?: PluginEventSubscription[];
   capabilities?: PluginCapabilities;
+  permissions?: string[];
   enabled: boolean;
   default_enabled: boolean;
   installed_at: string | null;

@@ -281,11 +281,11 @@ async def _migrate_optional_builtin_features(
         try:
             official_source = await plugin_repo_service._find_official_plugin_source(key)
         except Exception:  # noqa: BLE001
-            log.warning("历史 builtin 插件 %s 已被使用，但读取官方插件仓库失败", key, exc_info=True)
+            log.warning("历史 builtin 插件 %s 已被使用，但读取推荐插件源失败", key, exc_info=True)
             continue
         if official_source is None:
             log.warning(
-                "历史 builtin 插件 %s 已被使用，但 Core 已不再随包携带源码；请在安装插件页从官方插件仓库安装该插件",
+                "历史 builtin 插件 %s 已被使用，但 Core 已不再随包携带源码；请在安装插件页从推荐插件源安装该插件",
                 key,
             )
             continue
@@ -314,7 +314,7 @@ async def _migrate_optional_builtin_features(
                 )
                 staging.rename(target)
             except Exception:  # noqa: BLE001
-                log.warning("复制官方插件 %s 到 installed 失败", key, exc_info=True)
+                log.warning("复制推荐源插件 %s 到 installed 失败", key, exc_info=True)
                 continue
 
         if feature.is_builtin:

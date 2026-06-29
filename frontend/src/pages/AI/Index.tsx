@@ -12,6 +12,7 @@ import {
   History,
   LayoutDashboard,
   Package,
+  Power,
   PlusCircle,
   Sparkles,
 } from "lucide-react";
@@ -73,28 +74,32 @@ export function AIIndex() {
   const [helpOpen, setHelpOpen] = useState(searchParams.get("help") === "1");
   const [quickStartOpen, setQuickStartOpen] = useState(false);
   const activeTab = normalizeTab(searchParams.get("tab"));
+  const settingsQ = useQuery({
+    queryKey: ["system", "settings"],
+    queryFn: getSystemSettings,
+  });
+  const aiEnabled = settingsQ.data?.ai_enabled ?? true;
   const providersQ = useQuery({
     queryKey: ["llm-providers"],
     queryFn: listLLMProviders,
+    enabled: !settingsQ.isLoading && aiEnabled,
+    retry: false,
   });
   const templatesQ = useQuery({
     queryKey: ["cmd-tpl"],
     queryFn: listCommandTemplates,
   });
-  const settingsQ = useQuery({
-    queryKey: ["system", "settings"],
-    queryFn: getSystemSettings,
-  });
   const usageQ = useQuery({
     queryKey: ["llm-usage", "recent", "summary"],
     queryFn: () => listRecentLLMUsage(100),
     retry: false,
-    enabled: (providersQ.data?.length ?? 0) > 0,
+    enabled: !settingsQ.isLoading && aiEnabled && (providersQ.data?.length ?? 0) > 0,
   });
   const enablementQ = useQuery({
     queryKey: ["cmd-tpl", "ai-enablement-summary"],
     queryFn: getAICommandEnablementSummary,
     retry: false,
+    enabled: !settingsQ.isLoading && aiEnabled,
   });
   const accountsQ = useQuery({
     queryKey: ["accounts", "ai-enable-picker"],
@@ -115,7 +120,7 @@ export function AIIndex() {
     setSearchParams(next, { replace: true });
   };
 
-  const loading = providersQ.isLoading || templatesQ.isLoading;
+  const loading = settingsQ.isLoading || templatesQ.isLoading || (aiEnabled && providersQ.isLoading);
   if (loading) {
     return (
       <div className="flex h-40 items-center justify-center">
@@ -127,6 +132,30 @@ export function AIIndex() {
   const providers = providersQ.data || [];
   const templates = templatesQ.data || [];
   const cmdPrefix = settingsQ.data?.command_prefix || ",";
+  if (!aiEnabled) {
+    return (
+      <PageShell>
+        <AIHeader />
+        <Card>
+          <CardHeader>
+            <SectionHeader
+              icon={Power}
+              title="AI 能力已关闭"
+              description="模型提供商、AI 指令调用和插件 ctx.ai 已热拔出。已有模板仍保留，重新启用后可继续使用。"
+            />
+          </CardHeader>
+          <CardContent className="flex flex-wrap gap-2">
+            <Button asChild>
+              <Link to="/settings?tab=platform">去系统设置启用</Link>
+            </Button>
+            <Button asChild variant="outline">
+              <Link to="/plugins">返回插件中心</Link>
+            </Button>
+          </CardContent>
+        </Card>
+      </PageShell>
+    );
+  }
   const providerById = new Map(providers.map((p) => [p.id, p]));
   const aiTemplates = templates.filter((t) => t.type === "ai");
   const providerCount = providers.length;

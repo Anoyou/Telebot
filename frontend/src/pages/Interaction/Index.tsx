@@ -32,8 +32,7 @@ import { BotTab } from "@/pages/Accounts/BotTab";
 function accountOptionLabel(account: AccountSummary): string {
   const name = account.display_name?.trim();
   const username = account.tg_username?.trim();
-  const primary = name || (username ? `@${username}` : null) || `账号 #${account.id}`;
-  return account.phone ? `${primary} · ${account.phone}` : primary;
+  return name || (username ? `@${username}` : null) || `账号 #${account.id}`;
 }
 
 function countRuleChats(rules: AccountBotInteractionRule[]): number {
@@ -202,7 +201,6 @@ export function InteractionIndex() {
                 <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                   <AccountStatusBadge status={selectedAccount.status} />
                   <span>ID {selectedAccount.id}</span>
-                  {selectedAccount.phone ? <span>{selectedAccount.phone}</span> : null}
                   {selectedAccount.tg_user_id ? <span>TG {selectedAccount.tg_user_id}</span> : null}
                 </div>
               ) : null}
