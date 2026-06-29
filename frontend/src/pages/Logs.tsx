@@ -7,6 +7,7 @@ import {
   AlertTriangle,
   CheckCircle2,
   Clock,
+  Copy,
   MessageSquareText,
   MousePointerClick,
   Puzzle,
@@ -64,20 +65,26 @@ import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { formatDateTime } from "@/lib/utils";
 
-const LEVEL_VARIANT: Record<
-  string,
-  "secondary" | "warn" | "destructive" | "success"
-> = {
-  debug: "secondary",
-  info: "success",
-  warning: "warn",
-  warn: "warn",
-  error: "destructive",
+type MainTab = "overview" | "events" | "plugins" | "commands" | "actions" | "raw";
+type RuntimeSourceFilter = "" | "event" | "plugin" | "system";
+type RuntimeLevelFilter = "" | "debug" | "info" | "warn" | "error";
+type NormalizedRuntimeLevel = "debug" | "info" | "warn" | "error" | "unknown";
+type RawTab = "runtime" | "audit";
+
+const RUNTIME_LEVEL_RANK: Record<string, number> = {
+  debug: 0,
+  info: 1,
+  warn: 2,
+  warning: 2,
+  error: 3,
 };
 
-type MainTab = "overview" | "events" | "plugins" | "commands" | "actions" | "raw";
-type RuntimeSourceTab = "event" | "plugin" | "system";
-type RawTab = "runtime" | "audit";
+const LOW_VALUE_RUNTIME_PATTERNS = [
+  "允许群组名单已热更新",
+  "插件配置已热更新",
+  "账号 Bot 配置已热更新",
+  "配置已热更新",
+];
 
 function parseMainTab(value: string | null): MainTab {
   if (value === "events" || value === "plugins" || value === "commands" || value === "actions" || value === "raw") {
@@ -435,7 +442,13 @@ export function Logs() {
         </TabsContent>
 
         <TabsContent value="raw">
-          <RawLogsPanel timezone={timezone} />
+          <RawLogsPanel
+            accountId={accountId}
+            pluginKey={pluginKey}
+            keyword={keyword}
+            runtimeMinLevel={settingsQ.data?.log_retention?.runtime_log_min_level}
+            timezone={timezone}
+          />
         </TabsContent>
       </Tabs>
     </PageShell>
@@ -1023,112 +1036,162 @@ function ActionsPanel({
   );
 }
 
-function RawLogsPanel({ timezone }: { timezone?: string }) {
+function RawLogsPanel({
+  accountId,
+  pluginKey,
+  keyword,
+  runtimeMinLevel,
+  timezone,
+}: {
+  accountId: string;
+  pluginKey: string;
+  keyword: string;
+  runtimeMinLevel?: "debug" | "info" | "warn" | "error";
+  timezone?: string;
+}) {
   const [rawTab, setRawTab] = useState<RawTab>("runtime");
-  const [runtimeTab, setRuntimeTab] = useState<RuntimeSourceTab>("event");
-  const [runtimeLevel, setRuntimeLevel] = useState("");
-  const [runtimeSearch, setRuntimeSearch] = useState("");
+  const [runtimeSource, setRuntimeSource] = useState<RuntimeSourceFilter>("");
+  const [runtimeLevel, setRuntimeLevel] = useState<RuntimeLevelFilter>("");
   const [runtimeAutoRefresh, setRuntimeAutoRefresh] = useState(true);
+  const [showRuntimeDetail, setShowRuntimeDetail] = useState(false);
+  const [hideRuntimeNoise, setHideRuntimeNoise] = useState(true);
+  const [wrapRuntimeLines, setWrapRuntimeLines] = useState(true);
   const [auditAction, setAuditAction] = useState("");
-  const [auditSearch, setAuditSearch] = useState("");
+  const [showAuditDetail, setShowAuditDetail] = useState(false);
+  const [wrapAuditLines, setWrapAuditLines] = useState(true);
+  const inheritedFilters = [
+    accountId ? `account=#${accountId}` : "全部账号",
+    pluginKey ? `plugin=${pluginKey}` : null,
+    keyword.trim() ? `keyword=${keyword.trim()}` : null,
+  ].filter(Boolean);
 
   return (
-    <Tabs value={rawTab} onValueChange={(v) => setRawTab(v as RawTab)}>
-      <TabsList className="flex h-auto flex-wrap justify-start gap-1">
-        <TabsTrigger value="runtime" className="gap-1.5"><Activity className="h-4 w-4" /> 运行日志</TabsTrigger>
-        <TabsTrigger value="audit" className="gap-1.5"><ShieldCheck className="h-4 w-4" /> 审计日志</TabsTrigger>
-      </TabsList>
+    <Tabs value={rawTab} onValueChange={(v) => setRawTab(v as RawTab)} className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <TabsList className="flex h-auto flex-wrap justify-start gap-1">
+          <TabsTrigger value="runtime" className="gap-1.5"><Activity className="h-4 w-4" /> 运行日志</TabsTrigger>
+          <TabsTrigger value="audit" className="gap-1.5"><ShieldCheck className="h-4 w-4" /> 审计日志</TabsTrigger>
+        </TabsList>
+        <div className="flex flex-wrap gap-1.5 text-xs text-muted-foreground">
+          {inheritedFilters.map((item) => (
+            <span key={item} className="rounded-md border border-border/70 bg-muted/40 px-2 py-1">
+              {item}
+            </span>
+          ))}
+        </div>
+      </div>
       <TabsContent value="runtime" className="space-y-4">
-        <Card>
-          <CardHeader>
-            <SectionHeader
-              title="原始运行日志"
-              description="按时间展示原始运行记录；每条保留日志等级、正文和可展开 detail。"
-            />
-          </CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-1 gap-3 md:grid-cols-4 md:items-end">
-              <div className="space-y-1.5">
-                <Label>来源</Label>
-                <Select value={runtimeTab} onChange={(e) => setRuntimeTab(e.target.value as RuntimeSourceTab)}>
-                  <option value="event">消息事件</option>
-                  <option value="plugin">插件日志</option>
-                  <option value="system">系统日志</option>
-                </Select>
-              </div>
-              <div className="space-y-1.5">
-                <Label>级别</Label>
-                <Select value={runtimeLevel} onChange={(e) => setRuntimeLevel(e.target.value)}>
-                  <option value="">全部</option>
-                  <option value="debug">debug</option>
-                  <option value="info">info</option>
-                  <option value="warning">warning</option>
-                  <option value="error">error</option>
-                </Select>
-              </div>
-              <div className="space-y-1.5">
-                <Label>关键词</Label>
-                <SearchInput value={runtimeSearch} onChange={setRuntimeSearch} />
-              </div>
-              <div className="space-y-1.5">
-                <Label>刷新</Label>
-                <div className="flex h-10 items-center gap-2">
-                  <Switch checked={runtimeAutoRefresh} onCheckedChange={setRuntimeAutoRefresh} />
-                  <span className="text-sm text-muted-foreground">{runtimeAutoRefresh ? "5 秒" : "暂停"}</span>
-                </div>
-              </div>
+        <section className="rounded-lg border border-border/70 bg-card/80 p-4">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="min-w-0">
+              <h3 className="text-base font-semibold">控制台运行日志</h3>
+              <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
+                展示实际写入的 runtime log，按时间连续阅读；消息链路、插件调用、发送动作的细节仍可去上方对应标签深挖。
+              </p>
             </div>
-          </CardContent>
-        </Card>
-        <RuntimeLogTable
-          source={runtimeTab}
+            <span className="rounded-md border border-border/70 bg-muted/40 px-2 py-1 text-xs text-muted-foreground">
+              当前记录阈值：{runtimeMinLevelLabel(runtimeMinLevel)}
+            </span>
+          </div>
+          <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-6 xl:items-end">
+            <div className="space-y-1.5">
+              <Label>来源</Label>
+              <Select value={runtimeSource} onChange={(e) => setRuntimeSource(e.target.value as RuntimeSourceFilter)}>
+                <option value="">全部来源</option>
+                <option value="event">消息事件</option>
+                <option value="plugin">插件日志</option>
+                <option value="system">系统运行</option>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label>最低级别</Label>
+              <Select value={runtimeLevel} onChange={(e) => setRuntimeLevel(e.target.value as RuntimeLevelFilter)}>
+                <option value="">全部已记录</option>
+                <option value="debug">debug 及以上</option>
+                <option value="info">info 及以上</option>
+                <option value="warn">warn 及 error</option>
+                <option value="error">仅 error</option>
+              </Select>
+            </div>
+            <SwitchField label="隐藏噪声" checked={hideRuntimeNoise} onCheckedChange={setHideRuntimeNoise} />
+            <SwitchField label="显示 detail" checked={showRuntimeDetail} onCheckedChange={setShowRuntimeDetail} />
+            <SwitchField label="自动刷新" checked={runtimeAutoRefresh} onCheckedChange={setRuntimeAutoRefresh} />
+            <SwitchField label="自动换行" checked={wrapRuntimeLines} onCheckedChange={setWrapRuntimeLines} />
+          </div>
+        </section>
+        <RuntimeLogConsole
+          accountId={accountId}
+          pluginKey={pluginKey}
+          keyword={keyword}
+          source={runtimeSource}
           level={runtimeLevel}
-          search={runtimeSearch}
           autoRefresh={runtimeAutoRefresh}
+          hideNoise={hideRuntimeNoise}
+          showDetail={showRuntimeDetail}
+          wrapLines={wrapRuntimeLines}
           timezone={timezone}
         />
       </TabsContent>
       <TabsContent value="audit" className="space-y-4">
-        <Card>
-          <CardHeader>
-            <SectionHeader
-              title="原始审计日志"
-              description="记录 Web 面板里的启停、配置、插件更新和高风险操作；每条可展开查看 detail。"
-            />
-          </CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-1 gap-3 md:grid-cols-2 md:items-end">
-              <div className="space-y-1.5">
-                <Label>操作类型</Label>
-                <Input value={auditAction} onChange={(e) => setAuditAction(e.target.value)} placeholder="account_bot.test" />
-              </div>
-              <div className="space-y-1.5">
-                <Label>关键词</Label>
-                <SearchInput value={auditSearch} onChange={setAuditSearch} />
-              </div>
+        <section className="rounded-lg border border-border/70 bg-card/80 p-4">
+          <div className="min-w-0">
+            <h3 className="text-base font-semibold">控制台审计日志</h3>
+            <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
+              记录 Web 面板里的配置、启停、插件安装更新和高风险操作，按 action 精确筛选。
+            </p>
+          </div>
+          <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-3 md:items-end">
+            <div className="space-y-1.5 md:col-span-1">
+              <Label>操作类型</Label>
+              <Input value={auditAction} onChange={(e) => setAuditAction(e.target.value)} placeholder="account_bot.test" />
             </div>
-          </CardContent>
-        </Card>
-        <AuditLogTable action={auditAction} search={auditSearch} timezone={timezone} />
+            <SwitchField label="显示 detail" checked={showAuditDetail} onCheckedChange={setShowAuditDetail} />
+            <SwitchField label="自动换行" checked={wrapAuditLines} onCheckedChange={setWrapAuditLines} />
+          </div>
+        </section>
+        <AuditLogConsole
+          action={auditAction}
+          keyword={keyword}
+          showDetail={showAuditDetail}
+          wrapLines={wrapAuditLines}
+          timezone={timezone}
+        />
       </TabsContent>
     </Tabs>
   );
 }
 
-function RuntimeLogTable({
+function RuntimeLogConsole({
+  accountId,
+  pluginKey,
+  keyword,
   source,
   level,
-  search,
   autoRefresh,
+  hideNoise,
+  showDetail,
+  wrapLines,
   timezone,
 }: {
-  source: RuntimeSourceTab;
-  level: string;
-  search: string;
+  accountId: string;
+  pluginKey: string;
+  keyword: string;
+  source: RuntimeSourceFilter;
+  level: RuntimeLevelFilter;
   autoRefresh: boolean;
+  hideNoise: boolean;
+  showDetail: boolean;
+  wrapLines: boolean;
   timezone?: string;
 }) {
-  const filters = { source, level: level || undefined, limit: 100 };
+  const serverLevel = level === "warn" ? "warning" : level === "error" ? "error" : undefined;
+  const filters = {
+    account_id: accountId || undefined,
+    plugin_key: pluginKey || undefined,
+    source: source || undefined,
+    level: serverLevel,
+    limit: 300,
+  };
   const logsQ = useQuery({
     queryKey: ["logs", "runtime", filters],
     queryFn: () => listRuntimeLogs(filters),
@@ -1136,193 +1199,228 @@ function RuntimeLogTable({
     refetchIntervalInBackground: false,
   });
   const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    if (!q) return logsQ.data ?? [];
     return (logsQ.data ?? []).filter((row) => {
-      const detail = row.detail ? JSON.stringify(row.detail).toLowerCase() : "";
-      return row.message.toLowerCase().includes(q) || detail.includes(q);
+      if (level && !passesRuntimeLevel(row.level, level)) return false;
+      if (hideNoise && isLowValueRuntimeLog(row)) return false;
+      return matchesRuntimeKeyword(row, keyword);
     });
-  }, [logsQ.data, search]);
+  }, [hideNoise, keyword, level, logsQ.data]);
+  const visibleText = useMemo(
+    () => filtered.flatMap((row) => runtimeConsoleText(row, timezone, showDetail)).join("\n"),
+    [filtered, showDetail, timezone],
+  );
+  const [copied, setCopied] = useState(false);
   return (
-    <Card>
-      <CardHeader>
-        <SectionHeader
-          title="运行日志"
-          description="连续日志流视图，适合按时间扫正文；detail 折叠在每条日志下方。"
-          meta={<SignalPill tone="neutral" label="窗口" value="100 条" />}
-        />
-      </CardHeader>
-      <CardContent>
-        {logsQ.isLoading ? <InlineLoading /> : logsQ.isError ? (
-          <ErrorHint text="运行日志加载失败" error={logsQ.error} />
-        ) : filtered.length ? (
-          <div className="overflow-hidden rounded-lg border border-border/70 bg-background font-mono text-xs">
-            {filtered.map((row: RuntimeLogItem) => (
-              <RuntimeLogLine key={row.id} row={row} keyword={search} timezone={timezone} />
-            ))}
-          </div>
-        ) : <EmptyHint text="该分类暂无运行日志" />}
-      </CardContent>
-    </Card>
+    <ConsoleFrame
+      title="runtime.log"
+      description="最近 300 条，最新在上。顶部账号、插件、关键词过滤会同步作用于这里。"
+      count={filtered.length}
+      copied={copied}
+      onCopy={() => copyConsoleText(visibleText, setCopied)}
+    >
+      {logsQ.isLoading ? <InlineLoading /> : logsQ.isError ? (
+        <ConsoleError text="运行日志加载失败" error={logsQ.error} />
+      ) : filtered.length ? (
+        <div className={wrapLines ? "min-w-0" : "min-w-max"}>
+          {filtered.map((row) => (
+            <RuntimeConsoleRow
+              key={row.id}
+              row={row}
+              keyword={keyword}
+              showDetail={showDetail}
+              wrapLines={wrapLines}
+              timezone={timezone}
+            />
+          ))}
+        </div>
+      ) : <ConsoleEmpty text="没有符合筛选条件的运行日志行" />}
+    </ConsoleFrame>
   );
 }
 
-function AuditLogTable({ action, search, timezone }: { action: string; search: string; timezone?: string }) {
+function AuditLogConsole({
+  action,
+  keyword,
+  showDetail,
+  wrapLines,
+  timezone,
+}: {
+  action: string;
+  keyword: string;
+  showDetail: boolean;
+  wrapLines: boolean;
+  timezone?: string;
+}) {
   const logsQ = useQuery({
-    queryKey: ["logs", "audit", { action: action || undefined, keyword: search || undefined, limit: 100 }],
-    queryFn: () => listAuditLogs({ action: action || undefined, keyword: search || undefined, limit: 100 }),
+    queryKey: ["logs", "audit", { action: action || undefined, keyword: keyword || undefined, limit: 300 }],
+    queryFn: () => listAuditLogs({ action: action || undefined, keyword: keyword || undefined, limit: 300 }),
   });
   const endpointMissing = isAxiosError(logsQ.error) &&
     (logsQ.error.response?.status === 404 || logsQ.error.response?.status === 405);
+  const visibleRows = logsQ.data ?? [];
+  const visibleText = useMemo(
+    () => visibleRows.flatMap((row) => auditConsoleText(row, timezone, showDetail)).join("\n"),
+    [showDetail, timezone, visibleRows],
+  );
+  const [copied, setCopied] = useState(false);
   return (
-    <Card>
-      <CardHeader>
-        <SectionHeader
-          title="审计日志"
-          description="连续操作日志视图，保留 action、target、操作人和可展开 detail。"
-          meta={<SignalPill tone="neutral" label="窗口" value="100 条" />}
-        />
-      </CardHeader>
-      <CardContent>
-        {logsQ.isLoading ? <InlineLoading /> : endpointMissing ? (
-          <EmptyHint text="当前环境未提供审计日志接口" />
-        ) : logsQ.isError ? (
-          <ErrorHint text="审计日志加载失败" error={logsQ.error} />
-        ) : logsQ.data?.length ? (
-          <div className="overflow-hidden rounded-lg border border-border/70 bg-background font-mono text-xs">
-            {logsQ.data.map((row: AuditLogItem) => (
-              <AuditLogLine key={row.id} row={row} keyword={search} timezone={timezone} />
-            ))}
-          </div>
-        ) : <EmptyHint text="暂无审计日志" />}
-      </CardContent>
-    </Card>
+    <ConsoleFrame
+      title="audit.log"
+      description="最近 300 条，最新在上。关键词沿用顶部排查过滤。"
+      count={visibleRows.length}
+      copied={copied}
+      onCopy={() => copyConsoleText(visibleText, setCopied)}
+    >
+      {logsQ.isLoading ? <InlineLoading /> : endpointMissing ? (
+        <ConsoleEmpty text="当前环境未提供审计日志接口" />
+      ) : logsQ.isError ? (
+        <ConsoleError text="审计日志加载失败" error={logsQ.error} />
+      ) : visibleRows.length ? (
+        <div className={wrapLines ? "min-w-0" : "min-w-max"}>
+          {visibleRows.map((row) => (
+            <AuditConsoleRow
+              key={row.id}
+              row={row}
+              keyword={keyword}
+              showDetail={showDetail}
+              wrapLines={wrapLines}
+              timezone={timezone}
+            />
+          ))}
+        </div>
+      ) : <ConsoleEmpty text="没有符合筛选条件的审计日志行" />}
+    </ConsoleFrame>
   );
 }
 
-function RuntimeLogLine({
+function RuntimeConsoleRow({
   row,
   keyword,
+  showDetail,
+  wrapLines,
   timezone,
 }: {
   row: RuntimeLogItem;
   keyword: string;
+  showDetail: boolean;
+  wrapLines: boolean;
   timezone?: string;
 }) {
-  const detail = row.detail ?? {};
-  const traceId = pickString(detail, ["trace_id", "context.trace_id", "event.trace_id"]);
-  const pluginKey = pickString(detail, ["plugin_key", "feature_key", "module_key"]);
-  const entryKey = pickString(detail, ["entry_key", "entry", "handler"]);
-  const reasonCode = pickString(detail, ["reason_code", "error_code", "guard_level"]);
-  const chatId = pickString(detail, ["chat_id", "target_chat_id", "message.chat_id", "event.chat_id"]);
-  const messageId = pickString(detail, ["message_id", "target_message_id", "event.message_id"]);
-  const actor = pickString(detail, ["display_name", "username", "user_id", "sender_user_id"]);
-  const sourceLabel = runtimeSourceLabel(row.source);
-  const level = row.level.toLowerCase();
-  const meta = [
-    row.account_id ? `account=#${row.account_id}` : null,
-    pluginKey ? `plugin=${pluginKey}` : null,
-    entryKey ? `entry=${entryKey}` : null,
-    chatId ? `chat=${chatId}` : null,
-    messageId ? `message=${messageId}` : null,
-    actor ? `actor=${actor}` : null,
-    reasonCode ? `reason=${reasonDisplay(reasonCode)}` : null,
-  ].filter(Boolean);
-
+  const level = normalizeRuntimeLevel(row.level);
+  const line = runtimeConsoleLine(row, timezone);
+  const traceId = pickString(row.detail, ["trace_id", "context.trace_id", "event.trace_id"]);
   return (
-    <article className="border-b border-border/60 px-3 py-2 last:border-b-0 hover:bg-muted/25">
-      <div className="grid gap-2 lg:grid-cols-[11rem_5.5rem_minmax(0,1fr)] lg:items-start">
-        <time className="whitespace-nowrap text-muted-foreground">
-          {formatDateTime(row.created_at, timezone)}
-        </time>
-        <div className="flex flex-wrap items-center gap-1.5">
-          <Badge variant={LEVEL_VARIANT[level] ?? "secondary"} className="font-mono">{row.level.toUpperCase()}</Badge>
-          <span className="rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground">{sourceLabel}</span>
-        </div>
-        <div className="min-w-0">
-          <div className="break-words leading-5 text-foreground">
-            <HighlightedMessage text={row.message} keyword={keyword} />
-          </div>
-          <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[11px] leading-5 text-muted-foreground">
-            <span>id=#{row.id}</span>
-            {meta.map((item) => <span key={item}>{item}</span>)}
-            {traceId ? (
-              <Link className="text-primary hover:underline" to={`/logs?tab=events&trace_id=${encodeURIComponent(traceId)}`}>
-                trace={traceId}
-              </Link>
-            ) : null}
-          </div>
-          <DetailDisclosure title="详细记录" value={row.detail} />
-        </div>
+    <div className={`border-b border-white/5 last:border-b-0 ${runtimeConsoleLevelClass(level)} hover:bg-white/[0.035]`}>
+      <div className={`${consoleLineClass(wrapLines)} ${isLowValueRuntimeLog(row) ? "opacity-55" : ""}`}>
+        <HighlightedMessage text={line} keyword={keyword} />
+        {traceId ? (
+          <>
+            {" "}
+            <Link className="text-sky-300 underline-offset-2 hover:underline" to={`/logs?tab=events&trace_id=${encodeURIComponent(traceId)}`}>
+              open_trace
+            </Link>
+          </>
+        ) : null}
       </div>
-    </article>
+      {showDetail ? <ConsoleJson value={row.detail} wrapLines={wrapLines} /> : null}
+    </div>
   );
 }
 
-function AuditLogLine({
+function AuditConsoleRow({
   row,
   keyword,
+  showDetail,
+  wrapLines,
   timezone,
 }: {
   row: AuditLogItem;
   keyword: string;
+  showDetail: boolean;
+  wrapLines: boolean;
   timezone?: string;
 }) {
-  const detail = row.detail ?? {};
-  const pluginKey = pickString(detail, ["plugin_key", "feature_key", "key"]);
-  const accountId = pickString(detail, ["account_id", "aid"]);
-  const status = pickString(detail, ["status", "state", "result"]);
-  const version = pickString(detail, ["version", "new_version", "target_version"]);
-  const summary = auditDetailSummary(detail, keyword);
-  const meta = [
-    row.user_id ? `user=#${row.user_id}` : null,
-    row.target ? `target=${row.target}` : null,
-    accountId ? `account=#${accountId}` : null,
-    pluginKey ? `plugin=${pluginKey}` : null,
-    version ? `version=${version}` : null,
-  ].filter(Boolean);
-
+  const line = auditConsoleLine(row, timezone);
   return (
-    <article className="border-b border-border/60 px-3 py-2 last:border-b-0 hover:bg-muted/25">
-      <div className="grid gap-2 lg:grid-cols-[11rem_5.5rem_minmax(0,1fr)] lg:items-start">
-        <time className="whitespace-nowrap text-muted-foreground">
-          {formatDateTime(row.ts, timezone)}
-        </time>
-        <div className="flex flex-wrap items-center gap-1.5">
-          <Badge variant={status ? (LEVEL_VARIANT[status.toLowerCase()] ?? "secondary") : "secondary"} className="font-mono">
-            {status ? status.toUpperCase() : "AUDIT"}
-          </Badge>
-        </div>
-        <div className="min-w-0">
-          <div className="break-words leading-5 text-foreground">
-            <HighlightedMessage text={auditActionTitle(row.action)} keyword={keyword} />
-          </div>
-          <div className="mt-1 break-words leading-5 text-muted-foreground">
-            {summary || "detail 为空"}
-          </div>
-          <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[11px] leading-5 text-muted-foreground">
-            <span>id=#{row.id}</span>
-            <span>action={row.action}</span>
-            {meta.map((item) => <span key={item}>{item}</span>)}
-          </div>
-          <DetailDisclosure title="详细记录" value={row.detail} />
-        </div>
+    <div className="border-b border-white/5 text-zinc-100 last:border-b-0 hover:bg-white/[0.035]">
+      <div className={consoleLineClass(wrapLines)}>
+        <HighlightedMessage text={line} keyword={keyword} />
       </div>
-    </article>
+      {showDetail ? <ConsoleJson value={row.detail} wrapLines={wrapLines} /> : null}
+    </div>
   );
 }
 
-function DetailDisclosure({ title, value }: { title: string; value?: Record<string, unknown> | null }) {
-  if (!value || Object.keys(value).length === 0) return null;
+function SwitchField({
+  label,
+  checked,
+  onCheckedChange,
+}: {
+  label: string;
+  checked: boolean;
+  onCheckedChange: (checked: boolean) => void;
+}) {
   return (
-    <details className="group mt-1 rounded-md border border-border/70 bg-muted/20 px-2 py-1.5">
-      <summary className="cursor-pointer select-none text-[11px] font-medium text-muted-foreground group-open:text-foreground">
-        {title}
-      </summary>
-      <div className="mt-2">
-        <JsonBlock title="detail" value={value} />
+    <div className="space-y-1.5">
+      <Label>{label}</Label>
+      <div className="flex h-10 items-center gap-2">
+        <Switch checked={checked} onCheckedChange={onCheckedChange} />
+        <span className="text-sm text-muted-foreground">{checked ? "开启" : "关闭"}</span>
       </div>
-    </details>
+    </div>
+  );
+}
+
+function ConsoleFrame({
+  title,
+  description,
+  count,
+  copied,
+  onCopy,
+  children,
+}: {
+  title: string;
+  description: string;
+  count: number;
+  copied: boolean;
+  onCopy: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <section className="overflow-hidden rounded-lg border border-zinc-800 bg-[#08090d] shadow-sm">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 bg-zinc-950 px-3 py-2">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="font-mono text-xs font-semibold text-zinc-100">{title}</span>
+            <span className="rounded bg-zinc-800 px-1.5 py-0.5 text-[11px] text-zinc-300">{count} lines</span>
+          </div>
+          <p className="mt-1 text-xs text-zinc-400">{description}</p>
+        </div>
+        <Button type="button" variant="outline" size="sm" className="border-zinc-700 bg-zinc-900 text-zinc-100 hover:bg-zinc-800" onClick={onCopy}>
+          <Copy className="mr-1.5 h-3.5 w-3.5" />
+          {copied ? "已复制" : "复制当前视图"}
+        </Button>
+      </div>
+      <div className="max-h-[68vh] overflow-auto overscroll-contain bg-[#08090d] text-xs">
+        {children}
+      </div>
+    </section>
+  );
+}
+
+function ConsoleError({ text, error }: { text: string; error: unknown }) {
+  return (
+    <div className="px-3 py-8 font-mono text-xs text-red-300">
+      {text}: {errorMessage(error)}
+    </div>
+  );
+}
+
+function ConsoleEmpty({ text }: { text: string }) {
+  return (
+    <div className="px-3 py-8 font-mono text-xs text-zinc-400">
+      {text}
+    </div>
   );
 }
 
@@ -1332,6 +1430,206 @@ function runtimeSourceLabel(source?: string | null): string {
   if (value === "plugin" || value === "builtin") return "插件日志";
   if (value === "system" || value === "worker") return "系统运行";
   return source || "运行日志";
+}
+
+function runtimeSourceShort(source?: string | null): string {
+  const value = (source || "").toLowerCase();
+  if (value === "event" || value === "interaction" || value === "account_bot") return "event";
+  if (value === "plugin" || value === "builtin") return "plugin";
+  if (value === "system" || value === "worker") return "system";
+  return value || "runtime";
+}
+
+function runtimeMinLevelLabel(level?: "debug" | "info" | "warn" | "error"): string {
+  if (level === "debug") return "debug（排障最详细）";
+  if (level === "warn") return "warn（告警和错误）";
+  if (level === "error") return "error（仅错误）";
+  return "info（日常）";
+}
+
+function normalizeRuntimeLevel(level?: string | null): NormalizedRuntimeLevel {
+  const value = (level || "").toLowerCase();
+  if (value === "debug" || value === "info" || value === "error") return value;
+  if (value === "warn" || value === "warning") return "warn";
+  return "unknown";
+}
+
+function passesRuntimeLevel(level: string, minLevel: RuntimeLevelFilter): boolean {
+  if (!minLevel) return true;
+  const current = RUNTIME_LEVEL_RANK[level.toLowerCase()] ?? 1;
+  const threshold = RUNTIME_LEVEL_RANK[minLevel] ?? 0;
+  return current >= threshold;
+}
+
+function matchesRuntimeKeyword(row: RuntimeLogItem, keyword: string): boolean {
+  const q = keyword.trim().toLowerCase();
+  if (!q) return true;
+  const detail = row.detail ? safeJsonStringify(row.detail).toLowerCase() : "";
+  return [
+    row.message,
+    row.level,
+    row.source || "",
+    runtimeSourceLabel(row.source),
+    String(row.account_id ?? ""),
+    detail,
+  ].some((value) => value.toLowerCase().includes(q));
+}
+
+function isLowValueRuntimeLog(row: RuntimeLogItem): boolean {
+  const level = normalizeRuntimeLevel(row.level);
+  if (level === "warn" || level === "error") return false;
+  return LOW_VALUE_RUNTIME_PATTERNS.some((pattern) => row.message.includes(pattern));
+}
+
+function runtimeConsoleLine(row: RuntimeLogItem, timezone?: string): string {
+  const detail = row.detail ?? {};
+  const traceId = pickString(detail, ["trace_id", "context.trace_id", "event.trace_id"]);
+  const pluginKey = pickString(detail, ["plugin_key", "feature_key", "module_key"]);
+  const entryKey = pickString(detail, ["entry_key", "entry", "handler"]);
+  const reasonCode = pickString(detail, ["reason_code", "error_code", "guard_level"]);
+  const chatId = pickString(detail, ["chat_id", "target_chat_id", "message.chat_id", "event.chat_id"]);
+  const messageId = pickString(detail, ["message_id", "target_message_id", "event.message_id"]);
+  const actor = pickString(detail, ["display_name", "username", "user_id", "sender_user_id"]);
+  const meta = [
+    `id=#${row.id}`,
+    `source=${runtimeSourceShort(row.source)}`,
+    row.account_id ? `account=#${row.account_id}` : null,
+    pluginKey ? `plugin=${pluginKey}` : null,
+    entryKey ? `entry=${entryKey}` : null,
+    traceId ? `trace=${traceId}` : null,
+    chatId ? `chat=${chatId}` : null,
+    messageId ? `message=${messageId}` : null,
+    actor ? `actor=${actor}` : null,
+    reasonCode ? `reason=${reasonCode}` : null,
+  ].filter(Boolean);
+  const level = normalizeRuntimeLevel(row.level).toUpperCase().padEnd(5);
+  return `[${formatConsoleTimestamp(row.created_at, timezone)}] [${level}] [${meta.join(" ")}] ${compactConsoleText(row.message)}`;
+}
+
+function runtimeConsoleText(row: RuntimeLogItem, timezone: string | undefined, showDetail: boolean): string[] {
+  const lines = [runtimeConsoleLine(row, timezone)];
+  if (showDetail && row.detail && Object.keys(row.detail).length) {
+    lines.push(indentConsoleBlock(safeJsonStringify(row.detail, 2)));
+  }
+  return lines;
+}
+
+function auditConsoleLine(row: AuditLogItem, timezone?: string): string {
+  const detail = row.detail ?? {};
+  const pluginKey = pickString(detail, ["plugin_key", "feature_key", "key"]);
+  const accountId = pickString(detail, ["account_id", "aid"]);
+  const status = pickString(detail, ["status", "state", "result"]);
+  const version = pickString(detail, ["version", "new_version", "target_version"]);
+  const meta = [
+    `id=#${row.id}`,
+    row.user_id ? `user=#${row.user_id}` : null,
+    `action=${row.action}`,
+    row.target ? `target=${row.target}` : null,
+    accountId ? `account=#${accountId}` : null,
+    pluginKey ? `plugin=${pluginKey}` : null,
+    status ? `status=${status}` : null,
+    version ? `version=${version}` : null,
+  ].filter(Boolean);
+  const summary = auditDetailSummaryText(detail);
+  const message = summary ? `${auditActionTitle(row.action)} | ${summary}` : auditActionTitle(row.action);
+  return `[${formatConsoleTimestamp(row.ts, timezone)}] [AUDIT] [${meta.join(" ")}] ${compactConsoleText(message)}`;
+}
+
+function auditConsoleText(row: AuditLogItem, timezone: string | undefined, showDetail: boolean): string[] {
+  const lines = [auditConsoleLine(row, timezone)];
+  if (showDetail && row.detail && Object.keys(row.detail).length) {
+    lines.push(indentConsoleBlock(safeJsonStringify(row.detail, 2)));
+  }
+  return lines;
+}
+
+function auditDetailSummaryText(detail: Record<string, unknown>): string {
+  const preferred = [
+    "message",
+    "error",
+    "reason",
+    "plugin_key",
+    "feature_key",
+    "repo_url",
+    "branch",
+    "account_id",
+    "enabled",
+    "status",
+  ];
+  const picked = preferred
+    .filter((key) => key in detail)
+    .map((key) => `${key}=${stringifyShort(detail[key])}`);
+  const fallback = Object.entries(detail)
+    .filter(([key]) => !preferred.includes(key))
+    .slice(0, Math.max(0, 4 - picked.length))
+    .map(([key, value]) => `${key}=${stringifyShort(value)}`);
+  return [...picked, ...fallback].slice(0, 4).join(" ");
+}
+
+function consoleLineClass(wrapLines: boolean): string {
+  const wrapping = wrapLines ? "whitespace-pre-wrap break-words" : "min-w-max whitespace-pre";
+  return `${wrapping} px-3 py-1.5 font-mono text-[11px] leading-5`;
+}
+
+function runtimeConsoleLevelClass(level: NormalizedRuntimeLevel): string {
+  if (level === "error") return "text-red-300";
+  if (level === "warn") return "text-amber-200";
+  if (level === "debug") return "text-zinc-500";
+  if (level === "unknown") return "text-zinc-300";
+  return "text-zinc-100";
+}
+
+function ConsoleJson({ value, wrapLines }: { value?: Record<string, unknown> | null; wrapLines: boolean }) {
+  if (!value || Object.keys(value).length === 0) return null;
+  return (
+    <pre className={`${wrapLines ? "whitespace-pre-wrap break-words" : "min-w-max whitespace-pre"} border-l border-white/10 bg-black/20 px-6 py-2 font-mono text-[11px] leading-5 text-zinc-400`}>
+      {safeJsonStringify(value, 2)}
+    </pre>
+  );
+}
+
+async function copyConsoleText(text: string, setCopied: (value: boolean) => void): Promise<void> {
+  if (!text.trim() || !navigator.clipboard) return;
+  await navigator.clipboard.writeText(text);
+  setCopied(true);
+  window.setTimeout(() => setCopied(false), 1200);
+}
+
+function safeJsonStringify(value: unknown, space?: number): string {
+  try {
+    return JSON.stringify(value, null, space);
+  } catch {
+    return String(value);
+  }
+}
+
+function compactConsoleText(value: string): string {
+  return value.replace(/\s+/g, " ").trim();
+}
+
+function indentConsoleBlock(value: string): string {
+  return value.split("\n").map((line) => `  ${line}`).join("\n");
+}
+
+function formatConsoleTimestamp(iso?: string | null, tz?: string | null): string {
+  if (!iso) return "-";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "-";
+  try {
+    return new Intl.DateTimeFormat("zh-CN", {
+      timeZone: tz || "Asia/Shanghai",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: false,
+    }).format(d).replace(/\//g, "-");
+  } catch {
+    const pad = (n: number) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+  }
 }
 
 function auditActionTitle(action: string): string {
@@ -1348,31 +1646,6 @@ function auditActionTitle(action: string): string {
   };
   if (labels[action]) return labels[action];
   return action.split(".").filter(Boolean).join(" / ") || action;
-}
-
-function auditDetailSummary(detail: Record<string, unknown>, keyword: string): ReactNode {
-  const preferred = [
-    "message",
-    "error",
-    "reason",
-    "plugin_key",
-    "feature_key",
-    "repo_url",
-    "branch",
-    "account_id",
-    "enabled",
-    "status",
-  ];
-  const picked = preferred
-    .filter((key) => key in detail)
-    .map((key) => `${key}: ${stringifyShort(detail[key])}`);
-  const fallback = Object.entries(detail)
-    .filter(([key]) => !preferred.includes(key))
-    .slice(0, Math.max(0, 4 - picked.length))
-    .map(([key, value]) => `${key}: ${stringifyShort(value)}`);
-  const summary = [...picked, ...fallback].slice(0, 4).join(" · ");
-  if (!summary) return null;
-  return <HighlightedMessage text={summary} keyword={keyword} />;
 }
 
 function InlineTraceSummary({
@@ -1646,21 +1919,6 @@ function SearchInput({ value, onChange }: { value: string; onChange: (v: string)
     <div className="relative">
       <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
       <Input className="pl-9" value={value} onChange={(e) => onChange(e.target.value)} placeholder="搜索关键词" />
-    </div>
-  );
-}
-
-function LogDetail({ detail, keyword }: { detail: Record<string, unknown>; keyword: string }) {
-  const entries = Object.entries(detail).slice(0, 8);
-  if (!entries.length) return null;
-  return (
-    <div className="mt-2 grid gap-1 rounded-md bg-muted p-2 text-[11px] text-muted-foreground">
-      {entries.map(([key, value]) => (
-        <div key={key} className="break-all">
-          <span className="font-medium text-foreground">{key}</span>:{" "}
-          <HighlightedMessage text={stringifyShort(value)} keyword={keyword} />
-        </div>
-      ))}
     </div>
   );
 }
