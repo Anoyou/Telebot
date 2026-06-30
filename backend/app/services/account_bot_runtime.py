@@ -127,6 +127,7 @@ _PLAYER_IDENTITY_CONFIDENCE_CALLBACK = "callback_confirmed"
 _PLAYER_IDENTITY_CONFIDENCE_NAME_ONLY = "name_only"
 _PLAYER_IDENTITY_CONFIDENCE_UNKNOWN = "unknown"
 _MODULE_PAYMENT_AMOUNT_KEYS = ("amount", "bet", "entry_amount", "entry_fee", "stake")
+_COMMON_COMMAND_PREFIXES = (",", "。", ".", "/", "!", "！", "-", "、")
 
 
 async def _load_command_prefix(db) -> str:
@@ -141,6 +142,32 @@ async def _load_command_prefix(db) -> str:
         if value:
             prefix = value
     return prefix
+
+
+def _looks_like_command_name(cmd: str, *, prefix: str) -> bool:
+    name = str(cmd or "").strip()
+    if not name:
+        return False
+    if prefix and name.startswith(prefix):
+        return False
+    return any(ch.isalnum() or ch == "_" for ch in name)
+
+
+async def _incoming_is_userbot_command_text(db: Any, incoming: Incoming) -> bool:
+    text = str(incoming.text or "").strip()
+    if incoming.callback_id or not text:
+        return False
+    candidate_prefixes = {settings.command_prefix or "", *_COMMON_COMMAND_PREFIXES}
+    if not any(prefix and text.startswith(prefix) for prefix in candidate_prefixes):
+        return False
+    prefix = await _load_command_prefix(db)
+    if not prefix or not text.startswith(prefix):
+        return False
+    rest = text[len(prefix):].lstrip()
+    if not rest:
+        return False
+    token = rest.split(None, 1)[0].strip()
+    return _looks_like_command_name(token, prefix=prefix)
 
 
 async def _event_framework_flags() -> dict[str, bool]:
@@ -992,6 +1019,16 @@ async def _handle_interaction_update(aid: int, token: str, update: dict[str, Any
             cfg = await account_bot_service.get_transfer_notice_config(db, incoming.account_id)
             if incoming.user_id is not None and _int_or_none(cfg.get("interaction_bot_id")) == incoming.user_id:
                 await record_span(trace, "route", TRACE_STATUS_SKIPPED, component="interaction_bot", reason_code="bot_self_message")
+                return
+            if await _incoming_is_userbot_command_text(db, incoming):
+                await record_span(
+                    trace,
+                    "route",
+                    TRACE_STATUS_SKIPPED,
+                    component="interaction_bot",
+                    reason_code="userbot_command_message",
+                    message="系统前缀命令由 userbot 命令链路处理，交互 Bot 不投递规则或会话。",
+                )
                 return
             event_bus_delivery_enabled = flags.get("event_bus_delivery_enabled", True)
             if await _try_handle_transfer_notice(

@@ -7224,6 +7224,77 @@ async def test_interaction_control_and_start_keywords_do_not_route_as_plain_mess
 
 
 @pytest.mark.asyncio
+async def test_interaction_bot_skips_prefixed_userbot_command_messages(monkeypatch) -> None:
+    class _DB:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+        async def get(self, model, key=None):  # noqa: ANN002
+            if getattr(model, "__name__", "") == "SystemSetting" and key == "command_prefix":
+                return SimpleNamespace(value={"value": "。"})
+            return None
+
+    event_bus = AsyncMock(return_value=(False, True))
+    rule_or_keyword = AsyncMock(return_value=False)
+    module_message = AsyncMock(return_value=False)
+    transfer_notice = AsyncMock(return_value=False)
+    monkeypatch.setattr(account_bot_runtime, "AsyncSessionLocal", lambda: _DB())
+    monkeypatch.setattr(
+        account_bot_runtime,
+        "_event_framework_flags",
+        AsyncMock(return_value={"trace_enabled": False, "event_bus_delivery_enabled": True, "inline_updates_enabled": True}),
+    )
+    monkeypatch.setattr(account_bot_runtime, "_try_handle_transfer_notice", transfer_notice)
+    monkeypatch.setattr(account_bot_runtime, "_try_handle_event_bus_subscriptions", event_bus)
+    monkeypatch.setattr(account_bot_runtime, "_try_handle_interaction_rule_command_or_keyword", rule_or_keyword)
+    monkeypatch.setattr(account_bot_runtime, "_try_handle_interaction_module_message", module_message)
+    monkeypatch.setattr(
+        account_bot_service,
+        "get_transfer_notice_config",
+        AsyncMock(
+            return_value={
+                "enabled": True,
+                "interaction_bot_id": 8875144459,
+                "rules": [
+                    {
+                        "id": "ten-half",
+                        "enabled": True,
+                        "chat_ids": [-100778],
+                        "trigger_mode": "both",
+                        "module_start_keywords": ["十点半测试"],
+                        "action": "module",
+                        "module_key": "ten_half",
+                        "module_action": "start_ten_half",
+                    }
+                ],
+            }
+        ),
+    )
+
+    await account_bot_runtime._handle_interaction_update(
+        1,
+        "bbot-token",
+        {
+            "update_id": 15001,
+            "message": {
+                "message_id": 150010,
+                "text": "。10d 100",
+                "from": {"id": 1682400007, "first_name": "Owner"},
+                "chat": {"id": -100778, "type": "supergroup"},
+            },
+        },
+    )
+
+    transfer_notice.assert_not_awaited()
+    event_bus.assert_not_awaited()
+    rule_or_keyword.assert_not_awaited()
+    module_message.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_paid_module_start_keyword_is_blocked_but_answer_message_routes(monkeypatch) -> None:
     class _DB:
         async def __aenter__(self):
