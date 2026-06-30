@@ -32,6 +32,8 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-telebot}
     mem_limit: ${POSTGRES_MEM_LIMIT:-160m}
     mem_reservation: ${POSTGRES_MEM_RESERVATION:-96m}
+    ports:
+      - "127.0.0.1:5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -54,6 +56,8 @@ services:
       ]
     mem_limit: ${REDIS_MEM_LIMIT:-48m}
     mem_reservation: ${REDIS_MEM_RESERVATION:-32m}
+    ports:
+      - "127.0.0.1:6379:6379"
     volumes:
       - redisdata:/data
     healthcheck:
@@ -72,11 +76,13 @@ services:
     # worker 子进程僵尸；之前依赖 supervisor 的 atexit/signal hook 兜底，遇到
     # OOM-Kill 等暴力终止时不一定生效。
     init: true
+    network_mode: "host"
+    privileged: true
     env_file: .env
     environment:
       # 容器内连接服务名（postgres / redis），覆盖 .env 中本机地址
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-telebot}:${POSTGRES_PASSWORD:-telebot}@postgres:5432/${POSTGRES_DB:-telebot}
-      REDIS_URL: redis://redis:6379/0
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-telebot}:${POSTGRES_PASSWORD:-telebot}@127.0.0.1:5432/${POSTGRES_DB:-telebot}
+      REDIS_URL: redis://127.0.0.1:6379/0
       DB_POOL_SIZE: ${DB_POOL_SIZE:-3}
       DB_MAX_OVERFLOW: ${DB_MAX_OVERFLOW:-1}
       DB_POOL_TIMEOUT: ${DB_POOL_TIMEOUT:-30}
@@ -87,23 +93,14 @@ services:
       # 生产容器内路径必须和 volumes 挂载点一致；覆盖旧 .env 中可能残留的 /plugins/installed。
       PLUGINS_INSTALLED_DIR: /app/plugins/installed
       PLUGIN_REPOS_CACHE_DIR: /app/data/plugin_repos
-      TELEPILOT_UPDATER_URL: http://updater:8765
-      TELEPILOT_UPDATER_TOKEN: ${JWT_SECRET:-telepilot-updater-local}
       # #14：迁移只保留 command 里的那一次；应用启动期自动迁移关闭，避免重复执行
       AUTO_MIGRATE_ON_STARTUP: "false"
     mem_limit: ${WEB_MEM_LIMIT:-512m}
     mem_reservation: ${WEB_MEM_RESERVATION:-256m}
-    # 让容器内能用 ``host.docker.internal`` 访问宿主机（Mac/Windows Docker Desktop
-    # 自带；Linux 需要这一行兜底）。如 .env 里 TG_DEFAULT_PROXY=socks5://host.docker.internal:1080
-    # 即可让容器透过宿主机的本地代理出去。
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
     depends_on:
       postgres:
         condition: service_healthy
       redis:
-        condition: service_healthy
-      updater:
         condition: service_healthy
     volumes:
       # session 加密文件落盘目录，volume 持久化
@@ -123,42 +120,17 @@ services:
     # --limit-concurrency / --backlog：1C 机器上限制突发并发，避免请求堆积导致 OOM
     command: ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 1 --loop asyncio --http h11 --no-access-log --limit-concurrency 64 --backlog 64"]
 
-  # ── Updater：内网自更新执行器，不对公网暴露端口 ────────────────
-  updater:
-    build:
-      context: .
-      dockerfile: deploy/updater/Dockerfile
-    restart: unless-stopped
-    environment:
-      TELEPILOT_WORKSPACE: /workspace
-      TELEPILOT_HOST_PROJECT_DIR: ${TELEPILOT_HOST_PROJECT_DIR:-.}
-      TELEPILOT_UPDATE_REMOTE: ${TELEPILOT_UPDATE_REMOTE:-origin}
-      TELEPILOT_UPDATE_BRANCH: ${TELEPILOT_UPDATE_BRANCH:-main}
-      UPDATER_TOKEN: ${JWT_SECRET:-telepilot-updater-local}
-    volumes:
-      # 只挂载到 compose 私有网络里的 updater。它通过宿主机 Docker socket
-      # 执行 prod-update，避免 Web 容器自身拥有 Docker 控制能力。
-      - ${TELEPILOT_HOST_PROJECT_DIR:-.}:/workspace
-      - /var/run/docker.sock:/var/run/docker.sock
-    healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://localhost:8765/health"]
-      interval: 15s
-      timeout: 3s
-      retries: 5
-
   # ── Frontend：nginx 静态托管 + 反代后端 ──────────────────────
   frontend:
     build:
       context: .
       dockerfile: frontend/Dockerfile
     restart: unless-stopped
+    network_mode: "host"
     mem_limit: ${FRONTEND_MEM_LIMIT:-32m}
     mem_reservation: ${FRONTEND_MEM_RESERVATION:-16m}
     depends_on:
       - web
-    ports:
-      # 对外发布端口，可在 .env 中通过 WEB_PORT_PUBLISH 覆盖（默认 80）
-      - "${WEB_PORT_PUBLISH:-80}:80"
 
 # ── 持久化卷 ──────────────────────────────────────────────────
 volumes:
