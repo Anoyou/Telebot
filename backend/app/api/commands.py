@@ -894,7 +894,7 @@ async def test_model(
     started = _time.monotonic()
     try:
         cli = build_client(row, override_model=payload.model.strip(), proxy_url=proxy_url)
-        result = await cli.complete("ping", "ping", max_tokens=4)
+        result = await cli.complete("ping", "ping", max_tokens=4, timeout_seconds=90)
     except LLMError as e:
         elapsed_ms = int((_time.monotonic() - started) * 1000)
         # LLMError 已脱敏
