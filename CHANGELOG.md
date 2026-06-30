@@ -20,6 +20,12 @@
 
 ## [Unreleased]
 
+## [0.45.1] — 2026-06-30 · patch（补丁版本） · 插件配置动作透传补丁
+
+### Fixed
+- 修复远程插件 `plugin.json` 顶层 `config_actions` 在安装/仓库更新时没有写入功能 manifest 的问题；通用插件配置页现在能正确渲染快问快答“获取并整理为题库”等字段级动作按钮。
+- 功能矩阵输出新增 installed plugin manifest 兜底读取，避免旧 feature 记录缺少 `config_actions` 时前端拿不到插件声明的配置动作。
+
 ## [0.45.0] — 2026-06-30 · minor（次版本） · 通用插件配置框架
 
 ### Added

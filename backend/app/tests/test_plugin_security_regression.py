@@ -1516,6 +1516,13 @@ class TestPluginMetadataSchema:
                     "reason": "风控需要原始数字 ID",
                 }
             },
+            "config_actions": [
+                {
+                    "key": "generate_knowledge_base",
+                    "title": "获取并整理为题库",
+                    "placement": "field:knowledge_bases",
+                }
+            ],
         }
         schema = PluginMetadataSchema(**data)
         assert schema.category == "interactive"
@@ -1523,9 +1530,14 @@ class TestPluginMetadataSchema:
         assert schema.interaction_entries[0]["key"] == "start_game24"
         assert schema.event_subscriptions[0]["events"] == ["message", "callback_query"]
         assert schema.capabilities["telegram_native_raw"]["enabled"] is True
+        assert schema.config_actions[0]["key"] == "generate_knowledge_base"
 
     def test_manifest_json_from_remote_meta_keeps_interaction_fields(self):
-        from app.services.remote_plugin_service import PluginMetadata, _manifest_json_from_remote_meta
+        from app.services.remote_plugin_service import (
+            PluginMetadata,
+            _feature_manifest_from_meta,
+            _manifest_json_from_remote_meta,
+        )
 
         meta = PluginMetadata(
             name="dice_grid_hunt",
@@ -1554,12 +1566,27 @@ class TestPluginMetadataSchema:
                     "reason": "风控需要原始数字 ID",
                 }
             },
+            config_actions=[
+                {
+                    "key": "generate_knowledge_base",
+                    "title": "获取并整理为题库",
+                    "placement": "field:knowledge_bases",
+                }
+            ],
         )
 
         manifest_json = _manifest_json_from_remote_meta(meta)
+        feature_manifest = _feature_manifest_from_meta(meta)
         assert manifest_json["usage"] == "发送“开始九宫格”启动玩法；点击按钮或回复答案继续。"
         assert manifest_json["category"] == "interactive"
         assert manifest_json["interaction_profile"] == "session_game"
+        assert manifest_json["config_actions"] == [
+            {
+                "key": "generate_knowledge_base",
+                "title": "获取并整理为题库",
+                "placement": "field:knowledge_bases",
+            }
+        ]
         assert manifest_json["interaction_entries"] == [
             {
                 "key": "start_dice_grid_hunt",
@@ -1575,6 +1602,8 @@ class TestPluginMetadataSchema:
             }
         ]
         assert manifest_json["capabilities"]["telegram_native_raw"]["enabled"] is True
+        assert feature_manifest is not None
+        assert feature_manifest["config_actions"][0]["key"] == "generate_knowledge_base"
 
 
 def test_lint_plugin_metadata_files_warns_on_bad_interaction_contract(tmp_path) -> None:

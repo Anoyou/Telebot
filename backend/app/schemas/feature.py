@@ -49,6 +49,7 @@ class FeatureInfo(BaseModel):
         manifest = getattr(f, "manifest", None) or {}
         installed_source = str(getattr(installed_plugin, "source", "") or "")
         installed_source_url = str(getattr(installed_plugin, "source_url", "") or "")
+        installed_manifest = getattr(installed_plugin, "manifest_json", None) or {}
         source_url = str(getattr(remote_plugin, "source_url", "") or installed_source_url)
         source_type = (
             "remote"
@@ -71,6 +72,8 @@ class FeatureInfo(BaseModel):
         raw_config_actions = manifest.get("config_actions")
         usage = str(manifest.get("usage") or "").strip() or None
         schema_meta = config_schema if isinstance(config_schema, dict) else {}
+        if raw_config_actions is None and isinstance(installed_manifest, dict):
+            raw_config_actions = installed_manifest.get("config_actions")
         if raw_config_actions is None:
             raw_config_actions = schema_meta.get("x-config-actions")
         config_actions = raw_config_actions if isinstance(raw_config_actions, list) else []
@@ -94,7 +97,6 @@ class FeatureInfo(BaseModel):
             else None
         )
         lint_warnings = raw_lint_warnings if isinstance(raw_lint_warnings, list) else []
-        installed_manifest = getattr(installed_plugin, "manifest_json", None) or {}
         remote_info = (
             installed_manifest.get("_telepilot_remote", {})
             if isinstance(installed_manifest, dict)

@@ -1215,6 +1215,9 @@ def _feature_manifest_from_manifest_json(manifest_json: dict[str, Any]) -> dict[
     cfg_schema = manifest_json.get("config_schema")
     if isinstance(cfg_schema, dict):
         manifest["config_schema"] = cfg_schema
+    config_actions = manifest_json.get("config_actions")
+    if isinstance(config_actions, list):
+        manifest["config_actions"] = [item for item in config_actions if isinstance(item, dict)]
     category = str(manifest_json.get("category") or "").strip()
     if category:
         manifest["category"] = category

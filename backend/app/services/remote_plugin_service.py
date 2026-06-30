@@ -187,6 +187,7 @@ class PluginMetadataSchema(BaseModel):
     # permissions 和 config_schema 是可选扩展字段
     permissions: list[str] = Field(default_factory=list)
     config_schema: dict[str, Any] | None = None
+    config_actions: list[dict[str, Any]] = Field(default_factory=list)
     category: str | None = None
     interaction_profile: str | None = None
     interaction_entries: list[dict[str, Any]] = Field(default_factory=list)
@@ -262,6 +263,7 @@ class PluginMetadata:
     entry: str = "plugin.py"
     permissions: list[str] = field(default_factory=list)
     config_schema: dict[str, Any] | None = None
+    config_actions: list[dict[str, Any]] = field(default_factory=list)
     category: str | None = None
     interaction_profile: str | None = None
     interaction_entries: list[dict[str, Any]] = field(default_factory=list)
@@ -421,6 +423,8 @@ def _feature_manifest_from_meta(meta: PluginMetadata) -> dict[str, Any] | None:
     manifest: dict[str, Any] = {}
     if meta.config_schema:
         manifest["config_schema"] = meta.config_schema
+    if meta.config_actions:
+        manifest["config_actions"] = [item for item in meta.config_actions if isinstance(item, dict)]
     if meta.usage:
         manifest["usage"] = meta.usage
     if meta.category:
@@ -718,6 +722,7 @@ def _read_plugin_metadata(plugin_dir: Path, *, fallback_name: str) -> PluginMeta
         entry=str(validated.entry or "plugin.py"),
         permissions=list(validated.permissions or []),
         config_schema=validated.config_schema,
+        config_actions=[item for item in validated.config_actions if isinstance(item, dict)],
         category=validated.category,
         interaction_profile=validated.interaction_profile,
         interaction_entries=[item for item in validated.interaction_entries if isinstance(item, dict)],
@@ -1028,6 +1033,8 @@ def _manifest_json_from_remote_meta(meta: PluginMetadata) -> dict[str, Any]:
         data["usage"] = meta.usage
     if meta.config_schema is not None:
         data["config_schema"] = meta.config_schema
+    if meta.config_actions:
+        data["config_actions"] = [item for item in meta.config_actions if isinstance(item, dict)]
     if meta.category:
         data["category"] = meta.category
     if meta.interaction_profile:
