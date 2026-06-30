@@ -2643,7 +2643,7 @@ async def _activate(db, state: _AccountState, af: AccountFeature, redis: Any) ->
         rules=list(rules),
         client=plugin_client,
         engine=state.engine if plugin_source != "installed" else None,
-        redis=(state.redis or redis) if plugin_source != "installed" else None,
+        redis=state.redis or redis,
         log=_make_logger(redis, state.account_id, af.feature_key),
         scheduler=(
             state.scheduler.for_plugin(af.feature_key, state.generation)
