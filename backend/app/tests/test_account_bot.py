@@ -1962,7 +1962,7 @@ async def test_interaction_payload_sets_auto_payout_mode_for_math10_module(monke
     assert payload["payout_account_label"] == "@owner"
     assert payload["payout_mode"] == "auto"
     assert payload["settlement"]["mode"] == "auto"
-    assert payload["settlement"]["amount"] == 123
+    assert payload["settlement"]["amount"] == 0
     assert payload["settlement"]["payout_account_label"] == "@owner"
 
 
@@ -3030,6 +3030,98 @@ def test_module_config_bet_is_used_as_payment_amount() -> None:
     assert account_bot_runtime._rule_amount_matches(rule, 100) is True
     assert account_bot_runtime._rule_amount_matches(rule, 120) is True
     assert account_bot_runtime._rule_amount_matches(rule, 99) is False
+
+
+def test_interaction_module_payload_uses_module_config_amount_as_prize() -> None:
+    incoming = account_bot_runtime.Incoming(
+        account_id=1,
+        token="bbot-token",
+        update_id=10,
+        user_id=20,
+        chat_id=-100123,
+        message_id=30,
+        text="十点半",
+        display_name="AAA",
+    )
+    rule = {
+        "id": "ten-half-paid",
+        "action": "module",
+        "module_key": "ten_half",
+        "module_action": "start_ten_half",
+        "math_prize": 123,
+        "module_config": {"bet": 1000, "max_players": 2},
+    }
+
+    payload = account_bot_runtime._interaction_module_payload(
+        incoming,
+        rule,
+        None,
+        event_type="keyword",
+    )
+
+    assert payload["bet"] == 1000
+    assert payload["module_config"]["bet"] == 1000
+    assert payload["prize"] == 1000
+
+
+def test_interaction_module_payload_does_not_fallback_to_math_prize_default() -> None:
+    incoming = account_bot_runtime.Incoming(
+        account_id=1,
+        token="bbot-token",
+        update_id=10,
+        user_id=20,
+        chat_id=-100123,
+        message_id=30,
+        text="开局",
+        display_name="AAA",
+    )
+    rule = {
+        "id": "game-paid",
+        "action": "module",
+        "module_key": "game24",
+        "module_action": "start_paid_game",
+        "math_prize": 123,
+        "module_config": {},
+    }
+
+    payload = account_bot_runtime._interaction_module_payload(
+        incoming,
+        rule,
+        None,
+        event_type="keyword",
+    )
+
+    assert payload["prize"] is None
+
+
+def test_interaction_module_payload_keeps_explicit_module_prize_default_value() -> None:
+    incoming = account_bot_runtime.Incoming(
+        account_id=1,
+        token="bbot-token",
+        update_id=10,
+        user_id=20,
+        chat_id=-100123,
+        message_id=30,
+        text="开局",
+        display_name="AAA",
+    )
+    rule = {
+        "id": "game-paid",
+        "action": "module",
+        "module_key": "game24",
+        "module_action": "start_paid_game",
+        "module_prize": 123,
+        "module_config": {},
+    }
+
+    payload = account_bot_runtime._interaction_module_payload(
+        incoming,
+        rule,
+        None,
+        event_type="keyword",
+    )
+
+    assert payload["prize"] == 123
 
 
 def test_interaction_module_payload_preserves_plugin_timeout_config(monkeypatch) -> None:

@@ -3905,6 +3905,33 @@ def _interaction_settlement_envelope(
     }
 
 
+def _interaction_module_prize(rule: dict[str, Any], data: dict[str, Any]) -> int | None:
+    module_prize = _int_or_none(rule.get("module_prize"))
+    if module_prize is not None and module_prize > 0:
+        return module_prize
+
+    module_config = rule.get("module_config")
+    if isinstance(module_config, dict):
+        for key in (*_MODULE_PAYMENT_AMOUNT_KEYS, "prize"):
+            parsed = _int_or_none(module_config.get(key))
+            if parsed is not None and parsed > 0:
+                return parsed
+
+    rule_amount = _int_or_none(rule.get("amount"))
+    if rule_amount is not None and rule_amount > 0:
+        return rule_amount
+
+    for key in (*_MODULE_PAYMENT_AMOUNT_KEYS, "prize"):
+        parsed = _int_or_none(data.get(key))
+        if parsed is not None and parsed > 0:
+            return parsed
+
+    math_prize = _int_or_none(rule.get("math_prize"))
+    if math_prize is not None and math_prize > 0 and math_prize != 123:
+        return math_prize
+    return None
+
+
 def _interaction_module_payload(
     incoming: Incoming,
     rule: dict[str, Any],
@@ -3914,7 +3941,7 @@ def _interaction_module_payload(
 ) -> dict[str, Any]:
     data = dict(rule.get("module_config") or {}) if isinstance(rule.get("module_config"), dict) else {}
     data.update(dict(parsed or {}))
-    prize = int(rule.get("module_prize") or rule.get("math_prize") or 123)
+    prize = _interaction_module_prize(rule, data)
     data["event_type"] = event_type
     resolved_payer_user_id = _interaction_payment_payer_user_id(incoming, data)
     payer_user_id = resolved_payer_user_id if event_type == "payment_confirmed" else resolved_payer_user_id or incoming.user_id
@@ -3997,9 +4024,10 @@ async def _interaction_module_payload_async(
     payout_mode = await _resolve_payout_mode(incoming.account_id, incoming.chat_id)
     data["payout_account_label"] = payout_account_label
     data["payout_mode"] = payout_mode
+    settlement_prize = _int_or_none(data.get("prize")) or 0
     data["settlement"] = _interaction_settlement_envelope(
         data,
-        prize=int(data.get("prize") or 123),
+        prize=settlement_prize,
         payout_account_label=payout_account_label,
         payout_mode=payout_mode,
     )
