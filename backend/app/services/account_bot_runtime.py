@@ -2945,8 +2945,9 @@ async def _try_handle_event_bus_subscriptions(
     event["trace_id"] = incoming.trace_id
     account_state = await _event_bus_account_state(db, incoming, cfg)
     result = dispatch_event(event, subscriptions, account_state)
-    handled = False
+    terminal_handled = False
     all_ok = True
+    event_type = _incoming_event_type(incoming)
     for decision in result.decisions:
         span_status = TRACE_STATUS_OK if decision.matched else TRACE_STATUS_SKIPPED
         await record_span(
@@ -2964,10 +2965,11 @@ async def _try_handle_event_bus_subscriptions(
         )
         if not decision.matched:
             continue
-        handled = True
         entry_key = str(decision.entry_key or "").strip()
         if not entry_key:
             all_ok = False
+            if event_type != "message":
+                terminal_handled = True
             await record_span(
                 trace_log_context(incoming.trace_id),
                 "plugin_invoke",
@@ -2987,6 +2989,8 @@ async def _try_handle_event_bus_subscriptions(
         )
         if not ok:
             all_ok = False
+            if event_type != "message":
+                terminal_handled = True
             await _remember_interaction_debug_state(incoming, stage="plugin_error", payload=payload, error=error)
             continue
         rule = _event_bus_virtual_rule(decision)
@@ -2996,7 +3000,9 @@ async def _try_handle_event_bus_subscriptions(
             guarded,
             context=_interaction_trace_context(payload),
         )
-    return handled, all_ok
+        if event_type != "message" or actions or guarded:
+            terminal_handled = True
+    return terminal_handled, all_ok
 
 
 def _legacy_rule_event_bus_decision(

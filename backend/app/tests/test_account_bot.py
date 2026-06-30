@@ -2364,6 +2364,70 @@ async def test_event_bus_subscription_invokes_enabled_plugin(monkeypatch) -> Non
 
 
 @pytest.mark.asyncio
+async def test_event_bus_message_without_actions_does_not_consume_legacy_route(monkeypatch) -> None:
+    incoming = account_bot_runtime.Incoming(
+        account_id=1,
+        token="123:token",
+        update_id=10,
+        user_id=2001,
+        chat_id=-100,
+        chat_type="supergroup",
+        message_id=30,
+        text="十点半测试",
+        display_name="Bob",
+        native_raw={"update_id": 10},
+    )
+
+    class _Result:
+        def scalars(self):
+            return self
+
+        def all(self):
+            return [SimpleNamespace(feature_key="quick_qa")]
+
+    class _DB:
+        async def execute(self, _stmt):  # noqa: ANN001
+            return _Result()
+
+        async def get(self, *_args):  # noqa: ANN002
+            return SimpleNamespace(tg_user_id=999)
+
+    monkeypatch.setattr(
+        account_bot_service,
+        "declared_module_event_subscriptions",
+        lambda _key: [
+            {
+                "source": ["interaction_bot"],
+                "events": ["message"],
+                "scope": "all_allowed_chats",
+                "entry_key": "join_quick_qa",
+                "filters": {},
+            }
+        ],
+    )
+    monkeypatch.setattr(account_bot_service, "plugin_declares_telegram_native_raw", lambda *_args, **_kwargs: False)
+    run_entry = AsyncMock(return_value=(True, None, []))
+    guard_actions = AsyncMock(side_effect=lambda _incoming, _rule, actions: actions)
+    apply_actions = AsyncMock()
+    monkeypatch.setattr(account_bot_runtime, "_run_worker_interaction_entry", run_entry)
+    monkeypatch.setattr(account_bot_runtime, "_guard_interaction_actions", guard_actions)
+    monkeypatch.setattr(account_bot_runtime, "_apply_interaction_actions", apply_actions)
+    monkeypatch.setattr(account_bot_runtime, "record_span", AsyncMock())
+
+    handled, ok = await account_bot_runtime._try_handle_event_bus_subscriptions(
+        _DB(),
+        incoming,
+        {"enabled": True, "chat_ids": [-100]},
+    )
+
+    assert handled is False
+    assert ok is True
+    run_entry.assert_awaited_once()
+    guard_actions.assert_awaited_once()
+    apply_actions.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_interaction_update_respects_event_bus_delivery_switch(monkeypatch) -> None:
     class _DB:
         async def __aenter__(self):

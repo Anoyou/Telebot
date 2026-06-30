@@ -20,6 +20,15 @@
 
 ## [Unreleased]
 
+## [0.44.4] — 2026-06-30 · patch（补丁版本） · 交互关键词路由修复
+
+### Fixed
+- 修复普通消息 Event Bus 订阅命中但返回空动作时，会提前吞掉后续交互规则关键词链路的问题。
+- 修复 `十点半测试`、猜骰、21 点等通过交互 Bot 关键词启动的规则，在被通用消息订阅插件命中后没有任何响应的回归。
+
+### Tests
+- 执行账号 Bot / 交互 Bot 回归测试：`cd backend && ../backend/.venv/bin/python -m pytest app/tests/test_account_bot.py`。
+
 ## [0.44.3] — 2026-06-30 · patch（补丁版本） · 插件仓库标签展示补丁
 
 ### Changed
