@@ -697,7 +697,14 @@ class InteractionDeliveryExecutor:
                 error_code="telegram_api_error",
                 error=str(exc),
             )
-            raise
+            await self.write_log(
+                self.incoming,
+                "warn",
+                "interaction answer_callback failed; continue remaining actions",
+                error=str(exc),
+                **self.log_context(self.incoming),
+            )
+            return
         await record_action(action.get("context"), action, TRACE_STATUS_OK, actual_send_via="interaction_bot")
 
     async def _answer_inline_query(self, action: dict[str, Any]) -> None:

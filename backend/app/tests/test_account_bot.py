@@ -228,6 +228,58 @@ async def test_interaction_delivery_send_replaces_saved_message_after_new_send(m
 
 
 @pytest.mark.asyncio
+async def test_interaction_delivery_answer_callback_failure_does_not_block_edit(monkeypatch) -> None:
+    incoming = account_bot_runtime.Incoming(
+        account_id=1,
+        token="123:token",
+        update_id=10,
+        user_id=20,
+        chat_id=-100,
+        message_id=30,
+        text="",
+        callback_id="cb-1",
+    )
+    answer_callback = AsyncMock(side_effect=RuntimeError("query is too old"))
+    edit_message = AsyncMock(return_value={"message_id": 30})
+    write_log = AsyncMock()
+    monkeypatch.setattr(account_bot_service, "answer_callback", answer_callback)
+    monkeypatch.setattr(account_bot_service, "edit_message", edit_message)
+    executor = InteractionDeliveryExecutor(
+        incoming=incoming,
+        write_log=write_log,
+        run_worker_action=AsyncMock(),
+        log_context=account_bot_runtime._interaction_log_context,
+        trace_context=account_bot_runtime._interaction_trace_context,
+    )
+
+    await executor.apply([
+        {
+            "type": "answer_callback",
+            "callback_query_id": "cb-1",
+            "text": "庄家手牌",
+            "show_alert": True,
+        },
+        {
+            "type": "edit_message",
+            "message_id": 30,
+            "text": "进入庄家行动",
+            "reply_markup": {"inline_keyboard": []},
+            "send_via": "interaction_bot",
+        },
+    ])
+
+    answer_callback.assert_awaited_once()
+    edit_message.assert_awaited_once_with(
+        "123:token",
+        -100,
+        30,
+        "进入庄家行动",
+        reply_markup={"inline_keyboard": []},
+    )
+    assert write_log.await_args.kwargs["error"] == "query is too old"
+
+
+@pytest.mark.asyncio
 async def test_interaction_delivery_executor_routes_userbot_reply() -> None:
     incoming = account_bot_runtime.Incoming(
         account_id=1,

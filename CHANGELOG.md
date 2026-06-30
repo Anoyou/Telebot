@@ -20,6 +20,14 @@
 
 ## [Unreleased]
 
+## [0.44.5] — 2026-06-30 · patch（补丁版本） · 交互按钮 ACK 容错补丁
+
+### Fixed
+- 修复交互插件返回 `answer_callback` 后再编辑主消息时，如果 Telegram callback ACK 因过期或接口异常失败，后续 `edit_message` 被中断，导致按钮点击看起来“没反应”的问题。
+
+### Tests
+- 补充交互 delivery 回归测试，覆盖 `answer_callback` 失败后仍继续执行后续 `edit_message`。
+
 ## [0.44.4] — 2026-06-30 · patch（补丁版本） · 交互关键词路由修复
 
 ### Fixed
