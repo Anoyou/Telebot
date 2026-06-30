@@ -773,6 +773,80 @@ async def test_responses_client_parses_output_text_top_level() -> None:
 
 
 @pytest.mark.asyncio
+async def test_responses_client_parses_sse_completed_response() -> None:
+    """Codex/CLIProxyAPI 类反代可能无视 stream=false，仍返回 Responses SSE。"""
+    from app.services.llm_client import ResponsesClient
+
+    cli = ResponsesClient(api_key="sk", base_url="https://codex.example.com/v1", model="gpt-5.5")
+
+    class _Resp:
+        status_code = 200
+        headers = {"content-type": "text/event-stream; charset=utf-8"}
+        text = (
+            "event: response.created\n"
+            'data: {"type":"response.created","response":{"id":"resp_1","status":"in_progress"}}\n'
+            "\n"
+            "event: response.completed\n"
+            'data: {"type":"response.completed","response":{"model":"gpt-5.5-codex","status":"completed",'
+            '"output_text":"sse ok","usage":{"input_tokens":7,"output_tokens":2}}}\n'
+            "\n"
+        )
+
+        @staticmethod
+        def json():
+            raise json.JSONDecodeError("Expecting value", "", 0)
+
+    fake = AsyncMock()
+    fake.__aenter__.return_value = fake
+    fake.post = AsyncMock(return_value=_Resp())
+    with patch("app.services.llm_client.httpx.AsyncClient", return_value=fake):
+        result = await cli.complete("sys", "user")
+
+    assert result.text == "sse ok"
+    assert result.model == "gpt-5.5-codex"
+    assert result.input_tokens == 7
+    assert result.output_tokens == 2
+
+
+@pytest.mark.asyncio
+async def test_responses_client_parses_sse_text_delta_without_completed_body() -> None:
+    """半兼容反代如果只给文本增量，也应折叠成 output_text。"""
+    from app.services.llm_client import ResponsesClient
+
+    cli = ResponsesClient(api_key="sk", base_url="https://codex.example.com/v1", model="gpt-5.5")
+
+    class _Resp:
+        status_code = 200
+        headers = {"content-type": "text/event-stream"}
+        text = (
+            "event: response.output_text.delta\n"
+            'data: {"type":"response.output_text.delta","delta":"hello"}\n'
+            "\n"
+            "event: response.output_text.delta\n"
+            'data: {"type":"response.output_text.delta","delta":" world"}\n'
+            "\n"
+            "event: response.output_text.done\n"
+            'data: {"type":"response.output_text.done","text":"hello world"}\n'
+            "\n"
+        )
+
+        @staticmethod
+        def json():
+            raise json.JSONDecodeError("Expecting value", "", 0)
+
+    fake = AsyncMock()
+    fake.__aenter__.return_value = fake
+    fake.post = AsyncMock(return_value=_Resp())
+    with patch("app.services.llm_client.httpx.AsyncClient", return_value=fake):
+        result = await cli.complete("sys", "user")
+
+    assert result.text == "hello world"
+    assert result.model == "gpt-5.5"
+    assert result.input_tokens == 0
+    assert result.output_tokens == 0
+
+
+@pytest.mark.asyncio
 async def test_responses_client_retries_without_max_output_tokens_when_unsupported() -> None:
     """部分兼容站的 /responses 不支持 max_output_tokens，应自动用轻量 body 重试。"""
     from app.services.llm_client import ResponsesClient

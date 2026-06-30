@@ -239,6 +239,107 @@ def _response_text(resp: Any) -> str:
     return str(getattr(resp, "text", "") or "")
 
 
+def _response_content_type(resp: Any) -> str:
+    headers = getattr(resp, "headers", {}) or {}
+    try:
+        return str(headers.get("content-type") or headers.get("Content-Type") or "")
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def _parse_responses_sse(text: str) -> dict[str, Any]:
+    """把 Responses API 的 SSE 成功流折叠为普通 Responses JSON。
+
+    部分 Codex/CLIProxyAPI 反代即使请求里带了 ``stream: false``，仍会返回
+    ``text/event-stream``。这里优先使用 ``response.completed`` 里的完整响应；
+    如果反代只给了文本增量，则退化为顶层 ``output_text``。
+    """
+    events: list[tuple[str, str]] = []
+    event_name = "message"
+    data_lines: list[str] = []
+
+    def flush() -> None:
+        nonlocal event_name, data_lines
+        if data_lines:
+            events.append((event_name, "\n".join(data_lines)))
+        event_name = "message"
+        data_lines = []
+
+    for raw_line in text.splitlines():
+        line = raw_line.rstrip("\r")
+        if not line:
+            flush()
+            continue
+        if line.startswith(":"):
+            continue
+        if line.startswith("event:"):
+            event_name = line.removeprefix("event:").strip() or "message"
+            continue
+        if line.startswith("data:"):
+            data_lines.append(line.removeprefix("data:").strip())
+    flush()
+
+    delta_parts: list[str] = []
+    done_text = ""
+    last_response: dict[str, Any] | None = None
+    error_payload: Any = None
+
+    for event_name, raw_data in events:
+        if not raw_data or raw_data == "[DONE]":
+            continue
+        try:
+            payload = json.loads(raw_data)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(payload, dict):
+            continue
+
+        payload_type = str(payload.get("type") or event_name or "")
+        if payload_type in {"error", "response.error"}:
+            error_payload = payload.get("error") or payload
+            continue
+
+        response = payload.get("response")
+        if isinstance(response, dict):
+            last_response = response
+            if payload_type == "response.completed" or response.get("status") == "completed":
+                return response
+
+        if payload_type == "response.output_text.delta" and isinstance(payload.get("delta"), str):
+            delta_parts.append(payload["delta"])
+        elif payload_type == "response.output_text.done" and isinstance(payload.get("text"), str):
+            done_text = payload["text"]
+
+    if last_response and last_response.get("status") not in {"failed", "cancelled"}:
+        image_data, image_urls, output_text = _extract_response_image_outputs(last_response)
+        if output_text or image_data or image_urls:
+            return last_response
+    if delta_parts or done_text:
+        return {"output_text": "".join(delta_parts) or done_text}
+    if error_payload is not None:
+        raise ValueError(f"error event: {str(error_payload)[:200]}")
+    raise ValueError("缺少 response.completed 或 output_text 增量事件")
+
+
+def _decode_responses_payload(prefix: str, resp: Any, api_key: str | None) -> dict[str, Any]:
+    content_type = _response_content_type(resp).lower()
+    text = _response_text(resp)
+    if "text/event-stream" in content_type or text.lstrip().startswith(("event:", "data:")):
+        try:
+            return _parse_responses_sse(text)
+        except ValueError as exc:
+            raise LLMError(
+                _safe_error_message(f"{prefix} SSE 返回结构异常: {exc}", api_key)
+            ) from None
+    try:
+        data = resp.json()
+    except json.JSONDecodeError as exc:
+        raise _non_json_error(prefix, resp, exc, api_key) from None
+    if not isinstance(data, dict):
+        raise LLMError(f"{prefix} 返回结构异常: 顶层不是对象")
+    return data
+
+
 _RESPONSES_REMOVABLE_PARAMETERS = {
     "max_output_tokens": "max_output_tokens",
     "temperature": "temperature",
@@ -307,12 +408,7 @@ async def _post_responses_compatible(
 
 
 def _non_json_error(prefix: str, resp: Any, exc: json.JSONDecodeError, api_key: str | None) -> LLMError:
-    headers = getattr(resp, "headers", {}) or {}
-    content_type = ""
-    try:
-        content_type = str(headers.get("content-type") or headers.get("Content-Type") or "")
-    except Exception:  # noqa: BLE001
-        content_type = ""
+    content_type = _response_content_type(resp)
     status_code = int(getattr(resp, "status_code", 0) or 0)
     body = _response_text(resp).replace("\n", "\\n")[:200]
     if not body:
@@ -927,10 +1023,7 @@ class ResponsesClient(LLMClient):
                 )
             )
 
-        try:
-            data = resp.json()
-        except json.JSONDecodeError as exc:
-            raise _non_json_error("Responses", resp, exc, self._api_key) from None
+        data = _decode_responses_payload("Responses", resp, self._api_key)
 
         # 解析 output：兼容多种形态
         # 形态 1：data["output_text"] = "..."（部分实现的便利字段）
@@ -1054,10 +1147,7 @@ class ResponsesClient(LLMClient):
                     self._api_key,
                 )
             )
-        try:
-            data = resp.json()
-        except json.JSONDecodeError as exc:
-            raise _non_json_error("Responses 生图", resp, exc, self._api_key) from None
+        data = _decode_responses_payload("Responses 生图", resp, self._api_key)
 
         image_data, image_urls, output_text = _extract_response_image_outputs(data)
         if not image_data and not image_urls:

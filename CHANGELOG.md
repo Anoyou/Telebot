@@ -20,6 +20,12 @@
 
 ## [Unreleased]
 
+## [0.44.11] — 2026-06-30 · patch（补丁版本） · Codex 反代 SSE 响应兼容补丁
+
+### Fixed
+- 兼容 Codex/CLIProxyAPI 类反代在 Responses 请求中即使传入 `stream=false` 仍返回 `text/event-stream` 的情况；平台现在会解析 `response.completed` 和 `response.output_text.delta` 事件，不再把成功响应误报为“Responses 返回非 JSON”。
+- 为 Responses SSE 返回补充回归测试，覆盖完整响应体和纯文本增量两种形态。
+
 ## [0.44.10] — 2026-06-30 · patch（补丁版本） · Codex 反代 Responses 兼容补丁
 
 ### Fixed
