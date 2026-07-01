@@ -36,6 +36,8 @@ import { getErrMsg } from "@/lib/api";
 import { featureConfigBackTarget } from "@/pages/Plugins/_shared/featureConfig";
 import { featureRuntimeText, featureSwitchText } from "./_shared/featureStatus";
 
+const EMPTY_CONFIG: Record<string, unknown> = {};
+
 function isConfigSchema(schema: unknown): schema is ConfigSchema {
   const candidate = schema as Record<string, unknown> | null | undefined;
   return Boolean(
@@ -86,8 +88,8 @@ export function GenericPluginConfigPage() {
   const feature = matrixQ.data?.features.find((item) => item.key === featureKey);
   const accountFeature = featuresQ.data?.find((item) => item.feature_key === featureKey);
   const schema = isConfigSchema(feature?.config_schema) ? feature.config_schema : null;
-  const globalConfig = globalConfigQ.data ?? {};
-  const accountConfig = accountFeature?.config ?? {};
+  const globalConfig = globalConfigQ.data ?? EMPTY_CONFIG;
+  const accountConfig = accountFeature?.config ?? EMPTY_CONFIG;
   const commandPrefix = settingsQ.data?.command_prefix || ",";
   const llmProvidersQ = useQuery({
     queryKey: ["llm-providers"],
