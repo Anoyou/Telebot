@@ -6,15 +6,16 @@ import asyncio
 import logging
 import uuid
 from collections.abc import Mapping
+from copy import deepcopy
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db.base import AsyncSessionLocal
 from ..db.models.account import Account
-from ..db.models.feature import Feature
+from ..db.models.feature import FEATURE_STATE_DISABLED, AccountFeature, Feature
 from ..db.models.log import (
     LEVEL_ERROR,
     LEVEL_INFO,
@@ -23,10 +24,12 @@ from ..db.models.log import (
     RuntimeLog,
 )
 from ..db.models.plugin import InstalledPlugin
+from ..db.models.plugin_global_config import PluginGlobalConfig
 from ..schemas.feature import PluginConfigActionJobLogItem, PluginConfigActionJobResponse
 from ..services.redactor import redact_text, redact_value
 from ..worker.plugins.ai_facade import AIQuotaError, AIUnavailableError
 from ..worker.plugins.http_facade import PluginHTTPError
+from . import feature_service
 from .plugin_config_actions import (
     PluginConfigActionError,
     PluginConfigActionNotFound,
@@ -108,6 +111,30 @@ async def get_plugin_config_action_job(
         return None
     logs = await _load_job_logs(db, job.job_id) if include_logs else []
     return job_response(job, logs=logs)
+
+
+async def list_plugin_config_action_jobs(
+    db: AsyncSession,
+    *,
+    account_id: int,
+    plugin_key: str,
+    limit: int = 10,
+) -> list[PluginConfigActionJobResponse]:
+    """Return recent config action jobs for one account/plugin pair."""
+
+    safe_limit = min(max(int(limit or 10), 1), 50)
+    rows = (
+        await db.execute(
+            select(PluginConfigActionJob)
+            .where(
+                PluginConfigActionJob.account_id == account_id,
+                PluginConfigActionJob.plugin_key == plugin_key,
+            )
+            .order_by(desc(PluginConfigActionJob.created_at), desc(PluginConfigActionJob.id))
+            .limit(safe_limit)
+        )
+    ).scalars().all()
+    return [job_response(row, logs=[]) for row in rows]
 
 
 def job_response(
@@ -193,9 +220,20 @@ async def _run_plugin_config_action_job(
             return
 
         patch = result.get("config_patch") if isinstance(result.get("config_patch"), Mapping) else {}
+        applied_patch_keys: list[str] = []
+        if patch:
+            try:
+                applied_patch_keys = await _apply_config_patch(db, job, feature, patch)
+            except Exception as exc:  # noqa: BLE001 - persist schema/apply failures as job failures
+                code, message, status_level = _exception_detail(exc)
+                await _fail_job(db, job, code=code, message=message, log_level=status_level)
+                return
         now = _utcnow()
         job.status = STATUS_SUCCEEDED
-        job.message = str(result.get("toast") or result.get("message") or "配置动作已完成")
+        job.message = _success_message(
+            str(result.get("toast") or result.get("message") or "配置动作已完成"),
+            auto_saved=bool(applied_patch_keys),
+        )
         job.error_code = None
         job.error_message = None
         job.result = dict(result.get("result") or {})
@@ -209,6 +247,7 @@ async def _run_plugin_config_action_job(
             job.message or "配置动作已完成",
             step="finish",
             config_patch_keys=sorted(job.config_patch.keys()),
+            applied_config_keys=applied_patch_keys,
         )
         await db.commit()
 
@@ -252,6 +291,123 @@ async def _load_job_logs(db: AsyncSession, job_id: str) -> list[RuntimeLog]:
         )
     ).scalars().all()
     return list(rows)
+
+
+async def _apply_config_patch(
+    db: AsyncSession,
+    job: PluginConfigActionJob,
+    feature: Feature,
+    patch: Mapping[str, Any],
+) -> list[str]:
+    account_patch, global_patch = _split_config_patch(feature, patch)
+    applied_keys: list[str] = []
+    if account_patch:
+        _validate_config_patch(feature, account_patch, "account")
+        existing = (
+            await db.execute(
+                select(AccountFeature).where(
+                    AccountFeature.account_id == job.account_id,
+                    AccountFeature.feature_key == job.plugin_key,
+                )
+            )
+        ).scalar_one_or_none()
+        if existing is None:
+            existing = AccountFeature(
+                account_id=job.account_id,
+                feature_key=job.plugin_key,
+                enabled=True,
+                config={},
+                state=FEATURE_STATE_DISABLED,
+            )
+            db.add(existing)
+        existing.config = {**dict(existing.config or {}), **account_patch}
+        applied_keys.extend(sorted(account_patch.keys()))
+
+    if global_patch:
+        _validate_config_patch(feature, global_patch, "global")
+        row = await db.get(PluginGlobalConfig, job.plugin_key)
+        if row is None:
+            row = PluginGlobalConfig(plugin_key=job.plugin_key, config={})
+            db.add(row)
+        row.config = {**dict(row.config or {}), **global_patch}
+        applied_keys.extend(sorted(global_patch.keys()))
+
+    if applied_keys:
+        await _write_runtime_log(
+            db,
+            job,
+            LEVEL_INFO,
+            "配置补丁已自动保存",
+            step="apply_config_patch",
+            config_patch_keys=applied_keys,
+        )
+        await db.commit()
+        if account_patch:
+            await feature_service._notify_reload(job.account_id)  # noqa: SLF001 - shared service boundary
+        if global_patch:
+            await feature_service._notify_all_accounts_using_feature(db, job.plugin_key)  # noqa: SLF001
+    return applied_keys
+
+
+def _split_config_patch(
+    feature: Feature,
+    patch: Mapping[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    config_schema = (feature.manifest or {}).get("config_schema")
+    properties = config_schema.get("properties") if isinstance(config_schema, dict) else None
+    account_patch: dict[str, Any] = {}
+    global_patch: dict[str, Any] = {}
+    for key, value in patch.items():
+        item_key = str(key)
+        prop = properties.get(item_key) if isinstance(properties, dict) else None
+        if isinstance(prop, dict) and prop.get("level") == "global":
+            global_patch[item_key] = value
+        else:
+            account_patch[item_key] = value
+    return account_patch, global_patch
+
+
+def _validate_config_patch(
+    feature: Feature,
+    patch: Mapping[str, Any],
+    scope: str,
+) -> None:
+    config_schema = (feature.manifest or {}).get("config_schema")
+    if not isinstance(config_schema, dict) or not patch:
+        return
+    patch_schema = _config_patch_schema(config_schema, patch.keys(), scope)
+    validation = feature_service.validate_config_against_schema(dict(patch), patch_schema)
+    if not validation.valid:
+        detail = "; ".join(f"{e.field}: {e.message}" for e in validation.errors)
+        raise PluginConfigActionError(f"配置动作生成的配置补丁不符合插件 schema：{detail}")
+
+
+def _config_patch_schema(
+    config_schema: dict[str, Any],
+    keys: Any,
+    scope: str,
+) -> dict[str, Any]:
+    scoped = feature_service.config_schema_for_scope(config_schema, scope)
+    patch_keys = {str(key) for key in keys}
+    schema = deepcopy(scoped)
+    properties = schema.get("properties")
+    if isinstance(properties, dict):
+        schema["properties"] = {key: value for key, value in properties.items() if key in patch_keys}
+    required = schema.get("required")
+    if isinstance(required, list):
+        schema["required"] = [key for key in required if isinstance(key, str) and key in patch_keys]
+    return schema
+
+
+def _success_message(message: str, *, auto_saved: bool) -> str:
+    text = (message or "配置动作已完成").strip()
+    if not auto_saved:
+        return text
+    for suffix in ("，请保存配置后生效。", "，请保存配置后生效", "请保存配置后生效。", "请保存配置后生效"):
+        text = text.replace(suffix, "").strip()
+    if text.endswith("。"):
+        text = text[:-1]
+    return f"{text}，已自动保存并通知插件热加载。"
 
 
 async def _write_runtime_log(

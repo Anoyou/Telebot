@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import hashlib
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 
 from ..db.models.account import Account
 from ..db.models.feature import AccountFeature, Feature
@@ -37,6 +37,7 @@ from ..services.plugin_config_action_jobs import (
     create_plugin_config_action_job,
     get_plugin_config_action_job,
     job_response,
+    list_plugin_config_action_jobs,
 )
 from ..services.plugin_config_actions import (
     PluginConfigActionError,
@@ -477,6 +478,32 @@ async def get_config_action_job_status(
     if response is None:
         raise _bad("CONFIG_ACTION_JOB_NOT_FOUND", "配置动作任务不存在", 404)
     return response
+
+
+@router.get(
+    "/api/accounts/{aid}/features/{key}/config/action-jobs",
+    response_model=list[PluginConfigActionJobResponse],
+)
+async def list_account_feature_config_action_jobs(
+    aid: int,
+    key: str,
+    db: DBSession,
+    _user: CurrentUser,
+    limit: int = Query(10, ge=1, le=50),
+) -> list[PluginConfigActionJobResponse]:
+    """查询某账号某插件最近的配置动作任务，用于恢复后台窗口。"""
+
+    if await db.get(Account, aid) is None:
+        raise _bad("ACCOUNT_NOT_FOUND", "账号不存在", 404)
+    await feature_service.seed_builtin_features(db)
+    if await db.get(Feature, key) is None:
+        raise _bad("FEATURE_NOT_FOUND", f"未注册的 feature: {key}", 404)
+    return await list_plugin_config_action_jobs(
+        db,
+        account_id=aid,
+        plugin_key=key,
+        limit=limit,
+    )
 
 
 # ─────────────────────────────────────────────────────

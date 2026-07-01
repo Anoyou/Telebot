@@ -46,10 +46,27 @@ class FeatureInfo(BaseModel):
         plugin_install: Any | None = None,
         installed_plugin: InstalledPlugin | None = None,
     ) -> FeatureInfo:
-        manifest = getattr(f, "manifest", None) or {}
+        feature_manifest = getattr(f, "manifest", None) or {}
         installed_source = str(getattr(installed_plugin, "source", "") or "")
         installed_source_url = str(getattr(installed_plugin, "source_url", "") or "")
         installed_manifest = getattr(installed_plugin, "manifest_json", None) or {}
+        manifest = dict(feature_manifest)
+        if isinstance(installed_manifest, dict):
+            for key in (
+                "config_schema",
+                "config_actions",
+                "usage",
+                "category",
+                "interaction_profile",
+                "interaction_entries",
+                "event_subscriptions",
+                "capabilities",
+                "permissions",
+                "experimental",
+                "x-experimental",
+            ):
+                if key in installed_manifest:
+                    manifest[key] = installed_manifest[key]
         source_url = str(getattr(remote_plugin, "source_url", "") or installed_source_url)
         source_type = (
             "remote"
@@ -103,19 +120,28 @@ class FeatureInfo(BaseModel):
             else {}
         )
         remote_info = remote_info if isinstance(remote_info, dict) else {}
+        installed_version = None
+        if isinstance(installed_manifest, dict):
+            installed_version = str(installed_manifest.get("version") or "").strip() or None
+        installed_version = installed_version or str(getattr(installed_plugin, "version", "") or "").strip() or None
+        display_name = str(
+            installed_manifest.get("display_name")
+            if isinstance(installed_manifest, dict)
+            else ""
+        ).strip()
         return cls(
             key=f.key,
-            display_name=f.display_name,
+            display_name=display_name or f.display_name,
             is_builtin=f.is_builtin,
             source_type=source_type,
             source_label=str(source_label),
-            orphan=bool(manifest.get("x-orphan")),
+            orphan=bool(feature_manifest.get("x-orphan")),
             signature_ok=getattr(
                 installed_plugin,
                 "signature_ok",
                 getattr(plugin_install, "signature_ok", None),
             ),
-            version=f.version,
+            version=installed_version or f.version,
             usage=usage,
             config_schema=config_schema,
             config_actions=[item for item in config_actions if isinstance(item, dict)],

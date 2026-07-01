@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from app.db.models.feature import FEATURE_STATE_DISABLED
+from app.db.models.feature import FEATURE_STATE_DISABLED, Feature
 from app.db.models.plugin import InstalledPlugin
 from app.db.models.plugin_global_config import PluginGlobalConfig
 from app.schemas.feature import FeatureInfo
@@ -359,6 +359,63 @@ async def test_feature_matrix_passes_installed_plugin_lint_warnings(monkeypatch)
 
 
 @pytest.mark.asyncio
+async def test_feature_matrix_prefers_installed_plugin_version(monkeypatch) -> None:
+    """已安装插件版本是权威值，避免账号配置页展示 feature 表里的旧索引。"""
+
+    class Result:
+        def __init__(self, rows):
+            self.rows = rows
+
+        def scalars(self):
+            return self
+
+        def all(self):
+            return self.rows
+
+    feature = SimpleNamespace(
+        key="ten_half",
+        display_name="十点半",
+        is_builtin=False,
+        version="0.2.27",
+        manifest={"usage": "旧玩法说明"},
+    )
+    installed_plugin = InstalledPlugin(
+        key="ten_half",
+        source="repo",
+        source_url="https://github.com/Anoyou/telebot-plugins/tree/0.33.x",
+        version="0.3.3",
+        manifest_json={
+            "name": "ten_half",
+            "display_name": "十点半",
+            "version": "0.3.3",
+            "usage": "新按钮流程说明",
+            "capabilities": {"transfer": {"enabled": True}},
+        },
+        lint_warnings=[],
+    )
+
+    monkeypatch.setattr(
+        "app.services.feature_service.list_features",
+        AsyncMock(return_value=[feature]),
+    )
+    db = AsyncMock()
+    db.execute = AsyncMock(
+        side_effect=[
+            Result([installed_plugin]),  # InstalledPlugin
+            Result([]),  # Account
+            Result([]),  # AccountFeature
+        ],
+    )
+
+    data = await feature_matrix(db)
+    row = data["features"][0]
+
+    assert row["version"] == "0.3.3"
+    assert row["usage"] == "新按钮流程说明"
+    assert row["capabilities"] == {"transfer": {"enabled": True}}
+
+
+@pytest.mark.asyncio
 async def test_seed_local_installed_features_skips_orphan_dirs(monkeypatch, tmp_path) -> None:
     """磁盘孤儿目录不再写入模块矩阵；已有孤儿 feature 行会被清掉。"""
 
@@ -394,6 +451,61 @@ async def test_seed_local_installed_features_skips_orphan_dirs(monkeypatch, tmp_
     assert added == 0
     assert changed is True
     db.delete.assert_awaited_once_with(existing_row)
+
+
+@pytest.mark.asyncio
+async def test_seed_local_installed_features_repairs_stale_feature_from_installed_plugin(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    """seed 时用 InstalledPlugin 自愈旧 Feature 索引，不依赖手动修库。"""
+
+    class Result:
+        def __init__(self, rows):
+            self.rows = rows
+
+        def scalars(self):
+            return self
+
+        def all(self):
+            return self.rows
+
+    monkeypatch.setattr("app.settings.settings.plugins_installed_dir", str(tmp_path / "missing"))
+    feature = Feature(
+        key="ten_half",
+        display_name="十点半",
+        is_builtin=False,
+        version="0.2.27",
+        manifest={"usage": "旧玩法说明"},
+    )
+    installed_plugin = InstalledPlugin(
+        key="ten_half",
+        source="repo",
+        source_url="https://github.com/Anoyou/telebot-plugins/tree/0.33.x",
+        version="0.3.3",
+        manifest_json={
+            "name": "ten_half",
+            "display_name": "十点半",
+            "version": "0.3.3",
+            "usage": "新按钮流程说明",
+            "event_subscriptions": [{"events": ["message"]}],
+        },
+        lint_warnings=[],
+    )
+    db = AsyncMock()
+    db.execute = AsyncMock(return_value=Result([installed_plugin]))
+    db.flush = AsyncMock()
+
+    added, changed = await _seed_local_installed_features(db, {"ten_half": feature})
+
+    assert added == 0
+    assert changed is True
+    assert feature.version == "0.3.3"
+    assert feature.manifest == {
+        "usage": "新按钮流程说明",
+        "event_subscriptions": [{"events": ["message"]}],
+        "source_label": "repo",
+    }
 
 
 # ─────────────────────────────────────────────────────
@@ -447,6 +559,43 @@ class TestGetPluginGlobalConfig:
 
 
 class TestFeatureInfo:
+    def test_from_feature_prefers_installed_plugin_metadata(self) -> None:
+        feature = SimpleNamespace(
+            key="ten_half",
+            display_name="十点半",
+            is_builtin=False,
+            version="0.2.27",
+            manifest={
+                "usage": "旧玩法说明",
+                "config_schema": {"properties": {"old": {"type": "string"}}},
+                "capabilities": {"old": True},
+            },
+        )
+        installed = SimpleNamespace(
+            source="repo",
+            source_url="https://github.com/Anoyou/telebot-plugins/tree/0.33.x",
+            source_label="Plugin Repo",
+            version="0.3.3",
+            signature_ok=None,
+            manifest_json={
+                "display_name": "十点半",
+                "version": "0.3.3",
+                "usage": "新按钮流程说明",
+                "config_schema": {"properties": {"max_players": {"type": "integer"}}},
+                "event_subscriptions": [{"events": ["message", "callback_query"]}],
+                "capabilities": {"transfer": {"enabled": True}},
+            },
+            lint_warnings=[],
+        )
+
+        info = FeatureInfo.from_feature(feature, installed_plugin=installed)
+
+        assert info.version == "0.3.3"
+        assert info.usage == "新按钮流程说明"
+        assert info.config_schema == {"properties": {"max_players": {"type": "integer"}}}
+        assert info.event_subscriptions == [{"events": ["message", "callback_query"]}]
+        assert info.capabilities == {"transfer": {"enabled": True}}
+
     def test_from_feature_marks_experimental_manifest(self) -> None:
         feature = MagicMock()
         feature.key = "codex_image"

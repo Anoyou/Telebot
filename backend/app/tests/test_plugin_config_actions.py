@@ -289,3 +289,93 @@ async def test_create_plugin_config_action_job_writes_runtime_log_and_starts_tas
     assert len(runtime_logs) == 1
     assert runtime_logs[0].message == "配置动作已排队"
     assert runtime_logs[0].detail["config_action_job_id"] == job.job_id
+
+
+@pytest.mark.asyncio
+async def test_config_action_job_applies_account_patch_without_revalidating_legacy_config(monkeypatch) -> None:
+    feature = SimpleNamespace(
+        manifest={
+            "config_schema": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "ai_timeout_seconds": {
+                        "type": "integer",
+                        "minimum": 300,
+                    },
+                    "knowledge_bases": {
+                        "type": "array",
+                        "level": "account",
+                        "items": {"type": "object"},
+                    },
+                },
+                "required": ["ai_timeout_seconds", "knowledge_bases"],
+            }
+        }
+    )
+    existing = SimpleNamespace(
+        account_id=7,
+        feature_key="quick_qa",
+        enabled=True,
+        config={"ai_timeout_seconds": 90, "knowledge_bases": []},
+    )
+    job = SimpleNamespace(
+        account_id=7,
+        plugin_key="quick_qa",
+        action_key="generate_knowledge_base",
+        job_id="pcaj_demo",
+    )
+
+    class _Result:
+        def scalar_one_or_none(self):
+            return existing
+
+    class _DB:
+        def __init__(self) -> None:
+            self.added = []
+            self.commits = 0
+
+        async def execute(self, _query):
+            return _Result()
+
+        async def get(self, *_args, **_kwargs):
+            return None
+
+        def add(self, row):
+            self.added.append(row)
+
+        async def commit(self):
+            self.commits += 1
+
+    notified: list[int] = []
+
+    async def _notify_reload(aid: int) -> None:
+        notified.append(aid)
+
+    monkeypatch.setattr(plugin_config_action_jobs.feature_service, "_notify_reload", _notify_reload)
+
+    applied = await plugin_config_action_jobs._apply_config_patch(
+        _DB(),
+        job,
+        feature,
+        {
+            "knowledge_bases": [
+                {
+                    "title": "青蛙PT-wiki",
+                    "questions": [{"question": "Q", "options": ["A", "B", "C"], "answer_index": 0}],
+                }
+            ]
+        },
+    )
+
+    assert applied == ["knowledge_bases"]
+    assert existing.config["ai_timeout_seconds"] == 90
+    assert existing.config["knowledge_bases"][0]["title"] == "青蛙PT-wiki"
+    assert notified == [7]
+
+
+def test_config_action_success_message_marks_auto_saved() -> None:
+    assert plugin_config_action_jobs._success_message(
+        "已生成题库：青蛙PT-wiki（80 题），请保存配置后生效。",
+        auto_saved=True,
+    ) == "已生成题库：青蛙PT-wiki（80 题），已自动保存并通知插件热加载。"

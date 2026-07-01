@@ -22,6 +22,7 @@ import {
   getPluginConfigActionJob,
   getFeatureMatrix,
   getPluginGlobalConfig,
+  listPluginConfigActionJobs,
   setPluginGlobalConfig,
   startPluginConfigActionJob,
   updateAccountFeatureConfig,
@@ -164,6 +165,8 @@ export function GenericPluginConfigPage() {
     ]),
     [feature?.config_actions, schema],
   );
+  const actionTitleForKey = (actionKey: string) =>
+    configActions.find((action) => action.key === actionKey)?.title || actionKey;
 
   const [globalVals, setGlobalVals] = useState<Record<string, unknown>>({});
   const [accountVals, setAccountVals] = useState<Record<string, unknown>>({});
@@ -290,6 +293,27 @@ export function GenericPluginConfigPage() {
       return status && CONFIG_ACTION_TERMINAL_STATUSES.has(status) ? false : 2000;
     },
   });
+  const recentActionJobsQ = useQuery({
+    queryKey: ["plugin-config-action-jobs", aid, featureKey],
+    queryFn: () => listPluginConfigActionJobs(aid, featureKey, 10),
+    enabled: Boolean(aid && featureKey),
+    refetchInterval: (query) => {
+      const jobs = query.state.data ?? [];
+      return jobs.some((job) => !CONFIG_ACTION_TERMINAL_STATUSES.has(job.status)) ? 2000 : false;
+    },
+  });
+  const latestActionJob = recentActionJobsQ.data?.[0];
+
+  useEffect(() => {
+    if (activeActionJob || !latestActionJob) return;
+    if (CONFIG_ACTION_TERMINAL_STATUSES.has(latestActionJob.status)) return;
+    setActiveActionJob({
+      jobId: latestActionJob.job_id,
+      actionTitle: actionTitleForKey(latestActionJob.action_key),
+      minimized: false,
+      hidden: false,
+    });
+  }, [activeActionJob, latestActionJob, configActions]);
 
   useEffect(() => {
     const job = actionJobQ.data;
@@ -303,15 +327,19 @@ export function GenericPluginConfigPage() {
           setGlobalVals,
           setAccountVals,
         );
-        setDirty(true);
+        setDirty(false);
       }
       setFinalizedActionJobs((prev) => ({ ...prev, [job.job_id]: true }));
-      toast.success(job.message || "配置动作已完成");
+      toast.success(job.message || "配置动作已完成，配置已自动保存");
+      qc.invalidateQueries({ queryKey: ["account", aid, "features"] });
+      qc.invalidateQueries({ queryKey: ["plugin", "global", featureKey] });
+      qc.invalidateQueries({ queryKey: ["plugin-config-action-jobs", aid, featureKey] });
     } else if (job.status === "failed") {
       setFinalizedActionJobs((prev) => ({ ...prev, [job.job_id]: true }));
       toast.error(job.error_message || job.message || "配置动作失败");
+      qc.invalidateQueries({ queryKey: ["plugin-config-action-jobs", aid, featureKey] });
     }
-  }, [actionJobQ.data, finalizedActionJobs, schema]);
+  }, [actionJobQ.data, finalizedActionJobs, schema, qc, aid, featureKey]);
 
   if (!aid) return <p>账号 ID 不合法</p>;
   if (!featureKey) return <p>功能 key 不合法</p>;
@@ -349,6 +377,7 @@ export function GenericPluginConfigPage() {
       minimized: false,
       hidden: false,
     });
+    qc.invalidateQueries({ queryKey: ["plugin-config-action-jobs", aid, featureKey] });
     toast.success("配置动作已在后台开始执行");
   }
 
@@ -474,6 +503,22 @@ export function GenericPluginConfigPage() {
         </CardHeader>
       </Card>
 
+      {latestActionJob ? (
+        <RecentConfigActionJobCard
+          job={latestActionJob}
+          title={actionTitleForKey(latestActionJob.action_key)}
+          onRestore={() =>
+            setActiveActionJob({
+              jobId: latestActionJob.job_id,
+              actionTitle: actionTitleForKey(latestActionJob.action_key),
+              minimized: false,
+              hidden: false,
+            })
+          }
+          onOpenLogs={() => nav(`/logs?source=plugin&account_id=${aid}&plugin_key=${encodeURIComponent(featureKey)}`)}
+        />
+      ) : null}
+
       {!hasSchemaFields ? (
         <Card>
           <CardHeader>
@@ -593,6 +638,46 @@ export function GenericPluginConfigPage() {
         />
       ) : null}
     </div>
+  );
+}
+
+function RecentConfigActionJobCard({
+  job,
+  title,
+  onRestore,
+  onOpenLogs,
+}: {
+  job: PluginConfigActionJobStatus;
+  title: string;
+  onRestore: () => void;
+  onOpenLogs: () => void;
+}) {
+  const terminal = CONFIG_ACTION_TERMINAL_STATUSES.has(job.status);
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="min-w-0">
+            <CardTitle className="flex min-w-0 items-center gap-2 text-base">
+              {terminal ? jobStatusIcon(job.status) : <Loader2 className="h-4 w-4 shrink-0 animate-spin text-primary" />}
+              <span className="truncate">最近配置动作：{title}</span>
+            </CardTitle>
+            <CardDescription className="mt-1">
+              {job.message || configActionJobStatusText(job.status)}
+            </CardDescription>
+          </div>
+          <div className="flex shrink-0 flex-wrap items-center gap-2">
+            <Badge variant={jobStatusBadgeVariant(job.status)}>{configActionJobStatusText(job.status)}</Badge>
+            <Button type="button" variant="outline" size="sm" onClick={onRestore}>
+              查看过程
+            </Button>
+            <Button type="button" variant="ghost" size="sm" onClick={onOpenLogs}>
+              日志
+            </Button>
+          </div>
+        </div>
+      </CardHeader>
+    </Card>
   );
 }
 

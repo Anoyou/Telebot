@@ -144,6 +144,18 @@ export async function getPluginConfigActionJob(
   return data;
 }
 
+export async function listPluginConfigActionJobs(
+  aid: number,
+  pluginKey: string,
+  limit = 10,
+): Promise<PluginConfigActionJobStatus[]> {
+  const { data } = await api.get<PluginConfigActionJobStatus[]>(
+    `/api/accounts/${aid}/features/${pluginKey}/config/action-jobs`,
+    { params: { limit } },
+  );
+  return data;
+}
+
 // ===================== 规则 API =====================
 
 export async function listRules(

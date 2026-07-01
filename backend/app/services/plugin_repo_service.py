@@ -1271,6 +1271,9 @@ def _feature_manifest_from_manifest_json(manifest_json: dict[str, Any]) -> dict[
     config_actions = manifest_json.get("config_actions")
     if isinstance(config_actions, list):
         manifest["config_actions"] = [item for item in config_actions if isinstance(item, dict)]
+    usage = str(manifest_json.get("usage") or "").strip()
+    if usage:
+        manifest["usage"] = usage
     category = str(manifest_json.get("category") or "").strip()
     if category:
         manifest["category"] = category
@@ -1280,11 +1283,21 @@ def _feature_manifest_from_manifest_json(manifest_json: dict[str, Any]) -> dict[
     entries = manifest_json.get("interaction_entries")
     if isinstance(entries, list):
         manifest["interaction_entries"] = [item for item in entries if isinstance(item, dict)]
+    subscriptions = manifest_json.get("event_subscriptions")
+    if isinstance(subscriptions, list):
+        manifest["event_subscriptions"] = [item for item in subscriptions if isinstance(item, dict)]
+    capabilities = manifest_json.get("capabilities")
+    if isinstance(capabilities, dict):
+        manifest["capabilities"] = dict(capabilities)
     if manifest_json.get("x-experimental") or manifest_json.get("experimental"):
         manifest["x-experimental"] = True
     permissions = manifest_json.get("permissions")
     if isinstance(permissions, list):
         manifest["permissions"] = list(permissions)
+    for version_key in ("min_telepilot_version", "min_telebot_version"):
+        version_value = str(manifest_json.get(version_key) or "").strip()
+        if version_value:
+            manifest[version_key] = version_value
     return manifest or None
 
 

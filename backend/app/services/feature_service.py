@@ -63,6 +63,68 @@ _OPTIONAL_OFFICIAL_PLUGIN_KEYS: frozenset[str] = frozenset(
 )
 
 
+def _feature_manifest_from_installed_plugin(
+    installed_plugin: InstalledPlugin,
+) -> dict[str, Any] | None:
+    """从已安装插件记录生成 feature 索引 manifest。
+
+    ``installed_plugin`` 是插件安装与更新后的权威元数据源；``feature`` 表只是
+    账号矩阵和旧配置页使用的索引，不能反过来覆盖已安装插件的版本或契约。
+    """
+
+    manifest_json = installed_plugin.manifest_json if isinstance(installed_plugin.manifest_json, dict) else {}
+    manifest: dict[str, Any] = {}
+    cfg_schema = manifest_json.get("config_schema")
+    if isinstance(cfg_schema, dict):
+        manifest["config_schema"] = cfg_schema
+    config_actions = manifest_json.get("config_actions")
+    if isinstance(config_actions, list):
+        manifest["config_actions"] = [item for item in config_actions if isinstance(item, dict)]
+    usage = str(manifest_json.get("usage") or "").strip()
+    if usage:
+        manifest["usage"] = usage
+    category = str(manifest_json.get("category") or "").strip()
+    if category:
+        manifest["category"] = category
+    interaction_profile = str(manifest_json.get("interaction_profile") or "").strip()
+    if interaction_profile:
+        manifest["interaction_profile"] = interaction_profile
+    entries = manifest_json.get("interaction_entries")
+    if isinstance(entries, list):
+        manifest["interaction_entries"] = [item for item in entries if isinstance(item, dict)]
+    subscriptions = manifest_json.get("event_subscriptions")
+    if isinstance(subscriptions, list):
+        manifest["event_subscriptions"] = [item for item in subscriptions if isinstance(item, dict)]
+    capabilities = manifest_json.get("capabilities")
+    if isinstance(capabilities, dict):
+        manifest["capabilities"] = dict(capabilities)
+    permissions = manifest_json.get("permissions")
+    if isinstance(permissions, list):
+        manifest["permissions"] = list(permissions)
+    if manifest_json.get("x-experimental") or manifest_json.get("experimental"):
+        manifest["x-experimental"] = True
+    for version_key in ("min_telepilot_version", "min_telebot_version"):
+        version_value = str(manifest_json.get(version_key) or "").strip()
+        if version_value:
+            manifest[version_key] = version_value
+    source_label = getattr(installed_plugin, "source_label", None) or getattr(installed_plugin, "source", None)
+    if source_label:
+        manifest["source_label"] = str(source_label)
+    return manifest or None
+
+
+def _merge_feature_manifest_preserving_global_config(
+    current: dict[str, Any] | None,
+    next_manifest: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    """刷新索引 manifest，同时保留一轮旧版 global_config 兼容字段。"""
+
+    if current and "global_config" in current:
+        next_manifest = dict(next_manifest or {})
+        next_manifest["global_config"] = current["global_config"]
+    return next_manifest
+
+
 # ─────────────────────────────────────────────────────
 # Feature 表 seed
 # ─────────────────────────────────────────────────────
@@ -366,20 +428,64 @@ async def _seed_local_installed_features(
     loader 的安全策略决定。
     """
 
-    try:
-        from ..settings import settings
-
-        root = settings.plugins_installed_path
-    except Exception:  # noqa: BLE001
-        return 0, False
-    if not root.exists():
-        return 0, False
-
     installed_plugin_rows = (await db.execute(select(InstalledPlugin))).scalars().all()
     installed_plugin_by_key = {str(row.key): row for row in installed_plugin_rows}
 
     added = 0
     changed = False
+    for key, installed_plugin in sorted(installed_plugin_by_key.items()):
+        if not key or "/" in key or "\\" in key:
+            continue
+        installed_source = str(getattr(installed_plugin, "source", "") or "")
+        if installed_source == "builtin":
+            continue
+        manifest_json = installed_plugin.manifest_json if isinstance(installed_plugin.manifest_json, dict) else {}
+        display_name = str(manifest_json.get("display_name") or key)
+        version = str(manifest_json.get("version") or getattr(installed_plugin, "version", "") or "") or None
+        manifest_data = _feature_manifest_from_installed_plugin(installed_plugin)
+
+        if key in existing:
+            row = existing[key]
+            row_changed = False
+            if row.is_builtin:
+                row.is_builtin = False
+                row_changed = True
+            if row.display_name != display_name:
+                row.display_name = display_name
+                row_changed = True
+            if version and row.version != version:
+                row.version = version
+                row_changed = True
+            next_manifest = _merge_feature_manifest_preserving_global_config(row.manifest, manifest_data)
+            if (row.manifest or None) != (next_manifest or None):
+                row.manifest = next_manifest
+                flag_modified(row, "manifest")
+                row_changed = True
+            if row_changed:
+                await db.flush()
+                changed = True
+            continue
+
+        row = Feature(
+            key=key,
+            display_name=display_name,
+            is_builtin=False,
+            version=version,
+            manifest=manifest_data,
+        )
+        db.add(row)
+        existing[key] = row
+        added += 1
+
+    try:
+        from ..settings import settings
+
+        root = settings.plugins_installed_path
+    except Exception:  # noqa: BLE001
+        return added, changed
+    if not root.exists():
+        return added, changed
+
     for plugin_json in sorted(root.glob("*/plugin.json")):
         try:
             meta = json.loads(plugin_json.read_text(encoding="utf-8"))
@@ -391,6 +497,8 @@ async def _seed_local_installed_features(
             continue
         installed_plugin = installed_plugin_by_key.get(key)
         is_orphan = installed_plugin is None
+        if installed_plugin is not None and isinstance(installed_plugin.manifest_json, dict):
+            meta = dict(installed_plugin.manifest_json)
         display_name = str(meta.get("display_name") or key)
         version = str(meta.get("version") or "") or None
         cfg_schema = meta.get("config_schema")
