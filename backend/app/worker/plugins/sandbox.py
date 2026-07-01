@@ -45,7 +45,7 @@ log = logging.getLogger(__name__)
 
 # 能力名 → 允许的 TelegramClient 方法集
 ALLOWED_API: dict[str, frozenset[str]] = {
-    "send_message": frozenset({"send_message", "respond", "reply"}),
+    "send_message": frozenset({"send_message", "respond", "reply", "forward_messages"}),
     "edit_message": frozenset({"edit", "edit_message"}),
     "read_chat": frozenset({"get_messages", "get_chat", "iter_messages"}),
     "resolve_entity": frozenset({"get_entity"}),
