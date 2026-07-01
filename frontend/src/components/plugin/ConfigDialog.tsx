@@ -104,7 +104,7 @@ export interface ConfigSchema {
   "x-help"?: unknown;
 }
 
-const EMPTY_CONFIG: Record<string, unknown> = {};
+
 
 interface ConfigDialogProps {
   open: boolean;
