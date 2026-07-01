@@ -108,6 +108,13 @@ def _manifest_capabilities(manifest: Manifest) -> dict[str, Any]:
     return dict(capabilities) if isinstance(capabilities, dict) else {}
 
 
+def _validate_high_risk_capabilities(plugin_key: str, capabilities: dict[str, Any]) -> None:
+    direct_capability = capabilities.get("telegram_direct_passthrough")
+    if isinstance(direct_capability, dict) and direct_capability.get("enabled") is True:
+        if not str(direct_capability.get("reason") or "").strip():
+            raise AssertionError(f"{plugin_key}: telegram_direct_passthrough.enabled=true 时必须说明 reason")
+
+
 def _has_usage(metadata: dict[str, Any], manifest: Manifest) -> bool:
     if str(metadata.get("usage") or "").strip():
         return True
@@ -183,6 +190,7 @@ def _validate_plugin(plugin_key: str) -> None:
         raise AssertionError(f"{plugin_key}: plugin.json.capabilities 必须是对象")
     if metadata_capabilities and dict(metadata_capabilities) != _manifest_capabilities(manifest):
         raise AssertionError(f"{plugin_key}: plugin.json.capabilities 与 MANIFEST.capabilities 不一致")
+    _validate_high_risk_capabilities(plugin_key, metadata_capabilities)
 
     _validate_deprecated_risks(plugin_key, plugin_dir, metadata)
     warnings: list[str] = []

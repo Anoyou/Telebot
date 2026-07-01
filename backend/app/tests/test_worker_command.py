@@ -234,6 +234,163 @@ async def test_handler_uses_dynamic_prefix_from_ctx():
 
 
 @pytest.mark.asyncio
+async def test_outgoing_prefix_plugin_command_runs_for_account_owner():
+    """账号本人发系统前缀插件命令时，应进入 userbot 插件命令链路。"""
+    from app.worker import command as wcmd
+    from app.worker.command import make_command_handler
+
+    captured = {}
+
+    def fake_on(_event_type):
+        def deco(fn):
+            captured["fn"] = fn
+            return fn
+
+        return deco
+
+    plugin_handler = AsyncMock()
+    wcmd.register_plugin_command("10d", plugin_handler, owner_plugin_key="ten_half", generation=1)
+    try:
+        client = MagicMock()
+        client.on = fake_on
+        make_command_handler(client, account_id=1, prefix="。")
+        handler = captured["fn"]
+        set_command_context(
+            CommandContext(
+                account_id=1,
+                templates={},
+                providers={},
+                command_prefix="。",
+            )
+        )
+
+        event = AsyncMock()
+        event.raw_text = "。10d 6789"
+        await handler(event)
+
+        plugin_handler.assert_awaited_once()
+        assert plugin_handler.await_args.args[2] == ["6789"]
+        assert plugin_handler.await_args.args[3] == 1
+    finally:
+        wcmd.unregister_plugin_command("10d", owner_plugin_key="ten_half")
+
+
+@pytest.mark.asyncio
+async def test_outgoing_bare_command_requires_setting_to_be_disabled():
+    """默认必须带系统前缀，账号本人裸命令也不会触发。"""
+    from app.worker.command import make_command_handler
+
+    captured = {}
+
+    def fake_on(_event_type):
+        def deco(fn):
+            captured["fn"] = fn
+            return fn
+
+        return deco
+
+    client = MagicMock()
+    client.on = fake_on
+    make_command_handler(client, account_id=1, prefix="。")
+    handler = captured["fn"]
+    set_command_context(
+        CommandContext(
+            account_id=1,
+            templates={},
+            providers={},
+            command_prefix="。",
+            command_prefix_required=True,
+        )
+    )
+
+    event = AsyncMock()
+    event.raw_text = "ping"
+    await handler(event)
+    event.edit.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_outgoing_bare_command_runs_when_prefix_not_required():
+    """关闭必须带前缀后，仅账号本人 outgoing 裸命令可触发已有命令。"""
+    from app.worker.command import make_command_handler
+
+    captured = {}
+
+    def fake_on(_event_type):
+        def deco(fn):
+            captured["fn"] = fn
+            return fn
+
+        return deco
+
+    client = MagicMock()
+    client.on = fake_on
+    make_command_handler(client, account_id=1, prefix="。")
+    handler = captured["fn"]
+    set_command_context(
+        CommandContext(
+            account_id=1,
+            templates={},
+            providers={},
+            command_prefix="。",
+            command_prefix_required=False,
+        )
+    )
+
+    event = AsyncMock()
+    event.raw_text = "ping"
+    await handler(event)
+    event.edit.assert_called_with("pong")
+
+    unknown = AsyncMock()
+    unknown.raw_text = "普通聊天"
+    await handler(unknown)
+    unknown.edit.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_outgoing_bare_plugin_command_runs_when_prefix_not_required():
+    """关闭必须带前缀后，账号本人可裸写插件注册命令。"""
+    from app.worker import command as wcmd
+    from app.worker.command import make_command_handler
+
+    captured = {}
+
+    def fake_on(_event_type):
+        def deco(fn):
+            captured["fn"] = fn
+            return fn
+
+        return deco
+
+    plugin_handler = AsyncMock()
+    wcmd.register_plugin_command("10d", plugin_handler, owner_plugin_key="ten_half", generation=1)
+    try:
+        client = MagicMock()
+        client.on = fake_on
+        make_command_handler(client, account_id=1, prefix="。")
+        handler = captured["fn"]
+        set_command_context(
+            CommandContext(
+                account_id=1,
+                templates={},
+                providers={},
+                command_prefix="。",
+                command_prefix_required=False,
+            )
+        )
+
+        event = AsyncMock()
+        event.raw_text = "10d 6789"
+        await handler(event)
+
+        plugin_handler.assert_awaited_once()
+        assert plugin_handler.await_args.args[2] == ["6789"]
+    finally:
+        wcmd.unregister_plugin_command("10d", owner_plugin_key="ten_half")
+
+
+@pytest.mark.asyncio
 async def test_handler_falls_back_when_ctx_missing():
     """ctx 为空时（worker 启动早期）handler 应用闭包 fallback prefix 工作。"""
     from app.worker import command as wcmd
@@ -375,10 +532,16 @@ def test_command_context_has_command_prefix_field():
     """守门测试：CommandContext 必须有 command_prefix 字段且默认 ","。"""
     ctx = CommandContext(account_id=1, templates={}, providers={})
     assert ctx.command_prefix == ","
+    assert ctx.command_prefix_required is True
     ctx2 = CommandContext(
-        account_id=1, templates={}, providers={}, command_prefix="-"
+        account_id=1,
+        templates={},
+        providers={},
+        command_prefix="-",
+        command_prefix_required=False,
     )
     assert ctx2.command_prefix == "-"
+    assert ctx2.command_prefix_required is False
 
 
 def test_re_escape_special_prefix():

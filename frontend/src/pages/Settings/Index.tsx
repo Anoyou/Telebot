@@ -131,6 +131,7 @@ export function SettingsIndex() {
   });
 
   const [prefix, setPrefix] = useState("");
+  const [commandPrefixRequired, setCommandPrefixRequired] = useState(true);
   const [aiEnabled, setAiEnabled] = useState(true);
   const [timezone, setTimezone] = useState("Asia/Shanghai");
   const [llmLimits, setLlmLimits] = useState({
@@ -155,6 +156,7 @@ export function SettingsIndex() {
   useEffect(() => {
     if (settingsQ.data) {
       setPrefix(settingsQ.data.command_prefix ?? ",");
+      setCommandPrefixRequired(settingsQ.data.command_prefix_required ?? true);
       setAiEnabled(settingsQ.data.ai_enabled ?? true);
       setTimezone(settingsQ.data.timezone ?? "Asia/Shanghai");
       setLlmLimits({
@@ -229,6 +231,20 @@ export function SettingsIndex() {
     mutationFn: () => patchSystemSettings({ command_prefix: prefix }),
     onSuccess: () => {
       toast.success("指令前缀已保存（worker 将热加载）");
+      qc.invalidateQueries({ queryKey: ["system", "settings"] });
+    },
+    onError: (err) => toast.error(getErrMsg(err)),
+  });
+
+  const saveCommandPrefixRequired = useMutation({
+    mutationFn: (enabled: boolean) => patchSystemSettings({ command_prefix_required: enabled }),
+    onSuccess: (data) => {
+      setCommandPrefixRequired(data.command_prefix_required ?? true);
+      toast.success(
+        (data.command_prefix_required ?? true)
+          ? "已要求账号本人指令必须带前缀，worker 将热加载"
+          : "已允许账号本人裸命令触发，worker 将热加载",
+      );
       qc.invalidateQueries({ queryKey: ["system", "settings"] });
     },
     onError: (err) => toast.error(getErrMsg(err)),
@@ -475,6 +491,19 @@ export function SettingsIndex() {
                   保存
                 </Button>
               </div>
+              <div className="mt-4 flex max-w-xl items-start justify-between gap-4 rounded-md border bg-muted/20 px-3 py-3">
+                <div className="space-y-1">
+                  <div className="text-sm font-medium">账号本人必须带前缀</div>
+                  <p className="text-xs leading-5 text-muted-foreground">
+                    关闭后，只有当前 userbot 账号本人发出的消息可以直接用命令名触发；群成员仍不会因为裸命令或系统前缀触发 userbot 命令。
+                  </p>
+                </div>
+                <Switch
+                  checked={commandPrefixRequired}
+                  disabled={saveCommandPrefixRequired.isPending}
+                  onCheckedChange={(checked) => saveCommandPrefixRequired.mutate(checked)}
+                />
+              </div>
               {guideActive ? (
                 <div className="mt-3">
                   <GuideInlineCard
@@ -500,11 +529,15 @@ export function SettingsIndex() {
                       <div className="mb-1.5 inline-block max-w-full rounded-lg border-l-2 border-white/70 bg-white/15 px-2 py-1 text-[11px] leading-relaxed text-white/90">
                         这是一段被回复的原文。
                       </div>
-                      <div className="font-mono text-sm">{prefix || ","}ai 请总结这段内容</div>
+                      <div className="font-mono text-sm">
+                        {commandPrefixRequired ? (prefix || ",") : ""}ai 请总结这段内容
+                      </div>
                     </div>
 
                     <div className="ml-auto w-fit max-w-[78%] rounded-2xl rounded-br-lg bg-sky-500 px-3.5 py-2.5 text-white shadow-sm sm:max-w-[66%]">
-                      <div className="font-semibold text-sm">{prefix || ","}(๑•̌.•̑๑)ˀ̣ˀ̣ˀ̣ 好奇</div>
+                      <div className="font-semibold text-sm">
+                        {commandPrefixRequired ? (prefix || ",") : ""}(๑•̌.•̑๑)ˀ̣ˀ̣ˀ̣ 好奇
+                      </div>
                       <div className="mt-2 inline-block max-w-full rounded-lg border-l-2 border-white/60 bg-white/15 px-2 py-1 text-white/90">
                         这是一段被回复的原文。
                       </div>

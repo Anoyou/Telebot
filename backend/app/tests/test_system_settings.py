@@ -91,3 +91,21 @@ async def test_system_settings_ai_enabled_hotplug_roundtrip(monkeypatch) -> None
     assert db.rows["ai_enabled"].value == {"enabled": False}
     assert result["ai_enabled"] is False
     broadcast.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_system_settings_command_prefix_required_roundtrip(monkeypatch) -> None:
+    db = _FakeSettingsDB()
+    monkeypatch.setattr(rate_limit, "_audit", AsyncMock())
+    broadcast = AsyncMock()
+    monkeypatch.setattr(rate_limit, "_broadcast_reload", broadcast)
+
+    result = await rate_limit.patch_system_settings(
+        rate_limit._SettingsPatch(command_prefix_required=False),
+        db,  # type: ignore[arg-type]
+        SimpleNamespace(id=1),
+    )
+
+    assert db.rows["command_prefix_required"].value == {"enabled": False}
+    assert result["command_prefix_required"] is False
+    broadcast.assert_awaited_once()

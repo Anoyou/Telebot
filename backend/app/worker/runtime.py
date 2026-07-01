@@ -1192,6 +1192,7 @@ async def _refresh_command_context(account_id: int) -> None:
     ai_enabled = True
     # 命令前缀：DB 里 system_setting.command_prefix 优先，没有则用 .env 默认
     prefix: str = app_settings.command_prefix or ","
+    command_prefix_required = True
     sudo_prefix: str = "."
     sudo_enabled = False
     command_echo_guard_previous_messages = normalize_command_echo_guard_limit(
@@ -1214,6 +1215,17 @@ async def _refresh_command_context(account_id: int) -> None:
         except Exception:  # noqa: BLE001
             # DB 读不到（如迁移没跑）就退回 .env 默认；不影响其它字段加载
             pass
+
+        # 0.1) 账号本人命令是否必须带系统前缀（默认必须）
+        try:
+            row_prefix_required = await db.get(SystemSetting, "command_prefix_required")
+            raw_prefix_required = row_prefix_required.value if row_prefix_required is not None else None
+            if isinstance(raw_prefix_required, dict):
+                command_prefix_required = bool(raw_prefix_required.get("enabled", True))
+            elif raw_prefix_required is not None:
+                command_prefix_required = bool(raw_prefix_required)
+        except Exception:  # noqa: BLE001
+            command_prefix_required = True
         
         # 0.5) Sudo 前缀（系统设置）
         try:
@@ -1392,6 +1404,7 @@ async def _refresh_command_context(account_id: int) -> None:
             providers=providers,
             ai_enabled=ai_enabled,
             command_prefix=prefix,
+            command_prefix_required=command_prefix_required,
             aliases=aliases,
             sudo_users=sudo_users,
             sudo_prefix=sudo_prefix,

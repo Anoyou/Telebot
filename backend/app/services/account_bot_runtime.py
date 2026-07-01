@@ -127,6 +127,7 @@ _PLAYER_IDENTITY_CONFIDENCE_CALLBACK = "callback_confirmed"
 _PLAYER_IDENTITY_CONFIDENCE_NAME_ONLY = "name_only"
 _PLAYER_IDENTITY_CONFIDENCE_UNKNOWN = "unknown"
 _MODULE_PAYMENT_AMOUNT_KEYS = ("amount", "bet", "entry_amount", "entry_fee", "stake")
+_COMMON_COMMAND_PREFIXES = (",", "。", ".", "/", "!", "！", "-", "、")
 
 
 async def _load_command_prefix(db) -> str:
@@ -141,6 +142,32 @@ async def _load_command_prefix(db) -> str:
         if value:
             prefix = value
     return prefix
+
+
+def _looks_like_command_name(cmd: str, *, prefix: str) -> bool:
+    name = str(cmd or "").strip()
+    if not name:
+        return False
+    if prefix and name.startswith(prefix):
+        return False
+    return any(ch.isalnum() or ch == "_" for ch in name)
+
+
+async def _incoming_is_userbot_command_text(db: Any, incoming: Incoming) -> bool:
+    text = str(incoming.text or "").strip()
+    if incoming.callback_id or not text:
+        return False
+    candidate_prefixes = {settings.command_prefix or "", *_COMMON_COMMAND_PREFIXES}
+    if not any(prefix and text.startswith(prefix) for prefix in candidate_prefixes):
+        return False
+    prefix = await _load_command_prefix(db)
+    if not prefix or not text.startswith(prefix):
+        return False
+    rest = text[len(prefix):].lstrip()
+    if not rest:
+        return False
+    token = rest.split(None, 1)[0].strip()
+    return _looks_like_command_name(token, prefix=prefix)
 
 
 async def _event_framework_flags() -> dict[str, bool]:
@@ -993,6 +1020,16 @@ async def _handle_interaction_update(aid: int, token: str, update: dict[str, Any
             if incoming.user_id is not None and _int_or_none(cfg.get("interaction_bot_id")) == incoming.user_id:
                 await record_span(trace, "route", TRACE_STATUS_SKIPPED, component="interaction_bot", reason_code="bot_self_message")
                 return
+            if await _incoming_is_userbot_command_text(db, incoming):
+                await record_span(
+                    trace,
+                    "route",
+                    TRACE_STATUS_SKIPPED,
+                    component="interaction_bot",
+                    reason_code="userbot_command_message",
+                    message="系统前缀命令由 userbot 命令链路处理，交互 Bot 不投递规则或会话。",
+                )
+                return
             event_bus_delivery_enabled = flags.get("event_bus_delivery_enabled", True)
             if await _try_handle_transfer_notice(
                 db,
@@ -1059,6 +1096,14 @@ async def _handle_transfer_test_update(aid: int, token: str, update: dict[str, A
     if incoming is None:
         return
     async with AsyncSessionLocal() as db:
+        if await _incoming_is_userbot_command_text(db, incoming):
+            log.info(
+                "transfer command skipped: userbot command text aid=%s chat_id=%s sender_id=%s",
+                incoming.account_id,
+                incoming.chat_id,
+                incoming.user_id,
+            )
+            return
         await _try_handle_transfer_command(db, incoming)
 
 
@@ -1267,10 +1312,13 @@ def _legacy_interaction_rule(cfg: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _interaction_rules(cfg: dict[str, Any]) -> list[dict[str, Any]]:
+def _interaction_rules(cfg: dict[str, Any], *, include_disabled: bool = False) -> list[dict[str, Any]]:
     raw_rules = cfg.get("rules")
     if isinstance(raw_rules, list) and raw_rules:
-        return [rule for rule in raw_rules if isinstance(rule, dict) and rule.get("enabled", True)]
+        rules = [rule for rule in raw_rules if isinstance(rule, dict)]
+        if include_disabled:
+            return rules
+        return [rule for rule in rules if rule.get("enabled", True)]
     return [_legacy_interaction_rule(cfg)]
 
 
@@ -1349,6 +1397,18 @@ def _incoming_matches_interaction_trigger(cfg: dict[str, Any], incoming: Incomin
 
 def _rule_matches_incoming_trigger(rule: dict[str, Any], incoming: Incoming) -> bool:
     return any(_rule_matches_trigger(rule, text) for text in _incoming_trigger_texts(incoming))
+
+
+def _rule_matches_payment_notice_trigger(
+    rule: dict[str, Any],
+    incoming: Incoming,
+    parsed: dict[str, Any] | None,
+) -> bool:
+    if _rule_matches_incoming_trigger(rule, incoming):
+        return True
+    # A trusted transfer bot notice can be parsed even when Telegram strips the
+    # human trigger marker from the rendered message body.
+    return parsed is not None
 
 
 def _rule_amount_matches(rule: dict[str, Any], amount: int) -> bool:
@@ -2734,17 +2794,26 @@ async def _select_transfer_notice_rule(
     parsed_amount = int(parsed.get("amount") or 0)
     parsed_receiver = str(parsed.get("receiver_name") or "")
     parsed_receiver_id = _int_or_none(parsed.get("receiver_user_id"))
-    for rule in _interaction_rules(cfg):
-        if not _rule_trigger_mode_allows(rule, "payment"):
-            continue
+    for rule in _interaction_rules(cfg, include_disabled=True):
         if not _rule_chat_matches(rule, incoming.chat_id or 0):
             continue
-        if not _rule_matches_incoming_trigger(rule, incoming):
-            continue
-        if not _rule_amount_matches(rule, parsed_amount):
-            continue
-        if not await _is_interaction_rule_open(incoming.account_id, rule, incoming.chat_id):
-            continue
+        has_active_session = bool(
+            await _list_interaction_sessions_for_rule(incoming.account_id, rule, incoming.chat_id)
+        )
+        if has_active_session:
+            if not _rule_entry_allows_event(rule, "payment_confirmed"):
+                continue
+        else:
+            if not rule.get("enabled", True):
+                continue
+            if not _rule_trigger_mode_allows(rule, "payment"):
+                continue
+            if not _rule_matches_payment_notice_trigger(rule, incoming, parsed):
+                continue
+            if not _rule_amount_matches(rule, parsed_amount):
+                continue
+            if not await _is_interaction_rule_open(incoming.account_id, rule, incoming.chat_id):
+                continue
         receiver_filter = await _rule_receiver_filter(db, incoming.account_id, rule)
         if not _receiver_matches_filter(receiver_filter, user_id=parsed_receiver_id, name=parsed_receiver):
             continue
@@ -3386,10 +3455,8 @@ async def _try_handle_interaction_module_message(db: Any, incoming: Incoming) ->
     cfg = await account_bot_service.get_transfer_notice_config(db, incoming.account_id)
     if not cfg.get("enabled"):
         return False
-    for rule in _interaction_rules(cfg):
+    for rule in _interaction_rules(cfg, include_disabled=True):
         if not _rule_chat_matches(rule, incoming.chat_id):
-            continue
-        if not await _is_interaction_rule_open(incoming.account_id, rule, incoming.chat_id):
             continue
         if str(rule.get("action") or "") != "module":
             continue
@@ -3905,6 +3972,33 @@ def _interaction_settlement_envelope(
     }
 
 
+def _interaction_module_prize(rule: dict[str, Any], data: dict[str, Any]) -> int | None:
+    module_prize = _int_or_none(rule.get("module_prize"))
+    if module_prize is not None and module_prize > 0:
+        return module_prize
+
+    module_config = rule.get("module_config")
+    if isinstance(module_config, dict):
+        for key in (*_MODULE_PAYMENT_AMOUNT_KEYS, "prize"):
+            parsed = _int_or_none(module_config.get(key))
+            if parsed is not None and parsed > 0:
+                return parsed
+
+    rule_amount = _int_or_none(rule.get("amount"))
+    if rule_amount is not None and rule_amount > 0:
+        return rule_amount
+
+    for key in (*_MODULE_PAYMENT_AMOUNT_KEYS, "prize"):
+        parsed = _int_or_none(data.get(key))
+        if parsed is not None and parsed > 0:
+            return parsed
+
+    math_prize = _int_or_none(rule.get("math_prize"))
+    if math_prize is not None and math_prize > 0 and math_prize != 123:
+        return math_prize
+    return None
+
+
 def _interaction_module_payload(
     incoming: Incoming,
     rule: dict[str, Any],
@@ -3914,7 +4008,7 @@ def _interaction_module_payload(
 ) -> dict[str, Any]:
     data = dict(rule.get("module_config") or {}) if isinstance(rule.get("module_config"), dict) else {}
     data.update(dict(parsed or {}))
-    prize = int(rule.get("module_prize") or rule.get("math_prize") or 123)
+    prize = _interaction_module_prize(rule, data)
     data["event_type"] = event_type
     resolved_payer_user_id = _interaction_payment_payer_user_id(incoming, data)
     payer_user_id = resolved_payer_user_id if event_type == "payment_confirmed" else resolved_payer_user_id or incoming.user_id
@@ -3997,9 +4091,10 @@ async def _interaction_module_payload_async(
     payout_mode = await _resolve_payout_mode(incoming.account_id, incoming.chat_id)
     data["payout_account_label"] = payout_account_label
     data["payout_mode"] = payout_mode
+    settlement_prize = _int_or_none(data.get("prize")) or 0
     data["settlement"] = _interaction_settlement_envelope(
         data,
-        prize=int(data.get("prize") or 123),
+        prize=settlement_prize,
         payout_account_label=payout_account_label,
         payout_mode=payout_mode,
     )
@@ -5015,19 +5110,6 @@ async def _try_handle_transfer_notice(
                 message="外部转账通知已进入 Event Bus，但插件执行失败。",
         )
         return True
-    if not any(
-        _rule_trigger_mode_allows(rule, "payment")
-        and _rule_chat_matches(rule, incoming.chat_id)
-        and _rule_matches_incoming_trigger(rule, incoming)
-        for rule in _interaction_rules(cfg)
-    ):
-        if _incoming_matches_interaction_trigger(cfg, incoming):
-            log.info(
-                "transfer notice skipped: no chat/trigger rule matched aid=%s incoming_chat=%s",
-                incoming.account_id,
-                incoming.chat_id,
-            )
-        return False
     rule = await _select_transfer_notice_rule(db, incoming, cfg, parsed)
     if rule is None:
         log.info(
@@ -5037,9 +5119,6 @@ async def _try_handle_transfer_notice(
             parsed.get("amount"),
         )
         return False
-    if not await _is_interaction_rule_open(incoming.account_id, rule, incoming.chat_id):
-        log.info("transfer notice skipped: rule closed aid=%s rule=%s", incoming.account_id, rule.get("id"))
-        return True
     if not await _claim_interaction_trigger(incoming, rule, "transfer_notice", parsed):
         log.info("transfer notice skipped: duplicate aid=%s rule=%s", incoming.account_id, rule.get("id"))
         return True

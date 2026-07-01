@@ -76,6 +76,7 @@ function sameConfig(a: Record<string, unknown>, b: Record<string, unknown>): boo
   return JSON.stringify(a) === JSON.stringify(b);
 }
 
+const EMPTY_CONFIG: Record<string, unknown> = {};
 const CONFIG_ACTION_TERMINAL_STATUSES = new Set(["succeeded", "failed"]);
 
 function normalizeConfigActions(rawActions: unknown[]): ConfigAction[] {

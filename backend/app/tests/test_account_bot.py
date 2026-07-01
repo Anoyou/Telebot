@@ -1962,7 +1962,7 @@ async def test_interaction_payload_sets_auto_payout_mode_for_math10_module(monke
     assert payload["payout_account_label"] == "@owner"
     assert payload["payout_mode"] == "auto"
     assert payload["settlement"]["mode"] == "auto"
-    assert payload["settlement"]["amount"] == 123
+    assert payload["settlement"]["amount"] == 0
     assert payload["settlement"]["payout_account_label"] == "@owner"
 
 
@@ -3030,6 +3030,98 @@ def test_module_config_bet_is_used_as_payment_amount() -> None:
     assert account_bot_runtime._rule_amount_matches(rule, 100) is True
     assert account_bot_runtime._rule_amount_matches(rule, 120) is True
     assert account_bot_runtime._rule_amount_matches(rule, 99) is False
+
+
+def test_interaction_module_payload_uses_module_config_amount_as_prize() -> None:
+    incoming = account_bot_runtime.Incoming(
+        account_id=1,
+        token="bbot-token",
+        update_id=10,
+        user_id=20,
+        chat_id=-100123,
+        message_id=30,
+        text="十点半",
+        display_name="AAA",
+    )
+    rule = {
+        "id": "ten-half-paid",
+        "action": "module",
+        "module_key": "ten_half",
+        "module_action": "start_ten_half",
+        "math_prize": 123,
+        "module_config": {"bet": 1000, "max_players": 2},
+    }
+
+    payload = account_bot_runtime._interaction_module_payload(
+        incoming,
+        rule,
+        None,
+        event_type="keyword",
+    )
+
+    assert payload["bet"] == 1000
+    assert payload["module_config"]["bet"] == 1000
+    assert payload["prize"] == 1000
+
+
+def test_interaction_module_payload_does_not_fallback_to_math_prize_default() -> None:
+    incoming = account_bot_runtime.Incoming(
+        account_id=1,
+        token="bbot-token",
+        update_id=10,
+        user_id=20,
+        chat_id=-100123,
+        message_id=30,
+        text="开局",
+        display_name="AAA",
+    )
+    rule = {
+        "id": "game-paid",
+        "action": "module",
+        "module_key": "game24",
+        "module_action": "start_paid_game",
+        "math_prize": 123,
+        "module_config": {},
+    }
+
+    payload = account_bot_runtime._interaction_module_payload(
+        incoming,
+        rule,
+        None,
+        event_type="keyword",
+    )
+
+    assert payload["prize"] is None
+
+
+def test_interaction_module_payload_keeps_explicit_module_prize_default_value() -> None:
+    incoming = account_bot_runtime.Incoming(
+        account_id=1,
+        token="bbot-token",
+        update_id=10,
+        user_id=20,
+        chat_id=-100123,
+        message_id=30,
+        text="开局",
+        display_name="AAA",
+    )
+    rule = {
+        "id": "game-paid",
+        "action": "module",
+        "module_key": "game24",
+        "module_action": "start_paid_game",
+        "module_prize": 123,
+        "module_config": {},
+    }
+
+    payload = account_bot_runtime._interaction_module_payload(
+        incoming,
+        rule,
+        None,
+        event_type="keyword",
+    )
+
+    assert payload["prize"] == 123
 
 
 def test_interaction_module_payload_preserves_plugin_timeout_config(monkeypatch) -> None:
@@ -6472,7 +6564,7 @@ async def test_interaction_plain_message_routes_to_worker_entry_as_message(monke
 
 
 @pytest.mark.asyncio
-async def test_interaction_callback_routes_to_worker_entry_and_answers_callback(monkeypatch) -> None:
+async def test_interaction_callback_routes_disabled_active_session_to_worker_entry_and_answers_callback(monkeypatch) -> None:
     class _DB:
         async def __aenter__(self):
             return self
@@ -6498,8 +6590,19 @@ async def test_interaction_callback_routes_to_worker_entry_and_answers_callback(
     )
     send = AsyncMock()
     answer = AsyncMock()
+    redis = _MemoryRedis()
+    rule = {
+        "id": "button-game",
+        "enabled": False,
+        "chat_ids": [-100777],
+        "action": "module",
+        "module_key": "button_game",
+        "module_action": "play",
+        "module_prize": 456,
+    }
+    await redis.set(account_bot_runtime._rule_state_key(1, rule, -100777), "closed")
     monkeypatch.setattr(account_bot_runtime, "AsyncSessionLocal", lambda: _DB())
-    monkeypatch.setattr(account_bot_runtime, "get_redis", lambda: _MemoryRedis())
+    monkeypatch.setattr(account_bot_runtime, "get_redis", lambda: redis)
     dispatch_event = MagicMock(side_effect=account_bot_runtime.dispatch_event)
     monkeypatch.setattr(account_bot_runtime, "dispatch_event", dispatch_event)
     monkeypatch.setattr(account_bot_runtime, "_run_worker_interaction_entry", run_entry)
@@ -6519,17 +6622,7 @@ async def test_interaction_callback_routes_to_worker_entry_and_answers_callback(
         AsyncMock(
             return_value={
                 "enabled": True,
-                "rules": [
-                    {
-                        "id": "button-game",
-                        "enabled": True,
-                        "chat_ids": [-100777],
-                        "action": "module",
-                        "module_key": "button_game",
-                        "module_action": "play",
-                        "module_prize": 456,
-                    },
-                ],
+                "rules": [rule],
             }
         ),
     )
@@ -7132,6 +7225,117 @@ async def test_interaction_control_and_start_keywords_do_not_route_as_plain_mess
 
 
 @pytest.mark.asyncio
+async def test_interaction_bot_skips_prefixed_userbot_command_messages(monkeypatch) -> None:
+    class _DB:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+        async def get(self, model, key=None):  # noqa: ANN002
+            if getattr(model, "__name__", "") == "SystemSetting" and key == "command_prefix":
+                return SimpleNamespace(value={"value": "。"})
+            return None
+
+    event_bus = AsyncMock(return_value=(False, True))
+    rule_or_keyword = AsyncMock(return_value=False)
+    module_message = AsyncMock(return_value=False)
+    transfer_notice = AsyncMock(return_value=False)
+    monkeypatch.setattr(account_bot_runtime, "AsyncSessionLocal", lambda: _DB())
+    monkeypatch.setattr(
+        account_bot_runtime,
+        "_event_framework_flags",
+        AsyncMock(return_value={"trace_enabled": False, "event_bus_delivery_enabled": True, "inline_updates_enabled": True}),
+    )
+    monkeypatch.setattr(account_bot_runtime, "_try_handle_transfer_notice", transfer_notice)
+    monkeypatch.setattr(account_bot_runtime, "_try_handle_event_bus_subscriptions", event_bus)
+    monkeypatch.setattr(account_bot_runtime, "_try_handle_interaction_rule_command_or_keyword", rule_or_keyword)
+    monkeypatch.setattr(account_bot_runtime, "_try_handle_interaction_module_message", module_message)
+    monkeypatch.setattr(
+        account_bot_service,
+        "get_transfer_notice_config",
+        AsyncMock(
+            return_value={
+                "enabled": True,
+                "interaction_bot_id": 8875144459,
+                "rules": [
+                    {
+                        "id": "ten-half",
+                        "enabled": True,
+                        "chat_ids": [-100778],
+                        "trigger_mode": "both",
+                        "module_start_keywords": ["十点半测试"],
+                        "action": "module",
+                        "module_key": "ten_half",
+                        "module_action": "start_ten_half",
+                    }
+                ],
+            }
+        ),
+    )
+
+    await account_bot_runtime._handle_interaction_update(
+        1,
+        "bbot-token",
+        {
+            "update_id": 15001,
+            "message": {
+                "message_id": 150010,
+                "text": "。10d 100",
+                "from": {"id": 1682400007, "first_name": "Owner"},
+                "chat": {"id": -100778, "type": "supergroup"},
+            },
+        },
+    )
+
+    transfer_notice.assert_not_awaited()
+    event_bus.assert_not_awaited()
+    rule_or_keyword.assert_not_awaited()
+    module_message.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_transfer_test_update_skips_prefixed_userbot_command_messages(monkeypatch) -> None:
+    class _DB:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+        async def get(self, model, key=None):  # noqa: ANN002
+            if getattr(model, "__name__", "") == "SystemSetting" and key == "command_prefix":
+                return SimpleNamespace(value={"value": "。"})
+            return None
+
+    transfer_command = AsyncMock(return_value=True)
+    monkeypatch.setattr(account_bot_runtime, "AsyncSessionLocal", lambda: _DB())
+    monkeypatch.setattr(account_bot_runtime, "_try_handle_transfer_command", transfer_command)
+
+    await account_bot_runtime._handle_transfer_test_update(
+        1,
+        "bbot-token",
+        {
+            "update_id": 15002,
+            "message": {
+                "message_id": 150020,
+                "text": "。10d 6789",
+                "from": {"id": 1682400007, "first_name": "Owner"},
+                "chat": {"id": -100778, "type": "supergroup"},
+                "reply_to_message": {
+                    "message_id": 150019,
+                    "from": {"id": 111, "first_name": "玩家A"},
+                    "text": "入局",
+                },
+            },
+        },
+    )
+
+    transfer_command.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_paid_module_start_keyword_is_blocked_but_answer_message_routes(monkeypatch) -> None:
     class _DB:
         async def __aenter__(self):
@@ -7290,6 +7494,206 @@ async def test_transfer_notice_module_rule_starts_game24_with_interaction_bot(mo
     assert payload["prize"] == 888
     assert send.await_count == 1
     assert send.await_args.args[:3] == ("bbot-token", -100123, "24 点开始\n奖金：888")
+
+
+@pytest.mark.asyncio
+async def test_disabled_active_paid_pool_session_payment_bypasses_static_rule_amount(monkeypatch) -> None:
+    class _DB:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+        async def commit(self):
+            return None
+
+        async def get(self, model, *_args):  # noqa: ANN002
+            if model is Account:
+                return SimpleNamespace(tg_username="owner", display_name="你心里已经有答案了", tg_user_id=999)
+            return None
+
+    redis = _MemoryRedis()
+    rule = {
+        "id": "ten-half-paid",
+        "enabled": False,
+        "chat_ids": [-100123],
+        "trigger_mode": "keyword",
+        "trigger_texts": ["转账成功"],
+        "module_start_keywords": ["10d"],
+        "receiver_text": "你心里已经有答案了",
+        "amount": 1000,
+        "amount_match_mode": "eq",
+        "action": "module",
+        "module_key": "ten_half",
+        "module_action": "start_ten_half",
+        "module_session_scope": "chat",
+        "module_config": {"bet": 1000, "max_players": 5},
+    }
+    await redis.set(
+        account_bot_runtime._interaction_session_key(1, rule, -100123, None),
+        json.dumps(
+            {
+                "account_id": 1,
+                "chat_id": -100123,
+                "rule_id": "ten-half-paid",
+                "module_key": "ten_half",
+                "entry_key": "start_ten_half",
+                "started_by_user_id": 111,
+                "event_type": "keyword",
+            },
+            ensure_ascii=False,
+        ),
+    )
+    await redis.set(account_bot_runtime._rule_state_key(1, rule, -100123), "closed")
+    run_entry = AsyncMock(return_value=(True, None, [{"type": "send_message", "text": "加入成功"}]))
+    send = AsyncMock()
+    monkeypatch.setattr(account_bot_runtime, "AsyncSessionLocal", lambda: _DB())
+    monkeypatch.setattr(account_bot_runtime, "get_redis", lambda: redis)
+    monkeypatch.setattr(account_bot_runtime.audit, "write", AsyncMock())
+    monkeypatch.setattr(account_bot_runtime, "_run_worker_interaction_entry", run_entry)
+    monkeypatch.setattr(account_bot_service, "send_message", send)
+    monkeypatch.setattr(
+        account_bot_service,
+        "declared_module_entry_events",
+        lambda module_key, entry_key: ["payment_confirmed", "keyword", "message", "callback_query"]
+        if (module_key, entry_key) == ("ten_half", "start_ten_half")
+        else [],
+    )
+    monkeypatch.setattr(
+        account_bot_service,
+        "get_transfer_notice_config",
+        AsyncMock(
+            return_value={
+                "enabled": True,
+                "trusted_bot_id": 456,
+                "rules": [rule],
+            }
+        ),
+    )
+
+    await account_bot_runtime._handle_interaction_update(
+        1,
+        "bbot-token",
+        {
+            "update_id": 8,
+            "message": {
+                "message_id": 80,
+                "text": "转账成功\n你心里没点数？ 射出 100\n你心里已经有答案了 接收 100",
+                "from": {"id": 456, "is_bot": True, "first_name": "Abot"},
+                "chat": {"id": -100123, "type": "supergroup"},
+            },
+        },
+    )
+
+    run_entry.assert_awaited_once()
+    assert run_entry.await_args.kwargs["plugin_key"] == "ten_half"
+    assert run_entry.await_args.kwargs["entry_key"] == "start_ten_half"
+    payload = run_entry.await_args.kwargs["payload"]
+    assert payload["event_type"] == "payment_confirmed"
+    assert payload["payment"]["amount"] == 100
+    assert payload["module_config"]["bet"] == 1000
+    assert send.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_parsed_transfer_notice_without_trigger_text_matches_active_paid_pool_session(monkeypatch) -> None:
+    class _DB:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+        async def commit(self):
+            return None
+
+        async def get(self, model, *_args):  # noqa: ANN002
+            if model is Account:
+                return SimpleNamespace(tg_username="owner", display_name="你心里已经有答案了", tg_user_id=999)
+            return None
+
+    redis = _MemoryRedis()
+    rule = {
+        "id": "ten-half-paid",
+        "enabled": True,
+        "chat_ids": [-100123],
+        "trigger_mode": "both",
+        "trigger_texts": ["转账成功"],
+        "module_start_keywords": ["10d"],
+        "receiver_text": "你心里已经有答案了",
+        "amount": 1000,
+        "amount_match_mode": "eq",
+        "action": "module",
+        "module_key": "ten_half",
+        "module_action": "start_ten_half",
+        "module_session_scope": "chat",
+        "module_config": {"bet": 1000, "max_players": 5},
+    }
+    await redis.set(
+        account_bot_runtime._interaction_session_key(1, rule, -100123, None),
+        json.dumps(
+            {
+                "account_id": 1,
+                "chat_id": -100123,
+                "rule_id": "ten-half-paid",
+                "module_key": "ten_half",
+                "entry_key": "start_ten_half",
+                "started_by_user_id": 111,
+                "event_type": "command",
+            },
+            ensure_ascii=False,
+        ),
+    )
+    run_entry = AsyncMock(return_value=(True, None, [{"type": "send_message", "text": "加入成功"}]))
+    send = AsyncMock()
+    monkeypatch.setattr(account_bot_runtime, "AsyncSessionLocal", lambda: _DB())
+    monkeypatch.setattr(account_bot_runtime, "get_redis", lambda: redis)
+    monkeypatch.setattr(account_bot_runtime.audit, "write", AsyncMock())
+    monkeypatch.setattr(account_bot_runtime, "_run_worker_interaction_entry", run_entry)
+    monkeypatch.setattr(account_bot_service, "send_message", send)
+    monkeypatch.setattr(
+        account_bot_service,
+        "declared_module_entry_events",
+        lambda module_key, entry_key: ["payment_confirmed", "keyword", "message", "callback_query"]
+        if (module_key, entry_key) == ("ten_half", "start_ten_half")
+        else [],
+    )
+    monkeypatch.setattr(
+        account_bot_service,
+        "get_transfer_notice_config",
+        AsyncMock(
+            return_value={
+                "enabled": True,
+                "trusted_bot_id": 456,
+                "transfer_bot_id": 456,
+                "rules": [rule],
+            }
+        ),
+    )
+
+    await account_bot_runtime._handle_interaction_update(
+        1,
+        "bbot-token",
+        {
+            "update_id": 9,
+            "message": {
+                "message_id": 90,
+                "text": "你心里没点数？ 射出 6666 蝌蚪\n你心里已经有答案了 接收 6666 蝌蚪",
+                "from": {"id": 456, "is_bot": True, "first_name": "Abot"},
+                "chat": {"id": -100123, "type": "supergroup"},
+            },
+        },
+    )
+
+    run_entry.assert_awaited_once()
+    assert run_entry.await_args.kwargs["plugin_key"] == "ten_half"
+    assert run_entry.await_args.kwargs["entry_key"] == "start_ten_half"
+    payload = run_entry.await_args.kwargs["payload"]
+    assert payload["event_type"] == "payment_confirmed"
+    assert payload["payment"]["amount"] == 6666
+    assert payload["module_config"]["bet"] == 1000
+    assert send.await_count == 1
 
 
 @pytest.mark.asyncio

@@ -49,6 +49,7 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 
 export const MASKED_SECRET_PLACEHOLDER = "••••••••••••••••";
+const EMPTY_CONFIG: Record<string, unknown> = {};
 
 export interface ConfigField {
   key: string;
@@ -121,8 +122,10 @@ interface ConfigDialogProps {
 
 export function ConfigDialog({
   open, onOpenChange, pluginKey, pluginName, schema, accountName,
-  accountId, globalConfig = EMPTY_CONFIG, accountConfig = EMPTY_CONFIG, onSave,
+accountId, globalConfig, accountConfig, onSave,
 }: ConfigDialogProps) {
+  const effectiveGlobalConfig = globalConfig ?? EMPTY_CONFIG;
+  const effectiveAccountConfig = accountConfig ?? EMPTY_CONFIG;
   const [globalVals, setGlobalVals] = useState<Record<string, unknown>>({});
   const [accountVals, setAccountVals] = useState<Record<string, unknown>>({});
   const [saving, setSaving] = useState(false);
@@ -142,8 +145,8 @@ export function ConfigDialog({
   const handleSave = useCallback(async () => {
     if (!onSave) return;
     const properties = ((schema as ConfigSchema | null)?.properties ?? {}) as Record<string, ConfigField>;
-    const editableGlobalVals = withoutReadOnlyValues(globalVals, properties, globalConfig);
-    const editableAccountVals = withoutReadOnlyValues(accountVals, properties, accountConfig);
+    const editableGlobalVals = withoutReadOnlyValues(globalVals, properties, effectiveGlobalConfig);
+    const editableAccountVals = withoutReadOnlyValues(accountVals, properties, effectiveAccountConfig);
     setSaving(true);
     try {
       await onSave(editableGlobalVals, editableAccountVals);
@@ -154,17 +157,17 @@ export function ConfigDialog({
     } finally {
       setSaving(false);
     }
-  }, [onSave, schema, globalVals, accountVals, onOpenChange]);
+  }, [onSave, schema, globalVals, accountVals, effectiveGlobalConfig, effectiveAccountConfig, onOpenChange]);
 
   // 初始化配置值
   useEffect(() => {
     if (open && schema && typeof schema === "object" && "properties" in schema) {
       const s = schema as ConfigSchema;
-      const { globalVals: gv, accountVals: av } = buildScopedConfigValues(s, globalConfig, accountConfig);
+      const { globalVals: gv, accountVals: av } = buildScopedConfigValues(s, effectiveGlobalConfig, effectiveAccountConfig);
       setGlobalVals(gv);
       setAccountVals(av);
     }
-  }, [open, schema, globalConfig, accountConfig]);
+  }, [open, schema, effectiveGlobalConfig, effectiveAccountConfig]);
 
   const s = schema as ConfigSchema | null;
   if (!s?.properties || Object.keys(s.properties).length === 0) {
@@ -549,7 +552,7 @@ function FieldInput({
   fk,
   field,
   value,
-  values = {},
+  values = EMPTY_CONFIG,
   llmProviders,
   llmProvidersLoading = false,
   configActions = [],
@@ -742,6 +745,40 @@ function FieldInput({
           <p className="text-xs text-muted-foreground">范围: {field.minimum} — {field.maximum}</p>
         )}
       </div>
+    );
+  }
+
+  if (field.type === "object") {
+    const properties = field.properties ?? {};
+    const objectValue = normalizeConfigObject(value);
+    if (Object.keys(properties).length > 0) {
+      return (
+        <div className="space-y-2">
+          <div className="space-y-1.5">
+            <Label>{label}</Label>
+            {description && <p className="text-xs text-muted-foreground">{description}</p>}
+          </div>
+          <div className="rounded-md border bg-background p-3">
+            <ConfigObjectEditor
+              prefix={fk}
+              properties={properties}
+              values={objectValue}
+              llmProviders={llmProviders}
+              llmProvidersLoading={llmProvidersLoading}
+              onChange={(key, nextValue) => onChange({ ...objectValue, [key]: nextValue })}
+            />
+          </div>
+        </div>
+      );
+    }
+    return (
+      <JsonObjectField
+        inputId={inputId}
+        label={label}
+        description={description}
+        value={value}
+        onChange={onChange}
+      />
     );
   }
 
@@ -1247,6 +1284,57 @@ function JsonArrayField({
   );
 }
 
+function JsonObjectField({
+  inputId,
+  label,
+  description,
+  value,
+  onChange,
+}: {
+  inputId: string;
+  label: string;
+  description?: string;
+  value: unknown;
+  onChange: (v: unknown) => void;
+}) {
+  const serializedValue = stringifyConfigObject(value);
+  const [text, setText] = useState(serializedValue);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    setText((prev) => (prev === serializedValue ? prev : serializedValue));
+    setError("");
+  }, [serializedValue]);
+
+  return (
+    <div className="space-y-1.5">
+      <Label htmlFor={inputId}>{label}</Label>
+      {description && <p className="text-xs text-muted-foreground">{description}</p>}
+      <Textarea
+        id={inputId}
+        value={text}
+        rows={6}
+        onChange={(event) => {
+          const next = event.target.value;
+          setText(next);
+          try {
+            const parsed = JSON.parse(next);
+            if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+              setError("请输入 JSON 对象。");
+              return;
+            }
+            setError("");
+            onChange(parsed);
+          } catch {
+            setError("JSON 尚未解析成功，保存前请修正。");
+          }
+        }}
+      />
+      {error ? <p className="text-xs text-destructive">{error}</p> : null}
+    </div>
+  );
+}
+
 function ConfigActionButtons({
   actions,
   onRun,
@@ -1350,6 +1438,27 @@ function configActionInputSchema(action: ConfigAction): ConfigSchema | null {
     return null;
   }
   return schema;
+}
+
+function normalizeConfigObject(value: unknown): Record<string, unknown> {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    return { ...(value as Record<string, unknown>) };
+  }
+  if (typeof value === "string" && value.trim()) {
+    try {
+      const parsed = JSON.parse(value);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        return parsed as Record<string, unknown>;
+      }
+    } catch {
+      return {};
+    }
+  }
+  return {};
+}
+
+function stringifyConfigObject(value: unknown): string {
+  return JSON.stringify(normalizeConfigObject(value), null, 2);
 }
 
 function normalizeObjectArray(value: unknown): Record<string, unknown>[] {

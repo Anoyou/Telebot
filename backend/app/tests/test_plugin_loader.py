@@ -1725,6 +1725,231 @@ async def test_userbot_event_bus_delivery_switch_records_disabled_and_uses_legac
         _REGISTRY.pop("_test_delivery_off_dispatch", None)
 
 
+@pytest.mark.asyncio
+async def test_direct_passthrough_requires_account_config_opt_in(monkeypatch) -> None:
+    from app.worker.plugins.base import _REGISTRY, register
+
+    direct_calls: list[str] = []
+    legacy_calls: list[str] = []
+
+    @register
+    class _DirectNeedsConfigPlugin(Plugin):
+        key = "_test_direct_needs_config"
+        display_name = "直通二次确认测试"
+        owner_only = False
+
+        async def on_direct_message(self, ctx: PluginContext, event: Any) -> None:
+            direct_calls.append(str(getattr(event, "raw_text", "")))
+
+        async def on_message(self, ctx: PluginContext, event: Any) -> None:
+            legacy_calls.append(str(getattr(event, "raw_text", "")))
+
+    _DirectNeedsConfigPlugin._manifest = Manifest(
+        key="_test_direct_needs_config",
+        display_name="直通二次确认测试",
+        capabilities={
+            "telegram_direct_passthrough": {
+                "enabled": True,
+                "reason": "测试二次确认开关",
+                "sources": ["userbot"],
+                "directions": ["incoming"],
+            }
+        },
+    )
+
+    class _Event:
+        raw_text = "hello direct disabled"
+        text = "hello direct disabled"
+        chat_id = -1001
+        sender_id = 42
+        id = 188
+        is_private = False
+        is_group = True
+        is_channel = False
+
+        async def get_chat(self):
+            return None
+
+    fake_db = _FakeDB(
+        accounts={13: _FakeAcc(id=13)},
+        humanize={13: None},
+        afs=[_FakeAF(account_id=13, feature_key="_test_direct_needs_config", enabled=True, config={})],
+        rules=[],
+        features={
+            "_test_direct_needs_config": _FakeFeature(
+                key="_test_direct_needs_config",
+                manifest={
+                    "config_schema": {
+                        "type": "object",
+                        "properties": {
+                            "direct_passthrough": {
+                                "type": "object",
+                                "default": {"enabled": True},
+                            }
+                        },
+                    }
+                },
+            )
+        },
+        plugin_global_configs={
+            "_test_direct_needs_config": _FakePluginGlobalConfig(
+                plugin_key="_test_direct_needs_config",
+                config={"direct_passthrough": {"enabled": True}},
+            )
+        },
+    )
+    trace = SimpleNamespace(trace_id="evt_direct_disabled_trace")
+    monkeypatch.setattr(loader_mod, "AsyncSessionLocal", lambda: _fake_session_factory(fake_db))
+    monkeypatch.setattr(loader_mod, "_load_log_incoming_messages_setting", AsyncMock(return_value=False))
+    monkeypatch.setattr(loader_mod, "_load_event_framework_flags", AsyncMock(return_value={
+        "trace_enabled": True,
+        "event_bus_delivery_enabled": True,
+    }))
+    start_trace = AsyncMock(return_value=trace)
+    monkeypatch.setattr(loader_mod, "start_trace", start_trace)
+    monkeypatch.setattr(loader_mod, "record_span", AsyncMock())
+    monkeypatch.setattr(loader_mod, "finish_trace", AsyncMock())
+    monkeypatch.setattr(loader_mod, "update_plugin_runtime_status", AsyncMock())
+
+    captured: list[Any] = []
+
+    def _on(_filter):
+        def _wrap(fn):
+            captured.append(fn)
+            return fn
+
+        return _wrap
+
+    client = MagicMock()
+    client.on = _on
+    paused = asyncio.Event()
+    paused.set()
+
+    try:
+        await load_plugins_for_account(client, account_id=13, paused=paused, redis=_FakeRedis())
+        incoming_dispatch = captured[-1]
+        await incoming_dispatch(_Event())
+
+        assert direct_calls == []
+        assert legacy_calls == ["hello direct disabled"]
+        start_trace.assert_awaited_once()
+    finally:
+        loader_mod._STATES.pop(13, None)
+        _REGISTRY.pop("_test_direct_needs_config", None)
+
+
+@pytest.mark.asyncio
+async def test_direct_passthrough_consumes_raw_event_before_event_bus(monkeypatch) -> None:
+    from app.worker.plugins.base import _REGISTRY, register
+
+    direct_events: list[Any] = []
+    legacy_calls: list[str] = []
+
+    @register
+    class _DirectEnabledPlugin(Plugin):
+        key = "_test_direct_enabled"
+        display_name = "直通启用测试"
+        owner_only = False
+
+        async def on_direct_message(self, ctx: PluginContext, event: Any) -> None:
+            direct_events.append(event)
+
+        async def on_message(self, ctx: PluginContext, event: Any) -> None:
+            legacy_calls.append(str(getattr(event, "raw_text", "")))
+
+        async def on_event(self, ctx: PluginContext, payload: dict[str, Any]) -> list[dict[str, Any]]:
+            legacy_calls.append("event_bus")
+            return []
+
+    _DirectEnabledPlugin._manifest = Manifest(
+        key="_test_direct_enabled",
+        display_name="直通启用测试",
+        event_subscriptions=[
+            {
+                "source": ["userbot"],
+                "events": ["message"],
+                "scope": "all_allowed_chats",
+            }
+        ],
+        capabilities={
+            "telegram_direct_passthrough": {
+                "enabled": True,
+                "reason": "测试低延时直通",
+                "sources": ["userbot"],
+                "directions": ["incoming"],
+            }
+        },
+    )
+
+    class _Event:
+        raw_text = "hello direct enabled"
+        text = "hello direct enabled"
+        chat_id = -1001
+        sender_id = 42
+        id = 189
+        is_private = False
+        is_group = True
+        is_channel = False
+
+        async def get_chat(self):
+            return None
+
+    fake_db = _FakeDB(
+        accounts={14: _FakeAcc(id=14)},
+        humanize={14: None},
+        afs=[
+            _FakeAF(
+                account_id=14,
+                feature_key="_test_direct_enabled",
+                enabled=True,
+                config={"direct_passthrough": {"enabled": True}},
+            )
+        ],
+        rules=[],
+    )
+    monkeypatch.setattr(loader_mod, "AsyncSessionLocal", lambda: _fake_session_factory(fake_db))
+    monkeypatch.setattr(loader_mod, "_load_log_incoming_messages_setting", AsyncMock(return_value=False))
+    start_trace = AsyncMock()
+    monkeypatch.setattr(loader_mod, "start_trace", start_trace)
+    finish_trace = AsyncMock()
+    monkeypatch.setattr(loader_mod, "finish_trace", finish_trace)
+    runtime_status = AsyncMock()
+    monkeypatch.setattr(loader_mod, "update_plugin_runtime_status", runtime_status)
+
+    captured: list[Any] = []
+
+    def _on(_filter):
+        def _wrap(fn):
+            captured.append(fn)
+            return fn
+
+        return _wrap
+
+    client = MagicMock()
+    client.on = _on
+    paused = asyncio.Event()
+    paused.set()
+    event = _Event()
+
+    try:
+        await load_plugins_for_account(client, account_id=14, paused=paused, redis=_FakeRedis())
+        incoming_dispatch = captured[-1]
+        await incoming_dispatch(event)
+
+        assert direct_events == [event]
+        assert legacy_calls == []
+        start_trace.assert_not_awaited()
+        finish_trace.assert_not_awaited()
+        assert any(
+            call.kwargs.get("plugin_key") == "_test_direct_enabled"
+            and call.kwargs.get("last_invocation_status") == loader_mod.TRACE_STATUS_OK
+            for call in runtime_status.await_args_list
+        )
+    finally:
+        loader_mod._STATES.pop(14, None)
+        _REGISTRY.pop("_test_direct_enabled", None)
+
+
 def test_userbot_native_raw_boolean_true_is_not_explicit_capability() -> None:
     class _Plugin(Plugin):
         key = "_test_native_raw_bool"
@@ -1772,6 +1997,68 @@ async def test_plugin_command_ctx_client_send_message_records_action(monkeypatch
     record_action.assert_awaited_once()
     assert record_action.await_args.args[1]["type"] == "send_message"
     assert record_action.await_args.kwargs["actual_send_via"] == "userbot_reply"
+
+
+@pytest.mark.asyncio
+async def test_plugin_command_ctx_messages_apply_records_trace(monkeypatch) -> None:
+    class _DB:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+    rule = {
+        "id": "ten-half-paid",
+        "name": "十点半",
+        "action": "module",
+        "module_key": "ten_half",
+        "module_action": "start_ten_half",
+        "module_session_scope": "chat",
+        "participant_policy": "paid_pool",
+        "chat_ids": [-100123],
+        "valid_seconds": 600,
+    }
+    record_action = AsyncMock()
+    monkeypatch.setattr(loader_mod, "record_action", record_action)
+    monkeypatch.setattr(loader_mod, "AsyncSessionLocal", lambda: _DB())
+    monkeypatch.setattr(
+        loader_mod.account_bot_service,
+        "get_transfer_notice_config",
+        AsyncMock(return_value={"enabled": True, "rules": [rule]}),
+    )
+    state = loader_mod._AccountState(1)
+    state.redis = _FakeRedis()
+    ctx = PluginContext(
+        account_id=1,
+        feature_key="ten_half",
+        client=MagicMock(),
+        messages=loader_mod._LiveMessageOps(state, plugin_key="ten_half"),
+    )
+
+    async def _handler(client, event, args, account_id, ctx):  # noqa: ANN001
+        await ctx.messages.apply(
+            [
+                {
+                    "type": "start_session",
+                    "chat_id": -100123,
+                    "entry_key": "start_ten_half",
+                    "started_by_user_id": 999,
+                }
+            ],
+            entry_key="start_ten_half",
+        )
+
+    wrapped = loader_mod._wrap_cmd(_handler, ctx)
+    event = SimpleNamespace(trace_id="evt_command_session_trace", chat_id=-100123, message=SimpleNamespace(id=7))
+
+    await wrapped(ctx.client, event, ["100"], 1)
+
+    record_action.assert_awaited_once()
+    assert record_action.await_args.args[0]["trace_id"] == "evt_command_session_trace"
+    assert record_action.await_args.args[1]["type"] == "start_session"
+    assert record_action.await_args.args[1]["context"]["entry_key"] == "start_ten_half"
+    assert record_action.await_args.kwargs["actual_send_via"] == "interaction_session"
 
 
 @pytest.mark.asyncio

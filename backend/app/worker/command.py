@@ -120,6 +120,8 @@ class CommandContext:
     - ``command_prefix``  当前生效的命令前缀（``,`` / ``-`` / ``/`` 等）；
                           系统设置改了 → 主进程发 IPC 让 ``runtime`` 重拉，再写到这里
                           → handler 每次匹配时从 ctx 取，所以前缀热加载对已注册 handler 也生效
+    - ``command_prefix_required`` 账号本人 outgoing 命令是否必须带系统前缀；关闭后只对
+                          当前账号本人消息启用裸命令，incoming 群成员消息仍不会触发 userbot 命令
     """
 
     account_id: int
@@ -127,6 +129,7 @@ class CommandContext:
     providers: dict[int, dict[str, Any]]
     ai_enabled: bool = True
     command_prefix: str = ","
+    command_prefix_required: bool = True
     aliases: dict[str, str] = None  # type: ignore[assignment]  # {alias: target}
     sudo_users: dict[int, dict[str, Any]] = None  # type: ignore[assignment]  # {tg_user_id: config}
     sudo_prefix: str = "."
@@ -1655,6 +1658,22 @@ def _command_dispatch_target(cmd: str, args_raw: str) -> tuple[str, str | None]:
     return "unknown", None
 
 
+def _has_userbot_command_target(cmd: str, args_raw: str = "") -> bool:
+    target_type, _plugin_key = _command_dispatch_target(cmd, args_raw)
+    return target_type != "unknown"
+
+
+def _split_command_parts(text: str) -> tuple[str, str] | None:
+    raw = str(text or "").strip()
+    if not raw:
+        return None
+    parts = raw.split(None, 1)
+    cmd = parts[0].strip()
+    if not cmd:
+        return None
+    return cmd, (parts[1].strip() if len(parts) > 1 else "")
+
+
 def _command_event_bus_decisions(
     event_payload: dict[str, Any],
     *,
@@ -2095,12 +2114,24 @@ def make_command_handler(client: TelegramClient, account_id: int, prefix: str | 
         p = current_command_prefix(fallback=fallback_prefix)
         pattern = re.compile(rf"^{re.escape(p)}(\S+)(?:\s+(.*))?$", re.S)
         m = pattern.match(text)
-        if not m:
-            return
-        cmd = m.group(1)
-        args_raw = (m.group(2) or "").strip()
-        if not _looks_like_command_name(cmd, prefix=p):
-            return
+        help_prefix = p
+        if m:
+            cmd = m.group(1)
+            args_raw = (m.group(2) or "").strip()
+            if not _looks_like_command_name(cmd, prefix=p):
+                return
+        else:
+            if _ctx is None or _ctx.command_prefix_required:
+                return
+            bare_parts = _split_command_parts(text)
+            if bare_parts is None:
+                return
+            cmd, args_raw = bare_parts
+            if not _looks_like_command_name(cmd, prefix=p):
+                return
+            if not _has_userbot_command_target(cmd, args_raw):
+                return
+            help_prefix = ""
         if await should_skip_outgoing_command_echo(client, event, text, args_raw):
             log.info(
                 "跳过疑似抽奖/接龙回声命令 account=%s chat_id=%s command=%s",
@@ -2115,7 +2146,7 @@ def make_command_handler(client: TelegramClient, account_id: int, prefix: str | 
             cmd,
             args_raw,
             account_id=account_id,
-            help_prefix=p,
+            help_prefix=help_prefix,
         )
 
     @client.on(events.NewMessage(incoming=True))

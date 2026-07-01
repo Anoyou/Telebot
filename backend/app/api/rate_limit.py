@@ -622,6 +622,7 @@ async def get_system_settings(db: DBSession, _user: CurrentUser) -> dict[str, An
     llm_val = await _get_setting(db, "llm_limits", {})
     log_val = await _get_setting(db, "log_retention", {})
     sudo_val = await _get_setting(db, "sudo_enabled", {"enabled": False})
+    prefix_required_val = await _get_setting(db, "command_prefix_required", {"enabled": True})
     echo_guard_val = await _get_setting(db, "command_echo_guard_previous_messages", None)
     if echo_guard_val is None:
         from ..settings import settings as app_settings
@@ -649,6 +650,11 @@ async def get_system_settings(db: DBSession, _user: CurrentUser) -> dict[str, An
             "interval_minutes": max(30, min(10080, remote_update_interval)),
         },
         "sudo_enabled": bool(sudo_val.get("enabled", False)) if isinstance(sudo_val, dict) else bool(sudo_val),
+        "command_prefix_required": (
+            bool(prefix_required_val.get("enabled", True))
+            if isinstance(prefix_required_val, dict)
+            else bool(prefix_required_val)
+        ),
         "ai_enabled": normalize_ai_enabled(ai_enabled_val),
         "command_echo_guard_previous_messages": _normalize_command_echo_guard_limit(echo_guard_source),
         "llm_limits": {
@@ -723,6 +729,7 @@ class _SettingsPatch(BaseModel):
     timezone: str | None = None
     ai_enabled: bool | None = None
     sudo_enabled: bool | None = None
+    command_prefix_required: bool | None = None
     command_echo_guard_previous_messages: int | None = None
     remote_plugin_update_check: _RemotePluginUpdateCheckPatch | None = None
     llm_limits: _LLMLimitsPatch | None = None
@@ -758,6 +765,17 @@ async def patch_system_settings(
         enabled = bool(payload.sudo_enabled)
         await _set_setting(db, "sudo_enabled", {"enabled": enabled})
         await _audit(db, user.id, "set_sudo_enabled", target="system", detail={"enabled": enabled})
+        await _broadcast_reload()
+    if payload.command_prefix_required is not None:
+        enabled = bool(payload.command_prefix_required)
+        await _set_setting(db, "command_prefix_required", {"enabled": enabled})
+        await _audit(
+            db,
+            user.id,
+            "set_command_prefix_required",
+            target="system",
+            detail={"enabled": enabled},
+        )
         await _broadcast_reload()
     if payload.remote_plugin_update_check is not None:
         raw = payload.remote_plugin_update_check
