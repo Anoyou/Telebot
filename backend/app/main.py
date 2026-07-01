@@ -27,11 +27,19 @@ from .api import notify_bots as notify_bots_api
 from .api import proxies as proxies_api
 from .api import rate_limit as rate_limit_api
 from .api import sudo as sudo_api
-from .services import account_bot_runtime, interaction_bot_runtime, notify_service, remote_plugin_service
+from .logging_redaction import install_sensitive_log_filter
+from .services import (
+    account_bot_runtime,
+    event_trace,
+    interaction_bot_runtime,
+    notify_service,
+    remote_plugin_service,
+)
 from .services.login_service import cleanup_expired_loop
 from .settings import settings
 
 logging.basicConfig(level=getattr(logging, settings.log_level.upper(), logging.INFO))
+install_sensitive_log_filter()
 
 # Postgres advisory lock key（固定值，避免不同进程 key 漂移）
 _MIGRATION_ADVISORY_LOCK_KEY = 730140129
@@ -132,6 +140,10 @@ async def lifespan(app: FastAPI):
     #    能看到 alembic.in_sync=False 的明确信号）；只在日志里 ERROR 醒目提示。
     if settings.auto_migrate_on_startup:
         await asyncio.to_thread(_run_alembic_upgrade)
+    try:
+        await event_trace.refresh_trace_settings()
+    except Exception:  # noqa: BLE001
+        logging.exception("刷新 Trace 写入配置失败，使用默认配置继续启动")
 
     # 1) 启动登录会话清理后台任务（每 60s 扫一次）
     cleanup_task = asyncio.create_task(cleanup_expired_loop())
@@ -197,6 +209,10 @@ async def lifespan(app: FastAPI):
                 await stop_all_workers()
             except Exception:  # noqa: BLE001
                 logging.exception("stop_all_workers 失败")
+        try:
+            await event_trace.stop_trace_writer()
+        except Exception:  # noqa: BLE001
+            logging.exception("停止 Trace 后台写入器失败")
 
 
 app = FastAPI(title="TelePilot", version=__version__, lifespan=lifespan)

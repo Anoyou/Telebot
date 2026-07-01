@@ -1,7 +1,8 @@
-"""交互 Bot polling runtime 入口。
+"""交互 Bot polling runtime 兼容外观。
 
-当前先把生命周期/API 入口从账号管理 Bot runtime 中分离出来；底层处理逻辑保留
-在 ``account_bot_runtime`` 的兼容实现里，后续可继续物理迁移私有函数。
+生命周期入口保持在本模块；交互框架的标准事件、动作契约与受控发送执行器
+已经下沉到 ``app.services.interaction``。历史私有入口仍委托给
+``account_bot_runtime``，用于保持 API 与测试兼容。
 """
 
 from __future__ import annotations

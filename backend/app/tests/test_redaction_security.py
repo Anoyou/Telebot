@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -8,6 +9,7 @@ import pytest
 
 from app.api.features import _preserve_existing_sensitive_values, _sanitize_config
 from app.api.logs import RuntimeLogItem, list_audit_logs
+from app.logging_redaction import SensitiveDataLogFilter
 from app.services import audit
 from app.services.redactor import redact_text, redact_value
 
@@ -23,7 +25,12 @@ def test_redactor_masks_text_and_nested_fields() -> None:
     assert out["nested"]["api_key"] == "***"
     assert out["proxy_url"] == "http://***:***@example.com:8080"
     assert redact_text("Bearer abcdefghijklmnop") == "Bearer ***"
+    assert redact_text("Authorization: Basic eC1hY2Nlc3MtdG9rZW46Z2hwX3NlY3JldDEyMw==") == "Authorization: Basic ***"
     assert redact_text("socks5://user:pass@127.0.0.1:1080") == "socks5://***:***@127.0.0.1:1080"
+    bot_url = "https://api.telegram.org/bot123456:secret-token/getUpdates"
+    redacted_url = redact_text(bot_url)
+    assert "123456:secret-token" not in redacted_url
+    assert redacted_url == "https://api.telegram.org/bot***/getUpdates"
 
 
 def test_redactor_preserves_non_secret_token_counters() -> None:
@@ -41,6 +48,22 @@ def test_redactor_preserves_non_secret_token_counters() -> None:
     assert out["token_budget"] == 50
     assert out["bot_token"] == "***"
     assert out["accessToken"] == "***"
+
+
+def test_log_filter_redacts_telegram_bot_url_args() -> None:
+    record = logging.LogRecord(
+        name="httpx",
+        level=logging.INFO,
+        pathname=__file__,
+        lineno=1,
+        msg='HTTP Request: %s %s "HTTP/1.1 200 OK"',
+        args=("POST", "https://api.telegram.org/bot123456:secret-token/getUpdates"),
+        exc_info=None,
+    )
+    assert SensitiveDataLogFilter().filter(record)
+    rendered = record.getMessage()
+    assert "123456:secret-token" not in rendered
+    assert "https://api.telegram.org/bot***/getUpdates" in rendered
 
 
 @pytest.mark.asyncio

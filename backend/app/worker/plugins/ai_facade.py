@@ -19,6 +19,7 @@ from ...db.base import AsyncSessionLocal
 from ...db.models.account import Proxy
 from ...db.models.command import LLMProvider
 from ...services import plugin_ai_quota
+from ...services.ai_feature import is_ai_enabled
 from ...services.llm_client import LLMCallFailed, LLMError, LLMResult
 from ...services.llm_dto import LLMProviderDTO
 from ...services.llm_invoke import invoke as invoke_ai_runtime
@@ -27,7 +28,7 @@ from ...settings import settings
 ProviderLoader = Callable[[], Awaitable[Mapping[int, LLMProviderDTO]]]
 
 DEFAULT_PLUGIN_AI_MAX_TOKENS = 4096
-DEFAULT_PLUGIN_AI_TIMEOUT_SECONDS = 60
+DEFAULT_PLUGIN_AI_TIMEOUT_SECONDS = 600
 _SAFE_MODEL_KEYS = frozenset(
     {
         "id",
@@ -222,6 +223,8 @@ class PluginAI:
         raise NotImplementedError("ctx.ai.stream_complete 尚未开放；请使用 complete()")
 
     async def _load_providers(self) -> dict[int, LLMProviderDTO]:
+        if not await is_ai_enabled():
+            raise AIUnavailableError("AI 能力已在系统设置中关闭")
         providers = dict(await self._provider_loader())
         if not providers:
             raise AIUnavailableError("没有可用的 LLM provider")

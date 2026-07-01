@@ -1,5 +1,7 @@
 // 与后端 schema 对齐的关键类型（手写版）。OpenAPI 生成的 schema.ts 后续替换。
 
+import type { PluginCapabilities, PluginEventSubscription } from "@/types/pluginContract";
+
 // ===================== 鉴权 =====================
 export interface LoginRequest {
   username: string;
@@ -215,6 +217,7 @@ export interface AccountBotInteractionConfig {
   interaction_runtime_status?: "running" | "stopped";
   interaction_last_update_id?: number | null;
   interaction_last_error?: string | null;
+  interaction_debug?: AccountBotInteractionDebugSnapshot;
   trusted_bot_id?: number | null;
   transfer_bot_id?: number | null;
   transfer_bot_token?: string | null;
@@ -244,6 +247,7 @@ export interface AccountBotInteractionConfig {
   status_commands?: string[];
   query_commands?: string[];
   query_response_template?: string;
+  query_item_template?: string;
   query_empty_message?: string;
   disabled_message?: string | null;
   valid_seconds?: number | null;
@@ -251,6 +255,19 @@ export interface AccountBotInteractionConfig {
   response_template: string;
   transfer_notice_template: string;
   rules?: AccountBotInteractionRule[];
+}
+
+export interface AccountBotInteractionDebugSnapshot {
+  ts?: number | null;
+  stage?: string | null;
+  chat_id?: number | null;
+  message_id?: number | null;
+  update_id?: number | null;
+  payload?: Record<string, unknown>;
+  actions?: Record<string, unknown>[];
+  guarded_actions?: Record<string, unknown>[];
+  warnings?: Record<string, unknown>[];
+  error?: string | null;
 }
 
 export interface AccountBotInteractionSettlement {
@@ -298,6 +315,7 @@ export type AccountBotInteractionConfigUpdate = Pick<
   | "status_commands"
   | "query_commands"
   | "query_response_template"
+  | "query_item_template"
   | "query_empty_message"
   | "disabled_message"
   | "valid_seconds"
@@ -438,7 +456,10 @@ export interface FeatureInteractionEntry {
   description?: string | null;
   interaction_profile?: "session_game" | "challenge_game" | "reward_pool" | "utility_trigger" | string | null;
   launch_mode?: "bridge" | "direct" | "hybrid" | string | null;
-  events?: string[];
+  dispatch_modes?: Array<"admin_command" | "public_keyword" | string>;
+  message_channels?: Partial<Record<"admin_command" | "public_keyword" | string, string | string[] | { prefer?: string[]; fallback?: boolean }>>;
+  money_channel?: "userbot_reply" | string | null;
+  events?: Array<"payment_confirmed" | "keyword" | "message" | "callback_query" | "session_close" | "all_messages" | string>;
   session_scope?: "chat" | "user" | "none" | string | null;
   participant_policy?: "open_race" | "solo_owner" | "paid_pool" | "notify_only" | string | null;
   preserve_command_trigger?: boolean | null;
@@ -462,10 +483,15 @@ export interface FeatureInfo {
   orphan?: boolean;
   signature_ok?: boolean | null;
   version?: string | null;
+  usage?: string | null;
   config_schema?: Record<string, unknown> | null;
+  config_actions?: Record<string, unknown>[];
   category?: FeatureCategory | string | null;
   interaction_profile?: "session_game" | "challenge_game" | "reward_pool" | "utility_trigger" | string | null;
   interaction_entries?: FeatureInteractionEntry[];
+  event_subscriptions?: PluginEventSubscription[];
+  capabilities?: PluginCapabilities;
+  permissions?: string[];
   experimental: boolean;
   update_available?: boolean;
   latest_version?: string | null;
@@ -756,10 +782,126 @@ export interface AuditLogItem {
   detail?: Record<string, unknown> | null;
 }
 
+export interface NativeRawMeta {
+  enabled?: boolean;
+  source?: string | null;
+  driver?: string | null;
+  object?: string | null;
+  stored_in_trace?: boolean;
+  size_bytes?: number;
+  reason_code?: string | null;
+  [key: string]: unknown;
+}
+
+export interface EventSpanItem {
+  id: number;
+  span_id: string;
+  trace_id: string;
+  parent_span_id?: string | null;
+  phase: string;
+  component?: string | null;
+  plugin_key?: string | null;
+  entry_key?: string | null;
+  status: string;
+  reason_code?: string | null;
+  message?: string | null;
+  detail?: Record<string, unknown> | null;
+  started_at: string;
+  ended_at?: string | null;
+  duration_ms?: number | null;
+}
+
+export interface EventActionItem {
+  id: number;
+  action_id: string;
+  trace_id: string;
+  plugin_key?: string | null;
+  action_type: string;
+  requested_send_via?: string | null;
+  actual_send_via?: string | null;
+  target_chat_id?: number | null;
+  target_message_id?: number | null;
+  status: string;
+  telegram_message_id?: number | null;
+  inline_result_count?: number | null;
+  error_code?: string | null;
+  error_message?: string | null;
+  detail?: Record<string, unknown> | null;
+  created_at: string;
+}
+
+export interface EventTraceSummary {
+  id: number;
+  trace_id: string;
+  account_id?: number | null;
+  source_channel?: string | null;
+  event_type: string;
+  chat_id?: number | null;
+  message_id?: number | null;
+  update_id?: number | null;
+  callback_query_id?: string | null;
+  sender_user_id?: number | null;
+  sender_name?: string | null;
+  text_preview?: string | null;
+  inline_query?: string | null;
+  chosen_inline_result_id?: string | null;
+  chosen_inline_query?: string | null;
+  status: string;
+  started_at: string;
+  ended_at?: string | null;
+  duration_ms?: number | null;
+  native_raw_meta?: NativeRawMeta | null;
+  plugin_count: number;
+  action_count: number;
+  error_count: number;
+}
+
+export interface EventTraceDetail extends EventTraceSummary {
+  raw_summary?: Record<string, unknown> | null;
+  payload_snapshot?: Record<string, unknown> | null;
+  spans: EventSpanItem[];
+  actions: EventActionItem[];
+  related_runtime_logs: RuntimeLogItem[];
+}
+
+export interface PluginRuntimeStatusItem {
+  id: number;
+  plugin_key: string;
+  account_id?: number | null;
+  enabled: boolean;
+  installed_version?: string | null;
+  load_status: string;
+  last_load_error?: string | null;
+  last_invoked_at?: string | null;
+  last_invocation_status?: string | null;
+  last_trace_id?: string | null;
+  updated_at: string;
+}
+
+export interface PluginRuntimeDetail {
+  statuses: PluginRuntimeStatusItem[];
+  recent_spans: EventSpanItem[];
+  recent_traces: EventTraceSummary[];
+}
+
+export interface TraceOverview {
+  last_5m_total: number;
+  last_5m_failed: number;
+  last_5m_warning: number;
+  source_channel_counts: Record<string, number>;
+  recent_errors: EventTraceSummary[];
+  recent_failed_actions: EventActionItem[];
+  recent_plugin_errors: PluginRuntimeStatusItem[];
+}
+
 // ===================== 系统设置 =====================
 export interface SystemSettings {
   command_prefix: string;
+  /** 开启时账号本人也必须带系统前缀；关闭后仅账号本人可裸命令触发 */
+  command_prefix_required?: boolean;
   kill_switch?: boolean;
+  /** 全局 AI 能力开关；关闭后不加载模型 provider，也不注入插件 ctx.ai */
+  ai_enabled?: boolean;
   sudo_enabled?: boolean;
   /** 群聊纯命令回声防误触检查前 N 条消息；0 = 关闭 */
   command_echo_guard_previous_messages?: number;
@@ -777,10 +919,17 @@ export interface SystemSettings {
     premium_daily: number;
   };
   log_retention?: {
+    trace_enabled: boolean;
+    event_bus_delivery_enabled: boolean;
+    inline_updates_enabled: boolean;
     runtime_log_retention_days: number;
     runtime_log_max_message_chars: number;
     runtime_log_max_detail_chars: number;
     runtime_log_min_level: "debug" | "info" | "warn" | "error";
+    trace_retention_days: number;
+    trace_payload_snapshot_retention_days: number;
+    native_raw_persist_enabled: boolean;
+    native_raw_retention_days: number;
   };
 }
 
@@ -1404,8 +1553,11 @@ export interface CheckUpdateResult {
   current_commit: string | null;
   remote_commit: string | null;
   ahead: number;
+  remote?: string | null;
+  branch?: string | null;
   changed_files: string[];
   runtime_mode?: string | null;
+  update_executor?: string | null;
   action_required?:
     | "none"
     | "docs_only"
@@ -1430,7 +1582,12 @@ export interface PullUpdateResult {
   success: boolean;
   new_commit: string | null;
   summary: string | null;
+  job_id?: string | null;
+  status?: string | null;
+  remote?: string | null;
+  branch?: string | null;
   runtime_mode?: string | null;
+  update_executor?: string | null;
   action_required?:
     | "none"
     | "docs_only"
@@ -1454,4 +1611,21 @@ export interface PullUpdateResult {
 export interface RestartResult {
   success: boolean;
   error: string | null;
+}
+
+export interface UpdateJobStatus {
+  ok: boolean;
+  job_id: string;
+  status: "queued" | "running" | "succeeded" | "failed" | "unsupported" | "unknown" | string;
+  created_at?: number | null;
+  started_at?: number | null;
+  finished_at?: number | null;
+  returncode?: number | null;
+  remote?: string | null;
+  branch?: string | null;
+  new_commit?: string | null;
+  summary?: string | null;
+  error?: string | null;
+  logs: string[];
+  plan?: Record<string, unknown> | null;
 }

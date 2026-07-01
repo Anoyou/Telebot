@@ -77,7 +77,8 @@ class PluginContext:
     字段：
       - ``account_id``：当前 worker 服务的账号 id
       - ``feature_key``：插件对应的 feature key（与 ``Plugin.key`` 一致）
-      - ``config``：``account_feature.config`` 中保存的 dict（可由 reload_config 热更新）
+      - ``config``：合并后的插件配置（schema defaults < global config < account config）
+      - ``account_config``：``account_feature.config`` 原始账号级配置（不含 schema/global 合并值）
       - ``rules``：该 [账号 × feature] 下所有 ``enabled=True`` 的 ``Rule``，按 priority 倒序
       - ``client``：Telethon 客户端（loader 注入）
       - ``engine``：风控引擎（C Agent 提供，支持 ``acquire`` 与各 ``on_*`` 回调）
@@ -86,6 +87,7 @@ class PluginContext:
       - ``scheduler``：平台调度器 facade，可在插件内注册 cron / interval / once 任务
       - ``http``：声明 ``external_http`` 和 ``allowed_hosts`` 后注入的安全 HTTP facade
       - ``ai``：声明 ``ai_text`` 后注入的安全文本 LLM facade
+      - ``messages``：标准消息动作 facade；交互入口内为缓冲动作，后台任务/命令中为实时受控投递
 
     为避免循环 import，``rules`` / ``engine`` / ``redis`` 都用 ``Any`` 标注。
     """
@@ -93,6 +95,7 @@ class PluginContext:
     account_id: int
     feature_key: str
     config: dict[str, Any] = field(default_factory=dict)
+    account_config: dict[str, Any] = field(default_factory=dict)
     rules: list[Any] = field(default_factory=list)  # list[Rule] —— 这里用 Any 防循环引用
     client: TelegramClient | None = None
     engine: Any = None  # RateLimitEngine
@@ -101,6 +104,7 @@ class PluginContext:
     scheduler: Any = None  # SchedulerFacade
     http: Any = None  # PluginHTTP
     ai: Any = None  # PluginAI
+    messages: Any = None
     generation: int = 0
     account_proxy_url: str | None = None
 
@@ -179,6 +183,20 @@ class Plugin:
         ``on_message`` 语义。
         """
 
+    async def on_direct_message(
+        self,
+        ctx: PluginContext,
+        event: events.NewMessage.Event | events.MessageEdited.Event,
+    ) -> None:
+        """低延迟直通消息入口；默认 no-op。
+
+        这是高风险高级入口，只会在插件 manifest 显式声明
+        ``capabilities.telegram_direct_passthrough.enabled=true``，且账号级
+        ``AccountFeature.config.direct_passthrough.enabled=true`` 时启用。运行时会在
+        白名单/暂停检查后、Trace/Event Bus/legacy 包装前，把原始 Telethon event
+        交给插件；一旦命中直通插件，本条消息不会继续进入普通消息链路。
+        """
+
     async def on_command(
         self,
         ctx: PluginContext,
@@ -197,16 +215,56 @@ class Plugin:
     ) -> list[dict[str, Any]] | None:
         """交互 Bot 入口；返回平台标准动作列表，默认表示未实现。
 
-        平台会尽量提供统一信封：
-        - ``event``: 兼容旧版的扁平事件对象
-        - ``source`` / ``actor`` / ``reply_to`` / ``trigger`` / ``session``: 新版标准信封
-        - 旧字段如 ``event_type`` / ``message_text`` / ``sender_name`` / ``reply_to_text`` 继续保留
+        平台会提供标准事件信封：
+        - ``source`` / ``message`` / ``chat`` / ``sender`` / ``actor`` /
+          ``source_actor`` / ``player`` / ``payment`` / ``reply_to`` /
+          ``trigger`` / ``session`` / ``raw`` 是新插件主路径
+        - ``event`` 和 ``event_type`` / ``message_text`` / ``sender_name`` 等
+          平铺字段只作为历史兼容来源
 
         标准动作约定：
         - ``send_message`` / ``send_photo`` / ``send_file``
-        - 可选 ``send_via``，默认由交互 Bot 发送；``userbot_reply`` 表示由账号 worker 的 userbot 代发
+        - 可选 ``send_via`` / ``channel`` / ``channel_selector``。插件可以声明单一通道，
+          也可以声明候选通道和回退顺序；平台负责告警、限流、审计和实际发送
         - ``end_session`` / ``close_session`` / ``no_session`` / ``result``
         - 可选 ``settlement``，供平台记录和后续结算
+
+        新插件可优先使用 ``ctx.messages`` 生成受控消息动作，例如
+        ``await ctx.messages.send(channel=["interaction_bot", "userbot_reply"], chat_id=..., text="...")``。
+        这些动作不会直接调用 Bot API 或 Telethon，而是随本 hook 的返回结果交给
+        平台统一校验、限流、审计和发送。
+        """
+        return None
+
+    async def on_event(
+        self,
+        ctx: PluginContext,
+        payload: dict[str, Any],
+    ) -> list[dict[str, Any]] | None:
+        """Event Bus 主入口；新插件优先实现这个 hook。
+
+        ``payload`` 是 TelePilot 标准事件信封。插件可直接返回标准 action，
+        或使用 ``ctx.messages`` 缓冲发送、编辑、删除、置顶、callback ACK、
+        inline answer 等动作，由平台统一执行和记录 Trace。
+        """
+        return None
+
+    async def on_config_action(
+        self,
+        ctx: PluginContext,
+        action_key: str,
+        payload: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        """配置页动作入口；默认未实现。
+
+        插件可在 manifest/config_schema 中声明配置动作，由 TelePilot 配置页渲染按钮。
+        用户点击后平台会构造一个不带 Telegram client 的受控 ``PluginContext``，
+        注入当前表单配置、``ctx.http`` 和 ``ctx.ai`` 等安全 facade，然后调用此 hook。
+
+        返回值应是普通 dict，常用字段：
+        - ``config_patch``：要合并回当前表单的字段值，例如 ``{"rules": [...]}``
+        - ``message`` / ``toast``：给管理员展示的短反馈
+        - ``result``：可选的结构化结果，供更高级前端组件消费
         """
         return None
 

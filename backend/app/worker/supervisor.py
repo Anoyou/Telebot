@@ -53,6 +53,7 @@ from ..db.models.log import RuntimeLog
 from ..db.models.rate_limit import RateLimitEvent
 from ..db.models.system import SystemSetting
 from ..redis_client import get_redis
+from ..services.event_trace import cleanup_event_traces
 from ..services.redactor import redact_text, redact_value
 from .entry import worker_entry
 from .ipc import (
@@ -95,6 +96,10 @@ async def _get_log_retention_config() -> dict[str, int]:
         "runtime_log_max_message_chars": 2000,
         "runtime_log_max_detail_chars": 8000,
         "runtime_log_min_level": "info",
+        "trace_retention_days": 30,
+        "trace_payload_snapshot_retention_days": 7,
+        "native_raw_persist_enabled": False,
+        "native_raw_retention_days": 1,
     }
     try:
         async with AsyncSessionLocal() as db:
@@ -124,6 +129,27 @@ async def _get_log_retention_config() -> dict[str, int]:
                 if str(raw.get("runtime_log_min_level", defaults["runtime_log_min_level"]) or "info").lower()
                 in {"debug", "info", "warn", "error"}
                 else "info"
+            ),
+            "trace_retention_days": max(
+                0,
+                int(raw.get("trace_retention_days", defaults["trace_retention_days"]) or 0),
+            ),
+            "trace_payload_snapshot_retention_days": max(
+                0,
+                int(
+                    raw.get(
+                        "trace_payload_snapshot_retention_days",
+                        defaults["trace_payload_snapshot_retention_days"],
+                    )
+                    or 0
+                ),
+            ),
+            "native_raw_persist_enabled": bool(
+                raw.get("native_raw_persist_enabled", defaults["native_raw_persist_enabled"])
+            ),
+            "native_raw_retention_days": max(
+                0,
+                int(raw.get("native_raw_retention_days", defaults["native_raw_retention_days"]) or 0),
             ),
         }
     except Exception:
@@ -186,7 +212,7 @@ def _runtime_log_level_allowed(level: str, min_level: str) -> bool:
 
 
 async def _cleanup_runtime_logs_if_due() -> None:
-    """按 log_retention 定期清理过期运行日志；0 天表示不自动删除。"""
+    """按 log_retention 定期清理过期运行日志和 Trace；0 天表示不自动删除。"""
 
     global _LAST_RUNTIME_LOG_CLEANUP_AT
     now = time.monotonic()
@@ -204,6 +230,16 @@ async def _cleanup_runtime_logs_if_due() -> None:
             await db.commit()
     except Exception:
         log.debug("清理过期 runtime_log 失败", exc_info=True)
+    try:
+        await cleanup_event_traces(
+            trace_retention_days=int(cfg.get("trace_retention_days", 30) or 0),
+            payload_snapshot_retention_days=int(
+                cfg.get("trace_payload_snapshot_retention_days", 7) or 0
+            ),
+            native_raw_retention_days=int(cfg.get("native_raw_retention_days", 1) or 0),
+        )
+    except Exception:
+        log.debug("清理过期 event_trace 失败", exc_info=True)
 
 # ⚠ 强制 spawn 启动方式（不要 fork）
 #

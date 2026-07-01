@@ -1,514 +1,373 @@
 # TelePilot 远程插件
 
-本文是当前维护的远程插件开发与安装规范，覆盖仓库结构、安装元数据、运行时 Manifest、权限声明和兼容边界。
+远程插件最终版契约是 **Event Bus + Trace + MessageOps**。新插件不再以 `interaction_entries`、旧交互规则、旧平铺 payload 或 `notice` 通道作为主路径；这些内容只用于迁移旧插件。
 
-## 10. 远程插件
+## 适用场景
 
-远程插件与内置插件共用同一套 Plugin API、`Manifest`、`PluginContext`、权限沙箱、配置 schema、插件分类和交互 Bot 声明。区别只在安装来源：远程插件从 Git 仓库安装到 `plugins/installed/{name}/`，安装阶段先静态读取 `plugin.json`，不会执行 Python；运行阶段再由 worker loader 加载 `manifest.py` / `plugin.py`。
+- 把第三方插件以 zip、Git 仓库或 Registry 条目分发给 TelePilot。
+- 插件需要接收 Telegram 标准事件：消息、管理员命令、按钮回调、Inline、付款确认。
+- 插件需要通过 TelePilot 代发消息、ACK 按钮、回答 Inline Query 或记录结算动作。
+- 插件需要声明 HTTP、AI、原生 Telegram raw 等风险能力，供安装前提示和 Trace 排障。
 
-旧文档 `docs/REMOTE-PLUGIN-GUIDE.md` 只保留跳转说明，远程插件开发与安装规范以本章节为准。
+远程插件仍按个人可信插件模式运行：安装者自行信任插件业务逻辑；平台负责能力声明、事件信封、MessageOps 执行、Trace、审计、限流和客观失败提示。
 
-### 适用场景
-
-远程插件适合这些场景：
-
-- 希望把插件独立成仓库，由 Web UI 一键安装、更新、卸载。
-- 插件需要给多个 TelePilot 部署复用。
-- 插件作者不想改 TelePilot 主仓库，但愿意遵循统一的 Manifest、权限和配置规范。
-
-当前实现采用：
-
-- Git clone / pull 安装更新。
-- `plugin.json` 作为安装阶段静态元数据。
-- `manifest.py` 作为运行阶段真实 Manifest。
-- `Plugin` / `PluginContext` 作为运行时 API。
-- 第三方插件使用 `SandboxClient`，按 `permissions` 最小授权。
-
-### 远程插件结构
-
-一个可安装的远程插件仓库至少包含：
+## 目录结构
 
 ```text
-guess_number/
-├── plugin.json      # 安装阶段静态元数据，不能执行 Python
-├── manifest.py      # 运行阶段 Manifest
-├── plugin.py        # 插件主类
-└── __init__.py      # 导出 PLUGIN_CLASS 和 MANIFEST
+my_plugin/
+├── __init__.py
+├── manifest.py
+├── plugin.py
+└── plugin.json
 ```
 
-不再兼容旧的“只有 `plugin.json` + `plugin.py`”单文件结构；缺少 `manifest.py` 或 `__init__.py` 会在安装/更新阶段被拒绝。
+`plugin.json` 是静态安装元数据，不执行 Python；安装后运行时仍会读取 `manifest.py` 的 `MANIFEST`。两边的 `name/key`、`version`、`category`、`event_subscriptions`、`capabilities` 必须保持一致。
 
-### plugin.json
-
-`plugin.json` 用于安装、列表展示和安全校验。安装阶段只读取这个文件，但会同时检查运行期必须存在 `manifest.py`、`plugin.py`、`__init__.py`。
+## plugin.json 最小模板
 
 ```json
 {
-  "name": "guess_number",
-  "display_name": "猜数字",
-  "description": "一个抢答小游戏插件",
-  "author": "example",
+  "name": "event_bus_demo",
+  "display_name": "Event Bus 示例",
+  "description": "演示最终版事件订阅、Trace 与 MessageOps。",
+  "author": "examples",
   "version": "0.1.0",
   "entry": "plugin.py",
-  "min_telepilot_version": "0.19.0",
-  "commands": ["guess"],
-  "cleanup_mode": "resource",
-  "tags": ["game", "quiz"],
+  "min_telepilot_version": "0.33.0",
   "category": "interactive",
-  "interaction_entries": [
+  "permissions": ["send_message", "read_chat"],
+  "usage": "启用后按 Event Bus 订阅接收 message/command/callback/inline/payment 事件，所有输出都返回标准 action。",
+  "event_subscriptions": [
     {
-      "key": "start_guess_number",
-      "title": "开始游戏",
-      "description": "由交互 Bot 在群内开启一局游戏。",
-      "launch_mode": "hybrid",
-      "session_scope": "chat",
-      "events": ["keyword", "payment_confirmed", "message", "callback_query", "session_close"],
-      "preserve_command_trigger": true,
-      "command_fallback": {
-        "enabled": true,
-        "command": "guess",
-        "mode": "hint_only"
-      },
-      "session_policy": {
-        "ttl_seconds": 3600,
-        "duplicate_start": "reject",
-        "close_on": ["winner", "timeout", "session_close"]
-      },
-      "input_schema": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {
-          "prize": {
-            "type": "integer",
-            "title": "奖金",
-            "default": 123,
-            "minimum": 1
-          }
-        }
-      },
-      "payload_contract": {
-        "required_envelope": ["source", "actor", "trigger", "session"],
-        "required_event_fields": ["type", "chat_id"]
-      },
-      "result_contract": {
-        "actions": ["send_message", "send_photo", "send_file", "end_session", "result", "settlement"],
-        "send_via": ["interaction_bot", "userbot_reply", "bbot_notice"]
-      },
-      "settlement": {
-        "mode": "announce_only",
-        "winner_field": "actor.user_id",
-        "amount_field": "prize"
-      }
+      "events": ["message", "command"],
+      "source": ["userbot", "interaction_bot"],
+      "scope": "all_allowed_chats"
+    },
+    {
+      "events": ["callback_query"],
+      "source": ["interaction_bot"],
+      "scope": "rule_bound"
+    },
+    {
+      "events": ["inline_query", "chosen_inline_result"],
+      "source": ["interaction_bot"],
+      "scope": "inline_all"
+    },
+    {
+      "events": ["payment_confirmed"],
+      "source": ["external_payment_notice", "userbot"],
+      "scope": "rule_bound"
     }
   ],
-  "permissions": ["send_message", "edit_message", "read_chat"],
-  "config_schema": {
-    "type": "object",
-    "x-ui-mode": "single",
-    "properties": {
-      "command": {
-        "type": "string",
-        "title": "触发指令名",
-        "default": "guess",
-        "minLength": 1,
-        "maxLength": 32,
-        "pattern": "^\\S+$"
-      }
+  "capabilities": {
+    "telegram_native_raw": {
+      "enabled": true,
+      "reason": "仅用于排查 Telegram 原生字段映射差异，业务逻辑仍读取标准事件信封。",
+      "sources": ["interaction_bot", "userbot"],
+      "store_payload": false
     }
   }
 }
 ```
 
-字段说明：
-
-| 字段 | 必填 | 类型 | 说明 |
-|------|------|------|------|
-| `name` / `key` | 二选一 | string | 插件唯一标识，优先使用 `name` |
-| `display_name` | 推荐 | string | UI 显示名 |
-| `description` | 推荐 | string | 插件用途说明 |
-| `author` | 推荐 | string | 作者 |
-| `version` | 是 | string | 语义化版本，如 `0.1.0` |
-| `entry` | 否 | string | 入口文件，默认 `plugin.py`；当前仍要求同时提供标准 `manifest.py` / `__init__.py` |
-| `min_telepilot_version` | 推荐 | string | 最低 TelePilot 版本 |
-| `min_telebot_version` | 兼容 | string | 旧字段名，0.15 起仅作为 legacy alias 解析 |
-| `commands` | 否 | array | 插件声明的触发指令名，用于帮助文档 |
-| `cleanup_mode` | 否 | string | 开发约定字段，建议取 `resource` / `reset` / `no-op`；当前平台不会自动执行该字段对应的清理策略，插件仍需在 `on_shutdown` / 取消 / 超时路径里自行实现幂等清理 |
-| `tags` | 否 | array | 分类搜索标签 |
-| `category` | 推荐 | string | `interactive` / `automation` / `utility`，与 `manifest.py` 保持一致 |
-| `interaction_entries` | 按需 | array | 只有需要交互 Bot 触发的插件才声明；工具/自动化插件保持空或不填 |
-| `permissions` | 推荐 | array | 运行时沙箱权限声明 |
-| `config_schema` | 推荐 | object | 配置表单和 API 校验依据 |
-
-`plugin.json` 与 `manifest.py` 中的 `version`、`category`、`interaction_entries` 应保持一致；如果插件进入 Registry，Registry 里的 `version` 也要同步。交互入口的新规范还要求 `launch_mode`、`events`、`session_scope`、`session_policy`、`payload_contract`、`result_contract`、`settlement`、`command_fallback`、`preserve_command_trigger` 在两处含义一致，不能只写一边。
-
-`interaction_entries` 是交互 Bot 的兼容声明。每个入口至少要写：
+字段要点：
 
 | 字段 | 必填 | 说明 |
 | --- | --- | --- |
-| `key` | 是 | 传给插件 `on_interaction(ctx, entry_key, payload)` 的入口名 |
-| `title` | 推荐 | 前端下拉框和实验室展示名 |
-| `description` | 推荐 | 告诉用户这个入口做什么 |
-| `launch_mode` | 是 | `bridge` / `direct` / `hybrid`，决定交互 Bot 如何启动插件 |
-| `session_scope` | 是 | `chat` / `user` / `none`，决定平台如何保存会话和路由后续消息 |
-| `participant_policy` | 推荐 | `open_race` / `solo_owner` / `paid_pool` / `notify_only`，说明谁能参与后续互动 |
-| `events` | 是 | 支持的事件白名单，例如 `keyword`、`payment_confirmed`、`message`、`callback_query`、`session_close` |
-| `command_fallback` | 按需 | 交互入口不可用时是否提示或受控回退到原 UserBot 命令 |
-| `preserve_command_trigger` | 是 | 必须为 `true`，表示原有命令触发不受交互入口影响 |
-| `session_policy` | 推荐 | TTL、重复触发、关闭条件、并发策略 |
-| `payload_contract` | 推荐 | 平台提供的 `source` / `actor` / `reply_to` / `trigger` / `session` 信封要求 |
-| `result_contract` | 推荐 | 标准动作类型、`send_via` 白名单和结束语义 |
-| `settlement` | 按需 | 涉及奖金、补发、对账时声明结算责任和字段 |
-| `input_schema` | 推荐 | 当前规则可覆盖的入口参数，默认值用于前端预填 |
+| `name` / `display_name` / `version` | 是 | `name` 必须等于 `MANIFEST.key` 和插件类 `key` |
+| `usage` | 是 | 插件中心展示的使用说明；缺失会触发高级规范警告 |
+| `event_subscriptions` | 事件插件必填 | Event Bus 投递声明；纯 HTTP/AI 工具可写 `[]` |
+| `capabilities` | 是 | 高风险能力声明；没有高风险能力也建议写 `{}` |
+| `permissions` | 按需 | 安装提示和 facade 注入依据，如 `external_http`、`ai_text`、`send_message` |
+| `allowed_hosts` | HTTP 插件必填 | `ctx.http` 允许访问的域名 |
+| `config_schema` | 按需 | 账号级配置；有配置时也要提供 `usage` 或 `x-usage-guide` |
 
-推荐额外声明 `interaction_profile`，让平台和前端知道这是什么玩法类型。当前约定值：
+`usage` 缺失不是普通文案缺口，而是最终版规范警告：插件中心无法告诉安装者“谁能触发、监听什么事件、会发什么消息、如何排障”。远程插件、官方可选插件和示例插件都必须写 `usage`；有配置页时还应在 `config_schema` 顶层补 `x-usage-guide`、`x-usage-instructions` 或 `x-usage-steps`，但这些只能增强说明，不能替代 `plugin.json.usage`。
 
-| `interaction_profile` | 适用场景 |
-| --- | --- |
-| `session_game` | 群局抢答、竞猜、填空、算题、24 点 |
-| `challenge_game` | 双人/多人对战、轮流操作 |
-| `reward_pool` | 红包、抽奖池、下注开奖 |
-| `utility_trigger` | 只是借交互 Bot 做入口，但后续不是群局互动 |
+## 插件生态迁移边界
 
-这只是声明性元数据，不改变插件原有命令触发，也不改变 `on_interaction` 的调用方式。
+最终版按身份处理插件，不再把系统能力和可安装插件混成一类：
 
-`launch_mode` 的取值不要随意发明：
+| 类型 | 边界 | 最终版处理 |
+| --- | --- | --- |
+| 平台功能 | 系统运行必需或明显不是插件的能力，例如日志、账号管理、插件仓库管理、调度框架 | 不伪装成普通插件；在系统设置或平台页面展示 |
+| 官方可选插件 | TelePilot 维护但不是系统必需，例如自动回复、游戏、互动玩法 | 可提示安装，可手动移除；必须完整声明 `usage`、`event_subscriptions`、`capabilities` |
+| 官方远程插件 | 官方仓库分发、按需安装/更新的能力，例如图片生成或玩法插件 | 从远程插件库安装/一键更新；刷新时必须保留新字段和风险提示 |
+| 示例插件 | 用于开发者学习和验证，例如 `examples/plugins/event_bus_demo` | 不默认启用；必须能通过 `scripts/validate-plugin-examples.py` |
+| 用户安装插件 | 用户从私有库或第三方库安装的插件 | 不强制自动迁移代码；安装、启用、更新时显示规范警告、风险提示和废弃通道错误 |
 
-| launch_mode | 说明 |
-| --- | --- |
-| `bridge` | 交互 Bot 收到事件，平台组装信封后调用插件 `on_interaction` |
-| `direct` | 只走原命令或插件内部调用，不依赖交互 Bot |
-| `hybrid` | 两种方式都支持，但必须保留原命令触发 |
+官方可选插件和官方远程插件不允许为了通过 lint 写空声明。至少要写清：谁能触发、订阅哪些事件、使用哪些能力、普通互动由哪个通道发送、付款/发奖是否需要 userbot、如何在日志页按 trace 或 action 排查。
 
-`command_fallback` 不是改写命令语义的开关，只是“交互入口暂不可用时，平台要不要提示用户去用原命令”。如果插件以前能被 `{prefix}game` 启动，新规范下仍必须能被 `{prefix}game` 启动，不能因为加了 `interaction_entries` 就吞掉原命令。
+## event_subscriptions
 
-`session_scope` 必须按业务写准：
+`event_subscriptions` 描述“插件想从 Event Bus 接收什么”，不是旧规则系统的替代写法。
 
-- 群局、抢答、抽奖、红包、填空等公共流程用 `chat`。
-- 置顶促销、个人查询、个人表单等每个用户互不影响的流程用 `user`。
-- 一次性执行且不需要平台保存会话的入口用 `none`，并在返回动作里显式返回 `end_session` / `no_session` 更清楚。
+| 字段 | 常用值 | 说明 |
+| --- | --- | --- |
+| `events` | `message`、`command`、`callback_query`、`inline_query`、`chosen_inline_result`、`payment_confirmed`、`session_close` | 订阅事件类型 |
+| `source` | `userbot`、`interaction_bot`、`external_payment_notice` | 事件来源 |
+| `scope` | `all_allowed_chats`、`owner_only`、`known_users`、`rule_bound`、`inline_all` | 投递范围 |
 
-不要把 `session_scope` 和交互规则里的 `concurrency` 混在一起。`concurrency=user` 表示“规则按用户限流、冷却、每日次数”；`session_scope=chat` 表示“这个插件是一场群局，其他群友的后续消息也要能进入同一局”。如果群局插件漏写 `session_scope=chat`，用户开启每人 CD 后，后续答题消息可能只会路由给开局者，表现为“联动 Bot 没反应”。
+Inline 插件必须声明 `inline_all`；付款插件必须能处理 `payment_confirmed`，不要把外部转账通知文本当业务主路径。
 
-推荐矩阵：
+## capabilities.telegram_native_raw
 
-| 插件类型 | `category` | `session_scope` | 说明 |
-| --- | --- | --- | --- |
-| 24 点、九宫格、猜数字、诗词填空 | `interactive` | `chat` | 群内同一时间一局，大家抢答 |
-| 口令红包、彩票下注 | `interactive` | `chat` 或 `none` | 如果后续群消息还要进入入口用 `chat`，只发起一次可用 `none` |
-| PT 置顶促销 | `utility` 或 `automation` | `user` | 群友关键词触发，但执行的是个人请求 |
-| AI/图片/查询工具 | `utility` | 通常不声明 | 只有确实需要交互 Bot 规则触发时才声明 |
+默认情况下，插件只拿标准事件信封，不拿 live Telegram 对象。需要原生字段时声明：
 
-远程插件推荐把 `config_schema["x-ui-mode"]` 写成 `single`。需要多条规则 CRUD 时使用 `rules`，系统常驻能力才使用 `platform`。旧 `schema` 仅作为兼容别名，含义是“字段由 schema 提供，入口使用通用单配置独立页”。
+```json
+{
+  "capabilities": {
+    "telegram_native_raw": {
+      "enabled": true,
+      "reason": "排查 Bot API 与 Telethon 字段差异",
+      "sources": ["interaction_bot"],
+      "store_payload": false
+    }
+  }
+}
+```
 
-交互入口 payload 使用标准信封，不再只是一组平铺字段：
+插件必须先读取 `native_raw_meta`：
 
-| 信封 | 说明 |
-| --- | --- |
-| `source` | 事件来源和发送通道，例如 `interaction_bot`、`userbot`、`platform` |
-| `actor` | 触发事件的人；答题、中奖、个人限流和审计优先按它判断 |
-| `reply_to` | 应引用的原消息或被回复对象；中奖公告必须尽量保留 |
-| `trigger` | 命中的规则、入口、事件和消息，用于排障与幂等 |
-| `session` | 平台会话标识、作用域、TTL 和是否新建 |
-| `payment` | 可信转账通知 Bot 已确认到账后的结构化凭证；普通 `+金额` 文本不等于到账 |
-| `player` | 付费开局绑定的玩家身份，独玩/按钮玩法应优先读取它 |
-| `source_actor` | 实际发出事件消息的 Bot/用户，转账触发时通常是转账通知 Bot |
+```python
+native_raw_meta = payload.get("native_raw_meta") or {}
+if not native_raw_meta.get("enabled"):
+    # 降级到标准信封；不要因为拿不到原生对象而中断主流程。
+    pass
+```
 
-`payload_contract` 声明插件需要哪些信封和事件字段，`input_schema` 只声明规则可覆盖参数。`source` 不代表中奖用户，`source_actor` 不代表玩家，`actor` 是当前事件行为主体；付费开局时新插件优先用 `player`，到账判断只看 `payment.status=confirmed`。`reply_to` 不等同于当前消息，通常用于让结果回复原答案；`trigger` 用来还原“为什么这次调用发生”；`session` 要和插件内部状态 key 的粒度一致。
+不要使用旧 `raw_event` 字段。它代表旧运行时泄露原生对象的风险，只能出现在迁移说明或回归测试里。
 
-付费触发是“双证据”模型：UserBot/回复上下文用于补充付款玩家 `user_id`，可信转账通知 Bot 用于确认真实到账、金额和收款人。余额不足、只发送 `+1000` 但没有转账通知时，平台不会生成 `payment_confirmed`。如果转账通知只有付款人名称，独玩或按钮玩法应声明 `participant_policy=solo_owner`，平台会要求付款人点击确认后再启动，避免把转账通知 Bot 误当玩家。
+## capabilities.telegram_direct_passthrough
 
-插件返回动作时必须遵守 `result_contract`。`send_via` 是发送者白名单，常见值只有：
+`telegram_direct_passthrough` 是更高风险的低延时直通能力，只适合抢红包、秒杀、抢答首响等对毫秒级延迟敏感、且愿意跳过 TelePilot 标准 Event Bus / Trace / MessageOps 链路的插件。普通互动、付款确认、按钮、Inline 和需要审计回放的业务不要使用它。
 
-| send_via | 说明 |
-| --- | --- |
-| `interaction_bot` | 交互 Bot 发送题面、答复、图片和会话提示 |
-| `userbot_reply` | 当前账号的 userbot 由 worker 代发指定消息 |
-| `bbot_notice` | 通知 Bot 发公告、命中和对账提示 |
+插件必须同时满足两层开关才会收到直通消息：
 
-未声明 `result_contract.send_via` 时按最小权限处理，只允许 `interaction_bot`。涉及奖金、补发、转账、催付的插件要写 `settlement`，但 `settlement` 只能描述结果和对账字段，不能让交互 Bot 直接拥有发奖权限。钱相关动作仍应由账号 worker 的 userbot 代发或由平台受控结算流程处理。
+1. `plugin.json` 与 `MANIFEST.capabilities` 显式声明 `telegram_direct_passthrough.enabled=true`，并写清 `reason`、`sources`、`directions`。
+2. 安装后在对应账号的插件配置里二次手动开启：
 
-交互入口不得影响原有命令触发。远程插件可以把业务逻辑抽成共享函数，但 `commands`、`on_command`、`message_channels`、`on_message` 的既有语义必须保持；普通群成员 incoming 消息不能因为 `launch_mode=bridge/hybrid` 或 `command_fallback` 就直接进入 `on_command`。
+```json
+{
+  "direct_passthrough": {
+    "enabled": true
+  }
+}
+```
 
-### manifest.py
+仅声明能力不会启用直通；账号只启用插件本身也不会启用直通。运行时仍保留账号启用、installed 插件授权、worker 暂停状态和 incoming 白名单检查；通过这些外层检查后，worker 会在 Trace、Event Bus 订阅匹配、legacy `on_message` 包装之前调用：
 
-`manifest.py` 是运行阶段的 Manifest，必须导出 `MANIFEST`。运行时真正生效的是这里的 `Manifest`，因此远程插件要在 `plugin.json` 和 `manifest.py` 两处同步声明插件身份。
+```python
+async def on_direct_message(self, ctx, event):
+    ...
+```
+
+`event` 是 live Telethon event，不是标准事件信封。命中任一直通插件后，本条消息会被直通链路消费，不再进入 Event Bus 或 legacy `on_message`，避免低延时插件和普通链路重复处理同一条消息。直通 hook 的发送、编辑、点击等行为不会自动生成标准 action/Trace；插件作者必须自行承担幂等、异常、限流和审计缺失的风险。
+
+## 标准事件信封
+
+插件入口收到的是标准事件信封：
+
+```json
+{
+  "source": {"type": "message", "channel": "interaction_bot", "account_id": 1, "message_id": 41},
+  "chat": {"id": -100100200300, "type": "supergroup"},
+  "message": {"chat_id": -100100200300, "message_id": 41, "text": "hello"},
+  "actor": {"user_id": 501, "display_name": "玩家 A"},
+  "sender": {"user_id": 501, "display_name": "玩家 A"},
+  "trigger": {"mode": "public_keyword"},
+  "session": {"key": "chat:-100100200300:event_bus_demo", "scope": "chat", "active": true},
+  "native_raw_meta": {"enabled": false, "reason": "not_requested"}
+}
+```
+
+新插件读取文本用 `payload["message"]["text"]`，读取群用 `payload["chat"]["id"]` 或 `payload["message"]["chat_id"]`。不要把 `payload["text"]`、`payload["chat_id"]`、`payload.get("message")` 当主路径；顶层平铺字段仅为旧插件迁移期兼容。
+
+## MessageOps / action 输出
+
+插件不直接调用 Bot API、Telethon driver 或 Bot token。所有输出走 `ctx.messages` 或标准 action：
+
+```python
+return [
+    {
+        "type": "send_message",
+        "send_via": ["interaction_bot", "userbot_reply"],
+        "chat_id": payload["message"]["chat_id"],
+        "reply_to_message_id": payload["message"]["message_id"],
+        "text": "已收到"
+    }
+]
+```
+
+按钮回调：
+
+```python
+return [
+    {
+        "type": "answer_callback",
+        "callback_query_id": payload["source"]["callback_query_id"],
+        "text": "按钮已收到",
+        "show_alert": False
+    }
+]
+```
+
+Inline Query：
+
+```python
+return [
+    {
+        "type": "answer_inline_query",
+        "inline_query_id": payload["inline_query"]["id"],
+        "results": [
+            {
+                "type": "article",
+                "id": "demo",
+                "title": "示例结果",
+                "input_message_content": {"message_text": "Inline 示例"}
+            }
+        ],
+        "cache_time": 0,
+        "is_personal": True
+    }
+]
+```
+
+付款确认与结算：
+
+```python
+return [
+    {
+        "type": "settlement",
+        "mode": "confirm_only",
+        "payer_user_id": payload["payment"]["payer"]["user_id"],
+        "amount": payload["payment"]["amount"],
+        "currency": payload["payment"]["currency"],
+        "status": "confirmed"
+    },
+    {
+        "type": "send_message",
+        "send_via": ["userbot_reply"],
+        "chat_id": payload["message"]["chat_id"],
+        "text": "到账已确认，等待平台结算。"
+    }
+]
+```
+
+`send_via` 只使用 `interaction_bot`、`userbot_reply` 或 `auto`。`notice` / `bbot_notice` / `notice_bot` 已移除，插件请求这些通道应得到明确迁移错误。
+
+## manifest.py
 
 ```python
 from app.worker.plugins.manifest import Manifest
 
-MANIFEST = Manifest(
-    key="guess_number",
-    display_name="猜数字",
-    version="0.1.0",
-    author="example",
-    description="一个抢答小游戏插件",
-    category="interactive",
-    interaction_entries=[
-        {
-            "key": "start_guess_number",
-            "title": "开始游戏",
-            "description": "由交互 Bot 在群内开启一局游戏。",
-            "launch_mode": "hybrid",
-            "session_scope": "chat",
-            "events": ["keyword", "payment_confirmed", "message", "callback_query", "session_close"],
-            "preserve_command_trigger": True,
-            "command_fallback": {
-                "enabled": True,
-                "command": "guess",
-                "mode": "hint_only",
-            },
-            "session_policy": {
-                "ttl_seconds": 3600,
-                "duplicate_start": "reject",
-                "close_on": ["winner", "timeout", "session_close"],
-            },
-            "input_schema": {
-                "type": "object",
-                "additionalProperties": False,
-                "properties": {
-                    "prize": {
-                        "type": "integer",
-                        "title": "奖金",
-                        "default": 123,
-                        "minimum": 1,
-                    },
-                },
-            },
-            "payload_contract": {
-                "required_envelope": ["source", "actor", "trigger", "session"],
-                "required_event_fields": ["type", "chat_id"],
-            },
-            "result_contract": {
-                "actions": ["send_message", "end_session"],
-                "send_via": ["interaction_bot"],
-            },
-            "settlement": {
-                "mode": "announce_only",
-                "winner_field": "actor.user_id",
-                "amount_field": "prize",
-            },
-        }
-    ],
-    permissions=["send_message", "edit_message", "read_chat"],
-    config_schema={
-        "type": "object",
-        "x-ui-mode": "single",
-        "properties": {
-            "command": {
-                "type": "string",
-                "title": "触发指令名",
-                "default": "guess",
-                "minLength": 1,
-                "maxLength": 32,
-                "pattern": r"^\S+$",
-            },
-            "timeout": {
-                "type": "integer",
-                "title": "超时时间（秒）",
-                "default": 60,
-                "minimum": 10,
-                "maximum": 86400,
-            },
-        },
-    },
-)
-```
+EVENT_SUBSCRIPTIONS = [
+    {"events": ["message", "command"], "source": ["userbot", "interaction_bot"], "scope": "all_allowed_chats"},
+    {"events": ["callback_query"], "source": ["interaction_bot"], "scope": "rule_bound"},
+    {"events": ["inline_query", "chosen_inline_result"], "source": ["interaction_bot"], "scope": "inline_all"},
+    {"events": ["payment_confirmed"], "source": ["external_payment_notice", "userbot"], "scope": "rule_bound"},
+]
 
-不需要交互 Bot 规则触发的插件不要声明 `interaction_entries`：
-
-```python
-MANIFEST = Manifest(
-    key="image_tool",
-    display_name="图片工具",
-    version="1.0.0",
-    category="utility",
-    interaction_entries=[],
-)
-```
-
-`plugin.py` 仍然继承 `Plugin`，不要使用旧的 `group/private` 频道写法。当前只支持 `incoming` / `outgoing` 两类消息方向。`__init__.py` 必须导出 `PLUGIN_CLASS` 和 `MANIFEST`：
-
-```python
-from .manifest import MANIFEST
-from .plugin import GuessNumberPlugin
-
-PLUGIN_CLASS = GuessNumberPlugin
-
-__all__ = ["PLUGIN_CLASS", "MANIFEST"]
-```
-
-### 安装与启用流程
-
-通过 Web UI：
-
-1. 进入插件中心的远程插件页面。
-2. 输入 Git 仓库地址或子目录 URL。
-3. 点击安装。
-4. 安装完成后，回到插件中心选择账号启用和配置。
-
-通过 REST API：
-
-```text
-POST /api/remote-plugins/install
-POST /api/remote-plugins/{name}/enable
-POST /api/remote-plugins/{name}/enable-accounts   # body: {"account_ids": [1, 2]}
-POST /api/remote-plugins/{name}/disable-accounts  # body: {"account_ids": [1, 2]}
-POST /api/remote-plugins/{name}/update
-DELETE /api/remote-plugins/{name}
-```
-
-安装流程：
-
-```text
-1. git clone 到 plugins/installed/{name}/
-2. 读取 plugin.json → Pydantic 校验（安装阶段不执行 Python）
-3. 静态检查 manifest.py / plugin.py / __init__.py 是否齐全
-4. 验证通过 → 注册到数据库
-5. 广播 CMD_RELOAD_CONFIG，worker 重新扫描 installed 插件
-6. 验证失败 → 删除目录，返回错误
-```
-
-启用远程插件有两层开关：
-
-- “远程插件管理”里的启用/禁用是远程插件全局开关。
-- “插件中心”里的账号启用/禁用是账号级开关。
-
-远程插件实际加载需要 `InstalledPlugin.enabled` 和 `AccountFeature.enabled` 同时为真；旧 `RemotePlugin` 表仅作为升级兼容的只读快照保留。
-
-Docker 部署时，`plugins/installed/{name}/` 和 `data/plugin_repos/` 必须挂载到持久化卷。否则 `docker compose up -d --build` 重建 web 容器后，数据库可能还保留插件开关，但插件文件或仓库缓存已经从容器临时文件系统消失，最终表现为远程插件指令没有响应。
-
-### API
-
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| `GET` | `/api/remote-plugins` | 列出已安装远程插件 |
-| `POST` | `/api/remote-plugins/install` | 从 Git URL 安装 |
-| `POST` | `/api/remote-plugins/{name}/enable` | 全局启用远程插件 |
-| `POST` | `/api/remote-plugins/{name}/disable` | 全局禁用远程插件 |
-| `POST` | `/api/remote-plugins/{name}/enable-accounts` | 按请求体 `account_ids` 批量启用账号 |
-| `POST` | `/api/remote-plugins/{name}/disable-accounts` | 按请求体 `account_ids` 批量禁用账号 |
-| `POST` | `/api/remote-plugins/{name}/update` | 拉取更新并热重载 |
-| `DELETE` | `/api/remote-plugins/{name}` | 卸载并清理 DB |
-
-### 沙箱与权限
-
-第三方远程插件运行时拿到的 `ctx.client` 是 `SandboxClient`，只允许调用 `manifest.py` 中声明的权限。
-
-| 权限 | 允许方法 | 说明 |
-|------|----------|------|
-| `send_message` | `send_message` / `respond` / `reply` | 发送文本消息 |
-| `edit_message` | `edit` / `edit_message` | 编辑消息 |
-| `read_chat` | `get_messages` / `get_chat` / `iter_messages` | 读取聊天 |
-| `send_file` | `send_file` | 发送图片、文件 |
-| `join_chat` | `join_chat` | 加入聊天 |
-| `delete_message` | `delete_messages` | 删除消息 |
-| `moderate_chat` | `ban_user` / `kick_user` / `mute_user` / `unban_user` | 受控成员管理；高危权限，仅在确实需要封禁、踢出、禁言或解封成员时声明 |
-
-第三方插件不会拿到：
-
-- 真实 `client.session`
-- Redis 客户端
-- DB engine/session
-- worker 内部 `engine`
-- raw MTProto `client(functions.xxx(...))`
-
-注意：
-
-- 缺权限时会抛 `PermissionError`，请在日志里提示“缺少哪个权限”，不要吞掉异常。
-- `event.reply/respond/edit` 也必须按同等能力声明权限，不要把 event helper 当成越权发送路径。
-- 不要把 API Key、session、Bot Token、完整本地路径写进日志。
-- 外部 HTTP 请求必须设置 timeout。
-- 需要长期后台任务时，优先使用 `ctx.scheduler`，不要自己写永久循环。
-
-### 通用配置页的数据来源
-
-远程插件通用配置页由 `config_schema` 驱动。前端点击“配置”时，不会直接读取磁盘上的 `plugin.json` 或 `manifest.py`，而是读取：
-
-```text
-GET /api/accounts/{aid}/features
-```
-
-也就是接口返回的 `features[].config_schema`。这个字段来自数据库里的 `Feature.manifest.config_schema`。
-
-远程插件配置链路：
-
-```text
-plugin.json.config_schema
-  -> 安装/更新服务解析 plugin.json
-  -> 后端写入 Feature.manifest.config_schema
-  -> /api/accounts/{aid}/features 返回 config_schema
-  -> 前端通用独立配置页自动渲染配置表单
-```
-
-开发与排查时请记住：
-
-- `plugin.json.config_schema` 是远程插件安装阶段的静态来源。
-- 安装/更新后，后端必须把它持久化到 `Feature.manifest.config_schema`。
-- 前端通用配置页实际读取 `/api/accounts/{aid}/features` 返回的 `config_schema`。
-- 如果 UI 显示“该插件没有可配置的选项”，先检查该 API 返回里的 `config_schema` 是否为空。
-- 修改远程插件的 `config_schema` 后，需要在插件中心执行“更新插件”，并确认后端完成元数据回写。
-
-### 远程插件发布前检查
-
-- [ ] `plugin.json` 能被静态解析，不依赖 Python 执行。
-- [ ] `manifest.py` 导出 `MANIFEST`，`__init__.py` 导出 `PLUGIN_CLASS` 和 `MANIFEST`。
-- [ ] 不是旧的单文件结构；`manifest.py`、`plugin.py`、`__init__.py` 三个运行期文件都存在。
-- [ ] 插件名、Manifest key、目录名一致。
-- [ ] `plugin.json.version`、`MANIFEST.version`、Registry `version` 一致。
-- [ ] `category` 在 `plugin.json` 与 `manifest.py` 中一致。
-- [ ] 只有需要交互 Bot 规则触发的插件声明 `interaction_entries`；纯工具类和纯自动化类插件保持空或不填。
-- [ ] 交互入口声明了 `launch_mode`，且取值只用 `bridge` / `direct` / `hybrid`。
-- [ ] 交互入口声明了 `events`、`session_scope`、`session_policy`、`payload_contract`、`result_contract`，并与插件实现一致。
-- [ ] 独玩/按钮入口声明 `participant_policy=solo_owner`；抢答/竞猜入口声明或默认使用 `open_race`。
-- [ ] `preserve_command_trigger=true`；新增交互入口后，原有 UserBot 命令仍按原指令名、参数和权限触发。
-- [ ] 如声明 `command_fallback`，只做提示或受控回退，不让普通 incoming 消息直接进入 `on_command`。
-- [ ] 返回动作的 `send_via` 都命中 `result_contract.send_via` 白名单。
-- [ ] 涉及奖金/补发/对账的插件声明了 `settlement`，且交互 Bot 只公告结果，不直接执行钱相关动作。
-- [ ] 插件按 `source` / `source_actor` / `actor` / `payment` / `player` / `reply_to` / `trigger` / `session` 信封读取输入，不依赖转账通知原文或 Bot Token。
-- [ ] 启动日志或主要交互消息包含当前插件版本，方便确认远程热更新是否生效。
-- [ ] `permissions` 覆盖实际调用的 `ctx.client` 方法。
-- [ ] 指令可触发，指令改名后热重载生效。
-- [ ] 群聊、私聊、频道/匿名频道下不会因为事件属性缺失崩溃。
-- [ ] 进行中重复触发会提示当前状态和下一步操作，不会覆盖已有局。
-- [ ] 抢答并发只奖励一次。
-- [ ] 超时和答题同时发生时只结束一次。
-- [ ] 高频交互有冷却/限流/超时策略，且用户可见文案说明关键规则。
-- [ ] 模板类配置有占位符说明和示例预览。
-- [ ] 插件禁用、热重载、worker 退出后没有幽灵任务。
-- [ ] 取消、完成、超时、禁用、热重载都会清理临时消息、文件和后台任务。
-- [ ] 外部 HTTP 请求有 timeout，错误提示已脱敏。
-- [ ] 插件日志足够排查“为什么没触发/为什么没发出去”。
-
-### 示例与 CI 建议
-
-当前 CI 已校验 `examples/plugins/with_http`、`examples/plugins/with_ai` 和 `examples/plugins/with_interaction`，分别用于演示 `ctx.http` / `external_http` / `allowed_hosts` 的最小组合，`ctx.ai` / `ai_text` / 平台统一 LLM 池的推荐接入方式，以及“原命令 + 交互 Bot 入口”双兼容的最小交互契约。`examples/plugins/translate` 是历史示例，尚未迁移到受限 `PluginContext` + sandbox 权限模型，因此在示例校验脚本中明确跳过。
-
-新增示例时请同步更新 `scripts/validate-plugin-examples.py`：
-
-1. 已迁移到公开 API 的示例加入 `INCLUDED_EXAMPLES`，CI 会检查必要文件、`plugin.json`、`MANIFEST`、`PLUGIN_CLASS`、key/version/category/interaction_profile/interaction_entries/permissions/allowed_hosts 一致性，并实例化插件类。
-2. 暂时保留的历史示例加入 `SKIPPED_EXAMPLES` 并写清原因；不要让示例通过 import worker 私有实现绕过 `ctx.http` / `ctx.ai` facade。
-3. 示例不得访问网络、真实 LLM Provider、数据库或账号会话；CI 只做静态和 import 级校验。
-
-已接入的 installed 互动插件可额外运行 `python scripts/validate-installed-interaction-plugins.py`，检查 `plugin.json` 与 `manifest.py` 的 `version`、`category`、`interaction_profile`、`interaction_entries` 是否一致，避免安装态和运行态的交互契约慢慢漂移。
-
-### Registry 机制
-
-支持从远程 registry 同步可用插件列表：
-
-```json
-{
-  "plugins": [
-    {
-      "name": "guess_number",
-      "display_name": "猜数字",
-      "source_url": "https://github.com/user/repo",
-      "version": "0.1.0",
-      "description": "一个抢答小游戏插件",
-      "author": "example",
-      "tags": ["game", "quiz"]
+CAPABILITIES = {
+    "telegram_native_raw": {
+        "enabled": True,
+        "reason": "仅用于排查 Telegram 原生字段映射差异。",
+        "sources": ["interaction_bot", "userbot"],
+        "store_payload": False,
     }
-  ]
 }
+
+MANIFEST = Manifest(
+    key="event_bus_demo",
+    display_name="Event Bus 示例",
+    version="0.1.0",
+    category="interactive",
+    permissions=["send_message", "read_chat"],
+    event_subscriptions=EVENT_SUBSCRIPTIONS,
+    capabilities=CAPABILITIES,
+)
 ```
 
----
+当前 `usage` 由远程仓库读取 `plugin.json`；`Manifest` 侧仍以 `event_subscriptions` 和 `capabilities` 作为运行时声明。
+
+## plugin.py
+
+```python
+from typing import Any
+
+from app.worker.plugins.base import Plugin, PluginContext, register
+from app.worker.plugins.events import event_from_interaction_payload
+
+
+@register
+class EventBusDemoPlugin(Plugin):
+    key = "event_bus_demo"
+    display_name = "Event Bus 示例"
+
+    async def on_event(self, ctx: PluginContext, payload: dict[str, Any]) -> list[dict[str, Any]]:
+        event = event_from_interaction_payload(payload)
+        if event.type == "inline_query":
+            return [{
+                "type": "answer_inline_query",
+                "inline_query_id": payload["inline_query"]["id"],
+                "results": [],
+                "cache_time": 0,
+                "is_personal": True,
+            }]
+        return [{
+            "type": "send_message",
+            "send_via": ["interaction_bot", "userbot_reply"],
+            "chat_id": event.message.chat_id,
+            "text": f"收到 {event.type}: {event.message.text}",
+        }]
+```
+
+示例代码见 `examples/plugins/event_bus_demo`，fixtures 覆盖 message、command、callback、inline、chosen inline 和 payment。
+
+## 旧 interaction_entries 迁移
+
+旧 `interaction_entries` 只表示历史交互规则入口。迁移时按下面映射：
+
+| 旧字段 | 新口径 |
+| --- | --- |
+| `interaction_entries[].events` | `event_subscriptions[].events` |
+| `interaction_entries[].session_scope` | 标准信封 `session.scope` |
+| `payload_contract` | 标准事件信封字段要求 |
+| `result_contract.actions` | 标准 MessageOps/action |
+| `result_contract.send_via` | `send_via` 候选通道，仅限 `interaction_bot` / `userbot_reply` / `auto` |
+| `settlement` | `settlement` action 或可审计结算元数据 |
+
+迁移桥示例见 `examples/plugins/with_interaction`。该示例保留旧入口声明，但已经补齐 `usage`、`event_subscriptions`、`capabilities`，并修正了历史配置字段 `message` 与标准信封 `payload["message"]` 的冲突。
+
+## 安装与验证
+
+发布前至少运行：
+
+```bash
+backend/.venv/bin/python scripts/validate-plugin-examples.py
+backend/.venv/bin/python scripts/validate-installed-interaction-plugins.py
+```
+
+示例校验会检查：
+
+- 必要文件和 key/version/category 一致性。
+- `usage` 是否存在。
+- `event_subscriptions` 与 `MANIFEST.event_subscriptions` 是否一致。
+- `capabilities` 与 `MANIFEST.capabilities` 是否一致。
+- `capabilities.telegram_native_raw` 是否有 reason。
+- 示例 fixtures 是否覆盖 message、command、callback、inline、payment。
+- 是否出现旧 `notice` 发送通道、`bbot_notice`、`notice_bot`、`raw_event` 风险。
+
+安装态校验会对已安装互动插件做一致性检查；旧插件缺少最终版字段时会输出 warning，避免在本轮无法改 installed 插件时误判为脚本故障。
+
+## 发布前检查
+
+- [ ] `plugin.json` 有 `usage`，并能让用户不用读旧规则也知道怎么启用。
+- [ ] 事件插件声明了 `event_subscriptions`，且覆盖 message/command/callback/inline/payment 中实际使用的事件。
+- [ ] `capabilities` 已声明；需要原生字段时写明 `telegram_native_raw.reason` 和 `sources`。
+- [ ] 插件只读取标准事件信封，不依赖旧平铺 payload。
+- [ ] 所有发送、编辑、按钮 ACK、Inline answer、结算都走 MessageOps/action。
+- [ ] `answer_inline_query` 插件同时处理 `chosen_inline_result` 或明确忽略。
+- [ ] 付款插件使用 `payment.status=confirmed` 与 `settlement`，普通 Bot 不执行转账。
+- [ ] 旧 `interaction_entries` 只出现在迁移桥或兼容说明里。
+- [ ] 没有 `notice` / `bbot_notice` / `notice_bot` 可执行通道，没有 `raw_event` 业务依赖。

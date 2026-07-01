@@ -104,9 +104,17 @@ def _autorepeat_dry_run_match(*args):
 
 
 def _codex_image_dry_run_match(*args):
-    from ..worker.plugins.builtin.codex_image.plugin import _dry_run_match
+    import sys
 
-    return _dry_run_match(*args)
+    from ..worker.plugins.loader import _installed_module_name, _load_installed_plugin
+
+    _load_installed_plugin(FEATURE_CODEX_IMAGE)
+    module = sys.modules.get(f"{_installed_module_name(FEATURE_CODEX_IMAGE)}.plugin")
+    dry_run = getattr(module, "_dry_run_match", None)
+    if callable(dry_run):
+        return dry_run(*args)
+
+    return False, "codex_image 插件库插件未安装，无法执行图片插件 dry-run。"
 
 
 def _parse_scheduler_dt(raw: Any) -> datetime | None:
@@ -568,7 +576,7 @@ async def dry_run_rule(
             {"step": "sample", "msg": f"提示词长度：{len(payload.sample_message)}"},
         ]
         if not matched:
-            logs.append({"step": "result", "msg": "未命中（缺 access_token）"})
+            logs.append({"step": "result", "msg": output or "未命中（缺 access_token）"})
         else:
             logs.append({"step": "result", "msg": "命中"})
         return RuleDryRunResponse(

@@ -8,7 +8,7 @@ import pytest
 from app.services.llm_client import LLMCallFailed, LLMResult
 from app.services.llm_dto import LLMProviderDTO
 from app.worker.plugins import ai_facade
-from app.worker.plugins.ai_facade import AIQuotaError, PluginAI
+from app.worker.plugins.ai_facade import AIQuotaError, AIUnavailableError, PluginAI
 
 
 def _provider(
@@ -42,6 +42,14 @@ def _provider(
     )
 
 
+@pytest.fixture(autouse=True)
+def _enable_ai_feature(monkeypatch) -> None:
+    async def _enabled(*_args: Any, **_kwargs: Any) -> bool:
+        return True
+
+    monkeypatch.setattr(ai_facade, "is_ai_enabled", _enabled)
+
+
 @pytest.mark.asyncio
 async def test_list_providers_redacts_sensitive_metadata() -> None:
     async def _loader():
@@ -63,6 +71,27 @@ async def test_list_providers_redacts_sensitive_metadata() -> None:
     assert "secret-base" not in encoded
     assert "user:pass" not in encoded
     assert "model-secret" not in encoded
+
+
+@pytest.mark.asyncio
+async def test_ai_disabled_short_circuits_provider_loader(monkeypatch) -> None:
+    invoked = False
+
+    async def _disabled(*_args: Any, **_kwargs: Any) -> bool:
+        return False
+
+    async def _loader():
+        nonlocal invoked
+        invoked = True
+        return {1: _provider(1)}
+
+    monkeypatch.setattr(ai_facade, "is_ai_enabled", _disabled)
+    facade = PluginAI(account_id=7, plugin_key="demo", provider_loader=_loader)
+
+    with pytest.raises(AIUnavailableError, match="AI 能力已在系统设置中关闭"):
+        await facade.list_providers()
+
+    assert invoked is False
 
 
 @pytest.mark.asyncio

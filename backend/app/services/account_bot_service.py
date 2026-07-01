@@ -19,6 +19,7 @@ from ..account_bot_defaults import (
     DEFAULT_INTERACTION_DISABLED_MESSAGE,
     DEFAULT_INTERACTION_QUERY_COMMANDS,
     DEFAULT_INTERACTION_QUERY_EMPTY_MESSAGE,
+    DEFAULT_INTERACTION_QUERY_ITEM_TEMPLATE,
     DEFAULT_INTERACTION_QUERY_RESPONSE_TEMPLATE,
     DEFAULT_INTERACTION_RESPONSE_TEMPLATE,
     DEFAULT_TRANSFER_NOTICE_TEMPLATE,
@@ -46,6 +47,8 @@ from ..schemas.account_bot import (
     AccountBotUserUpdate,
 )
 from ..settings import settings
+from .event_bus import VALID_EVENT_TYPES
+from .interaction.contracts import send_via_selector_options, unsupported_send_via_values
 
 log = logging.getLogger(__name__)
 
@@ -55,9 +58,12 @@ TRANSFER_NOTICE_SETTING_PREFIX = "account_bot_transfer_notice:"
 VALID_TRIGGER_MODES = {"payment", "keyword", "both"}
 VALID_AMOUNT_MATCH_MODES = {"eq", "gte"}
 VALID_CONCURRENCY = {"chat", "user", "none"}
-VALID_INTERACTION_EVENTS = {"payment_confirmed", "keyword", "message", "callback_query", "session_close"}
+VALID_INTERACTION_EVENTS = set(VALID_EVENT_TYPES)
 VALID_INTERACTION_LAUNCH_MODES = {"bridge", "direct", "hybrid"}
-VALID_INTERACTION_SEND_VIA = {"interaction_bot", "userbot_reply", "bbot_notice"}
+VALID_INTERACTION_SEND_VIA = {"interaction_bot", "userbot_reply"}
+TRUSTED_INTERACTION_SEND_VIA = ["interaction_bot", "userbot_reply"]
+VALID_INTERACTION_DISPATCH_MODES = {"admin_command", "public_keyword"}
+VALID_INTERACTION_MESSAGE_CHANNELS = {"interaction_bot", "userbot_reply", "auto"}
 VALID_INTERACTION_PARTICIPANT_POLICIES = {"open_race", "solo_owner", "paid_pool", "notify_only"}
 FALLBACK_CHAT_SESSION_MODULE_ENTRIES = {
     ("dice_grid_hunt", "start_dice_grid_hunt"),
@@ -72,7 +78,7 @@ FALLBACK_NO_PRIZE_MODULE_ENTRIES = {
 FALLBACK_SOLO_OWNER_MODULE_ENTRIES = {
     ("blackjack", "start_blackjack"),
 }
-RULE_CONTROLLED_MODULE_CONFIG_KEYS = {"prize", "timeout", "valid_seconds"}
+RULE_CONTROLLED_MODULE_CONFIG_KEYS = {"prize", "valid_seconds"}
 DEFAULT_MATH10_START_KEYWORDS = ["发十以内算数", "十以内算数", "开算数题"]
 
 ROLE_RANK = {
@@ -203,6 +209,7 @@ def default_transfer_notice_config() -> dict[str, Any]:
         "status_commands": [],
         "query_commands": list(DEFAULT_INTERACTION_QUERY_COMMANDS),
         "query_response_template": DEFAULT_INTERACTION_QUERY_RESPONSE_TEMPLATE,
+        "query_item_template": DEFAULT_INTERACTION_QUERY_ITEM_TEMPLATE,
         "query_empty_message": DEFAULT_INTERACTION_QUERY_EMPTY_MESSAGE,
         "disabled_message": DEFAULT_INTERACTION_DISABLED_MESSAGE,
         "valid_seconds": 600,
@@ -332,6 +339,9 @@ def normalize_transfer_notice_config(raw: Any) -> dict[str, Any]:
     query_response_template = str(base.get("query_response_template") or "").strip()
     base["query_response_template"] = query_response_template or DEFAULT_INTERACTION_QUERY_RESPONSE_TEMPLATE
     base["query_response_template"] = base["query_response_template"][:2000]
+    query_item_template = str(base.get("query_item_template") or "").strip()
+    base["query_item_template"] = query_item_template or DEFAULT_INTERACTION_QUERY_ITEM_TEMPLATE
+    base["query_item_template"] = base["query_item_template"][:1000]
     query_empty_message = str(base.get("query_empty_message") or "").strip()
     base["query_empty_message"] = query_empty_message or DEFAULT_INTERACTION_QUERY_EMPTY_MESSAGE
     base["query_empty_message"] = base["query_empty_message"][:500]
@@ -442,6 +452,37 @@ def normalize_interaction_entry_manifest(raw: Any) -> dict[str, Any] | None:
                 events.append(event)
     if not events:
         events = ["payment_confirmed", "keyword", "message", "session_close"]
+    command_fallback = raw.get("command_fallback")
+    has_command_fallback = isinstance(command_fallback, dict) and bool(command_fallback.get("enabled", True))
+    dispatch_modes: list[str] = []
+    raw_dispatch_modes = raw.get("dispatch_modes")
+    if isinstance(raw_dispatch_modes, list):
+        for raw_item in raw_dispatch_modes:
+            item = str(raw_item or "").strip()
+            if item in VALID_INTERACTION_DISPATCH_MODES and item not in dispatch_modes:
+                dispatch_modes.append(item)
+    if not dispatch_modes:
+        if launch_mode in {"direct", "hybrid"} or has_command_fallback:
+            dispatch_modes.append("admin_command")
+        if launch_mode in {"bridge", "hybrid"}:
+            dispatch_modes.append("public_keyword")
+    if not dispatch_modes:
+        dispatch_modes = ["public_keyword"]
+    raw_message_channels = raw.get("message_channels")
+    message_channels: dict[str, Any] = {}
+    if isinstance(raw_message_channels, dict):
+        for mode, channel in raw_message_channels.items():
+            mode_key = str(mode or "").strip()
+            channel_value = _normalize_interaction_message_channel(channel)
+            if mode_key in VALID_INTERACTION_DISPATCH_MODES and channel_value is not None:
+                message_channels[mode_key] = channel_value
+    if "admin_command" in dispatch_modes:
+        message_channels.setdefault("admin_command", "userbot_reply")
+    if "public_keyword" in dispatch_modes:
+        message_channels.setdefault("public_keyword", "interaction_bot")
+    money_channel = str(raw.get("money_channel") or "userbot_reply").strip()
+    if money_channel not in {"userbot_reply"}:
+        money_channel = "userbot_reply"
     out = dict(raw)
     out.update(
         {
@@ -449,6 +490,9 @@ def normalize_interaction_entry_manifest(raw: Any) -> dict[str, Any] | None:
             "launch_mode": launch_mode,
             "session_scope": scope,
             "events": events,
+            "dispatch_modes": dispatch_modes,
+            "message_channels": message_channels,
+            "money_channel": money_channel,
             "preserve_command_trigger": bool(raw.get("preserve_command_trigger", True)),
         }
     )
@@ -461,22 +505,45 @@ def normalize_interaction_entry_manifest(raw: Any) -> dict[str, Any] | None:
     result_contract = raw.get("result_contract")
     if isinstance(result_contract, dict):
         normalized_result_contract = dict(result_contract)
-        send_via: list[str] = []
-        raw_send_via = result_contract.get("send_via")
-        if isinstance(raw_send_via, list):
-            for raw_item in raw_send_via:
-                item = str(raw_item or "").strip()
-                if item in VALID_INTERACTION_SEND_VIA and item not in send_via:
-                    send_via.append(item)
+        send_via = _normalize_result_contract_send_via(result_contract.get("send_via"))
         if send_via:
             normalized_result_contract["send_via"] = send_via
-        elif "send_via" in normalized_result_contract:
-            normalized_result_contract["send_via"] = ["interaction_bot"]
         out["result_contract"] = normalized_result_contract
-    command_fallback = raw.get("command_fallback")
     if isinstance(command_fallback, dict):
         out["command_fallback"] = dict(command_fallback)
     return out
+
+
+def _normalize_interaction_message_channel(raw: Any) -> Any:
+    if isinstance(raw, str):
+        channel = raw.strip()
+        if channel in VALID_INTERACTION_MESSAGE_CHANNELS:
+            return channel
+    options = send_via_selector_options(raw)
+    if not options:
+        return None
+    if isinstance(raw, dict):
+        out: dict[str, Any] = {"prefer": options}
+        if "fallback" in raw:
+            out["fallback"] = bool(raw.get("fallback"))
+        return out
+    if isinstance(raw, (list, tuple, set)):
+        return options
+    return options[0]
+
+
+def _normalize_result_contract_send_via(raw: Any) -> list[str]:
+    raw_items = raw if isinstance(raw, list) else [raw]
+    send_via: list[str] = []
+    for raw_item in raw_items:
+        options = send_via_selector_options(raw_item)
+        for item in options:
+            if item in VALID_INTERACTION_SEND_VIA and item not in send_via:
+                send_via.append(item)
+        for item in unsupported_send_via_values(raw_item):
+            if item not in send_via:
+                send_via.append(item)
+    return send_via
 
 
 def _entry_session_scope_from_entries(entries: Any, entry_key: str | None) -> str | None:
@@ -526,6 +593,18 @@ def _entry_events_from_entries(entries: Any, entry_key: str | None) -> list[str]
     return []
 
 
+def _entry_manifest_from_entries(entries: Any, entry_key: str | None) -> dict[str, Any] | None:
+    if not entry_key or not isinstance(entries, list):
+        return None
+    for raw_entry in entries:
+        entry = normalize_interaction_entry_manifest(raw_entry)
+        if entry is None:
+            continue
+        if str(entry.get("key") or "").strip() == entry_key:
+            return entry
+    return None
+
+
 def _entry_has_field_from_entries(entries: Any, entry_key: str | None, field_name: str) -> bool | None:
     if not entry_key or not isinstance(entries, list):
         return None
@@ -559,17 +638,84 @@ def _entry_key_from_entries(entries: Any) -> str | None:
     return keys[0] if len(keys) == 1 else None
 
 
-def _plugin_json_interaction_entries(module_key: str | None) -> Any:
+def _plugin_json_metadata(module_key: str | None) -> dict[str, Any] | None:
     if not module_key:
         return None
     plugin_json = settings.plugins_installed_path / module_key / "plugin.json"
     if not plugin_json.exists():
         return None
     meta = json.loads(plugin_json.read_text(encoding="utf-8"))
+    return meta if isinstance(meta, dict) else None
+
+
+def _plugin_json_interaction_entries(module_key: str | None) -> Any:
+    meta = _plugin_json_metadata(module_key)
+    if not isinstance(meta, dict):
+        return None
     raw_entries = meta.get("interaction_entries")
     if raw_entries is None and isinstance(meta.get("config_schema"), dict):
         raw_entries = meta["config_schema"].get("x-interaction-entries")
     return raw_entries
+
+
+def declared_module_event_subscriptions(module_key: str | None) -> list[dict[str, Any]]:
+    """Return Event Bus subscriptions declared by builtin or installed plugin metadata."""
+
+    if not module_key:
+        return []
+    try:
+        manifest = BUILTIN_FEATURES.manifest_for(module_key)
+        raw_subscriptions = getattr(manifest, "event_subscriptions", None) if manifest is not None else None
+        if isinstance(raw_subscriptions, list):
+            subscriptions = [dict(item) for item in raw_subscriptions if isinstance(item, dict)]
+            if subscriptions:
+                return subscriptions
+    except Exception:  # noqa: BLE001
+        log.debug("读取 builtin 模块事件订阅失败: %s", module_key, exc_info=True)
+    try:
+        meta = _plugin_json_metadata(module_key)
+        raw_subscriptions = meta.get("event_subscriptions") if isinstance(meta, dict) else None
+        if isinstance(raw_subscriptions, list):
+            return [dict(item) for item in raw_subscriptions if isinstance(item, dict)]
+    except Exception:  # noqa: BLE001
+        log.debug("读取 installed 模块事件订阅失败: %s", module_key, exc_info=True)
+    return []
+
+
+def declared_plugin_capabilities(module_key: str | None) -> dict[str, Any]:
+    """Return high-risk capability declarations for a plugin."""
+
+    if not module_key:
+        return {}
+    try:
+        manifest = BUILTIN_FEATURES.manifest_for(module_key)
+        raw_capabilities = getattr(manifest, "capabilities", None) if manifest is not None else None
+        if isinstance(raw_capabilities, dict) and raw_capabilities:
+            return dict(raw_capabilities)
+    except Exception:  # noqa: BLE001
+        log.debug("读取 builtin 模块能力声明失败: %s", module_key, exc_info=True)
+    try:
+        meta = _plugin_json_metadata(module_key)
+        raw_capabilities = meta.get("capabilities") if isinstance(meta, dict) else None
+        if isinstance(raw_capabilities, dict) and raw_capabilities:
+            return dict(raw_capabilities)
+    except Exception:  # noqa: BLE001
+        log.debug("读取 installed 模块能力声明失败: %s", module_key, exc_info=True)
+    return {}
+
+
+def plugin_declares_telegram_native_raw(module_key: str | None, *, source: str = "interaction_bot") -> bool:
+    """Whether a plugin explicitly asks for native Telegram raw event payloads."""
+
+    capabilities = declared_plugin_capabilities(module_key)
+    raw = capabilities.get("telegram_native_raw")
+    if not isinstance(raw, dict) or not bool(raw.get("enabled")):
+        return False
+    sources = raw.get("sources")
+    if isinstance(sources, list) and sources:
+        allowed_sources = {str(item or "").strip() for item in sources}
+        return source in allowed_sources or "all" in allowed_sources
+    return True
 
 
 def _declared_module_single_entry_key(module_key: str | None) -> str | None:
@@ -588,6 +734,17 @@ def _declared_module_single_entry_key(module_key: str | None) -> str | None:
             return key
     except Exception:  # noqa: BLE001
         log.debug("读取 installed 模块交互入口失败: %s", module_key, exc_info=True)
+    fallback_keys = sorted(
+        entry_key
+        for fallback_module_key, entry_key in (
+            set(FALLBACK_CHAT_SESSION_MODULE_ENTRIES)
+            | set(FALLBACK_NO_PRIZE_MODULE_ENTRIES)
+            | set(FALLBACK_SOLO_OWNER_MODULE_ENTRIES)
+        )
+        if fallback_module_key == module_key
+    )
+    if len(fallback_keys) == 1:
+        return fallback_keys[0]
     return None
 
 
@@ -650,6 +807,27 @@ def declared_module_entry_events(module_key: str | None, module_action: str | No
     except Exception:  # noqa: BLE001
         log.debug("读取 installed 模块交互入口事件失败: %s.%s", module_key, module_action, exc_info=True)
     return []
+
+
+def declared_module_entry_manifest(module_key: str | None, module_action: str | None) -> dict[str, Any] | None:
+    """返回交互入口的规范化声明；未知入口返回 None 以保留旧配置兼容。"""
+
+    if not module_key or not module_action:
+        return None
+    try:
+        manifest = BUILTIN_FEATURES.manifest_for(module_key)
+        entry = _entry_manifest_from_entries(getattr(manifest, "interaction_entries", None), module_action)
+        if entry:
+            return entry
+    except Exception:  # noqa: BLE001
+        log.debug("读取 builtin 模块交互入口声明失败: %s.%s", module_key, module_action, exc_info=True)
+    try:
+        entry = _entry_manifest_from_entries(_plugin_json_interaction_entries(module_key), module_action)
+        if entry:
+            return entry
+    except Exception:  # noqa: BLE001
+        log.debug("读取 installed 模块交互入口声明失败: %s.%s", module_key, module_action, exc_info=True)
+    return None
 
 
 def declared_module_entry_has_field(module_key: str | None, module_action: str | None, field_name: str) -> bool | None:
@@ -1274,6 +1452,29 @@ async def answer_callback(
     if text:
         payload["text"] = text[:200]
     await call_bot_api(token, "answerCallbackQuery", payload, timeout=httpx.Timeout(10.0))
+
+
+async def answer_inline_query(
+    token: str,
+    inline_query_id: str,
+    *,
+    results: list[dict[str, Any]],
+    cache_time: int = 0,
+    is_personal: bool = True,
+    next_offset: str | None = None,
+    button: dict[str, Any] | None = None,
+) -> None:
+    payload: dict[str, Any] = {
+        "inline_query_id": inline_query_id,
+        "results": results[:50],
+        "cache_time": max(0, int(cache_time or 0)),
+        "is_personal": bool(is_personal),
+    }
+    if next_offset is not None:
+        payload["next_offset"] = str(next_offset)
+    if isinstance(button, dict):
+        payload["button"] = button
+    await call_bot_api(token, "answerInlineQuery", payload, timeout=httpx.Timeout(10.0))
 
 
 def html_text(value: Any) -> str:

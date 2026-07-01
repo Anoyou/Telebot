@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from app.services import event_trace
 from app.worker.command import (
     _BUILTIN,
     CommandContext,
@@ -53,6 +54,120 @@ async def test_ping():
     event = AsyncMock()
     await _BUILTIN["ping"].handler(client, event, [], 1)
     event.edit.assert_called_once_with("pong")
+
+
+@pytest.mark.asyncio
+async def test_dispatch_command_creates_trace(monkeypatch):
+    """UserBot 命令分发必须产生 Trace，避免命令链路成为日志盲区。"""
+    from app.worker import command as wcmd
+
+    trace = event_trace.TraceContext(trace_id="evt_cmd", account_id=1, event_type="command")
+    start_trace = AsyncMock(return_value=trace)
+    record_span = AsyncMock()
+    record_action = AsyncMock()
+    finish_trace = AsyncMock()
+    dispatch_event = MagicMock(side_effect=wcmd.dispatch_event)
+    monkeypatch.setattr(wcmd, "_command_trace_enabled", AsyncMock(return_value=True))
+    monkeypatch.setattr(wcmd, "start_trace", start_trace)
+    monkeypatch.setattr(wcmd, "record_span", record_span)
+    monkeypatch.setattr(wcmd, "record_action", record_action)
+    monkeypatch.setattr(wcmd, "finish_trace", finish_trace)
+    monkeypatch.setattr(wcmd, "dispatch_event", dispatch_event)
+
+    client = AsyncMock()
+    event = AsyncMock()
+    event.raw_text = ",ping"
+    event.message = SimpleNamespace(id=1, chat_id=10, sender_id=20, text=",ping")
+
+    await wcmd._dispatch_command(client, event, "ping", "", account_id=1, help_prefix=",")
+
+    start_trace.assert_awaited_once()
+    assert start_trace.await_args.args[0]["source"]["type"] == "command"
+    assert start_trace.await_args.args[0]["trigger"]["command"] == "ping"
+    assert any(call.args[1] == "receive" for call in record_span.await_args_list)
+    assert any(call.args[1] == "command_parse" for call in record_span.await_args_list)
+    assert any(
+        call.args[1] == "subscription_match"
+        and call.kwargs.get("reason_code") == "command_matched"
+        and call.kwargs.get("dispatch_mode") == "admin_command"
+        and call.kwargs.get("event_bus_decisions", [{}])[0].get("matched") is True
+        for call in record_span.await_args_list
+    )
+    dispatch_event.assert_called_once()
+    record_action.assert_awaited_once()
+    assert record_action.await_args.args[1]["type"] == "edit_message"
+    assert record_action.await_args.kwargs["actual_send_via"] == "userbot_reply"
+    finish_trace.assert_awaited_once_with(trace, "ok")
+
+
+@pytest.mark.asyncio
+async def test_dispatch_plugin_command_creates_event_bus_decision(monkeypatch):
+    """插件注册命令也必须经过 command decision 后再调用 handler。"""
+    from app.worker import command as wcmd
+
+    trace = event_trace.TraceContext(trace_id="evt_plugin_cmd", account_id=1, event_type="command")
+    start_trace = AsyncMock(return_value=trace)
+    record_span = AsyncMock()
+    record_action = AsyncMock()
+    finish_trace = AsyncMock()
+    dispatch_event = MagicMock(side_effect=wcmd.dispatch_event)
+    monkeypatch.setattr(wcmd, "_command_trace_enabled", AsyncMock(return_value=True))
+    monkeypatch.setattr(wcmd, "start_trace", start_trace)
+    monkeypatch.setattr(wcmd, "record_span", record_span)
+    monkeypatch.setattr(wcmd, "record_action", record_action)
+    monkeypatch.setattr(wcmd, "finish_trace", finish_trace)
+    monkeypatch.setattr(wcmd, "dispatch_event", dispatch_event)
+
+    async def handler(_client, event, args, _account_id):
+        await event.edit(f"plugin ok {' '.join(args)}")
+
+    command_name = "demo_plugin_cmd"
+    wcmd.register_plugin_command(command_name, handler, owner_plugin_key="demo_plugin", generation=1)
+    try:
+        client = AsyncMock()
+        event = AsyncMock()
+        event.raw_text = f",{command_name} alpha"
+        event.message = SimpleNamespace(id=1, chat_id=10, sender_id=20, text=f",{command_name} alpha")
+
+        await wcmd._dispatch_command(client, event, command_name, "alpha", account_id=1, help_prefix=",")
+    finally:
+        wcmd.unregister_plugin_command(command_name, owner_plugin_key="demo_plugin")
+
+    dispatch_event.assert_called_once()
+    assert start_trace.await_args.args[0]["trigger"]["plugin_key"] == "demo_plugin"
+    assert any(
+        call.args[1] == "subscription_match"
+        and call.kwargs.get("plugin_key") == "demo_plugin"
+        and call.kwargs.get("event_bus_decisions", [{}])[0].get("plugin_key") == "demo_plugin"
+        and call.kwargs.get("event_bus_decisions", [{}])[0].get("matched") is True
+        for call in record_span.await_args_list
+    )
+    record_action.assert_awaited_once()
+    assert record_action.await_args.args[1]["type"] == "edit_message"
+    assert record_action.await_args.args[1]["plugin_key"] == "demo_plugin"
+    finish_trace.assert_awaited_once_with(trace, "ok")
+
+
+@pytest.mark.asyncio
+async def test_trace_command_client_pin_message_records_action(monkeypatch):
+    """命令 handler 通过 client 置顶消息也必须落 event_action。"""
+    from app.worker import command as wcmd
+
+    trace = event_trace.TraceContext(trace_id="evt_cmd_pin", account_id=1, event_type="command")
+    record_action = AsyncMock()
+    monkeypatch.setattr(wcmd, "record_action", record_action)
+    raw_client = AsyncMock()
+    raw_client.pin_message = AsyncMock(return_value=SimpleNamespace(id=55))
+    traced_client = wcmd._TraceCommandClient(raw_client, trace, command="pin", plugin_key="demo")
+
+    await traced_client.pin_message(-100, 55, notify=False)
+
+    raw_client.pin_message.assert_awaited_once_with(-100, 55, notify=False)
+    record_action.assert_awaited_once()
+    assert record_action.await_args.args[1]["type"] == "pin_message"
+    assert record_action.await_args.args[1]["message_id"] == 55
+    assert record_action.await_args.args[2] == "ok"
+    assert record_action.await_args.kwargs["actual_send_via"] == "userbot_reply"
 
 
 # ════════════════════════════════════════════════════════════
@@ -116,6 +231,163 @@ async def test_handler_uses_dynamic_prefix_from_ctx():
     msg = event3.edit.call_args[0][0]
     assert "未知命令" in msg
     assert "-help" in msg  # 提示用新前缀，不是 ",help"
+
+
+@pytest.mark.asyncio
+async def test_outgoing_prefix_plugin_command_runs_for_account_owner():
+    """账号本人发系统前缀插件命令时，应进入 userbot 插件命令链路。"""
+    from app.worker import command as wcmd
+    from app.worker.command import make_command_handler
+
+    captured = {}
+
+    def fake_on(_event_type):
+        def deco(fn):
+            captured["fn"] = fn
+            return fn
+
+        return deco
+
+    plugin_handler = AsyncMock()
+    wcmd.register_plugin_command("10d", plugin_handler, owner_plugin_key="ten_half", generation=1)
+    try:
+        client = MagicMock()
+        client.on = fake_on
+        make_command_handler(client, account_id=1, prefix="。")
+        handler = captured["fn"]
+        set_command_context(
+            CommandContext(
+                account_id=1,
+                templates={},
+                providers={},
+                command_prefix="。",
+            )
+        )
+
+        event = AsyncMock()
+        event.raw_text = "。10d 6789"
+        await handler(event)
+
+        plugin_handler.assert_awaited_once()
+        assert plugin_handler.await_args.args[2] == ["6789"]
+        assert plugin_handler.await_args.args[3] == 1
+    finally:
+        wcmd.unregister_plugin_command("10d", owner_plugin_key="ten_half")
+
+
+@pytest.mark.asyncio
+async def test_outgoing_bare_command_requires_setting_to_be_disabled():
+    """默认必须带系统前缀，账号本人裸命令也不会触发。"""
+    from app.worker.command import make_command_handler
+
+    captured = {}
+
+    def fake_on(_event_type):
+        def deco(fn):
+            captured["fn"] = fn
+            return fn
+
+        return deco
+
+    client = MagicMock()
+    client.on = fake_on
+    make_command_handler(client, account_id=1, prefix="。")
+    handler = captured["fn"]
+    set_command_context(
+        CommandContext(
+            account_id=1,
+            templates={},
+            providers={},
+            command_prefix="。",
+            command_prefix_required=True,
+        )
+    )
+
+    event = AsyncMock()
+    event.raw_text = "ping"
+    await handler(event)
+    event.edit.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_outgoing_bare_command_runs_when_prefix_not_required():
+    """关闭必须带前缀后，仅账号本人 outgoing 裸命令可触发已有命令。"""
+    from app.worker.command import make_command_handler
+
+    captured = {}
+
+    def fake_on(_event_type):
+        def deco(fn):
+            captured["fn"] = fn
+            return fn
+
+        return deco
+
+    client = MagicMock()
+    client.on = fake_on
+    make_command_handler(client, account_id=1, prefix="。")
+    handler = captured["fn"]
+    set_command_context(
+        CommandContext(
+            account_id=1,
+            templates={},
+            providers={},
+            command_prefix="。",
+            command_prefix_required=False,
+        )
+    )
+
+    event = AsyncMock()
+    event.raw_text = "ping"
+    await handler(event)
+    event.edit.assert_called_with("pong")
+
+    unknown = AsyncMock()
+    unknown.raw_text = "普通聊天"
+    await handler(unknown)
+    unknown.edit.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_outgoing_bare_plugin_command_runs_when_prefix_not_required():
+    """关闭必须带前缀后，账号本人可裸写插件注册命令。"""
+    from app.worker import command as wcmd
+    from app.worker.command import make_command_handler
+
+    captured = {}
+
+    def fake_on(_event_type):
+        def deco(fn):
+            captured["fn"] = fn
+            return fn
+
+        return deco
+
+    plugin_handler = AsyncMock()
+    wcmd.register_plugin_command("10d", plugin_handler, owner_plugin_key="ten_half", generation=1)
+    try:
+        client = MagicMock()
+        client.on = fake_on
+        make_command_handler(client, account_id=1, prefix="。")
+        handler = captured["fn"]
+        set_command_context(
+            CommandContext(
+                account_id=1,
+                templates={},
+                providers={},
+                command_prefix="。",
+                command_prefix_required=False,
+            )
+        )
+
+        event = AsyncMock()
+        event.raw_text = "10d 6789"
+        await handler(event)
+
+        plugin_handler.assert_awaited_once()
+        assert plugin_handler.await_args.args[2] == ["6789"]
+    finally:
+        wcmd.unregister_plugin_command("10d", owner_plugin_key="ten_half")
 
 
 @pytest.mark.asyncio
@@ -260,10 +532,16 @@ def test_command_context_has_command_prefix_field():
     """守门测试：CommandContext 必须有 command_prefix 字段且默认 ","。"""
     ctx = CommandContext(account_id=1, templates={}, providers={})
     assert ctx.command_prefix == ","
+    assert ctx.command_prefix_required is True
     ctx2 = CommandContext(
-        account_id=1, templates={}, providers={}, command_prefix="-"
+        account_id=1,
+        templates={},
+        providers={},
+        command_prefix="-",
+        command_prefix_required=False,
     )
     assert ctx2.command_prefix == "-"
+    assert ctx2.command_prefix_required is False
 
 
 def test_re_escape_special_prefix():

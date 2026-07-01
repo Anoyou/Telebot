@@ -11,6 +11,7 @@ from ..account_bot_defaults import (
     DEFAULT_INTERACTION_DISABLED_MESSAGE,
     DEFAULT_INTERACTION_QUERY_COMMANDS,
     DEFAULT_INTERACTION_QUERY_EMPTY_MESSAGE,
+    DEFAULT_INTERACTION_QUERY_ITEM_TEMPLATE,
     DEFAULT_INTERACTION_QUERY_RESPONSE_TEMPLATE,
     DEFAULT_INTERACTION_RESPONSE_TEMPLATE,
     DEFAULT_TRANSFER_NOTICE_TEMPLATE,
@@ -23,7 +24,7 @@ InteractionAmountMatchMode = Literal["eq", "gte"]
 InteractionConcurrency = Literal["chat", "user", "none"]
 InteractionParticipantPolicy = Literal["open_race", "solo_owner", "paid_pool", "notify_only"]
 InteractionEventType = Literal["payment_confirmed", "keyword", "message", "callback_query", "session_close"]
-InteractionSendVia = Literal["interaction_bot", "userbot_reply", "bbot_notice"]
+InteractionSendVia = Literal["interaction_bot", "userbot_reply"]
 
 
 class AccountBotInteractionEnvelopeSource(BaseModel):
@@ -85,10 +86,27 @@ class AccountBotInteractionAction(BaseModel):
     type: str = Field(max_length=64)
     text: str | None = Field(default=None, max_length=4000)
     send_via: InteractionSendVia | None = None
+    send_via_options: list[str] | None = None
+    channel: Any | None = None
+    channel_selector: Any | None = None
+    chat_id: int | None = None
     reply_to_message_id: int | None = None
     reply_markup: dict[str, Any] | None = None
     settlement: AccountBotInteractionSettlement | None = None
     data: dict[str, Any] = Field(default_factory=dict)
+
+
+class AccountBotInteractionDebugSnapshot(BaseModel):
+    ts: float | None = None
+    stage: str | None = None
+    chat_id: int | None = None
+    message_id: int | None = None
+    update_id: int | None = None
+    payload: dict[str, Any] = Field(default_factory=dict)
+    actions: list[dict[str, Any]] = Field(default_factory=list)
+    guarded_actions: list[dict[str, Any]] = Field(default_factory=list)
+    warnings: list[dict[str, Any]] = Field(default_factory=list)
+    error: str | None = None
 
 
 class AccountBotRemotePluginPolicy(BaseModel):
@@ -283,6 +301,7 @@ class AccountBotInteractionConfig(BaseModel):
     interaction_runtime_status: Literal["running", "stopped"] = "stopped"
     interaction_last_update_id: int | None = None
     interaction_last_error: str | None = None
+    interaction_debug: AccountBotInteractionDebugSnapshot = Field(default_factory=AccountBotInteractionDebugSnapshot)
     trusted_bot_id: int | None = None
     transfer_bot_id: int | None = None
     transfer_bot_token: str | None = Field(default=None, min_length=10, max_length=256)
@@ -314,6 +333,10 @@ class AccountBotInteractionConfig(BaseModel):
     query_response_template: str = Field(
         default=DEFAULT_INTERACTION_QUERY_RESPONSE_TEMPLATE,
         max_length=2000,
+    )
+    query_item_template: str = Field(
+        default=DEFAULT_INTERACTION_QUERY_ITEM_TEMPLATE,
+        max_length=1000,
     )
     query_empty_message: str = Field(
         default=DEFAULT_INTERACTION_QUERY_EMPTY_MESSAGE,
@@ -353,7 +376,7 @@ class AccountBotInteractionConfig(BaseModel):
             raise ValueError("不能包含换行")
         return value or None
 
-    @field_validator("trigger_text", "query_response_template", "query_empty_message", "response_template", "transfer_notice_template")
+    @field_validator("trigger_text", "query_response_template", "query_item_template", "query_empty_message", "response_template", "transfer_notice_template")
     @classmethod
     def _trim_required_text(cls, v: str) -> str:
         value = str(v or "").strip()

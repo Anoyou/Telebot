@@ -20,12 +20,14 @@ import shlex
 import shutil
 import subprocess
 import time
+import urllib.error
+import urllib.request
 from collections import Counter
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, File, UploadFile
+from fastapi import APIRouter, Body, File, UploadFile
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select, text
@@ -1154,6 +1156,21 @@ def _run_git(*args: str, timeout: int = 30) -> tuple[str, str, int]:
         return "", str(e), 1
 
 
+def _default_update_remote_branch() -> tuple[str, str]:
+    remote = (os.getenv("TELEPILOT_UPDATE_REMOTE") or "origin").strip() or "origin"
+    env_branch = (os.getenv("TELEPILOT_UPDATE_BRANCH") or "").strip()
+    if env_branch:
+        return remote, env_branch
+    upstream_out, _, upstream_rc = _run_git("rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}", timeout=5)
+    if upstream_rc == 0 and "/" in upstream_out:
+        upstream_remote, upstream_branch = upstream_out.split("/", 1)
+        return upstream_remote or remote, upstream_branch or "main"
+    branch_out, _, branch_rc = _run_git("rev-parse", "--abbrev-ref", "HEAD", timeout=5)
+    if branch_rc == 0 and branch_out and branch_out != "HEAD":
+        return remote, branch_out
+    return remote, "main"
+
+
 def _is_container_runtime() -> bool:
     """检测当前是否运行在容器内。"""
     if Path("/.dockerenv").exists():
@@ -1182,10 +1199,83 @@ def _resolve_host_updater() -> str | None:
     return None
 
 
+def _resolve_http_updater() -> str | None:
+    """返回可用的内部 updater sidecar URL。"""
+
+    raw = (os.getenv("TELEPILOT_UPDATER_URL") or "").strip().rstrip("/")
+    if not raw:
+        return None
+    try:
+        req = urllib.request.Request(f"{raw}/health", method="GET")
+        with urllib.request.urlopen(req, timeout=0.8) as resp:  # noqa: S310 - internal configured URL
+            if 200 <= int(resp.status) < 300:
+                return raw
+    except Exception:
+        return None
+    return None
+
+
+def _updater_token() -> str:
+    return (os.getenv("TELEPILOT_UPDATER_TOKEN") or "").strip()
+
+
+def _updater_request(path: str, payload: dict[str, Any] | None = None, *, timeout: int = 30) -> dict[str, Any]:
+    url = _resolve_http_updater()
+    if not url:
+        raise RuntimeError("内部 updater 不可用")
+    body = json.dumps(payload or {}, ensure_ascii=False).encode("utf-8")
+    headers = {"Content-Type": "application/json"}
+    token = _updater_token()
+    if token:
+        headers["X-TelePilot-Updater-Token"] = token
+    req = urllib.request.Request(f"{url}{path}", data=body, headers=headers, method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310 - internal configured URL
+            text = resp.read().decode("utf-8", errors="ignore")
+    except urllib.error.HTTPError as exc:
+        text = exc.read().decode("utf-8", errors="ignore")
+        try:
+            parsed = json.loads(text)
+        except Exception:
+            parsed = {"error": text or str(exc)}
+        if isinstance(parsed, dict):
+            parsed.setdefault("ok", False)
+            return parsed
+        return {"ok": False, "error": str(exc)}
+    parsed = json.loads(text) if text else {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _updater_get(path: str, *, timeout: int = 10) -> dict[str, Any]:
+    url = _resolve_http_updater()
+    if not url:
+        raise RuntimeError("内部 updater 不可用")
+    headers: dict[str, str] = {}
+    token = _updater_token()
+    if token:
+        headers["X-TelePilot-Updater-Token"] = token
+    req = urllib.request.Request(f"{url}{path}", headers=headers, method="GET")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310 - internal configured URL
+            text = resp.read().decode("utf-8", errors="ignore")
+    except urllib.error.HTTPError as exc:
+        text = exc.read().decode("utf-8", errors="ignore")
+        try:
+            parsed = json.loads(text)
+        except Exception:
+            parsed = {"error": text or str(exc)}
+        if isinstance(parsed, dict):
+            parsed.setdefault("ok", False)
+            return parsed
+        return {"ok": False, "error": str(exc)}
+    parsed = json.loads(text) if text else {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
 def _detect_runtime_mode() -> tuple[str, str | None, Path | None]:
     root = _git_root()
     in_container = _is_container_runtime()
-    updater = _resolve_host_updater()
+    updater = _resolve_http_updater() or _resolve_host_updater()
 
     if not in_container and root and (root / "Makefile").exists():
         return RUNTIME_LOCAL_SOURCE, updater, root
@@ -1283,7 +1373,7 @@ def _plan_text(
     can_apply: bool,
 ) -> tuple[str, str]:
     if not has_update:
-        return "已是最新版本", "当前代码与 origin/main 一致，无需更新。"
+        return "已是最新版本", "当前代码与目标分支一致，无需更新。"
 
     label = "检测到可更新变更"
     detail_parts: list[str] = []
@@ -1314,12 +1404,77 @@ def _plan_text(
     return label, " ".join(detail_parts)
 
 
+def _check_response_from_plan(
+    *,
+    runtime_mode: str,
+    updater: str | None,
+    remote: str,
+    branch: str,
+    plan: dict[str, Any],
+    can_apply: bool,
+    manual_command: str | None,
+) -> CheckUpdateResponse:
+    if not plan.get("ok", True):
+        return CheckUpdateResponse(
+            remote=remote,
+            branch=branch,
+            runtime_mode=runtime_mode,
+            update_executor=updater,
+            can_apply=can_apply,
+            manual_command=manual_command,
+            plan_label="更新检查失败",
+            plan_detail="执行远程更新检查失败，请查看错误信息。",
+            error=str(plan.get("error") or "更新检查失败"),
+        )
+    has_update = bool(plan.get("has_update"))
+    changed_files = [str(item) for item in plan.get("changed_files") or []]
+    components = [str(item) for item in plan.get("components") or ["none"]]
+    requires_full_update = bool(plan.get("requires_full_update"))
+    requires_backup = bool(plan.get("requires_backup"))
+    action_required = _action_required_for_plan(
+        runtime_mode,
+        has_update,
+        components,
+        requires_full_update,
+    )
+    plan_label, plan_detail = _plan_text(
+        runtime_mode=runtime_mode,
+        has_update=has_update,
+        components=components,
+        requires_full_update=requires_full_update,
+        requires_backup=requires_backup,
+        can_apply=can_apply,
+    )
+    return CheckUpdateResponse(
+        has_update=has_update,
+        current_commit=str(plan.get("current_commit") or "") or None,
+        remote_commit=str(plan.get("remote_commit") or "") or None,
+        ahead=int(plan.get("ahead") or 0),
+        remote=remote,
+        branch=branch,
+        changed_files=changed_files,
+        runtime_mode=runtime_mode,
+        update_executor=updater,
+        action_required=action_required,
+        plan_label=plan_label,
+        plan_detail=plan_detail,
+        components=components,
+        requires_full_update=requires_full_update,
+        requires_backup=requires_backup,
+        can_apply=can_apply,
+        manual_command=manual_command,
+    )
+
+
 class CheckUpdateResponse(BaseModel):
     has_update: bool = False
     current_commit: str | None = None
     remote_commit: str | None = None
     ahead: int = 0
+    remote: str = "origin"
+    branch: str = "main"
     runtime_mode: str = RUNTIME_UNSUPPORTED
+    update_executor: str | None = None
     action_required: str = "none"
     plan_label: str = ""
     plan_detail: str = ""
@@ -1336,7 +1491,12 @@ class PullUpdateResponse(BaseModel):
     success: bool = False
     new_commit: str | None = None
     summary: str | None = None
+    job_id: str | None = None
+    status: str | None = None
+    remote: str = "origin"
+    branch: str = "main"
     runtime_mode: str = RUNTIME_UNSUPPORTED
+    update_executor: str | None = None
     action_required: str = "none"
     plan_label: str = ""
     plan_detail: str = ""
@@ -1354,17 +1514,81 @@ class RestartResponse(BaseModel):
     error: str | None = None
 
 
+class UpdateRequest(BaseModel):
+    remote: str | None = None
+    branch: str | None = None
+    full: bool = False
+
+
+class UpdateJobStatusResponse(BaseModel):
+    ok: bool = False
+    job_id: str
+    status: str = "unknown"
+    created_at: int | None = None
+    started_at: int | None = None
+    finished_at: int | None = None
+    returncode: int | None = None
+    remote: str | None = None
+    branch: str | None = None
+    new_commit: str | None = None
+    summary: str | None = None
+    error: str | None = None
+    logs: list[str] = Field(default_factory=list)
+    plan: dict[str, Any] | None = None
+
+
+def _normalize_update_request(payload: UpdateRequest | None) -> tuple[str, str, bool]:
+    if not isinstance(payload, UpdateRequest):
+        payload = None
+    default_remote, default_branch = _default_update_remote_branch()
+    remote = str((payload.remote if payload else None) or default_remote).strip() or default_remote
+    branch = str((payload.branch if payload else None) or default_branch).strip() or default_branch
+    full = bool(payload.full) if payload else False
+    return remote, branch, full
+
+
+def _int_or_none(value: Any) -> int | None:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
 @router.post("/check-update", response_model=CheckUpdateResponse)
-async def check_update(_user: CurrentUser) -> CheckUpdateResponse:
-    """仅 git fetch + 对比本地/远程 commit，不拉取代码。"""
+async def check_update(
+    _user: CurrentUser,
+    payload: UpdateRequest | None = Body(default=None),
+) -> CheckUpdateResponse:
+    """仅检查远程更新，不拉取代码。"""
     runtime_mode, updater, root = _detect_runtime_mode()
     can_apply = runtime_mode in {RUNTIME_LOCAL_SOURCE, RUNTIME_PROD_CONTAINER_WITH_UPDATER}
     manual_command = _manual_command_for_runtime(runtime_mode, updater)
+    remote, branch, _force_full = _normalize_update_request(payload)
 
     try:
+        if runtime_mode == RUNTIME_PROD_CONTAINER_WITH_UPDATER and updater and updater.startswith(("http://", "https://")):
+            plan = await asyncio.to_thread(
+                _updater_request,
+                "/check",
+                {"remote": remote, "branch": branch},
+                timeout=120,
+            )
+            return _check_response_from_plan(
+                runtime_mode=runtime_mode,
+                updater=updater,
+                remote=remote,
+                branch=branch,
+                plan=plan,
+                can_apply=can_apply,
+                manual_command=manual_command,
+            )
+
         if runtime_mode == RUNTIME_LOCAL_SOURCE and root is None:
             return CheckUpdateResponse(
+                remote=remote,
+                branch=branch,
                 runtime_mode=runtime_mode,
+                update_executor=updater,
                 can_apply=can_apply,
                 manual_command=manual_command,
                 plan_label="环境检测失败",
@@ -1373,12 +1597,16 @@ async def check_update(_user: CurrentUser) -> CheckUpdateResponse:
             )
 
         if root:
+            remote_ref = f"refs/remotes/{remote}/{branch}"
             fetch_out, fetch_err, fetch_rc = await asyncio.to_thread(
-                _run_git, "fetch", "origin", "main:refs/remotes/origin/main", timeout=30
+                _run_git, "fetch", remote, f"{branch}:{remote_ref}", timeout=30
             )
             if fetch_rc != 0:
                 return CheckUpdateResponse(
+                    remote=remote,
+                    branch=branch,
                     runtime_mode=runtime_mode,
+                    update_executor=updater,
                     can_apply=can_apply,
                     manual_command=manual_command,
                     plan_label="更新检查失败",
@@ -1391,7 +1619,10 @@ async def check_update(_user: CurrentUser) -> CheckUpdateResponse:
             )
             if head_rc != 0:
                 return CheckUpdateResponse(
+                    remote=remote,
+                    branch=branch,
                     runtime_mode=runtime_mode,
+                    update_executor=updater,
                     can_apply=can_apply,
                     manual_command=manual_command,
                     plan_label="更新检查失败",
@@ -1400,49 +1631,39 @@ async def check_update(_user: CurrentUser) -> CheckUpdateResponse:
                 )
 
             remote_out, _, remote_rc = await asyncio.to_thread(
-                _run_git, "rev-parse", "origin/main", timeout=10
+                _run_git, "rev-parse", remote_ref, timeout=10
             )
             if remote_rc != 0:
                 return CheckUpdateResponse(
+                    remote=remote,
+                    branch=branch,
                     runtime_mode=runtime_mode,
+                    update_executor=updater,
                     can_apply=can_apply,
                     manual_command=manual_command,
                     plan_label="更新检查失败",
-                    plan_detail="无法读取远程版本（仅检查 origin/main）。",
-                    error="无法获取远程 commit（仅检查 origin/main）",
+                    plan_detail=f"无法读取远程版本（{remote}/{branch}）。",
+                    error=f"无法获取远程 commit（{remote}/{branch}）",
                 )
 
-            current = head_out[:12]
-            remote = remote_out[:12]
             has_update = head_out != remote_out
-
-            # 计算本地落后远程多少个 commit；前端展示的是待拉取数量。
             behind_out, _, behind_rc = await asyncio.to_thread(
                 _run_git, "rev-list", "--count", f"{head_out}..{remote_out}", timeout=10
             )
             behind = int(behind_out) if not behind_rc else 0
             changed_out, _, changed_rc = await asyncio.to_thread(
-                _run_git, "diff", "--name-only", "HEAD..origin/main", timeout=10
+                _run_git, "diff", "--name-only", f"HEAD..{remote_ref}", timeout=10
             )
-            changed_files = (
-                changed_out.splitlines()[:80] if changed_rc == 0 and changed_out else []
-            )
-            components, requires_full_update, requires_backup = _classify_changed_files(
-                changed_files
-            )
+            changed_files = changed_out.splitlines()[:80] if changed_rc == 0 and changed_out else []
+            components, requires_full_update, requires_backup = _classify_changed_files(changed_files)
             has_update = has_update and behind > 0
             if has_update and requires_full_update and runtime_mode == RUNTIME_LOCAL_SOURCE:
                 can_apply = False
                 manual_command = (
                     f"cd {shlex.quote(str(root))} && "
-                    "git pull --ff-only origin main && make install && make restart"
+                    f"git pull --ff-only {shlex.quote(remote)} {shlex.quote(branch)} && make install && make restart"
                 )
-            action_required = _action_required_for_plan(
-                runtime_mode,
-                has_update,
-                components,
-                requires_full_update,
-            )
+            action_required = _action_required_for_plan(runtime_mode, has_update, components, requires_full_update)
             plan_label, plan_detail = _plan_text(
                 runtime_mode=runtime_mode,
                 has_update=has_update,
@@ -1453,11 +1674,14 @@ async def check_update(_user: CurrentUser) -> CheckUpdateResponse:
             )
             return CheckUpdateResponse(
                 has_update=has_update,
-                current_commit=current,
-                remote_commit=remote,
+                current_commit=head_out[:12],
+                remote_commit=remote_out[:12],
                 ahead=behind,
+                remote=remote,
+                branch=branch,
                 changed_files=changed_files,
                 runtime_mode=runtime_mode,
+                update_executor=updater,
                 action_required=action_required,
                 plan_label=plan_label,
                 plan_detail=plan_detail,
@@ -1468,22 +1692,10 @@ async def check_update(_user: CurrentUser) -> CheckUpdateResponse:
                 manual_command=manual_command,
             )
 
-        # 非 Git 工作树环境（常见于容器镜像运行态）：返回运行计划，不报错。
         components = ["full_update"]
-        requires_full_update = runtime_mode in {
-            RUNTIME_PROD_CONTAINER_MANUAL,
-            RUNTIME_PROD_CONTAINER_WITH_UPDATER,
-        }
-        has_update = runtime_mode in {
-            RUNTIME_PROD_CONTAINER_MANUAL,
-            RUNTIME_PROD_CONTAINER_WITH_UPDATER,
-        }
-        action_required = _action_required_for_plan(
-            runtime_mode,
-            has_update,
-            components,
-            requires_full_update,
-        )
+        requires_full_update = runtime_mode in {RUNTIME_PROD_CONTAINER_MANUAL, RUNTIME_PROD_CONTAINER_WITH_UPDATER}
+        has_update = runtime_mode in {RUNTIME_PROD_CONTAINER_MANUAL, RUNTIME_PROD_CONTAINER_WITH_UPDATER}
+        action_required = _action_required_for_plan(runtime_mode, has_update, components, requires_full_update)
         plan_label, plan_detail = _plan_text(
             runtime_mode=runtime_mode,
             has_update=has_update,
@@ -1494,7 +1706,10 @@ async def check_update(_user: CurrentUser) -> CheckUpdateResponse:
         )
         return CheckUpdateResponse(
             has_update=has_update,
+            remote=remote,
+            branch=branch,
             runtime_mode=runtime_mode,
+            update_executor=updater,
             action_required=action_required,
             plan_label=plan_label,
             plan_detail=plan_detail,
@@ -1503,15 +1718,14 @@ async def check_update(_user: CurrentUser) -> CheckUpdateResponse:
             requires_backup=False,
             can_apply=can_apply,
             manual_command=manual_command,
-            error=(
-                None
-                if runtime_mode != RUNTIME_UNSUPPORTED
-                else "当前环境不支持自动更新检查，请人工执行部署流程。"
-            ),
+            error=None if runtime_mode != RUNTIME_UNSUPPORTED else "当前环境不支持自动更新检查，请人工执行部署流程。",
         )
     except Exception as e:  # noqa: BLE001
         return CheckUpdateResponse(
+            remote=remote,
+            branch=branch,
             runtime_mode=runtime_mode,
+            update_executor=updater,
             can_apply=can_apply,
             manual_command=manual_command,
             error=f"{type(e).__name__}: {str(e)[:200]}",
@@ -1519,17 +1733,61 @@ async def check_update(_user: CurrentUser) -> CheckUpdateResponse:
 
 
 @router.post("/pull-update", response_model=PullUpdateResponse)
-async def pull_update(_user: CurrentUser) -> PullUpdateResponse:
+async def pull_update(
+    _user: CurrentUser,
+    payload: UpdateRequest | None = Body(default=None),
+) -> PullUpdateResponse:
     """执行应用更新（保留历史路由名 /pull-update）。"""
     runtime_mode, updater, _root = _detect_runtime_mode()
     manual_command = _manual_command_for_runtime(runtime_mode, updater)
     can_apply = runtime_mode in {RUNTIME_LOCAL_SOURCE, RUNTIME_PROD_CONTAINER_WITH_UPDATER}
+    remote, branch, force_full = _normalize_update_request(payload)
 
     try:
+        if runtime_mode == RUNTIME_PROD_CONTAINER_WITH_UPDATER and updater and updater.startswith(("http://", "https://")):
+            result = await asyncio.to_thread(
+                _updater_request,
+                "/jobs",
+                {"remote": remote, "branch": branch, "full": force_full},
+                timeout=10,
+            )
+            if not result.get("ok"):
+                return PullUpdateResponse(
+                    success=False,
+                    remote=remote,
+                    branch=branch,
+                    runtime_mode=runtime_mode,
+                    update_executor=updater,
+                    action_required="full_update",
+                    can_apply=True,
+                    manual_command=manual_command,
+                    plan_label="更新任务启动失败",
+                    plan_detail="内部 updater 未能创建更新任务。",
+                    error=str(result.get("error") or "updater job create failed"),
+                )
+            return PullUpdateResponse(
+                success=True,
+                job_id=str(result.get("job_id") or ""),
+                status=str(result.get("status") or "queued"),
+                remote=remote,
+                branch=branch,
+                runtime_mode=runtime_mode,
+                update_executor=updater,
+                action_required="restart",
+                can_apply=True,
+                plan_label="更新任务已启动",
+                plan_detail="更新将在内部 updater 中执行，期间服务可能短暂重启；请观察任务日志。",
+                summary=f"job_id={result.get('job_id')}",
+                manual_command=manual_command,
+            )
+
         if runtime_mode == RUNTIME_LOCAL_SOURCE:
             if _git_root() is None:
                 return PullUpdateResponse(
+                    remote=remote,
+                    branch=branch,
                     runtime_mode=runtime_mode,
+                    update_executor=updater,
                     can_apply=can_apply,
                     manual_command=manual_command,
                     plan_label="环境检测失败",
@@ -1538,11 +1796,14 @@ async def pull_update(_user: CurrentUser) -> PullUpdateResponse:
                 )
 
             out, err, rc = await asyncio.to_thread(
-                _run_git, "pull", "--ff-only", "origin", "main", timeout=60
+                _run_git, "pull", "--ff-only", remote, branch, timeout=60
             )
             if rc != 0:
                 return PullUpdateResponse(
+                    remote=remote,
+                    branch=branch,
                     runtime_mode=runtime_mode,
+                    update_executor=updater,
                     can_apply=can_apply,
                     manual_command=manual_command,
                     plan_label="应用更新失败",
@@ -1572,7 +1833,10 @@ async def pull_update(_user: CurrentUser) -> PullUpdateResponse:
                 success=True,
                 new_commit=head_out[:12] if head_out else None,
                 summary=summary_out or None,
+                remote=remote,
+                branch=branch,
                 runtime_mode=runtime_mode,
+                update_executor=updater,
                 action_required="none",
                 plan_label="更新已应用",
                 plan_detail="已执行 git pull --ff-only，并触发后台 make restart。",
@@ -1582,15 +1846,19 @@ async def pull_update(_user: CurrentUser) -> PullUpdateResponse:
         if runtime_mode == RUNTIME_PROD_CONTAINER_WITH_UPDATER and updater:
             result = await asyncio.to_thread(
                 subprocess.run,
-                [updater],
+                [updater, "--full"] if force_full else [updater],
                 capture_output=True,
                 text=True,
                 timeout=180,
+                env={**os.environ, "TELEPILOT_UPDATE_REMOTE": remote, "TELEPILOT_UPDATE_BRANCH": branch},
             )
             merged = (result.stdout or "").strip() or (result.stderr or "").strip()
             if result.returncode != 0:
                 return PullUpdateResponse(
+                    remote=remote,
+                    branch=branch,
                     runtime_mode=runtime_mode,
+                    update_executor=updater,
                     action_required="full_update",
                     can_apply=True,
                     manual_command=manual_command,
@@ -1601,7 +1869,10 @@ async def pull_update(_user: CurrentUser) -> PullUpdateResponse:
                 )
             return PullUpdateResponse(
                 success=True,
+                remote=remote,
+                branch=branch,
                 runtime_mode=runtime_mode,
+                update_executor=updater,
                 can_apply=True,
                 plan_label="已触发宿主机更新器",
                 plan_detail="更新器已执行，具体重启/部署结果请查看宿主机日志。",
@@ -1612,7 +1883,10 @@ async def pull_update(_user: CurrentUser) -> PullUpdateResponse:
         if runtime_mode == RUNTIME_PROD_CONTAINER_MANUAL:
             return PullUpdateResponse(
                 success=False,
+                remote=remote,
+                branch=branch,
                 runtime_mode=runtime_mode,
+                update_executor=updater,
                 action_required="manual",
                 can_apply=False,
                 manual_command=manual_command,
@@ -1623,7 +1897,10 @@ async def pull_update(_user: CurrentUser) -> PullUpdateResponse:
 
         return PullUpdateResponse(
             success=False,
+            remote=remote,
+            branch=branch,
             runtime_mode=runtime_mode,
+            update_executor=updater,
             action_required="unsupported",
             can_apply=False,
             plan_label="环境不支持自动更新",
@@ -1632,11 +1909,49 @@ async def pull_update(_user: CurrentUser) -> PullUpdateResponse:
         )
     except Exception as e:  # noqa: BLE001
         return PullUpdateResponse(
+            remote=remote,
+            branch=branch,
             runtime_mode=runtime_mode,
+            update_executor=updater,
             can_apply=can_apply,
             manual_command=manual_command,
             error=f"{type(e).__name__}: {str(e)[:200]}",
         )
+
+
+@router.get("/update-jobs/{job_id}", response_model=UpdateJobStatusResponse)
+async def get_update_job(job_id: str, _user: CurrentUser) -> UpdateJobStatusResponse:
+    """读取内部 updater 任务状态。"""
+    runtime_mode, updater, _root = _detect_runtime_mode()
+    if runtime_mode != RUNTIME_PROD_CONTAINER_WITH_UPDATER or not updater or not updater.startswith(("http://", "https://")):
+        return UpdateJobStatusResponse(ok=False, job_id=job_id, status="unsupported", error="内部 updater 不可用")
+    try:
+        result = await asyncio.to_thread(_updater_get, f"/jobs/{job_id}", timeout=10)
+    except Exception as exc:  # noqa: BLE001
+        return UpdateJobStatusResponse(ok=False, job_id=job_id, status="unknown", error=f"{type(exc).__name__}: {exc}")
+    if not result.get("ok"):
+        return UpdateJobStatusResponse(
+            ok=False,
+            job_id=job_id,
+            status=str(result.get("status") or "unknown"),
+            error=str(result.get("error") or "读取更新任务失败"),
+        )
+    return UpdateJobStatusResponse(
+        ok=True,
+        job_id=str(result.get("job_id") or job_id),
+        status=str(result.get("status") or "unknown"),
+        created_at=_int_or_none(result.get("created_at")),
+        started_at=_int_or_none(result.get("started_at")),
+        finished_at=_int_or_none(result.get("finished_at")),
+        returncode=_int_or_none(result.get("returncode")),
+        remote=str(result.get("remote") or "") or None,
+        branch=str(result.get("branch") or "") or None,
+        new_commit=str(result.get("new_commit") or "") or None,
+        summary=str(result.get("summary") or "") or None,
+        error=str(result.get("error") or "") or None,
+        logs=[str(line) for line in result.get("logs") or []],
+        plan=result.get("plan") if isinstance(result.get("plan"), dict) else None,
+    )
 
 
 @router.post("/restart", response_model=RestartResponse)

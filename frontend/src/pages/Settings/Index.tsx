@@ -131,6 +131,8 @@ export function SettingsIndex() {
   });
 
   const [prefix, setPrefix] = useState("");
+  const [commandPrefixRequired, setCommandPrefixRequired] = useState(true);
+  const [aiEnabled, setAiEnabled] = useState(true);
   const [timezone, setTimezone] = useState("Asia/Shanghai");
   const [llmLimits, setLlmLimits] = useState({
     per_minute: "0",
@@ -139,14 +141,23 @@ export function SettingsIndex() {
     premium_daily: "0",
   });
   const [logRetention, setLogRetention] = useState({
+    trace_enabled: true,
+    event_bus_delivery_enabled: true,
+    inline_updates_enabled: true,
     runtime_log_retention_days: "30",
     runtime_log_max_message_chars: "2000",
     runtime_log_max_detail_chars: "8000",
     runtime_log_min_level: "info" as RuntimeLogLevel,
+    trace_retention_days: "30",
+    trace_payload_snapshot_retention_days: "7",
+    native_raw_persist_enabled: false,
+    native_raw_retention_days: "1",
   });
   useEffect(() => {
     if (settingsQ.data) {
       setPrefix(settingsQ.data.command_prefix ?? ",");
+      setCommandPrefixRequired(settingsQ.data.command_prefix_required ?? true);
+      setAiEnabled(settingsQ.data.ai_enabled ?? true);
       setTimezone(settingsQ.data.timezone ?? "Asia/Shanghai");
       setLlmLimits({
         per_minute: String(settingsQ.data.llm_limits?.per_minute ?? 0),
@@ -155,10 +166,17 @@ export function SettingsIndex() {
         premium_daily: String(settingsQ.data.llm_limits?.premium_daily ?? 0),
       });
       setLogRetention({
+        trace_enabled: Boolean(settingsQ.data.log_retention?.trace_enabled ?? true),
+        event_bus_delivery_enabled: Boolean(settingsQ.data.log_retention?.event_bus_delivery_enabled ?? true),
+        inline_updates_enabled: Boolean(settingsQ.data.log_retention?.inline_updates_enabled ?? true),
         runtime_log_retention_days: String(settingsQ.data.log_retention?.runtime_log_retention_days ?? 30),
         runtime_log_max_message_chars: String(settingsQ.data.log_retention?.runtime_log_max_message_chars ?? 2000),
         runtime_log_max_detail_chars: String(settingsQ.data.log_retention?.runtime_log_max_detail_chars ?? 8000),
         runtime_log_min_level: (settingsQ.data.log_retention?.runtime_log_min_level ?? "info") as RuntimeLogLevel,
+        trace_retention_days: String(settingsQ.data.log_retention?.trace_retention_days ?? 30),
+        trace_payload_snapshot_retention_days: String(settingsQ.data.log_retention?.trace_payload_snapshot_retention_days ?? 7),
+        native_raw_persist_enabled: Boolean(settingsQ.data.log_retention?.native_raw_persist_enabled ?? false),
+        native_raw_retention_days: String(settingsQ.data.log_retention?.native_raw_retention_days ?? 1),
       });
     }
   }, [settingsQ.data]);
@@ -218,11 +236,37 @@ export function SettingsIndex() {
     onError: (err) => toast.error(getErrMsg(err)),
   });
 
+  const saveCommandPrefixRequired = useMutation({
+    mutationFn: (enabled: boolean) => patchSystemSettings({ command_prefix_required: enabled }),
+    onSuccess: (data) => {
+      setCommandPrefixRequired(data.command_prefix_required ?? true);
+      toast.success(
+        (data.command_prefix_required ?? true)
+          ? "已要求账号本人指令必须带前缀，worker 将热加载"
+          : "已允许账号本人裸命令触发，worker 将热加载",
+      );
+      qc.invalidateQueries({ queryKey: ["system", "settings"] });
+    },
+    onError: (err) => toast.error(getErrMsg(err)),
+  });
+
   const saveTimezone = useMutation({
     mutationFn: () => patchSystemSettings({ timezone }),
     onSuccess: () => {
       toast.success("时区已保存");
       qc.invalidateQueries({ queryKey: ["system", "settings"] });
+    },
+    onError: (err) => toast.error(getErrMsg(err)),
+  });
+
+  const saveAIEnabled = useMutation({
+    mutationFn: (enabled: boolean) => patchSystemSettings({ ai_enabled: enabled }),
+    onSuccess: (data) => {
+      setAiEnabled(data.ai_enabled ?? true);
+      toast.success((data.ai_enabled ?? true) ? "AI 能力已启用，worker 将热加载" : "AI 能力已关闭，worker 将卸载模型能力");
+      qc.invalidateQueries({ queryKey: ["system", "settings"] });
+      qc.invalidateQueries({ queryKey: ["llm-providers"] });
+      qc.invalidateQueries({ queryKey: ["llm-usage"] });
     },
     onError: (err) => toast.error(getErrMsg(err)),
   });
@@ -246,10 +290,17 @@ export function SettingsIndex() {
   const saveLogRetention = useMutation({
     mutationFn: () => patchSystemSettings({
       log_retention: {
+        trace_enabled: Boolean(logRetention.trace_enabled),
+        event_bus_delivery_enabled: Boolean(logRetention.event_bus_delivery_enabled),
+        inline_updates_enabled: Boolean(logRetention.inline_updates_enabled),
         runtime_log_retention_days: Number(logRetention.runtime_log_retention_days) || 0,
         runtime_log_max_message_chars: Number(logRetention.runtime_log_max_message_chars) || 2000,
         runtime_log_max_detail_chars: Number(logRetention.runtime_log_max_detail_chars) || 0,
         runtime_log_min_level: logRetention.runtime_log_min_level,
+        trace_retention_days: Number(logRetention.trace_retention_days) || 0,
+        trace_payload_snapshot_retention_days: Number(logRetention.trace_payload_snapshot_retention_days) || 0,
+        native_raw_persist_enabled: Boolean(logRetention.native_raw_persist_enabled),
+        native_raw_retention_days: Number(logRetention.native_raw_retention_days) || 0,
       },
     }),
     onSuccess: () => {
@@ -376,7 +427,7 @@ export function SettingsIndex() {
               disabled={!quickAid}
               onClick={() => {
                 setQuickBindOpen(false);
-                nav(`/accounts/${quickAid}?tab=bot-management`);
+                nav(`/interaction?aid=${quickAid}`);
               }}
             >
               前往配置
@@ -386,7 +437,7 @@ export function SettingsIndex() {
       </Dialog>
 
       <Tabs value={tab} onValueChange={(v) => setTab(v as typeof tab)}>
-        <TabsList>
+        <TabsList className="flex h-auto flex-wrap justify-start gap-1">
           <TabsTrigger value="account" className="gap-1.5">
             <ShieldCheck className="h-4 w-4" /> 用户与管理
           </TabsTrigger>
@@ -440,6 +491,19 @@ export function SettingsIndex() {
                   保存
                 </Button>
               </div>
+              <div className="mt-4 flex max-w-xl items-start justify-between gap-4 rounded-md border bg-muted/20 px-3 py-3">
+                <div className="space-y-1">
+                  <div className="text-sm font-medium">账号本人必须带前缀</div>
+                  <p className="text-xs leading-5 text-muted-foreground">
+                    关闭后，只有当前 userbot 账号本人发出的消息可以直接用命令名触发；群成员仍不会因为裸命令或系统前缀触发 userbot 命令。
+                  </p>
+                </div>
+                <Switch
+                  checked={commandPrefixRequired}
+                  disabled={saveCommandPrefixRequired.isPending}
+                  onCheckedChange={(checked) => saveCommandPrefixRequired.mutate(checked)}
+                />
+              </div>
               {guideActive ? (
                 <div className="mt-3">
                   <GuideInlineCard
@@ -465,11 +529,15 @@ export function SettingsIndex() {
                       <div className="mb-1.5 inline-block max-w-full rounded-lg border-l-2 border-white/70 bg-white/15 px-2 py-1 text-[11px] leading-relaxed text-white/90">
                         这是一段被回复的原文。
                       </div>
-                      <div className="font-mono text-sm">{prefix || ","}ai 请总结这段内容</div>
+                      <div className="font-mono text-sm">
+                        {commandPrefixRequired ? (prefix || ",") : ""}ai 请总结这段内容
+                      </div>
                     </div>
 
                     <div className="ml-auto w-fit max-w-[78%] rounded-2xl rounded-br-lg bg-sky-500 px-3.5 py-2.5 text-white shadow-sm sm:max-w-[66%]">
-                      <div className="font-semibold text-sm">{prefix || ","}(๑•̌.•̑๑)ˀ̣ˀ̣ˀ̣ 好奇</div>
+                      <div className="font-semibold text-sm">
+                        {commandPrefixRequired ? (prefix || ",") : ""}(๑•̌.•̑๑)ˀ̣ˀ̣ˀ̣ 好奇
+                      </div>
                       <div className="mt-2 inline-block max-w-full rounded-lg border-l-2 border-white/60 bg-white/15 px-2 py-1 text-white/90">
                         这是一段被回复的原文。
                       </div>
@@ -488,6 +556,36 @@ export function SettingsIndex() {
                     </div>
                   </div>
                 </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">AI 能力包</CardTitle>
+              <CardDescription>
+                热插拔启用模型提供商、AI 指令和插件 ctx.ai。关闭后 worker 不加载 LLM provider，也不会解密模型代理配置。
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="flex flex-col gap-3 rounded-md border border-border/70 bg-muted/20 p-3 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <div className="text-sm font-medium">当前：{aiEnabled ? "已启用" : "已关闭"}</div>
+                  <p className="mt-1 max-w-2xl text-xs leading-5 text-muted-foreground">
+                    已有 AI 模板会保留，关闭期间不会调用模型；声明 ai_text 权限的插件不会拿到 ctx.ai。
+                  </p>
+                </div>
+                <Switch
+                  checked={aiEnabled}
+                  disabled={saveAIEnabled.isPending}
+                  onCheckedChange={(checked) => {
+                    if (!checked && !confirm("关闭 AI 能力后，AI 指令和依赖 ctx.ai 的插件会立即停止调用模型。确认关闭？")) {
+                      return;
+                    }
+                    setAiEnabled(checked);
+                    saveAIEnabled.mutate(checked);
+                  }}
+                />
               </div>
             </CardContent>
           </Card>
@@ -606,9 +704,9 @@ export function SettingsIndex() {
 
           <Card>
             <CardHeader>
-              <CardTitle className="text-base">运行日志设置</CardTitle>
+              <CardTitle className="text-base">运行日志与 Trace / Event Bus 设置</CardTitle>
               <CardDescription>
-                控制运行日志等级、保留时间和单条日志长度。日志等级保存后立即影响新日志落库，0 天表示不自动删除。
+                控制运行日志、Trace、Event Bus、Inline 和 native_raw 保留策略。日志等级保存后立即影响新日志落库，0 天表示不自动删除。
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -674,6 +772,100 @@ export function SettingsIndex() {
                   <p className="text-xs text-muted-foreground">
                     debug 会记录插件排障细节；info 适合日常；warn/error 只保留异常。
                   </p>
+                </div>
+              </div>
+              <div className="mt-4 grid gap-3 md:grid-cols-3">
+                <div className="space-y-1.5 rounded-md border border-border/70 bg-muted/20 p-3">
+                  <Label>写入 Trace</Label>
+                  <div className="flex h-10 items-center">
+                    <Switch
+                      checked={logRetention.trace_enabled}
+                      onCheckedChange={(checked) =>
+                        setLogRetention((v) => ({ ...v, trace_enabled: checked }))
+                      }
+                    />
+                  </div>
+                  <p className="text-xs text-muted-foreground">关闭后保留旧运行日志；仅用于排查 Trace 存储异常。</p>
+                </div>
+                <div className="space-y-1.5 rounded-md border border-border/70 bg-muted/20 p-3">
+                  <Label>Event Bus 投递</Label>
+                  <div className="flex h-10 items-center">
+                    <Switch
+                      checked={logRetention.event_bus_delivery_enabled}
+                      onCheckedChange={(checked) =>
+                        setLogRetention((v) => ({ ...v, event_bus_delivery_enabled: checked }))
+                      }
+                    />
+                  </div>
+                  <p className="text-xs text-muted-foreground">关闭后回退旧交互规则链路，适合部署回滚观察。</p>
+                </div>
+                <div className="space-y-1.5 rounded-md border border-border/70 bg-muted/20 p-3">
+                  <Label>Inline 更新</Label>
+                  <div className="flex h-10 items-center">
+                    <Switch
+                      checked={logRetention.inline_updates_enabled}
+                      onCheckedChange={(checked) =>
+                        setLogRetention((v) => ({ ...v, inline_updates_enabled: checked }))
+                      }
+                    />
+                  </div>
+                  <p className="text-xs text-muted-foreground">关闭后不拉取 inline_query / chosen_inline_result。</p>
+                </div>
+              </div>
+              <div className="mt-4 grid gap-3 md:grid-cols-4">
+                <div className="space-y-1.5">
+                  <Label>Trace 保留天数</Label>
+                  <Input
+                    inputMode="numeric"
+                    value={logRetention.trace_retention_days}
+                    onChange={(e) =>
+                      setLogRetention((v) => ({
+                        ...v,
+                        trace_retention_days: e.target.value.replace(/[^0-9]/g, ""),
+                      }))
+                    }
+                  />
+                  <p className="text-xs text-muted-foreground">默认 30；0 = 不自动删除链路记录</p>
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Payload 快照保留天数</Label>
+                  <Input
+                    inputMode="numeric"
+                    value={logRetention.trace_payload_snapshot_retention_days}
+                    onChange={(e) =>
+                      setLogRetention((v) => ({
+                        ...v,
+                        trace_payload_snapshot_retention_days: e.target.value.replace(/[^0-9]/g, ""),
+                      }))
+                    }
+                  />
+                  <p className="text-xs text-muted-foreground">默认 7；到期只清空快照，保留主链路</p>
+                </div>
+                <div className="space-y-1.5">
+                  <Label>保存完整 native_raw</Label>
+                  <div className="flex h-10 items-center">
+                    <Switch
+                      checked={logRetention.native_raw_persist_enabled}
+                      onCheckedChange={(checked) =>
+                        setLogRetention((v) => ({ ...v, native_raw_persist_enabled: checked }))
+                      }
+                    />
+                  </div>
+                  <p className="text-xs text-muted-foreground">默认关闭；仅用于短期深度排障</p>
+                </div>
+                <div className="space-y-1.5">
+                  <Label>native_raw 保留天数</Label>
+                  <Input
+                    inputMode="numeric"
+                    value={logRetention.native_raw_retention_days}
+                    onChange={(e) =>
+                      setLogRetention((v) => ({
+                        ...v,
+                        native_raw_retention_days: e.target.value.replace(/[^0-9]/g, ""),
+                      }))
+                    }
+                  />
+                  <p className="text-xs text-muted-foreground">默认 1；当前默认不持久化完整内容</p>
                 </div>
               </div>
               <div className="mt-3">

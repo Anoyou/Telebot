@@ -34,9 +34,10 @@
 
 1. 用 `git diff --stat` 和关键 diff 确认本批实际变更，不写愿景式发布说明。
 2. 按 SemVer 判断版本级别：
-   - `MAJOR`：破坏兼容的数据库迁移、配置格式、API 路径或语义变化。
-   - `MINOR`：用户可感知的新能力、主入口重组、新插件或重要工作流变化。
-   - `PATCH`：修复、文案、小 UI、测试、兼容性补丁。
+   - `MAJOR（主版本）`：破坏兼容的数据库迁移、配置格式、API 路径或语义变化。
+   - `MINOR（次版本）`：用户可感知的新能力、主入口重组、新插件或重要工作流变化。
+   - `PATCH（补丁版本）`：修复、文案、小 UI、测试、兼容性补丁。
+   - 0.x 阶段：`0.X.0` 是阶段性能力版本，`0.X.Y` 是同阶段补丁，不把第三位当流水号。
 3. 同步更新四处版本号：
    - `backend/app/__init__.py`
    - `backend/pyproject.toml`
@@ -53,8 +54,8 @@ pnpm --dir frontend typecheck
 pnpm --dir frontend build
 cd backend && . .venv/bin/activate && ruff check app
 cd backend && . .venv/bin/activate && pytest
-python scripts/validate-plugin-examples.py
-python scripts/validate-installed-interaction-plugins.py
+backend/.venv/bin/python scripts/validate-plugin-examples.py
+backend/.venv/bin/python scripts/validate-installed-interaction-plugins.py
 git diff --check
 ```
 

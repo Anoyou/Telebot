@@ -69,18 +69,55 @@ docker compose logs -f web
 
 ## 升级与回滚
 
-升级：
+稳定版升级：
 
 ```bash
-git pull --ff-only
-make prod-up
+cd /opt/telepilot
+./deploy/backup.sh
+cp .env "/var/backups/telebot/env-$(date +%Y%m%d-%H%M).bak"
+cp docker-compose.yml "/var/backups/telebot/docker-compose-$(date +%Y%m%d-%H%M).yml.bak"
+TELEPILOT_UPDATE_BRANCH=main make prod-update
+```
+
+测试发布候选分支时不要覆盖 `main`，必须显式指定分支：
+
+```bash
+cd /opt/telepilot
+TELEPILOT_UPDATE_BRANCH=codex/0.33-interaction-framework make prod-update
+```
+
+### Web 面板自更新
+
+生产栈包含一个仅 Docker 内网可访问的 `updater` 服务。它挂载项目目录和 Docker socket，由已登录的 Web 面板“检查更新”弹窗触发：
+
+- 检查更新：读取当前分支或 `TELEPILOT_UPDATE_BRANCH`，执行 `git fetch`，按变更文件分类。
+- 应用更新：后台执行 `scripts/prod-update.sh`，优先增量重建 `web` / `frontend`；涉及 compose、Dockerfile、依赖、部署脚本等关键文件时自动回退完整更新。
+- 任务日志：Web 面板轮询 updater job，显示最近输出；服务重启期间页面可能短暂断开，刷新后可重新检查版本。
+
+首次把 `updater` 服务部署到服务器仍需要一次宿主机操作；之后常规补丁不再依赖 SSH 登录。若部署目录不是当前 shell 的工作目录，可显式指定：
+
+```bash
+cd /opt/telepilot
+TELEPILOT_HOST_PROJECT_DIR=/opt/telepilot make prod-up
+```
+
+部署后至少验收：
+
+```bash
+git rev-parse HEAD
+docker compose ps
+curl -fsS http://127.0.0.1:8000/healthz
+docker compose logs --tail=100 web
 ```
 
 回滚：
 
 ```bash
+cd /opt/telepilot
 git checkout <tag-or-commit>
 make prod-up
 ```
+
+如果要恢复数据库或 sessions，先确认 `.env` 里的 `MASTER_KEY` 与备份时一致，再执行 `deploy/restore.sh`。
 
 部分 Docker 默认值、数据库默认名和 volume 名仍保留 `telebot` 历史兼容命名，不影响对外产品名 TelePilot。

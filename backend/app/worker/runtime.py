@@ -31,6 +31,20 @@ from ..db.models.feature import FEATURE_SCHEDULER, AccountFeature
 from ..db.models.system import SystemSetting
 from ..redis_client import get_redis
 from ..services import interaction_bot_service
+from ..services.ai_feature import is_ai_enabled
+from ..services.event_bus import dispatch_event, normalize_event_subscription, normalize_userbot_event
+from ..services.event_trace import (
+    TRACE_STATUS_FAILED,
+    TRACE_STATUS_OK,
+    TRACE_STATUS_SKIPPED,
+    finish_trace,
+    record_action,
+    record_span,
+    refresh_trace_settings,
+    start_trace,
+    stop_trace_writer,
+    trace_log_context,
+)
 from ..settings import settings as app_settings
 from .command import (
     CommandContext,
@@ -77,6 +91,108 @@ _CONFIG_RECONCILE_SECONDS = max(30, int(app_settings.worker_reconcile_seconds or
 _ACCOUNT_BOT_AUTO_AWARD_DEDUPE_PREFIX = "account_bot:auto_award:"
 _ACCOUNT_BOT_AUTO_AWARD_DEDUPE_TTL_SECONDS = 86400
 _ACCOUNT_BOT_AUTO_AWARD_MODULE_KEYS = {"game24", "math10", "dice_grid_hunt", "guess_number", "poetry_blank"}
+_ACCOUNT_BOT_AUTO_AWARD_TRACE_FLAGS_CACHE: tuple[float, bool] = (0.0, True)
+
+
+async def _account_bot_auto_award_trace_enabled() -> bool:
+    """Read the Trace switch without importing account_bot_runtime into worker."""
+
+    global _ACCOUNT_BOT_AUTO_AWARD_TRACE_FLAGS_CACHE
+    cached_at, cached = _ACCOUNT_BOT_AUTO_AWARD_TRACE_FLAGS_CACHE
+    now = asyncio.get_running_loop().time()
+    if now - cached_at < 30:
+        return cached
+    try:
+        async with AsyncSessionLocal() as db:
+            row = await db.get(SystemSetting, "log_retention")
+        raw = row.value if row is not None and isinstance(row.value, dict) else {}
+        enabled = bool(raw.get("trace_enabled", True))
+    except Exception:  # noqa: BLE001
+        log.debug("load auto award trace flag failed, using default", exc_info=True)
+        enabled = True
+    _ACCOUNT_BOT_AUTO_AWARD_TRACE_FLAGS_CACHE = (now, enabled)
+    return enabled
+
+
+def _account_bot_auto_award_event_payload(
+    account_id: int,
+    event: Any,
+    *,
+    chat_id: int | None,
+    message_id: int | None,
+    reply_to_msg_id: int,
+    prize: int,
+    sender_id: int | None,
+    sender_username: str | None,
+) -> dict[str, Any]:
+    payload = normalize_userbot_event(account_id, event)
+    source = payload.get("source") if isinstance(payload.get("source"), dict) else {}
+    source.update(
+        {
+            "type": "payment_confirmed",
+            "channel": "userbot",
+            "account_id": account_id,
+            "chat_id": chat_id,
+            "message_id": message_id,
+        }
+    )
+    payload["source"] = source
+    payload["event_type"] = "payment_confirmed"
+    message = payload.get("message") if isinstance(payload.get("message"), dict) else {}
+    message.update({"chat_id": chat_id, "message_id": message_id, "reply_to_message_id": reply_to_msg_id})
+    payload["message"] = message
+    sender = payload.get("sender") if isinstance(payload.get("sender"), dict) else {}
+    sender.update({"user_id": sender_id, "username": sender_username})
+    payload["sender"] = sender
+    payload["source_actor"] = dict(sender)
+    payload["actor"] = {"user_id": None, "display_name": None}
+    payload["player"] = dict(payload["actor"])
+    payload["payment"] = {
+        "amount": prize,
+        "source": "account_bot_auto_award",
+        "source_message_id": message_id,
+        "reply_to_message_id": reply_to_msg_id,
+        "notice_sender_user_id": sender_id,
+    }
+    payload["reply_to"] = {"message_id": reply_to_msg_id}
+    payload["trigger"] = {
+        "source": "account_bot_auto_award",
+        "rule_id": "account_bot_auto_award",
+        "notice_message_id": message_id,
+        "winner_message_id": reply_to_msg_id,
+        "prize": prize,
+    }
+    return payload
+
+
+def _account_bot_auto_award_event_bus_decision(
+    event_payload: dict[str, Any],
+    *,
+    chat_ids: list[int],
+    sender_id: int | None,
+) -> Any | None:
+    subscription = normalize_event_subscription(
+        {
+            "source": ["userbot"],
+            "events": ["payment_confirmed"],
+            "scope": "all_allowed_chats",
+            "entry_key": "auto_award",
+            "dispatch_mode": "account_bot_auto_award",
+            "filters": {"source": "account_bot_auto_award"},
+        },
+        plugin_key="account_bot_auto_award",
+        entry_key="auto_award",
+    )
+    result = dispatch_event(
+        event_payload,
+        [subscription],
+        {
+            "allowed_chat_ids": chat_ids,
+            "known_user_ids": [sender_id] if sender_id is not None else [],
+            "trigger": {"rule_id": "account_bot_auto_award"},
+        },
+    )
+    return result.decisions[0] if result.decisions else None
 
 
 def _should_defer_interaction_entry_error_log(plugin_key: str, error: str | None) -> bool:
@@ -155,6 +271,20 @@ async def _run_interaction_userbot_action(client: Any, payload: dict[str, Any]) 
         msg = await client.send_message(chat_id, text, reply_to=reply_to, parse_mode="html")
         return {
             "message_id": int(getattr(msg, "id", 0) or 0) or None,
+            "chat_id": chat_id,
+        }
+
+    if action_type == "edit_message":
+        text = str(payload.get("text") or "").strip()
+        if not text:
+            raise ValueError("缺少 text")
+        try:
+            message_id = int(payload["message_id"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValueError("缺少 message_id") from exc
+        msg = await client.edit_message(chat_id, message_id, text, parse_mode="html")
+        return {
+            "message_id": int(getattr(msg, "id", 0) or message_id) or None,
             "chat_id": chat_id,
         }
 
@@ -273,7 +403,8 @@ async def _try_account_bot_auto_award(client: Any, redis: Any, account_id: int, 
     cfg_chat_ids = cfg.get("chat_ids")
     if not isinstance(cfg_chat_ids, list):
         cfg_chat_ids = [cfg["chat_id"]] if cfg.get("chat_id") is not None else []
-    if int(chat_id or 0) not in {int(item) for item in cfg_chat_ids}:
+    configured_chat_ids = [int(item) for item in cfg_chat_ids]
+    if int(chat_id or 0) not in set(configured_chat_ids):
         return False
 
     sender = getattr(event, "sender", None)
@@ -330,11 +461,98 @@ async def _try_account_bot_auto_award(client: Any, redis: Any, account_id: int, 
         )
         return True
 
-    await client.send_message(
-        entity=chat_id,
-        message=f"+{prize}",
-        reply_to=reply_to_msg_id,
+    event_payload = _account_bot_auto_award_event_payload(
+        account_id,
+        event,
+        chat_id=chat_id,
+        message_id=message_id,
+        reply_to_msg_id=reply_to_msg_id,
+        prize=prize,
+        sender_id=sender_id,
+        sender_username=sender_username,
     )
+    decision = _account_bot_auto_award_event_bus_decision(
+        event_payload,
+        chat_ids=configured_chat_ids,
+        sender_id=sender_id,
+    )
+    trace = None
+    trace_enabled = await _account_bot_auto_award_trace_enabled()
+    if trace_enabled:
+        trace = await start_trace(event_payload)
+        await record_span(
+            trace,
+            "receive",
+            TRACE_STATUS_OK,
+            component="account_bot_auto_award",
+            chat_id=chat_id,
+            notice_message_id=message_id,
+            winner_message_id=reply_to_msg_id,
+            prize=prize,
+        )
+        await record_span(
+            trace,
+            "subscription_match",
+            TRACE_STATUS_OK if decision is not None and decision.matched else TRACE_STATUS_SKIPPED,
+            component="account_bot_auto_award",
+            plugin_key="account_bot_auto_award",
+            entry_key="auto_award",
+            reason_code=getattr(decision, "reason_code", None) or "subscription_not_matched",
+            message=getattr(decision, "reason_message", None) or "自动发奖事件未命中 Event Bus decision。",
+            dispatch_mode=getattr(decision, "dispatch_mode", None) or "account_bot_auto_award",
+            scope=getattr(decision, "scope", None) or "all_allowed_chats",
+            filters=dict(getattr(decision, "filters", None) or {}),
+        )
+    if decision is None or not decision.matched:
+        await finish_trace(trace, TRACE_STATUS_SKIPPED)
+        return True
+    action = {
+        "type": "send_message",
+        "send_via": "userbot_reply",
+        "chat_id": chat_id,
+        "reply_to_message_id": reply_to_msg_id,
+        "text": f"+{prize}",
+    }
+    try:
+        sent = await client.send_message(
+            entity=chat_id,
+            message=f"+{prize}",
+            reply_to=reply_to_msg_id,
+        )
+        await record_action(
+            trace_log_context(trace, plugin_key="account_bot_auto_award"),
+            action,
+            TRACE_STATUS_OK,
+            actual_send_via="userbot_reply",
+            result={"message_id": getattr(sent, "id", None) or getattr(sent, "message_id", None)},
+        )
+        await record_span(
+            trace,
+            "delivery",
+            TRACE_STATUS_OK,
+            component="account_bot_auto_award",
+            actual_send_via="userbot_reply",
+        )
+        await finish_trace(trace, TRACE_STATUS_OK)
+    except Exception as exc:  # noqa: BLE001
+        await record_action(
+            trace_log_context(trace, plugin_key="account_bot_auto_award"),
+            action,
+            TRACE_STATUS_FAILED,
+            actual_send_via="userbot_reply",
+            error_code="telegram_api_error",
+            error=f"{type(exc).__name__}: {exc}",
+        )
+        await record_span(
+            trace,
+            "delivery",
+            TRACE_STATUS_FAILED,
+            component="account_bot_auto_award",
+            reason_code="telegram_api_error",
+            error=f"{type(exc).__name__}: {exc}",
+        )
+        await finish_trace(trace, TRACE_STATUS_FAILED)
+        raise
     await _log(
         redis,
         account_id,
@@ -345,6 +563,7 @@ async def _try_account_bot_auto_award(client: Any, redis: Any, account_id: int, 
         winner_msg_id=reply_to_msg_id,
         notice_msg_id=message_id,
         prize=prize,
+        **trace_log_context(trace, plugin_key="account_bot_auto_award"),
     )
     return True
 
@@ -413,6 +632,7 @@ async def run_worker(account_id: int) -> None:
 
     # 初始化命令派发上下文（含模板 + LLM provider 字典；由 IPC reload_commands 热更新）
     await _refresh_command_context(account_id)
+    await refresh_trace_settings()
 
     # ⚠ 顺序：必须先 connect，再加载插件。
     #
@@ -548,6 +768,10 @@ async def run_worker(account_id: int) -> None:
                 await client.disconnect()
         except Exception:
             pass
+        try:
+            await stop_trace_writer()
+        except Exception:  # noqa: BLE001
+            log.exception("worker shutdown 时停止 Trace 后台写入器失败 account_id=%s", account_id)
         await _publish(redis, account_id, EVT_STATUS, status="stopped")
 
 
@@ -883,6 +1107,7 @@ async def _listen_global(redis, account_id: int, paused: asyncio.Event) -> None:
                         # 风控相关 reload 由 ratelimit 模块自己监听，不在这里处理
                         try:
                             await _refresh_command_context(account_id)
+                            await refresh_trace_settings()
                         except Exception as e:  # noqa: BLE001
                             await _log(
                                 redis, account_id, "warn",
@@ -964,8 +1189,10 @@ async def _refresh_command_context(account_id: int) -> None:
     """
     templates: dict[str, dict] = {}
     providers: dict[int, dict] = {}
-        # 命令前缀：DB 里 system_setting.command_prefix 优先，没有则用 .env 默认
+    ai_enabled = True
+    # 命令前缀：DB 里 system_setting.command_prefix 优先，没有则用 .env 默认
     prefix: str = app_settings.command_prefix or ","
+    command_prefix_required = True
     sudo_prefix: str = "."
     sudo_enabled = False
     command_echo_guard_previous_messages = normalize_command_echo_guard_limit(
@@ -988,6 +1215,17 @@ async def _refresh_command_context(account_id: int) -> None:
         except Exception:  # noqa: BLE001
             # DB 读不到（如迁移没跑）就退回 .env 默认；不影响其它字段加载
             pass
+
+        # 0.1) 账号本人命令是否必须带系统前缀（默认必须）
+        try:
+            row_prefix_required = await db.get(SystemSetting, "command_prefix_required")
+            raw_prefix_required = row_prefix_required.value if row_prefix_required is not None else None
+            if isinstance(raw_prefix_required, dict):
+                command_prefix_required = bool(raw_prefix_required.get("enabled", True))
+            elif raw_prefix_required is not None:
+                command_prefix_required = bool(raw_prefix_required)
+        except Exception:  # noqa: BLE001
+            command_prefix_required = True
         
         # 0.5) Sudo 前缀（系统设置）
         try:
@@ -1027,6 +1265,13 @@ async def _refresh_command_context(account_id: int) -> None:
                 app_settings.command_echo_guard_previous_messages
             )
 
+        # 0.8) AI 能力热插拔开关。关闭时不加载 LLM provider，避免把密钥、
+        # proxy 和模型清单放进 worker 内存。
+        try:
+            ai_enabled = await is_ai_enabled(db)
+        except Exception:  # noqa: BLE001
+            ai_enabled = True
+
         # 1) 该账号启用中的命令模板
         rows = (
             await db.execute(
@@ -1055,59 +1300,60 @@ async def _refresh_command_context(account_id: int) -> None:
             for alias in (r.aliases or []):
                 templates[alias] = payload
 
-        # 2) 全部 LLM provider（AI 命令在调用时按 provider_id 索引；不预解密 key）
-        #    顺带把 proxy 信息一起拉出来，让 worker 端调 LLM 时也能走代理
-        prov_rows = (
-            await db.execute(select(LLMProvider))
-        ).scalars().all()
-
-        # 收集所有用到的 proxy_id 一次性查出
-        proxy_ids = {p.proxy_id for p in prov_rows if p.proxy_id is not None}
-        proxy_rows: dict[int, Proxy] = {}
-        if proxy_ids:
-            rows2 = (
-                await db.execute(select(Proxy).where(Proxy.id.in_(proxy_ids)))
+        if ai_enabled:
+            # 2) 全部 LLM provider（AI 命令在调用时按 provider_id 索引；不预解密 key）
+            #    顺带把 proxy 信息一起拉出来，让 worker 端调 LLM 时也能走代理
+            prov_rows = (
+                await db.execute(select(LLMProvider))
             ).scalars().all()
-            proxy_rows = {r.id: r for r in rows2}
 
-        for p in prov_rows:
-            proxy_url: str | None = None
-            if p.proxy_id is not None:
-                pr = proxy_rows.get(p.proxy_id)
-                if pr is not None and (pr.type or "").lower() != "mtproxy":
-                    # 主进程在这里就把 password 解密 + 拼成 httpx 接受的 URL；
-                    # 比把 password_enc 下发到 worker 让它再解密少一次往返，明文也只在
-                    # ctx 内存里活到 LLM 调用结束（worker 进程私有，不进 Redis / 日志）
-                    pwd = ""
-                    if pr.password_enc:
-                        try:
-                            pwd = decrypt_str(pr.password_enc)
-                        except Exception:  # noqa: BLE001
-                            # 密码解密失败时退化为无认证连接，避免一条坏 proxy 把所有 ai 命令打死
-                            pwd = ""
-                    proxy_url = _build_proxy_url(
-                        pr.type, pr.host, pr.port, pr.username, pwd
-                    )
-            providers[p.id] = {
-                "id": p.id,
-                "name": p.name,
-                "provider": p.provider,
-                "api_key_enc": p.api_key_enc,
-                "base_url": p.base_url,
-                "default_model": p.default_model,
-                # API 协议格式：build_client 据此决定走哪条 client 实现
-                "api_format": getattr(p, "api_format", None),
-                "web_search_api_format": getattr(p, "web_search_api_format", None),
-                # 路由元数据：worker 选 provider 时要看
-                "modality": getattr(p, "modality", None) or "text",
-                "tags": list(getattr(p, "tags", None) or []),
-                "cost_tier": int(getattr(p, "cost_tier", None) or 2),
-                "notes": getattr(p, "notes", None),
-                # 出口代理 URL；None = 直连（DIRECT）
-                "proxy_url": proxy_url,
-                # 候选模型清单（worker 通常不直接读，但保持一致）
-                "models": list(getattr(p, "models", None) or []),
-            }
+            # 收集所有用到的 proxy_id 一次性查出
+            proxy_ids = {p.proxy_id for p in prov_rows if p.proxy_id is not None}
+            proxy_rows: dict[int, Proxy] = {}
+            if proxy_ids:
+                rows2 = (
+                    await db.execute(select(Proxy).where(Proxy.id.in_(proxy_ids)))
+                ).scalars().all()
+                proxy_rows = {r.id: r for r in rows2}
+
+            for p in prov_rows:
+                proxy_url: str | None = None
+                if p.proxy_id is not None:
+                    pr = proxy_rows.get(p.proxy_id)
+                    if pr is not None and (pr.type or "").lower() != "mtproxy":
+                        # 主进程在这里就把 password 解密 + 拼成 httpx 接受的 URL；
+                        # 比把 password_enc 下发到 worker 让它再解密少一次往返，明文也只在
+                        # ctx 内存里活到 LLM 调用结束（worker 进程私有，不进 Redis / 日志）
+                        pwd = ""
+                        if pr.password_enc:
+                            try:
+                                pwd = decrypt_str(pr.password_enc)
+                            except Exception:  # noqa: BLE001
+                                # 密码解密失败时退化为无认证连接，避免一条坏 proxy 把所有 ai 命令打死
+                                pwd = ""
+                        proxy_url = _build_proxy_url(
+                            pr.type, pr.host, pr.port, pr.username, pwd
+                        )
+                providers[p.id] = {
+                    "id": p.id,
+                    "name": p.name,
+                    "provider": p.provider,
+                    "api_key_enc": p.api_key_enc,
+                    "base_url": p.base_url,
+                    "default_model": p.default_model,
+                    # API 协议格式：build_client 据此决定走哪条 client 实现
+                    "api_format": getattr(p, "api_format", None),
+                    "web_search_api_format": getattr(p, "web_search_api_format", None),
+                    # 路由元数据：worker 选 provider 时要看
+                    "modality": getattr(p, "modality", None) or "text",
+                    "tags": list(getattr(p, "tags", None) or []),
+                    "cost_tier": int(getattr(p, "cost_tier", None) or 2),
+                    "notes": getattr(p, "notes", None),
+                    # 出口代理 URL；None = 直连（DIRECT）
+                    "proxy_url": proxy_url,
+                    # 候选模型清单（worker 通常不直接读，但保持一致）
+                    "models": list(getattr(p, "models", None) or []),
+                }
 
         # 3) 命令别名
         alias_rows = (
@@ -1156,7 +1402,9 @@ async def _refresh_command_context(account_id: int) -> None:
             account_id=account_id,
             templates=templates,
             providers=providers,
+            ai_enabled=ai_enabled,
             command_prefix=prefix,
+            command_prefix_required=command_prefix_required,
             aliases=aliases,
             sudo_users=sudo_users,
             sudo_prefix=sudo_prefix,

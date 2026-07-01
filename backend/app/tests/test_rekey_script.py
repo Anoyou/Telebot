@@ -49,6 +49,7 @@ def _create_rekey_tables(database_url: str) -> None:
     Table("notify_bot", metadata, Column("id", Integer, primary_key=True), Column("bot_token_enc", String))
     Table("web_user", metadata, Column("id", Integer, primary_key=True), Column("totp_secret_enc", String))
     Table("account_bot", metadata, Column("id", Integer, primary_key=True), Column("bot_token_enc", String))
+    Table("plugin_repo", metadata, Column("id", Integer, primary_key=True), Column("credential_enc", String))
     Table("system_setting", metadata, Column("key", String, primary_key=True), Column("value", JSON))
     metadata.create_all(engine)
     engine.dispose()
@@ -92,6 +93,10 @@ def test_rekey_database_dry_run_then_rotate(tmp_path: Path) -> None:
             {"id": 1, "bot_token_enc": _encrypt_text(old_key, "account-bot-token")},
         )
         conn.execute(
+            Table("plugin_repo", MetaData(), autoload_with=conn).insert(),
+            {"id": 1, "credential_enc": _encrypt_text(old_key, "github-token")},
+        )
+        conn.execute(
             Table("system_setting", MetaData(), autoload_with=conn).insert(),
             {
                 "key": "account_bot_transfer_notice:1",
@@ -104,8 +109,8 @@ def test_rekey_database_dry_run_then_rotate(tmp_path: Path) -> None:
         )
 
     dry_run = rekey_database(old_key=old_key, new_key=new_key, database_url=database_url, dry_run=True)
-    assert dry_run.scanned == 10
-    assert dry_run.changed == 10
+    assert dry_run.scanned == 11
+    assert dry_run.changed == 11
 
     with engine.connect() as conn:
         proxy = Table("proxy", MetaData(), autoload_with=conn)
@@ -113,8 +118,8 @@ def test_rekey_database_dry_run_then_rotate(tmp_path: Path) -> None:
     assert _decrypt_text(old_key, token) == "proxy-pass"
 
     result = rekey_database(old_key=old_key, new_key=new_key, database_url=database_url)
-    assert result.scanned == 10
-    assert result.changed == 10
+    assert result.scanned == 11
+    assert result.changed == 11
 
     with engine.connect() as conn:
         account = Table("account", MetaData(), autoload_with=conn)
@@ -127,6 +132,10 @@ def test_rekey_database_dry_run_then_rotate(tmp_path: Path) -> None:
         value = conn.execute(select(settings.c.value)).scalar_one()
         assert _decrypt_text(new_key, value["interaction_bot_token_enc"]) == "interaction-token"
         assert _decrypt_text(new_key, value["transfer_bot_token_enc"]) == "transfer-token"
+
+        plugin_repo = Table("plugin_repo", MetaData(), autoload_with=conn)
+        repo_token = conn.execute(select(plugin_repo.c.credential_enc)).scalar_one()
+        assert _decrypt_text(new_key, repo_token) == "github-token"
 
     engine.dispose()
 

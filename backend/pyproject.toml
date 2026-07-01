@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "telepilot-backend"
-version = "0.32.0"
+version = "0.46.1"
 description = "TelePilot后端"
 requires-python = ">=3.12"
 license = {text = "MIT"}
@@ -29,7 +29,7 @@ dependencies = [
     "redis>=5.0.4",
 
     # Telegram 客户端：Telethon（活跃维护、类型注解完备）
-    "telethon>=1.43,<2.0.0",
+    "telethon>=1.44,<2.0.0",
     "Pillow>=10.0.0",
     "cryptg>=0.4.0",            # C 加速 AES-IGE（Telethon）
     "python-socks[asyncio]>=2.4.4",  # SOCKS5/HTTP/MTProxy 出口代理

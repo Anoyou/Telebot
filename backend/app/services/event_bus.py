@@ -1,0 +1,536 @@
+"""Event Bus helpers for trusted TelePilot plugins.
+
+The service is intentionally framework-level and side-effect free: adapters
+normalize Telegram-shaped inputs into a stable envelope, while matchers explain
+why each plugin subscription is delivered or skipped. Runtime code is
+responsible for invoking plugins and recording spans.
+"""
+
+from __future__ import annotations
+
+import inspect
+from dataclasses import dataclass, field
+from typing import Any
+
+VALID_EVENT_SOURCES = {"userbot", "interaction_bot", "external_payment_notice"}
+VALID_EVENT_TYPES = {
+    "all_messages",
+    "message",
+    "command",
+    "callback_query",
+    "inline_query",
+    "chosen_inline_result",
+    "payment_confirmed",
+    "keyword",
+    "session_close",
+}
+VALID_EVENT_SCOPES = {"all_allowed_chats", "owner_only", "known_users", "inline_all", "rule_bound"}
+EVENT_TRACE_STATUSES = {
+    "received",
+    "normalized",
+    "matched",
+    "skipped",
+    "delivered",
+    "plugin_succeeded",
+    "plugin_failed",
+    "action_succeeded",
+    "action_failed",
+    "trace_degraded",
+}
+EVENT_REASON_CODES = {
+    "account_not_matched",
+    "account_bot_user_unauthorized",
+    "action_failed",
+    "plugin_not_installed",
+    "plugin_disabled",
+    "manifest_invalid",
+    "plugin_load_failed",
+    "matched",
+    "event_type_not_subscribed",
+    "source_not_subscribed",
+    "scope_not_matched",
+    "filter_not_matched",
+    "session_not_found",
+    "session_expired",
+    "rate_limited",
+    "callback_query",
+    "command_matched",
+    "command_not_matched",
+    "command_unauthorized",
+    "contract_failed",
+    "contract_warning",
+    "callback_query_id_missing",
+    "entry_key_missing",
+    "empty_message_text",
+    "event_bus_delivery_disabled",
+    "handler_error",
+    "inline_disabled",
+    "inline_query_id_missing",
+    "inline_query_answer_failed",
+    "media_payload_empty",
+    "media_payload_invalid",
+    "media_payload_missing",
+    "native_raw_not_allowed",
+    "native_raw_skipped",
+    "permission_denied",
+    "send_channel_deprecated",
+    "session_control_action",
+    "bot_not_configured",
+    "bot_self_message",
+    "bot_token_missing",
+    "userbot_offline",
+    "settlement_requires_userbot",
+    "subscription_load_failed",
+    "subscription_not_matched",
+    "target_message_id_missing",
+    "telegram_api_error",
+    "plugin_runtime_error",
+    "trace_write_failed",
+    "unsupported_send_via",
+    "userbot_command_message",
+}
+EVENT_MATCHED_REASON_CODE = "matched"
+
+
+@dataclass(slots=True)
+class EventSubscription:
+    plugin_key: str
+    entry_key: str | None
+    sources: list[str] = field(default_factory=list)
+    events: list[str] = field(default_factory=list)
+    scope: str = "all_allowed_chats"
+    filters: dict[str, Any] = field(default_factory=dict)
+    dispatch_mode: str = "event_subscription"
+    raw: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class SubscriptionDecision:
+    plugin_key: str
+    entry_key: str | None
+    matched: bool
+    reason_code: str
+    reason_message: str
+    dispatch_mode: str
+    scope: str
+    filters: dict[str, Any] = field(default_factory=dict)
+    subscription: EventSubscription | None = None
+
+
+@dataclass(slots=True)
+class DispatchResult:
+    event: dict[str, Any]
+    decisions: list[SubscriptionDecision]
+
+    @property
+    def matched(self) -> list[SubscriptionDecision]:
+        return [item for item in self.decisions if item.matched]
+
+
+def normalize_bot_update(account_id: int, update: dict[str, Any], *, channel: str = "interaction_bot") -> dict[str, Any]:
+    """Normalize a Telegram Bot API update into the TelePilot event envelope."""
+
+    update_id = _int_or_none(update.get("update_id"))
+    if isinstance(update.get("inline_query"), dict):
+        inline = update["inline_query"]
+        sender = _user_ref(inline.get("from"))
+        query = str(inline.get("query") or "")
+        return _event(
+            account_id=account_id,
+            channel=channel,
+            driver="telegram_bot_api",
+            event_type="inline_query",
+            update_id=update_id,
+            sender=sender,
+            message={"text": query},
+            inline_query={
+                "id": str(inline.get("id") or ""),
+                "query": query,
+                "offset": str(inline.get("offset") or ""),
+                "chat_type": str(inline.get("chat_type") or "") or None,
+                "from": sender,
+            },
+            raw_summary={"update_id": update_id, "event_type": "inline_query", "query": query},
+            native_raw=update,
+        )
+    if isinstance(update.get("chosen_inline_result"), dict):
+        chosen = update["chosen_inline_result"]
+        sender = _user_ref(chosen.get("from"))
+        query = str(chosen.get("query") or "")
+        return _event(
+            account_id=account_id,
+            channel=channel,
+            driver="telegram_bot_api",
+            event_type="chosen_inline_result",
+            update_id=update_id,
+            sender=sender,
+            message={"text": query},
+            chosen_inline_result={
+                "result_id": str(chosen.get("result_id") or ""),
+                "query": query,
+                "from": sender,
+            },
+            raw_summary={"update_id": update_id, "event_type": "chosen_inline_result", "query": query},
+            native_raw=update,
+        )
+    if isinstance(update.get("callback_query"), dict):
+        callback = update["callback_query"]
+        msg = callback.get("message") if isinstance(callback.get("message"), dict) else {}
+        chat = msg.get("chat") if isinstance(msg.get("chat"), dict) else {}
+        sender = _user_ref(callback.get("from"))
+        text = str(msg.get("text") or msg.get("caption") or "")
+        return _event(
+            account_id=account_id,
+            channel=channel,
+            driver="telegram_bot_api",
+            event_type="callback_query",
+            update_id=update_id,
+            chat={"id": _int_or_none(chat.get("id")), "type": str(chat.get("type") or "") or None},
+            sender=sender,
+            message={
+                "chat_id": _int_or_none(chat.get("id")),
+                "message_id": _int_or_none(msg.get("message_id")),
+                "text": text,
+            },
+            callback={
+                "id": str(callback.get("id") or ""),
+                "data": str(callback.get("data") or ""),
+            },
+            raw_summary={"update_id": update_id, "event_type": "callback_query", "callback_data": callback.get("data")},
+            native_raw=update,
+        )
+    msg = update.get("message") if isinstance(update.get("message"), dict) else {}
+    chat = msg.get("chat") if isinstance(msg.get("chat"), dict) else {}
+    sender = _user_ref(msg.get("from"))
+    text = str(msg.get("text") or msg.get("caption") or "")
+    reply = msg.get("reply_to_message") if isinstance(msg.get("reply_to_message"), dict) else {}
+    return _event(
+        account_id=account_id,
+        channel=channel,
+        driver="telegram_bot_api",
+        event_type="message",
+        update_id=update_id,
+        chat={"id": _int_or_none(chat.get("id")), "type": str(chat.get("type") or "") or None},
+        sender=sender,
+        message={
+            "chat_id": _int_or_none(chat.get("id")),
+            "message_id": _int_or_none(msg.get("message_id")),
+            "text": text,
+            "reply_to_message_id": _int_or_none(reply.get("message_id")),
+        },
+        reply_to={"message_id": _int_or_none(reply.get("message_id")), "text": str(reply.get("text") or "") or None}
+        if reply
+        else None,
+        raw_summary={"update_id": update_id, "event_type": "message", "text": text},
+        native_raw=update,
+    )
+
+
+def normalize_userbot_event(account_id: int, event: Any, *, command_meta: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Normalize a Telethon-like userbot event without exposing the live object."""
+
+    message = getattr(event, "message", event)
+    text = str(getattr(message, "text", None) or getattr(message, "message", None) or "")
+    chat_id = _int_or_none(getattr(message, "chat_id", None) or getattr(event, "chat_id", None))
+    sender_id = _int_or_none(getattr(message, "sender_id", None) or getattr(event, "sender_id", None))
+    message_id = _int_or_none(getattr(message, "id", None) or getattr(event, "id", None))
+    event_type = "command" if command_meta else "message"
+    return _event(
+        account_id=account_id,
+        channel="userbot",
+        driver="telethon",
+        event_type=event_type,
+        chat={"id": chat_id},
+        sender={"user_id": sender_id},
+        message={"chat_id": chat_id, "message_id": message_id, "text": text},
+        trigger=dict(command_meta or {}),
+        raw_summary={"event_type": event_type, "text": text},
+        native_raw=_safe_to_dict(message),
+    )
+
+
+def normalize_payment_notice(account_id: int, event: dict[str, Any], parsed: dict[str, Any]) -> dict[str, Any]:
+    """Normalize an external transfer notice into a payment_confirmed event."""
+
+    payload = normalize_bot_update(account_id, event, channel="external_payment_notice")
+    payload["source"]["type"] = "payment_confirmed"
+    payload["event_type"] = "payment_confirmed"
+    payload["payment"] = dict(parsed or {})
+    payload["raw"]["event_type"] = "payment_confirmed"
+    return payload
+
+
+def normalize_event_subscription(
+    raw: dict[str, Any] | Any,
+    *,
+    plugin_key: str,
+    entry_key: str | None = None,
+) -> EventSubscription:
+    """Parse one manifest event subscription into a stable matcher object."""
+
+    data = raw if isinstance(raw, dict) else {}
+    sources = _string_list(data.get("source") or data.get("sources")) or ["interaction_bot"]
+    events = _string_list(data.get("events") or data.get("event")) or ["message"]
+    scope = str(data.get("scope") or "all_allowed_chats").strip() or "all_allowed_chats"
+    if scope not in VALID_EVENT_SCOPES:
+        scope = "all_allowed_chats"
+    filters = data.get("filters") if isinstance(data.get("filters"), dict) else {}
+    return EventSubscription(
+        plugin_key=str(plugin_key or "").strip(),
+        entry_key=str(data.get("entry_key") or entry_key or "").strip() or None,
+        sources=[item for item in sources if item],
+        events=[item for item in events if item],
+        scope=scope,
+        filters=dict(filters),
+        dispatch_mode=str(data.get("dispatch_mode") or "event_subscription").strip() or "event_subscription",
+        raw=dict(data),
+    )
+
+
+def match_subscriptions(
+    event: dict[str, Any],
+    subscriptions: list[EventSubscription],
+    account_state: dict[str, Any] | None = None,
+) -> list[SubscriptionDecision]:
+    """Return matched/skipped decisions with stable reason codes."""
+
+    state = account_state if isinstance(account_state, dict) else {}
+    source = event.get("source") if isinstance(event.get("source"), dict) else {}
+    message = event.get("message") if isinstance(event.get("message"), dict) else {}
+    chat = event.get("chat") if isinstance(event.get("chat"), dict) else {}
+    event_source = str(source.get("channel") or source.get("source_channel") or "").strip()
+    event_type = str(source.get("type") or event.get("event_type") or "").strip() or "message"
+    chat_id = _int_or_none(message.get("chat_id") or chat.get("id") or source.get("chat_id"))
+    sender = event.get("sender") if isinstance(event.get("sender"), dict) else {}
+    sender_user_id = _int_or_none(sender.get("user_id"))
+    decisions: list[SubscriptionDecision] = []
+    for subscription in subscriptions:
+        decision = _match_one(subscription, event, state, event_source, event_type, chat_id, sender_user_id)
+        decisions.append(decision)
+    return decisions
+
+
+def dispatch_event(
+    event: dict[str, Any],
+    subscriptions: list[EventSubscription],
+    account_state: dict[str, Any] | None = None,
+) -> DispatchResult:
+    """Match an event against candidate subscriptions."""
+
+    return DispatchResult(event=event, decisions=match_subscriptions(event, subscriptions, account_state))
+
+
+def _match_one(
+    subscription: EventSubscription,
+    event: dict[str, Any],
+    state: dict[str, Any],
+    event_source: str,
+    event_type: str,
+    chat_id: int | None,
+    sender_user_id: int | None,
+) -> SubscriptionDecision:
+    base = {
+        "plugin_key": subscription.plugin_key,
+        "entry_key": subscription.entry_key,
+        "dispatch_mode": subscription.dispatch_mode,
+        "scope": subscription.scope,
+        "filters": dict(subscription.filters),
+        "subscription": subscription,
+    }
+    if not subscription.plugin_key:
+        return SubscriptionDecision(matched=False, reason_code="plugin_not_installed", reason_message="插件 key 为空", **base)
+    if event_source not in subscription.sources:
+        return SubscriptionDecision(matched=False, reason_code="source_not_subscribed", reason_message="事件来源未订阅", **base)
+    subscribed_events = set(subscription.events)
+    if event_type not in subscribed_events and not (
+        "all_messages" in subscribed_events and event_type in {"message", "command"}
+    ):
+        return SubscriptionDecision(matched=False, reason_code="event_type_not_subscribed", reason_message="事件类型未订阅", **base)
+    scope_ok, scope_reason = _scope_matches(subscription.scope, event_type, chat_id, sender_user_id, state)
+    if not scope_ok:
+        return SubscriptionDecision(matched=False, reason_code=scope_reason, reason_message="事件范围不匹配", **base)
+    filter_ok, filter_reason = _filters_match(event, subscription.filters)
+    if not filter_ok:
+        return SubscriptionDecision(matched=False, reason_code=filter_reason, reason_message="事件过滤条件不匹配", **base)
+    return SubscriptionDecision(matched=True, reason_code=EVENT_MATCHED_REASON_CODE, reason_message="订阅匹配", **base)
+
+
+def _scope_matches(
+    scope: str,
+    event_type: str,
+    chat_id: int | None,
+    sender_user_id: int | None,
+    state: dict[str, Any],
+) -> tuple[bool, str]:
+    if scope == "inline_all":
+        return (event_type in {"inline_query", "chosen_inline_result"}, "scope_not_matched")
+    owner_ids = _int_set(state.get("owner_user_ids") or state.get("admin_user_ids"))
+    if scope == "owner_only":
+        return (sender_user_id is not None and sender_user_id in owner_ids, "scope_not_matched")
+    known_ids = _int_set(state.get("known_user_ids")) | owner_ids
+    if scope == "known_users":
+        return (sender_user_id is not None and sender_user_id in known_ids, "scope_not_matched")
+    if scope == "rule_bound":
+        trigger = state.get("trigger") if isinstance(state.get("trigger"), dict) else {}
+        return (bool(trigger.get("rule_id")), "scope_not_matched")
+    allowed = state.get("allowed_chat_ids")
+    if allowed == "*" or allowed == ["*"]:
+        return (chat_id is not None, "scope_not_matched")
+    allowed_ids = _int_set(allowed)
+    return (chat_id is not None and chat_id in allowed_ids, "scope_not_matched")
+
+
+def _filters_match(event: dict[str, Any], filters: dict[str, Any]) -> tuple[bool, str]:
+    if not filters:
+        return True, "matched"
+    message = event.get("message") if isinstance(event.get("message"), dict) else {}
+    source = event.get("source") if isinstance(event.get("source"), dict) else {}
+    text = str(message.get("text") or "").strip()
+    keywords = _string_list(filters.get("keywords") or filters.get("keyword"))
+    if keywords and text not in keywords:
+        return False, "filter_not_matched"
+    contains = _string_list(filters.get("contains"))
+    if contains and not any(item in text for item in contains):
+        return False, "filter_not_matched"
+    callback_data = _string_list(filters.get("callback_data"))
+    if callback_data and str(source.get("callback_data") or "") not in callback_data:
+        return False, "filter_not_matched"
+    commands = _string_list(filters.get("commands") or filters.get("command"))
+    if commands and text.lstrip("/,").split(maxsplit=1)[0] not in [item.lstrip("/,") for item in commands]:
+        return False, "filter_not_matched"
+    return True, "matched"
+
+
+def _event(
+    *,
+    account_id: int,
+    channel: str,
+    driver: str,
+    event_type: str,
+    update_id: int | None = None,
+    chat: dict[str, Any] | None = None,
+    sender: dict[str, Any] | None = None,
+    message: dict[str, Any] | None = None,
+    callback: dict[str, Any] | None = None,
+    payment: dict[str, Any] | None = None,
+    reply_to: dict[str, Any] | None = None,
+    trigger: dict[str, Any] | None = None,
+    inline_query: dict[str, Any] | None = None,
+    chosen_inline_result: dict[str, Any] | None = None,
+    raw_summary: dict[str, Any] | None = None,
+    native_raw: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    source: dict[str, Any] = {
+        "type": event_type,
+        "channel": channel,
+        "driver": driver,
+        "account_id": account_id,
+        "update_id": update_id,
+    }
+    if callback:
+        source["callback_query_id"] = callback.get("id")
+        source["callback_data"] = callback.get("data")
+    if inline_query:
+        source["inline_query_id"] = inline_query.get("id")
+    payload = {
+        "source": source,
+        "event_type": event_type,
+        "message": message or {},
+        "chat": chat or {},
+        "sender": sender or {},
+        "actor": sender or {},
+        "source_actor": sender or {},
+        "player": sender or {},
+        "payment": payment,
+        "reply_to": reply_to,
+        "session": None,
+        "trigger": trigger or {},
+        "inline_query": inline_query,
+        "chosen_inline_result": chosen_inline_result,
+        "raw": raw_summary or {},
+        "native_raw_meta": {"enabled": False, "reason_code": "native_raw_not_allowed"},
+        "native_raw": native_raw,
+    }
+    return payload
+
+
+def _user_ref(raw: Any) -> dict[str, Any]:
+    data = raw if isinstance(raw, dict) else {}
+    first = str(data.get("first_name") or "").strip()
+    last = str(data.get("last_name") or "").strip()
+    display = " ".join(item for item in (first, last) if item).strip()
+    return {
+        "user_id": _int_or_none(data.get("id")),
+        "display_name": display or str(data.get("username") or "").strip() or None,
+        "username": str(data.get("username") or "").strip() or None,
+    }
+
+
+def _string_list(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return [value.strip()] if value.strip() else []
+    if isinstance(value, (list, tuple, set)):
+        out: list[str] = []
+        for item in value:
+            text = str(item or "").strip()
+            if text and text not in out:
+                out.append(text)
+        return out
+    text = str(value or "").strip()
+    return [text] if text else []
+
+
+def _int_set(value: Any) -> set[int]:
+    values = value if isinstance(value, (list, tuple, set)) else [value]
+    out: set[int] = set()
+    for item in values:
+        parsed = _int_or_none(item)
+        if parsed is not None:
+            out.add(parsed)
+    return out
+
+
+def _int_or_none(value: Any) -> int | None:
+    try:
+        if value in (None, ""):
+            return None
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _safe_to_dict(value: Any) -> dict[str, Any] | None:
+    to_dict = getattr(value, "to_dict", None)
+    if callable(to_dict):
+        try:
+            raw = to_dict()
+            if inspect.isawaitable(raw):
+                close = getattr(raw, "close", None)
+                if callable(close):
+                    close()
+                return None
+            return raw if isinstance(raw, dict) else None
+        except Exception:  # noqa: BLE001
+            return None
+    return None
+
+
+__all__ = [
+    "DispatchResult",
+    "EVENT_MATCHED_REASON_CODE",
+    "EVENT_REASON_CODES",
+    "EVENT_TRACE_STATUSES",
+    "EventSubscription",
+    "SubscriptionDecision",
+    "VALID_EVENT_SCOPES",
+    "VALID_EVENT_SOURCES",
+    "VALID_EVENT_TYPES",
+    "dispatch_event",
+    "match_subscriptions",
+    "normalize_bot_update",
+    "normalize_event_subscription",
+    "normalize_payment_notice",
+    "normalize_userbot_event",
+]

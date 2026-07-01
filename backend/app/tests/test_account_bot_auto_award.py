@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -238,6 +238,7 @@ async def test_account_bot_auto_award_replies_when_sender_id_matches(monkeypatch
         "_load_account_bot_auto_award_config",
         AsyncMock(return_value={"bot_id": 8807483916, "bot_username": "bbot", "chat_id": -100123}),
     )
+    monkeypatch.setattr(runtime, "_account_bot_auto_award_trace_enabled", AsyncMock(return_value=False))
     monkeypatch.setattr(runtime, "_log", AsyncMock())
 
     handled = await runtime._try_account_bot_auto_award(client, _Redis(), 1, event)
@@ -300,6 +301,7 @@ async def test_account_bot_auto_award_falls_back_to_username_without_bot_id(monk
         "_load_account_bot_auto_award_config",
         AsyncMock(return_value={"bot_username": "bbot", "chat_id": -100123}),
     )
+    monkeypatch.setattr(runtime, "_account_bot_auto_award_trace_enabled", AsyncMock(return_value=False))
     monkeypatch.setattr(runtime, "_log", AsyncMock())
 
     handled = await runtime._try_account_bot_auto_award(client, _Redis(), 1, event)
@@ -349,6 +351,7 @@ async def test_account_bot_auto_award_dedupes_by_notice_message(monkeypatch) -> 
         "_load_account_bot_auto_award_config",
         AsyncMock(return_value={"bot_id": 8807483916, "bot_username": "bbot", "chat_id": -100123}),
     )
+    monkeypatch.setattr(runtime, "_account_bot_auto_award_trace_enabled", AsyncMock(return_value=False))
     monkeypatch.setattr(runtime, "_log", AsyncMock())
 
     for notice_id in (77, 77):
@@ -367,6 +370,58 @@ async def test_account_bot_auto_award_dedupes_by_notice_message(monkeypatch) -> 
         f"{runtime._ACCOUNT_BOT_AUTO_AWARD_DEDUPE_PREFIX}1:-100123:77:66:123",
     ]
     assert client.send_message.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_account_bot_auto_award_records_trace_action(monkeypatch) -> None:
+    class _Redis:
+        async def set(self, *_args, **_kwargs):  # noqa: ANN001
+            return True
+
+    trace = SimpleNamespace(trace_id="evt_auto_award")
+    client = SimpleNamespace(send_message=AsyncMock(return_value=SimpleNamespace(id=888)))
+    event = SimpleNamespace(
+        raw_text="答对了：AAA\n题目：7 - 1 = 6\n奖金：123",
+        reply_to_msg_id=66,
+        chat_id=-100123,
+        id=77,
+        sender=SimpleNamespace(id=8807483916, username="Bbot"),
+    )
+    start_trace = AsyncMock(return_value=trace)
+    record_span = AsyncMock()
+    record_action = AsyncMock()
+    finish_trace = AsyncMock()
+    dispatch_event = MagicMock(side_effect=runtime.dispatch_event)
+    monkeypatch.setattr(
+        runtime,
+        "_load_account_bot_auto_award_config",
+        AsyncMock(return_value={"bot_id": 8807483916, "bot_username": "bbot", "chat_id": -100123}),
+    )
+    monkeypatch.setattr(runtime, "_account_bot_auto_award_trace_enabled", AsyncMock(return_value=True))
+    monkeypatch.setattr(runtime, "start_trace", start_trace)
+    monkeypatch.setattr(runtime, "dispatch_event", dispatch_event)
+    monkeypatch.setattr(runtime, "record_span", record_span)
+    monkeypatch.setattr(runtime, "record_action", record_action)
+    monkeypatch.setattr(runtime, "finish_trace", finish_trace)
+    monkeypatch.setattr(runtime, "_log", AsyncMock())
+
+    handled = await runtime._try_account_bot_auto_award(client, _Redis(), 1, event)
+
+    assert handled is True
+    dispatch_event.assert_called_once()
+    subscription = dispatch_event.call_args.args[1][0]
+    assert subscription.plugin_key == "account_bot_auto_award"
+    assert subscription.entry_key == "auto_award"
+    assert subscription.events == ["payment_confirmed"]
+    assert subscription.dispatch_mode == "account_bot_auto_award"
+    start_trace.assert_awaited_once()
+    assert start_trace.await_args.args[0]["event_type"] == "payment_confirmed"
+    assert start_trace.await_args.args[0]["trigger"]["source"] == "account_bot_auto_award"
+    record_action.assert_awaited_once()
+    assert record_action.await_args.args[1]["send_via"] == "userbot_reply"
+    assert record_action.await_args.args[2] == runtime.TRACE_STATUS_OK
+    assert record_action.await_args.kwargs["actual_send_via"] == "userbot_reply"
+    finish_trace.assert_awaited_once_with(trace, runtime.TRACE_STATUS_OK)
 
 
 @pytest.mark.asyncio

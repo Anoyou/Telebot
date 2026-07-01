@@ -12,6 +12,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/_lib.sh"
 cd "$ROOT_DIR"
+export TELEPILOT_HOST_PROJECT_DIR="${TELEPILOT_HOST_PROJECT_DIR:-$ROOT_DIR}"
 
 REMOTE="${TELEPILOT_UPDATE_REMOTE:-origin}"
 BRANCH="${TELEPILOT_UPDATE_BRANCH:-main}"
@@ -207,8 +208,35 @@ frontend_url() {
 }
 
 if (( NEEDS_FULL == 1 )); then
-  log "执行完整生产更新"
-  "$SCRIPT_DIR/prod-up.sh"
+  if [[ "${TELEPILOT_SKIP_UPDATER_RECREATE:-0}" == "1" ]]; then
+    warn "当前由内部 updater 执行完整更新，跳过重建 updater 自身以避免任务被中途杀掉。"
+    log "构建 + 启动业务容器（postgres / redis / web / frontend）"
+    docker compose up -d --build postgres redis web frontend
+    wait_compose_healthy docker-compose.yml postgres 60 || {
+      docker compose logs --tail=80 postgres >&2
+      exit 1
+    }
+    wait_compose_healthy docker-compose.yml redis 30 || {
+      docker compose logs --tail=80 redis >&2
+      exit 1
+    }
+    wait_compose_healthy docker-compose.yml web 120 || {
+      docker compose logs --tail=80 web >&2
+      exit 1
+    }
+    wait_compose_healthy docker-compose.yml frontend 60 || {
+      docker compose logs --tail=80 frontend >&2
+      exit 1
+    }
+    wait_http "$(frontend_url)" 30 "前端" || {
+      docker compose logs --tail=80 frontend >&2
+      exit 1
+    }
+    ok "完整业务更新完成（updater 保持当前版本）"
+  else
+    log "执行完整生产更新"
+    "$SCRIPT_DIR/prod-up.sh"
+  fi
 elif (( DOCS_ONLY == 1 )); then
   ok "无需重建服务，更新完成"
 else

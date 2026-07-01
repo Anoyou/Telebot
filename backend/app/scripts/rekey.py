@@ -46,6 +46,7 @@ SCALAR_FIELDS: tuple[RekeyField, ...] = (
     RekeyField("notify_bot", "id", "bot_token_enc"),
     RekeyField("web_user", "id", "totp_secret_enc"),
     RekeyField("account_bot", "id", "bot_token_enc"),
+    RekeyField("plugin_repo", "id", "credential_enc"),
 )
 SYSTEM_SETTING_PREFIX = "account_bot_transfer_notice:"
 SYSTEM_SETTING_ENCRYPTED_KEYS = ("interaction_bot_token_enc", "transfer_bot_token_enc")

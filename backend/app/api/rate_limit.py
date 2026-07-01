@@ -52,7 +52,9 @@ from ..schemas.rate_limit import (
     UsageResponse,
 )
 from ..services import audit as audit_svc
+from ..services import event_trace
 from ..services import rate_limit_service as svc
+from ..services.ai_feature import AI_ENABLED_SETTING_KEY, normalize_ai_enabled
 from ..worker.ipc import GCMD_KILL_SWITCH, GCMD_RELOAD_GLOBAL, GLOBAL_CHANNEL, make_cmd
 from ..worker.ratelimit.buckets import TokenBuckets
 from ..worker.ratelimit.overrides import add_override, drop_override, list_active
@@ -616,9 +618,11 @@ async def get_system_settings(db: DBSession, _user: CurrentUser) -> dict[str, An
         "remote_plugin_update_check",
         {"enabled": True, "interval_minutes": 360},
     )
+    ai_enabled_val = await _get_setting(db, AI_ENABLED_SETTING_KEY, {"enabled": True})
     llm_val = await _get_setting(db, "llm_limits", {})
     log_val = await _get_setting(db, "log_retention", {})
     sudo_val = await _get_setting(db, "sudo_enabled", {"enabled": False})
+    prefix_required_val = await _get_setting(db, "command_prefix_required", {"enabled": True})
     echo_guard_val = await _get_setting(db, "command_echo_guard_previous_messages", None)
     if echo_guard_val is None:
         from ..settings import settings as app_settings
@@ -646,6 +650,12 @@ async def get_system_settings(db: DBSession, _user: CurrentUser) -> dict[str, An
             "interval_minutes": max(30, min(10080, remote_update_interval)),
         },
         "sudo_enabled": bool(sudo_val.get("enabled", False)) if isinstance(sudo_val, dict) else bool(sudo_val),
+        "command_prefix_required": (
+            bool(prefix_required_val.get("enabled", True))
+            if isinstance(prefix_required_val, dict)
+            else bool(prefix_required_val)
+        ),
+        "ai_enabled": normalize_ai_enabled(ai_enabled_val),
         "command_echo_guard_previous_messages": _normalize_command_echo_guard_limit(echo_guard_source),
         "llm_limits": {
             "per_minute": max(0, int(llm_limits.get("per_minute", 0) or 0)),
@@ -654,6 +664,9 @@ async def get_system_settings(db: DBSession, _user: CurrentUser) -> dict[str, An
             "premium_daily": max(0, int(llm_limits.get("premium_daily", 0) or 0)),
         },
         "log_retention": {
+            "trace_enabled": bool(log_retention.get("trace_enabled", True)),
+            "event_bus_delivery_enabled": bool(log_retention.get("event_bus_delivery_enabled", True)),
+            "inline_updates_enabled": bool(log_retention.get("inline_updates_enabled", True)),
             "runtime_log_retention_days": max(
                 0, int(log_retention.get("runtime_log_retention_days", 30) or 0)
             ),
@@ -669,6 +682,16 @@ async def get_system_settings(db: DBSession, _user: CurrentUser) -> dict[str, An
                 in {"debug", "info", "warn", "error"}
                 else "info"
             ),
+            "trace_retention_days": max(
+                0, int(log_retention.get("trace_retention_days", 30) or 0)
+            ),
+            "trace_payload_snapshot_retention_days": max(
+                0, int(log_retention.get("trace_payload_snapshot_retention_days", 7) or 0)
+            ),
+            "native_raw_persist_enabled": bool(log_retention.get("native_raw_persist_enabled", False)),
+            "native_raw_retention_days": max(
+                0, int(log_retention.get("native_raw_retention_days", 1) or 0)
+            ),
         },
     }
 
@@ -681,10 +704,17 @@ class _LLMLimitsPatch(BaseModel):
 
 
 class _LogRetentionPatch(BaseModel):
+    trace_enabled: bool | None = None
+    event_bus_delivery_enabled: bool | None = None
+    inline_updates_enabled: bool | None = None
     runtime_log_retention_days: int | None = None
     runtime_log_max_message_chars: int | None = None
     runtime_log_max_detail_chars: int | None = None
     runtime_log_min_level: str | None = None
+    trace_retention_days: int | None = None
+    trace_payload_snapshot_retention_days: int | None = None
+    native_raw_persist_enabled: bool | None = None
+    native_raw_retention_days: int | None = None
 
 
 class _RemotePluginUpdateCheckPatch(BaseModel):
@@ -697,7 +727,9 @@ class _SettingsPatch(BaseModel):
 
     command_prefix: str | None = None
     timezone: str | None = None
+    ai_enabled: bool | None = None
     sudo_enabled: bool | None = None
+    command_prefix_required: bool | None = None
     command_echo_guard_previous_messages: int | None = None
     remote_plugin_update_check: _RemotePluginUpdateCheckPatch | None = None
     llm_limits: _LLMLimitsPatch | None = None
@@ -724,10 +756,26 @@ async def patch_system_settings(
         if tz and tz not in __import__("zoneinfo").available_timezones():  # noqa: PLC0415
             raise _bad("invalid_timezone", f"无效时区：{tz}")
         await _set_setting(db, "timezone", {"value": tz or "Asia/Shanghai"})
+    if payload.ai_enabled is not None:
+        enabled = bool(payload.ai_enabled)
+        await _set_setting(db, AI_ENABLED_SETTING_KEY, {"enabled": enabled})
+        await _audit(db, user.id, "set_ai_enabled", target="system", detail={"enabled": enabled})
+        await _broadcast_reload()
     if payload.sudo_enabled is not None:
         enabled = bool(payload.sudo_enabled)
         await _set_setting(db, "sudo_enabled", {"enabled": enabled})
         await _audit(db, user.id, "set_sudo_enabled", target="system", detail={"enabled": enabled})
+        await _broadcast_reload()
+    if payload.command_prefix_required is not None:
+        enabled = bool(payload.command_prefix_required)
+        await _set_setting(db, "command_prefix_required", {"enabled": enabled})
+        await _audit(
+            db,
+            user.id,
+            "set_command_prefix_required",
+            target="system",
+            detail={"enabled": enabled},
+        )
         await _broadcast_reload()
     if payload.remote_plugin_update_check is not None:
         raw = payload.remote_plugin_update_check
@@ -794,6 +842,9 @@ async def patch_system_settings(
             current = {}
         data = payload.log_retention.model_dump(exclude_unset=True)
         next_retention = {
+            "trace_enabled": bool(current.get("trace_enabled", True)),
+            "event_bus_delivery_enabled": bool(current.get("event_bus_delivery_enabled", True)),
+            "inline_updates_enabled": bool(current.get("inline_updates_enabled", True)),
             "runtime_log_retention_days": max(
                 0, int(current.get("runtime_log_retention_days", 30) or 0)
             ),
@@ -809,14 +860,31 @@ async def patch_system_settings(
                 in {"debug", "info", "warn", "error"}
                 else "info"
             ),
+            "trace_retention_days": max(
+                0, int(current.get("trace_retention_days", 30) or 0)
+            ),
+            "trace_payload_snapshot_retention_days": max(
+                0, int(current.get("trace_payload_snapshot_retention_days", 7) or 0)
+            ),
+            "native_raw_persist_enabled": bool(current.get("native_raw_persist_enabled", False)),
+            "native_raw_retention_days": max(
+                0, int(current.get("native_raw_retention_days", 1) or 0)
+            ),
         }
+        bool_keys = {"trace_enabled", "event_bus_delivery_enabled", "inline_updates_enabled", "native_raw_persist_enabled"}
         bounds = {
             "runtime_log_retention_days": (0, 3650),
             "runtime_log_max_message_chars": (200, 20000),
             "runtime_log_max_detail_chars": (0, 50000),
+            "trace_retention_days": (0, 3650),
+            "trace_payload_snapshot_retention_days": (0, 3650),
+            "native_raw_retention_days": (0, 30),
         }
         for key, value in data.items():
             if value is None:
+                continue
+            if key in bool_keys:
+                next_retention[key] = bool(value)
                 continue
             if key == "runtime_log_min_level":
                 norm = str(value).strip().lower()
@@ -834,6 +902,7 @@ async def patch_system_settings(
             next_retention[key] = ivalue
         await _set_setting(db, "log_retention", next_retention)
         await _audit(db, user.id, "set_log_retention", target="system", detail=next_retention)
+        await event_trace.refresh_trace_settings()
         try:
             from ..worker.supervisor import invalidate_log_retention_cache
 

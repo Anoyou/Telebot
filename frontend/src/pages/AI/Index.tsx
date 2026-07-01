@@ -12,6 +12,7 @@ import {
   History,
   LayoutDashboard,
   Package,
+  Power,
   PlusCircle,
   Sparkles,
 } from "lucide-react";
@@ -33,7 +34,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { MeterBar, SectionHeader, SignalPill, StatusSummaryPanel, ToneRailCard } from "@/components/ui/status";
+import { MeterBar, SectionHeader, ToneRailCard } from "@/components/ui/status";
 import { CommandBadge } from "@/components/CommandBadge";
 import { Glossary } from "@/components/ai/Glossary";
 import { HowItWorks } from "@/components/ai/HowItWorks";
@@ -73,28 +74,32 @@ export function AIIndex() {
   const [helpOpen, setHelpOpen] = useState(searchParams.get("help") === "1");
   const [quickStartOpen, setQuickStartOpen] = useState(false);
   const activeTab = normalizeTab(searchParams.get("tab"));
+  const settingsQ = useQuery({
+    queryKey: ["system", "settings"],
+    queryFn: getSystemSettings,
+  });
+  const aiEnabled = settingsQ.data?.ai_enabled ?? true;
   const providersQ = useQuery({
     queryKey: ["llm-providers"],
     queryFn: listLLMProviders,
+    enabled: !settingsQ.isLoading && aiEnabled,
+    retry: false,
   });
   const templatesQ = useQuery({
     queryKey: ["cmd-tpl"],
     queryFn: listCommandTemplates,
   });
-  const settingsQ = useQuery({
-    queryKey: ["system", "settings"],
-    queryFn: getSystemSettings,
-  });
   const usageQ = useQuery({
     queryKey: ["llm-usage", "recent", "summary"],
     queryFn: () => listRecentLLMUsage(100),
     retry: false,
-    enabled: (providersQ.data?.length ?? 0) > 0,
+    enabled: !settingsQ.isLoading && aiEnabled && (providersQ.data?.length ?? 0) > 0,
   });
   const enablementQ = useQuery({
     queryKey: ["cmd-tpl", "ai-enablement-summary"],
     queryFn: getAICommandEnablementSummary,
     retry: false,
+    enabled: !settingsQ.isLoading && aiEnabled,
   });
   const accountsQ = useQuery({
     queryKey: ["accounts", "ai-enable-picker"],
@@ -115,7 +120,7 @@ export function AIIndex() {
     setSearchParams(next, { replace: true });
   };
 
-  const loading = providersQ.isLoading || templatesQ.isLoading;
+  const loading = settingsQ.isLoading || templatesQ.isLoading || (aiEnabled && providersQ.isLoading);
   if (loading) {
     return (
       <div className="flex h-40 items-center justify-center">
@@ -127,6 +132,30 @@ export function AIIndex() {
   const providers = providersQ.data || [];
   const templates = templatesQ.data || [];
   const cmdPrefix = settingsQ.data?.command_prefix || ",";
+  if (!aiEnabled) {
+    return (
+      <PageShell>
+        <AIHeader />
+        <Card>
+          <CardHeader>
+            <SectionHeader
+              icon={Power}
+              title="AI 能力已关闭"
+              description="模型提供商、AI 指令调用和插件 ctx.ai 已热拔出。已有模板仍保留，重新启用后可继续使用。"
+            />
+          </CardHeader>
+          <CardContent className="flex flex-wrap gap-2">
+            <Button asChild>
+              <Link to="/settings?tab=platform">去系统设置启用</Link>
+            </Button>
+            <Button asChild variant="outline">
+              <Link to="/plugins">返回插件中心</Link>
+            </Button>
+          </CardContent>
+        </Card>
+      </PageShell>
+    );
+  }
   const providerById = new Map(providers.map((p) => [p.id, p]));
   const aiTemplates = templates.filter((t) => t.type === "ai");
   const providerCount = providers.length;
@@ -197,50 +226,7 @@ export function AIIndex() {
         onHelpOpenChange={setHelpMenuOpen}
         cmdPrefix={cmdPrefix}
       />
-      <StatusSummaryPanel
-        icon={Sparkles}
-        title="AI 工作台总览"
-        titleLevel="h2"
-        description="把模型供应、指令可用性和近期调用健康度放在同一层，方便快速判断下一步动作。"
-        signals={
-          <>
-            <SignalPill tone={readyCount > 0 ? "success" : "warn"} label="Provider 就绪" value={`${readyCount}/${providerCount}`} />
-            <SignalPill tone={aiTemplates.length > 0 ? "success" : "warn"} label="AI 指令" value={`${aiTemplates.length} 条`} />
-            <SignalPill
-              tone={(usageSummary?.failed_count ?? 0) > 0 ? "warn" : "primary"}
-              label="近期调用"
-              value={usageSummary ? `${usageSummary.request_count} 次` : "暂无"}
-            />
-          </>
-        }
-        aside={
-          <div className="w-full max-w-xs space-y-2 rounded-md border border-border/70 bg-background/80 p-3">
-            <div className="text-xs text-muted-foreground">调用成功率</div>
-            <div className="text-lg font-semibold">
-              {usageSummary && usageSummary.request_count > 0
-                ? `${Math.round((usageSummary.success_count / usageSummary.request_count) * 100)}%`
-                : "暂无"}
-            </div>
-            <MeterBar
-              tone={(usageSummary?.failed_count ?? 0) > 0 ? "warn" : "success"}
-              value={
-                usageSummary && usageSummary.request_count > 0
-                  ? (usageSummary.success_count / usageSummary.request_count) * 100
-                  : null
-              }
-            />
-            <div className="text-xs text-muted-foreground">
-              {usageSummary
-                ? `平均耗时 ${usageSummary.avg_latency_ms}ms`
-                : usageQ.isError
-                  ? "调用摘要暂不可用"
-                  : "触发调用后展示摘要"}
-            </div>
-          </div>
-        }
-      />
-
-      <div className="grid gap-3 md:grid-cols-3">
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
         <ToneRailCard
           icon={Package}
           title="Provider 就绪"
@@ -262,6 +248,31 @@ export function AIIndex() {
           description={usageSummary ? `Fallback ${usageSummary.fallback_count} 次` : "触发调用后展示摘要"}
           tone={(usageSummary?.failed_count ?? 0) > 0 ? "warn" : "neutral"}
         />
+        <Card className="border-t-4 border-t-emerald-500/90">
+          <CardContent className="space-y-2 p-4">
+            <div className="text-sm font-medium">调用成功率</div>
+            <div className="text-2xl font-semibold">
+              {usageSummary && usageSummary.request_count > 0
+                ? `${Math.round((usageSummary.success_count / usageSummary.request_count) * 100)}%`
+                : "暂无"}
+            </div>
+            <MeterBar
+              tone={(usageSummary?.failed_count ?? 0) > 0 ? "warn" : "success"}
+              value={
+                usageSummary && usageSummary.request_count > 0
+                  ? (usageSummary.success_count / usageSummary.request_count) * 100
+                  : null
+              }
+            />
+            <div className="text-xs text-muted-foreground">
+              {usageSummary
+                ? `平均耗时 ${usageSummary.avg_latency_ms}ms`
+                : usageQ.isError
+                  ? "调用摘要暂不可用"
+                  : "触发调用后展示摘要"}
+            </div>
+          </CardContent>
+        </Card>
       </div>
 
       <Card>

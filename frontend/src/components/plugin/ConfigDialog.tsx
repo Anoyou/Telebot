@@ -11,13 +11,27 @@
  */
 import { useState, useEffect, useCallback, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ChevronDown, ChevronRight, Save } from "lucide-react";
+import {
+  ArrowDown,
+  ArrowUp,
+  ChevronDown,
+  ChevronRight,
+  Copy,
+  GripVertical,
+  Loader2,
+  Pencil,
+  Plus,
+  Save,
+  Trash2,
+  Wand,
+} from "lucide-react";
 import { toast } from "sonner";
 import { TelegramHtmlPreview, TelegramHtmlPreviewThread } from "@/components/TelegramHtmlPreview";
 import { listLLMProviders } from "@/api/commands";
 import { getSystemSettings } from "@/api/system";
 import type { LLMProviderOut } from "@/api/types";
 import { getErrMsg } from "@/lib/api";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -35,6 +49,7 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 
 export const MASKED_SECRET_PLACEHOLDER = "••••••••••••••••";
+const EMPTY_CONFIG: Record<string, unknown> = {};
 
 export interface ConfigField {
   key: string;
@@ -42,25 +57,54 @@ export interface ConfigField {
   type: string;
   format?: string;
   "x-ui-widget"?: string;
+  "x-ui-hidden"?: boolean;
+  "x-ui-section"?: string;
+  "x-ui-order"?: number;
+  "x-ui-columns"?: 1 | 2 | 3 | number;
   "x-ui-provider-field"?: string;
   "x-ui-model-modality"?: string;
+  "x-ui-summary"?: string;
+  "x-ui-title-field"?: string;
+  "x-ui-description-field"?: string;
+  "x-ui-enabled-field"?: string;
+  "x-ui-reorderable"?: boolean;
+  "x-ui-add-label"?: string;
   enum?: Array<string | number | boolean>;
   enumNames?: string[];
   enumDescriptions?: string[];
-  items?: { type?: string };
+  items?: ConfigField;
+  properties?: Record<string, ConfigField>;
   default?: unknown;
   description?: string;
   minimum?: number;
   maximum?: number;
+  minItems?: number;
+  maxItems?: number;
   level?: "global" | "account";
   readOnly?: boolean;
+}
+
+export interface ConfigAction {
+  key: string;
+  title?: string;
+  description?: string;
+  placement?: string;
+  input_schema?: ConfigSchema;
+  submit_label?: string;
 }
 
 export interface ConfigSchema {
   type: string;
   properties: Record<string, ConfigField>;
   required?: string[];
+  "x-config-actions"?: ConfigAction[];
+  "x-usage-guide"?: unknown;
+  "x-usage-instructions"?: unknown;
+  "x-usage-steps"?: unknown;
+  "x-help"?: unknown;
 }
+
+
 
 interface ConfigDialogProps {
   open: boolean;
@@ -78,8 +122,10 @@ interface ConfigDialogProps {
 
 export function ConfigDialog({
   open, onOpenChange, pluginKey, pluginName, schema, accountName,
-  accountId, globalConfig = {}, accountConfig = {}, onSave,
+accountId, globalConfig, accountConfig, onSave,
 }: ConfigDialogProps) {
+  const effectiveGlobalConfig = globalConfig ?? EMPTY_CONFIG;
+  const effectiveAccountConfig = accountConfig ?? EMPTY_CONFIG;
   const [globalVals, setGlobalVals] = useState<Record<string, unknown>>({});
   const [accountVals, setAccountVals] = useState<Record<string, unknown>>({});
   const [saving, setSaving] = useState(false);
@@ -99,8 +145,8 @@ export function ConfigDialog({
   const handleSave = useCallback(async () => {
     if (!onSave) return;
     const properties = ((schema as ConfigSchema | null)?.properties ?? {}) as Record<string, ConfigField>;
-    const editableGlobalVals = withoutReadOnlyValues(globalVals, properties, globalConfig);
-    const editableAccountVals = withoutReadOnlyValues(accountVals, properties, accountConfig);
+    const editableGlobalVals = withoutReadOnlyValues(globalVals, properties, effectiveGlobalConfig);
+    const editableAccountVals = withoutReadOnlyValues(accountVals, properties, effectiveAccountConfig);
     setSaving(true);
     try {
       await onSave(editableGlobalVals, editableAccountVals);
@@ -111,17 +157,17 @@ export function ConfigDialog({
     } finally {
       setSaving(false);
     }
-  }, [onSave, schema, globalVals, accountVals, onOpenChange]);
+  }, [onSave, schema, globalVals, accountVals, effectiveGlobalConfig, effectiveAccountConfig, onOpenChange]);
 
   // 初始化配置值
   useEffect(() => {
     if (open && schema && typeof schema === "object" && "properties" in schema) {
       const s = schema as ConfigSchema;
-      const { globalVals: gv, accountVals: av } = buildScopedConfigValues(s, globalConfig, accountConfig);
+      const { globalVals: gv, accountVals: av } = buildScopedConfigValues(s, effectiveGlobalConfig, effectiveAccountConfig);
       setGlobalVals(gv);
       setAccountVals(av);
     }
-  }, [open, schema, globalConfig, accountConfig]);
+  }, [open, schema, effectiveGlobalConfig, effectiveAccountConfig]);
 
   const s = schema as ConfigSchema | null;
   if (!s?.properties || Object.keys(s.properties).length === 0) {
@@ -199,6 +245,9 @@ interface ConfigScopeSectionProps {
   commandPrefix: string;
   llmProviders?: LLMProviderOut[];
   llmProvidersLoading?: boolean;
+  showPreviews?: boolean;
+  configActions?: ConfigAction[];
+  onConfigAction?: (action: ConfigAction, input: Record<string, unknown>) => Promise<void>;
   onChange: (key: string, value: unknown) => void;
 }
 
@@ -210,6 +259,9 @@ export function ConfigScopeSection({
   commandPrefix,
   llmProviders,
   llmProvidersLoading = false,
+  showPreviews = true,
+  configActions = [],
+  onConfigAction,
   onChange,
 }: ConfigScopeSectionProps) {
   const [openTemplates, setOpenTemplates] = useState<Record<string, boolean>>({});
@@ -222,10 +274,36 @@ export function ConfigScopeSection({
         <p className="text-xs text-muted-foreground">{description}</p>
       </div>
 
+      {groups.sections.length > 0 && (
+        <div className="space-y-3">
+          {groups.sections.map((section) => (
+            <div key={section.key} className="space-y-3 rounded-md border bg-background p-3">
+              <div className="text-sm font-semibold">{section.title}</div>
+              <div className={configGridClass(section.columns)}>
+                {section.fields.map(([key, field]) => (
+                  <ConfigFieldWithActions
+                    key={key}
+                    fk={key}
+                    field={field}
+                    value={values[key]}
+                    values={values}
+                    llmProviders={llmProviders}
+                    llmProvidersLoading={llmProvidersLoading}
+                    fieldActions={actionsForField(configActions, key)}
+                    onConfigAction={onConfigAction}
+                    onChange={(value) => onChange(key, value)}
+                  />
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
       {groups.basic.length > 0 && (
         <div className="space-y-4">
           {groups.basic.map(([key, field]) => (
-            <FieldInput
+            <ConfigFieldWithActions
               key={key}
               fk={key}
               field={field}
@@ -233,6 +311,8 @@ export function ConfigScopeSection({
               values={values}
               llmProviders={llmProviders}
               llmProvidersLoading={llmProvidersLoading}
+              fieldActions={actionsForField(configActions, key)}
+              onConfigAction={onConfigAction}
               onChange={(value) => onChange(key, value)}
             />
           ))}
@@ -246,7 +326,7 @@ export function ConfigScopeSection({
             <p className="text-xs text-muted-foreground">点击展开后编辑对应消息。</p>
           </div>
           {groups.placeholders.map(([key, field]) => (
-            <FieldInput
+            <ConfigFieldWithActions
               key={key}
               fk={key}
               field={field}
@@ -254,6 +334,8 @@ export function ConfigScopeSection({
               values={values}
               llmProviders={llmProviders}
               llmProvidersLoading={llmProvidersLoading}
+              fieldActions={actionsForField(configActions, key)}
+              onConfigAction={onConfigAction}
               onChange={(value) => onChange(key, value)}
             />
           ))}
@@ -277,13 +359,15 @@ export function ConfigScopeSection({
                   </button>
                   {open && (
                     <div className="border-t px-3 py-3">
-                      <FieldInput
+                      <ConfigFieldWithActions
                         fk={key}
                         field={field}
                         value={values[key]}
                         values={values}
                         llmProviders={llmProviders}
                         llmProvidersLoading={llmProvidersLoading}
+                        fieldActions={actionsForField(configActions, key)}
+                        onConfigAction={onConfigAction}
                         onChange={(value) => onChange(key, value)}
                       />
                     </div>
@@ -295,7 +379,7 @@ export function ConfigScopeSection({
         </div>
       )}
 
-      {groups.previews.length > 0 && (
+      {showPreviews && groups.previews.length > 0 && (
         <div className="space-y-3 rounded-md border bg-background p-3">
           <div>
             <div className="text-sm font-semibold">预览结果</div>
@@ -314,19 +398,89 @@ export function ConfigScopeSection({
   );
 }
 
-function groupConfigFields(fields: FieldEntry[]): {
+function ConfigFieldWithActions({
+  fk,
+  field,
+  value,
+  values,
+  llmProviders,
+  llmProvidersLoading,
+  fieldActions,
+  onConfigAction,
+  onChange,
+}: {
+  fk: string;
+  field: ConfigField;
+  value: unknown;
+  values: Record<string, unknown>;
+  llmProviders?: LLMProviderOut[];
+  llmProvidersLoading?: boolean;
+  fieldActions: ConfigAction[];
+  onConfigAction?: (action: ConfigAction, input: Record<string, unknown>) => Promise<void>;
+  onChange: (value: unknown) => void;
+}) {
+  if (field["x-ui-hidden"]) return null;
+  return (
+    <div className="space-y-2">
+      <FieldInput
+        fk={fk}
+        field={field}
+        value={value}
+        values={values}
+        llmProviders={llmProviders}
+        llmProvidersLoading={llmProvidersLoading}
+        configActions={fieldActions}
+        onConfigAction={onConfigAction}
+        onChange={onChange}
+      />
+      {field["x-ui-widget"] !== "config-list" ? (
+        <ConfigActionButtons actions={fieldActions} onRun={onConfigAction} />
+      ) : null}
+    </div>
+  );
+}
+
+export function ConfigPreviewSection({
+  fields,
+  values,
+  commandPrefix,
+}: {
+  fields: FieldEntry[];
+  values: Record<string, unknown>;
+  commandPrefix: string;
+}) {
+  const groups = groupConfigFields(fields);
+  if (groups.previews.length === 0) return null;
+  return (
+    <div className="space-y-3">
+      <TelegramHtmlPreviewThread
+        messages={groups.previews.map(([key, field]) => ({
+          title: field.title || key,
+          value: renderPreviewValue(key, field, fields, values, commandPrefix),
+          mode: "html",
+        }))}
+      />
+    </div>
+  );
+}
+
+export function groupConfigFields(fields: FieldEntry[]): {
   basic: FieldEntry[];
   placeholders: FieldEntry[];
   templates: FieldEntry[];
   previews: FieldEntry[];
+  sections: Array<{ key: string; title: string; fields: FieldEntry[]; columns: number }>;
 } {
   const basic: FieldEntry[] = [];
   const placeholders: FieldEntry[] = [];
   const templates: FieldEntry[] = [];
   const previews: FieldEntry[] = [];
+  const sectionsByKey = new Map<string, { key: string; title: string; fields: FieldEntry[]; columns: number }>();
 
-  for (const entry of fields) {
-    const [key] = entry;
+  const sortedFields = [...fields].sort((a, b) => fieldOrder(a[1]) - fieldOrder(b[1]));
+
+  for (const entry of sortedFields) {
+    const [key, field] = entry;
     if (isPreviewField(key)) {
       previews.push(entry);
     } else if (isPlaceholderField(key)) {
@@ -335,10 +489,50 @@ function groupConfigFields(fields: FieldEntry[]): {
       templates.push(entry);
     } else {
       basic.push(entry);
+      const sectionName = typeof field["x-ui-section"] === "string" ? field["x-ui-section"].trim() : "";
+      if (sectionName) {
+        const sectionKey = sectionName.toLowerCase();
+        const current = sectionsByKey.get(sectionKey) ?? {
+          key: sectionKey,
+          title: sectionName,
+          fields: [],
+          columns: clampColumns(field["x-ui-columns"]),
+        };
+        current.fields.push(entry);
+        current.columns = Math.max(current.columns, clampColumns(field["x-ui-columns"]));
+        sectionsByKey.set(sectionKey, current);
+      }
     }
   }
 
-  return { basic, placeholders, templates, previews };
+  const sectionFieldKeys = new Set(
+    Array.from(sectionsByKey.values()).flatMap((section) => section.fields.map(([key]) => key)),
+  );
+  const unsectionedBasic = basic.filter(([key]) => !sectionFieldKeys.has(key));
+
+  return {
+    basic: unsectionedBasic,
+    placeholders,
+    templates,
+    previews,
+    sections: Array.from(sectionsByKey.values()),
+  };
+}
+
+function fieldOrder(field: ConfigField): number {
+  return Number.isFinite(field["x-ui-order"]) ? Number(field["x-ui-order"]) : 0;
+}
+
+function clampColumns(value: unknown): number {
+  const raw = Number(value);
+  if (!Number.isFinite(raw)) return 2;
+  return Math.min(3, Math.max(1, Math.floor(raw)));
+}
+
+function configGridClass(columns: number): string {
+  if (columns >= 3) return "grid gap-4 md:grid-cols-2 xl:grid-cols-3";
+  if (columns === 2) return "grid gap-4 md:grid-cols-2";
+  return "space-y-4";
 }
 
 interface FieldInputProps {
@@ -348,6 +542,8 @@ interface FieldInputProps {
   values?: Record<string, unknown>;
   llmProviders?: LLMProviderOut[];
   llmProvidersLoading?: boolean;
+  configActions?: ConfigAction[];
+  onConfigAction?: (action: ConfigAction, input: Record<string, unknown>) => Promise<void>;
   previewValue?: string;
   onChange: (v: unknown) => void;
 }
@@ -356,9 +552,11 @@ function FieldInput({
   fk,
   field,
   value,
-  values = {},
+  values = EMPTY_CONFIG,
   llmProviders,
   llmProvidersLoading = false,
+  configActions = [],
+  onConfigAction,
   previewValue,
   onChange,
 }: FieldInputProps) {
@@ -372,6 +570,10 @@ function FieldInput({
   const isTemplate = isTemplateField(fk);
   const isReadOnly = isReadOnlyField(fk, field);
   const isSensitive = isSensitiveConfigKey(fk);
+
+  if (field["x-ui-hidden"]) {
+    return null;
+  }
 
   if (isPreview) {
     return (
@@ -433,7 +635,47 @@ function FieldInput({
     );
   }
 
+  if (field.type === "array" && field["x-ui-widget"] === "config-list") {
+    return (
+      <ConfigListField
+        fk={fk}
+        field={field}
+        value={value}
+        actions={configActions}
+        onConfigAction={onConfigAction}
+        llmProviders={llmProviders}
+        llmProvidersLoading={llmProvidersLoading}
+        onChange={onChange}
+      />
+    );
+  }
+
+  if (field.type === "array" && (field["x-ui-widget"] === "multi-select" || field.items?.enum || field.enum)) {
+    return (
+      <MultiSelectField
+        inputId={inputId}
+        label={label}
+        description={description}
+        field={field}
+        value={value}
+        onChange={onChange}
+      />
+    );
+  }
+
   if (field.enum && field.enum.length > 0) {
+    if (field["x-ui-widget"] === "list-select") {
+      return (
+        <ListSelectField
+          inputId={inputId}
+          label={label}
+          description={description}
+          field={field}
+          value={value}
+          onChange={onChange}
+        />
+      );
+    }
     const enumLabels = field.enumNames ?? [];
     return (
       <div className="space-y-1.5">
@@ -506,7 +748,52 @@ function FieldInput({
     );
   }
 
+  if (field.type === "object") {
+    const properties = field.properties ?? {};
+    const objectValue = normalizeConfigObject(value);
+    if (Object.keys(properties).length > 0) {
+      return (
+        <div className="space-y-2">
+          <div className="space-y-1.5">
+            <Label>{label}</Label>
+            {description && <p className="text-xs text-muted-foreground">{description}</p>}
+          </div>
+          <div className="rounded-md border bg-background p-3">
+            <ConfigObjectEditor
+              prefix={fk}
+              properties={properties}
+              values={objectValue}
+              llmProviders={llmProviders}
+              llmProvidersLoading={llmProvidersLoading}
+              onChange={(key, nextValue) => onChange({ ...objectValue, [key]: nextValue })}
+            />
+          </div>
+        </div>
+      );
+    }
+    return (
+      <JsonObjectField
+        inputId={inputId}
+        label={label}
+        description={description}
+        value={value}
+        onChange={onChange}
+      />
+    );
+  }
+
   if (field.type === "array") {
+    if (field.items?.type === "object" || arrayHasObject(value)) {
+      return (
+        <JsonArrayField
+          inputId={inputId}
+          label={label}
+          description={description}
+          value={value}
+          onChange={onChange}
+        />
+      );
+    }
     return (
       <div className="space-y-1.5">
         <Label htmlFor={inputId}>{label}</Label>
@@ -570,6 +857,716 @@ function FieldInput({
       />
     </div>
   );
+}
+
+function actionsForField(actions: ConfigAction[], fieldKey: string): ConfigAction[] {
+  return actions.filter((action) => {
+    const placement = String(action.placement || "").trim();
+    return placement === `field:${fieldKey}` || placement === `field.${fieldKey}`;
+  });
+}
+
+function ConfigListField({
+  fk,
+  field,
+  value,
+  actions,
+  onConfigAction,
+  llmProviders,
+  llmProvidersLoading = false,
+  onChange,
+}: {
+  fk: string;
+  field: ConfigField;
+  value: unknown;
+  actions: ConfigAction[];
+  onConfigAction?: (action: ConfigAction, input: Record<string, unknown>) => Promise<void>;
+  llmProviders?: LLMProviderOut[];
+  llmProvidersLoading?: boolean;
+  onChange: (v: unknown) => void;
+}) {
+  const label = field.title || fk;
+  const items = normalizeObjectArray(value);
+  const properties = field.items?.properties ?? {};
+  const enabledField = String(field["x-ui-enabled-field"] || (properties.enabled ? "enabled" : "")).trim();
+  const reorderable = field["x-ui-reorderable"] !== false;
+  const minItems = Number.isFinite(field.minItems) ? Number(field.minItems) : 0;
+  const maxItems = Number.isFinite(field.maxItems) ? Number(field.maxItems) : Infinity;
+  const [editingIndex, setEditingIndex] = useState<number | "new" | null>(null);
+  const [draft, setDraft] = useState<Record<string, unknown>>({});
+  const [dragIndex, setDragIndex] = useState<number | null>(null);
+
+  const updateItems = (next: Record<string, unknown>[]) => onChange(next);
+  const openEditor = (index: number | "new") => {
+    setEditingIndex(index);
+    if (index === "new") {
+      setDraft(buildDefaultObject(properties));
+    } else {
+      setDraft({ ...items[index] });
+    }
+  };
+  const closeEditor = () => {
+    setEditingIndex(null);
+    setDraft({});
+  };
+  const saveDraft = () => {
+    if (editingIndex === "new") {
+      updateItems([...items, draft]);
+    } else if (editingIndex != null) {
+      updateItems(items.map((item, index) => (index === editingIndex ? draft : item)));
+    }
+    closeEditor();
+  };
+  const moveItem = (from: number, to: number) => {
+    if (from === to || to < 0 || to >= items.length) return;
+    updateItems(moveArrayItem(items, from, to));
+  };
+
+  return (
+    <div className="space-y-2">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <Label>{label}</Label>
+          {field.description && <p className="mt-1 text-xs text-muted-foreground">{field.description}</p>}
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <ConfigActionButtons actions={actions} onRun={onConfigAction} />
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={items.length >= maxItems}
+            onClick={() => openEditor("new")}
+          >
+            <Plus className="mr-1 h-4 w-4" />
+            {field["x-ui-add-label"] || "添加一组"}
+          </Button>
+        </div>
+      </div>
+
+      {items.length === 0 ? (
+        <div className="rounded-md border border-dashed bg-muted/20 px-3 py-5 text-sm text-muted-foreground">
+          暂无配置组。
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {items.map((item, index) => {
+            const enabled = enabledField ? item[enabledField] !== false : true;
+            const title = configListItemTitle(field, item, index);
+            const description = configListItemDescription(field, item);
+            const summary = configListItemSummary(field, item);
+            const canDelete = items.length > minItems;
+            return (
+              <div
+                key={configListItemKey(item, index)}
+                draggable={reorderable && items.length > 1}
+                onDragStart={(event) => {
+                  setDragIndex(index);
+                  event.dataTransfer.effectAllowed = "move";
+                }}
+                onDragOver={(event) => {
+                  if (reorderable) event.preventDefault();
+                }}
+                onDrop={(event) => {
+                  event.preventDefault();
+                  if (dragIndex != null) moveItem(dragIndex, index);
+                  setDragIndex(null);
+                }}
+                onDragEnd={() => setDragIndex(null)}
+                className="flex flex-col gap-3 rounded-md border bg-background p-3 sm:flex-row sm:items-center sm:justify-between"
+              >
+                <div className="flex min-w-0 flex-1 items-start gap-3">
+                  <div
+                    className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-md border bg-muted/30 text-muted-foreground"
+                    aria-hidden="true"
+                  >
+                    {reorderable ? <GripVertical className="h-4 w-4" /> : index + 1}
+                  </div>
+                  <div className="min-w-0 flex-1 space-y-1">
+                    <div className="flex min-w-0 flex-wrap items-center gap-2">
+                      <div className="min-w-0 truncate text-sm font-medium">{title}</div>
+                      {enabledField ? (
+                        <Badge variant={enabled ? "success" : "secondary"}>{enabled ? "启用" : "停用"}</Badge>
+                      ) : null}
+                    </div>
+                    {description ? (
+                      <div className="truncate text-xs text-muted-foreground">{description}</div>
+                    ) : null}
+                    {summary ? (
+                      <div className="break-words text-xs text-muted-foreground">{summary}</div>
+                    ) : null}
+                  </div>
+                </div>
+                <div className="flex shrink-0 flex-wrap items-center gap-1.5 sm:justify-end">
+                  {enabledField ? (
+                    <Switch
+                      checked={enabled}
+                      onCheckedChange={(checked) => {
+                        updateItems(items.map((row, rowIndex) => (
+                          rowIndex === index ? { ...row, [enabledField]: checked } : row
+                        )));
+                      }}
+                    />
+                  ) : null}
+                  <Button type="button" variant="ghost" size="icon" className="h-8 w-8" onClick={() => openEditor(index)} aria-label="编辑">
+                    <Pencil className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8"
+                    disabled={items.length >= maxItems}
+                    onClick={() => updateItems([...items.slice(0, index + 1), cloneConfigObject(item), ...items.slice(index + 1)])}
+                    aria-label="复制"
+                  >
+                    <Copy className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8"
+                    disabled={!reorderable || index === 0}
+                    onClick={() => moveItem(index, index - 1)}
+                    aria-label="上移"
+                  >
+                    <ArrowUp className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8"
+                    disabled={!reorderable || index === items.length - 1}
+                    onClick={() => moveItem(index, index + 1)}
+                    aria-label="下移"
+                  >
+                    <ArrowDown className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8 text-destructive hover:text-destructive"
+                    disabled={!canDelete}
+                    onClick={() => updateItems(items.filter((_, rowIndex) => rowIndex !== index))}
+                    aria-label="删除"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      <Dialog open={editingIndex !== null} onOpenChange={(open) => { if (!open) closeEditor(); }}>
+        <DialogContent className="max-h-[85vh] max-w-2xl overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>{editingIndex === "new" ? "添加配置组" : "编辑配置组"}</DialogTitle>
+            <DialogDescription>配置组会按当前页面顺序保存，拖动或使用上下箭头可调整优先级。</DialogDescription>
+          </DialogHeader>
+          <ConfigObjectEditor
+            prefix={`${fk}.${editingIndex ?? "closed"}`}
+            properties={properties}
+            values={draft}
+            llmProviders={llmProviders}
+            llmProvidersLoading={llmProvidersLoading}
+            onChange={(key, nextValue) => setDraft((prev) => ({ ...prev, [key]: nextValue }))}
+          />
+          <DialogFooter>
+            <Button type="button" variant="ghost" onClick={closeEditor}>取消</Button>
+            <Button type="button" onClick={saveDraft}>保存</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+function ConfigObjectEditor({
+  prefix,
+  properties,
+  values,
+  llmProviders,
+  llmProvidersLoading = false,
+  onChange,
+}: {
+  prefix: string;
+  properties: Record<string, ConfigField>;
+  values: Record<string, unknown>;
+  llmProviders?: LLMProviderOut[];
+  llmProvidersLoading?: boolean;
+  onChange: (key: string, value: unknown) => void;
+}) {
+  const entries = Object.entries(properties)
+    .filter(([, field]) => !field["x-ui-hidden"])
+    .sort((a, b) => fieldOrder(a[1]) - fieldOrder(b[1]));
+
+  if (entries.length === 0) {
+    return <div className="rounded-md border border-dashed bg-muted/20 px-3 py-4 text-sm text-muted-foreground">该配置组没有可编辑字段。</div>;
+  }
+
+  return (
+    <div className="space-y-4">
+      {entries.map(([key, field]) => (
+        <FieldInput
+          key={key}
+          fk={`${prefix}.${key}`}
+          field={{ ...field, key }}
+          value={values[key]}
+          values={values}
+          llmProviders={llmProviders}
+          llmProvidersLoading={llmProvidersLoading}
+          onChange={(value) => onChange(key, value)}
+        />
+      ))}
+    </div>
+  );
+}
+
+function MultiSelectField({
+  inputId,
+  label,
+  description,
+  field,
+  value,
+  onChange,
+}: {
+  inputId: string;
+  label: string;
+  description?: string;
+  field: ConfigField;
+  value: unknown;
+  onChange: (v: unknown) => void;
+}) {
+  const itemField = field.items ?? field;
+  const options = itemField.enum ?? field.enum ?? [];
+  const labels = itemField.enumNames ?? field.enumNames ?? [];
+  const descriptions = itemField.enumDescriptions ?? field.enumDescriptions ?? [];
+  const selected = new Set(Array.isArray(value) ? value.map((item) => String(item)) : []);
+
+  return (
+    <div className="space-y-1.5">
+      <Label htmlFor={inputId}>{label}</Label>
+      {description && <p className="text-xs text-muted-foreground">{description}</p>}
+      <div id={inputId} className="grid gap-2 sm:grid-cols-2">
+        {options.map((option, index) => {
+          const key = String(option);
+          const checked = selected.has(key);
+          return (
+            <label
+              key={key}
+              className="flex min-h-10 cursor-pointer items-start gap-2 rounded-md border bg-background px-3 py-2 text-sm"
+            >
+              <input
+                type="checkbox"
+                className="mt-1 h-4 w-4"
+                checked={checked}
+                onChange={(event) => {
+                  const next = new Set(selected);
+                  if (event.target.checked) next.add(key);
+                  else next.delete(key);
+                  onChange(options.filter((candidate) => next.has(String(candidate))));
+                }}
+              />
+              <span className="min-w-0">
+                <span className="block break-words font-medium">{labels[index] || key}</span>
+                {descriptions[index] ? (
+                  <span className="mt-0.5 block break-words text-xs text-muted-foreground">{descriptions[index]}</span>
+                ) : null}
+              </span>
+            </label>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function ListSelectField({
+  inputId,
+  label,
+  description,
+  field,
+  value,
+  onChange,
+}: {
+  inputId: string;
+  label: string;
+  description?: string;
+  field: ConfigField;
+  value: unknown;
+  onChange: (v: unknown) => void;
+}) {
+  const selected = value != null ? String(value) : "";
+  const labels = field.enumNames ?? [];
+  const descriptions = field.enumDescriptions ?? [];
+
+  return (
+    <div className="space-y-1.5">
+      <Label htmlFor={inputId}>{label}</Label>
+      {description && <p className="text-xs text-muted-foreground">{description}</p>}
+      <div id={inputId} className="grid gap-2 sm:grid-cols-2">
+        {(field.enum ?? []).map((option, index) => {
+          const key = String(option);
+          const active = selected === key;
+          return (
+            <button
+              key={key}
+              type="button"
+              className={`min-h-10 rounded-md border px-3 py-2 text-left text-sm transition-colors ${
+                active ? "border-primary bg-primary/10 text-foreground" : "bg-background hover:bg-muted/40"
+              }`}
+              onClick={() => onChange(option)}
+            >
+              <span className="block break-words font-medium">{labels[index] || key}</span>
+              {descriptions[index] ? (
+                <span className="mt-0.5 block break-words text-xs text-muted-foreground">{descriptions[index]}</span>
+              ) : null}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function JsonArrayField({
+  inputId,
+  label,
+  description,
+  value,
+  onChange,
+}: {
+  inputId: string;
+  label: string;
+  description?: string;
+  value: unknown;
+  onChange: (v: unknown) => void;
+}) {
+  const [text, setText] = useState(() => JSON.stringify(Array.isArray(value) ? value : [], null, 2));
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    setText(JSON.stringify(Array.isArray(value) ? value : [], null, 2));
+    setError("");
+  }, [value]);
+
+  return (
+    <div className="space-y-1.5">
+      <Label htmlFor={inputId}>{label}</Label>
+      {description && <p className="text-xs text-muted-foreground">{description}</p>}
+      <Textarea
+        id={inputId}
+        value={text}
+        rows={6}
+        onChange={(event) => {
+          const next = event.target.value;
+          setText(next);
+          try {
+            const parsed = JSON.parse(next);
+            if (!Array.isArray(parsed)) {
+              setError("请输入 JSON 数组。");
+              return;
+            }
+            setError("");
+            onChange(parsed);
+          } catch {
+            setError("JSON 尚未解析成功，保存前请修正。");
+          }
+        }}
+      />
+      {error ? <p className="text-xs text-destructive">{error}</p> : null}
+    </div>
+  );
+}
+
+function JsonObjectField({
+  inputId,
+  label,
+  description,
+  value,
+  onChange,
+}: {
+  inputId: string;
+  label: string;
+  description?: string;
+  value: unknown;
+  onChange: (v: unknown) => void;
+}) {
+  const serializedValue = stringifyConfigObject(value);
+  const [text, setText] = useState(serializedValue);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    setText((prev) => (prev === serializedValue ? prev : serializedValue));
+    setError("");
+  }, [serializedValue]);
+
+  return (
+    <div className="space-y-1.5">
+      <Label htmlFor={inputId}>{label}</Label>
+      {description && <p className="text-xs text-muted-foreground">{description}</p>}
+      <Textarea
+        id={inputId}
+        value={text}
+        rows={6}
+        onChange={(event) => {
+          const next = event.target.value;
+          setText(next);
+          try {
+            const parsed = JSON.parse(next);
+            if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+              setError("请输入 JSON 对象。");
+              return;
+            }
+            setError("");
+            onChange(parsed);
+          } catch {
+            setError("JSON 尚未解析成功，保存前请修正。");
+          }
+        }}
+      />
+      {error ? <p className="text-xs text-destructive">{error}</p> : null}
+    </div>
+  );
+}
+
+function ConfigActionButtons({
+  actions,
+  onRun,
+}: {
+  actions: ConfigAction[];
+  onRun?: (action: ConfigAction, input: Record<string, unknown>) => Promise<void>;
+}) {
+  if (actions.length === 0 || !onRun) return null;
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      {actions.map((action) => (
+        <ConfigActionButton key={action.key} action={action} onRun={onRun} />
+      ))}
+    </div>
+  );
+}
+
+function ConfigActionButton({
+  action,
+  onRun,
+}: {
+  action: ConfigAction;
+  onRun: (action: ConfigAction, input: Record<string, unknown>) => Promise<void>;
+}) {
+  const inputSchema = configActionInputSchema(action);
+  const inputFields = Object.entries(inputSchema?.properties ?? {}) as FieldEntry[];
+  const [open, setOpen] = useState(false);
+  const [running, setRunning] = useState(false);
+  const [inputValues, setInputValues] = useState<Record<string, unknown>>(() => (
+    inputSchema ? buildDefaultObject(inputSchema.properties) : {}
+  ));
+  const buttonLabel = action.title || "执行动作";
+  const submitLabel = action.submit_label || buttonLabel;
+
+  useEffect(() => {
+    if (!open || !inputSchema) return;
+    setInputValues(buildDefaultObject(inputSchema.properties));
+  }, [open, inputSchema]);
+
+  const run = async (input: Record<string, unknown>) => {
+    setRunning(true);
+    try {
+      await onRun(action, input);
+      setOpen(false);
+    } catch (err) {
+      toast.error(getErrMsg(err));
+    } finally {
+      setRunning(false);
+    }
+  };
+
+  if (inputFields.length === 0) {
+    return (
+      <Button type="button" variant="outline" size="sm" disabled={running} onClick={() => run({})}>
+        {running ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <Wand className="mr-1 h-4 w-4" />}
+        {buttonLabel}
+      </Button>
+    );
+  }
+
+  return (
+    <>
+      <Button type="button" variant="outline" size="sm" disabled={running} onClick={() => setOpen(true)}>
+        {running ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <Wand className="mr-1 h-4 w-4" />}
+        {buttonLabel}
+      </Button>
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="max-h-[85vh] max-w-xl overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>{buttonLabel}</DialogTitle>
+            {action.description ? <DialogDescription>{action.description}</DialogDescription> : null}
+          </DialogHeader>
+          <div className="space-y-4">
+            {inputFields.map(([key, field]) => (
+              <FieldInput
+                key={key}
+                fk={`action.${action.key}.${key}`}
+                field={{ ...field, key }}
+                value={inputValues[key]}
+                values={inputValues}
+                onChange={(value) => setInputValues((prev) => ({ ...prev, [key]: value }))}
+              />
+            ))}
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="ghost" disabled={running} onClick={() => setOpen(false)}>取消</Button>
+            <Button type="button" disabled={running} onClick={() => run(inputValues)}>
+              {running ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Wand className="mr-2 h-4 w-4" />}
+              {running ? "处理中…" : submitLabel}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
+function configActionInputSchema(action: ConfigAction): ConfigSchema | null {
+  const schema = action.input_schema as ConfigSchema | undefined;
+  if (!schema || schema.type !== "object" || !schema.properties || typeof schema.properties !== "object") {
+    return null;
+  }
+  return schema;
+}
+
+function normalizeConfigObject(value: unknown): Record<string, unknown> {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    return { ...(value as Record<string, unknown>) };
+  }
+  if (typeof value === "string" && value.trim()) {
+    try {
+      const parsed = JSON.parse(value);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        return parsed as Record<string, unknown>;
+      }
+    } catch {
+      return {};
+    }
+  }
+  return {};
+}
+
+function stringifyConfigObject(value: unknown): string {
+  return JSON.stringify(normalizeConfigObject(value), null, 2);
+}
+
+function normalizeObjectArray(value: unknown): Record<string, unknown>[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((item): item is Record<string, unknown> => Boolean(item && typeof item === "object" && !Array.isArray(item)))
+    .map((item) => ({ ...item }));
+}
+
+function arrayHasObject(value: unknown): boolean {
+  return Array.isArray(value) && value.some((item) => Boolean(item && typeof item === "object"));
+}
+
+function cloneConfigObject(value: Record<string, unknown>): Record<string, unknown> {
+  try {
+    return JSON.parse(JSON.stringify(value)) as Record<string, unknown>;
+  } catch {
+    return { ...value };
+  }
+}
+
+function moveArrayItem<T>(items: T[], from: number, to: number): T[] {
+  const next = [...items];
+  const [item] = next.splice(from, 1);
+  next.splice(to, 0, item);
+  return next;
+}
+
+function buildDefaultObject(properties: Record<string, ConfigField> | undefined): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [key, field] of Object.entries(properties ?? {})) {
+    out[key] = defaultValueForField(field);
+  }
+  return out;
+}
+
+function defaultValueForField(field: ConfigField): unknown {
+  if (field.default !== undefined) return cloneDefaultValue(field.default);
+  if (field.type === "boolean") return false;
+  if (field.type === "array") return [];
+  if (field.type === "object") return buildDefaultObject(field.properties);
+  if (field.type === "integer" || field.type === "number") return null;
+  return "";
+}
+
+function cloneDefaultValue(value: unknown): unknown {
+  if (value == null || typeof value !== "object") return value;
+  try {
+    return JSON.parse(JSON.stringify(value));
+  } catch {
+    return value;
+  }
+}
+
+function configListItemKey(item: Record<string, unknown>, index: number): string {
+  return `${String(item.id || item.kb_id || item.key || "row")}:${index}`;
+}
+
+function configListItemTitle(field: ConfigField, item: Record<string, unknown>, index: number): string {
+  const titleField = String(field["x-ui-title-field"] || "").trim();
+  const candidates = [
+    titleField ? item[titleField] : "",
+    item.remark,
+    item.name,
+    item.title,
+    item.label,
+    item.key,
+    item.id,
+    item.kb_id,
+  ];
+  return candidates.map(formatInlineValue).find(Boolean) || `第 ${index + 1} 组配置`;
+}
+
+function configListItemDescription(field: ConfigField, item: Record<string, unknown>): string {
+  const descriptionField = String(field["x-ui-description-field"] || "").trim();
+  const candidates = [
+    descriptionField ? item[descriptionField] : "",
+    item.url,
+    item.description,
+    item.summary,
+  ];
+  return candidates.map(formatInlineValue).find(Boolean) || "";
+}
+
+function configListItemSummary(field: ConfigField, item: Record<string, unknown>): string {
+  const template = String(field["x-ui-summary"] || "").trim();
+  if (!template) return "";
+  return template.replace(/\{([^}]+)\}/g, (_match, path: string) => formatInlineValue(valueAtPath(item, path)));
+}
+
+function valueAtPath(item: Record<string, unknown>, path: string): unknown {
+  const parts = String(path || "").split(".").map((part) => part.trim()).filter(Boolean);
+  let current: unknown = item;
+  for (const part of parts) {
+    if (part === "length") {
+      return Array.isArray(current) || typeof current === "string" ? current.length : 0;
+    }
+    if (!current || typeof current !== "object") return undefined;
+    current = (current as Record<string, unknown>)[part];
+  }
+  return current;
+}
+
+function formatInlineValue(value: unknown): string {
+  if (value == null) return "";
+  if (Array.isArray(value)) return value.length ? `${value.length}` : "";
+  if (typeof value === "object") return "";
+  return String(value).trim();
 }
 
 function LLMProviderSelectField({
@@ -681,10 +1678,16 @@ function LLMModelSelectField({
 export function schemaHasLLMSelect(schema: ConfigSchema | Record<string, unknown> | null): boolean {
   if (!schema || typeof schema !== "object" || !("properties" in schema)) return false;
   const properties = (schema as ConfigSchema).properties ?? {};
-  return Object.values(properties).some((field) => {
-    const widget = field?.["x-ui-widget"];
-    return widget === "llm-provider-select" || widget === "llm-model-select";
-  });
+  return Object.values(properties).some(fieldHasLLMSelect);
+}
+
+function fieldHasLLMSelect(field: ConfigField | undefined): boolean {
+  if (!field) return false;
+  const widget = field["x-ui-widget"];
+  if (widget === "llm-provider-select" || widget === "llm-model-select") return true;
+  if (field.items && fieldHasLLMSelect(field.items)) return true;
+  if (field.properties && Object.values(field.properties).some(fieldHasLLMSelect)) return true;
+  return false;
 }
 
 function findLLMProviderBySelector(providers: LLMProviderOut[] | undefined, selector: string): LLMProviderOut | null {
@@ -836,7 +1839,12 @@ function padClockValue(value: unknown, fallback: string): string {
 
 function formatConfigValue(value: unknown): string {
   if (value == null) return "";
-  if (Array.isArray(value)) return value.map((item) => String(item)).join(", ");
+  if (Array.isArray(value)) {
+    if (value.some((item) => item && typeof item === "object")) {
+      return JSON.stringify(value, null, 2);
+    }
+    return value.map((item) => String(item)).join(", ");
+  }
   if (typeof value === "object") {
     return JSON.stringify(value, null, 2);
   }

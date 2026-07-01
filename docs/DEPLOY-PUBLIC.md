@@ -154,7 +154,10 @@ make frontend
 
 ```bash
 cd /opt/telepilot
-make prod-update
+./deploy/backup.sh
+cp .env "/var/backups/telebot/env-$(date +%Y%m%d-%H%M).bak"
+cp docker-compose.yml "/var/backups/telebot/docker-compose-$(date +%Y%m%d-%H%M).yml.bak"
+TELEPILOT_UPDATE_BRANCH=main make prod-update
 ```
 
 `make prod-update` 会先检查远程变更，再按文件范围选择增量动作：仅后端变更时只重建
@@ -162,11 +165,33 @@ make prod-update
 Compose、依赖锁文件或部署脚本，会自动回退到完整 `make prod-up`。更新前如果工作区
 存在未提交改动会拒绝执行，避免覆盖服务器上的本地修改。
 
+发布候选分支不要覆盖 `main`，用环境变量显式指定：
+
+```bash
+cd /opt/telepilot
+TELEPILOT_UPDATE_BRANCH=codex/0.33-interaction-framework make prod-update
+```
+
 想先看本次会走哪条路径，可以执行：
 
 ```bash
 cd /opt/telepilot
-make prod-update PROD_UPDATE_ARGS=--dry-run
+TELEPILOT_UPDATE_BRANCH=codex/0.33-interaction-framework make prod-update PROD_UPDATE_ARGS=--dry-run
+```
+
+### Web 面板自更新
+
+生产栈会启动一个仅 Docker 内网可访问的 `updater` 服务。它挂载项目目录和 Docker socket，由已登录的 Web 后端通过共享 token 发起更新任务，不对公网暴露端口。
+
+- 检查更新：读取当前分支或 `TELEPILOT_UPDATE_BRANCH`，执行 `git fetch` 并按变更文件分类。
+- 应用更新：后台执行 `scripts/prod-update.sh`，优先增量重建 `web` / `frontend`；涉及 Compose、Dockerfile、依赖或部署脚本时自动回退完整更新。
+- 任务日志：Web 面板轮询 updater job，服务重启期间页面可能短暂断开，刷新后可重新检查版本。
+
+首次把 `updater` 服务部署到服务器仍需要一次宿主机操作；之后常规补丁不再依赖 SSH 登录。若部署目录不是当前 shell 的工作目录，可显式指定：
+
+```bash
+cd /opt/telepilot
+TELEPILOT_HOST_PROJECT_DIR=/opt/telepilot make prod-up
 ```
 
 回滚到指定版本：
@@ -178,6 +203,7 @@ make prod-up
 ```
 
 `make prod-up` 会重新构建镜像、启动容器，并在 `web` 容器启动时执行 `alembic upgrade head`。
+如果要恢复数据，先确认 `.env` 中的 `MASTER_KEY` 与备份时一致，再按 `deploy/restore.sh` 恢复数据库和 sessions。
 
 ## 7. 备份
 
@@ -197,12 +223,15 @@ make prod-up
 
 ## 8. 验收清单
 
-1. `docker compose ps` 中 `postgres` / `redis` / `web` / `frontend` 均为 running 或 healthy。
-2. `curl -I http://127.0.0.1:8080` 能返回前端响应。
-3. `https://telepilot.example.com` 可打开登录页。
-4. 浏览器 Cookie 带 `Secure`，确认 `COOKIE_SECURE=true` 生效。
-5. 服务器安全组只对公网开放 `80/tcp` 和 `443/tcp`，不要额外开放 `8000`。
-6. 登录后概览页资源占用能看到应用进程与服务器资源。
+1. `git rev-parse HEAD` 是本次目标 commit，`grep` 四处版本号一致。
+2. `docker compose ps` 中 `postgres` / `redis` / `web` / `frontend` 均为 running 或 healthy。
+3. `curl -fsS http://127.0.0.1:8000/healthz` 返回健康结果。
+4. `curl -I http://127.0.0.1:8080` 能返回前端响应。
+5. `docker compose logs --tail=100 web` 没有迁移、导入、路由或 worker 启动错误。
+6. `https://telepilot.example.com` 可打开登录页。
+7. 浏览器 Cookie 带 `Secure`，确认 `COOKIE_SECURE=true` 生效。
+8. 服务器安全组只对公网开放 `80/tcp` 和 `443/tcp`，不要额外开放 `8000`。
+9. 登录后确认概览、日志、交互、插件、设置页可打开。
 
 ## 9. 常见问题
 

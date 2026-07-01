@@ -5,9 +5,15 @@ import type {
   AuditLogItem,
   BackendVersionInfo,
   CheckUpdateResult,
+  UpdateJobStatus,
+  EventActionItem,
+  EventTraceDetail,
+  EventTraceSummary,
   HealthOverview,
   HumanizeConfig,
   HumanizeUpdate,
+  PluginRuntimeDetail,
+  PluginRuntimeStatusItem,
   PullUpdateResult,
   ResourceDashboard,
   RateLimitRuleConfig,
@@ -16,6 +22,7 @@ import type {
   RuntimeLogItem,
   SystemSettings,
   TemplateOut,
+  TraceOverview,
 } from "@/api/types";
 
 // ===================== 版本号（0.4.2 加） =====================
@@ -84,6 +91,98 @@ export async function listAuditLogs(
   q: AuditLogQuery = {},
 ): Promise<AuditLogItem[]> {
   const { data } = await api.get<AuditLogItem[]>("/api/logs/audit", {
+    params: q,
+  });
+  return data;
+}
+
+export interface TraceQuery {
+  account_id?: number | string;
+  source_channel?: string;
+  event_type?: string;
+  chat_id?: number | string;
+  message_id?: number | string;
+  update_id?: number | string;
+  sender_user_id?: number | string;
+  plugin_key?: string;
+  status?: string;
+  trace_id?: string;
+  reason_code?: string;
+  keyword?: string;
+  since?: string;
+  until?: string;
+  limit?: number;
+}
+
+export async function getTraceOverview(
+  q: Pick<TraceQuery, "account_id"> = {},
+): Promise<TraceOverview> {
+  const { data } = await api.get<TraceOverview>("/api/logs/trace/overview", {
+    params: q,
+  });
+  return data;
+}
+
+export async function listEventTraces(
+  q: TraceQuery = {},
+): Promise<EventTraceSummary[]> {
+  const { data } = await api.get<EventTraceSummary[]>("/api/logs/trace/events", {
+    params: q,
+  });
+  return data;
+}
+
+export async function getEventTrace(traceId: string): Promise<EventTraceDetail> {
+  const { data } = await api.get<EventTraceDetail>(
+    `/api/logs/trace/events/${encodeURIComponent(traceId)}`,
+  );
+  return data;
+}
+
+export async function listPluginRuntimeStatus(
+  q: Pick<TraceQuery, "account_id" | "plugin_key" | "status" | "limit"> = {},
+): Promise<PluginRuntimeStatusItem[]> {
+  const { data } = await api.get<PluginRuntimeStatusItem[]>("/api/logs/trace/plugins", {
+    params: q,
+  });
+  return data;
+}
+
+export async function getPluginRuntimeDetail(
+  pluginKey: string,
+  q: Pick<TraceQuery, "account_id"> = {},
+): Promise<PluginRuntimeDetail> {
+  const { data } = await api.get<PluginRuntimeDetail>(
+    `/api/logs/trace/plugins/${encodeURIComponent(pluginKey)}`,
+    { params: q },
+  );
+  return data;
+}
+
+export interface ActionTraceQuery {
+  account_id?: number | string;
+  trace_id?: string;
+  plugin_key?: string;
+  action_type?: string;
+  status?: string;
+  reason_code?: string;
+  error_code?: string;
+  limit?: number;
+}
+
+export async function listEventActions(
+  q: ActionTraceQuery = {},
+): Promise<EventActionItem[]> {
+  const { data } = await api.get<EventActionItem[]>("/api/logs/trace/actions", {
+    params: q,
+  });
+  return data;
+}
+
+export async function listCommandTraces(
+  q: Pick<TraceQuery, "account_id" | "keyword" | "since" | "until" | "reason_code" | "limit"> = {},
+): Promise<EventTraceSummary[]> {
+  const { data } = await api.get<EventTraceSummary[]>("/api/logs/trace/commands", {
     params: q,
   });
   return data;
@@ -170,6 +269,10 @@ export async function checkUpdate(): Promise<CheckUpdateResult> {
 }
 export async function pullUpdate(): Promise<PullUpdateResult> {
   const { data } = await api.post<PullUpdateResult>("/api/system/pull-update");
+  return data;
+}
+export async function getUpdateJob(jobId: string): Promise<UpdateJobStatus> {
+  const { data } = await api.get<UpdateJobStatus>(`/api/system/update-jobs/${jobId}`);
   return data;
 }
 export async function restartApp(): Promise<RestartResult> {

@@ -381,6 +381,74 @@ def test_classify_changed_files_makefile_requires_full_update() -> None:
     assert requires_backup is False
 
 
+def test_default_update_branch_prefers_env(monkeypatch) -> None:
+    """更新目标分支优先读环境变量，避免生产候选分支被写死到 main。"""
+
+    monkeypatch.setenv("TELEPILOT_UPDATE_REMOTE", "origin")
+    monkeypatch.setenv("TELEPILOT_UPDATE_BRANCH", "codex/0.33-interaction-framework")
+
+    assert sh._default_update_remote_branch() == ("origin", "codex/0.33-interaction-framework")
+
+
+@pytest.mark.asyncio
+async def test_check_update_uses_internal_updater(monkeypatch) -> None:
+    """生产容器内有 updater 时，检查更新应由 updater 读取宿主机工作树。"""
+
+    monkeypatch.setenv("TELEPILOT_UPDATE_BRANCH", "codex/update")
+    monkeypatch.setattr(
+        sh,
+        "_detect_runtime_mode",
+        lambda: (sh.RUNTIME_PROD_CONTAINER_WITH_UPDATER, "http://updater:8765", None),
+    )
+    monkeypatch.setattr(
+        sh,
+        "_updater_request",
+        lambda path, payload=None, timeout=30: {
+            "ok": True,
+            "has_update": True,
+            "current_commit": "aaaa1111aaaa",
+            "remote_commit": "bbbb2222bbbb",
+            "ahead": 2,
+            "changed_files": ["backend/app/api/system_health.py"],
+            "components": ["backend"],
+            "requires_full_update": False,
+            "requires_backup": False,
+        },
+    )
+
+    out = await sh.check_update(_user=None)  # type: ignore[arg-type]
+
+    assert out.has_update is True
+    assert out.branch == "codex/update"
+    assert out.runtime_mode == sh.RUNTIME_PROD_CONTAINER_WITH_UPDATER
+    assert out.action_required == "backend"
+    assert out.can_apply is True
+
+
+@pytest.mark.asyncio
+async def test_pull_update_starts_internal_updater_job(monkeypatch) -> None:
+    """应用更新应创建后台 job，避免 HTTP 请求被 docker compose 重启打断。"""
+
+    monkeypatch.setenv("TELEPILOT_UPDATE_BRANCH", "codex/update")
+    monkeypatch.setattr(
+        sh,
+        "_detect_runtime_mode",
+        lambda: (sh.RUNTIME_PROD_CONTAINER_WITH_UPDATER, "http://updater:8765", None),
+    )
+    monkeypatch.setattr(
+        sh,
+        "_updater_request",
+        lambda path, payload=None, timeout=30: {"ok": True, "job_id": "job123", "status": "queued"},
+    )
+
+    out = await sh.pull_update(_user=None)  # type: ignore[arg-type]
+
+    assert out.success is True
+    assert out.job_id == "job123"
+    assert out.status == "queued"
+    assert out.branch == "codex/update"
+
+
 @pytest.mark.asyncio
 async def test_restart_app_in_container_does_not_run_docker_compose() -> None:
     """容器环境下 restart 不应伪装执行 docker compose restart。"""

@@ -12,6 +12,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/_lib.sh"
 cd "$ROOT_DIR"
+export TELEPILOT_HOST_PROJECT_DIR="${TELEPILOT_HOST_PROJECT_DIR:-$ROOT_DIR}"
 
 # ── 1. 依赖与 .env ────────────────────────────────────────
 need_cmd docker "macOS Docker Desktop / Linux docker.io"

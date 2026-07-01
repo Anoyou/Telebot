@@ -19,6 +19,8 @@ import type {
   TestModelResponse,
 } from "@/api/types";
 
+const LLM_PROVIDER_OPERATION_TIMEOUT_MS = 120000;
+
 // ===================== 内置命令（只读，0.4.1 加） =====================
 export async function listBuiltinCommands(): Promise<BuiltinCommandItem[]> {
   const { data } = await api.get<BuiltinCommandItem[]>("/api/commands/builtin");
@@ -98,6 +100,8 @@ export async function fetchProviderModels(
 ): Promise<FetchModelsResponse> {
   const { data } = await api.post<FetchModelsResponse>(
     `/api/commands/llm-providers/${id}/fetch-models`,
+    undefined,
+    { timeout: LLM_PROVIDER_OPERATION_TIMEOUT_MS },
   );
   return data;
 }
@@ -110,6 +114,7 @@ export async function fetchProviderModelsPreview(
   const { data } = await api.post<FetchModelsPreviewResponse>(
     `/api/commands/llm-providers/fetch-models-preview`,
     payload,
+    { timeout: LLM_PROVIDER_OPERATION_TIMEOUT_MS },
   );
   return data;
 }
@@ -120,6 +125,7 @@ export async function detectProviderProtocols(
   const { data } = await api.post<DetectProviderProtocolsResponse>(
     "/api/commands/llm-providers/detect-protocols",
     payload,
+    { timeout: LLM_PROVIDER_OPERATION_TIMEOUT_MS },
   );
   return data;
 }
@@ -132,6 +138,7 @@ export async function testProviderModel(
   const { data } = await api.post<TestModelResponse>(
     `/api/commands/llm-providers/${id}/test-model`,
     payload,
+    { timeout: LLM_PROVIDER_OPERATION_TIMEOUT_MS },
   );
   return data;
 }

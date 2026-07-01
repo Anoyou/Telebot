@@ -1,6 +1,6 @@
 # TelePilot 双 Bot / 交互插件联动优化方案
 
-本文用于统一 TelePilot 当前“交互 Bot / 通知 Bot / UserBot / 插件”之间的职责边界、插件接入规范、前端展示结构与迁移步骤。目标不是推翻现有插件，而是在**不影响插件原有命令触发能力**的前提下，把所有适合高频互动的娱乐类、交互类插件纳入同一套平台契约。
+本文用于统一 TelePilot 当前“UserBot / 交互 Bot / 外部转账通知来源 / 插件”之间的职责边界、插件接入规范、前端展示结构与迁移步骤。TelePilot 的标准模式是个人可信插件模式：插件由管理员安装和启用后即视为可信，平台负责频控、审计、急停和通道代发，而不是按公共插件市场做强沙箱。目标不是推翻现有插件，而是在**不影响插件原有命令触发能力**的前提下，把管理员命令和群内高频玩法纳入同一套调度模型。
 
 适用范围：
 
@@ -12,11 +12,11 @@
 
 ### 1.1 目标
 
-1. 高频互动由交互 Bot 承担，减少 UserBot 本体暴露在高频群聊消息里。
+1. UserBot 作为主控感知层监听全量消息、处理管理员命令、确认收款和执行发奖；高频互动由交互 Bot 承担，减少 UserBot 本体暴露在高频群聊消息里。
 2. 插件接入时不再为每个玩法重复维护一套规则字段。
 3. 平台能稳定拿到“谁触发、谁中奖、奖金多少、由谁发奖、回复哪条消息”。
 4. 前端能优雅承载不同插件的不同入口和不同参数，不把所有规则堆在同一页的同一层级。
-5. 新插件作者只要遵守规范，就能低成本接入 TelePilot 的双 Bot 联动。
+5. 新插件作者只要遵守规范，就能低成本接入 TelePilot 的双通道调度：入口描述管理员命令或群内玩法的触发来源和默认偏好，插件实际动作可以选择交互 Bot / UserBot 的单通道或候选顺序，资金动作仍走 UserBot / 平台受控结算。
 
 ### 1.2 硬约束
 
@@ -29,6 +29,33 @@
    - 交互规则页不能依赖大屏专属布局。
 4. **插件层只关心业务逻辑。**
    - 收款人匹配、金额门槛、冷却、每日次数、触发来源过滤等，属于平台层。
+
+## 1.3 标准调度方式
+
+TelePilot 只保留一个标准模式，但插件入口可以有两种调度方式：
+
+1. **管理员命令入口**
+   - 管理员使用系统命令前缀触发，例如 `{prefix}game 100`。
+   - 通常由 userbot 监听、触发和继续交互；插件动作仍可按需要选择 Bot 或候选通道。
+   - 适合低频管理、人工开局、查询状态、后台任务和需要人形身份的操作。
+
+2. **群内玩法入口**
+   - 群成员发送配置好的关键词，或转账命中规则后启动。
+   - UserBot 负责监听、识别、确认收款和发奖；交互 Bot 通常负责题面、按钮、消息编辑、回调 ACK 等高频互动，插件仍可在动作里声明通道偏好和回退。
+   - 适合多人游戏、抢答、抽奖和按钮玩法。
+
+插件 manifest 可用兼容字段 `launch_mode`，也可用新字段 `dispatch_modes`、`message_channels`、`money_channel` 明确表达入口来源和通道偏好。注意：这只是默认偏好，不绑死插件后续动作。推荐写法：
+
+```json
+{
+  "dispatch_modes": ["admin_command", "public_keyword"],
+  "message_channels": {
+    "admin_command": "userbot_reply",
+    "public_keyword": "interaction_bot"
+  },
+  "money_channel": "userbot_reply"
+}
+```
 
 ## 2. 当前痛点
 
@@ -77,17 +104,17 @@
 
 ### 3.2 声明式接入，而不是平台硬编码插件特例
 
-平台只识别插件声明的交互入口，不再为每个娱乐插件单独写一套规则表单逻辑。插件通过 Manifest 声明：
+平台只识别插件声明的调度入口，不再为每个娱乐插件单独写一套规则表单逻辑。插件通过 Manifest 声明：
 
 - 自己有哪些交互入口；
 - 这些入口属于什么玩法类型；
 - 平台可覆盖哪些参数；
 - 会返回什么类型的结果；
-- 哪些发送通道是允许的。
+- 管理员命令入口和群内玩法入口分别走哪个消息通道。
 
 ### 3.3 原命令不动，交互入口只做“桥接”
 
-交互 Bot 的职责是承接高频互动，不是改写插件原本的命令语义。任何支持交互 Bot 的插件，都必须满足：
+交互 Bot 的职责是承接群内高频互动，不是改写插件原本的命令语义。任何支持群内玩法入口的插件，都必须满足：
 
 - 原本 `{prefix}24d 1000`、`{prefix}ct 1234` 之类的 UserBot 命令继续可用；
 - 交互 Bot 命中规则后调用的是同一份业务逻辑或同一份业务内核；
@@ -110,17 +137,22 @@
 - 自行决定监听所有消息来源
 - 绕过平台路由直接调用插件私有逻辑
 
-### 4.2 通知 Bot
+### 4.2 外部转账通知来源
 
 负责：
 
-- 公告、通知、结果提示、对账提示
-- 与交互 Bot 分开部署时承接低频通知场景
+- 监听群里已有的外部转账结果通知 Bot 消息
+- 作为到账证据来源，供平台确认金额、收款人和付款人显示名
+- 触发 `payment_confirmed` 前的付款证据校验
 
 不负责：
 
-- 高频群局承接
+- 插件主动发送消息
+- 普通交互内容、结果公告、按钮、会话提示
+- 高频群局承接、删除、置顶或按钮回调
 - 钱相关执行
+
+> 这里的“转账通知 Bot”不是 TelePilot 的发送通道。正常插件交互内容如果通过普通 Bot 执行，应由交互 Bot 发送；转账通知 Bot 只用于判断是否真的到账。
 
 ### 4.3 UserBot
 
@@ -153,13 +185,16 @@
 
 ## 5.1 插件入口声明
 
-插件需要通过 `interaction_entries` 声明可被交互 Bot 调用的入口。每个入口至少包含：
+插件需要通过 `interaction_entries` 声明可被 TelePilot 调度的入口。每个入口至少包含：
 
 - `key`
 - `title`
 - `description`
 - `interaction_profile`
 - `launch_mode`
+- `dispatch_modes`
+- `message_channels`
+- `money_channel`
 - `events`
 - `session_scope`
 - `input_schema`
@@ -261,7 +296,7 @@
 转账联动采用“双证据”模型：
 
 - UserBot/回复上下文负责补充“玩家是谁”，例如付款人回复 `+1000` 时的真实 `user_id`；
-- 可信转账通知 Bot 负责证明“钱已到账”，包括金额、收款人和付款人显示名。
+- 外部可信转账通知来源负责证明“钱已到账”，包括金额、收款人和付款人显示名。
 
 只有可信转账通知命中规则后，平台才会生成 `event.type=payment_confirmed` 和 `payment.status=confirmed`。普通群友发送 `+金额` 只是支付意图，不会直接启动付费玩法。
 
@@ -326,28 +361,31 @@
 - `send_message`
 - `send_photo`
 - `send_file`
+- `delete_message`
+- `pin_message`
+- `answer_callback`
 - `result`
 - `end_session`
 
-`send_message` 可携带 Bot API `reply_markup`（inline keyboard）。按钮点击会以 `callback_query` 事件回到对应活跃会话，payload 会同时包含 `callback_query_id`、`callback_data` 和原按钮消息的 `message_id` / `message_text`。
+`send_message` 可携带 Bot API `reply_markup`（inline keyboard）。按钮点击会以 `callback_query` 事件回到对应活跃会话，payload 会同时包含 `callback_query_id`、`callback_data` 和原按钮消息的 `message_id` / `message_text`。新插件推荐用 `ctx.messages.send/edit/delete/pin/answer_callback` 生成这些动作，而不是直接调用 Bot API。
 
 ### 7.1 标准动作与发送通道
 
-动作可带 `send_via`，但必须命中入口声明的白名单。当前推荐白名单只有：
+动作可带 `send_via`，也可以通过 `channel`、`channel_selector` 或 `send_via_options` 声明候选顺序。当前推荐主动发送通道只有：
 
 - `interaction_bot`
 - `userbot_reply`
-- `bbot_notice`
 
 解释：
 
 - `interaction_bot`：交互 Bot 发群内题面/答复/题图
 - `userbot_reply`：由账号 worker 的 UserBot 代发
-- `bbot_notice`：由通知 Bot 发公告
 
 这里的关键点是：
 
-> `send_via` 是“平台允许的发送通道”，不是“插件自由指定任何发送者”的能力。
+> 插件拥有通道选择权，框架拥有通道执行权。插件选择的是受控通道和候选顺序，不会直接拿 Bot Token 或账号 session。
+
+运行时会按个人可信插件标准处理 `result_contract`：未声明 `send_via` 时允许 `interaction_bot`、`userbot_reply` 两个受控通道；声明了 `actions` 或 `send_via` 时，未声明动作/通道会记录 Contract Guard 告警并继续尝试可执行动作。`reply_markup` 只透传给 `interaction_bot`，候选中包含 `userbot_reply` 时会自动收窄到可承接按钮的交互 Bot 通道。`bbot_notice` / `notice` / `notice_bot` 已移除且不兼容，不再作为插件主动发送通道；插件显式请求旧通道会返回失败并提示迁移。
 
 ## 7.2 结果与结算分离
 
@@ -384,7 +422,7 @@
 
 ### 7.4 平台读取边界
 
-平台不再在联动交互 Bot 页面提供“最近互动结果”列表，也不再暴露专用的 `interaction-results` 查询接口。
+平台不再在账号详情的交互通道页提供“最近互动结果”列表，也不再暴露专用的 `interaction-results` 查询接口。
 原因是当前发奖链路已经由当次中奖公告、赢家消息引用和 userbot 自动发奖监听完成；再额外保留一份最近结果列表会让用户误以为需要手工二次核对，也会让页面承担过多运维职责。
 
 插件仍然可以返回结构化 `result` / `settlement` 动作：
@@ -414,6 +452,8 @@
 
 - `send_via=interaction_bot`
 - `send_via=userbot_reply`
+- `channel=["interaction_bot", "userbot_reply"]`
+- `channel_selector={"prefer": ["bot", "userbot"], "fallback": true}`
 
 ### 8.2 不可直接放开的部分
 
@@ -433,7 +473,7 @@
 更稳妥的做法是：
 
 1. **平台注入来源元数据**，插件只读取，不自己抢订阅。
-2. **插件声明允许的接收形态与发送通道**，平台负责执行。
+2. **插件声明允许的接收形态与发送通道偏好/候选顺序**，平台负责执行、告警、审计和回退。
 3. 如有必要，可在入口声明层新增类似：
    - `accepted_sources`
    - `result_contract.send_via`
@@ -569,42 +609,42 @@
 5. 入口名推荐 `start_<plugin_key>`。
 6. 返回结果必须带结构化赢家信息，不依赖文本解析。
 7. 涉及奖金的入口必须写 `settlement`，但不能在插件里直接发钱。
-8. `send_via` 只能命中声明白名单。
+8. `send_via` / `channel` / `channel_selector` 只能使用当前受控通道：`interaction_bot`、`userbot_reply`、`auto`；声明外通道会产生告警，旧 `notice` / `bbot_notice` 会明确失败。
 9. 使用 inline keyboard 时必须声明 `callback_query` 事件，并通过 `send_message.reply_markup` 返回按钮。
 10. 业务逻辑可抽共享函数，UserBot 命令与交互入口共同调用。
 
-## 12. 迁移步骤
+## 12. 迁移步骤与 0.33 落地状态
 
 ### 阶段 1：平台契约收口
 
-- 统一 payload 信封
-- 统一动作结果
-- 统一 `send_via` 白名单
-- 统一 `settlement` 结构
+- 已落地统一 payload 信封。
+- 已落地统一动作结果。
+- 已落地 `result_contract.actions` 与 `result_contract.send_via` 运行时告警；未主动声明时按可信插件标准允许交互 Bot / UserBot 双通道代发，并支持插件声明候选通道与失败回退。
+- 已落地 `settlement` 结构化记录。
 
 ### 阶段 2：插件声明升级
 
-- 先升级内置互动插件
-- 再升级已验证的 installed / 远程互动插件
-- 历史入口名仅保留必要兼容
+- 内置互动插件已按 `interaction_entries` 暴露入口。
+- 已验证的 installed 互动插件通过 `scripts/validate-installed-interaction-plugins.py` 做契约对齐检查。
+- 历史入口名仅保留必要兼容，新入口推荐 `start_<plugin_key>`。
 
-### 阶段 3：前端规则编辑器重构
+### 阶段 3：前端交互框架入口
 
-- 把平台通用项与插件入口项分层
-- 技术字段折叠
-- 入口参数动态渲染
-- 移动端单列友好布局
+- 已新增独立「交互框架」顶级页面，和 AI 一样作为 TelePilot 内的重要框架入口。
+- 「交互」中心承载具体规则配置，账号详情的「交互通道」页只维护 Bot 凭证、通知模板等账号级通道设置。
+- 远程插件仓库已支持在插件页直接刷新列表。
 
-### 阶段 4：赢家与结算链路稳定化
+### 阶段 4：动作执行与结算链路稳定化
 
-- 平台统一记录 `feature_key + entry_key + session_key + trace_id`
-- 自动发奖与人工补发统一读取结构化 `result/settlement`
+- `app.services.interaction.contracts` 负责插件主动收窄时的动作契约守卫。
+- `app.services.interaction.delivery.InteractionDeliveryExecutor` 负责发送、编辑、删除、置顶、按钮 ACK、媒体发送和 message_id 保存。
+- 自动发奖与人工补发继续读取结构化 `result/settlement`，交互 Bot 不直接执行钱相关动作。
 
 ### 阶段 5：同步插件仓规范
 
-- 更新 `telebot-plugins` 仓库模板
-- 提供一份“交互插件最小骨架”
-- 提供一份兼容清单
+- 插件 API 参考、速查表、远程插件规范、安全边界和本文已同步个人可信插件标准模式、两类调度入口、`ctx.messages`、按钮回调和发送通道。
+- `examples/plugins/with_interaction` 作为最小交互插件骨架继续由校验脚本覆盖。
+- installed 插件兼容清单由 `scripts/validate-installed-interaction-plugins.py` 自动发现并校验。
 
 ## 13. 验收标准
 
@@ -621,14 +661,15 @@
 5. 交互 Bot 不直接执行钱相关动作；
 6. 移动端宽度下规则页无重叠、无不可读表单。
 
-## 14. 当前仓库状态与后续建议
+## 14. 当前仓库状态
 
-按当前仓库进度，这套方案并不是从零开始：
+截至 0.33.0，这套方案已经从“交互 Bot 功能块”收口为 TelePilot 的交互框架：
 
-- 平台已经开始采用统一输入信封；
-- 内置 `game24` / `math10` 已开始返回结构化结果；
-- 运行时已经支持 `userbot_reply`；
-- 前端规则页已经开始按 `interaction_entries` 动态渲染入口参数；
-- `interaction_profile` 已开始进入 Manifest / API / 前端类型体系。
+- 平台采用统一输入信封；
+- 插件可通过 `ctx.messages` 生成受控动作；
+- 运行时按 `result_contract` 记录动作类型和发送通道告警；
+- delivery executor 已从账号 Bot 大 runtime 中拆出；
+- 前端已有独立交互框架页；
+- 插件开发文档已经同步最新框架和迁移路径。
 
-接下来最重要的不是再造一套新系统，而是继续把这套契约补齐、测试补齐、文档补齐，并同步到插件仓规范中。
+后续版本可以继续增强可观测性、发奖工作流和更多玩法模板，但不再需要推翻这套框架。

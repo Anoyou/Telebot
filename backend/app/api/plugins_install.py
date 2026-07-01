@@ -25,6 +25,8 @@ router = APIRouter(tags=["plugins"])
 class PluginInstallOut(BaseModel):
     key: str
     source: str
+    source_url: str | None = None
+    source_label: str | None = None
     version: str
     enabled: bool
     signature_ok: bool | None
@@ -38,6 +40,8 @@ def _to_out(row: InstalledPlugin) -> PluginInstallOut:
     return PluginInstallOut(
         key=row.key,
         source=row.source,
+        source_url=row.source_url,
+        source_label=row.source_label,
         version=row.version,
         enabled=bool(row.enabled),
         signature_ok=row.signature_ok,

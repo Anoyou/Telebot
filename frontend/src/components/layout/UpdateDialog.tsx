@@ -10,10 +10,11 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { checkUpdate, pullUpdate, restartApp } from "@/api/system";
+import { checkUpdate, getUpdateJob, pullUpdate, restartApp } from "@/api/system";
 import type {
   CheckUpdateResult,
   PullUpdateResult,
+  UpdateJobStatus,
 } from "@/api/types";
 
 type UpdateActionRequired =
@@ -37,6 +38,9 @@ interface UpdatePlanMeta {
   requiresBackup: boolean;
   canApply: boolean;
   manualCommand: string | null;
+  remote: string | null;
+  branch: string | null;
+  updateExecutor: string | null;
 }
 
 type Step =
@@ -44,6 +48,7 @@ type Step =
   | { kind: "up_to_date"; commit: string }
   | { kind: "has_update"; current: string; remote: string; ahead: number; changedFiles: string[]; plan: UpdatePlanMeta }
   | { kind: "pulling" }
+  | { kind: "job_running"; jobId: string; status: string; logs: string[]; plan: UpdatePlanMeta }
   | { kind: "pulled"; newCommit: string | null; summary: string | null; plan: UpdatePlanMeta }
   | { kind: "pull_failed"; error: string }
   | { kind: "check_failed"; error: string }
@@ -57,6 +62,7 @@ interface UpdateDialogProps {
 export function UpdateDialog({ open, onOpenChange }: UpdateDialogProps) {
   const [step, setStep] = useState<Step | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval>>();
+  const jobPollTokenRef = useRef(0);
 
   const normalizeAction = (raw: CheckUpdateResult["action_required"]): UpdateActionRequired => {
     return typeof raw === "string" ? raw : "none";
@@ -72,6 +78,9 @@ export function UpdateDialog({ open, onOpenChange }: UpdateDialogProps) {
     requiresBackup: Boolean(res.requires_backup),
     canApply: res.can_apply ?? true,
     manualCommand: res.manual_command ?? null,
+    remote: res.remote ?? null,
+    branch: res.branch ?? null,
+    updateExecutor: res.update_executor ?? null,
   });
 
   const getPrimaryActionLabel = (plan: UpdatePlanMeta) => {
@@ -151,6 +160,7 @@ export function UpdateDialog({ open, onOpenChange }: UpdateDialogProps) {
       doCheck();
     } else {
       setStep(null);
+      jobPollTokenRef.current += 1;
       if (timerRef.current) {
         clearInterval(timerRef.current);
         timerRef.current = undefined;
@@ -169,6 +179,18 @@ export function UpdateDialog({ open, onOpenChange }: UpdateDialogProps) {
     try {
       const res: PullUpdateResult = await pullUpdate();
       if (res.success) {
+        const plan = parsePlanMeta(res);
+        if (res.job_id) {
+          setStep({
+            kind: "job_running",
+            jobId: res.job_id,
+            status: res.status || "queued",
+            logs: [],
+            plan,
+          });
+          pollUpdateJob(res.job_id, plan);
+          return;
+        }
         setStep({ kind: "pulled", newCommit: res.new_commit, summary: res.summary, plan: parsePlanMeta(res) });
       } else {
         setStep({ kind: "pull_failed", error: res.error || "未知错误" });
@@ -179,6 +201,62 @@ export function UpdateDialog({ open, onOpenChange }: UpdateDialogProps) {
         error: e instanceof Error ? e.message : String(e),
       });
     }
+  };
+
+  const pollUpdateJob = (jobId: string, plan: UpdatePlanMeta) => {
+    const pollToken = jobPollTokenRef.current + 1;
+    jobPollTokenRef.current = pollToken;
+    let stopped = false;
+    let failures = 0;
+    const poll = async () => {
+      if (stopped || jobPollTokenRef.current !== pollToken) return;
+      try {
+        const job: UpdateJobStatus = await getUpdateJob(jobId);
+        failures = 0;
+        const logs = job.logs || [];
+        if (job.status === "succeeded") {
+          stopped = true;
+          setStep({
+            kind: "pulled",
+            newCommit: job.new_commit ?? null,
+            summary: job.summary || "更新任务已完成。",
+            plan,
+          });
+          return;
+        }
+        if (job.status === "failed") {
+          stopped = true;
+          setStep({
+            kind: "pull_failed",
+            error: [job.error || "更新任务失败", ...logs.slice(-16)].join("\n"),
+          });
+          return;
+        }
+        setStep({
+          kind: "job_running",
+          jobId,
+          status: job.status || "running",
+          logs,
+          plan,
+        });
+      } catch (e) {
+        failures += 1;
+        if (failures >= 5) {
+          stopped = true;
+          setStep({
+            kind: "pulled",
+            newCommit: null,
+            summary: "更新任务已启动，服务可能正在重启；请稍后刷新页面重新检查版本。",
+            plan,
+          });
+          return;
+        }
+      }
+      if (!stopped && jobPollTokenRef.current === pollToken) {
+        window.setTimeout(poll, 2000);
+      }
+    };
+    window.setTimeout(poll, 1200);
   };
 
   const doRestart = async () => {
@@ -237,6 +315,7 @@ export function UpdateDialog({ open, onOpenChange }: UpdateDialogProps) {
             {step?.kind === "up_to_date" && "当前已是最新版本"}
             {step?.kind === "has_update" && describeUpdateState(step.plan, step.ahead)}
             {step?.kind === "pulling" && "正在应用更新计划..."}
+            {step?.kind === "job_running" && "更新任务正在执行"}
             {step?.kind === "pulled" && "更新计划已执行"}
             {step?.kind === "pull_failed" && "拉取失败"}
             {step?.kind === "check_failed" && "检查失败"}
@@ -250,7 +329,7 @@ export function UpdateDialog({ open, onOpenChange }: UpdateDialogProps) {
           {step?.kind === "checking" && (
             <div className="flex items-center gap-3 text-muted-foreground">
               <Loader2 className="h-5 w-5 animate-spin" />
-              <span className="text-sm">git fetch origin main ...</span>
+              <span className="text-sm">正在检查目标分支...</span>
             </div>
           )}
 
@@ -292,6 +371,8 @@ export function UpdateDialog({ open, onOpenChange }: UpdateDialogProps) {
                   <p>代码版本: 请在宿主机查看</p>
                 )}
                 {step.plan.runtimeMode && <p>运行模式: {step.plan.runtimeMode}</p>}
+                {step.plan.branch && <p>目标分支: {(step.plan.remote || "origin")}/{step.plan.branch}</p>}
+                {step.plan.updateExecutor && <p>执行器: {step.plan.updateExecutor}</p>}
               </div>
               {step.plan.components.length > 0 && (
                 <div className="rounded-md border bg-background px-3 py-2">
@@ -339,6 +420,23 @@ export function UpdateDialog({ open, onOpenChange }: UpdateDialogProps) {
             <div className="flex items-center gap-3 text-muted-foreground">
               <Loader2 className="h-5 w-5 animate-spin" />
               <span className="text-sm">正在执行更新计划，请稍候...</span>
+            </div>
+          )}
+
+          {step?.kind === "job_running" && (
+            <div className="space-y-3 text-sm">
+              <div className="flex items-center gap-3 text-muted-foreground">
+                <Loader2 className="h-5 w-5 animate-spin" />
+                <span>任务 {step.jobId} · {step.status}</span>
+              </div>
+              <div className="rounded-md border bg-background px-3 py-2">
+                <p className="mb-1 text-xs text-muted-foreground">
+                  {(step.plan.remote || "origin")}/{step.plan.branch || "main"} · 最近日志
+                </p>
+                <pre className="max-h-48 overflow-y-auto whitespace-pre-wrap text-xs leading-relaxed">
+                  {step.logs.length ? step.logs.slice(-40).join("\n") : "等待 updater 输出..."}
+                </pre>
+              </div>
             </div>
           )}
 

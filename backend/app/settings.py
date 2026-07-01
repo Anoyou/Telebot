@@ -74,6 +74,9 @@ class Settings(BaseSettings):
     plugins_installed_dir: str = "./plugins/installed"
     # 插件仓库（plugin_repo）本地克隆缓存目录；用于浏览仓库内可装插件而不重复克隆。
     plugin_repos_cache_dir: str = "./data/plugin_repos"
+    # 官方可选插件远程仓库。Core 不再随包携带游戏/图片类官方插件源码；
+    # 安装页通过这个仓库读取带 official 标签的插件。
+    official_plugin_repo_url: str = "https://github.com/Anoyou/telebot-plugins"
     # 上传 zip 时验签使用的 Ed25519 公钥（PEM）；为空表示不验签，前端给出"未签名"警告。
     # 公钥示例：-----BEGIN PUBLIC KEY-----\nMC...\n-----END PUBLIC KEY-----
     plugin_pubkey: str = ""
@@ -104,7 +107,7 @@ class Settings(BaseSettings):
     llm_max_output_tokens: int = 0
     # 第三方插件 ctx.ai 的额外保护上限；插件只能请求文本补全，且输出/超时默认收紧。
     plugin_ai_max_output_tokens: int = 4096
-    plugin_ai_timeout_seconds: int = 60
+    plugin_ai_timeout_seconds: int = 600
 
     # ── 启动期自动迁移 ────────────────────────────────────────────
     # True = backend 启动时自动 ``alembic upgrade head``，把 DB schema 升到代码期望的版本

@@ -314,7 +314,9 @@ async def invoke(
         has_replied_image, has_self_image, has_replied_audio, has_self_audio,
     )
     if native_image_mode and not user_q and not replied_text and not has_any_image:
-        await event.edit("✗ 请提供图片提示词，例如：,image 一只戴飞行员护目镜的机器人")
+        await event.edit(
+            f"✗ 请提供图片提示词，例如：{_cmd_prefix}{_tpl_name} 一只戴飞行员护目镜的机器人"
+        )
         return
 
     # ── 决策 provider_id（fixed / auto）────────────────────────

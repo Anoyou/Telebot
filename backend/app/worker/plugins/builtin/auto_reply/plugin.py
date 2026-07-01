@@ -40,7 +40,6 @@ from telethon import events
 
 # 模块化重构后改用绝对 import：第三方插件解压到 data/plugins/installed/{key}/
 # 时也只能走绝对 import，因此 builtin 同样统一用绝对路径以保持一致性。
-from app.db.models.feature import FEATURE_AUTO_REPLY
 from app.worker.command import (
     current_command_prefix,
     dispatch_auto_command_text,
@@ -48,6 +47,8 @@ from app.worker.command import (
 )
 from app.worker.plugins.base import Plugin, PluginContext, public_entity_display_name, register
 from app.worker.ratelimit.humanize import simulate_read, simulate_typing
+
+FEATURE_AUTO_REPLY = "auto_reply"
 
 
 @register

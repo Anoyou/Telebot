@@ -1,7 +1,7 @@
 // 插件安装与管理：插件包安装/更新/卸载 + 开发指南
 //
-// Tab 1：安装与更新 — 本地内置插件 + 远程插件（安装/卸载/更新）
-// Tab 2：开发指南 — 内置完整插件开发文档工作台
+// Tab 1：安装与更新 — 推荐插件 + 远程插件（安装/卸载/更新）
+// Tab 2：开发指南 — 完整插件开发文档工作台
 //
 // 账号级启停与配置统一回 /plugins 首页，避免“安装页”和“插件中心”双入口重复。
 // 远程插件原为独立 /remote-plugins 页面，现在统一收口到 /plugins/manage。
@@ -9,6 +9,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  AlertTriangle,
   ArrowLeft,
   Brain,
   BookOpen,
@@ -19,6 +20,7 @@ import {
   FileText,
   GitFork,
   Globe2,
+  KeyRound,
   ListChecks,
   Network,
   Power,
@@ -44,7 +46,9 @@ import cheatsheetMd from "../../../docs/PLUGIN-CHEATSHEET.md?raw";
 import devGuideMd from "../../../docs/PLUGIN-DEV-GUIDE.md?raw";
 import httpGuideMd from "../../../docs/PLUGIN-HTTP.md?raw";
 import overviewMd from "../../../docs/PLUGIN-OVERVIEW.md?raw";
+import quickstartMd from "../../../docs/PLUGIN-QUICKSTART.md?raw";
 import remoteGuideMd from "../../../docs/PLUGIN-REMOTE.md?raw";
+import rulesMd from "../../../docs/PLUGIN-RULES.md?raw";
 import safetyGuideMd from "../../../docs/PLUGIN-SAFETY.md?raw";
 
 import { Button } from "@/components/ui/button";
@@ -55,6 +59,14 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Table,
@@ -70,6 +82,8 @@ import { SectionHeader, SignalPill } from "@/components/ui/status";
 import { cn } from "@/lib/utils";
 import { goBackOr } from "@/lib/navigation";
 import { getErrMsg } from "@/lib/api";
+import { splitPluginWarnings } from "@/lib/plugin-config-contract";
+import { isPlatformFeature } from "@/lib/plugin-modes";
 
 import { getFeatureMatrix } from "@/api/features";
 import {
@@ -92,19 +106,33 @@ import {
   deletePluginRepo,
   fetchPluginRepos,
   fetchLocalPlugins,
+  fetchOfficialPlugins,
   fetchRepoPlugins,
+  refreshRepoPlugins,
   installLocalPlugin,
+  installOfficialPlugin,
   installFromRepo,
+  updateInstalledPluginsFromRepo,
+  updatePluginRepoCredential,
 } from "@/api/pluginRepo";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import {
+  compactUsageText,
+  pluginContractRiskWarnings,
+  pluginEventSubscriptionLabels,
+  pluginOperationalCapabilityLabels,
+} from "@/types/pluginContract";
+import type { PluginRepo, PluginRepoPlugin } from "@/types/pluginRepo";
 import type { RemotePlugin } from "@/types/remotePlugin";
 
 // ── 常量 ──────────────────────────────────────────────────────────
 type TabValue = "plugins" | "guide";
 type DevDocId =
   | "all"
+  | "quickstart"
+  | "rules"
   | "dev-guide"
   | "overview"
   | "api-reference"
@@ -126,8 +154,35 @@ type DevDoc = {
 const PLUGINS_QK = ["installed-packages"] as const;
 const REMOTE_QK = ["remote-plugins"] as const;
 const PLUGIN_REPOS_QK = ["plugin-repos"] as const;
+const OFFICIAL_PLUGINS_QK = ["official-plugins"] as const;
 const NEW_ACCOUNT_GUIDE_SEEN_KEY = "telebot.accounts.new_account_guide_seen.v4";
+const FIRST_RECOMMENDED_PLUGIN_KEYS = new Set(["auto_reply", "autorepeat"]);
+const DANGER_OUTLINE_BUTTON_CLASS = "border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive";
 const DEV_DOCS: DevDoc[] = [
+  {
+    id: "quickstart",
+    title: "5 分钟 Quickstart",
+    description: "复制最小 hello_ping 插件，跑通 Event Bus + MessageOps。",
+    path: "docs/PLUGIN-QUICKSTART.md",
+    markdown: quickstartMd,
+    icon: Sparkles,
+  },
+  {
+    id: "rules",
+    title: "插件开发铁律",
+    description: "先确认必须、禁止、推荐的硬边界，避免后续返工。",
+    path: "docs/PLUGIN-RULES.md",
+    markdown: rulesMd,
+    icon: ShieldCheck,
+  },
+  {
+    id: "api-reference",
+    title: "完整 API 参考",
+    description: "查字段、facade、事件信封、MessageOps、Trace 和前端集成。",
+    path: "docs/PLUGIN-API-REFERENCE.md",
+    markdown: apiReferenceMd,
+    icon: Code2,
+  },
   {
     id: "dev-guide",
     title: "索引与路线",
@@ -139,18 +194,10 @@ const DEV_DOCS: DevDoc[] = [
   {
     id: "overview",
     title: "插件概览",
-    description: "快速开始、插件结构、Route A 与 Route B 的边界。",
+    description: "快速开始、插件结构、个人可信插件标准模式与交互入口边界。",
     path: "docs/PLUGIN-OVERVIEW.md",
     markdown: overviewMd,
     icon: FileText,
-  },
-  {
-    id: "api-reference",
-    title: "API 参考",
-    description: "Plugin、Manifest、PluginContext、配置、派发、日志和前端集成。",
-    path: "docs/PLUGIN-API-REFERENCE.md",
-    markdown: apiReferenceMd,
-    icon: Code2,
   },
   {
     id: "http",
@@ -216,10 +263,16 @@ function formatPluginVersion(version?: string | null) {
 }
 
 function toastPluginLintWarnings(row: RemotePlugin) {
-  const warnings = row.lint_warnings ?? [];
-  if (!warnings.length) return;
-  toast.warning(`插件 ${row.name} 有 ${warnings.length} 条开发规范警告`, {
-    description: warnings[0],
+  const warnings = splitPluginWarnings(row.lint_warnings);
+  if (!warnings.all.length) return;
+  if (warnings.high.length > 0) {
+    toast.error(`插件 ${row.name} 有 ${warnings.high.length} 条高级规范警告`, {
+      description: warnings.high[0],
+    });
+    return;
+  }
+  toast.warning(`插件 ${row.name} 有 ${warnings.normal.length} 条开发规范警告`, {
+    description: warnings.normal[0],
   });
 }
 
@@ -237,6 +290,58 @@ function remoteVersionTone(plugin: RemotePlugin): "neutral" | "success" | "warn"
   if (plugin.source_url?.startsWith("local://")) return "outline";
   if (plugin.last_update_check_at) return "success";
   return "neutral";
+}
+
+function normalizeSourceUrlForCompare(value?: string | null): string {
+  return (value || "")
+    .trim()
+    .replace(/\/+$/, "")
+    .replace(/\.git$/i, "")
+    .toLowerCase();
+}
+
+function shortSourceUrl(value?: string | null): string {
+  const raw = (value || "").trim();
+  if (!raw) return "-";
+  if (raw.startsWith("local://")) return "本地导入";
+  if (raw.startsWith("official://")) return "推荐源";
+  const urlText = raw.startsWith("git+ssh://") ? raw.replace(/^git\+/, "") : raw;
+  try {
+    const url = new URL(urlText);
+    const path = url.pathname.replace(/^\/+/, "").replace(/\.git$/i, "");
+    return path ? `${url.hostname}/${path}` : url.hostname;
+  } catch {
+    return raw.replace(/\.git$/i, "");
+  }
+}
+
+function repoNameForSourceUrl(sourceUrl: string | null | undefined, repos: PluginRepo[]): string | null {
+  const sourceKey = normalizeSourceUrlForCompare(sourceUrl);
+  if (!sourceKey) return null;
+  const matched = repos.find((repo) => normalizeSourceUrlForCompare(repo.url) === sourceKey);
+  return matched ? (matched.name || shortSourceUrl(matched.url)) : null;
+}
+
+function installSourceLibraryLabel(
+  source: string | null | undefined,
+  sourceUrl: string | null | undefined,
+  sourceLabel: string | null | undefined,
+  repos: PluginRepo[],
+): string {
+  const sourceValue = (source || "").toLowerCase();
+  if (sourceValue === "builtin") return "系统核心";
+  if (sourceValue === "official" || sourceUrl?.startsWith("official://")) return "推荐源";
+  if (sourceValue === "local" || sourceUrl?.startsWith("local://")) return "本地导入";
+  const repoName = repoNameForSourceUrl(sourceUrl, repos);
+  if (repoName) return repoName;
+  if (sourceUrl) return shortSourceUrl(sourceUrl);
+  if (sourceLabel && !["Git", "Plugin Repo", "Official", "Local", "ZIP"].includes(sourceLabel)) {
+    return sourceLabel;
+  }
+  if (sourceValue === "repo") return "插件仓库";
+  if (sourceValue === "git") return "Git";
+  if (sourceValue === "zip") return "ZIP";
+  return sourceLabel || source || "-";
 }
 
 function parseManageTab(value: string | null): TabValue {
@@ -262,6 +367,41 @@ function normalizeDocHref(href?: string) {
   const normalizedPath = pathPart.replace(/^\.\//, "");
   const id = DOC_LINK_TO_ID[pathPart] ?? DOC_LINK_TO_ID[normalizedPath];
   return id ? { id, anchor: anchorPart ? `#${anchorPart}` : "" } : null;
+}
+
+function PluginContractBadges({
+  pluginKey,
+  events,
+  capabilities,
+}: {
+  pluginKey: string;
+  events: string[];
+  capabilities: string[];
+}) {
+  return (
+    <div className="mt-2 flex flex-wrap gap-1.5">
+      <MetaBadge tone="outline" title="插件声明自己会被哪些事件唤起">
+        触发入口 {events.length}
+      </MetaBadge>
+      {events.map((label) => (
+        <MetaBadge
+          key={`${pluginKey}-event-${label}`}
+          tone="outline"
+          className="border-sky-200/80 bg-sky-500/10 text-sky-700 dark:border-sky-300/25 dark:text-sky-300"
+        >
+          {label}
+        </MetaBadge>
+      ))}
+      <MetaBadge tone="outline" title="插件声明或推断出的运行能力">
+        能力 {capabilities.length}
+      </MetaBadge>
+      {capabilities.map((label) => (
+        <MetaBadge key={`${pluginKey}-cap-${label}`} tone="warn">
+          {label}
+        </MetaBadge>
+      ))}
+    </div>
+  );
 }
 
 // ── 顶层组件 ──────────────────────────────────────────────────────
@@ -384,12 +524,13 @@ function PluginInstallGuide({
 
 
 // ═══════════════════════════════════════════════════════════════════
-// Tab 2：插件管理 — 内置插件 + 远程插件统一展示
+// Tab 2：插件管理 — 推荐源 + 远程插件统一展示
 // ═══════════════════════════════════════════════════════════════════
 function PluginsManagementTab() {
   return (
     <div className="space-y-6">
       <RemoteUpdateSettingsCard />
+      <OfficialPluginsCard />
       <LocalImportCard />
       <RemoteInstallCard />
       <InstalledPluginsSection />
@@ -476,6 +617,115 @@ function RemoteUpdateSettingsCard() {
   );
 }
 
+function OfficialPluginsCard() {
+  const qc = useQueryClient();
+  const officialQ = useQuery({ queryKey: OFFICIAL_PLUGINS_QK, queryFn: fetchOfficialPlugins });
+  const installOfficialMut = useMutation({
+    mutationFn: (name: string) => installOfficialPlugin(name),
+    onSuccess: (row) => {
+      toast.success(`已安装/更新推荐插件 ${row.display_name || row.name} v${row.version}`);
+      toastPluginLintWarnings(row);
+      qc.invalidateQueries({ queryKey: OFFICIAL_PLUGINS_QK });
+      qc.invalidateQueries({ queryKey: PLUGINS_QK });
+      qc.invalidateQueries({ queryKey: REMOTE_QK });
+      qc.invalidateQueries({ queryKey: ["matrix"] });
+    },
+    onError: (err) => toast.error(getErrMsg(err)),
+  });
+  const uninstallOfficialMut = useMutation({
+    mutationFn: (key: string) => uninstallPlugin(key),
+    onSuccess: (_row, key) => {
+      toast.success(`已卸载 ${key}`);
+      qc.invalidateQueries({ queryKey: OFFICIAL_PLUGINS_QK });
+      qc.invalidateQueries({ queryKey: PLUGINS_QK });
+      qc.invalidateQueries({ queryKey: REMOTE_QK });
+      qc.invalidateQueries({ queryKey: ["matrix"] });
+    },
+    onError: (err) => toast.error(getErrMsg(err)),
+  });
+
+  const allItems = officialQ.data ?? [];
+  const items = allItems.filter((plugin) => FIRST_RECOMMENDED_PLUGIN_KEYS.has(plugin.name));
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <SectionHeader
+          icon={Sparkles}
+          title="推荐插件"
+          description="这些条目来自 TelePilot 预置推荐源，只保留首次部署建议安装的自动回复和自动复读；更多插件请添加自己的 Git 插件仓库。"
+          meta={<SignalPill tone="neutral" label="推荐项" value={items.length} className="h-8" />}
+        />
+      </CardHeader>
+      <CardContent>
+        {officialQ.isLoading ? (
+          <div className="flex h-16 items-center justify-center">
+            <Spinner className="text-primary" />
+          </div>
+        ) : officialQ.isError ? (
+          <p className="py-3 text-sm text-destructive">推荐插件源加载失败：{getErrMsg(officialQ.error)}</p>
+        ) : items.length === 0 ? (
+          <p className="py-3 text-sm text-muted-foreground">当前推荐源没有发现自动回复或自动复读。</p>
+        ) : (
+          <div className="grid gap-2 lg:grid-cols-2">
+            {items.map((plugin) => {
+              return (
+                <div key={plugin.name} className="flex flex-col gap-3 rounded-md border px-3 py-3 sm:flex-row sm:items-center">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="font-medium">{plugin.display_name || plugin.name}</span>
+                      <span className="font-mono text-xs text-muted-foreground">v{plugin.version}</span>
+                      <MetaBadge tone="success">首次推荐</MetaBadge>
+                      {plugin.installed ? <MetaBadge>已安装</MetaBadge> : null}
+                      {plugin.update_available ? <MetaBadge tone="warn">有更新</MetaBadge> : null}
+                    </div>
+                    <div className="mt-1 font-mono text-xs text-muted-foreground">{plugin.name}</div>
+                    {plugin.description ? (
+                      <p className="mt-1 text-xs leading-5 text-muted-foreground">{plugin.description}</p>
+                    ) : null}
+                  </div>
+                  <div className="flex shrink-0 flex-wrap justify-end gap-2">
+                    {plugin.installed ? (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className={DANGER_OUTLINE_BUTTON_CLASS}
+                        disabled={uninstallOfficialMut.isPending}
+                        onClick={() => {
+                          if (confirm(`确认卸载「${plugin.name}」？`)) uninstallOfficialMut.mutate(plugin.name);
+                        }}
+                      >
+                        <Trash2 className="mr-1 h-3 w-3" />
+                        卸载
+                      </Button>
+                    ) : null}
+                    {!plugin.installed || plugin.update_available ? (
+                      <Button
+                        size="sm"
+                        className="shrink-0"
+                        variant={plugin.installed ? "outline" : "default"}
+                        disabled={installOfficialMut.isPending}
+                        onClick={() => installOfficialMut.mutate(plugin.name)}
+                      >
+                        {installOfficialMut.isPending ? (
+                          <Spinner className="mr-2 h-4 w-4" />
+                        ) : (
+                          <Download className="mr-2 h-4 w-4" />
+                        )}
+                        {plugin.installed ? "更新" : "安装"}
+                      </Button>
+                    ) : null}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 function LocalImportCard() {
   const qc = useQueryClient();
   const localQ = useQuery({ queryKey: ["local-plugins"], queryFn: fetchLocalPlugins });
@@ -544,7 +794,16 @@ function RemoteInstallCard() {
   const qc = useQueryClient();
   const [addUrl, setAddUrl] = useState("");
   const [addName, setAddName] = useState("");
+  const [addToken, setAddToken] = useState("");
+  const [repoTokens, setRepoTokens] = useState<Record<number, string>>({});
   const [expandedRepoId, setExpandedRepoId] = useState<number | null>(null);
+  const [refreshingRepoId, setRefreshingRepoId] = useState<number | null>(null);
+  const [updatingRepoId, setUpdatingRepoId] = useState<number | null>(null);
+  const [pendingBulkUpdate, setPendingBulkUpdate] = useState<{
+    repoId: number;
+    repoName: string;
+    plugins: PluginRepoPlugin[];
+  } | null>(null);
 
   // 已保存仓库列表（后端）
   const reposQ = useQuery({ queryKey: PLUGIN_REPOS_QK, queryFn: fetchPluginRepos });
@@ -556,15 +815,76 @@ function RemoteInstallCard() {
     queryFn: () => fetchRepoPlugins(expandedRepoId!),
     enabled: expandedRepoId !== null,
   });
+  const bulkPreviewPlugins = pendingBulkUpdate?.plugins.filter((p) => p.installed && p.update_available) ?? [];
+
+  const openBulkUpdatePreview = (repo: { id: number; name?: string | null; url: string }, plugins?: PluginRepoPlugin[]) => {
+    const available = plugins?.filter((p) => p.installed && p.update_available) ?? [];
+    if (!plugins) {
+      setExpandedRepoId(repo.id);
+      toast.info("请先展开或刷新该仓库，确认可升级插件和风险变化后再一键更新。");
+      return;
+    }
+    if (available.length === 0) {
+      toast.info("该仓库暂无可升级的已安装插件。");
+      return;
+    }
+    setPendingBulkUpdate({
+      repoId: repo.id,
+      repoName: repo.name || repo.url,
+      plugins: available,
+    });
+  };
+
+  const refreshRepoMut = useMutation({
+    mutationFn: async (repoId: number) => {
+      setRefreshingRepoId(repoId);
+      return { repoId, plugins: await refreshRepoPlugins(repoId) };
+    },
+    onSuccess: ({ repoId, plugins }) => {
+      toast.success("插件仓库已刷新");
+      setExpandedRepoId(repoId);
+      qc.setQueryData(["repo-plugins", repoId], plugins);
+      qc.invalidateQueries({ queryKey: REMOTE_QK });
+      qc.invalidateQueries({ queryKey: PLUGINS_QK });
+    },
+    onError: (err) => toast.error(getErrMsg(err)),
+    onSettled: () => setRefreshingRepoId(null),
+  });
 
   // 添加仓库
   const addRepoMut = useMutation({
-    mutationFn: () => addPluginRepo({ url: addUrl.trim(), name: addName.trim() || undefined }),
+    mutationFn: () => addPluginRepo({
+      url: addUrl.trim(),
+      name: addName.trim() || undefined,
+      credential: addToken.trim()
+        ? { auth_type: "github_token", token: addToken.trim() }
+        : undefined,
+    }),
     onSuccess: (row) => {
       toast.success(`已添加仓库 ${row.name || row.url}`);
       setAddUrl("");
       setAddName("");
+      setAddToken("");
       qc.invalidateQueries({ queryKey: PLUGIN_REPOS_QK });
+    },
+    onError: (err) => toast.error(getErrMsg(err)),
+  });
+
+  const updateRepoCredentialMut = useMutation({
+    mutationFn: ({ id, token }: { id: number; token: string }) =>
+      updatePluginRepoCredential(id, {
+        auth_type: token.trim() ? "github_token" : "none",
+        token: token.trim() || null,
+      }),
+    onSuccess: (row) => {
+      toast.success(row.has_credentials ? "仓库凭证已保存" : "仓库凭证已清除");
+      setRepoTokens((prev) => {
+        const next = { ...prev };
+        delete next[row.id];
+        return next;
+      });
+      qc.invalidateQueries({ queryKey: PLUGIN_REPOS_QK });
+      qc.invalidateQueries({ queryKey: ["repo-plugins", row.id] });
     },
     onError: (err) => toast.error(getErrMsg(err)),
   });
@@ -607,6 +927,30 @@ function RemoteInstallCard() {
     onError: (err) => toast.error(getErrMsg(err)),
   });
 
+  const bulkUpdateRepoMut = useMutation({
+    mutationFn: async (repoId: number) => {
+      setUpdatingRepoId(repoId);
+      return updateInstalledPluginsFromRepo(repoId);
+    },
+    onSuccess: (res) => {
+      setExpandedRepoId(res.repo_id);
+      if (res.updated > 0) {
+        const failedSuffix = res.failed > 0 ? `，${res.failed} 个失败` : "";
+        toast.success(`已从 ${res.repo_name} 更新 ${res.updated} 个插件${failedSuffix}`);
+      } else if (res.failed > 0) {
+        toast.error(`${res.repo_name} 更新失败：${res.failed} 个插件未完成`);
+      } else {
+        toast.success(`${res.repo_name} 没有需要更新的已安装插件`);
+      }
+      qc.invalidateQueries({ queryKey: REMOTE_QK });
+      qc.invalidateQueries({ queryKey: PLUGINS_QK });
+      qc.invalidateQueries({ queryKey: ["matrix"] });
+      qc.invalidateQueries({ queryKey: ["repo-plugins", res.repo_id] });
+    },
+    onError: (err) => toast.error(getErrMsg(err)),
+    onSettled: () => setUpdatingRepoId(null),
+  });
+
   return (
     <Card>
       <CardHeader className="pb-3">
@@ -618,21 +962,31 @@ function RemoteInstallCard() {
       </CardHeader>
       <CardContent className="space-y-4">
         {/* 添加仓库 */}
-        <div className="flex gap-2">
-          <input
-            className="flex h-9 w-40 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+        <div className="grid gap-2 md:grid-cols-[160px_minmax(220px,1fr)_minmax(180px,280px)_auto]">
+          <Input
+            className="h-9 rounded-md bg-background"
             placeholder="仓库名（可选）"
             value={addName}
             onChange={(e) => setAddName(e.target.value)}
+            disabled={addRepoMut.isPending}
           />
-          <input
-            className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-            placeholder="https://github.com/user/repo.git"
+          <Input
+            className="h-9 rounded-md bg-background"
+            placeholder="https://github.com/user/repo.git 或 /tree/branch"
             value={addUrl}
             onChange={(e) => setAddUrl(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === "Enter" && addUrl.trim()) addRepoMut.mutate();
             }}
+            disabled={addRepoMut.isPending}
+          />
+          <Input
+            className="h-9 rounded-md bg-background"
+            type="password"
+            autoComplete="off"
+            placeholder="GitHub Token（私有库可选）"
+            value={addToken}
+            onChange={(e) => setAddToken(e.target.value)}
             disabled={addRepoMut.isPending}
           />
           <Button
@@ -649,6 +1003,9 @@ function RemoteInstallCard() {
               </>
             )}
           </Button>
+          <p className="text-xs text-muted-foreground md:col-span-4">
+            私有 GitHub 仓库请填写 fine-grained token，至少授予对应仓库 Contents 读取权限。Token 会加密保存且不会回显。
+          </p>
         </div>
 
         {/* 仓库列表 */}
@@ -656,42 +1013,136 @@ function RemoteInstallCard() {
           <p className="py-4 text-center text-sm text-muted-foreground">暂无已保存的仓库</p>
         ) : (
           <div className="space-y-2">
-            {repos.map((repo) => (
-              <div key={repo.id} className="rounded-md border">
-                <div
-                  className="flex cursor-pointer items-center gap-2 px-3 py-2 hover:bg-accent/50"
-                  onClick={() => setExpandedRepoId(expandedRepoId === repo.id ? null : repo.id)}
-                >
-                  <ChevronRight
-                    className={cn("h-4 w-4 shrink-0 transition-transform", expandedRepoId === repo.id && "rotate-90")}
-                  />
-                  <span className="flex-1 truncate text-sm font-medium">
-                    {repo.name || repo.url}
-                  </span>
-                  {repo.name && (
-                    <span className="truncate font-mono text-xs text-muted-foreground">
-                      {repo.url}
-                    </span>
-                  )}
-                  <MetaBadge tone="outline" className="shrink-0">
-                    {expandedRepoId === repo.id && pluginsQ.isLoading ? "加载中…" : "仓库"}
-                  </MetaBadge>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-6 w-6 shrink-0 p-0 text-muted-foreground hover:text-destructive"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      delRepoMut.mutate(repo.id);
-                    }}
-                    title="移除仓库"
+            {repos.map((repo) => {
+              const expandedPlugins = expandedRepoId === repo.id ? pluginsQ.data : undefined;
+              const knownUpdateCount = expandedPlugins?.filter((p) => p.installed && p.update_available).length;
+              const bulkUpdating = bulkUpdateRepoMut.isPending && updatingRepoId === repo.id;
+              return (
+                <div key={repo.id} className="rounded-md border">
+                  <div
+                    className="flex cursor-pointer items-center gap-2 px-3 py-2 hover:bg-accent/50"
+                    onClick={() => setExpandedRepoId(expandedRepoId === repo.id ? null : repo.id)}
                   >
-                    <X className="h-3.5 w-3.5" />
-                  </Button>
-                </div>
-                {/* 展开：仓库内插件列表 */}
-                {expandedRepoId === repo.id && (
-                  <div className="border-t px-3 py-2">
+                    <ChevronRight
+                      className={cn("h-4 w-4 shrink-0 transition-transform", expandedRepoId === repo.id && "rotate-90")}
+                    />
+                    <span className="flex-1 truncate text-sm font-medium">
+                      {repo.name || repo.url}
+                    </span>
+                    {repo.name && (
+                      <span className="truncate font-mono text-xs text-muted-foreground">
+                        {repo.url}
+                      </span>
+                    )}
+                    {repo.has_credentials ? (
+                      <MetaBadge tone="success" className="shrink-0">
+                        <KeyRound className="mr-1 h-3 w-3" />
+                        私有凭证
+                      </MetaBadge>
+                    ) : null}
+                    <MetaBadge tone="outline" className="shrink-0">
+                      {expandedRepoId === repo.id && pluginsQ.isLoading ? "加载中…" : "仓库"}
+                    </MetaBadge>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-7 shrink-0 gap-1 px-2 text-xs"
+                      disabled={
+                        bulkUpdateRepoMut.isPending
+                        || (expandedPlugins !== undefined && knownUpdateCount === 0)
+                      }
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        openBulkUpdatePreview(repo, expandedPlugins);
+                      }}
+                      aria-label={`更新插件仓库 ${repo.name || repo.url} 中可升级的已安装插件`}
+                      title={
+                        knownUpdateCount && knownUpdateCount > 0
+                          ? `更新 ${knownUpdateCount} 个可升级插件`
+                          : "刷新仓库并更新其中可升级的已安装插件"
+                      }
+                    >
+                      {bulkUpdating ? (
+                        <Spinner className="h-3.5 w-3.5" />
+                      ) : (
+                        <RefreshCw className="h-3.5 w-3.5" />
+                      )}
+                      <span className="hidden sm:inline">
+                        {knownUpdateCount && knownUpdateCount > 0 ? `更新 ${knownUpdateCount}` : "更新可升级"}
+                      </span>
+                      <span className="sm:hidden">更新</span>
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-6 w-6 shrink-0 p-0 text-muted-foreground hover:text-foreground"
+                      disabled={refreshRepoMut.isPending && refreshingRepoId === repo.id}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        refreshRepoMut.mutate(repo.id);
+                      }}
+                      aria-label={`刷新插件仓库 ${repo.name || repo.url}`}
+                      title="刷新仓库插件列表"
+                    >
+                      {refreshRepoMut.isPending && refreshingRepoId === repo.id ? (
+                        <Spinner className="h-3.5 w-3.5" />
+                      ) : (
+                        <RefreshCw className="h-3.5 w-3.5" />
+                      )}
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-6 w-6 shrink-0 p-0 text-muted-foreground hover:text-destructive"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        delRepoMut.mutate(repo.id);
+                      }}
+                      title="移除仓库"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                  {/* 展开：仓库内插件列表 */}
+                  {expandedRepoId === repo.id && (
+                    <div className="border-t px-3 py-2">
+                    <div className="mb-3 grid gap-2 rounded-md bg-muted/30 p-2 sm:grid-cols-[minmax(180px,1fr)_auto_auto] sm:items-center">
+                      <Input
+                        className="h-8 rounded-md bg-background"
+                        type="password"
+                        autoComplete="off"
+                        placeholder={repo.has_credentials ? "输入新 GitHub Token 可替换凭证" : "GitHub Token（私有库可选）"}
+                        value={repoTokens[repo.id] ?? ""}
+                        onChange={(event) =>
+                          setRepoTokens((prev) => ({ ...prev, [repo.id]: event.target.value }))
+                        }
+                        disabled={updateRepoCredentialMut.isPending}
+                      />
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-8"
+                        disabled={updateRepoCredentialMut.isPending || !(repoTokens[repo.id] ?? "").trim()}
+                        onClick={() =>
+                          updateRepoCredentialMut.mutate({
+                            id: repo.id,
+                            token: repoTokens[repo.id] ?? "",
+                          })
+                        }
+                      >
+                        <KeyRound className="mr-1 h-3.5 w-3.5" />
+                        保存凭证
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-8 text-muted-foreground hover:text-destructive"
+                        disabled={updateRepoCredentialMut.isPending || !repo.has_credentials}
+                        onClick={() => updateRepoCredentialMut.mutate({ id: repo.id, token: "" })}
+                      >
+                        清除
+                      </Button>
+                    </div>
                     {pluginsQ.isLoading ? (
                       <div className="flex h-16 items-center justify-center">
                         <Spinner className="text-primary" />
@@ -706,26 +1157,54 @@ function RemoteInstallCard() {
                       <div className="space-y-1">
                         {(pluginsQ.data ?? []).map((p) => {
                           const canUpdate = !!p.installed && !!p.update_available;
+                          const events = pluginEventSubscriptionLabels(p.event_subscriptions);
+                          const capabilities = pluginOperationalCapabilityLabels({
+                            capabilities: p.capabilities,
+                            permissions: p.permissions,
+                            usage: p.usage,
+                            description: p.description,
+                          });
+                          const risks = pluginContractRiskWarnings({
+                            capabilities: p.capabilities,
+                            event_subscriptions: p.event_subscriptions,
+                          });
                           return (
                           <div
                             key={p.name}
-                            className="flex flex-col gap-2 rounded px-2 py-1.5 hover:bg-accent/30 sm:flex-row sm:items-center"
+                            className="flex flex-col gap-2 rounded-md px-2 py-2 hover:bg-accent/30 sm:flex-row sm:items-start"
                           >
                             <div className="flex-1 min-w-0">
-                              <div className="flex items-center gap-2">
-                                <span className="text-sm font-medium">{p.display_name || p.name}</span>
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span className="min-w-0 text-sm font-medium">{p.display_name || p.name}</span>
                                 <span className="font-mono text-xs text-muted-foreground">v{p.version}</span>
                                 {canUpdate ? (
                                   <MetaBadge tone="success">可更新</MetaBadge>
                                 ) : p.installed ? (
                                   <MetaBadge>已安装</MetaBadge>
                                 ) : null}
+                                {risks.length > 0 ? <MetaBadge tone="danger">高风险能力</MetaBadge> : null}
                               </div>
                               {p.description && (
                                 <p className="truncate text-xs text-muted-foreground">{p.description}</p>
                               )}
+                              <p className="mt-1 text-xs text-muted-foreground">{compactUsageText(p.usage)}</p>
+                              <PluginContractBadges
+                                pluginKey={p.name}
+                                events={events}
+                                capabilities={capabilities}
+                              />
+                              {risks.length > 0 ? (
+                                <div className="mt-2 space-y-1 text-xs text-destructive">
+                                  {risks.slice(0, 2).map((risk) => (
+                                    <div key={`${p.name}-risk-${risk}`} className="flex gap-1.5">
+                                      <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                                      <span>{risk}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              ) : null}
                               {canUpdate && p.installed_version && (
-                                <p className="text-xs text-muted-foreground">
+                                <p className="mt-1 text-xs text-muted-foreground">
                                   当前 {formatPluginVersion(p.installed_version)}，仓库 {formatPluginVersion(p.version)}
                                 </p>
                               )}
@@ -757,18 +1236,85 @@ function RemoteInstallCard() {
                         })}
                       </div>
                     )}
-                  </div>
-                )}
-              </div>
-            ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         )}
+        <Dialog open={pendingBulkUpdate !== null} onOpenChange={(open) => !open && setPendingBulkUpdate(null)}>
+          <DialogContent className="max-h-[85vh] max-w-2xl overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>确认批量更新插件</DialogTitle>
+              <DialogDescription>
+                将从 {pendingBulkUpdate?.repoName ?? "该仓库"} 更新 {bulkPreviewPlugins.length} 个已安装插件。更新前请确认版本变化和高风险能力变化。
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-3">
+              {bulkPreviewPlugins.map((plugin) => {
+                const events = pluginEventSubscriptionLabels(plugin.event_subscriptions);
+                const capabilities = pluginOperationalCapabilityLabels({
+                  capabilities: plugin.capabilities,
+                  permissions: plugin.permissions,
+                  usage: plugin.usage,
+                  description: plugin.description,
+                });
+                const risks = pluginContractRiskWarnings({
+                  capabilities: plugin.capabilities,
+                  event_subscriptions: plugin.event_subscriptions,
+                });
+                return (
+                  <div key={plugin.name} className="rounded-md border border-border/70 p-3">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <div className="font-medium">{plugin.display_name || plugin.name}</div>
+                      <MetaBadge tone="outline">{formatPluginVersion(plugin.installed_version)} → {formatPluginVersion(plugin.version)}</MetaBadge>
+                      {risks.length > 0 ? <MetaBadge tone="danger">高风险能力</MetaBadge> : null}
+                    </div>
+                    <p className="mt-1 text-xs text-muted-foreground">{compactUsageText(plugin.usage)}</p>
+                    <PluginContractBadges
+                      pluginKey={plugin.name}
+                      events={events}
+                      capabilities={capabilities}
+                    />
+                    {risks.length > 0 ? (
+                      <div className="mt-2 space-y-1 text-xs text-destructive">
+                        {risks.map((risk) => (
+                          <div key={risk} className="flex gap-1.5">
+                            <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                            <span>{risk}</span>
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                );
+              })}
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setPendingBulkUpdate(null)}>
+                取消
+              </Button>
+              <Button
+                onClick={() => {
+                  if (!pendingBulkUpdate) return;
+                  bulkUpdateRepoMut.mutate(pendingBulkUpdate.repoId);
+                  setPendingBulkUpdate(null);
+                }}
+                disabled={!pendingBulkUpdate || bulkUpdateRepoMut.isPending}
+              >
+                {bulkUpdateRepoMut.isPending ? <Spinner className="mr-2 h-4 w-4" /> : <RefreshCw className="mr-2 h-4 w-4" />}
+                确认更新
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </CardContent>
     </Card>
   );
 }
 
-// ── 已安装插件列表（内置 + 远程） ────────────────────────────────
+// ── 已安装插件列表（推荐源 + 远程） ────────────────────────────────
 function InstalledPluginsSection() {
   const nav = useNavigate();
   const qc = useQueryClient();
@@ -776,25 +1322,42 @@ function InstalledPluginsSection() {
   const builtinQ = useQuery({
     queryKey: ["matrix"],
     queryFn: getFeatureMatrix,
-    select: (data) => data.features.filter((f) => f.is_builtin && f.key !== "forward"),
+    select: (data) =>
+      data.features.filter((f) => f.is_builtin && f.key !== "forward" && !isPlatformFeature(f)),
   });
 
   const thirdPartyQ = useQuery({ queryKey: PLUGINS_QK, queryFn: listInstalledPackages });
   const remoteQ = useQuery({ queryKey: REMOTE_QK, queryFn: fetchRemotePlugins });
+  const reposQ = useQuery({ queryKey: PLUGIN_REPOS_QK, queryFn: fetchPluginRepos });
 
   const enableTPMut = useMutation({
     mutationFn: (key: string) => enableInstall(key),
-    onSuccess: () => { toast.success("已启用"); qc.invalidateQueries({ queryKey: PLUGINS_QK }); },
+    onSuccess: () => {
+      toast.success("已启用");
+      qc.invalidateQueries({ queryKey: PLUGINS_QK });
+      qc.invalidateQueries({ queryKey: OFFICIAL_PLUGINS_QK });
+      qc.invalidateQueries({ queryKey: ["matrix"] });
+    },
     onError: (err) => toast.error(getErrMsg(err)),
   });
   const disableTPMut = useMutation({
     mutationFn: (key: string) => disableInstall(key),
-    onSuccess: () => { toast.success("已禁用"); qc.invalidateQueries({ queryKey: PLUGINS_QK }); },
+    onSuccess: () => {
+      toast.success("已禁用");
+      qc.invalidateQueries({ queryKey: PLUGINS_QK });
+      qc.invalidateQueries({ queryKey: OFFICIAL_PLUGINS_QK });
+      qc.invalidateQueries({ queryKey: ["matrix"] });
+    },
     onError: (err) => toast.error(getErrMsg(err)),
   });
   const uninstallTPMut = useMutation({
     mutationFn: (key: string) => uninstallPlugin(key),
-    onSuccess: (_r, key) => { toast.success(`已卸载 ${key}`); qc.invalidateQueries({ queryKey: PLUGINS_QK }); },
+    onSuccess: (_r, key) => {
+      toast.success(`已卸载 ${key}`);
+      qc.invalidateQueries({ queryKey: PLUGINS_QK });
+      qc.invalidateQueries({ queryKey: OFFICIAL_PLUGINS_QK });
+      qc.invalidateQueries({ queryKey: ["matrix"] });
+    },
     onError: (err) => toast.error(getErrMsg(err)),
   });
 
@@ -842,6 +1405,7 @@ function InstalledPluginsSection() {
   const builtin = builtinQ.data ?? [];
   const thirdParty = thirdPartyQ.data ?? [];
   const remote = remoteQ.data ?? [];
+  const repos = reposQ.data ?? [];
   const matrixQ = useQuery({ queryKey: ["matrix"], queryFn: getFeatureMatrix });
   const accounts = matrixQ.data?.accounts ?? [];
   const accountCount = accounts.length;
@@ -884,20 +1448,24 @@ function InstalledPluginsSection() {
               <TableRow>
                 <TableHead>插件</TableHead>
                 <TableHead>类型</TableHead>
+                <TableHead>来自库</TableHead>
                 <TableHead>版本</TableHead>
                 <TableHead>版本状态</TableHead>
                 <TableHead className="text-right">操作</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {/* 内置插件 */}
+              {/* 核心内置插件 */}
               {builtin.map((f) => (
                 <TableRow key={f.key}>
                   <TableCell>
                     <div className="font-medium">{f.display_name}</div>
                     <div className="font-mono text-xs text-muted-foreground">{f.key}</div>
                   </TableCell>
-                  <TableCell><MetaBadge>内置</MetaBadge></TableCell>
+                  <TableCell><MetaBadge>核心内置</MetaBadge></TableCell>
+                  <TableCell>
+                    <div className="max-w-[180px] truncate text-sm" title="系统核心">系统核心</div>
+                  </TableCell>
                   <TableCell>{formatPluginVersion(f.version)}</TableCell>
                   <TableCell><MetaBadge tone="success">随系统更新</MetaBadge></TableCell>
                   <TableCell className="text-right">
@@ -913,7 +1481,19 @@ function InstalledPluginsSection() {
                   <TableCell>
                     <div className="font-medium">{row.key}</div>
                   </TableCell>
-                  <TableCell><MetaBadge>第三方</MetaBadge></TableCell>
+                  <TableCell>
+                    <MetaBadge tone={row.source === "official" ? "success" : "neutral"}>
+                      {row.source === "official" ? "推荐源" : "第三方"}
+                    </MetaBadge>
+                  </TableCell>
+                  <TableCell>
+                    <div
+                      className="max-w-[200px] truncate text-sm"
+                      title={row.source_url || row.source_label || row.source}
+                    >
+                      {installSourceLibraryLabel(row.source, row.source_url, row.source_label, repos)}
+                    </div>
+                  </TableCell>
                   <TableCell>{formatPluginVersion(row.version)}</TableCell>
                   <TableCell>
                     <MetaBadge tone="outline">本地安装</MetaBadge>
@@ -928,27 +1508,43 @@ function InstalledPluginsSection() {
                       ) : (
                         <Button size="sm" onClick={() => enableTPMut.mutate(row.key)} disabled={enableTPMut.isPending}>启用</Button>
                       )}
-                      <Button size="sm" variant="ghost" onClick={() => { if (confirm(`确认卸载「${row.key}」？`)) uninstallTPMut.mutate(row.key); }} disabled={uninstallTPMut.isPending}>卸载</Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className={DANGER_OUTLINE_BUTTON_CLASS}
+                        onClick={() => { if (confirm(`确认卸载「${row.key}」？`)) uninstallTPMut.mutate(row.key); }}
+                        disabled={uninstallTPMut.isPending}
+                      >
+                        <Trash2 className="mr-1 h-3 w-3" />
+                        卸载
+                      </Button>
                     </div>
                   </TableCell>
                 </TableRow>
               ))}
               {/* 远程插件 */}
-              {remote.map((p) => (
+              {remote.map((p) => {
+                const warningGroups = splitPluginWarnings(p.lint_warnings);
+                const hasWarnings = warningGroups.all.length > 0;
+                const hasHighWarnings = warningGroups.high.length > 0;
+                return (
                 <TableRow key={`rm-${p.name}`}>
                   <TableCell>
                     <div className="flex flex-wrap items-center gap-2">
                       <div className="font-medium">{p.display_name || p.name}</div>
                       {p.update_available ? <MetaBadge tone="warn">有新版本</MetaBadge> : null}
-                      {(p.lint_warnings?.length ?? 0) > 0 ? (
+                      {hasWarnings ? (
                         <button
                           type="button"
                           className="inline-flex"
                           onClick={() => toggleWarnings(p.name)}
                           aria-expanded={expandedWarnings.has(p.name)}
                         >
-                          <MetaBadge tone="warn">
-                            规范警告
+                          <MetaBadge tone={hasHighWarnings ? "danger" : "warn"}>
+                            {hasHighWarnings ? (
+                              <AlertTriangle className="h-3 w-3" />
+                            ) : null}
+                            {hasHighWarnings ? "高级规范警告" : "规范警告"}
                             <ChevronDown
                               className={cn(
                                 "h-3 w-3 transition-transform",
@@ -970,9 +1566,16 @@ function InstalledPluginsSection() {
                         更新检查失败：{p.last_update_check_error}
                       </div>
                     ) : null}
-                    {(p.lint_warnings?.length ?? 0) > 0 && expandedWarnings.has(p.name) ? (
-                      <div className="mt-2 space-y-1 rounded-md border border-amber-500/30 bg-amber-50/70 px-3 py-2 text-xs text-amber-900 dark:bg-amber-950/20 dark:text-amber-200">
-                        {p.lint_warnings?.map((warning, index) => (
+                    {hasWarnings && expandedWarnings.has(p.name) ? (
+                      <div
+                        className={cn(
+                          "mt-2 space-y-1 rounded-md border px-3 py-2 text-xs",
+                          hasHighWarnings
+                            ? "border-destructive/30 bg-destructive/10 text-destructive"
+                            : "border-amber-500/30 bg-amber-50/70 text-amber-900 dark:bg-amber-950/20 dark:text-amber-200",
+                        )}
+                      >
+                        {warningGroups.all.map((warning, index) => (
                           <div key={`${p.name}-warning-${index}`} className="leading-5">
                             {warning}
                           </div>
@@ -986,6 +1589,19 @@ function InstalledPluginsSection() {
                     ) : (
                       <MetaBadge><GitFork className="h-3 w-3" />远程</MetaBadge>
                     )}
+                  </TableCell>
+                  <TableCell>
+                    <div
+                      className="max-w-[200px] truncate text-sm"
+                      title={p.source_url}
+                    >
+                      {installSourceLibraryLabel(
+                        p.source_url?.startsWith("local://") ? "local" : "repo",
+                        p.source_url,
+                        null,
+                        repos,
+                      )}
+                    </div>
                   </TableCell>
                   <TableCell>{formatPluginVersion(p.version)}</TableCell>
                   <TableCell>
@@ -1029,7 +1645,7 @@ function InstalledPluginsSection() {
                       <Button
                         size="sm"
                         variant="outline"
-                        className="border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                        className={DANGER_OUTLINE_BUTTON_CLASS}
                         onClick={() => { if (confirm(`确认卸载「${p.name}」？`)) uninstallRMMut.mutate(p.name); }}
                         disabled={uninstallRMMut.isPending}
                       >
@@ -1042,7 +1658,8 @@ function InstalledPluginsSection() {
                     </div>
                   </TableCell>
                 </TableRow>
-              ))}
+                );
+              })}
             </TableBody>
           </Table>
         )}
@@ -1059,7 +1676,7 @@ function DevGuideTab() {
     () => ({
       id: "all",
       title: "完整文档",
-      description: "把插件索引、概览、API、HTTP、安全、远程、速查和 AI facade 合并为一份可滚动正文。",
+      description: "把 Quickstart、铁律、索引、概览、API、HTTP、AI、安全、远程和速查合并为一份可滚动正文。",
       path: "docs/PLUGIN-*.md",
       markdown: buildCompleteDevGuide(),
       icon: Sparkles,
@@ -1114,13 +1731,59 @@ function DevGuideTab() {
           <div className="min-w-0">
             <CardTitle className="text-base">插件开发文档</CardTitle>
             <CardDescription className="mt-1">
-              内置完整开发文档，支持直接阅读合集，也可以按主题查看每个分篇。
+              先按 Quickstart、铁律、完整 API 三层阅读；需要时再按主题查看每个分篇。
             </CardDescription>
           </div>
           <div className="flex flex-wrap gap-2 md:justify-end">
             <SignalPill tone="primary" label="文档" value={`${DEV_DOCS.length} 篇`} />
             <SignalPill tone="neutral" label="当前" value={activeDoc.title} />
           </div>
+        </div>
+        <div className="grid gap-2 md:grid-cols-3">
+          {([
+            {
+              id: "quickstart",
+              icon: Sparkles,
+              title: "5 分钟 Quickstart",
+              text: "复制最小插件，先跑通 ping/pong。",
+            },
+            {
+              id: "rules",
+              icon: ShieldCheck,
+              title: "插件开发铁律",
+              text: "确认不能违反的能力边界。",
+            },
+            {
+              id: "api-reference",
+              icon: Code2,
+              title: "完整 API 参考",
+              text: "查字段、facade、事件信封和 MessageOps。",
+            },
+          ] as const).map((item) => {
+            const Icon = item.icon;
+            const active = activeDoc.id === item.id;
+            return (
+              <button
+                key={item.id}
+                type="button"
+                className={cn(
+                  "min-w-0 rounded-lg border px-3 py-3 text-left transition",
+                  active
+                    ? "border-primary/30 bg-primary/10"
+                    : "border-border/70 bg-background hover:border-primary/30 hover:bg-primary/5",
+                )}
+                onClick={() => setActiveDocId(item.id)}
+              >
+                <span className="flex min-w-0 items-center gap-2 text-sm font-medium">
+                  <Icon className="h-4 w-4 shrink-0 text-primary" />
+                  <span className="truncate">{item.title}</span>
+                </span>
+                <span className="mt-1 block text-xs leading-5 text-muted-foreground">
+                  {item.text}
+                </span>
+              </button>
+            );
+          })}
         </div>
       </CardHeader>
       <CardContent className="p-0">

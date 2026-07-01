@@ -94,6 +94,12 @@ function compareFeatureKey(a: FeatureInfo, b: FeatureInfo) {
   return a.key.localeCompare(b.key, "en", { sensitivity: "base" });
 }
 
+function featureSourceLabel(feature: Pick<FeatureInfo, "is_builtin" | "source_label">) {
+  if (feature.is_builtin) return "平台内置";
+  if (feature.source_label === "Official") return "推荐源";
+  return "第三方";
+}
+
 export function AccountDetail() {
   const params = useParams();
   const [searchParams] = useSearchParams();
@@ -267,7 +273,7 @@ export function AccountDetail() {
               <MessageCircle className="h-4 w-4" /> 管理 Bot
             </TabsTrigger>
             <TabsTrigger value="interaction-bot" className="shrink-0 gap-1.5">
-              <Gamepad2 className="h-4 w-4" /> 联动交互 Bot
+              <Gamepad2 className="h-4 w-4" /> 交互通道
             </TabsTrigger>
             <TabsTrigger value="rate" className="shrink-0 gap-1.5">
               <Gauge className="h-4 w-4" /> 风控基础
@@ -592,7 +598,7 @@ export function AccountDetail() {
                                   </TableCell>
                                   <TableCell>
                                     <Badge variant={f.is_builtin ? "secondary" : "outline"}>
-                                      {f.is_builtin ? "内置" : "第三方"}
+                                      {featureSourceLabel(f)}
                                     </Badge>
                                   </TableCell>
                                   <TableCell className="text-center">
@@ -640,7 +646,7 @@ export function AccountDetail() {
           <BotTab aid={aid} mode="management" />
         </TabsContent>
 
-        {/* 联动交互 Bot */}
+        {/* 交互 Bot 通道 */}
         <TabsContent value="interaction-bot">
           <BotTab aid={aid} mode="interaction" />
         </TabsContent>

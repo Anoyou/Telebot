@@ -2,9 +2,15 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 与 [SemVer](https://semver.org/lang/zh-CN/)：MAJOR.MINOR.PATCH。
 
-- **MAJOR**：破坏兼容的数据库迁移、配置格式变更、API 路径或语义不兼容、老版本无法平滑升级。
-- **MINOR**：用户可感知的新能力、主要入口/信息架构重组、后端能力完整前端化、新插件或重要工作流变化。
-- **PATCH**：bug 修复、文案、小 UI、错误提示、测试补充、兼容性补丁和不改变主要用户路径的小调整。
+- **MAJOR（主版本）**：破坏兼容的数据库迁移、配置格式变更、API 路径或语义不兼容、老版本无法平滑升级。
+- **MINOR（次版本）**：用户可感知的新能力、主要入口/信息架构重组、后端能力完整前端化、新插件或重要工作流变化。
+- **PATCH（补丁版本）**：bug 修复、文案、小 UI、错误提示、测试补充、兼容性补丁和不改变主要用户路径的小调整。
+
+0.x 阶段额外约定：
+
+- **0.X.0** 表示一个阶段性能力版本，例如交互框架、部署体验、插件系统、主入口重组等可命名的一批能力。
+- **0.X.Y** 表示同一阶段内的修复、体验补丁、文档补充、兼容性更新或测试补齐。
+- 不再把第三位当作每日流水号；不再使用 `feature` / `fix` / `polish` / `hotfix` / `refactor` 作为版本级别，正式段落统一写 `minor（次版本）` 或 `patch（补丁版本）`。
 
 > 不要为每个微小提交单独迭代版本号。开发过程中先把变更积累在 `Unreleased`；只有准备发布、推送稳定检查点、创建 release/PR，或用户明确要求“推一版/发一版”时，才按本批改动的最高影响级别统一 bump 一次版本号。
 >
@@ -14,7 +20,792 @@
 
 ## [Unreleased]
 
-## [0.32.0] — 2026-06-27 · minor · 交互玩法身份与参与者策略
+## [0.46.1] — 2026-07-01 · patch（补丁版本） · 插件命令 MessageOps 追踪补丁
+
+### Fixed
+- 修复 userbot 插件命令中通过 `ctx.messages.apply` 发出的 `start_session`、发送、编辑等标准动作缺少当前命令 trace 的问题；现在这些动作会写入消息链路的动作记录，排查“命令已启动但后续付款/按钮无反应”时可以直接看到动作成功或失败原因。
+- 当插件命令里的 MessageOps 动作部分执行失败时，运行日志会写入中文告警并关联 `trace_id`、`plugin_key` 和 `entry_key`，避免后台动作失败被静默吞掉。
+- 补充回归测试，覆盖插件命令通过 MessageOps 写入交互会话时能记录 trace 与 `interaction_session` 动作。
+
+## [0.46.0] — 2026-07-01 · minor（次版本） · 插件低延时直通模式
+
+### Added
+- 插件运行时新增 `telegram_direct_passthrough` 低延时直通能力：插件必须先在 manifest 声明高风险能力，账号配置再二次手动开启 `direct_passthrough.enabled=true`，命中后消息会在 Trace/Event Bus/legacy `on_message` 前直接交给 `on_direct_message`，用于抢红包等极低延时场景。
+
+### Changed
+- 远程插件文档和示例补充直通模式风险说明，明确普通插件仍应优先使用 Event Bus + Trace + MessageOps 标准链路。
+
+## [0.45.14] — 2026-07-01 · patch（补丁版本） · Userbot 指令边界补丁
+
+### Added
+- 系统设置新增“账号本人必须带前缀”开关，默认保持开启；关闭后，仅当前 userbot 账号本人发出的 outgoing 消息可以直接用命令名触发已有 userbot 命令或插件注册命令。
+
+### Fixed
+- 修复 0.45.12 为支持群内 userbot 插件命令时误把系统前缀插件命令接入 incoming 群成员消息的问题；群成员发送 `。10d` 这类系统前缀插件命令现在会静默忽略，不再触发 userbot 插件命令链路。
+- 保留账号本人发送 `{prefix}命令` 的原有 userbot 命令触发能力，并补充裸命令开关、前缀插件命令和群成员误触发的回归测试。
+
+## [0.45.13] — 2026-07-01 · patch（补丁版本） · 插件配置空对象补丁
+
+### Fixed
+- 修复通用插件配置页在全局配置或账号配置为空对象时，表单初始化 effect 因空对象引用不稳定反复执行，导致用户输入被重置、配置参数无法填写的问题。
+- 修复旧插件配置弹窗同类空配置对象重置风险，并补齐保存时对原始配置引用的依赖，避免敏感字段和只读字段过滤读取到旧值。
+- 通用 schema 表单新增 `type: "object"` 字段编辑支持：有子字段时渲染嵌套表单，无子字段时提供 JSON 对象编辑器，避免对象配置被当作字符串保存。
+
+## [0.45.12] — 2026-07-01 · patch（补丁版本） · 群内 userbot 插件命令触发补丁
+
+### Fixed
+- 修复群内成员发送系统前缀插件命令（例如 `。10d 6789`）时，消息只进入 incoming sudo 旧路径且被“自己私聊”限制拦下，导致 userbot 未真正开局的问题。
+- 群内 incoming 系统前缀只派发已注册插件命令，不暴露 `。status`、`。sudo` 等内置管理命令，也不改交互 Bot 关键词、入场转账和庄家逻辑。
+- 转账测试更新遇到系统前缀 userbot 命令文本时会主动跳过，避免命令消息被误记为转账候选路径，方便日志排查。
+- 补充回归测试，覆盖群内成员使用系统前缀触发插件命令、群内系统前缀不暴露内置管理命令，以及转账测试入口跳过系统命令文本。
+
+## [0.45.11] — 2026-07-01 · patch（补丁版本） · Userbot 会话路由补丁
+
+### Fixed
+- 明确区分交互 Bot 规则入口与 userbot 直接调用：规则启停、关闭状态、触发模式和静态金额只限制交互 Bot 新入口，不再限制 userbot 已创建的插件活动会话。
+- 修复 `。10d 6666` 这类 userbot 命令开局后，对应交互规则处于关闭状态时，后续转账通知仍被 `rule closed` 拦截，导致玩家付款后十点半无反应的问题。
+- 补充回归测试，覆盖停用且关闭的规则已有活动会话时，付款加入和按钮回调仍能继续投递给插件。
+
+## [0.45.10] — 2026-07-01 · patch（补丁版本） · 活动会话付款路由补丁
+
+### Fixed
+- 修复 userbot 命令已直接启动插件玩法后，如果对应交互规则在配置中处于停用状态，后续转账通知仍只从启用规则中匹配，导致十点半等付费池玩法出现“能开局但付款加入没反应”的问题。
+- 已有活动会话的停用规则现在可以继续接收付款通知和按钮/消息事件；停用规则仍不会通过交互 Bot 关键词新开局，也不会出现在玩法列表中。
+- 补充回归测试，覆盖停用规则已有活动会话时的付款加入与 callback 投递路径。
+
+## [0.45.9] — 2026-07-01 · patch（补丁版本） · 付款通知识别补丁
+
+### Fixed
+- 修复默认转账通知模板把“转账成功”放在代码块语言标记后，Telegram 实际消息正文不包含触发词，导致可信且可解析的付款通知无法匹配十点半等已开局付费池会话的问题；现在付款通知会继续按聊天室、收款人、金额和活动会话校验投递给插件。
+- 补充回归测试，覆盖已开局付费池玩法中“通知正文没有触发词但可解析金额和收款人”的加入路径。
+
+## [0.45.8] — 2026-07-01 · patch（补丁版本） · 命令入口隔离补丁
+
+### Fixed
+- 修复 `。命令 参数` 这类 userbot 插件命令同时被交互 Bot 当作普通群消息投递的问题；现在系统前缀命令只走 userbot 命令链路，规则关键词才走交互 Bot 规则入口，避免十点半、九宫格等玩法入口串线。
+
+## [0.45.7] — 2026-07-01 · patch（补丁版本） · 付费池会话金额匹配补丁
+
+### Fixed
+- 修复付费池玩法已通过关键词开局后，付款通知仍先按规则静态金额过滤的问题；现在已有活动会话时会先把到账通知投递给插件，由插件按本局实际底注判断，避免 `。10d 100` 开局后转 `100` 不触发、转 `1000` 才进入插件的错配。
+
+## [0.45.6] — 2026-07-01 · patch（补丁版本） · 远程插件后台清理补丁
+
+### Fixed
+- 修复远程 installed 插件运行时拿不到 `ctx.redis`，导致插件后台任务无法按 `save_message_id_key` 读取并清理已发送消息的问题；十点半等交互玩法结算后可正常删除加入提示、游戏面板、结算和奖励消息。
+
+## [0.45.5] — 2026-07-01 · patch（补丁版本） · 模块玩法金额配置补丁
+
+### Fixed
+- 修复交互模块 payload 会把旧算数题默认 `math_prize=123` 兜底写成模块插件 `prize` 的问题，避免十点半、24 点、诗词填空等玩法误把框架默认值当作用户配置金额。
+- 模块玩法金额解析统一为显式 `module_prize`、模块配置金额字段、规则付款金额、触发解析金额优先；插件额外参数和技术详情中的门槛金额会覆盖插件默认值。
+- 模块 settlement 不再在没有明确金额配置时伪造 `123`，避免日志和插件侧读取到错误奖励/门槛金额。
+
+## [0.45.4] — 2026-06-30 · patch（补丁版本） · 付费池玩法关键词开局补丁
+
+### Fixed
+- 修复 `paid_pool` 交互玩法配置了金额过滤后，关键词触发仍被旧“付费娱乐模块”提示拦截，导致十点半等新流程无法先创建大厅、后续转账只能返回“暂无等待中的牌局”的问题。
+- 交互事件 payload 新增 `trigger.start_keywords`，插件在付款确认、会话兜底等非关键词事件中也能拿到正确的玩法启动关键词。
+
+### Tests
+- 补充 `paid_pool + amount + keyword` 回归测试，确认十点半关键词会进入 `start_ten_half` 插件入口；保留普通付费规则先提示转账的旧行为测试。
+
+## [0.45.3] — 2026-06-30 · patch（补丁版本） · 配置动作后台任务补丁
+
+### Added
+- 通用插件配置动作新增后台任务接口：配置页按钮可启动长耗时动作，后端持久化任务状态，页面关闭或弹窗关闭不影响执行。
+- 通用插件配置页新增聊天式进度窗口，支持最小化和关闭，实时展示配置动作过程日志，并提供跳转到日志页的入口。
+
+### Changed
+- 第三方插件 `ctx.ai` 默认文本调用超时上限从 60 秒调整为 600 秒，适配 URL 抓取后整理题库、长网页摘要等分钟级任务。
+
+### Fixed
+- 修复配置动作同步接口遇到插件普通异常时可能冒泡成 500 的问题，现在会归类为可读的配置动作失败。
+
+## [0.45.2] — 2026-06-30 · patch（补丁版本） · 配置动作执行兜底补丁
+
+### Fixed
+- 修复配置页已渲染出插件动作按钮，但后端执行时只检查 `feature.manifest`，导致远程插件从 `installed_plugin.manifest_json` 透传的 `generate_knowledge_base` 被误报“未声明配置动作”的问题。
+- 配置动作执行入口现在和功能矩阵输出使用同一套声明来源，支持 `feature.manifest`、`installed_plugin.manifest_json` 与 schema `x-config-actions` 兜底。
+
+## [0.45.1] — 2026-06-30 · patch（补丁版本） · 插件配置动作透传补丁
+
+### Fixed
+- 修复远程插件 `plugin.json` 顶层 `config_actions` 在安装/仓库更新时没有写入功能 manifest 的问题；通用插件配置页现在能正确渲染快问快答“获取并整理为题库”等字段级动作按钮。
+- 功能矩阵输出新增 installed plugin manifest 兜底读取，避免旧 feature 记录缺少 `config_actions` 时前端拿不到插件声明的配置动作。
+
+## [0.45.0] — 2026-06-30 · minor（次版本） · 通用插件配置框架
+
+### Added
+- 通用插件配置页支持结构化配置组：数组对象字段可声明为行列表，支持简要信息展示、编辑、删除、复制、启停开关和拖拽/上下移动排序。
+- 通用 schema 表单新增 `config-list`、`multi-select`、`list-select`、字段隐藏和字段级动作按钮等声明式控件，插件无需再为常见配置形态编写 TelePilot 专用页面。
+- 新增通用插件配置动作 API：插件可在 manifest/schema 声明按钮，由后端注入受控 `ctx.http` / `ctx.ai` 后调用 `on_config_action`，并把返回的 `config_patch` 合并回当前配置表单。
+
+### Fixed
+- 修复插件通过 userbot 命令创建交互 Bot 牌局时，缺少交互会话登记导致后续按钮可能无法稳定路由到插件的问题；`ctx.messages` 常驻 facade 现在支持受控写入交互会话。
+- 修复 `paid_pool` 参与者校验会把牌局发起人/控制者挡在按钮回调外的问题；已付款玩家外，发起人 callback 会交给插件继续判定，路人仍会被拦截并弹窗提示。
+
+## [0.44.13] — 2026-06-30 · patch（补丁版本） · Responses SSE 空文本补丁
+
+### Fixed
+- 修复 Codex/cockpit-tools 反代返回 Responses SSE 时，正文在 `response.output_text.delta` 中、而 `response.completed` 事件只携带状态和 token 用量时，`.ai` 命令能联通但最终回复为空的问题。
+- Responses SSE 解析现在会在 completed body 没有正文时保留前序文本增量，避免 Provider 测试、命令 AI 和插件 AI facade 拿到空结果。
+
+### Tests
+- 补充 Responses SSE “delta 有正文、completed 无正文”的回归测试，防止后续兼容改动再次丢失流式文本。
+
+## [0.44.12] — 2026-06-30 · patch（补丁版本） · LLM Provider 测试超时补丁
+
+### Fixed
+- 修复 AI 页测试 LLM Provider 时，前端仍使用全局 15 秒请求超时，导致慢速 Codex 反代实际已在后端继续执行却被浏览器提前切断并显示 `timeout of 15000ms exceeded` 的问题。
+- LLM Provider 的模型拉取、协议探测和测试模型接口现在使用独立长超时；后端测试模型调用也显式放宽等待时间，适配慢推理和多次兼容重试场景。
+
+## [0.44.11] — 2026-06-30 · patch（补丁版本） · Codex 反代 SSE 响应兼容补丁
+
+### Fixed
+- 兼容 Codex/CLIProxyAPI 类反代在 Responses 请求中即使传入 `stream=false` 仍返回 `text/event-stream` 的情况；平台现在会解析 `response.completed` 和 `response.output_text.delta` 事件，不再把成功响应误报为“Responses 返回非 JSON”。
+- 为 Responses SSE 返回补充回归测试，覆盖完整响应体和纯文本增量两种形态。
+
+## [0.44.10] — 2026-06-30 · patch（补丁版本） · Codex 反代 Responses 兼容补丁
+
+### Fixed
+- 修复 cockpit-tools / CLIProxyAPI 这类 Codex 反代不支持 `temperature`、`reasoning`、`stream` 等 OpenAI Responses 参数时，AI 调用直接失败的问题；运行时会识别 `Unsupported parameter` 并逐个剥离可选参数重试。
+- Responses 文本和 Responses 生图入口共用同一套兼容发送逻辑，避免只修文本、不修生图的参数兼容缺口。
+- Responses 返回非 JSON 时，现在会在错误中带上状态码、content-type 和脱敏后的响应摘要，便于判断是空响应、HTML 网关页还是反代异常。
+
+### Tests
+- 补充 Codex 反代式连续参数拒绝、Responses 非 JSON 响应诊断两类回归测试。
+
+## [0.44.9] — 2026-06-30 · patch（补丁版本） · 命令前缀示例补丁
+
+### Fixed
+- 修复 AI 图片命令缺少提示词时仍显示默认 `,image` 示例的问题；现在会使用当前命令前缀和当前模板名生成示例。
+- 修复自动回复配置页的自动指令白名单说明写死 `,24d 100` 的问题，改为“命令前缀 + 指令名”口径。
+
+## [0.44.8] — 2026-06-30 · patch（补丁版本） · Responses 兼容接口补丁
+
+### Fixed
+- 修复部分 OpenAI Responses 兼容接口返回 `Unsupported parameter: max_output_tokens` 时，LLM 调用直接失败的问题；运行时会在明确识别该错误后自动省略 `max_output_tokens` 重试一次。
+- Responses 生图工具同样支持该兼容重试，避免兼容站点在图片生成/编辑入口因参数差异失败。
+- Provider 协议探测会识别 Responses 兼容模式，并在检测结果中提示运行时将自动省略不支持的参数。
+
+### Changed
+- 后端 Telethon 依赖下限提升到 `>=1.44,<2.0.0`，部署重建依赖后跟进近期上游版本。
+
+### Tests
+- 补充 Responses 文本和生图参数兼容回归测试。
+
+## [0.44.7] — 2026-06-30 · patch（补丁版本） · 交互按钮空动作路由补丁
+
+### Fixed
+- 修复全局 Event Bus 插件命中 `callback_query` 但返回空动作时，仍把按钮事件视为已处理，导致十点半“是否当庄”等会话按钮无法继续进入对应插件的问题。
+- 交互 Bot 的 Event Bus 路由现在只有在插件返回实际动作后才终止后续交互规则/会话链路；空动作只作为观察性命中记录，不再吞掉其他插件按钮。
+
+### Tests
+- 补充 callback 回归测试，覆盖“空动作不消费会话按钮”和“有 `answer_callback` 动作仍正常消费”两条路径。
+
+## [0.44.6] — 2026-06-30 · patch（补丁版本） · UserBot Event Bus 入口兼容补丁
+
+### Fixed
+- 修复 UserBot Event Bus 订阅缺少 `entry_key` 时被错误记录为 `entry_key_missing` failed 的问题；插件如果实现了 `on_event`，现在会直接投递到事件主入口。
+- 修复仅声明 Event Bus 订阅、但仍依赖 legacy `on_message` 的 userbot 插件被新分发链路吞掉消息的问题；无法投递新入口时只记录 skipped，并继续让 legacy 入口处理。
+
+### Tests
+- 补充插件 loader 回归测试，覆盖“无 `entry_key` + `on_event` 正常投递”和“无 `entry_key` + legacy `on_message` 继续处理”两条链路。
+
+## [0.44.5] — 2026-06-30 · patch（补丁版本） · 交互按钮 ACK 容错补丁
+
+### Fixed
+- 修复交互插件返回 `answer_callback` 后再编辑主消息时，如果 Telegram callback ACK 因过期或接口异常失败，后续 `edit_message` 被中断，导致按钮点击看起来“没反应”的问题。
+
+### Tests
+- 补充交互 delivery 回归测试，覆盖 `answer_callback` 失败后仍继续执行后续 `edit_message`。
+
+## [0.44.4] — 2026-06-30 · patch（补丁版本） · 交互关键词路由修复
+
+### Fixed
+- 修复普通消息 Event Bus 订阅命中但返回空动作时，会提前吞掉后续交互规则关键词链路的问题。
+- 修复 `十点半测试`、猜骰、21 点等通过交互 Bot 关键词启动的规则，在被通用消息订阅插件命中后没有任何响应的回归。
+
+### Tests
+- 执行账号 Bot / 交互 Bot 回归测试：`cd backend && ../backend/.venv/bin/python -m pytest app/tests/test_account_bot.py`。
+
+## [0.44.3] — 2026-06-30 · patch（补丁版本） · 插件仓库标签展示补丁
+
+### Changed
+- 插件仓库列表和批量更新确认框统一使用“触发入口 / 能力”分组标签展示插件契约信息。
+- 触发入口标签改为带颜色的独立标签，并直接展示命令、普通消息、按钮回调、会话关闭、付款确认等入口名称。
+- 能力标签不再折叠成 `+1` / `+2`，改为直接展示所有能力名称，减少插件仓库卡片上的信息歧义。
+- “触发入口”计数改为基于实际展示的入口标签数量，避免订阅数组数量和入口名称数量不一致。
+
+### Tests
+- 执行前端类型检查：`./node_modules/.bin/tsc -b --pretty false`。
+
+## [0.44.2] — 2026-06-30 · patch（补丁版本） · 交互消息替换补丁
+
+### Added
+- `send_message` 标准动作新增 `replace_saved_message_id_key`，平台会在发送新消息并保存新消息 ID 后，按旧保存键删除上一条消息，适合滚动加入通知、倒计时提示等只保留最新一条的交互场景。
+- `ctx.messages.send(...)` 支持传入 `replace_saved_message_id_key`，插件无需手写 action dict 也能使用同一能力。
+
+### Fixed
+- 修复远程/已安装交互插件无法稳定读取上一条已保存消息 ID 时，“发送新提示后删除旧提示”不生效的问题。
+
+### Tests
+- 执行交互发送替换回归测试：`backend/.venv/bin/python -m pytest -q backend/app/tests/test_account_bot.py -k "save_message_id_key or send_replaces_saved_message"`。
+
+## [0.44.1] — 2026-06-30 · patch（补丁版本） · 插件页与日志展示补丁
+
+### Changed
+- 插件中心快捷入口“安装插件”改为“插件管理”，并增强视觉权重；同一入口相关提示统一使用“插件管理”口径。
+- 插件中心的 AI 插件入口默认折叠，且在全局 AI 功能关闭时不再显示。
+- 插件卡片把“可交互”和“AI 调用”标签移到右上角独立展示；事件数量文案由“订阅”改为“触发入口”。
+- 插件管理页的推荐插件只展示首次部署推荐的自动回复和自动复读，并说明这些条目来自 TelePilot 预置推荐源，其他插件应通过用户自己的 Git 插件仓库安装。
+- 已安装插件表新增“来自库”列，优先显示已保存的插件仓库名，匹配不到时回退为推荐源、本地导入或 Git 地址缩写。
+- 原始运行日志的等级标签去掉补齐空格，`[INFO ]` 现在显示为 `[INFO]`；debug 记录阈值增加说明，明确“允许保留 debug 行”不等于当前链路一定会产生 debug 日志。
+- 日志排障文案把用户可见的“订阅”统一替换为“触发入口”，减少旧概念干扰。
+
+### Fixed
+- 已安装插件接口补充返回 `source_url` 和 `source_label`，前端可以准确展示插件来自哪个库或来源。
+
+### Tests
+- 执行前端类型检查：`./node_modules/.bin/tsc -b --pretty false`。
+- 执行前端生产构建：`./node_modules/.bin/vite build`。
+- 执行后端 lint：`.venv/bin/ruff check app`。
+
+## [0.44.0] — 2026-06-30 · minor（次版本） · AI 能力热插拔与插件契约展示
+
+### Added
+- 新增全局 `ai_enabled` 设置，可在系统设置中热插拔 AI 能力包；关闭后侧边栏、移动底栏和插件首页会隐藏 AI 入口，`/ai` 直达会显示启用提示页。
+- LLM Provider 的 CRUD、拉取模型、协议探测和测试模型接口在 AI 关闭时统一返回 `AI_DISABLED`，避免继续发起外部模型请求。
+- worker 热加载时会读取 AI 能力开关；关闭后不再查询或加载 LLM Provider，不解密模型代理配置，也不会把 provider 放进 worker 内存。
+- AI 指令触发、插件 `ctx.ai` facade 和模板编辑器均接入 AI 开关：关闭时指令短路提示，声明 `ai_text` 的插件不会注入 `ctx.ai`，模板编辑器不再拉 provider 或允许新建 AI 模板。
+
+### Changed
+- 插件配置页的“最终版插件契约”改为“触发与权限”，以“触发入口 / 可用能力 / 风险提示”展示插件运行声明，避免直接暴露 `event_subscriptions`、`capabilities` 等开发者字段名。
+- 插件能力标签现在会结合 `capabilities`、`permissions`、config schema 和使用说明推断；声明 `ai_text` 或明显调用 `ctx.ai` / LLM 的插件会显示 `AI 调用` 标签。
+- 插件中心和插件安装页弱化“官方插件库”口径，面向用户改为“推荐插件 / 推荐源 / 插件库插件”；首次部署推荐只保留自动回复和自动复读。
+- 账号详情和交互 Bot 旧入口同步使用“触发入口 / 可用能力 / 推荐源”等新口径，减少内部字段名和“官方库”概念对用户的干扰。
+- 后端安装、dry-run、运行时缺插件等用户可见提示改为“插件库插件 / 推荐插件源”，内部兼容源枚举保持不变。
+- 插件安装页统一“卸载”按钮样式，推荐插件已安装后也可在推荐插件卡片中直接卸载。
+- 交互中心的账号选择器与插件中心保持一致，不再在下拉和摘要区展示账号手机号。
+
+### Tests
+- 补充 AI 能力开关的系统设置回归测试，以及 `ctx.ai` 在 AI 关闭时不加载 provider 的回归测试。
+- 执行前端类型检查：`./node_modules/.bin/tsc -b --pretty false`。
+- 执行前端生产构建：`./node_modules/.bin/vite build`。
+- 执行后端目标测试：`app/tests/test_system_settings.py`、`app/tests/test_plugin_ai_facade.py`、`app/tests/test_plugin_loader.py`。
+
+## [0.43.2] — 2026-06-30 · patch（补丁版本） · 日志排查体验优化
+
+### Changed
+- 日志中心默认进入“原始日志”，并把“原始日志”标签放到最前，方便先按连续控制台日志排查系统收到消息、插件启动和发送动作状态。
+- 原始运行日志拆分时间、等级、元信息和正文渲染；`[INFO ]`、`[WARN ]`、`[ERROR]`、`[DEBUG]` 等等级字段按等级使用不同颜色，正文保持稳定可读。
+- 运行日志默认隐藏热更新、配置刷新、`reload_config` 等低价值刷屏内容；审计日志默认隐藏登录/退出噪声，并在界面上明确运行日志用于消息与插件排查，审计日志用于追踪 Web 面板操作。
+- 消息链路详情新增“排查结论”，直接展示未命中插件、插件执行失败、发送动作失败、链路告警或已完成等判断，并给出失败原因和下一步排查方向。
+- 消息链路时间线默认只展示关键阶段、异常阶段和发送动作，保留“显示全部”用于查看完整 span/action 明细。
+- 插件诊断详情新增“排查结论”和“最近异常阶段”，优先展示加载失败、最近调用失败、reason code 和 trace 入口；最近 span 原始 JSON 改为折叠展示。
+- 消息链路、插件诊断、命令链路、动作发送和总览增加极短用途提示，降低初次使用门槛。
+- 自动回复的 builtin / official 插件源码移除对 `app.db.models.feature` 的直接依赖，避免插件规范 lint 报内部模块引用警告。
+
+### Tests
+- 执行前端类型检查：`./node_modules/.bin/tsc -b --pretty false`。
+- 执行前端生产构建：`./node_modules/.bin/vite build`。
+- 执行自动回复插件 lint 验证：builtin / official 两份源码均无内部模块引用警告。
+
+## [0.43.1] — 2026-06-30 · patch（补丁版本） · 原始日志控制台化
+
+### Changed
+- 日志中心的“原始日志”改为控制台式连续文本流，不再用事件卡片展示运行日志和审计日志。
+- 原始运行日志默认展示全部来源，并沿用顶部账号、插件和关键词过滤；每行直接展示时间、等级、来源、账号、插件、入口、trace、会话、消息、操作者和原因代码等排障字段。
+- 新增最低等级、隐藏热更新噪声、显示 detail、自动刷新、自动换行和复制当前视图等控制项，便于快速排查消息链路和插件运行状态。
+- 审计日志同步改为控制台式文本流，保留 action 筛选与 detail 展开。
+
+### Tests
+- 执行前端类型检查：`./node_modules/.bin/tsc -b --pretty false`。
+- 执行前端生产构建：`./node_modules/.bin/vite build`。
+
+## [0.43.0] — 2026-06-30 · minor（次版本） · Trace 批量写入与官方插件外置
+
+### Changed
+- Trace 写库从消息热路径中的逐条同步 commit 改为内存队列 + 后台批量写入：`start_trace`、`record_span`、`record_action`、`finish_trace` 现在只做轻量入队，后台最多按 200 条或 0.2 秒窗口统一落库，避免一条消息产生多次数据库往返等待。
+- native_raw Trace 保留策略改为启动期和系统设置更新时刷新缓存，消息进入 Trace 时不再为了读取保留配置额外访问数据库。
+- worker 子进程启动和全局设置 reload 时同步刷新 Trace 设置缓存，退出时 flush 并停止后台写入器，保证多进程下的配置与队列行为一致。
+- 官方可选插件入口改为读取 `OFFICIAL_PLUGIN_REPO_URL` 指向的远程官方插件仓库，`game24`、`math10`、`chatgpt_image`、`codex_image` 不再从 Core 随包目录安装。
+- 历史 builtin 可选插件迁移逻辑改为从官方插件仓库查找源码；Core 中缺少源码时会给出安装官方插件仓库的提示，而不是继续依赖旧目录。
+
+### Fixed
+- Trace 后台写入器增加 graceful shutdown flush、跨事件循环隔离、队列满降级告警和单条失败拆分兜底，避免 Trace 存储异常反向打断 Telegram / 插件主流程。
+- 保留外部指定 `trace_id` 的去重语义，批量写入时同一批重复 `trace_id` 不会因唯一键冲突拖垮后续 span/action。
+- 交互付款规则在规则自身未填写金额时，会读取插件参数中的 `amount` / `bet` / `entry_amount` / `entry_fee` / `stake` 作为期望金额，避免十点半等玩法被无关小额转账误触发。
+- 交互会话参与者策略优先采用插件当前声明，避免旧规则中遗留的 `solo_owner` 覆盖插件已更新的 `paid_pool`。
+- `paid_pool` 会话会累计已付款玩家列表，不再由后一个付款人覆盖前一个付款人，并修复无付款人的关键词开局边界。
+- `math10` 本地交互 fallback 和 `codex_image` dry-run 不再硬编码 import Core 内置插件目录；已安装插件存在时动态加载，未安装时返回可读提示。
+
+### Removed
+- 从 Core 删除 `game24`、`math10`、`chatgpt_image`、`codex_image` 在 `builtin/` 与 `official/` 下的历史源码副本，插件源码迁移到官方远程插件仓库维护。
+
+### Tests
+- 补充 Trace 缓冲写入、flush、重复 `trace_id` 去重和交互付款/付费池会话回归测试。
+- 执行后端全量测试：`1019 passed, 2 skipped`。
+- 执行插件示例校验和已安装交互插件契约校验；示例通过，存量插件仅保留 usage / 旧 `interaction_entries` 规范警告。
+- 补充远程官方插件仓库入口测试，覆盖 official 标签过滤和远程官方插件安装记录。
+
+## [0.42.0] — 2026-06-29 · minor（次版本） · Web 面板自更新执行器
+
+### Added
+- 生产 Docker 栈新增内部 `updater` sidecar，仅在 Compose 内网监听，不暴露公网端口；Web 后端通过共享 token 调用它执行更新任务。
+- 检查更新机制支持当前分支 / `TELEPILOT_UPDATE_BRANCH`，不再写死 `origin/main`；生产候选分支也能在面板中检查和应用。
+- 更新任务改为后台 job，Web 面板可轮询显示更新状态和最近日志，避免 `docker compose` 重启 Web 容器时把请求中途打断。
+
+### Changed
+- `scripts/prod-up.sh` 与 `scripts/prod-update.sh` 会传递 `TELEPILOT_HOST_PROJECT_DIR`，让 updater 在容器内调用宿主 Docker 时仍能正确定位项目目录。
+- updater 触发完整更新时会跳过重建 updater 自身，避免自更新任务被中途杀掉；业务容器仍会按完整路径重建。
+- 更新弹窗展示目标分支、运行模式、执行器、变更分类和 job 日志；普通后端 / 前端变更继续走增量重建，部署脚本、Compose、Dockerfile、依赖等关键变更仍回退完整更新。
+- 部署文档补充 Web 自更新说明，明确首次启用 updater 仍需一次宿主机部署，后续常规补丁可从面板触发。
+
+### Tests
+- 补充分支选择、内部 updater 检查和更新 job 创建的单元测试。
+- 执行系统健康测试、后端 ruff、前端 TypeScript 构建检查、updater Python 编译检查和 Compose 配置渲染检查。
+
+## [0.41.7] — 2026-06-29 · patch（补丁版本） · 交互消息参与者拦截修复
+
+### Fixed
+- 修复 chat 级交互玩法会话中，非参与者发送任意普通消息都会被平台提前回复“这不是你的玩法，请由付款或开局本人操作”的问题；普通文本消息现在交给插件自行判断并可静默忽略，平台仅继续保护 callback 按钮操作。
+- 修复十点半等付费多人玩法中，玩家转账消息和开局者无关聊天被误判为非法玩法操作的问题，避免交互 Bot 在群内刷无关提示。
+
+### Tests
+- 补充 paid_pool 普通消息不触发平台前置拦截的回归测试。
+- 重新执行 `backend/app/tests/test_account_bot.py`，178 个测试通过。
+
+## [0.41.6] — 2026-06-29 · patch（补丁版本） · 交互中心账号选择统一
+
+### Fixed
+- 交互中心顶部账号选择改为与插件中心一致的“选择配置的账号”样式和文案，避免把账号选择误读成交互 Bot 实例选择。
+- 账号辅助信息保留状态、账号 ID、手机号和 Telegram ID；交互 Bot 运行状态继续放在右侧状态组，配置语义更清晰。
+
+## [0.41.5] — 2026-06-29 · patch（补丁版本） · 交互规则编辑体验修正
+
+### Fixed
+- 修正交互中心规则详情中“插件参数与技术详情”重复展示“奖励与限流”已接管字段的问题；高级区现在只展示插件额外参数和技术字段。
+- 修正交互中心“保存规则”按钮在页面滚动时固定到文档底部的问题；按钮改为挂载到页面视口层，始终停留在可视区域右下角。
+
+## [0.41.4] — 2026-06-29 · patch（补丁版本） · 日志保留字段收口
+
+### Fixed
+- 继续收口绑定日志器的保留字段透传问题，避免 scheduler runtime 和 account bot 本地交互 fallback 在 detail 中重复携带 `plugin_key` / `source` 时触发 Python keyword 冲突。
+- 统一以平台绑定的插件身份为准记录运行日志，插件 detail 中的同名保留字段不会再覆盖或打断平台日志链路。
+
+### Tests
+- 补充 scheduler 上下文日志和 account bot 本地交互 fallback 日志的重复 `plugin_key` 回归测试。
+
+## [0.41.3] — 2026-06-29 · patch（补丁版本） · 交互入口日志修复
+
+### Fixed
+- 修复插件交互入口执行期间 `ctx.log()` 自动携带 `trace_id` / `plugin_key` / `entry_key` 时，与已绑定插件身份的日志器重复传入 `plugin_key`，导致猜骰等交互玩法在转账确认后启动失败的问题。
+- 日志器现在会以当前加载的插件身份为准，忽略调用方重复传入的 `plugin_key` detail，避免日志写入中断插件业务流程，同时保留 `trace_id` 和 `entry_key` 便于排查。
+
+### Tests
+- 补充交互入口调用 `ctx.log()` 不重复传参的回归测试，并复跑相关 Event Bus / 交互入口日志测试。
+
+## [0.41.2] — 2026-06-29 · patch（补丁版本） · 交互插件运行时修复
+
+### Fixed
+- 修复 UserBot Event Bus 日志路径中重复传入 `plugin_key` / `entry_key` 导致 `run_interaction_entry` 被 `TypeError: got multiple values for keyword argument 'plugin_key'` 打断的问题，避免平台日志错误掩盖真实插件异常。
+- 修复已声明 Event Bus 订阅的插件在订阅未命中时被错误跳过 legacy `on_message` 的问题；管理员命令启动的猜骰等旧兼容游戏，现在后续玩家回复会继续交给 userbot 插件处理并触发原有发奖逻辑。
+
+### Tests
+- 补充 UserBot Event Bus 订阅未命中回退 legacy `on_message` 的回归测试。
+- 补充废弃发送通道日志上下文不重复传参的回归测试，并复跑交互插件合约和账号 Bot 自动发奖测试。
+
+## [0.41.1] — 2026-06-29 · patch（补丁版本） · AI 与日志页体验修正
+
+### Fixed
+- 修正 AI 页总览里“AI 中心”和“AI 工作台总览”重复形成双页眉的问题，改为保留统一页眉并用紧凑指标卡展示状态。
+- 调整日志中心“原始日志”展示，不再使用事件卡片，改为连续日志文本流，同时保留日志等级、时间、来源、正文、元信息和可展开 detail。
+
+### Tests
+- 执行前端类型检查和生产构建。
+
+## [0.41.0] — 2026-06-29 · minor（次版本） · 插件开发者体验与日志可读性改版
+
+### Added
+- 新增 `docs/PLUGIN-QUICKSTART.md`，用 `hello_ping` 演示 5 分钟复制最小 Event Bus + MessageOps 插件。
+- 新增 `docs/PLUGIN-RULES.md`，把插件开发的必须、禁止、推荐规则整理成短契约。
+- 新增 `examples/plugins/hello_ping` 入门示例，并纳入 `scripts/validate-plugin-examples.py`，校验 `ping` 返回 `send_message/pong`、非命中文本不返回动作。
+- 在插件安装页开发指南 Tab 置顶 Quickstart、插件开发铁律和完整 API 参考三个入口。
+
+### Changed
+- 调整插件开发指南索引、README、速查表、插件概览和安全边界，明确安装、启用、禁用、更新、热重载和卸载的心智，并补充插件清理检查表。
+- 统一插件示例验证命令为 `backend/.venv/bin/python scripts/validate-plugin-examples.py`，减少未激活虚拟环境时的误导。
+- 统一主页面页眉样式，概览、插件中心、日志等页面使用同一工作台式标题区，减少页面标题风格漂移。
+- 重做日志中心“原始日志”里的运行日志和审计日志展示，从横向表格改为可扫读事件卡片，并把原始 detail 默认折叠。
+
+### Tests
+- 执行插件示例验证、前端类型检查、前端生产构建、文档旧词审计和 `git diff --check`。
+
+## [0.40.6] — 2026-06-29 · patch（补丁版本） · 最终证据台账收束补丁
+
+### Docs
+- 新增 `0.40.6` 最终证据台账，绑定当前分支、远端 SHA、服务器健康、线上 Trace/action、回滚开关恢复状态、文档审计和子 Agent 只读复核结论。
+- 明确 `0.40.5` 是日志中心行为修复版本，`0.40.6` 只做发布材料与签收证据收束，不改变 Event Bus / Trace / MessageOps 运行时语义。
+
+### Tests
+- 重新执行最终版门禁验证：后端 ruff、D1-D6/D12 目标 pytest、全量 pytest、插件示例验证、已安装交互插件验证、Alembic head/offline SQL、前端类型检查、前端生产构建和 `git diff --check` 均通过。
+- 复核线上 `0.40.5` 部署状态：本地、远端分支和服务器 commit 一致，容器 healthy，版本 API 正常；随后按 `0.40.6` 发布流程重新部署复验。
+
+## [0.40.5] — 2026-06-29 · patch（补丁版本） · 日志中心选择体验与最终验收补丁
+
+### Fixed
+- 修复日志中心“消息链路”点击某条 trace 后，左侧列表被自动过滤到只剩当前 trace 的问题；现在点击只切换右侧详情，Trace ID 输入框才负责过滤。
+- 修复“动作发送”页被已选 trace 隐式过滤的问题，避免用户从其它页查看 trace 后误以为动作列表丢失。
+- 为 Trace ID 过滤框增加“清空”按钮，深链或手动过滤到单条 trace 后可以直接回到当前窗口列表。
+- 修复生产 CSP 拦截首页主题初始化内联脚本造成的控制台红色错误，改用精确 SHA-256 hash 放行，不放开 `unsafe-inline`。
+
+### Docs
+- 新增 `0.40.5` 最终证据台账，记录服务器部署、业务页桌面/窄屏验收、真实 Trace、fixture action、三个回滚开关演练和最终 Go/No-Go 结论。
+
+### Tests
+- 重新执行前端类型检查和生产构建；部署后复验线上版本、容器状态、健康检查、关键业务页和日志页选择行为。
+
+## [0.40.4] — 2026-06-29 · patch（补丁版本） · 最终版部署执行锁与发布复验
+
+### Docs
+- 继续补强全量 Event Bus 与 Trace 最终版计划，把最终版交付包、服务器部署目录探测、线上真实链路触发剧本、线上失败回滚剧本、插件开发指南最终审计清单、执行顺序锁和子 Agent 任务模板写入第 31 节。
+- 新增 `0.40.4` 最终版证据台账，绑定当前本地门禁、服务器部署、业务页验收、真实 Trace 和回滚演练的最终签收路径。
+
+### Fixed
+- 修复 UserBot 入口在 `trace_enabled=false` 时连 Event Bus decision 一起跳过的问题；现在关闭 Trace 只降级链路写库，新插件 Event Bus 投递仍按 `event_bus_delivery_enabled` 独立生效。
+- 补齐账号 Bot 系统通知和消息模板测试发送的 Trace/action 记录，用户可见 Bot 发送成功或失败会落 `event_action`，并尊重 `trace_enabled` 降级开关。
+- 修正插件 API 参考中 Event Bus 主路径示例的 `payload.get("message")` 歧义，改为直接读取标准信封 `payload["message"]`。
+
+### Tests
+- 补充 Trace 关闭但 UserBot Event Bus 仍投递、账号 Bot 通知 action、消息模板测试发送 action 的回归测试。
+- 重新执行最终版本地门禁：后端 ruff、D1-D6/D12 目标 pytest、全量 pytest、插件示例验证、已安装交互插件验证、Alembic head/offline SQL、前端类型检查和生产构建均通过。
+
+## [0.40.3] — 2026-06-29 · patch（补丁版本） · 最终版签收与收束执行补丁
+
+### Fixed
+- 修正 README 项目状态中的当前版本号，确保用户可见版本与四处发布版本文件保持一致。
+- 修复关闭 `event_bus_delivery_enabled` 后外部付款通知仍会进入 Event Bus 投递的问题，关闭后会记录降级原因并回退旧规则链路。
+- 修复关闭 `trace_enabled` 后 scheduler 仍创建 Trace 和写入 `event_action` 的问题，关闭后定时任务继续执行但只保留旧日志级别排障。
+
+### Changed
+- 插件仓库展开列表常态展示插件 usage 摘要、事件订阅、能力声明和高风险能力提示，不再只在批量更新确认弹窗中展示最终版契约信息。
+
+### Docs
+- 为全量 Event Bus 与 Trace 最终版计划补充“最终版签收执行补丁”和“最终版收束补丁”，把最终版收敛为 D1-D12 施工映射、G0-G6 签收闸门、证据状态机、业务页验收剧本、部署回滚底线和最终报告硬格式。
+- 新增 `0.40.3` 最终版证据台账，登记当前本地/远端 commit、服务器仍为 `0.37.0`、未跟踪文件处理和 D1-D12 当前签收状态。
+
+### Tests
+- 补齐 inline_query、chosen_inline_result、answer_inline_query、UserBot Event Bus、付款通知 Event Bus、scheduler Trace 回滚开关和系统设置写回的最终版门禁回归测试。
+- 重新执行最终版自动验证组：后端 ruff、D1-D6/D12 扩展目标 pytest、全量 pytest、插件示例验证、已安装交互插件验证、Alembic head/offline SQL、前端类型检查和生产构建均通过。
+
+## [0.40.2] — 2026-06-29 · patch（补丁版本） · 最终版执行封条与证据同步
+
+### Docs
+- 为全量 Event Bus 与 Trace 最终版计划补充“最终版执行封条”，明确执行前提、并行任务包、最短签收路线、报告模板和 D1-D12 证据门槛，防止把半落地状态误称为最终版。
+- 新增 `0.40.2` 最终版证据台账，把当前自动验证、只读复核、浏览器登录态限制、服务器 SSH 阻塞和远端版本状态绑定到当前提交。
+
+### Tests
+- 重新执行最终版门禁验证：后端 ruff、D1-D6 定向 pytest、全量 pytest、示例插件验证、已安装交互插件验证、Alembic head/offline SQL、前端类型检查和生产构建均通过。
+
+## [0.40.1] — 2026-06-29 · patch（补丁版本） · 最终版封口与文档验收补强
+
+### Fixed
+- 补齐运行时实际使用的 `reason_code` 稳定字典、日志页中文映射和测试，防止 Trace 输出与文档/前端排障表漂移。
+- 修正 README 当前版本号仍停留在 `v0.37.0` 的发布材料不一致问题。
+- 修复付款二次确认 callback 重放玩法事件时未继承当前 `trace_id` 的断链风险，确保后续插件动作继续归属同一条 Trace。
+- 修复关闭交互会话时 `session_close` 子 Trace 污染父入口 Trace 的问题，确保最终确认消息仍归属原始入口链路。
+- 修复 Delivery Executor 占位清理和编辑失败回退只写 runtime log、不落独立 `event_action` 的问题，避免日志页把复合动作误判为完全成功。
+
+### Docs
+- 将插件概览的快速开始改为 Event Bus + MessageOps 最小示例，旧 `on_command` / `on_message` 降级为管理员命令和历史兼容说明。
+- 在插件速查表、API 参考和最终版计划中补充常见 `reason_code` 排障表。
+- 补充最终版封口计划、可实现性锁定和执行冻结清单，明确最终版只关闭入口、协议、动作、日志、文档、部署断点，部署、浏览器/PWA、真实链路和回滚演练缺一不可。
+
+### Tests
+- 强化 `event_bus_demo` 示例验证，新增 native_raw 与废弃 notice 探针 fixture，并让验证脚本实际调用 `on_event` 校验 message、command、callback、inline、payment 等 action 形状。
+- 补充插件注册命令的 Event Bus decision 回归测试，证明插件命令会记录 `admin_command` 订阅决策和 `event_action`。
+- 补充 `session_close` 父 Trace 归属、占位删除 action、编辑失败回退 action 的最终版门禁回归测试。
+
+## [0.40.0] — 2026-06-29 · minor（次版本） · Event Bus 与 Trace 最终版框架
+
+### Added
+- 新增 `event_trace`、`event_span`、`event_action`、`plugin_runtime_status` 数据模型和迁移，日志中心可以按 `trace_id` 串起消息接收、标准化、订阅匹配、插件调用、动作执行和失败原因。
+- 新增统一 Event Bus 服务，把交互 Bot 消息、按钮回调、Inline Query、Inline 选择结果、外部付款通知和 UserBot 命令收敛为标准事件信封，并用稳定 `reason_code` 记录 matched / skipped / delivered。
+- 插件 manifest 支持 `usage`、`event_subscriptions`、`capabilities`，官方、内置、示例和远程插件字段链路同步贯通到后端 schema、feature matrix、前端类型和 WebUI 风险提示。
+- 新增可信插件 `telegram_native_raw` 能力边界：插件显式声明后才可拿到 JSON 兼容原生 Telegram 数据；日志默认只保存摘要和 `native_raw_meta`，完整 `native_raw` 需开启短保留期持久化。
+- Delivery Executor 和 MessageOps 增加 `answer_inline_query`、动作结果 Trace、旧通道失败 action、settlement 记录和实际发送通道留痕。
+- 日志中心重构为 Trace 视角，提供总览、消息链路、插件诊断、命令链路、动作发送和原始日志入口，并补齐 Inline、native_raw、Contract Guard、Telegram API 错误和插件加载失败展示。
+- 插件中心、插件配置页、远程插件仓库和交互中心展示插件使用说明、事件订阅、能力声明、高风险能力、废弃通道告警和一键更新风险信息。
+- 新增 `examples/plugins/event_bus_demo` 最终版示例，覆盖 message、command、callback、inline、chosen inline、payment fixtures，并演示 `ctx.messages`、`answer_inline_query` 和 `settlement`。
+
+### Changed
+- TelePilot 插件框架正式收敛为个人可信插件标准：账号主人主动安装和启用插件，业务风险由安装者承担；平台提供统一事件入口、统一消息操作出口、风险提示、审计、频控、急停和客观失败返回。
+- 旧交互规则继续可用，但语义收敛为 Event Bus 订阅条件和规则过滤，不再作为第二套插件调度真相。
+- 插件开发主路径切换为标准事件信封 + `ctx.messages` / 标准 action + Trace 排障；旧平铺 payload、`raw_event`、`event.reply/respond` 只作为迁移或历史说明。
+- 远程插件仓库、私有 GitHub 仓库、`tree/<branch>` URL、仓库刷新和单仓库一键更新都会保留 `usage`、`event_subscriptions`、`capabilities` 等最终版字段。
+- Trace 和 native_raw 保留策略接入系统设置；`native_raw_retention_days` 默认收紧为 1 天，Trace 清理会保留主链路记录并清理过期大字段。
+- Contract Guard 定位调整为契约记录器和客观失败保护层：越声明调用可告警放行，不支持或废弃能力明确失败，并输出中文说明与稳定 `reason_code`。
+
+### Fixed
+- 修复旧 `notice` / `bbot_notice` / `notice_bot` 可能被误当可执行发送通道的问题；运行时和 lint 均使用 `send_channel_deprecated` 明确失败，不会自动改写到交互 Bot。
+- 修复 `raw_event` 作为原生事件后门的风险；未声明 `telegram_native_raw` 的插件不会通过兼容 payload 拿到完整原生对象。
+- 修复插件动作失败缺少 `event_action` 的断链问题，空文本、非法媒体、缺 inline query id、Telegram API 错误等都会记录失败动作。
+- 修复插件加载失败只落旧 runtime log、日志页插件诊断不可见的问题；loader 失败会更新 `PluginRuntimeStatus`。
+- 修复 worker 交互入口 timeout 测试因全局 `time.time` monkeypatch 与 60 秒 timeout 不匹配导致全量测试卡住的问题。
+
+### Docs
+- 重写插件 API 参考、远程插件规范、速查表、安全边界、README 和最终版计划，统一为 Event Bus + Trace + MessageOps 口径。
+- 新增 `docs/TELEGRAM-FULL-EVENT-BUS-TRACE-PLAN.md` 和 `docs/release/0.40.0-final-evidence.md`，把最终版范围、Go / No-Go、证据台账、前端实测、部署回滚和残余风险写成可执行门禁。
+- 文档明确外部转账通知 Bot 只是群里已有到账证据来源，不是 TelePilot 的主动发送通道；普通交互由交互 Bot，收款确认和发奖由 UserBot 或 settlement 承接。
+
+### Tests
+- 后端全量测试覆盖 Event Bus、Trace、native_raw、Inline、旧通道失败、插件加载状态、远程插件字段贯通、MessageOps / Delivery、UserBot 命令 Trace 和交互 Bot 回归路径。
+- 插件示例验证脚本和已安装交互插件验证脚本补齐 `usage`、`event_subscriptions`、`capabilities`、废弃通道和旧风险字段检查。
+- 前端类型检查和生产构建覆盖日志中心、插件风险提示、交互中心、插件配置页和仓库字段展示。
+
+## [0.37.0] — 2026-06-28 · minor（次版本） · 插件开放事件框架
+
+### Added
+- 交互插件 payload 正式收口为标准事件信封，统一下发 `source`、`message`、`chat`、`sender`、`actor`、`source_actor`、`reply_to`、`payment`、`player`、`session`、`trigger`、`raw` 等顶层字段，插件不再需要从旧平铺字段里猜消息来源、业务主体和付款玩家。
+- `event_from_interaction_payload(payload)` 补齐 `sender`、`source_actor`、`player` 等稳定引用，插件可直接转换成 TelePilot 事件对象后读取 `event.message`、`event.actor`、`event.payment`、`event.session`。
+- 交互中心新增“事件与动作调试”面板，展示最近一次下发给插件的 payload、插件返回 actions、平台处理后的 actions、Contract Guard 告警和插件失败原因。
+- 交互事件声明支持 `all_messages`，用于明确表示入口可接收当前会话内的所有消息事件。
+
+### Changed
+- TelePilot 交互插件框架明确采用个人可信插件标准：插件和插件仓库由账号主人主动安装，业务风险由安装者自行承担；平台负责风险提示、审计日志、调试告警、频控、急停、token/session 隔离和客观失败返回。
+- Contract Guard 从硬阻断改为软告警：插件调用未声明动作或未声明受控通道时，会记录 `guard_level=warning` 并继续按插件请求尝试可用通道；`result_contract` 现在是可见契约和调试依据，不再是公共插件市场式强沙箱。
+- `notice`、`bbot_notice`、`notice_bot` 明确为旧主动发送通道且不兼容：插件显式请求这些通道会得到 `guard_level=failed`、不可执行失败和迁移提示；正常插件消息请迁移到 `interaction_bot`、`userbot_reply` 或 `auto`。
+- 插件开发主路径改为直接读取标准事件信封或使用 `event_from_interaction_payload(payload)`；`payload["event"]` 和旧平铺字段只作为历史兼容来源，不再写入新插件指南的主路径。
+- Delivery Executor 增加旧/未知通道兜底防御：即使内部调用绕过 Contract Guard，也不会把 `bbot_notice` 等旧通道误当交互 Bot token 执行发送。
+
+### Docs
+- 更新插件开发指南、API 参考、远程插件规范、速查表、安全边界、交互 Bot 优化方案、README 和开放事件框架计划，统一说明标准事件信封、旧通道迁移、Contract Guard 软告警、外部转账通知 Bot 仅作为到账证据来源。
+- 补充插件作者迁移要点：付费玩法只以 `source.type == "payment_confirmed"` 且 `payment.status == "confirmed"` 作为到账依据；真实玩家身份优先读取 `player.user_id` 和 `player.identity_confidence`。
+- 补齐 `interaction_entries` 示例中的 `dispatch_modes`、`message_channels`、`money_channel`，并把远程插件示例里的旧平铺 payload 改成标准事件信封；需要持续状态的示例明确第三方插件不得默认依赖 `ctx.redis` 恒可用。
+
+### Tests
+- 补充标准事件信封字段、付款 display/source/reply 字段、`event_from_interaction_payload` 投影、Contract Guard 软告警、旧通道失败和 Delivery Executor 拒绝旧通道直达发送的回归测试。
+
+## [0.36.2] — 2026-06-28 · patch（补丁版本） · 插件仓库更新超时修复
+
+### Fixed
+- 修复插件仓库“一键更新可升级”在 GitHub 拉取稍慢时继承前端 15 秒默认超时，导致页面报 `timeout of 15000ms exceeded`、服务端出现 499 的问题；仓库浏览、刷新、安装和批量更新现在使用适合 git 操作的独立超时。
+
+### Changed
+- 插件仓库缓存改为浅克隆与单远端引用刷新：首次拉取只获取当前版本文件，后续刷新不再执行全量 `fetch --all`，减少小型插件仓库更新时的等待时间。
+
+## [0.36.1] — 2026-06-28 · patch（补丁版本） · 插件仓库单仓库批量更新
+
+### Added
+- 插件仓库支持按单个仓库一键更新：点击仓库行的“更新可升级”后，会刷新该仓库并把仓库中已安装且版本更高的插件批量升级到仓库版本，未安装插件和同版本插件自动跳过。
+
+## [0.36.0] — 2026-06-27 · minor（次版本） · 交互插件主动通道收束
+
+### Changed
+- 交互插件主动发送通道正式收束为 `interaction_bot` 与 `userbot_reply`：普通交互内容、结果公告、按钮、会话提示默认由交互 Bot 承接；确需账号身份或低频代发时由 UserBot 承接。
+- `auto` 默认候选顺序调整为 `interaction_bot -> userbot_reply`；带 inline keyboard 的动作只会保留 `interaction_bot`，避免按钮落到无法承接回调的通道。
+- 外部转账通知 Bot 不再是 TelePilot 的发送通道；它只作为群里已有的到账证据来源，被平台监听、解析和校验后生成 `payment_confirmed`。
+- 入口显式声明 `result_contract.send_via` 时不再自动兜底错误值；写错或写入已移除通道会触发 lint / Contract Guard 告警，并在运行时阻断不合规动作。
+
+### Removed
+- 移除 `bbot_notice`、`notice`、`notice_bot` 作为插件 `send_via` / `channel` / `channel_selector` 的合法发送通道或别名。
+- Delivery Executor 不再读取转账通知 Bot token 执行插件动作；删除、置顶、按钮回调等 Bot 能力只由交互 Bot 承接。
+
+### Fixed
+- 修复“转账通知 Bot”概念容易被误解为 TelePilot 可主动控制的通知发送者的问题；前端旧通道标签改为“已移除通道”，文档统一改为“外部转账通知来源 / 到账证据来源”。
+
+### Docs
+- 插件 API 参考、远程插件指南、安全边界、速查表、插件概览和交互框架说明同步更新为“主动双通道 + 外部转账证据来源”口径。
+- 插件开发文档明确：正常插件交互和结果消息若走普通 Bot，应由交互 Bot 发送；收款确认与发奖仍由 UserBot 或平台受控结算链路处理；转账通知 Bot 只用于确认是否到账。
+
+### Tests
+- 补充旧 `bbot_notice` / `notice` 通道被 Contract Guard 阻断、混合候选中已移除通道产生告警、Delivery Executor 不再使用转账通知 Bot token、远程插件 lint 拒绝已移除通道等回归测试。
+
+## [0.35.2] — 2026-06-27 · patch（补丁版本） · 交互插件通道选择与回退
+
+### Added
+- 交互插件标准动作新增受控通道候选能力：插件可通过 `send_via_options`、`channel` 或 `channel_selector` 声明单通道、候选顺序和失败回退。
+- `ctx.messages.send/edit/delete/pin` 支持 `channel=["interaction_bot", "userbot_reply"]` 与 `channel={"prefer": ["bot", "userbot"], "fallback": true}` 写法；旧的 `channel="interaction_bot"` 继续兼容。
+- Delivery Executor 现在会按候选顺序执行发送，交互 Bot 发送失败或 token 不可用时可按插件声明回退，并写入运行时日志。
+
+### Changed
+- Contract Guard 从“单一 `send_via` 白名单”升级为“候选通道过滤”：不在 `result_contract.send_via` 白名单内的候选会被过滤，全部不命中才丢弃动作。
+- 带 inline keyboard 的动作会自动收窄到可承接按钮回调的 Bot 通道，避免把按钮发到 `userbot_reply` 后无法回调。
+- 交互入口的 `message_channels` 语义调整为“通道偏好”，不再表示插件后续回复必须绑定某个账号或 Bot；前端入口卡片同步显示“管理偏好 / 群内偏好”。
+
+### Fixed
+- 标准动作中的 `chat_id` 现在会被 Delivery Executor 正确使用；插件可在平台校验下向指定会话发送，而不是总是落回触发会话。
+- 启动占位消息在发送通道回退到非交互 Bot 时会被清理，避免 Bot 发送失败后群里残留“正在启动”占位内容。
+- 远程插件 lint 和 manifest 归一化支持 `bot`、`userbot`、`auto` 等通道别名，避免新规范写法被误判为不支持。
+
+### Docs
+- 插件 API 参考、远程插件指南、安全边界、速查表、插件概览和交互框架说明同步为“插件拥有通道选择权，框架拥有通道执行权”的新口径。
+
+### Tests
+- 补充通道候选归一化、按钮通道收窄、发送失败回退、指定 `chat_id` 发送、远程插件 lint 别名兼容等回归测试。
+
+## [0.35.1] — 2026-06-27 · patch（补丁版本） · 插件仓库分支链接兼容
+
+### Fixed
+- 插件仓库新增、刷新、安装和已安装插件检查更新现在支持 GitHub `tree/<branch>` 分支页链接；后端会保留用户填写的原始 URL，同时在 git 拉取时转换为真正的 clone URL 并 checkout 指定分支。
+- 远程插件直接安装同样支持 GitHub `tree/<branch>` 链接，避免临时插件分支必须先合入默认分支或手工改成 clone URL。
+
+### Docs
+- 插件仓库页面提示、API schema 和远程插件开发文档补充 GitHub 分支页 URL 的填写方式。
+
+### Tests
+- 补充插件仓库缓存刷新、远程插件安装和 source_url 校验的回归测试，覆盖普通 Git URL 与 GitHub `tree/<branch>` 链接。
+
+## [0.35.0] — 2026-06-27 · minor（次版本） · 官方可选插件库与平台能力收口
+
+### Added
+- 新增随包官方可选插件库：`auto_reply`、`autorepeat`、`chatgpt_image`、`codex_image`、`game24`、`math10` 不再作为 builtin 自动 seed，而是可在“插件安装与管理”页按需安装。
+- 插件中心首页新增首次部署推荐安装提醒：当自动回复、自动复读尚未安装时提示用户按需安装，用户也可以关闭提醒。
+- 新增官方插件库 API：`GET /api/plugin-repos/official/plugins` 和 `POST /api/plugin-repos/official/plugins/{plugin_name}/install`，安装后复制到 `plugins/installed/{key}/` 并登记为 `official` 来源。
+
+### Changed
+- `scheduler` 进一步收口为平台能力，不再按普通插件展示或卸载；普通插件需要后台任务时仍通过 `ctx.scheduler` facade 注册。
+- 官方可选插件安装后与远程/本地安装型插件走同一套运行目录、账号启用、配置页、卸载和 worker 热加载链路；已安装官方插件可手动禁用或卸载。
+- 插件中心和账号详情页来源展示调整为“平台内置 / 官方插件 / 第三方”，避免把官方可选插件误认为不可移除的 builtin。
+- 新账号配置复制不再默认复制自动回复，只保留平台定时任务配置，避免首次部署时无意启用官方可选插件。
+
+### Fixed
+- 旧数据库中已经启用、保存配置或被交互规则引用的历史 builtin 可选插件会自动迁移为 official installed 插件，保留账号配置、规则和全局配置；未使用过的旧 feature 行会被清理，避免插件中心误展示。
+- `codex_image` 缺失实现时的运行日志和前端提示改为引导安装官方可选插件，不再提示检查 builtin 目录。
+- 官方插件列表会从 `plugin.json.tags` 读取推荐标签，前端不再硬编码推荐插件 key。
+
+### Docs
+- README、插件概览、API 参考、HTTP facade、安全边界和远程插件指南同步更新为“平台能力 / 官方可选插件库 / 远程插件库”口径。
+- 插件开发指南明确新插件应走远程仓库或 `plugins/local_imports` 本地导入，不再指导开发者把新插件放进 builtin 目录。
+
+### Tests
+- 补充官方插件库鉴权、官方插件安装、builtin registry 排除可选插件、loader 核心 builtin 清单等回归测试。
+
+## [0.34.6] — 2026-06-27 · patch（补丁版本） · PWA 底部导航修复
+
+### Fixed
+- 修复 PWA/窄屏底部导航已有 6 个入口但容器仍写死 5 列，导致“系统”入口被挤到第二行、底部看起来错乱的问题；底部导航现在按实际入口数量动态分列。
+
+## [0.34.5] — 2026-06-27 · patch（补丁版本） · 插件配置页窄屏体验修复
+
+### Fixed
+- 修复插件配置页在 PWA/窄屏下“保存配置”操作条和应用底部导航同时吸底，导致底部视觉错乱成两行的问题；移动端保存操作回到配置卡片内部，桌面端仍保持卡片底部 sticky。
+- 优化命令示例徽标在窄容器中的换行表现，避免长命令、长参数或中文示例在使用说明卡片内显得过硬或挤压。
+
+## [0.34.4] — 2026-06-27 · patch（补丁版本） · 插件配置页说明与预览规范
+
+### Changed
+- 插件配置页统一为“使用说明 → 功能总开关 → 插件配置 → 插件预览”的信息架构，专属配置页和通用 schema 配置页都不再把保存操作放到页面顶部。
+- 有保存字段的长表单把“配置操作”固定到“插件配置”卡片底部，用户滚动配置时仍能看到保存状态和保存按钮。
+- 通用 schema 配置页支持插件用 `x-ui-section`、`x-ui-order`、`x-ui-columns` 在平台容器内做分组、排序和列数控制。
+- 插件预览从配置字段区拆成独立卡片；`template_preview` / `*_preview` 是建议项，缺失时只提示建议，不阻断保存或运行。
+
+### Fixed
+- 通用配置页不再把 `usage_preview` / `usage_guide` / `usage_instructions` / `ai_usage_guide` / `template_placeholders` 和预览字段当作可编辑配置保存。
+- 插件中心和远程插件管理页会把缺少详细使用说明的插件标记为红色“高级规范警告”，普通 lint 提醒仍保持 amber 提示。
+
+### Docs
+- 插件开发文档、远程插件规范、安全规范、速查表和 README 同步更新，明确配置页必须由插件自声明详细使用说明，不再提供默认兜底说明。
+
+### Tests
+- 补充远程插件 metadata lint 回归测试，覆盖缺少使用说明的高级规范警告和 `x-usage-guide` 正常通过场景。
+
+## [0.34.3] — 2026-06-27 · patch（补丁版本） · 私有插件仓库兼容
+
+### Added
+- 插件仓库支持 GitHub 私有仓库：添加仓库或编辑已保存仓库时可填写 GitHub Token，后端使用 `MASTER_KEY` 加密保存，前端和 API 只展示是否已配置凭证。
+- 新增 `PUT /api/plugin-repos/{id}/credential`，用于更新或清除插件仓库凭证。
+- 新增 `plugin_repo.auth_type` 与 `plugin_repo.credential_enc` 数据库字段，并补充 Alembic 迁移。
+
+### Changed
+- 插件仓库拉取私有 GitHub 仓库时改用临时 git extraheader 注入 token，不把 token 拼进仓库 URL、缓存 key、git remote 或 API 响应。
+- 从插件仓库安装插件统一从已刷新的仓库缓存复制，避免私有单插件仓库二次无凭证 clone 失败。
+- 从私有插件仓库安装的插件在检查更新和执行更新时会复用对应仓库保存的凭证。
+
+### Fixed
+- git 失败、超时和更新检查错误中的敏感 token 会统一脱敏，避免私有仓库凭证出现在错误提示或日志中。
+
+### Tests
+- 补充私有 GitHub 仓库凭证、git extraheader、错误脱敏、凭证清除和鉴权路由回归测试。
+
+## [0.34.2] — 2026-06-27 · patch（补丁版本） · 分支审查与插件文档校准
+
+### Fixed
+- 修复第三方 `httpx` 请求日志可能输出 Telegram Bot API Token 的问题，新增统一日志脱敏过滤器并覆盖 Telegram Bot API URL。
+- 修复本地插件仓库接口 `/api/plugin-repos/local/plugins` 被动态仓库路由抢先匹配导致返回 422 的问题。
+- 修复远程插件仓库“刷新”语义：强制刷新失败时不再静默返回旧缓存，避免前端误报刷新成功。
+
+### Changed
+- 插件开发文档统一更新为个人可信插件标准模式，移除旧的 Route A / sandbox 权限模型口径，补齐交互通道、双调度方式和受控 facade 的当前说明。
+
+### Tests
+- 补充日志脱敏、本地插件仓库路由和强制刷新失败语义的回归测试。
+
+## [0.34.1] — 2026-06-27 · patch（补丁版本） · 交互通道入口与文档口径补丁
+
+### Changed
+- 账号详情页的「联动交互 Bot」入口收束为「交互通道」，明确这里只维护当前账号的交互 Bot、通知 Bot 和通知模板，并提供跳转到「交互」中心的入口。
+- 规则保存按钮统一固定在浏览器可视区域右下角，避免在账号详情页或交互中心随页面滚动位置漂移。
+- 修正交互优化文档里 `result_contract.send_via` 默认通道的旧表述，和个人可信插件标准模式保持一致。
+
+## [0.34.0] — 2026-06-27 · minor（次版本） · 个人可信插件标准模式
+
+### Added
+- 交互插件入口新增可信调度元数据：`dispatch_modes` 区分「管理员命令」与「群内玩法」，`message_channels` 声明不同调度方式的默认消息通道，`money_channel` 固定标识转账相关动作由 userbot 承接。
+- 交互中心玩法入口卡片展示调度方式和通道分工，让用户能直接看出插件是管理员命令入口、群内玩法入口，还是两者都支持。
+- 后端 feature manifest seed 会统一补齐交互入口调度字段，已安装插件无需重装即可在刷新后得到一致的入口元数据。
+
+### Changed
+- TelePilot 标准模式明确调整为个人可信插件模式：管理员安装并启用插件后视为信任插件业务逻辑，平台保留频控、审计、急停、token/session 隔离和受控代发。
+- `result_contract.send_via` 从默认最小化为 `interaction_bot` 改为可信默认三通道：`interaction_bot`、`userbot_reply`、`bbot_notice`；插件主动声明白名单时仍会按白名单收窄。（历史记录：`bbot_notice` 已在 0.36.0 起移除，0.37.0 起显式请求会返回迁移提示。）
+- 远程插件校验不再要求交互入口必须声明 `result_contract`，改为校验已声明的 `dispatch_modes` / `send_via` 是否使用平台支持值。
+- 插件开发指南、API 参考、远程插件规范、速查表和交互优化方案同步更新，明确 userbot 主控监听/资金动作、交互 Bot 承接群内高频互动的标准分工。
+
+### Tests
+- 补充交互入口缺省 `result_contract` 时允许三通道代发的回归测试，并更新入口 normalize 测试覆盖 `dispatch_modes`、`message_channels`、`money_channel`。
+
+## [0.33.2] — 2026-06-27 · patch（补丁版本） · 交互中心规则列表与编辑区优化
+
+### Changed
+- 交互规则的监听群配置改为只从「已允许会话」选择，并在找不到目标会话时引导到账号详情页的「允许会话」添加；历史保存但不在允许会话中的 Chat ID 会保留显示并可移除。
+- 交互规则编辑区默认折叠「触发」「启动内容」「奖励与限流」步骤，将「命中后做什么」移动到「触发方式」之后，减少规则详情首屏高度。
+- 调整交互中心规则列表布局：桌面宽屏下列表与右侧规则详情保持同一工作区高度并各自滚动，窄屏/PWA 下规则列表收敛为更紧凑的名称、状态和开关。
+- 将交互中心顶部的 `Contract Guard` 标签汉化为「契约守卫」。
+
+## [0.33.1] — 2026-06-27 · patch（补丁版本） · 交互中心规则编辑体验修复
+
+### Changed
+- 「交互」页升级为可直接操作的交互中心，支持在顶部选择账号与交互 Bot，查看运行态、规则覆盖、最近触发和最近错误，并直接新增/编辑交互规则、插件入口、触发词和参数。
+- 重构交互规则列表展示样式，规则卡片固定展示动作、触发方式、监听群、会话范围、插件入口和启停状态，账号详情入口继续保留但不再是配置交互规则的唯一路径。
+- 交互中心收敛重复状态展示：保留顶部账号摘要作为唯一运行态入口，规则编辑区隐藏重复状态条和总览卡片，并把规则清单提前为主要工作区。
+- 交互规则编辑补强：玩法查询支持自定义 `{items}` 单项模板，启动占位消息支持按规则名称自动渲染，玩法入口选择更醒目，保存规则按钮恢复为右下角悬浮，转账成功代码块预览显示语言标题。
+
+## [0.33.0] — 2026-06-27 · minor（次版本） · TelePilot 交互框架与部署体验收口
+
+### Added
+- 新增独立「交互框架」工作台页面，作为 TelePilot 内部与 AI 并列的重要框架入口，集中展示事件渠道、插件入口、动作契约和发送通道。
+- 新增插件交互消息 facade：`ctx.messages.send/edit/delete/pin/answer_callback`，插件可生成平台标准动作，由 TelePilot 统一校验、审计和发送，不再需要每个插件自己拼普通 Bot API。
+- 交互 runtime 支持 `answer_callback`、`delete_message`、`pin_message` 标准动作，并避免插件已 ACK 按钮后再次自动发送空 ACK。
+- 交互入口新增 `result_contract` 运行时守卫：未声明 `send_via` 时默认只允许 `interaction_bot`；显式声明 `actions` 时丢弃未声明动作；`userbot_reply` 自动移除 `reply_markup`，避免按钮发到无法承接回调的通道。
+- 新增 `app.services.interaction` 框架层，拆出 `contracts` 契约守卫和 `InteractionDeliveryExecutor` 受控发送执行器，账号 Bot runtime 保留兼容 shim。
+- 远程插件仓库新增刷新接口与前端刷新按钮，可在插件页直接刷新原创插件库列表。
+- 新增生产 Docker Compose 初始化脚本 `scripts/init-prod-env.sh`，可自动生成 `MASTER_KEY`、`JWT_SECRET`、`POSTGRES_PASSWORD` 和 `.env`，减少首次部署手工配置。
+
+### Changed
+- Docker Compose 快速部署文档改为 `./scripts/init-prod-env.sh` 后直接 `docker compose up -d --build`，并新增 `make init-prod-env`。
+- 插件交互开发指南把 `ctx.client` 定位为常规命令与高级兼容入口，交互入口推荐使用 TelePilot 的事件信封和 `ctx.messages`。
+
+### Tests
+- 补充 `ctx.messages` 标准动作缓存、`result_contract.send_via` 守卫和 `userbot_reply` 按钮剥离的单元测试。
+- 补充 interaction delivery executor 的直接单元测试，覆盖普通 Bot 发送、userbot_reply 转 worker 和 message_id 保存 key 校验。
+
+### Docs
+- 明确 0.x 阶段版本号规则：`0.X.0` 表示阶段能力版本，`0.X.Y` 表示同阶段补丁；版本级别使用中英并列口径。
+- 更新插件 API 参考、速查表、远程插件规范、安全边界和交互 Bot 优化方案，补齐事件信封、按钮回调、发送通道、契约守卫和旧动作列表到 `ctx.messages` 的迁移路径。
+
+## [0.32.0] — 2026-06-27 · minor（次版本） · 交互玩法身份与参与者策略
 
 ### Fixed
 - 付费玩法新增 `payment` / `player` / `source_actor` 标准信封，明确区分到账证据、真实玩家和消息来源；独玩/按钮玩法缺少真实付款人 ID 时会先要求付款人点击确认，避免把未到账的 `+金额` 或转账通知 Bot 当成玩家。
@@ -22,7 +813,7 @@
 ### Docs
 - 更新插件开发指南、远程插件规范和联动 Bot 优化方案，补充 `participant_policy`、双证据支付模型和 `payment_confirmed` 身份绑定规则。
 
-## [0.31.6] — 2026-06-26 · patch · 交互玩法运行时增强
+## [0.31.6] — 2026-06-26 · patch（补丁版本） · 交互玩法运行时增强
 
 ### Added
 - `_apply_interaction_actions` 新增通用 `send_message` 扩展字段：`edit_message_id`（插件指定编辑目标消息）、`pin`（发送后置顶，默认不置顶）、`save_message_id_key`（发送后将 message_id 写入 Redis 供后续编辑）。

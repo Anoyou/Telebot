@@ -31,6 +31,7 @@ const PluginsSchedulerPage = lazy(() => import("@/pages/Plugins").then(m => ({ d
 const PluginsAutoCommandWhitelistPage = lazy(() => import("@/pages/Plugins").then(m => ({ default: m.PluginsAutoCommandWhitelistPage })));
 const MessageTemplateLabPage = lazy(() => import("@/pages/Plugins").then(m => ({ default: m.MessageTemplateLabPage })));
 const PluginsManagePage = lazy(() => import("@/pages/Extensions").then(m => ({ default: m.Extensions })));
+const InteractionIndex = lazy(() => import("@/pages/Interaction/Index").then(m => ({ default: m.InteractionIndex })));
 const AIIndex = lazy(() => import("@/pages/AI/Index").then(m => ({ default: m.AIIndex })));
 
 type AppErrorBoundaryState = { hasError: boolean };
@@ -219,6 +220,14 @@ export default function App() {
             element={
               <Suspense fallback={<PageFallback />}>
                 <PluginsManagePage />
+              </Suspense>
+            }
+          />
+          <Route
+            path="interaction"
+            element={
+              <Suspense fallback={<PageFallback />}>
+                <InteractionIndex />
               </Suspense>
             }
           />

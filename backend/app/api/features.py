@@ -18,6 +18,7 @@ from fastapi import APIRouter, HTTPException
 
 from ..db.models.account import Account
 from ..db.models.feature import AccountFeature, Feature
+from ..db.models.plugin import InstalledPlugin
 from ..deps import CurrentUser, DBSession
 from ..schemas.feature import (
     AccountFeatureConfigUpdate,
@@ -25,11 +26,27 @@ from ..schemas.feature import (
     AccountFeatureToggle,
     ConfigValidationResponse,
     FeatureMatrixResponse,
+    PluginConfigActionJobResponse,
+    PluginConfigActionRequest,
+    PluginConfigActionResponse,
     PluginGlobalConfigResponse,
     PluginGlobalConfigUpdate,
 )
 from ..services import audit, feature_service
+from ..services.plugin_config_action_jobs import (
+    create_plugin_config_action_job,
+    get_plugin_config_action_job,
+    job_response,
+)
+from ..services.plugin_config_actions import (
+    PluginConfigActionError,
+    PluginConfigActionNotFound,
+    PluginConfigActionUnavailable,
+    run_plugin_config_action,
+)
 from ..services.redactor import is_sensitive_key, redact_value
+from ..worker.plugins.ai_facade import AIQuotaError, AIUnavailableError
+from ..worker.plugins.http_facade import PluginHTTPError
 
 router = APIRouter(tags=["features"])
 
@@ -330,6 +347,136 @@ async def update_account_feature_config(
         last_error=af.last_error,
         config=_sanitize_config(dict(af.config or {}), key),
     )
+
+
+@router.post(
+    "/api/accounts/{aid}/features/{key}/config/actions/{action_key}",
+    response_model=PluginConfigActionResponse,
+)
+async def run_account_feature_config_action(
+    aid: int,
+    key: str,
+    action_key: str,
+    payload: PluginConfigActionRequest,
+    db: DBSession,
+    user: CurrentUser,
+) -> PluginConfigActionResponse:
+    """运行插件声明的配置页动作。"""
+
+    account = await db.get(Account, aid)
+    if account is None:
+        raise _bad("ACCOUNT_NOT_FOUND", "账号不存在", 404)
+    await feature_service.seed_builtin_features(db)
+    feature = await db.get(Feature, key)
+    if feature is None:
+        raise _bad("FEATURE_NOT_FOUND", f"未注册的 feature: {key}", 404)
+    installed_plugin = await db.get(InstalledPlugin, key)
+
+    effective_config = await feature_service.get_effective_plugin_config(db, aid, key)
+    try:
+        result = await run_plugin_config_action(
+            db,
+            account=account,
+            feature=feature,
+            action_key=action_key,
+            effective_config=effective_config,
+            current_config=payload.config,
+            action_input=payload.input,
+            installed_plugin=installed_plugin,
+        )
+    except PluginConfigActionNotFound as exc:
+        raise _bad("CONFIG_ACTION_NOT_FOUND", str(exc), 404) from exc
+    except PluginConfigActionUnavailable as exc:
+        raise _bad("CONFIG_ACTION_UNAVAILABLE", str(exc), 400) from exc
+    except PluginHTTPError as exc:
+        raise _bad("CONFIG_ACTION_HTTP_REJECTED", str(exc), 400) from exc
+    except AIQuotaError as exc:
+        raise _bad("CONFIG_ACTION_AI_QUOTA", str(exc), 429) from exc
+    except AIUnavailableError as exc:
+        raise _bad("CONFIG_ACTION_AI_UNAVAILABLE", str(exc), 503) from exc
+    except PluginConfigActionError as exc:
+        raise _bad("CONFIG_ACTION_FAILED", str(exc), 400) from exc
+    except Exception as exc:
+        raise _bad("CONFIG_ACTION_FAILED", str(exc), 400) from exc
+
+    await audit.write(
+        db,
+        user.id,
+        "feature.config.action",
+        target=f"account:{aid}/feature:{key}",
+        detail={
+            "action_key": action_key,
+            "config_patch_keys": sorted((result.get("config_patch") or {}).keys()),
+        },
+    )
+    await db.commit()
+    return PluginConfigActionResponse(**result)
+
+
+@router.post(
+    "/api/accounts/{aid}/features/{key}/config/actions/{action_key}/jobs",
+    response_model=PluginConfigActionJobResponse,
+)
+async def start_account_feature_config_action_job(
+    aid: int,
+    key: str,
+    action_key: str,
+    payload: PluginConfigActionRequest,
+    db: DBSession,
+    user: CurrentUser,
+) -> PluginConfigActionJobResponse:
+    """启动插件声明的配置页后台动作。"""
+
+    account = await db.get(Account, aid)
+    if account is None:
+        raise _bad("ACCOUNT_NOT_FOUND", "账号不存在", 404)
+    await feature_service.seed_builtin_features(db)
+    feature = await db.get(Feature, key)
+    if feature is None:
+        raise _bad("FEATURE_NOT_FOUND", f"未注册的 feature: {key}", 404)
+    installed_plugin = await db.get(InstalledPlugin, key)
+
+    effective_config = await feature_service.get_effective_plugin_config(db, aid, key)
+    try:
+        job = await create_plugin_config_action_job(
+            db,
+            account=account,
+            feature=feature,
+            action_key=action_key,
+            effective_config=effective_config,
+            current_config=payload.config,
+            action_input=payload.input,
+            installed_plugin=installed_plugin,
+        )
+    except PluginConfigActionNotFound as exc:
+        raise _bad("CONFIG_ACTION_NOT_FOUND", str(exc), 404) from exc
+
+    await audit.write(
+        db,
+        user.id,
+        "feature.config.action.job.start",
+        target=f"account:{aid}/feature:{key}",
+        detail={"action_key": action_key, "job_id": job.job_id},
+    )
+    await db.commit()
+    return job_response(job, logs=[])
+
+
+@router.get(
+    "/api/plugin-config-action-jobs/{job_id}",
+    response_model=PluginConfigActionJobResponse,
+)
+async def get_config_action_job_status(
+    job_id: str,
+    db: DBSession,
+    _user: CurrentUser,
+) -> PluginConfigActionJobResponse:
+    """查询配置动作后台任务状态与过程日志。"""
+
+    response = await get_plugin_config_action_job(db, job_id)
+    if response is None:
+        raise _bad("CONFIG_ACTION_JOB_NOT_FOUND", "配置动作任务不存在", 404)
+    return response
 
 
 # ─────────────────────────────────────────────────────

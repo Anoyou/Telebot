@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
 import pytest
@@ -223,6 +224,43 @@ async def test_ai_runtime_image_llm_uses_native_image_generation(monkeypatch) ->
     sent_file = client.send_file.await_args.args[1]
     assert sent_file.name == "ai_image.png"
     event.delete.assert_awaited()
+
+
+@pytest.mark.asyncio
+async def test_ai_runtime_image_prompt_hint_uses_live_command_prefix(monkeypatch) -> None:
+    monkeypatch.setattr("app.worker.runtime._refresh_command_context", AsyncMock(return_value=None))
+    wcmd.set_command_context(
+        CommandContext(
+            account_id=1,
+            templates={},
+            providers={},
+            command_prefix="。",
+        )
+    )
+
+    client = AsyncMock()
+    event = AsyncMock()
+    event.get_reply_message = AsyncMock(return_value=None)
+    event.message = SimpleNamespace(
+        photo=None,
+        document=None,
+        sticker=None,
+        voice=None,
+        audio=None,
+        media=None,
+    )
+    tpl = {
+        "name": "image",
+        "type": "ai",
+        "config": {"mode": "image", "image_backend": "llm", "provider_id": 1},
+    }
+
+    await ai_runtime.invoke(client, event, [], tpl, 1)
+
+    event.edit.assert_awaited_once()
+    text = event.edit.call_args.args[0]
+    assert "例如：。image " in text
+    assert ",image" not in text
 
 
 def test_ai_runtime_model_display_name_prefers_label() -> None:

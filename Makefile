@@ -9,7 +9,7 @@
 #   make nuke        彻底清理（删数据 + venv + node_modules + .env）
 #   make help        全部命令清单
 
-.PHONY: help up down restart logs status nuke bootstrap \
+.PHONY: help up down restart logs status nuke bootstrap init-prod-env \
         dev-up dev-down dev-logs install migrate makemigration backend frontend \
         test lint codegen build prod-build prod-up prod-update prod-down backup clean
 
@@ -27,6 +27,7 @@ help:
 	@echo "  make logs be|fe|db 单独看某个组件日志"
 	@echo "  make status        四组件状态总览"
 	@echo "  make prod-up       一键生产部署（纯 docker compose 4 容器）"
+	@echo "  make init-prod-env 生成生产 .env（随机密钥 + 数据库密码）"
 	@echo "  make prod-update   增量更新生产栈（按变更重建必要服务）"
 	@echo "  make prod-down     停止生产栈"
 	@echo "  make nuke          ⚠ 彻底清理（含数据库）"
@@ -71,6 +72,9 @@ status:
 
 bootstrap:
 	@./scripts/bootstrap.sh
+
+init-prod-env:
+	@./scripts/init-prod-env.sh
 
 prod-up:
 	@./scripts/prod-up.sh

@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import logging
+import shutil
 from collections.abc import Iterable
 from copy import deepcopy
 from typing import Any
@@ -38,6 +39,8 @@ from ..db.models.feature import (
 )
 from ..db.models.plugin import InstalledPlugin
 from ..db.models.plugin_global_config import PluginGlobalConfig
+from ..db.models.rule import Rule
+from ..db.models.system import SystemSetting
 from ..redis_client import get_redis
 from ..schemas.feature import (
     ConfigValidationError,
@@ -45,8 +48,19 @@ from ..schemas.feature import (
     FeatureInfo,
 )
 from ..worker.ipc import CMD_RELOAD_CONFIG, publish_cmd_with_ack
+from .account_bot_service import normalize_interaction_entry_manifest
 
 log = logging.getLogger(__name__)
+_OPTIONAL_OFFICIAL_PLUGIN_KEYS: frozenset[str] = frozenset(
+    {
+        "auto_reply",
+        "autorepeat",
+        "chatgpt_image",
+        "codex_image",
+        "game24",
+        "math10",
+    }
+)
 
 
 # ─────────────────────────────────────────────────────
@@ -67,26 +81,40 @@ async def seed_builtin_features(db: AsyncSession) -> int:
 
     rows = (await db.execute(select(Feature))).scalars().all()
     existing: dict[str, Feature] = {f.key: f for f in rows}
+    migrated_count, migrated_changed = await _migrate_optional_builtin_features(db, existing)
     added = 0
-    changed_existing = False
+    changed_existing = migrated_changed
     for key, name in BUILTIN_FEATURES.items():
         # 尝试从 manifest 读取 config_schema 和 version
         cfg_schema = None
         ver = None
         experimental = False
+        usage = None
         category = "utility"
         interaction_profile = None
         interaction_entries: list[dict[str, Any]] = []
+        event_subscriptions: list[dict[str, Any]] = []
+        capabilities: dict[str, Any] | None = None
         m = BUILTIN_FEATURES.manifest_for(key)
         if m is not None:
             cfg_schema = getattr(m, "config_schema", None)
             ver = getattr(m, "version", None)
             experimental = bool(getattr(m, "experimental", False))
+            usage = str(getattr(m, "usage", None) or "").strip() or None
             category = str(getattr(m, "category", None) or "utility")
             interaction_profile = str(getattr(m, "interaction_profile", None) or "").strip() or None
+            raw_subscriptions = getattr(m, "event_subscriptions", None) or []
+            if isinstance(raw_subscriptions, list):
+                event_subscriptions = [item for item in raw_subscriptions if isinstance(item, dict)]
+            raw_capabilities = getattr(m, "capabilities", None)
+            capabilities = dict(raw_capabilities) if isinstance(raw_capabilities, dict) else None
             raw_entries = getattr(m, "interaction_entries", None) or []
             if isinstance(raw_entries, list):
-                interaction_entries = [item for item in raw_entries if isinstance(item, dict)]
+                interaction_entries = [
+                    entry
+                    for item in raw_entries
+                    if (entry := normalize_interaction_entry_manifest(item)) is not None
+                ]
         if category not in {"interactive", "automation", "utility"}:
             category = "utility"
 
@@ -102,10 +130,25 @@ async def seed_builtin_features(db: AsyncSession) -> int:
             if ver and f.version != ver:
                 f.version = ver
                 changed = True
-            if cfg_schema or experimental or category or interaction_entries or interaction_profile:
+            if (
+                cfg_schema
+                or experimental
+                or usage
+                or category
+                or interaction_entries
+                or event_subscriptions
+                or capabilities
+                or interaction_profile
+            ):
                 manifest = dict(f.manifest or {})
                 if manifest.get("config_schema") != cfg_schema:
                     manifest["config_schema"] = cfg_schema
+                    changed = True
+                if manifest.get("usage") != usage:
+                    if usage:
+                        manifest["usage"] = usage
+                    else:
+                        manifest.pop("usage", None)
                     changed = True
                 if manifest.get("category") != category:
                     manifest["category"] = category
@@ -116,6 +159,12 @@ async def seed_builtin_features(db: AsyncSession) -> int:
                 if manifest.get("interaction_entries") != interaction_entries:
                     manifest["interaction_entries"] = interaction_entries
                     changed = True
+                if manifest.get("event_subscriptions") != event_subscriptions:
+                    manifest["event_subscriptions"] = event_subscriptions
+                    changed = True
+                if manifest.get("capabilities") != capabilities:
+                    manifest["capabilities"] = capabilities
+                    changed = True
                 if manifest.get("x-experimental") != experimental:
                     manifest["x-experimental"] = experimental
                     changed = True
@@ -125,26 +174,186 @@ async def seed_builtin_features(db: AsyncSession) -> int:
                 await db.flush()
             continue
         manifest_data: dict[str, Any] | None = None
-        if cfg_schema or experimental or category or interaction_entries or interaction_profile:
+        if cfg_schema or experimental or usage or category or interaction_entries or event_subscriptions or capabilities or interaction_profile:
             manifest_data = {}
             if cfg_schema:
                 manifest_data["config_schema"] = cfg_schema
+            if usage:
+                manifest_data["usage"] = usage
             manifest_data["category"] = category
             if interaction_profile:
                 manifest_data["interaction_profile"] = interaction_profile
             if interaction_entries:
                 manifest_data["interaction_entries"] = interaction_entries
+            if event_subscriptions:
+                manifest_data["event_subscriptions"] = event_subscriptions
+            if capabilities:
+                manifest_data["capabilities"] = capabilities
             manifest_data["x-experimental"] = experimental
         db.add(Feature(key=key, display_name=name, is_builtin=True, version=ver, manifest=manifest_data))
         added += 1
     installed_added, installed_changed = await _seed_local_installed_features(db, existing)
-    added += installed_added
+    added += migrated_count + installed_added
     changed_existing = changed_existing or installed_changed
     if added:
         await db.commit()
     elif changed_existing:
         await db.commit()
     return added
+
+
+async def _migrate_optional_builtin_features(
+    db: AsyncSession,
+    existing: dict[str, Feature],
+) -> tuple[int, bool]:
+    """把历史 builtin 可选插件收敛成 official installed 插件。
+
+    0.35 起这些插件不再作为 builtin 自动出现。若旧数据库里已经有账号开关、
+    规则引用、全局配置或交互规则引用，则自动登记为官方已安装包，保证旧配置
+    继续可用；若从未使用，则删除旧 feature 行，避免插件中心继续展示。
+    """
+
+    keys = sorted(key for key in _OPTIONAL_OFFICIAL_PLUGIN_KEYS if key in existing)
+    if not keys:
+        return 0, False
+
+    try:
+        from ..db.models.plugin import (
+            PLUGIN_SOURCE_OFFICIAL,
+            PLUGIN_TRUST_OFFICIAL,
+        )
+        from . import plugin_repo_service
+        from .remote_plugin_service import upsert_installed_plugin
+    except Exception:  # noqa: BLE001
+        log.warning("加载官方插件迁移工具失败，跳过本轮收敛", exc_info=True)
+        return 0, False
+
+    account_feature_rows = (
+        await db.execute(
+            select(AccountFeature).where(AccountFeature.feature_key.in_(keys))
+        )
+    ).scalars().all()
+    rule_rows = (
+        await db.execute(select(Rule).where(Rule.feature_key.in_(keys)))
+    ).scalars().all()
+    global_config_rows = (
+        await db.execute(
+            select(PluginGlobalConfig).where(PluginGlobalConfig.plugin_key.in_(keys))
+        )
+    ).scalars().all()
+    interaction_settings = (
+        await db.execute(
+            select(SystemSetting).where(SystemSetting.key.like("account_bot_transfer_notice:%"))
+        )
+    ).scalars().all()
+    used_keys = {row.feature_key for row in account_feature_rows}
+    used_keys.update(row.feature_key for row in rule_rows)
+    used_keys.update(row.plugin_key for row in global_config_rows)
+    for row in rule_rows:
+        cfg = row.config if isinstance(row.config, dict) else {}
+        module_key = str(cfg.get("module_key") or "").strip()
+        if module_key in _OPTIONAL_OFFICIAL_PLUGIN_KEYS:
+            used_keys.add(module_key)
+    for setting in interaction_settings:
+        value = setting.value if isinstance(setting.value, dict) else {}
+        module_key = str(value.get("module_key") or "").strip()
+        if module_key in _OPTIONAL_OFFICIAL_PLUGIN_KEYS:
+            used_keys.add(module_key)
+        raw_rules = value.get("rules")
+        if isinstance(raw_rules, list):
+            for item in raw_rules:
+                if not isinstance(item, dict):
+                    continue
+                module_key = str(item.get("module_key") or "").strip()
+                if module_key in _OPTIONAL_OFFICIAL_PLUGIN_KEYS:
+                    used_keys.add(module_key)
+
+    added = 0
+    changed = False
+    for key in keys:
+        feature = existing[key]
+        if key not in used_keys:
+            if bool(feature.is_builtin):
+                await db.delete(feature)
+                existing.pop(key, None)
+                changed = True
+            continue
+        try:
+            official_source = await plugin_repo_service._find_official_plugin_source(key)
+        except Exception:  # noqa: BLE001
+            log.warning("历史 builtin 插件 %s 已被使用，但读取推荐插件源失败", key, exc_info=True)
+            continue
+        if official_source is None:
+            log.warning(
+                "历史 builtin 插件 %s 已被使用，但 Core 已不再随包携带源码；请在安装插件页从推荐插件源安装该插件",
+                key,
+            )
+            continue
+
+        try:
+            plugin_dir = official_source.plugin_dir
+            meta = official_source.meta
+            manifest_json = plugin_repo_service._manifest_json_for_official_source(official_source)
+            feature_manifest = plugin_repo_service._feature_manifest_from_manifest_json(manifest_json)
+            lint_warnings = plugin_repo_service.lint_plugin_metadata_files(plugin_dir)
+        except Exception:  # noqa: BLE001
+            log.warning("迁移历史 builtin 插件 %s 到 official 失败", key, exc_info=True)
+            continue
+
+        if not (plugin_repo_service._plugin_dir(key)).exists():
+            try:
+                target = plugin_repo_service._plugin_dir(key)
+                staging = target.parent / f"{target.name}.installing"
+                if staging.exists():
+                    shutil.rmtree(staging, ignore_errors=True)
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copytree(
+                    plugin_dir,
+                    staging,
+                    ignore=shutil.ignore_patterns(".git", ".gitignore", "__pycache__"),
+                )
+                staging.rename(target)
+            except Exception:  # noqa: BLE001
+                log.warning("复制推荐源插件 %s 到 installed 失败", key, exc_info=True)
+                continue
+
+        if feature.is_builtin:
+            feature.is_builtin = False
+            changed = True
+        display_name = str(manifest_json.get("display_name") or meta.display_name or key)
+        version = str(manifest_json.get("version") or meta.version)
+        if feature.display_name != display_name:
+            feature.display_name = display_name
+            changed = True
+        if feature.version != version:
+            feature.version = version
+            changed = True
+        if (feature.manifest or {}) != (feature_manifest or {}):
+            feature.manifest = feature_manifest
+            changed = True
+
+        installed = await db.get(InstalledPlugin, key)
+        was_enabled = bool(getattr(installed, "enabled", False)) if installed is not None else bool(
+            any(row.feature_key == key and row.enabled for row in account_feature_rows)
+        )
+        await upsert_installed_plugin(
+            db,
+            key=key,
+            source=PLUGIN_SOURCE_OFFICIAL,
+            source_url=official_source.source_url,
+            installed_path=str(plugin_repo_service._plugin_dir(key)),
+            version=version,
+            manifest_json=manifest_json,
+            enabled=was_enabled,
+            signature_ok=True,
+            trust_tier=PLUGIN_TRUST_OFFICIAL,
+            source_label="Official",
+            last_install_error=None,
+            lint_warnings=lint_warnings,
+        )
+        added += 1 if installed is None else 0
+        await db.flush()
+    return added, changed
 
 
 async def _seed_local_installed_features(
@@ -193,7 +402,15 @@ async def _seed_local_installed_features(
         raw_entries = meta.get("interaction_entries")
         if raw_entries is None and isinstance(cfg_schema, dict):
             raw_entries = cfg_schema.get("x-interaction-entries")
-        interaction_entries = raw_entries if isinstance(raw_entries, list) else []
+        interaction_entries = [
+            entry
+            for item in raw_entries
+            if (entry := normalize_interaction_entry_manifest(item)) is not None
+        ] if isinstance(raw_entries, list) else []
+        raw_subscriptions = meta.get("event_subscriptions")
+        event_subscriptions = [item for item in raw_subscriptions if isinstance(item, dict)] if isinstance(raw_subscriptions, list) else []
+        raw_capabilities = meta.get("capabilities")
+        capabilities = dict(raw_capabilities) if isinstance(raw_capabilities, dict) else None
         tags = meta.get("tags") or []
         experimental = bool(meta.get("experimental")) or "experimental" in tags
         if is_orphan:
@@ -217,9 +434,11 @@ async def _seed_local_installed_features(
         if interaction_profile:
             manifest["interaction_profile"] = interaction_profile
         if interaction_entries:
-            manifest["interaction_entries"] = [
-                item for item in interaction_entries if isinstance(item, dict)
-            ]
+            manifest["interaction_entries"] = interaction_entries
+        if event_subscriptions:
+            manifest["event_subscriptions"] = event_subscriptions
+        if capabilities:
+            manifest["capabilities"] = capabilities
         if experimental:
             manifest["x-experimental"] = True
         if meta.get("permissions"):
