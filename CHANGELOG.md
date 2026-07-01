@@ -20,6 +20,14 @@
 
 ## [Unreleased]
 
+## [0.46.0] — 2026-07-01 · minor（次版本） · 插件低延时直通模式
+
+### Added
+- 插件运行时新增 `telegram_direct_passthrough` 低延时直通能力：插件必须先在 manifest 声明高风险能力，账号配置再二次手动开启 `direct_passthrough.enabled=true`，命中后消息会在 Trace/Event Bus/legacy `on_message` 前直接交给 `on_direct_message`，用于抢红包等极低延时场景。
+
+### Changed
+- 远程插件文档和示例补充直通模式风险说明，明确普通插件仍应优先使用 Event Bus + Trace + MessageOps 标准链路。
+
 ## [0.45.14] — 2026-07-01 · patch（补丁版本） · Userbot 指令边界补丁
 
 ### Added

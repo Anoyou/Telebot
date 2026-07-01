@@ -762,6 +762,118 @@ def _plugin_declares_native_raw(inst: Plugin, *, source: str) -> bool:
     return True
 
 
+def _plugin_declares_direct_passthrough(
+    inst: Plugin,
+    *,
+    source: str,
+    direction: str,
+    edited: bool,
+) -> bool:
+    manifest = getattr(type(inst), "_manifest", None)
+    capabilities = getattr(manifest, "capabilities", None)
+    if not isinstance(capabilities, dict):
+        return False
+    raw = capabilities.get("telegram_direct_passthrough")
+    if not isinstance(raw, dict) or not bool(raw.get("enabled")):
+        return False
+
+    sources = raw.get("sources")
+    if isinstance(sources, list) and sources:
+        allowed_sources = {str(item or "").strip() for item in sources}
+        if source not in allowed_sources and "all" not in allowed_sources:
+            return False
+
+    directions = raw.get("directions")
+    if isinstance(directions, list) and directions:
+        allowed_directions = {str(item or "").strip() for item in directions}
+        if direction not in allowed_directions and "all" not in allowed_directions:
+            return False
+
+    if edited and not bool(raw.get("include_edited", False)):
+        return False
+    return True
+
+
+def _plugin_direct_passthrough_enabled(ctx: PluginContext | None) -> bool:
+    if ctx is None or ctx.generation <= 0:
+        return False
+    cfg = ctx.account_config if isinstance(ctx.account_config, dict) else {}
+    raw = cfg.get("direct_passthrough")
+    if isinstance(raw, dict):
+        return bool(raw.get("enabled", False))
+    return False
+
+
+async def _dispatch_userbot_direct_passthrough(
+    state: _AccountState,
+    event: Any,
+    *,
+    direction: str,
+    edited: bool,
+    event_label: str,
+    redis: Any,
+) -> bool:
+    """Dispatch raw Telethon events to explicitly opted-in low-latency plugins."""
+
+    invoked = False
+    handler_name = "on_direct_message"
+    for plugin_key, inst in list(state.instances.items()):
+        ctx = state.contexts.get(plugin_key)
+        if ctx is None or ctx.generation != state.generation:
+            continue
+        if not _plugin_direct_passthrough_enabled(ctx):
+            continue
+        if not _plugin_declares_direct_passthrough(
+            inst,
+            source="userbot",
+            direction=direction,
+            edited=edited,
+        ):
+            continue
+        handler = getattr(inst, handler_name, None)
+        if handler is None or getattr(type(inst), handler_name, None) is getattr(Plugin, handler_name, None):
+            continue
+        if getattr(inst, "owner_only", True):
+            allowed = await _event_allowed_for_owner_only(state, event)
+            if not allowed:
+                continue
+        invoked = True
+        started = time.monotonic()
+        try:
+            await handler(ctx, event)
+            await update_plugin_runtime_status(
+                account_id=state.account_id,
+                plugin_key=plugin_key,
+                last_invocation_status=TRACE_STATUS_OK,
+                last_trace_id=None,
+            )
+        except Exception as exc:  # noqa: BLE001
+            await update_plugin_runtime_status(
+                account_id=state.account_id,
+                plugin_key=plugin_key,
+                last_invocation_status=TRACE_STATUS_FAILED,
+                last_trace_id=None,
+            )
+            await _log(
+                redis,
+                state.account_id,
+                "error",
+                (
+                    f"插件 {plugin_key} 处理直通 {event_label} 消息时出错："
+                    f"{type(exc).__name__}: {exc}。本条消息不会继续进入普通消息链路。"
+                ),
+                source="plugin",
+                plugin_key=plugin_key,
+                direction=event_label,
+                chat_id=getattr(event, "chat_id", None),
+                sender_id=getattr(event, "sender_id", None),
+                message_preview=(getattr(event, "raw_text", "") or "")[:200],
+                duration_ms=int((time.monotonic() - started) * 1000),
+                traceback=traceback.format_exc(limit=8),
+            )
+    return invoked
+
+
 def _userbot_native_raw_meta(native_raw: Any, *, enabled: bool) -> dict[str, Any]:
     size = 0
     try:
@@ -2312,6 +2424,17 @@ async def load_plugins_for_account(
                 if not edited and await _interaction_bot_owns_incoming_text(state, event):
                     return
 
+            direct_consumed = await _dispatch_userbot_direct_passthrough(
+                state,
+                event,
+                direction=direction,
+                edited=edited,
+                event_label=event_label,
+                redis=redis,
+            )
+            if direct_consumed:
+                return
+
             dispatch_state = await _start_userbot_message_trace(state, event, event_label=event_label)
             trace = dispatch_state.trace
             if trace is not None:
@@ -2590,6 +2713,7 @@ async def _activate(db, state: _AccountState, af: AccountFeature, redis: Any) ->
     effective_config = await _merge_plugin_config(
         db, state.account_id, af.feature_key, dict(af.config or {})
     )
+    account_config = dict(af.config or {})
     plugin_permissions = set(plugin_manifest.permissions or []) if plugin_manifest is not None else set()
     plugin_http: Any = None
     if plugin_manifest is not None and "external_http" in plugin_permissions:
@@ -2640,6 +2764,7 @@ async def _activate(db, state: _AccountState, af: AccountFeature, redis: Any) ->
         account_id=state.account_id,
         feature_key=af.feature_key,
         config=effective_config,
+        account_config=account_config,
         rules=list(rules),
         client=plugin_client,
         engine=state.engine if plugin_source != "installed" else None,
@@ -2990,6 +3115,7 @@ async def reload_account_config(account_id: int, payload: dict | None = None) ->
                 continue
 
             ctx.config = new_config
+            ctx.account_config = dict(af.config or {})
             ctx.rules = list(rules)
             ctx.generation = state.generation
             ctx.scheduler = (

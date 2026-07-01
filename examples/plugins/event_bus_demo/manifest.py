@@ -33,6 +33,12 @@ CAPABILITIES = {
         "reason": "只在排查 Telegram 原生字段映射差异时读取 native_raw_meta；业务逻辑仍以标准事件信封为主。",
         "sources": ["interaction_bot", "userbot"],
         "store_payload": False,
+    },
+    "telegram_direct_passthrough": {
+        "enabled": False,
+        "reason": "示例插件不启用低延时直通；只有抢红包、秒杀等需要跳过标准链路的插件才应声明并让账号二次手动开启。",
+        "sources": ["userbot"],
+        "directions": ["incoming"],
     }
 }
 

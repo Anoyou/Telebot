@@ -138,6 +138,32 @@ if not native_raw_meta.get("enabled"):
 
 不要使用旧 `raw_event` 字段。它代表旧运行时泄露原生对象的风险，只能出现在迁移说明或回归测试里。
 
+## capabilities.telegram_direct_passthrough
+
+`telegram_direct_passthrough` 是更高风险的低延时直通能力，只适合抢红包、秒杀、抢答首响等对毫秒级延迟敏感、且愿意跳过 TelePilot 标准 Event Bus / Trace / MessageOps 链路的插件。普通互动、付款确认、按钮、Inline 和需要审计回放的业务不要使用它。
+
+插件必须同时满足两层开关才会收到直通消息：
+
+1. `plugin.json` 与 `MANIFEST.capabilities` 显式声明 `telegram_direct_passthrough.enabled=true`，并写清 `reason`、`sources`、`directions`。
+2. 安装后在对应账号的插件配置里二次手动开启：
+
+```json
+{
+  "direct_passthrough": {
+    "enabled": true
+  }
+}
+```
+
+仅声明能力不会启用直通；账号只启用插件本身也不会启用直通。运行时仍保留账号启用、installed 插件授权、worker 暂停状态和 incoming 白名单检查；通过这些外层检查后，worker 会在 Trace、Event Bus 订阅匹配、legacy `on_message` 包装之前调用：
+
+```python
+async def on_direct_message(self, ctx, event):
+    ...
+```
+
+`event` 是 live Telethon event，不是标准事件信封。命中任一直通插件后，本条消息会被直通链路消费，不再进入 Event Bus 或 legacy `on_message`，避免低延时插件和普通链路重复处理同一条消息。直通 hook 的发送、编辑、点击等行为不会自动生成标准 action/Trace；插件作者必须自行承担幂等、异常、限流和审计缺失的风险。
+
 ## 标准事件信封
 
 插件入口收到的是标准事件信封：

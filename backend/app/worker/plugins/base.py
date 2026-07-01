@@ -77,7 +77,8 @@ class PluginContext:
     字段：
       - ``account_id``：当前 worker 服务的账号 id
       - ``feature_key``：插件对应的 feature key（与 ``Plugin.key`` 一致）
-      - ``config``：``account_feature.config`` 中保存的 dict（可由 reload_config 热更新）
+      - ``config``：合并后的插件配置（schema defaults < global config < account config）
+      - ``account_config``：``account_feature.config`` 原始账号级配置（不含 schema/global 合并值）
       - ``rules``：该 [账号 × feature] 下所有 ``enabled=True`` 的 ``Rule``，按 priority 倒序
       - ``client``：Telethon 客户端（loader 注入）
       - ``engine``：风控引擎（C Agent 提供，支持 ``acquire`` 与各 ``on_*`` 回调）
@@ -94,6 +95,7 @@ class PluginContext:
     account_id: int
     feature_key: str
     config: dict[str, Any] = field(default_factory=dict)
+    account_config: dict[str, Any] = field(default_factory=dict)
     rules: list[Any] = field(default_factory=list)  # list[Rule] —— 这里用 Any 防循环引用
     client: TelegramClient | None = None
     engine: Any = None  # RateLimitEngine
@@ -179,6 +181,20 @@ class Plugin:
 
         loader 只会把编辑消息派发给显式重写该方法的插件，避免改变既有
         ``on_message`` 语义。
+        """
+
+    async def on_direct_message(
+        self,
+        ctx: PluginContext,
+        event: events.NewMessage.Event | events.MessageEdited.Event,
+    ) -> None:
+        """低延迟直通消息入口；默认 no-op。
+
+        这是高风险高级入口，只会在插件 manifest 显式声明
+        ``capabilities.telegram_direct_passthrough.enabled=true``，且账号级
+        ``AccountFeature.config.direct_passthrough.enabled=true`` 时启用。运行时会在
+        白名单/暂停检查后、Trace/Event Bus/legacy 包装前，把原始 Telethon event
+        交给插件；一旦命中直通插件，本条消息不会继续进入普通消息链路。
         """
 
     async def on_command(

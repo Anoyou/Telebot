@@ -136,6 +136,10 @@ def _validate_event_contract(name: str, metadata: dict[str, Any], manifest: Mani
                 raise AssertionError(f"{name}: capabilities.telegram_native_raw 必须显式声明为对象")
             if raw_capability.get("enabled") is True and not str(raw_capability.get("reason") or "").strip():
                 raise AssertionError(f"{name}: telegram_native_raw.enabled=true 时必须说明 reason")
+        direct_capability = metadata_capabilities.get("telegram_direct_passthrough")
+        if isinstance(direct_capability, dict) and direct_capability.get("enabled") is True:
+            if not str(direct_capability.get("reason") or "").strip():
+                raise AssertionError(f"{name}: telegram_direct_passthrough.enabled=true 时必须说明 reason")
 
 
 def _validate_deprecated_risks(name: str, plugin_dir: Path, metadata: dict[str, Any]) -> None:
