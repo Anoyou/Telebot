@@ -39,6 +39,7 @@ from urllib.parse import unquote, urlparse
 from pydantic import BaseModel, Field, field_validator, model_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm.attributes import flag_modified
 
 from ..db.base import AsyncSessionLocal
 from ..db.models.account import Account
@@ -1520,6 +1521,7 @@ async def install(
             feat.version = meta.version
             feat.is_builtin = False
             feat.manifest = _merge_feature_manifest_preserving_global_config(feat.manifest, meta)
+            flag_modified(feat, "manifest")
 
         manifest_json = _with_remote_info(
             _manifest_json_from_remote_meta(meta),
@@ -1695,6 +1697,7 @@ async def update(db: AsyncSession, name: str) -> RemotePluginView:
         feat.version = meta.version or feat.version
         feat.is_builtin = False
         feat.manifest = _merge_feature_manifest_preserving_global_config(feat.manifest, meta)
+        flag_modified(feat, "manifest")
     updated_version = meta.version or row.version
     manifest_json = _with_remote_info(
         _manifest_json_from_remote_meta(meta),
