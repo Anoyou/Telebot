@@ -46,10 +46,14 @@ class FeatureInfo(BaseModel):
         plugin_install: Any | None = None,
         installed_plugin: InstalledPlugin | None = None,
     ) -> FeatureInfo:
-        manifest = getattr(f, "manifest", None) or {}
+        manifest = dict(getattr(f, "manifest", None) or {})
         installed_source = str(getattr(installed_plugin, "source", "") or "")
         installed_source_url = str(getattr(installed_plugin, "source_url", "") or "")
         installed_manifest = getattr(installed_plugin, "manifest_json", None) or {}
+        if isinstance(installed_manifest, dict):
+            for k, v in installed_manifest.items():
+                if v and k not in {"_telepilot_remote", "global_config"}:
+                    manifest[k] = v
         source_url = str(getattr(remote_plugin, "source_url", "") or installed_source_url)
         source_type = (
             "remote"
