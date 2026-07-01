@@ -897,6 +897,8 @@ export interface TraceOverview {
 // ===================== 系统设置 =====================
 export interface SystemSettings {
   command_prefix: string;
+  /** 开启时账号本人也必须带系统前缀；关闭后仅账号本人可裸命令触发 */
+  command_prefix_required?: boolean;
   kill_switch?: boolean;
   /** 全局 AI 能力开关；关闭后不加载模型 provider，也不注入插件 ctx.ai */
   ai_enabled?: boolean;

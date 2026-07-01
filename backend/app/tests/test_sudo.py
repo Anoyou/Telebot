@@ -583,8 +583,8 @@ async def test_incoming_sudo_command_outside_self_chat_is_ignored():
 
 
 @pytest.mark.asyncio
-async def test_incoming_normal_prefix_plugin_command_runs_for_group_user():
-    """群组成员发系统前缀插件命令时，应由 userbot 插件命令链路处理。"""
+async def test_incoming_normal_prefix_plugin_command_from_group_user_is_ignored():
+    """群组成员发系统前缀插件命令不应触发 userbot 命令链路。"""
     captured = []
 
     def fake_on(_event_type):
@@ -624,9 +624,9 @@ async def test_incoming_normal_prefix_plugin_command_runs_for_group_user():
 
         await incoming_handler(event)
 
-        plugin_handler.assert_awaited_once()
-        assert plugin_handler.await_args.args[2] == ["6789"]
-        assert plugin_handler.await_args.args[3] == 1
+        plugin_handler.assert_not_awaited()
+        event.edit.assert_not_called()
+        event.respond.assert_not_called()
     finally:
         unregister_plugin_command("10d", owner_plugin_key="ten_half")
 
