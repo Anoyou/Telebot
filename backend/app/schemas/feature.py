@@ -46,10 +46,12 @@ class FeatureInfo(BaseModel):
         plugin_install: Any | None = None,
         installed_plugin: InstalledPlugin | None = None,
     ) -> FeatureInfo:
-        manifest = getattr(f, "manifest", None) or {}
+        base_manifest = getattr(f, "manifest", None) or {}
         installed_source = str(getattr(installed_plugin, "source", "") or "")
         installed_source_url = str(getattr(installed_plugin, "source_url", "") or "")
         installed_manifest = getattr(installed_plugin, "manifest_json", None) or {}
+        manifest = {**base_manifest, **installed_manifest}
+        
         source_url = str(getattr(remote_plugin, "source_url", "") or installed_source_url)
         source_type = (
             "remote"
