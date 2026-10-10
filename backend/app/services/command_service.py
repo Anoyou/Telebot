@@ -25,8 +25,10 @@ from ..db.models.command import (
     AccountCommandLink,
     CommandTemplate,
     LLMProvider,
+    LLMProviderKey,
     default_api_format_for,
     normalize_client_identity_profile,
+    normalize_key_strategy,
     normalize_protocol_profile,
 )
 from ..redis_client import get_redis
@@ -36,6 +38,12 @@ from ..schemas.command import (
     CommandTemplateOut,
     CommandTemplateUpdate,
     LLMProviderCreate,
+    LLMProviderKeyCreate,
+    LLMProviderKeyHealth,
+    LLMProviderKeyListResponse,
+    LLMProviderKeyOut,
+    LLMProviderKeySummary,
+    LLMProviderKeyUpdate,
     LLMProviderOut,
     LLMProviderUpdate,
 )
@@ -334,6 +342,17 @@ def _provider_to_out(row: LLMProvider) -> LLMProviderOut:
         request_headers=request_header_summaries(
             getattr(row, "request_headers_enc", None)
         ),
+        key_strategy=normalize_key_strategy(getattr(row, "key_strategy", None)),
+        pool_keys=[
+            LLMProviderKeySummary(
+                id=k.id,
+                label=k.label,
+                key_hint=k.key_hint,
+                enabled=bool(k.enabled),
+                priority=int(k.priority),
+            )
+            for k in (getattr(row, "pool_keys", None) or [])
+        ],
         created_at=row.created_at,
     )
 
@@ -436,6 +455,9 @@ async def create_provider(
         cost_tier=int(payload.cost_tier),
         notes=payload.notes,
         proxy_id=payload.proxy_id,
+        key_strategy=normalize_key_strategy(payload.key_strategy),
+        # 显式初始化集合，避免 flush 后在 async 会话里触发惰性加载
+        pool_keys=[],
         # 候选模型清单（前端可以建完之后再调 fetch-models 自动填）
         models=[m.model_dump() for m in (payload.models or [])],
     )
@@ -530,6 +552,8 @@ async def update_provider(
     if "notes" in data:
         # notes 允许显式 None 清空
         row.notes = data["notes"]
+    if "key_strategy" in data and data["key_strategy"]:
+        row.key_strategy = normalize_key_strategy(data["key_strategy"])
 
     # proxy 处理：clear_proxy=True → 切回直连；否则只在 proxy_id 显式给值时改
     # （exclude_unset=True 已经过滤掉前端没传的字段，所以 proxy_id 出现 = 用户主动选了一条）
@@ -585,6 +609,146 @@ async def update_provider(
 async def delete_provider(db: AsyncSession, pid: int) -> None:
     """删除 provider；引用此 provider 的 ai 类模板调用会在 worker 内报错（friendly message）。"""
     row = await get_provider_row(db, pid)
+    await db.delete(row)
+    await db.flush()
+
+
+# ════════════════════════════════════════════════════════════
+# LLM Provider 密钥池
+# ════════════════════════════════════════════════════════════
+
+_MAX_POOL_KEYS_PER_PROVIDER = 32
+
+
+def _key_hint(api_key: str) -> str | None:
+    text = str(api_key or "").strip()
+    return text[-4:] if len(text) >= 8 else None
+
+
+def _provider_key_to_out(
+    row: LLMProviderKey,
+    *,
+    usage: tuple[int, int] | None = None,
+) -> LLMProviderKeyOut:
+    from .llm_key_pool import key_health
+
+    requests, tokens = usage or (0, 0)
+    return LLMProviderKeyOut(
+        id=row.id,
+        provider_id=row.provider_id,
+        label=row.label,
+        key_hint=row.key_hint,
+        enabled=bool(row.enabled),
+        priority=int(row.priority),
+        proxy_id=row.proxy_id,
+        daily_request_limit=row.daily_request_limit,
+        daily_token_limit=row.daily_token_limit,
+        notes=row.notes,
+        created_at=row.created_at,
+        health=LLMProviderKeyHealth(**key_health(row.provider_id, row.id)),
+        today_requests=int(requests),
+        today_tokens=int(tokens),
+    )
+
+
+async def get_provider_key_row(db: AsyncSession, pid: int, key_id: int) -> LLMProviderKey:
+    row = await db.get(LLMProviderKey, key_id)
+    if row is None or int(row.provider_id) != int(pid):
+        raise _err("LLM_PROVIDER_KEY_NOT_FOUND", "密钥不存在", 404)
+    return row
+
+
+async def list_provider_keys(db: AsyncSession, pid: int) -> LLMProviderKeyListResponse:
+    from .llm_key_pool import key_health, load_daily_usage
+
+    provider = await get_provider_row(db, pid)
+    rows = (
+        await db.execute(
+            select(LLMProviderKey)
+            .where(LLMProviderKey.provider_id == pid)
+            .order_by(LLMProviderKey.priority.asc(), LLMProviderKey.id.asc())
+        )
+    ).scalars().all()
+    usage = await load_daily_usage(pid, [int(r.id) for r in rows])
+    return LLMProviderKeyListResponse(
+        provider_id=pid,
+        key_strategy=normalize_key_strategy(getattr(provider, "key_strategy", None)),
+        has_main_key=bool(provider.api_key_enc),
+        main_key_health=LLMProviderKeyHealth(**key_health(pid, None)),
+        keys=[_provider_key_to_out(r, usage=usage.get(int(r.id))) for r in rows],
+    )
+
+
+async def create_provider_key(db: AsyncSession, pid: int, payload: LLMProviderKeyCreate) -> LLMProviderKeyOut:
+    provider = await get_provider_row(db, pid)
+    if getattr(provider, "execution_backend", "direct") == "codex_gateway":
+        raise _err("LLM_PROVIDER_KEY_UNSUPPORTED", "Codex 客户端兼容模式（Gateway）不支持密钥池", 422)
+    existing = (
+        await db.execute(select(LLMProviderKey).where(LLMProviderKey.provider_id == pid))
+    ).scalars().all()
+    if len(existing) >= _MAX_POOL_KEYS_PER_PROVIDER:
+        raise _err("LLM_PROVIDER_KEY_LIMIT", f"单个 Provider 最多 {_MAX_POOL_KEYS_PER_PROVIDER} 把池内密钥", 422)
+    if any(k.label == payload.label for k in existing):
+        raise _err("LLM_PROVIDER_KEY_LABEL_CONFLICT", f"已存在同名密钥：{payload.label}", 409)
+    if payload.proxy_id is not None:
+        await _validate_proxy_for_llm(db, payload.proxy_id)
+    row = LLMProviderKey(
+        provider_id=pid,
+        label=payload.label,
+        api_key_enc=encrypt_str(payload.api_key),
+        key_hint=_key_hint(payload.api_key),
+        enabled=bool(payload.enabled),
+        priority=int(payload.priority),
+        proxy_id=payload.proxy_id,
+        daily_request_limit=payload.daily_request_limit or None,
+        daily_token_limit=payload.daily_token_limit or None,
+        notes=payload.notes,
+    )
+    db.add(row)
+    await db.flush()
+    return _provider_key_to_out(row)
+
+
+async def update_provider_key(
+    db: AsyncSession, pid: int, key_id: int, payload: LLMProviderKeyUpdate
+) -> LLMProviderKeyOut:
+    row = await get_provider_key_row(db, pid, key_id)
+    data = payload.model_dump(exclude_unset=True)
+    if "label" in data and data["label"] and data["label"] != row.label:
+        dup = (
+            await db.execute(
+                select(LLMProviderKey).where(
+                    LLMProviderKey.provider_id == pid, LLMProviderKey.label == data["label"]
+                )
+            )
+        ).scalar_one_or_none()
+        if dup is not None and dup.id != row.id:
+            raise _err("LLM_PROVIDER_KEY_LABEL_CONFLICT", f"已存在同名密钥：{data['label']}", 409)
+        row.label = data["label"]
+    if data.get("api_key"):
+        row.api_key_enc = encrypt_str(data["api_key"])
+        row.key_hint = _key_hint(data["api_key"])
+    if "enabled" in data and data["enabled"] is not None:
+        row.enabled = bool(data["enabled"])
+    if "priority" in data and data["priority"] is not None:
+        row.priority = int(data["priority"])
+    if data.get("clear_proxy"):
+        row.proxy_id = None
+    elif "proxy_id" in data and data["proxy_id"] is not None:
+        await _validate_proxy_for_llm(db, int(data["proxy_id"]))
+        row.proxy_id = int(data["proxy_id"])
+    if "daily_request_limit" in data:
+        row.daily_request_limit = data["daily_request_limit"] or None
+    if "daily_token_limit" in data:
+        row.daily_token_limit = data["daily_token_limit"] or None
+    if "notes" in data:
+        row.notes = data["notes"]
+    await db.flush()
+    return _provider_key_to_out(row)
+
+
+async def delete_provider_key(db: AsyncSession, pid: int, key_id: int) -> None:
+    row = await get_provider_key_row(db, pid, key_id)
     await db.delete(row)
     await db.flush()
 

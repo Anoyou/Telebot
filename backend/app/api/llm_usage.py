@@ -22,6 +22,8 @@ class LLMUsageItem(BaseModel):
     account_id: int | None
     provider_id: int | None
     provider_name: str | None
+    # 密钥池命中的 Key 标签；None = 主密钥或老记录。
+    provider_key_label: str | None = None
     model: str | None
     client_identity_profile: str | None
     execution_backend: str | None
@@ -46,6 +48,7 @@ class LLMUsageItem(BaseModel):
             account_id=row.account_id,
             provider_id=row.provider_id,
             provider_name=row.provider_name,
+            provider_key_label=getattr(row, "provider_key_label", None),
             model=row.model,
             client_identity_profile=row.client_identity_profile,
             execution_backend=getattr(row, "execution_backend", None),

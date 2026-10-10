@@ -58,10 +58,15 @@ from ..schemas.command import (
     LivenessResultItem,
     LLMProviderApiKeyReveal,
     LLMProviderCreate,
+    LLMProviderKeyCreate,
+    LLMProviderKeyListResponse,
+    LLMProviderKeyOut,
+    LLMProviderKeyUpdate,
     LLMProviderOut,
     LLMProviderUpdate,
     ProtocolIdentityAttempt,
     ProtocolProbeResult,
+    ProviderModel,
     QuickVerifyProviderRequest,
     TestModelRequest,
     TestModelResponse,
@@ -73,6 +78,7 @@ from ..services.llm_identity import (
     default_identity_for_format,
     resolve_identity,
 )
+from ..services.llm_model_catalog import ModelMetadata, merge_model_entry, parse_models_payload
 from ..services.llm_profiles import infer_protocol_profile, resolve_protocol_profile
 from ..services.llm_protocol import (
     normalize_base_url,
@@ -567,8 +573,112 @@ async def delete_provider(pid: int, db: DBSession, user: CurrentUser) -> dict[st
 
 
 # ════════════════════════════════════════════════════════════
-# 账号 × 模板 启用关系
+# LLM Provider 密钥池
 # ════════════════════════════════════════════════════════════
+
+
+async def _notify_provider_reload(db: Any) -> None:
+    """密钥池改动后通知 worker 重新拉取 provider（与 Provider CRUD 同一口径）。"""
+
+    aids = await command_service.list_all_account_ids(db)
+    await command_service.notify_reload(aids)
+
+
+@router.get(
+    "/api/commands/llm-providers/{pid}/keys",
+    response_model=LLMProviderKeyListResponse,
+)
+async def list_provider_keys(pid: int, db: DBSession, _user: CurrentUser) -> LLMProviderKeyListResponse:
+    """列出 Provider 的池内密钥（只回 label / key_hint，绝不回明文）。"""
+    await _require_ai_enabled(db)
+    return await command_service.list_provider_keys(db, pid)
+
+
+@router.post(
+    "/api/commands/llm-providers/{pid}/keys",
+    response_model=LLMProviderKeyOut,
+)
+async def create_provider_key(
+    pid: int,
+    payload: LLMProviderKeyCreate,
+    db: DBSession,
+    user: CurrentUser,
+) -> LLMProviderKeyOut:
+    """新增池内密钥；api_key 用 MASTER_KEY 加密落库，响应只带末 4 位提示。"""
+    await _require_ai_enabled(db)
+    try:
+        out = await command_service.create_provider_key(db, pid, payload)
+        await audit.write(
+            db,
+            user.id,
+            "llm_provider.key_create",
+            target=f"llm_provider:{pid}",
+            detail={"key_id": out.id, "label": out.label, "enabled": out.enabled, "priority": out.priority},
+        )
+        await db.commit()
+    except BaseException:
+        await db.rollback()
+        raise
+    await _notify_provider_reload(db)
+    return out
+
+
+@router.patch(
+    "/api/commands/llm-providers/{pid}/keys/{key_id}",
+    response_model=LLMProviderKeyOut,
+)
+async def update_provider_key(
+    pid: int,
+    key_id: int,
+    payload: LLMProviderKeyUpdate,
+    db: DBSession,
+    user: CurrentUser,
+) -> LLMProviderKeyOut:
+    """更新池内密钥。api_key 行为与 Provider 一致：``""`` 清空、非空替换、缺省不动。"""
+    await _require_ai_enabled(db)
+    submitted = payload.model_dump(exclude_unset=True)
+    audit_detail = payload.model_dump(
+        exclude_unset=True,
+        exclude={"api_key", "notes"},
+    )
+    if "api_key" in submitted:
+        audit_detail["api_key_changed"] = True
+    try:
+        out = await command_service.update_provider_key(db, pid, key_id, payload)
+        await audit.write(
+            db,
+            user.id,
+            "llm_provider.key_update",
+            target=f"llm_provider:{pid}",
+            detail={"key_id": out.id, **audit_detail},
+        )
+        await db.commit()
+    except BaseException:
+        await db.rollback()
+        raise
+    await _notify_provider_reload(db)
+    return out
+
+
+@router.delete("/api/commands/llm-providers/{pid}/keys/{key_id}")
+async def delete_provider_key(pid: int, key_id: int, db: DBSession, user: CurrentUser) -> dict[str, bool]:
+    """删除池内密钥；该密钥若正在被使用，下一次调用即换用其它候选。"""
+    await _require_ai_enabled(db)
+    try:
+        await command_service.delete_provider_key(db, pid, key_id)
+        await audit.write(
+            db,
+            user.id,
+            "llm_provider.key_delete",
+            target=f"llm_provider:{pid}",
+            detail={"key_id": key_id},
+        )
+        await db.commit()
+    except BaseException:
+        await db.rollback()
+        raise
+    await _notify_provider_reload(db)
+    return {"ok": True}
 
 
 @router.get("/api/accounts/{aid}/commands", response_model=list[AccountCommandItem])
@@ -774,7 +884,11 @@ async def fetch_models_preview(
             },
         )
         await db.commit()
-        return FetchModelsPreviewResponse(fetched=len(new_ids), ids=new_ids)
+        return FetchModelsPreviewResponse(
+            fetched=len(new_ids),
+            ids=new_ids,
+            models=[ProviderModel(id=mid, enabled=False, custom=False) for mid in new_ids],
+        )
 
     default_base_urls = {
         "openai": "https://api.openai.com/v1",
@@ -848,16 +962,18 @@ async def fetch_models_preview(
             "FETCH_BAD_SHAPE",
             f"响应缺 'data' 数组（实际顶层 keys: {list(data.keys())[:5] if isinstance(data, dict) else type(data).__name__}）",
         )
+    catalog = parse_models_payload(data)
     new_ids: list[str] = []
-    seen_ids: set[str] = set()
-    for it in items:
-        if isinstance(it, dict) and isinstance(it.get("id"), str):
-            mid = it["id"].strip()
-            if mid and len(mid) <= 128 and mid not in seen_ids:
-                seen_ids.add(mid)
-                new_ids.append(mid)
-            if len(new_ids) >= 200:
-                break
+    preview_models: list[ProviderModel] = []
+    for mid, meta in catalog.items():
+        if len(mid) > 128:
+            continue
+        new_ids.append(mid)
+        preview_models.append(
+            ProviderModel(**merge_model_entry({"id": mid, "enabled": False, "custom": False}, meta))
+        )
+        if len(new_ids) >= 200:
+            break
 
     await audit.write(
         db,
@@ -867,7 +983,7 @@ async def fetch_models_preview(
         detail={"fetched": len(new_ids), "provider": payload.provider},
     )
     await db.commit()
-    return FetchModelsPreviewResponse(fetched=len(new_ids), ids=new_ids)
+    return FetchModelsPreviewResponse(fetched=len(new_ids), ids=new_ids, models=preview_models)
 
 
 @router.post("/api/commands/llm-providers/quick-verify/stream")
@@ -1509,6 +1625,7 @@ async def fetch_models(pid: int, db: DBSession, user: CurrentUser) -> FetchModel
             422,
         )
 
+    catalog: dict[str, ModelMetadata] = {}
     if getattr(row, "execution_backend", "direct") == LLM_EXECUTION_BACKEND_CODEX_GATEWAY:
         from ..services.llm_client import GatewayResponsesClient, LLMError, build_client
 
@@ -1576,12 +1693,8 @@ async def fetch_models(pid: int, db: DBSession, user: CurrentUser) -> FetchModel
                 "FETCH_BAD_SHAPE",
                 f"响应缺 'data' 数组（实际顶层 keys: {list(data.keys())[:5] if isinstance(data, dict) else type(data).__name__}）",
             )
-        new_ids = []
-        for item in items:
-            if isinstance(item, dict) and isinstance(item.get("id"), str):
-                model_id = item["id"].strip()
-                if model_id:
-                    new_ids.append(model_id)
+        catalog = parse_models_payload(data)
+        new_ids = list(catalog.keys())
 
     from ..services.gateway_runtime import gateway_configuration_transaction
 
@@ -1604,17 +1717,18 @@ async def fetch_models(pid: int, db: DBSession, user: CurrentUser) -> FetchModel
             for mid in new_ids:
                 if mid in existing:
                     old = existing[mid]
-                    merged.append(
-                        {
-                            **old,
-                            "id": mid,
-                            "enabled": bool(old.get("enabled", False)),
-                            "custom": False,
-                            "label": old.get("label"),
-                        }
-                    )
+                    entry = {
+                        **old,
+                        "id": mid,
+                        "enabled": bool(old.get("enabled", False)),
+                        "custom": False,
+                        "label": old.get("label"),
+                    }
                 else:
-                    merged.append({"id": mid, "enabled": False, "custom": False, "label": None})
+                    entry = {"id": mid, "enabled": False, "custom": False, "label": None}
+                meta = catalog.get(mid)
+                # 上游元数据只补空缺：enabled / custom / 用户手填 label 与能力标记一律保留。
+                merged.append(merge_model_entry(entry, meta) if meta is not None else entry)
 
             fetched_ids = set(new_ids)
             for mid, old in existing.items():

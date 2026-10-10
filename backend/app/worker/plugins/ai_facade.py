@@ -50,6 +50,7 @@ from ...services.llm_invoke import (
 from ...services.llm_invoke import (
     invoke_structured,
 )
+from ...services.llm_key_pool import resolve_pool_key_proxies
 from ...services.llm_protocol import MessageRole, ModelMessage, ModelRequest, ModelUsage
 from ...settings import settings
 from ...util.proxy import ProxyConfigError
@@ -710,6 +711,10 @@ async def load_llm_providers() -> dict[int, LLMProviderDTO]:
     async with AsyncSessionLocal() as db:
         rows = list((await db.execute(select(LLMProvider))).scalars().all())
         proxy_ids = {int(row.proxy_id) for row in rows if getattr(row, "proxy_id", None) is not None}
+        for row in rows:
+            for key_row in getattr(row, "pool_keys", None) or []:
+                if key_row.proxy_id is not None:
+                    proxy_ids.add(int(key_row.proxy_id))
         proxies: dict[int, Proxy] = {}
         if proxy_ids:
             proxy_rows = list(
@@ -732,6 +737,7 @@ async def load_llm_providers() -> dict[int, LLMProviderDTO]:
                     exc,
                 )
                 continue
+        resolve_pool_key_proxies(dto, proxies, _proxy_url_from_row, log_prefix="PluginAI Provider")
         providers[int(dto.id)] = dto
     return providers
 

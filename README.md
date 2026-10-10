@@ -52,7 +52,7 @@ TelePilot 面向需要自托管 Telegram 自动化的个人用户和小团队。
 | 工作台 | 当前实现 |
 | --- | --- |
 | 插件 | 内置插件、本地导入、ZIP 安装和 Git 远程仓库；支持签名策略、权限声明、版本检查、全局安装、按账号启停、配置页和 Worker 热重载 |
-| AI | OpenAI Chat Completions、OpenAI Responses、Anthropic Messages 与 Ollama 兼容协议；Responses Provider 可选 Codex 客户端兼容模式（Gateway）；支持模型发现、测活、路由标签、客户端身份、加密兼容请求头、调用记录、Token 与预算 |
+| AI | OpenAI Chat Completions、OpenAI Responses、Anthropic Messages 与 Ollama 兼容协议；Responses Provider 可选 Codex 客户端兼容模式（Gateway）；支持模型发现与上下文窗口等元数据、多 Key 密钥池、测活、路由标签、客户端身份、加密兼容请求头、调用记录、Token 与预算；内置 Magpie 网关快捷模板 |
 | 系统助手与待确认 | Web 悬浮助手和管理 Bot `/agent` 共用可恢复 Durable Run；思考与正文分流、工具渐进披露、同 Provider 重试与 fallback、公开网页读取、源码只读诊断、长期记忆和写操作 Action 确认 |
 | 交互 | 独立 Interaction Bot manager 承接关键词、付款确认、按钮回调和群会话；会话状态持久化，命令入口仍可走用户账号通道 |
 | 指令与任务 | 消息模板、AI 指令、定时任务和自动命令白名单集中在一级工作台，支持按账号启用和立即执行 |
@@ -205,6 +205,7 @@ make plugin-register dir=plugins/local_imports/my_game
 | 平台模块热关闭与恢复 | [平台能力](./docs/PLATFORM-CAPABILITIES.md) |
 | System Agent、Durable Run 与 Action | [系统助手](./docs/SYSTEM-AGENT.md) |
 | Codex 客户端兼容 Gateway 管理、健康与排障 | [Codex Gateway](./docs/CODEX-GATEWAY.md) |
+| LLM 多 Key 密钥池、模型元数据与 Magpie 网关接入 | [LLM 密钥池](./docs/LLM-KEY-POOL.md) |
 | 内部 HTTP API、认证、错误与类型生成 | [API 契约](./docs/API-CONTRACT.md) |
 | 插件开发入口 | [插件开发指南](./docs/PLUGIN-DEV-GUIDE.md) |
 | 插件字段、事件、action 和生命周期 | [插件 API 参考](./docs/PLUGIN-API-REFERENCE.md) |

@@ -56,7 +56,7 @@ import {
 } from "@/api/commands";
 import { listProxies } from "@/api/proxies";
 import { getHealthOverview, getSystemSettings, patchSystemSettings } from "@/api/system";
-import type { ChatTestModelResult, ClientIdentityHeaderItem, ClientIdentityRequestProfile, ClientIdentityVersionDetectItem, ClientIdentityVersionItem, DetectProviderProtocolsResponse, LLMApiFormat, LLMClientIdentityProfile, LLMExecutionBackend, LLMModality, LLMProtocolProfile, LLMProviderKind, LLMProviderOut, LLMRequestHeaderInput, LLMRequestHeaderScope, LLMTag, LLMWebSearchApiFormat, ProviderModel, ProtocolProbeResult, ProxyOut } from "@/api/types";
+import type { ChatTestModelResult, ClientIdentityHeaderItem, ClientIdentityRequestProfile, ClientIdentityVersionDetectItem, ClientIdentityVersionItem, DetectProviderProtocolsResponse, LLMApiFormat, LLMClientIdentityProfile, LLMExecutionBackend, LLMKeyStrategy, LLMModality, LLMProtocolProfile, LLMProviderKind, LLMProviderOut, LLMRequestHeaderInput, LLMRequestHeaderScope, LLMTag, LLMWebSearchApiFormat, ProviderModel, ProtocolProbeResult, ProxyOut } from "@/api/types";
 import { getErrMsg } from "@/lib/api";
 import {
   isSupportedProxyType,
@@ -71,6 +71,7 @@ import {
   ProviderCreateVerification,
   type ProviderCreateStage,
 } from "@/components/ai/ProviderCreateVerification";
+import { ProviderKeyPoolSection } from "@/components/ai/ProviderKeyPoolSection";
 import { UpstreamErrorFacts } from "@/components/ai/UpstreamErrorFacts";
 
 // 各 provider 的默认 base_url 提示，仅作 placeholder
@@ -282,6 +283,8 @@ interface FormState {
   // toggle / 自定义添加 / fetch 都改这个；保存时整体 PATCH 给后端
   models: ProviderModel[];
   request_headers: FormRequestHeader[];
+  // ── 密钥池选钥策略（池内密钥本身走独立 keys 接口，不随表单保存）──
+  key_strategy: LLMKeyStrategy;
 }
 
 interface FormRequestHeader {
@@ -318,6 +321,7 @@ const EMPTY_FORM: FormState = {
   proxy_id: "",
   models: [],
   request_headers: [],
+  key_strategy: "order",
 };
 
 function ApiKeyInput({
@@ -866,6 +870,7 @@ export function LLMProviders({
         proxy_id: form.proxy_id ? Number(form.proxy_id) : null,
         models: form.models,
         request_headers: requestHeadersPayload(form.request_headers),
+        key_strategy: form.key_strategy,
       }),
     onSuccess: () => {
       toast.success("已新建模型提供商");
@@ -906,6 +911,7 @@ export function LLMProviders({
         ...proxyPatch,
         models: form.models,
         request_headers: requestHeadersPayload(form.request_headers),
+        key_strategy: form.key_strategy,
       });
     },
     onSuccess: () => {
@@ -958,18 +964,15 @@ export function LLMProviders({
       cost_tier: typeof p.cost_tier === "number" ? p.cost_tier : 2,
       notes: p.notes || "",
       proxy_id: p.proxy_id != null ? String(p.proxy_id) : "",
+      // 整条展开保留：上下文窗口 / 输出上限 / 模态等元数据不能在编辑往返里丢掉
       models: (p.models || []).map((m) => ({
+        ...m,
         id: m.id,
         enabled: !!m.enabled,
         custom: !!m.custom,
         label: m.label ?? null,
-        supports_tools: m.supports_tools ?? null,
-        supports_images: m.supports_images ?? null,
-        supports_temperature: m.supports_temperature ?? null,
-        reasoning_efforts: m.reasoning_efforts ?? null,
-        supported_reasoning_levels: m.supported_reasoning_levels ?? null,
-        default_reasoning_level: m.default_reasoning_level ?? null,
       })),
+      key_strategy: (p.key_strategy as LLMKeyStrategy) || "order",
       request_headers: (p.request_headers || []).map((header) => ({
         name: header.name,
         value: "",
@@ -1288,6 +1291,15 @@ export function LLMProviders({
                         ) : (
                           <MetaBadge>未配置</MetaBadge>
                         )}
+                        {(p.pool_keys?.length ?? 0) > 0 ? (
+                          <MetaBadge
+                            className="ml-1"
+                            tone="info"
+                            title={`密钥池 ${p.pool_keys!.length} 把（${p.pool_keys!.filter((k) => k.enabled).length} 把启用）`}
+                          >
+                            +{p.pool_keys!.length} 池
+                          </MetaBadge>
+                        ) : null}
                       </TableCell>
                       <TableCell className="space-x-2 text-right">
                         <Button
@@ -1379,6 +1391,9 @@ function ProviderMobileCard({
             <KeyRound className="h-3 w-3" />
             {provider.has_api_key ? "已配置" : "未配置"}
           </MetaBadge>
+          {(provider.pool_keys?.length ?? 0) > 0 ? (
+            <MetaBadge tone="info">+{provider.pool_keys!.length} 池</MetaBadge>
+          ) : null}
           <MetaBadge mono>{provider.provider}</MetaBadge>
           <MetaBadge mono>{provider.api_format || "chat_completions"}</MetaBadge>
           <MetaBadge mono tone={isGatewayBackend(provider.execution_backend) ? "info" : "neutral"}>
@@ -1536,6 +1551,7 @@ function ProviderCreateWorkspace({
     : null;
   const proxySelectionBlocked = proxyListRequired || selectedProxyIssue !== null;
   const proxyOptions = visibleProxyOptions(proxies, form.proxy_id);
+  const proxyById = new Map(proxies.map((proxy) => [proxy.id, proxy]));
 
   useEffect(() => {
     const root = document.querySelector<HTMLElement>("[data-app-main]");
@@ -1576,6 +1592,24 @@ function ProviderCreateWorkspace({
 
   const setExecutionBackend = (executionBackend: LLMExecutionBackend) => {
     onChange(applyExecutionBackend(form, executionBackend) as FormState);
+    onVerificationChange(false);
+  };
+
+  // Magpie 网关快捷模板：只预填接入信息（地址 / 协议 / 身份），凭据仍需用户自己填。
+  // 网关自己的 /v1/models 会带上下文窗口、推理档位等元数据，保存时自动写进模型清单。
+  const applyMagpieTemplate = () => {
+    if (isEdit) return;
+    onChange({
+      ...(applyExecutionBackend(form, "direct") as FormState),
+      name: form.name.trim() || "Magpie 网关",
+      provider: "openai",
+      base_url: "http://127.0.0.1:3425/v1",
+      api_format: "chat_completions",
+      protocol_profile: protocolProfileForFormat("chat_completions", form.protocol_profile),
+      client_identity_profile: "auto",
+      default_model: "",
+      models: [],
+    });
     onVerificationChange(false);
   };
 
@@ -1709,6 +1743,24 @@ function ProviderCreateWorkspace({
                   onChange={(event) => setField("base_url", event.target.value)}
                 />
                 <p className="text-xs text-muted-foreground">留空使用当前服务类型的默认地址。</p>
+                {!isEdit ? (
+                  <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                    <span>快捷模板：</span>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      disabled={connectionLocked || gatewayMode}
+                      title="预填 Magpie 网关（yetone/magpie）的地址与协议；API Key 填网关自身的 Key"
+                      onClick={applyMagpieTemplate}
+                    >
+                      Magpie 网关
+                    </Button>
+                    <span>
+                      已部署 Magpie 时用它一步带入地址与协议；网关 /v1/models 的上下文窗口、推理档位会随「获取模型列表」写入。
+                    </span>
+                  </div>
+                ) : null}
               </div>
               <div className="space-y-1.5 sm:col-span-2">
                 <Label htmlFor="provider-create-api-key">API Key</Label>
@@ -1807,6 +1859,30 @@ function ProviderCreateWorkspace({
                 />
               </div>
             </details>
+
+            {/* 密钥池：仅编辑模式且非 Gateway（Gateway 凭据由自身管理）时可见。
+                策略随 Provider PATCH 保存；池内 Key 的增删改立即生效并触发 worker reload。 */}
+            {isEdit && form.id && !gatewayMode ? (
+              <details className="group mt-4 rounded-md border bg-muted/20">
+                <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2.5 text-sm font-medium [&::-webkit-details-marker]:hidden">
+                  <ChevronRight className="h-4 w-4 transition-transform group-open:rotate-90" />
+                  密钥池（多 Key 轮换）
+                  {form.key_strategy !== "order" ? (
+                    <MetaBadge>{form.key_strategy === "rotate" ? "轮转" : "用量最少优先"}</MetaBadge>
+                  ) : null}
+                </summary>
+                <div className="border-t p-3">
+                  <ProviderKeyPoolSection
+                    providerId={form.id}
+                    strategy={form.key_strategy}
+                    onStrategyChange={(next) => setField("key_strategy", next)}
+                    proxyOptions={proxyOptions}
+                    proxyById={proxyById}
+                    disabled={saving}
+                  />
+                </div>
+              </details>
+            ) : null}
 
             <div className="mt-4 flex flex-wrap items-center gap-2">
               <Button
@@ -2298,6 +2374,89 @@ function ProbeRow({ label, probe }: { label: string; probe: ProtocolProbeResult 
 // - 单模型测活在后台复用真实对话接口并原地返回结果；未保存的 provider
 //   （form.id 为空）按钮置灰 + 提示"先保存"。
 // - 模型按 enabled 拆两段：启用的常驻显示；未启用的默认折叠隐藏，点击展开。
+// 与后端 llm_model_catalog.merge_model_entry 对齐：上游元数据只填空缺，
+// 绝不覆盖用户勾选的 enabled / custom 和已经填过的能力位。
+function mergeModelMetadata(row: ProviderModel, meta?: ProviderModel): ProviderModel {
+  if (!meta) return row;
+  const fill = <T,>(current: T | null | undefined, upstream: T | null | undefined): T | null =>
+    current ?? upstream ?? null;
+  const fillList = <T,>(current: T[] | null | undefined, upstream: T[] | null | undefined): T[] | null =>
+    current && current.length > 0 ? current : upstream && upstream.length > 0 ? upstream : null;
+  return {
+    ...row,
+    label: row.label || meta.label || null,
+    context_window: fill(row.context_window, meta.context_window),
+    max_output_tokens: fill(row.max_output_tokens, meta.max_output_tokens),
+    input_modalities: fillList(row.input_modalities, meta.input_modalities),
+    output_modalities: fillList(row.output_modalities, meta.output_modalities),
+    supported_reasoning_levels: fillList(
+      row.supported_reasoning_levels,
+      meta.supported_reasoning_levels,
+    ),
+    reasoning_efforts: fillList(row.reasoning_efforts, meta.reasoning_efforts),
+    default_reasoning_level: fill(row.default_reasoning_level, meta.default_reasoning_level),
+    supported_api_formats: fillList(row.supported_api_formats, meta.supported_api_formats),
+    supports_images: fill(row.supports_images, meta.supports_images),
+    metadata_source: row.metadata_source ?? meta.metadata_source ?? "upstream",
+  };
+}
+
+/** 上下文窗口这类大数字用 400K / 1M 这种紧凑写法，完整值放 title。 */
+function formatTokenCount(value: number): string {
+  if (value >= 1_000_000) {
+    const millions = value / 1_000_000;
+    return `${Number.isInteger(millions) ? millions : millions.toFixed(1)}M`;
+  }
+  if (value >= 1000) {
+    const thousands = value / 1000;
+    return `${Number.isInteger(thousands) ? thousands : thousands.toFixed(1)}K`;
+  }
+  return String(value);
+}
+
+function ModelMetadataBadges({ model }: { model: ProviderModel }) {
+  const image =
+    model.supports_images ||
+    (model.input_modalities || []).some((modality) => modality === "image");
+  const levels = model.supported_reasoning_levels || model.reasoning_efforts || [];
+  return (
+    <>
+      {model.context_window ? (
+        <MetaBadge
+          tone="outline"
+          className="text-[10px] leading-4"
+          title={`上下文窗口 ${model.context_window.toLocaleString()} tokens（来自 ${model.metadata_source === "manual" ? "手填" : "上游 /models"}）`}
+        >
+          {formatTokenCount(model.context_window)} ctx
+        </MetaBadge>
+      ) : null}
+      {model.max_output_tokens ? (
+        <MetaBadge
+          tone="outline"
+          className="text-[10px] leading-4"
+          title={`单次输出上限 ${model.max_output_tokens.toLocaleString()} tokens`}
+        >
+          ≤{formatTokenCount(model.max_output_tokens)} out
+        </MetaBadge>
+      ) : null}
+      {image ? (
+        <MetaBadge tone="info" className="text-[10px] leading-4" title="支持图片输入">
+          图片
+        </MetaBadge>
+      ) : null}
+      {levels.length > 0 ? (
+        <MetaBadge
+          tone="neutral"
+          className="text-[10px] leading-4"
+          title={`支持的推理档位：${levels.join(" / ")}${model.default_reasoning_level ? `；默认 ${model.default_reasoning_level}` : ""}`}
+        >
+          推理 {levels.length > 1 ? `${levels[0]}→${levels[levels.length - 1]}` : levels[0]}
+        </MetaBadge>
+      ) : null}
+    </>
+  );
+}
+
 function ProviderModelsSection({
   providerId,
   models,
@@ -2347,27 +2506,38 @@ function ProviderModelsSection({
 
   const persisted = providerId !== null;
 
-  // 把后端拉到的 ID 列表合并进 form.models，逻辑与后端 fetch_models 一致：
-  // - 已存在的条目保留 enabled / label，custom 改 false（fetch 拿到了说明不是用户瞎填）
+  // 把后端拉到的模型清单合并进 form.models，逻辑与后端 fetch_models 一致：
+  // - 已存在的条目保留 enabled / label / 用户手填能力位，用上游元数据补空缺
   // - 新条目默认 enabled=false
   // - 老的 fetch 来的（非 custom）但本次没拿到 → 视为已下架，丢弃
   // - 老的 custom 条目 → 永远保留
-  const mergeFetched = (newIds: string[]) => {
+  const mergeFetched = (newIds: string[], fetchedModels: ProviderModel[] = []) => {
     const existing = new Map(models.map((m) => [m.id, m]));
+    const metaById = new Map(fetchedModels.map((m) => [m.id, m]));
     const fetched = new Set(newIds);
     const merged: ProviderModel[] = [];
     for (const mid of newIds) {
       const old = existing.get(mid);
+      const meta = metaById.get(mid);
       if (old) {
-        merged.push({
-          ...old,
-          id: mid,
-          enabled: !!old.enabled,
-          custom: false,
-          label: old.label ?? null,
-        });
+        merged.push(
+          mergeModelMetadata(
+            {
+              ...old,
+              id: mid,
+              enabled: !!old.enabled,
+              custom: false,
+              label: old.label ?? null,
+            },
+            meta,
+          ),
+        );
       } else {
-        merged.push({ id: mid, enabled: false, custom: false, label: null });
+        merged.push(
+          meta
+            ? { ...meta, id: mid, enabled: false, custom: false }
+            : { id: mid, enabled: false, custom: false, label: null },
+        );
       }
     }
     for (const m of models) {
@@ -2393,13 +2563,16 @@ function ProviderModelsSection({
         request_headers: requestHeadersPayload(requestHeaders),
       }),
     onSuccess: (resp) => {
-      mergeFetched(resp.ids);
+      mergeFetched(resp.ids, resp.models || []);
+      const metaCount = (resp.models || []).filter(
+        (m) => m.context_window || m.supported_reasoning_levels?.length || m.input_modalities?.length,
+      ).length;
       toast.success(
         `已拉取 ${resp.fetched} 个模型；本地共 ${
         // mergeFetched 是同步的，但 models 还是旧引用——直接用 resp.fetched 给提示
         resp.fetched +
         models.filter((m) => m.custom && !resp.ids.includes(m.id)).length
-        } 条`,
+        } 条${metaCount > 0 ? `，其中 ${metaCount} 条带上下文窗口等元数据` : ""}`,
       );
     },
     onError: (err) => toast.error(getErrMsg(err)),
@@ -2516,6 +2689,7 @@ function ProviderModelsSection({
         {m.custom ? (
           <MetaBadge tone="outline" className="text-[10px] leading-4">custom</MetaBadge>
         ) : null}
+        <ModelMetadataBadges model={m} />
         {result ? (
           result.ok ? (
             <MetaBadge tone="success" className="text-[10px] leading-4" title={resultDetail || ""}>

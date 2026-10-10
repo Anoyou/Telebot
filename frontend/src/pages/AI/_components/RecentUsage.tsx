@@ -245,7 +245,14 @@ export function RecentUsageContent() {
                         <TableCell title={r.source || undefined}>
                           <div className="font-medium">{usageSourceLabel(r.source)}</div>
                         </TableCell>
-                        <TableCell>{r.provider_name || (r.provider_id ? `#${r.provider_id}` : "-")}</TableCell>
+                        <TableCell>
+                          {r.provider_name || (r.provider_id ? `#${r.provider_id}` : "-")}
+                          {r.provider_key_label ? (
+                            <MetaBadge className="ml-1" tone="info" title="密钥池命中的 Key">
+                              {r.provider_key_label}
+                            </MetaBadge>
+                          ) : null}
+                        </TableCell>
                         <TableCell className="font-mono text-xs">{r.model || "-"}</TableCell>
                         <TableCell>{isGatewayBackend(r.execution_backend) ? "由 Gateway 管理" : clientIdentityLabel(r.client_identity_profile)}</TableCell>
                         <TableCell>
@@ -370,7 +377,10 @@ function UsageDetailPanel({ record }: { record: LLMUsageRecord }) {
       <div className="grid gap-2 text-xs sm:grid-cols-2 xl:grid-cols-5">
         <InfoCell label="调用来源" value={usageSourceLabel(record.source)} />
         <InfoCell label="账号" value={record.account_id == null ? "-" : `#${record.account_id}`} />
-        <InfoCell label="模型提供商" value={record.provider_name || (record.provider_id ? `#${record.provider_id}` : "-")} />
+        <InfoCell
+          label="模型提供商"
+          value={`${record.provider_name || (record.provider_id ? `#${record.provider_id}` : "-")}${record.provider_key_label ? ` · Key ${record.provider_key_label}` : ""}`}
+        />
         <InfoCell label="客户端" value={isGatewayBackend(record.execution_backend) ? "由 Gateway 管理" : clientIdentityLabel(record.client_identity_profile)} />
         <InfoCell label="实际后端" value={executionBackendLabel(record.execution_backend, "未记录")} />
         <InfoCell label="Token" value={`${record.input_tokens || 0} 输入 / ${record.output_tokens || 0} 输出`} />

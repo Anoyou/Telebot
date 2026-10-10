@@ -6318,6 +6318,13 @@
             },
             "title": "Ids",
             "type": "array"
+          },
+          "models": {
+            "items": {
+              "$ref": "#/components/schemas/ProviderModel"
+            },
+            "title": "Models",
+            "type": "array"
           }
         },
         "required": [
@@ -7214,6 +7221,16 @@
             "title": "Execution Backend",
             "type": "string"
           },
+          "key_strategy": {
+            "default": "order",
+            "enum": [
+              "order",
+              "rotate",
+              "least_used"
+            ],
+            "title": "Key Strategy",
+            "type": "string"
+          },
           "modality": {
             "default": "text",
             "enum": [
@@ -7319,6 +7336,458 @@
         "title": "LLMProviderCreate",
         "type": "object"
       },
+      "LLMProviderKeyCreate": {
+        "description": "向密钥池追加一把密钥。",
+        "properties": {
+          "api_key": {
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "Api Key",
+            "type": "string"
+          },
+          "daily_request_limit": {
+            "anyOf": [
+              {
+                "maximum": 10000000.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Daily Request Limit"
+          },
+          "daily_token_limit": {
+            "anyOf": [
+              {
+                "maximum": 10000000000.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Daily Token Limit"
+          },
+          "enabled": {
+            "default": true,
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "label": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Label",
+            "type": "string"
+          },
+          "notes": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notes"
+          },
+          "priority": {
+            "default": 100,
+            "maximum": 10000.0,
+            "minimum": 0.0,
+            "title": "Priority",
+            "type": "integer"
+          },
+          "proxy_id": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Proxy Id"
+          }
+        },
+        "required": [
+          "label",
+          "api_key"
+        ],
+        "title": "LLMProviderKeyCreate",
+        "type": "object"
+      },
+      "LLMProviderKeyHealth": {
+        "properties": {
+          "consecutive_failures": {
+            "default": 0,
+            "title": "Consecutive Failures",
+            "type": "integer"
+          },
+          "cooldown_remaining_seconds": {
+            "default": 0,
+            "title": "Cooldown Remaining Seconds",
+            "type": "integer"
+          },
+          "last_error_class": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Error Class"
+          },
+          "last_error_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Error Message"
+          },
+          "last_failure_at": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Failure At"
+          },
+          "last_success_at": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Success At"
+          },
+          "state": {
+            "default": "healthy",
+            "enum": [
+              "healthy",
+              "cooling"
+            ],
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "title": "LLMProviderKeyHealth",
+        "type": "object"
+      },
+      "LLMProviderKeyListResponse": {
+        "properties": {
+          "has_main_key": {
+            "default": false,
+            "title": "Has Main Key",
+            "type": "boolean"
+          },
+          "key_strategy": {
+            "default": "order",
+            "enum": [
+              "order",
+              "rotate",
+              "least_used"
+            ],
+            "title": "Key Strategy",
+            "type": "string"
+          },
+          "keys": {
+            "items": {
+              "$ref": "#/components/schemas/LLMProviderKeyOut"
+            },
+            "title": "Keys",
+            "type": "array"
+          },
+          "main_key_health": {
+            "$ref": "#/components/schemas/LLMProviderKeyHealth"
+          },
+          "provider_id": {
+            "title": "Provider Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "provider_id"
+        ],
+        "title": "LLMProviderKeyListResponse",
+        "type": "object"
+      },
+      "LLMProviderKeyOut": {
+        "description": "池内密钥出参；**绝不含明文 api_key**，只带尾号提示与运行时健康/当日用量。",
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "daily_request_limit": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Daily Request Limit"
+          },
+          "daily_token_limit": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Daily Token Limit"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "health": {
+            "$ref": "#/components/schemas/LLMProviderKeyHealth"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "key_hint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Key Hint"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "notes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notes"
+          },
+          "priority": {
+            "title": "Priority",
+            "type": "integer"
+          },
+          "provider_id": {
+            "title": "Provider Id",
+            "type": "integer"
+          },
+          "proxy_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Proxy Id"
+          },
+          "today_requests": {
+            "default": 0,
+            "title": "Today Requests",
+            "type": "integer"
+          },
+          "today_tokens": {
+            "default": 0,
+            "title": "Today Tokens",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "provider_id",
+          "label",
+          "enabled",
+          "priority",
+          "created_at"
+        ],
+        "title": "LLMProviderKeyOut",
+        "type": "object"
+      },
+      "LLMProviderKeySummary": {
+        "description": "Provider 出参里的池内密钥摘要；不含任何密文。",
+        "properties": {
+          "enabled": {
+            "default": true,
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "key_hint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Key Hint"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "priority": {
+            "default": 100,
+            "title": "Priority",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "label"
+        ],
+        "title": "LLMProviderKeySummary",
+        "type": "object"
+      },
+      "LLMProviderKeyUpdate": {
+        "description": "PATCH 池内密钥；``api_key`` None = 不动，非空 = 替换；``clear_proxy`` = 切回沿用 Provider 代理。",
+        "properties": {
+          "api_key": {
+            "anyOf": [
+              {
+                "maxLength": 512,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Key"
+          },
+          "clear_proxy": {
+            "default": false,
+            "title": "Clear Proxy",
+            "type": "boolean"
+          },
+          "daily_request_limit": {
+            "anyOf": [
+              {
+                "maximum": 10000000.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Daily Request Limit"
+          },
+          "daily_token_limit": {
+            "anyOf": [
+              {
+                "maximum": 10000000000.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Daily Token Limit"
+          },
+          "enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enabled"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          },
+          "notes": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notes"
+          },
+          "priority": {
+            "anyOf": [
+              {
+                "maximum": 10000.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Priority"
+          },
+          "proxy_id": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Proxy Id"
+          }
+        },
+        "title": "LLMProviderKeyUpdate",
+        "type": "object"
+      },
       "LLMProviderOut": {
         "description": "LLM provider 出参；**绝不含明文 api_key**。",
         "properties": {
@@ -7370,6 +7839,16 @@
             "title": "Id",
             "type": "integer"
           },
+          "key_strategy": {
+            "default": "order",
+            "enum": [
+              "order",
+              "rotate",
+              "least_used"
+            ],
+            "title": "Key Strategy",
+            "type": "string"
+          },
           "modality": {
             "default": "text",
             "title": "Modality",
@@ -7396,6 +7875,13 @@
               }
             ],
             "title": "Notes"
+          },
+          "pool_keys": {
+            "items": {
+              "$ref": "#/components/schemas/LLMProviderKeySummary"
+            },
+            "title": "Pool Keys",
+            "type": "array"
           },
           "protocol_profile": {
             "default": "standard",
@@ -7557,6 +8043,22 @@
               }
             ],
             "title": "Execution Backend"
+          },
+          "key_strategy": {
+            "anyOf": [
+              {
+                "enum": [
+                  "order",
+                  "rotate",
+                  "least_used"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Key Strategy"
           },
           "modality": {
             "anyOf": [
@@ -7896,6 +8398,17 @@
               }
             ],
             "title": "Provider Id"
+          },
+          "provider_key_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider Key Label"
           },
           "provider_name": {
             "anyOf": [
@@ -12555,6 +13068,22 @@
               }
             ],
             "title": "Max Output Tokens"
+          },
+          "metadata_source": {
+            "anyOf": [
+              {
+                "enum": [
+                  "upstream",
+                  "probe",
+                  "manual"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metadata Source"
           },
           "output_modalities": {
             "anyOf": [
@@ -18550,7 +19079,7 @@
   },
   "info": {
     "title": "TelePilot",
-    "version": "0.99.1"
+    "version": "0.100.0-beta.1"
   },
   "openapi": "3.1.0",
   "paths": {
@@ -28621,6 +29150,419 @@
           }
         ],
         "summary": "Fetch Models",
+        "tags": [
+          "commands"
+        ]
+      }
+    },
+    "/api/commands/llm-providers/{pid}/keys": {
+      "get": {
+        "description": "列出 Provider 的池内密钥（只回 label / key_hint，绝不回明文）。",
+        "operationId": "list_provider_keys_api_commands_llm_providers__pid__keys_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pid",
+            "required": true,
+            "schema": {
+              "title": "Pid",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "auth_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Auth Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LLMProviderKeyListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "认证失败"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "服务器内部错误"
+          }
+        },
+        "security": [
+          {
+            "AuthCookie": []
+          }
+        ],
+        "summary": "List Provider Keys",
+        "tags": [
+          "commands"
+        ]
+      },
+      "post": {
+        "description": "新增池内密钥；api_key 用 MASTER_KEY 加密落库，响应只带末 4 位提示。",
+        "operationId": "create_provider_key_api_commands_llm_providers__pid__keys_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pid",
+            "required": true,
+            "schema": {
+              "title": "Pid",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "auth_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Auth Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LLMProviderKeyCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LLMProviderKeyOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "认证失败"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "CSRF 校验失败或权限不足"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "服务器内部错误"
+          }
+        },
+        "security": [
+          {
+            "AuthCookie": [],
+            "CsrfCookie": [],
+            "CsrfHeader": [],
+            "RequestedWith": []
+          }
+        ],
+        "summary": "Create Provider Key",
+        "tags": [
+          "commands"
+        ]
+      }
+    },
+    "/api/commands/llm-providers/{pid}/keys/{key_id}": {
+      "delete": {
+        "description": "删除池内密钥；该密钥若正在被使用，下一次调用即换用其它候选。",
+        "operationId": "delete_provider_key_api_commands_llm_providers__pid__keys__key_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pid",
+            "required": true,
+            "schema": {
+              "title": "Pid",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "key_id",
+            "required": true,
+            "schema": {
+              "title": "Key Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "auth_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Auth Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "boolean"
+                  },
+                  "title": "Response Delete Provider Key Api Commands Llm Providers  Pid  Keys  Key Id  Delete",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "认证失败"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "CSRF 校验失败或权限不足"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "服务器内部错误"
+          }
+        },
+        "security": [
+          {
+            "AuthCookie": [],
+            "CsrfCookie": [],
+            "CsrfHeader": [],
+            "RequestedWith": []
+          }
+        ],
+        "summary": "Delete Provider Key",
+        "tags": [
+          "commands"
+        ]
+      },
+      "patch": {
+        "description": "更新池内密钥。api_key 行为与 Provider 一致：``\"\"`` 清空、非空替换、缺省不动。",
+        "operationId": "update_provider_key_api_commands_llm_providers__pid__keys__key_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pid",
+            "required": true,
+            "schema": {
+              "title": "Pid",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "key_id",
+            "required": true,
+            "schema": {
+              "title": "Key Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "auth_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Auth Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LLMProviderKeyUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LLMProviderKeyOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "认证失败"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "CSRF 校验失败或权限不足"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "服务器内部错误"
+          }
+        },
+        "security": [
+          {
+            "AuthCookie": [],
+            "CsrfCookie": [],
+            "CsrfHeader": [],
+            "RequestedWith": []
+          }
+        ],
+        "summary": "Update Provider Key",
         "tags": [
           "commands"
         ]

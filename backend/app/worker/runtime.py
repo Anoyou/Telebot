@@ -2654,11 +2654,18 @@ def _llm_provider_proxy_url(proxy: Proxy) -> str:
     return _build_proxy_url(proxy.type, proxy.host, proxy.port, proxy.username, password)
 
 
-def _provider_runtime_payload(row: LLMProvider, proxy_url: str | None) -> dict[str, Any]:
+def _provider_runtime_payload(
+    row: LLMProvider,
+    proxy_url: str | None,
+    proxy_rows: dict[int, Proxy] | None = None,
+) -> dict[str, Any]:
     """构造 worker 进程内 Provider 投影，保留加密凭据但不解密。"""
+
+    from ..services.llm_key_pool import resolve_pool_key_proxies
 
     provider_dto = LLMProviderDTO.from_orm_row(row)
     provider_dto.proxy_url = proxy_url
+    resolve_pool_key_proxies(provider_dto, proxy_rows or {}, _llm_provider_proxy_url)
     payload = provider_dto.to_runtime_dict()
     payload["notes"] = getattr(row, "notes", None)
     return payload
@@ -2808,8 +2815,12 @@ async def _refresh_command_context(
             #    顺带把 proxy 信息一起拉出来，让 worker 端调 LLM 时也能走代理
             prov_rows = (await db.execute(select(LLMProvider))).scalars().all()
 
-            # 收集所有用到的 proxy_id 一次性查出
+            # 收集所有用到的 proxy_id 一次性查出（含密钥池内密钥的代理覆盖）
             proxy_ids = {p.proxy_id for p in prov_rows if p.proxy_id is not None}
+            for p in prov_rows:
+                for key_row in getattr(p, "pool_keys", None) or []:
+                    if key_row.proxy_id is not None:
+                        proxy_ids.add(key_row.proxy_id)
             proxy_rows: dict[int, Proxy] = {}
             if proxy_ids:
                 rows2 = (await db.execute(select(Proxy).where(Proxy.id.in_(proxy_ids)))).scalars().all()
@@ -2837,7 +2848,7 @@ async def _refresh_command_context(
                             exc,
                         )
                         continue
-                providers[p.id] = _provider_runtime_payload(p, proxy_url)
+                providers[p.id] = _provider_runtime_payload(p, proxy_url, proxy_rows)
 
         # 3) 命令别名
         alias_rows = (

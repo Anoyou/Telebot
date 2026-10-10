@@ -54,6 +54,8 @@ async def on_event(self, ctx, payload):
 
 Provider 的 `execution_backend` 同样由平台配置决定，插件不能要求某次调用强制标准 API 直连或 Gateway。选择 `codex_gateway` 的 Responses Provider 时，`complete()`、`stream_complete()` 和 `run_agent()` 仍复用同一 Client Builder：Gateway 只替换传输层，工具 handler、插件 quota、账号预算、fallback 和 usage 继续由 TelePilot 管理。同一 Provider 的 Gateway 失败不会偷跑 direct；可在尚未输出文本时按平台策略 fallback 到其它 Provider。实际 backend、Gateway 版本、request ID 和失败阶段写入「AI → 近期调用」，不加入插件可见的 routing 摘要。详见 [Codex 客户端兼容模式（Gateway）](./CODEX-GATEWAY.md)。
 
+同一 Provider 可配置多把 API Key（密钥池）：选钥、密钥级冷却和 prompt cache 亲和都由平台在 Provider 内部完成，插件不能指定 Key，routing 摘要也不含 Key 信息；命中的 Key 标签只写入「AI → 近期调用」。详见 [LLM 密钥池与模型元数据](./LLM-KEY-POOL.md)。
+
 ## 原生文本流
 
 需要边生成边处理时使用 `ctx.ai.stream_complete()`；每次迭代只会返回 Provider 原生流中真实抵达的文本 delta，不会把完整结果拆字模拟：

@@ -28,7 +28,7 @@ from sqlalchemy import (
     Text,
     func,
 )
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from ..base import Base
 
@@ -79,6 +79,24 @@ ALL_LLM_EXECUTION_BACKENDS = {
     LLM_EXECUTION_BACKEND_DIRECT,
     LLM_EXECUTION_BACKEND_CODEX_GATEWAY,
 }
+
+# 同一 Provider 多把密钥时的选钥策略：
+# - order       按 priority 升序固定顺序；当前密钥被限流/拒绝时才切下一把
+# - rotate      在可用密钥间轮转，分摊单把密钥的速率限制
+# - least_used  优先当日消耗 Token 最少的密钥
+LLM_KEY_STRATEGY_ORDER = "order"
+LLM_KEY_STRATEGY_ROTATE = "rotate"
+LLM_KEY_STRATEGY_LEAST_USED = "least_used"
+ALL_LLM_KEY_STRATEGIES = {
+    LLM_KEY_STRATEGY_ORDER,
+    LLM_KEY_STRATEGY_ROTATE,
+    LLM_KEY_STRATEGY_LEAST_USED,
+}
+
+
+def normalize_key_strategy(value: str | None) -> str:
+    text = str(value or "").strip().lower()
+    return text if text in ALL_LLM_KEY_STRATEGIES else LLM_KEY_STRATEGY_ORDER
 
 ALL_LLM_WEB_SEARCH_API_FORMATS = {
     LLM_WEB_SEARCH_API_FORMAT_AUTO,
@@ -357,9 +375,55 @@ class LLMProvider(Base):
     proxy_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("proxy.id", ondelete="SET NULL"), nullable=True
     )
+    # 多密钥选钥策略；只有池内存在启用密钥时才生效，主密钥 ``api_key_enc`` 始终参与候选。
+    key_strategy: Mapped[str] = mapped_column(
+        String(16), nullable=False, server_default=LLM_KEY_STRATEGY_ORDER
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
+    pool_keys: Mapped[list[LLMProviderKey]] = relationship(
+        "LLMProviderKey",
+        back_populates="provider",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+        order_by="LLMProviderKey.priority, LLMProviderKey.id",
+    )
+
+
+class LLMProviderKey(Base):
+    """Provider 密钥池中的一把追加密钥。
+
+    与 ``LLMProvider.api_key_enc``（主密钥）共享同一 base_url / 协议 / 模型清单，
+    只替换出站凭据与可选出口代理。``api_key_enc`` 同样是 Fernet token，
+    任何 GET 接口只返回 label 与尾 4 位提示，不返回明文。
+    """
+
+    __tablename__ = "llm_provider_key"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    provider_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("llm_provider.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    label: Mapped[str] = mapped_column(String(64), nullable=False)
+    api_key_enc: Mapped[str] = mapped_column(Text, nullable=False)
+    # 密钥尾 4 位明文提示，便于与上游控制台对账；不足 4 位的密钥不保存提示。
+    key_hint: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")
+    # 越小越先；主密钥固定视为 0。
+    priority: Mapped[int] = mapped_column(Integer, nullable=False, server_default="100")
+    # 可选出口代理覆盖；NULL = 沿用 Provider 的代理设置。
+    proxy_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("proxy.id", ondelete="SET NULL"), nullable=True
+    )
+    # 可选的按密钥每日上限（UTC 日）；NULL 或 0 = 不限制。
+    daily_request_limit: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    daily_token_limit: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    notes: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    provider: Mapped[LLMProvider] = relationship("LLMProvider", back_populates="pool_keys")
 
 
 # ── 命令别名（Sprint5）──────────────────────────────────────

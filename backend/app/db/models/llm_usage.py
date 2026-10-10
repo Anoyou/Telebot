@@ -24,6 +24,9 @@ class LLMUsage(Base):
         BigInteger, ForeignKey("llm_provider.id", ondelete="SET NULL"), nullable=True, index=True
     )
     provider_name: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # 密钥池归因：本次调用实际使用的池内密钥（主密钥或无密钥时为空）
+    provider_key_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    provider_key_label: Mapped[str | None] = mapped_column(String(64), nullable=True)
     model: Mapped[str | None] = mapped_column(String(128), nullable=True)
     client_identity_profile: Mapped[str | None] = mapped_column(String(32), nullable=True)
     execution_backend: Mapped[str | None] = mapped_column(String(32), nullable=True)

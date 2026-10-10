@@ -19,7 +19,7 @@ import asyncio
 import inspect
 import logging
 import time
-from collections.abc import AsyncIterator, Awaitable, Callable, Coroutine
+from collections.abc import AsyncIterator, Awaitable, Callable, Coroutine, Mapping
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any
 
@@ -29,7 +29,7 @@ if TYPE_CHECKING:
 
 from ..db.models.command import default_api_format_for
 from ..settings import settings
-from . import llm_account_budget
+from . import llm_account_budget, llm_key_pool
 from .llm_client import build_client_from_dto
 from .llm_identity import resolve_identity
 from .llm_profiles import resolve_protocol_profile
@@ -83,6 +83,9 @@ class UsageRecord:
     fallback_chain: list[str] = field(default_factory=list)
     request_preview: str | None = None
     response_preview: str | None = None
+    # 密钥池归因：None = 主密钥或该 Provider 无池内密钥
+    provider_key_id: int | None = None
+    provider_key_label: str | None = None
 
 
 @dataclass(frozen=True)
@@ -716,6 +719,7 @@ async def call_with_fallback(
 
         # 记录本次 provider 尝试的墙钟耗时（含重试退避），成功/失败都写入 usage.latency_ms
         attempt_start = time.monotonic()
+        key_trace: dict[str, Any] = {}
         try:
             result = await _call_with_retry(
                 provider_dto,
@@ -732,6 +736,8 @@ async def call_with_fallback(
                 native_image=native_image,
                 log_prompt_preview=log_prompt_preview,
                 client_factory=client_factory,
+                key_scope=_key_affinity_scope(None, account_id),
+                key_trace=key_trace,
             )
             _ensure_legacy_result_product(result)
             latency_ms = int((time.monotonic() - attempt_start) * 1000)
@@ -755,6 +761,7 @@ async def call_with_fallback(
                 request_preview=request_preview_for_usage(system, user),
                 response_preview=preview_text_for_usage(result.text),
                 **usage_transport_fields(provider_dto, result),
+                **key_trace,
             )
             await _emit_usage(usage_record)
             await llm_account_budget.settle(
@@ -813,6 +820,7 @@ async def call_with_fallback(
                 fallback_chain=chain.get_provider_names(),
                 request_preview=request_preview_for_usage(system, user),
                 **usage_transport_fields(provider_dto, exc),
+                **key_trace,
             )
             await _emit_usage(usage_record)
             if idx == len(all_providers) - 1 or not _should_try_next_provider(exc):
@@ -917,6 +925,7 @@ async def invoke_model_with_fallback(
                 break
 
             started = time.monotonic()
+            key_trace: dict[str, Any] = {}
             try:
                 response = await _invoke_model_with_retry(
                     provider,
@@ -931,6 +940,8 @@ async def invoke_model_with_fallback(
                     ),
                     retry_delay_seconds=_structured_retry_delay(provider_request),
                     progress_callback=progress_callback,
+                    key_scope=_key_affinity_scope(provider_request.metadata, account_id),
+                    key_trace=key_trace,
                 )
                 _ensure_model_response_product(response)
                 used_fallback = index > 0
@@ -952,6 +963,7 @@ async def invoke_model_with_fallback(
                         request_preview=request_preview,
                         response_preview=preview_text_for_usage(response.text),
                         **usage_transport_fields(provider, response),
+                        **key_trace,
                     )
                 )
                 await llm_account_budget.settle(
@@ -1010,6 +1022,7 @@ async def invoke_model_with_fallback(
                             f"{type(exc).__name__}: {exc}"
                         ),
                         **usage_transport_fields(provider, exc),
+                        **key_trace,
                     )
                 )
                 if _should_try_next_provider(exc):
@@ -1150,15 +1163,27 @@ async def stream_model_with_fallback(
             provider_call_started = False
             candidate_settled = False
             active_client: Any | None = None
+            key_trace: dict[str, Any] = {}
             try:
-                for attempt in range(max_retries + 1):
+                selection: llm_key_pool.KeySelection | None = None
+                try:
+                    selection = await _open_key_selection(
+                        provider,
+                        scope=_key_affinity_scope(provider_request.metadata, account_id),
+                    )
+                except LLMError as exc:
+                    last_error = exc
+                attempt = 0
+                while selection is not None and attempt <= max_retries:
                     terminal_response: ModelResponse | None = None
+                    effective_provider = selection.apply(provider)
+                    key_trace.update(selection.usage_fields())
                     try:
                         builder = client_factory or build_client_from_dto
                         client = builder(
-                            provider,
+                            effective_provider,
                             override_model=provider_request.model,
-                            proxy_url=provider.proxy_url,
+                            proxy_url=effective_provider.proxy_url,
                         )
                         if inspect.isawaitable(client):
                             client = await client
@@ -1186,6 +1211,9 @@ async def stream_model_with_fallback(
                         if terminal_response is None:
                             raise LLMError("上游流式响应没有返回最终状态", retryable=True)
                         _ensure_model_response_product(terminal_response)
+                        await selection.report_success(
+                            tokens=int(terminal_response.usage.total_tokens or 0)
+                        )
                         used_fallback = index > 0
                         await _emit_usage(
                             UsageRecord(
@@ -1207,6 +1235,7 @@ async def stream_model_with_fallback(
                                     terminal_response.text
                                 ),
                                 **usage_transport_fields(provider, terminal_response),
+                                **key_trace,
                             )
                         )
                         settled_tokens = terminal_response.usage.total_tokens or estimated_tokens
@@ -1224,6 +1253,12 @@ async def stream_model_with_fallback(
                     except Exception as exc:
                         last_error = exc
                         if candidate_emitted_delta:
+                            # 已输出文本后不换钥：只记录密钥健康，沿用"不自动重试"语义
+                            llm_key_pool.record_key_failure(
+                                provider.id,
+                                selection.current.key_id if selection.current else None,
+                                exc,
+                            )
                             await llm_account_budget.settle(
                                 budget_check.ticket,
                                 actual_tokens=estimated_tokens,
@@ -1251,6 +1286,7 @@ async def stream_model_with_fallback(
                                         f"{type(exc).__name__}: {exc}"
                                     ),
                                     **usage_transport_fields(provider, exc),
+                                    **key_trace,
                                 )
                             )
                             raise LLMCallFailed(
@@ -1265,6 +1301,9 @@ async def stream_model_with_fallback(
                                     execution_backend=provider.execution_backend,
                                 ),
                             ) from exc
+                        if await selection.report_failure(exc):
+                            # 首个 delta 之前允许换钥重试，不消耗 Provider 级重试预算
+                            continue
                         if not _is_retryable_error(exc) or attempt >= max_retries:
                             break
                         delay = (
@@ -1287,6 +1326,7 @@ async def stream_model_with_fallback(
                             },
                         )
                         await asyncio.sleep(delay)
+                        attempt += 1
 
                 exc = last_error or RuntimeError("结构化流式调用重试耗尽")
                 last_error = exc
@@ -1317,6 +1357,7 @@ async def stream_model_with_fallback(
                             f"{type(exc).__name__}: {exc}"
                         ),
                         **usage_transport_fields(provider, exc),
+                        **key_trace,
                     )
                 )
                 await _emit_structured_progress(
@@ -1465,6 +1506,33 @@ def _structured_provider_switch_candidates(
     return candidates
 
 
+async def _open_key_selection(provider: LLMProviderDTO, *, scope: str | None) -> llm_key_pool.KeySelection:
+    """打开选钥会话；全部密钥达当日上限时抛 Provider 本地错误，让 fallback 继续到下一个 Provider。"""
+    from .llm_client import LLMError, LLMErrorScope
+
+    selection = await llm_key_pool.open_selection(provider, scope=scope)
+    if selection.current is None:
+        raise LLMError(
+            f"Provider「{provider.name}」的所有密钥均已达到当日用量上限",
+            retryable=False,
+            scope=LLMErrorScope.PROVIDER_LOCAL,
+            category="key_pool_exhausted",
+        )
+    return selection
+
+
+def _key_affinity_scope(metadata: Mapping[str, Any] | None, account_id: int | None) -> str | None:
+    """prompt cache 亲和作用域：优先同一 Agent 会话，其次同一 Telegram 账号。"""
+    raw = (metadata or {}).get("_client_runtime")
+    if isinstance(raw, Mapping):
+        session_id = str(raw.get("session_id") or "").strip()
+        if session_id:
+            return f"session:{session_id}"
+    if account_id is not None:
+        return f"account:{int(account_id)}"
+    return None
+
+
 async def _invoke_model_with_retry(
     provider: LLMProviderDTO,
     request: ModelRequest,
@@ -1473,13 +1541,20 @@ async def _invoke_model_with_retry(
     max_retries: int = _MAX_RETRIES,
     retry_delay_seconds: float | None = None,
     progress_callback: Callable[[dict[str, Any]], Awaitable[None] | None] | None = None,
+    key_scope: str | None = None,
+    key_trace: dict[str, Any] | None = None,
 ) -> ModelResponse:
     provider.capabilities_for_model(request.model).validate(
         request,
         provider.api_format or "chat_completions",
     )
     last_error: Exception | None = None
-    for attempt in range(max_retries + 1):
+    selection = await _open_key_selection(provider, scope=key_scope)
+    attempt = 0
+    while attempt <= max_retries:
+        effective_provider = selection.apply(provider)
+        if key_trace is not None:
+            key_trace.update(selection.usage_fields())
         await _emit_structured_progress(
             progress_callback,
             {
@@ -1495,15 +1570,19 @@ async def _invoke_model_with_retry(
         try:
             builder = client_factory or build_client_from_dto
             client = builder(
-                provider,
+                effective_provider,
                 override_model=request.model,
-                proxy_url=provider.proxy_url,
+                proxy_url=effective_provider.proxy_url,
             )
             if inspect.isawaitable(client):
                 client = await client
-            return await client.invoke(request)
+            response = await client.invoke(request)
+            await selection.report_success(tokens=int(getattr(response.usage, "total_tokens", 0) or 0))
+            return response
         except Exception as exc:
             last_error = exc
+            if await selection.report_failure(exc):
+                continue
             if not _is_retryable_error(exc) or attempt >= max_retries:
                 raise
             delay = (
@@ -1525,6 +1604,7 @@ async def _invoke_model_with_retry(
                 },
             )
             await asyncio.sleep(delay)
+            attempt += 1
     raise last_error or RuntimeError("结构化调用重试耗尽")
 
 
@@ -1602,23 +1682,34 @@ async def _call_with_retry(
     log_prompt_preview: bool,
     client_factory: Callable[..., Any | Awaitable[Any]] | None = None,
     max_retries: int = _MAX_RETRIES,
+    key_scope: str | None = None,
+    key_trace: dict[str, Any] | None = None,
 ) -> LLMResult:
-    """使用指数退避重试调用单个 provider。"""
+    """使用指数退避重试调用单个 provider。
+
+    ``key_trace`` 由调用方传入空 dict，返回/抛错后其中记录本次实际使用的池内密钥
+    （``provider_key_id`` / ``provider_key_label``），供 usage 归因。
+    """
     from .llm_client import (
         LLMError,
     )
 
     last_error: Exception | None = None
+    selection = await _open_key_selection(provider_dto, scope=key_scope)
 
-    for attempt in range(max_retries + 1):
+    attempt = 0
+    while attempt <= max_retries:
         start_time = time.monotonic()
+        effective_provider = selection.apply(provider_dto)
+        if key_trace is not None:
+            key_trace.update(selection.usage_fields())
 
         try:
             builder = client_factory or build_client_from_dto
             client = builder(
-                provider_dto,
+                effective_provider,
                 override_model=override_model,
-                proxy_url=provider_dto.proxy_url,
+                proxy_url=effective_provider.proxy_url,
             )
             if inspect.isawaitable(client):
                 client = await client
@@ -1646,10 +1737,17 @@ async def _call_with_retry(
                     latency_ms,
                 )
 
+            await selection.report_success(
+                tokens=int(getattr(result, "input_tokens", 0) or 0) + int(getattr(result, "output_tokens", 0) or 0)
+            )
             return result
 
         except LLMError as exc:
             last_error = exc
+
+            if await selection.report_failure(exc):
+                # 密钥作用域错误：换下一把密钥重试，不消耗 Provider 级重试预算
+                continue
 
             if not _is_retryable_error(exc):
                 # 不可重试的错误（如 401/403）直接抛出
@@ -1666,12 +1764,15 @@ async def _call_with_retry(
                     delay,
                 )
                 await asyncio.sleep(delay)
+                attempt += 1
                 continue
             else:
                 raise
 
         except Exception as exc:
             last_error = exc
+            if await selection.report_failure(exc):
+                continue
             if not _is_retryable_error(exc):
                 raise
 
@@ -1685,6 +1786,7 @@ async def _call_with_retry(
                     delay,
                 )
                 await asyncio.sleep(delay)
+                attempt += 1
                 continue
             else:
                 raise

@@ -5,6 +5,8 @@ export interface LLMUsageRecord {
   account_id: number | null;
   provider_id: number | null;
   provider_name?: string | null;
+  /** 密钥池命中的 Key 标签；空 = 主密钥或老记录 */
+  provider_key_label?: string | null;
   model: string | null;
   client_identity_profile?: string | null;
   execution_backend?: string | null;

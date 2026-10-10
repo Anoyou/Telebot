@@ -44,6 +44,7 @@ SCALAR_FIELDS: tuple[RekeyField, ...] = (
     RekeyField("account", "id", "session_enc"),
     RekeyField("llm_provider", "id", "api_key_enc"),
     RekeyField("llm_provider", "id", "request_headers_enc"),
+    RekeyField("llm_provider_key", "id", "api_key_enc"),
     RekeyField("notify_bot", "id", "bot_token_enc"),
     RekeyField("web_user", "id", "totp_secret_enc"),
     RekeyField("account_bot", "id", "bot_token_enc"),

@@ -46,6 +46,7 @@ LLMProtocolProfile = Literal[
     "codex_responses",
     "claude_code_proxy",
 ]
+LLMKeyStrategy = Literal["order", "rotate", "least_used"]
 
 
 # ════════════════════════════════════════════════════════════
@@ -352,6 +353,8 @@ class ProviderModel(BaseModel):
     reasoning_efforts: list[Literal["minimal", "low", "medium", "high", "xhigh", "max"]] | None = None
     supported_reasoning_levels: list[Literal["minimal", "low", "medium", "high", "xhigh", "max"]] | None = None
     default_reasoning_level: Literal["minimal", "low", "medium", "high", "xhigh", "max"] | None = None
+    # 元数据来源：upstream = 从 /models 响应解析；probe = 探测得到；manual = 用户手填。
+    metadata_source: Literal["upstream", "probe", "manual"] | None = None
 
     @field_validator("id")
     @classmethod
@@ -441,6 +444,9 @@ class LLMProviderCreate(BaseModel):
     request_headers: list[LLMRequestHeaderInput] = Field(default_factory=list)
     """Provider 专用兼容请求头；服务层校验名称、作用域、大小与系统保留字段。"""
 
+    key_strategy: LLMKeyStrategy = "order"
+    """多密钥选钥策略；只有池内存在启用密钥时才生效。"""
+
     @field_validator("provider")
     @classmethod
     def _check_provider(cls, v: str) -> str:
@@ -526,6 +532,7 @@ class LLMProviderUpdate(BaseModel):
     """整体替换式的 PATCH——None 表示不动；给 list（含空 list）则覆盖。
     fetch-models / test-model 等独立 endpoint 不通过这条字段，那些直接改 DB。"""
     request_headers: list[LLMRequestHeaderInput] | None = None
+    key_strategy: LLMKeyStrategy | None = None
 
     @field_validator("tags")
     @classmethod
@@ -534,6 +541,84 @@ class LLMProviderUpdate(BaseModel):
             return None
         # 复用 Create 的校验逻辑
         return LLMProviderCreate._check_tags.__func__(cls, v)  # type: ignore[attr-defined]
+
+
+class LLMProviderKeySummary(BaseModel):
+    """Provider 出参里的池内密钥摘要；不含任何密文。"""
+
+    id: int
+    label: str
+    key_hint: str | None = None
+    enabled: bool = True
+    priority: int = 100
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class LLMProviderKeyCreate(BaseModel):
+    """向密钥池追加一把密钥。"""
+
+    label: str = Field(min_length=1, max_length=64)
+    api_key: str = Field(min_length=1, max_length=512)
+    enabled: bool = True
+    priority: int = Field(default=100, ge=0, le=10000)
+    proxy_id: int | None = Field(default=None, ge=1)
+    daily_request_limit: int | None = Field(default=None, ge=0, le=10_000_000)
+    daily_token_limit: int | None = Field(default=None, ge=0, le=10_000_000_000)
+    notes: str | None = Field(default=None, max_length=500)
+
+
+class LLMProviderKeyUpdate(BaseModel):
+    """PATCH 池内密钥；``api_key`` None = 不动，非空 = 替换；``clear_proxy`` = 切回沿用 Provider 代理。"""
+
+    label: str | None = Field(default=None, min_length=1, max_length=64)
+    api_key: str | None = Field(default=None, min_length=1, max_length=512)
+    enabled: bool | None = None
+    priority: int | None = Field(default=None, ge=0, le=10000)
+    proxy_id: int | None = Field(default=None, ge=1)
+    clear_proxy: bool = False
+    daily_request_limit: int | None = Field(default=None, ge=0, le=10_000_000)
+    daily_token_limit: int | None = Field(default=None, ge=0, le=10_000_000_000)
+    notes: str | None = Field(default=None, max_length=500)
+
+
+class LLMProviderKeyHealth(BaseModel):
+    state: Literal["healthy", "cooling"] = "healthy"
+    consecutive_failures: int = 0
+    cooldown_remaining_seconds: int = 0
+    last_error_class: str | None = None
+    last_error_message: str | None = None
+    last_failure_at: float | None = None
+    last_success_at: float | None = None
+
+
+class LLMProviderKeyOut(BaseModel):
+    """池内密钥出参；**绝不含明文 api_key**，只带尾号提示与运行时健康/当日用量。"""
+
+    id: int
+    provider_id: int
+    label: str
+    key_hint: str | None = None
+    enabled: bool
+    priority: int
+    proxy_id: int | None = None
+    daily_request_limit: int | None = None
+    daily_token_limit: int | None = None
+    notes: str | None = None
+    created_at: datetime
+    health: LLMProviderKeyHealth = Field(default_factory=LLMProviderKeyHealth)
+    today_requests: int = 0
+    today_tokens: int = 0
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class LLMProviderKeyListResponse(BaseModel):
+    provider_id: int
+    key_strategy: LLMKeyStrategy = "order"
+    has_main_key: bool = False
+    main_key_health: LLMProviderKeyHealth = Field(default_factory=LLMProviderKeyHealth)
+    keys: list[LLMProviderKeyOut] = Field(default_factory=list)
 
 
 class LLMProviderOut(BaseModel):
@@ -560,6 +645,9 @@ class LLMProviderOut(BaseModel):
     # 候选模型清单（带启用状态）
     models: list[ProviderModel] = Field(default_factory=list)
     request_headers: list[LLMRequestHeaderSummary] = Field(default_factory=list)
+    # 密钥池：策略 + 池内密钥摘要（不含密文）
+    key_strategy: LLMKeyStrategy = "order"
+    pool_keys: list[LLMProviderKeySummary] = Field(default_factory=list)
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
@@ -620,6 +708,8 @@ class FetchModelsPreviewResponse(BaseModel):
 
     fetched: int
     ids: list[str]
+    models: list[ProviderModel] = Field(default_factory=list)
+    """与 ``ids`` 同序的条目，附带从响应解析出的上下文窗口 / 输出上限 / 模态 / 推理档位等元数据。"""
 
 
 class QuickVerifyProviderRequest(BaseModel):

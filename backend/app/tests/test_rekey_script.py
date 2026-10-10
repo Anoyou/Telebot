@@ -46,6 +46,13 @@ def _create_rekey_tables(database_url: str) -> None:
         Column("session_enc", LargeBinary),
     )
     Table("llm_provider", metadata, Column("id", Integer, primary_key=True), Column("api_key_enc", String))
+    Table(
+        "llm_provider_key",
+        metadata,
+        Column("id", Integer, primary_key=True),
+        Column("provider_id", Integer),
+        Column("api_key_enc", String),
+    )
     Table("notify_bot", metadata, Column("id", Integer, primary_key=True), Column("bot_token_enc", String))
     Table("web_user", metadata, Column("id", Integer, primary_key=True), Column("totp_secret_enc", String))
     Table("account_bot", metadata, Column("id", Integer, primary_key=True), Column("bot_token_enc", String))
@@ -79,6 +86,10 @@ def test_rekey_database_dry_run_then_rotate(tmp_path: Path) -> None:
         conn.execute(
             Table("llm_provider", MetaData(), autoload_with=conn).insert(),
             {"id": 1, "api_key_enc": _encrypt_text(old_key, "llm-key")},
+        )
+        conn.execute(
+            Table("llm_provider_key", MetaData(), autoload_with=conn).insert(),
+            {"id": 1, "provider_id": 1, "api_key_enc": _encrypt_text(old_key, "llm-pool-key")},
         )
         conn.execute(
             Table("notify_bot", MetaData(), autoload_with=conn).insert(),
@@ -120,8 +131,8 @@ def test_rekey_database_dry_run_then_rotate(tmp_path: Path) -> None:
         )
 
     dry_run = rekey_database(old_key=old_key, new_key=new_key, database_url=database_url, dry_run=True)
-    assert dry_run.scanned == 12
-    assert dry_run.changed == 12
+    assert dry_run.scanned == 13
+    assert dry_run.changed == 13
 
     with engine.connect() as conn:
         proxy = Table("proxy", MetaData(), autoload_with=conn)
@@ -129,8 +140,8 @@ def test_rekey_database_dry_run_then_rotate(tmp_path: Path) -> None:
     assert _decrypt_text(old_key, token) == "proxy-pass"
 
     result = rekey_database(old_key=old_key, new_key=new_key, database_url=database_url)
-    assert result.scanned == 12
-    assert result.changed == 12
+    assert result.scanned == 13
+    assert result.changed == 13
 
     with engine.connect() as conn:
         account = Table("account", MetaData(), autoload_with=conn)

@@ -1539,6 +1539,80 @@ export interface ProviderModel {
   reasoning_efforts?: LLMReasoningEffort[] | null;
   supported_reasoning_levels?: LLMReasoningEffort[] | null;
   default_reasoning_level?: LLMReasoningEffort | null;
+  /** 元数据来源：upstream = /models 响应解析；probe = 探测；manual = 手填 */
+  metadata_source?: "upstream" | "probe" | "manual" | null;
+}
+
+/** Provider 密钥池选钥策略：order 按优先级顺序；rotate 轮转；least_used 当日用量最少优先 */
+export type LLMKeyStrategy = "order" | "rotate" | "least_used";
+
+/** Provider 出参里的池内密钥摘要；不含任何密文 */
+export interface LLMProviderKeySummary {
+  id: number;
+  label: string;
+  key_hint?: string | null;
+  enabled: boolean;
+  priority: number;
+}
+
+export interface LLMProviderKeyHealth {
+  state: "healthy" | "cooling";
+  consecutive_failures: number;
+  cooldown_remaining_seconds: number;
+  last_error_class?: string | null;
+  last_error_message?: string | null;
+  last_failure_at?: number | null;
+  last_success_at?: number | null;
+}
+
+/** 池内密钥出参；绝不含明文 api_key，只带尾号提示与运行时健康/当日用量 */
+export interface LLMProviderKeyOut {
+  id: number;
+  provider_id: number;
+  label: string;
+  key_hint?: string | null;
+  enabled: boolean;
+  priority: number;
+  proxy_id?: number | null;
+  daily_request_limit?: number | null;
+  daily_token_limit?: number | null;
+  notes?: string | null;
+  created_at: string;
+  health: LLMProviderKeyHealth;
+  today_requests: number;
+  today_tokens: number;
+}
+
+export interface LLMProviderKeyListResponse {
+  provider_id: number;
+  key_strategy: LLMKeyStrategy;
+  has_main_key: boolean;
+  main_key_health: LLMProviderKeyHealth;
+  keys: LLMProviderKeyOut[];
+}
+
+export interface LLMProviderKeyCreate {
+  label: string;
+  api_key: string;
+  enabled?: boolean;
+  priority?: number;
+  proxy_id?: number | null;
+  daily_request_limit?: number | null;
+  daily_token_limit?: number | null;
+  notes?: string | null;
+}
+
+/** PATCH 池内密钥；api_key 缺省 = 不动，非空 = 替换；clear_proxy = 切回沿用 Provider 代理 */
+export interface LLMProviderKeyUpdate {
+  label?: string;
+  api_key?: string | null;
+  enabled?: boolean | null;
+  priority?: number | null;
+  proxy_id?: number | null;
+  clear_proxy?: boolean;
+  daily_request_limit?: number | null;
+  daily_token_limit?: number | null;
+  notes?: string | null;
 }
 
 /**
@@ -1603,6 +1677,10 @@ export interface LLMProviderOut {
   models?: ProviderModel[];
   /** Provider 专用兼容请求头脱敏摘要，不含 value。 */
   request_headers?: LLMRequestHeaderSummary[];
+  /** 密钥池选钥策略；老数据缺省按 order */
+  key_strategy?: LLMKeyStrategy;
+  /** 池内密钥摘要（不含密文）；主密钥不在其中 */
+  pool_keys?: LLMProviderKeySummary[];
   created_at: string;
 }
 
@@ -1633,6 +1711,7 @@ export interface LLMProviderCreate {
   /** 候选模型清单；通常新建时留空，建完用“获取模型列表”按钮自动填 */
   models?: ProviderModel[];
   request_headers?: LLMRequestHeaderInput[];
+  key_strategy?: LLMKeyStrategy;
 }
 
 /**
@@ -1670,6 +1749,7 @@ export interface LLMProviderUpdate {
   /** 整体替换式 PATCH——给 list（含空 list）就覆盖；undefined = 不动 */
   models?: ProviderModel[];
   request_headers?: LLMRequestHeaderInput[];
+  key_strategy?: LLMKeyStrategy;
 }
 
 /** ``POST /api/commands/llm-providers/{pid}/fetch-models`` 出参 */
@@ -1700,6 +1780,8 @@ export interface FetchModelsPreviewRequest {
 export interface FetchModelsPreviewResponse {
   fetched: number;
   ids: string[];
+  /** 与 ids 同序，附带从响应解析出的上下文窗口 / 输出上限 / 模态 / 推理档位；老后端可能缺 */
+  models?: ProviderModel[];
 }
 
 export interface QuickVerifyProviderRequest {

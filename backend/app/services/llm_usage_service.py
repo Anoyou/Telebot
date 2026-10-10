@@ -23,6 +23,8 @@ async def _persist_usage(record: UsageRecord) -> None:
                     triggered_by_account_id=record.triggered_by_account_id,
                     provider_id=record.provider_id,
                     provider_name=record.provider_name,
+                    provider_key_id=record.provider_key_id,
+                    provider_key_label=record.provider_key_label,
                     model=record.model,
                     client_identity_profile=record.client_identity_profile,
                     execution_backend=record.execution_backend,

@@ -3,7 +3,7 @@
 from .account import Account, HumanizeConfig, Proxy
 from .account_bot import AccountBot, AccountBotUser
 from .action_event import ActionEvent
-from .command import AccountCommandLink, CommandTemplate, LLMProvider
+from .command import AccountCommandLink, CommandTemplate, LLMProvider, LLMProviderKey
 from .feature import AccountFeature, Feature
 from .ignored_peer import IgnoredPeer
 from .llm_usage import LLMUsage
@@ -45,7 +45,7 @@ __all__ = [
     "IgnoredPeer",
     "InstalledPlugin",
     "LLMProvider",
-    "LLMUsage",
+    "LLMProviderKey",    "LLMUsage",
     "NotificationChannel",
     "NotifyBot",
     "PayoutCompensation",

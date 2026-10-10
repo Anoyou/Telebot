@@ -1722,6 +1722,54 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/commands/llm-providers/{pid}/keys": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Provider Keys
+         * @description 列出 Provider 的池内密钥（只回 label / key_hint，绝不回明文）。
+         */
+        get: operations["list_provider_keys_api_commands_llm_providers__pid__keys_get"];
+        put?: never;
+        /**
+         * Create Provider Key
+         * @description 新增池内密钥；api_key 用 MASTER_KEY 加密落库，响应只带末 4 位提示。
+         */
+        post: operations["create_provider_key_api_commands_llm_providers__pid__keys_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/commands/llm-providers/{pid}/keys/{key_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete Provider Key
+         * @description 删除池内密钥；该密钥若正在被使用，下一次调用即换用其它候选。
+         */
+        delete: operations["delete_provider_key_api_commands_llm_providers__pid__keys__key_id__delete"];
+        options?: never;
+        head?: never;
+        /**
+         * Update Provider Key
+         * @description 更新池内密钥。api_key 行为与 Provider 一致：``""`` 清空、非空替换、缺省不动。
+         */
+        patch: operations["update_provider_key_api_commands_llm_providers__pid__keys__key_id__patch"];
+        trace?: never;
+    };
     "/api/commands/llm-providers/{pid}/test-model": {
         parameters: {
             query?: never;
@@ -6650,6 +6698,8 @@ export interface components {
             fetched: number;
             /** Ids */
             ids: string[];
+            /** Models */
+            models?: components["schemas"]["ProviderModel"][];
         };
         /**
          * FetchModelsResponse
@@ -7039,6 +7089,12 @@ export interface components {
              */
             execution_backend: "direct" | "codex_gateway";
             /**
+             * Key Strategy
+             * @default order
+             * @enum {string}
+             */
+            key_strategy: "order" | "rotate" | "least_used";
+            /**
              * Modality
              * @default text
              * @enum {string}
@@ -7073,6 +7129,171 @@ export interface components {
              * @enum {string}
              */
             web_search_api_format: "auto" | "chat_completions" | "responses" | "anthropic_messages";
+        };
+        /**
+         * LLMProviderKeyCreate
+         * @description 向密钥池追加一把密钥。
+         */
+        LLMProviderKeyCreate: {
+            /** Api Key */
+            api_key: string;
+            /** Daily Request Limit */
+            daily_request_limit?: number | null;
+            /** Daily Token Limit */
+            daily_token_limit?: number | null;
+            /**
+             * Enabled
+             * @default true
+             */
+            enabled: boolean;
+            /** Label */
+            label: string;
+            /** Notes */
+            notes?: string | null;
+            /**
+             * Priority
+             * @default 100
+             */
+            priority: number;
+            /** Proxy Id */
+            proxy_id?: number | null;
+        };
+        /** LLMProviderKeyHealth */
+        LLMProviderKeyHealth: {
+            /**
+             * Consecutive Failures
+             * @default 0
+             */
+            consecutive_failures: number;
+            /**
+             * Cooldown Remaining Seconds
+             * @default 0
+             */
+            cooldown_remaining_seconds: number;
+            /** Last Error Class */
+            last_error_class?: string | null;
+            /** Last Error Message */
+            last_error_message?: string | null;
+            /** Last Failure At */
+            last_failure_at?: number | null;
+            /** Last Success At */
+            last_success_at?: number | null;
+            /**
+             * State
+             * @default healthy
+             * @enum {string}
+             */
+            state: "healthy" | "cooling";
+        };
+        /** LLMProviderKeyListResponse */
+        LLMProviderKeyListResponse: {
+            /**
+             * Has Main Key
+             * @default false
+             */
+            has_main_key: boolean;
+            /**
+             * Key Strategy
+             * @default order
+             * @enum {string}
+             */
+            key_strategy: "order" | "rotate" | "least_used";
+            /** Keys */
+            keys?: components["schemas"]["LLMProviderKeyOut"][];
+            main_key_health?: components["schemas"]["LLMProviderKeyHealth"];
+            /** Provider Id */
+            provider_id: number;
+        };
+        /**
+         * LLMProviderKeyOut
+         * @description 池内密钥出参；**绝不含明文 api_key**，只带尾号提示与运行时健康/当日用量。
+         */
+        LLMProviderKeyOut: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Daily Request Limit */
+            daily_request_limit?: number | null;
+            /** Daily Token Limit */
+            daily_token_limit?: number | null;
+            /** Enabled */
+            enabled: boolean;
+            health?: components["schemas"]["LLMProviderKeyHealth"];
+            /** Id */
+            id: number;
+            /** Key Hint */
+            key_hint?: string | null;
+            /** Label */
+            label: string;
+            /** Notes */
+            notes?: string | null;
+            /** Priority */
+            priority: number;
+            /** Provider Id */
+            provider_id: number;
+            /** Proxy Id */
+            proxy_id?: number | null;
+            /**
+             * Today Requests
+             * @default 0
+             */
+            today_requests: number;
+            /**
+             * Today Tokens
+             * @default 0
+             */
+            today_tokens: number;
+        };
+        /**
+         * LLMProviderKeySummary
+         * @description Provider 出参里的池内密钥摘要；不含任何密文。
+         */
+        LLMProviderKeySummary: {
+            /**
+             * Enabled
+             * @default true
+             */
+            enabled: boolean;
+            /** Id */
+            id: number;
+            /** Key Hint */
+            key_hint?: string | null;
+            /** Label */
+            label: string;
+            /**
+             * Priority
+             * @default 100
+             */
+            priority: number;
+        };
+        /**
+         * LLMProviderKeyUpdate
+         * @description PATCH 池内密钥；``api_key`` None = 不动，非空 = 替换；``clear_proxy`` = 切回沿用 Provider 代理。
+         */
+        LLMProviderKeyUpdate: {
+            /** Api Key */
+            api_key?: string | null;
+            /**
+             * Clear Proxy
+             * @default false
+             */
+            clear_proxy: boolean;
+            /** Daily Request Limit */
+            daily_request_limit?: number | null;
+            /** Daily Token Limit */
+            daily_token_limit?: number | null;
+            /** Enabled */
+            enabled?: boolean | null;
+            /** Label */
+            label?: string | null;
+            /** Notes */
+            notes?: string | null;
+            /** Priority */
+            priority?: number | null;
+            /** Proxy Id */
+            proxy_id?: number | null;
         };
         /**
          * LLMProviderOut
@@ -7113,6 +7334,12 @@ export interface components {
             /** Id */
             id: number;
             /**
+             * Key Strategy
+             * @default order
+             * @enum {string}
+             */
+            key_strategy: "order" | "rotate" | "least_used";
+            /**
              * Modality
              * @default text
              */
@@ -7123,6 +7350,8 @@ export interface components {
             name: string;
             /** Notes */
             notes?: string | null;
+            /** Pool Keys */
+            pool_keys?: components["schemas"]["LLMProviderKeySummary"][];
             /**
              * Protocol Profile
              * @default standard
@@ -7166,6 +7395,8 @@ export interface components {
             default_model?: string | null;
             /** Execution Backend */
             execution_backend?: ("direct" | "codex_gateway") | null;
+            /** Key Strategy */
+            key_strategy?: ("order" | "rotate" | "least_used") | null;
             /** Modality */
             modality?: ("text" | "vision" | "audio" | "multimodal") | null;
             /** Models */
@@ -7250,6 +7481,8 @@ export interface components {
             output_tokens: number;
             /** Provider Id */
             provider_id: number | null;
+            /** Provider Key Label */
+            provider_key_label?: string | null;
             /** Provider Name */
             provider_name: string | null;
             /** Request Preview */
@@ -8874,6 +9107,8 @@ export interface components {
             label?: string | null;
             /** Max Output Tokens */
             max_output_tokens?: number | null;
+            /** Metadata Source */
+            metadata_source?: ("upstream" | "probe" | "manual") | null;
             /** Output Modalities */
             output_modalities?: ("text" | "image" | "audio")[] | null;
             /** Reasoning Efforts */
@@ -16916,6 +17151,249 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["FetchModelsResponse"];
+                };
+            };
+            /** @description 认证失败 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description CSRF 校验失败或权限不足 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description 服务器内部错误 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    list_provider_keys_api_commands_llm_providers__pid__keys_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                pid: number;
+            };
+            cookie?: {
+                auth_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LLMProviderKeyListResponse"];
+                };
+            };
+            /** @description 认证失败 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description 服务器内部错误 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    create_provider_key_api_commands_llm_providers__pid__keys_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                pid: number;
+            };
+            cookie?: {
+                auth_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LLMProviderKeyCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LLMProviderKeyOut"];
+                };
+            };
+            /** @description 认证失败 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description CSRF 校验失败或权限不足 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description 服务器内部错误 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    delete_provider_key_api_commands_llm_providers__pid__keys__key_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                pid: number;
+                key_id: number;
+            };
+            cookie?: {
+                auth_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: boolean;
+                    };
+                };
+            };
+            /** @description 认证失败 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description CSRF 校验失败或权限不足 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description 服务器内部错误 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    update_provider_key_api_commands_llm_providers__pid__keys__key_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                pid: number;
+                key_id: number;
+            };
+            cookie?: {
+                auth_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LLMProviderKeyUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LLMProviderKeyOut"];
                 };
             };
             /** @description 认证失败 */

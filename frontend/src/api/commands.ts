@@ -26,6 +26,10 @@ import type {
   FullLivenessRunResponse,
   LLMProviderCreate,
   LLMProviderApiKeyReveal,
+  LLMProviderKeyCreate,
+  LLMProviderKeyListResponse,
+  LLMProviderKeyOut,
+  LLMProviderKeyUpdate,
   LLMProviderOut,
   LLMProviderUpdate,
   QuickVerifyProviderRequest,
@@ -120,6 +124,46 @@ export async function revealLLMProviderApiKey(
     `/api/commands/llm-providers/${id}/api-key`,
   );
   return data;
+}
+
+// ===================== Provider 密钥池 =====================
+export async function listLLMProviderKeys(
+  pid: number,
+): Promise<LLMProviderKeyListResponse> {
+  const { data } = await api.get<LLMProviderKeyListResponse>(
+    `/api/commands/llm-providers/${pid}/keys`,
+  );
+  return data;
+}
+
+export async function createLLMProviderKey(
+  pid: number,
+  payload: LLMProviderKeyCreate,
+): Promise<LLMProviderKeyOut> {
+  const { data } = await api.post<LLMProviderKeyOut>(
+    `/api/commands/llm-providers/${pid}/keys`,
+    payload,
+  );
+  return data;
+}
+
+export async function patchLLMProviderKey(
+  pid: number,
+  keyId: number,
+  payload: LLMProviderKeyUpdate,
+): Promise<LLMProviderKeyOut> {
+  const { data } = await api.patch<LLMProviderKeyOut>(
+    `/api/commands/llm-providers/${pid}/keys/${keyId}`,
+    payload,
+  );
+  return data;
+}
+
+export async function deleteLLMProviderKey(
+  pid: number,
+  keyId: number,
+): Promise<void> {
+  await api.delete(`/api/commands/llm-providers/${pid}/keys/${keyId}`);
 }
 
 /** 调 GET {base_url}/models 拉模型列表，合并到 provider.models（保留已 enabled 状态）。

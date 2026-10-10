@@ -70,16 +70,30 @@ def normalize_quick_verify_base_url(value: str) -> str:
     return normalized
 
 
+MAGPIE_DEFAULT_PORT = 3425
+MAGPIE_SUGGESTED_NAME = "Magpie 网关"
+
+
+def looks_like_magpie(base_url: str) -> bool:
+    """Magpie 网关默认监听 127.0.0.1:3425；主机名含 magpie 也按网关处理。"""
+
+    parts = urlsplit(base_url)
+    hostname = (parts.hostname or "").lower()
+    return "magpie" in hostname or parts.port == MAGPIE_DEFAULT_PORT
+
+
 def suggested_provider(api_format: str, base_url: str, api_key: str) -> str:
     if api_format == "anthropic_messages":
         return "anthropic"
     hostname = (urlsplit(base_url).hostname or "").lower()
-    if not api_key and hostname in {"localhost", "127.0.0.1", "::1"}:
+    if not api_key and hostname in {"localhost", "127.0.0.1", "::1"} and not looks_like_magpie(base_url):
         return "ollama"
     return "openai"
 
 
 def suggested_name(base_url: str) -> str:
+    if looks_like_magpie(base_url):
+        return MAGPIE_SUGGESTED_NAME
     hostname = urlsplit(base_url).hostname or "模型提供商"
     return hostname[:64]
 

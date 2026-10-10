@@ -172,7 +172,12 @@ def _has_api_key(p: dict[str, Any]) -> bool:
     if p.get("provider") == "ollama":
         # ollama 本地部署可不要 key
         return True
-    return bool(p.get("api_key_enc"))
+    if p.get("api_key_enc"):
+        return True
+    # 只用密钥池（未设主密钥）的 provider 同样可路由；池内密钥载荷由运行时选钥注入。
+    return any(
+        isinstance(k, dict) and k.get("api_key_enc") and k.get("enabled") for k in (p.get("keys") or [])
+    )
 
 
 def _provider_tags(p: dict[str, Any]) -> set[str]:
@@ -218,6 +223,38 @@ def _has_model_list(p: dict[str, Any]) -> bool:
     return bool(
         [m for m in (p.get("models") or []) if isinstance(m, dict) and str(m.get("id") or "").strip()]
     )
+
+
+def _picked_model_context_window(p: dict[str, Any]) -> int | None:
+    """选中模型的上下文窗口（来自 /models 元数据或手填）；未知返回 None。"""
+    model_id = _pick_model_for(p)
+    if not model_id:
+        return None
+    for item in p.get("models") or []:
+        if isinstance(item, dict) and str(item.get("id") or "").strip() == model_id:
+            try:
+                value = int(item.get("context_window") or 0)
+            except (TypeError, ValueError):
+                return None
+            return value if value > 0 else None
+    return None
+
+
+def _select_by_context_window(candidates: list[dict[str, Any]], needed_tokens: int) -> dict[str, Any] | None:
+    """没有 tag=long_context 时，按模型元数据选窗口够大且最便宜的 provider。
+
+    只在至少一个候选声明了 ``context_window`` 且足以容纳输入时才命中；
+    没有任何元数据的老配置保持原有规则链路不变。
+    """
+    fits: list[tuple[int, int, dict[str, Any]]] = []
+    for p in candidates:
+        window = _picked_model_context_window(p)
+        if window is not None and window >= needed_tokens:
+            fits.append((_cost_tier(p), -window, p))
+    if not fits:
+        return None
+    fits.sort(key=lambda item: (item[0], item[1]))
+    return fits[0][2]
 
 
 def _pick_model_for(p: dict[str, Any]) -> str | None:
@@ -398,6 +435,16 @@ def _rule_route(
         p = _select_by_tag(candidates, "long_context", prefer_cheap=True)
         if p:
             return RoutingDecision(int(p["id"]), "matched tag=long_context", "long_context")
+        # 没打 long_context 标签时，退而按模型元数据挑窗口放得下输入的最便宜 provider。
+        # 字符数按 1 字符≈1 token 的保守口径估算（CJK 场景），再给输出留 2k 余量。
+        needed_tokens = len(user_q or "") + len(replied_text or "") + 2048
+        p = _select_by_context_window(candidates, needed_tokens)
+        if p:
+            return RoutingDecision(
+                int(p["id"]),
+                f"context_window fits ~{needed_tokens} tokens",
+                "long_context",
+            )
 
     # 6) 复杂推理 → smart / reason，premium 优先
     if _looks_like_reason(user_q):

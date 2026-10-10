@@ -19,10 +19,56 @@ from typing import Any
 
 from ..db.models.command import (
     normalize_client_identity_profile,
+    normalize_key_strategy,
     normalize_protocol_profile,
 )
 
 _REASONING_LEVEL_ORDER = ("minimal", "low", "medium", "high", "xhigh", "max")
+
+_KEY_RUNTIME_FIELDS = (
+    "id",
+    "label",
+    "key_hint",
+    "enabled",
+    "priority",
+    "daily_request_limit",
+    "daily_token_limit",
+)
+
+
+def _read_field(raw: Any, name: str, default: Any = None) -> Any:
+    if isinstance(raw, dict):
+        return raw.get(name, default)
+    return getattr(raw, name, default)
+
+
+def _key_entry(raw: Any) -> dict[str, Any] | None:
+    """把池内密钥（ORM 行或 dict）规范化为运行时 dict。
+
+    保留 ``api_key_enc`` 与 ``proxy_id``（内部使用），展示面统一走 ``_mask_key_entry``。
+    """
+    token = _read_field(raw, "api_key_enc")
+    if not token:
+        return None
+    return {
+        "id": int(_read_field(raw, "id", 0) or 0),
+        "label": str(_read_field(raw, "label", "") or ""),
+        "key_hint": _read_field(raw, "key_hint"),
+        "enabled": bool(_read_field(raw, "enabled", True)),
+        "priority": int(_read_field(raw, "priority", 100) or 100),
+        "daily_request_limit": _read_field(raw, "daily_request_limit"),
+        "daily_token_limit": _read_field(raw, "daily_token_limit"),
+        "api_key_enc": token,
+        "proxy_id": _read_field(raw, "proxy_id"),
+        "proxy_url": _read_field(raw, "proxy_url"),
+    }
+
+
+def _mask_key_entry(entry: dict[str, Any]) -> dict[str, Any]:
+    """去掉密文与代理 id，只保留可展示字段。"""
+    out = {name: entry.get(name) for name in _KEY_RUNTIME_FIELDS}
+    out["proxy_url"] = entry.get("proxy_url")
+    return out
 
 
 def _reasoning_levels(metadata: dict[str, Any]) -> tuple[tuple[str, ...], str | None]:
@@ -64,6 +110,8 @@ class LLMProviderDTO:
     - tags: 路由标签列表
     - cost_tier: 成本档（1=便宜/3=旗舰）
     - models: 候选模型清单（用于把模型 ID 映射为展示名）
+    - key_strategy: 多密钥选钥策略（order/rotate/least_used）
+    - keys: 池内追加密钥（含 api_key_enc，仅内部使用）；主密钥 ``api_key_enc`` 始终是候选之一
     """
 
     id: int
@@ -83,6 +131,8 @@ class LLMProviderDTO:
     tags: list[str] = field(default_factory=list)
     cost_tier: int = 2
     models: list[dict[str, Any]] = field(default_factory=list)
+    key_strategy: str = "order"
+    keys: list[dict[str, Any]] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         """规范化字段类型。"""
@@ -93,10 +143,13 @@ class LLMProviderDTO:
             self.protocol_profile,
         )
         self.client_identity_profile = normalize_client_identity_profile(self.client_identity_profile)
+        self.key_strategy = normalize_key_strategy(self.key_strategy)
         if self.tags is None:
             self.tags = []
         if self.models is None:
             self.models = []
+        if self.keys is None:
+            self.keys = []
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> LLMProviderDTO:
@@ -119,6 +172,8 @@ class LLMProviderDTO:
             tags=list(d.get("tags") or []),
             cost_tier=int(d.get("cost_tier", 2) or 2),
             models=[dict(m) for m in (d.get("models") or []) if isinstance(m, dict)],
+            key_strategy=str(d.get("key_strategy", "order") or "order"),
+            keys=[entry for entry in (_key_entry(k) for k in (d.get("keys") or [])) if entry],
         )
 
     @classmethod
@@ -142,6 +197,12 @@ class LLMProviderDTO:
             tags=list(getattr(row, "tags", []) or []),
             cost_tier=int(getattr(row, "cost_tier", 2) or 2),
             models=[dict(m) for m in (getattr(row, "models", None) or []) if isinstance(m, dict)],
+            key_strategy=str(getattr(row, "key_strategy", "order") or "order"),
+            keys=[
+                entry
+                for entry in (_key_entry(k) for k in (getattr(row, "pool_keys", None) or []))
+                if entry
+            ],
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -162,6 +223,9 @@ class LLMProviderDTO:
             "tags": self.tags,
             "cost_tier": self.cost_tier,
             "models": self.models,
+            "key_strategy": self.key_strategy,
+            # 池内密钥只保留可展示字段（label / 尾号提示 / 优先级 / 限额）
+            "keys": [_mask_key_entry(k) for k in self.keys],
             # 注意：不含 api_key_enc 明文
         }
 
@@ -172,6 +236,7 @@ class LLMProviderDTO:
             **self.to_dict(),
             "api_key_enc": self.api_key_enc,
             "request_headers_enc": self.request_headers_enc,
+            "keys": [dict(k) for k in self.keys],
         }
 
     @property
@@ -181,10 +246,14 @@ class LLMProviderDTO:
 
     @property
     def has_api_key(self) -> bool:
-        """是否有 API key（ollama 本地部署例外，可不要 key）。"""
+        """是否有可用凭据（ollama 本地部署例外，可不要 key）。"""
         if self.is_ollama:
             return True
-        return bool(self.api_key_enc)
+        return bool(self.api_key_enc) or bool(self.enabled_keys())
+
+    def enabled_keys(self) -> list[dict[str, Any]]:
+        """返回启用中的池内密钥（保持同优先级内的原有顺序）。"""
+        return [k for k in self.keys if isinstance(k, dict) and k.get("api_key_enc") and k.get("enabled")]
 
     def enabled_model_ids(self) -> list[str]:
         """严格返回 models[].enabled == True 的模型 id（顺序保留、去重）。"""

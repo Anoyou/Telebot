@@ -25,6 +25,22 @@
 
 ## [Unreleased]
 
+## [0.100.0-beta.1] - 2026-10-10 · minor（次版本预发布） · LLM 多 Key 密钥池、模型元数据与 Magpie 网关接入
+
+### 新增
+
+- Provider 支持密钥池：同一 Provider 可挂多把 API Key，按 `order` / `rotate` / `least_used` 策略选钥，可为每把 Key 单独设置优先级、出口代理与每日请求 / Token 上限；新增 `/api/commands/llm-providers/{pid}/keys` 增删改查接口，出参只含标签与尾号、绝不返回明文。
+- 密钥级冷却与 prompt cache 亲和：401 / 403 / 429 这类只跟 Key 有关的错误在流式首个增量前自动换钥且不消耗 Provider 重试次数，坏 Key 单独冷却不拖累整个 Provider；同一 Agent 会话或 Telegram 账号在 30 分钟内粘在同一把 Key 上以维持上游缓存命中。
+- 模型元数据：「获取模型列表」解析 Magpie、OpenRouter、LiteLLM 等上游 `/v1/models` 的展示名、上下文窗口、输出上限、输入模态、推理档位与原生端点并写入模型清单，模型行显示 `ctx` / `out` / 图片 / 推理徽标；自动路由遇到长输入时按 `context_window` 过滤放不下的候选。
+- 新建 Provider 增加「Magpie 网关」快捷模板，一步预填 `http://127.0.0.1:3425/v1` 与 Chat Completions 协议；快速验证对 Magpie 地址建议名称「Magpie 网关」且不再误判为 Ollama。
+- 「AI → 近期调用」记录并展示本次命中的密钥标签（`provider_key_label`）。
+- 新增文档 `docs/LLM-KEY-POOL.md`，说明选钥规则、冷却、亲和、元数据来源与 Magpie 接入。
+
+### 改进
+
+- 密钥池新增 Alembic 迁移 `0058_llm_provider_key_pool`，池内 Key 使用 `MASTER_KEY` 加密并纳入 `app.scripts.rekey` 覆盖；无池内 Key 的 Provider 调用路径与 Redis 流量保持不变。
+- 模型清单编辑表单往返保真：编辑 Provider 时不再丢弃已保存的模型元数据字段。
+
 ## [0.99.1] - 2026-08-24 · patch（补丁正式版） · 插件消息动作反馈与发奖事件幂等修复
 
 ### 改进
