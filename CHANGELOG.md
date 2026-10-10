@@ -25,6 +25,13 @@
 
 ## [Unreleased]
 
+## [0.100.0-beta.2] - 2026-10-11 · patch（补丁版本预发布） · 修复 CI 契约快照与密钥池视觉回归
+
+### 修复
+
+- OpenAPI 快照改为按 CI 实际解析的 pydantic 2.14 生成：Decimal 字段不再输出 JSON Schema `pattern`，`API 契约` 检查与后端快照测试恢复通过；`frontend/src/api/schema.ts` 无变化。
+- 视觉回归基线声明 Provider 密钥池接口 `GET /api/commands/llm-providers/{id}/keys`，修复 0.100.0-beta.1 在 Provider 编辑页新增密钥池分区后浏览器检查报“未声明 API 请求”。
+
 ## [0.100.0-beta.1] - 2026-10-10 · minor（次版本预发布） · LLM 多 Key 密钥池、模型元数据与 Magpie 网关接入
 
 ### 新增

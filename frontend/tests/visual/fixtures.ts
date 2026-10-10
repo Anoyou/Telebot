@@ -142,6 +142,14 @@ function jsonResponse(pathname: string): unknown | undefined {
   if (pathname === "/api/accounts") return [accountFixture];
   if (pathname === "/api/commands/llm-providers") return [];
   if (pathname === "/api/commands/llm-providers/runtime-health") return [];
+  const keyPool = pathname.match(/^\/api\/commands\/llm-providers\/(\d+)\/keys$/);
+  if (keyPool) return {
+    provider_id: Number(keyPool[1]),
+    key_strategy: "order",
+    has_main_key: true,
+    main_key_health: { state: "healthy", consecutive_failures: 0, cooldown_remaining_seconds: 0 },
+    keys: [],
+  };
   if (pathname === "/api/commands/llm-providers/identity-versions") return {
     items: [{
       key: "codex_tui",
