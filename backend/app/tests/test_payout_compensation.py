@@ -8,7 +8,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from sqlalchemy import select, text
+from sqlalchemy import event, select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.db.models.account import Account  # noqa: F401 - registers FK target table metadata
@@ -108,8 +108,19 @@ def test_ambiguous_delivery_error_enqueues_probe_only_not_retryable() -> None:
 
 
 @pytest.fixture
-async def payout_session_factory(monkeypatch):
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+async def payout_session_factory(monkeypatch, tmp_path):
+    # 并发扫描测试需要每个 Session 拿到真实独立的连接：`:memory:` 库在 SQLAlchemy 2.1
+    # 下并发 checkout 会落到同一底层连接，两个事务互相污染，租约条件 UPDATE 失去原子性。
+    # 文件库 + WAL + busy_timeout 让 SQLite 按真实写锁串行化，与生产 PostgreSQL 一致。
+    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'payout.db'}")
+
+    @event.listens_for(engine.sync_engine, "connect")
+    def _set_sqlite_pragmas(dbapi_connection, _connection_record):  # pragma: no cover - 驱动回调
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA journal_mode=WAL")
+        cursor.execute("PRAGMA busy_timeout=5000")
+        cursor.close()
+
     async with engine.begin() as conn:
         await conn.execute(text("CREATE TABLE account (id BIGINT PRIMARY KEY)"))
         await conn.execute(text("INSERT INTO account (id) VALUES (7), (8)"))

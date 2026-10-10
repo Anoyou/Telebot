@@ -1821,8 +1821,8 @@ async def _lease_payout_compensation(row_id: int, now: datetime) -> PayoutCompen
                 )
             )
             if int(result.rowcount or 0) <= 0:
-                # 没有写入，不使用 rollback；SQLite 单连接并发测试中 rollback 可能回滚
-                # 另一协程刚取得的租约，生产 PostgreSQL 下 commit 同样是空事务。
+                # 条件更新没有命中任何行；用 commit 结束这个空事务即可，
+                # 生产 PostgreSQL 下空事务的 commit 与 rollback 等价。
                 await db.commit()
                 return None
         row = await db.get(PayoutCompensation, int(row_id))

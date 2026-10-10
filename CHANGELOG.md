@@ -25,6 +25,12 @@
 
 ## [Unreleased]
 
+## [0.100.0-beta.3] - 2026-10-11 · patch（补丁版本预发布） · 修复 payout 并发租约测试在 SQLAlchemy 2.1 下的不确定性
+
+### 修复
+
+- `test_payout_replay_concurrent_scan_lease_sends_once` 的测试夹具从内存 SQLite 改为临时文件 SQLite（WAL + busy_timeout）：SQLAlchemy 2.1 下内存库并发 checkout 会共用同一底层连接，两个扫描协程的事务互相污染，条件更新租约失去原子性，导致 CI 上间歇性双重发送或状态写丢失；文件库让每个 Session 持有真实独立连接，按 SQLite 写锁串行化，与生产 PostgreSQL 的行级原子语义一致。
+
 ## [0.100.0-beta.2] - 2026-10-11 · patch（补丁版本预发布） · 修复 CI 契约快照与密钥池视觉回归
 
 ### 修复
