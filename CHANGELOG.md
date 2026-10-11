@@ -25,6 +25,13 @@
 
 ## [Unreleased]
 
+## [0.100.0-beta.4] - 2026-10-12 · patch（补丁版本预发布） · 修复容器访问纯 IPv6 上游不通
+
+### 修复
+
+- `docker-compose.yml` 为 `web` 增加 `ipv6-egress` 出口网络（`enable_ipv4: false`、`enable_ipv6: true`）：Docker 默认 bridge 只有 IPv4，容器内既没有全局 IPv6 地址也没有 `::/0` 默认路由，访问只有 AAAA 记录的上游（如家宽 IPv6 反代的 `mg.idaenen.cn:22022`）会立刻 `Network is unreachable`，而宿主机 IPv6 本身是通的。该类上游现在可在容器内直连，无需在宿主机安装中转服务、也无需改 `/etc/docker/daemon.json`。
+- 新网络不与默认网络混跑内部服务名解析：`postgres` / `redis` / `updater` 仍只走默认网络，避免同名服务在两条网络上产生 DNS 解析歧义。
+
 ## [0.100.0-beta.3] - 2026-10-11 · patch（补丁版本预发布） · 修复 payout 并发租约测试在 SQLAlchemy 2.1 下的不确定性
 
 ### 修复

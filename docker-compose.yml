@@ -109,6 +109,14 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    # web 额外接入一条 IPv6 出口网络：Docker 默认 bridge 只有 IPv4，容器里既没有
+    # 全局 IPv6 地址也没有 ::/0 默认路由，访问纯 IPv6 上游（如 mg.idaenen.cn 这类
+    # 家宽 IPv6 反代）会直接 "Network is unreachable"，而宿主机 IPv6 明明是通的。
+    # 该网络 enable_ipv4=false，不参与内部服务名解析，postgres / redis / updater
+    # 仍走默认网络，避免 DNS 在两条网络间产生歧义。
+    networks:
+      - default
+      - ipv6-egress
     volumes:
       # 历史兼容 session 卷；当前 Telethon StringSession 经 MASTER_KEY 加密后存入 DB，
       # 账号运行不依赖该卷。暂保留卷名，避免破坏旧部署的备份/恢复布局。
@@ -184,3 +192,11 @@ volumes:
   sessions:
   plugins_installed:
   plugin_repos:
+
+# ── 网络 ──────────────────────────────────────────────────────
+networks:
+  # 仅 web 使用；只为容器补一条全局 IPv6 地址与 ::/0 默认路由。
+  # 宿主机侧无需改 /etc/docker/daemon.json：用户自定义网络可直接开启 IPv6。
+  ipv6-egress:
+    enable_ipv4: false
+    enable_ipv6: true
