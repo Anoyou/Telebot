@@ -25,6 +25,13 @@
 
 ## [Unreleased]
 
+## [0.100.0-beta.5] - 2026-10-12 · patch（补丁版本预发布） · 修复同步 DSN 驱动解析导致 web 无法启动
+
+### 修复
+
+- `Settings.database_url_sync` 现在显式把异步 DSN 改写为 `postgresql+psycopg2://`：SQLAlchemy 2.1 起裸 `postgresql://` 默认解析到 psycopg 3，而运行镜像只装了 `psycopg2-binary`，会导致启动期 `alembic upgrade head` 抛 `ModuleNotFoundError: No module named 'psycopg'`，web 容器一直 unhealthy。
+- 新增 `test_database_url_sync_pins_psycopg2_driver` 等回归测试，覆盖 `+asyncpg`、裸 `postgresql://`、已是同步 DSN 与 SQLite 四种输入。
+
 ## [0.100.0-beta.4] - 2026-10-12 · patch（补丁版本预发布） · 修复容器访问纯 IPv6 上游不通
 
 ### 修复

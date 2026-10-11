@@ -1,5 +1,6 @@
 """全局配置：从 .env 加载，所有模块统一通过 settings.* 读取。"""
 
+import re
 from functools import lru_cache
 from pathlib import Path
 
@@ -164,8 +165,20 @@ class Settings(BaseSettings):
 
     @property
     def database_url_sync(self) -> str:
-        """Alembic 用的同步 DSN（去掉 +asyncpg 后缀，psycopg2/psycopg 都能识别）。"""
-        return self.database_url.replace("+asyncpg", "")
+        """Alembic / 健康检查用的同步 DSN。
+
+        必须显式指定 ``+psycopg2`` 驱动：SQLAlchemy 2.1 起裸 ``postgresql://``
+        会优先解析到 psycopg 3，而镜像里只装了 ``psycopg2-binary``，会直接
+        ``ModuleNotFoundError: No module named 'psycopg'``，导致 web 启动时
+        ``alembic upgrade head`` 失败、容器一直 unhealthy。
+        """
+        url = self.database_url
+        if url.startswith("postgresql+"):
+            # 已经是显式驱动（例如 asyncpg / psycopg2），去掉异步后缀回落到 psycopg2。
+            return re.sub(r"^postgresql\+[^:]+://", "postgresql+psycopg2://", url)
+        if url.startswith("postgresql://"):
+            return "postgresql+psycopg2://" + url[len("postgresql://") :]
+        return url
 
     def resolve_project_path(self, raw: str) -> Path:
         """把相对路径固定解析到仓库根目录，避免主进程/worker cwd 不同导致分裂。"""
