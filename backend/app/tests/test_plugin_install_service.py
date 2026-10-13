@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import base64
 import io
+import os
 import shutil
 import sqlite3
 import zipfile
@@ -27,6 +28,7 @@ from types import SimpleNamespace
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+from starlette.datastructures import UploadFile
 
 from app.api import plugins_install as plugins_install_api
 from app.db.models.feature import FEATURE_FORWARD, AccountFeature, Feature
@@ -425,6 +427,51 @@ async def test_installed_plugin_changelog_api_reads_file_and_reports_missing(tmp
     assert len(large.json()["content"].encode("utf-8")) == 256 * 1024
 
 
+@pytest.mark.asyncio
+async def test_read_zip_upload_bounded_aborts_before_reading_whole_body(monkeypatch) -> None:
+    """超限请求必须在读取阶段中止，不允许把整个 body 读进内存。"""
+    monkeypatch.setattr(plugins_install_api.settings, "plugin_zip_max_bytes", 8)
+    read_calls = 0
+
+    class _CountingStream:
+        """每次 read 都声称还有更多数据，验证循环会提前抛错。"""
+
+        def read(self, size: int = -1) -> bytes:  # noqa: ANN001
+            nonlocal read_calls
+            read_calls += 1
+            return b"x" * size
+
+        def seek(self, offset: int) -> None:  # noqa: ANN001
+            return None
+
+        def close(self) -> None:
+            return None
+
+    upload = UploadFile(file=_CountingStream(), filename="big.zip", size=None)
+
+    with pytest.raises(pis.ZipTooLarge) as ex:
+        await plugins_install_api._read_zip_upload_bounded(upload)
+
+    assert ex.value.code == "ZIP_TOO_LARGE"
+    # 上限 8 字节 + 8 字节块 → 最多再读一块就中止，不会读穿整个 body。
+    assert read_calls <= 2
+
+
+@pytest.mark.asyncio
+async def test_read_zip_upload_bounded_reads_all_bytes_within_limit() -> None:
+    """未超限时按分块读取并还原完整字节，且不触发上限判定。"""
+    payload = os.urandom(300 * 1024)
+    original = plugins_install_api.settings.plugin_zip_max_bytes
+    plugins_install_api.settings.plugin_zip_max_bytes = len(payload)
+    try:
+        with io.BytesIO(payload) as stream:
+            upload = UploadFile(file=stream, filename="ok.zip", size=None)
+            data = await plugins_install_api._read_zip_upload_bounded(upload)
+    finally:
+        plugins_install_api.settings.plugin_zip_max_bytes = original
+    assert data == payload
+
+
 # ─────────────────────────────────────────────────────
 # upload API
 # ─────────────────────────────────────────────────────
@@ -486,6 +533,66 @@ async def test_upload_plugin_package_api_returns_signature_failed_for_bad_signat
     assert r.json()["error"]["code"] == "SIGNATURE_FAILED"
     assert db.committed is False
     assert db.installed_rows == {}
+
+
+@pytest.mark.asyncio
+async def test_upload_plugin_package_api_returns_413_for_oversize_zip(tmp_path, monkeypatch) -> None:
+    """超过上限的 zip 必须在读取阶段就 413，且不进入安装流程。"""
+    monkeypatch.setattr(pis.settings, "plugins_installed_dir", str(tmp_path / "installed"))
+    monkeypatch.setattr(pis.settings, "plugin_zip_max_bytes", 512)
+    db = _FakeDB()
+    _, previous_overrides = _install_api_overrides(db, monkeypatch)
+    z = _make_zip(key="api_oversize", extra_members=[("pad.bin", b"x" * 64)])
+    sig, pub = _sign_payload(z)
+    monkeypatch.setattr(pis.settings, "plugin_pubkey", pub)
+
+    try:
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as c:
+            r = await c.post(
+                "/api/plugins/install/upload",
+                headers=_csrf_headers(),
+                files={"file": ("api_oversize.zip", z, "application/zip")},
+            )
+    finally:
+        _restore_api_overrides(previous_overrides)
+
+    assert r.status_code == 413
+    assert r.json()["error"]["code"] == "ZIP_TOO_LARGE"
+    assert db.committed is False
+    assert db.installed_rows == {}
+
+
+@pytest.mark.asyncio
+async def test_upload_plugin_package_api_accepts_zip_within_limit(tmp_path, monkeypatch) -> None:
+    """恰好在上限之内的 zip 仍然正常安装（413 判定为严格大于）。"""
+    monkeypatch.setattr(pis.settings, "plugins_installed_dir", str(tmp_path / "installed"))
+    db = _FakeDB()
+    _, previous_overrides = _install_api_overrides(db, monkeypatch)
+    z = _make_zip(key="api_at_limit", version="1.0.0")
+    sig, pub = _sign_payload(z)
+    monkeypatch.setattr(pis.settings, "plugin_pubkey", pub)
+    # 上限正好等于 zip 体积：不得误判为超限。
+    monkeypatch.setattr(pis.settings, "plugin_zip_max_bytes", len(z))
+
+    try:
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as c:
+            r = await c.post(
+                "/api/plugins/install/upload",
+                headers=_csrf_headers(),
+                files={
+                    "file": ("api_at_limit.zip", z, "application/zip"),
+                    "signature_file": ("api_at_limit.sig", sig, "application/octet-stream"),
+                },
+            )
+    finally:
+        _restore_api_overrides(previous_overrides)
+
+    assert r.status_code == 200
+    body = r.json()
+    assert body["key"] == "api_at_limit"
+    assert db.installed_rows["api_at_limit"].source == "zip"
 
 
 # ─────────────────────────────────────────────────────

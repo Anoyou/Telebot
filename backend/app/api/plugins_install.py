@@ -112,8 +112,36 @@ def _bad(code: str, message: str, status: int = 400) -> HTTPException:
 def _map_install_error(exc: pis.PluginInstallError) -> HTTPException:
     status_map = {
         "PLUGIN_NOT_FOUND": 404,
+        # settings.plugin_zip_max_bytes 约定的语义就是 413。
+        "ZIP_TOO_LARGE": 413,
     }
     return _bad(exc.code, exc.message, status_map.get(exc.code, 400))
+
+
+async def _read_zip_upload_bounded(file: UploadFile) -> bytes:
+    """分块读取上传的 zip，超过 ``settings.plugin_zip_max_bytes`` 立即中止。
+
+    直接 ``await file.read()`` 会先把整个 body 拉进内存，之后才在
+    ``parse_zip`` 里判大小；这里在读取阶段就按上限截断，尽早返回 413，
+    避免为超限请求分配完整缓冲区。
+    """
+    max_bytes = max(1, int(settings.plugin_zip_max_bytes))
+    chunk_size = min(1024 * 1024, max_bytes)
+    chunks: list[bytes] = []
+    total = 0
+    while True:
+        chunk = await file.read(chunk_size)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > max_bytes:
+            # 与 parse_zip 的 ZipTooLarge 使用同一 code，便于统一映射 413。
+            raise pis.ZipTooLarge(
+                "ZIP_TOO_LARGE",
+                f"zip 体积超出 {settings.plugin_zip_max_bytes // 1024 // 1024} MiB 上限",
+            )
+        chunks.append(chunk)
+    return b"".join(chunks)
 
 
 async def _read_signature(
@@ -216,7 +244,10 @@ async def upload_plugin_package(
     signature_file: UploadFile | None = File(None),
     signature: str | None = Form(None),
 ) -> PluginInstallOut:
-    zip_bytes = await file.read()
+    try:
+        zip_bytes = await _read_zip_upload_bounded(file)
+    except pis.PluginInstallError as exc:
+        raise _map_install_error(exc) from exc
     sig_bytes = await _read_signature(signature_file, signature)
     try:
         row = await pis.install_zip(
