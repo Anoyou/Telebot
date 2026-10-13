@@ -47,6 +47,31 @@ AGENT_MODE_TTL_SECONDS = 30 * 60
 AGENT_MODE_KEY = "system_agent:bot_mode:{account_id}:{tg_user_id}"
 AGENT_CONFIRM_PREFIX = "system_agent:bot_confirm:"
 AGENT_CONFIRM_TTL_SECONDS = 10 * 60  # 与 Action 默认 TTL 对齐
+
+
+def _assistant_signature(usage: Any) -> str:
+    """根据本轮 usage 生成回复署名：实际作答的 provider/model。
+
+    ``usage`` 来自 ``assistant_message`` 事件（schema_version=2）：``model`` /
+    ``provider_name`` 就是**实际**产出回复的 Provider 与模型，Magpie 等网关场景下
+    是上游模型（如 ``workbuddy/glm-5.3-flash``），不是用户选择的那一个。
+    发生 fallback 时额外注明原选择，避免用户以为模型没换。
+    """
+    if not isinstance(usage, dict):
+        return ""
+    provider = str(usage.get("provider_name") or "").strip()
+    model = str(usage.get("model") or "").strip()
+    answered = " / ".join(part for part in (provider, model) if part)
+    if not answered:
+        return ""
+    if not bool(usage.get("used_fallback")):
+        return answered
+    requested = str(usage.get("requested_model") or "").strip()
+    requested_provider = str(usage.get("requested_provider_name") or "").strip()
+    chosen = " / ".join(part for part in (requested_provider, requested) if part)
+    if not chosen or chosen == answered:
+        return answered
+    return f"{answered}（原选择 {chosen} 失败回退）"
 _PURE_SECRET_RE = re.compile(r"^[A-Za-z0-9._+/=:-]{12,512}$")
 _MARKDOWN_TABLE_SEPARATOR_RE = re.compile(
     r"^\s*\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|?\s*$"
@@ -999,6 +1024,7 @@ async def run_agent_query(
             placeholder_message_id = int(placeholder["message_id"])
 
     assistant_text = ""
+    assistant_usage: dict[str, Any] | None = None
     streamed_assistant_text = ""
     error_text = ""
     proposed_actions: list[dict[str, Any]] = []
@@ -1080,6 +1106,10 @@ async def run_agent_query(
             elif et == "assistant_message":
                 # 完整正文不进 draft：随后会 send 真实消息，若再 update_draft 会与 final 并存
                 assistant_text = str(event.get("content") or "")
+                # 记录本轮实际作答的 provider/model，发送前追加署名
+                raw_usage = event.get("usage")
+                if isinstance(raw_usage, dict):
+                    assistant_usage = raw_usage
             elif et == "error":
                 error_text = str(event.get("message") or "助手运行失败")
             elif et == "action_proposed":
@@ -1138,8 +1168,15 @@ async def run_agent_query(
     if role_hint:
         body = (body.rstrip() if body else "") + role_hint
 
+    # 回复署名：标明实际作答的 provider/model（网关/Magpie 下是上游模型）。
+    # 放在截断**之后**追加，署名本身不会占正文预算，也不会被截断吃掉。
+    signature = _assistant_signature(assistant_usage)
+
     if len(body) > 3500:
         body = body[:3400] + "\n\n…（已截断，完整内容请到 Web 悬浮助手查看）"
+
+    if signature:
+        body = f"{body}\n\n——\n模型：{signature}" if body else f"模型：{signature}"
 
     safe = _markdown_to_telegram_html(body) if body else "（无文本回复）"
 

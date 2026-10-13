@@ -30,6 +30,10 @@
 - 新增「应用自动检查更新」后端能力：`backend/app/services/app_update_service.py` 把原本堆在 `api/system_health.py` 的检查核心收敛为服务层实现，新增 SystemSetting `app_update_check`（默认 `{enabled: true, interval_minutes: 1440}`，clamp 60..10080 分钟）与 `app_update_last_check`（最近一次检查的结果摘要 + 时间戳，只保留角标需要的最小字段，不把完整 plan 落库）。新增 `GET /api/system/update-status` 供前端角标读取、`PATCH /api/system/update-check` 半量更新设置（读现值 → merge → 落库 → 审计），`POST /api/system/check-update` 改为薄壳共用同一份实现。
 - lifespan 启动后台自动检查循环：沿用 `remote_plugin_service.auto_update_check_loop` 的既有模式，启动 15s 后按设置间隔轮询（60s 粒度），只在"检测到新版本且结论发生变化"时记录一条日志，全程只检查与记录，绝不自动 pull / restart；DB 读写异常时降级告警，不会阻塞其他组件启动。
 
+### 优化
+
+- 系统助手回复新增「实际作答模型」署名：Bot 端在正文末尾追加 `模型：{provider} / {model}`，Web 端在回复气泡下方始终展示 `provider · model`。署名取的是本轮 **usage** 里的 `provider_name` / `model`——即真正产出回复的 Provider 与模型，Magpie 等网关场景下会显示上游标识（如 `Magpie 网关 / workbuddy/glm-5.3-flash`），而不是用户在面板上选的那一个。发生模型/Provider 回退时，Bot 署名补 `（原选择 {原模型} 失败回退）`，Web 端在下方单列「原模型 / 实际使用 / 原因」，避免用户误以为模型没换。署名追加在 3500 字符截断**之后**，超长回复也不会把署名吃掉；无 usage（旧 worker）时不渲染署名。纯逻辑抽到前端 `src/lib/modelRunMeta.ts`，Bot 侧抽 `bot_bridge._assistant_signature`，两侧各带回归测试。
+
 ### 文档
 
 - 新增面向使用者的中文《[使用指南](./docs/USAGE-GUIDE.md)》：安装与首次启动（三条部署路径）、
@@ -279,6 +283,10 @@
 
 - 收敛树状视图文案，以“插件调用”“平台能力”等实际语义替代“取养分”等过度树状隐喻。
 
+### 优化
+
+- 系统助手回复新增「实际作答模型」署名：Bot 端在正文末尾追加 `模型：{provider} / {model}`，Web 端在回复气泡下方始终展示 `provider · model`。署名取的是本轮 **usage** 里的 `provider_name` / `model`——即真正产出回复的 Provider 与模型，Magpie 等网关场景下会显示上游标识（如 `Magpie 网关 / workbuddy/glm-5.3-flash`），而不是用户在面板上选的那一个。发生模型/Provider 回退时，Bot 署名补 `（原选择 {原模型} 失败回退）`，Web 端在下方单列「原模型 / 实际使用 / 原因」，避免用户误以为模型没换。署名追加在 3500 字符截断**之后**，超长回复也不会把署名吃掉；无 usage（旧 worker）时不渲染署名。纯逻辑抽到前端 `src/lib/modelRunMeta.ts`，Bot 侧抽 `bot_bridge._assistant_signature`，两侧各带回归测试。
+
 ### 文档
 
 - 完成插件文档族真实性审计：修正 AI token 预扣估算与 tp_plugin 脚手架命令示例，补充 System Agent 动态插件只读工具说明。
@@ -304,6 +312,10 @@
 
 - 看树视图重构为"侧生树"形态：树干脊柱、枝干连线与叶行导轨可视化干-枝-叶层级；叶按嫁接通道挂靠（直通/命令贴干、交互长在交互枝），AI 与资金台账作为养分枝显示"被 N 叶取养分"，额外需求以「+能力」徽标表示并支持悬停联动高亮；值守时全树降饱和并显示修枝剪徽记。
 
+### 优化
+
+- 系统助手回复新增「实际作答模型」署名：Bot 端在正文末尾追加 `模型：{provider} / {model}`，Web 端在回复气泡下方始终展示 `provider · model`。署名取的是本轮 **usage** 里的 `provider_name` / `model`——即真正产出回复的 Provider 与模型，Magpie 等网关场景下会显示上游标识（如 `Magpie 网关 / workbuddy/glm-5.3-flash`），而不是用户在面板上选的那一个。发生模型/Provider 回退时，Bot 署名补 `（原选择 {原模型} 失败回退）`，Web 端在下方单列「原模型 / 实际使用 / 原因」，避免用户误以为模型没换。署名追加在 3500 字符截断**之后**，超长回复也不会把署名吃掉；无 usage（旧 worker）时不渲染署名。纯逻辑抽到前端 `src/lib/modelRunMeta.ts`，Bot 侧抽 `bot_bridge._assistant_signature`，两侧各带回归测试。
+
 ### 文档
 
 - 修正 `requires_platform_capabilities` 指南与平台能力描述中 `ledger` 的声明条件：以发奖、结算、补偿、人工核销等资金动作为主要判据，并注明台账枝关闭或值守时资金动作 fail-closed 拒绝。
@@ -315,6 +327,10 @@
 - 新增插件 `requires_platform_capabilities` 声明、按叶自动点亮平台枝与看树视图；值守或管理员强制关闭时明确拒绝启用，新装/升级强制校验声明，存量缺声明或源缺失仅提示警告。
 - 新增可持久、自愈的值守运行预设：暂停插件叶投递与定时任务、冻结资金动作、停止交互 Bot 采集，并支持按进入前快照安全恢复。
 - 新增 fail-closed 资金保险丝：仅在台账模块处于 ready 且无拒绝原因时允许发奖、补偿重放和人工核销；状态未知或切换中会明确拒绝新资金动作并保留待补义务。
+
+### 优化
+
+- 系统助手回复新增「实际作答模型」署名：Bot 端在正文末尾追加 `模型：{provider} / {model}`，Web 端在回复气泡下方始终展示 `provider · model`。署名取的是本轮 **usage** 里的 `provider_name` / `model`——即真正产出回复的 Provider 与模型，Magpie 等网关场景下会显示上游标识（如 `Magpie 网关 / workbuddy/glm-5.3-flash`），而不是用户在面板上选的那一个。发生模型/Provider 回退时，Bot 署名补 `（原选择 {原模型} 失败回退）`，Web 端在下方单列「原模型 / 实际使用 / 原因」，避免用户误以为模型没换。署名追加在 3500 字符截断**之后**，超长回复也不会把署名吃掉；无 usage（旧 worker）时不渲染署名。纯逻辑抽到前端 `src/lib/modelRunMeta.ts`，Bot 侧抽 `bot_bridge._assistant_signature`，两侧各带回归测试。
 
 ### 文档
 
@@ -613,6 +629,10 @@
 - 修正客户端受限错误建议：不再笼统归因 API Key，Responses Provider 会优先提示内置 Gateway，确需 OAuth/官方账号时保持明确拒绝伪造。
 - 修正生产更新失败后的人工回滚提示，要求同时恢复记录的 commit 与 Web、Frontend、Updater 三张镜像；涉及迁移时明确恢复迁移前备份，避免代码与镜像混装。
 
+### 优化
+
+- 系统助手回复新增「实际作答模型」署名：Bot 端在正文末尾追加 `模型：{provider} / {model}`，Web 端在回复气泡下方始终展示 `provider · model`。署名取的是本轮 **usage** 里的 `provider_name` / `model`——即真正产出回复的 Provider 与模型，Magpie 等网关场景下会显示上游标识（如 `Magpie 网关 / workbuddy/glm-5.3-flash`），而不是用户在面板上选的那一个。发生模型/Provider 回退时，Bot 署名补 `（原选择 {原模型} 失败回退）`，Web 端在下方单列「原模型 / 实际使用 / 原因」，避免用户误以为模型没换。署名追加在 3500 字符截断**之后**，超长回复也不会把署名吃掉；无 usage（旧 worker）时不渲染署名。纯逻辑抽到前端 `src/lib/modelRunMeta.ts`，Bot 侧抽 `bot_bridge._assistant_signature`，两侧各带回归测试。
+
 ### 文档
 
 - 按当前代码反向同步 System Agent 持久队列、运行中 steer/输入/审批、租约恢复、待确认收件箱和 Gateway 可观测性边界。
@@ -641,6 +661,10 @@
 - Gateway 边界剥离内部请求头、拒绝回指 Socket 的转发环路和自动上游重定向，避免自定义鉴权头跨 origin 泄露；语音转写和图片生成明确拒绝 Gateway，不绕过 Unix Socket。
 - 未配置 Provider 代理时 Gateway 强制直连，不继承进程环境代理；网络错误使用稳定文案，不向 usage 或界面暴露上游 Base URL。
 
+### 优化
+
+- 系统助手回复新增「实际作答模型」署名：Bot 端在正文末尾追加 `模型：{provider} / {model}`，Web 端在回复气泡下方始终展示 `provider · model`。署名取的是本轮 **usage** 里的 `provider_name` / `model`——即真正产出回复的 Provider 与模型，Magpie 等网关场景下会显示上游标识（如 `Magpie 网关 / workbuddy/glm-5.3-flash`），而不是用户在面板上选的那一个。发生模型/Provider 回退时，Bot 署名补 `（原选择 {原模型} 失败回退）`，Web 端在下方单列「原模型 / 实际使用 / 原因」，避免用户误以为模型没换。署名追加在 3500 字符截断**之后**，超长回复也不会把署名吃掉；无 usage（旧 worker）时不渲染署名。纯逻辑抽到前端 `src/lib/modelRunMeta.ts`，Bot 侧抽 `bot_bridge._assistant_signature`，两侧各带回归测试。
+
 ### 文档
 
 - 新增内置 Codex Gateway 配置、健康、错误排查、部署升级、开发命令、System Agent 集成和安全边界文档，并同步 README、架构、生产部署、安全运维和开发指南。
@@ -666,6 +690,10 @@
 ### 修复
 
 - 修复普通 Reply Keyboard 被标准事件错误标记为 Inline Keyboard 的问题，Bot API 与 Telethon 两种输入现在都会保留真实键盘类型。
+
+### 优化
+
+- 系统助手回复新增「实际作答模型」署名：Bot 端在正文末尾追加 `模型：{provider} / {model}`，Web 端在回复气泡下方始终展示 `provider · model`。署名取的是本轮 **usage** 里的 `provider_name` / `model`——即真正产出回复的 Provider 与模型，Magpie 等网关场景下会显示上游标识（如 `Magpie 网关 / workbuddy/glm-5.3-flash`），而不是用户在面板上选的那一个。发生模型/Provider 回退时，Bot 署名补 `（原选择 {原模型} 失败回退）`，Web 端在下方单列「原模型 / 实际使用 / 原因」，避免用户误以为模型没换。署名追加在 3500 字符截断**之后**，超长回复也不会把署名吃掉；无 usage（旧 worker）时不渲染署名。纯逻辑抽到前端 `src/lib/modelRunMeta.ts`，Bot 侧抽 `bot_bridge._assistant_signature`，两侧各带回归测试。
 
 ### 文档
 
@@ -905,6 +933,10 @@
 - 将 `payout` 纳入插件沙箱可识别的非客户端权限，并在已安装插件执行派奖动作前校验 Manifest 显式授权，避免正确声明被误报未知权限，也阻止未授权插件绕过高风险权限声明直接付款。
 - 修正 AI 平台能力热切换文档：正常关闭后现有上下文的 `ctx.ai` 会置为 `None`，只有竞态中继续持有旧 facade 时才抛出结构化不可用错误。
 
+### 优化
+
+- 系统助手回复新增「实际作答模型」署名：Bot 端在正文末尾追加 `模型：{provider} / {model}`，Web 端在回复气泡下方始终展示 `provider · model`。署名取的是本轮 **usage** 里的 `provider_name` / `model`——即真正产出回复的 Provider 与模型，Magpie 等网关场景下会显示上游标识（如 `Magpie 网关 / workbuddy/glm-5.3-flash`），而不是用户在面板上选的那一个。发生模型/Provider 回退时，Bot 署名补 `（原选择 {原模型} 失败回退）`，Web 端在下方单列「原模型 / 实际使用 / 原因」，避免用户误以为模型没换。署名追加在 3500 字符截断**之后**，超长回复也不会把署名吃掉；无 usage（旧 worker）时不渲染署名。纯逻辑抽到前端 `src/lib/modelRunMeta.ts`，Bot 侧抽 `bot_bridge._assistant_signature`，两侧各带回归测试。
+
 ### 文档
 
 - 在插件开发指南和 API 参考中明确 `payout` 的显式权限要求、拒绝错误码与严格 Trace 建议。
@@ -983,6 +1015,10 @@
 
 - 将 `payout` 纳入插件沙箱可识别的非客户端权限，并在已安装插件执行派奖动作前校验 Manifest 显式授权，避免正确声明被误报未知权限，也阻止未授权插件绕过高风险权限声明直接付款。
 - 修正 AI 平台能力热切换文档：正常关闭后现有上下文的 `ctx.ai` 会置为 `None`，只有竞态中继续持有旧 facade 时才抛出结构化不可用错误。
+
+### 优化
+
+- 系统助手回复新增「实际作答模型」署名：Bot 端在正文末尾追加 `模型：{provider} / {model}`，Web 端在回复气泡下方始终展示 `provider · model`。署名取的是本轮 **usage** 里的 `provider_name` / `model`——即真正产出回复的 Provider 与模型，Magpie 等网关场景下会显示上游标识（如 `Magpie 网关 / workbuddy/glm-5.3-flash`），而不是用户在面板上选的那一个。发生模型/Provider 回退时，Bot 署名补 `（原选择 {原模型} 失败回退）`，Web 端在下方单列「原模型 / 实际使用 / 原因」，避免用户误以为模型没换。署名追加在 3500 字符截断**之后**，超长回复也不会把署名吃掉；无 usage（旧 worker）时不渲染署名。纯逻辑抽到前端 `src/lib/modelRunMeta.ts`，Bot 侧抽 `bot_bridge._assistant_signature`，两侧各带回归测试。
 
 ### 文档
 

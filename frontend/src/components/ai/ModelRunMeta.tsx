@@ -1,7 +1,11 @@
 import { ModelBrandLogo } from "@/components/ai/ModelBrandLogo";
+import {
+  formatStageTimings,
+  resolveModelRunSummary,
+  resolveToolCallCount,
+  type ModelRunMetaUsage,
+} from "@/lib/modelRunMeta";
 import { cn } from "@/lib/utils";
-
-export type ModelRunMetaUsage = Record<string, unknown> | null | undefined;
 
 function num(value: unknown): number | null {
   if (typeof value === "number" && Number.isFinite(value)) return value;
@@ -16,16 +20,6 @@ function str(value: unknown): string | null {
   return null;
 }
 
-/** 工具调用数：优先实际调用 tool_calls，兼容旧 tool_count（历史消息）。 */
-export function resolveToolCallCount(usage: ModelRunMetaUsage): number | null {
-  if (!usage || typeof usage !== "object") return null;
-  const actual = num(usage.tool_calls);
-  if (actual != null) return actual;
-  // schema_version>=2 前 tool_count 是暴露数，无法区分；仅当无 tool_calls 时降级
-  if (num(usage.schema_version) === 2) return actual;
-  return num(usage.tool_count);
-}
-
 function formatElapsed(ms: number | null): string | null {
   if (ms == null) return null;
   return ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${ms}ms`;
@@ -33,22 +27,6 @@ function formatElapsed(ms: number | null): string | null {
 
 function formatTokens(value: number | null): string {
   return value == null ? "–" : value.toLocaleString("zh-CN");
-}
-
-/** 从 usage.stage_timings 抽出探测/路由/首 token 耗时标签。 */
-export function formatStageTimings(usage: ModelRunMetaUsage): string[] {
-  if (!usage || typeof usage !== "object") return [];
-  const raw = usage.stage_timings;
-  if (!raw || typeof raw !== "object") return [];
-  const stages = raw as Record<string, unknown>;
-  const bits: string[] = [];
-  const verify = num(stages.verify_ms);
-  const route = num(stages.route_ms);
-  const first = num(stages.first_token_ms);
-  if (verify != null) bits.push(`探测 ${formatElapsed(verify)}`);
-  if (route != null) bits.push(`路由 ${formatElapsed(route)}`);
-  if (first != null) bits.push(`首 token ${formatElapsed(first)}`);
-  return bits.filter((bit): bit is string => Boolean(bit));
 }
 
 /**
@@ -69,6 +47,7 @@ export function ModelRunMeta({
 }) {
   if (!usage || typeof usage !== "object") return null;
 
+  const run = resolveModelRunSummary(usage);
   const provider = str(usage.provider_name);
   const model = str(usage.model);
   const input = num(usage.input_tokens);
@@ -77,16 +56,13 @@ export function ModelRunMeta({
   const retries = num(usage.retry_count);
   const elapsed = num(usage.elapsed_ms);
   const apiFormat = str(usage.api_format);
-  const usedFallback = Boolean(usage.used_fallback);
+  const usedFallback = run?.usedFallback ?? false;
   const streamFallback = Boolean(usage.stream_fallback);
   const selectionMode = str(usage.selection_mode);
-  const reqProvider = str(usage.requested_provider_name);
-  const reqModel = str(usage.requested_model);
-  const reported = [provider, model].filter(Boolean).join(" · ");
-  const requested = [reqProvider, reqModel].filter(Boolean).join(" · ");
-  const summaryModel =
-    !usedFallback && reqModel && (!reqProvider || reqProvider === provider) ? reqModel : model;
-  const summary = [provider || reqProvider, summaryModel].filter(Boolean).join(" · ");
+  const reported = run?.reported ?? "";
+  const requested = run?.requested ?? "";
+  const summaryModel = run?.summaryModel ?? "";
+  const summary = run?.summary ?? "";
   const expectedLabel = [expected?.providerName, expected?.model].filter(Boolean).join(" · ");
   const mismatch =
     Boolean(expectedLabel) && Boolean(reported) && expectedLabel !== reported;
@@ -111,7 +87,7 @@ export function ModelRunMeta({
         <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
           {summary ? (
             <span className="inline-flex min-w-0 items-center gap-1.5">
-              <ModelBrandLogo model={summaryModel || model || reqModel} providerName={provider || reqProvider} size={12} />
+              <ModelBrandLogo model={summaryModel || model} providerName={provider} size={12} />
               <span className="min-w-0 break-all">{summary}</span>
             </span>
           ) : null}
@@ -139,7 +115,7 @@ export function ModelRunMeta({
       <div className="flex min-w-0 flex-wrap items-center gap-1.5">
         {summary ? (
           <span className={cn("inline-flex min-w-0 items-center gap-1.5 font-medium text-foreground/80", usedFallback && mismatch && "text-warning")}>
-            <ModelBrandLogo model={summaryModel || model || reqModel} providerName={provider || reqProvider} size={13} />
+            <ModelBrandLogo model={summaryModel || model} providerName={provider} size={13} />
             <span className="min-w-0 break-all">{summary}</span>
           </span>
         ) : null}

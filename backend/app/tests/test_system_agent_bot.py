@@ -1291,3 +1291,230 @@ async def test_keep_pending_reissues_inline_keyboard() -> None:
     assert "验证失败" in final["msg"] or "仍待确认" in final["msg"]
     assert final["reply_markup"] is not None
     assert any("confirm" in b["callback_data"] for b in final["reply_markup"]["inline_keyboard"][0])
+
+
+# ─────────── 回复署名：实际作答 provider/model ───────────
+
+
+def test_signature_uses_actual_provider_and_model() -> None:
+    """署名必须是实际产出回复的 provider/model，不是用户选择的那一个。"""
+    assert bot_bridge._assistant_signature(
+        {"provider_name": "openai", "model": "gpt-5.3", "used_fallback": False}
+    ) == "openai / gpt-5.3"
+
+
+def test_signature_reports_upstream_model_under_gateway() -> None:
+    """Magpie 等网关下 usage.model 是上游模型标识。"""
+    assert bot_bridge._assistant_signature(
+        {
+            "provider_name": "Magpie 网关",
+            "model": "workbuddy/glm-5.3-flash",
+            "requested_provider_name": "Magpie 网关",
+            "requested_model": "glm-5.3",
+            "used_fallback": False,
+        }
+    ) == "Magpie 网关 / workbuddy/glm-5.3-flash"
+
+
+def test_signature_notes_fallback_choice() -> None:
+    """发生回退时注明原选择，避免用户以为模型没换。"""
+    assert bot_bridge._assistant_signature(
+        {
+            "provider_name": "backup",
+            "model": "model-b",
+            "requested_provider_name": "primary",
+            "requested_model": "model-a",
+            "used_fallback": True,
+        }
+    ) == "backup / model-b（原选择 primary / model-a 失败回退）"
+
+
+def test_signature_omits_fallback_note_when_choice_matches() -> None:
+    """used_fallback 但 provider/model 未变时不加回退注记。"""
+    assert bot_bridge._assistant_signature(
+        {
+            "provider_name": "p",
+            "model": "m",
+            "requested_provider_name": "p",
+            "requested_model": "m",
+            "used_fallback": True,
+        }
+    ) == "p / m"
+
+
+@pytest.mark.parametrize(
+    "usage",
+    (
+        None,
+        {},
+        "garbage",
+        42,
+        {"model": "  "},
+        {"model": None, "provider_name": None},
+        {"provider_name": "p"},
+        {"provider_name": "  ", "model": "m"},
+    ),
+)
+def test_signature_without_provider_falls_back_to_model_only(usage: Any) -> None:
+    """没有 provider_name 时只署模型名；两者都空才不出署名。"""
+    signature = bot_bridge._assistant_signature(usage)
+    if usage is None or not isinstance(usage, dict):
+        assert signature == ""
+        return
+    if not any(
+        str(usage.get(key) or "").strip() for key in ("provider_name", "model")
+    ):
+        assert signature == ""
+    else:
+        assert signature
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("usage", "expected"),
+    (
+        (
+            {"provider_name": "openai", "model": "gpt-5.3", "used_fallback": False},
+            "模型：openai / gpt-5.3",
+        ),
+        (
+            {
+                "provider_name": "backup",
+                "model": "model-b",
+                "requested_provider_name": "primary",
+                "requested_model": "model-a",
+                "used_fallback": True,
+            },
+            "模型：backup / model-b（原选择 primary / model-a 失败回退）",
+        ),
+    ),
+)
+async def test_bot_reply_appends_signature(monkeypatch, usage, expected) -> None:
+    """Bot 发送前把署名追加到正文末尾。"""
+    send = _SendCapture()
+
+    class _Svc:
+        async def get_or_create_active_session(self, *a, **k):  # noqa: ANN001
+            return SimpleNamespace(id="sess-signature")
+
+        async def stream_message(self, *a, **k):  # noqa: ANN001
+            yield {"type": "assistant_message", "content": "查询结果", "usage": usage}
+            yield {"type": "done", "ok": True}
+
+    class _DB:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+        async def commit(self) -> None:
+            return None
+
+    monkeypatch.setattr(bot_bridge, "AsyncSessionLocal", lambda: _DB())
+    monkeypatch.setattr(bot_bridge, "get_system_agent_service", lambda: _Svc())
+    monkeypatch.setattr(bot_bridge, "refresh_agent_mode", AsyncMock())
+    monkeypatch.setattr(bot_bridge, "_redis_nonce_available", AsyncMock(return_value=True))
+
+    await bot_bridge.run_agent_query(
+        account_id=1,
+        tg_user_id=2,
+        role="viewer",
+        text="查一下今天收入",
+        send=send,
+        edit=False,
+    )
+
+    final = send.calls[-1]
+    assert "查询结果" in final["msg"]
+    assert expected in final["msg"]
+    # 署名在正文之后
+    assert final["msg"].index("查询结果") < final["msg"].index(expected)
+
+
+@pytest.mark.asyncio
+async def test_bot_reply_signature_survives_truncation(monkeypatch) -> None:
+    """超长回复被截断时，署名仍然完整保留在末尾。"""
+    send = _SendCapture()
+    long_text = "长" * 4000
+
+    class _Svc:
+        async def get_or_create_active_session(self, *a, **k):  # noqa: ANN001
+            return SimpleNamespace(id="sess-truncate")
+
+        async def stream_message(self, *a, **k):  # noqa: ANN001
+            yield {
+                "type": "assistant_message",
+                "content": long_text,
+                "usage": {"provider_name": "openai", "model": "gpt-5.3"},
+            }
+            yield {"type": "done", "ok": True}
+
+    class _DB:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+        async def commit(self) -> None:
+            return None
+
+    monkeypatch.setattr(bot_bridge, "AsyncSessionLocal", lambda: _DB())
+    monkeypatch.setattr(bot_bridge, "get_system_agent_service", lambda: _Svc())
+    monkeypatch.setattr(bot_bridge, "refresh_agent_mode", AsyncMock())
+
+    await bot_bridge.run_agent_query(
+        account_id=1,
+        tg_user_id=2,
+        role="viewer",
+        text="给我一份很长的报告",
+        send=send,
+        edit=False,
+    )
+
+    final = send.calls[-1]
+    assert "已截断" in final["msg"]
+    assert "模型：openai / gpt-5.3" in final["msg"]
+    assert final["msg"].rstrip().endswith("模型：openai / gpt-5.3")
+
+
+@pytest.mark.asyncio
+async def test_bot_reply_without_usage_has_no_signature(monkeypatch) -> None:
+    """老 worker / 无 usage 时不渲染署名。"""
+    send = _SendCapture()
+
+    class _Svc:
+        async def get_or_create_active_session(self, *a, **k):  # noqa: ANN001
+            return SimpleNamespace(id="sess-no-usage")
+
+        async def stream_message(self, *a, **k):  # noqa: ANN001
+            yield {"type": "assistant_message", "content": "纯文本回复"}
+            yield {"type": "done", "ok": True}
+
+    class _DB:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+        async def commit(self) -> None:
+            return None
+
+    monkeypatch.setattr(bot_bridge, "AsyncSessionLocal", lambda: _DB())
+    monkeypatch.setattr(bot_bridge, "get_system_agent_service", lambda: _Svc())
+    monkeypatch.setattr(bot_bridge, "refresh_agent_mode", AsyncMock())
+
+    await bot_bridge.run_agent_query(
+        account_id=1,
+        tg_user_id=2,
+        role="viewer",
+        text="你好",
+        send=send,
+        edit=False,
+    )
+
+    final = send.calls[-1]
+    assert "纯文本回复" in final["msg"]
+    assert "模型：" not in final["msg"]
