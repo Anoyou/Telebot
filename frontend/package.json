@@ -9,6 +9,7 @@
     "dev": "vite",
     "test": "node --experimental-strip-types --test src/lib/appIconAssets.test.ts src/lib/changelog.test.ts src/lib/csv.test.ts src/lib/devLoopbackConfig.test.ts src/lib/updateJobPersistence.test.ts src/lib/schedulerTarget.test.ts src/lib/navigation.capabilities.test.ts src/lib/ndjsonStream.test.ts src/lib/livenessStatus.test.ts src/lib/modelBrand.test.ts src/lib/providerExecutionBackend.test.ts src/lib/proxySupport.test.ts src/lib/upstreamErrorFacts.test.ts src/components/ai/modelPickerItems.test.ts src/pages/Assistant/sessionState.test.ts src/pages/Assistant/sessionModelSelection.test.ts src/components/assistant/actionCardState.test.ts src/components/assistant/assistantDockState.test.ts src/components/assistant/assistantPetAnimation.test.ts src/components/assistant/composerState.test.ts src/components/assistant/conversationState.test.ts src/components/assistant/runTraceState.test.ts src/components/assistant/taskCenterState.test.ts src/components/TelegramHtmlPreview.test.cjs src/types/pluginContract.test.ts",
     "typecheck": "tsc -b --pretty false",
+    "lint": "eslint src",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "test:visual": "START_SERVER=1 playwright test tests/visual --workers=1",
@@ -43,6 +44,7 @@
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.12.1",
+    "@eslint/js": "^9.39.5",
     "@playwright/test": "^1.61.1",
     "@tailwindcss/typography": "^0.5.19",
     "@types/node": "^22.0.0",
@@ -50,6 +52,9 @@
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^4.3.0",
     "autoprefixer": "^10.4.0",
+    "eslint": "^9.39.5",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "globals": "^16.5.0",
     "openapi-typescript": "^7.0.0",
     "pixelmatch": "^7.2.0",
     "pngjs": "^7.0.0",
@@ -58,6 +63,7 @@
     "rollup-plugin-visualizer": "^7.0.1",
     "tailwindcss": "^3.4.0",
     "typescript": "^5.5.0",
+    "typescript-eslint": "^8.71.2",
     "vite": "^5.4.0",
     "vite-plugin-pwa": "^0.20.5",
     "workbox-window": "^7.1.0"

@@ -164,6 +164,17 @@ export function AppShell() {
     isMobileNavActive(item.to, item.end, mobileActivePath),
   );
 
+  // 所有 hook 必须先执行完：提前 return 放在 useCallback 之后，
+  // 否则 loading -> ready 切换时会触发 "Rendered fewer hooks than expected" 崩溃。
+  const scrollMainToTop = useCallback(() => {
+    const main = mainRef.current;
+    if (!main) return;
+    const reduceMotion =
+      typeof window !== "undefined" &&
+      window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches;
+    main.scrollTo({ top: 0, behavior: reduceMotion ? "auto" : "smooth" });
+  }, []);
+
   if (isLoading) {
     return (
       <div role="status" aria-label="工作台加载中" className="flex h-[100dvh] flex-col bg-background">
@@ -179,15 +190,6 @@ export function AppShell() {
       </div>
     );
   }
-
-  const scrollMainToTop = useCallback(() => {
-    const main = mainRef.current;
-    if (!main) return;
-    const reduceMotion =
-      typeof window !== "undefined" &&
-      window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
-    main.scrollTo({ top: 0, behavior: reduceMotion ? "auto" : "smooth" });
-  }, []);
 
   return (
     <AssistantDockProvider>

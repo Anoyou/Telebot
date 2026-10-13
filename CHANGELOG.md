@@ -35,6 +35,8 @@
 - 修复 Key 池旁路：转写与插件流式此前自己 `build_client`，完全绕过密钥池，pool-only Provider（无主 Key、只配了池内 Key）在这两条路径上必然 401。现在 `llm_key_pool` 抽出公共入口 `open_selection_or_raise`，`llm_runtime._open_key_selection` 与 `llm_invoke.transcribe`、插件 `ctx.ai.stream_complete` 统一走它：转写遇到 401/403 会换下一把池内 Key 重试，两条路径的 usage 记录都补上 `provider_key_id` / `provider_key_label` 归因，密钥全部达当日上限时直接抛 `key_pool_exhausted`（provider_local），交给既有 fallback 链。转写同时把"选钥"移到账号预算预扣之前，避免在没有可用密钥时白锁一份预算。
 - 修复 Provider 可用性语义：出参 `has_api_key` 只代表主 Key，导致 pool-only Provider（只配了池内 Key）在 Web 端被到处误判为"未配置 Key"——助手 Provider 下拉、fallback 白名单、插件模板编辑器、Dashboard/AI 概览都会把它禁用或漏统计。现在新增 `has_effective_key`（主 Key 或任一启用的池内 Key；ollama 例外），`has_api_key` 保持主 Key 原义不变；前端可用性判断、下拉过滤、模型拉取统一改用 `has_effective_key`，LLM Providers 列表徽标区分"主 Key / 池内 Key / 未配置"，不改布局。
 - 修复 Gateway 超时契约：结构化调用的业务预算此前完全没传进 Go，`/v1/responses` 固定吃 snapshot 的 90s 兜底，System Agent 600s 的长预算会被上游中途掐断。现在 `llm_agent` 把 Agent 本轮剩余预算写进 `ModelRequest.metadata["_request_timeout_seconds"]`，`llm_runtime` 转成 `X-TelePilot-Timeout-Seconds` 头发给 `GatewayResponsesClient`；Go 侧 `routeTimeoutForRequest` 让请求级参数优先于 snapshot，`sseTimeoutsForRequest` 同步按总预算放宽首包 / idle 超时（上限 60s / 120s）。没有显式预算时不下发该头，走原有默认值，向后兼容；非法值直接忽略。契约已写入 `docs/CODEX-GATEWAY.md`（总超时 / 首包 / idle 三层）。
+- 修复 AppShell 的 hook 顺序缺陷：`if (isLoading)` 的提前 return 原本位于 `useCallback`（`scrollMainToTop`）之前，从骨架屏切到真实内容时会触发 "Rendered fewer hooks than expected. than the previous render" 直接崩溃。现已把该 hook 移到提前 return 之前，并同步为最小 ESLint 配置守住了这条规则。
+- 前端新增最小 ESLint 配置（`frontend/eslint.config.js` + `pnpm --dir frontend lint` 脚本），只启用 `react-hooks/rules-of-hooks`（error）与 `react-hooks/exhaustive-deps`（warn），不引入大范围风格规则；存量 33 条 `exhaustive-deps` 告警留在 warn 级逐批清理，不阻塞提交。
 
 ## [0.100.0-beta.5] - 2026-10-12 · patch（补丁版本预发布） · 修复同步 DSN 驱动解析导致 web 无法启动
 
