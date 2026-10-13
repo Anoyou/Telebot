@@ -8,7 +8,7 @@ const API_KEY_ERROR_CODES = new Set([
 
 function providerNeedsApiKey(action: SystemAgentAction): boolean {
   const previewMode = String(action.preview?.mode || "");
-  const currentProvider = action.preview?.current as { has_api_key?: boolean } | undefined;
+  const currentProvider = action.preview?.current as { has_effective_key?: boolean } | undefined;
   return Boolean(
     API_KEY_ERROR_CODES.has(String(action.error_code || ""))
       || (action.tool_name === "providers.verify" && previewMode === "draft")
@@ -16,7 +16,7 @@ function providerNeedsApiKey(action: SystemAgentAction): boolean {
       || (
         action.tool_name === "providers.save"
         && previewMode === "update"
-        && currentProvider?.has_api_key === false
+        && currentProvider?.has_effective_key === false
       ),
   );
 }

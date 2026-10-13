@@ -93,7 +93,7 @@ export function Dashboard() {
   const providers = providersQ.data ?? [];
   const activeAccounts = accounts.filter((account) => account.status === "active").length;
   const readyProviders = providers.filter(
-    (provider) => provider.has_api_key || provider.provider === "ollama",
+    (provider) => provider.has_effective_key || provider.provider === "ollama",
   ).length;
   const workerValue = accountsQ.isError ? "读取失败" : accountsQ.isLoading ? "-" : `${activeAccounts}/${accounts.length}`;
   const providerValue = !aiEnabled

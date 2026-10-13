@@ -7835,6 +7835,11 @@
             "title": "Has Api Key",
             "type": "boolean"
           },
+          "has_effective_key": {
+            "default": false,
+            "title": "Has Effective Key",
+            "type": "boolean"
+          },
           "id": {
             "title": "Id",
             "type": "integer"

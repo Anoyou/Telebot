@@ -628,6 +628,7 @@ class LLMProviderOut(BaseModel):
     name: str
     provider: str
     has_api_key: bool
+    has_effective_key: bool = False
     base_url: str | None = None
     default_model: str
     api_format: str = LLM_API_FORMAT_CHAT_COMPLETIONS

@@ -1,6 +1,6 @@
 // 系统设置 → LLM Provider 管理
 // 用于"AI 类自定义指令"的大模型供应商凭据配置；API Key 在后端 Fernet 加密落库
-// 列表里只显示 has_api_key:✓/✗；编辑表单点击眼睛时才通过专用接口按需查看明文
+// 列表里 has_api_key 只代表主 Key；可用性判断一律用 has_effective_key（主 Key 或启用的池内 Key）。
 //
 // 路由元数据（modality / tags / cost_tier / notes）：决定"自动路由"模式下
 // 一条 ,ai 指令该把请求送给哪个 provider；详见 backend/services/llm_router.py
@@ -1284,9 +1284,10 @@ export function LLMProviders({
                         )}
                       </TableCell>
                       <TableCell>
-                        {p.has_api_key ? (
+                        {p.has_effective_key ? (
                           <MetaBadge tone="success">
-                            <KeyRound className="h-3 w-3" /> 已配置
+                            <KeyRound className="h-3 w-3" />
+                            {p.has_api_key ? "已配置" : "池内 Key"}
                           </MetaBadge>
                         ) : (
                           <MetaBadge>未配置</MetaBadge>
@@ -1387,10 +1388,23 @@ function ProviderMobileCard({
       <div className="space-y-2">
         <div className="min-w-0 break-words text-sm font-semibold">{provider.name}</div>
         <div className="flex flex-wrap gap-1.5">
-          <MetaBadge tone={provider.has_api_key ? "success" : "warn"}>
-            <KeyRound className="h-3 w-3" />
-            {provider.has_api_key ? "已配置" : "未配置"}
-          </MetaBadge>
+          {/* 徽标按凭据来源区分：主 Key 优先，其次池内 Key，都没有才告警。 */}
+          {provider.has_api_key ? (
+            <MetaBadge tone="success">
+              <KeyRound className="h-3 w-3" />
+              主 Key
+            </MetaBadge>
+          ) : provider.has_effective_key ? (
+            <MetaBadge tone="success">
+              <KeyRound className="h-3 w-3" />
+              池内 Key
+            </MetaBadge>
+          ) : (
+            <MetaBadge tone="warn">
+              <KeyRound className="h-3 w-3" />
+              未配置
+            </MetaBadge>
+          )}
           {(provider.pool_keys?.length ?? 0) > 0 ? (
             <MetaBadge tone="info">+{provider.pool_keys!.length} 池</MetaBadge>
           ) : null}

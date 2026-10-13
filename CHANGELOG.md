@@ -33,6 +33,7 @@
 - 修复 account worker webhook ACK 因 payload 与 `_ack_cmd` 重复传 `ok` 导致 `make_event()` 抛 `TypeError` 被静默吞掉、ACK 完全不发布的问题：投递成功的 webhook 也会让主进程等到超时，调用侧只能看到 503。`_ack_cmd` 现在只从 dispatch 结果取统计字段，`ok` 仍由分支自己决定。
 - 修复 System Agent 会话摘要后台压缩从未被调度的问题：`schedule_summary_compression` 收到的是 `session.id`（`String(36)` UUID 主键），调用点却做了 `int(session.id)`，`ValueError` 被 `except: log.debug` 静默吞掉，因此超长摘要只会继续触发条目裁剪、LLM 压缩分支形同虚设。现在直接传字符串主键，`memory_compress` 的 `session_id` 类型改为 `str`，并新增「UUID 会话完成后压缩任务被真实调度」的回归测试。
 - 修复 Key 池旁路：转写与插件流式此前自己 `build_client`，完全绕过密钥池，pool-only Provider（无主 Key、只配了池内 Key）在这两条路径上必然 401。现在 `llm_key_pool` 抽出公共入口 `open_selection_or_raise`，`llm_runtime._open_key_selection` 与 `llm_invoke.transcribe`、插件 `ctx.ai.stream_complete` 统一走它：转写遇到 401/403 会换下一把池内 Key 重试，两条路径的 usage 记录都补上 `provider_key_id` / `provider_key_label` 归因，密钥全部达当日上限时直接抛 `key_pool_exhausted`（provider_local），交给既有 fallback 链。转写同时把"选钥"移到账号预算预扣之前，避免在没有可用密钥时白锁一份预算。
+- 修复 Provider 可用性语义：出参 `has_api_key` 只代表主 Key，导致 pool-only Provider（只配了池内 Key）在 Web 端被到处误判为"未配置 Key"——助手 Provider 下拉、fallback 白名单、插件模板编辑器、Dashboard/AI 概览都会把它禁用或漏统计。现在新增 `has_effective_key`（主 Key 或任一启用的池内 Key；ollama 例外），`has_api_key` 保持主 Key 原义不变；前端可用性判断、下拉过滤、模型拉取统一改用 `has_effective_key`，LLM Providers 列表徽标区分"主 Key / 池内 Key / 未配置"，不改布局。
 
 ## [0.100.0-beta.5] - 2026-10-12 · patch（补丁版本预发布） · 修复同步 DSN 驱动解析导致 web 无法启动
 

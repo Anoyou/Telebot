@@ -314,11 +314,19 @@ async def disable_for_account(
 
 def _provider_to_out(row: LLMProvider) -> LLMProviderOut:
     """ORM → 出参；屏蔽明文 api_key。"""
+    # has_api_key 只表示主 Key；可用性判断要用 has_effective_key（主 Key 或启用池内 Key），
+    # 否则 pool-only Provider 在前端会被误判为不可用。
+    pool_keys = list(getattr(row, "pool_keys", None) or [])
+    has_main_key = bool(row.api_key_enc) or (row.provider or "").lower() == "ollama"
+    has_effective_key = has_main_key or any(
+        bool(k.enabled) and bool(k.api_key_enc) for k in pool_keys
+    )
     return LLMProviderOut(
         id=row.id,
         name=row.name,
         provider=row.provider,
         has_api_key=bool(row.api_key_enc),
+        has_effective_key=has_effective_key,
         base_url=row.base_url,
         default_model=row.default_model,
         api_format=getattr(row, "api_format", None) or "chat_completions",

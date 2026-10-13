@@ -1651,6 +1651,8 @@ export interface LLMProviderOut {
   name: string;
   provider: LLMProviderKind | string;
   has_api_key: boolean;
+  /** 是否有可用凭据：主 Key，或任一启用的池内 Key；可用性判断一律用它 */
+  has_effective_key?: boolean;
   base_url: string | null;
   default_model: string;
   /** API 协议；老数据可能缺，前端按 chat_completions 兜底 */

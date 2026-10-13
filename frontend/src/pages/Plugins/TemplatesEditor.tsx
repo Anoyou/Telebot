@@ -1944,7 +1944,7 @@ function ProviderModelSelect({
   };
   const rows: Row[] = [];
   for (const p of providers) {
-    if (!p.has_api_key && (p.provider !== "ollama")) {
+    if (!p.has_effective_key && (p.provider !== "ollama")) {
       // 没配 key 的 provider 不展开（除了 ollama 本地不需要 key）
       // 但仍想让用户看到，所以加一条 disabled 提示行——这里简单跳过
       // 没有 key 的还是要展示，让用户知道这条 provider 没法用，他能去配
@@ -1957,7 +1957,7 @@ function ProviderModelSelect({
       modelId: "",
       defaultModelHint: p.default_model || null,
       custom: false,
-      hasKey: !!p.has_api_key,
+      hasKey: !!p.has_effective_key,
     });
     // (2) 已启用的具体模型一一展开
     const enabled = (p.models || []).filter((m) => m.enabled);
@@ -1969,7 +1969,7 @@ function ProviderModelSelect({
         modelId: m.id,
         defaultModelHint: null,
         custom: !!m.custom,
-        hasKey: !!p.has_api_key,
+        hasKey: !!p.has_effective_key,
       });
     }
   }

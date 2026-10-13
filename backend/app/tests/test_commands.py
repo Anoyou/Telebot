@@ -22,7 +22,7 @@ from fastapi import HTTPException
 
 from app.api import commands as commands_api
 from app.crypto import decrypt_str, encrypt_str
-from app.db.models.command import LLMProvider, normalize_protocol_profile
+from app.db.models.command import LLMProvider, LLMProviderKey, normalize_protocol_profile
 from app.schemas.command import (
     ChatTestModelsRequest,
     CommandTemplateBase,
@@ -3897,3 +3897,51 @@ async def test_update_provider_normalizes_persisted_codex_cli_identity() -> None
 
     assert row.client_identity_profile == "codex_tui"
     assert out.client_identity_profile == "codex_tui"
+
+
+def test_provider_to_out_reports_effective_key_for_pool_only_provider() -> None:
+    """pool-only Provider（无主 Key、有启用池 Key）必须 has_effective_key=True。"""
+    row = LLMProvider(
+        id=7,
+        name="pooled",
+        provider="openai",
+        api_key_enc=None,
+        base_url=None,
+        default_model="gpt-4o-mini",
+        created_at=datetime.now(UTC),
+    )
+    enabled = LLMProviderKey(
+        id=11,
+        provider_id=7,
+        label="k-a",
+        api_key_enc=encrypt_str("sk-pool-a"),
+        enabled=True,
+        priority=10,
+    )
+    row.pool_keys = [enabled]
+    out = _provider_to_out(row)
+    assert out.has_api_key is False  # 主 Key 语义保持原样
+    assert out.has_effective_key is True  # 可用性判断必须看到池内 Key
+
+def test_provider_to_out_effective_key_false_when_pool_all_disabled() -> None:
+    """池内密钥全部禁用时 has_effective_key 仍为 False，不能被误判成可用。"""
+    row = LLMProvider(
+        id=8,
+        name="pooled-off",
+        provider="openai",
+        api_key_enc=None,
+        base_url=None,
+        default_model="gpt-4o-mini",
+        created_at=datetime.now(UTC),
+    )
+    disabled = LLMProviderKey(
+        id=12,
+        provider_id=8,
+        label="k-off",
+        api_key_enc=encrypt_str("sk-pool-off"),
+        enabled=False,
+        priority=10,
+    )
+    row.pool_keys = [disabled]
+    out = _provider_to_out(row)
+    assert out.has_effective_key is False

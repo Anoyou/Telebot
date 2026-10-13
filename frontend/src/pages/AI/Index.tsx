@@ -220,7 +220,7 @@ export function AIIndex() {
   const providerById = new Map(providers.map((p) => [p.id, p]));
   const aiTemplates = templates.filter((t) => t.type === "ai");
   const providerCount = providers.length;
-  const readyCount = providers.filter((p) => p.has_api_key || p.provider === "ollama").length;
+  const readyCount = providers.filter((p) => p.has_effective_key || p.provider === "ollama").length;
   const usageSummary = usageQ.data?.summary;
   const successRateTone = !usageSummary || usageSummary.request_count === 0
     ? "neutral"

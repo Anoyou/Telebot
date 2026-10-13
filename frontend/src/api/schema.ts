@@ -7331,6 +7331,11 @@ export interface components {
             execution_backend: string;
             /** Has Api Key */
             has_api_key: boolean;
+            /**
+             * Has Effective Key
+             * @default false
+             */
+            has_effective_key: boolean;
             /** Id */
             id: number;
             /**

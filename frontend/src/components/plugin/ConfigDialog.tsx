@@ -1790,7 +1790,9 @@ function findLLMProviderBySelector(providers: LLMProviderOut[] | undefined, sele
 
 function formatLLMProviderOptionLabel(provider: LLMProviderOut): string {
   const tags = provider.tags && provider.tags.length > 0 ? ` · ${provider.tags.join(",")}` : "";
-  const keyState = provider.has_api_key || provider.provider === "ollama" ? "" : " · 未配置 API Key";
+  const keyState = provider.has_effective_key || provider.provider === "ollama"
+    ? ""
+    : " · 未配置 API Key";
   return `${provider.name}（${provider.provider} · ${provider.default_model}${tags}${keyState}）`;
 }
 

@@ -605,7 +605,7 @@ export function AssistantIndex() {
         : null);
 
   const selectableProviders = useMemo(
-    () => (providersQ.data || []).filter((provider) => provider.has_api_key && toolsModels(provider).length > 0),
+    () => (providersQ.data || []).filter((provider) => provider.has_effective_key && toolsModels(provider).length > 0),
     [providersQ.data],
   );
   const selectorDisabled = saveConfigMut.isPending || providersQ.isLoading;
@@ -1627,7 +1627,7 @@ export function AssistantIndex() {
             <option value="">未配置</option>
             {(providersQ.data || []).map((provider) => {
               const eligible = selectableProviders.some((item) => item.id === provider.id);
-              const unavailableLabel = !provider.has_api_key
+              const unavailableLabel = !provider.has_effective_key
                 ? "（缺少 Key）"
                 : "（无可用 Tools 模型）";
               return (
@@ -1816,10 +1816,10 @@ export function AssistantIndex() {
                   <option
                     key={p.id}
                     value={p.id}
-                    disabled={!p.has_api_key || toolsModels(p).length === 0}
+                    disabled={!p.has_effective_key || toolsModels(p).length === 0}
                   >
                     {p.name}
-                    {!p.has_api_key
+                    {!p.has_effective_key
                       ? "（缺少 Key）"
                       : toolsModels(p).length === 0
                         ? "（无 Tools 模型）"
@@ -1879,7 +1879,7 @@ export function AssistantIndex() {
                 .filter((provider) => provider.id !== configQ.data?.provider_id)
                 .map((provider) => {
                   const models = toolsModels(provider);
-                  const eligible = provider.has_api_key && models.length > 0;
+                  const eligible = provider.has_effective_key && models.length > 0;
                   const checked = (configQ.data?.fallback_provider_ids || []).includes(
                     provider.id,
                   );

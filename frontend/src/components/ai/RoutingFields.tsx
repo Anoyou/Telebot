@@ -140,7 +140,7 @@ function ProviderSelect({
       {providers.map((p) => (
         <option key={p.id} value={String(p.id)}>
           {p.name}（{p.provider} · {p.default_model}）
-          {p.has_api_key ? "" : " · ⚠ 未配置 key"}
+          {p.has_effective_key ? "" : " · ⚠ 未配置 key"}
           {p.tags && p.tags.length > 0 ? ` · [${p.tags.join(",")}]` : ""}
         </option>
       ))}
