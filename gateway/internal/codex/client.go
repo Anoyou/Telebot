@@ -30,6 +30,9 @@ const (
 	upstreamResponseHeaderTimeout = 15 * time.Second
 	sseFirstEventTimeout          = 20 * time.Second
 	sseIdleTimeout                = 30 * time.Second
+	// 请求级预算再长，首包 / idle 也不能无限放宽，否则会长期占用连接。
+	maxRequestedSSEFirstEvent = 60 * time.Second
+	maxRequestedSSEIdle       = 120 * time.Second
 )
 
 type Handler struct {
@@ -97,7 +100,7 @@ func (h *Handler) responses(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer release()
-	requestContext, cancelRequest := context.WithTimeout(r.Context(), routeTimeout(route))
+	requestContext, cancelRequest := context.WithTimeout(r.Context(), routeTimeoutForRequest(route, r))
 	defer cancelRequest()
 
 	downstreamStream, _ := payload["stream"].(bool)
@@ -151,6 +154,7 @@ func (h *Handler) responses(w http.ResponseWriter, r *http.Request) {
 	}
 	contentType := strings.ToLower(response.Header.Get("Content-Type"))
 	if strings.Contains(contentType, "text/event-stream") {
+		sseFirstEvent, sseIdle := h.sseTimeoutsForRequest(r)
 		if downstreamStream {
 			w.Header().Set("Content-Type", "text/event-stream")
 			wrote, streamErr := copySSEWithLimits(
@@ -158,8 +162,8 @@ func (h *Handler) responses(w http.ResponseWriter, r *http.Request) {
 				response.Body,
 				route.UpstreamModel,
 				model,
-				h.sseFirstEvent,
-				h.sseIdle,
+				sseFirstEvent,
+				sseIdle,
 				h.sseMaxBytes,
 				routeSecretValues(route)...,
 			)
@@ -172,8 +176,8 @@ func (h *Handler) responses(w http.ResponseWriter, r *http.Request) {
 			response.Body,
 			route.UpstreamModel,
 			model,
-			h.sseFirstEvent,
-			h.sseIdle,
+			sseFirstEvent,
+			sseIdle,
 			h.sseMaxBytes,
 		)
 		if err != nil {
@@ -312,6 +316,20 @@ func requestID(r *http.Request) string {
 	return strings.TrimSpace(r.Header.Get("X-TelePilot-Request-ID"))
 }
 
+// requestTimeout 返回调用方下发的请求级总超时（秒）。
+// 0 表示没有下发，调用方沿用 route snapshot 的默认值。
+func requestTimeout(r *http.Request) time.Duration {
+	raw := strings.TrimSpace(r.Header.Get("X-TelePilot-Timeout-Seconds"))
+	if raw == "" {
+		return 0
+	}
+	seconds, err := strconv.Atoi(raw)
+	if err != nil || seconds <= 0 {
+		return 0
+	}
+	return time.Duration(seconds) * time.Second
+}
+
 func compatibilityHeadersForRequest(route routing.Route, r *http.Request) (map[string]string, error) {
 	switch strings.TrimSpace(r.Header.Get("X-TelePilot-Request-Scope")) {
 	case "", "inference":
@@ -403,6 +421,40 @@ func routeTimeout(route routing.Route) time.Duration {
 		return 90 * time.Second
 	}
 	return timeout
+}
+
+// routeTimeoutForRequest 让请求级参数优先于 snapshot 默认值：
+// 调用方（System Agent 等）带 X-TelePilot-Timeout-Seconds 时按它的总预算走，
+// 否则保持 snapshot timeout_seconds（或 90s 兜底），向后兼容。
+func routeTimeoutForRequest(route routing.Route, r *http.Request) time.Duration {
+	if requested := requestTimeout(r); requested > 0 {
+		return requested
+	}
+	return routeTimeout(route)
+}
+
+// sseTimeoutsForRequest 把首包 / idle 超时一起按请求级总预算收紧：
+// 总预算更长时首包与 idle 相应放宽（不超过 60s），避免长请求被固定 20s/30s 掐断。
+func (h *Handler) sseTimeoutsForRequest(r *http.Request) (time.Duration, time.Duration) {
+	requested := requestTimeout(r)
+	if requested <= 0 {
+		return h.sseFirstEvent, h.sseIdle
+	}
+	first := h.sseFirstEvent
+	idle := h.sseIdle
+	if limit := requested / 6; limit > first {
+		first = limit
+	}
+	if limit := requested / 3; limit > idle {
+		idle = limit
+	}
+	if first > maxRequestedSSEFirstEvent {
+		first = maxRequestedSSEFirstEvent
+	}
+	if idle > maxRequestedSSEIdle {
+		idle = maxRequestedSSEIdle
+	}
+	return first, idle
 }
 
 func copySSE(

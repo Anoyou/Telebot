@@ -98,6 +98,14 @@ Gateway 只在 Unix Socket 上提供内部 HTTP，不能加入 FastAPI OpenAPI�
 
 数据面至少携带 `X-TelePilot-Provider-ID`、`X-TelePilot-Request-Scope` 和 `X-TelePilot-Request-ID`；Agent 调用还可携带伪名化 session/run/turn 元数据。Gateway 根据 Provider ID + 用户模型名精确选路，由内部路由名隔离同名模型，转发前删除所有 `X-TelePilot-*` 头并恢复上游模型名。调用方不得自行构造这些头绕过 Client Builder。
 
+### 请求级超时
+
+总超时默认来自 Provider snapshot 的 `timeout_seconds`（缺省 90s 兜底）。结构化调用可下发可选头 `X-TelePilot-Timeout-Seconds`（正整数秒）作为**请求级覆盖**，优先级高于 snapshot：
+
+- Python 侧 `llm_agent` 会把 Agent 本轮剩余预算写进 `ModelRequest.metadata["_request_timeout_seconds"]`，`llm_runtime` 再把它转成该头下发给 `GatewayResponsesClient`；System Agent 的 600s 预算因此能真正穿透到上游，不会被固定的 90s 截断。没有显式预算时不下发该头，行为与旧版完全一致。
+- Go 侧 `routeTimeoutForRequest` 让请求级参数优先；`sseTimeoutsForRequest` 同步按总预算放宽首包与 idle 超时（上限 60s / 120s），短预算不放大默认值，非法值直接忽略并回落默认。
+- 因此超时分三层：总超时（请求级 > snapshot > 90s）、首包超时、idle 超时。只有 Client Builder 会生成这些头，调用方不得自行构造。
+
 错误统一使用顶层 `error` 对象，对象字段包括 `code`、`message`、`retryable`、`request_id` 和 `gateway_stage`；响应头可回传脱敏的 Gateway version、request ID 和 stage。新增字段或错误码时，应先改 `gateway/contract`、Go 契约测试和 Python client，再同步 usage/OpenAPI 可见投影；不能只改一端。
 
 升级和普通回滚跟随 Web 镜像完成。回滚到不认识 `execution_backend` 的旧版前，先把所有 Gateway Provider 切回 direct；若跨越新增该字段的数据库迁移，还必须使用迁移前备份恢复数据库，不能只切代码或镜像。生产人工恢复步骤见 [公网部署指南](./DEPLOY-PUBLIC.md#人工回滚)。

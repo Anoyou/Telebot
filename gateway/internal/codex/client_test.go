@@ -704,3 +704,79 @@ func configuredHandler(t *testing.T, baseURL, key, model, upstreamModel string) 
 	}
 	return NewHandler(store)
 }
+
+func TestRequestTimeoutOverridesRouteDefault(t *testing.T) {
+	route := routing.Route{TimeoutSeconds: 90}
+	request := httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	request.Header.Set("X-TelePilot-Timeout-Seconds", "600")
+	if got := routeTimeoutForRequest(route, request); got != 600*time.Second {
+		t.Fatalf("routeTimeoutForRequest=%v", got)
+	}
+	if got := routeTimeoutForRequest(route, httptest.NewRequest(http.MethodPost, "/v1/responses", nil)); got != 90*time.Second {
+		t.Fatalf("无请求级头时应回落 snapshot 默认值, got=%v", got)
+	}
+	// 非法值必须被忽略，不能把总超时压成 0 或负数
+	bad := httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	bad.Header.Set("X-TelePilot-Timeout-Seconds", "not-a-number")
+	if got := routeTimeoutForRequest(route, bad); got != 90*time.Second {
+		t.Fatalf("非法请求级值应回落默认, got=%v", got)
+	}
+}
+
+func TestSSETimeoutsScaleWithRequestBudget(t *testing.T) {
+	handler := NewHandler(control.NewStore())
+	handler.sseFirstEvent = 20 * time.Second
+	handler.sseIdle = 30 * time.Second
+
+	longRequest := httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	longRequest.Header.Set("X-TelePilot-Timeout-Seconds", "600")
+	first, idle := handler.sseTimeoutsForRequest(longRequest)
+	if first != 60*time.Second || idle != 120*time.Second {
+		t.Fatalf("长预算应放宽到上限 first=%v idle=%v", first, idle)
+	}
+
+	// 无请求级头时保持默认，向后兼容
+	first, idle = handler.sseTimeoutsForRequest(httptest.NewRequest(http.MethodPost, "/v1/responses", nil))
+	if first != 20*time.Second || idle != 30*time.Second {
+		t.Fatalf("无预算应保持默认 first=%v idle=%v", first, idle)
+	}
+
+	// 短预算不放大
+	shortRequest := httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	shortRequest.Header.Set("X-TelePilot-Timeout-Seconds", "30")
+	first, idle = handler.sseTimeoutsForRequest(shortRequest)
+	if first != 20*time.Second || idle != 30*time.Second {
+		t.Fatalf("短预算不应放大默认值 first=%v idle=%v", first, idle)
+	}
+}
+
+func TestResponsesUsesRequestLevelTimeoutForSlowUpstream(t *testing.T) {
+	// 上游首个事件 120ms 才到：固定 20ms 的默认首包超时会直接 504。
+	// 请求级预算 2s 时必须放行，证明长预算真的穿透到上游。
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		w.(http.Flusher).Flush()
+		select {
+		case <-r.Context().Done():
+		case <-time.After(120 * time.Millisecond):
+		}
+		fmt.Fprintf(w, "data: {\"type\":\"response.output_text.delta\",\"delta\":\"hi\"}\n\n")
+		fmt.Fprintf(w, "data: [DONE]\n\n")
+	}))
+	defer upstream.Close()
+
+	handler := configuredHandler(t, upstream.URL, "key", "model", "model")
+	handler.sseFirstEvent = 20 * time.Millisecond
+	handler.sseIdle = 30 * time.Millisecond
+	request := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"model","stream":true}`))
+	request.Header.Set("X-TelePilot-Provider-ID", "1")
+	request.Header.Set("X-TelePilot-Timeout-Seconds", "2")
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK || !strings.Contains(recorder.Body.String(), "response.output_text.delta") {
+		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+}

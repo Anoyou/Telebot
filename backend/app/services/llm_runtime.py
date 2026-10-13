@@ -1179,11 +1179,12 @@ async def stream_model_with_fallback(
                     effective_provider = selection.apply(provider)
                     key_trace.update(selection.usage_fields())
                     try:
-                        builder = client_factory or build_client_from_dto
-                        client = builder(
+                        client = _build_client(
+                            client_factory or build_client_from_dto,
                             effective_provider,
                             override_model=provider_request.model,
                             proxy_url=effective_provider.proxy_url,
+                            timeout_seconds=_request_timeout_seconds(provider_request.metadata),
                         )
                         if inspect.isawaitable(client):
                             client = await client
@@ -1523,6 +1524,45 @@ def _key_affinity_scope(metadata: Mapping[str, Any] | None, account_id: int | No
     return None
 
 
+def _request_timeout_seconds(metadata: Mapping[str, Any] | None) -> int | None:
+    """从 metadata 解析本轮请求级超时预算（秒）；无预算或非法值返回 None。"""
+    raw = (metadata or {}).get("_request_timeout_seconds")
+    try:
+        value = int(raw)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+    return value if value > 0 else None
+
+
+def _build_client(
+    builder: Callable[..., Any | Awaitable[Any]],
+    provider: Any,
+    *,
+    override_model: str | None,
+    proxy_url: str | None,
+    timeout_seconds: int | None = None,
+) -> Any:
+    """装配 client；仅当 builder 显式支持时才下发 ``timeout_seconds``。
+
+    测试注入的 client_factory 往往只接受 (provider, override_model, proxy_url)；
+    强行传参会把超时问题伪装成 TypeError。
+    """
+    kwargs: dict[str, Any] = {
+        "override_model": override_model,
+        "proxy_url": proxy_url,
+    }
+    if timeout_seconds and timeout_seconds > 0:
+        try:
+            sig = inspect.signature(builder)
+        except (TypeError, ValueError):
+            sig = None
+        if sig is None or "timeout_seconds" in sig.parameters or any(
+            p.kind is inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()
+        ):
+            kwargs["timeout_seconds"] = timeout_seconds
+    return builder(provider, **kwargs)
+
+
 async def _invoke_model_with_retry(
     provider: LLMProviderDTO,
     request: ModelRequest,
@@ -1558,11 +1598,12 @@ async def _invoke_model_with_retry(
             },
         )
         try:
-            builder = client_factory or build_client_from_dto
-            client = builder(
+            client = _build_client(
+                client_factory or build_client_from_dto,
                 effective_provider,
                 override_model=request.model,
                 proxy_url=effective_provider.proxy_url,
+                timeout_seconds=_request_timeout_seconds(request.metadata),
             )
             if inspect.isawaitable(client):
                 client = await client
@@ -1695,11 +1736,12 @@ async def _call_with_retry(
             key_trace.update(selection.usage_fields())
 
         try:
-            builder = client_factory or build_client_from_dto
-            client = builder(
+            client = _build_client(
+                client_factory or build_client_from_dto,
                 effective_provider,
                 override_model=override_model,
                 proxy_url=effective_provider.proxy_url,
+                timeout_seconds=timeout_seconds,
             )
             if inspect.isawaitable(client):
                 client = await client

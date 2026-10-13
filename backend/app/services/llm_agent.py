@@ -318,6 +318,11 @@ async def run_agent(
         remaining = limits.timeout_seconds - (time.monotonic() - started)
         if remaining <= 0:
             raise TimeoutError("Agent 会话已超时")
+        # 把本轮剩余预算写进 metadata：Gateway 等结构化调用需要请求级超时，
+        # 否则 Go 侧固定 90s 会把长预算的 Agent 会话截断。
+        request_metadata = dict(current.metadata)
+        request_metadata["_request_timeout_seconds"] = int(remaining)
+        current = replace(current, metadata=request_metadata)
         async with asyncio.timeout(remaining):
             if stream_model_call is None:
                 return await model_call(current)

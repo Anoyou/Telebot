@@ -4463,6 +4463,7 @@ class GatewayResponsesClient(ResponsesClient):
         model: str,
         socket_path: str,
         request_scope: str = REQUEST_SCOPE_INFERENCE,
+        timeout_seconds: int | None = None,
     ) -> None:
         super().__init__(
             api_key="",
@@ -4481,6 +4482,8 @@ class GatewayResponsesClient(ResponsesClient):
         self._last_gateway_stage: str | None = None
         self._last_outbound_request_id: str | None = None
         self._gateway_response_seen = False
+        # 请求级超时预算：None / <=0 时不下发该头，Go 侧沿用 snapshot 默认值。
+        self._gateway_timeout_seconds = timeout_seconds
 
     def _reset_gateway_diagnostics(self) -> None:
         self._last_gateway_request_id = None
@@ -4500,7 +4503,9 @@ class GatewayResponsesClient(ResponsesClient):
             provider_scope=self._provider_scope,
         )
         self._last_outbound_request_id = context.request_id
-        return {
+        # 请求级超时：Go 侧优先用它覆盖 snapshot 的 route timeout（缺省仍走 90s 兜底），
+        # 让 System Agent 的长预算能真正穿透到上游，而不是被固定 90s 截断。
+        headers = {
             "X-TelePilot-Provider-ID": str(self._gateway_provider_id),
             "X-TelePilot-Request-Scope": self._gateway_request_scope,
             "X-TelePilot-Request-ID": context.request_id,
@@ -4509,6 +4514,9 @@ class GatewayResponsesClient(ResponsesClient):
             "X-TelePilot-Turn-ID": context.turn_id,
             "X-TelePilot-Turn-Index": str(context.turn_index),
         }
+        if self._gateway_timeout_seconds and self._gateway_timeout_seconds > 0:
+            headers["X-TelePilot-Timeout-Seconds"] = str(int(self._gateway_timeout_seconds))
+        return headers
 
     def _client_kwargs(self, timeout_seconds: int | None) -> dict[str, object]:
         return {
@@ -5228,6 +5236,7 @@ def build_client_from_dto(
     api_format_override: str | None = None,
     identity_override: str | None = None,
     request_scope: str = REQUEST_SCOPE_INFERENCE,
+    timeout_seconds: int | None = None,
 ) -> LLMClient:
     """根据 LLMProviderDTO 装配具体 LLMClient。
 
@@ -5256,6 +5265,7 @@ def build_client_from_dto(
             model=model,
             socket_path=os.getenv("TELEPILOT_GATEWAY_SOCKET", DEFAULT_GATEWAY_SOCKET),
             request_scope=request_scope,
+            timeout_seconds=timeout_seconds,
         )
     api_key = ""
     if dto.api_key_enc:

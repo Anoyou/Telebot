@@ -226,3 +226,68 @@ async def test_gateway_model_list_uses_bound_provider_route() -> None:
     client._client_kwargs = lambda _timeout: {"transport": transport}  # type: ignore[method-assign]
 
     assert await client.list_models() == ["gpt-x", "gpt-y"]
+
+
+def test_gateway_builder_passes_request_timeout_through(monkeypatch: pytest.MonkeyPatch) -> None:
+    """业务超时必须穿透到 GatewayResponsesClient，而不是只走本地 httpx 超时。"""
+    monkeypatch.setenv("TELEPILOT_GATEWAY_SOCKET", "/tmp/test-gateway.sock")
+    request = ModelRequest(model="gpt-x", messages=(ModelMessage.text(MessageRole.USER, "hi"),))
+    headers = build_client_from_dto(
+        _dto(backend="codex_gateway"),
+        timeout_seconds=600,
+    )._runtime_headers(request)
+    assert headers["X-TelePilot-Timeout-Seconds"] == "600"
+    # 无预算时不下发该头，Go 侧沿用 snapshot 默认 90s
+    headers = build_client_from_dto(_dto(backend="codex_gateway"))._runtime_headers(request)
+    assert "X-TelePilot-Timeout-Seconds" not in headers
+    # 非正值同样不下发
+    headers = build_client_from_dto(_dto(backend="codex_gateway"), timeout_seconds=0)._runtime_headers(request)
+    assert "X-TelePilot-Timeout-Seconds" not in headers
+
+
+def test_request_timeout_parser_ignores_garbage() -> None:
+    from app.services.llm_runtime import _request_timeout_seconds
+
+    assert _request_timeout_seconds({"_request_timeout_seconds": 600}) == 600
+    assert _request_timeout_seconds({"_request_timeout_seconds": "240"}) == 240
+    assert _request_timeout_seconds({"_request_timeout_seconds": 0}) is None
+    assert _request_timeout_seconds({"_request_timeout_seconds": -1}) is None
+    assert _request_timeout_seconds({"_request_timeout_seconds": "abc"}) is None
+    assert _request_timeout_seconds({"_request_timeout_seconds": None}) is None
+    assert _request_timeout_seconds(None) is None
+
+
+@pytest.mark.asyncio
+async def test_agent_call_once_exposes_remaining_budget_in_metadata() -> None:
+    """Agent 剩余预算必须落到 metadata，结构化调用才能转成请求级超时。"""
+    from app.services import llm_agent
+    from app.services.llm_agent import AgentLimits, run_agent
+    from app.services.llm_protocol import (
+        ModelResponse,
+        ModelUsage,
+        StopReason,
+        TextContent,
+    )
+
+    seen: dict[str, object] = {}
+
+    async def model_call(request: ModelRequest) -> ModelResponse:
+        seen["budget"] = request.metadata.get("_request_timeout_seconds")
+        return ModelResponse(
+            model=request.model,
+            content=(TextContent("done"),),
+            usage=ModelUsage(input_tokens=1, output_tokens=1),
+            stop_reason=StopReason.COMPLETED,
+        )
+
+    await run_agent(
+        model_call,
+        ModelRequest(model="gpt-x", messages=(ModelMessage.text(MessageRole.USER, "hi"),)),
+        {},
+        limits=AgentLimits(max_steps=1, max_tool_calls=1, timeout_seconds=120.0),
+    )
+    budget = seen.get("budget")
+    assert isinstance(budget, int)
+    assert 0 < budget <= 120
+
+    assert llm_agent is not None
