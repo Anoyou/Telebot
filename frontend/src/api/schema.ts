@@ -4206,6 +4206,26 @@ export interface paths {
         patch: operations["patch_system_settings_api_system_settings_patch"];
         trace?: never;
     };
+    "/api/system/update-check": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Patch Update Check
+         * @description 更新自动检查更新设置（读现值 → merge → 落库 → 审计）。
+         */
+        patch: operations["patch_update_check_api_system_update_check_patch"];
+        trace?: never;
+    };
     "/api/system/update-jobs/{job_id}": {
         parameters: {
             query?: never;
@@ -4218,6 +4238,26 @@ export interface paths {
          * @description 读取内部 updater 任务状态。
          */
         get: operations["get_update_job_api_system_update_jobs__job_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/system/update-status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Update Status
+         * @description TopBar 角标读取的自动检查更新状态与最近一次检查结果。
+         */
+        get: operations["get_update_status_api_system_update_status_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -5238,6 +5278,33 @@ export interface components {
             ok: boolean;
             /** Pending */
             pending?: string[];
+        };
+        /**
+         * AppUpdateCheckSettingsIn
+         * @description 自动检查更新设置；两个字段都可选，缺省保留现值。
+         */
+        AppUpdateCheckSettingsIn: {
+            /** Enabled */
+            enabled?: boolean | null;
+            /** Interval Minutes */
+            interval_minutes?: number | null;
+        };
+        /** AppUpdateStatusOut */
+        AppUpdateStatusOut: {
+            /**
+             * Enabled
+             * @default true
+             */
+            enabled: boolean;
+            /**
+             * Interval Minutes
+             * @default 1440
+             */
+            interval_minutes: number;
+            /** Last Check */
+            last_check?: {
+                [key: string]: unknown;
+            } | null;
         };
         /**
          * AuditLogItem
@@ -26700,6 +26767,68 @@ export interface operations {
             };
         };
     };
+    patch_update_check_api_system_update_check_patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: {
+                auth_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AppUpdateCheckSettingsIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AppUpdateStatusOut"];
+                };
+            };
+            /** @description 认证失败 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description CSRF 校验失败或权限不足 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description 服务器内部错误 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
     get_update_job_api_system_update_jobs__job_id__get: {
         parameters: {
             query?: never;
@@ -26720,6 +26849,55 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["UpdateJobStatusResponse"];
+                };
+            };
+            /** @description 认证失败 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description 服务器内部错误 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    get_update_status_api_system_update_status_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: {
+                auth_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AppUpdateStatusOut"];
                 };
             };
             /** @description 认证失败 */

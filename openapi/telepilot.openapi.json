@@ -2356,6 +2356,63 @@
         "title": "AlembicStatus",
         "type": "object"
       },
+      "AppUpdateCheckSettingsIn": {
+        "description": "自动检查更新设置；两个字段都可选，缺省保留现值。",
+        "properties": {
+          "enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enabled"
+          },
+          "interval_minutes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Interval Minutes"
+          }
+        },
+        "title": "AppUpdateCheckSettingsIn",
+        "type": "object"
+      },
+      "AppUpdateStatusOut": {
+        "properties": {
+          "enabled": {
+            "default": true,
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "interval_minutes": {
+            "default": 1440,
+            "title": "Interval Minutes",
+            "type": "integer"
+          },
+          "last_check": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Check"
+          }
+        },
+        "title": "AppUpdateStatusOut",
+        "type": "object"
+      },
       "AuditLogItem": {
         "description": "审计（操作）日志条目。",
         "properties": {
@@ -45973,6 +46030,104 @@
         ]
       }
     },
+    "/api/system/update-check": {
+      "patch": {
+        "description": "更新自动检查更新设置（读现值 → merge → 落库 → 审计）。",
+        "operationId": "patch_update_check_api_system_update_check_patch",
+        "parameters": [
+          {
+            "in": "cookie",
+            "name": "auth_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Auth Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AppUpdateCheckSettingsIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppUpdateStatusOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "认证失败"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "CSRF 校验失败或权限不足"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "服务器内部错误"
+          }
+        },
+        "security": [
+          {
+            "AuthCookie": [],
+            "CsrfCookie": [],
+            "CsrfHeader": [],
+            "RequestedWith": []
+          }
+        ],
+        "summary": "Patch Update Check",
+        "tags": [
+          "system"
+        ]
+      }
+    },
     "/api/system/update-jobs/{job_id}": {
       "get": {
         "description": "读取内部 updater 任务状态。",
@@ -46052,6 +46207,81 @@
           }
         ],
         "summary": "Get Update Job",
+        "tags": [
+          "system"
+        ]
+      }
+    },
+    "/api/system/update-status": {
+      "get": {
+        "description": "TopBar 角标读取的自动检查更新状态与最近一次检查结果。",
+        "operationId": "get_update_status_api_system_update_status_get",
+        "parameters": [
+          {
+            "in": "cookie",
+            "name": "auth_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Auth Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppUpdateStatusOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "认证失败"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "服务器内部错误"
+          }
+        },
+        "security": [
+          {
+            "AuthCookie": []
+          }
+        ],
+        "summary": "Get Update Status",
         "tags": [
           "system"
         ]

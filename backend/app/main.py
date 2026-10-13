@@ -47,6 +47,7 @@ from .services import (
     remote_plugin_service,
     runtime_profile_service,
 )
+from .services.app_update_service import auto_update_check_loop
 from .services.login_service import cleanup_expired_loop
 from .services.system_agent.actions import cleanup_expired_action_secrets_loop
 from .services.system_agent.run_manager import get_system_agent_run_manager
@@ -288,6 +289,10 @@ async def lifespan(app: FastAPI):
         name="system-agent-secret-cleanup",
     )
     remote_plugin_update_task = asyncio.create_task(remote_plugin_service.auto_update_check_loop())
+    app_update_check_task = asyncio.create_task(
+        auto_update_check_loop(),
+        name="app-update-check",
+    )
 
     retry_tasks: list[asyncio.Task[None]] = []
     for component in _RUNTIME_COMPONENTS:
@@ -388,6 +393,7 @@ async def lifespan(app: FastAPI):
         cleanup_task.cancel()
         agent_secret_cleanup_task.cancel()
         remote_plugin_update_task.cancel()
+        app_update_check_task.cancel()
         try:
             await cleanup_task
         except (asyncio.CancelledError, Exception):  # noqa: BLE001
@@ -398,6 +404,10 @@ async def lifespan(app: FastAPI):
             pass
         try:
             await remote_plugin_update_task
+        except (asyncio.CancelledError, Exception):  # noqa: BLE001
+            pass
+        try:
+            await app_update_check_task
         except (asyncio.CancelledError, Exception):  # noqa: BLE001
             pass
         if stop_all_workers is not None:

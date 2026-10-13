@@ -45,7 +45,7 @@ from ..db.models.command import LLMProvider
 from ..db.models.system import SystemSetting
 from ..deps import CurrentUser
 from ..redis_client import get_redis
-from ..services import auth_service
+from ..services import app_update_service, auth_service
 from ..settings import settings
 from ..util.update_plan import build_update_plan, classify_changed_files
 from ..util.update_target import (
@@ -2048,13 +2048,15 @@ async def get_update_target_options(
     )
 
 
-@router.post("/check-update", response_model=CheckUpdateResponse)
-async def check_update(
-    _user: CurrentUser,
-    payload: UpdateRequest | None = Body(default=None),
-) -> CheckUpdateResponse:
-    """仅检查远程更新，不拉取代码。"""
-    # _detect_runtime_mode 内含对 updater 的同步探活（urlopen 0.8s）与文件系统探测，
+async def run_update_check(payload: UpdateRequest | None = None) -> CheckUpdateResponse:
+    """仅检查远程更新，不拉取代码。
+
+    手动路由、TopBar 角标与 lifespan 后台循环共用这一份实现；
+    后台只取其中可序列化的摘要字段。
+    """
+    if not isinstance(payload, UpdateRequest):
+        payload = None
+    # _detect_runtime_mode 内含对 updater 的同步探活（urlopen 0.8s）与文件系统探测,
     # 放到线程池执行，避免阻塞事件循环（尤其 update-jobs 每 2s 轮询时）。
     runtime_mode, updater, root = await asyncio.to_thread(_detect_runtime_mode)
     can_apply = runtime_mode in {RUNTIME_LOCAL_SOURCE, RUNTIME_PROD_CONTAINER_WITH_UPDATER}
@@ -2269,6 +2271,68 @@ async def check_update(
             manual_command=manual_command,
             error=f"{type(e).__name__}: {str(e)[:200]}",
         )
+
+
+async def run_update_check_for_scheduler() -> dict[str, Any]:
+    """后台循环用的薄封装：只回传可 JSON 序列化的摘要。"""
+    response = await run_update_check(None)
+    return response.model_dump(mode="json")
+
+
+@router.post("/check-update", response_model=CheckUpdateResponse)
+async def check_update(
+    _user: CurrentUser,
+    payload: UpdateRequest | None = Body(default=None),
+) -> CheckUpdateResponse:
+    """仅检查远程更新，不拉取代码。"""
+    return await run_update_check(payload)
+
+
+class AppUpdateCheckSettingsIn(BaseModel):
+    """自动检查更新设置；两个字段都可选，缺省保留现值。"""
+
+    enabled: bool | None = None
+    interval_minutes: int | None = None
+
+
+class AppUpdateStatusOut(BaseModel):
+    enabled: bool = True
+    interval_minutes: int = 1440
+    last_check: dict[str, Any] | None = None
+
+
+@router.get("/update-status", response_model=AppUpdateStatusOut)
+async def get_update_status(_user: CurrentUser) -> AppUpdateStatusOut:
+    """TopBar 角标读取的自动检查更新状态与最近一次检查结果。"""
+    status = await app_update_service.load_update_status()
+    return AppUpdateStatusOut(**status)
+
+
+@router.patch("/update-check", response_model=AppUpdateStatusOut)
+async def patch_update_check(_user: CurrentUser, payload: AppUpdateCheckSettingsIn) -> AppUpdateStatusOut:
+    """更新自动检查更新设置（读现值 → merge → 落库 → 审计）。"""
+    from ..services import audit as audit_svc
+
+    async with AsyncSessionLocal() as db:
+        saved = await app_update_service.save_check_setting(
+            db,
+            enabled=payload.enabled,
+            interval_minutes=payload.interval_minutes,
+        )
+        last = await app_update_service.load_last_check(db)
+        await audit_svc.write(
+            db,
+            _user.id,
+            "set_app_update_check",
+            target="system",
+            detail=saved,
+        )
+        await db.commit()
+    return AppUpdateStatusOut(
+        enabled=saved["enabled"],
+        interval_minutes=saved["interval_minutes"],
+        last_check=last,
+    )
 
 
 @router.post("/pull-update", response_model=PullUpdateResponse)
