@@ -18184,14 +18184,58 @@
             "title": "Delivered",
             "type": "boolean"
           },
+          "failed": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failed"
+          },
           "hook_key": {
             "title": "Hook Key",
             "type": "string"
+          },
+          "invoked": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Invoked"
+          },
+          "matched": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Matched"
           },
           "ok": {
             "default": true,
             "title": "Ok",
             "type": "boolean"
+          },
+          "trace_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trace Id"
           }
         },
         "required": [

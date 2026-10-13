@@ -25,7 +25,7 @@ from ..deps import CurrentUser, DBSession
 from ..redis_client import get_redis
 from ..services import rate_limit_service
 from ..settings import settings
-from ..worker.ipc import CMD_WEBHOOK_DELIVER, publish_cmd_with_ack
+from ..worker.ipc import CMD_WEBHOOK_DELIVER, publish_cmd_with_ack_payload
 from ..worker.ratelimit.buckets import TokenBuckets
 
 router = APIRouter(prefix="/api/webhooks", tags=["webhooks"])
@@ -94,6 +94,11 @@ class WebhookDeliverOut(BaseModel):
     hook_key: str
     delivered: bool
     body_size: int
+    # 已受理（accepted）语义：trace_id 指向 worker 侧 EventTrace，处理结果以 trace 为准。
+    trace_id: str | None = None
+    matched: int | None = None
+    invoked: int | None = None
+    failed: int | None = None
 
 
 def _now_iso() -> str:
@@ -356,6 +361,13 @@ def _whitelisted_headers(request: Request) -> dict[str, str]:
     return out
 
 
+def _int_or_none(value: Any) -> int | None:
+    try:
+        return int(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+
+
 def _provided_token(header_token: str | None, query_token: str | None) -> str:
     if header_token:
         return str(header_token).strip()
@@ -471,7 +483,7 @@ async def deliver_webhook(
         "received_at": _now_iso(),
     }
     try:
-        delivered = await publish_cmd_with_ack(
+        ack = await publish_cmd_with_ack_payload(
             redis,
             account_id,
             CMD_WEBHOOK_DELIVER,
@@ -483,14 +495,30 @@ async def deliver_webhook(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail={"code": "WEBHOOK_DELIVERY_FAILED", "message": f"Webhook 投递失败：{type(exc).__name__}"},
         ) from exc
-    if not delivered:
+    if ack is None or not bool(ack.get("ok", False)):
+        # 没有 ACK 或 worker 明确拒绝：保持 503，与旧版本语义一致。
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail={"code": "WEBHOOK_WORKER_OFFLINE", "message": "账号 worker 未在线或未确认 webhook 投递"},
+        )
+    trace_id = ack.get("trace_id")
+    failed_count = _int_or_none(ack.get("failed"))
+    if failed_count:
+        # delivered 只表示已受理（accepted）；有失败动作必须留下可排查线索。
+        log.warning(
+            "webhook 投递已受理但有失败动作 account=%s hook=%s trace=%s failed=%s",
+            account_id,
+            hook["key"],
+            trace_id,
+            failed_count,
         )
     return WebhookDeliverOut(
         account_id=account_id,
         hook_key=hook["key"],
         delivered=True,
         body_size=body_size,
+        trace_id=trace_id if isinstance(trace_id, str) else None,
+        matched=_int_or_none(ack.get("matched")),
+        invoked=_int_or_none(ack.get("invoked")),
+        failed=failed_count,
     )

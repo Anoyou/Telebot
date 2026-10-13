@@ -127,6 +127,33 @@ async def publish_cmd_with_ack(
     worker 离线或旧版本 worker 不回 ACK 时返回 False；调用方可继续依赖
     DB 持久状态和周期 reconcile 收敛，不把用户请求硬失败。
     """
+    ack = await publish_cmd_with_ack_payload(
+        redis,
+        account_id,
+        type_,
+        timeout=timeout,
+        **payload,
+    )
+    if ack is None:
+        return False
+    return bool(ack_validator(ack)) if ack_validator is not None else True
+
+
+async def publish_cmd_with_ack_payload(
+    redis: Any,
+    account_id: int,
+    type_: str,
+    *,
+    timeout: float = 2.0,
+    **payload: Any,
+) -> dict[str, Any] | None:
+    """发布 worker 指令并返回 ACK payload（含 ok=False 的 ACK）。
+
+    返回 None 表示"没有拿到 ACK"（worker 离线、超时、异常），拿到 ACK 时
+    返回完整 payload，由调用方判断 ``ok``：这样可以区分"worker 明确拒绝"
+    与"没有任何应答"两种语义，也能把 ACK 携带的业务结果（例如 webhook 的
+    trace_id）透出给调用方。
+    """
     cmd_id = str(uuid.uuid4())
     reply_to = ack_channel(account_id, cmd_id)
     pubsub = redis.pubsub()
@@ -147,12 +174,10 @@ async def publish_cmd_with_ack(
                 continue
             ack = IPCMessage.decode(msg["data"])
             if ack.type == EVT_ACK and ack.payload.get("cmd_id") == cmd_id:
-                if not bool(ack.payload.get("ok", False)):
-                    return False
-                return bool(ack_validator(ack.payload)) if ack_validator is not None else True
-        return False
+                return dict(ack.payload)
+        return None
     except TimeoutError:
-        return False
+        return None
     finally:
         try:
             await pubsub.unsubscribe(reply_to)

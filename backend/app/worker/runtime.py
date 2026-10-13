@@ -791,6 +791,7 @@ async def _listen_cmd(
                         continue
                     ack_ok = True
                     ack_error: str | None = None
+                    cmd_ack_payload: dict[str, Any] | None = None
                     if _should_schedule_background_rpc(cmd):
                         if not paused.is_set() and _rpc_blocked_while_paused(cmd):
                             await _reject_rpc_command(redis, cmd, "kill switch / account pause is active")
@@ -975,7 +976,17 @@ async def _listen_cmd(
                                 else:
                                     from .plugins.loader import dispatch_webhook_event  # type: ignore
 
-                                    await dispatch_webhook_event(account_id, cmd.payload, redis=redis)
+                                    dispatch = await dispatch_webhook_event(
+                                        account_id, cmd.payload, redis=redis
+                                    )
+                                    # 受理语义：dispatch 返回值让主进程拿到 trace_id 与命中统计，
+                                    # 处理结果以 trace 为准，ACK 只代表"已受理"。
+                                    # 不带 ok：_ack_cmd 已显式传 ok=，重复键会让 make_event 冲突。
+                                    cmd_ack_payload = {
+                                        key: dispatch.get(key)
+                                        for key in ("matched", "invoked", "failed", "trace_id")
+                                        if isinstance(dispatch, dict) and key in dispatch
+                                    }
                             except Exception as e:  # noqa: BLE001
                                 ack_ok = False
                                 ack_error = f"{type(e).__name__}: {e}"
@@ -990,6 +1001,8 @@ async def _listen_cmd(
                         if not handled:
                             continue
                     ack_payload: dict[str, Any] | None = None
+                    if cmd_ack_payload is not None:
+                        ack_payload = cmd_ack_payload
                     if (
                         ack_ok
                         and cmd.type == CMD_RELOAD_CONFIG

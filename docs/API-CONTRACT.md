@@ -27,6 +27,10 @@ TelePilot 当前只为自身 Web/PWA 提供内部 HTTP API，不承诺第三方�
 
 请求参数校验错误继续使用 FastAPI 的 `HTTPValidationError`（422 `detail` 数组）。前端错误解析必须同时兼容这两种既有格式；本阶段不为统一外观而破坏运行时兼容性。
 
+## 异步受理语义
+
+`POST /api/webhooks/{account_id}/{hook_key}` 的 `delivered=true` 表示"已受理（accepted）"，即投递已进入账号 worker 队列，不代表插件动作已执行成功。处理结果以 worker 侧 `trace_id` 为准：响应同时返回 `matched` / `invoked` / `failed` 统计（旧版本 worker 不返回这些字段时为 `null`），调用方需要追踪执行细节时应记录 `trace_id`，并在 `failed > 0` 时按失败处理排查。只有 worker 离线或明确拒绝时才返回 503 `WEBHOOK_WORKER_OFFLINE`。
+
 ## 修改接口后的固定动作
 
 从仓库根目录执行：

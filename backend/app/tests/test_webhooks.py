@@ -133,7 +133,7 @@ def _headers(token: str) -> dict[str, str]:
 @pytest.mark.asyncio
 async def test_deliver_webhook_rejects_bad_token(monkeypatch: pytest.MonkeyPatch) -> None:
     db = _FakeDB(token="good-token")
-    monkeypatch.setattr(webhooks_api, "publish_cmd_with_ack", AsyncMock())
+    monkeypatch.setattr(webhooks_api, "publish_cmd_with_ack_payload", AsyncMock())
 
     async with _client(db) as client:
         response = await client.post(
@@ -146,7 +146,7 @@ async def test_deliver_webhook_rejects_bad_token(monkeypatch: pytest.MonkeyPatch
     assert response.json()["error"]["code"] == "WEBHOOK_TOKEN_INVALID"
     assert db.commits == 0
     assert db.settings[webhooks_api._setting_key(1)].value["token"] == "good-token"
-    webhooks_api.publish_cmd_with_ack.assert_not_awaited()
+    webhooks_api.publish_cmd_with_ack_payload.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -154,7 +154,7 @@ async def test_deliver_webhook_without_config_does_not_create_state(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     db = _FakeDB(configured=False)
-    monkeypatch.setattr(webhooks_api, "publish_cmd_with_ack", AsyncMock())
+    monkeypatch.setattr(webhooks_api, "publish_cmd_with_ack_payload", AsyncMock())
 
     async with _client(db) as client:
         response = await client.post(
@@ -212,7 +212,7 @@ async def test_deliver_webhook_module_disabled_is_fail_closed(
     db = _FakeDB(token="good-token")
     publish = AsyncMock()
     ingress = AsyncMock()
-    monkeypatch.setattr(webhooks_api, "publish_cmd_with_ack", publish)
+    monkeypatch.setattr(webhooks_api, "publish_cmd_with_ack_payload", publish)
     monkeypatch.setattr(webhooks_api, "_enforce_webhook_ingress_rate_limit", ingress)
 
     async with _client(db) as client:
@@ -292,7 +292,7 @@ async def test_deliver_webhook_exempt_from_csrf_header(monkeypatch: pytest.Monke
     """外部系统无法携带 X-Requested-With/CSRF cookie，webhook 路径必须豁免 CSRF 中间件，
     请求应穿过中间件到达端点做 token 校验（而非被 403 CSRF_HEADER_REQUIRED 拦截）。"""
     db = _FakeDB(token="good-token")
-    monkeypatch.setattr(webhooks_api, "publish_cmd_with_ack", AsyncMock())
+    monkeypatch.setattr(webhooks_api, "publish_cmd_with_ack_payload", AsyncMock())
 
     async with _client(db) as client:
         response = await client.post(
@@ -313,7 +313,7 @@ async def test_deliver_webhook_exempt_from_csrf_header(monkeypatch: pytest.Monke
 @pytest.mark.asyncio
 async def test_deliver_webhook_rejects_query_token_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
     db = _FakeDB(token="good-token")
-    monkeypatch.setattr(webhooks_api, "publish_cmd_with_ack", AsyncMock())
+    monkeypatch.setattr(webhooks_api, "publish_cmd_with_ack_payload", AsyncMock())
 
     async with _client(db) as client:
         response = await client.post(
@@ -324,7 +324,7 @@ async def test_deliver_webhook_rejects_query_token_by_default(monkeypatch: pytes
 
     assert response.status_code == 401
     assert response.json()["error"]["code"] == "WEBHOOK_TOKEN_INVALID"
-    webhooks_api.publish_cmd_with_ack.assert_not_awaited()
+    webhooks_api.publish_cmd_with_ack_payload.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -344,7 +344,7 @@ async def test_deliver_webhook_unknown_account_does_not_oracle_account_existence
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     db = _FakeDB(token="good-token")
-    monkeypatch.setattr(webhooks_api, "publish_cmd_with_ack", AsyncMock())
+    monkeypatch.setattr(webhooks_api, "publish_cmd_with_ack_payload", AsyncMock())
 
     async with _client(db) as client:
         response = await client.post(
@@ -358,7 +358,7 @@ async def test_deliver_webhook_unknown_account_does_not_oracle_account_existence
 
     assert response.status_code == 401
     assert response.json()["error"]["code"] == "WEBHOOK_TOKEN_INVALID"
-    webhooks_api.publish_cmd_with_ack.assert_not_awaited()
+    webhooks_api.publish_cmd_with_ack_payload.assert_not_awaited()
 
 
 def test_webhook_deliver_is_configurable_rate_limit_action() -> None:
@@ -374,7 +374,7 @@ def test_webhook_deliver_is_configurable_rate_limit_action() -> None:
 @pytest.mark.asyncio
 async def test_deliver_webhook_rejects_unknown_hook_key(monkeypatch: pytest.MonkeyPatch) -> None:
     db = _FakeDB(token="good-token", hook_key="default")
-    monkeypatch.setattr(webhooks_api, "publish_cmd_with_ack", AsyncMock())
+    monkeypatch.setattr(webhooks_api, "publish_cmd_with_ack_payload", AsyncMock())
 
     async with _client(db) as client:
         response = await client.post(
@@ -385,7 +385,7 @@ async def test_deliver_webhook_rejects_unknown_hook_key(monkeypatch: pytest.Monk
 
     assert response.status_code == 404
     assert response.json()["error"]["code"] == "WEBHOOK_HOOK_NOT_FOUND"
-    webhooks_api.publish_cmd_with_ack.assert_not_awaited()
+    webhooks_api.publish_cmd_with_ack_payload.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -401,7 +401,7 @@ async def test_deliver_webhook_returns_429_when_bucket_limited(monkeypatch: pyte
         )
 
     monkeypatch.setattr(webhooks_api, "_enforce_webhook_rate_limit", _limited)
-    monkeypatch.setattr(webhooks_api, "publish_cmd_with_ack", AsyncMock())
+    monkeypatch.setattr(webhooks_api, "publish_cmd_with_ack_payload", AsyncMock())
 
     async with _client(db) as client:
         response = await client.post(
@@ -412,7 +412,7 @@ async def test_deliver_webhook_returns_429_when_bucket_limited(monkeypatch: pyte
 
     assert response.status_code == 429
     assert response.json()["error"]["code"] == "WEBHOOK_RATE_LIMITED"
-    webhooks_api.publish_cmd_with_ack.assert_not_awaited()
+    webhooks_api.publish_cmd_with_ack_payload.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -453,17 +453,16 @@ async def test_deliver_webhook_mock_ipc_reaches_subscribed_plugin(monkeypatch: p
     )
     loader_mod._STATES[1] = state
 
-    async def _publish(redis: Any, account_id: int, cmd_type: str, **payload: Any) -> bool:
+    async def _publish(redis: Any, account_id: int, cmd_type: str, **payload: Any) -> dict[str, Any] | None:
         assert redis is state.redis or isinstance(redis, _FakeRedis)
         assert account_id == 1
         assert cmd_type == CMD_WEBHOOK_DELIVER
         payload.pop("timeout", None)
-        result = await loader_mod.dispatch_webhook_event(account_id, payload, redis=state.redis)
-        return bool(result["ok"])
+        return await loader_mod.dispatch_webhook_event(account_id, payload, redis=state.redis)
 
     monkeypatch.setattr(webhooks_api, "get_redis", lambda: state.redis)
     monkeypatch.setattr(webhooks_api, "_enforce_webhook_rate_limit", AsyncMock(return_value={}))
-    monkeypatch.setattr(webhooks_api, "publish_cmd_with_ack", _publish)
+    monkeypatch.setattr(webhooks_api, "publish_cmd_with_ack_payload", _publish)
     monkeypatch.setattr(
         loader_mod,
         "_load_event_framework_flags",
@@ -494,3 +493,161 @@ async def test_deliver_webhook_mock_ipc_reaches_subscribed_plugin(monkeypatch: p
     stored = db.settings[webhooks_api._setting_key(1)].value
     assert "token" not in stored
     assert decrypt_str(stored["token_enc"]) == "good-token"
+
+
+@pytest.mark.asyncio
+async def test_deliver_webhook_returns_trace_id_and_dispatch_stats(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """已受理响应必须带 trace_id 与命中统计，便于调用方按 trace 查处理结果。"""
+    db = _FakeDB(token="good-token")
+    ack = {
+        "ok": True,
+        "matched": 2,
+        "invoked": 2,
+        "failed": 0,
+        "trace_id": "trace-webhook-1",
+    }
+    monkeypatch.setattr(
+        webhooks_api, "publish_cmd_with_ack_payload", AsyncMock(return_value=ack)
+    )
+    monkeypatch.setattr(
+        webhooks_api, "_enforce_webhook_rate_limit", AsyncMock(return_value={})
+    )
+    monkeypatch.setattr(webhooks_api, "_enforce_webhook_ingress_rate_limit", AsyncMock(return_value={}))
+
+    async with _client(db) as client:
+        response = await client.post(
+            "/api/webhooks/1/default",
+            headers=_headers("good-token"),
+            json={"event": "demo"},
+        )
+
+    assert response.status_code == 202
+    body = response.json()
+    assert body["delivered"] is True
+    assert body["trace_id"] == "trace-webhook-1"
+    assert body["matched"] == 2
+    assert body["invoked"] == 2
+    assert body["failed"] == 0
+
+
+@pytest.mark.asyncio
+async def test_deliver_webhook_logs_warning_when_dispatch_has_failures(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """failed_count > 0 时必须留下 warning 日志，不能静默吞掉失败动作。"""
+    db = _FakeDB(token="good-token")
+    ack = {
+        "ok": True,
+        "matched": 1,
+        "invoked": 1,
+        "failed": 2,
+        "trace_id": "trace-webhook-2",
+    }
+    monkeypatch.setattr(
+        webhooks_api, "publish_cmd_with_ack_payload", AsyncMock(return_value=ack)
+    )
+    monkeypatch.setattr(
+        webhooks_api, "_enforce_webhook_rate_limit", AsyncMock(return_value={})
+    )
+    monkeypatch.setattr(webhooks_api, "_enforce_webhook_ingress_rate_limit", AsyncMock(return_value={}))
+
+    with caplog.at_level("WARNING", logger="app.api.webhooks"):
+        async with _client(db) as client:
+            response = await client.post(
+                "/api/webhooks/1/default",
+                headers=_headers("good-token"),
+                json={"event": "demo"},
+            )
+
+    assert response.status_code == 202
+    assert response.json()["failed"] == 2
+    assert any(
+        "trace-webhook-2" in record.message and "failed=2" in record.message
+        for record in caplog.records
+    )
+
+
+@pytest.mark.asyncio
+async def test_deliver_webhook_503_when_worker_rejects(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """worker 明确拒绝（ok=False）时仍返回 503，不把失败当成功。"""
+    db = _FakeDB(token="good-token")
+    monkeypatch.setattr(
+        webhooks_api,
+        "publish_cmd_with_ack_payload",
+        AsyncMock(return_value={"ok": False, "error": "webhooks module disabled"}),
+    )
+    monkeypatch.setattr(
+        webhooks_api, "_enforce_webhook_rate_limit", AsyncMock(return_value={})
+    )
+    monkeypatch.setattr(webhooks_api, "_enforce_webhook_ingress_rate_limit", AsyncMock(return_value={}))
+
+    async with _client(db) as client:
+        response = await client.post(
+            "/api/webhooks/1/default",
+            headers=_headers("good-token"),
+            json={"event": "demo"},
+        )
+
+    assert response.status_code == 503
+    assert response.json()["error"]["code"] == "WEBHOOK_WORKER_OFFLINE"
+
+
+def test_ipc_ack_payload_keeps_ok_false_ack(monkeypatch: pytest.MonkeyPatch) -> None:
+    """ACK 契约：publish_cmd_with_ack_payload 必须把 ok=False 的 ACK 也返回。"""
+    import asyncio
+
+    from app.worker import ipc
+
+    class _PubSub:
+        def __init__(self, cmd_id: str) -> None:
+            self._cmd_id = cmd_id
+            self._sent = False
+
+        async def subscribe(self, _channel: str) -> None:
+            return None
+
+        async def get_message(self, **_kwargs: Any) -> dict[str, Any]:
+            if self._sent:
+                return {}
+            self._sent = True
+            return {
+                "data": ipc.make_event(
+                    ipc.EVT_ACK,
+                    cmd_id=self._cmd_id,
+                    cmd_type=CMD_WEBHOOK_DELIVER,
+                    ok=False,
+                    error="webhooks module disabled",
+                )
+            }
+
+        async def unsubscribe(self, _channel: str) -> None:
+            return None
+
+        async def close(self) -> None:
+            return None
+
+    class _Redis:
+        def __init__(self) -> None:
+            self.published: list[tuple[str, str]] = []
+
+        def pubsub(self) -> _PubSub:  # noqa: ANN202
+            return _PubSub("fixed-cmd-id")
+
+        async def publish(self, channel: str, message: str) -> int:
+            self.published.append((channel, message))
+            return 1
+
+    monkeypatch.setattr(ipc.uuid, "uuid4", lambda: "fixed-cmd-id")
+    redis = _Redis()
+    ack = asyncio.run(
+        ipc.publish_cmd_with_ack_payload(redis, 1, CMD_WEBHOOK_DELIVER, timeout=0.5)
+    )
+
+    assert ack is not None
+    assert ack["ok"] is False
+    assert ack["error"] == "webhooks module disabled"
+    assert ack["cmd_type"] == CMD_WEBHOOK_DELIVER

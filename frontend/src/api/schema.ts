@@ -10911,13 +10911,21 @@ export interface components {
             body_size: number;
             /** Delivered */
             delivered: boolean;
+            /** Failed */
+            failed?: number | null;
             /** Hook Key */
             hook_key: string;
+            /** Invoked */
+            invoked?: number | null;
+            /** Matched */
+            matched?: number | null;
             /**
              * Ok
              * @default true
              */
             ok: boolean;
+            /** Trace Id */
+            trace_id?: string | null;
         };
         /** WebhookHookOut */
         WebhookHookOut: {

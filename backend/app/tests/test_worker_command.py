@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import re
 import time
@@ -30,6 +31,7 @@ from app.worker.ipc import (
     CMD_RUN_INTERACTION_ACTION,
     CMD_RUN_INTERACTION_ENTRY,
     CMD_STOP,
+    CMD_WEBHOOK_DELIVER,
     EVT_ACK,
     EVT_PONG,
     IPCMessage,
@@ -1726,3 +1728,101 @@ def test_should_block_auto_command_text_when_ctx_missing() -> None:
         assert key == "help"
     finally:
         wcmd._ctx = old_ctx  # type: ignore[attr-defined]
+
+
+@pytest.mark.asyncio
+async def test_webhook_deliver_ack_carries_dispatch_result(monkeypatch):
+    """webhook 投递的 ACK 必须带 trace_id 与命中统计，供 API 层返回给调用方。"""
+    from app.worker import runtime as runtime_mod
+    from app.worker.plugins import loader as loader_mod
+
+    async def _fake_dispatch(account_id: int, payload: dict, **_kwargs):
+        return {
+            "ok": True,
+            "matched": 3,
+            "invoked": 3,
+            "failed": 1,
+            "trace_id": "wh-trace-1",
+        }
+
+    # worker 侧是函数内延迟 import，patch loader 模块属性即可生效。
+    monkeypatch.setattr(loader_mod, "dispatch_webhook_event", _fake_dispatch)
+    platform_capabilities._reset_for_tests()
+    platform_capabilities._CACHE_READY = True
+    platform_capabilities._DESIRED["webhooks"] = True
+
+    redis = _FakeCmdRedis()
+    client = AsyncMock()
+    paused = asyncio.Event()
+    paused.set()
+    listener = asyncio.create_task(runtime_mod._listen_cmd(redis, client, 107, paused))
+    try:
+        await redis.send_cmd(
+            make_cmd(
+                CMD_WEBHOOK_DELIVER,
+                reply_to="wh-reply",
+                cmd_id="wh-cmd-1",
+                hook_key="orders",
+                body={"a": 1},
+            )
+        )
+        channel, msg = await _wait_for_publish(
+            redis,
+            lambda ch, item: ch == "wh-reply" and item.type == EVT_ACK,
+        )
+    finally:
+        listener.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await listener
+
+    assert channel == "wh-reply"
+    assert msg.payload["ok"] is True
+    assert msg.payload["trace_id"] == "wh-trace-1"
+    assert msg.payload["matched"] == 3
+    assert msg.payload["invoked"] == 3
+    # failed 只进 ACK 统计，不改变 ok=True 的已受理语义。
+    assert msg.payload["failed"] == 1
+
+
+@pytest.mark.asyncio
+async def test_webhook_deliver_ack_reports_failure_without_trace(monkeypatch):
+    """dispatch 抛异常时 ACK 保持 ok=False，不伪造 trace_id。"""
+    from app.worker import runtime as runtime_mod
+    from app.worker.plugins import loader as loader_mod
+
+    async def _boom(account_id: int, payload: dict, **_kwargs):
+        raise RuntimeError("dispatch exploded")
+
+    monkeypatch.setattr(loader_mod, "dispatch_webhook_event", _boom)
+    platform_capabilities._reset_for_tests()
+    platform_capabilities._CACHE_READY = True
+    platform_capabilities._DESIRED["webhooks"] = True
+
+    redis = _FakeCmdRedis()
+    client = AsyncMock()
+    paused = asyncio.Event()
+    paused.set()
+    listener = asyncio.create_task(runtime_mod._listen_cmd(redis, client, 108, paused))
+    try:
+        await redis.send_cmd(
+            make_cmd(
+                CMD_WEBHOOK_DELIVER,
+                reply_to="wh-reply-2",
+                cmd_id="wh-cmd-2",
+                hook_key="orders",
+                body={"a": 1},
+            )
+        )
+        channel, msg = await _wait_for_publish(
+            redis,
+            lambda ch, item: ch == "wh-reply-2" and item.type == EVT_ACK,
+        )
+    finally:
+        listener.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await listener
+
+    assert channel == "wh-reply-2"
+    assert msg.payload["ok"] is False
+    assert "dispatch exploded" in str(msg.payload["error"])
+    assert "trace_id" not in msg.payload
