@@ -1414,3 +1414,88 @@ async def test_save_config_roundtrip(agent_db) -> None:
         row = await db.get(SystemSetting, "system_agent_config")
         assert row is not None
         assert row.value["provider_id"] == 3
+
+
+@pytest.mark.asyncio
+async def test_summary_compression_scheduled_with_uuid_session_id(agent_db, monkeypatch) -> None:
+    """UUID 主键会话的摘要压缩必须真正被调度（旧代码 int(session.id) 抛 ValueError 被吞）。"""
+    svc = SystemAgentService()
+    scheduled: list[tuple[str, int]] = []
+
+    async def fake_stream(*_a, **_k):
+        yield {"type": "assistant_message", "content": "好的", "usage": {}}
+        yield {"type": "done", "ok": True}
+
+    monkeypatch.setattr(svc.runtime, "stream_turn", fake_stream)
+
+    def fake_schedule(session_id, *, summary_rev: int) -> None:
+        scheduled.append((str(session_id), int(summary_rev)))
+
+    monkeypatch.setattr(
+        "app.services.system_agent.service.schedule_summary_compression", fake_schedule
+    )
+
+    async with agent_db() as db:
+        session = await svc.create_session(db, channel=CHANNEL_WEB, web_user_id=1)
+        assert len(session.id) == 36 and "-" in session.id  # String(36) UUID 主键
+        # 预置一段超过压缩阈值的摘要，使本轮 done 命中压缩调度分支
+        # 让 recent_turns 本轮轮转出条目，从而真正刷新 memory_summary 并触发压缩调度
+        session.memory_state = {
+            "recent_turns": [{"goal": f"旧目标 {i}", "result": f"旧结果 {i}"} for i in range(4)],
+            "summary_rev": 0,
+        }
+        session.memory_summary = "用户目标：整理账目。" * 200
+        await db.flush()
+
+        events = [
+            event
+            async for event in svc.stream_message(
+                db,
+                session=session,
+                text="继续整理",
+                role="admin",
+                channel=CHANNEL_WEB,
+                web_user_id=1,
+            )
+        ]
+
+    assert any(e.get("type") == "done" for e in events)
+    assert scheduled and scheduled[0][0] == session.id
+
+
+@pytest.mark.asyncio
+async def test_compress_session_summary_uses_string_primary_key(agent_db, monkeypatch) -> None:
+    """后台压缩器必须按字符串 UUID 主键查会话；rev 冲突时直接短路返回。"""
+    from app.services.system_agent import memory_compress
+
+    async def failing_resolve(*_a, **_k):
+        raise AssertionError("rev 冲突必须先于 provider 解析返回")
+
+    monkeypatch.setattr(memory_compress, "resolve_agent_providers", failing_resolve)
+
+    async with agent_db() as db:
+        session = await SystemAgentService().create_session(db, channel=CHANNEL_WEB, web_user_id=1)
+        await db.commit()
+        assert isinstance(session.id, str) and "-" in session.id
+
+        captured: list[Any] = []
+        real_get = db.get
+
+        async def spy_get(model, pk, *a, **k):
+            captured.append(pk)
+            return await real_get(model, pk, *a, **k)
+
+        db.get = spy_get  # type: ignore[method-assign]
+
+        class _SessionCtx:
+            async def __aenter__(self_inner):
+                return db
+
+            async def __aexit__(self_inner, *_exc) -> bool:
+                return False
+
+        monkeypatch.setattr(memory_compress, "AsyncSessionLocal", lambda: _SessionCtx())
+        # expected_rev 与实际不一致：压缩器读库后应记录 rev_conflict 并返回
+        await memory_compress._compress_session_summary(session.id, expected_rev=999)
+
+        assert captured == [session.id]

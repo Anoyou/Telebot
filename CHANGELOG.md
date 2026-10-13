@@ -31,6 +31,7 @@
 - `runtime_log_stream` 的写入统一收敛到 `backend/app/worker/runtime_log.py` 的 `push_runtime_log_bounded`（`RPUSH` + `LTRIM -5000 -1`，pipeline 可用时同管道执行，不可用时退化为逐条且 ltrim 尽力而为）：此前 `account_bot_runtime._write_interaction_runtime_log` 使用裸 `RPUSH`，消费者停滞时该键会在 `noeviction` Redis 上无限增长；新增静态与运行时双重不变量测试，防止后续改动绕过 helper 回退成裸写入。
 - Webhook 投递改为"已受理（accepted）"契约并回传处理线索：`POST /api/webhooks/{account_id}/{hook_key}` 的响应新增 `trace_id` 与 `matched` / `invoked` / `failed` 统计（旧版本 worker 不回这些字段时为 `null`），account worker 的 `webhook_deliver` 分支接住 `dispatch_webhook_event` 返回值并把结果放进 ACK。此前 ACK 只回 `ok`，主进程无法知道插件动作有没有失败、也没有可追溯的 trace；现在 `failed > 0` 会在 API 层记 warning 日志，调用方可以按 trace 查执行细节。同步新增 `app/worker/ipc.py` 的 `publish_cmd_with_ack_payload`，把 `ok=False` 的 ACK 也返回给调用方，区分"worker 明确拒绝"与"完全没有应答"。
 - 修复 account worker webhook ACK 因 payload 与 `_ack_cmd` 重复传 `ok` 导致 `make_event()` 抛 `TypeError` 被静默吞掉、ACK 完全不发布的问题：投递成功的 webhook 也会让主进程等到超时，调用侧只能看到 503。`_ack_cmd` 现在只从 dispatch 结果取统计字段，`ok` 仍由分支自己决定。
+- 修复 System Agent 会话摘要后台压缩从未被调度的问题：`schedule_summary_compression` 收到的是 `session.id`（`String(36)` UUID 主键），调用点却做了 `int(session.id)`，`ValueError` 被 `except: log.debug` 静默吞掉，因此超长摘要只会继续触发条目裁剪、LLM 压缩分支形同虚设。现在直接传字符串主键，`memory_compress` 的 `session_id` 类型改为 `str`，并新增「UUID 会话完成后压缩任务被真实调度」的回归测试。
 
 ## [0.100.0-beta.5] - 2026-10-12 · patch（补丁版本预发布） · 修复同步 DSN 驱动解析导致 web 无法启动
 

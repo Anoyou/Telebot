@@ -977,7 +977,9 @@ class SystemAgentService:
                 state = session.memory_state if isinstance(session.memory_state, dict) else {}
                 rev = int(state.get("summary_rev") or 0)
                 if should_compress_summary(session.memory_summary):
-                    schedule_summary_compression(int(session.id), summary_rev=rev)
+                    # session.id 是 String(36) UUID；此前 int(...) 会抛 ValueError 被静默吞掉，
+                    # 导致摘要压缩调度从未真正发生。
+                    schedule_summary_compression(session.id, summary_rev=rev)
             except Exception:  # noqa: BLE001
                 log.debug("schedule summary compression failed", exc_info=True)
             if retry_message is not None:

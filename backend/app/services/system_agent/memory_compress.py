@@ -25,7 +25,7 @@ _COMPRESS_SYSTEM = (
 _COMPRESS_MAX_CHARS = 2_000
 
 
-def schedule_summary_compression(session_id: int, *, summary_rev: int) -> None:
+def schedule_summary_compression(session_id: str, *, summary_rev: int) -> None:
     """投递后台压缩；service 层例外允许 create_task + 独立 session。"""
 
     try:
@@ -34,12 +34,12 @@ def schedule_summary_compression(session_id: int, *, summary_rev: int) -> None:
         log.debug("no running loop; skip summary compression for session %s", session_id)
         return
     loop.create_task(
-        _compress_session_summary(session_id, expected_rev=summary_rev),
+        _compress_session_summary(str(session_id), expected_rev=summary_rev),
         name=f"system-agent-memory-compress-{session_id}",
     )
 
 
-async def _compress_session_summary(session_id: int, *, expected_rev: int) -> None:
+async def _compress_session_summary(session_id: str, *, expected_rev: int) -> None:
     try:
         async with AsyncSessionLocal() as db:
             row = await db.get(SystemAgentSession, session_id)
