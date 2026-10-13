@@ -30,6 +30,18 @@
 - 新增「应用自动检查更新」后端能力：`backend/app/services/app_update_service.py` 把原本堆在 `api/system_health.py` 的检查核心收敛为服务层实现，新增 SystemSetting `app_update_check`（默认 `{enabled: true, interval_minutes: 1440}`，clamp 60..10080 分钟）与 `app_update_last_check`（最近一次检查的结果摘要 + 时间戳，只保留角标需要的最小字段，不把完整 plan 落库）。新增 `GET /api/system/update-status` 供前端角标读取、`PATCH /api/system/update-check` 半量更新设置（读现值 → merge → 落库 → 审计），`POST /api/system/check-update` 改为薄壳共用同一份实现。
 - lifespan 启动后台自动检查循环：沿用 `remote_plugin_service.auto_update_check_loop` 的既有模式，启动 15s 后按设置间隔轮询（60s 粒度），只在"检测到新版本且结论发生变化"时记录一条日志，全程只检查与记录，绝不自动 pull / restart；DB 读写异常时降级告警，不会阻塞其他组件启动。
 
+### 文档
+
+- 新增面向使用者的中文《[使用指南](./docs/USAGE-GUIDE.md)》：安装与首次启动（三条部署路径）、
+  Web 界面逐个页面导览（概览/插件/AI/待确认/交互/指令与任务/入站 Webhook/命中调试/日志/系统）、
+  Telegram 通道（userbot 与 interaction bot、交互规则、命令与 Action 二次确认）、
+  System Agent 三种入口与常用 Bot 命令、密钥池与 Magpie、自动检查更新、常见问题与排障入口。
+  文档按当前版本代码编写，并明确"界面与本文不一致时以界面为准"。
+- 使用指南走 runtime-content 通道发布（`scripts/sync-runtime-content.sh` 的 `DOC_FILES`、
+  `frontend/nginx.conf` 的 docs 白名单、`UsageGuideMenu.tsx` 的 `/runtime-content/docs/USAGE-GUIDE.md`
+  读取），不参与前端构建；侧边栏页脚新增「使用指南」入口，位于「更新日志」**上方**，
+  折叠态、移动端弹层位置与更新日志完全一致。
+
 ## [0.100.0-beta.6] - 2026-10-14 · patch（补丁版本预发布） · 五域审查 P0 修复
 
 ### 修复

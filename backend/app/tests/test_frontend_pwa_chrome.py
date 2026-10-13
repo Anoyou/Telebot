@@ -9,6 +9,8 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 INDEX_HTML = REPO_ROOT / "frontend" / "index.html"
 NGINX_CONF = REPO_ROOT / "frontend" / "nginx.conf"
 CHANGELOG_MENU = REPO_ROOT / "frontend" / "src" / "components" / "layout" / "ChangelogMenu.tsx"
+USAGE_GUIDE_MENU = REPO_ROOT / "frontend" / "src" / "components" / "layout" / "UsageGuideMenu.tsx"
+SYNC_RUNTIME_CONTENT = REPO_ROOT / "scripts" / "sync-runtime-content.sh"
 VITE_CONFIG = REPO_ROOT / "frontend" / "vite.config.ts"
 EXTENSIONS_PAGE = REPO_ROOT / "frontend" / "src" / "pages" / "Extensions.tsx"
 
@@ -85,3 +87,22 @@ def test_plugin_docs_are_runtime_content_with_real_404s() -> None:
     assert "location /runtime-content/" in nginx
     assert "return 404;" in nginx
     assert "try_files $uri =404;" in nginx
+
+def test_usage_guide_is_runtime_content_instead_of_a_build_asset() -> None:
+    """使用指南必须走 runtime-content 通道，而不是打包进前端 bundle。"""
+    component = USAGE_GUIDE_MENU.read_text(encoding="utf-8")
+    vite = VITE_CONFIG.read_text(encoding="utf-8")
+
+    assert '"/runtime-content/docs/USAGE-GUIDE.md"' in component
+    assert "USAGE-GUIDE.md?url" not in component
+    assert "USAGE-GUIDE.md?raw" not in component
+    assert "fetch(USAGE_GUIDE_URL" in component
+    assert "js,css,ico" in vite
+
+def test_usage_guide_is_synced_and_whitelisted() -> None:
+    """同步脚本与 nginx 白名单都必须包含 USAGE-GUIDE，否则线上会 404。"""
+    sync = SYNC_RUNTIME_CONTENT.read_text(encoding="utf-8")
+    nginx = NGINX_CONF.read_text(encoding="utf-8")
+
+    assert "USAGE-GUIDE.md" in sync.split("DOC_FILES=(")[1].split(")")[0]
+    assert "|USAGE-GUIDE)" in nginx

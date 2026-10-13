@@ -47,6 +47,7 @@ DOC_FILES=(
   PLUGIN-WEBHOOK-QUICKSTART.md
   PLATFORM-CAPABILITIES.md
   SECURITY-OPS.md
+  USAGE-GUIDE.md
 )
 
 # updater 可能以 root 身份运行；拒绝已有 symlink，避免把清理/覆盖跟随到

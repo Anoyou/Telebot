@@ -7,6 +7,7 @@ import { NavLink } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import {
+  BookOpen,
   Boxes,
   Bug,
   Cog,
@@ -42,6 +43,7 @@ import {
   type CapabilityEnabledMap,
 } from "@/lib/navigation";
 const ChangelogMenu = lazy(() => import("./ChangelogMenu"));
+const UsageGuideMenu = lazy(() => import("./UsageGuideMenu"));
 
 export interface NavItem {
   to: string;
@@ -241,6 +243,7 @@ function SidebarBody({
   onNavigate?: () => void;
 }) {
   const [changelogOpen, setChangelogOpen] = useState(false);
+  const [usageGuideOpen, setUsageGuideOpen] = useState(false);
   const versionQ = useQuery({
     queryKey: ["system", "version"],
     queryFn: getBackendVersion,
@@ -296,6 +299,42 @@ function SidebarBody({
           <Github className="h-5 w-5 shrink-0" />
           <span className={cn("truncate", collapsed && "sr-only")}>TelePilot</span>
         </a>
+        <DropdownMenu modal={false} open={usageGuideOpen} onOpenChange={setUsageGuideOpen}>
+          <DropdownMenuTrigger asChild>
+            <button
+              type="button"
+              className={cn(
+                "liquid-sidebar-link flex h-11 w-full items-center gap-3 rounded-lg px-3 text-left text-muted-foreground transition hover:text-accent-foreground",
+                collapsed && "justify-center px-0",
+              )}
+              aria-label="使用指南"
+              title="使用指南"
+            >
+              <BookOpen className="h-5 w-5 shrink-0" />
+              <span className={cn("min-w-0 flex-1 truncate text-sm", collapsed && "sr-only")}>
+                使用指南
+              </span>
+            </button>
+          </DropdownMenuTrigger>
+          {usageGuideOpen ? (
+            <DropdownMenuContent
+              side={mobile ? "top" : "right"}
+              align={mobile ? "start" : "end"}
+              sideOffset={10}
+              collisionPadding={16}
+              className="w-[min(28rem,calc(100vw-2rem))] p-0"
+              style={{ maxHeight: "min(72dvh, 34rem)", overflowY: "auto" }}
+            >
+              <Suspense
+                fallback={
+                  <div className="p-4 text-sm text-muted-foreground">正在加载使用指南…</div>
+                }
+              >
+                <UsageGuideMenu />
+              </Suspense>
+            </DropdownMenuContent>
+          ) : null}
+        </DropdownMenu>
         <DropdownMenu modal={false} open={changelogOpen} onOpenChange={setChangelogOpen}>
           <DropdownMenuTrigger asChild>
             <button
