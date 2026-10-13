@@ -9,6 +9,7 @@ consistent with first-party AI commands.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import inspect
 import logging
 import time
@@ -50,7 +51,7 @@ from ...services.llm_invoke import (
 from ...services.llm_invoke import (
     invoke_structured,
 )
-from ...services.llm_key_pool import resolve_pool_key_proxies
+from ...services.llm_key_pool import open_selection_or_raise, resolve_pool_key_proxies
 from ...services.llm_protocol import MessageRole, ModelMessage, ModelRequest, ModelUsage
 from ...settings import settings
 from ...util.proxy import ProxyConfigError
@@ -538,6 +539,8 @@ class PluginAI:
         stream_terminal_received = False
         active_client: Any | None = None
         terminal_chunk: Any | None = None
+        key_trace: dict[str, Any] = {}
+        selection: Any | None = None
 
         async def settle_interrupted(error_type: str) -> None:
             """Conservatively charge a stream once provider execution started."""
@@ -581,10 +584,14 @@ class PluginAI:
                 primary,
                 estimated_tokens,
             )
+            # 走密钥池选钥：pool-only Provider（无主 Key、只有池内 Key）此前直接 401。
+            selection = await open_selection_or_raise(primary, scope=None)
+            effective_provider = selection.apply(primary)
+            key_trace.update(selection.usage_fields())
             client = build_llm_client(
-                primary,
+                effective_provider,
                 override_model=selected_model or routed_model,
-                proxy_url=primary.proxy_url,
+                proxy_url=effective_provider.proxy_url,
                 api_format_override=None,
             )
             if inspect.isawaitable(client):
@@ -622,6 +629,8 @@ class PluginAI:
                 actual_tokens = int(quota_ticket.estimated_tokens or 0)
                 final_input_tokens = actual_tokens
                 final_output_tokens = 0
+            key_trace.update(selection.usage_fields())
+            await selection.report_success(tokens=actual_tokens)
             await llm_account_budget.settle(
                 budget_ticket,
                 actual_tokens=actual_tokens,
@@ -642,6 +651,7 @@ class PluginAI:
                 started_at=started_at,
                 request_preview=llm_runtime.request_preview_for_usage(system_prompt, user_prompt),
                 response_preview=llm_runtime.preview_text_for_usage("".join(response_preview_parts)),
+                key_trace=key_trace,
                 outcome=terminal_chunk,
             )
         except plugin_ai_quota.PluginAIQuotaExceeded as exc:
@@ -658,6 +668,7 @@ class PluginAI:
                 error_type="budget_exceeded",
                 started_at=started_at,
                 request_preview=llm_runtime.request_preview_for_usage(system_prompt, user_prompt),
+                key_trace=key_trace,
             )
             raise AIQuotaError(str(exc)) from exc
         except (GeneratorExit, asyncio.CancelledError) as exc:
@@ -667,6 +678,12 @@ class PluginAI:
             await settle_interrupted("timeout")
             raise AIUnavailableError(f"ctx.ai.stream_complete 超过 {clamped_timeout:g} 秒总超时时间") from exc
         except (LLMError, ValueError, NotImplementedError) as exc:
+            # 密钥作用域错误（401/403/429）要让池内其余密钥进入冷却/换钥统计。
+            # 流式不中途换 Provider（可能已向插件吐出增量），但必须留下失败记录。
+            if selection is not None:
+                with contextlib.suppress(Exception):
+                    key_trace.update(selection.usage_fields())
+                    await selection.report_failure(exc)
             await settle_interrupted(type(exc).__name__)
             raise AIUnavailableError(str(exc)) from exc
         except Exception:
@@ -981,6 +998,7 @@ async def _emit_stream_usage(
     error_type: str | None = None,
     request_preview: str | None = None,
     response_preview: str | None = None,
+    key_trace: dict[str, Any] | None = None,
     outcome: object | None = None,
 ) -> None:
     await llm_runtime._emit_usage(
@@ -990,6 +1008,8 @@ async def _emit_stream_usage(
             provider_name=provider.name,
             model=model or provider.default_model,
             client_identity_profile=llm_runtime.resolve_usage_client_identity_profile(provider),
+            provider_key_id=(key_trace or {}).get("provider_key_id"),
+            provider_key_label=(key_trace or {}).get("provider_key_label"),
             input_tokens=max(0, int(input_tokens or 0)),
             output_tokens=max(0, int(output_tokens or 0)),
             latency_ms=max(0, int((time.monotonic() - started_at) * 1000)),

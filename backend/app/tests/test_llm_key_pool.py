@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
@@ -300,3 +301,213 @@ async def test_stream_rotates_key_before_first_delta_and_attributes_usage(monkey
     assert len(records) == 1 and records[0].success is True
     assert records[0].provider_key_id == 2
     assert records[0].provider_key_label == "k-b"
+
+
+# ── WP-A5：旁路入口（转写 / 插件流式）复用密钥池选钥 ──────────────────
+@pytest.mark.asyncio
+async def test_transcribe_uses_pool_key_for_pool_only_provider(monkeypatch) -> None:
+    """pool-only Provider（无主 Key）转写必须带池内 Key 鉴权并记录用量归因。"""
+    from app.services import llm_account_budget, llm_invoke, llm_runtime
+
+    provider = _provider(main_key=None)
+    assert not provider.api_key_enc  # 确认是 pool-only
+    seen_keys: list[str | None] = []
+    emitted: list[Any] = []
+    ticket = llm_account_budget.LLMAccountBudgetTicket(
+        account_id=1,
+        provider_id=42,
+        estimated_tokens=64,
+        backend="test",
+        limited=True,
+    )
+
+    async def _acquire(*_a, **_k):
+        return ticket
+
+    async def _settle(*_a, **_k):
+        return None
+
+    async def _emit(record):
+        emitted.append(record)
+
+    class _FakeClient:
+        def __init__(self, row) -> None:
+            seen_keys.append(row.api_key_enc)
+
+        async def transcribe(self, audio, model):
+            return "转写结果"
+
+    monkeypatch.setattr(llm_account_budget, "acquire", _acquire)
+    monkeypatch.setattr(llm_account_budget, "settle", _settle)
+    monkeypatch.setattr(llm_runtime, "_emit_usage", _emit)
+
+    text = await llm_invoke.transcribe(
+        provider,
+        b"OggS" + b"\x00" * 20,
+        model="whisper-1",
+        account_id=1,
+        client_factory=lambda row, **_k: _FakeClient(row),
+    )
+
+    assert text == "转写结果"
+    assert seen_keys == ["enc-a"]  # 用了第一把池内 Key，而不是 None
+    assert len(emitted) == 1
+    assert emitted[0].provider_key_id == 1
+    assert emitted[0].provider_key_label == "k-a"
+
+
+@pytest.mark.asyncio
+async def test_transcribe_rotates_to_next_pool_key_on_auth_failure(monkeypatch) -> None:
+    """转写遇到 401 时必须换下一把池内 Key 重试，而不是直接失败。"""
+    from app.services import llm_account_budget, llm_invoke, llm_runtime
+
+    provider = _provider(main_key=None)
+    seen: list[str | None] = []
+    emitted: list[Any] = []
+    ticket = llm_account_budget.LLMAccountBudgetTicket(
+        account_id=1,
+        provider_id=42,
+        estimated_tokens=64,
+        backend="test",
+        limited=True,
+    )
+
+    async def _acquire(*_a, **_k):
+        return ticket
+
+    async def _settle(*_a, **_k):
+        return None
+
+    async def _emit(record):
+        emitted.append(record)
+
+    class _FakeClient:
+        def __init__(self, row) -> None:
+            seen.append(row.api_key_enc)
+
+        async def transcribe(self, audio, model):
+            if row_key == "enc-a":
+                raise LLMError("unauthorized", status_code=401)
+            return "换钥后成功"
+
+    row_key: str | None = None
+
+    def _factory(row, **_k):
+        nonlocal row_key
+        row_key = row.api_key_enc
+        return _FakeClient(row)
+
+    monkeypatch.setattr(llm_account_budget, "acquire", _acquire)
+    monkeypatch.setattr(llm_account_budget, "settle", _settle)
+    monkeypatch.setattr(llm_runtime, "_emit_usage", _emit)
+
+    text = await llm_invoke.transcribe(
+        provider,
+        b"OggS" + b"\x00" * 20,
+        model="whisper-1",
+        account_id=1,
+        client_factory=_factory,
+    )
+
+    assert text == "换钥后成功"
+    assert seen == ["enc-a", "enc-b"]  # 401 后切换到 k-b 重试
+    assert len(emitted) == 1
+    assert emitted[0].provider_key_id == 2  # 归因到实际成功的密钥
+    assert emitted[0].provider_key_label == "k-b"
+
+
+@pytest.mark.asyncio
+async def test_transcribe_raises_when_all_pool_keys_exhausted(
+    monkeypatch, _isolated_pool_state
+) -> None:
+    """所有池内密钥都达当日上限时转写应抛错误，而不是静默用空 Key 调用。"""
+    from app.services import llm_account_budget, llm_invoke, llm_runtime
+
+    provider = _provider(main_key=None)
+    provider.keys[0]["daily_request_limit"] = 10
+    provider.keys[1]["daily_token_limit"] = 10
+    _isolated_pool_state["usage"]["42"] = {1: (10, 0), 2: (0, 50)}
+
+    called = False
+
+    def _factory(*_a, **_k):
+        nonlocal called
+        called = True
+        raise AssertionError("不应构造 client")
+
+    monkeypatch.setattr(llm_runtime, "_emit_usage", AsyncMock())
+
+    async def _acquire(*_a, **_k):
+        raise AssertionError("密钥耗尽应先于预算获取失败")
+
+    monkeypatch.setattr(llm_account_budget, "acquire", _acquire)
+
+    with pytest.raises(LLMError) as exc_info:
+        await llm_invoke.transcribe(
+            provider,
+            b"OggS" + b"\x00" * 20,
+            model="whisper-1",
+            account_id=1,
+            client_factory=_factory,
+        )
+
+    assert called is False
+    assert exc_info.value.category == "key_pool_exhausted"
+
+
+@pytest.mark.asyncio
+async def test_plugin_stream_complete_uses_pool_key_for_pool_only_provider(monkeypatch) -> None:
+    """插件 ctx.ai.stream_complete 必须带池内 Key 鉴权并把用量归因到该 Key。"""
+    from app.worker.plugins import ai_facade
+
+    provider = _provider(main_key=None)
+    assert not provider.api_key_enc
+    seen: list[str | None] = []
+    emitted: list[Any] = []
+
+    class _Chunk:
+        def __init__(self, *, done=False, delta="", model="gpt-x"):
+            self.done = done
+            self.delta = delta
+            self.model = model
+            self.input_tokens = 4 if done else 0
+            self.output_tokens = 2 if done else 0
+
+    class _FakeClient:
+        def __init__(self, row) -> None:
+            seen.append(row.api_key_enc)
+
+        async def stream_complete(self, *_a, **_k):
+            yield _Chunk(delta="你好")
+            yield _Chunk(done=True)
+
+    async def _loader() -> dict[int, LLMProviderDTO]:
+        return {42: provider}
+
+    async def _emit(record):
+        emitted.append(record)
+
+    facade = ai_facade.PluginAI(
+        account_id=1,
+        plugin_key="demo",
+        provider_loader=_loader,
+    )
+
+    monkeypatch.setattr(ai_facade, "is_ai_enabled", AsyncMock(return_value=True))
+    monkeypatch.setattr(ai_facade.llm_runtime, "_emit_usage", _emit)
+    monkeypatch.setattr(ai_facade.llm_account_budget, "acquire", AsyncMock(return_value=None))
+    monkeypatch.setattr(ai_facade.llm_account_budget, "settle", AsyncMock())
+    monkeypatch.setattr(ai_facade.plugin_ai_quota, "acquire", AsyncMock(return_value=None))
+    monkeypatch.setattr(ai_facade.plugin_ai_quota, "release", AsyncMock())
+    monkeypatch.setattr(ai_facade, "build_llm_client", lambda row, **_k: _FakeClient(row))
+
+    deltas = [
+        chunk
+        async for chunk in facade.stream_complete("sys", "用户问题", provider=42)
+    ]
+
+    assert deltas == ["你好"]
+    assert seen == ["enc-a"]  # pool-only 也拿到了池内 Key
+    assert len(emitted) == 1
+    assert emitted[0].provider_key_id == 1
+    assert emitted[0].provider_key_label == "k-a"

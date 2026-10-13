@@ -455,6 +455,26 @@ async def open_selection(provider: LLMProviderDTO, *, scope: str | None = None) 
     return KeySelection(provider, available, scope=scope, has_pool=True)
 
 
+async def open_selection_or_raise(provider: LLMProviderDTO, *, scope: str | None = None) -> KeySelection:
+    """打开选钥会话；所有密钥达当日上限时抛 Provider 本地错误，让 fallback 继续。
+
+    转写、插件流式等旁路主链的入口此前自己 build_client，完全绕过密钥池，导致
+    pool-only Provider（无主 Key、只有池内 Key）在这些路径上直接 401。统一走这个
+    公共入口，保证换 Key / 用量记录 / 冷却行为与主链路一致。
+    """
+    from .llm_client import LLMError, LLMErrorScope
+
+    selection = await open_selection(provider, scope=scope)
+    if selection.current is None:
+        raise LLMError(
+            f"Provider「{provider.name}」的所有密钥均已达到当日用量上限",
+            retryable=False,
+            scope=LLMErrorScope.PROVIDER_LOCAL,
+            category="key_pool_exhausted",
+        )
+    return selection
+
+
 __all__ = [
     "MAIN_KEY_LABEL",
     "KeyCandidate",
@@ -464,6 +484,7 @@ __all__ = [
     "key_health",
     "load_daily_usage",
     "open_selection",
+    "open_selection_or_raise",
     "record_key_failure",
     "record_key_success",
     "reset_state_for_tests",

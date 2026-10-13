@@ -1508,17 +1508,7 @@ def _structured_provider_switch_candidates(
 
 async def _open_key_selection(provider: LLMProviderDTO, *, scope: str | None) -> llm_key_pool.KeySelection:
     """打开选钥会话；全部密钥达当日上限时抛 Provider 本地错误，让 fallback 继续到下一个 Provider。"""
-    from .llm_client import LLMError, LLMErrorScope
-
-    selection = await llm_key_pool.open_selection(provider, scope=scope)
-    if selection.current is None:
-        raise LLMError(
-            f"Provider「{provider.name}」的所有密钥均已达到当日用量上限",
-            retryable=False,
-            scope=LLMErrorScope.PROVIDER_LOCAL,
-            category="key_pool_exhausted",
-        )
-    return selection
+    return await llm_key_pool.open_selection_or_raise(provider, scope=scope)
 
 
 def _key_affinity_scope(metadata: Mapping[str, Any] | None, account_id: int | None) -> str | None:

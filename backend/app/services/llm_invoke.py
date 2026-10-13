@@ -12,7 +12,7 @@ from ..db.models.command import (
     LLM_PROVIDER_OPENAI,
     LLM_WEB_SEARCH_API_FORMAT_AUTO,
 )
-from . import llm_account_budget, llm_client, llm_runtime
+from . import llm_account_budget, llm_client, llm_key_pool, llm_runtime
 from .llm_client import LLMCallFailed, LLMResult
 from .llm_dto import LLMProviderDTO
 from .llm_protocol import ModelRequest, ModelResponse, ModelStreamEvent
@@ -217,6 +217,11 @@ async def transcribe(
 
     started = time.monotonic()
     estimated_input_tokens = _estimate_audio_token_units(audio)
+    key_trace: dict[str, Any] = {}
+
+    # 先选钥再预扣预算：池内密钥全部达上限时应当直接失败，而不是先锁一份账号预算。
+    selection = await llm_key_pool.open_selection_or_raise(provider, scope=None)
+
     try:
         ticket = await llm_account_budget.acquire(account_id, provider, estimated_input_tokens)
     except llm_account_budget.LLMAccountBudgetExceeded as exc:
@@ -242,14 +247,16 @@ async def transcribe(
 
     try:
         builder = client_factory or llm_client.build_client
-        client = builder(
-            provider,
+        text = await _transcribe_with_selection(
+            selection,
+            provider=provider,
+            builder=builder,
+            audio=audio,
+            model=model,
             override_model=override_model,
-            proxy_url=provider.proxy_url,
         )
-        if inspect.isawaitable(client):
-            client = await client
-        text = await client.transcribe(audio, model=model)
+        key_trace.update(selection.usage_fields())
+        await selection.report_success(tokens=0)
     except Exception as exc:
         error_type = "unsupported" if isinstance(exc, NotImplementedError) else _classify_transcribe_error(exc)
         await _emit_transcribe_usage(
@@ -263,6 +270,7 @@ async def transcribe(
             success=False,
             error_type=error_type,
             audio_bytes=len(audio or b""),
+            key_trace=key_trace,
         )
         await llm_account_budget.settle(
             ticket,
@@ -285,6 +293,7 @@ async def transcribe(
         success=True,
         audio_bytes=len(audio or b""),
         response_text=text,
+        key_trace=key_trace,
     )
     await llm_account_budget.settle(
         ticket,
@@ -293,6 +302,33 @@ async def transcribe(
         success=True,
     )
     return text
+
+
+async def _transcribe_with_selection(
+    selection: Any,
+    *,
+    provider: LLMProviderDTO,
+    builder: Callable[..., Any | Awaitable[Any]],
+    audio: bytes,
+    model: str,
+    override_model: str | None,
+) -> str:
+    """按选钥会话的当前密钥调用一次转写；密钥作用域错误时换钥并重试。"""
+    while True:
+        effective_provider = selection.apply(provider)
+        client = builder(
+            effective_provider,
+            override_model=override_model,
+            proxy_url=effective_provider.proxy_url,
+        )
+        if inspect.isawaitable(client):
+            client = await client
+        try:
+            return await client.transcribe(audio, model=model)
+        except Exception as exc:  # noqa: BLE001
+            if not await selection.report_failure(exc):
+                raise
+            # report_failure 返回 True 表示已切换到下一把密钥，继续本轮循环
 
 
 async def _emit_transcribe_usage(
@@ -309,6 +345,7 @@ async def _emit_transcribe_usage(
     output_tokens: int = 0,
     error_type: str | None = None,
     response_text: str | None = None,
+    key_trace: dict[str, Any] | None = None,
 ) -> None:
     request_preview = preview_text_for_usage(
         f"stt model={model} audio_bytes={max(0, int(audio_bytes or 0))}"
@@ -321,6 +358,8 @@ async def _emit_transcribe_usage(
             provider_name=provider.name,
             model=model or provider.default_model,
             client_identity_profile=llm_runtime.resolve_usage_client_identity_profile(provider),
+            provider_key_id=(key_trace or {}).get("provider_key_id"),
+            provider_key_label=(key_trace or {}).get("provider_key_label"),
             input_tokens=max(0, int(input_tokens or 0)),
             output_tokens=max(0, int(output_tokens or 0)),
             latency_ms=max(0, int((time.monotonic() - started) * 1000)),
