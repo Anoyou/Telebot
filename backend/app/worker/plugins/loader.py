@@ -126,9 +126,10 @@ from ..command import (
     register_plugin_command,
     unregister_all_plugin_commands,
 )
-from ..ipc import RUNTIME_LOG_STREAM, RuntimeLogPayload
+from ..ipc import RuntimeLogPayload
 from ..ratelimit.engine import RateLimitEngine
 from ..ratelimit.humanize import HumanizeOpts, simulate_read, simulate_typing
+from ..runtime_log import push_runtime_log_bounded
 from .base import (
     Plugin,
     PluginContext,
@@ -8720,21 +8721,7 @@ async def _log(
             message=message,
             detail=detail or None,
         )
-        pipe = getattr(redis, "pipeline", None)
-        if callable(pipe):
-            try:
-                p = redis.pipeline()
-                p.rpush(RUNTIME_LOG_STREAM, payload.encode())
-                p.ltrim(RUNTIME_LOG_STREAM, -5000, -1)
-                await p.execute()
-            except Exception:  # noqa: BLE001
-                await redis.rpush(RUNTIME_LOG_STREAM, payload.encode())
-        else:
-            await redis.rpush(RUNTIME_LOG_STREAM, payload.encode())
-            try:
-                await redis.ltrim(RUNTIME_LOG_STREAM, -5000, -1)
-            except Exception:  # noqa: BLE001
-                pass
+        await push_runtime_log_bounded(redis, payload.encode())
     except Exception:  # noqa: BLE001
         log.exception("写 runtime_log_stream 失败 account=%s", account_id)
 

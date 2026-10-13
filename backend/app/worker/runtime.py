@@ -97,7 +97,6 @@ from .ipc import (
     GCMD_RELOAD_GLOBAL,
     GLOBAL_CHANNEL,
     RPC_RESULT_TTL_SECONDS,
-    RUNTIME_LOG_STREAM,
     IPCMessage,
     RuntimeLogPayload,
     cmd_channel,
@@ -108,6 +107,7 @@ from .ipc import (
 )
 from .leaf_delivery_gate import LeafDeliveryGate
 from .ratelimit.humanize import simulate_read, simulate_typing
+from .runtime_log import push_runtime_log_bounded
 from .scheduler_runtime import PlatformScheduler
 from .tg_client import build_client
 
@@ -2931,21 +2931,7 @@ async def _log(redis, account_id: int | None, level: str, message: str, *, sourc
         detail=detail or None,
     )
     # 有界队列：保留最新 N 条，防止消费者停滞时无限增长拖垮 noeviction Redis。
-    pipe = getattr(redis, "pipeline", None)
-    if callable(pipe):
-        try:
-            p = redis.pipeline()
-            p.rpush(RUNTIME_LOG_STREAM, payload.encode())
-            p.ltrim(RUNTIME_LOG_STREAM, -5000, -1)
-            await p.execute()
-            return
-        except Exception:  # noqa: BLE001
-            pass
-    await redis.rpush(RUNTIME_LOG_STREAM, payload.encode())
-    try:
-        await redis.ltrim(RUNTIME_LOG_STREAM, -5000, -1)
-    except Exception:  # noqa: BLE001
-        pass
+    await push_runtime_log_bounded(redis, payload.encode())
 
 
 def worker_main(account_id: int) -> None:

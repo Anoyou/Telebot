@@ -47,13 +47,13 @@ from ..worker.ipc import (
     CMD_RUN_INTERACTION_ACTION,
     CMD_RUN_INTERACTION_ENTRY,
     GLOBAL_CHANNEL,
-    RUNTIME_LOG_STREAM,
     IPCMessage,
     RuntimeLogPayload,
     cmd_channel,
     make_cmd,
     publish_cmd_with_ack,
 )
+from ..worker.runtime_log import push_runtime_log_bounded
 from . import (
     account_bot_service,
     account_service,
@@ -7131,7 +7131,7 @@ async def _write_interaction_runtime_log(
             message=message,
             detail=detail or None,
         )
-        await get_redis().rpush(RUNTIME_LOG_STREAM, payload.encode())
+        await push_runtime_log_bounded(get_redis(), payload.encode())
     except Exception:  # noqa: BLE001
         log.debug("write interaction runtime log failed aid=%s", incoming.account_id, exc_info=True)
 
