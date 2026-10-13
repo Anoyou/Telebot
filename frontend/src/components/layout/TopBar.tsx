@@ -2,6 +2,7 @@
 // iOS PWA：背景色延伸到 safe-area-inset-top，并随主题同步系统状态栏底色。
 // 内容区高度约 3.25rem（相对旧版 5rem 收约 1/3）。
 import { Component, lazy, Suspense, useEffect, useState, type ErrorInfo, type ReactNode } from "react";
+import { useQuery } from "@tanstack/react-query";
 import {
   Check,
   Menu,
@@ -11,6 +12,8 @@ import {
   RefreshCw,
   Sun,
 } from "lucide-react";
+import { getUpdateStatus } from "@/api/system";
+import { shouldShowUpdateBadge, updateBadgeLabel } from "@/lib/appAutoCheck";
 
 import { Button } from "@/components/ui/button";
 import { ErrorState } from "@/components/feedback/ErrorState";
@@ -61,6 +64,15 @@ export function TopBar({
 }: TopBarProps) {
   const [updateOpen, setUpdateOpen] = useState(false);
   const isStandalone = useStandaloneDisplayMode();
+  // 自动检查更新的角标数据源：服务端已按设置周期检查并落库，这里只读摘要；
+  // 未开启自动检查时 last_check 为空，不会显示角标。
+  const updateStatusQ = useQuery({
+    queryKey: ["system", "update-status-badge"],
+    queryFn: getUpdateStatus,
+    staleTime: 30_000,
+    refetchOnWindowFocus: true,
+  });
+  const hasUpdateBadge = shouldShowUpdateBadge(updateStatusQ.data);
 
   return (
     <header
@@ -129,13 +141,19 @@ export function TopBar({
         <Button
           variant="outline"
           size="sm"
-          className={topbarActionClass(isStandalone)}
+          className={cn(topbarActionClass(isStandalone), "relative")}
           onClick={() => setUpdateOpen(true)}
-          aria-label="检查更新"
-          title="检查更新"
+          aria-label={updateBadgeLabel(hasUpdateBadge)}
+          title={updateBadgeLabel(hasUpdateBadge)}
         >
           <RefreshCw className="h-3.5 w-3.5" />
           {isStandalone ? null : <span className="hidden text-[11px] sm:inline">检查更新</span>}
+          {hasUpdateBadge ? (
+            <span
+              aria-hidden="true"
+              className="absolute right-1 top-1 h-2 w-2 rounded-full bg-warning ring-2 ring-background"
+            />
+          ) : null}
         </Button>
         {updateOpen ? (
           <UpdateDialogErrorBoundary onClose={() => setUpdateOpen(false)}>

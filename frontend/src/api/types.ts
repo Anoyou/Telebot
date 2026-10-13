@@ -2285,6 +2285,31 @@ export interface UpdateTargetOptions {
   error?: string | null;
 }
 
+/** 应用自动检查更新的最近一次结果摘要（后端 `app_update_last_check`）。 */
+export interface AppUpdateLastCheck {
+  has_update?: boolean;
+  can_check?: boolean;
+  current_version?: string | null;
+  target_version?: string | null;
+  remote?: string | null;
+  branch?: string | null;
+  error?: string | null;
+  checked_at?: string;
+}
+
+/** `GET /api/system/update-status` 返回：TopBar 角标与更新弹窗共用。 */
+export interface AppUpdateStatus {
+  enabled: boolean;
+  interval_minutes: number;
+  last_check: AppUpdateLastCheck | null;
+}
+
+/** `PATCH /api/system/update-check` 入参：两个字段都可选，缺省保留现值。 */
+export interface AppUpdateCheckPatch {
+  enabled?: boolean;
+  interval_minutes?: number;
+}
+
 // ═══════════════ 客户端身份 UA 版本配置（0.57.0 收口） ═══════════════
 export interface ClientIdentityVersionItem {
   key: string;

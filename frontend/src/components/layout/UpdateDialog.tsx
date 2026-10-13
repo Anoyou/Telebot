@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { RefreshCw, RotateCcw, CheckCircle2, AlertCircle, Copy, ChevronDown } from "lucide-react";
+import { RefreshCw, RotateCcw, CheckCircle2, AlertCircle, Copy, ChevronDown, Clock } from "lucide-react";
 import { Spinner } from "@/components/ui/misc";
 
 import {
@@ -14,6 +14,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import {
   checkUpdate,
   getBackendVersion,
@@ -23,6 +24,8 @@ import {
   patchSystemSettings,
   pullUpdate,
   restartApp,
+  getUpdateStatus,
+  patchUpdateCheck,
 } from "@/api/system";
 import type { AppUpdateTarget } from "@/api/system";
 import type {
@@ -30,6 +33,14 @@ import type {
   PullUpdateResult,
   UpdateJobStatus,
 } from "@/api/types";
+import {
+  AUTO_CHECK_MAX_MINUTES,
+  AUTO_CHECK_MIN_MINUTES,
+  AUTO_CHECK_PRESETS,
+  formatLastCheck,
+  minutesToHours,
+  resolveCustomIntervalMinutes,
+} from "@/lib/appAutoCheck";
 import { formatRuntimeVersionLabel } from "@/lib/runtime-version";
 import {
   clearActiveUpdateJob,
@@ -152,6 +163,9 @@ export function UpdateDialog({ open, onOpenChange }: UpdateDialogProps) {
   const [errorCopied, setErrorCopied] = useState(false);
   const [planExpanded, setPlanExpanded] = useState(false);
   const [releaseNotesExpanded, setReleaseNotesExpanded] = useState(false);
+  const [autoCheckSaving, setAutoCheckSaving] = useState(false);
+  const [autoCheckError, setAutoCheckError] = useState<string | null>(null);
+  const [autoCheckCustomHours, setAutoCheckCustomHours] = useState<string | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval>>();
   const jobPollTokenRef = useRef(0);
   const checkTokenRef = useRef(0);
@@ -160,6 +174,13 @@ export function UpdateDialog({ open, onOpenChange }: UpdateDialogProps) {
   const runtimeVersionQ = useQuery({
     queryKey: ["system", "version"],
     queryFn: getBackendVersion,
+    enabled: open,
+    staleTime: 30_000,
+  });
+  // 自动检查更新设置：只在弹窗打开时读取，不常驻轮询；保存后由同一 query key 失效刷新。
+  const autoCheckQ = useQuery({
+    queryKey: ["system", "update-check"],
+    queryFn: getUpdateStatus,
     enabled: open,
     staleTime: 30_000,
   });
@@ -509,6 +530,33 @@ export function UpdateDialog({ open, onOpenChange }: UpdateDialogProps) {
     }
   };
 
+  const saveAutoCheck = async (patch: { enabled?: boolean; interval_minutes?: number }) => {
+    setAutoCheckSaving(true);
+    setAutoCheckError(null);
+    try {
+      await patchUpdateCheck(patch);
+      await autoCheckQ.refetch();
+    } catch (error) {
+      setAutoCheckError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setAutoCheckSaving(false);
+    }
+  };
+
+  const applyAutoCheckPreset = (minutes: number) => {
+    void saveAutoCheck({ interval_minutes: minutes });
+  };
+
+  const submitAutoCheckCustom = () => {
+    if (autoCheckCustomHours === null) return;
+    const resolved = resolveCustomIntervalMinutes(autoCheckCustomHours);
+    if (resolved.ok === false) {
+      setAutoCheckError(resolved.error);
+      return;
+    }
+    void saveAutoCheck({ interval_minutes: resolved.minutes });
+  };
+
   const doRestart = async () => {
     if (!window.confirm("确认重启应用？页面将在 5 秒后自动刷新。")) return;
     try {
@@ -642,6 +690,104 @@ export function UpdateDialog({ open, onOpenChange }: UpdateDialogProps) {
                 {targetsLoading ? "读取分支" : "保存并检查"}
               </Button>
             </div>
+          </div>
+
+          {/* 自动检查更新设置 */}
+          <div className="mb-4 space-y-3 rounded-md border bg-background px-3 py-3">
+            <div className="flex min-h-11 items-center justify-between gap-3">
+              <div className="min-w-0">
+                <Label htmlFor="app-auto-check-enabled">自动检查更新</Label>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  后台只检查并提示，不会自动拉取或重启。
+                </p>
+              </div>
+              <Switch
+                id="app-auto-check-enabled"
+                checked={autoCheckQ.data?.enabled ?? true}
+                disabled={autoCheckSaving || autoCheckQ.isLoading}
+                onCheckedChange={(checked) => void saveAutoCheck({ enabled: checked })}
+              />
+            </div>
+
+            {autoCheckQ.data?.enabled !== false && (
+              <>
+                <div className="space-y-1.5">
+                  <Label htmlFor="app-auto-check-preset">检查频率</Label>
+                  <Select
+                    id="app-auto-check-preset"
+                    value={
+                      AUTO_CHECK_PRESETS.find(
+                        (preset) => preset.minutes === autoCheckQ.data?.interval_minutes,
+                      )?.minutes ?? "custom"
+                    }
+                    disabled={autoCheckSaving || autoCheckQ.isLoading}
+                    onChange={(event) => {
+                      const next = event.target.value;
+                      if (next === "custom") return;
+                      applyAutoCheckPreset(Number(next));
+                    }}
+                  >
+                    {AUTO_CHECK_PRESETS.map((preset) => (
+                      <option key={preset.minutes} value={preset.minutes}>{preset.label}</option>
+                    ))}
+                    <option value="custom">自定义</option>
+                  </Select>
+                </div>
+
+                <div className="grid min-w-0 grid-cols-[100px_minmax(0,1fr)] gap-3">
+                  <div className="min-w-0 space-y-1.5">
+                    <Label htmlFor="app-auto-check-hours">自定义小时</Label>
+                    <input
+                      id="app-auto-check-hours"
+                      type="number"
+                      inputMode="decimal"
+                      min={AUTO_CHECK_MIN_MINUTES / 60}
+                      max={AUTO_CHECK_MAX_MINUTES / 60}
+                      step={1}
+                      value={
+                        autoCheckCustomHours ??
+                        String(minutesToHours(autoCheckQ.data?.interval_minutes ?? 1440))
+                      }
+                      onChange={(event) => setAutoCheckCustomHours(event.target.value)}
+                      onBlur={submitAutoCheckCustom}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") submitAutoCheckCustom();
+                      }}
+                      disabled={autoCheckSaving || autoCheckQ.isLoading}
+                      className="h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                    />
+                  </div>
+                  <div className="flex min-w-0 items-end">
+                    <Button
+                      type="button"
+                      size="sm"
+                      className="w-full shrink-0"
+                      loading={autoCheckSaving}
+                      disabled={autoCheckSaving || autoCheckQ.isLoading}
+                      onClick={submitAutoCheckCustom}
+                    >
+                      {!autoCheckSaving ? <Clock className="mr-1 h-3.5 w-3.5" /> : null}
+                      保存间隔
+                    </Button>
+                  </div>
+                </div>
+              </>
+            )}
+
+            {autoCheckQ.data?.last_check?.checked_at ? (
+              <p className="text-xs text-muted-foreground">
+                最近检查：{formatLastCheck(autoCheckQ.data.last_check.checked_at) ?? autoCheckQ.data.last_check.checked_at}
+                {autoCheckQ.data.last_check.has_update
+                  ? ` · 发现新版本${autoCheckQ.data.last_check.target_version ? ` ${autoCheckQ.data.last_check.target_version}` : ""}`
+                  : " · 已是最新"}
+              </p>
+            ) : (
+              <p className="text-xs text-muted-foreground">尚未执行过自动检查。</p>
+            )}
+
+            {autoCheckError ? (
+              <p className="text-xs text-destructive">{autoCheckError}</p>
+            ) : null}
           </div>
 
           {step?.kind === "checking" && (

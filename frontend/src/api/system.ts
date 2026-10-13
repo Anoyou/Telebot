@@ -2,6 +2,8 @@
 import { api } from "@/lib/api";
 import type {
   AccountRateLimitOut,
+  AppUpdateCheckPatch,
+  AppUpdateStatus,
   AuditLogItem,
   BackendVersionInfo,
   CheckUpdateResult,
@@ -344,5 +346,26 @@ export async function getUpdateTargetOptions(remote?: string): Promise<UpdateTar
 }
 export async function restartApp(): Promise<RestartResult> {
   const { data } = await api.post<RestartResult>("/api/system/restart");
+  return data;
+}
+
+// ===================== 自动检查更新（角标 / 设置） =====================
+/** 读取自动检查更新开关、间隔与最近一次检查结果（TopBar 角标数据源）。 */
+export async function getUpdateStatus(): Promise<AppUpdateStatus> {
+  const { data } = await api.get<AppUpdateStatus>("/api/system/update-status", {
+    timeout: 15_000,
+  });
+  return data;
+}
+
+/** 半量更新自动检查设置：只传需要改的字段，缺省字段保留现值。 */
+export async function patchUpdateCheck(
+  payload: AppUpdateCheckPatch,
+): Promise<AppUpdateStatus> {
+  const { data } = await api.patch<AppUpdateStatus>(
+    "/api/system/update-check",
+    payload,
+    { timeout: 15_000 },
+  );
   return data;
 }
