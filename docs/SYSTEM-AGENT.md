@@ -40,7 +40,7 @@
 
 - 默认关闭；需管理员显式启用。
 - 必须选择支持 tools 的固定 Provider/模型。声明只用于候选预筛选；模型首次进入 Agent 前还会接受一次真实的强制工具调用探测，只有返回指定工具及正确参数才会放行。
-- 工具能力探测结果保存在 `SystemSetting.system_agent_model_capability_cache`：支持结果缓存 7 天，明确不支持缓存 1 天，429/5xx/网络故障只按暂时不可用缓存 5 分钟。明确不支持的 fallback 会被排除；暂时不可用的 fallback 仍保留为待确认候选，避免一次网络故障把它永久从切换链路中移除。
+- 工具能力探测结果保存在 `SystemSetting.system_agent_model_capability_cache`：支持结果缓存 7 天，明确不支持缓存 30 分钟，429/5xx/网络故障只按暂时不可用缓存 5 分钟。明确不支持的 fallback 会被排除；暂时不可用的 fallback 仍保留为待确认候选，避免一次网络故障把它永久从切换链路中移除。
 - 固定 Provider 作为首选；同一 Provider 内会先按首选模型、默认模型、其它已启用 Tools 模型静默 fallback。
 - 同一模型遇到超时、网络错误、429 或 5xx 后会固定间隔 3 秒重试 5 次；5 次均失败后才尝试同 Provider 的下一 Tools 模型。Web 可用输入框右侧的停止按钮中断当前请求和重试等待。
 - 跨 Provider 只使用 `fallback_provider_ids` 白名单中拥有 API Key 和 Tools 模型的候选；当前 Provider 内模型均失败时，Web 会先询问是否改用下一个候选，确认后才重试。

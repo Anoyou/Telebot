@@ -102,8 +102,9 @@ func TestUpstreamPoolReusesAcrossRequestsViaHandler(t *testing.T) {
 	defer upstream.Close()
 
 	handler := configuredHandler(t, upstream.URL, "secret-one", "model", "model")
-	// 强制走连接池，不注入测试 Transport。
-	handler.clientForRoute = nil
+	if handler.clientForRoute != nil {
+		t.Fatal("生产 Handler 不应默认注入一次性 Client")
+	}
 
 	for i := 0; i < 3; i++ {
 		request := httptest.NewRequest(http.MethodPost, "/v1/responses", stringsReader(`{"model":"model","input":"hi"}`))
@@ -198,7 +199,6 @@ func TestHandlerCloseDrainsUpstreamPool(t *testing.T) {
 		t.Fatal(err)
 	}
 	handler := NewHandler(store)
-	handler.clientForRoute = nil
 	handler.upstreamClient(routing.Route{ProviderID: 1, BaseURL: "https://upstream.example"}, 1)
 	if handler.pool.size() == 0 {
 		t.Fatal("池内应有 Client")

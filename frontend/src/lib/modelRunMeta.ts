@@ -52,7 +52,7 @@ export function formatStageTimings(usage: ModelRunMetaUsage): string[] {
  *
  * `usage.model` / `usage.provider_name` 就是实际产出回复的 Provider 与模型：
  * Magpie 等网关场景下是上游模型标识（如 `workbuddy/glm-5.3-flash`），不是用户选的那一个。
- * 发生 fallback 时摘要换成实际模型，`requested` / `reported` 供单独列出「原模型」。
+ * `requested` / `reported` 供单独列出「原模型 / 实际使用」。
  */
 export function resolveModelRunSummary(usage: ModelRunMetaUsage): {
   summary: string;
@@ -69,8 +69,7 @@ export function resolveModelRunSummary(usage: ModelRunMetaUsage): {
   const reported = [provider, model].filter(Boolean).join(" · ");
   const requested = [reqProvider, reqModel].filter(Boolean).join(" · ");
   const usedFallback = Boolean(usage.used_fallback);
-  const summaryModel =
-    !usedFallback && reqModel && (!reqProvider || reqProvider === provider) ? reqModel : model;
+  const summaryModel = model || reqModel;
   const summary = [provider || reqProvider, summaryModel].filter(Boolean).join(" · ");
   if (!summary) return null;
   return { summary, summaryModel, reported, requested, usedFallback };

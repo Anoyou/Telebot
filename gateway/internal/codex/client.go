@@ -46,13 +46,12 @@ type Handler struct {
 
 func NewHandler(store *control.Store) *Handler {
 	return &Handler{
-		store:          store,
-		providerSem:    make(map[int64]chan struct{}),
-		clientForRoute: httpClient,
-		pool:           newUpstreamPool(),
-		sseFirstEvent:  sseFirstEventTimeout,
-		sseIdle:        sseIdleTimeout,
-		sseMaxBytes:    maxResponseBodyBytes,
+		store:         store,
+		providerSem:   make(map[int64]chan struct{}),
+		pool:          newUpstreamPool(),
+		sseFirstEvent: sseFirstEventTimeout,
+		sseIdle:       sseIdleTimeout,
+		sseMaxBytes:   maxResponseBodyBytes,
 	}
 }
 

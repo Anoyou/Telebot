@@ -50,6 +50,9 @@
 
 ### 修复
 
+- 修复 Web 端系统助手常驻摘要行的模型署名：此前无 fallback 且 Provider 同名时优先展示用户请求模型，Magpie 等网关场景下会把上游实际模型（如 `workbuddy/glm-5.3-flash`）藏进详情里；现在摘要统一优先使用 usage 里的实际作答模型，原选择继续在 fallback 详情中单独展示。
+- 修复使用指南与系统助手文档中的四处过期描述：首次安全设置的入口改为「系统 → 用户与管理」，侧边栏默认顺序补齐「概览 / 系统」并说明可排序，系统助手配置入口改为悬浮球面板的「配置」，模型能力探测的“明确不支持”缓存时长改为真实的 30 分钟。
+- 修复 Gateway 连接池在生产路径不可达的问题：`NewHandler` 此前默认注入一次性 `httpClient`，导致后续请求仍逐次新建 Transport；现在生产路径直接进入按 Provider / 代理 / Base URL / snapshot revision 缓存的连接池，端到端测试也不再手动清空测试注入。
 - 修复平台能力 gate 的加载竞态：`CapabilityGate` 原先要求 capabilities 与 settings **两个查询都**加载完才显示骨架，settings 先返回而 capabilities 仍在飞行时会提前放行，已暂停模块的内容会先渲染一帧再跳暂停页。改为只等 capabilities（settings 仅作为 `ai` 键的默认兜底，保持 default-true 语义），并把决策抽成 `lib/navigation.ts` 的 `resolveCapabilityGatePhase`，补 6 条纯粹逻辑回归。
 - 修复插件 `route="auto"` 下「只配了池内 Key」的 Provider 从路由候选里消失的问题：`ai_facade._shared_router_auto` 构造共享 Router 候选池时改用 `to_runtime_dict()`，此前用展示版 `to_dict()` 再手补 `api_key_enc`，池内 `keys[].api_key_enc` 被抹掉，共享 Router 的 `_has_api_key` 会把这些 Provider 全部过滤掉，插件 auto 永远选不到它们。
 - 占位符还原只发生在面向 owner 的显示边界，且**还原先于各边界的后续加工**：Bot 发送前还原（再追加回复署名、再做 Markdown→Telegram HTML 转换与 3500 字符截断——否则还原进来的真实值会被截断切成半个 token，或吃掉署名预算）；Web 实时流（`assistant_message` 的 `content` / `reasoning`）与 Web 消息历史（`text` / `reasoning`，附件等结构原样返回）在下发前还原。映射读失败、解密失败或会话没有映射时**退化为占位符**，绝不“猜不到就丢内容或整段打码”。run 事件库、运行日志、RunTrace、记忆、工具摘要、`list_events` 全部保持占位符不变。

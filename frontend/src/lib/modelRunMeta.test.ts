@@ -25,8 +25,8 @@ test("Magpie / 网关场景：展示上游模型而不是用户选择的模型",
     requested_model: "glm-5.3",
     used_fallback: false,
   });
-  // 没有 fallback 时仍优先用 requested_model 作为摘要模型；此时应与上游一致或显示上游
-  assert.ok(run?.summary.includes("Magpie 网关"));
+  assert.equal(run?.summary, "Magpie 网关 · workbuddy/glm-5.3-flash");
+  assert.equal(run?.summaryModel, "workbuddy/glm-5.3-flash");
   assert.equal(run?.reported, "Magpie 网关 · workbuddy/glm-5.3-flash");
 });
 
