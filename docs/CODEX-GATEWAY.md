@@ -80,6 +80,8 @@ make gateway-run
 
 执行过 `make gateway-build` 后，`make backend` 和 `make up` 会自动把本地二进制及 `.run/gateway.sock` 传给 Runtime Manager；无需把开发产物复制到 `/usr/local/bin` 或创建 `/run/telepilot`。
 
+Gateway 运行时镜像的基础镜像必须是 `gcr.io/distroless/static-debian12:nonroot`，不能用 `FROM scratch`：Gateway 用 Go `net/http` 访问 HTTPS 上游，需要系统 CA 根证书完成校验，`scratch` 不带 `/etc/ssl/certs`，任何真实上游调用都会以 `x509: certificate signed by unknown authority` 失败。`backend/Dockerfile` 内嵌 Gateway 的生产路径由 Python 基础镜像提供 CA，不受影响；独立构建 `gateway/Dockerfile`（开发/排查用）依赖这一选择，改回 `scratch` 前需先让 Gateway 改为自管证书池。复现与验收见 [`gateway/UPSTREAM.md`](../gateway/UPSTREAM.md) 的「运行时基础镜像」小节。
+
 Gateway 当前协议版本为 `2`。后端与二进制协议版本不一致时会失败关闭，不能通过忽略未知字段继续运行。
 
 ### 内部开发契约（不是公网 API）
