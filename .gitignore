@@ -16,6 +16,9 @@ keys-backup-*.age
 data/
 !frontend/src/components/data/
 !frontend/src/components/data/ResponsiveList.tsx
+# 但测试夹具必须入库：回放快照 / golden 数据是断言对象，不能因 data/ 规则被漏提交。
+!backend/app/tests/data/
+!backend/app/tests/data/route_replay/
 data/recordings/
 backend/data/
 backend/plugins/

@@ -1,0 +1,5 @@
+{"domains": ["accounts"], "route_reason": "keyword_match", "route_source": "local", "text": "那账号呢"}
+{"domains": ["logs"], "route_reason": "reference_to_previous_domain", "route_source": "memory", "text": "它为什么挂了"}
+{"domains": ["logs"], "route_reason": "reference_to_previous_domain", "route_source": "memory", "text": "刚才那个再看一次"}
+{"domains": ["logs"], "route_reason": "reference_to_previous_domain", "route_source": "memory", "text": "这个也停掉"}
+{"domains": ["logs"], "route_reason": "reference_to_previous_domain", "route_source": "memory", "text": "那个也不行"}

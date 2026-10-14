@@ -1,0 +1,7 @@
+{"domains": ["web", "providers"], "route_reason": "keyword_match", "route_source": "local", "text": "列出全部 provider 的 base_url"}
+{"domains": ["providers"], "route_reason": "keyword_match", "route_source": "local", "text": "把 provider 的 api key 删掉"}
+{"domains": ["rate_limits"], "route_reason": "keyword_match", "route_source": "local", "text": "show me rate limit 配置"}
+{"domains": ["plugin_demo_game"], "route_reason": "keyword_match", "route_source": "local", "text": "lottery 最近几期开奖结果"}
+{"domains": ["routing"], "route_reason": "keyword_match", "route_source": "local", "text": "auto routing 怎么设"}
+{"domains": ["plugins"], "route_reason": "keyword_match", "route_source": "local", "text": "plugin 装好了吗"}
+{"domains": ["scheduler"], "route_reason": "keyword_match", "route_source": "local", "text": "scheduler 的定时任务在跑吗"}

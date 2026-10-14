@@ -1,0 +1,6 @@
+{"domains": ["logs"], "route_reason": "keyword_match", "route_source": "local", "text": "日志咋样了"}
+{"domains": ["accounts"], "route_reason": "keyword_match", "route_source": "local", "text": "账号还能用吗"}
+{"domains": ["plugins"], "route_reason": "keyword_match", "route_source": "local", "text": "咋看插件装没装"}
+{"domains": ["plugin_demo_game"], "route_reason": "keyword_match", "route_source": "local", "text": "那个彩票还能买吗"}
+{"domains": [], "route_reason": "no_live_system_data_needed", "route_source": "local", "text": "系统忙不忙"}
+{"domains": ["providers"], "route_reason": "keyword_match", "route_source": "local", "text": "provider 都不行啊"}

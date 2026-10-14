@@ -326,5 +326,69 @@
   {
     "text": "list recent lottery rounds",
     "expect": "plugin_demo_game"
+  },
+  {
+    "text": "列出全部 provider 的 base_url",
+    "expect": "any_domain"
+  },
+  {
+    "text": "把 provider 的 api key 删掉",
+    "expect": "providers"
+  },
+  {
+    "text": "show me rate limit 配置",
+    "expect": "rate_limits"
+  },
+  {
+    "text": "scheduler 的定时任务在跑吗",
+    "expect": "scheduler"
+  },
+  {
+    "text": "plugin 装好了吗",
+    "expect": "plugins"
+  },
+  {
+    "text": "把 gateway 的 timeout 改一下",
+    "expect": "no_tools"
+  },
+  {
+    "text": "日志咋样了",
+    "expect": "logs"
+  },
+  {
+    "text": "账号还能用吗",
+    "expect": "accounts"
+  },
+  {
+    "text": "咋看插件装没装",
+    "expect": "plugins"
+  },
+  {
+    "text": "provider 都不行啊",
+    "expect": "providers"
+  },
+  {
+    "text": "那个彩票还能买吗",
+    "expect": "plugin_demo_game"
+  },
+  {
+    "text": "系统忙不忙",
+    "expect": "no_tools"
+  },
+  {
+    "text": "那账号呢",
+    "expect": "accounts"
+  },
+  {
+    "text": "它为什么挂了",
+    "expect": "reference_or_domain"
+  },
+  {
+    "text": "刚才那个再看一次",
+    "expect": "reference_or_domain"
+  },
+  {
+    "text": "这个也停掉",
+    "expect": "reference_or_domain"
   }
 ]
