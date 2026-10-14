@@ -8,9 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
-	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -40,6 +38,7 @@ type Handler struct {
 	mu             sync.Mutex
 	providerSem    map[int64]chan struct{}
 	clientForRoute func(routing.Route) *http.Client
+	pool           *upstreamPool
 	sseFirstEvent  time.Duration
 	sseIdle        time.Duration
 	sseMaxBytes    int64
@@ -50,10 +49,30 @@ func NewHandler(store *control.Store) *Handler {
 		store:          store,
 		providerSem:    make(map[int64]chan struct{}),
 		clientForRoute: httpClient,
+		pool:           newUpstreamPool(),
 		sseFirstEvent:  sseFirstEventTimeout,
 		sseIdle:        sseIdleTimeout,
 		sseMaxBytes:    maxResponseBodyBytes,
 	}
+}
+
+// Close 退役上游连接池，供进程优雅退出时调用（收尾 SIGTERM 之后的空闲 socket）。
+func (h *Handler) Close() {
+	if h.pool != nil {
+		h.pool.close()
+	}
+}
+
+// upstreamClient 返回该路由的上游 Client。默认走连接池；测试注入 clientForRoute 时
+// 仍按原路径返回，保持既有用例可替换 Transport。
+func (h *Handler) upstreamClient(route routing.Route, revision int64) *http.Client {
+	if h.clientForRoute != nil {
+		return h.clientForRoute(route)
+	}
+	if h.pool == nil {
+		return httpClient(route)
+	}
+	return h.pool.acquire(route, revision)
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -119,7 +138,6 @@ func (h *Handler) responses(w http.ResponseWriter, r *http.Request) {
 	upstreamRequest.Header.Set("Authorization", "Bearer "+route.APIKey)
 	upstreamRequest.Header.Set("Content-Type", "application/json")
 	upstreamRequest.Header.Set("Accept", "text/event-stream")
-	upstreamRequest.Close = true
 	compatibilityHeaders, scopeErr := compatibilityHeadersForRequest(route, r)
 	if scopeErr != nil {
 		writeError(w, http.StatusBadRequest, contract.GatewayError{Code: "request_invalid", Message: scopeErr.Error(), RequestID: requestID(r), GatewayStage: "routing"})
@@ -135,8 +153,7 @@ func (h *Handler) responses(w http.ResponseWriter, r *http.Request) {
 	upstreamRequest.Body = io.NopCloser(bytes.NewReader(upstreamBody))
 	upstreamRequest.ContentLength = int64(len(upstreamBody))
 
-	client := h.clientForRoute(route)
-	defer client.CloseIdleConnections()
+	client := h.upstreamClient(route, table.Revision())
 	response, err := doUpstreamRequest(client, upstreamRequest, requestContext)
 	if err != nil {
 		writeUpstreamRequestError(w, r, err, route)
@@ -232,8 +249,7 @@ func (h *Handler) models(w http.ResponseWriter, r *http.Request) {
 	defer release()
 	requestContext, cancelRequest := context.WithTimeout(r.Context(), routeTimeout(route))
 	defer cancelRequest()
-	client := h.clientForRoute(route)
-	defer client.CloseIdleConnections()
+	client := h.upstreamClient(route, table.Revision())
 	var response *http.Response
 	for index, endpoint := range route.ModelsEndpoints {
 		upstreamRequest, requestErr := http.NewRequestWithContext(requestContext, http.MethodGet, endpoint, nil)
@@ -243,7 +259,6 @@ func (h *Handler) models(w http.ResponseWriter, r *http.Request) {
 		}
 		upstreamRequest.Header.Set("Authorization", "Bearer "+route.APIKey)
 		upstreamRequest.Header.Set("Accept", "application/json")
-		upstreamRequest.Close = true
 		for name, value := range route.CompatibilityHeaders {
 			upstreamRequest.Header.Set(name, value)
 		}
@@ -394,25 +409,10 @@ func doUpstreamRequest(client *http.Client, request *http.Request, downstream co
 	return client.Do(request)
 }
 
+// httpClient 返回单个一次性上游 Client。生产路径已改走 Handler.upstreamClient
+// （连接池复用），这里保留给测试和需要显式一次性连接的调用方。
 func httpClient(route routing.Route) *http.Client {
-	transport := http.DefaultTransport.(*http.Transport).Clone()
-	transport.DialContext = (&net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}).DialContext
-	transport.ResponseHeaderTimeout = upstreamResponseHeaderTimeout
-	// 未显式选择 Provider 代理时必须直连，不能继承 Web/Gateway 进程的
-	// HTTP_PROXY/HTTPS_PROXY 环境，否则凭据和请求体可能被送往非预期代理。
-	transport.Proxy = nil
-	if route.ProxyURL != "" {
-		if parsed, err := url.Parse(route.ProxyURL); err == nil {
-			transport.Proxy = http.ProxyURL(parsed)
-		}
-	}
-	return &http.Client{
-		Transport: transport,
-		Timeout:   0,
-		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
-			return http.ErrUseLastResponse
-		},
-	}
+	return newUpstreamClient(route)
 }
 
 func routeTimeout(route routing.Route) time.Duration {

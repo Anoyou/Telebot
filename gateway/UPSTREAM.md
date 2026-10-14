@@ -38,3 +38,27 @@ Get "https://api.openai.com/v1/models": tls: failed to verify certificate: x509:
 ```
 
 第 2、3 步的差异就是本次改动的验收证据。
+
+## 上游连接池（WP-B15）
+
+Gateway 的上游 `http.Client` 按 **(provider, proxy, baseURL, snapshot revision)** 缓存复用，不再逐请求新建连接（`gateway/internal/codex/pool.go::upstreamPool`）。
+
+先前实现每个上游请求都设 `Request.Close = true` 并 `defer client.CloseIdleConnections()`，等于每次调用都新建 TCP + TLS 连接。System Agent 的长任务会连着打多轮工具调用，握手开销被全额付在每一次请求上。
+
+### key 只取影响连接的字段
+
+`poolKey` 只组合 `ProviderID`、`Revision()`、`BaseURL`、`ProxyURL`。模型名、`TimeoutSeconds`、`MaxConcurrency`、兼容请求头都不改变复用资格，放进去只会打出多个池、把复用抵消掉。总超时仍由请求 context 控制（请求级 `X-TelePilot-Timeout-Seconds` 优先），`http.Client.Timeout` 保持 0，不在 Client 层再压一层。
+
+### revision 是退役信号
+
+Provider 改了代理、Base URL 或凭据后，新 snapshot 的 revision 单调递增；`acquire` 发现 revision 变化即 `retireLocked()`——关闭旧池全部空闲连接并清空 map，再为新 revision 建池。回退到旧 revision 也重新建池，不复活已退役的 Client。进程退出时 `Handler.Close()` 收尾（`gateway/cmd/telepilot-gateway/main.go` 里 `defer codexHandler.Close()`）。
+
+### 复用边界与安全语义不变
+
+- 未显式选择 Provider 代理时 `Transport.Proxy` 仍为 `nil`，不继承进程 `HTTP_PROXY` / `HTTPS_PROXY`。
+- 上游重定向仍不自动跟随（`http.ErrUseLastResponse`），避免自定义认证头跨 origin 泄露。
+- 单 Provider 并发上限（`acquire` semaphore）与全局并发上限不变。
+
+### 相关测试
+
+`gateway/internal/codex/pool_test.go`：同路由复用同一 Client、provider/proxy/baseURL 分池、revision 变化整体退役、`close()` 清空、并发 acquire 稳定、`IdleConnTimeout > 0` 与 `MaxIdleConnsPerHost >= 2` 保底复用、坏代理字符串退化为直连，以及一条端到端用例——连续 3 次 `/v1/responses` 上游侧只建立 1 条连接。
