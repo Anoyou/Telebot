@@ -25,37 +25,42 @@
 
 ## [Unreleased]
 
+## [0.101.0-beta.1] - 2026-10-14 · minor（次版本预发布） · 自动检查更新、使用指南、回复署名与密钥占位符
+
 ### 新增
 
 - 新增「应用自动检查更新」后端能力：`backend/app/services/app_update_service.py` 把原本堆在 `api/system_health.py` 的检查核心收敛为服务层实现，新增 SystemSetting `app_update_check`（默认 `{enabled: true, interval_minutes: 1440}`，clamp 60..10080 分钟）与 `app_update_last_check`（最近一次检查的结果摘要 + 时间戳，只保留角标需要的最小字段，不把完整 plan 落库）。新增 `GET /api/system/update-status` 供前端角标读取、`PATCH /api/system/update-check` 半量更新设置（读现值 → merge → 落库 → 审计），`POST /api/system/check-update` 改为薄壳共用同一份实现。
-- lifespan 启动后台自动检查循环：沿用 `remote_plugin_service.auto_update_check_loop` 的既有模式，启动 15s 后按设置间隔轮询（60s 粒度），只在"检测到新版本且结论发生变化"时记录一条日志，全程只检查与记录，绝不自动 pull / restart；DB 读写异常时降级告警，不会阻塞其他组件启动。
+- lifespan 启动后台自动检查循环：沿用 `remote_plugin_service.auto_update_check_loop` 的既有模式，启动 15s 后按设置间隔轮询（60s 粒度），只在“检测到新版本且结论发生变化”时记录一条日志，全程只检查与记录，绝不自动 pull / restart；DB 读写异常时降级告警，不会阻塞其他组件启动。
+- 前端顶栏新增更新角标与检查设置区：`UpdateDialog` 可开关自动检查并选择 6h/12h/24h/72h/168h 预设或自定义小时；自动检查频率收敛为纯逻辑模块 `frontend/src/lib/appAutoCheck.ts`（带 6 条回归），只影响提示，不触发任何下载或重启。
+- 系统助手回复新增「实际作答模型」署名：Bot 端在正文末尾追加 `模型：{provider} / {model}`，Web 端在回复气泡下方始终展示 `provider · model`。署名取的是本轮 **usage** 里的 `provider_name` / `model`——即真正产出回复的 Provider 与模型，Magpie 等网关场景下会显示上游标识（如 `Magpie 网关 / workbuddy/glm-5.3-flash`），而不是用户在面板上选的那一个。发生模型/Provider 回退时，Bot 署名补 `（原选择 {原模型} 失败回退）`，Web 端在下方单列「原模型 / 实际使用 / 原因」，避免用户误以为模型没换。署名追加在 3500 字符截断**之后**，超长回复也不会把署名吃掉；无 usage（旧 worker）时不渲染署名。纯逻辑抽到前端 `src/lib/modelRunMeta.ts`，Bot 侧抽 `bot_bridge._assistant_signature`，两侧各带回归测试。
+- 密钥以 `[[TP-CRED-n]]` 占位符发给模型、面向 owner 时再还原，替代原先直接替换成 `[REDACTED]`（纯 ASCII，不含 `api_key` / `token` / `password` / `secret` 等触发词，也不含 `:=`，因此不会命中密钥抽取与打码正则）。此前用户把 Key 贴给模型后被替换为 `[REDACTED]`，模型既读不到值、也无法把它填回工具的 `api_key` 参数，“帮我用这个 Key 注册 Provider”这类请求基本不可用；现在出站文本带占位符，模型可以原样引用，真实值只在面向 owner 的显示边界还原。占位符映射按“现值 → merge → FIFO 上限 20 → `encrypt_str` 加密”写入会话新列 `secret_map_enc`（迁移 `0059`），`app.scripts.rekey` 已同步覆盖该列，`MASTER_KEY` 变更后可整列重加密。请求头配置场景维持全量打码，不产生占位符。
+- 新增面向使用者的中文《[使用指南](./docs/USAGE-GUIDE.md)》：安装与首次启动（三条部署路径）、Web 界面逐个页面导览（概览/插件/AI/待确认/交互/指令与任务/入站 Webhook/命中调试/日志/系统）、Telegram 通道（userbot 与 interaction bot、交互规则、命令与 Action 二次确认）、System Agent 三种入口与常用 Bot 命令、密钥池与 Magpie、自动检查更新、常见问题与排障入口。文档按当前版本代码编写，并明确“界面与本文不一致时以界面为准”。
+- 使用指南走 runtime-content 通道发布（`scripts/sync-runtime-content.sh` 的 `DOC_FILES`、`frontend/nginx.conf` 的 docs 白名单、`UsageGuideMenu.tsx` 的 `/runtime-content/docs/USAGE-GUIDE.md` 读取），不参与前端构建；侧边栏页脚新增「使用指南」入口，位于「更新日志」**上方**，折叠态、移动端弹层位置与更新日志完全一致。
 
 ### 优化
 
 - 路由装配不再经 barrel 整目录拉页面：`frontend/src/App.tsx` 的插件中心、模板实验室两条懒加载改为直连「pages/Plugins/Home / pages/Plugins/MessageTemplateLab」，`pages/Plugins/index.ts` 只保留兼容 re-export，不再把整个目录拖进同一个 chunk。
 - 移动端触控命中区补齐：共享按钮组件在 `max-sm` 断点用透明 `after` 伪元素把命中区抬到 40px（顶栏 28px 图标按钮、日志页「查看最新」等小按钮受益），视觉尺寸、布局与桌面端命中区完全不变；宽度方向不外扩，避免抢占相邻按钮。Chrome 实测：移动端按钮上下各扩 6px 可点、桌面端命中区仍等于按钮本体、≥40px 高的按钮不受影响。
-- Codex TUI 客户端版本号收敛为单一来源：此前 `gateway/internal/routing/table.go`（旧快照兼容回退）、`gateway/internal/codex/identity.go`（Codex 身份请求头缺省值）、`backend/app/services/llm_identity.py`（控制面默认版本）三处各写死一份，任一处漏改就会让 Python 直连链路与 Gateway 链路发出不一致的 `User-Agent` / `Version` 头。现在 gateway 内唯一字面量在 `gateway/contract/types.go` 的 `DefaultCodexClientVersion`，两个包都改为引用；两侧漂移由 `test_codex_client_version_single_source.py` 与 Go 侧 `TestCodexClientVersionFallbackUsesSingleContractConstant` 双向守卫。
+- 能力探测首轮「临时放行」现在对用户可见：`non_blocking` 探测下“无缓存首次放行”与“过期 unavailable 临时放行”都会把主模型当可用继续，但真实能力尚未确认。此前这个事实只存在于 `CapabilityProbeResult.provisional` 里，没有任何调用方读取；现在 `provider_selected` 之后会发 `model_capability_provisional` 事件，Web 端 RunTrace 显示「能力待确认」标题、实时 pending 文本展示后端原话。放行决策、路由、工具筛选与默认配置全部不变。
 - 启动 `api/types.ts` → OpenAPI 生成类型的分域迁移：新增 `frontend/src/api/types.accounts.ts` 与 `frontend/src/api/types.commands.ts`，账号域 / 命令域类型底层改引 `schema.ts` 的 `components["schemas"]`，`types.ts` 只保留 re-export 兼容层，页面侧引用无需改动。状态字面量（`AccountStatus` 等）保留窄联合 + `string` 兜底，避免一次迁移引发大面积 TS 收窄报错；config bundle 导出形状与已无人引用的手写副本一并清理。运行时行为不变，新增 `typesMigration.test.ts` 7 条静态回归守住引用边界，防止后续又绕回兼容层。
-- 密钥以 `[[TP-CRED-n]]` 占位符发给模型、面向 owner 时再还原，替代原先直接替换成 `[REDACTED]`（纯 ASCII，不含 `api_key` / `token` / `password` / `secret` 等触发词，也不含 `:=`，因此不会命中密钥抽取与打码正则）。此前用户把 Key 贴给模型后被替换为 `[REDACTED]`，模型既读不到值、也无法把它填回工具的 `api_key` 参数，"帮我用这个 Key 注册 Provider" 这类请求基本不可用；现在出站文本带占位符，模型可以原样引用，真实值只在面向 owner 的显示边界还原。占位符映射按"现值 → merge → FIFO 上限 20 → `encrypt_str` 加密"写入会话新列 `secret_map_enc`（迁移 `0059`），`app.scripts.rekey` 已同步覆盖该列，`MASTER_KEY` 变更后可整列重加密。请求头配置场景维持全量打码，不产生占位符。
+- Go gateway 上游请求改为按 `(provider, proxy, baseURL, snapshot revision)` 缓存 `http.Client` / `Transport`：此前每次上游调用都新建 TCP + TLS 连接，System Agent 长任务连着打多轮工具调用，握手开销被全额付在每一次请求上。Transport 显式设置 `MaxIdleConns` / `MaxIdleConnsPerHost` / `IdleConnTimeout` / `TLSHandshakeTimeout` / `ForceAttemptHTTP2`，总超时仍由请求 context 与请求级 `X-TelePilot-Timeout-Seconds` 控制；revision 变化即退役旧池。累计 18 条 Go 回归，含端到端「3 次请求上游只建 1 条连接」。
+- Codex TUI 客户端版本号收敛为单一来源：此前 `gateway/internal/routing/table.go`（旧快照兼容回退）、`gateway/internal/codex/identity.go`（Codex 身份请求头缺省值）、`backend/app/services/llm_identity.py`（控制面默认版本）三处各写死一份，任一处漏改就会让 Python 直连链路与 Gateway 链路发出不一致的 `User-Agent` / `Version` 头。现在 gateway 内唯一字面量在 `gateway/contract/types.go` 的 `DefaultCodexClientVersion`，两个包都改为引用；两侧漂移由 `test_codex_client_version_single_source.py` 与 Go 侧 `TestCodexClientVersionFallbackUsesSingleContractConstant` 双向守卫。
+- 指令与任务工作台收尾 IA 迁移收尾到 Operations：两个组件按既有信息架构归位，补 5 条静态回归防止引用又绕回旧路径。
+- 路由 golden 回放闭环：新增 `scripts/capture-route-selected.py` 与 `data/route_replay/` 三组回放快照，可离线重放 `route_selected` 事件排障“当时为什么走了这些域”；golden 82 → 98 条，并修掉 stale 域名白名单——`_known_domains()` 改为从 `domain_catalog()` 动态取，新域必须在 golden 里显式给期望，不再被误判成 unknown expect（看着通过、其实断言没生效）。
 
+### 修复
 
 - 修复平台能力 gate 的加载竞态：`CapabilityGate` 原先要求 capabilities 与 settings **两个查询都**加载完才显示骨架，settings 先返回而 capabilities 仍在飞行时会提前放行，已暂停模块的内容会先渲染一帧再跳暂停页。改为只等 capabilities（settings 仅作为 `ai` 键的默认兜底，保持 default-true 语义），并把决策抽成 `lib/navigation.ts` 的 `resolveCapabilityGatePhase`，补 6 条纯粹逻辑回归。
 - 修复插件 `route="auto"` 下「只配了池内 Key」的 Provider 从路由候选里消失的问题：`ai_facade._shared_router_auto` 构造共享 Router 候选池时改用 `to_runtime_dict()`，此前用展示版 `to_dict()` 再手补 `api_key_enc`，池内 `keys[].api_key_enc` 被抹掉，共享 Router 的 `_has_api_key` 会把这些 Provider 全部过滤掉，插件 auto 永远选不到它们。
-- 占位符还原只发生在面向 owner 的显示边界，且**还原先于各边界的后续加工**：Bot 发送前还原（再追加回复署名、再做 Markdown→Telegram HTML 转换与 3500 字符截断——否则还原进来的真实值会被截断切成半个 token，或吃掉署名预算）；Web 实时流（`assistant_message` 的 `content` / `reasoning`）与 Web 消息历史（`text` / `reasoning`，附件等结构原样返回）在下发前还原。映射读失败、解密失败或会话没有映射时**退化为占位符**，绝不"猜不到就丢内容或整段打码"。run 事件库、运行日志、RunTrace、记忆、工具摘要、`list_events` 全部保持占位符不变。
-- 工具参数也支持占位符往返：模型把 `[[TP-CRED-n]]` 填进**任意**参数（不止约定的 `secret_argument_names`，含嵌套 dict / list）时，只读与写 handler 在入口统一还原；写 handler 的还原先于既有的 sensitive-argument 注入（否则注入逻辑看到的只是一串占位符），因此"贴 Key → 让助手注册 Provider → 确认执行"这条链路可以真正跑通。映射里没有的占位符原样保留，交由工具自行报错，而不是塞一个假值。
-- 系统助手回复新增「实际作答模型」署名：Bot 端在正文末尾追加 `模型：{provider} / {model}`，Web 端在回复气泡下方始终展示 `provider · model`。署名取的是本轮 **usage** 里的 `provider_name` / `model`——即真正产出回复的 Provider 与模型，Magpie 等网关场景下会显示上游标识（如 `Magpie 网关 / workbuddy/glm-5.3-flash`），而不是用户在面板上选的那一个。发生模型/Provider 回退时，Bot 署名补 `（原选择 {原模型} 失败回退）`，Web 端在下方单列「原模型 / 实际使用 / 原因」，避免用户误以为模型没换。署名追加在 3500 字符截断**之后**，超长回复也不会把署名吃掉；无 usage（旧 worker）时不渲染署名。纯逻辑抽到前端 `src/lib/modelRunMeta.ts`，Bot 侧抽 `bot_bridge._assistant_signature`，两侧各带回归测试。
+- 占位符还原只发生在面向 owner 的显示边界，且**还原先于各边界的后续加工**：Bot 发送前还原（再追加回复署名、再做 Markdown→Telegram HTML 转换与 3500 字符截断——否则还原进来的真实值会被截断切成半个 token，或吃掉署名预算）；Web 实时流（`assistant_message` 的 `content` / `reasoning`）与 Web 消息历史（`text` / `reasoning`，附件等结构原样返回）在下发前还原。映射读失败、解密失败或会话没有映射时**退化为占位符**，绝不“猜不到就丢内容或整段打码”。run 事件库、运行日志、RunTrace、记忆、工具摘要、`list_events` 全部保持占位符不变。
+- 工具参数也支持占位符往返：模型把 `[[TP-CRED-n]]` 填进**任意**参数（不止约定的 `secret_argument_names`，含嵌套 dict / list）时，只读与写 handler 在入口统一还原；写 handler 的还原先于既有的 sensitive-argument 注入（否则注入逻辑看到的只是一串占位符），因此“贴 Key → 让助手注册 Provider → 确认执行”这条链路可以真正跑通。映射里没有的占位符原样保留，交由工具自行报错，而不是塞一个假值。
+- 修复独立构建的 gateway 镜像无法访问 HTTPS 上游：`gateway/Dockerfile` 运行时阶段原本是 `FROM scratch` + 只 COPY 二进制，而 Gateway 用 Go `net/http` 访问 HTTPS 上游需要系统 CA 根证书，不带 `/etc/ssl/certs` 的镜像对任何真实上游调用都会 `x509: certificate signed by unknown authority`。改为 `gcr.io/distroless/static-debian12:nonroot`，仍只 COPY 二进制、不加包管理器与 shell，保持最小运行时与安全边界；文档同步记录该硬约束（生产路径本就由 Python 基础镜像提供 CA，不受影响）。
 
 ### 文档
 
-- 新增面向使用者的中文《[使用指南](./docs/USAGE-GUIDE.md)》：安装与首次启动（三条部署路径）、
-  Web 界面逐个页面导览（概览/插件/AI/待确认/交互/指令与任务/入站 Webhook/命中调试/日志/系统）、
-  Telegram 通道（userbot 与 interaction bot、交互规则、命令与 Action 二次确认）、
-  System Agent 三种入口与常用 Bot 命令、密钥池与 Magpie、自动检查更新、常见问题与排障入口。
-  文档按当前版本代码编写，并明确"界面与本文不一致时以界面为准"。
-- 使用指南走 runtime-content 通道发布（`scripts/sync-runtime-content.sh` 的 `DOC_FILES`、
-  `frontend/nginx.conf` 的 docs 白名单、`UsageGuideMenu.tsx` 的 `/runtime-content/docs/USAGE-GUIDE.md`
-  读取），不参与前端构建；侧边栏页脚新增「使用指南」入口，位于「更新日志」**上方**，
-  折叠态、移动端弹层位置与更新日志完全一致。
+- README（GitHub 展示页）按当前能力刷新：能力表补自动检查更新、密钥占位符、使用指南等 0.101 新能力，补齐使用指南入口与密钥占位符安全边界。
+- 开发指南（`CONTRIBUTING.md`）按当前代码全量校对：补齐 gateway、密钥池/Magpie、runtime-content/使用指南、deploy/updater、密钥占位符约定与双检查点版本流程；`docs/SYSTEM-AGENT.md` 补充占位符小节与 `model_capability_provisional` 事件。
+- `docs/API-CONTRACT.md` 新增「运行观测事件的投递语义：at-least-once」小节：`runtime_log` / `rate_limit_event` 由主进程可靠消费（inflight → DB 提交 → LREM ack），本质至少一次，文档明确不得当计数基线、列表结果会波动、消费停滞时 LTRIM 上限会静默丢弃旧事件，并配 3 条守卫回归防止文档悄悄过期。
 
 ## [0.100.0-beta.6] - 2026-10-14 · patch（补丁版本预发布） · 五域审查 P0 修复
 
