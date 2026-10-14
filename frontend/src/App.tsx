@@ -28,7 +28,7 @@ const AutoReplyConfig = lazy(() => import("@/pages/Plugins/configs/AutoReply").t
 const AutorepeatConfig = lazy(() => import("@/pages/Plugins/configs/Autorepeat").then(m => ({ default: m.AutorepeatConfig })));
 const CodexImageConfigPage = lazy(() => import("@/pages/Plugins/configs/CodexImageConfig").then(m => ({ default: m.CodexImageConfigPage })));
 const ChatGPTImageConfigPage = lazy(() => import("@/pages/Plugins/configs/ChatGPTImageConfig").then(m => ({ default: m.ChatGPTImageConfigPage })));
-const SchedulerConfig = lazy(() => import("@/pages/Plugins/configs/Scheduler").then(m => ({ default: m.SchedulerConfig })));
+const SchedulerConfig = lazy(() => import("@/pages/Operations/SchedulerConfig").then(m => ({ default: m.SchedulerConfig })));
 const Game24ConfigPage = lazy(() => import("@/pages/Plugins/configs/Game24Config").then(m => ({ default: m.Game24ConfigPage })));
 const GenericPluginConfigPage = lazy(() => import("@/pages/Plugins/configs/GenericPluginConfig").then(m => ({ default: m.GenericPluginConfigPage })));
 const Logs = lazy(() => import("@/pages/Logs").then(m => ({ default: m.Logs })));

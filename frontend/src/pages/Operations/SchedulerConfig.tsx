@@ -54,7 +54,7 @@ import {
   RuleEditDialogShell,
   RulePageHeader,
   useRuleCrud,
-} from "./_shared";
+} from "@/pages/Plugins/configs/_shared";
 
 function defaultConfig(commandPrefix = ","): SchedulerRuleConfig {
   return {

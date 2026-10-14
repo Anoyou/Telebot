@@ -1,5 +1,5 @@
 import { PageShell } from "@/components/layout/PageScaffold";
-import { SchedulerConfig } from "@/pages/Plugins/configs/Scheduler";
+import { SchedulerConfig } from "./SchedulerConfig";
 import { OperationsWorkspaceHeader } from "./WorkspaceHeader";
 
 export function OperationsSchedulerPage() {
