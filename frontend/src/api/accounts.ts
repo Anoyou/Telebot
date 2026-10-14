@@ -6,14 +6,14 @@ import type {
   AccountConfirmCodeRequest,
   AccountConfirmResponse,
   AccountDetail,
+  AccountFeatureItem,
   AccountStartLoginRequest,
   AccountStartLoginResponse,
   AccountSummary,
   AccountUpdateRequest,
   ConfigBundleConfirmResponse,
-  AccountFeatureItem,
   ConfigBundleDryRunResponse,
-} from "@/api/types";
+} from "@/api/types.accounts";
 
 export async function listAccounts(): Promise<AccountSummary[]> {
   const { data } = await api.get<AccountSummary[]>("/api/accounts");

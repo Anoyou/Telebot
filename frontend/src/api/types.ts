@@ -1,7 +1,38 @@
 // 与后端 schema 对齐的关键类型（手写版）。OpenAPI 生成的 schema.ts 后续替换。
+//
+// 迁移状态（WP-B12 启动）：账号域与命令域已改为从 `types.accounts.ts` /
+// `types.commands.ts` 引出（底层引 `schema.ts` 生成类型），本文件只保留 re-export
+// 兼容层，老引用无需改动。新代码请直接引域名模块或 `schema.ts`，不要再往这里新增
+// 账号/命令域手写类型。
 
 import type { components as ApiComponents } from "@/api/schema";
 import type { PluginCapabilities, PluginEventSubscription } from "@/types/pluginContract";
+
+// ── 账号域 / 命令域：从域名模块 re-export（兼容层，见 types.accounts.ts / types.commands.ts）──
+export type {
+  AccountConfirm2FARequest,
+  AccountConfirmCodeRequest,
+  AccountConfirmResponse,
+  AccountDetail,
+  AccountFeatureItem,
+  AccountStartLoginRequest,
+  AccountStartLoginResponse,
+  AccountStatus,
+  AccountSummary,
+  AccountUpdateRequest,
+  ConfigBundleConfirmResponse,
+  ConfigBundleDryRunResponse,
+  ProxySummary,
+} from "./types.accounts";
+export type {
+  AccountCommandItem,
+  AICommandEnablementSummary,
+  BuiltinCommandItem,
+  CommandTemplateCreate,
+  CommandTemplateOut,
+  CommandTemplateType,
+  CommandTemplateUpdate,
+} from "./types.commands";
 
 // ===================== 鉴权 =====================
 export interface LoginRequest {
@@ -26,91 +57,6 @@ export interface CurrentUser {
   id: number;
   username: string;
   has_totp: boolean;
-}
-
-// ===================== 账号 =====================
-export type AccountStatus =
-  | "active"
-  | "paused"
-  | "floodwait"
-  | "dead"
-  | "login_required";
-
-export interface ProxySummary {
-  id: number;
-  /** socks5 / http / https；历史未知值按原字符串展示。 */
-  type: string;
-  host: string;
-  port: number;
-  /** 友好名字；后端目前给的是 host:port */
-  label?: string | null;
-  // ── 上次主动测的真实出口（30 min Redis 缓存）──
-  /** ISO-2 国家代码（CN / US / JP），无缓存时 null */
-  exit_country?: string | null;
-  exit_ip?: string | null;
-  /** epoch 秒；前端用来算"几分钟前测的" */
-  probed_at?: number | null;
-  /** 上次探测是否成功；null=从未探测 */
-  probe_ok?: boolean | null;
-}
-
-export interface AccountSummary {
-  id: number;
-  phone: string;
-  display_name: string | null;
-  /** Telegram 数字 ID（client.get_me().id），新账号登录后回填，老账号 worker 上线时自动同步 */
-  tg_user_id?: number | null;
-  /** Telegram 用户名（不含 @），用户可能未设置或随时修改 */
-  tg_username?: string | null;
-  status: AccountStatus;
-  tags?: string[] | null;
-  enabled_features: number;
-  cold_start_until: string | null;
-  created_at: string;
-  /** 该账号绑定的代理；null = 走主进程默认出口（DIRECT 或全局 TG_DEFAULT_PROXY） */
-  proxy?: ProxySummary | null;
-}
-
-export interface AccountDetail extends AccountSummary {
-  notes?: string | null;
-  template_id?: number | null;
-  proxy_id?: number | null;
-  /** 设备伪装 profile id，决定 TG 设备列表里看到的 device_model / system_version / app_version */
-  device_profile_id?: number | null;
-}
-
-export interface AccountStartLoginRequest {
-  api_id: number;
-  api_hash: string;
-  phone: string;
-  account_id?: number | null;
-  proxy_id?: number | null;
-  device_profile_id?: number | null;
-}
-export interface AccountStartLoginResponse {
-  login_token: string;
-  phone_code_hash?: string | null;
-}
-export interface AccountConfirmCodeRequest {
-  login_token: string;
-  code: string;
-}
-export interface AccountConfirm2FARequest {
-  login_token: string;
-  password: string;
-}
-export interface AccountConfirmResponse {
-  account_id: number;
-  require_2fa: boolean;
-  display_name?: string | null;
-}
-export interface AccountUpdateRequest {
-  display_name?: string | null;
-  notes?: string | null;
-  tags?: string[] | null;
-  template_id?: number | null;
-  proxy_id?: number | null;
-  device_profile_id?: number | null;
 }
 
 // ===================== 账号 Bot 联动 =====================
@@ -390,84 +336,9 @@ export interface AccountCloneConfigRequest {
 }
 
 // ===================== Config Bundle =====================
-export interface ConfigBundleSourceAccount {
-  id: number;
-  label: string;
-}
-
-export interface ConfigBundleFeatureItem {
-  feature_key: string;
-  enabled: boolean;
-  config: Record<string, unknown>;
-}
-
-export interface ConfigBundleRuleItem {
-  feature_key: string;
-  name: string;
-  enabled: boolean;
-  priority: number;
-  config: Record<string, unknown>;
-}
-
-export interface ConfigBundleCommandLinkItem {
-  template_id: number;
-  template_name: string;
-  aliases: string[];
-  type: string;
-  enabled: boolean;
-}
-
-export interface ConfigBundleIgnoredPeerItem {
-  peer_id: number;
-  peer_kind: string;
-  peer_label?: string | null;
-}
-
-export interface ConfigBundleExport {
-  version: "1";
-  source_account: ConfigBundleSourceAccount;
-  rules: ConfigBundleRuleItem[];
-  features: Record<string, ConfigBundleFeatureItem>;
-  command_links: ConfigBundleCommandLinkItem[];
-  ignored_peers: ConfigBundleIgnoredPeerItem[];
-}
-
-export interface ConfigBundleDiffCounts {
-  add: number;
-  skip: number;
-  conflict: number;
-}
-
-export interface ConfigBundleDiffItem {
-  entity: "feature" | "rule" | "command_link" | "ignored_peer";
-  key: string;
-  action: "add" | "skip" | "conflict";
-  conflict_kind?: "overridable" | "blocked" | null;
-  fields: string[];
-  note?: string | null;
-}
-
-export interface ConfigBundleDryRunResponse {
-  version: "1";
-  source_account: ConfigBundleSourceAccount;
-  target_account: ConfigBundleSourceAccount;
-  size_bytes: number;
-  counts: ConfigBundleDiffCounts;
-  items: ConfigBundleDiffItem[];
-  warnings: string[];
-  preview_signature?: string | null;
-}
-
-export interface ConfigBundleConfirmResponse {
-  version: "1";
-  source_account: ConfigBundleSourceAccount;
-  target_account: ConfigBundleSourceAccount;
-  imported: number;
-  skipped: number;
-  conflicts: number;
-  warnings: string[];
-  preview_signature?: string | null;
-}
+// 导出/导入的 config bundle 形状已由 `schema.ts` 的 `ConfigBundle*` 生成类型覆盖
+// （`types.accounts.ts` 的 `ConfigBundleDryRunResponse` / `ConfigBundleConfirmResponse`
+// 就是它们的出参），本文件不再保留独立手写副本，避免两处漂移。
 
 // ===================== 功能 =====================
 export type FeatureState = "active" | "failed" | "disabled";
@@ -528,13 +399,6 @@ export interface FeatureInfo {
   available_channels?: string[];
   blocked_entries?: Array<Record<string, unknown>>;
   blocked_reason_code?: string | null;
-}
-export interface AccountFeatureItem {
-  feature_key: string;
-  enabled: boolean;
-  state: FeatureState;
-  last_error?: string | null;
-  config: Record<string, unknown>;
 }
 export interface AccountFeatureToggle {
   enabled: boolean;
@@ -1327,49 +1191,12 @@ export interface RecentPeersResponse {
 }
 
 // ==================== Sprint2 #2 Custom Commands ====================
-//
-// 4 种命令类型：
+// 命令模板类型已迁到 `./types.commands`（底层引 schema.ts），这里只留 re-export。
+// 4 种命令的历史行为说明：
 //   - reply_text   收到 → 编辑原消息为文本（支持 {args} 占位）
 //   - forward_to   收到 → 转发被引用消息到指定 chat_id
 //   - run_plugin   占位：调插件方法（V1 暂未实装）
 //   - ai           收到 → 调 LLM provider → 编辑回原消息
-export type CommandTemplateType =
-  | "reply_text"
-  | "forward_to"
-  | "run_plugin"
-  | "ai";
-
-/** 命令模板出参（与 GET /api/commands/templates 对齐） */
-export interface CommandTemplateOut {
-  id: number;
-  /** ,name 触发名；命令前缀在系统设置里改 */
-  name: string;
-  type: CommandTemplateType;
-  /** 按 type 不同结构；前端按 type 切表单 */
-  config: Record<string, unknown>;
-  description: string | null;
-  aliases: string[];
-  created_at: string;
-}
-
-/** 新建模板入参（POST /api/commands/templates） */
-export interface CommandTemplateCreate {
-  name: string;
-  aliases?: string[];
-  type: CommandTemplateType;
-  config: Record<string, unknown>;
-  description?: string | null;
-}
-
-/** PATCH 更新（任意字段可选） */
-export interface CommandTemplateUpdate {
-  name?: string;
-  aliases?: string[];
-  type?: CommandTemplateType;
-  config?: Record<string, unknown>;
-  description?: string | null;
-}
-
 // 各 type 对应的 config 形状（仅做编辑/校验参考；后端 schema 校验是权威）
 export interface ReplyTextConfig {
   /** 命令文本；支持 {args} 占位，被 ,name xxx yyy 的剩余参数替换 */
@@ -1438,19 +1265,6 @@ export interface AICommandConfig {
   send_mode?: "edit" | "send_new";
   /** image 模式后端：codex_image 复用图片生成插件；llm 调用 Provider 原生生图 */
   image_backend?: "codex_image" | "llm";
-}
-
-/** 账号详情 → 命令 tab 一行：模板内容 + 该账号是否启用 */
-export interface AccountCommandItem {
-  template: CommandTemplateOut;
-  enabled: boolean;
-}
-
-/** AI 总览：账号启用 AI 命令的批量统计 */
-export interface AICommandEnablementSummary {
-  total_accounts: number;
-  enabled_accounts: number;
-  ai_templates: number;
 }
 
 // ===== Sprint4 Wave1 =====
@@ -2154,15 +1968,6 @@ export interface NotifyBotUpdate {
 
 export interface NotifyBotTestRequest {
   text?: string;
-}
-
-// ==================== Patch 0.4.1 ====================
-// 内置命令的元数据（只读）。前端在「自定义命令模板」编辑器里展示，
-// 让用户知道哪些 name / alias 已被占用，避免起名撞车。
-export interface BuiltinCommandItem {
-  name: string;
-  aliases: string[];
-  doc: string;
 }
 
 // ==================== Patch 0.4.2 ====================

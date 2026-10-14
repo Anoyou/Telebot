@@ -32,7 +32,8 @@
 
 ### 优化
 
-- System Agent 聊天密钥改为**占位符往返**，替代原先直接替换成 `[REDACTED]`：格式 `[[TP-CRED-n]]`（纯 ASCII，不含 `api_key` / `token` / `password` / `secret` 等触发词，也不含 `:=`，因此不会命中密钥抽取与打码正则）。此前用户把 Key 贴给模型后被替换为 `[REDACTED]`，模型既读不到值、也无法把它填回工具的 `api_key` 参数，"帮我用这个 Key 注册 Provider" 这类请求基本不可用；现在出站文本带占位符，模型可以原样引用，真实值只在面向 owner 的显示边界还原。占位符映射按"现值 → merge → FIFO 上限 20 → `encrypt_str` 加密"写入会话新列 `secret_map_enc`（迁移 `0059`），`app.scripts.rekey` 已同步覆盖该列，`MASTER_KEY` 变更后可整列重加密。请求头配置场景维持全量打码，不产生占位符。
+- 启动 `api/types.ts` → OpenAPI 生成类型的分域迁移：新增 `frontend/src/api/types.accounts.ts` 与 `frontend/src/api/types.commands.ts`，账号域 / 命令域类型底层改引 `schema.ts` 的 `components["schemas"]`，`types.ts` 只保留 re-export 兼容层，页面侧引用无需改动。状态字面量（`AccountStatus` 等）保留窄联合 + `string` 兜底，避免一次迁移引发大面积 TS 收窄报错；config bundle 导出形状与已无人引用的手写副本一并清理。运行时行为不变，新增 `typesMigration.test.ts` 7 条静态回归守住引用边界，防止后续又绕回兼容层。
+，替代原先直接替换成 `[REDACTED]`：格式 `[[TP-CRED-n]]`（纯 ASCII，不含 `api_key` / `token` / `password` / `secret` 等触发词，也不含 `:=`，因此不会命中密钥抽取与打码正则）。此前用户把 Key 贴给模型后被替换为 `[REDACTED]`，模型既读不到值、也无法把它填回工具的 `api_key` 参数，"帮我用这个 Key 注册 Provider" 这类请求基本不可用；现在出站文本带占位符，模型可以原样引用，真实值只在面向 owner 的显示边界还原。占位符映射按"现值 → merge → FIFO 上限 20 → `encrypt_str` 加密"写入会话新列 `secret_map_enc`（迁移 `0059`），`app.scripts.rekey` 已同步覆盖该列，`MASTER_KEY` 变更后可整列重加密。请求头配置场景维持全量打码，不产生占位符。
 
 
 - 修复平台能力 gate 的加载竞态：`CapabilityGate` 原先要求 capabilities 与 settings **两个查询都**加载完才显示骨架，settings 先返回而 capabilities 仍在飞行时会提前放行，已暂停模块的内容会先渲染一帧再跳暂停页。改为只等 capabilities（settings 仅作为 `ai` 键的默认兜底，保持 default-true 语义），并把决策抽成 `lib/navigation.ts` 的 `resolveCapabilityGatePhase`，补 6 条纯粹逻辑回归。
