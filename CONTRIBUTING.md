@@ -84,6 +84,39 @@ make gateway-run # 前台监听 .run/gateway.sock
 
 `make backend` 适合只改控制面 API。涉及 Worker 的改动仍要完整重启。
 
+### runtime-content 与《使用指南》发布链路
+
+面向使用者的文档不打包进前端 bundle，而是通过 `.run/runtime-content/` 以只读方式挂载给前端 Nginx：
+
+```bash
+bash scripts/sync-runtime-content.sh      # 同步 docs/ 白名单到 .run/runtime-content/docs/
+```
+
+新增一份可在线阅读的文档需要三处同步，缺一就会在线上 404：
+
+1. `scripts/sync-runtime-content.sh` 的 `DOC_FILES` 数组加入文件名。
+2. `frontend/nginx.conf` 中 `runtime-content/docs/` 的正则白名单加入同一文件名。
+3. `backend/app/tests/test_frontend_pwa_chrome.py` 补断言：同步脚本与 nginx 白名单都包含该文件。
+
+目前《[使用指南](docs/USAGE-GUIDE.md)》走这条链路，入口是 `frontend/src/components/layout/UsageGuideMenu.tsx`，按钮在 `Sidebar.tsx` 页脚「更新日志」**上方**，折叠态、弹层位置与更新日志逐项一致。改写文档内容不需要动这三处；改动菜单结构或按钮位置时要跑 `pnpm --dir frontend test`。
+
+### 内置 Codex Gateway（Go）
+
+`gateway/` 是独立 Go module，只在与 Go 客户端兼容的 Responses 调用链路上使用：
+
+```bash
+cd gateway
+go build ./...
+go vet ./internal/...
+go test ./...
+```
+
+或使用 Makefile 目标 `make gateway-build`、`make gateway-test`、`make gateway-run`。
+
+- 路由 snapshot、请求级超时（`X-TelePilot-Timeout-Seconds`）、连接池与上游契约见 [Codex Gateway](docs/CODEX-GATEWAY.md)。
+- 改 Go 侧超时、连接池或身份标识常量时，必须同时跑 Python 与 Go 两侧回归，并用仓库根 `make codegen` 确认没有 schema 漂移。
+- Go 代码不引入 Python 侧没有的运行时依赖；二进制由 backend 镜像内构建，不需要独立的 Docker 构建流程。
+
 ## 运行架构
 
 FastAPI 进程同时承载 Web API、System Agent、Worker Supervisor、Account Bot manager 和 Interaction Bot manager。生产环境固定使用一个 Uvicorn worker，避免同一账号被多个 Supervisor 重复拉起。
@@ -139,6 +172,14 @@ FastAPI 进程同时承载 Web API、System Agent、Worker Supervisor、Account 
 - 前端默认同源访问 API；只有独立开发拓扑才设置 `VITE_API_BASE`。
 
 新增可复用凭据时，使用 `*_enc` 字段和 `MASTER_KEY` 加密，并同步加入 `app.scripts.rekey`。公开鉴权入口不能在凭据验证前创建或修改持久配置。
+
+### LLM 密钥池与 Magpie
+
+Provider 可以只有主 Key、只有池内 Key，或两者并存；可用性判断以 `has_effective_key`（主 Key 或任一启用的池内 Key）为准，`has_api_key` 保留纯主 Key 语义。
+
+- 密钥轮换、冷却、每日上限与用量归因见 [LLM 密钥池](docs/LLM-KEY-POOL.md)。
+- 转写、插件流式、System Agent 等旁路必须走 `llm_key_pool.open_selection_or_raise`，不要自己构造 client，否则绕过选钥与冷却。
+- Magpie 是内置网关模板，模型标识在 usage 里可能是上游标识（如 `workbuddy/glm-5.3-flash`），展示"实际作答模型"时用它而不是用户选择。
 
 主进程或独立子进程调用 `logging.basicConfig()` 后必须安装 `install_sensitive_log_filter()`。测试要覆盖 Telegram Bot API URL、Authorization、代理凭据和常见 Provider Key 不会进入日志。
 
@@ -264,6 +305,19 @@ System Agent 通过注册表调用有限业务工具，禁止万能 SQL、Shell�
 
 工具结果、网页内容、源码和日志都属于外部数据，不能覆盖 system prompt。源码工具只读白名单目录，网页读取每次重定向都要重新做公网地址校验。完整约束见 [System Agent 文档](docs/SYSTEM-AGENT.md)。
 
+### System Agent 聊天密钥占位符约定
+
+用户在聊天里贴 Provider Key 时，真实值不会进入模型上下文，也不会进入运行事件、日志、记忆或工具摘要：
+
+1. `services/system_agent/secrets.py` 的 `extract_plaintext_secrets` 抽取密钥，`build_secret_map` 生成 `[[TP-CRED-n]]` 占位符。
+2. 出站单点在 `service.py` 的 `stream_message`：**先** `apply_secret_placeholders`，**再** `redact_user_message`。反序会让 Key 先变成 `[REDACTED]`，占位符永远不出现。
+3. 映射按"现值 → merge → FIFO 上限 20 → `encrypt_secret_map`"写入 `SystemAgentSession.secret_map_enc`，`app/scripts/rekey.py` 已覆盖该列。
+4. 还原只发生在面向 owner 的显示边界：Bot 发送前、Web 实时 SSE、Web 消息历史；工具参数在读/写 handler 入口还原。新增任何出站面前先判断它属于哪一类。
+5. 还原必须早于该边界的后续加工（Bot 是先还原、再追加署名、再截断）；`restore_placeholders` 只替换完整 token，映射缺失时退化为占位符，不猜值、不丢内容。
+6. `contains_request_header_context` 场景维持整段打码，不进入占位符机制（其自然语言形态无法可靠逐值抽取）。
+
+回归测试见 `app/tests/test_system_agent_secrets.py`、`test_system_agent_bot.py`、`test_system_agent_api.py`、`test_system_agent_provider_stage3.py`。
+
 ## 提交前验证
 
 普通后端或文档改动至少运行：
@@ -275,6 +329,43 @@ cd backend
 .venv/bin/pytest -v
 cd ..
 backend/.venv/bin/python scripts/validate-plugin-examples.py
+```
+
+### 全量验证清单
+
+改动跨域、准备 beta 检查点或稳定发布时，按顺序跑完整套：
+
+```bash
+# 后端
+cd backend && . .venv/bin/activate && ruff check app && pytest
+
+# 插件示例与已安装交互插件校验（仓库根）
+backend/.venv/bin/python scripts/validate-plugin-examples.py
+backend/.venv/bin/python scripts/validate-installed-interaction-plugins.py
+
+# 契约与版本：改了 Pydantic schema、内部 API 或版本号后必须运行并提交产物
+make codegen
+
+# 前端
+pnpm --dir frontend typecheck
+pnpm --dir frontend test
+pnpm --dir frontend build
+pnpm --dir frontend lint   # 0 error；存量 exhaustive-deps 告警不要求清零
+
+# Gateway（改了 gateway/ 后）
+cd gateway && go test ./...
+
+# 工作区
+git diff --check
+```
+
+AGENTS.md 指定的热点回归，改动对应文件后至少运行：
+
+```bash
+cd backend && . .venv/bin/activate
+pytest app/tests/test_account_bot.py app/tests/test_plugin_loader.py
+pytest app/tests/test_system_agent_memory.py app/tests/test_system_agent_api.py app/tests/test_system_agent_run_manager.py
+pytest app/tests/test_llm_key_pool.py app/tests/test_llm_runtime.py app/tests/test_frontend_pwa_chrome.py app/tests/test_supervisor_reliable_consumer.py
 ```
 
 普通前端改动至少运行：
@@ -309,10 +400,12 @@ pnpm --dir frontend test:visual
 
 - `main` 是稳定发布线，只接收已验证的 beta。
 - 开发分支使用目标正式版本的 `-beta.N`。同一候选继续修复时只递增 beta 序号；加入新的 minor 或 major 级变化时提升基础版本并从 `beta.1` 开始。
+- 实际执行按检查点推进，检查点内多个 WP 共用一个版本号：例如 P0 修复批收口为 `0.100.0-beta.6`，随后一批新增/优化能力提升基础版本并从 `0.101.0-beta.1` 重新开始，而不是每个 WP bump 一次。
+- 检查点收口时必须全套同步五处版本并写中文 CHANGELOG：`backend/app/__init__.py`、`backend/pyproject.toml`、`frontend/package.json`、`frontend/src/lib/version.ts`，再 `make codegen` 让 `openapi/telepilot.openapi.json` 的 `info.version` 跟随。CI 会校验五处一致。
 - 开发过程中把变更写入 `CHANGELOG.md` 的 `Unreleased`，不要为每个小提交单独迭代版本号。
 - 准备 beta 检查点、稳定发布、推送稳定检查点、创建 release/PR，或维护者明确要求发版时，才统一决定版本号。
 - 发布前执行 `git fetch origin --prune`，同时检查 `origin/main` 与仍活跃的发布/开发分支。
-- beta 检查点和稳定发布必须同步更新 `backend/app/__init__.py`、`backend/pyproject.toml`、`frontend/package.json`、`frontend/src/lib/version.ts`，运行 `make codegen` 同步 `openapi/telepilot.openapi.json` 的 `info.version` 与 `frontend/src/api/schema.ts`，并用中文更新 `CHANGELOG.md`。
+- 部署形态（容器内 updater、宿主机 updater、手动部署）与回滚步骤见 [公网部署](docs/DEPLOY-PUBLIC.md)；检查更新只做"检查 + 提示"，不做后台 pull/restart，相关设置持久化在 SystemSetting `app_update_check`。
 - Commit、PR 和 release 文案使用中文。
 
 SemVer 判断：破坏兼容为 MAJOR，用户可感知的新能力或主入口变化为 MINOR，Bug、文案、小 UI、测试和兼容补丁为 PATCH。0.x 阶段的 `0.X.0` 表示阶段性能力版本，`0.X.Y` 表示同阶段补丁。

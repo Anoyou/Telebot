@@ -249,6 +249,16 @@ Responses 流同时接受 `response.completed` 与 `response.incomplete` 协议�
 
 每个 `assistant_delta` 在进入 Durable Run 前先经过跨分块缓冲脱敏，覆盖已知聊天密钥、Authorization、Telegram Bot Token 及常见 `sk-`、`xai-`、`gsk_`、`AIza` Provider Key。最终 `assistant_message`、工具摘要和错误事件仍会再次做完整对象脱敏，防止增量路径和历史路径语义分叉。
 
+### 聊天密钥占位符往返
+
+用户在聊天里贴 Provider Key 时，真实值不会进入模型上下文，也不会进入运行事件、日志、记忆或工具摘要。模型看到的是 `[[TP-CRED-n]]` 占位符，可以原样引用或填回工具参数：
+
+- 出站在 `service.stream_message` 单点完成：先 `apply_secret_placeholders`，再 `redact_user_message`。自定义请求头场景仍整段打码，不产生占位符。
+- 映射写入 `SystemAgentSession.secret_map_enc`（`MASTER_KEY` 加密 JSON，FIFO 上限 20），迁移 `0059`，`app/scripts/rekey.py` 已覆盖。
+- 还原只发生在面向 owner 的显示边界：Bot 发送前、Web 实时 SSE 的 `assistant_message`、Web 消息历史的 `text` / `reasoning`；工具参数在读/写 handler 入口还原。其余面保持占位符。
+- 模型可以把占位符填进任意参数（含嵌套结构）。映射里没有的占位符原样保留，交由工具报错，不会塞入猜测值。
+- 回复末尾会追加实际作答的 `模型：provider / model`；回退时附注原选择。usage 缺省（旧 worker）时不渲染署名。
+
 前端使用共享 NDJSON 增量解析器处理任意网络分块和 UTF-8 边界，并以 `requestAnimationFrame` 合并已经抵达的 delta，降低渲染频率；这只是批量提交 React 状态，不是打字机效果。Run 事件按 `seq` 去重，重连不会重复追加文本。
 
 失败用户消息会显示错误原因与「重试本轮」按钮；需要跨 Provider 或工具批准时，会显示对应确认按钮。重试接口为：
