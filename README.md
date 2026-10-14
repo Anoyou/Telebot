@@ -53,7 +53,7 @@ TelePilot 面向需要自托管 Telegram 自动化的个人用户和小团队。
 | --- | --- |
 | 插件 | 内置插件、本地导入、ZIP 安装和 Git 远程仓库；支持签名策略、权限声明、版本检查、全局安装、按账号启停、配置页和 Worker 热重载 |
 | AI | OpenAI Chat Completions、OpenAI Responses、Anthropic Messages 与 Ollama 兼容协议；Responses Provider 可选 Codex 客户端兼容模式（Gateway）；支持模型发现与上下文窗口等元数据、多 Key 密钥池、测活、路由标签、客户端身份、加密兼容请求头、调用记录、Token 与预算；内置 Magpie 网关快捷模板 |
-| 系统助手与待确认 | Web 悬浮助手和管理 Bot `/agent` 共用可恢复 Durable Run；思考与正文分流、工具渐进披露、同 Provider 重试与 fallback、公开网页读取、源码只读诊断、长期记忆和写操作 Action 确认 |
+| 系统助手与待确认 | Web 悬浮助手和管理 Bot `/agent` 共用可恢复 Durable Run；思考与正文分流、工具渐进披露、同 Provider 重试与 fallback、公开网页读取、源码只读诊断、长期记忆和写操作 Action 确认。回复末尾标注**实际作答**的 Provider 与模型（网关下显示上游标识），发生回退时注明原选择；聊天里贴的 Key 只以 `[[TP-CRED-n]]` 占位符交给模型，真实值仅在面向本人的回复与工具参数处还原，不进入运行事件、日志与记忆 |
 | 交互 | 独立 Interaction Bot manager 承接关键词、付款确认、按钮回调和群会话；会话状态持久化，命令入口仍可走用户账号通道 |
 | 指令与任务 | 消息模板、AI 指令、定时任务和自动命令白名单集中在一级工作台，支持按账号启用和立即执行 |
 | 账号与概览 | Web 向导绑定 Telegram 账号，管理代理、设备参数、Account Bot 和账号功能；Supervisor 负责启动、停止、重连、退避与资源状态 |
@@ -61,7 +61,11 @@ TelePilot 面向需要自托管 Telegram 自动化的个人用户和小团队。
 | 入站 Webhook | 外部系统通过账号级加密 Token 投递标准事件，支持限流、去重、平台开关和 Worker 投递 |
 | 命中调试 | 模拟消息路由、查看规则与插件命中结果，按短 TTL 打开 router debug trace，并支持录制与离线回放 |
 | 日志 | 消息流、Agent 运行、系统控制台和运行事件分视图；提供 Runtime/Audit 日志、Event Trace、reason code、原始事件与关联下钻 |
-| 系统 | AI、交互、Webhook、台账和命中调试可热关闭与恢复；提供系统健康、全局紧急停用、配置导出、备份恢复和在线增量更新 |
+| 系统 | AI、交互、Webhook、台账和命中调试可热关闭与恢复；提供系统健康、全局紧急停用、配置导出、备份恢复和在线增量更新；后台按设定周期自动检查新版本（默认每天，可选 6 小时到每周或自定义），发现新版本时顶栏出现角标，只提示不自动更新 |
+
+### 面向使用者与开发者各有一本手册
+
+浏览器里点不开源码也能用：[侧边栏页脚的「使用指南」](./docs/USAGE-GUIDE.md)在界面内直接阅读，覆盖安装启动、逐个页面导览、Telegram 通道、系统助手、密钥池与自动检查更新、常见问题排障。插件与二次开发看 [CONTRIBUTING.md](./CONTRIBUTING.md) 与 [PLUGIN-DEV-GUIDE.md](./docs/PLUGIN-DEV-GUIDE.md)。
 
 ### System Agent 当前链路
 
@@ -176,6 +180,8 @@ make prod-up
 - payout 遇到超时或未知发送结果时进入 ambiguous，不会把异常视为未发送后自动重付。
 - 全局紧急停用会并行收敛 Worker、Account Bot 和 Interaction Bot；部分失败返回 `KILL_SWITCH_PARTIAL_FAILURE`。
 - Updater 可以控制宿主机 Docker，必须使用独立 `UPDATER_TOKEN`，不能和 `JWT_SECRET` 复用。
+- System Agent 聊天密钥采用占位符往返：给模型的是 `[[TP-CRED-n]]`，真实值经 `MASTER_KEY` 加密后只写入会话的 `secret_map_enc` 列，仅在面向本人的回复与工具执行时还原；运行事件、调用日志、记忆与工具摘要始终只有占位符。
+- 自动检查更新只做「检查 + 记录 + 提示」，绝不后台 pull 或重启；容器内无法比对 Git 时不会误报有新版本。
 
 生产检查、密钥轮换、备份恢复和应急流程见 [安全运维 SOP](./docs/SECURITY-OPS.md)。
 
@@ -212,6 +218,7 @@ make plugin-register dir=plugins/local_imports/my_game
 | 外部系统触发插件 | [Webhook Quickstart](./docs/PLUGIN-WEBHOOK-QUICKSTART.md) |
 | 插件 HTTP 与 AI 能力 | [HTTP facade](./docs/PLUGIN-HTTP.md) · [AI facade](./docs/PLUGIN-AI.md) |
 | 远程插件仓库与发布 | [远程插件](./docs/PLUGIN-REMOTE.md) |
+| 界面怎么用、遇到问题先看哪里 | [使用指南](./docs/USAGE-GUIDE.md) |
 | 版本变化与参与开发 | [CHANGELOG](./CHANGELOG.md) · [开发指南](./CONTRIBUTING.md) |
 
 ## 技术栈
