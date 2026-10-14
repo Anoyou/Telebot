@@ -202,6 +202,7 @@ Agent 回答时必须给出来源，并区分搜索摘要、已读取正文、�
 - `run_started`
 - `provider_selected`（当前 Provider 名称、模型与 configured/model_fallback/provider_fallback 原因）
 - `model_capability_check`（首次使用或缓存过期时验证模型的真实工具调用能力）
+- `model_capability_provisional`（WP-B17：主模型按可用放行但能力尚未确认时说明原因）
 - `model_attempt` / `retry_scheduled` / `model_exhausted`（当前模型尝试、固定间隔重试和模型耗尽）
 - `heartbeat`（等待上游期间每 10 秒保持 NDJSON 连接并报告当前 Provider/模型）
 - `route_selected`（所选领域、来源、工具数量）
@@ -232,6 +233,21 @@ Web 首先通过 `POST /api/system-agent/sessions/{session_id}/runs` 创建持�
 助手面板内的「任务中心」显示当前与历史 Run，也可编辑、删除、前移、后移、清空或恢复尚未开始的队列项；进入 dispatching/已经开始的项不可再编辑。对应 API 是 `/api/system-agent/queue`、`/sessions/{id}/queue/reorder`、`/sessions/{id}/queue` 与 `/sessions/{id}/queue/resume`。
 
 Run 状态为 `queued`、`running`、`waiting_input`、`waiting_approval`、`succeeded`、`failed`、`cancelled`。waiting 状态会释放执行租约并暂停后续队列，必须由 input、approval、cancel 或 replace 明确推进。相同 session + `client_request_id` 且请求摘要一致时返回同一个 Run；同一个 ID 携带不同 payload 返回 409。运行中输入使用同样的幂等约束，调用方重试网络请求时必须复用原 ID。
+
+### 能力探测与首轮「临时放行」
+
+模型工具调用能力默认走 `non_blocking`：请求路径不等待探测，用新鲜缓存、过期已知状态或无缓存时的临时放行决定本轮可用模型，真正要刷新的项丢到后台（见 `app/services/system_agent/model_capability.py`）。
+
+这里有一个用户一直看不到的事实：**无缓存首次放行**和**过期 `unavailable` 临时放行**都会把主模型当可用继续，但真实能力尚未确认。此前这个状态只存在于 `CapabilityProbeResult.provisional` 里，没有任何调用方读取，用户会以为"这轮已经验证过"，直到工具轮失败才从后端日志里发现首轮是在赌。
+
+WP-B17 起：
+
+- `verify_resolved_agent_providers` 在放行成功后把主模型这一轮的 `CapabilityProbeResult` 写进 ContextVar（`last_primary_verification()`）。用 ContextVar 而不是模块变量，保证并发会话各自读到自己的结论、不互相覆盖，也不需要显式清理。
+- `provisional_reason()` 只把两种情况翻译成一句人话：`supported + provisional` → "首次使用该模型，正在后台确认工具调用能力"；`unavailable + provisional` → "上次探测该模型暂时不可用，本轮先按可用继续"。明确 `unsupported` 不是临时放行，不会给这句话术。
+- 运行时在 `provider_selected` 之后发 `model_capability_provisional` 事件（带 provider / model / message），前端把它作为进行中提示和 RunTrace 的模型阶段条目展示。每轮只发一条。
+- 放行/拒绝决策、路由、工具筛选、默认配置**全部不变**：探测通过后 `provisional=False`，事件不再出现。
+
+配套测试：`test_system_agent_model_capability.py`（helper 口径、non_blocking 记录 provisional、阻塞确认后不再自称临时、并发不串味）与 `test_system_agent_runtime.py`（事件真的发出、已确认时保持静默），前端 `runTraceState.test.ts` 覆盖 RunTrace 可见性与分类。
 
 ### 进程重启与租约恢复
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import hashlib
 import json
 import logging
@@ -409,6 +410,47 @@ def schedule_capability_refresh(
     loop.create_task(_refresh_capability_cache_background(list(items)))
 
 
+# 本轮主模型能力验证结果。用 ContextVar 而不是模块变量：多个会话并发时必须各自读到
+# 自己那轮的结论，不能互相覆盖；协程结束自动失效，不需要显式清理。
+_primary_verification: contextvars.ContextVar[CapabilityProbeResult | None] = (
+    contextvars.ContextVar("primary_capability_verification", default=None)
+)
+
+
+def _record_primary_verification(result: CapabilityProbeResult) -> None:
+    _primary_verification.set(result)
+
+
+def last_primary_verification() -> CapabilityProbeResult | None:
+    """返回本轮主模型能力验证结果（含 ``provisional`` 标记）。
+
+    只用于把"临时放行"这一事实送到运行时做用户提示，不参与放行/拒绝决策。
+    """
+    return _primary_verification.get()
+
+
+def provisional_reason(result: CapabilityProbeResult | None) -> str | None:
+    """返回"本轮为临时放行"的可读原因；已确认或无法判断时为 ``None``。
+
+    ``result`` 允许为 ``None``：调用方可能在替换了 ``verify_resolved_agent_providers``
+    的测试或旁路路径上拿不到记录，此时按"没有额外提示"处理，排障话术不得影响主流程。
+
+    WP-B17：``non_blocking`` 路径下，无缓存首次放行与过期 ``unavailable`` 临时放行都会
+    把主模型当可用继续，但真实能力尚未确认。此前这个事实只存在于
+    :attr:`CapabilityProbeResult.provisional` 里、没有任何调用方读取，用户侧完全看不到
+    "这轮是在赌"，失败后才在后端日志里留下线索。
+
+    调用方（runtime）据此发一条明确的进行中提示，不改变路由与放行决策本身。
+    """
+    if result is None or not result.provisional:
+        return None
+    if result.status == "supported":
+        return "首次使用该模型，正在后台确认工具调用能力"
+    if result.status == "unavailable":
+        return "上次探测该模型暂时不可用，本轮先按可用继续"
+    return None
+
+
 async def verify_resolved_agent_providers(
     db: AsyncSession,
     resolved: ResolvedAgentProviders,
@@ -419,6 +461,10 @@ async def verify_resolved_agent_providers(
 
     ``non_blocking=True``（WP-L4）：不在请求路径上等待探测。
     使用新鲜缓存 / 过期已知状态 / 无缓存时的临时放行，并把需刷新的项丢到后台。
+
+    WP-B17：放行是否属于"临时"由 :func:`provisional_reason` 从放行时的
+    ``CapabilityProbeResult.provisional`` 还原，调用方据此向用户明示；这里不改变
+    返回值形状，默认行为（含调用方调用点）完全不变。
     """
 
     row = await db.get(SystemSetting, CACHE_KEY)
@@ -558,6 +604,14 @@ async def verify_resolved_agent_providers(
             "DeepSeek 思考模式需能在 tool_choice=auto 下返回 tool_calls。"
             "可在 AI 中心对该 Provider 重新测活；若刚改过配置，再试一次以触发重测。"
         )
+    # WP-B17：把主模型这一轮的放行性质（确认 vs 临时）暴露给调用方。
+    # 只记录，不参与任何决策；默认调用方不读它，行为与改动前完全一致。
+    primary_result = results.get(
+        (resolved.primary.id, selected_model),
+        CapabilityProbeResult("supported", now),
+    )
+    _record_primary_verification(primary_result)
+
     return ResolvedAgentProviders(
         primary=verified[resolved.primary.id],
         model=selected_model,
@@ -567,6 +621,8 @@ async def verify_resolved_agent_providers(
 
 __all__ = [
     "CACHE_KEY",
+    "last_primary_verification",
+    "provisional_reason",
     "CapabilityProbeResult",
     "probe_model_tool_capability",
     "schedule_capability_refresh",

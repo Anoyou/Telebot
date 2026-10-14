@@ -152,3 +152,35 @@ test("错误 hint 同时兼容文本与导航对象", () => {
   );
   assert.equal(traceEventHint(null), "");
 });
+
+test("WP-B17：能力待确认事件进入 RunTrace 可见类型", () => {
+  const events = [
+    { type: "provider_selected", provider_name: "DeepSeek", model: "deepseek-chat", reason: "configured", seq: 1 },
+    { type: "model_capability_provisional", provider_name: "DeepSeek", model: "deepseek-chat", message: "首次使用该模型", seq: 2 },
+    { type: "done", ok: true, seq: 3 },
+  ];
+  const visible = filterTraceEvents(events);
+  assert.equal(visible.length, 3, "能力待确认事件必须出现在 RunTrace 里");
+  assert.equal(visible[1].type, "model_capability_provisional");
+
+  // Agent 视角把它归到模型阶段，不能因为不认识就掉到最后分组
+  const perspective = filterPerspectiveEvents(events, "model");
+  assert.equal(perspective.length, 2, "能力待确认必须留在模型筛选视图里");
+  assert.equal(traceEventCategory(visible[1]), "model");
+  assert.equal(defaultPerspectiveEvent(events)?.type, "done", "正常结束时默认选中 done，不是把提示当问题");
+});
+
+test("WP-B17：能力待确认不应被当成失败或 fallback", () => {
+  const summary = summarizeTraceEvents([
+    { type: "model_capability_provisional", provider_name: "p", model: "m", message: "首次使用该模型" },
+    { type: "done", ok: true },
+  ]);
+  assert.equal(summary.failed, false);
+  assert.equal(summary.fallbackCount, 0);
+});
+
+test("WP-B17：能力待确认归到模型阶段，且不当成 issue", () => {
+  assert.equal(traceEventCategory({ type: "model_capability_provisional" }), "model");
+  // 排障视图只收集 issue；这条是进行中说明，不该挤占用户的注意力
+  assert.equal(filterPerspectiveEvents([{ type: "model_capability_provisional" }], "issue").length, 0);
+});

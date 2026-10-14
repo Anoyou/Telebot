@@ -70,6 +70,8 @@ function labelEvent(event: TraceEvent): string {
       return `Provider · ${event.provider_name || "?"} · ${event.model || "?"} (${event.reason || "selected"})`;
     case "model_capability_check":
       return `能力检查 · ${event.provider_name || "?"} · ${event.model || "?"}`;
+    case "model_capability_provisional":
+      return `能力待确认 · ${event.provider_name || "?"} · ${event.model || "?"}`;
     case "model_attempt":
       return `尝试 · ${event.provider_name || "?"} · ${event.model || "?"} #${event.attempt || 1}`;
     case "retry_scheduled":

@@ -51,7 +51,11 @@ from .context import ToolContext
 from .events import make_event
 from .media import extract_image_contents, image_content_to_public, materialize_attachments
 from .memory import memory_context
-from .model_capability import verify_resolved_agent_providers
+from .model_capability import (
+    last_primary_verification,
+    provisional_reason,
+    verify_resolved_agent_providers,
+)
 from .prompts import build_system_prompt, provider_setup_hint
 from .redactor import StreamingMessageRedactor, summarize_tool_result
 from .registry import PreparedAction, ToolRegistry, get_registry
@@ -472,6 +476,18 @@ class SystemAgentRuntime:
             reason="pinned" if selection_mode == "pinned" else "configured",
             selection_mode=selection_mode,
         )
+        # WP-B17：non_blocking 下主模型可能是"临时放行"（首轮无缓存，或过期 unavailable）。
+        # 真实能力尚未确认，若不提示，用户会以为这轮已经验证过；等工具轮失败才暴露原因。
+        # 这里只发一条进行中说明，不改放行决策、不改路由、不改默认配置。
+        provisional_note = provisional_reason(last_primary_verification())
+        if provisional_note:
+            yield next_event(
+                "model_capability_provisional",
+                provider_id=provider_dto.id,
+                provider_name=provider_dto.name,
+                model=model,
+                message=provisional_note,
+            )
         routed_tool_specs = select_tool_specs(all_tool_specs, route)
         selected_skills = self.skill_registry.select(route)
         tool_specs = self.skill_registry.narrow_tools(routed_tool_specs, selected_skills)

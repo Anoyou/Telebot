@@ -76,6 +76,7 @@ const VISIBLE_TYPES = new Set([
   "retry_scheduled",
   "model_exhausted",
   "model_capability_check",
+  "model_capability_provisional",
   "assistant_delta_reset",
   "assistant_message",
   "error",
@@ -90,6 +91,7 @@ const PERSPECTIVE_HIDDEN_TYPES = new Set([
 
 const MODEL_EVENT_TYPES = new Set([
   "model_capability_check",
+  "model_capability_provisional",
   "provider_selected",
   "model_attempt",
   "retry_scheduled",

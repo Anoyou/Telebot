@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -25,6 +26,7 @@ from app.services.llm_protocol import (
 from app.services.system_agent import runtime as runtime_module
 from app.services.system_agent.config import ResolvedAgentProviders
 from app.services.system_agent.context import ToolContext
+from app.services.system_agent.model_capability import CapabilityProbeResult
 from app.services.system_agent.registry import ToolRegistry, ToolSpec
 from app.services.system_agent.runtime import SystemAgentRuntime
 
@@ -1115,3 +1117,98 @@ async def test_tool_exception_redacts_opaque_chat_secret() -> None:
     tool_db.rollback.assert_awaited_once_with()
     tool_db.commit.assert_not_awaited()
     owner_db.rollback.assert_not_awaited()
+
+
+# ─────────────────────────────────────────────────────
+# WP-B17：临时放行必须在运行时变成用户可见事件
+# ─────────────────────────────────────────────────────
+async def _collect_web_turn(monkeypatch) -> list[dict]:
+    primary, _fallback = _providers()
+    await _patch_runtime_config(monkeypatch, primary, _fallback)
+
+    async def verify(_db, resolved, **_kwargs):  # noqa: ANN001
+        return resolved
+
+    monkeypatch.setattr(runtime_module, "verify_resolved_agent_providers", verify)
+
+    async def invoke(provider, _providers, request, **_kwargs):  # noqa: ANN001
+        return (
+            ModelResponse(
+                model=provider.default_model,
+                content=(TextContent("done"),),
+                usage=ModelUsage(input_tokens=1, output_tokens=1),
+            ),
+            provider,
+            False,
+        )
+
+    async def run(model_call, request, tools, **_kwargs):  # noqa: ANN001
+        first = await model_call(request)
+        return AgentResult(
+            text=first.text,
+            model=first.model,
+            messages=request.messages,
+            usage=ModelUsage(input_tokens=1, output_tokens=1),
+            steps=1,
+            tool_calls=0,
+            stop_reason=StopReason.COMPLETED,
+        )
+
+    monkeypatch.setattr(runtime_module, "invoke_structured", invoke)
+    monkeypatch.setattr(runtime_module, "run_agent", run)
+
+    db = AsyncMock()
+    return [
+        event
+        async for event in SystemAgentRuntime(_registry()).stream_turn(
+            db,
+            session=_session(),  # type: ignore[arg-type]
+            user_text="帮我看看定时任务",
+            role="admin",
+            channel="web",
+        )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_runtime_emits_provisional_capability_notice(monkeypatch) -> None:
+    """首轮无缓存（临时放行）时，必须发出 model_capability_provisional 提示。"""
+    monkeypatch.setattr(
+        runtime_module,
+        "last_primary_verification",
+        lambda: model_capability_provisional(),
+    )
+    events = await _collect_web_turn(monkeypatch)
+
+    notice = [event for event in events if event["type"] == "model_capability_provisional"]
+    assert notice, "临时放行没有向用户明示，首轮会静默跑进工具轮"
+    assert notice[0]["message"]
+    assert notice[0]["model"] == "primary-model"
+    # 只提示一次，不能每轮刷屏
+    assert len(notice) == 1
+    # 不影响正常流程：仍然要走到 provider_selected / route_selected / done
+    assert next(event for event in events if event["type"] == "provider_selected")
+    assert next(event for event in events if event["type"] == "done")["ok"] is True
+
+
+@pytest.mark.asyncio
+async def test_runtime_stays_silent_when_capability_already_confirmed(monkeypatch) -> None:
+    """已确认识别时不得发提示：默认行为不变，不多一条事件。"""
+    monkeypatch.setattr(
+        runtime_module,
+        "last_primary_verification",
+        lambda: model_capability_provisional(provisional=False),
+    )
+    events = await _collect_web_turn(monkeypatch)
+
+    assert not [event for event in events if event["type"] == "model_capability_provisional"]
+    assert next(event for event in events if event["type"] == "done")["ok"] is True
+
+
+def model_capability_provisional(*, provisional: bool = True) -> CapabilityProbeResult:
+    """构造一个能力探测结果，仅供 WP-B17 事件断言使用。"""
+    return CapabilityProbeResult(
+        "supported" if provisional else "unsupported",
+        datetime.now(UTC),
+        provisional=provisional,
+    )

@@ -434,6 +434,7 @@ function eventTitle(event: TraceEvent): string {
   switch (String(event.type || "")) {
     case "run_started": return "开始运行";
     case "model_capability_check": return "检查模型能力";
+    case "model_capability_provisional": return "能力待确认";
     case "provider_selected": return "选择 Provider";
     case "model_attempt": return "请求模型";
     case "retry_scheduled": return "安排重试";
@@ -453,7 +454,7 @@ function eventTitle(event: TraceEvent): string {
 
 function eventSubtitle(event: TraceEvent): string {
   const type = String(event.type || "");
-  if (["provider_selected", "model_capability_check", "model_attempt", "model_exhausted"].includes(type)) {
+  if (["provider_selected", "model_capability_check", "model_capability_provisional", "model_attempt", "model_exhausted"].includes(type)) {
     return [event.provider_name, event.model].filter(Boolean).join(" · ") || "等待模型信息";
   }
   if (type === "retry_scheduled") {

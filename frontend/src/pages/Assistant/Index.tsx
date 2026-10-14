@@ -863,6 +863,14 @@ export function AssistantIndex() {
         `正在验证 ${event.provider_name || "Provider"} · ${event.model || "模型"} 的工具调用能力…`,
       );
     }
+    if (event.type === "model_capability_provisional") {
+      const message = String(event.message || "").trim();
+      updatePendingText(
+        message
+          ? `${event.provider_name || "Provider"} · ${event.model || "模型"}：${message}`
+          : `正在确认 ${event.provider_name || "Provider"} · ${event.model || "模型"} 的工具调用能力…`,
+      );
+    }
     if (event.type === "model_attempt") {
       const providerName = String(event.provider_name || "");
       const model = String(event.model || "");

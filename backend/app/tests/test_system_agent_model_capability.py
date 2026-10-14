@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime
 
 import pytest
@@ -362,3 +363,113 @@ async def test_verify_non_blocking_skips_probe_and_schedules_refresh(
     assert result.model == "m1"
     assert calls == []  # 请求路径不探测
     assert scheduled and scheduled[0] == [(1, "m1")]
+
+
+# ─────────────────────────────────────────────────────
+# WP-B17：临时放行必须对调用方可读
+# ─────────────────────────────────────────────────────
+def _now() -> datetime:
+    return datetime.now(UTC)
+
+
+def test_provisional_reason_none_when_not_provisional() -> None:
+    assert model_capability.provisional_reason(None) is None
+    assert (
+        model_capability.provisional_reason(
+            model_capability.CapabilityProbeResult("supported", _now())
+        )
+        is None
+    )
+    # unsupported 是明确结论，不是"临时放行"，不该给用户"正在确认"的话术
+    assert (
+        model_capability.provisional_reason(
+            model_capability.CapabilityProbeResult("unsupported", _now())
+        )
+        is None
+    )
+
+
+def test_provisional_reason_covers_first_use_and_stale_unavailable() -> None:
+    first_use = model_capability.provisional_reason(
+        model_capability.CapabilityProbeResult("supported", _now(), provisional=True)
+    )
+    assert first_use and "首次" in first_use
+
+    stale = model_capability.provisional_reason(
+        model_capability.CapabilityProbeResult(
+            "unavailable", _now(), "stale_unavailable", provisional=True
+        )
+    )
+    assert stale and "暂时不可用" in stale
+    # 两段话术必须能区分：一个是"还没测过"，一个是"上次测过但没过"
+    assert first_use != stale
+
+
+@pytest.mark.asyncio
+async def test_non_blocking_records_provisional_primary(setting_db, monkeypatch) -> None:
+    """无缓存 + non_blocking：主模型是临时放行，必须能被 last_primary_verification 读到。"""
+    primary = _provider(1, models=["fresh"])
+    resolved = ResolvedAgentProviders(
+        primary=primary, model="fresh", providers={1: primary}
+    )
+    monkeypatch.setattr(model_capability, "schedule_capability_refresh", lambda items: None)
+
+    async with setting_db() as db:
+        result = await model_capability.verify_resolved_agent_providers(
+            db, resolved, non_blocking=True
+        )
+
+    assert not isinstance(result, str)
+    recorded = model_capability.last_primary_verification()
+    assert recorded is not None
+    assert recorded.provisional is True
+    assert recorded.status == "supported"
+    assert model_capability.provisional_reason(recorded)
+
+
+@pytest.mark.asyncio
+async def test_blocking_confirmed_primary_is_not_provisional(setting_db, monkeypatch) -> None:
+    """真实探测通过后不能再自称"临时放行"，否则用户会一直看到误导性提示。"""
+
+    async def probe(_provider, _model):  # noqa: ANN001
+        return model_capability.CapabilityProbeResult("supported", _now())
+
+    monkeypatch.setattr(model_capability, "probe_model_tool_capability", probe)
+    primary = _provider(1, models=["m1"])
+    resolved = ResolvedAgentProviders(
+        primary=primary, model="m1", providers={1: primary}
+    )
+
+    async with setting_db() as db:
+        result = await model_capability.verify_resolved_agent_providers(db, resolved)
+
+    assert not isinstance(result, str)
+    recorded = model_capability.last_primary_verification()
+    assert recorded is not None
+    assert recorded.provisional is False
+    assert model_capability.provisional_reason(recorded) is None
+
+
+@pytest.mark.asyncio
+async def test_primary_verification_does_not_leak_across_concurrent_turns(
+    setting_db,
+    monkeypatch,
+) -> None:
+    """并发会话必须各自读到自己的结论：A 轮临时放行不能污染 B 轮的提示。"""
+    monkeypatch.setattr(model_capability, "schedule_capability_refresh", lambda items: None)
+    primary = _provider(1, models=["fresh"])
+    resolved = ResolvedAgentProviders(
+        primary=primary, model="fresh", providers={1: primary}
+    )
+
+    async def turn() -> model_capability.CapabilityProbeResult | None:
+        async with setting_db() as db:
+            await model_capability.verify_resolved_agent_providers(
+                db, resolved, non_blocking=True
+            )
+        return model_capability.last_primary_verification()
+
+    # asyncio.gather 的每个协程有独立 context 副本，ContextVar 写入互不可见
+    first, second = await asyncio.gather(turn(), turn())
+    assert first is not None and first.provisional is True
+    assert second is not None and second.provisional is True
