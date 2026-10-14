@@ -780,3 +780,27 @@ func TestResponsesUsesRequestLevelTimeoutForSlowUpstream(t *testing.T) {
 		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
 	}
 }
+
+func TestCodexClientVersionFallbackUsesSingleContractConstant(t *testing.T) {
+	// WP-B18：codex_tui 默认版本只允许在 contract.DefaultCodexClientVersion 出现一次，
+	// routing 表兼容回退与 Codex 身份头缺省值必须引用同一个常量。两侧漂移会让
+	// "旧控制面快照"发出与控制面链路不一致的 User-Agent / Version 头。
+	if codexClientVersion != contract.DefaultCodexClientVersion {
+		t.Fatalf("codex 包缺省版本应引用 contract 常量: %q", codexClientVersion)
+	}
+	if routing.DefaultCodexClientVersion != contract.DefaultCodexClientVersion {
+		t.Fatalf("routing 兼容回退应引用 contract 常量: %q", routing.DefaultCodexClientVersion)
+	}
+	// 缺省 UA 也必须由同一版本号拼出，不能是另一份写死的字面量。
+	version := codexClientVersion
+	identity := buildRequestIdentity(routing.Route{ProviderID: 1, BaseURL: "https://example.test"}, httptest.NewRequest(http.MethodPost, "/v1/responses", nil))
+	upstream := httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	applyCodexHeaders(upstream, identity, "")
+	want := "codex-tui/" + version
+	if !strings.HasPrefix(upstream.Header.Get("User-Agent"), want) {
+		t.Fatalf("User-Agent=%q 应由版本 %q 拼出", upstream.Header.Get("User-Agent"), version)
+	}
+	if upstream.Header.Get("Version") != version {
+		t.Fatalf("Version=%q want=%q", upstream.Header.Get("Version"), version)
+	}
+}

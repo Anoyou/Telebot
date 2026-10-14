@@ -2,6 +2,16 @@ package contract
 
 const ProtocolVersion = "2"
 
+// DefaultCodexClientVersion 是控制面快照缺少 codex_client_version 时的兼容回退值，
+// 也是 gateway 内唯一的 Codex TUI 版本字面量来源（routing 表的兜底、Codex 身份
+// 请求头的缺省版本都读这里）。
+//
+// 该值必须与 backend/app/services/llm_identity.py 的 codex_tui 默认版本保持一致：
+// Python 控制面下发快照时会带上当前生效版本，这个常量只在"旧控制面 / 测试构造的
+// 快照缺字段"时才被用到。两侧漂移的症状是 UA / Version 头与 Python 链路不一致，
+// 上游可能据此拒绝或降级处理。改这里时同步改 llm_identity.py 与对应回归测试。
+const DefaultCodexClientVersion = "0.145.0"
+
 type VersionInfo struct {
 	Version                 string `json:"version"`
 	ProtocolVersion         string `json:"gateway_protocol_version"`

@@ -226,6 +226,8 @@ function UpdateDialogFallback({ onClose }: { onClose: () => void }) {
 }
 
 function topbarActionClass(compact: boolean) {
+  // 移动端命中区由共享 Button 的 after 伪元素提供（见 ui/button.tsx）：顶栏图标按钮
+  // 保持 h-7 的视觉尺寸与顶栏间距，`max-sm` 下命中区抬到 40px，桌面端命中区不变。
   return cn(
     "rounded-full border-0 bg-secondary text-[11px] shadow-none hover:bg-secondary-hover active:scale-95 motion-reduce:transform-none",
     compact ? "h-9 w-9 px-0" : "h-7 w-7 px-0 sm:w-auto sm:gap-1.5 sm:px-2.5",

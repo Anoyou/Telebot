@@ -6,7 +6,13 @@ import { cn } from "@/lib/utils";
 import { Spinner } from "@/components/ui/misc";
 
 const buttonVariants = cva(
-  "inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-md text-[13px] font-semibold transition-all focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/45 disabled:pointer-events-none disabled:opacity-45 active:scale-[0.975]",
+  // 触控命中区（移动端）：`relative` + `after` 伪元素在按钮外扩一层透明命中盒。
+  // 只在 `max-sm` 给高度 40px（配合 -mt-5 垂直居中），因此：
+  //   - 视觉尺寸、布局、间距完全不变（伪元素无背景、无边框、不占布局）；
+  //   - `>=640px` 的桌面布局下伪元素高度为 0（空 content、未设高度），不改变命中区；
+  //   - 已经 >=40px 高的尺寸（lg / touch）伪元素整体落在按钮内部，等于无操作。
+  // 宽度方向刻意不扩：横向外扩会抢占相邻按钮的命中区。
+  "relative inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-md text-[13px] font-semibold transition-all focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/45 disabled:pointer-events-none disabled:opacity-45 active:scale-[0.975] after:absolute after:inset-x-0 after:top-1/2 after:content-[''] max-sm:after:-mt-5 max-sm:after:h-10",
   {
     variants: {
       variant: {

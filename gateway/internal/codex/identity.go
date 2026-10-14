@@ -8,17 +8,23 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/anoyou/telepilot/gateway/contract"
 	"github.com/anoyou/telepilot/gateway/internal/routing"
 )
 
 // 该档案固定对齐 gateway/UPSTREAM.md 中审查过的 CLIProxyAPI Codex executor。
 // 这里只复现公开的 Responses 请求契约，不生成 OAuth Account ID、设备证明或 attestation。
 const (
-	// 仅供缺少控制面版本的兼容调用与测试使用，须与控制面默认值一致。
-	codexClientVersion = "0.145.0"
-	codexUserAgent     = "codex-tui/0.145.0 (Mac OS 26.5.0; arm64) iTerm.app/3.6.10 (codex-tui; 0.145.0)"
+	// 缺少控制面版本时的兼容回退，取 contract 的单一来源（须与
+	// backend/app/services/llm_identity.py 的 codex_tui 默认值一致）。
+	codexClientVersion = contract.DefaultCodexClientVersion
 	codexOriginator    = "codex-tui"
 )
+
+// codexUserAgent 复刻本机交互式 Codex TUI 的 UA 结构。终端段来自真实抓包；
+// 默认版本没有内置 UA 里必须带的占位符以外的魔法值，与 Python 侧
+// `_codex_tui_user_agent()` 的字段顺序保持一致（便于两侧比对）。
+const codexUserAgent = "codex-tui/0.145.0 (Mac OS 26.5.0; arm64) iTerm.app/3.6.10 (codex-tui; 0.145.0)"
 
 type requestIdentity struct {
 	installationID string

@@ -32,8 +32,11 @@
 
 ### 优化
 
+- 路由装配不再经 barrel 整目录拉页面：`frontend/src/App.tsx` 的插件中心、模板实验室两条懒加载改为直连「pages/Plugins/Home / pages/Plugins/MessageTemplateLab」，`pages/Plugins/index.ts` 只保留兼容 re-export，不再把整个目录拖进同一个 chunk。
+- 移动端触控命中区补齐：共享按钮组件在 `max-sm` 断点用透明 `after` 伪元素把命中区抬到 40px（顶栏 28px 图标按钮、日志页「查看最新」等小按钮受益），视觉尺寸、布局与桌面端命中区完全不变；宽度方向不外扩，避免抢占相邻按钮。Chrome 实测：移动端按钮上下各扩 6px 可点、桌面端命中区仍等于按钮本体、≥40px 高的按钮不受影响。
+- Codex TUI 客户端版本号收敛为单一来源：此前 `gateway/internal/routing/table.go`（旧快照兼容回退）、`gateway/internal/codex/identity.go`（Codex 身份请求头缺省值）、`backend/app/services/llm_identity.py`（控制面默认版本）三处各写死一份，任一处漏改就会让 Python 直连链路与 Gateway 链路发出不一致的 `User-Agent` / `Version` 头。现在 gateway 内唯一字面量在 `gateway/contract/types.go` 的 `DefaultCodexClientVersion`，两个包都改为引用；两侧漂移由 `test_codex_client_version_single_source.py` 与 Go 侧 `TestCodexClientVersionFallbackUsesSingleContractConstant` 双向守卫。
 - 启动 `api/types.ts` → OpenAPI 生成类型的分域迁移：新增 `frontend/src/api/types.accounts.ts` 与 `frontend/src/api/types.commands.ts`，账号域 / 命令域类型底层改引 `schema.ts` 的 `components["schemas"]`，`types.ts` 只保留 re-export 兼容层，页面侧引用无需改动。状态字面量（`AccountStatus` 等）保留窄联合 + `string` 兜底，避免一次迁移引发大面积 TS 收窄报错；config bundle 导出形状与已无人引用的手写副本一并清理。运行时行为不变，新增 `typesMigration.test.ts` 7 条静态回归守住引用边界，防止后续又绕回兼容层。
-，替代原先直接替换成 `[REDACTED]`：格式 `[[TP-CRED-n]]`（纯 ASCII，不含 `api_key` / `token` / `password` / `secret` 等触发词，也不含 `:=`，因此不会命中密钥抽取与打码正则）。此前用户把 Key 贴给模型后被替换为 `[REDACTED]`，模型既读不到值、也无法把它填回工具的 `api_key` 参数，"帮我用这个 Key 注册 Provider" 这类请求基本不可用；现在出站文本带占位符，模型可以原样引用，真实值只在面向 owner 的显示边界还原。占位符映射按"现值 → merge → FIFO 上限 20 → `encrypt_str` 加密"写入会话新列 `secret_map_enc`（迁移 `0059`），`app.scripts.rekey` 已同步覆盖该列，`MASTER_KEY` 变更后可整列重加密。请求头配置场景维持全量打码，不产生占位符。
+- 密钥以 `[[TP-CRED-n]]` 占位符发给模型、面向 owner 时再还原，替代原先直接替换成 `[REDACTED]`（纯 ASCII，不含 `api_key` / `token` / `password` / `secret` 等触发词，也不含 `:=`，因此不会命中密钥抽取与打码正则）。此前用户把 Key 贴给模型后被替换为 `[REDACTED]`，模型既读不到值、也无法把它填回工具的 `api_key` 参数，"帮我用这个 Key 注册 Provider" 这类请求基本不可用；现在出站文本带占位符，模型可以原样引用，真实值只在面向 owner 的显示边界还原。占位符映射按"现值 → merge → FIFO 上限 20 → `encrypt_str` 加密"写入会话新列 `secret_map_enc`（迁移 `0059`），`app.scripts.rekey` 已同步覆盖该列，`MASTER_KEY` 变更后可整列重加密。请求头配置场景维持全量打码，不产生占位符。
 
 
 - 修复平台能力 gate 的加载竞态：`CapabilityGate` 原先要求 capabilities 与 settings **两个查询都**加载完才显示骨架，settings 先返回而 capabilities 仍在飞行时会提前放行，已暂停模块的内容会先渲染一帧再跳暂停页。改为只等 capabilities（settings 仅作为 `ai` 键的默认兜底，保持 default-true 语义），并把决策抽成 `lib/navigation.ts` 的 `resolveCapabilityGatePhase`，补 6 条纯粹逻辑回归。

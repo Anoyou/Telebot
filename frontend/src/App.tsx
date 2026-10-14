@@ -33,9 +33,9 @@ const Game24ConfigPage = lazy(() => import("@/pages/Plugins/configs/Game24Config
 const GenericPluginConfigPage = lazy(() => import("@/pages/Plugins/configs/GenericPluginConfig").then(m => ({ default: m.GenericPluginConfigPage })));
 const Logs = lazy(() => import("@/pages/Logs").then(m => ({ default: m.Logs })));
 const SettingsIndex = lazy(() => import("@/pages/Settings/Index").then(m => ({ default: m.SettingsIndex })));
-const PluginsHome = lazy(() => import("@/pages/Plugins").then(m => ({ default: m.PluginsHome })));
+const PluginsHome = lazy(() => import("@/pages/Plugins/Home").then(m => ({ default: m.PluginsHome })));
 const OperationsWorkspaceRoutes = lazy(() => import("@/pages/Operations/Index").then(m => ({ default: m.OperationsWorkspaceRoutes })));
-const MessageTemplateLabPage = lazy(() => import("@/pages/Plugins").then(m => ({ default: m.MessageTemplateLabPage })));
+const MessageTemplateLabPage = lazy(() => import("@/pages/Plugins/MessageTemplateLab").then(m => ({ default: m.MessageTemplateLabPage })));
 const PluginsManagePage = lazy(() => import("@/pages/Extensions").then(m => ({ default: m.Extensions })));
 const InteractionIndex = lazy(() => import("@/pages/Interaction/Index").then(m => ({ default: m.InteractionIndex })));
 const LedgerPage = lazy(() => import("@/pages/Ledger").then(m => ({ default: m.LedgerPage })));

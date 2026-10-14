@@ -125,10 +125,9 @@ func (t *Table) ProviderRoute(providerID int64) (Route, bool) {
 	}, true
 }
 
-// 仅用于旧控制面快照缺少 codex_client_version 时的兼容回退。
-// 正常请求始终采用 Python 控制面下发的版本；此值必须与
-// backend/app/services/llm_identity.py 的 codex_tui 默认值一致。
-const DefaultCodexClientVersion = "0.145.0"
+// 兼容回退取 contract.DefaultCodexClientVersion（gateway 内唯一字面量来源）；
+// 正常请求始终采用 Python 控制面下发的版本。
+const DefaultCodexClientVersion = contract.DefaultCodexClientVersion
 
 func validClientVersion(value string) bool {
 	if len(value) < 1 || len(value) > 64 {
