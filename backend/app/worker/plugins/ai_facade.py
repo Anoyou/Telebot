@@ -912,11 +912,12 @@ async def _shared_router_auto(
     by_id = {int(p.id): p for p in usable}
     if not by_id:
         return None
-    # 构造共享 Router 需要的 provider dict（含 api_key_enc 以通过其 _has_api_key 过滤）。
+    # 构造共享 Router 需要的 provider dict。必须用 `to_runtime_dict()` 而不是 `to_dict()`
+    # + 手补 api_key_enc：共享 Router 的 `_has_api_key` 还检查池内 `keys[].api_key_enc`，
+    # 只用展示版 dict 会让"仅密钥池、未设主 Key"的 Provider 从路由候选里消失。
     router_pool: dict[int, dict[str, Any]] = {}
     for pid, dto in by_id.items():
-        d = dto.to_dict()
-        d["api_key_enc"] = dto.api_key_enc
+        d = dto.to_runtime_dict()
         router_pool[pid] = d
     try:
         decision = await llm_router.pick_provider(

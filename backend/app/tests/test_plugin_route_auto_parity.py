@@ -11,8 +11,12 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+from unittest.mock import patch
+
 import pytest
 
+from app.services import llm_router
 from app.services.llm_dto import LLMProviderDTO
 from app.services.llm_router import pick_provider
 from app.worker.plugins import ai_facade
@@ -26,6 +30,7 @@ def _dto(
     name: str,
     tags: list[str],
     cost_tier: int,
+    pool_only: bool = False,
 ) -> LLMProviderDTO:
     return LLMProviderDTO(
         id=provider_id,
@@ -35,11 +40,104 @@ def _dto(
         base_url="https://example/v1",
         default_model=f"{name}-model",
         api_key_enc="enc",
+        keys=(
+            # pool_only：没有主 Key，只有一条启用的池内 Key（`has_api_key` 仍为 True）
+            [
+                {
+                    "id": 1,
+                    "label": "pool",
+                    "key_hint": "***tail",
+                    "enabled": True,
+                    "api_key_enc": "pool-enc",
+                }
+            ]
+            if pool_only
+            else []
+        ),
         modality="text",
         tags=tags,
         cost_tier=cost_tier,
         models=[{"id": f"{name}-model", "enabled": True}],
     )
+
+
+def _pool_only_coder() -> LLMProviderDTO:
+    dto = _dto(2, name="coder", tags=["code"], cost_tier=3, pool_only=True)
+    dto.api_key_enc = None  # dataclass 运行时字段，置空以表达"只用密钥池"
+    return dto
+
+
+# ─────────── WP-B9：池内 Key Provider 不应从 auto 候选消失 ───────────
+
+
+@pytest.mark.asyncio
+async def test_plugin_auto_keeps_pool_only_provider_candidate() -> None:
+    """pool-only（无主 Key、有启用池内 Key）的 code Provider 必须仍是 auto 候选。
+
+    此前 `_shared_router_auto` 用 `to_dict()` + 手补 `api_key_enc` 构造 Router 池，
+    展示版 dict 的 `keys[]` 没有 `api_key_enc`，共享 Router 的 `_has_api_key`
+    会把这类 Provider 全部过滤掉，插件 auto 永远选不到它。
+    """
+    chat = _dto(1, name="chat", tags=["chat"], cost_tier=1)
+    coder = _pool_only_coder()
+    assert chat.has_api_key is True
+    assert coder.has_api_key is True
+    assert coder.api_key_enc is None  # 确认造的是 pool-only
+
+    dto, tag, mode = await ai_facade._resolve_route(
+        {1: chat, 2: coder},
+        provider=None,
+        provider_tag=None,
+        route="auto",
+        user_content=_CODE_PROMPT,
+    )
+
+    assert mode == "auto"
+    assert dto.id == 2
+    assert tag == "code"
+
+
+@pytest.mark.asyncio
+async def test_plugin_auto_pool_only_matches_shared_router() -> None:
+    """与共享 Router 口径一致：池内 Provider 在模板路由侧同样是候选。"""
+    chat = _dto(1, name="chat", tags=["chat"], cost_tier=1)
+    coder = _pool_only_coder()
+    providers = {1: chat, 2: coder}
+
+    # 共享 Router 侧的池也必须带池内 `keys[].api_key_enc`
+    pool = {int(d.id): d.to_runtime_dict() for d in providers.values()}
+    decision = await pick_provider(_CODE_PROMPT, None, False, pool)
+    plugin_dto, _tag, _mode = await ai_facade._resolve_route(
+        providers,
+        provider=None,
+        provider_tag=None,
+        route="auto",
+        user_content=_CODE_PROMPT,
+    )
+
+    assert decision.provider_id == 2
+    assert plugin_dto.id == 2
+
+
+@pytest.mark.asyncio
+async def test_shared_router_auto_pool_carries_pool_key_ciphertext() -> None:
+    """内部池构造：池内 Key 密文必须传给 Router（它靠这个判断可用性）。"""
+    chat = _dto(1, name="chat", tags=["chat"], cost_tier=1)
+    coder = _pool_only_coder()
+    captured: dict[int, dict] = {}
+
+    class _StubRouter:
+        @staticmethod
+        async def pick_provider(_text, _repl, _photo, pool, **_kwargs):  # noqa: ANN001
+            captured.update(pool)
+            return SimpleNamespace(provider_id=1, matched_tag="chat")
+
+    with patch.object(llm_router, "pick_provider", _StubRouter.pick_provider):
+        # Router 返回 id=1（chat），我们只关心构造出的池内容
+        assert await ai_facade._shared_router_auto([chat, coder], _CODE_PROMPT) is not None
+
+    entries = captured.get(2, {}).get("keys") or []
+    assert entries and entries[0].get("api_key_enc") == "pool-enc"
 
 
 def _router_pool(dtos: list[LLMProviderDTO]) -> dict[int, dict]:
