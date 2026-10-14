@@ -215,6 +215,8 @@ function jsonResponse(pathname: string): unknown | undefined {
   if (pathname === "/api/remote-plugins") return [];
   if (pathname === "/api/system/network") return { online: true };
   if (pathname === "/api/system/version") return { version: APP_VERSION };
+  // 自动检查更新状态：基线固定为"尚未执行过自动检查"，避免顶栏角标让截图产生随机差异。
+  if (pathname === "/api/system/update-status") return { enabled: true, interval_minutes: 1440, last_check: null };
   if (pathname === "/api/system/update-target-options") return { ok: true, remotes: ["origin"], branches: ["main"], remote: "origin" };
   if (pathname === "/api/system/check-update") return {
     has_update: true, can_check: true,
