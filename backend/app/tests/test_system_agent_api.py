@@ -885,3 +885,299 @@ async def test_secret_input_rejects_replacing_verified_probe_key(monkeypatch) ->
     assert getattr(exc_info.value, "status_code", None) == 409
     assert row.secret_payload_enc == "encrypted-verified-key"
     db.commit.assert_not_awaited()
+
+
+# ─────────── 密钥占位符还原：Web 历史边界 ───────────
+
+
+@pytest.mark.asyncio
+async def test_list_messages_restores_placeholders_for_owner(fake_svc) -> None:
+    """Web 历史是面向 owner 的显示边界：落库占位符在这里还原成真实值。"""
+    from app.services.system_agent.secrets import build_secret_map, encrypt_secret_map
+
+    secret = "sk-web-history-secret-value-123"
+    db = AsyncMock()
+    user = SimpleNamespace(id=7)
+    session = SimpleNamespace(
+        id="s-restore",
+        web_user_id=7,
+        channel="web",
+        secret_map_enc=encrypt_secret_map(build_secret_map([secret])),
+    )
+    fake_svc.sessions[session.id] = session
+    fake_svc.messages[session.id] = [
+        # 落库内容保持占位符：映射里的真实值只存在于 secret_map_enc
+        SimpleNamespace(
+            id=11,
+            session_id=session.id,
+            role="user",
+            content={"text": "key 是 [[TP-CRED-1]]"},
+            usage=None,
+            run_status="completed",
+            error_code=None,
+            error_message=None,
+            retry_count=0,
+            created_at=None,
+        ),
+        SimpleNamespace(
+            id=12,
+            session_id=session.id,
+            role="assistant",
+            content={"text": "好的", "reasoning": "看看 [[TP-CRED-1]] 是什么"},
+            usage=None,
+            run_status="completed",
+            error_code=None,
+            error_message=None,
+            retry_count=0,
+            created_at=None,
+        ),
+    ]
+
+    rows = await api.list_messages(session.id, db, user, limit=100, before_id=None)
+
+    assert secret not in str(fake_svc.messages[session.id][0].content)
+    assert rows[0].content["text"] == f"key 是 {secret}"
+    # reasoning 字段同样在显示边界还原
+    assert rows[1].content["reasoning"] == f"看看 {secret} 是什么"
+    assert rows[1].content["text"] == "好的"
+
+
+@pytest.mark.asyncio
+async def test_list_messages_without_mapping_keeps_placeholder(fake_svc) -> None:
+    """老会话 / 映射不可用时历史保持占位符，不猜值也不丢内容。"""
+    db = AsyncMock()
+    user = SimpleNamespace(id=7)
+    session = SimpleNamespace(
+        id="s-no-map",
+        web_user_id=7,
+        channel="web",
+        secret_map_enc=None,
+    )
+    fake_svc.sessions[session.id] = session
+    fake_svc.messages[session.id] = [
+        SimpleNamespace(
+            id=21,
+            session_id=session.id,
+            role="user",
+            content={"text": "key 是 [[TP-CRED-1]]"},
+            usage=None,
+            run_status="completed",
+            error_code=None,
+            error_message=None,
+            retry_count=0,
+            created_at=None,
+        )
+    ]
+
+    rows = await api.list_messages(session.id, db, user, limit=100, before_id=None)
+
+    assert rows[0].content == {"text": "key 是 [[TP-CRED-1]]"}
+
+
+@pytest.mark.asyncio
+async def test_list_messages_preserves_attachment_payloads(fake_svc) -> None:
+    """还原只处理 text/reasoning，附件等结构必须原样返回。"""
+    from app.services.system_agent.secrets import build_secret_map, encrypt_secret_map
+
+    db = AsyncMock()
+    user = SimpleNamespace(id=7)
+    session = SimpleNamespace(
+        id="s-attach",
+        web_user_id=7,
+        channel="web",
+        secret_map_enc=encrypt_secret_map(build_secret_map(["sk-attach-secret-value-123"])),
+    )
+    fake_svc.sessions[session.id] = session
+    attachments = [{"type": "image", "url": "/api/x", "mime_type": "image/png"}]
+    fake_svc.messages[session.id] = [
+        SimpleNamespace(
+            id=31,
+            session_id=session.id,
+            role="user",
+            content={"text": "看这张图 [[TP-CRED-1]]", "attachments": attachments},
+            usage=None,
+            run_status="completed",
+            error_code=None,
+            error_message=None,
+            retry_count=0,
+            created_at=None,
+        )
+    ]
+
+    rows = await api.list_messages(session.id, db, user, limit=100, before_id=None)
+
+    assert rows[0].content["attachments"] == attachments
+    assert "sk-attach-secret-value-123" in rows[0].content["text"]
+
+
+# ─────────── 密钥占位符还原：Web 实时流边界 ───────────
+
+
+class _FakeSecretRunManager:
+    """`stream_system_agent_run` 用的最小 run manager 替身。"""
+
+    def __init__(self, events) -> None:  # noqa: ANN001
+        self.events = events
+
+    async def stream_events(self, run_id, *, after_seq=0):
+        for event in self.events:
+            if int(event.get("seq") or 0) > after_seq:
+                yield event
+
+
+class _FakeSecretRunDB:
+    """按 run_id → session 读占位符映射的最小 DB 替身。"""
+
+    def __init__(self, session_row) -> None:  # noqa: ANN001
+        self.session_row = session_row
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *args):
+        return False
+
+    async def get(self, model, pk):  # noqa: ANN001
+        name = getattr(model, "__name__", "")
+        if name == "SystemAgentRun":
+            return SimpleNamespace(id="run-restore", session_id=self.session_row.id)
+        if name == "SystemAgentSession":
+            return self.session_row
+        return None
+
+
+def _restore_session(secret: str):
+    from app.services.system_agent.secrets import build_secret_map, encrypt_secret_map
+
+    return SimpleNamespace(
+        id="sess-sse",
+        web_user_id=7,
+        channel="web",
+        secret_map_enc=encrypt_secret_map(build_secret_map([secret])),
+    )
+
+
+@pytest.mark.asyncio
+async def test_run_stream_restores_placeholders_for_owner(monkeypatch) -> None:
+    """Web 实时流是面向 owner 的显示边界：assistant_message 的内容先还原再下发。"""
+    secret = "sk-web-sse-secret-value-123"
+    events = [
+        {"type": "run_started", "run_id": "run-restore", "session_id": "sess-sse", "seq": 1},
+        {
+            "type": "assistant_message",
+            "content": "我会用 [[TP-CRED-1]] 注册。",
+            "reasoning": "用户给了 [[TP-CRED-1]]",
+            "run_id": "run-restore",
+            "session_id": "sess-sse",
+            "seq": 2,
+        },
+        {"type": "done", "ok": True, "run_id": "run-restore", "session_id": "sess-sse", "seq": 3},
+    ]
+    session_row = _restore_session(secret)
+    monkeypatch.setattr(
+        api,
+        "get_system_agent_run_manager",
+        lambda: _FakeSecretRunManager(events),
+    )
+    monkeypatch.setattr(
+        api,
+        "AsyncSessionLocal",
+        lambda: _FakeSecretRunDB(session_row),
+    )
+    monkeypatch.setattr(api, "_owned_run", AsyncMock(return_value=session_row))
+
+    response = await api.stream_system_agent_run(
+        "run-restore", AsyncMock(), SimpleNamespace(id=7), after_seq=0
+    )
+    chunks = [
+        chunk if isinstance(chunk, str) else chunk.decode()
+        async for chunk in response.body_iterator
+    ]
+    parsed = [json.loads(line) for line in "".join(chunks).splitlines() if line.strip()]
+
+    assistant = next(event for event in parsed if event["type"] == "assistant_message")
+    assert assistant["content"] == f"我会用 {secret} 注册。"
+    assert assistant["reasoning"] == f"用户给了 {secret}"
+    # 事件源（run 事件库）保持占位符不变，还原只发生在出站流
+    assert events[1]["content"] == "我会用 [[TP-CRED-1]] 注册。"
+
+
+@pytest.mark.asyncio
+async def test_run_stream_keeps_placeholder_without_mapping(monkeypatch) -> None:
+    """映射缺失时不还原，出站仍是占位符（不猜值）。"""
+    events = [
+        {
+            "type": "assistant_message",
+            "content": "我会用 [[TP-CRED-1]] 注册。",
+            "run_id": "run-restore",
+            "session_id": "sess-sse",
+            "seq": 2,
+        },
+        {"type": "done", "ok": True, "run_id": "run-restore", "session_id": "sess-sse", "seq": 3},
+    ]
+    monkeypatch.setattr(
+        api,
+        "get_system_agent_run_manager",
+        lambda: _FakeSecretRunManager(events),
+    )
+    monkeypatch.setattr(
+        api,
+        "AsyncSessionLocal",
+        lambda: _FakeSecretRunDB(SimpleNamespace(id="sess-sse", secret_map_enc=None)),
+    )
+    monkeypatch.setattr(api, "_owned_run", AsyncMock(return_value=SimpleNamespace(id="run-restore")))
+
+    response = await api.stream_system_agent_run(
+        "run-restore", AsyncMock(), SimpleNamespace(id=7), after_seq=0
+    )
+    chunks = [
+        chunk if isinstance(chunk, str) else chunk.decode()
+        async for chunk in response.body_iterator
+    ]
+    parsed = [json.loads(line) for line in "".join(chunks).splitlines() if line.strip()]
+
+    assistant = next(event for event in parsed if event["type"] == "assistant_message")
+    assert assistant["content"] == "我会用 [[TP-CRED-1]] 注册。"
+
+
+@pytest.mark.asyncio
+async def test_run_stream_survives_mapping_lookup_failure(monkeypatch) -> None:
+    """读映射失败不能打断实时流：降级为不还原，事件照常下发。"""
+    events = [
+        {
+            "type": "assistant_message",
+            "content": "我会用 [[TP-CRED-1]] 注册。",
+            "run_id": "run-restore",
+            "session_id": "sess-sse",
+            "seq": 2,
+        },
+        {"type": "done", "ok": True, "run_id": "run-restore", "session_id": "sess-sse", "seq": 3},
+    ]
+    monkeypatch.setattr(
+        api,
+        "get_system_agent_run_manager",
+        lambda: _FakeSecretRunManager(events),
+    )
+
+    class _BrokenDB:
+        async def __aenter__(self):
+            raise RuntimeError("db unavailable")
+
+        async def __aexit__(self, *args):
+            return False
+
+    monkeypatch.setattr(api, "AsyncSessionLocal", lambda: _BrokenDB())
+    monkeypatch.setattr(api, "_owned_run", AsyncMock(return_value=SimpleNamespace(id="run-restore")))
+
+    response = await api.stream_system_agent_run(
+        "run-restore", AsyncMock(), SimpleNamespace(id=7), after_seq=0
+    )
+    chunks = [
+        chunk if isinstance(chunk, str) else chunk.decode()
+        async for chunk in response.body_iterator
+    ]
+    parsed = [json.loads(line) for line in "".join(chunks).splitlines() if line.strip()]
+
+    assert any(event["type"] == "done" for event in parsed)
+    assistant = next(event for event in parsed if event["type"] == "assistant_message")
+    assert assistant["content"] == "我会用 [[TP-CRED-1]] 注册。"

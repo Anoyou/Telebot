@@ -12,6 +12,7 @@ from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 
+from ..db.base import AsyncSessionLocal
 from ..db.models.system_agent import (
     CHANNEL_WEB,
     MESSAGE_ROLE_ASSISTANT,
@@ -76,9 +77,28 @@ from ..services.system_agent.run_manager import (
     RunNotFoundError,
     get_system_agent_run_manager,
 )
+from ..services.system_agent.secrets import (
+    decrypt_secret_map,
+    load_run_secret_map,
+    restore_placeholders,
+)
 
 router = APIRouter(prefix="/api/system-agent", tags=["system-agent"])
 log = logging.getLogger(__name__)
+
+
+def _restore_message_content(
+    content: Any,
+    secret_map: dict[str, str],
+) -> Any:
+    """还原消息内容里的占位符（只处理文本字段，附件等结构原样返回）。"""
+    if not isinstance(content, dict):
+        return restore_placeholders(content, secret_map)
+    restored = dict(content)
+    for key in ("text", "reasoning"):
+        if restored.get(key):
+            restored[key] = restore_placeholders(restored[key], secret_map)
+    return restored
 
 
 def _err(code: str, message: str, status: int = 400) -> HTTPException:
@@ -114,8 +134,25 @@ def _run_stream_response(run_id: str, *, after_seq: int = 0) -> StreamingRespons
     manager = get_system_agent_run_manager()
 
     async def event_source():
+        # Web 实时流是面向 owner 的显示边界：把占位符还原成真实值再下发。
+        # run 事件库本身保持占位符不变，这只是出站渲染。
+        secret_map: dict[str, str] = {}
+        try:
+            async with AsyncSessionLocal() as db:
+                secret_map = await load_run_secret_map(db, run_id)
+        except Exception:  # noqa: BLE001
+            log.warning("load run secret map failed run=%s", run_id, exc_info=True)
         try:
             async for event in manager.stream_events(run_id, after_seq=after_seq):
+                if secret_map and event.get("type") == "assistant_message":
+                    event = dict(event)
+                    event["content"] = restore_placeholders(
+                        event.get("content"),
+                        secret_map,
+                    )
+                    reasoning = event.get("reasoning")
+                    if reasoning:
+                        event["reasoning"] = restore_placeholders(reasoning, secret_map)
                 yield json.dumps(
                     event,
                     ensure_ascii=False,
@@ -385,7 +422,16 @@ async def list_messages(
     if await svc.reconcile_stale_messages(db, session_id):
         await db.commit()
     rows = await svc.list_messages(db, session_id, limit=limit, before_id=before_id)
-    return [SystemAgentMessageOut.model_validate(r) for r in rows]
+    # Web 历史是面向 owner 的显示边界：还原占位符后再序列化。
+    # 落库内容保持占位符不变，这里只影响本轮响应。
+    secret_map = decrypt_secret_map(getattr(session, "secret_map_enc", None))
+    payloads: list[dict[str, Any]] = []
+    for row in rows:
+        payload = SystemAgentMessageOut.model_validate(row).model_dump()
+        if secret_map:
+            payload["content"] = _restore_message_content(payload.get("content"), secret_map)
+        payloads.append(payload)
+    return [SystemAgentMessageOut.model_validate(payload) for payload in payloads]
 
 
 @router.post("/sessions/{session_id}/messages/stream")

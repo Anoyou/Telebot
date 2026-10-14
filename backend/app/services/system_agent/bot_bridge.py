@@ -38,7 +38,7 @@ from .run_manager import (
     RunNotFoundError,
     get_system_agent_run_manager,
 )
-from .secrets import extract_plaintext_secrets
+from .secrets import extract_plaintext_secrets, load_session_secret_map, restore_placeholders
 from .service import get_system_agent_service
 
 log = logging.getLogger(__name__)
@@ -1025,6 +1025,7 @@ async def run_agent_query(
 
     assistant_text = ""
     assistant_usage: dict[str, Any] | None = None
+    bot_secret_map: dict[str, str] = {}
     streamed_assistant_text = ""
     error_text = ""
     proposed_actions: list[dict[str, Any]] = []
@@ -1040,6 +1041,12 @@ async def run_agent_query(
                 account_id=account_id,
             )
             await db.commit()
+            # 面向 owner 的 Bot 出站也需要还原占位符；run 事件库保持占位符。
+            try:
+                bot_secret_map = await load_session_secret_map(db, session.id)
+            except Exception:  # noqa: BLE001
+                log.debug("load bot session secret map failed", exc_info=True)
+                bot_secret_map = {}
 
         request_id = str(client_request_id or f"bot-{uuid.uuid4().hex}")[:64]
         active_run = await manager.get_active_run_for_bot(
@@ -1167,6 +1174,11 @@ async def run_agent_query(
     role_hint = _write_intent_hint(role=role, text=text, proposed_actions=proposed_actions)
     if role_hint:
         body = (body.rstrip() if body else "") + role_hint
+
+    # 密钥还原（面向 owner 的显示边界）：必须在追加署名与截断**之前**，
+    # 否则还原进来的真实值会被署名/截断逻辑二次处理。
+    if bot_secret_map and body:
+        body = restore_placeholders(body, bot_secret_map)
 
     # 回复署名：标明实际作答的 provider/model（网关/Magpie 下是上游模型）。
     # 放在截断**之后**追加，署名本身不会占正文预算，也不会被截断吃掉。

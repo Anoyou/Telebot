@@ -23,6 +23,7 @@ from app.services.system_agent.secrets import (
     placeholders_remain,
     redact_known_secrets,
     redact_user_message,
+    restore_argument_placeholders,
     restore_placeholders,
 )
 
@@ -299,3 +300,69 @@ def test_placeholders_remain_detects_leftover_tokens() -> None:
     assert placeholders_remain("还剩 [[TP-CRED-3]]")
     assert not placeholders_remain("已经还原了")
     assert not placeholders_remain("")
+
+
+# ─────────── WP-B6：工具参数占位符还原 ───────────
+
+
+def test_restore_argument_placeholders_covers_any_field() -> None:
+    """模型可以把占位符填进任意字段，不只约定的 secret_argument_names。"""
+    secret_map = build_secret_map(["sk-real-value"])
+    args, triggered = restore_argument_placeholders(
+        {
+            "api_key": "[[TP-CRED-1]]",
+            "note": "用这个 key",
+            "headers": {"Authorization": "[[TP-CRED-1]]"},
+            "tags": ["[[TP-CRED-1]]", "keep"],
+            "model": "gpt-5.3",
+        },
+        secret_map,
+    )
+    assert args["api_key"] == "sk-real-value"
+    assert args["headers"]["Authorization"] == "sk-real-value"
+    assert args["tags"] == ["sk-real-value", "keep"]
+    assert args["note"] == "用这个 key"
+    assert args["model"] == "gpt-5.3"
+    assert triggered == ["[[TP-CRED-1]]"] * 3
+
+
+def test_restore_argument_placeholders_noop_without_map() -> None:
+    args = {"api_key": "[[TP-CRED-1]]"}
+    restored, triggered = restore_argument_placeholders(args, {})
+    assert restored == args
+    assert triggered == []
+    restored, triggered = restore_argument_placeholders(args, None)
+    assert restored == args
+    assert triggered == []
+
+
+def test_restore_argument_placeholders_keeps_unknown_placeholder() -> None:
+    """映射里没有的占位符保持原样，交由工具自行报错而不是塞一个假值。"""
+    secret_map = build_secret_map(["sk-1"])
+    args, triggered = restore_argument_placeholders(
+        {"api_key": "[[TP-CRED-9]]", "other": "[[TP-CRED-1]]"}, secret_map
+    )
+    assert args == {"api_key": "[[TP-CRED-9]]", "other": "sk-1"}
+    # triggered 记录的是"见到过"的占位符（含未映射的），便于审计判断模型引用了什么
+    assert triggered == ["[[TP-CRED-9]]", "[[TP-CRED-1]]"]
+
+
+def test_restore_argument_placeholders_preserves_non_string_values() -> None:
+    secret_map = build_secret_map(["sk-real-value"])
+    args, triggered = restore_argument_placeholders(
+        {"count": 3, "enabled": True, "ratio": 1.5, "empty": None, "nested": {"a": [1, 2]}},
+        secret_map,
+    )
+    assert args["count"] == 3
+    assert args["enabled"] is True
+    assert args["ratio"] == 1.5
+    assert args["empty"] is None
+    assert args["nested"] == {"a": [1, 2]}
+    assert triggered == []
+
+
+def test_restore_argument_placeholders_does_not_mutate_input() -> None:
+    secret_map = build_secret_map(["sk-real-value"])
+    original = {"api_key": "[[TP-CRED-1]]"}
+    restore_argument_placeholders(original, secret_map)
+    assert original == {"api_key": "[[TP-CRED-1]]"}

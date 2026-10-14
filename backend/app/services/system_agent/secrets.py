@@ -163,6 +163,32 @@ def decrypt_secret_map(token: str | None) -> dict[str, str]:
     }
 
 
+async def load_session_secret_map(db: Any, session_id: str) -> dict[str, str]:
+    """按会话读取占位符映射，供面向 owner 的显示边界还原。"""
+    from ...db.models.system_agent import SystemAgentSession
+
+    try:
+        session = await db.get(SystemAgentSession, session_id)
+    except Exception:  # noqa: BLE001
+        return {}
+    if session is None:
+        return {}
+    return decrypt_secret_map(getattr(session, "secret_map_enc", None))
+
+
+async def load_run_secret_map(db: Any, run_id: str) -> dict[str, str]:
+    """按 run 读取所属会话的占位符映射。"""
+    from ...db.models.system_agent import SystemAgentRun
+
+    try:
+        run = await db.get(SystemAgentRun, run_id)
+    except Exception:  # noqa: BLE001
+        return {}
+    if run is None:
+        return {}
+    return await load_session_secret_map(db, str(run.session_id))
+
+
 def _provider_credential_remainder(text: str) -> str | None:
     raw = str(text or "")
     lowered = raw.lower()
@@ -308,6 +334,36 @@ def merge_secret_into_arguments(
     return split_secret_arguments(args, secret_names)
 
 
+def restore_argument_placeholders(
+    arguments: dict[str, Any],
+    secret_map: dict[str, str] | None,
+) -> tuple[dict[str, Any], list[str]]:
+    """把工具参数里的占位符还原成真实值。
+
+    模型可以把占位符填进**任意**参数（不止约定的 ``secret_argument_names``），
+    所以这里扫全部参数值而不是白名单字段。返回还原后的参数与被触发的占位符列表。
+    """
+    args = dict(arguments or {})
+    if not secret_map:
+        return args, []
+    triggered: list[str] = []
+
+    def _walk(value: Any) -> Any:
+        if isinstance(value, str):
+            matches = find_credential_placeholders(value)
+            if not matches:
+                return value
+            triggered.extend(matches)
+            return restore_placeholders(value, secret_map)
+        if isinstance(value, list):
+            return [_walk(item) for item in value]
+        if isinstance(value, dict):
+            return {key: _walk(item) for key, item in value.items()}
+        return value
+    restored = _walk(args)
+    return restored, triggered
+
+
 def encrypt_secrets_dict(secrets: dict[str, Any]) -> str | None:
     return encrypt_secret_payload(secrets)
 
@@ -326,12 +382,15 @@ __all__ = [
     "extract_plaintext_secrets",
     "find_credential_placeholders",
     "is_credential_placeholder",
+    "load_run_secret_map",
+    "load_session_secret_map",
     "looks_like_provider_credential_paste",
     "looks_like_standalone_provider_key",
     "make_placeholder",
     "merge_secret_into_arguments",
     "placeholders_remain",
     "redact_known_secrets",
+    "restore_argument_placeholders",
     "redact_user_message",
     "restore_placeholders",
 ]

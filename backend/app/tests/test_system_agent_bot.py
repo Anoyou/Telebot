@@ -1518,3 +1518,164 @@ async def test_bot_reply_without_usage_has_no_signature(monkeypatch) -> None:
     final = send.calls[-1]
     assert "纯文本回复" in final["msg"]
     assert "模型：" not in final["msg"]
+
+
+# ─────────── 密钥占位符还原：Bot 发送边界 ───────────
+
+
+class _SecretSession:
+    def __init__(self, sid: str, secret_map_enc=None) -> None:  # noqa: ANN001
+        self.id = sid
+        self.secret_map_enc = secret_map_enc
+
+
+class _SecretDB:
+    """最小 DB 替身：只支持 ``get(SystemAgentSession, id)`` 读占位符映射。"""
+
+    def __init__(self, session_row: _SecretSession) -> None:
+        self.session_row = session_row
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *args):
+        return False
+
+    async def commit(self) -> None:
+        return None
+
+    async def get(self, model, pk):  # noqa: ANN001
+        if getattr(model, "__name__", "") != "SystemAgentSession":
+            return None
+        return self.session_row if str(pk) == str(self.session_row.id) else None
+
+
+def _secret_db_factory(monkeypatch, session_row: _SecretSession) -> None:
+    monkeypatch.setattr(bot_bridge, "AsyncSessionLocal", lambda: _SecretDB(session_row))
+
+
+@pytest.mark.asyncio
+async def test_bot_reply_restores_placeholder_and_keeps_signature(monkeypatch) -> None:
+    """端到端：贴 Key → 模型引用占位符 → Bot 出站是真实值，署名仍在末尾。"""
+    from app.services.system_agent.secrets import build_secret_map, encrypt_secret_map
+
+    secret = "sk-placeholder-bot-secret-value-123"
+    send = _SendCapture()
+    session_row = _SecretSession("sess-bot-restore", encrypt_secret_map(build_secret_map([secret])))
+
+    class _Svc:
+        async def get_or_create_active_session(self, *a, **k):  # noqa: ANN001
+            return session_row
+
+        async def stream_message(self, *a, **k):  # noqa: ANN001
+            # 模型回复里只出现占位符，真实密钥从未进入模型上下文
+            yield {
+                "type": "assistant_message",
+                "content": "好的，我会用 [[TP-CRED-1]] 注册这个 Provider。",
+                "usage": {"provider_name": "magpie", "model": "workbuddy/glm-5.3-flash"},
+            }
+            yield {"type": "done", "ok": True}
+
+    _secret_db_factory(monkeypatch, session_row)
+    monkeypatch.setattr(bot_bridge, "get_system_agent_service", lambda: _Svc())
+    monkeypatch.setattr(bot_bridge, "refresh_agent_mode", AsyncMock())
+
+    await bot_bridge.run_agent_query(
+        account_id=1,
+        tg_user_id=2,
+        role="admin",
+        text=f"帮我加个 provider，key 是 {secret}",
+        send=send,
+        edit=False,
+    )
+
+    final = send.calls[-1]["msg"]
+    # 面向 owner 的 Bot 出站是真实值，占位符已还原
+    assert secret in final
+    assert "[[TP-CRED-1]]" not in final
+    # 还原发生在追加署名之前：真实值在正文里，署名仍在末尾
+    assert final.rstrip().endswith("模型：magpie / workbuddy/glm-5.3-flash")
+    assert final.index(secret) < final.index("模型：magpie")
+
+
+@pytest.mark.asyncio
+async def test_bot_reply_keeps_placeholder_when_mapping_unavailable(monkeypatch) -> None:
+    """映射不可用时只发占位符，绝不猜一个值出来。"""
+    send = _SendCapture()
+    session_row = _SecretSession("sess-bot-no-map")
+
+    class _Svc:
+        async def get_or_create_active_session(self, *a, **k):  # noqa: ANN001
+            return session_row
+
+        async def stream_message(self, *a, **k):  # noqa: ANN001
+            yield {
+                "type": "assistant_message",
+                "content": "我会用 [[TP-CRED-1]] 注册。",
+                "usage": {"provider_name": "openai", "model": "gpt-5.3"},
+            }
+            yield {"type": "done", "ok": True}
+
+    _secret_db_factory(monkeypatch, session_row)
+    monkeypatch.setattr(bot_bridge, "get_system_agent_service", lambda: _Svc())
+    monkeypatch.setattr(bot_bridge, "refresh_agent_mode", AsyncMock())
+
+    await bot_bridge.run_agent_query(
+        account_id=1,
+        tg_user_id=2,
+        role="admin",
+        text="帮我加个 provider",
+        send=send,
+        edit=False,
+    )
+
+    final = send.calls[-1]["msg"]
+    assert "[[TP-CRED-1]]" in final
+    assert "模型：openai / gpt-5.3" in final
+
+
+@pytest.mark.asyncio
+async def test_bot_send_restores_before_truncation(monkeypatch) -> None:
+    """还原先于截断：占位符不会被 3400 裁切切成半个 token。"""
+    from app.services.system_agent.secrets import build_secret_map, encrypt_secret_map
+
+    secret = "sk-bot-truncate-secret-value-1234"
+    send = _SendCapture()
+    session_row = _SecretSession(
+        "sess-bot-truncate", encrypt_secret_map(build_secret_map([secret]))
+    )
+    # 占位符紧贴 3400 裁切边界：若先截断再还原，出站会留下半个 `[[TP-CRED-`
+    filler = "长" * 3390
+    tail = "结尾" * 60
+
+    class _Svc:
+        async def get_or_create_active_session(self, *a, **k):  # noqa: ANN001
+            return session_row
+
+        async def stream_message(self, *a, **k):  # noqa: ANN001
+            yield {
+                "type": "assistant_message",
+                "content": f"{filler}[[TP-CRED-1]]{tail}",
+                "usage": {"provider_name": "openai", "model": "gpt-5.3"},
+            }
+            yield {"type": "done", "ok": True}
+
+    _secret_db_factory(monkeypatch, session_row)
+    monkeypatch.setattr(bot_bridge, "get_system_agent_service", lambda: _Svc())
+    monkeypatch.setattr(bot_bridge, "refresh_agent_mode", AsyncMock())
+
+    await bot_bridge.run_agent_query(
+        account_id=1,
+        tg_user_id=2,
+        role="admin",
+        text="给我一份很长的报告",
+        send=send,
+        edit=False,
+    )
+
+    final = send.calls[-1]["msg"]
+    assert "已截断" in final
+    # 裁切发生在还原之后：边界处是真实值，而不是半个 `[[TP-CRED-`
+    assert "[[TP-CRED" not in final
+    assert secret[:10] in final
+    assert "模型：openai / gpt-5.3" in final

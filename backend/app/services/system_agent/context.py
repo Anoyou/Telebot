@@ -30,6 +30,9 @@ class ToolContext:
     action: Any | None = None
     # 阶段 3：当轮从用户消息提取的密钥明文（仅请求内存，不落库）
     chat_secrets: list[str] | None = None
+    # WP-B5/B6：当轮会话的占位符映射（`[[TP-CRED-n]] → 真实值`）。
+    # 只用于把模型回填的占位符还原成工具参数，同样仅存在于请求内存，不落库。
+    secret_map: dict[str, str] | None = None
     # 仅在当前事务内使用，不进入 Action.arguments 或审计结果。
     gateway_candidate_sync: bool = False
 

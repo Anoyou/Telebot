@@ -32,9 +32,11 @@
 
 ### 优化
 
-- System Agent 聊天密钥改为**占位符往返**，替代原先直接替换成 `[REDACTED]`：格式 `[[TP-CRED-n]]`（纯 ASCII，不含 `api_key` / `token` / `password` / `secret` 等触发词，也不含 `:=`，因此不会命中密钥抽取与打码正则）。此前用户把 Key 贴给模型后被替换为 `[REDACTED]`，模型既读不到值、也无法把它填回工具的 `api_key` 参数，"帮我用这个 Key 注册 Provider" 这类请求基本不可用；现在出站文本带占位符，模型可以原样引用，真实值只在面向 owner 的显示边界还原（WP-B6）。占位符映射按"现值 → merge → FIFO 上限 20 → `encrypt_str` 加密"写入会话新列 `secret_map_enc`（迁移 `0059`），`app.scripts.rekey` 已同步覆盖该列，`MASTER_KEY` 变更后可整列重加密。请求头配置场景维持全量打码，不产生占位符。
+- System Agent 聊天密钥改为**占位符往返**，替代原先直接替换成 `[REDACTED]`：格式 `[[TP-CRED-n]]`（纯 ASCII，不含 `api_key` / `token` / `password` / `secret` 等触发词，也不含 `:=`，因此不会命中密钥抽取与打码正则）。此前用户把 Key 贴给模型后被替换为 `[REDACTED]`，模型既读不到值、也无法把它填回工具的 `api_key` 参数，"帮我用这个 Key 注册 Provider" 这类请求基本不可用；现在出站文本带占位符，模型可以原样引用，真实值只在面向 owner 的显示边界还原。占位符映射按"现值 → merge → FIFO 上限 20 → `encrypt_str` 加密"写入会话新列 `secret_map_enc`（迁移 `0059`），`app.scripts.rekey` 已同步覆盖该列，`MASTER_KEY` 变更后可整列重加密。请求头配置场景维持全量打码，不产生占位符。
 
 
+- 占位符还原只发生在面向 owner 的显示边界，且**还原先于各边界的后续加工**：Bot 发送前还原（再追加回复署名、再做 Markdown→Telegram HTML 转换与 3500 字符截断——否则还原进来的真实值会被截断切成半个 token，或吃掉署名预算）；Web 实时流（`assistant_message` 的 `content` / `reasoning`）与 Web 消息历史（`text` / `reasoning`，附件等结构原样返回）在下发前还原。映射读失败、解密失败或会话没有映射时**退化为占位符**，绝不"猜不到就丢内容或整段打码"。run 事件库、运行日志、RunTrace、记忆、工具摘要、`list_events` 全部保持占位符不变。
+- 工具参数也支持占位符往返：模型把 `[[TP-CRED-n]]` 填进**任意**参数（不止约定的 `secret_argument_names`，含嵌套 dict / list）时，只读与写 handler 在入口统一还原；写 handler 的还原先于既有的 sensitive-argument 注入（否则注入逻辑看到的只是一串占位符），因此"贴 Key → 让助手注册 Provider → 确认执行"这条链路可以真正跑通。映射里没有的占位符原样保留，交由工具自行报错，而不是塞一个假值。
 - 系统助手回复新增「实际作答模型」署名：Bot 端在正文末尾追加 `模型：{provider} / {model}`，Web 端在回复气泡下方始终展示 `provider · model`。署名取的是本轮 **usage** 里的 `provider_name` / `model`——即真正产出回复的 Provider 与模型，Magpie 等网关场景下会显示上游标识（如 `Magpie 网关 / workbuddy/glm-5.3-flash`），而不是用户在面板上选的那一个。发生模型/Provider 回退时，Bot 署名补 `（原选择 {原模型} 失败回退）`，Web 端在下方单列「原模型 / 实际使用 / 原因」，避免用户误以为模型没换。署名追加在 3500 字符截断**之后**，超长回复也不会把署名吃掉；无 usage（旧 worker）时不渲染署名。纯逻辑抽到前端 `src/lib/modelRunMeta.ts`，Bot 侧抽 `bot_bridge._assistant_signature`，两侧各带回归测试。
 
 ### 文档
@@ -288,7 +290,7 @@
 
 ### 优化
 
-- System Agent 聊天密钥改为**占位符往返**，替代原先直接替换成 `[REDACTED]`：格式 `[[TP-CRED-n]]`（纯 ASCII，不含 `api_key` / `token` / `password` / `secret` 等触发词，也不含 `:=`，因此不会命中密钥抽取与打码正则）。此前用户把 Key 贴给模型后被替换为 `[REDACTED]`，模型既读不到值、也无法把它填回工具的 `api_key` 参数，"帮我用这个 Key 注册 Provider" 这类请求基本不可用；现在出站文本带占位符，模型可以原样引用，真实值只在面向 owner 的显示边界还原（WP-B6）。占位符映射按"现值 → merge → FIFO 上限 20 → `encrypt_str` 加密"写入会话新列 `secret_map_enc`（迁移 `0059`），`app.scripts.rekey` 已同步覆盖该列，`MASTER_KEY` 变更后可整列重加密。请求头配置场景维持全量打码，不产生占位符。
+- System Agent 聊天密钥改为**占位符往返**，替代原先直接替换成 `[REDACTED]`：格式 `[[TP-CRED-n]]`（纯 ASCII，不含 `api_key` / `token` / `password` / `secret` 等触发词，也不含 `:=`，因此不会命中密钥抽取与打码正则）。此前用户把 Key 贴给模型后被替换为 `[REDACTED]`，模型既读不到值、也无法把它填回工具的 `api_key` 参数，"帮我用这个 Key 注册 Provider" 这类请求基本不可用；现在出站文本带占位符，模型可以原样引用，真实值只在面向 owner 的显示边界还原。占位符映射按"现值 → merge → FIFO 上限 20 → `encrypt_str` 加密"写入会话新列 `secret_map_enc`（迁移 `0059`），`app.scripts.rekey` 已同步覆盖该列，`MASTER_KEY` 变更后可整列重加密。请求头配置场景维持全量打码，不产生占位符。
 
 
 - 系统助手回复新增「实际作答模型」署名：Bot 端在正文末尾追加 `模型：{provider} / {model}`，Web 端在回复气泡下方始终展示 `provider · model`。署名取的是本轮 **usage** 里的 `provider_name` / `model`——即真正产出回复的 Provider 与模型，Magpie 等网关场景下会显示上游标识（如 `Magpie 网关 / workbuddy/glm-5.3-flash`），而不是用户在面板上选的那一个。发生模型/Provider 回退时，Bot 署名补 `（原选择 {原模型} 失败回退）`，Web 端在下方单列「原模型 / 实际使用 / 原因」，避免用户误以为模型没换。署名追加在 3500 字符截断**之后**，超长回复也不会把署名吃掉；无 usage（旧 worker）时不渲染署名。纯逻辑抽到前端 `src/lib/modelRunMeta.ts`，Bot 侧抽 `bot_bridge._assistant_signature`，两侧各带回归测试。
@@ -320,7 +322,7 @@
 
 ### 优化
 
-- System Agent 聊天密钥改为**占位符往返**，替代原先直接替换成 `[REDACTED]`：格式 `[[TP-CRED-n]]`（纯 ASCII，不含 `api_key` / `token` / `password` / `secret` 等触发词，也不含 `:=`，因此不会命中密钥抽取与打码正则）。此前用户把 Key 贴给模型后被替换为 `[REDACTED]`，模型既读不到值、也无法把它填回工具的 `api_key` 参数，"帮我用这个 Key 注册 Provider" 这类请求基本不可用；现在出站文本带占位符，模型可以原样引用，真实值只在面向 owner 的显示边界还原（WP-B6）。占位符映射按"现值 → merge → FIFO 上限 20 → `encrypt_str` 加密"写入会话新列 `secret_map_enc`（迁移 `0059`），`app.scripts.rekey` 已同步覆盖该列，`MASTER_KEY` 变更后可整列重加密。请求头配置场景维持全量打码，不产生占位符。
+- System Agent 聊天密钥改为**占位符往返**，替代原先直接替换成 `[REDACTED]`：格式 `[[TP-CRED-n]]`（纯 ASCII，不含 `api_key` / `token` / `password` / `secret` 等触发词，也不含 `:=`，因此不会命中密钥抽取与打码正则）。此前用户把 Key 贴给模型后被替换为 `[REDACTED]`，模型既读不到值、也无法把它填回工具的 `api_key` 参数，"帮我用这个 Key 注册 Provider" 这类请求基本不可用；现在出站文本带占位符，模型可以原样引用，真实值只在面向 owner 的显示边界还原。占位符映射按"现值 → merge → FIFO 上限 20 → `encrypt_str` 加密"写入会话新列 `secret_map_enc`（迁移 `0059`），`app.scripts.rekey` 已同步覆盖该列，`MASTER_KEY` 变更后可整列重加密。请求头配置场景维持全量打码，不产生占位符。
 
 
 - 系统助手回复新增「实际作答模型」署名：Bot 端在正文末尾追加 `模型：{provider} / {model}`，Web 端在回复气泡下方始终展示 `provider · model`。署名取的是本轮 **usage** 里的 `provider_name` / `model`——即真正产出回复的 Provider 与模型，Magpie 等网关场景下会显示上游标识（如 `Magpie 网关 / workbuddy/glm-5.3-flash`），而不是用户在面板上选的那一个。发生模型/Provider 回退时，Bot 署名补 `（原选择 {原模型} 失败回退）`，Web 端在下方单列「原模型 / 实际使用 / 原因」，避免用户误以为模型没换。署名追加在 3500 字符截断**之后**，超长回复也不会把署名吃掉；无 usage（旧 worker）时不渲染署名。纯逻辑抽到前端 `src/lib/modelRunMeta.ts`，Bot 侧抽 `bot_bridge._assistant_signature`，两侧各带回归测试。
@@ -339,7 +341,7 @@
 
 ### 优化
 
-- System Agent 聊天密钥改为**占位符往返**，替代原先直接替换成 `[REDACTED]`：格式 `[[TP-CRED-n]]`（纯 ASCII，不含 `api_key` / `token` / `password` / `secret` 等触发词，也不含 `:=`，因此不会命中密钥抽取与打码正则）。此前用户把 Key 贴给模型后被替换为 `[REDACTED]`，模型既读不到值、也无法把它填回工具的 `api_key` 参数，"帮我用这个 Key 注册 Provider" 这类请求基本不可用；现在出站文本带占位符，模型可以原样引用，真实值只在面向 owner 的显示边界还原（WP-B6）。占位符映射按"现值 → merge → FIFO 上限 20 → `encrypt_str` 加密"写入会话新列 `secret_map_enc`（迁移 `0059`），`app.scripts.rekey` 已同步覆盖该列，`MASTER_KEY` 变更后可整列重加密。请求头配置场景维持全量打码，不产生占位符。
+- System Agent 聊天密钥改为**占位符往返**，替代原先直接替换成 `[REDACTED]`：格式 `[[TP-CRED-n]]`（纯 ASCII，不含 `api_key` / `token` / `password` / `secret` 等触发词，也不含 `:=`，因此不会命中密钥抽取与打码正则）。此前用户把 Key 贴给模型后被替换为 `[REDACTED]`，模型既读不到值、也无法把它填回工具的 `api_key` 参数，"帮我用这个 Key 注册 Provider" 这类请求基本不可用；现在出站文本带占位符，模型可以原样引用，真实值只在面向 owner 的显示边界还原。占位符映射按"现值 → merge → FIFO 上限 20 → `encrypt_str` 加密"写入会话新列 `secret_map_enc`（迁移 `0059`），`app.scripts.rekey` 已同步覆盖该列，`MASTER_KEY` 变更后可整列重加密。请求头配置场景维持全量打码，不产生占位符。
 
 
 - 系统助手回复新增「实际作答模型」署名：Bot 端在正文末尾追加 `模型：{provider} / {model}`，Web 端在回复气泡下方始终展示 `provider · model`。署名取的是本轮 **usage** 里的 `provider_name` / `model`——即真正产出回复的 Provider 与模型，Magpie 等网关场景下会显示上游标识（如 `Magpie 网关 / workbuddy/glm-5.3-flash`），而不是用户在面板上选的那一个。发生模型/Provider 回退时，Bot 署名补 `（原选择 {原模型} 失败回退）`，Web 端在下方单列「原模型 / 实际使用 / 原因」，避免用户误以为模型没换。署名追加在 3500 字符截断**之后**，超长回复也不会把署名吃掉；无 usage（旧 worker）时不渲染署名。纯逻辑抽到前端 `src/lib/modelRunMeta.ts`，Bot 侧抽 `bot_bridge._assistant_signature`，两侧各带回归测试。
@@ -576,7 +578,7 @@
 
 ### 优化
 
-- System Agent 聊天密钥改为**占位符往返**，替代原先直接替换成 `[REDACTED]`：格式 `[[TP-CRED-n]]`（纯 ASCII，不含 `api_key` / `token` / `password` / `secret` 等触发词，也不含 `:=`，因此不会命中密钥抽取与打码正则）。此前用户把 Key 贴给模型后被替换为 `[REDACTED]`，模型既读不到值、也无法把它填回工具的 `api_key` 参数，"帮我用这个 Key 注册 Provider" 这类请求基本不可用；现在出站文本带占位符，模型可以原样引用，真实值只在面向 owner 的显示边界还原（WP-B6）。占位符映射按"现值 → merge → FIFO 上限 20 → `encrypt_str` 加密"写入会话新列 `secret_map_enc`（迁移 `0059`），`app.scripts.rekey` 已同步覆盖该列，`MASTER_KEY` 变更后可整列重加密。请求头配置场景维持全量打码，不产生占位符。
+- System Agent 聊天密钥改为**占位符往返**，替代原先直接替换成 `[REDACTED]`：格式 `[[TP-CRED-n]]`（纯 ASCII，不含 `api_key` / `token` / `password` / `secret` 等触发词，也不含 `:=`，因此不会命中密钥抽取与打码正则）。此前用户把 Key 贴给模型后被替换为 `[REDACTED]`，模型既读不到值、也无法把它填回工具的 `api_key` 参数，"帮我用这个 Key 注册 Provider" 这类请求基本不可用；现在出站文本带占位符，模型可以原样引用，真实值只在面向 owner 的显示边界还原。占位符映射按"现值 → merge → FIFO 上限 20 → `encrypt_str` 加密"写入会话新列 `secret_map_enc`（迁移 `0059`），`app.scripts.rekey` 已同步覆盖该列，`MASTER_KEY` 变更后可整列重加密。请求头配置场景维持全量打码，不产生占位符。
 
 
 - Gateway 为每次 Codex Responses 调用生成受保护的会话、线程、轮次、窗口、安装标识、`client_metadata` 与 `prompt_cache_key`，并按当前 Codex 版本维护身份头；Provider 自定义头不能覆盖这些 Gateway 身份字段。
@@ -605,7 +607,7 @@
 
 ### 优化
 
-- System Agent 聊天密钥改为**占位符往返**，替代原先直接替换成 `[REDACTED]`：格式 `[[TP-CRED-n]]`（纯 ASCII，不含 `api_key` / `token` / `password` / `secret` 等触发词，也不含 `:=`，因此不会命中密钥抽取与打码正则）。此前用户把 Key 贴给模型后被替换为 `[REDACTED]`，模型既读不到值、也无法把它填回工具的 `api_key` 参数，"帮我用这个 Key 注册 Provider" 这类请求基本不可用；现在出站文本带占位符，模型可以原样引用，真实值只在面向 owner 的显示边界还原（WP-B6）。占位符映射按"现值 → merge → FIFO 上限 20 → `encrypt_str` 加密"写入会话新列 `secret_map_enc`（迁移 `0059`），`app.scripts.rekey` 已同步覆盖该列，`MASTER_KEY` 变更后可整列重加密。请求头配置场景维持全量打码，不产生占位符。
+- System Agent 聊天密钥改为**占位符往返**，替代原先直接替换成 `[REDACTED]`：格式 `[[TP-CRED-n]]`（纯 ASCII，不含 `api_key` / `token` / `password` / `secret` 等触发词，也不含 `:=`，因此不会命中密钥抽取与打码正则）。此前用户把 Key 贴给模型后被替换为 `[REDACTED]`，模型既读不到值、也无法把它填回工具的 `api_key` 参数，"帮我用这个 Key 注册 Provider" 这类请求基本不可用；现在出站文本带占位符，模型可以原样引用，真实值只在面向 owner 的显示边界还原。占位符映射按"现值 → merge → FIFO 上限 20 → `encrypt_str` 加密"写入会话新列 `secret_map_enc`（迁移 `0059`），`app.scripts.rekey` 已同步覆盖该列，`MASTER_KEY` 变更后可整列重加密。请求头配置场景维持全量打码，不产生占位符。
 
 
 - Provider 切换执行后端后可直接读取模型列表和测活，无需先保存；同次编辑切回原后端会恢复表单中的直连协议配置，模型列表不会被强制清空或要求重新读取。
@@ -649,7 +651,7 @@
 
 ### 优化
 
-- System Agent 聊天密钥改为**占位符往返**，替代原先直接替换成 `[REDACTED]`：格式 `[[TP-CRED-n]]`（纯 ASCII，不含 `api_key` / `token` / `password` / `secret` 等触发词，也不含 `:=`，因此不会命中密钥抽取与打码正则）。此前用户把 Key 贴给模型后被替换为 `[REDACTED]`，模型既读不到值、也无法把它填回工具的 `api_key` 参数，"帮我用这个 Key 注册 Provider" 这类请求基本不可用；现在出站文本带占位符，模型可以原样引用，真实值只在面向 owner 的显示边界还原（WP-B6）。占位符映射按"现值 → merge → FIFO 上限 20 → `encrypt_str` 加密"写入会话新列 `secret_map_enc`（迁移 `0059`），`app.scripts.rekey` 已同步覆盖该列，`MASTER_KEY` 变更后可整列重加密。请求头配置场景维持全量打码，不产生占位符。
+- System Agent 聊天密钥改为**占位符往返**，替代原先直接替换成 `[REDACTED]`：格式 `[[TP-CRED-n]]`（纯 ASCII，不含 `api_key` / `token` / `password` / `secret` 等触发词，也不含 `:=`，因此不会命中密钥抽取与打码正则）。此前用户把 Key 贴给模型后被替换为 `[REDACTED]`，模型既读不到值、也无法把它填回工具的 `api_key` 参数，"帮我用这个 Key 注册 Provider" 这类请求基本不可用；现在出站文本带占位符，模型可以原样引用，真实值只在面向 owner 的显示边界还原。占位符映射按"现值 → merge → FIFO 上限 20 → `encrypt_str` 加密"写入会话新列 `secret_map_enc`（迁移 `0059`），`app.scripts.rekey` 已同步覆盖该列，`MASTER_KEY` 变更后可整列重加密。请求头配置场景维持全量打码，不产生占位符。
 
 
 - 系统助手回复新增「实际作答模型」署名：Bot 端在正文末尾追加 `模型：{provider} / {model}`，Web 端在回复气泡下方始终展示 `provider · model`。署名取的是本轮 **usage** 里的 `provider_name` / `model`——即真正产出回复的 Provider 与模型，Magpie 等网关场景下会显示上游标识（如 `Magpie 网关 / workbuddy/glm-5.3-flash`），而不是用户在面板上选的那一个。发生模型/Provider 回退时，Bot 署名补 `（原选择 {原模型} 失败回退）`，Web 端在下方单列「原模型 / 实际使用 / 原因」，避免用户误以为模型没换。署名追加在 3500 字符截断**之后**，超长回复也不会把署名吃掉；无 usage（旧 worker）时不渲染署名。纯逻辑抽到前端 `src/lib/modelRunMeta.ts`，Bot 侧抽 `bot_bridge._assistant_signature`，两侧各带回归测试。
@@ -671,7 +673,7 @@
 
 ### 优化
 
-- System Agent 聊天密钥改为**占位符往返**，替代原先直接替换成 `[REDACTED]`：格式 `[[TP-CRED-n]]`（纯 ASCII，不含 `api_key` / `token` / `password` / `secret` 等触发词，也不含 `:=`，因此不会命中密钥抽取与打码正则）。此前用户把 Key 贴给模型后被替换为 `[REDACTED]`，模型既读不到值、也无法把它填回工具的 `api_key` 参数，"帮我用这个 Key 注册 Provider" 这类请求基本不可用；现在出站文本带占位符，模型可以原样引用，真实值只在面向 owner 的显示边界还原（WP-B6）。占位符映射按"现值 → merge → FIFO 上限 20 → `encrypt_str` 加密"写入会话新列 `secret_map_enc`（迁移 `0059`），`app.scripts.rekey` 已同步覆盖该列，`MASTER_KEY` 变更后可整列重加密。请求头配置场景维持全量打码，不产生占位符。
+- System Agent 聊天密钥改为**占位符往返**，替代原先直接替换成 `[REDACTED]`：格式 `[[TP-CRED-n]]`（纯 ASCII，不含 `api_key` / `token` / `password` / `secret` 等触发词，也不含 `:=`，因此不会命中密钥抽取与打码正则）。此前用户把 Key 贴给模型后被替换为 `[REDACTED]`，模型既读不到值、也无法把它填回工具的 `api_key` 参数，"帮我用这个 Key 注册 Provider" 这类请求基本不可用；现在出站文本带占位符，模型可以原样引用，真实值只在面向 owner 的显示边界还原。占位符映射按"现值 → merge → FIFO 上限 20 → `encrypt_str` 加密"写入会话新列 `secret_map_enc`（迁移 `0059`），`app.scripts.rekey` 已同步覆盖该列，`MASTER_KEY` 变更后可整列重加密。请求头配置场景维持全量打码，不产生占位符。
 
 
 - 统一 LLM HTTP、流式、模型列表、协议探测、测活、Agent、插件和 usage 的错误事实，区分客户端受限、官方账号运行时要求、额度耗尽、Gateway 不可用、限流、超时、网络、协议和上游服务错误。
@@ -687,7 +689,7 @@
 
 ### 优化
 
-- System Agent 聊天密钥改为**占位符往返**，替代原先直接替换成 `[REDACTED]`：格式 `[[TP-CRED-n]]`（纯 ASCII，不含 `api_key` / `token` / `password` / `secret` 等触发词，也不含 `:=`，因此不会命中密钥抽取与打码正则）。此前用户把 Key 贴给模型后被替换为 `[REDACTED]`，模型既读不到值、也无法把它填回工具的 `api_key` 参数，"帮我用这个 Key 注册 Provider" 这类请求基本不可用；现在出站文本带占位符，模型可以原样引用，真实值只在面向 owner 的显示边界还原（WP-B6）。占位符映射按"现值 → merge → FIFO 上限 20 → `encrypt_str` 加密"写入会话新列 `secret_map_enc`（迁移 `0059`），`app.scripts.rekey` 已同步覆盖该列，`MASTER_KEY` 变更后可整列重加密。请求头配置场景维持全量打码，不产生占位符。
+- System Agent 聊天密钥改为**占位符往返**，替代原先直接替换成 `[REDACTED]`：格式 `[[TP-CRED-n]]`（纯 ASCII，不含 `api_key` / `token` / `password` / `secret` 等触发词，也不含 `:=`，因此不会命中密钥抽取与打码正则）。此前用户把 Key 贴给模型后被替换为 `[REDACTED]`，模型既读不到值、也无法把它填回工具的 `api_key` 参数，"帮我用这个 Key 注册 Provider" 这类请求基本不可用；现在出站文本带占位符，模型可以原样引用，真实值只在面向 owner 的显示边界还原。占位符映射按"现值 → merge → FIFO 上限 20 → `encrypt_str` 加密"写入会话新列 `secret_map_enc`（迁移 `0059`），`app.scripts.rekey` 已同步覆盖该列，`MASTER_KEY` 变更后可整列重加密。请求头配置场景维持全量打码，不产生占位符。
 
 
 - 系统助手回复新增「实际作答模型」署名：Bot 端在正文末尾追加 `模型：{provider} / {model}`，Web 端在回复气泡下方始终展示 `provider · model`。署名取的是本轮 **usage** 里的 `provider_name` / `model`——即真正产出回复的 Provider 与模型，Magpie 等网关场景下会显示上游标识（如 `Magpie 网关 / workbuddy/glm-5.3-flash`），而不是用户在面板上选的那一个。发生模型/Provider 回退时，Bot 署名补 `（原选择 {原模型} 失败回退）`，Web 端在下方单列「原模型 / 实际使用 / 原因」，避免用户误以为模型没换。署名追加在 3500 字符截断**之后**，超长回复也不会把署名吃掉；无 usage（旧 worker）时不渲染署名。纯逻辑抽到前端 `src/lib/modelRunMeta.ts`，Bot 侧抽 `bot_bridge._assistant_signature`，两侧各带回归测试。
@@ -720,7 +722,7 @@
 
 ### 优化
 
-- System Agent 聊天密钥改为**占位符往返**，替代原先直接替换成 `[REDACTED]`：格式 `[[TP-CRED-n]]`（纯 ASCII，不含 `api_key` / `token` / `password` / `secret` 等触发词，也不含 `:=`，因此不会命中密钥抽取与打码正则）。此前用户把 Key 贴给模型后被替换为 `[REDACTED]`，模型既读不到值、也无法把它填回工具的 `api_key` 参数，"帮我用这个 Key 注册 Provider" 这类请求基本不可用；现在出站文本带占位符，模型可以原样引用，真实值只在面向 owner 的显示边界还原（WP-B6）。占位符映射按"现值 → merge → FIFO 上限 20 → `encrypt_str` 加密"写入会话新列 `secret_map_enc`（迁移 `0059`），`app.scripts.rekey` 已同步覆盖该列，`MASTER_KEY` 变更后可整列重加密。请求头配置场景维持全量打码，不产生占位符。
+- System Agent 聊天密钥改为**占位符往返**，替代原先直接替换成 `[REDACTED]`：格式 `[[TP-CRED-n]]`（纯 ASCII，不含 `api_key` / `token` / `password` / `secret` 等触发词，也不含 `:=`，因此不会命中密钥抽取与打码正则）。此前用户把 Key 贴给模型后被替换为 `[REDACTED]`，模型既读不到值、也无法把它填回工具的 `api_key` 参数，"帮我用这个 Key 注册 Provider" 这类请求基本不可用；现在出站文本带占位符，模型可以原样引用，真实值只在面向 owner 的显示边界还原。占位符映射按"现值 → merge → FIFO 上限 20 → `encrypt_str` 加密"写入会话新列 `secret_map_enc`（迁移 `0059`），`app.scripts.rekey` 已同步覆盖该列，`MASTER_KEY` 变更后可整列重加密。请求头配置场景维持全量打码，不产生占位符。
 
 
 - 系统助手回复新增「实际作答模型」署名：Bot 端在正文末尾追加 `模型：{provider} / {model}`，Web 端在回复气泡下方始终展示 `provider · model`。署名取的是本轮 **usage** 里的 `provider_name` / `model`——即真正产出回复的 Provider 与模型，Magpie 等网关场景下会显示上游标识（如 `Magpie 网关 / workbuddy/glm-5.3-flash`），而不是用户在面板上选的那一个。发生模型/Provider 回退时，Bot 署名补 `（原选择 {原模型} 失败回退）`，Web 端在下方单列「原模型 / 实际使用 / 原因」，避免用户误以为模型没换。署名追加在 3500 字符截断**之后**，超长回复也不会把署名吃掉；无 usage（旧 worker）时不渲染署名。纯逻辑抽到前端 `src/lib/modelRunMeta.ts`，Bot 侧抽 `bot_bridge._assistant_signature`，两侧各带回归测试。
@@ -747,7 +749,7 @@
 
 ### 优化
 
-- System Agent 聊天密钥改为**占位符往返**，替代原先直接替换成 `[REDACTED]`：格式 `[[TP-CRED-n]]`（纯 ASCII，不含 `api_key` / `token` / `password` / `secret` 等触发词，也不含 `:=`，因此不会命中密钥抽取与打码正则）。此前用户把 Key 贴给模型后被替换为 `[REDACTED]`，模型既读不到值、也无法把它填回工具的 `api_key` 参数，"帮我用这个 Key 注册 Provider" 这类请求基本不可用；现在出站文本带占位符，模型可以原样引用，真实值只在面向 owner 的显示边界还原（WP-B6）。占位符映射按"现值 → merge → FIFO 上限 20 → `encrypt_str` 加密"写入会话新列 `secret_map_enc`（迁移 `0059`），`app.scripts.rekey` 已同步覆盖该列，`MASTER_KEY` 变更后可整列重加密。请求头配置场景维持全量打码，不产生占位符。
+- System Agent 聊天密钥改为**占位符往返**，替代原先直接替换成 `[REDACTED]`：格式 `[[TP-CRED-n]]`（纯 ASCII，不含 `api_key` / `token` / `password` / `secret` 等触发词，也不含 `:=`，因此不会命中密钥抽取与打码正则）。此前用户把 Key 贴给模型后被替换为 `[REDACTED]`，模型既读不到值、也无法把它填回工具的 `api_key` 参数，"帮我用这个 Key 注册 Provider" 这类请求基本不可用；现在出站文本带占位符，模型可以原样引用，真实值只在面向 owner 的显示边界还原。占位符映射按"现值 → merge → FIFO 上限 20 → `encrypt_str` 加密"写入会话新列 `secret_map_enc`（迁移 `0059`），`app.scripts.rekey` 已同步覆盖该列，`MASTER_KEY` 变更后可整列重加密。请求头配置场景维持全量打码，不产生占位符。
 
 
 - 将 Agent Provider 测活总超时从 45 秒统一为 90 秒，与手动测活保持一致，减少协议自动探测和慢响应上游被提前中断的假失败。
@@ -766,7 +768,7 @@
 
 ### 优化
 
-- System Agent 聊天密钥改为**占位符往返**，替代原先直接替换成 `[REDACTED]`：格式 `[[TP-CRED-n]]`（纯 ASCII，不含 `api_key` / `token` / `password` / `secret` 等触发词，也不含 `:=`，因此不会命中密钥抽取与打码正则）。此前用户把 Key 贴给模型后被替换为 `[REDACTED]`，模型既读不到值、也无法把它填回工具的 `api_key` 参数，"帮我用这个 Key 注册 Provider" 这类请求基本不可用；现在出站文本带占位符，模型可以原样引用，真实值只在面向 owner 的显示边界还原（WP-B6）。占位符映射按"现值 → merge → FIFO 上限 20 → `encrypt_str` 加密"写入会话新列 `secret_map_enc`（迁移 `0059`），`app.scripts.rekey` 已同步覆盖该列，`MASTER_KEY` 变更后可整列重加密。请求头配置场景维持全量打码，不产生占位符。
+- System Agent 聊天密钥改为**占位符往返**，替代原先直接替换成 `[REDACTED]`：格式 `[[TP-CRED-n]]`（纯 ASCII，不含 `api_key` / `token` / `password` / `secret` 等触发词，也不含 `:=`，因此不会命中密钥抽取与打码正则）。此前用户把 Key 贴给模型后被替换为 `[REDACTED]`，模型既读不到值、也无法把它填回工具的 `api_key` 参数，"帮我用这个 Key 注册 Provider" 这类请求基本不可用；现在出站文本带占位符，模型可以原样引用，真实值只在面向 owner 的显示边界还原。占位符映射按"现值 → merge → FIFO 上限 20 → `encrypt_str` 加密"写入会话新列 `secret_map_enc`（迁移 `0059`），`app.scripts.rekey` 已同步覆盖该列，`MASTER_KEY` 变更后可整列重加密。请求头配置场景维持全量打码，不产生占位符。
 
 
 - 统一 Agent“测活并添加”与新建 Provider 页面的真实对话探针：不再发送 `ping` 或带责备语气的测试句，改为要求模型针对日常专注场景给出两句可执行建议；最大输出统一为 512 Token，为强制推理模型保留足够的推理与正文空间，同时维持单次探针的成本边界。
@@ -789,7 +791,7 @@
 
 ### 优化
 
-- System Agent 聊天密钥改为**占位符往返**，替代原先直接替换成 `[REDACTED]`：格式 `[[TP-CRED-n]]`（纯 ASCII，不含 `api_key` / `token` / `password` / `secret` 等触发词，也不含 `:=`，因此不会命中密钥抽取与打码正则）。此前用户把 Key 贴给模型后被替换为 `[REDACTED]`，模型既读不到值、也无法把它填回工具的 `api_key` 参数，"帮我用这个 Key 注册 Provider" 这类请求基本不可用；现在出站文本带占位符，模型可以原样引用，真实值只在面向 owner 的显示边界还原（WP-B6）。占位符映射按"现值 → merge → FIFO 上限 20 → `encrypt_str` 加密"写入会话新列 `secret_map_enc`（迁移 `0059`），`app.scripts.rekey` 已同步覆盖该列，`MASTER_KEY` 变更后可整列重加密。请求头配置场景维持全量打码，不产生占位符。
+- System Agent 聊天密钥改为**占位符往返**，替代原先直接替换成 `[REDACTED]`：格式 `[[TP-CRED-n]]`（纯 ASCII，不含 `api_key` / `token` / `password` / `secret` 等触发词，也不含 `:=`，因此不会命中密钥抽取与打码正则）。此前用户把 Key 贴给模型后被替换为 `[REDACTED]`，模型既读不到值、也无法把它填回工具的 `api_key` 参数，"帮我用这个 Key 注册 Provider" 这类请求基本不可用；现在出站文本带占位符，模型可以原样引用，真实值只在面向 owner 的显示边界还原。占位符映射按"现值 → merge → FIFO 上限 20 → `encrypt_str` 加密"写入会话新列 `secret_map_enc`（迁移 `0059`），`app.scripts.rekey` 已同步覆盖该列，`MASTER_KEY` 变更后可整列重加密。请求头配置场景维持全量打码，不产生占位符。
 
 
 - 拆分 Chat Completions、Responses、Anthropic 与 SSE Codec；SSE 按完整事件块和字节流解析，支持多行 data、UTF-8 跨分片、无尾分隔符与传输大小限制。
@@ -828,7 +830,7 @@
 
 ### 优化
 
-- System Agent 聊天密钥改为**占位符往返**，替代原先直接替换成 `[REDACTED]`：格式 `[[TP-CRED-n]]`（纯 ASCII，不含 `api_key` / `token` / `password` / `secret` 等触发词，也不含 `:=`，因此不会命中密钥抽取与打码正则）。此前用户把 Key 贴给模型后被替换为 `[REDACTED]`，模型既读不到值、也无法把它填回工具的 `api_key` 参数，"帮我用这个 Key 注册 Provider" 这类请求基本不可用；现在出站文本带占位符，模型可以原样引用，真实值只在面向 owner 的显示边界还原（WP-B6）。占位符映射按"现值 → merge → FIFO 上限 20 → `encrypt_str` 加密"写入会话新列 `secret_map_enc`（迁移 `0059`），`app.scripts.rekey` 已同步覆盖该列，`MASTER_KEY` 变更后可整列重加密。请求头配置场景维持全量打码，不产生占位符。
+- System Agent 聊天密钥改为**占位符往返**，替代原先直接替换成 `[REDACTED]`：格式 `[[TP-CRED-n]]`（纯 ASCII，不含 `api_key` / `token` / `password` / `secret` 等触发词，也不含 `:=`，因此不会命中密钥抽取与打码正则）。此前用户把 Key 贴给模型后被替换为 `[REDACTED]`，模型既读不到值、也无法把它填回工具的 `api_key` 参数，"帮我用这个 Key 注册 Provider" 这类请求基本不可用；现在出站文本带占位符，模型可以原样引用，真实值只在面向 owner 的显示边界还原。占位符映射按"现值 → merge → FIFO 上限 20 → `encrypt_str` 加密"写入会话新列 `secret_map_enc`（迁移 `0059`），`app.scripts.rekey` 已同步覆盖该列，`MASTER_KEY` 变更后可整列重加密。请求头配置场景维持全量打码，不产生占位符。
 
 
 - 在线更新弹窗和执行日志现在会展示分类依据，便于直接识别触发完整更新、数据库备份或服务重建的具体原因。
@@ -842,7 +844,7 @@
 
 ### 优化
 
-- System Agent 聊天密钥改为**占位符往返**，替代原先直接替换成 `[REDACTED]`：格式 `[[TP-CRED-n]]`（纯 ASCII，不含 `api_key` / `token` / `password` / `secret` 等触发词，也不含 `:=`，因此不会命中密钥抽取与打码正则）。此前用户把 Key 贴给模型后被替换为 `[REDACTED]`，模型既读不到值、也无法把它填回工具的 `api_key` 参数，"帮我用这个 Key 注册 Provider" 这类请求基本不可用；现在出站文本带占位符，模型可以原样引用，真实值只在面向 owner 的显示边界还原（WP-B6）。占位符映射按"现值 → merge → FIFO 上限 20 → `encrypt_str` 加密"写入会话新列 `secret_map_enc`（迁移 `0059`），`app.scripts.rekey` 已同步覆盖该列，`MASTER_KEY` 变更后可整列重加密。请求头配置场景维持全量打码，不产生占位符。
+- System Agent 聊天密钥改为**占位符往返**，替代原先直接替换成 `[REDACTED]`：格式 `[[TP-CRED-n]]`（纯 ASCII，不含 `api_key` / `token` / `password` / `secret` 等触发词，也不含 `:=`，因此不会命中密钥抽取与打码正则）。此前用户把 Key 贴给模型后被替换为 `[REDACTED]`，模型既读不到值、也无法把它填回工具的 `api_key` 参数，"帮我用这个 Key 注册 Provider" 这类请求基本不可用；现在出站文本带占位符，模型可以原样引用，真实值只在面向 owner 的显示边界还原。占位符映射按"现值 → merge → FIFO 上限 20 → `encrypt_str` 加密"写入会话新列 `secret_map_enc`（迁移 `0059`），`app.scripts.rekey` 已同步覆盖该列，`MASTER_KEY` 变更后可整列重加密。请求头配置场景维持全量打码，不产生占位符。
 
 
 - 将桌面端 Agent 的 Provider 与账号上下文配置整合到“系统助手”页头右侧，并移除窄屏和移动端的重复配置行，为会话区域释放更多空间。
@@ -980,7 +982,7 @@
 
 ### 优化
 
-- System Agent 聊天密钥改为**占位符往返**，替代原先直接替换成 `[REDACTED]`：格式 `[[TP-CRED-n]]`（纯 ASCII，不含 `api_key` / `token` / `password` / `secret` 等触发词，也不含 `:=`，因此不会命中密钥抽取与打码正则）。此前用户把 Key 贴给模型后被替换为 `[REDACTED]`，模型既读不到值、也无法把它填回工具的 `api_key` 参数，"帮我用这个 Key 注册 Provider" 这类请求基本不可用；现在出站文本带占位符，模型可以原样引用，真实值只在面向 owner 的显示边界还原（WP-B6）。占位符映射按"现值 → merge → FIFO 上限 20 → `encrypt_str` 加密"写入会话新列 `secret_map_enc`（迁移 `0059`），`app.scripts.rekey` 已同步覆盖该列，`MASTER_KEY` 变更后可整列重加密。请求头配置场景维持全量打码，不产生占位符。
+- System Agent 聊天密钥改为**占位符往返**，替代原先直接替换成 `[REDACTED]`：格式 `[[TP-CRED-n]]`（纯 ASCII，不含 `api_key` / `token` / `password` / `secret` 等触发词，也不含 `:=`，因此不会命中密钥抽取与打码正则）。此前用户把 Key 贴给模型后被替换为 `[REDACTED]`，模型既读不到值、也无法把它填回工具的 `api_key` 参数，"帮我用这个 Key 注册 Provider" 这类请求基本不可用；现在出站文本带占位符，模型可以原样引用，真实值只在面向 owner 的显示边界还原。占位符映射按"现值 → merge → FIFO 上限 20 → `encrypt_str` 加密"写入会话新列 `secret_map_enc`（迁移 `0059`），`app.scripts.rekey` 已同步覆盖该列，`MASTER_KEY` 变更后可整列重加密。请求头配置场景维持全量打码，不产生占位符。
 
 
 - 系统助手回复新增「实际作答模型」署名：Bot 端在正文末尾追加 `模型：{provider} / {model}`，Web 端在回复气泡下方始终展示 `provider · model`。署名取的是本轮 **usage** 里的 `provider_name` / `model`——即真正产出回复的 Provider 与模型，Magpie 等网关场景下会显示上游标识（如 `Magpie 网关 / workbuddy/glm-5.3-flash`），而不是用户在面板上选的那一个。发生模型/Provider 回退时，Bot 署名补 `（原选择 {原模型} 失败回退）`，Web 端在下方单列「原模型 / 实际使用 / 原因」，避免用户误以为模型没换。署名追加在 3500 字符截断**之后**，超长回复也不会把署名吃掉；无 usage（旧 worker）时不渲染署名。纯逻辑抽到前端 `src/lib/modelRunMeta.ts`，Bot 侧抽 `bot_bridge._assistant_signature`，两侧各带回归测试。
@@ -1066,7 +1068,7 @@
 
 ### 优化
 
-- System Agent 聊天密钥改为**占位符往返**，替代原先直接替换成 `[REDACTED]`：格式 `[[TP-CRED-n]]`（纯 ASCII，不含 `api_key` / `token` / `password` / `secret` 等触发词，也不含 `:=`，因此不会命中密钥抽取与打码正则）。此前用户把 Key 贴给模型后被替换为 `[REDACTED]`，模型既读不到值、也无法把它填回工具的 `api_key` 参数，"帮我用这个 Key 注册 Provider" 这类请求基本不可用；现在出站文本带占位符，模型可以原样引用，真实值只在面向 owner 的显示边界还原（WP-B6）。占位符映射按"现值 → merge → FIFO 上限 20 → `encrypt_str` 加密"写入会话新列 `secret_map_enc`（迁移 `0059`），`app.scripts.rekey` 已同步覆盖该列，`MASTER_KEY` 变更后可整列重加密。请求头配置场景维持全量打码，不产生占位符。
+- System Agent 聊天密钥改为**占位符往返**，替代原先直接替换成 `[REDACTED]`：格式 `[[TP-CRED-n]]`（纯 ASCII，不含 `api_key` / `token` / `password` / `secret` 等触发词，也不含 `:=`，因此不会命中密钥抽取与打码正则）。此前用户把 Key 贴给模型后被替换为 `[REDACTED]`，模型既读不到值、也无法把它填回工具的 `api_key` 参数，"帮我用这个 Key 注册 Provider" 这类请求基本不可用；现在出站文本带占位符，模型可以原样引用，真实值只在面向 owner 的显示边界还原。占位符映射按"现值 → merge → FIFO 上限 20 → `encrypt_str` 加密"写入会话新列 `secret_map_enc`（迁移 `0059`），`app.scripts.rekey` 已同步覆盖该列，`MASTER_KEY` 变更后可整列重加密。请求头配置场景维持全量打码，不产生占位符。
 
 
 - 系统助手回复新增「实际作答模型」署名：Bot 端在正文末尾追加 `模型：{provider} / {model}`，Web 端在回复气泡下方始终展示 `provider · model`。署名取的是本轮 **usage** 里的 `provider_name` / `model`——即真正产出回复的 Provider 与模型，Magpie 等网关场景下会显示上游标识（如 `Magpie 网关 / workbuddy/glm-5.3-flash`），而不是用户在面板上选的那一个。发生模型/Provider 回退时，Bot 署名补 `（原选择 {原模型} 失败回退）`，Web 端在下方单列「原模型 / 实际使用 / 原因」，避免用户误以为模型没换。署名追加在 3500 字符截断**之后**，超长回复也不会把署名吃掉；无 usage（旧 worker）时不渲染署名。纯逻辑抽到前端 `src/lib/modelRunMeta.ts`，Bot 侧抽 `bot_bridge._assistant_signature`，两侧各带回归测试。

@@ -1614,3 +1614,134 @@ async def test_request_header_context_stays_fully_redacted_without_placeholder(a
             assert "[安全提示" in goal
         # 请求头场景不创建映射
         assert session.secret_map_enc is None
+
+
+@pytest.mark.asyncio
+async def test_placeholder_restores_only_at_owner_facing_boundaries(agent_db, monkeypatch) -> None:
+    """端到端：贴 Key → 出站文本带占位符 → 消息/记忆保持占位符 → 映射可解密。"""
+    from app.services.system_agent.secrets import (
+        decrypt_secret_map,
+        restore_placeholders,
+    )
+
+    captured: dict[str, Any] = {}
+    tool_args_seen: list[dict[str, Any]] = []
+
+    svc = SystemAgentService()
+    secret = "sk-abcdefghijklmnopqrstuvwxyz123456"
+
+    async def stream_turn(*_args, **kwargs):
+        captured["user_text"] = str(kwargs.get("user_text") or "")
+        # secret_map 必须被传进 runtime，工具参数才能还原占位符
+        captured["secret_map"] = dict(kwargs.get("secret_map") or {})
+        yield {"type": "assistant_message", "content": "开始创建", "usage": {}}
+        yield {"type": "tool_finished", "tool": "provider_create", "summary": {"ok": True}}
+        yield {"type": "assistant_message", "content": "创建完成", "usage": {}}
+        yield {"type": "done", "ok": True}
+
+    monkeypatch.setattr(svc.runtime, "stream_turn", stream_turn)
+
+    async with agent_db() as db:
+        session = await svc.create_session(db, channel=CHANNEL_WEB, web_user_id=1)
+        async for _event in svc.stream_message(
+            db,
+            session=session,
+            text=f"添加 Provider，base_url=https://api.example.com key={secret}",
+            role="admin",
+            channel=CHANNEL_WEB,
+            web_user_id=1,
+        ):
+            pass
+        await db.commit()
+
+        # 出站给模型的文本带占位符，真实密钥不出现
+        assert secret not in captured["user_text"]
+        assert "[[TP-CRED-1]]" in captured["user_text"]
+
+        # runtime 拿到的是映射本身（供工具参数还原），run 事件仍只见占位符
+        assert captured["secret_map"] == {"[[TP-CRED-1]]": secret}
+
+        # 消息落库面只见占位符
+        rows = (
+            await db.execute(text("SELECT role, content FROM system_agent_message ORDER BY id"))
+        ).all()
+        for role, content in rows:
+            assert secret not in str(content), f"{role} 消息泄漏了真实密钥"
+
+        # 记忆与摘要同样保持占位符
+        assert secret not in str(session.memory_state)
+
+        # 映射可解密，且显示边界能还原
+        secret_map = decrypt_secret_map(session.secret_map_enc)
+        assert secret_map == {"[[TP-CRED-1]]": secret}
+        assert restore_placeholders("我会用 [[TP-CRED-1]] 注册", secret_map) == (
+            f"我会用 {secret} 注册"
+        )
+        assert tool_args_seen == []
+
+
+@pytest.mark.asyncio
+async def test_run_events_and_tool_summaries_stay_placeholder(agent_db, monkeypatch) -> None:
+    """run 事件 / 工具摘要 / 不出现在显示边界的地方保持占位符。"""
+
+    from app.services.system_agent.run_manager import _redact_event
+
+    svc = SystemAgentService()
+    secret = "sk-run-event-secret-value-1234"
+    captured: dict[str, Any] = {}
+
+    async def stream_turn(*_args, **kwargs):
+        captured["secret_map"] = dict(kwargs.get("secret_map") or {})
+        # 模型回复里只有占位符；真实值只在 ToolContext.secret_map 里
+        yield {
+            "type": "assistant_message",
+            "content": "好的，我会用 [[TP-CRED-1]] 注册。",
+            "usage": {},
+        }
+        yield {
+            "type": "tool_finished",
+            "tool": "providers.probe_and_add",
+            "call_id": "call-1",
+            "tool_name": "providers.probe_and_add",
+            "is_error": False,
+            "result_summary": {"echo": "收到 [[TP-CRED-1]]"},
+        }
+        yield {"type": "done", "ok": True}
+
+    monkeypatch.setattr(svc.runtime, "stream_turn", stream_turn)
+
+    async with agent_db() as db:
+        session = await svc.create_session(db, channel=CHANNEL_WEB, web_user_id=1)
+        async for _event in svc.stream_message(
+            db,
+            session=session,
+            text=f"添加 Provider，base_url=https://api.example.com key={secret}",
+            role="admin",
+            channel=CHANNEL_WEB,
+            web_user_id=1,
+        ):
+            pass
+        await db.commit()
+
+        # 工具摘要落库面只见占位符，不出现真实值
+        rows = (
+            await db.execute(
+                text(
+                    "SELECT role, content FROM system_agent_message "
+                    "WHERE role = 'tool' ORDER BY id"
+                )
+            )
+        ).all()
+        assert rows, "工具摘要应已落库"
+        for _role, content in rows:
+            assert secret not in str(content)
+
+    # run 事件库脱敏后也不出现真实值：`_redact_event` 面对的是占位符文本，
+    # 还原不应该发生在这个面上
+    event = _redact_event(
+        {"type": "assistant_message", "content": "我会用 [[TP-CRED-1]] 注册"},
+        (secret,),
+    )
+    assert secret not in str(event)
+    assert "[[TP-CRED-1]]" in str(event)
+    assert captured["secret_map"] == {"[[TP-CRED-1]]": secret}

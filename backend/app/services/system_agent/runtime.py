@@ -55,7 +55,11 @@ from .model_capability import verify_resolved_agent_providers
 from .prompts import build_system_prompt, provider_setup_hint
 from .redactor import StreamingMessageRedactor, summarize_tool_result
 from .registry import PreparedAction, ToolRegistry, get_registry
-from .secrets import extract_plaintext_secrets, redact_known_secrets
+from .secrets import (
+    extract_plaintext_secrets,
+    redact_known_secrets,
+    restore_argument_placeholders,
+)
 from .skills import SkillRegistry, get_skill_registry
 from .tool_routing import (
     ToolRoute,
@@ -128,6 +132,7 @@ class SystemAgentRuntime:
         bot_tg_user_id: int | None = None,
         history_messages: list[SystemAgentMessage] | None = None,
         chat_secrets: list[str] | None = None,
+        secret_map: dict[str, str] | None = None,
         fallback_provider_id: int | None = None,
         approved_tools: list[str] | None = None,
         approved_tool_calls: list[dict[str, Any]] | None = None,
@@ -241,6 +246,9 @@ class SystemAgentRuntime:
 
         progress_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
         turn_secrets = list(dict.fromkeys(chat_secrets or []))
+        # 占位符映射只在本轮内存中生效：把模型回填的 `[[TP-CRED-n]]` 还原成工具参数，
+        # 不进入 run 事件库、日志、记忆或工具摘要。
+        turn_secret_map = dict(secret_map or {})
         streaming_redactor = StreamingMessageRedactor(secrets=turn_secrets)
         reasoning_redactor = StreamingMessageRedactor(secrets=turn_secrets)
         attempted_models: dict[int, str] = {}
@@ -558,6 +566,7 @@ class SystemAgentRuntime:
             web_user_id=web_user_id,
             bot_tg_user_id=bot_tg_user_id,
             chat_secrets=turn_secrets,
+            secret_map=turn_secret_map,
         )
 
         deferred_events: list[dict[str, Any]] = []
@@ -1076,7 +1085,11 @@ class SystemAgentRuntime:
             async with self._tool_session_factory() as tool_db:
                 isolated_ctx = replace(tool_ctx, db=tool_db)
                 try:
-                    result = await spec.read_handler(isolated_ctx, arguments or {})
+                    call_args, _restored = restore_argument_placeholders(
+                        arguments or {},
+                        tool_ctx.secret_map,
+                    )
+                    result = await spec.read_handler(isolated_ctx, call_args)
                     # 所有只读工具统一经过脱敏与体积门禁后才进入模型上下文。
                     safe_result = summarize_tool_result(result, max_chars=8000)
                     await tool_db.commit()
@@ -1204,6 +1217,9 @@ class SystemAgentRuntime:
                 }
             try:
                 args = dict(arguments or {})
+                # 占位符还原先于既有 sensitive-argument 注入：模型填进来的占位符
+                # 必须变成真实值，否则注入逻辑看到的只是一串 [[TP-CRED-n]]。
+                args, _restored = restore_argument_placeholders(args, tool_ctx.secret_map)
                 if tool_ctx.channel == "bot":
                     if tool_ctx.account_id is None:
                         raise PermissionError("Bot 渠道缺少绑定账号上下文")

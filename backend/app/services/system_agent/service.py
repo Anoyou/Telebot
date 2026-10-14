@@ -790,6 +790,7 @@ class SystemAgentService:
                 history_messages=history_for_model,
                 user_images=user_images,
                 chat_secrets=chat_secrets,
+                secret_map=decrypt_secret_map(session.secret_map_enc),
                 fallback_provider_id=fallback_provider_id,
                 approved_tools=approved_tools,
                 approved_tool_calls=approved_tool_calls,

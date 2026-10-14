@@ -636,3 +636,121 @@ def test_agent_gateway_client_rejects_direct_pinned_provider() -> None:
     )
 
     assert selected == "该 Provider 未配置为 Codex 客户端兼容模式（Gateway），不能在 Agent 中临时切换"
+
+
+@pytest.mark.asyncio
+async def test_write_tool_restores_placeholder_before_secret_injection(action_db) -> None:
+    """工具参数边界：模型回填的占位符先还原，sensitive-argument 注入才看得到真实值。
+    """
+    from app.services.system_agent.secrets import build_secret_map
+
+    secret = "sk-tool-arg-secret-value-1234"
+    secret_map = build_secret_map([secret])
+    seen: dict[str, str] = {}
+
+    async def preview(ctx, args):  # noqa: ANN001
+        # preview 拿到的必须是还原后的真实值（写工具随后才会把它移入加密 payload）
+        seen["api_key"] = args.get("api_key")
+        return PreparedAction(
+            arguments={**args, "name": "api.example", "provider": "openai"},
+            preview={"summary": "是否添加 Provider「api.example」？"},
+        )
+
+    async def execute(_ctx, _args):  # noqa: ANN001
+        return {"ok": True}
+
+    spec = ToolSpec(
+        name="providers.probe_and_add",
+        description="probe",
+        input_schema={"type": "object"},
+        read_only=False,
+        min_role="admin",
+        secret_argument_names=("api_key",),
+        preview_handler=preview,
+        execute_handler=execute,
+    )
+
+    async with action_db() as db:
+        ctx = ToolContext(
+            db=db,
+            channel=CHANNEL_WEB,
+            role="admin",
+            web_user_id=1,
+            secret_map=secret_map,
+        )
+        runtime = SystemAgentRuntime()
+        handler = runtime._bind_write_handler(  # noqa: SLF001
+            spec,
+            ctx,
+            [],
+            lambda event_type, **payload: {"type": event_type, **payload},
+        )
+        # 模型把占位符填进参数（而不是明文密钥）
+        result = await handler({"base_url": "https://api.example/v1", "api_key": "[[TP-CRED-1]]"})
+
+        assert seen["api_key"] == secret
+        action = await db.get(SystemAgentAction, result["action_id"])
+        assert action is not None
+        # 落库面同样只见占位符/掩码，不出现真实值
+        assert secret not in str(action.arguments)
+        assert decrypt_secret_payload(action.secret_payload_enc) == {"api_key": secret}
+
+
+@pytest.mark.asyncio
+async def test_read_tool_restores_placeholder_in_arguments() -> None:
+    """只读工具同样在入口还原占位符：模型可以把占位符填进任意字段。"""
+    from app.services.system_agent.secrets import build_secret_map
+
+    secret = "sk-read-tool-secret-value-123"
+    seen: dict[str, str] = {}
+
+    async def read_handler(_ctx, args):  # noqa: ANN001
+        seen.update(args)
+        return {"ok": True}
+
+    spec = ToolSpec(
+        name="demo.read",
+        description="demo",
+        input_schema={"type": "object"},
+        read_handler=read_handler,
+    )
+    tool_db = AsyncMock()
+    tool_db.__aenter__.return_value = tool_db
+    tool_db.__aexit__.return_value = False
+    ctx = ToolContext(db=AsyncMock(), channel="web", role="admin")
+    ctx.secret_map = build_secret_map([secret])
+
+    runtime = SystemAgentRuntime(tool_session_factory=lambda: tool_db)  # type: ignore[arg-type]
+    await runtime._bind_read_handler(spec, ctx)({  # noqa: SLF001
+        "query": "查一下 [[TP-CRED-1]] 的额度",
+    })
+
+    assert seen["query"] == f"查一下 {secret} 的额度"
+
+
+@pytest.mark.asyncio
+async def test_read_tool_without_secret_map_leaves_placeholder() -> None:
+    """无映射时只读工具原样收到占位符，不会抛错也不会被改写。"""
+    seen: dict[str, str] = {}
+
+    async def read_handler(_ctx, args):  # noqa: ANN001
+        seen.update(args)
+        return {"ok": True}
+
+    spec = ToolSpec(
+        name="demo.read",
+        description="demo",
+        input_schema={"type": "object"},
+        read_handler=read_handler,
+    )
+    tool_db = AsyncMock()
+    tool_db.__aenter__.return_value = tool_db
+    tool_db.__aexit__.return_value = False
+    ctx = ToolContext(db=AsyncMock(), channel="web", role="admin")
+
+    runtime = SystemAgentRuntime(tool_session_factory=lambda: tool_db)  # type: ignore[arg-type]
+    await runtime._bind_read_handler(spec, ctx)({  # noqa: SLF001
+        "query": "查一下 [[TP-CRED-1]] 的额度",
+    })
+
+    assert seen["query"] == "查一下 [[TP-CRED-1]] 的额度"
