@@ -60,6 +60,26 @@ export function isRouteEnabledByCapabilities(
   return enabled[moduleKey] !== false;
 }
 
+export type CapabilityGatePhase = "pending" | "paused" | "ready";
+
+/** 能力 gate 的纯决策：把两个查询状态收敛成"骨架 / 暂停页 / 放行"。 */
+export function resolveCapabilityGatePhase(params: {
+  capsLoading: boolean;
+  caps: PlatformCapabilities | null | undefined;
+  moduleKey: PlatformModuleKey;
+  fallbackAiEnabled: boolean;
+}): CapabilityGatePhase {
+  // 只等 capabilities 查询：settings 仅仅是 ai 键的兜底来源，缺失时按
+  // default-true 处理即可。若把 settings 也纳入等待条件，会出现
+  // "settings 已返回、capabilities 还在飞"的窗口——gate 提前放行，
+  // 已关闭模块的内容先闪一下再跳暂停页。
+  if (params.capsLoading) {
+    return "pending";
+  }
+  const enabled = capabilityEnabledMap(params.caps, params.fallbackAiEnabled);
+  return enabled[params.moduleKey] === false ? "paused" : "ready";
+}
+
 export function filterNavByCapabilities<T extends { to: string }>(
   items: T[],
   enabled: CapabilityEnabledMap,

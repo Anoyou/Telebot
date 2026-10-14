@@ -12,8 +12,8 @@ import { PageShell } from "@/components/layout/PageScaffold";
 import { getPlatformCapabilities, getSystemSettings } from "@/api/system";
 import type { PlatformModuleKey } from "@/api/types";
 import {
-  capabilityEnabledMap,
   moduleLabel,
+  resolveCapabilityGatePhase,
 } from "@/lib/navigation";
 
 // 把不影响首屏的页面拆成 lazy chunk：
@@ -130,11 +130,18 @@ function CapabilityGate({
     queryFn: getPlatformCapabilities,
     staleTime: 15_000,
   });
-  const enabled = capabilityEnabledMap(capsQ.data, settingsQ.data?.ai_enabled ?? true);
-  if (capsQ.isLoading && settingsQ.isLoading) {
+  // 只等 capabilities：settings 查询快一步时旧写法会提前放行，模块内容先闪一下
+  // 再跳暂停页。settings 仅作为 ai 键的兜底来源，缺失时保持 default-true。
+  const gatePhase = resolveCapabilityGatePhase({
+    capsLoading: capsQ.isLoading,
+    caps: capsQ.data,
+    moduleKey,
+    fallbackAiEnabled: settingsQ.data?.ai_enabled ?? true,
+  });
+  if (gatePhase === "pending") {
     return <PageFallback />;
   }
-  if (enabled[moduleKey] === false) {
+  if (gatePhase === "paused") {
     const label = moduleLabel(moduleKey);
     return (
       <PageShell>

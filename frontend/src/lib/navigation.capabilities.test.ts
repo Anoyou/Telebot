@@ -7,6 +7,7 @@ import {
   filterNavByCapabilities,
   isRouteEnabledByCapabilities,
   pluginRuntimeAvailabilityLabel,
+  resolveCapabilityGatePhase,
 } from "./navigation.ts";
 
 const sampleCaps = (enabled: Partial<Record<string, boolean>>): PlatformCapabilities => ({
@@ -89,4 +90,94 @@ test("plugin runtime availability labels", () => {
   assert.equal(pluginRuntimeAvailabilityLabel("paused"), "已暂停");
   assert.equal(pluginRuntimeAvailabilityLabel("transitioning"), "等待热加载");
   assert.equal(pluginRuntimeAvailabilityLabel("ready"), "正常");
+});
+
+// ─────────── WP-B10：CapabilityGate 竞态收敛 ───────────
+
+test("capability gate shows skeleton only while capabilities is loading", () => {
+  assert.equal(
+    resolveCapabilityGatePhase({
+      capsLoading: true,
+      caps: undefined,
+      moduleKey: "ai",
+      fallbackAiEnabled: true,
+    }),
+    "pending",
+  );
+});
+
+test("capability gate does not wait for settings query", () => {
+  // settings 已返回而 capabilities 仍在飞：旧写法按 && 判断会跳出骨架，
+  // 让已暂停模块的内容先渲染一帧。必须继续等 capabilities。
+  assert.equal(
+    resolveCapabilityGatePhase({
+      capsLoading: true,
+      caps: undefined,
+      moduleKey: "ai",
+      fallbackAiEnabled: true,
+    }),
+    "pending",
+  );
+});
+
+test("capability gate pauses disabled module after capabilities arrives", () => {
+  const phase = resolveCapabilityGatePhase({
+    capsLoading: false,
+    caps: sampleCaps({ ai: false }),
+    moduleKey: "ai",
+    fallbackAiEnabled: true,
+  });
+  assert.equal(phase, "paused");
+});
+
+test("capability gate releases enabled module once capabilities arrives", () => {
+  const phase = resolveCapabilityGatePhase({
+    capsLoading: false,
+    caps: sampleCaps({ ai: true }),
+    moduleKey: "ai",
+    fallbackAiEnabled: false, // settings 说关闭，但 capabilities 已就绪并以它为准
+  });
+  assert.equal(phase, "ready");
+});
+
+test("capability gate keeps default-true when capabilities is empty", () => {
+  assert.equal(
+    resolveCapabilityGatePhase({
+      capsLoading: false,
+      caps: { modules: [] } as PlatformCapabilities,
+      moduleKey: "ai",
+      fallbackAiEnabled: true,
+    }),
+    "ready",
+  );
+  assert.equal(
+    resolveCapabilityGatePhase({
+      capsLoading: false,
+      caps: { modules: [] } as PlatformCapabilities,
+      moduleKey: "ai",
+      fallbackAiEnabled: false,
+    }),
+    "paused",
+  );
+});
+
+test("capability gate ignores settings for non-ai modules", () => {
+  assert.equal(
+    resolveCapabilityGatePhase({
+      capsLoading: false,
+      caps: sampleCaps({ ledger: false }),
+      moduleKey: "ledger",
+      fallbackAiEnabled: false,
+    }),
+    "paused",
+  );
+  assert.equal(
+    resolveCapabilityGatePhase({
+      capsLoading: false,
+      caps: sampleCaps({ ledger: true }),
+      moduleKey: "ledger",
+      fallbackAiEnabled: false,
+    }),
+    "ready",
+  );
 });
