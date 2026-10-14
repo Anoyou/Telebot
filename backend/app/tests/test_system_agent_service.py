@@ -27,6 +27,7 @@ from app.db.models.system_agent import (
     SESSION_STATUS_ACTIVE,
     SESSION_STATUS_ARCHIVED,
     SystemAgentMessage,
+    SystemAgentRunEvent,
     SystemAgentSession,
 )
 from app.services.system_agent.config import (
@@ -38,6 +39,7 @@ from app.services.system_agent.config import (
     tools_models_for_dto,
 )
 from app.services.system_agent.prompts import build_system_prompt, session_title_from_message
+from app.services.system_agent.secrets import decrypt_secret_map
 from app.services.system_agent.service import SystemAgentService
 
 
@@ -51,6 +53,7 @@ async def agent_db():
         await conn.run_sync(SystemSetting.__table__.create)
         await conn.run_sync(SystemAgentSession.__table__.create)
         await conn.run_sync(SystemAgentMessage.__table__.create)
+        await conn.run_sync(SystemAgentRunEvent.__table__.create)
     factory = async_sessionmaker(engine, expire_on_commit=False)
     try:
         yield factory
@@ -1054,6 +1057,7 @@ async def test_retry_reference_without_failure_is_a_normal_message(agent_db, mon
 
 @pytest.mark.asyncio
 async def test_failed_secret_goal_anchor_and_retry_stay_redacted(agent_db, monkeypatch) -> None:
+    """失败轮锚点与重试上下文都不能泄漏真实密钥（WP-B5 后改用占位符）。"""
     svc = SystemAgentService()
     secret = "sk-abcdefghijklmnopqrstuvwxyz123456"
     runtime_goals: list[str] = []
@@ -1064,6 +1068,8 @@ async def test_failed_secret_goal_anchor_and_retry_stay_redacted(agent_db, monke
         yield {"type": "done", "ok": False}
 
     monkeypatch.setattr(svc.runtime, "stream_turn", fail_stream)
+
+    user_msg_id: int | None = None
 
     async with agent_db() as db:
         session = await svc.create_session(db, channel=CHANNEL_WEB, web_user_id=1)
@@ -1076,8 +1082,20 @@ async def test_failed_secret_goal_anchor_and_retry_stay_redacted(agent_db, monke
             web_user_id=1,
         ):
             pass
+        row = await db.execute(text("SELECT id FROM system_agent_message WHERE role='user'"))
+        user_msg_id = row.scalar_one()
         assert secret not in str(session.memory_state)
-        assert "REDACTED" in session.memory_state["failed_turn"]["user_goal"]
+        assert secret not in str(session.secret_map_enc or "")
+        assert secret not in runtime_goals[0]
+        # 给模型的是占位符，失败锚点也保持占位符而不是 `[REDACTED]`
+        assert "[[TP-CRED-1]]" in runtime_goals[0]
+        assert "[[TP-CRED-1]]" in session.memory_state["failed_turn"]["user_goal"]
+        # 落库的用户消息与失败锚点都保持占位符（持久化面不出现真实密钥）
+        stored = await db.get(SystemAgentMessage, user_msg_id)
+        assert stored is not None and "[[TP-CRED-1]]" in str(stored.content.get("text"))
+        assert secret not in str(stored.content)
+        # 映射可解密，本轮密钥确实注册过，供显示边界还原
+        assert decrypt_secret_map(session.secret_map_enc) == {"[[TP-CRED-1]]": secret}
 
         async for _event in svc.stream_message(
             db,
@@ -1089,9 +1107,8 @@ async def test_failed_secret_goal_anchor_and_retry_stay_redacted(agent_db, monke
         ):
             pass
 
-        assert runtime_goals[0].endswith(secret)
         assert secret not in runtime_goals[1]
-        assert "REDACTED" in runtime_goals[1]
+        assert "[[TP-CRED-1]]" in runtime_goals[1]
 
 
 @pytest.mark.asyncio
@@ -1499,3 +1516,101 @@ async def test_compress_session_summary_uses_string_primary_key(agent_db, monkey
         await memory_compress._compress_session_summary(session.id, expected_rev=999)
 
         assert captured == [session.id]
+
+
+# ─────────── WP-B5：密钥占位符不回泄到任何持久化面 ───────────
+
+
+@pytest.mark.asyncio
+async def test_secret_placeholder_roundtrip_never_leaks_into_persistence(agent_db, monkeypatch) -> None:
+    """真实密钥只出现在会话的加密映射里；消息/记忆/事件/usage 全部只见占位符。"""
+    svc = SystemAgentService()
+    secret = "sk-abcdefghijklmnopqrstuvwxyz123456"
+
+    async def stream_turn(*_args, **kwargs):
+        user_text = str(kwargs.get("user_text") or "")
+        assert secret not in user_text
+        assert "[[TP-CRED-1]]" in user_text
+        yield {
+            "type": "assistant_message",
+            "content": f"已收到，我会用 [[TP-CRED-1]] 注册，密钥是 {secret}",
+            "usage": {"schema_version": 2, "provider_name": "p", "model": "m"},
+        }
+        yield {"type": "done", "ok": True}
+
+    monkeypatch.setattr(svc.runtime, "stream_turn", stream_turn)
+
+    async with agent_db() as db:
+        session = await svc.create_session(db, channel=CHANNEL_WEB, web_user_id=1)
+        async for _event in svc.stream_message(
+            db,
+            session=session,
+            text=f"添加 Provider，key={secret}",
+            role="admin",
+            channel=CHANNEL_WEB,
+            web_user_id=1,
+        ):
+            pass
+        await db.commit()
+
+        # 1) 用户消息与助手消息都只见占位符
+        rows = (
+            await db.execute(
+                text("SELECT role, content FROM system_agent_message ORDER BY id"),
+            )
+        ).all()
+        assert rows
+        for role, content in rows:
+            assert secret not in str(content), f"{role} 消息泄漏了真实密钥"
+        assert any("[[TP-CRED-1]]" in str(content) for _role, content in rows)
+
+        # 2) 会话加密列必须可解密且含真实值（还原的唯一来源）
+        from app.services.system_agent.secrets import decrypt_secret_map
+
+        assert decrypt_secret_map(session.secret_map_enc) == {"[[TP-CRED-1]]": secret}
+
+        # 3) 记忆与 usage 不出现真实密钥
+        assert secret not in str(session.memory_state)
+        assert secret not in str(session.memory_summary)
+
+        # 4) 运行事件同样保持占位符
+        run_rows = (
+            await db.execute(text("SELECT event FROM system_agent_run_event"))
+        ).all()
+        for (event,) in run_rows:
+            assert secret not in str(event)
+
+
+
+@pytest.mark.asyncio
+async def test_request_header_context_stays_fully_redacted_without_placeholder(agent_db, monkeypatch) -> None:
+    """请求头场景维持全量打码：不产生占位符，也不写加密映射。"""
+    svc = SystemAgentService()
+    runtime_goals: list[str] = []
+
+    async def stream_turn(*_args, **kwargs):
+        runtime_goals.append(str(kwargs.get("user_text") or ""))
+        yield {"type": "done", "ok": True}
+
+    monkeypatch.setattr(svc.runtime, "stream_turn", stream_turn)
+
+    async with agent_db() as db:
+        session = await svc.create_session(db, channel=CHANNEL_WEB, web_user_id=1)
+        async for _event in svc.stream_message(
+            db,
+            session=session,
+            text="request headers 里加 Authorization: Bearer sk-abcdefghijklmnopqrstuvwxyz123456",
+            role="admin",
+            channel=CHANNEL_WEB,
+            web_user_id=1,
+        ):
+            pass
+        await db.commit()
+
+        assert runtime_goals
+        for goal in runtime_goals:
+            assert "sk-abcdefghijklmnopqrstuvwxyz123456" not in goal
+            assert "[[TP-CRED-" not in goal
+            assert "[安全提示" in goal
+        # 请求头场景不创建映射
+        assert session.secret_map_enc is None

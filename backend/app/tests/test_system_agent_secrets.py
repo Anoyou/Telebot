@@ -5,13 +5,25 @@ from __future__ import annotations
 import pytest
 
 from app.services.system_agent.secrets import (
+    MAX_SECRET_MAP_ENTRIES,
+    apply_secret_placeholders,
+    build_secret_map,
+    cap_secret_map,
     contains_request_header_context,
+    decrypt_secret_map,
+    encrypt_secret_map,
+    encrypt_secrets_dict,
     extract_plaintext_secrets,
+    find_credential_placeholders,
+    is_credential_placeholder,
     looks_like_provider_credential_paste,
     looks_like_standalone_provider_key,
+    make_placeholder,
     merge_secret_into_arguments,
+    placeholders_remain,
     redact_known_secrets,
     redact_user_message,
+    restore_placeholders,
 )
 
 
@@ -174,3 +186,116 @@ def test_chat_secret_does_not_fill_another_secret_when_one_is_already_present() 
     assert public.get("has_request_headers") is not True
     assert secrets == {"api_key": "sk-already-present-secret-value"}
     assert fields == ["api_key"]
+
+
+# ─────────── WP-B5：密钥占位符往返 ───────────
+
+
+def test_placeholder_format_is_ascii_and_not_secret_shaped() -> None:
+    """`[[TP-CRED-n]]` 不能被密钥/敏感标签正则命中，否则会自我打码。"""
+    token = make_placeholder(1)
+    assert token == "[[TP-CRED-1]]"
+    assert token.isascii()
+    assert not extract_plaintext_secrets(f"请用 {token} 调用")
+    assert not contains_request_header_context(token)
+    # 通过基础打码后仍然原样保留（不变成 [REDACTED]）
+    assert redact_user_message(f"请用 {token} 调用") == f"请用 {token} 调用"
+    # 旧占位符集合也认它（模型回填到敏感字段时不会被当成真实值）
+    assert is_credential_placeholder(token)
+
+
+def test_build_secret_map_is_deterministic_and_ordered() -> None:
+    secret_map = build_secret_map(["aaa", "bbb"])
+    assert secret_map == {"[[TP-CRED-1]]": "aaa", "[[TP-CRED-2]]": "bbb"}
+    assert build_secret_map([]) == {}
+
+
+def test_is_credential_placeholder_requires_full_token() -> None:
+    assert is_credential_placeholder("[[TP-CRED-7]]")
+    assert is_credential_placeholder("  [[TP-CRED-7]]  ")
+    assert not is_credential_placeholder("[[TP-CRED-7]] more text")
+    assert not is_credential_placeholder("[[TP-CRED-]]")
+    assert not is_credential_placeholder("[[TP-CRED-x]]")
+    assert not is_credential_placeholder("")
+    assert not is_credential_placeholder(None)
+
+
+def test_find_credential_placeholders_dedupes_in_order() -> None:
+    assert find_credential_placeholders("a [[TP-CRED-2]] b [[TP-CRED-1]] a [[TP-CRED-2]]") == [
+        "[[TP-CRED-2]]",
+        "[[TP-CRED-1]]",
+    ]
+    assert find_credential_placeholders("no placeholders here") == []
+
+
+def test_cap_secret_map_keeps_newest_entries() -> None:
+    secret_map = build_secret_map([str(i) for i in range(1, 30)])
+    assert len(secret_map) == 29
+    capped = cap_secret_map(secret_map)
+    assert len(capped) == MAX_SECRET_MAP_ENTRIES
+    # FIFO：最早的被淘汰，最后 20 个保留
+    assert capped[make_placeholder(10)] == "10"
+    assert make_placeholder(9) not in capped
+    assert capped[make_placeholder(29)] == "29"
+    # 未超限时原样返回（副本）
+    small = build_secret_map(["a"])
+    assert cap_secret_map(small) == small
+    assert cap_secret_map(small) is not small
+
+
+def test_restore_placeholders_replaces_every_occurrence() -> None:
+    secret_map = build_secret_map(["sk-real-value", "tok-real"])
+    text = "用 [[TP-CRED-1]] 调，失败用 [[TP-CRED-2]]；再不行还试 [[TP-CRED-1]]。"
+    assert restore_placeholders(text, secret_map) == (
+        "用 sk-real-value 调，失败用 tok-real；再不行还试 sk-real-value。"
+    )
+
+
+def test_restore_placeholders_keeps_unknown_placeholder_intact() -> None:
+    """映射里没有的占位符必须原样保留，不能打码或丢弃整段文本。"""
+    secret_map = build_secret_map(["sk-real-value"])
+    text = "新密钥 [[TP-CRED-1]]，旧密钥 [[TP-CRED-9]] 已过期。"
+    assert restore_placeholders(text, secret_map) == (
+        "新密钥 sk-real-value，旧密钥 [[TP-CRED-9]] 已过期。"
+    )
+
+
+@pytest.mark.parametrize("text", ("", None, "普通文本"))
+def test_restore_placeholders_noop_without_map_or_token(text) -> None:
+    assert restore_placeholders(text, {}) == (text or "")
+    assert restore_placeholders(text, None) == (text or "")
+    assert restore_placeholders("[[TP-CRED-1]]", None) == "[[TP-CRED-1]]"
+
+
+def test_secret_map_encrypt_roundtrip_and_reject_garbage() -> None:
+    secret_map = build_secret_map(["sk-abcdefghijklmnopqrstuvwxyz123456"])
+    token = encrypt_secret_map(secret_map)
+    assert token
+    assert "sk-abcdefghijklmnopqrstuvwxyz123456" not in token
+    assert decrypt_secret_map(token) == secret_map
+    # 解密失败（MASTER_KEY 变更 / 数据损坏）→ 空映射，显示边界退化为占位符
+    assert decrypt_secret_map("not-a-fernet-token") == {}
+    assert decrypt_secret_map(None) == {}
+
+
+def test_decrypt_secret_map_drops_non_placeholder_keys() -> None:
+    token = encrypt_secrets_dict({"not-a-placeholder": "sk-x", "[[TP-CRED-1]]": "sk-real"})
+    assert decrypt_secret_map(token) == {"[[TP-CRED-1]]": "sk-real"}
+
+
+def test_apply_secret_placeholders_replaces_only_mapped_secrets() -> None:
+    secret_map = build_secret_map(["sk-abcdefghijklmnopqrstuvwxyz123456"])
+    text = (
+        "key=sk-abcdefghijklmnopqrstuvwxyz123456  "
+        "其它内容 sk-other-unmapped-key-123456789012 不变"
+    )
+    out = apply_secret_placeholders(text, secret_map)
+    assert "key=[[TP-CRED-1]]" in out
+    assert "sk-abcdefghijklmnopqrstuvwxyz123456" not in out
+    assert "sk-other-unmapped-key-123456789012" in out
+
+
+def test_placeholders_remain_detects_leftover_tokens() -> None:
+    assert placeholders_remain("还剩 [[TP-CRED-3]]")
+    assert not placeholders_remain("已经还原了")
+    assert not placeholders_remain("")

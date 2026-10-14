@@ -65,6 +65,103 @@ def _is_secret_placeholder(value: Any) -> bool:
         return True
     return bool(normalized) and "***" in normalized
 
+# 会话内占位符格式 `[[TP-CRED-n]]`：纯 ASCII、不含 api_key/token/password/secret 等
+# 触发词、不含 `:=`，因此不会命中 redactor 的密钥/敏感标签正则。
+# 之所以不用 `[REDACTED]`，是因为模型拿到 `[REDACTED]` 后无法把它填回工具参数；
+# 占位符是既可被模型引用、又能还原成真实值的往返令牌。
+PLACEHOLDER_PREFIX = "[[TP-CRED-"
+PLACEHOLDER_SUFFIX = "]]"
+PLACEHOLDER_RE = re.compile(r"\[\[TP-CRED-(\d+)\]\]")
+# 单会话最多保留多少个映射；超出后按 FIFO 淘汰，避免加密列无限增长。
+MAX_SECRET_MAP_ENTRIES = 20
+
+
+def make_placeholder(index: int) -> str:
+    """生成第 ``index`` 个（从 1 开始）占位符。"""
+    return f"{PLACEHOLDER_PREFIX}{index}{PLACEHOLDER_SUFFIX}"
+
+
+def is_credential_placeholder(value: Any) -> bool:
+    """判断一个字符串是否整体就是本机制生成的占位符。"""
+    return bool(PLACEHOLDER_RE.fullmatch(str(value or "").strip()))
+
+
+def find_credential_placeholders(text: Any) -> list[str]:
+    """按出现顺序列出文本中的占位符（去重）。"""
+    found: list[str] = []
+    for token in PLACEHOLDER_RE.findall(str(text or "")):
+        candidate = make_placeholder(int(token))
+        if candidate not in found:
+            found.append(candidate)
+    return found
+
+
+def build_secret_map(secrets: list[str]) -> dict[str, str]:
+    """把密钥列表映射成 ``{placeholder: secret}``。"""
+    return {make_placeholder(index): secret for index, secret in enumerate(secrets, start=1)}
+
+
+def cap_secret_map(secret_map: dict[str, str]) -> dict[str, str]:
+    """FIFO 截断到 ``MAX_SECRET_MAP_ENTRIES``，保留最新的那批。"""
+    if len(secret_map) <= MAX_SECRET_MAP_ENTRIES:
+        return dict(secret_map)
+    keys = list(secret_map)[-MAX_SECRET_MAP_ENTRIES:]
+    return {key: secret_map[key] for key in keys}
+
+
+def restore_placeholders(text: Any, secret_map: dict[str, str] | None) -> str:
+    """把文本里的占位符还原成真实值。
+
+    只替换完整的占位符 token；``secret_map`` 为空或占位符已不在映射中时原样保留，
+    绝不因为"猜不到"就把整段文本打码或丢弃——显示边界宁可显示占位符也不能丢内容。
+    """
+    out = str(text or "")
+    if not out or not secret_map:
+        return out
+    for placeholder, secret in secret_map.items():
+        if secret and placeholder in out:
+            out = out.replace(placeholder, str(secret))
+    return out
+
+
+def placeholders_remain(text: Any) -> bool:
+    """文本中是否还有未还原的占位符。"""
+    return bool(PLACEHOLDER_RE.search(str(text or "")))
+
+
+def apply_secret_placeholders(text: Any, secret_map: dict[str, str] | None) -> str:
+    """把文本里的真实密钥替换成占位符。
+
+    出站单点：给模型的用户文本与要落库的用户文本都走这里。只有本会话
+    ``build_secret_map`` 生成的映射参与替换，不会碰无关内容。
+    """
+    out = str(text or "")
+    if not out or not secret_map:
+        return out
+    for placeholder, secret in secret_map.items():
+        if secret and secret in out:
+            out = out.replace(secret, placeholder)
+    return out
+
+
+def encrypt_secret_map(secret_map: dict[str, str]) -> str | None:
+    """序列化并加密占位符映射，供写入 ``SystemAgentSession.secret_map_enc``。"""
+    from .actions import encrypt_secret_payload
+
+    return encrypt_secret_payload(cap_secret_map(secret_map))
+
+
+def decrypt_secret_map(token: str | None) -> dict[str, str]:
+    """解密占位符映射；解密失败或格式异常时返回空映射（显示边界退化为占位符）。"""
+    from .actions import decrypt_secret_payload
+
+    raw = decrypt_secret_payload(token)
+    return {
+        str(placeholder): str(value)
+        for placeholder, value in raw.items()
+        if is_credential_placeholder(placeholder) and str(value)
+    }
+
 
 def _provider_credential_remainder(text: str) -> str | None:
     raw = str(text or "")
@@ -216,12 +313,25 @@ def encrypt_secrets_dict(secrets: dict[str, Any]) -> str | None:
 
 
 __all__ = [
+    "MAX_SECRET_MAP_ENTRIES",
+    "PLACEHOLDER_RE",
+    "apply_secret_placeholders",
+    "build_secret_map",
+    "cap_secret_map",
+    "decrypt_secret_map",
+    "encrypt_secret_map",
+    "cap_secret_map",
     "contains_request_header_context",
     "encrypt_secrets_dict",
     "extract_plaintext_secrets",
+    "find_credential_placeholders",
+    "is_credential_placeholder",
     "looks_like_provider_credential_paste",
     "looks_like_standalone_provider_key",
+    "make_placeholder",
     "merge_secret_into_arguments",
+    "placeholders_remain",
     "redact_known_secrets",
     "redact_user_message",
+    "restore_placeholders",
 ]

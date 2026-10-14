@@ -46,7 +46,12 @@ from .prompts import session_title_from_message
 from .registry import get_registry
 from .runtime import SystemAgentRuntime
 from .secrets import (
+    apply_secret_placeholders,
+    build_secret_map,
+    cap_secret_map,
     contains_request_header_context,
+    decrypt_secret_map,
+    encrypt_secret_map,
     extract_plaintext_secrets,
     redact_known_secrets,
     redact_user_message,
@@ -622,15 +627,40 @@ class SystemAgentService:
             )
             else extract_plaintext_secrets(raw_text)
         )
-        persisted_user_text = redact_user_message(raw_text, chat_secrets)
-        model_user_text = (
-            persisted_user_text
+        # 占位符映射：本轮密钥 → `[[TP-CRED-n]]`。出站给模型的文本与落库的用户消息
+        # 都用占位符（替代旧 `[REDACTED]`：模型看到 `[REDACTED]` 无法把它填回工具参数），
+        # 真实值只存在于本会话的 `secret_map_enc`，并在面向 owner 的显示边界还原。
+        # 请求头场景仍整段打码，不进入占位符机制（其自然语言形态无法可靠逐值抽取）。
+        secret_map: dict[str, str] = (
+            {}
             if contains_request_header_context(raw_text)
-            else raw_text
+            else build_secret_map(chat_secrets)
         )
+        if secret_map:
+            # 先落占位符，再交给 redact_user_message 做剩余的基础字段打码：
+            # 反过来做会把真实密钥先替换成 `[REDACTED]`，占位符就无从替代了
+            # （模型拿到 `[REDACTED]` 无法填回工具参数，这正是本轮要修的问题）。
+            persisted_user_text = redact_user_message(
+                apply_secret_placeholders(raw_text, secret_map)
+            )
+            model_user_text = persisted_user_text
+        else:
+            persisted_user_text = redact_user_message(raw_text, chat_secrets)
+            model_user_text = (
+                persisted_user_text
+                if contains_request_header_context(raw_text)
+                else raw_text
+            )
         if not session.title:
             session.title = session_title_from_message(persisted_user_text)
         session.updated_at = datetime.now(UTC)
+        # 把本轮新密钥合并进会话占位符映射（现值 → merge → FIFO → 加密落库）。
+        # 每轮都重写整列，历史消息引用的旧占位符仍在映射里，直到被 FIFO 挤出。
+        if secret_map:
+            existing_map = decrypt_secret_map(getattr(session, "secret_map_enc", None))
+            session.secret_map_enc = encrypt_secret_map(
+                cap_secret_map({**existing_map, **secret_map})
+            )
 
         approved_tool_calls: list[dict[str, Any]] = []
         requested_approved_tools = {

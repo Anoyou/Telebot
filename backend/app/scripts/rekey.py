@@ -52,6 +52,9 @@ SCALAR_FIELDS: tuple[RekeyField, ...] = (
     RekeyField("system_agent_action", "id", "secret_payload_enc"),
     RekeyField("system_agent_pending_turn", "id", "content_enc"),
     RekeyField("system_agent_run_input", "id", "payload_enc"),
+    # System Agent 会话的密钥占位符映射（`[[TP-CRED-n]] → 真实值`），
+    # 与其它凭据同等对待：MASTER_KEY 变更后必须能整列重加密。
+    RekeyField("system_agent_session", "id", "secret_map_enc"),
 )
 SYSTEM_SETTING_ENCRYPTED_KEYS_BY_PREFIX = {
     "account_bot_transfer_notice:": ("interaction_bot_token_enc", "transfer_bot_token_enc"),

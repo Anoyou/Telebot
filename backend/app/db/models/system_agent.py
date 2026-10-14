@@ -170,6 +170,11 @@ class SystemAgentSession(Base):
         default=dict,
         server_default="{}",
     )
+    # 会话内密钥占位符 `[[TP-CRED-n]]` → 真实值的映射，经 MASTER_KEY 加密的 JSON。
+    # 只在面向 owner 的显示边界（Bot 发送前、Web SSE、Web 历史）还原；
+    # 运行事件 / 日志 / trace / 记忆 / 工具摘要始终保持占位符。FIFO 上限见
+    # `services.system_agent.secrets.MAX_SECRET_MAP_ENTRIES`。
+    secret_map_enc: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),
