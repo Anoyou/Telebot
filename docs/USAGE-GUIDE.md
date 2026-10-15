@@ -80,7 +80,7 @@ make dev              # 本地开发栈：数据库 + Redis + 后端 + 前端
   推理档位、`responses` 协议）。合并规则是「只填空缺」，你手改过的 `label` / `enabled` 永远保留。
 - **密钥池**：同一 Provider 挂多把 Key（最多 32 把），支持优先级、轮转、最少使用三种策略，
   以及 Key 级每日请求/Token 上限、独立出口代理、Key 级冷却。完整规则见 [LLM-KEY-POOL.md](./LLM-KEY-POOL.md)。
-- **近期调用**：每次调用记录命中的 `provider_key_label`，空表示用了主密钥。
+- **近期调用**：每次调用记录命中的 `provider_key_label`，空表示用了主密钥。System Agent 等结构化调用还展示缓存读取/写入 Token；上游未返回的缓存字段按 0 记录，旧接口及历史记录显示“未采集”。各协议的输入统计口径不同，暂不计算缓存命中率。
 
 > **Provider 可用性判断**：列表徽标区分「主 Key / 池内 Key / 未配置」。只配了池内 Key 的 Provider 同样算可用。
 
@@ -137,6 +137,7 @@ Telegram 账号的自动化规则与分组。账号的 userbot / interaction bot
 
 ### 命令与 Action 确认
 
+- userbot 的 `,ai` 默认只携带当前问题；在 Web「系统」设置页的“AI 指令上下文条数”中设为 1–20，或执行 `,aictx <0-20>`，可为所有账号开启最近聊天上下文，设为 0 关闭。历史按时间正序拼装，排除命令和空消息，发送前脱敏；当前问题始终位于最后。实际命令前缀跟随系统配置。
 - 普通斜杠命令（`/status`、`/rules` 等）始终优先于助手模式。
 - 敏感操作（密钥保存、远程插件更新、写操作）会走 Action 二次确认：
   待确认项进入 `/assistant/inbox`， Bot 侧也可用 `/agent pending` 查看。

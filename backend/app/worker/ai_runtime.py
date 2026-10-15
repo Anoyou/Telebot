@@ -7,6 +7,7 @@ from typing import Any
 
 from ..services.llm_call_context import runtime_metadata as build_runtime_metadata
 from ..services.llm_invoke import resolved_api_format_for_call
+from ..services.redactor import redact_text
 
 log = logging.getLogger(__name__)
 
@@ -93,6 +94,7 @@ async def _append_ai_history(client: Any, event: Any, current_prompt: str, limit
     lines = ["[历史对话]"]
     used = len(lines[0])
     for role, text in history:
+        text = redact_text(text)
         remaining = _AI_CONTEXT_MAX_CHARS - used - len(role) - 3
         if remaining <= 0:
             break

@@ -94,12 +94,14 @@ System Agent 的 Provider 管理工具仍不开放 `execution_backend`，`provid
 
 ### 上下文与记忆
 
-System Agent 使用四层上下文，避免每轮回放全部原始消息：
+System Agent 使用四层上下文，并按预算持久化历史窗口：
 
-1. **短期上下文**：仅携带最近 8 条成功/已完成消息，并继续受会话 token **增量预算**约束。
+1. **短期上下文**：按时间顺序携带成功/已完成消息，不再限制为最近 8 条。构建请求时从 `session_token_limit` 预留 system、本轮输入和图片预算；历史超预算时一次丢弃至少 25% 并对齐下一条 user 消息，将窗口起点保存到 `memory_state.context_start_message_id`，后续不重新加载已裁掉的历史。Agent 执行过程仍受会话 token **增量预算**约束。
 2. **滚动压缩摘要**：`memory_summary` 吸收移出短期窗口的旧成功轮次；超 2000 字符时后台 LLM 压缩为状态式描述（`source=system_agent_memory`，失败静默降级）；硬上限 3000 字符，按「`- 用户目标：`」条目边界丢最旧条，避免半条记录。`memory_state.summary_rev` 用于压缩写回的乐观并发。
 3. **结构化工作记忆**：`memory_state` 保存最近工具领域、用户目标、结果、工具摘要与账号上下文，用于“把它停掉”“继续刚才那个”等指代请求。
-4. **长期偏好**：表 `system_agent_user_memory`（按 web_user / bot_tg_user 分 scope，每 scope ≤20 条）。构建 system prompt 时在会话记忆之前注入 enabled 条目（总量 ≤600 字符）。Web 可在助手「配置 → 长期记忆」管理；工具 `memory.list` / `memory.save` / `memory.delete`（写操作走 Action 确认）。密钥样式内容拒绝保存。
+4. **长期偏好**：表 `system_agent_user_memory`（按 web_user / bot_tg_user 分 scope，每 scope ≤20 条）。在本轮上下文中、会话记忆之前注入 enabled 条目（总量 ≤600 字符）。Web 可在助手「配置 → 长期记忆」管理；工具 `memory.list` / `memory.save` / `memory.delete`（写操作走 Action 确认）。密钥样式内容拒绝保存。
+
+系统提示词保持稳定；时间、长期偏好、会话记忆、技能与本轮工具/媒体状态放在历史之后的当前 user 消息尾部。服务端将这部分内容脱敏后保存为 `model_turn_context`，后续回放时保留当轮上下文，减少跨轮前缀变化。直连 Magpie 时使用派生的稳定 `X-Magpie-Session`，Provider 自定义同名请求头优先。
 
 #### 防注入
 

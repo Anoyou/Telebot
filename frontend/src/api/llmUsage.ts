@@ -16,6 +16,8 @@ export interface LLMUsageRecord {
   source?: string | null;
   input_tokens: number;
   output_tokens: number;
+  cache_read_tokens?: number | null;
+  cache_write_tokens?: number | null;
   latency_ms?: number | null;
   success: boolean;
   error_type?: string | null;

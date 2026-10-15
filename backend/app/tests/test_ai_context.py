@@ -47,6 +47,54 @@ async def test_ai_history_is_role_labelled_oldest_first_and_filters_commands() -
 
 
 @pytest.mark.asyncio
+async def test_ai_history_redacts_credentials_before_clipping_and_preserves_current_prompt() -> None:
+    command.set_command_context(
+        command.CommandContext(account_id=1, templates={}, providers={}, self_tg_user_id=99)
+    )
+    authorization_secret = "synthetic-authorization-secret"
+    bot_secret = "123456:synthetic_bot_token"
+    provider_secret = "sk-synthetic-provider-secret"
+    proxy_secret = "synthetic-proxy-password"
+    history_text = (
+        f"Authorization: Bearer {authorization_secret}\n"
+        f"https://api.telegram.org/bot{bot_secret}/getMe\n"
+        f"api_key={provider_secret}\n"
+        f"https://proxy-user:{proxy_secret}@proxy.example:8080\n"
+        + "x" * ai_runtime._AI_CONTEXT_MAX_CHARS
+    )
+    current_prompt = "当前问题 api_key=sk-current-prompt-secret"
+    client = _AsyncMessagesClient([SimpleNamespace(id=1, sender_id=7, text=history_text)])
+
+    result = await ai_runtime._append_ai_history(
+        client, SimpleNamespace(chat_id=123, message=SimpleNamespace(id=2)), current_prompt, 1
+    )
+
+    for secret in (authorization_secret, bot_secret, provider_secret, proxy_secret):
+        assert secret not in result
+    assert "Authorization: Bearer ***" in result
+    assert "https://api.telegram.org/bot***/getMe" in result
+    assert "https://***:***@proxy.example:8080" in result
+    history_block, current_block = result.split("\n\n[当前问题]\n", 1)
+    assert len(history_block) <= ai_runtime._AI_CONTEXT_MAX_CHARS
+    assert current_block == current_prompt
+
+
+@pytest.mark.asyncio
+async def test_ai_history_redacts_credential_crossing_character_limit(monkeypatch) -> None:
+    command.set_command_context(command.CommandContext(account_id=1, templates={}, providers={}))
+    monkeypatch.setattr(ai_runtime, "_AI_CONTEXT_MAX_CHARS", 43)
+    history_text = "普通消息 " + "a" * 20 + " sk-" + "s" * 100
+    client = _AsyncMessagesClient([SimpleNamespace(id=1, sender_id=7, text=history_text)])
+
+    result = await ai_runtime._append_ai_history(
+        client, SimpleNamespace(chat_id=123, message=SimpleNamespace(id=2)), "当前问题", 1
+    )
+
+    assert "sk-" not in result
+    assert result.endswith("\n\n[当前问题]\n当前问题")
+
+
+@pytest.mark.asyncio
 async def test_ai_context_setting_is_normalized_and_read_from_db(monkeypatch) -> None:
     class _DB:
         async def __aenter__(self):
