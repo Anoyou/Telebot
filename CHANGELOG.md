@@ -25,13 +25,22 @@
 
 ## [Unreleased]
 
-### 修复
+## [0.101.0-beta.2] - 2026-10-15 · patch（补丁版本预发布） · 依赖升级与验收修复
+
+### 依赖与兼容
 
 - Telethon 依赖从固定提交 `b7a6dfe`（1.44 / Layer 228）改为 `telethon>=1.45.0`（当前上游 1.45.0，Layer 229），不再把版本钉死在一个不可变提交上：`backend/pyproject.toml` 只声明下限，安装时按可用最新版解析。升级后按钮 TL 结构有破坏性变化，见下条修复。
 - Codex 客户端模拟版本从 `0.145.0` 更新到 npm 上实际拉取到的最新版 `0.162.1`：`gateway/contract/types.go` 的 `DefaultCodexClientVersion`（gateway 内唯一字面量）、`gateway/internal/codex/identity.go` 的 UA 缺省值、`backend/app/services/llm_identity.py` 的 `codex_tui` 默认值与对应回归测试、前端 gateway 管理页夹具同步。UA 模板结构（`{originator}/{version} ({os}; {arch}) {terminal}`）未变，只更新版本号。
 - 兼容 Telethon 1.45 的按钮 TL 改版：1.45 起 `KeyboardButtonCallback` / `KeyboardButtonUrl` 等单一按钮类型被移除，改为 `KeyboardInlineButton` / `KeyboardButton` + 嵌套 `.type`（`InlineButtonTypeCallback`、`InlineButtonTypeUrl`、`ButtonTypeRequestPhone` 等）。同步修正三处因此失效的读取：`worker/plugins/loader.py` 的 `click_callback_button` 类型判定与 `callback_data` 取值（原先 `getattr(button, "data")` 恒为 None，会误报 `callback_data_missing`）、`worker/conversation.py` 的 `click_button` 取 callback data、`worker/plugins/sandbox.py` 的按钮 `kind` 映射。`isinstance` 判定同时收紧为“必须是 `KeyboardInlineButton` 且 `.type` 是 `InlineButtonTypeCallback`”，非 callback 按钮仍被拒绝。
 - 修复事件信封按钮 `kind` 在 Telethon 1.45 下退化成清一色 `text`：`services/event_bus.py::_reply_markup_button_kind` 现在同时识别扁平（1.44 / Bot API）与嵌套（1.45）两种形状，`callback` / `url` / `switch_inline` / `request_phone` / `request_location` 等类型恢复正常投影。新增嵌套形状回归，防止再退回。
 - Layer 契约测试不再把上游钉在 228：`test_telegram_layer_contract.py` 与 `test_userbot_rich_message.py` 由精确断言 `LAYER == 228` 改为下限断言 `>= 228`，`userbot_rich_message` 的常量注释也明确它是能力下限而非版本锁，避免升级依赖必然打挂测试。
+
+### 修复
+
+- 为视觉与无障碍测试的统一夹具声明新增的 `GET /api/system/update-status`：顶栏更新角标接入后，基线页面的合法查询被误判成“未声明 API 请求”，导致浏览器任务里 24 条无障碍用例全部失败；夹具按“尚未执行过自动检查”返回，顶栏不出现角标，截图基线保持不变。
+- 修复 Web 端系统助手常驻摘要行的模型署名：此前无 fallback 且 Provider 同名时优先展示用户请求模型，Magpie 等网关场景下会把上游实际模型（如 `workbuddy/glm-5.3-flash`）藏进详情里；现在摘要统一优先使用 usage 里的实际作答模型，原选择继续在 fallback 详情中单独展示。
+- 修复使用指南与系统助手文档中的四处过期描述：首次安全设置的入口改为「系统 → 用户与管理」，侧边栏默认顺序补齐「概览 / 系统」并说明可排序，系统助手配置入口改为悬浮球面板的「配置」，模型能力探测的“明确不支持”缓存时长改为真实的 30 分钟。
+- 修复 Gateway 连接池在生产路径不可达的问题：`NewHandler` 此前默认注入一次性 `httpClient`，导致后续请求仍逐次新建 Transport；现在生产路径直接进入按 Provider / 代理 / Base URL / snapshot revision 缓存的连接池，端到端测试也不再手动清空测试注入。
 
 ## [0.101.0-beta.1] - 2026-10-14 · minor（次版本预发布） · 自动检查更新、使用指南、回复署名与密钥占位符
 
@@ -58,10 +67,6 @@
 
 ### 修复
 
-- 为视觉与无障碍测试的统一夹具声明新增的 `GET /api/system/update-status`：顶栏更新角标接入后，基线页面的合法查询被误判成“未声明 API 请求”，导致浏览器任务里 24 条无障碍用例全部失败；夹具按“尚未执行过自动检查”返回，顶栏不出现角标，截图基线保持不变。
-- 修复 Web 端系统助手常驻摘要行的模型署名：此前无 fallback 且 Provider 同名时优先展示用户请求模型，Magpie 等网关场景下会把上游实际模型（如 `workbuddy/glm-5.3-flash`）藏进详情里；现在摘要统一优先使用 usage 里的实际作答模型，原选择继续在 fallback 详情中单独展示。
-- 修复使用指南与系统助手文档中的四处过期描述：首次安全设置的入口改为「系统 → 用户与管理」，侧边栏默认顺序补齐「概览 / 系统」并说明可排序，系统助手配置入口改为悬浮球面板的「配置」，模型能力探测的“明确不支持”缓存时长改为真实的 30 分钟。
-- 修复 Gateway 连接池在生产路径不可达的问题：`NewHandler` 此前默认注入一次性 `httpClient`，导致后续请求仍逐次新建 Transport；现在生产路径直接进入按 Provider / 代理 / Base URL / snapshot revision 缓存的连接池，端到端测试也不再手动清空测试注入。
 - 修复平台能力 gate 的加载竞态：`CapabilityGate` 原先要求 capabilities 与 settings **两个查询都**加载完才显示骨架，settings 先返回而 capabilities 仍在飞行时会提前放行，已暂停模块的内容会先渲染一帧再跳暂停页。改为只等 capabilities（settings 仅作为 `ai` 键的默认兜底，保持 default-true 语义），并把决策抽成 `lib/navigation.ts` 的 `resolveCapabilityGatePhase`，补 6 条纯粹逻辑回归。
 - 修复插件 `route="auto"` 下「只配了池内 Key」的 Provider 从路由候选里消失的问题：`ai_facade._shared_router_auto` 构造共享 Router 候选池时改用 `to_runtime_dict()`，此前用展示版 `to_dict()` 再手补 `api_key_enc`，池内 `keys[].api_key_enc` 被抹掉，共享 Router 的 `_has_api_key` 会把这些 Provider 全部过滤掉，插件 auto 永远选不到它们。
 - 占位符还原只发生在面向 owner 的显示边界，且**还原先于各边界的后续加工**：Bot 发送前还原（再追加回复署名、再做 Markdown→Telegram HTML 转换与 3500 字符截断——否则还原进来的真实值会被截断切成半个 token，或吃掉署名预算）；Web 实时流（`assistant_message` 的 `content` / `reasoning`）与 Web 消息历史（`text` / `reasoning`，附件等结构原样返回）在下发前还原。映射读失败、解密失败或会话没有映射时**退化为占位符**，绝不“猜不到就丢内容或整段打码”。run 事件库、运行日志、RunTrace、记忆、工具摘要、`list_events` 全部保持占位符不变。
