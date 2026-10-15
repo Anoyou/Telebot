@@ -1327,32 +1327,48 @@ def _reply_markup_type(data: dict[str, Any]) -> str:
 def _reply_markup_button_kind(button: dict[str, Any]) -> str:
     """Project one Telegram button into a stable type without its action payload."""
 
-    native_type = str(button.get("_") or button.get("type") or "").lower()
-    if "callback" in native_type or button.get("callback_data") is not None or button.get("data") is not None:
+    # Telethon 1.45 起按钮把种类放进嵌套的 ``type`` 子对象
+    # （``KeyboardInlineButton`` + ``{"_": "InlineButtonTypeCallback", ...}``）；
+    # 1.44 与 Bot API 仍是扁平结构。两种形状都要能识别。
+    inner = button.get("type") if isinstance(button.get("type"), dict) else {}
+    inner_name = str(inner.get("_") or "").lower()
+    native_type = f"{str(button.get('_') or '').lower()} {inner_name}".strip()
+
+    def has(name: str) -> bool:
+        """按钮自身或其 1.45 嵌套 type 载荷里存在该字段（含显式 False）。"""
+
+        return button.get(name) is not None or inner.get(name) is not None
+
+    def flag(name: str) -> bool:
+        """布尔型标记字段：任一层为真即为真，保持 1.44 的真值语义。"""
+
+        return bool(button.get(name) or inner.get(name))
+
+    if "callback" in native_type or has("callback_data") or has("data"):
         return "callback"
     if (
         "url" in native_type
-        or button.get("url") is not None
-        or button.get("login_url") is not None
-        or button.get("web_app") is not None
+        or has("url")
+        or has("login_url")
+        or has("web_app")
     ):
         return "url"
     if "switchinline" in native_type or any(
-        button.get(key) is not None
+        has(key)
         for key in ("switch_inline_query", "switch_inline_query_current_chat", "switch_inline_query_chosen_chat")
     ):
         return "switch_inline"
-    if "requestphone" in native_type or button.get("request_contact"):
+    if "requestphone" in native_type or flag("request_contact"):
         return "request_phone"
-    if "requestgeo" in native_type or button.get("request_location"):
+    if "requestgeo" in native_type or flag("request_location"):
         return "request_location"
-    if "requestpoll" in native_type or button.get("request_poll") is not None:
+    if "requestpoll" in native_type or has("request_poll"):
         return "request_poll"
-    if "copy" in native_type or button.get("copy_text") is not None:
+    if "copy" in native_type or has("copy_text"):
         return "copy_text"
-    if "game" in native_type or button.get("callback_game") is not None:
+    if "game" in native_type or has("callback_game"):
         return "game"
-    if "buy" in native_type or button.get("pay"):
+    if "buy" in native_type or flag("pay"):
         return "pay"
     return "text"
 

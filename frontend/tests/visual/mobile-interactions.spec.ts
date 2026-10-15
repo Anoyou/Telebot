@@ -272,7 +272,7 @@ test.describe("移动端交互细节", () => {
             protocol_version: "codex-responses-v1",
             upstream_commit: "839616a1c0ffee1234567890abcdef1234567890",
             build_commit: "46028ebc3d75deadbeef1234567890abcdef1234",
-            codex_client_version: "0.145.0",
+            codex_client_version: "0.162.1",
             codex_version_source: "builtin_default",
             contract_review_date: "2026-08-04",
             error: [

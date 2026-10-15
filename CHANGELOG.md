@@ -25,6 +25,14 @@
 
 ## [Unreleased]
 
+### 修复
+
+- Telethon 依赖从固定提交 `b7a6dfe`（1.44 / Layer 228）改为 `telethon>=1.45.0`（当前上游 1.45.0，Layer 229），不再把版本钉死在一个不可变提交上：`backend/pyproject.toml` 只声明下限，安装时按可用最新版解析。升级后按钮 TL 结构有破坏性变化，见下条修复。
+- Codex 客户端模拟版本从 `0.145.0` 更新到 npm 上实际拉取到的最新版 `0.162.1`：`gateway/contract/types.go` 的 `DefaultCodexClientVersion`（gateway 内唯一字面量）、`gateway/internal/codex/identity.go` 的 UA 缺省值、`backend/app/services/llm_identity.py` 的 `codex_tui` 默认值与对应回归测试、前端 gateway 管理页夹具同步。UA 模板结构（`{originator}/{version} ({os}; {arch}) {terminal}`）未变，只更新版本号。
+- 兼容 Telethon 1.45 的按钮 TL 改版：1.45 起 `KeyboardButtonCallback` / `KeyboardButtonUrl` 等单一按钮类型被移除，改为 `KeyboardInlineButton` / `KeyboardButton` + 嵌套 `.type`（`InlineButtonTypeCallback`、`InlineButtonTypeUrl`、`ButtonTypeRequestPhone` 等）。同步修正三处因此失效的读取：`worker/plugins/loader.py` 的 `click_callback_button` 类型判定与 `callback_data` 取值（原先 `getattr(button, "data")` 恒为 None，会误报 `callback_data_missing`）、`worker/conversation.py` 的 `click_button` 取 callback data、`worker/plugins/sandbox.py` 的按钮 `kind` 映射。`isinstance` 判定同时收紧为“必须是 `KeyboardInlineButton` 且 `.type` 是 `InlineButtonTypeCallback`”，非 callback 按钮仍被拒绝。
+- 修复事件信封按钮 `kind` 在 Telethon 1.45 下退化成清一色 `text`：`services/event_bus.py::_reply_markup_button_kind` 现在同时识别扁平（1.44 / Bot API）与嵌套（1.45）两种形状，`callback` / `url` / `switch_inline` / `request_phone` / `request_location` 等类型恢复正常投影。新增嵌套形状回归，防止再退回。
+- Layer 契约测试不再把上游钉在 228：`test_telegram_layer_contract.py` 与 `test_userbot_rich_message.py` 由精确断言 `LAYER == 228` 改为下限断言 `>= 228`，`userbot_rich_message` 的常量注释也明确它是能力下限而非版本锁，避免升级依赖必然打挂测试。
+
 ## [0.101.0-beta.1] - 2026-10-14 · minor（次版本预发布） · 自动检查更新、使用指南、回复署名与密钥占位符
 
 ### 新增

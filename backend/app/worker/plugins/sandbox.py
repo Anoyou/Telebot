@@ -554,7 +554,11 @@ class SandboxButton:
 
     def __init__(self, button: Any, *, plugin_key: str) -> None:
         raw = getattr(button, "button", button)
-        class_name = type(raw).__name__
+        # Telethon 1.45 起按钮种类从「一支 TL 类型」改为 KeyboardInlineButton /
+        # KeyboardButton + 嵌套的 .type 载荷，旧的 KeyboardButtonCallback 等已移除。
+        # inline 按钮的 .type 是 InlineButtonType*，reply 键盘的 .type 是 ButtonType*。
+        inner_type = getattr(raw, "type", None)
+        class_name = type(inner_type).__name__ if inner_type is not None else type(raw).__name__
         object.__setattr__(
             self,
             "_text",
@@ -564,12 +568,12 @@ class SandboxButton:
             self,
             "_kind",
             {
-                "KeyboardButtonCallback": "callback",
-                "KeyboardButtonUrl": "url",
-                "KeyboardButtonGame": "game",
-                "KeyboardButtonSwitchInline": "switch_inline",
-                "KeyboardButtonRequestPhone": "request_phone",
-                "KeyboardButtonRequestGeoLocation": "request_location",
+                "InlineButtonTypeCallback": "callback",
+                "InlineButtonTypeUrl": "url",
+                "InlineButtonTypeGame": "game",
+                "InlineButtonTypeSwitchInline": "switch_inline",
+                "ButtonTypeRequestPhone": "request_phone",
+                "ButtonTypeRequestGeoLocation": "request_location",
             }.get(class_name, "reply"),
         )
 

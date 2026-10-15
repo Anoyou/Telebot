@@ -1,4 +1,4 @@
-"""Telethon Layer 228 adapter for native Userbot rich messages."""
+"""Telethon Layer 228+ adapter for native Userbot rich messages."""
 
 from __future__ import annotations
 
@@ -27,6 +27,8 @@ from .rich_message import (
 from .telegram_reply import ReplyParameters
 from .telegram_text import UnsupportedRichBlock, text_only_blocks_to_html
 
+# Rich Message raw API 的最低层要求（能力门是 ``layer < 该值`` 才报 too_old），
+# 不是对上游 Telethon 版本/Layer 的锁定：更高的 Layer 直接放行。
 TELETHON_RICH_MESSAGE_LAYER = 228
 CAPABILITY_CACHE_TTL_SECONDS = 300.0
 
@@ -282,7 +284,7 @@ def clear_rich_message_capability_cache(client: Any | None = None) -> None:
 
 
 def build_telethon_input_rich_message(raw: Any) -> Any:
-    """Build a Layer 228 raw HTML/Markdown input without text fallback."""
+    """Build a Layer 228+ raw HTML/Markdown input without text fallback."""
 
     try:
         rich_message = build_input_rich_message(raw)

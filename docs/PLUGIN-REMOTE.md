@@ -8,7 +8,7 @@
 | UserBot 标准消息链路 | Event Bus、前缀命令会话、legacy `on_message`；可含 incoming/outgoing | 建立会话后由 `session.channel=userbot` 路由普通收发 | 管理员命令、账号身份动作、第三方 Bot 消息监听 |
 | Interaction Bot 标准消息链路 | Event Bus 自主订阅或旧规则会话 | 建立会话后由 `session.channel=interaction_bot` 路由普通收发 | 高频群内互动、按钮、题面、普通会话提示 |
 
-能力固定路由有两个例外：`payout`、收付款、发奖永远由 userbot 执行；`send_rich_message` 默认由 interaction bot 执行，只有插件显式指定 `userbot_reply` 才使用 Layer 228 Userbot 能力。两者都不会为了迁就当前会话通道而静默降级。
+能力固定路由有两个例外：`payout`、收付款、发奖永远由 userbot 执行；`send_rich_message` 默认由 interaction bot 执行，只有插件显式指定 `userbot_reply` 才使用 Layer 228+ Userbot 能力。两者都不会为了迁就当前会话通道而静默降级。
 
 Event Bus、Trace、MessageOps 是标准链路的内部契约：Event Bus 负责把标准事件投递给插件，Trace 负责记录匹配、执行和失败原因，MessageOps/action 负责把插件输出交给平台路由和审计。它们服务于两条标准消息链路，不是第四种运行模式。新插件不再以 `interaction_entries`、旧交互规则、旧平铺 payload 或 `notice` 通道作为主路径；这些内容只用于迁移旧插件。
 
@@ -462,7 +462,7 @@ async def on_event(self, ctx: PluginContext, payload: dict[str, Any]) -> list[di
     return []
 ```
 
-`send_rich()` 的 `html`、`markdown`、`blocks` 三选一。省略 `channel` 时仍生成 `send_via="interaction_bot"`。显式指定 `channel="userbot_reply"` 时使用 Telethon Layer 228，支持 HTML、Markdown 和可无损转换的纯文本 blocks，要求主号具备 Telegram Premium 且 `rich_message_posting` 可用；复杂/媒体 blocks、media 和按钮不会降级成普通文本。详见 [API 参考的 Rich Message 说明](./PLUGIN-API-REFERENCE.md#原生-rich-message)。
+`send_rich()` 的 `html`、`markdown`、`blocks` 三选一。省略 `channel` 时仍生成 `send_via="interaction_bot"`。显式指定 `channel="userbot_reply"` 时使用 Telethon Layer 228+，支持 HTML、Markdown 和可无损转换的纯文本 blocks，要求主号具备 Telegram Premium 且 `rich_message_posting` 可用；复杂/媒体 blocks、media 和按钮不会降级成普通文本。详见 [API 参考的 Rich Message 说明](./PLUGIN-API-REFERENCE.md#原生-rich-message)。
 
 示例代码见 `examples/plugins/event_bus_demo`，fixtures 覆盖 message、command、callback、inline、chosen inline 和 payment。
 

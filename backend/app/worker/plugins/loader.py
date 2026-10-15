@@ -49,7 +49,12 @@ from sqlalchemy import select, update
 from telethon import TelegramClient, events
 from telethon.errors import FloodWaitError, PeerFloodError
 from telethon.tl.functions.messages import GetBotCallbackAnswerRequest
-from telethon.tl.types import KeyboardButtonCallback, PeerUser, ReplyInlineMarkup
+from telethon.tl.types import (
+    InlineButtonTypeCallback,
+    KeyboardInlineButton,
+    PeerUser,
+    ReplyInlineMarkup,
+)
 
 from ... import __version__ as TELEPILOT_VERSION
 from ...db.base import AsyncSessionLocal
@@ -3133,13 +3138,14 @@ async def _apply_userbot_click_callback_button_action(
             )
             return None
         button = buttons[column]
-        if not isinstance(button, KeyboardButtonCallback):
+        button_type = getattr(button, "type", None)
+        if not (isinstance(button, KeyboardInlineButton) and isinstance(button_type, InlineButtonTypeCallback)):
             await _fail(
                 "button_type_not_allowed",
                 f"只允许 callback 按钮，实际类型为 {type(button).__name__}",
             )
             return None
-        callback_data = getattr(button, "data", None)
+        callback_data = getattr(button_type, "data", None)
         if not isinstance(callback_data, (bytes, bytearray, memoryview)) or not callback_data:
             await _fail("callback_data_missing", "目标 callback 按钮缺少有效 callback data")
             return None

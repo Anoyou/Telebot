@@ -20,7 +20,7 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from telethon.tl.types import PeerUser
+from telethon.tl.types import InlineButtonTypeCallback, InlineButtonTypeUrl, PeerUser
 
 from app.db.models.feature import (
     FEATURE_FORWARD,
@@ -4208,7 +4208,7 @@ async def test_safe_watch_observes_userbot_inbound_before_gate_without_any_plugi
 @pytest.mark.asyncio
 async def test_installed_direct_passthrough_receives_sandboxed_button_view(monkeypatch) -> None:
     from telethon.tl.custom.messagebutton import MessageButton
-    from telethon.tl.types import KeyboardButtonCallback
+    from telethon.tl.types import InlineButtonTypeCallback, KeyboardInlineButton
 
     from app.worker.plugins.sandbox import SandboxClient, SandboxEvent
 
@@ -4241,7 +4241,7 @@ async def test_installed_direct_passthrough_receives_sandboxed_button_view(monke
     real_client = SimpleNamespace()
     raw_button = MessageButton(
         real_client,
-        KeyboardButtonCallback(text="确认", data=b"secret"),
+        KeyboardInlineButton(text="确认", type=InlineButtonTypeCallback(data=b"secret")),
         chat=-100123,
         bot=456,
         msg_id=7,
@@ -7126,7 +7126,12 @@ async def test_plugin_invoke_deadline_and_circuit_are_scoped_per_plugin(monkeypa
 
 @pytest.mark.asyncio
 async def test_userbot_click_callback_button_uses_platform_read_data(monkeypatch):
-    from telethon.tl.types import KeyboardButtonCallback, KeyboardButtonRow, ReplyInlineMarkup
+    from telethon.tl.types import (
+        InlineButtonTypeCallback,
+        KeyboardInlineButton,
+        KeyboardInlineButtonRow,
+        ReplyInlineMarkup,
+    )
 
     class Redis:
         def __init__(self):
@@ -7161,8 +7166,8 @@ async def test_userbot_click_callback_button_uses_platform_read_data(monkeypatch
                 sender_id=456,
                 reply_markup=ReplyInlineMarkup(
                     rows=[
-                        KeyboardButtonRow(
-                            buttons=[KeyboardButtonCallback(text="确认", data=callback_data)]
+                        KeyboardInlineButtonRow(
+                            buttons=[KeyboardInlineButton(text="确认", type=InlineButtonTypeCallback(data=callback_data))]
                         )
                     ]
                 ),
@@ -7232,7 +7237,12 @@ async def test_userbot_click_callback_button_uses_platform_read_data(monkeypatch
 
 @pytest.mark.asyncio
 async def test_userbot_callback_click_does_not_audit_sensitive_request_exception(monkeypatch):
-    from telethon.tl.types import KeyboardButtonCallback, KeyboardButtonRow, ReplyInlineMarkup
+    from telethon.tl.types import (
+        InlineButtonTypeCallback,
+        KeyboardInlineButton,
+        KeyboardInlineButtonRow,
+        ReplyInlineMarkup,
+    )
 
     class Client:
         async def get_messages(self, _chat_id, *, ids):
@@ -7243,8 +7253,8 @@ async def test_userbot_callback_click_does_not_audit_sensitive_request_exception
                 sender_id=456,
                 reply_markup=ReplyInlineMarkup(
                     rows=[
-                        KeyboardButtonRow(
-                            buttons=[KeyboardButtonCallback(text="确认", data=b"server-secret")]
+                        KeyboardInlineButtonRow(
+                            buttons=[KeyboardInlineButton(text="确认", type=InlineButtonTypeCallback(data=b"server-secret"))]
                         )
                     ]
                 ),
@@ -7314,7 +7324,12 @@ async def test_userbot_click_callback_button_rejects_negative_index(monkeypatch)
 
 @pytest.mark.asyncio
 async def test_userbot_click_callback_button_rejects_missing_callback_data(monkeypatch):
-    from telethon.tl.types import KeyboardButtonCallback, KeyboardButtonRow, ReplyInlineMarkup
+    from telethon.tl.types import (
+        InlineButtonTypeCallback,
+        KeyboardInlineButton,
+        KeyboardInlineButtonRow,
+        ReplyInlineMarkup,
+    )
 
     client = AsyncMock()
     client.get_messages.return_value = SimpleNamespace(
@@ -7322,7 +7337,7 @@ async def test_userbot_click_callback_button_rejects_missing_callback_data(monke
         sender=SimpleNamespace(id=456, bot=True),
         sender_id=456,
         reply_markup=ReplyInlineMarkup(
-            rows=[KeyboardButtonRow(buttons=[KeyboardButtonCallback(text="确认", data=b"")])]
+            rows=[KeyboardInlineButtonRow(buttons=[KeyboardInlineButton(text="确认", type=InlineButtonTypeCallback(data=b""))])]
         ),
     )
     state = SimpleNamespace(
@@ -7506,18 +7521,18 @@ async def test_callback_click_rejects_stale_message_ops_after_plugin_unload(monk
                 sender_id=456,
                 reply_markup=__import__(
                     "telethon.tl.types",
-                    fromlist=["ReplyInlineMarkup", "KeyboardButtonRow", "KeyboardButtonUrl"],
+                    fromlist=["ReplyInlineMarkup", "KeyboardInlineButtonRow", "InlineButtonTypeUrl", "KeyboardInlineButton"],
                 ).ReplyInlineMarkup(
                     rows=[
                         __import__(
                             "telethon.tl.types",
-                            fromlist=["KeyboardButtonRow"],
-                        ).KeyboardButtonRow(
+                            fromlist=["KeyboardInlineButtonRow", "KeyboardInlineButton", "InlineButtonTypeCallback"],
+                        ).KeyboardInlineButtonRow(
                             buttons=[
                                 __import__(
                                     "telethon.tl.types",
-                                    fromlist=["KeyboardButtonUrl"],
-                                ).KeyboardButtonUrl(text="打开", url="https://example.test")
+                                    fromlist=["InlineButtonTypeUrl", "KeyboardInlineButton"],
+                                ).KeyboardInlineButton(text="打开", type=InlineButtonTypeUrl(url="https://example.test"))
                             ]
                         )
                     ]
@@ -7533,18 +7548,18 @@ async def test_callback_click_rejects_stale_message_ops_after_plugin_unload(monk
                 sender_id=456,
                 reply_markup=__import__(
                     "telethon.tl.types",
-                    fromlist=["ReplyInlineMarkup", "KeyboardButtonRow", "KeyboardButtonCallback"],
+                    fromlist=["ReplyInlineMarkup", "KeyboardInlineButtonRow", "InlineButtonTypeCallback"],
                 ).ReplyInlineMarkup(
                     rows=[
                         __import__(
                             "telethon.tl.types",
-                            fromlist=["KeyboardButtonRow"],
-                        ).KeyboardButtonRow(
+                            fromlist=["KeyboardInlineButtonRow", "KeyboardInlineButton", "InlineButtonTypeCallback"],
+                        ).KeyboardInlineButtonRow(
                             buttons=[
                                 __import__(
                                     "telethon.tl.types",
-                                    fromlist=["KeyboardButtonCallback"],
-                                ).KeyboardButtonCallback(text="确认", data=b"owned")
+                                    fromlist=["InlineButtonTypeCallback", "KeyboardInlineButton"],
+                                ).KeyboardInlineButton(text="确认", type=InlineButtonTypeCallback(data=b"owned"))
                             ]
                         )
                     ]
@@ -7560,18 +7575,18 @@ async def test_callback_click_rejects_stale_message_ops_after_plugin_unload(monk
                 sender_id=456,
                 reply_markup=__import__(
                     "telethon.tl.types",
-                    fromlist=["ReplyInlineMarkup", "KeyboardButtonRow", "KeyboardButtonCallback"],
+                    fromlist=["ReplyInlineMarkup", "KeyboardInlineButtonRow", "InlineButtonTypeCallback"],
                 ).ReplyInlineMarkup(
                     rows=[
                         __import__(
                             "telethon.tl.types",
-                            fromlist=["KeyboardButtonRow"],
-                        ).KeyboardButtonRow(
+                            fromlist=["KeyboardInlineButtonRow", "KeyboardInlineButton", "InlineButtonTypeCallback"],
+                        ).KeyboardInlineButtonRow(
                             buttons=[
                                 __import__(
                                     "telethon.tl.types",
-                                    fromlist=["KeyboardButtonCallback"],
-                                ).KeyboardButtonCallback(text="确认", data=b"owned")
+                                    fromlist=["InlineButtonTypeCallback", "KeyboardInlineButton"],
+                                ).KeyboardInlineButton(text="确认", type=InlineButtonTypeCallback(data=b"owned"))
                             ]
                         )
                     ]
@@ -7587,18 +7602,18 @@ async def test_callback_click_rejects_stale_message_ops_after_plugin_unload(monk
                 sender_id=456,
                 reply_markup=__import__(
                     "telethon.tl.types",
-                    fromlist=["ReplyInlineMarkup", "KeyboardButtonRow", "KeyboardButtonCallback"],
+                    fromlist=["ReplyInlineMarkup", "KeyboardInlineButtonRow", "InlineButtonTypeCallback"],
                 ).ReplyInlineMarkup(
                     rows=[
                         __import__(
                             "telethon.tl.types",
-                            fromlist=["KeyboardButtonRow"],
-                        ).KeyboardButtonRow(
+                            fromlist=["KeyboardInlineButtonRow", "KeyboardInlineButton", "InlineButtonTypeCallback"],
+                        ).KeyboardInlineButtonRow(
                             buttons=[
                                 __import__(
                                     "telethon.tl.types",
-                                    fromlist=["KeyboardButtonCallback"],
-                                ).KeyboardButtonCallback(text="确认", data=b"owned")
+                                    fromlist=["InlineButtonTypeCallback", "KeyboardInlineButton"],
+                                ).KeyboardInlineButton(text="确认", type=InlineButtonTypeCallback(data=b"owned"))
                             ]
                         )
                     ]
@@ -7648,7 +7663,12 @@ async def test_userbot_callback_click_rejects_unsafe_or_mismatched_target(
 
 @pytest.mark.asyncio
 async def test_userbot_callback_click_dry_run_does_not_claim_or_send(monkeypatch) -> None:
-    from telethon.tl.types import KeyboardButtonCallback, KeyboardButtonRow, ReplyInlineMarkup
+    from telethon.tl.types import (
+        InlineButtonTypeCallback,
+        KeyboardInlineButton,
+        KeyboardInlineButtonRow,
+        ReplyInlineMarkup,
+    )
 
     redis = _FakeRedis()
     client = AsyncMock()
@@ -7657,7 +7677,7 @@ async def test_userbot_callback_click_dry_run_does_not_claim_or_send(monkeypatch
         sender=SimpleNamespace(id=456, bot=True),
         sender_id=456,
         reply_markup=ReplyInlineMarkup(
-            rows=[KeyboardButtonRow(buttons=[KeyboardButtonCallback(text="确认", data=b"owned")])]
+            rows=[KeyboardInlineButtonRow(buttons=[KeyboardInlineButton(text="确认", type=InlineButtonTypeCallback(data=b"owned"))])]
         ),
     )
     state = SimpleNamespace(
@@ -7692,7 +7712,12 @@ async def test_userbot_callback_click_dry_run_does_not_claim_or_send(monkeypatch
 
 @pytest.mark.asyncio
 async def test_userbot_callback_click_rate_limit_rejection_does_not_claim_dedupe(monkeypatch) -> None:
-    from telethon.tl.types import KeyboardButtonCallback, KeyboardButtonRow, ReplyInlineMarkup
+    from telethon.tl.types import (
+        InlineButtonTypeCallback,
+        KeyboardInlineButton,
+        KeyboardInlineButtonRow,
+        ReplyInlineMarkup,
+    )
 
     redis = _FakeRedis()
     client = AsyncMock()
@@ -7701,7 +7726,7 @@ async def test_userbot_callback_click_rate_limit_rejection_does_not_claim_dedupe
         sender=SimpleNamespace(id=456, bot=True),
         sender_id=456,
         reply_markup=ReplyInlineMarkup(
-            rows=[KeyboardButtonRow(buttons=[KeyboardButtonCallback(text="确认", data=b"owned")])]
+            rows=[KeyboardInlineButtonRow(buttons=[KeyboardInlineButton(text="确认", type=InlineButtonTypeCallback(data=b"owned"))])]
         ),
     )
     state = SimpleNamespace(
@@ -7750,7 +7775,12 @@ async def test_userbot_callback_click_rate_limit_rejection_does_not_claim_dedupe
 
 @pytest.mark.asyncio
 async def test_userbot_callback_click_revalidates_edited_button_after_rate_limit(monkeypatch) -> None:
-    from telethon.tl.types import KeyboardButtonCallback, KeyboardButtonRow, ReplyInlineMarkup
+    from telethon.tl.types import (
+        InlineButtonTypeCallback,
+        KeyboardInlineButton,
+        KeyboardInlineButtonRow,
+        ReplyInlineMarkup,
+    )
 
     redis = _FakeRedis()
     client = AsyncMock()
@@ -7760,7 +7790,7 @@ async def test_userbot_callback_click_revalidates_edited_button_after_rate_limit
             sender=SimpleNamespace(id=456, bot=True),
             sender_id=456,
             reply_markup=ReplyInlineMarkup(
-                rows=[KeyboardButtonRow(buttons=[KeyboardButtonCallback(text="确认", data=b"old")])]
+                rows=[KeyboardInlineButtonRow(buttons=[KeyboardInlineButton(text="确认", type=InlineButtonTypeCallback(data=b"old"))])]
             ),
         ),
         SimpleNamespace(
@@ -7768,7 +7798,7 @@ async def test_userbot_callback_click_revalidates_edited_button_after_rate_limit
             sender=SimpleNamespace(id=456, bot=True),
             sender_id=456,
             reply_markup=ReplyInlineMarkup(
-                rows=[KeyboardButtonRow(buttons=[KeyboardButtonCallback(text="取消", data=b"new")])]
+                rows=[KeyboardInlineButtonRow(buttons=[KeyboardInlineButton(text="取消", type=InlineButtonTypeCallback(data=b"new"))])]
             ),
         ),
     ]
@@ -7811,7 +7841,12 @@ async def test_userbot_callback_click_revalidates_edited_button_after_rate_limit
 
 @pytest.mark.asyncio
 async def test_userbot_callback_click_rechecks_plugin_after_dedupe_await(monkeypatch) -> None:
-    from telethon.tl.types import KeyboardButtonCallback, KeyboardButtonRow, ReplyInlineMarkup
+    from telethon.tl.types import (
+        InlineButtonTypeCallback,
+        KeyboardInlineButton,
+        KeyboardInlineButtonRow,
+        ReplyInlineMarkup,
+    )
 
     class _ActiveClickPlugin(Plugin):
         key = "demo"
@@ -7823,7 +7858,7 @@ async def test_userbot_callback_click_rechecks_plugin_after_dedupe_await(monkeyp
         sender=SimpleNamespace(id=456, bot=True),
         sender_id=456,
         reply_markup=ReplyInlineMarkup(
-            rows=[KeyboardButtonRow(buttons=[KeyboardButtonCallback(text="确认", data=b"owned")])]
+            rows=[KeyboardInlineButtonRow(buttons=[KeyboardInlineButton(text="确认", type=InlineButtonTypeCallback(data=b"owned"))])]
         ),
     )
 
@@ -7883,14 +7918,19 @@ async def test_userbot_callback_click_rechecks_plugin_after_dedupe_await(monkeyp
 
 @pytest.mark.asyncio
 async def test_userbot_callback_click_concurrent_requests_only_click_once(monkeypatch) -> None:
-    from telethon.tl.types import KeyboardButtonCallback, KeyboardButtonRow, ReplyInlineMarkup
+    from telethon.tl.types import (
+        InlineButtonTypeCallback,
+        KeyboardInlineButton,
+        KeyboardInlineButtonRow,
+        ReplyInlineMarkup,
+    )
 
     message = SimpleNamespace(
         empty=False,
         sender=SimpleNamespace(id=456, bot=True),
         sender_id=456,
         reply_markup=ReplyInlineMarkup(
-            rows=[KeyboardButtonRow(buttons=[KeyboardButtonCallback(text="确认", data=b"owned")])]
+            rows=[KeyboardInlineButtonRow(buttons=[KeyboardInlineButton(text="确认", type=InlineButtonTypeCallback(data=b"owned"))])]
         ),
     )
 
@@ -8032,14 +8072,19 @@ async def test_userbot_callback_local_rate_limit_rejection_is_audited(
 
 @pytest.mark.asyncio
 async def test_userbot_callback_click_dedupe_and_redis_fail_closed(monkeypatch) -> None:
-    from telethon.tl.types import KeyboardButtonCallback, KeyboardButtonRow, ReplyInlineMarkup
+    from telethon.tl.types import (
+        InlineButtonTypeCallback,
+        KeyboardInlineButton,
+        KeyboardInlineButtonRow,
+        ReplyInlineMarkup,
+    )
 
     message = SimpleNamespace(
         empty=False,
         sender=SimpleNamespace(id=456, bot=True),
         sender_id=456,
         reply_markup=ReplyInlineMarkup(
-            rows=[KeyboardButtonRow(buttons=[KeyboardButtonCallback(text="确认", data=b"owned")])]
+            rows=[KeyboardInlineButtonRow(buttons=[KeyboardInlineButton(text="确认", type=InlineButtonTypeCallback(data=b"owned"))])]
         ),
     )
 

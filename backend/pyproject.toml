@@ -28,9 +28,10 @@ dependencies = [
     # 缓存/IPC
     "redis>=5.0.4",
 
-    # Telegram 客户端：固定到含 Layer 228 Rich Message TL 定义的不可变提交；
-    # 使用可稳定访问的 GitHub 镜像，避免 Codeberg 超时阻断 CI 与镜像发布。
-    "telethon @ https://github.com/LonamiWebs/Telethon/archive/b7a6dfe815fef200da478524cc1a20350b531175.tar.gz",
+    # Telegram 客户端：至少 1.45.0（PyPI 最新，Layer 229，含 Rich Message TL 定义）。
+    # 1.45 起按钮 TL 结构改为 KeyboardInlineButton + InlineButtonType*，
+    # 不再提供 KeyboardButtonCallback / KeyboardButtonUrl。
+    "telethon>=1.45.0",
     "Pillow>=10.0.0",
     "cryptg>=0.4.0",            # C 加速 AES-IGE（Telethon）
     "python-socks[asyncio]>=2.4.4",  # SOCKS5/HTTP 出口代理

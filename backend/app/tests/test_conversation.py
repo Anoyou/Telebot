@@ -141,6 +141,37 @@ async def test_click_button_index_out_of_range():
 
 
 @pytest.mark.asyncio
+async def test_click_button_reads_nested_145_callback_data():
+    """Telethon 1.45 把 callback data 放进 KeyboardInlineButton.type，仍要能点击。"""
+    from telethon.tl.types import (
+        InlineButtonTypeCallback,
+        KeyboardInlineButton,
+        KeyboardInlineButtonRow,
+        ReplyInlineMarkup,
+    )
+
+    client = AsyncMock()
+    conv = Conversation(client, "@SomeBot")
+    conv._resolved_peer = "@SomeBot"
+
+    msg = MagicMock()
+    msg.id = 7
+    msg.reply_markup = ReplyInlineMarkup(
+        rows=[
+            KeyboardInlineButtonRow(
+                buttons=[KeyboardInlineButton(text="确认", type=InlineButtonTypeCallback(data=b"cb"))]
+            )
+        ]
+    )
+
+    await conv.click_button(msg, 0, 0)
+
+    request = client.call_args.args[0]
+    assert request.data == b"cb"
+    assert request.msg_id == 7
+
+
+@pytest.mark.asyncio
 async def test_setup_registers_handler():
     """_setup 应该注册 NewMessage handler。"""
     client = AsyncMock()

@@ -34,7 +34,7 @@ Event Bus、Trace 和 MessageOps 是两条标准消息链路共用的内部契�
 
 消息链路统一后，互动插件还要记住：
 
-- 触发方式决定普通会话通道。带前缀命令开局，整段普通收发走 `userbot`；关键词、付款确认、按钮回调开局，整段普通收发走 `interaction_bot`。固定能力例外：`payout` 走 UserBot，且已安装插件必须在 `permissions` 中显式声明 `payout`，否则运行时拒绝执行；`send_rich_message` 默认走 Interaction Bot，显式 `userbot_reply` 才使用 Layer 228。
+- 触发方式决定普通会话通道。带前缀命令开局，整段普通收发走 `userbot`；关键词、付款确认、按钮回调开局，整段普通收发走 `interaction_bot`。固定能力例外：`payout` 走 UserBot，且已安装插件必须在 `permissions` 中显式声明 `payout`，否则运行时拒绝执行；`send_rich_message` 默认走 Interaction Bot，显式 `userbot_reply` 才使用 Layer 228+。
 - 账号级“允许会话”列表留空表示全部会话放行；列表非空时才只允许名单内会话。插件自己的 `allowed_chat_ids=[]` 是插件自定义配置，语义由插件自己定义，不能套用平台规则。
 - 新玩法优先实现一个 `on_event(ctx, payload)` 入口，在同一个入口里按 `tp_event.type` 或 `payload["source"]["type"]` 处理 `command`、`keyword`、`payment_confirmed`、`message`、`callback_query`、`session_expired`。
 - 单局状态优先写进 `session.data`，通过 `update_session` 持久化；Event Bus 订阅入口首次建局必须先返回 `start_session`，裸 `update_session` 不会隐式创建会话。不要再把游戏状态放进进程内全局字典、锁和自建超时任务。

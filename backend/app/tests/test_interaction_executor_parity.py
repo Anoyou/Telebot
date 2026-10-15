@@ -30,8 +30,9 @@ from unittest.mock import AsyncMock
 
 import pytest
 from telethon.tl.types import (
-    KeyboardButtonCallback,
-    KeyboardButtonRow,
+    InlineButtonTypeCallback,
+    KeyboardInlineButton,
+    KeyboardInlineButtonRow,
     ReplyInlineMarkup,
 )
 
@@ -158,8 +159,8 @@ class _FakeClient:
             sender_id=456,
             reply_markup=ReplyInlineMarkup(
                 rows=[
-                    KeyboardButtonRow(
-                        buttons=[KeyboardButtonCallback(text="确认", data=b"server-owned")]
+                    KeyboardInlineButtonRow(
+                        buttons=[KeyboardInlineButton(text="确认", type=InlineButtonTypeCallback(data=b"server-owned"))]
                     )
                 ]
             ),

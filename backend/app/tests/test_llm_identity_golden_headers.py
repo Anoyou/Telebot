@@ -69,7 +69,7 @@ def test_golden_codex_tui_headers() -> None:
     ident = get_identity("codex_tui")
     assert ident is not None
     assert ident.headers() == {
-        "User-Agent": f"codex-tui/0.145.0 ({_os_seg()}) Apple_Terminal/487 (codex-tui; 0.145.0)",
+        "User-Agent": f"codex-tui/0.162.1 ({_os_seg()}) Apple_Terminal/487 (codex-tui; 0.162.1)",
         "originator": "codex-tui",
     }
 
@@ -174,7 +174,7 @@ async def test_minimal_transport_headers_carry_no_fabricated_product_ua() -> Non
 def test_default_client_versions_locked() -> None:
     """默认版本号 golden：漂移时必须显式更新证据。"""
     assert llm_identity.default_client_versions() == {
-        "codex_tui": "0.145.0",
+        "codex_tui": "0.162.1",
         "codex_desktop_core": "0.146.0-alpha.3.1",
         "codex_desktop_build": "26.721.41059",
         "claude_code": "2.1.220",

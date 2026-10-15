@@ -195,10 +195,11 @@ def test_telethon_builder_rejects_unsupported_input_without_text_fallback(
     assert exc_info.value.code == code
 
 
-def test_local_capability_matches_pinned_layer_228_schema() -> None:
+def test_local_capability_covers_rich_message_schema() -> None:
     layer, raw_types_available = local_telethon_rich_message_capability()
 
-    assert layer == 228
+    # 本机 Telethon 只要不低于 Layer 228（Rich Message 引入层）即视为可用。
+    assert layer is not None and layer >= 228
     assert raw_types_available is True
 
 

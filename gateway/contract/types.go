@@ -10,7 +10,7 @@ const ProtocolVersion = "2"
 // Python 控制面下发快照时会带上当前生效版本，这个常量只在"旧控制面 / 测试构造的
 // 快照缺字段"时才被用到。两侧漂移的症状是 UA / Version 头与 Python 链路不一致，
 // 上游可能据此拒绝或降级处理。改这里时同步改 llm_identity.py 与对应回归测试。
-const DefaultCodexClientVersion = "0.145.0"
+const DefaultCodexClientVersion = "0.162.1"
 
 type VersionInfo struct {
 	Version                 string `json:"version"`

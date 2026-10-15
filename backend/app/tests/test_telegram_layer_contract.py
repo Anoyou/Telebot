@@ -8,8 +8,9 @@ from telethon import utils
 from telethon.tl import alltlobjects, functions, types
 
 
-def test_telethon_uses_layer_228_with_rich_message_types() -> None:
-    assert alltlobjects.LAYER == 228
+def test_telethon_layer_covers_rich_message_types() -> None:
+    # 只要求不低于引入 Rich Message 的 Layer 228，跟随上游前沿版本（当前 229）。
+    assert alltlobjects.LAYER >= 228
 
     for type_name in (
         "InputRichMessageHTML",

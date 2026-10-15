@@ -91,7 +91,7 @@ async def test_codex_version_change_triggers_new_gateway_revision(
     )
     monkeypatch.setattr(
         "app.services.gateway_runtime.llm_identity.default_client_versions",
-        lambda: {"codex_tui": "0.145.0"},
+        lambda: {"codex_tui": "0.162.1"},
     )
     request = AsyncMock(side_effect=[{"revision": 1}, {"revision": 2}])
     monkeypatch.setattr(manager, "_request_json", request)

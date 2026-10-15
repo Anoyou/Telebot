@@ -83,7 +83,11 @@ class Conversation:
         if row < 0 or col < 0 or row >= len(rows) or col >= len(rows[row].buttons):
             raise IndexError(f"按钮索引越界: row={row}, col={col}")
         button = rows[row].buttons[col]
+        # Telethon 1.45 起 callback data 位于 KeyboardInlineButton 的嵌套 .type
+        # （1.44 及更早直接挂在按钮上），两种形状都取。
         data = getattr(button, "data", None)
+        if data is None:
+            data = getattr(getattr(button, "type", None), "data", None)
         if data is None:
             raise ValueError("该按钮不是 callback 类型")
         from telethon.tl.functions.messages import GetBotCallbackAnswerRequest

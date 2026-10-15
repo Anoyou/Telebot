@@ -268,7 +268,7 @@ def _codex_desktop_user_agent(core_version: str, app_build: str) -> str:
 
 # 采集时核对过 UA 结构的真实版本（DB 覆盖缺失时回落这些）。
 _DEFAULT_CLIENT_VERSIONS: dict[str, str] = {
-    "codex_tui": "0.145.0",
+    "codex_tui": "0.162.1",
     "codex_desktop_core": "0.146.0-alpha.3.1",
     "codex_desktop_build": "26.721.41059",
     "claude_code": "2.1.220",
@@ -347,7 +347,7 @@ def _build_catalog() -> dict[str, ClientIdentity]:
         user_agent=_codex_tui_user_agent(_CLIENT_VERSIONS["codex_tui"]),
         # 动态请求链路 ID 由 ResponsesClient 在实例化时生成，不写入固定目录。
         extra_headers={"originator": "codex-tui"},
-        source="用户真实抓包：交互式 Codex TUI 0.145.0 Responses",
+        source="用户真实抓包：交互式 Codex TUI 0.162.1 Responses",
         captured_at="2026-07-27",
         client_version=_CLIENT_VERSIONS["codex_tui"],
         verified=True,

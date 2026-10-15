@@ -27,7 +27,7 @@
 - `source` 描述事件类型和来源通道；`actor` 是当前行为主体；`sender` 是发出消息的人或 Bot；`source_actor` 可表示可信外部通知 Bot；`player` 是付款绑定玩家；`payment.status=confirmed` 才能作为到账依据。
 - `session.channel` 表示当前整段会话默认收发通道；普通发送动作不用手写 `send_via`，平台会继承会话通道。
 - 普通消息回复使用 `ctx.messages.send(...)` 或返回 `{"type": "send_message", ...}`；标题、任务列表、折叠详情、表格等原生格式使用 `ctx.messages.send_rich(html=...)` 或 `send_rich_message` action；图片题面可用 `ctx.messages.send_photo(..., save_message_id_key="round")`，后续用 `ctx.messages.edit_caption(message_id_key="round", caption="...")` 原地更新 caption。
-- `send_rich` 的 `html` / `markdown` / `blocks` 必须三选一，继续声明 `send_message` 权限；默认走 Interaction Bot。显式 `userbot_reply` 使用 Layer 228，支持 HTML、Markdown 和纯文本 blocks，并要求 Premium 与 `rich_message_posting`；复杂/媒体 blocks 失败时不会静默退化。
+- `send_rich` 的 `html` / `markdown` / `blocks` 必须三选一，继续声明 `send_message` 权限；默认走 Interaction Bot。显式 `userbot_reply` 使用 Layer 228+，支持 HTML、Markdown 和纯文本 blocks，并要求 Premium 与 `rich_message_posting`；复杂/媒体 blocks 失败时不会静默退化。
 - 当前 Interaction Bot 发按钮、用户点击：订阅 `source=["interaction_bot"]`、`events=["callback_query"]`、`scope="all_allowed_chats"`，用 `answer_callback` ACK；不依赖旧 Interaction Bot 规则或活跃会话。
 - 第三方 Bot 发按钮、TelePilot UserBot 主动点击：插件声明 `permissions=["click_bot_button"]`，在 UserBot 执行链路调用 `ctx.messages.click_callback_button(chat_id=..., message_id=..., row=..., column=..., expected_bot_id=..., expected_button_text=...)`；Interaction Bot 插件入口不支持。这不是 `callback_query`，也不能用 `answer_callback`。
 - 平台只允许 callback 类型，重新读取 Telegram 消息和 callback data，并统一执行 Bot/文字校验、限流、Trace、ActionEvent、dry-run 和账号级物理点击锁；明确成功后保护 20 秒，超时/未知结果保护 5 分钟，Redis 不可用时拒绝点击。`message.buttons[row][column].click()` 已被安全阻断。

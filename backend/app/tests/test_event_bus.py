@@ -318,7 +318,7 @@ def test_telethon_reply_markup_projection_preserves_keyboard_type(
             "rows": [
                 {
                     "buttons": [
-                        {"_": "KeyboardButtonCallback", "text": "确认", "data": b"secret"}
+                        {"_": "InlineButtonTypeCallback", "text": "确认", "data": b"secret"}
                     ]
                 }
             ],
@@ -328,6 +328,38 @@ def test_telethon_reply_markup_projection_preserves_keyboard_type(
     assert markup is not None
     assert markup["type"] == expected_type
     assert markup["buttons"][0]["kind"] == "callback"
+
+
+def test_telethon_145_nested_button_type_projects_kind() -> None:
+    """Telethon 1.45 把按钮种类放进嵌套 type；投影仍要还原 callback/url 等 kind。
+
+    1.44 及更早、以及 Bot API 都是扁平结构（``{"_": "KeyboardButtonUrl", "url": ...}``）。
+    两组形状都必须投影出同一种 kind，否则 userbot 事件信封会退化成清一色 ``text``。
+    """
+    markup = _reply_markup_summary(
+        {
+            "_": "ReplyInlineMarkup",
+            "rows": [
+                {
+                    "buttons": [
+                        {
+                            "_": "KeyboardInlineButton",
+                            "text": "确认",
+                            "type": {"_": "InlineButtonTypeCallback", "data": b"x"},
+                        },
+                        {
+                            "_": "KeyboardInlineButton",
+                            "text": "打开",
+                            "type": {"_": "InlineButtonTypeUrl", "url": "https://e.test"},
+                        },
+                    ]
+                }
+            ],
+        }
+    )
+
+    assert markup is not None
+    assert [button["kind"] for button in markup["buttons"]] == ["callback", "url"]
     assert "data" not in markup["buttons"][0]
 
 

@@ -154,8 +154,8 @@ function jsonResponse(pathname: string): unknown | undefined {
     items: [{
       key: "codex_tui",
       label: "Codex CLI",
-      current: "0.145.0",
-      default: "0.145.0",
+      current: "0.162.1",
+      default: "0.162.1",
       registry: "npm",
       detectable: true,
     }],

@@ -14,7 +14,7 @@
 | UserBot 标准消息链路 | Event Bus、前缀命令、legacy `on_message`；可含 incoming/outgoing | 建立会话后由 `session.channel=userbot` 路由普通收发 | 适合管理员命令、账号身份动作和第三方 Bot 消息监听；会话按钮会降级成文本编号 |
 | Interaction Bot 标准消息链路 | Event Bus 自主订阅或旧规则会话 | 建立会话后由 `session.channel=interaction_bot` 路由普通收发 | 适合高频群内互动、按钮、题面和会话提示 |
 
-固定路由例外有两类：`payout`、收付款、发奖永远由 userbot 执行；`send_rich_message` 默认由 interaction bot 执行，只有显式选择 `userbot_reply` 才进入 Layer 228 Userbot 路径。Event Bus、Trace、MessageOps 只是两条标准消息链路的内部契约，不是第四种模式。
+固定路由例外有两类：`payout`、收付款、发奖永远由 userbot 执行；`send_rich_message` 默认由 interaction bot 执行，只有显式选择 `userbot_reply` 才进入 Layer 228+ Userbot 路径。Event Bus、Trace、MessageOps 只是两条标准消息链路的内部契约，不是第四种模式。
 
 ### 平台能力开关
 
@@ -72,7 +72,7 @@ UserBot 主动点击第三方 Bot callback 必须声明 `click_bot_button` 权�
 - 会话通道由触发方式决定。命令开局默认走 userbot，关键词/付款/按钮开局默认走 interaction bot；普通发送动作应继承 `session.channel`，不要每条消息手动改通道。
 - 账号级“允许会话”列表留空表示全部会话放行，非空时才只允许名单内会话；插件自己的 `allowed_chat_ids=[]` 是自定义配置，不能擅自套用平台语义。
 - `payout`、收付款、发奖永远经 userbot 执行，并进入 `RateLimitEngine`、trace 和失败回写。插件不要把 Bot 公告伪装成转账，也不要把发奖逻辑拆成“先发普通消息，再等旧文案协议补发”。
-- `send_rich_message` 默认经 Interaction Bot 执行。显式请求 `userbot_reply` 时使用 Telethon Layer 228，并要求 Premium 与 `rich_message_posting`；当前支持 HTML、Markdown 和可无损转换的纯文本 blocks，复杂/媒体 blocks、media、Bot `reply_markup` 必须明确失败，禁止静默转成普通 HTML 或纯文本。
+- `send_rich_message` 默认经 Interaction Bot 执行。显式请求 `userbot_reply` 时使用 Telethon Layer 228+，并要求 Premium 与 `rich_message_posting`；当前支持 HTML、Markdown 和可无损转换的纯文本 blocks，复杂/媒体 blocks、media、Bot `reply_markup` 必须明确失败，禁止静默转成普通 HTML 或纯文本。
 - TelePilot 自有的账号 Bot 控制页与系统告警可以在同一个 Bot 内从 Rich Message 回退到旧 HTML，以兼容 Bot API 暂不支持或格式拒绝；插件 `send_rich_message` 不继承这个内部兼容策略。
 - userbot 会话没有原生 inline 按钮能力。平台会把按钮降级成文本编号，并把玩家回复合成为 callback 事件；这意味着强按钮玩法最好默认 `keyword_only`，避免命令开局落到不适合的通道。
 

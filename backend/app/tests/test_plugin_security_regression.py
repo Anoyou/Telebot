@@ -2129,7 +2129,12 @@ def test_lint_plugin_metadata_files_accepts_standard_channel_aliases(tmp_path) -
 @pytest.mark.asyncio
 async def test_sandbox_message_buttons_do_not_leak_raw_button_or_client() -> None:
     from telethon.tl.custom.messagebutton import MessageButton
-    from telethon.tl.types import KeyboardButtonCallback, KeyboardButtonRow, ReplyInlineMarkup
+    from telethon.tl.types import (
+        InlineButtonTypeCallback,
+        KeyboardInlineButton,
+        KeyboardInlineButtonRow,
+        ReplyInlineMarkup,
+    )
 
     from app.worker.plugins.sandbox import (
         SandboxButton,
@@ -2141,15 +2146,15 @@ async def test_sandbox_message_buttons_do_not_leak_raw_button_or_client() -> Non
     real_client = SimpleNamespace()
     raw_button = MessageButton(
         real_client,
-        KeyboardButtonCallback(text="确认", data=b"secret"),
+        KeyboardInlineButton(text="确认", type=InlineButtonTypeCallback(data=b"secret")),
         chat=123,
         bot=456,
         msg_id=7,
     )
     raw_markup = ReplyInlineMarkup(
         rows=[
-            KeyboardButtonRow(
-                buttons=[KeyboardButtonCallback(text="确认", data=b"nested-secret")]
+            KeyboardInlineButtonRow(
+                buttons=[KeyboardInlineButton(text="确认", type=InlineButtonTypeCallback(data=b"nested-secret"))]
             )
         ]
     )

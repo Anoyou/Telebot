@@ -24,7 +24,7 @@ const (
 // codexUserAgent 复刻本机交互式 Codex TUI 的 UA 结构。终端段来自真实抓包；
 // 默认版本没有内置 UA 里必须带的占位符以外的魔法值，与 Python 侧
 // `_codex_tui_user_agent()` 的字段顺序保持一致（便于两侧比对）。
-const codexUserAgent = "codex-tui/0.145.0 (Mac OS 26.5.0; arm64) iTerm.app/3.6.10 (codex-tui; 0.145.0)"
+const codexUserAgent = "codex-tui/0.162.1 (Mac OS 26.5.0; arm64) iTerm.app/3.6.10 (codex-tui; 0.162.1)"
 
 type requestIdentity struct {
 	installationID string
