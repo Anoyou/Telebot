@@ -129,6 +129,7 @@ export function SettingsIndex() {
   });
 
   const [prefix, setPrefix] = useState("");
+  const [aiContextMessages, setAiContextMessages] = useState("0");
   const [commandPrefixRequired, setCommandPrefixRequired] = useState(true);
   const [aiEnabled, setAiEnabled] = useState(true);
   const [timezone, setTimezone] = useState("Asia/Shanghai");
@@ -158,6 +159,7 @@ export function SettingsIndex() {
   useEffect(() => {
     if (settingsQ.data) {
       setPrefix(settingsQ.data.command_prefix ?? ",");
+      setAiContextMessages(String(settingsQ.data.ai_context_messages ?? 0));
       setCommandPrefixRequired(settingsQ.data.command_prefix_required ?? true);
       setAiEnabled(settingsQ.data.ai_enabled ?? true);
       setTimezone(settingsQ.data.timezone ?? "Asia/Shanghai");
@@ -232,6 +234,16 @@ export function SettingsIndex() {
     mutationFn: () => patchSystemSettings({ command_prefix: prefix }),
     onSuccess: () => {
       toast.success("指令前缀已保存（worker 将热加载）");
+      qc.invalidateQueries({ queryKey: ["system", "settings"] });
+    },
+    onError: (err) => toast.error(getErrMsg(err)),
+  });
+
+  const saveAiContextMessages = useMutation({
+    mutationFn: () => patchSystemSettings({ ai_context_messages: Number(aiContextMessages) || 0 }),
+    onSuccess: (data) => {
+      setAiContextMessages(String(data.ai_context_messages ?? 0));
+      toast.success("AI 指令上下文条数已保存（worker 将热加载）");
       qc.invalidateQueries({ queryKey: ["system", "settings"] });
     },
     onError: (err) => toast.error(getErrMsg(err)),
@@ -490,6 +502,28 @@ export function SettingsIndex() {
                   loading={savePrefix.isPending}
                 >
                   {!savePrefix.isPending ? <Save className="mr-2 h-4 w-4" /> : null}
+                  保存
+                </Button>
+              </div>
+              <div className="mt-4 flex max-w-xl flex-col gap-2 sm:flex-row sm:items-end sm:gap-3">
+                <div className="w-full space-y-1.5 sm:max-w-xs">
+                  <Label htmlFor="ai-context-messages">AI 指令上下文条数</Label>
+                  <Input
+                    id="ai-context-messages"
+                    type="number"
+                    min={0}
+                    max={20}
+                    step={1}
+                    inputMode="numeric"
+                    value={aiContextMessages}
+                    onChange={(e) => setAiContextMessages(e.target.value.replace(/[^0-9]/g, "").slice(0, 2))}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    0 = 不带上下文；&gt;0 时 ,ai 会携带最近 N 条聊天记录
+                  </p>
+                </div>
+                <Button onClick={() => saveAiContextMessages.mutate()} loading={saveAiContextMessages.isPending}>
+                  {!saveAiContextMessages.isPending ? <Save className="mr-2 h-4 w-4" /> : null}
                   保存
                 </Button>
               </div>

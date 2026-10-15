@@ -5,11 +5,102 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
+from ..services.llm_call_context import runtime_metadata as build_runtime_metadata
 from ..services.llm_invoke import resolved_api_format_for_call
 
 log = logging.getLogger(__name__)
 
 _LONG_MESSAGE_THRESHOLD = 3900
+_AI_CONTEXT_MAX_CHARS = 8000
+
+
+def _normalize_ai_context_messages(value: Any) -> int:
+    try:
+        return max(0, min(20, int(value)))
+    except (TypeError, ValueError):
+        return 0
+
+
+async def _read_ai_context_messages(default: int = 0) -> int:
+    """Read the latest global setting, falling back to the worker-local context."""
+    try:
+        from ..db.base import AsyncSessionLocal
+        from ..db.models.system import SystemSetting
+
+        async with AsyncSessionLocal() as db:
+            row = await db.get(SystemSetting, "ai_context_messages")
+        raw = row.value if row is not None else None
+        if isinstance(raw, dict):
+            raw = raw.get("value", raw.get("count", 0))
+        if raw is not None:
+            return _normalize_ai_context_messages(raw)
+    except Exception:  # noqa: BLE001
+        log.debug("read ai_context_messages failed; using worker-local value", exc_info=True)
+    return _normalize_ai_context_messages(default)
+
+
+def _message_role(message: Any, self_tg_user_id: int | None) -> str:
+    """Map Telegram messages to the role labels understood by the prompt."""
+    sender_id = getattr(message, "sender_id", None)
+    if self_tg_user_id is not None and sender_id is not None:
+        try:
+            if int(sender_id) == int(self_tg_user_id):
+                return "assistant"
+        except (TypeError, ValueError):
+            pass
+    return "user"
+
+
+async def _load_ai_history(client: Any, event: Any, limit: int) -> list[tuple[str, str]]:
+    """Load recent non-empty messages, oldest first, excluding the current command."""
+    if limit <= 0:
+        return []
+    chat_id = getattr(event, "chat_id", None)
+    if chat_id is None:
+        return []
+    try:
+        from .command import current_command_prefix, get_command_context
+
+        ctx = get_command_context()
+        self_tg_user_id = getattr(ctx, "self_tg_user_id", None)
+        current_id = getattr(getattr(event, "message", None), "id", None)
+        messages: list[tuple[str, str, int]] = []
+        async for message in client.iter_messages(chat_id, limit=limit + 8):
+            msg_id = getattr(message, "id", None)
+            if current_id is not None and msg_id == current_id:
+                continue
+            text = str(getattr(message, "text", None) or getattr(message, "message", None) or "").strip()
+            if not text:
+                continue
+            # Ignore prior worker commands as well as the current command message.
+            prefix = current_command_prefix()
+            if prefix and text.startswith(prefix):
+                continue
+            messages.append((_message_role(message, self_tg_user_id), text, int(msg_id or 0)))
+            if len(messages) >= limit:
+                break
+        messages.reverse()
+        return [(role, text) for role, text, _ in messages]
+    except Exception:  # noqa: BLE001
+        log.debug("load ai history failed", exc_info=True)
+        return []
+
+
+async def _append_ai_history(client: Any, event: Any, current_prompt: str, limit: int) -> str:
+    history = await _load_ai_history(client, event, limit)
+    if not history:
+        return current_prompt
+    lines = ["[历史对话]"]
+    used = len(lines[0])
+    for role, text in history:
+        remaining = _AI_CONTEXT_MAX_CHARS - used - len(role) - 3
+        if remaining <= 0:
+            break
+        clipped = text[:remaining]
+        lines.append(f"{role}: {clipped}")
+        used += len(role) + len(clipped) + 2
+    lines.extend(("", "[当前问题]", current_prompt))
+    return "\n".join(lines)
 
 
 def _format_llm_sources(sources: Any) -> str:
@@ -296,6 +387,7 @@ async def _call_llm_provider(
     temperature: float | None,
     reasoning_effort: str | None,
     timeout_seconds: int | None,
+    runtime_metadata: dict[str, Any] | None = None,
 ) -> _LLMCallOutcome | None:
     from ..services.llm_client import LLMCallFailed, LLMError
     from ..services.llm_invoke import invoke as invoke_ai_runtime
@@ -333,6 +425,7 @@ async def _call_llm_provider(
             source=f"command:{tpl.get('name') or 'ai'}",
             fallback_provider_id=fallback_provider_id,
             matched_tag=routing_matched_tag,
+            runtime_metadata=runtime_metadata,
         )
         if used_provider_dto.id != provider_dto.id:
             provider_dict = ctx_providers.get(used_provider_dto.id) or used_provider_dto.to_dict()
@@ -1155,6 +1248,13 @@ async def invoke(
         image_bytes_list=image_bytes_list,
         transcribed_text=transcribed_text,
     )
+    # Read on every invocation so a Web/API change takes effect even if the
+    # worker missed its reload IPC message. Historical turns remain separate
+    # role-labelled lines and the current question is always last.
+    context_default = getattr(ctx, "ai_context_messages", 0)
+    context_count = await _read_ai_context_messages(context_default)
+    if context_count > 0:
+        user_msg = await _append_ai_history(client, event, user_msg, context_count)
 
     outcome = await _call_llm_provider(
         event=event,
@@ -1179,6 +1279,11 @@ async def invoke(
         temperature=request_settings.temperature,
         reasoning_effort=request_settings.reasoning_effort,
         timeout_seconds=request_settings.timeout_seconds,
+        runtime_metadata=build_runtime_metadata(
+            session_id=f"cmdai:{account_id}:{getattr(event, 'chat_id', '')}",
+            run_id=f"cmdai-run:{getattr(getattr(event, 'message', None), 'id', '') or id(event)}",
+            turn_id=f"cmdai-turn:{getattr(getattr(event, 'message', None), 'id', '') or id(event)}",
+        ),
     )
     if outcome is None:
         return

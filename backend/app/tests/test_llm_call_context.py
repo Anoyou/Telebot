@@ -1,6 +1,11 @@
 from __future__ import annotations
 
-from app.services.llm_call_context import ClientRuntimeContext, runtime_metadata
+from app.services.llm_call_context import (
+    ClientRuntimeContext,
+    reset_current_runtime_metadata,
+    runtime_metadata,
+    set_current_runtime_metadata,
+)
 
 
 def test_runtime_context_is_stable_per_provider_but_request_id_is_unique() -> None:
@@ -37,3 +42,15 @@ def test_runtime_headers_omit_raw_and_agent_identity_fields() -> None:
         "grok_cli",
         model="model\r\nX-Injected: yes",
     )
+
+
+def test_current_runtime_metadata_is_used_when_request_has_no_metadata() -> None:
+    metadata = runtime_metadata(session_id="chat-42", run_id="run-1")
+    token = set_current_runtime_metadata(metadata)
+    try:
+        first = ClientRuntimeContext.from_metadata(None, provider_scope="provider|standard")
+        second = ClientRuntimeContext.from_metadata(None, provider_scope="provider|standard")
+    finally:
+        reset_current_runtime_metadata(token)
+    assert first.session_id == second.session_id
+    assert not first.ephemeral

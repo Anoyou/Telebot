@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import inspect
 import time
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from typing import Any
 
 from ..db.models.command import (
@@ -13,6 +13,7 @@ from ..db.models.command import (
     LLM_WEB_SEARCH_API_FORMAT_AUTO,
 )
 from . import llm_account_budget, llm_client, llm_key_pool, llm_runtime
+from .llm_call_context import reset_current_runtime_metadata, set_current_runtime_metadata
 from .llm_client import LLMCallFailed, LLMResult
 from .llm_dto import LLMProviderDTO
 from .llm_protocol import ModelRequest, ModelResponse, ModelStreamEvent
@@ -50,6 +51,7 @@ async def invoke(
     fallback_provider_id: int | None = None,
     matched_tag: str | None = None,
     client_factory: Callable[..., Any | Awaitable[Any]] | None = None,
+    runtime_metadata: Mapping[str, Any] | None = None,
 ) -> tuple[LLMResult, LLMProviderDTO, bool]:
     """Call a standard LLM provider with shared fallback / retry / usage logic.
 
@@ -108,26 +110,31 @@ async def invoke(
             effective_api_format=api_format_override,
         )
 
-    return await call_with_fallback(
-        chain,
-        system,
-        user,
-        override_model=override_model,
-        routed_model=routed_model,
-        max_tokens=max_tokens,
-        images=images,
-        web_search=web_search,
-        web_search_context_size=web_search_context_size,
-        temperature=temperature,
-        reasoning_effort=reasoning_effort,
-        timeout_seconds=timeout_seconds,
-        native_image=native_image,
-        client_factory=_build_runtime_client,
-        client_identity_resolver=_resolve_runtime_client_identity,
-        account_id=account_id,
-        triggered_by_account_id=triggered_by_account_id,
-        source=source,
-    )
+    token = set_current_runtime_metadata(runtime_metadata) if runtime_metadata is not None else None
+    try:
+        return await call_with_fallback(
+            chain,
+            system,
+            user,
+            override_model=override_model,
+            routed_model=routed_model,
+            max_tokens=max_tokens,
+            images=images,
+            web_search=web_search,
+            web_search_context_size=web_search_context_size,
+            temperature=temperature,
+            reasoning_effort=reasoning_effort,
+            timeout_seconds=timeout_seconds,
+            native_image=native_image,
+            client_factory=_build_runtime_client,
+            client_identity_resolver=_resolve_runtime_client_identity,
+            account_id=account_id,
+            triggered_by_account_id=triggered_by_account_id,
+            source=source,
+        )
+    finally:
+        if token is not None:
+            reset_current_runtime_metadata(token)
 
 
 async def invoke_structured(

@@ -25,6 +25,7 @@ from contextvars import ContextVar
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from typing import Any
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -97,6 +98,16 @@ _ERROR_SECRET_VALUES: ContextVar[tuple[str, ...]] = ContextVar(
     "llm_error_secret_values",
     default=(),
 )
+
+
+def _looks_like_magpie(base_url: str) -> bool:
+    """识别本地 Magpie 网关，避免给其他 Provider 添加专用会话头。"""
+
+    try:
+        parts = urlsplit(base_url)
+        return "magpie" in (parts.hostname or "").lower() or parts.port == 3425
+    except ValueError:
+        return False
 
 
 def _activate_error_secrets(values: Iterable[str]) -> None:
@@ -1846,8 +1857,26 @@ class OpenAIClient(LLMClient):
         self._model = model
         self._proxy_url = proxy_url
         self._identity = identity
+        self._provider_scope = f"{self._base_url}|chat_completions"
         self._compatibility_headers = dict(compatibility_headers or {})
         self._reasoning_transport = reasoning_transport
+
+    def _runtime_headers(self, request: ModelRequest | None = None) -> dict[str, str]:
+        context = ClientRuntimeContext.from_metadata(
+            request.metadata if request is not None else None,
+            provider_scope=self._provider_scope,
+        )
+        headers: dict[str, str] = {}
+        if self._identity is not None:
+            headers.update(
+                context.headers_for_identity(
+                    self._identity.profile,
+                    model=request.model if request is not None else self._model,
+                )
+            )
+        if _looks_like_magpie(self._base_url):
+            headers["X-Magpie-Session"] = context.session_id[:128]
+        return headers
 
     async def complete(
         self,
@@ -1868,7 +1897,11 @@ class OpenAIClient(LLMClient):
             )
         url = provider_endpoint(self._base_url, LLM_API_FORMAT_CHAT_COMPLETIONS)
         # Ollama 部署可能不需要 api_key；为空时不下发 Authorization 头
-        headers = _llm_headers(identity=self._identity, compatibility_headers=self._compatibility_headers)
+        headers = _llm_headers(
+            identity=self._identity,
+            compatibility_headers=self._compatibility_headers,
+            runtime_headers=self._runtime_headers(),
+        )
         if self._api_key:
             headers["Authorization"] = f"Bearer {self._api_key}"
         # 视觉路径：content 改成数组，先 text 再 image_url（OpenAI / mimo / GLM-4V 均如此）
@@ -2022,6 +2055,7 @@ class OpenAIClient(LLMClient):
             identity=self._identity,
             accept="text/event-stream",
             compatibility_headers=self._compatibility_headers,
+            runtime_headers=self._runtime_headers(),
         )
         if self._api_key:
             headers["Authorization"] = f"Bearer {self._api_key}"
@@ -2193,7 +2227,11 @@ class OpenAIClient(LLMClient):
         )
         tool_names = _request_tool_name_map(request)
         url = provider_endpoint(self._base_url, LLM_API_FORMAT_CHAT_COMPLETIONS)
-        headers = _llm_headers(identity=self._identity, compatibility_headers=self._compatibility_headers)
+        headers = _llm_headers(
+            identity=self._identity,
+            compatibility_headers=self._compatibility_headers,
+            runtime_headers=self._runtime_headers(request),
+        )
         if self._api_key:
             headers["Authorization"] = f"Bearer {self._api_key}"
         body: dict[str, Any] = {
@@ -2255,6 +2293,7 @@ class OpenAIClient(LLMClient):
             identity=self._identity,
             accept="text/event-stream",
             compatibility_headers=self._compatibility_headers,
+            runtime_headers=self._runtime_headers(request),
         )
         if self._api_key:
             headers["Authorization"] = f"Bearer {self._api_key}"
@@ -2515,7 +2554,10 @@ class OpenAIClient(LLMClient):
             raise LLMError("transcribe() 必须指定 model（如 'whisper-1'）")
         url = f"{self._base_url}/audio/transcriptions"
         headers = _llm_headers(
-            identity=self._identity, content_type=None, compatibility_headers=self._compatibility_headers
+            identity=self._identity,
+            content_type=None,
+            compatibility_headers=self._compatibility_headers,
+            runtime_headers=self._runtime_headers(),
         )
         if self._api_key:
             headers["Authorization"] = f"Bearer {self._api_key}"
@@ -2586,7 +2628,11 @@ class OpenAIClient(LLMClient):
             )
 
         url = f"{self._base_url}/images/generations"
-        headers = _llm_headers(identity=self._identity, compatibility_headers=self._compatibility_headers)
+        headers = _llm_headers(
+            identity=self._identity,
+            compatibility_headers=self._compatibility_headers,
+            runtime_headers=self._runtime_headers(),
+        )
         if self._api_key:
             headers["Authorization"] = f"Bearer {self._api_key}"
 
@@ -2717,15 +2763,20 @@ class AnthropicClient(LLMClient):
                 }
             )
         runtime_headers: dict[str, str] = {}
-        if self._identity is not None:
+        if self._identity is not None or _looks_like_magpie(self._base_url):
             context = ClientRuntimeContext.from_metadata(
                 request.metadata if request is not None else None,
                 provider_scope=self._provider_scope,
             )
+        else:
+            context = None
+        if context is not None and self._identity is not None:
             runtime_headers = context.headers_for_identity(
                 self._identity.profile,
                 model=request.model if request is not None else self._model,
             )
+        if context is not None and _looks_like_magpie(self._base_url):
+            runtime_headers["X-Magpie-Session"] = context.session_id[:128]
         return plan_request_headers(
             system_headers=system_headers,
             identity_headers=self._identity.headers() if self._identity is not None else None,
@@ -3531,16 +3582,23 @@ class ResponsesClient(LLMClient):
         return kwargs
 
     def _runtime_headers(self, request: ModelRequest | None = None) -> dict[str, str]:
-        if self._identity is None:
+        if self._identity is None and not _looks_like_magpie(self._base_url):
             return {}
         context = ClientRuntimeContext.from_metadata(
             request.metadata if request is not None else None,
             provider_scope=self._provider_scope,
         )
-        return context.headers_for_identity(
-            self._identity.profile,
-            model=request.model if request is not None else self._model,
-        )
+        headers: dict[str, str] = {}
+        if self._identity is not None:
+            headers.update(
+                context.headers_for_identity(
+                    self._identity.profile,
+                    model=request.model if request is not None else self._model,
+                )
+            )
+        if _looks_like_magpie(self._base_url):
+            headers["X-Magpie-Session"] = context.session_id[:128]
+        return headers
 
     def _capture_response_metadata(self, response: httpx.Response) -> None:
         """Transport-specific clients may retain bounded diagnostic headers."""

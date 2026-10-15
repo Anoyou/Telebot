@@ -140,6 +140,43 @@ async def test_system_settings_command_prefix_required_roundtrip(monkeypatch) ->
 
 
 @pytest.mark.asyncio
+async def test_system_settings_ai_context_messages_defaults_and_roundtrip(monkeypatch) -> None:
+    db = _FakeSettingsDB()
+    monkeypatch.setattr(rate_limit, "_audit", AsyncMock())
+    broadcast = AsyncMock()
+    monkeypatch.setattr(rate_limit, "_broadcast_reload", broadcast)
+
+    initial = await rate_limit.get_system_settings(db, SimpleNamespace(id=1))  # type: ignore[arg-type]
+    assert initial["ai_context_messages"] == 0
+
+    result = await rate_limit.patch_system_settings(
+        rate_limit._SettingsPatch(ai_context_messages=12),
+        db,  # type: ignore[arg-type]
+        SimpleNamespace(id=1),
+    )
+
+    assert db.rows["ai_context_messages"].value == {"value": 12}
+    assert result["ai_context_messages"] == 12
+    broadcast.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_system_settings_ai_context_messages_rejects_out_of_range(monkeypatch) -> None:
+    db = _FakeSettingsDB()
+    monkeypatch.setattr(rate_limit, "_audit", AsyncMock())
+
+    with pytest.raises(HTTPException) as exc_info:
+        await rate_limit.patch_system_settings(
+            rate_limit._SettingsPatch(ai_context_messages=21),
+            db,  # type: ignore[arg-type]
+            SimpleNamespace(id=1),
+        )
+
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.detail["code"] == "invalid_ai_context_messages"
+
+
+@pytest.mark.asyncio
 async def test_system_settings_ui_preferences_roundtrip(monkeypatch) -> None:
     db = _FakeSettingsDB()
     audit = AsyncMock()

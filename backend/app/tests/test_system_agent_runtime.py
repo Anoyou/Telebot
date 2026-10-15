@@ -386,7 +386,7 @@ async def test_runtime_general_help_sends_zero_tool_definitions(monkeypatch) -> 
         assert tools == {}
         assert request.metadata["repair_text_tool_protocol"] is True
         assert request.metadata["retry_false_image_refusal"] is True
-        assert "本轮未提供任何工具" in request.messages[0].text_content()
+        assert "本轮未提供任何工具" in request.messages[-1].text_content()
         return AgentResult(
             text="帮助",
             model=request.model,
@@ -423,7 +423,7 @@ async def test_runtime_marks_uploaded_images_as_native_visual_input(monkeypatch)
     async def run(_model_call, request, tools, **_kwargs):  # noqa: ANN001
         assert tools == {}
         assert "图片已经作为模型原生视觉输入提供，不属于工具" in request.messages[
-            0
+            -1
         ].text_content()
         assert isinstance(request.messages[-1].content[-1], ImageContent)
         return AgentResult(

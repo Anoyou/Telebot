@@ -7524,6 +7524,10 @@ export interface components {
         LLMUsageItem: {
             /** Account Id */
             account_id: number | null;
+            /** Cache Read Tokens */
+            cache_read_tokens?: number | null;
+            /** Cache Write Tokens */
+            cache_write_tokens?: number | null;
             /** Client Identity Profile */
             client_identity_profile: string | null;
             /**
@@ -11200,6 +11204,8 @@ export interface components {
          * @description 前端只会传子集；未传字段保持不变。
          */
         _SettingsPatch: {
+            /** Ai Context Messages */
+            ai_context_messages?: number | null;
             /** Ai Enabled */
             ai_enabled?: boolean | null;
             app_update_target?: components["schemas"]["_AppUpdateTargetPatch"] | null;

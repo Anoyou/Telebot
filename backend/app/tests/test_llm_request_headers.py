@@ -8,6 +8,7 @@ from cryptography.fernet import Fernet
 
 from app import crypto
 from app.services import llm_client
+from app.services.llm_call_context import runtime_metadata
 from app.services.llm_client import AnthropicClient, ResponsesClient
 from app.services.llm_identity import resolve_identity
 from app.services.llm_request_headers import (
@@ -93,6 +94,13 @@ def test_scope_filter_and_planner_keep_system_headers_authoritative() -> None:
     ) == {"Content-Type": "application/json", "X-Tenant-ID": "a"}
 
 
+def test_user_magpie_session_header_overrides_generated_runtime_header() -> None:
+    assert plan_request_headers(
+        runtime_headers={"X-Magpie-Session": "generated"},
+        compatibility_headers={"x-magpie-session": "user-pinned"},
+    ) == {"x-magpie-session": "user-pinned"}
+
+
 def test_duplicate_names_are_case_insensitive() -> None:
     with pytest.raises(RequestHeaderConfigError, match="重复"):
         normalize_request_headers(
@@ -161,3 +169,23 @@ def test_grok_cli_uses_random_non_user_runtime_ids() -> None:
     assert "x-grok-agent-id" not in headers
     assert headers["x-grok-turn-idx"] == "1"
     assert headers["x-grok-model-override"] == "grok-4.5"
+
+
+def test_magpie_session_header_is_added_only_for_magpie_base_urls() -> None:
+    metadata = runtime_metadata(session_id="chat-42", run_id="run-1")
+    chat_magpie = llm_client.OpenAIClient("secret", "http://127.0.0.1:3425/v1", "model")
+    chat_other = llm_client.OpenAIClient("secret", "https://api.example/v1", "model")
+    responses_magpie = ResponsesClient("secret", "https://magpie.local/v1", "model")
+    anthropic_magpie = AnthropicClient("secret", "http://localhost:3425/v1", "model")
+
+    from app.services.llm_protocol import MessageRole, ModelMessage, ModelRequest
+
+    request = ModelRequest(
+        model="model",
+        messages=(ModelMessage.text(MessageRole.USER, "hello"),),
+        metadata=metadata,
+    )
+    assert chat_magpie._runtime_headers(request)["X-Magpie-Session"]
+    assert "X-Magpie-Session" not in chat_other._runtime_headers(request)
+    assert responses_magpie._runtime_headers(request)["X-Magpie-Session"]
+    assert anthropic_magpie._headers(request)["X-Magpie-Session"]

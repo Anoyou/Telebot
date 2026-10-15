@@ -33,6 +33,8 @@ class LLMUsageItem(BaseModel):
     source: str | None
     input_tokens: int
     output_tokens: int
+    cache_read_tokens: int | None = None
+    cache_write_tokens: int | None = None
     latency_ms: int
     success: bool
     error_type: str | None
@@ -58,6 +60,8 @@ class LLMUsageItem(BaseModel):
             source=row.source,
             input_tokens=int(row.input_tokens or 0),
             output_tokens=int(row.output_tokens or 0),
+            cache_read_tokens=getattr(row, "cache_read_tokens", None),
+            cache_write_tokens=getattr(row, "cache_write_tokens", None),
             latency_ms=int(row.latency_ms or 0),
             success=bool(row.success),
             error_type=row.error_type,

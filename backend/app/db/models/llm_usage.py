@@ -36,6 +36,8 @@ class LLMUsage(Base):
     source: Mapped[str | None] = mapped_column(String(64), nullable=True)
     input_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     output_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    cache_read_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    cache_write_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
     latency_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     success: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     error_type: Mapped[str | None] = mapped_column(String(32), nullable=True)

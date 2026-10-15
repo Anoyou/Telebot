@@ -390,13 +390,10 @@ async def test_runtime_emits_skill_event_and_injects_skill_prompt(monkeypatch) -
             providers={provider.id: provider},
         )
 
+    calls = []
+
     async def run(_model_call, request, tools, **_kwargs):  # noqa: ANN001
-        prompt = request.messages[0].text_content()
-        assert "## 当前按需领域技能" in prompt
-        assert "### scheduler" in prompt
-        assert "### diagnostics" not in prompt
-        assert len(request.tools) <= 8
-        assert list(tools) == ["scheduler.list", "scheduler.save"]
+        calls.append((request, tools))
         return AgentResult(
             text="ok",
             model=request.model,
@@ -444,6 +441,15 @@ async def test_runtime_emits_skill_event_and_injects_skill_prompt(monkeypatch) -
     assert selected["skill_names"] == ["scheduler"]
     assert "定时任务" in selected["understanding_summary"]
     assert selected["tool_count"] == 2
+    # 模型调用必须成功，否则下面的断言会被错误事件吞掉而空转。
+    assert any(event["type"] == "assistant_message" for event in events)
+    request, tools = calls[0]
+    prompt = request.messages[-1].text_content()
+    assert "## 当前按需领域技能" in prompt
+    assert "### scheduler" in prompt
+    assert "### diagnostics" not in prompt
+    assert len(request.tools) <= 8
+    assert list(tools) == ["scheduler.list", "scheduler.save"]
 
 
 @pytest.mark.asyncio
@@ -478,10 +484,10 @@ async def test_runtime_general_question_does_not_emit_skill_event(monkeypatch) -
             providers={provider.id: provider},
         )
 
+    calls = []
+
     async def run(_model_call, request, tools, **_kwargs):  # noqa: ANN001
-        assert "## 当前按需领域技能" not in request.messages[0].text_content()
-        assert request.tools == ()
-        assert tools == {}
+        calls.append((request, tools))
         return AgentResult(
             text="ok",
             model=request.model,
@@ -524,3 +530,8 @@ async def test_runtime_general_question_does_not_emit_skill_event(monkeypatch) -
     ]
 
     assert not any(event["type"] == "skill_selected" for event in events)
+    assert any(event["type"] == "assistant_message" for event in events)
+    request, tools = calls[0]
+    assert "## 当前按需领域技能" not in request.messages[-1].text_content()
+    assert request.tools == ()
+    assert tools == {}

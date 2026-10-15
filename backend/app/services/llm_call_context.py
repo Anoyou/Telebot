@@ -6,12 +6,17 @@ import hashlib
 import hmac
 import uuid
 from collections.abc import Mapping
+from contextvars import ContextVar, Token
 from dataclasses import dataclass
 from typing import Any
 
 from ..settings import settings
 
 _METADATA_KEY = "_client_runtime"
+_CURRENT_METADATA: ContextVar[Mapping[str, Any] | None] = ContextVar(
+    "llm_current_runtime_metadata",
+    default=None,
+)
 
 
 def _pseudonym(provider_scope: str, kind: str, value: str) -> str:
@@ -46,6 +51,7 @@ class ClientRuntimeContext:
         *,
         provider_scope: str,
     ) -> ClientRuntimeContext:
+        metadata = metadata if metadata is not None else _CURRENT_METADATA.get()
         raw = (metadata or {}).get(_METADATA_KEY)
         values = raw if isinstance(raw, Mapping) else {}
         ephemeral = not bool(values)
@@ -114,4 +120,21 @@ def runtime_metadata(
     }
 
 
-__all__ = ["ClientRuntimeContext", "runtime_metadata"]
+def set_current_runtime_metadata(metadata: Mapping[str, Any] | None) -> Token:
+    """Set call-local metadata for legacy clients that lack a request object."""
+
+    return _CURRENT_METADATA.set(metadata)
+
+
+def reset_current_runtime_metadata(token: Token) -> None:
+    """Restore the previous call-local metadata after an invocation."""
+
+    _CURRENT_METADATA.reset(token)
+
+
+__all__ = [
+    "ClientRuntimeContext",
+    "reset_current_runtime_metadata",
+    "runtime_metadata",
+    "set_current_runtime_metadata",
+]

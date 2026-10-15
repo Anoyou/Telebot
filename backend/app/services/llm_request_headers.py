@@ -224,6 +224,17 @@ def plan_request_headers(
         for name, value in (layer or {}).items():
             lowered = name.casefold()
             if lowered in owners:
+                # Providers may explicitly pin the Magpie conversation. Keep that
+                # user value instead of treating the generated runtime value as a conflict.
+                if lowered == "x-magpie-session" and owner == "Provider 兼容" and owners[lowered] == "运行态":
+                    for planned_name in tuple(planned):
+                        if planned_name.casefold() == lowered:
+                            planned.pop(planned_name, None)
+                            break
+                    planned[name] = value
+                    owners[lowered] = owner
+                    values[lowered] = value
+                    continue
                 if values[lowered] == value:
                     continue
                 raise RequestHeaderConfigError(f"请求头 {name} 与{owners[lowered]}管理的字段冲突")

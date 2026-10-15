@@ -75,6 +75,8 @@ class UsageRecord:
     gateway_stage: str | None = None
     input_tokens: int = 0
     output_tokens: int = 0
+    cache_read_tokens: int | None = None
+    cache_write_tokens: int | None = None
     latency_ms: int = 0
     success: bool = False
     error_type: str | None = None
@@ -753,6 +755,8 @@ async def call_with_fallback(
                 client_identity_profile=client_identity_profile,
                 input_tokens=result.input_tokens,
                 output_tokens=result.output_tokens,
+                cache_read_tokens=getattr(result, "cache_read_tokens", None),
+                cache_write_tokens=getattr(result, "cache_write_tokens", None),
                 latency_ms=latency_ms,
                 success=True,
                 source=source,
@@ -955,6 +959,8 @@ async def invoke_model_with_fallback(
                         client_identity_profile=client_identity_profile,
                         input_tokens=response.usage.input_tokens,
                         output_tokens=response.usage.output_tokens,
+                        cache_read_tokens=response.usage.cache_read_tokens,
+                        cache_write_tokens=response.usage.cache_write_tokens,
                         latency_ms=int((time.monotonic() - started) * 1000),
                         success=True,
                         source=source,
@@ -1226,6 +1232,8 @@ async def stream_model_with_fallback(
                                 client_identity_profile=client_identity_profile,
                                 input_tokens=terminal_response.usage.input_tokens,
                                 output_tokens=terminal_response.usage.output_tokens,
+                                cache_read_tokens=terminal_response.usage.cache_read_tokens,
+                                cache_write_tokens=terminal_response.usage.cache_write_tokens,
                                 latency_ms=int((time.monotonic() - started) * 1000),
                                 success=True,
                                 source=source,

@@ -396,6 +396,27 @@ class SystemAgentService:
         rows.reverse()
         return rows
 
+    async def _model_history(
+        self,
+        db: AsyncSession,
+        session: SystemAgentSession,
+        *,
+        before_id: int,
+    ) -> list[SystemAgentMessage]:
+        state = session.memory_state if isinstance(session.memory_state, dict) else {}
+        start_id = int(state.get("context_start_message_id") or 0)
+        query = (
+            select(SystemAgentMessage)
+            .where(
+                SystemAgentMessage.session_id == session.id,
+                SystemAgentMessage.id < before_id,
+                SystemAgentMessage.id >= start_id,
+            )
+            .order_by(SystemAgentMessage.id)
+        )
+        rows = (await db.execute(query)).scalars().all()
+        return [message for message in rows if _message_available_to_context(message)]
+
     async def reconcile_stale_messages(
         self,
         db: AsyncSession,
@@ -739,25 +760,7 @@ class SystemAgentService:
 
         # 历史最后一条是刚写入的打码用户消息；模型当次请求通常使用原始文本，
         # 自定义请求头配置则只追加安全提示，强制密钥改走 Provider 设置页。
-        if regenerating:
-            history = await self.list_messages(
-                db,
-                session.id,
-                limit=32,
-                before_id=user_msg.id,
-            )
-            history_for_model = [
-                message
-                for message in history
-                if _message_available_to_context(message)
-            ][-8:]
-        else:
-            history = await self.list_messages(db, session.id, limit=32)
-            history_for_model = [
-                message
-                for message in history
-                if message.id != user_msg.id and _message_available_to_context(message)
-            ][-8:]
+        history_for_model = await self._model_history(db, session, before_id=user_msg.id)
 
         # 用户消息先独立落库。即使浏览器断线或上游模型超时，刷新后仍能看到本轮输入。
         await db.commit()
@@ -788,6 +791,7 @@ class SystemAgentService:
                 web_user_id=web_user_id,
                 bot_tg_user_id=bot_tg_user_id,
                 history_messages=history_for_model,
+                context_user_message=user_msg,
                 user_images=user_images,
                 chat_secrets=chat_secrets,
                 secret_map=decrypt_secret_map(session.secret_map_enc),

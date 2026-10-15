@@ -95,7 +95,7 @@ def memory_context(
         visible_state = {
             key: value
             for key, value in state.items()
-            if key not in {"recent_turns", "summary_rev"}
+            if key not in {"recent_turns", "summary_rev", "context_start_message_id"}
         }
         parts.append(
             "结构化状态："

@@ -66,7 +66,14 @@ from .commands.sudo_guard import (
 from .commands.sudo_guard import (
     should_report_incoming_sudo_denial as _should_report_incoming_sudo_denial_impl,
 )
-from .ipc import CMD_PAUSE, CMD_RESUME, cmd_channel, make_cmd
+from .ipc import (
+    CMD_PAUSE,
+    CMD_RESUME,
+    GCMD_RELOAD_GLOBAL,
+    GLOBAL_CHANNEL,
+    cmd_channel,
+    make_cmd,
+)
 from .plugins.base import public_entity_display_name
 from .ratelimit.engine import RateLimitDecision, RateLimitEngine
 
@@ -134,6 +141,9 @@ class CommandContext:
     templates: dict[str, dict[str, Any]]
     providers: dict[int, dict[str, Any]]
     ai_enabled: bool = True
+    # AI 指令携带的历史消息条数；runtime.py 未传入时保持默认 0，
+    # ai_runtime 会在每次调用时从 SystemSetting 读取最新值。
+    ai_context_messages: int = 0
     command_prefix: str = ","
     command_prefix_required: bool = True
     aliases: dict[str, str] = None  # type: ignore[assignment]  # {alias: target}
@@ -1028,6 +1038,14 @@ def _command_echo_guard_limit() -> int:
     return normalize_command_echo_guard_limit(settings.command_echo_guard_previous_messages)
 
 
+def normalize_ai_context_messages(value: Any) -> int:
+    """Normalize the configurable number of historical messages for `,ai`."""
+    try:
+        return max(0, min(20, int(value)))
+    except (TypeError, ValueError):
+        return 0
+
+
 async def should_skip_outgoing_command_echo(
     client: TelegramClient,
     event: Any,
@@ -1620,6 +1638,37 @@ async def _cmd_status(client, event, args, account_id):
 async def _cmd_ping(client, event, args, account_id):
     """连通性自检。"""
     await event.edit("pong")
+
+
+@builtin("aictx", doc="设置 ,ai 携带的历史消息条数（0-20）")
+async def _cmd_aictx(client, event, args, account_id):
+    """立即更新 AI 指令上下文条数，并持久化到全局 SystemSetting。"""
+    if len(args) != 1:
+        await event.edit(f"用法：{current_command_prefix()}aictx <0-20>")
+        return
+    try:
+        value = int(args[0])
+    except (TypeError, ValueError):
+        value = -1
+    if value < 0 or value > 20:
+        await event.edit("上下文条数必须是 0-20 的整数")
+        return
+    value = normalize_ai_context_messages(value)
+    async with AsyncSessionLocal() as db:
+        row = await db.get(SystemSetting, "ai_context_messages")
+        if row is None:
+            db.add(SystemSetting(key="ai_context_messages", value={"value": value}))
+        else:
+            row.value = {"value": value}
+        await db.commit()
+    if _ctx is not None:
+        _ctx.ai_context_messages = value
+    # 其他 worker 通过现有全局 reload 机制读取设置；本 worker 已即时更新。
+    try:
+        await get_redis().publish(GLOBAL_CHANNEL, make_cmd(GCMD_RELOAD_GLOBAL))
+    except Exception:  # noqa: BLE001
+        log.debug("broadcast ai context reload failed", exc_info=True)
+    await event.edit(f"已设置上下文 {value} 条")
 
 
 @builtin("id", aliases=("i",), doc="返回当前会话 chat_id")

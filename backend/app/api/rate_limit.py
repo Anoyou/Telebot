@@ -632,6 +632,15 @@ async def get_system_settings(db: DBSession, _user: CurrentUser) -> dict[str, An
         echo_guard_source = echo_guard_val.get("value", 8)
     else:
         echo_guard_source = echo_guard_val
+    ai_context_val = await _get_setting(db, "ai_context_messages", {"value": 0})
+    if isinstance(ai_context_val, dict):
+        ai_context_source: Any = ai_context_val.get("value", 0)
+    else:
+        ai_context_source = ai_context_val
+    try:
+        ai_context_messages = max(0, min(20, int(ai_context_source)))
+    except (TypeError, ValueError):
+        ai_context_messages = 0
     tz = str(tz_val.get("value", "")) if isinstance(tz_val, dict) else str(tz_val)
     llm_limits = llm_val if isinstance(llm_val, dict) else {}
     payout_limits = payout_val if isinstance(payout_val, dict) else {}
@@ -668,6 +677,7 @@ async def get_system_settings(db: DBSession, _user: CurrentUser) -> dict[str, An
         ),
         "ai_enabled": ai_enabled,
         "command_echo_guard_previous_messages": _normalize_command_echo_guard_limit(echo_guard_source),
+        "ai_context_messages": ai_context_messages,
         "login_security": auth_login_security.login_security_config_to_dict(login_security),
         "llm_limits": {
             "per_minute": max(0, int(llm_limits.get("per_minute", 0) or 0)),
@@ -784,6 +794,7 @@ class _SettingsPatch(BaseModel):
     sudo_enabled: bool | None = None
     command_prefix_required: bool | None = None
     command_echo_guard_previous_messages: int | None = None
+    ai_context_messages: int | None = None
     login_security: _LoginSecurityPatch | None = None
     remote_plugin_update_check: _RemotePluginUpdateCheckPatch | None = None
     app_update_target: _AppUpdateTargetPatch | None = None
@@ -969,6 +980,19 @@ async def patch_system_settings(payload: _SettingsPatch, db: DBSession, user: Cu
             "set_command_echo_guard",
             target="system",
             detail={"previous_messages": limit},
+        )
+        await _broadcast_reload()
+    if payload.ai_context_messages is not None:
+        context_messages = int(payload.ai_context_messages)
+        if context_messages < 0 or context_messages > 20:
+            raise _bad("invalid_ai_context_messages", "AI 指令上下文条数必须在 0~20 之间")
+        await _set_setting(db, "ai_context_messages", {"value": context_messages})
+        await _audit(
+            db,
+            user.id,
+            "set_ai_context_messages",
+            target="system",
+            detail={"value": context_messages},
         )
         await _broadcast_reload()
     if payload.llm_limits is not None:

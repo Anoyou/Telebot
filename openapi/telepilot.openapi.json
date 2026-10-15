@@ -8352,6 +8352,28 @@
             ],
             "title": "Account Id"
           },
+          "cache_read_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cache Read Tokens"
+          },
+          "cache_write_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cache Write Tokens"
+          },
           "client_identity_profile": {
             "anyOf": [
               {
@@ -18958,6 +18980,17 @@
       "_SettingsPatch": {
         "description": "前端只会传子集；未传字段保持不变。",
         "properties": {
+          "ai_context_messages": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ai Context Messages"
+          },
           "ai_enabled": {
             "anyOf": [
               {

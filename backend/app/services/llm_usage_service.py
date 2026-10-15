@@ -34,6 +34,8 @@ async def _persist_usage(record: UsageRecord) -> None:
                     source=record.source,
                     input_tokens=int(record.input_tokens or 0),
                     output_tokens=int(record.output_tokens or 0),
+                    cache_read_tokens=record.cache_read_tokens,
+                    cache_write_tokens=record.cache_write_tokens,
                     latency_ms=int(record.latency_ms or 0),
                     success=bool(record.success),
                     error_type=record.error_type,

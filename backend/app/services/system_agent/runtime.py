@@ -56,7 +56,7 @@ from .model_capability import (
     provisional_reason,
     verify_resolved_agent_providers,
 )
-from .prompts import build_system_prompt, provider_setup_hint
+from .prompts import build_system_prompt, build_turn_time_context, provider_setup_hint
 from .redactor import StreamingMessageRedactor, summarize_tool_result
 from .registry import PreparedAction, ToolRegistry, get_registry
 from .secrets import (
@@ -135,6 +135,7 @@ class SystemAgentRuntime:
         web_user_id: int | None = None,
         bot_tg_user_id: int | None = None,
         history_messages: list[SystemAgentMessage] | None = None,
+        context_user_message: SystemAgentMessage | None = None,
         chat_secrets: list[str] | None = None,
         secret_map: dict[str, str] | None = None,
         fallback_provider_id: int | None = None,
@@ -328,7 +329,8 @@ class SystemAgentRuntime:
             command_prefix=str(flags["command_prefix"]),
         )
 
-        # 长期偏好：会话记忆块之前注入
+        turn_context = [build_turn_time_context(str(flags["timezone"]))]
+        # 可随轮次变化的上下文统一放到历史之后。
         try:
             from .user_memory import prompt_block_for_scope
 
@@ -343,7 +345,7 @@ class SystemAgentRuntime:
             else:
                 long_term = ""
             if long_term:
-                system_prompt = f"{system_prompt}\n\n{long_term}"
+                turn_context.append(long_term)
         except Exception:  # noqa: BLE001
             log.debug("load long-term memory failed", exc_info=True)
 
@@ -352,7 +354,7 @@ class SystemAgentRuntime:
             exclude_latest_turn=exclude_latest_session_memory,
         )
         if memory_block:
-            system_prompt = f"{system_prompt}\n\n{memory_block}"
+            turn_context.append(memory_block)
 
         all_tool_specs = self.registry.list_for(
             channel=channel,
@@ -510,16 +512,16 @@ class SystemAgentRuntime:
             )
             skill_prompt = self.skill_registry.render_prompt(selected_skills)
             if skill_prompt:
-                system_prompt = f"{system_prompt}\n\n{skill_prompt}"
+                turn_context.append(skill_prompt)
         if not tool_specs:
-            system_prompt = (
-                f"{system_prompt}\n\n## 本轮工具状态\n"
+            turn_context.append(
+                "## 本轮工具状态\n"
                 "本轮未提供任何工具。请直接回答用户问题；不得输出 XML、tool_call、"
                 "search_tool 或其它伪工具调用标签，也不得声称已经调用工具。"
             )
         if user_images:
-            system_prompt = (
-                f"{system_prompt}\n\n## 原生媒体输入\n"
+            turn_context.append(
+                "## 原生媒体输入\n"
                 "用户消息附带的图片已经作为模型原生视觉输入提供，不属于工具。"
                 "即使本轮工具列表为空，也必须直接查看并回答图片相关问题；"
                 "不得因为没有工具而声称未收到或无法查看图片。"
@@ -606,6 +608,12 @@ class SystemAgentRuntime:
                 read_only=read_only,
             )
 
+        rendered_turn_context = "\n\n".join(turn_context)
+        if context_user_message is not None:
+            context_user_message.content = {
+                **context_user_message.content,
+                "model_turn_context": redact_turn_text(rendered_turn_context),
+            }
         messages = self._build_messages(
             system_prompt=system_prompt,
             history=history_messages or [],
@@ -614,6 +622,8 @@ class SystemAgentRuntime:
                 cfg.get("session_token_limit") if cfg.get("session_token_limit") is not None else 16_384
             ),
             user_images=tuple(user_images),
+            turn_context=rendered_turn_context,
+            session=session,
         )
         # pinned：同模型内重试照旧，耗尽后走确认链路，不静默换模型
         request = ModelRequest(
@@ -1339,13 +1349,24 @@ class SystemAgentRuntime:
         user_text: str,
         token_budget: int,
         user_images: tuple[ImageContent, ...] = (),
+        turn_context: str = "",
+        session: SystemAgentSession | None = None,
     ) -> list[ModelMessage]:
         messages: list[ModelMessage] = [ModelMessage.text(MessageRole.SYSTEM, system_prompt)]
-        # 粗略按字符预算滑窗：约 4 字符 ~ 1 token。0 表示不裁剪历史窗口。
+        if turn_context:
+            user_text = _with_turn_context(user_text, turn_context)
+        # 沿用约 3 字符/token 的估算；为 system 和本轮输入预留预算。
         budget_chars = None if token_budget <= 0 else max(1000, token_budget * 3)
-        selected: list[ModelMessage] = []
-        used = 0
-        for msg in reversed(history):
+        if budget_chars is not None:
+            budget_chars = max(
+                0, budget_chars - len(system_prompt) - len(user_text) - 2_000 * len(user_images)
+            )
+        state = dict(session.memory_state or {}) if session is not None else {}
+        start_id = int(state.get("context_start_message_id") or 0)
+        selected: list[tuple[SystemAgentMessage, ModelMessage, int]] = []
+        for msg in history:
+            if start_id and msg.id is not None and msg.id < start_id:
+                continue
             text = _message_text(msg)
             images = _message_images(msg)
             if not text and not images:
@@ -1354,13 +1375,27 @@ class SystemAgentRuntime:
             if role is None:
                 continue
             cost = len(text) + 2_000 * len(images)
-            if budget_chars is not None and used + cost > budget_chars and selected:
-                break
             content = ((TextContent(text),) if text else ()) + images
-            selected.append(ModelMessage(role=role, content=content))
-            used += cost
-        selected.reverse()
-        messages.extend(selected)
+            selected.append((msg, ModelMessage(role=role, content=content), cost))
+        used = sum(item[2] for item in selected)
+        clipped = False
+        while selected and budget_chars is not None and used > budget_chars:
+            # 一次丢弃至少 25%，并对齐下一轮 user，避免从半轮开始。
+            drop = max(1, (len(selected) + 3) // 4)
+            while drop < len(selected) and selected[drop][1].role != MessageRole.USER:
+                drop += 1
+            used -= sum(item[2] for item in selected[:drop])
+            del selected[:drop]
+            clipped = True
+        if clipped and session is not None:
+            next_id = (
+                selected[0][0].id
+                if selected
+                else max((msg.id or 0 for msg in history), default=0) + 1
+            )
+            state["context_start_message_id"] = max(start_id, next_id or 0)
+            session.memory_state = state
+        messages.extend(item[1] for item in selected)
         user_content = []
         if user_text:
             user_content.append(TextContent(user_text))
@@ -1385,6 +1420,9 @@ def _map_role(role: str) -> MessageRole | None:
 def _message_text(msg: SystemAgentMessage) -> str:
     content = msg.content if isinstance(msg.content, dict) else {}
     text = content.get("text")
+    turn_context = content.get("model_turn_context")
+    if msg.role == MESSAGE_ROLE_USER and isinstance(turn_context, str) and turn_context:
+        return _with_turn_context(text if isinstance(text, str) else "", turn_context)
     if isinstance(text, str) and text.strip():
         return text
     if msg.role == MESSAGE_ROLE_TOOL:
@@ -1395,6 +1433,10 @@ def _message_text(msg: SystemAgentMessage) -> str:
         except (TypeError, ValueError):
             return f"[tool:{name}] {str(summary)[:1500]}"
     return ""
+
+
+def _with_turn_context(user_text: str, turn_context: str) -> str:
+    return f"{user_text}\n\n## 服务端本轮上下文\n{turn_context}"
 
 
 def _message_images(msg: SystemAgentMessage) -> tuple[ImageContent, ...]:
@@ -1443,6 +1485,8 @@ def _usage_payload(
         "requested_model": req_m,
         "selection_mode": selection_mode if selection_mode in {"auto", "pinned"} else "auto",
         "input_tokens": usage.input_tokens,
+        "cache_read_tokens": usage.cache_read_tokens,
+        "cache_write_tokens": usage.cache_write_tokens,
         "output_tokens": usage.output_tokens,
         "total_tokens": usage.total_tokens,
         "tool_calls": int(tool_calls),

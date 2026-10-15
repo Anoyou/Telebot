@@ -5,7 +5,7 @@ import { ArrowRight, ChevronDown, Copy, History, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { listRecentLLMUsage, resetRecentLLMUsage } from "@/api/llmUsage";
-import type { LLMUsageRecord } from "@/api/llmUsage";
+import type { LLMUsageRecord as BaseLLMUsageRecord } from "@/api/llmUsage";
 import { listLLMProviders } from "@/api/commands";
 import { getErrMsg } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -16,6 +16,21 @@ import { MetaBadge } from "@/components/ui/meta-badge";
 import { MeterBar, SectionHeader, SignalPill, ToneRailCard } from "@/components/ui/status";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+
+type LLMUsageRecord = BaseLLMUsageRecord & {
+  cache_read_tokens?: number | null;
+  cache_write_tokens?: number | null;
+};
+
+function cacheHitRate(record: Pick<LLMUsageRecord, "input_tokens" | "cache_read_tokens" | "cache_write_tokens">): string {
+  if (record.cache_read_tokens == null || record.cache_write_tokens == null) return "未采集";
+  const total = record.input_tokens + record.cache_read_tokens + record.cache_write_tokens;
+  return total > 0 ? `${((record.cache_read_tokens / total) * 100).toFixed(1)}%` : "无输入";
+}
+
+function cacheTokenLabel(record: LLMUsageRecord): string {
+  return `读 ${record.cache_read_tokens ?? "未采集"} / 写 ${record.cache_write_tokens ?? "未采集"}`;
+}
 
 export function RecentUsageContent() {
   const queryClient = useQueryClient();
@@ -106,8 +121,14 @@ export function RecentUsageContent() {
   }
 
   const usage = usageQ.data;
-  const rows = usage?.items || [];
+  const rows: LLMUsageRecord[] = usage?.items || [];
   const summary = usage?.summary;
+  const measuredRows = rows.filter((record) => record.cache_read_tokens != null && record.cache_write_tokens != null);
+  const cacheTotals = measuredRows.reduce((total, record) => ({
+    input_tokens: total.input_tokens + record.input_tokens,
+    cache_read_tokens: total.cache_read_tokens + (record.cache_read_tokens || 0),
+    cache_write_tokens: total.cache_write_tokens + (record.cache_write_tokens || 0),
+  }), { input_tokens: 0, cache_read_tokens: 0, cache_write_tokens: 0 });
   const filteredRows = rows.filter((record) => {
     if (statusFilter === "success") return record.success;
     if (statusFilter === "failed") return !record.success;
@@ -199,6 +220,13 @@ export function RecentUsageContent() {
                 tone={summary.failed_count > 0 ? "warn" : "neutral"}
               />
             </div>
+            <div className="rounded-lg border bg-background px-3 py-2 text-xs">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="font-medium" title="缓存读取 /（输入 + 缓存读取 + 缓存写入）">缓存命中率 {measuredRows.length > 0 ? cacheHitRate(cacheTotals) : "未采集"}</span>
+                <span className="text-muted-foreground">读取 {measuredRows.length > 0 ? cacheTotals.cache_read_tokens : "未采集"} / 写入 {measuredRows.length > 0 ? cacheTotals.cache_write_tokens : "未采集"} Token</span>
+              </div>
+              <p className="mt-1 text-muted-foreground">按已采集的 {measuredRows.length}/{rows.length} 条记录汇总，口径为缓存读取 ÷（输入 + 缓存读取 + 缓存写入）。</p>
+            </div>
             {statusFilter !== "all" ? (
               <div className="text-xs text-muted-foreground">
                 当前仅显示{statusFilter === "success" ? "成功" : "失败"}记录，再点一次指标可取消筛选。
@@ -260,7 +288,11 @@ export function RecentUsageContent() {
                             {executionBackendLabel(r.execution_backend, "未记录")}
                           </MetaBadge>
                         </TableCell>
-                        <TableCell>{tokens}</TableCell>
+                        <TableCell>
+                          <div>{tokens}</div>
+                          <div className="whitespace-nowrap text-xs text-muted-foreground">缓存 {cacheHitRate(r)}</div>
+                          <div className="whitespace-nowrap text-xs text-muted-foreground">{cacheTokenLabel(r)}</div>
+                        </TableCell>
                         <TableCell>{r.latency_ms != null ? `${r.latency_ms}ms` : "-"}</TableCell>
                         <TableCell>
                           <MetaBadge tone={r.success ? "success" : "warn"}>{r.success ? "成功" : "失败"}</MetaBadge>
@@ -346,6 +378,8 @@ function UsageRecordCard({
           <InfoCell label="来源" value={usageSourceLabel(record.source)} />
           <InfoCell label="Token" value={tokens} />
           <InfoCell label="耗时" value={record.latency_ms != null ? `${record.latency_ms}ms` : "-"} />
+          <InfoCell label="缓存命中率" value={cacheHitRate(record)} />
+          <InfoCell label="缓存 Token" value={cacheTokenLabel(record)} />
         </div>
         <div className="mt-3 flex items-center justify-between gap-2">
           <div className="flex flex-wrap gap-1.5">
@@ -384,6 +418,8 @@ function UsageDetailPanel({ record }: { record: LLMUsageRecord }) {
         <InfoCell label="客户端" value={isGatewayBackend(record.execution_backend) ? "由 Gateway 管理" : clientIdentityLabel(record.client_identity_profile)} />
         <InfoCell label="实际后端" value={executionBackendLabel(record.execution_backend, "未记录")} />
         <InfoCell label="Token" value={`${record.input_tokens || 0} 输入 / ${record.output_tokens || 0} 输出`} />
+        <InfoCell label="缓存命中率" value={cacheHitRate(record)} />
+        <InfoCell label="缓存 Token" value={cacheTokenLabel(record)} />
       </div>
       {isGatewayBackend(record.execution_backend) ? (
         <div className="grid gap-2 text-xs sm:grid-cols-3">

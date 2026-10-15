@@ -25,6 +25,22 @@
 
 ## [Unreleased]
 
+### 新增
+
+- `,ai` 指令支持可选上下文：新增系统设置 `ai_context_messages`（0–20，默认 0 表示不带上下文），可在 Web 系统设置页“AI 指令上下文条数”配置，也可用 `,aictx <0-20>` 命令即时修改并热加载。开启后按时间正序携带该聊天最近 N 条消息，以 `user:` / `assistant:` 角色化历史拼装，当前问题始终在最后，并沿用既有脱敏路径。
+- LLM 用量新增 prompt cache 观测：`llm_usage` 增加 `cache_read_tokens` / `cache_write_tokens` 两列（迁移 `0060`，旧记录留空），用量读取 API 与前端“近期调用”展示缓存读写 token 与命中率，命中率口径为 `cacheRead / (input + cacheRead + cacheWrite)`，未采集时显示“未采集”。
+
+### 改进
+
+- System Agent 系统提示词逐轮稳定：本地/UTC 时间不再写入 system prompt，改为随本轮 user 尾部下发；会话记忆、长期偏好、技能、本轮工具状态与原生媒体说明一并从 system 前缀移到历史之后、当前问题之前的尾部块。system 前缀因此跨轮不变，配合上游 prompt cache 与网关侧对话亲和可以真正命中缓存。
+- System Agent 历史窗口改为追加式：移除模型历史的 32 条读取上限与“最近 8 条”截断，改为预算内尽量保留；超预算时一次丢弃至少 25% 并对齐下一轮 user，窗口起点随后持久化，避免下一轮重新加载已裁掉的历史。
+- LLM 调用补齐稳定会话身份：直连的 Chat Completions、Responses 与 Anthropic Messages 链路在识别到 Magpie 网关时附加 `X-Magpie-Session`（用户自定义同名兼容头优先）；worker 的 `,ai` 以 `cmdai:{account_id}:{chat_id}` 作为稳定聊天作用域注入运行态元数据，不再退化成每次随机会话。
+
+### 修复
+
+- `llm_usage` 生产持久化回调补齐缓存字段映射，此前缓存统计在写库前被丢弃，页面上永远看不到命中情况。
+- 修正两个会静默通过的 System Agent 测试：断言位于被 agent 错误处理吞掉的 mock 内，技能注入与“普通问题不注入技能”实际上没有校验；改为在测试体内断言并把检查目标修正到本轮消息尾部，同时补上模型调用成功的守卫。
+
 ## [0.101.0-beta.2] - 2026-10-15 · patch（补丁版本预发布） · 依赖升级与验收修复
 
 ### 依赖与兼容
