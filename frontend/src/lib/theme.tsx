@@ -47,6 +47,9 @@ function applyResolvedTheme(resolvedTheme: ResolvedTheme) {
   root.classList.toggle("dark", resolvedTheme === "dark");
   root.style.colorScheme = resolvedTheme;
   root.style.backgroundColor = chromeColor;
+  // 主屏 PWA 的状态栏取样面（index.html 的 #telepilot-status-surface）用这个变量
+  // 取背景色，切换主题时必须同步，否则 iOS 会一直用启动那一帧的颜色填充状态栏。
+  root.style.setProperty("--telepilot-app-chrome", chromeColor);
   document.body.style.backgroundColor = chromeColor;
 
   const meta = document.querySelector<HTMLMetaElement>('meta[name="theme-color"]');

@@ -25,6 +25,14 @@
 
 ## [Unreleased]
 
+## [0.102.0-beta.2] - 2026-10-23 · patch（次版本预发布） · iOS 27 PWA 顶栏模糊修复
+
+> 本条是主屏 Web App 的视觉修复；真机验收仍以 iOS 27/27.2 实机截图为准。
+
+### 修复
+
+- 修复 iOS 27 / 27.2 主屏 Web App（PWA）顶栏被系统强制叠加的顶端渐隐模糊覆盖：iOS 27 会给独立窗口页面的顶端压一层渐进模糊，WebKit 只有在边缘取样命中「贴顶、全宽、厚度超过 10px 的 `position: fixed/sticky` 元素」时才改用实色状态栏，而顶栏原有的 `::before` 是绝对定位，永远不进判定范围。现在在 `frontend/index.html` 的 `#root` 之外补了一个从首帧起就存在的固定取样面 `#telepilot-status-surface`：高 12px、贴顶全宽、`background-clip: text` 配合空文本保证不绘制像素也不拦截点击，颜色跟随 `--telepilot-app-chrome` 同步明暗主题。仅在独立窗口（`data-pwa-standalone`）且引擎支持文本背景裁剪时启用，普通 Safari 标签页与 Chromium PWA 的取色行为不变。
+
 ## [0.102.0-beta.1] - 2026-10-16 · minor（次版本预发布） · Agent 缓存与 AI 指令上下文
 
 ### 新增

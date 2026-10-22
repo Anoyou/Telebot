@@ -566,7 +566,10 @@
   }
 
   /* 顶部不再叠渐变或半透明遮罩；::before 只负责用 --app-chrome
-     纯色填充 safe-area，不影响明暗主题的真实背景。 */
+     纯色填充 safe-area，不影响明暗主题的真实背景。
+     iOS 27 主屏 Web App 顶端那层强制渐隐模糊不在这里处理：WebKit 的边缘取样
+     只命中 position: fixed / sticky 的元素，绝对定位的 ::before 不在判定范围内，
+     改由 index.html 的 #telepilot-status-surface 承担，见那里的注释。 */
 
   .dialog-center {
     position: fixed !important;

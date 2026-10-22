@@ -106,3 +106,80 @@ def test_usage_guide_is_synced_and_whitelisted() -> None:
 
     assert "USAGE-GUIDE.md" in sync.split("DOC_FILES=(")[1].split(")")[0]
     assert "|USAGE-GUIDE)" in nginx
+
+
+STATUS_SURFACE_ID = "telepilot-status-surface"
+
+
+def _chrome_bootstrap_style(html: str) -> str:
+    match = re.search(
+        r'<style id="telepilot-chrome-bootstrap">(?P<content>[\s\S]*?)</style>',
+        html,
+    )
+    assert match is not None
+    return match.group("content")
+
+
+def test_ios27_forced_top_blur_has_a_fixed_edge_surface() -> None:
+    """iOS 27 主屏 Web App 顶端的强制渐隐模糊只能靠 WebKit 边缘取样消除。
+
+    WebKit 只命中 position: fixed/sticky、贴顶全宽且厚度超过 10px 的元素；
+    .app-topbar::before 是绝对定位，永远不在判定范围内，因此由 body 下这个独立
+    元素承担取样。它必须为空、不绘制像素、不拦截点击，并且默认不显示。
+    """
+    html = INDEX_HTML.read_text(encoding="utf-8")
+    style = _chrome_bootstrap_style(html)
+    body_index = html.index("<body>")
+    root_index = html.index('<div id="root">')
+    surface_index = html.index(f'<div id="{STATUS_SURFACE_ID}"')
+
+    # 必须真实存在且位于 React root 之外：既能在首帧参与取样，也不会被 React 接管。
+    assert body_index < surface_index < root_index
+    assert 'aria-hidden="true"' in html[surface_index : html.index(">", surface_index)]
+
+    # 默认隐藏：普通 Safari 标签页与 Chromium PWA 不参与，保持既有取色行为。
+    default_rule_start = style.index(f"#{STATUS_SURFACE_ID} {{")
+    default_rule = style[default_rule_start : style.index("}", default_rule_start)]
+    assert "display: none" in default_rule
+
+    assert "@supports (-webkit-background-clip: text) or (background-clip: text)" in style
+    rule_start = style.index(f'html[data-pwa-standalone="true"] #{STATUS_SURFACE_ID}')
+    rule = style[rule_start : style.index("}", rule_start)]
+    assert "position: fixed" in rule
+    assert "pointer-events: none" in rule
+    assert "var(--telepilot-app-chrome" in rule
+
+    # WebKit 的细边阈值是 10px：更矮的固定面会被当成细边采样，换色不稳定。
+    height = re.search(r"height:\s*(\d+)px", rule)
+    assert height is not None
+    assert int(height.group(1)) > 10
+
+    # 文本裁剪 = 保留背景样式但不绘制像素；换成 opacity/visibility/display 隐藏
+    # 会被取样判定直接跳过，模糊反而回来，所以要守住这条边界。
+    assert "-webkit-background-clip: text" in rule
+    assert "background-clip: text" in rule
+    assert "opacity: 0" not in rule
+    assert "visibility: hidden" not in rule
+
+
+def test_ios_pwa_standalone_flag_is_set_before_react_mounts() -> None:
+    """独立窗口判定必须和内联引导脚本同时生效，取样面才能从第一帧就存在。"""
+    html = INDEX_HTML.read_text(encoding="utf-8")
+    script_match = re.search(
+        r'<script data-telepilot-chrome-bootstrap>(?P<content>[\s\S]*?)</script>',
+        html,
+    )
+    assert script_match is not None
+    assert script_match.start() < html.index("<body>")
+    script = script_match.group("content")
+
+    assert "window.navigator.standalone === true" in script
+    assert 'matchMedia("(display-mode: standalone)")' in script
+    assert 'setAttribute("data-pwa-standalone", "true")' in script
+
+
+def test_ios_status_surface_follows_runtime_theme_changes() -> None:
+    """取样面靠 --telepilot-app-chrome 取色，切换主题后必须同步，否则状态栏停在旧色。"""
+    theme = (REPO_ROOT / "frontend" / "src" / "lib" / "theme.tsx").read_text(encoding="utf-8")
+
+    assert 'setProperty("--telepilot-app-chrome", chromeColor)' in theme

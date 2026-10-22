@@ -28,6 +28,35 @@
         min-height: 100%;
         background-color: var(--telepilot-app-chrome, #F2F0EC);
       }
+
+      /* iOS 27 会给主屏 Web App 的顶端强制叠一层渐进模糊，WebKit 只有在边缘
+         取样命中「符合条件的固定元素」时才改用实色状态栏，否则模糊会一直压到
+         应用顶栏上。下面这个空元素只充当取样面，本身不绘制任何像素：
+         - position: fixed 且贴顶全宽，才能被顶边 4px 处的取样点命中；
+         - 高度要超过 WebKit 的 10px 细边阈值，这里取 12px；
+         - background-color 就是被取样的颜色，即应用 chrome 底色；
+         - background-clip: text 配合空文本把背景裁成空字形，屏幕上看不见，
+           换成 opacity/visibility/display 隐藏会直接判定失败、模糊重新出现；
+         - 普通 Safari 标签页与 Chromium PWA 保持 display: none。 */
+      #telepilot-status-surface {
+        display: none;
+      }
+
+      @supports (-webkit-background-clip: text) or (background-clip: text) {
+        html[data-pwa-standalone="true"] #telepilot-status-surface {
+          display: block;
+          position: fixed;
+          top: 0;
+          left: 0;
+          right: 0;
+          height: 12px;
+          z-index: 2147483647;
+          pointer-events: none;
+          background-color: var(--telepilot-app-chrome, #F2F0EC);
+          -webkit-background-clip: text;
+          background-clip: text;
+        }
+      }
     </style>
 
     <script data-telepilot-chrome-bootstrap>
@@ -37,16 +66,23 @@
           var prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
           var dark = theme === "dark" || (theme === "system" && prefersDark);
           var chrome = dark ? "#1C1C1E" : "#F2F0EC";
-          document.documentElement.classList.toggle("dark", dark);
-          document.documentElement.style.colorScheme = dark ? "dark" : "light";
-          document.documentElement.style.setProperty("--telepilot-app-chrome", chrome);
-          document.documentElement.style.backgroundColor = chrome;
+          var root = document.documentElement;
+          root.classList.toggle("dark", dark);
+          root.style.colorScheme = dark ? "dark" : "light";
+          root.style.setProperty("--telepilot-app-chrome", chrome);
+          root.style.backgroundColor = chrome;
           var meta = document.querySelector('meta[name="theme-color"]');
           if (meta) meta.setAttribute("content", chrome);
           var colorScheme = document.querySelector('meta[name="color-scheme"]');
           if (colorScheme) colorScheme.setAttribute("content", dark ? "dark" : "light");
           // iOS 26 的主屏 Web App 会在 React 启动前取样 body/canvas；CSS 变量由 html
           // 继承到稍后创建的 body，使状态栏和应用顶栏从第一帧就是同一块实色背景。
+          // iOS 27 的顶端渐隐模糊同样从首帧就生效，所以独立窗口判定也放在这里，
+          // 让 #telepilot-status-surface 从第一帧起就参与 WebKit 的边缘取样。
+          var standalone = window.navigator.standalone === true ||
+            (typeof window.matchMedia === "function" &&
+              window.matchMedia("(display-mode: standalone)").matches);
+          if (standalone) root.setAttribute("data-pwa-standalone", "true");
         } catch (e) {}
       })();
     </script>
@@ -57,6 +93,7 @@
     <title>TelePilot</title>
   </head>
   <body>
+    <div id="telepilot-status-surface" aria-hidden="true"></div>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
