@@ -10,6 +10,7 @@ MVP 设计：
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import time
 import uuid
@@ -23,6 +24,8 @@ from ..db.base import AsyncSessionLocal
 from ..db.models.llm_usage import LLMUsage
 from ..db.models.system import SystemSetting
 from ..redis_client import get_redis
+from . import audit
+from .redis_key_migration import eval_with_legacy_keys
 
 log = logging.getLogger(__name__)
 
@@ -222,6 +225,9 @@ async def release(ticket: PluginAIQuotaTicket | None, actual_tokens: int) -> Non
             ticket.estimated_tokens,
             exc_info=True,
         )
+        # 释放失败意味着 Redis 计数可能多占了配额（预扣未按实际用量修正），
+        # 只写日志会让管理员在 Audit 里看不到；这里补一条审计事件供排查。
+        await _write_release_failure_audit(ticket, actual)
 
 
 async def _try_redis_acquire(
@@ -235,7 +241,8 @@ async def _try_redis_acquire(
 ) -> None:
     redis = get_redis()
     await redis.ping()
-    result = await redis.eval(
+    result = await eval_with_legacy_keys(
+        redis,
         _ACQUIRE_SCRIPT,
         3,
         minute_key,
@@ -354,12 +361,36 @@ async def _write_quota_error_usage(plugin_key: str, account_id: int | None) -> N
 def _quota_keys(plugin_key: str, account_id: int | None) -> tuple[str, str, str]:
     now = datetime.now(UTC)
     account = "none" if account_id is None else str(int(account_id))
-    base = f"plugin_ai_quota:{account}:{plugin_key}"
+    # telepilot: 命名空间前缀，对齐 llm_key_pool 的 telepilot:llm_key_usage 先例。
+    base = f"telepilot:plugin_ai_quota:{account}:{plugin_key}"
     return (
         f"{base}:m",
         f"{base}:ma",
         f"{base}:d:{now:%Y%m%d}",
     )
+
+
+async def _write_release_failure_audit(ticket: PluginAIQuotaTicket, actual: int) -> None:
+    """release 失败时写一条审计事件（worker 侧无请求级 session，自建会话并提交）。"""
+    try:
+        async with AsyncSessionLocal() as db:
+            await audit.write(
+                db,
+                None,
+                "plugin.ai_quota_release_failed",
+                target=f"plugin:{ticket.plugin_key}",
+                detail={
+                    "plugin_key": ticket.plugin_key,
+                    "account_id": ticket.account_id,
+                    "actual_tokens": actual,
+                    "estimated_tokens": ticket.estimated_tokens,
+                    "reservation_id": ticket.reservation_id,
+                },
+            )
+            await db.commit()
+    except Exception:  # noqa: BLE001
+        # 审计写失败不能再干扰业务返回路径；日志兜底。
+        log.debug("plugin AI quota release audit write failed", exc_info=True)
 
 
 def _quota_message(scope: str, used: int, estimate: int, limit: int) -> str:
@@ -372,7 +403,14 @@ def _quota_message(scope: str, used: int, estimate: int, limit: int) -> str:
 
 def _normalize_plugin_key(plugin_key: str) -> str:
     key = str(plugin_key or "unknown").strip()
-    return key[:48] or "unknown"
+    if not key:
+        return "unknown"
+    if len(key) <= 48:
+        return key
+    # 超长 key：截断前缀 + 短 hash 后缀（对齐 llm_key_pool._affinity_redis_key 的做法），
+    # 消除"共享 48 字符前缀的不同插件 key 共用同一个配额桶"的碰撞。
+    digest = hashlib.sha1(key.encode("utf-8")).hexdigest()[:20]  # noqa: S324 - 仅做键名缩短
+    return f"{key[:48]}#{digest}"
 
 
 def _positive_int(value: Any, default: int) -> int:

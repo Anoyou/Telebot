@@ -169,6 +169,9 @@ async def test_dispatch_debug_router_delivery_stats_reads_light_summary(
             object(),
             account_id=909,
             channel="account_bot",
+            # limit 默认值是 Query(50, ...) 对象（由 FastAPI 注入解析），
+            # 直接调用端点函数时需显式传 int。
+            limit=50,
         )
 
         assert summary["count"] == 1
@@ -177,3 +180,43 @@ async def test_dispatch_debug_router_delivery_stats_reads_light_summary(
         assert summary["entries"][0]["last_status"] == account_bot_runtime.TRACE_STATUS_OK
     finally:
         account_bot_runtime._ROUTER_DELIVERY_STATS.clear()
+
+
+async def _limit_422_status(router, path: str, params: dict) -> int:
+    """用最小 FastAPI 应用验证 Query 声明式参数校验（不触达真实依赖）。"""
+    from types import SimpleNamespace
+
+    from fastapi import FastAPI
+    from httpx import ASGITransport, AsyncClient
+
+    import app.deps as deps
+
+    app = FastAPI()
+    app.include_router(router)
+    app.dependency_overrides[deps.get_db] = lambda: object()
+    app.dependency_overrides[deps.get_current_user] = lambda: SimpleNamespace(id=1)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.get(path, params=params)
+        return resp.status_code
+
+
+@pytest.mark.asyncio
+async def test_router_delivery_stats_limit_is_bounded() -> None:
+    """router-delivery-stats 的 limit 必须有 1..200 上限：超限/非法值 → 422。"""
+    assert (
+        await _limit_422_status(
+            dispatch_debug.router,
+            "/api/dispatch/router-delivery-stats",
+            {"limit": 201},
+        )
+        == 422
+    )
+    assert (
+        await _limit_422_status(
+            dispatch_debug.router,
+            "/api/dispatch/router-delivery-stats",
+            {"limit": 0},
+        )
+        == 422
+    )

@@ -100,9 +100,17 @@ auth-recovery:
 nuke:
 	@./scripts/nuke.sh
 
-# 让 `make logs be` 这种"接位置参数"不报错
+# 让 `make logs be` 这种"接位置参数"不报错；已知组件词静默通过。
+# 其它未知目标（多半是拼写错误，如 `make prod-upd`）明确提示并以失败退出，
+# 不再静默空跑 exit 0 让人误以为已执行。
+LOGS_TARGET_WORDS := be fe db web frontend backend postgres redis updater
 %:
-	@:
+	@if echo ' $(LOGS_TARGET_WORDS) ' | grep -q ' $@ '; then \
+		exit 0; \
+	else \
+		echo "make: 未知目标 '$@'（可用目标见 make help；make logs 的组件词：$(LOGS_TARGET_WORDS)）" >&2; \
+		exit 1; \
+	fi
 
 # ════════════════════════════════════════════
 # 细粒度（保留旧 target 不破坏既有用法）

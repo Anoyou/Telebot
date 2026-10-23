@@ -403,6 +403,103 @@ async def test_stream_message_ndjson(fake_svc, fake_run_manager) -> None:
     db.commit.assert_awaited()
 
 
+class _IdempotentStreamRunManager:
+    """模拟 run_manager 的 client_request_id 去重语义（_find_by_request）。"""
+
+    def __init__(self) -> None:
+        self.runs_by_request: dict[str, str] = {}
+        self.start_calls: list[str] = []
+
+    async def start_run(self, **kwargs):
+        request_id = str(kwargs["client_request_id"])
+        self.start_calls.append(request_id)
+        run_id = self.runs_by_request.get(request_id)
+        if run_id is None:
+            run_id = f"stream-run-{len(self.runs_by_request) + 1}"
+            self.runs_by_request[request_id] = run_id
+        return SimpleNamespace(id=run_id)
+
+    async def stream_events(self, run_id, *, after_seq=0):
+        yield {"type": "run_started", "run_id": run_id, "session_id": "s1", "seq": after_seq + 1}
+        yield {"type": "done", "ok": True, "run_id": run_id, "session_id": "s1", "seq": after_seq + 2}
+
+
+async def _drain_stream(response) -> None:  # noqa: ANN001
+    async for _chunk in response.body_iterator:
+        pass
+
+
+@pytest.mark.asyncio
+async def test_stream_run_reuses_client_request_id_across_retries(fake_svc, monkeypatch) -> None:
+    # 网络重试/双击：同一 client_request_id 的流式建 run 请求应复用同一 run，
+    # 服务端不得每次现造 uuid 导致重复创建 run、重复消耗 LLM token
+    manager = _IdempotentStreamRunManager()
+    monkeypatch.setattr(api, "get_system_agent_run_manager", lambda: manager)
+    db = AsyncMock()
+    user = SimpleNamespace(id=7)
+    await api.create_session(api.SystemAgentSessionCreate(), db, user)
+
+    for _ in range(2):
+        response = await api.stream_message(
+            "s1",
+            api.SystemAgentMessageCreate(content="你好", client_request_id="request-stream-1"),
+            db,
+            user,
+        )
+        await _drain_stream(response)
+
+    assert manager.start_calls == ["request-stream-1", "request-stream-1"]
+    assert len(manager.runs_by_request) == 1
+
+
+@pytest.mark.asyncio
+async def test_retry_stream_reuses_client_request_id(fake_svc, monkeypatch) -> None:
+    manager = _IdempotentStreamRunManager()
+    monkeypatch.setattr(api, "get_system_agent_run_manager", lambda: manager)
+    db = AsyncMock()
+    user = SimpleNamespace(id=7)
+    await api.create_session(api.SystemAgentSessionCreate(), db, user)
+    fake_svc.messages["s1"] = [
+        SimpleNamespace(id=9, session_id="s1", role="user", run_status="failed")
+    ]
+
+    for _ in range(2):
+        response = await api.retry_message(
+            "s1",
+            9,
+            api.SystemAgentMessageRetry(client_request_id="request-retry-stream-1"),
+            db,
+            user,
+        )
+        await _drain_stream(response)
+
+    assert manager.start_calls == ["request-retry-stream-1", "request-retry-stream-1"]
+    assert len(manager.runs_by_request) == 1
+
+
+@pytest.mark.asyncio
+async def test_stream_run_generates_request_id_when_payload_missing(
+    fake_svc,
+    fake_run_manager,
+) -> None:
+    # 兼容旧客户端：不传 client_request_id 时服务端仍现造 uuid 兜底
+    db = AsyncMock()
+    user = SimpleNamespace(id=7)
+    await api.create_session(api.SystemAgentSessionCreate(), db, user)
+
+    response = await api.stream_message(
+        "s1",
+        api.SystemAgentMessageCreate(content="你好"),
+        db,
+        user,
+    )
+    await _drain_stream(response)
+
+    request_id = fake_run_manager.last_start_kwargs["client_request_id"]
+    assert isinstance(request_id, str)
+    assert len(request_id) >= 8
+
+
 @pytest.mark.asyncio
 async def test_start_durable_run_returns_run_and_message_identity(
     fake_svc,
@@ -1181,3 +1278,42 @@ async def test_run_stream_survives_mapping_lookup_failure(monkeypatch) -> None:
     assert any(event["type"] == "done" for event in parsed)
     assistant = next(event for event in parsed if event["type"] == "assistant_message")
     assert assistant["content"] == "我会用 [[TP-CRED-1]] 注册。"
+
+
+# ─────────── account_id 不存在 → 404 结构化错误（非 FK 500） ───────────
+
+
+@pytest.mark.asyncio
+async def test_create_session_with_missing_account_maps_to_404(fake_svc, monkeypatch) -> None:
+    db = AsyncMock()
+    user = SimpleNamespace(id=7)
+
+    async def raising_create(_db, **_kwargs):
+        raise LookupError("account 404 不存在")
+
+    monkeypatch.setattr(fake_svc, "create_session", raising_create)
+    with pytest.raises(HTTPException) as exc_info:
+        await api.create_session(api.SystemAgentSessionCreate(account_id=404), db, user)
+    assert exc_info.value.status_code == 404
+    assert exc_info.value.detail["code"] == "ACCOUNT_NOT_FOUND"
+
+
+@pytest.mark.asyncio
+async def test_update_session_with_missing_account_maps_to_404(fake_svc, monkeypatch) -> None:
+    db = AsyncMock()
+    user = SimpleNamespace(id=7)
+    await api.create_session(api.SystemAgentSessionCreate(account_id=None), db, user)
+
+    async def raising_update(_db, _session, **_kwargs):
+        raise LookupError("account 404 不存在")
+
+    monkeypatch.setattr(fake_svc, "update_session", raising_update)
+    with pytest.raises(HTTPException) as exc_info:
+        await api.update_session(
+            "s1",
+            api.SystemAgentSessionUpdate(account_id=404),
+            db,
+            user,
+        )
+    assert exc_info.value.status_code == 404
+    assert exc_info.value.detail["code"] == "ACCOUNT_NOT_FOUND"

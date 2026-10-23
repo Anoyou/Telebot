@@ -1,6 +1,8 @@
 """远程插件管理 API 路由。"""
 from __future__ import annotations
 
+import logging
+
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
@@ -9,6 +11,7 @@ from ..schemas.remote_plugin import RemotePluginCreate, RemotePluginOut
 from ..services import feature_service
 from ..services import remote_plugin_service as svc
 from ..services.platform_capabilities import PluginCapabilityBlocked
+from ..services.redactor import redact_text
 from ..services.remote_plugin_service import (
     DuplicatePluginName,
     GitOperationFailed,
@@ -19,6 +22,8 @@ from ..services.remote_plugin_service import (
 )
 
 router = APIRouter(prefix="/api/remote-plugins", tags=["remote-plugins"])
+
+log = logging.getLogger(__name__)
 
 
 @router.get("", response_model=list[RemotePluginOut])
@@ -58,7 +63,11 @@ async def api_install_plugin(
     except RemotePluginError as e:
         raise HTTPException(400, detail={"code": e.code, "message": e.message}) from e
     except Exception as e:
-        raise HTTPException(500, detail={"code": "INTERNAL", "message": f"安装失败: {e}"}) from e
+        # 异常文本可能含本地路径或 URL 内嵌凭据，只落服务端日志，不回显客户端。
+        log.exception("remote plugin install failed: %s", redact_text(body.source_url))
+        raise HTTPException(
+            500, detail={"code": "INTERNAL", "message": "安装失败，请查看服务端日志"}
+        ) from e
 
 
 @router.post("/{name}/enable")

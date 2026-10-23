@@ -721,6 +721,26 @@ async def test_llm_budget_interrupted_stream_keeps_conservative_charge(monkeypat
 
 
 @pytest.mark.asyncio
+async def test_llm_budget_redis_keys_use_telepilot_namespace_prefix() -> None:
+    """预算 Redis 键统一挂 telepilot: 命名空间（对齐 telepilot:llm_key_usage 先例）。"""
+
+    from app.services import llm_account_budget
+
+    minute, daily_requests, daily_tokens, daily_premium, reservation = llm_account_budget._budget_keys(
+        7, 3, "resv-1"
+    )
+    assert minute == "telepilot:llm_budget:7:minute"
+    assert daily_requests.startswith("telepilot:llm_budget:7:daily_requests:")
+    assert daily_tokens.startswith("telepilot:llm_budget:7:daily_tokens:")
+    assert daily_premium.startswith("telepilot:llm_budget:7:daily_premium:3:")
+    assert reservation.startswith("telepilot:llm_budget:7:reservation:resv-1")
+    # 结算侧 premium 分桶键与 acquire 侧同一前缀口径。
+    assert llm_account_budget._daily_premium_key(7, 5, today="20261024") == (
+        "telepilot:llm_budget:7:daily_premium:5:20261024"
+    )
+
+
+@pytest.mark.asyncio
 async def test_llm_budget_premium_limit_is_per_provider(monkeypatch) -> None:
     """高价 provider 每日次数沿用旧语义：同账号下按 provider_id 分桶。"""
     from app.services import llm_account_budget

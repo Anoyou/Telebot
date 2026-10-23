@@ -547,6 +547,28 @@ def _text_is_mostly_secrets(text: str, secrets: list[str]) -> bool:
     return len(cleaned) <= 8
 
 
+# 密钥被拒类 error_code：已有 Key 但验证失败/无法解密，允许覆盖旧值重试
+_REJECTED_SECRET_ERROR_CODES = {
+    "API_KEY_REJECTED",
+    "PROVIDER_VERIFY_FAILED",
+    "API_KEY_DECRYPT_FAILED",
+}
+
+
+def _action_accepts_secret_input(row: Any, secret_names: tuple[str, ...]) -> bool:
+    """仅“缺密钥”或“密钥被拒”的 Action 允许回填，避免把 Key 写进无关待确认操作。
+
+    缺密钥以实际字段语义判断：密文为空，或任一必需密钥字段尚未落库
+    （API_KEY_REQUIRED / API_KEY_REJECTED 等预检路径会同步清除对应
+    secret_fields）；已有全部密钥时仅密钥被拒类允许重试覆盖。
+    """
+
+    stored = tuple(row.secret_fields or ())
+    if not row.secret_payload_enc or any(name not in stored for name in secret_names):
+        return True
+    return str(row.error_code or "").upper() in _REJECTED_SECRET_ERROR_CODES
+
+
 async def try_attach_secrets_to_pending_action(
     *,
     account_id: int,
@@ -567,6 +589,12 @@ async def try_attach_secrets_to_pending_action(
         and not any(ch.isspace() for ch in raw_secret)
     )
     if not secrets and not pure_secret_candidate:
+        return False
+    if not secrets and pure_secret_candidate:
+        secrets = [raw_secret]
+    # 仅当消息几乎全是密钥时才允许回填旧 Action；混合句子里带密钥时
+    # 无法确定 Key 归属，交给正常 Agent 轮次处理，且不得做任何写回。
+    if not _text_is_mostly_secrets(text, secrets):
         return False
 
     async with AsyncSessionLocal() as db:
@@ -592,31 +620,15 @@ async def try_attach_secrets_to_pending_action(
                 continue
             if not getattr(spec, "allow_secret_input", True):
                 continue
-            # 优先：已报缺 Key / 验证失败，或当前无密文
-            if (
-                not row.secret_payload_enc
-                or (row.error_code or "").upper()
-                in {
-                    "API_KEY_REQUIRED",
-                    "PROVIDER_VERIFY_FAILED",
-                    "API_KEY_DECRYPT_FAILED",
-                    "PRECHECK_FAILED",
-                }
-                or str(row.error_message or "").find("密钥") >= 0
-                or str(row.error_message or "").find("Key") >= 0
-                or str(row.error_message or "").find("api_key") >= 0
-            ):
+            # 只回填到明确缺 Key / 密钥被拒的 Action，避免跨操作污染凭据
+            names = tuple(spec.secret_argument_names)
+            if _action_accepts_secret_input(row, names):
                 target = row
-                secret_names = tuple(spec.secret_argument_names)
+                secret_names = names
                 break
-            if target is None:
-                target = row
-                secret_names = tuple(spec.secret_argument_names)
         if target is None or not secret_names:
             await db.commit()  # 可能有过期标记
             return False
-        if not secrets and pure_secret_candidate:
-            secrets = [raw_secret]
 
         locked = await lock_action(db, target.id)
         if locked is None or not bot_owns_action(locked, tg_user_id):
@@ -629,10 +641,19 @@ async def try_attach_secrets_to_pending_action(
         target = locked
 
         secret_map = decrypt_secret_payload(target.secret_payload_enc)
+        # 已有同名旧密钥时，仅密钥被拒类允许覆盖，避免误改仍有效的凭据
+        overwrite_allowed = (
+            str(target.error_code or "").upper() in _REJECTED_SECRET_ERROR_CODES
+        )
+        wrote_any = False
         for i, name in enumerate(secret_names):
-            if i < len(secrets):
-                secret_map[name] = secrets[i]
-        if not any(secret_map.get(n) for n in secret_names):
+            if i >= len(secrets):
+                break
+            if secret_map.get(name) and not overwrite_allowed:
+                continue
+            secret_map[name] = secrets[i]
+            wrote_any = True
+        if not wrote_any:
             await db.rollback()
             return False
 
@@ -650,11 +671,6 @@ async def try_attach_secrets_to_pending_action(
         action_id = target.id
         summary = target.summary
         danger = str(target.risk or "") == "dangerous"
-
-    # 仅当消息几乎全是密钥时短路；否则仍继续 Agent（用户可能边说边贴 Key）
-    only_secret = _text_is_mostly_secrets(text, secrets)
-    if not only_secret:
-        return False
 
     nonce = await store_agent_confirm_nonce(
         account_id=account_id,

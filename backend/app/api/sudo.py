@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import logging
+
 from fastapi import APIRouter, HTTPException
 
 from ..deps import CurrentUser, DBSession
 from ..redis_client import get_redis
 from ..schemas.sudo import SudoUserCreate, SudoUserResponse, SudoUserUpdate
+from ..services import audit
 from ..services.sudo_service import (
     create_sudo_user,
     delete_sudo_user,
@@ -16,6 +19,7 @@ from ..services.sudo_service import (
 )
 from ..worker.ipc import CMD_RELOAD_CONFIG, publish_cmd_with_ack
 
+log = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/sudo", tags=["sudo"])
 
 
@@ -25,7 +29,14 @@ async def _notify_sudo_reload(account_id: int | None) -> None:
     try:
         redis = get_redis()
         await publish_cmd_with_ack(redis, int(account_id), CMD_RELOAD_CONFIG)
-    except Exception:
+    except Exception as exc:  # noqa: BLE001
+        # 通知失败不阻断 API 结果，但必须留痕：sudo 白名单（尤其权限收窄）变更后
+        # worker 可能一直用旧白名单，需要能从日志追到这次通知失败。
+        log.warning(
+            "sudo reload 通知失败，worker 将继续使用旧 sudo 白名单 account_id=%s error=%s",
+            account_id,
+            type(exc).__name__,
+        )
         return
 
 
@@ -60,7 +71,15 @@ async def create_sudo_user_endpoint(
     user: CurrentUser = None,
 ) -> SudoUserResponse:
     """创建 Sudo 用户。"""
-    sudo_user = await create_sudo_user(db, data)
+    sudo_user = await create_sudo_user(db, data, commit=False)
+    await audit.write(
+        db,
+        user.id,
+        "sudo.create",
+        target=f"sudo:{sudo_user.id}",
+        detail={"account_id": data.account_id, "tg_user_id": data.tg_user_id},
+    )
+    await db.commit()
     await _notify_sudo_reload(sudo_user.account_id)
     return SudoUserResponse.model_validate(sudo_user)
 
@@ -73,9 +92,17 @@ async def update_sudo_user_endpoint(
     user: CurrentUser = None,
 ) -> SudoUserResponse:
     """更新 Sudo 用户。"""
-    sudo_user = await update_sudo_user(db, sudo_id, data)
+    sudo_user = await update_sudo_user(db, sudo_id, data, commit=False)
     if not sudo_user:
         raise HTTPException(status_code=404, detail="Sudo user not found")
+    await audit.write(
+        db,
+        user.id,
+        "sudo.update",
+        target=f"sudo:{sudo_id}",
+        detail={"account_id": sudo_user.account_id, "tg_user_id": sudo_user.tg_user_id},
+    )
+    await db.commit()
     await _notify_sudo_reload(sudo_user.account_id)
     return SudoUserResponse.model_validate(sudo_user)
 
@@ -88,8 +115,17 @@ async def delete_sudo_user_endpoint(
 ) -> None:
     """删除 Sudo 用户。"""
     sudo_user = await get_sudo_user(db, sudo_id)
-    account_id = sudo_user.account_id if sudo_user is not None else None
-    success = await delete_sudo_user(db, sudo_id)
-    if not success:
+    if not sudo_user:
         raise HTTPException(status_code=404, detail="Sudo user not found")
+    account_id = sudo_user.account_id
+    tg_user_id = sudo_user.tg_user_id
+    await delete_sudo_user(db, sudo_id, commit=False)
+    await audit.write(
+        db,
+        user.id,
+        "sudo.delete",
+        target=f"sudo:{sudo_id}",
+        detail={"account_id": account_id, "tg_user_id": tg_user_id},
+    )
+    await db.commit()
     await _notify_sudo_reload(account_id)

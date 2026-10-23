@@ -25,11 +25,20 @@ from ..db.models.payout_compensation import (
     PayoutCompensation,
 )
 from . import audit, platform_capabilities
-from .action_tap import emit_compensated_payout_event
+from .action_tap import (
+    LEDGER_DIRECTION_IN,
+    LEDGER_DIRECTION_OUT,
+    emit_compensated_payout_event,
+    ledger_amount_from_summary,
+    ledger_direction_from_action,
+)
 
-LEDGER_DIRECTION_IN = "in"
-LEDGER_DIRECTION_OUT = "out"
 LEDGER_DIRECTIONS = {LEDGER_DIRECTION_IN, LEDGER_DIRECTION_OUT}
+
+# 方向/金额派生与写入路径（action_tap）保持单一实现，避免读写口径漂移；
+# 保留旧私有名，便于既有调用与测试对照。
+_extract_amount = ledger_amount_from_summary
+_direction_from_action = ledger_direction_from_action
 
 LEDGER_SOURCE_ACTION_EVENT = "action_event"
 LEDGER_SUMMARY_STATUSES = frozenset({ACTION_EVENT_STATUS_OK, ACTION_EVENT_STATUS_COMPENSATED})
@@ -187,25 +196,24 @@ async def list_ledger_entries(db: AsyncSession, filters: LedgerFilters | None = 
 
 
 async def summarize_ledger(db: AsyncSession, filters: LedgerFilters | None = None) -> LedgerSummary:
-    """按日和按群汇总真实资金净盈亏。"""
+    """按日和按群汇总真实资金净盈亏。
+
+    总额/条数通过 SQL SUM/COUNT 聚合（不再全量拉行）；按日/按群/按收款人
+    分组仍需 JSON 标签与收款人信息，只拉取 SQL 过滤后的资金行。
+    """
 
     active = resolve_summary_filters(filters)
     if active.status is not None and active.status not in LEDGER_SUMMARY_STATUSES:
         return _empty_summary()
+    income, payout, count = await _summarize_totals(db, active)
     entries = await list_ledger_entries(db, active)
 
-    income = Decimal("0")
-    payout = Decimal("0")
     day_buckets: dict[str, _SummaryAccumulator] = {}
     chat_buckets: dict[str, _SummaryAccumulator] = {}
     recipient_buckets: dict[str, _RecipientAccumulator] = {}
 
     for entry in entries:
         amount = _decimal_from_any(entry.amount) or Decimal("0")
-        if entry.direction == LEDGER_DIRECTION_IN:
-            income += amount
-        else:
-            payout += amount
 
         day_key = entry.created_at.date().isoformat()
         _add_to_bucket(day_buckets, day_key, day_key, entry.direction, amount)
@@ -222,7 +230,7 @@ async def summarize_ledger(db: AsyncSession, filters: LedgerFilters | None = Non
         income=_decimal_text(income),
         payout=_decimal_text(payout),
         net=_decimal_text(income - payout),
-        count=len(entries),
+        count=count,
         by_day=_summary_buckets(day_buckets, sort_key=lambda item: item.key),
         by_chat=_summary_buckets(
             chat_buckets,
@@ -453,6 +461,57 @@ def _empty_summary() -> LedgerSummary:
     return LedgerSummary(income="0", payout="0", net="0", count=0, by_day=[], by_chat=[], by_recipient=[])
 
 
+def _ledger_row_conditions(
+    filters: LedgerFilters,
+    *,
+    cursor: tuple[datetime, int] | None = None,
+) -> list[Any]:
+    """台账行过滤条件（SQL 下推）。
+
+    - direction/amount 提取列为 NULL 的行（params_summary 缺字段，或未经 0062
+      回填的旧行）不产生台账条目，与旧 Python 侧 `_entry_from_action_event`
+      /`_entry_matches` 的"缺字段行跳过"口径一致。
+    - 金额过滤使用绝对金额：旧行为比较的是 `entry.amount`（copy_abs 后的值），
+      因此 SQL 侧用 abs(amount) 比较。
+    """
+
+    conditions: list[Any] = []
+    if filters.since is not None:
+        conditions.append(ActionEvent.created_at >= filters.since)
+    if filters.until is not None:
+        conditions.append(ActionEvent.created_at <= filters.until)
+    if filters.account_id is not None:
+        conditions.append(ActionEvent.account_id == int(filters.account_id))
+    if filters.plugin_key:
+        conditions.append(ActionEvent.plugin_key == filters.plugin_key)
+    if filters.status:
+        conditions.append(ActionEvent.status == filters.status)
+    elif filters.statuses:
+        conditions.append(ActionEvent.status.in_(filters.statuses))
+    conditions.append(ActionEvent.direction.is_not(None))
+    conditions.append(ActionEvent.amount.is_not(None))
+    if filters.chat_id is not None:
+        conditions.append(ActionEvent.chat_id == int(filters.chat_id))
+    if filters.direction is not None:
+        conditions.append(ActionEvent.direction == filters.direction)
+    amount_abs = func.abs(ActionEvent.amount)
+    if filters.amount is not None:
+        conditions.append(amount_abs == filters.amount)
+    if filters.amount_min is not None:
+        conditions.append(amount_abs >= filters.amount_min)
+    if filters.amount_max is not None:
+        conditions.append(amount_abs <= filters.amount_max)
+    if cursor is not None:
+        created_at, row_id = cursor
+        conditions.append(
+            or_(
+                ActionEvent.created_at < created_at,
+                and_(ActionEvent.created_at == created_at, ActionEvent.id < int(row_id)),
+            )
+        )
+    return conditions
+
+
 async def _load_action_rows(
     db: AsyncSession,
     filters: LedgerFilters,
@@ -460,32 +519,36 @@ async def _load_action_rows(
     cursor: tuple[datetime, int] | None = None,
     batch_size: int | None = None,
 ) -> list[ActionEvent]:
-    stmt = select(ActionEvent)
-    if filters.since is not None:
-        stmt = stmt.where(ActionEvent.created_at >= filters.since)
-    if filters.until is not None:
-        stmt = stmt.where(ActionEvent.created_at <= filters.until)
-    if filters.account_id is not None:
-        stmt = stmt.where(ActionEvent.account_id == int(filters.account_id))
-    if filters.plugin_key:
-        stmt = stmt.where(ActionEvent.plugin_key == filters.plugin_key)
-    if filters.status:
-        stmt = stmt.where(ActionEvent.status == filters.status)
-    elif filters.statuses:
-        stmt = stmt.where(ActionEvent.status.in_(filters.statuses))
-    if cursor is not None:
-        created_at, row_id = cursor
-        stmt = stmt.where(
-            or_(
-                ActionEvent.created_at < created_at,
-                and_(ActionEvent.created_at == created_at, ActionEvent.id < int(row_id)),
-            )
-        )
+    stmt = select(ActionEvent).where(*_ledger_row_conditions(filters, cursor=cursor))
     stmt = stmt.order_by(ActionEvent.created_at.desc(), ActionEvent.id.desc())
     if batch_size is not None:
         stmt = stmt.limit(max(1, int(batch_size)))
     rows = (await db.execute(stmt)).scalars().all()
     return list(rows)
+
+
+async def _summarize_totals(
+    db: AsyncSession,
+    filters: LedgerFilters,
+) -> tuple[Decimal, Decimal, int]:
+    """SQL 聚合入账/出账总额与条数（金额与旧口径一致，取绝对值按方向汇总）。"""
+
+    stmt = (
+        select(ActionEvent.direction, func.sum(func.abs(ActionEvent.amount)), func.count())
+        .where(*_ledger_row_conditions(filters))
+        .group_by(ActionEvent.direction)
+    )
+    income = Decimal("0")
+    payout = Decimal("0")
+    count = 0
+    for direction, total, row_count in (await db.execute(stmt)).all():
+        amount = _decimal_from_any(total) or Decimal("0")
+        count += int(row_count or 0)
+        if direction == LEDGER_DIRECTION_IN:
+            income += amount
+        else:
+            payout += amount
+    return income, payout, count
 
 
 async def _hydrate_ledger_metadata(db: AsyncSession, entries: list[LedgerEntry]) -> None:
@@ -619,27 +682,8 @@ def _entry_from_action_event(row: ActionEvent) -> LedgerEntry | None:
     )
 
 
-def _direction_from_action(action_type: str, summary: dict[str, Any]) -> str | None:
-    action = str(action_type or "").strip().lower()
-    summary_type = str(summary.get("type") or summary.get("action_type") or "").strip().lower()
-    event_type = str(summary.get("event_type") or "").strip().lower()
-    source_type = str(_nested(summary, "source", "type") or "").strip().lower()
-    raw_event_type = str(_nested(summary, "raw", "event_type") or "").strip().lower()
-    if action == "payment_confirmed" or "payment_confirmed" in {summary_type, event_type, source_type, raw_event_type}:
-        return LEDGER_DIRECTION_IN
-    if action == "payout" or summary_type == "payout" or action.endswith("_payout") or action.startswith("payout_"):
-        return LEDGER_DIRECTION_OUT
-    return None
-
-
-def _extract_amount(summary: dict[str, Any]) -> Decimal | None:
-    return _decimal_from_any(
-        summary.get("amount"),
-        _nested(summary, "payment", "amount"),
-        _nested(summary, "parsed", "amount"),
-        _nested(summary, "raw", "parsed", "amount"),
-        _nested(summary, "result", "amount"),
-    )
+# _direction_from_action / _extract_amount 统一来自 action_tap（见文件顶部别名），
+# 与写入路径、alembic 0062 回填口径保持单一实现。
 
 
 def _entry_matches(entry: LedgerEntry, filters: LedgerFilters) -> bool:

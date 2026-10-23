@@ -17,6 +17,7 @@ from app.crypto import decrypt_str, encrypt_str
 from app.db.models.system_agent import (
     AGENT_RUN_CANCELLED,
     AGENT_RUN_FAILED,
+    AGENT_RUN_KIND_MESSAGE,
     AGENT_RUN_QUEUED,
     AGENT_RUN_RUNNING,
     AGENT_RUN_SUCCEEDED,
@@ -43,7 +44,9 @@ from app.db.models.system_agent import (
     SystemAgentRunInput,
     SystemAgentSession,
 )
+from app.services.system_agent import run_manager as run_manager_module
 from app.services.system_agent.run_manager import (
+    HEARTBEAT_INTERVAL_SECONDS,
     RunConflictError,
     RunNotFoundError,
     SystemAgentRunManager,
@@ -235,6 +238,177 @@ async def test_subscriber_disconnect_does_not_cancel_run_and_events_resume(run_d
     assert terminal.last_seq == 3
     assert [event["type"] for event in resumed] == ["assistant_message", "done"]
     assert [event["seq"] for event in resumed] == [first_seq + 1, first_seq + 2]
+
+
+class _FakeStreamClock:
+    """确定性单调时钟：时间只随被替换的 asyncio.sleep 推进，驱动心跳/退避断言。"""
+
+    def __init__(self) -> None:
+        self.now = 1000.0
+
+    def __call__(self) -> float:
+        return self.now
+
+
+async def _make_streaming_run(
+    run_db,
+    *,
+    run_id: str,
+    last_seq: int = 0,
+) -> None:
+    """直接落库一个非终态 Run（lease 远未到期、不触发派发），只服务传输层测试。"""
+    async with run_db() as db:
+        db.add(
+            SystemAgentRun(
+                id=run_id,
+                session_id="session-1",
+                web_user_id=7,
+                channel=CHANNEL_WEB,
+                client_request_id=f"request-{run_id}",
+                request_hash=f"hash-{run_id}",
+                kind=AGENT_RUN_KIND_MESSAGE,
+                status=AGENT_RUN_RUNNING,
+                last_seq=last_seq,
+                lease_expires_at=datetime.now(UTC) + timedelta(hours=1),
+            )
+        )
+        await db.commit()
+
+
+def _patch_stream_timing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> tuple[_FakeStreamClock, list[float]]:
+    """替换 stream_events 的时钟与 sleep：记录轮询间隔，并按间隔推进假时钟。"""
+    clock = _FakeStreamClock()
+    sleeps: list[float] = []
+
+    async def fake_sleep(delay: float) -> None:
+        sleeps.append(delay)
+        clock.now += delay
+
+    monkeypatch.setattr(run_manager_module, "_stream_monotonic", clock)
+    monkeypatch.setattr(asyncio, "sleep", fake_sleep)
+    return clock, sleeps
+
+
+@pytest.mark.asyncio
+async def test_stream_events_heartbeat_keeps_idle_subscriber_alive(
+    run_db,
+    monkeypatch,
+) -> None:
+    run_id = "run-stream-heartbeat"
+    await _make_streaming_run(run_db, run_id=run_id)
+    manager = SystemAgentRunManager(session_factory=run_db, poll_interval=0.2)
+    # 跳过恢复/派发循环，只验证订阅传输层。
+    manager._ready = True
+    clock, sleeps = _patch_stream_timing(monkeypatch)
+
+    subscriber = manager.stream_events(run_id)
+    received: list[tuple[float, dict[str, Any]]] = []
+    for _ in range(30):
+        event = await anext(subscriber)
+        received.append((clock.now, event))
+
+    # 空闲期间只产出心跳帧；字段对齐 make_event 信封，seq 固定 0。
+    assert {event["type"] for _, event in received} == {"heartbeat"}
+    for _, event in received:
+        assert event["seq"] == 0
+        assert event["run_id"] == run_id
+        assert event["ts"]
+
+    # 假时钟只随 sleep 推进：首帧与相邻心跳间隔都必须 ≥ 心跳阈值。
+    assert received[0][0] - 1000.0 >= HEARTBEAT_INTERVAL_SECONDS
+    for (prev_time, _), (now_time, _) in zip(received, received[1:], strict=False):
+        assert now_time - prev_time >= HEARTBEAT_INTERVAL_SECONDS
+
+    # 空闲轮询逐步退避：0.2 → 0.5 → 1.0 → 2.0 封顶。
+    assert sleeps[:3] == [0.2, 0.5, 1.0]
+    assert all(0.0 < delay <= 2.0 for delay in sleeps)
+
+    # 心跳不落事件表、不推进游标：订阅期间事件表为空、last_seq 不变。
+    async with run_db() as db:
+        rows = list(
+            (
+                await db.execute(
+                    select(SystemAgentRunEvent).where(SystemAgentRunEvent.run_id == run_id)
+                )
+            ).scalars()
+        )
+    assert rows == []
+    assert (await manager.get_run(run_id)).last_seq == 0
+
+    # 游标仍停在未来事件之前：随后落库的真实事件能被原订阅继续收到。
+    async with run_db() as db:
+        db.add(
+            SystemAgentRunEvent(
+                run_id=run_id,
+                seq=1,
+                event={"type": "tool_started", "seq": 1},
+            )
+        )
+        run_row = await db.get(SystemAgentRun, run_id)
+        run_row.last_seq = 1
+        await db.commit()
+    event = await anext(subscriber)
+    assert event["type"] == "tool_started"
+    assert event["seq"] == 1
+    await subscriber.aclose()
+
+
+@pytest.mark.asyncio
+async def test_stream_events_backoff_and_heartbeat_reset_on_new_events(
+    run_db,
+    monkeypatch,
+) -> None:
+    run_id = "run-stream-backoff"
+    await _make_streaming_run(run_db, run_id=run_id, last_seq=1)
+    async with run_db() as db:
+        db.add(
+            SystemAgentRunEvent(
+                run_id=run_id,
+                seq=1,
+                event={"type": "tool_started", "seq": 1},
+            )
+        )
+        await db.commit()
+    manager = SystemAgentRunManager(session_factory=run_db, poll_interval=0.2)
+    manager._ready = True
+    clock, sleeps = _patch_stream_timing(monkeypatch)
+
+    subscriber = manager.stream_events(run_id, after_seq=1)
+    # 空闲期逐级退避，累计假时间超过心跳阈值后才有第一帧心跳。
+    first = await anext(subscriber)
+    assert first["type"] == "heartbeat"
+    assert sum(sleeps) >= HEARTBEAT_INTERVAL_SECONDS
+    assert sleeps[:3] == [0.2, 0.5, 1.0]
+    assert all(delay == 2.0 for delay in sleeps[3:])
+
+    # 心跳后新事件落库：订阅立即收到，且退避回到 0.2s 快速跟进。
+    async with run_db() as db:
+        db.add(
+            SystemAgentRunEvent(
+                run_id=run_id,
+                seq=2,
+                event={"type": "tool_finished", "seq": 2},
+            )
+        )
+        run_row = await db.get(SystemAgentRun, run_id)
+        run_row.last_seq = 2
+        await db.commit()
+
+    event = await anext(subscriber)
+    assert event["type"] == "tool_finished"
+    assert event["seq"] == 2
+    event_time = clock.now
+
+    # 收到真实事件后心跳计时复位：下一帧心跳距真实事件 ≥ 心跳阈值（未复位则会立刻发出）。
+    sleeps.clear()
+    next_beat = await anext(subscriber)
+    assert next_beat["type"] == "heartbeat"
+    assert clock.now - event_time >= HEARTBEAT_INTERVAL_SECONDS
+    assert sleeps[:3] == [0.2, 0.5, 1.0]
+    assert all(0.0 < delay <= 2.0 for delay in sleeps)
+    await subscriber.aclose()
 
 
 @pytest.mark.asyncio

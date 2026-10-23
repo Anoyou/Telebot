@@ -197,6 +197,24 @@ def _get_redis():
     return get_redis()
 
 
+# 原子 INCR+EXPIRE：把"计数"与"首次设置 TTL"放进同一个 Lua 脚本一次完成。
+# 若拆成两条命令，第一条 INCR 成功后进程崩溃 / 连接断开会丢失 EXPIRE，key 变成
+# 无 TTL 且只增不减，超阈值后对应 IP / 用户名会被永久限流，只能人工清 Redis。
+# TTL 仅在计数为 1 时设置，保持原有"固定窗口"计数语义。
+_ATOMIC_INCR_EXPIRE_SCRIPT = """
+local count = redis.call('INCR', KEYS[1])
+if count == 1 then
+  redis.call('EXPIRE', KEYS[1], ARGV[1])
+end
+return count
+"""
+
+
+async def atomic_incr_with_expire(redis: Any, key: str, ttl: int) -> int:
+    """原子完成 INCR + 首次 EXPIRE；返回计数后的值。Redis 异常向上抛出由调用方降级。"""
+    return int(await redis.eval(_ATOMIC_INCR_EXPIRE_SCRIPT, 1, key, int(ttl)))
+
+
 def _local_incr(key: str, ttl: int) -> int:
     now = time.time()
     count, expires_at = _LOCAL_FAILS.get(key, (0, now + ttl))
@@ -262,9 +280,8 @@ async def record_login_failure(
     try:
         redis = _get_redis()
         for key in keys:
-            count = await redis.incr(key)
-            if count == 1:
-                await redis.expire(key, ttl)
+            # 原子 INCR+EXPIRE：防止 EXPIRE 丢失导致失败计数 key 永不过期
+            await atomic_incr_with_expire(redis, key, ttl)
     except Exception as exc:  # noqa: BLE001
         log.warning("auth login failure counter Redis fail-degraded: %s", exc)
         for key in keys:
@@ -280,6 +297,13 @@ async def clear_login_failures(ip: str, username_norm: str) -> None:
         log.warning("auth login failure counter clear failed: %s", exc)
     for key in keys:
         _LOCAL_FAILS.pop(key, None)
+
+
+# ── TOTP ──────────────────────────────────────────────────────────
+# 设计取舍：不做"已用 timestep"消费式防重放。验证码本身 ±1 窗口（最长 ~90s）
+# 有效，消费式拒绝会把同一窗口内的第二次正常登录（换设备/刷新重登/双端同时
+# 登录）连同正确密码一起拦在门外；登录已有密码 + 限速 + 递进锁定兜底，TOTP
+# 猜错在 api/auth.py 计入失败计数，重放面足够窄。
 
 
 async def should_require_login_otp(

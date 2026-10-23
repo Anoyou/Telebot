@@ -49,5 +49,6 @@ export function downloadCsv<T>(
   document.body.append(link);
   link.click();
   link.remove();
-  window.setTimeout(() => URL.revokeObjectURL(url), 0);
+  // iOS Safari/PWA webview 上立即 revoke 有中断下载的历史问题，留足下载启动时间。
+  window.setTimeout(() => URL.revokeObjectURL(url), 30_000);
 }

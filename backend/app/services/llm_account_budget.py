@@ -19,6 +19,7 @@ from ..db.base import AsyncSessionLocal
 from ..db.models.system import SystemSetting
 from ..redis_client import get_redis
 from ..settings import settings
+from .redis_key_migration import eval_with_legacy_keys
 
 log = logging.getLogger(__name__)
 
@@ -335,7 +336,8 @@ async def _try_redis_acquire(
 ) -> None:
     redis = get_redis()
     await redis.ping()
-    result = await redis.eval(
+    result = await eval_with_legacy_keys(
+        redis,
         _ACQUIRE_SCRIPT,
         5,
         *keys,
@@ -384,7 +386,10 @@ def _budget_keys(
 ) -> tuple[str, str, str, str, str]:
     today = datetime.now(UTC).strftime("%Y%m%d")
     account = int(account_id)
-    base = f"llm_budget:{account}"
+    # telepilot: 命名空间前缀，对齐 llm_key_pool 的 telepilot:llm_key_usage 先例。
+    # 升级影响：旧无前缀键（llm_budget:*）随 TTL 自然过期，升级瞬间当日
+    # 累计数清零一次——当日预算可能多放行一点，方向安全（限流偏松而非误杀）。
+    base = f"telepilot:llm_budget:{account}"
     return (
         f"{base}:minute",
         f"{base}:daily_requests:{today}",
@@ -397,7 +402,8 @@ def _budget_keys(
 def _daily_premium_key(account_id: int, provider_id: int | None, *, today: str | None = None) -> str:
     day = today or datetime.now(UTC).strftime("%Y%m%d")
     provider = int(provider_id or 0)
-    return f"llm_budget:{int(account_id)}:daily_premium:{provider}:{day}"
+    # 前缀口径同 _budget_keys（telepilot: 命名空间，旧键随 TTL 过期）。
+    return f"telepilot:llm_budget:{int(account_id)}:daily_premium:{provider}:{day}"
 
 
 def _settlement_premium_key(

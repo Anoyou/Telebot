@@ -37,6 +37,8 @@ chmod 700 sessions/            # 历史兼容目录；当前加密 StringSession
 chmod 700 data/avatars/        # 头像缓存（不算敏感，但顺手收紧）
 ```
 
+部署脚本改写 `.env` 时，在同目录用 `mkstemp` 创建自带 `0600` 权限的临时文件，写入后原子替换，并在异常时清理临时文件；不要改成先写明文再 `chmod`，否则写入期间存在可读窗口。
+
 ### 1.3 密钥异地备份
 
 部署完成后**立刻**跑一次：
@@ -173,6 +175,14 @@ docker compose exec web python -m app.scripts.auth_recovery --username admin --t
 - `PLUGIN_ALLOW_LEGACY_UNSIGNED_PLUGINS=true` 只兼容历史 `signature_ok=NULL` 的已安装插件，不允许新的未签名 ZIP 越过安装门禁。
 
 个人可信插件模型允许管理员主动安装自有代码，但生产环境仍应保留来源、版本、哈希和签名记录。临时开启新未签名安装后，应在完成安装后立即关闭。
+
+ZIP 与远程插件安装的临时目录统一放在 `plugins/installed/.staging/`，loader 不加载点号目录。自动清理只回收该目录内完整名称匹配且超过一小时的 staging，不删除插件根目录中的旧 `<key>.installing*` 目录；旧残留须在确认没有安装任务且并非合法插件后人工处理。
+
+### 2.7 Redis 额度键升级
+
+`payout_limit:`、`llm_budget:` 与 `plugin_ai_quota:` 额度键使用 `telepilot:` 前缀。首次消费时，所需旧键通过 `DUMP/RESTORE` 延续类型、值和剩余 TTL，并与额度校验、扣账在同一个 Lua 调用中执行；已存在的新键不会被旧值覆盖。迁移失败沿用各入口的 fail-closed 行为拒绝消费，不会因迁移错误重置额度。
+
+升级时必须停止旧版本写入后再启动新版本，避免新旧进程同时使用两个键空间。旧键保留至自然过期，但升级后的消费不会同步回旧键，因此它们不是无损回滚快照；若需回滚，先停写并核对当前累计及幂等集合，不得直接启用旧版本继续扣账。
 
 ---
 

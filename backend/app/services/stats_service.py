@@ -209,6 +209,9 @@ async def _load_action_rows(db: AsyncSession, filters: StatsFilters) -> list[Act
         stmt = stmt.where(ActionEvent.account_id == int(filters.account_id))
     if filters.plugin_key:
         stmt = stmt.where(ActionEvent.plugin_key == filters.plugin_key)
+    # 只有 OK/FAILED 参与运营指标（开局/参与者要求 OK，派奖成功率分母为 OK+FAILED），
+    # PENDING/DRY_RUN 等其余状态行在 SQL 侧直接排除，避免重复拉取无关全量行。
+    stmt = stmt.where(ActionEvent.status.in_((ACTION_EVENT_STATUS_OK, ACTION_EVENT_STATUS_FAILED)))
     stmt = stmt.order_by(ActionEvent.created_at.asc(), ActionEvent.id.asc())
     rows = (await db.execute(stmt)).scalars().all()
     return list(rows)

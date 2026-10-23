@@ -1226,6 +1226,182 @@ async def test_attach_secrets_skips_verified_probe_action(monkeypatch) -> None:
     assert send.calls[-1]["reply_markup"] is not None
 
 
+class _AttachAction:
+    """密钥回填回归测试用的 pending Action 桩。"""
+
+    def __init__(
+        self,
+        *,
+        secret_payload_enc: str | None,
+        secret_fields: list[str] | None,
+        error_code: str | None,
+    ) -> None:
+        self.id = "act-attach"
+        self.account_id = 1
+        self.tool_name = "providers.save"
+        self.secret_payload_enc = secret_payload_enc
+        self.secret_fields = secret_fields
+        self.arguments = {"name": "provider-x"}
+        self.summary = "创建 Provider"
+        self.risk = "normal"
+        self.status = "pending"
+        self.error_code = error_code
+        self.error_message = None
+        self.expires_at = None
+        self.actor_bot_user_id = 2
+
+
+class _AttachDB:
+    def __init__(self) -> None:
+        self.commit = AsyncMock()
+        self.rollback = AsyncMock()
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *args):
+        return False
+
+
+def _attach_registry():
+    class _Spec:
+        secret_argument_names = ("api_key",)
+
+    class _Reg:
+        def get(self, _name):  # noqa: ANN001
+            return _Spec()
+
+    return _Reg()
+
+
+@pytest.mark.asyncio
+async def test_attach_secrets_skips_pending_action_with_valid_key() -> None:
+    # 已有有效 Key 的 pending Action：粘贴无关纯密钥不得覆盖，也不得产生任何写入
+    action = _AttachAction(
+        secret_payload_enc="encrypted-existing-key",
+        secret_fields=["api_key"],
+        error_code=None,
+    )
+    encrypt_mock = AsyncMock()
+    lock_mock = AsyncMock()
+    send = _SendCapture()
+
+    with (
+        patch.object(bot_bridge, "AsyncSessionLocal", lambda: _AttachDB()),
+        patch.object(bot_bridge, "list_actions", AsyncMock(return_value=[action])),
+        patch.object(bot_bridge, "lock_action", lock_mock),
+        patch.object(bot_bridge, "get_registry", _attach_registry),
+        patch.object(bot_bridge, "encrypt_secret_payload", encrypt_mock),
+    ):
+        handled = await bot_bridge.try_attach_secrets_to_pending_action(
+            account_id=1,
+            tg_user_id=2,
+            text="ghp_zzzzzzzzzzzzzzzzzzzzzzzzzzzz999",
+            send=send,
+        )
+
+    assert handled is False
+    assert action.secret_payload_enc == "encrypted-existing-key"
+    assert action.arguments == {"name": "provider-x"}
+    lock_mock.assert_not_awaited()
+    encrypt_mock.assert_not_called()
+    assert send.calls == []
+
+
+@pytest.mark.asyncio
+async def test_attach_secrets_fills_missing_key_action_with_pure_secret() -> None:
+    # 缺 Key 的 Action + 纯密钥消息：正常加密回填并短路
+    action = _AttachAction(
+        secret_payload_enc=None,
+        secret_fields=None,
+        error_code="API_KEY_REQUIRED",
+    )
+    send = _SendCapture()
+
+    with (
+        patch.object(bot_bridge, "AsyncSessionLocal", lambda: _AttachDB()),
+        patch.object(bot_bridge, "list_actions", AsyncMock(return_value=[action])),
+        patch.object(bot_bridge, "lock_action", AsyncMock(return_value=action)),
+        patch.object(bot_bridge, "get_registry", _attach_registry),
+        patch.object(bot_bridge, "decrypt_secret_payload", lambda _t: {}),
+        patch.object(bot_bridge, "encrypt_secret_payload", lambda d: "enc-new"),
+        patch.object(bot_bridge, "store_agent_confirm_nonce", AsyncMock(return_value="n-1")),
+    ):
+        handled = await bot_bridge.try_attach_secrets_to_pending_action(
+            account_id=1,
+            tg_user_id=2,
+            text="sk-abcdefghijklmnopqrstuvwxyz123456",
+            send=send,
+        )
+
+    assert handled is True
+    assert action.secret_payload_enc == "enc-new"
+    assert action.arguments.get("has_api_key") is True
+    assert action.error_code is None
+
+
+@pytest.mark.asyncio
+async def test_attach_secrets_rejected_error_allows_key_overwrite() -> None:
+    # 密钥被拒类（PROVIDER_VERIFY_FAILED）：已有旧 Key 也允许覆盖重试
+    action = _AttachAction(
+        secret_payload_enc="encrypted-old-key",
+        secret_fields=["api_key"],
+        error_code="PROVIDER_VERIFY_FAILED",
+    )
+    send = _SendCapture()
+
+    with (
+        patch.object(bot_bridge, "AsyncSessionLocal", lambda: _AttachDB()),
+        patch.object(bot_bridge, "list_actions", AsyncMock(return_value=[action])),
+        patch.object(bot_bridge, "lock_action", AsyncMock(return_value=action)),
+        patch.object(bot_bridge, "get_registry", _attach_registry),
+        patch.object(bot_bridge, "decrypt_secret_payload", lambda _t: {"api_key": "old"}),
+        patch.object(bot_bridge, "encrypt_secret_payload", lambda d: "enc-replaced"),
+        patch.object(bot_bridge, "store_agent_confirm_nonce", AsyncMock(return_value="n-2")),
+    ):
+        handled = await bot_bridge.try_attach_secrets_to_pending_action(
+            account_id=1,
+            tg_user_id=2,
+            text="sk-abcdefghijklmnopqrstuvwxyz654321",
+            send=send,
+        )
+
+    assert handled is True
+    assert action.secret_payload_enc == "enc-replaced"
+
+
+@pytest.mark.asyncio
+async def test_attach_secrets_mixed_sentence_key_does_not_write_back() -> None:
+    # 混合句子里带密钥（非纯密钥）：不做任何写回，交回正常 Agent 轮次
+    action = _AttachAction(
+        secret_payload_enc=None,
+        secret_fields=None,
+        error_code="API_KEY_REQUIRED",
+    )
+    list_mock = AsyncMock(return_value=[action])
+    lock_mock = AsyncMock()
+    send = _SendCapture()
+
+    with (
+        patch.object(bot_bridge, "AsyncSessionLocal", lambda: _AttachDB()),
+        patch.object(bot_bridge, "list_actions", list_mock),
+        patch.object(bot_bridge, "lock_action", lock_mock),
+        patch.object(bot_bridge, "get_registry", _attach_registry),
+    ):
+        handled = await bot_bridge.try_attach_secrets_to_pending_action(
+            account_id=1,
+            tg_user_id=2,
+            text="帮我配置 Provider Y，Key 是 sk-abcdefghijklmnopqrstuvwxyz123456 谢谢",
+            send=send,
+        )
+
+    assert handled is False
+    list_mock.assert_not_awaited()
+    lock_mock.assert_not_awaited()
+    assert action.secret_payload_enc is None
+    assert send.calls == []
+
+
 @pytest.mark.asyncio
 async def test_keep_pending_reissues_inline_keyboard() -> None:
     send = _SendCapture()

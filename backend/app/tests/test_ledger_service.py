@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from unittest.mock import AsyncMock
@@ -23,6 +24,7 @@ from app.db.models.payout_compensation import (
     PayoutCompensation,
 )
 from app.services import ledger_service, platform_capabilities
+from app.services.action_tap import derive_ledger_columns
 
 
 @pytest.fixture(autouse=True)
@@ -56,18 +58,24 @@ async def _insert_action_event(session_factory, **overrides) -> ActionEvent:
     payout_key = overrides.pop("payout_key", None)
     if payout_key is None and isinstance(params_summary, dict):
         payout_key = params_summary.get("payout_key")
+    action_type = overrides.pop("action_type")
+    # 模拟 0062 迁移后的行：写入时按台账口径派生三个提取列（JSON 缺字段则为 NULL）。
+    ledger_direction, ledger_amount, ledger_chat_id = derive_ledger_columns(action_type, params_summary)
     row = ActionEvent(
         account_id=overrides.pop("account_id", 7),
         channel=overrides.pop("channel", "interaction_bot"),
         session_key=overrides.pop("session_key", "session_1"),
         plugin_key=overrides.pop("plugin_key", "game"),
         entry_key=overrides.pop("entry_key", "main"),
-        action_type=overrides.pop("action_type"),
+        action_type=action_type,
         params_summary=params_summary,
         status=overrides.pop("status", ACTION_EVENT_STATUS_OK),
         error_code=overrides.pop("error_code", None),
         error_summary=overrides.pop("error_summary", None),
         payout_key=payout_key,
+        direction=ledger_direction,
+        amount=ledger_amount,
+        chat_id=ledger_chat_id,
         created_at=overrides.pop("created_at"),
     )
     async with session_factory() as db:
@@ -380,6 +388,9 @@ async def test_ledger_list_scans_past_sparse_non_financial_rows(ledger_session_f
                 action_type="payment_confirmed",
                 params_summary={"event_type": "payment_confirmed", "amount": "16", "chat_id": -100123},
                 status=ACTION_EVENT_STATUS_OK,
+                direction="in",
+                amount=Decimal("16"),
+                chat_id=-100123,
                 created_at=now - timedelta(seconds=1300),
             )
         )
@@ -645,3 +656,283 @@ async def test_reset_ledger_data_removes_financial_and_operational_rows_only(
         compensation_rows = (await db.execute(select(PayoutCompensation))).scalars().all()
     assert [row.action_type for row in action_rows] == ["send_message"]
     assert compensation_rows == []
+
+
+def _legacy_list_entry_ids(rows: list[ActionEvent], filters: ledger_service.LedgerFilters) -> list[int]:
+    """旧 Python 过滤口径的对照实现：全量行 + `_entry_from_action_event`/`_entry_matches`。"""
+
+    def _naive(value: datetime) -> datetime:
+        # SQLite 驱动返回 naive datetime；过滤值统一按 UTC 时钟转 naive 再比较。
+        return value.replace(tzinfo=None) if value.tzinfo is not None else value
+
+    out: list[int] = []
+    for row in rows:
+        row_created_at = _naive(row.created_at)
+        if filters.since is not None and row_created_at < _naive(filters.since):
+            continue
+        if filters.until is not None and row_created_at > _naive(filters.until):
+            continue
+        if filters.account_id is not None and int(row.account_id) != int(filters.account_id):
+            continue
+        if filters.plugin_key and row.plugin_key != filters.plugin_key:
+            continue
+        if filters.status:
+            if row.status != filters.status:
+                continue
+        elif filters.statuses and row.status not in filters.statuses:
+            continue
+        entry = ledger_service._entry_from_action_event(row)
+        if entry is None or not ledger_service._entry_matches(entry, filters):
+            continue
+        out.append(entry.id)
+        if filters.limit is not None and len(out) >= filters.limit:
+            break
+    return out
+
+
+@pytest.mark.asyncio
+async def test_ledger_sql_filters_match_legacy_python_behavior(ledger_session_factory) -> None:
+    """金额/群/方向过滤下推 SQL 后，结果与旧 Python 全量过滤口径逐条一致。"""
+
+    base = datetime.now(UTC) - timedelta(days=1)
+    # 覆盖：常规 in/out、result.amount 嵌套金额、source.chat_id 嵌套群、负数金额（按绝对值过滤）、
+    # JSON 缺 amount / 缺 chat_id、非资金动作、不可解析金额、失败状态、其他账号。
+    await _insert_action_event(
+        ledger_session_factory,
+        action_type="payment_confirmed",
+        params_summary={"event_type": "payment_confirmed", "amount": "100.50", "chat_id": -100123},
+        created_at=base,
+    )
+    await _insert_action_event(
+        ledger_session_factory,
+        action_type="payout",
+        params_summary={"type": "payout", "amount": "30.25", "chat_id": -100123, "payout_key": "pay_a"},
+        created_at=base + timedelta(minutes=1),
+    )
+    await _insert_action_event(
+        ledger_session_factory,
+        action_type="payout",
+        params_summary={"type": "payout", "amount": "10", "chat_id": -100456, "payout_key": "pay_b"},
+        created_at=base + timedelta(minutes=2),
+    )
+    await _insert_action_event(
+        ledger_session_factory,
+        action_type="payout",
+        params_summary={"type": "payout", "chat_id": -100456, "result": {"amount": "5"}, "payout_key": "pay_c"},
+        created_at=base + timedelta(minutes=3),
+    )
+    await _insert_action_event(
+        ledger_session_factory,
+        action_type="payout",
+        params_summary={"type": "payout", "amount": "7", "source": {"chat_id": -100789}, "payout_key": "pay_d"},
+        created_at=base + timedelta(minutes=4),
+    )
+    await _insert_action_event(
+        ledger_session_factory,
+        action_type="payout",
+        params_summary={"type": "payout", "amount": "-8", "chat_id": -100456, "payout_key": "pay_e"},
+        created_at=base + timedelta(minutes=5),
+    )
+    await _insert_action_event(
+        ledger_session_factory,
+        action_type="payout",
+        params_summary={"type": "payout", "chat_id": -100456, "payout_key": "pay_no_amount"},
+        created_at=base + timedelta(minutes=6),
+    )
+    await _insert_action_event(
+        ledger_session_factory,
+        action_type="payment_confirmed",
+        params_summary={"event_type": "payment_confirmed", "amount": "40"},
+        created_at=base + timedelta(minutes=7),
+    )
+    await _insert_action_event(
+        ledger_session_factory,
+        action_type="send_message",
+        params_summary={"type": "send_message", "amount": "999", "chat_id": -100123},
+        created_at=base + timedelta(minutes=8),
+    )
+    await _insert_action_event(
+        ledger_session_factory,
+        action_type="payout",
+        params_summary={"type": "payout", "amount": "abc", "chat_id": -100456, "payout_key": "pay_bad"},
+        created_at=base + timedelta(minutes=9),
+    )
+    await _insert_action_event(
+        ledger_session_factory,
+        action_type="payout",
+        params_summary={"type": "payout", "amount": "11", "chat_id": -100456, "payout_key": "pay_failed"},
+        status=ACTION_EVENT_STATUS_FAILED,
+        error_code="telegram_api_error",
+        created_at=base + timedelta(minutes=10),
+    )
+    await _insert_action_event(
+        ledger_session_factory,
+        account_id=8,
+        action_type="payment_confirmed",
+        params_summary={"event_type": "payment_confirmed", "amount": "999", "chat_id": -100123},
+        created_at=base + timedelta(minutes=11),
+    )
+
+    filter_cases: list[ledger_service.LedgerFilters] = [
+        ledger_service.LedgerFilters(limit=None),
+        ledger_service.LedgerFilters(direction="in", limit=None),
+        ledger_service.LedgerFilters(direction="out", limit=None),
+        ledger_service.LedgerFilters(chat_id=-100123, limit=None),
+        ledger_service.LedgerFilters(chat_id=-100456, limit=None),
+        ledger_service.LedgerFilters(chat_id=-100789, limit=None),
+        ledger_service.LedgerFilters(amount=Decimal("30.25"), limit=None),
+        ledger_service.LedgerFilters(amount=Decimal("8"), limit=None),
+        ledger_service.LedgerFilters(amount=Decimal("12.50"), limit=None),
+        ledger_service.LedgerFilters(amount_min=Decimal("7"), amount_max=Decimal("30.25"), limit=None),
+        ledger_service.LedgerFilters(direction="out", amount_min=Decimal("10"), limit=None),
+        ledger_service.LedgerFilters(chat_id=-100456, direction="out", amount_max=Decimal("10"), limit=None),
+        ledger_service.LedgerFilters(account_id=7, plugin_key="game", limit=2),
+        ledger_service.LedgerFilters(direction="out", limit=1),
+        ledger_service.LedgerFilters(
+            since=base + timedelta(minutes=3),
+            until=base + timedelta(minutes=7),
+            limit=None,
+        ),
+    ]
+
+    async with ledger_session_factory() as db:
+        all_rows = list(
+            (
+                await db.execute(
+                    select(ActionEvent).order_by(ActionEvent.created_at.desc(), ActionEvent.id.desc())
+                )
+            )
+            .scalars()
+            .all()
+        )
+        for filters in filter_cases:
+            # 与生产路径一致地补默认状态集合，供对照实现使用。
+            expected_filters = ledger_service._normalize_filters(replace(filters))
+            if expected_filters.status is None and not expected_filters.statuses:
+                expected_filters.statuses = ledger_service.LEDGER_SUMMARY_STATUSES
+            expected = _legacy_list_entry_ids(all_rows, expected_filters)
+            entries = await ledger_service.list_ledger_entries(db, replace(filters))
+            assert [item.id for item in entries] == expected, (
+                f"filters={filters!r} expected={expected} got={[item.id for item in entries]}"
+            )
+
+
+@pytest.mark.asyncio
+async def test_ledger_null_columns_keep_legacy_missing_field_semantics(ledger_session_factory) -> None:
+    """JSON 缺字段（列为 NULL）的行沿用旧口径：不产生台账条目；缺 chat 仅在群过滤时排除。"""
+
+    base = datetime.now(UTC) - timedelta(days=1)
+    complete = await _insert_action_event(
+        ledger_session_factory,
+        action_type="payout",
+        params_summary={"type": "payout", "amount": "20", "chat_id": -100123, "payout_key": "pay_ok"},
+        created_at=base,
+    )
+    missing_amount = await _insert_action_event(
+        ledger_session_factory,
+        action_type="payout",
+        params_summary={"type": "payout", "chat_id": -100123, "payout_key": "pay_no_amount"},
+        created_at=base + timedelta(minutes=1),
+    )
+    missing_chat = await _insert_action_event(
+        ledger_session_factory,
+        action_type="payout",
+        params_summary={"type": "payout", "amount": "15", "payout_key": "pay_no_chat"},
+        created_at=base + timedelta(minutes=2),
+    )
+
+    # 列派生口径：JSON 缺字段 → NULL（等价旧行为里解析失败跳过该字段）。
+    assert missing_amount.amount is None and missing_amount.direction == "out"
+    assert missing_chat.chat_id is None and missing_chat.amount == Decimal("15")
+
+    async with ledger_session_factory() as db:
+        entries = await ledger_service.list_ledger_entries(
+            db, ledger_service.LedgerFilters(account_id=7, limit=None)
+        )
+        chat_entries = await ledger_service.list_ledger_entries(
+            db, ledger_service.LedgerFilters(account_id=7, chat_id=-100123, limit=None)
+        )
+        summary = await ledger_service.summarize_ledger(db, ledger_service.LedgerFilters(account_id=7))
+        chat_summary = await ledger_service.summarize_ledger(
+            db, ledger_service.LedgerFilters(account_id=7, chat_id=-100123)
+        )
+
+    # 旧行为：缺 amount 的行无台账条目；缺 chat_id 的行不受影响、但群过滤时被排除。
+    assert [item.id for item in entries] == [missing_chat.id, complete.id]
+    assert [item.id for item in chat_entries] == [complete.id]
+    assert summary.count == 2
+    assert Decimal(summary.payout) == Decimal("35")
+    assert chat_summary.count == 1
+    assert Decimal(chat_summary.payout) == Decimal("20")
+
+    # 未回填旧行（JSON 完整但列为 NULL，例如跳过 0062 的库）不参与台账：
+    # 这是列提升后明确的新边界，回填迁移保证存量行不会停留在此状态。
+    async with ledger_session_factory() as db:
+        db.add(
+            ActionEvent(
+                account_id=7,
+                channel="interaction_bot",
+                action_type="payout",
+                params_summary={"type": "payout", "amount": "50", "chat_id": -100123, "payout_key": "pay_stale"},
+                status=ACTION_EVENT_STATUS_OK,
+                created_at=base + timedelta(minutes=3),
+            )
+        )
+        await db.commit()
+        entries_after = await ledger_service.list_ledger_entries(
+            db, ledger_service.LedgerFilters(account_id=7, limit=None)
+        )
+        summary_after = await ledger_service.summarize_ledger(
+            db, ledger_service.LedgerFilters(account_id=7)
+        )
+    assert [item.id for item in entries_after] == [item.id for item in entries]
+    assert summary_after.count == summary.count
+    assert Decimal(summary_after.payout) == Decimal("35")
+
+
+@pytest.mark.asyncio
+async def test_ledger_summary_sql_totals_match_filtered_entries(ledger_session_factory) -> None:
+    """SQL SUM/COUNT 总额与明细条目聚合逐项一致（含金额区间、方向、群过滤组合）。"""
+
+    base = datetime.now(UTC) - timedelta(days=1)
+    amounts_by_direction = {
+        "in": ["100.50", "9", "40"],
+        "out": ["30.25", "10", "5"],
+    }
+    index = 0
+    for direction, amounts in amounts_by_direction.items():
+        for amount in amounts:
+            chat_id = -100123 if index % 2 == 0 else -100456
+            await _insert_action_event(
+                ledger_session_factory,
+                action_type="payment_confirmed" if direction == "in" else "payout",
+                params_summary=(
+                    {"event_type": "payment_confirmed", "amount": amount, "chat_id": chat_id}
+                    if direction == "in"
+                    else {"type": "payout", "amount": amount, "chat_id": chat_id, "payout_key": f"pay_{index}"}
+                ),
+                created_at=base + timedelta(minutes=index),
+            )
+            index += 1
+
+    filter_cases: list[ledger_service.LedgerFilters] = [
+        ledger_service.LedgerFilters(account_id=7, limit=None),
+        ledger_service.LedgerFilters(account_id=7, direction="out", limit=None),
+        ledger_service.LedgerFilters(account_id=7, chat_id=-100456, limit=None),
+        ledger_service.LedgerFilters(account_id=7, amount_min=Decimal("10"), amount_max=Decimal("40"), limit=None),
+    ]
+
+    async with ledger_session_factory() as db:
+        for filters in filter_cases:
+            entries = await ledger_service.list_ledger_entries(db, replace(filters))
+            summary = await ledger_service.summarize_ledger(db, replace(filters))
+            income = sum(
+                (Decimal(item.amount) for item in entries if item.direction == "in"), Decimal("0")
+            )
+            payout = sum(
+                (Decimal(item.amount) for item in entries if item.direction == "out"), Decimal("0")
+            )
+            assert summary.count == len(entries), f"filters={filters!r}"
+            assert Decimal(summary.income) == income, f"filters={filters!r}"
+            assert Decimal(summary.payout) == payout, f"filters={filters!r}"
+            assert Decimal(summary.net) == income - payout, f"filters={filters!r}"

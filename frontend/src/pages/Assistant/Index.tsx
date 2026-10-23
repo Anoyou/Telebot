@@ -41,6 +41,7 @@ import {
   startSystemAgentRun,
   steerSystemAgentQueueItem,
   streamSystemAgentRun,
+  IdleTimeoutError,
   submitSystemAgentRunInput,
   updateSystemAgentQueueItem,
   type SystemAgentAction,
@@ -79,7 +80,7 @@ import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Skeleton } from "@/components/ui/misc";
 import { useStreamingText } from "@/hooks/useStreamingText";
-import { getErrMsg } from "@/lib/api";
+import { getErrCode, getErrMsg } from "@/lib/api";
 import { fetchMe } from "@/lib/auth";
 import { systemAgentToolLabel } from "@/lib/systemAgentLabels";
 import { removeSessionAndChooseNext } from "./sessionState";
@@ -226,6 +227,11 @@ export function AssistantIndex() {
     notifyOutcome,
   } = useAssistantDock();
   const [activeId, setActiveId] = useState<string | null>(null);
+  const activeIdRef = useRef(activeId);
+  activeIdRef.current = activeId;
+  // 记录草稿最近一次加载的 (userId, activeId) 组合：meQ 晚于用户输入 resolve 时，
+  // 相同组合不允许用存储草稿覆盖正在输入的文本。
+  const draftScopeRef = useRef<string | null>(null);
   const [originFilter, setOriginFilter] = useState<SessionOriginFilter>("all");
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [sessionSidebarCollapsed, setSessionSidebarCollapsed] = useState(false);
@@ -243,6 +249,9 @@ export function AssistantIndex() {
   } | null>(null);
   const [streamNotice, setStreamNotice] = useState("");
   const [composerValue, setComposerValue] = useState("");
+  // 草稿切换 effect 需要读"当前正在输入"的值但不依赖它（避免随键入重跑），用 ref 镜像。
+  const composerValueRef = useRef("");
+  composerValueRef.current = composerValue;
   const [waitingInput, setWaitingInput] = useState("");
   const [activeRunSnapshot, setActiveRunSnapshot] = useState<SystemAgentRun | null>(null);
   const [notificationPermission, setNotificationPermission] = useState<
@@ -367,6 +376,7 @@ export function AssistantIndex() {
     () =>
       sessionRuns.find((run) => openRun(run)) ||
       (activeRunSnapshot?.session_id === activeId && openRun(activeRunSnapshot)
+        && !sessionRuns.some((run) => run.id === activeRunSnapshot.id)
         ? activeRunSnapshot
         : null),
     [activeId, activeRunSnapshot, sessionRuns],
@@ -458,8 +468,29 @@ export function AssistantIndex() {
 
   useEffect(() => {
     if (!meQ.data?.id) return;
-    skipNextDraftWriteRef.current = true;
-    setComposerValue(readDraft(meQ.data.id, activeId));
+    const scope = `${meQ.data.id}:${activeId || "new"}`;
+    if (draftScopeRef.current !== scope) {
+      const outgoing = draftScopeRef.current;
+      draftScopeRef.current = scope;
+      // 切换前先把未持久化的当前输入落盘到出站会话，再载入目标草稿：
+      // 否则最后一次按键与切换之间的文本会被目标草稿覆盖而丢失。
+      if (outgoing && composerValueRef.current) {
+        const [outUserId, outSessionId] = outgoing.split(":");
+        const outSession = outSessionId === "new" ? null : outSessionId;
+        if (Number(outUserId) === meQ.data.id) {
+          writeDraft(meQ.data.id, outSession, composerValueRef.current);
+        }
+      }
+      const stored = readDraft(meQ.data.id, activeId);
+      if (!outgoing && composerValueRef.current && !stored) {
+        // 首次拿到用户 ID 时用户可能已开始输入：保留输入并持久化，
+        // 不用（大概率更高的）空存储草稿覆盖。
+        skipNextDraftWriteRef.current = false;
+      } else {
+        skipNextDraftWriteRef.current = true;
+        setComposerValue(stored);
+      }
+    }
     setWaitingInput("");
     setActiveRunSnapshot(null);
   }, [activeId, meQ.data?.id]);
@@ -472,13 +503,6 @@ export function AssistantIndex() {
     }
     writeDraft(meQ.data.id, activeId, composerValue);
   }, [activeId, composerValue, meQ.data?.id]);
-
-  useEffect(() => {
-    if (currentRun) setActiveRunSnapshot(currentRun);
-    else if (activeRunSnapshot?.session_id === activeId && terminalRun(activeRunSnapshot)) {
-      setActiveRunSnapshot(null);
-    }
-  }, [activeId, activeRunSnapshot, currentRun]);
 
   const createMut = useMutation({
     mutationFn: () =>
@@ -718,11 +742,13 @@ export function AssistantIndex() {
 
   const ensureSession = async (): Promise<string> => {
     if (activeId) return activeId;
+    const startedActiveId = activeIdRef.current;
     const session = await createSystemAgentSession({
       account_id: accountId === "" ? null : Number(accountId),
     });
     await qc.invalidateQueries({ queryKey: ["system-agent", "sessions"] });
-    setActiveId(session.id);
+    // POST 期间用户可能已手动切换到别的会话；迟到的 setActiveId 会把用户拽回新会话。
+    if (activeIdRef.current === startedActiveId) setActiveId(session.id);
     return session.id;
   };
 
@@ -1042,6 +1068,14 @@ export function AssistantIndex() {
     ]);
   };
 
+  const applyRunSnapshot = (snapshot: SystemAgentRun) => {
+    setActiveRunSnapshot(snapshot);
+    // 终态快照必须同时覆盖轮询缓存，防止旧的 running 行重新拉起订阅。
+    qc.setQueryData<SystemAgentRun[]>(["system-agent", "runs", "task-center"], (runs = []) =>
+      [snapshot, ...runs.filter((run) => run.id !== snapshot.id)],
+    );
+  };
+
   const followRun = async (
     sessionId: string,
     stored: StoredRun,
@@ -1053,25 +1087,38 @@ export function AssistantIndex() {
     let doneOk = false;
     let reconnectAttempt = 0;
     let pausedForInput = false;
+    let finalSnapshot: SystemAgentRun | null = null;
+    // rememberRun 每次都同步读写 localStorage，高频 delta 流下按 1s 节流；
+    // waiting/终态/断开前强制落盘，游标可由服务端事件表重建，最多丢 1s 进度。
+    let lastPersistAt = 0;
+    const persistRun = (force = false) => {
+      const now = Date.now();
+      if (!force && now - lastPersistAt < 1000) return;
+      lastPersistAt = now;
+      rememberRun(sessionId, { ...stored, runId, lastSeq: cursor });
+    };
+    const ownsSubscription = () => abortRef.current === controller && !controller.signal.aborted;
     try {
-      while (!controller.signal.aborted && !doneReceived) {
-        let streamFailed = false;
+      while (ownsSubscription() && !doneReceived) {
         try {
           await streamSystemAgentRun(
             runId,
             cursor,
             (event) => {
+              if (!ownsSubscription()) return;
+              // 心跳帧只用于保活探测，不进入消息流。
+              if (event.type === "heartbeat") return;
               const seq = Number(event.seq || 0);
               // durable stream 重连时可能重放游标边界事件，不重复追加文本。
               if (seq > 0 && seq <= cursor) return;
-              if (seq > cursor) cursor = seq;
-              const next = { ...stored, runId, lastSeq: cursor };
-              rememberRun(sessionId, next);
-              setActiveRun(next);
-              handleRunEvent(event);
-              if (event.type === "error" && event.code === "RUN_STREAM_FAILED") {
-                streamFailed = true;
+              if (seq > cursor) {
+                cursor = seq;
+                // 收到新进度说明链路健康，重连计数归零。
+                reconnectAttempt = 0;
               }
+              persistRun(event.type === "done");
+              setActiveRun({ ...stored, runId, lastSeq: cursor });
+              handleRunEvent(event);
               if (event.type === "done") {
                 doneReceived = true;
                 doneOk = event.ok === true;
@@ -1079,26 +1126,32 @@ export function AssistantIndex() {
             },
             { signal: controller.signal },
           );
-          if (streamFailed && !doneReceived) {
-            reconnectAttempt += 1;
-            await new Promise((resolve) =>
-              window.setTimeout(resolve, Math.min(2000, 250 * reconnectAttempt)),
-            );
-          } else {
-            reconnectAttempt = 0;
+          if (!doneReceived) {
+            // 重放的 done 可能已被游标去重；仍需读快照，不能空转重连。
+            throw new Error("进度订阅未返回新的终态，正在核对任务状态。");
           }
         } catch (error) {
-          if (controller.signal.aborted) throw error;
-          const snapshot = await getSystemAgentRun(runId).catch(() => null);
-          if (!snapshot) {
-            forgetRun(sessionId, runId);
-            setActiveRun((current) => (current?.runId === runId ? null : current));
-            setStreamNotice("本轮进度已失效，请重新发送消息。");
-            setStreaming(false);
-            return;
+          if (!ownsSubscription()) return;
+          const idleProbe = error instanceof IdleTimeoutError;
+          let snapshot: SystemAgentRun | null = null;
+          try {
+            snapshot = await getSystemAgentRun(runId);
+          } catch (snapshotError) {
+            if (!ownsSubscription()) return;
+            if (getErrCode(snapshotError) === "RUN_NOT_FOUND") {
+              forgetRun(sessionId, runId);
+              setActiveRun((current) => (current?.runId === runId ? null : current));
+              setActiveRunSnapshot(null);
+              setLive([]);
+              pausedForInput = true;
+              setStreamNotice("本轮进度已失效，请检查会话记录后再发送。");
+              return;
+            }
+            // 临时网络/服务错误不等于任务不存在；保留游标，只重试读取。
           }
-          setActiveRunSnapshot(snapshot);
-          if (snapshot.status === "waiting_input" || snapshot.status === "waiting_approval") {
+          if (!ownsSubscription()) return;
+          if (snapshot) applyRunSnapshot(snapshot);
+          if (snapshot?.status === "waiting_input" || snapshot?.status === "waiting_approval") {
             pausedForInput = true;
             setStreamNotice(
               snapshot.status === "waiting_input"
@@ -1109,21 +1162,29 @@ export function AssistantIndex() {
             return;
           }
           if (snapshot && terminalRun(snapshot)) {
-            // 终态事件也在同一事件表中；继续按游标读取，直到真正收到 done。
-            cursor = Math.min(cursor, Math.max(0, snapshot.last_seq - 1));
+            // 数据库终态足以结算；缺失 done 或游标越过 done 时不能无限重放。
+            finalSnapshot = snapshot;
+            doneReceived = true;
+            doneOk = snapshot.status === "succeeded";
+            break;
           }
           reconnectAttempt += 1;
-          setStreamNotice("进度连接中断，正在恢复…");
-          updatePendingText("进度连接中断，正在恢复…");
+          // 空闲超时是保活探测（任务可能只是安静），静默核对即可；
+          // 只有真实断连才向用户提示"连接中断"。
+          if (!idleProbe) {
+            setStreamNotice("进度连接中断，正在恢复…");
+            updatePendingText("进度连接中断，正在恢复…");
+          }
           await new Promise((resolve) =>
             window.setTimeout(resolve, Math.min(2000, 250 * reconnectAttempt)),
           );
         }
       }
-      if (!doneReceived) return;
-      const finalSnapshot = await getSystemAgentRun(runId).catch(() => null);
+      if (!doneReceived || !ownsSubscription()) return;
+      finalSnapshot ??= await getSystemAgentRun(runId).catch(() => null);
+      if (!ownsSubscription()) return;
       if (finalSnapshot) {
-        setActiveRunSnapshot(finalSnapshot);
+        applyRunSnapshot(finalSnapshot);
         const settlement = classifySystemAgentRunSettlement(finalSnapshot.status);
         if (settlement === "waiting") {
           pausedForInput = true;
@@ -1168,6 +1229,8 @@ export function AssistantIndex() {
         liveAssistantMessageIdRef.current = null;
       }
     } finally {
+      // 断开/被取代前把最新游标落盘一次；已结算（done/waiting）的路径不需要。
+      if (!doneReceived && !pausedForInput) persistRun(true);
       if (abortRef.current === controller) {
         abortRef.current = null;
         setStreaming(false);
@@ -1195,12 +1258,15 @@ export function AssistantIndex() {
     };
     fallbackProviderId?: number;
     approvedTools?: string[];
-  }) => {
-    if (streaming || abortRef.current) return;
+  }): Promise<boolean> => {
+    if (abortRef.current) {
+      toast.message("上一条消息仍在提交或恢复中，请稍后重试；输入已保留。");
+      return false;
+    }
     if (!enabled) {
       toast.error("请先在右上角开启系统助手并选择支持 tools 的 Provider");
       setConfigOpen(true);
-      return;
+      return false;
     }
     setStreaming(true);
     setRetryingMessageId(retryMessageId ?? regenerate?.userMessageId ?? null);
@@ -1246,6 +1312,7 @@ export function AssistantIndex() {
     setLive(userBubble ? [userBubble, pending] : [pending]);
     try {
       const sessionId = await ensureSession();
+      if (controller.signal.aborted || abortRef.current !== controller) return false;
       if (activeId !== sessionId) {
         // 新建会话：把当前选择绑到新 session key
         saveSessionModelSelection(sessionId, sessionModel);
@@ -1284,8 +1351,20 @@ export function AssistantIndex() {
         editedUserText: regenerate?.editedText,
       };
       rememberRun(sessionId, saved);
-      setActiveRun(saved);
-      await followRun(sessionId, saved, controller);
+      if (abortRef.current === controller && !controller.signal.aborted) {
+        setActiveRun(saved);
+        applyRunSnapshot(run);
+        // 发送完成以 POST 受理为准，不能让输入框一直等到整个任务结束。
+        void followRun(sessionId, saved, controller).catch((error) => {
+          if (!controller.signal.aborted) toast.error(getErrMsg(error));
+        });
+      }
+      if (!regenerate && retryMessageId == null && meQ.data?.id) {
+        // 输入框提交被受理后清空对应会话的持久草稿；scope 已切换时 Composer
+        // 自身的清空逻辑不会覆盖旧会话草稿，必须由这里按提交时的 sessionId 清。
+        writeDraft(meQ.data.id, sessionId, "");
+      }
+      return true;
     } catch (error) {
       if (!controller.signal.aborted) {
         toast.error(getErrMsg(error));
@@ -1305,25 +1384,45 @@ export function AssistantIndex() {
         setStreaming(false);
         setRetryingMessageId(null);
       }
+      return false;
     }
   };
 
   const onSend = async (text: string, attachments: ComposerAttachment[]) => {
     try {
-      if (!hasOpenRun) {
-        await runTurn({ text, attachments });
-        return;
-      }
       if (!enabled) {
         toast.error("请先开启系统助手");
-        return;
+        setConfigOpen(true);
+        return false;
+      }
+      let target = currentRun;
+      const saved = activeId ? storedRun(activeId) : null;
+      if (!target && saved) {
+        // 持久游标可能属于已完成任务，先读服务器快照而不是静默退出。
+        const snapshot = await getSystemAgentRun(saved.runId).catch((error) => {
+          if (getErrCode(error) === "RUN_NOT_FOUND") return null;
+          throw error;
+        });
+        if (activeIdRef.current !== activeId) return false;
+        if (snapshot) applyRunSnapshot(snapshot);
+        if (!snapshot || terminalRun(snapshot)) {
+          abortRef.current?.abort();
+          abortRef.current = null;
+          setStreaming(false);
+          setRetryingMessageId(null);
+          forgetRun(activeId!, saved.runId);
+          setActiveRun(null);
+          setActiveRunSnapshot(null);
+          clearLiveStreamingState();
+        } else {
+          target = snapshot;
+        }
+      }
+      if (!target) {
+        return await runTurn({ text, attachments });
       }
       const sessionId = await ensureSession();
-      const target = currentRun || activeRunSnapshot;
-      if (!target) {
-        await runTurn({ text, attachments });
-        return;
-      }
+      if (activeIdRef.current !== sessionId) return false;
       const queued = await startSystemAgentRun(sessionId, {
         content: text,
         attachments,
@@ -1331,15 +1430,21 @@ export function AssistantIndex() {
         client_request_id: requestId(),
         model_selection: toApiModelSelection(sessionModel),
       });
-      await refreshRunData(sessionId);
-      const pendingAhead = currentQueue.filter((item) => item.status === "pending").length;
+      // 入队已经成功；后续刷新失败不能把受理结果变成失败并诱发重复提交。
+      void refreshRunData(sessionId).catch((error) => toast.error(getErrMsg(error)));
+      // 渲染闭包里的 currentQueue 可能早于本次提交期间的多个 await，从缓存读最新值。
+      const latestQueue =
+        qc.getQueryData<SystemAgentQueueItem[]>(["system-agent", "queue"]) ?? [];
+      const pendingAhead = latestQueue.filter((item) => item.status === "pending").length;
       toast.success(
         queued.status === "running"
           ? "已开始执行"
           : `已加入队列${pendingAhead ? `，前面有 ${pendingAhead} 条` : ""}`,
       );
+      return true;
     } catch (error) {
       toast.error(getErrMsg(error));
+      return false;
     }
   };
 
@@ -1466,18 +1571,25 @@ export function AssistantIndex() {
     );
     return () => {
       controller.abort();
-      if (abortRef.current === controller) abortRef.current = null;
+      if (abortRef.current === controller) {
+        abortRef.current = null;
+        setStreaming(false);
+        setRetryingMessageId(null);
+      }
     };
     // followRun 只读取本轮 activeId 对应的持久游标；切换会话时重新建立订阅。
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeId]);
 
+  const resumableRunId = currentRun && ["queued", "running"].includes(currentRun.status)
+    ? currentRun.id
+    : null;
   useEffect(() => {
     if (
       !activeId ||
       abortRef.current ||
       !currentRun ||
-      !["queued", "running"].includes(currentRun.status)
+      !resumableRunId
     ) {
       return;
     }
@@ -1507,11 +1619,18 @@ export function AssistantIndex() {
     });
     return () => {
       controller.abort();
-      if (abortRef.current === controller) abortRef.current = null;
+      if (abortRef.current === controller) {
+        abortRef.current = null;
+        setStreaming(false);
+        setRetryingMessageId(null);
+        clearLiveStreamingState();
+        setLive([]);
+        void refreshRunData(activeId);
+      }
     };
-    // currentRun 的状态由任务中心轮询推进；只在 queued/running 时重新订阅。
+    // queued → running 仍是同一订阅，不能清掉已消费的增量并跳过其游标。
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeId, currentRun?.id, currentRun?.status]);
+  }, [activeId, resumableRunId]);
 
   const editQueueItem = async (item: SystemAgentQueueItem, content: string) => {
     try {
@@ -2219,6 +2338,8 @@ export function AssistantIndex() {
                 </div>
               ) : null}
               <Composer
+                key={activeId || "new-session"}
+                scopeKey={activeId || "new-session"}
                 disabled={configQ.isLoading || viewingBotSession}
                 streaming={hasOpenRun}
                 onSend={onSend}

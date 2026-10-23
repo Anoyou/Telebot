@@ -231,12 +231,16 @@ async def test_deliver_webhook_module_disabled_is_fail_closed(
 
 @pytest.mark.asyncio
 async def test_ingress_limit_uses_hashed_client_bucket(monkeypatch: pytest.MonkeyPatch) -> None:
-    captured: dict[str, Any] = {}
+    captured: list[dict[str, Any]] = []
 
     class _Buckets:
         async def check_and_consume(self, account_id: int, action: str, *limits: Any, **kwargs: Any):
-            captured.update(account_id=account_id, action=action, limits=limits, kwargs=kwargs)
-            return False, 3, 1
+            captured.append(
+                {"account_id": account_id, "action": action, "limits": limits, "kwargs": kwargs}
+            )
+            # 兜底桶放行、主桶拒绝，验证两层都会执行且 429 语义不变。
+            allowed = action == webhooks_api.WEBHOOK_INGRESS_BACKSTOP_RATE_LIMIT_ACTION
+            return allowed, 3, 1
 
     monkeypatch.setattr(webhooks_api, "TokenBuckets", lambda _redis: _Buckets())
     request = Request(
@@ -250,15 +254,52 @@ async def test_ingress_limit_uses_hashed_client_bucket(monkeypatch: pytest.Monke
     )
 
     with pytest.raises(HTTPException) as exc_info:
-        await _REAL_INGRESS_LIMITER(request, _FakeRedis())
+        await _REAL_INGRESS_LIMITER(request, _FakeRedis(), 1)
 
     assert exc_info.value.status_code == 429
-    assert captured["action"] == webhooks_api.WEBHOOK_INGRESS_RATE_LIMIT_ACTION
-    assert captured["account_id"] != 0
-    assert captured["limits"][:2] == (
+    # 兜底桶（仅按 IP，限额放大）先于主桶执行。
+    assert captured[0]["action"] == webhooks_api.WEBHOOK_INGRESS_BACKSTOP_RATE_LIMIT_ACTION
+    assert captured[0]["limits"][:2] == (
+        webhooks_api.INGRESS_LIMITS["per_second"] * webhooks_api.INGRESS_BACKSTOP_MULTIPLIER,
+        webhooks_api.INGRESS_LIMITS["per_minute"] * webhooks_api.INGRESS_BACKSTOP_MULTIPLIER,
+    )
+    assert captured[0]["account_id"] != 0
+    # 主桶按 (client_ip, account_id) 分桶：反代后同 IP 的不同账号互不挤占。
+    assert captured[1]["action"] == webhooks_api.WEBHOOK_INGRESS_RATE_LIMIT_ACTION
+    assert captured[1]["account_id"] != 0
+    assert captured[1]["account_id"] != captured[0]["account_id"]
+    assert captured[1]["limits"][:2] == (
         webhooks_api.INGRESS_LIMITS["per_second"],
         webhooks_api.INGRESS_LIMITS["per_minute"],
     )
+
+
+@pytest.mark.asyncio
+async def test_ingress_limit_buckets_accounts_independently(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """同 IP 下不同账号必须落到不同主桶，单个高频发送方不能饿死其它账号。"""
+    seen: set[int] = set()
+
+    class _Buckets:
+        async def check_and_consume(self, account_id: int, action: str, *limits: Any, **kwargs: Any):
+            if action == webhooks_api.WEBHOOK_INGRESS_RATE_LIMIT_ACTION:
+                seen.add(account_id)
+            return True, 0, 1
+
+    monkeypatch.setattr(webhooks_api, "TokenBuckets", lambda _redis: _Buckets())
+    base = {
+        "type": "http",
+        "headers": [],
+        "method": "POST",
+        "path": "/api/webhooks/1/default",
+        "client": ("198.51.100.7", 12345),
+    }
+
+    await _REAL_INGRESS_LIMITER(Request(base), _FakeRedis(), 1)
+    await _REAL_INGRESS_LIMITER(Request(base), _FakeRedis(), 2)
+
+    assert len(seen) == 2
 
 
 @pytest.mark.asyncio
@@ -281,7 +322,7 @@ async def test_ingress_limit_fails_closed_when_redis_is_unavailable(
     )
 
     with pytest.raises(HTTPException) as exc_info:
-        await _REAL_INGRESS_LIMITER(request, _FakeRedis())
+        await _REAL_INGRESS_LIMITER(request, _FakeRedis(), 1)
 
     assert exc_info.value.status_code == 503
     assert exc_info.value.detail["code"] == "WEBHOOK_RATE_LIMIT_UNAVAILABLE"

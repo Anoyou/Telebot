@@ -13,6 +13,7 @@ Endpoint：
 from __future__ import annotations
 
 import hashlib
+import logging
 
 from fastapi import APIRouter, HTTPException, Query
 
@@ -54,6 +55,8 @@ from ..worker.plugins.ai_facade import AIQuotaError, AIUnavailableError
 from ..worker.plugins.http_facade import PluginHTTPError
 
 router = APIRouter(tags=["features"])
+
+log = logging.getLogger(__name__)
 
 
 def _bad(code: str, message: str, status: int = 400) -> HTTPException:
@@ -707,7 +710,13 @@ async def run_account_feature_config_action(
     except PluginConfigActionError as exc:
         raise _bad("CONFIG_ACTION_FAILED", str(exc), 400) from exc
     except Exception as exc:
-        raise _bad("CONFIG_ACTION_FAILED", str(exc), 400) from exc
+        # 未预期异常按服务端错误处理；文本可能含插件内部路径/堆栈，只落日志不回显。
+        log.exception(
+            "plugin config action failed: account=%s feature=%s action=%s", aid, key, action_key
+        )
+        raise _bad(
+            "CONFIG_ACTION_INTERNAL", "配置动作执行异常，请查看服务端日志", 500
+        ) from exc
 
     await audit.write(
         db,

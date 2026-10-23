@@ -299,13 +299,15 @@ class _FakeDB:
         # 记录 update 调用，便于断言 state 改动
         self.update_calls: list[Any] = []
 
-    async def get(self, model, pk):
+    async def get(self, model, pk, **kwargs):
         # 按 model.__tablename__ 区分
         name = getattr(model, "__tablename__", None) or getattr(
             getattr(model, "__table__", None), "name", None
         )
         if name == "account":
             return self.accounts.get(pk)
+        if name == "account_feature":
+            return next((row for row in self.afs if (row.account_id, row.feature_key) == pk), None)
         if name == "humanize_config":
             return self.humanize.get(pk)
         if name == "feature":
@@ -1329,6 +1331,78 @@ async def test_reload_account_config_force_reload_clears_installed_module_cache(
     shutdown_spy.assert_awaited_once_with(ctx)
     assert cleared == [plugin_key]
     assert plugin_key in state.instances
+
+
+@pytest.mark.asyncio
+async def test_reload_plugin_keeps_other_plugins_generation_fresh(monkeypatch) -> None:
+    """reload_plugin 只重载目标插件，不得让其他插件 ctx.generation 过期而失声。
+
+    三条投递闸门（Event Bus / legacy on_message / 直通）都按
+    ``ctx.generation == state.generation`` 判定；旧实现 reload 入口就 bump 全局
+    generation 但只重载目标插件，其他插件会被闸门拒绝并标 failed，
+    直到 periodic reconcile 才恢复。
+    """
+
+    from app.worker.plugins.base import _REGISTRY, register
+
+    shutdown_spy = AsyncMock()
+
+    @register
+    class _ReloadTargetPlugin(Plugin):
+        key = "_test_reload_single_target"
+        display_name = "单插件重载目标"
+
+        async def on_shutdown(self, ctx: PluginContext) -> None:  # noqa: D401
+            await shutdown_spy(ctx)
+
+    @register
+    class _ReloadBystanderPlugin(Plugin):
+        key = "_test_reload_single_bystander"
+        display_name = "单插件重载旁观者"
+
+    target_key = _ReloadTargetPlugin.key
+    bystander_key = _ReloadBystanderPlugin.key
+    db = _FakeDB(
+        accounts={1: _FakeAcc(id=1)},
+        humanize={1: None},
+        afs=[
+            _FakeAF(account_id=1, feature_key=target_key, enabled=True, config={}),
+            _FakeAF(account_id=1, feature_key=bystander_key, enabled=True, config={}),
+        ],
+        rules=[],
+    )
+    monkeypatch.setattr(loader_mod, "AsyncSessionLocal", lambda: _fake_session_factory(db))
+
+    state = loader_mod._AccountState(account_id=1)
+    state.redis = _FakeRedis()
+    state.client = MagicMock()
+    state.instances[target_key] = _ReloadTargetPlugin()
+    state.contexts[target_key] = PluginContext(
+        account_id=1, feature_key=target_key, client=MagicMock(), generation=state.generation
+    )
+    state.instances[bystander_key] = _ReloadBystanderPlugin()
+    state.contexts[bystander_key] = PluginContext(
+        account_id=1,
+        feature_key=bystander_key,
+        client=MagicMock(),
+        generation=state.generation,
+    )
+    loader_mod._STATES[1] = state
+
+    try:
+        assert state.contexts[bystander_key].generation == state.generation
+        await loader_mod.reload_plugin(1, target_key)
+
+        # 旁观插件仍处于当前 generation：不会被投递闸门当成过期实例拒绝。
+        assert state.contexts[bystander_key].generation == state.generation
+        # 目标插件重载后同样处于当前 generation，且实例被重建。
+        assert state.contexts[target_key].generation == state.generation
+        assert target_key in state.instances
+        shutdown_spy.assert_awaited_once()
+    finally:
+        loader_mod._STATES.pop(1, None)
+        _REGISTRY.pop(target_key, None)
+        _REGISTRY.pop(bystander_key, None)
 
 
 @pytest.mark.asyncio
@@ -4392,7 +4466,9 @@ async def test_direct_passthrough_broadcasts_before_incoming_guards(monkeypatch)
     try:
         await load_plugins_for_account(client, account_id=15, paused=paused, redis=_FakeRedis())
         state = loader_mod._STATES[15]
-        state.ignored_peers = {-1001}
+        # 允许名单非空时只有名单内会话能进直通；事件会话 -2002 必须在名单内，
+        # 否则直通会先被名单拦截，测不到"先于 incoming 守卫广播"的顺序。
+        state.ignored_peers = {-2002}
         incoming_dispatch = captured[-1]
         await incoming_dispatch(_Event())
 
@@ -4402,7 +4478,8 @@ async def test_direct_passthrough_broadcasts_before_incoming_guards(monkeypatch)
             ("_test_direct_broadcast_b", "keyword owned by interaction bot"),
         ]
         loader_mod._record_recent_peer.assert_awaited_once()
-        interaction_owned.assert_not_awaited()
+        # 直通广播发生在 incoming 守卫之前；广播完成后守卫才接管这条消息。
+        interaction_owned.assert_awaited_once()
         loader_mod.start_trace.assert_awaited()
         assert sum(1 for call in record_span.await_args_list if call.args[1] == "route") == 2
         assert sum(1 for call in record_span.await_args_list if call.args[1] == "plugin_invoke") == 2
@@ -4412,6 +4489,118 @@ async def test_direct_passthrough_broadcasts_before_incoming_guards(monkeypatch)
         loader_mod._STATES.pop(15, None)
         _REGISTRY.pop("_test_direct_broadcast_a", None)
         _REGISTRY.pop("_test_direct_broadcast_b", None)
+
+
+@pytest.mark.asyncio
+async def test_direct_passthrough_respects_account_allowed_peers(monkeypatch) -> None:
+    """直通不是账号允许名单的豁免通道：名单外 incoming 会话不进直通插件。
+
+    outgoing 不受名单限制。语义与普通链路的 ignored_peers 白名单判定一致：
+    名单为空 = 放行全部；非空 = 仅放行名单内会话。
+    """
+
+    from app.worker.plugins.base import _REGISTRY, register
+
+    calls: list[tuple[str, int]] = []
+
+    @register
+    class _DirectAllowlistPlugin(Plugin):
+        key = "_test_direct_allowlist"
+        display_name = "直通允许名单测试"
+        owner_only = False
+
+        async def on_direct_message(self, ctx: PluginContext, event: Any) -> None:
+            calls.append((self.key, event.chat_id))
+            return None
+
+    _DirectAllowlistPlugin._manifest = Manifest(
+        key=_DirectAllowlistPlugin.key,
+        display_name=_DirectAllowlistPlugin.display_name,
+        capabilities={
+            "telegram_direct_passthrough": {
+                "enabled": True,
+                "reason": "测试允许名单约束",
+                "sources": ["userbot"],
+                "directions": ["incoming", "outgoing"],
+            }
+        },
+    )
+
+    monkeypatch.setattr(loader_mod, "_load_event_framework_flags", AsyncMock(return_value={
+        "trace_enabled": True,
+        "event_bus_delivery_enabled": True,
+    }))
+    trace = SimpleNamespace(trace_id="evt_direct_allowlist_trace")
+    monkeypatch.setattr(loader_mod, "start_trace", AsyncMock(return_value=trace))
+    monkeypatch.setattr(loader_mod, "record_span", AsyncMock())
+    monkeypatch.setattr(loader_mod, "finish_trace", AsyncMock())
+    monkeypatch.setattr(loader_mod, "update_plugin_runtime_status", AsyncMock())
+
+    state = loader_mod._AccountState(account_id=171)
+    state.redis = _FakeRedis()
+    state.ignored_peers = {-1001}
+    ctx = PluginContext(
+        account_id=171,
+        feature_key=_DirectAllowlistPlugin.key,
+        client=MagicMock(),
+        account_config={"direct_passthrough": {"enabled": True}},
+        generation=state.generation,
+    )
+    state.instances[_DirectAllowlistPlugin.key] = _DirectAllowlistPlugin()
+    state.contexts[_DirectAllowlistPlugin.key] = ctx
+
+    class _Event:
+        raw_text = "hello"
+        text = "hello"
+        sender_id = 42
+        id = 191
+        is_private = False
+        is_group = True
+        is_channel = False
+
+        def __init__(self, chat_id: int) -> None:
+            self.chat_id = chat_id
+
+        async def get_chat(self):
+            return None
+
+    try:
+        # 名单外 incoming：不进直通，直接回退普通链路（由普通链路再次拦截）。
+        consumed = await loader_mod._dispatch_userbot_direct_passthrough(
+            state,
+            _Event(-9999),
+            direction="incoming",
+            edited=False,
+            event_label="incoming",
+            redis=state.redis,
+        )
+        assert consumed is False
+        assert calls == []
+
+        # 名单内 incoming：正常进入直通。
+        consumed = await loader_mod._dispatch_userbot_direct_passthrough(
+            state,
+            _Event(-1001),
+            direction="incoming",
+            edited=False,
+            event_label="incoming",
+            redis=state.redis,
+        )
+        assert consumed is False
+        assert calls == [("_test_direct_allowlist", -1001)]
+
+        # outgoing 不受名单限制：名单外会话的 outgoing 仍进直通。
+        await loader_mod._dispatch_userbot_direct_passthrough(
+            state,
+            _Event(-9999),
+            direction="outgoing",
+            edited=False,
+            event_label="outgoing",
+            redis=state.redis,
+        )
+        assert calls[-1] == ("_test_direct_allowlist", -9999)
+    finally:
+        _REGISTRY.pop(_DirectAllowlistPlugin.key, None)
 
 
 @pytest.mark.asyncio
@@ -5984,6 +6173,118 @@ async def test_load_calls_on_startup(monkeypatch) -> None:
     await load_plugins_for_account(client, account_id=1, paused=paused, redis=redis)
 
     on_startup_spy.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_load_isolates_plugin_activate_exception(monkeypatch) -> None:
+    """某插件 cls() 构造抛异常时：该插件标 failed，其余插件照常加载。
+
+    模块 docstring 承诺"任何插件抛出的异常都不会让整个 worker 崩溃"；
+    旧实现里 cls() / rules 查询 / _plugin_data_dir 的异常会直接冒出中断加载循环。
+    """
+
+    from app.worker.plugins.base import _REGISTRY, register
+
+    healthy_startup = AsyncMock()
+
+    class _BrokenInitPlugin(Plugin):
+        key = "_test_broken_init_plugin"
+        display_name = "构造即炸测试"
+
+        def __init__(self) -> None:
+            raise RuntimeError("boom on init")
+
+    @register
+    class _HealthyAfterBrokenPlugin(Plugin):
+        key = "_test_healthy_after_broken"
+        display_name = "坏插件之后的健康插件"
+
+        async def on_startup(self, ctx: PluginContext) -> None:  # noqa: D401
+            await healthy_startup(ctx)
+
+    _REGISTRY[_BrokenInitPlugin.key] = _BrokenInitPlugin
+    broken_af = _FakeAF(account_id=41, feature_key=_BrokenInitPlugin.key, enabled=True, config={})
+    healthy_af = _FakeAF(account_id=41, feature_key=_HealthyAfterBrokenPlugin.key, enabled=True, config={})
+    fake_db = _FakeDB(
+        accounts={41: _FakeAcc(id=41)},
+        humanize={41: None},
+        # 故意把坏插件排在前面：异常不得影响后面的插件加载。
+        afs=[broken_af, healthy_af],
+        rules=[],
+    )
+    monkeypatch.setattr(loader_mod, "AsyncSessionLocal", lambda: _fake_session_factory(fake_db))
+
+    client = MagicMock()
+
+    def _on(_filter):
+        def _wrap(fn):
+            return fn
+
+        return _wrap
+
+    client.on = _on
+    redis = _FakeRedis()
+    paused = asyncio.Event()
+    paused.set()
+
+    try:
+        await load_plugins_for_account(client, account_id=41, paused=paused, redis=redis)
+
+        # 坏插件：状态 failed 且 last_error 带异常摘要；运行日志有错误记录。
+        assert broken_af.state == "failed"
+        assert "RuntimeError" in str(broken_af.last_error)
+        assert any(
+            _BrokenInitPlugin.key in (push[1] or "") and "加载失败" in (push[1] or "")
+            for push in redis.list_pushes
+        )
+        # 后续插件不受影响：照常激活。
+        assert healthy_startup.await_count == 1
+        state = loader_mod._STATES[41]
+        assert _HealthyAfterBrokenPlugin.key in state.instances
+        assert _BrokenInitPlugin.key not in state.instances
+    finally:
+        loader_mod._STATES.pop(41, None)
+        _REGISTRY.pop(_BrokenInitPlugin.key, None)
+        _REGISTRY.pop(_HealthyAfterBrokenPlugin.key, None)
+
+
+@pytest.mark.asyncio
+async def test_activate_isolated_cleanup_failures_do_not_propagate(monkeypatch) -> None:
+    """隔离包装自身的善后路径（rollback/写状态/运行日志/redact）再抛错也不外泄。
+
+    旧实现里 `_log`（Redis 故障）和 `redact_text` 的异常会从包装里冒出，
+    依旧中断整个加载循环——隔离包装绝不能成为新的抛错源。
+    """
+
+    class _BoomDB:
+        async def rollback(self):
+            raise RuntimeError("rollback broken")
+
+        async def execute(self, *_args, **_kwargs):
+            raise RuntimeError("execute broken")
+
+        async def commit(self):
+            raise RuntimeError("commit broken")
+
+    class _BoomRedis:
+        def __getattr__(self, name):
+            raise RuntimeError("redis down")
+
+    async def _boom_activate(*_args, **_kwargs):
+        raise ValueError("activate failed")
+
+    monkeypatch.setattr(loader_mod, "_activate", _boom_activate)
+    monkeypatch.setattr(
+        loader_mod,
+        "redact_text",
+        lambda *_a, **_k: (_ for _ in ()).throw(RuntimeError("redact broken")),
+    )
+
+    state = SimpleNamespace(account_id=51)
+    af = _FakeAF(account_id=51, feature_key="_test_isolated_cleanup", enabled=True, config={})
+
+    # 任何善后路径全炸，包装本身也不能抛。
+    await loader_mod._activate_isolated(_BoomDB(), state, af, _BoomRedis())
 
 
 @pytest.mark.asyncio

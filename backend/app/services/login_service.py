@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 
 from fastapi import HTTPException
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from telethon import TelegramClient
 from telethon.errors import (
@@ -288,6 +289,30 @@ async def _finalize_claimed(db: AsyncSession, token: str, pending: _PendingLogin
     # me.username 不含 @；可能为 None（用户未设置用户名）
     tg_user_id = getattr(me, "id", None)
     tg_username = getattr(me, "username", None) or None
+
+    if pending.account_id is None:
+        # 应用层查重守卫：同一手机号（或 TG 用户 ID）已完成过绑定时，不再重复建
+        # Account 行，而是按隐式重登复用已有账号——否则 sudo 授权、功能矩阵、
+        # 资金台账都会按账号 ID 分裂。身份校验走下方重登分支的同一口径。
+        # 说明：account.phone / tg_user_id 尚无唯一约束（存量可能已有重复行，
+        # 直接加唯一索引会把启动迁移炸掉），DB 侧只建了查询索引，见 0061 迁移。
+        dedupe_conditions = [Account.phone == pending.phone]
+        if tg_user_id is not None:
+            dedupe_conditions.append(Account.tg_user_id == tg_user_id)
+        existing = (
+            (
+                await db.execute(
+                    select(Account)
+                    .where(or_(*dedupe_conditions))
+                    .order_by(Account.id)
+                    .limit(1)
+                )
+            )
+            .scalars()
+            .first()
+        )
+        if existing is not None:
+            pending.account_id = existing.id
 
     if pending.account_id is None:
         # 新建账号

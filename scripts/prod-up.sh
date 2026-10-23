@@ -70,13 +70,20 @@ if grep -qE '^(MASTER_KEY|JWT_SECRET)=(changeme.*)?$' .env; then
   MK="$($PY -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())')"
   JS="$($PY -c 'import secrets; print(secrets.token_urlsafe(64))')"
   $PY - "$MK" "$JS" <<'PY'
-import sys, pathlib, re
+import os, pathlib, re, sys, tempfile
 mk, js = sys.argv[1], sys.argv[2]
 p = pathlib.Path(".env")
 text = p.read_text()
 text = re.sub(r'^MASTER_KEY=(changeme.*)?$', f'MASTER_KEY={mk}', text, flags=re.MULTILINE)
 text = re.sub(r'^JWT_SECRET=(changeme.*)?$', f'JWT_SECRET={js}', text, flags=re.MULTILINE)
-p.write_text(text)
+descriptor, temporary = tempfile.mkstemp(prefix=f".{p.name}.", dir=p.parent)
+try:
+    with os.fdopen(descriptor, "w", encoding="utf-8") as output:
+        output.write(text)
+    os.replace(temporary, p)
+finally:
+    if os.path.exists(temporary):
+        os.unlink(temporary)
 PY
   ok ".env 密钥已生成"
 fi

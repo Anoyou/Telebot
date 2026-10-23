@@ -11,7 +11,10 @@ from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert as postgres_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from ...db.models.system import SystemSetting
 from ..llm_client import LLMErrorScope, build_client_from_dto
@@ -351,6 +354,29 @@ async def _persist_cache_entries(
     await db.flush()
 
 
+async def _upsert_cache_entries(
+    db: AsyncSession,
+    updates: dict[str, dict[str, Any]],
+) -> None:
+    """独立短事务中创建、锁行、合并并提交，不提前提交调用方事务。"""
+
+    factory = async_sessionmaker(db.bind, expire_on_commit=False)
+    async with factory.begin() as cache_db:
+        insert = postgres_insert if cache_db.bind.dialect.name == "postgresql" else sqlite_insert
+        await cache_db.execute(
+            insert(SystemSetting)
+            .values(key=CACHE_KEY, value={"version": 1, "entries": {}})
+            .on_conflict_do_nothing(index_elements=[SystemSetting.key])
+        )
+        row = (await cache_db.execute(
+            select(SystemSetting).where(SystemSetting.key == CACHE_KEY).with_for_update()
+        )).scalar_one()
+        raw = row.value if isinstance(row.value, dict) else {}
+        entries = dict(raw.get("entries") or {}) if isinstance(raw, dict) else {}
+        entries.update(updates)
+        await _persist_cache_entries(cache_db, entries)
+
+
 async def _refresh_capability_cache_background(
     items: list[tuple[LLMProviderDTO, str, str]],
 ) -> None:
@@ -378,17 +404,18 @@ async def _refresh_capability_cache_background(
         probed = await asyncio.gather(
             *(run_probe(provider, model, signature) for provider, model, signature in items)
         )
+        # 只 upsert 本次探测到的 signature：整体读-整体写会把并发路径刚写入的
+        # 其它条目一并覆盖丢失
+        updates = {
+            signature: {
+                "status": result.status,
+                "checked_at": result.checked_at.isoformat(),
+                "error_type": result.error_type,
+            }
+            for signature, result in probed
+        }
         async with AsyncSessionLocal() as db:
-            row = await db.get(SystemSetting, CACHE_KEY)
-            raw = row.value if row is not None and isinstance(row.value, dict) else {}
-            entries = dict(raw.get("entries") or {}) if isinstance(raw, dict) else {}
-            for signature, result in probed:
-                entries[signature] = {
-                    "status": result.status,
-                    "checked_at": result.checked_at.isoformat(),
-                    "error_type": result.error_type,
-                }
-            await _persist_cache_entries(db, entries)
+            await _upsert_cache_entries(db, updates)
             await db.commit()
         log.info(
             "system agent capability cache refreshed in background count=%s",
@@ -396,6 +423,25 @@ async def _refresh_capability_cache_background(
         )
     except Exception:  # noqa: BLE001
         log.warning("system agent background capability refresh failed", exc_info=True)
+
+
+# 事件循环对 task 只持弱引用：create_task 后不保存强引用的任务可能在执行中被 GC。
+# 与 run_manager 的 recovery loop 相同模式：模块级集合持有引用，完成/取消后移除。
+_REFRESH_TASKS: set[asyncio.Task[None]] = set()
+
+
+def _refresh_task_done(task: asyncio.Task[None]) -> None:
+    _REFRESH_TASKS.discard(task)
+    if task.cancelled():
+        return
+    exc = task.exception()
+    if exc is not None:
+        # 协程内部已兜底异常，这里只防御未捕获路径，避免异常被事件循环静默吞掉
+        log.warning(
+            "system agent capability refresh task crashed: %s",
+            exc,
+            exc_info=exc,
+        )
 
 
 def schedule_capability_refresh(
@@ -407,7 +453,9 @@ def schedule_capability_refresh(
         loop = asyncio.get_running_loop()
     except RuntimeError:
         return
-    loop.create_task(_refresh_capability_cache_background(list(items)))
+    task = loop.create_task(_refresh_capability_cache_background(list(items)))
+    _REFRESH_TASKS.add(task)
+    task.add_done_callback(_refresh_task_done)
 
 
 # 本轮主模型能力验证结果。用 ContextVar 而不是模块变量：多个会话并发时必须各自读到
@@ -545,14 +593,17 @@ async def verify_resolved_agent_providers(
         probed = await asyncio.gather(
             *(run_probe(provider, model, signature) for provider, model, signature in candidates)
         )
+        updates: dict[str, dict[str, Any]] = {}
         for provider_id, model, signature, result in probed:
             results[(provider_id, model)] = result
-            entries[signature] = {
+            updates[signature] = {
                 "status": result.status,
                 "checked_at": result.checked_at.isoformat(),
                 "error_type": result.error_type,
             }
-        await _persist_cache_entries(db, entries)
+        # 探测 await 期间并发路径可能已写入缓存：只 upsert 本次探测到的
+        # signature，写回前重读现值合并，避免整体覆盖丢掉并发结果
+        await _upsert_cache_entries(db, updates)
 
     if non_blocking and background:
         schedule_capability_refresh(background)

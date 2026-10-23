@@ -4,7 +4,7 @@
 - ``install``：``git clone`` 到 ``plugins/installed/<name>/`` → 解析 ``plugin.json`` → 写 ``installed_plugin`` 表 → 触发 worker 热加载（``reload_config``）
 - ``uninstall``：删 installed_plugin 行 + 删插件目录
 - ``enable`` / ``disable``：翻转 ``enabled`` 标志，并向 worker 广播热加载
-- ``update``：``git pull`` → 重读 plugin.json → 写新版本号 → 触发热加载
+- ``update``：fresh clone 已校验的 ``source_url`` → 重读 plugin.json → 写新版本号 → 触发热加载
 
 安全设计（阶段 E 修复）：
 - 安装阶段**绝对禁止执行任何 Python 代码**（manifest.py 在安装时不被解析/执行）
@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import ast
 import asyncio
+import glob
 import json
 import logging
 import os
@@ -31,6 +32,7 @@ import re
 import shutil
 import sqlite3
 import tempfile
+import time
 import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -45,7 +47,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db.base import AsyncSessionLocal
 from ..db.models.account import Account
-from ..db.models.feature import FEATURE_STATE_DISABLED, AccountFeature, Feature
+from ..db.models.feature import (
+    BUILTIN_FEATURES,
+    FEATURE_STATE_DISABLED,
+    AccountFeature,
+    Feature,
+)
 from ..db.models.plugin import (
     PLUGIN_SOURCE_GIT,
     PLUGIN_SOURCE_LEGACY,
@@ -573,6 +580,33 @@ def _plugin_dir(name: str) -> Path:
             f"插件名派生路径越界: {name!r}",
         )
     return target
+
+
+def _new_staging_dir(target: Path) -> Path:
+    """在非插件命名空间中创建并发安全的 staging 路径。"""
+    root = target.parent / ".staging"
+    if root.is_symlink():
+        raise ValueError("插件 staging 根目录不得为符号链接")
+    root.mkdir(parents=True, exist_ok=True)
+    return root / f"{target.name}.installing.{uuid.uuid4().hex}"
+
+
+def _cleanup_staging_residue(target: Path, *, older_than_seconds: float = 3600.0) -> None:
+    """仅回收隔离 staging 根下的过期目录；旧插件根残留留待人工确认。"""
+    root = target.parent / ".staging"
+    if root.is_symlink() or not root.is_dir():
+        return
+    cutoff = time.time() - older_than_seconds
+    pattern = re.compile(re.escape(target.name) + r"\.installing\.[0-9a-f]{32}")
+    for residue in root.glob(glob.escape(target.name) + ".installing.*"):
+        if not pattern.fullmatch(residue.name) or residue.is_symlink():
+            continue
+        try:
+            if residue.stat().st_mtime > cutoff:
+                continue
+        except OSError:
+            continue
+        shutil.rmtree(residue, ignore_errors=True)
 
 
 def _plugin_data_dir(name: str) -> Path:
@@ -1443,10 +1477,9 @@ async def _copy_plugin_from_source_url(
         )
     _validate_source_url(source_url)
 
-    staging = target.with_name(f"{target.name}.installing")
+    staging = _new_staging_dir(target)
     backup = target.with_name(f"{target.name}.bak-update")
-    if staging.exists():
-        shutil.rmtree(staging, ignore_errors=True)
+    _cleanup_staging_residue(target)
     if backup.exists():
         shutil.rmtree(backup, ignore_errors=True)
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -1459,10 +1492,12 @@ async def _copy_plugin_from_source_url(
             repo_dir = Path(tmp) / "repo"
             await _clone_git_source(source_url, repo_dir, timeout=180.0, env=git_env)
             _, source_dir = _find_plugin_metadata_in_repo(repo_dir, name)
+            # symlinks=True：保留符号链接本身，防止把 Git 仓库携带的外指 symlink 目标内容复制进插件目录。
             shutil.copytree(
                 source_dir,
                 staging,
                 ignore=shutil.ignore_patterns(".git", ".gitignore", "__pycache__"),
+                symlinks=True,
             )
             staged_meta = _read_plugin_metadata(staging, fallback_name=name)
             if staged_meta.name != name:
@@ -1789,8 +1824,15 @@ async def install(
     _validate_source_url(source_url)
 
     final_name = name or _derive_name_from_url(source_url)
+    # 与 ZIP 通道（plugin_install_service.KEY_CONFLICTS_BUILTIN）一致：
+    # builtin key 不允许被远程插件占用，否则 Feature 行 is_builtin 会被覆盖成 False。
+    if final_name in BUILTIN_FEATURES:
+        raise DuplicatePluginName(
+            "KEY_CONFLICTS_BUILTIN",
+            f"key {final_name!r} 与内置插件冲突，请改名后重试",
+        )
     target = _plugin_dir(final_name)
-    staging = target.parent / f"{target.name}.installing"
+    staging = _new_staging_dir(target)
 
     # 2. 重名拦截：先查 DB，再查目录
     existing = await db.get(InstalledPlugin, final_name)
@@ -1803,8 +1845,8 @@ async def install(
         raise DuplicatePluginName(
             "DIR_EXISTS", f"目录已存在但 DB 无记录: {target}（请先手动清理）"
         )
-    if staging.exists():
-        shutil.rmtree(staging, ignore_errors=True)
+    # 只清理历史残留，不动并发流程正在使用的随机 staging 目录
+    _cleanup_staging_residue(target)
 
     # 3. 确保父目录存在
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -2028,7 +2070,7 @@ async def update(
     target = Path(row.installed_path or _existing_plugin_dir(name))
     source_url = str(row.source_url or "")
     git_env = await _git_env_for_installed_source(db, source_url) if source_url else None
-    staging = target.with_name(f"{target.name}.installing")
+    staging = _new_staging_dir(target)
     backup = target.with_name(f"{target.name}.bak-update")
     target_existed = target.exists()
     barrier_started = False
@@ -2036,8 +2078,7 @@ async def update(
     legacy_sqlite_names: list[str] = []
     legacy_json_names: list[str] = []
 
-    if staging.exists():
-        shutil.rmtree(staging, ignore_errors=True)
+    _cleanup_staging_residue(target)
     if backup.exists():
         shutil.rmtree(backup, ignore_errors=True)
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -2045,27 +2086,29 @@ async def update(
     try:
         # 永远先在 staging 拉取与校验。新版缺声明或能力被修枝剪阻断时，
         # 运行中的旧目录保持不变或由 backup 原样恢复。
-        if target_existed and (target / ".git").exists():
-            shutil.copytree(target, staging, symlinks=True)
-            await _run_git("pull", "--ff-only", cwd=staging, timeout=60.0, env=git_env)
-        else:
-            if not source_url:
-                raise RemotePluginError("SOURCE_URL_MISSING", f"插件 {name} 缺少 source_url，无法更新")
-            if source_url.startswith("local://"):
-                raise RemotePluginError(
-                    "DIR_MISSING",
-                    f"插件目录已丢失或不含 Git 元数据: {target}；本地导入插件无法从 {source_url!r} 自动更新，请重新导入。",
-                )
-            _validate_source_url(source_url)
-            with tempfile.TemporaryDirectory(prefix="telepilot-plugin-update-") as tmp:
-                repo_dir = Path(tmp) / "repo"
-                await _clone_git_source(source_url, repo_dir, timeout=180.0, env=git_env)
-                _, source_dir = _find_plugin_metadata_in_repo(repo_dir, name)
-                shutil.copytree(
-                    source_dir,
-                    staging,
-                    ignore=shutil.ignore_patterns(".git", ".gitignore", "__pycache__"),
-                )
+        # 不使用本地 .git 的 `git pull` 快路径：插件进程在 worker 拥有完整文件
+        # 权限，可改写自己目录下的 .git/config（remote url 重写为 file://、
+        # core.sshCommand、fetch.insteadOf 等），pull 会让这些配置在主 API 进程
+        # 生效。更新始终 fresh clone 数据库里已校验的 source_url。
+        if not source_url:
+            raise RemotePluginError("SOURCE_URL_MISSING", f"插件 {name} 缺少 source_url，无法更新")
+        if source_url.startswith("local://"):
+            raise RemotePluginError(
+                "DIR_MISSING",
+                f"插件目录 {target}；本地导入插件无法从 {source_url!r} 自动更新，请重新导入。",
+            )
+        _validate_source_url(source_url)
+        with tempfile.TemporaryDirectory(prefix="telepilot-plugin-update-") as tmp:
+            repo_dir = Path(tmp) / "repo"
+            await _clone_git_source(source_url, repo_dir, timeout=180.0, env=git_env)
+            _, source_dir = _find_plugin_metadata_in_repo(repo_dir, name)
+            # symlinks=True：与自愈路径一致，保留 symlink 本身而不复制目标内容。
+            shutil.copytree(
+                source_dir,
+                staging,
+                ignore=shutil.ignore_patterns(".git", ".gitignore", "__pycache__"),
+                symlinks=True,
+            )
 
         meta = _read_plugin_metadata(
             staging,

@@ -35,6 +35,9 @@ SETTING_PREFIX = "account_webhooks:"
 TOKEN_HEADER = "X-TelePilot-Webhook-Token"
 WEBHOOK_RATE_LIMIT_ACTION = "webhook_deliver"
 WEBHOOK_INGRESS_RATE_LIMIT_ACTION = "webhook_ingress"
+WEBHOOK_INGRESS_BACKSTOP_RATE_LIMIT_ACTION = "webhook_ingress_backstop"
+# 兜底桶限额 = 入口限额 × 该倍率；同一来源（反代后即整个站点）的总入口上限。
+INGRESS_BACKSTOP_MULTIPLIER = 8
 MAX_WEBHOOK_BODY_BYTES = 64 * 1024
 DEFAULT_HOOK_KEY = "default"
 HOOK_KEY_RE = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
@@ -284,24 +287,48 @@ def _client_ip(request: Request) -> str:
     return request.client.host if request.client else "?"
 
 
-def _ingress_bucket_id(request: Request) -> int:
+def _ingress_bucket_id(request: Request, account_id: int) -> int:
+    digest = hashlib.blake2b(
+        f"{_client_ip(request)}:{account_id}".encode(), digest_size=8
+    ).digest()
+    return int.from_bytes(digest, "big") & ((1 << 63) - 1)
+
+
+def _ingress_backstop_bucket_id(request: Request) -> int:
     digest = hashlib.blake2b(_client_ip(request).encode("utf-8"), digest_size=8).digest()
     return int.from_bytes(digest, "big") & ((1 << 63) - 1)
 
 
-async def _enforce_webhook_ingress_rate_limit(request: Request, redis: Any) -> None:
+async def _enforce_webhook_ingress_rate_limit(request: Request, redis: Any, account_id: int) -> None:
+    # 反代后（trust_forwarded_for=false）所有发送方共享同一 client IP，仅按 IP
+    # 分桶会让单个高频发送方饿死所有账号的入口。主桶按 (client_ip, account_id)
+    # 分桶保证账号间公平；另保留一个仅按 IP 的兜底桶（限额放大），约束同一来源
+    # 对全部账号的总入口流量，防止伪造随机 account_id 绕开主桶。
+    buckets = TokenBuckets(redis)
     try:
-        allowed, retry_after, _idx = await TokenBuckets(redis).check_and_consume(
-            _ingress_bucket_id(request),
-            WEBHOOK_INGRESS_RATE_LIMIT_ACTION,
-            INGRESS_LIMITS["per_second"],
-            INGRESS_LIMITS["per_minute"],
+        allowed, retry_after, _idx = await buckets.check_and_consume(
+            _ingress_backstop_bucket_id(request),
+            WEBHOOK_INGRESS_BACKSTOP_RATE_LIMIT_ACTION,
+            INGRESS_LIMITS["per_second"] * INGRESS_BACKSTOP_MULTIPLIER,
+            INGRESS_LIMITS["per_minute"] * INGRESS_BACKSTOP_MULTIPLIER,
             None,
             None,
             None,
             peer_id=None,
             consume=True,
         )
+        if allowed:
+            allowed, retry_after, _idx = await buckets.check_and_consume(
+                _ingress_bucket_id(request, account_id),
+                WEBHOOK_INGRESS_RATE_LIMIT_ACTION,
+                INGRESS_LIMITS["per_second"],
+                INGRESS_LIMITS["per_minute"],
+                None,
+                None,
+                None,
+                peer_id=None,
+                consume=True,
+            )
     except Exception as exc:  # noqa: BLE001
         log.warning("webhook ingress rate-limit unavailable: %s", type(exc).__name__)
         raise HTTPException(
@@ -446,7 +473,7 @@ async def deliver_webhook(
         )
 
     redis = get_redis()
-    await _enforce_webhook_ingress_rate_limit(request, redis)
+    await _enforce_webhook_ingress_rate_limit(request, redis, account_id)
     account = await db.get(Account, account_id)
     if account is None:
         raise HTTPException(

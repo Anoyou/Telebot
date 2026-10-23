@@ -124,6 +124,7 @@ from ...services.interaction.delivery import (
     save_action_reply_target,
 )
 from ...services.rate_limit_service import get_effective
+from ...services.redactor import redact_text
 from ...settings import settings as app_settings
 from ...util.sudo_permissions import sudo_chat_allowed
 from ..command import (
@@ -245,6 +246,19 @@ class _TracePluginClient:
             return None
         return detail if isinstance(detail, dict) else None
 
+    async def _record_rate_limited_skipped(self, action: dict[str, Any], exc: Any) -> None:
+        """限速拒绝：动作未发出，按 SKIPPED/rate_limited 记录；异常继续抛给插件。"""
+        detail = getattr(exc, "detail", None)
+        if not isinstance(detail, dict):
+            detail = self._consume_rate_limit_detail() or {}
+        await self._record(
+            action,
+            TRACE_STATUS_SKIPPED,
+            actual_send_via="userbot_reply",
+            error_code="rate_limited",
+            result=detail,
+        )
+
     def _dry_run_enabled(self) -> bool:
         if self._account_id is None:
             return False
@@ -283,19 +297,16 @@ class _TracePluginClient:
             return self._dry_run_object(action)
         try:
             result = await self._client.send_message(chat_id, text, *args, **kwargs)
-            rate_limit_detail = self._consume_rate_limit_detail()
-            if rate_limit_detail is not None:
-                await self._record(
-                    action,
-                    TRACE_STATUS_SKIPPED,
-                    actual_send_via="userbot_reply",
-                    error_code="rate_limited",
-                    result=rate_limit_detail,
-                )
-                return result
             await self._record(action, TRACE_STATUS_OK, actual_send_via="userbot_reply", result=_trace_client_result(result))
             return result
         except Exception as exc:  # noqa: BLE001
+            from .sandbox import PluginSendRateLimited  # 延迟 import 避免循环
+
+            if isinstance(exc, PluginSendRateLimited):
+                # SandboxClient 限速拒绝时抛 PluginSendRateLimited；动作未发出，
+                # 记 SKIPPED/rate_limited 后把失败信号继续抛给插件（不再静默返回 None）。
+                await self._record_rate_limited_skipped(action, exc)
+                raise
             await self._record(
                 action,
                 TRACE_STATUS_FAILED,
@@ -332,19 +343,16 @@ class _TracePluginClient:
             return self._dry_run_object(action)
         try:
             result = await self._client.send_file(chat_id, file, *args, **kwargs)
-            rate_limit_detail = self._consume_rate_limit_detail()
-            if rate_limit_detail is not None:
-                await self._record(
-                    action,
-                    TRACE_STATUS_SKIPPED,
-                    actual_send_via="userbot_reply",
-                    error_code="rate_limited",
-                    result=rate_limit_detail,
-                )
-                return result
             await self._record(action, TRACE_STATUS_OK, actual_send_via="userbot_reply", result=_trace_client_result(result))
             return result
         except Exception as exc:  # noqa: BLE001
+            from .sandbox import PluginSendRateLimited  # 延迟 import 避免循环
+
+            if isinstance(exc, PluginSendRateLimited):
+                # SandboxClient 限速拒绝时抛 PluginSendRateLimited；动作未发出，
+                # 记 SKIPPED/rate_limited 后把失败信号继续抛给插件（不再静默返回 None）。
+                await self._record_rate_limited_skipped(action, exc)
+                raise
             await self._record(
                 action,
                 TRACE_STATUS_FAILED,
@@ -1826,6 +1834,18 @@ async def _dispatch_userbot_direct_passthrough(
     返回 True 表示本条消息已被直通消费，调用方应跳过 Event Bus / legacy。
     返回 False 表示所有插件均 ignored / failed，应继续普通链路。
     """
+
+    # incoming 直通与普通链路（_dispatch 中的 ignored_peers 白名单判定）受同一账号
+    # 允许名单约束：名单非空且会话不在名单内时，不得进入直通插件；outgoing 不受限。
+    if direction == "incoming":
+        pid = event.chat_id
+        if pid is not None and state.ignored_peers and pid not in state.ignored_peers:
+            log.debug(
+                "[allowed] drop direct passthrough account=%s chat_id=%s",
+                state.account_id,
+                pid,
+            )
+            return False
 
     handler_name = "on_direct_message"
     candidates: list[tuple[int, str, Plugin, PluginContext, Any]] = []
@@ -5970,7 +5990,7 @@ def discover_plugins(*, include_installed: bool = False) -> dict[str, type[Plugi
     installed_dir = _installed_dir()
     if installed_dir.exists():
         for sub in sorted(installed_dir.iterdir(), key=lambda p: p.name):
-            if not sub.is_dir() or sub.name.startswith("_"):
+            if not sub.is_dir() or sub.name.startswith(("_", ".")):
                 continue
             out.update(_load_dir(sub, source="installed"))
     return out
@@ -7514,13 +7534,71 @@ async def load_plugins_for_account(
                 )
             )
         ).scalars().all()
-        for af in afs:
-            await _activate(db, state, af, redis)
+        # 单个插件激活失败（cls() 构造 / rules 查询等）只标记 failed，不影响其余插件。
+        for feature_key in [af.feature_key for af in afs]:
+            af = await db.get(AccountFeature, (account_id, feature_key), populate_existing=True)
+            if af is None or not af.enabled:
+                continue
+            await _activate_isolated(db, state, af, redis)
 
 
 # ─────────────────────────────────────────────────────
 # 单 feature 激活（安全：双开关检查）
 # ─────────────────────────────────────────────────────
+async def _activate_isolated(
+    db: Any,
+    state: _AccountState,
+    af: AccountFeature,
+    redis: Any,
+) -> None:
+    """按插件隔离的 ``_activate`` 包装：单个插件激活失败只标记 failed，不中断循环。
+
+    ``cls()`` 构造、rules 查询、``_plugin_data_dir`` 等异常都会在这里兜底，
+    兑现模块 docstring"任何插件抛出的异常都不会让整个 worker 崩溃"的承诺。
+    善后路径（rollback / 写状态 / 日志）自身再包一层：隔离包装绝不能成为新的
+    抛错源。``asyncio.CancelledError`` 继承自 BaseException 不被捕获——worker
+    停机时的取消语义保持穿透。
+    """
+    feature_key = af.feature_key
+    try:
+        await _activate(db, state, af, redis)
+    except Exception as exc:  # noqa: BLE001
+        try:
+            summary = redact_text(f"{type(exc).__name__}: {exc}")[:500]
+        except Exception:  # noqa: BLE001 - redact 异常输入时降级为纯类型名
+            summary = type(exc).__name__
+        log.exception("插件 %s 激活失败", feature_key)
+        # 异常可能带着失败中的事务状态，先回滚再写 failed 标记。
+        try:
+            await db.rollback()
+        except Exception:  # noqa: BLE001
+            log.debug("回滚失败会话失败 feature=%s", feature_key, exc_info=True)
+        try:
+            await db.execute(
+                update(AccountFeature)
+                .where(
+                    AccountFeature.account_id == state.account_id,
+                    AccountFeature.feature_key == feature_key,
+                )
+                .values(state=FEATURE_STATE_FAILED, last_error=summary)
+            )
+            await db.commit()
+        except Exception:  # noqa: BLE001
+            log.exception("写入插件 failed 状态失败 feature=%s", feature_key)
+        try:
+            # Redis 故障不能从隔离包装里再抛出去中断整个加载循环。
+            await _log(
+                redis,
+                state.account_id,
+                "error",
+                f"插件 {feature_key} 加载失败: {summary}",
+                source="system",
+                plugin_key=feature_key,
+            )
+        except Exception:  # noqa: BLE001
+            log.debug("写入插件失败运行日志失败 feature=%s", feature_key, exc_info=True)
+
+
 async def _activate(db, state: _AccountState, af: AccountFeature, redis: Any) -> None:
     """根据 ``account_feature`` 行实例化对应插件，调 ``on_startup``，写状态。
 
@@ -8611,9 +8689,13 @@ async def reload_account_config(account_id: int, payload: dict | None = None) ->
                 )
             )
         ).scalars().all()
-        for af in afs:
-            if af.feature_key not in state.instances:
-                await _activate(db, state, af, redis)
+        for feature_key in [af.feature_key for af in afs]:
+            if feature_key not in state.instances:
+                af = await db.get(AccountFeature, (account_id, feature_key), populate_existing=True)
+                if af is None or not af.enabled:
+                    continue
+                # 与启动加载循环一致：单个新增插件激活失败只标记 failed，继续处理其余插件。
+                await _activate_isolated(db, state, af, redis)
 
     state.generation = next_generation
     for fkey, ctx in state.contexts.items():
@@ -8648,7 +8730,6 @@ async def reload_plugin(account_id: int, plugin_key: str | None) -> None:
     state = _STATES.get(account_id)
     if state is None:
         return
-    state.generation += 1
     redis = state.redis or get_redis()
     await _refresh_interaction_text_guard_cache(state)
     await _refresh_userbot_session_chat_cache(state)
@@ -8696,6 +8777,19 @@ async def reload_plugin(account_id: int, plugin_key: str | None) -> None:
         ).scalar_one_or_none()
         if af is not None and af.enabled:
             await _activate(db, state, af, redis)
+
+    # 4) 与 reload_account_config 的收尾保持一致：generation 只是"配置/实例新鲜度"标记，
+    #    单插件重载不能让其他插件 ctx.generation 过期、被三条投递闸门当成 failed 拒绝。
+    #    重载完成后把 state 与全部 contexts 原子推进到下一代（中间无 await，不会出现
+    #    半更新窗口）；重载失败 / 插件未加载或已禁用的路径不会走到这里，也不再 bump。
+    next_generation = state.generation + 1
+    state.generation = next_generation
+    for fkey, ctx in state.contexts.items():
+        ctx.generation = next_generation
+        ctx.scheduler = (
+            state.scheduler.for_plugin(fkey, next_generation)
+            if state.scheduler is not None else None
+        )
     await _log(redis, account_id, "info", f"插件 {plugin_key} 已重载")
 
 

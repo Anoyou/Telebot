@@ -11,6 +11,7 @@ import json
 import os
 import re
 import secrets
+import select
 import subprocess
 import threading
 import time
@@ -27,8 +28,16 @@ DEFAULT_BRANCH = os.getenv("TELEPILOT_UPDATE_BRANCH", "").strip() or "main"
 TOKEN = os.getenv("UPDATER_TOKEN", "").strip()
 MAX_LOG_LINES = 240
 MAX_CONSOLE_LOG_LINES = 1000
+# prod-update.sh 在“等待交接”阶段会主动进入无限 sleep，只能由 handoff 容器
+# force-recreate 杀掉。若 handoff 双重失败（目标切换与回滚 recreate 都失败），
+# 这里必须自行收尾，否则 _apply_lock 永久卡死。
+APPLY_POLL_SECONDS = 1.0
+HANDOFF_STUCK_SECONDS = 1800.0
+HANDOFF_GONE_GRACE_SECONDS = 180.0
 CONSOLE_LOG_COMMAND_TIMEOUT_SECONDS = 5
 RESOURCE_COMMAND_TIMEOUT_SECONDS = 5
+# 内存中的 job 记录只保留最近 N 个；更早的由 _job_snapshot 回退到磁盘文件读取。
+MAX_IN_MEMORY_JOBS = 50
 CONSOLE_LOG_SERVICES = ("web", "frontend", "postgres", "redis", "updater")
 PROGRESS_PREFIX = "@@TELEPILOT_PROGRESS@@"
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
@@ -707,6 +716,14 @@ def _persist_job(job_id: str, job: dict[str, Any]) -> None:
     try:
         path = _job_path(job_id)
         path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            persisted = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            persisted = {}
+        if persisted.get("status") in {"succeeded", "failed"} and job.get("status") != persisted["status"]:
+            with _jobs_lock:
+                _jobs[job_id] = persisted
+            return
         temporary = path.with_suffix(".tmp")
         temporary.write_text(json.dumps(job, ensure_ascii=False), encoding="utf-8")
         temporary.replace(path)
@@ -715,9 +732,39 @@ def _persist_job(job_id: str, job: dict[str, Any]) -> None:
         return
 
 
+def _handoff_log_mtime() -> float:
+    """handoff 容器的全部输出（拉镜像、recreate、健康等待）都写入 handoff 日志。
+
+    日志 mtime 仍在推进说明 handoff 存活——慢速网络拉取大镜像可能远超任何静态
+    阈值，不能据此判定卡死；只有日志长时间静默才算异常。
+    """
+    try:
+        return (WORKSPACE / ".git" / "telepilot-updater-handoff.log").stat().st_mtime
+    except OSError:
+        return 0.0
+
+
+def _persisted_job_status(job_id: str) -> str | None:
+    try:
+        data = json.loads(_job_path(job_id).read_text(encoding="utf-8"))
+        return data.get("status")
+    except Exception:
+        return None
+
+
+def _trim_in_memory_jobs(keep_job_id: str) -> None:
+    """超过上限时按插入序淘汰最老的内存 job；磁盘文件保留，读取走回退路径。"""
+    while len(_jobs) > MAX_IN_MEMORY_JOBS:
+        oldest = next(iter(_jobs))
+        if oldest == keep_job_id:
+            break
+        del _jobs[oldest]
+
+
 def _set_job(job_id: str, **updates: Any) -> None:
     with _jobs_lock:
         job = _jobs.setdefault(job_id, {"job_id": job_id, "logs": []})
+        _trim_in_memory_jobs(job_id)
         # WP-U1：阶段切换时累计各步耗时，供前端进度展示
         now = time.time()
         new_phase = updates.get("phase")
@@ -782,6 +829,7 @@ def _append_job_log_unlocked(job: dict[str, Any], line: str) -> None:
 def _append_job_log(job_id: str, line: str) -> None:
     with _jobs_lock:
         job = _jobs.setdefault(job_id, {"job_id": job_id, "logs": []})
+        _trim_in_memory_jobs(job_id)
         logs = list(job.get("logs") or [])
         logs.append(line.rstrip())
         job["logs"] = logs[-MAX_LOG_LINES:]
@@ -849,13 +897,100 @@ def _run_apply_job(job_id: str, remote: str, branch: str, force_full: bool) -> N
             bufsize=1,
         )
         assert proc.stdout is not None
-        for line in proc.stdout:
-            progress = _parse_progress(line.strip())
+        stream_fd = proc.stdout.fileno()
+        pending = ""
+        handoff_wait_at: float | None = None
+        marker_gone_at: float | None = None
+        watchdog_reason: str | None = None
+
+        def _consume_line(raw_line: str) -> None:
+            nonlocal handoff_wait_at
+            stripped = raw_line.strip()
+            progress = _parse_progress(stripped)
             if progress is not None:
                 percent, phase, detail = progress
                 _set_job(job_id, progress=percent, phase=phase, detail=detail)
+                if phase == "等待交接":
+                    handoff_wait_at = handoff_wait_at or time.time()
             else:
-                _append_job_log(job_id, line)
+                _append_job_log(job_id, raw_line)
+                if "等待交接" in stripped:
+                    handoff_wait_at = handoff_wait_at or time.time()
+
+        while watchdog_reason is None:
+            ready, _, _ = select.select([proc.stdout], [], [], APPLY_POLL_SECONDS)
+            if ready:
+                chunk = os.read(stream_fd, 8192)
+                if not chunk:
+                    break  # EOF：子进程已结束
+                pending += chunk.decode("utf-8", errors="replace")
+                *lines, pending = pending.split("\n")
+                for raw_line in lines:
+                    _consume_line(raw_line)
+                continue
+            # 无新输出时只在进入“等待交接”阶段后启用看门狗，避免干扰镜像拉取等长静默。
+            if handoff_wait_at is None:
+                continue
+            now = time.time()
+            if _handoff_active():
+                marker_gone_at = None
+                # 以"最近一次 handoff 日志推进"为存活信号：拉取大镜像可以远超静态
+                # 阈值，只有日志静默超过阈值才判定卡死，避免慢更新被误报失败。
+                last_activity = max(handoff_wait_at, _handoff_log_mtime())
+                if now - last_activity > HANDOFF_STUCK_SECONDS:
+                    persisted_now = _persisted_job_status(job_id)
+                    if persisted_now in ("succeeded", "failed"):
+                        # handoff 已在磁盘写入终态但标记未清除（finalize 后、清 marker
+                        # 前崩溃）：镜像其结论，不覆盖成失败。
+                        watchdog_reason = (
+                            f"handoff 已在磁盘写入终态（{persisted_now}）但标记未清除，按该终态收尾"
+                        )
+                    else:
+                        watchdog_reason = (
+                            "handoff 标记长时间未清除且日志无进展，handoff 容器可能已异常退出；"
+                            "已保留 fail-closed 标记并释放更新锁"
+                        )
+            else:
+                marker_gone_at = marker_gone_at or now
+                if now - marker_gone_at > HANDOFF_GONE_GRACE_SECONDS:
+                    watchdog_reason = "handoff 已收尾（标记已清除）但旧 updater 未被替换"
+        if pending:
+            _consume_line(pending)
+        if watchdog_reason is not None:
+            try:
+                persisted_job = json.loads(_job_path(job_id).read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                persisted_job = {}
+            proc.terminate()
+            try:
+                proc.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait()
+            if persisted_job.get("status") in {"succeeded", "failed"}:
+                with _jobs_lock:
+                    _jobs[job_id] = persisted_job
+                _append_job_log(job_id, f"看门狗：{watchdog_reason}；已停止 prod-update 子进程")
+                return
+            _append_job_log(job_id, f"看门狗：{watchdog_reason}；已停止 prod-update 子进程")
+            # handoff 侧 finalize 脚本可能已把持久化任务写成 succeeded；保留其结论。
+            persisted_status = persisted_job.get("status")
+            final_status = "succeeded" if persisted_status == "succeeded" else "failed"
+            _set_job(
+                job_id,
+                status=final_status,
+                finished_at=int(time.time()),
+                returncode=proc.returncode if proc.returncode is not None else -1,
+                phase="更新完成" if final_status == "succeeded" else "更新失败",
+                detail=watchdog_reason,
+                summary=(
+                    "更新完成（handoff 已收尾）。"
+                    if final_status == "succeeded"
+                    else "更新失败：updater handoff 异常，请查看日志。"
+                ),
+                error=None if final_status == "succeeded" else watchdog_reason,
+            )
+            return
         rc = proc.wait()
         head, _, _ = _run(["git", "rev-parse", "HEAD"], timeout=10)
         current_job = _job_snapshot(job_id) or {}
@@ -895,8 +1030,14 @@ class Handler(BaseHTTPRequestHandler):
         return secrets.compare_digest(supplied, TOKEN)
 
     def _read_json(self) -> dict[str, Any]:
-        raw_len = int(self.headers.get("Content-Length") or "0")
+        try:
+            raw_len = int(self.headers.get("Content-Length") or "0")
+        except ValueError:
+            # 畸形 Content-Length 不应打穿 handler 栈打印 traceback；按空体处理。
+            raw_len = 0
         if raw_len <= 0:
+            return {}
+        if raw_len > 8 * 1024 * 1024:
             return {}
         data = self.rfile.read(raw_len)
         try:

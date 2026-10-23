@@ -586,6 +586,15 @@ export async function stopAndReplaceSystemAgentRun(
   return data;
 }
 
+/** 流空闲超时（90s 无任何字节）主动断开；后端心跳帧会把这种情形压到极罕见，
+ * 触发时按"核对状态"静默处理，不当成连接错误提示用户。 */
+export class IdleTimeoutError extends Error {
+  constructor() {
+    super("进度连接长时间无响应，正在核对任务状态。");
+    this.name = "IdleTimeoutError";
+  }
+}
+
 export async function streamSystemAgentRun(
   runId: string,
   afterSeq: number,
@@ -593,12 +602,30 @@ export async function streamSystemAgentRun(
   opts?: { signal?: AbortSignal },
 ): Promise<void> {
   const params = new URLSearchParams({ after_seq: String(Math.max(0, afterSeq)) });
-  const response = await apiFetch(`/api/system-agent/runs/${runId}/stream?${params}`, {
-    method: "GET",
-    headers: { Accept: "application/x-ndjson" },
-    signal: opts?.signal,
-  });
-  return consumeSystemAgentStream(response, onEvent);
+  // 只重建 GET 订阅，不取消后台任务，更不能重发创建 Run 的 POST。
+  const controller = new AbortController();
+  const abort = () => controller.abort(opts?.signal?.reason);
+  if (opts?.signal?.aborted) abort();
+  else opts?.signal?.addEventListener("abort", abort, { once: true });
+  let idleTimer: ReturnType<typeof setTimeout> | undefined;
+  const activity = () => {
+    clearTimeout(idleTimer);
+    idleTimer = setTimeout(() => {
+      controller.abort(new IdleTimeoutError());
+    }, 90_000);
+  };
+  activity();
+  try {
+    const response = await apiFetch(`/api/system-agent/runs/${runId}/stream?${params}`, {
+      method: "GET",
+      headers: { Accept: "application/x-ndjson" },
+      signal: controller.signal,
+    });
+    await consumeSystemAgentStream(response, onEvent, activity);
+  } finally {
+    clearTimeout(idleTimer);
+    opts?.signal?.removeEventListener("abort", abort);
+  }
 }
 
 function streamErrorMessage(value: unknown, fallback: string): string {
@@ -706,6 +733,7 @@ async function streamSystemAgentRequest(
 async function consumeSystemAgentStream(
   response: Response,
   onEvent: (event: SystemAgentStreamEvent) => void,
+  onActivity?: () => void,
 ): Promise<void> {
   if (!response.ok) {
     let payloadError: unknown;
@@ -721,7 +749,7 @@ async function consumeSystemAgentStream(
   const reader = response.body.getReader();
   const decoder = new NdjsonDecoder<SystemAgentStreamEvent>();
   let doneReceived = false;
-  let streamFinished = false;
+  let reachedEof = false;
   const consumeEvent = (event: SystemAgentStreamEvent) => {
     if (event.type === "done") doneReceived = true;
     onEvent(event);
@@ -729,14 +757,16 @@ async function consumeSystemAgentStream(
   try {
     while (true) {
       const { done, value } = await reader.read();
+      if (value?.byteLength) onActivity?.();
       decoder.push(value).forEach(consumeEvent);
-      if (done) break;
+      reachedEof = done;
+      // done 已是应用层终态，不能继续等代理或浏览器关闭连接。
+      if (done || doneReceived) break;
     }
-    decoder.finish().forEach(consumeEvent);
+    if (reachedEof) decoder.finish().forEach(consumeEvent);
     if (!doneReceived) throw new Error("流式响应提前结束，没有返回最终状态。");
-    streamFinished = true;
   } finally {
-    if (!streamFinished) await reader.cancel().catch(() => undefined);
+    if (!reachedEof) await reader.cancel().catch(() => undefined);
     reader.releaseLock();
   }
 }

@@ -17,9 +17,13 @@ from sqlalchemy import (
     UniqueConstraint,
     func,
 )
+from sqlalchemy.dialects import postgresql
 from sqlalchemy.orm import Mapped, mapped_column
 
 from ..base import Base
+
+# PG 生产库为 JSONB（与 0001 迁移终态一致）；SQLite（测试/本地）回落到通用 JSON
+JSONB_VARIANT = JSON().with_variant(postgresql.JSONB(), "postgresql")
 
 # RuntimeLog level
 LEVEL_DEBUG = "debug"
@@ -34,13 +38,16 @@ class AuditLog(Base):
     __tablename__ = "audit_log"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=True)
     user_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("web_user.id"), nullable=True
     )
-    action: Mapped[str] = mapped_column(String, nullable=False)
-    target: Mapped[str | None] = mapped_column(String, nullable=True)
-    detail: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    action: Mapped[str] = mapped_column(Text, nullable=False)
+    target: Mapped[str | None] = mapped_column(Text, nullable=True)
+    detail: Mapped[dict[str, Any] | None] = mapped_column(JSONB_VARIANT, nullable=True)
+
+    # 审计日志按时间倒序分页查询（/api/logs/audit 的 ts 过滤+排序）；审计数据不做自动删除
+    __table_args__ = (Index("ix_audit_log_ts", "ts"),)
 
 
 class RuntimeLog(Base):
@@ -52,11 +59,11 @@ class RuntimeLog(Base):
     account_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("account.id", ondelete="CASCADE"), nullable=True
     )
-    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    level: Mapped[str] = mapped_column(String, nullable=False)
-    source: Mapped[str | None] = mapped_column(String, nullable=True)
+    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=True)
+    level: Mapped[str] = mapped_column(Text, nullable=False)
+    source: Mapped[str | None] = mapped_column(Text, nullable=True)
     message: Mapped[str] = mapped_column(Text, nullable=False)
-    detail: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    detail: Mapped[dict[str, Any] | None] = mapped_column(JSONB_VARIANT, nullable=True)
 
     __table_args__ = (
         Index("ix_runtime_log_account_ts", "account_id", "ts"),

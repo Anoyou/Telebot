@@ -197,6 +197,8 @@ async def test_resolve_agent_providers_uses_fallback_allowlist() -> None:
 async def test_session_crud_and_ownership(agent_db) -> None:
     svc = SystemAgentService()
     async with agent_db() as db:
+        # account_id 前置校验要求账号存在：预置 account 3
+        await db.execute(text("INSERT INTO account (id) VALUES (3)"))
         s1 = await svc.create_session(db, channel=CHANNEL_WEB, web_user_id=1, title="t1")
         s2 = await svc.create_session(db, channel=CHANNEL_WEB, web_user_id=2, title="t2")
         bot = await svc.create_session(
@@ -1017,7 +1019,9 @@ async def test_retry_reference_reuses_latest_failed_goal_and_clears_anchor(agent
 
         rows = await svc.list_messages(db, session.id)
         users = [row for row in rows if row.role == MESSAGE_ROLE_USER]
-        assert runtime_goals == ["交互里有哪些规则？", "交互里有哪些规则？"]
+        assert runtime_goals[0] == "交互里有哪些规则？"
+        # 指代触发的重试不再丢弃用户当轮输入：旧失败目标 + 附加上下文一起进入模型
+        assert runtime_goals[1] == "交互里有哪些规则？\n用户补充：重试"
         assert len(users) == 1
         assert users[0].id == original_id
         assert users[0].retry_count == 1
@@ -1745,3 +1749,233 @@ async def test_run_events_and_tool_summaries_stay_placeholder(agent_db, monkeypa
     assert secret not in str(event)
     assert "[[TP-CRED-1]]" in str(event)
     assert captured["secret_map"] == {"[[TP-CRED-1]]": secret}
+
+
+# ─────────── account_id 前置校验：404 而非 FK 500 ───────────
+
+
+@pytest.mark.asyncio
+async def test_create_session_rejects_missing_account(agent_db) -> None:
+    """绑定的 account_id 不存在时前置抛 LookupError，不落到 FK IntegrityError。"""
+
+    svc = SystemAgentService()
+    async with agent_db() as db:
+        await db.execute(text("INSERT INTO account (id) VALUES (7)"))
+        with pytest.raises(LookupError, match="不存在"):
+            await svc.create_session(
+                db,
+                channel=CHANNEL_BOT,
+                bot_tg_user_id=99,
+                account_id=8,
+            )
+        ok = await svc.create_session(
+            db,
+            channel=CHANNEL_BOT,
+            bot_tg_user_id=99,
+            account_id=7,
+        )
+        assert ok.account_id == 7
+
+
+@pytest.mark.asyncio
+async def test_update_session_rejects_missing_account(agent_db) -> None:
+    svc = SystemAgentService()
+    async with agent_db() as db:
+        session = await svc.create_session(db, channel=CHANNEL_WEB, web_user_id=1)
+        with pytest.raises(LookupError, match="不存在"):
+            await svc.update_session(db, session, account_id=404)
+        # 解绑（None）不受校验影响
+        await svc.update_session(db, session, account_id=None)
+        assert session.account_id is None
+
+
+# ─────────── 指代触发的失败重试：用户当轮原文不能被静默丢弃 ───────────
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("retry_word", ["继续", "重试", "再来一次"])
+async def test_retry_reference_carries_user_supplement(
+    agent_db,
+    monkeypatch,
+    retry_word: str,
+) -> None:
+    """指代词触发失败重试：重试发生，且当轮原文作为附加上下文并入请求文本。"""
+
+    svc = SystemAgentService()
+    captured: dict[str, Any] = {}
+
+    async def failing_stream(*_args, **kwargs):
+        captured["first_user_text"] = kwargs.get("user_text")
+        yield {"type": "error", "code": "UPSTREAM_FAILED", "message": "上游失败"}
+        yield {"type": "done", "ok": False}
+
+    async def ok_stream(*_args, **kwargs):
+        captured["retry_user_text"] = kwargs.get("user_text")
+        yield {"type": "assistant_message", "content": "完成", "usage": {}}
+        yield {"type": "done", "ok": True}
+
+    async with agent_db() as db:
+        session = await svc.create_session(db, channel=CHANNEL_WEB, web_user_id=1)
+        monkeypatch.setattr(svc.runtime, "stream_turn", failing_stream)
+        async for _event in svc.stream_message(
+            db,
+            session=session,
+            text="整理账目并汇总",
+            role="admin",
+            channel=CHANNEL_WEB,
+            web_user_id=1,
+        ):
+            pass
+
+        users = [
+            m for m in await svc.list_messages(db, session.id) if m.role == MESSAGE_ROLE_USER
+        ]
+        assert len(users) == 1
+        failed = users[0]
+        assert failed.run_status == MESSAGE_RUN_FAILED
+
+        monkeypatch.setattr(svc.runtime, "stream_turn", ok_stream)
+        async for _event in svc.stream_message(
+            db,
+            session=session,
+            text=retry_word,
+            role="admin",
+            channel=CHANNEL_WEB,
+            web_user_id=1,
+        ):
+            pass
+
+        users_after = [
+            m for m in await svc.list_messages(db, session.id) if m.role == MESSAGE_ROLE_USER
+        ]
+        # 重试复用原失败消息：没有新增用户消息，retry_count 递增
+        assert [m.id for m in users_after] == [failed.id]
+        assert users_after[0].retry_count == 1
+        # 旧失败目标仍是重试目标，用户当轮原文作为附加上下文带入
+        assert "整理账目并汇总" in str(captured["retry_user_text"])
+        assert f"用户补充：{retry_word}" in str(captured["retry_user_text"])
+        assert users_after[0].run_status == MESSAGE_RUN_SUCCEEDED
+
+
+@pytest.mark.asyncio
+async def test_continue_without_failed_anchor_is_normal_message(
+    agent_db,
+    monkeypatch,
+) -> None:
+    """无失败锚点时「继续」就是普通消息：新建用户消息、不触发重试。"""
+
+    svc = SystemAgentService()
+    captured: dict[str, Any] = {}
+
+    async def ok_stream(*_args, **kwargs):
+        captured["user_text"] = kwargs.get("user_text")
+        yield {"type": "assistant_message", "content": "好的", "usage": {}}
+        yield {"type": "done", "ok": True}
+
+    monkeypatch.setattr(svc.runtime, "stream_turn", ok_stream)
+    async with agent_db() as db:
+        session = await svc.create_session(db, channel=CHANNEL_WEB, web_user_id=1)
+        async for _event in svc.stream_message(
+            db,
+            session=session,
+            text="继续",
+            role="admin",
+            channel=CHANNEL_WEB,
+            web_user_id=1,
+        ):
+            pass
+
+        users = [
+            m for m in await svc.list_messages(db, session.id) if m.role == MESSAGE_ROLE_USER
+        ]
+        assert len(users) == 1
+        assert users[0].retry_count == 0
+        assert users[0].run_status == MESSAGE_RUN_SUCCEEDED
+        assert captured["user_text"] == "继续"
+
+
+# ─────────── 摘要压缩乐观锁：rev 被并发推进时不覆盖 ───────────
+
+
+@pytest.mark.asyncio
+async def test_compress_summary_aborts_when_rev_advanced_before_write(
+    agent_db,
+    monkeypatch,
+) -> None:
+    """写回前 rev 已被并发推进：放弃覆盖且不抛异常；rev 一致时正常写回。"""
+
+    from types import SimpleNamespace
+
+    from app.services.system_agent import memory_compress
+
+    async def fake_config(_db):
+        return {"enabled": True, "provider_id": 7}
+
+    async def fake_resolve(_db, _cfg):
+        return SimpleNamespace(primary=object(), model="m", providers={})
+
+    async def fake_invoke(*_args, **_kwargs):
+        return (SimpleNamespace(text="压缩后的状态式摘要"), None, None)
+
+    monkeypatch.setattr(memory_compress, "load_config", fake_config)
+    monkeypatch.setattr(memory_compress, "resolve_agent_providers", fake_resolve)
+    monkeypatch.setattr(memory_compress, "invoke_structured", fake_invoke)
+
+    svc = SystemAgentService()
+    async with agent_db() as db:
+        session = await svc.create_session(db, channel=CHANNEL_WEB, web_user_id=1)
+        session.memory_state = {"summary_rev": 1}
+        # 超过 MEMORY_COMPRESS_THRESHOLD_CHARS(2000) 才会进入压缩分支
+        session.memory_summary = "用户目标：整理账目。" * 250
+        await db.commit()
+        original_summary = session.memory_summary
+
+        class _SessionCtx:
+            async def __aenter__(self_inner):
+                return db
+
+            async def __aexit__(self_inner, *_exc) -> bool:
+                return False
+
+        monkeypatch.setattr(memory_compress, "AsyncSessionLocal", lambda: _SessionCtx())
+
+        # 复检读到新 rev：放弃压缩，不覆盖、不抛异常
+        async def advanced_row(_db, _session_id):
+            return SimpleNamespace(memory_state={"summary_rev": 2})
+
+        monkeypatch.setattr(memory_compress, "_load_session_for_update", advanced_row)
+        await memory_compress._compress_session_summary(session.id, expected_rev=1)
+        assert session.memory_summary == original_summary
+
+        # rev 一致：正常写回压缩结果
+        async def matching_row(_db, _session_id):
+            return session
+
+        monkeypatch.setattr(memory_compress, "_load_session_for_update", matching_row)
+        await memory_compress._compress_session_summary(session.id, expected_rev=1)
+        assert session.memory_summary == "压缩后的状态式摘要"
+
+
+@pytest.mark.asyncio
+async def test_schedule_summary_compression_keeps_strong_reference(monkeypatch) -> None:
+    """后台压缩任务必须登记到模块级集合并随完成移除（事件循环只持弱引用）。"""
+
+    from app.services.system_agent import memory_compress
+
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def fake_compress(_session_id, *, expected_rev):
+        started.set()
+        await release.wait()
+
+    monkeypatch.setattr(memory_compress, "_compress_session_summary", fake_compress)
+
+    memory_compress.schedule_summary_compression("sess-1", summary_rev=3)
+    await started.wait()
+    # 任务存活期间已登记（持强引用，不会被 GC）
+    assert len(memory_compress._COMPRESS_TASKS) == 1
+    release.set()
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+    assert memory_compress._COMPRESS_TASKS == set()  # done_callback 已移除

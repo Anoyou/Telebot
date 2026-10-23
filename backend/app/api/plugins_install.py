@@ -9,7 +9,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 
@@ -114,8 +114,13 @@ def _map_install_error(exc: pis.PluginInstallError) -> HTTPException:
         "PLUGIN_NOT_FOUND": 404,
         # settings.plugin_zip_max_bytes 约定的语义就是 413。
         "ZIP_TOO_LARGE": 413,
+        "SIGNATURE_TOO_LARGE": 413,
     }
     return _bad(exc.code, exc.message, status_map.get(exc.code, 400))
+
+
+# 签名是几十到几百字节的二进制；64 KiB 已远超合理范围，用于拦截误传的大文件。
+_SIGNATURE_MAX_BYTES = 64 * 1024
 
 
 async def _read_zip_upload_bounded(file: UploadFile) -> bytes:
@@ -149,7 +154,22 @@ async def _read_signature(
     signature: str | None,
 ) -> bytes | None:
     if signature_file is not None:
-        data = await signature_file.read()
+        # 签名远小于 zip 上限，与 zip 一致按上限截断，避免一次性 read 拉满内存。
+        max_bytes = _SIGNATURE_MAX_BYTES
+        chunks: list[bytes] = []
+        total = 0
+        while True:
+            chunk = await signature_file.read(min(64 * 1024, max_bytes))
+            if not chunk:
+                break
+            total += len(chunk)
+            if total > max_bytes:
+                raise pis.PluginInstallError(
+                    "SIGNATURE_TOO_LARGE",
+                    f"签名文件超出 {max_bytes // 1024} KiB 上限",
+                )
+            chunks.append(chunk)
+        data = b"".join(chunks)
         return data or None
     raw = (signature or "").strip()
     if not raw:
@@ -248,7 +268,10 @@ async def upload_plugin_package(
         zip_bytes = await _read_zip_upload_bounded(file)
     except pis.PluginInstallError as exc:
         raise _map_install_error(exc) from exc
-    sig_bytes = await _read_signature(signature_file, signature)
+    try:
+        sig_bytes = await _read_signature(signature_file, signature)
+    except pis.PluginInstallError as exc:
+        raise _map_install_error(exc) from exc
     try:
         row = await pis.install_zip(
             db,
@@ -376,15 +399,14 @@ async def get_installed_plugin_history(
     key: str,
     db: DBSession,
     _user: CurrentUser,
-    limit: int = 50,
+    limit: int = Query(50, ge=1, le=200),
 ) -> list[PluginInstallHistoryOut]:
-    safe_limit = max(1, min(int(limit), 200))
     rows = (
         await db.execute(
             select(PluginInstallHistory)
             .where(PluginInstallHistory.plugin_key == key)
             .order_by(PluginInstallHistory.created_at.desc(), PluginInstallHistory.id.desc())
-            .limit(safe_limit)
+            .limit(limit)
         )
     ).scalars().all()
     return [PluginInstallHistoryOut.model_validate(row) for row in rows]

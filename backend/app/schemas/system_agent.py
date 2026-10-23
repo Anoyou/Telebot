@@ -161,6 +161,8 @@ class SystemAgentMessageCreate(BaseModel):
     account_id: int | None = None
     model_selection: SystemAgentModelSelection | None = None
     attachments: list[SystemAgentImageAttachment] = Field(default_factory=list, max_length=4)
+    # 流式建 run 的客户端幂等键：网络重试/双击时避免重复创建 run；缺省由服务端生成
+    client_request_id: str | None = Field(default=None, min_length=8, max_length=64)
 
 class SystemAgentMessageRetry(BaseModel):
     account_id: int | None = None
@@ -168,6 +170,8 @@ class SystemAgentMessageRetry(BaseModel):
     approved_tools: list[str] = Field(default_factory=list, max_length=64)
     # 缺省：重试保留原始请求 selection（由调用方传入）；未传则 auto
     model_selection: SystemAgentModelSelection | None = None
+    # 流式重试建 run 的客户端幂等键：语义同 SystemAgentMessageCreate.client_request_id
+    client_request_id: str | None = Field(default=None, min_length=8, max_length=64)
 
 
 class SystemAgentRunCreate(SystemAgentMessageCreate):

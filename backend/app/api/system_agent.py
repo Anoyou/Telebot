@@ -105,6 +105,26 @@ def _err(code: str, message: str, status: int = 400) -> HTTPException:
     return HTTPException(status_code=status, detail={"code": code, "message": message})
 
 
+def _account_not_found(exc: BaseException) -> HTTPException:
+    return _err("ACCOUNT_NOT_FOUND", "账号不存在", 404)
+
+
+async def _apply_session_account_context(
+    svc: Any,
+    db: DBSession,
+    session: SystemAgentSession,
+    account_id: int | None,
+) -> None:
+    """可选更新会话账号上下文；账号不存在时返回 404 结构化错误而非 FK 500。"""
+
+    if account_id is None or session.account_id == account_id:
+        return
+    try:
+        await svc.update_session(db, session, account_id=account_id)
+    except LookupError as exc:
+        raise _account_not_found(exc) from exc
+
+
 def _session_out(row: Any) -> SystemAgentSessionOut:
     return SystemAgentSessionOut.model_validate(row)
 
@@ -301,13 +321,17 @@ async def create_session(
     user: CurrentUser,
 ) -> SystemAgentSessionOut:
     svc = get_system_agent_service()
-    session = await svc.create_session(
-        db,
-        channel=CHANNEL_WEB,
-        web_user_id=user.id,
-        account_id=payload.account_id,
-        title=payload.title,
-    )
+    try:
+        session = await svc.create_session(
+            db,
+            channel=CHANNEL_WEB,
+            web_user_id=user.id,
+            account_id=payload.account_id,
+            title=payload.title,
+        )
+    except LookupError as exc:
+        # account_id 前置校验失败：404 结构化错误，而不是 FK IntegrityError 500
+        raise _account_not_found(exc) from exc
     await db.commit()
     await db.refresh(session)
     return _session_out(session)
@@ -371,6 +395,8 @@ async def update_session(
             status=payload.status,
             account_id=payload.account_id if "account_id" in payload.model_fields_set else ...,
         )
+    except LookupError as exc:
+        raise _account_not_found(exc) from exc
     except ValueError as exc:
         raise _err("INVALID_SESSION", str(exc)) from None
     await db.commit()
@@ -451,14 +477,15 @@ async def stream_message(
 
     # 可选更新账号上下文
     if payload.account_id is not None and session.account_id != payload.account_id:
-        await svc.update_session(db, session, account_id=payload.account_id)
+        await _apply_session_account_context(svc, db, session, payload.account_id)
 
     await db.commit()
     try:
         run = await get_system_agent_run_manager().start_run(
             session_id=session_id,
             web_user_id=user.id,
-            client_request_id=str(uuid.uuid4()),
+            # 优先使用客户端幂等键：网络重试/双击时复用同一 run，避免重复烧 LLM token
+            client_request_id=payload.client_request_id or str(uuid.uuid4()),
             text=content,
             attachments=[item.model_dump(exclude_none=True) for item in payload.attachments],
             model_selection=(
@@ -488,14 +515,15 @@ async def retry_message(
     if message.run_status != MESSAGE_RUN_FAILED:
         raise _err("MESSAGE_NOT_RETRYABLE", "只有失败消息可以重试", 409)
     if payload.account_id is not None and session.account_id != payload.account_id:
-        await svc.update_session(db, session, account_id=payload.account_id)
+        await _apply_session_account_context(svc, db, session, payload.account_id)
 
     await db.commit()
     try:
         run = await get_system_agent_run_manager().start_run(
             session_id=session_id,
             web_user_id=user.id,
-            client_request_id=str(uuid.uuid4()),
+            # 优先使用客户端幂等键：语义同流式发消息端点
+            client_request_id=payload.client_request_id or str(uuid.uuid4()),
             text="",
             retry_message_id=message.id,
             fallback_provider_id=payload.fallback_provider_id,
@@ -691,7 +719,7 @@ async def start_system_agent_run(
     if not content and not payload.attachments:
         raise _err("EMPTY_MESSAGE", "消息不能为空", 422)
     if payload.account_id is not None and session.account_id != payload.account_id:
-        await svc.update_session(db, session, account_id=payload.account_id)
+        await _apply_session_account_context(svc, db, session, payload.account_id)
     await db.commit()
     try:
         row = await get_system_agent_run_manager().start_run(
@@ -731,7 +759,7 @@ async def start_system_agent_retry_run(
     if message.run_status != MESSAGE_RUN_FAILED:
         raise _err("MESSAGE_NOT_RETRYABLE", "只有失败消息可以重试", 409)
     if payload.account_id is not None and session.account_id != payload.account_id:
-        await svc.update_session(db, session, account_id=payload.account_id)
+        await _apply_session_account_context(svc, db, session, payload.account_id)
     await db.commit()
     try:
         row = await get_system_agent_run_manager().start_run(

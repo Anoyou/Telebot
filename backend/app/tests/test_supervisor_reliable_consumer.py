@@ -392,6 +392,9 @@ async def test_run_retention_cleanup_still_cleans_traces_when_runtime_log_retent
             "trace_retention_days": 30,
             "trace_payload_snapshot_retention_days": 7,
             "native_raw_retention_days": 1,
+            # 新增的两张流水表保留清理也关掉，聚焦验证 runtime 关闭不影响 trace 清理
+            "llm_usage_retention_days": 0,
+            "rate_limit_event_retention_days": 0,
         }
 
     async def _fake_cleanup_event_traces(**kwargs):
@@ -446,6 +449,8 @@ async def test_run_retention_cleanup_deletes_runtime_logs_when_enabled(
             "trace_retention_days": 30,
             "trace_payload_snapshot_retention_days": 7,
             "native_raw_retention_days": 1,
+            "llm_usage_retention_days": 0,
+            "rate_limit_event_retention_days": 0,
         }
 
     async def _fake_cleanup_event_traces(**_kwargs):
@@ -461,3 +466,116 @@ async def test_run_retention_cleanup_deletes_runtime_logs_when_enabled(
 
     stats = await supervisor._run_retention_cleanup_once()
     assert stats["deleted_runtime_logs"] == 5
+
+
+@pytest.mark.asyncio
+async def test_run_retention_cleanup_deletes_llm_usage_and_rate_limit_events(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """llm_usage / rate_limit_event 保留天数开启时按各自时间列清理。"""
+
+    class _Result:
+        def __init__(self, rowcount: int) -> None:
+            self.rowcount = rowcount
+
+    class _Session:
+        def __init__(self) -> None:
+            self.statements: list[object] = []
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+        async def execute(self, stmt, *_args, **_kwargs):
+            self.statements.append(stmt)
+            return _Result(4)
+
+        async def commit(self):
+            return None
+
+    session = _Session()
+
+    async def _fake_cfg():
+        return {
+            "runtime_log_retention_days": 0,
+            "trace_retention_days": 0,
+            "trace_payload_snapshot_retention_days": 0,
+            "native_raw_retention_days": 0,
+            "llm_usage_retention_days": 14,
+            "rate_limit_event_retention_days": 7,
+        }
+
+    async def _fake_cleanup_event_traces(**_kwargs):
+        return {
+            "deleted_traces": 0,
+            "cleared_payload_snapshots": 0,
+            "cleared_native_raw": 0,
+        }
+
+    monkeypatch.setattr(supervisor, "_get_log_retention_config", _fake_cfg)
+    monkeypatch.setattr(supervisor, "AsyncSessionLocal", lambda: session)
+    monkeypatch.setattr(supervisor, "cleanup_event_traces", _fake_cleanup_event_traces)
+
+    stats = await supervisor._run_retention_cleanup_once()
+
+    assert stats["deleted_llm_usage_rows"] == 4
+    assert stats["deleted_rate_limit_events"] == 4
+    assert stats["deleted_runtime_logs"] == 0
+    # 只清理两张新表：llm_usage 按 created_at，rate_limit_event 按 ts
+    sqls = [str(stmt) for stmt in session.statements]
+    assert len(sqls) == 2
+    assert any("llm_usage" in sql and "created_at" in sql for sql in sqls)
+    assert any("rate_limit_event" in sql for sql in sqls)
+
+
+@pytest.mark.asyncio
+async def test_run_retention_cleanup_skips_usage_tables_when_disabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """llm_usage / rate_limit_event 保留天数为 0 时完全不碰这两张表。"""
+
+    class _Session:
+        def __init__(self) -> None:
+            self.execute_called = False
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+        async def execute(self, *_args, **_kwargs):
+            self.execute_called = True
+            raise AssertionError("保留清理已关闭，不应执行任何删除")
+
+        async def commit(self):
+            return None
+
+    async def _fake_cfg():
+        return {
+            "runtime_log_retention_days": 0,
+            "trace_retention_days": 0,
+            "trace_payload_snapshot_retention_days": 0,
+            "native_raw_retention_days": 0,
+            "llm_usage_retention_days": 0,
+            "rate_limit_event_retention_days": 0,
+        }
+
+    async def _fake_cleanup_event_traces(**_kwargs):
+        return {
+            "deleted_traces": 0,
+            "cleared_payload_snapshots": 0,
+            "cleared_native_raw": 0,
+        }
+
+    monkeypatch.setattr(supervisor, "_get_log_retention_config", _fake_cfg)
+    monkeypatch.setattr(supervisor, "AsyncSessionLocal", lambda: _Session())
+    monkeypatch.setattr(supervisor, "cleanup_event_traces", _fake_cleanup_event_traces)
+
+    stats = await supervisor._run_retention_cleanup_once()
+
+    assert stats["deleted_llm_usage_rows"] == 0
+    assert stats["deleted_rate_limit_events"] == 0
+    assert stats["deleted_runtime_logs"] == 0

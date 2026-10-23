@@ -7231,6 +7231,53 @@ async def test_interaction_polling_batch_keeps_same_chat_order_and_parallelizes_
 
 
 @pytest.mark.asyncio
+async def test_management_polling_batch_keeps_same_chat_order_and_parallelizes_other_chats(
+    monkeypatch,
+) -> None:
+    # 管理 Bot 批处理按 chat 分桶：慢 Agent 查询挂起 chat A 时，
+    # chat B 的命令仍被处理，同 chat 的下一条 update 保持顺序
+    events: list[tuple[str, int, int]] = []
+    release_first_chat = asyncio.Event()
+
+    async def _fake_handle_update(_aid: int, _token: str, update: dict[str, object]) -> None:
+        message = update["message"]
+        chat_id = int(message["chat"]["id"])
+        update_id = int(update["update_id"])
+        events.append(("start", chat_id, update_id))
+        if chat_id == 111 and update_id == 1:
+            await release_first_chat.wait()
+        events.append(("end", chat_id, update_id))
+
+    monkeypatch.setattr(account_bot_runtime, "_handle_update", _fake_handle_update)
+
+    task = asyncio.create_task(
+        account_bot_runtime._handle_management_polling_updates_batch(
+            aid=1,
+            token="management-token",
+            updates=[
+                {"update_id": 1, "message": {"message_id": 1, "text": "帮我总结一下", "from": {"id": 1}, "chat": {"id": 111}}},
+                {"update_id": 2, "message": {"message_id": 2, "text": "/agent stop", "from": {"id": 1}, "chat": {"id": 111}}},
+                {"update_id": 3, "message": {"message_id": 3, "text": "/status", "from": {"id": 2}, "chat": {"id": 222}}},
+            ],
+        )
+    )
+    for _ in range(20):
+        if ("start", 222, 3) in events:
+            break
+        await asyncio.sleep(0)
+
+    assert ("start", 222, 3) in events
+    assert ("start", 111, 2) not in events
+    release_first_chat.set()
+
+    last_update_id, batch_error = await task
+
+    assert last_update_id == 3
+    assert batch_error is None
+    assert events.index(("end", 111, 1)) < events.index(("start", 111, 2))
+
+
+@pytest.mark.asyncio
 async def test_interaction_polling_batch_limits_global_concurrency() -> None:
     active = 0
     max_active = 0
@@ -18029,3 +18076,269 @@ async def test_bot_chat_membership_inspection_marks_left_bot_as_not_joined(monke
 
     assert statuses == [{"chat_id": -1009002, "status": "not_joined", "detail": "left"}]
     assert account_bot_service.bot_chat_is_known_unavailable(token, -1009002) is True
+
+
+@pytest.mark.asyncio
+async def test_account_bot_polling_dlq_limit_is_bounded() -> None:
+    """polling-dlq 列表的 limit 必须有 1..200 上限：超限/非法值 → 422。"""
+    from types import SimpleNamespace
+
+    from fastapi import FastAPI
+    from httpx import ASGITransport, AsyncClient
+
+    import app.deps as deps
+    from app.api import account_bots as account_bots_api
+
+    app = FastAPI()
+    app.include_router(account_bots_api.router)
+    app.dependency_overrides[deps.get_db] = lambda: object()
+    app.dependency_overrides[deps.get_current_user] = lambda: SimpleNamespace(id=1)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        assert (
+            await client.get("/api/accounts/1/bot/polling-dlq", params={"limit": 201})
+        ).status_code == 422
+        assert (
+            await client.get("/api/accounts/1/bot/polling-dlq", params={"limit": 0})
+        ).status_code == 422
+
+
+# ─────────── 管理 Bot 轮询配置缓存：不再每周期整行查库 + 解密 token ───────────
+
+
+def test_management_polling_config_cache_ttl_and_invalidate() -> None:
+    """缓存 TTL 内命中；过期或 invalidate 后返回 None 并清理条目。"""
+
+    import time as _time
+
+    account_bot_runtime._MANAGEMENT_POLLING_CONFIG_CACHE.clear()
+    try:
+        account_bot_runtime._remember_management_polling_token(9, "tok-1")
+        assert account_bot_runtime._cached_management_polling_token(9) == "tok-1"
+        assert account_bot_runtime._cached_management_polling_token(8) is None
+
+        # 手动把时间戳拨到 TTL 之外，模拟过期
+        stale_at = (
+            _time.monotonic()
+            - account_bot_runtime._MANAGEMENT_POLLING_CONFIG_TTL_SECONDS
+            - 0.1
+        )
+        account_bot_runtime._MANAGEMENT_POLLING_CONFIG_CACHE[9] = (stale_at, "tok-1")
+        assert account_bot_runtime._cached_management_polling_token(9) is None
+        assert 9 not in account_bot_runtime._MANAGEMENT_POLLING_CONFIG_CACHE
+
+        # invalidate 后立即未命中
+        account_bot_runtime._remember_management_polling_token(9, "tok-2")
+        account_bot_runtime._invalidate_management_polling_config_cache(9)
+        assert account_bot_runtime._cached_management_polling_token(9) is None
+    finally:
+        account_bot_runtime._MANAGEMENT_POLLING_CONFIG_CACHE.clear()
+
+
+@pytest.mark.asyncio
+async def test_polling_loop_cache_hit_skips_db_and_reuses_local_cursor(monkeypatch) -> None:
+    """缓存命中周期不查库；游标用局部变量推进，不再每轮重读整行。"""
+
+    calls: list[str] = []
+
+    def _fail_session_factory():
+        calls.append("db")
+        raise AssertionError("缓存命中周期不应访问数据库")
+
+    monkeypatch.setattr(account_bot_runtime, "AsyncSessionLocal", _fail_session_factory)
+
+    async def fake_flags():
+        return {}
+
+    monkeypatch.setattr(account_bot_runtime, "_event_framework_flags", fake_flags)
+
+    api_calls: list[dict[str, Any]] = []
+
+    async def fake_call_bot_api(_token, method, payload, *args, **kwargs):
+        api_calls.append({"method": method, **payload})
+        if len(api_calls) >= 2:
+            raise asyncio.CancelledError
+        return {"result": []}
+
+    monkeypatch.setattr(account_bot_service, "call_bot_api", fake_call_bot_api)
+
+    async def noop_state(*_args, **_kwargs):
+        return
+
+    monkeypatch.setattr(
+        account_bot_runtime, "_set_account_bot_runtime_state_best_effort", noop_state
+    )
+
+    account_bot_runtime._MANAGEMENT_POLLING_CONFIG_CACHE.clear()
+    account_bot_runtime._remember_management_polling_token(9, "tok-1")
+    try:
+        with pytest.raises(asyncio.CancelledError):
+            await account_bot_runtime._polling_loop(9)
+    finally:
+        account_bot_runtime._MANAGEMENT_POLLING_CONFIG_CACHE.clear()
+
+    # 两个 getUpdates 周期均未查库；游标为缓存写入时的初值（无 DB 游标 → None）
+    assert calls == []
+    assert len(api_calls) == 2
+    assert api_calls[0]["method"] == "getUpdates"
+    assert api_calls[0]["offset"] is None
+    assert api_calls[1]["offset"] is None
+
+
+@pytest.mark.asyncio
+async def test_cancelled_old_task_skips_stopped_write_when_slot_taken_over(monkeypatch) -> None:
+    """restart 交错：旧任务取消时槽位已被新任务接管 → 不回写 STOPPED。
+
+    复现 restart_account_bot 的真实顺序：新任务先登记进 _TASKS，旧任务
+    的 CancelledError 处理器后执行。修复前旧任务会写 STOPPED(only_if_
+    enabled=True)，把新任务刚写的 RUNNING 覆盖掉，状态页短暂回退。
+    """
+
+    statuses: list[str] = []
+
+    async def fake_state(aid, *, status, error=None, only_if_enabled=False) -> None:
+        statuses.append(status)
+
+    async def fake_call_bot_api(_token, method, payload, *args, **kwargs):
+        raise asyncio.CancelledError
+
+    async def fake_flags():
+        return {}
+
+    monkeypatch.setattr(
+        account_bot_runtime, "_set_account_bot_runtime_state_best_effort", fake_state
+    )
+    monkeypatch.setattr(account_bot_service, "call_bot_api", fake_call_bot_api)
+    monkeypatch.setattr(account_bot_runtime, "_event_framework_flags", fake_flags)
+    # token 走缓存，跳过配置查库，隔离出纯取消路径
+    account_bot_runtime._MANAGEMENT_POLLING_CONFIG_CACHE.clear()
+    account_bot_runtime._remember_management_polling_token(51, "tok-old")
+
+    old_task = asyncio.create_task(account_bot_runtime._polling_loop(51))
+    # 模拟新任务先接管槽位（restart_account_bot 在锁内先登记新任务）
+    async def _new_loop() -> None:
+        await asyncio.sleep(3600)
+
+    new_task = asyncio.create_task(_new_loop())
+    account_bot_runtime._TASKS[51] = new_task
+    try:
+        with pytest.raises(asyncio.CancelledError):
+            await old_task
+        # 交接场景：旧任务不得写 STOPPED（新任务的 RUNNING 是终态）
+        assert account_bot_runtime.ACCOUNT_BOT_STATUS_STOPPED not in statuses
+    finally:
+        account_bot_runtime._TASKS.pop(51, None)
+        account_bot_runtime._MANAGEMENT_POLLING_CONFIG_CACHE.clear()
+        new_task.cancel()
+        await asyncio.gather(new_task, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+async def test_cancelled_task_still_writes_stopped_without_takeover(monkeypatch) -> None:
+    """无接管（真正停机）时保留原行为：取消仍回写 STOPPED。"""
+
+    statuses: list[str] = []
+
+    async def fake_state(aid, *, status, error=None, only_if_enabled=False) -> None:
+        statuses.append(status)
+
+    async def fake_call_bot_api(_token, method, payload, *args, **kwargs):
+        raise asyncio.CancelledError
+
+    async def fake_flags():
+        return {}
+
+    monkeypatch.setattr(
+        account_bot_runtime, "_set_account_bot_runtime_state_best_effort", fake_state
+    )
+    monkeypatch.setattr(account_bot_service, "call_bot_api", fake_call_bot_api)
+    monkeypatch.setattr(account_bot_runtime, "_event_framework_flags", fake_flags)
+    account_bot_runtime._MANAGEMENT_POLLING_CONFIG_CACHE.clear()
+    account_bot_runtime._remember_management_polling_token(52, "tok-stop")
+    try:
+        with pytest.raises(asyncio.CancelledError):
+            await account_bot_runtime._polling_loop(52)
+        assert statuses == [account_bot_runtime.ACCOUNT_BOT_STATUS_STOPPED]
+    finally:
+        account_bot_runtime._MANAGEMENT_POLLING_CONFIG_CACHE.clear()
+
+
+@pytest.mark.asyncio
+async def test_restart_account_bot_does_no_db_io_while_holding_task_lock(monkeypatch) -> None:
+    """持 _TASK_LOCK 期间不得出现 DB 调用：AsyncSessionLocal 被触达即失败。
+
+    修复前 restart_account_bot 在锁内做配置 select + commit，连接池耗尽时
+    所有账号的 Bot 重启会在锁上串行卡住。
+    """
+
+    class _InstrumentedLock(asyncio.Lock):
+        def __init__(self) -> None:
+            super().__init__()
+            self.held = False
+
+        async def __aenter__(self) -> None:
+            await super().__aenter__()
+            self.held = True
+
+        async def __aexit__(self, exc_type, exc, tb) -> None:
+            self.held = False
+            await super().__aexit__(exc_type, exc, tb)
+
+    lock = _InstrumentedLock()
+
+    class _Row:
+        enabled = True
+        bot_token_enc = "enc-token"
+
+    class _Result:
+        @staticmethod
+        def scalar_one_or_none():
+            return _Row()
+
+    class _DB:
+        async def __aenter__(self):
+            assert not lock.held, "持 _TASK_LOCK 期间不得访问数据库"
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+        async def execute(self, _query):
+            assert not lock.held, "持 _TASK_LOCK 期间不得访问数据库"
+            return _Result()
+
+        async def commit(self):
+            assert not lock.held, "持 _TASK_LOCK 期间不得访问数据库"
+            return None
+
+    db_reads = 0
+
+    def _session_factory():
+        nonlocal db_reads
+        assert not lock.held, "持 _TASK_LOCK 期间不得访问数据库"
+        db_reads += 1
+        return _DB()
+
+    started: list[int] = []
+
+    async def fake_polling_loop(aid: int) -> None:
+        started.append(aid)
+
+    monkeypatch.setattr(account_bot_runtime, "_TASK_LOCK", lock)
+    monkeypatch.setattr(account_bot_runtime, "AsyncSessionLocal", _session_factory)
+    monkeypatch.setattr(account_bot_runtime, "_polling_loop", fake_polling_loop)
+
+    try:
+        await account_bot_runtime.restart_account_bot(61)
+        # 配置在锁外读取；enabled+token 齐备 → 新任务在锁内登记并启动
+        assert db_reads == 1
+        assert 61 in account_bot_runtime._TASKS
+        task = account_bot_runtime._TASKS[61]
+        await asyncio.sleep(0)
+        assert started == [61]
+        assert task.done() is True
+    finally:
+        leftover = account_bot_runtime._TASKS.pop(61, None)
+        if leftover is not None and not leftover.done():
+            leftover.cancel()
+            await asyncio.gather(leftover, return_exceptions=True)

@@ -12,6 +12,7 @@ from sqlalchemy import (
     Date,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     LargeBinary,
     SmallInteger,
@@ -35,12 +36,12 @@ class Proxy(Base):
     __tablename__ = "proxy"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    type: Mapped[str] = mapped_column(String, nullable=False)
-    host: Mapped[str] = mapped_column(String, nullable=False)
+    type: Mapped[str] = mapped_column(Text, nullable=False)
+    host: Mapped[str] = mapped_column(Text, nullable=False)
     port: Mapped[int] = mapped_column(Integer, nullable=False)
-    username: Mapped[str | None] = mapped_column(String, nullable=True)
+    username: Mapped[str | None] = mapped_column(Text, nullable=True)
     # password 须用 master_key 加密
-    password_enc: Mapped[str | None] = mapped_column(String, nullable=True)
+    password_enc: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 class DeviceProfile(Base):
@@ -86,18 +87,20 @@ class Account(Base):
     __tablename__ = "account"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    phone: Mapped[str] = mapped_column(String, nullable=False)
-    display_name: Mapped[str | None] = mapped_column(String, nullable=True)
+    # phone / tg_user_id 暂无唯一约束（存量可能已有重复行，唯一化需先清数据）；
+    # 这里只建普通查询索引，新建账号的查重由 login_service 应用层守卫兜底（见 0061 迁移）。
+    phone: Mapped[str] = mapped_column(Text, nullable=False, index=True)
+    display_name: Mapped[str | None] = mapped_column(Text, nullable=True)
     # 来自 Telethon ``client.get_me()``：用户数字 ID 与 @username（不含 @）
     # 登录成功 / worker 启动连上 TG 时回填；旧账号在迁移后为空，重新登录后填上
-    tg_user_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    tg_user_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, index=True)
     tg_username: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     # api_id / api_hash 全部加密落盘
-    api_id_enc: Mapped[str] = mapped_column(String, nullable=False)
-    api_hash_enc: Mapped[str] = mapped_column(String, nullable=False)
+    api_id_enc: Mapped[str] = mapped_column(Text, nullable=False)
+    api_hash_enc: Mapped[str] = mapped_column(Text, nullable=False)
     # session 是 Telethon ``StringSession.save()`` 序列化后的字符串再编码为 bytes 后用主密钥加密
     session_enc: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
-    status: Mapped[str] = mapped_column(String, nullable=False, default=ACCOUNT_STATUS_LOGIN_REQUIRED, index=True)
+    status: Mapped[str] = mapped_column(Text, nullable=False, default=ACCOUNT_STATUS_LOGIN_REQUIRED, index=True)
     template_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("rate_limit_template.id"), nullable=True
     )
@@ -108,11 +111,11 @@ class Account(Base):
         BigInteger, ForeignKey("device_profile.id", ondelete="SET NULL"), nullable=True
     )
     cold_start_until: Mapped[date | None] = mapped_column(Date, nullable=True)
-    tags: Mapped[list[str] | None] = mapped_column(ARRAY(String), nullable=True)
+    tags: Mapped[list[str] | None] = mapped_column(ARRAY(Text), nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=True)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=True
     )
 
     humanize: Mapped[HumanizeConfig] = relationship(
@@ -128,15 +131,15 @@ class HumanizeConfig(Base):
     account_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("account.id", ondelete="CASCADE"), primary_key=True
     )
-    jitter_pct: Mapped[int] = mapped_column(SmallInteger, default=15)
-    typing_simulate: Mapped[bool] = mapped_column(Boolean, default=True)
-    typing_min_ms: Mapped[int] = mapped_column(Integer, default=1000)
-    typing_max_ms: Mapped[int] = mapped_column(Integer, default=3000)
-    typing_probability: Mapped[int] = mapped_column(SmallInteger, default=80)
-    read_before_reply: Mapped[bool] = mapped_column(Boolean, default=True)
+    jitter_pct: Mapped[int] = mapped_column(SmallInteger, default=15, nullable=True)
+    typing_simulate: Mapped[bool] = mapped_column(Boolean, default=True, nullable=True)
+    typing_min_ms: Mapped[int] = mapped_column(Integer, default=1000, nullable=True)
+    typing_max_ms: Mapped[int] = mapped_column(Integer, default=3000, nullable=True)
+    typing_probability: Mapped[int] = mapped_column(SmallInteger, default=80, nullable=True)
+    read_before_reply: Mapped[bool] = mapped_column(Boolean, default=True, nullable=True)
     active_window_start: Mapped[time | None] = mapped_column(Time, nullable=True)
     active_window_end: Mapped[time | None] = mapped_column(Time, nullable=True)
-    cold_start_days: Mapped[int] = mapped_column(SmallInteger, default=7)
+    cold_start_days: Mapped[int] = mapped_column(SmallInteger, default=7, nullable=True)
 
     account: Mapped[Account] = relationship("Account", back_populates="humanize")
 
@@ -161,4 +164,9 @@ class SudoUser(Base):
     allowed_commands: Mapped[list | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    # 与 0017 迁移对齐：一个账号下同一 TG 用户只允许一条 sudo 记录（唯一索引）
+    __table_args__ = (
+        Index("ix_sudo_user_account_tg", "account_id", "tg_user_id", unique=True),
     )

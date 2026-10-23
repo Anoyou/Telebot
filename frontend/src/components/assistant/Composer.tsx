@@ -17,6 +17,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
+import { getErrMsg } from "@/lib/api";
 import { composerEnterAction } from "./composerState";
 import type { SystemAgentImageAttachment, SystemAgentQueueItem } from "@/api/systemAgent";
 
@@ -34,6 +35,7 @@ const QUEUE_ACTION_COPY = {
 } as const;
 
 export function Composer({
+  scopeKey,
   disabled,
   onSend,
   streaming,
@@ -59,8 +61,10 @@ export function Composer({
   onSteerQueueItem,
   runStatus,
 }: {
+  scopeKey: string;
   disabled?: boolean;
-  onSend: (text: string, attachments: ComposerAttachment[]) => void | Promise<void>;
+  /** 只有服务器已受理时返回 true；拒绝或状态冲突必须保留草稿。 */
+  onSend: (text: string, attachments: ComposerAttachment[]) => boolean | Promise<boolean>;
   streaming?: boolean;
   onStop?: () => void;
   placeholder?: string;
@@ -95,6 +99,19 @@ export function Composer({
   const composingRef = useRef(false);
   const suppressNextEnterRef = useRef(false);
   const suppressTimerRef = useRef<number | null>(null);
+  const sendingRef = useRef(false);
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
+  const scopeRef = useRef(scopeKey);
+  scopeRef.current = scopeKey;
+  // 提交瞬间要读最新附件：粘贴后立刻回车时渲染闭包里的 attachments 还是旧值。
+  const attachmentsRef = useRef<ComposerAttachment[]>(attachments);
+  attachmentsRef.current = attachments;
+  // 在途的图片读取任务；submit 需等它们落定，避免发出无图消息后图片“复活”。
+  const pendingLoadRef = useRef<Promise<void>[]>([]);
   const value = controlledValue ?? internalValue;
 
   const updateValue = (next: string) => {
@@ -118,34 +135,56 @@ export function Composer({
   );
 
   const addFiles = async (files: File[]) => {
-    const accepted = files.filter((file) => ["image/jpeg", "image/png", "image/webp", "image/gif"].includes(file.type));
-    if (accepted.length !== files.length) toast.error("仅支持 JPG、PNG、WEBP 或 GIF 图片");
-    const available = Math.max(0, 4 - attachments.length);
-    if (accepted.length > available) toast.error("每条消息最多附带 4 张图片");
-    const next = accepted.slice(0, available);
-    const loaded = await Promise.all(next.map((file) => new Promise<ComposerAttachment | null>((resolve) => {
-      if (file.size > 6 * 1024 * 1024) { toast.error(`${file.name} 超过 6 MiB`); resolve(null); return; }
-      const reader = new FileReader();
-      reader.onload = () => resolve({ kind: "image", source: "data_url", mime_type: file.type, data_url: String(reader.result || ""), name: file.name });
-      reader.onerror = () => { toast.error(`${file.name} 读取失败`); resolve(null); };
-      reader.readAsDataURL(file);
-    })));
-    setAttachments((current) => [
-      ...current,
-      ...loaded.filter((item): item is ComposerAttachment => Boolean(item)),
-    ].slice(0, 4));
+    const done = (async () => {
+      const accepted = files.filter((file) => ["image/jpeg", "image/png", "image/webp", "image/gif"].includes(file.type));
+      if (accepted.length !== files.length) toast.error("仅支持 JPG、PNG、WEBP 或 GIF 图片");
+      const available = Math.max(0, 4 - attachmentsRef.current.length);
+      if (accepted.length > available) toast.error("每条消息最多附带 4 张图片");
+      const next = accepted.slice(0, available);
+      const loaded = await Promise.all(next.map((file) => new Promise<ComposerAttachment | null>((resolve) => {
+        if (file.size > 6 * 1024 * 1024) { toast.error(`${file.name} 超过 6 MiB`); resolve(null); return; }
+        const reader = new FileReader();
+        reader.onload = () => resolve({ kind: "image", source: "data_url", mime_type: file.type, data_url: String(reader.result || ""), name: file.name });
+        reader.onerror = () => { toast.error(`${file.name} 读取失败`); resolve(null); };
+        reader.readAsDataURL(file);
+      })));
+      setAttachments((current) => [
+        ...current,
+        ...loaded.filter((item): item is ComposerAttachment => Boolean(item)),
+      ].slice(0, 4));
+    })();
+    pendingLoadRef.current.push(done);
+    try {
+      await done;
+    } finally {
+      pendingLoadRef.current = pendingLoadRef.current.filter((item) => item !== done);
+    }
   };
 
   const submit = async () => {
-    const text = value.trim();
-    if ((!text && attachments.length === 0) || disabled || sending) return;
+    if (disabled || sendingRef.current) return;
+    sendingRef.current = true;
     setSending(true);
+    const submittedScope = scopeKey;
     try {
-      await onSend(text, attachments);
-      updateValue("");
-      setAttachments([]);
+      if (pendingLoadRef.current.length) {
+        // 粘贴后立刻回车：等在途图片读取完成再判定内容与发送。
+        await Promise.allSettled([...pendingLoadRef.current]);
+      }
+      if (!mountedRef.current || scopeRef.current !== submittedScope) return;
+      const currentAttachments = attachmentsRef.current;
+      const text = value.trim();
+      if (!text && currentAttachments.length === 0) return;
+      const accepted = await onSend(text, currentAttachments);
+      if (accepted && mountedRef.current && scopeRef.current === submittedScope) {
+        updateValue("");
+        setAttachments([]);
+      }
+    } catch (error) {
+      toast.error(getErrMsg(error));
     } finally {
-      setSending(false);
+      sendingRef.current = false;
+      if (mountedRef.current) setSending(false);
     }
   };
 

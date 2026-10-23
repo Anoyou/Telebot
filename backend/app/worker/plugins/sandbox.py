@@ -46,6 +46,43 @@ from ..command import acquire_userbot_action_rate_limit
 log = logging.getLogger(__name__)
 
 
+class PluginSendRateLimited(Exception):
+    """``SandboxClient.send_message`` / ``send_file`` 被 UserBot 动作限速拒绝时抛出。
+
+    与 Telethon 正常返回 ``Message`` 的语义对齐：拒绝必须以异常形式把失败信号
+    交给插件，而不是静默返回 ``None``。``detail`` 携带
+    ``acquire_userbot_action_rate_limit`` 返回的结构化限速详情
+    （``rate_limit_action`` / ``rate_limit_backend`` / ``reason`` / ``wait_seconds`` 等），
+    ``retry_after`` 是建议等待秒数（取自 ``wait_seconds``）。
+    """
+
+    def __init__(self, message: str, *, detail: dict[str, Any] | None = None) -> None:
+        super().__init__(message)
+        self.detail: dict[str, Any] = dict(detail or {})
+
+    @property
+    def retry_after(self) -> float:
+        """建议重试等待秒数；detail 缺失或非法时返回 0。"""
+        try:
+            value = float(self.detail.get("wait_seconds") or 0.0)
+        except (TypeError, ValueError):
+            return 0.0
+        return value if value > 0 else 0.0
+
+
+def _rate_limited_message(plugin_key: str, action: str, detail: dict[str, Any]) -> str:
+    """构造说明"被哪个限速拦住"的异常消息。"""
+    limit_action = detail.get("rate_limit_action") or action
+    backend = detail.get("rate_limit_backend") or "unknown"
+    reason = detail.get("reason") or detail.get("outcome") or "rate_limited"
+    wait = detail.get("wait_seconds")
+    wait_text = f"，建议 {wait}s 后重试" if wait else ""
+    return (
+        f"插件 {plugin_key!r} 的 {action} 请求被 UserBot 动作限速拒绝"
+        f"（限速动作={limit_action}，后端={backend}，原因={reason}{wait_text}）"
+    )
+
+
 # 能力名 → 允许的 TelegramClient 方法集
 ALLOWED_API: dict[str, frozenset[str]] = {
     "send_message": frozenset({"send_message", "respond", "reply"}),
@@ -357,8 +394,14 @@ class SandboxClient:
             chat_id,
         )
         if not allowed:
+            # 语义与 Telethon 对齐：拒绝必须让插件拿到失败信号（抛异常），不再静默返回 None。
             object.__setattr__(self, "_last_rate_limit_detail", detail)
-            return None
+            raise PluginSendRateLimited(
+                _rate_limited_message(
+                    object.__getattribute__(self, "_plugin_key"), "send_message", detail
+                ),
+                detail=detail,
+            )
         return await _maybe_await(real.send_message(chat_id, text, *args, **kwargs))
 
     async def send_file(self, chat_id: Any = None, file: Any = None, *args: Any, **kwargs: Any) -> Any:
@@ -374,8 +417,14 @@ class SandboxClient:
             chat_id,
         )
         if not allowed:
+            # 语义与 Telethon 对齐：拒绝必须让插件拿到失败信号（抛异常），不再静默返回 None。
             object.__setattr__(self, "_last_rate_limit_detail", detail)
-            return None
+            raise PluginSendRateLimited(
+                _rate_limited_message(
+                    object.__getattribute__(self, "_plugin_key"), "send_file", detail
+                ),
+                detail=detail,
+            )
         return await _maybe_await(real.send_file(chat_id, file, *args, **kwargs))
 
     async def ban_user(
@@ -659,6 +708,7 @@ def _wrap_reply_markup(value: Any, plugin_key: str) -> SandboxReplyMarkup | None
 
 __all__ = [
     "ALLOWED_API",
+    "PluginSendRateLimited",
     "SandboxButton",
     "SandboxButtonRow",
     "SandboxClient",

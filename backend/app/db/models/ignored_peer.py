@@ -58,7 +58,7 @@ class IgnoredPeer(Base):
     # 群名/用户名快照；为空表示加入时未拿到（如 worker 离线场景的手填 ID）
     peer_label: Mapped[str | None] = mapped_column(String(128), nullable=True)
     added_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
+        DateTime(timezone=True), server_default=func.now(), nullable=True
     )
 
     __table_args__ = (

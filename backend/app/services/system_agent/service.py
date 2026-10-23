@@ -12,6 +12,7 @@ from typing import Any
 from sqlalchemy import delete, desc, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ...db.models.account import Account
 from ...db.models.system_agent import (
     CHANNEL_BOT,
     CHANNEL_WEB,
@@ -240,6 +241,17 @@ class SystemAgentService:
         }
 
     # ── 会话 CRUD ─────────────────────────────────────────────────
+    @staticmethod
+    async def _ensure_account_exists(db: AsyncSession, account_id: int) -> None:
+        """account_id 前置校验：不存在时抛 LookupError，避免落到 FK IntegrityError 500。
+
+        只查 id 列，不加载整行账号数据。
+        """
+
+        found = await db.scalar(select(Account.id).where(Account.id == int(account_id)))
+        if found is None:
+            raise LookupError(f"account {account_id} 不存在")
+
     async def create_session(
         self,
         db: AsyncSession,
@@ -255,6 +267,8 @@ class SystemAgentService:
             raise ValueError(f"invalid channel: {channel}")
         if channel == CHANNEL_BOT and account_id is None:
             raise ValueError("Bot 会话必须绑定 account_id")
+        if account_id is not None:
+            await self._ensure_account_exists(db, int(account_id))
         origin_value = str(origin or SESSION_ORIGIN_INTERACTIVE)
         if origin_value not in SESSION_ORIGINS:
             raise ValueError(f"invalid origin: {origin_value}")
@@ -345,6 +359,8 @@ class SystemAgentService:
                 raise ValueError(f"invalid status: {status}")
             session.status = status
         if account_id is not ...:
+            if account_id is not None:
+                await self._ensure_account_exists(db, int(account_id))
             session.account_id = account_id
         session.updated_at = datetime.now(UTC)
         await db.flush()
@@ -601,6 +617,11 @@ class SystemAgentService:
                 if explicit_retry_message and incoming_text
                 else str(content.get("text") or "").strip()
             )
+            if not explicit_retry_message and incoming_text and raw_text:
+                # 指代触发的失败重试（如「继续」「再来一次」）：旧失败消息文本仍是
+                # 重试目标，但用户当轮输入不能被静默丢弃——作为附加上下文并入
+                # 本轮请求文本，模型可以参考用户的补充意图
+                raw_text = f"{raw_text}\n用户补充：{incoming_text}"
         else:
             raw_text = incoming_text
         raw_attachments: list[dict[str, Any]] = [
@@ -644,7 +665,7 @@ class SystemAgentService:
             if (
                 retry_message is not None
                 and not regenerating
-                and not (explicit_retry_message and incoming_text)
+                and not incoming_text
             )
             else extract_plaintext_secrets(raw_text)
         )

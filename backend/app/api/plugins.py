@@ -112,7 +112,11 @@ async def uninstall_plugin(
     _ensure_builtin_or_501(payload.plugin_key)
     await _ensure_accounts_exist(db, payload.account_ids)
     n = await feature_service.bulk_set_enabled(
-        db, payload.account_ids, payload.plugin_key, enabled=False
+        db,
+        payload.account_ids,
+        payload.plugin_key,
+        enabled=False,
+        triggered_by_user_id=user.id,
     )
     await audit.write(
         db,

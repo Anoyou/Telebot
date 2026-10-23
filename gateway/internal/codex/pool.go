@@ -33,13 +33,15 @@ func newUpstreamPool() *upstreamPool {
 // poolKey 只挑真正影响连接池的字段：provider、proxy、baseURL、snapshot revision。
 // 模型名、超时、并发上限、兼容请求头都不改变 pool 的复用资格，放进 key 会白白打出
 // 多个池，把复用效果抵消掉。
+// 分隔符用 "\x00"：baseURL/proxy 均为管理员可配字符串，若用 "|" 之类可见字符拼接，
+// baseURL 路径里含 "|x" 时两个不同元组可以拼出同一 key，导致共用错误代理的连接池。
 func poolKey(route routing.Route, revision int64) string {
 	return strings.Join([]string{
 		"p" + itoa(route.ProviderID),
 		"r" + itoa(revision),
 		"b" + route.BaseURL,
 		"x" + route.ProxyURL,
-	}, "|")
+	}, "\x00")
 }
 
 func itoa(value int64) string {

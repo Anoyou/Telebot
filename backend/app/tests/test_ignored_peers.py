@@ -93,7 +93,7 @@ class _FakeDB:
         self.rules = rules or []
         self.ignored_rows = ignored_rows or []
 
-    async def get(self, model, pk):
+    async def get(self, model, pk, **kwargs):
         name = getattr(model, "__tablename__", None) or getattr(
             getattr(model, "__table__", None), "name", None
         )
@@ -101,6 +101,8 @@ class _FakeDB:
             return self.accounts.get(pk)
         if name == "humanize_config":
             return self.humanize.get(pk)
+        if name == "account_feature":
+            return next((af for af in self.afs if (af.account_id, af.feature_key) == pk), None)
         return None
 
     async def execute(self, stmt):

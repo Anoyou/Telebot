@@ -12,6 +12,7 @@ from app.worker.plugins.update_barrier import (
     acknowledge_plugin_update,
     begin_plugin_update,
     clear_plugin_update,
+    invalidate_update_marker_cache,
     plugin_update_in_progress,
 )
 
@@ -51,6 +52,88 @@ def test_update_barrier_accepts_platform_test_and_internal_plugin_keys(tmp_path)
     assert plugin_update_in_progress(tmp_path, "_test_plugin", 1) is True
     acknowledge_plugin_update(tmp_path, "_test_plugin", 1, update_id)
     assert plugin_update_in_progress(tmp_path, "_test_plugin", 1) is False
+
+
+def _counting_uncached(monkeypatch) -> list[tuple[str, int]]:
+    """把未缓存的真实检查包一层计数器，用于断言文件 IO 次数。"""
+    from app.worker.plugins import update_barrier
+
+    calls: list[tuple[str, int]] = []
+    real = update_barrier._plugin_update_in_progress_uncached
+
+    def _counting(root, plugin_key, account_id):
+        calls.append((plugin_key, account_id))
+        return real(root, plugin_key, account_id)
+
+    monkeypatch.setattr(update_barrier, "_plugin_update_in_progress_uncached", _counting)
+    return calls
+
+
+def test_plugin_update_in_progress_caches_negative_within_ttl(monkeypatch, tmp_path) -> None:
+    calls = _counting_uncached(monkeypatch)
+
+    assert plugin_update_in_progress(tmp_path, "ai_redpacket", 1) is False
+    assert plugin_update_in_progress(tmp_path, "ai_redpacket", 1) is False
+    assert plugin_update_in_progress(tmp_path, "ai_redpacket", 1) is False
+    # TTL 内只有第一次做了真实检查（文件 IO）
+    assert calls == [("ai_redpacket", 1)]
+    # 不同账号不共享缓存
+    assert plugin_update_in_progress(tmp_path, "ai_redpacket", 2) is False
+    assert calls == [("ai_redpacket", 1), ("ai_redpacket", 2)]
+    # 显式失效后重新检查
+    invalidate_update_marker_cache(tmp_path, "ai_redpacket")
+    assert plugin_update_in_progress(tmp_path, "ai_redpacket", 1) is False
+    assert calls.count(("ai_redpacket", 1)) == 2
+
+
+def test_plugin_update_in_progress_never_caches_positive_result(monkeypatch, tmp_path) -> None:
+    calls = _counting_uncached(monkeypatch)
+    begin_plugin_update(tmp_path, "ai_redpacket")
+
+    assert plugin_update_in_progress(tmp_path, "ai_redpacket", 1) is True
+    assert plugin_update_in_progress(tmp_path, "ai_redpacket", 1) is True
+    # 发现更新进行中后不使用缓存：每次调用都穿透真实检查
+    assert calls == [("ai_redpacket", 1), ("ai_redpacket", 1)]
+
+
+def test_begin_plugin_update_invalidates_cached_negative(monkeypatch, tmp_path) -> None:
+    calls = _counting_uncached(monkeypatch)
+
+    assert plugin_update_in_progress(tmp_path, "ai_redpacket", 1) is False
+    assert calls == [("ai_redpacket", 1)]
+
+    begin_plugin_update(tmp_path, "ai_redpacket")
+    # 更新开始后不能继续使用"无更新进行中"的缓存
+    assert plugin_update_in_progress(tmp_path, "ai_redpacket", 1) is True
+    assert calls == [("ai_redpacket", 1), ("ai_redpacket", 1)]
+
+
+def test_plugin_update_in_progress_rechecks_after_ttl_expiry(monkeypatch, tmp_path) -> None:
+    from app.worker.plugins import update_barrier
+
+    calls = _counting_uncached(monkeypatch)
+
+    class _Clock:
+        def __init__(self) -> None:
+            self.now = 100.0
+
+        def monotonic(self) -> float:
+            return self.now
+
+        def time(self) -> float:
+            return self.now
+
+    clock = _Clock()
+    monkeypatch.setattr(update_barrier, "time", clock)
+
+    assert plugin_update_in_progress(tmp_path, "ai_redpacket", 1) is False
+    assert plugin_update_in_progress(tmp_path, "ai_redpacket", 1) is False
+    assert calls == [("ai_redpacket", 1)]
+
+    clock.now += update_barrier._MARKER_CACHE_TTL_SECONDS + 0.1
+    assert plugin_update_in_progress(tmp_path, "ai_redpacket", 1) is False
+    # TTL 过期后重新做真实检查
+    assert calls == [("ai_redpacket", 1), ("ai_redpacket", 1)]
 
 
 def test_remote_update_check_preserves_runtime_revision_timestamp() -> None:

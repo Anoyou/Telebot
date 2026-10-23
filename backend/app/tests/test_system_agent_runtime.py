@@ -1212,3 +1212,73 @@ def model_capability_provisional(*, provisional: bool = True) -> CapabilityProbe
         datetime.now(UTC),
         provisional=provisional,
     )
+
+
+@pytest.mark.asyncio
+async def test_router_call_uses_namespaced_session_identity(monkeypatch) -> None:
+    """路由小模型调用与主对话必须使用不同会话身份，避免冲刷上游前缀缓存。"""
+
+    primary, fallback = _providers()
+    await _patch_runtime_config(monkeypatch, primary, fallback)
+    router_sessions: list[str] = []
+    main_sessions: list[str] = []
+
+    async def invoke(provider, _providers, request, **kwargs):  # noqa: ANN001
+        if kwargs.get("source") == "system_agent_router":
+            router_sessions.append(str(request.metadata["_client_runtime"]["session_id"]))
+            return (
+                ModelResponse(
+                    model=request.model,
+                    content=(
+                        TextContent(
+                            '{"needs_tools":true,"domains":["scheduler"],"reason":"lookup"}'
+                        ),
+                    ),
+                    usage=ModelUsage(input_tokens=1, output_tokens=1),
+                ),
+                provider,
+                False,
+            )
+        return (
+            ModelResponse(
+                model=request.model,
+                content=(TextContent("完成"),),
+                usage=ModelUsage(input_tokens=1, output_tokens=1),
+            ),
+            provider,
+            False,
+        )
+
+    async def run(model_call, request, tools, **_kwargs):  # noqa: ANN001
+        main_sessions.append(str(request.metadata["_client_runtime"]["session_id"]))
+        await model_call(request)
+        return AgentResult(
+            text="完成",
+            model=request.model,
+            messages=request.messages,
+            usage=ModelUsage(input_tokens=1, output_tokens=1),
+            steps=1,
+            tool_calls=0,
+            stop_reason=StopReason.COMPLETED,
+        )
+
+    monkeypatch.setattr(runtime_module, "invoke_structured", invoke)
+    monkeypatch.setattr(runtime_module, "run_agent", run)
+
+    db = AsyncMock()
+    events = [
+        event
+        async for event in SystemAgentRuntime(_registry()).stream_turn(
+            db,
+            session=_session(),  # type: ignore[arg-type]
+            user_text="帮我查一下相关配置",
+            role="admin",
+            channel="web",
+        )
+    ]
+
+    assert any(event.get("type") == "done" and event.get("ok") for event in events)
+    # 路由调用走独立命名空间，主对话身份保持原 session id
+    assert router_sessions == ["router:session-1"]
+    assert main_sessions and set(main_sessions) == {"session-1"}
+    assert router_sessions[0] != main_sessions[0]

@@ -19,9 +19,11 @@ from __future__ import annotations
 
 import base64
 import io
+import json
 import os
 import shutil
 import sqlite3
+import time
 import zipfile
 from pathlib import Path
 from types import SimpleNamespace
@@ -32,7 +34,7 @@ from starlette.datastructures import UploadFile
 
 from app.api import plugins_install as plugins_install_api
 from app.db.models.feature import FEATURE_FORWARD, AccountFeature, Feature
-from app.db.models.plugin import InstalledPlugin, PluginInstallHistory
+from app.db.models.plugin import PLUGIN_SOURCE_ZIP, InstalledPlugin, PluginInstallHistory
 from app.db.models.plugin_global_config import PluginGlobalConfig
 from app.deps import get_current_user, get_db
 from app.main import app
@@ -141,9 +143,10 @@ def _make_zip(
     *,
     key: str = "demo",
     version: str = "0.1.0",
-    layout: str = "flat",  # flat | nested(包一层 outer/) | missing-plugin | missing-init
+    layout: str = "flat",  # flat | nested(包一层 outer/) | missing-plugin | missing-init | missing-plugin-json
     include_platform_capabilities: bool = True,
     extra_members: list[tuple[str, bytes]] | None = None,
+    plugin_json_override: bytes | None = None,
 ) -> bytes:
     """生成一个最小化的插件 zip 字节流。"""
     declaration = (
@@ -167,16 +170,33 @@ def _make_zip(
         f"    key = {key!r}\n"
         "    display_name = 'Demo'\n"
     ).encode()
+    # plugin.json 是 worker 加载（_preflight_installed_plugin）的硬性要求，
+    # 合法包必须带上；usage 字段用于避免"未声明使用说明"的 lint warning。
+    if plugin_json_override is not None:
+        plugin_json = plugin_json_override
+    else:
+        plugin_json = json.dumps(
+            {
+                "name": key,
+                "display_name": "Demo",
+                "version": version,
+                "usage": "单元测试用示例插件。",
+            },
+            ensure_ascii=False,
+        ).encode("utf-8")
 
     files: dict[str, bytes] = {
         "manifest.py": manifest_py,
         "__init__.py": init_py,
         "plugin.py": plugin_py,
+        "plugin.json": plugin_json,
     }
     if layout == "missing-plugin":
         files.pop("plugin.py")
     elif layout == "missing-init":
         files.pop("__init__.py")
+    elif layout == "missing-plugin-json":
+        files.pop("plugin.json")
 
     prefix = ""
     if layout == "nested":
@@ -204,6 +224,8 @@ def test_parse_zip_flat_layout() -> None:
         assert (parsed.extract_dir / "manifest.py").exists()
         assert (parsed.extract_dir / "plugin.py").exists()
         assert (parsed.extract_dir / "__init__.py").exists()
+        # plugin.json 与其他必含文件一起落盘
+        assert (parsed.extract_dir / "plugin.json").exists()
     finally:
         shutil.rmtree(parsed.extract_dir, ignore_errors=True)
 
@@ -251,16 +273,59 @@ def test_parse_zip_key_conflicts_builtin() -> None:
     assert ex.value.code == "KEY_CONFLICTS_BUILTIN"
 
 
+def test_parse_zip_requires_plugin_json() -> None:
+    """缺 plugin.json 的 zip 必须在安装阶段被拒：worker 加载时（_preflight）必拒，装上即坏件。"""
+    z = _make_zip(key="no_plugin_json", layout="missing-plugin-json")
+    with pytest.raises(pis.InvalidZipStructure) as ex:
+        pis.parse_zip(z)
+    assert ex.value.code == "MISSING_REQUIRED_FILE"
+
+
+def test_parse_zip_rejects_unparsable_plugin_json() -> None:
+    """plugin.json 不是合法 JSON 时拒绝。"""
+    z = _make_zip(
+        key="broken_plugin_json",
+        plugin_json_override=b"{not-json",
+    )
+    with pytest.raises(pis.InvalidZipStructure) as ex:
+        pis.parse_zip(z)
+    assert ex.value.code == "BAD_PLUGIN_JSON"
+
+
+def test_parse_zip_rejects_plugin_json_without_key() -> None:
+    """plugin.json 缺少可用的 name/key 字段时拒绝。"""
+    z = _make_zip(
+        key="no_key_plugin_json",
+        plugin_json_override=json.dumps({"display_name": "Demo"}).encode(),
+    )
+    with pytest.raises(pis.InvalidZipStructure) as ex:
+        pis.parse_zip(z)
+    assert ex.value.code == "BAD_PLUGIN_JSON_KEY"
+
+
+def test_parse_zip_rejects_plugin_json_key_mismatch() -> None:
+    """plugin.json 的静态 key 与 manifest.key 不一致时拒绝（与 worker 加载期检查对齐）。"""
+    z = _make_zip(
+        key="mismatch_a",
+        plugin_json_override=json.dumps({"name": "mismatch_b", "version": "0.1.0"}).encode(),
+    )
+    with pytest.raises(pis.ManifestError) as ex:
+        pis.parse_zip(z)
+    assert ex.value.code == "PLUGIN_JSON_KEY_MISMATCH"
+
+
 def test_parse_zip_manifest_missing_const(tmp_path) -> None:
     """manifest.py 不导出 MANIFEST → ManifestError。"""
     bad_manifest = b"x = 1\n"
     init_py = b"PLUGIN_CLASS = None\nMANIFEST = None\n"
     plugin_py = b"class X: pass\n"
+    plugin_json = json.dumps({"name": "bad_manifest_demo", "version": "0.1.0"}).encode()
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
         zf.writestr("manifest.py", bad_manifest)
         zf.writestr("__init__.py", init_py)
         zf.writestr("plugin.py", plugin_py)
+        zf.writestr("plugin.json", plugin_json)
     with pytest.raises(pis.ManifestError) as ex:
         pis.parse_zip(buf.getvalue())
     assert ex.value.code in ("MANIFEST_MISSING_CONST", "BAD_MANIFEST")
@@ -627,6 +692,103 @@ async def test_install_zip_roundtrip(tmp_path, monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
+async def test_install_zip_keeps_concurrent_staging_and_cleans_stale_residue(
+    tmp_path, monkeypatch
+) -> None:
+    """并发安装的随机 staging 目录互不删除；只有过期残留会被顺带清理。
+
+    串行模拟交错：A 已创建随机 staging（进行中）→ B 同 key 全量安装走完 →
+    A 的 staging 仍在（A 可恢复；最终 rename 竞争行为保持现状，由重试收口）。
+    """
+    monkeypatch.setattr(pis.settings, "plugins_installed_dir", str(tmp_path / "installed"))
+    installed_root = tmp_path / "installed"
+    installed_root.mkdir(parents=True)
+    final_dir = installed_root / "race_demo"
+
+    # A 流程：并发安装已创建自己的随机 staging（进行中）
+    a_staging = pis._new_staging_dir(final_dir)
+    assert a_staging.name.startswith("race_demo.installing.")
+    a_staging.mkdir(parents=True)
+    a_marker = a_staging / "a-marker.txt"
+    a_marker.write_text("A in progress", encoding="utf-8")
+
+    # 历史残留：旧固定名 + 旧随机名，修改时间拨回 2 小时前
+    stale_legacy = installed_root / "race_demo.installing"
+    stale_legacy.mkdir()
+    (stale_legacy / "leftover").write_text("crash leftover", encoding="utf-8")
+    stale_random = pis._new_staging_dir(final_dir)
+    stale_random.mkdir()
+    old_ts = time.time() - 7200
+    os.utime(stale_legacy, (old_ts, old_ts))
+    os.utime(stale_random, (old_ts, old_ts))
+
+    # B 流程：同 key 全量安装走完
+    z = _make_zip(key="race_demo", version="1.0.0")
+    sig, pub = _sign_payload(z)
+    monkeypatch.setattr(pis.settings, "plugin_pubkey", pub)
+    db = _FakeDB()
+    row = await pis.install_zip(db, zip_bytes=z, signature=sig)
+
+    assert row.key == "race_demo"
+    assert final_dir.is_dir()
+    # A 的进行中 staging 未被 B 删除
+    assert a_marker.exists()
+    # 过期残留被顺带清理（覆盖旧固定名与新随机命名两种模式）
+    assert stale_legacy.exists()
+    assert not stale_random.exists()
+
+
+@pytest.mark.asyncio
+async def test_cleanup_staging_residue_never_removes_legit_plugin(tmp_path) -> None:
+    """名为 <key>.installing<任意后缀> 的合法插件目录不得被残留清理误删。
+
+    插件 key 允许含 "."；宽松 glob `<key>.installing*` 会把合法已安装插件
+    `demo.installinger` 当成 `demo` 的 staging 残留整目录删除。
+    """
+    installed_root = tmp_path / "installed"
+    installed_root.mkdir(parents=True)
+
+    # 合法插件：demo.installinger（其内部还有真实文件），修改时间已超过清理阈值
+    legit = installed_root / "demo.installinger"
+    legit.mkdir()
+    (legit / "plugin.json").write_text("{}", encoding="utf-8")
+    old_ts = time.time() - 7200
+    os.utime(legit, (old_ts, old_ts))
+
+    # demo 的过期 staging 残留：应被清理
+    stale = pis._new_staging_dir(installed_root / "demo")
+    stale.mkdir()
+    (stale / "leftover").write_text("x", encoding="utf-8")
+    os.utime(stale, (old_ts, old_ts))
+    stale_hex = pis._new_staging_dir(installed_root / "demo")
+    stale_hex.mkdir()
+    os.utime(stale_hex, (old_ts, old_ts))
+
+    pis._cleanup_staging_residue(installed_root / "demo")
+
+    assert legit.is_dir(), "合法插件目录被误删"
+    assert (legit / "plugin.json").exists()
+    assert not stale.exists()
+    assert not stale_hex.exists()
+
+    # remote 通道的同名清理函数行为一致
+    from app.services import remote_plugin_service as rps
+
+    legit2 = installed_root / "demo2.installinger"
+    legit2.mkdir()
+    (legit2 / "plugin.json").write_text("{}", encoding="utf-8")
+    os.utime(legit2, (old_ts, old_ts))
+    stale2 = rps._new_staging_dir(installed_root / "demo2")
+    stale2.mkdir()
+    os.utime(stale2, (old_ts, old_ts))
+
+    rps._cleanup_staging_residue(installed_root / "demo2")
+
+    assert legit2.is_dir(), "remote 通道误删合法插件目录"
+    assert not stale2.exists()
+
+
+@pytest.mark.asyncio
 async def test_install_zip_upgrade_keeps_enabled(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(pis.settings, "plugins_installed_dir", str(tmp_path / "installed"))
     db = _FakeDB()
@@ -690,7 +852,7 @@ async def test_install_zip_upgrade_without_platform_capability_declaration_is_re
     assert db.installed_rows["upgrade_caps"].enabled is True
     assert "1.0.0" in (install_dir / "manifest.py").read_text(encoding="utf-8")
     assert not (tmp_path / "installed" / "upgrade_caps.bak-zip").exists()
-    assert not (tmp_path / "installed" / "upgrade_caps.installing").exists()
+    assert list((tmp_path / "installed").glob("upgrade_caps.installing*")) == []
 
 
 @pytest.mark.asyncio
@@ -925,3 +1087,52 @@ async def test_uninstall_missing_returns_false() -> None:
     db = _FakeDB()
     deleted = await pis.uninstall(db, "ghost")
     assert deleted is False
+
+
+@pytest.mark.asyncio
+async def test_uninstall_refuses_dir_outside_installed_root(tmp_path, monkeypatch) -> None:
+    """installed_path 指向 installed 根之外时拒绝 rmtree（DB 行仍清理）。"""
+    monkeypatch.setattr(pis.settings, "plugins_installed_dir", str(tmp_path / "installed"))
+    outside = tmp_path / "elsewhere" / "hostage"
+    outside.mkdir(parents=True)
+    (outside / "keep.txt").write_text("data", encoding="utf-8")
+    db = _FakeDB()
+    db.installed_rows["evil"] = InstalledPlugin(
+        key="evil",
+        source=PLUGIN_SOURCE_ZIP,
+        installed_path=str(outside),
+        version="1.0.0",
+        enabled=True,
+        trust_tier=pis.PLUGIN_TRUST_COMMUNITY,
+    )
+
+    deleted = await pis.uninstall(db, "evil")
+
+    assert deleted is True
+    assert "evil" not in db.installed_rows
+    # 目录与内容原样保留，未被 rmtree。
+    assert (outside / "keep.txt").read_text(encoding="utf-8") == "data"
+
+
+@pytest.mark.asyncio
+async def test_installed_plugin_history_limit_is_bounded() -> None:
+    """插件安装历史的 limit 用 Query 声明式钳制（1..200）：超限 → 422。"""
+    from types import SimpleNamespace
+
+    from fastapi import FastAPI
+    from httpx import ASGITransport, AsyncClient
+
+    import app.deps as deps
+
+    app = FastAPI()
+    app.include_router(plugins_install_api.router)
+    app.dependency_overrides[deps.get_db] = lambda: object()
+    app.dependency_overrides[deps.get_current_user] = lambda: SimpleNamespace(id=1)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        assert (
+            await client.get("/api/plugins/install/demo/history", params={"limit": 201})
+        ).status_code == 422
+        assert (
+            await client.get("/api/plugins/install/demo/history", params={"limit": 0})
+        ).status_code == 422

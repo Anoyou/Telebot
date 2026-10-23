@@ -2,12 +2,21 @@
 
 from __future__ import annotations
 
+from fastapi import HTTPException
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db.models.account import SudoUser
 from ..schemas.sudo import SudoUserCreate, SudoUserUpdate
 from ..util.sudo_permissions import build_sudo_chat_scope, build_sudo_command_scope
+
+
+def _duplicate_error(tg_user_id: int) -> HTTPException:
+    return HTTPException(
+        status_code=409,
+        detail={"code": "SUDO_ALREADY_EXISTS", "message": f"该 Telegram 用户已是 sudo 用户: {tg_user_id}"},
+    )
 
 
 async def get_sudo_users(db: AsyncSession, account_id: int | None = None) -> list[SudoUser]:
@@ -33,7 +42,21 @@ async def create_sudo_user(
     *,
     commit: bool = True,
 ) -> SudoUser:
-    """创建 Sudo 用户。"""
+    """创建 Sudo 用户。
+
+    ``sudo_user`` 上有 (account_id, tg_user_id) 唯一索引：先查重给可读的 409；
+    并发窗口再由 IntegrityError 兜底，同样返回结构化 409 而不是裸 500。
+    """
+    dup = (
+        await db.execute(
+            select(SudoUser.id).where(
+                SudoUser.account_id == data.account_id,
+                SudoUser.tg_user_id == data.tg_user_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if dup is not None:
+        raise _duplicate_error(data.tg_user_id)
     sudo_user = SudoUser(
         account_id=data.account_id,
         tg_user_id=data.tg_user_id,
@@ -48,10 +71,15 @@ async def create_sudo_user(
         ),
     )
     db.add(sudo_user)
-    if commit:
-        await db.commit()
-    else:
-        await db.flush()
+    try:
+        if commit:
+            await db.commit()
+        else:
+            await db.flush()
+    except IntegrityError as exc:
+        # 并发插入撞唯一索引：回滚本事务，保持与前置查重一致的 409 语义。
+        await db.rollback()
+        raise _duplicate_error(data.tg_user_id) from exc
     await db.refresh(sudo_user)
     return sudo_user
 

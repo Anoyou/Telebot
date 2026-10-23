@@ -8,9 +8,16 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.db.models.account import Account  # noqa: F401 - registers FK target table metadata
-from app.db.models.action_event import ACTION_EVENT_STATUS_FAILED, ACTION_EVENT_STATUS_OK, ActionEvent
+from app.db.models.action_event import (
+    ACTION_EVENT_STATUS_DRY_RUN,
+    ACTION_EVENT_STATUS_FAILED,
+    ACTION_EVENT_STATUS_OK,
+    ACTION_EVENT_STATUS_PENDING,
+    ActionEvent,
+)
 from app.db.models.log import EventTrace
 from app.services import ledger_service, stats_service
+from app.services.action_tap import derive_ledger_columns
 
 
 @pytest.fixture
@@ -29,17 +36,24 @@ async def stats_session_factory():
 
 
 async def _insert_action_event(session_factory, **overrides) -> ActionEvent:
+    action_type = overrides.pop("action_type")
+    params_summary = overrides.pop("params_summary")
+    # 模拟 0062 迁移后的行：写入路径会同步派生三个台账提取列。
+    ledger_direction, ledger_amount, ledger_chat_id = derive_ledger_columns(action_type, params_summary)
     row = ActionEvent(
         account_id=overrides.pop("account_id", 7),
         channel=overrides.pop("channel", "interaction_bot"),
         session_key=overrides.pop("session_key", "session_1"),
         plugin_key=overrides.pop("plugin_key", "game"),
         entry_key=overrides.pop("entry_key", "main"),
-        action_type=overrides.pop("action_type"),
-        params_summary=overrides.pop("params_summary"),
+        action_type=action_type,
+        params_summary=params_summary,
         status=overrides.pop("status", ACTION_EVENT_STATUS_OK),
         error_code=overrides.pop("error_code", None),
         error_summary=overrides.pop("error_summary", None),
+        direction=ledger_direction,
+        amount=ledger_amount,
+        chat_id=ledger_chat_id,
         created_at=overrides.pop("created_at"),
         **overrides,
     )
@@ -269,3 +283,42 @@ async def test_operational_stats_default_window_matches_ledger_window(stats_sess
     assert stats.total.ledger_count == 1
     assert Decimal(stats.total.ledger_net) == Decimal("10")
     assert [item.key for item in stats.by_day] == [recent.date().isoformat()]
+
+
+@pytest.mark.asyncio
+async def test_operational_stats_ignores_rows_outside_ok_failed_statuses(stats_session_factory) -> None:
+    """PENDING/DRY_RUN 行不参与任何运营指标：SQL 状态过滤与旧 Python 口径一致。"""
+
+    base = datetime(2026, 7, 9, 8, 0, tzinfo=UTC)
+    await _insert_action_event(
+        stats_session_factory,
+        action_type="payout",
+        params_summary={"type": "payout", "amount": "10", "chat_id": -100123, "payout_key": "pay_dry"},
+        status=ACTION_EVENT_STATUS_DRY_RUN,
+        created_at=base,
+    )
+    await _insert_action_event(
+        stats_session_factory,
+        action_type="start_session",
+        params_summary={"type": "start_session", "chat_id": -100123, "participant_user_ids": [111]},
+        status=ACTION_EVENT_STATUS_PENDING,
+        created_at=base + timedelta(seconds=1),
+    )
+    await _insert_action_event(
+        stats_session_factory,
+        action_type="payment_confirmed",
+        params_summary={"event_type": "payment_confirmed", "amount": "25", "chat_id": -100123, "payer_user_id": 222},
+        created_at=base + timedelta(seconds=2),
+    )
+
+    async with stats_session_factory() as db:
+        stats = await stats_service.summarize_operational_stats(
+            db,
+            stats_service.StatsFilters(since=base, until=base + timedelta(days=1), account_id=7),
+        )
+
+    assert stats.total.started_sessions == 0
+    assert stats.total.participant_count == 1
+    assert stats.total.payout_attempt_count == 0
+    assert stats.total.payout_success_rate is None
+    assert Decimal(stats.total.ledger_net) == Decimal("25")

@@ -58,6 +58,27 @@ prune_complete_sets() {
   done < <(find "$DIR" -maxdepth 1 -type f -name 'checksums-*.sha256' -print | sort -r)
 }
 
+prune_orphan_archives() {
+  # 中途失败的备份会留下无 checksums 配套的孤儿归档；它们不参与完整组计数，
+  # 只能等 30 天 mtime 清理，小磁盘上会积压。按“无配套校验文件且已存在超过
+  # 12 小时”清理，年龄门槛避开本轮正在写入的文件。
+  local file base stamp
+  while IFS= read -r file; do
+    base="$(basename "$file")"
+    stamp="${base#db-}"
+    stamp="${stamp#sessions-}"
+    stamp="${stamp#plugins-installed-}"
+    stamp="${stamp#plugin-repos-}"
+    stamp="${stamp%.sql}"
+    stamp="${stamp%.tgz}"
+    [[ -f "$DIR/checksums-$stamp.sha256" ]] && continue
+    rm -f "$file"
+  done < <(find "$DIR" -maxdepth 1 -type f \
+    \( -name 'db-*.sql' -o -name 'sessions-*.tgz' \
+    -o -name 'plugins-installed-*.tgz' -o -name 'plugin-repos-*.tgz' \) \
+    -mmin +720 -print)
+}
+
 # 在创建新 dump 前先给本轮腾出一个完整备份组的位置，同时至少保留最近一组。
 # 这样高频网页更新不会等到 30 天后才释放空间，也不会先删光所有可恢复点。
 PRE_BACKUP_KEEP=$((RETENTION_COUNT - 1))
@@ -144,6 +165,7 @@ fi
 chmod 600 "$CHECKSUM_FILE"
 
 prune_complete_sets "$RETENTION_COUNT"
+prune_orphan_archives
 
 find "$DIR" -type f \( -name 'db-*.sql' -o -name 'sessions-*.tgz' \
   -o -name 'plugins-installed-*.tgz' -o -name 'plugin-repos-*.tgz' \

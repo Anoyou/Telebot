@@ -164,6 +164,17 @@ async def test_idempotency_key_counts_daily_usage_once(monkeypatch) -> None:
     assert daily_values == [60]
 
 
+def test_redis_keys_use_telepilot_namespace_prefix() -> None:
+    """日累计 / 幂等键统一挂 telepilot: 命名空间（对齐 telepilot:llm_key_usage 先例）。"""
+
+    daily = payout_limit._daily_key(9)
+    assert daily.startswith("telepilot:payout_limit:9:daily:")
+    counted = payout_limit._counted_key(9, "pay-1")
+    assert counted.startswith("telepilot:payout_limit:counted:9:pay-1")
+    # 幂等占位键与真实键同一前缀段，仅靠 numkeys 之外的 use_counted=0 跳过。
+    assert payout_limit._COUNTED_KEY_UNUSED.startswith("telepilot:payout_limit:counted:")
+
+
 @pytest.mark.asyncio
 async def test_consume_script_real_redis_accumulates_atomically_and_short_circuits_counted() -> None:
     redis_url = os.environ.get("TELEPILOT_TEST_REDIS_URL")

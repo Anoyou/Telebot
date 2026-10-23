@@ -308,3 +308,116 @@ def test_legacy_totp_enabled_defaults_to_always_mode():
 
     assert config.totp_enabled is True
     assert config.totp_mode == auth_login_security.TOTP_MODE_ALWAYS
+
+
+class _AtomicOnlyRedis:
+    """只支持 eval 的假 Redis：出现裸 INCR / EXPIRE 调用即失败，用于锁死原子路径。"""
+
+    def __init__(self):
+        self.buckets: dict[str, tuple[int, int]] = {}  # key -> (count, ttl)
+
+    async def eval(self, _script: str, numkeys: int, key: str, ttl: int):
+        assert numkeys == 1
+        count, cur_ttl = self.buckets.get(key, (0, int(ttl)))
+        self.buckets[key] = (count + 1, cur_ttl)
+        return count + 1
+
+    async def incr(self, *_args, **_kwargs):  # pragma: no cover - 非原子路径禁止再用
+        raise AssertionError("counter must use atomic eval, not bare INCR")
+
+    async def expire(self, *_args, **_kwargs):  # pragma: no cover
+        raise AssertionError("counter must use atomic eval, not bare EXPIRE")
+
+
+@pytest.mark.asyncio
+async def test_record_login_failure_uses_atomic_incr_expire(monkeypatch):
+    """失败计数必须走原子 INCR+EXPIRE：EXPIRE 丢失会让失败 key 永不过期、用户被永久递进锁定。"""
+    fake = _AtomicOnlyRedis()
+    monkeypatch.setattr(auth_login_security, "_get_redis", lambda: fake)
+    config = auth_login_security.normalize_login_security_config(
+        {
+            "notify_otp_enabled": True,
+            "notify_otp_failed_attempt_threshold": 3,
+            "notify_otp_fail_window_seconds": 900,
+        }
+    )
+
+    await auth_login_security.record_login_failure("10.0.0.1", "admin", config=config)
+    await auth_login_security.record_login_failure("10.0.0.1", "admin", config=config)
+
+    # ip 与 user 两个 key 各计 2 次；TTL 与首次设置时保持一致（固定窗口语义不变）
+    assert sorted(v[0] for v in fake.buckets.values()) == [2, 2]
+    assert {v[1] for v in fake.buckets.values()} == {900}
+
+
+@pytest.mark.asyncio
+async def test_totp_wrong_code_records_login_failure(monkeypatch):
+    """TOTP 猜错必须与密码错误同口径计入失败记录，否则可长期慢速爆破 6 位码。"""
+    user = SimpleNamespace(id=1, username="admin", password_hash="hash", totp_secret_enc="enc:totp")
+    db = _FakeDB([_ScalarResult(1), _ScalarResult(user)])
+    db.settings["login_security"] = SystemSetting(
+        key="login_security",
+        value={"totp_enabled": True, "totp_mode": "always"},
+    )
+
+    monkeypatch.setattr(auth_api, "_enforce_login_rate_limit", AsyncMock(return_value=None))
+    monkeypatch.setattr(auth_api.auth_service, "verify_password_with_sentinel", lambda *_args: True)
+    monkeypatch.setattr(auth_api, "decrypt_str", lambda _s: "TOTPSECRET")
+    monkeypatch.setattr(auth_api.auth_service, "verify_totp_step", lambda _s, _c: None)
+    record_failure = AsyncMock(return_value=None)
+    monkeypatch.setattr(auth_api.auth_login_security, "record_login_failure", record_failure)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await auth_api.login(
+            LoginRequest(username="admin", password="ok", totp_code="000000"),
+            _request(),
+            Response(),
+            db,
+        )
+
+    assert exc_info.value.status_code == 401
+    assert exc_info.value.detail["code"] == "TOTP_INVALID"
+    record_failure.assert_awaited_once()
+    assert record_failure.await_args.args == ("127.0.0.1", "admin")
+
+
+@pytest.mark.asyncio
+async def test_totp_login_same_step_twice_both_succeed(monkeypatch):
+    """同一 30s 窗口内用同一枚正确验证码连续两次登录都必须成功。
+
+    消费式防重放曾把同窗口内的第二次正常登录（换设备/刷新重登/双端同时登录）
+    连同正确密码一起拒绝——正确凭据永远不能被拒；防爆破由"TOTP 错误计入失败
+    计数 + 限速 + 递进锁定"承担。
+    """
+    user = SimpleNamespace(id=1, username="admin", password_hash="hash", totp_secret_enc="enc:totp")
+    db = _FakeDB([_ScalarResult(1), _ScalarResult(user)] * 2)
+    db.settings["login_security"] = SystemSetting(
+        key="login_security",
+        value={"totp_enabled": True, "totp_mode": "always"},
+    )
+
+    monkeypatch.setattr(auth_api, "_enforce_login_rate_limit", AsyncMock(return_value=None))
+    monkeypatch.setattr(auth_api.auth_service, "verify_password_with_sentinel", lambda *_args: True)
+    monkeypatch.setattr(auth_api, "decrypt_str", lambda _s: "TOTPSECRET")
+    monkeypatch.setattr(auth_api.auth_login_security, "clear_login_failures", AsyncMock(return_value=None))
+    monkeypatch.setattr(auth_api.audit, "write", AsyncMock(return_value=None))
+    record_failure = AsyncMock(return_value=None)
+    monkeypatch.setattr(auth_api.auth_login_security, "record_login_failure", record_failure)
+    monkeypatch.setattr(auth_api.auth_service, "verify_totp_step", lambda _s, _c: 59759297)
+
+    # 同一 step（同一枚验证码）连续两次登录都成功。
+    first = await auth_api.login(
+        LoginRequest(username="admin", password="ok", totp_code="123456"),
+        _request(),
+        Response(),
+        db,
+    )
+    assert first.ok is True
+    second = await auth_api.login(
+        LoginRequest(username="admin", password="ok", totp_code="123456"),
+        _request(),
+        Response(),
+        db,
+    )
+    assert second.ok is True
+    record_failure.assert_not_awaited()

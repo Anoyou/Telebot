@@ -50,6 +50,7 @@ from ..db.models.account import (
     ACCOUNT_STATUS_DEAD,
     Account,
 )
+from ..db.models.llm_usage import LLMUsage
 from ..db.models.log import RuntimeLog
 from ..db.models.rate_limit import RateLimitEvent
 from ..db.models.system import SystemSetting
@@ -109,6 +110,9 @@ async def _get_log_retention_config() -> dict[str, int]:
         "trace_payload_snapshot_retention_days": 7,
         "native_raw_persist_enabled": False,
         "native_raw_retention_days": 1,
+        # 用量/风控事件流水与 runtime_log 同机制保留（audit_log 属审计合规数据，不自动删除）
+        "llm_usage_retention_days": 30,
+        "rate_limit_event_retention_days": 30,
     }
     try:
         async with AsyncSessionLocal() as db:
@@ -159,6 +163,20 @@ async def _get_log_retention_config() -> dict[str, int]:
             "native_raw_retention_days": max(
                 0,
                 int(raw.get("native_raw_retention_days", defaults["native_raw_retention_days"]) or 0),
+            ),
+            "llm_usage_retention_days": max(
+                0,
+                int(raw.get("llm_usage_retention_days", defaults["llm_usage_retention_days"]) or 0),
+            ),
+            "rate_limit_event_retention_days": max(
+                0,
+                int(
+                    raw.get(
+                        "rate_limit_event_retention_days",
+                        defaults["rate_limit_event_retention_days"],
+                    )
+                    or 0
+                ),
             ),
         }
     except Exception:
@@ -227,10 +245,11 @@ async def _cleanup_runtime_logs_if_due() -> None:
 
 
 async def _run_retention_cleanup_once() -> dict[str, int]:
-    """按 log_retention 清理过期 runtime_log 与 event_trace。
+    """按 log_retention 清理过期 runtime_log、event_trace、llm_usage 与 rate_limit_event。
 
-    - runtime_log / trace 保留天数互相独立；任一为 0 只跳过对应清理。
+    - runtime_log / trace / llm_usage / rate_limit_event 保留天数互相独立；任一为 0 只跳过对应清理。
     - 不再挂在 runtime_log 消费成功路径上，避免“没日志就不清理 / 有日志就尖峰”。
+    - audit_log 属审计合规数据，不做自动删除（只在 0061 迁移里加了查询索引）。
     """
 
     cfg = await _get_log_retention_config()
@@ -260,17 +279,48 @@ async def _run_retention_cleanup_once() -> dict[str, int]:
         )
     except Exception:
         log.exception("清理过期 event_trace 失败")
+    # LLM 用量流水：滚动窗口外的记录只用于统计，按保留天数清理
+    deleted_llm_usage_rows = 0
+    llm_usage_days = int(cfg.get("llm_usage_retention_days", 30) or 0)
+    if llm_usage_days > 0:
+        cutoff = datetime.now(UTC) - timedelta(days=llm_usage_days)
+        try:
+            async with AsyncSessionLocal() as db:
+                result = await db.execute(delete(LLMUsage).where(LLMUsage.created_at < cutoff))
+                await db.commit()
+                deleted_llm_usage_rows = int(result.rowcount or 0)
+        except Exception:
+            log.exception("清理过期 llm_usage 失败")
+    # 风控事件流：与 runtime_log 同为可滚动的流水数据
+    deleted_rate_limit_events = 0
+    rate_limit_event_days = int(cfg.get("rate_limit_event_retention_days", 30) or 0)
+    if rate_limit_event_days > 0:
+        cutoff = datetime.now(UTC) - timedelta(days=rate_limit_event_days)
+        try:
+            async with AsyncSessionLocal() as db:
+                result = await db.execute(
+                    delete(RateLimitEvent).where(RateLimitEvent.ts < cutoff)
+                )
+                await db.commit()
+                deleted_rate_limit_events = int(result.rowcount or 0)
+        except Exception:
+            log.exception("清理过期 rate_limit_event 失败")
     stats = {
         "deleted_runtime_logs": deleted_runtime_logs,
+        "deleted_llm_usage_rows": deleted_llm_usage_rows,
+        "deleted_rate_limit_events": deleted_rate_limit_events,
         **trace_stats,
     }
     log.info(
         "retention cleanup finished deleted_runtime_logs=%s deleted_traces=%s "
-        "cleared_payload_snapshots=%s cleared_native_raw=%s",
+        "cleared_payload_snapshots=%s cleared_native_raw=%s deleted_llm_usage_rows=%s "
+        "deleted_rate_limit_events=%s",
         stats.get("deleted_runtime_logs", 0),
         stats.get("deleted_traces", 0),
         stats.get("cleared_payload_snapshots", 0),
         stats.get("cleared_native_raw", 0),
+        stats.get("deleted_llm_usage_rows", 0),
+        stats.get("deleted_rate_limit_events", 0),
     )
     return stats
 

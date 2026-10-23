@@ -14281,6 +14281,9 @@
         "description": "首次部署时创建超管账号的接口入参（系统已存在用户后该接口禁用）。",
         "properties": {
           "password": {
+            "description": "≥ 8 位",
+            "maxLength": 256,
+            "minLength": 8,
             "title": "Password",
             "type": "string"
           },
@@ -16175,6 +16178,19 @@
             "title": "Attachments",
             "type": "array"
           },
+          "client_request_id": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "minLength": 8,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Client Request Id"
+          },
           "content": {
             "default": "",
             "maxLength": 32000,
@@ -16300,6 +16316,19 @@
             "maxItems": 64,
             "title": "Approved Tools",
             "type": "array"
+          },
+          "client_request_id": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "minLength": 8,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Client Request Id"
           },
           "fallback_provider_id": {
             "anyOf": [
@@ -18713,6 +18742,17 @@
             ],
             "title": "Inline Updates Enabled"
           },
+          "llm_usage_retention_days": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Llm Usage Retention Days"
+          },
           "native_raw_persist_enabled": {
             "anyOf": [
               {
@@ -18734,6 +18774,17 @@
               }
             ],
             "title": "Native Raw Retention Days"
+          },
+          "rate_limit_event_retention_days": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rate Limit Event Retention Days"
           },
           "runtime_log_max_detail_chars": {
             "anyOf": [
@@ -19218,7 +19269,7 @@
   },
   "info": {
     "title": "TelePilot",
-    "version": "0.102.0-beta.2"
+    "version": "0.103.0-beta.1"
   },
   "openapi": "3.1.0",
   "paths": {
@@ -20362,6 +20413,8 @@
             "required": false,
             "schema": {
               "default": 100,
+              "maximum": 200,
+              "minimum": 1,
               "title": "Limit",
               "type": "integer"
             }
@@ -30911,6 +30964,8 @@
             "required": false,
             "schema": {
               "default": 50,
+              "maximum": 200,
+              "minimum": 1,
               "title": "Limit",
               "type": "integer"
             }
@@ -36905,6 +36960,8 @@
             "required": false,
             "schema": {
               "default": 50,
+              "maximum": 200,
+              "minimum": 1,
               "title": "Limit",
               "type": "integer"
             }
@@ -46845,7 +46902,7 @@
     },
     "/readyz": {
       "get": {
-        "description": "readiness：依赖是否健康（DB + Redis 实际 ping）。\n\n任一依赖不健康都返回 503，便于反代/编排系统据此把流量摘走。\nDB 与 Redis ping **并行执行**，各自 2s 超时；最坏耗时 ~2s 而非串行的 4s\n（后者会踩 docker compose healthcheck timeout: 5s 的边缘）。",
+        "description": "readiness：依赖是否健康（DB + Redis 实际 ping）。\n\n任一依赖不健康都返回 503，便于反代/编排系统据此把流量摘走。\n响应未认证可访问：只返回组件名与 ok 标记，异常细节写日志、不回显。\nDB 与 Redis ping **并行执行**，各自 2s 超时；最坏耗时 ~2s 而非串行的 4s\n（后者会踩 docker compose healthcheck timeout: 5s 的边缘）。",
         "operationId": "readyz_readyz_get",
         "responses": {
           "200": {

@@ -4406,6 +4406,7 @@ export interface paths {
          * @description readiness：依赖是否健康（DB + Redis 实际 ping）。
          *
          *     任一依赖不健康都返回 503，便于反代/编排系统据此把流量摘走。
+         *     响应未认证可访问：只返回组件名与 ok 标记，异常细节写日志、不回显。
          *     DB 与 Redis ping **并行执行**，各自 2s 超时；最坏耗时 ~2s 而非串行的 4s
          *     （后者会踩 docker compose healthcheck timeout: 5s 的边缘）。
          */
@@ -9608,7 +9609,10 @@ export interface components {
          * @description 首次部署时创建超管账号的接口入参（系统已存在用户后该接口禁用）。
          */
         RegisterRequest: {
-            /** Password */
+            /**
+             * Password
+             * @description ≥ 8 位
+             */
             password: string;
             /** Username */
             username: string;
@@ -10314,6 +10318,8 @@ export interface components {
             account_id?: number | null;
             /** Attachments */
             attachments?: components["schemas"]["SystemAgentImageAttachment"][];
+            /** Client Request Id */
+            client_request_id?: string | null;
             /**
              * Content
              * @default
@@ -10360,6 +10366,8 @@ export interface components {
             account_id?: number | null;
             /** Approved Tools */
             approved_tools?: string[];
+            /** Client Request Id */
+            client_request_id?: string | null;
             /** Fallback Provider Id */
             fallback_provider_id?: number | null;
             model_selection?: components["schemas"]["SystemAgentModelSelection"] | null;
@@ -11145,10 +11153,14 @@ export interface components {
             event_bus_delivery_enabled?: boolean | null;
             /** Inline Updates Enabled */
             inline_updates_enabled?: boolean | null;
+            /** Llm Usage Retention Days */
+            llm_usage_retention_days?: number | null;
             /** Native Raw Persist Enabled */
             native_raw_persist_enabled?: boolean | null;
             /** Native Raw Retention Days */
             native_raw_retention_days?: number | null;
+            /** Rate Limit Event Retention Days */
+            rate_limit_event_retention_days?: number | null;
             /** Runtime Log Max Detail Chars */
             runtime_log_max_detail_chars?: number | null;
             /** Runtime Log Max Message Chars */

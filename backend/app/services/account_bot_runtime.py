@@ -416,6 +416,7 @@ _POLLING_UPDATE_RETRY_DELAYS_SECONDS = (1.0, 3.0)
 _POLLING_DLQ_MAX = 500
 _POLLING_DLQ_LOOPS = {"interaction", "management", "transfer_test"}
 _INTERACTION_UPDATE_CONCURRENCY = 8
+_MANAGEMENT_UPDATE_CONCURRENCY = 8
 _INTERACTION_DEBUG_PAYLOAD_SAMPLE_MODULO = 5
 _INTERACTION_DEBUG_FULL_STAGES = {"plugin_error", "actions_guarded"}
 _INTERACTION_DEBUG_SAMPLED_STAGES = {"payload_built"}
@@ -1159,21 +1160,29 @@ async def stop_account_bot_manager() -> None:
 async def restart_account_bot(aid: int) -> None:
     """重启单个账号 Bot polling task。"""
 
+    # 配置（token / enabled）刚被变更，轮询配置缓存立即失效
+    _invalidate_management_polling_config_cache(aid)
+
+    # 配置读取/校验与停用状态写回在锁外完成：持 _TASK_LOCK 期间不做任何
+    # DB I/O，避免连接池耗尽时所有账号的 Bot 重启在锁上串行卡住。配置在
+    # 调用前已由 API 层提交，锁外读不影响结果；极端并发交错下新任务首轮
+    # 也会重读配置（缓存已被上面失效），误启动会在一个轮询周期内自愈。
+    should_start = False
+    async with AsyncSessionLocal() as db:
+        row = (
+            await db.execute(
+                select(AccountBot).where(AccountBot.account_id == aid)
+            )
+        ).scalar_one_or_none()
+        should_start = bool(row and row.enabled and row.bot_token_enc)
+        if row and not should_start:
+            row.status = ACCOUNT_BOT_STATUS_DISABLED if not row.enabled else ACCOUNT_BOT_STATUS_STOPPED
+            await db.commit()
+
     async with _TASK_LOCK:
         old = _TASKS.pop(aid, None)
         if old is not None:
             old.cancel()
-        should_start = False
-        async with AsyncSessionLocal() as db:
-            row = (
-                await db.execute(
-                    select(AccountBot).where(AccountBot.account_id == aid)
-                )
-            ).scalar_one_or_none()
-            should_start = bool(row and row.enabled and row.bot_token_enc)
-            if row and not should_start:
-                row.status = ACCOUNT_BOT_STATUS_DISABLED if not row.enabled else ACCOUNT_BOT_STATUS_STOPPED
-                await db.commit()
         if should_start:
             _TASKS[aid] = asyncio.create_task(_polling_loop(aid), name=f"account-bot:{aid}")
     if old is not None:
@@ -2001,36 +2010,127 @@ async def _set_account_bot_runtime_state_best_effort(
         log.warning("account bot runtime state update failed aid=%s", aid, exc_info=True)
 
 
+# 管理 Bot 轮询配置短 TTL 缓存：繁忙账号的 getUpdates 周期可能小于一秒，
+# 每个周期整行 select + 解密 token 既浪费 DB 也反复跑解密。配置变更都会经
+# restart_account_bot 重启任务（那里显式失效缓存）；TTL 只兜底本进程外直改
+# DB 的场景，5 秒内的不一致可接受。游标 last_update_id 不进缓存——它由本
+# 循环自己推进，必须每轮跟随最新值。
+_MANAGEMENT_POLLING_CONFIG_CACHE: dict[int, tuple[float, str]] = {}
+_MANAGEMENT_POLLING_CONFIG_TTL_SECONDS = 5.0
+
+
+def _invalidate_management_polling_config_cache(aid: int) -> None:
+    """配置变更（token 轮换 / 开关）后由 restart_account_bot 调用，立即失效。"""
+
+    _MANAGEMENT_POLLING_CONFIG_CACHE.pop(int(aid), None)
+
+
+def _cached_management_polling_token(aid: int) -> str | None:
+    cached = _MANAGEMENT_POLLING_CONFIG_CACHE.get(int(aid))
+    if cached is None:
+        return None
+    cached_at, token = cached
+    if time.monotonic() - cached_at > _MANAGEMENT_POLLING_CONFIG_TTL_SECONDS:
+        _MANAGEMENT_POLLING_CONFIG_CACHE.pop(int(aid), None)
+        return None
+    return token
+
+
+def _remember_management_polling_token(aid: int, token: str) -> None:
+    _MANAGEMENT_POLLING_CONFIG_CACHE[int(aid)] = (time.monotonic(), token)
+
+
+async def _handle_management_polling_updates_batch(
+    *,
+    aid: int,
+    token: str,
+    updates: list[dict[str, Any]],
+) -> tuple[int | None, str | None]:
+    """管理 Bot 批量处理：同 chat 顺序串行，不同 chat 并发。
+
+    一轮内可能混有触发长 Agent 查询的 chat 与普通命令 chat；串行逐条
+    await 会让 getUpdates 停摆最长达单轮 Agent 超时。这里对照交互侧
+    _handle_interaction_polling_updates_batch 按 chat 分桶并发，整批
+    （所有桶）处理完后再由调用方推进 update 游标，语义保持不变。
+
+    游标语义是刻意的 at-most-once：batch_last_update_id 取整批（含处理
+    失败的 update）的最大 update_id 一并推进，失败 update 不会被下一轮
+    重新拉取、即被永久跳过——否则毒丸消息（必失败的 update）会让游标
+    永远卡住，阻断该账号后续全部消息。补偿途径：处理失败（重试耗尽）的
+    update 由 _record_polling_dead_letter 连同原始 payload 写入 Redis
+    DLQ（每账号上限 _POLLING_DLQ_MAX 条），可经 _replay_polling_dead_letter
+    人工重放，不会无迹丢失。
+    """
+
+    buckets: dict[str, list[tuple[int, dict[str, Any]]]] = {}
+    batch_last_update_id: int | None = None
+    for index, update in enumerate(updates):
+        update_id = int(update.get("update_id", 0))
+        batch_last_update_id = update_id if batch_last_update_id is None else max(batch_last_update_id, update_id)
+        key = _polling_update_chat_key(aid, token, update)
+        buckets.setdefault(key, []).append((index, update))
+
+    semaphore = asyncio.Semaphore(_MANAGEMENT_UPDATE_CONCURRENCY)
+    batch_errors: list[tuple[int, str]] = []
+
+    async def _run_bucket(items: list[tuple[int, dict[str, Any]]]) -> None:
+        async with semaphore:
+            for index, update in items:
+                update_error = await _handle_polling_update_with_retries(
+                    aid=aid,
+                    token=token,
+                    update=update,
+                    loop_name="account bot",
+                    loop="management",
+                    token_role="management",
+                    handler=_handle_update,
+                )
+                if update_error is not None:
+                    batch_errors.append((index, update_error))
+
+    await asyncio.gather(*(_run_bucket(items) for items in buckets.values()))
+    batch_error = max(batch_errors, key=lambda item: item[0])[1] if batch_errors else None
+    return batch_last_update_id, batch_error
+
+
 async def _polling_loop(aid: int) -> None:
     backoff = 2.0
     token = ""
+    # 游标用局部变量跟踪：缓存命中的周期不再查库，批处理提交后同步推进；
+    # 缓存未命中（≤5s 一次）重读配置时与 DB 里的 last_update_id 重新对齐
+    offset: int | None = None
     try:
         while True:
             try:
-                async with AsyncSessionLocal() as db:
-                    row = (
-                        await db.execute(
-                            select(AccountBot).where(AccountBot.account_id == aid)
-                        )
-                    ).scalar_one_or_none()
-                    if row is None or not row.enabled or not row.bot_token_enc:
-                        if row is not None:
-                            row.status = ACCOUNT_BOT_STATUS_DISABLED
+                cached_token = _cached_management_polling_token(aid)
+                if cached_token is not None:
+                    token = cached_token
+                else:
+                    async with AsyncSessionLocal() as db:
+                        row = (
+                            await db.execute(
+                                select(AccountBot).where(AccountBot.account_id == aid)
+                            )
+                        ).scalar_one_or_none()
+                        if row is None or not row.enabled or not row.bot_token_enc:
+                            if row is not None:
+                                row.status = ACCOUNT_BOT_STATUS_DISABLED
+                                await db.commit()
+                            return
+                        try:
+                            token = account_bot_service.decrypt_bot_token(row)
+                        except Exception as exc:  # noqa: BLE001
+                            row.status = ACCOUNT_BOT_STATUS_ERROR
+                            row.last_error = account_bot_service.sanitize_bot_error(exc)
                             await db.commit()
-                        return
-                    try:
-                        token = account_bot_service.decrypt_bot_token(row)
-                    except Exception as exc:  # noqa: BLE001
-                        row.status = ACCOUNT_BOT_STATUS_ERROR
-                        row.last_error = account_bot_service.sanitize_bot_error(exc)
-                        await db.commit()
-                        return
-                    offset = (row.last_update_id + 1) if row.last_update_id is not None else None
-                    if row.status != ACCOUNT_BOT_STATUS_RUNNING:
-                        row.status = ACCOUNT_BOT_STATUS_RUNNING
-                        row.last_error = None
-                        await db.commit()
-                    event_flags = await _event_framework_flags()
+                            return
+                        offset = (row.last_update_id + 1) if row.last_update_id is not None else None
+                        if row.status != ACCOUNT_BOT_STATUS_RUNNING:
+                            row.status = ACCOUNT_BOT_STATUS_RUNNING
+                            row.last_error = None
+                            await db.commit()
+                        _remember_management_polling_token(aid, token)
+                event_flags = await _event_framework_flags()
             except asyncio.CancelledError:
                 raise
             except Exception as exc:  # noqa: BLE001
@@ -2063,26 +2163,13 @@ async def _polling_loop(aid: int) -> None:
                 if not isinstance(updates, list):
                     updates = []
                 backoff = 2.0
-                batch_last_update_id: int | None = None
-                batch_error: str | None = None
-                for update in updates:
-                    update_id = int(update.get("update_id", 0))
-                    update_error = await _handle_polling_update_with_retries(
-                        aid=aid,
-                        token=token,
-                        update=update,
-                        loop_name="account bot",
-                        loop="management",
-                        token_role="management",
-                        handler=_handle_update,
-                    )
-                    if update_error is not None:
-                        batch_error = update_error
-                    batch_last_update_id = (
-                        update_id
-                        if batch_last_update_id is None
-                        else max(batch_last_update_id, update_id)
-                    )
+                # 按 chat 分桶并发处理整批 update，避免单 chat 的长 Agent
+                # 查询阻塞其他 chat 的命令；批处理完成后再推进游标
+                batch_last_update_id, batch_error = await _handle_management_polling_updates_batch(
+                    aid=aid,
+                    token=token,
+                    updates=updates,
+                )
                 if batch_last_update_id is not None:
                     async with AsyncSessionLocal() as db:
                         row = (
@@ -2096,6 +2183,12 @@ async def _polling_loop(aid: int) -> None:
                             row.status = ACCOUNT_BOT_STATUS_RUNNING
                             row.last_error = batch_error
                             await db.commit()
+                            # 游标提交后同步局部 offset，缓存命中周期直接复用
+                            offset = (
+                                (row.last_update_id + 1)
+                                if row.last_update_id is not None
+                                else None
+                            )
             except asyncio.CancelledError:
                 raise
             except Exception as exc:  # noqa: BLE001
@@ -2110,11 +2203,17 @@ async def _polling_loop(aid: int) -> None:
                 await asyncio.sleep(backoff)
                 backoff = min(backoff * 2, 60.0)
     except asyncio.CancelledError:
-        await _set_account_bot_runtime_state_best_effort(
-            aid,
-            status=ACCOUNT_BOT_STATUS_STOPPED,
-            only_if_enabled=True,
-        )
+        # restart_account_bot 在锁内先登记新任务、锁外再等旧任务退出：本
+        # 处理器可能与新任务的 RUNNING 写入交错。若 _TASKS[aid] 槽位已被
+        # 其他 task 接管，说明这是重启交接而非真正停机，跳过 STOPPED 回写，
+        # 避免状态页短暂回退成"已停止"；槽位为空或仍是本任务时保持原行为。
+        successor = _TASKS.get(aid)
+        if successor is None or successor is asyncio.current_task():
+            await _set_account_bot_runtime_state_best_effort(
+                aid,
+                status=ACCOUNT_BOT_STATUS_STOPPED,
+                only_if_enabled=True,
+            )
         raise
 
 

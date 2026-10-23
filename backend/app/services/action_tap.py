@@ -10,7 +10,7 @@ import json
 import logging
 import time
 from datetime import datetime
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
 
@@ -35,6 +35,10 @@ from ..worker.ipc import event_channel, make_event
 from .redactor import redact_text, redact_value
 
 log = logging.getLogger(__name__)
+
+# 资金台账方向值（ledger_service 从此处导入并对外 re-export，保持单一来源）。
+LEDGER_DIRECTION_IN = "in"
+LEDGER_DIRECTION_OUT = "out"
 
 ACTION_TAP_EVENT_TYPE = "action_event"
 ACTION_TAP_ERROR_LIMIT = 500
@@ -324,6 +328,9 @@ async def emit_action_event(
     )
     if payout_key and "payout_key" not in params_summary:
         params_summary["payout_key"] = payout_key
+    # 资金台账提取列：写入时按台账口径从 params_summary 派生冗余列（见 alembic 0062），
+    # 让读取侧的金额/群/方向过滤与聚合可下推到 SQL；params_summary JSON 原样保留。
+    ledger_direction, ledger_amount, ledger_chat_id = derive_ledger_columns(action_type, params_summary)
     row = ActionEvent(
         account_id=account,
         channel=resolved_channel,
@@ -337,6 +344,9 @@ async def emit_action_event(
         error_summary=error_summary,
         payout_key=payout_key,
         source_event_key=source_event_key,
+        direction=ledger_direction,
+        amount=ledger_amount,
+        chat_id=ledger_chat_id,
     )
     if db is not None:
         db.add(row)
@@ -520,6 +530,65 @@ def summarize_action_params(action: dict[str, Any] | None, *, result: Any = None
         if result_summary:
             summary["result"] = result_summary
     return redact_value(summary, drop_sensitive_keys=True)
+
+
+# ---- 资金台账提取列派生（与 ledger_service 读取口径、alembic 0062 回填口径一致） ----
+# amount/chat_id/direction 三个冗余列在写入时按下面的优先级从 params_summary 派生，
+# 读取侧（ledger_service）过滤与聚合只依赖这三列；三处口径必须保持同步。
+
+
+def ledger_direction_from_action(action_type: str, summary: dict[str, Any]) -> str | None:
+    """payment_confirmed 类事件为 in，payout 类动作为 out，其余返回 None。"""
+
+    action = str(action_type or "").strip().lower()
+    summary_type = str(summary.get("type") or summary.get("action_type") or "").strip().lower()
+    event_type = str(summary.get("event_type") or "").strip().lower()
+    source_type = str(_nested(summary, "source", "type") or "").strip().lower()
+    raw_event_type = str(_nested(summary, "raw", "event_type") or "").strip().lower()
+    if action == "payment_confirmed" or "payment_confirmed" in {summary_type, event_type, source_type, raw_event_type}:
+        return LEDGER_DIRECTION_IN
+    if action == "payout" or summary_type == "payout" or action.endswith("_payout") or action.startswith("payout_"):
+        return LEDGER_DIRECTION_OUT
+    return None
+
+
+def ledger_amount_from_summary(summary: dict[str, Any]) -> Decimal | None:
+    """按台账口径提取金额：amount / payment.amount / parsed.amount / raw.parsed.amount / result.amount。"""
+
+    return _decimal_from_any(
+        summary.get("amount"),
+        _nested(summary, "payment", "amount"),
+        _nested(summary, "parsed", "amount"),
+        _nested(summary, "raw", "parsed", "amount"),
+        _nested(summary, "result", "amount"),
+    )
+
+
+def ledger_chat_id_from_summary(summary: dict[str, Any]) -> int | None:
+    """按台账口径提取 chat_id：chat_id / source.chat_id / chat.id / payment.chat_id。"""
+
+    return _int_or_none(
+        summary.get("chat_id"),
+        _nested(summary, "source", "chat_id"),
+        _nested(summary, "chat", "id"),
+        _nested(summary, "payment", "chat_id"),
+    )
+
+
+def derive_ledger_columns(
+    action_type: str,
+    params_summary: dict[str, Any],
+) -> tuple[str | None, Decimal | None, int | None]:
+    """从 params_summary 派生 (direction, amount, chat_id) 三个台账提取列。
+
+    JSON 缺字段时对应列为 None——与旧读取路径"缺字段行不产生台账条目"的口径一致。
+    """
+
+    return (
+        ledger_direction_from_action(action_type, params_summary),
+        ledger_amount_from_summary(params_summary),
+        ledger_chat_id_from_summary(params_summary),
+    )
 
 
 async def _persist_action_event(row: ActionEvent) -> tuple[ActionEvent | None, bool]:
@@ -738,13 +807,43 @@ def _first_text(*values: Any) -> str | None:
     return None
 
 
-def _int_or_none(value: Any) -> int | None:
-    try:
-        if value in (None, ""):
+def _int_or_none(*values: Any) -> int | None:
+    """返回第一个可解析为 int 的值（与 ledger 解析行为一致）。"""
+
+    for value in values:
+        try:
+            if value in (None, ""):
+                continue
+            return int(value)
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
+def _nested(payload: dict[str, Any], *path: str) -> Any:
+    """按路径读取嵌套 dict，路径中断或非 dict 时返回 None。"""
+
+    current: Any = payload
+    for key in path:
+        if not isinstance(current, dict):
             return None
-        return int(value)
-    except (TypeError, ValueError):
-        return None
+        current = current.get(key)
+    return current
+
+
+def _decimal_from_any(*values: Any) -> Decimal | None:
+    """返回第一个可解析为 Decimal 的值（与 ledger 旧解析行为一致）。"""
+
+    for value in values:
+        if value in (None, ""):
+            continue
+        try:
+            if isinstance(value, Decimal):
+                return value
+            return Decimal(str(value).strip())
+        except (InvalidOperation, ValueError):
+            continue
+    return None
 
 
 __all__ = [
@@ -754,14 +853,20 @@ __all__ = [
     "ACTION_EVENT_STATUS_OK",
     "ACTION_EVENT_STATUS_PENDING",
     "ACTION_TAP_EVENT_TYPE",
+    "LEDGER_DIRECTION_IN",
+    "LEDGER_DIRECTION_OUT",
     "action_context",
     "action_context_dry_run_enabled",
     "dev_mode_dry_run_enabled",
     "dev_mode_recording_enabled",
+    "derive_ledger_columns",
     "emit_action_event",
     "emit_compensated_payout_event",
     "emit_inbound_event",
     "find_payout_ledger_event",
     "find_source_action_event",
+    "ledger_amount_from_summary",
+    "ledger_chat_id_from_summary",
+    "ledger_direction_from_action",
     "summarize_action_params",
 ]

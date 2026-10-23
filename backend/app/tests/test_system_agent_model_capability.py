@@ -15,8 +15,8 @@ from app.services.system_agent.config import ResolvedAgentProviders
 
 
 @pytest.fixture
-async def setting_db():
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+async def setting_db(tmp_path):
+    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'settings.sqlite'}")
     async with engine.begin() as conn:
         await conn.run_sync(SystemSetting.__table__.create)
     factory = async_sessionmaker(engine, expire_on_commit=False)
@@ -473,3 +473,144 @@ async def test_primary_verification_does_not_leak_across_concurrent_turns(
     first, second = await asyncio.gather(turn(), turn())
     assert first is not None and first.provisional is True
     assert second is not None and second.provisional is True
+
+
+# ─────────── 后台刷新任务强引用 & 并发探测局部 upsert ───────────
+
+
+@pytest.mark.asyncio
+async def test_schedule_capability_refresh_keeps_strong_reference(monkeypatch) -> None:
+    """后台刷新任务必须登记到模块级集合并随完成移除（事件循环只持弱引用）。"""
+
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def fake_refresh(_items):
+        started.set()
+        await release.wait()
+
+    monkeypatch.setattr(model_capability, "_refresh_capability_cache_background", fake_refresh)
+
+    model_capability.schedule_capability_refresh(
+        [(_provider(1, models=["m1"]), "m1", "sig-1")]
+    )
+    await started.wait()
+    # 任务存活期间已登记（持强引用，不会被 GC）
+    assert len(model_capability._REFRESH_TASKS) == 1
+    release.set()
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+    assert model_capability._REFRESH_TASKS == set()  # done_callback 已移除
+
+
+@pytest.mark.asyncio
+async def test_concurrent_probes_merge_distinct_signatures(setting_db, monkeypatch) -> None:
+    """并发探测不同 signature 不能互相覆盖：A 写回前挂起、B 先完成，A 恢复后两者都在。"""
+
+    provider_a = _provider(1, models=["model-a"])
+    provider_b = _provider(2, models=["model-b"])
+    sig_a = model_capability._provider_signature(provider_a, "model-a")
+    sig_b = model_capability._provider_signature(provider_b, "model-b")
+    assert sig_a != sig_b
+
+    db_a = setting_db()
+    a_probed = asyncio.Event()
+    release_a = asyncio.Event()
+
+    async def probe(provider, _model):  # noqa: ANN001
+        if provider.id == 1:
+            result = model_capability.CapabilityProbeResult("supported", datetime.now(UTC))
+            a_probed.set()
+            await release_a.wait()
+            return result
+        return model_capability.CapabilityProbeResult("unsupported", datetime.now(UTC))
+
+    monkeypatch.setattr(model_capability, "probe_model_tool_capability", probe)
+
+    resolved = ResolvedAgentProviders(
+        primary=provider_a,
+        model="model-a",
+        providers={1: provider_a},
+    )
+    task_a = asyncio.create_task(
+        model_capability.verify_resolved_agent_providers(db_a, resolved)
+    )
+    await a_probed.wait()
+
+    # A 挂在写回前：B 走后台刷新路径，完整写入 sig_b
+    import app.db.base as db_base
+
+    monkeypatch.setattr(db_base, "AsyncSessionLocal", setting_db)
+    await model_capability._refresh_capability_cache_background(
+        [(provider_b, "model-b", sig_b)]
+    )
+    async with setting_db() as db:
+        committed = await db.get(SystemSetting, model_capability.CACHE_KEY)
+        assert sig_b in committed.value["entries"]
+
+    # 放行 A：写回必须重读现值、只 upsert sig_a，不得丢掉 B 的结果
+    release_a.set()
+    result_a = await task_a
+    await db_a.close()
+    assert not isinstance(result_a, str)
+
+    async with setting_db() as db:
+        row = await db.get(SystemSetting, model_capability.CACHE_KEY)
+        entries = row.value["entries"]
+    assert sig_a in entries
+    assert sig_b in entries
+    assert entries[sig_b]["status"] == "unsupported"
+    assert entries[sig_a]["status"] == "supported"
+
+
+@pytest.mark.asyncio
+async def test_upsert_cache_entries_refreshes_stale_identity_map_row(setting_db) -> None:
+    """upsert 的"重读现值"必须穿透会话 identity map，否则合并到过期快照上。
+
+    真实场景：请求路径先读过缓存（行对象进入会话身份映射），探测 await 期间
+    并发会话写入了新条目；旧实现的 db.get 命中身份映射拿到旧行对象，合并写回
+    把并发条目整体覆盖丢失。
+    """
+    store: dict = {}
+    store[model_capability.CACHE_KEY] = {
+        "version": 1,
+        "entries": {
+            "sig_old": {"status": "supported", "checked_at": "2026-10-24T00:00:00+00:00"},
+        },
+    }
+    async with setting_db() as seed_db:
+        seed_db.add(SystemSetting(key=model_capability.CACHE_KEY, value=store[model_capability.CACHE_KEY]))
+        await seed_db.commit()
+    db = setting_db()
+    # 第一次读：行对象（含 sig_old）进入身份映射
+    row = await db.get(SystemSetting, model_capability.CACHE_KEY)
+    assert row is not None
+
+    # 并发会话已提交的新状态：store 里多了一个新 signature 条目
+    concurrent = {
+        "version": 1,
+        "entries": {
+            "sig_old": {"status": "supported", "checked_at": "2026-10-24T00:00:00+00:00"},
+            "sig_concurrent": {"status": "unsupported", "checked_at": "2026-10-24T00:01:00+00:00"},
+        },
+    }
+    async with setting_db() as concurrent_db:
+        concurrent_row = await concurrent_db.get(SystemSetting, model_capability.CACHE_KEY)
+        concurrent_row.value = concurrent
+        await concurrent_db.commit()
+
+    # 本会话 upsert：必须 refresh 重读，把 sig_concurrent 一并保留
+    await model_capability._upsert_cache_entries(
+        db,
+        {"sig_new": {"status": "supported", "checked_at": "2026-10-24T00:02:00+00:00"}},
+    )
+    await db.commit()
+    await db.close()
+
+    async with setting_db() as verification_db:
+        current = await verification_db.get(SystemSetting, model_capability.CACHE_KEY)
+        entries = current.value["entries"]
+    assert "sig_new" in entries
+    assert "sig_concurrent" in entries
+    assert entries["sig_concurrent"]["status"] == "unsupported"
+    assert "sig_old" in entries

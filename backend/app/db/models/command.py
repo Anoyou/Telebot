@@ -23,14 +23,19 @@ from sqlalchemy import (
     Boolean,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
     func,
 )
+from sqlalchemy.dialects import postgresql
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from ..base import Base
+
+# PG 生产库为 JSONB（与 0003/0006/0008/0011 迁移终态一致）；SQLite（测试/本地）回落到通用 JSON
+JSONB_VARIANT = JSON().with_variant(postgresql.JSONB(), "postgresql")
 
 # ── 命令类型枚举 ────────────────────────────────────────────
 COMMAND_TYPE_REPLY_TEXT = "reply_text"   # 收到 → 编辑原消息为指定文本
@@ -249,12 +254,12 @@ class CommandTemplate(Base):
     name: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
     # 命令别名列表（JSON 数组，元素同 name 规则；跨模板唯一性由 service 层校验）
     aliases: Mapped[list[str]] = mapped_column(
-        JSON, nullable=False, default=list, server_default="[]"
+        JSONB_VARIANT, nullable=False, default=list, server_default="[]"
     )
     # 取值见上方常量；schema 层做合法性校验
     type: Mapped[str] = mapped_column(String(16), nullable=False)
     # 按 type 决定结构；统一存 JSON
-    config: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+    config: Mapped[dict[str, Any]] = mapped_column(JSONB_VARIANT, default=dict, nullable=False)
     description: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
@@ -279,6 +284,8 @@ class AccountCommandLink(Base):
         primary_key=True,
     )
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
+    __table_args__ = (Index("ix_account_command_link_account", "account_id"),)
 
 
 class LLMProvider(Base):
@@ -353,7 +360,7 @@ class LLMProvider(Base):
     # - ``custom``   true = 用户手动添加；false = 从 GET /v1/models 拉的
     # - ``label``    可选展示名（默认就用 id）
     models: Mapped[list[dict[str, Any]]] = mapped_column(
-        JSON, nullable=False, default=list, server_default="[]"
+        JSONB_VARIANT, nullable=False, default=list, server_default="[]"
     )
     # ── 路由元数据 ────────────────────────────────
     # 模态：text/vision/audio/multimodal；默认 text
@@ -362,7 +369,7 @@ class LLMProvider(Base):
     )
     # 标签数组；JSON list[str]；默认空列表
     tags: Mapped[list[str]] = mapped_column(
-        JSON, nullable=False, default=list, server_default="[]"
+        JSONB_VARIANT, nullable=False, default=list, server_default="[]"
     )
     # 成本档：1=cheap / 2=mid / 3=premium；默认 2
     cost_tier: Mapped[int] = mapped_column(
@@ -373,7 +380,7 @@ class LLMProvider(Base):
     # 出口代理（指向 proxy 表）；NULL = 直连（DIRECT），即不走任何代理。
     # 历史 mtproxy 行不受当前运行链路支持；HTTP 客户端也会拒绝。
     proxy_id: Mapped[int | None] = mapped_column(
-        BigInteger, ForeignKey("proxy.id", ondelete="SET NULL"), nullable=True
+        BigInteger, ForeignKey("proxy.id", ondelete="SET NULL"), nullable=True, index=True
     )
     # 多密钥选钥策略；只有池内存在启用密钥时才生效，主密钥 ``api_key_enc`` 始终参与候选。
     key_strategy: Mapped[str] = mapped_column(

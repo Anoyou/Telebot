@@ -14,8 +14,9 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import time as _time
-from urllib.parse import unquote, urlsplit
+from urllib.parse import quote, unquote, urlsplit
 
 import httpx
 from fastapi import APIRouter, HTTPException, status
@@ -31,6 +32,8 @@ from ..deps import CurrentUser, DBSession
 from ..services import audit, proxy_probe_cache
 
 router = APIRouter(prefix="/api/proxies", tags=["proxies"])
+
+log = logging.getLogger(__name__)
 
 
 # ── Schemas ──────────────────────────────────────────────────────
@@ -153,11 +156,13 @@ async def create_proxy(payload: ProxyCreate, db: DBSession, user: CurrentUser) -
         password_enc=encrypt_str(password) if password else None,
     )
     db.add(p)
+    # flush 先拿到自增 id 供审计 target 使用；实体与审计同事务、一次 commit，
+    # 避免旧的"先 commit 实体再 commit 审计"两段式在第二步失败时留下已入库代理。
+    await db.flush()
+    await audit.write(db, user.id, "create_proxy", target=str(p.id),
+                      detail={"type": p.type, "host": p.host, "port": p.port})
     await db.commit()
     await db.refresh(p)
-    await audit.write(db, user.id, "create_proxy", target=str(p.id),
-                       detail={"type": p.type, "host": p.host, "port": p.port})
-    await db.commit()
     return _to_out(p)
 
 
@@ -340,8 +345,9 @@ async def _resolve_country(client_factory) -> dict[str, str | None]:
                     "region": d.get("regionName") or d.get("region"),
                     "city": d.get("city"),
                 }
-    except Exception:
-        pass
+    except Exception as exc:
+        # 出口探测失败不能静默：否则出口 IP 缺失会被缓存 30 分钟且无从排查。
+        log.warning("proxy geo probe (ip-api.com) failed: %s", type(exc).__name__)
     try:
         async with client_factory() as cli:
             r = await cli.get("https://ipinfo.io/json", timeout=8.0)
@@ -353,7 +359,8 @@ async def _resolve_country(client_factory) -> dict[str, str | None]:
                 "region": d.get("region"),
                 "city": d.get("city"),
             }
-    except Exception:
+    except Exception as exc:
+        log.warning("proxy geo probe (ipinfo.io) failed: %s", type(exc).__name__)
         return {"exit_ip": None, "country": None, "region": None, "city": None}
 
 
@@ -406,13 +413,22 @@ async def test_proxy(pid: int, db: DBSession, _user: CurrentUser) -> ProxyTestRe
 
     # 第二步：通过该代理访问 ipinfo.io 拿出口 IP
     def _make_client():
+        # 凭据一律结构化/编码后拼 URL：手拼裸字符串在"有用户名无密码"时会拼出
+        # 字面量 None 或直接 TypeError，含 @:/ 的密码也会解析出错误的 host/凭据。
+        host = f"[{p.host}]" if ":" in (p.host or "") else (p.host or "")
         if proxy_type in ("http", "https"):
-            url = f"http://{p.username + ':' + pwd + '@' if p.username else ''}{p.host}:{p.port}"
+            url = f"http://{host}:{p.port}"
+            if p.username:
+                proxy = httpx.Proxy(url, auth=httpx.BasicAuth(p.username, pwd or ""))
+                return httpx.AsyncClient(proxy=proxy)
             return httpx.AsyncClient(proxy=url)
         if proxy_type == "socks5":
-            scheme = "socks5"
-            auth = f"{p.username}:{pwd}@" if p.username else ""
-            url = f"{scheme}://{auth}{p.host}:{p.port}"
+            userinfo = ""
+            if p.username:
+                user = quote(str(p.username), safe="")
+                password = quote(str(pwd or ""), safe="")
+                userinfo = f"{user}:{password}@"
+            url = f"socks5://{userinfo}{host}:{p.port}"
             return httpx.AsyncClient(proxy=url)
         raise ValueError(f"不支持的代理类型: {p.type}")
 

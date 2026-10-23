@@ -393,7 +393,10 @@ class SystemAgentRuntime:
                     progress_callback=emit_model_progress,
                     known_secrets=turn_secrets,
                     client_runtime_metadata=build_runtime_metadata(
-                        session_id=session.id,
+                        # 路由调用与主对话共用同一会话假名会在上游前缀缓存里互相
+                        # 冲刷；用独立命名空间隔离（llm_call_context 只按值派生
+                        # 假名，不校验格式），主对话路径保持原样
+                        session_id=f"router:{session.id}",
                         run_id=run_id,
                         turn_id=run_id,
                     ),

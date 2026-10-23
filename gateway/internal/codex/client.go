@@ -98,7 +98,14 @@ func (h *Handler) responses(w http.ResponseWriter, r *http.Request) {
 	}
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxRequestBodyBytes))
 	if err != nil {
-		writeError(w, http.StatusRequestEntityTooLarge, contract.GatewayError{Code: "request_invalid", Message: "Responses request is too large", RequestID: requestID(r), GatewayStage: "routing"})
+		// 只有真正超限才回 413；客户端中断/网络错误等其它读失败按 400 处理，
+		// 不能一律伪装成"请求过大"。
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			writeError(w, http.StatusRequestEntityTooLarge, contract.GatewayError{Code: "request_invalid", Message: "Responses request is too large", RequestID: requestID(r), GatewayStage: "routing"})
+		} else {
+			writeError(w, http.StatusBadRequest, contract.GatewayError{Code: "request_invalid", Message: "Failed to read request body", RequestID: requestID(r), GatewayStage: "routing"})
+		}
 		return
 	}
 	var payload map[string]any

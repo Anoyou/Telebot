@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 from datetime import datetime
 from typing import Any
 
@@ -33,6 +34,7 @@ from ..services.system_console_logs import (
 )
 
 router = APIRouter(tags=["logs"])
+log = logging.getLogger(__name__)
 _LOCAL_CONSOLE_FILES = LOCAL_CONSOLE_FILES
 _fetch_updater_console_logs = fetch_updater_console_logs
 _filter_console_payload = filter_console_payload
@@ -988,5 +990,15 @@ async def list_system_console_logs(
             local_files=_LOCAL_CONSOLE_FILES,
         )
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        # 参数/服务名校验失败：细节只进服务端日志；给前端的必须是 {"code","message"}
+        # 信封，异常原文经脱敏截断后拼入 message 供管理员定位。
+        detail = redact_text(f"{type(exc).__name__}: {exc}")[:300]
+        log.warning("系统控制台日志请求被拒 service=%s tail=%s: %s", body.service, body.tail, detail)
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "SYSTEM_CONSOLE_LOGS_INVALID",
+                "message": f"系统控制台日志请求无效：{detail}",
+            },
+        ) from exc
     return SystemConsoleLogsResponse(**payload)

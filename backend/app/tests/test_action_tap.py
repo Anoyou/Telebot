@@ -163,6 +163,95 @@ async def test_emit_action_event_persists_status_and_publishes(
 
 
 @pytest.mark.asyncio
+async def test_emit_action_event_persists_ledger_columns(action_event_session_factory) -> None:
+    """写入路径同步派生 direction/amount/chat_id 三个台账提取列，params_summary 原样保留。"""
+
+    await action_tap.emit_action_event(
+        account_id=7,
+        action={
+            "type": "payout",
+            "amount": Decimal("12.50"),
+            "chat_id": -100123,
+            "chat_title": "测试群",
+            "receiver_user_id": 9001,
+            "payout_key": "pay_cols",
+        },
+        status=ACTION_EVENT_STATUS_OK,
+        channel="userbot_reply",
+    )
+    await action_tap.emit_action_event(
+        account_id=7,
+        action={
+            "type": "payment_confirmed",
+            "amount": "100.50",
+            "chat_id": -100123,
+            "source_event_key": "update:cols",
+        },
+        status=ACTION_EVENT_STATUS_OK,
+        channel="external_payment_notice",
+    )
+    await action_tap.emit_action_event(
+        account_id=7,
+        action={"type": "send_message", "text": "普通消息", "chat_id": -100123},
+        status=ACTION_EVENT_STATUS_OK,
+    )
+
+    async with action_event_session_factory() as db:
+        rows = {
+            row.action_type: row
+            for row in (await db.execute(select(ActionEvent).order_by(ActionEvent.id))).scalars().all()
+        }
+
+    payout = rows["payout"]
+    assert (payout.direction, payout.amount, payout.chat_id) == ("out", Decimal("12.50"), -100123)
+    assert payout.params_summary["amount"] == "12.50"
+    assert payout.params_summary["chat_id"] == -100123
+    assert payout.params_summary["chat_title"] == "测试群"
+
+    payment = rows["payment_confirmed"]
+    assert (payment.direction, payment.amount, payment.chat_id) == ("in", Decimal("100.50"), -100123)
+    assert payment.params_summary["type"] == "payment_confirmed"
+
+    # 非资金动作：direction/amount 为 NULL（不产生台账条目），chat_id 仍可提取。
+    send = rows["send_message"]
+    assert send.direction is None and send.amount is None
+    assert send.chat_id == -100123
+
+
+@pytest.mark.asyncio
+async def test_emit_action_event_keeps_ledger_columns_in_sync_with_json_fallbacks(
+    action_event_session_factory,
+) -> None:
+    """金额/群只出现在嵌套路径（result / source）时，提取列按台账优先级回退。"""
+
+    await action_tap.emit_action_event(
+        account_id=7,
+        action={"type": "payout", "chat_id": -100456, "payout_key": "pay_nested"},
+        result={"amount": "5.5"},
+        status=ACTION_EVENT_STATUS_OK,
+    )
+    await action_tap.emit_action_event(
+        account_id=7,
+        action={"type": "payout", "amount": "7", "source": {"chat_id": -100789}},
+        status=ACTION_EVENT_STATUS_OK,
+    )
+
+    async with action_event_session_factory() as db:
+        rows = list((await db.execute(select(ActionEvent).order_by(ActionEvent.id))).scalars().all())
+
+    nested_amount = rows[0]
+    assert nested_amount.direction == "out"
+    assert nested_amount.amount == Decimal("5.5")
+    assert nested_amount.params_summary["result"]["amount"] == "5.5"
+    nested_chat = rows[1]
+    # source.chat_id 不在 _SUMMARY_KEYS 内、不会落入 params_summary，
+    # 因此写入路径派生的 chat_id 与读取路径一样保持 NULL（列与 JSON 同源）。
+    assert "source" not in (nested_chat.params_summary or {})
+    assert nested_chat.chat_id is None
+    assert nested_chat.amount == Decimal("7")
+
+
+@pytest.mark.asyncio
 async def test_income_source_event_is_deduplicated_across_replays(
     action_event_session_factory,
 ) -> None:

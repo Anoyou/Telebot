@@ -125,12 +125,12 @@ async def test_release_uses_acquire_day_across_midnight(monkeypatch) -> None:
 
     _FrozenDateTime.current = datetime(2026, 1, 1, 23, 59, 50, tzinfo=UTC)
     ticket = await plugin_ai_quota.acquire("demo", 7, 60)
-    assert ticket.daily_key == "plugin_ai_quota:7:demo:d:20260101"
+    assert ticket.daily_key == "telepilot:plugin_ai_quota:7:demo:d:20260101"
     assert fake.values[ticket.daily_key] == 60
 
     _FrozenDateTime.current = datetime(2026, 1, 2, 0, 0, 10, tzinfo=UTC)
     today_minute_key, today_amount_key, today_daily_key = plugin_ai_quota._quota_keys("demo", 7)
-    assert today_daily_key == "plugin_ai_quota:7:demo:d:20260102"
+    assert today_daily_key == "telepilot:plugin_ai_quota:7:demo:d:20260102"
 
     await plugin_ai_quota.release(ticket, actual_tokens=0)
 
@@ -190,3 +190,91 @@ async def test_db_fallback_counts_plugin_agent_usage_source(monkeypatch) -> None
     )
     assert "llm_usage.source = 'plugin:demo'" in sql
     assert "llm_usage.source LIKE 'plugin:demo:' || '%%'" in sql
+
+
+def test_quota_keys_use_telepilot_namespace_prefix() -> None:
+    minute_key, minute_amount_key, daily_key = plugin_ai_quota._quota_keys("demo", 7)
+
+    # 对齐 telepilot:llm_key_usage 先例的命名空间前缀
+    assert minute_key == "telepilot:plugin_ai_quota:7:demo:m"
+    assert minute_amount_key == "telepilot:plugin_ai_quota:7:demo:ma"
+    assert daily_key.startswith("telepilot:plugin_ai_quota:7:demo:d:")
+    none_minute, _ma, _d = plugin_ai_quota._quota_keys("demo", None)
+    assert none_minute == "telepilot:plugin_ai_quota:none:demo:m"
+
+
+def test_normalize_plugin_key_long_keys_do_not_share_bucket() -> None:
+    # 两个共享 48 字符前缀的不同长 key 不能共用同一个配额桶
+    prefix = "p" * 48
+    key_a = f"{prefix}_alpha"
+    key_b = f"{prefix}_beta"
+
+    normalized_a = plugin_ai_quota._normalize_plugin_key(key_a)
+    normalized_b = plugin_ai_quota._normalize_plugin_key(key_b)
+
+    assert normalized_a != normalized_b
+    assert normalized_a.startswith(prefix)
+    assert normalized_b.startswith(prefix)
+    assert len(normalized_a) <= 48 + 1 + 20
+    keys_a = plugin_ai_quota._quota_keys(normalized_a, 7)
+    keys_b = plugin_ai_quota._quota_keys(normalized_b, 7)
+    assert keys_a[0] != keys_b[0]
+    assert keys_a[2].rsplit(":", 1)[0] != keys_b[2].rsplit(":", 1)[0]
+    # 短 key 原样保留
+    assert plugin_ai_quota._normalize_plugin_key("demo") == "demo"
+
+
+@pytest.mark.asyncio
+async def test_release_failure_writes_audit_event(monkeypatch) -> None:
+    class _BrokenRedis:
+        async def eval(self, *_args, **_kwargs):
+            raise RuntimeError("redis eval down")
+
+    monkeypatch.setattr(plugin_ai_quota, "get_redis", lambda: _BrokenRedis())
+
+    audit_events: list[tuple] = []
+    commits: list[bool] = []
+
+    class _AuditStub:
+        async def write(self, db, user_id, action, target=None, detail=None):  # noqa: ANN001
+            audit_events.append((user_id, action, target, detail))
+
+    class _DB:
+        async def commit(self):
+            commits.append(True)
+
+    class _Session:
+        async def __aenter__(self):
+            return _DB()
+
+        async def __aexit__(self, exc_type, exc, tb) -> bool:  # noqa: ANN001
+            return False
+
+    monkeypatch.setattr(plugin_ai_quota, "audit", _AuditStub())
+    monkeypatch.setattr(plugin_ai_quota, "AsyncSessionLocal", lambda: _Session())
+
+    ticket = plugin_ai_quota.PluginAIQuotaTicket(
+        plugin_key="demo",
+        account_id=7,
+        estimated_tokens=60,
+        minute_key="telepilot:plugin_ai_quota:7:demo:m",
+        minute_amount_key="telepilot:plugin_ai_quota:7:demo:ma",
+        daily_key="telepilot:plugin_ai_quota:7:demo:d:20260101",
+        reservation_id="res-1",
+        backend="redis",
+        limited=True,
+    )
+
+    # 释放失败不能抛出（业务路径已结束），但必须留下审计
+    await plugin_ai_quota.release(ticket, actual_tokens=0)
+
+    assert commits == [True]
+    assert len(audit_events) == 1
+    user_id, action, target, detail = audit_events[0]
+    assert user_id is None
+    assert action == "plugin.ai_quota_release_failed"
+    assert target == "plugin:demo"
+    assert detail["account_id"] == 7
+    assert detail["actual_tokens"] == 0
+    assert detail["estimated_tokens"] == 60
+    assert detail["reservation_id"] == "res-1"

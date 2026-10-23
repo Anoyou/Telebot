@@ -6,6 +6,9 @@ import asyncio
 import logging
 from typing import Any
 
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from ...db.base import AsyncSessionLocal
 from ...db.models.system_agent import SystemAgentSession
 from ..llm_invoke import invoke_structured
@@ -24,6 +27,24 @@ _COMPRESS_SYSTEM = (
 )
 _COMPRESS_MAX_CHARS = 2_000
 
+# 事件循环对 task 只持弱引用：create_task 后不保存强引用的任务可能在执行中被 GC。
+# 与 run_manager 的 recovery loop 相同模式：模块级集合持有引用，完成/取消后移除。
+_COMPRESS_TASKS: set[asyncio.Task[None]] = set()
+
+
+def _compress_task_done(task: asyncio.Task[None]) -> None:
+    _COMPRESS_TASKS.discard(task)
+    if task.cancelled():
+        return
+    exc = task.exception()
+    if exc is not None:
+        # 协程内部已兜底异常，这里只防御未捕获路径，避免异常被事件循环静默吞掉
+        log.warning(
+            "system_agent memory compress task crashed: %s",
+            exc,
+            exc_info=exc,
+        )
+
 
 def schedule_summary_compression(session_id: str, *, summary_rev: int) -> None:
     """投递后台压缩；service 层例外允许 create_task + 独立 session。"""
@@ -33,10 +54,27 @@ def schedule_summary_compression(session_id: str, *, summary_rev: int) -> None:
     except RuntimeError:
         log.debug("no running loop; skip summary compression for session %s", session_id)
         return
-    loop.create_task(
+    task = loop.create_task(
         _compress_session_summary(str(session_id), expected_rev=summary_rev),
         name=f"system-agent-memory-compress-{session_id}",
     )
+    _COMPRESS_TASKS.add(task)
+    task.add_done_callback(_compress_task_done)
+
+
+async def _load_session_for_update(
+    db: AsyncSession,
+    session_id: str,
+) -> SystemAgentSession | None:
+    """压缩写回前的锁行复检：强制重读列值，绕过当前 session 的身份映射缓存。"""
+
+    result = await db.execute(
+        select(SystemAgentSession)
+        .where(SystemAgentSession.id == session_id)
+        .with_for_update()
+        .execution_options(populate_existing=True),
+    )
+    return result.scalar_one_or_none()
 
 
 async def _compress_session_summary(session_id: str, *, expected_rev: int) -> None:
@@ -95,16 +133,21 @@ async def _compress_session_summary(session_id: str, *, expected_rev: int) -> No
             if not compressed:
                 return
 
-            # 写回前再读一遍校验 rev
-            await db.refresh(row)
-            state2 = dict(row.memory_state) if isinstance(row.memory_state, dict) else {}
+            # 乐观锁写回：refresh 校验与 commit 之间仍可能被并发事务推进 summary_rev
+            # 并把新条目并入摘要。锁行复检（PG 上 FOR UPDATE 排他；sqlite 忽略锁但
+            # populate_existing 强制重读列值），rev 一致才覆盖 memory_summary，
+            # 避免旧压缩结果整体覆盖掉并发并入的新条目。
+            locked = await _load_session_for_update(db, session_id)
+            if locked is None:
+                return
+            state2 = dict(locked.memory_state) if isinstance(locked.memory_state, dict) else {}
             if int(state2.get("summary_rev") or 0) != expected_rev:
                 log.info(
                     "system_agent memory compress abandon session=%s rev changed before write",
                     session_id,
                 )
                 return
-            row.memory_summary = compressed
+            locked.memory_summary = compressed
             await db.commit()
             log.info(
                 "system_agent memory compress ok session=%s before=%s after=%s",

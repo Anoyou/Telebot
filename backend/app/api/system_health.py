@@ -46,6 +46,7 @@ from ..db.models.system import SystemSetting
 from ..deps import CurrentUser
 from ..redis_client import get_redis
 from ..services import app_update_service, auth_service
+from ..services.redactor import redact_text
 from ..settings import settings
 from ..util.update_plan import build_update_plan, classify_changed_files
 from ..util.update_target import (
@@ -2535,8 +2536,11 @@ async def get_update_job(job_id: str, _user: CurrentUser) -> UpdateJobStatusResp
     try:
         result = await asyncio.to_thread(_updater_get, f"/jobs/{job_id}", timeout=10)
     except Exception as exc:  # noqa: BLE001
+        # 细节只进服务端日志；给前端的错误字段用固定文案 + 脱敏截断的类型摘要。
+        detail = redact_text(f"{type(exc).__name__}: {exc}")[:300]
+        log.warning("读取 updater 任务失败 job_id=%s: %s", job_id, detail)
         return UpdateJobStatusResponse(
-            ok=False, job_id=job_id, status="unknown", error=f"{type(exc).__name__}: {exc}"
+            ok=False, job_id=job_id, status="unknown", error=f"读取更新任务失败：{detail}"
         )
     if not result.get("ok"):
         return UpdateJobStatusResponse(
@@ -2968,6 +2972,19 @@ class ConfigImportError(RuntimeError):
         self.imported = imported
 
 
+def _config_import_http_error(exc: ConfigImportError) -> HTTPException:
+    """配置导入被拒：异常原文（可能裹着内部错误类型）不直接透传给前端。"""
+    detail = redact_text(str(exc))[:300]
+    log.warning("配置导入校验失败：%s", detail)
+    return HTTPException(
+        status_code=409,
+        detail={
+            "code": "CONFIG_IMPORT_REJECTED",
+            "message": f"配置导入未执行：{detail}",
+        },
+    )
+
+
 def _coerce_import_value(column: Any, value: Any) -> Any:
     if value is None:
         return None
@@ -3312,7 +3329,7 @@ async def preview_import_config(
     try:
         outcome = await _import_config_payload(data, dry_run=True)
     except ConfigImportError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
+        raise _config_import_http_error(exc) from exc
     return outcome.model_copy(
         update={
             "id_mappings": {},
@@ -3340,7 +3357,7 @@ async def import_config(
             )
         outcome = await _import_config_payload(data)
     except ConfigImportError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
+        raise _config_import_http_error(exc) from exc
 
     reloaded, restart_required = await _reload_imported_runtime(outcome.affected_accounts)
     return outcome.model_copy(

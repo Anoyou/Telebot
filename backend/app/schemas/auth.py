@@ -27,8 +27,10 @@ class LoginResponse(BaseModel):
 
 class RegisterRequest(BaseModel):
     """首次部署时创建超管账号的接口入参（系统已存在用户后该接口禁用）。"""
+
     username: str
-    password: str
+    # 与 ChangePasswordRequest.new_password 同口径：≥ 8 位
+    password: str = Field(min_length=8, max_length=256, description="≥ 8 位")
 
 
 class TotpEnableResponse(BaseModel):

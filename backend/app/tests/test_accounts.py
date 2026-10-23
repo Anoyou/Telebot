@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 from datetime import UTC, timedelta
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from telethon.errors import (
@@ -483,6 +483,147 @@ async def test_finalize_relogin_rejects_identity_mismatch():
     assert exc_info.value.status_code == 409
     assert exc_info.value.detail["code"] == "ACCOUNT_IDENTITY_MISMATCH"
     assert decrypt_bytes(old.session_enc) == b"old-session"
+    assert token not in login_service._PENDING
+    fake_client.disconnect.assert_awaited()
+
+
+# ── 新建账号的应用层查重守卫 ────────────────────────────────────────
+def _make_finalize_db(*, dedupe_hit: object) -> tuple[MagicMock, list[object]]:
+    """构造 finalize 用 mock DB：``dedupe_hit`` 是按 phone/tg_user_id 查重的返回。"""
+
+    db = MagicMock()
+    added: list[object] = []
+
+    async def _execute(_stmt):
+        return SimpleNamespace(scalars=lambda: SimpleNamespace(first=lambda: dedupe_hit))
+
+    async def _flush():
+        for obj in added:
+            if isinstance(obj, Account) and obj.id is None:
+                obj.id = 88
+
+    db.execute = AsyncMock(side_effect=_execute)
+    db.get = AsyncMock(return_value=dedupe_hit if isinstance(dedupe_hit, Account) else None)
+    db.commit = AsyncMock()
+    db.flush = AsyncMock(side_effect=_flush)
+    db.add = MagicMock(side_effect=added.append)
+    return db, added
+
+
+@pytest.mark.asyncio
+async def test_finalize_new_login_reuses_existing_account_with_same_phone():
+    """同手机号已完成过绑定：再走一遍绑定向导应复用已有账号（隐式重登），不新建行。"""
+
+    existing = Account(
+        id=77,
+        phone="+8613800000000",
+        display_name="旧账号",
+        tg_user_id=12345,
+        api_id_enc=encrypt_str("old-api-id"),
+        api_hash_enc=encrypt_str("old-api-hash"),
+        session_enc=encrypt_bytes(b"old-session"),
+        status=ACCOUNT_STATUS_LOGIN_REQUIRED,
+    )
+    db, added = _make_finalize_db(dedupe_hit=existing)
+    fake_client = AsyncMock()
+    fake_client.get_me = AsyncMock(
+        return_value=SimpleNamespace(id=12345, username="new_name", first_name="新名字")
+    )
+    fake_client.session = SimpleNamespace(save=lambda: "new-session")
+    fake_client.disconnect = AsyncMock(return_value=None)
+    pending = login_service._PendingLogin(
+        client=fake_client,
+        api_id=999,
+        api_hash="new-api-hash",
+        phone="+8613800000000",
+        claimed=True,
+    )
+    token = "dedupe-reuse-token"
+    login_service._PENDING[token] = pending
+
+    with patch.object(login_service, "get_redis", side_effect=RuntimeError("no redis")):
+        aid = await login_service.finalize(db, token, pending)
+
+    # 复用已有账号：不新建 Account / HumanizeConfig，session 等按重登语义覆盖
+    assert aid == 77
+    assert added == []
+    assert existing.status == ACCOUNT_STATUS_ACTIVE
+    assert decrypt_bytes(existing.session_enc).decode() == "new-session"
+    assert token not in login_service._PENDING
+
+
+@pytest.mark.asyncio
+async def test_finalize_new_login_creates_account_when_phone_new():
+    """手机号未绑过：正常走新建分支，插入 Account + 默认拟人化配置。"""
+
+    db, added = _make_finalize_db(dedupe_hit=None)
+    fake_client = AsyncMock()
+    fake_client.get_me = AsyncMock(
+        return_value=SimpleNamespace(id=67890, username=None, first_name="全新账号")
+    )
+    fake_client.session = SimpleNamespace(save=lambda: "fresh-session")
+    fake_client.disconnect = AsyncMock(return_value=None)
+    pending = login_service._PendingLogin(
+        client=fake_client,
+        api_id=1,
+        api_hash="fresh-api-hash",
+        phone="+8613900000000",
+        claimed=True,
+    )
+    token = "dedupe-create-token"
+    login_service._PENDING[token] = pending
+
+    with patch.object(login_service, "get_redis", side_effect=RuntimeError("no redis")):
+        aid = await login_service.finalize(db, token, pending)
+
+    assert aid == 88
+    assert len(added) == 2
+    created = added[0]
+    assert isinstance(created, Account)
+    assert created.phone == "+8613900000000"
+    assert created.tg_user_id == 67890
+    assert created.status == ACCOUNT_STATUS_ACTIVE
+    assert isinstance(added[1], login_service.HumanizeConfig)
+    # 新建分支也要先做查重（db.execute 至少跑过一次 dedupe 查询）
+    db.execute.assert_awaited()
+
+
+@pytest.mark.asyncio
+async def test_finalize_dedupe_hit_rejects_identity_mismatch():
+    """查重命中已有账号但登录的是另一个 TG 用户：与重登同口径拒绝覆盖。"""
+
+    existing = Account(
+        id=77,
+        phone="+8613800000000",
+        display_name="旧账号",
+        tg_user_id=12345,
+        api_id_enc=encrypt_str("old-api-id"),
+        api_hash_enc=encrypt_str("old-api-hash"),
+        session_enc=encrypt_bytes(b"old-session"),
+        status=ACCOUNT_STATUS_LOGIN_REQUIRED,
+    )
+    db, added = _make_finalize_db(dedupe_hit=existing)
+    fake_client = AsyncMock()
+    fake_client.get_me = AsyncMock(return_value=SimpleNamespace(id=99999, username="wrong"))
+    fake_client.session = SimpleNamespace(save=lambda: "wrong-session")
+    fake_client.disconnect = AsyncMock(return_value=None)
+    pending = login_service._PendingLogin(
+        client=fake_client,
+        api_id=999,
+        api_hash="new-api-hash",
+        phone="+8613800000000",
+        claimed=True,
+    )
+    token = "dedupe-mismatch-token"
+    login_service._PENDING[token] = pending
+
+    with pytest.raises(login_service.HTTPException) as exc_info:
+        await login_service.finalize(db, token, pending)
+
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.detail["code"] == "ACCOUNT_IDENTITY_MISMATCH"
+    assert added == []
+    assert decrypt_bytes(existing.session_enc) == b"old-session"
     assert token not in login_service._PENDING
     fake_client.disconnect.assert_awaited()
 

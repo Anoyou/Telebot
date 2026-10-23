@@ -1,7 +1,7 @@
 """第三方插件 zip 安装 / 卸载 / 启停服务（阶段 B）。
 
 主要职责：
-- 校验 zip 完整性（含 ``manifest.py`` / ``__init__.py`` / ``plugin.py``）
+- 校验 zip 完整性（含 ``manifest.py`` / ``__init__.py`` / ``plugin.py`` / ``plugin.json``）
 - 解析 manifest.py 拿到 ``MANIFEST`` 实例（不会 import 到 app 命名空间，全在临时目录隔离）
 - 可选 Ed25519 签名校验：``settings.plugin_pubkey`` 配置公钥 + 上传 ``.sig`` 文件
 - 把临时目录原子地搬到 ``settings.plugins_installed_dir/<key>/``
@@ -19,11 +19,16 @@
 from __future__ import annotations
 
 import ast
+import glob
 import importlib.util
+import json
 import logging
+import re
 import shutil
 import sys
 import tempfile
+import time
+import uuid
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -66,6 +71,33 @@ _MANAGED_SOURCES = (
     PLUGIN_SOURCE_REPO,
     PLUGIN_SOURCE_LOCAL,
 )
+
+
+def _new_staging_dir(final_dir: Path) -> Path:
+    """在非插件命名空间中创建并发安全的 staging 路径。"""
+    root = final_dir.parent / ".staging"
+    if root.is_symlink():
+        raise ValueError("插件 staging 根目录不得为符号链接")
+    root.mkdir(parents=True, exist_ok=True)
+    return root / f"{final_dir.name}.installing.{uuid.uuid4().hex}"
+
+
+def _cleanup_staging_residue(final_dir: Path, *, older_than_seconds: float = 3600.0) -> None:
+    """仅回收隔离 staging 根下的过期目录；旧插件根残留留待人工确认。"""
+    root = final_dir.parent / ".staging"
+    if root.is_symlink() or not root.is_dir():
+        return
+    cutoff = time.time() - older_than_seconds
+    pattern = re.compile(re.escape(final_dir.name) + r"\.installing\.[0-9a-f]{32}")
+    for residue in root.glob(glob.escape(final_dir.name) + ".installing.*"):
+        if not pattern.fullmatch(residue.name) or residue.is_symlink():
+            continue
+        try:
+            if residue.stat().st_mtime > cutoff:
+                continue
+        except OSError:
+            continue
+        shutil.rmtree(residue, ignore_errors=True)
 
 
 # ─────────────────────────────────────────────────────
@@ -115,7 +147,7 @@ class ParsedPlugin:
 # ─────────────────────────────────────────────────────
 # 公共：解析 zip
 # ─────────────────────────────────────────────────────
-REQUIRED_FILES = ("manifest.py", "__init__.py", "plugin.py")
+REQUIRED_FILES = ("manifest.py", "__init__.py", "plugin.py", "plugin.json")
 
 
 def parse_zip(zip_bytes: bytes) -> ParsedPlugin:
@@ -157,6 +189,11 @@ def parse_zip(zip_bytes: bytes) -> ParsedPlugin:
                     f"zip 必须包含 {required}（找不到 {root / required}）",
                 )
 
+        # 3.5) 静态校验 plugin.json：worker 加载（loader._preflight_installed_plugin）
+        #      在执行任何 Python 前就要求 plugin.json 可解析且 key 与目录一致，
+        #      缺失/不一致的包"安装成功即坏件"，必须在安装阶段拒绝。
+        static_key = _validate_plugin_json(root)
+
         # 4) 先维持既有 Manifest 基础错误语义，再强制新装/升级显式声明平台能力。
         manifest = _load_manifest_from_path(root / "manifest.py")
         if not isinstance(manifest, Manifest):
@@ -168,6 +205,13 @@ def parse_zip(zip_bytes: bytes) -> ParsedPlugin:
             raise ManifestError(
                 "BAD_MANIFEST_KEY",
                 f"manifest.key 非法: {manifest.key!r}（不能为空且不允许斜杠）",
+            )
+        # plugin.json 的静态 key 必须与 manifest.key 一致：worker 侧 _preflight_installed_plugin
+        # 会按"plugin.json key == 安装目录名（= manifest.key）"拒绝，不一致同样是坏件。
+        if static_key != manifest.key:
+            raise ManifestError(
+                "PLUGIN_JSON_KEY_MISMATCH",
+                f"plugin.json key={static_key!r} 与 manifest.key={manifest.key!r} 不一致",
             )
         _require_platform_capabilities_declaration(root / "manifest.py")
 
@@ -186,6 +230,31 @@ def parse_zip(zip_bytes: bytes) -> ParsedPlugin:
     except Exception:
         shutil.rmtree(extract_dir, ignore_errors=True)
         raise
+
+
+def _validate_plugin_json(root: Path) -> str:
+    """解压后立即静态校验 ``plugin.json``，返回其中的静态 key（name 优先，key 备选）。
+
+    与 ``loader._preflight_installed_plugin`` 的加载期检查对齐：只做 JSON 解析和
+    基本字段检查，不执行任何 Python。
+    """
+    metadata_path = root / "plugin.json"
+    try:
+        raw = json.loads(metadata_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise InvalidZipStructure(
+            "BAD_PLUGIN_JSON",
+            f"plugin.json 无法读取: {type(exc).__name__}",
+        ) from exc
+    if not isinstance(raw, dict):
+        raise InvalidZipStructure("BAD_PLUGIN_JSON", "plugin.json 顶层必须是对象")
+    static_key = str(raw.get("name") or raw.get("key") or "").strip()
+    if not static_key or "/" in static_key or "\\" in static_key:
+        raise InvalidZipStructure(
+            "BAD_PLUGIN_JSON_KEY",
+            f"plugin.json 缺少可用的 name/key 字段或字段非法: {static_key!r}",
+        )
+    return static_key
 
 
 def _require_platform_capabilities_declaration(manifest_py: Path) -> None:
@@ -436,10 +505,10 @@ async def install_zip(
         previous_version = existing.version if existing is not None else None
         was_enabled = bool(existing.enabled) if existing is not None else False
 
-        staging = final_dir.with_name(f"{final_dir.name}.installing")
+        staging = _new_staging_dir(final_dir)
         backup = final_dir.with_name(f"{final_dir.name}.bak-zip")
-        if staging.exists():
-            shutil.rmtree(staging, ignore_errors=True)
+        # 只清理历史残留，不动并发流程正在使用的随机 staging 目录
+        _cleanup_staging_residue(final_dir)
         if backup.exists():
             shutil.rmtree(backup, ignore_errors=True)
         shutil.move(str(parsed.extract_dir), str(staging))
@@ -507,13 +576,31 @@ async def install_zip(
         raise
 
 
+def _assert_removable_plugin_dir(target: Path) -> None:
+    """installed_path 是持久化字段：rmtree 前断言目标在插件 installed 根之下。
+
+    防止历史坏数据或手工改库把 installed 根之外的任意绝对路径变成删除目标；
+    允许的根为现行 installed 根与旧 backend/plugins/installed 兼容根。
+    """
+    resolved = target.resolve()
+    backend_root = Path(__file__).resolve().parents[2]
+    allowed_roots = (
+        Path(settings.plugins_installed_path).resolve(),
+        (backend_root / "plugins" / "installed").resolve(),
+    )
+    for root in allowed_roots:
+        # 只允许严格位于根之下；目标等于根本身时同样拒绝。
+        if root in resolved.parents:
+            return
+    raise ValueError(f"插件目录不在 installed 根之下，拒绝删除: {resolved}")
+
+
 async def uninstall(db: AsyncSession, key: str) -> bool:
     """卸载指定 key：删表行 + 删目录 + 清理功能矩阵残留。"""
     row = await db.get(InstalledPlugin, key)
     if row is None or row.source not in _PACKAGE_MANAGED_SOURCES:
         return False
     target = Path(row.installed_path or settings.plugins_installed_path / key)
-
     afs = (
         await db.execute(
             select(AccountFeature).where(AccountFeature.feature_key == key)
@@ -536,6 +623,7 @@ async def uninstall(db: AsyncSession, key: str) -> bool:
     # 删目录失败不阻塞 DB 提交（但写日志方便排查）
     try:
         if target.exists():
+            _assert_removable_plugin_dir(target)
             shutil.rmtree(target)
     except Exception:  # noqa: BLE001
         log.exception("卸载插件 %s 时删除目录失败 %s", key, target)

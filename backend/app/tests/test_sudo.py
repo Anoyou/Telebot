@@ -887,3 +887,177 @@ async def test_builtin_sudo_ls_still_works_with_summary(monkeypatch):
         "subcommand": "ls",
         "row_count": 1,
     }
+
+
+# ════════════════════════════════════════════════════════════
+# 4) API/Service 层：reload 通知失败留痕、CRUD 审计、重复创建 409
+# ════════════════════════════════════════════════════════════
+
+@pytest.mark.asyncio
+async def test_sudo_reload_notify_failure_logs_warning(monkeypatch, caplog):
+    """reload 通知失败必须记 warning（含 account_id 与异常类型），不能静默吞掉。"""
+    import logging
+
+    from app.api import sudo as sudo_api
+
+    def _boom():
+        raise RuntimeError("redis down")
+
+    monkeypatch.setattr(sudo_api, "get_redis", _boom)
+
+    with caplog.at_level(logging.WARNING, logger="app.api.sudo"):
+        await sudo_api._notify_sudo_reload(42)
+
+    messages = [rec.getMessage() for rec in caplog.records]
+    assert any(
+        "sudo reload 通知失败" in msg and "account_id=42" in msg and "RuntimeError" in msg
+        for msg in messages
+    )
+
+
+def _sudo_row(**overrides):
+    from datetime import UTC, datetime
+    from types import SimpleNamespace
+
+    data = {
+        "id": 11,
+        "account_id": 3,
+        "tg_user_id": 111,
+        "display_name": "alice",
+        "allowed_chat_ids": ["*"],
+        "allowed_commands": ["*"],
+        "created_at": datetime(2026, 5, 10, tzinfo=UTC),
+    }
+    data.update(overrides)
+    return SimpleNamespace(**data)
+
+
+@pytest.mark.asyncio
+async def test_sudo_create_endpoint_writes_audit_and_notifies(monkeypatch):
+    """sudo 创建成功：同事务写 audit（sudo.create）并通知 worker reload。"""
+    from app.api import sudo as sudo_api
+    from app.schemas.sudo import SudoUserCreate
+
+    row = _sudo_row()
+    audit_write = AsyncMock()
+    notify = AsyncMock()
+    db = AsyncMock()
+    monkeypatch.setattr(sudo_api, "create_sudo_user", AsyncMock(return_value=row))
+    monkeypatch.setattr(sudo_api.audit, "write", audit_write)
+    monkeypatch.setattr(sudo_api, "_notify_sudo_reload", notify)
+
+    resp = await sudo_api.create_sudo_user_endpoint(
+        SudoUserCreate(account_id=3, tg_user_id=111), db=db, user=MagicMock(id=7)
+    )
+
+    assert resp.id == 11
+    audit_write.assert_awaited_once()
+    assert audit_write.await_args.args[1] == 7
+    assert audit_write.await_args.args[2] == "sudo.create"
+    assert audit_write.await_args.kwargs["target"] == "sudo:11"
+    db.commit.assert_awaited_once()
+    notify.assert_awaited_once_with(3)
+
+
+@pytest.mark.asyncio
+async def test_sudo_update_endpoint_writes_audit(monkeypatch):
+    """sudo 更新成功：同事务写 audit（sudo.update）。"""
+    from app.api import sudo as sudo_api
+    from app.schemas.sudo import SudoUserUpdate
+
+    row = _sudo_row(display_name="alice2")
+    audit_write = AsyncMock()
+    notify = AsyncMock()
+    db = AsyncMock()
+    monkeypatch.setattr(sudo_api, "update_sudo_user", AsyncMock(return_value=row))
+    monkeypatch.setattr(sudo_api.audit, "write", audit_write)
+    monkeypatch.setattr(sudo_api, "_notify_sudo_reload", notify)
+
+    await sudo_api.update_sudo_user_endpoint(
+        11, SudoUserUpdate(display_name="alice2"), db=db, user=MagicMock(id=7)
+    )
+
+    audit_write.assert_awaited_once()
+    assert audit_write.await_args.args[2] == "sudo.update"
+    assert audit_write.await_args.kwargs["target"] == "sudo:11"
+    db.commit.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_sudo_delete_endpoint_writes_audit(monkeypatch):
+    """sudo 删除成功：同事务写 audit（sudo.delete）并按原 account 通知 reload。"""
+    from app.api import sudo as sudo_api
+
+    row = _sudo_row()
+    audit_write = AsyncMock()
+    notify = AsyncMock()
+    db = AsyncMock()
+    monkeypatch.setattr(sudo_api, "get_sudo_user", AsyncMock(return_value=row))
+    monkeypatch.setattr(sudo_api, "delete_sudo_user", AsyncMock(return_value=True))
+    monkeypatch.setattr(sudo_api.audit, "write", audit_write)
+    monkeypatch.setattr(sudo_api, "_notify_sudo_reload", notify)
+
+    await sudo_api.delete_sudo_user_endpoint(11, db=db, user=MagicMock(id=7))
+
+    audit_write.assert_awaited_once()
+    assert audit_write.await_args.args[2] == "sudo.delete"
+    assert audit_write.await_args.kwargs["target"] == "sudo:11"
+    assert audit_write.await_args.kwargs["detail"] == {"account_id": 3, "tg_user_id": 111}
+    db.commit.assert_awaited_once()
+    notify.assert_awaited_once_with(3)
+
+
+class _ScalarOneOrNone:
+    def __init__(self, value):
+        self._value = value
+
+    def scalar_one_or_none(self):
+        return self._value
+
+
+@pytest.mark.asyncio
+async def test_create_sudo_user_duplicate_returns_409():
+    """同一 (account_id, tg_user_id) 重复添加：前置查重返回结构化 409 而不是裸 500。"""
+    from fastapi import HTTPException
+
+    from app.schemas.sudo import SudoUserCreate
+    from app.services import sudo_service
+
+    db = AsyncMock()
+    db.execute = AsyncMock(return_value=_ScalarOneOrNone(5))  # 已存在同 (account, tg) 行
+
+    with pytest.raises(HTTPException) as exc_info:
+        await sudo_service.create_sudo_user(db, SudoUserCreate(account_id=3, tg_user_id=111))
+
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.detail["code"] == "SUDO_ALREADY_EXISTS"
+    db.add.assert_not_called()
+    db.commit.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_create_sudo_user_integrity_error_rolls_back_and_returns_409():
+    """并发窗口撞唯一索引：IntegrityError 回滚后同样返回结构化 409。"""
+    from fastapi import HTTPException
+    from sqlalchemy.exc import IntegrityError
+
+    from app.schemas.sudo import SudoUserCreate
+    from app.services import sudo_service
+
+    db = AsyncMock()
+    db.execute = AsyncMock(return_value=_ScalarOneOrNone(None))
+
+    async def _flush():
+        raise IntegrityError("INSERT ...", None, Exception("unique"))
+
+    db.flush = AsyncMock(side_effect=_flush)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await sudo_service.create_sudo_user(
+            db, SudoUserCreate(account_id=3, tg_user_id=222), commit=False
+        )
+
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.detail["code"] == "SUDO_ALREADY_EXISTS"
+    db.rollback.assert_awaited_once()
+    db.commit.assert_not_awaited()

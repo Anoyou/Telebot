@@ -1015,3 +1015,46 @@ async def test_get_health_overview_resilient_to_one_probe_hanging() -> None:
     assert out.providers.total == 0
     assert out.alembic.ok is True
     assert out.codex_gateway.state in {"not_required", "ready", "degraded"}
+
+
+# ── 错误信封：updater 任务读取失败 / 配置导入被拒 ─────────────────
+@pytest.mark.asyncio
+async def test_get_update_job_failure_uses_fixed_copy(monkeypatch) -> None:
+    """updater 任务读取失败：错误字段用固定文案 + 脱敏摘要，不再裸透异常类型文本。"""
+
+    monkeypatch.setattr(
+        sh,
+        "_detect_runtime_mode",
+        lambda: (sh.RUNTIME_PROD_CONTAINER_WITH_UPDATER, "http://updater:8765", None),
+    )
+
+    def _raise(*_args, **_kwargs):
+        raise RuntimeError("updater down")
+
+    monkeypatch.setattr(sh, "_updater_get", _raise)
+
+    out = await sh.get_update_job("job-1", _user=None)  # type: ignore[arg-type]
+
+    assert out.ok is False
+    assert out.status == "unknown"
+    assert out.error.startswith("读取更新任务失败")
+    assert "RuntimeError" in out.error  # 管理员可定位异常类型，细节仍在服务端日志
+
+
+def test_config_import_error_returns_structured_detail() -> None:
+    """配置导入被拒：必须返回 {"code","message"} 信封，异常原文经脱敏截断。"""
+    from fastapi import HTTPException
+
+    exc = sh.ConfigImportError(
+        "配置导入事务失败：KeyError: 'session_str https://user:pass@proxy.local:1080'"
+    )
+    err = sh._config_import_http_error(exc)  # noqa: SLF001
+
+    assert isinstance(err, HTTPException)
+    assert err.status_code == 409
+    assert err.detail["code"] == "CONFIG_IMPORT_REJECTED"
+    assert "配置导入未执行" in err.detail["message"]
+    # 代理 URL 凭据必须被脱敏后再拼入 message
+    assert "user:pass@" not in err.detail["message"]
+    assert "***" in err.detail["message"]
+    assert len(err.detail["message"]) <= 300 + len("配置导入未执行：")

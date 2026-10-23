@@ -780,3 +780,52 @@ async def test_web_proxy_test_accepts_historical_proxy_type_case(monkeypatch) ->
     assert result.ok is False
     assert result.error == "case-normalized"
     probe.assert_awaited_once_with("proxy.example", 8080)
+
+
+@pytest.mark.asyncio
+async def test_create_proxy_commits_entity_and_audit_atomically(monkeypatch) -> None:
+    """create_proxy 实体与审计必须单事务：审计失败时不得先 commit 出半提交代理。"""
+    from app.api.proxies import ProxyCreate, create_proxy
+
+    monkeypatch.setattr(proxies_api, "encrypt_str", lambda value: f"enc:{value}")
+    events: list[str] = []
+    added: list = []
+
+    db = AsyncMock()
+    db.add = lambda obj: added.append(obj)
+
+    async def _fake_flush():
+        added[0].id = 42
+        events.append("flush")
+
+    db.flush = AsyncMock(side_effect=_fake_flush)
+    db.commit = AsyncMock(side_effect=lambda: events.append("commit"))
+
+    # 场景一：审计写入失败 → 不应有任何 commit（旧实现实体已先行 commit）
+    audit_write = AsyncMock(side_effect=RuntimeError("audit failed"))
+    monkeypatch.setattr(proxies_api.audit, "write", audit_write)
+
+    with pytest.raises(RuntimeError, match="audit failed"):
+        await create_proxy(
+            ProxyCreate(type="socks5", host="h.local", port=1080),
+            db,
+            SimpleNamespace(id=5),
+        )
+    db.commit.assert_not_awaited()
+
+    # 场景二：正常路径 → flush 后写审计，再单次 commit（顺序可追）
+    events.clear()
+    added.clear()
+    db.commit.reset_mock()
+    audit_write_ok = AsyncMock(side_effect=lambda *a, **k: events.append("audit"))
+    monkeypatch.setattr(proxies_api.audit, "write", audit_write_ok)
+
+    out = await create_proxy(
+        ProxyCreate(type="socks5", host="h.local", port=1080),
+        db,
+        SimpleNamespace(id=5),
+    )
+
+    assert out.id == 42
+    db.commit.assert_awaited_once()
+    assert events == ["flush", "audit", "commit"]

@@ -1907,9 +1907,18 @@ def register_plugin_command(name: str, fn: Callable, *, owner_plugin_key: str = 
         name: 命令名（不含前缀）
         fn: 命令处理函数
         owner_plugin_key: 所属插件的 key
-        generation: 插件实例的 generation
+        generation: 插件实例的 generation（当前仅存储备用，命令分发尚未按
+            generation 过滤旧实例；旧命令依赖 loader 在 reload/disable 时主动注销）
     """
     if name in _BUILTIN_ALIAS_TO_PRIMARY:
+        # 与内置命令（含别名）同名：静默丢弃会让插件作者难以排查，记 warning 说明被谁占用。
+        occupied_by = _BUILTIN_ALIAS_TO_PRIMARY.get(name) or name
+        log.warning(
+            "插件命令注册被忽略：命令名 %r 与内置命令冲突（插件=%r，占用方=builtin:%s）",
+            name,
+            owner_plugin_key,
+            occupied_by,
+        )
         return  # 不覆盖内置命令
     _BUILTIN[name] = BuiltinCmd(handler=fn)
     _PLUGIN_COMMANDS[name] = PluginCmd(

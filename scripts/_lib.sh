@@ -183,10 +183,12 @@ ensure_updater_token_env() {
     die "需要 Python 生成独立 UPDATER_TOKEN"
   fi
   "$py" - "$env_file" <<'PY'
+import os
 import pathlib
 import re
 import secrets
 import sys
+import tempfile
 
 p = pathlib.Path(sys.argv[1])
 text = p.read_text()
@@ -195,7 +197,14 @@ if re.search(r"^UPDATER_TOKEN=.*$", text, flags=re.MULTILINE):
     text = re.sub(r"^UPDATER_TOKEN=.*$", line, text, flags=re.MULTILINE)
 else:
     text = text.rstrip() + "\n" + line + "\n"
-p.write_text(text)
+descriptor, temporary = tempfile.mkstemp(prefix=f".{p.name}.", dir=p.parent)
+try:
+    with os.fdopen(descriptor, "w", encoding="utf-8") as output:
+        output.write(text)
+    os.replace(temporary, p)
+finally:
+    if os.path.exists(temporary):
+        os.unlink(temporary)
 PY
   chmod 600 "$env_file" 2>/dev/null || true
   ok "$env_file 已生成独立 UPDATER_TOKEN"
@@ -212,9 +221,11 @@ set_env_value() {
     die "需要 Python 更新部署镜像引用"
   fi
   "$py" - "$env_file" "$key" "$value" <<'PY'
+import os
 import pathlib
 import re
 import sys
+import tempfile
 
 path = pathlib.Path(sys.argv[1])
 key = sys.argv[2]
@@ -226,7 +237,14 @@ if re.search(pattern, text, flags=re.MULTILINE):
     text = re.sub(pattern, lambda _: line, text, flags=re.MULTILINE)
 else:
     text = text.rstrip() + "\n" + line + "\n"
-path.write_text(text, encoding="utf-8")
+descriptor, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
+try:
+    with os.fdopen(descriptor, "w", encoding="utf-8") as output:
+        output.write(text)
+    os.replace(temporary, path)
+finally:
+    if os.path.exists(temporary):
+        os.unlink(temporary)
 PY
   chmod 600 "$env_file" 2>/dev/null || true
 }

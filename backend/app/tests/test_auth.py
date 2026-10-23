@@ -92,6 +92,23 @@ def test_make_otpauth_url_format():
     assert "admin" in url
 
 
+def test_verify_totp_step_returns_matched_step():
+    """verify_totp_step 返回命中的 timestep：±1 窗口内的码返回对应 step，错误码为 None。"""
+    import pyotp
+
+    secret = auth_service.generate_totp_secret()
+    totp = pyotp.TOTP(secret)
+    now = int(time.time())
+    base = now // 30
+
+    assert auth_service.verify_totp_step(secret, totp.at(now)) == base
+    assert auth_service.verify_totp_step(secret, totp.at(now, -1)) == base - 1
+    assert auth_service.verify_totp_step(secret, totp.at(now, 1)) == base + 1
+    assert auth_service.verify_totp_step(secret, "000000") is None
+    assert auth_service.verify_totp_step("", totp.at(now)) is None
+    assert auth_service.verify_totp_step(secret, "") is None
+
+
 @pytest.mark.asyncio
 async def test_register_integrity_race_returns_register_disabled(monkeypatch) -> None:
     """两个首次注册同时通过 COUNT 时，数据库唯一约束失败应返回稳定的 403。"""
@@ -107,7 +124,7 @@ async def test_register_integrity_race_returns_register_disabled(monkeypatch) ->
 
     with pytest.raises(auth_api.HTTPException) as exc_info:
         await auth_api.register(
-            RegisterRequest(username="admin", password="secret"),
+            RegisterRequest(username="admin", password="S3cret!!"),
             request,
             Response(),
             db,
@@ -116,6 +133,51 @@ async def test_register_integrity_race_returns_register_disabled(monkeypatch) ->
     assert exc_info.value.status_code == 403
     assert exc_info.value.detail["code"] == "REGISTER_DISABLED"
     db.rollback.assert_awaited_once()
+
+
+def test_register_request_rejects_weak_password():
+    """注册密码与改密同口径：少于 8 位直接被 schema 拒绝（API 层表现为 422）。"""
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        RegisterRequest(username="admin", password="short")  # 6 位
+    ok = RegisterRequest(username="admin", password="S3cret!!")
+    assert ok.password == "S3cret!!"
+
+
+@pytest.mark.asyncio
+async def test_login_rate_limit_counter_is_atomic_incr_expire(monkeypatch):
+    """限速计数必须走原子 INCR+EXPIRE（Lua eval）。
+
+    裸 INCR 后补 EXPIRE 的非原子路径一旦在两条命令之间崩溃/断连，key 会失去
+    TTL 且只增不减，最终对应 IP/用户名被永久 429，只能人工清 Redis。
+    """
+    eval_calls: list[tuple[str, int]] = []
+
+    class _AtomicOnlyRedis:
+        async def eval(self, _script: str, numkeys: int, key: str, ttl: int):
+            assert numkeys == 1
+            eval_calls.append((key, int(ttl)))
+            return 1
+
+        async def incr(self, *_args, **_kwargs):  # pragma: no cover - 旧路径禁止再用
+            raise AssertionError("rate-limit must use atomic eval, not bare INCR")
+
+        async def expire(self, *_args, **_kwargs):  # pragma: no cover
+            raise AssertionError("rate-limit must use atomic eval, not bare EXPIRE")
+
+    monkeypatch.setattr("app.redis_client.get_redis", lambda: _AtomicOnlyRedis())
+    from app.settings import settings
+
+    monkeypatch.setattr(settings, "login_rate_limit_per_min", 5)
+    request = Request({"type": "http", "headers": [], "client": ("127.0.0.1", 1)})
+
+    await auth_api._enforce_login_rate_limit(request, "admin")
+
+    # IP 与归一化用户名两个 key 都必须一次 eval 原子完成，TTL 固定 60s
+    assert len(eval_calls) == 2
+    assert {ttl for _key, ttl in eval_calls} == {60}
+    assert {key for key, _ttl in eval_calls} == {"auth_rl:ip:127.0.0.1", "auth_rl:user:admin"}
 
 
 # ── 端到端（占位，等整合阶段连真 PG 时启用） ──────────────────────

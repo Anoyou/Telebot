@@ -4,7 +4,17 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy import (
+    BigInteger,
+    Boolean,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    func,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from ..base import Base
@@ -45,4 +55,15 @@ class LLMUsage(Base):
     fallback_chain: Mapped[str | None] = mapped_column(Text, nullable=True)
     request_preview: Mapped[str | None] = mapped_column(Text, nullable=True)
     response_preview: Mapped[str | None] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    # created_at 索引与 0020 迁移对齐；source 用 text_pattern_ops 服务 ``LIKE 'plugin:%'`` 前缀匹配（0061）
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False, index=True
+    )
+
+    __table_args__ = (
+        Index(
+            "ix_llm_usage_source",
+            "source",
+            postgresql_ops={"source": "text_pattern_ops"},
+        ),
+    )

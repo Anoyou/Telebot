@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from sqlalchemy import select
 
 from ..db.models.account_bot import ACCOUNT_BOT_STATUS_DISABLED, AccountBot
@@ -456,7 +456,7 @@ async def list_account_bot_polling_dlq(
     aid: int,
     db: DBSession,
     _user: CurrentUser,
-    limit: int = 100,
+    limit: int = Query(100, ge=1, le=200),
 ) -> dict[str, Any]:
     await account_bot_service.ensure_account(db, aid)
     items = await account_bot_runtime._list_polling_dead_letters(aid, limit=limit)  # noqa: SLF001

@@ -390,6 +390,14 @@ async def lifespan(app: FastAPI):
             await account_bot_runtime.stop_account_bot_manager()
         except Exception:  # noqa: BLE001
             logging.exception("停止 account bot manager 失败")
+        try:
+            # 管理 Bot 共享的 Bot API HTTP 连接池也要随进程退出释放，
+            # 避免长连接悬挂到容器停止阶段
+            from .services.account_bot_service import close_bot_api_client
+
+            await close_bot_api_client()
+        except Exception:  # noqa: BLE001
+            logging.exception("关闭账号 Bot 共享 HTTP 客户端失败")
         cleanup_task.cancel()
         agent_secret_cleanup_task.cancel()
         remote_plugin_update_task.cancel()
@@ -589,6 +597,7 @@ async def readyz() -> dict:
     """readiness：依赖是否健康（DB + Redis 实际 ping）。
 
     任一依赖不健康都返回 503，便于反代/编排系统据此把流量摘走。
+    响应未认证可访问：只返回组件名与 ok 标记，异常细节写日志、不回显。
     DB 与 Redis ping **并行执行**，各自 2s 超时；最坏耗时 ~2s 而非串行的 4s
     （后者会踩 docker compose healthcheck timeout: 5s 的边缘）。
     """
@@ -617,14 +626,22 @@ async def readyz() -> dict:
     checks: dict[str, dict] = {}
     overall_ok = True
 
+    # /readyz 未认证可访问：失败细节（异常类型/文本可能带上游信息）只写日志，
+    # 响应仅暴露组件名与失败事实，不回显错误文本
     if isinstance(db_res, BaseException):
-        checks["db"] = {"ok": False, "error": str(db_res)[:200]}
+        logging.warning("readyz 依赖 db 探测失败：%s: %s", type(db_res).__name__, db_res)
+        checks["db"] = {"ok": False}
         overall_ok = False
     else:
         checks["db"] = {"ok": True}
 
     if isinstance(redis_res, BaseException):
-        checks["redis"] = {"ok": False, "error": str(redis_res)[:200]}
+        logging.warning(
+            "readyz 依赖 redis 探测失败：%s: %s",
+            type(redis_res).__name__,
+            redis_res,
+        )
+        checks["redis"] = {"ok": False}
         overall_ok = False
     else:
         checks["redis"] = {"ok": True}
@@ -635,10 +652,13 @@ async def readyz() -> dict:
         if component_ok:
             checks[name] = {"ok": True}
         else:
-            checks[name] = {
-                "ok": False,
-                "error": _RUNTIME_COMPONENT_ERRORS.get(name, "组件尚未启动"),
-            }
+            # 异常细节保留在 _RUNTIME_COMPONENT_ERRORS / 日志里供排障，不进响应
+            logging.warning(
+                "readyz 组件 %s 未就绪：%s",
+                name,
+                _RUNTIME_COMPONENT_ERRORS.get(name, "组件尚未启动"),
+            )
+            checks[name] = {"ok": False}
             overall_ok = False
 
     body = {"ok": overall_ok, "checks": checks}

@@ -31,6 +31,115 @@ def _write_repo_plugin(repo, name: str, *, version: str = "1.0.0", tags: list[st
 
 
 @pytest.mark.asyncio
+async def test_install_plugin_from_repo_rejects_builtin_key(tmp_path) -> None:
+    """仓库插件 key 与 builtin（如 forward）冲突时安装必须被拒，错误码与 ZIP 通道一致。"""
+    repo = tmp_path / "repo"
+    _write_repo_plugin(repo, "forward")
+    # 补齐运行期结构（manifest.py / plugin.py / __init__.py），让冲突检查前的校验通过。
+    (repo / "forward" / "manifest.py").write_text(
+        "from app.worker.plugins.manifest import Manifest\n"
+        "MANIFEST = Manifest(key='forward', display_name='forward', version='9.9.9', "
+        "requires_platform_capabilities=[])\n",
+        encoding="utf-8",
+    )
+    (repo / "forward" / "__init__.py").write_text("PLUGIN_CLASS = None\n", encoding="utf-8")
+    (repo / "forward" / "plugin.py").write_text("class X: pass\n", encoding="utf-8")
+
+    class _DB:
+        async def get(self, *_args, **_kwargs):  # noqa: ARG002
+            return None
+
+    row = SimpleNamespace(url="https://github.com/example/plugins.git")
+    with pytest.raises(svc.DuplicatePluginName) as ex:
+        await svc._install_plugin_from_cached_repo(
+            _DB(),
+            row,
+            repo,
+            "forward",
+            default_enabled=False,
+            replace_existing=False,
+            triggered_by_user_id=None,
+        )
+
+    assert ex.value.code == "KEY_CONFLICTS_BUILTIN"
+
+
+@pytest.mark.asyncio
+async def test_install_plugin_from_repo_preserves_outward_symlinks(tmp_path, monkeypatch) -> None:
+    """copytree(symlinks=True)：插件目录里指向宿主路径的 symlink 保留为链接本身，不复制目标内容。"""
+    import os
+
+    repo = tmp_path / "repo"
+    _write_repo_plugin(repo, "symdemo")
+    # 安装阶段只解析 plugin.json；补上平台能力声明让校验通过
+    plugin_json = json.loads((repo / "symdemo" / "plugin.json").read_text(encoding="utf-8"))
+    plugin_json["requires_platform_capabilities"] = []
+    (repo / "symdemo" / "plugin.json").write_text(
+        json.dumps(plugin_json), encoding="utf-8"
+    )
+    # 补齐运行期结构，让安装校验通过
+    (repo / "symdemo" / "manifest.py").write_text(
+        "from app.worker.plugins.manifest import Manifest\n"
+        "MANIFEST = Manifest(key='symdemo', display_name='symdemo', version='1.0.0', "
+        "requires_platform_capabilities=[])\n",
+        encoding="utf-8",
+    )
+    (repo / "symdemo" / "__init__.py").write_text("PLUGIN_CLASS = None\n", encoding="utf-8")
+    (repo / "symdemo" / "plugin.py").write_text("class X: pass\n", encoding="utf-8")
+
+    # 模拟 Git 仓库携带的外指 symlink：指向插件目录之外的宿主路径
+    host_secret = tmp_path / "host_secret"
+    host_secret.mkdir()
+    (host_secret / "secret.txt").write_text("host-secret-content", encoding="utf-8")
+    (repo / "symdemo" / "outsider").symlink_to(host_secret, target_is_directory=True)
+
+    installed_root = tmp_path / "installed"
+    monkeypatch.setattr(svc, "_plugin_dir", lambda name: installed_root / name)
+
+    class _Result:
+        def scalar_one_or_none(self):
+            return None
+
+        def scalars(self):
+            return SimpleNamespace(all=lambda: [])
+
+    class _DB:
+        def __init__(self) -> None:
+            self.added: list = []
+
+        async def get(self, *_args, **_kwargs):
+            return None
+
+        def add(self, obj) -> None:
+            self.added.append(obj)
+
+        async def flush(self) -> None:
+            return None
+
+        async def execute(self, _stmt):
+            return _Result()
+
+    view = await svc._install_plugin_from_cached_repo(
+        _DB(),
+        SimpleNamespace(url="https://github.com/example/plugins.git"),
+        repo,
+        "symdemo",
+        default_enabled=False,
+        replace_existing=False,
+        triggered_by_user_id=None,
+    )
+
+    assert view.name == "symdemo"
+    target = installed_root / "symdemo"
+    outsider = target / "outsider"
+    # 链接本身被保留，而不是把宿主目录内容复制成普通目录
+    assert outsider.is_symlink()
+    assert os.readlink(str(outsider)) == str(host_secret)
+    # 目标内容没有以普通文件形式落进插件目录
+    assert not (target / "secret.txt").exists()
+
+
+@pytest.mark.asyncio
 async def test_force_refresh_cached_repo_surfaces_git_failure(tmp_path, monkeypatch) -> None:
     url = "https://github.com/example/plugins.git"
     target = tmp_path / "cache" / "repo"

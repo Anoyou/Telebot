@@ -41,12 +41,11 @@ class AccountBot(Base):
     __tablename__ = "account_bot"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    # 与 0021 迁移对齐：一对一关系用唯一约束表达，另建同名普通索引服务查询
     account_id: Mapped[int] = mapped_column(
         BigInteger,
         ForeignKey("account.id", ondelete="CASCADE"),
         nullable=False,
-        unique=True,
-        index=True,
     )
     bot_token_enc: Mapped[str | None] = mapped_column(Text, nullable=True)
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
@@ -65,6 +64,11 @@ class AccountBot(Base):
         server_default=func.now(),
         onupdate=func.now(),
         nullable=False,
+    )
+
+    __table_args__ = (
+        UniqueConstraint("account_id", name="uq_account_bot_account_id"),
+        Index("ix_account_bot_account_id", "account_id"),
     )
 
 

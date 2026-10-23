@@ -25,6 +25,69 @@
 
 ## [Unreleased]
 
+## [0.103.0-beta.1] - 2026-10-24 · minor（次版本预发布） · 运行时回归修复与数据保留策略
+
+### 修复
+
+- 修复单插件重载（`POST /api/plugins/{key}/reload`）会让同账号其他插件静默失效的问题：`reload_plugin` 不再在入口提前递增全局 generation，改为与 `reload_account_config` 一致在重载完成后统一刷新全部插件上下文，消除最长一个 reconcile 周期（默认 180 秒）内的事件丢失与其他插件被误标 failed。
+- 修复 Bot 渠道密钥回填可命中"不相关"待确认 Action 的问题：去掉兜底目标选择，只允许回填到明确缺密钥（密钥字段缺失或 `secret_payload_enc` 为空）的 Action；非"纯密钥"消息不再写回旧 Action；已有密钥仅在错误码属于密钥被拒类时才允许覆盖，杜绝跨 Provider 的凭据污染。
+- 修复管理 Bot 轮询循环被一轮 Agent 查询内联阻塞最长 10 分钟的问题：管理循环改为与交互侧一致的按 chat 分桶并发（同 chat 保序、跨 chat 并发），单个用户的长 Agent 对话不再冻结该账号全部 Bot 命令响应。
+- 修复直通（direct passthrough）插件可绕过账号允许名单观察名单外会话消息的问题：直通链路对 incoming 消息应用与普通链路完全相同的允许名单判定（outgoing 不受影响），插件 API 参考文档同步声明该约束。
+- 修复单个插件激活异常（构造、rules 查询、数据目录等）会中断整个账号加载循环的问题：`_activate` 全程按插件隔离，异常插件落 `FEATURE_STATE_FAILED` 并记录脱敏错误后继续加载其余插件，与 loader 模块承诺一致。
+- ZIP 安装通道强制要求并静态校验 `plugin.json`（可解析、key/name 合法、与 manifest.py 声明一致），缺失或损坏在安装期即拒绝，不再出现"安装成功但 worker 永远拒绝加载"的坏件；远程/仓库/本地导入通道统一补上 builtin key 冲突检查（与 ZIP 通道同错误码），不再可能覆盖内置 Feature 行的 `is_builtin` 与元数据。
+- 修复 `.env` 与部署状态文件的非原子写入：`set_env_value`、`ensure_updater_token_env`、`prod-up.sh` 密钥重生成与 `telepilot-deploy-previous.json` 使用临时文件与原子替换；密钥临时文件由 `mkstemp` 从创建时即限定为 `0600`，异常时清理，消除先写明文再 chmod 的读取窗口。
+- 修复 updater handoff 双重失败（目标切换与回滚 recreate 都失败）后 `_apply_lock` 永久死锁的问题：prod-update 子进程输出读取加看门狗，进入"等待交接"阶段后以 handoff 日志推进为存活信号，日志静默超过阈值且磁盘任务无终态时才收尾任务并释放更新锁（慢网络拉取大镜像不会被误判卡死；handoff 已写入终态时镜像其结论，不再把成功的更新误报为失败）。保留 fail-closed 标记，新任务仍被拦截直至人工介入。
+- 修复前端图片附件跨会话携带与"复活"问题：输入框组件按会话 key 重挂载，会话 A 的附件不再随下一条消息发给会话 B；粘贴后立即发送会先等在途图片读取完成，不再出现"以为已发送、实际没发"的图片；发送被受理后按提交时的会话清空持久草稿，切回旧会话不再出现已发消息与相同草稿并存。
+- 修复同一手机号/Telegram 身份重复走绑定向导会产生重复 Account 行的问题：登录落库前按 phone / tg_user_id 查重，命中即复用已有账号（等价隐式重登，身份不符仍拒绝），sudo、功能矩阵与资金台账不再按错误账号分裂。
+- 修复登录限速计数的 `INCR`/`EXPIRE` 非原子问题（进程在两步之间崩溃会让计数器永不过期、对应 IP/用户名被永久 429），改为 Lua 原子执行。
+- 修复 System Agent 后台任务（会话摘要压缩、模型能力探测）`create_task` 后未持强引用、可能被 GC 中途丢弃的问题；模型能力缓存并发探测改为独立短事务锁行合并并提交，不再互相覆盖丢结果；摘要压缩写回前对会话行加 `FOR UPDATE` 复检 `summary_rev`，并发轮次不再可能用旧压缩结果覆盖新摘要。
+- 修复 Bot 账号重启时新旧轮询任务状态标记互踩（旧任务迟到的 STOPPED 回写不再覆盖新任务的 RUNNING），且配置读取移出任务锁——连接池耗尽时不再串行卡住所有账号的 Bot 重启。
+- 修复"重试指代"（如对失败任务回"继续"）会丢弃用户当轮输入的问题：重试仍复用原失败消息，但用户原文以"用户补充"附入模型文本（含密钥时同样走占位符脱敏）。
+- 修复代理测试的出口探测 URL 构造：有用户名无密码不再拼出 `None`/TypeError，凭据统一编码（含 `@:/` 的密码、IPv6 地址均正确解析），出口探测失败记日志不再静默缓存空结果。
+- 修复删除仍被账号引用的风控模板时落 FK 违约 500 的问题：前置引用检查返回 409（`template_in_use`，附引用账号列表），与删除代理的守卫口径一致。
+- 修复插件 staging 残留清理可能误删其它合法插件的问题：ZIP 与远程通道统一在隔离的 `.staging/` 中生成随机目录，只回收该根下完整名称匹配的过期目录；旧插件根中的同名目录不再自动删除，留待人工确认。
+- 修复插件激活异常隔离包装自身再抛错的问题：善后路径使用提前保存的插件 key，避免 rollback 过期 ORM 对象后日志与状态回写触发 `MissingGreenlet`；启动与热重载按 key 重新读取后续插件，Redis 故障不再中断加载，取消语义保持穿透。
+- 修复 System Agent 能力缓存并发合并丢条目：写入改为独立短事务，完成幂等建行、数据库锁行、读取、合并与提交后才释放锁；不使用调用方的旧 identity map，也不提前提交调用方事务，保留缓存条数上限。
+- 修复前端会话切换丢草稿的问题：切换前保存出站草稿，首次获取用户 ID 时保留输入；旧 Composer 卸载后停止提交与清空操作，迟到的发送成功响应不再清空新会话草稿。
+- 修复 ZIP 通道卸载按数据库 `installed_path` 直接 rmtree 无包含校验的问题：删除前断言目标位于插件 installed 根（含旧 backend 路径兼容根）之下，范围外拒绝删除并记日志（数据库行仍正常清理）。
+- 修复 System Agent 会话 `account_id` 指向不存在账号时落 FK 违约 500 的问题，前置校验返回 404（`ACCOUNT_NOT_FOUND`）。
+- 修复前端慢网络下后到的用户信息查询会用存储草稿覆盖正在输入文本的问题；新建会话期间用户手动切换会话后，迟到的会话激活不再把用户拽回新会话；排队提示的"前面有 N 条"改读最新队列缓存。
+- 修复 sudo 重复添加同一 (账号, TG 用户) 时落裸 500 的问题，改为结构化 409；`restart_account_bot` 等 Bot 重启的配置读取不再持锁做 DB I/O。
+
+### 安全
+
+- TOTP 硬化：验证码错误计入登录失败记录（可触发递进锁定）。不做"已用 timestep"消费式防重放——验证码本身 ±1 窗口有效，消费式拒绝会把同一 30s 窗口内的第二次正常登录（换设备/刷新重登/双端同时登录）连同正确密码一起拒绝。
+- 注册接口密码补齐强度约束（8–256 位），与修改密码口径一致。
+- 远程插件安装与插件配置动作的兜底异常不再把内部异常文本（可能含本地路径、URL 内嵌凭据）回显给客户端，改为固定文案 + 服务端日志（source_url 等经脱敏后记录）；插件配置动作的未预期异常按 500 返回。
+- 插件签名上传文件增加 64 KiB 读取上限（与 zip 通道的边界一致，超限 413）。
+- Webhook 入口限速改为双层分桶：主桶按 (client IP, account_id) 分桶保证账号间公平，另设仅按 IP 的放大兜底桶约束同一来源总量，反代后单个高频发送方不再饿死所有账号的 webhook 入口。
+- 远程插件更新移除本地 `.git` 的 `git pull` 快路径，始终 fresh clone 数据库中已校验的 `source_url`：插件进程无法再通过篡改自身目录的 `.git/config`（remote 重写、`core.sshCommand` 等）让配置在主 API 进程生效。本地导入（`local://`）插件本就不支持自动更新，行为不变。
+- `/readyz` 不再向未认证调用方回显依赖异常文本（可能含内部路径/标识），只返回 `ok:false` 与组件名，细节写入服务端日志。
+- sudo 白名单变更的 worker reload 通知失败不再被静默吞掉（记 warning 日志）；sudo 与 alias 的增删改补齐审计记录；远程插件安装与卸载的审计触发者口径补齐。
+- 系统控制台日志与配置导入等端点的兜底异常改为结构化错误信封 + 服务端日志（经脱敏），不再把内部异常文本透传给客户端；代理创建合并为单事务（审计与实体同 commit，失败不再产生半提交状态）。
+
+### 改进
+
+- 数据模型与迁移元数据对齐：补齐 SudoUser 唯一索引、LLMUsage.created_at、InstalledPlugin 三个索引、AccountBot 约束/索引等十余处模型声明漂移；12 个 `JSON` 列改为 `JSONB`（`JSON().with_variant` 写法，PG 编译为 JSONB、SQLite 回落 JSON），避免 autogenerate 生成删索引/降级类型的危险迁移。
+- 真实 PostgreSQL 迁移门禁补齐历史 `TEXT`、`ARRAY(TEXT)`、可空字段与遗漏索引的模型声明，并移除从未迁移的数据库列注释元数据；按现有迁移终态对齐，不改写历史迁移、不强加新约束，`alembic check` 保持严格检查。
+- 新增迁移 `0061`：`account.phone` / `account.tg_user_id` 查询索引、`audit_log(ts)` 索引、`llm_usage(source)` text_pattern_ops 索引（服务插件用量聚合与前缀匹配）。
+- 保留策略扩展：`llm_usage` 与 `rate_limit_event` 纳入 supervisor 保留清理（默认 30 天，可在系统设置 `log_retention` 中按表调整；`audit_log` 属审计合规数据不做自动删除，仅加索引）。
+- System Agent 流式订阅新增传输层心跳帧（`{"type":"heartbeat","seq":0}`，每 15 秒）：健康但安静的长任务不再触发前端 90 秒空闲兜底；空闲轮询改为自适应退避（0.2s 起步、2s 封顶，收到新事件立即恢复），单次 10 分钟运行的事件轮询查询量大幅下降。前端空闲超时改为静默核对（`IdleTimeoutError` 不再提示"连接中断"）、收到新进度即重置重连计数、持久游标按 1 秒节流落盘并在断开前强制写一次。
+- 资金台账/运营统计列提升与 SQL 聚合（迁移 `0062`）：`action_event` 新增 `amount` / `chat_id` / `direction` 冗余列并按旧 JSON 口径回填存量；写入时同步派生，台账与统计的金额/会话/方向过滤与总额聚合下推 SQL，不再 30 天窗口全量拉行到 Python。已用旧 Python 逻辑做 oracle 对照测试（15 组过滤组合逐条一致）。
+- 新增迁移 `0063`：清理自 0001 起无任何运行时引用的孤儿表 `plugin_available` 与 `plugin_install.repo_id` 残留列（downgrade 为文档化 no-op）。
+- Redis 键统一 `telepilot:` 命名空间（`llm_budget:`、`payout_limit:`、`plugin_ai_quota:`）：本次所需旧键通过 `DUMP/RESTORE` 在额度校验与扣账的同一个 Lua 调用中延续类型、值与剩余 TTL，覆盖 string、set、hash 与 zset；不扫描全库，不提前登记迁移完成，失败走既有 fail-closed 拒绝路径，下次可重试。
+- System Agent 路由小模型调用改用独立会话身份（`router:{session_id}`），不再与主对话共用同一上游缓存会话互相冲刷前缀缓存。
+- 管理 Bot 轮询增加 5 秒配置缓存：命中周期不再整行重读配置并解密 token，配置变更（restart/sync）立即失效。
+- 共享 Bot API HTTP 客户端接入进程优雅停机（shutdown 时关闭 keep-alive 连接）。
+- 插件运行时：`SandboxClient.send_message/send_file` 限速拒绝时抛 `PluginSendRateLimited`（带结构化限速详情，插件 API 参考已同步；此前静默返回 `None`）；插件更新屏障检查加 2 秒负缓存（发现更新中立即失效），消除每事件×每插件的热路径文件 IO；插件命令与内置别名冲突时记 warning；仓库/远程通道 `copytree` 统一 `symlinks=True`（不再把宿主目录内容复制进插件目录）；AI 配额 Redis 键超长插件改哈希后缀（消除 48 字符前缀碰撞共用配额桶）、release 失败写审计事件；并发安装 staging 目录改随机后缀（互不删除，残留清理只回收 1 小时前的过期目录）；`ctx.http` 无按插件配额的语义在插件 API 参考中明确。
+- `make` 未知目标不再静默空跑成功：已知组件词（`make logs be` 等）照常通过，拼写错误明确报错退出。
+- CI 新增"数据库迁移门禁"job：在真实 PostgreSQL 服务上执行 `alembic upgrade head` 验证迁移链可完整升级，随后 `alembic check` 拒绝模型与迁移的元数据漂移（防止 autogenerate 意外生成删索引/降级类型的迁移被合入），已纳入 CI Gate 汇总。
+- 列表接口 limit 参数统一声明式上限（`dispatch_debug`、`account_bots`、`plugins_install`，`ge=1, le=200`）。
+- 前端：CSV 下载的 blob URL 延迟 30 秒 revoke（规避 iOS Safari/PWA 立即 revoke 中断下载的历史问题）；PWA 运行时静态资源缓存增加条数与 30 天过期策略（限制跨部署 hash URL 无限累积）。
+- `scripts/verify-llm-cache.py` 统计口径修复：分页不再因缺失 `total` 字段静默截断、达到抓取上限打印警示；`since` 时间比较改为解析后比较（格式不符不再静默过滤同日数据）；caller key 缺少 id 字段时报错而非误导性"没有调用"。
+- 部署脚本：`backup.sh` 清理无校验文件配套的孤儿归档（超过 12 小时，避开本轮写入）；updater 内存任务记录保留最近 50 个（更早走磁盘回退读取）、畸形 Content-Length 不再打穿 handler 栈。
+- Go gateway：连接池键分隔符改 `\x00`（消除 baseURL 含 `|x` 时不同路由元组碰撞共用错误代理的理论可能）；请求体读错误区分 `http.MaxBytesError`，只有真正超限才返回 413。
+
 ## [0.102.0-beta.2] - 2026-10-23 · patch（次版本预发布） · iOS 27 PWA 顶栏模糊修复
 
 > 本条是主屏 Web App 的视觉修复；真机验收仍以 iOS 27/27.2 实机截图为准。

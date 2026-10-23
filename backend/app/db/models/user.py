@@ -9,7 +9,7 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     SmallInteger,
-    String,
+    Text,
     UniqueConstraint,
     func,
 )
@@ -28,18 +28,18 @@ class WebUser(Base):
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    username: Mapped[str] = mapped_column(String, unique=True, nullable=False)
+    username: Mapped[str] = mapped_column(Text, unique=True, nullable=False)
     # 数据库级单用户哨兵：所有行只能取 1，唯一约束使并发首次注册至多成功一个。
     singleton_key: Mapped[int] = mapped_column(
         SmallInteger,
         nullable=False,
         server_default="1",
     )
-    password_hash: Mapped[str] = mapped_column(String, nullable=False)
+    password_hash: Mapped[str] = mapped_column(Text, nullable=False)
     # 密码版本号：每次改密 +1，用于让旧 JWT（携带旧版本）自动失效
     pwd_version: Mapped[int] = mapped_column(BigInteger, nullable=False, server_default="0")
     # TOTP secret 用 master_key 加密后存（为空表示未启用 2FA）
-    totp_secret_enc: Mapped[str | None] = mapped_column(String, nullable=True)
+    totp_secret_enc: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
+        DateTime(timezone=True), server_default=func.now(), nullable=True
     )

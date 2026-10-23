@@ -629,6 +629,109 @@ class TestSandboxClientSecurity:
         assert "MTProto" in str(ex.value) or "__call__" in str(ex.value)
 
     @pytest.mark.asyncio
+    async def test_sandbox_send_message_rate_limited_raises_with_detail(self, monkeypatch):
+        """send_message 被限速拒绝时必须抛 PluginSendRateLimited 并携带限速详情。"""
+        from app.worker.plugins import sandbox as sandbox_mod
+        from app.worker.plugins.sandbox import PluginSendRateLimited, SandboxClient
+
+        sent: list[tuple] = []
+
+        class FakeClient:
+            async def send_message(self, *args, **kwargs):
+                sent.append((args, kwargs))
+                return SimpleNamespace(id=1)
+
+        detail = {
+            "rate_limit_action": "send_message_group",
+            "rate_limit_backend": "distributed",
+            "outcome": "rejected",
+            "wait_seconds": 12.5,
+            "reason": "group_throttled",
+        }
+
+        async def _rejected(*_args, **_kwargs):
+            return False, dict(detail)
+
+        monkeypatch.setattr(sandbox_mod, "acquire_userbot_action_rate_limit", _rejected)
+        client = SandboxClient(FakeClient(), ["send_message"], plugin_key="demo", account_id=7)
+
+        with pytest.raises(PluginSendRateLimited) as ex:
+            await client.send_message(-100123, "hello")
+
+        assert ex.value.detail == detail
+        assert ex.value.retry_after == 12.5
+        # 异常消息要说明被哪个限速拦住
+        assert "send_message_group" in str(ex.value)
+        assert "distributed" in str(ex.value)
+        assert "group_throttled" in str(ex.value)
+        # 真实 client 不应被调用
+        assert sent == []
+        # 兼容字段仍保留，供 trace 消费
+        assert object.__getattribute__(client, "_last_rate_limit_detail") == detail
+
+    @pytest.mark.asyncio
+    async def test_sandbox_send_file_rate_limited_raises_with_detail(self, monkeypatch):
+        """send_file 被限速拒绝时必须抛 PluginSendRateLimited 并携带限速详情。"""
+        from app.worker.plugins import sandbox as sandbox_mod
+        from app.worker.plugins.sandbox import PluginSendRateLimited, SandboxClient
+
+        sent: list[tuple] = []
+
+        class FakeClient:
+            async def send_file(self, *args, **kwargs):
+                sent.append((args, kwargs))
+                return SimpleNamespace(id=2)
+
+        detail = {
+            "rate_limit_action": "send_file",
+            "rate_limit_backend": "local_fallback",
+            "outcome": "rejected",
+            "reason": "local_fallback_account_throttled",
+        }
+
+        async def _rejected(*_args, **_kwargs):
+            return False, dict(detail)
+
+        monkeypatch.setattr(sandbox_mod, "acquire_userbot_action_rate_limit", _rejected)
+        client = SandboxClient(FakeClient(), ["send_file"], plugin_key="demo", account_id=7)
+
+        with pytest.raises(PluginSendRateLimited) as ex:
+            await client.send_file(-100123, b"payload")
+
+        assert ex.value.detail == detail
+        assert ex.value.retry_after == 0.0
+        assert "send_file" in str(ex.value)
+        assert "local_fallback" in str(ex.value)
+        assert sent == []
+
+    @pytest.mark.asyncio
+    async def test_sandbox_send_allowed_returns_real_result_unchanged(self, monkeypatch):
+        """未触发限速时 send_message/send_file 返回真实 client 结果。"""
+        from app.worker.plugins import sandbox as sandbox_mod
+        from app.worker.plugins.sandbox import SandboxClient
+
+        real_message = SimpleNamespace(id=99)
+
+        class FakeClient:
+            async def send_message(self, *args, **kwargs):
+                return real_message
+
+            async def send_file(self, *args, **kwargs):
+                return SimpleNamespace(id=100)
+
+        async def _allowed(*_args, **_kwargs):
+            return True, {"rate_limit_backend": "distributed", "outcome": "allowed"}
+
+        monkeypatch.setattr(sandbox_mod, "acquire_userbot_action_rate_limit", _allowed)
+        client = SandboxClient(
+            FakeClient(), ["send_message", "send_file"], plugin_key="demo", account_id=7
+        )
+
+        assert await client.send_message(-100123, "hello") is real_message
+        assert (await client.send_file(-100123, b"payload")).id == 100
+        assert object.__getattribute__(client, "_last_rate_limit_detail") is None
+
+    @pytest.mark.asyncio
     async def test_sandbox_event_helpers_require_permissions(self):
         """installed 插件不能通过 event helper 绕过 SandboxClient 权限。"""
         from app.worker.plugins.sandbox import SandboxClient, SandboxEvent
@@ -740,6 +843,47 @@ class TestSandboxClientSecurity:
         assert record_action.await_args.args[1]["type"] == "send_message"
         assert record_action.await_args.args[1]["reply_to_message_id"] == 777
         assert record_action.await_args.args[2] == plugin_loader.TRACE_STATUS_OK
+
+    @pytest.mark.asyncio
+    async def test_sandbox_rate_limited_send_records_skipped_and_reraises(self, monkeypatch):
+        """限速拒绝经 trace client 记 SKIPPED/rate_limited 后仍要把异常抛给插件。"""
+        from app.worker.plugins import loader as plugin_loader
+        from app.worker.plugins import sandbox as sandbox_mod
+        from app.worker.plugins.sandbox import PluginSendRateLimited, SandboxClient
+
+        class FakeClient:
+            async def send_message(self, *_args, **_kwargs):
+                raise AssertionError("rate limited 前不应触达真实 client")
+
+        detail = {
+            "rate_limit_action": "send_message_group",
+            "rate_limit_backend": "distributed",
+            "outcome": "rejected",
+            "wait_seconds": 3.0,
+            "reason": "group_throttled",
+        }
+
+        async def _rejected(*_args, **_kwargs):
+            return False, dict(detail)
+
+        monkeypatch.setattr(sandbox_mod, "acquire_userbot_action_rate_limit", _rejected)
+        record_action = AsyncMock()
+        monkeypatch.setattr(plugin_loader, "record_action", record_action)
+        trace_client = plugin_loader._trace_plugin_client(
+            SandboxClient(FakeClient(), ["send_message"], plugin_key="demo", account_id=7),
+            "evt_rate_limited",
+            plugin_key="demo",
+            component="sandbox_rate_limit_test",
+            account_id=7,
+        )
+
+        with pytest.raises(PluginSendRateLimited):
+            await trace_client.send_message(-100123, "hello")
+
+        record_action.assert_awaited_once()
+        assert record_action.await_args.args[2] == plugin_loader.TRACE_STATUS_SKIPPED
+        assert record_action.await_args.kwargs["error_code"] == "rate_limited"
+        assert record_action.await_args.kwargs["result"] == detail
 
     @pytest.mark.asyncio
     async def test_sandbox_event_message_layer_still_enforces_permissions(self):
@@ -1124,8 +1268,9 @@ class TestRemotePluginEnableFlow:
 
         async def _fake_clone(*args, **_kwargs):  # noqa: ANN001
             target = args[-1]
-            plugin_dir = tmp_path / "installed" / "git_demo.installing"
-            assert str(plugin_dir) == str(target)
+            # staging 现在带随机后缀：<key>.installing.<uuid4hex[:8]>
+            assert Path(target).name.startswith("git_demo.installing.")
+            plugin_dir = Path(target)
             plugin_dir.mkdir(parents=True)
             (plugin_dir / "plugin.json").write_text(
                 '{"name":"git_demo","display_name":"Git Demo","version":"1.2.3",'
@@ -1164,9 +1309,28 @@ class TestRemotePluginEnableFlow:
         assert installed.source_label == "Git"
         assert installed.last_install_error is None
         assert (tmp_path / "installed" / "git_demo").is_dir()
-        assert not (tmp_path / "installed" / "git_demo.installing").exists()
+        assert list((tmp_path / "installed").glob("git_demo.installing*")) == []
         assert any("app.db.models.plugin" in item for item in installed.lint_warnings)
         assert any("httpx.get" in item and "timeout" in item for item in installed.lint_warnings)
+
+    @pytest.mark.asyncio
+    async def test_install_rejects_builtin_key_conflict(self, monkeypatch, tmp_path):
+        """Git 安装 key 撞上 builtin（如 forward）时必须在 clone 前拒绝，与 ZIP 通道一致。"""
+        monkeypatch.setattr(svc.settings, "plugins_installed_dir", str(tmp_path / "installed"))
+
+        async def _clone_should_not_run(*_args, **_kwargs):  # noqa: ANN001
+            raise AssertionError("git clone 不应被调用")
+
+        monkeypatch.setattr(svc, "_run_git", _clone_should_not_run)
+        db = _FakeRemoteInstallDB()
+
+        with pytest.raises(svc.DuplicatePluginName) as ex:
+            await svc.install(db, "https://example.com/forward.git", name="forward")
+
+        assert ex.value.code == "KEY_CONFLICTS_BUILTIN"
+        assert db.installed_rows == {}
+        assert db.features == {}
+        assert not (tmp_path / "installed" / "forward").exists()
 
     @pytest.mark.asyncio
     async def test_install_supports_github_tree_branch_url(self, monkeypatch, tmp_path):
@@ -1186,7 +1350,7 @@ class TestRemotePluginEnableFlow:
 
         await svc.install(db, "https://github.com/example/git_demo/tree/feature/demo")
 
-        assert calls[0] == (
+        assert calls[0][:7] == (
             "clone",
             "--depth",
             "1",
@@ -1194,9 +1358,42 @@ class TestRemotePluginEnableFlow:
             "feature/demo",
             "--single-branch",
             "https://github.com/example/git_demo.git",
-            str(tmp_path / "installed" / "git_demo.installing"),
         )
+        # clone 目标是带随机后缀的 staging 目录
+        assert Path(calls[0][7]).name.startswith("git_demo.installing.")
         assert db.installed_rows["git_demo"].source_url == "https://github.com/example/git_demo/tree/feature/demo"
+
+    @pytest.mark.asyncio
+    async def test_install_does_not_delete_concurrent_random_staging(self, monkeypatch, tmp_path):
+        """Git 安装不得删除并发流程正在使用的随机 staging 目录（旧固定名会互相 rmtree）。"""
+        monkeypatch.setattr(svc.settings, "plugins_installed_dir", str(tmp_path / "installed"))
+        installed_root = tmp_path / "installed"
+        installed_root.mkdir(parents=True)
+        final_dir = installed_root / "race_git"
+
+        # A 流程：并发安装已创建自己的随机 staging（进行中）
+        a_staging = svc._new_staging_dir(final_dir)
+        a_staging.mkdir(parents=True)
+        a_marker = a_staging / "a-marker.txt"
+        a_marker.write_text("A in progress", encoding="utf-8")
+
+        async def _fake_clone(*args, **_kwargs):  # noqa: ANN001
+            plugin_dir = Path(args[-1])
+            # B 拿到的是独立的随机 staging，不与 A 冲突
+            assert plugin_dir != a_staging
+            plugin_dir.mkdir(parents=True)
+            _write_runtime_plugin(plugin_dir, key="race_git", version="1.0.0")
+            return ""
+
+        monkeypatch.setattr(svc, "_run_git", _fake_clone)
+        db = _FakeRemoteInstallDB()
+
+        await svc.install(db, "https://example.com/race_git.git")
+
+        assert final_dir.is_dir()
+        # B 完成后 A 的 staging 仍在，未被 B 的残留清理误删
+        assert a_marker.exists()
+        assert list((installed_root / ".staging").glob("race_git.installing*")) == [a_staging]
 
     @pytest.mark.asyncio
     async def test_update_writes_installed_plugin(self, monkeypatch, tmp_path):
@@ -1218,20 +1415,20 @@ class TestRemotePluginEnableFlow:
         (plugin_dir / "__init__.py").write_text("PLUGIN_CLASS = None\n", encoding="utf-8")
         (plugin_dir / "plugin.py").write_text("import requests\n", encoding="utf-8")
 
-        async def _fake_pull(*_args, **kwargs):  # noqa: ANN001
-            staged_dir = Path(kwargs["cwd"])
-            (staged_dir / "plugin.json").write_text(
-                '{"name":"update_demo","display_name":"Update Demo","version":"1.1.0",'
-                '"requires_platform_capabilities":[]}',
-                encoding="utf-8",
-            )
-            (staged_dir / "plugin.py").write_text(
-                "import requests\nrequests.post('https://example.com')\n",
-                encoding="utf-8",
+        async def _fake_clone(*args, **kwargs):  # noqa: ANN001
+            # 更新必须 fresh clone 已校验的 source_url，不得走本地 .git 的 pull 快路径。
+            assert args[:2] == ("clone", "--depth")
+            assert "https://example.com/update_demo.git" in args
+            repo_dir = Path(args[-1])
+            _write_runtime_plugin(
+                repo_dir / "update_demo",
+                key="update_demo",
+                version="1.1.0",
+                extra_py="import requests\nrequests.post('https://example.com')\n",
             )
             return ""
 
-        monkeypatch.setattr(svc, "_run_git", _fake_pull)
+        monkeypatch.setattr(svc, "_run_git", _fake_clone)
         db = _FakeRemoteInstallDB()
         db.installed_rows["update_demo"] = InstalledPlugin(
             key="update_demo",
@@ -1265,15 +1462,23 @@ class TestRemotePluginEnableFlow:
         _write_runtime_plugin(plugin_dir, key="update_demo", version="1.0.0")
         (plugin_dir / ".git").mkdir()
 
-        async def _fake_pull(*_args, **kwargs):  # noqa: ANN001
-            staged_dir = Path(kwargs["cwd"])
-            (staged_dir / "plugin.json").write_text(
+        async def _fake_clone(*args, **kwargs):  # noqa: ANN001
+            # 更新必须 fresh clone 已校验的 source_url，不得走本地 .git 的 pull 快路径。
+            assert args[:2] == ("clone", "--depth")
+            repo_dir = Path(args[-1])
+            _write_runtime_plugin(
+                repo_dir / "update_demo",
+                key="update_demo",
+                version="2.0.0",
+            )
+            # 新版故意缺 requires_platform_capabilities 字段，触发保留旧目录的回退。
+            (repo_dir / "update_demo" / "plugin.json").write_text(
                 '{"name":"update_demo","display_name":"Update Demo","version":"2.0.0"}',
                 encoding="utf-8",
             )
             return ""
 
-        monkeypatch.setattr(svc, "_run_git", _fake_pull)
+        monkeypatch.setattr(svc, "_run_git", _fake_clone)
         db = _FakeRemoteInstallDB()
         db.installed_rows["update_demo"] = InstalledPlugin(
             key="update_demo",
@@ -1290,7 +1495,7 @@ class TestRemotePluginEnableFlow:
         assert exc.value.code == "PLATFORM_CAPABILITIES_REQUIRED"
         assert '"1.0.0"' in (plugin_dir / "plugin.json").read_text(encoding="utf-8")
         assert db.installed_rows["update_demo"].version == "1.0.0"
-        assert not (tmp_path / "installed" / "update_demo.installing").exists()
+        assert list((tmp_path / "installed").glob("update_demo.installing*")) == []
         assert not (tmp_path / "installed" / "update_demo.bak-update").exists()
         assert svc.plugin_update_active(tmp_path / "installed", "update_demo") is False
 
@@ -1307,9 +1512,17 @@ class TestRemotePluginEnableFlow:
         _write_runtime_plugin(plugin_dir, key="update_demo", version="1.0.0")
         (plugin_dir / ".git").mkdir()
 
-        async def _fake_pull(*_args, **kwargs):  # noqa: ANN001
-            staged_dir = Path(kwargs["cwd"])
-            (staged_dir / "plugin.json").write_text(
+        async def _fake_clone(*args, **kwargs):  # noqa: ANN001
+            # 更新必须 fresh clone 已校验的 source_url，不得走本地 .git 的 pull 快路径。
+            assert args[:2] == ("clone", "--depth")
+            repo_dir = Path(args[-1])
+            _write_runtime_plugin(
+                repo_dir / "update_demo",
+                key="update_demo",
+                version="2.0.0",
+            )
+            # 新版声明 interaction_bot 能力，会被下方 _blocked 拦下。
+            (repo_dir / "update_demo" / "plugin.json").write_text(
                 '{"name":"update_demo","display_name":"Update Demo","version":"2.0.0",'
                 '"requires_platform_capabilities":["interaction_bot"]}',
                 encoding="utf-8",
@@ -1323,7 +1536,7 @@ class TestRemotePluginEnableFlow:
                 "值守预设",
             )
 
-        monkeypatch.setattr(svc, "_run_git", _fake_pull)
+        monkeypatch.setattr(svc, "_run_git", _fake_clone)
         monkeypatch.setattr(platform_capabilities, "ensure_plugin_capabilities", _blocked)
         db = _FakeRemoteInstallDB()
         db.installed_rows["update_demo"] = InstalledPlugin(
@@ -1340,7 +1553,7 @@ class TestRemotePluginEnableFlow:
 
         assert '"1.0.0"' in (plugin_dir / "plugin.json").read_text(encoding="utf-8")
         assert db.installed_rows["update_demo"].version == "1.0.0"
-        assert not (tmp_path / "installed" / "update_demo.installing").exists()
+        assert list((tmp_path / "installed").glob("update_demo.installing*")) == []
         assert not (tmp_path / "installed" / "update_demo.bak-update").exists()
         assert svc.plugin_update_active(tmp_path / "installed", "update_demo") is False
 
@@ -1382,7 +1595,7 @@ class TestRemotePluginEnableFlow:
         assert installed.version == "1.1.11"
         assert installed.installed_path == str(target)
         assert installed.enabled is True
-        assert not (tmp_path / "installed" / "sum.installing").exists()
+        assert list((tmp_path / "installed").glob("sum.installing*")) == []
         assert not (tmp_path / "installed" / "sum.bak-update").exists()
 
     @pytest.mark.asyncio
@@ -1450,8 +1663,33 @@ class TestPluginRepoInstallFlow:
         assert installed.trust_tier == "community"
         assert installed.source_label == "Plugin Repo"
         assert (tmp_path / "installed" / "repo_demo").is_dir()
-        assert not (tmp_path / "installed" / "repo_demo.installing").exists()
+        assert list((tmp_path / "installed").glob("repo_demo.installing*")) == []
         assert any("httpx.get" in item and "timeout" in item for item in installed.lint_warnings)
+
+    @pytest.mark.asyncio
+    async def test_install_plugin_from_repo_rejects_builtin_key_conflict(
+        self,
+        monkeypatch,
+        tmp_path,
+    ):
+        """仓库插件 key 撞上 builtin（如 forward）时必须拒绝，不得覆盖内置 Feature 行。"""
+        monkeypatch.setattr(repo_svc.settings, "plugins_installed_dir", str(tmp_path / "installed"))
+        repo_dir = tmp_path / "repo"
+        _write_runtime_plugin(repo_dir / "forward", key="forward", version="9.9.9")
+
+        async def _cached(_url: str, **_kwargs):
+            return repo_dir
+
+        monkeypatch.setattr(repo_svc, "_ensure_repo_cached_unlocked", _cached)
+        db = _FakePluginRepoDB(PluginRepo(id=1, url="https://example.com/repo.git", name="Repo"))
+
+        with pytest.raises(repo_svc.DuplicatePluginName) as ex:
+            await repo_svc.install_plugin_from_repo(db, 1, "forward", default_enabled=False)
+
+        assert ex.value.code == "KEY_CONFLICTS_BUILTIN"
+        assert db.installed_rows == {}
+        assert db.features == {}
+        assert not (tmp_path / "installed" / "forward").exists()
 
     @pytest.mark.asyncio
     async def test_update_installed_plugins_from_repo_only_updates_newer_installed(
@@ -1536,7 +1774,7 @@ class TestPluginRepoInstallFlow:
         assert installed_json.is_symlink()
         installed_json.write_text('{"round": 8}', encoding="utf-8")
         assert migrated_json.read_text(encoding="utf-8") == '{"round": 8}'
-        assert not (tmp_path / "installed" / "update_demo.installing").exists()
+        assert list((tmp_path / "installed").glob("update_demo.installing*")) == []
         assert not (tmp_path / "installed" / "update_demo.bak-update").exists()
 
     @pytest.mark.asyncio
@@ -1756,7 +1994,7 @@ class TestPluginRepoInstallFlow:
         assert db.installed_rows["game_demo"].manifest_json == {"name": "game_demo"}
         assert "game_demo" not in db.features
         assert '"1.0.0"' in (install_dir / "plugin.json").read_text(encoding="utf-8")
-        assert not (tmp_path / "installed" / "game_demo.installing").exists()
+        assert list((tmp_path / "installed").glob("game_demo.installing*")) == []
         assert not (tmp_path / "installed" / "game_demo.bak-update").exists()
         assert (
             svc.plugin_update_active(tmp_path / "installed", "game_demo")
@@ -1838,7 +2076,7 @@ class TestPluginRepoInstallFlow:
         assert installed.trust_tier == "local"
         assert installed.source_label == "Local"
         assert (tmp_path / "installed" / "local_demo").is_dir()
-        assert not (tmp_path / "installed" / "local_demo.installing").exists()
+        assert list((tmp_path / "installed").glob("local_demo.installing*")) == []
 
 class TestPluginMetadataSchema:
     """PluginMetadataSchema Pydantic 校验测试。"""

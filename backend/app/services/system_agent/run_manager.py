@@ -7,6 +7,7 @@ import hashlib
 import json
 import logging
 import socket
+import time
 import uuid
 from collections.abc import AsyncIterator, Callable, Sequence
 from dataclasses import dataclass
@@ -63,6 +64,21 @@ from .secrets import extract_plaintext_secrets, redact_known_secrets
 from .service import get_system_agent_service, is_latest_completed_pair
 
 log = logging.getLogger(__name__)
+
+# —— stream_events 订阅保活与空闲退避参数（纯传输层，不写事件表）——
+# 订阅心跳间隔：距上次向客户端产出字节超过该秒数即补发一帧
+# {"type":"heartbeat","seq":0,...}，防止前端把“健康但安静”的长工具调用误判断流。
+# 前端按 type 忽略该帧，心跳字节会重置其空闲计时器。
+HEARTBEAT_INTERVAL_SECONDS = 15.0
+# 空闲退避倍率（相对 poll_interval 逐级放大），封顶 _STREAM_BACKOFF_MAX_SECONDS；
+# 封顶值必须明显小于 HEARTBEAT_INTERVAL_SECONDS，保证心跳按时发出。
+_STREAM_BACKOFF_FACTORS = (1.0, 2.5, 5.0, 10.0)
+_STREAM_BACKOFF_MAX_SECONDS = 2.0
+
+
+def _stream_monotonic() -> float:
+    """stream_events 专用单调时钟；独立成函数便于测试确定性替换。"""
+    return time.monotonic()
 
 
 class RunConflictError(RuntimeError):
@@ -1800,15 +1816,48 @@ class SystemAgentRunManager:
         after_seq: int = 0,
     ) -> AsyncIterator[dict[str, Any]]:
         cursor = max(0, after_seq)
+        # last_emit：最近一次向客户端产出字节的时刻（真实事件与心跳帧都会推进）；
+        # idle_rounds：连续无新事件的轮次，用于空闲退避；收到真实事件即双双复位。
+        last_emit = _stream_monotonic()
+        idle_rounds = 0
         while True:
             rows = await self.list_events(run_id, after_seq=cursor)
-            for row in rows:
-                cursor = row.seq
-                yield dict(row.event or {})
+            if rows:
+                idle_rounds = 0
+                for row in rows:
+                    cursor = row.seq
+                    yield dict(row.event or {})
+                last_emit = _stream_monotonic()
             run = await self.get_run(run_id)
             if run.status in AGENT_RUN_STREAM_FINAL_STATUSES and cursor >= run.last_seq:
                 return
-            await asyncio.sleep(self._poll_interval)
+            # 空闲退避：无新事件时轮询间隔按倍率逐步放大（poll_interval=0.2s 时
+            # 0.2 → 0.5 → 1.0 → 2.0s 封顶），收到新事件立即回到 poll_interval 快速
+            # 跟进；list_events/get_run 双查询结构保持不变，不因轮询次数减少而合并。
+            # 代价是终态/waiting 检测最多延迟一个退避间隔（≤ 封顶值），可接受。
+            factor = _STREAM_BACKOFF_FACTORS[
+                min(idle_rounds, len(_STREAM_BACKOFF_FACTORS) - 1)
+            ]
+            await asyncio.sleep(
+                max(
+                    self._poll_interval,
+                    min(self._poll_interval * factor, _STREAM_BACKOFF_MAX_SECONDS),
+                )
+            )
+            idle_rounds += 1
+            # 心跳帧：距上次产出字节超过阈值即补发一帧保活，字段对齐 events.make_event
+            # 信封（type/run_id/seq/ts）；seq 固定 0，不推进 cursor、不写事件表，
+            # 前端按 type 忽略并靠 seq 去重，不会误消费。退避封顶值远小于心跳间隔，
+            # 心跳最多延迟一个退避间隔发出。
+            now = _stream_monotonic()
+            if now - last_emit >= HEARTBEAT_INTERVAL_SECONDS:
+                yield {
+                    "type": "heartbeat",
+                    "seq": 0,
+                    "run_id": run_id,
+                    "ts": datetime.now(UTC).isoformat(),
+                }
+                last_emit = now
 
     async def cancel_run(self, run_id: str) -> SystemAgentRun:
         """取消 queued/waiting/running Run；远端 worker 由 heartbeat 观察请求。"""

@@ -391,6 +391,7 @@ record_previous_deployment() {
   updater_image="$(docker inspect --format '{{.Config.Image}}' "$updater_id" 2>/dev/null || true)"
   python3 - "$state_file" "$CURRENT_COMMIT" "$web_image" "$frontend_image" "$updater_image" <<'PY'
 import json
+import os
 import pathlib
 import sys
 
@@ -403,7 +404,10 @@ payload = {
         "updater": sys.argv[5] or None,
     },
 }
-path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+# 回滚流程依赖此状态文件，原子落盘避免读到半截内容。
+tmp = path.with_name(path.name + ".tmp")
+tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+os.replace(tmp, path)
 PY
 }
 

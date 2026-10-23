@@ -1125,6 +1125,34 @@ async def test_dispatch_plugin_command_creates_event_bus_decision(monkeypatch):
     finish_trace.assert_awaited_once_with(trace, "ok")
 
 
+@pytest.mark.parametrize("conflict_name", ["help", "h"])
+def test_register_plugin_command_conflicting_with_builtin_logs_warning(caplog, conflict_name):
+    """插件命令与内置命令（含别名）同名被忽略时必须记 warning，而不是静默丢弃。"""
+    import logging
+
+    from app.worker import command as wcmd
+
+    async def handler(_client, _event, _args, _account_id):
+        return None
+
+    with caplog.at_level(logging.WARNING, logger="app.worker.command"):
+        wcmd.register_plugin_command(
+            conflict_name, handler, owner_plugin_key="demo_conflict", generation=1
+        )
+
+    try:
+        assert conflict_name not in wcmd._PLUGIN_COMMANDS
+        assert any(
+            "内置命令冲突" in record.message
+            and "demo_conflict" in record.message
+            and conflict_name in record.message
+            for record in caplog.records
+        )
+    finally:
+        # 冲突命令不会注册成功，但保险起见清理，避免污染其他用例。
+        wcmd.unregister_plugin_command(conflict_name, owner_plugin_key="demo_conflict")
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("cmd", "args_raw", "aliases", "templates"),

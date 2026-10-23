@@ -145,9 +145,10 @@ async def _enforce_login_rate_limit(request: Request, username: str) -> None:
     redis = get_redis()
     for k in keys:
         try:
-            count = await redis.incr(k)
-            if count == 1:
-                await redis.expire(k, 60)
+            # 原子 INCR+EXPIRE（Lua）：两条命令拆开时，第一条 INCR 成功后进程崩溃 /
+            # 连接断开会丢失 EXPIRE，key 变成无 TTL 且只增不减，最终该 IP / 用户名被
+            # 永久 429，只能人工清 Redis。脚本统一由 auth_login_security 提供。
+            count = await auth_login_security.atomic_incr_with_expire(redis, k, 60)
             if count > limit:
                 raise _err(
                     "RATE_LIMITED",
@@ -225,13 +226,11 @@ async def login(req: LoginRequest, request: Request, response: Response, db: DBS
     ).scalar_one_or_none()
     login_security = await auth_login_security.get_login_security_config(db)
     # 用户不存在或密码错都返回相同错误；不存在用户时也做一次等价密码校验，
-    # 降低用户名枚举的时序侧信道风险。
+    # 降低用户名枚举的时序侧信道风险（哨兵校验对不存在用户恒为 False，
+    # 因此通过此处校验后 user 必然存在，无需再判 None）。
     if not auth_service.verify_password_with_sentinel(
         req.password, user.password_hash if user else None
     ):
-        await auth_login_security.record_login_failure(ip, username_norm, config=login_security)
-        raise _err("AUTH_INVALID", "用户名或密码错误", 401)
-    if user is None:
         await auth_login_security.record_login_failure(ip, username_norm, config=login_security)
         raise _err("AUTH_INVALID", "用户名或密码错误", 401)
 
@@ -262,8 +261,14 @@ async def login(req: LoginRequest, request: Request, response: Response, db: DBS
         if not req.totp_code:
             return LoginResponse(ok=False, require_totp=True)
         secret = decrypt_str(user.totp_secret_enc)
-        if not auth_service.verify_totp(secret, req.totp_code):
+        if auth_service.verify_totp_step(secret, req.totp_code) is None:
+            # TOTP 猜错与密码错误同口径计入失败计数：此分支密码已校验通过、不会与
+            # 密码失败重复计数，若不计则攻击者可拿正确密码按限速上限长期慢速爆破 6 位码。
+            await auth_login_security.record_login_failure(ip, username_norm, config=login_security)
             raise _err("TOTP_INVALID", "动态验证码错误", 401)
+        # 不做"已用 timestep"消费式防重放：验证码本身 ±1 窗口（最长 ~90s）有效，
+        # 消费式拒绝会把同一窗口内的第二次正常登录（换设备/刷新重登/双端同时登录）
+        # 连同正确密码一起拦在门外；登录已有密码 + 限速 + 递进锁定兜底，重放面足够窄。
 
     # 密码失败次数过多后，正确密码还需要通知 Bot OTP；通知 Bot 不可用时提示使用恢复码。
     if not used_recovery and await auth_login_security.should_require_login_otp(

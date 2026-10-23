@@ -35,24 +35,23 @@ class RemotePlugin(Base):
     source_url: Mapped[str] = mapped_column(Text, nullable=False)
     version: Mapped[str] = mapped_column(String(64), nullable=False, default="0.0.0")
     latest_version: Mapped[str | None] = mapped_column(
-        String(64), nullable=True, comment="最近一次检查到的远程版本"
+        String(64), nullable=True
     )
     update_available: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, default=False, comment="最近一次检查是否发现可更新版本"
+        Boolean, nullable=False, default=False
     )
     last_update_check_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True, comment="最近一次检查远程更新的时间"
+        DateTime(timezone=True), nullable=True
     )
     last_update_check_error: Mapped[str | None] = mapped_column(
-        Text, nullable=True, comment="最近一次检查更新失败原因"
+        Text, nullable=True
     )
     lint_warnings: Mapped[list[str]] = mapped_column(
-        JSON, nullable=False, default=list, comment="安装/更新时静态 lint 警告"
+        JSON, nullable=False, default=list
     )
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     default_enabled: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False,
-        comment="安装时是否默认为所有账号启用；启用后自动在 AccountFeature 创建行",
     )
     installed_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False

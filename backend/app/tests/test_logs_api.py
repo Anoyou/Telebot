@@ -610,3 +610,28 @@ async def test_list_log_messages_verdict_scans_later_pages_until_match() -> None
     )
 
     assert [row.trace_id for row in rows] == ["evt_deep_failed"]
+
+
+@pytest.mark.asyncio
+async def test_system_console_logs_invalid_service_returns_structured_detail(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """系统控制台日志参数被拒：必须返回 {"code","message"} 信封，而不是透传异常文本。"""
+    from fastapi import HTTPException
+
+    def fake_fetch(*_args, **_kwargs):
+        raise AssertionError("校验失败时不应访问 updater")
+
+    monkeypatch.setattr("app.api.logs._fetch_updater_console_logs", fake_fetch)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await list_system_console_logs(
+            _user=object(),
+            body=logs_api.SystemConsoleLogsRequest(service="not-a-service", tail=100),
+        )
+
+    assert exc_info.value.status_code == 400
+    detail = exc_info.value.detail
+    assert isinstance(detail, dict)
+    assert detail["code"] == "SYSTEM_CONSOLE_LOGS_INVALID"
+    assert "系统控制台日志请求无效" in detail["message"]

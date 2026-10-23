@@ -203,10 +203,24 @@ async def update_template(
     return tpl
 
 
+class RateLimitTemplateInUse(Exception):
+    """模板仍被账号引用，直接删除会触发 FK 违约；由 API 层映射为 409。"""
+
+    def __init__(self, account_ids: list[int]) -> None:
+        super().__init__(f"rate limit template in use by accounts {account_ids}")
+        self.account_ids = account_ids
+
+
 async def delete_template(db: AsyncSession, tpl_id: int) -> bool:
     tpl = await db.get(RateLimitTemplate, tpl_id)
     if tpl is None:
         return False
+    # Account.template_id 的 FK 无 ondelete：被引用时直接删会 ForeignKeyViolation 500。
+    used = (
+        await db.execute(select(Account.id).where(Account.template_id == tpl_id))
+    ).scalars().all()
+    if used:
+        raise RateLimitTemplateInUse(sorted(int(i) for i in used))
     # 同步删模板下所有 rule
     rules = (
         await db.execute(

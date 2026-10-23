@@ -168,11 +168,15 @@ export default defineConfig({
             },
           },
           {
-            // 静态资源：StaleWhileRevalidate（带内容 hash，可长期缓存）
+            // 静态资源：StaleWhileRevalidate（带内容 hash，可长期缓存）。
+            // 每次部署产生新 hash URL，若不设过期策略会无限累积；限条数 + 30 天回收。
             urlPattern: ({ request }) =>
               ["style", "script", "worker", "image", "font"].includes(request.destination),
             handler: "StaleWhileRevalidate",
-            options: { cacheName: "assets" },
+            options: {
+              cacheName: "assets",
+              expiration: { maxEntries: 200, maxAgeSeconds: 30 * 24 * 60 * 60 },
+            },
           },
         ],
       },

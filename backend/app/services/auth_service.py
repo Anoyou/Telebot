@@ -104,9 +104,25 @@ def make_otpauth_url(username: str, secret: str, issuer: str = "TelegramUserbot"
 
 def verify_totp(secret: str, code: str) -> bool:
     """校验 6 位 TOTP code。``valid_window=1`` 容忍 ±30s 时钟漂移。"""
+    return verify_totp_step(secret, code) is not None
+
+
+def verify_totp_step(secret: str, code: str) -> int | None:
+    """校验 6 位 TOTP code，命中返回对应的 timestep（30s 步进），未命中返回 None。
+
+    与 :func:`verify_totp` 的 ±1 窗口语义完全一致（同一套 pyotp 比较路径），
+    但把命中的 timestep 暴露给调用方，供登录成功后记录"已用 timestep"做防重放。
+    """
     if not secret or not code:
-        return False
+        return None
     try:
-        return bool(pyotp.TOTP(secret).verify(code.strip(), valid_window=1))
+        totp = pyotp.TOTP(secret)
+        code_norm = str(code).strip()
+        now_ts = int(time.time())
+        base_step = int(now_ts // totp.interval)
+        for offset in (-1, 0, 1):
+            if pyotp.utils.strings_equal(code_norm, totp.at(now_ts, offset)):
+                return base_step + offset
     except Exception:
-        return False
+        return None
+    return None

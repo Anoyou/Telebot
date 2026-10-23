@@ -228,3 +228,90 @@ async def test_alias_to_template():
     event.raw_text = ",hi"
     await handler(event)
     event.edit.assert_called_with("hello world")
+
+
+# ════════════════════════════════════════════════════════════
+# 3) API 层：别名 CRUD 写审计
+# ════════════════════════════════════════════════════════════
+
+def _alias_row(**overrides):
+    from types import SimpleNamespace
+
+    # CommandAliasResponse.created_at 是 str（无 SudoUserResponse 那样的 validator）
+    data = {
+        "id": 21,
+        "alias": "fy",
+        "target": "translate",
+        "account_id": 3,
+        "created_at": "2026-05-10T00:00:00+00:00",
+    }
+    data.update(overrides)
+    return SimpleNamespace(**data)
+
+
+@pytest.mark.asyncio
+async def test_alias_create_endpoint_writes_audit(monkeypatch):
+    """别名创建成功：同事务写 audit（alias.create）。"""
+    from app.api import alias as alias_api
+    from app.schemas.alias import CommandAliasCreate
+
+    row = _alias_row()
+    audit_write = AsyncMock()
+    db = AsyncMock()
+    monkeypatch.setattr(alias_api, "create_alias", AsyncMock(return_value=row))
+    monkeypatch.setattr(alias_api.audit, "write", audit_write)
+
+    await alias_api.create_alias_endpoint(
+        CommandAliasCreate(alias="fy", target="translate", account_id=3),
+        db=db,
+        user=MagicMock(id=7),
+    )
+
+    audit_write.assert_awaited_once()
+    assert audit_write.await_args.args[1] == 7
+    assert audit_write.await_args.args[2] == "alias.create"
+    assert audit_write.await_args.kwargs["target"] == "alias:21"
+    db.commit.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_alias_update_endpoint_writes_audit(monkeypatch):
+    """别名更新成功：同事务写 audit（alias.update）。"""
+    from app.api import alias as alias_api
+    from app.schemas.alias import CommandAliasUpdate
+
+    row = _alias_row(target="translate zh")
+    audit_write = AsyncMock()
+    db = AsyncMock()
+    monkeypatch.setattr(alias_api, "update_alias", AsyncMock(return_value=row))
+    monkeypatch.setattr(alias_api.audit, "write", audit_write)
+
+    await alias_api.update_alias_endpoint(
+        21, CommandAliasUpdate(target="translate zh"), db=db, user=MagicMock(id=7)
+    )
+
+    audit_write.assert_awaited_once()
+    assert audit_write.await_args.args[2] == "alias.update"
+    assert audit_write.await_args.kwargs["target"] == "alias:21"
+    db.commit.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_alias_delete_endpoint_writes_audit(monkeypatch):
+    """别名删除成功：同事务写 audit（alias.delete）。"""
+    from app.api import alias as alias_api
+
+    row = _alias_row()
+    audit_write = AsyncMock()
+    db = AsyncMock()
+    monkeypatch.setattr(alias_api, "get_alias", AsyncMock(return_value=row))
+    monkeypatch.setattr(alias_api, "delete_alias", AsyncMock(return_value=True))
+    monkeypatch.setattr(alias_api.audit, "write", audit_write)
+
+    await alias_api.delete_alias_endpoint(21, db=db, user=MagicMock(id=7))
+
+    audit_write.assert_awaited_once()
+    assert audit_write.await_args.args[2] == "alias.delete"
+    assert audit_write.await_args.kwargs["target"] == "alias:21"
+    assert audit_write.await_args.kwargs["detail"] == {"account_id": 3, "alias": "fy"}
+    db.commit.assert_awaited_once()

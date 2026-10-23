@@ -138,7 +138,15 @@ async def patch_template(
 
 @router.delete("/api/rate-templates/{tpl_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_template(tpl_id: int, db: DBSession, user: CurrentUser) -> None:
-    ok = await svc.delete_template(db, tpl_id)
+    try:
+        ok = await svc.delete_template(db, tpl_id)
+    except svc.RateLimitTemplateInUse as exc:
+        accounts = ", ".join(f"#{i}" for i in exc.account_ids)
+        raise _bad(
+            "template_in_use",
+            f"模板正被账号 {accounts} 使用，无法删除（请先为这些账号改换模板）",
+            409,
+        ) from exc
     if not ok:
         raise _bad("not_found", "模板不存在", 404)
     await _audit(db, user.id, "delete_rate_template", target=str(tpl_id))
@@ -714,6 +722,12 @@ async def get_system_settings(db: DBSession, _user: CurrentUser) -> dict[str, An
             ),
             "native_raw_persist_enabled": bool(log_retention.get("native_raw_persist_enabled", False)),
             "native_raw_retention_days": max(0, int(log_retention.get("native_raw_retention_days", 1) or 0)),
+            "llm_usage_retention_days": max(
+                0, int(log_retention.get("llm_usage_retention_days", 30) or 0)
+            ),
+            "rate_limit_event_retention_days": max(
+                0, int(log_retention.get("rate_limit_event_retention_days", 30) or 0)
+            ),
         },
         "ui_preferences": {
             "sidebar_order": [
@@ -755,6 +769,8 @@ class _LogRetentionPatch(BaseModel):
     trace_payload_snapshot_retention_days: int | None = None
     native_raw_persist_enabled: bool | None = None
     native_raw_retention_days: int | None = None
+    llm_usage_retention_days: int | None = None
+    rate_limit_event_retention_days: int | None = None
 
 
 class _RemotePluginUpdateCheckPatch(BaseModel):
@@ -1059,6 +1075,12 @@ async def patch_system_settings(payload: _SettingsPatch, db: DBSession, user: Cu
             ),
             "native_raw_persist_enabled": bool(current.get("native_raw_persist_enabled", False)),
             "native_raw_retention_days": max(0, int(current.get("native_raw_retention_days", 1) or 0)),
+            "llm_usage_retention_days": max(
+                0, int(current.get("llm_usage_retention_days", 30) or 0)
+            ),
+            "rate_limit_event_retention_days": max(
+                0, int(current.get("rate_limit_event_retention_days", 30) or 0)
+            ),
         }
         bool_keys = {
             "trace_enabled",
@@ -1073,6 +1095,8 @@ async def patch_system_settings(payload: _SettingsPatch, db: DBSession, user: Cu
             "trace_retention_days": (0, 3650),
             "trace_payload_snapshot_retention_days": (0, 3650),
             "native_raw_retention_days": (0, 30),
+            "llm_usage_retention_days": (0, 3650),
+            "rate_limit_event_retention_days": (0, 3650),
         }
         for key, value in data.items():
             if value is None:

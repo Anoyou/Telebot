@@ -37,7 +37,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..crypto import decrypt_str, encrypt_str
 from ..db.models.account import Account
-from ..db.models.feature import FEATURE_STATE_DISABLED, AccountFeature, Feature
+from ..db.models.feature import (
+    BUILTIN_FEATURES,
+    FEATURE_STATE_DISABLED,
+    AccountFeature,
+    Feature,
+)
 from ..db.models.plugin import (
     PLUGIN_SOURCE_LOCAL,
     PLUGIN_SOURCE_REPO,
@@ -677,6 +682,13 @@ async def _install_plugin_from_cached_repo(
     meta = _read_plugin_metadata(target_dir, fallback_name=plugin_name)
     _validate_runtime_plugin_shape(target_dir, meta)
     final_name = meta.name
+    # 与 ZIP 通道（plugin_install_service.KEY_CONFLICTS_BUILTIN）一致：builtin key
+    # 不允许被仓库插件占用，否则会把内置 Feature 行的 is_builtin 覆盖成 False。
+    if final_name in BUILTIN_FEATURES:
+        raise DuplicatePluginName(
+            "KEY_CONFLICTS_BUILTIN",
+            f"key {final_name!r} 与内置插件冲突，请改名后重试",
+        )
 
     # 统一从缓存副本复制。公开仓库与私有仓库行为一致；私有仓库不会触发二次无凭证 clone。
     install_path = _plugin_dir(final_name)
@@ -711,10 +723,12 @@ async def _install_plugin_from_cached_repo(
     install_path.parent.mkdir(parents=True, exist_ok=True)
     renamed = False
     try:
+        # symlinks=True：保留符号链接本身，不把 Git 仓库携带的外指 symlink 目标内容复制进插件目录。
         shutil.copytree(
             target_dir,
             staging,
             ignore=shutil.ignore_patterns(".git", ".gitignore", "__pycache__"),
+            symlinks=True,
         )
         staged_meta = _read_plugin_metadata(
             staging,
@@ -839,10 +853,12 @@ async def _replace_installed_plugin_from_repo_dir(
     legacy_sqlite_names: list[str] = []
     legacy_json_names: list[str] = []
     try:
+        # symlinks=True：保留符号链接本身，防止把仓库中外指 symlink 的宿主内容复制进插件目录。
         shutil.copytree(
             plugin_dir,
             staging,
             ignore=shutil.ignore_patterns(".git", ".gitignore", "__pycache__"),
+            symlinks=True,
         )
         staged_meta = _read_plugin_metadata(
             staging,
@@ -1190,6 +1206,13 @@ async def install_local_plugin(
     meta = _read_plugin_metadata(target_dir, fallback_name=plugin_name)
     _validate_runtime_plugin_shape(target_dir, meta)
     final_name = meta.name
+    # 与 ZIP 通道（plugin_install_service.KEY_CONFLICTS_BUILTIN）一致：builtin key
+    # 不允许被本地导入插件占用，否则会把内置 Feature 行的 is_builtin 覆盖成 False。
+    if final_name in BUILTIN_FEATURES:
+        raise DuplicatePluginName(
+            "KEY_CONFLICTS_BUILTIN",
+            f"key {final_name!r} 与内置插件冲突，请改名后重试",
+        )
     install_path = _plugin_dir(final_name)
     staging = install_path.parent / f"{install_path.name}.installing"
 
@@ -1204,10 +1227,12 @@ async def install_local_plugin(
     install_path.parent.mkdir(parents=True, exist_ok=True)
     renamed = False
     try:
+        # symlinks=True：本地目录可能来自 Git 检出，同样保留 symlink 本身而不复制目标内容。
         shutil.copytree(
             target_dir,
             staging,
             ignore=shutil.ignore_patterns(".git", ".gitignore", "__pycache__"),
+            symlinks=True,
         )
         staged_meta = _read_plugin_metadata(
             staging,

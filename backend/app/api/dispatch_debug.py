@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from ..deps import CurrentUser, DBSession
@@ -89,7 +89,7 @@ async def get_router_delivery_stats(
     channel: str | None = None,
     plugin_key: str | None = None,
     chat_id: int | None = None,
-    limit: int = 50,
+    limit: int = Query(50, ge=1, le=200),
 ) -> dict[str, Any]:
     await _require_dispatch_debug(db)
     return account_bot_runtime.get_router_delivery_stats_summary(

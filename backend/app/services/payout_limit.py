@@ -24,19 +24,21 @@ from typing import Any
 from ..db.base import AsyncSessionLocal
 from ..db.models.system import SystemSetting
 from ..redis_client import get_redis
+from .redis_key_migration import eval_with_legacy_keys
 
 log = logging.getLogger(__name__)
 
 SETTING_KEY = "payout_limits"
 _DAILY_TTL_SECONDS = 172_800  # 48h：key 已按日期分桶，多留一天冗余便于跨零点
-_COUNTED_KEY_PREFIX = "payout_limit:counted:"
+# telepilot: 命名空间前缀，对齐 llm_key_pool 的 telepilot:llm_key_usage 先例。
+_COUNTED_KEY_PREFIX = "telepilot:payout_limit:counted:"
 # use_counted=0 时脚本不碰 KEYS[2]，仅为占位保证 numkeys 恒为 2。
 _COUNTED_KEY_UNUSED = f"{_COUNTED_KEY_PREFIX}__unused__"
 
 # 日累计 check-and-consume：先判断"已用 + 本笔"是否超限，未超才 INCRBY，保证原子，
 # 避免并发下先各自读到未超再各自累加导致击穿上限。
 #
-# 幂等（KEYS[2] = payout_limit:counted:{idempotency_key}，use_counted=1 时启用）：
+# 幂等（KEYS[2] = telepilot:payout_limit:counted:{idempotency_key}，use_counted=1 时启用）：
 # 该键已存在说明这笔 payout 之前已计入过日累计 → 直接放行、不再 INCRBY；否则正常
 # check-and-consume，成功后原子 SET 该键（EX 48h）标记已计。用于将来补偿重放同一笔
 # payout 时日累计只计一次。use_counted=0（idempotency_key=None）时完全不碰 KEYS[2]，
@@ -131,7 +133,8 @@ async def _try_consume_daily(
     await redis.ping()
     counted_key = _counted_key(account_id, idempotency_key)
     use_counted = 1 if counted_key != _COUNTED_KEY_UNUSED else 0
-    result = await redis.eval(
+    result = await eval_with_legacy_keys(
+        redis,
         _CONSUME_SCRIPT,
         2,
         _daily_key(account_id),
@@ -162,7 +165,8 @@ async def _load_payout_limits() -> dict[str, int]:
 
 def _daily_key(account_id: int) -> str:
     today = datetime.now(UTC).strftime("%Y%m%d")
-    return f"payout_limit:{int(account_id)}:daily:{today}"
+    # 前缀口径同 _COUNTED_KEY_PREFIX（telepilot: 命名空间，旧键随 TTL 过期）。
+    return f"telepilot:payout_limit:{int(account_id)}:daily:{today}"
 
 
 def _counted_key(account_id: int, idempotency_key: str | None) -> str:

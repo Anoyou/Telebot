@@ -3,9 +3,22 @@
 from __future__ import annotations
 
 from datetime import datetime
+from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import JSON, BigInteger, DateTime, ForeignKey, Index, Integer, String, Text, func, text
+from sqlalchemy import (
+    JSON,
+    BigInteger,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    Numeric,
+    String,
+    Text,
+    func,
+    text,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from ..base import Base
@@ -64,6 +77,12 @@ class ActionEvent(Base):
     source_event_key: Mapped[str | None] = mapped_column(String(200), nullable=True)
     # 可索引幂等键：可计账 payout（OK/COMPENSATED）在 DB 层 partial unique（见 alembic 0038）。
     payout_key: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    # 资金台账提取列（见 alembic 0062）：由 params_summary 按台账口径派生并冗余存储，
+    # 让金额/群/方向过滤与聚合下推到 SQL；params_summary JSON 原样保留，旧读路径不受影响。
+    # 旧行若 JSON 缺对应字段则列为 NULL——与旧 Python 过滤“缺字段行不产生台账条目”口径一致。
+    amount: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+    chat_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    direction: Mapped[str | None] = mapped_column(String(16), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     __table_args__ = (

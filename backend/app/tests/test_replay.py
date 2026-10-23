@@ -93,10 +93,17 @@ class _FakeDB:
     async def __aexit__(self, exc_type: Any, exc: Any, tb: Any) -> None:
         return None
 
-    async def get(self, model: Any, key: Any) -> Any:
+    async def get(self, model: Any, key: Any, **kwargs: Any) -> Any:
         name = getattr(model, "__name__", "")
         if name == "Account":
             return SimpleNamespace(id=key, tg_user_id=42, cold_start_until=None)
+        if name == "AccountFeature" and key == (self.account_id, self.plugin_key):
+            return SimpleNamespace(
+                account_id=self.account_id,
+                feature_key=self.plugin_key,
+                enabled=True,
+                config={},
+            )
         if name in {"HumanizeConfig", "PluginGlobalConfig", "SystemSetting"}:
             return None
         return None

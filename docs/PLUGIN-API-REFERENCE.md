@@ -54,6 +54,8 @@ async def on_direct_message(self, ctx, event):
 
 账号二次开关只决定插件是否加入直通调度，优先级只决定尝试顺序。只有 `consumed` 会停止后续直通与普通链路；`ignored`、`failed`、异常和未返回结果都会继续调度并最终回退。兼容返回值为 `True → consumed`、`False/None → ignored`、`{"consume": true/false} → consumed/ignored`。
 
+直通不是账号允许名单的豁免通道：incoming 消息与标准链路走同一账号允许名单（"允许会话"白名单）判定，名单非空时会话不在名单内的消息不会进入任何直通插件；outgoing 消息不受该名单限制。
+
 ## 2. 标准会话链路与单入口模型
 
 进入标准链路后，互动插件按“触发方式决定整段会话通道”理解；插件全程不需要感知或选择收发通道：
@@ -186,6 +188,8 @@ class PluginContext:
 
 注意：核心平台兼容代码可能拿到完整运行时能力；远程/本地/插件库安装型插件拿到的是受控上下文：`ctx.client` 是 `SandboxClient` facade，指令 handler 中传入的 `client` 参数与 `ctx.client` 同源。安装型插件的 `ctx.redis` 是 `PluginRedisFacade`，会自动添加 `plugin_store:{account_id}:{plugin_key}:` 前缀，并拒绝 `keys`、`scan`、`eval`、`pipeline`、`pubsub` 等操作；builtin 兼容代码才可能拿到原始 Redis client。新插件的普通状态仍应优先使用 `ctx.storage`。`ctx.engine` 只供核心 builtin 兼容代码直接依赖，安装型插件通常为 `None`。受控上下文用于收口常用操作和审计，不是公共插件市场式强沙箱。
 
+`SandboxClient.send_message(...)` / `send_file(...)` 会先过 UserBot 动作限速：限速拒绝时抛出 `app.worker.plugins.sandbox.PluginSendRateLimited`（不再静默返回 `None`）。异常的 `detail` 携带结构化限速详情（`rate_limit_action` / `rate_limit_backend` / `reason` / `wait_seconds`），`retry_after` 是建议等待秒数；未触发限速时返回值与 Telethon 原生调用一致。插件应在主动发送处捕获该异常做降级或提示。
+
 插件需要 SQLite、索引文件或其他文件型持久化时，必须写入 `ctx.data_dir`，不要写进 `Path(__file__).parent`、插件安装目录或仓库源码目录。TelePilot 更新插件时会整体替换代码目录，而 `ctx.data_dir` 位于持久化插件卷的 `_data/<plugin_key>/` 下，不随代码更新删除。插件仍需使用 `ctx.account_id` 隔离账号数据；若一个数据库文件服务多个账号，表结构必须包含账号隔离键。
 
 为兼容旧插件，更新器会在替换代码目录前迁移插件根目录的 `*.sqlite3` 和顶层运行态 `*.json`（排除 `plugin.json`），并在新目录保留兼容链接；已有 `ctx.data_dir` 文件不会被旧文件覆盖。这个迁移只负责旧数据过渡，不扫描嵌套目录，也不能替代新代码直接使用 `ctx.data_dir`。
@@ -194,7 +198,7 @@ class PluginContext:
 
 第三方插件可以使用两个受控 facade，但必须在 Manifest 中显式声明权限；未声明或策略不完整时字段会是 `None`：
 
-- `ctx.http`：声明 `permissions=["external_http"]` 且填写 `allowed_hosts` 后注入。它限制协议、域名、超时、响应大小，并在发起请求前阻断 localhost/内网/链路本地地址。默认走账号代理；账号代理若已删除、类型不受支持或配置无效，Web 配置动作和 worker 都会在网络请求前失败。只有 Manifest 的 `http={"allow_direct": true}` 与账号配置共同请求 direct 时才允许直连，这属于显式授权而非失败回落；未注入 `ctx.http` 的纯本地配置动作不会查询代理。
+- `ctx.http`：声明 `permissions=["external_http"]` 且填写 `allowed_hosts` 后注入。它限制协议、域名、超时、响应大小，并在发起请求前阻断 localhost/内网/链路本地地址。默认走账号代理；账号代理若已删除、类型不受支持或配置无效，Web 配置动作和 worker 都会在网络请求前失败。只有 Manifest 的 `http={"allow_direct": true}` 与账号配置共同请求 direct 时才允许直连，这属于显式授权而非失败回落；未注入 `ctx.http` 的纯本地配置动作不会查询代理。注意：`ctx.http` 目前只提供协议/域名/SSRF/超时/响应上限防护，不做按插件的请求频率或流量配额（区别于 `ctx.ai` 的 token 配额）；异常高频使用需要管理员通过运行日志观察并处置。
 - `ctx.ai`：声明 `permissions=["ai_text"]` 后注入。它复用 TelePilot 的 LLM Provider 池、fallback 链、账号级预算和 usage 记录；插件只能拿到脱敏 provider 元数据，不能读取 `api_key_enc`、`base_url` 或代理 URL。显式绑定缺失、已停用或无效代理的 Provider 会从插件路由排除，不会自动改成 DIRECT。
 - `ctx.ai.complete()` 推荐用 `provider_tag` 按用途选择 provider；`tag` / `tags` 是兼容别名且已 deprecated，新插件不要依赖它们作为主要入口。可选 `route="fixed"|"tag"|"auto"` 显式声明路由模式（留空时按旧参数推断，向后兼容）；返回结果的 `routing` 字段是脱敏路由摘要（模式 / provider / 生效模型 / 命中 tag / 协议 / 身份 / 是否 fallback），不含 key、base_url、代理或内部分类器细节。插件不能指定 UA、身份、密钥、代理、内部分类器或全局 fallback。
 - `ctx.ai.stream_complete()` 返回 Provider 原生文本 delta 的异步迭代器，支持 Chat Completions、Responses 与 Anthropic Messages；不拆分完整响应、不在已输出部分文本后切 Provider。上游忽略 `stream=true` 而返回普通 JSON 时，同一次请求的完整文本作为一个块产出，不会再次调用模型。调用方必须消费到迭代器自然结束；取消、提前关闭、超时或异常按已发起调用保守结算。需要跨 Provider 的完整响应 fallback 时使用 `complete()`。
@@ -1980,6 +1984,8 @@ def is_outgoing(event) -> bool:
 包装拒绝。普通安装插件点击第三方 Bot callback 必须改用
 `ctx.messages.click_callback_button(...)`；具体限制见
 [Inline 按钮的两种完全不同场景](#inline-按钮的两种完全不同场景)。
+`send_message` / `send_file` 受 UserBot 动作限速约束：被限速拒绝时抛
+`PluginSendRateLimited`（含 `detail` / `retry_after`），不会静默返回 `None`。
 
 以下示例仅用于真实客户端的内部兼容代码（如与 @BotFather 交互）：
 

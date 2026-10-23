@@ -17,13 +17,17 @@ from sqlalchemy import (
     Index,
     Integer,
     Numeric,
-    String,
+    Text,
     UniqueConstraint,
     func,
 )
+from sqlalchemy.dialects import postgresql
 from sqlalchemy.orm import Mapped, mapped_column
 
 from ..base import Base
+
+# PG 生产库为 JSONB（与 0001 迁移终态一致）；SQLite（测试/本地）回落到通用 JSON
+JSONB_VARIANT = JSON().with_variant(postgresql.JSONB(), "postgresql")
 
 # RateLimitRule.scope
 SCOPE_TEMPLATE = "template"
@@ -78,9 +82,9 @@ class RateLimitTemplate(Base):
     __tablename__ = "rate_limit_template"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    name: Mapped[str] = mapped_column(String, nullable=False)
-    is_default: Mapped[bool] = mapped_column(Boolean, default=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    is_default: Mapped[bool] = mapped_column(Boolean, default=False, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=True)
 
 
 class RateLimitRule(Base):
@@ -89,9 +93,9 @@ class RateLimitRule(Base):
     __tablename__ = "rate_limit_rule"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    scope: Mapped[str] = mapped_column(String, nullable=False)
+    scope: Mapped[str] = mapped_column(Text, nullable=False)
     scope_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
-    action: Mapped[str] = mapped_column(String, nullable=False)
+    action: Mapped[str] = mapped_column(Text, nullable=False)
 
     per_second: Mapped[int | None] = mapped_column(Integer, nullable=True)
     per_minute: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -99,11 +103,11 @@ class RateLimitRule(Base):
     per_day: Mapped[int | None] = mapped_column(Integer, nullable=True)
     same_peer_per_minute: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
-    policy: Mapped[str] = mapped_column(String, nullable=False, default=POLICY_QUEUE)
-    backoff_base_seconds: Mapped[int] = mapped_column(Integer, default=5)
-    backoff_max_seconds: Mapped[int] = mapped_column(Integer, default=1800)
+    policy: Mapped[str] = mapped_column(Text, nullable=False, default=POLICY_QUEUE)
+    backoff_base_seconds: Mapped[int] = mapped_column(Integer, default=5, nullable=True)
+    backoff_max_seconds: Mapped[int] = mapped_column(Integer, default=1800, nullable=True)
 
-    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=True)
 
     __table_args__ = (UniqueConstraint("scope", "scope_id", "action", name="uq_rl_scope_action"),)
 
@@ -117,10 +121,10 @@ class RateLimitEvent(Base):
     account_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("account.id", ondelete="CASCADE"), nullable=False
     )
-    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    action: Mapped[str] = mapped_column(String, nullable=False)
-    outcome: Mapped[str] = mapped_column(String, nullable=False)
-    detail: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=True)
+    action: Mapped[str] = mapped_column(Text, nullable=False)
+    outcome: Mapped[str] = mapped_column(Text, nullable=False)
+    detail: Mapped[dict[str, Any] | None] = mapped_column(JSONB_VARIANT, nullable=True)
 
     __table_args__ = (
         Index("ix_rl_event_account_ts", "account_id", "ts"),
@@ -137,10 +141,10 @@ class RateLimitOverride(Base):
     account_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("account.id", ondelete="CASCADE"), nullable=False
     )
-    action: Mapped[str] = mapped_column(String, nullable=False)
+    action: Mapped[str] = mapped_column(Text, nullable=False)
     multiplier: Mapped[float] = mapped_column(Numeric(4, 2), nullable=False)
-    reason: Mapped[str | None] = mapped_column(String, nullable=True)
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=True)
 
     __table_args__ = (Index("ix_rl_override_account_expires", "account_id", "expires_at"),)
