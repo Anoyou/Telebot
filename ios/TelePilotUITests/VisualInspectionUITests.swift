@@ -30,10 +30,20 @@ final class VisualInspectionUITests: XCTestCase {
         capture("04-plugin-detail-overview")
 
         app.buttons["账号配置"].tap()
+        XCTAssertTrue(app.buttons["plugin.config.edit"].waitForExistence(timeout: 5))
         capture("05-plugin-detail-configuration")
 
-        app.buttons["维护"].tap()
-        XCTAssertTrue(app.buttons["查看全局插件维护"].waitForExistence(timeout: 5))
+        app.buttons["plugin.config.edit"].tap()
+        XCTAssertTrue(app.buttons["plugin.config.toolbarReview"].waitForExistence(timeout: 10))
+        capture("05b-plugin-config-editor")
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+
+        app.buttons["概况"].tap()
+        let serverMaintenance = app.buttons["plugin.detail.serverMaintenance"]
+        if !serverMaintenance.waitForExistence(timeout: 3) { app.swipeUp() }
+        XCTAssertTrue(serverMaintenance.waitForExistence(timeout: 5))
+        serverMaintenance.tap()
+        XCTAssertTrue(app.buttons["plugin.global.toggle"].waitForExistence(timeout: 10))
         capture("06-plugin-detail-maintenance")
 
         app.tabBars.buttons["AI"].tap()

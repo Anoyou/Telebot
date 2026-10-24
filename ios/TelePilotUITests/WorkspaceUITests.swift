@@ -58,11 +58,28 @@ final class WorkspaceUITests: XCTestCase {
         }
         XCTAssertTrue(confirm.waitForExistence(timeout: 5))
         confirm.tap()
-        XCTAssertTrue(app.buttons["启用此账号"].firstMatch.waitForExistence(timeout: 10))
-        app.buttons["维护"].tap()
-        XCTAssertTrue(app.buttons["查看全局插件维护"].waitForExistence(timeout: 5))
-        app.buttons["查看全局插件维护"].tap()
+        XCTAssertTrue(app.buttons["在此账号启用该插件"].firstMatch.waitForExistence(timeout: 10))
+        let serverMaintenance = app.buttons["plugin.detail.serverMaintenance"]
+        if !serverMaintenance.waitForExistence(timeout: 3) { app.swipeUp() }
+        XCTAssertTrue(serverMaintenance.waitForExistence(timeout: 5))
+        serverMaintenance.tap()
+        XCTAssertTrue(app.buttons["plugin.global.toggle"].waitForExistence(timeout: 10))
         XCTAssertTrue(app.buttons["卸载插件"].exists == false)
         XCTAssertTrue(app.buttons["重新加载到所选账号"].exists)
+    }
+
+    func testPluginConfigSubpageReturnsToConfigurationTab() {
+        let app = launch()
+        app.tabBars.buttons["插件"].tap()
+        XCTAssertTrue(app.buttons["plugin.card.auto_reply"].waitForExistence(timeout: 10))
+        app.buttons["plugin.card.auto_reply"].tap()
+        XCTAssertTrue(app.buttons["账号配置"].waitForExistence(timeout: 5))
+        app.buttons["账号配置"].tap()
+        XCTAssertTrue(app.buttons["plugin.config.edit"].waitForExistence(timeout: 5))
+        app.buttons["plugin.config.edit"].tap()
+        XCTAssertTrue(app.buttons["plugin.config.toolbarReview"].waitForExistence(timeout: 10))
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        // 返回后仍停留在“账号配置”，而不是跳回“概况”。
+        XCTAssertTrue(app.buttons["plugin.config.edit"].waitForExistence(timeout: 5))
     }
 }

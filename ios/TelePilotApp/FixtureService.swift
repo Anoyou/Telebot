@@ -19,6 +19,7 @@ actor FixtureService: AppServing {
         "llm_limits": ["per_minute": 30, "daily_requests": 0, "daily_tokens": 500000, "premium_daily": 0],
         "log_retention": ["llm_usage_retention_days": 30]
     ]
+    private var pluginGlobalEnabled: [String: Bool] = ["auto_reply": true, "content_assistant": true, "forward_guard": false]
 
     init(offline: Bool = false) {
         self.offline = offline
@@ -145,12 +146,32 @@ actor FixtureService: AppServing {
             return ["id": "fixture-run", "session_id": "fixture-session", "status": "succeeded"]
         }
         if clean == "/api/system-agent/capabilities" { return ["enabled": true, "model_matrix": []] }
+        if let match = clean.firstMatch(of: #/^\/api\/plugins\/install\/([^\/]+)\/(enable|disable)$/#), method == "POST" {
+            pluginGlobalEnabled[String(match.1)] = match.2 == "enable"
+            return ["key": .string(String(match.1)), "enabled": .bool(match.2 == "enable")]
+        }
         if clean == "/api/plugins/installed-overview" || clean == "/api/plugins/installed" {
-            return [
-                ["key": "auto_reply", "display_name": "自动回复", "global_enabled": true, "version": "1.4.0", "signature_ok": true, "source": "builtin"],
-                ["key": "content_assistant", "display_name": "内容整理助手", "global_enabled": true, "version": "2.1.0", "signature_ok": true, "source": "git"],
-                ["key": "forward_guard", "display_name": "转发风控与来源保护", "global_enabled": false, "version": "0.9.2", "signature_ok": false, "source": "local"]
+            let autoReplyAccounts: JSONValue = [
+                ["account_id": 1, "account_name": "日常工作账号", "enabled": .bool(accountFeatureEnabled[1]?["auto_reply"] ?? true), "state": "active"],
+                ["account_id": 2, "account_name": "备用账号", "enabled": .bool(accountFeatureEnabled[2]?["auto_reply"] ?? false), "state": "stopped"]
             ]
+            return [
+                ["key": "auto_reply", "display_name": "自动回复", "global_enabled": .bool(pluginGlobalEnabled["auto_reply"] ?? true), "version": "1.4.0", "signature_ok": true, "source": "builtin", "accounts": autoReplyAccounts],
+                ["key": "content_assistant", "display_name": "内容整理助手", "global_enabled": .bool(pluginGlobalEnabled["content_assistant"] ?? true), "version": "2.1.0", "signature_ok": true, "source": "git"],
+                ["key": "forward_guard", "display_name": "转发风控与来源保护", "global_enabled": .bool(pluginGlobalEnabled["forward_guard"] ?? false), "version": "0.9.2", "signature_ok": false, "source": "local"]
+            ]
+        }
+        if clean == "/api/plugins/auto_reply/config", method == "GET" {
+            return ["plugin_key": "auto_reply", "config": ["max_per_hour": 40], "global_config": ["max_per_hour": 40]]
+        }
+        if clean.firstMatch(of: #/^\/api\/accounts\/\d+\/features\/[^\/]+\/config$/#) != nil {
+            if method == "PATCH" {
+                fixtureValues[clean + "#effective"] = body?["config"]
+                return ["feature_key": "auto_reply", "enabled": true, "state": "active", "config": body?["config"] ?? [:]]
+            }
+            var effective: [String: JSONValue] = ["reply": "收到", "cooldown_seconds": 30, "max_per_hour": 40, "notify_owner": false]
+            for (key, value) in fixtureValues[clean + "#effective"]?.objectValue ?? [:] { effective[key] = value }
+            return .object(effective)
         }
         if clean == "/api/feature-matrix" {
             return [
@@ -163,7 +184,14 @@ actor FixtureService: AppServing {
                     ["key": "auto_reply", "display_name": "自动回复", "usage": "按规则自动回复私聊与群组消息。",
                      "category": "automation", "version": "1.4.0", "latest_version": "1.4.0", "update_available": false,
                      "source_type": "builtin", "source_label": "TelePilot 内置", "is_builtin": true, "signature_ok": true,
-                     "orphan": false, "runtime_availability": "ready", "permissions": ["send_message"]],
+                     "orphan": false, "runtime_availability": "ready", "permissions": ["send_message"],
+                     "event_subscriptions": [["event_types": ["message", "command"]]],
+                     "config_schema": ["type": "object", "properties": [
+                        "reply": ["type": "string", "title": "默认回复", "description": "规则没有单独设置回复时使用。", "default": "收到"],
+                        "cooldown_seconds": ["type": "integer", "title": "冷却秒数", "minimum": 0, "default": 30],
+                        "max_per_hour": ["type": "integer", "title": "每小时上限", "minimum": 1, "default": 60, "level": "global"],
+                        "notify_owner": ["type": "boolean", "title": "回复后通知我", "default": false, "level": "global"]
+                     ]]],
                     ["key": "content_assistant", "display_name": "内容整理助手", "usage": "整理消息、提取摘要并交给 AI 处理。",
                      "category": "interactive", "version": "2.1.0", "latest_version": "2.2.0", "update_available": true,
                      "source_type": "remote", "source_label": "个人插件仓库", "is_builtin": false, "signature_ok": true,
