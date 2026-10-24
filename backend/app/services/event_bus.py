@@ -23,6 +23,7 @@ VALID_EVENT_TYPES = {
     "callback_query",
     "inline_query",
     "chosen_inline_result",
+    "guest_message",
     "payment_confirmed",
     "keyword",
     "session_close",
@@ -30,7 +31,7 @@ VALID_EVENT_TYPES = {
     "message_edited",
     "webhook",
 }
-VALID_EVENT_SCOPES = {"all_allowed_chats", "owner_only", "known_users", "inline_all", "rule_bound"}
+VALID_EVENT_SCOPES = {"all_allowed_chats", "owner_only", "known_users", "inline_all", "guest_all", "rule_bound"}
 SUPPORTED_FILTER_KEYS = {
     "callback_data",
     "chat_id",
@@ -107,6 +108,15 @@ EVENT_REASON_CODES = {
     "inline_disabled",
     "inline_query_id_missing",
     "inline_query_answer_failed",
+    "guest_query_id_missing",
+    "guest_answer_failed",
+    "guest_reply_already_used",
+    "guest_reply_buffered",
+    "guest_action_unsupported",
+    "guest_media_unsupported",
+    "guest_no_reply",
+    "guest_rate_limited",
+    "guest_updates_disabled",
     "interaction_rule_owned",
     "interaction_bot_not_in_chat",
     "media_payload_empty",
@@ -263,6 +273,40 @@ def normalize_bot_update(account_id: int, update: dict[str, Any], *, channel: st
             ),
             native_raw=update,
         )
+    if isinstance(update.get("guest_message"), dict):
+        msg = update["guest_message"]
+        chat = msg.get("chat") if isinstance(msg.get("chat"), dict) else {}
+        sender = _bot_sender_ref(msg)
+        text = str(msg.get("text") or msg.get("caption") or "")
+        message_payload = _bot_message_payload(msg, chat=chat)
+        guest_query_id = str(msg.get("guest_query_id") or "") or None
+        event = _event(
+            account_id=account_id,
+            channel=channel,
+            driver="telegram_bot_api",
+            event_type="guest_message",
+            update_id=update_id,
+            chat=_chat_ref(chat),
+            sender=sender,
+            message=message_payload,
+            reply_to=_bot_reply_to(msg),
+            raw_summary={
+                **_bot_raw_summary(update_id=update_id, event_type="guest_message", msg=msg, text=text),
+                "guest_query_id": guest_query_id,
+            },
+            native_raw=update,
+        )
+        event["source"]["guest_query_id"] = guest_query_id
+        event["guest"] = {
+            "query_id": guest_query_id,
+            "chat_id": _int_or_none(chat.get("id")),
+            "chat_type": str(chat.get("type") or "") or None,
+            "caller_user_id": sender.get("user_id") if isinstance(sender, dict) else None,
+            "raw_text": text,
+            "reply_once": True,
+            "reply_via": "answer_guest_query",
+        }
+        return event
     if isinstance(update.get("edited_message"), dict):
         msg = update["edited_message"]
         chat = msg.get("chat") if isinstance(msg.get("chat"), dict) else {}
@@ -576,6 +620,9 @@ def _scope_matches(
 ) -> tuple[bool, str]:
     if scope == "inline_all":
         return (event_type in {"inline_query", "chosen_inline_result"}, "scope_not_matched")
+    if scope == "guest_all":
+        # Guest Mode：任何会话里 @提及 Bot 的访客消息都投递（会话不在允许列表中也可）。
+        return (event_type == "guest_message", "scope_not_matched")
     if event_type == "webhook" and scope == "all_allowed_chats":
         return True, "scope_not_matched"
     owner_ids = _int_set(state.get("owner_user_ids") or state.get("admin_user_ids"))

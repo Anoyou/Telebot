@@ -98,6 +98,13 @@ from .interaction.delivery import (
     delivery_message_id,
     read_action_reply_target,
 )
+from .interaction.guest_reply import (
+    GUEST_REASON_RATE_LIMITED,
+    GuestReplyBuffer,
+    flush_guest_reply,
+    guest_rate_limiter,
+    strip_guest_bot_mentions,
+)
 from .interaction.rpc_broker import get_interaction_rpc_broker, new_reply_channel
 
 log = logging.getLogger(__name__)
@@ -745,6 +752,7 @@ def _classify_interaction_routes(
         return routes
     if _routing_index_text_is_userbot_command_candidate(incoming):
         routes.append(_ROUTE_USERBOT_COMMAND)
+    is_guest = bool(incoming.guest_query_id)
     scope_matches = (
         incoming.chat_id is None
         or incoming.callback_id is not None
@@ -752,8 +760,13 @@ def _classify_interaction_routes(
         or _routing_index_chat_matches(incoming.chat_id, index.allowed_chat_ids)
         or _routing_index_chat_matches(incoming.chat_id, index.active_session_chat_ids)
     )
+    # 访客消息来自 Bot 未加入的任意会话：Event Bus 订阅按自己的 scope（例如
+    # guest_all / owner_only / known_users）逐条判断，这里不提前按会话收窄；
+    # 关键词规则仍按规则自身的会话范围判断。
+    event_bus_scope_matches = scope_matches or is_guest
     if (
-        incoming.chat_id is not None
+        not is_guest
+        and incoming.chat_id is not None
         and incoming.user_id is not None
         and _routing_index_chat_matches(incoming.chat_id, index.transfer_test_chat_ids)
         and _parse_transfer_command(incoming.text) is not None
@@ -761,6 +774,7 @@ def _classify_interaction_routes(
         routes.append(_ROUTE_TRANSFER_COMMAND)
     if (
         scope_matches
+        and not is_guest
         and incoming.chat_id is not None
         and incoming.user_id is not None
         and incoming.user_id in index.trusted_sender_ids
@@ -770,11 +784,15 @@ def _classify_interaction_routes(
         )
     ):
         routes.append(_ROUTE_PAYMENT_NOTICE)
-    if scope_matches and event_bus_enabled and _routing_index_message_matches_event_bus(incoming, index):
+    if event_bus_scope_matches and event_bus_enabled and _routing_index_message_matches_event_bus(incoming, index):
         routes.append(_ROUTE_EVENT_BUS)
     event_type = _incoming_event_type(incoming)
     text = str(incoming.text or "").strip()
-    if scope_matches and event_type == "message" and _routing_index_message_matches_keywords(text, index.keyword_candidates):
+    if (
+        scope_matches
+        and event_type in {"message", "guest_message"}
+        and _routing_index_message_matches_keywords(text, index.keyword_candidates)
+    ):
         routes.append(_ROUTE_KEYWORD)
     if scope_matches and incoming.chat_id is not None and index.enabled:
         if incoming.callback_id:
@@ -802,6 +820,7 @@ async def _event_framework_flags() -> dict[str, bool]:
         "trace_enabled": True,
         "event_bus_delivery_enabled": True,
         "inline_updates_enabled": True,
+        "guest_updates_enabled": True,
         "native_raw_persist_enabled": False,
     }
     try:
@@ -814,6 +833,7 @@ async def _event_framework_flags() -> dict[str, bool]:
                 raw.get("event_bus_delivery_enabled", defaults["event_bus_delivery_enabled"])
             ),
             "inline_updates_enabled": bool(raw.get("inline_updates_enabled", defaults["inline_updates_enabled"])),
+            "guest_updates_enabled": bool(raw.get("guest_updates_enabled", defaults["guest_updates_enabled"])),
             "native_raw_persist_enabled": bool(
                 raw.get("native_raw_persist_enabled", defaults["native_raw_persist_enabled"])
             ),
@@ -831,6 +851,10 @@ def _inline_update_allowed_updates(flags: dict[str, bool], base: list[str]) -> l
         for item in ("inline_query", "chosen_inline_result"):
             if item not in updates:
                 updates.append(item)
+    # Bot API 10.0 Guest Mode：Bot 在 BotFather 开启“访客模式”后，在未加入的会话
+    # 被 @提及 / 回复时收到 guest_message；未开启时 Telegram 不会推送，订阅无副作用。
+    if flags.get("guest_updates_enabled", True) and "guest_message" not in updates:
+        updates.append("guest_message")
     return updates
 
 
@@ -851,6 +875,8 @@ class Incoming:
     inline_offset: str | None = None
     inline_chat_type: str | None = None
     chosen_inline_result_id: str | None = None
+    guest_query_id: str | None = None
+    guest_raw_text: str | None = None
     event_type: str | None = None
     display_name: str | None = None
     username: str | None = None
@@ -872,6 +898,7 @@ class Incoming:
     native_raw: dict[str, Any] | None = None
     callback_already_acked: bool = False
     management_rich_html_required: bool = False
+    guest_reply: GuestReplyBuffer | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -2490,6 +2517,75 @@ async def _transfer_test_polling_loop(aid: int) -> None:
         raise
 
 
+async def _prepare_guest_incoming(incoming: Incoming, flags: dict[str, bool], *, channel: str) -> bool:
+    """访客消息预检：运行开关 + 限流，并挂上一次性回复缓冲。普通消息直接放行。"""
+
+    if not incoming.guest_query_id:
+        return True
+    if not flags.get("guest_updates_enabled", True):
+        log.info("guest message ignored: guest updates disabled aid=%s channel=%s", incoming.account_id, channel)
+        return False
+    if not guest_rate_limiter.allow(account_id=incoming.account_id, role=channel, user_id=incoming.user_id):
+        log.warning(
+            "guest message rate limited aid=%s channel=%s user_id=%s",
+            incoming.account_id,
+            channel,
+            incoming.user_id,
+        )
+        await _write_interaction_runtime_log(
+            incoming,
+            "warn",
+            "访客消息触发限流，已忽略本次 @提及",
+            reason_code=GUEST_REASON_RATE_LIMITED,
+            channel=channel,
+            **_interaction_log_context(incoming),
+        )
+        return False
+    incoming.guest_reply = GuestReplyBuffer(query_id=incoming.guest_query_id)
+    return True
+
+
+async def _finish_guest_reply(incoming: Incoming, trace: Any, *, channel: str) -> None:
+    """处理结束后把访客回复缓冲合成一条消息，只调用一次 answerGuestQuery。"""
+
+    buffer = incoming.guest_reply
+    if buffer is None or not incoming.guest_query_id:
+        return
+    try:
+        outcome = await flush_guest_reply(incoming.token, buffer)
+    except Exception as exc:  # noqa: BLE001
+        outcome = {"status": "failed", "reason_code": "guest_answer_failed", "error": f"{type(exc).__name__}: {exc}"}
+    status = {
+        "answered": TRACE_STATUS_OK,
+        "skipped": TRACE_STATUS_SKIPPED,
+    }.get(str(outcome.get("status")), TRACE_STATUS_FAILED)
+    await record_span(
+        trace,
+        "guest_reply",
+        status,
+        component=f"{channel}_guest",
+        reason_code=outcome.get("reason_code"),
+        message={
+            "answered": "已通过 answerGuestQuery 回复访客消息",
+            "skipped": "访客消息未产生回复",
+        }.get(str(outcome.get("status")), "访客消息回复失败"),
+        error=outcome.get("error"),
+        reply_format=outcome.get("format"),
+        entries=len(buffer.entries),
+        skipped_actions=list(buffer.skipped_actions),
+    )
+    if status == TRACE_STATUS_FAILED:
+        await _write_interaction_runtime_log(
+            incoming,
+            "warn",
+            "访客消息回复失败（answerGuestQuery）",
+            reason_code=outcome.get("reason_code"),
+            error=outcome.get("error"),
+            channel=channel,
+            **_interaction_log_context(incoming),
+        )
+
+
 async def _handle_update(aid: int, token: str, update: dict[str, Any]) -> None:
     incoming = _extract_incoming(aid, token, update)
     if incoming is None:
@@ -2498,9 +2594,13 @@ async def _handle_update(aid: int, token: str, update: dict[str, Any]) -> None:
     flags = await _event_framework_flags()
     if (incoming.inline_query_id or incoming.chosen_inline_result_id) and not flags.get("inline_updates_enabled", True):
         return
+    if not await _prepare_guest_incoming(incoming, flags, channel="account_bot"):
+        return
     trace = None
     if await _router_debug_trace_enabled(incoming.account_id, chat_id=incoming.chat_id):
         trace = await _start_router_trace(incoming, channel="account_bot", reason="debug")
+    elif incoming.guest_query_id and flags.get("trace_enabled", True):
+        trace = await _start_router_trace(incoming, channel="account_bot", reason="guest_message")
     final_status = TRACE_STATUS_SKIPPED
     try:
         async with AsyncSessionLocal() as db:
@@ -2525,7 +2625,8 @@ async def _handle_update(aid: int, token: str, update: dict[str, Any]) -> None:
                 elif incoming.callback_id:
                     await _answer_callback(incoming, text="未授权", show_alert=True)
                 return
-            if incoming.chat_id is not None:
+            # 访客消息的 chat 是 Bot 未加入的会话，不能作为后续通知的投递目标。
+            if incoming.chat_id is not None and not incoming.guest_query_id:
                 user.last_chat_id = incoming.chat_id
             if incoming.display_name and not user.display_name:
                 user.display_name = incoming.display_name
@@ -2585,6 +2686,8 @@ async def _handle_update(aid: int, token: str, update: dict[str, Any]) -> None:
                     )
 
                 async def _agent_draft(text: str) -> None:
+                    if incoming.guest_query_id:
+                        raise ValueError("访客模式只能回复一次，不支持 Draft 流式预览")
                     if incoming.chat_id is None or incoming.chat_id <= 0:
                         raise ValueError("Bot API Draft 仅支持私聊")
                     draft_id = int(incoming.message_id or incoming.update_id or 1)
@@ -2644,6 +2747,7 @@ async def _handle_update(aid: int, token: str, update: dict[str, Any]) -> None:
         )
         raise
     finally:
+        await _finish_guest_reply(incoming, trace, channel="account_bot")
         _record_router_delivery_light(incoming, "account_bot", final_status)
         await finish_trace(trace, final_status)
 
@@ -2678,9 +2782,13 @@ async def _handle_interaction_update(aid: int, token: str, update: dict[str, Any
     flags = await _event_framework_flags()
     if (incoming.inline_query_id or incoming.chosen_inline_result_id) and not flags.get("inline_updates_enabled", True):
         return
+    if not await _prepare_guest_incoming(incoming, flags, channel="interaction_bot"):
+        return
     trace = None
     if await _router_debug_trace_enabled(incoming.account_id, chat_id=incoming.chat_id):
         trace = await _start_router_trace(incoming, channel="interaction_bot", reason="debug")
+    elif incoming.guest_query_id and flags.get("trace_enabled", True):
+        trace = await _start_router_trace(incoming, channel="interaction_bot", reason="guest_message")
     final_status = TRACE_STATUS_SKIPPED
     try:
         cached_state = _cached_interaction_routing_state(incoming.account_id)
@@ -2816,6 +2924,7 @@ async def _handle_interaction_update(aid: int, token: str, update: dict[str, Any
         )
         raise
     finally:
+        await _finish_guest_reply(incoming, trace, channel="interaction_bot")
         _record_router_delivery_light(incoming, "interaction_bot", final_status)
         await finish_trace(trace, final_status)
 
@@ -4265,6 +4374,9 @@ async def _apply_interaction_start_session_actions(
     rule: dict[str, Any],
     actions: list[dict[str, Any]],
 ) -> None:
+    if incoming.guest_query_id:
+        # Guest Mode：Bot 不在该会话，后续消息不会送达，跳过会话创建。
+        return
     for action in actions:
         if isinstance(action, dict) and str(action.get("type") or "").strip() == "start_session":
             await _apply_interaction_start_session_action(incoming, rule, action)
@@ -5715,7 +5827,7 @@ async def _try_handle_event_bus_subscriptions(
         )
         if not ok:
             all_ok = False
-            if event_type != "message":
+            if event_type not in {"message", "guest_message"}:
                 terminal_handled = True
             _schedule_interaction_debug_state(incoming, stage="plugin_error", payload=payload, error=error)
             continue
@@ -5728,7 +5840,7 @@ async def _try_handle_event_bus_subscriptions(
             context=_interaction_trace_context(payload),
         )
         applied_actions.extend(guarded)
-        if actions or guarded or event_type not in {"message", "callback_query"}:
+        if actions or guarded or event_type not in {"message", "guest_message", "callback_query"}:
             terminal_handled = True
     if (
         incoming.callback_id
@@ -6216,7 +6328,7 @@ async def _try_handle_interaction_rule_command_or_keyword(
 ) -> bool:
     if incoming.callback_id or incoming.chat_id is None:
         return False
-    if _incoming_event_type(incoming) != "message":
+    if _incoming_event_type(incoming) not in {"message", "guest_message"}:
         return False
     if cfg is None:
         cfg = await account_bot_service.get_transfer_notice_config(db, incoming.account_id)
@@ -7337,6 +7449,8 @@ def _incoming_trace_payload(
         chat = payload.get("chat") if isinstance(payload.get("chat"), dict) else {}
         native_update = incoming.native_raw
         raw_message = native_update.get("message") if isinstance(native_update.get("message"), dict) else native_update.get("edited_message")
+        if isinstance(native_update.get("guest_message"), dict):
+            raw_message = native_update["guest_message"]
         if isinstance(native_update.get("callback_query"), dict):
             callback_message = native_update["callback_query"].get("message")
             if isinstance(callback_message, dict):
@@ -7378,8 +7492,12 @@ def _incoming_trace_payload(
         payload["raw"] = raw
         payload["native_raw_meta"] = _native_raw_meta(incoming, object_name="update", enabled=False, source=channel)
         payload["native_raw"] = None
+        if incoming.guest_query_id:
+            source["guest_query_id"] = incoming.guest_query_id
+            raw["guest_query_id"] = incoming.guest_query_id
+            payload["guest"] = _incoming_guest_envelope(incoming)
         return payload
-    return {
+    fallback: dict[str, Any] = {
         "trace_id": incoming.trace_id,
         "source": {
             "type": kind,
@@ -7448,6 +7566,27 @@ def _incoming_trace_payload(
         },
         "native_raw_meta": _native_raw_meta(incoming, object_name="update", enabled=False, source=channel),
         "native_raw": None,
+    }
+    if incoming.guest_query_id:
+        fallback["source"]["guest_query_id"] = incoming.guest_query_id
+        fallback["raw"]["guest_query_id"] = incoming.guest_query_id
+        fallback["guest"] = _incoming_guest_envelope(incoming)
+    return fallback
+
+
+def _incoming_guest_envelope(incoming: Incoming) -> dict[str, Any]:
+    """Event Bus ``guest`` 字段：标明本事件只能通过 answerGuestQuery 回复一次。"""
+
+    return {
+        "query_id": incoming.guest_query_id,
+        "chat_id": incoming.chat_id,
+        "chat_type": incoming.chat_type,
+        "caller_user_id": incoming.user_id,
+        "caller_username": incoming.username,
+        "caller_display_name": incoming.display_name,
+        "raw_text": incoming.guest_raw_text,
+        "reply_once": True,
+        "reply_via": "answer_guest_query",
     }
 
 
@@ -7934,7 +8073,8 @@ async def _run_interaction_module(
     )
     success = _interaction_actions_mark_success(actions)
     keep_session = not _interaction_actions_request_no_session(actions)
-    if success and keep_session:
+    # 访客消息无法收到后续群消息，不保存多轮交互会话。
+    if success and keep_session and not incoming.guest_query_id:
         await _save_interaction_session(
             incoming,
             rule,
@@ -7978,6 +8118,9 @@ def _is_private_chat(incoming: Incoming) -> bool:
 
 def _should_route_text_to_account_commands(incoming: Incoming) -> bool:
     if _is_private_chat(incoming):
+        return True
+    # 访客消息本身就是显式 @提及 / 回复 Bot，等同于私聊里直接对 Bot 说话。
+    if incoming.guest_query_id:
         return True
     return incoming.text.startswith("/")
 
@@ -8507,8 +8650,12 @@ def _extract_incoming(aid: int, token: str, update: dict[str, Any]) -> Incoming 
             username=str(from_user.get("username") or "").strip() or None,
             native_raw=dict(update),
         )
-    event_type = "message_edited" if isinstance(update.get("edited_message"), dict) else "message"
-    msg = update.get("edited_message") if event_type == "message_edited" else update.get("message")
+    if isinstance(update.get("guest_message"), dict):
+        event_type = "guest_message"
+        msg = update.get("guest_message")
+    else:
+        event_type = "message_edited" if isinstance(update.get("edited_message"), dict) else "message"
+        msg = update.get("edited_message") if event_type == "message_edited" else update.get("message")
     if not isinstance(msg, dict):
         return None
     sender = _message_sender_fields(msg)
@@ -8516,6 +8663,8 @@ def _extract_incoming(aid: int, token: str, update: dict[str, Any]) -> Incoming 
     reply = msg.get("reply_to_message") if isinstance(msg.get("reply_to_message"), dict) else {}
     reply_sender = _message_sender_fields(reply) if reply else {}
     reply_text = str(reply.get("text") or reply.get("caption") or "").strip()
+    raw_text = str(msg.get("text") or msg.get("caption") or "").strip()
+    guest_query_id = str(msg.get("guest_query_id") or "").strip() or None if event_type == "guest_message" else None
     return Incoming(
         account_id=aid,
         token=token,
@@ -8524,7 +8673,9 @@ def _extract_incoming(aid: int, token: str, update: dict[str, Any]) -> Incoming 
         chat_id=_int_or_none(chat.get("id")),
         chat_type=str(chat.get("type") or "") or None,
         message_id=_int_or_none(msg.get("message_id")),
-        text=str(msg.get("text") or msg.get("caption") or "").strip(),
+        text=strip_guest_bot_mentions(raw_text) if event_type == "guest_message" else raw_text,
+        guest_query_id=guest_query_id,
+        guest_raw_text=raw_text if event_type == "guest_message" else None,
         event_type=event_type,
         display_name=str(sender.get("display_name") or "").strip() or None,
         username=str(sender.get("username") or "").strip() or None,
@@ -9781,6 +9932,15 @@ async def _send(
     edit: bool = False,
     edit_message_id: int | None = None,
 ) -> dict[str, Any] | None:
+    if incoming.guest_query_id and incoming.guest_reply is not None:
+        return await _send_guest_reply(
+            incoming,
+            text,
+            rich_markdown=rich_markdown,
+            reply_markup=reply_markup,
+            edit=edit,
+            edit_message_id=edit_message_id,
+        )
     if incoming.chat_id is None:
         return None
     management_rich_html_required = incoming.management_rich_html_required
@@ -10005,6 +10165,59 @@ async def _send(
             error=f"{type(exc).__name__}: {exc}",
         )
         raise
+
+
+async def _send_guest_reply(
+    incoming: Incoming,
+    text: str,
+    *,
+    rich_markdown: str | None = None,
+    reply_markup: dict[str, Any] | None = None,
+    edit: bool = False,
+    edit_message_id: int | None = None,
+) -> dict[str, Any] | None:
+    """访客模式下的 ``_send``：写入一次性回复缓冲，处理结束后统一 answerGuestQuery。"""
+
+    buffer = incoming.guest_reply
+    if buffer is None:
+        return None
+    action = {
+        "type": "edit_message" if edit else "send_message",
+        "send_via": "guest_reply",
+        "chat_id": incoming.chat_id,
+        "text": text,
+    }
+    if buffer.answered:
+        await record_action(
+            trace_log_context(incoming.trace_id),
+            action,
+            TRACE_STATUS_SKIPPED,
+            actual_send_via="guest_reply",
+            error_code="guest_reply_already_used",
+            reason_code="guest_reply_already_used",
+            error="guest message already answered",
+        )
+        return None
+    body = str(text or "").strip()
+    kind = "html"
+    if not body and rich_markdown:
+        body = str(rich_markdown).strip()
+        kind = "plain"
+    if edit:
+        target = edit_message_id if edit_message_id is not None and edit_message_id != incoming.message_id else None
+        entry_id = buffer.replace(target, body, kind=kind, reply_markup=reply_markup)
+    else:
+        entry_id = buffer.add(body, kind=kind, reply_markup=reply_markup)
+    result = buffer.result_message(entry_id)
+    await record_action(
+        trace_log_context(incoming.trace_id),
+        action,
+        TRACE_STATUS_OK,
+        actual_send_via="guest_reply",
+        reason_code="guest_reply_buffered",
+        result=result,
+    )
+    return result
 
 
 async def _answer_callback(

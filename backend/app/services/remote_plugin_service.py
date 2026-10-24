@@ -1261,7 +1261,7 @@ def lint_plugin_metadata_files(plugin_dir: Path) -> list[str]:
                             warnings.append(f"plugin.json event_subscriptions[{idx}] source 含有未支持值")
                     scope = str(raw_subscription.get("scope") or "all_allowed_chats").strip()
                     if scope not in VALID_EVENT_SCOPES:
-                        warnings.append(f"plugin.json event_subscriptions[{idx}] scope 必须是 all_allowed_chats / owner_only / known_users / inline_all / rule_bound")
+                        warnings.append(f"plugin.json event_subscriptions[{idx}] scope 必须是 all_allowed_chats / owner_only / known_users / inline_all / guest_all / rule_bound")
                     filters = raw_subscription.get("filters")
                     if isinstance(filters, dict):
                         unknown = sorted(

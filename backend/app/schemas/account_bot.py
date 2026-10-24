@@ -379,6 +379,35 @@ class AccountBotInteractionCompositeSaveResponse(BaseModel):
     plugins: list[AccountBotInteractionCompositePluginSummary] = Field(default_factory=list)
 
 
+class AccountBotCapabilityStatus(BaseModel):
+    """单个 Bot 的 getMe 能力位（Bot API 10.0 起包含 Guest Mode）。"""
+
+    role: Literal["management", "interaction"]
+    configured: bool = False
+    bot_id: int | None = None
+    username: str | None = None
+    supports_guest_queries: bool | None = Field(
+        default=None,
+        description="getMe.supports_guest_queries：是否已在 BotFather 开启访客模式（Guest Mode）；null 表示未知。",
+    )
+    supports_inline_queries: bool | None = None
+    can_read_all_group_messages: bool | None = None
+    error: str | None = None
+
+
+class AccountBotCapabilitiesResponse(BaseModel):
+    """账号管理 Bot / 交互 Bot 的能力状态。"""
+
+    account_id: int
+    guest_updates_enabled: bool = Field(
+        default=True,
+        description="系统设置中的“访客消息（Guest Mode）”运行开关；关闭后不拉取 guest_message。",
+    )
+    management_bot: AccountBotCapabilityStatus
+    interaction_bot: AccountBotCapabilityStatus
+    guest_mode_help: str = ""
+
+
 class AccountBotRuntimeResponse(BaseModel):
     ok: bool
     status: str | None = None

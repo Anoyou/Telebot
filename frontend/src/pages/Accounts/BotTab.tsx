@@ -80,6 +80,7 @@ import {
   updateInteractionBotConfig,
 } from "@/api/accountBots";
 import { getFeatureMatrix } from "@/api/features";
+import { GuestModeStatus } from "@/components/bot/GuestModeStatus";
 import { listIgnoredPeers } from "@/api/ignored_peers";
 import type {
   AccountBotInteractionConfig,
@@ -2561,6 +2562,7 @@ export function BotTab({
   const managementContent = (
     <div className="space-y-6">
       {managementStatus}
+      {bot?.has_token ? <GuestModeStatus aid={aid} role="management" /> : null}
       <div className="grid gap-4 2xl:grid-cols-[minmax(0,1.2fr)_minmax(320px,0.8fr)]">
         <Card>
           <CardHeader>
@@ -2783,6 +2785,9 @@ export function BotTab({
             <div className="nested-surface-item border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
               {localizeBotRuntimeError(interactionQ.data.interaction_last_error)}
             </div>
+          ) : null}
+          {interactionQ.data?.has_interaction_bot_token ? (
+            <GuestModeStatus aid={aid} role="interaction" />
           ) : null}
 
           <section className="nested-surface border border-warning/30 bg-warning/10 text-sm text-warning">

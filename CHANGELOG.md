@@ -25,6 +25,14 @@
 
 ## [Unreleased]
 
+### 新增
+
+- 支持 Telegram Bot API 10.0（2026-05-08）访客模式（Guest Mode）：管理 Bot 与交互 Bot 的 polling 订阅 `guest_message`，Bot 在未加入的群聊或私聊被 `@提及`／回复时也能回复一次；新增系统设置运行开关“访客消息（Guest Mode）”（默认开启）。
+- 访客消息复用现有能力：管理 Bot 对已授权用户执行斜杠命令，系统助手模式下的自由文本交给系统助手；交互 Bot 进入交互规则（按规则会话范围）与订阅了 `guest_message` 的 Event Bus 插件。处理过程中的发送／编辑会合并为一条消息，结束后只调用一次 `answerGuestQuery`；超长截断，HTML 失败退回纯文本，仅保留 URL 等无需回调的按钮。
+- 插件契约新增 `guest_message` 事件、`guest_all` 订阅范围、标准信封 `guest` 字段、`answer_guest_query` 动作与 `ctx.messages.answer_guest_query()`；访客场景下付款／发奖、置顶、按钮 ACK、媒体发送、转账指令与会话创建会被跳过并记录 `guest_*` 原因码，另有按调用者／按 Bot 的访客限流。
+- 新增 `GET /api/accounts/{aid}/bot/capabilities`，读取 `getMe.supports_guest_queries` 等能力位；Web 管理 Bot／交互 Bot 页与 iOS「账号管理」显示“访客模式（Guest Mode）：已开启／未开启”及 BotFather 开启方法。
+- `event_bus_demo` 示例补充访客消息订阅与 fixture，插件参考文档、速查与使用指南补充访客模式说明。
+
 ### 文档
 
 - 重构 GitHub 首页 README：按产品定位、当前界面、能力总览、运行结构、快速开始、安全边界、插件开发与文档导航重新组织，减少与专项文档重复的长段落，补齐日志、资金台账和移动端入口。

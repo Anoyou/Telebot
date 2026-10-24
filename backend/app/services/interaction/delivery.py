@@ -31,6 +31,15 @@ from .contracts import (
     action_send_via_raw_selector,
     deprecated_send_via_values,
 )
+from .guest_reply import (
+    GUEST_REASON_ACTION_UNSUPPORTED,
+    GUEST_REASON_ANSWER_FAILED,
+    GUEST_REASON_CAPTURED,
+    GUEST_REASON_MEDIA_UNSUPPORTED,
+    GUEST_REASON_QUERY_ID_MISSING,
+    GUEST_REASON_REPLY_ALREADY_USED,
+    guest_result_from_action,
+)
 
 log = logging.getLogger(__name__)
 
@@ -252,6 +261,10 @@ class InteractionDeliveryExecutor:
             await self._apply_delete_message(action)
             return True
 
+        async def _on_answer_guest(action: dict[str, Any]) -> bool:
+            await self._record_settlement(action)
+            return await self._answer_guest_query(action)
+
         async def _on_pin(action: dict[str, Any]) -> bool:
             await self._record_settlement(action)
             await self._apply_pin_message(action)
@@ -385,10 +398,33 @@ class InteractionDeliveryExecutor:
             on_pin_message=_on_pin,
             on_answer_callback=_on_answer_callback,
             on_answer_inline_query=_on_answer_inline,
+            on_answer_guest_query=_on_answer_guest,
             on_deprecated_send_via=_on_deprecated,
             on_unsupported=_on_unsupported,
             on_truncated=_on_truncated,
         )
+        guest_buffer = self._guest_buffer()
+        if guest_buffer is not None:
+            # Guest Mode：Bot 不在该会话里，不能 sendMessage；所有消息类动作改写进
+            # 访客回复缓冲，处理结束后由 runtime 统一 answerGuestQuery 一次。
+            async def _on_guest_capture(action: dict[str, Any]) -> bool:
+                await self._record_settlement(action)
+                return await self._capture_guest_action(action, guest_buffer, replace_holder=replace_holder)
+
+            async def _on_guest_unsupported(action: dict[str, Any]) -> bool:
+                await self._record_settlement(action)
+                return await self._skip_guest_action(action)
+
+            handlers.on_send_message = _on_guest_capture
+            handlers.on_send_rich_message = _on_guest_capture
+            handlers.on_send_media = _on_guest_capture
+            handlers.on_edit_message = _on_guest_capture
+            handlers.on_edit_caption = _on_guest_capture
+            handlers.on_delete_message = _on_guest_capture
+            handlers.on_pin_message = _on_guest_unsupported
+            handlers.on_payout = _on_guest_unsupported
+            handlers.on_answer_callback = _on_guest_unsupported
+            handlers.on_answer_inline_query = _on_guest_unsupported
         await run_action_batch(
             list(actions or []),
             handlers,
@@ -1946,6 +1982,176 @@ class InteractionDeliveryExecutor:
             return
         await record_action(action.get("context"), action, TRACE_STATUS_OK, actual_send_via="interaction_bot")
         await self._emit_action_tap(action, ACTION_EVENT_STATUS_OK, channel="interaction_bot")
+
+    def _guest_buffer(self) -> Any:
+        if not str(getattr(self.incoming, "guest_query_id", "") or "").strip():
+            return None
+        return getattr(self.incoming, "guest_reply", None)
+
+    async def _skip_guest_action(self, action: dict[str, Any], *, reason_code: str = GUEST_REASON_ACTION_UNSUPPORTED) -> bool:
+        action_type = str(action.get("type") or "").strip()
+        buffer = self._guest_buffer()
+        if buffer is not None:
+            buffer.skipped_actions.append(action_type)
+        await record_action(
+            action.get("context"),
+            action,
+            TRACE_STATUS_SKIPPED,
+            actual_send_via="guest_reply",
+            error_code=reason_code,
+            reason_code=reason_code,
+            error=f"guest mode cannot execute {action_type}",
+        )
+        await self.write_log(
+            self.incoming,
+            "info",
+            f"guest message action skipped: {action_type}",
+            reason_code=reason_code,
+            action_type=action_type,
+            **self.log_context(self.incoming),
+        )
+        return True
+
+    async def _capture_guest_action(
+        self,
+        action: dict[str, Any],
+        buffer: Any,
+        *,
+        replace_holder: dict[str, int | None] | None = None,
+    ) -> bool:
+        """把消息类动作写进访客回复缓冲（不调用 Telegram）。"""
+
+        action_type = str(action.get("type") or "").strip()
+        if buffer.answered:
+            return await self._skip_guest_action(action, reason_code=GUEST_REASON_REPLY_ALREADY_USED)
+        raw_reply_markup = action.get("reply_markup")
+        reply_markup = raw_reply_markup if isinstance(raw_reply_markup, dict) else None
+        rich_message = action.get("rich_message") if isinstance(action.get("rich_message"), dict) else None
+        text = str(action.get("text") or action.get("caption") or "").strip()
+        kind = "html" if _action_parse_mode(action) == "html" else "plain"
+        if rich_message is not None:
+            kind = "rich"
+        entry_id: int | None = None
+        if action_type in {"send_message", "send_rich_message"}:
+            if not text and rich_message is None:
+                await record_action(
+                    action.get("context"),
+                    action,
+                    TRACE_STATUS_FAILED,
+                    error_code="empty_message_text",
+                    error=f"{action_type} text is empty",
+                )
+                return False
+            placeholder_id = replace_holder.get("id") if replace_holder is not None else None
+            if placeholder_id is not None:
+                # 与普通链路的“占位消息 → 结果”替换语义一致。
+                entry_id = buffer.replace(placeholder_id, text, kind=kind, rich_message=rich_message, reply_markup=reply_markup)
+                replace_holder["id"] = None
+            else:
+                entry_id = buffer.add(text, kind=kind, rich_message=rich_message, reply_markup=reply_markup)
+        elif action_type in {"send_photo", "send_file"}:
+            if not text:
+                return await self._skip_guest_action(action, reason_code=GUEST_REASON_MEDIA_UNSUPPORTED)
+            entry_id = buffer.add(text, kind=kind, reply_markup=reply_markup, source="media_caption")
+            buffer.skipped_actions.append(action_type)
+        elif action_type in {"edit_message", "edit_caption"}:
+            if not text and rich_message is None:
+                await record_action(
+                    action.get("context"),
+                    action,
+                    TRACE_STATUS_FAILED,
+                    error_code="empty_message_text",
+                    error=f"{action_type} text is empty",
+                )
+                return False
+            entry_id = buffer.replace(
+                _int_or_none(action.get("message_id") or action.get("edit_message_id")),
+                text,
+                kind=kind,
+                rich_message=rich_message,
+                reply_markup=reply_markup,
+            )
+        elif action_type == "delete_message":
+            buffer.remove(_int_or_none(action.get("message_id")))
+        else:
+            return await self._skip_guest_action(action)
+        # 合成 message_id 只在本次访客处理内有效，不写入跨事件的 save_message_id_key。
+        await record_action(
+            action.get("context"),
+            action,
+            TRACE_STATUS_OK,
+            actual_send_via="guest_reply",
+            reason_code=GUEST_REASON_CAPTURED,
+            result=buffer.result_message(entry_id) if entry_id is not None else {"guest_buffered": True},
+        )
+        return True
+
+    async def _answer_guest_query(self, action: dict[str, Any]) -> bool:
+        """显式 ``answer_guest_query`` 动作：立即回答访客消息（每条只能一次）。"""
+
+        guest_query_id = str(action.get("guest_query_id") or getattr(self.incoming, "guest_query_id", "") or "").strip()
+        if not guest_query_id:
+            await record_action(
+                action.get("context"),
+                action,
+                TRACE_STATUS_FAILED,
+                error_code=GUEST_REASON_QUERY_ID_MISSING,
+                error="guest_query_id missing",
+            )
+            return False
+        buffer = self._guest_buffer()
+        if buffer is not None and buffer.answered:
+            return await self._skip_guest_action(action, reason_code=GUEST_REASON_REPLY_ALREADY_USED)
+        result = guest_result_from_action(action)
+        if result is None:
+            await record_action(
+                action.get("context"),
+                action,
+                TRACE_STATUS_FAILED,
+                error_code="empty_message_text",
+                error="answer_guest_query requires result or text",
+            )
+            return False
+        if self._dry_run_enabled(action):
+            await self._record_dry_run(
+                action,
+                channel="interaction_bot",
+                result={"dry_run": True, "guest_query_id": guest_query_id, "result_type": result.get("type")},
+            )
+            return True
+        try:
+            sent = await account_bot_service.answer_guest_query(self.incoming.token, guest_query_id, result=result)
+        except Exception as exc:  # noqa: BLE001
+            error = account_bot_service.sanitize_bot_error(exc, token=self.incoming.token)
+            await record_action(
+                action.get("context"),
+                action,
+                TRACE_STATUS_FAILED,
+                error_code=GUEST_REASON_ANSWER_FAILED,
+                error=error,
+            )
+            await self._emit_action_tap(
+                action,
+                ACTION_EVENT_STATUS_FAILED,
+                channel="interaction_bot",
+                error_code=GUEST_REASON_ANSWER_FAILED,
+                error=error,
+            )
+            await self.write_log(
+                self.incoming,
+                "warn",
+                "interaction guest query answer failed",
+                reason_code=GUEST_REASON_ANSWER_FAILED,
+                error=error,
+                **self.log_context(self.incoming),
+            )
+            return False
+        if buffer is not None:
+            buffer.answered = True
+            buffer.answer_result = sent if isinstance(sent, dict) else {"result": sent}
+        await record_action(action.get("context"), action, TRACE_STATUS_OK, actual_send_via="interaction_bot", result=sent)
+        await self._emit_action_tap(action, ACTION_EVENT_STATUS_OK, channel="interaction_bot", result=sent)
+        return True
 
     async def _apply_delete_message(self, action: dict[str, Any]) -> None:
         message_id = _int_or_none(action.get("message_id"))
