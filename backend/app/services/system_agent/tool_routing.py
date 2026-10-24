@@ -14,6 +14,47 @@ from .secrets import (
     looks_like_standalone_provider_key,
 )
 
+# 一键体检触发词：命中即优先披露 diagnostics 域，单个体检工具即可覆盖跨域排障，
+# 不再受“每轮最多 3 个领域”限制而只查到一半。
+CHECKUP_KEYWORDS: tuple[str, ...] = (
+    "体检",
+    "一键体检",
+    "健康检查",
+    "全面检查",
+    "全面排查",
+    "整体检查",
+    "系统有没有问题",
+    "系统有问题吗",
+    "系统是否正常",
+    "整体有没有问题",
+    "不回复",
+    "不自动回复",
+    "不回消息",
+    "没反应",
+    "没有反应",
+    "不响应",
+    "不工作",
+    "不干活",
+    "checkup",
+    "health check",
+    "healthcheck",
+)
+# 这些词单独出现时语义较弱（如“模型健康检查”），只有未命中其它专用领域时才让体检域排第一。
+_WEAK_CHECKUP_KEYWORDS: tuple[str, ...] = ("健康检查", "health check", "healthcheck")
+
+
+def _checkup_intent(normalized: str) -> str | None:
+    """返回 ``strong`` / ``weak`` / None。normalized 已去空白并小写。"""
+
+    hits = [kw for kw in CHECKUP_KEYWORDS if kw.replace(" ", "").lower() in normalized]
+    if not hits:
+        return None
+    weak = {kw.replace(" ", "").lower() for kw in _WEAK_CHECKUP_KEYWORDS}
+    if all(kw.replace(" ", "").lower() in weak for kw in hits):
+        return "weak"
+    return "strong"
+
+
 # 插件动态域（plugin_<key>）运行时追加，不写入此常量本体
 _DYNAMIC_DOMAIN_CATALOG: dict[str, tuple[str, tuple[str, ...]]] = {}
 
@@ -37,6 +78,10 @@ DOMAIN_CATALOG: dict[str, tuple[str, tuple[str, ...]]] = {
             "复制账号配置",
             "克隆配置",
         ),
+    ),
+    "diagnostics": (
+        "一键体检：系统整体或单账号的跨域健康检查（账号/Worker/规则/插件/日志/Provider），回答“系统有没有问题”“账号为什么不回复”",
+        CHECKUP_KEYWORDS,
     ),
     "account_bots": (
         "账号管理 Bot、授权用户、测试发送、polling runtime 与死信队列",
@@ -811,6 +856,15 @@ def route_locally(
         and "source" not in matched
     ):
         matched.append("source")
+    checkup = _checkup_intent(normalized) if "diagnostics" in available else None
+    if checkup is not None and not plugin_diagnostic_intent:
+        others = [domain for domain in matched if domain != "diagnostics"]
+        # 体检工具已覆盖账号/日志/系统健康；保留用户点名的其它领域供后续操作（如重启 Worker）。
+        specific = [domain for domain in others if domain not in {"system", "logs", "source", "accounts"}]
+        if checkup == "strong" or not specific:
+            matched = ["diagnostics", *others]
+            return ToolRoute(tuple(dict.fromkeys(matched[:3])), "local", "checkup")
+        matched = [*others, "diagnostics"]
     if matched:
         return ToolRoute(tuple(dict.fromkeys(matched[:3])), "local", "keyword_match")
     if previous and any(re.sub(r"\s+", "", hint.lower()) in normalized for hint in _CORRECTION_HINTS):
@@ -872,6 +926,7 @@ def select_tool_specs(specs: Iterable[ToolSpec], route: ToolRoute) -> list[ToolS
 
 
 __all__ = [
+    "CHECKUP_KEYWORDS",
     "DOMAIN_CATALOG",
     "ToolRoute",
     "available_domains",

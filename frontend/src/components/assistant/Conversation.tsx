@@ -385,6 +385,7 @@ export function Conversation({
         <Bot className="h-10 w-10 opacity-40" />
         <p className="text-sm">向系统助手提问，例如：</p>
         <ul className="text-sm">
+          <li>「一键体检：系统整体有没有问题？」</li>
           <li>「交互里有哪些规则？」</li>
           <li>「最近 20 条运行日志里有什么错误？」</li>
           <li>「我今天收入多少？」</li>

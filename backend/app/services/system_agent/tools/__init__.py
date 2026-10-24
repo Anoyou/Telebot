@@ -20,6 +20,7 @@ def register_all_tools(registry: ToolRegistry) -> None:
         commands,
         config_bundles,
         connectivity,
+        diagnostics,
         dispatch,
         features,
         interaction,
@@ -49,6 +50,7 @@ def register_all_tools(registry: ToolRegistry) -> None:
 
     system.register(registry)
     system_ops.register(registry)
+    diagnostics.register(registry)
     usage.register(registry)
     access.register(registry)
     account_bots.register(registry)
