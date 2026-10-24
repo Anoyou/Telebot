@@ -220,10 +220,18 @@ struct ManagementPluginLookupView: View {
 
 struct ManagementActionLink: View {
     let action: ManagementAction
+    /// 未指定时按操作类型取默认图标：危险操作 / 修改 / 执行。
+    var symbol: String? = nil
     var body: some View {
         NavigationLink { ManagementFormView(action: action) } label: {
-            Text(action.title).foregroundStyle(action.destructive ? Color.red : Color.primary)
+            Label(action.title, systemImage: symbol ?? Self.defaultSymbol(action))
+                .foregroundStyle(action.destructive ? Color.red : Color.primary)
         }
+    }
+    static func defaultSymbol(_ action: ManagementAction) -> String {
+        if action.destructive || action.method == "DELETE" { return "exclamationmark.triangle" }
+        if ["PATCH", "PUT"].contains(action.method) { return "square.and.pencil" }
+        return "play.circle"
     }
 }
 

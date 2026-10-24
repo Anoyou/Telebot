@@ -19,18 +19,22 @@ struct PushSettingsView: View {
     var body: some View {
         Form {
             Section("本机通知") {
-                LabeledContent("系统授权", value: permissionLabel)
-                LabeledContent("设备注册", value: push.isEnabled ? "已请求启用" : "关闭")
+                LabeledContent {
+                    Text(permissionLabel)
+                } label: { Label("系统授权", systemImage: "hand.raised") }
+                LabeledContent {
+                    Text(push.isEnabled ? "已请求启用" : "关闭")
+                } label: { Label("设备注册", systemImage: "iphone") }
                 if let message = push.statusMessage { Text(message).font(.footnote).foregroundStyle(.secondary) }
                 if let error = push.registrationError { NoticeView(title: "推送尚未就绪", message: error) }
-                Button(push.isRegistering ? "正在注册…" : "授权并注册设备") { Task { await push.enable() } }
+                Button(push.isRegistering ? "正在注册…" : "授权并注册设备", systemImage: "bell.badge") { Task { await push.enable() } }
                     .disabled(push.isRegistering || saving)
-                Button("发送测试通知") { Task { await push.test() } }.disabled(!push.isEnabled || saving)
-                Button("注销本机通知", role: .destructive) { Task { await push.disable() } }.disabled(!push.isEnabled || saving)
+                Button("发送测试通知", systemImage: "paperplane") { Task { await push.test() } }.disabled(!push.isEnabled || saving)
+                Button("注销本机通知", systemImage: "bell.slash", role: .destructive) { Task { await push.disable() } }.disabled(!push.isEnabled || saving)
             }
             Section {
                 if let error = push.configurationError { NoticeView(title: "无法读取服务器配置", message: error) }
-                Toggle("启用 APNs 服务", isOn: $enabled)
+                Toggle(isOn: $enabled) { Label("启用 APNs 服务", systemImage: "antenna.radiowaves.left.and.right") }
                 TextField("Team ID", text: $teamID).textInputAutocapitalization(.characters).autocorrectionDisabled()
                 TextField("Key ID", text: $keyID).textInputAutocapitalization(.characters).autocorrectionDisabled()
                 TextField("Bundle ID", text: $bundleID).textInputAutocapitalization(.never).autocorrectionDisabled()
@@ -38,16 +42,19 @@ struct PushSettingsView: View {
                     Text("开发／自签").tag("sandbox")
                     Text("生产分发").tag("production")
                 }
-                LabeledContent("Auth Key", value: privateKey == nil ? (push.configuration?["has_auth_key"]?.boolValue == true ? "服务器已保存" : "尚未配置") : "已选择新密钥")
-                Button("选择 .p8 私钥文件") { pickingKey = true }
-                if privateKey != nil { Button("取消替换密钥") { privateKey = nil } }
-                Button(saving ? "正在保存…" : "保存服务器配置") { confirmingSave = true }
+                LabeledContent {
+                    Text(privateKey == nil ? (push.configuration?["has_auth_key"]?.boolValue == true ? "服务器已保存" : "尚未配置") : "已选择新密钥")
+                } label: { Label("Auth Key", systemImage: "key") }
+                Button("选择 .p8 私钥文件", systemImage: "doc.badge.plus") { pickingKey = true }
+                if privateKey != nil { Button("取消替换密钥", systemImage: "xmark.circle") { privateKey = nil } }
+                Button(saving ? "正在保存…" : "保存服务器配置", systemImage: "square.and.arrow.down") { confirmingSave = true }
                     .disabled(saving || push.configuration == nil)
             } header: { Text("服务器推送通道") } footer: {
                 Text("需要具有 Push Notifications 权限的签名、Apple Auth Key 和相同的 Bundle ID。仅保存必要信息到自己的服务器；通知不包含密钥或会话正文。")
             }
             if let feedback { Section { Text(feedback).font(.footnote) } }
         }
+        .symbolRenderingMode(.hierarchical)
         .navigationTitle("Apple 推送")
         .navigationBarTitleDisplayMode(.inline)
         .task {

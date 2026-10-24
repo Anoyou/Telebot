@@ -4,6 +4,7 @@ enum MoreDestination: Hashable {
     case accounts
     case account(Int)
     case settings
+    case about
     case module(ManagementModule)
 }
 
@@ -27,6 +28,10 @@ struct MoreView: View {
                     Label("设置", systemImage: "gearshape")
                 }
                 .accessibilityIdentifier("more.settings")
+                NavigationLink(value: MoreDestination.about) {
+                    Label("关于与更新", systemImage: "info.circle")
+                }
+                .accessibilityIdentifier("more.about")
             }
 
             Section("管理") {
@@ -37,6 +42,7 @@ struct MoreView: View {
                 }
             }
         }
+        .symbolRenderingMode(.hierarchical)
         .navigationTitle("更多")
         .accessibilityIdentifier("more.screen")
         .toolbar {
@@ -50,6 +56,7 @@ struct MoreView: View {
             case .accounts: AccountsView(embedded: true)
             case .account(let id): AccountDetailView(id: id)
             case .settings: SettingsView(embedded: true)
+            case .about: AboutView()
             case .module(let module): ManagementModuleView(module: module)
             }
         }

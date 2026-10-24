@@ -63,13 +63,14 @@ struct FileManagementView: View {
                     Text("安装包会由服务器验证，签名和权限检查结果以服务器为准。").font(.footnote).foregroundStyle(.secondary)
                 }
                 if mode != .plugin {
-                    Button("预览导入影响") { Task { await makePreview() } }.disabled(selectedData == nil || busy || uncertain)
+                    Button("预览导入影响", systemImage: "eye") { Task { await makePreview() } }.disabled(selectedData == nil || busy || uncertain)
                 }
             }
             if let preview { Section("导入预览") { ManagementValueView(value: preview) } }
             if selectedData != nil, mode == .plugin || preview?["preview_signature"]?.stringValue != nil {
                 Section {
-                    Button(mode == .plugin ? "安装插件" : "确认导入", role: mode == .plugin ? nil : .destructive) { confirming = true }
+                    Button(mode == .plugin ? "安装插件" : "确认导入", systemImage: mode == .plugin ? "square.and.arrow.down.on.square" : "tray.and.arrow.down",
+                           role: mode == .plugin ? nil : .destructive) { confirming = true }
                         .disabled(busy || uncertain)
                         .accessibilityIdentifier("management.file.confirm")
                 } footer: { Text(mode == .plugin ? "插件会在服务器执行代码，请确认来源和权限。" : "将按以上预览写入服务器。文件和冲突选项改变后必须重新预览。") }
@@ -99,7 +100,7 @@ struct FileManagementView: View {
                         if selected { selectedCategories.insert(key) } else { selectedCategories.remove(key) }
                     }))
                 }
-                Toggle("包含敏感配置", isOn: $includeSensitive)
+                Toggle(isOn: $includeSensitive) { Label("包含敏感配置", systemImage: "lock") }
                 if includeSensitive {
                     SecureField("当前管理员密码", text: $password).privacySensitive()
                     SecureField("验证器验证码（如已启用）", text: $totp).keyboardType(.numberPad).privacySensitive()

@@ -59,21 +59,24 @@ struct AccountManagementSchedulerView: View {
             if let error { NoticeView(title: "定时配置读取失败", message: error) }
             if let feature {
                 let schema = ManagementRuleSchemas.request(feature: feature)
-                NavigationLink("定时任务规则") {
+                NavigationLink {
                     ManagementCollectionView(resource: .init(title: "定时任务", path: base + "/rules", kind: .rules,
                         create: .init(title: "添加定时任务", path: base + "/rules", schema: schema), itemPath: base + "/rules/{id}", ruleSchema: schema))
-                }
+                } label: { Label("定时任务规则", systemImage: "calendar.badge.clock") }
                 if let config {
                     let whitelist: JSONValue = .object(["type": .string("object"), "properties": .object([
                         "allowed_command_whitelist": .object(["type": .string("array"), "items": .object(["type": .string("string")]),
                             "description": .string("仅列出的命令 key 允许自动执行，不带系统指令前缀。")])
                     ])])
-                    ManagementActionLink(action: .init(title: "编辑自动指令白名单", path: base + "/config", method: "PATCH", schema: whitelist, seed: config, envelope: "config"))
-                    NavigationLink("当前白名单") { List { ManagementValueView(value: config["allowed_command_whitelist"] ?? .array([])) }.navigationTitle("自动指令白名单") }
+                    ManagementActionLink(action: .init(title: "编辑自动指令白名单", path: base + "/config", method: "PATCH", schema: whitelist, seed: config, envelope: "config"), symbol: "checklist")
+                    NavigationLink { List { ManagementValueView(value: config["allowed_command_whitelist"] ?? .array([])) }.navigationTitle("自动指令白名单") } label: {
+                        Label("当前白名单", systemImage: "list.bullet")
+                    }
                 }
-                ManagementActionLink(action: .init(title: "启用定时任务", path: base, method: "PATCH", seed: .object(["enabled": .bool(true)])))
+                ManagementActionLink(action: .init(title: "启用定时任务", path: base, method: "PATCH", seed: .object(["enabled": .bool(true)])), symbol: "power")
             } else if error == nil { ProgressView("正在读取定时配置…") }
         }
+        .symbolRenderingMode(.hierarchical)
         .navigationTitle("定时任务与白名单").navigationBarTitleDisplayMode(.inline)
         .task { await load() }.refreshable { await load() }
     }

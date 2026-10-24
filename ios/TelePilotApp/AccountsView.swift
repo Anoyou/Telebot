@@ -57,7 +57,7 @@ struct AccountsView: View {
                 }
                 if model.accountsError != nil || (model.accountsLoaded && model.accounts.isEmpty) {
                     Section {
-                        Button("重新读取账号") { Task { await model.refresh() } }
+                        Button("重新读取账号", systemImage: "arrow.clockwise") { Task { await model.refresh() } }
                             .disabled(model.isRefreshing)
                         if let url = model.serverURL {
                             Link(destination: url) { Label("打开 Web 管理台", systemImage: "safari") }
