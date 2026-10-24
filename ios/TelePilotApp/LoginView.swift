@@ -77,14 +77,14 @@ struct LoginView: View {
                             .focused($focusedField, equals: .code)
                             .accessibilityIdentifier("login.code")
                         if challenge?.recoveryAvailable == true || challenge?.requireTotp == true {
-                            Button(usingRecovery ? "改用验证码" : "改用恢复码") {
+                            Button(usingRecovery ? "改用验证码" : "改用恢复码", systemImage: usingRecovery ? "number" : "key") {
                                 usingRecovery.toggle()
                                 code = ""
                                 error = nil
                             }
                             .accessibilityIdentifier("login.recovery")
                         }
-                        Button("重新开始验证") { resetChallenge(); error = nil }
+                        Button("重新开始验证", systemImage: "arrow.counterclockwise") { resetChallenge(); error = nil }
                             .accessibilityIdentifier("login.reset")
                     } header: { Text("安全验证") } footer: {
                         if challenge?.requireOtp == true, let ttl = challenge?.otpTTLSeconds {
@@ -98,7 +98,7 @@ struct LoginView: View {
                 if let message = model.sessionCleanupError {
                     Section {
                         NoticeView(title: "旧会话尚未安全移除", message: message)
-                        Button("重试清理旧会话") {
+                        Button("重试清理旧会话", systemImage: "arrow.clockwise") {
                             error = nil
                             Task { await model.retrySessionCleanup() }
                         }
@@ -106,7 +106,7 @@ struct LoginView: View {
                     }
                 } else if model.canRetrySession {
                     Section {
-                        Button("重试已有会话") { Task { await model.retrySession() } }
+                        Button("重试已有会话", systemImage: "arrow.clockwise") { Task { await model.retrySession() } }
                             .accessibilityIdentifier("login.retrySession")
                     } footer: { Text("连接失败没有删除原会话。恢复网络后可直接重试，无需重新输入密码。") }
                 }

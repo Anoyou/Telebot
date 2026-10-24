@@ -10,6 +10,7 @@
 		00F4613DE15D81F631F58F58 /* ManagementUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5166A9DAB15A2783E85E7038 /* ManagementUITests.swift */; };
 		0DE54EE0D849DBAFF02D2F18 /* PrivacyFormatting.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2B2718B75FA9808D8DCE77A /* PrivacyFormatting.swift */; };
 		0EC7CD8B95AA2E333E404B52 /* AssistantView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 698666CDC618CD52DE256E14 /* AssistantView.swift */; };
+		D41C585E8554315CCF6E8E33 /* AboutView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3EE45644362A407F4B8116D /* AboutView.swift */; };
 		1228565DBAEBE9623DC753A0 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4FC94FA14558B4E6B86D9C8F /* SettingsView.swift */; };
 		190715111E57BA57BC4B4B45 /* AIWorkspace.swift in Sources */ = {isa = PBXBuildFile; fileRef = C08588E80EB829F8C5179276 /* AIWorkspace.swift */; };
 		1B5D752E60BBE5D0A9CBFC84 /* FixtureService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2C9EA1E10C48B583FD528E4B /* FixtureService.swift */; };
@@ -80,6 +81,7 @@
 		340B7C9FDAAD7EDEB16A56F2 /* AssistantInboxView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssistantInboxView.swift; sourceTree = "<group>"; };
 		38CDC7296A3C0B470515C56E /* ManagementCollections.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManagementCollections.swift; sourceTree = "<group>"; };
 		45704C3929B3B6D40D3AB3A7 /* AIPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIPresentation.swift; sourceTree = "<group>"; };
+		A3EE45644362A407F4B8116D /* AboutView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AboutView.swift; sourceTree = "<group>"; };
 		4E4EC44F66923DDE373CA296 /* PushSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PushSettingsView.swift; sourceTree = "<group>"; };
 		4FC94FA14558B4E6B86D9C8F /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		5166A9DAB15A2783E85E7038 /* ManagementUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManagementUITests.swift; sourceTree = "<group>"; };
@@ -167,6 +169,7 @@
 				D2B288FCB89886B843143DE2 /* PrivacyShield.swift */,
 				9F684A78746D7C8E9770D93F /* PushNotificationAppDelegate.swift */,
 				D4192BDAB91269A11C623D30 /* PushNotificationManager.swift */,
+				A3EE45644362A407F4B8116D /* AboutView.swift */,
 				4E4EC44F66923DDE373CA296 /* PushSettingsView.swift */,
 				4FC94FA14558B4E6B86D9C8F /* SettingsView.swift */,
 				9CD5698893CB93EA821F8D1C /* TelePilot.entitlements */,
@@ -348,6 +351,7 @@
 				B0CEF20BC7833D4E38385876 /* PrivacyShield.swift in Sources */,
 				939CB8EB7AF2DC4E52E410BE /* PushNotificationAppDelegate.swift in Sources */,
 				2B17A30BB82EB69D77A28049 /* PushNotificationManager.swift in Sources */,
+				D41C585E8554315CCF6E8E33 /* AboutView.swift in Sources */,
 				9D1531925668D516D369F965 /* PushSettingsView.swift in Sources */,
 				1228565DBAEBE9623DC753A0 /* SettingsView.swift in Sources */,
 				88885830FD6DBAA8702EB75E /* TelePilotApp.swift in Sources */,

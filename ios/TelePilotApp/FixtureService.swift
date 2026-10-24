@@ -223,6 +223,25 @@ actor FixtureService: AppServing {
             return ["run_id": "fixture-liveness", "status": "completed", "task_total": 1, "completed": 1, "healthy": 1, "failed": 0,
                     "results": [["provider_id": 1, "provider_name": "个人模型网关", "model_id": "gpt-5.4-mini", "status": "healthy", "latency_ms": 620, "preview": "连接正常"]]]
         }
+        if clean == "/api/system/update-status" {
+            return ["enabled": true, "interval_minutes": 1440,
+                    "last_check": ["has_update": true, "can_check": true, "checked_at": "2026-10-24T08:00:00.123456+00:00"]]
+        }
+        if clean == "/api/system/check-update", method == "POST" {
+            return ["has_update": true, "can_check": true, "current_version": "0.104.0-beta.1", "target_version": "0.105.0-beta.1",
+                    "current_commit": "56246fd0a1b2c3d4", "remote_commit": "9a8b7c6d5e4f3a2b", "ahead": 2,
+                    "remote": "origin", "branch": "Beta", "runtime_mode": "prod_container_with_updater", "action_required": "backend",
+                    "plan_label": "后端增量更新", "plan_detail": "拉取镜像并重启后端，前端无需重建。",
+                    "commit_titles": ["iOS：新增关于页与独立的服务器更新入口", "修复插件更新检查偶发超时"],
+                    "requires_backup": true, "requires_migration": false, "requires_full_update": false, "can_apply": true]
+        }
+        if clean == "/api/system/pull-update", method == "POST" {
+            return ["success": true, "job_id": "fixture-update", "status": "queued", "remote": "origin", "branch": "Beta",
+                    "plan_label": "更新任务已启动", "plan_detail": "更新将在内部 updater 中执行，期间服务可能短暂重启；请观察任务日志。"]
+        }
+        if clean == "/api/system/update-jobs/fixture-update" {
+            return ["ok": true, "job_id": "fixture-update", "status": "succeeded", "progress": 100, "phase": "完成", "summary": "更新任务已完成。"]
+        }
         if clean == "/api/apns/config" { return ["enabled": false, "configured": false, "environment": "sandbox", "has_auth_key": false] }
         if clean == "/api/apns/devices" { return [] }
         if clean == "/api/system/settings" { return ["timezone": "Asia/Shanghai", "command_prefix": ".", "ai_enabled": true] }

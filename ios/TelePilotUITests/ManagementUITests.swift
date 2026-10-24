@@ -48,6 +48,26 @@ final class ManagementUITests: XCTestCase {
         XCTAssertFalse(app.buttons["预览导入影响"].isEnabled)
     }
 
+    func testServerUpdateRequiresConfirmationBeforeApplying() {
+        let app = launch()
+        let about = app.buttons["more.about"]
+        XCTAssertTrue(about.waitForExistence(timeout: 10))
+        about.tap()
+        XCTAssertTrue(app.staticTexts["App 版本"].waitForExistence(timeout: 10))
+        let open = app.buttons["update.open"]
+        for _ in 0..<4 where !open.isHittable { app.swipeUp() }
+        open.tap()
+        XCTAssertTrue(app.staticTexts["发现新版本"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["0.105.0-beta.1"].exists)
+        let apply = app.buttons["update.apply"]
+        for _ in 0..<4 where !apply.isHittable { app.swipeUp() }
+        apply.tap()
+        XCTAssertTrue(app.buttons["update.confirm"].firstMatch.waitForExistence(timeout: 5))
+        app.buttons["取消"].firstMatch.tap()
+        XCTAssertFalse(app.otherElements["update.applied"].exists)
+        XCTAssertFalse(app.staticTexts["更新任务已启动"].exists)
+    }
+
     func testRuntimeLogCredentialsAreMaskedByDefault() {
         let app = launch()
         app.buttons["日志与诊断"].tap()
