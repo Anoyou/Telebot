@@ -15,6 +15,8 @@ struct MoreView: View {
 
     var body: some View {
         List {
+            EmergencyStopSection()
+
             Section("工作区") {
                 NavigationLink(value: MoreDestination.accounts) {
                     Label {

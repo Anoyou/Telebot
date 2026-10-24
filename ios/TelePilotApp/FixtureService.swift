@@ -327,6 +327,14 @@ actor FixtureService: AppServing {
                     "recommended_api_format": "responses", "recommended_protocol_profile": "standard",
                     "recommended_client_identity_profile": "openai_sdk", "recommended_web_search_api_format": "responses"]
         }
+        if clean == "/api/system/kill-switch" {
+            if method == "POST" {
+                let value: JSONValue = ["enabled": .bool(body?["enabled"]?.boolValue ?? false)]
+                fixtureValues[clean] = value
+                return value
+            }
+            return ["enabled": false]
+        }
         if clean == "/api/system/update-check", method == "PATCH" {
             var current = fixtureUpdateCheck.objectValue ?? [:]
             for (key, value) in body?.objectValue ?? [:] { current[key] = value }
