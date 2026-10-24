@@ -366,6 +366,9 @@ class SystemAgentRuntime:
         pre_provider = resolved.primary
         pre_model = resolved.model
         pre_providers = resolved.providers
+        # 原选择是本轮输入事实，不能被能力过滤或 fallback 的结果覆盖。
+        requested_provider = pre_provider
+        requested_model = pre_model
 
         async def _timed_verify() -> Any:
             t0 = time.perf_counter()
@@ -389,6 +392,7 @@ class SystemAgentRuntime:
                     memory_state=session.memory_state,
                     all_tool_specs=all_tool_specs,
                     account_id=session.account_id,
+                    model_pinned=selection_mode == "pinned",
                     fallback_provider_id=fallback_provider_id,
                     progress_callback=emit_model_progress,
                     known_secrets=turn_secrets,
@@ -440,8 +444,16 @@ class SystemAgentRuntime:
             yield next_event(
                 "error",
                 code="MODEL_TOOLS_UNAVAILABLE",
-                message=verified,
-                hint="请在 AI 中心选择真正支持结构化工具调用的模型。",
+                message=(
+                    f"固定模型「{pre_provider.name} / {pre_model}」的工具调用能力未通过验证，"
+                    f"本轮未切换模型。{verified}"
+                    if selection_mode == "pinned" else verified
+                ),
+                hint=(
+                    "请稍后重试，或手动选择其他支持结构化工具调用的模型。"
+                    if selection_mode == "pinned"
+                    else "请在 AI 中心选择真正支持结构化工具调用的模型。"
+                ),
             )
             yield next_event("done", ok=False, stage_timings=timings)
             return
@@ -450,8 +462,6 @@ class SystemAgentRuntime:
         provider_dto = resolved.primary
         model = resolved.model
         providers = resolved.providers
-        requested_provider = provider_dto
-        requested_model = model
         # 健康排序：cooling 排后但不摘除；主选不变，仅影响 fallback 候选相对顺序
         try:
             from ..provider_health import sort_provider_candidates
@@ -628,7 +638,7 @@ class SystemAgentRuntime:
             turn_context=rendered_turn_context,
             session=session,
         )
-        # pinned：同模型内重试照旧，耗尽后走确认链路，不静默换模型
+        # pinned：只重试所选模型，耗尽后报错，由用户另选；auto 保持原 fallback 链。
         request = ModelRequest(
             model=model,
             messages=tuple(messages),
@@ -1154,6 +1164,7 @@ class SystemAgentRuntime:
         memory_state: dict[str, Any] | None,
         all_tool_specs: list[Any],
         account_id: int | None,
+        model_pinned: bool = False,
         fallback_provider_id: int | None = None,
         progress_callback: Callable[[dict[str, Any]], Awaitable[None] | None] | None = None,
         known_secrets: list[str] | None = None,
@@ -1190,10 +1201,12 @@ class SystemAgentRuntime:
                         ),
                         max_output_tokens=160,
                         metadata={
-                            "model_pinned": False,
+                            "model_pinned": model_pinned,
                             "confirm_provider_switch": True,
                             "allowed_cross_provider_ids": (
-                                [fallback_provider_id] if fallback_provider_id is not None else []
+                                [fallback_provider_id]
+                                if fallback_provider_id is not None and not model_pinned
+                                else []
                             ),
                             "max_retries_per_model": 1,
                             "retry_delay_seconds": 0.0,
@@ -1604,7 +1617,7 @@ async def _apply_pinned_selection(
     resolved: Any | None,
     selection: dict[str, Any],
 ) -> Any | str:
-    """将 pinned 选择应用到 ResolvedAgentProviders；失败返回错误文案。"""
+    """将本轮候选收窄到指定 Provider/模型；不修改持久化配置。"""
 
     from ...db.models.command import LLMProvider
     from ..llm_dto import LLMProviderDTO
@@ -1620,9 +1633,15 @@ async def _apply_pinned_selection(
         return f"Provider「{dto.name}」缺少 API Key"
     if not tools_model_for_dto(dto, model):
         return f"模型「{model}」不可用或不支持 Tools"
-    providers = dict(getattr(resolved, "providers", {}) or {})
-    providers[dto.id] = dto
-    return ResolvedAgentProviders(primary=dto, model=model, providers=providers)
+    # explicit 在能力校验中只是首选顺序，不能靠它表达严格选择。
+    # 同步收窄模型清单和默认值，避免校验/后台探测/分类器再发现其它候选；
+    # 无模型清单的旧配置保留空清单，能力仍按协议推导，不伪造验证结果。
+    dto = replace(
+        dto,
+        default_model=model,
+        models=[dict(item) for item in dto.models if str(item.get("id") or "").strip() == model],
+    )
+    return ResolvedAgentProviders(primary=dto, model=model, providers={dto.id: dto})
 
 
 __all__ = ["SystemAgentRuntime"]

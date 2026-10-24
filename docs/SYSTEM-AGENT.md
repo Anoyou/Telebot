@@ -90,6 +90,8 @@ Provider 还可以选择 `direct`（标准 API 直连）或 `codex_gateway`（Co
 
 Web Agent 输入区可为当前会话选择“跟随 Provider”、指定标准 API 直连客户端身份或“Codex 客户端兼容模式”，选择后立即影响下一次请求并随会话保存在浏览器中。“Codex 客户端兼容模式”只使用已经配置为 Gateway、且支持 Tools 的 Provider；没有可用 Gateway Provider 时不会伪装成可选。固定了不兼容模型时，界面会切回可用 Gateway 模型，服务端仍会校验调用组合，避免绕过 Provider 配置。
 
+模型选择与客户端身份分开生效：`model_selection.mode=pinned` 严格固定本轮 Provider 和模型，主回答及需要模型参与的意图分类均只请求该目标。同模型重试仍保留；能力校验未通过或调用失败时不自动换成同 Provider 的其他模型，也不沿用旧的跨 Provider 确认，用户需重试或手动另选。首次使用或暂不可验证的缓存仍可按既有策略尝试所选模型，但前台/后台能力探测都只限该模型。`auto` 模式保留原有能力筛选、同 Provider 模型 fallback 与跨 Provider 确认策略。usage 分别保留校验前的原请求 Provider/模型与实际响应标识，不用替换后的模型冒充原选择。
+
 System Agent 的 Provider 管理工具仍不开放 `execution_backend`，`providers.verify` 也不是 Gateway 专项测活；模型不能自行修改 Provider 的 direct/Gateway 配置、读取 Gateway 进程健康或宣称已完成真实 Gateway 验收。持久配置与状态检查必须在「AI → 模型提供商」完成。助手可通过 `usage.recent` 查看已经发生的调用所记录的实际 backend、Gateway 版本、request ID、阶段和错误类别；这些历史事实不按 Provider 当前配置反推。
 
 ### 上下文与记忆
@@ -100,6 +102,8 @@ System Agent 使用四层上下文，并按预算持久化历史窗口：
 2. **滚动压缩摘要**：`memory_summary` 吸收移出短期窗口的旧成功轮次；超 2000 字符时后台 LLM 压缩为状态式描述（`source=system_agent_memory`，失败静默降级）；硬上限 3000 字符，按「`- 用户目标：`」条目边界丢最旧条，避免半条记录。`memory_state.summary_rev` 用于压缩写回的乐观并发。
 3. **结构化工作记忆**：`memory_state` 保存最近工具领域、用户目标、结果、工具摘要与账号上下文，用于“把它停掉”“继续刚才那个”等指代请求。
 4. **长期偏好**：表 `system_agent_user_memory`（按 web_user / bot_tg_user 分 scope，每 scope ≤20 条）。在本轮上下文中、会话记忆之前注入 enabled 条目（总量 ≤600 字符）。Web 可在助手「配置 → 长期记忆」管理；工具 `memory.list` / `memory.save` / `memory.delete`（写操作走 Action 确认）。密钥样式内容拒绝保存。
+
+后台摘要压缩是独立任务：执行时重新读取全局 System Agent Provider/模型配置，不继承用户本轮的固定模型或客户端覆盖；其用量来源为 `system_agent_memory`，不同于主回答和本轮分类。
 
 系统提示词保持稳定；时间、长期偏好、会话记忆、技能与本轮工具/媒体状态放在历史之后的当前 user 消息尾部。服务端将这部分内容脱敏后保存为 `model_turn_context`，后续回放时保留当轮上下文，减少跨轮前缀变化。直连 Magpie 时使用派生的稳定 `X-Magpie-Session`，Provider 自定义同名请求头优先。
 
@@ -321,7 +325,8 @@ System Agent 在自己的运行入口注册 LLM usage 持久化回调，路由�
 | 情况 | 用户可见 |
 | --- | --- |
 | 未启用 / 无 tools Provider | 明确错误 + AI 中心入口 |
-| 首选 Provider 返回 429/5xx/超时 | 当前模型每 3 秒重试一次，共 5 次；随后尝试同 Provider 的其它 Tools 模型，跨 Provider 前要求确认 |
+| 自动路由的首选 Provider 返回 429/5xx/超时 | 当前模型每 3 秒重试一次，共 5 次；随后尝试同 Provider 的其它 Tools 模型，跨 Provider 前要求确认 |
+| 显式固定模型能力校验未通过或调用失败 | 不自动替换模型；校验失败明确提示所选模型，调用重试耗尽后报错，由用户重试或手动另选 |
 | Web 开启工具前置批准 | 模型先理解需求并选择具体工具；有真实工具调用时才显示中文批准项，批准前不执行任何 handler |
 | 当前 Provider 内所有 Tools 模型失败 | 返回候选 Provider；Web 用户确认后用原消息重试，不重复写入历史 |
 | 工具异常 | 说明业务是否变化 |
