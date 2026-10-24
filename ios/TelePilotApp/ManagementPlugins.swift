@@ -21,6 +21,8 @@ private enum PluginFilter: String, CaseIterable {
 
 struct PluginManagementView: View {
     var accountID: Int? = nil
+    /// 仅作为“插件”一级 Tab 根页面时使用大标题；从“管理”等处推入时用行内标题。
+    var isTabRoot = true
     @Environment(AppModel.self) private var model
     @State private var section: PluginWorkspaceSection = .center
     @State private var features: [JSONValue] = []
@@ -48,7 +50,7 @@ struct PluginManagementView: View {
         .background(Color(.systemGroupedBackground))
         .navigationTitle(accountID == nil ? "插件" : "插件与规则")
         // 一级 Tab 与概览、AI、更多保持一致使用大标题；账号下的子页面仍用行内标题。
-        .navigationBarTitleDisplayMode(accountID == nil ? .large : .inline)
+        .navigationBarTitleDisplayMode(accountID == nil && isTabRoot ? .large : .inline)
         .task { await load() }
     }
 

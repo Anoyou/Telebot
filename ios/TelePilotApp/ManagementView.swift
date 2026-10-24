@@ -52,8 +52,8 @@ struct ManagementModuleView: View {
     @Environment(AppModel.self) private var model
     var body: some View {
         Group {
-            if module == .plugins { PluginManagementView() }
-            else if module == .ai { AIWorkspaceView() }
+            if module == .plugins { PluginManagementView(isTabRoot: false) }
+            else if module == .ai { AIWorkspaceView().navigationBarTitleDisplayMode(.inline) }
             else if module == .logs { LogsView() }
             else if module == .ledger { LedgerView() }
             else {
