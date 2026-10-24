@@ -166,6 +166,7 @@ System Agent 使用四层上下文，并按预算持久化历史窗口：
 | `scheduler.save` / `set_enabled` / `delete` / `execute_now` | 定时任务写操作 |
 | `features.set_enabled` | 账号功能/插件启停 |
 | `providers.save` / `delete` / `verify` | Provider 创建更新删除与本地可调用性检查 |
+| `providers.patrol` / `patrol_status` / `patrol_cancel` | 全部（或指定 Provider / 模型）已启用模型巡检：复用 Web「全部 Provider 巡检」同一后端 Job（`/api/commands/llm-providers/liveness/*` 的预览、启动、轮询与取消实现）。`patrol` 预览只读数据库并展示 Provider 数、模型数与额度消耗，确认后才真实调用上游并返回 `run_id`；`patrol_status` 只读，按 Provider 分组返回模型、ok/失败、延迟、HTTP 状态与脱敏错误摘要（失败优先，默认最多 200 条，可 `only_failed`，`wait_seconds` 最多 30 秒）；`patrol_cancel` 经确认后停止新请求并中断在途请求。Web 与管理 Bot 均可用（启动/取消需管理员）；失败不自动重试，确认时范围扩大会拒绝执行；Job 只保存在当前进程内存约 30 分钟 |
 | `commands.save` / `delete` / `set_enabled_for_accounts` | 自定义指令与账号启用 |
 | `plugins.list_installed` / `get` / `check_updates` | 远程插件包查询 |
 | `plugins.install` / `update` / `uninstall` / `set_package_enabled` | 安装包装卸更新与全局启停（危险项需确认） |

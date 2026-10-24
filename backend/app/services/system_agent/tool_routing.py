@@ -351,7 +351,7 @@ DOMAIN_CATALOG: dict[str, tuple[str, tuple[str, ...]]] = {
         ),
     ),
     "providers": (
-        "模型 Provider 的列表、保存、验证与删除",
+        "模型 Provider 的列表、保存、验证、全量模型巡检（测活）与删除",
         (
             "provider",
             "providers",
@@ -381,6 +381,15 @@ DOMAIN_CATALOG: dict[str, tuple[str, tuple[str, ...]]] = {
             "接入模型",
             "加个模型",
             "添加模型",
+            "巡检",
+            "模型巡检",
+            "全量测活",
+            "批量测活",
+            "模型能不能用",
+            "模型还能不能用",
+            "全部模型",
+            "所有模型",
+            "patrol",
         ),
     ),
     "proxies": (
