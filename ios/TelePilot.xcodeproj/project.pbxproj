@@ -54,6 +54,9 @@
 		ED354A1E77C52EA112C2F31D /* AssistantUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C58570A86D880181446561E2 /* AssistantUITests.swift */; };
 		F30F76EE251AE4F0C20860C7 /* WorkspaceUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B01C57151088B6E6DF8E6DE4 /* WorkspaceUITests.swift */; };
 		F76863BF5116138B386BD89C /* ManagementCollections.swift in Sources */ = {isa = PBXBuildFile; fileRef = 38CDC7296A3C0B470515C56E /* ManagementCollections.swift */; };
+		69C689E28FB266A8B9264EB7 /* LedgerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60FD9F8937AC80EAFFD9FE60 /* LedgerView.swift */; };
+		B10822A8064132E6D409C83C /* LogsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B29024201240E657FD8EE9E /* LogsView.swift */; };
+		27352306F1820118DA3B0D68 /* OpsSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7E951B0297F46DB8F71B23B8 /* OpsSupport.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -117,6 +120,9 @@
 		F7345E48AE830986E3B98514 /* TelePilotApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TelePilotApp.swift; sourceTree = "<group>"; };
 		F74BB888C1F18820B172C6A8 /* AIProviders.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIProviders.swift; sourceTree = "<group>"; };
 		F98EB034681A1D9B4FEC79A1 /* VisualInspectionUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VisualInspectionUITests.swift; sourceTree = "<group>"; };
+		60FD9F8937AC80EAFFD9FE60 /* LedgerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LedgerView.swift; sourceTree = "<group>"; };
+		4B29024201240E657FD8EE9E /* LogsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LogsView.swift; sourceTree = "<group>"; };
+		7E951B0297F46DB8F71B23B8 /* OpsSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpsSupport.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -152,7 +158,9 @@
 				698666CDC618CD52DE256E14 /* AssistantView.swift */,
 				8255085B6A9592CC540A6C0A /* FileManagementView.swift */,
 				2C9EA1E10C48B583FD528E4B /* FixtureService.swift */,
+				60FD9F8937AC80EAFFD9FE60 /* LedgerView.swift */,
 				95EB7F933825D8AE7BB4D48B /* LoginView.swift */,
+				4B29024201240E657FD8EE9E /* LogsView.swift */,
 				38CDC7296A3C0B470515C56E /* ManagementCollections.swift */,
 				8977F833837A79C464CFBA29 /* ManagementForms.swift */,
 				10E9FFA6394C9F48135FAE27 /* ManagementJobs.swift */,
@@ -164,6 +172,7 @@
 				DB2CCF9898F9CE1A2073AFA2 /* OverviewComponents.swift */,
 				1129B1323A246221ADC267A8 /* OverviewCustomization.swift */,
 				727F8D4AA9F52E12A4F04A46 /* OverviewView.swift */,
+				7E951B0297F46DB8F71B23B8 /* OpsSupport.swift */,
 				F2B2718B75FA9808D8DCE77A /* PrivacyFormatting.swift */,
 				29595AAA4876A4A949A42697 /* PrivacyInfo.xcprivacy */,
 				D2B288FCB89886B843143DE2 /* PrivacyShield.swift */,
@@ -335,7 +344,9 @@
 				0EC7CD8B95AA2E333E404B52 /* AssistantView.swift in Sources */,
 				47FDA06A27C3C12C38F4FA47 /* FileManagementView.swift in Sources */,
 				1B5D752E60BBE5D0A9CBFC84 /* FixtureService.swift in Sources */,
+				69C689E28FB266A8B9264EB7 /* LedgerView.swift in Sources */,
 				DCDCA2D5DF047E8FA10AFC49 /* LoginView.swift in Sources */,
+				B10822A8064132E6D409C83C /* LogsView.swift in Sources */,
 				F76863BF5116138B386BD89C /* ManagementCollections.swift in Sources */,
 				9592E80BE3FC7E63D347A748 /* ManagementForms.swift in Sources */,
 				D6AEC186649529E54AB14D5E /* ManagementJobs.swift in Sources */,
@@ -347,6 +358,7 @@
 				702EA3E96F61E657A0C12224 /* OverviewComponents.swift in Sources */,
 				8BD74933286E7D1248175ECE /* OverviewCustomization.swift in Sources */,
 				6153B904980915FD4BEC55D0 /* OverviewView.swift in Sources */,
+				27352306F1820118DA3B0D68 /* OpsSupport.swift in Sources */,
 				0DE54EE0D849DBAFF02D2F18 /* PrivacyFormatting.swift in Sources */,
 				B0CEF20BC7833D4E38385876 /* PrivacyShield.swift in Sources */,
 				939CB8EB7AF2DC4E52E410BE /* PushNotificationAppDelegate.swift in Sources */,
