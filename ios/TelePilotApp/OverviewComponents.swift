@@ -85,26 +85,28 @@ final class OverviewSignals {
         async let providers = OpsFetch.result(model, "/api/commands/llm-providers")
         async let compensations = OpsFetch.result(model, OpsFormat.path("/api/ledger/compensations", [("limit", "100")]))
         let results = await (stats, latest, messages, matrix, health, providers, compensations)
+        guard !Task.isCancelled else { return }
         var missing: [String] = []
 
         switch results.0 {
         case .success(let value) where value.objectValue != nil:
             runtimeErrors = value["error"]?.intValue ?? 0
             runtimeWarnings = value["warn"]?.intValue ?? 0
-        case .success: runtimeErrors = nil; runtimeWarnings = nil
-        case .failure: missing.append("日志统计")
+        case .success: runtimeErrors = nil; runtimeWarnings = nil; missing.append("日志统计")
+        case .failure: runtimeErrors = nil; runtimeWarnings = nil; missing.append("日志统计")
         }
         if case .success(let value) = results.1 {
             latestError = ManagementText.items(value).map(LogEntry.runtime).first { $0.severity == .error }
-            if runtimeErrors == nil, latestError != nil { runtimeErrors = ManagementText.items(value).count }
-        }
+        } else { latestError = nil }
         switch results.2 {
         case .success(let value): failedMessages = ManagementText.items(value).count
-        case .failure: failedMessages = nil
+        case .failure: failedMessages = nil; missing.append("消息处理失败")
         }
         switch results.3 {
         case .success(let value): parsePlugins(value)
-        case .failure: missing.append("插件状态")
+        case .failure:
+            failingPlugins = []; untrustedPlugins = []; enabledPluginCount = nil
+            missing.append("插件状态")
         }
         var providerNames: [Int: String] = [:]
         switch results.5 {
@@ -113,7 +115,7 @@ final class OverviewSignals {
             providerTotal = items.count
             providerReady = items.filter { ($0["has_effective_key"]?.boolValue ?? false) || $0["provider"]?.stringValue == "ollama" }.count
             for item in items { if let id = item["id"]?.intValue { providerNames[id] = OpsFormat.text(item["name"]) } }
-        case .failure: providerTotal = nil; providerReady = nil
+        case .failure: providerTotal = nil; providerReady = nil; missing.append("AI 供应商")
         }
         switch results.4 {
         case .success(let value):
@@ -126,7 +128,7 @@ final class OverviewSignals {
                 return CoolingModel(id: "\(provider ?? 0)-\(modelName)", title: "\(name) · \(modelName)",
                                     detail: "\(reason)。暂停调用约 \(max(1, remaining)) 秒后自动重试，期间会改用其他模型。")
             }
-        case .failure: missing.append("AI 运行状态")
+        case .failure: coolingModels = []; missing.append("AI 运行状态")
         }
         switch results.6 {
         case .success(let value):
@@ -236,13 +238,16 @@ enum OverviewAttention {
         if let errors = signals.runtimeErrors, errors > 0 {
             items.append(.init(id: "logs-errors", severity: .warning, title: "最近 24 小时有 \(errors) 条错误日志",
                                detail: signals.latestError.map { "最近一条：" + String($0.title.prefix(80)) } ?? "打开日志查看详情。", action: .push(.errorLogs)))
+        } else if signals.runtimeErrors == nil, let latest = signals.latestError {
+            items.append(.init(id: "logs-errors", severity: .warning, title: "最近 24 小时发现错误日志",
+                               detail: "暂时无法统计总数。最近一条：" + String(latest.title.prefix(80)), action: .push(.errorLogs)))
         }
         if let failed = signals.failedMessages, failed > 0 {
-            items.append(.init(id: "logs-messages", severity: .warning, title: "最近 24 小时有 \(failed) 条消息处理失败",
+            items.append(.init(id: "logs-messages", severity: .warning, title: "最近 24 小时有 \(OpsFormat.sampledCount(failed, limit: 100)) 条消息处理失败",
                                detail: "这些消息没能按预期回复，打开可以看到失败在哪一步、怎么处理。", action: .push(.failedMessages)))
         }
         if let open = signals.openCompensations, open > 0 {
-            items.append(.init(id: "ledger", severity: .warning, title: "\(open) 笔付款等待补付",
+            items.append(.init(id: "ledger", severity: .warning, title: "\(OpsFormat.sampledCount(open, limit: 100)) 笔付款等待补付",
                                detail: "付款失败后正在等待自动补付或人工核销。", action: .push(.ledger)))
         }
         if !model.pendingActions.isEmpty {

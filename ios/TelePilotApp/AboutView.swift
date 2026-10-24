@@ -230,7 +230,13 @@ struct ServerUpdateSheet: View {
     @State private var applyError: String?
     @State private var applyUncertain = false
     @State private var confirming = false
+    @State private var confirmingNewAttempt = false
     @State private var copiedCommand = false
+
+    private var receiptKey: String {
+        let testing = ProcessInfo.processInfo.arguments.contains("--ui-testing") ? ".fixture.\(ProcessInfo.processInfo.processIdentifier)" : ""
+        return "telepilot.serverUpdate\(testing).\(model.serverURL?.absoluteString ?? "").\(model.user?.id ?? 0)"
+    }
 
     private var hasUpdate: Bool { check?["has_update"]?.boolValue == true }
     private var canCheck: Bool { check?["can_check"]?.boolValue != false }
@@ -258,7 +264,7 @@ struct ServerUpdateSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("完成") { dismiss() }.accessibilityIdentifier("update.done")
+                    Button("完成") { dismiss() }.disabled(applying).accessibilityIdentifier("update.done")
                 }
             }
             .refreshable { await runCheck() }
@@ -270,10 +276,23 @@ struct ServerUpdateSheet: View {
             } message: {
                 Text(confirmationMessage)
             }
+            .confirmationDialog("已核实上次更新任务已经结束？", isPresented: $confirmingNewAttempt, titleVisibility: .visible) {
+                Button("已核实，允许下次更新", role: .destructive) {
+                    UserDefaults.standard.removeObject(forKey: receiptKey)
+                    applyUncertain = false
+                    applyResult = nil
+                    applyError = nil
+                }
+                Button("取消", role: .cancel) {}
+            } message: {
+                Text("请先在升级任务或服务器上确认上次更新没有继续执行。这里只解除重复提交保护，不会立刻开始更新。")
+            }
         }
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
+        .interactiveDismissDisabled(applying)
         .task {
+            restoreReceipt()
             await loadStatus()
             await runCheck()
         }
@@ -400,6 +419,11 @@ struct ServerUpdateSheet: View {
             NavigationLink { ManagementRunLookupView(updateJob: true) } label: {
                 Label("查看升级任务", systemImage: "list.bullet.rectangle")
             }
+            if applyUncertain || applySubmitted {
+                Button("已核实上次任务，允许下次更新", systemImage: "checkmark.shield") { confirmingNewAttempt = true }
+                    .disabled(applying || checking)
+                    .accessibilityIdentifier("update.allowNext")
+            }
         } footer: {
             if hasUpdate && !canApply && check != nil {
                 Text("当前运行环境不能从 App 直接应用更新，请按上方命令在服务器上执行。")
@@ -490,7 +514,10 @@ struct ServerUpdateSheet: View {
 
     /// 应用更新：只提交一次，网络中断或结果未知时锁定按钮，提示用户核实而不是重试。
     private func apply() async {
-        guard !applying, !applyUncertain else { return }
+        guard !applying, !applyUncertain, !applySubmitted, !checking, hasUpdate, canApply else { return }
+        // 收据在发请求前持久化；面板关闭、进程被杀或超时都不能绕过重复提交保护。
+        restoreReceipt()
+        guard !applyUncertain, !applySubmitted else { return }
         applying = true
         applyError = nil
         applyResult = nil
@@ -498,14 +525,31 @@ struct ServerUpdateSheet: View {
         var payload: [String: JSONValue] = [:]
         if let remote = text(check?["remote"]) { payload["remote"] = .string(remote) }
         if let branch = text(check?["branch"]) { payload["branch"] = .string(branch) }
+        persistReceipt(["pending": true])
         do {
             applyResult = try await model.request(path: "/api/system/pull-update", method: "POST", body: .object(payload))
+            if applySubmitted, let applyResult { persistReceipt(["result": applyResult]) }
+            else { UserDefaults.standard.removeObject(forKey: receiptKey) }
         } catch {
             let uncertain = (error as? APIError)?.isOutcomeUncertain == true
             applyUncertain = uncertain
+            if !uncertain { UserDefaults.standard.removeObject(forKey: receiptKey) }
             applyError = uncertain
                 ? "连接中断，无法确认服务器是否已开始更新。更新时服务重启也会导致这种情况。请稍候在“查看升级任务”或重新检查中核实，不要重复提交。"
                 : error.localizedDescription
+        }
+    }
+
+    private func persistReceipt(_ receipt: JSONValue) {
+        if let data = try? receipt.data() { UserDefaults.standard.set(data, forKey: receiptKey) }
+    }
+
+    private func restoreReceipt() {
+        guard let data = UserDefaults.standard.data(forKey: receiptKey), let receipt = try? JSONValue(data: data) else { return }
+        if let result = receipt["result"], result["success"]?.boolValue == true { applyResult = result }
+        else if receipt["pending"]?.boolValue == true {
+            applyUncertain = true
+            applyError = "上次更新请求的结果尚未确认。请先查看升级任务或核实服务器状态，不要重复提交。"
         }
     }
 

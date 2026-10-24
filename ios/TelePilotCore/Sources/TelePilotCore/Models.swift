@@ -178,6 +178,7 @@ public enum APIError: Error, LocalizedError, Sendable {
             case "AUTH_INVALID": "用户名或密码错误。"
             case "AUTH_EXPIRED", "AUTH_REQUIRED": "登录已失效，请重新登录。"
             case "ACCOUNT_SESSION_DECRYPT_FAILED": "账号登录凭据无法解密，请在 Web 管理台恢复原密钥或重新登录该 Telegram 账号。"
+            case "SESSION_BUSY": "会话仍有执行中、等待确认或排队的任务，请先停止或处理任务后再删除。"
             default: status == 429 ? "请求过于频繁，请稍后重试。" : "服务器拒绝了请求（HTTP \(status)），请在 Web 管理台检查详情。"
             }
         }

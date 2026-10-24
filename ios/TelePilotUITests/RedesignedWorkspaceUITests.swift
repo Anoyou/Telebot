@@ -46,6 +46,13 @@ final class RedesignedWorkspaceUITests: XCTestCase {
         let retry = app.buttons["ai.liveness.retryFailed"]
         for _ in 0..<5 where !retry.exists { app.swipeUp() }
         XCTAssertTrue(retry.waitForExistence(timeout: 10))
+        for _ in 0..<5 where !retry.isHittable { app.swipeUp() }
+        retry.tap()
+        XCTAssertTrue(confirm.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "将向 1 个模型各发送一次真实请求")).firstMatch.exists)
+        let cancel = app.buttons["取消"].firstMatch
+        if cancel.exists && cancel.isHittable { cancel.tap() }
+        else { app.otherElements["PopoverDismissRegion"].firstMatch.tap() }
     }
 
     func testAIGlobalSettingsIsNativeForm() {

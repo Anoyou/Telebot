@@ -105,8 +105,16 @@ struct OverviewView: View {
                     let errors = items.filter { $0.severity == .error }.count
                     let warnings = items.filter { $0.severity == .warning }.count
                     if errors + warnings == 0 {
-                        Label("一切正常", systemImage: "checkmark.circle.fill")
-                            .font(.title2.weight(.semibold)).foregroundStyle(.green)
+                        if signals.loadedAt == nil || signals.loading {
+                            Label("正在检查工作区…", systemImage: "arrow.clockwise")
+                                .font(.title2.weight(.semibold))
+                        } else if !signals.unavailable.isEmpty || model.healthError != nil || model.accountsError != nil || model.resourcesError != nil || model.workspaceError != nil {
+                            Label("部分状态未能确认", systemImage: "questionmark.circle")
+                                .font(.title2.weight(.semibold)).foregroundStyle(.secondary)
+                        } else {
+                            Label("一切正常", systemImage: "checkmark.circle.fill")
+                                .font(.title2.weight(.semibold)).foregroundStyle(.green)
+                        }
                     } else {
                         Label(errors > 0 ? "\(errors + warnings) 项需要处理" : "\(warnings) 项需要留意",
                               systemImage: errors > 0 ? OpsSeverity.error.symbol : OpsSeverity.warning.symbol)
@@ -134,7 +142,7 @@ struct OverviewView: View {
             if items.isEmpty {
                 if signals.loading && signals.loadedAt == nil {
                     ProgressView("正在检查账号、插件、AI 与日志…")
-                } else if model.health != nil {
+                } else if model.health != nil && signals.unavailable.isEmpty && model.healthError == nil && model.accountsError == nil && model.resourcesError == nil && model.workspaceError == nil {
                     Label("没有需要处理的事项", systemImage: "checkmark.circle").foregroundStyle(.green)
                 }
             }

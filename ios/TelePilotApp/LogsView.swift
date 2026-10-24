@@ -419,7 +419,8 @@ struct LogsView: View {
     @Environment(AppModel.self) private var model
     @State private var stats: JSONValue?
     @State private var problems: [LogEntry] = []
-    @State private var failedMessages = 0
+    @State private var failedMessages: Int?
+    @State private var messageCountCapped = false
     @State private var error: String?
     @State private var loading = false
     @State private var loaded = false
@@ -485,8 +486,9 @@ struct LogsView: View {
                               symbol: OpsSeverity.error.symbol, color: (stats?["error"]?.intValue ?? 0) > 0 ? .red : .primary, detail: "运行日志")
                 OpsMetricTile(title: "告警", value: stats.map { OpsFormat.integer($0["warn"]?.intValue ?? 0) } ?? "—",
                               symbol: OpsSeverity.warning.symbol, color: (stats?["warn"]?.intValue ?? 0) > 0 ? .orange : .primary, detail: "运行日志")
-                OpsMetricTile(title: "消息处理失败", value: loaded ? OpsFormat.integer(failedMessages) : "—",
-                              symbol: "bubble.left.and.exclamationmark.bubble.right", color: failedMessages > 0 ? .red : .primary, detail: "含卡住的消息")
+                OpsMetricTile(title: "消息处理失败", value: failedMessages.map { OpsFormat.integer($0) + (messageCountCapped ? "+" : "") } ?? "—",
+                              symbol: "bubble.left.and.exclamationmark.bubble.right", color: (failedMessages ?? 0) > 0 ? .red : .primary,
+                              detail: "含卡住的消息；每类最多 20 条")
             }
             if loading && !loaded { ProgressView("正在读取最近问题…") }
             if loaded && problems.isEmpty && error == nil {
@@ -519,20 +521,27 @@ struct LogsView: View {
         var failures: [String] = []
         switch results.0 {
         case .success(let value): stats = value.objectValue == nil ? nil : value
-        case .failure(let failure): failures.append(OpsFormat.errorMessage(failure))
+        case .failure(let failure): stats = nil; failures.append(OpsFormat.errorMessage(failure))
         }
         if case .success(let value) = results.1 {
             collected += ManagementText.items(value).map(LogEntry.runtime).filter { $0.severity >= .warning }
         } else if case .failure(let failure) = results.1 { failures.append(OpsFormat.errorMessage(failure)) }
         var messageCount = 0
+        var messagesAvailable = true
+        var capped = false
         for result in [results.2, results.3] {
             if case .success(let value) = result {
                 let items = ManagementText.items(value).map(LogEntry.message).filter { $0.severity >= .warning }
                 messageCount += items.count
+                capped = capped || items.count >= 20
                 collected += items
+            } else if case .failure(let failure) = result {
+                messagesAvailable = false
+                failures.append(OpsFormat.errorMessage(failure))
             }
         }
-        failedMessages = messageCount
+        failedMessages = messagesAvailable ? messageCount : nil
+        messageCountCapped = capped
         problems = collected.sorted { ($0.date ?? .distantPast) > ($1.date ?? .distantPast) }
         error = failures.first
         loaded = true
@@ -675,25 +684,33 @@ struct LogListView: View {
         loading = true
         defer { loading = false }
         let model = self.model
+        let requestedKey = loadKey
         let since = OpsFormat.iso(range.since)
         let account = accountID.map(String.init)
         let keyword = self.keyword.isEmpty ? nil : self.keyword
         let kinds = activeKinds
         let runtimePath = OpsFormat.path(LogKind.runtime.path, [("since", since), ("account_id", account), ("level", level.runtimeQuery), ("keyword", keyword), ("limit", "200")])
-        let messagesPath = OpsFormat.path(LogKind.messages.path, [("since", since), ("account_id", account), ("keyword", keyword), ("limit", "100")])
+        let messageQuery: [(String, String?)] = [("since", since), ("account_id", account), ("keyword", keyword), ("limit", "100")]
+        let messagesPath = OpsFormat.path(LogKind.messages.path, messageQuery + [("verdict", level == .all ? nil : "failed")])
+        let stuckPath = OpsFormat.path(LogKind.messages.path, messageQuery + [("verdict", "stuck")])
         let auditPath = OpsFormat.path(LogKind.audit.path, [("since", since), ("keyword", keyword), ("limit", "100")])
-        let tracesPath = OpsFormat.path(LogKind.traces.path, [("since", since), ("account_id", account), ("keyword", keyword), ("limit", "100")])
+        let traceQuery: [(String, String?)] = [("since", since), ("account_id", account), ("keyword", keyword), ("limit", "100")]
+        let tracesPath = OpsFormat.path(LogKind.traces.path, traceQuery + [("status", level == .all ? nil : "failed")])
+        let warningTracesPath = OpsFormat.path(LogKind.traces.path, traceQuery + [("status", "warning")])
         async let runtimeResult = OpsFetch.result(model, runtimePath, enabled: kinds.contains(.runtime))
         async let messagesResult = OpsFetch.result(model, messagesPath, enabled: kinds.contains(.messages))
+        async let stuckResult = OpsFetch.result(model, stuckPath, enabled: kinds.contains(.messages) && level == .warning)
         async let auditResult = OpsFetch.result(model, auditPath, enabled: kinds.contains(.audit))
         async let tracesResult = OpsFetch.result(model, tracesPath, enabled: kinds.contains(.traces))
-        let results = await (runtimeResult, messagesResult, auditResult, tracesResult)
-        guard !Task.isCancelled else { return }
+        async let warningTracesResult = OpsFetch.result(model, warningTracesPath, enabled: kinds.contains(.traces) && level == .warning)
+        let results = await (runtimeResult, messagesResult, auditResult, tracesResult, stuckResult, warningTracesResult)
+        guard !Task.isCancelled, requestedKey == loadKey else { return }
         var collected: [LogEntry] = []
         var failures: [String] = []
         let pairs: [(LogKind, Result<JSONValue, Error>, (JSONValue) -> LogEntry)] = [
             (.runtime, results.0, LogEntry.runtime), (.messages, results.1, LogEntry.message),
-            (.audit, results.2, LogEntry.audit), (.traces, results.3, LogEntry.trace)
+            (.audit, results.2, LogEntry.audit), (.traces, results.3, LogEntry.trace),
+            (.messages, results.4, LogEntry.message), (.traces, results.5, LogEntry.trace)
         ]
         for (kind, result, transform) in pairs {
             switch result {

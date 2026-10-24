@@ -173,6 +173,11 @@ final class AssistantStore {
     @discardableResult
     func deleteSession(id: String, model: AppModel) async -> Bool {
         guard !busy, deletingSessionID == nil else { return false }
+        guard sessions.first(where: { $0.id == id })?.text("channel") != "bot",
+              !(sessionID == id && session?.assistantText("channel") == "bot") else {
+            error = "Telegram 会话仅支持查看历史，不能在这里删除。"
+            return false
+        }
         if id == sessionID && runActive {
             error = "当前会话仍有任务在执行。请先停止任务，结束后再删除。"
             return false
@@ -181,6 +186,7 @@ final class AssistantStore {
         deletingSessionID = id
         defer { busy = false; deletingSessionID = nil }
         error = nil
+        var submitted = false
         do {
             // 删除前读取一次服务器任务列表，避免删除仍在执行任务的会话。
             let rows = try await model.request(path: AssistantPresentation.root + "/runs?limit=200&include_bot=true").assistantItems
@@ -188,12 +194,28 @@ final class AssistantStore {
                 error = "该会话仍有任务在执行。请先打开会话停止任务，结束后再删除。"
                 return false
             }
+            submitted = true
             _ = try await model.request(path: AssistantPresentation.root + "/sessions/\(AssistantPresentation.path(id))", method: "DELETE")
         } catch {
-            self.error = AssistantPresentation.error(error)
+            let failure = AssistantPresentation.error(error)
+            // 超时不代表删除失败；只读取一次目标，404 才能确认它已被删除。
+            if submitted {
+                do {
+                    _ = try await model.request(path: AssistantPresentation.root + "/sessions/\(AssistantPresentation.path(id))")
+                } catch APIError.server(status: 404, code: _) {
+                    await finishDeletingSession(id, model: model)
+                    return true
+                } catch {}
+            }
             await loadSessions(model)
+            self.error = failure
             return false
         }
+        await finishDeletingSession(id, model: model)
+        return true
+    }
+
+    private func finishDeletingSession(_ id: String, model: AppModel) async {
         sessions.removeAll { $0.id == id }
         let wasCurrent = id == sessionID
         if wasCurrent {
@@ -205,14 +227,17 @@ final class AssistantStore {
             runs = []
             events = []
             activeRun = nil
+            accountID = nil
             liveText = ""
             liveReasoning = ""
             streaming = false
         }
+        let token = generation
         await loadSessions(model)
-        if wasCurrent, let next = sessions.first { await select(next.id, model: model) }
+        if wasCurrent, token == generation, sessionID == nil, let next = sessions.first(where: { $0.id != id }) {
+            await select(next.id, model: model)
+        }
         notice = "会话已删除。"
-        return true
     }
 
     func refreshMessages(_ model: AppModel, older: Bool = false) async {

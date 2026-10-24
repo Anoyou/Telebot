@@ -83,6 +83,11 @@ enum OpsFormat {
 
     static func integer(_ value: Int) -> String { value.formatted(.number.grouping(.automatic)) }
 
+    /// 列表接口没有总数，达到上限只能说明至少有这么多条。
+    static func sampledCount(_ value: Int, limit: Int) -> String {
+        integer(value) + (value >= limit ? "+" : "")
+    }
+
     /// 只保留 ASCII 安全字符，其余（含中文、`+`、空格）全部百分号编码。
     static func path(_ base: String, _ items: [(String, String?)]) -> String {
         let allowed = CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_.~:")

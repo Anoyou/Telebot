@@ -1661,7 +1661,10 @@ struct ManagementPluginConfigView: View {
 
     private func cleanedConfig() -> [String: JSONValue] {
         if freeForm { return draft.objectValue ?? [:] }
-        var result: [String: JSONValue] = [:]
+        // 全局 PUT 不会像账号 PATCH 一样保留只读值，必须带回其原值。
+        var result: [String: JSONValue] = global ? (snapshot?.stored ?? [:]).filter { key, _ in
+            fields.contains { $0.key == key && $0.readOnly }
+        } : [:]
         for field in fields where !field.readOnly {
             guard let value = draft[field.key] else { continue }
             if value.isNull, !ManagementSchema.allowsNull(field.spec) { continue }
@@ -1694,7 +1697,7 @@ struct ManagementPluginConfigView: View {
                 seed = loaded.stored.filter { !ManagementText.secret($0.key) }
             } else {
                 for field in fields where !field.secret && !field.readOnly {
-                    if let value = loaded.values[field.key], !value.isNull { seed[field.key] = value }
+                    if let value = loaded.values[field.key], !value.isNull || ManagementSchema.allowsNull(field.spec) { seed[field.key] = value }
                     else if let fallback = field.spec["default"], !fallback.isNull { seed[field.key] = fallback }
                 }
             }

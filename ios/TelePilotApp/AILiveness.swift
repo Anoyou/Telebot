@@ -27,7 +27,6 @@ final class AILivenessStore {
     var loadingPreview = false
     var starting = false
     var cancelling = false
-    var polling = false
     var error: String?
     var pollError: String?
     var scopeReady = false
@@ -35,6 +34,7 @@ final class AILivenessStore {
     @ObservationIgnored private var previewKey: String?
     @ObservationIgnored private var defaultsKey = ""
     @ObservationIgnored private var restored = false
+    @ObservationIgnored private var pollToken = UUID()
     private var skipPersistence: Bool { ProcessInfo.processInfo.arguments.contains("--ui-testing") }
 
     var running: Bool { runID != nil || ["queued", "running"].contains(result?["status"]?.stringValue ?? "") }
@@ -66,6 +66,8 @@ final class AILivenessStore {
     }
 
     func reconcile(_ providers: [JSONValue]) {
+        guard !running, !starting, !loadingPreview else { return }
+        let previousKey = currentPreviewKey
         let valid = Set(providers.compactMap { $0["id"]?.intValue })
         selectedProviders = selectedProviders.intersection(valid)
         for provider in providers {
@@ -77,8 +79,9 @@ final class AILivenessStore {
         selectedModels = selectedModels.filter { valid.contains($0.key) }
         if selectedProviders.isEmpty, !scopeReady {
             selectedProviders = valid
-            selectedModels = selectedModels.mapValues { $0 }
         }
+        selectedProviders = selectedProviders.filter { selectedModels[$0]?.isEmpty == false }
+        if previousKey != currentPreviewKey { invalidatePreview() }
     }
 
     func toggleProvider(_ id: Int, enabled: Bool, providers: [JSONValue]) {
@@ -216,14 +219,15 @@ final class AILivenessStore {
     }
 
     func poll(_ model: AppModel) async {
-        guard runID != nil, !polling else { return }
-        polling = true; pollError = nil
-        defer { polling = false }
+        guard let id = runID, !Task.isCancelled else { return }
+        let token = UUID()
+        pollToken = token
+        pollError = nil
         var failures = 0
-        while let id = runID, !Task.isCancelled {
+        while runID == id, pollToken == token, !Task.isCancelled {
             do {
                 let value = try await model.request(path: "/api/commands/llm-providers/liveness/\(ManagementText.pathSegment(id))")
-                guard runID == id else { return }
+                guard runID == id, pollToken == token, !Task.isCancelled else { return }
                 result = value; pollError = nil; failures = 0
                 if !["queued", "running"].contains(value["status"]?.stringValue ?? "") {
                     runID = nil; persist(); return
@@ -232,6 +236,7 @@ final class AILivenessStore {
                 try await Task.sleep(for: .milliseconds(800))
             } catch is CancellationError { return }
             catch {
+                guard runID == id, pollToken == token, !Task.isCancelled else { return }
                 if case APIError.server(status: 404, code: _) = error {
                     var current = result?.objectValue ?? ["run_id": .string(id), "task_total": 0]
                     current["status"] = "cancelled"
@@ -240,7 +245,7 @@ final class AILivenessStore {
                 }
                 failures += 1
                 pollError = "进度暂时读取失败，将自动重试：\(error.localizedDescription)"
-                do { try await Task.sleep(for: .seconds(min(15, Int(pow(2.0, Double(failures)))))) }
+                do { try await Task.sleep(for: .seconds(1 << min(4, failures))) }
                 catch { return }
             }
         }
@@ -252,6 +257,7 @@ final class AILivenessStore {
         defer { cancelling = false }
         do {
             let value = try await model.request(path: "/api/commands/llm-providers/liveness/\(ManagementText.pathSegment(id))/cancel", method: "POST")
+            guard runID == id else { return }
             result = value
             if !["queued", "running"].contains(value["status"]?.stringValue ?? "") { runID = nil }
             persist()
@@ -262,6 +268,7 @@ final class AILivenessStore {
         guard let id = runID else { return }
         do {
             let value = try await model.request(path: "/api/commands/llm-providers/liveness/\(ManagementText.pathSegment(id))")
+            guard runID == id, !Task.isCancelled else { return }
             result = value
             if !["queued", "running"].contains(value["status"]?.stringValue ?? "") { runID = nil }
             persist()
@@ -329,6 +336,7 @@ struct AILivenessView: View {
     private var messageEmpty: Bool { liveness.message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     private var promptEmpty: Bool { liveness.systemPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     private var canStart: Bool { liveness.canPreview && !liveness.loadingPreview && !messageEmpty && !promptEmpty }
+    private var activePollID: String? { scenePhase == .active ? liveness.runID : nil }
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -355,15 +363,13 @@ struct AILivenessView: View {
                 liveness.start(model, providers: workspace.providers, providerID: providerID)
             }
             .onChange(of: workspace.providers) { _, providers in liveness.reconcile(providers) }
-            .task(id: scenePhase) {
-                guard scenePhase == .active, liveness.runID != nil else { return }
+            .task(id: activePollID) {
+                guard activePollID != nil else { return }
                 await liveness.poll(model)
             }
             .onChange(of: liveness.runID) { _, id in
                 guard id != nil else { return }
                 withAnimation { proxy.scrollTo("ai.liveness.progressAnchor", anchor: .top) }
-                guard scenePhase == .active else { return }
-                Task { await liveness.poll(model) }
             }
             .refreshable {
                 await workspace.refresh(model)

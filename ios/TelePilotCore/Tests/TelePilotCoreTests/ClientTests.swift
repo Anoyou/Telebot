@@ -163,6 +163,22 @@ struct ClientTests {
         #expect(script.requests.count == 2)
     }
 
+    @Test func serverUpdateTransportKeepsAuthenticationAndNeverReplaysTimeout() async throws {
+        let store = MemoryStore()
+        try store.save(StoredSession(token: "session-one", expiresAt: Date().addingTimeInterval(3600)), origin: origin)
+        let (client, script, _) = try setup([csrfReply, MockReply(body: "{\"has_update\":true}"), MockReply(error: .timedOut)], store: store)
+        _ = try await client.request(path: "/api/system/check-update", method: "POST")
+        do {
+            _ = try await client.request(path: "/api/system/pull-update", method: "POST", body: ["remote": "origin", "branch": "Beta"])
+            Issue.record("Expected uncertain update outcome")
+        } catch let error as APIError { #expect(error.isOutcomeUncertain) }
+        #expect(script.requests.count == 3)
+        for request in script.requests.dropFirst() {
+            #expect(request.value(forHTTPHeaderField: "Cookie")?.contains("auth_token=session-one") == true)
+            #expect(request.value(forHTTPHeaderField: "X-CSRF-Token") == "csrf-one")
+        }
+    }
+
     @Test func unauthorizedClearsPersistentAndMemorySession() async throws {
         let store = MemoryStore()
         try store.save(.init(token: "old-session", expiresAt: .distantFuture), origin: origin)

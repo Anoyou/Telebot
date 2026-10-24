@@ -50,6 +50,7 @@ from ..services.plugin_config_actions import (
     PluginConfigActionUnavailable,
     run_plugin_config_action,
 )
+from ..services.plugin_config_secrets import is_secret_envelope
 from ..services.redactor import is_sensitive_key, redact_value
 from ..worker.plugins.ai_facade import AIQuotaError, AIUnavailableError
 from ..worker.plugins.http_facade import PluginHTTPError
@@ -252,7 +253,7 @@ def _preserve_existing_sensitive_values(
     for item_key, value in existing_dict.items():
         if key == "chatgpt_image" and item_key == "token" and "tokens" in merged:
             continue
-        if not is_sensitive_key(str(item_key)):
+        if not is_sensitive_key(str(item_key)) and not is_secret_envelope(value):
             continue
         if item_key not in merged or merged.get(item_key) in ("", None, "***"):
             merged[item_key] = value

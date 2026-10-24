@@ -257,6 +257,7 @@ struct LedgerView: View {
     @State private var entries: [LedgerEntry] = []
     @State private var compensations: [LedgerCompensation] = []
     @State private var summaryError: String?
+    @State private var statsError: String?
     @State private var entriesError: String?
     @State private var compensationsError: String?
     @State private var loading = false
@@ -345,7 +346,7 @@ struct LedgerView: View {
                                   detail: "近 \(range.title)已计账")
                 }
                 if !compensations.isEmpty {
-                    Label("有 \(compensations.count) 笔付款失败、等待补付，见下方“待补付”。", systemImage: "exclamationmark.triangle.fill")
+                    Label("有 \(OpsFormat.sampledCount(compensations.count, limit: 100)) 笔付款失败、等待补付，见下方“待补付”。", systemImage: "exclamationmark.triangle.fill")
                         .foregroundStyle(.orange).font(.subheadline)
                 }
             } header: { Text("汇总（近 \(range.title)）") }
@@ -516,6 +517,9 @@ struct LedgerView: View {
     }
 
     @ViewBuilder private var operationsSection: some View {
+        if let statsError {
+            Section { NoticeView(title: "运营统计读取失败", message: statsError) }
+        }
         if let total = stats?["total"] {
             Section {
                 OpsMetricGrid {
@@ -523,7 +527,7 @@ struct LedgerView: View {
                                   detail: "有效开局事件")
                     OpsMetricTile(title: "派奖成功率", value: rateText(total["payout_success_rate"]), symbol: "percent",
                                   color: rateColor(total), detail: "\(total["payout_success_count"]?.intValue ?? 0) 成功 / \(total["payout_attempt_count"]?.intValue ?? 0) 次")
-                    OpsMetricTile(title: "参与人数", value: OpsFormat.integer(total["participant_count"]?.intValue ?? 0), symbol: "person.3",
+                    OpsMetricTile(title: "参与人数", value: total["participant_count"]?.intValue.map(OpsFormat.integer) ?? "—", symbol: "person.3",
                                   detail: "按用户去重")
                     OpsMetricTile(title: "派奖失败", value: OpsFormat.integer(total["payout_failure_count"]?.intValue ?? 0), symbol: "xmark.circle",
                                   color: (total["payout_failure_count"]?.intValue ?? 0) > 0 ? .red : .primary, detail: "失败会进入待补付")
@@ -559,7 +563,7 @@ struct LedgerView: View {
                 }
             }
         } header: { Text("待补付") } footer: {
-            Text("付款失败后会自动重试补付；成功补付或你人工核销后会从这里消失。正常情况下应为 0。")
+            Text("付款失败后会自动重试补付；成功补付或你人工核销后会从这里消失。每次最多读取最近 100 笔，100+ 表示可能还有更早的挂账。")
         }
     }
 
@@ -581,7 +585,9 @@ struct LedgerView: View {
                 } label: { Label("查看全部 \(entries.count) 笔", systemImage: "list.bullet") }
                     .accessibilityIdentifier("ledger.allEntries")
             }
-        } header: { Text("最近流水（\(statusFilter.title)）") }
+        } header: { Text("最近流水（\(statusFilter.title)）") } footer: {
+            Text("最多读取最近 200 笔；如需更早的记录，请缩小时间范围或按账号筛选。")
+        }
     }
 
     // MARK: Helpers
@@ -590,8 +596,18 @@ struct LedgerView: View {
 
     private func load() async {
         loading = true
+        summary = nil
+        stats = nil
+        entries = []
+        compensations = []
+        summaryError = nil
+        statsError = nil
+        entriesError = nil
+        compensationsError = nil
+        lastLoaded = nil
         defer { loading = false }
         let model = self.model
+        let requestedFilter = filterKey
         let since = OpsFormat.iso(Date.now.addingTimeInterval(-Double(range.rawValue) * 86_400))
         let accountText = accountID.map(String.init)
         let common: [(String, String?)] = [("since", since), ("account_id", accountText)]
@@ -604,12 +620,15 @@ struct LedgerView: View {
         async let entriesResult = OpsFetch.result(model, entriesPath)
         async let compensationsResult = OpsFetch.result(model, compensationsPath)
         let results = await (summaryResult, statsResult, entriesResult, compensationsResult)
-        guard !Task.isCancelled else { return }
+        guard !Task.isCancelled, requestedFilter == filterKey else { return }
         switch results.0 {
         case .success(let value): summary = value; summaryError = nil
         case .failure(let error): summaryError = OpsFormat.errorMessage(error)
         }
-        if case .success(let value) = results.1 { stats = value }
+        switch results.1 {
+        case .success(let value): stats = value; statsError = nil
+        case .failure(let error): stats = nil; statsError = OpsFormat.errorMessage(error)
+        }
         switch results.2 {
         case .success(let value): entries = ManagementText.items(value).map(LedgerEntry.init); entriesError = nil
         case .failure(let error): entriesError = OpsFormat.errorMessage(error)
@@ -626,7 +645,7 @@ struct LedgerView: View {
         var lines = [
             "资金台账汇总：近 \(range.title)，\(accountID.map { accountName($0) } ?? "全部账号")，\(direction.title)",
             "入账 \(OpsFormat.amount(OpsFormat.decimal(summary["income"])))，出账 \(OpsFormat.amount(OpsFormat.decimal(summary["payout"])))，净额 \(OpsFormat.amount(OpsFormat.decimal(summary["net"]), signed: true))，共 \(summary["count"]?.intValue ?? 0) 笔",
-            "待补付 \(compensations.count) 笔"
+            "待补付 \(OpsFormat.sampledCount(compensations.count, limit: 100)) 笔"
         ]
         for item in compensations.prefix(10) {
             lines.append("· 待补付 #\(item.id) \(OpsFormat.amount(item.amount)) \(LedgerText.compensation(item.status).title) \(item.error ?? "")")

@@ -66,7 +66,9 @@ final class ManagementUITests: XCTestCase {
         for _ in 0..<4 where !apply.isHittable { app.swipeUp() }
         apply.tap()
         XCTAssertTrue(app.buttons["update.confirm"].firstMatch.waitForExistence(timeout: 5))
-        app.buttons["取消"].firstMatch.tap()
+        let cancel = app.buttons["取消"].firstMatch
+        if cancel.exists && cancel.isHittable { cancel.tap() }
+        else { app.otherElements["PopoverDismissRegion"].firstMatch.tap() }
         XCTAssertFalse(app.otherElements["update.applied"].exists)
         XCTAssertFalse(app.staticTexts["更新任务已启动"].exists)
     }
@@ -75,8 +77,8 @@ final class ManagementUITests: XCTestCase {
         let app = launch()
         app.buttons["日志与诊断"].tap()
         let runtime = app.buttons["logs.kind.runtime"]
+        for _ in 0..<8 where !(runtime.exists && runtime.isHittable) { app.swipeUp() }
         XCTAssertTrue(runtime.waitForExistence(timeout: 10))
-        for _ in 0..<6 where !runtime.isHittable { app.swipeUp() }
         runtime.tap()
         let message = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "界面日志测试")).firstMatch
         XCTAssertTrue(message.waitForExistence(timeout: 10))
@@ -87,12 +89,38 @@ final class ManagementUITests: XCTestCase {
         add(screenshot)
     }
 
+    func testServerUpdateReceiptSurvivesClosingPanel() {
+        let app = launch()
+        app.buttons["more.about"].tap()
+        let open = app.buttons["update.open"]
+        for _ in 0..<4 where !open.isHittable { app.swipeUp() }
+        XCTAssertTrue(open.waitForExistence(timeout: 10))
+        open.tap()
+        let apply = app.buttons["update.apply"]
+        for _ in 0..<5 where !apply.isHittable { app.swipeUp() }
+        XCTAssertTrue(apply.waitForExistence(timeout: 10))
+        apply.tap()
+        let confirm = app.buttons["update.confirm"].firstMatch
+        XCTAssertTrue(confirm.waitForExistence(timeout: 5))
+        confirm.tap()
+        let job = app.buttons["update.job"]
+        for _ in 0..<5 where !job.isHittable { app.swipeUp() }
+        XCTAssertTrue(job.waitForExistence(timeout: 10))
+        app.buttons["update.done"].tap()
+        XCTAssertTrue(open.waitForExistence(timeout: 5))
+        open.tap()
+        for _ in 0..<5 where !job.isHittable { app.swipeUp() }
+        XCTAssertTrue(job.waitForExistence(timeout: 10))
+        XCTAssertFalse(app.buttons["update.apply"].exists)
+        XCTAssertTrue(app.buttons["update.allowNext"].exists)
+    }
+
     func testLogDetailExplainsMessageFailureAndOpensTimeline() {
         let app = launch()
         app.buttons["日志与诊断"].tap()
         let messages = app.buttons["logs.kind.messages"]
+        for _ in 0..<8 where !(messages.exists && messages.isHittable) { app.swipeUp() }
         XCTAssertTrue(messages.waitForExistence(timeout: 10))
-        for _ in 0..<6 where !messages.isHittable { app.swipeUp() }
         messages.tap()
         let failure = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "处理失败")).firstMatch
         XCTAssertTrue(failure.waitForExistence(timeout: 10))

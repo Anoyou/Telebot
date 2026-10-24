@@ -117,6 +117,23 @@ actor FixtureService: AppServing {
         if let value = fixtureValues[clean], method == "GET" { return value }
         if method == "GET" {
             let opsValue = Self.opsFixture(clean)
+            if let rows = opsValue.arrayValue {
+                let query = URLComponents(string: path)?.queryItems ?? []
+                let filtered = rows.filter { row in
+                    query.allSatisfy { item in
+                        switch item.name {
+                        case "verdict", "status": return row[item.name]?.stringValue == item.value
+                        case "account_id": return row["account_id"]?.intValue == item.value.flatMap(Int.init)
+                        case "level":
+                            let level = row["level"]?.stringValue ?? ""
+                            return item.value == "warning" ? ["warn", "warning", "error"].contains(level) : level == item.value
+                        default: return true
+                        }
+                    }
+                }
+                let limit = query.first { $0.name == "limit" }?.value.flatMap(Int.init) ?? filtered.count
+                return .array(Array(filtered.prefix(limit)))
+            }
             if !opsValue.isNull { return opsValue }
         }
         if clean == "/api/system-agent/sessions", method == "POST" {
@@ -253,7 +270,10 @@ actor FixtureService: AppServing {
         }
         if clean == "/api/commands/ai/enablement-summary" { return ["enabled_accounts": 1, "total_accounts": 4, "enabled_templates": 2] }
         if clean == "/api/commands/llm-providers/liveness/preview", method == "POST" {
-            return ["provider_total": 2, "executable_provider_total": 2, "enabled_model_total": 3, "task_total": 3,
+            let scope = body?["models_by_provider"]?.objectValue ?? [:]
+            let count = scope.values.reduce(0) { $0 + ($1.arrayValue?.count ?? 0) }
+            return ["provider_total": .integer(Int64(scope.count)), "executable_provider_total": .integer(Int64(scope.count)),
+                    "enabled_model_total": .integer(Int64(count)), "task_total": .integer(Int64(count)),
                     "needs_confirmation": false, "global_concurrency": 8, "provider_concurrency": 2, "max_tokens": 256, "max_output_tokens": 256,
                     "providers": [["provider_id": 1, "provider_name": "个人模型网关", "enabled_models": ["gpt-5.4-mini", "gpt-5.4"], "executable": true]]]
         }

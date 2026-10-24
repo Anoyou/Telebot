@@ -15,6 +15,8 @@ actor SessionTransport: ClientTransport {
     private let origin: URL
     private let transport: URLSessionTransport
     private let session: URLSession
+    private let updateTransport: URLSessionTransport
+    private let updateSession: URLSession
     private let store: any SessionStore
     private var auth: StoredSession?
     private var csrf: StoredSession?
@@ -35,9 +37,13 @@ actor SessionTransport: ClientTransport {
         configuration.timeoutIntervalForResource = 3_600
         session = URLSession(configuration: configuration, delegate: RejectRedirectDelegate(), delegateQueue: nil)
         transport = URLSessionTransport(configuration: .init(session: session, httpBodyProcessingMode: .buffered))
+        // Update checks wait for synchronous Git operations, as in the Web client.
+        configuration.timeoutIntervalForRequest = 150
+        updateSession = URLSession(configuration: configuration, delegate: RejectRedirectDelegate(), delegateQueue: nil)
+        updateTransport = URLSessionTransport(configuration: .init(session: updateSession, httpBodyProcessingMode: .buffered))
     }
 
-    deinit { session.invalidateAndCancel() }
+    deinit { session.invalidateAndCancel(); updateSession.invalidateAndCancel() }
 
     func clear() throws {
         generation += 1
@@ -111,7 +117,10 @@ actor SessionTransport: ClientTransport {
         let response: HTTPResponse
         let data: Data
         do {
-            let result = try await transport.send(request, body: payload.map(HTTPBody.init),
+            let path = original.path?.split(separator: "?").first.map(String.init)
+            let slowUpdate = ["/api/system/check-update", "/api/system/pull-update", "/api/system/update-target-options"].contains(path ?? "")
+            let selectedTransport = slowUpdate ? updateTransport : transport
+            let result = try await selectedTransport.send(request, body: payload.map(HTTPBody.init),
                                                   baseURL: origin, operationID: operationID)
             response = result.0
             data = try await result.1.mapAsync { try await Data(collecting: $0, upTo: 64 * 1024 * 1024) } ?? Data()
