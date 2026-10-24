@@ -2915,8 +2915,9 @@ async def _build_export_payload(
             for key, value in (definition.get("filter") or {}).items():
                 query = query.where(getattr(model_cls, key) == value)
             rows = (await db.execute(query)).scalars().all()
-            if model_cls.__name__ == "SystemSetting" and not include_sensitive:
-                rows = [row for row in rows if _system_setting_safe_for_export(getattr(row, "key", ""))]
+            if model_cls.__name__ == "SystemSetting":
+                rows = [row for row in rows if not str(getattr(row, "key", "")).startswith("apns:")
+                        and (include_sensitive or _system_setting_safe_for_export(getattr(row, "key", "")))]
             exclude = set() if include_sensitive else definition["exclude_fields"]
             result[category] = [_row_to_dict(row, exclude, include_sensitive) for row in rows]
     return result
@@ -3125,6 +3126,9 @@ async def _import_config_payload(
                 for source in rows:
                     if not isinstance(source, dict):
                         raise ConfigImportError(f"[{category}] 行必须是 object")
+                    if category == "system_settings" and str(source.get("key", "")).startswith("apns:"):
+                        skipped += 1
+                        continue
                     source_pk = source.get(definition.get("pk_field", ""))
                     remapped = _remap_import_row(category, source, mappings)
                     filtered: dict[str, Any] = {}

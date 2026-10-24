@@ -1,0 +1,71 @@
+name: TelePilot
+options:
+  minimumXcodeGenVersion: 2.44.0
+  deploymentTarget:
+    iOS: "26.0"
+  createIntermediateGroups: true
+  developmentLanguage: zh-Hans
+  knownRegions:
+    - zh-Hans
+    - en
+    - Base
+packages:
+  TelePilotCore:
+    path: TelePilotCore
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    MARKETING_VERSION: "0.5.0"
+    CURRENT_PROJECT_VERSION: "4"
+    CODE_SIGN_STYLE: Automatic
+    ENABLE_USER_SCRIPT_SANDBOXING: YES
+    ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS: YES
+targets:
+  TelePilot:
+    type: application
+    platform: iOS
+    sources:
+      - path: TelePilotApp
+        excludes:
+          - Info.plist
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.telepilot.personal
+        PRODUCT_NAME: TelePilot
+        INFOPLIST_FILE: TelePilotApp/Info.plist
+        TARGETED_DEVICE_FAMILY: "1,2"
+        SUPPORTS_MACCATALYST: NO
+        SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD: NO
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        GENERATE_INFOPLIST_FILE: NO
+        CODE_SIGN_ENTITLEMENTS: "$(TELEPILOT_PUSH_ENTITLEMENTS)"
+    dependencies:
+      - package: TelePilotCore
+  TelePilotUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: TelePilotUITests
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.telepilot.personal.uitests
+        GENERATE_INFOPLIST_FILE: YES
+        TARGETED_DEVICE_FAMILY: "1,2"
+    dependencies:
+      - target: TelePilot
+schemes:
+  TelePilot:
+    build:
+      targets:
+        TelePilot: all
+        TelePilotUITests: [test]
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - name: TelePilotUITests
+          parallelizable: false
+    archive:
+      config: Release

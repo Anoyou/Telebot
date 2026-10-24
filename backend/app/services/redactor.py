@@ -28,6 +28,7 @@ SENSITIVE_KEYS = {
     "session",
     "session_string",
     "totp",
+    "auth_key_p8",
 }
 SENSITIVE_KEY_SUFFIXES = tuple(f"_{key}" for key in sorted(SENSITIVE_KEYS)) + ("_enc",)
 
@@ -59,6 +60,12 @@ _PROVIDER_TOKEN_PATTERNS: tuple[re.Pattern[str], ...] = (
 _TELEGRAM_BOT_TOKEN_RE = re.compile(
     r"((?:https?://)?api\.telegram\.org/bot)[^/\s\"']+",
     re.IGNORECASE,
+)
+_APNS_DEVICE_URL_RE = re.compile(
+    r"(https://api(?:\.sandbox)?\.push\.apple\.com/3/device/)[0-9a-f]+", re.IGNORECASE,
+)
+_PRIVATE_KEY_RE = re.compile(
+    r"-----BEGIN (?:EC )?PRIVATE KEY-----.*?-----END (?:EC )?PRIVATE KEY-----", re.DOTALL,
 )
 _KV_SECRET_RE = re.compile(
     r"""(?ix)
@@ -94,6 +101,8 @@ def is_sensitive_key(key: str) -> bool:
 def redact_text(text: str) -> str:
     out = _URL_CREDENTIAL_RE.sub(r"\1***:***@", text)
     out = _TELEGRAM_BOT_TOKEN_RE.sub(r"\1***", out)
+    out = _APNS_DEVICE_URL_RE.sub(r"\1***", out)
+    out = _PRIVATE_KEY_RE.sub(REDACTED, out)
     for pattern in _PROVIDER_TOKEN_PATTERNS:
         out = pattern.sub(REDACTED, out)
 

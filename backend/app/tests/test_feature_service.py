@@ -24,6 +24,31 @@ from app.services.feature_service import (
     set_plugin_global_config,
     validate_config_against_schema,
 )
+from app.services.plugin_config_secrets import encrypt_config_secrets
+
+
+@pytest.mark.parametrize(
+    ("incoming", "replacement"),
+    [
+        ({}, None),
+        ({"login_data": "***"}, None),
+        ({"login_data": ""}, None),
+        ({"login_data": None}, None),
+        ({"login_data": "new-login-value"}, "new-login-value"),
+    ],
+)
+def test_config_save_preserves_schema_only_encrypted_field(incoming, replacement) -> None:
+    schema = {
+        "type": "object",
+        "properties": {"login_data": {"type": "string", "format": "password"}},
+    }
+    existing = encrypt_config_secrets({"login_data": "old-login-value"}, schema=schema)
+    existing["obsolete_option"] = "can-be-removed"
+
+    saved = features_api._preserve_existing_sensitive_values(existing, incoming)
+
+    assert saved["login_data"] == (existing["login_data"] if replacement is None else replacement)
+    assert "obsolete_option" not in saved
 
 
 @pytest.mark.asyncio

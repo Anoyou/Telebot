@@ -57,6 +57,8 @@ SCALAR_FIELDS: tuple[RekeyField, ...] = (
     RekeyField("system_agent_session", "id", "secret_map_enc"),
 )
 SYSTEM_SETTING_ENCRYPTED_KEYS_BY_PREFIX = {
+    "apns:config": ("auth_key_enc",),
+    "apns:device:": ("device_token_enc",),
     "account_bot_transfer_notice:": ("interaction_bot_token_enc", "transfer_bot_token_enc"),
     "account_webhooks:": ("token_enc",),
 }

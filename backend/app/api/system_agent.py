@@ -14,14 +14,19 @@ from sqlalchemy import select
 
 from ..db.base import AsyncSessionLocal
 from ..db.models.system_agent import (
+    AGENT_RUN_OPEN_STATUSES,
     CHANNEL_WEB,
     MESSAGE_ROLE_ASSISTANT,
     MESSAGE_ROLE_USER,
     MESSAGE_RUN_FAILED,
+    PENDING_TURN_DISPATCHING,
+    PENDING_TURN_PAUSED,
+    PENDING_TURN_PENDING,
     RUN_INPUT_APPROVAL,
     RUN_INPUT_STEER,
     RUN_INPUT_USER,
     SESSION_STATUS_ACTIVE,
+    SystemAgentPendingTurn,
     SystemAgentRun,
     SystemAgentSession,
 )
@@ -414,6 +419,39 @@ async def delete_session(
     session = await svc.get_session(db, session_id, web_user_id=user.id)
     if session is None:
         raise _err("SESSION_NOT_FOUND", "会话不存在", 404)
+    # 与 start_run 使用同一会话行锁，将任务检查和删除放在同一事务中。
+    locked = await db.execute(
+        select(SystemAgentSession)
+        .where(
+            SystemAgentSession.id == session_id,
+            SystemAgentSession.web_user_id == user.id,
+            SystemAgentSession.channel == CHANNEL_WEB,
+        )
+        .with_for_update()
+    )
+    session = locked.scalar_one_or_none()
+    if session is None:
+        raise _err("SESSION_NOT_FOUND", "会话不存在", 404)
+    open_run = await db.scalar(
+        select(SystemAgentRun.id)
+        .where(
+            SystemAgentRun.session_id == session_id,
+            SystemAgentRun.status.in_(AGENT_RUN_OPEN_STATUSES),
+        )
+        .limit(1)
+    )
+    pending_turn = await db.scalar(
+        select(SystemAgentPendingTurn.id)
+        .where(
+            SystemAgentPendingTurn.session_id == session_id,
+            SystemAgentPendingTurn.status.in_(
+                {PENDING_TURN_PENDING, PENDING_TURN_DISPATCHING, PENDING_TURN_PAUSED}
+            ),
+        )
+        .limit(1)
+    )
+    if open_run is not None or pending_turn is not None:
+        raise _err("SESSION_BUSY", "会话仍有执行中、等待确认或排队的任务，请先停止或处理任务后再删除。", 409)
     await svc.delete_session(db, session)
     await db.commit()
     return {"ok": True, "deleted": session_id}

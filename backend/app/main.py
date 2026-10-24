@@ -17,6 +17,7 @@ from . import __version__
 from .api import account_bots as account_bots_api
 from .api import accounts as accounts_api
 from .api import alias as alias_api
+from .api import apns as apns_api
 from .api import auth as auth_api
 from .api import config_bundle as config_bundle_api
 from .api import device_profiles as device_profiles_api
@@ -293,6 +294,9 @@ async def lifespan(app: FastAPI):
         auto_update_check_loop(),
         name="app-update-check",
     )
+    from .services.apns import delivery_loop
+
+    apns_delivery_task = asyncio.create_task(delivery_loop(), name="apns-outbox")
 
     retry_tasks: list[asyncio.Task[None]] = []
     for component in _RUNTIME_COMPONENTS:
@@ -362,6 +366,8 @@ async def lifespan(app: FastAPI):
     try:
         yield
     finally:
+        apns_delivery_task.cancel()
+        await asyncio.gather(apns_delivery_task, return_exceptions=True)
         # 3) 退出：取消清理任务 + 关停所有 worker
         for task in retry_tasks:
             task.cancel()
@@ -563,6 +569,7 @@ async def unhandled_exc_handler(request: Request, exc: Exception):
 
 # ── Router ────────────────────────────────────────────────────────
 app.include_router(auth_api.router)
+app.include_router(apns_api.router)
 app.include_router(accounts_api.router)
 app.include_router(account_bots_api.router)
 app.include_router(rate_limit_api.router)   # C Agent：风控 + 拟人化 + 全局总闸

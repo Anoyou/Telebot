@@ -1,0 +1,454 @@
+import CryptoKit
+import Foundation
+import Observation
+import TelePilotCore
+
+struct AssistantItem: Identifiable, Hashable, Sendable {
+    let value: JSONValue
+    var id: String { value["id"]?.stringValue ?? value["id"]?.intValue.map(String.init) ?? "missing" }
+    subscript(_ key: String) -> JSONValue? { value[key] }
+    func text(_ key: String) -> String { value[key]?.stringValue ?? "" }
+}
+
+extension JSONValue {
+    var assistantItems: [AssistantItem] { (arrayValue ?? []).map { AssistantItem(value: $0) } }
+    func assistantText(_ key: String) -> String { self[key]?.stringValue ?? "" }
+}
+
+enum AssistantPresentation {
+    static let root = "/api/system-agent"
+    static let terminal: Set<String> = ["succeeded", "failed", "cancelled"]
+    static func path(_ component: String) -> String {
+        component.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? ""
+    }
+    static func status(_ value: String) -> String {
+        ["queued": "排队中", "running": "执行中", "waiting_input": "等待补充", "waiting_approval": "等待审批",
+         "succeeded": "已完成", "failed": "失败", "cancelled": "已取消", "pending": "待确认",
+         "confirmed": "已确认", "executed": "已执行", "rejected": "已拒绝", "expired": "已过期",
+         "active": "进行中", "archived": "已归档", "paused": "已暂停", "dispatching": "正在派发",
+         "applied": "已应用", "not_required": "无需同步", "synced": "已同步", "normal": "普通",
+         "high": "高风险", "critical": "危险", "completed": "已完成", "user": "我",
+         "assistant": "助手", "tool": "工具", "system": "系统"][value] ?? value
+    }
+    static func error(_ error: Error) -> String {
+        (error as? APIError)?.errorDescription ?? "无法完成请求，请重新读取服务器状态后再试。"
+    }
+    static func eventTitle(_ value: JSONValue) -> String {
+        let type = value.assistantText("type")
+        return ["run_started": "开始执行", "provider_selected": "选择模型", "model_attempt": "模型调用",
+                "tool_started": "调用工具", "tool_finished": "工具结果", "action_proposed": "待确认操作",
+                "assistant_delta": "生成回答", "assistant_reasoning_delta": "推理中", "reasoning_delta": "推理中",
+                "assistant_message": "最终回答", "assistant_delta_reset": "进入工具阶段", "error": "执行异常",
+                "done": "本轮结束", "route_selected": "工具路由", "skill_selected": "加载能力",
+                "retry_scheduled": "等待重试", "run_paused": "任务暂停", "input_applied": "已应用补充"] [type] ?? type
+    }
+    static func safeJSON(_ value: JSONValue, key: String = "") -> JSONValue {
+        let lower = key.lowercased()
+        let sensitive = ["secret", "password", "authorization", "api_key", "credential", "data_url"]
+        if lower == "token" || lower.hasSuffix("_token") || lower.hasSuffix("_token_enc") || sensitive.contains(where: { lower.contains($0) }) { return .string("••••••") }
+        switch value {
+        case .object(let fields): return .object(fields.reduce(into: [:]) { $0[$1.key] = safeJSON($1.value, key: $1.key) })
+        case .array(let values): return .array(values.map { safeJSON($0) })
+        case .string(let text): return .string(AssistantRedaction.text(text))
+        default: return value
+        }
+    }
+}
+
+@MainActor @Observable
+final class AssistantStore {
+    var sessions: [AssistantItem] = []
+    var messages: [AssistantItem] = []
+    var runs: [AssistantItem] = []
+    var capabilities: JSONValue = [:]
+    var sessionID: String?
+    var session: JSONValue?
+    var activeRun: JSONValue?
+    var events: [JSONValue] = []
+    var liveText = ""
+    var liveReasoning = ""
+    var notice: String?
+    var error: String?
+    var busy = false
+    var loading = false
+    var streaming = false
+    var hasOlderMessages = true
+    var unresolvedSend = false
+    var includeArchived = false
+    var includeBot = false
+    var modelIndex = -1
+    var accountID: Int?
+    var deletingSessionID: String?
+    @ObservationIgnored private var streamTask: Task<Void, Never>?
+    @ObservationIgnored private var generation = 0
+    @ObservationIgnored private var lastSeq = 0
+    @ObservationIgnored private var defaultsKey = ""
+    @ObservationIgnored private var requestID: String?
+    @ObservationIgnored private var subscriptionID = UUID()
+
+    var runID: String? { activeRun?["id"]?.stringValue }
+    var runStatus: String { activeRun?.assistantText("status") ?? "" }
+    var runActive: Bool { !runStatus.isEmpty && !AssistantPresentation.terminal.contains(runStatus) }
+    var models: [JSONValue] { (capabilities["model_matrix"]?.arrayValue ?? []).filter { $0["enabled"]?.boolValue != false && $0["provider_id"]?.intValue != nil && $0["model"]?.stringValue?.isEmpty == false } }
+    var canSend: Bool { !busy && !unresolvedSend && capabilities["enabled"]?.boolValue == true && capabilities["ai_enabled"]?.boolValue != false && session?.assistantText("channel") != "bot" && session?.assistantText("status") != "archived" }
+    var selectedModel: JSONValue {
+        guard models.indices.contains(modelIndex), let provider = models[modelIndex]["provider_id"],
+              let model = models[modelIndex]["model"] else { return ["mode": "auto"] }
+        return ["mode": "pinned", "provider_id": provider, "model": model]
+    }
+
+    func start(_ model: AppModel, initialID: String?) async {
+        defaultsKey = "telepilot.assistant.pending.\(model.serverURL?.absoluteString ?? "").\(model.user?.id ?? 0)"
+        unresolvedSend = UserDefaults.standard.dictionary(forKey: defaultsKey) != nil
+        await loadSessions(model)
+        do { capabilities = try await model.request(path: AssistantPresentation.root + "/capabilities") }
+        catch { self.error = AssistantPresentation.error(error) }
+        if let initialID { await select(initialID, model: model) }
+        else if let pending = UserDefaults.standard.dictionary(forKey: defaultsKey)?["session_id"] as? String {
+            await select(pending, model: model)
+            await reconcileSend(model)
+        } else if let first = sessions.first { await select(first.id, model: model) }
+    }
+
+    func loadSessions(_ model: AppModel) async {
+        loading = true
+        defer { loading = false }
+        do {
+            let status = includeArchived ? "archived" : "active"
+            sessions = try await model.request(path: AssistantPresentation.root + "/sessions?limit=200&status=\(status)&include_bot=\(includeBot)").assistantItems
+        } catch { self.error = AssistantPresentation.error(error) }
+    }
+
+    func select(_ id: String, model: AppModel) async {
+        generation += 1
+        streamTask?.cancel()
+        streaming = false
+        sessionID = id
+        session = nil
+        messages = []
+        events = []
+        liveText = ""
+        liveReasoning = ""
+        activeRun = nil
+        lastSeq = 0
+        error = nil
+        hasOlderMessages = true
+        let token = generation
+        do {
+            let row = try await model.request(path: AssistantPresentation.root + "/sessions/\(AssistantPresentation.path(id))")
+            guard token == generation else { return }
+            session = row
+            accountID = row["account_id"]?.intValue
+            await refreshMessages(model)
+            await restoreRun(model)
+        } catch { if token == generation { self.error = AssistantPresentation.error(error) } }
+    }
+
+    func createSession(_ model: AppModel) async {
+        guard !busy else { return }
+        busy = true
+        defer { busy = false }
+        do {
+            var body: [String: JSONValue] = [:]
+            if let accountID { body["account_id"] = .number(Double(accountID)) }
+            let created = try await model.request(path: AssistantPresentation.root + "/sessions", method: "POST", body: .object(body))
+            guard let id = created["id"]?.stringValue else { throw APIError.incompatibleResponse }
+            await loadSessions(model)
+            await select(id, model: model)
+        } catch { self.error = AssistantPresentation.error(error) }
+    }
+
+    func updateSession(_ body: JSONValue, model: AppModel) async {
+        guard let sessionID, !busy else { return }
+        busy = true
+        defer { busy = false }
+        do {
+            session = try await model.request(path: AssistantPresentation.root + "/sessions/\(AssistantPresentation.path(sessionID))", method: "PATCH", body: body)
+            accountID = session?["account_id"]?.intValue
+            await loadSessions(model)
+        } catch { self.error = AssistantPresentation.error(error) }
+    }
+
+    /// 删除指定会话。写操作只提交一次：失败或结果未知时重新读取列表展示真实状态，不自动重试。
+    @discardableResult
+    func deleteSession(id: String, model: AppModel) async -> Bool {
+        guard !busy, deletingSessionID == nil else { return false }
+        guard sessions.first(where: { $0.id == id })?.text("channel") != "bot",
+              !(sessionID == id && session?.assistantText("channel") == "bot") else {
+            error = "Telegram 会话仅支持查看历史，不能在这里删除。"
+            return false
+        }
+        if id == sessionID && runActive {
+            error = "当前会话仍有任务在执行。请先停止任务，结束后再删除。"
+            return false
+        }
+        busy = true
+        deletingSessionID = id
+        defer { busy = false; deletingSessionID = nil }
+        error = nil
+        var submitted = false
+        do {
+            // 删除前读取一次服务器任务列表，避免删除仍在执行任务的会话。
+            let rows = try await model.request(path: AssistantPresentation.root + "/runs?limit=200&include_bot=true").assistantItems
+            if rows.contains(where: { $0.text("session_id") == id && !AssistantPresentation.terminal.contains($0.text("status")) }) {
+                error = "该会话仍有任务在执行。请先打开会话停止任务，结束后再删除。"
+                return false
+            }
+            submitted = true
+            _ = try await model.request(path: AssistantPresentation.root + "/sessions/\(AssistantPresentation.path(id))", method: "DELETE")
+        } catch {
+            let failure = AssistantPresentation.error(error)
+            // 超时不代表删除失败；只读取一次目标，404 才能确认它已被删除。
+            if submitted {
+                do {
+                    _ = try await model.request(path: AssistantPresentation.root + "/sessions/\(AssistantPresentation.path(id))")
+                } catch APIError.server(status: 404, code: _) {
+                    await finishDeletingSession(id, model: model)
+                    return true
+                } catch {}
+            }
+            await loadSessions(model)
+            self.error = failure
+            return false
+        }
+        await finishDeletingSession(id, model: model)
+        return true
+    }
+
+    private func finishDeletingSession(_ id: String, model: AppModel) async {
+        sessions.removeAll { $0.id == id }
+        let wasCurrent = id == sessionID
+        if wasCurrent {
+            generation += 1
+            streamTask?.cancel()
+            sessionID = nil
+            session = nil
+            messages = []
+            runs = []
+            events = []
+            activeRun = nil
+            accountID = nil
+            liveText = ""
+            liveReasoning = ""
+            streaming = false
+        }
+        let token = generation
+        await loadSessions(model)
+        if wasCurrent, token == generation, sessionID == nil, let next = sessions.first(where: { $0.id != id }) {
+            await select(next.id, model: model)
+        }
+        notice = "会话已删除。"
+    }
+
+    func refreshMessages(_ model: AppModel, older: Bool = false) async {
+        guard let sessionID else { return }
+        let token = generation
+        let before = older ? messages.first?["id"]?.intValue.map { "&before_id=\($0)" } ?? "" : ""
+        do {
+            let rows = try await model.request(path: AssistantPresentation.root + "/sessions/\(AssistantPresentation.path(sessionID))/messages?limit=100\(before)").assistantItems
+            guard token == generation else { return }
+            if older { messages = rows + messages.filter { row in !rows.contains(where: { $0.id == row.id }) } }
+            else { messages = rows }
+            hasOlderMessages = rows.count == 100
+        } catch { if token == generation { self.error = AssistantPresentation.error(error) } }
+    }
+
+    func restoreRun(_ model: AppModel) async {
+        guard let sessionID else { return }
+        let token = generation
+        do {
+            let rows = try await model.request(path: AssistantPresentation.root + "/runs?limit=200&include_bot=true").assistantItems
+            guard token == generation else { return }
+            runs = rows.filter { $0.text("session_id") == sessionID }
+            if let running = runs.first(where: { !AssistantPresentation.terminal.contains($0.text("status")) }) {
+                if runID != running.id { events = []; lastSeq = 0; liveText = ""; liveReasoning = "" }
+                activeRun = running.value
+                attach(model)
+            } else if let runID {
+                let current = try await model.request(path: AssistantPresentation.root + "/runs/\(AssistantPresentation.path(runID))")
+                guard token == generation else { return }
+                activeRun = current
+                await refreshMessages(model)
+                liveText = ""
+                liveReasoning = ""
+            }
+        } catch { if token == generation { self.error = AssistantPresentation.error(error) } }
+    }
+
+    func reconcileSend(_ model: AppModel) async {
+        guard let pending = UserDefaults.standard.dictionary(forKey: defaultsKey), let key = pending["request_id"] as? String else { unresolvedSend = false; return }
+        do {
+            let rows = try await model.request(path: AssistantPresentation.root + "/runs?limit=200&include_bot=true").assistantItems
+            if let found = rows.first(where: { $0.text("client_request_id") == key }) {
+                clearPending()
+                if sessionID != found.text("session_id") { await select(found.text("session_id"), model: model) }
+                activeRun = found.value
+                events = []
+                lastSeq = 0
+                liveText = ""
+                await refreshMessages(model)
+                attach(model)
+                notice = "已找到服务器接收的任务，没有重复发送。"
+            } else { notice = "暂未在最近 200 项任务中找到该请求，仍保留待核对记录。请检查任务历史后决定是否放弃记录。" }
+        } catch { self.error = AssistantPresentation.error(error) }
+    }
+
+    func clearPending() {
+        UserDefaults.standard.removeObject(forKey: defaultsKey)
+        unresolvedSend = false
+        requestID = nil
+    }
+
+    func send(_ content: String, attachments: [JSONValue], model: AppModel, mode: String = "message") async -> Bool {
+        guard let sessionID, canSend else { return false }
+        var body: [String: JSONValue] = ["content": .string(content), "attachments": .array(attachments), "model_selection": selectedModel]
+        if let accountID { body["account_id"] = .number(Double(accountID)) }
+        let path: String
+        if mode == "replace", let runID { path = AssistantPresentation.root + "/runs/\(AssistantPresentation.path(runID))/stop-and-replace" }
+        else if mode == "steer", let runID {
+            body.removeValue(forKey: "model_selection")
+            body.removeValue(forKey: "account_id")
+            return await input(runID: runID, endpoint: "steer", body: body, model: model)
+        } else if mode == "input", let runID {
+            body.removeValue(forKey: "model_selection")
+            body.removeValue(forKey: "account_id")
+            body.removeValue(forKey: "attachments")
+            return await input(runID: runID, endpoint: "input", body: body, model: model)
+        } else { path = AssistantPresentation.root + "/sessions/\(AssistantPresentation.path(sessionID))/runs" }
+        return await createRun(path: path, body: body, model: model)
+    }
+
+    func retry(_ message: AssistantItem, model: AppModel) async {
+        guard let sessionID, !busy, !unresolvedSend else { return }
+        _ = await createRun(path: AssistantPresentation.root + "/sessions/\(AssistantPresentation.path(sessionID))/messages/\(message.id)/retry/runs", body: ["model_selection": selectedModel], model: model)
+    }
+
+    func regenerate(user: AssistantItem, assistant: AssistantItem, edited: String?, model: AppModel) async {
+        guard let sessionID, !busy, !unresolvedSend, let assistantID = assistant["id"] else { return }
+        var body: [String: JSONValue] = ["assistant_message_id": assistantID, "model_selection": selectedModel]
+        if let edited { body["content"] = .string(edited) }
+        _ = await createRun(path: AssistantPresentation.root + "/sessions/\(AssistantPresentation.path(sessionID))/messages/\(user.id)/regenerate/runs", body: body, model: model)
+    }
+
+    private func createRun(path: String, body: [String: JSONValue], model: AppModel) async -> Bool {
+        guard let sessionID, !busy, !unresolvedSend else { return false }
+        busy = true
+        defer { busy = false }
+        error = nil
+        let token = generation
+        let key = UUID().uuidString
+        requestID = key
+        let fingerprint = (try? JSONValue.object(body).data()).map { SHA256.hash(data: $0).map { String(format: "%02x", $0) }.joined() } ?? ""
+        UserDefaults.standard.set(["request_id": key, "session_id": sessionID, "fingerprint": fingerprint], forKey: defaultsKey)
+        var payload = body
+        payload["client_request_id"] = .string(key)
+        do {
+            let row = try await model.request(path: path, method: "POST", body: .object(payload))
+            guard row["id"]?.stringValue != nil else { throw APIError.incompatibleResponse }
+            clearPending()
+            guard token == generation else { return true }
+            streamTask?.cancel()
+            activeRun = row
+            events = []
+            lastSeq = 0
+            liveText = ""
+            liveReasoning = ""
+            await refreshMessages(model)
+            attach(model)
+            return true
+        } catch {
+            if let api = error as? APIError, !api.isOutcomeUncertain && !api.isIncompatibleResponse { clearPending() }
+            else { unresolvedSend = true }
+            self.error = AssistantPresentation.error(error)
+            return false
+        }
+    }
+
+    func input(runID: String, endpoint: String, body: [String: JSONValue], model: AppModel) async -> Bool {
+        guard !busy else { return false }
+        busy = true
+        defer { busy = false }
+        var payload = body
+        payload["client_request_id"] = .string(UUID().uuidString)
+        do {
+            _ = try await model.request(path: AssistantPresentation.root + "/runs/\(AssistantPresentation.path(runID))/\(endpoint)", method: "POST", body: .object(payload))
+            notice = "服务器已接收，正在核对任务进度。"
+            await restoreRun(model)
+            return true
+        } catch {
+            self.error = AssistantPresentation.error(error)
+            await restoreRun(model)
+            return false
+        }
+    }
+
+    func cancel(_ model: AppModel) async {
+        guard let runID, !busy else { return }
+        busy = true
+        defer { busy = false }
+        do {
+            activeRun = try await model.request(path: AssistantPresentation.root + "/runs/\(AssistantPresentation.path(runID))/cancel", method: "POST")
+            notice = "已提交停止请求，请以服务器任务状态为准。"
+            await restoreRun(model)
+        } catch { self.error = AssistantPresentation.error(error); await restoreRun(model) }
+    }
+
+    func pauseSubscription() { subscriptionID = UUID(); streamTask?.cancel(); streaming = false }
+
+    func attach(_ model: AppModel) {
+        streamTask?.cancel()
+        guard let runID else { return }
+        let token = generation
+        subscriptionID = UUID()
+        let subscription = subscriptionID
+        streamTask = Task { [weak self] in
+            guard let self else { return }
+            streaming = true
+            defer { if token == generation && subscription == subscriptionID { streaming = false } }
+            for attempt in 0..<4 {
+                guard !Task.isCancelled, token == generation, subscription == subscriptionID else { return }
+                do {
+                    try await model.stream(path: AssistantPresentation.root + "/runs/\(AssistantPresentation.path(runID))/stream?after_seq=\(lastSeq)") { [weak self] event in
+                        await self?.consume(event, generation: token, subscription: subscription)
+                    }
+                } catch {
+                    if Task.isCancelled { return }
+                }
+                guard !Task.isCancelled, token == generation, subscription == subscriptionID else { return }
+                do {
+                    let row = try await model.request(path: AssistantPresentation.root + "/runs/\(AssistantPresentation.path(runID))")
+                    guard token == generation else { return }
+                    activeRun = row
+                    await refreshMessages(model)
+                    let status = row.assistantText("status")
+                    if AssistantPresentation.terminal.contains(status) || status == "waiting_input" || status == "waiting_approval" {
+                        liveText = ""
+                        liveReasoning = ""
+                        return
+                    }
+                } catch { if attempt == 3 { self.error = AssistantPresentation.error(error) } }
+                if attempt < 3 { try? await Task.sleep(for: .seconds(1 << attempt)) }
+            }
+            if token == generation { notice = "进度连接已中断，任务仍在服务器执行。点击“恢复进度”重新订阅。" }
+        }
+    }
+
+    private func consume(_ event: JSONValue, generation token: Int, subscription: UUID) {
+        guard token == generation, subscription == subscriptionID else { return }
+        let type = event.assistantText("type")
+        if type == "heartbeat" { return }
+        if let seq = event["seq"]?.intValue {
+            guard seq > lastSeq else { return }
+            lastSeq = seq
+        }
+        events.append(event)
+        if events.count > 500 { events.removeFirst(events.count - 500) }
+        switch type {
+        case "assistant_delta": liveText += event.assistantText("delta")
+        case "assistant_reasoning_delta", "reasoning_delta": liveReasoning += event.assistantText("delta")
+        case "assistant_delta_reset": liveText = ""; liveReasoning = ""
+        case "assistant_message": liveText = event.assistantText("content"); liveReasoning = event.assistantText("reasoning")
+        default: break
+        }
+    }
+}
