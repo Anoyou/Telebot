@@ -517,6 +517,7 @@ BUILTIN_SKILLS: tuple[SkillSpec, ...] = (
             "system.get_health",
             "system.get_context",
             "system.get_resources",
+            "system.get_versions",
         ),
         instructions=(
             "Web 管理界面出现‘服务器内部错误’、管理 API 4xx/5xx 或保存/更新失败时，先用 logs.system_console 读取最近 Web 日志；不要先要求用户补 Provider ID 或 UTC 时间。",
@@ -524,10 +525,16 @@ BUILTIN_SKILLS: tuple[SkillSpec, ...] = (
             "日志指向函数、文件或堆栈时，先搜索并读取部署源码，再给出代码级根因。",
             "插件 Debug 必须先核对安装状态与版本，再按插件 key/名称过滤系统和运行日志，并把堆栈映射到 plugins 源码；报告应包含观察事实、根因、受影响范围、修复文件/行号、建议改法与验证步骤。",
             "怀疑部署版本或数据库结构不一致时读取 system.get_health 的迁移版本，并与日志、部署源码交叉验证。",
+            "用户询问 Telethon、Gateway、Python、依赖库、数据库/Redis 版本或部署 commit 时调用 system.get_versions，按返回的实际运行值回答，不要根据记忆或源码常量推测；Gateway 未运行时说明版本来源（binary_probe）。",
             "区分已观察到的事实与推断；引用源码路径和行号，方案只以文字给出，不声称已经改代码。",
             "系统更新或重启属于写操作，只生成待确认 Action。",
         ),
-        examples=("看看最近报错", "根据日志和代码定位为什么任务失败", "检查系统健康状态"),
+        examples=(
+            "看看最近报错",
+            "根据日志和代码定位为什么任务失败",
+            "检查系统健康状态",
+            "现在内置的 Telethon 和 Gateway 版本是多少",
+        ),
         required_context=("时间范围", "账号或运行对象", "错误或事件线索"),
     ),
     SkillSpec(

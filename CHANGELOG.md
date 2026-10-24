@@ -25,6 +25,11 @@
 
 ## [Unreleased]
 
+### System Agent
+
+- 新增只读工具 `system.get_versions`：一次返回 TelePilot 版本与部署 commit、Python 版本、内置 Telethon 版本（含 MTProto Layer 与 cryptg）、内置 telepilot-gateway 的实际运行版本／协议版本／构建 commit、FastAPI／SQLAlchemy／Pydantic／httpx／redis 等核心依赖版本、Worker 进程运行环境校验、PostgreSQL／SQLite 与 Redis 服务端版本以及操作系统／容器信息；支持按包名查询任意已安装 Python 包。Gateway 未运行时短暂启动内置二进制只读取 `/version`，结果按二进制缓存。工具不返回环境变量、连接串或任何密钥，Web 与管理 Bot 渠道的 viewer 角色均可用。
+- “Telethon 版本”“Gateway 版本”“依赖库版本”“Python 版本”等提问现在会路由到系统诊断技能并披露该工具，不再只能回答 TelePilot 自身版本。
+
 ### 文档
 
 - 重构 GitHub 首页 README：按产品定位、当前界面、能力总览、运行结构、快速开始、安全边界、插件开发与文档导航重新组织，减少与专项文档重复的长段落，补齐日志、资金台账和移动端入口。

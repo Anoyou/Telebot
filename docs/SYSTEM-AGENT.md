@@ -143,6 +143,7 @@ System Agent 使用四层上下文，并按预算持久化历史窗口：
 | `system.get_context` | 时区、前缀、开关、版本、会话上下文 |
 | `system.get_health` | DB/Redis/账号/Provider 就绪 |
 | `system.get_resources` | 主机与 TelePilot 进程树的 CPU、内存和磁盘快照 |
+| `system.get_versions` | 运行时与依赖版本：TelePilot 版本与部署 commit、Python、Telethon（含 Layer）、内置 Gateway 实际运行版本（未运行时探测内置二进制 `/version`）、核心依赖、Worker 运行环境、数据库与 Redis 服务端版本、OS/容器；可按包名查询任意已安装包，不返回环境变量或密钥 |
 | `accounts.list` / `accounts.get` | 账号列表与详情 |
 | `interaction.list_rules` / `get_rule` / `list_active_sessions` | 交互规则与活跃会话（账号 JSON，非 Rule 表） |
 | `rules.list` / `rules.get` / `rules.dry_run` | 通用 Rule 查询与无副作用试运行（拒绝 `feature_key=interaction`） |
