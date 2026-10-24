@@ -1,0 +1,584 @@
+{
+  "meta": {
+    "title": "TelePilot · 运行结构",
+    "lang": "zh"
+  },
+  "canvas": {
+    "width": 1200,
+    "height": 620,
+    "duration": 16,
+    "fps": 12,
+    "preroll": 10
+  },
+  "theme": {
+    "preset": "terminal-dark",
+    "fontSize": 17,
+    "lineHeight": 25,
+    "colors": {
+      "bg": "#17191d",
+      "bar": "#24272d",
+      "line": "#485160",
+      "line2": "#353c49",
+      "dim": "#737c8e",
+      "mute": "#aab1c0",
+      "fg": "#e5e9f0",
+      "wh": "#ffffff",
+      "cy": "#83dfe5",
+      "bl": "#8fb4f6",
+      "gr": "#7fdba8",
+      "ye": "#e3c07a",
+      "pu": "#b9a2f2",
+      "hl": "#28283b",
+      "dots": "#566078"
+    }
+  },
+  "clock": {
+    "start": "09:41:06",
+    "rate": 2
+  },
+  "titlebar": {
+    "text": "~/telepilot — control plane",
+    "height": 34,
+    "size": 13
+  },
+  "credit": {
+    "text": "TelePilot README · structure is illustrative · made with live-panel",
+    "y": 606,
+    "size": 11
+  },
+  "machines": {
+    "events": {
+      "type": "counter",
+      "start": 1280,
+      "rate": 9,
+      "format": "comma"
+    },
+    "worker_a": {
+      "type": "lane",
+      "period": 7.2,
+      "run": 4.9,
+      "off": 0.4,
+      "busy": "processing",
+      "done": [
+        "idle"
+      ],
+      "phase": 0,
+      "log": {
+        "who": "worker a",
+        "c": "bl",
+        "msgs": [
+          [
+            "message routed",
+            "ok"
+          ],
+          [
+            "plugin event handled",
+            "ok"
+          ]
+        ]
+      }
+    },
+    "worker_b": {
+      "type": "lane",
+      "period": 8.4,
+      "run": 5.4,
+      "off": 1.2,
+      "busy": "processing",
+      "done": [
+        "idle"
+      ],
+      "phase": 2,
+      "log": {
+        "who": "worker b",
+        "c": "ye",
+        "msgs": [
+          [
+            "session ready",
+            "ok"
+          ],
+          [
+            "action event recorded",
+            "ok"
+          ]
+        ]
+      }
+    }
+  },
+  "elements": [
+    {
+      "type": "text",
+      "x": 54,
+      "y": 68,
+      "w": 520,
+      "size": 31,
+      "c": "wh",
+      "b": 1,
+      "t": "TelePilot"
+    },
+    {
+      "type": "text",
+      "x": 56,
+      "y": 101,
+      "w": 760,
+      "size": 14,
+      "c": "dim",
+      "t": "SELF-HOSTED · TELEGRAM · CONTROL PLANE"
+    },
+    {
+      "type": "text",
+      "x": 780,
+      "y": 72,
+      "w": 366,
+      "align": "right",
+      "size": 15,
+      "runs": [
+        {
+          "sw": "gr"
+        },
+        {
+          "t": "accounts isolated  ",
+          "c": "mute"
+        },
+        {
+          "sw": "cy"
+        },
+        {
+          "t": "web + pwa",
+          "c": "mute"
+        }
+      ]
+    },
+    {
+      "type": "rule",
+      "x": 54,
+      "y": 126,
+      "w": 1092
+    },
+    {
+      "type": "text",
+      "x": 56,
+      "y": 153,
+      "w": 760,
+      "size": 13,
+      "runs": [
+        {
+          "sw": "cy"
+        },
+        {
+          "t": "control plane      ",
+          "c": "dim"
+        },
+        {
+          "sw": "bl"
+        },
+        {
+          "t": "account workers      ",
+          "c": "dim"
+        },
+        {
+          "sw": "gr"
+        },
+        {
+          "t": "telegram",
+          "c": "dim"
+        }
+      ]
+    },
+    {
+      "type": "box",
+      "x": 54,
+      "y": 190,
+      "w": 220,
+      "h": 132,
+      "color": "cy",
+      "pad": [
+        14,
+        16
+      ],
+      "lines": [
+        {
+          "t": "WEB / PWA",
+          "c": "cy",
+          "b": 1
+        },
+        {
+          "t": "账号 · 插件 · AI",
+          "c": "mute"
+        },
+        {
+          "t": "日志 · 系统设置",
+          "c": "mute"
+        },
+        {
+          "t": "one workspace",
+          "c": "dim",
+          "size": 12
+        }
+      ]
+    },
+    {
+      "type": "box",
+      "x": 350,
+      "y": 190,
+      "w": 230,
+      "h": 132,
+      "color": "cy",
+      "pad": [
+        14,
+        16
+      ],
+      "lines": [
+        {
+          "t": "FASTAPI",
+          "c": "cy",
+          "b": 1
+        },
+        {
+          "t": "认证 · 配置 · API",
+          "c": "mute"
+        },
+        {
+          "t": "Durable Run",
+          "c": "mute"
+        },
+        {
+          "t": "PostgreSQL · Redis",
+          "c": "dim",
+          "size": 12
+        }
+      ]
+    },
+    {
+      "type": "box",
+      "x": 655,
+      "y": 150,
+      "w": 215,
+      "h": 96,
+      "color": "bl",
+      "pad": [
+        9,
+        15
+      ],
+      "lines": [
+        {
+          "t": "WORKER A",
+          "c": "bl",
+          "b": 1
+        },
+        {
+          "t": "Telethon · plugins",
+          "c": "mute",
+          "size": 14
+        },
+        {
+          "v": "worker_a",
+          "b": 1,
+          "size": 13
+        }
+      ]
+    },
+    {
+      "type": "box",
+      "x": 655,
+      "y": 266,
+      "w": 215,
+      "h": 96,
+      "color": "ye",
+      "pad": [
+        9,
+        15
+      ],
+      "lines": [
+        {
+          "t": "WORKER B",
+          "c": "ye",
+          "b": 1
+        },
+        {
+          "t": "Telethon · plugins",
+          "c": "mute",
+          "size": 14
+        },
+        {
+          "v": "worker_b",
+          "b": 1,
+          "size": 13
+        }
+      ]
+    },
+    {
+      "type": "box",
+      "x": 945,
+      "y": 190,
+      "w": 200,
+      "h": 132,
+      "color": "gr",
+      "pad": [
+        14,
+        13
+      ],
+      "lines": [
+        {
+          "t": "TELEGRAM",
+          "c": "gr",
+          "b": 1
+        },
+        {
+          "t": "MTProto · Bot API",
+          "c": "mute"
+        },
+        {
+          "t": "Webhook · callback",
+          "c": "mute",
+          "size": 14
+        },
+        {
+          "t": "channel boundary",
+          "c": "dim",
+          "size": 12
+        }
+      ]
+    },
+    {
+      "type": "path",
+      "points": [
+        [
+          274,
+          256
+        ],
+        [
+          350,
+          256
+        ]
+      ],
+      "color": "line",
+      "width": 2,
+      "flow": {
+        "period": 1.8,
+        "offsets": [
+          0,
+          0.9
+        ],
+        "color": "cy"
+      }
+    },
+    {
+      "type": "path",
+      "points": [
+        [
+          580,
+          256
+        ],
+        [
+          615,
+          256
+        ],
+        [
+          615,
+          198
+        ],
+        [
+          655,
+          198
+        ]
+      ],
+      "color": "line",
+      "width": 2,
+      "r": 0,
+      "flow": {
+        "period": 2.0,
+        "offsets": [
+          0,
+          0.95
+        ],
+        "color": "bl"
+      }
+    },
+    {
+      "type": "path",
+      "points": [
+        [
+          580,
+          256
+        ],
+        [
+          615,
+          256
+        ],
+        [
+          615,
+          314
+        ],
+        [
+          655,
+          314
+        ]
+      ],
+      "color": "line",
+      "width": 2,
+      "r": 0,
+      "flow": {
+        "period": 2.25,
+        "offsets": [
+          0.2,
+          1.1
+        ],
+        "color": "ye"
+      }
+    },
+    {
+      "type": "path",
+      "points": [
+        [
+          870,
+          198
+        ],
+        [
+          905,
+          198
+        ],
+        [
+          905,
+          256
+        ],
+        [
+          945,
+          256
+        ]
+      ],
+      "color": "line",
+      "width": 2,
+      "r": 0,
+      "flow": {
+        "period": 2.4,
+        "offsets": [
+          0.1,
+          1.05
+        ],
+        "color": "gr"
+      }
+    },
+    {
+      "type": "path",
+      "points": [
+        [
+          870,
+          314
+        ],
+        [
+          905,
+          314
+        ],
+        [
+          905,
+          256
+        ],
+        [
+          945,
+          256
+        ]
+      ],
+      "color": "line",
+      "width": 2,
+      "r": 0,
+      "flow": {
+        "period": 2.65,
+        "offsets": [
+          0.4,
+          1.35
+        ],
+        "color": "gr"
+      }
+    },
+    {
+      "type": "text",
+      "x": 54,
+      "y": 352,
+      "w": 1092,
+      "size": 13,
+      "runs": [
+        {
+          "t": "每个 Telegram 用户账号 = 独立 Worker 子进程",
+          "c": "mute"
+        },
+        {
+          "t": "   /   ",
+          "c": "dim"
+        },
+        {
+          "t": "控制面统一认证、配置、日志与更新",
+          "c": "mute"
+        }
+      ]
+    },
+    {
+      "type": "log",
+      "x": 54,
+      "y": 405,
+      "w": 1092,
+      "rows": 4,
+      "padTop": 12,
+      "padBottom": 28,
+      "padLeft": 22,
+      "title": "runtime log",
+      "titleX": 54,
+      "titleW": 92,
+      "cols": [
+        {
+          "key": "time",
+          "x": 0
+        },
+        {
+          "key": "who",
+          "x": 112
+        },
+        {
+          "key": "m",
+          "x": 240
+        },
+        {
+          "key": "g",
+          "x": 960
+        }
+      ]
+    },
+    {
+      "type": "text",
+      "x": 56,
+      "y": 578,
+      "w": 520,
+      "size": 13,
+      "runs": [
+        {
+          "t": "events ",
+          "c": "dim"
+        },
+        {
+          "t": "[",
+          "c": "gr",
+          "b": 1
+        },
+        {
+          "v": "events",
+          "c": "gr",
+          "b": 1
+        },
+        {
+          "t": "]",
+          "c": "gr",
+          "b": 1
+        }
+      ]
+    },
+    {
+      "type": "text",
+      "x": 600,
+      "y": 578,
+      "w": 546,
+      "align": "right",
+      "size": 12,
+      "c": "dim",
+      "t": "结构示意 · 非实时数据"
+    }
+  ]
+}

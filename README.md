@@ -1,5 +1,10 @@
 <p align="center">
-  <img src="./assets/readme/hero.svg" width="100%" alt="TelePilot，自托管的 Telegram 多账号控制台">
+  <img src="./assets/readme/runtime-map.webp" width="100%" alt="TelePilot 运行结构：Web/PWA、FastAPI 控制面、独立账号 Worker 与 Telegram 通道">
+</p>
+
+<p align="center">
+  <strong>自托管的 Telegram 多账号控制台。</strong><br>
+  账号、插件、交互 Bot、AI、资金动作与运维，在一个自己掌控的 Web/PWA 工作台里完成。
 </p>
 
 <p align="center">
@@ -10,17 +15,29 @@
 </p>
 
 <p align="center">
-  <strong>把 Telegram 账号、插件、交互 Bot、AI、资金动作与运维放进一个自己掌控的 Web/PWA 工作台。</strong>
+  <a href="#快速开始">快速开始</a> ·
+  <a href="./docs/USAGE-GUIDE.md">使用指南</a> ·
+  <a href="./docs/TELEPILOT-ARCHITECTURE.md">架构说明</a> ·
+  <a href="./docs/PLUGIN-DEV-GUIDE.md">插件开发</a> ·
+  <a href="./CHANGELOG.md">更新日志</a>
 </p>
 
-TelePilot 面向需要自托管 Telegram 自动化的个人用户和小团队。每个 Telegram 用户账号由独立 Worker 子进程运行，拥有自己的 session、代理、设备参数和插件配置；FastAPI 控制面统一管理配置、权限、运行状态、日志、在线更新和安全边界。
-
 > [!IMPORTANT]
-> TelePilot 操作的是 Telegram **用户账号**，不是普通 Bot API 托管服务。自动回复、群发、频繁操作和第三方插件可能触发账号风控，也可能带来数据与资金风险。请在理解后使用，并遵守 Telegram 规则和当地法律。
+> TelePilot 操作 Telegram **用户账号**，不是普通 Bot API 托管服务。自动回复、群发、频繁操作和第三方插件可能触发账号风控，也可能带来数据与资金风险。请先理解这些边界，并遵守 Telegram 规则和当地法律。
+
+## 为什么是 TelePilot
+
+Telegram 自动化通常散落在脚本、Bot、定时任务和几套互不相通的日志里。TelePilot 把它们收进一个可观察、可回滚的自托管工作台：
+
+- **账号隔离**：每个 Telegram 用户账号由独立 Worker 子进程运行，拥有自己的 session、代理、设备参数和插件配置。
+- **统一控制面**：FastAPI 统一处理认证、配置、权限、运行状态、日志、备份和在线更新。
+- **插件可复用**：指令、消息模板、AI 指令和插件按账号启用，新账号不必从零配置。
+- **数据自己掌握**：业务数据、加密凭据和运行记录留在自己的 PostgreSQL、Redis 与部署目录中。
+- **失败可见**：消息流、命中调试、Agent 运行视角和资金台账保留真实链路，不把“命令返回成功”当作业务已经成功。
 
 ## 当前界面
 
-插件中心是当前默认入口。先沉淀可复用的指令、消息和 AI 模板，再按账号启用，新账号不需要重复配置。
+插件中心是默认入口。先沉淀可复用的能力，再按账号启用。
 
 <p align="center">
   <img src="./assets/readme/plugin-center.png" width="100%" alt="TelePilot 插件中心，包含首次部署推荐、插件分类和账号插件配置">
@@ -32,12 +49,17 @@ TelePilot 面向需要自托管 Telegram 自动化的个人用户和小团队。
 </p>
 
 <details>
-<summary><strong>查看概览与 PWA 移动端</strong></summary>
+<summary><strong>查看概览、日志与 PWA 移动端</strong></summary>
 
 <br>
 
 <p align="center">
   <img src="./docs/frontend/baseline/screenshots/dashboard-desktop-light.png" width="100%" alt="TelePilot 桌面端概览，显示账号 Worker、AI、插件、日志与资源状态">
+</p>
+
+<p align="center">
+  <img src="./docs/frontend/baseline/screenshots/logs-desktop-light.png" width="49%" alt="TelePilot 日志中心，按消息流、Agent 运行、系统控制台和运行事件分视图">
+  <img src="./docs/frontend/baseline/screenshots/ledger-desktop-light.png" width="49%" alt="TelePilot 资金台账，按账号和插件核对入账、出账与净额">
 </p>
 
 <p align="center">
@@ -47,33 +69,23 @@ TelePilot 面向需要自托管 Telegram 自动化的个人用户和小团队。
 
 </details>
 
-## 当前能力
+## 能做什么
 
-| 工作台 | 当前实现 |
+| 工作台 | 主要能力 |
 | --- | --- |
-| 插件 | 内置插件、本地导入、ZIP 安装和 Git 远程仓库；支持签名策略、权限声明、版本检查、全局安装、按账号启停、配置页和 Worker 热重载 |
-| AI | OpenAI Chat Completions、OpenAI Responses、Anthropic Messages 与 Ollama 兼容协议；Responses Provider 可选 Codex 客户端兼容模式（Gateway）；支持模型发现与上下文窗口等元数据、多 Key 密钥池、测活、路由标签、客户端身份、加密兼容请求头、调用记录、Token 与预算；内置 Magpie 网关快捷模板 |
-| 系统助手与待确认 | Web 悬浮助手和管理 Bot `/agent` 共用可恢复 Durable Run；思考与正文分流、工具渐进披露、同 Provider 重试与 fallback、公开网页读取、源码只读诊断、长期记忆和写操作 Action 确认。回复末尾标注**实际作答**的 Provider 与模型（网关下显示上游标识），发生回退时注明原选择；聊天里贴的 Key 只以 `[[TP-CRED-n]]` 占位符交给模型，真实值仅在面向本人的回复与工具参数处还原，不进入运行事件、日志与记忆 |
-| 交互 | 独立 Interaction Bot manager 承接关键词、付款确认、按钮回调和群会话；会话状态持久化，命令入口仍可走用户账号通道 |
-| 指令与任务 | 消息模板、AI 指令、定时任务和自动命令白名单集中在一级工作台，支持按账号启用和立即执行 |
-| 账号与概览 | Web 向导绑定 Telegram 账号，管理代理、设备参数、Account Bot 和账号功能；Supervisor 负责启动、停止、重连、退避与资源状态 |
-| 资金台账 | Action ledger、按账号查询、统计与导出、payout 限额、持久化幂等、失败补偿和 ambiguous 人工核对 |
-| 入站 Webhook | 外部系统通过账号级加密 Token 投递标准事件，支持限流、去重、平台开关和 Worker 投递 |
-| 命中调试 | 模拟消息路由、查看规则与插件命中结果，按短 TTL 打开 router debug trace，并支持录制与离线回放 |
-| 日志 | 消息流、Agent 运行、系统控制台和运行事件分视图；提供 Runtime/Audit 日志、Event Trace、reason code、原始事件与关联下钻 |
-| 系统 | AI、交互、Webhook、台账和命中调试可热关闭与恢复；提供系统健康、全局紧急停用、配置导出、备份恢复和在线增量更新；后台按设定周期自动检查新版本（默认每天，可选 6 小时到每周或自定义），发现新版本时顶栏出现角标，只提示不自动更新 |
+| **账号** | Web 向导绑定账号，管理代理、设备参数、Account Bot 和功能开关；Supervisor 负责启动、停止、重连、退避与资源状态 |
+| **插件** | 内置插件、本地导入、ZIP 安装和 Git 仓库；支持签名策略、权限声明、版本检查、全局安装、按账号启停和 Worker 热重载 |
+| **AI** | 接入 OpenAI Chat Completions、OpenAI Responses、Anthropic Messages 和 Ollama 兼容协议；支持多 Key 密钥池、模型元数据、测活、路由标签、调用记录、Token 与预算 |
+| **系统助手** | Web 悬浮助手和管理 Bot `/agent` 共用可恢复 Durable Run；工具渐进披露、只读工具直接执行、写操作先生成待确认 Action |
+| **交互** | Interaction Bot 承接关键词、付款确认、按钮回调和群会话；会话状态持久化，命令入口仍可走用户账号通道 |
+| **指令与任务** | 消息模板、AI 指令、定时任务和自动命令白名单集中管理，支持按账号启用和立即执行 |
+| **资金台账** | Action ledger、按账号查询、统计与导出、payout 限额、持久化幂等、失败补偿和 ambiguous 人工核对 |
+| **可观察性** | 消息流、命中调试、Runtime/Audit 日志、Event Trace、reason code 和原始事件关联下钻 |
+| **系统运维** | 平台模块热关闭与恢复、系统健康、全局紧急停用、配置导出、备份恢复、在线增量更新和版本提示 |
 
-### 面向使用者与开发者各有一本手册
+更完整的页面说明和操作步骤见 [使用指南](./docs/USAGE-GUIDE.md)。
 
-浏览器里点不开源码也能用：[侧边栏页脚的「使用指南」](./docs/USAGE-GUIDE.md)在界面内直接阅读，覆盖安装启动、逐个页面导览、Telegram 通道、系统助手、密钥池与自动检查更新、常见问题排障。插件与二次开发看 [CONTRIBUTING.md](./CONTRIBUTING.md) 与 [PLUGIN-DEV-GUIDE.md](./docs/PLUGIN-DEV-GUIDE.md)。
-
-### System Agent 当前链路
-
-System Agent 不直接获得数据库、Shell 或任意文件访问权。它先按请求选择领域和 Skill，每轮最多加载两个领域 Skill、暴露十六个工具；只读工具直接执行，写工具先生成待确认 Action，再由统一执行器提交。日志中心的 Agent 视角会保留 Provider、模型、路由、Skill、工具、重试、Token 和阶段耗时，刷新后仍能按持久 Run 恢复。
-
-联网搜索与 URL 读取使用独立工具，不依赖聊天 Provider 的原生搜索能力。源码诊断只允许读取当前部署包中的后端、前端和已安装插件白名单，拒绝 `.env`、日志、session、数据目录、依赖、构建产物、路径穿越、源码写入和任意命令执行。
-
-## 它如何运行
+## 运行结构
 
 ```mermaid
 flowchart LR
@@ -84,7 +96,7 @@ flowchart LR
   API --> Supervisor["Worker Supervisor"]
   Supervisor --> W1["Account Worker A"]
   Supervisor --> W2["Account Worker B"]
-  W1 --> TG["Telegram 用户账号网络（Telethon / MTProto）"]
+  W1 --> TG["Telegram 用户账号<br/>Telethon / MTProto"]
   W2 --> TG
   W1 --> Plugins["Plugin Runtime"]
   W2 --> Plugins
@@ -97,26 +109,23 @@ flowchart LR
 ```
 
 - FastAPI 负责 Web API、认证、配置、System Agent、两个 Bot manager 和 Worker Supervisor。
-- Codex 客户端兼容模式（Gateway）是最接近真实 Codex Responses 客户端公开请求契约的内置调用方式；它由 Web 按需拉起独立 Go 子进程，仅通过 Unix Socket 服务选择 Gateway 的 Responses Provider，不是额外 Compose 服务，也不接管 Agent 决策。
 - 每个运行中的账号对应一个独立 `multiprocessing.spawn` Worker，Worker 内运行 Telethon、插件、命令和调度器。
 - PostgreSQL 保存业务数据和加密后的敏感字段；Redis 用于 IPC、租约、去重、限速和短期状态。
 - FastAPI 启动时分别拉起 Supervisor、Account Bot manager 和 Interaction Bot manager。失败会进入后台重试，并让 `/readyz` 保持未就绪。
 - `/healthz` 只表示 FastAPI 进程存活；生产流量和更新完成判定使用 `/readyz`。
 
-完整组件和数据流见 [架构说明](./docs/TELEPILOT-ARCHITECTURE.md)。
-
-## Telegram 通道边界
+### Telegram 通道边界
 
 | 通道 | 负责什么 |
 | --- | --- |
-| 用户账号通道（内部称 UserBot） | Account Worker 使用 Telethon 以用户账号 session 连接 Telegram；Telethon 底层使用 MTProto。负责用户账号消息、命令会话、插件运行、定时任务和 payout |
+| 用户账号通道（UserBot） | Account Worker 使用 Telethon 以用户账号 session 连接 Telegram；负责消息、命令会话、插件、定时任务和 payout |
 | Account Bot | 每账号可选的管理 Bot，提供授权用户远程运维和 `/agent` 入口 |
 | Interaction Bot | 关键词、付款确认、按钮回调、群互动和会话消息 |
 | Webhook | 外部系统向指定账号投递标准事件，不绕过平台能力、权限、限流和 Trace |
 
-`MTProto` 不是额外通道或单独部署的服务，而是 Telethon 连接 Telegram 用户账号时使用的底层协议。Account Bot 与 Interaction Bot 才使用 Telegram Bot API。
+`MTProto` 是 Telethon 连接 Telegram 用户账号的底层协议，不是额外部署的服务。Account Bot 与 Interaction Bot 才使用 Telegram Bot API。普通命令默认走用户账号通道；关键词、付款和按钮会话默认走 Interaction Bot；`payout` 固定交给用户账号通道。
 
-普通命令会话默认走用户账号通道，关键词、付款和按钮会话默认走 Interaction Bot。`payout` 固定交给用户账号通道，并进入限额、幂等、补偿和 ActionEvent 链路。一个 Bot Token 只能由一个主要 polling/webhook 消费者使用。
+完整组件、生命周期和隔离边界见 [架构说明](./docs/TELEPILOT-ARCHITECTURE.md)。
 
 ## 快速开始
 
@@ -150,16 +159,16 @@ make down     # 停止服务，保留数据和依赖
 curl -fsSL https://raw.githubusercontent.com/Anoyou/telebot/main/scripts/install-server.sh | bash
 ```
 
-脚本默认安装到 `/opt/telepilot`，生成生产密钥，从 GHCR 拉取预构建的 AMD64/ARM64 应用镜像，并启动 PostgreSQL、Redis、FastAPI/Worker、前端 Nginx 和内网 Updater。服务器不需要编译前端或应用镜像。公网使用前还要配置 HTTPS、反向代理和备份，详见 [公网部署指南](./docs/DEPLOY-PUBLIC.md)。
+脚本默认安装到 `/opt/telepilot`，生成生产密钥，从 GHCR 拉取预构建的 AMD64/ARM64 应用镜像，并启动 PostgreSQL、Redis、FastAPI/Worker、前端 Nginx 和内网 Updater。服务器不需要编译前端或应用镜像。
 
-已克隆仓库可以手动初始化生产配置：
+公网使用前还要配置 HTTPS、反向代理和备份，详见 [公网部署指南](./docs/DEPLOY-PUBLIC.md)。已克隆仓库可以手动初始化生产配置：
 
 ```bash
 make init-prod-env
 make prod-up
 ```
 
-## 第一次启动后
+### 第一次启动后
 
 1. 在 [my.telegram.org](https://my.telegram.org) 申请 Telegram `API ID` 和 `API Hash`。
 2. 打开 TelePilot，注册第一个 Web 管理员。
@@ -170,22 +179,22 @@ make prod-up
 
 大部分业务配置都在 Web 面板完成。`.env` 只保存进程启动前必须知道的密钥、数据库连接、端口、反代信任和资源限制。
 
-## 安全与正确性边界
+## 安全边界
 
 - `MASTER_KEY` 加密 Telegram session、API Hash、代理密码、Bot Token、Webhook Token、TOTP secret、LLM Key 和 Provider 兼容请求头。丢失后旧密文无法恢复，请与数据库备份分开保存。
 - 公网环境必须使用 HTTPS，设置强 `JWT_SECRET` 和数据库密码，并限制后端端口只在可信网络可见。
 - TelePilot 采用个人可信插件模型，不提供公共插件市场式强沙箱。新 ZIP 默认拒绝未签名安装；历史未签名插件使用独立兼容开关。
-- Webhook Token 默认只从 `X-TelePilot-Webhook-Token` 请求头读取；查询参数兼容默认关闭，公开入口在读取业务数据前另有 IP 限流。
+- Webhook Token 默认只从 `X-TelePilot-Webhook-Token` 请求头读取；查询参数兼容默认关闭。
 - payout 限额、AI 预算、关键风控、平台能力缓存和交互 claim 在依赖故障时采用 fail-closed。
 - payout 遇到超时或未知发送结果时进入 ambiguous，不会把异常视为未发送后自动重付。
 - 全局紧急停用会并行收敛 Worker、Account Bot 和 Interaction Bot；部分失败返回 `KILL_SWITCH_PARTIAL_FAILURE`。
 - Updater 可以控制宿主机 Docker，必须使用独立 `UPDATER_TOKEN`，不能和 `JWT_SECRET` 复用。
-- System Agent 聊天密钥采用占位符往返：给模型的是 `[[TP-CRED-n]]`，真实值经 `MASTER_KEY` 加密后只写入会话的 `secret_map_enc` 列，仅在面向本人的回复与工具执行时还原；运行事件、调用日志、记忆与工具摘要始终只有占位符。
-- 自动检查更新只做「检查 + 记录 + 提示」，绝不后台 pull 或重启；容器内无法比对 Git 时不会误报有新版本。
+- System Agent 聊天里的 Key 以 `[[TP-CRED-n]]` 占位符交给模型；真实值仅在面向本人的回复与工具执行时还原。
+- 自动检查更新只做“检查 + 记录 + 提示”，不会后台 pull 或重启；容器内无法比对 Git 时不会误报有新版本。
 
 生产检查、密钥轮换、备份恢复和应急流程见 [安全运维 SOP](./docs/SECURITY-OPS.md)。
 
-## 插件与项目开发
+## 插件与开发
 
 普通插件通过 Event Bus、标准事件信封、MessageOps/action、存储、身份、HTTP 和 AI facade 接入，不需要直接接触 Bot Token 或 Telegram session。
 
@@ -195,31 +204,31 @@ make plugin-check dir=plugins/local_imports/my_game
 make plugin-register dir=plugins/local_imports/my_game
 ```
 
-- [插件 5 分钟 Quickstart](./docs/PLUGIN-QUICKSTART.md)
-- [插件开发指南](./docs/PLUGIN-DEV-GUIDE.md)
-- [插件 API 参考](./docs/PLUGIN-API-REFERENCE.md)
-- [插件安全边界](./docs/PLUGIN-SAFETY.md)
-- [项目开发指南](./CONTRIBUTING.md)
+| 要做什么 | 从这里开始 |
+| --- | --- |
+| 写第一个插件 | [插件 5 分钟 Quickstart](./docs/PLUGIN-QUICKSTART.md) |
+| 理解插件生命周期 | [插件开发指南](./docs/PLUGIN-DEV-GUIDE.md) |
+| 查字段、事件和 action | [插件 API 参考](./docs/PLUGIN-API-REFERENCE.md) |
+| 确认权限与安全边界 | [插件安全边界](./docs/PLUGIN-SAFETY.md) |
+| 发布远程插件 | [远程插件](./docs/PLUGIN-REMOTE.md) |
+| 参与 TelePilot 本体开发 | [开发指南](./CONTRIBUTING.md) |
 
 ## 文档
 
-| 任务 | 文档 |
+| 主题 | 文档 |
 | --- | --- |
 | 安装、升级、备份和回滚 | [公网部署](./docs/DEPLOY-PUBLIC.md) |
 | 生产安全、密钥轮换和应急停用 | [安全运维](./docs/SECURITY-OPS.md) |
 | 组件、数据流和生命周期 | [架构说明](./docs/TELEPILOT-ARCHITECTURE.md) |
 | 平台模块热关闭与恢复 | [平台能力](./docs/PLATFORM-CAPABILITIES.md) |
 | System Agent、Durable Run 与 Action | [系统助手](./docs/SYSTEM-AGENT.md) |
-| Codex 客户端兼容 Gateway 管理、健康与排障 | [Codex Gateway](./docs/CODEX-GATEWAY.md) |
-| LLM 多 Key 密钥池、模型元数据与 Magpie 网关接入 | [LLM 密钥池](./docs/LLM-KEY-POOL.md) |
+| Codex 客户端兼容 Gateway | [Codex Gateway](./docs/CODEX-GATEWAY.md) |
+| LLM 多 Key 密钥池与 Magpie 接入 | [LLM 密钥池](./docs/LLM-KEY-POOL.md) |
 | 内部 HTTP API、认证、错误与类型生成 | [API 契约](./docs/API-CONTRACT.md) |
-| 插件开发入口 | [插件开发指南](./docs/PLUGIN-DEV-GUIDE.md) |
-| 插件字段、事件、action 和生命周期 | [插件 API 参考](./docs/PLUGIN-API-REFERENCE.md) |
 | 外部系统触发插件 | [Webhook Quickstart](./docs/PLUGIN-WEBHOOK-QUICKSTART.md) |
 | 插件 HTTP 与 AI 能力 | [HTTP facade](./docs/PLUGIN-HTTP.md) · [AI facade](./docs/PLUGIN-AI.md) |
-| 远程插件仓库与发布 | [远程插件](./docs/PLUGIN-REMOTE.md) |
-| 界面怎么用、遇到问题先看哪里 | [使用指南](./docs/USAGE-GUIDE.md) |
-| 版本变化与参与开发 | [CHANGELOG](./CHANGELOG.md) · [开发指南](./CONTRIBUTING.md) |
+| 页面怎么用、问题先查哪里 | [使用指南](./docs/USAGE-GUIDE.md) |
+| 版本变化 | [CHANGELOG](./CHANGELOG.md) |
 
 ## 技术栈
 
@@ -231,8 +240,8 @@ TelePilot 仍处于 0.x 快速迭代阶段，主要面向单租户、自托管�
 
 当前源码版本以 `backend/app/__init__.py`、`backend/pyproject.toml`、`frontend/package.json` 与 `frontend/src/lib/version.ts` 四个源文件为准，并由 `make codegen` 同步到 `openapi/telepilot.openapi.json` 的 `info.version` 作为第五处发布校验。仓库历史名称仍是 `Telebot`，部分数据库默认值、Docker volume 和兼容字段保留旧名称，避免已有部署升级后连接到空数据；产品名称和界面统一使用 TelePilot。
 
-## License
+## 致谢与许可
 
-[MIT](./LICENSE)
+[MIT](./LICENSE)。感谢 [Telethon](https://codeberg.org/LonamiWebs/Telethon)、[FastAPI](https://fastapi.tiangolo.com/)、[React](https://react.dev/) 与 [Tailwind CSS](https://tailwindcss.com/) 及其社区。
 
-感谢 [Telethon](https://codeberg.org/LonamiWebs/Telethon)、[FastAPI](https://fastapi.tiangolo.com/)、[React](https://react.dev/) 与 [Tailwind CSS](https://tailwindcss.com/) 及其社区。
+README 首屏运行图使用 [live-panel](https://github.com/ythx-101/live-panel-skill)（MIT）生成；源配置位于 [`assets/readme/source/`](./assets/readme/source/)，画面数字与日志均为结构示意。
