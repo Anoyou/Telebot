@@ -251,6 +251,13 @@ const CLIENT_HEADER_GROUPS: Array<{
 
 const MASKED_SECRET_PLACEHOLDER = "••••••••••••••••";
 
+function identityRegistryLabel(registry: string): string {
+  if (registry === "cli:grok-update-check") return "Grok CLI / xAI stable";
+  if (registry === "appcast:codex-desktop-build") return "Codex Desktop 官方更新源（appcast）";
+  if (registry === "appcast:codex-desktop-core") return "Codex Desktop 官方安装包内核心版本";
+  return registry;
+}
+
 interface FormState {
   id?: number; // 编辑模式时存在
   hasApiKey?: boolean;
@@ -3273,7 +3280,7 @@ function IdentityVersionsDialog({
                         <div className="col-span-2 min-w-0 sm:col-span-1">
                           <div className="text-sm font-medium">{item.label}</div>
                           <p className="mt-1 break-words text-xs leading-5 text-muted-foreground">
-                            内置基线 {item.default} · {item.registry ? `检测源 ${item.registry === "cli:grok-update-check" ? "Grok CLI / xAI stable" : item.registry}` : "仅手动填写"}
+                            内置基线 {item.default} · {item.registry ? `检测源 ${identityRegistryLabel(item.registry)}` : "仅手动填写"}
                           </p>
                         </div>
                         <label className="min-w-0 space-y-1">

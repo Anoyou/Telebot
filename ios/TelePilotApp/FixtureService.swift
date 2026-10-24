@@ -310,12 +310,18 @@ actor FixtureService: AppServing {
         }
         if clean == "/api/commands/llm-providers/identity-versions" {
             return ["items": [["key": "codex_tui", "label": "Codex TUI", "current": "0.50.0", "default": "0.50.0", "registry": "npm:@openai/codex", "detectable": true],
-                              ["key": "codex_desktop_core", "label": "Codex Desktop 核心", "current": "1.2.0", "default": "1.2.0", "detectable": false]],
+                              ["key": "codex_desktop_core", "label": "Codex Desktop 核心", "current": "1.2.0", "default": "1.2.0",
+                               "registry": "appcast:codex-desktop-core", "detectable": true]],
                     "profiles": [["profile": "codex_tui", "label": "Codex TUI", "description": "交互式 Codex TUI 的 Responses 身份。", "api_formats": ["responses"],
                                   "headers": [["name": "originator", "value": "codex_cli_rs", "description": "Codex TUI 或 Desktop 的来源标识。", "management": "fixed"]]]]]
         }
         if clean == "/api/commands/llm-providers/identity-versions/detect" {
-            return ["items": [["key": "codex_tui", "current": "0.50.0", "latest": "0.51.0", "up_to_date": false]]]
+            return ["items": [["key": "codex_tui", "current": "0.50.0", "latest": "0.51.0", "up_to_date": false],
+                              ["key": "codex_desktop_core", "current": "1.2.0", "latest": "1.3.0-alpha.2.1", "up_to_date": false]]]
+        }
+        if clean == "/api/commands/llm-providers/fetch-models-preview", method == "POST" {
+            return ["fetched": 2, "ids": ["gpt-5.4-mini", "gpt-5.4"],
+                    "models": [["id": "gpt-5.4-mini", "enabled": true], ["id": "gpt-5.4", "enabled": true]]]
         }
         if clean == "/api/commands/llm-providers/detect-protocols" {
             return ["chat_completions": ["ok": true, "latency_ms": 420, "status_code": 200],

@@ -3,7 +3,8 @@ import TelePilotCore
 
 struct AIProviderListSection: View {
     @Bindable var workspace: AIWorkspaceStore
-    var showSearch = false
+    /// 供应商较多时显示搜索框。
+    var showSearch = true
     @State private var search = ""
 
     private var providers: [JSONValue] {
@@ -15,7 +16,7 @@ struct AIProviderListSection: View {
     }
 
     var body: some View {
-        if showSearch, !workspace.providers.isEmpty {
+        if showSearch, workspace.providers.count > 3 {
             Section {
                 TextField("搜索供应商、类型或模型", text: $search)
                     .textInputAutocapitalization(.never).autocorrectionDisabled()
@@ -29,10 +30,7 @@ struct AIProviderListSection: View {
                 .accessibilityIdentifier("ai.provider.\(provider["id"]?.intValue ?? 0)")
             }
             NavigationLink {
-                ManagementFormView(action: .init(title: "添加供应商", path: "/api/commands/llm-providers",
-                    explanation: "填写供应商连接与默认模型。密钥只在提交时发送，服务器不会在列表中返回明文。")) { value in
-                    workspace.replaceProvider(value)
-                }
+                AIProviderCreateView(workspace: workspace)
             } label: { Label("添加供应商", systemImage: "plus") }
             .accessibilityIdentifier("ai.provider.add")
             if workspace.loaded, workspace.providers.isEmpty {
@@ -362,4 +360,588 @@ struct AIProviderModelsView: View {
 
 private extension String {
     var nilIfEmpty: String? { isEmpty ? nil : self }
+}
+
+// MARK: - 添加供应商
+
+/// 原生“添加供应商”表单，字段与 Web 新建 Provider 页对齐：
+/// 常用项（名称、地址、密钥、接口协议、模型）直接展示；
+/// 服务类型、调用方式、客户端身份、协议档案、联网搜索接口、出口代理与自动路由信息收进“高级设置”，
+/// 默认值与 Web 一致。Web 新建时不展示的密钥池策略、模型能力原始字段不在这里出现；
+/// 兼容请求头属于少见需求，请在 Web 管理台配置。
+struct AIProviderCreateView: View {
+    @Bindable var workspace: AIWorkspaceStore
+    @Environment(AppModel.self) private var model
+
+    // 常用
+    @State private var name = ""
+    @State private var baseURL = ""
+    @State private var apiKey = ""
+    @State private var apiFormat = "responses"
+    @State private var defaultModel = ""
+
+    // 模型列表
+    @State private var fetchedModels: [JSONValue] = []
+    @State private var enabledModelIDs: Set<String> = []
+    @State private var modelSearch = ""
+    @State private var fetching = false
+    @State private var fetchError: String?
+    @State private var fetchedOnce = false
+
+    // 高级
+    @State private var showAdvanced = false
+    @State private var providerKind = "openai"
+    @State private var executionBackend = "direct"
+    @State private var clientIdentity = "auto"
+    @State private var protocolProfile = "standard"
+    @State private var webSearchFormat = "auto"
+    @State private var proxyID: Int?
+    @State private var proxies: [JSONValue] = []
+    @State private var proxiesError: String?
+    @State private var modality = "text"
+    @State private var costTier = 2
+    @State private var tags: Set<String> = ["chat"]
+    @State private var notes = ""
+
+    // 提交
+    @State private var confirming = false
+    @State private var saving = false
+    @State private var validationError: String?
+    @State private var saveError: String?
+    @State private var uncertain = false
+    @State private var created: JSONValue?
+
+    private static let apiFormats: [AIProviderChoice] = [
+        .init("responses", "新版响应接口（Responses）", "OpenAI 推荐的新接口，DeepSeek 等也支持。不确定时先用它，读取模型或测活失败再换“对话补全接口”。"),
+        .init("chat_completions", "对话补全接口（Chat Completions）", "最常见、兼容性最好的接口，大多数中转站和本地服务（如 Ollama）都支持。"),
+        .init("anthropic_messages", "Claude 消息接口（Messages）", "Anthropic 官方或兼容 Claude 的中转站使用。选择后服务类型会自动改为 Anthropic。")
+    ]
+    private static let providerKinds: [AIProviderChoice] = [
+        .init("openai", "OpenAI 兼容服务"), .init("anthropic", "Anthropic"), .init("ollama", "Ollama 本地服务")
+    ]
+    private static let defaultBaseURLs = [
+        "openai": "https://api.openai.com/v1", "anthropic": "https://api.anthropic.com/v1", "ollama": "http://localhost:11434/v1"
+    ]
+    private static let identities: [AIProviderChoice] = [
+        .init("auto", hint: "推荐。按接口协议自动选择合适的身份，普通供应商无需改动。"),
+        .init("minimal", hint: "只发送接口必需的信息，不模拟任何客户端。上游不检查客户端时使用。"),
+        .init("openai_sdk", hint: "模拟 OpenAI 官方 Python SDK，适用于标准 OpenAI 接口。"),
+        .init("codex_tui", hint: "模拟 Codex 命令行客户端的基础身份。只在中转站明确要求 Codex 客户端时使用。"),
+        .init("codex_desktop", hint: "模拟 Codex 桌面版的基础身份。只在中转站明确要求时使用。"),
+        .init("claude_code", hint: "模拟 Claude Code 命令行，适用于 Claude 消息接口的中转站。"),
+        .init("grok_cli", hint: "模拟 Grok 命令行，适用于要求 Grok 客户端的 Responses 服务。")
+    ]
+    private static let profiles: [String: [AIProviderChoice]] = [
+        "chat_completions": [.init("standard", hint: "使用标准字段。")],
+        "responses": [
+            .init("standard", hint: "通用：适合大多数兼容服务。"),
+            .init("openai_responses", hint: "OpenAI 官方：启用 OpenAI 官方专有字段。"),
+            .init("deepseek_responses", hint: "DeepSeek：按 DeepSeek V4 的要求调整字段，支持联网搜索和图片。"),
+            .init("codex_responses", hint: "Codex：只用于明确要求 Codex 身份的服务。")
+        ],
+        "anthropic_messages": [
+            .init("standard", hint: "标准 Anthropic 字段。"),
+            .init("claude_code_proxy", hint: "只用于明确要求 Claude Code 语义的中转站。")
+        ]
+    ]
+    private static let webSearchFormats: [AIProviderChoice] = [
+        .init("auto", hint: "推荐。平时按上面的接口协议调用；需要联网搜索时自动改用 Responses。"),
+        .init("responses", hint: "联网搜索固定使用 Responses，适合 OpenAI 官方或同时支持两种接口的服务。"),
+        .init("chat_completions", hint: "只有你的服务在对话补全接口里自己实现了搜索时才选。"),
+        .init("anthropic_messages", hint: "预留，目前一般不建议用于联网搜索。")
+    ]
+    private static let modalities = ["text", "vision", "audio", "multimodal"]
+    private static let allTags = ["chat", "code", "math", "translate", "vision", "long_context", "reason", "smart", "cheap", "fast", "classify"]
+
+    private var gatewayMode: Bool { executionBackend == "codex_gateway" }
+    private var trimmedName: String { name.trimmingCharacters(in: .whitespacesAndNewlines) }
+    private var trimmedDefault: String { defaultModel.trimmingCharacters(in: .whitespacesAndNewlines) }
+    private var trimmedBaseURL: String { baseURL.trimmingCharacters(in: .whitespacesAndNewlines) }
+    private var trimmedKey: String { apiKey.trimmingCharacters(in: .whitespacesAndNewlines) }
+    private var effectiveName: String { trimmedName.isEmpty ? inferredName : trimmedName }
+    private var formatHint: String { Self.apiFormats.first { $0.value == apiFormat }?.hint ?? "" }
+    private var profileOptions: [AIProviderChoice] { Self.profiles[apiFormat] ?? [.init("standard", hint: "使用标准字段。")] }
+    private var supportedProxies: [JSONValue] {
+        proxies.filter { ["socks5", "http", "https"].contains(($0["type"]?.stringValue ?? "").lowercased()) }
+    }
+    private var visibleModels: [JSONValue] {
+        let query = modelSearch.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return fetchedModels }
+        return fetchedModels.filter { ($0["id"]?.stringValue ?? "").localizedCaseInsensitiveContains(query) }
+    }
+    private var locked: Bool { saving || created != nil }
+
+    var body: some View {
+        Form {
+            Section {
+                Text("填写接入地址和密钥，读取模型列表并选好默认模型即可。其余选项都有合适的默认值，普通供应商不需要展开“高级设置”。")
+                    .font(.subheadline).foregroundStyle(.secondary)
+            }
+            connectionSection
+            protocolSection
+            modelSection
+            advancedSection
+            submitSection
+            if let created { resultSection(created) }
+        }
+        .navigationTitle("添加供应商").navigationBarTitleDisplayMode(.inline)
+        .disabled(saving)
+        .task { await loadProxies() }
+        .confirmationDialog("添加供应商？", isPresented: $confirming, titleVisibility: .visible) {
+            Button("确认添加") { Task { await save() } }
+            Button("取消", role: .cancel) {}
+        } message: { Text(confirmationMessage) }
+    }
+
+    // MARK: - 连接
+
+    private var connectionSection: some View {
+        Section {
+            TextField("名称（可留空，自动生成）", text: $name)
+                .textInputAutocapitalization(.never).autocorrectionDisabled()
+                .accessibilityIdentifier("ai.providerCreate.name")
+            TextField(Self.defaultBaseURLs[providerKind] ?? "https://api.example.com/v1", text: $baseURL)
+                .keyboardType(.URL).textInputAutocapitalization(.never).autocorrectionDisabled()
+                .accessibilityIdentifier("ai.providerCreate.baseURL")
+            SecureField(providerKind == "ollama" ? "API Key（本地 Ollama 可留空）" : "API Key", text: $apiKey)
+                .textInputAutocapitalization(.never).autocorrectionDisabled()
+                .accessibilityIdentifier("ai.providerCreate.apiKey")
+        } header: {
+            Text("连接信息")
+        } footer: {
+            Text("接入地址留空表示使用该服务类型的官方默认地址（\(Self.defaultBaseURLs[providerKind] ?? "")）；使用中转站时填写中转站给出的地址，通常以 /v1 结尾。API Key 加密保存在服务器，之后列表中不会显示明文。")
+        }
+        .disabled(locked)
+    }
+
+    private var protocolSection: some View {
+        Section {
+            Picker(selection: Binding(get: { apiFormat }, set: { setAPIFormat($0) })) {
+                ForEach(Self.apiFormats) { Text($0.title).tag($0.value) }
+            } label: {
+                Label("接口协议", systemImage: "arrow.left.arrow.right")
+            }
+            .disabled(gatewayMode || locked)
+            Text(gatewayMode ? "Codex 兼容模式固定使用 Responses 接口。" : formatHint)
+                .font(.caption).foregroundStyle(.secondary)
+        } header: {
+            Text("接口协议")
+        } footer: {
+            Text("接口协议决定 TelePilot 用哪种格式和供应商通信。不确定时，可在添加后到“高级：接口协议与客户端身份”里自动检测。")
+        }
+    }
+
+    // MARK: - 模型
+
+    private var modelSection: some View {
+        Section {
+            Button {
+                Task { await fetchModels() }
+            } label: {
+                HStack(spacing: 8) {
+                    if fetching { ProgressView() }
+                    Label(fetching ? "正在读取模型列表…" : (fetchedOnce ? "重新读取模型列表" : "读取模型列表"), systemImage: "arrow.triangle.2.circlepath")
+                }
+            }
+            .disabled(fetching || locked || (trimmedKey.isEmpty && providerKind != "ollama"))
+            .accessibilityIdentifier("ai.providerCreate.fetchModels")
+            if trimmedKey.isEmpty && providerKind != "ollama" {
+                Text("先填写 API Key，才能读取模型列表。").font(.caption).foregroundStyle(.secondary)
+            }
+            if let fetchError { NoticeView(title: "读取模型列表失败", message: fetchError) }
+            if fetchedOnce && fetchedModels.isEmpty && fetchError == nil {
+                Text("供应商没有返回模型。可以直接在下方手动填写默认模型。").font(.caption).foregroundStyle(.secondary)
+            }
+            if fetchedModels.count > 12 {
+                TextField("搜索模型", text: $modelSearch)
+                    .textInputAutocapitalization(.never).autocorrectionDisabled()
+            }
+            ForEach(visibleModels, id: \.self) { item in
+                if let id = item["id"]?.stringValue {
+                    Toggle(isOn: Binding(get: { enabledModelIDs.contains(id) }, set: { toggleModel(id, $0) })) {
+                        HStack {
+                            Text(id).font(.subheadline).lineLimit(2)
+                            if id == trimmedDefault {
+                                Spacer(minLength: 4)
+                                Text("默认").font(.caption2).foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                    .disabled(locked)
+                }
+            }
+            if !enabledModelIDs.isEmpty {
+                Picker(selection: $defaultModel) {
+                    if trimmedDefault.isEmpty || !enabledModelIDs.contains(trimmedDefault) {
+                        Text(trimmedDefault.isEmpty ? "未选择" : trimmedDefault).tag(defaultModel)
+                    }
+                    ForEach(enabledModelIDs.sorted(), id: \.self) { Text($0).tag($0) }
+                } label: {
+                    Label("默认模型", systemImage: "star")
+                }
+                .disabled(locked)
+            }
+            TextField("默认模型 ID，例如 gpt-5.4-mini", text: $defaultModel)
+                .textInputAutocapitalization(.never).autocorrectionDisabled()
+                .disabled(locked)
+                .accessibilityIdentifier("ai.providerCreate.defaultModel")
+        } header: {
+            Text("模型")
+        } footer: {
+            Text("读取模型列表只查询供应商有哪些模型，不会发起对话或产生费用。打开开关的模型会被启用，可在 AI 指令和测活中使用；默认模型是未指定模型时使用的那一个。读取失败时也可以直接手动填写默认模型。")
+        }
+    }
+
+    // MARK: - 高级设置
+
+    private var advancedSection: some View {
+        Section {
+            DisclosureGroup(isExpanded: $showAdvanced) {
+                Picker(selection: Binding(get: { providerKind }, set: { setProviderKind($0) })) {
+                    ForEach(Self.providerKinds) { Text($0.title).tag($0.value) }
+                } label: {
+                    AISettingLabel(title: "服务类型", detail: "决定默认地址和鉴权方式。通常跟随接口协议自动设置；只有本地 Ollama 需要手动选择。")
+                }
+                .disabled(gatewayMode)
+
+                Picker(selection: Binding(get: { executionBackend }, set: { setExecutionBackend($0) })) {
+                    Text("标准 API 直连").tag("direct")
+                    Text("Codex 兼容模式（内置网关）").tag("codex_gateway")
+                } label: {
+                    AISettingLabel(title: "调用方式", detail: "保持“标准 API 直连”即可。只有中转站要求完整的 Codex 客户端请求格式时才选兼容模式，它必须填写 API Key，并固定使用 Responses 接口。")
+                }
+
+                Picker(selection: $clientIdentity) {
+                    ForEach(Self.identities) { Text(AIPresentation.clientIdentity($0.value)).tag($0.value) }
+                } label: {
+                    AISettingLabel(title: "客户端身份", detail: "部分中转站只接受特定官方客户端的请求，这里决定 TelePilot 在请求中声明自己是哪个客户端。")
+                }
+                .disabled(gatewayMode)
+                Text(gatewayMode ? "兼容模式由内置网关补齐 Codex 请求信息，此项会保留，切回直连后继续使用。" : (Self.identities.first { $0.value == clientIdentity }?.hint ?? ""))
+                    .font(.caption).foregroundStyle(.secondary)
+
+                if apiFormat != "chat_completions" {
+                    Picker(selection: $protocolProfile) {
+                        ForEach(profileOptions) { Text(AIPresentation.protocolProfile($0.value)).tag($0.value) }
+                    } label: {
+                        AISettingLabel(title: "协议细节", detail: "同一种接口在不同厂商之间有细微差别，选择对应厂商可避免字段不兼容。")
+                    }
+                    .disabled(gatewayMode)
+                    Text(gatewayMode ? "兼容模式固定使用 Codex 协议细节。" : (profileOptions.first { $0.value == protocolProfile }?.hint ?? ""))
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+
+                Picker(selection: $webSearchFormat) {
+                    ForEach(Self.webSearchFormats) { Text($0.value == "auto" ? "自动（推荐）" : AIPresentation.apiFormat($0.value)).tag($0.value) }
+                } label: {
+                    AISettingLabel(title: "联网搜索接口", detail: "AI 指令使用联网搜索时调用的接口。")
+                }
+                .disabled(gatewayMode)
+                Text(gatewayMode ? "兼容模式的联网请求固定使用 Responses。" : (Self.webSearchFormats.first { $0.value == webSearchFormat }?.hint ?? ""))
+                    .font(.caption).foregroundStyle(.secondary)
+
+                Picker(selection: $proxyID) {
+                    Text("直连，不走代理").tag(Int?.none)
+                    ForEach(supportedProxies, id: \.self) { proxy in
+                        if let id = proxy["id"]?.intValue {
+                            Text("#\(id) · \(proxy["type"]?.stringValue ?? "") · \(proxy["host"]?.stringValue ?? ""):\(proxy["port"]?.intValue.map(String.init) ?? "")")
+                                .tag(Optional(id))
+                        }
+                    }
+                } label: {
+                    AISettingLabel(title: "出口代理", detail: "服务器访问这个供应商时经过的网络代理。服务器能直接访问时保持直连。")
+                }
+                if let proxiesError { Text("代理列表读取失败：\(proxiesError)").font(.caption).foregroundStyle(.orange) }
+
+                Picker(selection: $modality) {
+                    ForEach(Self.modalities, id: \.self) { Text(AIPresentation.modality($0)).tag($0) }
+                } label: {
+                    AISettingLabel(title: "能处理的内容", detail: "告诉自动路由这个供应商能否看图、听语音。选错不会报错，但看图类请求可能分配不到它。")
+                }
+
+                Picker(selection: $costTier) {
+                    ForEach(1...3, id: \.self) { Text(AIPresentation.costTier($0)).tag($0) }
+                } label: {
+                    AISettingLabel(title: "成本等级", detail: "自动路由在同类供应商中挑选时参考的价格档位。")
+                }
+
+                NavigationLink {
+                    AIProviderTagPicker(tags: $tags, allTags: Self.allTags)
+                } label: {
+                    AISettingLabel(title: "擅长的任务（自动路由标签）",
+                                   detail: tags.isEmpty ? "未设置：只作为备用供应商" : Self.allTags.filter(tags.contains).map(AIPresentation.tag).joined(separator: "、"))
+                }
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("备注（仅自己可见，不影响调用）").font(.caption).foregroundStyle(.secondary)
+                    TextField("例如：公司中转站，月底重置额度", text: $notes, axis: .vertical)
+                        .lineLimit(1...4)
+                }
+            } label: {
+                Label("高级设置", systemImage: "slider.horizontal.3")
+            }
+            .disabled(locked)
+            .accessibilityIdentifier("ai.providerCreate.advanced")
+        } footer: {
+            Text("服务类型、调用方式、客户端身份、协议细节、联网搜索接口、出口代理和自动路由信息。普通接入保持默认即可，添加后也可以在“编辑供应商”中修改。兼容请求头等少见配置请在 Web 管理台设置。")
+        }
+    }
+
+    // MARK: - 提交与结果
+
+    private var submitSection: some View {
+        Section {
+            Button {
+                if let message = validate() { validationError = message; return }
+                validationError = nil
+                confirming = true
+            } label: {
+                HStack(spacing: 8) {
+                    Spacer(minLength: 0)
+                    if saving { ProgressView() }
+                    Label(saving ? "正在添加…" : "添加供应商", systemImage: "plus.circle").font(.headline)
+                    Spacer(minLength: 0)
+                }
+                .frame(minHeight: 44)
+            }
+            .disabled(saving || uncertain || created != nil)
+            .accessibilityIdentifier("ai.providerCreate.submit")
+            if let validationError { Text(validationError).font(.caption).foregroundStyle(.red) }
+            if let saveError { NoticeView(title: uncertain ? "添加结果待确认" : "添加失败", message: saveError) }
+            if uncertain { Text("请返回供应商列表下拉刷新，确认是否已添加，避免重复创建。").font(.caption).foregroundStyle(.orange) }
+        } footer: {
+            Text("添加后建议立即做一次测活，确认模型可以正常回复。")
+        }
+    }
+
+    @ViewBuilder private func resultSection(_ provider: JSONValue) -> some View {
+        Section {
+            Label("已添加“\(AIPresentation.providerName(provider))”", systemImage: "checkmark.circle").foregroundStyle(.green)
+            NavigationLink {
+                AIProviderDetailView(provider: provider, workspace: workspace)
+            } label: {
+                Label("打开供应商详情", systemImage: "server.rack")
+            }
+            if provider["id"]?.intValue != nil {
+                NavigationLink {
+                    AILivenessView(workspace: workspace, providerID: provider["id"]?.intValue)
+                } label: {
+                    Label("测活此供应商", systemImage: "waveform.path.ecg")
+                }
+            }
+        }
+    }
+
+    private var confirmationMessage: String {
+        var text = "将添加“\(effectiveName)”，默认模型 \(trimmedDefault)"
+        if !enabledModelIDs.isEmpty { text += "，启用 \(enabledModelIDs.union([trimmedDefault]).count) 个模型" }
+        text += "。"
+        if trimmedName.isEmpty { text += "名称未填写，将自动命名。" }
+        if gatewayMode { text += "将使用 Codex 兼容模式，服务器会验证并按需启动内置网关。" }
+        return text
+    }
+
+    // MARK: - 逻辑
+
+    private var inferredName: String {
+        let modelPart = trimmedDefault.split(separator: "-").prefix(2).joined(separator: "-")
+        if let host = URL(string: trimmedBaseURL)?.host(), !host.isEmpty {
+            let brand = host.replacingOccurrences(of: "api.", with: "").split(separator: ".").first.map(String.init) ?? host
+            let firstModelPart = trimmedDefault.split(separator: "-").first.map(String.init) ?? "provider"
+            return String("\(brand)-\(firstModelPart.isEmpty ? "provider" : firstModelPart)".prefix(64))
+        }
+        return String("\(modelPart.isEmpty ? "model" : modelPart)-provider".prefix(64))
+    }
+
+    private func setAPIFormat(_ value: String) {
+        guard !gatewayMode else { return }
+        apiFormat = value
+        if value == "anthropic_messages" { providerKind = "anthropic" }
+        else if providerKind == "anthropic" { providerKind = "openai" }
+        if !(Self.profiles[value] ?? []).contains(where: { $0.value == protocolProfile }) { protocolProfile = "standard" }
+        clientIdentity = "auto"
+        resetFetchedModels()
+    }
+
+    private func setProviderKind(_ value: String) {
+        providerKind = value
+        if value == "anthropic" { apiFormat = "anthropic_messages" }
+        else if apiFormat == "anthropic_messages" { apiFormat = value == "ollama" ? "chat_completions" : "responses" }
+        if !(Self.profiles[apiFormat] ?? []).contains(where: { $0.value == protocolProfile }) { protocolProfile = "standard" }
+        resetFetchedModels()
+    }
+
+    private func setExecutionBackend(_ value: String) {
+        guard value != executionBackend else { return }
+        executionBackend = value
+        if value == "codex_gateway" {
+            if providerKind != "openai" { providerKind = "openai" }
+            apiFormat = "responses"
+            protocolProfile = "codex_responses"
+            webSearchFormat = "responses"
+        } else {
+            apiFormat = "responses"
+            protocolProfile = "standard"
+            webSearchFormat = "auto"
+        }
+        resetFetchedModels()
+    }
+
+    private func resetFetchedModels() {
+        fetchedModels = []
+        enabledModelIDs = []
+        fetchedOnce = false
+        fetchError = nil
+    }
+
+    private func toggleModel(_ id: String, _ enabled: Bool) {
+        if enabled {
+            enabledModelIDs.insert(id)
+            if trimmedDefault.isEmpty { defaultModel = id }
+        } else {
+            enabledModelIDs.remove(id)
+            if trimmedDefault == id { defaultModel = enabledModelIDs.sorted().first ?? "" }
+        }
+    }
+
+    private func validate() -> String? {
+        if trimmedDefault.isEmpty { return "请填写或选择默认模型。" }
+        if trimmedDefault.count > 64 { return "默认模型 ID 最多 64 个字符。" }
+        if effectiveName.count > 64 { return "名称最多 64 个字符。" }
+        if trimmedBaseURL.count > 255 { return "接入地址最多 255 个字符。" }
+        if !trimmedBaseURL.isEmpty {
+            let scheme = URL(string: trimmedBaseURL)?.scheme?.lowercased() ?? ""
+            if scheme != "http" && scheme != "https" { return "接入地址需要以 http:// 或 https:// 开头。" }
+        }
+        if trimmedKey.count > 512 { return "API Key 最多 512 个字符。" }
+        if gatewayMode && trimmedKey.isEmpty { return "Codex 兼容模式必须填写 API Key。" }
+        if notes.count > 500 { return "备注最多 500 个字符。" }
+        if enabledModelIDs.union([trimmedDefault]).count > 200 { return "一次最多启用 200 个模型，请减少选择。" }
+        return nil
+    }
+
+    private var connectionBody: [String: JSONValue] {
+        var body: [String: JSONValue] = [
+            "provider": .string(providerKind),
+            "api_format": .string(apiFormat),
+            "protocol_profile": .string(protocolProfile),
+            "execution_backend": .string(executionBackend),
+            "base_url": trimmedBaseURL.isEmpty ? .null : .string(trimmedBaseURL),
+            "api_key": trimmedKey.isEmpty ? .null : .string(trimmedKey)
+        ]
+        if let proxyID { body["proxy_id"] = .integer(Int64(proxyID)) } else { body["proxy_id"] = .null }
+        return body
+    }
+
+    private func fetchModels() async {
+        guard !fetching else { return }
+        fetching = true; fetchError = nil
+        defer { fetching = false }
+        do {
+            let response = try await model.request(path: "/api/commands/llm-providers/fetch-models-preview", method: "POST",
+                                                   body: .object(connectionBody))
+            var items = response["models"]?.arrayValue ?? []
+            if items.isEmpty {
+                items = (response["ids"]?.arrayValue ?? []).compactMap(\.stringValue).map { JSONValue.object(["id": .string($0)]) }
+            }
+            fetchedModels = items.filter { $0["id"]?.stringValue?.isEmpty == false }
+            let available = Set(fetchedModels.compactMap { $0["id"]?.stringValue })
+            enabledModelIDs = enabledModelIDs.intersection(available)
+            fetchedOnce = true
+        } catch {
+            fetchError = error.localizedDescription
+        }
+    }
+
+    private func loadProxies() async {
+        do {
+            let value = try await model.request(path: "/api/proxies")
+            proxies = value.arrayValue ?? value["items"]?.arrayValue ?? []
+            proxiesError = nil
+        } catch {
+            proxiesError = error.localizedDescription
+        }
+    }
+
+    private var modelsPayload: [JSONValue] {
+        var result: [JSONValue] = []
+        var seen: Set<String> = []
+        for item in fetchedModels {
+            guard let id = item["id"]?.stringValue, enabledModelIDs.contains(id) || id == trimmedDefault, !seen.contains(id) else { continue }
+            var object = item.objectValue ?? [:]
+            object["enabled"] = true
+            object["custom"] = false
+            result.append(.object(object))
+            seen.insert(id)
+        }
+        if !seen.contains(trimmedDefault) {
+            result.append(.object(["id": .string(trimmedDefault), "enabled": true, "custom": true]))
+        }
+        return result
+    }
+
+    private func save() async {
+        guard !saving, !uncertain, created == nil, validate() == nil else { return }
+        saving = true; saveError = nil
+        defer { saving = false }
+        var body = connectionBody
+        body["name"] = .string(effectiveName)
+        body["default_model"] = .string(trimmedDefault)
+        body["client_identity_profile"] = .string(clientIdentity)
+        body["web_search_api_format"] = .string(webSearchFormat)
+        body["modality"] = .string(modality)
+        body["cost_tier"] = .integer(Int64(costTier))
+        body["tags"] = .array(Self.allTags.filter(tags.contains).map(JSONValue.string))
+        let trimmedNotes = notes.trimmingCharacters(in: .whitespacesAndNewlines)
+        body["notes"] = trimmedNotes.isEmpty ? .null : .string(trimmedNotes)
+        body["models"] = .array(modelsPayload)
+        do {
+            let response = try await model.request(path: "/api/commands/llm-providers", method: "POST", body: .object(body))
+            workspace.replaceProvider(response)
+            created = response
+            apiKey = ""
+        } catch {
+            saveError = error.localizedDescription
+            uncertain = (error as? APIError)?.isOutcomeUncertain == true
+        }
+    }
+}
+
+private struct AIProviderTagPicker: View {
+    @Binding var tags: Set<String>
+    let allTags: [String]
+
+    var body: some View {
+        List {
+            Section {
+                ForEach(allTags, id: \.self) { tag in
+                    Toggle(AIPresentation.tag(tag), isOn: Binding(get: { tags.contains(tag) }, set: { enabled in
+                        if enabled { tags.insert(tag) } else { tags.remove(tag) }
+                    }))
+                }
+            } footer: {
+                Text("只影响开启“自动路由”的 AI 指令：例如翻译类问题会优先分配给标记了“翻译”的供应商。固定模型的指令不读取这些标签。全部不选表示只作为备用供应商。")
+            }
+        }
+        .navigationTitle("擅长的任务").navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+private struct AIProviderChoice: Identifiable, Hashable {
+    let value: String
+    let title: String
+    let hint: String
+    var id: String { value }
+
+    init(_ value: String, _ title: String = "", hint: String = "") {
+        self.value = value
+        self.title = title
+        self.hint = hint
+    }
+
+    init(_ value: String, _ title: String, _ hint: String) {
+        self.value = value
+        self.title = title
+        self.hint = hint
+    }
 }
