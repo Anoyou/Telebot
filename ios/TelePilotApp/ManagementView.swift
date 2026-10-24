@@ -145,14 +145,6 @@ struct ManagementModuleView: View {
             ManagementActionLink(action: .init(title: "重启服务器服务", path: "/api/system/restart", destructive: true,
                 explanation: "会中断当前服务器连接和正在执行的请求。请先检查运行任务。"), symbol: "restart.circle")
         }
-        Section {
-            ServerUpdateButton()
-            document("自动检查更新设置", "/api/system/update-status", symbol: "clock.arrow.2.circlepath", actions: [
-                .init(title: "配置自动检查", path: "/api/system/update-check", method: "PATCH")
-            ])
-        } header: { Text("更新") } footer: {
-            Text("服务器版本、更新内容与应用更新已移到“检查服务器更新”，也可在 设置 › 关于 中打开。")
-        }
         Section("紧急控制") {
             document("全局紧急停止", "/api/system/kill-switch", symbol: "exclamationmark.octagon", actions: [
                 .init(title: "修改紧急停止开关", path: "/api/system/kill-switch", destructive: true,

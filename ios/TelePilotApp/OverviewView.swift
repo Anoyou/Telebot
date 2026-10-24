@@ -93,9 +93,8 @@ struct OverviewView: View {
 
     @ViewBuilder private func statusSection(_ items: [OverviewAttentionItem]) -> some View {
         Section {
+            OverviewBrandHeader(host: model.serverURL?.host)
             VStack(alignment: .leading, spacing: 8) {
-                Label(model.serverURL?.host ?? "TelePilot", systemImage: "server.rack")
-                    .font(.subheadline).foregroundStyle(.secondary).textSelection(.enabled)
                 if model.health == nil && model.healthError == nil {
                     Text(model.isRefreshing ? "正在读取服务状态…" : "尚无服务状态").font(.title2.weight(.semibold))
                 } else if model.health == nil {
@@ -301,4 +300,41 @@ struct VerticalQuickLabelStyle: LabelStyle {
 
 extension LabelStyle where Self == VerticalQuickLabelStyle {
     static var verticalQuick: VerticalQuickLabelStyle { VerticalQuickLabelStyle() }
+}
+
+/// 概览顶部的紧凑品牌头：App 图标、名称、一句话说明与当前连接的服务器（原“关于”页顶部卡片）。
+private struct OverviewBrandHeader: View {
+    let host: String?
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 14) {
+            Image("BrandMark")
+                .resizable()
+                .scaledToFit()
+                .frame(width: 52, height: 52)
+                .clipShape(.rect(cornerRadius: 12, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .strokeBorder(Color(.separator), lineWidth: 0.5)
+                }
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("TelePilot").font(.title3.weight(.bold))
+                Text("个人 Telegram 自动化服务器的原生管理客户端")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                if let host {
+                    Label(host, systemImage: "server.rack")
+                        .font(.caption).foregroundStyle(.secondary)
+                        .lineLimit(1).truncationMode(.middle)
+                        .textSelection(.enabled)
+                        .padding(.top, 2)
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.vertical, 4)
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("overview.brand")
+    }
 }

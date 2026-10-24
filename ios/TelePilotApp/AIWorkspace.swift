@@ -95,21 +95,24 @@ struct AIWorkspaceView: View {
 
     var body: some View {
         List {
-            Section {
-                Picker("AI 工作区", selection: $section) {
-                    ForEach(AISection.allCases) { item in Text(item.title).tag(item) }
-                }
-                .pickerStyle(.segmented)
-                .accessibilityIdentifier("ai.sections")
-            }
-            .listRowInsets(EdgeInsets(top: 12, leading: 16, bottom: 8, trailing: 16))
-            .listRowSeparator(.hidden)
-
             switch section {
             case .overview: AIOverviewSection(workspace: workspace, showUsage: { section = .usage }, showLiveness: { showLiveness = true })
             case .providers: AIProviderListSection(workspace: workspace)
             case .usage: AIUsageSection(workspace: workspace)
             }
+        }
+        // 顶部分段切换放进系统安全区栏：内容从下方滚过时由系统的滚动边缘效果承托，
+        // 分段控件本身是 iOS 26 原生的 Liquid Glass 控件，不再套白色卡片背景。
+        .safeAreaBar(edge: .top) {
+            Picker("AI 工作区", selection: $section) {
+                ForEach(AISection.allCases) { item in Text(item.title).tag(item) }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .controlSize(.large)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+            .accessibilityIdentifier("ai.sections")
         }
         .navigationTitle("AI")
         .navigationDestination(isPresented: $showLiveness) {

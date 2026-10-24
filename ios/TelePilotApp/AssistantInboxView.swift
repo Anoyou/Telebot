@@ -18,12 +18,6 @@ struct AssistantInboxView: View {
             List {
                 if let error { Section { AssistantNotice(text: error, isError: true) } }
                 Section {
-                    Picker("状态", selection: $status) {
-                        Text("待确认").tag("pending")
-                        Text("全部").tag("")
-                    }.pickerStyle(.segmented)
-                }
-                Section {
                     ForEach(actions) { item in
                         Button { selected = item } label: { AssistantActionRow(item: item) }
                     }
@@ -32,6 +26,17 @@ struct AssistantInboxView: View {
                     }
                     if loading { ProgressView("正在读取…") }
                 }
+            }
+            .safeAreaBar(edge: .top) {
+                Picker("状态", selection: $status) {
+                    Text("待确认").tag("pending")
+                    Text("全部").tag("")
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .controlSize(.large)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
             }
             .navigationTitle("待确认操作")
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { dismiss() } } }

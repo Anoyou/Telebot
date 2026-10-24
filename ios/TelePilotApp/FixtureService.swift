@@ -17,8 +17,10 @@ actor FixtureService: AppServing {
     private var fixtureSettings: JSONValue = [
         "timezone": "Asia/Shanghai", "command_prefix": ".", "ai_enabled": true, "ai_context_messages": 3,
         "llm_limits": ["per_minute": 30, "daily_requests": 0, "daily_tokens": 500000, "premium_daily": 0],
-        "log_retention": ["llm_usage_retention_days": 30]
+        "log_retention": ["llm_usage_retention_days": 30],
+        "app_update_target": ["remote": "origin", "branch": "Beta"]
     ]
+    private var fixtureUpdateCheck: JSONValue = ["enabled": true, "interval_minutes": 1440]
     private var pluginGlobalEnabled: [String: Bool] = ["auto_reply": true, "content_assistant": true, "forward_guard": false]
 
     init(offline: Bool = false) {
@@ -325,9 +327,18 @@ actor FixtureService: AppServing {
                     "recommended_api_format": "responses", "recommended_protocol_profile": "standard",
                     "recommended_client_identity_profile": "openai_sdk", "recommended_web_search_api_format": "responses"]
         }
-        if clean == "/api/system/update-status" {
-            return ["enabled": true, "interval_minutes": 1440,
-                    "last_check": ["has_update": true, "can_check": true, "checked_at": "2026-10-24T08:00:00.123456+00:00"]]
+        if clean == "/api/system/update-check", method == "PATCH" {
+            var current = fixtureUpdateCheck.objectValue ?? [:]
+            for (key, value) in body?.objectValue ?? [:] { current[key] = value }
+            fixtureUpdateCheck = .object(current)
+        }
+        if clean == "/api/system/update-status" || clean == "/api/system/update-check" {
+            var status = fixtureUpdateCheck.objectValue ?? [:]
+            status["last_check"] = ["has_update": true, "can_check": true, "checked_at": "2026-10-24T08:00:00.123456+00:00"]
+            return .object(status)
+        }
+        if clean == "/api/system/update-target-options" {
+            return ["ok": true, "remotes": ["origin"], "branches": ["main", "Beta"], "remote": "origin"]
         }
         if clean == "/api/system/check-update", method == "POST" {
             return ["has_update": true, "can_check": true, "current_version": "0.104.0-beta.1", "target_version": "0.105.0-beta.1",

@@ -60,18 +60,14 @@ struct SettingsView: View {
                 Section {
                     NavigationLink { AboutView() } label: {
                         Label {
-                            LabeledContent("关于 TelePilot") {
+                            LabeledContent("关于与更新") {
                                 Text(AppInfo.version).monospacedDigit()
                             }
                         } icon: { Image(systemName: "info.circle") }
                     }
                     .accessibilityIdentifier("settings.about")
-                    ServerUpdateButton()
-                    if let error = model.versionError {
-                        NoticeView(title: model.serverVersion == nil ? "版本读取失败" : "版本信息已过期", message: error)
-                    }
-                } header: { Text("关于与更新") } footer: {
-                    Text("服务器与 App 独立更新。兼容接口的修复通常不需要重装 App；新增原生页面或不兼容接口变化才需要更新客户端。")
+                } header: { Text("关于") } footer: {
+                    Text("版本信息、检查服务器更新、更新通道与自动检查都集中在“关于与更新”里。")
                 }
                 Section {
                     Label("密码不保存在 App 中", systemImage: "lock.shield")

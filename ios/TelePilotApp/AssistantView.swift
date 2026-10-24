@@ -196,17 +196,23 @@ struct AssistantView: View {
                                     .buttonStyle(.borderedProminent).frame(maxWidth: .infinity)
                             }
                         }
-                        ForEach(store.messages) { item in
-                            AssistantMessageView(item: item) {
-                                Task { await store.retry(item, model: model) }
-                            } regenerate: {
-                                if let user = latestUser {
-                                    Task { await store.regenerate(user: user, assistant: item, edited: nil, model: model) }
+                        // 工具结果不再单独成块：并入同一轮回答底部的“本轮详情”。
+                        ForEach(AssistantTurnGrouping.entries(store.messages)) { entry in
+                            if let item = entry.item {
+                                AssistantMessageView(item: item, tools: entry.tools) {
+                                    Task { await store.retry(item, model: model) }
+                                } regenerate: {
+                                    if let user = latestUser {
+                                        Task { await store.regenerate(user: user, assistant: item, edited: nil, model: model) }
+                                    }
+                                } edit: {
+                                    if let user = latestUser { editingPair = AssistantEditPair(user: user, assistant: item) }
                                 }
-                            } edit: {
-                                if let user = latestUser { editingPair = AssistantEditPair(user: user, assistant: item) }
+                                .environment(\.assistantMayRegenerate, item.id == latestAssistant?.id && !store.runActive && !store.busy)
+                            } else {
+                                // 本轮还没有最终回答（执行中或失败）时，工具调用仍可在折叠详情里查看。
+                                AssistantTurnDetailsView(usage: nil, tools: entry.tools)
                             }
-                            .environment(\.assistantMayRegenerate, item.id == latestAssistant?.id && !store.runActive && !store.busy)
                         }
                         if !store.liveText.isEmpty || !store.liveReasoning.isEmpty {
                             VStack(alignment: .leading, spacing: 10) {
@@ -548,6 +554,8 @@ private extension EnvironmentValues {
 private struct AssistantMessageView: View {
     @Environment(\.assistantMayRegenerate) private var mayRegenerate
     let item: AssistantItem
+    /// 同一轮中的工具结果消息，只在“本轮详情”展开后显示。
+    var tools: [AssistantItem] = []
     let retry: () -> Void
     let regenerate: () -> Void
     let edit: () -> Void
@@ -565,6 +573,7 @@ private struct AssistantMessageView: View {
                 }
             }
             if role == "tool" {
+                // 正常情况下工具消息已并入回答详情；保留兜底展示，避免未知顺序的数据被吞掉。
                 AssistantToolResultView(content: item["content"] ?? [:])
                 let images = item["content"]?["images"]?.arrayValue ?? []
                 if !images.isEmpty { AssistantImagesView(images: images) }
@@ -588,6 +597,9 @@ private struct AssistantMessageView: View {
                 }
                 let images = item["content"]?["images"]?.arrayValue ?? item["content"]?["attachments"]?.arrayValue ?? []
                 if !images.isEmpty { AssistantImagesView(images: images) }
+                // 工具产出的图片（例如截图）属于回答内容，直接显示在回答里。
+                let toolImages = tools.flatMap { $0["content"]?["images"]?.arrayValue ?? [] }
+                if !toolImages.isEmpty { AssistantImagesView(images: toolImages) }
             }
             if role == "user" && item.text("run_status") == "failed" {
                 Text("这条消息执行失败，可以查看任务轨迹了解原因。").font(.caption).foregroundStyle(.secondary)
@@ -599,13 +611,214 @@ private struct AssistantMessageView: View {
                     Button("编辑后重发", systemImage: "pencil", action: edit)
                 }.font(.caption)
             }
-            if let usage = item["usage"], usage.objectValue?.isEmpty == false {
-                DisclosureGroup("本轮用量与详情") { AssistantJSONView(value: usage) }.font(.caption).foregroundStyle(.secondary)
+            if role != "user" {
+                AssistantTurnDetailsView(usage: item["usage"], tools: tools)
             }
         }
         .padding(role == "user" ? 14 : 0)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(role == "user" ? Color.accentColor.opacity(0.08) : .clear, in: .rect(cornerRadius: 16))
+    }
+}
+
+// MARK: - 本轮详情
+
+/// 一个显示条目：普通消息（附带同一轮的工具结果），或尚无最终回答时单独显示的工具调用。
+private struct AssistantDisplayEntry: Identifiable {
+    let id: String
+    let item: AssistantItem?
+    let tools: [AssistantItem]
+}
+
+enum AssistantTurnGrouping {
+    /// 以用户消息切分轮次：服务器在回答之后才写入工具消息，所以同一轮内的工具结果归到这一轮最后一条助手回答。
+    /// 没有助手回答的轮次（执行中、失败）把工具结果放在第一条工具消息的位置单独显示。
+    fileprivate static func entries(_ messages: [AssistantItem]) -> [AssistantDisplayEntry] {
+        var result: [AssistantDisplayEntry] = []
+        var segment: [AssistantItem] = []
+        func flush() {
+            guard !segment.isEmpty else { return }
+            let tools = segment.filter { $0.text("role") == "tool" }
+            let ownerID = segment.last { $0.text("role") == "assistant" }?.id
+            var orphanPlaced = false
+            for item in segment {
+                if item.text("role") == "tool" {
+                    if ownerID == nil && !orphanPlaced {
+                        result.append(AssistantDisplayEntry(id: "tools-\(item.id)", item: nil, tools: tools))
+                        orphanPlaced = true
+                    }
+                } else {
+                    result.append(AssistantDisplayEntry(id: item.id, item: item, tools: item.id == ownerID ? tools : []))
+                }
+            }
+            segment.removeAll()
+        }
+        for item in messages {
+            if item.text("role") == "user" {
+                flush()
+                result.append(AssistantDisplayEntry(id: item.id, item: item, tools: []))
+            } else {
+                segment.append(item)
+            }
+        }
+        flush()
+        return result
+    }
+}
+
+/// 与 Web 端 ModelRunMeta 对齐的本轮执行信息（不显示费用）。
+struct AssistantRunMeta {
+    let usage: [String: JSONValue]
+    let toolMessages: Int
+
+    init(usage: JSONValue?, toolMessages: Int) {
+        self.usage = usage?.objectValue ?? [:]
+        self.toolMessages = toolMessages
+    }
+
+    private func string(_ key: String) -> String? {
+        guard let value = usage[key]?.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty else { return nil }
+        return value
+    }
+    private static func number(_ value: JSONValue?) -> Int? {
+        switch value {
+        case .integer(let v)?: return Int(exactly: v)
+        case .number(let v)? where v.isFinite && abs(v) < 1e15: return Int(v.rounded())
+        case .string(let v)?: return Int(v.trimmingCharacters(in: .whitespaces))
+        default: return nil
+        }
+    }
+
+    /// 实际作答的“供应商 · 模型”。
+    var model: String? {
+        let parts = [string("provider_name") ?? string("requested_provider_name"), string("model") ?? string("requested_model")].compactMap { $0 }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+    var requestedModel: String? {
+        let parts = [string("requested_provider_name"), string("requested_model")].compactMap { $0 }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+    var usedFallback: Bool { usage["used_fallback"]?.boolValue == true }
+    var streamFallback: Bool { usage["stream_fallback"]?.boolValue == true }
+    var pinned: Bool { string("selection_mode") == "pinned" }
+    var apiFormat: String? { string("api_format") }
+    var inputTokens: Int? { Self.number(usage["input_tokens"]) }
+    var outputTokens: Int? { Self.number(usage["output_tokens"]) }
+    var retries: Int? { Self.number(usage["retry_count"]).flatMap { $0 > 0 ? $0 : nil } }
+    var elapsedMS: Int? { Self.number(usage["elapsed_ms"]) }
+    /// 工具调用数：优先实际调用 tool_calls；旧消息兼容 tool_count（schema_version 2 起它表示暴露数量，不再采用）；都没有时按工具结果条数。
+    var toolCalls: Int? {
+        if let actual = Self.number(usage["tool_calls"]) { return actual }
+        if Self.number(usage["schema_version"]) != 2, let legacy = Self.number(usage["tool_count"]) { return legacy }
+        return toolMessages > 0 ? toolMessages : nil
+    }
+    var stages: [(String, Int)] {
+        guard let timings = usage["stage_timings"]?.objectValue else { return [] }
+        return [("探测", "verify_ms"), ("路由", "route_ms"), ("首个词元", "first_token_ms")].compactMap { title, key in
+            Self.number(timings[key]).map { (title, $0) }
+        }
+    }
+    var hasUsage: Bool { !usage.isEmpty }
+
+    /// 折叠时的一行摘要：模型 · 输入/输出词元 · 工具 · 耗时。
+    var summaryLine: String {
+        var bits: [String] = []
+        if let model { bits.append(model) }
+        if inputTokens != nil || outputTokens != nil {
+            bits.append("输入 \(inputTokens.map(AIPresentation.tokens) ?? "–") / 输出 \(outputTokens.map(AIPresentation.tokens) ?? "–")")
+        }
+        if let toolCalls { bits.append("工具 \(toolCalls)") }
+        if let retries { bits.append("重试 \(retries)") }
+        if let elapsedMS, elapsedMS > 0 { bits.append(AIPresentation.latency(elapsedMS)) }
+        return bits.isEmpty ? "本轮详情" : bits.joined(separator: " · ")
+    }
+}
+
+/// 回答底部的本轮详情：默认只占一行，点按展开模型、词元、耗时、工具调用与脱敏后的原始数据。
+private struct AssistantTurnDetailsView: View {
+    let usage: JSONValue?
+    let tools: [AssistantItem]
+    @State private var expanded = false
+
+    var body: some View {
+        let meta = AssistantRunMeta(usage: usage, toolMessages: tools.count)
+        if meta.hasUsage || !tools.isEmpty {
+            DisclosureGroup(isExpanded: $expanded) {
+                details(meta)
+                    .padding(.top, 6)
+            } label: {
+                Label {
+                    Text(meta.summaryLine)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .monospacedDigit()
+                } icon: {
+                    Image(systemName: meta.hasUsage ? "chart.bar.doc.horizontal" : "wrench.and.screwdriver")
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .accessibilityLabel("本轮详情：\(meta.summaryLine)")
+            }
+            .font(.caption)
+            .tint(Color.secondary)
+            .accessibilityIdentifier("assistant.turnDetails")
+        }
+    }
+
+    @ViewBuilder private func details(_ meta: AssistantRunMeta) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            if meta.hasUsage {
+                VStack(alignment: .leading, spacing: 6) {
+                    if let model = meta.model { row("实际模型", model) }
+                    if meta.usedFallback, let requested = meta.requestedModel, requested != meta.model {
+                        row("原模型", requested)
+                    }
+                    if let format = meta.apiFormat { row("接口格式", format) }
+                    if let input = meta.inputTokens { row("输入词元", AIPresentation.tokens(input)) }
+                    if let output = meta.outputTokens { row("输出词元", AIPresentation.tokens(output)) }
+                    if let calls = meta.toolCalls { row("工具调用", "\(calls) 次") }
+                    if let retries = meta.retries { row("重试", "\(retries) 次") }
+                    if let elapsed = meta.elapsedMS, elapsed > 0 { row("总耗时", AIPresentation.latency(elapsed)) }
+                    ForEach(meta.stages, id: \.0) { stage in row(stage.0, AIPresentation.latency(stage.1)) }
+                }
+                let flags = [meta.usedFallback ? "已改用备用模型" : nil, meta.streamFallback ? "完整响应（未流式返回）" : nil, meta.pinned ? "本轮固定模型" : nil].compactMap { $0 }
+                if !flags.isEmpty {
+                    Text(flags.joined(separator: " · ")).font(.caption2).foregroundStyle(.secondary)
+                }
+                Text("“词元”是模型计费与长度单位；“首个词元”为开始返回第一段内容的等待时间。")
+                    .font(.caption2).foregroundStyle(.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if !tools.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    Label("工具调用（\(tools.count)）", systemImage: "wrench.and.screwdriver")
+                        .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                    ForEach(tools) { tool in
+                        AssistantToolResultView(content: tool["content"] ?? [:])
+                    }
+                    if !meta.hasUsage {
+                        // 没有最终回答时，工具产出的图片也在这里显示。
+                        let images = tools.flatMap { $0["content"]?["images"]?.arrayValue ?? [] }
+                        if !images.isEmpty { AssistantImagesView(images: images) }
+                    }
+                }
+            }
+            if let usage, meta.hasUsage {
+                DisclosureGroup("原始数据（已脱敏）") { AssistantJSONView(value: usage) }
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func row(_ title: String, _ value: String) -> some View {
+        LabeledContent {
+            Text(value).monospacedDigit().textSelection(.enabled).multilineTextAlignment(.trailing)
+        } label: {
+            Text(title)
+        }
+        .font(.caption)
+        .foregroundStyle(.secondary)
     }
 }
 
