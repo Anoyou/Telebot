@@ -114,6 +114,9 @@ actor FixtureService: AppServing {
         if clean == "/api/system-agent/sessions" {
             return [["id": "fixture-session", "title": "服务检查", "status": "active", "channel": "web"]]
         }
+        if clean.hasPrefix("/api/system-agent/sessions/"), method == "DELETE" {
+            return ["ok": true, "deleted": .string(String(clean.dropFirst("/api/system-agent/sessions/".count)))]
+        }
         if clean.hasSuffix("/messages") {
             return [["id": 1, "role": "assistant", "content": ["text": "服务状态正常。这里是界面测试数据。"], "run_status": "completed"]]
         }

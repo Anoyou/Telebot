@@ -81,6 +81,8 @@ private struct MainTabs: View {
     @Environment(AppModel.self) private var model
     @Environment(WorkspacePreferences.self) private var preferences
     @State private var selected: DockItem = .overview
+    // Agent 页隐藏 Dock，最小化按钮返回进入 Agent 前所在的标签页。
+    @State private var previousTab: DockItem = .overview
     @State private var morePath: [MoreDestination] = []
     @State private var modal: WorkspaceModal?
 
@@ -108,13 +110,13 @@ private struct MainTabs: View {
 
             if #available(iOS 27.0, *) {
                 Tab("Agent", systemImage: DockItem.agent.symbol, value: DockItem.agent, role: .prominent) {
-                    AssistantView(embedded: true)
+                    AssistantView(embedded: true) { selected = previousTab }
                 }
                 .badge(model.pendingActions.count)
                 .accessibilityIdentifier("dock.assistant")
             } else {
                 Tab("Agent", systemImage: DockItem.agent.symbol, value: DockItem.agent) {
-                    AssistantView(embedded: true)
+                    AssistantView(embedded: true) { selected = previousTab }
                 }
                 .badge(model.pendingActions.count)
                 .accessibilityIdentifier("dock.assistant")
@@ -137,6 +139,9 @@ private struct MainTabs: View {
             openRequestedRoute()
         }
         .onChange(of: model.requestedRoute) { _, _ in openRequestedRoute() }
+        .onChange(of: selected) { old, new in
+            if new == .agent && old != .agent { previousTab = old }
+        }
     }
 
     private func openRequestedRoute() {
