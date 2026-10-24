@@ -106,7 +106,7 @@ struct ManagementLoadedEditorView: View {
                 List {
                     if let error { NoticeView(title: "读取失败", message: error) }
                     else { ProgressView("正在读取当前配置…") }
-                }.navigationTitle(title)
+                }.navigationTitle(title).navigationBarTitleDisplayMode(.inline)
             }
         }.task {
             do { value = try await model.request(path: path) }
@@ -262,7 +262,7 @@ struct AccountManagementPassthroughView: View {
             if let result { Section("操作结果") { ManagementValueView(value: result) } }
             Button("保存顺序", systemImage: "square.and.arrow.down") { confirming = true }.disabled(features.isEmpty || busy || uncertain)
         }
-        .navigationTitle("直通优先顺序").toolbar { EditButton() }
+        .navigationTitle("直通优先顺序").navigationBarTitleDisplayMode(.inline).toolbar { EditButton() }
         .task { await load() }.refreshable { await load() }
         .confirmationDialog("保存此执行顺序？", isPresented: $confirming, titleVisibility: .visible) {
             Button("确认保存") { Task { await save() } }

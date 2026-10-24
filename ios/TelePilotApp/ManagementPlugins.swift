@@ -1092,7 +1092,7 @@ private struct AccountPluginDetailView: View {
                 }
             }
         }
-        .navigationTitle(ManagementText.title(feature))
+        .navigationTitle(ManagementText.title(feature)).navigationBarTitleDisplayMode(.inline)
         .task {
             guard !loaded else { return }
             let key = feature["key"]?.stringValue ?? ""
@@ -1264,11 +1264,11 @@ private struct PluginTechnicalInfoView: View {
             }
 
             Section {
-                NavigationLink { List { ManagementValueView(value: feature) }.navigationTitle("插件原始字段") } label: {
+                NavigationLink { List { ManagementValueView(value: feature) }.navigationTitle("插件原始字段").navigationBarTitleDisplayMode(.inline) } label: {
                     Label("插件原始字段", systemImage: "curlybraces")
                 }
                 if let accountState {
-                    NavigationLink { List { ManagementValueView(value: accountState) }.navigationTitle("账号插件原始字段") } label: {
+                    NavigationLink { List { ManagementValueView(value: accountState) }.navigationTitle("账号插件原始字段").navigationBarTitleDisplayMode(.inline) } label: {
                         Label("账号插件原始字段", systemImage: "curlybraces.square")
                     }
                 }
@@ -1800,7 +1800,7 @@ struct ManagementLocalPluginsView: View {
                     NavigationLink { ManagementFormView(action: .init(title: "安装 " + name, path: "/api/plugin-repos/local/plugins/\(ManagementText.pathSegment(name))/install")) } label: { ManagementRecordRow(value: item) }
                 }
             }
-        }.navigationTitle("本地参考插件").task {
+        }.navigationTitle("本地参考插件").navigationBarTitleDisplayMode(.inline).task {
             do { items = ManagementText.items(try await model.request(path: "/api/plugin-repos/local/plugins")) }
             catch { self.error = error.localizedDescription }
         }

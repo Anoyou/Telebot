@@ -293,7 +293,7 @@ struct AIProviderModelsView: View {
                             Spacer()
                             if item["custom"]?.boolValue == true { Text("手动添加").font(.caption2).foregroundStyle(.secondary) }
                         }
-                        NavigationLink { List { ManagementValueView(value: item) }.navigationTitle(item["id"]?.stringValue ?? "模型详情") } label: {
+                        NavigationLink { List { ManagementValueView(value: item) }.navigationTitle(item["id"]?.stringValue ?? "模型详情").navigationBarTitleDisplayMode(.inline) } label: {
                             Label("查看模型详细信息", systemImage: "info.circle")
                         }
                         .font(.caption)

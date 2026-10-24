@@ -69,7 +69,7 @@ struct AccountManagementSchedulerView: View {
                             "description": .string("仅列出的命令 key 允许自动执行，不带系统指令前缀。")])
                     ])])
                     ManagementActionLink(action: .init(title: "编辑自动指令白名单", path: base + "/config", method: "PATCH", schema: whitelist, seed: config, envelope: "config"), symbol: "checklist")
-                    NavigationLink { List { ManagementValueView(value: config["allowed_command_whitelist"] ?? .array([])) }.navigationTitle("自动指令白名单") } label: {
+                    NavigationLink { List { ManagementValueView(value: config["allowed_command_whitelist"] ?? .array([])) }.navigationTitle("自动指令白名单").navigationBarTitleDisplayMode(.inline) } label: {
                         Label("当前白名单", systemImage: "list.bullet")
                     }
                 }

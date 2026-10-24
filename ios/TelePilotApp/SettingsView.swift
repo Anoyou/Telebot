@@ -88,7 +88,7 @@ struct SettingsView: View {
                 }
             }
             .symbolRenderingMode(.hierarchical)
-            .navigationTitle("设置")
+            .navigationTitle("设置").navigationBarTitleDisplayMode(.inline)
             .accessibilityIdentifier("settings.screen")
             .confirmationDialog(
                 confirmation == .server ? "退出并更换服务器？" : "退出登录？",

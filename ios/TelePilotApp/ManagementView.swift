@@ -42,7 +42,7 @@ struct ManagementView: View {
                         NavigationLink { ManagementModuleView(module: module) } label: { Label(module.title, systemImage: module.symbol) }
                     }
                 }
-            }.navigationTitle("管理")
+            }.navigationTitle("管理").navigationBarTitleDisplayMode(.inline)
         }
     }
 }
@@ -177,7 +177,7 @@ struct ManagementRunLookupView: View {
                     ManagementJobView(id: identifier.trimmingCharacters(in: .whitespacesAndNewlines), updateJob: updateJob, liveness: !updateJob)
                 } label: { Label("读取任务进度", systemImage: "chart.bar.doc.horizontal") }
             }
-        }.navigationTitle(updateJob ? "升级任务" : "测活任务")
+        }.navigationTitle(updateJob ? "升级任务" : "测活任务").navigationBarTitleDisplayMode(.inline)
     }
 }
 
@@ -189,6 +189,6 @@ struct ManagementTOTPView: View {
                 ManagementActionLink(action: .init(title: "验证并启用", path: "/api/auth/totp/verify"), symbol: "checkmark.shield")
                 ManagementActionLink(action: .init(title: "关闭验证器保护", path: "/api/auth/totp/disable", destructive: true), symbol: "lock.open")
             } footer: { Text("密钥和恢复码默认遮盖。请在安全环境中查看，并妥善保管恢复码。") }
-        }.navigationTitle("验证器与恢复码")
+        }.navigationTitle("验证器与恢复码").navigationBarTitleDisplayMode(.inline)
     }
 }

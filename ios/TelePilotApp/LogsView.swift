@@ -786,7 +786,7 @@ struct LogDetailView: View {
             }
             Section {
                 NavigationLink {
-                    List { ManagementValueView(value: entry.raw) }.navigationTitle("原始数据")
+                    List { ManagementValueView(value: entry.raw) }.navigationTitle("原始数据").navigationBarTitleDisplayMode(.inline)
                 } label: { Label("原始数据（高级）", systemImage: "curlybraces") }
                 Button {
                     OpsFormat.copyForDiagnosis(entry.diagnosisLines)
@@ -835,7 +835,7 @@ struct LogDetailView: View {
             OpsFieldRow(title: "完整内容", value: OpsFormat.text(entry.raw["message"]), symbol: "text.alignleft")
             if let detail = entry.raw["detail"], detail.objectValue?.isEmpty == false {
                 NavigationLink {
-                    List { ManagementValueView(value: detail) }.navigationTitle("附加信息")
+                    List { ManagementValueView(value: detail) }.navigationTitle("附加信息").navigationBarTitleDisplayMode(.inline)
                 } label: { Label("附加信息", systemImage: "info.square") }
             }
         case .messages, .traces:
@@ -855,7 +855,7 @@ struct LogDetailView: View {
             OpsFieldRow(title: "操作人", value: entry.raw["user_id"]?.intValue.map { "管理员 \($0)" } ?? "系统自动", symbol: "person.badge.key")
             if let detail = entry.raw["detail"], detail.objectValue?.isEmpty == false {
                 NavigationLink {
-                    List { ManagementValueView(value: detail) }.navigationTitle("变更内容")
+                    List { ManagementValueView(value: detail) }.navigationTitle("变更内容").navigationBarTitleDisplayMode(.inline)
                 } label: { Label("变更内容", systemImage: "list.bullet.clipboard") }
             }
         }
@@ -958,7 +958,7 @@ struct LogTraceTimelineView: View {
                 Section {
                     Button { copy() } label: { Label("复制诊断信息", systemImage: "doc.on.doc") }
                     NavigationLink {
-                        List { ManagementValueView(value: trace) }.navigationTitle("原始数据")
+                        List { ManagementValueView(value: trace) }.navigationTitle("原始数据").navigationBarTitleDisplayMode(.inline)
                     } label: { Label("原始数据（高级）", systemImage: "curlybraces") }
                 }
             }
