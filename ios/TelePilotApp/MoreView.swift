@@ -28,10 +28,6 @@ struct MoreView: View {
                     Label("设置", systemImage: "gearshape")
                 }
                 .accessibilityIdentifier("more.settings")
-                NavigationLink(value: MoreDestination.about) {
-                    Label("关于与更新", systemImage: "info.circle")
-                }
-                .accessibilityIdentifier("more.about")
             }
 
             Section("管理") {
@@ -40,6 +36,13 @@ struct MoreView: View {
                         Label(module.title, systemImage: module.symbol)
                     }
                 }
+            }
+
+            Section {
+                NavigationLink(value: MoreDestination.about) {
+                    Label("关于与更新", systemImage: "info.circle")
+                }
+                .accessibilityIdentifier("more.about")
             }
         }
         .symbolRenderingMode(.hierarchical)

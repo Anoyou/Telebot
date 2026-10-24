@@ -55,6 +55,7 @@ final class ManagementUITests: XCTestCase {
         let app = launch()
         let about = app.buttons["more.about"]
         XCTAssertTrue(about.waitForExistence(timeout: 10))
+        for _ in 0..<4 where !about.isHittable { app.swipeUp() }
         about.tap()
         XCTAssertTrue(app.staticTexts["App 版本"].waitForExistence(timeout: 10))
         let open = app.buttons["update.open"]
@@ -91,7 +92,10 @@ final class ManagementUITests: XCTestCase {
 
     func testServerUpdateReceiptSurvivesClosingPanel() {
         let app = launch()
-        app.buttons["more.about"].tap()
+        let about = app.buttons["more.about"]
+        XCTAssertTrue(about.waitForExistence(timeout: 10))
+        for _ in 0..<4 where !about.isHittable { app.swipeUp() }
+        about.tap()
         let open = app.buttons["update.open"]
         for _ in 0..<4 where !open.isHittable { app.swipeUp() }
         XCTAssertTrue(open.waitForExistence(timeout: 10))

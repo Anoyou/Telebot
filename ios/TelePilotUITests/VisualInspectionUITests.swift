@@ -27,7 +27,9 @@ final class VisualInspectionUITests: XCTestCase {
         capture("13-ledger-charts")
         app.navigationBars.buttons.element(boundBy: 0).tap()
 
-        app.buttons["more.about"].tap()
+        let about = app.buttons["more.about"]
+        for _ in 0..<4 where !about.isHittable { app.swipeUp() }
+        about.tap()
         XCTAssertTrue(app.descendants(matching: .any)["about.appVersion"].firstMatch.waitForExistence(timeout: 10))
         capture("14-about")
 
