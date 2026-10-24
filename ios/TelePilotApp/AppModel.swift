@@ -389,20 +389,21 @@ final class AppModel {
     func refreshWorkspace() async {
         guard phase == .signedIn else { return }
         let token = generation
-        do {
-            let values = try await request(path: "/api/system-agent/actions?status=pending&limit=200")
-            guard token == generation else { return }
+        // 待确认事项与插件矩阵互不依赖，并发读取以缩短概览刷新时间。
+        async let actionsResult = capture { try await self.request(path: "/api/system-agent/actions?status=pending&limit=200") }
+        async let pluginsResult = capture { try await self.request(path: "/api/feature-matrix") }
+        let (actions, matrix) = await (actionsResult, pluginsResult)
+        guard token == generation else { return }
+        switch actions {
+        case .success(let values):
             pendingActions = values.arrayValue ?? []
             workspaceError = nil
-        } catch {
-            guard token == generation else { return }
+        case .failure:
             workspaceError = "待确认事项读取失败，请重试。"
         }
-        do {
-            let value = try await request(path: "/api/feature-matrix")
-            guard token == generation else { return }
+        if case .success(let value) = matrix {
             plugins = value.arrayValue ?? value["items"]?.arrayValue ?? value["plugins"]?.arrayValue ?? value["features"]?.arrayValue ?? []
-        } catch { }
+        }
     }
 
     private func finishSessionCleanup() async {
