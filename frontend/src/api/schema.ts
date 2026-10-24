@@ -1106,6 +1106,76 @@ export interface paths {
         patch: operations["update_alias_endpoint_api_aliases__alias_id__patch"];
         trace?: never;
     };
+    "/api/apns/config": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Apns Config */
+        get: operations["get_apns_config_api_apns_config_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Patch Apns Config */
+        patch: operations["patch_apns_config_api_apns_config_patch"];
+        trace?: never;
+    };
+    "/api/apns/devices": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Apns Devices */
+        get: operations["list_apns_devices_api_apns_devices_get"];
+        put?: never;
+        /** Register Apns Device */
+        post: operations["register_apns_device_api_apns_devices_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/apns/devices/{device_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Unregister Apns Device */
+        delete: operations["unregister_apns_device_api_apns_devices__device_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/apns/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Send Apns Test */
+        post: operations["send_apns_test_api_apns_test_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/auth/change-password": {
         parameters: {
             query?: never;
@@ -5279,6 +5349,137 @@ export interface components {
             ok: boolean;
             /** Pending */
             pending?: string[];
+        };
+        /** ApnsConfigOut */
+        ApnsConfigOut: {
+            /** Bundle Id */
+            bundle_id?: string | null;
+            /**
+             * Configured
+             * @default false
+             */
+            configured: boolean;
+            /**
+             * Enabled
+             * @default false
+             */
+            enabled: boolean;
+            /**
+             * Environment
+             * @default production
+             * @enum {string}
+             */
+            environment: "production" | "sandbox";
+            /**
+             * Has Auth Key
+             * @default false
+             */
+            has_auth_key: boolean;
+            /** Key Id */
+            key_id?: string | null;
+            /** Team Id */
+            team_id?: string | null;
+            /** Updated At */
+            updated_at?: string | null;
+        };
+        /** ApnsConfigPatch */
+        ApnsConfigPatch: {
+            /** Auth Key P8 */
+            auth_key_p8?: string | null;
+            /** Bundle Id */
+            bundle_id?: string | null;
+            /**
+             * Clear Auth Key
+             * @default false
+             */
+            clear_auth_key: boolean;
+            /** Enabled */
+            enabled?: boolean | null;
+            /** Environment */
+            environment?: ("production" | "sandbox") | null;
+            /** Key Id */
+            key_id?: string | null;
+            /** Team Id */
+            team_id?: string | null;
+        };
+        /** ApnsDeviceOut */
+        ApnsDeviceOut: {
+            /** Bundle Id */
+            bundle_id: string;
+            /** Categories */
+            categories: string[];
+            /** Device Id */
+            device_id: string;
+            /** Enabled */
+            enabled: boolean;
+            /**
+             * Environment
+             * @enum {string}
+             */
+            environment: "production" | "sandbox";
+            /** Expires At */
+            expires_at?: string | null;
+            /** Last Error */
+            last_error?: string | null;
+            /** Registered At */
+            registered_at?: string | null;
+            /** Updated At */
+            updated_at?: string | null;
+        };
+        /** ApnsDeviceRegister */
+        ApnsDeviceRegister: {
+            /** Bundle Id */
+            bundle_id: string;
+            /** Categories */
+            categories?: ("assistant_approval" | "assistant_result" | "account_alert")[];
+            /** Device Id */
+            device_id: string;
+            /** Device Token */
+            device_token: string;
+            /**
+             * Environment
+             * @default production
+             * @enum {string}
+             */
+            environment: "production" | "sandbox";
+            /** Server Origin Sha256 */
+            server_origin_sha256: string;
+        };
+        /** ApnsTestOut */
+        ApnsTestOut: {
+            /**
+             * Accepted
+             * @default 0
+             */
+            accepted: number;
+            /**
+             * Attempted
+             * @default 0
+             */
+            attempted: number;
+            /** Device Id */
+            device_id: string;
+            /** Event Id */
+            event_id?: string | null;
+            /**
+             * Failed
+             * @default 0
+             */
+            failed: number;
+            /** Message */
+            message: string;
+            /** Ok */
+            ok: boolean;
+            /**
+             * Unregistered
+             * @default 0
+             */
+            unregistered: number;
+        };
+        /** ApnsTestRequest */
+        ApnsTestRequest: {
+            /** Device Id */
+            device_id: string;
         };
         /**
          * AppUpdateCheckSettingsIn
@@ -15564,6 +15765,348 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CommandAliasResponse"];
+                };
+            };
+            /** @description 认证失败 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description CSRF 校验失败或权限不足 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description 服务器内部错误 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    get_apns_config_api_apns_config_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: {
+                auth_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApnsConfigOut"];
+                };
+            };
+            /** @description 认证失败 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description 服务器内部错误 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    patch_apns_config_api_apns_config_patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: {
+                auth_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ApnsConfigPatch"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApnsConfigOut"];
+                };
+            };
+            /** @description 认证失败 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description CSRF 校验失败或权限不足 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description 服务器内部错误 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    list_apns_devices_api_apns_devices_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: {
+                auth_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApnsDeviceOut"][];
+                };
+            };
+            /** @description 认证失败 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description 服务器内部错误 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    register_apns_device_api_apns_devices_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: {
+                auth_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ApnsDeviceRegister"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApnsDeviceOut"];
+                };
+            };
+            /** @description 认证失败 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description CSRF 校验失败或权限不足 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description 服务器内部错误 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    unregister_apns_device_api_apns_devices__device_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                device_id: string;
+            };
+            cookie?: {
+                auth_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description 认证失败 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description CSRF 校验失败或权限不足 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description 服务器内部错误 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    send_apns_test_api_apns_test_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: {
+                auth_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ApnsTestRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApnsTestOut"];
                 };
             };
             /** @description 认证失败 */

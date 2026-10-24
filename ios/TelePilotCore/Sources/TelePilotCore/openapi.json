@@ -1,0 +1,1446 @@
+{
+  "components": {
+    "schemas": {
+      "AccountDetail": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "display_name": {
+            "title": "Display Name",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "enabled_features": {
+            "default": 0,
+            "title": "Enabled Features",
+            "type": "integer"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "notes": {
+            "title": "Notes",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "phone": {
+            "title": "Phone",
+            "type": "string"
+          },
+          "proxy": {
+            "description": "挂在账号摘要上的代理一行信息——绝不返回明文密码 / 用户名也只是肉眼标识。\n\n用途：概览页 / 账号列表页一眼看出 \"这个账号走哪个代理出网\"，\n避免去开 ProxyManager 找。",
+            "properties": {
+              "host": {
+                "title": "Host",
+                "type": "string"
+              },
+              "label": {
+                "title": "Label",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "port": {
+                "title": "Port",
+                "type": "integer"
+              }
+            },
+            "required": [
+              "host",
+              "port"
+            ],
+            "title": "ProxySummary",
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Tags",
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "tg_username": {
+            "title": "Tg Username",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "phone",
+          "display_name",
+          "status",
+          "created_at"
+        ],
+        "title": "AccountDetail",
+        "type": "object"
+      },
+      "AccountSummary": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "display_name": {
+            "title": "Display Name",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "enabled_features": {
+            "default": 0,
+            "title": "Enabled Features",
+            "type": "integer"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "phone": {
+            "title": "Phone",
+            "type": "string"
+          },
+          "proxy": {
+            "description": "挂在账号摘要上的代理一行信息——绝不返回明文密码 / 用户名也只是肉眼标识。\n\n用途：概览页 / 账号列表页一眼看出 \"这个账号走哪个代理出网\"，\n避免去开 ProxyManager 找。",
+            "properties": {
+              "host": {
+                "title": "Host",
+                "type": "string"
+              },
+              "label": {
+                "title": "Label",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "port": {
+                "title": "Port",
+                "type": "integer"
+              }
+            },
+            "required": [
+              "host",
+              "port"
+            ],
+            "title": "ProxySummary",
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Tags",
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "tg_username": {
+            "title": "Tg Username",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "phone",
+          "display_name",
+          "status",
+          "created_at"
+        ],
+        "title": "AccountSummary",
+        "type": "object"
+      },
+      "AlembicStatus": {
+        "properties": {
+          "error": {
+            "title": "Error",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "ok": {
+            "title": "Ok",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ok"
+        ],
+        "title": "AlembicStatus",
+        "type": "object"
+      },
+      "CurrentUser": {
+        "properties": {
+          "has_totp": {
+            "title": "Has Totp",
+            "type": "boolean"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "username": {
+            "title": "Username",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "username",
+          "has_totp"
+        ],
+        "title": "CurrentUser",
+        "type": "object"
+      },
+      "DbStatus": {
+        "properties": {
+          "error": {
+            "title": "Error",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "ok": {
+            "title": "Ok",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ok"
+        ],
+        "title": "DbStatus",
+        "type": "object"
+      },
+      "ErrorDetail": {
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "ErrorDetail",
+        "type": "object"
+      },
+      "ErrorEnvelope": {
+        "properties": {
+          "error": {
+            "$ref": "#/components/schemas/ErrorDetail"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "title": "ErrorEnvelope",
+        "type": "object"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "HealthOverview": {
+        "description": "前端 Dashboard 用的一次性聚合状态。",
+        "properties": {
+          "alembic": {
+            "$ref": "#/components/schemas/AlembicStatus"
+          },
+          "db": {
+            "$ref": "#/components/schemas/DbStatus"
+          },
+          "redis": {
+            "$ref": "#/components/schemas/RedisStatus"
+          },
+          "workers": {
+            "$ref": "#/components/schemas/WorkersStatus"
+          }
+        },
+        "required": [
+          "db",
+          "alembic",
+          "redis",
+          "workers"
+        ],
+        "title": "HealthOverview",
+        "type": "object"
+      },
+      "HostResource": {
+        "properties": {
+          "cpu_percent": {
+            "title": "Cpu Percent",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "disk_used_percent": {
+            "title": "Disk Used Percent",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "memory_used_percent": {
+            "title": "Memory Used Percent",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "uptime_seconds": {
+            "title": "Uptime Seconds",
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "required": [],
+        "title": "HostResource",
+        "type": "object"
+      },
+      "LoginRequest": {
+        "properties": {
+          "otp_code": {
+            "description": "通知 Bot 登录 OTP 验证码",
+            "title": "Otp Code",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "otp_token": {
+            "description": "通知 Bot 登录 OTP 挑战 token",
+            "title": "Otp Token",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "password": {
+            "title": "Password",
+            "type": "string"
+          },
+          "recovery_code": {
+            "description": "服务器一次性登录恢复码",
+            "title": "Recovery Code",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "totp_code": {
+            "description": "启用 TOTP 后必填",
+            "title": "Totp Code",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "username": {
+            "title": "Username",
+            "type": "string"
+          }
+        },
+        "required": [
+          "username",
+          "password"
+        ],
+        "title": "LoginRequest",
+        "type": "object"
+      },
+      "LoginResponse": {
+        "properties": {
+          "ok": {
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "otp_delivery": {
+            "title": "Otp Delivery",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "otp_message": {
+            "title": "Otp Message",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "otp_token": {
+            "title": "Otp Token",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "otp_ttl_seconds": {
+            "title": "Otp Ttl Seconds",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "recovery_available": {
+            "default": false,
+            "title": "Recovery Available",
+            "type": "boolean"
+          },
+          "require_otp": {
+            "default": false,
+            "title": "Require Otp",
+            "type": "boolean"
+          },
+          "require_totp": {
+            "default": false,
+            "title": "Require Totp",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ok"
+        ],
+        "title": "LoginResponse",
+        "type": "object"
+      },
+      "ProxySummary": {
+        "description": "挂在账号摘要上的代理一行信息——绝不返回明文密码 / 用户名也只是肉眼标识。\n\n用途：概览页 / 账号列表页一眼看出 \"这个账号走哪个代理出网\"，\n避免去开 ProxyManager 找。",
+        "properties": {
+          "host": {
+            "title": "Host",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "port": {
+            "title": "Port",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "host",
+          "port"
+        ],
+        "title": "ProxySummary",
+        "type": "object"
+      },
+      "RedisStatus": {
+        "properties": {
+          "error": {
+            "title": "Error",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "ok": {
+            "title": "Ok",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ok"
+        ],
+        "title": "RedisStatus",
+        "type": "object"
+      },
+      "ResourceDashboard": {
+        "properties": {
+          "host": {
+            "$ref": "#/components/schemas/HostResource"
+          },
+          "workers": {
+            "items": {
+              "$ref": "#/components/schemas/WorkerRuntimeResource"
+            },
+            "title": "Workers",
+            "type": "array"
+          }
+        },
+        "required": [
+          "host"
+        ],
+        "title": "ResourceDashboard",
+        "type": "object"
+      },
+      "ValidationError": {
+        "properties": {
+          "ctx": {
+            "title": "Context",
+            "type": "object"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Error Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError",
+        "type": "object"
+      },
+      "VersionInfo": {
+        "description": "``GET /api/system/version`` 响应。\n\n前端启动时拉取并定时刷新，以运行中服务为准展示发布版本与部署 commit。\n\npublic 接口（**无鉴权**）：未登录页也要能调，否则发现\"前端是新版后端是旧版\"\n会一直登不上去（旧 schema 拒新登录字段之类）。返回的字段都是公开的版本元数据。",
+        "properties": {
+          "channel": {
+            "enum": [
+              "beta",
+              "stable",
+              "dev"
+            ],
+            "title": "Channel",
+            "type": "string"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "version": {
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "version",
+          "channel"
+        ],
+        "title": "VersionInfo",
+        "type": "object"
+      },
+      "WorkerRuntimeResource": {
+        "properties": {
+          "account_id": {
+            "title": "Account Id",
+            "type": "integer"
+          },
+          "alive": {
+            "title": "Alive",
+            "type": "boolean"
+          },
+          "desired": {
+            "title": "Desired",
+            "type": "string"
+          },
+          "fail_count": {
+            "title": "Fail Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "account_id",
+          "alive",
+          "desired",
+          "fail_count"
+        ],
+        "title": "WorkerRuntimeResource",
+        "type": "object"
+      },
+      "WorkersStatus": {
+        "properties": {
+          "by_status": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "By Status",
+            "type": "object"
+          },
+          "runtime_alive": {
+            "default": 0,
+            "title": "Runtime Alive",
+            "type": "integer"
+          },
+          "runtime_desired_running": {
+            "default": 0,
+            "title": "Runtime Desired Running",
+            "type": "integer"
+          },
+          "runtime_desired_running_alive": {
+            "default": 0,
+            "title": "Runtime Desired Running Alive",
+            "type": "integer"
+          },
+          "runtime_failing": {
+            "default": 0,
+            "title": "Runtime Failing",
+            "type": "integer"
+          },
+          "total": {
+            "default": 0,
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "title": "WorkersStatus",
+        "type": "object"
+      }
+    },
+    "securitySchemes": {
+      "AuthCookie": {
+        "description": "Web 登录后由服务端写入的 HttpOnly Cookie。",
+        "in": "cookie",
+        "name": "auth_token",
+        "type": "apiKey"
+      },
+      "CsrfCookie": {
+        "description": "写请求 double-submit CSRF Cookie。",
+        "in": "cookie",
+        "name": "csrf_token",
+        "type": "apiKey"
+      },
+      "CsrfHeader": {
+        "description": "必须与 csrf_token Cookie 相同。",
+        "in": "header",
+        "name": "X-CSRF-Token",
+        "type": "apiKey"
+      },
+      "RequestedWith": {
+        "description": "Web/PWA 写请求固定为 telepilot-ui。",
+        "in": "header",
+        "name": "X-Requested-With",
+        "type": "apiKey"
+      },
+      "WebhookToken": {
+        "description": "外部 Webhook 投递使用的账号级 Token。",
+        "in": "header",
+        "name": "X-TelePilot-Webhook-Token",
+        "type": "apiKey"
+      }
+    }
+  },
+  "info": {
+    "title": "TelePilot",
+    "version": "0.104.0-beta.1"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/api/accounts": {
+      "get": {
+        "description": "列出全部账号。",
+        "operationId": "list_accounts_api_accounts_get",
+        "parameters": [
+          {
+            "in": "cookie",
+            "name": "auth_token",
+            "required": false,
+            "schema": {
+              "title": "Auth Token",
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/AccountSummary"
+                  },
+                  "title": "Response List Accounts Api Accounts Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "认证失败"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "服务器内部错误"
+          }
+        },
+        "security": [
+          {
+            "AuthCookie": []
+          }
+        ],
+        "summary": "List Accounts",
+        "tags": [
+          "accounts"
+        ]
+      }
+    },
+    "/api/accounts/{aid}": {
+      "get": {
+        "description": "读取账号详情。",
+        "operationId": "get_account_api_accounts__aid__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "aid",
+            "required": true,
+            "schema": {
+              "title": "Aid",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "auth_token",
+            "required": false,
+            "schema": {
+              "title": "Auth Token",
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "认证失败"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "服务器内部错误"
+          }
+        },
+        "security": [
+          {
+            "AuthCookie": []
+          }
+        ],
+        "summary": "Get Account",
+        "tags": [
+          "accounts"
+        ]
+      }
+    },
+    "/api/accounts/{aid}/pause": {
+      "post": {
+        "description": "暂停账号。",
+        "operationId": "pause_account_api_accounts__aid__pause_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "aid",
+            "required": true,
+            "schema": {
+              "title": "Aid",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "auth_token",
+            "required": false,
+            "schema": {
+              "title": "Auth Token",
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "boolean"
+                  },
+                  "title": "Response Pause Account Api Accounts  Aid  Pause Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "认证失败"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "CSRF 校验失败或权限不足"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "服务器内部错误"
+          }
+        },
+        "security": [
+          {
+            "AuthCookie": [],
+            "CsrfCookie": [],
+            "CsrfHeader": [],
+            "RequestedWith": []
+          }
+        ],
+        "summary": "Pause Account",
+        "tags": [
+          "accounts"
+        ]
+      }
+    },
+    "/api/accounts/{aid}/resume": {
+      "post": {
+        "description": "恢复账号。",
+        "operationId": "resume_account_api_accounts__aid__resume_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "aid",
+            "required": true,
+            "schema": {
+              "title": "Aid",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "auth_token",
+            "required": false,
+            "schema": {
+              "title": "Auth Token",
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "boolean"
+                  },
+                  "title": "Response Resume Account Api Accounts  Aid  Resume Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "认证失败"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "CSRF 校验失败或权限不足"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "服务器内部错误"
+          }
+        },
+        "security": [
+          {
+            "AuthCookie": [],
+            "CsrfCookie": [],
+            "CsrfHeader": [],
+            "RequestedWith": []
+          }
+        ],
+        "summary": "Resume Account",
+        "tags": [
+          "accounts"
+        ]
+      }
+    },
+    "/api/auth/csrf": {
+      "get": {
+        "operationId": "csrf_token_api_auth_csrf_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "服务器内部错误"
+          }
+        },
+        "security": [],
+        "summary": "Csrf Token"
+      }
+    },
+    "/api/auth/login": {
+      "post": {
+        "description": "用户名密码（+ 可选 TOTP）登录，成功后写 HttpOnly cookie。\n\n特殊情况：``web_user`` 表为空（首次部署还没注册）时返回 ``NO_USER``，\n前端据此切到注册页，避免一直提示\"用户名或密码错误\"让人摸不着头脑。",
+        "operationId": "login_api_auth_login_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LoginResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "CSRF 校验失败或权限不足"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "服务器内部错误"
+          }
+        },
+        "security": [
+          {
+            "CsrfCookie": [],
+            "CsrfHeader": [],
+            "RequestedWith": []
+          }
+        ],
+        "summary": "Login",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/auth/logout": {
+      "post": {
+        "description": "清除 auth_token cookie。",
+        "operationId": "logout_api_auth_logout_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "boolean"
+                  },
+                  "title": "Response Logout Api Auth Logout Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "CSRF 校验失败或权限不足"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "服务器内部错误"
+          }
+        },
+        "security": [
+          {
+            "CsrfCookie": [],
+            "CsrfHeader": [],
+            "RequestedWith": []
+          }
+        ],
+        "summary": "Logout",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/auth/me": {
+      "get": {
+        "description": "返回当前登录用户信息。",
+        "operationId": "me_api_auth_me_get",
+        "parameters": [
+          {
+            "in": "cookie",
+            "name": "auth_token",
+            "required": false,
+            "schema": {
+              "title": "Auth Token",
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CurrentUser"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "认证失败"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "服务器内部错误"
+          }
+        },
+        "security": [
+          {
+            "AuthCookie": []
+          }
+        ],
+        "summary": "Me",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/system/health-overview": {
+      "get": {
+        "description": "聚合一次性返所有运维状态。各子探测并行 + 各自带 2s 超时。",
+        "operationId": "get_health_overview_api_system_health_overview_get",
+        "parameters": [
+          {
+            "in": "cookie",
+            "name": "auth_token",
+            "required": false,
+            "schema": {
+              "title": "Auth Token",
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthOverview"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "认证失败"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "服务器内部错误"
+          }
+        },
+        "security": [
+          {
+            "AuthCookie": []
+          }
+        ],
+        "summary": "Get Health Overview",
+        "tags": [
+          "system"
+        ]
+      }
+    },
+    "/api/system/resource-dashboard": {
+      "get": {
+        "description": "资源占用概览：主机、项目进程、完整 Compose 容器与 5 分钟日志量。",
+        "operationId": "get_resource_dashboard_api_system_resource_dashboard_get",
+        "parameters": [
+          {
+            "in": "cookie",
+            "name": "auth_token",
+            "required": false,
+            "schema": {
+              "title": "Auth Token",
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResourceDashboard"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "认证失败"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "服务器内部错误"
+          }
+        },
+        "security": [
+          {
+            "AuthCookie": []
+          }
+        ],
+        "summary": "Get Resource Dashboard",
+        "tags": [
+          "system"
+        ]
+      }
+    },
+    "/api/system/version": {
+      "get": {
+        "description": "返回后端版本号（无鉴权）。",
+        "operationId": "get_version_api_system_version_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VersionInfo"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "服务器内部错误"
+          }
+        },
+        "security": [],
+        "summary": "Get Version",
+        "tags": [
+          "system"
+        ]
+      }
+    }
+  }
+}

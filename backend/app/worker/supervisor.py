@@ -976,6 +976,12 @@ async def _monitor_loop() -> None:
                             .where(Account.id == aid)
                             .values(status=ACCOUNT_STATUS_DEAD)
                         )
+                        from ..db.apns_events import enqueue
+
+                        await db.run_sync(lambda sync, aid=aid: enqueue(
+                            sync.connection(), kind="account_alert",
+                            user_id=None, account_id=aid,
+                        ))
                         await db.commit()
                     # 2-D: account dead 告警（若未配置 alert/default channel，send 返回 False）
                     try:

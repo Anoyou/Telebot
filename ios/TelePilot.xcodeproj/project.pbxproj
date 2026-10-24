@@ -1,0 +1,636 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		00F4613DE15D81F631F58F58 /* ManagementUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5166A9DAB15A2783E85E7038 /* ManagementUITests.swift */; };
+		0DE54EE0D849DBAFF02D2F18 /* PrivacyFormatting.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2B2718B75FA9808D8DCE77A /* PrivacyFormatting.swift */; };
+		0EC7CD8B95AA2E333E404B52 /* AssistantView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 698666CDC618CD52DE256E14 /* AssistantView.swift */; };
+		1228565DBAEBE9623DC753A0 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4FC94FA14558B4E6B86D9C8F /* SettingsView.swift */; };
+		190715111E57BA57BC4B4B45 /* AIWorkspace.swift in Sources */ = {isa = PBXBuildFile; fileRef = C08588E80EB829F8C5179276 /* AIWorkspace.swift */; };
+		1B5D752E60BBE5D0A9CBFC84 /* FixtureService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2C9EA1E10C48B583FD528E4B /* FixtureService.swift */; };
+		1D2A8324084D0725E692908E /* VisualInspectionUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F98EB034681A1D9B4FEC79A1 /* VisualInspectionUITests.swift */; };
+		23D1E37C1B00C5D9166FE9D5 /* AIUsage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6E0F9A0F4E22C151694ED4D0 /* AIUsage.swift */; };
+		2B17A30BB82EB69D77A28049 /* PushNotificationManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4192BDAB91269A11C623D30 /* PushNotificationManager.swift */; };
+		3215E1001048E63F337EDB20 /* TelePilotUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 18587ABAD612072898FB2976 /* TelePilotUITests.swift */; };
+		47FDA06A27C3C12C38F4FA47 /* FileManagementView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8255085B6A9592CC540A6C0A /* FileManagementView.swift */; };
+		484581446258AD2019F0E91C /* AssistantRedaction.swift in Sources */ = {isa = PBXBuildFile; fileRef = E467EE20AB9DDC16EE1B4340 /* AssistantRedaction.swift */; };
+		4DE6F8216DF92A80B25F85BB /* AccountsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E32918F7013C607C4AB25DC /* AccountsView.swift */; };
+		6153B904980915FD4BEC55D0 /* OverviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 727F8D4AA9F52E12A4F04A46 /* OverviewView.swift */; };
+		63C8830D1423065F61AE1F3A /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 29595AAA4876A4A949A42697 /* PrivacyInfo.xcprivacy */; };
+		6831F006FD21A32133940BE3 /* ManagementView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2EFDEDF45ECBEE066D2B91CC /* ManagementView.swift */; };
+		6998959A60A66F25BA4CA439 /* AssistantInboxView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 340B7C9FDAAD7EDEB16A56F2 /* AssistantInboxView.swift */; };
+		702EA3E96F61E657A0C12224 /* OverviewComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = DB2CCF9898F9CE1A2073AFA2 /* OverviewComponents.swift */; };
+		7901764592C78E770F0844FC /* MoreView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 128DDC606C3A511DB8D00C74 /* MoreView.swift */; };
+		79B21DFFE85F22B61B1D26CA /* AILiveness.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C32028841D2B2274B6BFD3C /* AILiveness.swift */; };
+		88885830FD6DBAA8702EB75E /* TelePilotApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7345E48AE830986E3B98514 /* TelePilotApp.swift */; };
+		8BD74933286E7D1248175ECE /* OverviewCustomization.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1129B1323A246221ADC267A8 /* OverviewCustomization.swift */; };
+		8E7ADFAFD8FEFAE9B5360374 /* AppNavigation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6C4D438C39C7B3D3D9DE67C3 /* AppNavigation.swift */; };
+		90317CF0BCE3A729A234CCAA /* AccountManagementView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EBE0E190C56D43F8A6B77F6C /* AccountManagementView.swift */; };
+		939CB8EB7AF2DC4E52E410BE /* PushNotificationAppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9F684A78746D7C8E9770D93F /* PushNotificationAppDelegate.swift */; };
+		952761BD17159D6FA34C5361 /* AIProviders.swift in Sources */ = {isa = PBXBuildFile; fileRef = F74BB888C1F18820B172C6A8 /* AIProviders.swift */; };
+		9592E80BE3FC7E63D347A748 /* ManagementForms.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8977F833837A79C464CFBA29 /* ManagementForms.swift */; };
+		98BE1FA3E101EA2808E885EB /* RedesignedWorkspaceUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 91EAA20EE5B3D74CA2166B91 /* RedesignedWorkspaceUITests.swift */; };
+		9B9808170CED544BDD8089CD /* ManagementPlugins.swift in Sources */ = {isa = PBXBuildFile; fileRef = 312281F6FF27C8BC5F0044BA /* ManagementPlugins.swift */; };
+		9C657D4027BD8DA9296CB231 /* ManagementUI.swift in Sources */ = {isa = PBXBuildFile; fileRef = B9A92C1168E91BF98C329CE1 /* ManagementUI.swift */; };
+		9D1531925668D516D369F965 /* PushSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E4EC44F66923DDE373CA296 /* PushSettingsView.swift */; };
+		A920FDC791D162FD0D573C18 /* WorkspacePreferences.swift in Sources */ = {isa = PBXBuildFile; fileRef = CCE2FA9C9BA24B4D3829C930 /* WorkspacePreferences.swift */; };
+		B0CEF20BC7833D4E38385876 /* PrivacyShield.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2B288FCB89886B843143DE2 /* PrivacyShield.swift */; };
+		B80471918233D2494EC6827F /* AssistantStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9054073B8619C984585C49EF /* AssistantStore.swift */; };
+		BC1FD94A092D99C85EA4F113 /* AppLock.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A6F351DB246B00638B80808 /* AppLock.swift */; };
+		C40BA141643C7135FEA9FA33 /* TelePilotCore in Frameworks */ = {isa = PBXBuildFile; productRef = 0F741ABE684F88EEC1656271 /* TelePilotCore */; };
+		D64A3611E56B2005CA457B41 /* AppServing.swift in Sources */ = {isa = PBXBuildFile; fileRef = 164FB264CCA22ACBC35826C8 /* AppServing.swift */; };
+		D6AEC186649529E54AB14D5E /* ManagementJobs.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10E9FFA6394C9F48135FAE27 /* ManagementJobs.swift */; };
+		D6C527EF38FC160F7E0B43EE /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = B475BAE98F2A79DE07DFA26F /* Assets.xcassets */; };
+		DCDCA2D5DF047E8FA10AFC49 /* LoginView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 95EB7F933825D8AE7BB4D48B /* LoginView.swift */; };
+		DF525F78F7C972FD2344E3E4 /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 25532477F7C965CD672AEEF6 /* AppModel.swift */; };
+		E4FBDEBE4F82E3952705A4E9 /* ManagementRules.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6FBDA94E7D541ACA0F785572 /* ManagementRules.swift */; };
+		E9D1A0EBEDC2BCFEA5589DA4 /* AIPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 45704C3929B3B6D40D3AB3A7 /* AIPresentation.swift */; };
+		ED354A1E77C52EA112C2F31D /* AssistantUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C58570A86D880181446561E2 /* AssistantUITests.swift */; };
+		F30F76EE251AE4F0C20860C7 /* WorkspaceUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B01C57151088B6E6DF8E6DE4 /* WorkspaceUITests.swift */; };
+		F76863BF5116138B386BD89C /* ManagementCollections.swift in Sources */ = {isa = PBXBuildFile; fileRef = 38CDC7296A3C0B470515C56E /* ManagementCollections.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		22C4922F829EE318F2FA35E1 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = BAFF5171D44E5C5005AB0EF3 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 689606D1C7F18E63EED2B704;
+			remoteInfo = TelePilot;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		10E9FFA6394C9F48135FAE27 /* ManagementJobs.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManagementJobs.swift; sourceTree = "<group>"; };
+		1129B1323A246221ADC267A8 /* OverviewCustomization.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OverviewCustomization.swift; sourceTree = "<group>"; };
+		128DDC606C3A511DB8D00C74 /* MoreView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MoreView.swift; sourceTree = "<group>"; };
+		164FB264CCA22ACBC35826C8 /* AppServing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppServing.swift; sourceTree = "<group>"; };
+		18587ABAD612072898FB2976 /* TelePilotUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TelePilotUITests.swift; sourceTree = "<group>"; };
+		1E32918F7013C607C4AB25DC /* AccountsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountsView.swift; sourceTree = "<group>"; };
+		25532477F7C965CD672AEEF6 /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
+		29595AAA4876A4A949A42697 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		2C9EA1E10C48B583FD528E4B /* FixtureService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FixtureService.swift; sourceTree = "<group>"; };
+		2EFDEDF45ECBEE066D2B91CC /* ManagementView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManagementView.swift; sourceTree = "<group>"; };
+		312281F6FF27C8BC5F0044BA /* ManagementPlugins.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManagementPlugins.swift; sourceTree = "<group>"; };
+		340B7C9FDAAD7EDEB16A56F2 /* AssistantInboxView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssistantInboxView.swift; sourceTree = "<group>"; };
+		38CDC7296A3C0B470515C56E /* ManagementCollections.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManagementCollections.swift; sourceTree = "<group>"; };
+		45704C3929B3B6D40D3AB3A7 /* AIPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIPresentation.swift; sourceTree = "<group>"; };
+		4E4EC44F66923DDE373CA296 /* PushSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PushSettingsView.swift; sourceTree = "<group>"; };
+		4FC94FA14558B4E6B86D9C8F /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		5166A9DAB15A2783E85E7038 /* ManagementUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManagementUITests.swift; sourceTree = "<group>"; };
+		5277FE76AA8D203AF01F17DF /* TelePilotCore */ = {isa = PBXFileReference; lastKnownFileType = folder; name = TelePilotCore; path = TelePilotCore; sourceTree = SOURCE_ROOT; };
+		658A9CA792F9E9A4F5292F66 /* TelePilotUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = TelePilotUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		698666CDC618CD52DE256E14 /* AssistantView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssistantView.swift; sourceTree = "<group>"; };
+		6C4D438C39C7B3D3D9DE67C3 /* AppNavigation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppNavigation.swift; sourceTree = "<group>"; };
+		6E0F9A0F4E22C151694ED4D0 /* AIUsage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIUsage.swift; sourceTree = "<group>"; };
+		6F031DB659E417980A5417FD /* TelePilot.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = TelePilot.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		6FBDA94E7D541ACA0F785572 /* ManagementRules.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManagementRules.swift; sourceTree = "<group>"; };
+		727F8D4AA9F52E12A4F04A46 /* OverviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OverviewView.swift; sourceTree = "<group>"; };
+		7A6F351DB246B00638B80808 /* AppLock.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppLock.swift; sourceTree = "<group>"; };
+		7C32028841D2B2274B6BFD3C /* AILiveness.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AILiveness.swift; sourceTree = "<group>"; };
+		8255085B6A9592CC540A6C0A /* FileManagementView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileManagementView.swift; sourceTree = "<group>"; };
+		8977F833837A79C464CFBA29 /* ManagementForms.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManagementForms.swift; sourceTree = "<group>"; };
+		9054073B8619C984585C49EF /* AssistantStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssistantStore.swift; sourceTree = "<group>"; };
+		91EAA20EE5B3D74CA2166B91 /* RedesignedWorkspaceUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RedesignedWorkspaceUITests.swift; sourceTree = "<group>"; };
+		95EB7F933825D8AE7BB4D48B /* LoginView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoginView.swift; sourceTree = "<group>"; };
+		9CD5698893CB93EA821F8D1C /* TelePilot.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = TelePilot.entitlements; sourceTree = "<group>"; };
+		9F684A78746D7C8E9770D93F /* PushNotificationAppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PushNotificationAppDelegate.swift; sourceTree = "<group>"; };
+		B01C57151088B6E6DF8E6DE4 /* WorkspaceUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceUITests.swift; sourceTree = "<group>"; };
+		B475BAE98F2A79DE07DFA26F /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		B9A92C1168E91BF98C329CE1 /* ManagementUI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManagementUI.swift; sourceTree = "<group>"; };
+		C08588E80EB829F8C5179276 /* AIWorkspace.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIWorkspace.swift; sourceTree = "<group>"; };
+		C58570A86D880181446561E2 /* AssistantUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssistantUITests.swift; sourceTree = "<group>"; };
+		CCE2FA9C9BA24B4D3829C930 /* WorkspacePreferences.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspacePreferences.swift; sourceTree = "<group>"; };
+		D2B288FCB89886B843143DE2 /* PrivacyShield.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrivacyShield.swift; sourceTree = "<group>"; };
+		D4192BDAB91269A11C623D30 /* PushNotificationManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PushNotificationManager.swift; sourceTree = "<group>"; };
+		DB2CCF9898F9CE1A2073AFA2 /* OverviewComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OverviewComponents.swift; sourceTree = "<group>"; };
+		E467EE20AB9DDC16EE1B4340 /* AssistantRedaction.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssistantRedaction.swift; sourceTree = "<group>"; };
+		EBE0E190C56D43F8A6B77F6C /* AccountManagementView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountManagementView.swift; sourceTree = "<group>"; };
+		F2B2718B75FA9808D8DCE77A /* PrivacyFormatting.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrivacyFormatting.swift; sourceTree = "<group>"; };
+		F7345E48AE830986E3B98514 /* TelePilotApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TelePilotApp.swift; sourceTree = "<group>"; };
+		F74BB888C1F18820B172C6A8 /* AIProviders.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIProviders.swift; sourceTree = "<group>"; };
+		F98EB034681A1D9B4FEC79A1 /* VisualInspectionUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VisualInspectionUITests.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		C7EDF81CE220017AB091AF29 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				C40BA141643C7135FEA9FA33 /* TelePilotCore in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		24A7181ACCD9A94385FEF6C7 /* TelePilotApp */ = {
+			isa = PBXGroup;
+			children = (
+				EBE0E190C56D43F8A6B77F6C /* AccountManagementView.swift */,
+				1E32918F7013C607C4AB25DC /* AccountsView.swift */,
+				7C32028841D2B2274B6BFD3C /* AILiveness.swift */,
+				45704C3929B3B6D40D3AB3A7 /* AIPresentation.swift */,
+				F74BB888C1F18820B172C6A8 /* AIProviders.swift */,
+				6E0F9A0F4E22C151694ED4D0 /* AIUsage.swift */,
+				C08588E80EB829F8C5179276 /* AIWorkspace.swift */,
+				7A6F351DB246B00638B80808 /* AppLock.swift */,
+				25532477F7C965CD672AEEF6 /* AppModel.swift */,
+				6C4D438C39C7B3D3D9DE67C3 /* AppNavigation.swift */,
+				164FB264CCA22ACBC35826C8 /* AppServing.swift */,
+				B475BAE98F2A79DE07DFA26F /* Assets.xcassets */,
+				340B7C9FDAAD7EDEB16A56F2 /* AssistantInboxView.swift */,
+				E467EE20AB9DDC16EE1B4340 /* AssistantRedaction.swift */,
+				9054073B8619C984585C49EF /* AssistantStore.swift */,
+				698666CDC618CD52DE256E14 /* AssistantView.swift */,
+				8255085B6A9592CC540A6C0A /* FileManagementView.swift */,
+				2C9EA1E10C48B583FD528E4B /* FixtureService.swift */,
+				95EB7F933825D8AE7BB4D48B /* LoginView.swift */,
+				38CDC7296A3C0B470515C56E /* ManagementCollections.swift */,
+				8977F833837A79C464CFBA29 /* ManagementForms.swift */,
+				10E9FFA6394C9F48135FAE27 /* ManagementJobs.swift */,
+				312281F6FF27C8BC5F0044BA /* ManagementPlugins.swift */,
+				6FBDA94E7D541ACA0F785572 /* ManagementRules.swift */,
+				B9A92C1168E91BF98C329CE1 /* ManagementUI.swift */,
+				2EFDEDF45ECBEE066D2B91CC /* ManagementView.swift */,
+				128DDC606C3A511DB8D00C74 /* MoreView.swift */,
+				DB2CCF9898F9CE1A2073AFA2 /* OverviewComponents.swift */,
+				1129B1323A246221ADC267A8 /* OverviewCustomization.swift */,
+				727F8D4AA9F52E12A4F04A46 /* OverviewView.swift */,
+				F2B2718B75FA9808D8DCE77A /* PrivacyFormatting.swift */,
+				29595AAA4876A4A949A42697 /* PrivacyInfo.xcprivacy */,
+				D2B288FCB89886B843143DE2 /* PrivacyShield.swift */,
+				9F684A78746D7C8E9770D93F /* PushNotificationAppDelegate.swift */,
+				D4192BDAB91269A11C623D30 /* PushNotificationManager.swift */,
+				4E4EC44F66923DDE373CA296 /* PushSettingsView.swift */,
+				4FC94FA14558B4E6B86D9C8F /* SettingsView.swift */,
+				9CD5698893CB93EA821F8D1C /* TelePilot.entitlements */,
+				F7345E48AE830986E3B98514 /* TelePilotApp.swift */,
+				CCE2FA9C9BA24B4D3829C930 /* WorkspacePreferences.swift */,
+			);
+			path = TelePilotApp;
+			sourceTree = "<group>";
+		};
+		5A0BBE7AC38BCB6299E7A43E = {
+			isa = PBXGroup;
+			children = (
+				B69CC8C9A311065B62DA50EC /* Packages */,
+				24A7181ACCD9A94385FEF6C7 /* TelePilotApp */,
+				A0E9CEFCF6AE688C2BCF8E82 /* TelePilotUITests */,
+				8C7152EDEBC38CEE0B612CA0 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		8C7152EDEBC38CEE0B612CA0 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				6F031DB659E417980A5417FD /* TelePilot.app */,
+				658A9CA792F9E9A4F5292F66 /* TelePilotUITests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		A0E9CEFCF6AE688C2BCF8E82 /* TelePilotUITests */ = {
+			isa = PBXGroup;
+			children = (
+				C58570A86D880181446561E2 /* AssistantUITests.swift */,
+				5166A9DAB15A2783E85E7038 /* ManagementUITests.swift */,
+				91EAA20EE5B3D74CA2166B91 /* RedesignedWorkspaceUITests.swift */,
+				18587ABAD612072898FB2976 /* TelePilotUITests.swift */,
+				F98EB034681A1D9B4FEC79A1 /* VisualInspectionUITests.swift */,
+				B01C57151088B6E6DF8E6DE4 /* WorkspaceUITests.swift */,
+			);
+			path = TelePilotUITests;
+			sourceTree = "<group>";
+		};
+		B69CC8C9A311065B62DA50EC /* Packages */ = {
+			isa = PBXGroup;
+			children = (
+				5277FE76AA8D203AF01F17DF /* TelePilotCore */,
+			);
+			name = Packages;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		63707EE197ECE59DCEC8016F /* TelePilotUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = F05AF733571179B53CBEF153 /* Build configuration list for PBXNativeTarget "TelePilotUITests" */;
+			buildPhases = (
+				ED865F4BDB7266F0E8C038CF /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				A5ABA6CF6FEB7EFF14ED76C4 /* PBXTargetDependency */,
+			);
+			name = TelePilotUITests;
+			packageProductDependencies = (
+			);
+			productName = TelePilotUITests;
+			productReference = 658A9CA792F9E9A4F5292F66 /* TelePilotUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
+		689606D1C7F18E63EED2B704 /* TelePilot */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = AFC4A84C9936C4F962B9E36F /* Build configuration list for PBXNativeTarget "TelePilot" */;
+			buildPhases = (
+				6460D053CB9E33A55B7A5713 /* Sources */,
+				1B30DAABADDC226C6F9E0097 /* Resources */,
+				C7EDF81CE220017AB091AF29 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = TelePilot;
+			packageProductDependencies = (
+				0F741ABE684F88EEC1656271 /* TelePilotCore */,
+			);
+			productName = TelePilot;
+			productReference = 6F031DB659E417980A5417FD /* TelePilot.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		BAFF5171D44E5C5005AB0EF3 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+					63707EE197ECE59DCEC8016F = {
+						ProvisioningStyle = Automatic;
+						TestTargetID = 689606D1C7F18E63EED2B704;
+					};
+					689606D1C7F18E63EED2B704 = {
+						ProvisioningStyle = Automatic;
+					};
+				};
+			};
+			buildConfigurationList = D5E4CBB8360463AEB4A272BD /* Build configuration list for PBXProject "TelePilot" */;
+			developmentRegion = "zh-Hans";
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				"zh-Hans",
+			);
+			mainGroup = 5A0BBE7AC38BCB6299E7A43E;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				A3C6E52B8403E6AAEBBE3A79 /* XCLocalSwiftPackageReference "TelePilotCore" */,
+			);
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 8C7152EDEBC38CEE0B612CA0 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				689606D1C7F18E63EED2B704 /* TelePilot */,
+				63707EE197ECE59DCEC8016F /* TelePilotUITests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		1B30DAABADDC226C6F9E0097 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				D6C527EF38FC160F7E0B43EE /* Assets.xcassets in Resources */,
+				63C8830D1423065F61AE1F3A /* PrivacyInfo.xcprivacy in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		6460D053CB9E33A55B7A5713 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				79B21DFFE85F22B61B1D26CA /* AILiveness.swift in Sources */,
+				E9D1A0EBEDC2BCFEA5589DA4 /* AIPresentation.swift in Sources */,
+				952761BD17159D6FA34C5361 /* AIProviders.swift in Sources */,
+				23D1E37C1B00C5D9166FE9D5 /* AIUsage.swift in Sources */,
+				190715111E57BA57BC4B4B45 /* AIWorkspace.swift in Sources */,
+				90317CF0BCE3A729A234CCAA /* AccountManagementView.swift in Sources */,
+				4DE6F8216DF92A80B25F85BB /* AccountsView.swift in Sources */,
+				BC1FD94A092D99C85EA4F113 /* AppLock.swift in Sources */,
+				DF525F78F7C972FD2344E3E4 /* AppModel.swift in Sources */,
+				8E7ADFAFD8FEFAE9B5360374 /* AppNavigation.swift in Sources */,
+				D64A3611E56B2005CA457B41 /* AppServing.swift in Sources */,
+				6998959A60A66F25BA4CA439 /* AssistantInboxView.swift in Sources */,
+				484581446258AD2019F0E91C /* AssistantRedaction.swift in Sources */,
+				B80471918233D2494EC6827F /* AssistantStore.swift in Sources */,
+				0EC7CD8B95AA2E333E404B52 /* AssistantView.swift in Sources */,
+				47FDA06A27C3C12C38F4FA47 /* FileManagementView.swift in Sources */,
+				1B5D752E60BBE5D0A9CBFC84 /* FixtureService.swift in Sources */,
+				DCDCA2D5DF047E8FA10AFC49 /* LoginView.swift in Sources */,
+				F76863BF5116138B386BD89C /* ManagementCollections.swift in Sources */,
+				9592E80BE3FC7E63D347A748 /* ManagementForms.swift in Sources */,
+				D6AEC186649529E54AB14D5E /* ManagementJobs.swift in Sources */,
+				9B9808170CED544BDD8089CD /* ManagementPlugins.swift in Sources */,
+				E4FBDEBE4F82E3952705A4E9 /* ManagementRules.swift in Sources */,
+				9C657D4027BD8DA9296CB231 /* ManagementUI.swift in Sources */,
+				6831F006FD21A32133940BE3 /* ManagementView.swift in Sources */,
+				7901764592C78E770F0844FC /* MoreView.swift in Sources */,
+				702EA3E96F61E657A0C12224 /* OverviewComponents.swift in Sources */,
+				8BD74933286E7D1248175ECE /* OverviewCustomization.swift in Sources */,
+				6153B904980915FD4BEC55D0 /* OverviewView.swift in Sources */,
+				0DE54EE0D849DBAFF02D2F18 /* PrivacyFormatting.swift in Sources */,
+				B0CEF20BC7833D4E38385876 /* PrivacyShield.swift in Sources */,
+				939CB8EB7AF2DC4E52E410BE /* PushNotificationAppDelegate.swift in Sources */,
+				2B17A30BB82EB69D77A28049 /* PushNotificationManager.swift in Sources */,
+				9D1531925668D516D369F965 /* PushSettingsView.swift in Sources */,
+				1228565DBAEBE9623DC753A0 /* SettingsView.swift in Sources */,
+				88885830FD6DBAA8702EB75E /* TelePilotApp.swift in Sources */,
+				A920FDC791D162FD0D573C18 /* WorkspacePreferences.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		ED865F4BDB7266F0E8C038CF /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				ED354A1E77C52EA112C2F31D /* AssistantUITests.swift in Sources */,
+				00F4613DE15D81F631F58F58 /* ManagementUITests.swift in Sources */,
+				98BE1FA3E101EA2808E885EB /* RedesignedWorkspaceUITests.swift in Sources */,
+				3215E1001048E63F337EDB20 /* TelePilotUITests.swift in Sources */,
+				1D2A8324084D0725E692908E /* VisualInspectionUITests.swift in Sources */,
+				F30F76EE251AE4F0C20860C7 /* WorkspaceUITests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		A5ABA6CF6FEB7EFF14ED76C4 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 689606D1C7F18E63EED2B704 /* TelePilot */;
+			targetProxy = 22C4922F829EE318F2FA35E1 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		522030B1EB3BB8DD344FC3DD /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.telepilot.personal.uitests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = TelePilot;
+			};
+			name = Debug;
+		};
+		5E935FAEA58F771098227344 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_STYLE = Automatic;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 3;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				MARKETING_VERSION = 0.4.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 6.0;
+			};
+			name = Release;
+		};
+		9D0D2FF4DD6441B4C87F76D6 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = "$(TELEPILOT_PUSH_ENTITLEMENTS)";
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = TelePilotApp/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.telepilot.personal;
+				PRODUCT_NAME = TelePilot;
+				SDKROOT = iphoneos;
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		AD5E180CB4BA63E075A85B35 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_STYLE = Automatic;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 3;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				MARKETING_VERSION = 0.4.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 6.0;
+			};
+			name = Debug;
+		};
+		C329FB67CF9B6657C046210E /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.telepilot.personal.uitests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = TelePilot;
+			};
+			name = Release;
+		};
+		D12D16BBF7F6912F3E2B3B52 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = "$(TELEPILOT_PUSH_ENTITLEMENTS)";
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = TelePilotApp/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.telepilot.personal;
+				PRODUCT_NAME = TelePilot;
+				SDKROOT = iphoneos;
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		AFC4A84C9936C4F962B9E36F /* Build configuration list for PBXNativeTarget "TelePilot" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				9D0D2FF4DD6441B4C87F76D6 /* Debug */,
+				D12D16BBF7F6912F3E2B3B52 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		D5E4CBB8360463AEB4A272BD /* Build configuration list for PBXProject "TelePilot" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				AD5E180CB4BA63E075A85B35 /* Debug */,
+				5E935FAEA58F771098227344 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		F05AF733571179B53CBEF153 /* Build configuration list for PBXNativeTarget "TelePilotUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				522030B1EB3BB8DD344FC3DD /* Debug */,
+				C329FB67CF9B6657C046210E /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		A3C6E52B8403E6AAEBBE3A79 /* XCLocalSwiftPackageReference "TelePilotCore" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = TelePilotCore;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		0F741ABE684F88EEC1656271 /* TelePilotCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = TelePilotCore;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = BAFF5171D44E5C5005AB0EF3 /* Project object */;
+}

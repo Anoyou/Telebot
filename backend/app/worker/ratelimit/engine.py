@@ -425,6 +425,12 @@ class RateLimitEngine:
                     .where(Account.id == self.account_id)
                     .values(status=ACCOUNT_STATUS_FLOODWAIT)
                 )
+                from ...db.apns_events import enqueue
+
+                await db.run_sync(lambda sync: enqueue(
+                    sync.connection(), kind="account_alert",
+                    user_id=None, account_id=self.account_id,
+                ))
                 await db.commit()
         except Exception:
             log.exception("写 FloodWait override 失败")

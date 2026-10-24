@@ -1,5 +1,6 @@
 """所有 ORM 模型集中导出，便于 alembic autogenerate 与外部 import。"""
 
+from ..apns_events import install_listeners
 from .account import Account, HumanizeConfig, Proxy
 from .account_bot import AccountBot, AccountBotUser
 from .action_event import ActionEvent
@@ -27,6 +28,8 @@ from .rule import Rule
 from .system import NotificationChannel, SystemSetting
 from .system_agent import SystemAgentAction, SystemAgentMessage, SystemAgentSession, SystemAgentUserMemory
 from .user import WebUser
+
+install_listeners()
 
 __all__ = [
     "Account",
