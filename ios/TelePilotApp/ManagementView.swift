@@ -54,14 +54,15 @@ struct ManagementModuleView: View {
         Group {
             if module == .plugins { PluginManagementView() }
             else if module == .ai { AIWorkspaceView() }
+            else if module == .logs { LogsView() }
+            else if module == .ledger { LedgerView() }
             else {
                 List {
                     switch module {
                     case .plugins: EmptyView()
                     case .operations: operationSections
                     case .ai: aiSections
-                    case .logs: logSections
-                    case .ledger: ledgerSections
+                    case .logs, .ledger: EmptyView() // 由 LogsView / LedgerView 承载
                     case .webhooks: webhookSections
                     case .system: systemSections
                     case .maintenance: maintenanceSections
@@ -110,33 +111,6 @@ struct ManagementModuleView: View {
             document("AI 路由与输出配置", "/api/system/settings", actions: [.init(title: "修改路由与输出", path: "/api/system/settings", method: "PATCH")])
             collection("插件 AI 用量", "/api/llm/usage/plugins/summary")
             collection("最近 AI 调用", "/api/llm/usage/recent")
-        }
-    }
-    @ViewBuilder private var logSections: some View {
-        Section("日志") {
-            collection("消息日志", "/api/logs/messages")
-            collection("运行日志", "/api/logs/runtime")
-            collection("审计日志", "/api/logs/audit")
-            collection("Trace 调用链", "/api/logs/trace/events", kind: .traces, idField: "trace_id")
-            document("运行日志统计", "/api/logs/runtime/stats")
-            ManagementActionLink(action: .init(title: "查看系统控制台", path: "/api/logs/system-console", explanation: "读取服务器系统进程日志。"))
-        }
-        Section("路由诊断") {
-            ManagementActionLink(action: .init(title: "模拟消息路由", path: "/api/dispatch/simulate", explanation: "模拟路由命中过程，不向 Telegram 投递。"))
-            document("投递统计", "/api/dispatch/router-delivery-stats")
-            ManagementActionLink(action: .init(title: "开启路由诊断记录", path: "/api/dispatch/router-debug-trace"))
-        }
-    }
-    @ViewBuilder private var ledgerSections: some View {
-        Section("资金") {
-            document("台账汇总", "/api/ledger/summary")
-            document("运行统计", "/api/ledger/stats")
-            collection("交易明细", "/api/ledger")
-            collection("补偿与人工支付", "/api/ledger/compensations", kind: .compensations)
-        }
-        Section("高风险维护") {
-            ManagementActionLink(action: .init(title: "重置资金台账", path: "/api/ledger/reset", destructive: true,
-                explanation: "将清空服务器资金台账。此操作无法在 App 中撤销，请先完成备份并输入确认口令。"))
         }
     }
     @ViewBuilder private var webhookSections: some View {

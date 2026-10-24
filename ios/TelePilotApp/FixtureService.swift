@@ -108,6 +108,10 @@ actor FixtureService: AppServing {
         try checkConnection()
         let clean = String(path.split(separator: "?").first ?? "")
         if let value = fixtureValues[clean], method == "GET" { return value }
+        if method == "GET" {
+            let opsValue = Self.opsFixture(clean)
+            if !opsValue.isNull { return opsValue }
+        }
         if clean == "/api/system-agent/sessions", method == "POST" {
             return ["id": "fixture-session", "title": body?["title"] ?? "新会话", "status": "active"]
         }
@@ -142,7 +146,8 @@ actor FixtureService: AppServing {
         if clean == "/api/feature-matrix" {
             return [
                 "accounts": [
-                    ["id": 1, "name": "日常工作账号", "features": ["auto_reply": "active"], "feature_enabled": ["auto_reply": true]],
+                    ["id": 1, "name": "日常工作账号", "features": ["auto_reply": "active", "content_assistant": "failed"],
+                     "feature_enabled": ["auto_reply": true, "content_assistant": true]],
                     ["id": 2, "name": "备用账号", "features": ["auto_reply": "paused"], "feature_enabled": ["auto_reply": false]]
                 ],
                 "features": [
@@ -224,10 +229,6 @@ actor FixtureService: AppServing {
         if clean == "/api/apns/devices" { return [] }
         if clean == "/api/system/settings" { return ["timezone": "Asia/Shanghai", "command_prefix": ".", "ai_enabled": true] }
         if clean == "/api/system/capabilities" { return ["modules": []] }
-        if clean == "/api/ledger/summary" { return ["total": 0, "income": 0, "expense": 0] }
-        if clean == "/api/logs/runtime" {
-            return [["id": 1, "level": "info", "message": "界面日志测试 sk-proj-THIS_IS_A_FAKE_SECRET_FOR_UI_TEST_123456"]]
-        }
         if clean.contains("/import-config/preview") { return ["preview_signature": "fixture-signature", "warnings": [], "imported": 0] }
         if method == "GET" {
             if clean.contains("/config") || clean.contains("/health") || clean.contains("/network") || clean.contains("/status") {
@@ -263,6 +264,99 @@ actor FixtureService: AppServing {
         Account(id: 1, phone: "+10000000001", displayName: "日常工作账号", tgUsername: "telepilot_ui_test", status: firstStatus,
                 tags: ["日常", "工作"], enabledFeatures: 3, notes: "这是一条界面测试记录，不连接 Telegram 或真实服务器。",
                 createdAt: "2026-10-01T08:00:00Z", proxyLabel: "测试代理")
+    }
+
+    /// 日志、台账与概览的界面测试数据。日期固定，金额用字符串以匹配后端 Decimal 输出。
+    private static func opsFixture(_ path: String) -> JSONValue {
+        switch path {
+        case "/api/logs/runtime":
+            return [
+                ["id": 3, "ts": "2026-10-24T08:40:00.123456+00:00", "created_at": "2026-10-24T08:40:00Z", "account_id": 1, "level": "error",
+                 "source": "plugin", "message": "内容整理助手调用模型超时（30 秒）", "detail": ["plugin_key": "content_assistant", "trace_id": "fixture-trace-2"]],
+                ["id": 2, "ts": "2026-10-24T08:20:00Z", "created_at": "2026-10-24T08:20:00Z", "account_id": 2, "level": "warn",
+                 "source": "system", "message": "备用账号连接中断，正在重连", "detail": [:]],
+                ["id": 1, "ts": "2026-10-24T08:00:00Z", "created_at": "2026-10-24T08:00:00Z", "account_id": 1, "level": "info",
+                 "source": "system", "message": "界面日志测试 sk-proj-THIS_IS_A_FAKE_SECRET_FOR_UI_TEST_123456", "detail": nil]
+            ]
+        case "/api/logs/runtime/stats":
+            return ["total": 3, "debug": 0, "info": 1, "warn": 1, "error": 1, "by_account": [], "by_source": [], "cached": false]
+        case "/api/logs/messages", "/api/logs/trace/events":
+            return [
+                ["id": 2, "trace_id": "fixture-trace-2", "account_id": 1, "source_channel": "userbot", "event_type": "message",
+                 "chat_id": -1001234567, "chat_title": "测试群", "sender_user_id": 42, "sender_name": "小王", "text_preview": "帮我总结一下今天的讨论",
+                 "status": "failed", "started_at": "2026-10-24T08:39:30Z", "duration_ms": 30120, "plugin_count": 1,
+                 "plugin_keys": ["content_assistant"], "action_count": 0, "error_count": 1,
+                 "funel": ["received": "pass", "routed": "pass", "ran": "fail", "sent": "none", "verdict": "failed", "stuck_at": nil,
+                           "reason_code": "plugin_runtime_error", "reason_text": "插件运行异常：模型请求超时", "next_step": "检查 AI 供应商是否可用，或在插件中心查看错误详情。"],
+                 "verdict": "failed", "stuck_at": nil, "reason_code": "plugin_runtime_error",
+                 "reason_text": "插件运行异常：模型请求超时", "next_step": "检查 AI 供应商是否可用，或在插件中心查看错误详情。"],
+                ["id": 1, "trace_id": "fixture-trace-1", "account_id": 1, "source_channel": "userbot", "event_type": "command",
+                 "chat_id": 10086, "sender_user_id": 7, "sender_name": "老李", "text_preview": ".ping", "status": "ok",
+                 "started_at": "2026-10-24T08:10:00Z", "duration_ms": 180, "plugin_count": 1, "plugin_keys": ["auto_reply"],
+                 "action_count": 1, "error_count": 0,
+                 "funel": ["received": "pass", "routed": "pass", "ran": "pass", "sent": "pass", "verdict": "responded", "stuck_at": nil,
+                           "reason_code": "command_matched", "reason_text": "指令已命中并回复", "next_step": "无需处理。"],
+                 "verdict": "responded", "stuck_at": nil, "reason_code": "command_matched", "reason_text": "指令已命中并回复", "next_step": "无需处理。"]
+            ]
+        case "/api/logs/audit":
+            return [["id": 1, "ts": "2026-10-24T07:30:00Z", "user_id": 1, "action": "account.pause", "target": "account:2", "detail": ["reason": "界面测试"]]]
+        case "/api/ledger/summary":
+            return ["income": "1280.50", "payout": "860", "net": "420.50", "count": 18,
+                    "by_day": [
+                        ["key": "2026-10-20", "label": "2026-10-20", "income": "200", "payout": "150", "net": "50", "count": 3],
+                        ["key": "2026-10-21", "label": "2026-10-21", "income": "320.50", "payout": "100", "net": "220.50", "count": 4],
+                        ["key": "2026-10-22", "label": "2026-10-22", "income": "80", "payout": "260", "net": "-180", "count": 3],
+                        ["key": "2026-10-23", "label": "2026-10-23", "income": "400", "payout": "200", "net": "200", "count": 5],
+                        ["key": "2026-10-24", "label": "2026-10-24", "income": "280", "payout": "150", "net": "130", "count": 3]
+                    ],
+                    "by_chat": [
+                        ["key": "-1001234567", "label": "测试群", "income": "900", "payout": "500", "net": "400", "count": 12],
+                        ["key": "-1007654321", "label": "活动群", "income": "380.50", "payout": "360", "net": "20.50", "count": 6]
+                    ],
+                    "by_recipient": [
+                        ["key": "42", "label": "小王", "user_id": 42, "username": "xiaowang", "received": "500", "income": "0", "payout": "500", "count": 4]
+                    ]]
+        case "/api/ledger/stats":
+            return ["total": ["started_sessions": 26, "participant_count": 11, "payout_success_count": 9, "payout_failure_count": 1,
+                              "payout_attempt_count": 10, "payout_success_rate": "90.00", "ledger_income": "1280.50", "ledger_payout": "860",
+                              "ledger_net": "420.50", "ledger_count": 18],
+                    "by_day": [], "by_chat": [], "source_matrix": []]
+        case "/api/ledger":
+            return ["items": [
+                ["id": 2, "source": "action_event", "source_id": 2, "direction": "out", "amount": "150", "signed_amount": "-150", "status": "OK",
+                 "account_id": 1, "chat_id": -1001234567, "chat_title": "测试群", "receiver_user_id": 42, "receiver_name": "小王",
+                 "plugin_key": "lucky_game", "action_type": "payout", "channel": "userbot", "created_at": "2026-10-24T08:30:00Z", "params_summary": ["round": 12]],
+                ["id": 1, "source": "action_event", "source_id": 1, "direction": "in", "amount": "280", "signed_amount": "280", "status": "OK",
+                 "account_id": 1, "chat_id": -1001234567, "chat_title": "测试群", "payer_user_id": 7, "payer_name": "老李",
+                 "plugin_key": "lucky_game", "action_type": "payment_confirmed", "channel": "userbot", "created_at": "2026-10-24T08:00:00Z", "params_summary": [:]]
+            ]]
+        case "/api/ledger/compensations":
+            return ["items": [
+                ["id": 1, "payout_key": "fixture-payout-1", "account_id": 1, "trace_id": "fixture-trace-2", "plugin_key": "lucky_game", "origin": "payout",
+                 "chat_id": -1001234567, "chat_title": "测试群", "receiver_user_id": 42, "receiver_name": "小王", "amount": "50", "status": "pending",
+                 "error_code_last": "FLOOD_WAIT", "error_last": "Telegram 限流，稍后重试", "ambiguous": false, "retry_count": 2,
+                 "next_attempt_at": "2026-10-24T09:00:00Z", "created_at": "2026-10-24T08:31:00Z", "updated_at": "2026-10-24T08:45:00Z"]
+            ]]
+        default:
+            if path.hasPrefix("/api/logs/trace/events/") {
+                return ["id": 2, "trace_id": "fixture-trace-2", "account_id": 1, "source_channel": "userbot", "event_type": "message",
+                        "chat_id": -1001234567, "chat_title": "测试群", "sender_user_id": 42, "sender_name": "小王",
+                        "text_preview": "帮我总结一下今天的讨论", "status": "failed", "started_at": "2026-10-24T08:39:30Z", "duration_ms": 30120,
+                        "spans": [
+                            ["id": 1, "span_id": "s1", "trace_id": "fixture-trace-2", "phase": "receive", "status": "ok", "started_at": "2026-10-24T08:39:30Z", "duration_ms": 4],
+                            ["id": 2, "span_id": "s2", "trace_id": "fixture-trace-2", "phase": "subscription_match", "plugin_key": "content_assistant", "status": "ok",
+                             "reason_code": "matched", "started_at": "2026-10-24T08:39:30.010Z", "duration_ms": 6],
+                            ["id": 3, "span_id": "s3", "trace_id": "fixture-trace-2", "phase": "plugin_invoke", "plugin_key": "content_assistant", "status": "failed",
+                             "reason_code": "plugin_runtime_error", "message": "模型请求超时", "started_at": "2026-10-24T08:39:30.020Z", "duration_ms": 30100]
+                        ],
+                        "actions": [],
+                        "related_runtime_logs": [
+                            ["id": 3, "ts": "2026-10-24T08:40:00Z", "created_at": "2026-10-24T08:40:00Z", "account_id": 1, "level": "error",
+                             "source": "plugin", "message": "内容整理助手调用模型超时（30 秒）", "detail": ["plugin_key": "content_assistant"]]
+                        ]]
+            }
+            return .null
+        }
     }
 
     private func checkConnection() throws {
