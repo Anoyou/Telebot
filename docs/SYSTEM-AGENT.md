@@ -144,6 +144,8 @@ System Agent 使用四层上下文，并按预算持久化历史窗口：
 | `system.get_health` | DB/Redis/账号/Provider 就绪 |
 | `system.get_resources` | 主机与 TelePilot 进程树的 CPU、内存和磁盘快照 |
 | `system.get_versions` | 运行时与依赖版本：TelePilot 版本与部署 commit、Python、Telethon（含 Layer）、内置 Gateway 实际运行版本（未运行时探测内置二进制 `/version`）、核心依赖、Worker 运行环境、数据库与 Redis 服务端版本、OS/容器；可按包名查询任意已安装包，不返回环境变量或密钥 |
+| `diagnostics.system_checkup` | 一键体检（只读）：一次返回数据库/Redis/运行时组件、版本、总闸与平台模块、账号状态与 Worker 存活、最近 N 小时错误统计与高频错误、Provider 就绪度（凭据/模型/冷却/近期失败类型，不调用上游）、系统助手配置、定时任务失败/逾期、插件加载失败/可更新、通知 Bot 与 APNs；每项 `ok/warn/error/unknown` + 一句话结论 + 关键事实，附总体结论与按严重程度排序的“建议下一步”。每段独立超时（5 秒）与降级，总时长上限 25 秒；管理 Bot 渠道自动限定为当前账号 |
+| `diagnostics.account_checkup` | 单账号体检（只读）：`account_id` 或 `account`（ID/@用户名/名称/手机号片段模糊匹配，多命中返回候选），可选 `feature_key` 聚焦功能；检查会话与凭据、Worker、暂停/总闸、功能插件矩阵、Rule/交互规则/AI 指令路由、所用 Provider 就绪度、近期错误与动作事件、补付积压、活跃时段与最近活动时间，按可信度给出“为什么不回复”的可能原因与证据；Bot 渠道只能体检绑定账号 |
 | `accounts.list` / `accounts.get` | 账号列表与详情 |
 | `interaction.list_rules` / `get_rule` / `list_active_sessions` | 交互规则与活跃会话（账号 JSON，非 Rule 表） |
 | `rules.list` / `rules.get` / `rules.dry_run` | 通用 Rule 查询与无副作用试运行（拒绝 `feature_key=interaction`） |
@@ -179,6 +181,8 @@ System Agent 使用四层上下文，并按预算持久化历史窗口：
 Web 用内联卡片确认；Bot 用 Inline 按钮（`ab:{aid}:confirm|cancel:agent:{nonce}`）。
 
 Web 还有一级「待确认」收件箱（`/assistant/inbox`，侧栏带 pending 角标），可跨会话查看、单条确认/拒绝或批量拒绝 Action。会话流中的 Action 卡会展示摘要、风险、预览、密钥补填和运行时重新同步；它与模型调用前的 Run 级工具审批是两层不同门禁：前者确认具体业务写操作，后者只批准本轮模型选中的工具集合。
+
+“体检”“健康检查”“全面检查”“系统有没有问题”“账号为什么不回复/没反应/不工作”会优先路由到 `checkup` 技能（`diagnostics` 域）：先用一个体检工具拿到跨账号、Worker、规则、插件、日志与 Provider 的整体快照，再按“建议下一步”深入；体检本身只读，建议中的重启、恢复、巡检等写操作仍需确认。
 
 诊断请求可按“日志 → 错误事件 → 源码搜索 → 按行读取”的顺序定位代码级根因。
 源码工具只对管理员开放，只能读取当前部署包中的 `backend`、`frontend` 和已安装插件源码白名单；
