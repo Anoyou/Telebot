@@ -266,7 +266,7 @@ struct OverviewModuleView: View {
                 }
             }
         }
-        .navigationTitle(module.title)
+        .navigationTitle(module.title).navigationBarTitleDisplayMode(.inline)
         .refreshable { await model.refresh() }
     }
 }

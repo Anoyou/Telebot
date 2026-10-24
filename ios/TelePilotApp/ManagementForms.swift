@@ -251,7 +251,7 @@ struct ManagementFieldView: View {
                 Toggle(title, isOn: Binding(get: { value.boolValue ?? false }, set: { value = .bool($0) }))
             } else if spec["type"]?.stringValue == "object" || spec["properties"] != nil || value.objectValue != nil {
                 NavigationLink {
-                    Form { ManagementFieldsView(schema: spec, value: $value) }.navigationTitle(title)
+                    Form { ManagementFieldsView(schema: spec, value: $value) }.navigationTitle(title).navigationBarTitleDisplayMode(.inline)
                 } label: { LabeledContent("编辑" + title, value: ManagementText.scalar(value)) }
             } else if spec["type"]?.stringValue == "array" || value.arrayValue != nil {
                 NavigationLink {
@@ -324,7 +324,7 @@ struct ManagementArrayView: View {
             Button("添加项目", systemImage: "plus") {
                 var array = value.arrayValue ?? []; array.append(ManagementSchema.initial(schema)); value = .array(array)
             }
-        }.navigationTitle(title).toolbar { EditButton() }
+        }.navigationTitle(title).navigationBarTitleDisplayMode(.inline).toolbar { EditButton() }
     }
     private func item(_ index: Int) -> Binding<JSONValue> {
         Binding(get: { (value.arrayValue ?? []).indices.contains(index) ? value.arrayValue![index] : .null }, set: { new in

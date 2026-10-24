@@ -21,6 +21,8 @@ private enum PluginFilter: String, CaseIterable {
 
 struct PluginManagementView: View {
     var accountID: Int? = nil
+    /// 仅作为“插件”一级 Tab 根页面时使用大标题；从“管理”等处推入时用行内标题。
+    var isTabRoot = true
     @Environment(AppModel.self) private var model
     @State private var section: PluginWorkspaceSection = .center
     @State private var features: [JSONValue] = []
@@ -33,29 +35,37 @@ struct PluginManagementView: View {
             if let accountID {
                 PluginCenterView(features: features, fixedAccountID: accountID, loading: busy, loadError: error, reload: load)
             } else {
-                VStack(spacing: 0) {
-                    Picker("插件工作区", selection: $section) {
-                        ForEach(PluginWorkspaceSection.allCases, id: \.self) { item in
-                            Text(item.title).tag(item)
-                                .accessibilityIdentifier(item == .center ? "plugins.center" : "plugins.management")
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    .padding(.horizontal, 16).padding(.vertical, 10)
-                    .background(Color(.systemGroupedBackground))
-                    switch section {
-                    case .center:
-                        PluginCenterView(features: features, loading: busy, loadError: error, reload: load)
-                    case .management:
-                        PluginSourcesView(features: features, installed: installed, loading: busy, loadError: error, reload: load)
-                    }
+                // 分段切换挂在各自滚动视图的系统安全区栏上（iOS 26 safeAreaBar），
+                // 内容滚过时由系统滚动边缘效果承托，不再使用实色背景条。
+                switch section {
+                case .center:
+                    PluginCenterView(features: features, loading: busy, loadError: error, reload: load)
+                        .safeAreaBar(edge: .top) { sectionPicker }
+                case .management:
+                    PluginSourcesView(features: features, installed: installed, loading: busy, loadError: error, reload: load)
+                        .safeAreaBar(edge: .top) { sectionPicker }
                 }
             }
         }
         .background(Color(.systemGroupedBackground))
         .navigationTitle(accountID == nil ? "插件" : "插件与规则")
-        .navigationBarTitleDisplayMode(.inline)
+        // 一级 Tab 与概览、AI、更多保持一致使用大标题；账号下的子页面仍用行内标题。
+        .navigationBarTitleDisplayMode(accountID == nil && isTabRoot ? .large : .inline)
         .task { await load() }
+    }
+
+    private var sectionPicker: some View {
+        Picker("插件工作区", selection: $section) {
+            ForEach(PluginWorkspaceSection.allCases, id: \.self) { item in
+                Text(item.title).tag(item)
+                    .accessibilityIdentifier(item == .center ? "plugins.center" : "plugins.management")
+            }
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        .controlSize(.large)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
     }
 
     private func load() async {
@@ -151,7 +161,7 @@ private struct PluginCenterView: View {
                     }
                     if accountLoading { ProgressView().frame(maxWidth: .infinity, alignment: .leading) }
                     if filtered.isEmpty {
-                        ContentUnavailableView("没有匹配的插件", systemImage: "puzzlepiece.extension", description: Text("调整查看范围、状态或分类筛选。")).padding(.vertical, 24)
+                        ContentUnavailableView("没有匹配的插件", systemImage: "puzzlepiece.extension", description: Text("调整所选账号、状态或分类筛选。")).padding(.vertical, 24)
                     } else {
                         LazyVGrid(columns: columns, alignment: .leading, spacing: 10) {
                             ForEach(Array(filtered.enumerated()), id: \.offset) { _, feature in
@@ -186,16 +196,16 @@ private struct PluginCenterView: View {
         }
     }
 
-    /// 查看范围：决定卡片上显示“服务器整体状态”还是“某个账号里的启用与运行状态”。
+    /// 选择配置的账号：决定卡片上显示“服务器整体状态”还是“某个账号里的启用与运行状态”。
     @ViewBuilder private var scopePicker: some View {
         if fixedAccountID == nil {
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 10) {
-                    Label("查看范围", systemImage: "scope")
+                    Label("选择配置的账号：", systemImage: "person.crop.circle.badge.checkmark")
                         .font(.subheadline.weight(.semibold))
                     Spacer(minLength: 8)
                     Menu {
-                        Picker("查看范围", selection: $selectedAccountID) {
+                        Picker("选择配置的账号", selection: $selectedAccountID) {
                             Label("全部账号", systemImage: "square.stack.3d.up").tag(Int?.none)
                             ForEach(model.accounts) { account in
                                 Label(ManagementText.accountName(account), systemImage: "person.crop.circle").tag(Optional(account.id))
@@ -212,8 +222,8 @@ private struct PluginCenterView: View {
                     .accessibilityIdentifier("plugins.accountPicker")
                 }
                 Text(selectedAccountID == nil
-                     ? "显示插件在服务器上的整体状态。切换到某个账号可以查看并管理它在该账号里的启用情况。"
-                     : "卡片显示插件在此账号里是否启用、是否正常运行。点开插件即可为此账号开关或修改配置。")
+                     ? "未选择账号：卡片显示插件在服务器上的整体状态。选择一个账号后，可以查看并配置插件在该账号里的启用情况。"
+                     : "正在配置此账号：卡片显示插件在这个账号里是否启用、是否正常运行。点开插件即可为此账号开关或修改配置。")
                     .font(.footnote).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                 if model.accounts.isEmpty {
@@ -226,19 +236,34 @@ private struct PluginCenterView: View {
         }
     }
 
+    /// 状态筛选：iOS 26 原生玻璃胶囊按钮，选中项用 glassProminent（强调色），其余为普通玻璃。
+    /// 同一个 GlassEffectContainer 让相邻胶囊在切换时由系统统一渲染与融合。
     private var filterBar: some View {
         ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                ForEach(PluginFilter.allCases, id: \.self) { item in
-                    Button(item.title) { filter = item }
-                        .buttonStyle(.borderedProminent)
-                        .tint(filter == item ? Color.accentColor : Color(.secondarySystemGroupedBackground))
-                        .foregroundStyle(filter == item ? Color.white : Color.primary)
-                        .font(.subheadline)
-                        .accessibilityIdentifier("plugins.filter." + item.rawValue)
+            GlassEffectContainer(spacing: 8) {
+                HStack(spacing: 8) {
+                    ForEach(PluginFilter.allCases, id: \.self) { item in
+                        filterButton(item)
+                    }
                 }
+                .padding(.vertical, 4)
             }
         }
+        .scrollClipDisabled()
+    }
+
+    @ViewBuilder private func filterButton(_ item: PluginFilter) -> some View {
+        let selected = filter == item
+        Group {
+            if selected {
+                Button(item.title) { filter = item }.buttonStyle(.glassProminent)
+            } else {
+                Button(item.title) { filter = item }.buttonStyle(.glass)
+            }
+        }
+        .font(.subheadline)
+        .accessibilityAddTraits(selected ? .isSelected : [])
+        .accessibilityIdentifier("plugins.filter." + item.rawValue)
     }
 
     private func loadAccountFeatures() async {
@@ -1069,7 +1094,7 @@ private struct AccountPluginDetailView: View {
                 }
             }
         }
-        .navigationTitle(ManagementText.title(feature))
+        .navigationTitle(ManagementText.title(feature)).navigationBarTitleDisplayMode(.inline)
         .task {
             guard !loaded else { return }
             let key = feature["key"]?.stringValue ?? ""
@@ -1241,11 +1266,11 @@ private struct PluginTechnicalInfoView: View {
             }
 
             Section {
-                NavigationLink { List { ManagementValueView(value: feature) }.navigationTitle("插件原始字段") } label: {
+                NavigationLink { List { ManagementValueView(value: feature) }.navigationTitle("插件原始字段").navigationBarTitleDisplayMode(.inline) } label: {
                     Label("插件原始字段", systemImage: "curlybraces")
                 }
                 if let accountState {
-                    NavigationLink { List { ManagementValueView(value: accountState) }.navigationTitle("账号插件原始字段") } label: {
+                    NavigationLink { List { ManagementValueView(value: accountState) }.navigationTitle("账号插件原始字段").navigationBarTitleDisplayMode(.inline) } label: {
                         Label("账号插件原始字段", systemImage: "curlybraces.square")
                     }
                 }
@@ -1777,7 +1802,7 @@ struct ManagementLocalPluginsView: View {
                     NavigationLink { ManagementFormView(action: .init(title: "安装 " + name, path: "/api/plugin-repos/local/plugins/\(ManagementText.pathSegment(name))/install")) } label: { ManagementRecordRow(value: item) }
                 }
             }
-        }.navigationTitle("本地参考插件").task {
+        }.navigationTitle("本地参考插件").navigationBarTitleDisplayMode(.inline).task {
             do { items = ManagementText.items(try await model.request(path: "/api/plugin-repos/local/plugins")) }
             catch { self.error = error.localizedDescription }
         }

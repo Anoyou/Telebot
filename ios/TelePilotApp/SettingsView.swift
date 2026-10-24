@@ -5,6 +5,7 @@ struct SettingsView: View {
     @Environment(AppModel.self) private var model
     @Environment(AppLockModel.self) private var lock
     @State private var confirmation: Confirmation?
+    @AppStorage(AppAppearance.storageKey) private var appearanceRaw = AppAppearance.system.rawValue
     private enum Confirmation: String, Identifiable {
         case logout, server
         var id: String { rawValue }
@@ -19,6 +20,17 @@ struct SettingsView: View {
 
     private var form: some View {
             Form {
+                Section {
+                    Picker(selection: $appearanceRaw) {
+                        ForEach(AppAppearance.allCases) { item in
+                            Label(item.title, systemImage: item.symbol).tag(item.rawValue)
+                        }
+                    } label: { Label("外观", systemImage: "circle.lefthalf.filled") }
+                    .pickerStyle(.menu)
+                    .accessibilityIdentifier("settings.appearance")
+                } header: { Text("外观") } footer: {
+                    Text("“自动”跟随系统的浅色／深色设置；选择后立即生效，仅保存在本机。")
+                }
                 Section("原生体验") {
                     NavigationLink { OverviewCustomizationView() } label: { Label("首页模块", systemImage: "square.grid.2x2") }
                     NavigationLink { PushSettingsView() } label: { Label("Apple 推送通知", systemImage: "bell.badge") }
@@ -58,22 +70,6 @@ struct SettingsView: View {
                     Text("离开 App 时始终遮住任务切换器中的内容；超过所选时间后返回，需要通过 Face ID、Touch ID 或设备密码解锁。适当的宽限期便于切到 Telegram 查看验证码。此功能不删除服务器会话。")
                 }
                 Section {
-                    NavigationLink { AboutView() } label: {
-                        Label {
-                            LabeledContent("关于 TelePilot") {
-                                Text(AppInfo.version).monospacedDigit()
-                            }
-                        } icon: { Image(systemName: "info.circle") }
-                    }
-                    .accessibilityIdentifier("settings.about")
-                    ServerUpdateButton()
-                    if let error = model.versionError {
-                        NoticeView(title: model.serverVersion == nil ? "版本读取失败" : "版本信息已过期", message: error)
-                    }
-                } header: { Text("关于与更新") } footer: {
-                    Text("服务器与 App 独立更新。兼容接口的修复通常不需要重装 App；新增原生页面或不兼容接口变化才需要更新客户端。")
-                }
-                Section {
                     Label("密码不保存在 App 中", systemImage: "lock.shield")
                     Label("仅在前台读取服务器数据", systemImage: "iphone")
                     Label("管理功能使用服务器现有权限", systemImage: "server.rack")
@@ -90,9 +86,21 @@ struct SettingsView: View {
                     }
                     .frame(minHeight: 44).accessibilityIdentifier("settings.logout")
                 }
+                Section {
+                    NavigationLink { AboutView() } label: {
+                        Label {
+                            LabeledContent("关于与更新") {
+                                Text(AppInfo.version).monospacedDigit()
+                            }
+                        } icon: { Image(systemName: "info.circle") }
+                    }
+                    .accessibilityIdentifier("settings.about")
+                } header: { Text("关于") } footer: {
+                    Text("版本信息、检查服务器更新、更新通道与自动检查都集中在“关于与更新”里。")
+                }
             }
             .symbolRenderingMode(.hierarchical)
-            .navigationTitle("设置")
+            .navigationTitle("设置").navigationBarTitleDisplayMode(.inline)
             .accessibilityIdentifier("settings.screen")
             .confirmationDialog(
                 confirmation == .server ? "退出并更换服务器？" : "退出登录？",
@@ -117,6 +125,34 @@ extension SettingsView {
         case 0: "立即"
         case 60: "离开 1 分钟后"
         default: "离开 \(seconds / 60) 分钟后"
+        }
+    }
+}
+
+/// App 外观：自动跟随系统，或固定浅色／深色。保存在本机 UserDefaults。
+enum AppAppearance: String, CaseIterable, Identifiable {
+    case system, light, dark
+    static let storageKey = "app.appearance"
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .system: "自动"
+        case .light: "浅色"
+        case .dark: "深色"
+        }
+    }
+    var symbol: String {
+        switch self {
+        case .system: "circle.lefthalf.filled"
+        case .light: "sun.max"
+        case .dark: "moon"
+        }
+    }
+    var colorScheme: ColorScheme? {
+        switch self {
+        case .system: nil
+        case .light: .light
+        case .dark: .dark
         }
     }
 }

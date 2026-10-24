@@ -65,7 +65,7 @@ struct AccountsView: View {
                     }
                 }
             }
-            .navigationTitle("账号")
+            .navigationTitle("账号").navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     NavigationLink { AccountManagementLoginView() } label: { Label("添加账号", systemImage: "plus") }
