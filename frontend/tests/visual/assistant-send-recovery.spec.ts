@@ -124,14 +124,20 @@ test("恢复终态旧任务后连续发送，不能静默清空或永久保留�
 });
 
 // 用浏览器原生 ReadableStream 模拟代理不关闭连接；其它 API 仍走隔离路由。
-async function holdProgressStream(page: Page, withDone = false) {
-  await page.addInitScript((withDone) => {
+async function holdProgressStream(page: Page, withDone = false, initialDelta = "") {
+  await page.addInitScript(({ withDone, initialDelta }) => {
     const original = window.fetch.bind(window);
     window.fetch = async (input, init) => {
       if (String(input).includes("/api/system-agent/runs/") && String(input).includes("/stream?")) {
         window.sessionStorage.setItem("test-stream-opened", "true");
+        const count = Number(window.sessionStorage.getItem("test-stream-count") || 0);
+        window.sessionStorage.setItem("test-stream-count", String(count + 1));
+        const afterSeq = Number(new URL(String(input), window.location.origin).searchParams.get("after_seq") || 0);
         return new Response(new ReadableStream({
           start(controller) {
+            if (initialDelta && afterSeq < 1) controller.enqueue(new TextEncoder().encode(
+              JSON.stringify({ type: "assistant_delta", seq: 1, delta: initialDelta }) + "\n",
+            ));
             if (withDone) controller.enqueue(new TextEncoder().encode('{"type":"done","seq":2,"ok":true}\n'));
             init?.signal?.addEventListener("abort", () => controller.error(new DOMException("Aborted", "AbortError")), { once: true });
           },
@@ -139,7 +145,7 @@ async function holdProgressStream(page: Page, withDone = false) {
       }
       return original(input, init);
     };
-  }, withDone);
+  }, { withDone, initialDelta });
 }
 
 test("提交受理就释放输入框，不等长任务执行完才允许继续排队", async ({ page }) => {
@@ -183,6 +189,31 @@ test("进度流静默超时只核对旧任务，不重发消息或调用新任�
   await page.clock.fastForward(90_001);
   await expect.poll(() => state.snapshots).toBeGreaterThan(0);
   await expect(composer(page).getByRole("button", { name: "停止", exact: true })).toHaveCount(0);
+  expect(state.posts).toHaveLength(0);
+  fixture.assertClean();
+});
+
+test("排队转运行时保留已接收的回复，不重复订阅或跳过文本", async ({ page }) => {
+  const { fixture, state } = await installScenario(page);
+  const delta = "排队期间已收到的回复不能消失";
+  state.runs = [{ ...run, status: "queued" }];
+  await holdProgressStream(page, false, delta);
+  await page.clock.install();
+  await page.goto("/assistant");
+  await expect(page.getByText(delta, { exact: true })).toBeVisible();
+
+  state.runs = [{ ...run, status: "running", last_seq: 1 }];
+  const runningPoll = page.waitForResponse(async (response) => {
+    if (new URL(response.url()).pathname !== "/api/system-agent/runs") return false;
+    const rows = await response.json();
+    return rows.some((row: typeof run) => row.id === run.id && row.status === "running");
+  });
+  await page.clock.fastForward(3_001);
+  await runningPoll;
+  await page.clock.runFor(100);
+
+  await expect(page.getByText(delta, { exact: true })).toBeVisible();
+  expect(await page.evaluate(() => sessionStorage.getItem("test-stream-count"))).toBe("1");
   expect(state.posts).toHaveLength(0);
   fixture.assertClean();
 });
