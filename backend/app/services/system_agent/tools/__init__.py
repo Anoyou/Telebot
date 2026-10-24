@@ -32,6 +32,7 @@ def register_all_tools(registry: ToolRegistry) -> None:
         plugin_repos,
         plugins,
         product,
+        provider_patrol,
         providers,
         routing,
         rules,
@@ -59,6 +60,7 @@ def register_all_tools(registry: ToolRegistry) -> None:
     scheduler.register(registry)
     system_settings.register(registry)
     providers.register(registry)
+    provider_patrol.register(registry)
     commands.register(registry)
     config_bundles.register(registry)
     connectivity.register(registry)

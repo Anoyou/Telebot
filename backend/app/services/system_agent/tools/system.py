@@ -111,7 +111,64 @@ async def get_resources(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any
         }
 
 
+async def get_versions(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
+    """只读汇总运行时与依赖版本；不返回环境变量、连接串或任何密钥。"""
+
+    from ...runtime_versions import collect_runtime_versions
+
+    package = args.get("package")
+    package_name = str(package).strip() if isinstance(package, str) else ""
+    probe_gateway = args.get("probe_gateway")
+    try:
+        result = await collect_runtime_versions(
+            ctx.db,
+            package=package_name or None,
+            probe_gateway=True if probe_gateway is None else bool(probe_gateway),
+        )
+    except Exception as exc:  # noqa: BLE001
+        return {
+            "error": "version_probe_failed",
+            "message": f"版本信息采集失败：{type(exc).__name__}",
+            "business_changed": False,
+        }
+    result["business_changed"] = False
+    return result
+
+
 def register(registry: ToolRegistry) -> None:
+    registry.register(
+        ToolSpec(
+            name="system.get_versions",
+            channels=("web", "bot"),
+            description=(
+                "查询当前部署的运行时与依赖版本：TelePilot 版本与部署 Git commit、Python 版本、"
+                "内置 Telethon 版本（含 MTProto Layer 与 cryptg）、内置 telepilot-gateway"
+                "（Codex Gateway）的实际运行版本/协议版本/构建 commit、FastAPI/SQLAlchemy/"
+                "Pydantic/httpx/redis 等核心依赖版本、Worker 进程运行环境、PostgreSQL/SQLite "
+                "与 Redis 服务端版本、操作系统/容器信息。用户问“telethon 版本”“gateway 版本”"
+                "“依赖/库版本”“Python 版本”“数据库/Redis 版本”“部署的是哪个 commit”时调用。"
+                "可用 package 参数查询任意已安装 Python 包的版本。"
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "package": {
+                        "type": "string",
+                        "description": "可选：要额外查询的 Python 包名（如 telethon、openai、orjson），大小写和 -/_ 不敏感。",
+                        "maxLength": 100,
+                    },
+                    "probe_gateway": {
+                        "type": "boolean",
+                        "description": "Gateway 未运行时是否短暂探测内置二进制的 /version，默认 true。",
+                    },
+                },
+                "additionalProperties": False,
+            },
+            read_only=True,
+            min_role="viewer",
+            read_handler=get_versions,
+        )
+    )
     registry.register(
         ToolSpec(
             name="system.get_resources",
