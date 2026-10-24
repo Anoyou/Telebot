@@ -45,7 +45,7 @@ struct LoginView: View {
                         .accessibilityLabel("服务器地址")
                         .accessibilityIdentifier("login.server")
                 } header: { Text("服务器") } footer: {
-                    Text("填写管理台的 HTTPS 根地址。登录信息只发送到这台服务器，不经过第三方服务。")
+                    Text("填写管理台的 HTTPS 根地址，可省略 https://。登录信息只发送到这台服务器，不经过第三方服务。")
                 }
                 Section("登录账号") {
                     TextField("用户名", text: $username)
@@ -77,14 +77,14 @@ struct LoginView: View {
                             .focused($focusedField, equals: .code)
                             .accessibilityIdentifier("login.code")
                         if challenge?.recoveryAvailable == true || challenge?.requireTotp == true {
-                            Button(usingRecovery ? "改用验证码" : "改用恢复码") {
+                            Button(usingRecovery ? "改用验证码" : "改用恢复码", systemImage: usingRecovery ? "number" : "key") {
                                 usingRecovery.toggle()
                                 code = ""
                                 error = nil
                             }
                             .accessibilityIdentifier("login.recovery")
                         }
-                        Button("重新开始验证") { resetChallenge(); error = nil }
+                        Button("重新开始验证", systemImage: "arrow.counterclockwise") { resetChallenge(); error = nil }
                             .accessibilityIdentifier("login.reset")
                     } header: { Text("安全验证") } footer: {
                         if challenge?.requireOtp == true, let ttl = challenge?.otpTTLSeconds {
@@ -98,7 +98,7 @@ struct LoginView: View {
                 if let message = model.sessionCleanupError {
                     Section {
                         NoticeView(title: "旧会话尚未安全移除", message: message)
-                        Button("重试清理旧会话") {
+                        Button("重试清理旧会话", systemImage: "arrow.clockwise") {
                             error = nil
                             Task { await model.retrySessionCleanup() }
                         }
@@ -106,7 +106,7 @@ struct LoginView: View {
                     }
                 } else if model.canRetrySession {
                     Section {
-                        Button("重试已有会话") { Task { await model.retrySession() } }
+                        Button("重试已有会话", systemImage: "arrow.clockwise") { Task { await model.retrySession() } }
                             .accessibilityIdentifier("login.retrySession")
                     } footer: { Text("连接失败没有删除原会话。恢复网络后可直接重试，无需重新输入密码。") }
                 }
@@ -142,10 +142,18 @@ struct LoginView: View {
                 if value == nil { server = "" }
             }
             .onChange(of: server) { _, _ in password = ""; resetChallenge(); error = nil }
-            .onChange(of: username) { _, _ in password = ""; resetChallenge(); error = nil }
+            // 不清空密码：系统密码自动填充可能先写入密码再写入用户名。
+            .onChange(of: username) { _, _ in resetChallenge(); error = nil }
             .onChange(of: password) { _, _ in resetChallenge(); error = nil }
             .onDisappear { password = ""; resetChallenge() }
         }
+    }
+
+    /// 用户省略协议时补全 https://；其他校验仍由 TelePilotClient.normalizedServerURL 负责。
+    static func serverInput(_ text: String) -> String {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, !trimmed.contains("://") else { return trimmed }
+        return "https://" + trimmed
     }
 
     private func resetChallenge() {
@@ -169,7 +177,7 @@ struct LoginView: View {
         )
         Task {
             do {
-                if let result = try await model.login(server: server, request: request), !result.ok {
+                if let result = try await model.login(server: Self.serverInput(server), request: request), !result.ok {
                     challenge = result
                     code = ""
                     usingRecovery = false

@@ -40,16 +40,16 @@ struct AIUsageSection: View {
         let summary = workspace.usageSummary
         Section {
             HStack(spacing: 20) {
-                AIMetric(title: "总 Token", value: AIPresentation.tokens(summary["total_tokens"]?.intValue ?? 0))
+                AIMetric(title: "总词元", value: AIPresentation.tokens(summary["total_tokens"]?.intValue ?? 0))
                 AIMetric(title: "请求", value: String(summary["request_count"]?.intValue ?? 0))
-                AIMetric(title: "成功率", value: successRate(summary), detail: "平均 \(summary["avg_latency_ms"]?.intValue ?? 0) ms")
+                AIMetric(title: "成功率", value: successRate(summary), detail: "平均耗时 \(AIPresentation.latency(summary["avg_latency_ms"]?.intValue))")
             }
             HStack(spacing: 20) {
                 AIMetric(title: "失败", value: String(summary["failed_count"]?.intValue ?? 0), color: summary["failed_count"]?.intValue ?? 0 > 0 ? .orange : .primary)
-                AIMetric(title: "Fallback", value: String(summary["fallback_count"]?.intValue ?? 0))
-                AIMetric(title: "缓存读取", value: cacheRead)
+                AIMetric(title: "改用备用模型", value: String(summary["fallback_count"]?.intValue ?? 0))
+                AIMetric(title: "缓存命中词元", value: cacheRead)
             }
-        } header: { Text("最近 100 条以内") } footer: { Text("统计基于当前读取的近期记录。缓存数据仅汇总服务器实际返回的字段，不推算命中率。") }
+        } header: { Text("最近 100 条以内") } footer: { Text("“词元（Token）”是模型计费和长度的单位；“改用备用模型”表示首选模型失败后自动换了备用模型；“缓存命中词元”是供应商从缓存读取、通常更便宜的部分，仅在供应商返回该数据时统计。") }
 
         Section("筛选") {
             Picker("结果", selection: $filter) {
@@ -71,7 +71,7 @@ struct AIUsageSection: View {
         } header: { Text("\(items.count) 条调用") }
 
         Section {
-            Button("清空调用记录", role: .destructive) { confirmingReset = true }
+            Button(role: .destructive) { confirmingReset = true } label: { Label("清空调用记录", systemImage: "trash") }
                 .disabled(workspace.usageItems.isEmpty || resetting)
                 .accessibilityIdentifier("ai.usage.reset")
             if resetting { ProgressView("正在清空服务器记录…") }
@@ -93,7 +93,7 @@ struct AIUsageSection: View {
                         Text("\(item["request_count"]?.intValue ?? 0) 次").monospacedDigit().foregroundStyle(.secondary)
                     }
                     HStack(spacing: 16) {
-                        Text("Token \(AIPresentation.tokens(item["total_tokens"]?.intValue ?? ((item["input_tokens"]?.intValue ?? 0) + (item["output_tokens"]?.intValue ?? 0))))")
+                        Text("词元 \(AIPresentation.tokens(item["total_tokens"]?.intValue ?? ((item["input_tokens"]?.intValue ?? 0) + (item["output_tokens"]?.intValue ?? 0))))")
                         Text("失败 \(item["failed_count"]?.intValue ?? 0)")
                             .foregroundStyle(item["failed_count"]?.intValue ?? 0 > 0 ? .orange : .secondary)
                     }.font(.caption).monospacedDigit()
@@ -143,10 +143,10 @@ struct AIUsageRow: View {
             HStack {
                 Text(AIPresentation.usageSource(item["source"]?.stringValue))
                 Spacer()
-                Text("\(AIPresentation.tokens((item["input_tokens"]?.intValue ?? 0) + (item["output_tokens"]?.intValue ?? 0))) Token")
-                Text("\(item["latency_ms"]?.intValue ?? 0) ms")
+                Text("\(AIPresentation.tokens((item["input_tokens"]?.intValue ?? 0) + (item["output_tokens"]?.intValue ?? 0))) 词元")
+                Text(AIPresentation.latency(item["latency_ms"]?.intValue))
             }.font(.caption2).foregroundStyle(.secondary).monospacedDigit()
-            if item["used_fallback"]?.boolValue == true { Text("已使用 Fallback").font(.caption2).foregroundStyle(.orange) }
+            if item["used_fallback"]?.boolValue == true { Text("已改用备用模型").font(.caption2).foregroundStyle(.orange) }
             if let error = item["error_type"]?.stringValue, !error.isEmpty {
                 Text(AIPresentation.status(error)).font(.caption).foregroundStyle(.red).lineLimit(2)
             }
@@ -169,18 +169,18 @@ struct AIUsageDetailView: View {
                 LabeledContent("来源", value: AIPresentation.usageSource(item["source"]?.stringValue))
                 LabeledContent("供应商", value: item["provider_name"]?.stringValue ?? "未记录")
                 LabeledContent("模型", value: item["model"]?.stringValue ?? "未记录")
-                if let key = item["provider_key_label"]?.stringValue, !key.isEmpty { LabeledContent("密钥池", value: key) }
+                if let key = item["provider_key_label"]?.stringValue, !key.isEmpty { LabeledContent("使用的密钥", value: key) }
                 if let account = item["account_id"]?.intValue { LabeledContent("账号", value: "账号 #\(account)") }
             }
             Section("用量与传输") {
-                LabeledContent("输入 Token", value: AIPresentation.tokens(item["input_tokens"]?.intValue ?? 0))
-                LabeledContent("输出 Token", value: AIPresentation.tokens(item["output_tokens"]?.intValue ?? 0))
-                LabeledContent("耗时", value: "\(item["latency_ms"]?.intValue ?? 0) ms")
-                LabeledContent("Fallback", value: item["used_fallback"]?.boolValue == true ? "已使用" : "未使用")
-                LabeledContent("客户端身份", value: item["client_identity_profile"]?.stringValue ?? "未记录")
-                LabeledContent("实际后端", value: item["execution_backend"]?.stringValue ?? "未记录")
-                if let cache = item["cache_read_tokens"]?.intValue { LabeledContent("缓存读取", value: AIPresentation.tokens(cache)) }
-                if let cache = item["cache_write_tokens"]?.intValue { LabeledContent("缓存写入", value: AIPresentation.tokens(cache)) }
+                LabeledContent("输入词元", value: AIPresentation.tokens(item["input_tokens"]?.intValue ?? 0))
+                LabeledContent("输出词元", value: AIPresentation.tokens(item["output_tokens"]?.intValue ?? 0))
+                LabeledContent("耗时", value: AIPresentation.latency(item["latency_ms"]?.intValue))
+                LabeledContent("备用模型", value: item["used_fallback"]?.boolValue == true ? "首选失败，已改用备用模型" : "未使用")
+                LabeledContent("客户端身份", value: item["client_identity_profile"]?.stringValue.map { AIPresentation.clientIdentity($0) } ?? "未记录")
+                LabeledContent("调用方式", value: item["execution_backend"]?.stringValue.map { AIPresentation.executionBackend($0) } ?? "未记录")
+                if let cache = item["cache_read_tokens"]?.intValue { LabeledContent("缓存命中词元", value: AIPresentation.tokens(cache)) }
+                if let cache = item["cache_write_tokens"]?.intValue { LabeledContent("写入缓存词元", value: AIPresentation.tokens(cache)) }
             }
             if let error = item["error_type"]?.stringValue, !error.isEmpty {
                 Section("错误类型") { Text(AIPresentation.status(error)).foregroundStyle(.red) }
@@ -194,10 +194,10 @@ struct AIUsageDetailView: View {
                 }
             }
             if item["execution_backend"]?.stringValue == "codex_gateway" {
-                Section("Gateway 诊断") {
-                    LabeledContent("版本", value: item["gateway_version"]?.stringValue ?? "未记录")
-                    LabeledContent("阶段", value: item["gateway_stage"]?.stringValue ?? "未记录")
-                    LabeledContent("Request ID", value: item["gateway_request_id"]?.stringValue ?? "未记录")
+                Section("内置网关诊断") {
+                    LabeledContent("网关版本", value: item["gateway_version"]?.stringValue ?? "未记录")
+                    LabeledContent("处理阶段", value: item["gateway_stage"]?.stringValue ?? "未记录")
+                    LabeledContent("请求编号", value: item["gateway_request_id"]?.stringValue ?? "未记录")
                 }
             }
         }

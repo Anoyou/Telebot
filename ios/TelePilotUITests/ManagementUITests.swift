@@ -29,7 +29,10 @@ final class ManagementUITests: XCTestCase {
     func testLedgerResetRequiresExactPhraseBeforeConfirmation() {
         let app = launch()
         app.buttons["资金台账"].tap()
-        app.buttons["重置资金台账"].tap()
+        let reset = app.buttons["重置资金台账"]
+        XCTAssertTrue(app.descendants(matching: .any)["ledger.screen"].firstMatch.waitForExistence(timeout: 10))
+        for _ in 0..<12 where !(reset.exists && reset.isHittable) { app.swipeUp() }
+        reset.tap()
         let field = app.textFields["确认口令"]
         XCTAssertTrue(field.waitForExistence(timeout: 10))
         app.buttons["management.submit"].tap()
@@ -48,15 +51,71 @@ final class ManagementUITests: XCTestCase {
         XCTAssertFalse(app.buttons["预览导入影响"].isEnabled)
     }
 
+    func testServerUpdateRequiresConfirmationBeforeApplying() {
+        let app = launch()
+        let about = app.buttons["more.about"]
+        XCTAssertTrue(about.waitForExistence(timeout: 10))
+        about.tap()
+        XCTAssertTrue(app.staticTexts["App 版本"].waitForExistence(timeout: 10))
+        let open = app.buttons["update.open"]
+        for _ in 0..<4 where !open.isHittable { app.swipeUp() }
+        open.tap()
+        XCTAssertTrue(app.staticTexts["发现新版本"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["0.105.0-beta.1"].exists)
+        let apply = app.buttons["update.apply"]
+        for _ in 0..<4 where !apply.isHittable { app.swipeUp() }
+        apply.tap()
+        XCTAssertTrue(app.buttons["update.confirm"].firstMatch.waitForExistence(timeout: 5))
+        app.buttons["取消"].firstMatch.tap()
+        XCTAssertFalse(app.otherElements["update.applied"].exists)
+        XCTAssertFalse(app.staticTexts["更新任务已启动"].exists)
+    }
+
     func testRuntimeLogCredentialsAreMaskedByDefault() {
         let app = launch()
         app.buttons["日志与诊断"].tap()
-        app.buttons["运行日志"].tap()
+        let runtime = app.buttons["logs.kind.runtime"]
+        XCTAssertTrue(runtime.waitForExistence(timeout: 10))
+        for _ in 0..<6 where !runtime.isHittable { app.swipeUp() }
+        runtime.tap()
         let message = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "界面日志测试")).firstMatch
         XCTAssertTrue(message.waitForExistence(timeout: 10))
         XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "sk-proj-THIS_IS_A_FAKE_SECRET_FOR_UI_TEST_123456")).firstMatch.exists)
         let screenshot = XCTAttachment(screenshot: app.screenshot())
         screenshot.name = "原生日志默认脱敏"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+    }
+
+    func testLogDetailExplainsMessageFailureAndOpensTimeline() {
+        let app = launch()
+        app.buttons["日志与诊断"].tap()
+        let messages = app.buttons["logs.kind.messages"]
+        XCTAssertTrue(messages.waitForExistence(timeout: 10))
+        for _ in 0..<6 where !messages.isHittable { app.swipeUp() }
+        messages.tap()
+        let failure = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "处理失败")).firstMatch
+        XCTAssertTrue(failure.waitForExistence(timeout: 10))
+        failure.tap()
+        XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "建议下一步")).firstMatch.waitForExistence(timeout: 10))
+        let timeline = app.buttons["logs.openTrace"]
+        for _ in 0..<8 where !(timeline.exists && timeline.isHittable) { app.swipeUp() }
+        timeline.tap()
+        XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "插件开始执行")).firstMatch.waitForExistence(timeout: 10))
+        let screenshot = XCTAttachment(screenshot: app.screenshot())
+        screenshot.name = "日志处理时间线"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+    }
+
+    func testLedgerShowsSummaryAndCharts() {
+        let app = launch()
+        app.buttons["资金台账"].tap()
+        let net = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "净额")).firstMatch
+        XCTAssertTrue(net.waitForExistence(timeout: 10))
+        XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "待补付")).firstMatch.exists)
+        let screenshot = XCTAttachment(screenshot: app.screenshot())
+        screenshot.name = "资金台账汇总与图表"
         screenshot.lifetime = .keepAlways
         add(screenshot)
     }

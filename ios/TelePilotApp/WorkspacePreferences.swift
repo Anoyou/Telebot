@@ -19,7 +19,7 @@ enum DockItem: String, CaseIterable, Codable, Identifiable {
         case .plugins: "puzzlepiece.extension"
         case .ai: "cpu"
         case .more: "ellipsis.circle"
-        case .agent: "bubble.left.and.bubble.right"
+        case .agent: "sparkles"
         }
     }
 }

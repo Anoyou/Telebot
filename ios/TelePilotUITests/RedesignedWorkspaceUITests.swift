@@ -28,27 +28,48 @@ final class RedesignedWorkspaceUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["gpt-5.4-mini"].exists)
     }
 
-    func testAILivenessRequiresPreviewBeforeStarting() {
+    func testAILivenessConfirmsBeforeStartingAndOffersRetry() {
         let app = launch(tab: "AI")
         let liveness = app.buttons["模型批量测活"].firstMatch
         XCTAssertTrue(liveness.waitForExistence(timeout: 10))
         liveness.tap()
         XCTAssertTrue(app.navigationBars["模型测活"].waitForExistence(timeout: 10))
-        let preview = app.buttons["ai.liveness.preview"]
-        for _ in 0..<3 where !preview.exists { app.swipeUp() }
-        XCTAssertTrue(preview.waitForExistence(timeout: 10))
-        XCTAssertEqual(preview.label, "预览测试范围与消耗")
-        XCTAssertFalse(app.buttons["ai.liveness.start"].exists)
-        preview.tap()
-        XCTAssertTrue(preview.waitForExistence(timeout: 5))
         let start = app.buttons["ai.liveness.start"]
         for _ in 0..<5 where !start.isHittable { app.swipeUp() }
-        XCTAssertTrue(start.waitForExistence(timeout: 5))
+        XCTAssertTrue(start.waitForExistence(timeout: 10))
+        XCTAssertTrue(start.isEnabled)
         start.tap()
-        let startAction = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "开始测活")).firstMatch
-        XCTAssertTrue(startAction.waitForExistence(timeout: 5))
-        XCTAssertTrue(startAction.isEnabled)
-        startAction.tap()
+        let confirm = app.buttons["确认并开始"]
+        XCTAssertTrue(confirm.waitForExistence(timeout: 5))
+        confirm.tap()
         XCTAssertTrue(app.staticTexts["执行进度"].waitForExistence(timeout: 10))
+        let retry = app.buttons["ai.liveness.retryFailed"]
+        for _ in 0..<5 where !retry.exists { app.swipeUp() }
+        XCTAssertTrue(retry.waitForExistence(timeout: 10))
+    }
+
+    func testAIGlobalSettingsIsNativeForm() {
+        let app = launch(tab: "AI")
+        let entry = app.buttons["ai.settings.global"]
+        for _ in 0..<6 where !entry.exists { app.swipeUp() }
+        XCTAssertTrue(entry.waitForExistence(timeout: 10))
+        entry.tap()
+        let save = app.buttons["ai.settings.save"]
+        for _ in 0..<6 where !save.exists { app.swipeUp() }
+        XCTAssertTrue(save.waitForExistence(timeout: 10))
+        XCTAssertFalse(save.isEnabled)
+    }
+
+    func testAICommandEnablementShowsAliasesAndAccounts() {
+        let app = launch(tab: "AI")
+        let entry = app.buttons["ai.settings.commands"]
+        for _ in 0..<6 where !entry.exists { app.swipeUp() }
+        XCTAssertTrue(entry.waitForExistence(timeout: 10))
+        entry.tap()
+        let command = app.buttons["ai.command.11"]
+        XCTAssertTrue(command.waitForExistence(timeout: 10))
+        command.tap()
+        XCTAssertTrue(app.staticTexts["指令别名"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts[".a"].exists)
     }
 }

@@ -59,9 +59,19 @@ final class AppLockModel {
     @ObservationIgnored private let defaults: UserDefaults
     @ObservationIgnored private let preferenceKey = "telepilot.interfaceLock"
     @ObservationIgnored private var generation = 0
+    @ObservationIgnored private let graceKey = "telepilot.interfaceLock.grace"
+    @ObservationIgnored private var backgroundedAt: Date?
+
+    /// 进入后台后多久需要重新验证。0 表示立即锁定（默认）。
+    static let graceOptions: [Int] = [0, 60, 300, 900]
+    var graceSeconds: Int {
+        didSet { defaults.set(graceSeconds, forKey: graceKey) }
+    }
 
     init(defaults: UserDefaults = .standard, authenticator: (any AppLockAuthenticating)? = nil) {
         self.defaults = defaults
+        let storedGrace = defaults.integer(forKey: "telepilot.interfaceLock.grace")
+        graceSeconds = Self.graceOptions.contains(storedGrace) ? storedGrace : 0
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("--ui-test-lock") {
             self.authenticator = FixtureAuthenticator()
@@ -79,8 +89,24 @@ final class AppLockModel {
         isObscured = isEnabled
     }
 
+    /// App 进入后台。宽限期为 0 时立即锁定；否则记录时间，回到前台时由 `resume()` 判断。
+    /// 任务切换器与录屏遮挡由场景遮罩独立负责，不受宽限期影响。
     func suspend() {
         guard isEnabled else { return }
+        guard graceSeconds > 0 else { lockNow(); return }
+        if backgroundedAt == nil { backgroundedAt = Date() }
+    }
+
+    /// App 回到前台。超过宽限期（或系统时间被回拨）则锁定。
+    func resume() {
+        guard isEnabled, let since = backgroundedAt else { return }
+        backgroundedAt = nil
+        let elapsed = Date().timeIntervalSince(since)
+        if elapsed < 0 || elapsed >= Double(graceSeconds) { lockNow() }
+    }
+
+    private func lockNow() {
+        backgroundedAt = nil
         generation += 1
         isObscured = true
         isAuthenticating = false

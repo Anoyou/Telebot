@@ -290,4 +290,15 @@ final class TelePilotUITests: XCTestCase {
         XCTAssertTrue(moveDown.isEnabled)
         capture("概览自定义", app: app)
     }
+
+    func testOverviewSurfacesItemsThatNeedAttention() {
+        let app = launch()
+        XCTAssertTrue(app.buttons["overview.refresh"].waitForExistence(timeout: 15))
+        let relogin = app.buttons["overview.attention.account-3"]
+        XCTAssertTrue(relogin.waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["overview.attention.plugin-content_assistant"].exists)
+        capture("概览需要处理", app: app)
+        relogin.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["account.status"].firstMatch.waitForExistence(timeout: 10))
+    }
 }

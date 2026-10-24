@@ -36,6 +36,10 @@ final class AppModel {
     private(set) var plugins: [JSONValue] = []
     private(set) var workspaceError: String?
     var requestedRoute: AppRoute?
+    /// 推送或其他入口要求 Agent 标签页打开的会话；由内嵌助手读取后清空。
+    private(set) var assistantSessionRequest: String?
+    /// 写操作已被服务器接受，正在重新读取状态。与读取失败（*Error）区分，避免误报“已过期”。
+    private(set) var isSyncingAfterAction = false
 
     @ObservationIgnored private var service: (any AppServing)?
     @ObservationIgnored private var generation = 0
@@ -159,6 +163,15 @@ final class AppModel {
         return result
     }
 
+    func requestAssistantSession(_ id: String?) {
+        assistantSessionRequest = id
+    }
+
+    func consumeAssistantSessionRequest() -> String? {
+        defer { assistantSessionRequest = nil }
+        return assistantSessionRequest
+    }
+
     func refresh() async {
         guard phase == .signedIn, let service else { return }
         if isRefreshing { refreshAgain = true; return }
@@ -193,6 +206,7 @@ final class AppModel {
         case .failure(let error): versionError = message(error)
         }
         if errors.isEmpty { lastUpdated = Date() }
+        if !refreshAgain { isSyncingAfterAction = false }
         if refreshAgain {
             refreshAgain = false
             await refresh()
@@ -243,8 +257,7 @@ final class AppModel {
             actionMessages[id] = detailErrors[id] == nil
                 ? "服务器已接受操作，账号信息已重新读取。运行进程可能需要片刻同步。"
                 : "服务器已接受操作，但未能读取最新状态。请刷新确认，不要重复操作。"
-            healthError = "账号操作后正在重新读取进程状态。"
-            resourcesError = "账号操作后正在重新读取资源状态。"
+            isSyncingAfterAction = true
             await refresh()
         } catch {
             guard token == generation else { return }
@@ -263,8 +276,7 @@ final class AppModel {
                 actionMessages[id] = detailErrors[id] == nil
                     ? failureMessage
                     : failureMessage + " 最新账号状态也未能读取，请刷新确认后再操作。"
-                healthError = "账号操作后正在重新读取进程状态。"
-                resourcesError = "账号操作后正在重新读取资源状态。"
+                isSyncingAfterAction = true
                 await refresh()
             }
         }
@@ -420,6 +432,8 @@ final class AppModel {
     private func clearData() {
         pendingActions = []
         plugins = []
+        assistantSessionRequest = nil
+        isSyncingAfterAction = false
         workspaceError = nil
         requestedRoute = nil
         user = nil

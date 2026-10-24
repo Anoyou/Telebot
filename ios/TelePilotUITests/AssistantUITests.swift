@@ -30,6 +30,40 @@ final class AssistantUITests: XCTestCase {
         XCTAssertFalse(send.isEnabled)
     }
 
+    func testAgentHidesDockAndMinimizeReturnsToPreviousTab() {
+        let app = openAssistant()
+        let overview = app.tabBars.buttons["概览"]
+        XCTAssertFalse(overview.exists && overview.isHittable)
+        let minimize = app.buttons["assistant.minimize"]
+        XCTAssertTrue(minimize.waitForExistence(timeout: 5))
+        minimize.tap()
+        XCTAssertTrue(app.tabBars.buttons["Agent"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.tabBars.buttons["概览"].isHittable)
+    }
+
+    func testSessionListClosesAndDeleteNeedsConfirmation() {
+        let app = openAssistant()
+        let open = app.buttons["assistant.sessions"]
+        guard open.waitForExistence(timeout: 5) else { return } // iPad 使用常驻侧栏
+        open.tap()
+        let row = app.buttons["assistant.session.fixture-session"].firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: 10))
+        row.swipeLeft()
+        let delete = app.buttons["删除"].firstMatch
+        XCTAssertTrue(delete.waitForExistence(timeout: 5))
+        delete.tap()
+        XCTAssertTrue(app.staticTexts["删除这个会话？"].waitForExistence(timeout: 5))
+        let cancel = app.buttons["取消"].firstMatch
+        if cancel.exists && cancel.isHittable { cancel.tap() }
+        else { app.otherElements["PopoverDismissRegion"].firstMatch.tap() }
+        XCTAssertTrue(row.exists)
+        let close = app.buttons["assistant.sessions.close"]
+        XCTAssertTrue(close.waitForExistence(timeout: 5))
+        close.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["assistant.composer"].firstMatch.waitForExistence(timeout: 5))
+        XCTAssertFalse(close.exists)
+    }
+
     func testActionRequiresExplicitConfirmation() {
         let app = openAssistant()
         app.buttons["助手菜单"].tap()

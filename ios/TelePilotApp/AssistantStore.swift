@@ -78,6 +78,7 @@ final class AssistantStore {
     var includeBot = false
     var modelIndex = -1
     var accountID: Int?
+    var deletingSessionID: String?
     @ObservationIgnored private var streamTask: Task<Void, Never>?
     @ObservationIgnored private var generation = 0
     @ObservationIgnored private var lastSeq = 0
@@ -168,22 +169,50 @@ final class AssistantStore {
         } catch { self.error = AssistantPresentation.error(error) }
     }
 
-    func deleteSession(_ model: AppModel) async {
-        guard let sessionID, !busy else { return }
+    /// 删除指定会话。写操作只提交一次：失败或结果未知时重新读取列表展示真实状态，不自动重试。
+    @discardableResult
+    func deleteSession(id: String, model: AppModel) async -> Bool {
+        guard !busy, deletingSessionID == nil else { return false }
+        if id == sessionID && runActive {
+            error = "当前会话仍有任务在执行。请先停止任务，结束后再删除。"
+            return false
+        }
         busy = true
-        defer { busy = false }
+        deletingSessionID = id
+        defer { busy = false; deletingSessionID = nil }
+        error = nil
         do {
-            _ = try await model.request(path: AssistantPresentation.root + "/sessions/\(AssistantPresentation.path(sessionID))", method: "DELETE")
+            // 删除前读取一次服务器任务列表，避免删除仍在执行任务的会话。
+            let rows = try await model.request(path: AssistantPresentation.root + "/runs?limit=200&include_bot=true").assistantItems
+            if rows.contains(where: { $0.text("session_id") == id && !AssistantPresentation.terminal.contains($0.text("status")) }) {
+                error = "该会话仍有任务在执行。请先打开会话停止任务，结束后再删除。"
+                return false
+            }
+            _ = try await model.request(path: AssistantPresentation.root + "/sessions/\(AssistantPresentation.path(id))", method: "DELETE")
+        } catch {
+            self.error = AssistantPresentation.error(error)
+            await loadSessions(model)
+            return false
+        }
+        sessions.removeAll { $0.id == id }
+        let wasCurrent = id == sessionID
+        if wasCurrent {
             generation += 1
             streamTask?.cancel()
-            self.sessionID = nil
+            sessionID = nil
             session = nil
             messages = []
+            runs = []
+            events = []
             activeRun = nil
             liveText = ""
+            liveReasoning = ""
             streaming = false
-            await loadSessions(model)
-        } catch { self.error = AssistantPresentation.error(error) }
+        }
+        await loadSessions(model)
+        if wasCurrent, let next = sessions.first { await select(next.id, model: model) }
+        notice = "会话已删除。"
+        return true
     }
 
     func refreshMessages(_ model: AppModel, older: Bool = false) async {

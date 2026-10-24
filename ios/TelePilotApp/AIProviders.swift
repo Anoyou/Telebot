@@ -44,7 +44,7 @@ struct AIProviderListSection: View {
         } header: {
             if workspace.loaded { Text("\(providers.count) 个供应商") }
         } footer: {
-            Text("可调用以主密钥或启用的密钥池为准。模型是否被下游使用，由模型清单中的启用状态决定。")
+            Text("“可调用”表示已配好主密钥或启用的密钥池（Ollama 本地模型无需密钥）。只有模型清单里启用的模型，才能被 AI 指令和测活使用。")
         }
     }
 }
@@ -63,7 +63,7 @@ struct AIProviderRow: View {
                 if !issues.isEmpty {
                     AIStatusLabel(title: "\(issues.count) 项异常", symbol: "exclamationmark.circle.fill", color: .orange)
                 } else if AIPresentation.ready(provider) {
-                    AIStatusLabel(title: "凭据就绪", symbol: "checkmark.circle.fill", color: .green)
+                    AIStatusLabel(title: "可调用", symbol: "checkmark.circle.fill", color: .green)
                 } else {
                     AIStatusLabel(title: "缺少有效密钥", symbol: "key.slash", color: .orange)
                 }
@@ -71,7 +71,7 @@ struct AIProviderRow: View {
             Text(provider["default_model"]?.stringValue ?? "未设置默认模型")
                 .font(.subheadline).foregroundStyle(.secondary).lineLimit(2)
             HStack(spacing: 12) {
-                Text(provider["provider"]?.stringValue?.capitalized ?? "未知类型")
+                Text(AIPresentation.providerType(provider["provider"]?.stringValue))
                 Text("\(AIPresentation.enabledModels(provider).count) 个启用模型")
                 if let keys = provider["pool_keys"]?.arrayValue, !keys.isEmpty {
                     Text("密钥池 \(keys.filter { $0["enabled"]?.boolValue == true }.count)/\(keys.count)")
@@ -100,15 +100,15 @@ struct AIProviderDetailView: View {
     var body: some View {
         List {
             Section {
-                LabeledContent("类型", value: provider["provider"]?.stringValue?.capitalized ?? "未知")
+                LabeledContent("类型", value: AIPresentation.providerType(provider["provider"]?.stringValue))
                 LabeledContent("默认模型", value: provider["default_model"]?.stringValue ?? "未设置")
-                LabeledContent("接口协议", value: provider["api_format"]?.stringValue ?? "chat_completions")
-                LabeledContent("调用凭据") {
-                    Text(AIPresentation.ready(provider) ? "已就绪" : "未配置有效密钥")
+                LabeledContent("接口协议", value: AIPresentation.apiFormat(provider["api_format"]?.stringValue))
+                LabeledContent("调用密钥") {
+                    Text(AIPresentation.ready(provider) ? "已配置" : "未配置有效密钥")
                         .foregroundStyle(AIPresentation.ready(provider) ? .green : .orange)
                 }
                 if provider["provider"]?.stringValue == "ollama" {
-                    Text("Ollama 本地服务不需要 API Key，可调用状态取决于服务与模型。")
+                    Text("Ollama 本地模型不需要密钥，能否调用取决于本地服务是否在运行。")
                         .font(.caption).foregroundStyle(.secondary)
                 }
             }
@@ -143,42 +143,54 @@ struct AIProviderDetailView: View {
                 }
                 .accessibilityIdentifier("ai.provider.keys")
                 if provider["has_api_key"]?.boolValue == true {
-                    NavigationLink("验证后查看主密钥") { AIProviderSecretView(path: base + "/api-key") }
+                    NavigationLink { AIProviderSecretView(path: base + "/api-key") } label: {
+                        Label("验证后查看主密钥", systemImage: "key")
+                    }
                 } else {
                     Text("主密钥未配置；可添加池内密钥，或在编辑供应商时替换主密钥。")
                         .font(.caption).foregroundStyle(.secondary)
                 }
             }
 
-            Section("连通性") {
+            Section {
                 NavigationLink { AILivenessView(workspace: workspace, providerID: provider["id"]?.intValue) } label: {
                     Label("测活此供应商", systemImage: "waveform.path.ecg")
                 }
-                ManagementActionLink(action: .init(title: "单模型连通性测试", path: base + "/test-model",
-                    explanation: "服务器将使用最小输出向上游发送一次真实请求，可能产生用量。"))
-                ManagementActionLink(action: .init(title: "真实对话批量测试", path: base + "/chat-test-models",
-                    explanation: "用自定义测试语和上下文检查多个模型，可能产生实际上游用量。"))
+                NavigationLink {
+                    ManagementFormView(action: .init(title: "单个模型快速测试", path: base + "/test-model",
+                        explanation: "填写模型名称，服务器会让它回复几个字，确认能否连通，并显示耗时。会产生极少量费用。"))
+                } label: { Label("单个模型快速测试", systemImage: "bolt.horizontal") }
+                NavigationLink {
+                    ManagementFormView(action: .init(title: "多模型对话测试", path: base + "/chat-test-models",
+                        explanation: "用自定义测试语同时检查多个模型的真实对话效果，可能产生上游费用。"))
+                } label: { Label("多模型对话测试", systemImage: "bubble.left.and.bubble.right") }
+            } header: {
+                Text("连通性")
+            } footer: {
+                Text("“测活此供应商”最直观：会逐个检查已启用的模型，并显示耗时和失败原因。")
             }
 
             Section("高级配置") {
-                NavigationLink("编辑连接、路由与输出") {
+                NavigationLink {
                     ManagementFormView(action: .init(title: "编辑供应商", path: base, method: "PATCH",
                         explanation: "仅提交选择编辑的字段。已有密钥与敏感请求头不会回填；留空表示保持不变。", seed: provider)) { value in
                         provider = value; workspace.replaceProvider(value)
                     }
-                }
+                } label: { Label("编辑连接、路由与输出", systemImage: "square.and.pencil") }
                 .accessibilityIdentifier("ai.provider.edit")
-                NavigationLink("服务地址与传输详情") { AIProviderTechnicalView(provider: provider) }
+                NavigationLink { AIProviderTechnicalView(provider: provider) } label: {
+                    Label("服务地址与传输详情", systemImage: "network")
+                }
             }
 
             Section {
-                NavigationLink("删除供应商") {
+                NavigationLink {
                     ManagementFormView(action: .init(title: "删除供应商", path: base, method: "DELETE", destructive: true,
                         explanation: "将删除此供应商及其密钥池配置。关联的 AI 指令可能无法继续调用，请先确认路由和备用模型。")) { _ in
                         Task { await workspace.refresh(model) }
                         dismiss()
                     }
-                }
+                } label: { Label("删除供应商", systemImage: "trash") }
                 .foregroundStyle(.red)
             }
         }
@@ -195,15 +207,21 @@ private struct AIProviderTechnicalView: View {
         List {
             Section("服务") {
                 LabeledContent("服务地址", value: provider["base_url"]?.stringValue ?? "供应商默认地址")
-                LabeledContent("执行方式", value: provider["execution_backend"]?.stringValue ?? "direct")
-                LabeledContent("协议配置", value: provider["protocol_profile"]?.stringValue ?? "standard")
-                LabeledContent("客户端身份", value: provider["client_identity_profile"]?.stringValue ?? "auto")
+                LabeledContent("调用方式", value: AIPresentation.executionBackend(provider["execution_backend"]?.stringValue))
+                LabeledContent("协议配置", value: AIPresentation.protocolProfile(provider["protocol_profile"]?.stringValue))
+                LabeledContent("客户端身份", value: AIPresentation.clientIdentity(provider["client_identity_profile"]?.stringValue))
+                LabeledContent("联网搜索接口", value: AIPresentation.apiFormat(provider["web_search_api_format"]?.stringValue ?? "auto"))
                 LabeledContent("出口代理", value: provider["proxy_id"]?.intValue.map { "代理 #\($0)" } ?? "直连")
             }
-            Section("路由元数据") {
-                LabeledContent("内容模态", value: provider["modality"]?.stringValue ?? "text")
-                LabeledContent("成本等级", value: String(provider["cost_tier"]?.intValue ?? 2))
-                LabeledContent("标签", value: (provider["tags"]?.arrayValue ?? []).compactMap(\.stringValue).joined(separator: "、"))
+            Section {
+                LabeledContent("能处理的内容", value: AIPresentation.modality(provider["modality"]?.stringValue))
+                LabeledContent("成本等级", value: AIPresentation.costTier(provider["cost_tier"]?.intValue))
+                let tags = (provider["tags"]?.arrayValue ?? []).compactMap(\.stringValue).map(AIPresentation.tag)
+                LabeledContent("擅长", value: tags.isEmpty ? "未设置" : tags.joined(separator: "、"))
+            } header: {
+                Text("自动路由参考信息")
+            } footer: {
+                Text("开启“自动路由”的 AI 指令会参考这些信息挑选模型：例如翻译类问题优先选标为“翻译”“低成本”的模型。")
             }
             if let notes = provider["notes"]?.stringValue, !notes.isEmpty {
                 Section("备注") { Text(notes) }
@@ -260,7 +278,7 @@ struct AIProviderModelsView: View {
     var body: some View {
         List {
             Section {
-                Text("只有启用的模型会出现在下游模型选择与批量测活范围中。修改模型能力元数据请使用编辑供应商，避免覆盖上游返回的信息。")
+                Text("只有启用的模型才能被 AI 指令选择和参与测活。模型的能力信息（上下文长度、是否支持图片等）请在“编辑供应商”中修改。")
                     .font(.subheadline).foregroundStyle(.secondary)
             }
             Section("候选模型") {
@@ -275,8 +293,10 @@ struct AIProviderModelsView: View {
                             Spacer()
                             if item["custom"]?.boolValue == true { Text("手动添加").font(.caption2).foregroundStyle(.secondary) }
                         }
-                        NavigationLink("查看模型元数据") { List { ManagementValueView(value: item) }.navigationTitle(item["id"]?.stringValue ?? "模型详情") }
-                            .font(.caption)
+                        NavigationLink { List { ManagementValueView(value: item) }.navigationTitle(item["id"]?.stringValue ?? "模型详情") } label: {
+                            Label("查看模型详细信息", systemImage: "info.circle")
+                        }
+                        .font(.caption)
                     }
                     .accessibilityIdentifier("ai.model.\(item["id"]?.stringValue ?? "unknown")")
                 }
@@ -296,7 +316,7 @@ struct AIProviderModelsView: View {
                     .accessibilityIdentifier("ai.models.save")
                 if busy { ProgressView("正在保存到服务器…") }
                 if uncertain { Text("请返回并重新读取供应商，确认服务器实际状态后再保存。").font(.caption) }
-            } footer: { Text("服务器将整体替换模型清单，现有模型 ID、能力、推理与上下文元数据会原样保留。") }
+            } footer: { Text("保存时会整体更新模型清单，各模型已有的能力信息会原样保留。") }
         }
         .navigationTitle("模型清单").navigationBarTitleDisplayMode(.inline)
         .task { models = provider["models"]?.arrayValue ?? [] }
