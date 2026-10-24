@@ -42,6 +42,8 @@
 - 插件契约新增 `guest_message` 事件、`guest_all` 订阅范围、标准信封 `guest` 字段、`answer_guest_query` 动作与 `ctx.messages.answer_guest_query()`；访客场景下付款／发奖、置顶、按钮 ACK、媒体发送、转账指令与会话创建会被跳过并记录 `guest_*` 原因码，另有按调用者／按 Bot 的访客限流。
 - 新增 `GET /api/accounts/{aid}/bot/capabilities`，读取 `getMe.supports_guest_queries` 等能力位；Web 管理 Bot／交互 Bot 页与 iOS「账号管理」显示“访客模式（Guest Mode）：已开启／未开启”及 BotFather 开启方法。
 - `event_bus_demo` 示例补充访客消息订阅与 fixture，插件参考文档、速查与使用指南补充访客模式说明。
+- iOS AI 管理新增“全部供应商巡检”：对应 Web 的“全部 Provider 巡检”，默认选中全部有启用模型的供应商，可搜索、按供应商或单个模型挑选范围，设置回复长度、超时和并发；开始前由服务器核对范围并确认（任务较多时提示“大规模巡检”），之后显示真实进度、按供应商分组的结果、正常/失败/跳过/取消筛选与清空结果。从单个供应商进入的测活改为“供应商测活”，与全局巡检分开保存范围与结果，并提供“改为全部供应商巡检”入口。
+- 客户端身份版本的“查询官方最新版本 / 使用最新版本”现在也覆盖 Codex Desktop：App 版本号读取 OpenAI 官方 Sparkle 更新源（`persistent.oaistatic.com/codex-app-prod/appcast.xml`），内置核心版本通过 HTTP Range 只读取最新官方安装包中的 `codex-cli/codex-package.json`（约 1 MB 流量，不下载整个安装包、不执行任何内容）；Web 与 iOS 同步显示检测源。
 
 ### iOS 推送（APNs）
 
@@ -61,15 +63,16 @@
 - 更新入口收敛为“关于与更新”页里唯一的“检查服务器更新”：移除“设置”和“备份与维护”中重复的更新按钮与“自动检查更新设置”。
 - 助手回答底部改为与 Web 一致的一行摘要（模型 · 输入/输出词元 · 工具次数 · 耗时），点按展开详情；工具调用结果并入展开后的详情，不再在对话中单独成块，原始数据仍脱敏并默认折叠。
 
-### 新增
-
-- iOS AI 管理新增“全部供应商巡检”：对应 Web 的“全部 Provider 巡检”，默认选中全部有启用模型的供应商，可搜索、按供应商或单个模型挑选范围，设置回复长度、超时和并发；开始前由服务器核对范围并确认（任务较多时提示“大规模巡检”），之后显示真实进度、按供应商分组的结果、正常/失败/跳过/取消筛选与清空结果。从单个供应商进入的测活改为“供应商测活”，与全局巡检分开保存范围与结果，并提供“改为全部供应商巡检”入口。
-- 客户端身份版本的“查询官方最新版本 / 使用最新版本”现在也覆盖 Codex Desktop：App 版本号读取 OpenAI 官方 Sparkle 更新源（`persistent.oaistatic.com/codex-app-prod/appcast.xml`），内置核心版本通过 HTTP Range 只读取最新官方安装包中的 `codex-cli/codex-package.json`（约 1 MB 流量，不下载整个安装包、不执行任何内容）；Web 与 iOS 同步显示检测源。
-
 ### 优化
 
 - iOS“添加供应商”改为与 Web 对齐的原生表单：常用项只保留名称、接入地址、API Key、接口协议与模型（可先读取模型列表再勾选启用、选择默认模型），服务类型、调用方式、客户端身份、协议细节、联网搜索接口、出口代理、能处理的内容、成本等级、自动路由标签和备注收进“高级设置”并逐项中文说明；不再在新建时展示密钥池策略、模型能力原始字段与兼容请求头。
 - iOS AI 概览移除与“供应商”分栏重复的“管理供应商与模型”入口，“供应商”分栏在供应商较多时提供搜索。
+
+### 持续集成
+
+- 新增 GitHub Actions「iOS」工作流（`.github/workflows/ios.yml`）：在 macOS 26 + Xcode 26.6 上校验工程源文件清单与 OpenAPI／表单契约同步、运行 TelePilotCore `swift test`，并在 iOS 26 模拟器上以 fixture 模式编译和运行全部 UI 测试；失败时上传 xcresult。针对 `Beta`／`main` 的 iOS 相关 PR、推送到 `Beta` 时自动触发，也可手动运行。
+- 新增 `ios/scripts/check-xcodeproj-sources.py`，检查手工维护的 `TelePilot.xcodeproj` 是否收录全部 Swift 源文件。
+- 同步 iOS 原生表单契约 `contract.json`（访客模式新增的接口与字段）。
 
 ### 文档
 
