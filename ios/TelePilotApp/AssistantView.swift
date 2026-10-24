@@ -26,6 +26,7 @@ struct AssistantView: View {
     @State private var confirmReplace = false
     @State private var abandonPending = false
     @State private var editingPair: AssistantEditPair?
+    @State private var pinnedToBottom = true
     private let initialID: String?
     private let embedded: Bool
 
@@ -75,7 +76,14 @@ struct AssistantView: View {
                     }
             }
         }
-        .task { await store.start(model, initialID: initialID) }
+        .task {
+            let requested = embedded ? model.consumeAssistantSessionRequest() : nil
+            await store.start(model, initialID: initialID ?? requested)
+        }
+        .onChange(of: model.assistantSessionRequest) { _, value in
+            guard embedded, value != nil, let id = model.consumeAssistantSessionRequest() else { return }
+            Task { await store.select(id, model: model) }
+        }
         .onDisappear { store.pauseSubscription() }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active { Task { await store.restoreRun(model); if store.unresolvedSend { await store.reconcileSend(model) } } }
@@ -202,7 +210,20 @@ struct AssistantView: View {
                 .defaultScrollAnchor(.bottom)
                 .scrollDismissesKeyboard(.interactively)
                 .refreshable { await store.refreshMessages(model); await store.restoreRun(model) }
-                .onChange(of: store.messages.count) { _, _ in withAnimation { proxy.scrollTo("assistant.bottom", anchor: .bottom) } }
+                // 用户停留在底部附近时才跟随；向上翻阅历史时不打断。
+                .onScrollGeometryChange(for: Bool.self) { geometry in
+                    geometry.visibleRect.maxY >= geometry.contentSize.height - 80
+                } action: { _, nearBottom in pinnedToBottom = nearBottom }
+                .onChange(of: store.messages.count) { _, _ in
+                    pinnedToBottom = true
+                    withAnimation { proxy.scrollTo("assistant.bottom", anchor: .bottom) }
+                }
+                .onChange(of: store.liveText) { _, _ in
+                    if pinnedToBottom { proxy.scrollTo("assistant.bottom", anchor: .bottom) }
+                }
+                .onChange(of: store.liveReasoning) { _, _ in
+                    if pinnedToBottom { proxy.scrollTo("assistant.bottom", anchor: .bottom) }
+                }
             }
             if store.runActive { runBar }
         }

@@ -45,7 +45,7 @@ struct LoginView: View {
                         .accessibilityLabel("服务器地址")
                         .accessibilityIdentifier("login.server")
                 } header: { Text("服务器") } footer: {
-                    Text("填写管理台的 HTTPS 根地址。登录信息只发送到这台服务器，不经过第三方服务。")
+                    Text("填写管理台的 HTTPS 根地址，可省略 https://。登录信息只发送到这台服务器，不经过第三方服务。")
                 }
                 Section("登录账号") {
                     TextField("用户名", text: $username)
@@ -142,10 +142,18 @@ struct LoginView: View {
                 if value == nil { server = "" }
             }
             .onChange(of: server) { _, _ in password = ""; resetChallenge(); error = nil }
-            .onChange(of: username) { _, _ in password = ""; resetChallenge(); error = nil }
+            // 不清空密码：系统密码自动填充可能先写入密码再写入用户名。
+            .onChange(of: username) { _, _ in resetChallenge(); error = nil }
             .onChange(of: password) { _, _ in resetChallenge(); error = nil }
             .onDisappear { password = ""; resetChallenge() }
         }
+    }
+
+    /// 用户省略协议时补全 https://；其他校验仍由 TelePilotClient.normalizedServerURL 负责。
+    static func serverInput(_ text: String) -> String {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, !trimmed.contains("://") else { return trimmed }
+        return "https://" + trimmed
     }
 
     private func resetChallenge() {
@@ -169,7 +177,7 @@ struct LoginView: View {
         )
         Task {
             do {
-                if let result = try await model.login(server: server, request: request), !result.ok {
+                if let result = try await model.login(server: Self.serverInput(server), request: request), !result.ok {
                     challenge = result
                     code = ""
                     usingRecovery = false

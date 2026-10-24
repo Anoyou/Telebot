@@ -43,6 +43,7 @@ struct TelePilotApp: App {
             .onChange(of: scenePhase) { _, phase in
                 if phase == .active {
                     sceneHidden = false
+                    lock.resume()
                     if !lock.isObscured { Task { await model.refresh(); await model.refreshWorkspace(); await push.connect(model: model) } }
                     push.deliverPendingRoute(unlocked: !lock.isObscured)
                 } else {
@@ -124,7 +125,6 @@ private struct MainTabs: View {
         .sheet(item: $modal, onDismiss: { Task { await model.refreshWorkspace() } }) { route in
             Group {
                 switch route {
-                case .assistant(let id): AssistantView(sessionID: id)
                 case .action(let id): AssistantInboxView(actionID: id)
                 }
             }
@@ -142,7 +142,8 @@ private struct MainTabs: View {
     private func openRequestedRoute() {
             guard let route = model.requestedRoute else { return }
             switch route {
-            case .assistant(let id): modal = .assistant(id)
+            // 助手只保留 Agent 标签页一个实例，避免两个会话状态与流式订阅并存。
+            case .assistant(let id): modal = nil; model.requestAssistantSession(id); selected = .agent
             case .action(let id): modal = .action(id.isEmpty ? nil : id)
             case .account(let id): modal = nil; selected = .more; morePath = [.accounts, .account(id)]
             case .overview: modal = nil; selected = .overview
@@ -161,10 +162,9 @@ private struct MainTabs: View {
 }
 
 private enum WorkspaceModal: Identifiable {
-    case assistant(String?), action(String?)
+    case action(String?)
     var id: String {
         switch self {
-        case .assistant(let id): "assistant:" + (id ?? "current")
         case .action(let id): "action:" + (id ?? "all")
         }
     }

@@ -142,7 +142,9 @@ struct AccountDetailView: View {
                     }
                 }
                 Section {
-                    if model.resourcesError != nil {
+                    if model.isSyncingAfterAction {
+                        NoticeView(title: "正在同步进程状态", message: "服务器已收到操作，进程数据稍后更新。", symbol: "arrow.triangle.2.circlepath")
+                    } else if model.resourcesError != nil {
                         NoticeView(title: "进程数据已过期", message: "请返回概览刷新后查看最新结果。")
                     }
                     if let worker = model.resources?.workers.first(where: { $0.accountID == id }) {

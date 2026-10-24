@@ -17,6 +17,11 @@ struct OverviewView: View {
                                 .font(.title2.weight(.semibold))
                             Text(model.healthError == nil ? "进程存活与账号启用状态分别显示。" : "以下为上次读取结果，并非当前在线状态。")
                                 .font(.subheadline).foregroundStyle(.secondary)
+                            if model.isSyncingAfterAction {
+                                Label("操作已提交，正在同步最新状态…", systemImage: "arrow.triangle.2.circlepath")
+                                    .font(.footnote).foregroundStyle(.secondary)
+                                    .accessibilityIdentifier("overview.syncing")
+                            }
                         } else {
                             Text(model.isRefreshing ? "正在读取服务状态…" : "尚无服务状态")
                                 .font(.title2.weight(.semibold))

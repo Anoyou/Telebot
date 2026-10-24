@@ -41,11 +41,19 @@ struct SettingsView: View {
                     ))
                     .disabled(lock.isAuthenticating)
                     .accessibilityIdentifier("settings.interfaceLock")
+                    if lock.isEnabled {
+                        Picker("需要验证", selection: Binding(get: { lock.graceSeconds }, set: { lock.graceSeconds = $0 })) {
+                            ForEach(AppLockModel.graceOptions, id: \.self) { seconds in
+                                Text(Self.graceLabel(seconds)).tag(seconds)
+                            }
+                        }
+                        .accessibilityIdentifier("settings.interfaceLockGrace")
+                    }
                     if let error = lock.failureMessage {
                         NoticeView(title: "界面锁设置未改变", message: error)
                     }
                 } header: { Text("界面锁") } footer: {
-                    Text("离开 App 后立即遮住内容，返回时通过 Face ID、Touch ID 或设备密码解锁。此功能不删除服务器会话。")
+                    Text("离开 App 时始终遮住任务切换器中的内容；超过所选时间后返回，需要通过 Face ID、Touch ID 或设备密码解锁。适当的宽限期便于切到 Telegram 查看验证码。此功能不删除服务器会话。")
                 }
                 Section {
                     ReadOnlyRow(title: "App 版本", value: appVersion)
@@ -95,5 +103,15 @@ struct SettingsView: View {
         let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "未知"
         let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "未知"
         return "\(version)（\(build)）"
+    }
+}
+
+extension SettingsView {
+    static func graceLabel(_ seconds: Int) -> String {
+        switch seconds {
+        case 0: "立即"
+        case 60: "离开 1 分钟后"
+        default: "离开 \(seconds / 60) 分钟后"
+        }
     }
 }
