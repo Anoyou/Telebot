@@ -7019,3 +7019,4 @@ int 4")`，下次 bump 版本号时 `stage` 字段如果摘掉得记得这里同
 - 顶部网络环境徽章（IP / 国家 / 缓存 5min）。
 - 内置命令：`,help` `,id` `,status` `,ping` `,pause` `,resume`。
 - 两轮 review 修复（21 处真实改动，详见 `REVIEW-FIXES-REPORT.md`）。
+- iOS 插件页一级标题改为与概览、AI、更多一致的大标题样式。

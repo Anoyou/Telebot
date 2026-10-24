@@ -47,7 +47,8 @@ struct PluginManagementView: View {
         }
         .background(Color(.systemGroupedBackground))
         .navigationTitle(accountID == nil ? "插件" : "插件与规则")
-        .navigationBarTitleDisplayMode(.inline)
+        // 一级 Tab 与概览、AI、更多保持一致使用大标题；账号下的子页面仍用行内标题。
+        .navigationBarTitleDisplayMode(accountID == nil ? .large : .inline)
         .task { await load() }
     }
 
