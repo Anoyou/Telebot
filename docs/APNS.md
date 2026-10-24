@@ -1,5 +1,7 @@
 # 原生 iOS 推送（可选）
 
+> 第一次配置请先看图文步骤：[iOS 推送通知配置教程](./IOS-PUSH.md)。本文是接口契约与投递语义参考。
+
 APNs 是 Apple Push Notification service。App 在后台或关闭时，服务器仍可通过 Apple 向设备显示通知。此功能默认关闭，未配置不会连接 Apple，也不影响现有 Web/PWA 或 Telegram 通知。
 
 ## 自签与配置
@@ -43,8 +45,8 @@ APNs 是 Apple Push Notification service。App 在后台或关闭时，服务器
 
 待确认 Action 创建、助手 Run 进入成功/失败/取消、账号进入 dead/login_required/floodwait 时，在同一个业务事务写入 `apns:outbox:*`。事务回滚不会留下推送事件。ORM监听器在主进程与worker均注册；现有 bulk 更新账号的路径显式写入队列。此过程只写数据库，不等待网络。
 
-单个后台任务每5秒扫描最多5条，PostgreSQL使用 `FOR UPDATE SKIP LOCKED` 协调多个Web进程，每次每事件最多发送一台设备并持久记录剩余设备；每设备最多3次尝试（30/60秒退避）。已成功设备不参与常规重试，事件24小时到期，队列达到1000条时跳过新通知（并发写入允许短暂超出阈值）；过期订阅会定期删除。处理前重新检查审批仍待确认且未过期。进程关闭取消并等待后台任务，数据库队列供重启接续。
+单个后台任务每5秒扫描最多5条，PostgreSQL使用 `FOR UPDATE SKIP LOCKED` 协调多个Web进程，每次每事件最多发送一台设备并持久记录剩余设备；每设备最多3次尝试：网络错误与 `TooManyRequests` 按30/60秒退避，Apple 5xx（`InternalServerError`、`ServiceUnavailable`、`Shutdown`）按 Apple 建议15分钟后重试；Apple 明确不应重试的错误（`BadDeviceToken`、`DeviceTokenNotForTopic`、`Forbidden`、`ExpiredToken`、`Unregistered`、`PayloadTooLarge` 及其他请求格式类400）立即放弃。业务通知设置24小时 `apns-expiration`，设备离线时由 Apple 暂存（每个 App 只保留最新一条）；测试通知 `apns-expiration=0` 不暂存。已成功设备不参与常规重试，事件24小时到期，队列达到1000条时跳过新通知（并发写入允许短暂超出阈值）；过期订阅会定期删除。处理前重新检查审批仍待确认且未过期。进程关闭取消并等待后台任务，数据库队列供重启接续。
 
-Apple接受与本地提交之间进程崩溃时可能重复投递，采用稳定 collapse ID 合并尚未显示的同事件通知，不承诺严格恰好一次。`403 ExpiredProviderToken` 只刷新一次JWT重试；普通错误不禁用设备；HTTP410才清理设备，需重新注册。错误日志仅记录异常类型，不输出令牌URL、Authorization或私钥。
+Apple接受与本地提交之间进程崩溃时可能重复投递，采用稳定 collapse ID 合并尚未显示的同事件通知，不承诺严格恰好一次。服务端复用同一个 HTTP/2 连接池（按环境 + Team ID + Key ID 区分，空闲最长保持1小时），避免频繁建连被 Apple 视为异常；凭据变更、传输错误或 `UnrelatedKeyIdInToken`/`BadEnvironmentKeyIdInToken` 时重建连接。JWT 缓存30分钟（Apple 要求20–60分钟刷新一次），`403 ExpiredProviderToken` 只刷新一次JWT重试。HTTP410（`Unregistered`/`ExpiredToken`）删除设备；`BadDeviceToken`/`DeviceTokenNotForTopic` 将设备置为停用并保留 `last_error` 供 App 展示，App 重新注册即恢复；其他错误不禁用设备。错误日志仅记录异常类型，不输出令牌URL、Authorization或私钥。
 
 参考：[Apple APNs请求](https://developer.apple.com/documentation/usernotifications/sending-notification-requests-to-apns)、[响应处理](https://developer.apple.com/documentation/usernotifications/handling-notification-responses-from-apns)、[Token鉴权](https://developer.apple.com/documentation/usernotifications/establishing-a-token-based-connection-to-apns)。

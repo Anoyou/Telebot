@@ -345,7 +345,12 @@ actor FixtureService: AppServing {
             return ["ok": true, "job_id": "fixture-update", "status": "succeeded", "progress": 100, "phase": "完成", "summary": "更新任务已完成。"]
         }
         if clean == "/api/apns/config" { return ["enabled": false, "configured": false, "environment": "sandbox", "has_auth_key": false] }
+        if clean == "/api/apns/devices", method == "POST" {
+            return ["device_id": body?["device_id"] ?? "fixture-device", "bundle_id": body?["bundle_id"] ?? "", "environment": body?["environment"] ?? "sandbox",
+                    "enabled": true, "categories": body?["categories"] ?? [], "last_error": nil]
+        }
         if clean == "/api/apns/devices" { return [] }
+        if clean == "/api/apns/test", method == "POST" { return ["ok": false, "attempted": 0, "accepted": 0, "failed": 0, "unregistered": 0, "message": "APNs 尚未启用", "device_id": body?["device_id"] ?? ""] }
         if clean == "/api/system/settings" {
             if method == "PATCH", let patch = body?.objectValue {
                 var current = fixtureSettings.objectValue ?? [:]

@@ -228,6 +228,7 @@ make plugin-register dir=plugins/local_imports/my_game
 | 外部系统触发插件 | [Webhook Quickstart](./docs/PLUGIN-WEBHOOK-QUICKSTART.md) |
 | 插件 HTTP 与 AI 能力 | [HTTP facade](./docs/PLUGIN-HTTP.md) · [AI facade](./docs/PLUGIN-AI.md) |
 | 页面怎么用、问题先查哪里 | [使用指南](./docs/USAGE-GUIDE.md) |
+| iOS App 推送通知（APNs）配置 | [iOS 推送教程](./docs/IOS-PUSH.md) |
 | 版本变化 | [CHANGELOG](./CHANGELOG.md) |
 
 ## 技术栈

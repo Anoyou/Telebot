@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import time
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock
 
@@ -428,3 +429,119 @@ def test_apns_credentials_and_metadata_rekey_and_redact(tmp_path):
     assert token not in redact_text(f"https://api.push.apple.com/3/device/{token}")
     assert "PRIVATE KEY" not in redact_text(pem())
     assert redact_value({"auth_key_p8": "secret"}) == {"auth_key_p8": "***"}
+
+
+@pytest.mark.parametrize("reason", ["BadDeviceToken", "DeviceTokenNotForTopic"])
+@pytest.mark.asyncio
+async def test_bad_device_token_disables_device_until_reregistered(db_factory, monkeypatch, reason):
+    post = AsyncMock(return_value=(False, reason, False))
+    monkeypatch.setattr(apns, "_post", post)
+    async with db_factory() as db:
+        await configured(db)
+        await apns.register_device(db, 1, device())
+        await db.commit()
+        result = await apns._deliver(db, rows=await apns._device_rows(db), kind="assistant_result",
+                                     event_id="run-1")
+        await db.commit()
+        assert not result.ok and "已暂停此设备" in result.message
+        [listed] = await apns.list_devices(db, 1)
+        assert listed["enabled"] is False and listed["last_error"] == reason
+        await db.run_sync(lambda sync: enqueue(sync.connection(), kind="assistant_result", event_id="run-2", user_id=1))
+        await db.commit()
+    # A disabled token is neither retried nor targeted by new events.
+    assert await apns.drain_outbox_once(db_factory) == 1
+    assert post.await_count == 1
+    async with db_factory() as db:
+        assert not list(await db.scalars(select(SystemSetting).where(SystemSetting.key.like(OUTBOX_PREFIX + "%"))))
+        await apns.register_device(db, 1, device())
+        await db.commit()
+        [listed] = await apns.list_devices(db, 1)
+        assert listed["enabled"] is True and listed["last_error"] is None
+
+
+@pytest.mark.parametrize("reason,retried", [
+    ("PayloadTooLarge", False), ("Forbidden", False), ("TopicDisallowed", False),
+    ("TooManyRequests", True), ("InvalidProviderToken", True),
+])
+@pytest.mark.asyncio
+async def test_outbox_never_retries_permanent_apns_errors(db_factory, monkeypatch, reason, retried):
+    async with db_factory() as db:
+        await configured(db)
+        await apns.register_device(db, 1, device())
+        await db.commit()
+        await db.run_sync(lambda sync: enqueue(sync.connection(), kind="assistant_result", event_id="run-1", user_id=1))
+        await db.commit()
+    monkeypatch.setattr(apns, "_post", AsyncMock(return_value=(False, reason, False)))
+    assert await apns.drain_outbox_once(db_factory) == 1
+    async with db_factory() as db:
+        queued = list(await db.scalars(select(SystemSetting).where(SystemSetting.key.like(OUTBOX_PREFIX + "%"))))
+        assert bool(queued) is retried
+        if retried:
+            assert 0 < queued[0].value["next_attempt_at"] - time.time() <= 31
+
+
+@pytest.mark.asyncio
+async def test_server_errors_back_off_fifteen_minutes(db_factory, monkeypatch):
+    async with db_factory() as db:
+        await configured(db)
+        await apns.register_device(db, 1, device())
+        await db.commit()
+        await db.run_sync(lambda sync: enqueue(sync.connection(), kind="assistant_result", event_id="run-1", user_id=1))
+        await db.commit()
+    monkeypatch.setattr(apns, "_post", AsyncMock(return_value=(False, "ServiceUnavailable", False)))
+    assert await apns.drain_outbox_once(db_factory) == 1
+    async with db_factory() as db:
+        [queued] = list(await db.scalars(select(SystemSetting).where(SystemSetting.key.like(OUTBOX_PREFIX + "%"))))
+        assert queued.value["next_attempt_at"] - time.time() > 14 * 60
+
+
+@pytest.mark.asyncio
+async def test_business_alerts_are_stored_but_test_push_is_not(db_factory, monkeypatch):
+    post = AsyncMock(return_value=(True, None, False))
+    monkeypatch.setattr(apns, "_post", post)
+    async with db_factory() as db:
+        await configured(db)
+        await apns.register_device(db, 1, device())
+        await db.commit()
+        await apns._deliver(db, rows=await apns._device_rows(db), kind="test", event_id="t")
+        await apns._deliver(db, rows=await apns._device_rows(db), kind="assistant_result", event_id="r")
+    assert post.call_args_list[0].kwargs["expiration"] == 0
+    stored = post.call_args_list[1].kwargs["expiration"]
+    assert stored > time.time() + 23 * 3600
+
+
+@pytest.mark.asyncio
+async def test_expiration_header_and_shared_http2_client_reuse(monkeypatch):
+    seen = []
+
+    def handler(request):
+        seen.append(request.headers["apns-expiration"])
+        return httpx.Response(200)
+
+    config = dict(team_id="ABCDEFGHIJ", key_id="KLMNOPQRST", bundle_id="com.telepilot.personal",
+                  environment="sandbox")
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        assert (await apns._post(client, config=config, private_key=pem(), token="a" * 64,
+                                 payload={"aps": {}}, collapse_key="c", expiration=1234))[0]
+    assert seen == ["1234"]
+    apns._reset_provider_token_cache()
+    first = apns._get_client(config)
+    assert apns._get_client(config) is first
+    rotated = apns._get_client(dict(config, key_id="ZZZZZZZZZZ"))
+    assert rotated is not first
+    await apns._reset_client()
+    assert rotated.is_closed
+
+
+@pytest.mark.asyncio
+async def test_test_push_explains_expired_registration(db_factory, monkeypatch):
+    monkeypatch.setattr(apns, "_post", AsyncMock())
+    async with db_factory() as db:
+        await configured(db)
+        await apns.register_device(db, 1, device())
+        [row] = await apns._device_rows(db)
+        row.value = dict(row.value, expires_at=(datetime.now(UTC) - timedelta(minutes=1)).isoformat())
+        await db.commit()
+        result = await apns.send_test(db, 1, "installation-1")
+    assert not result.ok and "重新注册" in result.message
+    assert not apns._post.called
