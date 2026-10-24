@@ -49,6 +49,13 @@ struct AccountManagementView: View {
                     ManagementCollectionView(resource: .init(title: "账号指令", path: base + "/commands", kind: .accountCommands, itemPath: base + "/commands/{id}"))
                 } label: { Label("账号指令与白名单", systemImage: "terminal") }
             }
+            Section {
+                BotGuestModeStatusRows(accountID: id)
+            } header: {
+                Text("访客模式（Guest Mode）")
+            } footer: {
+                Text("Bot API 10.0：开启后，Bot 在未加入的群聊或私聊里被 @提及（或被回复）时可回复一次。开启方法：在 Telegram 打开 @BotFather 的 Mini App，进入对应 Bot 的设置并启用 “Guest Mode”。")
+            }
             Section("账号 Bot") {
                 document("Bot 配置", "/bot", edit: "PUT", symbol: "gearshape", actions: [
                     .init(title: "测试 Bot", path: base + "/bot/test"),
@@ -285,5 +292,77 @@ struct AccountManagementPassthroughView: View {
                 body: .object(["order": .array(features.compactMap { $0["feature_key"] })]))
             error = nil
         } catch { self.error = error.localizedDescription; uncertain = (error as? APIError)?.isOutcomeUncertain == true }
+    }
+}
+
+/// 访客模式状态：读取 `/bot/capabilities` 中 getMe 的 `supports_guest_queries`。
+struct BotGuestModeStatusRows: View {
+    let accountID: Int
+    @Environment(AppModel.self) private var model
+    @State private var value: JSONValue?
+    @State private var error: String?
+    @State private var loading = false
+
+    var body: some View {
+        Group {
+            row(title: "管理 Bot", status: value?["management_bot"])
+            row(title: "交互 Bot", status: value?["interaction_bot"])
+            if value?["guest_updates_enabled"]?.boolValue == false {
+                Label("系统设置中的“访客消息”运行开关已关闭，当前不会处理访客消息。", systemImage: "pause.circle")
+                    .font(.footnote).foregroundStyle(.orange)
+            }
+            if let error {
+                Label(error, systemImage: "exclamationmark.triangle").font(.footnote).foregroundStyle(.secondary)
+            }
+            Button {
+                Task { await load(refresh: true) }
+            } label: {
+                Label(loading ? "正在检测…" : "重新检测", systemImage: "arrow.clockwise")
+            }
+            .disabled(loading)
+        }
+        .task(id: accountID) { await load(refresh: false) }
+    }
+
+    @ViewBuilder
+    private func row(title: String, status: JSONValue?) -> some View {
+        LabeledContent {
+            Text(statusText(status)).foregroundStyle(statusColor(status))
+        } label: {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("访客模式（Guest Mode）· \(title)")
+                if let username = status?["username"]?.stringValue {
+                    Text("@\(username)").font(.caption).foregroundStyle(.secondary)
+                }
+            }
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    private func statusText(_ status: JSONValue?) -> String {
+        guard let status else { return loading ? "读取中…" : "未知" }
+        if status["configured"]?.boolValue != true { return "未配置 Bot" }
+        if status["error"]?.stringValue != nil { return "无法读取" }
+        switch status["supports_guest_queries"]?.boolValue {
+        case .some(true): return "已开启"
+        case .some(false): return "未开启"
+        case .none: return "未知"
+        }
+    }
+
+    private func statusColor(_ status: JSONValue?) -> Color {
+        status?["supports_guest_queries"]?.boolValue == true ? .green : .secondary
+    }
+
+    private func load(refresh: Bool) async {
+        loading = true
+        defer { loading = false }
+        do {
+            let suffix = refresh ? "?refresh=true" : ""
+            value = try await model.request(path: "/api/accounts/\(accountID)/bot/capabilities" + suffix)
+            error = nil
+        } catch {
+            self.error = error.localizedDescription
+        }
     }
 }

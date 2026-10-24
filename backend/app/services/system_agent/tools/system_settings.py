@@ -185,6 +185,7 @@ def _validate_changes(changes: dict[str, Any]) -> None:
             "trace_enabled",
             "event_bus_delivery_enabled",
             "inline_updates_enabled",
+            "guest_updates_enabled",
             "native_raw_persist_enabled",
         }
         allowed = {*bounds, *bool_keys, "runtime_log_min_level"}

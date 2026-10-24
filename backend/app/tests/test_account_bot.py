@@ -6316,6 +6316,7 @@ async def test_interaction_polling_requests_callback_query_updates(monkeypatch) 
         "callback_query",
         "inline_query",
         "chosen_inline_result",
+        "guest_message",
     ]
 
 
@@ -6341,7 +6342,11 @@ async def test_interaction_polling_respects_inline_updates_switch(monkeypatch) -
         raise asyncio.CancelledError()
 
     monkeypatch.setattr(account_bot_runtime, "_load_interaction_runtime_config", _load_config)
-    monkeypatch.setattr(account_bot_runtime, "_event_framework_flags", AsyncMock(return_value={"inline_updates_enabled": False}))
+    monkeypatch.setattr(
+        account_bot_runtime,
+        "_event_framework_flags",
+        AsyncMock(return_value={"inline_updates_enabled": False, "guest_updates_enabled": False}),
+    )
     monkeypatch.setattr(account_bot_runtime, "AsyncSessionLocal", lambda: _DB())
     monkeypatch.setattr(account_bot_runtime, "_set_interaction_runtime_state", AsyncMock())
     monkeypatch.setattr(account_bot_service, "call_bot_api", _call_bot_api)

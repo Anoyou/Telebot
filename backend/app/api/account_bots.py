@@ -11,6 +11,8 @@ from ..db.models.account_bot import ACCOUNT_BOT_STATUS_DISABLED, AccountBot
 from ..db.models.feature import AccountFeature, Feature
 from ..deps import CurrentUser, DBSession
 from ..schemas.account_bot import (
+    AccountBotCapabilitiesResponse,
+    AccountBotCapabilityStatus,
     AccountBotConfigResponse,
     AccountBotConfigUpdate,
     AccountBotInteractionCompositePluginConfig,
@@ -567,6 +569,65 @@ async def restart_account_bot_runtime(
     await db.commit()
     await account_bot_runtime.restart_account_bot(aid)
     return AccountBotRuntimeResponse(ok=True, message="已重启 Bot polling runtime")
+
+
+GUEST_MODE_HELP = (
+    "访客模式（Guest Mode，Bot API 10.0）让 Bot 在未加入的群聊或私聊里被 @提及（或被回复）时也能回复一次。"
+    "开启方法：在 Telegram 打开 @BotFather 的 Mini App（https://t.me/BotFather?startapp），"
+    "进入对应 Bot 的设置并启用 “Guest Mode”。开启后在任意聊天输入 “@你的Bot用户名 内容”（或回复该 Bot 的消息）即可召唤；"
+    "管理 Bot 走授权用户的命令 / 系统助手，交互 Bot 走交互规则与订阅了 guest_message 的插件。"
+)
+
+
+async def _bot_capability_status(
+    role: str,
+    token: str | None,
+    *,
+    refresh: bool,
+) -> AccountBotCapabilityStatus:
+    if not token:
+        return AccountBotCapabilityStatus(role=role, configured=False)  # type: ignore[arg-type]
+    try:
+        caps = await account_bot_service.get_bot_capabilities(token, refresh=refresh)
+    except Exception as exc:  # noqa: BLE001
+        return AccountBotCapabilityStatus(
+            role=role,  # type: ignore[arg-type]
+            configured=True,
+            error=account_bot_service.sanitize_bot_error(exc, token=token),
+        )
+    return AccountBotCapabilityStatus(role=role, configured=True, **caps)  # type: ignore[arg-type]
+
+
+@router.get("/{aid}/bot/capabilities", response_model=AccountBotCapabilitiesResponse)
+async def get_account_bot_capabilities(
+    aid: int,
+    db: DBSession,
+    _user: CurrentUser,
+    refresh: bool = Query(False, description="跳过 60 秒缓存，重新调用 getMe"),
+) -> AccountBotCapabilitiesResponse:
+    """读取管理 Bot / 交互 Bot 的 getMe 能力位（含访客模式 supports_guest_queries）。"""
+
+    await account_bot_service.ensure_account(db, aid)
+    management_token: str | None = None
+    row = (
+        await db.execute(select(AccountBot).where(AccountBot.account_id == aid))
+    ).scalar_one_or_none()
+    if row is not None and row.bot_token_enc:
+        try:
+            management_token = account_bot_service.decrypt_bot_token(row)
+        except HTTPException:
+            management_token = None
+    interaction_token = await account_bot_service.get_interaction_bot_token(db, aid)
+    flags = await account_bot_runtime._event_framework_flags()  # noqa: SLF001
+    management = await _bot_capability_status("management", management_token, refresh=refresh)
+    interaction = await _bot_capability_status("interaction", interaction_token, refresh=refresh)
+    return AccountBotCapabilitiesResponse(
+        account_id=aid,
+        guest_updates_enabled=bool(flags.get("guest_updates_enabled", True)),
+        management_bot=management,
+        interaction_bot=interaction,
+        guest_mode_help=GUEST_MODE_HELP,
+    )
 
 
 @router.get("/{aid}/bot/users", response_model=list[AccountBotUserResponse])

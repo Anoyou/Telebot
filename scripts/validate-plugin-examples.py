@@ -68,6 +68,7 @@ EVENT_FIXTURES = {
     "callback_query.json",
     "inline_query.json",
     "chosen_inline_result.json",
+    "guest_message.json",
     "payment_confirmed.json",
     "native_raw_telethon_message.json",
     "deprecated_notice_action.json",
@@ -78,6 +79,7 @@ EXPECTED_EVENT_ACTIONS = {
     "callback_query.json": {"answer_callback"},
     "inline_query.json": {"answer_inline_query"},
     "chosen_inline_result.json": {"result"},
+    "guest_message.json": {"answer_guest_query"},
     "payment_confirmed.json": {"settlement", "send_message"},
     "native_raw_telethon_message.json": {"send_message"},
 }
@@ -256,6 +258,8 @@ def _validate_event_demo_runtime(name: str, plugin_dir: Path, plugin: Plugin) ->
                     raise AssertionError(f"{name}: {fixture_name} 返回了旧 notice 发送通道")
             if action_type == "answer_inline_query" and not str(action.get("inline_query_id") or "").strip():
                 raise AssertionError(f"{name}: {fixture_name} 缺少 inline_query_id")
+            if action_type == "answer_guest_query" and not str(action.get("guest_query_id") or "").strip():
+                raise AssertionError(f"{name}: {fixture_name} 缺少 guest_query_id")
             if action_type == "answer_callback" and not str(action.get("callback_query_id") or "").strip():
                 if synthetic_source:
                     continue

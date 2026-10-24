@@ -2439,6 +2439,7 @@ function channelLabel(channel?: string | null): string {
   if (channel === "userbot") return "UserBot";
   if (channel === "userbot_reply") return "UserBot 回复";
   if (channel === "account_bot") return "管理 Bot";
+  if (channel === "guest_reply") return "访客回复";
   if (channel === "scheduler") return "定时任务";
   if (channel === "external_payment_notice") return "转账通知";
   return channel || "未知来源";
@@ -2483,6 +2484,7 @@ function runtimeSourceLabel(source?: string | null): string {
 function phaseLabel(phase?: string | null): string {
   const value = (phase || "").toLowerCase();
   if (value.includes("receive")) return "收到消息";
+  if (value.includes("guest_reply")) return "访客回复";
   if (value.includes("subscription") || value.includes("route")) return "路由判断";
   if (value.includes("plugin_invoke")) return "插件执行";
   if (value.includes("plugin_return")) return "插件返回";
@@ -2499,6 +2501,7 @@ function actionTypeLabel(actionType?: string | null): string {
   if (value === "edit_message") return "编辑消息";
   if (value === "delete_message") return "删除消息";
   if (value === "answer_inline_query") return "Inline 回答";
+  if (value === "answer_guest_query") return "访客回复";
   if (value === "payout") return "结算付款";
   if (value === "start_session") return "开启会话";
   if (value === "close_session") return "关闭会话";

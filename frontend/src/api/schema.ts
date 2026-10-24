@@ -161,6 +161,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/accounts/{aid}/bot/capabilities": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Account Bot Capabilities
+         * @description 读取管理 Bot / 交互 Bot 的 getMe 能力位（含访客模式 supports_guest_queries）。
+         */
+        get: operations["get_account_bot_capabilities_api_accounts__aid__bot_capabilities_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/accounts/{aid}/bot/interaction": {
         parameters: {
             query?: never;
@@ -4504,6 +4524,58 @@ export interface components {
             enabled_accounts: number;
             /** Total Accounts */
             total_accounts: number;
+        };
+        /**
+         * AccountBotCapabilitiesResponse
+         * @description 账号管理 Bot / 交互 Bot 的能力状态。
+         */
+        AccountBotCapabilitiesResponse: {
+            /** Account Id */
+            account_id: number;
+            /**
+             * Guest Mode Help
+             * @default
+             */
+            guest_mode_help: string;
+            /**
+             * Guest Updates Enabled
+             * @description 系统设置中的“访客消息（Guest Mode）”运行开关；关闭后不拉取 guest_message。
+             * @default true
+             */
+            guest_updates_enabled: boolean;
+            interaction_bot: components["schemas"]["AccountBotCapabilityStatus"];
+            management_bot: components["schemas"]["AccountBotCapabilityStatus"];
+        };
+        /**
+         * AccountBotCapabilityStatus
+         * @description 单个 Bot 的 getMe 能力位（Bot API 10.0 起包含 Guest Mode）。
+         */
+        AccountBotCapabilityStatus: {
+            /** Bot Id */
+            bot_id?: number | null;
+            /** Can Read All Group Messages */
+            can_read_all_group_messages?: boolean | null;
+            /**
+             * Configured
+             * @default false
+             */
+            configured: boolean;
+            /** Error */
+            error?: string | null;
+            /**
+             * Role
+             * @enum {string}
+             */
+            role: "management" | "interaction";
+            /**
+             * Supports Guest Queries
+             * @description getMe.supports_guest_queries：是否已在 BotFather 开启访客模式（Guest Mode）；null 表示未知。
+             */
+            supports_guest_queries?: boolean | null;
+            /** Supports Inline Queries */
+            supports_inline_queries?: boolean | null;
+            /** Username */
+            username?: string | null;
         };
         /** AccountBotChatMembership */
         AccountBotChatMembership: {
@@ -11352,6 +11424,8 @@ export interface components {
         _LogRetentionPatch: {
             /** Event Bus Delivery Enabled */
             event_bus_delivery_enabled?: boolean | null;
+            /** Guest Updates Enabled */
+            guest_updates_enabled?: boolean | null;
             /** Inline Updates Enabled */
             inline_updates_enabled?: boolean | null;
             /** Llm Usage Retention Days */
@@ -12008,6 +12082,60 @@ export interface operations {
             };
             /** @description CSRF 校验失败或权限不足 */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description 服务器内部错误 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    get_account_bot_capabilities_api_accounts__aid__bot_capabilities_get: {
+        parameters: {
+            query?: {
+                /** @description 跳过 60 秒缓存，重新调用 getMe */
+                refresh?: boolean;
+            };
+            header?: never;
+            path: {
+                aid: number;
+            };
+            cookie?: {
+                auth_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccountBotCapabilitiesResponse"];
+                };
+            };
+            /** @description 认证失败 */
+            401: {
                 headers: {
                     [name: string]: unknown;
                 };

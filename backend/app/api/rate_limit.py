@@ -701,6 +701,7 @@ async def get_system_settings(db: DBSession, _user: CurrentUser) -> dict[str, An
             "trace_enabled": bool(log_retention.get("trace_enabled", True)),
             "event_bus_delivery_enabled": bool(log_retention.get("event_bus_delivery_enabled", True)),
             "inline_updates_enabled": bool(log_retention.get("inline_updates_enabled", True)),
+            "guest_updates_enabled": bool(log_retention.get("guest_updates_enabled", True)),
             "runtime_log_retention_days": max(
                 0, int(log_retention.get("runtime_log_retention_days", 30) or 0)
             ),
@@ -761,6 +762,7 @@ class _LogRetentionPatch(BaseModel):
     trace_enabled: bool | None = None
     event_bus_delivery_enabled: bool | None = None
     inline_updates_enabled: bool | None = None
+    guest_updates_enabled: bool | None = None
     runtime_log_retention_days: int | None = None
     runtime_log_max_message_chars: int | None = None
     runtime_log_max_detail_chars: int | None = None
@@ -1056,6 +1058,7 @@ async def patch_system_settings(payload: _SettingsPatch, db: DBSession, user: Cu
             "trace_enabled": bool(current.get("trace_enabled", True)),
             "event_bus_delivery_enabled": bool(current.get("event_bus_delivery_enabled", True)),
             "inline_updates_enabled": bool(current.get("inline_updates_enabled", True)),
+            "guest_updates_enabled": bool(current.get("guest_updates_enabled", True)),
             "runtime_log_retention_days": max(0, int(current.get("runtime_log_retention_days", 30) or 0)),
             "runtime_log_max_message_chars": max(
                 200, int(current.get("runtime_log_max_message_chars", 2000) or 2000)
@@ -1086,6 +1089,7 @@ async def patch_system_settings(payload: _SettingsPatch, db: DBSession, user: Cu
             "trace_enabled",
             "event_bus_delivery_enabled",
             "inline_updates_enabled",
+            "guest_updates_enabled",
             "native_raw_persist_enabled",
         }
         bounds = {

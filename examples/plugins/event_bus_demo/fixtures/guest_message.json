@@ -1,0 +1,45 @@
+{
+  "source": {
+    "type": "guest_message",
+    "channel": "interaction_bot",
+    "account_id": 1,
+    "chat_id": -100555,
+    "message_id": 77,
+    "guest_query_id": "guest-1001"
+  },
+  "event_type": "guest_message",
+  "message": {
+    "chat_id": -100555,
+    "message_id": 77,
+    "text": "今天天气怎么样"
+  },
+  "chat": {
+    "id": -100555,
+    "type": "supergroup",
+    "title": "外部群"
+  },
+  "actor": {
+    "user_id": 501,
+    "display_name": "访客 A"
+  },
+  "sender": {
+    "user_id": 501,
+    "display_name": "访客 A"
+  },
+  "guest": {
+    "query_id": "guest-1001",
+    "chat_id": -100555,
+    "chat_type": "supergroup",
+    "caller_user_id": 501,
+    "raw_text": "@event_bus_demo_bot 今天天气怎么样",
+    "reply_once": true,
+    "reply_via": "answer_guest_query"
+  },
+  "trigger": {
+    "scope": "guest_all"
+  },
+  "native_raw_meta": {
+    "enabled": false,
+    "reason": "snapshot_disabled"
+  }
+}

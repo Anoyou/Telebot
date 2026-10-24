@@ -1013,6 +1013,7 @@ export interface SystemSettings {
     trace_enabled: boolean;
     event_bus_delivery_enabled: boolean;
     inline_updates_enabled: boolean;
+    guest_updates_enabled?: boolean;
     runtime_log_retention_days: number;
     runtime_log_max_message_chars: number;
     runtime_log_max_detail_chars: number;

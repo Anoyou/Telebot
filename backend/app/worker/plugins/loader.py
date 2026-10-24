@@ -2365,6 +2365,9 @@ async def _apply_userbot_event_bus_actions(
     async def _on_answer_inline_query(action: dict[str, Any]) -> bool:
         return await _apply_userbot_answer_inline_query_action(state, action)
 
+    async def _on_answer_guest_query(action: dict[str, Any]) -> bool:
+        return await _apply_userbot_answer_guest_query_action(state, action)
+
     async def _on_unsupported(action: dict[str, Any]) -> bool:
         action_type = str(action.get("type") or "").strip()
         await record_action(
@@ -2413,6 +2416,7 @@ async def _apply_userbot_event_bus_actions(
         on_click_callback_button=_on_click_callback_button,
         on_answer_callback=_on_answer_callback,
         on_answer_inline_query=_on_answer_inline_query,
+        on_answer_guest_query=_on_answer_guest_query,
         on_deprecated_send_via=_on_deprecated,
         on_unsupported=_on_unsupported,
         on_truncated=_on_truncated,
@@ -4895,6 +4899,50 @@ async def _apply_userbot_answer_inline_query_action(state: _AccountState, action
     return True
 
 
+async def _apply_userbot_answer_guest_query_action(state: _AccountState, action: dict[str, Any]) -> bool:
+    """UserBot 执行链路的 ``answer_guest_query``：用交互 Bot Token 调 answerGuestQuery。"""
+
+    from ...services.interaction.guest_reply import guest_result_from_action
+
+    guest_query_id = str(action.get("guest_query_id") or "").strip()
+    if not guest_query_id:
+        await record_action(action.get("context"), action, TRACE_STATUS_FAILED, error_code="guest_query_id_missing", error="guest_query_id missing")
+        return False
+    result = guest_result_from_action(action)
+    if result is None:
+        await record_action(action.get("context"), action, TRACE_STATUS_FAILED, error_code="empty_message_text", error="answer_guest_query requires result or text")
+        return False
+    token = await _interaction_bot_token_for_account(state.account_id)
+    if not token:
+        await record_action(action.get("context"), action, TRACE_STATUS_FAILED, error_code="bot_token_missing", error="interaction bot token unavailable")
+        return False
+    if _action_dev_mode_dry_run_enabled(state, action):
+        await _record_userbot_dry_run(
+            state,
+            action,
+            channel="interaction_bot",
+            result={"dry_run": True, "guest_query_id": guest_query_id, "result_type": result.get("type")},
+        )
+        return True
+    try:
+        sent = await account_bot_service.answer_guest_query(token, guest_query_id, result=result)
+    except Exception as exc:  # noqa: BLE001
+        error = account_bot_service.sanitize_bot_error(exc, token=token)
+        await record_action(action.get("context"), action, TRACE_STATUS_FAILED, error_code="guest_answer_failed", error=error)
+        await _emit_userbot_action_tap(
+            state,
+            action,
+            ACTION_EVENT_STATUS_FAILED,
+            channel="interaction_bot",
+            error_code="guest_answer_failed",
+            error=error,
+        )
+        return False
+    await record_action(action.get("context"), action, TRACE_STATUS_OK, actual_send_via="interaction_bot", result=sent)
+    await _emit_userbot_action_tap(state, action, ACTION_EVENT_STATUS_OK, channel="interaction_bot")
+    return True
+
+
 async def _interaction_bot_token_for_account(account_id: int) -> str | None:
     try:
         async with AsyncSessionLocal() as db:
@@ -6246,6 +6294,14 @@ class _LiveMessageOps:
 
         buffered = BufferedMessageOps()
         action = await buffered.answer_inline_query(**kwargs)
+        await self.apply([action])
+        return action
+
+    async def answer_guest_query(self, **kwargs: Any) -> dict[str, Any]:
+        from .message_ops import BufferedMessageOps
+
+        buffered = BufferedMessageOps()
+        action = await buffered.answer_guest_query(**kwargs)
         await self.apply([action])
         return action
 

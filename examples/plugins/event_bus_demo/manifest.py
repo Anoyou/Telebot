@@ -21,6 +21,11 @@ EVENT_SUBSCRIPTIONS = [
         "scope": "inline_all",
     },
     {
+        "events": ["guest_message"],
+        "source": ["interaction_bot"],
+        "scope": "guest_all",
+    },
+    {
         "events": ["payment_confirmed"],
         "source": ["external_payment_notice", "userbot"],
         "scope": "rule_bound",
@@ -50,8 +55,8 @@ MANIFEST = Manifest(
     description="演示最终版 Event Bus、Trace 与 MessageOps 插件契约。",
     usage=(
         "安装后在插件中心启用；Event Bus 会按 event_subscriptions 投递 message、command、"
-        "callback_query、inline_query、chosen_inline_result 与 payment_confirmed。插件只读取标准事件信封，"
-        "发送、按钮 ACK、inline answer 与 settlement 都返回 MessageOps/action。"
+        "callback_query、inline_query、chosen_inline_result、guest_message（访客模式）与 payment_confirmed。"
+        "插件只读取标准事件信封，发送、按钮 ACK、inline answer、访客回复与 settlement 都返回 MessageOps/action。"
     ),
     category="interactive",
     permissions=["send_message", "read_chat"],

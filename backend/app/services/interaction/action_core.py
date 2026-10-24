@@ -32,6 +32,7 @@ CANONICAL_ACTION_TYPES = frozenset(
         "click_callback_button",
         "answer_callback",
         "answer_inline_query",
+        "answer_guest_query",
         "payout",
         "update_session",
         "start_session",
@@ -123,6 +124,7 @@ class ActionKind(StrEnum):
     CLICK_CALLBACK_BUTTON = "click_callback_button"
     ANSWER_CALLBACK = "answer_callback"
     ANSWER_INLINE_QUERY = "answer_inline_query"
+    ANSWER_GUEST_QUERY = "answer_guest_query"
     DEPRECATED_SEND_VIA = "deprecated_send_via"
     UNSUPPORTED = "unsupported"
 
@@ -168,6 +170,8 @@ def classify_action(action: dict[str, Any]) -> ActionKind:
         return ActionKind.ANSWER_CALLBACK
     if action_type == "answer_inline_query":
         return ActionKind.ANSWER_INLINE_QUERY
+    if action_type == "answer_guest_query":
+        return ActionKind.ANSWER_GUEST_QUERY
     return ActionKind.UNSUPPORTED
 
 
@@ -191,6 +195,7 @@ class ActionHandlers:
     on_click_callback_button: ActionHandler | None = None
     on_answer_callback: ActionHandler | None = None
     on_answer_inline_query: ActionHandler | None = None
+    on_answer_guest_query: ActionHandler | None = None
     on_deprecated_send_via: ActionHandler | None = None
     on_unsupported: ActionHandler | None = None
     on_truncated: ActionHandler | None = None  # actions beyond limit
@@ -223,6 +228,7 @@ def _handler_for(kind: ActionKind, handlers: ActionHandlers) -> ActionHandler | 
         ActionKind.CLICK_CALLBACK_BUTTON: handlers.on_click_callback_button,
         ActionKind.ANSWER_CALLBACK: handlers.on_answer_callback,
         ActionKind.ANSWER_INLINE_QUERY: handlers.on_answer_inline_query,
+        ActionKind.ANSWER_GUEST_QUERY: handlers.on_answer_guest_query,
         ActionKind.DEPRECATED_SEND_VIA: handlers.on_deprecated_send_via,
         ActionKind.UNSUPPORTED: handlers.on_unsupported,
     }.get(kind)

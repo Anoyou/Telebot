@@ -398,6 +398,14 @@ PARITY_MATRIX: list[ParityCase] = [
         covers="answer_inline_query",
     ),
     _row(
+        "answer_guest_query_ok",
+        [{"type": "answer_guest_query", "guest_query_id": "gq", "text": "hi"}],
+        "answer_guest_query",
+        (TRACE_STATUS_OK, None, "interaction_bot"),
+        (TRACE_STATUS_OK, None, "interaction_bot"),
+        covers="answer_guest_query",
+    ),
+    _row(
         "payout_ok",
         [{"type": "payout", "amount": 100, "text": "+100", "chat_id": CHAT}],
         "payout",
@@ -740,6 +748,7 @@ async def _drive_worker(monkeypatch: pytest.MonkeyPatch, case: ParityCase) -> Ob
     monkeypatch.setattr(payout_limit_mod, "check_and_consume", AsyncMock(return_value=(True, None)))
     monkeypatch.setattr(account_bot_service, "answer_callback", AsyncMock(return_value={}))
     monkeypatch.setattr(account_bot_service, "answer_inline_query", AsyncMock(return_value={}))
+    monkeypatch.setattr(account_bot_service, "answer_guest_query", AsyncMock(return_value={"inline_message_id": "im"}))
     monkeypatch.setattr(
         account_bot_service,
         "send_rich_message",
@@ -799,6 +808,7 @@ async def _drive_e2(monkeypatch: pytest.MonkeyPatch, case: ParityCase) -> Observ
     monkeypatch.setattr(delivery_mod, "record_action", rec)
     monkeypatch.setattr(account_bot_service, "answer_callback", AsyncMock(return_value={}))
     monkeypatch.setattr(account_bot_service, "answer_inline_query", AsyncMock(return_value={}))
+    monkeypatch.setattr(account_bot_service, "answer_guest_query", AsyncMock(return_value={"inline_message_id": "im"}))
     monkeypatch.setattr(
         account_bot_service,
         "send_rich_message",

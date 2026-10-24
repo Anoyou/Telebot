@@ -147,6 +147,7 @@ export function SettingsIndex() {
     trace_enabled: true,
     event_bus_delivery_enabled: true,
     inline_updates_enabled: true,
+    guest_updates_enabled: true,
     runtime_log_retention_days: "30",
     runtime_log_max_message_chars: "2000",
     runtime_log_max_detail_chars: "8000",
@@ -177,6 +178,7 @@ export function SettingsIndex() {
         trace_enabled: Boolean(settingsQ.data.log_retention?.trace_enabled ?? true),
         event_bus_delivery_enabled: Boolean(settingsQ.data.log_retention?.event_bus_delivery_enabled ?? true),
         inline_updates_enabled: Boolean(settingsQ.data.log_retention?.inline_updates_enabled ?? true),
+        guest_updates_enabled: Boolean(settingsQ.data.log_retention?.guest_updates_enabled ?? true),
         runtime_log_retention_days: String(settingsQ.data.log_retention?.runtime_log_retention_days ?? 30),
         runtime_log_max_message_chars: String(settingsQ.data.log_retention?.runtime_log_max_message_chars ?? 2000),
         runtime_log_max_detail_chars: String(settingsQ.data.log_retention?.runtime_log_max_detail_chars ?? 8000),
@@ -327,6 +329,7 @@ export function SettingsIndex() {
         trace_enabled: Boolean(logRetention.trace_enabled),
         event_bus_delivery_enabled: Boolean(logRetention.event_bus_delivery_enabled),
         inline_updates_enabled: Boolean(logRetention.inline_updates_enabled),
+        guest_updates_enabled: Boolean(logRetention.guest_updates_enabled),
         runtime_log_retention_days: Number(logRetention.runtime_log_retention_days) || 0,
         runtime_log_max_message_chars: Number(logRetention.runtime_log_max_message_chars) || 2000,
         runtime_log_max_detail_chars: Number(logRetention.runtime_log_max_detail_chars) || 0,
@@ -846,7 +849,7 @@ export function SettingsIndex() {
                   </p>
                 </div>
               </div>
-              <div className="mt-4 grid gap-3 md:grid-cols-3">
+              <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
                 <LogToggleCard
                   label="写入 Trace"
                   description="关闭后保留旧运行日志；仅用于排查 Trace 存储异常。"
@@ -869,6 +872,14 @@ export function SettingsIndex() {
                   checked={logRetention.inline_updates_enabled}
                   onCheckedChange={(checked) =>
                     setLogRetention((v) => ({ ...v, inline_updates_enabled: checked }))
+                  }
+                />
+                <LogToggleCard
+                  label="访客消息（Guest Mode）"
+                  description="关闭后不拉取 guest_message：Bot 在未加入的会话被 @提及时不再回复。"
+                  checked={logRetention.guest_updates_enabled}
+                  onCheckedChange={(checked) =>
+                    setLogRetention((v) => ({ ...v, guest_updates_enabled: checked }))
                   }
                 />
               </div>
