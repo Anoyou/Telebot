@@ -84,7 +84,7 @@ final class AILivenessStore {
     func toggleProvider(_ id: Int, enabled: Bool, providers: [JSONValue]) {
         guard !running && !starting else { return }
         if enabled { selectedProviders.insert(id) } else { selectedProviders.remove(id) }
-        if selectedModels[id] == nil, let provider = providers.first(where: { $0["id"]?.intValue == id }) {
+        if enabled, selectedModels[id]?.isEmpty != false, let provider = providers.first(where: { $0["id"]?.intValue == id }) {
             selectedModels[id] = Set(AIPresentation.enabledModels(provider))
         }
         invalidatePreview()
@@ -101,6 +101,70 @@ final class AILivenessStore {
 
     func updateSettings() { invalidatePreview() }
 
+    /// 选中全部供应商及其全部已启用模型。
+    func selectAll(_ providers: [JSONValue]) {
+        guard !running && !starting else { return }
+        for provider in providers {
+            guard let id = provider["id"]?.intValue else { continue }
+            let enabled = Set(AIPresentation.enabledModels(provider))
+            guard !enabled.isEmpty else { continue }
+            selectedModels[id] = enabled
+            selectedProviders.insert(id)
+        }
+        invalidatePreview()
+    }
+
+    func clearSelection() {
+        guard !running && !starting else { return }
+        selectedProviders = []
+        invalidatePreview()
+    }
+
+    func setAllModels(_ providerID: Int, provider: JSONValue, enabled: Bool) {
+        guard !running && !starting else { return }
+        if enabled {
+            selectedModels[providerID] = Set(AIPresentation.enabledModels(provider))
+            selectedProviders.insert(providerID)
+        } else {
+            selectedModels[providerID] = []
+            selectedProviders.remove(providerID)
+        }
+        invalidatePreview()
+    }
+
+    /// 结果中“失败”的项：已实际发起、不是正常也不是取消。
+    var failedItems: [JSONValue] {
+        (result?["results"]?.arrayValue ?? []).filter(AILivenessStore.isFailure)
+    }
+
+    nonisolated static func isFailure(_ item: JSONValue) -> Bool {
+        let status = item["status"]?.stringValue ?? ""
+        return item["skipped"]?.boolValue != true && status != "healthy" && status != "cancelled" && !status.hasPrefix("skipped")
+    }
+
+    /// 把测试范围收窄到给定结果项（失败重测 / 单项重测）。返回是否有可测模型。
+    @discardableResult
+    func prepareRetry(_ items: [JSONValue]) -> Bool {
+        guard !running && !starting else { return false }
+        var scope: [Int: Set<String>] = [:]
+        for item in items {
+            guard let id = item["provider_id"]?.intValue, let modelID = item["model_id"]?.stringValue else { continue }
+            scope[id, default: []].insert(modelID)
+        }
+        guard !scope.isEmpty else { return false }
+        selectedProviders = Set(scope.keys)
+        for (id, models) in scope { selectedModels[id] = models }
+        invalidatePreview()
+        return true
+    }
+
+    func clearResult() {
+        guard !running && !starting else { return }
+        result = nil
+        pollError = nil
+        persist()
+    }
+
     func invalidatePreview() {
         preview = nil
         previewKey = nil
@@ -108,17 +172,23 @@ final class AILivenessStore {
         persist()
     }
 
-    func loadPreview(_ model: AppModel) async {
-        guard canPreview, !loadingPreview else { return }
+    /// 请服务器核对测试范围（只读，不发起上游请求）。成功返回 true。
+    @discardableResult
+    func loadPreview(_ model: AppModel) async -> Bool {
+        guard canPreview, !loadingPreview else { return false }
         loadingPreview = true; error = nil
         defer { loadingPreview = false }
         let requestKey = currentPreviewKey
         do {
             let value = try await model.request(path: "/api/commands/llm-providers/liveness/preview", method: "POST", body: .object(scopeBody))
-            guard requestKey == currentPreviewKey else { return }
+            guard requestKey == currentPreviewKey else { return false }
             preview = value; previewKey = requestKey
             persist()
-        } catch { self.error = error.localizedDescription }
+            return true
+        } catch {
+            self.error = error.localizedDescription
+            return false
+        }
     }
 
     func startRun(_ model: AppModel) async {
@@ -222,6 +292,27 @@ final class AILivenessStore {
     }
 }
 
+private enum AILivenessSort: String, CaseIterable, Identifiable {
+    case provider, latency, failuresFirst
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .provider: "按供应商分组"
+        case .latency: "按耗时（快→慢）"
+        case .failuresFirst: "失败优先"
+        }
+    }
+}
+
+private struct AILivenessGroup: Identifiable {
+    let id: Int
+    let name: String
+    let items: [JSONValue]
+    let healthy: Int
+    let total: Int
+    let statusCodes: [Int]
+}
+
 struct AILivenessView: View {
     @Bindable var workspace: AIWorkspaceStore
     var providerID: Int?
@@ -231,143 +322,222 @@ struct AILivenessView: View {
     @State private var confirming = false
     @State private var cancelling = false
     @State private var resultFilter = "all"
+    @State private var sort: AILivenessSort = .provider
+    @State private var showAdvanced = false
+
+    private var editingLocked: Bool { liveness.running || liveness.starting }
+    private var messageEmpty: Bool { liveness.message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    private var promptEmpty: Bool { liveness.systemPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    private var canStart: Bool { liveness.canPreview && !liveness.loadingPreview && !messageEmpty && !promptEmpty }
 
     var body: some View {
-        List {
-            if workspace.loading && workspace.providers.isEmpty { Section { ProgressView("正在读取供应商…") } }
-            Section {
-                Label(liveness.running ? "服务器正在执行测活" : "选择要测试的模型", systemImage: liveness.running ? "waveform.path.ecg" : "checklist")
+        ScrollViewReader { proxy in
+            List {
+                if workspace.loading && workspace.providers.isEmpty { Section { ProgressView("正在读取供应商…") } }
+                intro
+                scopeSection
+                contentSection
+                startSection
+                if let preview = liveness.preview { skippedSection(preview) }
+                if let result = liveness.result {
+                    progressSection(result)
+                    resultSections(result)
+                }
+                Section {
+                    NavigationLink { ManagementRunLookupView() } label: {
+                        Label("恢复其他设备发起的测活", systemImage: "arrow.uturn.backward.circle")
+                    }
+                } footer: { Text("仅用于查看 Web 端或其他设备发起的测活进度。本 App 发起的测活会自动保留并恢复进度。") }
+            }
+            .navigationTitle("模型测活").navigationBarTitleDisplayMode(.inline)
+            .task {
+                if workspace.providers.isEmpty { await workspace.refresh(model) }
+                liveness.start(model, providers: workspace.providers, providerID: providerID)
+            }
+            .onChange(of: workspace.providers) { _, providers in liveness.reconcile(providers) }
+            .task(id: scenePhase) {
+                guard scenePhase == .active, liveness.runID != nil else { return }
+                await liveness.poll(model)
+            }
+            .onChange(of: liveness.runID) { _, id in
+                guard id != nil else { return }
+                withAnimation { proxy.scrollTo("ai.liveness.progressAnchor", anchor: .top) }
+                guard scenePhase == .active else { return }
+                Task { await liveness.poll(model) }
+            }
+            .refreshable {
+                await workspace.refresh(model)
+                if liveness.runID != nil { await liveness.pollOnce(model) }
+            }
+            .confirmationDialog("开始模型测活？", isPresented: $confirming, titleVisibility: .visible) {
+                Button("确认并开始") { Task { await liveness.startRun(model) } }
+                Button("取消", role: .cancel) {}
+            } message: {
+                Text(confirmationMessage)
+            }
+            .confirmationDialog("停止本次测活？", isPresented: $cancelling, titleVisibility: .visible) {
+                Button("停止测活", role: .destructive) { Task { await liveness.cancel(model) } }
+                Button("继续测活", role: .cancel) {}
+            } message: { Text("将不再发起新的请求，并中断正在进行的请求。已完成的结果会保留，已产生的上游费用不会退回。") }
+        }
+    }
+
+    // MARK: - 说明与范围
+
+    private var intro: some View {
+        Section {
+            HStack(alignment: .top) {
+                Label(liveness.running ? "服务器正在测活" : "检查模型现在能不能用", systemImage: liveness.running ? "waveform.path.ecg" : "stethoscope")
                     .font(.headline)
-                Text("测活会发送真实上游请求，不会自动启停模型，也不会清除业务调用的冷却状态。")
-                    .font(.caption).foregroundStyle(.secondary)
+                Spacer(minLength: 4)
+                AIHelpButton(title: "什么是测活", message: AIGlossary.terms.first { $0.title == "测活" }?.detail ?? "")
             }
-
-            Section {
-                ForEach(workspace.providers, id: \.self) { provider in
-                    if let id = provider["id"]?.intValue {
-                        AILivenessProviderScope(provider: provider, id: id, liveness: liveness, providers: workspace.providers)
-                    }
-                }
-                if workspace.providers.isEmpty, workspace.loaded { Text("请先添加供应商和模型。").foregroundStyle(.secondary) }
-            } header: {
-                Text("测试范围")
-            } footer: {
-                Text("已选 \(liveness.selectedProviders.count) 个供应商、\(liveness.selectedModelCount) 个模型。只包含已启用的模型。")
-            }
-
-            Section("测试设置") {
-                Stepper("单模型最大输出：\(liveness.maxTokens) Token", value: Binding(get: { liveness.maxTokens }, set: { liveness.maxTokens = $0; liveness.updateSettings() }), in: 64...8000, step: 64)
-                    .disabled(liveness.running || liveness.starting)
-                Stepper("超时：\(liveness.timeoutSeconds) 秒", value: $liveness.timeoutSeconds, in: 10...600, step: 10)
-                    .disabled(liveness.running || liveness.starting)
-                Picker("全局并发", selection: Binding(get: { liveness.concurrency }, set: { liveness.concurrency = $0; liveness.updateSettings() })) {
-                    ForEach([2, 4, 8, 12], id: \.self) { Text("\($0) 路").tag($0) }
-                }
-                .disabled(liveness.running || liveness.starting)
-                TextField("测试语", text: $liveness.message, axis: .vertical).lineLimit(1...4)
-                    .disabled(liveness.running || liveness.starting)
-                DisclosureGroup("自定义系统提示词") {
-                    TextField("系统提示词", text: $liveness.systemPrompt, axis: .vertical).lineLimit(2...8)
-                        .disabled(liveness.running || liveness.starting)
-                }
-            }
-
-            Section("操作") {
-                Button(liveness.preview == nil ? "预览测试范围与消耗" : "重新预览当前范围", systemImage: "list.clipboard") {
-                    Task { await liveness.loadPreview(model) }
-                }
-                .accessibilityIdentifier("ai.liveness.preview")
-                .disabled(!liveness.canPreview || liveness.loadingPreview || liveness.message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                .frame(minHeight: 44)
-                .accessibilityHint(liveness.preview == nil ? "预览后会显示消耗与可执行范围" : "重新预览当前范围")
-                if liveness.preview == nil { Text("预览后会显示消耗与可执行范围").font(.caption).foregroundStyle(.secondary) }
-                if liveness.loadingPreview { ProgressView("服务器正在核对测试范围…") }
-            }
-
-            if let error = liveness.error { Section { NoticeView(title: "测活操作未完成", message: error) } }
-
-            if let preview = liveness.preview { previewSection(preview) }
-            if let result = liveness.result { resultSection(result) }
-
-            Section {
-                NavigationLink("恢复其他测活任务") { ManagementRunLookupView() }
-            } footer: { Text("仅用于恢复其他设备或 Web 发起的任务。本 App 创建的测活会自动保留并恢复进度。") }
+            Text("选好要检查的模型后点“开始测活”。服务器会向每个模型发送同一句测试语，并逐个显示是否正常、耗时多久、失败原因。测活不会自动启用或停用模型，也不会清除业务调用的冷却状态。")
+                .font(.caption).foregroundStyle(.secondary)
         }
-        .navigationTitle("模型测活").navigationBarTitleDisplayMode(.inline)
-        .task {
-            if workspace.providers.isEmpty { await workspace.refresh(model) }
-            liveness.start(model, providers: workspace.providers, providerID: providerID)
-        }
-        .onChange(of: workspace.providers) { _, providers in liveness.reconcile(providers) }
-        .task(id: scenePhase) {
-            guard scenePhase == .active, liveness.runID != nil else { return }
-            await liveness.poll(model)
-        }
-        .onChange(of: liveness.runID) { _, id in
-            guard id != nil, scenePhase == .active else { return }
-            Task { await liveness.poll(model) }
-        }
-        .refreshable {
-            await workspace.refresh(model)
-            if liveness.runID != nil { await liveness.pollOnce(model) }
-        }
-        .confirmationDialog("开始模型测活？", isPresented: $confirming, titleVisibility: .visible) {
-            Button(liveness.preview?["needs_confirmation"]?.boolValue == true ? "确认消耗并开始测活" : "开始测活") {
-                Task { await liveness.startRun(model) }
-            }
-            Button("取消", role: .cancel) {}
-        } message: {
-            Text("将向 \(liveness.preview?["task_total"]?.intValue ?? 0) 个模型发送真实请求，最大可能输出约 \(AIPresentation.tokens(liveness.preview?["max_output_tokens"]?.intValue ?? 0)) Token。测试期间可能产生上游费用。")
-        }
-        .confirmationDialog("取消本次测活？", isPresented: $cancelling, titleVisibility: .visible) {
-            Button("取消测活", role: .destructive) { Task { await liveness.cancel(model) } }
-            Button("继续测活", role: .cancel) {}
-        } message: { Text("将停止发起新任务并中断在途请求。已完成的结果会保留，已消耗的上游额度不会退回。") }
     }
 
-
-    @ViewBuilder private func previewSection(_ preview: JSONValue) -> some View {
-        Section("服务器预览") {
-            HStack(spacing: 20) {
-                AIMetric(title: "测试任务", value: String(preview["task_total"]?.intValue ?? 0))
-                AIMetric(title: "输出上限", value: AIPresentation.tokens(preview["max_output_tokens"]?.intValue ?? 0), detail: "Token")
-                AIMetric(title: "并发", value: "\(preview["global_concurrency"]?.intValue ?? 0) 路", detail: "单供应商最多 \(preview["provider_concurrency"]?.intValue ?? 0) 路")
+    private var scopeSection: some View {
+        Section {
+            HStack {
+                Button("全选", systemImage: "checkmark.circle") { liveness.selectAll(workspace.providers) }
+                Spacer()
+                Button("全不选", systemImage: "circle") { liveness.clearSelection() }
             }
-            ForEach(preview["providers"]?.arrayValue ?? [], id: \.self) { plan in
+            .buttonStyle(.borderless)
+            .disabled(editingLocked || workspace.providers.isEmpty)
+            ForEach(workspace.providers, id: \.self) { provider in
+                if let id = provider["id"]?.intValue {
+                    AILivenessProviderScope(provider: provider, id: id, liveness: liveness, providers: workspace.providers, locked: editingLocked)
+                }
+            }
+            if workspace.providers.isEmpty, workspace.loaded {
+                Text("还没有供应商。请先在“供应商”里添加供应商并启用模型。").foregroundStyle(.secondary)
+            }
+        } header: {
+            Text("测试范围")
+        } footer: {
+            Text("已选 \(liveness.selectedProviders.count) 个供应商、\(liveness.selectedModelCount) 个模型。这里只列出模型清单中已启用的模型。")
+        }
+    }
+
+    private var contentSection: some View {
+        Section {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("测试语").font(.caption).foregroundStyle(.secondary)
+                TextField("发送给每个模型的一句话", text: $liveness.message, axis: .vertical)
+                    .lineLimit(1...4)
+                    .disabled(editingLocked)
+            }
+            DisclosureGroup("高级参数", isExpanded: $showAdvanced) {
+                Stepper(value: Binding(get: { liveness.maxTokens }, set: { liveness.maxTokens = $0; liveness.updateSettings() }), in: 64...8000, step: 64) {
+                    AISettingLabel(title: "最大回复长度：\(liveness.maxTokens) 词元", detail: "限制每个模型最多回复多长。越大越能看出完整回复，也可能花费更多。")
+                }
+                .disabled(editingLocked)
+                Stepper(value: $liveness.timeoutSeconds, in: 10...600, step: 10) {
+                    AISettingLabel(title: "超时：\(liveness.timeoutSeconds) 秒", detail: "超过这个时间还没有回复，就记为“超时”。")
+                }
+                .disabled(editingLocked)
+                Picker(selection: Binding(get: { liveness.concurrency }, set: { liveness.concurrency = $0; liveness.updateSettings() })) {
+                    ForEach([2, 4, 8, 12], id: \.self) { Text("\($0) 个").tag($0) }
+                } label: {
+                    AISettingLabel(title: "同时测试的模型数", detail: "越大越快，但更容易触发供应商限流。")
+                }
+                .disabled(editingLocked)
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(plan["provider_name"]?.stringValue ?? "供应商").font(.subheadline.weight(.medium))
-                    if plan["executable"]?.boolValue == true {
-                        Text("\(plan["enabled_models"]?.arrayValue?.count ?? 0) 个模型可执行").font(.caption).foregroundStyle(.secondary)
-                    } else {
-                        Text(plan["skipped_reason"]?.stringValue.map(AIPresentation.status) ?? "没有可执行的启用模型")
-                            .font(.caption).foregroundStyle(.orange)
-                    }
+                    Text("系统提示词（告诉模型该如何回答）").font(.caption).foregroundStyle(.secondary)
+                    TextField("系统提示词", text: $liveness.systemPrompt, axis: .vertical)
+                        .lineLimit(2...8)
+                        .disabled(editingLocked)
                 }
             }
-            if preview["needs_confirmation"]?.boolValue == true {
-                Label("任务数较多，开始时会再次明确确认上游消耗。", systemImage: "exclamationmark.triangle")
-                    .font(.caption).foregroundStyle(.orange)
-            }
-            Button("按此范围开始测活", systemImage: "play.fill") { confirming = true }
-                .disabled(liveness.running || liveness.starting || (preview["task_total"]?.intValue ?? 0) == 0
-                    || liveness.message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                    || liveness.systemPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                .frame(minHeight: 44)
-                .accessibilityIdentifier("ai.liveness.start")
-            if liveness.starting { ProgressView("正在创建服务器测活任务…") }
+        } header: {
+            Text("测试内容")
+        } footer: {
+            Text("所有模型收到完全相同的测试语，不带任何聊天历史，方便横向比较。")
         }
     }
 
-    @ViewBuilder private func resultSection(_ result: JSONValue) -> some View {
-        let results = result["results"]?.arrayValue ?? []
-        let filtered = results.filter { item in
-            switch resultFilter {
-            case "healthy": return item["status"]?.stringValue == "healthy"
-            case "failed": return item["skipped"]?.boolValue != true && item["status"]?.stringValue != "healthy" && item["status"]?.stringValue != "cancelled"
-            case "skipped": return item["skipped"]?.boolValue == true || item["status"]?.stringValue == "cancelled"
-            default: return true
+    private var startTitle: String {
+        if liveness.loadingPreview { return "正在核对测试范围…" }
+        if liveness.starting { return "正在创建测活任务…" }
+        if liveness.running { return "测活进行中" }
+        return "开始测活（\(liveness.selectedModelCount) 个模型）"
+    }
+
+    private var startSection: some View {
+        Section {
+            Button {
+                requestStart()
+            } label: {
+                HStack(spacing: 8) {
+                    Spacer(minLength: 0)
+                    if liveness.loadingPreview || liveness.starting { ProgressView() }
+                    Label(startTitle, systemImage: "play.fill").font(.headline)
+                    Spacer(minLength: 0)
+                }
+                .frame(minHeight: 44)
             }
+            .disabled(!canStart)
+            .accessibilityIdentifier("ai.liveness.start")
+            if messageEmpty || promptEmpty {
+                Text(messageEmpty ? "请先填写测试语。" : "请先填写系统提示词。").font(.caption).foregroundStyle(.orange)
+            }
+            if let error = liveness.error { NoticeView(title: "测活未能开始", message: error) }
+        } footer: {
+            Text("点按后服务器会先核对实际可测的模型数量和最大花费，你确认后才会发送真实请求，可能产生上游费用。")
         }
+    }
+
+    private var confirmationMessage: String {
+        let preview = liveness.preview
+        var text = "将向 \(preview?["task_total"]?.intValue ?? 0) 个模型各发送一次真实请求（最多同时 \(preview?["global_concurrency"]?.intValue ?? liveness.concurrency) 个），全部回复合计最多约 \(AIPresentation.tokens(preview?["max_output_tokens"]?.intValue ?? 0)) 词元，会产生上游费用。"
+        if preview?["needs_confirmation"]?.boolValue == true { text += "\n本次任务较多，请确认范围无误。" }
+        return text
+    }
+
+    private func requestStart() {
+        guard !liveness.loadingPreview, !editingLocked else { return }
+        guard liveness.canPreview else {
+            liveness.error = "所选模型已不在启用列表中，请重新选择测试范围。"
+            return
+        }
+        Task {
+            guard await liveness.loadPreview(model) else { return }
+            if (liveness.preview?["task_total"]?.intValue ?? 0) > 0 { confirming = true }
+            else { liveness.error = "服务器核对后没有可以测试的模型。请检查供应商密钥是否有效、模型是否已启用。" }
+        }
+    }
+
+    private func retry(_ items: [JSONValue]) {
+        guard !editingLocked, !liveness.loadingPreview else { return }
+        guard liveness.prepareRetry(items) else { return }
+        resultFilter = "all"
+        requestStart()
+    }
+
+    @ViewBuilder private func skippedSection(_ preview: JSONValue) -> some View {
+        let skipped = (preview["providers"]?.arrayValue ?? []).filter { $0["executable"]?.boolValue != true }
+        if !skipped.isEmpty {
+            Section {
+                ForEach(skipped, id: \.self) { plan in
+                    Label {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(plan["provider_name"]?.stringValue ?? "供应商").font(.subheadline.weight(.medium))
+                            Text(plan["skipped_reason"]?.stringValue.map(AIPresentation.status) ?? "没有可执行的启用模型")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                    } icon: {
+                        Image(systemName: "exclamationmark.triangle").foregroundStyle(.orange)
+                    }
+                }
+            } header: { Text("将被跳过的供应商") } footer: { Text("这些供应商缺少可用密钥或没有启用的模型，本次不会发送请求。") }
+        }
+    }
+
+    // MARK: - 进度与结果
+
+    @ViewBuilder private func progressSection(_ result: JSONValue) -> some View {
         Section {
             if let error = result["error"]?.stringValue { NoticeView(title: "测活未完成", message: error) }
             if let pollError = liveness.pollError { NoticeView(title: "进度连接中断", message: pollError) }
@@ -380,38 +550,169 @@ struct AILivenessView: View {
                 }
                 ProgressView(value: Double(result["completed"]?.intValue ?? 0), total: Double(max(1, result["task_total"]?.intValue ?? 0)))
                 HStack(spacing: 16) {
-                    Text("正常 \(result["healthy"]?.intValue ?? 0)").foregroundStyle(.green)
-                    Text("失败 \(result["failed"]?.intValue ?? 0)").foregroundStyle(result["failed"]?.intValue ?? 0 > 0 ? .red : .secondary)
-                    Text("跳过 \(result["skipped"]?.intValue ?? 0)").foregroundStyle(.secondary)
-                }.font(.caption).monospacedDigit()
+                    Label("正常 \(result["healthy"]?.intValue ?? 0)", systemImage: "checkmark.circle").foregroundStyle(.green)
+                    Label("失败 \(result["failed"]?.intValue ?? 0)", systemImage: "xmark.circle")
+                        .foregroundStyle((result["failed"]?.intValue ?? 0) > 0 ? Color.red : Color.secondary)
+                    Label("跳过 \(result["skipped"]?.intValue ?? 0)", systemImage: "minus.circle").foregroundStyle(.secondary)
+                }
+                .font(.caption).monospacedDigit()
             }
+            .id("ai.liveness.progressAnchor")
             .accessibilityElement(children: .combine)
             .accessibilityIdentifier("ai.liveness.progress")
             if liveness.running {
-                Button("取消测活", role: .destructive) { cancelling = true }
-                    .disabled(liveness.cancelling || liveness.runID == nil)
-                    .frame(minHeight: 44)
-                    .accessibilityIdentifier("ai.liveness.cancel")
-                if liveness.cancelling { ProgressView("正在请求服务器取消…") }
+                Button(role: .destructive) { cancelling = true } label: {
+                    Label("停止测活", systemImage: "stop.circle")
+                }
+                .disabled(liveness.cancelling || liveness.runID == nil)
+                .frame(minHeight: 44)
+                .accessibilityIdentifier("ai.liveness.cancel")
+                if liveness.cancelling { ProgressView("正在请求服务器停止…") }
             }
         } header: {
             Text("执行进度")
         } footer: {
-            Text("任务在服务器执行，离开页面不会中断。前台自动刷新进度，断线后自动重试读取，不会重复启动任务。")
+            Text("测活在服务器上执行，离开页面或切到后台不会中断。回到前台后自动刷新进度；网络中断时只会重新读取进度，不会重复发起测活。")
+        }
+    }
+
+    private func matches(_ item: JSONValue) -> Bool {
+        let status = item["status"]?.stringValue ?? ""
+        switch resultFilter {
+        case "healthy": return status == "healthy"
+        case "failed": return AILivenessStore.isFailure(item)
+        case "skipped": return !AILivenessStore.isFailure(item) && status != "healthy"
+        default: return true
+        }
+    }
+
+    private func ordered(_ items: [JSONValue]) -> [JSONValue] {
+        switch sort {
+        case .provider:
+            return items
+        case .latency:
+            return items.sorted { lhs, rhs in
+                let left = lhs["latency_ms"]?.intValue ?? 0, right = rhs["latency_ms"]?.intValue ?? 0
+                if (left > 0) != (right > 0) { return left > 0 }
+                return left < right
+            }
+        case .failuresFirst:
+            return items.sorted { AILivenessStore.isFailure($0) && !AILivenessStore.isFailure($1) }
+        }
+    }
+
+    private func groups(_ items: [JSONValue], all: [JSONValue]) -> [AILivenessGroup] {
+        var order: [Int] = []
+        var names: [Int: String] = [:]
+        for item in items {
+            let id = item["provider_id"]?.intValue ?? 0
+            if names[id] == nil { order.append(id); names[id] = item["provider_name"]?.stringValue ?? "未知供应商" }
+        }
+        return order.map { id in
+            let providerAll = all.filter { ($0["provider_id"]?.intValue ?? 0) == id }
+            let codes = Set(providerAll.compactMap(AILivenessResultRow.httpStatus)).sorted()
+            return AILivenessGroup(id: id, name: names[id] ?? "未知供应商",
+                items: items.filter { ($0["provider_id"]?.intValue ?? 0) == id },
+                healthy: providerAll.filter { $0["status"]?.stringValue == "healthy" }.count,
+                total: providerAll.count, statusCodes: codes)
+        }
+    }
+
+    @ViewBuilder private func resultSections(_ result: JSONValue) -> some View {
+        let results = result["results"]?.arrayValue ?? []
+        let failed = results.filter(AILivenessStore.isFailure)
+        let filtered = ordered(results.filter(matches))
+        Section {
+            if results.isEmpty {
+                Text(liveness.running ? "正在等待第一项结果…" : "本次测活没有返回逐项结果。").foregroundStyle(.secondary)
+            } else {
+                Picker("结果筛选", selection: $resultFilter) {
+                    Text("全部").tag("all")
+                    Text("正常").tag("healthy")
+                    Text("失败 \(failed.count)").tag("failed")
+                    Text("跳过").tag("skipped")
+                }
+                .pickerStyle(.segmented)
+                Picker(selection: $sort) {
+                    ForEach(AILivenessSort.allCases) { Text($0.title).tag($0) }
+                } label: {
+                    Label("排序", systemImage: "arrow.up.arrow.down")
+                }
+                if !failed.isEmpty {
+                    Button { retry(failed) } label: {
+                        Label("重新测试失败的 \(failed.count) 个模型", systemImage: "arrow.clockwise")
+                    }
+                    .disabled(editingLocked || liveness.loadingPreview)
+                    .frame(minHeight: 44)
+                    .accessibilityIdentifier("ai.liveness.retryFailed")
+                }
+            }
+            if !liveness.running && !liveness.starting {
+                Button(role: .destructive) { liveness.clearResult() } label: {
+                    Label("清空本次结果", systemImage: "trash")
+                }
+            }
+        } header: {
+            Text("逐项结果")
+        } footer: {
+            if !results.isEmpty { Text("左滑某一项可以单独重测。重测会新建一次只包含所选模型的测活，并替换当前结果。") }
         }
 
-        Section {
-            Picker("结果筛选", selection: $resultFilter) {
-                Text("全部 \(results.count)").tag("all")
-                Text("正常 \(result["healthy"]?.intValue ?? 0)").tag("healthy")
-                Text("失败 \(result["failed"]?.intValue ?? 0)").tag("failed")
-                Text("跳过 \(result["skipped"]?.intValue ?? 0)").tag("skipped")
+        if !results.isEmpty {
+            if filtered.isEmpty {
+                Section { Text("当前筛选下没有结果。").foregroundStyle(.secondary) }
+            } else if sort == .provider {
+                ForEach(groups(filtered, all: results)) { group in
+                    Section {
+                        ForEach(Array(group.items.enumerated()), id: \.offset) { _, item in resultRow(item) }
+                    } header: {
+                        HStack {
+                            Text(group.name)
+                            Spacer()
+                            if !group.statusCodes.isEmpty {
+                                Text(group.statusCodes.map { "HTTP \($0)" }.joined(separator: " "))
+                            }
+                            Text("正常 \(group.healthy)/\(group.total)")
+                                .foregroundStyle(group.healthy == group.total ? Color.green : Color.orange)
+                        }
+                        .monospacedDigit()
+                    }
+                }
+            } else {
+                Section {
+                    ForEach(Array(filtered.enumerated()), id: \.offset) { _, item in resultRow(item) }
+                }
             }
-            ForEach(filtered, id: \.self) { item in
-                NavigationLink { AILivenessResultView(item: item) } label: { AILivenessResultRow(item: item) }
-            }
-            if filtered.isEmpty { Text(results.isEmpty ? "正在等待第一项结果。" : "当前筛选没有结果。").foregroundStyle(.secondary) }
-        } header: { Text("逐项结果") }
+        }
+    }
+
+    private func resultRow(_ item: JSONValue) -> some View {
+        NavigationLink {
+            AILivenessResultView(item: item, onRetry: { retry([item]) })
+        } label: {
+            AILivenessResultRow(item: item)
+        }
+        .swipeActions(edge: .trailing) {
+            Button { retry([item]) } label: { Label("重测", systemImage: "arrow.clockwise") }
+                .tint(Color.accentColor)
+                .disabled(editingLocked)
+        }
+        .contextMenu {
+            Button { retry([item]) } label: { Label("单独重测此模型", systemImage: "arrow.clockwise") }
+                .disabled(editingLocked)
+        }
+    }
+}
+
+/// 标题 + 灰色解释的组合标签，用于设置项。
+struct AISettingLabel: View {
+    let title: String
+    let detail: String
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title)
+            Text(detail).font(.caption).foregroundStyle(.secondary)
+        }
     }
 }
 
@@ -420,41 +721,80 @@ private struct AILivenessProviderScope: View {
     let id: Int
     @Bindable var liveness: AILivenessStore
     let providers: [JSONValue]
+    let locked: Bool
+    @State private var expanded = false
 
     var body: some View {
-        Toggle(isOn: Binding(get: { liveness.selectedProviders.contains(id) }, set: { liveness.toggleProvider(id, enabled: $0, providers: providers) })) {
+        let models = AIPresentation.enabledModels(provider)
+        let isSelected = liveness.selectedProviders.contains(id)
+        let selectedCount = isSelected ? (liveness.selectedModels[id]?.count ?? 0) : 0
+        Toggle(isOn: Binding(get: { isSelected }, set: { liveness.toggleProvider(id, enabled: $0, providers: providers) })) {
             VStack(alignment: .leading, spacing: 3) {
                 Text(AIPresentation.providerName(provider)).font(.subheadline.weight(.medium))
-                Text("\(liveness.selectedModels[id]?.count ?? 0) / \(AIPresentation.enabledModels(provider).count) 个模型")
+                Text(models.isEmpty ? "没有启用的模型" : "\(AIPresentation.providerType(provider["provider"]?.stringValue)) · 已选 \(selectedCount)/\(models.count) 个模型")
                     .font(.caption).foregroundStyle(.secondary)
             }
         }
-        .disabled(liveness.running || liveness.starting)
-        if liveness.selectedProviders.contains(id) {
-            ForEach(AIPresentation.enabledModels(provider), id: \.self) { item in
-                Toggle(item, isOn: Binding(get: { liveness.selectedModels[id]?.contains(item) == true }, set: { liveness.toggleModel(id, item, enabled: $0) }))
-                    .font(.caption).padding(.leading, 16)
-                    .disabled(liveness.running || liveness.starting)
+        .disabled(locked || models.isEmpty)
+        .accessibilityIdentifier("ai.liveness.provider.\(id)")
+        if isSelected, models.count > 1 {
+            DisclosureGroup(isExpanded: $expanded) {
+                HStack {
+                    Button("全部选中", systemImage: "checkmark.circle") { liveness.setAllModels(id, provider: provider, enabled: true) }
+                    Spacer()
+                    Button("全部取消", systemImage: "circle") { liveness.setAllModels(id, provider: provider, enabled: false) }
+                }
+                .buttonStyle(.borderless)
+                .font(.caption)
+                .disabled(locked)
+                ForEach(models, id: \.self) { item in
+                    Toggle(item, isOn: Binding(get: { liveness.selectedModels[id]?.contains(item) == true }, set: { liveness.toggleModel(id, item, enabled: $0) }))
+                        .font(.caption)
+                        .disabled(locked)
+                }
+            } label: {
+                Label("单独挑选模型", systemImage: "slider.horizontal.3").font(.caption)
             }
+            .padding(.leading, 16)
         }
     }
 }
 
-private struct AILivenessResultRow: View {
+struct AILivenessResultRow: View {
     let item: JSONValue
+
+    /// 只展示后端已结构化确认的 HTTP 状态码，不从错误文案中猜测。
+    static func httpStatus(_ item: JSONValue) -> Int? {
+        guard let code = item["upstream_status_code"]?.intValue ?? item["status_code"]?.intValue, (100...599).contains(code) else { return nil }
+        return code
+    }
+
     var body: some View {
         let status = item["status"]?.stringValue ?? "unknown"
+        let skipped = item["skipped"]?.boolValue == true || status == "cancelled" || status.hasPrefix("skipped")
+        let code = Self.httpStatus(item)
         VStack(alignment: .leading, spacing: 5) {
-            HStack {
+            HStack(alignment: .firstTextBaseline) {
                 Text(item["model_id"]?.stringValue ?? "未知模型").font(.subheadline.weight(.medium)).lineLimit(2)
-                Spacer()
-                AIStatusLabel(title: AIPresentation.status(status), symbol: status == "healthy" ? "checkmark.circle.fill" : "exclamationmark.circle.fill", color: AIPresentation.statusColor(status))
+                Spacer(minLength: 6)
+                AIStatusLabel(title: AIPresentation.status(status) + (code.map { " · \($0)" } ?? ""),
+                    symbol: status == "healthy" ? "checkmark.circle.fill" : skipped ? "minus.circle" : "exclamationmark.circle.fill",
+                    color: AIPresentation.statusColor(status))
             }
-            HStack {
-                Text(item["provider_name"]?.stringValue ?? "未知供应商")
-                Spacer()
-                if let latency = item["latency_ms"]?.intValue, latency > 0 { Text("\(latency) ms").monospacedDigit() }
-            }.font(.caption).foregroundStyle(.secondary)
+            HStack(spacing: 8) {
+                Text(item["provider_name"]?.stringValue ?? "未知供应商").lineLimit(1)
+                Spacer(minLength: 4)
+                if !skipped {
+                    Label(AIPresentation.latency(item["latency_ms"]?.intValue), systemImage: "timer").monospacedDigit()
+                }
+            }
+            .font(.caption).foregroundStyle(.secondary)
+            if let format = item["effective_api_format"]?.stringValue, !format.isEmpty {
+                Text("接口：\(AIPresentation.apiFormat(format)) · 身份：\(AIPresentation.clientIdentity(item["client_identity_profile"]?.stringValue))")
+                    .font(.caption2).foregroundStyle(.secondary).lineLimit(2)
+            } else if skipped {
+                Text("未发起请求").font(.caption2).foregroundStyle(.secondary)
+            }
             if let error = item["error"]?.stringValue, !error.isEmpty {
                 Text(AssistantRedaction.text(error)).font(.caption).foregroundStyle(.red).lineLimit(2)
             }
@@ -465,6 +805,29 @@ private struct AILivenessResultRow: View {
 
 struct AILivenessResultView: View {
     let item: JSONValue
+    var onRetry: (() -> Void)? = nil
+    @Environment(\.dismiss) private var dismiss
+
+    private static let diagnosticLabels: [(String, String)] = [
+        ("status_code", "HTTP 状态码"), ("upstream_status_code", "上游 HTTP 状态码"),
+        ("error_category", "错误分类"), ("upstream_error_code", "上游错误码"),
+        ("upstream_error_message", "上游错误信息"), ("upstream_request_id", "上游请求编号"),
+        ("client_request_id", "本地请求编号"), ("effective_api_format", "实际接口协议"),
+        ("client_identity_profile", "实际客户端身份"), ("execution_backend", "实际调用方式"),
+        ("gateway_version", "内置网关版本"), ("gateway_request_id", "内置网关请求编号"), ("gateway_stage", "内置网关阶段")
+    ]
+
+    private func display(_ key: String, _ value: JSONValue) -> String {
+        let raw = ManagementText.rawScalar(value)
+        switch key {
+        case "effective_api_format": return AIPresentation.apiFormat(raw)
+        case "client_identity_profile": return AIPresentation.clientIdentity(raw)
+        case "execution_backend": return AIPresentation.executionBackend(raw)
+        case "error_category": return AIPresentation.status(raw)
+        default: return raw
+        }
+    }
+
     var body: some View {
         let status = item["status"]?.stringValue ?? "unknown"
         List {
@@ -472,29 +835,35 @@ struct AILivenessResultView: View {
                 LabeledContent("供应商", value: item["provider_name"]?.stringValue ?? "未知")
                 LabeledContent("模型", value: item["model_id"]?.stringValue ?? "未知")
                 LabeledContent("结果") { Text(AIPresentation.status(status)).foregroundStyle(AIPresentation.statusColor(status)) }
-                LabeledContent("耗时", value: "\(item["latency_ms"]?.intValue ?? 0) ms")
-                LabeledContent("Token", value: "\(item["input_tokens"]?.intValue ?? 0) 输入 / \(item["output_tokens"]?.intValue ?? 0) 输出")
+                LabeledContent("耗时", value: AIPresentation.latency(item["latency_ms"]?.intValue))
+                LabeledContent("词元用量", value: "输入 \(item["input_tokens"]?.intValue ?? 0) · 输出 \(item["output_tokens"]?.intValue ?? 0)")
             }
             if let preview = item["preview"]?.stringValue, !preview.isEmpty {
-                Section("返回预览") { Text(AssistantRedaction.text(preview)).textSelection(.enabled) }
+                Section("模型回复") { Text(AssistantRedaction.text(preview)).textSelection(.enabled) }
             }
             if let error = item["error"]?.stringValue, !error.isEmpty {
-                Section("错误") { Text(AssistantRedaction.text(error)).foregroundStyle(.red).textSelection(.enabled) }
+                Section("错误原因") { Text(AssistantRedaction.text(error)).foregroundStyle(.red).textSelection(.enabled) }
             }
-            if let suggestion = item["suggestion"]?.stringValue, !suggestion.isEmpty {
-                Section("建议") { Text(AssistantRedaction.text(suggestion)) }
+            if let suggestion = item["suggestion"]?.stringValue, !suggestion.isEmpty, suggestion != item["error"]?.stringValue {
+                Section("处理建议") { Text(AssistantRedaction.text(suggestion)) }
             }
-            Section("诊断详情") {
-                ForEach(["status_code", "upstream_status_code", "upstream_error_code", "upstream_error_message",
-                         "upstream_request_id", "client_request_id", "effective_api_format", "client_identity_profile",
-                         "execution_backend", "gateway_version", "gateway_request_id", "gateway_stage"], id: \.self) { key in
-                    if let value = item[key], !value.isNull, !ManagementText.rawScalar(value).isEmpty {
-                        LabeledContent(ManagementText.label(key)) {
-                            Text(ManagementText.rawScalar(value)).multilineTextAlignment(.trailing).textSelection(.enabled)
+            if let onRetry {
+                Section {
+                    Button {
+                        onRetry()
+                        dismiss()
+                    } label: { Label("单独重测此模型", systemImage: "arrow.clockwise") }
+                } footer: { Text("会新建一次只包含此模型的测活，开始前仍会请你确认。") }
+            }
+            Section {
+                ForEach(Array(Self.diagnosticLabels.enumerated()), id: \.offset) { _, pair in
+                    if let value = item[pair.0], !value.isNull, !ManagementText.rawScalar(value).isEmpty {
+                        LabeledContent(pair.1) {
+                            Text(AssistantRedaction.text(display(pair.0, value))).multilineTextAlignment(.trailing).textSelection(.enabled)
                         }
                     }
                 }
-            }
+            } header: { Text("诊断详情") } footer: { Text("向供应商或中转站反馈问题时，可以附上请求编号。") }
         }
         .navigationTitle("测活详情").navigationBarTitleDisplayMode(.inline)
     }

@@ -13,6 +13,12 @@ actor FixtureService: AppServing {
     private var cleanupAttempts = 0
     private var fixtureValues: [String: JSONValue] = [:]
     private var accountFeatureEnabled: [Int: [String: Bool]] = [1: ["auto_reply": true], 2: ["auto_reply": false]]
+    private var accountAICommands: [Int: Set<Int>] = [1: [11], 2: []]
+    private var fixtureSettings: JSONValue = [
+        "timezone": "Asia/Shanghai", "command_prefix": ".", "ai_enabled": true, "ai_context_messages": 3,
+        "llm_limits": ["per_minute": 30, "daily_requests": 0, "daily_tokens": 500000, "premium_daily": 0],
+        "log_retention": ["llm_usage_retention_days": 30]
+    ]
 
     init(offline: Bool = false) {
         self.offline = offline
@@ -220,8 +226,51 @@ actor FixtureService: AppServing {
         }
         if clean == "/api/commands/llm-providers/liveness/run" { return ["run_id": "fixture-liveness", "status": "queued"] }
         if clean == "/api/commands/llm-providers/liveness/fixture-liveness" {
-            return ["run_id": "fixture-liveness", "status": "completed", "task_total": 1, "completed": 1, "healthy": 1, "failed": 0,
-                    "results": [["provider_id": 1, "provider_name": "个人模型网关", "model_id": "gpt-5.4-mini", "status": "healthy", "latency_ms": 620, "preview": "连接正常"]]]
+            return ["run_id": "fixture-liveness", "status": "completed", "task_total": 2, "completed": 2, "healthy": 1, "failed": 1, "skipped": 0,
+                    "results": [["provider_id": 1, "provider_name": "个人模型网关", "model_id": "gpt-5.4-mini", "status": "healthy", "latency_ms": 620,
+                                 "preview": "连接正常", "effective_api_format": "responses", "client_identity_profile": "openai_sdk"],
+                                ["provider_id": 1, "provider_name": "个人模型网关", "model_id": "gpt-5.4", "status": "timeout", "latency_ms": 30000,
+                                 "error": "上游响应超时", "suggestion": "稍后重试或调大超时秒数。", "effective_api_format": "responses"]]]
+        }
+        if clean == "/api/commands/templates", method == "GET" {
+            return [
+                ["id": 11, "name": "ai", "type": "ai", "description": "通用问答", "aliases": ["a", "ask"],
+                 "config": ["mode": "chat", "provider_id": 1, "model": "gpt-5.4-mini", "routing_mode": "auto", "output_format": "html", "send_mode": "edit"],
+                 "created_at": "2026-10-01T08:00:00Z"],
+                ["id": 12, "name": "img", "type": "ai", "description": "生成图片", "aliases": [],
+                 "config": ["mode": "image", "image_backend": "codex_image"], "created_at": "2026-10-01T08:00:00Z"],
+                ["id": 13, "name": "hi", "type": "reply_text", "aliases": [], "config": ["text": "你好"], "created_at": "2026-10-01T08:00:00Z"]
+            ]
+        }
+        if let match = clean.firstMatch(of: #/^\/api\/accounts\/(\d+)\/commands$/#), method == "GET" {
+            let enabled = accountAICommands[Int(match.1) ?? 0] ?? []
+            let names: [Int: String] = [11: "ai", 12: "img", 13: "hi"]
+            return .array([11, 12, 13].map { (id: Int) -> JSONValue in
+                .object(["template": .object(["id": .integer(Int64(id)), "name": .string(names[id] ?? "")]), "enabled": .bool(enabled.contains(id))])
+            })
+        }
+        if let match = clean.firstMatch(of: #/^\/api\/accounts\/(\d+)\/commands\/(\d+)$/#), method == "POST" || method == "DELETE" {
+            let accountID = Int(match.1) ?? 0, templateID = Int(match.2) ?? 0
+            if method == "POST" { accountAICommands[accountID, default: []].insert(templateID) }
+            else { accountAICommands[accountID, default: []].remove(templateID) }
+            return ["ok": true]
+        }
+        if clean == "/api/commands/llm-providers/identity-versions" {
+            return ["items": [["key": "codex_tui", "label": "Codex TUI", "current": "0.50.0", "default": "0.50.0", "registry": "npm:@openai/codex", "detectable": true],
+                              ["key": "codex_desktop_core", "label": "Codex Desktop 核心", "current": "1.2.0", "default": "1.2.0", "detectable": false]],
+                    "profiles": [["profile": "codex_tui", "label": "Codex TUI", "description": "交互式 Codex TUI 的 Responses 身份。", "api_formats": ["responses"],
+                                  "headers": [["name": "originator", "value": "codex_cli_rs", "description": "Codex TUI 或 Desktop 的来源标识。", "management": "fixed"]]]]]
+        }
+        if clean == "/api/commands/llm-providers/identity-versions/detect" {
+            return ["items": [["key": "codex_tui", "current": "0.50.0", "latest": "0.51.0", "up_to_date": false]]]
+        }
+        if clean == "/api/commands/llm-providers/detect-protocols" {
+            return ["chat_completions": ["ok": true, "latency_ms": 420, "status_code": 200],
+                    "responses": ["ok": true, "latency_ms": 510, "status_code": 200, "client_identity_profile": "openai_sdk"],
+                    "anthropic_messages": ["ok": false, "latency_ms": 120, "status_code": 404, "error": "接口不存在"],
+                    "models": ["ok": true, "latency_ms": 200, "status_code": 200],
+                    "recommended_api_format": "responses", "recommended_protocol_profile": "standard",
+                    "recommended_client_identity_profile": "openai_sdk", "recommended_web_search_api_format": "responses"]
         }
         if clean == "/api/system/update-status" {
             return ["enabled": true, "interval_minutes": 1440,
@@ -244,7 +293,19 @@ actor FixtureService: AppServing {
         }
         if clean == "/api/apns/config" { return ["enabled": false, "configured": false, "environment": "sandbox", "has_auth_key": false] }
         if clean == "/api/apns/devices" { return [] }
-        if clean == "/api/system/settings" { return ["timezone": "Asia/Shanghai", "command_prefix": ".", "ai_enabled": true] }
+        if clean == "/api/system/settings" {
+            if method == "PATCH", let patch = body?.objectValue {
+                var current = fixtureSettings.objectValue ?? [:]
+                for (key, value) in patch {
+                    if let nested = value.objectValue, var existing = current[key]?.objectValue {
+                        for (nestedKey, nestedValue) in nested { existing[nestedKey] = nestedValue }
+                        current[key] = .object(existing)
+                    } else { current[key] = value }
+                }
+                fixtureSettings = .object(current)
+            }
+            return fixtureSettings
+        }
         if clean == "/api/system/capabilities" { return ["modules": []] }
         if clean == "/api/ledger/summary" { return ["total": 0, "income": 0, "expense": 0] }
         if clean == "/api/logs/runtime" {

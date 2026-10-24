@@ -76,7 +76,7 @@ struct ManagementModuleView: View {
             collection("指令模板", "/api/commands/templates", kind: .editable, create: "新建指令模板", itemPath: "/api/commands/templates/{id}", symbol: "text.badge.plus")
             collection("指令别名", "/api/aliases", kind: .editable, create: "添加指令别名", itemPath: "/api/aliases/{id}", symbol: "arrow.triangle.swap")
             document("内置指令", "/api/commands/builtin", symbol: "terminal")
-            document("AI 指令启用概览", "/api/commands/ai/enablement-summary", symbol: "sparkles.rectangle.stack")
+            NavigationLink { AICommandEnablementView() } label: { Label("AI 指令与账号启用", systemImage: "text.bubble") }
         }
         Section("模板预览与测试") {
             document("模板变量与示例", "/api/message-templates/catalog", symbol: "curlybraces")
@@ -94,26 +94,11 @@ struct ManagementModuleView: View {
             }
         }
     }
+    // AI 模块由 AIWorkspaceView 承载（见 body）；此处仅保留原生入口，避免再暴露原始 JSON 文档。
     @ViewBuilder private var aiSections: some View {
-        Section("供应商与模型") {
-            collection("供应商与密钥池", "/api/commands/llm-providers", kind: .providers, create: "添加供应商", itemPath: "/api/commands/llm-providers/{id}")
-            document("运行健康与冷却", "/api/commands/llm-providers/runtime-health")
-            document("客户端身份版本", "/api/commands/llm-providers/identity-versions", actions: [
-                .init(title: "修改身份版本", path: "/api/commands/llm-providers/identity-versions", method: "PUT"),
-                .init(title: "检测身份版本", path: "/api/commands/llm-providers/identity-versions/detect")
-            ])
-            ManagementActionLink(action: .init(title: "协议发现", path: "/api/commands/llm-providers/detect-protocols", explanation: "服务器将尝试模型服务协议，可能产生请求用量。"))
-            ManagementActionLink(action: .init(title: "预览可用模型", path: "/api/commands/llm-providers/fetch-models-preview"))
-        }
-        Section("批量测活") {
-            ManagementActionLink(action: .init(title: "预览测活范围", path: "/api/commands/llm-providers/liveness/preview"))
-            ManagementActionLink(action: .init(title: "启动批量测活", path: "/api/commands/llm-providers/liveness/run", explanation: "将对选定的供应商和模型发出真实请求，可能产生用量。"))
-            NavigationLink("查看测活进度") { ManagementRunLookupView() }
-        }
-        Section("路由与用量") {
-            document("AI 路由与输出配置", "/api/system/settings", actions: [.init(title: "修改路由与输出", path: "/api/system/settings", method: "PATCH")])
-            collection("插件 AI 用量", "/api/llm/usage/plugins/summary")
-            collection("最近 AI 调用", "/api/llm/usage/recent")
+        Section {
+            NavigationLink { AIWorkspaceView() } label: { Label("打开 AI 管理", systemImage: "cpu") }
+            NavigationLink { AICommandEnablementView() } label: { Label("AI 指令与账号启用", systemImage: "text.bubble") }
         }
     }
     @ViewBuilder private var logSections: some View {
