@@ -73,7 +73,7 @@ final class VisualInspectionUITests: XCTestCase {
         capture("06-plugin-detail-maintenance")
 
         switchTab("AI")
-        XCTAssertTrue(app.buttons["模型批量测活"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["ai.liveness.patrol"].waitForExistence(timeout: 10))
         capture("07-ai-overview")
 
         app.buttons["供应商"].firstMatch.tap()
@@ -81,9 +81,9 @@ final class VisualInspectionUITests: XCTestCase {
         capture("08-ai-providers")
 
         app.segmentedControls.buttons["概览"].tap()
-        XCTAssertTrue(app.buttons["模型批量测活"].waitForExistence(timeout: 5))
-        app.buttons["模型批量测活"].tap()
-        XCTAssertTrue(app.navigationBars["模型测活"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["ai.liveness.patrol"].waitForExistence(timeout: 5))
+        app.buttons["ai.liveness.patrol"].tap()
+        XCTAssertTrue(app.navigationBars["全部供应商巡检"].waitForExistence(timeout: 10))
         capture("09-ai-liveness")
 
         app.terminate()

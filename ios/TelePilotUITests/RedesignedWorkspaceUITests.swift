@@ -30,10 +30,10 @@ final class RedesignedWorkspaceUITests: XCTestCase {
 
     func testAILivenessConfirmsBeforeStartingAndOffersRetry() {
         let app = launch(tab: "AI")
-        let liveness = app.buttons["模型批量测活"].firstMatch
+        let liveness = app.buttons["ai.liveness.patrol"].firstMatch
         XCTAssertTrue(liveness.waitForExistence(timeout: 10))
         liveness.tap()
-        XCTAssertTrue(app.navigationBars["模型测活"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.navigationBars["全部供应商巡检"].waitForExistence(timeout: 10))
         let start = app.buttons["ai.liveness.start"]
         for _ in 0..<5 where !start.isHittable { app.swipeUp() }
         XCTAssertTrue(start.waitForExistence(timeout: 10))
@@ -49,7 +49,7 @@ final class RedesignedWorkspaceUITests: XCTestCase {
         for _ in 0..<5 where !retry.isHittable { app.swipeUp() }
         retry.tap()
         XCTAssertTrue(confirm.waitForExistence(timeout: 5))
-        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "将向 1 个模型各发送一次真实请求")).firstMatch.exists)
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "1 个模型各发送一次真实请求")).firstMatch.exists)
         let cancel = app.buttons["取消"].firstMatch
         if cancel.exists && cancel.isHittable { cancel.tap() }
         else { app.otherElements["PopoverDismissRegion"].firstMatch.tap() }
