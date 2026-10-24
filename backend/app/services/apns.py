@@ -42,11 +42,33 @@ APNS_HOSTS = {
     "sandbox": "https://api.sandbox.push.apple.com",
 }
 ALL_CATEGORIES = ("assistant_approval", "assistant_result", "account_alert")
+# Apple: "Don't retry ... Bad Device Token, Device Token Not For Topic, Forbidden,
+# Expired Token, Unregistered, or Payload Too Large". 410 reasons delete the row;
+# the token-scope reasons below keep the row for diagnosis but stop delivery until
+# the app re-registers (registration re-enables it).
+DEVICE_DISABLE_REASONS = frozenset({"BadDeviceToken", "DeviceTokenNotForTopic"})
+NON_RETRYABLE_REASONS = DEVICE_DISABLE_REASONS | frozenset({
+    "Unregistered", "ExpiredToken", "PayloadTooLarge", "Forbidden",
+    "BadTopic", "TopicDisallowed", "MissingTopic", "BadCollapseId",
+    "BadExpirationDate", "BadMessageId", "BadPriority", "InvalidPushType",
+})
+# Apple asks providers to wait 15 minutes before retrying a 5xx response.
+SERVER_ERROR_REASONS = frozenset({"InternalServerError", "ServiceUnavailable", "Shutdown"})
+SERVER_ERROR_RETRY_SECONDS = 15 * 60
+# Business alerts are stored by APNs while the device is offline (APNs keeps only
+# the latest one per app); the outbox already drops events after 24 hours.
+BUSINESS_EXPIRATION_SECONDS = 24 * 3600
+# Reasons that mean the cached HTTP/2 connection was bound to another key/team.
+_CONNECTION_RESET_REASONS = frozenset({"UnrelatedKeyIdInToken", "BadEnvironmentKeyIdInToken"})
 
 # APNs requires refresh between 20 and 60 minutes on a connection. A 30-minute
 # cache avoids re-signing for every device in a fan-out.
 _provider_token_cache: tuple[str, str, float] | None = None
 _provider_token_lock = asyncio.Lock()
+# Apple treats rapid connect/disconnect as abuse and recommends reusing one
+# HTTP/2 connection for hours. The pooled client is keyed by host + signing key
+# because APNs binds a connection to the team/key used on its first push.
+_shared_client: tuple[str, asyncio.AbstractEventLoop, httpx.AsyncClient] | None = None
 
 
 def _now() -> str:
@@ -255,6 +277,39 @@ async def _provider_token(config: dict[str, Any], private_key: str) -> str:
         return token
 
 
+def _client_fingerprint(config: dict[str, Any]) -> str:
+    return hashlib.sha256(
+        f"{config.get('environment')}|{config.get('team_id')}|{config.get('key_id')}".encode()
+    ).hexdigest()
+
+
+def _get_client(config: dict[str, Any]) -> httpx.AsyncClient:
+    """Return the pooled APNs client, replacing it after a key/host change."""
+    global _shared_client
+    fingerprint = _client_fingerprint(config)
+    loop = asyncio.get_running_loop()
+    if _shared_client is not None:
+        old_fingerprint, old_loop, client = _shared_client
+        if old_fingerprint == fingerprint and old_loop is loop and not client.is_closed:
+            return client
+        if old_loop is loop and not client.is_closed:
+            # Closing is fire-and-forget: in-flight requests of the old key finish first.
+            loop.create_task(client.aclose())
+    client = httpx.AsyncClient(
+        http2=True, timeout=10.0, follow_redirects=False, trust_env=False,
+        limits=httpx.Limits(max_connections=4, max_keepalive_connections=2, keepalive_expiry=3600),
+    )
+    _shared_client = (fingerprint, loop, client)
+    return client
+
+
+async def _reset_client() -> None:
+    global _shared_client
+    current, _shared_client = _shared_client, None
+    if current is not None and current[1] is asyncio.get_running_loop() and not current[2].is_closed:
+        await current[2].aclose()
+
+
 def _response_reason(response: httpx.Response) -> str | None:
     try:
         body = response.json()
@@ -272,6 +327,7 @@ async def _post(
     token: str,
     payload: dict[str, Any],
     collapse_key: str,
+    expiration: int = 0,
 ) -> tuple[bool, str | None, bool]:
     provider_token = await _provider_token(config, private_key)
     body = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode()
@@ -279,7 +335,7 @@ async def _post(
         return False, "PayloadTooLarge", False
     headers = {
         "authorization": f"bearer {provider_token}",
-        "apns-push-type": "alert", "apns-priority": "10", "apns-expiration": "0",
+        "apns-push-type": "alert", "apns-priority": "10", "apns-expiration": str(int(expiration)),
         "apns-topic": config["bundle_id"], "apns-id": str(uuid.uuid4()),
         "apns-collapse-id": hashlib.sha256(collapse_key.encode()).hexdigest(),
         "content-type": "application/json",
@@ -318,14 +374,30 @@ async def _deliver(
     account_id: int | None = None,
     session_id: str | None = None,
 ) -> ApnsSendResult:
+    result, _reasons = await _deliver_detailed(
+        db, rows=rows, kind=kind, event_id=event_id, account_id=account_id, session_id=session_id,
+    )
+    return result
+
+
+async def _deliver_detailed(
+    db: AsyncSession,
+    *,
+    rows: list[SystemSetting],
+    kind: str,
+    event_id: str,
+    account_id: int | None = None,
+    session_id: str | None = None,
+) -> tuple[ApnsSendResult, set[str]]:
+    """Deliver and also return the raw APNs reasons so the outbox can pick a retry policy."""
     if not rows:
-        return ApnsSendResult(ok=False, message="没有已启用且订阅此通知的设备")
+        return ApnsSendResult(ok=False, message="没有已启用且订阅此通知的设备"), set()
     config = await _raw_config(db)
     public = _public_config(config)
     if not public["enabled"]:
-        return ApnsSendResult(ok=False, attempted=len(rows), failed=len(rows), message="APNs 尚未启用")
+        return ApnsSendResult(ok=False, attempted=len(rows), failed=len(rows), message="APNs 尚未启用"), set()
     if not public["configured"]:
-        return ApnsSendResult(ok=False, attempted=len(rows), failed=len(rows), message="APNs 配置不完整")
+        return ApnsSendResult(ok=False, attempted=len(rows), failed=len(rows), message="APNs 配置不完整"), set()
     private_key = decrypt_str(config["auth_key_enc"])
     title, body, _route = _notification(kind)
     payload = {
@@ -344,67 +416,90 @@ async def _deliver(
         payload["action_id"] = event_id
     if session_id:
         payload["session_id"] = session_id
-    accepted = failed = unregistered = 0
+    expiration = 0 if kind == "test" else int(time.time()) + BUSINESS_EXPIRATION_SECONDS
+    accepted = failed = unregistered = disabled = skipped = 0
     reasons: set[str] = set()
     try:
-        async with httpx.AsyncClient(http2=True, timeout=10.0, follow_redirects=False, trust_env=False) as client:
-            for row in rows:
-                row = await db.scalar(select(SystemSetting).where(SystemSetting.key == row.key)
-                                      .with_for_update().execution_options(populate_existing=True))
-                if row is None:
-                    continue
-                value = dict(row.value)
-                if kind != "test" and not _eligible(row, value.get("owner_user_id"), kind, config):
-                    continue
-                user = await db.get(WebUser, value.get("owner_user_id"), populate_existing=True)
-                if user is None or int(user.pwd_version or 0) != value.get("pwd_version") or not _lease_valid(value):
+        client = _get_client(config)
+        for row in rows:
+            row = await db.scalar(select(SystemSetting).where(SystemSetting.key == row.key)
+                                  .with_for_update().execution_options(populate_existing=True))
+            if row is None:
+                skipped += 1
+                continue
+            value = dict(row.value)
+            if kind != "test" and not _eligible(row, value.get("owner_user_id"), kind, config):
+                skipped += 1
+                continue
+            user = await db.get(WebUser, value.get("owner_user_id"), populate_existing=True)
+            if user is None or int(user.pwd_version or 0) != value.get("pwd_version") or not _lease_valid(value):
+                await db.delete(row)
+                skipped += 1
+                continue
+            device_payload = dict(payload, server_origin_sha256=value.get("server_origin_sha256"))
+            try:
+                token = decrypt_str(value["device_token_enc"])
+                delivered, reason, invalid_device = await _post(
+                    client,
+                    config=config,
+                    private_key=private_key,
+                    token=token,
+                    payload=device_payload,
+                    collapse_key=f"{kind}:{event_id}",
+                    expiration=expiration,
+                )
+            except (httpx.HTTPError, ValueError) as exc:
+                delivered, reason, invalid_device = False, type(exc).__name__, False
+                log.warning("APNs delivery failed: %s", type(exc).__name__)
+                if isinstance(exc, httpx.TransportError):
+                    await _reset_client()
+                    client = _get_client(config)
+            if reason in _CONNECTION_RESET_REASONS:
+                await _reset_client()
+                client = _get_client(config)
+            if delivered:
+                accepted += 1
+                value["last_error"] = None
+            else:
+                failed += 1
+                if reason:
+                    reasons.add(reason)
+                value["last_error"] = reason or "APNS_REQUEST_FAILED"
+                if invalid_device:
                     await db.delete(row)
-                    continue
-                device_payload = dict(payload, server_origin_sha256=value.get("server_origin_sha256"))
-                try:
-                    token = decrypt_str(value["device_token_enc"])
-                    delivered, reason, invalid_device = await _post(
-                        client,
-                        config=config,
-                        private_key=private_key,
-                        token=token,
-                        payload=device_payload,
-                        collapse_key=f"{kind}:{event_id}",
-                    )
-                except (httpx.HTTPError, ValueError) as exc:
-                    delivered, reason, invalid_device = False, type(exc).__name__, False
-                    log.warning("APNs delivery failed: %s", type(exc).__name__)
-                if delivered:
-                    accepted += 1
-                    value["last_error"] = None
-                else:
-                    failed += 1
-                    if reason:
-                        reasons.add(reason)
-                    value["last_error"] = reason or "APNS_REQUEST_FAILED"
-                    if invalid_device:
-                        await db.delete(row)
-                        unregistered += 1
-                if delivered or not invalid_device:
-                    row.value = value
+                    unregistered += 1
+                elif reason in DEVICE_DISABLE_REASONS:
+                    # Token is wrong for this topic/environment. Keep the row so
+                    # the app can show last_error; re-registration re-enables it.
+                    value["enabled"] = False
+                    disabled += 1
+            if delivered or not invalid_device:
+                row.value = value
     except (httpx.HTTPError, ImportError, RuntimeError, ValueError) as exc:
         log.warning("APNs connection failed: %s", type(exc).__name__)
+        await _reset_client()
         return ApnsSendResult(
             ok=False,
             attempted=len(rows),
             failed=len(rows),
             message="无法连接 APNs；请检查网络与 HTTP/2 依赖",
-        )
+        ), {"APNS_CONNECTION_FAILED"}
+    if accepted == failed == 0 and skipped:
+        return ApnsSendResult(
+            ok=False, attempted=len(rows), message="设备注册已过期或登录凭据已变更；请在 App 内重新注册本机设备",
+            event_id=event_id,
+        ), reasons
     detail = f"；{', '.join(sorted(reasons))[:180]}" if reasons else ""
+    hint = "；设备令牌与当前推送环境或 Bundle ID 不匹配，已暂停此设备，请检查签名后重新注册" if disabled else ""
     return ApnsSendResult(
         ok=accepted > 0,
         attempted=len(rows),
         accepted=accepted,
         failed=failed,
         unregistered=unregistered,
-        message=f"APNs 已接受 {accepted} 台设备，失败 {failed} 台{detail}",
+        message=f"APNs 已接受 {accepted} 台设备，失败 {failed} 台{detail}{hint}",
         event_id=event_id,
-    )
+    ), reasons
 
 
 def _eligible(row: SystemSetting, user_id: int | None, kind: str, config: dict[str, Any]) -> bool:
@@ -477,16 +572,19 @@ async def drain_outbox_once(session_factory=None) -> int:
             attempts = dict(value.get("device_attempts") or {})
             next_attempt_at = 0
             for row in rows[:1]:
-                result = await _deliver(
+                result, reasons = await _deliver_detailed(
                     db, rows=[row], kind=value["kind"], event_id=value["event_id"],
                     account_id=value.get("account_id"), session_id=value.get("session_id"),
                 )
-                if result.accepted or result.unregistered:
+                if result.accepted or result.unregistered or reasons & NON_RETRYABLE_REASONS:
+                    # Accepted, token gone, or an error Apple says never to retry.
                     remaining.discard(row.key)
                 else:
                     attempts[row.key] = int(attempts.get(row.key, 0)) + 1
                     if attempts[row.key] >= 3:
                         remaining.discard(row.key)
+                    elif reasons & SERVER_ERROR_REASONS:
+                        next_attempt_at = time.time() + SERVER_ERROR_RETRY_SECONDS
                     else:
                         next_attempt_at = time.time() + 30 * attempts[row.key]
             remaining &= {row.key for row in rows}
@@ -513,13 +611,16 @@ async def drain_outbox_once(session_factory=None) -> int:
 
 
 async def delivery_loop() -> None:
-    while True:
-        try:
-            await drain_outbox_once()
-        except Exception as exc:  # noqa: BLE001
-            # Never log the exception text: HTTP exceptions may contain device URLs.
-            log.warning("APNs outbox failed: %s", type(exc).__name__)
-        await asyncio.sleep(5)
+    try:
+        while True:
+            try:
+                await drain_outbox_once()
+            except Exception as exc:  # noqa: BLE001
+                # Never log the exception text: HTTP exceptions may contain device URLs.
+                log.warning("APNs outbox failed: %s", type(exc).__name__)
+            await asyncio.sleep(5)
+    finally:
+        await _reset_client()
 
 
 __all__ = [

@@ -25,10 +25,19 @@
 
 ## [Unreleased]
 
+### iOS 推送（APNs）
+
+- 设置 → Apple 推送通知新增“推送状态”检查清单：系统通知权限、设备已注册（读取服务器真实注册记录与有效期、最近一次投递错误）、服务器 APNs 已配置（列出缺失项）、推送环境与 Bundle ID 是否匹配，并可一键改为本机环境、填入本机 Bundle ID。
+- 新增 App 内“配置教程”页，概述 Apple Developer 后台步骤与常见错误代码，并链接 GitHub 完整教程。
+- 测试通知结果区分“Apple 已接受 / 未送出 / 结果未知”，网络失败不再误报；通知类别（助手待确认、助手任务结果、账号告警）可按设备开关。
+- TestFlight / App Store 安装包（不含嵌入描述文件）按 production 环境注册，不再提示“当前签名未声明推送环境”；模拟器按 sandbox 处理。
+- 服务端：复用 HTTP/2 连接池，凭据变更或连接异常时重建；`BadDeviceToken`、`DeviceTokenNotForTopic` 暂停该设备并保留错误供 App 展示，重新注册即恢复；Apple 明确不应重试的错误不再重试，5xx 按 Apple 建议 15 分钟后重试；业务通知设置 24 小时有效期，设备短暂离线也能收到；注册过期时测试通知给出明确提示。
+
 ### 文档
 
 - 重构 GitHub 首页 README：按产品定位、当前界面、能力总览、运行结构、快速开始、安全边界、插件开发与文档导航重新组织，减少与专项文档重复的长段落，补齐日志、资金台账和移动端入口。
 - 使用 live-panel 生成 README 首屏动态运行图，提供循环 WebP、静态 PNG 和可复现的源配置；画面中的计数与日志明确标注为结构示意。
+- 新增 `docs/IOS-PUSH.md` iOS 推送通知配置教程：Apple Developer 账号准备、创建 APNs `.p8` 密钥、查找 Key ID / Team ID、在 TelePilot 中配置、sandbox 与 production 的选择、测试与错误排查表；README、iOS README 与 APNs 参考文档补充入口。
 
 ## [0.105.0-beta.1] - 2026-10-25 · minor（次版本预发布） · iOS 工作流与诊断体验重做
 
