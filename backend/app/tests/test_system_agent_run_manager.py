@@ -144,7 +144,13 @@ class _WaitingService:
 
 @pytest.fixture
 async def run_db(tmp_path):
-    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'runs.db'}")
+    engine = create_async_engine(
+        f"sqlite+aiosqlite:///{tmp_path / 'runs.db'}",
+        # Durable Run tests intentionally overlap a few short-lived sessions.
+        # CI hosts can briefly queue those writers; SQLite's five-second default
+        # otherwise turns ordinary scheduling delay into a false lock failure.
+        connect_args={"timeout": 30},
+    )
     async with engine.begin() as conn:
         await conn.execute(text("CREATE TABLE web_user (id INTEGER PRIMARY KEY)"))
         await conn.execute(text("CREATE TABLE account (id INTEGER PRIMARY KEY)"))
