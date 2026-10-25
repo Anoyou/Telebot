@@ -95,24 +95,25 @@ struct AIWorkspaceView: View {
 
     var body: some View {
         List {
+            // 分段切换作为滚动内容的第一行，随内容一起滚动。曾挂在 `.safeAreaBar(edge: .top)` 上，
+            // 与大标题导航栏的折叠/展开互相改变顶部安全区，滑到顶部时顶栏会持续抖动。
+            Section {
+                Picker("AI 工作区", selection: $section) {
+                    ForEach(AISection.allCases) { item in Text(item.title).tag(item) }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .accessibilityIdentifier("ai.sections")
+                .listRowBackground(Color.clear)
+                .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
+                .listRowSeparator(.hidden)
+            }
+            .listSectionSeparator(.hidden)
             switch section {
             case .overview: AIOverviewSection(workspace: workspace, showUsage: { section = .usage }, showLiveness: { showLiveness = true })
             case .providers: AIProviderListSection(workspace: workspace)
             case .usage: AIUsageSection(workspace: workspace)
             }
-        }
-        // 顶部分段切换放进系统安全区栏：内容从下方滚过时由系统的滚动边缘效果承托，
-        // 分段控件本身是 iOS 26 原生的 Liquid Glass 控件，不再套白色卡片背景。
-        .safeAreaBar(edge: .top) {
-            Picker("AI 工作区", selection: $section) {
-                ForEach(AISection.allCases) { item in Text(item.title).tag(item) }
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .controlSize(.large)
-            .padding(.horizontal, 16)
-            .padding(.vertical, 8)
-            .accessibilityIdentifier("ai.sections")
         }
         .navigationTitle("AI")
         .navigationDestination(isPresented: $showLiveness) {
@@ -426,12 +427,6 @@ struct AIGlobalSettingsView: View {
         .task { if original == nil { await load() } }
         .refreshable { await load() }
         .onChange(of: draft) { saved = false }
-        .confirmationDialog("关闭 AI 能力？", isPresented: $confirmingDisable, titleVisibility: .visible) {
-            Button("关闭 AI 并保存", role: .destructive) { Task { await save() } }
-            Button("取消", role: .cancel) {}
-        } message: {
-            Text("所有 AI 指令、插件中的 AI 调用和助手会立即停止。供应商、模型和指令配置都会保留，之后重新打开即可恢复。")
-        }
     }
 
     private var switchSection: some View {
@@ -523,6 +518,12 @@ struct AIGlobalSettingsView: View {
             }
             .disabled(!dirty || saving || uncertain)
             .accessibilityIdentifier("ai.settings.save")
+            .confirmationDialog("关闭 AI 能力？", isPresented: $confirmingDisable, titleVisibility: .visible) {
+                Button("关闭 AI 并保存", role: .destructive) { Task { await save() } }
+                Button("取消", role: .cancel) {}
+            } message: {
+                Text("所有 AI 指令、插件中的 AI 调用和助手会立即停止。供应商、模型和指令配置都会保留，之后重新打开即可恢复。")
+            }
             if dirty && !saving, let original {
                 Button(role: .destructive) { draft = original } label: {
                     Label("放弃修改", systemImage: "arrow.uturn.backward")
@@ -1196,12 +1197,6 @@ struct AIProtocolDetectView: View {
             result = nil; error = nil; applied = false; applyError = nil; applyUncertain = false
             modelID = candidateModels.first ?? ""
         }
-        .confirmationDialog("应用推荐配置？", isPresented: $confirmingApply, titleVisibility: .visible) {
-            Button("应用到此供应商") { Task { await applyRecommendation() } }
-            Button("取消", role: .cancel) {}
-        } message: {
-            Text("将修改该供应商的接口协议、协议配置、客户端身份或联网搜索方式。密钥和模型清单保持不变。")
-        }
     }
 
     @ViewBuilder private func protocolRow(_ title: String, detail: String, probe: JSONValue?) -> some View {
@@ -1263,6 +1258,12 @@ struct AIProtocolDetectView: View {
                     .disabled(applying || applyUncertain)
                     .frame(minHeight: 44)
                     .accessibilityIdentifier("ai.protocols.apply")
+                    .confirmationDialog("应用推荐配置？", isPresented: $confirmingApply, titleVisibility: .visible) {
+                        Button("应用到此供应商") { Task { await applyRecommendation() } }
+                        Button("取消", role: .cancel) {}
+                    } message: {
+                        Text("将修改该供应商的接口协议、协议配置、客户端身份或联网搜索方式。密钥和模型清单保持不变。")
+                    }
                 }
             }
             if applying { ProgressView("正在保存到服务器…") }
@@ -1406,6 +1407,12 @@ struct AIIdentityVersionsView: View {
                     }
                     .disabled(!dirty || saving || uncertain || !invalidLabels.isEmpty)
                     .accessibilityIdentifier("ai.identity.save")
+                    .confirmationDialog("保存客户端身份版本？", isPresented: $confirmingSave, titleVisibility: .visible) {
+                        Button("保存修改") { Task { await save() } }
+                        Button("取消", role: .cancel) {}
+                    } message: {
+                        Text("保存后，所有使用这些身份的 AI 请求会改用新版本号，所有账号会重新加载配置。")
+                    }
                     if !invalidLabels.isEmpty {
                         Text("版本号格式不正确：\(invalidLabels.joined(separator: "、"))").font(.caption).foregroundStyle(.red)
                     }
@@ -1439,12 +1446,6 @@ struct AIIdentityVersionsView: View {
         .navigationTitle("客户端身份版本").navigationBarTitleDisplayMode(.inline)
         .task { if !loaded { await load() } }
         .refreshable { await load() }
-        .confirmationDialog("保存客户端身份版本？", isPresented: $confirmingSave, titleVisibility: .visible) {
-            Button("保存修改") { Task { await save() } }
-            Button("取消", role: .cancel) {}
-        } message: {
-            Text("保存后，所有使用这些身份的 AI 请求会改用新版本号，所有账号会重新加载配置。")
-        }
     }
 
     @ViewBuilder private func versionRow(_ item: JSONValue) -> some View {

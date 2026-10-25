@@ -73,6 +73,10 @@ struct FileManagementView: View {
                            role: mode == .plugin ? nil : .destructive) { confirming = true }
                         .disabled(busy || uncertain)
                         .accessibilityIdentifier("management.file.confirm")
+                        .confirmationDialog(mode == .plugin ? "安装这个插件？" : "确认将预览配置导入服务器？", isPresented: $confirming, titleVisibility: .visible) {
+                            Button(mode == .plugin ? "确认安装" : "确认导入", role: mode == .plugin ? nil : .destructive) { Task { await importFile() } }
+                            Button("取消", role: .cancel) {}
+                        }
                 } footer: { Text(mode == .plugin ? "插件会在服务器执行代码，请确认来源和权限。" : "将按以上预览写入服务器。文件和冲突选项改变后必须重新预览。") }
             }
             if busy { Section { ProgressView("正在处理…") } }
@@ -87,10 +91,6 @@ struct FileManagementView: View {
         .onChange(of: applyConflicts) { _, _ in preview = nil }
         .onChange(of: confirmChatConflicts) { _, _ in preview = nil }
         .onChange(of: scenePhase) { _, phase in if phase != .active { password = ""; totp = "" } }
-        .confirmationDialog(mode == .plugin ? "安装这个插件？" : "确认将预览配置导入服务器？", isPresented: $confirming, titleVisibility: .visible) {
-            Button(mode == .plugin ? "确认安装" : "确认导入", role: mode == .plugin ? nil : .destructive) { Task { await importFile() } }
-            Button("取消", role: .cancel) {}
-        }
     }
     @ViewBuilder private var exportSection: some View {
         Section("导出备份") {

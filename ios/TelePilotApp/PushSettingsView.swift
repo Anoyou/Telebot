@@ -80,6 +80,9 @@ struct PushSettingsView: View {
                 if privateKey != nil { Button("取消替换密钥", systemImage: "xmark.circle") { privateKey = nil } }
                 Button(saving ? "正在保存…" : "保存服务器配置", systemImage: "square.and.arrow.down") { confirmingSave = true }
                     .disabled(saving || push.configuration == nil)
+                    .confirmationDialog("保存推送通道配置？", isPresented: $confirmingSave, titleVisibility: .visible) {
+                        Button("确认保存") { Task { await save() } }
+                    } message: { Text("这会修改服务器所有设备使用的 APNs 通道。") }
             } header: { Text("服务器推送通道") } footer: {
                 Text("Team ID、Key ID 和 .p8 私钥来自 Apple Developer 后台，Bundle ID 必须与本机安装包一致。私钥加密保存在你自己的服务器，不会再次显示。")
             }
@@ -109,9 +112,6 @@ struct PushSettingsView: View {
                 feedback = nil
             } catch { feedback = "未能读取文件，请重新选择。" }
         }
-        .confirmationDialog("保存推送通道配置？", isPresented: $confirmingSave, titleVisibility: .visible) {
-            Button("确认保存") { Task { await save() } }
-        } message: { Text("这会修改服务器所有设备使用的 APNs 通道。") }
     }
 
     // MARK: - 状态检查

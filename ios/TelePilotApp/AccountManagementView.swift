@@ -268,13 +268,13 @@ struct AccountManagementPassthroughView: View {
             if let error { NoticeView(title: uncertain ? "结果待确认" : "操作未完成", message: error) }
             if let result { Section("操作结果") { ManagementValueView(value: result) } }
             Button("保存顺序", systemImage: "square.and.arrow.down") { confirming = true }.disabled(features.isEmpty || busy || uncertain)
+                .confirmationDialog("保存此执行顺序？", isPresented: $confirming, titleVisibility: .visible) {
+                    Button("确认保存") { Task { await save() } }
+                    Button("取消", role: .cancel) {}
+                }
         }
         .navigationTitle("直通优先顺序").navigationBarTitleDisplayMode(.inline).toolbar { EditButton() }
         .task { await load() }.refreshable { await load() }
-        .confirmationDialog("保存此执行顺序？", isPresented: $confirming, titleVisibility: .visible) {
-            Button("确认保存") { Task { await save() } }
-            Button("取消", role: .cancel) {}
-        }
     }
     private func load() async {
         do {

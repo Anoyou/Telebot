@@ -27,6 +27,7 @@ struct AssistantInboxView: View {
                     if loading { ProgressView("正在读取…") }
                 }
             }
+            // 此页为 sheet 内的行内标题，没有大标题折叠，安全区栏不会与导航栏形成反馈循环，可保留 safeAreaBar。
             .safeAreaBar(edge: .top) {
                 Picker("状态", selection: $status) {
                     Text("待确认").tag("pending")
@@ -34,7 +35,6 @@ struct AssistantInboxView: View {
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
-                .controlSize(.large)
                 .padding(.horizontal, 16)
                 .padding(.vertical, 8)
             }
@@ -136,7 +136,9 @@ private struct AssistantActionDetailView: View {
                     if pending {
                         Section {
                             Button("确认执行", role: action.assistantText("risk") == "dangerous" ? .destructive : nil) { ask("confirm") }.disabled(busy || requiresSecret)
+                                .modifier(confirmationFor("confirm"))
                             Button("拒绝操作", role: .destructive) { ask("reject") }.disabled(busy)
+                                .modifier(confirmationFor("reject"))
                         } footer: { Text("只有确认后服务器才会执行此操作。") }
                     }
                     if action.assistantText("runtime_sync_status") == "failed" {
@@ -144,6 +146,7 @@ private struct AssistantActionDetailView: View {
                             Text("配置已保存，但运行时同步失败。请先核对实际状态。").foregroundStyle(.orange)
                             if action["runtime_retryable"]?.boolValue != false {
                                 Button("重新同步运行时") { ask("retry-runtime-sync") }.disabled(busy)
+                                    .modifier(confirmationFor("retry-runtime-sync"))
                             } else { Text("此操作可能已产生外部影响，不能直接重试。").font(.footnote).foregroundStyle(.secondary) }
                         }
                     }
@@ -157,11 +160,6 @@ private struct AssistantActionDetailView: View {
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { dismiss() } } }
             .refreshable { await load() }
             .task { await load() }
-            .confirmationDialog(confirmation == "reject" ? "拒绝这个操作？" : confirmation == "retry-runtime-sync" ? "重新同步运行时？" : "确认执行此操作？", isPresented: $confirming, titleVisibility: .visible) {
-                Button(confirmation == "reject" ? "拒绝" : confirmation == "retry-runtime-sync" ? "重新同步" : "确认执行", role: .destructive) {
-                    if let confirmation { Task { await mutate(confirmation) } }
-                }
-            } message: { Text(AssistantRedaction.text(action?.assistantText("summary") ?? "请核对执行预览。")) }
             .onChange(of: scenePhase) { _, phase in if phase != .active { secrets = [:] } }
             .onDisappear { secrets = [:] }
         }
@@ -169,6 +167,15 @@ private struct AssistantActionDetailView: View {
 
     private func secretBinding(_ field: String) -> Binding<String> { Binding(get: { secrets[field] ?? "" }, set: { secrets[field] = $0 }) }
     private func ask(_ action: String) { confirmation = action; confirming = true }
+    /// iOS 26+ 确认框以 popover 锚定在所修饰的视图上：三个触发按钮各自挂一个，
+    /// 共用 `confirming`/`confirmation` 状态，只有与本次请求匹配的那个按钮弹出。
+    private func confirmationFor(_ kind: String) -> AssistantActionConfirmation {
+        AssistantActionConfirmation(
+            isPresented: Binding(get: { confirming && confirmation == kind }, set: { if !$0 { confirming = false } }),
+            kind: kind,
+            summary: AssistantRedaction.text(action?.assistantText("summary") ?? "请核对执行预览。"),
+            perform: { Task { await mutate(kind) } })
+    }
     private func load() async {
         busy = true
         defer { busy = false }
@@ -207,6 +214,20 @@ private struct AssistantActionDetailView: View {
         } catch { failure = AssistantPresentation.error(error) }
         await load()
         if let failure { error = failure }
+    }
+}
+
+/// 待确认操作详情的二次确认框，挂在触发它的按钮上。
+private struct AssistantActionConfirmation: ViewModifier {
+    @Binding var isPresented: Bool
+    let kind: String
+    let summary: String
+    let perform: () -> Void
+
+    func body(content: Content) -> some View {
+        content.confirmationDialog(kind == "reject" ? "拒绝这个操作？" : kind == "retry-runtime-sync" ? "重新同步运行时？" : "确认执行此操作？", isPresented: $isPresented, titleVisibility: .visible) {
+            Button(kind == "reject" ? "拒绝" : kind == "retry-runtime-sync" ? "重新同步" : "确认执行", role: .destructive) { perform() }
+        } message: { Text(summary) }
     }
 }
 
@@ -314,6 +335,9 @@ struct AssistantTraceView: View {
                     }
                     if !status.isEmpty && !AssistantPresentation.terminal.contains(status) {
                         Button("停止任务", role: .destructive) { confirmingStop = true }.disabled(busy)
+                            .confirmationDialog("停止当前任务？", isPresented: $confirmingStop, titleVisibility: .visible) {
+                                Button("提交停止请求", role: .destructive) { Task { await stop() } }
+                            } message: { Text("已经执行的外部操作不会撤销。") }
                     }
                 }
                 if status == "waiting_approval" { approvalSection }
@@ -355,14 +379,6 @@ struct AssistantTraceView: View {
                     if !busy { await load() }
                 }
             }
-            .confirmationDialog("批准选中的工具调用？", isPresented: $confirmingApproval, titleVisibility: .visible) {
-                Button("批准调用", role: .destructive) {
-                    Task { await sendInput("approval", payload: ["approved": true, "approved_tools": .array(selectedTools.sorted().map(JSONValue.string))]) }
-                }
-            } message: { Text("批准后助手可以继续调用这些工具。请核对每个工具的风险和参数。") }
-            .confirmationDialog("停止当前任务？", isPresented: $confirmingStop, titleVisibility: .visible) {
-                Button("提交停止请求", role: .destructive) { Task { await stop() } }
-            } message: { Text("已经执行的外部操作不会撤销。") }
         }
     }
 
@@ -383,6 +399,11 @@ struct AssistantTraceView: View {
             }
             if tools.isEmpty { Text("正在读取审批请求。下拉刷新以核对完整工具信息。").foregroundStyle(.secondary) }
             Button("批准选中的工具") { confirmingApproval = true }.disabled(busy || selectedTools.isEmpty)
+                .confirmationDialog("批准选中的工具调用？", isPresented: $confirmingApproval, titleVisibility: .visible) {
+                    Button("批准调用", role: .destructive) {
+                        Task { await sendInput("approval", payload: ["approved": true, "approved_tools": .array(selectedTools.sorted().map(JSONValue.string))]) }
+                    }
+                } message: { Text("批准后助手可以继续调用这些工具。请核对每个工具的风险和参数。") }
             Button("拒绝本次调用", role: .destructive) { Task { await sendInput("approval", payload: ["approved": false, "approved_tools": []]) } }.disabled(busy)
         } header: { Text("工具审批") }
     }
@@ -485,14 +506,14 @@ struct AssistantQueueView: View {
                             Text(AssistantRedaction.text(item.text("content"))).lineLimit(5).privacySensitive()
                             Text(AssistantPresentation.status(item.text("status"))).font(.caption).foregroundStyle(.secondary)
                             if !item.text("blocked_reason").isEmpty { Text(AssistantRedaction.text(item.text("blocked_reason"))).font(.caption).foregroundStyle(.orange) }
-                            Menu("操作", systemImage: "ellipsis.circle") {
+                            deleteConfirmation(Menu("操作", systemImage: "ellipsis.circle") {
                                 Button("编辑", systemImage: "pencil") { editing = item }
                                 Button("置顶", systemImage: "pin") { Task { await mutate("/queue/\(AssistantPresentation.path(item.id))", method: "PATCH", body: ["pinned": true]) } }
                                 Button("转为当前任务的调整说明", systemImage: "arrow.turn.up.right") {
                                     Task { await mutate("/queue/\(AssistantPresentation.path(item.id))/steer", method: "POST", body: ["client_request_id": .string(UUID().uuidString)]) }
                                 }
                                 Button("删除", systemImage: "trash", role: .destructive) { deleting = item; confirmation = true }
-                            }.font(.caption).disabled(busy)
+                            }.font(.caption).disabled(busy)) { clearSession == nil && deleting?.id == item.id }
                         }.padding(.vertical, 4)
                     }
                     .onMove { source, destination in
@@ -503,7 +524,7 @@ struct AssistantQueueView: View {
                     HStack {
                         Button("恢复队列") { Task { await mutate("/sessions/\(AssistantPresentation.path(id))/queue/resume", method: "POST") } }
                         Spacer()
-                        Button("清空", role: .destructive) { clearSession = id; confirmation = true }
+                        deleteConfirmation(Button("清空", role: .destructive) { clearSession = id; confirmation = true }) { clearSession == id }
                     }.buttonStyle(.borderless).disabled(busy)
                 } header: { Text(id == sessionID ? "当前会话" : "会话 \(id.prefix(8))") }
             }
@@ -518,7 +539,13 @@ struct AssistantQueueView: View {
                 await mutate("/queue/\(AssistantPresentation.path(item.id))", method: "PATCH", body: ["content": .string(content)])
             }
         }
-        .confirmationDialog(clearSession == nil ? "删除这个排队任务？" : "清空这个会话的队列？", isPresented: $confirmation, titleVisibility: .visible) {
+    }
+    /// iOS 26+ 确认框以 popover 锚定在所修饰的视图上，因此挂在触发它的那一行/按钮上；
+    /// 行在 ForEach 内会重复实例化，用 `matches` 只让本次点按的那一个绑定为真。
+    private func deleteConfirmation(_ content: some View, matches: @escaping () -> Bool) -> some View {
+        content.confirmationDialog(clearSession == nil ? "删除这个排队任务？" : "清空这个会话的队列？",
+                                   isPresented: Binding(get: { confirmation && matches() }, set: { if !$0 { confirmation = false } }),
+                                   titleVisibility: .visible) {
             Button("确认删除", role: .destructive) {
                 if let id = clearSession {
                     Task { await mutate("/sessions/\(AssistantPresentation.path(id))/queue", method: "DELETE") }
@@ -607,6 +634,10 @@ struct AssistantMemoryView: View {
                                 Button("编辑") { editing = row }.font(.caption)
                             }
                         }
+                        // 确认框挂在被左滑的那一行上；行在 ForEach 内重复实例化，只让被删除的那一行绑定为真。
+                        .confirmationDialog("删除这条长期记忆？", isPresented: Binding(get: { confirmingDelete && deleting?.id == row.id }, set: { if !$0 { confirmingDelete = false } }), titleVisibility: .visible) {
+                            Button("删除", role: .destructive) { if let deleting { Task { await mutate(id: deleting.id, body: nil) } } }
+                        }
                         .swipeActions {
                             Button("删除", role: .destructive) { deleting = row; confirmingDelete = true }
                             Button(row["enabled"]?.boolValue == true ? "停用" : "启用") {
@@ -626,9 +657,6 @@ struct AssistantMemoryView: View {
             .task { await load() }
             .sheet(item: $editing) { item in AssistantMemoryEditor(item: item) { content, enabled in await mutate(id: item.id, body: ["content": .string(content), "enabled": .bool(enabled)]) } }
             .sheet(isPresented: $creating) { AssistantMemoryEditor(item: nil) { content, enabled in await mutate(id: nil, body: ["content": .string(content), "enabled": .bool(enabled)]) } }
-            .confirmationDialog("删除这条长期记忆？", isPresented: $confirmingDelete, titleVisibility: .visible) {
-                Button("删除", role: .destructive) { if let deleting { Task { await mutate(id: deleting.id, body: nil) } } }
-            }
         }
     }
     private func load() async {

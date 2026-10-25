@@ -421,16 +421,6 @@ struct AILivenessView: View {
                 await workspace.refresh(model)
                 if liveness.runID != nil { await liveness.pollOnce(model) }
             }
-            .confirmationDialog(confirmationTitle, isPresented: $confirming, titleVisibility: .visible) {
-                Button("确认并开始") { Task { await liveness.startRun(model) } }
-                Button("取消", role: .cancel) {}
-            } message: {
-                Text(confirmationMessage)
-            }
-            .confirmationDialog("停止本次测活？", isPresented: $cancelling, titleVisibility: .visible) {
-                Button("停止测活", role: .destructive) { Task { await liveness.cancel(model) } }
-                Button("继续测活", role: .cancel) {}
-            } message: { Text("将不再发起新的请求，并中断正在进行的请求。已完成的结果会保留，已产生的上游费用不会退回。") }
         }
     }
 
@@ -566,6 +556,13 @@ struct AILivenessView: View {
             }
             .disabled(!canStart)
             .accessibilityIdentifier("ai.liveness.start")
+            // iOS 26+ 确认框以 popover 锚定在所修饰的视图上，挂在触发按钮上才会从按钮弹出。
+            .confirmationDialog(confirmationTitle, isPresented: $confirming, titleVisibility: .visible) {
+                Button("确认并开始") { Task { await liveness.startRun(model) } }
+                Button("取消", role: .cancel) {}
+            } message: {
+                Text(confirmationMessage)
+            }
             if messageEmpty || promptEmpty {
                 Text(messageEmpty ? "请先填写测试语。" : "请先填写系统提示词。").font(.caption).foregroundStyle(.orange)
             }
@@ -663,6 +660,10 @@ struct AILivenessView: View {
                 .disabled(liveness.cancelling || liveness.runID == nil)
                 .frame(minHeight: 44)
                 .accessibilityIdentifier("ai.liveness.cancel")
+                .confirmationDialog("停止本次测活？", isPresented: $cancelling, titleVisibility: .visible) {
+                    Button("停止测活", role: .destructive) { Task { await liveness.cancel(model) } }
+                    Button("继续测活", role: .cancel) {}
+                } message: { Text("将不再发起新的请求，并中断正在进行的请求。已完成的结果会保留，已产生的上游费用不会退回。") }
                 if liveness.cancelling { ProgressView("正在请求服务器停止…") }
             }
         } header: {

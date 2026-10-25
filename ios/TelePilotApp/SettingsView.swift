@@ -81,10 +81,12 @@ struct SettingsView: View {
                         Label("更换服务器", systemImage: "arrow.left.arrow.right.circle")
                     }
                     .frame(minHeight: 44).accessibilityIdentifier("settings.changeServer")
+                    .modifier(logoutConfirmation(.server))
                     Button(role: .destructive) { confirmation = .logout } label: {
                         Label("退出登录", systemImage: "rectangle.portrait.and.arrow.right")
                     }
                     .frame(minHeight: 44).accessibilityIdentifier("settings.logout")
+                    .modifier(logoutConfirmation(.logout))
                 }
                 Section {
                     NavigationLink { AboutView() } label: {
@@ -102,29 +104,45 @@ struct SettingsView: View {
             .symbolRenderingMode(.hierarchical)
             .navigationTitle("设置").navigationBarTitleDisplayMode(.inline)
             .accessibilityIdentifier("settings.screen")
-            .confirmationDialog(
-                confirmation == .server ? "退出并更换服务器？" : "退出登录？",
-                isPresented: Binding(get: { confirmation != nil }, set: { if !$0 { confirmation = nil } }),
-                titleVisibility: .visible
-            ) {
-                let forgetServer = confirmation == .server
-                Button(forgetServer ? "退出并更换" : "确认退出", role: .destructive) {
-                    Task { await model.logout(forgetServer: forgetServer) }
-                }
-                .accessibilityIdentifier("settings.confirmLogout")
-                Button("取消", role: .cancel) {}
-            } message: {
-                Text("这会清除此设备的登录状态和已读取数据，不会停止服务器上的任务。")
-            }
     }
 }
 
 extension SettingsView {
+    /// iOS 26+ 确认框以 popover 锚定在所修饰的视图上：“更换服务器”和“退出登录”各自挂一个，
+    /// 共用 `confirmation` 状态，只有被点按的那个按钮弹出。
+    private func logoutConfirmation(_ kind: Confirmation) -> SettingsLogoutConfirmation {
+        SettingsLogoutConfirmation(
+            isPresented: Binding(get: { confirmation == kind }, set: { if !$0 { confirmation = nil } }),
+            forgetServer: kind == .server,
+            logout: { Task { await model.logout(forgetServer: kind == .server) } })
+    }
+
     static func graceLabel(_ seconds: Int) -> String {
         switch seconds {
         case 0: "立即"
         case 60: "离开 1 分钟后"
         default: "离开 \(seconds / 60) 分钟后"
+        }
+    }
+}
+
+/// 设置页“更换服务器 / 退出登录”的二次确认框，挂在触发它的按钮上。
+private struct SettingsLogoutConfirmation: ViewModifier {
+    @Binding var isPresented: Bool
+    let forgetServer: Bool
+    let logout: () -> Void
+
+    func body(content: Content) -> some View {
+        content.confirmationDialog(
+            forgetServer ? "退出并更换服务器？" : "退出登录？",
+            isPresented: $isPresented,
+            titleVisibility: .visible
+        ) {
+            Button(forgetServer ? "退出并更换" : "确认退出", role: .destructive) { logout() }
+                .accessibilityIdentifier("settings.confirmLogout")
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("这会清除此设备的登录状态和已读取数据，不会停止服务器上的任务。")
         }
     }
 }
