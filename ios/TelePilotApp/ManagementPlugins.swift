@@ -35,15 +35,13 @@ struct PluginManagementView: View {
             if let accountID {
                 PluginCenterView(features: features, fixedAccountID: accountID, loading: busy, loadError: error, reload: load)
             } else {
-                // 分段切换挂在各自滚动视图的系统安全区栏上（iOS 26 safeAreaBar），
-                // 内容滚过时由系统滚动边缘效果承托，不再使用实色背景条。
+                // 分段切换作为各自滚动内容的顶部头部，随内容一起滚动。曾挂在 `.safeAreaBar(edge: .top)` 上，
+                // 与大标题导航栏的折叠/展开互相改变顶部安全区，滑到顶部时顶栏会持续抖动。
                 switch section {
                 case .center:
-                    PluginCenterView(features: features, loading: busy, loadError: error, reload: load)
-                        .safeAreaBar(edge: .top) { sectionPicker }
+                    PluginCenterView(features: features, loading: busy, loadError: error, reload: load, header: AnyView(sectionPicker))
                 case .management:
-                    PluginSourcesView(features: features, installed: installed, loading: busy, loadError: error, reload: load)
-                        .safeAreaBar(edge: .top) { sectionPicker }
+                    PluginSourcesView(features: features, installed: installed, loading: busy, loadError: error, reload: load, header: AnyView(sectionPicker))
                 }
             }
         }
@@ -63,9 +61,6 @@ struct PluginManagementView: View {
         }
         .pickerStyle(.segmented)
         .labelsHidden()
-        .controlSize(.large)
-        .padding(.horizontal, 16)
-        .padding(.vertical, 8)
     }
 
     private func load() async {
@@ -99,6 +94,8 @@ private struct PluginCenterView: View {
     var loading = false
     var loadError: String?
     let reload: () async -> Void
+    /// 可选的顶部头部（插件工作区的分段切换），作为滚动内容第一项显示。
+    var header: AnyView? = nil
     @Environment(AppModel.self) private var model
     @Environment(WorkspacePreferences.self) private var preferences
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
@@ -138,6 +135,7 @@ private struct PluginCenterView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
+                if let header { header }
                 scopePicker
                 if let loadError { NoticeView(title: "插件目录读取失败", message: loadError) }
                 if let accountError { NoticeView(title: "账号插件状态读取失败", message: accountError) }
@@ -287,10 +285,21 @@ private struct PluginSourcesView: View {
     let loading: Bool
     let loadError: String?
     let reload: () async -> Void
+    /// 可选的顶部头部（插件工作区的分段切换），作为列表第一个分组显示。
+    var header: AnyView? = nil
     private var updates: Int { features.filter { $0["update_available"]?.boolValue == true }.count }
 
     var body: some View {
         List {
+            if let header {
+                Section {
+                    header
+                        .listRowBackground(Color.clear)
+                        .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
+                        .listRowSeparator(.hidden)
+                }
+                .listSectionSeparator(.hidden)
+            }
             if let loadError { NoticeView(title: "插件安装状态读取失败", message: loadError) }
             Section {
                 NavigationLink {
@@ -714,18 +723,6 @@ struct ManagementPluginDetailView: View {
         .toolbar { Button(preferences.isFavoritePlugin(key) ? "取消收藏" : "收藏", systemImage: preferences.isFavoritePlugin(key) ? "star.fill" : "star") { preferences.togglePlugin(key) } }
         .task { if accountID == nil { await loadInstallRecord() } }
         .refreshable { if accountID == nil { await loadInstallRecord() } else { await reloadAccountState() } }
-        .confirmationDialog(accountEnabled ? "在此账号停用该插件？" : "在此账号启用该插件？", isPresented: $confirmToggle, titleVisibility: .visible) {
-            Button(accountEnabled ? "确认停用" : "确认启用", role: accountEnabled ? .destructive : nil) { Task { await toggleAccount() } }
-            Button("取消", role: .cancel) {}
-        } message: {
-            Text(accountEnabled ? "此账号将不再运行该插件，配置和规则会保留。其他账号与服务器安装不受影响。" : "此账号将按自己的配置和规则运行该插件。其他账号不受影响。")
-        }
-        .confirmationDialog(globalEnabled == true ? "全局停用此插件？" : "全局启用此插件？", isPresented: $confirmGlobal, titleVisibility: .visible) {
-            Button(globalEnabled == true ? "确认全局停用" : "确认全局启用", role: globalEnabled == true ? .destructive : nil) { Task { await toggleGlobal() } }
-            Button("取消", role: .cancel) {}
-        } message: {
-            Text(globalEnabled == true ? "停用后所有账号都不会运行此插件；各账号的开关、配置和规则会保留，重新启用即可恢复。" : "启用后，已在账号中开启此插件的账号会重新开始运行它。")
-        }
     }
 
     // MARK: 账号开关（仅账号作用域）
@@ -742,6 +739,12 @@ struct ManagementPluginDetailView: View {
             }
             .disabled(toggling || toggleUncertain)
             .accessibilityIdentifier("plugin.account.toggle")
+            .confirmationDialog(accountEnabled ? "在此账号停用该插件？" : "在此账号启用该插件？", isPresented: $confirmToggle, titleVisibility: .visible) {
+                Button(accountEnabled ? "确认停用" : "确认启用", role: accountEnabled ? .destructive : nil) { Task { await toggleAccount() } }
+                Button("取消", role: .cancel) {}
+            } message: {
+                Text(accountEnabled ? "此账号将不再运行该插件，配置和规则会保留。其他账号与服务器安装不受影响。" : "此账号将按自己的配置和规则运行该插件。其他账号不受影响。")
+            }
             if toggling { ProgressView("正在提交并刷新状态…") }
             if let actionMessage { Label(actionMessage, systemImage: "checkmark.circle").foregroundStyle(.green) }
             if let actionError { NoticeView(title: toggleUncertain ? "结果待确认" : "操作未完成", message: actionError) }
@@ -939,6 +942,12 @@ struct ManagementPluginDetailView: View {
                 }
                 .disabled(globalBusy || globalUncertain)
                 .accessibilityIdentifier("plugin.global.toggle")
+                .confirmationDialog(globalEnabled == true ? "全局停用此插件？" : "全局启用此插件？", isPresented: $confirmGlobal, titleVisibility: .visible) {
+                    Button(globalEnabled == true ? "确认全局停用" : "确认全局启用", role: globalEnabled == true ? .destructive : nil) { Task { await toggleGlobal() } }
+                    Button("取消", role: .cancel) {}
+                } message: {
+                    Text(globalEnabled == true ? "停用后所有账号都不会运行此插件；各账号的开关、配置和规则会保留，重新启用即可恢复。" : "启用后，已在账号中开启此插件的账号会重新开始运行它。")
+                }
             } else if installLoaded {
                 Label(isBuiltin ? "内置插件随服务器提供，没有单独的总开关。" : "没有找到此插件的安装记录。", systemImage: "info.circle")
                     .foregroundStyle(.secondary)

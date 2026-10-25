@@ -298,35 +298,9 @@ struct ServerUpdateSheet: View {
                 }
             }
             .refreshable { await runCheck() }
-            .confirmationDialog(target.map { "更新服务器到 \($0) 的最新版本？" } ?? "更新服务器？",
-                                isPresented: $confirming, titleVisibility: .visible) {
-                Button("确认更新", role: .destructive) { Task { await apply() } }
-                    .accessibilityIdentifier("update.confirm")
-                Button("取消", role: .cancel) {}
-            } message: {
-                Text(confirmationMessage)
-            }
-            .confirmationDialog(channelConfirmationTitle, isPresented: $confirmingChannel, titleVisibility: .visible) {
-                Button("切换通道") { Task { await saveChannel() } }
-                    .accessibilityIdentifier("update.channel.confirm")
-                Button("取消", role: .cancel) {}
-            } message: {
-                Text(channelConfirmationMessage)
-            }
             .onChange(of: selectedRemote) { old, new in
                 guard !old.isEmpty, old != new else { return }
                 Task { await loadTargetOptions(remote: new) }
-            }
-            .confirmationDialog("已核实上次更新任务已经结束？", isPresented: $confirmingNewAttempt, titleVisibility: .visible) {
-                Button("已核实，允许下次更新", role: .destructive) {
-                    UserDefaults.standard.removeObject(forKey: receiptKey)
-                    applyUncertain = false
-                    applyResult = nil
-                    applyError = nil
-                }
-                Button("取消", role: .cancel) {}
-            } message: {
-                Text("请先在升级任务或服务器上确认上次更新没有继续执行。这里只解除重复提交保护，不会立刻开始更新。")
             }
         }
         .presentationDetents([.medium, .large])
@@ -436,6 +410,13 @@ struct ServerUpdateSheet: View {
                     }
                     .disabled(savingChannel || applying || checking || channelUncertain)
                     .accessibilityIdentifier("update.channel.save")
+                    .confirmationDialog(channelConfirmationTitle, isPresented: $confirmingChannel, titleVisibility: .visible) {
+                        Button("切换通道") { Task { await saveChannel() } }
+                            .accessibilityIdentifier("update.channel.confirm")
+                        Button("取消", role: .cancel) {}
+                    } message: {
+                        Text(channelConfirmationMessage)
+                    }
                 }
             } else if loadingChannel {
                 HStack(spacing: 10) { ProgressView(); Text("正在读取更新通道…").foregroundStyle(.secondary) }
@@ -570,6 +551,14 @@ struct ServerUpdateSheet: View {
                 }
                 .disabled(applying || applyUncertain || checking)
                 .accessibilityIdentifier("update.apply")
+                .confirmationDialog(target.map { "更新服务器到 \($0) 的最新版本？" } ?? "更新服务器？",
+                                    isPresented: $confirming, titleVisibility: .visible) {
+                    Button("确认更新", role: .destructive) { Task { await apply() } }
+                        .accessibilityIdentifier("update.confirm")
+                    Button("取消", role: .cancel) {}
+                } message: {
+                    Text(confirmationMessage)
+                }
             }
             Button { Task { await runCheck() } } label: {
                 Label(checking ? "正在检查…" : "重新检查", systemImage: "arrow.clockwise").frame(minHeight: 44)
@@ -583,6 +572,17 @@ struct ServerUpdateSheet: View {
                 Button("已核实上次任务，允许下次更新", systemImage: "checkmark.shield") { confirmingNewAttempt = true }
                     .disabled(applying || checking)
                     .accessibilityIdentifier("update.allowNext")
+                    .confirmationDialog("已核实上次更新任务已经结束？", isPresented: $confirmingNewAttempt, titleVisibility: .visible) {
+                        Button("已核实，允许下次更新", role: .destructive) {
+                            UserDefaults.standard.removeObject(forKey: receiptKey)
+                            applyUncertain = false
+                            applyResult = nil
+                            applyError = nil
+                        }
+                        Button("取消", role: .cancel) {}
+                    } message: {
+                        Text("请先在升级任务或服务器上确认上次更新没有继续执行。这里只解除重复提交保护，不会立刻开始更新。")
+                    }
             }
         } footer: {
             if hasUpdate && !canApply && check != nil {

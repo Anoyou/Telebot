@@ -125,15 +125,6 @@ struct AssistantView: View {
                 Task { await store.regenerate(user: pair.user, assistant: pair.assistant, edited: text, model: model) }
             }
         }
-        .confirmationDialog("停止当前任务？", isPresented: $confirmStop, titleVisibility: .visible) {
-            Button("提交停止请求", role: .destructive) { Task { await store.cancel(model) } }
-        } message: { Text("已执行的操作不会撤销。关闭窗口不会停止服务器任务。") }
-        .confirmationDialog("停止当前任务并发送替代消息？", isPresented: $confirmReplace, titleVisibility: .visible) {
-            Button("停止并替换", role: .destructive) { performSend() }
-        } message: { Text("服务器会停止当前任务，并使用输入框中的内容创建替代任务。已经执行的操作不会撤销。") }
-        .confirmationDialog("放弃待核对的发送记录？", isPresented: $abandonPending, titleVisibility: .visible) {
-            Button("放弃本机记录", role: .destructive) { store.clearPending() }
-        } message: { Text("这不会停止服务器任务。请先检查任务历史，重新发送可能产生重复任务。") }
         .onChange(of: photos) { _, items in
             Task {
                 loadingImage = true
@@ -178,6 +169,9 @@ struct AssistantView: View {
                     HStack {
                         Button("核对发送结果") { Task { await store.reconcileSend(model) } }
                         Button("放弃记录", role: .destructive) { abandonPending = true }
+                            .confirmationDialog("放弃待核对的发送记录？", isPresented: $abandonPending, titleVisibility: .visible) {
+                                Button("放弃本机记录", role: .destructive) { store.clearPending() }
+                            } message: { Text("这不会停止服务器任务。请先检查任务历史，重新发送可能产生重复任务。") }
                     }.font(.subheadline)
                 }.padding().frame(maxWidth: .infinity, alignment: .leading).background(.orange.opacity(0.1))
             }
@@ -430,6 +424,9 @@ struct AssistantView: View {
         .keyboardShortcut(.return, modifiers: .command)
         .accessibilityLabel(store.busy ? "正在提交" : sendMode == "replace" && store.runActive ? "停止并替换" : "发送消息")
         .accessibilityIdentifier("assistant.send")
+        .confirmationDialog("停止当前任务并发送替代消息？", isPresented: $confirmReplace, titleVisibility: .visible) {
+            Button("停止并替换", role: .destructive) { performSend() }
+        } message: { Text("服务器会停止当前任务，并使用输入框中的内容创建替代任务。已经执行的操作不会撤销。") }
     }
 
     private var stopButton: some View {
@@ -448,6 +445,9 @@ struct AssistantView: View {
         .opacity(unavailable ? 0.45 : 1)
         .accessibilityLabel("停止当前任务")
         .accessibilityIdentifier("assistant.stop")
+        .confirmationDialog("停止当前任务？", isPresented: $confirmStop, titleVisibility: .visible) {
+            Button("提交停止请求", role: .destructive) { Task { await store.cancel(model) } }
+        } message: { Text("已执行的操作不会撤销。关闭窗口不会停止服务器任务。") }
     }
 
     private var trimmedDraft: String { draft.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -911,18 +911,6 @@ private struct AssistantSessionsView: View {
                     }
                 }
             }
-            .confirmationDialog(
-                "删除这个会话？",
-                isPresented: Binding(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } }),
-                titleVisibility: .visible,
-                presenting: pendingDelete
-            ) { item in
-                Button("删除会话", role: .destructive) {
-                    Task { await store.deleteSession(id: item.id, model: model) }
-                }
-            } message: { item in
-                Text("“\(AssistantRedaction.text(item.text("title").nilIfEmpty ?? "新会话"))”及其全部消息会从服务器删除，此操作不可撤销。")
-            }
         }
     }
 
@@ -964,6 +952,20 @@ private struct AssistantSessionsView: View {
             }
         }
         .accessibilityIdentifier("assistant.session." + item.id)
+        // 确认框挂在被删除的那一行上（iOS 26+ 以 popover 锚定在所修饰的视图）；
+        // 行在 ForEach 内重复实例化，只让 pendingDelete 对应的那一行绑定为真。
+        .confirmationDialog(
+            "删除这个会话？",
+            isPresented: Binding(get: { pendingDelete?.id == item.id }, set: { if !$0 { pendingDelete = nil } }),
+            titleVisibility: .visible,
+            presenting: pendingDelete
+        ) { item in
+            Button("删除会话", role: .destructive) {
+                Task { await store.deleteSession(id: item.id, model: model) }
+            }
+        } message: { item in
+            Text("“\(AssistantRedaction.text(item.text("title").nilIfEmpty ?? "新会话"))”及其全部消息会从服务器删除，此操作不可撤销。")
+        }
     }
 }
 
@@ -1002,20 +1004,20 @@ private struct AssistantSessionSettingsView: View {
                         }
                     }.disabled(store.busy || store.runActive)
                     Button("删除会话", systemImage: "trash", role: .destructive) { confirmDelete = true }.disabled(store.busy || store.runActive)
+                        .confirmationDialog("删除此会话及历史？", isPresented: $confirmDelete, titleVisibility: .visible) {
+                            Button("删除会话", role: .destructive) {
+                                Task {
+                                    guard let id = store.sessionID else { return }
+                                    if await store.deleteSession(id: id, model: model) { dismiss() }
+                                }
+                            }
+                        } message: { Text("此操作不可撤销。") }
                 } footer: { Text("运行中的任务结束后才能归档或删除会话。") }
                 if let error = store.error { Section { Text(error).foregroundStyle(.red) } }
             }
             .navigationTitle("会话设置").navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { dismiss() } } }
             .onAppear { title = AssistantRedaction.text(originalTitle) }
-            .confirmationDialog("删除此会话及历史？", isPresented: $confirmDelete, titleVisibility: .visible) {
-                Button("删除会话", role: .destructive) {
-                    Task {
-                        guard let id = store.sessionID else { return }
-                        if await store.deleteSession(id: id, model: model) { dismiss() }
-                    }
-                }
-            } message: { Text("此操作不可撤销。") }
         }
     }
 }

@@ -312,16 +312,16 @@ struct AIProviderModelsView: View {
                     .disabled(!dirty || busy || uncertain || models.isEmpty)
                     .frame(minHeight: 44)
                     .accessibilityIdentifier("ai.models.save")
+                    .confirmationDialog("保存模型选择？", isPresented: $confirming, titleVisibility: .visible) {
+                        Button("确认保存") { Task { await save() } }
+                        Button("取消", role: .cancel) {}
+                    } message: { Text("将启用 \(models.filter { $0["enabled"]?.boolValue == true }.count) 个模型，停用其余候选模型。") }
                 if busy { ProgressView("正在保存到服务器…") }
                 if uncertain { Text("请返回并重新读取供应商，确认服务器实际状态后再保存。").font(.caption) }
             } footer: { Text("保存时会整体更新模型清单，各模型已有的能力信息会原样保留。") }
         }
         .navigationTitle("模型清单").navigationBarTitleDisplayMode(.inline)
         .task { models = provider["models"]?.arrayValue ?? [] }
-        .confirmationDialog("保存模型选择？", isPresented: $confirming, titleVisibility: .visible) {
-            Button("确认保存") { Task { await save() } }
-            Button("取消", role: .cancel) {}
-        } message: { Text("将启用 \(models.filter { $0["enabled"]?.boolValue == true }.count) 个模型，停用其余候选模型。") }
     }
 
     private func enabled(_ index: Int) -> Binding<Bool> {
@@ -487,10 +487,6 @@ struct AIProviderCreateView: View {
         .navigationTitle("添加供应商").navigationBarTitleDisplayMode(.inline)
         .disabled(saving)
         .task { await loadProxies() }
-        .confirmationDialog("添加供应商？", isPresented: $confirming, titleVisibility: .visible) {
-            Button("确认添加") { Task { await save() } }
-            Button("取消", role: .cancel) {}
-        } message: { Text(confirmationMessage) }
     }
 
     // MARK: - 连接
@@ -706,6 +702,10 @@ struct AIProviderCreateView: View {
             }
             .disabled(saving || uncertain || created != nil)
             .accessibilityIdentifier("ai.providerCreate.submit")
+            .confirmationDialog("添加供应商？", isPresented: $confirming, titleVisibility: .visible) {
+                Button("确认添加") { Task { await save() } }
+                Button("取消", role: .cancel) {}
+            } message: { Text(confirmationMessage) }
             if let validationError { Text(validationError).font(.caption).foregroundStyle(.red) }
             if let saveError { NoticeView(title: uncertain ? "添加结果待确认" : "添加失败", message: saveError) }
             if uncertain { Text("请返回供应商列表下拉刷新，确认是否已添加，避免重复创建。").font(.caption).foregroundStyle(.orange) }

@@ -169,6 +169,16 @@ struct AccountDetailView: View {
                         }
                         .disabled(busy || model.detailErrors[id] != nil || model.uncertainActions.contains(id))
                         .accessibilityIdentifier(account.status == "active" ? "account.pause" : "account.resume")
+                        .confirmationDialog(confirmedStatus == "active" ? "暂停这个账号？" : "恢复这个账号？", isPresented: $confirming, titleVisibility: .visible) {
+                            Button(confirmedStatus == "active" ? "确认暂停" : "确认恢复") {
+                                Task { await model.toggleAccount(id: id, expectedStatus: confirmedStatus) }
+                            }
+                            .accessibilityIdentifier("account.confirmAction")
+                            Button("取消", role: .cancel) {}
+                                .accessibilityIdentifier("account.cancelAction")
+                        } message: {
+                            Text(confirmedStatus == "active" ? "服务器将暂停此账号的运行。其他账号不受影响。" : "服务器将尝试恢复此账号。成功接受请求不代表进程已立即就绪。")
+                        }
                     } header: { Text("运行控制") } footer: {
                         Text("操作修改服务器上的账号状态，运行进程会随后同步。App 不在手机上运行 Telegram 任务。")
                     }
@@ -210,16 +220,6 @@ struct AccountDetailView: View {
             if phase == .active { Task { await model.loadAccount(id: id) } }
         }
         .refreshable { await model.confirmLatestAccount(id: id) }
-        .confirmationDialog(confirmedStatus == "active" ? "暂停这个账号？" : "恢复这个账号？", isPresented: $confirming, titleVisibility: .visible) {
-            Button(confirmedStatus == "active" ? "确认暂停" : "确认恢复") {
-                Task { await model.toggleAccount(id: id, expectedStatus: confirmedStatus) }
-            }
-            .accessibilityIdentifier("account.confirmAction")
-            Button("取消", role: .cancel) {}
-                .accessibilityIdentifier("account.cancelAction")
-        } message: {
-            Text(confirmedStatus == "active" ? "服务器将暂停此账号的运行。其他账号不受影响。" : "服务器将尝试恢复此账号。成功接受请求不代表进程已立即就绪。")
-        }
     }
 
     private func formattedDate(_ value: String) -> String {

@@ -39,6 +39,16 @@ struct EmergencyStopSection: View {
             .listRowBackground(Color.red.opacity(enabled == true ? 0.22 : 0.10))
             .accessibilityIdentifier("more.emergencyStop")
             .accessibilityValue(statusText)
+            .confirmationDialog(confirmTitle, isPresented: $confirming, titleVisibility: .visible) {
+                Button(enabled == true ? "解除紧急停止" : "立即紧急停止", role: enabled == true ? nil : .destructive) {
+                    Task { await toggle() }
+                }
+                Button("取消", role: .cancel) {}
+            } message: {
+                Text(enabled == true
+                     ? "解除后自动化会恢复运行。请先确认当前任务和资金状态正常。"
+                     : "会立刻停止服务器上的全部自动化执行，直到手动解除。")
+            }
         } footer: {
             if let resultMessage {
                 Text(resultMessage).foregroundStyle(.red)
@@ -47,16 +57,6 @@ struct EmergencyStopSection: View {
             }
         }
         .task { await load() }
-        .confirmationDialog(confirmTitle, isPresented: $confirming, titleVisibility: .visible) {
-            Button(enabled == true ? "解除紧急停止" : "立即紧急停止", role: enabled == true ? nil : .destructive) {
-                Task { await toggle() }
-            }
-            Button("取消", role: .cancel) {}
-        } message: {
-            Text(enabled == true
-                 ? "解除后自动化会恢复运行。请先确认当前任务和资金状态正常。"
-                 : "会立刻停止服务器上的全部自动化执行，直到手动解除。")
-        }
     }
 
     private var statusText: String {

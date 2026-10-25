@@ -74,13 +74,13 @@ struct AIUsageSection: View {
             Button(role: .destructive) { confirmingReset = true } label: { Label("清空调用记录", systemImage: "trash") }
                 .disabled(workspace.usageItems.isEmpty || resetting)
                 .accessibilityIdentifier("ai.usage.reset")
+                .confirmationDialog("清空全部 AI 调用记录？", isPresented: $confirmingReset, titleVisibility: .visible) {
+                    Button("确认清空调用记录", role: .destructive) { Task { await reset() } }
+                    Button("取消", role: .cancel) {}
+                } message: { Text("此操作不可撤销。历史用量和错误记录将删除，服务器业务配置保持不变。") }
             if resetting { ProgressView("正在清空服务器记录…") }
             if let error { NoticeView(title: "清空操作未完成", message: error) }
         } footer: { Text("将清空近期调用、成功率和插件 AI 用量统计，不影响供应商、模型或指令配置。") }
-        .confirmationDialog("清空全部 AI 调用记录？", isPresented: $confirmingReset, titleVisibility: .visible) {
-            Button("确认清空调用记录", role: .destructive) { Task { await reset() } }
-            Button("取消", role: .cancel) {}
-        } message: { Text("此操作不可撤销。历史用量和错误记录将删除，服务器业务配置保持不变。") }
     }
 
     private var plugins: some View {

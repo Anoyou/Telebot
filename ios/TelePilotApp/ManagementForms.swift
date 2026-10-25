@@ -134,6 +134,10 @@ struct ManagementFormView: View {
                 .disabled(busy || uncertain || !initialized)
                 .frame(minHeight: 44)
                 .accessibilityIdentifier("management.submit")
+                .confirmationDialog(action.title + "？", isPresented: $confirming, titleVisibility: .visible) {
+                    Button("确认" + action.title, role: action.destructive ? .destructive : nil) { Task { await submit() } }
+                    Button("取消", role: .cancel) {}
+                } message: { Text(action.explanation) }
                 if busy { ProgressView("正在提交到服务器…") }
                 if uncertain { Text("请返回列表刷新，确认服务器上的实际结果后再操作。").foregroundStyle(.secondary) }
             }
@@ -156,10 +160,6 @@ struct ManagementFormView: View {
             draft = ManagementSchema.initial(schema, seed: action.seed, defaults: !["PUT", "PATCH"].contains(action.method))
             initialized = true
         }
-        .confirmationDialog(action.title + "？", isPresented: $confirming, titleVisibility: .visible) {
-            Button("确认" + action.title, role: action.destructive ? .destructive : nil) { Task { await submit() } }
-            Button("取消", role: .cancel) {}
-        } message: { Text(action.explanation) }
     }
 
     private func submit() async {
