@@ -12,6 +12,16 @@ final class ManagementUITests: XCTestCase {
         return app
     }
 
+    /// 服务器更新面板以 medium 高度的 sheet 呈现。对整个 App 快速上滑会带惯性滚过目标行，
+    /// 甚至在惯性未停时点击而丢失点击；这里只在 sheet 内的列表上慢速逐段上滑，直到目标可点。
+    private func scrollUpdateSheet(to element: XCUIElement, in app: XCUIApplication, attempts: Int = 10) {
+        let list = app.otherElements["update.sheet"].collectionViews.firstMatch
+        XCTAssertTrue(list.waitForExistence(timeout: 10))
+        for _ in 0..<attempts where !(element.exists && element.isHittable) {
+            list.swipeUp(velocity: .slow)
+        }
+    }
+
     func testTelegramBindingRequiresCredentialsBeforeSendingCode() {
         let app = launch()
         let accounts = app.buttons["more.accounts"]
@@ -64,9 +74,9 @@ final class ManagementUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["发现新版本"].waitForExistence(timeout: 10))
         XCTAssertTrue(app.staticTexts["0.105.0-beta.1"].exists)
         let apply = app.buttons["update.apply"]
-        for _ in 0..<4 where !apply.isHittable { app.swipeUp() }
+        scrollUpdateSheet(to: apply, in: app)
         apply.tap()
-        XCTAssertTrue(app.buttons["update.confirm"].firstMatch.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["update.confirm"].firstMatch.waitForExistence(timeout: 10))
         let cancel = app.buttons["取消"].firstMatch
         if cancel.exists && cancel.isHittable { cancel.tap() }
         else { app.otherElements["PopoverDismissRegion"].firstMatch.tap() }
@@ -101,14 +111,14 @@ final class ManagementUITests: XCTestCase {
         XCTAssertTrue(open.waitForExistence(timeout: 10))
         open.tap()
         let apply = app.buttons["update.apply"]
-        for _ in 0..<5 where !apply.isHittable { app.swipeUp() }
+        scrollUpdateSheet(to: apply, in: app)
         XCTAssertTrue(apply.waitForExistence(timeout: 10))
         apply.tap()
         let confirm = app.buttons["update.confirm"].firstMatch
-        XCTAssertTrue(confirm.waitForExistence(timeout: 5))
+        XCTAssertTrue(confirm.waitForExistence(timeout: 10))
         confirm.tap()
         let job = app.buttons["update.job"]
-        for _ in 0..<5 where !job.isHittable { app.swipeUp() }
+        scrollUpdateSheet(to: job, in: app)
         XCTAssertTrue(job.waitForExistence(timeout: 10))
         app.buttons["update.done"].tap()
         XCTAssertTrue(open.waitForExistence(timeout: 5))
@@ -116,10 +126,10 @@ final class ManagementUITests: XCTestCase {
         // 面板新增“更新通道”分区后内容更长：滚到“更新结果”时，上方操作分区的行已被列表回收，
         // 因此先在操作分区确认“应用更新”已隐藏、“允许下次更新”可用，再继续滚到升级任务。
         let allowNext = app.buttons["update.allowNext"]
-        for _ in 0..<5 where !allowNext.isHittable { app.swipeUp() }
+        scrollUpdateSheet(to: allowNext, in: app)
         XCTAssertTrue(allowNext.waitForExistence(timeout: 10))
         XCTAssertFalse(app.buttons["update.apply"].exists)
-        for _ in 0..<5 where !job.isHittable { app.swipeUp() }
+        scrollUpdateSheet(to: job, in: app)
         XCTAssertTrue(job.waitForExistence(timeout: 10))
     }
 
