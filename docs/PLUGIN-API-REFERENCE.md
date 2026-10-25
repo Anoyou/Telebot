@@ -2312,6 +2312,7 @@ config_schema={
 - `x-ui-order`：控制字段排序，数值越小越靠前；未声明视为 0，相同值保持 `properties` 的声明顺序（服务器写库时记在 `x-ui-property-order`，Web 与 iOS 都按它还原，不按字母排序）。
 - `required`：只列出真正必填、没有可用默认值且留空插件无法工作的字段；Web/iOS 会给它们标“必填”。有 `default` 的字段不要放进 `required`：留空或不提交时运行时按默认值补齐（默认值 < 全局 < 账号），清空成 `null` 的不可空字段也按“未设置”处理。
 - `x-ui-columns`：控制分组列数，允许 1 到 3。
+- 长配置页（多于 2 个分组且不少于 12 个字段）：标题含“基础 / 基本 / 常用 / 模型”的分组和未分组字段留在顶层，其余分组在 iOS 成为子页面入口、在 Web 默认折叠；组内任一字段声明 `x-ui-section-inline: true` 可让该分组留在顶层（`false` 则强制进子页面/折叠）。
 - `x-ui-widget: "config-list"`：把 `array<object>` 渲染为多组配置列表，内置添加、编辑、复制、删除、启停和排序。
 - `x-ui-widget: "multi-select"`：把枚举数组渲染为多选列表。
 - `x-ui-widget: "list-select"`：把枚举字符串渲染为列表式单选。

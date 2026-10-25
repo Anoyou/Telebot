@@ -1416,6 +1416,33 @@ private struct PluginConfigFieldGroup: Identifiable {
     let id: String
     let title: String?
     let fields: [PluginConfigField]
+    var core: PluginConfigLayout.FieldGroup { .init(title: title, keys: fields.map(\.key)) }
+}
+
+/// 长配置页的拆分：`inline` 留在主页，`pages` 各自成为一行进入子页面（规则见 `PluginConfigLayout.pagePlan`）。
+private struct PluginConfigPagePlan {
+    let inline: [PluginConfigFieldGroup]
+    let pages: [PluginConfigFieldGroup]
+}
+
+extension PluginConfigSchema {
+    static func pagePlan(feature: JSONValue, groups: [PluginConfigFieldGroup]) -> PluginConfigPagePlan {
+        let plan = PluginConfigLayout.pagePlan(schema: feature["config_schema"] ?? .object([:]), groups: groups.map(\.core))
+        guard !plan.pages.isEmpty else { return PluginConfigPagePlan(inline: groups, pages: []) }
+        return PluginConfigPagePlan(inline: groups.filter { plan.inline.contains($0.core) },
+                                    pages: groups.filter { plan.pages.contains($0.core) })
+    }
+    /// 子页面入口的图标，按分组标题里的关键词选择。
+    static func symbol(forGroup title: String) -> String {
+        let rules: [(String, String)] = [
+            ("模板", "text.bubble"), ("触发", "bolt"), ("关键词", "text.magnifyingglass"), ("模型", "cpu"),
+            ("限额", "gauge.with.dots.needle.33percent"), ("使用者", "person.2"), ("护栏", "shield.lefthalf.filled"),
+            ("安全", "shield.lefthalf.filled"), ("PT", "server.rack"), ("数据源", "server.rack"), ("站点", "server.rack"),
+            ("时限", "timer"), ("超时", "timer"), ("记忆", "brain"), ("回复", "arrowshape.turn.up.left"),
+            ("Skill", "puzzlepiece.extension"), ("题库", "books.vertical"), ("红包", "gift"), ("AI", "sparkles")
+        ]
+        return rules.first { title.localizedCaseInsensitiveContains($0.0) }?.1 ?? "slider.horizontal.3"
+    }
 }
 
 private enum PluginConfigFormat {
@@ -1589,8 +1616,12 @@ struct ManagementPluginConfigView: View {
     @State private var llmProviders: [JSONValue]?
     @State private var llmLoading = false
     @State private var llmError: String?
+    @State private var confirmingDiscard = false
+    @Environment(\.dismiss) private var dismiss
 
     private var global: Bool { accountID == nil }
+    /// 有未保存的修改（含子页面里改的）：离开前需要确认。
+    private var hasUnsavedChanges: Bool { snapshot != nil && !changes.isEmpty && !saving }
     private var segment: String { ManagementText.pathSegment(feature["key"]?.stringValue ?? "") }
     private var path: String { accountID.map { "/api/accounts/\($0)/features/\(segment)/config" } ?? "/api/plugins/\(segment)/config" }
     private var freeForm: Bool { !global && !PluginConfigSchema.hasSchema(feature) }
@@ -1640,9 +1671,18 @@ struct ManagementPluginConfigView: View {
                 if freeForm {
                     ManagementDictionaryView(value: $draft)
                 } else {
-                    ForEach(PluginConfigSchema.groups(feature: feature, fields: fields.filter { !$0.hidden })) { group in
+                    let plan = PluginConfigSchema.pagePlan(feature: feature,
+                                                           groups: PluginConfigSchema.groups(feature: feature, fields: fields.filter { !$0.hidden }))
+                    ForEach(plan.inline) { group in
                         ForEach(Array(group.fields.enumerated()), id: \.element.id) { index, field in
                             fieldSection(field, groupTitle: index == 0 ? group.title : nil)
+                        }
+                    }
+                    if !plan.pages.isEmpty {
+                        Section {
+                            ForEach(plan.pages) { group in pageRow(group) }
+                        } header: { Text("更多设置") } footer: {
+                            Text("各分组的修改都暂存在这次编辑里，回到本页点“检查修改”一次保存。")
                         }
                     }
                 }
@@ -1665,7 +1705,19 @@ struct ManagementPluginConfigView: View {
         // 可选字段只显示一个控件（不渲染“是否提交此项”开关），留空由服务器按默认值处理。
         .environment(\.managementOptionalFieldsInline, true)
         .navigationTitle(global ? "修改全局配置" : "修改账号配置").navigationBarTitleDisplayMode(.inline)
+        // 有未保存的修改时用自己的返回按钮（同时停用滑动返回），离开前确认是否放弃。
+        .navigationBarBackButtonHidden(hasUnsavedChanges)
         .toolbar {
+            if hasUnsavedChanges {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("返回", systemImage: "chevron.backward") { confirmingDiscard = true }
+                        .accessibilityIdentifier("plugin.config.back")
+                        .confirmationDialog("放弃未保存的修改？", isPresented: $confirmingDiscard, titleVisibility: .visible) {
+                            Button("放弃修改", role: .destructive) { dismiss() }
+                            Button("继续编辑", role: .cancel) {}
+                        } message: { Text("还有 \(changes.count) 项修改没有保存，离开后会丢失。") }
+                }
+            }
             ToolbarItem(placement: .confirmationAction) {
                 Button("检查修改") { beginReview() }.disabled(snapshot == nil || changes.isEmpty || saving || uncertain)
                     .accessibilityIdentifier("plugin.config.toolbarReview")
@@ -1676,8 +1728,80 @@ struct ManagementPluginConfigView: View {
         .sheet(isPresented: $reviewing) { reviewSheet }
     }
 
+    private func isChanged(_ field: PluginConfigField) -> Bool {
+        field.secret ? !(draft[field.key]?.stringValue ?? "").isEmpty : !PluginConfigFormat.same(baseline[field.key], draft[field.key])
+    }
+    /// 当前草稿里此项是否为空（敏感字段：服务器上也没有保存过）。
+    private func isEmptyValue(_ field: PluginConfigField) -> Bool {
+        if field.secret {
+            return (draft[field.key]?.stringValue ?? "").isEmpty
+                && PluginConfigFormat.text(snapshot?.values[field.key], secret: true).hasPrefix("未")
+        }
+        guard let value = draft[field.key], !value.isNull else { return true }
+        if let text = value.stringValue { return text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        return false
+    }
+    /// 此项是否已配置为不同于插件默认值的内容。
+    private func isConfigured(_ field: PluginConfigField) -> Bool {
+        if field.secret { return !isEmptyValue(field) }
+        guard let value = draft[field.key], !value.isNull else { return false }
+        if let fallback = field.spec["default"] { return !PluginConfigFormat.same(value, fallback) }
+        if let text = value.stringValue { return !text.isEmpty }
+        return true
+    }
+    private func pageSummary(_ group: PluginConfigFieldGroup) -> (text: String, missingRequired: Bool, changed: Int) {
+        let editable = group.fields.filter { !$0.readOnly }
+        let changed = editable.filter { isChanged($0) }.count
+        let missing = editable.contains { $0.required && isEmptyValue($0) }
+        var parts: [String] = []
+        if missing { parts.append("有必填项未填") }
+        if let toggle = editable.first(where: { ManagementSchema.isPlainBoolean($0.spec) && ($0.key == "enabled" || $0.key.hasSuffix("_enabled")) }) {
+            parts.append(draft[toggle.key]?.boolValue == true ? "已启用" : "未启用")
+        }
+        let configured = editable.filter { isConfigured($0) }.count
+        parts.append(configured > 0 ? "已配置 \(configured) 项" : "使用默认值")
+        parts.append("共 \(editable.count) 项")
+        return (parts.joined(separator: " · "), missing, changed)
+    }
+
+    /// 子页面入口：显示分组名与摘要；子页面直接编辑同一份草稿，回到主页统一检查并保存。
+    @ViewBuilder private func pageRow(_ group: PluginConfigFieldGroup) -> some View {
+        let title = group.title ?? "其他设置"
+        let summary = pageSummary(group)
+        NavigationLink {
+            Form {
+                Section {
+                    Label("这里的修改暂存在本次编辑中，返回上一页后点“检查修改”统一保存。", systemImage: "info.circle")
+                        .font(.subheadline).foregroundStyle(.secondary)
+                }
+                ForEach(group.fields) { field in fieldSection(field) }
+            }
+            .environment(\.managementOptionalFieldsInline, true)
+            .navigationTitle(title).navigationBarTitleDisplayMode(.inline)
+        } label: {
+            HStack(spacing: 12) {
+                Label {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(title)
+                        Text(summary.text).font(.caption).foregroundStyle(.secondary)
+                    }
+                } icon: { Image(systemName: PluginConfigSchema.symbol(forGroup: title)) }
+                Spacer(minLength: 8)
+                if summary.missingRequired {
+                    Image(systemName: "circle.fill").font(.caption2).foregroundStyle(.red)
+                        .accessibilityLabel("有必填项未填")
+                }
+                if summary.changed > 0 {
+                    Image(systemName: "pencil.circle.fill").foregroundStyle(.orange)
+                        .accessibilityLabel("已修改 \(summary.changed) 项")
+                }
+            }
+        }
+        .accessibilityIdentifier("plugin.config.page.\(title)")
+    }
+
     @ViewBuilder private func fieldSection(_ field: PluginConfigField, groupTitle: String? = nil) -> some View {
-        let changed = field.secret ? !(draft[field.key]?.stringValue ?? "").isEmpty : !PluginConfigFormat.same(baseline[field.key], draft[field.key])
+        let changed = isChanged(field)
         Section {
             if field.readOnly {
                 LabeledContent {

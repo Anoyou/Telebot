@@ -44,7 +44,7 @@ import {
   groupUnifiedOptions,
   resolveUnifiedModelKey,
 } from "./llmModelOptions";
-import { fieldAllowsNull, orderedPropertyEntries, sortedConfigEntries } from "./configFieldOrder";
+import { collapsedSectionKeys, fieldAllowsNull, orderedPropertyEntries, sortedConfigEntries } from "./configFieldOrder";
 
 export const MASKED_SECRET_PLACEHOLDER = "••••••••••••••••";
 const EMPTY_CONFIG: Record<string, unknown> = {};
@@ -61,6 +61,8 @@ export interface ConfigField {
   /** 服务器记录的 properties 声明顺序（JSONB 不保留键顺序）。 */
   "x-ui-property-order"?: string[];
   "x-ui-columns"?: 1 | 2 | 3 | number;
+  /** 长配置页里让此字段所在分组留在顶层（不折叠/不进子页面）。 */
+  "x-ui-section-inline"?: boolean;
   "x-ui-provider-field"?: string;
   "x-ui-options-field"?: string;
   "x-ui-placeholder"?: string;
@@ -142,7 +144,14 @@ export function ConfigScopeSection({
   onChangeMany,
 }: ConfigScopeSectionProps) {
   const [openTemplates, setOpenTemplates] = useState<Record<string, boolean>>({});
+  const [openSections, setOpenSections] = useState<Record<string, boolean>>({});
   const groups = groupConfigFields(fields);
+  // 长配置页：非基础分组默认折叠（与 iOS 子页面同一规则），x-ui-section-inline 可让分组留在顶层。
+  const collapsed = collapsedSectionKeys(
+    groups.sections,
+    groups.sections.length + (groups.basic.length > 0 ? 1 : 0) + (groups.templates.length > 0 ? 1 : 0),
+    groups.sections.reduce((sum, section) => sum + section.fields.length, 0) + groups.basic.length + groups.templates.length,
+  );
   const sectionKeys = new Set(fields.map(([key]) => key));
   // 只允许改写本作用域内的字段：Provider 字段在另一作用域（全局/账号）时不跨域写入。
   const onFieldsChange = (patch: Record<string, unknown>) => {
@@ -161,9 +170,32 @@ export function ConfigScopeSection({
 
       {groups.sections.length > 0 && (
         <div className="space-y-3">
-          {groups.sections.map((section) => (
+          {groups.sections.map((section) => {
+            const collapsible = collapsed.has(section.key);
+            const open = !collapsible || Boolean(openSections[section.key]);
+            return (
             <div key={section.key} className="space-y-3 rounded-md border bg-background p-3">
-              <div className="text-sm font-semibold">{section.title}</div>
+              {collapsible ? (
+                <button
+                  type="button"
+                  className="flex w-full items-center justify-between gap-3 text-left text-sm font-semibold"
+                  aria-expanded={open}
+                  onClick={() => setOpenSections((p) => ({ ...p, [section.key]: !p[section.key] }))}
+                >
+                  <span>
+                    {section.title}
+                    <span className="ml-2 text-xs font-normal text-muted-foreground">共 {section.fields.length} 项</span>
+                  </span>
+                  {open ? (
+                    <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                  ) : (
+                    <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                  )}
+                </button>
+              ) : (
+                <div className="text-sm font-semibold">{section.title}</div>
+              )}
+              {open && (
               <div className={configGridClass(section.columns)}>
                 {section.fields.map(([key, field]) => (
                   <ConfigFieldWithActions
@@ -182,8 +214,10 @@ export function ConfigScopeSection({
                   />
                 ))}
               </div>
+              )}
             </div>
-          ))}
+            );
+          })}
         </div>
       )}
 

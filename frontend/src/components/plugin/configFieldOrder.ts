@@ -86,3 +86,25 @@ export function withoutClearedValues(
   }
   return out;
 }
+
+/** 长配置页：至少这么多字段、且多于 2 个分组时，非基础分组折叠（iOS 为子页面）。 */
+export const SUBPAGE_MIN_FIELDS = 12;
+export const INLINE_SECTION_KEY = "x-ui-section-inline";
+const INLINE_TITLE_KEYWORDS = ["基础", "基本", "常用", "模型"];
+
+type SectionLike = { key: string; title: string; fields: Array<[string, object]> };
+
+/** 组内任一字段声明 `x-ui-section-inline` 时以它为准，否则标题含“基础/基本/常用/模型”的分组留在顶层。 */
+export function isInlineSection(section: SectionLike): boolean {
+  for (const [, field] of section.fields) {
+    const flag = (field as Record<string, unknown>)[INLINE_SECTION_KEY];
+    if (typeof flag === "boolean") return flag;
+  }
+  return INLINE_TITLE_KEYWORDS.some((word) => section.title.includes(word));
+}
+
+/** 返回需要折叠的分组 key（与 iOS `PluginConfigLayout.pagePlan` 同一规则）。 */
+export function collapsedSectionKeys(sections: SectionLike[], groupCount: number, fieldCount: number): Set<string> {
+  if (groupCount <= 2 || fieldCount < SUBPAGE_MIN_FIELDS) return new Set();
+  return new Set(sections.filter((section) => !isInlineSection(section)).map((section) => section.key));
+}

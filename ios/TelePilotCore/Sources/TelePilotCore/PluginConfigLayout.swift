@@ -80,4 +80,44 @@ public enum PluginConfigLayout {
         if !templates.isEmpty { result.append(FieldGroup(title: "消息模板", keys: templates)) }
         return result
     }
+
+    // MARK: - 长配置页拆成子页面
+
+    /// 分组拆页结果：`inline` 留在配置主页直接显示，`pages` 各自成为一行进入子页面。
+    public struct PagePlan: Equatable, Sendable {
+        public let inline: [FieldGroup]
+        public let pages: [FieldGroup]
+
+        public init(inline: [FieldGroup], pages: [FieldGroup]) {
+            self.inline = inline
+            self.pages = pages
+        }
+    }
+
+    /// 至少这么多字段、且多于 2 个分组时才拆子页面；否则维持单页。
+    public static let subpageMinimumFields = 12
+    public static let inlineSectionKey = "x-ui-section-inline"
+    /// 标题含这些词的分组视为“基础分组”，留在主页。
+    public static let inlineTitleKeywords = ["基础", "基本", "常用", "模型"]
+
+    /// 组内任一字段声明 `x-ui-section-inline` 时以它为准；未分组的字段留在主页；
+    /// 其余按标题关键词判断（如“基础设置”“模型与能力”）。消息模板默认进入子页面。
+    public static func isInline(_ group: FieldGroup, schema: JSONValue) -> Bool {
+        let properties = schema["properties"]?.objectValue ?? [:]
+        for key in group.keys {
+            if let flag = properties[key]?[inlineSectionKey]?.boolValue { return flag }
+        }
+        guard let title = group.title else { return true }
+        if group.keys.allSatisfy(isTemplate) { return false }
+        if title == "其他设置" { return true }
+        return inlineTitleKeywords.contains { title.contains($0) }
+    }
+
+    public static func pagePlan(schema: JSONValue, groups: [FieldGroup]) -> PagePlan {
+        let fieldCount = groups.reduce(0) { $0 + $1.keys.count }
+        guard groups.count > 2, fieldCount >= subpageMinimumFields else { return PagePlan(inline: groups, pages: []) }
+        let inline = groups.filter { isInline($0, schema: schema) }
+        let pages = groups.filter { !isInline($0, schema: schema) }
+        return PagePlan(inline: inline, pages: pages)
+    }
 }

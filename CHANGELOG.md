@@ -88,6 +88,7 @@
 - 插件配置表单支持 `x-ui-widget`：`llm-provider-select` 以原生选择器列出 TelePilot AI Provider（含“自动路由”），`llm-model-select` 按所选 Provider 列出已启用模型并按 `x-ui-model-modality=text` 排除图片模型（含“使用 Provider 默认模型”），`dynamic-select` 从 `x-ui-options-field` 指定字段读取候选；数据源与 Web 相同（`GET /api/commands/llm-providers`），不在候选中的旧值以“当前值：…”保留。ai-chat、ai_redpacket、quick_qa、sum、interaction-ai-chat 的 Provider/模型字段由此可直接选择；枚举字段（如 chatgpt_image、codex_image 的模型）继续使用原生选择器，并同样保留不在候选中的旧值。
 - 新增独立的 iOS 更新日志 `ios/CHANGELOG.md`（自 iOS 0.4.0 起按批次重建版本史），并随 App 打包；“关于”页新增“App 更新日志”入口，按版本原生列出 App 自身变化，离线可看、不依赖服务器，并标出当前安装版本（iOS 0.8.0）。原“更新日志”链接改名为“服务器更新日志”。
 - 插件配置表单不再把可选字段标成「必填」：「必填」只给 schema `required` 里的字段；字段顺序改为与 Web 一致——按插件声明顺序，再按 `x-ui-order`，并按 `x-ui-section` 分组显示组标题（分组 → 其他设置 → 消息模板），不再“必填在前、其余按标题字母排序”。配置页里对象/列表项的可选字段也只显示一个控件，不再多出“是否提交此项”开关，留空即由服务器按默认值处理。
+- 长插件配置页拆成子页面（多于 2 个分组且不少于 12 个字段时）：顶层只显示基础分组（如“基础设置”“模型与能力”）和未分组字段，其余分组（触发方式、PT 站点数据源、消息模板等）各成一行进入子页面，行上显示“已启用/未启用”“已配置 N 项”和必填未填的红点；子页面直接编辑同一份草稿，回到主页一次检查并保存，有未保存修改时返回会先确认。插件可用 `x-ui-section-inline: true` 让某分组留在顶层；Web 对同样的分组默认折叠。
 
 ### 优化
 

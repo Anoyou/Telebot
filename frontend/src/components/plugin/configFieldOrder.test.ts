@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  collapsedSectionKeys,
   fieldAllowsNull,
   orderedPropertyEntries,
   sortedConfigEntries,
@@ -50,4 +51,15 @@ test("清空不接受 null 的可选字段时不提交，允许 null 的保留",
     ),
     { nullable_limit: null, name: "", unknown: null },
   );
+});
+
+test("长配置页折叠非基础分组；x-ui-section-inline 可让分组留在顶层", () => {
+  const sections = [
+    { key: "模型与能力", title: "模型与能力", fields: [["telepilot_model", {}]] as Array<[string, Record<string, unknown>]> },
+    { key: "触发方式", title: "触发方式", fields: [["enable_guest", { "x-ui-section-inline": true }]] as Array<[string, Record<string, unknown>]> },
+    { key: "pt 站点数据源", title: "PT 站点数据源", fields: [["pt_enabled", {}]] as Array<[string, Record<string, unknown>]> },
+  ];
+  assert.deepEqual([...collapsedSectionKeys(sections, 5, 14)], ["pt 站点数据源"]);
+  assert.deepEqual([...collapsedSectionKeys(sections, 2, 30)], []);
+  assert.deepEqual([...collapsedSectionKeys(sections, 5, 8)], []);
 });

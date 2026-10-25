@@ -47,4 +47,36 @@ struct PluginConfigLayoutTests {
         #expect(PluginConfigLayout.groups(schema: schema, orderedKeys: PluginConfigLayout.orderedKeys(schema: schema))
                 == [.init(title: nil, keys: ["b", "a"])])
     }
+
+    @Test func smallSchemasStayOnOnePage() {
+        let keys = PluginConfigLayout.orderedKeys(schema: Self.schema)
+        let groups = PluginConfigLayout.groups(schema: Self.schema, orderedKeys: keys)
+        // 只有 7 个字段：不拆子页面。
+        #expect(PluginConfigLayout.pagePlan(schema: Self.schema, groups: groups) == .init(inline: groups, pages: []))
+    }
+
+    @Test func longSchemasMoveNonBasicSectionsToSubpages() {
+        var properties: [String: JSONValue] = [:]
+        var order: [JSONValue] = []
+        func add(_ key: String, _ section: String?, inline: Bool? = nil) {
+            var spec: [String: JSONValue] = ["type": "string", "default": ""]
+            if let section { spec["x-ui-section"] = .string(section) }
+            if let inline { spec["x-ui-section-inline"] = .bool(inline) }
+            properties[key] = .object(spec)
+            order.append(.string(key))
+        }
+        add("telepilot_model", "模型与能力"); add("enable_web_search", "模型与能力")
+        add("enable_guest", "触发方式", inline: true); add("trigger_keywords", "触发方式")
+        add("pt_enabled", "PT 站点数据源"); add("pt_site_url", "PT 站点数据源"); add("pt_cookie", "PT 站点数据源")
+        add("access_mode", "使用者与限额"); add("per_user_daily_limit", "使用者与限额")
+        add("max_tokens", nil)
+        add("help_template", nil); add("reset_template", nil)
+        let schema: JSONValue = ["properties": .object(properties), "x-ui-property-order": .array(order)]
+        let groups = PluginConfigLayout.groups(schema: schema, orderedKeys: PluginConfigLayout.orderedKeys(schema: schema))
+        let plan = PluginConfigLayout.pagePlan(schema: schema, groups: groups)
+        #expect(plan.inline.map(\.title) == ["模型与能力", "触发方式", "其他设置"])
+        #expect(plan.pages.map(\.title) == ["PT 站点数据源", "使用者与限额", "消息模板"])
+        #expect(plan.pages.first?.keys == ["pt_enabled", "pt_site_url", "pt_cookie"])
+    }
 }
+
