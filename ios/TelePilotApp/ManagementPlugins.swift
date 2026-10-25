@@ -1668,7 +1668,8 @@ struct ManagementPluginConfigView: View {
                 } label: { Label(field.label, systemImage: field.symbol) }
             } else if !field.secret, let widget = PluginSelectWidget(spec: field.spec) {
                 PluginSelectWidgetField(widget: widget, title: field.label, value: binding(field.key), draft: draft,
-                                        stored: snapshot?.values ?? [:], providers: llmProviders, loading: llmLoading, loadError: llmError)
+                                        stored: snapshot?.values ?? [:], providers: llmProviders, loading: llmLoading, loadError: llmError,
+                                        editableKeys: Set(fields.filter { !$0.readOnly }.map(\.key)), setField: set)
             } else {
                 ManagementFieldView(title: field.secret ? "留空则保持原值" : field.label, key: field.key, schema: field.spec, value: binding(field.key))
                 if ManagementSchema.allowsNull(field.spec), let value = draft[field.key], !value.isNull, !field.secret {
@@ -1919,8 +1920,48 @@ private struct PluginSelectWidgetField: View {
     let providers: [JSONValue]?
     let loading: Bool
     let loadError: String?
+    /// 当前表单可写的字段：Provider 字段在另一作用域（全局/账号）时不跨域写入。
+    let editableKeys: Set<String>
+    let setField: (String, JSONValue) -> Void
 
     var body: some View {
+        if case .llmModel(let providerField, let modality) = widget {
+            unifiedModelPicker(providerField: providerField, modality: modality)
+        } else {
+            plainPicker
+        }
+    }
+
+    /// 统一模型列表：所有 Provider 下已启用的模型按 Provider 分组；选中时同时写回 Provider 字段（与 Web 一致）。
+    @ViewBuilder private func unifiedModelPicker(providerField: String?, modality: String?) -> some View {
+        let providerValue = providerField.flatMap { draft[$0] ?? stored[$0] }
+        let selection = PluginSelectOptions.unifiedModelSelection(providers, providerValue: providerValue, modelValue: value, modality: modality)
+        let waiting = loading && providers == nil
+        Picker(selection: Binding(get: { selection.selectedKey }, set: { key in
+            guard let next = selection.resolve(key) else { return }
+            value = .string(next.model)
+            if let providerField, editableKeys.contains(providerField) { setField(providerField, .string(next.provider)) }
+        })) {
+            Text(waiting ? "正在加载 Provider…" : PluginSelectOptions.autoRouteLabel).tag(PluginSelectOptions.autoRouteKey)
+            // 用序号作 id：不同 Provider 可能同名。
+            ForEach(Array(selection.groups.enumerated()), id: \.offset) { _, group in
+                Section(group.group) {
+                    ForEach(group.options, id: \.key) { option in Text(option.label).tag(option.key) }
+                }
+            }
+            if let legacy = selection.legacy { Text(legacy.label).tag(legacy.key) }
+        } label: { Text(title) }
+        .pickerStyle(.menu)
+        .disabled(waiting)
+        .accessibilityIdentifier("plugin.config.select." + title)
+        if let loadError, providers == nil {
+            Text("Provider 列表读取失败：\(loadError)").font(.footnote).foregroundStyle(.secondary)
+        } else if !waiting, selection.options.isEmpty {
+            Text("还没有已启用的模型；请先在 AI 页添加 Provider 并启用模型。").font(.footnote).foregroundStyle(.secondary)
+        }
+    }
+
+    @ViewBuilder private var plainPicker: some View {
         let selected = PluginSelectOptions.text(value)
         let content = choices()
         Picker(selection: Binding(get: { selected }, set: { value = .string($0) })) {
@@ -1942,14 +1983,11 @@ private struct PluginSelectWidgetField: View {
             if loading && providers == nil { return ([], "正在加载 Provider…", true, nil) }
             if let loadError, providers == nil { return ([], "自动路由", false, "Provider 列表读取失败：\(loadError)") }
             let options = PluginSelectOptions.providerOptions(providers ?? [])
-            return (options, "自动路由", false, options.isEmpty ? "尚未配置 TelePilot AI Provider；请先在 AI 页添加。" : nil)
-        case .llmModel(let providerField, let modality):
-            if loading && providers == nil { return ([], "正在加载 Provider…", true, nil) }
-            let selector = providerField.map { PluginSelectOptions.text(draft[$0] ?? stored[$0]) } ?? ""
-            guard let provider = PluginSelectOptions.provider(providers, selector: selector) else {
-                return ([], "跟随自动路由", true, "先选择固定 TelePilot Provider 后，才能选择该 Provider 下已启用的模型。")
-            }
-            return (PluginSelectOptions.modelOptions(provider, modality: modality), "使用 Provider 默认模型", false, nil)
+            return (options, "自动路由", false, options.isEmpty ? "尚未配置 TelePilot AI Provider；请先在 AI 页添加。"
+                                                              : "随模型自动填写；只想固定 Provider、使用其默认模型时才需要单独选择。")
+        case .llmModel:
+            // 由 unifiedModelPicker 渲染，不会走到这里。
+            return ([], PluginSelectOptions.autoRouteLabel, false, nil)
         case .dynamic(let optionsField):
             let source = optionsField.flatMap { draft[$0] ?? stored[$0] }
             let options = PluginSelectOptions.dynamicOptions(source)

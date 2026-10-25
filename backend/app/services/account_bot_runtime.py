@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import hashlib
 import json
 import logging
@@ -5815,16 +5816,25 @@ async def _try_handle_event_bus_subscriptions(
             filters=decision.filters,
         )
         if not decision.matched:
+            _log_event_bus_chat_not_allowed(incoming, decision, account_state)
             continue
         entry_key = str(decision.entry_key or "").strip()
         await _maybe_fast_ack_callback(incoming, decision.plugin_key, entry_key)
         payload = _event_bus_plugin_payload(incoming, event, decision)
-        ok, error, actions = await _run_worker_interaction_entry(
-            incoming,
-            plugin_key=decision.plugin_key,
-            entry_key=entry_key,
-            payload=payload,
-        )
+        bot_identity = await _interaction_bot_identity(incoming)
+        if bot_identity:
+            payload["bot"] = bot_identity
+        # 订阅声明的处理时限经 contextvar 传入，不改变 _run_worker_interaction_entry 的签名。
+        timeout_token = _ENTRY_TIMEOUT_OVERRIDE.set(_event_subscription_timeout_seconds(decision))
+        try:
+            ok, error, actions = await _run_worker_interaction_entry(
+                incoming,
+                plugin_key=decision.plugin_key,
+                entry_key=entry_key,
+                payload=payload,
+            )
+        finally:
+            _ENTRY_TIMEOUT_OVERRIDE.reset(timeout_token)
         if not ok:
             all_ok = False
             if event_type not in {"message", "guest_message"}:
@@ -6222,6 +6232,26 @@ def _interaction_allowed_chat_ids(cfg: dict[str, Any]) -> list[int]:
             if chat_id is not None and chat_id not in ids:
                 ids.append(chat_id)
     return ids
+
+
+async def _interaction_bot_identity(incoming: Incoming) -> dict[str, Any] | None:
+    """交互 Bot 自身的 id / username（getMe 结果短缓存），供插件识别 @Bot 与回复 Bot。"""
+
+    token = str(getattr(incoming, "token", "") or "")
+    if not token:
+        return None
+    try:
+        caps = await account_bot_service.get_bot_capabilities(token)
+    except Exception:  # noqa: BLE001 - 身份只是辅助信息，读取失败不影响投递
+        return None
+    identity = {
+        "id": caps.get("bot_id"),
+        "username": caps.get("username"),
+        # 群隐私模式：False 时 Bot 在群里只能收到 @Bot、回复 Bot 与命令，收不到普通消息。
+        "can_read_all_group_messages": caps.get("can_read_all_group_messages"),
+    }
+    identity = {key: value for key, value in identity.items() if value not in (None, "")}
+    return identity or None
 
 
 def _event_bus_plugin_payload(incoming: Incoming, event: dict[str, Any], decision: Any) -> dict[str, Any]:
@@ -7147,6 +7177,57 @@ async def _interaction_module_payload_async(
     return data
 
 
+# Event Bus 订阅声明的处理时限（秒）；None 表示按入口声明 / 默认 15 秒。
+_ENTRY_TIMEOUT_OVERRIDE: contextvars.ContextVar[float | None] = contextvars.ContextVar(
+    "interaction_entry_timeout_override", default=None
+)
+
+
+def _interaction_entry_timeout_seconds(plugin_key: str, entry_key: str) -> float:
+    """入口 manifest 可声明 ``timeout_seconds``（上限 90 秒）；读取失败时回到默认 15 秒。"""
+
+    try:
+        from .account_bot_service import declared_module_entry_timeout_seconds
+
+        return float(declared_module_entry_timeout_seconds(plugin_key, entry_key))
+    except Exception:  # noqa: BLE001
+        log.debug("读取交互入口时限失败: %s.%s", plugin_key, entry_key, exc_info=True)
+        return _INTERACTION_ENTRY_TIMEOUT_SECONDS
+
+
+def _event_subscription_timeout_seconds(decision: Any) -> float:
+    """Event Bus 订阅可在 ``event_subscriptions[]`` 上声明 ``timeout_seconds``；否则按入口声明/默认 15 秒。"""
+
+    subscription = getattr(decision, "subscription", None)
+    raw = getattr(subscription, "raw", None)
+    if isinstance(raw, dict):
+        declared = account_bot_service.normalize_entry_timeout_seconds(raw.get("timeout_seconds"))
+        if declared is not None:
+            return declared
+    return _interaction_entry_timeout_seconds(
+        str(getattr(decision, "plugin_key", "") or ""),
+        str(getattr(decision, "entry_key", "") or ""),
+    )
+
+
+def _log_event_bus_chat_not_allowed(incoming: Incoming, decision: Any, account_state: dict[str, Any]) -> None:
+    """「允许的聊天」把交互 Bot 事件挡在插件之外时留一条 info 日志，便于排查“为什么不回复”。"""
+
+    if getattr(decision, "matched", False) or getattr(decision, "reason_code", "") != "scope_not_matched":
+        return
+    if getattr(decision, "scope", "") != "all_allowed_chats":
+        return
+    allowed = account_state.get("allowed_chat_ids")
+    if allowed == "*" or allowed == ["*"]:
+        return
+    log.info(
+        "交互 Bot 事件未投递给插件：会话不在「允许的聊天」中 account=%s chat_id=%s plugin=%s reason=chat_not_in_allowed_chats",
+        incoming.account_id,
+        incoming.chat_id,
+        getattr(decision, "plugin_key", ""),
+    )
+
+
 async def _run_worker_interaction_entry(
     incoming: Incoming,
     *,
@@ -7155,6 +7236,7 @@ async def _run_worker_interaction_entry(
     payload: dict[str, Any],
 ) -> tuple[bool, str | None, list[dict[str, Any]]]:
     reply_channel = new_reply_channel("entry", incoming.account_id)
+    timeout_seconds = _ENTRY_TIMEOUT_OVERRIDE.get()
     redis = get_redis()
     trace_ctx = _interaction_trace_context(payload)
     trace_id = trace_ctx.get("trace_id") or incoming.trace_id
@@ -7180,7 +7262,11 @@ async def _run_worker_interaction_entry(
             cmd_channel=cmd_channel(incoming.account_id),
             command=command,
             reply_channel=reply_channel,
-            timeout_seconds=_INTERACTION_ENTRY_TIMEOUT_SECONDS,
+            timeout_seconds=(
+                float(timeout_seconds)
+                if timeout_seconds is not None
+                else _interaction_entry_timeout_seconds(plugin_key, entry_key)
+            ),
             online_wait_seconds=_INTERACTION_WORKER_ONLINE_WAIT_SECONDS,
             redis=redis,
             request_id=(
@@ -7471,13 +7557,16 @@ def _incoming_trace_payload(
         payload["actor"] = dict(sender)
         payload["source_actor"] = dict(sender)
         payload["player"] = dict(sender)
+        normalized_reply = payload.get("reply_to") if isinstance(payload.get("reply_to"), dict) else {}
         payload["reply_to"] = {
             "user_id": incoming.reply_to_user_id,
             "message_id": incoming.reply_to_message_id,
             "display_name": incoming.reply_to_display_name,
             "username": incoming.reply_to_username,
             "text": incoming.reply_to_text,
-        } if incoming.reply_to_message_id or incoming.reply_to_text else None
+        } if incoming.reply_to_message_id or incoming.reply_to_text or normalized_reply.get("media") else None
+        if payload["reply_to"] is not None and isinstance(normalized_reply.get("media"), dict):
+            payload["reply_to"]["media"] = dict(normalized_reply["media"])
         raw = payload.get("raw") if isinstance(payload.get("raw"), dict) else {}
         raw.update({
             "update_id": incoming.update_id,

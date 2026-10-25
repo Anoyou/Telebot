@@ -858,6 +858,8 @@ def _bot_reply_to(msg: dict[str, Any]) -> dict[str, Any] | None:
         "message_id": _int_or_none(reply.get("message_id")),
         "text": str(reply.get("text") or reply.get("caption") or "") or None,
         "sender": sender if sender else None,
+        # 被回复消息的媒体摘要（含 file_id），供识图类插件读取“回复一张图片并 @Bot”。
+        "media": _bot_media_summary(reply),
     }
     return {key: value for key, value in out.items() if value not in (None, "", [], {})}
 

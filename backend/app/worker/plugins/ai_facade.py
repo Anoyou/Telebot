@@ -59,9 +59,14 @@ from ...util.proxy import ProxyConfigError
 log = logging.getLogger(__name__)
 
 ProviderLoader = Callable[[], Awaitable[Mapping[int, LLMProviderDTO]]]
+BotFileLoader = Callable[[str, int], Awaitable[bytes]]
 
 DEFAULT_PLUGIN_AI_MAX_TOKENS = 4096
 DEFAULT_PLUGIN_AI_TIMEOUT_SECONDS = 600
+# 识图：单次最多几张图、每张图的字节上限（Bot API getFile 下载上限为 20MB，这里更保守）。
+PLUGIN_AI_MAX_IMAGES = 4
+PLUGIN_AI_MAX_IMAGE_BYTES = 8 * 1024 * 1024
+_WEB_SEARCH_CONTEXT_SIZES = frozenset({"low", "medium", "high"})
 _SAFE_MODEL_KEYS = frozenset(
     {
         "id",
@@ -85,6 +90,14 @@ class AIUnavailableError(PluginAIError):
 
 class AIQuotaError(PluginAIError):
     """Raised when account/plugin LLM quota or provider rate limits block a call."""
+
+
+class AICapabilityError(AIUnavailableError):
+    """Raised when every candidate provider/model lacks a requested capability.
+
+    例如请求了 ``web_search`` / ``images``，但所选 Provider 及 fallback 链都不支持。
+    插件可捕获后去掉该能力降级重试；能力不匹配在发出网络请求前就会判定，重试很便宜。
+    """
 
 
 @dataclass(frozen=True)
@@ -146,12 +159,16 @@ class PluginAI:
         max_tokens_limit: int | None = None,
         timeout_limit_seconds: int | None = None,
         allow_agent: bool = False,
+        allow_vision: bool = False,
         manifest: Mapping[str, Any] | None = None,
+        bot_file_loader: BotFileLoader | None = None,
     ) -> None:
         self.account_id = account_id
         self.plugin_key = plugin_key
         self._provider_loader = provider_loader or load_llm_providers
         self._allow_agent = bool(allow_agent)
+        self._allow_vision = bool(allow_vision)
+        self._bot_file_loader = bot_file_loader
         self._manifest = dict(manifest or {})
         self.max_tokens_limit = _positive_int(
             max_tokens_limit,
@@ -176,8 +193,40 @@ class PluginAI:
             account_id=getattr(ctx, "account_id", None),
             plugin_key=str(getattr(ctx, "feature_key", "") or "unknown"),
             allow_agent=bool(getattr(ctx, "allow_ai_agent", False)),
+            allow_vision=bool(getattr(ctx, "allow_ai_vision", False)),
             manifest=getattr(ctx, "plugin_manifest", None),
         )
+
+    @property
+    def vision_enabled(self) -> bool:
+        """插件是否声明了 ``ai_vision``（可向模型传图片、可读取交互 Bot 收到的图片）。"""
+
+        return self._allow_vision
+
+    async def fetch_bot_image(self, file_id: str, *, max_bytes: int = PLUGIN_AI_MAX_IMAGE_BYTES) -> bytes:
+        """用当前账号的交互 Bot 下载一张 Bot API 图片（``message.media.file_id``）。
+
+        需要 ``ai_vision`` 权限；只用于把用户发来的图片交给模型理解。超过 ``max_bytes``
+        （上限 8MB）直接拒绝，不落盘、不返回文件路径或 Bot Token。
+        """
+
+        if not self._allow_vision:
+            raise AIUnavailableError("插件未声明 ai_vision 权限，不能读取图片")
+        if self._bot_file_loader is None:
+            raise AIUnavailableError("当前运行环境不支持读取交互 Bot 图片")
+        raw_id = str(file_id or "").strip()
+        if not raw_id:
+            raise AIUnavailableError("缺少图片 file_id")
+        limit = max(1, min(_positive_int(max_bytes, PLUGIN_AI_MAX_IMAGE_BYTES), PLUGIN_AI_MAX_IMAGE_BYTES))
+        try:
+            data = await self._bot_file_loader(raw_id, limit)
+        except PluginAIError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - 下载错误统一脱敏成 facade 错误
+            raise AIUnavailableError(f"读取图片失败：{type(exc).__name__}: {exc}") from exc
+        if not data:
+            raise AIUnavailableError("读取图片失败：文件为空")
+        return bytes(data)
 
     async def list_providers(self) -> list[AIProviderInfo]:
         """Return providers without encrypted API keys, proxy URLs or base URLs."""
@@ -200,6 +249,9 @@ class PluginAI:
         max_tokens: int = 512,
         timeout: int = DEFAULT_PLUGIN_AI_TIMEOUT_SECONDS,
         timeout_seconds: int | None = None,
+        images: list[bytes] | tuple[bytes, ...] | None = None,
+        web_search: bool = False,
+        web_search_context_size: str | None = None,
         **_ignored: Any,
     ) -> AIResult:
         """Call a text LLM through TelePilot's shared LLM runtime.
@@ -208,6 +260,12 @@ class PluginAI:
         ``tag`` / first ``tags`` item select the cheapest usable provider with
         that tag. ``route`` 显式选择 ``fixed`` / ``tag`` / ``auto``（阶段 E）；
         留空时按旧参数推断，保持向后兼容。
+
+        ``images``（需要 ``ai_vision`` 权限）把图片字节交给支持图片输入的模型；
+        ``web_search`` 请求原生联网搜索（Responses API；OpenAI chat_completions
+        Provider 会按 ``web_search_api_format`` 临时切到 Responses）。不支持时运行时
+        会跳过该 Provider 走 fallback；全部不兼容时抛 :class:`AICapabilityError`。
+        联网搜索的引用来源在 ``AIResult.sources``。
         """
 
         if tag is not None or tags:
@@ -222,6 +280,10 @@ class PluginAI:
         user_prompt = str(user or "")
         if not system_prompt.strip() and not user_prompt.strip():
             raise AIUnavailableError("ctx.ai.complete 需要 system 或 user 内容")
+        image_list = self._validated_images(images)
+        search_size = str(web_search_context_size or "").strip().lower() or None
+        if search_size is not None and search_size not in _WEB_SEARCH_CONTEXT_SIZES:
+            search_size = None
 
         providers = await self._load_providers()
         selected_tag = provider_tag or tag
@@ -246,6 +308,7 @@ class PluginAI:
         quota_ticket: plugin_ai_quota.PluginAIQuotaTicket | None = None
         try:
             estimated_tokens = _estimate_total_tokens(system_prompt, user_prompt, clamped_tokens)
+            estimated_tokens += 1024 * len(image_list)
             quota_ticket = await plugin_ai_quota.acquire(
                 self.plugin_key,
                 self.account_id,
@@ -260,6 +323,9 @@ class PluginAI:
                 override_model=selected_model,
                 routed_model=routed_model,
                 max_tokens=clamped_tokens,
+                images=image_list or None,
+                web_search=bool(web_search),
+                web_search_context_size=search_size,
                 timeout_seconds=clamped_timeout,
                 account_id=self.account_id,
                 source=f"plugin:{self.plugin_key}",
@@ -295,6 +361,23 @@ class PluginAI:
             ),
         )
         return ai_result
+
+    def _validated_images(self, images: Any) -> list[bytes]:
+        if not images:
+            return []
+        if not self._allow_vision:
+            raise AIUnavailableError("插件未声明 ai_vision 权限，不能向模型传图片")
+        if isinstance(images, (bytes, bytearray)):
+            images = [images]
+        items = [bytes(item) for item in images if isinstance(item, (bytes, bytearray)) and item]
+        if not items:
+            return []
+        if len(items) > PLUGIN_AI_MAX_IMAGES:
+            raise AIUnavailableError(f"单次最多传 {PLUGIN_AI_MAX_IMAGES} 张图片")
+        for item in items:
+            if len(item) > PLUGIN_AI_MAX_IMAGE_BYTES:
+                raise AIUnavailableError("图片过大（单张上限 8MB）")
+        return items
 
     async def run_agent(
         self,
@@ -1037,6 +1120,9 @@ def _facade_error_from_llm_call(exc: LLMCallFailed) -> PluginAIError:
     message = str(exc)
     if exc.error_type in {"budget_exceeded", "rate_limit"}:
         return AIQuotaError(message)
+    scope = getattr(getattr(exc, "scope", None), "value", getattr(exc, "scope", None))
+    if str(scope or "") == "capability_mismatch":
+        return AICapabilityError(message)
     return AIUnavailableError(message)
 
 
@@ -1089,6 +1175,7 @@ def _proxy_url_from_row(proxy: Proxy | None) -> str:
 
 __all__ = [
     "AIAgentResult",
+    "AICapabilityError",
     "AIProviderInfo",
     "AIQuotaError",
     "AIResult",

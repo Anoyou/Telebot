@@ -689,6 +689,23 @@ def _normalize_positive_int_list(raw: Any, *, max_items: int) -> list[int]:
     return out
 
 
+INTERACTION_ENTRY_DEFAULT_TIMEOUT_SECONDS = 15.0
+# 插件入口可在 manifest 用 ``timeout_seconds`` 声明更长时限，平台上限 90 秒（下限 1 秒）。
+INTERACTION_ENTRY_MAX_TIMEOUT_SECONDS = 90.0
+
+
+def normalize_entry_timeout_seconds(raw: Any) -> float | None:
+    if isinstance(raw, bool) or not isinstance(raw, (int, float, str)):
+        return None
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return None
+    if value != value or value <= 0:  # NaN / 非正数
+        return None
+    return max(1.0, min(INTERACTION_ENTRY_MAX_TIMEOUT_SECONDS, value))
+
+
 def normalize_interaction_entry_manifest(raw: Any) -> dict[str, Any] | None:
     """把 builtin/installed 入口声明整理成统一形态，同时保留扩展字段。"""
 
@@ -771,6 +788,11 @@ def normalize_interaction_entry_manifest(raw: Any) -> dict[str, Any] | None:
         out["result_contract"] = normalized_result_contract
     if isinstance(command_fallback, dict):
         out["command_fallback"] = dict(command_fallback)
+    timeout_seconds = normalize_entry_timeout_seconds(raw.get("timeout_seconds"))
+    if timeout_seconds is None:
+        out.pop("timeout_seconds", None)
+    else:
+        out["timeout_seconds"] = timeout_seconds
     return out
 
 
@@ -1088,6 +1110,14 @@ def declared_module_entry_manifest(module_key: str | None, module_action: str | 
     except Exception:  # noqa: BLE001
         log.debug("读取 installed 模块交互入口声明失败: %s.%s", module_key, module_action, exc_info=True)
     return None
+
+
+def declared_module_entry_timeout_seconds(module_key: str | None, module_action: str | None) -> float:
+    """交互入口的执行时限：manifest 声明的 ``timeout_seconds``（1–90 秒），未声明时 15 秒。"""
+
+    entry = declared_module_entry_manifest(module_key, module_action)
+    declared = normalize_entry_timeout_seconds((entry or {}).get("timeout_seconds"))
+    return declared if declared is not None else INTERACTION_ENTRY_DEFAULT_TIMEOUT_SECONDS
 
 
 def declared_module_entry_has_field(module_key: str | None, module_action: str | None, field_name: str) -> bool | None:
@@ -1985,6 +2015,69 @@ async def edit_message(
     if reply_markup is not None:
         payload["reply_markup"] = reply_markup
     return await call_bot_api(token, "editMessageText", payload)
+
+
+async def edit_inline_message(
+    token: str,
+    inline_message_id: str,
+    text: str,
+    *,
+    reply_markup: dict[str, Any] | None = None,
+    parse_mode: str | None = "HTML",
+) -> dict[str, Any]:
+    """编辑 inline 消息（含 Guest Mode ``answerGuestQuery`` 返回的 ``inline_message_id``）。"""
+
+    normalized_parse_mode = normalize_bot_parse_mode(parse_mode)
+    payload: dict[str, Any] = {
+        "inline_message_id": str(inline_message_id),
+        "text": _truncate_bot_text(text, parse_mode=normalized_parse_mode, limit=BOT_MESSAGE_TEXT_LIMIT),
+        "disable_web_page_preview": True,
+    }
+    if normalized_parse_mode:
+        payload["parse_mode"] = normalized_parse_mode
+    if reply_markup is not None:
+        payload["reply_markup"] = reply_markup
+    return await call_bot_api(token, "editMessageText", payload)
+
+
+def is_bot_parse_entities_error(exc: BaseException | str) -> bool:
+    """Telegram 拒绝 HTML/Markdown 实体（``can't parse entities`` 等）时返回 True。"""
+
+    text = str(exc or "").lower()
+    return "can't parse entities" in text or "can't find end tag" in text or "unsupported start tag" in text
+
+
+def is_bot_message_not_modified_error(exc: BaseException | str) -> bool:
+    return "message is not modified" in str(exc or "").lower()
+
+
+BOT_FILE_DOWNLOAD_MAX_BYTES = 20 * 1024 * 1024
+
+
+async def download_bot_file(token: str, file_id: str, *, max_bytes: int = BOT_FILE_DOWNLOAD_MAX_BYTES) -> bytes:
+    """``getFile`` + 下载文件内容；超过 ``max_bytes`` 时拒绝（不落盘）。"""
+
+    limit = max(1, min(int(max_bytes or BOT_FILE_DOWNLOAD_MAX_BYTES), BOT_FILE_DOWNLOAD_MAX_BYTES))
+    info = await call_bot_api(token, "getFile", {"file_id": str(file_id)}, timeout=httpx.Timeout(10.0))
+    size = info.get("file_size")
+    if isinstance(size, int) and size > limit:
+        raise ValueError(f"文件过大（{size} 字节，上限 {limit} 字节）")
+    file_path = str(info.get("file_path") or "").strip()
+    if not file_path:
+        raise ValueError("Bot API 没有返回 file_path")
+    client = await get_bot_api_client()
+    url = f"{BOT_API_BASE}/file/bot{token}/{file_path.lstrip('/')}"
+    chunks: list[bytes] = []
+    total = 0
+    async with client.stream("GET", url, timeout=httpx.Timeout(15.0)) as resp:
+        if resp.status_code >= 400:
+            raise RuntimeError(f"下载文件失败：HTTP {resp.status_code}")
+        async for chunk in resp.aiter_bytes():
+            total += len(chunk)
+            if total > limit:
+                raise ValueError(f"文件过大（超过 {limit} 字节）")
+            chunks.append(chunk)
+    return b"".join(chunks)
 
 
 async def edit_rich_message(

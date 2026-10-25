@@ -15,7 +15,8 @@ loader 在扫描目录阶段读取这个常量来决定加载方式、显示名�
 - ``config_schema``：``rule.config`` 的 JSON Schema，前端可据此生成动态表单
 - ``config_actions``：配置页动作声明，前端按声明渲染按钮，后端调插件 ``on_config_action``
 - ``category``：模块身份分类（interactive / automation / utility）
-- ``interaction_entries``：声明可由 TelePilot 调度的插件入口，既可被管理员命令触发，也可由群内关键词/交互 Bot 触发
+- ``interaction_entries``：声明可由 TelePilot 调度的插件入口，既可被管理员命令触发，也可由群内关键词/交互 Bot 触发；
+  入口可声明 ``timeout_seconds``（默认 15 秒，平台上限 90 秒）放宽单次执行时限
 - ``event_subscriptions``：声明插件希望从 Event Bus 接收的 Telegram 事件
 - ``interaction_profile``：声明交互入口属于哪类玩法（如群局抢答、对战、奖池）
 - ``command_fallback``：交互入口无法直接接入时的受控回退声明
