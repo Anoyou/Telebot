@@ -1,4 +1,5 @@
 import { api } from "@/lib/api";
+import type { components as ApiComponents } from "@/api/schema";
 import type {
   AccountBotConfig,
   AccountBotConfigUpdate,
@@ -32,6 +33,20 @@ export async function testAccountBot(
     `/api/accounts/${aid}/bot/test`,
     payload ?? {},
   );
+  return data;
+}
+
+export type AccountBotCapabilities = ApiComponents["schemas"]["AccountBotCapabilitiesResponse"];
+export type AccountBotCapabilityStatus = ApiComponents["schemas"]["AccountBotCapabilityStatus"];
+
+/** 读取管理 Bot / 交互 Bot 的 getMe 能力位（含 Guest Mode 访客模式）。 */
+export async function getAccountBotCapabilities(
+  aid: number,
+  options?: { refresh?: boolean },
+): Promise<AccountBotCapabilities> {
+  const { data } = await api.get<AccountBotCapabilities>(`/api/accounts/${aid}/bot/capabilities`, {
+    params: options?.refresh ? { refresh: true } : undefined,
+  });
   return data;
 }
 

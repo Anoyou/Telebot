@@ -71,7 +71,14 @@ from ..schemas.command import (
     TestModelRequest,
     TestModelResponse,
 )
-from ..services import audit, command_service, llm_diagnostics, llm_identity, llm_liveness
+from ..services import (
+    audit,
+    codex_desktop_release,
+    command_service,
+    llm_diagnostics,
+    llm_identity,
+    llm_liveness,
+)
 from ..services.ai_feature import is_ai_enabled
 from ..services.llm_identity import (
     IDENTITY_PROBE_ORDER,
@@ -3107,6 +3114,22 @@ async def _detect_grok_cli_latest() -> tuple[str | None, str | None]:
     return await _grok_detection_fallback("grok update --check 未返回可识别的版本号")
 
 
+async def _detect_codex_desktop_latest() -> codex_desktop_release.CodexDesktopLatest:
+    """读取官方 Codex Desktop 更新源与安装包内核心版本（只读，逐项降级）。"""
+
+    try:
+        return await codex_desktop_release.detect_codex_desktop_latest()
+    except Exception as exc:  # noqa: BLE001 - 未预期异常也只降级为逐项 error
+        message = f"{type(exc).__name__}: {str(exc)[:80]}"
+        return codex_desktop_release.CodexDesktopLatest(
+            build=None, core=None, build_error=message, core_error=message
+        )
+
+
+async def _no_desktop_detection() -> None:
+    return None
+
+
 @router.post(
     "/api/commands/llm-providers/identity-versions/detect",
     response_model=ClientIdentityVersionDetectResponse,
@@ -3116,7 +3139,26 @@ async def detect_client_identity_versions(_user: CurrentUser) -> ClientIdentityV
     current = llm_identity.current_client_versions()
     meta = llm_identity.version_key_metadata()
     detect_targets = [(k, str(v["registry"])) for k, v in meta.items() if v.get("registry")]
-    results = await asyncio.gather(*(_detect_registry_latest(reg) for _, reg in detect_targets))
+    desktop_registries = {
+        llm_identity.CODEX_DESKTOP_BUILD_REGISTRY,
+        llm_identity.CODEX_DESKTOP_CORE_REGISTRY,
+    }
+    registry_targets = [(k, reg) for k, reg in detect_targets if reg not in desktop_registries]
+    needs_desktop = len(registry_targets) != len(detect_targets)
+    # Codex Desktop 两个版本键共用同一次官方更新源 + 安装包目录读取。
+    registry_results, desktop = await asyncio.gather(
+        asyncio.gather(*(_detect_registry_latest(reg) for _, reg in registry_targets)),
+        _detect_codex_desktop_latest() if needs_desktop else _no_desktop_detection(),
+    )
+    by_key = dict(zip((k for k, _ in registry_targets), registry_results, strict=True))
+    results = []
+    for key, registry in detect_targets:
+        if registry == llm_identity.CODEX_DESKTOP_BUILD_REGISTRY:
+            results.append((desktop.build, desktop.build_error) if desktop else (None, "未执行检测"))
+        elif registry == llm_identity.CODEX_DESKTOP_CORE_REGISTRY:
+            results.append((desktop.core, desktop.core_error) if desktop else (None, "未执行检测"))
+        else:
+            results.append(by_key[key])
     items: list[ClientIdentityVersionDetectItem] = []
     for (key, _registry), (latest, error) in zip(detect_targets, results, strict=True):
         cur = current.get(key, "")

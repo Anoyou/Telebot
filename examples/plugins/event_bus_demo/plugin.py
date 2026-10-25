@@ -56,6 +56,19 @@ class EventBusDemoPlugin(Plugin):
             )
             return actions
 
+        if event_type == "guest_message":
+            # Guest Mode：Bot 未加入该会话，只能 answer_guest_query 回复一次。
+            # 直接返回 send_message 也会被平台合并为一次访客回复；这里演示显式写法。
+            guest = payload.get("guest") if isinstance(payload.get("guest"), dict) else {}
+            actions.append(
+                {
+                    "type": "answer_guest_query",
+                    "guest_query_id": guest.get("query_id"),
+                    "text": f"访客模式收到：{event.message.text or '（空）'}",
+                }
+            )
+            return actions
+
         if event_type == "chosen_inline_result":
             return [{"type": "result", "success": True, "result": {"chosen": True}}]
 

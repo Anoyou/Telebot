@@ -84,7 +84,7 @@ struct ManagementCollectionView: View {
         .sheet(isPresented: $filtering) {
             NavigationStack {
                 Form { ManagementFieldsView(schema: filterSchema, value: $filters) }
-                    .navigationTitle("筛选" + resource.title)
+                    .navigationTitle("筛选" + resource.title).navigationBarTitleDisplayMode(.inline)
                     .toolbar {
                         ToolbarItem(placement: .cancellationAction) { Button("清空") { filters = .object([:]) } }
                         ToolbarItem(placement: .confirmationAction) { Button("应用") { filtering = false; Task { await load() } } }

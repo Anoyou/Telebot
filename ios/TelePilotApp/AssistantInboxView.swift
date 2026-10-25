@@ -18,12 +18,6 @@ struct AssistantInboxView: View {
             List {
                 if let error { Section { AssistantNotice(text: error, isError: true) } }
                 Section {
-                    Picker("状态", selection: $status) {
-                        Text("待确认").tag("pending")
-                        Text("全部").tag("")
-                    }.pickerStyle(.segmented)
-                }
-                Section {
                     ForEach(actions) { item in
                         Button { selected = item } label: { AssistantActionRow(item: item) }
                     }
@@ -33,7 +27,18 @@ struct AssistantInboxView: View {
                     if loading { ProgressView("正在读取…") }
                 }
             }
-            .navigationTitle("待确认操作")
+            .safeAreaBar(edge: .top) {
+                Picker("状态", selection: $status) {
+                    Text("待确认").tag("pending")
+                    Text("全部").tag("")
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .controlSize(.large)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+            }
+            .navigationTitle("待确认操作").navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { dismiss() } } }
             .refreshable { await load() }
             .onChange(of: status) { _, _ in Task { await load() } }
@@ -242,7 +247,7 @@ struct AssistantTasksView: View {
                     else if runs.isEmpty { ContentUnavailableView("没有任务", systemImage: "checklist") }
                 }
             }
-            .navigationTitle("任务中心")
+            .navigationTitle("任务中心").navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { dismiss() } } }
             .task { await load() }
             .refreshable { await load() }
@@ -563,7 +568,7 @@ private struct AssistantQueueEditView: View {
                 }
                 if failed { Text("未能确认保存结果，已保留编辑内容。请先刷新队列核对。").foregroundStyle(.red) }
             }
-                .navigationTitle("编辑排队消息")
+                .navigationTitle("编辑排队消息").navigationBarTitleDisplayMode(.inline)
                 .toolbar {
                     ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() }.disabled(saving) }
                     ToolbarItem(placement: .confirmationAction) {
@@ -612,7 +617,7 @@ struct AssistantMemoryView: View {
                     if rows.isEmpty { ContentUnavailableView("还没有长期记忆", systemImage: "brain", description: Text("保存你的习惯和偏好，让之后的对话继续使用。每条最多 200 字。")) }
                 }
             }
-            .navigationTitle("长期记忆")
+            .navigationTitle("长期记忆").navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Button("添加", systemImage: "plus") { creating = true }.disabled(busy) }
                 ToolbarItem(placement: .confirmationAction) { Button("完成") { dismiss() } }
@@ -667,7 +672,7 @@ private struct AssistantMemoryEditor: View {
                 } footer: { Text("\(content.count) / 200 字。请勿在长期记忆中保存密钥或密码。") }
                 if failed { Text("未能确认保存结果，已保留编辑内容。请先刷新长期记忆核对。").foregroundStyle(.red) }
             }
-            .navigationTitle(item == nil ? "添加记忆" : "编辑记忆")
+            .navigationTitle(item == nil ? "添加记忆" : "编辑记忆").navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() }.disabled(saving) }
                 ToolbarItem(placement: .confirmationAction) {

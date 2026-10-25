@@ -4,7 +4,7 @@
 - 版本号校验：合法 x.y.z / 预发布后缀通过；含空格/引号/控制字符的注入被拒。
 - apply_version_overrides 只改版本号、重建目录，非法/未知键忽略、缺省回落默认。
 - 版本覆盖只作用于 UA 版本段，不改 UA 结构与请求头字段名/值。
-- 版本键元数据：有公共 registry 的可检测，Desktop 两段无 registry。
+- 版本键元数据：全部版本键均有检测源，Desktop 两段读取官方 Sparkle 更新源。
 """
 
 from __future__ import annotations
@@ -115,8 +115,9 @@ def test_version_key_metadata_detectability() -> None:
     assert meta["claude_sdk"]["registry"] == "npm:@anthropic-ai/sdk"
     assert meta["openai_sdk"]["registry"] == "pypi:openai"
     assert meta["grok_cli"]["registry"] == "cli:grok-update-check"
-    assert meta["codex_desktop_core"]["registry"] is None
-    assert meta["codex_desktop_build"]["registry"] is None
+    # Desktop 两段改由官方 Sparkle 更新源 + 安装包内 codex-package.json 检测
+    assert meta["codex_desktop_core"]["registry"] == "appcast:codex-desktop-core"
+    assert meta["codex_desktop_build"]["registry"] == "appcast:codex-desktop-build"
 
 
 def test_parse_grok_update_check_prefers_remote_version() -> None:

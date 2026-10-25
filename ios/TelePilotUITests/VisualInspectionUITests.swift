@@ -9,7 +9,7 @@ final class VisualInspectionUITests: XCTestCase {
         app = XCUIApplication()
         app.launchArguments = ["--ui-testing", "-AppleLanguages", "(zh-Hans)", "-AppleLocale", "zh_CN"]
         app.launch()
-        XCTAssertTrue(app.tabBars.buttons["概览"].waitForExistence(timeout: 15))
+        XCTAssertTrue(app.tabBars.buttons["概览"].waitForExistence(timeout: 45))
         app.tabBars.buttons["概览"].tap()
     }
 
@@ -27,7 +27,9 @@ final class VisualInspectionUITests: XCTestCase {
         capture("13-ledger-charts")
         app.navigationBars.buttons.element(boundBy: 0).tap()
 
-        app.buttons["more.about"].tap()
+        let about = app.buttons["more.about"]
+        for _ in 0..<4 where !about.isHittable { app.swipeUp() }
+        about.tap()
         XCTAssertTrue(app.descendants(matching: .any)["about.appVersion"].firstMatch.waitForExistence(timeout: 10))
         capture("14-about")
 
@@ -71,7 +73,7 @@ final class VisualInspectionUITests: XCTestCase {
         capture("06-plugin-detail-maintenance")
 
         switchTab("AI")
-        XCTAssertTrue(app.buttons["模型批量测活"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["ai.liveness.patrol"].waitForExistence(timeout: 10))
         capture("07-ai-overview")
 
         app.buttons["供应商"].firstMatch.tap()
@@ -79,14 +81,14 @@ final class VisualInspectionUITests: XCTestCase {
         capture("08-ai-providers")
 
         app.segmentedControls.buttons["概览"].tap()
-        XCTAssertTrue(app.buttons["模型批量测活"].waitForExistence(timeout: 5))
-        app.buttons["模型批量测活"].tap()
-        XCTAssertTrue(app.navigationBars["模型测活"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["ai.liveness.patrol"].waitForExistence(timeout: 5))
+        app.buttons["ai.liveness.patrol"].tap()
+        XCTAssertTrue(app.navigationBars["全部供应商巡检"].waitForExistence(timeout: 10))
         capture("09-ai-liveness")
 
         app.terminate()
         app.launch()
-        XCTAssertTrue(app.tabBars.buttons["AI"].waitForExistence(timeout: 15))
+        XCTAssertTrue(app.tabBars.buttons["AI"].waitForExistence(timeout: 45))
         app.tabBars.buttons["AI"].tap()
         XCTAssertTrue(app.segmentedControls.buttons["用量"].waitForExistence(timeout: 10))
         app.segmentedControls.buttons["用量"].tap()

@@ -87,6 +87,7 @@ async def on_direct_message(self, ctx, event):
 | `send_rich_message` | 可走 UserBot 富消息路径，但不承诺 Bot API inline markup 等能力 | `interaction_bot` 时走 Bot API | `userbot_reply` 时实际执行 | 选择通道时以富消息能力边界为准，不能假定三端渲染相同。 |
 | `click_callback_button` | 支持，以 UserBot 点击第三方 Bot 按钮 | 有意不代点，记录 `skipped/unsupported_send_via` | 不支持 | 这是 E1 专属能力，不是待修的不一致。 |
 | `answer_callback` / `answer_inline_query` | 调用 Interaction Bot API | 调用 Interaction Bot API | 不进入 | 回答回调/Inline 必须视为 Bot API 动作，不能期待账号 UserBot RPC 代答。 |
+| `answer_guest_query` | 调用 Interaction Bot API（`answerGuestQuery`） | 调用 Interaction Bot API；访客事件中每条消息只回复一次，重复调用记 `guest_reply_already_used` | 不进入 | Bot API 10.0 访客模式专用；访客事件里的消息类动作会自动合并成一次访客回复。 |
 | `payout` | 固定 UserBot 路径 | 编排、审计、补偿后委派 | 实际 UserBot RPC | 始终经过 T3 资金闸与补偿/幂等语义；`message_id=None` 不能安全关联时仍按既有边界放行。 |
 | `start_session` | 内联创建/续用会话 | `apply` 仅记录控制动作，外层入口负责建会话 | 不进入 | Event Bus 需要先显式 `start_session`；关键词、付款等既有入口会按自己的已修流程预建会话。 |
 | `update_session` | 更新已有会话 | 更新已有会话 | 不进入 | Event Bus 不会隐式建会话：裸 `update_session` 失败为 `session_not_found`，必须先 `start_session`。 |
@@ -300,8 +301,8 @@ if attempts is not None and attempts > 5:
 
 | 上下文 | facade | 可直接调用的方法 |
 | --- | --- | --- |
-| Event Bus / `on_interaction` 的当前交互入口 | 缓冲 facade | `apply`、`send`、`send_rich`、`send_photo`、`send_file`、`edit`、`edit_rich`、`edit_caption`、`delete`、`pin`、`answer_callback`、`answer_inline_query`、`payout`、`update_session`、`read_saved_message_id`、`delete_saved_message_id`；UserBot 执行链路才允许 `click_callback_button` |
-| 常驻上下文、插件命令、legacy `on_message` / `on_message_edited`、裸直通、scheduler/后台 callback | live facade | `apply`、`send`、`send_rich`、`edit`、`delete`、`pin`、`answer_callback`、`click_callback_button`、`answer_inline_query`、`payout`、`read_saved_message_id`、`delete_saved_message_id` |
+| Event Bus / `on_interaction` 的当前交互入口 | 缓冲 facade | `apply`、`send`、`send_rich`、`send_photo`、`send_file`、`edit`、`edit_rich`、`edit_caption`、`delete`、`pin`、`answer_callback`、`answer_inline_query`、`answer_guest_query`、`payout`、`update_session`、`read_saved_message_id`、`delete_saved_message_id`；UserBot 执行链路才允许 `click_callback_button` |
+| 常驻上下文、插件命令、legacy `on_message` / `on_message_edited`、裸直通、scheduler/后台 callback | live facade | `apply`、`send`、`send_rich`、`edit`、`delete`、`pin`、`answer_callback`、`click_callback_button`、`answer_inline_query`、`answer_guest_query`、`payout`、`read_saved_message_id`、`delete_saved_message_id` |
 
 live facade 当前没有 `send_photo`、`send_file`、`edit_rich`、`edit_caption`、`update_session` helper；直接调用会得到属性不存在错误。后台需要发送媒体或编辑 caption 时，构造文档化的标准 action 后调用 `await ctx.messages.apply([action], entry_key="...")`。`update_session` 只在拥有当前交互会话的入口中使用，不把后台任务伪装成会话更新。
 
@@ -757,6 +758,7 @@ callback data 不向插件暴露，也不接受插件传入；推荐同时传
 | `callback_query` | 当前 Interaction Bot 收到的 Inline keyboard 按钮回调，用 `answer_callback` ACK；不是 UserBot 主动点击第三方 Bot 按钮 |
 | `inline_query` | Inline 查询，用 `answer_inline_query` 返回结果 |
 | `chosen_inline_result` | 用户选择了 Inline 结果，用于记录选择或后续结算 |
+| `guest_message` | Bot API 10.0 访客模式：交互 Bot 在**未加入**的会话被 `@提及`/回复。需显式订阅，`message` / `all_events` 不会收到；只能用一次 `answer_guest_query`（或消息类动作，平台合并为一次回复） |
 | `payment_confirmed` | 可信外部通知或平台解析确认到账后生成 |
 | `message_edited` | 平台已登记的编辑后消息事件，需显式订阅 |
 | `session_expired` | 会话 TTL 到期后由平台投递，供插件清理状态 |
@@ -768,6 +770,49 @@ callback data 不向插件暴露，也不接受插件传入；推荐同时传
 `all_messages` 目前仍只等于 `message` / `command`；需要覆盖更多已登记事件时，使用 `all_events`。Inline 相关事件、付款确认、`message_edited` 与 `session_expired` 仍可按需显式订阅。
 
 `known_users` 只认平台 state 提供的真实集合，不会自动把当前 sender 算进去。
+
+### 访客消息（Guest Mode）
+
+Telegram Bot API 10.0 的访客模式让 Bot 在没有加入的群聊或私聊里被 `@提及`（或被回复）时收到 `guest_message` 更新，并且只能通过 `answerGuestQuery(guest_query_id, result)` 回复**一次**（结果是一个 `InlineQueryResult`，成功返回 `SentGuestMessage.inline_message_id`）。Bot 需要先在 BotFather Mini App 中启用 “Guest Mode”；平台可通过 `GET /api/accounts/{aid}/bot/capabilities` 读取 `getMe.supports_guest_queries`。
+
+订阅写法：
+
+```json
+{"events": ["guest_message"], "source": ["interaction_bot"], "scope": "guest_all"}
+```
+
+`scope` 说明：`guest_all` 接收任意会话的访客消息（高风险，安装界面会提示）；`owner_only` / `known_users` 按调用者收窄；`all_allowed_chats` 仍按交互 Bot 允许会话判断，访客会话不在列表中会记录 `scope_not_matched`。
+
+事件信封额外字段：
+
+| 字段 | 说明 |
+| --- | --- |
+| `source.type` / `event_type` | `guest_message` |
+| `source.guest_query_id` | 回答用的 `guest_query_id` |
+| `message.text` | 已去掉开头/结尾的 `@xxx_bot` 提及；原文在 `guest.raw_text` |
+| `chat` | 召唤所在的会话（Bot 不在其中，不能 `sendMessage`） |
+| `reply_to` | 用户回复某条消息召唤时的被回复消息 |
+| `guest` | `{"query_id", "chat_id", "chat_type", "caller_user_id", "raw_text", "reply_once": true, "reply_via": "answer_guest_query"}` |
+
+回复方式：
+
+- 直接返回 `send_message` / `send_rich_message` / `edit_message` / `delete_message`：平台写入一次性回复缓冲（合成 `message_id` 只在本次处理内有效），处理结束后合成一条 `InlineQueryResultArticle` 调一次 `answerGuestQuery`。多条消息以空行拼接；对占位消息的编辑会替换内容；超过 4096 字截断；HTML 解析失败退回纯文本；只保留 URL / 复制 / 切换 Inline 按钮。
+- 返回 `answer_guest_query` 立即回答，之后的消息类动作记 `guest_reply_already_used` 跳过：
+
+```python
+return [{
+    "type": "answer_guest_query",
+    "guest_query_id": payload["guest"]["query_id"],  # 省略时取当前事件
+    "text": "<b>答案</b>：42",
+    "parse_mode": "html",           # 省略为纯文本
+    # 或 "rich_message": {"markdown": "..."}
+    # 或 "result": {完整 InlineQueryResult，缺 id 自动补}
+}]
+```
+
+MessageOps 对应 `await ctx.messages.answer_guest_query(text=..., parse_mode="html")`。
+
+访客事件中 `payout`、`pin_message`、`answer_callback`、`answer_inline_query` 记 `guest_action_unsupported` 跳过；`send_photo` / `send_file` 只保留说明文字并记 `guest_media_unsupported`；所有发送都不会走 `userbot_reply`。相关 reason code：`guest_reply_buffered`、`guest_reply_already_used`、`guest_no_reply`、`guest_answer_failed`、`guest_rate_limited`、`guest_updates_disabled`。
 
 ### 入站 webhook 事件
 
@@ -1081,7 +1126,7 @@ userbot 会话里的 `reply_markup` 不会直接丢掉：
 | --- | --- |
 | `matched` | Event Bus 订阅命中，准备投递 |
 | `subscription_not_matched` / `event_type_not_subscribed` / `source_not_subscribed` | 没有订阅命中、事件类型未订阅或来源未订阅 |
-| `scope_not_matched` / `filter_not_matched` | 允许会话、owner_only、inline_all 等范围不匹配，或关键词、金额、callback data 等过滤不匹配 |
+| `scope_not_matched` / `filter_not_matched` | 允许会话、owner_only、inline_all、guest_all 等范围不匹配，或关键词、金额、callback data 等过滤不匹配 |
 | `plugin_disabled` / `plugin_load_failed` / `plugin_runtime_error` | 插件未启用、加载失败或运行异常 |
 | `entry_key_missing` | 订阅未声明 `entry_key`，且插件也没有实现标准 `on_event` 入口 |
 | `command_matched` / `command_not_matched` / `command_unauthorized` | 管理员命令命中、普通文本未命中命令、权限不足 |

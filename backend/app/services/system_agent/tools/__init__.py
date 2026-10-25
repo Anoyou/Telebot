@@ -20,6 +20,7 @@ def register_all_tools(registry: ToolRegistry) -> None:
         commands,
         config_bundles,
         connectivity,
+        diagnostics,
         dispatch,
         features,
         interaction,
@@ -32,6 +33,7 @@ def register_all_tools(registry: ToolRegistry) -> None:
         plugin_repos,
         plugins,
         product,
+        provider_patrol,
         providers,
         routing,
         rules,
@@ -48,6 +50,7 @@ def register_all_tools(registry: ToolRegistry) -> None:
 
     system.register(registry)
     system_ops.register(registry)
+    diagnostics.register(registry)
     usage.register(registry)
     access.register(registry)
     account_bots.register(registry)
@@ -59,6 +62,7 @@ def register_all_tools(registry: ToolRegistry) -> None:
     scheduler.register(registry)
     system_settings.register(registry)
     providers.register(registry)
+    provider_patrol.register(registry)
     commands.register(registry)
     config_bundles.register(registry)
     connectivity.register(registry)

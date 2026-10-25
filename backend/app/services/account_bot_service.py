@@ -2081,6 +2081,71 @@ async def answer_inline_query(
     await call_bot_api(token, "answerInlineQuery", payload, timeout=httpx.Timeout(10.0))
 
 
+async def answer_guest_query(
+    token: str,
+    guest_query_id: str,
+    *,
+    result: dict[str, Any],
+) -> dict[str, Any]:
+    """Bot API 10.0 Guest Mode：回答一条 ``guest_message``。
+
+    官方语义：``answerGuestQuery(guest_query_id, result: InlineQueryResult)``，
+    成功返回 ``SentGuestMessage``（仅含 ``inline_message_id``）。每条访客消息只能
+    回复一次，因此调用方必须保证同一个 ``guest_query_id`` 只调用一次。
+    """
+
+    payload: dict[str, Any] = {
+        "guest_query_id": str(guest_query_id),
+        "result": dict(result),
+    }
+    return await call_bot_api(token, "answerGuestQuery", payload, timeout=httpx.Timeout(15.0))
+
+
+_BOT_CAPABILITIES_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
+_BOT_CAPABILITIES_TTL_SECONDS = 60.0
+
+
+def _bot_capabilities_cache_key(token: str) -> str:
+    return hashlib.sha256(str(token or "").encode("utf-8")).hexdigest()
+
+
+def bot_capabilities_from_me(me: dict[str, Any] | None) -> dict[str, Any]:
+    """从 getMe 结果中提取前端需要的能力位；字段缺失时返回 ``None`` 表示未知。"""
+
+    data = me if isinstance(me, dict) else {}
+
+    def _flag(key: str) -> bool | None:
+        value = data.get(key)
+        return bool(value) if isinstance(value, bool) else None
+
+    username = data.get("username")
+    bot_id = data.get("id")
+    return {
+        "bot_id": int(bot_id) if isinstance(bot_id, int) else None,
+        "username": username if isinstance(username, str) and username else None,
+        "supports_guest_queries": _flag("supports_guest_queries"),
+        "supports_inline_queries": _flag("supports_inline_queries"),
+        "can_read_all_group_messages": _flag("can_read_all_group_messages"),
+        "can_join_groups": _flag("can_join_groups"),
+    }
+
+
+async def get_bot_capabilities(token: str, *, refresh: bool = False) -> dict[str, Any]:
+    """读取并短暂缓存 Bot 的 getMe 能力位（含 Guest Mode）。"""
+
+    key = _bot_capabilities_cache_key(token)
+    now = time.monotonic()
+    cached = _BOT_CAPABILITIES_CACHE.get(key)
+    if not refresh and cached is not None and now - cached[0] < _BOT_CAPABILITIES_TTL_SECONDS:
+        return dict(cached[1])
+    me = await get_me(token)
+    caps = bot_capabilities_from_me(me)
+    if len(_BOT_CAPABILITIES_CACHE) > 256:
+        _BOT_CAPABILITIES_CACHE.clear()
+    _BOT_CAPABILITIES_CACHE[key] = (now, caps)
+    return dict(caps)
+
+
 def html_text(value: Any) -> str:
     """Bot HTML 消息统一转义。"""
 

@@ -25,10 +25,61 @@
 
 ## [Unreleased]
 
+### System Agent
+
+- 新增只读工具 `system.get_versions`：一次返回 TelePilot 版本与部署 commit、Python 版本、内置 Telethon 版本（含 MTProto Layer 与 cryptg）、内置 telepilot-gateway 的实际运行版本／协议版本／构建 commit、FastAPI／SQLAlchemy／Pydantic／httpx／redis 等核心依赖版本、Worker 进程运行环境校验、PostgreSQL／SQLite 与 Redis 服务端版本以及操作系统／容器信息；支持按包名查询任意已安装 Python 包。Gateway 未运行时短暂启动内置二进制只读取 `/version`，结果按二进制缓存。工具不返回环境变量、连接串或任何密钥，Web 与管理 Bot 渠道的 viewer 角色均可用。
+- “Telethon 版本”“Gateway 版本”“依赖库版本”“Python 版本”等提问现在会路由到系统诊断技能并披露该工具，不再只能回答 TelePilot 自身版本。
+- 新增模型巡检工具 `providers.patrol` / `providers.patrol_status` / `providers.patrol_cancel`：可对全部或指定 Provider 的已启用模型批量测活，直接复用 Web「全部 Provider 巡检」的后端预览、Job 调度、轮询与取消实现，不另起一套逻辑。启动巡检会真实调用上游并消耗额度，因此只生成待确认操作：卡片展示 Provider 数、模型数与额度提示，确认后才后台运行；确认时若范围比预览扩大则拒绝执行，失败不自动重试。结果按 Provider 分组返回模型、ok/失败、延迟、HTTP 状态与脱敏错误摘要，失败项优先。Web 与管理 Bot 渠道均可用，启动与停止需管理员角色。
+- “巡检”“测活”“模型能不能用”“全部模型”等提问会路由到模型 Provider 技能并披露巡检工具；系统提示能力清单同步补充。
+- 新增「一键体检」只读工具 `diagnostics.system_checkup`：一次调用汇总数据库／Redis／运行时组件、版本、总闸与平台模块、账号状态与 Worker 存活、最近 N 小时（默认 24）错误日志统计与高频错误、模型 Provider 就绪度（凭据、已启用模型、冷却与近期失败类型，不调用上游）、系统助手配置、定时任务失败／逾期、插件加载失败／可更新、通知 Bot 与 APNs。每项给出 ok／warn／error／unknown 状态、一句话结论与关键事实，并输出总体结论和按严重程度排序、引用具体工具的“建议下一步”（写操作均标注需确认）。每个检查段独立超时与降级，单项失败只会显示为“未能检查”并附脱敏原因，总耗时有上限。
+- 新增单账号体检工具 `diagnostics.account_checkup`：支持按 ID、@用户名、显示名或手机号片段模糊定位账号（多个命中时返回候选），一次检查账号会话与凭据可解密性、Worker 进程、暂停／总闸、功能与插件矩阵、通用 Rule／交互规则／AI 指令路由、该账号所用 Provider 的就绪度、最近错误与动作事件、补付积压、拟人化活跃时段与最近活动时间，并按可信度给出“为什么不回复”的可能原因与证据。管理 Bot 渠道只能体检当前绑定账号；手机号脱敏，错误文本脱敏后标记为外部数据。
+- “体检”“一键体检”“健康检查”“全面检查”“系统有没有问题”“为什么不回复／没反应／不工作”等提问会优先路由到新的体检技能，单个体检工具即可覆盖跨域排障，不再受每轮最多 3 个领域／16 个工具的限制而只查一半；“模型健康检查”“插件不工作”等专用请求仍走原有领域。Web 助手空白页示例补充“一键体检”。
+
+### 新增
+
+- 支持 Telegram Bot API 10.0（2026-05-08）访客模式（Guest Mode）：管理 Bot 与交互 Bot 的 polling 订阅 `guest_message`，Bot 在未加入的群聊或私聊被 `@提及`／回复时也能回复一次；新增系统设置运行开关“访客消息（Guest Mode）”（默认开启）。
+- 访客消息复用现有能力：管理 Bot 对已授权用户执行斜杠命令，系统助手模式下的自由文本交给系统助手；交互 Bot 进入交互规则（按规则会话范围）与订阅了 `guest_message` 的 Event Bus 插件。处理过程中的发送／编辑会合并为一条消息，结束后只调用一次 `answerGuestQuery`；超长截断，HTML 失败退回纯文本，仅保留 URL 等无需回调的按钮。
+- 插件契约新增 `guest_message` 事件、`guest_all` 订阅范围、标准信封 `guest` 字段、`answer_guest_query` 动作与 `ctx.messages.answer_guest_query()`；访客场景下付款／发奖、置顶、按钮 ACK、媒体发送、转账指令与会话创建会被跳过并记录 `guest_*` 原因码，另有按调用者／按 Bot 的访客限流。
+- 新增 `GET /api/accounts/{aid}/bot/capabilities`，读取 `getMe.supports_guest_queries` 等能力位；Web 管理 Bot／交互 Bot 页与 iOS「账号管理」显示“访客模式（Guest Mode）：已开启／未开启”及 BotFather 开启方法。
+- `event_bus_demo` 示例补充访客消息订阅与 fixture，插件参考文档、速查与使用指南补充访客模式说明。
+- iOS AI 管理新增“全部供应商巡检”：对应 Web 的“全部 Provider 巡检”，默认选中全部有启用模型的供应商，可搜索、按供应商或单个模型挑选范围，设置回复长度、超时和并发；开始前由服务器核对范围并确认（任务较多时提示“大规模巡检”），之后显示真实进度、按供应商分组的结果、正常/失败/跳过/取消筛选与清空结果。从单个供应商进入的测活改为“供应商测活”，与全局巡检分开保存范围与结果，并提供“改为全部供应商巡检”入口。
+- 客户端身份版本的“查询官方最新版本 / 使用最新版本”现在也覆盖 Codex Desktop：App 版本号读取 OpenAI 官方 Sparkle 更新源（`persistent.oaistatic.com/codex-app-prod/appcast.xml`），内置核心版本通过 HTTP Range 只读取最新官方安装包中的 `codex-cli/codex-package.json`（约 1 MB 流量，不下载整个安装包、不执行任何内容）；Web 与 iOS 同步显示检测源。
+
+### iOS 推送（APNs）
+
+- 设置 → Apple 推送通知新增“推送状态”检查清单：系统通知权限、设备已注册（读取服务器真实注册记录与有效期、最近一次投递错误）、服务器 APNs 已配置（列出缺失项）、推送环境与 Bundle ID 是否匹配，并可一键改为本机环境、填入本机 Bundle ID。
+- 新增 App 内“配置教程”页，概述 Apple Developer 后台步骤与常见错误代码，并链接 GitHub 完整教程。
+- 测试通知结果区分“Apple 已接受 / 未送出 / 结果未知”，网络失败不再误报；通知类别（助手待确认、助手任务结果、账号告警）可按设备开关。
+- TestFlight / App Store 安装包（不含嵌入描述文件）按 production 环境注册，不再提示“当前签名未声明推送环境”；模拟器按 sandbox 处理。
+- 服务端：复用 HTTP/2 连接池，凭据变更或连接异常时重建；`BadDeviceToken`、`DeviceTokenNotForTopic` 暂停该设备并保留错误供 App 展示，重新注册即恢复；Apple 明确不应重试的错误不再重试，5xx 按 Apple 建议 15 分钟后重试；业务通知设置 24 小时有效期，设备短暂离线也能收到；注册过期时测试通知给出明确提示。
+
+### iOS 客户端
+
+- 概览顶部新增紧凑品牌头（App 图标、名称、一句话说明与当前服务器），紧接“一切正常 / N 项需要处理”状态；“关于”页不再重复显示该卡片。
+- 插件页“插件中心 / 插件管理”、AI 页“概览 / 供应商 / 用量”与“待确认操作”的顶部分段切换改为 iOS 26 原生样式：放入系统安全区栏（`safeAreaBar`），由系统滚动边缘效果与 Liquid Glass 分段控件承载，去掉白色卡片和实色背景条。
+- 插件中心的状态筛选（全部 / 运行中 / 需处理 / 可更新 / 收藏）改为原生玻璃胶囊按钮，选中项使用强调色玻璃。
+- 插件中心的“查看范围”改名为“选择配置的账号：”，说明文字同步调整，选择行为不变。
+- 服务器更新面板新增“更新通道”：显示当前检查与拉取更新的远端/分支和正在运行的版本类型，可从服务器返回的分支列表中切换（main 正式版 / Beta 测试版等），切换前需要确认，只保存一次、不自动重试，结果未知时提示核实；同时把“自动检查更新”的开关与检查频率改为面板内的原生控件。
+- 更新入口收敛为“关于与更新”页里唯一的“检查服务器更新”：移除“设置”和“备份与维护”中重复的更新按钮与“自动检查更新设置”。
+- 助手回答底部改为与 Web 一致的一行摘要（模型 · 输入/输出词元 · 工具次数 · 耗时），点按展开详情；工具调用结果并入展开后的详情，不再在对话中单独成块，原始数据仍脱敏并默认折叠。
+
+### 优化
+
+- iOS“添加供应商”改为与 Web 对齐的原生表单：常用项只保留名称、接入地址、API Key、接口协议与模型（可先读取模型列表再勾选启用、选择默认模型），服务类型、调用方式、客户端身份、协议细节、联网搜索接口、出口代理、能处理的内容、成本等级、自动路由标签和备注收进“高级设置”并逐项中文说明；不再在新建时展示密钥池策略、模型能力原始字段与兼容请求头。
+- iOS AI 概览移除与“供应商”分栏重复的“管理供应商与模型”入口，“供应商”分栏在供应商较多时提供搜索。
+
+### 持续集成
+
+- 新增 GitHub Actions「iOS」工作流（`.github/workflows/ios.yml`）：在 GitHub `xcode-27` 运行器（Xcode 27，工程已使用 iOS 27 SDK API）上校验工程源文件清单与 OpenAPI／表单契约同步、运行 TelePilotCore `swift test`，并在 iOS 26+ iPhone 模拟器（运行器当前提供 iOS 27）上以 fixture 模式编译和运行全部 UI 测试；失败时上传 xcresult。针对 `Beta`／`main` 的 iOS 相关 PR、推送到 `Beta` 时自动触发，也可手动运行。
+- 新增 `ios/scripts/check-xcodeproj-sources.py`，检查手工维护的 `TelePilot.xcodeproj` 是否收录全部 Swift 源文件。
+- 同步 iOS 原生表单契约 `contract.json`（访客模式新增的接口与字段）。
+- UI 测试适配第三轮界面与 iOS 27：服务器更新面板（medium 高度 sheet）改为在 sheet 列表内慢速逐段滚动定位“应用更新／允许下次更新／查看升级进度”，避免惯性滚过目标或丢失点击，并在操作分区先确认“允许下次更新”再滚到升级任务；设置页“打开 Web 管理台”按标识查找任意元素类型（SwiftUI `Link` 在 iOS 27 暴露为 Link 而非 Button）。断言内容不变。
+
 ### 文档
 
 - 重构 GitHub 首页 README：按产品定位、当前界面、能力总览、运行结构、快速开始、安全边界、插件开发与文档导航重新组织，减少与专项文档重复的长段落，补齐日志、资金台账和移动端入口。
 - 使用 live-panel 生成 README 首屏动态运行图，提供循环 WebP、静态 PNG 和可复现的源配置；画面中的计数与日志明确标注为结构示意。
+- 新增 `docs/IOS-PUSH.md` iOS 推送通知配置教程：Apple Developer 账号准备、创建 APNs `.p8` 密钥、查找 Key ID / Team ID、在 TelePilot 中配置、sandbox 与 production 的选择、测试与错误排查表；README、iOS README 与 APNs 参考文档补充入口。
 
 ## [0.105.0-beta.1] - 2026-10-25 · minor（次版本预发布） · iOS 工作流与诊断体验重做
 
@@ -382,7 +433,6 @@
 - 恢复 PWA 主内容区与设备边缘的原始外层留白，保持当前内容区内部密度和底部安全区不变。
 - 优化插件中心窄屏布局：运行模式说明按需隐藏，全局筛选默认收起，账号选择与消息模板测试并排，插件计数移至标题右上角；树状插件行增加呼吸间距，编辑按钮统一为描边样式。
 
-
 ## [0.99.0-beta.1] - 2026-08-17 · minor（次版本预发布） · Agent 图片输入与原生媒体闭环
 
 ### 新增
@@ -476,7 +526,6 @@
 
 - System Agent 聊天密钥改为**占位符往返**，替代原先直接替换成 `[REDACTED]`：格式 `[[TP-CRED-n]]`（纯 ASCII，不含 `api_key` / `token` / `password` / `secret` 等触发词，也不含 `:=`，因此不会命中密钥抽取与打码正则）。此前用户把 Key 贴给模型后被替换为 `[REDACTED]`，模型既读不到值、也无法把它填回工具的 `api_key` 参数，"帮我用这个 Key 注册 Provider" 这类请求基本不可用；现在出站文本带占位符，模型可以原样引用，真实值只在面向 owner 的显示边界还原。占位符映射按"现值 → merge → FIFO 上限 20 → `encrypt_str` 加密"写入会话新列 `secret_map_enc`（迁移 `0059`），`app.scripts.rekey` 已同步覆盖该列，`MASTER_KEY` 变更后可整列重加密。请求头配置场景维持全量打码，不产生占位符。
 
-
 - 系统助手回复新增「实际作答模型」署名：Bot 端在正文末尾追加 `模型：{provider} / {model}`，Web 端在回复气泡下方始终展示 `provider · model`。署名取的是本轮 **usage** 里的 `provider_name` / `model`——即真正产出回复的 Provider 与模型，Magpie 等网关场景下会显示上游标识（如 `Magpie 网关 / workbuddy/glm-5.3-flash`），而不是用户在面板上选的那一个。发生模型/Provider 回退时，Bot 署名补 `（原选择 {原模型} 失败回退）`，Web 端在下方单列「原模型 / 实际使用 / 原因」，避免用户误以为模型没换。署名追加在 3500 字符截断**之后**，超长回复也不会把署名吃掉；无 usage（旧 worker）时不渲染署名。纯逻辑抽到前端 `src/lib/modelRunMeta.ts`，Bot 侧抽 `bot_bridge._assistant_signature`，两侧各带回归测试。
 
 ### 文档
@@ -508,7 +557,6 @@
 
 - System Agent 聊天密钥改为**占位符往返**，替代原先直接替换成 `[REDACTED]`：格式 `[[TP-CRED-n]]`（纯 ASCII，不含 `api_key` / `token` / `password` / `secret` 等触发词，也不含 `:=`，因此不会命中密钥抽取与打码正则）。此前用户把 Key 贴给模型后被替换为 `[REDACTED]`，模型既读不到值、也无法把它填回工具的 `api_key` 参数，"帮我用这个 Key 注册 Provider" 这类请求基本不可用；现在出站文本带占位符，模型可以原样引用，真实值只在面向 owner 的显示边界还原。占位符映射按"现值 → merge → FIFO 上限 20 → `encrypt_str` 加密"写入会话新列 `secret_map_enc`（迁移 `0059`），`app.scripts.rekey` 已同步覆盖该列，`MASTER_KEY` 变更后可整列重加密。请求头配置场景维持全量打码，不产生占位符。
 
-
 - 系统助手回复新增「实际作答模型」署名：Bot 端在正文末尾追加 `模型：{provider} / {model}`，Web 端在回复气泡下方始终展示 `provider · model`。署名取的是本轮 **usage** 里的 `provider_name` / `model`——即真正产出回复的 Provider 与模型，Magpie 等网关场景下会显示上游标识（如 `Magpie 网关 / workbuddy/glm-5.3-flash`），而不是用户在面板上选的那一个。发生模型/Provider 回退时，Bot 署名补 `（原选择 {原模型} 失败回退）`，Web 端在下方单列「原模型 / 实际使用 / 原因」，避免用户误以为模型没换。署名追加在 3500 字符截断**之后**，超长回复也不会把署名吃掉；无 usage（旧 worker）时不渲染署名。纯逻辑抽到前端 `src/lib/modelRunMeta.ts`，Bot 侧抽 `bot_bridge._assistant_signature`，两侧各带回归测试。
 
 ### 文档
@@ -526,7 +574,6 @@
 ### 优化
 
 - System Agent 聊天密钥改为**占位符往返**，替代原先直接替换成 `[REDACTED]`：格式 `[[TP-CRED-n]]`（纯 ASCII，不含 `api_key` / `token` / `password` / `secret` 等触发词，也不含 `:=`，因此不会命中密钥抽取与打码正则）。此前用户把 Key 贴给模型后被替换为 `[REDACTED]`，模型既读不到值、也无法把它填回工具的 `api_key` 参数，"帮我用这个 Key 注册 Provider" 这类请求基本不可用；现在出站文本带占位符，模型可以原样引用，真实值只在面向 owner 的显示边界还原。占位符映射按"现值 → merge → FIFO 上限 20 → `encrypt_str` 加密"写入会话新列 `secret_map_enc`（迁移 `0059`），`app.scripts.rekey` 已同步覆盖该列，`MASTER_KEY` 变更后可整列重加密。请求头配置场景维持全量打码，不产生占位符。
-
 
 - 系统助手回复新增「实际作答模型」署名：Bot 端在正文末尾追加 `模型：{provider} / {model}`，Web 端在回复气泡下方始终展示 `provider · model`。署名取的是本轮 **usage** 里的 `provider_name` / `model`——即真正产出回复的 Provider 与模型，Magpie 等网关场景下会显示上游标识（如 `Magpie 网关 / workbuddy/glm-5.3-flash`），而不是用户在面板上选的那一个。发生模型/Provider 回退时，Bot 署名补 `（原选择 {原模型} 失败回退）`，Web 端在下方单列「原模型 / 实际使用 / 原因」，避免用户误以为模型没换。署名追加在 3500 字符截断**之后**，超长回复也不会把署名吃掉；无 usage（旧 worker）时不渲染署名。纯逻辑抽到前端 `src/lib/modelRunMeta.ts`，Bot 侧抽 `bot_bridge._assistant_signature`，两侧各带回归测试。
 
@@ -764,7 +811,6 @@
 
 - System Agent 聊天密钥改为**占位符往返**，替代原先直接替换成 `[REDACTED]`：格式 `[[TP-CRED-n]]`（纯 ASCII，不含 `api_key` / `token` / `password` / `secret` 等触发词，也不含 `:=`，因此不会命中密钥抽取与打码正则）。此前用户把 Key 贴给模型后被替换为 `[REDACTED]`，模型既读不到值、也无法把它填回工具的 `api_key` 参数，"帮我用这个 Key 注册 Provider" 这类请求基本不可用；现在出站文本带占位符，模型可以原样引用，真实值只在面向 owner 的显示边界还原。占位符映射按"现值 → merge → FIFO 上限 20 → `encrypt_str` 加密"写入会话新列 `secret_map_enc`（迁移 `0059`），`app.scripts.rekey` 已同步覆盖该列，`MASTER_KEY` 变更后可整列重加密。请求头配置场景维持全量打码，不产生占位符。
 
-
 - Gateway 为每次 Codex Responses 调用生成受保护的会话、线程、轮次、窗口、安装标识、`client_metadata` 与 `prompt_cache_key`，并按当前 Codex 版本维护身份头；Provider 自定义头不能覆盖这些 Gateway 身份字段。
 - 将 Provider 的调用方式明确区分为「标准 API 直连」与「Codex 客户端兼容模式（Gateway）」，统一模型列表入口为「获取模型列表」，补充 Gateway 的用途、运行边界和版本维护说明。
 - Gateway 状态弹窗适配 375px PWA 与长版本、提交和错误文本，避免横向溢出。
@@ -792,7 +838,6 @@
 ### 优化
 
 - System Agent 聊天密钥改为**占位符往返**，替代原先直接替换成 `[REDACTED]`：格式 `[[TP-CRED-n]]`（纯 ASCII，不含 `api_key` / `token` / `password` / `secret` 等触发词，也不含 `:=`，因此不会命中密钥抽取与打码正则）。此前用户把 Key 贴给模型后被替换为 `[REDACTED]`，模型既读不到值、也无法把它填回工具的 `api_key` 参数，"帮我用这个 Key 注册 Provider" 这类请求基本不可用；现在出站文本带占位符，模型可以原样引用，真实值只在面向 owner 的显示边界还原。占位符映射按"现值 → merge → FIFO 上限 20 → `encrypt_str` 加密"写入会话新列 `secret_map_enc`（迁移 `0059`），`app.scripts.rekey` 已同步覆盖该列，`MASTER_KEY` 变更后可整列重加密。请求头配置场景维持全量打码，不产生占位符。
-
 
 - Provider 切换执行后端后可直接读取模型列表和测活，无需先保存；同次编辑切回原后端会恢复表单中的直连协议配置，模型列表不会被强制清空或要求重新读取。
 - Agent 的全局默认模型入口收进模型选择器，发送与停止按钮改为圆形；PWA 输入区为客户端和模型选择器使用独立紧凑宽度。
@@ -837,7 +882,6 @@
 
 - System Agent 聊天密钥改为**占位符往返**，替代原先直接替换成 `[REDACTED]`：格式 `[[TP-CRED-n]]`（纯 ASCII，不含 `api_key` / `token` / `password` / `secret` 等触发词，也不含 `:=`，因此不会命中密钥抽取与打码正则）。此前用户把 Key 贴给模型后被替换为 `[REDACTED]`，模型既读不到值、也无法把它填回工具的 `api_key` 参数，"帮我用这个 Key 注册 Provider" 这类请求基本不可用；现在出站文本带占位符，模型可以原样引用，真实值只在面向 owner 的显示边界还原。占位符映射按"现值 → merge → FIFO 上限 20 → `encrypt_str` 加密"写入会话新列 `secret_map_enc`（迁移 `0059`），`app.scripts.rekey` 已同步覆盖该列，`MASTER_KEY` 变更后可整列重加密。请求头配置场景维持全量打码，不产生占位符。
 
-
 - 系统助手回复新增「实际作答模型」署名：Bot 端在正文末尾追加 `模型：{provider} / {model}`，Web 端在回复气泡下方始终展示 `provider · model`。署名取的是本轮 **usage** 里的 `provider_name` / `model`——即真正产出回复的 Provider 与模型，Magpie 等网关场景下会显示上游标识（如 `Magpie 网关 / workbuddy/glm-5.3-flash`），而不是用户在面板上选的那一个。发生模型/Provider 回退时，Bot 署名补 `（原选择 {原模型} 失败回退）`，Web 端在下方单列「原模型 / 实际使用 / 原因」，避免用户误以为模型没换。署名追加在 3500 字符截断**之后**，超长回复也不会把署名吃掉；无 usage（旧 worker）时不渲染署名。纯逻辑抽到前端 `src/lib/modelRunMeta.ts`，Bot 侧抽 `bot_bridge._assistant_signature`，两侧各带回归测试。
 
 ### 文档
@@ -859,7 +903,6 @@
 
 - System Agent 聊天密钥改为**占位符往返**，替代原先直接替换成 `[REDACTED]`：格式 `[[TP-CRED-n]]`（纯 ASCII，不含 `api_key` / `token` / `password` / `secret` 等触发词，也不含 `:=`，因此不会命中密钥抽取与打码正则）。此前用户把 Key 贴给模型后被替换为 `[REDACTED]`，模型既读不到值、也无法把它填回工具的 `api_key` 参数，"帮我用这个 Key 注册 Provider" 这类请求基本不可用；现在出站文本带占位符，模型可以原样引用，真实值只在面向 owner 的显示边界还原。占位符映射按"现值 → merge → FIFO 上限 20 → `encrypt_str` 加密"写入会话新列 `secret_map_enc`（迁移 `0059`），`app.scripts.rekey` 已同步覆盖该列，`MASTER_KEY` 变更后可整列重加密。请求头配置场景维持全量打码，不产生占位符。
 
-
 - 统一 LLM HTTP、流式、模型列表、协议探测、测活、Agent、插件和 usage 的错误事实，区分客户端受限、官方账号运行时要求、额度耗尽、Gateway 不可用、限流、超时、网络、协议和上游服务错误。
 - Gateway 失败后允许 TelePilot runtime 按既有策略切换其它 Provider，但不会在同一 Provider 内偷跑 direct；插件 Agent 成功切换后保持 Provider，避免后续工具轮次重复撞击已知故障路径。
 - Gateway Provider 的模型列表通过真实上游候选端点读取；推理、测活和模型列表兼容请求头按 scope 隔离。
@@ -874,7 +917,6 @@
 ### 优化
 
 - System Agent 聊天密钥改为**占位符往返**，替代原先直接替换成 `[REDACTED]`：格式 `[[TP-CRED-n]]`（纯 ASCII，不含 `api_key` / `token` / `password` / `secret` 等触发词，也不含 `:=`，因此不会命中密钥抽取与打码正则）。此前用户把 Key 贴给模型后被替换为 `[REDACTED]`，模型既读不到值、也无法把它填回工具的 `api_key` 参数，"帮我用这个 Key 注册 Provider" 这类请求基本不可用；现在出站文本带占位符，模型可以原样引用，真实值只在面向 owner 的显示边界还原。占位符映射按"现值 → merge → FIFO 上限 20 → `encrypt_str` 加密"写入会话新列 `secret_map_enc`（迁移 `0059`），`app.scripts.rekey` 已同步覆盖该列，`MASTER_KEY` 变更后可整列重加密。请求头配置场景维持全量打码，不产生占位符。
-
 
 - 系统助手回复新增「实际作答模型」署名：Bot 端在正文末尾追加 `模型：{provider} / {model}`，Web 端在回复气泡下方始终展示 `provider · model`。署名取的是本轮 **usage** 里的 `provider_name` / `model`——即真正产出回复的 Provider 与模型，Magpie 等网关场景下会显示上游标识（如 `Magpie 网关 / workbuddy/glm-5.3-flash`），而不是用户在面板上选的那一个。发生模型/Provider 回退时，Bot 署名补 `（原选择 {原模型} 失败回退）`，Web 端在下方单列「原模型 / 实际使用 / 原因」，避免用户误以为模型没换。署名追加在 3500 字符截断**之后**，超长回复也不会把署名吃掉；无 usage（旧 worker）时不渲染署名。纯逻辑抽到前端 `src/lib/modelRunMeta.ts`，Bot 侧抽 `bot_bridge._assistant_signature`，两侧各带回归测试。
 
@@ -908,7 +950,6 @@
 
 - System Agent 聊天密钥改为**占位符往返**，替代原先直接替换成 `[REDACTED]`：格式 `[[TP-CRED-n]]`（纯 ASCII，不含 `api_key` / `token` / `password` / `secret` 等触发词，也不含 `:=`，因此不会命中密钥抽取与打码正则）。此前用户把 Key 贴给模型后被替换为 `[REDACTED]`，模型既读不到值、也无法把它填回工具的 `api_key` 参数，"帮我用这个 Key 注册 Provider" 这类请求基本不可用；现在出站文本带占位符，模型可以原样引用，真实值只在面向 owner 的显示边界还原。占位符映射按"现值 → merge → FIFO 上限 20 → `encrypt_str` 加密"写入会话新列 `secret_map_enc`（迁移 `0059`），`app.scripts.rekey` 已同步覆盖该列，`MASTER_KEY` 变更后可整列重加密。请求头配置场景维持全量打码，不产生占位符。
 
-
 - 系统助手回复新增「实际作答模型」署名：Bot 端在正文末尾追加 `模型：{provider} / {model}`，Web 端在回复气泡下方始终展示 `provider · model`。署名取的是本轮 **usage** 里的 `provider_name` / `model`——即真正产出回复的 Provider 与模型，Magpie 等网关场景下会显示上游标识（如 `Magpie 网关 / workbuddy/glm-5.3-flash`），而不是用户在面板上选的那一个。发生模型/Provider 回退时，Bot 署名补 `（原选择 {原模型} 失败回退）`，Web 端在下方单列「原模型 / 实际使用 / 原因」，避免用户误以为模型没换。署名追加在 3500 字符截断**之后**，超长回复也不会把署名吃掉；无 usage（旧 worker）时不渲染署名。纯逻辑抽到前端 `src/lib/modelRunMeta.ts`，Bot 侧抽 `bot_bridge._assistant_signature`，两侧各带回归测试。
 
 ### 文档
@@ -935,7 +976,6 @@
 
 - System Agent 聊天密钥改为**占位符往返**，替代原先直接替换成 `[REDACTED]`：格式 `[[TP-CRED-n]]`（纯 ASCII，不含 `api_key` / `token` / `password` / `secret` 等触发词，也不含 `:=`，因此不会命中密钥抽取与打码正则）。此前用户把 Key 贴给模型后被替换为 `[REDACTED]`，模型既读不到值、也无法把它填回工具的 `api_key` 参数，"帮我用这个 Key 注册 Provider" 这类请求基本不可用；现在出站文本带占位符，模型可以原样引用，真实值只在面向 owner 的显示边界还原。占位符映射按"现值 → merge → FIFO 上限 20 → `encrypt_str` 加密"写入会话新列 `secret_map_enc`（迁移 `0059`），`app.scripts.rekey` 已同步覆盖该列，`MASTER_KEY` 变更后可整列重加密。请求头配置场景维持全量打码，不产生占位符。
 
-
 - 将 Agent Provider 测活总超时从 45 秒统一为 90 秒，与手动测活保持一致，减少协议自动探测和慢响应上游被提前中断的假失败。
 - 重新设计 Agent 运行中的消息处理入口：将“稍后执行、补充要求、改做这条”移到输入框上方，直接解释每种方式的执行结果；队列编辑、前移、后移、取消和恢复按钮在窄屏下可换行并显示易懂中文。
 
@@ -953,7 +993,6 @@
 ### 优化
 
 - System Agent 聊天密钥改为**占位符往返**，替代原先直接替换成 `[REDACTED]`：格式 `[[TP-CRED-n]]`（纯 ASCII，不含 `api_key` / `token` / `password` / `secret` 等触发词，也不含 `:=`，因此不会命中密钥抽取与打码正则）。此前用户把 Key 贴给模型后被替换为 `[REDACTED]`，模型既读不到值、也无法把它填回工具的 `api_key` 参数，"帮我用这个 Key 注册 Provider" 这类请求基本不可用；现在出站文本带占位符，模型可以原样引用，真实值只在面向 owner 的显示边界还原。占位符映射按"现值 → merge → FIFO 上限 20 → `encrypt_str` 加密"写入会话新列 `secret_map_enc`（迁移 `0059`），`app.scripts.rekey` 已同步覆盖该列，`MASTER_KEY` 变更后可整列重加密。请求头配置场景维持全量打码，不产生占位符。
-
 
 - 统一 Agent“测活并添加”与新建 Provider 页面的真实对话探针：不再发送 `ping` 或带责备语气的测试句，改为要求模型针对日常专注场景给出两句可执行建议；最大输出统一为 512 Token，为强制推理模型保留足够的推理与正文空间，同时维持单次探针的成本边界。
 
@@ -976,7 +1015,6 @@
 ### 优化
 
 - System Agent 聊天密钥改为**占位符往返**，替代原先直接替换成 `[REDACTED]`：格式 `[[TP-CRED-n]]`（纯 ASCII，不含 `api_key` / `token` / `password` / `secret` 等触发词，也不含 `:=`，因此不会命中密钥抽取与打码正则）。此前用户把 Key 贴给模型后被替换为 `[REDACTED]`，模型既读不到值、也无法把它填回工具的 `api_key` 参数，"帮我用这个 Key 注册 Provider" 这类请求基本不可用；现在出站文本带占位符，模型可以原样引用，真实值只在面向 owner 的显示边界还原。占位符映射按"现值 → merge → FIFO 上限 20 → `encrypt_str` 加密"写入会话新列 `secret_map_enc`（迁移 `0059`），`app.scripts.rekey` 已同步覆盖该列，`MASTER_KEY` 变更后可整列重加密。请求头配置场景维持全量打码，不产生占位符。
-
 
 - 拆分 Chat Completions、Responses、Anthropic 与 SSE Codec；SSE 按完整事件块和字节流解析，支持多行 data、UTF-8 跨分片、无尾分隔符与传输大小限制。
 - 模型发现支持有序候选端点；仅在 404/405 时继续尝试，401/403、429 与服务端错误保留真实失败，避免把鉴权或限流问题误判为路径不兼容。
@@ -1016,7 +1054,6 @@
 
 - System Agent 聊天密钥改为**占位符往返**，替代原先直接替换成 `[REDACTED]`：格式 `[[TP-CRED-n]]`（纯 ASCII，不含 `api_key` / `token` / `password` / `secret` 等触发词，也不含 `:=`，因此不会命中密钥抽取与打码正则）。此前用户把 Key 贴给模型后被替换为 `[REDACTED]`，模型既读不到值、也无法把它填回工具的 `api_key` 参数，"帮我用这个 Key 注册 Provider" 这类请求基本不可用；现在出站文本带占位符，模型可以原样引用，真实值只在面向 owner 的显示边界还原。占位符映射按"现值 → merge → FIFO 上限 20 → `encrypt_str` 加密"写入会话新列 `secret_map_enc`（迁移 `0059`），`app.scripts.rekey` 已同步覆盖该列，`MASTER_KEY` 变更后可整列重加密。请求头配置场景维持全量打码，不产生占位符。
 
-
 - 在线更新弹窗和执行日志现在会展示分类依据，便于直接识别触发完整更新、数据库备份或服务重建的具体原因。
 - 保留未知文件默认走完整更新的安全兜底，同时细化已知生成物、测试文件、文件同步与镜像重建的服务级分类。
 
@@ -1029,7 +1066,6 @@
 ### 优化
 
 - System Agent 聊天密钥改为**占位符往返**，替代原先直接替换成 `[REDACTED]`：格式 `[[TP-CRED-n]]`（纯 ASCII，不含 `api_key` / `token` / `password` / `secret` 等触发词，也不含 `:=`，因此不会命中密钥抽取与打码正则）。此前用户把 Key 贴给模型后被替换为 `[REDACTED]`，模型既读不到值、也无法把它填回工具的 `api_key` 参数，"帮我用这个 Key 注册 Provider" 这类请求基本不可用；现在出站文本带占位符，模型可以原样引用，真实值只在面向 owner 的显示边界还原。占位符映射按"现值 → merge → FIFO 上限 20 → `encrypt_str` 加密"写入会话新列 `secret_map_enc`（迁移 `0059`），`app.scripts.rekey` 已同步覆盖该列，`MASTER_KEY` 变更后可整列重加密。请求头配置场景维持全量打码，不产生占位符。
-
 
 - 将桌面端 Agent 的 Provider 与账号上下文配置整合到“系统助手”页头右侧，并移除窄屏和移动端的重复配置行，为会话区域释放更多空间。
 - 将 Agent 输入框的默认提示语更新为“想让 Agent 怎么帮你？直接用自然语言问她吧！”，强化自然语言调用引导。
@@ -1168,7 +1204,6 @@
 
 - System Agent 聊天密钥改为**占位符往返**，替代原先直接替换成 `[REDACTED]`：格式 `[[TP-CRED-n]]`（纯 ASCII，不含 `api_key` / `token` / `password` / `secret` 等触发词，也不含 `:=`，因此不会命中密钥抽取与打码正则）。此前用户把 Key 贴给模型后被替换为 `[REDACTED]`，模型既读不到值、也无法把它填回工具的 `api_key` 参数，"帮我用这个 Key 注册 Provider" 这类请求基本不可用；现在出站文本带占位符，模型可以原样引用，真实值只在面向 owner 的显示边界还原。占位符映射按"现值 → merge → FIFO 上限 20 → `encrypt_str` 加密"写入会话新列 `secret_map_enc`（迁移 `0059`），`app.scripts.rekey` 已同步覆盖该列，`MASTER_KEY` 变更后可整列重加密。请求头配置场景维持全量打码，不产生占位符。
 
-
 - 系统助手回复新增「实际作答模型」署名：Bot 端在正文末尾追加 `模型：{provider} / {model}`，Web 端在回复气泡下方始终展示 `provider · model`。署名取的是本轮 **usage** 里的 `provider_name` / `model`——即真正产出回复的 Provider 与模型，Magpie 等网关场景下会显示上游标识（如 `Magpie 网关 / workbuddy/glm-5.3-flash`），而不是用户在面板上选的那一个。发生模型/Provider 回退时，Bot 署名补 `（原选择 {原模型} 失败回退）`，Web 端在下方单列「原模型 / 实际使用 / 原因」，避免用户误以为模型没换。署名追加在 3500 字符截断**之后**，超长回复也不会把署名吃掉；无 usage（旧 worker）时不渲染署名。纯逻辑抽到前端 `src/lib/modelRunMeta.ts`，Bot 侧抽 `bot_bridge._assistant_signature`，两侧各带回归测试。
 
 ### 文档
@@ -1253,7 +1288,6 @@
 ### 优化
 
 - System Agent 聊天密钥改为**占位符往返**，替代原先直接替换成 `[REDACTED]`：格式 `[[TP-CRED-n]]`（纯 ASCII，不含 `api_key` / `token` / `password` / `secret` 等触发词，也不含 `:=`，因此不会命中密钥抽取与打码正则）。此前用户把 Key 贴给模型后被替换为 `[REDACTED]`，模型既读不到值、也无法把它填回工具的 `api_key` 参数，"帮我用这个 Key 注册 Provider" 这类请求基本不可用；现在出站文本带占位符，模型可以原样引用，真实值只在面向 owner 的显示边界还原。占位符映射按"现值 → merge → FIFO 上限 20 → `encrypt_str` 加密"写入会话新列 `secret_map_enc`（迁移 `0059`），`app.scripts.rekey` 已同步覆盖该列，`MASTER_KEY` 变更后可整列重加密。请求头配置场景维持全量打码，不产生占位符。
-
 
 - 系统助手回复新增「实际作答模型」署名：Bot 端在正文末尾追加 `模型：{provider} / {model}`，Web 端在回复气泡下方始终展示 `provider · model`。署名取的是本轮 **usage** 里的 `provider_name` / `model`——即真正产出回复的 Provider 与模型，Magpie 等网关场景下会显示上游标识（如 `Magpie 网关 / workbuddy/glm-5.3-flash`），而不是用户在面板上选的那一个。发生模型/Provider 回退时，Bot 署名补 `（原选择 {原模型} 失败回退）`，Web 端在下方单列「原模型 / 实际使用 / 原因」，避免用户误以为模型没换。署名追加在 3500 字符截断**之后**，超长回复也不会把署名吃掉；无 usage（旧 worker）时不渲染署名。纯逻辑抽到前端 `src/lib/modelRunMeta.ts`，Bot 侧抽 `bot_bridge._assistant_signature`，两侧各带回归测试。
 
@@ -6436,7 +6470,6 @@
 
 ---
 
-
 ## [0.9.8] — 2026-05-10 · feature · Codex 生图体验 + 插件模式与调度器收口
 
 ### Added
@@ -6471,7 +6504,6 @@
 - 前端生产构建通过：`pnpm -C frontend build`。
 
 ---
-
 
 ## [0.9.7] — 2026-05-10 · feature · 插件前端规范 + LLM/IPC 可靠性闭环
 
@@ -6753,7 +6785,6 @@
 - `backend/app/worker/command.py`
 - `backend/app/worker/inline_override.py`
 
-
 ### Added
 - **项目归档与预览支持**：
   - 新增 `docs/screenshots/` 文件夹用于存放 UI 截图
@@ -7009,3 +7040,9 @@ int 4")`，下次 bump 版本号时 `stage` 字段如果摘掉得记得这里同
 - 顶部网络环境徽章（IP / 国家 / 缓存 5min）。
 - 内置命令：`,help` `,id` `,status` `,ping` `,pause` `,resume`。
 - 两轮 review 修复（21 处真实改动，详见 `REVIEW-FIXES-REPORT.md`）。
+- iOS 统一导航标题：概览、插件、AI、更多四个一级 Tab 使用大标题，其余二级页面、详情与弹窗一律使用行内标题（此前约 30 处未声明，沿用上级大标题导致样式不一）。
+- iOS 概览顶部改为“当前服务器”卡片：显示服务器地址、连接状态、服务器版本与通道、登录用户，点按进入“关于”。
+- iOS 概览刷新提速：服务状态、待确认事项/插件矩阵、“需要处理”信号三组读取改为并发；刷新期间保留上次“需要处理”结果，不再每次回到“正在检查工作区…”。
+- iOS 设置新增“外观”：自动（跟随系统）／浅色／深色，立即生效并保存在本机。
+- iOS “关于与更新”入口移到“更多”和“设置”的最底部。
+- iOS “更多”页顶部新增红色高亮的“全局紧急停止”，显示真实状态，启用/解除前需确认，失败不自动重试。

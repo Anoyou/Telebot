@@ -9,6 +9,7 @@ struct TelePilotApp: App {
     @State private var preferences = WorkspacePreferences()
     @State private var push = PushNotificationManager()
     @State private var sceneHidden = false
+    @AppStorage(AppAppearance.storageKey) private var appearanceRaw = AppAppearance.system.rawValue
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
@@ -26,6 +27,7 @@ struct TelePilotApp: App {
             }
             .environment(model)
             .environment(lock)
+            .preferredColorScheme(AppAppearance(rawValue: appearanceRaw)?.colorScheme)
             .environment(overviewLayout)
             .environment(preferences)
             .environment(push)

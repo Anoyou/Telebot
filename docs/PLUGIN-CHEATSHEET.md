@@ -34,8 +34,9 @@
 - userbot 会话没有原生按钮，平台会把按钮降级成文本编号，并把玩家回复合成为 callback；此时 `source.synthetic="text_button"`。
 - 免费参与、按钮加入、互动游戏可按自身玩法保存完整业务状态；如果只是为了后续发奖锚点，记录玩家 `tgid` 即可。发奖动作优先用 `payout`，也可走 `userbot_reply` 并携带 `reply_to_user_id`，平台会搜索该玩家近期发言作为回复锚点，插件不要自己遍历群消息。已有 `reply_to_message_id` 时优先用消息 id；找不到锚点时动作失败并写入日志，默认提示 `未找到对应用户（用户 ID）的近期消息。`，可用 `reply_anchor_missing_text` 自定义提示。
 - Inline 插件返回 `answer_inline_query`；选择结果进入 `chosen_inline_result`，用于记录选择、结算或后续状态。
+- 访客模式（Bot API 10.0 Guest Mode）：订阅 `source=["interaction_bot"]`、`events=["guest_message"]`，`scope` 用 `guest_all`（任何会话）或 `owner_only` / `known_users` / `all_allowed_chats`。每条访客消息只能回复一次：可以直接返回 `send_message` / `send_rich_message`（平台合并后统一 `answerGuestQuery`），或返回 `answer_guest_query` 自定义结果；`message` / `all_events` 订阅不会收到访客消息。
 - 付款/发奖插件返回 `settlement` 或 userbot 受控动作；普通 Bot 只公告结果，不直接执行转账、催付或发奖。
-- 常见 action：`send_message`、`send_rich_message`、`send_photo`、`send_file`、`edit_message`、`edit_caption`、`delete_message`、`pin_message`、`click_callback_button`、`answer_callback`、`answer_inline_query`、`payout`、`update_session`、`settlement`、`result`、`end_session`。
+- 常见 action：`send_message`、`send_rich_message`、`send_photo`、`send_file`、`edit_message`、`edit_caption`、`delete_message`、`pin_message`、`click_callback_button`、`answer_callback`、`answer_inline_query`、`answer_guest_query`、`payout`、`update_session`、`settlement`、`result`、`end_session`。
 - `send_via` 只在高级覆盖时使用 `interaction_bot`、`userbot_reply` 或 `auto`；旧 `notice` 值应返回迁移错误，不能静默执行。
 - 默认 `send_message` / `send_photo` / `send_file` 等动作按 `parse_mode="plain"` 发送；只有显式声明 `parse_mode="html"` 时才启用普通消息 HTML。`send_rich_message` 使用独立的 Rich HTML/Markdown/blocks 语法，动态 HTML 文案同样先转义再拼标签。
 - 强按钮玩法可通过 `interaction_trigger_modes=keyword_only` 关闭命令触发；manifest 可用 `default_trigger_modes` 提供默认值。

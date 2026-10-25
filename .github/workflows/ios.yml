@@ -1,0 +1,132 @@
+name: iOS
+
+on:
+  pull_request:
+    branches: [Beta, main]
+    paths:
+      - "ios/**"
+      - "openapi/telepilot.openapi.json"
+      - ".github/workflows/ios.yml"
+  push:
+    branches: [Beta]
+    paths:
+      - "ios/**"
+      - "openapi/telepilot.openapi.json"
+      - ".github/workflows/ios.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  # 工程使用 iOS 27 SDK 才有的 API（如 TabRole.prominent，运行时以 #available 兜底），
+  # 因此必须用 Xcode 27 编译；部署目标仍为 iOS 26。
+  XCODE_APP: /Applications/Xcode_27.app
+  DERIVED_DATA: ${{ github.workspace }}/ios/build/DerivedData
+  RESULTS_DIR: ${{ github.workspace }}/ios/build/results
+
+jobs:
+  ios:
+    name: iOS 构建与测试
+    runs-on: xcode-27
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: 选择 Xcode
+        run: |
+          sudo xcode-select -s "$XCODE_APP/Contents/Developer"
+          xcodebuild -version
+          xcrun simctl list runtimes available
+
+      - name: 校验工程与契约同步
+        run: |
+          python3 ios/scripts/check-xcodeproj-sources.py
+          python3 ios/TelePilotCore/scripts/sync-openapi.py --check
+          python3 ios/TelePilotCore/scripts/sync-contract.py --check
+
+      - name: 校验 OpenAPI 生成代码
+        run: sh ios/TelePilotCore/scripts/generate.sh --check
+
+      - name: TelePilotCore 单元测试
+        run: swift test --package-path ios/TelePilotCore
+
+      - name: 选择 iOS 26+ 模拟器
+        id: simulator
+        run: |
+          UDID=$(xcrun simctl list devices available -j | python3 -c '
+          import json, re, sys
+          data = json.load(sys.stdin)["devices"]
+          def version(runtime):
+              m = re.search(r"iOS-(\d+)-(\d+)", runtime)
+              return (int(m.group(1)), int(m.group(2))) if m else (0, 0)
+          runtimes = sorted((r for r in data if version(r)[0] >= 26), key=version, reverse=True)
+          for preferred in ("iPhone 17 Pro", "iPhone 18 Pro", "iPhone 17", None):
+              for runtime in runtimes:
+                  for device in data[runtime]:
+                      if not device.get("isAvailable", True):
+                          continue
+                      if preferred is None and device["name"].startswith("iPhone") or device["name"] == preferred:
+                          print(device["udid"]); print(device["name"], runtime, file=sys.stderr)
+                          raise SystemExit(0)
+          raise SystemExit("没有可用的 iOS 26+ iPhone 模拟器")
+          ')
+          echo "udid=$UDID" >> "$GITHUB_OUTPUT"
+          xcrun simctl boot "$UDID" || true
+          xcrun simctl bootstatus "$UDID" -b
+
+      - name: 编译 App 与 UI 测试
+        run: |
+          set -o pipefail
+          mkdir -p "$RESULTS_DIR"
+          xcodebuild build-for-testing \
+            -project ios/TelePilot.xcodeproj \
+            -scheme TelePilot \
+            -configuration Debug \
+            -destination "platform=iOS Simulator,id=${{ steps.simulator.outputs.udid }}" \
+            -derivedDataPath "$DERIVED_DATA" \
+            -resultBundlePath "$RESULTS_DIR/Build.xcresult" \
+            CODE_SIGNING_ALLOWED=NO \
+            2>&1 | tee "$RESULTS_DIR/build.log" | xcbeautify --renderer github-actions
+
+      - name: 预热模拟器
+        # 刚启动的模拟器前几分钟无障碍快照和首次启动都很慢（曾出现前 3 个用例停在“连接 TelePilot…”
+        # 超时、UI 查询超时），先安装并以 UI 测试参数冷启动一次 App，再开始计时的 UI 测试。
+        run: |
+          UDID="${{ steps.simulator.outputs.udid }}"
+          APP=$(find "$DERIVED_DATA/Build/Products" -maxdepth 2 -name TelePilot.app -path '*iphonesimulator*' | head -n 1)
+          echo "预热 App：$APP"
+          if [ -n "$APP" ]; then
+            xcrun simctl install "$UDID" "$APP" || true
+            xcrun simctl launch "$UDID" com.telepilot.personal --ui-testing -AppleLanguages "(zh-Hans)" -AppleLocale zh_CN || true
+            sleep 45
+            xcrun simctl terminate "$UDID" com.telepilot.personal || true
+          fi
+          sleep 15
+
+      - name: 运行 UI 测试（fixture 模式）
+        run: |
+          set -o pipefail
+          xcodebuild test-without-building \
+            -project ios/TelePilot.xcodeproj \
+            -scheme TelePilot \
+            -destination "platform=iOS Simulator,id=${{ steps.simulator.outputs.udid }}" \
+            -derivedDataPath "$DERIVED_DATA" \
+            -resultBundlePath "$RESULTS_DIR/UITests.xcresult" \
+            -parallel-testing-enabled NO \
+            -collect-test-diagnostics never \
+            CODE_SIGNING_ALLOWED=NO \
+            2>&1 | tee "$RESULTS_DIR/test.log" | xcbeautify --renderer github-actions
+
+      - name: 上传结果包
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ios-xcresult-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ios/build/results
+          retention-days: 7
+          if-no-files-found: ignore

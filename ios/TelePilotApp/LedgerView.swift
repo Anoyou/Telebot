@@ -767,7 +767,7 @@ struct LedgerEntryDetailView: View {
                 OpsFieldRow(title: "流水键", value: entry.payoutKey, symbol: "number", monospaced: true)
                 if let params = entry.raw["params_summary"], params.objectValue?.isEmpty == false {
                     NavigationLink {
-                        List { ManagementValueView(value: params) }.navigationTitle("原始参数")
+                        List { ManagementValueView(value: params) }.navigationTitle("原始参数").navigationBarTitleDisplayMode(.inline)
                     } label: { Label("原始参数", systemImage: "curlybraces") }
                 }
             }

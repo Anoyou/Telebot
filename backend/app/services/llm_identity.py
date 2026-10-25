@@ -285,11 +285,15 @@ CLIENT_IDENTITY_VERSIONS_SETTING_KEY = "llm_client_identity_versions"
 
 # 每个版本键的元数据：前端展示名 + 只读检测源。
 # ``registry`` 非空表示可自动检测最新版本；None 表示只能手动填写。
-# （Codex Desktop 的核心版本与 app 构建号都没有公共 registry）。
+# Codex Desktop 没有 npm/PyPI 包：App 版本号读官方 Sparkle 更新源
+# （persistent.oaistatic.com/codex-app-prod/appcast.xml），核心版本读该更新源最新
+# 安装包内的 codex-cli/codex-package.json（见 ``services.codex_desktop_release``）。
+CODEX_DESKTOP_BUILD_REGISTRY = "appcast:codex-desktop-build"
+CODEX_DESKTOP_CORE_REGISTRY = "appcast:codex-desktop-core"
 _VERSION_KEY_META: dict[str, dict[str, str | None]] = {
     "codex_tui": {"label": "Codex TUI", "registry": "npm:@openai/codex"},
-    "codex_desktop_core": {"label": "Codex Desktop 核心", "registry": None},
-    "codex_desktop_build": {"label": "Codex Desktop 构建", "registry": None},
+    "codex_desktop_core": {"label": "Codex Desktop 核心", "registry": CODEX_DESKTOP_CORE_REGISTRY},
+    "codex_desktop_build": {"label": "Codex Desktop 构建", "registry": CODEX_DESKTOP_BUILD_REGISTRY},
     "claude_code": {"label": "Claude Code", "registry": "npm:@anthropic-ai/claude-code"},
     "claude_sdk": {"label": "Anthropic JS SDK", "registry": "npm:@anthropic-ai/sdk"},
     "openai_sdk": {"label": "OpenAI Python SDK", "registry": "pypi:openai"},

@@ -42,19 +42,6 @@ struct AboutView: View {
     var body: some View {
         List {
             Section {
-                VStack(spacing: 8) {
-                    Image("BrandMark").resizable().scaledToFit().frame(width: 64, height: 64)
-                        .accessibilityHidden(true)
-                    Text("TelePilot").font(.title2.weight(.bold))
-                    Text("个人 Telegram 自动化服务器的原生管理客户端")
-                        .font(.footnote).foregroundStyle(.secondary).multilineTextAlignment(.center)
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 8)
-                .accessibilityElement(children: .combine)
-            }
-
-            Section {
                 LabeledContent {
                     Text(AppInfo.version).monospacedDigit().textSelection(.enabled)
                 } label: { Label("App 版本", systemImage: "iphone") }
@@ -232,6 +219,23 @@ struct ServerUpdateSheet: View {
     @State private var confirming = false
     @State private var confirmingNewAttempt = false
     @State private var copiedCommand = false
+    // 更新通道（服务器检查与拉取更新的 Git 远端/分支）
+    @State private var savedRemote: String?
+    @State private var savedBranch: String?
+    @State private var selectedRemote = ""
+    @State private var selectedBranch = ""
+    @State private var remoteOptions: [String] = []
+    @State private var branchOptions: [String] = []
+    @State private var loadingChannel = false
+    @State private var optionsError: String?
+    @State private var channelReadError: String?
+    @State private var savingChannel = false
+    @State private var channelError: String?
+    @State private var channelUncertain = false
+    @State private var confirmingChannel = false
+    // 自动检查
+    @State private var savingAutoCheck = false
+    @State private var autoCheckError: String?
 
     private var receiptKey: String {
         let testing = ProcessInfo.processInfo.arguments.contains("--ui-testing") ? ".fixture.\(ProcessInfo.processInfo.processIdentifier)" : ""
@@ -249,15 +253,41 @@ struct ServerUpdateSheet: View {
     }
     private var applySubmitted: Bool { applyResult?["success"]?.boolValue == true }
 
+    /// 实际生效的通道：优先用检查结果里服务器解析出的远端/分支，其次是已保存的设置。
+    private var effectiveRemote: String? { text(check?["remote"]) ?? savedRemote }
+    private var effectiveBranch: String? { text(check?["branch"]) ?? savedBranch }
+    private var channelLoaded: Bool { savedBranch != nil }
+    private var channelChanged: Bool {
+        channelLoaded && !selectedBranch.isEmpty && !selectedRemote.isEmpty
+            && (selectedBranch != effectiveBranch || selectedRemote != effectiveRemote)
+    }
+    private var branchChoices: [String] {
+        var seen = Set<String>()
+        return ([effectiveBranch, selectedBranch.isEmpty ? nil : selectedBranch].compactMap { $0 } + branchOptions)
+            .filter { seen.insert($0).inserted }
+    }
+    private var remoteChoices: [String] {
+        var seen = Set<String>()
+        return ([effectiveRemote, selectedRemote.isEmpty ? nil : selectedRemote].compactMap { $0 } + remoteOptions)
+            .filter { seen.insert($0).inserted }
+    }
+    private var autoCheckEnabled: Bool { status?["enabled"]?.boolValue ?? true }
+    private var autoCheckInterval: Int { status?["interval_minutes"]?.intValue ?? 1440 }
+    private static let intervalPresets: [(minutes: Int, title: String)] = [
+        (360, "每 6 小时"), (720, "每 12 小时"), (1440, "每天"), (4320, "每 3 天"), (10080, "每周")
+    ]
+
     var body: some View {
         NavigationStack {
             List {
                 statusSection
                 versionSection
+                channelSection
                 notesSection
                 planSection
                 actionSection
                 resultSection
+                autoCheckSection
             }
             .symbolRenderingMode(.hierarchical)
             .navigationTitle("服务器更新")
@@ -275,6 +305,17 @@ struct ServerUpdateSheet: View {
                 Button("取消", role: .cancel) {}
             } message: {
                 Text(confirmationMessage)
+            }
+            .confirmationDialog(channelConfirmationTitle, isPresented: $confirmingChannel, titleVisibility: .visible) {
+                Button("切换通道") { Task { await saveChannel() } }
+                    .accessibilityIdentifier("update.channel.confirm")
+                Button("取消", role: .cancel) {}
+            } message: {
+                Text(channelConfirmationMessage)
+            }
+            .onChange(of: selectedRemote) { old, new in
+                guard !old.isEmpty, old != new else { return }
+                Task { await loadTargetOptions(remote: new) }
             }
             .confirmationDialog("已核实上次更新任务已经结束？", isPresented: $confirmingNewAttempt, titleVisibility: .visible) {
                 Button("已核实，允许下次更新", role: .destructive) {
@@ -294,8 +335,11 @@ struct ServerUpdateSheet: View {
         .task {
             restoreReceipt()
             await loadStatus()
+            await loadChannel()
             await runCheck()
+            syncSelectionToEffective()
         }
+        .task { await loadTargetOptions(remote: nil) }
         .accessibilityIdentifier("update.sheet")
     }
 
@@ -347,19 +391,135 @@ struct ServerUpdateSheet: View {
                     } label: { Label("待合入提交", systemImage: "arrow.triangle.pull") }
                 }
             }
-            if let target {
-                LabeledContent {
-                    Text(target).font(.body.monospaced())
-                } label: { Label("更新来源", systemImage: "arrow.triangle.branch") }
-            }
             if let current = AppInfo.shortCommit(text(check?["current_commit"]) ?? model.serverVersion?.revision) {
                 LabeledContent {
                     Text(current).font(.footnote.monospaced()).textSelection(.enabled)
                 } label: { Label("部署提交", systemImage: "number") }
             }
         } header: { Text("版本") } footer: {
-            Text("“更新来源”是服务器拉取代码的远端与分支，可在 管理 › 系统设置 › 服务器设置 中修改。")
+            Text("“部署提交”是服务器当前运行代码的提交编号，反馈问题时可一并提供。")
         }
+    }
+
+    @ViewBuilder private var channelSection: some View {
+        Section {
+            LabeledContent {
+                Text(effectiveBranch.map { Self.branchTitle($0, remote: effectiveRemote) } ?? (loadingChannel ? "正在读取…" : "未知"))
+                    .multilineTextAlignment(.trailing)
+            } label: { Label("当前通道", systemImage: "arrow.triangle.branch") }
+                .accessibilityIdentifier("update.channel.current")
+            if let version = model.serverVersion {
+                LabeledContent {
+                    Text(AppInfo.channelLabel(version.channel))
+                } label: { Label("正在运行", systemImage: "shippingbox") }
+            }
+            if channelLoaded {
+                if remoteChoices.count > 1 {
+                    Picker(selection: $selectedRemote) {
+                        ForEach(remoteChoices, id: \.self) { Text($0).tag($0) }
+                    } label: { Label("Git 远端", systemImage: "server.rack") }
+                    .pickerStyle(.menu)
+                    .disabled(savingChannel || applying || channelUncertain)
+                }
+                Picker(selection: $selectedBranch) {
+                    ForEach(branchChoices, id: \.self) { branch in
+                        Text(Self.branchTitle(branch, remote: nil)).tag(branch)
+                    }
+                } label: { Label("选择通道", systemImage: "arrow.left.arrow.right") }
+                .pickerStyle(.menu)
+                .disabled(savingChannel || applying || channelUncertain)
+                .accessibilityIdentifier("update.channel.picker")
+                if channelChanged {
+                    Button { confirmingChannel = true } label: {
+                        Label(savingChannel ? "正在切换…" : "切换到 \(Self.branchTitle(selectedBranch, remote: nil))", systemImage: "checkmark.circle")
+                            .frame(minHeight: 44)
+                    }
+                    .disabled(savingChannel || applying || checking || channelUncertain)
+                    .accessibilityIdentifier("update.channel.save")
+                }
+            } else if loadingChannel {
+                HStack(spacing: 10) { ProgressView(); Text("正在读取更新通道…").foregroundStyle(.secondary) }
+            } else if let channelReadError {
+                NoticeView(title: "更新通道读取失败", message: channelReadError)
+            }
+            if let optionsError {
+                Label("未能读取完整的分支列表：\(optionsError)", systemImage: "exclamationmark.triangle")
+                    .font(.footnote).foregroundStyle(.secondary)
+            }
+            if let channelError {
+                NoticeView(title: channelUncertain ? "通道切换结果待确认" : "通道未切换", message: channelError)
+                    .accessibilityIdentifier("update.channel.error")
+            }
+            if channelUncertain {
+                Button { Task { await loadChannel(); syncSelectionToEffective() } } label: {
+                    Label("重新读取当前通道", systemImage: "arrow.clockwise")
+                }
+                .disabled(loadingChannel)
+            }
+        } header: { Text("更新通道") } footer: {
+            Text("更新通道是服务器检查和拉取更新的 Git 分支：main 为正式版，更稳定；Beta 为测试版，新功能更早但可能不稳定。切换只修改更新来源，不会立即更新；“正在运行”表示当前部署的版本类型。")
+        }
+    }
+
+    @ViewBuilder private var autoCheckSection: some View {
+        if status != nil {
+            Section {
+                Toggle(isOn: Binding(
+                    get: { autoCheckEnabled },
+                    set: { value in Task { await saveAutoCheck(enabled: value, interval: nil) } }
+                )) { Label("自动检查更新", systemImage: "clock.arrow.2.circlepath") }
+                .disabled(savingAutoCheck)
+                .accessibilityIdentifier("update.autoCheck")
+                if autoCheckEnabled {
+                    Picker(selection: Binding(
+                        get: { autoCheckInterval },
+                        set: { value in Task { await saveAutoCheck(enabled: nil, interval: value) } }
+                    )) {
+                        ForEach(intervalChoices, id: \.minutes) { choice in Text(choice.title).tag(choice.minutes) }
+                    } label: { Label("检查频率", systemImage: "timer") }
+                    .pickerStyle(.menu)
+                    .disabled(savingAutoCheck)
+                }
+                if let autoCheckError {
+                    NoticeView(title: "自动检查设置未保存", message: autoCheckError)
+                }
+            } header: { Text("自动检查") } footer: {
+                Text("服务器按所选频率在后台只读检查当前通道，发现新版本时在 App 与 Web 管理台提示，不会自动安装。")
+            }
+        }
+    }
+
+    private var intervalChoices: [(minutes: Int, title: String)] {
+        let current = autoCheckInterval
+        if Self.intervalPresets.contains(where: { $0.minutes == current }) { return Self.intervalPresets }
+        let hours = (Double(current) / 60).formatted(.number.precision(.fractionLength(0...1)))
+        return Self.intervalPresets + [(current, "每 \(hours) 小时（自定义）")]
+    }
+
+    private var channelConfirmationTitle: String {
+        "切换到 \(Self.branchTitle(selectedBranch, remote: selectedRemote))？"
+    }
+
+    private var channelConfirmationMessage: String {
+        var parts = ["之后服务器会从 \(selectedRemote)/\(selectedBranch) 检查和拉取更新。这一步只保存更新来源，不会立即更新；需要时再点“应用更新”。"]
+        if Self.isStable(selectedBranch) {
+            parts.append("从测试版切回正式版时，如果正式版比当前版本旧，可能暂时不会显示可用更新，请等待新的正式版。")
+        } else {
+            parts.append("非正式版分支可能包含尚未充分验证的改动。")
+        }
+        return parts.joined(separator: "\n")
+    }
+
+    static func isStable(_ branch: String) -> Bool { branch == "main" || branch == "master" }
+
+    /// 分支的中文说明：main 正式版、Beta 测试版，其余按原名显示为开发分支。
+    static func branchTitle(_ branch: String, remote: String?) -> String {
+        let name = remote.map { "\($0)/\(branch)" } ?? branch
+        let lower = branch.lowercased()
+        if isStable(branch) { return "\(name) · 正式版" }
+        if lower == "beta" { return "\(name) · 测试版" }
+        if lower == "dev" || lower == "develop" { return "\(name) · 开发版" }
+        return name
     }
 
     @ViewBuilder private var notesSection: some View {
@@ -491,6 +651,91 @@ struct ServerUpdateSheet: View {
 
     private func loadStatus() async {
         status = try? await model.request(path: "/api/system/update-status")
+    }
+
+    /// 读取已保存的更新通道与可选分支（只读请求）。
+    private func loadChannel() async {
+        guard !loadingChannel else { return }
+        loadingChannel = true
+        defer { loadingChannel = false }
+        do {
+            let settings = try await model.request(path: "/api/system/settings")
+            let target = settings["app_update_target"]
+            savedRemote = text(target?["remote"]) ?? "origin"
+            savedBranch = text(target?["branch"]) ?? "main"
+            channelReadError = nil
+            channelUncertain = false
+            channelError = nil
+            if selectedBranch.isEmpty || selectedRemote.isEmpty { syncSelectionToEffective() }
+        } catch {
+            channelReadError = error.localizedDescription
+        }
+    }
+
+    /// 读取可选远端与分支。服务器需要访问远端仓库，可能较慢，因此与检查更新并行进行。
+    private func loadTargetOptions(remote: String?) async {
+        var path = "/api/system/update-target-options"
+        if let remote, let encoded = remote.addingPercentEncoding(withAllowedCharacters: .alphanumerics.union(CharacterSet(charactersIn: "._-"))) {
+            path += "?remote=\(encoded)"
+        }
+        do {
+            let options = try await model.request(path: path)
+            remoteOptions = (options["remotes"]?.arrayValue ?? []).compactMap(\.stringValue)
+            branchOptions = (options["branches"]?.arrayValue ?? []).compactMap(\.stringValue)
+            optionsError = text(options["error"])
+        } catch {
+            optionsError = error.localizedDescription
+        }
+    }
+
+    /// 选择器默认指向实际生效的通道。
+    private func syncSelectionToEffective() {
+        guard !savingChannel else { return }
+        if let remote = effectiveRemote { selectedRemote = remote }
+        if let branch = effectiveBranch { selectedBranch = branch }
+    }
+
+    /// 保存更新通道：确认后只提交一次；网络中断时提示核实，不自动重试。
+    private func saveChannel() async {
+        guard !savingChannel, !applying, !channelUncertain, channelChanged else { return }
+        let remote = selectedRemote, branch = selectedBranch
+        savingChannel = true
+        channelError = nil
+        do {
+            let payload: JSONValue = .object(["app_update_target": .object(["remote": .string(remote), "branch": .string(branch)])])
+            let settings = try await model.request(path: "/api/system/settings", method: "PATCH", body: payload)
+            savedRemote = text(settings["app_update_target"]?["remote"]) ?? remote
+            savedBranch = text(settings["app_update_target"]?["branch"]) ?? branch
+            savingChannel = false
+            check = nil
+            await runCheck()
+            syncSelectionToEffective()
+        } catch {
+            savingChannel = false
+            let uncertain = (error as? APIError)?.isOutcomeUncertain == true
+            channelUncertain = uncertain
+            channelError = uncertain
+                ? "连接中断，无法确认通道是否已切换。请点“重新读取当前通道”核实，App 不会自动重试。"
+                : error.localizedDescription
+        }
+    }
+
+    /// 修改自动检查设置：失败时保留原值并显示原因，不自动重试。
+    private func saveAutoCheck(enabled: Bool?, interval: Int?) async {
+        guard !savingAutoCheck else { return }
+        savingAutoCheck = true
+        autoCheckError = nil
+        defer { savingAutoCheck = false }
+        var payload: [String: JSONValue] = [:]
+        if let enabled { payload["enabled"] = .bool(enabled) }
+        if let interval { payload["interval_minutes"] = .integer(Int64(interval)) }
+        do {
+            status = try await model.request(path: "/api/system/update-check", method: "PATCH", body: .object(payload))
+        } catch {
+            autoCheckError = (error as? APIError)?.isOutcomeUncertain == true
+                ? "未能确认设置是否已保存，请关闭面板后重新打开核实。"
+                : error.localizedDescription
+        }
     }
 
     /// 只读检查（服务器不拉取代码）；失败时显示原因，由用户决定是否重新检查。

@@ -7,9 +7,58 @@ final class ManagementUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["--ui-testing", "-AppleLanguages", "(zh-Hans)", "-AppleLocale", "zh_CN"]
         app.launch()
-        XCTAssertTrue(app.tabBars.buttons["更多"].waitForExistence(timeout: 15))
+        XCTAssertTrue(app.tabBars.buttons["更多"].waitForExistence(timeout: 45))
         app.tabBars.buttons["更多"].tap()
         return app
+    }
+
+    /// 服务器更新面板以 medium 高度的 sheet 呈现，iOS 26 起内联导航栏是悬浮在列表之上的玻璃层，
+    /// 列表行可以滚到导航栏下面：此时元素仍 exists/isHittable，但点击中心会落在导航栏上而丢失
+    /// （iOS 27 上“应用更新”曾停在 y≈420–490、导航栏 430–482 处，点击后确认弹窗没有出现）。
+    /// 这里按帧判断：只有目标整行落在导航栏下沿与列表下沿之间才算到位；否则按目标与可见区中线的
+    /// 距离做“按住—拖动—停留”的受控拖动（无惯性），目标被导航栏遮住时向下拖、在下方或尚未加载时向上拖。
+    private func scrollUpdateSheet(to element: XCUIElement, in app: XCUIApplication, attempts: Int = 14) {
+        let sheet = app.otherElements["update.sheet"]
+        let list = sheet.collectionViews.firstMatch
+        XCTAssertTrue(list.waitForExistence(timeout: 10))
+        let bar = sheet.navigationBars.firstMatch
+        for _ in 0..<attempts {
+            let listFrame = list.frame
+            let top = (bar.exists ? max(listFrame.minY, bar.frame.maxY) : listFrame.minY) + 4
+            let bottom = listFrame.maxY - 4
+            let span = bottom - top
+            guard span > 40 else { return }
+            var dy = -span * 0.5
+            if element.exists {
+                let frame = element.frame
+                if frame.minY >= top && frame.maxY <= bottom {
+                    if element.isHittable { return }
+                    Thread.sleep(forTimeInterval: 0.3)
+                    continue
+                }
+                dy = (top + span / 2) - frame.midY
+                dy = max(-span * 0.6, min(span * 0.6, dy))
+                if abs(dy) < 24 { dy = dy < 0 ? -24 : 24 }
+            }
+            let origin = list.coordinate(withNormalizedOffset: CGVector(dx: 0, dy: 0))
+            let startY = dy < 0 ? bottom - span * 0.15 : top + span * 0.15
+            let start = origin.withOffset(CGVector(dx: listFrame.width / 2, dy: startY - listFrame.minY))
+            let end = start.withOffset(CGVector(dx: 0, dy: dy))
+            start.press(forDuration: 0.1, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0.4)
+        }
+    }
+
+    /// 断言目标整行位于 sheet 可见区（导航栏下沿以下），点击不会被悬浮导航栏截走。
+    private func assertVisibleInUpdateSheet(_ element: XCUIElement, in app: XCUIApplication,
+                                            file: StaticString = #filePath, line: UInt = #line) {
+        let sheet = app.otherElements["update.sheet"]
+        let bar = sheet.navigationBars.firstMatch
+        XCTAssertTrue(element.exists, "\(element) 不存在", file: file, line: line)
+        XCTAssertTrue(element.isHittable, "\(element) 不可点", file: file, line: line)
+        if bar.exists {
+            XCTAssertGreaterThanOrEqual(element.frame.minY, bar.frame.maxY,
+                                        "\(element) 仍被导航栏遮挡", file: file, line: line)
+        }
     }
 
     func testTelegramBindingRequiresCredentialsBeforeSendingCode() {
@@ -55,6 +104,7 @@ final class ManagementUITests: XCTestCase {
         let app = launch()
         let about = app.buttons["more.about"]
         XCTAssertTrue(about.waitForExistence(timeout: 10))
+        for _ in 0..<4 where !about.isHittable { app.swipeUp() }
         about.tap()
         XCTAssertTrue(app.staticTexts["App 版本"].waitForExistence(timeout: 10))
         let open = app.buttons["update.open"]
@@ -63,9 +113,10 @@ final class ManagementUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["发现新版本"].waitForExistence(timeout: 10))
         XCTAssertTrue(app.staticTexts["0.105.0-beta.1"].exists)
         let apply = app.buttons["update.apply"]
-        for _ in 0..<4 where !apply.isHittable { app.swipeUp() }
+        scrollUpdateSheet(to: apply, in: app)
+        assertVisibleInUpdateSheet(apply, in: app)
         apply.tap()
-        XCTAssertTrue(app.buttons["update.confirm"].firstMatch.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["update.confirm"].firstMatch.waitForExistence(timeout: 10))
         let cancel = app.buttons["取消"].firstMatch
         if cancel.exists && cancel.isHittable { cancel.tap() }
         else { app.otherElements["PopoverDismissRegion"].firstMatch.tap() }
@@ -91,28 +142,36 @@ final class ManagementUITests: XCTestCase {
 
     func testServerUpdateReceiptSurvivesClosingPanel() {
         let app = launch()
-        app.buttons["more.about"].tap()
+        let about = app.buttons["more.about"]
+        XCTAssertTrue(about.waitForExistence(timeout: 10))
+        for _ in 0..<4 where !about.isHittable { app.swipeUp() }
+        about.tap()
         let open = app.buttons["update.open"]
         for _ in 0..<4 where !open.isHittable { app.swipeUp() }
         XCTAssertTrue(open.waitForExistence(timeout: 10))
         open.tap()
         let apply = app.buttons["update.apply"]
-        for _ in 0..<5 where !apply.isHittable { app.swipeUp() }
+        scrollUpdateSheet(to: apply, in: app)
         XCTAssertTrue(apply.waitForExistence(timeout: 10))
+        assertVisibleInUpdateSheet(apply, in: app)
         apply.tap()
         let confirm = app.buttons["update.confirm"].firstMatch
-        XCTAssertTrue(confirm.waitForExistence(timeout: 5))
+        XCTAssertTrue(confirm.waitForExistence(timeout: 10))
         confirm.tap()
         let job = app.buttons["update.job"]
-        for _ in 0..<5 where !job.isHittable { app.swipeUp() }
+        scrollUpdateSheet(to: job, in: app)
         XCTAssertTrue(job.waitForExistence(timeout: 10))
         app.buttons["update.done"].tap()
         XCTAssertTrue(open.waitForExistence(timeout: 5))
         open.tap()
-        for _ in 0..<5 where !job.isHittable { app.swipeUp() }
-        XCTAssertTrue(job.waitForExistence(timeout: 10))
+        // 面板新增“更新通道”分区后内容更长：滚到“更新结果”时，上方操作分区的行已被列表回收，
+        // 因此先在操作分区确认“应用更新”已隐藏、“允许下次更新”可用，再继续滚到升级任务。
+        let allowNext = app.buttons["update.allowNext"]
+        scrollUpdateSheet(to: allowNext, in: app)
+        XCTAssertTrue(allowNext.waitForExistence(timeout: 10))
         XCTAssertFalse(app.buttons["update.apply"].exists)
-        XCTAssertTrue(app.buttons["update.allowNext"].exists)
+        scrollUpdateSheet(to: job, in: app)
+        XCTAssertTrue(job.waitForExistence(timeout: 10))
     }
 
     func testLogDetailExplainsMessageFailureAndOpensTimeline() {

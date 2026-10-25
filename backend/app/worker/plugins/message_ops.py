@@ -390,6 +390,43 @@ class BufferedMessageOps:
         self.actions.append(action)
         return action
 
+    async def answer_guest_query(
+        self,
+        *,
+        guest_query_id: str | None = None,
+        text: str | None = None,
+        parse_mode: Literal["html", "plain"] = "plain",
+        rich_message: dict[str, Any] | None = None,
+        result: dict[str, Any] | None = None,
+        title: str | None = None,
+        reply_markup: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Bot API 10.0 Guest Mode：回复一条 ``guest_message``（每条只能回复一次）。
+
+        ``guest_query_id`` 省略时使用当前事件的 ``guest.query_id``。可以传
+        ``text`` / ``rich_message``，也可以传完整的 ``InlineQueryResult``（``result``）。
+        访客事件里直接 ``send`` / ``send_rich`` 也会被平台合并为一次访客回复，
+        只有需要自定义结果类型时才必须使用本方法。
+        """
+
+        action: dict[str, Any] = {
+            "type": "answer_guest_query",
+            "guest_query_id": guest_query_id,
+            "parse_mode": parse_mode,
+        }
+        if text is not None:
+            action["text"] = text
+        if rich_message is not None:
+            action["rich_message"] = dict(rich_message)
+        if result is not None:
+            action["result"] = dict(result)
+        if title is not None:
+            action["title"] = title
+        if reply_markup is not None:
+            action["reply_markup"] = dict(reply_markup)
+        self.actions.append(action)
+        return action
+
     async def payout(
         self,
         *,

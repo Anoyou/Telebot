@@ -25,6 +25,129 @@
         "title": "AICommandEnablementSummary",
         "type": "object"
       },
+      "AccountBotCapabilitiesResponse": {
+        "description": "账号管理 Bot / 交互 Bot 的能力状态。",
+        "properties": {
+          "account_id": {
+            "title": "Account Id",
+            "type": "integer"
+          },
+          "guest_mode_help": {
+            "default": "",
+            "title": "Guest Mode Help",
+            "type": "string"
+          },
+          "guest_updates_enabled": {
+            "default": true,
+            "description": "系统设置中的“访客消息（Guest Mode）”运行开关；关闭后不拉取 guest_message。",
+            "title": "Guest Updates Enabled",
+            "type": "boolean"
+          },
+          "interaction_bot": {
+            "$ref": "#/components/schemas/AccountBotCapabilityStatus"
+          },
+          "management_bot": {
+            "$ref": "#/components/schemas/AccountBotCapabilityStatus"
+          }
+        },
+        "required": [
+          "account_id",
+          "management_bot",
+          "interaction_bot"
+        ],
+        "title": "AccountBotCapabilitiesResponse",
+        "type": "object"
+      },
+      "AccountBotCapabilityStatus": {
+        "description": "单个 Bot 的 getMe 能力位（Bot API 10.0 起包含 Guest Mode）。",
+        "properties": {
+          "bot_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bot Id"
+          },
+          "can_read_all_group_messages": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Can Read All Group Messages"
+          },
+          "configured": {
+            "default": false,
+            "title": "Configured",
+            "type": "boolean"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "role": {
+            "enum": [
+              "management",
+              "interaction"
+            ],
+            "title": "Role",
+            "type": "string"
+          },
+          "supports_guest_queries": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "getMe.supports_guest_queries：是否已在 BotFather 开启访客模式（Guest Mode）；null 表示未知。",
+            "title": "Supports Guest Queries"
+          },
+          "supports_inline_queries": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Supports Inline Queries"
+          },
+          "username": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Username"
+          }
+        },
+        "required": [
+          "role"
+        ],
+        "title": "AccountBotCapabilityStatus",
+        "type": "object"
+      },
       "AccountBotChatMembership": {
         "properties": {
           "chat_id": {
@@ -19107,6 +19230,17 @@
             ],
             "title": "Event Bus Delivery Enabled"
           },
+          "guest_updates_enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Guest Updates Enabled"
+          },
           "inline_updates_enabled": {
             "anyOf": [
               {
@@ -20576,6 +20710,102 @@
           }
         ],
         "summary": "Update Account Bot",
+        "tags": [
+          "account-bots"
+        ]
+      }
+    },
+    "/api/accounts/{aid}/bot/capabilities": {
+      "get": {
+        "description": "读取管理 Bot / 交互 Bot 的 getMe 能力位（含访客模式 supports_guest_queries）。",
+        "operationId": "get_account_bot_capabilities_api_accounts__aid__bot_capabilities_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "aid",
+            "required": true,
+            "schema": {
+              "title": "Aid",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "跳过 60 秒缓存，重新调用 getMe",
+            "in": "query",
+            "name": "refresh",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "跳过 60 秒缓存，重新调用 getMe",
+              "title": "Refresh",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "auth_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Auth Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountBotCapabilitiesResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "认证失败"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "服务器内部错误"
+          }
+        },
+        "security": [
+          {
+            "AuthCookie": []
+          }
+        ],
+        "summary": "Get Account Bot Capabilities",
         "tags": [
           "account-bots"
         ]

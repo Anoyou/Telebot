@@ -83,19 +83,30 @@ struct OverviewView: View {
         }
     }
 
+    /// 三组读取并发进行，不再串行等待；“需要处理”在刷新期间保留上次结果。
     private func refreshAll() async {
-        await model.refresh()
-        await model.refreshWorkspace()
-        await signals.load(model: model)
+        let model = self.model
+        let signals = self.signals
+        async let base: Void = model.refresh()
+        async let workspace: Void = model.refreshWorkspace()
+        async let attention: Void = signals.load(model: model)
+        _ = await (base, workspace, attention)
     }
 
     // MARK: 状态摘要
 
     @ViewBuilder private func statusSection(_ items: [OverviewAttentionItem]) -> some View {
         Section {
+            NavigationLink { AboutView() } label: {
+                OverviewServerHeader(
+                    host: model.serverURL?.host,
+                    version: model.serverVersion,
+                    username: model.user?.username,
+                    reachable: model.health == nil ? (model.healthError == nil ? nil : false) : (model.healthError == nil),
+                    refreshing: model.isRefreshing || signals.loading
+                )
+            }
             VStack(alignment: .leading, spacing: 8) {
-                Label(model.serverURL?.host ?? "TelePilot", systemImage: "server.rack")
-                    .font(.subheadline).foregroundStyle(.secondary).textSelection(.enabled)
                 if model.health == nil && model.healthError == nil {
                     Text(model.isRefreshing ? "正在读取服务状态…" : "尚无服务状态").font(.title2.weight(.semibold))
                 } else if model.health == nil {
@@ -105,7 +116,7 @@ struct OverviewView: View {
                     let errors = items.filter { $0.severity == .error }.count
                     let warnings = items.filter { $0.severity == .warning }.count
                     if errors + warnings == 0 {
-                        if signals.loadedAt == nil || signals.loading {
+                        if signals.loadedAt == nil {
                             Label("正在检查工作区…", systemImage: "arrow.clockwise")
                                 .font(.title2.weight(.semibold))
                         } else if !signals.unavailable.isEmpty || model.healthError != nil || model.accountsError != nil || model.resourcesError != nil || model.workspaceError != nil {
@@ -301,4 +312,74 @@ struct VerticalQuickLabelStyle: LabelStyle {
 
 extension LabelStyle where Self == VerticalQuickLabelStyle {
     static var verticalQuick: VerticalQuickLabelStyle { VerticalQuickLabelStyle() }
+}
+
+/// 概览顶部的紧凑品牌头：App 图标、名称、一句话说明与当前连接的服务器（原“关于”页顶部卡片）。
+/// 概览顶部：当前连接的服务器。点按进入“关于”查看完整服务器信息与检查更新。
+private struct OverviewServerHeader: View {
+    let host: String?
+    let version: ServerVersion?
+    let username: String?
+    /// nil = 尚未读取；true = 在线；false = 最近一次读取失败
+    let reachable: Bool?
+    let refreshing: Bool
+
+    private var statusText: String {
+        switch reachable {
+        case .some(true): "已连接"
+        case .some(false): "连接异常"
+        case .none: "正在连接…"
+        }
+    }
+    private var statusColor: Color {
+        switch reachable {
+        case .some(true): .green
+        case .some(false): .red
+        case .none: .secondary
+        }
+    }
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 14) {
+            Image("BrandMark")
+                .resizable()
+                .scaledToFit()
+                .frame(width: 48, height: 48)
+                .clipShape(.rect(cornerRadius: 11, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 11, style: .continuous)
+                        .strokeBorder(Color(.separator), lineWidth: 0.5)
+                }
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 3) {
+                Text("当前服务器").font(.caption).foregroundStyle(.secondary)
+                Text(host ?? "未连接服务器")
+                    .font(.headline)
+                    .lineLimit(1).truncationMode(.middle)
+                HStack(spacing: 6) {
+                    Circle().fill(statusColor).frame(width: 7, height: 7)
+                    Text(statusText)
+                    if let version {
+                        Text("·")
+                        Text("v\(version.version)").monospacedDigit()
+                        Text(AppInfo.channelLabel(version.channel))
+                    }
+                    if refreshing {
+                        ProgressView().controlSize(.mini)
+                    }
+                }
+                .font(.caption).foregroundStyle(.secondary)
+                .lineLimit(1)
+                if let username {
+                    Label(username, systemImage: "person.crop.circle")
+                        .font(.caption).foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.vertical, 4)
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("overview.server")
+    }
 }

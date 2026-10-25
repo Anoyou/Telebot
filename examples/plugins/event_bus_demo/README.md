@@ -8,6 +8,7 @@
 - `callback_query`：返回 `answer_callback`。
 - `inline_query`：返回 `answer_inline_query`。
 - `chosen_inline_result`：返回结构化 `result`。
+- `guest_message`（Bot API 10.0 访客模式，`scope: guest_all`）：返回 `answer_guest_query`，每条访客消息只能回复一次。
 - `payment_confirmed`：返回 `settlement`，普通 Bot 不执行转账。
 
 `capabilities.telegram_native_raw` 只用于排障。插件必须先处理 `native_raw_meta.enabled=false` 的降级场景，不能把原生对象当业务主路径。

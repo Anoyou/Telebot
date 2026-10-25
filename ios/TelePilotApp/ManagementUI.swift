@@ -150,7 +150,7 @@ struct ManagementValueView: View {
                     if let fieldValue = object[field], !fieldValue.isNull, field != "preview_signature" {
                         if fieldValue.objectValue != nil || fieldValue.arrayValue != nil {
                             NavigationLink {
-                                List { ManagementValueView(value: fieldValue, key: field) }.navigationTitle(ManagementText.label(field))
+                                List { ManagementValueView(value: fieldValue, key: field) }.navigationTitle(ManagementText.label(field)).navigationBarTitleDisplayMode(.inline)
                             } label: {
                                 LabeledContent(ManagementText.label(field), value: ManagementText.scalar(fieldValue))
                             }
@@ -172,7 +172,7 @@ struct ManagementValueView: View {
                 ForEach(Array(array.enumerated()), id: \.offset) { index, item in
                     if item.objectValue != nil || item.arrayValue != nil {
                         NavigationLink {
-                            List { ManagementValueView(value: item) }.navigationTitle(ManagementText.title(item))
+                            List { ManagementValueView(value: item) }.navigationTitle(ManagementText.title(item)).navigationBarTitleDisplayMode(.inline)
                         } label: { ManagementRecordRow(value: item) }
                     } else { Text(ManagementText.scalar(item)).textSelection(.enabled) }
                 }
@@ -206,7 +206,7 @@ struct ManagementPluginLookupView: View {
                 List {
                     if let error { NoticeView(title: "插件读取失败", message: error) }
                     else { ProgressView("正在读取插件…") }
-                }.navigationTitle("插件详情")
+                }.navigationTitle("插件详情").navigationBarTitleDisplayMode(.inline)
             }
         }.task {
             do {

@@ -14,7 +14,7 @@
 - 日志筛选、调用链、路由模拟、脱敏导出；资金明细与补偿、Webhook、平台设置、代理、设备、通知 Bot、权限和 TOTP。
 - 配置原生文件导入／导出、导入预检、网络诊断、服务器升级进度、重启与紧急停止。
 - 可定制底部 Dock 和首页、全局搜索、iPad 双栏、深色模式、Face ID／设备验证与敏感信息遮盖。
-- 可选 Apple 远程推送，详见 [APNs 配置](../docs/APNS.md)。
+- 可选 Apple 远程推送，配置步骤见 [iOS 推送通知配置教程](../docs/IOS-PUSH.md)，接口与投递语义见 [APNs 参考](../docs/APNS.md)；App 内「设置 → Apple 推送通知」提供状态检查与配置教程。
 - 在 Safari 打开完整 Web 管理台。浏览器与 App 的会话独立，可能需要分别登录。
 
 普通字段由原生表单承载，第三方插件配置使用服务端 schema 生成嵌套对象、数组、枚举等原生控件。App 不运行插件或模型，也不模拟 iOS 后台常驻。退出 App 不会停止服务器任务。
@@ -116,7 +116,7 @@ sh ios/scripts/ui-visual-screenshots.sh ios/build/ui-screenshots-light
 git diff --check
 ```
 
-模拟器名称以 `xcrun simctl list devices available` 为准。UI 测试以 Debug 专属的 fixture 启动，不连接真实服务器；Release 构建不包含这套测试服务。核心测试使用模拟 HTTP 响应验证真实网络层协议，不使用生产凭据。
+模拟器名称以 `xcrun simctl list devices available` 为准。GitHub Actions 的「iOS」工作流（`.github/workflows/ios.yml`）会在 GitHub `xcode-27` 运行器（Xcode 27；工程使用 `TabRole.prominent` 等 iOS 27 SDK API，需 Xcode 27 编译）上自动执行同样的契约检查、核心测试和 UI 测试，iOS 相关 PR 无需本地编译即可看到结果；手工增删 Swift 文件后可用 `python3 ios/scripts/check-xcodeproj-sources.py` 确认工程已收录。UI 测试以 Debug 专属的 fixture 启动，不连接真实服务器；Release 构建不包含这套测试服务。核心测试使用模拟 HTTP 响应验证真实网络层协议，不使用生产凭据。
 
 视觉巡检脚本会连接当前已启动的 iPhone 模拟器，按固定路径拍摄概览、插件中心、插件管理、插件详情、AI 概览、供应商、测活和用量。脚本不会覆盖已有 result bundle；复查深色模式或其他模拟器时，先切换好外观或机型，再使用新的输出目录。
 

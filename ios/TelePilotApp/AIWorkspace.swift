@@ -95,21 +95,24 @@ struct AIWorkspaceView: View {
 
     var body: some View {
         List {
-            Section {
-                Picker("AI 工作区", selection: $section) {
-                    ForEach(AISection.allCases) { item in Text(item.title).tag(item) }
-                }
-                .pickerStyle(.segmented)
-                .accessibilityIdentifier("ai.sections")
-            }
-            .listRowInsets(EdgeInsets(top: 12, leading: 16, bottom: 8, trailing: 16))
-            .listRowSeparator(.hidden)
-
             switch section {
             case .overview: AIOverviewSection(workspace: workspace, showUsage: { section = .usage }, showLiveness: { showLiveness = true })
             case .providers: AIProviderListSection(workspace: workspace)
             case .usage: AIUsageSection(workspace: workspace)
             }
+        }
+        // 顶部分段切换放进系统安全区栏：内容从下方滚过时由系统的滚动边缘效果承托，
+        // 分段控件本身是 iOS 26 原生的 Liquid Glass 控件，不再套白色卡片背景。
+        .safeAreaBar(edge: .top) {
+            Picker("AI 工作区", selection: $section) {
+                ForEach(AISection.allCases) { item in Text(item.title).tag(item) }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .controlSize(.large)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+            .accessibilityIdentifier("ai.sections")
         }
         .navigationTitle("AI")
         .navigationDestination(isPresented: $showLiveness) {
@@ -171,18 +174,18 @@ private struct AIOverviewSection: View {
     }
 
     private var actions: some View {
-        Section("常用操作") {
+        Section {
             Button {
                 showLiveness()
             } label: {
-                Label("模型批量测活", systemImage: "waveform.path.ecg")
-                    .accessibilityHint("检查所选模型现在能否正常回复")
+                AINavigationRow(title: "全部供应商巡检", detail: "一次检查所有供应商的已启用模型能否正常回复", symbol: "checklist")
             }
-            NavigationLink {
-                AIProvidersDestination(workspace: workspace)
-            } label: {
-                Label("管理供应商与模型", systemImage: "server.rack")
-            }
+            .accessibilityIdentifier("ai.liveness.patrol")
+            .accessibilityHint("检查所选模型现在能否正常回复")
+        } header: {
+            Text("常用操作")
+        } footer: {
+            Text("供应商与模型的添加、编辑请在上方“供应商”中进行。")
         }
     }
 
@@ -276,14 +279,6 @@ struct AIWorkspaceErrors: View {
         ForEach(workspace.errors.keys.sorted(), id: \.self) { key in
             Section { NoticeView(title: "\(names[key] ?? key)读取失败", message: workspace.errors[key]) }
         }
-    }
-}
-
-private struct AIProvidersDestination: View {
-    @Bindable var workspace: AIWorkspaceStore
-    var body: some View {
-        List { AIProviderListSection(workspace: workspace, showSearch: true) }
-            .navigationTitle("供应商").navigationBarTitleDisplayMode(.inline)
     }
 }
 
@@ -1397,7 +1392,7 @@ struct AIIdentityVersionsView: View {
                     }
                     if let detectError { NoticeView(title: "查询失败", message: detectError) }
                 } footer: {
-                    Text("只从公开的软件仓库查询版本号，不会修改设置，也不消耗模型额度。填入后还需点“保存修改”。")
+                    Text("只从公开的软件仓库（npm、PyPI）和官方更新源查询版本号，不会修改设置，也不消耗模型额度。Codex Desktop 的两个版本读取 OpenAI 官方桌面 App 更新源及其最新安装包里的核心版本。填入后还需点“保存修改”。")
                 }
                 Section {
                     Button { confirmingSave = true } label: {
@@ -1492,6 +1487,8 @@ struct AIIdentityVersionsView: View {
             .font(.caption)
             if item["detectable"]?.boolValue != true {
                 Text("此项无法自动查询最新版本，只能手动填写。").font(.caption2).foregroundStyle(.secondary)
+            } else if item["registry"]?.stringValue?.hasPrefix("appcast:") == true {
+                Text("最新版本来自 OpenAI 官方 Codex Desktop 更新源。").font(.caption2).foregroundStyle(.secondary)
             }
         }
         .padding(.vertical, 2)

@@ -143,6 +143,32 @@ Telegram 账号的自动化规则与分组。账号的 userbot / interaction bot
   待确认项进入 `/assistant/inbox`， Bot 侧也可用 `/agent pending` 查看。
 - Action 过期后密文会被清除，确认链接不会长期可点。
 
+### 访客模式（Guest Mode，Bot API 10.0）
+
+Telegram Bot API 10.0（2026-05-08）新增访客模式：Bot 在 BotFather 开启 “Guest Mode” 后，可以在**没有加入**的群聊或私聊里被 `@提及`（或被回复）时回复**一次**，且看不到该会话的历史消息。
+
+开启与使用：
+
+1. 在 Telegram 打开 [@BotFather 的 Mini App](https://t.me/BotFather?startapp)，进入对应 Bot 的设置并启用 “Guest Mode”。管理 Bot 和交互 Bot 各自独立开关。
+2. 在 Web「账号 → Bot 联动」（管理 Bot / 交互 Bot 页）或 iOS「账号管理 → 访客模式」查看“访客模式（Guest Mode）：已开启/未开启”，开启后点“重新检测”。状态来自 `getMe.supports_guest_queries`，接口为 `GET /api/accounts/{aid}/bot/capabilities`。
+3. 在任意聊天输入 `@你的Bot用户名 内容`，或直接回复该 Bot 之前发出的消息。
+
+不同 Bot 的处理方式：
+
+| 被召唤的 Bot | 谁能用 | 进入的能力 |
+| --- | --- | --- |
+| 管理 Bot | 仅 Bot 用户与权限里已授权的 Telegram 用户 | 斜杠命令（如 `@管理Bot /status`）；开启系统助手模式后，自由文本交给系统助手回答。未授权用户的 `@` 被忽略，`/start` `/help` 只返回授权提示。 |
+| 交互 Bot | 任何人 | 交互规则的查询指令、开关/状态指令和关键词入口（仍按规则自身的会话范围判断，全局规则才会在陌生会话生效）；以及订阅了 `guest_message` 的 Event Bus 插件。 |
+
+限制：
+
+- 每条访客消息只能回复一次。TelePilot 会把处理过程中的所有发送/编辑合并为最终的一条消息（占位“处理中…”会被最终结果替换），处理结束后通过 `answerGuestQuery` 发送；AI 等耗时流程会在得出结果后才回复，期间没有流式预览。
+- 回复上限 4096 字，超长会截断；HTML 解析失败时自动退回纯文本。回调按钮会被去掉，只保留 URL / 复制 / 切换 Inline 按钮。
+- 图片、文件无法作为访客回复发送（只保留说明文字）；付款/发奖、置顶、按钮 ACK、转账指令和付款通知在访客场景下一律跳过并记录 `guest_action_unsupported`。
+- 访客会话不会写入授权用户的“最近会话”，也不会成为通知投递目标；访客消息不会续接交互会话（游戏等多轮玩法）。
+- 每个调用者每分钟最多 6 次、每个 Bot 每分钟最多 60 次，超出会被忽略并记录 `guest_rate_limited`。
+- 系统设置的“访客消息（Guest Mode）”运行开关关闭后，平台不再拉取 `guest_message`。
+
 ---
 
 ## 4. System Agent（系统助手）

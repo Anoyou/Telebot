@@ -28,6 +28,7 @@
 		6998959A60A66F25BA4CA439 /* AssistantInboxView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 340B7C9FDAAD7EDEB16A56F2 /* AssistantInboxView.swift */; };
 		702EA3E96F61E657A0C12224 /* OverviewComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = DB2CCF9898F9CE1A2073AFA2 /* OverviewComponents.swift */; };
 		7901764592C78E770F0844FC /* MoreView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 128DDC606C3A511DB8D00C74 /* MoreView.swift */; };
+		4723C566E9CA12B1FFA659B3 /* EmergencyStopSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8CA613B49564EAA36E5FAC1C /* EmergencyStopSection.swift */; };
 		79B21DFFE85F22B61B1D26CA /* AILiveness.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C32028841D2B2274B6BFD3C /* AILiveness.swift */; };
 		88885830FD6DBAA8702EB75E /* TelePilotApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7345E48AE830986E3B98514 /* TelePilotApp.swift */; };
 		8BD74933286E7D1248175ECE /* OverviewCustomization.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1129B1323A246221ADC267A8 /* OverviewCustomization.swift */; };
@@ -73,6 +74,7 @@
 		10E9FFA6394C9F48135FAE27 /* ManagementJobs.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManagementJobs.swift; sourceTree = "<group>"; };
 		1129B1323A246221ADC267A8 /* OverviewCustomization.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OverviewCustomization.swift; sourceTree = "<group>"; };
 		128DDC606C3A511DB8D00C74 /* MoreView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MoreView.swift; sourceTree = "<group>"; };
+		8CA613B49564EAA36E5FAC1C /* EmergencyStopSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmergencyStopSection.swift; sourceTree = "<group>"; };
 		164FB264CCA22ACBC35826C8 /* AppServing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppServing.swift; sourceTree = "<group>"; };
 		18587ABAD612072898FB2976 /* TelePilotUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TelePilotUITests.swift; sourceTree = "<group>"; };
 		1E32918F7013C607C4AB25DC /* AccountsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountsView.swift; sourceTree = "<group>"; };
@@ -169,6 +171,7 @@
 				6FBDA94E7D541ACA0F785572 /* ManagementRules.swift */,
 				B9A92C1168E91BF98C329CE1 /* ManagementUI.swift */,
 				2EFDEDF45ECBEE066D2B91CC /* ManagementView.swift */,
+				8CA613B49564EAA36E5FAC1C /* EmergencyStopSection.swift */,
 				128DDC606C3A511DB8D00C74 /* MoreView.swift */,
 				4BB022269DBE2DE7F5E3C7A1 /* OpsSupport.swift */,
 				DB2CCF9898F9CE1A2073AFA2 /* OverviewComponents.swift */,
@@ -355,6 +358,7 @@
 				E4FBDEBE4F82E3952705A4E9 /* ManagementRules.swift in Sources */,
 				9C657D4027BD8DA9296CB231 /* ManagementUI.swift in Sources */,
 				6831F006FD21A32133940BE3 /* ManagementView.swift in Sources */,
+				4723C566E9CA12B1FFA659B3 /* EmergencyStopSection.swift in Sources */,
 				7901764592C78E770F0844FC /* MoreView.swift in Sources */,
 				C729DBBC8C4DCCC0301B973D /* OpsSupport.swift in Sources */,
 				702EA3E96F61E657A0C12224 /* OverviewComponents.swift in Sources */,

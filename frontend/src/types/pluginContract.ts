@@ -5,6 +5,7 @@ const HIGH_RISK_TERMS = [
   "telegram_native_raw",
   "native_raw",
   "inline_all",
+  "guest_all",
   "bbot_notice",
   "notice_bot",
 ];
@@ -18,6 +19,7 @@ const EVENT_LABELS: Record<string, string> = {
   chosen_inline_result: "Inline 选择",
   command: "命令",
   external_payment_notice: "外部付款通知",
+  guest_message: "访客消息",
   inline_query: "Inline 查询",
   keyword: "关键词",
   message: "普通消息",
@@ -30,11 +32,13 @@ const EVENT_LABELS: Record<string, string> = {
 const CAPABILITY_LABELS: Record<string, string> = {
   answer_callback: "按钮 ACK",
   answer_inline_query: "Inline 回答",
+  answer_guest_query: "访客回复",
   ai: "AI 调用",
   ai_text: "AI 文本",
   llm: "AI 调用",
   llm_text: "AI 文本",
   inline_all: "Inline 全量",
+  guest_all: "访客全量",
   settlement: "结算动作",
   telegram_direct_passthrough: "裸直通",
   telegram_native_raw: "native_raw",
@@ -251,6 +255,9 @@ export function pluginContractRiskWarnings(input: {
   }
   if (haystack.includes("inline_all")) {
     warnings.push("高风险：插件声明 inline_all，可能处理全部 Inline 查询。");
+  }
+  if (haystack.includes("guest_all")) {
+    warnings.push("高风险：插件声明 guest_all，任何会话里 @提及 Bot 的访客消息都会投递给它。");
   }
   for (const channel of DEPRECATED_SEND_CHANNELS) {
     if (containsDeprecatedSendChannel({
