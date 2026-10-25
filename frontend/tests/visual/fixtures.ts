@@ -178,6 +178,11 @@ function jsonResponse(pathname: string): unknown | undefined {
   if (pathname === "/api/system-agent/queue") return [];
   if (pathname === "/api/system-agent/actions") return [];
   if (pathname === "/api/system-agent/memory") return [];
+  // Agent Skills：基线固定为“未安装任何 skill”，上限与后端默认值一致。
+  if (pathname === "/api/agent-skills") return {
+    items: [],
+    limits: { max_files: 64, max_file_bytes: 262144, max_skill_bytes: 1048576, max_archive_bytes: 10485760, agent_load_max_chars: 20000, plugin_load_max_chars: 8000 },
+  };
   if (pathname === "/api/system/capabilities") return platformCapabilitiesFixture;
   if (pathname === "/api/platform/profile") return {
     active_profile: null,
