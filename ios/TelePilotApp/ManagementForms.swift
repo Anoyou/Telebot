@@ -1,6 +1,17 @@
 import SwiftUI
 import TelePilotCore
 
+/// 插件配置表单里的可选字段直接显示单个控件：不渲染“是否提交此项”的开关，
+/// 留空即不提交，由服务器按 schema 默认值处理（与 Web 插件配置页一致）。
+/// 通用管理表单（API 操作）保持原行为：可选字段需要先打开开关才提交。
+private struct ManagementOptionalFieldsInlineKey: EnvironmentKey { static let defaultValue = false }
+extension EnvironmentValues {
+    var managementOptionalFieldsInline: Bool {
+        get { self[ManagementOptionalFieldsInlineKey.self] }
+        set { self[ManagementOptionalFieldsInlineKey.self] = newValue }
+    }
+}
+
 enum ManagementSchema {
     static func allowsNull(_ schema: JSONValue) -> Bool {
         schema["type"]?.stringValue == "null"
@@ -186,24 +197,22 @@ struct ManagementFormView: View {
 struct ManagementFieldsView: View {
     let schema: JSONValue
     @Binding var value: JSONValue
+    @Environment(\.managementOptionalFieldsInline) private var optionalInline
     var body: some View {
         let schema = ManagementSchema.normalized(schema)
         let properties = schema["properties"]?.objectValue ?? [:]
         let required = Set(schema["required"]?.arrayValue?.compactMap(\.stringValue) ?? [])
         if !properties.isEmpty {
-            ForEach(properties.keys.sorted { lhs, rhs in
-                if required.contains(lhs) != required.contains(rhs) { return required.contains(lhs) }
-                return lhs < rhs
-            }, id: \.self) { key in
+            ForEach(Self.orderedKeys(schema: schema, properties: properties, required: required), id: \.self) { key in
                 if let spec = properties[key], spec["readOnly"]?.boolValue != true {
                     // 可选布尔字段本身就是开关：不再额外渲染“是否提交此项”的同名开关，
                     // 否则会出现两个同名开关（一个开、一个关），且实际提交的是用户没注意到的那个值。
                     let inlineToggle = ManagementSchema.isPlainBoolean(spec)
                     Section {
-                        if !required.contains(key), !inlineToggle {
+                        if !required.contains(key), !inlineToggle, !optionalInline {
                             Toggle(isOn: included(key, spec: spec)) { Text(ManagementText.fieldLabel(key, schema: spec)) }
                         }
-                        if required.contains(key) || inlineToggle || value[key] != nil {
+                        if required.contains(key) || inlineToggle || optionalInline || value[key] != nil {
                             if value[key]?.isNull == true, ManagementSchema.allowsNull(spec) {
                                 Text("此项将设为空，使用服务器默认值或解除关联。").font(.footnote).foregroundStyle(.secondary)
                                 Button("填写" + ManagementText.fieldLabel(key, schema: spec)) { field(key).wrappedValue = ManagementSchema.inputValue(spec) }
@@ -223,6 +232,17 @@ struct ManagementFieldsView: View {
         } else if schema["additionalProperties"]?.boolValue == true || schema["additionalProperties"]?.objectValue != nil
                     || (schema["properties"] == nil && value.objectValue?.isEmpty == false) {
             ManagementDictionaryView(value: $value, itemSchema: schema["additionalProperties"])
+        }
+    }
+    /// 声明了 `x-ui-property-order` / `x-ui-order`（插件配置）时按声明顺序排列；
+    /// 否则沿用通用表单的顺序：必填项在前，其余按字段名。
+    static func orderedKeys(schema: JSONValue, properties: [String: JSONValue], required: Set<String>) -> [String] {
+        let declared = schema[PluginConfigLayout.propertyOrderKey]?.arrayValue?.isEmpty == false
+            || properties.values.contains { $0["x-ui-order"] != nil }
+        if declared { return PluginConfigLayout.orderedKeys(schema: schema) }
+        return properties.keys.sorted { lhs, rhs in
+            if required.contains(lhs) != required.contains(rhs) { return required.contains(lhs) }
+            return lhs < rhs
         }
     }
     private func field(_ key: String) -> Binding<JSONValue> {
@@ -245,6 +265,7 @@ struct ManagementFieldView: View {
     let schema: JSONValue
     @Binding var value: JSONValue
     @State private var inputError: String?
+    @Environment(\.managementOptionalFieldsInline) private var optionalInline
 
     var body: some View {
         let spec = ManagementSchema.normalized(schema)
@@ -261,10 +282,12 @@ struct ManagementFieldView: View {
             } else if spec["type"]?.stringValue == "object" || spec["properties"] != nil || value.objectValue != nil {
                 NavigationLink {
                     Form { ManagementFieldsView(schema: spec, value: $value) }.navigationTitle(title).navigationBarTitleDisplayMode(.inline)
+                        .environment(\.managementOptionalFieldsInline, optionalInline)
                 } label: { LabeledContent("编辑" + title, value: ManagementText.scalar(value)) }
             } else if spec["type"]?.stringValue == "array" || value.arrayValue != nil {
                 NavigationLink {
                     ManagementArrayView(title: title, schema: spec["items"] ?? .object(["type": .string("string")]), value: $value)
+                        .environment(\.managementOptionalFieldsInline, optionalInline)
                 } label: { LabeledContent("编辑" + title, value: ManagementText.scalar(value)) }
             } else if spec["format"]?.stringValue == "date-time" {
                 ManagementDateField(title: title, value: $value)

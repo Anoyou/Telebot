@@ -101,4 +101,66 @@ final class WorkspaceUITests: XCTestCase {
         // 统一模型列表：Provider 选择器保留，但标注随模型自动填写。
         XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "随模型自动填写")).firstMatch.waitForExistence(timeout: 5))
     }
+
+    func testPluginConfigFollowsSectionsAndMarksOnlyRequiredFields() {
+        let app = launch()
+        app.tabBars.buttons["插件"].tap()
+        let card = app.buttons["plugin.card.content_assistant"]
+        XCTAssertTrue(card.waitForExistence(timeout: 10))
+        card.tap()
+        XCTAssertTrue(app.buttons["账号配置"].waitForExistence(timeout: 5))
+        app.buttons["账号配置"].tap()
+        XCTAssertTrue(app.buttons["plugin.config.edit"].waitForExistence(timeout: 5))
+        app.buttons["plugin.config.edit"].tap()
+        // 基础分组（“AI 模型”）留在主页，组标题位于组内第一项上方。
+        let aiGroup = app.descendants(matching: .any)["plugin.config.group.AI 模型"].firstMatch
+        XCTAssertTrue(aiGroup.waitForExistence(timeout: 10))
+        let provider = app.descendants(matching: .any)["plugin.config.select.固定 TelePilot Provider（可选）"].firstMatch
+        XCTAssertTrue(provider.waitForExistence(timeout: 5))
+        XCTAssertLessThan(aiGroup.frame.minY, provider.frame.minY)
+        XCTAssertFalse(app.descendants(matching: .any)["plugin.config.required.telepilot_provider"].exists)
+        // 其他分组各自成为一行子页面入口，行上显示摘要；必填未填的分组有提示。
+        // 表单是懒加载列表，屏幕外的行不在辅助功能树里：滚到“更多设置”最后一行（消息模板）可点为止，
+        // 保证三个子页面入口都已渲染，而不是第一个入口刚露头就停下。
+        let triggerPage = app.buttons["plugin.config.page.触发方式"]
+        let templatePage = app.buttons["plugin.config.page.消息模板"]
+        var swipes = 0
+        while !(templatePage.exists && templatePage.isHittable) && swipes < 8 {
+            app.swipeUp()
+            swipes += 1
+        }
+        XCTAssertTrue(templatePage.waitForExistence(timeout: 5))
+        XCTAssertTrue(triggerPage.exists)
+        XCTAssertTrue(triggerPage.isHittable)
+        XCTAssertTrue(triggerPage.label.contains("有必填项未填"))
+        let ptPage = app.buttons["plugin.config.page.PT 站点数据源"]
+        XCTAssertTrue(ptPage.exists)
+        XCTAssertTrue(ptPage.label.contains("未启用"))
+        XCTAssertFalse(app.descendants(matching: .any)["plugin.config.required.bot_username"].exists)
+
+        triggerPage.tap()
+        XCTAssertTrue(app.navigationBars["触发方式"].waitForExistence(timeout: 5))
+        // 写着“可选”、有默认值的字段不标“必填”；只有没有默认值的“目标群组 ID”是必填。
+        let required = app.descendants(matching: .any)["plugin.config.required.target_chat_id"].firstMatch
+        XCTAssertTrue(required.waitForExistence(timeout: 5))
+        XCTAssertFalse(app.descendants(matching: .any)["plugin.config.required.bot_username"].exists)
+        XCTAssertFalse(app.descendants(matching: .any)["plugin.config.required.enable_guest"].exists)
+        // 可选字段只有一个控件：不再出现“是否提交此项”的同名开关。
+        let guest = app.switches.matching(NSPredicate(format: "label == %@", "访客模式触发"))
+        XCTAssertEqual(guest.count, 1)
+        // 子页面里修改同一份草稿，回到主页统一检查并保存。
+        guest.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.92, dy: 0.5)).tap()
+        app.navigationBars["触发方式"].buttons.element(boundBy: 0).tap()
+        let review = app.buttons["plugin.config.toolbarReview"]
+        XCTAssertTrue(review.waitForExistence(timeout: 5))
+        XCTAssertTrue(review.isEnabled)
+        // 有未保存的修改时离开要确认。
+        let back = app.buttons["plugin.config.back"]
+        XCTAssertTrue(back.waitForExistence(timeout: 5))
+        back.tap()
+        let discard = app.buttons["放弃修改"]
+        XCTAssertTrue(discard.waitForExistence(timeout: 5))
+        discard.tap()
+        XCTAssertTrue(app.buttons["plugin.config.edit"].waitForExistence(timeout: 5))
+    }
 }

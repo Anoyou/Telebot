@@ -34,6 +34,27 @@ from __future__ import annotations
 from dataclasses import InitVar, dataclass, field
 from typing import Any
 
+# 记录 ``properties`` 的声明顺序。PostgreSQL JSONB 不保留对象键顺序，
+# 写库后 App/Web 只能靠这份列表还原插件作者声明的字段顺序。
+PROPERTY_ORDER_KEY = "x-ui-property-order"
+
+
+def with_property_order(schema: Any) -> Any:
+    """返回带 ``x-ui-property-order`` 的 schema 副本（递归处理嵌套对象与数组项）。
+
+    已有的声明会按当前 ``properties`` 重新计算，保证与字段一致；不修改入参。
+    """
+
+    if isinstance(schema, list):
+        return [with_property_order(item) for item in schema]
+    if not isinstance(schema, dict):
+        return schema
+    out = {key: with_property_order(value) for key, value in schema.items()}
+    properties = out.get("properties")
+    if isinstance(properties, dict) and properties:
+        out[PROPERTY_ORDER_KEY] = [key for key in properties if isinstance(key, str)]
+    return out
+
 
 @dataclass
 class Manifest:
@@ -92,6 +113,11 @@ class Manifest:
     # 仅保留旧第三方插件的构造参数兼容；loader 从未执行该钩子，实例不存储也不序列化。
     on_install: InitVar[str | None] = None
 
+    def __post_init__(self, on_install: str | None = None) -> None:
+        del on_install
+        if isinstance(self.config_schema, dict):
+            self.config_schema = with_property_order(self.config_schema)
+
     def to_dict(self) -> dict[str, Any]:
         """序列化成可写入 DB / JSON 的 dict。"""
         return {
@@ -125,4 +151,4 @@ class Manifest:
         }
 
 
-__all__ = ["Manifest"]
+__all__ = ["PROPERTY_ORDER_KEY", "Manifest", "with_property_order"]

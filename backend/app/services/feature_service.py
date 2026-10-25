@@ -914,6 +914,7 @@ async def set_plugin_global_config(
     # 验证 config_schema
     config_schema = (feature.manifest or {}).get("config_schema")
     if config_schema:
+        config = drop_cleared_config_values(config, config_schema)
         validation = validate_config_against_schema(
             config,
             config_schema_for_scope(config_schema, "global"),
@@ -1053,6 +1054,48 @@ def validate_config_against_schema(
         )
 
 
+def _schema_allows_null(field: dict[str, Any]) -> bool:
+    if "type" not in field and not any(k in field for k in ("anyOf", "oneOf", "enum", "const")):
+        return True
+    field_type = field.get("type")
+    if field_type == "null" or (isinstance(field_type, list) and "null" in field_type):
+        return True
+    if field.get("nullable") is True:
+        return True
+    enum = field.get("enum")
+    if isinstance(enum, list) and None in enum:
+        return True
+    for key in ("anyOf", "oneOf"):
+        options = field.get(key)
+        if isinstance(options, list) and any(
+            isinstance(option, dict) and _schema_allows_null(option) for option in options
+        ):
+            return True
+    return False
+
+
+def drop_cleared_config_values(
+    config: dict[str, Any],
+    config_schema: dict[str, Any],
+) -> dict[str, Any]:
+    """去掉被清空成 ``null``、但字段本身不接受 ``null`` 的可选配置项。
+
+    Web/App 清空一个可选数字框时会提交 ``null``。字段不接受 ``null`` 时，
+    这表示“不设置”：去掉该键，运行时按 schema 默认值（默认值 < 全局 < 账号）补齐，
+    而不是直接校验失败。
+    """
+
+    properties = config_schema.get("properties") if isinstance(config_schema, dict) else None
+    if not isinstance(properties, dict):
+        return dict(config)
+    out = dict(config)
+    for key, value in config.items():
+        field = properties.get(key)
+        if value is None and isinstance(field, dict) and not _schema_allows_null(field):
+            out.pop(key, None)
+    return out
+
+
 def apply_required_config_defaults(
     config: dict[str, Any],
     config_schema: dict[str, Any],
@@ -1067,6 +1110,7 @@ def apply_required_config_defaults(
 
     if not isinstance(config_schema, dict):
         return dict(config)
+    config = drop_cleared_config_values(config, config_schema)
     properties = config_schema.get("properties")
     required = config_schema.get("required")
     if not isinstance(properties, dict) or not isinstance(required, list):
@@ -1127,6 +1171,7 @@ def config_schema_for_scope(
 
 __all__ = [
     "apply_required_config_defaults",
+    "drop_cleared_config_values",
     "bulk_set_enabled",
     "config_schema_for_scope",
     "feature_matrix",

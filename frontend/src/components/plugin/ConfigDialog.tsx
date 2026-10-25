@@ -44,6 +44,7 @@ import {
   groupUnifiedOptions,
   resolveUnifiedModelKey,
 } from "./llmModelOptions";
+import { collapsedSectionKeys, fieldAllowsNull, orderedPropertyEntries, sortedConfigEntries } from "./configFieldOrder";
 
 export const MASKED_SECRET_PLACEHOLDER = "••••••••••••••••";
 const EMPTY_CONFIG: Record<string, unknown> = {};
@@ -57,7 +58,11 @@ export interface ConfigField {
   "x-ui-hidden"?: boolean;
   "x-ui-section"?: string;
   "x-ui-order"?: number;
+  /** 服务器记录的 properties 声明顺序（JSONB 不保留键顺序）。 */
+  "x-ui-property-order"?: string[];
   "x-ui-columns"?: 1 | 2 | 3 | number;
+  /** 长配置页里让此字段所在分组留在顶层（不折叠/不进子页面）。 */
+  "x-ui-section-inline"?: boolean;
   "x-ui-provider-field"?: string;
   "x-ui-options-field"?: string;
   "x-ui-placeholder"?: string;
@@ -96,6 +101,7 @@ export interface ConfigSchema {
   type: string;
   properties: Record<string, ConfigField>;
   required?: string[];
+  "x-ui-property-order"?: string[];
   "x-config-actions"?: ConfigAction[];
   "x-usage-guide"?: unknown;
   "x-usage-instructions"?: unknown;
@@ -138,7 +144,14 @@ export function ConfigScopeSection({
   onChangeMany,
 }: ConfigScopeSectionProps) {
   const [openTemplates, setOpenTemplates] = useState<Record<string, boolean>>({});
+  const [openSections, setOpenSections] = useState<Record<string, boolean>>({});
   const groups = groupConfigFields(fields);
+  // 长配置页：非基础分组默认折叠（与 iOS 子页面同一规则），x-ui-section-inline 可让分组留在顶层。
+  const collapsed = collapsedSectionKeys(
+    groups.sections,
+    groups.sections.length + (groups.basic.length > 0 ? 1 : 0) + (groups.templates.length > 0 ? 1 : 0),
+    groups.sections.reduce((sum, section) => sum + section.fields.length, 0) + groups.basic.length + groups.templates.length,
+  );
   const sectionKeys = new Set(fields.map(([key]) => key));
   // 只允许改写本作用域内的字段：Provider 字段在另一作用域（全局/账号）时不跨域写入。
   const onFieldsChange = (patch: Record<string, unknown>) => {
@@ -157,9 +170,32 @@ export function ConfigScopeSection({
 
       {groups.sections.length > 0 && (
         <div className="space-y-3">
-          {groups.sections.map((section) => (
+          {groups.sections.map((section) => {
+            const collapsible = collapsed.has(section.key);
+            const open = !collapsible || Boolean(openSections[section.key]);
+            return (
             <div key={section.key} className="space-y-3 rounded-md border bg-background p-3">
-              <div className="text-sm font-semibold">{section.title}</div>
+              {collapsible ? (
+                <button
+                  type="button"
+                  className="flex w-full items-center justify-between gap-3 text-left text-sm font-semibold"
+                  aria-expanded={open}
+                  onClick={() => setOpenSections((p) => ({ ...p, [section.key]: !p[section.key] }))}
+                >
+                  <span>
+                    {section.title}
+                    <span className="ml-2 text-xs font-normal text-muted-foreground">共 {section.fields.length} 项</span>
+                  </span>
+                  {open ? (
+                    <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                  ) : (
+                    <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                  )}
+                </button>
+              ) : (
+                <div className="text-sm font-semibold">{section.title}</div>
+              )}
+              {open && (
               <div className={configGridClass(section.columns)}>
                 {section.fields.map(([key, field]) => (
                   <ConfigFieldWithActions
@@ -178,8 +214,10 @@ export function ConfigScopeSection({
                   />
                 ))}
               </div>
+              )}
             </div>
-          ))}
+            );
+          })}
         </div>
       )}
 
@@ -701,6 +739,7 @@ function FieldInput({
             <ConfigObjectEditor
               prefix={fk}
               properties={properties}
+              propertyOrder={field["x-ui-property-order"]}
               values={objectValue}
               accountId={accountId}
               llmProviders={llmProviders}
@@ -1013,6 +1052,7 @@ function ConfigListField({
           <ConfigObjectEditor
             prefix={`${fk}.${editingIndex ?? "closed"}`}
             properties={properties}
+            propertyOrder={field.items?.["x-ui-property-order"]}
             values={draft}
             llmProviders={llmProviders}
             llmProvidersLoading={llmProvidersLoading}
@@ -1031,6 +1071,7 @@ function ConfigListField({
 function ConfigObjectEditor({
   prefix,
   properties,
+  propertyOrder,
   values,
   accountId,
   llmProviders,
@@ -1040,6 +1081,7 @@ function ConfigObjectEditor({
 }: {
   prefix: string;
   properties: Record<string, ConfigField>;
+  propertyOrder?: string[];
   values: Record<string, unknown>;
   accountId?: number;
   llmProviders?: LLMProviderOut[];
@@ -1048,9 +1090,7 @@ function ConfigObjectEditor({
   /** 一次写入多个字段，避免基于同一旧值的连续 onChange 互相覆盖。 */
   onChangeMany?: (patch: Record<string, unknown>) => void;
 }) {
-  const entries = Object.entries(properties)
-    .filter(([, field]) => !field["x-ui-hidden"])
-    .sort((a, b) => fieldOrder(a[1]) - fieldOrder(b[1]));
+  const entries = sortedConfigEntries(properties, propertyOrder).filter(([, field]) => !field["x-ui-hidden"]);
 
   if (entries.length === 0) {
     return <div className="rounded-md border border-dashed bg-muted/20 px-3 py-4 text-sm text-muted-foreground">该配置组没有可编辑字段。</div>;
@@ -1475,7 +1515,7 @@ function ConfigActionButton({
   onRun: (action: ConfigAction, input: Record<string, unknown>) => Promise<void>;
 }) {
   const inputSchema = configActionInputSchema(action);
-  const inputFields = Object.entries(inputSchema?.properties ?? {}) as FieldEntry[];
+  const inputFields = orderedPropertyEntries(inputSchema?.properties, inputSchema?.["x-ui-property-order"]) as FieldEntry[];
   const [open, setOpen] = useState(false);
   const [running, setRunning] = useState(false);
   const [inputValues, setInputValues] = useState<Record<string, unknown>>(() => (
@@ -2011,6 +2051,8 @@ export function withoutReadOnlyValues(
   for (const [key, value] of Object.entries(values)) {
     const field = properties[key];
     if (field && isReadOnlyField(key, field)) continue;
+    // 清空不接受 null 的可选字段：不提交，服务器按 schema 默认值处理（与 iOS 一致）。
+    if (value === null && field && !fieldAllowsNull(field)) continue;
     if (isSensitiveConfigKey(key) && isRedactedSecretValue(originalValues[key]) && value === "") continue;
     if (isSensitiveConfigKey(key) && isRedactedSecretValue(value)) continue;
     out[key] = value;
