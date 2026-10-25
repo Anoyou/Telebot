@@ -13,6 +13,7 @@ on:
     paths:
       - ".github/workflows/ios-ipa.yml"
       - "ios/scripts/build-unsigned.sh"
+      - "ios/scripts/check-ios-version.py"
   workflow_dispatch:
 
 permissions:
@@ -23,6 +24,9 @@ concurrency:
   cancel-in-progress: true
 
 env:
+  # build 号（CFBundleVersion）用本工作流的 run_number：每次打包严格递增、跨分支不重复，
+  # 不依赖完整 Git 历史；同一次运行重跑（run_attempt）沿用同一 build 号，对应同一提交。
+  TELEPILOT_BUILD_NUMBER: ${{ github.run_number }}
   # 与 iOS 测试工作流一致：工程用到 iOS 27 SDK 的 API，必须用 Xcode 27 编译。
   XCODE_APP: /Applications/Xcode_27.app
 
@@ -39,6 +43,9 @@ jobs:
           sudo xcode-select -s "$XCODE_APP/Contents/Developer"
           xcodebuild -version
 
+      - name: 校验 iOS 版本设置
+        run: python3 ios/scripts/check-ios-version.py
+
       - name: 构建未签名 IPA
         run: |
           set -o pipefail
@@ -50,6 +57,11 @@ jobs:
           VERSION=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' ios/build/TelePilot.xcarchive/Products/Applications/TelePilot.app/Info.plist)
           BUILD=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' ios/build/TelePilot.xcarchive/Products/Applications/TelePilot.app/Info.plist)
           SHA=$(git rev-parse --short HEAD)
+          EXPECTED_VERSION=$(sed -nE 's/^[[:space:]]*MARKETING_VERSION:[[:space:]]*"?([0-9.]+)"?.*/\1/p' ios/project.yml)
+          if [ "$VERSION" != "$EXPECTED_VERSION" ] || [ "$BUILD" != "$TELEPILOT_BUILD_NUMBER" ]; then
+            echo "::error::IPA 版本异常：得到 ${VERSION} (${BUILD})，期望 ${EXPECTED_VERSION} (${TELEPILOT_BUILD_NUMBER})"
+            exit 1
+          fi
           NAME="TelePilot-${VERSION}-${BUILD}-${SHA}-unsigned"
           mkdir -p dist
           cp ios/build/TelePilot-unsigned.ipa "dist/${NAME}.ipa"

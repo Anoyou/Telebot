@@ -52,6 +52,8 @@ struct AboutView: View {
                 LabeledContent {
                     Text("iOS \(UIDevice.current.systemVersion)").monospacedDigit()
                 } label: { Label("系统版本", systemImage: "gearshape.2") }
+                NavigationLink { AppChangelogView() } label: { Label("App 更新日志", systemImage: "list.bullet.rectangle") }
+                    .accessibilityIdentifier("about.appChangelog")
             } header: { Text("App") } footer: {
                 Text("构建号是同一版本内的打包序号，反馈问题时请一并提供版本与构建号。")
             }
@@ -91,7 +93,7 @@ struct AboutView: View {
 
             Section("项目") {
                 Link(destination: AppInfo.repositoryURL) { Label("GitHub 仓库", systemImage: "chevron.left.forwardslash.chevron.right") }
-                Link(destination: AppInfo.changelogURL) { Label("更新日志", systemImage: "list.bullet.clipboard") }
+                Link(destination: AppInfo.changelogURL) { Label("服务器更新日志", systemImage: "list.bullet.clipboard") }
                 Link(destination: AppInfo.usageGuideURL) { Label("使用指南", systemImage: "book") }
                 Link(destination: AppInfo.issuesURL) { Label("问题反馈", systemImage: "exclamationmark.bubble") }
             }
@@ -105,6 +107,82 @@ struct AboutView: View {
         .navigationTitle("关于")
         .navigationBarTitleDisplayMode(.inline)
         .accessibilityIdentifier("about.screen")
+    }
+}
+
+/// App 自身的更新日志：读取随 App 打包的 `CHANGELOG.md`（来自仓库 `ios/CHANGELOG.md`），离线显示，不请求服务器。
+struct AppChangelogView: View {
+    private let releases: [AppChangelogRelease]?
+
+    init(bundle: Bundle = .main) {
+        if let url = bundle.url(forResource: "CHANGELOG", withExtension: "md"),
+           let text = try? String(contentsOf: url, encoding: .utf8) {
+            releases = AppChangelog.parse(text)
+        } else {
+            releases = nil
+        }
+    }
+
+    var body: some View {
+        Group {
+            if let releases, !releases.isEmpty {
+                List {
+                    ForEach(releases) { release in
+                        Section {
+                            if let note = release.note {
+                                Text(note).font(.footnote).foregroundStyle(.secondary)
+                            }
+                            ForEach(release.groups) { group in
+                                VStack(alignment: .leading, spacing: 6) {
+                                    Text(group.title).font(.subheadline.weight(.semibold))
+                                    ForEach(Array(group.items.enumerated()), id: \.offset) { _, item in
+                                        HStack(alignment: .firstTextBaseline, spacing: 6) {
+                                            Text("•").foregroundStyle(.secondary)
+                                            Text(Self.inline(item)).font(.callout).fixedSize(horizontal: false, vertical: true)
+                                        }
+                                    }
+                                }
+                                .padding(.vertical, 2)
+                            }
+                        } header: {
+                            ReleaseHeader(release: release)
+                        }
+                    }
+                }
+                .accessibilityIdentifier("changelog.list")
+            } else {
+                ContentUnavailableView("无法读取更新日志", systemImage: "doc.questionmark",
+                                       description: Text("此安装包未包含 App 更新日志。"))
+                    .accessibilityIdentifier("changelog.unavailable")
+            }
+        }
+        // 不在外层 Group 上设 accessibilityIdentifier：它会覆盖列表与“当前版本”标记各自的标识。
+        .navigationTitle("App 更新日志")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private static func inline(_ text: String) -> AttributedString {
+        let options = AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+        return (try? AttributedString(markdown: text, options: options)) ?? AttributedString(text)
+    }
+
+    private struct ReleaseHeader: View {
+        let release: AppChangelogRelease
+
+        var body: some View {
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    Text(release.isUnreleased ? "未发布" : release.version).monospacedDigit()
+                    if !release.isUnreleased, release.version == AppInfo.version {
+                        Text("当前版本").font(.caption2.weight(.semibold)).foregroundStyle(.tint)
+                            .accessibilityIdentifier("changelog.current")
+                    }
+                    Spacer()
+                    if let date = release.date { Text(date).monospacedDigit() }
+                }
+                if let title = release.title { Text(title).textCase(nil) }
+            }
+        }
     }
 }
 
