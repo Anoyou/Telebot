@@ -118,8 +118,7 @@ actor SessionTransport: ClientTransport {
         let data: Data
         do {
             let path = original.path?.split(separator: "?").first.map(String.init)
-            let slowUpdate = ["/api/system/check-update", "/api/system/pull-update", "/api/system/update-target-options"].contains(path ?? "")
-            let selectedTransport = slowUpdate ? updateTransport : transport
+            let selectedTransport = Self.isSlowOperation(path ?? "", write: write) ? updateTransport : transport
             let result = try await selectedTransport.send(request, body: payload.map(HTTPBody.init),
                                                   baseURL: origin, operationID: operationID)
             response = result.0
@@ -190,6 +189,28 @@ actor SessionTransport: ClientTransport {
               let code = detail["code"] as? String,
               code.count <= 80, code.allSatisfy({ $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "_") }) else { return nil }
         return code
+    }
+
+    /// 需要服务器同步执行 Git 操作的请求：沿用较长的请求超时，避免服务器仍在执行时
+    /// 客户端先超时，用户误以为失败而重复提交（例如插件安装第二次撞上“已安装”的 409）。
+    static func isSlowOperation(_ path: String, write: Bool) -> Bool {
+        if ["/api/system/check-update", "/api/system/pull-update", "/api/system/update-target-options"].contains(path) { return true }
+        guard write else { return false }
+        let parts = path.split(separator: "/", omittingEmptySubsequences: true)
+        guard parts.count >= 3, parts[0] == "api" else { return false }
+        switch parts[1] {
+        case "plugin-repos":
+            // /api/plugin-repos/{id}/plugins/{name}/install、/{id}/refresh、/{id}/update-installed
+            return parts.last == "install" || parts.last == "refresh" || parts.last == "update-installed"
+        case "remote-plugins":
+            // /api/remote-plugins/install、/api/remote-plugins/{name}/update
+            return parts.last == "install" || parts.last == "update"
+        case "plugins":
+            // /api/plugins/install/upload
+            return parts.count == 4 && parts[2] == "install" && parts[3] == "upload"
+        default:
+            return false
+        }
     }
 
     static func validPath(_ path: String) -> Bool {

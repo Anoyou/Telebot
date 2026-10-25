@@ -179,6 +179,10 @@ public enum APIError: Error, LocalizedError, Sendable {
             case "AUTH_EXPIRED", "AUTH_REQUIRED": "登录已失效，请重新登录。"
             case "ACCOUNT_SESSION_DECRYPT_FAILED": "账号登录凭据无法解密，请在 Web 管理台恢复原密钥或重新登录该 Telegram 账号。"
             case "SESSION_BUSY": "会话仍有执行中、等待确认或排队的任务，请先停止或处理任务后再删除。"
+            case "PLUGIN_EXISTS": "服务器上已安装同名插件（可能上一次安装请求其实已经成功）。请到插件中心确认；如需覆盖安装，请打开「替换已有插件」后再提交。"
+            case "DIR_EXISTS": "服务器插件目录里已有同名目录但没有安装记录，请在 Web 管理台清理后重试。"
+            case "KEY_CONFLICTS_BUILTIN", "BUILTIN_PLUGIN_CONFLICT": "该插件名与服务器内置插件冲突，不能由插件仓库安装或覆盖。"
+            case "PLUGIN_CAPABILITY_FORCED_OFF": "插件需要的平台能力模块已被关闭，请先在系统设置的能力开关中开启后再启用插件。"
             default: status == 429 ? "请求过于频繁，请稍后重试。" : "服务器拒绝了请求（HTTP \(status)），请在 Web 管理台检查详情。"
             }
         }

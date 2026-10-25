@@ -214,7 +214,12 @@ actor FixtureService: AppServing {
                     ["key": "content_assistant", "display_name": "内容整理助手", "usage": "整理消息、提取摘要并交给 AI 处理。",
                      "category": "interactive", "version": "2.1.0", "latest_version": "2.2.0", "update_available": true,
                      "source_type": "remote", "source_label": "个人插件仓库", "is_builtin": false, "signature_ok": true,
-                     "orphan": false, "permissions": ["call_llm"]],
+                     "orphan": false, "permissions": ["call_llm"],
+                     "config_schema": ["type": "object", "properties": [
+                        "telepilot_provider": ["type": "string", "title": "固定 TelePilot Provider（可选）", "default": "", "x-ui-widget": "llm-provider-select"],
+                        "telepilot_model": ["type": "string", "title": "TelePilot 模型覆盖（可选）", "default": "", "x-ui-widget": "llm-model-select",
+                                            "x-ui-provider-field": "telepilot_provider", "x-ui-model-modality": "text"]
+                     ]]],
                     ["key": "forward_guard", "display_name": "转发风控与来源保护", "usage": "过滤异常转发并保留来源。",
                      "category": "utility", "version": "0.9.2", "update_available": false,
                      "source_type": "local", "source_label": "本地导入", "is_builtin": false, "signature_ok": false,
