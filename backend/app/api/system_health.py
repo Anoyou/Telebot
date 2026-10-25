@@ -2286,7 +2286,20 @@ async def check_update(
     payload: UpdateRequest | None = Body(default=None),
 ) -> CheckUpdateResponse:
     """仅检查远程更新，不拉取代码。"""
-    return await run_update_check(payload)
+    response = await run_update_check(payload)
+    # 检查当前通道（未覆盖 remote / branch）时，把结果摘要写回最近一次检查记录，
+    # 让 GET /api/system/update-status 的角标与手动检查结论保持一致；
+    # 写回失败只记日志，不影响本次响应。
+    if not isinstance(payload, UpdateRequest) or (payload.remote is None and payload.branch is None):
+        try:
+            async with AsyncSessionLocal() as db:
+                await app_update_service.save_last_check(
+                    db, app_update_service.summarize_result(response.model_dump(mode="json"))
+                )
+                await db.commit()
+        except Exception:  # noqa: BLE001
+            log.warning("手动检查更新结果写回失败", exc_info=True)
+    return response
 
 
 class AppUpdateCheckSettingsIn(BaseModel):
@@ -2332,7 +2345,7 @@ async def patch_update_check(_user: CurrentUser, payload: AppUpdateCheckSettings
     return AppUpdateStatusOut(
         enabled=saved["enabled"],
         interval_minutes=saved["interval_minutes"],
-        last_check=last,
+        last_check=await app_update_service.resolve_last_check(last),
     )
 
 

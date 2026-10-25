@@ -75,6 +75,8 @@ async def save_check_setting(
 
 async def load_last_check(db: Any) -> dict[str, Any] | None:
     row = await db.get(SystemSetting, SETTING_LAST_CHECK)
+    if row is None:
+        return None
     return row.value if isinstance(row.value, dict) else None
 
 
@@ -97,10 +99,80 @@ def summarize_result(result: dict[str, Any]) -> dict[str, Any]:
         "can_check": bool(result.get("can_check", True)),
         "current_version": result.get("current_version"),
         "target_version": result.get("target_version"),
+        "current_commit": result.get("current_commit"),
+        "remote_commit": result.get("remote_commit"),
         "remote": result.get("remote"),
         "branch": result.get("branch"),
         "error": result.get("error"),
     }
+
+
+def _same_commit(left: Any, right: Any) -> bool:
+    """短 commit 与长 commit 按前缀比较；任一侧缺失或过短时视为无法判断（False）。"""
+    if not isinstance(left, str) or not isinstance(right, str):
+        return False
+    a = left.strip().lower()
+    b = right.strip().lower()
+    if len(a) < 7 or len(b) < 7:
+        return False
+    return a.startswith(b) or b.startswith(a)
+
+
+def is_last_check_stale(last: dict[str, Any] | None, running_commit: str | None) -> bool:
+    """判断"有新版本"的旧结论是否已被部署变更推翻。
+
+    - 取不到运行提交，或旧结论本身没有 ``has_update``、没有记录 ``current_commit``
+      （老版本写入的摘要）时不做判断；
+    - 运行提交已等于当时的目标 ``remote_commit``：已更新到目标，结论陈旧；
+    - 记录的 ``current_commit`` 与运行提交不一致：检查之后服务器已换过版本，
+      结论陈旧。例外是 updater 报告"Git 已前进、容器尚未切换"的待部署状态
+      （此时 ``current_commit`` 与 ``remote_commit`` 相同），这时运行提交本就
+      落后于 ``current_commit``，不能据此判陈旧。
+    """
+    if not last or not last.get("has_update") or not running_commit:
+        return False
+    current_commit = last.get("current_commit")
+    remote_commit = last.get("remote_commit")
+    if _same_commit(running_commit, remote_commit):
+        return True
+    if not isinstance(current_commit, str) or len(current_commit.strip()) < 7:
+        return False
+    if _same_commit(current_commit, remote_commit):
+        return False
+    return not _same_commit(current_commit, running_commit)
+
+
+def _runtime_commit_sync() -> str | None:
+    """与 ``GET /api/system/version`` 的 ``revision``（部署提交）同源。"""
+    from ..api.system_health import _runtime_revision
+
+    return _runtime_revision()
+
+
+async def current_runtime_commit() -> str | None:
+    """读取服务器当前运行提交；任何异常都视为取不到（不做陈旧判断）。"""
+    try:
+        return await asyncio.to_thread(_runtime_commit_sync)
+    except Exception:  # noqa: BLE001
+        log.debug("读取当前运行提交失败", exc_info=True)
+        return None
+
+
+async def resolve_last_check(last: dict[str, Any] | None) -> dict[str, Any] | None:
+    """返回给角标前处理陈旧结论：陈旧时 ``has_update`` 置 False 并标记 ``stale``。"""
+    if not last or not last.get("has_update"):
+        return last
+    if not last.get("current_commit") and not last.get("remote_commit"):
+        # 老版本写入的摘要没有 commit 字段，无从判断，原样返回。
+        return last
+    running = await current_runtime_commit()
+    if not is_last_check_stale(last, running):
+        return last
+    resolved = dict(last)
+    resolved["has_update"] = False
+    resolved["stale"] = True
+    resolved["running_commit"] = running[:12] if running else None
+    return resolved
 
 
 async def run_check(check_call: Any) -> dict[str, Any]:
@@ -125,11 +197,6 @@ async def load_update_status() -> dict[str, Any]:
         async with AsyncSessionLocal() as db:
             check = await load_check_setting(db)
             last = await load_last_check(db)
-            return {
-                "enabled": check["enabled"],
-                "interval_minutes": check["interval_minutes"],
-                "last_check": last,
-            }
     except Exception:  # noqa: BLE001
         log.warning("读取应用更新检查状态失败", exc_info=True)
         return {
@@ -137,6 +204,11 @@ async def load_update_status() -> dict[str, Any]:
             "interval_minutes": DEFAULT_INTERVAL_MINUTES,
             "last_check": None,
         }
+    return {
+        "enabled": check["enabled"],
+        "interval_minutes": check["interval_minutes"],
+        "last_check": await resolve_last_check(last),
+    }
 
 
 async def default_check_call() -> dict[str, Any]:
@@ -227,11 +299,14 @@ __all__ = [
     "_sleep",
     "auto_update_check_loop",
     "clamp_interval_minutes",
+    "current_runtime_commit",
     "default_check_call",
+    "is_last_check_stale",
     "load_check_setting",
     "load_last_check",
     "load_update_status",
     "normalize_check_setting",
+    "resolve_last_check",
     "run_check",
     "save_check_setting",
     "save_last_check",
