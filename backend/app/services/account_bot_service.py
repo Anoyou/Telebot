@@ -2100,6 +2100,28 @@ async def edit_rich_message(
     return await call_bot_api(token, "editMessageText", payload)
 
 
+async def edit_inline_rich_message(
+    token: str,
+    inline_message_id: str,
+    rich_message: dict[str, Any],
+    *,
+    reply_markup: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """用 Bot API 10.2 原生 rich_message 编辑 inline 消息（含 Guest Mode 占位）。
+
+    Telegram：editMessageText 的 rich_message 同样适用于 inline_message_id；编辑 inline
+    消息时不支持直传新文件或按 URL 上传文件。
+    """
+
+    payload: dict[str, Any] = {
+        "inline_message_id": str(inline_message_id),
+        "rich_message": normalize_rich_message(rich_message),
+    }
+    if reply_markup is not None:
+        payload["reply_markup"] = reply_markup
+    return await call_bot_api(token, "editMessageText", payload)
+
+
 async def edit_message_caption(
     token: str,
     chat_id: int,

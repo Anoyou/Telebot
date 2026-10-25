@@ -172,6 +172,57 @@ async def test_guest_inline_edit_bypasses_guest_buffer(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
+async def test_guest_inline_edit_supports_rich_message(monkeypatch) -> None:
+    rich_calls: list[tuple[str, dict[str, Any]]] = []
+
+    async def _edit_inline_rich(token, inline_message_id, rich_message, **kwargs):
+        rich_calls.append((inline_message_id, rich_message))
+        return True
+
+    text_edit = AsyncMock(side_effect=AssertionError("rich edit must not fall back to text silently"))
+    monkeypatch.setattr(account_bot_service, "edit_inline_rich_message", _edit_inline_rich)
+    monkeypatch.setattr(account_bot_service, "edit_inline_message", text_edit)
+    incoming, executor, records = _executor(monkeypatch, _guest_update(), guest=True)
+
+    await executor.apply(
+        [
+            {
+                "type": "edit_message",
+                "inline_message_id": "im-1",
+                "rich_message": {"markdown": "| 标题 | 大小 |\n|---|---|\n| **[A](https://pt.example/details.php?id=1)** | 1 GB |"},
+                "send_via": "interaction_bot",
+            }
+        ]
+    )
+
+    assert rich_calls and rich_calls[0][0] == "im-1"
+    assert rich_calls[0][1]["markdown"].startswith("| 标题 |")
+    text_edit.assert_not_awaited()
+    assert incoming.guest_reply is not None and incoming.guest_reply.entries == []
+    assert records.await_args.args[2] == "ok"
+
+
+@pytest.mark.asyncio
+async def test_guest_inline_rich_edit_failure_is_reported(monkeypatch) -> None:
+    monkeypatch.setattr(
+        account_bot_service,
+        "edit_inline_rich_message",
+        AsyncMock(side_effect=RuntimeError("Bad Request: rich_message is not supported")),
+    )
+    text_edit = AsyncMock()
+    monkeypatch.setattr(account_bot_service, "edit_inline_message", text_edit)
+    _incoming, executor, records = _executor(monkeypatch, _guest_update(), guest=True)
+
+    await executor.apply(
+        [{"type": "edit_message", "inline_message_id": "im-1", "rich_message": {"markdown": "**x**"}, "send_via": "interaction_bot"}]
+    )
+
+    text_edit.assert_not_awaited()
+    assert records.await_args.args[2] != "ok"
+    assert records.await_args.kwargs["error_code"] == "telegram_api_error"
+
+
+@pytest.mark.asyncio
 async def test_guest_answer_html_parse_error_falls_back_to_plain(monkeypatch) -> None:
     results: list[dict[str, Any]] = []
 

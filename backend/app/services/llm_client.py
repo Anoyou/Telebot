@@ -188,6 +188,12 @@ class LLMResult:
     gateway_version: str | None = None
     gateway_request_id: str | None = None
     gateway_stage: str | None = None
+    # 推理模型（GLM / DeepSeek / Qwen / Kimi 等）的思考过程，单独保存，绝不并入 text。
+    reasoning: str | None = None
+    reasoning_tokens: int = 0
+    # True 表示 text 不是模型的最终 content，而是协议层用推理过程兜底出来的文本
+    # （content 为空时）。面向用户/插件的运行时必须拒绝这种结果，见 llm_runtime。
+    text_from_reasoning: bool = False
 
 
 @dataclass(frozen=True)
@@ -207,6 +213,9 @@ class LLMStreamChunk:
     gateway_version: str | None = None
     gateway_request_id: str | None = None
     gateway_stage: str | None = None
+    # True：delta 是推理过程（reasoning_content），不是最终答案。测活可以计数，
+    # 面向插件/用户的消费方必须跳过。
+    is_reasoning: bool = False
 
 
 def _responses_event_error(prefix: str, error: Any, api_key: str | None) -> LLMError:
@@ -261,6 +270,9 @@ def _completed_json_as_stream_result(
     if data.get("error"):
         raise _responses_event_error("上游流式请求返回错误", data["error"], api_key)
     text = ""
+    reasoning: str | None = None
+    reasoning_tokens = 0
+    text_from_reasoning = False
     stop_reason = StopReason.UNKNOWN
     provider_status: str | None = None
     usage = data.get("usage") or {}
@@ -271,7 +283,13 @@ def _completed_json_as_stream_result(
             choices = data.get("choices") or []
             choice = choices[0] if isinstance(choices, list) and choices else {}
             message = choice.get("message") if isinstance(choice, dict) else {}
-            text = _openai_message_visible_text(message) if isinstance(message, dict) else ""
+            final_text, reasoning_text = (
+                _openai_final_and_reasoning(message) if isinstance(message, dict) else ("", "")
+            )
+            text = final_text or reasoning_text
+            reasoning = reasoning_text or None
+            reasoning_tokens = _usage_reasoning_tokens(usage)
+            text_from_reasoning = bool(text) and not final_text
             refusal = message.get("refusal") if isinstance(message, dict) else None
             finish_reason = choice.get("finish_reason") if isinstance(choice, dict) else None
             stop_reason = (
@@ -320,6 +338,9 @@ def _completed_json_as_stream_result(
         output_tokens=output_tokens,
         stop_reason=stop_reason,
         provider_status=provider_status,
+        reasoning=reasoning,
+        reasoning_tokens=reasoning_tokens,
+        text_from_reasoning=text_from_reasoning,
     )
 
 
@@ -883,6 +904,93 @@ def _openai_message_visible_text(message: Mapping[str, Any] | dict[str, Any]) ->
     if has_tool_calls:
         return ""
     return _openai_message_reasoning_text(message)
+
+
+_THINK_OPEN_RE = re.compile(r"<(think|thinking)>", re.IGNORECASE)
+
+
+def split_think_tags(text: str) -> tuple[str, str]:
+    """把 content 里 ``<think>…</think>`` 包裹的推理与最终答案拆开。
+
+    部分 OpenAI 兼容站（DeepSeek-R1 / Qwen / GLM 自部署）把思考过程放在 content
+    里用 ``<think>`` 包裹。返回 ``(最终答案, 推理)``；开标签没有闭合（输出被
+    截断）时，开标签之后的内容全部视为推理，不进入答案。
+    """
+
+    value = str(text or "")
+    if "<" not in value:
+        return value, ""
+    reasoning_parts: list[str] = []
+    visible_parts: list[str] = []
+    pos = 0
+    while True:
+        match = _THINK_OPEN_RE.search(value, pos)
+        if match is None:
+            visible_parts.append(value[pos:])
+            break
+        visible_parts.append(value[pos : match.start()])
+        tag = match.group(1).lower()
+        close_re = re.compile(rf"</{tag}>", re.IGNORECASE)
+        close = close_re.search(value, match.end())
+        if close is None:
+            reasoning_parts.append(value[match.end() :])
+            break
+        reasoning_parts.append(value[match.end() : close.start()])
+        pos = close.end()
+    return "".join(visible_parts).strip(), "\n".join(part.strip() for part in reasoning_parts if part.strip())
+
+
+def _openai_final_and_reasoning(message: Mapping[str, Any] | dict[str, Any]) -> tuple[str, str]:
+    """返回 ``(最终 content, 推理)``：推理来自 reasoning_content 等字段或 content 内的 <think>。"""
+
+    content, think_reasoning = split_think_tags(_openai_content_text(message.get("content")))
+    reasoning = _openai_message_reasoning_text(message)
+    if think_reasoning:
+        reasoning = f"{reasoning}\n{think_reasoning}".strip() if reasoning else think_reasoning
+    return content.strip(), reasoning
+
+
+def _usage_reasoning_tokens(usage: Mapping[str, Any] | Any) -> int:
+    if not isinstance(usage, Mapping):
+        return 0
+    for key in ("completion_tokens_details", "output_tokens_details"):
+        details = usage.get(key)
+        if isinstance(details, Mapping):
+            try:
+                return int(details.get("reasoning_tokens") or 0)
+            except (TypeError, ValueError):
+                return 0
+    return 0
+
+
+def thinking_param_style(base_url: str | None, model: str | None) -> str | None:
+    """推断 OpenAI 兼容上游关闭/开启思考的参数写法；未知上游返回 None（不下发）。
+
+    - ``thinking``：智谱 / Z.ai（bigmodel.cn、z.ai、glm-*）与 DeepSeek，``{"thinking": {"type": "disabled"}}``；
+    - ``enable_thinking``：阿里云百炼 / DashScope（Qwen3），``{"enable_thinking": false}``。
+    OpenAI 官方等会拒绝未知参数，因此只对明确支持的上游下发。
+    """
+
+    host = str(base_url or "").lower()
+    name = str(model or "").lower()
+    if "dashscope" in host:
+        return "enable_thinking"
+    if any(key in host for key in ("bigmodel.cn", "z.ai", "deepseek.com")):
+        return "thinking"
+    if name.startswith(("glm-", "deepseek")):
+        return "thinking"
+    return None
+
+
+def apply_thinking_param(body: dict[str, Any], *, base_url: str | None, model: str | None, thinking: str | None) -> None:
+    mode = str(thinking or "").strip().lower()
+    if mode not in {"enabled", "disabled"}:
+        return
+    style = thinking_param_style(base_url, model)
+    if style == "thinking":
+        body["thinking"] = {"type": mode}
+    elif style == "enable_thinking":
+        body["enable_thinking"] = mode == "enabled"
 
 
 def _image_contents_from_blocks(value: Any) -> tuple[ImageContent, ...]:
@@ -1889,6 +1997,7 @@ class OpenAIClient(LLMClient):
         temperature: float | None = None,
         reasoning_effort: str | None = None,
         timeout_seconds: int | None = None,
+        thinking: str | None = None,
     ) -> LLMResult:
         if web_search:
             raise LLMError(
@@ -1926,6 +2035,7 @@ class OpenAIClient(LLMClient):
         normalized_effort = _normalize_reasoning_effort(reasoning_effort)
         if normalized_effort is not None:
             body["reasoning_effort"] = normalized_effort
+        apply_thinking_param(body, base_url=self._base_url, model=self._model, thinking=thinking)
         # httpx 0.28+ 用 proxy=<str> 单参数；socks5 需要 httpx[socks] 安装的 socksio
         # 当 proxy_url 为空时，显式 trust_env=False 避免 httpx 读取环境变量中的
         # HTTP_PROXY / NO_PROXY（NO_PROXY 含 ::1 会导致 httpx InvalidURL 崩溃）
@@ -1970,7 +2080,10 @@ class OpenAIClient(LLMClient):
             message = data["choices"][0]["message"]
             if not isinstance(message, dict):
                 raise TypeError("message is not an object")
-            text = _openai_message_visible_text(message)
+            final_text, reasoning_text = _openai_final_and_reasoning(message)
+            # 兼容测活/预览：content 为空时 text 仍用推理兜底，但用 text_from_reasoning
+            # 明确标记；llm_runtime 面向用户/插件时会拒绝这种结果，绝不把推理当答案。
+            text = final_text or ("" if message.get("tool_calls") else reasoning_text)
         except (AttributeError, KeyError, IndexError, TypeError) as exc:
             raise LLMError(f"OpenAI 返回结构异常: {exc}") from None
 
@@ -2018,6 +2131,9 @@ class OpenAIClient(LLMClient):
             image_urls=image_urls,
             image_data=image_data,
             tool_calls=tool_calls,
+            reasoning=reasoning_text or None,
+            reasoning_tokens=_usage_reasoning_tokens(usage),
+            text_from_reasoning=bool(text) and not final_text,
             stop_reason=resolved_stop_reason,
             provider_status=(
                 "refusal"
@@ -2189,7 +2305,7 @@ class OpenAIClient(LLMClient):
                                 else delta.get("reasoning")
                             )
                             if reasoning and not saw_content:
-                                yield LLMStreamChunk(delta=reasoning, model=model_name)
+                                yield LLMStreamChunk(delta=reasoning, model=model_name, is_reasoning=True)
                         if choice.get("finish_reason") is not None:
                             finish_received = True
                             # usage 可能位于 finish chunk 或其后的独立 chunk；继续读到
@@ -3738,6 +3854,7 @@ class ResponsesClient(LLMClient):
             tool_names={},
             api_key=self._api_key,
         )
+        normalized_reasoning = normalized.reasoning_content or None
         return LLMResult(
             text=normalized.text,
             model=str(normalized.model or self._model),
@@ -3747,6 +3864,12 @@ class ResponsesClient(LLMClient):
             tool_calls=list(normalized.tool_calls or ()),
             stop_reason=normalized.stop_reason,
             provider_status=normalized.provider_status,
+            reasoning=normalized_reasoning,
+            reasoning_tokens=int(getattr(normalized.usage, "reasoning_tokens", 0) or 0),
+            # _responses_structured_response 只在没有 output_text 时用 reasoning 兜底正文
+            text_from_reasoning=bool(
+                normalized_reasoning and normalized.text and normalized.text == normalized_reasoning
+            ),
         )
 
 

@@ -6200,6 +6200,10 @@ class _LiveMessageOps:
     常驻上下文使用本 facade，供插件命令和后台任务继续走平台受控通道。
     """
 
+    # 能力标记：edit_message 同时给 inline_message_id 与 rich_message 时，平台用
+    # editMessageText(inline_message_id, rich_message) 原地编辑 inline 消息（访客模式占位）。
+    inline_rich_edit = True
+
     def __init__(
         self,
         state: _AccountState,
@@ -6392,6 +6396,11 @@ class _LiveMessageOps:
 
 class _InteractionEntryMessageOps(BufferedMessageOps):
     """Buffer current interaction actions while keeping live apply for delayed work."""
+
+    # 能力标记：edit_message 同时给 inline_message_id 与 rich_message 时，平台用
+    # editMessageText(inline_message_id, rich_message) 原地编辑 inline 消息（访客模式占位）。
+    inline_rich_edit = True
+
 
     def __init__(
         self,

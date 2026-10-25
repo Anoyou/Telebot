@@ -427,6 +427,51 @@ def _should_try_next_provider(exc: Exception) -> bool:
     }
 
 
+AI_RESPONSE_TRUNCATED_CATEGORY = "reasoning_truncated"
+AI_NO_FINAL_ANSWER_CATEGORY = "no_final_answer"
+
+
+def _ensure_final_answer(result: LLMResult, *, provider_name: str = "", max_tokens: int | None = None) -> None:
+    """面向用户/插件的调用只接受模型的最终 content，绝不把推理过程当答案。
+
+    推理模型（GLM / DeepSeek / Qwen / Kimi …）的思考过程走 ``reasoning_content``
+    或 ``<think>``；协议层为测活兼容会在 content 为空时用推理兜底 ``text`` 并标记
+    ``text_from_reasoning``。这里把这种结果改判为失败：输出额度被推理耗尽
+    （finish_reason=length）时报 ``reasoning_truncated``，否则报 ``no_final_answer``。
+    """
+    from .llm_client import LLMError, LLMErrorScope
+
+    if not getattr(result, "text_from_reasoning", False):
+        return
+    truncated = result.stop_reason is StopReason.MAX_TOKENS
+    reasoning_tokens = int(getattr(result, "reasoning_tokens", 0) or 0)
+    reasoning_chars = len(str(getattr(result, "reasoning", "") or result.text or ""))
+    log.info(
+        "[llm-runtime] 模型没有给出最终答案 provider=%s model=%s finish_reason=%s max_tokens=%s "
+        "output_tokens=%s reasoning_tokens=%s reasoning_chars=%s",
+        provider_name,
+        result.model,
+        result.provider_status or str(result.stop_reason),
+        max_tokens,
+        result.output_tokens,
+        reasoning_tokens,
+        reasoning_chars,
+    )
+    if truncated:
+        raise LLMError(
+            "模型输出被截断（finish_reason=length）：最大输出 Token"
+            + (f"（max_tokens={max_tokens}）" if max_tokens else "")
+            + "已被推理过程耗尽，没有给出最终答案；请调大最大输出 Token，或为该模型关闭/降低思考",
+            scope=LLMErrorScope.PROVIDER_LOCAL,
+            category=AI_RESPONSE_TRUNCATED_CATEGORY,
+        )
+    raise LLMError(
+        "模型只返回了推理过程，没有给出最终答案",
+        scope=LLMErrorScope.PROVIDER_LOCAL,
+        category=AI_NO_FINAL_ANSWER_CATEGORY,
+    )
+
+
 def _ensure_legacy_result_product(result: LLMResult) -> None:
     """Reject only semantically empty successes; tool/image/refusal remain valid."""
     from .llm_client import LLMError, LLMErrorScope
@@ -580,6 +625,7 @@ async def call_with_fallback(
     timeout_seconds: int | None = None,
     native_image: bool = False,
     *,
+    thinking: str | None = None,
     # 阶段 F 收口 #6：区分「用户固定模型」与「Router 自动模型」。
     #   - override_model：用户/模板显式固定的模型，对所有 provider 生效（原行为）。
     #   - routed_model：auto 路由为 primary 选出的模型；仅作 primary 的提示，
@@ -738,9 +784,11 @@ async def call_with_fallback(
                 native_image=native_image,
                 log_prompt_preview=log_prompt_preview,
                 client_factory=client_factory,
+                thinking=thinking,
                 key_scope=_key_affinity_scope(None, account_id),
                 key_trace=key_trace,
             )
+            _ensure_final_answer(result, provider_name=provider_dto.name, max_tokens=max_tokens)
             _ensure_legacy_result_product(result)
             latency_ms = int((time.monotonic() - attempt_start) * 1000)
             # 成功
@@ -1723,6 +1771,7 @@ async def _call_with_retry(
     max_retries: int = _MAX_RETRIES,
     key_scope: str | None = None,
     key_trace: dict[str, Any] | None = None,
+    thinking: str | None = None,
 ) -> LLMResult:
     """使用指数退避重试调用单个 provider。
 
@@ -1763,6 +1812,9 @@ async def _call_with_retry(
             if web_search:
                 kwargs["web_search"] = True
                 kwargs["web_search_context_size"] = web_search_context_size
+            if thinking in {"enabled", "disabled"}:
+                # 只有声明了 thinking 参数的客户端（OpenAI 兼容）会收到；其余被 compat 过滤
+                kwargs["thinking"] = thinking
             if native_image:
                 result = await _call_generate_image_compat(client, system, user, kwargs)
             else:

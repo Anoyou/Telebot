@@ -92,6 +92,14 @@ class AIQuotaError(PluginAIError):
     """Raised when account/plugin LLM quota or provider rate limits block a call."""
 
 
+class AIResponseTruncated(AIUnavailableError):
+    """模型没有给出最终答案：输出额度被推理过程耗尽（finish_reason=length）或只返回了推理。
+
+    平台绝不把推理过程（reasoning_content / ``<think>``）当作 ``AIResult.text`` 返回。
+    插件可捕获后调大 ``max_tokens``、传 ``thinking="disabled"`` 重试，或提示用户换模型。
+    """
+
+
 class AICapabilityError(AIUnavailableError):
     """Raised when every candidate provider/model lacks a requested capability.
 
@@ -114,6 +122,11 @@ class AIResult:
     sources: list[dict[str, Any]] = field(default_factory=list)
     # 阶段 E：脱敏路由摘要（不含 key / base_url / 代理 / 内部分类器细节）。
     routing: dict[str, Any] = field(default_factory=dict)
+    # 推理模型的思考过程（只读参考，绝不并入 text；插件不要把它发给用户）。
+    reasoning: str | None = None
+    reasoning_tokens: int = 0
+    # Provider 原始结束原因（stop / length / …）。
+    finish_reason: str | None = None
 
 
 @dataclass(frozen=True)
@@ -252,9 +265,15 @@ class PluginAI:
         images: list[bytes] | tuple[bytes, ...] | None = None,
         web_search: bool = False,
         web_search_context_size: str | None = None,
+        thinking: str | None = None,
         **_ignored: Any,
     ) -> AIResult:
         """Call a text LLM through TelePilot's shared LLM runtime.
+
+        返回的 ``AIResult.text`` 只包含模型的最终 content；推理过程单独放在
+        ``AIResult.reasoning``。模型没有给出最终答案（输出被推理耗尽等）时抛
+        :class:`AIResponseTruncated`。``thinking="disabled"/"enabled"`` 对支持的
+        OpenAI 兼容上游（智谱/Z.ai、DeepSeek、DashScope Qwen）关闭/开启思考，其余上游忽略。
 
         ``provider`` accepts an id or provider name. ``provider_tag`` /
         ``tag`` / first ``tags`` item select the cheapest usable provider with
@@ -305,6 +324,20 @@ class PluginAI:
         routed_model = None if selected_model else _enabled_model_for_dto(primary, None)
         if not selected_model and not routed_model:
             raise AIUnavailableError(f"provider {primary.name} 没有已启用模型")
+        thinking_mode = _normalize_thinking(thinking)
+        if thinking_mode != "disabled" and is_reasoning_model(primary, selected_model or routed_model):
+            floor = max(0, int(getattr(settings, "plugin_ai_reasoning_min_output_tokens", 0) or 0))
+            if floor and clamped_tokens < floor:
+                raised = self._clamp_max_tokens(floor)
+                if raised > clamped_tokens:
+                    log.info(
+                        "[plugin-ai] 推理模型 max_tokens 抬高 plugin=%s model=%s requested=%s effective=%s",
+                        self.plugin_key,
+                        selected_model or routed_model,
+                        clamped_tokens,
+                        raised,
+                    )
+                    clamped_tokens = raised
         quota_ticket: plugin_ai_quota.PluginAIQuotaTicket | None = None
         try:
             estimated_tokens = _estimate_total_tokens(system_prompt, user_prompt, clamped_tokens)
@@ -330,6 +363,7 @@ class PluginAI:
                 account_id=self.account_id,
                 source=f"plugin:{self.plugin_key}",
                 matched_tag=matched_tag,
+                thinking=_normalize_thinking(thinking),
             )
             await plugin_ai_quota.release(
                 quota_ticket,
@@ -698,6 +732,9 @@ class PluginAI:
                         final_model = str(getattr(chunk, "model", None) or final_model or "")
                         continue
                     final_model = str(getattr(chunk, "model", None) or final_model or "")
+                    if getattr(chunk, "is_reasoning", False):
+                        # 推理过程不是答案，不交给插件
+                        continue
                     delta = str(getattr(chunk, "delta", "") or "")
                     if delta:
                         if response_preview_chars < 2000:
@@ -1057,6 +1094,9 @@ def _safe_model_metadata(item: Mapping[str, Any]) -> dict[str, Any]:
 
 def _result_from_llm(result: LLMResult, provider: LLMProviderDTO, used_fallback: bool) -> AIResult:
     sources = [dict(item) for item in (getattr(result, "sources", None) or []) if isinstance(item, dict)]
+    if getattr(result, "text_from_reasoning", False):
+        # 防御：运行时已拒绝这种结果；直接调用 client 的路径也绝不把推理当正文。
+        raise AIResponseTruncated("模型只返回了推理过程，没有给出最终答案")
     return AIResult(
         text=str(result.text or ""),
         model=str(result.model or provider.default_model or ""),
@@ -1066,6 +1106,9 @@ def _result_from_llm(result: LLMResult, provider: LLMProviderDTO, used_fallback:
         input_tokens=int(result.input_tokens or 0),
         output_tokens=int(result.output_tokens or 0),
         sources=sources,
+        reasoning=getattr(result, "reasoning", None) or None,
+        reasoning_tokens=int(getattr(result, "reasoning_tokens", 0) or 0),
+        finish_reason=getattr(result, "provider_status", None) or None,
     )
 
 
@@ -1116,10 +1159,62 @@ def _effective_api_format(provider: LLMProviderDTO) -> str:
     return default_api_format_for(provider.provider)
 
 
+_REASONING_MODEL_MARKERS = (
+    "glm-4.5",
+    "glm-4.6",
+    "glm-4.7",
+    "glm-5",
+    "glm-z1",
+    "deepseek-r1",
+    "deepseek-reasoner",
+    "qwq",
+    "qwen3",
+    "thinking",
+    "reasoner",
+    "kimi-k2",
+    "kimi-k3",
+    "gpt-5",
+    "grok-4",
+    "magistral",
+)
+_REASONING_MODEL_PREFIXES = ("o1", "o3", "o4")
+
+
+def is_reasoning_model(dto: LLMProviderDTO, model: str | None) -> bool:
+    """模型是否会消耗输出 Token 做推理：模型清单声明了推理档位，或模型名属于常见推理系列。"""
+
+    name = str(model or dto.default_model or "").strip()
+    if not name:
+        return False
+    for item in dto.models or []:
+        if isinstance(item, dict) and str(item.get("id") or "") == name:
+            meta = item.get("metadata") if isinstance(item.get("metadata"), dict) else item
+            if meta.get("supported_reasoning_levels") or meta.get("reasoning_efforts"):
+                return True
+    base = name.lower().rsplit("/", 1)[-1]
+    if any(base == prefix or base.startswith(f"{prefix}-") for prefix in _REASONING_MODEL_PREFIXES):
+        return True
+    return any(marker in base for marker in _REASONING_MODEL_MARKERS)
+
+
+def _normalize_thinking(value: Any) -> str | None:
+    mode = str(value or "").strip().lower()
+    if mode in {"disabled", "off", "false", "none"}:
+        return "disabled"
+    if mode in {"enabled", "on", "true"}:
+        return "enabled"
+    return None
+
+
 def _facade_error_from_llm_call(exc: LLMCallFailed) -> PluginAIError:
     message = str(exc)
     if exc.error_type in {"budget_exceeded", "rate_limit"}:
         return AIQuotaError(message)
+    if exc.error_type in {
+        llm_runtime.AI_RESPONSE_TRUNCATED_CATEGORY,
+        llm_runtime.AI_NO_FINAL_ANSWER_CATEGORY,
+    }:
+        return AIResponseTruncated(message)
     scope = getattr(getattr(exc, "scope", None), "value", getattr(exc, "scope", None))
     if str(scope or "") == "capability_mismatch":
         return AICapabilityError(message)
