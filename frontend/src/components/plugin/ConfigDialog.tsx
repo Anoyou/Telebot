@@ -37,6 +37,13 @@ import { Spinner } from "@/components/ui/misc";
 import { Select } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  AUTO_ROUTE_LABEL,
+  buildUnifiedModelSelection,
+  findProviderBySelector,
+  groupUnifiedOptions,
+  resolveUnifiedModelKey,
+} from "./llmModelOptions";
 
 export const MASKED_SECRET_PLACEHOLDER = "••••••••••••••••";
 const EMPTY_CONFIG: Record<string, unknown> = {};
@@ -111,6 +118,8 @@ interface ConfigScopeSectionProps {
   configActions?: ConfigAction[];
   onConfigAction?: (action: ConfigAction, input: Record<string, unknown>) => Promise<void>;
   onChange: (key: string, value: unknown) => void;
+  /** 一次写入多个字段（统一模型列表同时写模型与 Provider）；缺省时逐个调用 onChange。 */
+  onChangeMany?: (patch: Record<string, unknown>) => void;
 }
 
 export function ConfigScopeSection({
@@ -126,9 +135,18 @@ export function ConfigScopeSection({
   configActions = [],
   onConfigAction,
   onChange,
+  onChangeMany,
 }: ConfigScopeSectionProps) {
   const [openTemplates, setOpenTemplates] = useState<Record<string, boolean>>({});
   const groups = groupConfigFields(fields);
+  const sectionKeys = new Set(fields.map(([key]) => key));
+  // 只允许改写本作用域内的字段：Provider 字段在另一作用域（全局/账号）时不跨域写入。
+  const onFieldsChange = (patch: Record<string, unknown>) => {
+    const scoped = Object.fromEntries(Object.entries(patch).filter(([key]) => sectionKeys.has(key)));
+    if (Object.keys(scoped).length === 0) return;
+    if (onChangeMany) onChangeMany(scoped);
+    else Object.entries(scoped).forEach(([key, value]) => onChange(key, value));
+  };
 
   return (
     <section className="space-y-4 rounded-md border bg-muted/30 p-3">
@@ -156,6 +174,7 @@ export function ConfigScopeSection({
                     fieldActions={actionsForField(configActions, key)}
                     onConfigAction={onConfigAction}
                     onChange={(value) => onChange(key, value)}
+                    onFieldsChange={onFieldsChange}
                   />
                 ))}
               </div>
@@ -179,6 +198,7 @@ export function ConfigScopeSection({
               fieldActions={actionsForField(configActions, key)}
               onConfigAction={onConfigAction}
               onChange={(value) => onChange(key, value)}
+              onFieldsChange={onFieldsChange}
             />
           ))}
         </div>
@@ -202,6 +222,7 @@ export function ConfigScopeSection({
               fieldActions={actionsForField(configActions, key)}
               onConfigAction={onConfigAction}
               onChange={(value) => onChange(key, value)}
+              onFieldsChange={onFieldsChange}
             />
           ))}
           <div className="space-y-2">
@@ -235,6 +256,7 @@ export function ConfigScopeSection({
                         fieldActions={actionsForField(configActions, key)}
                         onConfigAction={onConfigAction}
                         onChange={(value) => onChange(key, value)}
+                        onFieldsChange={onFieldsChange}
                       />
                     </div>
                   )}
@@ -275,6 +297,7 @@ function ConfigFieldWithActions({
   fieldActions,
   onConfigAction,
   onChange,
+  onFieldsChange,
 }: {
   fk: string;
   field: ConfigField;
@@ -286,6 +309,7 @@ function ConfigFieldWithActions({
   fieldActions: ConfigAction[];
   onConfigAction?: (action: ConfigAction, input: Record<string, unknown>) => Promise<void>;
   onChange: (value: unknown) => void;
+  onFieldsChange?: (patch: Record<string, unknown>) => void;
 }) {
   if (field["x-ui-hidden"]) return null;
   return (
@@ -301,6 +325,7 @@ function ConfigFieldWithActions({
         configActions={fieldActions}
         onConfigAction={onConfigAction}
         onChange={onChange}
+        onFieldsChange={onFieldsChange}
       />
       {field["x-ui-widget"] !== "config-list" ? (
         <ConfigActionButtons actions={fieldActions} onRun={onConfigAction} />
@@ -416,6 +441,8 @@ interface FieldInputProps {
   onConfigAction?: (action: ConfigAction, input: Record<string, unknown>) => Promise<void>;
   previewValue?: string;
   onChange: (v: unknown) => void;
+  /** 同一配置对象内一次改写多个字段（统一模型列表选中时同时写模型与 Provider）。 */
+  onFieldsChange?: (patch: Record<string, unknown>) => void;
 }
 
 function FieldInput({
@@ -430,6 +457,7 @@ function FieldInput({
   onConfigAction,
   previewValue,
   onChange,
+  onFieldsChange,
 }: FieldInputProps) {
   const label = field.title || fk;
   const description = field.description;
@@ -502,6 +530,11 @@ function FieldInput({
         loading={llmProvidersLoading}
         modelModality={field["x-ui-model-modality"]}
         onChange={onChange}
+        onSelectPair={
+          providerField && onFieldsChange
+            ? (model, provider) => onFieldsChange({ [field.key || fk]: model, [providerField]: provider })
+            : undefined
+        }
       />
     );
   }
@@ -673,6 +706,7 @@ function FieldInput({
               llmProviders={llmProviders}
               llmProvidersLoading={llmProvidersLoading}
               onChange={(key, nextValue) => onChange({ ...objectValue, [key]: nextValue })}
+              onChangeMany={(patch) => onChange({ ...objectValue, ...patch })}
             />
           </div>
         </div>
@@ -1002,6 +1036,7 @@ function ConfigObjectEditor({
   llmProviders,
   llmProvidersLoading = false,
   onChange,
+  onChangeMany,
 }: {
   prefix: string;
   properties: Record<string, ConfigField>;
@@ -1010,6 +1045,8 @@ function ConfigObjectEditor({
   llmProviders?: LLMProviderOut[];
   llmProvidersLoading?: boolean;
   onChange: (key: string, value: unknown) => void;
+  /** 一次写入多个字段，避免基于同一旧值的连续 onChange 互相覆盖。 */
+  onChangeMany?: (patch: Record<string, unknown>) => void;
 }) {
   const entries = Object.entries(properties)
     .filter(([, field]) => !field["x-ui-hidden"])
@@ -1032,6 +1069,11 @@ function ConfigObjectEditor({
           llmProviders={llmProviders}
           llmProvidersLoading={llmProvidersLoading}
           onChange={(value) => onChange(key, value)}
+          onFieldsChange={(patch) => {
+            const scoped = Object.fromEntries(Object.entries(patch).filter(([name]) => name in properties));
+            if (onChangeMany) onChangeMany(scoped);
+            else Object.entries(scoped).forEach(([name, next]) => onChange(name, next));
+          }}
         />
       ))}
     </div>
@@ -1674,7 +1716,7 @@ function LLMProviderSelectField({
   onChange: (v: unknown) => void;
 }) {
   const selected = formatConfigValue(value);
-  const hasSelectedProvider = Boolean(selected) && Boolean(findLLMProviderBySelector(providers, selected));
+  const hasSelectedProvider = Boolean(selected) && Boolean(findProviderBySelector(providers, selected));
 
   return (
     <div className="space-y-1.5">
@@ -1696,10 +1738,12 @@ function LLMProviderSelectField({
           <option value={selected}>当前值：{selected}</option>
         )}
       </Select>
-      {!loading && (!providers || providers.length === 0) && (
+      {!loading && (!providers || providers.length === 0) ? (
         <p className="text-xs text-muted-foreground">
           尚未配置 TelePilot AI Provider；请先到 AI 模型提供商中添加。
         </p>
+      ) : (
+        <p className="text-xs text-muted-foreground">随模型自动填写；只想固定 Provider、使用其默认模型时才需要单独选择。</p>
       )}
     </div>
   );
@@ -1715,6 +1759,7 @@ function LLMModelSelectField({
   loading,
   modelModality,
   onChange,
+  onSelectPair,
 }: {
   inputId: string;
   label: string;
@@ -1725,11 +1770,11 @@ function LLMModelSelectField({
   loading: boolean;
   modelModality?: string;
   onChange: (v: unknown) => void;
+  onSelectPair?: (model: string, provider: string) => void;
 }) {
-  const selected = formatConfigValue(value);
-  const provider = findLLMProviderBySelector(providers, formatConfigValue(providerValue));
-  const rows = provider ? buildLLMModelOptions(provider, modelModality) : [];
-  const hasSelectedModel = Boolean(selected) && rows.some((row) => row.value === selected);
+  // 统一列表：所有 Provider 下已启用的模型，选中后同步写回 Provider 字段（与 iOS 一致）。
+  const selection = buildUnifiedModelSelection(providers, providerValue, value, modelModality);
+  const groups = groupUnifiedOptions(selection.options);
 
   return (
     <div className="space-y-1.5">
@@ -1737,25 +1782,30 @@ function LLMModelSelectField({
       {description && <p className="text-xs text-muted-foreground">{description}</p>}
       <Select
         id={inputId}
-        value={selected}
-        disabled={loading || !provider}
-        onChange={(e) => onChange(e.target.value)}
+        value={selection.selectedKey}
+        disabled={loading && !providers}
+        onChange={(e) => {
+          const next = resolveUnifiedModelKey(selection, e.target.value);
+          if (!next) return;
+          if (onSelectPair) onSelectPair(next.model, next.provider);
+          else onChange(next.model);
+        }}
       >
-        <option value="">
-          {provider ? "使用 Provider 默认模型" : loading ? "正在加载 TelePilot Provider..." : "跟随自动路由"}
-        </option>
-        {rows.map((row) => (
-          <option key={row.value} value={row.value}>
-            {row.label}
-          </option>
+        <option value="">{loading && !providers ? "正在加载 TelePilot Provider..." : AUTO_ROUTE_LABEL}</option>
+        {groups.map((group) => (
+          <optgroup key={group.group} label={group.group}>
+            {group.options.map((option) => (
+              <option key={option.key} value={option.key}>
+                {option.label}
+              </option>
+            ))}
+          </optgroup>
         ))}
-        {selected && !hasSelectedModel && (
-          <option value={selected}>当前值：{selected}</option>
-        )}
+        {selection.legacy && <option value={selection.legacy.key}>{selection.legacy.label}</option>}
       </Select>
-      {!loading && !provider && (
+      {!loading && selection.options.length === 0 && (
         <p className="text-xs text-muted-foreground">
-          先选择固定 TelePilot Provider 后，才能选择该 Provider 下已启用的模型。
+          还没有已启用的模型；请先到 AI 模型提供商中添加 Provider 并启用模型。
         </p>
       )}
     </div>
@@ -1777,49 +1827,12 @@ function fieldHasLLMSelect(field: ConfigField | undefined): boolean {
   return false;
 }
 
-function findLLMProviderBySelector(providers: LLMProviderOut[] | undefined, selector: string): LLMProviderOut | null {
-  const raw = selector.trim();
-  if (!raw) return null;
-  const lowered = raw.toLowerCase();
-  return providers?.find((provider) => (
-    String(provider.id) === raw ||
-    provider.name.toLowerCase() === lowered ||
-    String(provider.provider).toLowerCase() === lowered
-  )) ?? null;
-}
-
 function formatLLMProviderOptionLabel(provider: LLMProviderOut): string {
   const tags = provider.tags && provider.tags.length > 0 ? ` · ${provider.tags.join(",")}` : "";
   const keyState = provider.has_effective_key || provider.provider === "ollama"
     ? ""
     : " · 未配置 API Key";
   return `${provider.name}（${provider.provider} · ${provider.default_model}${tags}${keyState}）`;
-}
-
-function buildLLMModelOptions(provider: LLMProviderOut, modelModality?: string): Array<{ value: string; label: string }> {
-  const enabled = (provider.models ?? []).filter((model) => (
-    model.enabled && modelMatchesModality(model.id, modelModality)
-  ));
-  const seen = new Set<string>();
-  const rows: Array<{ value: string; label: string }> = [];
-  for (const model of enabled) {
-    const value = model.id.trim();
-    if (!value || seen.has(value)) continue;
-    seen.add(value);
-    const label = model.label && model.label !== model.id ? `${model.label}（${model.id}）` : model.id;
-    rows.push({ value, label });
-  }
-  return rows;
-}
-
-function modelMatchesModality(modelId: string, modelModality?: string): boolean {
-  if ((modelModality || "").trim().toLowerCase() !== "text") return true;
-  const normalized = modelId.trim().toLowerCase();
-  return !(
-    normalized.startsWith("gpt-image-") ||
-    normalized.startsWith("dall-e-") ||
-    normalized.includes("image")
-  );
 }
 
 function isTemplateField(key: string): boolean {

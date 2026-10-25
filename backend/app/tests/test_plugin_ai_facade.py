@@ -1025,3 +1025,155 @@ async def test_plugin_quota_precheck_is_mapped_to_quota_error(monkeypatch) -> No
         await facade.complete("sys", "hello")
 
     assert invoked is False
+
+
+@pytest.mark.asyncio
+async def test_complete_passes_images_and_web_search_to_runtime(monkeypatch) -> None:
+    captured: dict[str, Any] = {}
+    quota_calls: dict[str, Any] = {}
+
+    async def _loader():
+        return {1: _provider(1, api_format="responses")}
+
+    async def _invoke(primary, providers, system, user, **kwargs):
+        captured.update(kwargs)
+        return (
+            LLMResult(
+                text="ok",
+                model="gpt-test",
+                input_tokens=3,
+                output_tokens=5,
+                sources=[{"url": "https://example.com", "title": "Example"}],
+            ),
+            primary,
+            False,
+        )
+
+    async def _acquire(plugin_key, account_id, estimated_tokens):
+        quota_calls["acquire"] = estimated_tokens
+        return object()
+
+    monkeypatch.setattr(ai_facade, "invoke_ai_runtime", _invoke)
+    monkeypatch.setattr(ai_facade.plugin_ai_quota, "acquire", _acquire)
+    monkeypatch.setattr(ai_facade.plugin_ai_quota, "release", AsyncNoop())
+    facade = PluginAI(account_id=7, plugin_key="demo", provider_loader=_loader, allow_vision=True)
+
+    result = await facade.complete(
+        "sys",
+        "这张图是什么？",
+        images=[b"\x89PNG-fake"],
+        web_search=True,
+        web_search_context_size="LOW",
+    )
+
+    assert captured["images"] == [b"\x89PNG-fake"]
+    assert captured["web_search"] is True
+    assert captured["web_search_context_size"] == "low"
+    # 每张图按 1024 token 预占插件配额。
+    assert quota_calls["acquire"] >= 1024
+    assert result.sources == [{"url": "https://example.com", "title": "Example"}]
+
+
+@pytest.mark.asyncio
+async def test_complete_defaults_keep_text_only_runtime_call(monkeypatch) -> None:
+    captured: dict[str, Any] = {}
+
+    async def _loader():
+        return {1: _provider(1)}
+
+    async def _invoke(primary, providers, system, user, **kwargs):
+        captured.update(kwargs)
+        return (LLMResult(text="ok", model="gpt-test", input_tokens=1, output_tokens=1), primary, False)
+
+    monkeypatch.setattr(ai_facade, "invoke_ai_runtime", _invoke)
+    monkeypatch.setattr(ai_facade.plugin_ai_quota, "acquire", AsyncNoop(return_value=object()))
+    monkeypatch.setattr(ai_facade.plugin_ai_quota, "release", AsyncNoop())
+    facade = PluginAI(account_id=7, plugin_key="demo", provider_loader=_loader)
+
+    await facade.complete("sys", "hello")
+
+    assert captured["images"] is None
+    assert captured["web_search"] is False
+    assert captured["web_search_context_size"] is None
+
+
+@pytest.mark.asyncio
+async def test_complete_images_require_ai_vision_permission(monkeypatch) -> None:
+    async def _loader():
+        return {1: _provider(1)}
+
+    invoked = False
+
+    async def _invoke(*_args, **_kwargs):
+        nonlocal invoked
+        invoked = True
+
+    monkeypatch.setattr(ai_facade, "invoke_ai_runtime", _invoke)
+    facade = PluginAI(account_id=7, plugin_key="demo", provider_loader=_loader)
+
+    with pytest.raises(AIUnavailableError, match="ai_vision"):
+        await facade.complete("sys", "hello", images=[b"img"])
+    assert invoked is False
+
+
+@pytest.mark.asyncio
+async def test_complete_rejects_too_many_or_oversized_images() -> None:
+    async def _loader():
+        return {1: _provider(1)}
+
+    facade = PluginAI(account_id=7, plugin_key="demo", provider_loader=_loader, allow_vision=True)
+
+    with pytest.raises(AIUnavailableError, match="最多"):
+        await facade.complete("sys", "hello", images=[b"a"] * (ai_facade.PLUGIN_AI_MAX_IMAGES + 1))
+    with pytest.raises(AIUnavailableError, match="过大"):
+        await facade.complete("sys", "hello", images=[b"a" * (ai_facade.PLUGIN_AI_MAX_IMAGE_BYTES + 1)])
+
+
+@pytest.mark.asyncio
+async def test_capability_mismatch_maps_to_capability_error(monkeypatch) -> None:
+    async def _loader():
+        return {1: _provider(1)}
+
+    async def _invoke(*_args, **_kwargs):
+        raise LLMCallFailed(
+            "所有 provider 均不兼容或调用失败: provider 不支持原生联网搜索",
+            error_type="exhausted",
+            scope="capability_mismatch",
+        )
+
+    monkeypatch.setattr(ai_facade, "invoke_ai_runtime", _invoke)
+    monkeypatch.setattr(ai_facade.plugin_ai_quota, "acquire", AsyncNoop(return_value=object()))
+    monkeypatch.setattr(ai_facade.plugin_ai_quota, "release", AsyncNoop())
+    facade = PluginAI(account_id=7, plugin_key="demo", provider_loader=_loader)
+
+    with pytest.raises(ai_facade.AICapabilityError):
+        await facade.complete("sys", "hello", web_search=True)
+
+
+@pytest.mark.asyncio
+async def test_fetch_bot_image_requires_permission_and_caps_size() -> None:
+    calls: list[tuple[str, int]] = []
+
+    async def _file_loader(file_id: str, max_bytes: int) -> bytes:
+        calls.append((file_id, max_bytes))
+        return b"jpeg-bytes"
+
+    denied = PluginAI(account_id=7, plugin_key="demo", bot_file_loader=_file_loader)
+    with pytest.raises(AIUnavailableError, match="ai_vision"):
+        await denied.fetch_bot_image("file-1")
+    assert calls == []
+
+    facade = PluginAI(account_id=7, plugin_key="demo", allow_vision=True, bot_file_loader=_file_loader)
+    assert facade.vision_enabled is True
+    assert await facade.fetch_bot_image("file-1", max_bytes=10**12) == b"jpeg-bytes"
+    assert calls == [("file-1", ai_facade.PLUGIN_AI_MAX_IMAGE_BYTES)]
+
+
+@pytest.mark.asyncio
+async def test_fetch_bot_image_wraps_loader_errors() -> None:
+    async def _file_loader(file_id: str, max_bytes: int) -> bytes:
+        raise ValueError("文件过大")
+
+    facade = PluginAI(account_id=7, plugin_key="demo", allow_vision=True, bot_file_loader=_file_loader)
+    with pytest.raises(AIUnavailableError, match="读取图片失败"):
+        await facade.fetch_bot_image("file-1")

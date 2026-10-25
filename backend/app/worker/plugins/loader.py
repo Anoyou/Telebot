@@ -4938,9 +4938,25 @@ async def _apply_userbot_answer_guest_query_action(state: _AccountState, action:
             error=error,
         )
         return False
+    await _save_action_inline_message_id(state, action, sent)
     await record_action(action.get("context"), action, TRACE_STATUS_OK, actual_send_via="interaction_bot", result=sent)
     await _emit_userbot_action_tap(state, action, ACTION_EVENT_STATUS_OK, channel="interaction_bot")
     return True
+
+
+def _interaction_bot_file_loader(account_id: int) -> Callable[[str, int], Awaitable[bytes]]:
+    """给 ``ctx.ai.fetch_bot_image`` 用的下载器：Token 只在 worker 内部解析，不暴露给插件。"""
+
+    async def _load(file_id: str, max_bytes: int) -> bytes:
+        token = await _interaction_bot_token_for_account(account_id)
+        if not token:
+            raise RuntimeError("交互 Bot Token 不可用")
+        try:
+            return await account_bot_service.download_bot_file(token, file_id, max_bytes=max_bytes)
+        except Exception as exc:  # noqa: BLE001 - 错误信息里可能带 Token URL
+            raise RuntimeError(account_bot_service.sanitize_bot_error(exc, token=token)) from None
+
+    return _load
 
 
 async def _interaction_bot_token_for_account(account_id: int) -> str | None:
@@ -5196,6 +5212,38 @@ async def _read_action_message_id(state: _AccountState, raw_key: Any) -> int | N
     return _int_or_none(raw)
 
 
+async def _save_action_inline_message_id(state: _AccountState, action: dict[str, Any], result: Any) -> None:
+    """Guest Mode：把 ``answerGuestQuery`` 返回的 inline_message_id 存到 save_message_id_key。"""
+
+    save_key = namespaced_action_save_message_id_key(state.account_id, action.get("save_message_id_key"))
+    if not save_key or not isinstance(result, dict):
+        return
+    inline_id = str(result.get("inline_message_id") or "").strip()
+    if not inline_id:
+        return
+    try:
+        redis = state.redis or get_redis()
+        await redis.set(save_key, f"inline:{inline_id}", ex=7200)
+    except Exception:  # noqa: BLE001
+        log.debug("save plugin inline message id failed account=%s key=%s", state.account_id, save_key, exc_info=True)
+
+
+async def _read_action_inline_message_id(state: _AccountState, raw_key: Any) -> str | None:
+    read_key = namespaced_action_save_message_id_key(state.account_id, raw_key)
+    if not read_key:
+        return None
+    try:
+        redis = state.redis or get_redis()
+        raw = await redis.get(read_key)
+    except Exception:  # noqa: BLE001
+        log.debug("read plugin inline message id failed account=%s key=%s", state.account_id, read_key, exc_info=True)
+        return None
+    if isinstance(raw, bytes):
+        raw = raw.decode("utf-8", errors="ignore")
+    text = str(raw or "")
+    return text[len("inline:"):] or None if text.startswith("inline:") else None
+
+
 async def _delete_action_message_id(state: _AccountState, raw_key: Any) -> bool:
     delete_key = namespaced_action_save_message_id_key(state.account_id, raw_key)
     if not delete_key:
@@ -5297,9 +5345,10 @@ _SUPPORTED_FACADE_PERMISSIONS: set[str] = {
     "external_http_bypass_proxy",
     "ai_text",
     "ai_agent",
+    # ai_vision 需与 ai_text 同时声明：让 ctx.ai.complete(images=...) 与 ctx.ai.fetch_bot_image 可用。
+    "ai_vision",
 }
 _RESERVED_UNSUPPORTED_FACADE_PERMISSIONS: set[str] = {
-    "ai_vision",
     "ai_image",
     "ai_stt",
 }
@@ -6086,12 +6135,17 @@ class _AccountState:
         self.plugin_circuits: dict[str, dict[str, float | int]] = {}
 
 
+# 与 account_bot_service.INTERACTION_ENTRY_MAX_TIMEOUT_SECONDS 一致（worker 不反向依赖主进程服务模块）。
+_INTERACTION_ENTRY_MAX_TIMEOUT_SECONDS = 90.0
+
+
 async def _invoke_plugin_with_resilience(
     state: _AccountState,
     plugin_key: str,
     factory: Callable[[], Awaitable[Any]],
     *,
     deadline_at_ms: int | None = None,
+    deadline_governs: bool = False,
 ) -> Any:
     if plugin_update_in_progress(_installed_dir(), plugin_key, state.account_id):
         raise RuntimeError(f"PLUGIN_UPDATE_IN_PROGRESS: {plugin_key}")
@@ -6102,7 +6156,12 @@ async def _invoke_plugin_with_resilience(
 
     timeout = max(0.05, float(app_settings.plugin_invoke_timeout_seconds or 30.0))
     if deadline_at_ms is not None and deadline_at_ms > 0:
-        timeout = min(timeout, max(0.0, (deadline_at_ms / 1000) - time.time()))
+        remaining = max(0.0, (deadline_at_ms / 1000) - time.time())
+        if deadline_governs:
+            # 交互入口：主进程按 manifest ``timeout_seconds`` 下发 deadline，以它为准（不超过平台上限 90 秒）。
+            timeout = min(remaining, _INTERACTION_ENTRY_MAX_TIMEOUT_SECONDS)
+        else:
+            timeout = min(timeout, remaining)
     if timeout <= 0:
         raise TimeoutError(f"PLUGIN_INVOKE_TIMEOUT: {plugin_key}")
 
@@ -6323,6 +6382,11 @@ class _LiveMessageOps:
 
         return await _delete_action_message_id(self._state, key)
 
+    async def read_saved_inline_message_id(self, key: str) -> str | None:
+        """Read the ``inline_message_id`` saved by a live ``answer_guest_query``."""
+
+        return await _read_action_inline_message_id(self._state, key)
+
 
 class _InteractionEntryMessageOps(BufferedMessageOps):
     """Buffer current interaction actions while keeping live apply for delayed work."""
@@ -6372,6 +6436,9 @@ class _InteractionEntryMessageOps(BufferedMessageOps):
 
     async def delete_saved_message_id(self, key: str) -> bool:
         return await self._live.delete_saved_message_id(key)
+
+    async def read_saved_inline_message_id(self, key: str) -> str | None:
+        return await self._live.read_saved_inline_message_id(key)
 
 
 async def _event_sender_id(event: Any) -> int | None:
@@ -7839,11 +7906,14 @@ async def _activate(db, state: _AccountState, af: AccountFeature, redis: Any) ->
         if await is_ai_enabled(db):
             from .ai_facade import PluginAI  # 延迟 import，避免未用 AI 的插件增加依赖面
 
+            allow_vision = "ai_vision" in plugin_permissions
             plugin_ai = PluginAI(
                 account_id=state.account_id,
                 plugin_key=af.feature_key,
                 allow_agent="ai_agent" in plugin_permissions,
+                allow_vision=allow_vision,
                 manifest=plugin_manifest.to_dict(),
+                bot_file_loader=_interaction_bot_file_loader(state.account_id) if allow_vision else None,
             )
     declared_facade_permissions = plugin_permissions & (
         _SUPPORTED_FACADE_PERMISSIONS | _RESERVED_UNSUPPORTED_FACADE_PERMISSIONS
@@ -9140,6 +9210,7 @@ async def invoke_interaction_entry(
         plugin_key,
         _call_handler,
         deadline_at_ms=deadline_at_ms,
+        deadline_governs=True,
     )
     if actions is None and not buffered_messages.actions and not (is_event_subscription and has_event_handler):
         raise RuntimeError(f"模块尚未实现交互入口：{plugin_key}.{entry_key}")

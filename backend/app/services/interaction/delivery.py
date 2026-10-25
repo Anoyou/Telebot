@@ -38,7 +38,9 @@ from .guest_reply import (
     GUEST_REASON_MEDIA_UNSUPPORTED,
     GUEST_REASON_QUERY_ID_MISSING,
     GUEST_REASON_REPLY_ALREADY_USED,
+    build_guest_article,
     guest_result_from_action,
+    html_to_plain_text,
 )
 
 log = logging.getLogger(__name__)
@@ -408,6 +410,9 @@ class InteractionDeliveryExecutor:
             # Guest Mode：Bot 不在该会话里，不能 sendMessage；所有消息类动作改写进
             # 访客回复缓冲，处理结束后由 runtime 统一 answerGuestQuery 一次。
             async def _on_guest_capture(action: dict[str, Any]) -> bool:
+                if str(action.get("type") or "").strip() == "edit_message" and str(action.get("inline_message_id") or "").strip():
+                    # 插件已用 answer_guest_query 回复过占位（inline 消息），这里直接编辑它。
+                    return await _on_edit_message(action)
                 await self._record_settlement(action)
                 return await self._capture_guest_action(action, guest_buffer, replace_holder=replace_holder)
 
@@ -596,14 +601,16 @@ class InteractionDeliveryExecutor:
                 edit_action["context"] = dict(context)
             try:
                 edit_kwargs: dict[str, Any] = {"reply_markup": reply_markup}
-                if service_parse_mode is not None:
-                    edit_kwargs["parse_mode"] = service_parse_mode
-                result = await account_bot_service.edit_message(
-                    token,
-                    target_chat_id,
-                    edit_message_id,
+                result = await _call_with_plain_fallback(
+                    lambda body, mode: account_bot_service.edit_message(
+                        token,
+                        target_chat_id,
+                        edit_message_id,
+                        body,
+                        **_with_parse_mode(edit_kwargs, mode),
+                    ),
                     text,
-                    **edit_kwargs,
+                    service_parse_mode,
                 )
                 await record_action(
                     context,
@@ -638,11 +645,15 @@ class InteractionDeliveryExecutor:
             }
             if service_parse_mode is not None:
                 send_kwargs["parse_mode"] = service_parse_mode
-            result = await account_bot_service.send_message(
-                token,
-                target_chat_id,
+            result = await _call_with_plain_fallback(
+                lambda body, mode: account_bot_service.send_message(
+                    token,
+                    target_chat_id,
+                    body,
+                    **_with_parse_mode(send_kwargs, mode),
+                ),
                 text,
-                **send_kwargs,
+                service_parse_mode,
             )
         except Exception as exc:  # noqa: BLE001
             await self.write_log(
@@ -708,14 +719,16 @@ class InteractionDeliveryExecutor:
             return False, {"error": "bot token unavailable", "error_code": "bot_token_missing"}
         try:
             edit_kwargs: dict[str, Any] = {"reply_markup": reply_markup if send_via == "interaction_bot" else None}
-            if service_parse_mode is not None:
-                edit_kwargs["parse_mode"] = service_parse_mode
-            result = await account_bot_service.edit_message(
-                token,
-                target_chat_id,
-                message_id,
+            result = await _call_with_plain_fallback(
+                lambda body, mode: account_bot_service.edit_message(
+                    token,
+                    target_chat_id,
+                    message_id,
+                    body,
+                    **_with_parse_mode(edit_kwargs, mode),
+                ),
                 text,
-                **edit_kwargs,
+                service_parse_mode,
             )
             return True, result
         except Exception as exc:  # noqa: BLE001
@@ -1599,6 +1612,16 @@ class InteractionDeliveryExecutor:
                 error="edit_message text is empty",
             )
             return
+        inline_message_id = str(action.get("inline_message_id") or "").strip()
+        if inline_message_id and not is_rich_edit:
+            await self._apply_edit_inline_message(
+                action,
+                inline_message_id,
+                text,
+                parse_mode=parse_mode,
+                reply_markup=reply_markup,
+            )
+            return
         message_id = _int_or_none(action.get("message_id") or action.get("edit_message_id"))
         if message_id is None:
             await record_action(
@@ -1642,6 +1665,23 @@ class InteractionDeliveryExecutor:
                 parse_mode=parse_mode,
                 reply_markup=reply_markup,
             )
+            if not ok and bool(action.get("send_on_edit_failure")):
+                # 占位消息被删除或已不可编辑时改为新发一条，避免最终答案丢失。
+                ok, result, used_send_via = await self._try_send_message_options(
+                    text,
+                    chat_id=chat_id,
+                    reply_to_message_id=_int_or_none(action.get("reply_to_message_id")),
+                    reply_to_user_id=None,
+                    reply_to_search_limit=None,
+                    parse_mode=parse_mode,
+                    send_via_options=action_send_via_options(action),
+                    edit_message_id=None,
+                    reply_markup=reply_markup,
+                    context=action.get("context") if isinstance(action.get("context"), dict) else None,
+                    action=action,
+                )
+                if isinstance(result, dict):
+                    result = {**result, "edit_fallback_send": True}
         await record_action(
             action.get("context"),
             action,
@@ -1657,6 +1697,81 @@ class InteractionDeliveryExecutor:
             channel=used_send_via,
             error_code=None if ok else _result_error_code(result, "action_failed"),
             error=result.get("error") if isinstance(result, dict) else None,
+            result=result,
+        )
+
+    async def _apply_edit_inline_message(
+        self,
+        action: dict[str, Any],
+        inline_message_id: str,
+        text: str,
+        *,
+        parse_mode: str,
+        reply_markup: dict[str, Any] | None,
+    ) -> None:
+        """编辑 inline 消息（Guest Mode 先回复占位、再编辑为最终答案）。只支持交互 Bot。"""
+
+        if self._dry_run_enabled(action):
+            await self._record_dry_run(
+                action,
+                channel="interaction_bot",
+                result={"dry_run": True, "inline_message_id": inline_message_id, "text": text},
+            )
+            return
+        options = action_send_via_options(action)
+        if options and options[0] != "interaction_bot":
+            await record_action(
+                action.get("context"),
+                action,
+                TRACE_STATUS_FAILED,
+                error_code="unsupported_send_via",
+                error="inline message edit requires interaction_bot",
+            )
+            return
+        token = await self._resolve_token("interaction_bot")
+        ok = False
+        result: dict[str, Any] = {}
+        if not token:
+            result = {"error": "bot token unavailable", "error_code": "bot_token_missing"}
+        else:
+            try:
+                result = await _call_with_plain_fallback(
+                    lambda body, mode: account_bot_service.edit_inline_message(
+                        token,
+                        inline_message_id,
+                        body,
+                        reply_markup=reply_markup,
+                        parse_mode=mode,
+                    ),
+                    text,
+                    None if parse_mode == "plain" else parse_mode,
+                )
+                ok = True
+            except Exception as exc:  # noqa: BLE001
+                error = account_bot_service.sanitize_bot_error(exc, token=token)
+                result = {"error": error, "error_code": "telegram_api_error"}
+                await self.write_log(
+                    self.incoming,
+                    "warn",
+                    "interaction inline message edit failed",
+                    error=error,
+                    **self.log_context(self.incoming),
+                )
+        await record_action(
+            action.get("context"),
+            action,
+            TRACE_STATUS_OK if ok else TRACE_STATUS_FAILED,
+            actual_send_via="interaction_bot",
+            result=result,
+            error_code=None if ok else _result_error_code(result, "action_failed"),
+            error=None if ok else result.get("error"),
+        )
+        await self._emit_action_tap(
+            action,
+            ACTION_EVENT_STATUS_OK if ok else ACTION_EVENT_STATUS_FAILED,
+            channel="interaction_bot",
+            error_code=None if ok else _result_error_code(result, "action_failed"),
+            error=None if ok else result.get("error"),
             result=result,
         )
 
@@ -2120,7 +2235,7 @@ class InteractionDeliveryExecutor:
             )
             return True
         try:
-            sent = await account_bot_service.answer_guest_query(self.incoming.token, guest_query_id, result=result)
+            sent = await _answer_guest_with_plain_fallback(self.incoming.token, guest_query_id, result)
         except Exception as exc:  # noqa: BLE001
             error = account_bot_service.sanitize_bot_error(exc, token=self.incoming.token)
             await record_action(
@@ -2639,6 +2754,51 @@ def _reply_to_user_id_from_action(action: dict[str, Any]) -> int | None:
 def _action_parse_mode(action: dict[str, Any]) -> str:
     value = str(action.get("parse_mode") or "plain").strip().lower()
     return "html" if value == "html" else "plain"
+
+
+def _with_parse_mode(kwargs: dict[str, Any], mode: Any) -> dict[str, Any]:
+    """纯文本时不传 ``parse_mode``，保持与旧调用签名一致。"""
+
+    out = {key: value for key, value in kwargs.items() if key != "parse_mode"}
+    if mode is not None:
+        out["parse_mode"] = mode
+    return out
+
+
+async def _call_with_plain_fallback(
+    call: Callable[[str, str | None], Awaitable[Any]],
+    text: str,
+    parse_mode: str | None,
+) -> Any:
+    """按 parse_mode 发送；Telegram 拒绝 HTML 实体时去标签改为纯文本重试一次。"""
+
+    try:
+        return await call(text, parse_mode)
+    except Exception as exc:
+        if not parse_mode or not account_bot_service.is_bot_parse_entities_error(exc):
+            raise
+        log.info("interaction html text rejected by Telegram, retry as plain text: %s", exc)
+        plain = html_to_plain_text(text) or text
+        return await call(plain, None)
+
+
+async def _answer_guest_with_plain_fallback(token: str, guest_query_id: str, result: dict[str, Any]) -> Any:
+    """``answerGuestQuery`` 的 HTML 解析失败（请求未生效）时退回纯文本文章重试一次。"""
+
+    try:
+        return await account_bot_service.answer_guest_query(token, guest_query_id, result=result)
+    except Exception as exc:
+        content = result.get("input_message_content") if isinstance(result.get("input_message_content"), dict) else {}
+        if not content.get("parse_mode") or not account_bot_service.is_bot_parse_entities_error(exc):
+            raise
+        plain = html_to_plain_text(str(content.get("message_text") or "")) or "TelePilot"
+        fallback = build_guest_article(
+            message_text=plain[:4096],
+            parse_mode=None,
+            title=str(result.get("title") or "") or None,
+            reply_markup=result.get("reply_markup") if isinstance(result.get("reply_markup"), dict) else None,
+        )
+        return await account_bot_service.answer_guest_query(token, guest_query_id, result=fallback)
 
 
 def _result_error_code(result: Any, fallback: str) -> str:

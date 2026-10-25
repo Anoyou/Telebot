@@ -98,5 +98,7 @@ final class WorkspaceUITests: XCTestCase {
         XCTAssertTrue(provider.waitForExistence(timeout: 10))
         XCTAssertTrue(app.descendants(matching: .any)["plugin.config.select.TelePilot 模型覆盖（可选）"].firstMatch.exists)
         XCTAssertFalse(app.textFields["固定 TelePilot Provider（可选）"].exists)
+        // 统一模型列表：Provider 选择器保留，但标注随模型自动填写。
+        XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "随模型自动填写")).firstMatch.waitForExistence(timeout: 5))
     }
 }

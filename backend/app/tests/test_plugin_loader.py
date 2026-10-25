@@ -6507,7 +6507,7 @@ async def test_activate_logs_reserved_unsupported_facade_permission() -> None:
     _TempReservedFacadePlugin._manifest = Manifest(
         key=plugin_key,
         display_name="预留 facade 权限测试",
-        permissions=["ai_vision"],
+        permissions=["ai_image"],
     )
 
     af = _FakeAF(account_id=1, feature_key=plugin_key, enabled=True, config={})
@@ -6538,7 +6538,7 @@ async def test_activate_logs_reserved_unsupported_facade_permission() -> None:
     assert any(
         log["source"] == "system"
         and log["level"] == "warn"
-        and "ai_vision" in log["message"]
+        and "ai_image" in log["message"]
         and log["detail"]["plugin_key"] == plugin_key
         for log in decoded_logs
     )

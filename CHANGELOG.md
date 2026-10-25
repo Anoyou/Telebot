@@ -50,6 +50,11 @@
 - `event_bus_demo` 示例补充访客消息订阅与 fixture，插件参考文档、速查与使用指南补充访客模式说明。
 - iOS AI 管理新增“全部供应商巡检”：对应 Web 的“全部 Provider 巡检”，默认选中全部有启用模型的供应商，可搜索、按供应商或单个模型挑选范围，设置回复长度、超时和并发；开始前由服务器核对范围并确认（任务较多时提示“大规模巡检”），之后显示真实进度、按供应商分组的结果、正常/失败/跳过/取消筛选与清空结果。从单个供应商进入的测活改为“供应商测活”，与全局巡检分开保存范围与结果，并提供“改为全部供应商巡检”入口。
 - 客户端身份版本的“查询官方最新版本 / 使用最新版本”现在也覆盖 Codex Desktop：App 版本号读取 OpenAI 官方 Sparkle 更新源（`persistent.oaistatic.com/codex-app-prod/appcast.xml`），内置核心版本通过 HTTP Range 只读取最新官方安装包中的 `codex-cli/codex-package.json`（约 1 MB 流量，不下载整个安装包、不执行任何内容）；Web 与 iOS 同步显示检测源。
+- 插件 AI 能力扩展：`ctx.ai.complete()` 新增 `web_search` / `web_search_context_size`（原生联网搜索作为工具交给模型自行决定，`tool_choice` 保持 auto，来源在 `AIResult.sources`）与 `images`（识图，需 `ai_vision` 权限，最多 4 张、每张 ≤ 8MB）；新增 `ctx.ai.fetch_bot_image(file_id)` 读取交互 Bot 收到的图片；所选 Provider 与 fallback 链都不支持所需能力时抛 `AICapabilityError`，插件可降级重试。`ai_vision` 权限现在真正生效。
+- 交互 Bot 插件投递：带 `parse_mode=html` 的发送、编辑与访客回答被 Telegram 以实体解析错误拒绝时自动去标签改纯文本重试一次；`edit_message` 支持 `inline_message_id`（访客模式先回占位、再编辑为最终答案，`answer_guest_query` 可用 `save_message_id_key` 保存返回的 `inline_message_id`）与 `send_on_edit_failure`；交互 Bot 事件新增 `bot`（Bot 自身 id、用户名与 `can_read_all_group_messages`）和 `reply_to.media`。
+- 插件可声明处理时限：`event_subscriptions[]` 与 `interaction_entries[]` 支持 `timeout_seconds`（默认 15 秒，平台上限 90 秒），主进程 RPC 等待与 worker deadline 同步放宽，交互入口不再被全局 `plugin_invoke_timeout_seconds` 截断。
+- 交互 Bot 事件因不在账号“允许会话”中被平台丢弃时，记一条 info 日志（账号、chat_id、原因），便于排查“为什么不回复”；丢弃行为不变。
+- 插件配置的 `llm-model-select` 改为统一模型列表（Web 与 iOS 一致）：列出所有 Provider 下已启用的文本模型、按 Provider 分组，标签“Provider 名 · 模型”，含“自动路由（不指定）”与不在列表里的“当前值：…”；选中模型时同时写入 `x-ui-provider-field` 指向的 Provider 字段，Provider 选择器保留并标注“随模型自动填写”。Web 交互规则的插件参数一次写入多个字段，避免模型与 Provider 两次写入互相覆盖。
 
 ### iOS 推送（APNs）
 

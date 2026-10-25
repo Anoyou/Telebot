@@ -205,6 +205,9 @@ class PluginContext:
 - `ctx.ai.stream_complete()` 返回 Provider 原生文本 delta 的异步迭代器，支持 Chat Completions、Responses 与 Anthropic Messages；不拆分完整响应、不在已输出部分文本后切 Provider。上游忽略 `stream=true` 而返回普通 JSON 时，同一次请求的完整文本作为一个块产出，不会再次调用模型。调用方必须消费到迭代器自然结束；取消、提前关闭、超时或异常按已发起调用保守结算。需要跨 Provider 的完整响应 fallback 时使用 `complete()`。
 - `ctx.ai.run_agent()` 需要独立 `ai_agent` 权限，并同时要求 `capabilities.agent_tools.enabled=true`、manifest `agent_tools[]` 声明和调用方传入同名 handler。平台限制轮数、工具数、重复调用、token 与总超时；只读工具可并行，副作用工具串行。同样支持 `route="fixed"|"tag"|"auto"`，且 Agent 路由会预先排除没有已启用模型的 provider（无法支撑 tools 调用）。
 - `ctx.ai.list_providers()` 可用于展示当前账号可见的脱敏 provider 摘要；更完整的 AI facade 说明见 `docs/PLUGIN-AI.md`。
+- `ctx.ai.complete(..., web_search=True, web_search_context_size="low"|"medium"|"high")` 请求原生联网搜索：把 `web_search` 作为**工具**交给模型（Responses API，`tool_choice` 保持 auto，由模型自行决定是否搜索，不强制每次搜索）；OpenAI 官方 chat_completions Provider 按 `web_search_api_format` 临时切到 Responses。引用来源在 `AIResult.sources`。需要“该搜就搜”时请在系统提示里引导（并注入当前日期），不要用关键词强制。
+- `ctx.ai.complete(..., images=[bytes, ...])` 把图片交给支持图片输入的模型（最多 4 张、每张 ≤ 8MB），需要 `ai_vision` 权限；`ctx.ai.vision_enabled` 表示是否已授权。`await ctx.ai.fetch_bot_image(file_id)` 用当前账号交互 Bot 下载用户发来的图片（`message.media.file_id` 或 `reply_to.media.file_id`），同样需要 `ai_vision`，不落盘、不返回路径或 Token。
+- 请求的能力（`web_search` / `images`）在所选 Provider 及 fallback 链上都不支持时抛 `AICapabilityError`（`AIUnavailableError` 子类），在发出网络请求前判定；插件可去掉该能力降级重试。
 
 标准链路示例：
 
@@ -363,7 +366,7 @@ if not result["ok"]:
 | `min_telepilot_version` | str | 最低 TelePilot 版本要求，远程插件建议填写 |
 | `min_telebot_version` | str | 旧字段名，仅作为兼容别名保留，新插件不要再新增 |
 | `category` | str | `interactive` / `automation` / `utility`，只决定展示分组 |
-| `event_subscriptions` | list | 标准链路订阅声明，描述插件想从 Event Bus 接收哪些事件 |
+| `event_subscriptions` | list | 标准链路订阅声明，描述插件想从 Event Bus 接收哪些事件；每条可选 `timeout_seconds` 放宽单次处理时限（默认 15 秒，平台上限 90 秒，见下文“处理时限”） |
 | `capabilities` | dict | 高风险能力声明，例如 `telegram_native_raw` |
 | `agent_tools` | list | Agent 工具名、说明、object JSON Schema、`read_only` 与 `strict`；必须配合 `ai_agent` 权限和 `capabilities.agent_tools` |
 | `agent_keywords` | list | 可选；暴露给系统助手时的路由关键词（最多 6 个） |
@@ -811,6 +814,32 @@ return [{
 ```
 
 MessageOps 对应 `await ctx.messages.answer_guest_query(text=..., parse_mode="html")`。
+
+先回占位、再编辑为最终答案（访客模式下的“思考中”提示）：
+
+- `answer_guest_query` 动作可带 `save_message_id_key`，平台把 `answerGuestQuery` 返回的 `inline_message_id` 存到该键（2 小时）；实时 MessageOps 下可用 `await ctx.messages.read_saved_inline_message_id(key)` 读回。
+- 之后返回 `{"type": "edit_message", "inline_message_id": "...", "text": "...", "parse_mode": "html"}` 编辑这条 inline 消息（只支持交互 Bot）。访客事件里带 `inline_message_id` 的编辑会直接执行，不进一次性回复缓冲。
+- `edit_message` 可带 `send_on_edit_failure: true`：编辑失败时改为发送一条新消息，结果带 `edit_fallback_send: true`。
+- `send_message` / `edit_message` / `answer_guest_query` 使用 `parse_mode="html"` 时，Telegram 因实体解析失败拒绝（`can't parse entities` 等）会去掉标签以纯文本重试一次，插件不必自行兜底。
+
+事件信封补充：交互 Bot 事件带 `bot`（`{"id", "username", "can_read_all_group_messages"}`，来自 `getMe` 短缓存，读取失败时缺省），插件可据此识别 @Bot / 回复 Bot，并在群隐私模式开启（`can_read_all_group_messages=false`，群里只能收到 @Bot、回复 Bot 与命令）时提示用户；`reply_to.media` 给出被回复消息的图片/文件元数据（含 `file_id`）。
+
+### 处理时限
+
+交互 Bot / Event Bus 投递给插件的单次处理默认 15 秒（主进程等待 worker 的 RPC 时限，worker 内同步以此为 deadline）。需要更久的插件（如先回占位再调用大模型、联网搜索）可在 manifest 中静态声明：
+
+```python
+event_subscriptions=[
+    {"events": ["message"], "source": ["interaction_bot"], "scope": "all_allowed_chats", "timeout_seconds": 45},
+]
+# 旧 interaction_entries 入口同样支持：{"key": "chat", ..., "timeout_seconds": 45}
+```
+
+- 取值 1–90 秒，超过 90 按 90、非法值忽略（回到 15 秒）；交互入口的时限以主进程下发的 deadline 为准，不再受全局 `plugin_invoke_timeout_seconds`（默认 30 秒）截断。
+- 时限只能静态声明；想让用户可配，请声明上限，并在插件内部按配置自行超时（例如把占位改为超时提示）。
+- 长时限会占用该会话的处理并发，建议先回复占位让用户知道在处理。
+
+“允许会话”：交互 Bot 账号配置了允许会话列表时，`scope=all_allowed_chats` 的订阅只接收列表内会话的事件；其它会话的事件由平台直接丢弃（插件收不到），并记一条 info 日志（账号、`chat_id`、原因 `chat_not_in_allowed_chats`）。访客模式 `guest_all` 不受此限制。
 
 访客事件中 `payout`、`pin_message`、`answer_callback`、`answer_inline_query` 记 `guest_action_unsupported` 跳过；`send_photo` / `send_file` 只保留说明文字并记 `guest_media_unsupported`；所有发送都不会走 `userbot_reply`。相关 reason code：`guest_reply_buffered`、`guest_reply_already_used`、`guest_no_reply`、`guest_answer_failed`、`guest_rate_limited`、`guest_updates_disabled`。
 

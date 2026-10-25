@@ -1894,6 +1894,15 @@ function InteractionRuleEditor({
                     next[key] = normalizeEntryConfigValue(properties[key], value);
                     onPatch({ moduleConfig: mergeEntryConfigValues(selectedInteractionEntry, next) });
                   }}
+                  onChangeMany={(patch) => {
+                    // 统一模型列表会同时写模型与 Provider，合并成一次 onPatch，避免基于旧值的两次写入互相覆盖。
+                    const properties = interactionSchemaProperties(selectedInteractionEntry);
+                    const next = buildEntryConfigValues(selectedInteractionEntry, rule.moduleConfig);
+                    for (const [key, value] of Object.entries(patch)) {
+                      next[key] = normalizeEntryConfigValue(properties[key], value);
+                    }
+                    onPatch({ moduleConfig: mergeEntryConfigValues(selectedInteractionEntry, next) });
+                  }}
                 />
               </div>
             ) : (

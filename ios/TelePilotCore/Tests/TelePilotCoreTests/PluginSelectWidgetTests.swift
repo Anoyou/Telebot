@@ -249,4 +249,73 @@ struct PluginSelectWidgetTests {
         #expect(PluginSelectOptions.matches("gpt-image-1", modality: nil))
         #expect(PluginSelectOptions.matches("gpt-5.4", modality: "text"))
     }
+
+    // MARK: - 统一模型列表（与 Web llmModelOptions.test.ts 同一组用例）
+
+    static let unifiedProviders: [JSONValue] = [
+        ["id": 7, "name": "猫羽", "provider": "openai",
+         "models": [["id": "gpt-4o", "label": "GPT-4o", "enabled": true], ["id": "gpt-image-1", "enabled": true], ["id": "o3", "enabled": false]]],
+        ["id": 3, "name": "DeepSeek", "provider": "deepseek",
+         "models": [["id": "deepseek-chat", "enabled": true], ["id": "deepseek-chat", "enabled": true], "deepseek-reasoner"]],
+    ]
+
+    @Test func unifiedListGroupsEnabledTextModelsByProvider() {
+        let selection = PluginSelectOptions.unifiedModelSelection(Self.unifiedProviders, providerValue: nil, modelValue: nil, modality: "text")
+        #expect(selection.options.map { [$0.group, $0.label] } == [
+            ["DeepSeek", "DeepSeek · deepseek-chat"],
+            ["DeepSeek", "DeepSeek · deepseek-reasoner"],
+            ["猫羽", "猫羽 · GPT-4o（gpt-4o）"],
+        ])
+        #expect(selection.selectedKey == PluginSelectOptions.autoRouteKey)
+        #expect(selection.legacy == nil)
+        #expect(selection.groups.map { "\($0.group):\($0.options.count)" } == ["DeepSeek:2", "猫羽:1"])
+        #expect(PluginSelectOptions.autoRouteLabel == "自动路由（不指定）")
+    }
+
+    @Test func unifiedListKeepsImageModelsWithoutTextModality() {
+        let selection = PluginSelectOptions.unifiedModelSelection(Self.unifiedProviders, providerValue: nil, modelValue: nil, modality: nil)
+        #expect(selection.options.contains { $0.modelValue == "gpt-image-1" })
+    }
+
+    @Test func unifiedSelectionWritesProviderAndModelTogether() {
+        let selection = PluginSelectOptions.unifiedModelSelection(Self.unifiedProviders, providerValue: "", modelValue: "", modality: "text")
+        let picked = selection.resolve(PluginSelectOptions.unifiedModelKey(provider: "7", model: "gpt-4o"))
+        #expect(picked?.provider == "7" && picked?.model == "gpt-4o")
+        let auto = selection.resolve(PluginSelectOptions.autoRouteKey)
+        #expect(auto?.provider == "" && auto?.model == "")
+        #expect(selection.resolve("unknown") == nil)
+    }
+
+    @Test(arguments: ["7", "猫羽", "openai"])
+    func unifiedSelectionMatchesProviderByIdNameOrType(selector: String) {
+        let selection = PluginSelectOptions.unifiedModelSelection(Self.unifiedProviders, providerValue: .string(selector), modelValue: "gpt-4o", modality: "text")
+        #expect(selection.selectedKey == PluginSelectOptions.unifiedModelKey(provider: "7", model: "gpt-4o"))
+        #expect(selection.legacy == nil)
+    }
+
+    @Test func unifiedSelectionShowsLegacyValuesWithoutRewriting() {
+        let disabled = PluginSelectOptions.unifiedModelSelection(Self.unifiedProviders, providerValue: "7", modelValue: "o3", modality: "text")
+        #expect(disabled.legacy?.label == "当前值：猫羽 · o3")
+        #expect(disabled.selectedKey == disabled.legacy?.key)
+        let kept = disabled.resolve(disabled.selectedKey)
+        #expect(kept?.provider == "7" && kept?.model == "o3")
+        #expect(PluginSelectOptions.unifiedModelSelection(Self.unifiedProviders, providerValue: "9", modelValue: "x", modality: "text").legacy?.label == "当前值：9 · x")
+        #expect(PluginSelectOptions.unifiedModelSelection(Self.unifiedProviders, providerValue: "3", modelValue: "", modality: "text").legacy?.label == "当前值：DeepSeek · 默认模型")
+        #expect(PluginSelectOptions.unifiedModelSelection(Self.unifiedProviders, providerValue: "", modelValue: "orphan", modality: "text").legacy?.label == "当前值：orphan（未固定 Provider）")
+    }
+
+    @Test func unifiedSelectionWithoutProvidersOnlyOffersAutoRoute() {
+        let selection = PluginSelectOptions.unifiedModelSelection([], providerValue: nil, modelValue: nil, modality: "text")
+        #expect(selection.options.isEmpty)
+        #expect(selection.selectedKey == PluginSelectOptions.autoRouteKey)
+    }
+
+    @Test func unifiedListUsesRealManifestFields() throws {
+        // 真实插件 manifest 的模型字段 + 与 /api/commands/llm-providers 同形的数据：两个 Provider 的已启用文本模型都在列表里。
+        let spec = try #require(Self.manifests["interaction-ai-chat"]?["telepilot_model"])
+        guard case .llmModel(_, let modality) = try #require(PluginSelectWidget(spec: spec)) else { Issue.record("不是模型选择器"); return }
+        let selection = PluginSelectOptions.unifiedModelSelection(Self.providers, providerValue: nil, modelValue: nil, modality: modality)
+        #expect(selection.options.map(\.label) == ["个人模型网关 · GPT-5.4 mini（gpt-5.4-mini）", "个人模型网关 · gpt-5.4", "本地 Ollama · qwen3:14b"])
+        #expect(selection.options.map(\.providerValue) == ["3", "3", "7"])
+    }
 }
