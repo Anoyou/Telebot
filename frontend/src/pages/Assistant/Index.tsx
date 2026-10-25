@@ -58,6 +58,7 @@ import { listAccounts } from "@/api/accounts";
 import type { LLMProviderOut } from "@/api/types";
 import { matrixToPickerItems, type ModelPickerValue } from "@/components/ai/ModelPicker";
 import { Composer, type ComposerAttachment } from "@/components/assistant/Composer";
+import { AgentSkillsSection } from "@/components/assistant/AgentSkillsSection";
 import { AgentMark } from "@/components/assistant/AgentMark";
 import { useAssistantDock } from "@/components/assistant/AssistantDock";
 import { Conversation, type LiveBubble } from "@/components/assistant/Conversation";
@@ -2147,6 +2148,7 @@ export function AssistantIndex() {
               )}
             </div>
           </div>
+          <AgentSkillsSection />
         </div>
         </>
       ) : null}

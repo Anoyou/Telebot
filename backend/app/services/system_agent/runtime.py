@@ -77,6 +77,9 @@ from .tool_routing import (
 
 log = logging.getLogger(__name__)
 
+# 已安装 skill 的调用工具：只要有对系统 Agent 启用的 skill，每轮都披露（只读）。
+INSTALLED_SKILL_TOOL_NAMES = frozenset({"skills.load", "skills.read_file"})
+
 EventSink = Callable[[dict[str, Any]], Awaitable[None] | None]
 
 
@@ -356,6 +359,25 @@ class SystemAgentRuntime:
         if memory_block:
             turn_context.append(memory_block)
 
+        # 已安装 Agent Skills：系统提示只放 name + description（渐进式披露第一层），
+        # 正文由模型按需调用 skills.load / skills.read_file 读取。内置技能可被管理员停用。
+        installed_skill_catalog: list[Any] = []
+        disabled_builtin_skills: set[str] = set()
+        try:
+            from .skills import store as installed_skill_store
+
+            disabled_builtin_skills = await installed_skill_store.disabled_builtin_names(db)
+            installed_skill_catalog = await installed_skill_store.catalog(
+                db, installed_skill_store.SCOPE_AGENT
+            )
+        except Exception:  # noqa: BLE001
+            log.debug("load installed agent skills failed", exc_info=True)
+        turn_skill_registry = (
+            self.skill_registry.without(disabled_builtin_skills)
+            if disabled_builtin_skills
+            else self.skill_registry
+        )
+
         all_tool_specs = self.registry.list_for(
             channel=channel,
             role=role,
@@ -504,8 +526,15 @@ class SystemAgentRuntime:
                 message=provisional_note,
             )
         routed_tool_specs = select_tool_specs(all_tool_specs, route)
-        selected_skills = self.skill_registry.select(route)
-        tool_specs = self.skill_registry.narrow_tools(routed_tool_specs, selected_skills)
+        selected_skills = turn_skill_registry.select(route)
+        tool_specs = turn_skill_registry.narrow_tools(routed_tool_specs, selected_skills)
+        if installed_skill_catalog:
+            present_tool_names = {spec.name for spec in tool_specs}
+            tool_specs.extend(
+                spec
+                for spec in all_tool_specs
+                if spec.name in INSTALLED_SKILL_TOOL_NAMES and spec.name not in present_tool_names
+            )
         yield next_event(
             "route_selected",
             domains=list(route.domains),
@@ -520,12 +549,16 @@ class SystemAgentRuntime:
                 "skill_selected",
                 skills=skill_names,
                 skill_names=skill_names,
-                understanding_summary=self.skill_registry.understanding_summary(selected_skills),
+                understanding_summary=turn_skill_registry.understanding_summary(selected_skills),
                 tool_count=len(tool_specs),
             )
-            skill_prompt = self.skill_registry.render_prompt(selected_skills)
+            skill_prompt = turn_skill_registry.render_prompt(selected_skills)
             if skill_prompt:
                 turn_context.append(skill_prompt)
+        if installed_skill_catalog and any(
+            spec.name in INSTALLED_SKILL_TOOL_NAMES for spec in tool_specs
+        ):
+            turn_context.append(installed_skill_store.render_catalog_prompt(installed_skill_catalog))
         if not tool_specs:
             turn_context.append(
                 "## 本轮工具状态\n"

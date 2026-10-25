@@ -16,6 +16,7 @@ def register_all_tools(registry: ToolRegistry) -> None:
         access,
         account_bots,
         accounts,
+        agent_skills,
         capabilities,
         commands,
         config_bundles,
@@ -78,6 +79,7 @@ def register_all_tools(registry: ToolRegistry) -> None:
     web.register(registry)
     webhooks.register(registry)
     ledger.register(registry)
+    agent_skills.register(registry)
     memory.register(registry)
     message_templates.register(registry)
     notifications.register(registry)

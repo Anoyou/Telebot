@@ -37,6 +37,7 @@
 		90317CF0BCE3A729A234CCAA /* AccountManagementView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EBE0E190C56D43F8A6B77F6C /* AccountManagementView.swift */; };
 		939CB8EB7AF2DC4E52E410BE /* PushNotificationAppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9F684A78746D7C8E9770D93F /* PushNotificationAppDelegate.swift */; };
 		952761BD17159D6FA34C5361 /* AIProviders.swift in Sources */ = {isa = PBXBuildFile; fileRef = F74BB888C1F18820B172C6A8 /* AIProviders.swift */; };
+		F1FB3BAB8AD560DB96610EAD /* AgentSkills.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EDEE2A9A43C320E4B867405 /* AgentSkills.swift */; };
 		9592E80BE3FC7E63D347A748 /* ManagementForms.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8977F833837A79C464CFBA29 /* ManagementForms.swift */; };
 		98BE1FA3E101EA2808E885EB /* RedesignedWorkspaceUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 91EAA20EE5B3D74CA2166B91 /* RedesignedWorkspaceUITests.swift */; };
 		9B9808170CED544BDD8089CD /* ManagementPlugins.swift in Sources */ = {isa = PBXBuildFile; fileRef = 312281F6FF27C8BC5F0044BA /* ManagementPlugins.swift */; };
@@ -126,6 +127,7 @@
 		F2B2718B75FA9808D8DCE77A /* PrivacyFormatting.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrivacyFormatting.swift; sourceTree = "<group>"; };
 		F7345E48AE830986E3B98514 /* TelePilotApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TelePilotApp.swift; sourceTree = "<group>"; };
 		F74BB888C1F18820B172C6A8 /* AIProviders.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIProviders.swift; sourceTree = "<group>"; };
+		5EDEE2A9A43C320E4B867405 /* AgentSkills.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSkills.swift; sourceTree = "<group>"; };
 		F98EB034681A1D9B4FEC79A1 /* VisualInspectionUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VisualInspectionUITests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -150,6 +152,7 @@
 				7C32028841D2B2274B6BFD3C /* AILiveness.swift */,
 				45704C3929B3B6D40D3AB3A7 /* AIPresentation.swift */,
 				F74BB888C1F18820B172C6A8 /* AIProviders.swift */,
+				5EDEE2A9A43C320E4B867405 /* AgentSkills.swift */,
 				6E0F9A0F4E22C151694ED4D0 /* AIUsage.swift */,
 				C08588E80EB829F8C5179276 /* AIWorkspace.swift */,
 				7A6F351DB246B00638B80808 /* AppLock.swift */,
@@ -337,6 +340,7 @@
 				79B21DFFE85F22B61B1D26CA /* AILiveness.swift in Sources */,
 				E9D1A0EBEDC2BCFEA5589DA4 /* AIPresentation.swift in Sources */,
 				952761BD17159D6FA34C5361 /* AIProviders.swift in Sources */,
+				F1FB3BAB8AD560DB96610EAD /* AgentSkills.swift in Sources */,
 				23D1E37C1B00C5D9166FE9D5 /* AIUsage.swift in Sources */,
 				190715111E57BA57BC4B4B45 /* AIWorkspace.swift in Sources */,
 				5CDB3C9F99A5D26CCF3CC712 /* AboutView.swift in Sources */,
@@ -470,7 +474,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
-				MARKETING_VERSION = 0.8.0;
+				MARKETING_VERSION = 0.9.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -559,7 +563,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
-				MARKETING_VERSION = 0.8.0;
+				MARKETING_VERSION = 0.9.0;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;

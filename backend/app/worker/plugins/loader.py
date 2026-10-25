@@ -5347,6 +5347,8 @@ _SUPPORTED_FACADE_PERMISSIONS: set[str] = {
     "ai_agent",
     # ai_vision 需与 ai_text 同时声明：让 ctx.ai.complete(images=...) 与 ctx.ai.fetch_bot_image 可用。
     "ai_vision",
+    # ctx.skills：只读获取管理员已对插件启用的 Agent Skills 文本（脚本从不执行）。
+    "agent_skills",
 }
 _RESERVED_UNSUPPORTED_FACADE_PERMISSIONS: set[str] = {
     "ai_image",
@@ -7915,6 +7917,22 @@ async def _activate(db, state: _AccountState, af: AccountFeature, redis: Any) ->
                 manifest=plugin_manifest.to_dict(),
                 bot_file_loader=_interaction_bot_file_loader(state.account_id) if allow_vision else None,
             )
+    plugin_skills: Any = None
+    if plugin_manifest is not None and "agent_skills" in plugin_permissions:
+        from .skills_facade import PluginSkills  # 延迟 import，未声明权限的插件不加载
+
+        plugin_skills = PluginSkills(plugin_key=af.feature_key)
+        try:
+            import sys as _sys
+
+            from .skills_facade import ensure_bundled_skills
+
+            module_file = getattr(_sys.modules.get(cls.__module__), "__file__", None)
+            await ensure_bundled_skills(
+                af.feature_key, Path(module_file).resolve().parent if module_file else None
+            )
+        except Exception:  # noqa: BLE001 - 内置 skill 登记失败不影响插件加载
+            log.warning("登记插件内置 skill 失败 feature=%s", af.feature_key, exc_info=True)
     declared_facade_permissions = plugin_permissions & (
         _SUPPORTED_FACADE_PERMISSIONS | _RESERVED_UNSUPPORTED_FACADE_PERMISSIONS
     )
@@ -7964,6 +7982,7 @@ async def _activate(db, state: _AccountState, af: AccountFeature, redis: Any) ->
         ),
         http=plugin_http,
         ai=plugin_ai,
+        skills=plugin_skills,
         messages=_LiveMessageOps(state, plugin_key=af.feature_key),
         identities=(
             PluginIdentityFacade(

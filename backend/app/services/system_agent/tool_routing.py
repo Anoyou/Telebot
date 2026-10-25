@@ -315,6 +315,21 @@ DOMAIN_CATALOG: dict[str, tuple[str, tuple[str, ...]]] = {
             "usage",
         ),
     ),
+    "agent_skills": (
+        "Agent Skills（SKILL.md 技能包）的列出、安装、更新、启停与卸载",
+        (
+            "skill",
+            "skills",
+            "技能包",
+            "安装技能",
+            "卸载技能",
+            "更新技能",
+            "停用技能",
+            "启用技能",
+            "skill.md",
+            "agent skill",
+        ),
+    ),
     "memory": (
         "长期偏好记忆的查询与保存",
         (

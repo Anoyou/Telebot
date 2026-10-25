@@ -104,6 +104,7 @@ _NON_CLIENT_PERMISSIONS: frozenset[str] = frozenset(
         "ai_text",
         "ai_agent",
         "ai_vision",
+        "agent_skills",
         "ai_image",
         "ai_stt",
         "payout",

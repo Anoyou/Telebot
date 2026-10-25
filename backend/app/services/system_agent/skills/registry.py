@@ -24,6 +24,15 @@ class SkillRegistry:
     def list_all(self) -> tuple[SkillSpec, ...]:
         return self._skills
 
+    def without(self, names: Iterable[str]) -> SkillRegistry:
+        """返回去掉指定技能的新注册表（管理员停用的内置技能）。
+
+        被停用技能的领域视同“尚未配置技能”，其工具仍按路由披露，只是不再注入流程说明。
+        """
+
+        excluded = set(names)
+        return SkillRegistry(skill for skill in self._skills if skill.name not in excluded)
+
     def select(
         self,
         route: ToolRoute,

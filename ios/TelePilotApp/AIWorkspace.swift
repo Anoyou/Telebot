@@ -254,6 +254,12 @@ private struct AIOverviewSection: View {
             }
             .accessibilityIdentifier("ai.settings.commands")
             NavigationLink {
+                AgentSkillsView()
+            } label: {
+                AINavigationRow(title: "Skills", detail: "安装、编辑和启用 Agent Skills；插件可按需读取对插件启用的 skill", symbol: "sparkles.rectangle.stack")
+            }
+            .accessibilityIdentifier("ai.settings.skills")
+            NavigationLink {
                 AIAdvancedSettingsView(workspace: workspace)
             } label: {
                 AINavigationRow(title: "高级：接口协议与客户端身份", detail: "对接特殊中转站时才需要调整，普通使用保持默认", symbol: "gearshape.2")

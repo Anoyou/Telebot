@@ -16,6 +16,7 @@ from fastapi.responses import JSONResponse
 from . import __version__
 from .api import account_bots as account_bots_api
 from .api import accounts as accounts_api
+from .api import agent_skills as agent_skills_api
 from .api import alias as alias_api
 from .api import apns as apns_api
 from .api import auth as auth_api
@@ -587,6 +588,7 @@ app.include_router(dispatch_debug_api.router)  # WP4：命中调试器接口空�
 app.include_router(ledger_api.router)  # WP5：资金台账接口空桩
 app.include_router(webhooks_api.router)  # WP7：入站 Webhook 接口空桩
 app.include_router(system_agent_api.router)  # System Agent：自然语言系统助手
+app.include_router(agent_skills_api.router)  # Agent Skills：安装 / 卸载 / 启用范围
 app.include_router(platform_capabilities_api.router)  # 平台能力热插拔
 app.include_router(platform_tree_api.router)  # WP-T4：平台看树视图
 app.include_router(runtime_profiles_api.router)  # 值守运行预设

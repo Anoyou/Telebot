@@ -2426,6 +2426,917 @@
         "title": "AccountWebhookConfigOut",
         "type": "object"
       },
+      "AgentSkillContentIn": {
+        "properties": {
+          "skill_md": {
+            "description": "新的 SKILL.md 全文；name 必须保持不变",
+            "maxLength": 262144,
+            "title": "Skill Md",
+            "type": "string"
+          }
+        },
+        "required": [
+          "skill_md"
+        ],
+        "title": "AgentSkillContentIn",
+        "type": "object"
+      },
+      "AgentSkillDetailOut": {
+        "properties": {
+          "builtin": {
+            "description": "内置领域技能：不可卸载，只能对系统 Agent 停用",
+            "title": "Builtin",
+            "type": "boolean"
+          },
+          "bundled": {
+            "default": false,
+            "description": "随插件分发的内置 skill：不可卸载，可停用；编辑保存为覆盖层",
+            "title": "Bundled",
+            "type": "boolean"
+          },
+          "content_sha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content Sha256"
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "editable": {
+            "default": false,
+            "description": "可以直接编辑 SKILL.md",
+            "title": "Editable",
+            "type": "boolean"
+          },
+          "enabled_agent": {
+            "title": "Enabled Agent",
+            "type": "boolean"
+          },
+          "enabled_plugins": {
+            "title": "Enabled Plugins",
+            "type": "boolean"
+          },
+          "file_count": {
+            "default": 0,
+            "title": "File Count",
+            "type": "integer"
+          },
+          "files": {
+            "items": {
+              "$ref": "#/components/schemas/AgentSkillFileInfo"
+            },
+            "title": "Files",
+            "type": "array"
+          },
+          "installed_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Installed At"
+          },
+          "license": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "License"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "owner_plugin": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "内置 skill 所属插件",
+            "title": "Owner Plugin"
+          },
+          "plugin_supported": {
+            "description": "是否可以提供给插件（内置技能为 false）",
+            "title": "Plugin Supported",
+            "type": "boolean"
+          },
+          "skill_md": {
+            "default": "",
+            "description": "SKILL.md 原文（内置技能为渲染后的流程说明）",
+            "title": "Skill Md",
+            "type": "string"
+          },
+          "skipped_files": {
+            "items": {
+              "$ref": "#/components/schemas/AgentSkillSkippedFile"
+            },
+            "title": "Skipped Files",
+            "type": "array"
+          },
+          "source_commit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "安装时的提交 SHA（GitHub 来源）",
+            "title": "Source Commit"
+          },
+          "source_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "仓库或 zip 内的 skill 子目录",
+            "title": "Source Path"
+          },
+          "source_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "GitHub 分支/标签/提交",
+            "title": "Source Ref"
+          },
+          "source_type": {
+            "enum": [
+              "builtin",
+              "github",
+              "zip_url",
+              "zip_upload",
+              "paste",
+              "md_upload",
+              "plugin_bundled"
+            ],
+            "title": "Source Type",
+            "type": "string"
+          },
+          "source_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Url"
+          },
+          "total_bytes": {
+            "default": 0,
+            "title": "Total Bytes",
+            "type": "integer"
+          },
+          "uninstallable": {
+            "default": true,
+            "description": "可以卸载（内置技能与插件内置 skill 为 false）",
+            "title": "Uninstallable",
+            "type": "boolean"
+          },
+          "updatable": {
+            "description": "是否可从原地址重新拉取更新",
+            "title": "Updatable",
+            "type": "boolean"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          },
+          "upstream_changed": {
+            "default": false,
+            "description": "内置有新版本：插件升级带来了新的默认内容，而你保留着自己的修改",
+            "title": "Upstream Changed",
+            "type": "boolean"
+          },
+          "upstream_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "插件分发的默认版本号",
+            "title": "Upstream Version"
+          },
+          "user_modified": {
+            "default": false,
+            "description": "插件内置 skill 已被用户编辑",
+            "title": "User Modified",
+            "type": "boolean"
+          },
+          "version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version"
+          }
+        },
+        "required": [
+          "name",
+          "description",
+          "builtin",
+          "source_type",
+          "enabled_agent",
+          "enabled_plugins",
+          "plugin_supported",
+          "updatable"
+        ],
+        "title": "AgentSkillDetailOut",
+        "type": "object"
+      },
+      "AgentSkillEnablePatch": {
+        "properties": {
+          "enabled_agent": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enabled Agent"
+          },
+          "enabled_plugins": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enabled Plugins"
+          }
+        },
+        "title": "AgentSkillEnablePatch",
+        "type": "object"
+      },
+      "AgentSkillFileInfo": {
+        "properties": {
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "size": {
+            "title": "Size",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "path",
+          "size"
+        ],
+        "title": "AgentSkillFileInfo",
+        "type": "object"
+      },
+      "AgentSkillFileOut": {
+        "properties": {
+          "content": {
+            "title": "Content",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "truncated": {
+            "default": false,
+            "title": "Truncated",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "name",
+          "path",
+          "content"
+        ],
+        "title": "AgentSkillFileOut",
+        "type": "object"
+      },
+      "AgentSkillInstallIn": {
+        "properties": {
+          "enabled_agent": {
+            "default": true,
+            "title": "Enabled Agent",
+            "type": "boolean"
+          },
+          "enabled_plugins": {
+            "default": false,
+            "title": "Enabled Plugins",
+            "type": "boolean"
+          },
+          "path": {
+            "anyOf": [
+              {
+                "maxLength": 512,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "可选：仓库或 zip 内的 skill 子目录",
+            "title": "Path"
+          },
+          "ref": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "可选：分支/标签/提交，覆盖链接里的分支",
+            "title": "Ref"
+          },
+          "skill_md": {
+            "anyOf": [
+              {
+                "maxLength": 262144,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "paste / md_upload：SKILL.md 全文",
+            "title": "Skill Md"
+          },
+          "source": {
+            "enum": [
+              "github",
+              "zip_url",
+              "zip_upload",
+              "paste",
+              "md_upload"
+            ],
+            "title": "Source",
+            "type": "string"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "maxLength": 2048,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "GitHub 链接或 zip 下载链接",
+            "title": "Url"
+          },
+          "zip_base64": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "zip_upload：zip 文件的 base64（≤10MB）",
+            "title": "Zip Base64"
+          }
+        },
+        "required": [
+          "source"
+        ],
+        "title": "AgentSkillInstallIn",
+        "type": "object"
+      },
+      "AgentSkillLimits": {
+        "properties": {
+          "agent_load_max_chars": {
+            "title": "Agent Load Max Chars",
+            "type": "integer"
+          },
+          "max_archive_bytes": {
+            "title": "Max Archive Bytes",
+            "type": "integer"
+          },
+          "max_file_bytes": {
+            "title": "Max File Bytes",
+            "type": "integer"
+          },
+          "max_files": {
+            "title": "Max Files",
+            "type": "integer"
+          },
+          "max_skill_bytes": {
+            "title": "Max Skill Bytes",
+            "type": "integer"
+          },
+          "plugin_load_max_chars": {
+            "title": "Plugin Load Max Chars",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "max_files",
+          "max_file_bytes",
+          "max_skill_bytes",
+          "max_archive_bytes",
+          "agent_load_max_chars",
+          "plugin_load_max_chars"
+        ],
+        "title": "AgentSkillLimits",
+        "type": "object"
+      },
+      "AgentSkillListOut": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AgentSkillOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "limits": {
+            "$ref": "#/components/schemas/AgentSkillLimits"
+          }
+        },
+        "required": [
+          "items",
+          "limits"
+        ],
+        "title": "AgentSkillListOut",
+        "type": "object"
+      },
+      "AgentSkillOut": {
+        "properties": {
+          "builtin": {
+            "description": "内置领域技能：不可卸载，只能对系统 Agent 停用",
+            "title": "Builtin",
+            "type": "boolean"
+          },
+          "bundled": {
+            "default": false,
+            "description": "随插件分发的内置 skill：不可卸载，可停用；编辑保存为覆盖层",
+            "title": "Bundled",
+            "type": "boolean"
+          },
+          "content_sha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content Sha256"
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "editable": {
+            "default": false,
+            "description": "可以直接编辑 SKILL.md",
+            "title": "Editable",
+            "type": "boolean"
+          },
+          "enabled_agent": {
+            "title": "Enabled Agent",
+            "type": "boolean"
+          },
+          "enabled_plugins": {
+            "title": "Enabled Plugins",
+            "type": "boolean"
+          },
+          "file_count": {
+            "default": 0,
+            "title": "File Count",
+            "type": "integer"
+          },
+          "installed_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Installed At"
+          },
+          "license": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "License"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "owner_plugin": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "内置 skill 所属插件",
+            "title": "Owner Plugin"
+          },
+          "plugin_supported": {
+            "description": "是否可以提供给插件（内置技能为 false）",
+            "title": "Plugin Supported",
+            "type": "boolean"
+          },
+          "skipped_files": {
+            "items": {
+              "$ref": "#/components/schemas/AgentSkillSkippedFile"
+            },
+            "title": "Skipped Files",
+            "type": "array"
+          },
+          "source_commit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "安装时的提交 SHA（GitHub 来源）",
+            "title": "Source Commit"
+          },
+          "source_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "仓库或 zip 内的 skill 子目录",
+            "title": "Source Path"
+          },
+          "source_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "GitHub 分支/标签/提交",
+            "title": "Source Ref"
+          },
+          "source_type": {
+            "enum": [
+              "builtin",
+              "github",
+              "zip_url",
+              "zip_upload",
+              "paste",
+              "md_upload",
+              "plugin_bundled"
+            ],
+            "title": "Source Type",
+            "type": "string"
+          },
+          "source_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Url"
+          },
+          "total_bytes": {
+            "default": 0,
+            "title": "Total Bytes",
+            "type": "integer"
+          },
+          "uninstallable": {
+            "default": true,
+            "description": "可以卸载（内置技能与插件内置 skill 为 false）",
+            "title": "Uninstallable",
+            "type": "boolean"
+          },
+          "updatable": {
+            "description": "是否可从原地址重新拉取更新",
+            "title": "Updatable",
+            "type": "boolean"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          },
+          "upstream_changed": {
+            "default": false,
+            "description": "内置有新版本：插件升级带来了新的默认内容，而你保留着自己的修改",
+            "title": "Upstream Changed",
+            "type": "boolean"
+          },
+          "upstream_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "插件分发的默认版本号",
+            "title": "Upstream Version"
+          },
+          "user_modified": {
+            "default": false,
+            "description": "插件内置 skill 已被用户编辑",
+            "title": "User Modified",
+            "type": "boolean"
+          },
+          "version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version"
+          }
+        },
+        "required": [
+          "name",
+          "description",
+          "builtin",
+          "source_type",
+          "enabled_agent",
+          "enabled_plugins",
+          "plugin_supported",
+          "updatable"
+        ],
+        "title": "AgentSkillOut",
+        "type": "object"
+      },
+      "AgentSkillSkippedFile": {
+        "properties": {
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "reason": {
+            "description": "跳过原因：binary / too_large / symlink / hidden / ignored_dir / ignored_file / outside",
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "reason"
+        ],
+        "title": "AgentSkillSkippedFile",
+        "type": "object"
+      },
+      "AgentSkillUnbound": {
+        "properties": {
+          "account_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Account Id"
+          },
+          "fields": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Fields",
+            "type": "array"
+          },
+          "plugin_key": {
+            "title": "Plugin Key",
+            "type": "string"
+          },
+          "scope": {
+            "enum": [
+              "global",
+              "account"
+            ],
+            "title": "Scope",
+            "type": "string"
+          }
+        },
+        "required": [
+          "plugin_key",
+          "scope"
+        ],
+        "title": "AgentSkillUnbound",
+        "type": "object"
+      },
+      "AgentSkillUninstallOut": {
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "unbound": {
+            "items": {
+              "$ref": "#/components/schemas/AgentSkillUnbound"
+            },
+            "title": "Unbound",
+            "type": "array"
+          },
+          "uninstalled": {
+            "title": "Uninstalled",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "name",
+          "uninstalled"
+        ],
+        "title": "AgentSkillUninstallOut",
+        "type": "object"
+      },
+      "AgentSkillUpdateIn": {
+        "properties": {
+          "skill_md": {
+            "anyOf": [
+              {
+                "maxLength": 262144,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Skill Md"
+          },
+          "zip_base64": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Zip Base64"
+          }
+        },
+        "title": "AgentSkillUpdateIn",
+        "type": "object"
+      },
+      "AgentSkillUpdateOut": {
+        "properties": {
+          "changed": {
+            "title": "Changed",
+            "type": "boolean"
+          },
+          "skill": {
+            "$ref": "#/components/schemas/AgentSkillOut"
+          }
+        },
+        "required": [
+          "skill",
+          "changed"
+        ],
+        "title": "AgentSkillUpdateOut",
+        "type": "object"
+      },
+      "AgentSkillUpstreamOut": {
+        "properties": {
+          "current_skill_md": {
+            "title": "Current Skill Md",
+            "type": "string"
+          },
+          "diff": {
+            "description": "unified diff：默认版本 → 当前版本",
+            "title": "Diff",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "owner_plugin": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner Plugin"
+          },
+          "upstream_changed": {
+            "title": "Upstream Changed",
+            "type": "boolean"
+          },
+          "upstream_skill_md": {
+            "title": "Upstream Skill Md",
+            "type": "string"
+          },
+          "upstream_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Upstream Version"
+          },
+          "user_modified": {
+            "title": "User Modified",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "name",
+          "user_modified",
+          "upstream_changed",
+          "current_skill_md",
+          "upstream_skill_md",
+          "diff"
+        ],
+        "title": "AgentSkillUpstreamOut",
+        "type": "object"
+      },
       "AlembicStatus": {
         "properties": {
           "current": {
@@ -26859,6 +27770,1046 @@
         "summary": "Resume Account",
         "tags": [
           "accounts"
+        ]
+      }
+    },
+    "/api/agent-skills": {
+      "get": {
+        "description": "列出已安装 skills 与内置领域技能（含启用范围与来源）。",
+        "operationId": "list_agent_skills_api_agent_skills_get",
+        "parameters": [
+          {
+            "in": "cookie",
+            "name": "auth_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Auth Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentSkillListOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "认证失败"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "服务器内部错误"
+          }
+        },
+        "security": [
+          {
+            "AuthCookie": []
+          }
+        ],
+        "summary": "List Agent Skills",
+        "tags": [
+          "agent-skills"
+        ]
+      },
+      "post": {
+        "description": "从 GitHub、zip（上传或链接）或粘贴的 SKILL.md 安装 skill。",
+        "operationId": "install_agent_skill_api_agent_skills_post",
+        "parameters": [
+          {
+            "in": "cookie",
+            "name": "auth_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Auth Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentSkillInstallIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentSkillOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "认证失败"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "CSRF 校验失败或权限不足"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "服务器内部错误"
+          }
+        },
+        "security": [
+          {
+            "AuthCookie": [],
+            "CsrfCookie": [],
+            "CsrfHeader": [],
+            "RequestedWith": []
+          }
+        ],
+        "summary": "Install Agent Skill",
+        "tags": [
+          "agent-skills"
+        ]
+      }
+    },
+    "/api/agent-skills/{name}": {
+      "delete": {
+        "description": "卸载 skill，并从所有插件配置的 skill 选择中移除；内置技能不可卸载。",
+        "operationId": "uninstall_agent_skill_api_agent_skills__name__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "auth_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Auth Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentSkillUninstallOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "认证失败"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "CSRF 校验失败或权限不足"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "服务器内部错误"
+          }
+        },
+        "security": [
+          {
+            "AuthCookie": [],
+            "CsrfCookie": [],
+            "CsrfHeader": [],
+            "RequestedWith": []
+          }
+        ],
+        "summary": "Uninstall Agent Skill",
+        "tags": [
+          "agent-skills"
+        ]
+      },
+      "get": {
+        "description": "skill 详情：SKILL.md 原文与文件清单。",
+        "operationId": "get_agent_skill_api_agent_skills__name__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "auth_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Auth Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentSkillDetailOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "认证失败"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "服务器内部错误"
+          }
+        },
+        "security": [
+          {
+            "AuthCookie": []
+          }
+        ],
+        "summary": "Get Agent Skill",
+        "tags": [
+          "agent-skills"
+        ]
+      },
+      "patch": {
+        "description": "分别启用/停用系统 Agent 与插件使用范围；内置技能只能切换系统 Agent。",
+        "operationId": "patch_agent_skill_api_agent_skills__name__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "auth_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Auth Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentSkillEnablePatch"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentSkillOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "认证失败"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "CSRF 校验失败或权限不足"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "服务器内部错误"
+          }
+        },
+        "security": [
+          {
+            "AuthCookie": [],
+            "CsrfCookie": [],
+            "CsrfHeader": [],
+            "RequestedWith": []
+          }
+        ],
+        "summary": "Patch Agent Skill",
+        "tags": [
+          "agent-skills"
+        ]
+      }
+    },
+    "/api/agent-skills/{name}/content": {
+      "put": {
+        "description": "编辑 SKILL.md。插件内置 skill 的修改保存为覆盖层，插件升级不会覆盖。",
+        "operationId": "edit_agent_skill_api_agent_skills__name__content_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "auth_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Auth Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentSkillContentIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentSkillOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "认证失败"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "CSRF 校验失败或权限不足"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "服务器内部错误"
+          }
+        },
+        "security": [
+          {
+            "AuthCookie": [],
+            "CsrfCookie": [],
+            "CsrfHeader": [],
+            "RequestedWith": []
+          }
+        ],
+        "summary": "Edit Agent Skill",
+        "tags": [
+          "agent-skills"
+        ]
+      }
+    },
+    "/api/agent-skills/{name}/files/{path}": {
+      "get": {
+        "description": "读取 skill 内的一个文本文件（只读展示，不执行）。",
+        "operationId": "get_agent_skill_file_api_agent_skills__name__files__path__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "path",
+            "required": true,
+            "schema": {
+              "title": "Path",
+              "type": "string"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "auth_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Auth Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentSkillFileOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "认证失败"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "服务器内部错误"
+          }
+        },
+        "security": [
+          {
+            "AuthCookie": []
+          }
+        ],
+        "summary": "Get Agent Skill File",
+        "tags": [
+          "agent-skills"
+        ]
+      }
+    },
+    "/api/agent-skills/{name}/keep-modified": {
+      "post": {
+        "description": "插件内置 skill：保留自己的修改，不再提示这一版“内置有新版本”。",
+        "operationId": "keep_agent_skill_modified_api_agent_skills__name__keep_modified_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "auth_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Auth Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentSkillOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "认证失败"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "CSRF 校验失败或权限不足"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "服务器内部错误"
+          }
+        },
+        "security": [
+          {
+            "AuthCookie": [],
+            "CsrfCookie": [],
+            "CsrfHeader": [],
+            "RequestedWith": []
+          }
+        ],
+        "summary": "Keep Agent Skill Modified",
+        "tags": [
+          "agent-skills"
+        ]
+      }
+    },
+    "/api/agent-skills/{name}/restore-default": {
+      "post": {
+        "description": "插件内置 skill：放弃修改，恢复为插件分发的默认版本。",
+        "operationId": "restore_agent_skill_default_api_agent_skills__name__restore_default_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "auth_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Auth Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentSkillOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "认证失败"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "CSRF 校验失败或权限不足"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "服务器内部错误"
+          }
+        },
+        "security": [
+          {
+            "AuthCookie": [],
+            "CsrfCookie": [],
+            "CsrfHeader": [],
+            "RequestedWith": []
+          }
+        ],
+        "summary": "Restore Agent Skill Default",
+        "tags": [
+          "agent-skills"
+        ]
+      }
+    },
+    "/api/agent-skills/{name}/update": {
+      "post": {
+        "description": "GitHub / zip 链接来源按原地址重新拉取；上传或粘贴来源需提供新内容；插件内置 skill 随插件升级。",
+        "operationId": "update_agent_skill_api_agent_skills__name__update_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "auth_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Auth Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentSkillUpdateIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentSkillUpdateOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "认证失败"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "CSRF 校验失败或权限不足"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "服务器内部错误"
+          }
+        },
+        "security": [
+          {
+            "AuthCookie": [],
+            "CsrfCookie": [],
+            "CsrfHeader": [],
+            "RequestedWith": []
+          }
+        ],
+        "summary": "Update Agent Skill",
+        "tags": [
+          "agent-skills"
+        ]
+      }
+    },
+    "/api/agent-skills/{name}/upstream": {
+      "get": {
+        "description": "插件内置 skill：当前版本与插件分发的默认版本及差异。",
+        "operationId": "get_agent_skill_upstream_api_agent_skills__name__upstream_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "auth_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Auth Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentSkillUpstreamOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "认证失败"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "服务器内部错误"
+          }
+        },
+        "security": [
+          {
+            "AuthCookie": []
+          }
+        ],
+        "summary": "Get Agent Skill Upstream",
+        "tags": [
+          "agent-skills"
         ]
       }
     },
