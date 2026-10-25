@@ -379,4 +379,24 @@ struct ClientTests {
         let (client, _, _) = try setup([csrfReply, MockReply(body: "{\"ok\":true}")], store: store)
         await #expect(throws: APIError.self) { try await client.login(.init(username: "other-user", password: "secret")) }
     }
+
+    @Test func pluginInstallUsesLongTimeoutTransport() {
+        #expect(SessionTransport.isSlowOperation("/api/plugin-repos/3/plugins/interaction-ai-chat/install", write: true))
+        #expect(SessionTransport.isSlowOperation("/api/plugin-repos/local/plugins/demo/install", write: true))
+        #expect(SessionTransport.isSlowOperation("/api/plugin-repos/3/refresh", write: true))
+        #expect(SessionTransport.isSlowOperation("/api/plugin-repos/3/update-installed", write: true))
+        #expect(SessionTransport.isSlowOperation("/api/remote-plugins/install", write: true))
+        #expect(SessionTransport.isSlowOperation("/api/remote-plugins/demo/update", write: true))
+        #expect(SessionTransport.isSlowOperation("/api/plugins/install/upload", write: true))
+        #expect(SessionTransport.isSlowOperation("/api/system/pull-update", write: true))
+        #expect(!SessionTransport.isSlowOperation("/api/plugin-repos/3/plugins", write: false))
+        #expect(!SessionTransport.isSlowOperation("/api/plugins/install/demo/enable", write: true))
+        #expect(!SessionTransport.isSlowOperation("/api/accounts/1/features/demo", write: true))
+    }
+
+    @Test func pluginInstallConflictExplainsAlreadyInstalled() {
+        let message = APIError.server(status: 409, code: "PLUGIN_EXISTS").errorDescription ?? ""
+        #expect(message.contains("已安装"))
+        #expect(!message.contains("HTTP 409"))
+    }
 }

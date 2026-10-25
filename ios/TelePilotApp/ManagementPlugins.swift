@@ -378,6 +378,7 @@ private enum PluginPresentation {
     }
     static func accountStatus(enabled: Bool, state: String?, error: String?) -> (title: String, symbol: String, tone: PluginStatusTone) {
         guard enabled else { return ("未启用", "pause.circle", .paused) }
+        if isGloballyDisabled(error) { return ("全局已停用", "pause.circle", .paused) }
         if (error?.isEmpty == false) || state == "failed" { return ("运行异常", "exclamationmark.circle.fill", .failed) }
         if state == "active" { return ("运行中", "checkmark.circle.fill", .running) }
         return ("等待生效", "clock", .pending)
@@ -385,6 +386,14 @@ private enum PluginPresentation {
     static func needsAttention(feature: JSONValue, accountState: JSONValue?) -> Bool {
         feature["orphan"]?.boolValue == true || feature["signature_ok"]?.boolValue == false || feature["update_available"]?.boolValue == true
             || accountState?["state"]?.stringValue == "failed" || accountState?["last_error"]?.stringValue?.isEmpty == false
+    }
+    /// Worker 因服务器总开关关闭而跳过加载（loader 写入 `PLUGIN_DISABLED: installed_plugin.enabled=False`）。
+    static func isGloballyDisabled(_ error: String?) -> Bool {
+        error?.trimmingCharacters(in: .whitespaces).hasPrefix("PLUGIN_DISABLED") == true
+    }
+    /// 把 Worker 的原始错误码翻译成可理解的中文；未知错误原样展示。
+    static func errorText(_ error: String) -> String {
+        isGloballyDisabled(error) ? "插件已全局停用，账号开关不会生效。需在服务器总开关中全局启用后才会运行。" : error
     }
     static func category(_ value: String) -> String { ["automation": "自动化", "interactive": "交互", "utility": "工具"][value] ?? value }
     static func symbol(_ feature: JSONValue) -> String {
@@ -667,6 +676,7 @@ struct ManagementPluginDetailView: View {
     @State private var toggleUncertain = false
     @State private var confirmToggle = false
     @State private var actionMessage: String?
+    @State private var actionWarning: String?
     @State private var actionError: String?
     @State private var globalBusy = false
     @State private var globalUncertain = false
@@ -701,13 +711,20 @@ struct ManagementPluginDetailView: View {
     private var globalEnabled: Bool? {
         installRecord?["global_enabled"]?.boolValue ?? feature["global_enabled"]?.boolValue
     }
+    /// 服务器总开关关闭：以安装台账为准；台账缺失时以 Worker 回报的 PLUGIN_DISABLED 判断。
+    private var globallyDisabled: Bool {
+        globalEnabled == false || PluginPresentation.isGloballyDisabled(currentAccountState?["last_error"]?.stringValue)
+    }
 
     var body: some View {
         List {
             Section {
                 PluginDetailHeader(feature: feature, accountState: currentAccountState, accountScoped: accountID != nil, globalEnabled: globalEnabled)
             }
-            if accountID != nil { accountSwitchSection }
+            if accountID != nil {
+                accountSwitchSection
+                if globallyDisabled { globalDisabledSection }
+            }
             Picker("插件详情", selection: $section) {
                 ForEach(sections, id: \.self) { item in Text(title(item)).tag(item) }
             }
@@ -721,8 +738,8 @@ struct ManagementPluginDetailView: View {
         }
         .navigationTitle(ManagementText.title(feature)).navigationBarTitleDisplayMode(.inline)
         .toolbar { Button(preferences.isFavoritePlugin(key) ? "取消收藏" : "收藏", systemImage: preferences.isFavoritePlugin(key) ? "star.fill" : "star") { preferences.togglePlugin(key) } }
-        .task { if accountID == nil { await loadInstallRecord() } }
-        .refreshable { if accountID == nil { await loadInstallRecord() } else { await reloadAccountState() } }
+        .task { await loadInstallRecord() }
+        .refreshable { await loadInstallRecord(); if accountID != nil { await reloadAccountState() } }
     }
 
     // MARK: 账号开关（仅账号作用域）
@@ -731,7 +748,11 @@ struct ManagementPluginDetailView: View {
     private var accountSwitchSection: some View {
         Section {
             LabeledContent {
-                Text(accountEnabled ? "已启用" : "未启用").foregroundStyle(accountEnabled ? Color.green : Color.secondary)
+                if accountEnabled && globallyDisabled {
+                    Text("已开启 · 未生效").foregroundStyle(Color.orange)
+                } else {
+                    Text(accountEnabled ? "已启用" : "未启用").foregroundStyle(accountEnabled ? Color.green : Color.secondary)
+                }
             } label: { Label("在此账号中", systemImage: accountEnabled ? "power.circle.fill" : "power.circle") }
             Button(role: accountEnabled ? .destructive : nil) { confirmToggle = true } label: {
                 Label(accountEnabled ? "在此账号停用该插件" : "在此账号启用该插件", systemImage: accountEnabled ? "pause.circle" : "play.circle")
@@ -747,6 +768,7 @@ struct ManagementPluginDetailView: View {
             }
             if toggling { ProgressView("正在提交并刷新状态…") }
             if let actionMessage { Label(actionMessage, systemImage: "checkmark.circle").foregroundStyle(.green) }
+            if let actionWarning { Label(actionWarning, systemImage: "exclamationmark.triangle").foregroundStyle(.orange) }
             if let actionError { NoticeView(title: toggleUncertain ? "结果待确认" : "操作未完成", message: actionError) }
         } header: { Text("此账号的插件开关") } footer: {
             Text(toggleUncertain
@@ -754,6 +776,32 @@ struct ManagementPluginDetailView: View {
                  : accountEnabled
                     ? "停用后此账号不再运行该插件，配置和规则都会保留，随时可以重新启用。不影响其他账号，也不会卸载插件。"
                     : "启用后此账号会按自己的配置和规则运行该插件。不影响其他账号。")
+        }
+    }
+
+    /// 账号作用域下服务器总开关关闭时的提示与直达“全局启用”入口（复用全局总开关的确认框与提交逻辑）。
+    private var globalDisabledSection: some View {
+        Section {
+            NoticeView(title: "插件已全局停用，账号开关不会生效",
+                       message: "服务器总开关处于关闭状态，所有账号都不会运行此插件。全局启用后，已在账号中开启的账号会开始运行它。",
+                       symbol: "pause.circle")
+            Button { confirmGlobal = true } label: {
+                Label("全局启用插件", systemImage: "play.circle").frame(minHeight: 44)
+            }
+            .disabled(globalBusy || globalUncertain)
+            .accessibilityIdentifier("plugin.account.globalEnable")
+            .confirmationDialog("全局启用此插件？", isPresented: $confirmGlobal, titleVisibility: .visible) {
+                Button("确认全局启用") { Task { await toggleGlobal() } }
+                Button("取消", role: .cancel) {}
+            } message: {
+                Text("启用后，已在账号中开启此插件的账号会重新开始运行它。会影响所有账号。")
+            }
+            if globalBusy { ProgressView("正在提交并刷新状态…") }
+            if let globalError { NoticeView(title: globalUncertain ? "结果待确认" : "操作未完成", message: globalError) }
+        } header: { Text("服务器总开关") } footer: {
+            Text(globalUncertain
+                 ? "网络中断，无法确认是否已生效。请下拉刷新，确认实际状态后再操作。"
+                 : "总开关在「服务器安装与维护」中也可以管理。")
         }
     }
 
@@ -770,7 +818,8 @@ struct ManagementPluginDetailView: View {
             Section {
                 PluginInfoRow(title: "运行状态", value: PluginPresentation.workerState(accountState["state"]?.stringValue), symbol: "gearshape.2")
                 if let error = accountState["last_error"]?.stringValue, !error.isEmpty {
-                    Label(error, systemImage: "exclamationmark.triangle").font(.footnote).foregroundStyle(.red).textSelection(.enabled)
+                    Label(PluginPresentation.errorText(error), systemImage: PluginPresentation.isGloballyDisabled(error) ? "pause.circle" : "exclamationmark.triangle")
+                        .font(.footnote).foregroundStyle(PluginPresentation.isGloballyDisabled(error) ? Color.orange : Color.red).textSelection(.enabled)
                 }
             } header: { Text("账号运行详情") } footer: {
                 Text("上面的开关是你的设置；“运行状态”是 Worker 实际加载的结果，刚切换时两者可能短暂不一致。")
@@ -1018,6 +1067,7 @@ struct ManagementPluginDetailView: View {
         actionMessage = nil
         actionError = nil
         defer { toggling = false }
+        actionWarning = nil
         let target = !accountEnabled
         do {
             _ = try await model.request(path: "/api/accounts/\(accountID)/features/\(segment)", method: "PATCH", body: ["enabled": .bool(target)])
@@ -1030,6 +1080,7 @@ struct ManagementPluginDetailView: View {
             let values = try await model.request(path: "/api/accounts/\(accountID)/features").arrayValue ?? []
             currentAccountState = values.first { $0["feature_key"]?.stringValue == key }
             if !target { actionMessage = "已在此账号停用。" }
+            else if globallyDisabled { actionWarning = "已在此账号开启，但插件处于全局停用状态，需全局启用后才会运行。" }
             else { actionMessage = currentAccountState?["state"]?.stringValue == "active" ? "已在此账号启用，Worker 正在运行。" : "已提交启用，请留意运行状态。" }
         } catch {
             actionMessage = "已提交，但重新读取状态失败。请下拉刷新确认。"
@@ -1037,7 +1088,7 @@ struct ManagementPluginDetailView: View {
     }
 
     private func toggleGlobal() async {
-        guard let enabled = globalEnabled, !globalBusy, !globalUncertain else { return }
+        guard let enabled = globalEnabled ?? (globallyDisabled ? false : nil), !globalBusy, !globalUncertain else { return }
         globalBusy = true
         globalMessage = nil
         globalError = nil
@@ -1050,6 +1101,11 @@ struct ManagementPluginDetailView: View {
             return
         }
         await loadInstallRecord()
+        if accountID != nil {
+            await reloadAccountState()
+            actionWarning = nil
+            actionMessage = enabled ? nil : (currentAccountState?["state"]?.stringValue == "active" ? "已全局启用，此账号的 Worker 正在运行。" : "已全局启用，请留意此账号的运行状态。")
+        }
         globalMessage = enabled ? "已全局停用，所有账号都不会再运行此插件。" : "已全局启用。"
     }
 }
@@ -1140,7 +1196,11 @@ private struct PluginDetailHeader: View {
                 }
             }
             if let error = accountState?["last_error"]?.stringValue, !error.isEmpty {
-                Label(error, systemImage: "exclamationmark.triangle").font(.footnote).foregroundStyle(.red).lineLimit(3)
+                if PluginPresentation.isGloballyDisabled(error) {
+                    Label(PluginPresentation.errorText(error), systemImage: "pause.circle").font(.footnote).foregroundStyle(.orange).lineLimit(3)
+                } else {
+                    Label(error, systemImage: "exclamationmark.triangle").font(.footnote).foregroundStyle(.red).lineLimit(3)
+                }
             }
         }
         .padding(.vertical, 4)
@@ -1269,7 +1329,11 @@ private struct PluginTechnicalInfoView: View {
                     PluginInfoRow(title: "运行状态", value: PluginPresentation.workerState(accountState["state"]?.stringValue), symbol: "gearshape.2")
                     PluginInfoRow(title: "已单独保存的配置", value: "\(accountState["config"]?.objectValue?.count ?? 0) 项", symbol: "tray.full")
                     if let error = accountState["last_error"]?.stringValue, !error.isEmpty {
-                        Label(error, systemImage: "exclamationmark.triangle").font(.footnote).foregroundStyle(.red).textSelection(.enabled)
+                        Label(PluginPresentation.errorText(error), systemImage: PluginPresentation.isGloballyDisabled(error) ? "pause.circle" : "exclamationmark.triangle")
+                            .font(.footnote).foregroundStyle(PluginPresentation.isGloballyDisabled(error) ? Color.orange : Color.red).textSelection(.enabled)
+                        if PluginPresentation.isGloballyDisabled(error) {
+                            Text(error).font(.caption2.monospaced()).foregroundStyle(.secondary).textSelection(.enabled)
+                        }
                     }
                 } header: { Text("此账号的运行记录") }
             }
@@ -1316,6 +1380,7 @@ private struct PluginConfigField: Identifiable {
     /// 开关、选项与分组控件自带标题；文本与数字输入框需要在分组标题里显示字段名。
     var titledInline: Bool {
         let schema = ManagementSchema.normalized(spec)
+        if PluginSelectWidget(spec: spec) != nil { return true }
         return schema["enum"] != nil || ["boolean", "object", "array"].contains(schema["type"]?.stringValue ?? "")
     }
 }
@@ -1510,6 +1575,9 @@ struct ManagementPluginConfigView: View {
     @State private var saveError: String?
     @State private var uncertain = false
     @State private var savedMessage: String?
+    @State private var llmProviders: [JSONValue]?
+    @State private var llmLoading = false
+    @State private var llmError: String?
 
     private var global: Bool { accountID == nil }
     private var segment: String { ManagementText.pathSegment(feature["key"]?.stringValue ?? "") }
@@ -1598,6 +1666,9 @@ struct ManagementPluginConfigView: View {
                 LabeledContent {
                     Text(PluginConfigFormat.text(snapshot?.values[field.key], secret: field.secret)).foregroundStyle(.secondary)
                 } label: { Label(field.label, systemImage: field.symbol) }
+            } else if !field.secret, let widget = PluginSelectWidget(spec: field.spec) {
+                PluginSelectWidgetField(widget: widget, title: field.label, value: binding(field.key), draft: draft,
+                                        stored: snapshot?.values ?? [:], providers: llmProviders, loading: llmLoading, loadError: llmError)
             } else {
                 ManagementFieldView(title: field.secret ? "留空则保持原值" : field.label, key: field.key, schema: field.spec, value: binding(field.key))
                 if ManagementSchema.allowsNull(field.spec), let value = draft[field.key], !value.isNull, !field.secret {
@@ -1723,9 +1794,25 @@ struct ManagementPluginConfigView: View {
         reviewing = true
     }
 
+    /// 与 Web 插件配置页一致：从 `/api/commands/llm-providers` 读取 TelePilot AI Provider 及其模型。
+    private func loadProviders() async {
+        guard !llmLoading else { return }
+        llmLoading = true
+        defer { llmLoading = false }
+        do {
+            llmProviders = try await model.request(path: "/api/commands/llm-providers").arrayValue ?? []
+            llmError = nil
+        } catch {
+            llmError = error.localizedDescription
+        }
+    }
+
     private func load() async {
         do {
             let loaded = try await PluginConfigLoader.load(model: model, feature: feature, accountID: accountID)
+            if llmProviders == nil, fields.contains(where: { PluginSelectWidget(spec: $0.spec)?.needsProviders == true }) {
+                Task { await loadProviders() }
+            }
             var seed: [String: JSONValue] = [:]
             if freeForm {
                 seed = loaded.stored.filter { !ManagementText.secret($0.key) }
@@ -1814,6 +1901,59 @@ struct ManagementLocalPluginsView: View {
         }.navigationTitle("本地参考插件").navigationBarTitleDisplayMode(.inline).task {
             do { items = ManagementText.items(try await model.request(path: "/api/plugin-repos/local/plugins")) }
             catch { self.error = error.localizedDescription }
+        }
+    }
+}
+
+// MARK: - 插件配置的选择类控件（x-ui-widget）
+
+// PluginSelectWidget / PluginSelectOptions 位于 TelePilotCore（便于用真实插件 manifest 做单元测试）。
+
+/// 原生 Picker 呈现插件的 Provider / 模型 / 动态选项字段；保留不在候选里的旧值。
+private struct PluginSelectWidgetField: View {
+    let widget: PluginSelectWidget
+    let title: String
+    @Binding var value: JSONValue
+    let draft: JSONValue
+    let stored: [String: JSONValue]
+    let providers: [JSONValue]?
+    let loading: Bool
+    let loadError: String?
+
+    var body: some View {
+        let selected = PluginSelectOptions.text(value)
+        let content = choices()
+        Picker(selection: Binding(get: { selected }, set: { value = .string($0) })) {
+            Text(content.empty).tag("")
+            ForEach(content.options, id: \.value) { option in Text(option.label).tag(option.value) }
+            if !selected.isEmpty, !content.options.contains(where: { $0.value == selected }) {
+                Text("当前值：\(selected)").tag(selected)
+            }
+        } label: { Text(title) }
+        .pickerStyle(.menu)
+        .disabled(content.disabled && selected.isEmpty)
+        .accessibilityIdentifier("plugin.config.select." + title)
+        if let note = content.note { Text(note).font(.footnote).foregroundStyle(.secondary) }
+    }
+
+    private func choices() -> (options: [PluginSelectOption], empty: String, disabled: Bool, note: String?) {
+        switch widget {
+        case .llmProvider:
+            if loading && providers == nil { return ([], "正在加载 Provider…", true, nil) }
+            if let loadError, providers == nil { return ([], "自动路由", false, "Provider 列表读取失败：\(loadError)") }
+            let options = PluginSelectOptions.providerOptions(providers ?? [])
+            return (options, "自动路由", false, options.isEmpty ? "尚未配置 TelePilot AI Provider；请先在 AI 页添加。" : nil)
+        case .llmModel(let providerField, let modality):
+            if loading && providers == nil { return ([], "正在加载 Provider…", true, nil) }
+            let selector = providerField.map { PluginSelectOptions.text(draft[$0] ?? stored[$0]) } ?? ""
+            guard let provider = PluginSelectOptions.provider(providers, selector: selector) else {
+                return ([], "跟随自动路由", true, "先选择固定 TelePilot Provider 后，才能选择该 Provider 下已启用的模型。")
+            }
+            return (PluginSelectOptions.modelOptions(provider, modality: modality), "使用 Provider 默认模型", false, nil)
+        case .dynamic(let optionsField):
+            let source = optionsField.flatMap { draft[$0] ?? stored[$0] }
+            let options = PluginSelectOptions.dynamicOptions(source)
+            return (options, "未设置", false, options.isEmpty ? "暂无可选项。" : nil)
         }
     }
 }

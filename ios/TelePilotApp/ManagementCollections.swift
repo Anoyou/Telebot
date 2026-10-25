@@ -187,7 +187,8 @@ struct ManagementItemView: View {
             case .repoPlugins:
                 if let repo = resource.context {
                     Section("安装") {
-                        ManagementActionLink(action: .init(title: "安装此插件", path: "/api/plugin-repos/\(repo)/plugins/\(ManagementText.pathSegment(identifier))/install"))
+                        ManagementActionLink(action: .init(title: "安装此插件", path: "/api/plugin-repos/\(repo)/plugins/\(ManagementText.pathSegment(identifier))/install",
+                                                           explanation: "修改会提交到当前连接的服务器。打开「安装后默认启用」会全局启用插件并为所有账号开启；关闭则安装后保持全局停用，需要到插件详情的服务器总开关中启用。"))
                     }
                 }
             case .remotePlugins:

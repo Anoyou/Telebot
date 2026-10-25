@@ -7,6 +7,10 @@ enum ManagementSchema {
             || (schema["type"]?.arrayValue?.contains(.string("null")) ?? false)
             || ((schema["anyOf"]?.arrayValue ?? schema["oneOf"]?.arrayValue ?? []).contains { $0["type"]?.stringValue == "null" })
     }
+    /// 不可为空的布尔字段：表单里只用一个开关表示它的值，缺省即为关闭（或 schema 默认值）。
+    static func isPlainBoolean(_ raw: JSONValue) -> Bool {
+        normalized(raw)["type"]?.stringValue == "boolean" && !allowsNull(raw)
+    }
     static func inputValue(_ raw: JSONValue) -> JSONValue {
         let schema = normalized(raw)
         if let value = schema["default"], !value.isNull { return value }
@@ -192,11 +196,14 @@ struct ManagementFieldsView: View {
                 return lhs < rhs
             }, id: \.self) { key in
                 if let spec = properties[key], spec["readOnly"]?.boolValue != true {
+                    // 可选布尔字段本身就是开关：不再额外渲染“是否提交此项”的同名开关，
+                    // 否则会出现两个同名开关（一个开、一个关），且实际提交的是用户没注意到的那个值。
+                    let inlineToggle = ManagementSchema.isPlainBoolean(spec)
                     Section {
-                        if !required.contains(key) {
+                        if !required.contains(key), !inlineToggle {
                             Toggle(isOn: included(key, spec: spec)) { Text(ManagementText.fieldLabel(key, schema: spec)) }
                         }
-                        if required.contains(key) || value[key] != nil {
+                        if required.contains(key) || inlineToggle || value[key] != nil {
                             if value[key]?.isNull == true, ManagementSchema.allowsNull(spec) {
                                 Text("此项将设为空，使用服务器默认值或解除关联。").font(.footnote).foregroundStyle(.secondary)
                                 Button("填写" + ManagementText.fieldLabel(key, schema: spec)) { field(key).wrappedValue = ManagementSchema.inputValue(spec) }
@@ -244,8 +251,10 @@ struct ManagementFieldView: View {
         Group {
             if let choices = spec["enum"]?.arrayValue {
                 Picker(title, selection: $value) {
-                    if !choices.contains(value) { Text("请选择").tag(JSONValue.null) }
+                    if value.isNull { Text("请选择").tag(JSONValue.null) }
                     ForEach(choices, id: \.self) { choice in Text(ManagementText.scalar(choice)).tag(choice) }
+                    // 保留不在候选里的旧值（例如插件升级后移除了某个模型），避免选择器显示为空。
+                    if !value.isNull, !choices.contains(value) { Text("当前值：\(ManagementText.scalar(value))").tag(value) }
                 }
             } else if spec["type"]?.stringValue == "boolean" || value.boolValue != nil {
                 Toggle(title, isOn: Binding(get: { value.boolValue ?? false }, set: { value = .bool($0) }))

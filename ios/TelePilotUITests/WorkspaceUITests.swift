@@ -82,4 +82,21 @@ final class WorkspaceUITests: XCTestCase {
         // 返回后仍停留在“账号配置”，而不是跳回“概况”。
         XCTAssertTrue(app.buttons["plugin.config.edit"].waitForExistence(timeout: 5))
     }
+
+    func testPluginConfigUsesNativeProviderAndModelPickers() {
+        let app = launch()
+        app.tabBars.buttons["插件"].tap()
+        let card = app.buttons["plugin.card.content_assistant"]
+        XCTAssertTrue(card.waitForExistence(timeout: 10))
+        card.tap()
+        XCTAssertTrue(app.buttons["账号配置"].waitForExistence(timeout: 5))
+        app.buttons["账号配置"].tap()
+        XCTAssertTrue(app.buttons["plugin.config.edit"].waitForExistence(timeout: 5))
+        app.buttons["plugin.config.edit"].tap()
+        // x-ui-widget=llm-provider-select / llm-model-select 渲染为原生选择器，而不是手输文本框。
+        let provider = app.descendants(matching: .any)["plugin.config.select.固定 TelePilot Provider（可选）"].firstMatch
+        XCTAssertTrue(provider.waitForExistence(timeout: 10))
+        XCTAssertTrue(app.descendants(matching: .any)["plugin.config.select.TelePilot 模型覆盖（可选）"].firstMatch.exists)
+        XCTAssertFalse(app.textFields["固定 TelePilot Provider（可选）"].exists)
+    }
 }
