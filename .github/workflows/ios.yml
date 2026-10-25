@@ -23,14 +23,16 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  XCODE_APP: /Applications/Xcode_26.6.app
+  # 工程使用 iOS 27 SDK 才有的 API（如 TabRole.prominent，运行时以 #available 兜底），
+  # 因此必须用 Xcode 27 编译；部署目标仍为 iOS 26。
+  XCODE_APP: /Applications/Xcode_27.app
   DERIVED_DATA: ${{ github.workspace }}/ios/build/DerivedData
   RESULTS_DIR: ${{ github.workspace }}/ios/build/results
 
 jobs:
   ios:
     name: iOS 构建与测试
-    runs-on: macos-26
+    runs-on: xcode-27
     timeout-minutes: 75
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -53,7 +55,7 @@ jobs:
       - name: TelePilotCore 单元测试
         run: swift test --package-path ios/TelePilotCore
 
-      - name: 选择 iOS 26 模拟器
+      - name: 选择 iOS 26+ 模拟器
         id: simulator
         run: |
           UDID=$(xcrun simctl list devices available -j | python3 -c '
@@ -63,7 +65,7 @@ jobs:
               m = re.search(r"iOS-(\d+)-(\d+)", runtime)
               return (int(m.group(1)), int(m.group(2))) if m else (0, 0)
           runtimes = sorted((r for r in data if version(r)[0] >= 26), key=version, reverse=True)
-          for preferred in ("iPhone 17 Pro", "iPhone 17", None):
+          for preferred in ("iPhone 17 Pro", "iPhone 18 Pro", "iPhone 17", None):
               for runtime in runtimes:
                   for device in data[runtime]:
                       if not device.get("isAvailable", True):
@@ -71,7 +73,7 @@ jobs:
                       if preferred is None and device["name"].startswith("iPhone") or device["name"] == preferred:
                           print(device["udid"]); print(device["name"], runtime, file=sys.stderr)
                           raise SystemExit(0)
-          raise SystemExit("没有可用的 iOS 26 iPhone 模拟器")
+          raise SystemExit("没有可用的 iOS 26+ iPhone 模拟器")
           ')
           echo "udid=$UDID" >> "$GITHUB_OUTPUT"
           xcrun simctl boot "$UDID" || true
