@@ -475,6 +475,7 @@ private enum PluginPresentation {
         "payout": ("派奖", "执行转账或派奖动作"),
         "ai": ("调用 AI", "使用已配置的模型供应商"),
         "ai_text": ("调用 AI 文本", "使用已配置的模型生成文字"),
+        "agent_skills": ("读取 Skills", "只读获取管理员对插件启用的 Skill 说明文本，不执行其中脚本"),
         "call_llm": ("调用 AI", "使用已配置的模型供应商"),
         "llm": ("调用 AI", "使用已配置的模型供应商")
     ]

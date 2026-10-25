@@ -806,6 +806,7 @@ class PluginContext:
       - ``scheduler``：平台调度器 facade，可在插件内注册 cron / interval / once 任务
       - ``http``：声明 ``external_http`` 和 ``allowed_hosts`` 后注入的安全 HTTP facade
       - ``ai``：声明 ``ai_text`` 或独立 ``ai_agent`` 后注入的安全 LLM facade
+      - ``skills``：声明 ``agent_skills`` 后注入，只读列出/读取管理员已对插件启用的 Agent Skills 文本
       - ``messages``：标准消息动作 facade；交互入口内为缓冲动作，后台任务/命令中为实时受控投递
       - ``identities``：群内安全公开身份 facade；匿名管理员只返回标签，不暴露原始客户端
 
@@ -826,6 +827,7 @@ class PluginContext:
     scheduler: Any = None  # SchedulerFacade
     http: Any = None  # PluginHTTP
     ai: Any = None  # PluginAI
+    skills: Any = None  # PluginSkills
     messages: Any = None
     identities: Any = None  # PluginIdentityFacade
     generation: int = 0

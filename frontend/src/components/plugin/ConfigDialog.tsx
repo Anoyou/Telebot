@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { TelegramHtmlPreview, TelegramHtmlPreviewThread } from "@/components/TelegramHtmlPreview";
+import { AgentSkillMultiSelectField } from "@/components/plugin/AgentSkillMultiSelectField";
 import { listIgnoredPeers } from "@/api/ignored_peers";
 import type { IgnoredPeer, LLMProviderOut } from "@/api/types";
 import { getErrMsg } from "@/lib/api";
@@ -610,6 +611,18 @@ function FieldInput({
         onConfigAction={onConfigAction}
         llmProviders={llmProviders}
         llmProvidersLoading={llmProvidersLoading}
+        onChange={onChange}
+      />
+    );
+  }
+
+  if (field.type === "array" && field["x-ui-widget"] === "agent-skill-multi-select") {
+    return (
+      <AgentSkillMultiSelectField
+        inputId={inputId}
+        label={label}
+        description={description}
+        value={value}
         onChange={onChange}
       />
     );

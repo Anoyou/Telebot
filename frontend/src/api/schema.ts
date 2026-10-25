@@ -1074,6 +1074,178 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/agent-skills": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Agent Skills
+         * @description 列出已安装 skills 与内置领域技能（含启用范围与来源）。
+         */
+        get: operations["list_agent_skills_api_agent_skills_get"];
+        put?: never;
+        /**
+         * Install Agent Skill
+         * @description 从 GitHub、zip（上传或链接）或粘贴的 SKILL.md 安装 skill。
+         */
+        post: operations["install_agent_skill_api_agent_skills_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/agent-skills/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Agent Skill
+         * @description skill 详情：SKILL.md 原文与文件清单。
+         */
+        get: operations["get_agent_skill_api_agent_skills__name__get"];
+        put?: never;
+        post?: never;
+        /**
+         * Uninstall Agent Skill
+         * @description 卸载 skill，并从所有插件配置的 skill 选择中移除；内置技能不可卸载。
+         */
+        delete: operations["uninstall_agent_skill_api_agent_skills__name__delete"];
+        options?: never;
+        head?: never;
+        /**
+         * Patch Agent Skill
+         * @description 分别启用/停用系统 Agent 与插件使用范围；内置技能只能切换系统 Agent。
+         */
+        patch: operations["patch_agent_skill_api_agent_skills__name__patch"];
+        trace?: never;
+    };
+    "/api/agent-skills/{name}/content": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Edit Agent Skill
+         * @description 编辑 SKILL.md。插件内置 skill 的修改保存为覆盖层，插件升级不会覆盖。
+         */
+        put: operations["edit_agent_skill_api_agent_skills__name__content_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/agent-skills/{name}/files/{path}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Agent Skill File
+         * @description 读取 skill 内的一个文本文件（只读展示，不执行）。
+         */
+        get: operations["get_agent_skill_file_api_agent_skills__name__files__path__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/agent-skills/{name}/keep-modified": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Keep Agent Skill Modified
+         * @description 插件内置 skill：保留自己的修改，不再提示这一版“内置有新版本”。
+         */
+        post: operations["keep_agent_skill_modified_api_agent_skills__name__keep_modified_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/agent-skills/{name}/restore-default": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Restore Agent Skill Default
+         * @description 插件内置 skill：放弃修改，恢复为插件分发的默认版本。
+         */
+        post: operations["restore_agent_skill_default_api_agent_skills__name__restore_default_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/agent-skills/{name}/update": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Update Agent Skill
+         * @description GitHub / zip 链接来源按原地址重新拉取；上传或粘贴来源需提供新内容；插件内置 skill 随插件升级。
+         */
+        post: operations["update_agent_skill_api_agent_skills__name__update_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/agent-skills/{name}/upstream": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Agent Skill Upstream
+         * @description 插件内置 skill：当前版本与插件分发的默认版本及差异。
+         */
+        get: operations["get_agent_skill_upstream_api_agent_skills__name__upstream_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/aliases": {
         parameters: {
             query?: never;
@@ -5408,6 +5580,402 @@ export interface components {
             token_header: string;
             /** Token Storage */
             token_storage: string;
+        };
+        /** AgentSkillContentIn */
+        AgentSkillContentIn: {
+            /**
+             * Skill Md
+             * @description 新的 SKILL.md 全文；name 必须保持不变
+             */
+            skill_md: string;
+        };
+        /** AgentSkillDetailOut */
+        AgentSkillDetailOut: {
+            /**
+             * Builtin
+             * @description 内置领域技能：不可卸载，只能对系统 Agent 停用
+             */
+            builtin: boolean;
+            /**
+             * Bundled
+             * @description 随插件分发的内置 skill：不可卸载，可停用；编辑保存为覆盖层
+             * @default false
+             */
+            bundled: boolean;
+            /** Content Sha256 */
+            content_sha256?: string | null;
+            /** Description */
+            description: string;
+            /**
+             * Editable
+             * @description 可以直接编辑 SKILL.md
+             * @default false
+             */
+            editable: boolean;
+            /** Enabled Agent */
+            enabled_agent: boolean;
+            /** Enabled Plugins */
+            enabled_plugins: boolean;
+            /**
+             * File Count
+             * @default 0
+             */
+            file_count: number;
+            /** Files */
+            files?: components["schemas"]["AgentSkillFileInfo"][];
+            /** Installed At */
+            installed_at?: string | null;
+            /** License */
+            license?: string | null;
+            /** Name */
+            name: string;
+            /**
+             * Owner Plugin
+             * @description 内置 skill 所属插件
+             */
+            owner_plugin?: string | null;
+            /**
+             * Plugin Supported
+             * @description 是否可以提供给插件（内置技能为 false）
+             */
+            plugin_supported: boolean;
+            /**
+             * Skill Md
+             * @description SKILL.md 原文（内置技能为渲染后的流程说明）
+             * @default
+             */
+            skill_md: string;
+            /** Skipped Files */
+            skipped_files?: components["schemas"]["AgentSkillSkippedFile"][];
+            /**
+             * Source Commit
+             * @description 安装时的提交 SHA（GitHub 来源）
+             */
+            source_commit?: string | null;
+            /**
+             * Source Path
+             * @description 仓库或 zip 内的 skill 子目录
+             */
+            source_path?: string | null;
+            /**
+             * Source Ref
+             * @description GitHub 分支/标签/提交
+             */
+            source_ref?: string | null;
+            /**
+             * Source Type
+             * @enum {string}
+             */
+            source_type: "builtin" | "github" | "zip_url" | "zip_upload" | "paste" | "md_upload" | "plugin_bundled";
+            /** Source Url */
+            source_url?: string | null;
+            /**
+             * Total Bytes
+             * @default 0
+             */
+            total_bytes: number;
+            /**
+             * Uninstallable
+             * @description 可以卸载（内置技能与插件内置 skill 为 false）
+             * @default true
+             */
+            uninstallable: boolean;
+            /**
+             * Updatable
+             * @description 是否可从原地址重新拉取更新
+             */
+            updatable: boolean;
+            /** Updated At */
+            updated_at?: string | null;
+            /**
+             * Upstream Changed
+             * @description 内置有新版本：插件升级带来了新的默认内容，而你保留着自己的修改
+             * @default false
+             */
+            upstream_changed: boolean;
+            /**
+             * Upstream Version
+             * @description 插件分发的默认版本号
+             */
+            upstream_version?: string | null;
+            /**
+             * User Modified
+             * @description 插件内置 skill 已被用户编辑
+             * @default false
+             */
+            user_modified: boolean;
+            /** Version */
+            version?: string | null;
+        };
+        /** AgentSkillEnablePatch */
+        AgentSkillEnablePatch: {
+            /** Enabled Agent */
+            enabled_agent?: boolean | null;
+            /** Enabled Plugins */
+            enabled_plugins?: boolean | null;
+        };
+        /** AgentSkillFileInfo */
+        AgentSkillFileInfo: {
+            /** Path */
+            path: string;
+            /** Size */
+            size: number;
+        };
+        /** AgentSkillFileOut */
+        AgentSkillFileOut: {
+            /** Content */
+            content: string;
+            /** Name */
+            name: string;
+            /** Path */
+            path: string;
+            /**
+             * Truncated
+             * @default false
+             */
+            truncated: boolean;
+        };
+        /** AgentSkillInstallIn */
+        AgentSkillInstallIn: {
+            /**
+             * Enabled Agent
+             * @default true
+             */
+            enabled_agent: boolean;
+            /**
+             * Enabled Plugins
+             * @default false
+             */
+            enabled_plugins: boolean;
+            /**
+             * Path
+             * @description 可选：仓库或 zip 内的 skill 子目录
+             */
+            path?: string | null;
+            /**
+             * Ref
+             * @description 可选：分支/标签/提交，覆盖链接里的分支
+             */
+            ref?: string | null;
+            /**
+             * Skill Md
+             * @description paste / md_upload：SKILL.md 全文
+             */
+            skill_md?: string | null;
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "github" | "zip_url" | "zip_upload" | "paste" | "md_upload";
+            /**
+             * Url
+             * @description GitHub 链接或 zip 下载链接
+             */
+            url?: string | null;
+            /**
+             * Zip Base64
+             * @description zip_upload：zip 文件的 base64（≤10MB）
+             */
+            zip_base64?: string | null;
+        };
+        /** AgentSkillLimits */
+        AgentSkillLimits: {
+            /** Agent Load Max Chars */
+            agent_load_max_chars: number;
+            /** Max Archive Bytes */
+            max_archive_bytes: number;
+            /** Max File Bytes */
+            max_file_bytes: number;
+            /** Max Files */
+            max_files: number;
+            /** Max Skill Bytes */
+            max_skill_bytes: number;
+            /** Plugin Load Max Chars */
+            plugin_load_max_chars: number;
+        };
+        /** AgentSkillListOut */
+        AgentSkillListOut: {
+            /** Items */
+            items: components["schemas"]["AgentSkillOut"][];
+            limits: components["schemas"]["AgentSkillLimits"];
+        };
+        /** AgentSkillOut */
+        AgentSkillOut: {
+            /**
+             * Builtin
+             * @description 内置领域技能：不可卸载，只能对系统 Agent 停用
+             */
+            builtin: boolean;
+            /**
+             * Bundled
+             * @description 随插件分发的内置 skill：不可卸载，可停用；编辑保存为覆盖层
+             * @default false
+             */
+            bundled: boolean;
+            /** Content Sha256 */
+            content_sha256?: string | null;
+            /** Description */
+            description: string;
+            /**
+             * Editable
+             * @description 可以直接编辑 SKILL.md
+             * @default false
+             */
+            editable: boolean;
+            /** Enabled Agent */
+            enabled_agent: boolean;
+            /** Enabled Plugins */
+            enabled_plugins: boolean;
+            /**
+             * File Count
+             * @default 0
+             */
+            file_count: number;
+            /** Installed At */
+            installed_at?: string | null;
+            /** License */
+            license?: string | null;
+            /** Name */
+            name: string;
+            /**
+             * Owner Plugin
+             * @description 内置 skill 所属插件
+             */
+            owner_plugin?: string | null;
+            /**
+             * Plugin Supported
+             * @description 是否可以提供给插件（内置技能为 false）
+             */
+            plugin_supported: boolean;
+            /** Skipped Files */
+            skipped_files?: components["schemas"]["AgentSkillSkippedFile"][];
+            /**
+             * Source Commit
+             * @description 安装时的提交 SHA（GitHub 来源）
+             */
+            source_commit?: string | null;
+            /**
+             * Source Path
+             * @description 仓库或 zip 内的 skill 子目录
+             */
+            source_path?: string | null;
+            /**
+             * Source Ref
+             * @description GitHub 分支/标签/提交
+             */
+            source_ref?: string | null;
+            /**
+             * Source Type
+             * @enum {string}
+             */
+            source_type: "builtin" | "github" | "zip_url" | "zip_upload" | "paste" | "md_upload" | "plugin_bundled";
+            /** Source Url */
+            source_url?: string | null;
+            /**
+             * Total Bytes
+             * @default 0
+             */
+            total_bytes: number;
+            /**
+             * Uninstallable
+             * @description 可以卸载（内置技能与插件内置 skill 为 false）
+             * @default true
+             */
+            uninstallable: boolean;
+            /**
+             * Updatable
+             * @description 是否可从原地址重新拉取更新
+             */
+            updatable: boolean;
+            /** Updated At */
+            updated_at?: string | null;
+            /**
+             * Upstream Changed
+             * @description 内置有新版本：插件升级带来了新的默认内容，而你保留着自己的修改
+             * @default false
+             */
+            upstream_changed: boolean;
+            /**
+             * Upstream Version
+             * @description 插件分发的默认版本号
+             */
+            upstream_version?: string | null;
+            /**
+             * User Modified
+             * @description 插件内置 skill 已被用户编辑
+             * @default false
+             */
+            user_modified: boolean;
+            /** Version */
+            version?: string | null;
+        };
+        /** AgentSkillSkippedFile */
+        AgentSkillSkippedFile: {
+            /** Path */
+            path: string;
+            /**
+             * Reason
+             * @description 跳过原因：binary / too_large / symlink / hidden / ignored_dir / ignored_file / outside
+             */
+            reason: string;
+        };
+        /** AgentSkillUnbound */
+        AgentSkillUnbound: {
+            /** Account Id */
+            account_id?: number | null;
+            /** Fields */
+            fields?: string[];
+            /** Plugin Key */
+            plugin_key: string;
+            /**
+             * Scope
+             * @enum {string}
+             */
+            scope: "global" | "account";
+        };
+        /** AgentSkillUninstallOut */
+        AgentSkillUninstallOut: {
+            /** Name */
+            name: string;
+            /** Unbound */
+            unbound?: components["schemas"]["AgentSkillUnbound"][];
+            /** Uninstalled */
+            uninstalled: boolean;
+        };
+        /** AgentSkillUpdateIn */
+        AgentSkillUpdateIn: {
+            /** Skill Md */
+            skill_md?: string | null;
+            /** Zip Base64 */
+            zip_base64?: string | null;
+        };
+        /** AgentSkillUpdateOut */
+        AgentSkillUpdateOut: {
+            /** Changed */
+            changed: boolean;
+            skill: components["schemas"]["AgentSkillOut"];
+        };
+        /** AgentSkillUpstreamOut */
+        AgentSkillUpstreamOut: {
+            /** Current Skill Md */
+            current_skill_md: string;
+            /**
+             * Diff
+             * @description unified diff：默认版本 → 当前版本
+             */
+            diff: string;
+            /** Name */
+            name: string;
+            /** Owner Plugin */
+            owner_plugin?: string | null;
+            /** Upstream Changed */
+            upstream_changed: boolean;
+            /** Upstream Skill Md */
+            upstream_skill_md: string;
+            /** Upstream Version */
+            upstream_version?: string | null;
+            /** User Modified */
+            user_modified: boolean;
         };
         /** AlembicStatus */
         AlembicStatus: {
@@ -15620,6 +16188,643 @@ export interface operations {
             };
             /** @description CSRF 校验失败或权限不足 */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description 服务器内部错误 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    list_agent_skills_api_agent_skills_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: {
+                auth_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentSkillListOut"];
+                };
+            };
+            /** @description 认证失败 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description 服务器内部错误 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    install_agent_skill_api_agent_skills_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: {
+                auth_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgentSkillInstallIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentSkillOut"];
+                };
+            };
+            /** @description 认证失败 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description CSRF 校验失败或权限不足 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description 服务器内部错误 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    get_agent_skill_api_agent_skills__name__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: {
+                auth_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentSkillDetailOut"];
+                };
+            };
+            /** @description 认证失败 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description 服务器内部错误 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    uninstall_agent_skill_api_agent_skills__name__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: {
+                auth_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentSkillUninstallOut"];
+                };
+            };
+            /** @description 认证失败 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description CSRF 校验失败或权限不足 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description 服务器内部错误 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    patch_agent_skill_api_agent_skills__name__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: {
+                auth_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgentSkillEnablePatch"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentSkillOut"];
+                };
+            };
+            /** @description 认证失败 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description CSRF 校验失败或权限不足 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description 服务器内部错误 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    edit_agent_skill_api_agent_skills__name__content_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: {
+                auth_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgentSkillContentIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentSkillOut"];
+                };
+            };
+            /** @description 认证失败 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description CSRF 校验失败或权限不足 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description 服务器内部错误 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    get_agent_skill_file_api_agent_skills__name__files__path__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+                path: string;
+            };
+            cookie?: {
+                auth_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentSkillFileOut"];
+                };
+            };
+            /** @description 认证失败 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description 服务器内部错误 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    keep_agent_skill_modified_api_agent_skills__name__keep_modified_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: {
+                auth_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentSkillOut"];
+                };
+            };
+            /** @description 认证失败 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description CSRF 校验失败或权限不足 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description 服务器内部错误 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    restore_agent_skill_default_api_agent_skills__name__restore_default_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: {
+                auth_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentSkillOut"];
+                };
+            };
+            /** @description 认证失败 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description CSRF 校验失败或权限不足 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description 服务器内部错误 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    update_agent_skill_api_agent_skills__name__update_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: {
+                auth_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgentSkillUpdateIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentSkillUpdateOut"];
+                };
+            };
+            /** @description 认证失败 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description CSRF 校验失败或权限不足 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description 服务器内部错误 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    get_agent_skill_upstream_api_agent_skills__name__upstream_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: {
+                auth_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentSkillUpstreamOut"];
+                };
+            };
+            /** @description 认证失败 */
+            401: {
                 headers: {
                     [name: string]: unknown;
                 };

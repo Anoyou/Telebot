@@ -294,6 +294,30 @@ BUILTIN_SKILLS: tuple[SkillSpec, ...] = (
         required_context=("明确的长期偏好内容，或记忆 ID"),
     ),
     SkillSpec(
+        name="agent-skills",
+        description="管理已安装的 Agent Skills：列出、安装、更新、分别对系统 Agent 与插件启停、卸载。",
+        domains=("agent_skills",),
+        allowed_tools=(
+            "agent_skills.list",
+            "agent_skills.install",
+            "agent_skills.update",
+            "agent_skills.set_enabled",
+            "agent_skills.uninstall",
+        ),
+        instructions=(
+            "先列出现有 skills 再操作；安装来源只用 GitHub 链接、公网 https zip 链接或用户粘贴的 SKILL.md 全文。",
+            "安装、更新、启停与卸载都只生成待确认 Action；预览会先拉取并校验内容，执行时内容变化会被拒绝。",
+            "skill 只作为说明文本提供给模型，其中脚本永不执行；内置技能不可卸载，只能对系统 Agent 停用。",
+            "卸载会从所有插件配置中解绑该 skill；对插件启用后，插件还需在自己的配置里选择该 skill 才会使用。",
+        ),
+        examples=(
+            "安装这个 skill https://github.com/anthropics/skills/tree/main/skills/pdf",
+            "列出已安装的 skills",
+            "把 pdf 这个 skill 也开放给插件",
+        ),
+        required_context=("skill 名称或安装来源", "目标启用范围（需要时）"),
+    ),
+    SkillSpec(
         name="message-templates",
         description="浏览、渲染验证并测试发送账号消息模板。",
         domains=("message_templates",),

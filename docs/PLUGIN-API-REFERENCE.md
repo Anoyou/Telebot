@@ -208,6 +208,12 @@ class PluginContext:
 - `ctx.ai.complete(..., web_search=True, web_search_context_size="low"|"medium"|"high")` 请求原生联网搜索：把 `web_search` 作为**工具**交给模型（Responses API，`tool_choice` 保持 auto，由模型自行决定是否搜索，不强制每次搜索）；OpenAI 官方 chat_completions Provider 按 `web_search_api_format` 临时切到 Responses。引用来源在 `AIResult.sources`。需要“该搜就搜”时请在系统提示里引导（并注入当前日期），不要用关键词强制。
 - `ctx.ai.complete(..., images=[bytes, ...])` 把图片交给支持图片输入的模型（最多 4 张、每张 ≤ 8MB），需要 `ai_vision` 权限；`ctx.ai.vision_enabled` 表示是否已授权。`await ctx.ai.fetch_bot_image(file_id)` 用当前账号交互 Bot 下载用户发来的图片（`message.media.file_id` 或 `reply_to.media.file_id`），同样需要 `ai_vision`，不落盘、不返回路径或 Token。
 - 请求的能力（`web_search` / `images`）在所选 Provider 及 fallback 链上都不支持时抛 `AICapabilityError`（`AIUnavailableError` 子类），在发出网络请求前判定；插件可去掉该能力降级重试。
+- `ctx.skills`：在 `permissions` 声明 `agent_skills` 后注入（旧版本平台为 `None`，插件需降级）。只读获取 **Agent Skills**（Anthropic `SKILL.md` 目录格式）文本，**从不执行**其中脚本：
+  - `await ctx.skills.list(names=None)` 返回管理员已「对插件启用」的已安装 skill（`name` / `description` / `version` / `files`）；传 `names` 时只返回其中仍可用的，通常传插件配置里的多选值。
+  - `await ctx.skills.load(name, max_chars=None)` 返回 SKILL.md 正文（去掉 front matter，默认截断 8000 字符、上限 16000）；`await ctx.skills.read_file(name, path, max_chars=None)` 读取附属文本文件。不可用时抛 `PluginSkillUnavailable`（`LookupError` 子类）。
+  - `await ctx.skills.bundled(max_chars=None)` 返回**本插件内置**且仍对插件启用的 skill 正文：插件目录 `skills/<name>/SKILL.md` 会在插件加载时由平台登记为内置 skill（默认只对插件启用、不可卸载、可停用）；管理员在 App/Web 编辑后保存为覆盖层，插件升级不会覆盖，只标记「内置有新版本」并允许查看差异、恢复默认或保留修改。
+  - 配置里让管理员选择 skills：数组字段声明 `"x-ui-widget": "agent-skill-multi-select"`（`items.type=string`，可选字段、不进 `required`）。卸载 skill 时平台会从所有插件配置的这类字段中移除该名称。
+  - 推荐渐进式披露：先只把 `name + description` 交给模型判断要不要用（`ctx.ai.complete` 不支持自定义工具时用两步法），再 `load` 需要的正文拼进最终请求；面向访客时只注入文本并控制长度。
 
 标准链路示例：
 

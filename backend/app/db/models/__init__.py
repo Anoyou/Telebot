@@ -4,6 +4,7 @@ from ..apns_events import install_listeners
 from .account import Account, HumanizeConfig, Proxy
 from .account_bot import AccountBot, AccountBotUser
 from .action_event import ActionEvent
+from .agent_skill import AgentSkill, AgentSkillFile
 from .command import AccountCommandLink, CommandTemplate, LLMProvider, LLMProviderKey
 from .feature import AccountFeature, Feature
 from .ignored_peer import IgnoredPeer
@@ -37,6 +38,8 @@ __all__ = [
     "AccountBotUser",
     "AccountCommandLink",
     "ActionEvent",
+    "AgentSkill",
+    "AgentSkillFile",
     "AccountFeature",
     "AuditLog",
     "CommandTemplate",
