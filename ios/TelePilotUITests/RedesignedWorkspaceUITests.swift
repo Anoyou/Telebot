@@ -7,7 +7,7 @@ final class RedesignedWorkspaceUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["--ui-testing", "-AppleLanguages", "(zh-Hans)", "-AppleLocale", "zh_CN"]
         app.launch()
-        XCTAssertTrue(app.tabBars.buttons[tab].waitForExistence(timeout: 15))
+        XCTAssertTrue(app.tabBars.buttons[tab].waitForExistence(timeout: 45))
         app.tabBars.buttons[tab].tap()
         return app
     }

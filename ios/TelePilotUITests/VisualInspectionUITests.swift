@@ -9,7 +9,7 @@ final class VisualInspectionUITests: XCTestCase {
         app = XCUIApplication()
         app.launchArguments = ["--ui-testing", "-AppleLanguages", "(zh-Hans)", "-AppleLocale", "zh_CN"]
         app.launch()
-        XCTAssertTrue(app.tabBars.buttons["概览"].waitForExistence(timeout: 15))
+        XCTAssertTrue(app.tabBars.buttons["概览"].waitForExistence(timeout: 45))
         app.tabBars.buttons["概览"].tap()
     }
 
@@ -88,7 +88,7 @@ final class VisualInspectionUITests: XCTestCase {
 
         app.terminate()
         app.launch()
-        XCTAssertTrue(app.tabBars.buttons["AI"].waitForExistence(timeout: 15))
+        XCTAssertTrue(app.tabBars.buttons["AI"].waitForExistence(timeout: 45))
         app.tabBars.buttons["AI"].tap()
         XCTAssertTrue(app.segmentedControls.buttons["用量"].waitForExistence(timeout: 10))
         app.segmentedControls.buttons["用量"].tap()

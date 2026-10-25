@@ -7,7 +7,7 @@ final class ManagementUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["--ui-testing", "-AppleLanguages", "(zh-Hans)", "-AppleLocale", "zh_CN"]
         app.launch()
-        XCTAssertTrue(app.tabBars.buttons["更多"].waitForExistence(timeout: 15))
+        XCTAssertTrue(app.tabBars.buttons["更多"].waitForExistence(timeout: 45))
         app.tabBars.buttons["更多"].tap()
         return app
     }

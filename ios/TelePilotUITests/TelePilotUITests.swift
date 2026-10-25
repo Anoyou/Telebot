@@ -27,7 +27,7 @@ final class TelePilotUITests: XCTestCase {
 
     func testOverviewAndAccountActions() {
         let app = launch()
-        XCTAssertTrue(app.buttons["overview.refresh"].waitForExistence(timeout: 15))
+        XCTAssertTrue(app.buttons["overview.refresh"].waitForExistence(timeout: 45))
         capture("概览", app: app)
 
         app.tabBars.buttons["更多"].tap()
@@ -111,7 +111,7 @@ final class TelePilotUITests: XCTestCase {
     func testOfflineKeepsSessionAndAllowsRetry() {
         let app = launch(["--ui-test-offline"])
         let refresh = app.buttons["overview.refresh"]
-        XCTAssertTrue(refresh.waitForExistence(timeout: 15))
+        XCTAssertTrue(refresh.waitForExistence(timeout: 45))
         XCTAssertFalse(app.secureTextFields["login.password"].exists)
         capture("离线状态", app: app)
         refresh.tap()
@@ -121,7 +121,7 @@ final class TelePilotUITests: XCTestCase {
 
     func testSettingsPresentation() {
         let app = launch()
-        XCTAssertTrue(app.buttons["overview.refresh"].waitForExistence(timeout: 15))
+        XCTAssertTrue(app.buttons["overview.refresh"].waitForExistence(timeout: 45))
         app.tabBars.buttons["更多"].tap()
         let settings = app.buttons["more.settings"]
         XCTAssertTrue(settings.waitForExistence(timeout: 10))
@@ -135,7 +135,7 @@ final class TelePilotUITests: XCTestCase {
 
     func testUnknownStatusDisablesMutations() {
         let app = launch()
-        XCTAssertTrue(app.buttons["overview.refresh"].waitForExistence(timeout: 15))
+        XCTAssertTrue(app.buttons["overview.refresh"].waitForExistence(timeout: 45))
         app.tabBars.buttons["更多"].tap()
         let accounts = app.buttons["more.accounts"]
         XCTAssertTrue(accounts.waitForExistence(timeout: 10))
@@ -152,7 +152,7 @@ final class TelePilotUITests: XCTestCase {
 
     func testUncertainMutationRequiresRefreshBeforeRetry() {
         let app = launch(["--ui-test-mutation-uncertain"])
-        XCTAssertTrue(app.buttons["overview.refresh"].waitForExistence(timeout: 15))
+        XCTAssertTrue(app.buttons["overview.refresh"].waitForExistence(timeout: 45))
         app.tabBars.buttons["更多"].tap()
         let accounts = app.buttons["more.accounts"]
         XCTAssertTrue(accounts.waitForExistence(timeout: 10))
@@ -187,14 +187,14 @@ final class TelePilotUITests: XCTestCase {
 
     func testExpiredSessionClearsAccountViews() {
         let app = launch(["--ui-test-session-expired"])
-        XCTAssertTrue(app.secureTextFields["login.password"].waitForExistence(timeout: 15))
+        XCTAssertTrue(app.secureTextFields["login.password"].waitForExistence(timeout: 45))
         XCTAssertFalse(app.buttons["account.row.1"].exists)
         XCTAssertFalse(app.buttons["more.accounts"].exists)
     }
 
     func testCleanupFailureBlocksLoginUntilRetried() {
         let app = launch(["--ui-test-cleanup-failure"])
-        XCTAssertTrue(app.buttons["overview.refresh"].waitForExistence(timeout: 15))
+        XCTAssertTrue(app.buttons["overview.refresh"].waitForExistence(timeout: 45))
         app.tabBars.buttons["更多"].tap()
         let settings = app.buttons["more.settings"]
         XCTAssertTrue(settings.waitForExistence(timeout: 10))
@@ -214,7 +214,7 @@ final class TelePilotUITests: XCTestCase {
 
     func testRejectedResumeStillReadsChangedServerState() {
         let app = launch(["--ui-test-resume-rejected"])
-        XCTAssertTrue(app.buttons["overview.refresh"].waitForExistence(timeout: 15))
+        XCTAssertTrue(app.buttons["overview.refresh"].waitForExistence(timeout: 45))
         app.tabBars.buttons["更多"].tap()
         let accounts = app.buttons["more.accounts"]
         XCTAssertTrue(accounts.waitForExistence(timeout: 10))
@@ -244,7 +244,7 @@ final class TelePilotUITests: XCTestCase {
     func testInterfaceLockCancelAndSuccess() {
         let app = launch(["--ui-test-lock", "--ui-test-lock-cancel"])
         let cover = app.descendants(matching: .any)["lock.cover"].firstMatch
-        XCTAssertTrue(cover.waitForExistence(timeout: 15))
+        XCTAssertTrue(cover.waitForExistence(timeout: 45))
         let unlock = app.buttons["lock.unlock"]
         XCTAssertTrue(unlock.waitForExistence(timeout: 10), app.debugDescription)
         unlock.tap()
@@ -264,7 +264,7 @@ final class TelePilotUITests: XCTestCase {
 
     func testGlobalSearchAndCustomizableOverview() {
         let app = launch()
-        XCTAssertTrue(app.buttons["overview.refresh"].waitForExistence(timeout: 15))
+        XCTAssertTrue(app.buttons["overview.refresh"].waitForExistence(timeout: 45))
         app.buttons["overview.search"].tap()
         let search = app.searchFields.firstMatch
         XCTAssertTrue(search.waitForExistence(timeout: 10))
@@ -276,7 +276,7 @@ final class TelePilotUITests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["account.status"].firstMatch.waitForExistence(timeout: 10))
         app.terminate()
         app.launch()
-        XCTAssertTrue(app.buttons["overview.refresh"].waitForExistence(timeout: 15))
+        XCTAssertTrue(app.buttons["overview.refresh"].waitForExistence(timeout: 45))
 
         let customize = app.buttons["overview.customizeButton"]
         reveal(customize, app: app)
@@ -295,7 +295,7 @@ final class TelePilotUITests: XCTestCase {
 
     func testOverviewSurfacesItemsThatNeedAttention() {
         let app = launch()
-        XCTAssertTrue(app.buttons["overview.refresh"].waitForExistence(timeout: 15))
+        XCTAssertTrue(app.buttons["overview.refresh"].waitForExistence(timeout: 45))
         let relogin = app.buttons["overview.attention.account-3"]
         XCTAssertTrue(relogin.waitForExistence(timeout: 10))
         XCTAssertTrue(app.buttons["overview.attention.plugin-content_assistant"].exists)

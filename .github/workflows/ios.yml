@@ -93,6 +93,21 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             2>&1 | tee "$RESULTS_DIR/build.log" | xcbeautify --renderer github-actions
 
+      - name: 预热模拟器
+        # 刚启动的模拟器前几分钟无障碍快照和首次启动都很慢（曾出现前 3 个用例停在“连接 TelePilot…”
+        # 超时、UI 查询超时），先安装并以 UI 测试参数冷启动一次 App，再开始计时的 UI 测试。
+        run: |
+          UDID="${{ steps.simulator.outputs.udid }}"
+          APP=$(find "$DERIVED_DATA/Build/Products" -maxdepth 2 -name TelePilot.app -path '*iphonesimulator*' | head -n 1)
+          echo "预热 App：$APP"
+          if [ -n "$APP" ]; then
+            xcrun simctl install "$UDID" "$APP" || true
+            xcrun simctl launch "$UDID" com.telepilot.personal --ui-testing -AppleLanguages "(zh-Hans)" -AppleLocale zh_CN || true
+            sleep 45
+            xcrun simctl terminate "$UDID" com.telepilot.personal || true
+          fi
+          sleep 15
+
       - name: 运行 UI 测试（fixture 模式）
         run: |
           set -o pipefail

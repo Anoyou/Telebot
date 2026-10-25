@@ -12,7 +12,7 @@ final class WorkspaceUITests: XCTestCase {
 
     func testDockKeepsPrimarySectionsAndAgentEntry() {
         let app = launch()
-        XCTAssertTrue(app.tabBars.buttons["概览"].waitForExistence(timeout: 15))
+        XCTAssertTrue(app.tabBars.buttons["概览"].waitForExistence(timeout: 45))
         XCTAssertTrue(app.tabBars.buttons["插件"].exists)
         XCTAssertTrue(app.tabBars.buttons["AI"].exists)
         XCTAssertTrue(app.tabBars.buttons["更多"].exists)
@@ -22,7 +22,7 @@ final class WorkspaceUITests: XCTestCase {
     func testMoreSectionKeepsAccountsAndSettingsReachable() {
         let app = launch()
         let more = app.tabBars.buttons["更多"]
-        XCTAssertTrue(more.waitForExistence(timeout: 15))
+        XCTAssertTrue(more.waitForExistence(timeout: 45))
         more.tap()
         XCTAssertTrue(app.buttons["more.accounts"].waitForExistence(timeout: 10))
         XCTAssertTrue(app.buttons["more.settings"].exists)
@@ -32,7 +32,7 @@ final class WorkspaceUITests: XCTestCase {
     func testPluginScreenUsesTwoColumnCards() {
         let app = launch()
         let plugins = app.tabBars.buttons["插件"]
-        XCTAssertTrue(plugins.waitForExistence(timeout: 15))
+        XCTAssertTrue(plugins.waitForExistence(timeout: 45))
         plugins.tap()
         XCTAssertTrue(app.buttons["plugin.card.auto_reply"].waitForExistence(timeout: 10))
         XCTAssertTrue(app.buttons["plugins.category"].exists)

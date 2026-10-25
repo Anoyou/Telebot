@@ -8,7 +8,7 @@ final class AssistantUITests: XCTestCase {
         app.launchArguments = ["--ui-testing", "-AppleLanguages", "(zh-Hans)", "-AppleLocale", "zh_CN"]
         app.launch()
         let dock = app.tabBars.buttons["Agent"]
-        XCTAssertTrue(dock.waitForExistence(timeout: 15))
+        XCTAssertTrue(dock.waitForExistence(timeout: 45))
         dock.tap()
         XCTAssertTrue(app.descendants(matching: .any)["assistant.composer"].firstMatch.waitForExistence(timeout: 10))
         return app
