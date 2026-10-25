@@ -31,4 +31,3 @@ export function sourceLabel(item: Pick<AgentSkill, "source_type" | "owner_plugin
       return item.source_type;
   }
 }
-
