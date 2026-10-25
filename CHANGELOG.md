@@ -25,6 +25,15 @@
 
 ## [Unreleased]
 
+### Agent Skills
+
+- 新增 Agent Skills（SKILL.md 规范）安装与管理：新表 `agent_skill` / `agent_skill_file`（迁移 `0064_agent_skills`），REST `/api/agent-skills` 提供列表、详情、文件读取、安装、从源地址更新、启停（`PATCH`，对系统 Agent / 对插件分别开关）、编辑 SKILL.md（`PUT /content`）、与默认版本对比（`/upstream`）、恢复默认、保留我的修改与卸载。
+- 安装来源：GitHub 仓库/目录链接（可指定分支与子目录，记录提交 SHA）、zip 下载链接、上传 zip（base64，≤10 MB）、粘贴或上传 SKILL.md；校验 front matter（name / description）、路径安全、文件数与大小上限，二进制、隐藏、过大文件与符号链接跳过并在结果中列出；同名、与内置重名、改名等冲突返回明确错误码。
+- System Agent 渐进加载：系统提示只列出已启用 skill 的名称与用途，需要时通过 `skills.load` / `skills.read_file` 读取正文与附属文件；管理员可让 Agent 经确认后调用 `agent_skills.*` 工具安装、启停、更新或卸载。skill 中的脚本从不执行。
+- 插件接口 `ctx.skills`（权限 `agent_skills`）：`list` / `load` / `read_file` 只读取管理员“对插件启用”的已安装 skill；`bundled()` 返回插件自带的内置 skill（`skills/<name>/SKILL.md`）。插件加载时平台自动登记内置 skill：默认只对插件启用、不可卸载可停用；编辑保存为覆盖层，插件升级不覆盖用户修改，只标记“内置有新版本”。新增配置控件 `x-ui-widget: agent-skill-multi-select`，卸载 skill 时自动从插件配置中移除。
+- Web「助手 → Skills」：列表、详情、编辑、差异对比、恢复默认/保留修改、安装与卸载；插件配置页支持 skill 多选字段。`docs/PLUGIN-API-REFERENCE.md` 补充 `ctx.skills` 与内置 skill 说明，OpenAPI 与前端类型已再生成。
+- iOS：新增 Skills 管理（助手菜单与 AI 配置区入口）、安装 sheet（GitHub / zip 链接、粘贴、选择 .zip 或 .md 文件）、编辑、差异 / 恢复默认 / 保留我的修改、卸载确认挂在触发按钮上、服务器错误码中文映射；插件配置支持 `agent-skill-multi-select` 多选字段；插件权限说明新增 `agent_skills`。
+
 ### 部署与更新
 
 - 修复生产更新在目标为合并提交时找错预构建镜像：`scripts/prod-update.sh` 改为沿目标分支 first-parent 历史确定镜像检查点，不再落到 PR 分支上从未单独推送（因而没有镜像）的提交，避免报“目标 web 镜像不存在”。

@@ -43,7 +43,7 @@ struct AssistantView: View {
     }
 
     private enum AssistantPanel: String, Identifiable {
-        case sessions, settings, tasks, memory, inbox, trace
+        case sessions, settings, tasks, memory, skills, inbox, trace
         var id: String { rawValue }
     }
 
@@ -80,6 +80,7 @@ struct AssistantView: View {
                                 Button("任务与队列", systemImage: "list.bullet.rectangle") { panel = .tasks }
                                 Button("待确认操作", systemImage: "checkmark.shield") { panel = .inbox }
                                 Button("长期记忆", systemImage: "brain") { panel = .memory }
+                                Button("Skills", systemImage: "sparkles.rectangle.stack") { panel = .skills }
                                 Button("运行轨迹", systemImage: "point.3.connected.trianglepath.dotted") { panel = .trace }.disabled(store.runID == nil)
                             } label: { Image(systemName: "ellipsis.circle") }
                             .accessibilityLabel("助手菜单")
@@ -115,6 +116,7 @@ struct AssistantView: View {
             case .settings: AssistantSessionSettingsView(store: store)
             case .tasks: AssistantTasksView(sessionID: store.sessionID)
             case .memory: AssistantMemoryView()
+            case .skills: AgentSkillsSheet()
             case .inbox: AssistantInboxView()
             case .trace:
                 if let runID = store.runID { AssistantTraceView(runID: runID) }

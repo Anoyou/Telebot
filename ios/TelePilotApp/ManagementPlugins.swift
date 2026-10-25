@@ -1808,6 +1808,8 @@ struct ManagementPluginConfigView: View {
                 LabeledContent {
                     Text(PluginConfigFormat.text(snapshot?.values[field.key], secret: field.secret)).foregroundStyle(.secondary)
                 } label: { Label(field.label, systemImage: field.symbol) }
+            } else if !field.secret, AgentSkillMultiSelectField.matches(field.spec) {
+                AgentSkillMultiSelectField(title: field.label, value: binding(field.key))
             } else if !field.secret, let widget = PluginSelectWidget(spec: field.spec) {
                 PluginSelectWidgetField(widget: widget, title: field.label, value: binding(field.key), draft: draft,
                                         stored: snapshot?.values ?? [:], providers: llmProviders, loading: llmLoading, loadError: llmError,

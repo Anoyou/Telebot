@@ -113,6 +113,53 @@ actor FixtureService: AppServing {
     }
 
     func logout() async throws {}
+    /// Agent Skills 界面测试数据：一个已安装 skill、一个插件内置（有新默认版本）、一个 TelePilot 内置。
+    static func agentSkillFixture(_ path: String, method: String, body: JSONValue?) -> JSONValue {
+        let installed: JSONValue = [
+            "name": "pdf-helper", "description": "拆分、合并与提取 PDF 文本的操作说明。", "builtin": false, "bundled": false,
+            "version": "1.2.0", "editable": false, "uninstallable": true, "user_modified": false, "upstream_changed": false,
+            "source_type": "github", "source_url": "https://github.com/example/skills/tree/main/pdf-helper", "source_ref": "main",
+            "enabled_agent": true, "enabled_plugins": true, "plugin_supported": true, "updatable": true,
+            "file_count": 2, "total_bytes": 5120, "skipped_files": [], "installed_at": "2026-10-25 20:00"]
+        let bundled: JSONValue = [
+            "name": "group-helper", "description": "群聊答疑助手的能力与行为准则。", "builtin": false, "bundled": true,
+            "owner_plugin": "interaction-ai-chat", "editable": true, "uninstallable": false, "user_modified": true,
+            "upstream_changed": true, "upstream_version": "0.4.0", "source_type": "plugin_bundled",
+            "enabled_agent": false, "enabled_plugins": true, "plugin_supported": true, "updatable": false,
+            "file_count": 1, "total_bytes": 2048, "skipped_files": []]
+        let builtin: JSONValue = [
+            "name": "telepilot-accounts", "description": "账号巡检与暂停恢复流程。", "builtin": true, "bundled": false,
+            "editable": false, "uninstallable": false, "source_type": "builtin", "enabled_agent": true, "enabled_plugins": false,
+            "plugin_supported": false, "updatable": false, "file_count": 0, "total_bytes": 0, "skipped_files": []]
+        let all = [installed, bundled, builtin]
+        if path == "/api/agent-skills" {
+            if method == "POST" { return installed }
+            return ["items": .array(all), "limits": ["max_files": 64, "max_file_bytes": 262_144, "max_skill_bytes": 1_048_576,
+                                                       "max_archive_bytes": 10_485_760, "agent_load_max_chars": 24_000, "plugin_load_max_chars": 6000]]
+        }
+        let rest = path.dropFirst("/api/agent-skills/".count)
+        let name = String(rest.split(separator: "/").first ?? "")
+        let item = all.first { $0["name"]?.stringValue == name } ?? installed
+        if rest.hasSuffix("/upstream") {
+            return ["name": .string(name), "owner_plugin": "interaction-ai-chat", "user_modified": true, "upstream_changed": true,
+                    "upstream_version": "0.4.0", "current_skill_md": "---\nname: group-helper\n---\n我的版本",
+                    "upstream_skill_md": "---\nname: group-helper\n---\n默认版本",
+                    "diff": "--- 默认版本\n+++ 当前版本\n@@ -3 +3 @@\n-默认版本\n+我的版本"]
+        }
+        if rest.contains("/files/") { return ["name": .string(name), "path": "reference.md", "content": "参考资料示例。", "truncated": false] }
+        if rest.hasSuffix("/update") { return ["skill": item, "changed": false] }
+        if method == "DELETE" { return ["name": .string(name), "uninstalled": true, "unbound": []] }
+        if method == "PATCH", var object = item.objectValue {
+            for (key, value) in body?.objectValue ?? [:] { object[key] = value }
+            return .object(object)
+        }
+        guard var object = item.objectValue else { return item }
+        object["skill_md"] = .string("---\nname: \(name)\ndescription: 示例\n---\n\n# \(name)\n\n界面测试数据。")
+        let files: JSONValue = name == "pdf-helper" ? [["path": "reference.md", "size": 1024]] : []
+        object["files"] = files
+        return .object(object)
+    }
+
     func request(path: String, method: String, body: JSONValue?) async throws -> JSONValue {
         try checkConnection()
         let clean = String(path.split(separator: "?").first ?? "")
@@ -261,6 +308,9 @@ actor FixtureService: AppServing {
                 accountFeatureEnabled[accountID, default: [:]][featureKey] = enabled
             }
             return ["feature_key": .string(String(match.2)), "enabled": body?["enabled"] ?? false, "state": body?["enabled"]?.boolValue == true ? "pending" : "stopped", "config": [:]]
+        }
+        if clean == "/api/agent-skills" || clean.hasPrefix("/api/agent-skills/") {
+            return Self.agentSkillFixture(clean, method: method, body: body)
         }
         if clean == "/api/commands/llm-providers" && method == "GET" {
             return [

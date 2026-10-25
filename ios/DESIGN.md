@@ -42,6 +42,7 @@
 | 服务器更新面板 | 当前版本 `shippingbox`、最新版本 `sparkles`、更新通道 `arrow.triangle.branch`、选择通道 `arrow.left.arrow.right`、Git 远端 `server.rack`、应用更新 `arrow.down.to.line.circle`、自动检查 `clock.arrow.2.circlepath`、检查频率 `timer` |
 | 插件中心 | 选择配置的账号 `person.crop.circle.badge.checkmark`、分类筛选 `line.3.horizontal.decrease.circle` |
 | 助手 | 本轮详情 `chart.bar.doc.horizontal`、工具调用 `wrench.and.screwdriver` |
+| Skills | Skills 入口 `sparkles.rectangle.stack`、安装 `plus`／`square.and.arrow.down`、编辑 SKILL.md `square.and.pencil`、查看内容 `doc.text`、与默认版本差异 `plus.forwardslash.minus`、恢复默认 `arrow.uturn.backward`、保留我的修改 `checkmark.circle`、从源地址更新 `arrow.down.circle`、卸载 `trash`、对系统 Agent 启用 `sparkles`、对插件启用 `puzzlepiece.extension`；来源：TelePilot 内置 `shippingbox`、插件内置 `puzzlepiece.extension`、GitHub `chevron.left.forwardslash.chevron.right`、其它 `doc.text` |
 
 新增页面沿用上表；表中没有的概念先在本节补充符号再使用，避免同一含义出现多个图标。
 
