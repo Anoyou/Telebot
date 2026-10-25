@@ -25,6 +25,8 @@
 
 ## [Unreleased]
 
+## [0.106.0-beta.1] - 2026-10-26 · minor（次版本预发布） · Agent Skills、插件 AI 能力与配置表单
+
 ### Agent Skills
 
 - 新增 Agent Skills（SKILL.md 规范）安装与管理：新表 `agent_skill` / `agent_skill_file`（迁移 `0064_agent_skills`），REST `/api/agent-skills` 提供列表、详情、文件读取、安装、从源地址更新、启停（`PATCH`，对系统 Agent / 对插件分别开关）、编辑 SKILL.md（`PUT /content`）、与默认版本对比（`/upstream`）、恢复默认、保留我的修改与卸载。
