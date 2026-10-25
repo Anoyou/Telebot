@@ -12,13 +12,52 @@ final class ManagementUITests: XCTestCase {
         return app
     }
 
-    /// 服务器更新面板以 medium 高度的 sheet 呈现。对整个 App 快速上滑会带惯性滚过目标行，
-    /// 甚至在惯性未停时点击而丢失点击；这里只在 sheet 内的列表上慢速逐段上滑，直到目标可点。
-    private func scrollUpdateSheet(to element: XCUIElement, in app: XCUIApplication, attempts: Int = 10) {
-        let list = app.otherElements["update.sheet"].collectionViews.firstMatch
+    /// 服务器更新面板以 medium 高度的 sheet 呈现，iOS 26 起内联导航栏是悬浮在列表之上的玻璃层，
+    /// 列表行可以滚到导航栏下面：此时元素仍 exists/isHittable，但点击中心会落在导航栏上而丢失
+    /// （iOS 27 上“应用更新”曾停在 y≈420–490、导航栏 430–482 处，点击后确认弹窗没有出现）。
+    /// 这里按帧判断：只有目标整行落在导航栏下沿与列表下沿之间才算到位；否则按目标与可见区中线的
+    /// 距离做“按住—拖动—停留”的受控拖动（无惯性），目标被导航栏遮住时向下拖、在下方或尚未加载时向上拖。
+    private func scrollUpdateSheet(to element: XCUIElement, in app: XCUIApplication, attempts: Int = 14) {
+        let sheet = app.otherElements["update.sheet"]
+        let list = sheet.collectionViews.firstMatch
         XCTAssertTrue(list.waitForExistence(timeout: 10))
-        for _ in 0..<attempts where !(element.exists && element.isHittable) {
-            list.swipeUp(velocity: .slow)
+        let bar = sheet.navigationBars.firstMatch
+        for _ in 0..<attempts {
+            let listFrame = list.frame
+            let top = (bar.exists ? max(listFrame.minY, bar.frame.maxY) : listFrame.minY) + 4
+            let bottom = listFrame.maxY - 4
+            let span = bottom - top
+            guard span > 40 else { return }
+            var dy = -span * 0.5
+            if element.exists {
+                let frame = element.frame
+                if frame.minY >= top && frame.maxY <= bottom {
+                    if element.isHittable { return }
+                    Thread.sleep(forTimeInterval: 0.3)
+                    continue
+                }
+                dy = (top + span / 2) - frame.midY
+                dy = max(-span * 0.6, min(span * 0.6, dy))
+                if abs(dy) < 24 { dy = dy < 0 ? -24 : 24 }
+            }
+            let origin = list.coordinate(withNormalizedOffset: CGVector(dx: 0, dy: 0))
+            let startY = dy < 0 ? bottom - span * 0.15 : top + span * 0.15
+            let start = origin.withOffset(CGVector(dx: listFrame.width / 2, dy: startY - listFrame.minY))
+            let end = start.withOffset(CGVector(dx: 0, dy: dy))
+            start.press(forDuration: 0.1, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0.4)
+        }
+    }
+
+    /// 断言目标整行位于 sheet 可见区（导航栏下沿以下），点击不会被悬浮导航栏截走。
+    private func assertVisibleInUpdateSheet(_ element: XCUIElement, in app: XCUIApplication,
+                                            file: StaticString = #filePath, line: UInt = #line) {
+        let sheet = app.otherElements["update.sheet"]
+        let bar = sheet.navigationBars.firstMatch
+        XCTAssertTrue(element.exists, "\(element) 不存在", file: file, line: line)
+        XCTAssertTrue(element.isHittable, "\(element) 不可点", file: file, line: line)
+        if bar.exists {
+            XCTAssertGreaterThanOrEqual(element.frame.minY, bar.frame.maxY,
+                                        "\(element) 仍被导航栏遮挡", file: file, line: line)
         }
     }
 
@@ -75,6 +114,7 @@ final class ManagementUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["0.105.0-beta.1"].exists)
         let apply = app.buttons["update.apply"]
         scrollUpdateSheet(to: apply, in: app)
+        assertVisibleInUpdateSheet(apply, in: app)
         apply.tap()
         XCTAssertTrue(app.buttons["update.confirm"].firstMatch.waitForExistence(timeout: 10))
         let cancel = app.buttons["取消"].firstMatch
@@ -113,6 +153,7 @@ final class ManagementUITests: XCTestCase {
         let apply = app.buttons["update.apply"]
         scrollUpdateSheet(to: apply, in: app)
         XCTAssertTrue(apply.waitForExistence(timeout: 10))
+        assertVisibleInUpdateSheet(apply, in: app)
         apply.tap()
         let confirm = app.buttons["update.confirm"].firstMatch
         XCTAssertTrue(confirm.waitForExistence(timeout: 10))
