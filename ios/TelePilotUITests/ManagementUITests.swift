@@ -112,9 +112,10 @@ final class ManagementUITests: XCTestCase {
         XCTAssertTrue(entry.waitForExistence(timeout: 10))
         for _ in 0..<4 where !entry.isHittable { app.swipeUp() }
         entry.tap()
+        XCTAssertTrue(app.navigationBars["App 更新日志"].waitForExistence(timeout: 10))
+        XCTAssertFalse(app.descendants(matching: .any)["changelog.unavailable"].exists)
         XCTAssertTrue(app.descendants(matching: .any)["changelog.list"].firstMatch.waitForExistence(timeout: 10))
         XCTAssertTrue(app.staticTexts["changelog.current"].firstMatch.waitForExistence(timeout: 5))
-        XCTAssertFalse(app.staticTexts["无法读取更新日志"].exists)
         let oldest = app.staticTexts["首个原生客户端与 APNs"]
         for _ in 0..<12 where !oldest.exists { app.swipeUp() }
         XCTAssertTrue(oldest.exists)

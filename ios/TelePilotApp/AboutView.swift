@@ -147,18 +147,18 @@ struct AppChangelogView: View {
                         } header: {
                             ReleaseHeader(release: release)
                         }
-                        .accessibilityIdentifier("changelog.release.\(release.version)")
                     }
                 }
                 .accessibilityIdentifier("changelog.list")
             } else {
                 ContentUnavailableView("无法读取更新日志", systemImage: "doc.questionmark",
                                        description: Text("此安装包未包含 App 更新日志。"))
+                    .accessibilityIdentifier("changelog.unavailable")
             }
         }
+        // 不在外层 Group 上设 accessibilityIdentifier：它会覆盖列表与“当前版本”标记各自的标识。
         .navigationTitle("App 更新日志")
         .navigationBarTitleDisplayMode(.inline)
-        .accessibilityIdentifier("changelog.screen")
     }
 
     private static func inline(_ text: String) -> AttributedString {
