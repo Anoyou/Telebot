@@ -324,3 +324,71 @@ def test_dotfile_and_unicode_docs_are_not_misclassified_as_runtime(tmp_path: Pat
     assert plan.changed_files == [".env.example", "docs/审查.md"]
     assert plan.components == ["docs_only"]
     assert plan.requires_full_update is False
+
+
+def test_ios_client_changes_have_no_server_runtime_impact() -> None:
+    plan = classify_changed_files(
+        [
+            "ios/TelePilotApp/OverviewView.swift",
+            "ios/TelePilotCore/scripts/sync-openapi.py",
+            "ios/TelePilotUITests/ManagementUITests.swift",
+            "ios/project.yml",
+            "ios/scripts/build-unsigned.sh",
+            "ios/TelePilot.xcodeproj/project.pbxproj",
+        ]
+    )
+
+    assert plan.requires_full_update is False
+    assert plan.services == []
+    assert plan.rebuild_services == []
+    assert plan.file_sync_services == []
+    assert plan.reasons == []
+
+
+def _git(root: Path, *args: str) -> str:
+    return subprocess.run(
+        ["git", *args], cwd=root, check=True, capture_output=True, text=True
+    ).stdout.strip()
+
+
+def _image_checkpoint(root: Path, target: str) -> str:
+    script = Path(__file__).resolve().parents[3] / "scripts" / "prod-update.sh"
+    source = script.read_text(encoding="utf-8")
+    start = source.index("image_checkpoint_commit() {")
+    end = source.index("\n}\n", start) + 3
+    function = source[start:end]
+    return subprocess.run(
+        ["bash", "-c", f'{function}\nTARGET_COMMIT="$1"\nimage_checkpoint_commit', "_", target],
+        cwd=root,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+
+
+def test_image_checkpoint_uses_merge_commit_pushed_to_branch(tmp_path: Path) -> None:
+    root = tmp_path / "repo"
+    root.mkdir()
+    _git(root, "init", "-q", "-b", "Beta")
+    _git(root, "config", "user.email", "test@example.com")
+    _git(root, "config", "user.name", "Test")
+    (root / "app.py").write_text("v = 1\n", encoding="utf-8")
+    _git(root, "add", ".")
+    _git(root, "commit", "-qm", "base")
+    _git(root, "checkout", "-q", "-b", "feature")
+    (root / "app.py").write_text("v = 2\n", encoding="utf-8")
+    _git(root, "commit", "-qam", "feature")
+    feature = _git(root, "rev-parse", "HEAD")
+    _git(root, "checkout", "-q", "Beta")
+    _git(root, "merge", "-q", "--no-ff", "-m", "merge", "feature")
+    merge = _git(root, "rev-parse", "HEAD")
+
+    # 合并提交的内容与 feature 父提交相同；镜像只为推送到 Beta 的合并提交构建。
+    assert _image_checkpoint(root, merge) == merge
+    assert _image_checkpoint(root, merge) != feature
+
+    (root / "NOTES.md").write_text("docs\n", encoding="utf-8")
+    _git(root, "add", ".")
+    _git(root, "commit", "-qm", "docs")
+    docs = _git(root, "rev-parse", "HEAD")
+    assert _image_checkpoint(root, docs) == merge

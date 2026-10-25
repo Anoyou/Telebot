@@ -340,7 +340,10 @@ if [[ -n "$(git status --porcelain)" ]]; then
 fi
 
 image_checkpoint_commit() {
-  git log -1 --format=%H "$TARGET_COMMIT" -- . \
+  # 预构建镜像只为推送到 Beta/main 的提交打 sha 标签。必须沿目标分支自身的
+  # first-parent 历史查找：否则 git log 的历史简化会把“内容与某个父提交相同”的
+  # 合并提交跳过，落到 PR 分支上从未单独推送、也就没有镜像的提交。
+  git log -1 --first-parent --format=%H "$TARGET_COMMIT" -- . \
     ':(exclude)docs/**' \
     ':(exclude,glob)**/*.md' \
     ':(exclude,glob)**/*.rst' \
