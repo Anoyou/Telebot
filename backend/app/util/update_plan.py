@@ -32,6 +32,8 @@ _NO_RUNTIME_PREFIXES = (
     ".github/",
     "docs/",
     "examples/",
+    # iOS 客户端源码、测试与构建脚本只用于构建 App，不进入任何服务器镜像或挂载卷。
+    "ios/",
 )
 _NO_RUNTIME_FILES = {
     ".env.example",

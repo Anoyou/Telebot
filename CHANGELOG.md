@@ -25,6 +25,11 @@
 
 ## [Unreleased]
 
+### 部署与更新
+
+- 修复生产更新在目标为合并提交时找错预构建镜像：`scripts/prod-update.sh` 改为沿目标分支 first-parent 历史确定镜像检查点，不再落到 PR 分支上从未单独推送（因而没有镜像）的提交，避免报“目标 web 镜像不存在”。
+- 更新计划把 `ios/` 下的 iOS 客户端源码、测试和构建脚本视为不影响服务器运行，不再因此触发完整更新。
+
 ### System Agent
 
 - 新增只读工具 `system.get_versions`：一次返回 TelePilot 版本与部署 commit、Python 版本、内置 Telethon 版本（含 MTProto Layer 与 cryptg）、内置 telepilot-gateway 的实际运行版本／协议版本／构建 commit、FastAPI／SQLAlchemy／Pydantic／httpx／redis 等核心依赖版本、Worker 进程运行环境校验、PostgreSQL／SQLite 与 Redis 服务端版本以及操作系统／容器信息；支持按包名查询任意已安装 Python 包。Gateway 未运行时短暂启动内置二进制只读取 `/version`，结果按二进制缓存。工具不返回环境变量、连接串或任何密钥，Web 与管理 Bot 渠道的 viewer 角色均可用。
