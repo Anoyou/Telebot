@@ -113,10 +113,14 @@ final class ManagementUITests: XCTestCase {
         app.buttons["update.done"].tap()
         XCTAssertTrue(open.waitForExistence(timeout: 5))
         open.tap()
+        // 面板新增“更新通道”分区后内容更长：滚到“更新结果”时，上方操作分区的行已被列表回收，
+        // 因此先在操作分区确认“应用更新”已隐藏、“允许下次更新”可用，再继续滚到升级任务。
+        let allowNext = app.buttons["update.allowNext"]
+        for _ in 0..<5 where !allowNext.isHittable { app.swipeUp() }
+        XCTAssertTrue(allowNext.waitForExistence(timeout: 10))
+        XCTAssertFalse(app.buttons["update.apply"].exists)
         for _ in 0..<5 where !job.isHittable { app.swipeUp() }
         XCTAssertTrue(job.waitForExistence(timeout: 10))
-        XCTAssertFalse(app.buttons["update.apply"].exists)
-        XCTAssertTrue(app.buttons["update.allowNext"].exists)
     }
 
     func testLogDetailExplainsMessageFailureAndOpensTimeline() {

@@ -73,6 +73,7 @@
 - 新增 GitHub Actions「iOS」工作流（`.github/workflows/ios.yml`）：在 GitHub `xcode-27` 运行器（Xcode 27，工程已使用 iOS 27 SDK API）上校验工程源文件清单与 OpenAPI／表单契约同步、运行 TelePilotCore `swift test`，并在 iOS 26+ iPhone 模拟器（运行器当前提供 iOS 27）上以 fixture 模式编译和运行全部 UI 测试；失败时上传 xcresult。针对 `Beta`／`main` 的 iOS 相关 PR、推送到 `Beta` 时自动触发，也可手动运行。
 - 新增 `ios/scripts/check-xcodeproj-sources.py`，检查手工维护的 `TelePilot.xcodeproj` 是否收录全部 Swift 源文件。
 - 同步 iOS 原生表单契约 `contract.json`（访客模式新增的接口与字段）。
+- UI 测试适配第三轮界面调整：设置页顶部新增“外观”后先滚动再断言“打开 Web 管理台”；服务器更新面板新增“更新通道”后，在操作分区确认“允许下次更新”再滚到升级任务（断言不变，只调整滚动顺序）。
 
 ### 文档
 

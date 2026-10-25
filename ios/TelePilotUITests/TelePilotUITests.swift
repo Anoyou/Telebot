@@ -126,8 +126,11 @@ final class TelePilotUITests: XCTestCase {
         let settings = app.buttons["more.settings"]
         XCTAssertTrue(settings.waitForExistence(timeout: 10))
         settings.tap()
-        XCTAssertTrue(app.buttons["settings.openWeb"].waitForExistence(timeout: 10))
+        // 设置页顶部新增“外观”分区后，“打开 Web 管理台”在较矮的屏幕上位于首屏以下；
+        // Form 只为可见行建立无障碍元素，所以先确认页面已加载，再滚动到目标行断言。
+        XCTAssertTrue(app.descendants(matching: .any)["settings.appearance"].firstMatch.waitForExistence(timeout: 10))
         capture("设置", app: app)
+        reveal(app.buttons["settings.openWeb"], app: app)
         reveal(app.buttons["settings.logout"], app: app)
     }
 
