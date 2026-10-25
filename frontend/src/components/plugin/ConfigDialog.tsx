@@ -44,6 +44,7 @@ import {
   groupUnifiedOptions,
   resolveUnifiedModelKey,
 } from "./llmModelOptions";
+import { fieldAllowsNull, orderedPropertyEntries, sortedConfigEntries } from "./configFieldOrder";
 
 export const MASKED_SECRET_PLACEHOLDER = "••••••••••••••••";
 const EMPTY_CONFIG: Record<string, unknown> = {};
@@ -57,6 +58,8 @@ export interface ConfigField {
   "x-ui-hidden"?: boolean;
   "x-ui-section"?: string;
   "x-ui-order"?: number;
+  /** 服务器记录的 properties 声明顺序（JSONB 不保留键顺序）。 */
+  "x-ui-property-order"?: string[];
   "x-ui-columns"?: 1 | 2 | 3 | number;
   "x-ui-provider-field"?: string;
   "x-ui-options-field"?: string;
@@ -96,6 +99,7 @@ export interface ConfigSchema {
   type: string;
   properties: Record<string, ConfigField>;
   required?: string[];
+  "x-ui-property-order"?: string[];
   "x-config-actions"?: ConfigAction[];
   "x-usage-guide"?: unknown;
   "x-usage-instructions"?: unknown;
@@ -701,6 +705,7 @@ function FieldInput({
             <ConfigObjectEditor
               prefix={fk}
               properties={properties}
+              propertyOrder={field["x-ui-property-order"]}
               values={objectValue}
               accountId={accountId}
               llmProviders={llmProviders}
@@ -1013,6 +1018,7 @@ function ConfigListField({
           <ConfigObjectEditor
             prefix={`${fk}.${editingIndex ?? "closed"}`}
             properties={properties}
+            propertyOrder={field.items?.["x-ui-property-order"]}
             values={draft}
             llmProviders={llmProviders}
             llmProvidersLoading={llmProvidersLoading}
@@ -1031,6 +1037,7 @@ function ConfigListField({
 function ConfigObjectEditor({
   prefix,
   properties,
+  propertyOrder,
   values,
   accountId,
   llmProviders,
@@ -1040,6 +1047,7 @@ function ConfigObjectEditor({
 }: {
   prefix: string;
   properties: Record<string, ConfigField>;
+  propertyOrder?: string[];
   values: Record<string, unknown>;
   accountId?: number;
   llmProviders?: LLMProviderOut[];
@@ -1048,9 +1056,7 @@ function ConfigObjectEditor({
   /** 一次写入多个字段，避免基于同一旧值的连续 onChange 互相覆盖。 */
   onChangeMany?: (patch: Record<string, unknown>) => void;
 }) {
-  const entries = Object.entries(properties)
-    .filter(([, field]) => !field["x-ui-hidden"])
-    .sort((a, b) => fieldOrder(a[1]) - fieldOrder(b[1]));
+  const entries = sortedConfigEntries(properties, propertyOrder).filter(([, field]) => !field["x-ui-hidden"]);
 
   if (entries.length === 0) {
     return <div className="rounded-md border border-dashed bg-muted/20 px-3 py-4 text-sm text-muted-foreground">该配置组没有可编辑字段。</div>;
@@ -1475,7 +1481,7 @@ function ConfigActionButton({
   onRun: (action: ConfigAction, input: Record<string, unknown>) => Promise<void>;
 }) {
   const inputSchema = configActionInputSchema(action);
-  const inputFields = Object.entries(inputSchema?.properties ?? {}) as FieldEntry[];
+  const inputFields = orderedPropertyEntries(inputSchema?.properties, inputSchema?.["x-ui-property-order"]) as FieldEntry[];
   const [open, setOpen] = useState(false);
   const [running, setRunning] = useState(false);
   const [inputValues, setInputValues] = useState<Record<string, unknown>>(() => (
@@ -2011,6 +2017,8 @@ export function withoutReadOnlyValues(
   for (const [key, value] of Object.entries(values)) {
     const field = properties[key];
     if (field && isReadOnlyField(key, field)) continue;
+    // 清空不接受 null 的可选字段：不提交，服务器按 schema 默认值处理（与 iOS 一致）。
+    if (value === null && field && !fieldAllowsNull(field)) continue;
     if (isSensitiveConfigKey(key) && isRedactedSecretValue(originalValues[key]) && value === "") continue;
     if (isSensitiveConfigKey(key) && isRedactedSecretValue(value)) continue;
     out[key] = value;

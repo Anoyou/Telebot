@@ -90,6 +90,7 @@ import {
   pluginSupportsDirectPassthrough,
 } from "@/types/pluginContract";
 import { featureConfigBackTarget, formatFeatureVersion } from "@/pages/Plugins/_shared/featureConfig";
+import { orderedPropertyEntries } from "@/components/plugin/configFieldOrder";
 import { CollapsibleUsageContent } from "./_shared/CollapsibleUsageContent";
 import { featureRuntimeText, featureSwitchText } from "./_shared/featureStatus";
 
@@ -280,7 +281,8 @@ export function GenericPluginConfigPage() {
       key === "usage_instructions" ||
       key === "ai_usage_guide" ||
       key === "template_placeholders";
-    const entries = Object.entries(properties) as Array<[string, ConfigField]>;
+    // 按插件声明顺序（服务器记录在 x-ui-property-order）排列，分组内再按 x-ui-order 排序。
+    const entries = orderedPropertyEntries(properties, schema?.["x-ui-property-order"]) as Array<[string, ConfigField]>;
     return {
       globalFields: entries.filter(
         ([key, field]) => !isGuideField(key) && field.level === "global",

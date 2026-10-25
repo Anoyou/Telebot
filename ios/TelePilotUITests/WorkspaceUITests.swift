@@ -101,4 +101,37 @@ final class WorkspaceUITests: XCTestCase {
         // 统一模型列表：Provider 选择器保留，但标注随模型自动填写。
         XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "随模型自动填写")).firstMatch.waitForExistence(timeout: 5))
     }
+
+    func testPluginConfigFollowsSectionsAndMarksOnlyRequiredFields() {
+        let app = launch()
+        app.tabBars.buttons["插件"].tap()
+        let card = app.buttons["plugin.card.content_assistant"]
+        XCTAssertTrue(card.waitForExistence(timeout: 10))
+        card.tap()
+        XCTAssertTrue(app.buttons["账号配置"].waitForExistence(timeout: 5))
+        app.buttons["账号配置"].tap()
+        XCTAssertTrue(app.buttons["plugin.config.edit"].waitForExistence(timeout: 5))
+        app.buttons["plugin.config.edit"].tap()
+        // x-ui-section 分组按插件声明顺序显示：“AI 模型”在前，组标题位于组内第一项上方。
+        let aiGroup = app.descendants(matching: .any)["plugin.config.group.AI 模型"].firstMatch
+        XCTAssertTrue(aiGroup.waitForExistence(timeout: 10))
+        let provider = app.descendants(matching: .any)["plugin.config.select.固定 TelePilot Provider（可选）"].firstMatch
+        XCTAssertTrue(provider.waitForExistence(timeout: 5))
+        XCTAssertLessThan(aiGroup.frame.minY, provider.frame.minY)
+        // 写着“可选”、有默认值的字段不标“必填”；只有没有默认值的“目标群组 ID”是必填。
+        let triggerGroup = app.descendants(matching: .any)["plugin.config.group.触发方式"].firstMatch
+        let required = app.descendants(matching: .any)["plugin.config.required.target_chat_id"].firstMatch
+        var swipes = 0
+        while !(triggerGroup.exists && required.exists) && swipes < 5 {
+            app.swipeUp()
+            swipes += 1
+        }
+        XCTAssertTrue(triggerGroup.exists)
+        XCTAssertTrue(required.exists)
+        XCTAssertFalse(app.descendants(matching: .any)["plugin.config.required.bot_username"].exists)
+        XCTAssertFalse(app.descendants(matching: .any)["plugin.config.required.enable_guest"].exists)
+        XCTAssertFalse(app.descendants(matching: .any)["plugin.config.required.telepilot_provider"].exists)
+        // 可选字段只有一个控件：不再出现“是否提交此项”的同名开关。
+        XCTAssertEqual(app.switches.matching(NSPredicate(format: "label == %@", "访客模式触发")).count, 1)
+    }
 }

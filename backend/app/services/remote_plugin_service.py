@@ -67,6 +67,7 @@ from ..worker.ipc import CMD_RELOAD_CONFIG, publish_cmd_with_ack
 
 # 直接复用现有 loader 的配置热更新路径；installed 插件在 loader 里按 DB 双开关按需加载
 from ..worker.plugins.loader import reload_account_config
+from ..worker.plugins.manifest import with_property_order
 from ..worker.plugins.update_barrier import (
     begin_plugin_update,
     clear_plugin_update,
@@ -276,7 +277,8 @@ class PluginMetadataSchema(BaseModel):
             Draft7Validator.check_schema(value)
         except Exception as exc:
             raise ValueError(f"config_schema 不是有效的 JSON Schema: {exc}") from exc
-        return value
+        # JSONB 不保留键顺序：写库前记下字段声明顺序，供配置表单按插件作者的顺序展示。
+        return with_property_order(value)
 
     @field_validator("agent_tools")
     @classmethod

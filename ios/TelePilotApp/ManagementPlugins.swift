@@ -1392,19 +1392,30 @@ private enum PluginConfigSchema {
     }
     static func hasSchema(_ feature: JSONValue) -> Bool { feature["config_schema"]?["properties"]?.objectValue != nil }
     /// 与 Web 一致：level == "global" 的字段属于全局配置，其余属于账号配置；说明/预览类字段不参与保存。
+    /// 顺序与 Web 相同：按插件声明顺序（`x-ui-property-order`），再按 `x-ui-order`；不按标题或字母排序。
     static func fields(feature: JSONValue, global: Bool) -> [PluginConfigField] {
         guard let schema = feature["config_schema"], let properties = schema["properties"]?.objectValue else { return [] }
         let required = Set(schema["required"]?.arrayValue?.compactMap(\.stringValue) ?? [])
-        return properties.compactMap { entry -> PluginConfigField? in
-            guard !isGuide(entry.key) else { return nil }
-            guard (entry.value["level"]?.stringValue == "global") == global else { return nil }
-            return PluginConfigField(key: entry.key, spec: entry.value, required: required.contains(entry.key))
-        }
-        .sorted { lhs, rhs in
-            if lhs.required != rhs.required { return lhs.required }
-            return lhs.label.localizedStandardCompare(rhs.label) == .orderedAscending
+        return PluginConfigLayout.orderedKeys(schema: schema).compactMap { key -> PluginConfigField? in
+            guard let spec = properties[key], !isGuide(key) else { return nil }
+            guard (spec["level"]?.stringValue == "global") == global else { return nil }
+            return PluginConfigField(key: key, spec: spec, required: required.contains(key))
         }
     }
+    /// 按 `x-ui-section` 分组（与 Web 相同：分组 → 未分组 → 消息模板），组内保持 `fields` 的顺序。
+    static func groups(feature: JSONValue, fields: [PluginConfigField]) -> [PluginConfigFieldGroup] {
+        let schema = feature["config_schema"] ?? .object([:])
+        let byKey = Dictionary(fields.map { ($0.key, $0) }, uniquingKeysWith: { first, _ in first })
+        return PluginConfigLayout.groups(schema: schema, orderedKeys: fields.map(\.key)).enumerated().map { index, group in
+            PluginConfigFieldGroup(id: "\(index)-\(group.title ?? "")", title: group.title, fields: group.keys.compactMap { byKey[$0] })
+        }
+    }
+}
+
+private struct PluginConfigFieldGroup: Identifiable {
+    let id: String
+    let title: String?
+    let fields: [PluginConfigField]
 }
 
 private enum PluginConfigFormat {
@@ -1629,7 +1640,11 @@ struct ManagementPluginConfigView: View {
                 if freeForm {
                     ManagementDictionaryView(value: $draft)
                 } else {
-                    ForEach(fields.filter { !$0.hidden }) { field in fieldSection(field) }
+                    ForEach(PluginConfigSchema.groups(feature: feature, fields: fields.filter { !$0.hidden })) { group in
+                        ForEach(Array(group.fields.enumerated()), id: \.element.id) { index, field in
+                            fieldSection(field, groupTitle: index == 0 ? group.title : nil)
+                        }
+                    }
                 }
                 Section {
                     Button { beginReview() } label: {
@@ -1647,6 +1662,8 @@ struct ManagementPluginConfigView: View {
                 }
             }
         }
+        // 可选字段只显示一个控件（不渲染“是否提交此项”开关），留空由服务器按默认值处理。
+        .environment(\.managementOptionalFieldsInline, true)
         .navigationTitle(global ? "修改全局配置" : "修改账号配置").navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .confirmationAction) {
@@ -1659,7 +1676,7 @@ struct ManagementPluginConfigView: View {
         .sheet(isPresented: $reviewing) { reviewSheet }
     }
 
-    @ViewBuilder private func fieldSection(_ field: PluginConfigField) -> some View {
+    @ViewBuilder private func fieldSection(_ field: PluginConfigField, groupTitle: String? = nil) -> some View {
         let changed = field.secret ? !(draft[field.key]?.stringValue ?? "").isEmpty : !PluginConfigFormat.same(baseline[field.key], draft[field.key])
         Section {
             if field.readOnly {
@@ -1677,12 +1694,21 @@ struct ManagementPluginConfigView: View {
                 }
             }
         } header: {
-            if !field.titledInline || changed || field.required {
-                HStack {
-                    if !field.titledInline { Text(field.label) }
-                    if field.required { Text("必填") }
-                    Spacer()
-                    if changed { Label("已修改", systemImage: "pencil.circle.fill").foregroundStyle(.orange) }
+            VStack(alignment: .leading, spacing: 8) {
+                // 分组标题（x-ui-section）挂在组内第一项上方，与 Web 的分组卡片对应。
+                if let groupTitle {
+                    Text(groupTitle).font(.headline).foregroundStyle(.primary).textCase(nil)
+                        .accessibilityAddTraits(.isHeader)
+                        .accessibilityIdentifier("plugin.config.group.\(groupTitle)")
+                }
+                if !field.titledInline || changed || field.required {
+                    HStack {
+                        if !field.titledInline { Text(field.label) }
+                        // 只给 schema required 里的字段标“必填”；可选字段留空时使用插件默认值。
+                        if field.required { Text("必填").accessibilityIdentifier("plugin.config.required.\(field.key)") }
+                        Spacer()
+                        if changed { Label("已修改", systemImage: "pencil.circle.fill").foregroundStyle(.orange) }
+                    }
                 }
             }
         } footer: {

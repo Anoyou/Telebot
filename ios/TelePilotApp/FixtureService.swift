@@ -215,11 +215,20 @@ actor FixtureService: AppServing {
                      "category": "interactive", "version": "2.1.0", "latest_version": "2.2.0", "update_available": true,
                      "source_type": "remote", "source_label": "个人插件仓库", "is_builtin": false, "signature_ok": true,
                      "orphan": false, "permissions": ["call_llm"],
+                     // 带分组、声明顺序与可选字段：只有“目标群组 ID”真正必填。
                      "config_schema": ["type": "object", "properties": [
-                        "telepilot_provider": ["type": "string", "title": "固定 TelePilot Provider（可选）", "default": "", "x-ui-widget": "llm-provider-select"],
+                        "telepilot_provider": ["type": "string", "title": "固定 TelePilot Provider（可选）", "default": "", "x-ui-widget": "llm-provider-select",
+                                               "x-ui-section": "AI 模型"],
                         "telepilot_model": ["type": "string", "title": "TelePilot 模型覆盖（可选）", "default": "", "x-ui-widget": "llm-model-select",
-                                            "x-ui-provider-field": "telepilot_provider", "x-ui-model-modality": "text"]
-                     ]]],
+                                            "x-ui-provider-field": "telepilot_provider", "x-ui-model-modality": "text", "x-ui-section": "AI 模型"],
+                        "enable_guest": ["type": "boolean", "title": "访客模式触发", "default": true, "x-ui-section": "触发方式"],
+                        "bot_username": ["type": "string", "title": "交互 Bot 用户名（兜底，可选）", "default": "", "x-ui-section": "触发方式"],
+                        "target_chat_id": ["type": "integer", "title": "目标群组 ID", "description": "插件工作的群组，必须填写。", "x-ui-section": "触发方式"],
+                        "max_tokens": ["type": "integer", "title": "最大输出 Token", "default": 800, "minimum": 64],
+                        "help_template": ["type": "string", "title": "帮助提示", "default": "@我 + 问题即可提问。"]
+                     ],
+                     "x-ui-property-order": ["telepilot_provider", "telepilot_model", "enable_guest", "bot_username", "target_chat_id", "max_tokens", "help_template"],
+                     "required": ["target_chat_id"]]],
                     ["key": "forward_guard", "display_name": "转发风控与来源保护", "usage": "过滤异常转发并保留来源。",
                      "category": "utility", "version": "0.9.2", "update_available": false,
                      "source_type": "local", "source_label": "本地导入", "is_builtin": false, "signature_ok": false,
