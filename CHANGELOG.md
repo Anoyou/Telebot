@@ -70,6 +70,7 @@
 
 ### 持续集成
 
+- 新增 GitHub Actions 工作流「iOS 未签名 IPA」（`.github/workflows/ios-ipa.yml`）：`Beta`／`main` 上 iOS 代码变化时或手动触发，用 Xcode 27 运行 `ios/scripts/build-unsigned.sh` 打包未签名 IPA 并上传为工件（保留 30 天，附权限文件与签名说明），没有 Mac 的自签用户可直接下载重签安装。
 - 新增 GitHub Actions「iOS」工作流（`.github/workflows/ios.yml`）：在 GitHub `xcode-27` 运行器（Xcode 27，工程已使用 iOS 27 SDK API）上校验工程源文件清单与 OpenAPI／表单契约同步、运行 TelePilotCore `swift test`，并在 iOS 26+ iPhone 模拟器（运行器当前提供 iOS 27）上以 fixture 模式编译和运行全部 UI 测试；失败时上传 xcresult。针对 `Beta`／`main` 的 iOS 相关 PR、推送到 `Beta` 时自动触发，也可手动运行。
 - 新增 `ios/scripts/check-xcodeproj-sources.py`，检查手工维护的 `TelePilot.xcodeproj` 是否收录全部 Swift 源文件。
 - 同步 iOS 原生表单契约 `contract.json`（访客模式新增的接口与字段）。
