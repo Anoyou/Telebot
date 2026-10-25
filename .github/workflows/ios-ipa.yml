@@ -1,0 +1,92 @@
+name: iOS 未签名 IPA
+
+# 用 macOS 运行器执行 ios/scripts/build-unsigned.sh，产出未签名 IPA 作为工件，
+# 供使用自签工具的用户下载后自行签名安装；不需要任何证书、描述文件或仓库密钥。
+on:
+  push:
+    branches: [Beta, main]
+    paths:
+      - "ios/**"
+      - ".github/workflows/ios-ipa.yml"
+  pull_request:
+    branches: [Beta, main]
+    paths:
+      - ".github/workflows/ios-ipa.yml"
+      - "ios/scripts/build-unsigned.sh"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-ipa-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  # 与 iOS 测试工作流一致：工程用到 iOS 27 SDK 的 API，必须用 Xcode 27 编译。
+  XCODE_APP: /Applications/Xcode_27.app
+
+jobs:
+  ipa:
+    name: 打包未签名 IPA
+    runs-on: xcode-27
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: 选择 Xcode
+        run: |
+          sudo xcode-select -s "$XCODE_APP/Contents/Developer"
+          xcodebuild -version
+
+      - name: 构建未签名 IPA
+        run: |
+          set -o pipefail
+          bash ios/scripts/build-unsigned.sh "$GITHUB_WORKSPACE/ios/build" 2>&1 | tee ios/build-unsigned.log | xcbeautify --renderer github-actions
+
+      - name: 整理工件
+        id: pack
+        run: |
+          VERSION=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' ios/build/TelePilot.xcarchive/Products/Applications/TelePilot.app/Info.plist)
+          BUILD=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' ios/build/TelePilot.xcarchive/Products/Applications/TelePilot.app/Info.plist)
+          SHA=$(git rev-parse --short HEAD)
+          NAME="TelePilot-${VERSION}-${BUILD}-${SHA}-unsigned"
+          mkdir -p dist
+          cp ios/build/TelePilot-unsigned.ipa "dist/${NAME}.ipa"
+          # 自签需要推送时，签名工具应注入与描述文件一致的 aps-environment；这里附上仓库内的权限文件供参考。
+          cp ios/TelePilotApp/TelePilot.entitlements dist/
+          {
+            echo "TelePilot 未签名 IPA"
+            echo "版本：${VERSION} (${BUILD})"
+            echo "提交：$(git rev-parse HEAD)"
+            echo "分支：${GITHUB_REF_NAME}"
+            echo
+            echo "此 IPA 未签名，不能直接安装，需要用你自己的签名工具重签。"
+            echo "Bundle ID 默认 com.telepilot.personal，可在签名时改成你自己的。"
+            echo "APNs 推送需要付费开发者账号，且签名时注入 aps-environment（开发描述文件为 development，Ad Hoc/分发为 production）。"
+          } > dist/README.txt
+          echo "name=${NAME}" >> "$GITHUB_OUTPUT"
+          {
+            echo "### 未签名 IPA 已生成"
+            echo
+            echo "- 版本：\`${VERSION} (${BUILD})\`"
+            echo "- 提交：\`${SHA}\`"
+            echo "- 在本页底部 Artifacts 下载 \`${NAME}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: 上传 IPA
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ${{ steps.pack.outputs.name }}
+          path: dist
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: 上传构建日志
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ios-ipa-log-${{ github.run_id }}
+          path: ios/build-unsigned.log
+          retention-days: 7
+          if-no-files-found: ignore

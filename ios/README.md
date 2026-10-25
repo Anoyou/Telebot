@@ -48,6 +48,8 @@ bash ios/scripts/build-unsigned.sh
 
 也可以把一个输出目录作为脚本的第一个参数。构建产物已被 Git 忽略，不会进入服务器发布包的源代码提交。
 
+没有 Mac 时，可直接下载 GitHub Actions 构建的未签名 IPA：`Beta` 或 `main` 上 `ios/**` 有改动时，工作流「iOS 未签名 IPA」会自动打包（也可在 Actions 页手动运行），在运行详情页底部 Artifacts 下载，工件保留 30 天，内含 IPA、`TelePilot.entitlements` 和说明。免费 Apple ID 自签可以安装使用，但无法启用推送能力；测试 APNs 需要付费开发者账号签名并注入 `aps-environment`。
+
 ## 服务器修复后，App 要不要更新？
 
 服务器版本与客户端版本独立，不要求两个版本号一致。
