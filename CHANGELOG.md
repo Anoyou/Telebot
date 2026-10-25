@@ -32,7 +32,7 @@
 - System Agent 渐进加载：系统提示只列出已启用 skill 的名称与用途，需要时通过 `skills.load` / `skills.read_file` 读取正文与附属文件；管理员可让 Agent 经确认后调用 `agent_skills.*` 工具安装、启停、更新或卸载。skill 中的脚本从不执行。
 - 插件接口 `ctx.skills`（权限 `agent_skills`）：`list` / `load` / `read_file` 只读取管理员“对插件启用”的已安装 skill；`bundled()` 返回插件自带的内置 skill（`skills/<name>/SKILL.md`）。插件加载时平台自动登记内置 skill：默认只对插件启用、不可卸载可停用；编辑保存为覆盖层，插件升级不覆盖用户修改，只标记“内置有新版本”。新增配置控件 `x-ui-widget: agent-skill-multi-select`，卸载 skill 时自动从插件配置中移除。
 - Web「助手 → Skills」：列表、详情、编辑、差异对比、恢复默认/保留修改、安装与卸载；插件配置页支持 skill 多选字段。`docs/PLUGIN-API-REFERENCE.md` 补充 `ctx.skills` 与内置 skill 说明，OpenAPI 与前端类型已再生成。
-- iOS：新增 Skills 管理（助手菜单与 AI 配置区入口）、安装 sheet（GitHub / zip 链接、粘贴、选择 .zip 或 .md 文件）、编辑、差异 / 恢复默认 / 保留我的修改、卸载确认挂在触发按钮上、服务器错误码中文映射；插件配置支持 `agent-skill-multi-select` 多选字段；插件权限说明新增 `agent_skills`。
+- iOS 0.9.0：新增 Skills 管理（助手菜单与 AI 配置区入口）、安装 sheet（GitHub / zip 链接、粘贴、选择 .zip 或 .md 文件）、编辑、差异 / 恢复默认 / 保留我的修改、卸载确认挂在触发按钮上、服务器错误码中文映射；插件配置支持 `agent-skill-multi-select` 多选字段；插件权限说明新增 `agent_skills`。
 
 ### 部署与更新
 

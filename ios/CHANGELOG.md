@@ -9,6 +9,10 @@
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-10-26 · minor（次版本） · Skills 管理与插件 skill 多选
+
+> 对应服务器：Beta 0.105.0-beta.1 之后（PR #62，下一个服务器检查点待定）
+
 ### 新增
 
 - 新增 Skills 管理（助手菜单 → Skills，或 AI → 配置 → Skills）：查看已安装、插件内置与 TelePilot 内置的 skill，分别开关“对系统 Agent 启用”“对插件启用”；查看 SKILL.md 与附属文件，编辑可编辑的 skill。
