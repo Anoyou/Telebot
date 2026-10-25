@@ -120,18 +120,22 @@ final class WorkspaceUITests: XCTestCase {
         XCTAssertLessThan(aiGroup.frame.minY, provider.frame.minY)
         XCTAssertFalse(app.descendants(matching: .any)["plugin.config.required.telepilot_provider"].exists)
         // 其他分组各自成为一行子页面入口，行上显示摘要；必填未填的分组有提示。
+        // 表单是懒加载列表，屏幕外的行不在辅助功能树里：滚到“更多设置”最后一行（消息模板）可点为止，
+        // 保证三个子页面入口都已渲染，而不是第一个入口刚露头就停下。
         let triggerPage = app.buttons["plugin.config.page.触发方式"]
+        let templatePage = app.buttons["plugin.config.page.消息模板"]
         var swipes = 0
-        while !triggerPage.exists && swipes < 4 {
+        while !(templatePage.exists && templatePage.isHittable) && swipes < 8 {
             app.swipeUp()
             swipes += 1
         }
+        XCTAssertTrue(templatePage.waitForExistence(timeout: 5))
         XCTAssertTrue(triggerPage.exists)
+        XCTAssertTrue(triggerPage.isHittable)
         XCTAssertTrue(triggerPage.label.contains("有必填项未填"))
         let ptPage = app.buttons["plugin.config.page.PT 站点数据源"]
         XCTAssertTrue(ptPage.exists)
         XCTAssertTrue(ptPage.label.contains("未启用"))
-        XCTAssertTrue(app.buttons["plugin.config.page.消息模板"].exists)
         XCTAssertFalse(app.descendants(matching: .any)["plugin.config.required.bot_username"].exists)
 
         triggerPage.tap()
