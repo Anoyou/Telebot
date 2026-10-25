@@ -29,6 +29,7 @@
 
 - 修复生产更新在目标为合并提交时找错预构建镜像：`scripts/prod-update.sh` 改为沿目标分支 first-parent 历史确定镜像检查点，不再落到 PR 分支上从未单独推送（因而没有镜像）的提交，避免报“目标 web 镜像不存在”。
 - 更新计划把 `ios/` 下的 iOS 客户端源码、测试和构建脚本视为不影响服务器运行，不再因此触发完整更新。
+- 修复服务器已更新到最新后，iOS「关于 → 检查服务器更新」与 Web 顶栏仍显示“有新版本”角标：手动检查当前通道（未指定其他 remote/branch）时会把结论写回最近一次检查记录，角标随之刷新；最近一次检查摘要新增 `current_commit` / `remote_commit`，读取 `GET /api/system/update-status` 时若旧的“有新版本”结论对应的提交已不是服务器当前运行提交（与 `/api/system/version` 的部署提交同源，按前缀比较；取不到时不判断），视为陈旧并返回 `has_update=false`、`stale=true`，不再等到下一次定时检查才消失。
 
 ### System Agent
 

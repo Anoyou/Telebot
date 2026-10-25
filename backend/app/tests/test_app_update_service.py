@@ -316,3 +316,237 @@ async def test_load_update_status_degrades_gracefully_on_db_error(monkeypatch) -
     assert status["last_check"] is None
     assert status["interval_minutes"] == app_update_service.DEFAULT_INTERVAL_MINUTES
     assert datetime.now(UTC).tzinfo is not None
+
+
+# ── 更新后旧结论陈旧判定 ─────────────────────────────────────────
+
+
+def test_summarize_result_keeps_commits() -> None:
+    summary = app_update_service.summarize_result(
+        {
+            "has_update": True,
+            "current_commit": "aaaa1111aaaa",
+            "remote_commit": "bbbb2222bbbb",
+            "changed_files": ["x"],
+        }
+    )
+    assert summary["current_commit"] == "aaaa1111aaaa"
+    assert summary["remote_commit"] == "bbbb2222bbbb"
+    assert "changed_files" not in summary
+
+
+@pytest.mark.parametrize(
+    ("last", "running", "expected"),
+    (
+        # 已更新到当时的目标提交（长 commit 与短 commit 前缀比较）
+        (
+            {"has_update": True, "current_commit": "aaaa1111aaaa", "remote_commit": "034100485772"},
+            "034100485772" + "f" * 28,
+            True,
+        ),
+        # 检查后服务器换过版本（目标又前进，但运行提交已不是检查时的提交）
+        (
+            {"has_update": True, "current_commit": "aaaa1111aaaa", "remote_commit": "bbbb2222bbbb"},
+            "cccc3333cccc",
+            True,
+        ),
+        # 运行提交仍是检查时的提交：结论有效
+        (
+            {"has_update": True, "current_commit": "aaaa1111aaaa", "remote_commit": "bbbb2222bbbb"},
+            "aaaa1111aaaa" + "0" * 28,
+            False,
+        ),
+        # 取不到运行提交：不做判断
+        (
+            {"has_update": True, "current_commit": "aaaa1111aaaa", "remote_commit": "bbbb2222bbbb"},
+            None,
+            False,
+        ),
+        # 老摘要没有 commit 字段：不做判断
+        ({"has_update": True, "current_version": "1.0.0"}, "cccc3333cccc", False),
+        # 本来就没有更新：无需判断
+        (
+            {"has_update": False, "current_commit": "aaaa1111aaaa", "remote_commit": "aaaa1111aaaa"},
+            "cccc3333cccc",
+            False,
+        ),
+        # updater 待部署状态（Git 已前进、容器未切换）：运行提交落后不算陈旧
+        (
+            {"has_update": True, "current_commit": "bbbb2222bbbb", "remote_commit": "bbbb2222bbbb"},
+            "aaaa1111aaaa",
+            False,
+        ),
+    ),
+)
+def test_is_last_check_stale(last, running, expected) -> None:
+    assert app_update_service.is_last_check_stale(last, running) is expected
+
+
+@pytest.mark.asyncio
+async def test_update_status_marks_old_has_update_stale_after_deploy(
+    db_factory, monkeypatch
+) -> None:
+    """服务器更新并重启后，旧的 has_update=true 不能继续点亮角标。"""
+
+    monkeypatch.setattr(app_update_service, "AsyncSessionLocal", db_factory)
+    async with db_factory() as db:
+        await app_update_service.save_last_check(
+            db,
+            app_update_service.summarize_result(
+                {
+                    "has_update": True,
+                    "current_version": "0.100.0-beta.6",
+                    "target_version": "0.100.0-beta.7",
+                    "current_commit": "aaaa1111aaaa",
+                    "remote_commit": "034100485772",
+                    "remote": "origin",
+                    "branch": "Beta",
+                }
+            ),
+        )
+        await db.commit()
+
+    async def deployed() -> str:
+        return "034100485772" + "e" * 28
+
+    monkeypatch.setattr(app_update_service, "current_runtime_commit", deployed)
+    status = await app_update_service.load_update_status()
+    assert status["last_check"]["has_update"] is False
+    assert status["last_check"]["stale"] is True
+
+    # 落库内容本身不被改写，下一次检查自然覆盖
+    async with db_factory() as db:
+        stored = await app_update_service.load_last_check(db)
+        assert stored is not None and stored["has_update"] is True
+
+    async def not_deployed() -> str:
+        return "aaaa1111aaaa" + "0" * 28
+
+    monkeypatch.setattr(app_update_service, "current_runtime_commit", not_deployed)
+    status = await app_update_service.load_update_status()
+    assert status["last_check"]["has_update"] is True
+    assert "stale" not in status["last_check"]
+
+
+@pytest.mark.asyncio
+async def test_update_status_without_runtime_commit_keeps_result(db_factory, monkeypatch) -> None:
+    monkeypatch.setattr(app_update_service, "AsyncSessionLocal", db_factory)
+    async with db_factory() as db:
+        await app_update_service.save_last_check(
+            db,
+            {"has_update": True, "current_commit": "aaaa1111aaaa", "remote_commit": "bbbb2222bbbb"},
+        )
+        await db.commit()
+
+    async def unknown() -> None:
+        return None
+
+    monkeypatch.setattr(app_update_service, "current_runtime_commit", unknown)
+    status = await app_update_service.load_update_status()
+    assert status["last_check"]["has_update"] is True
+
+
+@pytest.mark.asyncio
+async def test_load_last_check_returns_none_when_missing(db_factory) -> None:
+    async with db_factory() as db:
+        assert await app_update_service.load_last_check(db) is None
+
+
+# ── 手动检查写回 ─────────────────────────────────────────────────
+
+
+def _patch_manual_check(monkeypatch, db_factory, plan: dict):
+    from app.api import system_health as sh
+
+    monkeypatch.setenv("TELEPILOT_UPDATE_BRANCH", "Beta")
+    monkeypatch.setattr(sh, "AsyncSessionLocal", db_factory)
+    monkeypatch.setattr(app_update_service, "AsyncSessionLocal", db_factory)
+    monkeypatch.setattr(
+        sh,
+        "_detect_runtime_mode",
+        lambda: (sh.RUNTIME_PROD_CONTAINER_WITH_UPDATER, "http://updater:8765", None),
+    )
+    monkeypatch.setattr(sh, "_updater_request", lambda path, payload=None, timeout=30: plan)
+
+    async def default_branch(_payload):
+        remote = getattr(_payload, "remote", None) or "origin"
+        branch = getattr(_payload, "branch", None) or "Beta"
+        return remote, branch, False
+
+    monkeypatch.setattr(sh, "_resolve_update_request", default_branch)
+    return sh
+
+
+_UP_TO_DATE_PLAN = {
+    "ok": True,
+    "has_update": False,
+    "current_version": "0.100.0-beta.7",
+    "target_version": "0.100.0-beta.7",
+    "current_commit": "034100485772",
+    "remote_commit": "034100485772",
+    "ahead": 0,
+    "components": ["none"],
+}
+
+
+@pytest.mark.asyncio
+async def test_manual_check_writes_back_last_check(db_factory, monkeypatch) -> None:
+    """手动检查当前通道后，角标读到的必须是这次的结论，而不是旧的"有新版本"。"""
+
+    sh = _patch_manual_check(monkeypatch, db_factory, _UP_TO_DATE_PLAN)
+    async with db_factory() as db:
+        await app_update_service.save_last_check(
+            db,
+            {"has_update": True, "current_version": "0.100.0-beta.6", "target_version": "0.100.0-beta.7"},
+        )
+        await db.commit()
+
+    out = await sh.check_update(_user=None)  # type: ignore[arg-type]
+    assert out.has_update is False
+
+    async with db_factory() as db:
+        stored = await app_update_service.load_last_check(db)
+    assert stored is not None
+    assert stored["has_update"] is False
+    assert stored["current_commit"] == "034100485772"
+    assert stored["branch"] == "Beta"
+    assert stored["checked_at"]
+
+    # 显式只传 full 也算检查当前通道
+    out = await sh.check_update(_user=None, payload=sh.UpdateRequest(full=True))  # type: ignore[arg-type]
+    assert out.has_update is False
+
+
+@pytest.mark.asyncio
+async def test_manual_check_with_override_does_not_write_back(db_factory, monkeypatch) -> None:
+    """指定其他 remote / branch 的试探性检查不应覆盖当前通道的角标结论。"""
+
+    sh = _patch_manual_check(monkeypatch, db_factory, _UP_TO_DATE_PLAN)
+    original = {"has_update": True, "current_version": "0.100.0-beta.6"}
+    async with db_factory() as db:
+        await app_update_service.save_last_check(db, original)
+        await db.commit()
+
+    await sh.check_update(_user=None, payload=sh.UpdateRequest(branch="main"))  # type: ignore[arg-type]
+
+    async with db_factory() as db:
+        stored = await app_update_service.load_last_check(db)
+    assert stored is not None and stored["has_update"] is True
+    assert stored["current_version"] == "0.100.0-beta.6"
+
+
+@pytest.mark.asyncio
+async def test_manual_check_write_back_failure_keeps_response(db_factory, monkeypatch) -> None:
+    sh = _patch_manual_check(monkeypatch, db_factory, _UP_TO_DATE_PLAN)
+
+    class _Broken:
+        def __aenter__(self):
+            raise RuntimeError("db down")
+
+        async def __aexit__(self, *_exc) -> bool:
+            return False
+
+    monkeypatch.setattr(sh, "AsyncSessionLocal", lambda: _Broken())
+    out = await sh.check_update(_user=None)  # type: ignore[arg-type]
+    assert out.has_update is False
+    assert out.current_commit == "034100485772"
