@@ -6,6 +6,18 @@ OUTPUT="${1:-$IOS_ROOT/build}"
 mkdir -p "$OUTPUT"
 OUTPUT="$(cd "$OUTPUT" && pwd)"
 
+# build 号（CFBundleVersion）：CI 通过 TELEPILOT_BUILD_NUMBER 注入单调递增的正整数；
+# 未设置时沿用工程里的本地默认值。MARKETING_VERSION 不在这里覆盖，以工程设置为准。
+VERSION_ARGS=()
+if [ -n "${TELEPILOT_BUILD_NUMBER:-}" ]; then
+  if ! [[ "$TELEPILOT_BUILD_NUMBER" =~ ^[1-9][0-9]*$ ]]; then
+    echo "TELEPILOT_BUILD_NUMBER 必须是正整数，当前为：$TELEPILOT_BUILD_NUMBER" >&2
+    exit 1
+  fi
+  VERSION_ARGS+=("CURRENT_PROJECT_VERSION=$TELEPILOT_BUILD_NUMBER")
+  echo "注入 build 号：$TELEPILOT_BUILD_NUMBER"
+fi
+
 xcodebuild \
   -project "$IOS_ROOT/TelePilot.xcodeproj" \
   -scheme TelePilot \
@@ -14,6 +26,7 @@ xcodebuild \
   -archivePath "$OUTPUT/TelePilot.xcarchive" \
   -derivedDataPath "$OUTPUT/DerivedData" \
   CODE_SIGNING_ALLOWED=NO \
+  ${VERSION_ARGS[@]+"${VERSION_ARGS[@]}"} \
   archive
 
 STAGING="$(mktemp -d)"

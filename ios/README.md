@@ -48,7 +48,11 @@ bash ios/scripts/build-unsigned.sh
 
 也可以把一个输出目录作为脚本的第一个参数。构建产物已被 Git 忽略，不会进入服务器发布包的源代码提交。
 
-没有 Mac 时，可直接下载 GitHub Actions 构建的未签名 IPA：`Beta` 或 `main` 上 `ios/**` 有改动时，工作流「iOS 未签名 IPA」会自动打包（也可在 Actions 页手动运行），在运行详情页底部 Artifacts 下载，工件保留 30 天，内含 IPA、`TelePilot.entitlements` 和说明。免费 Apple ID 自签可以安装使用，但无法启用推送能力；测试 APNs 需要付费开发者账号签名并注入 `aps-environment`。
+### App 版本号
+
+iOS App 的版本号独立于服务器版本：`MARKETING_VERSION`（显示版本，纯数字 `X.Y.Z`，当前 `0.8.0`）只在 iOS 发版检查点按改动级别 bump，变化记在 [`ios/CHANGELOG.md`](CHANGELOG.md)（随 App 打包，在“关于 → App 更新日志”离线显示），`ios/project.yml` 与 `TelePilot.xcodeproj` 需同步修改，可用 `python3 ios/scripts/check-ios-version.py` 校验。build 号（`CFBundleVersion`）由 CI 打包时注入，取工作流运行序号，每次打包严格递增；本地构建使用工程里的默认值，也可设置 `TELEPILOT_BUILD_NUMBER=<正整数>` 再运行 `build-unsigned.sh` 覆盖。App 的“关于”页显示为 `版本（build）`。
+
+没有 Mac 时，可直接下载 GitHub Actions 构建的未签名 IPA：`Beta` 或 `main` 上 `ios/**` 有改动时，工作流「iOS 未签名 IPA」会自动打包（也可在 Actions 页手动运行），在运行详情页底部 Artifacts 下载，工件名为 `TelePilot-<版本>-<build>-<短提交>-unsigned`，保留 30 天，内含 IPA、`TelePilot.entitlements` 和说明。免费 Apple ID 自签可以安装使用，但无法启用推送能力；测试 APNs 需要付费开发者账号签名并注入 `aps-environment`。
 
 ## 服务器修复后，App 要不要更新？
 

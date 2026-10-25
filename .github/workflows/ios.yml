@@ -46,6 +46,7 @@ jobs:
       - name: 校验工程与契约同步
         run: |
           python3 ios/scripts/check-xcodeproj-sources.py
+          python3 ios/scripts/check-ios-version.py
           python3 ios/TelePilotCore/scripts/sync-openapi.py --check
           python3 ios/TelePilotCore/scripts/sync-contract.py --check
 

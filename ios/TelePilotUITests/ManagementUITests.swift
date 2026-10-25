@@ -100,6 +100,30 @@ final class ManagementUITests: XCTestCase {
         XCTAssertFalse(app.buttons["预览导入影响"].isEnabled)
     }
 
+    /// “关于 → App 更新日志”读取随 App 打包的 ios/CHANGELOG.md，fixture 模式下不连服务器也能显示，
+    /// 并标出当前安装的版本。
+    func testAboutShowsBundledAppChangelog() {
+        let app = launch()
+        let about = app.buttons["more.about"]
+        XCTAssertTrue(about.waitForExistence(timeout: 10))
+        for _ in 0..<4 where !about.isHittable { app.swipeUp() }
+        about.tap()
+        let entry = app.buttons["about.appChangelog"]
+        XCTAssertTrue(entry.waitForExistence(timeout: 10))
+        for _ in 0..<4 where !entry.isHittable { app.swipeUp() }
+        entry.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["changelog.list"].firstMatch.waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["changelog.current"].firstMatch.waitForExistence(timeout: 5))
+        XCTAssertFalse(app.staticTexts["无法读取更新日志"].exists)
+        let oldest = app.staticTexts["首个原生客户端与 APNs"]
+        for _ in 0..<12 where !oldest.exists { app.swipeUp() }
+        XCTAssertTrue(oldest.exists)
+        let screenshot = XCTAttachment(screenshot: app.screenshot())
+        screenshot.name = "App 更新日志"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+    }
+
     func testServerUpdateRequiresConfirmationBeforeApplying() {
         let app = launch()
         let about = app.buttons["more.about"]

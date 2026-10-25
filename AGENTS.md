@@ -17,8 +17,18 @@
   - 同阶段补丁版本从新的补丁基础版本开始，例如 `0.81.1-beta.1`。
   - beta 期间若加入新的 minor 或 major 级变化，必须提升基础版本并从 `-beta.1` 重新开始，不能只递增 beta 序号。
   - beta 稳定并合入 `main` 后去掉 prerelease 后缀，发布相同基础版本的正式版。
-- beta 检查点与稳定发布都必须同步更新：`backend/app/__init__.py`、`backend/pyproject.toml`、`frontend/package.json`、`frontend/src/lib/version.ts`，随后运行 `make codegen` 让 `openapi/telepilot.openapi.json` 的 `info.version` 跟随，并用中文写入 `CHANGELOG.md`；CI 会校验这五处版本一致。
+- beta 检查点与稳定发布都必须同步更新：`backend/app/__init__.py`、`backend/pyproject.toml`、`frontend/package.json`、`frontend/src/lib/version.ts`，随后运行 `make codegen` 让 `openapi/telepilot.openapi.json` 的 `info.version` 跟随，并用中文写入 `CHANGELOG.md`；CI 会校验这五处版本一致。iOS App 版本独立，不在这五处之列，见下方「iOS 版本」。
 - commit / PR / release 文案使用中文。
+
+## iOS 版本
+
+- iOS App 使用**独立于 TelePilot 服务器**的版本号，不跟随、也不要求等于服务器版本；服务器 beta 检查点或稳定发布不需要改 iOS 版本，反之亦然。
+- `MARKETING_VERSION`（`CFBundleShortVersionString`）按 Apple 规范只能是纯数字 `X.Y.Z`，不能带 `-beta` 等后缀；按上文同一套 SemVer 级别判断，只在 **iOS 发版检查点**（准备给用户分发新 IPA、或用户明确要求 iOS 发一版）时按本批 iOS 改动的最高级别统一 bump 一次，不为每个提交单独迭代：
+  - `MINOR`：用户可感知的新能力、页面/信息架构重组、重要工作流变化；`PATCH`：bug 修复、文案、小 UI 与兼容性调整；`MAJOR`：要求重新配置或无法平滑升级的变化（如更换 Bundle ID、Keychain 数据不兼容）。
+  - iOS 改动必须**同时**记入 `ios/CHANGELOG.md`（iOS App 自身的更新日志，只写用户能感知的 App 变化）和根目录 `CHANGELOG.md` 的 `Unreleased`；bump 时把 `ios/CHANGELOG.md` 的 `Unreleased` 移到新版本段落，标题写 `## [X.Y.Z] - 日期 · 级别 · 主题`，下一行写 `> 对应服务器：…`（随哪个服务器检查点或 Beta 合并发布），并在根 CHANGELOG 对应条目注明 `iOS X.Y.Z`。
+  - `ios/CHANGELOG.md` 随 App 打包，在“关于 → App 更新日志”离线显示，修改时保持上述标题格式。
+- `CURRENT_PROJECT_VERSION`（`CFBundleVersion`，build 号）由 CI 生成：工作流「iOS 未签名 IPA」以本工作流的 `github.run_number` 通过 `TELEPILOT_BUILD_NUMBER` 注入 `ios/scripts/build-unsigned.sh`，保证每次打包严格递增；工程里的值只是本地构建默认值，不要手工递增。IPA 工件名为 `TelePilot-<版本>-<build>-<短提交>-unsigned`。
+- 改版本时 `ios/project.yml` 与 `ios/TelePilot.xcodeproj/project.pbxproj` 必须同步修改；`python3 ios/scripts/check-ios-version.py` 校验两处一致、格式合规，且 `ios/CHANGELOG.md` 最新版本段落等于当前 `MARKETING_VERSION`，「iOS」与「iOS 未签名 IPA」工作流都会运行它。
 
 ## 工作区安全
 
