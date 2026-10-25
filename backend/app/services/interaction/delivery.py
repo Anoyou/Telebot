@@ -1613,13 +1613,14 @@ class InteractionDeliveryExecutor:
             )
             return
         inline_message_id = str(action.get("inline_message_id") or "").strip()
-        if inline_message_id and not is_rich_edit:
+        if inline_message_id:
             await self._apply_edit_inline_message(
                 action,
                 inline_message_id,
                 text,
                 parse_mode=parse_mode,
                 reply_markup=reply_markup,
+                rich_message=rich_message if is_rich_edit else None,
             )
             return
         message_id = _int_or_none(action.get("message_id") or action.get("edit_message_id"))
@@ -1708,14 +1709,25 @@ class InteractionDeliveryExecutor:
         *,
         parse_mode: str,
         reply_markup: dict[str, Any] | None,
+        rich_message: dict[str, Any] | None = None,
     ) -> None:
-        """编辑 inline 消息（Guest Mode 先回复占位、再编辑为最终答案）。只支持交互 Bot。"""
+        """编辑 inline 消息（Guest Mode 先回复占位、再编辑为最终答案）。只支持交互 Bot。
+
+        ``rich_message`` 存在时走 ``editMessageText(inline_message_id, rich_message)``
+        （Bot API 10.2：rich_message 同样适用于 inline 消息，但不能直传/按 URL 上传新文件）。
+        Rich 编辑失败时如实记失败、不静默降级，由插件读取批次结果后自行退回 HTML。
+        """
 
         if self._dry_run_enabled(action):
             await self._record_dry_run(
                 action,
                 channel="interaction_bot",
-                result={"dry_run": True, "inline_message_id": inline_message_id, "text": text},
+                result={
+                    "dry_run": True,
+                    "inline_message_id": inline_message_id,
+                    "text": text,
+                    "rich_message": rich_message,
+                },
             )
             return
         options = action_send_via_options(action)
@@ -1735,17 +1747,28 @@ class InteractionDeliveryExecutor:
             result = {"error": "bot token unavailable", "error_code": "bot_token_missing"}
         else:
             try:
-                result = await _call_with_plain_fallback(
-                    lambda body, mode: account_bot_service.edit_inline_message(
+                if rich_message is not None:
+                    result = await account_bot_service.edit_inline_rich_message(
                         token,
                         inline_message_id,
-                        body,
+                        rich_message,
                         reply_markup=reply_markup,
-                        parse_mode=mode,
-                    ),
-                    text,
-                    None if parse_mode == "plain" else parse_mode,
-                )
+                    )
+                else:
+                    result = await _call_with_plain_fallback(
+                        lambda body, mode: account_bot_service.edit_inline_message(
+                            token,
+                            inline_message_id,
+                            body,
+                            reply_markup=reply_markup,
+                            parse_mode=mode,
+                        ),
+                        text,
+                        None if parse_mode == "plain" else parse_mode,
+                    )
+                if not isinstance(result, dict):
+                    # inline 消息编辑成功时 Bot API 返回 True
+                    result = {"ok": bool(result), "inline_message_id": inline_message_id}
                 ok = True
             except Exception as exc:  # noqa: BLE001
                 error = account_bot_service.sanitize_bot_error(exc, token=token)

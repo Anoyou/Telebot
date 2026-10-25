@@ -208,6 +208,9 @@ class PluginContext:
 - `ctx.ai.complete(..., web_search=True, web_search_context_size="low"|"medium"|"high")` 请求原生联网搜索：把 `web_search` 作为**工具**交给模型（Responses API，`tool_choice` 保持 auto，由模型自行决定是否搜索，不强制每次搜索）；OpenAI 官方 chat_completions Provider 按 `web_search_api_format` 临时切到 Responses。引用来源在 `AIResult.sources`。需要“该搜就搜”时请在系统提示里引导（并注入当前日期），不要用关键词强制。
 - `ctx.ai.complete(..., images=[bytes, ...])` 把图片交给支持图片输入的模型（最多 4 张、每张 ≤ 8MB），需要 `ai_vision` 权限；`ctx.ai.vision_enabled` 表示是否已授权。`await ctx.ai.fetch_bot_image(file_id)` 用当前账号交互 Bot 下载用户发来的图片（`message.media.file_id` 或 `reply_to.media.file_id`），同样需要 `ai_vision`，不落盘、不返回路径或 Token。
 - 请求的能力（`web_search` / `images`）在所选 Provider 及 fallback 链上都不支持时抛 `AICapabilityError`（`AIUnavailableError` 子类），在发出网络请求前判定；插件可去掉该能力降级重试。
+- 推理模型（GLM / DeepSeek / Qwen / Kimi 等）：`AIResult.text` **只包含模型的最终 content**，思考过程（Chat Completions 的 `reasoning_content`、content 里的 `<think>…</think>`、Responses 的 reasoning 项）单独放在 `AIResult.reasoning`（另有 `reasoning_tokens`、`finish_reason`），插件不要把它发给用户。content 为空时平台不再用推理过程兜底：输出额度被推理耗尽（`finish_reason=length`）或只返回了推理时抛 `AIResponseTruncated`（`AIUnavailableError` 子类，fallback 链会先尝试下一个 Provider），并记一条 info 日志（finish_reason、max_tokens、推理 Token）。`ctx.ai.stream_complete` 同样跳过推理增量。
+- `ctx.ai.complete(..., thinking="disabled"|"enabled")`（0.106.0-beta.2+）：对支持的 OpenAI 兼容上游关闭/开启思考——智谱 / Z.ai（`bigmodel.cn`、`z.ai`、`glm-*`）与 DeepSeek 下发 `thinking={"type": ...}`，阿里云百炼 DashScope（Qwen3）下发 `enable_thinking`；其它上游忽略该参数（OpenAI 官方等会拒绝未知参数）。旧平台的 `complete` 没有这个参数，插件可用 `inspect.signature` 探测后再传。
+- 推理模型的输出 Token 下限：模型名属于常见推理系列（GLM-4.5+/GLM-5、DeepSeek-R1/Reasoner、QwQ/Qwen3、Kimi K2/K3、o1/o3/o4、GPT-5 等）或模型清单声明了推理档位时，`complete` 请求的 `max_tokens` 低于 `PLUGIN_AI_REASONING_MIN_OUTPUT_TOKENS`（默认 4096，0 表示不抬高）会自动抬到该值，避免额度全被推理吃掉；传 `thinking="disabled"` 时不抬高。
 - `ctx.skills`：在 `permissions` 声明 `agent_skills` 后注入（旧版本平台为 `None`，插件需降级）。只读获取 **Agent Skills**（Anthropic `SKILL.md` 目录格式）文本，**从不执行**其中脚本：
   - `await ctx.skills.list(names=None)` 返回管理员已「对插件启用」的已安装 skill（`name` / `description` / `version` / `files`）；传 `names` 时只返回其中仍可用的，通常传插件配置里的多选值。
   - `await ctx.skills.load(name, max_chars=None)` 返回 SKILL.md 正文（去掉 front matter，默认截断 8000 字符、上限 16000）；`await ctx.skills.read_file(name, path, max_chars=None)` 读取附属文本文件。不可用时抛 `PluginSkillUnavailable`（`LookupError` 子类）。
@@ -825,6 +828,7 @@ MessageOps 对应 `await ctx.messages.answer_guest_query(text=..., parse_mode="h
 
 - `answer_guest_query` 动作可带 `save_message_id_key`，平台把 `answerGuestQuery` 返回的 `inline_message_id` 存到该键（2 小时）；实时 MessageOps 下可用 `await ctx.messages.read_saved_inline_message_id(key)` 读回。
 - 之后返回 `{"type": "edit_message", "inline_message_id": "...", "text": "...", "parse_mode": "html"}` 编辑这条 inline 消息（只支持交互 Bot）。访客事件里带 `inline_message_id` 的编辑会直接执行，不进一次性回复缓冲。
+- 0.106.0-beta.2+：`edit_message` 同时带 `inline_message_id` 与 `rich_message` 时，平台用 `editMessageText(inline_message_id, rich_message)` 以 Telegram 原生 Rich Message 编辑 inline 消息（Bot API：rich_message 同样适用于 inline 消息，但不能直传或按 URL 上传新文件），访客模式的“🤔”占位因此也能原生渲染表格、标题等。Rich 编辑失败如实记失败、不静默降级，插件读取批次结果后自行退回 HTML。实时 MessageOps 以类属性 `ctx.messages.inline_rich_edit = True` 声明该能力，插件可据此判断，旧平台没有该属性时保持 HTML 编辑。
 - `edit_message` 可带 `send_on_edit_failure: true`：编辑失败时改为发送一条新消息，结果带 `edit_fallback_send: true`。
 - `send_message` / `edit_message` / `answer_guest_query` 使用 `parse_mode="html"` 时，Telegram 因实体解析失败拒绝（`can't parse entities` 等）会去掉标签以纯文本重试一次，插件不必自行兜底。
 
@@ -1448,6 +1452,7 @@ class GuessNumberPlugin(Plugin):
 | `send_photo` / `send_file` | `save_message_id_key` | 可选；媒体发送成功后把 Telegram `message_id` 按 key 保存 2 小时，供后续 `edit_caption`、删除或替换使用 |
 | `edit_message` | `message_id`、`text` | 编辑纯文本消息；不用于编辑媒体 caption |
 | `edit_message` | `message_id`、`rich_message` | 编辑 Rich Message；默认由 Interaction Bot 执行，显式 Userbot 支持 HTML、Markdown 和纯文本 blocks，并受 Premium 与 `rich_message_posting` 门禁 |
+| `edit_message` | `inline_message_id`、`rich_message` | 以 Rich Message 编辑 inline 消息（含 Guest Mode 占位），只支持 Interaction Bot（0.106.0-beta.2+） |
 | `edit_caption` | `message_id` / `message_id_key`、`caption` | 编辑图片或文件消息的 caption；`message_id_key` 会读取同账号命名空间下由 `save_message_id_key` 保存的消息 ID |
 | `edit_caption` | `parse_mode`、`reply_markup` | 可选；`parse_mode="html"` 时按 HTML 发送，`reply_markup` 只由 `interaction_bot` 原生承接 |
 | `delete_message` | `message_id` | 删除对应 Bot 通道可操作的消息 |

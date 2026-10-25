@@ -775,7 +775,10 @@ async def test_openai_complete_uses_reasoning_content_when_content_empty() -> No
             "kimi-k3",
         ).complete("system", "1+1?")
 
+    # 测活兼容：text 仍可用推理兜底，但必须标记为非最终答案（运行时会拒绝交给插件/用户）
     assert "1+1=2" in result.text
+    assert result.text_from_reasoning is True
+    assert result.reasoning == "先算一下：1+1=2。"
 
 
 @pytest.mark.asyncio

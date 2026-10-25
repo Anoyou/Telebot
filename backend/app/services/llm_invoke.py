@@ -52,6 +52,7 @@ async def invoke(
     matched_tag: str | None = None,
     client_factory: Callable[..., Any | Awaitable[Any]] | None = None,
     runtime_metadata: Mapping[str, Any] | None = None,
+    thinking: str | None = None,
 ) -> tuple[LLMResult, LLMProviderDTO, bool]:
     """Call a standard LLM provider with shared fallback / retry / usage logic.
 
@@ -126,6 +127,7 @@ async def invoke(
             reasoning_effort=reasoning_effort,
             timeout_seconds=timeout_seconds,
             native_image=native_image,
+            thinking=thinking,
             client_factory=_build_runtime_client,
             client_identity_resolver=_resolve_runtime_client_identity,
             account_id=account_id,

@@ -25,6 +25,21 @@
 
 ## [Unreleased]
 
+## [0.106.0-beta.2] - 2026-10-26 · patch（补丁预发布） · 推理模型思考过程不再当答案、访客 inline Rich 编辑
+
+### 修复
+
+- 紧急修复：推理模型的思考过程被当作答案交给插件和用户。GLM-5.3-Flash（Z.ai，OpenAI 兼容 chat_completions，始终开启推理）在插件 `max_tokens=800` 时输出额度全被推理耗尽，`content` 为空、`finish_reason=length`；OpenAI 兼容适配器此前在 `content` 为空时用 `message.reasoning_content` 兜底正文，`ctx.ai.complete` 于是把截断的英文推理草稿当 `text` 返回，AI 答疑插件原样发进群里。
+- `LLMResult` 新增 `reasoning` / `reasoning_tokens` / `text_from_reasoning`：Chat Completions（含流式请求被上游返回为普通 JSON 的路径）与 Responses 把推理过程单独保存；content 里的 `<think>…</think>` 拆到 `reasoning`，未闭合的 `<think>`（被截断）之后的内容一律不进入正文。测活/预览仍可显示推理兜底文本，但带 `text_from_reasoning` 标记。
+- 共享 LLM 运行时（插件 `ctx.ai.complete`、AI 命令）拒绝 `text_from_reasoning` 的结果：`finish_reason=length` 时报 `reasoning_truncated`（“模型输出被截断：最大输出 Token 已被推理过程耗尽，没有给出最终答案”），否则报 `no_final_answer`，fallback 链会尝试下一个 Provider；同时记 info 日志（Provider、模型、finish_reason、max_tokens、输出与推理 Token、推理字数）。插件侧映射为新异常 `AIResponseTruncated`（`AIUnavailableError` 子类），`AIResult` 新增 `reasoning`、`reasoning_tokens`、`finish_reason`，`text` 只含最终 content；`ctx.ai.stream_complete` 跳过推理增量（`LLMStreamChunk.is_reasoning`）。
+- `ctx.ai.complete` 新增 `thinking="disabled"|"enabled"`：对智谱 / Z.ai、DeepSeek 下发 `thinking={"type": ...}`，对 DashScope（Qwen3）下发 `enable_thinking`，其它上游不下发。
+- 推理模型输出 Token 下限：新增配置 `PLUGIN_AI_REASONING_MIN_OUTPUT_TOKENS`（默认 4096，0 关闭），模型名属于常见推理系列（GLM-4.5+/GLM-5、DeepSeek-R1/Reasoner、QwQ/Qwen3、Kimi K2/K3、o1/o3/o4、GPT-5 等）或模型清单声明推理档位时，插件 `complete` 请求的 `max_tokens` 低于该值会自动抬高（受 `PLUGIN_AI_MAX_OUTPUT_TOKENS` 上限约束，`thinking="disabled"` 时不抬高）。
+
+### 交互 Bot
+
+- 访客模式 inline 消息编辑支持 Rich Message：`edit_message` 同时带 `inline_message_id` 与 `rich_message` 时走 `editMessageText(inline_message_id, rich_message)`（Bot API 10.2 文档确认 rich_message 同样适用于 inline 消息，但不能直传/按 URL 上传新文件），“🤔 占位后编辑”的表格、标题等终于能原生渲染；失败如实记 `telegram_api_error`、不静默降级。实时 MessageOps 新增能力标记 `inline_rich_edit = True`。配套插件 interaction-ai-chat 0.4.3 已优先使用并在失败时退回 HTML。
+- `docs/PLUGIN-API-REFERENCE.md` 补充 `AIResult.reasoning`、`AIResponseTruncated`、`thinking` 参数、推理模型输出下限与 inline Rich 编辑。
+
 ## [0.106.0-beta.1] - 2026-10-26 · minor（次版本预发布） · Agent Skills、插件 AI 能力与配置表单
 
 ### Agent Skills
