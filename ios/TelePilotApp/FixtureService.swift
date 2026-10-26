@@ -121,16 +121,14 @@ actor FixtureService: AppServing {
     }
 
     func logout() async throws {}
-    /// 含超长行与不可断行 URL，用于检查差异视图换行、不横向溢出。
-    static let agentSkillDiffFixture = [
-        "--- 默认版本（插件内置）", "+++ 当前版本（你的修改）", "@@ -1,9 +1,10 @@",
-        " 上下文一", " 上下文二", " 上下文三", " 上下文四",
-        "-默认版本",
-        "+我的版本",
-        "+- 结果整理成表格，列为：标题、大小、做种/下载、优惠（Free/2xFree/50% 等）、发布时间。标题列写成加粗的详情页链接，不要再单独放“详情页”列。按做种数从高到低排列，同名多版本时优先显示官种。",
-        "+https://example.com/" + String(repeating: "a", count: 200),
-        " 尾部一", " 尾部二", " 尾部三", " 尾部四"
-    ].joined(separator: "\n")
+    /// 含超长行与不可断行 URL，用于检查代码对比视图换行、不横向溢出。
+    static let agentSkillLongLine = "- 结果整理成表格，列为：标题、大小、做种/下载、优惠（Free/2xFree/50% 等）、发布时间。标题列写成加粗的详情页链接，不要再单独放“详情页”列。按做种数从高到低排列，同名多版本时优先显示官种。"
+    static let agentSkillUpstreamMarkdown = (["---", "name: group-helper", "description: 群聊答疑助手", "---", "", "# 群聊答疑助手", "", "## PT 站点搜索", "",
+                                              agentSkillLongLine.replacingOccurrences(of: "做种/下载、", with: ""), ""]
+                                             + (1...12).map { "- 第 \($0) 条规则：保持简短。" }).joined(separator: "\n")
+    static let agentSkillCurrentMarkdown = (["---", "name: group-helper", "description: 群聊答疑助手", "---", "", "# 群聊答疑助手", "", "## PT 站点种子搜索", "",
+                                             agentSkillLongLine, "https://example.com/" + String(repeating: "a", count: 200), ""]
+                                            + (1...12).map { "- 第 \($0) 条规则：保持简短。" }).joined(separator: "\n")
 
     /// Agent Skills 界面测试数据：一个已安装 skill、一个插件内置（有新默认版本）、一个 TelePilot 内置。
     static func agentSkillFixture(_ path: String, method: String, body: JSONValue?) -> JSONValue {
@@ -161,9 +159,9 @@ actor FixtureService: AppServing {
         let item = all.first { $0["name"]?.stringValue == name } ?? installed
         if rest.hasSuffix("/upstream") {
             return ["name": .string(name), "owner_plugin": "interaction-ai-chat", "user_modified": true, "upstream_changed": true,
-                    "upstream_version": "0.4.0", "current_skill_md": "---\nname: group-helper\n---\n我的版本",
-                    "upstream_skill_md": "---\nname: group-helper\n---\n默认版本",
-                    "diff": .string(Self.agentSkillDiffFixture)]
+                    "upstream_version": "0.4.0", "current_skill_md": .string(Self.agentSkillCurrentMarkdown),
+                    "upstream_skill_md": .string(Self.agentSkillUpstreamMarkdown),
+                    "diff": "--- 默认版本（插件内置）\n+++ 当前版本（你的修改）\n@@ -8 +8 @@\n-## PT 站点搜索\n+## PT 站点种子搜索"]
         }
         if rest.contains("/files/") { return ["name": .string(name), "path": "reference.md", "content": "参考资料示例。", "truncated": false] }
         if rest.hasSuffix("/update") { return ["skill": item, "changed": false] }

@@ -111,11 +111,17 @@ final class AssistantUITests: XCTestCase {
         for _ in 0..<4 where !(diffLink.exists && diffLink.isHittable) { app.swipeUp() }
         XCTAssertTrue(diffLink.waitForExistence(timeout: 5))
         diffLink.tap()
-        let toggle = app.switches["skills.diff.onlyChanges"].firstMatch
-        XCTAssertTrue(toggle.waitForExistence(timeout: 10))
+        let stats = app.descendants(matching: .any)["skills.diff.stats"].firstMatch
+        XCTAssertTrue(stats.waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["+3"].exists)
+        XCTAssertTrue(app.staticTexts["−2"].exists)
+        // 未改动的大段折叠为「展开 N 行」
+        let gap = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "展开")).firstMatch
+        XCTAssertTrue(gap.waitForExistence(timeout: 5))
         let longLine = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@", "新增：- 结果整理成表格")).firstMatch
         for _ in 0..<4 where !longLine.exists { app.swipeUp() }
         XCTAssertTrue(longLine.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@", "删除：## PT 站点搜索")).firstMatch.exists)
         // 长行换行：不超出窗口宽度
         let window = app.windows.firstMatch.frame
         XCTAssertLessThanOrEqual(longLine.frame.maxX, window.maxX + 1)

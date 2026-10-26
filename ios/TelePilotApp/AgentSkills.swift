@@ -664,9 +664,13 @@ struct AgentSkillUpstreamView: View {
     @State private var busy = false
     @State private var confirmingRestore = false
     @State private var confirmingKeep = false
-    @State private var onlyChanges = true
+    @State private var expandedGaps: Set<Int> = []
+    @State private var chosenLayout: AgentSkillDiffLayout?
+    @State private var codeDiff: AgentSkillCodeDiff?
+    @Environment(\.horizontalSizeClass) private var sizeClass
 
-    private var parsedDiff: AgentSkillDiff { AgentSkillDiff(upstream?["diff"]?.stringValue ?? "") }
+    /// 宽屏（iPad、大屏横屏）默认双栏，紧凑宽度固定统一视图。
+    private var layout: AgentSkillDiffLayout { sizeClass == .regular ? (chosenLayout ?? .split) : .unified }
 
     var body: some View {
         List {
@@ -676,38 +680,57 @@ struct AgentSkillUpstreamView: View {
                     Button("重新读取", systemImage: "arrow.clockwise") { Task { await load() } }
                 }
             } else if let upstream {
-                let diff = parsedDiff
                 Section {
                     if upstream["upstream_changed"]?.boolValue == true {
                         Label("插件默认版本 \(upstream["upstream_version"]?.stringValue ?? "") 有更新。", systemImage: "sparkles").foregroundStyle(.orange)
                     }
-                    Text("“−”是默认版本（插件内置）的内容，“+”是你当前保存的内容；长行自动换行。").font(.footnote).foregroundStyle(.secondary)
-                    if !diff.lines.isEmpty {
-                        Toggle(isOn: $onlyChanges) { Label("只看改动", systemImage: "line.3.horizontal.decrease.circle") }
-                            .accessibilityIdentifier("skills.diff.onlyChanges")
+                    Text("红底“−”是默认版本（插件内置），绿底“+”是你当前保存的版本；改动的字词深色标出，长行自动换行。").font(.footnote).foregroundStyle(.secondary)
+                    if let codeDiff, codeDiff.changed {
+                        HStack(spacing: 10) {
+                            Text("+\(codeDiff.added)").foregroundStyle(.green)
+                            Text("−\(codeDiff.removed)").foregroundStyle(.red)
+                            Spacer()
+                            let gaps = codeDiff.gapIDs(layout)
+                            if !gaps.isEmpty {
+                                let all = gaps.isSubset(of: expandedGaps)
+                                Button(all ? "折叠未改动" : "全部展开", systemImage: "arrow.up.and.down") {
+                                    expandedGaps = all ? [] : gaps
+                                }
+                                .font(.footnote)
+                                .buttonStyle(.borderless)
+                            }
+                        }
+                        .font(.subheadline.monospacedDigit().weight(.semibold))
+                        .accessibilityElement(children: .contain)
+                        .accessibilityIdentifier("skills.diff.stats")
+                        if sizeClass == .regular {
+                            Picker("对比视图", selection: Binding(get: { layout }, set: { chosenLayout = $0; expandedGaps = [] })) {
+                                Text("双栏").tag(AgentSkillDiffLayout.split)
+                                Text("统一").tag(AgentSkillDiffLayout.unified)
+                            }
+                            .pickerStyle(.segmented)
+                        }
                     }
                 }
                 Section {
-                    if diff.lines.isEmpty {
-                        Text("当前内容与默认版本相同。").foregroundStyle(.secondary)
-                    } else {
-                        ForEach(diff.rows(onlyChanges: onlyChanges)) { row in
-                            AgentSkillDiffRowView(row: row) { onlyChanges = false }
-                                .listRowInsets(EdgeInsets(top: 2, leading: 10, bottom: 2, trailing: 10))
-                                .listRowBackground(row.background)
+                    if let codeDiff {
+                        if !codeDiff.changed {
+                            Text("当前内容与默认版本相同。").foregroundStyle(.secondary)
+                        } else {
+                            ForEach(codeDiff.visibleRows(layout, expanded: expandedGaps)) { row in
+                                AgentSkillCodeDiffRowView(row: row) { id in expandedGaps.insert(id) }
+                                    .listRowInsets(EdgeInsets())
+                                    .listRowSeparator(.hidden)
+                                    .listRowBackground(row.rowBackground)
+                            }
                         }
+                    } else {
+                        ProgressView("正在对比…")
                     }
                 } header: {
-                    HStack {
-                        Text("差异")
-                        Spacer()
-                        if !diff.lines.isEmpty {
-                            Text("+\(diff.added)  −\(diff.removed)").monospacedDigit()
-                                .accessibilityLabel("新增 \(diff.added) 行，删除 \(diff.removed) 行")
-                        }
-                    }
+                    Text(layout == .split ? "默认版本 ｜ 当前版本" : "差异")
                 } footer: {
-                    if diff.truncated { Text("差异较长，只显示前 3000 行。") }
+                    if codeDiff?.degraded == true { Text("内容较长，改动区按整段显示，未逐行对齐。") }
                 }
                 Section("默认版本全文") {
                     NavigationLink {
@@ -743,7 +766,15 @@ struct AgentSkillUpstreamView: View {
     }
 
     private func load() async {
-        do { upstream = try await model.request(path: AgentSkillAPI.path(name) + "/upstream"); error = nil }
+        do {
+            let value = try await model.request(path: AgentSkillAPI.path(name) + "/upstream")
+            upstream = value
+            error = nil
+            let old = value["upstream_skill_md"]?.stringValue ?? ""
+            let new = value["current_skill_md"]?.stringValue ?? ""
+            codeDiff = await Task.detached(priority: .userInitiated) { AgentSkillCodeDiff(old: old, new: new) }.value
+            expandedGaps = []
+        }
         catch { self.error = AgentSkillAPI.message(error) }
     }
 
@@ -764,105 +795,369 @@ struct AgentSkillUpstreamView: View {
     }
 }
 
-// MARK: - 差异解析与行视图
+// MARK: - 代码对比（行号、红绿底、字词级高亮、折叠未改动段）
 
-/// 服务器 unified diff（默认版本 → 当前版本）的解析结果；与 Web `frontend/src/lib/skillDiff.ts` 同一规则。
-struct AgentSkillDiff {
-    enum Kind { case file, hunk, add, del, context, meta, gap }
-    struct Line: Identifiable {
-        let id: Int
-        let kind: Kind
-        let text: String
-        var hidden = 0
-        var background: Color? {
-            switch kind {
-            case .add: Color.green.opacity(0.14)
-            case .del: Color.red.opacity(0.14)
-            case .hunk: Color.blue.opacity(0.08)
-            default: nil
-            }
-        }
+/// 与 Web `frontend/src/lib/skillDiff.ts` 同一算法：裁掉公共前后缀后做 LCS 行对齐，
+/// 修改行再按“空白 / 英文单词 / 单个汉字或标点”分词做字词级对比。
+enum AgentSkillDiffLayout: Hashable { case split, unified }
+enum AgentSkillDiffKind: Hashable { case equal, del, add }
+
+struct AgentSkillDiffSegment: Hashable {
+    let text: String
+    let changed: Bool
+}
+
+struct AgentSkillDiffCell: Hashable {
+    let kind: AgentSkillDiffKind
+    let text: String
+    let oldNo: Int?
+    let newNo: Int?
+    var segments: [AgentSkillDiffSegment]?
+}
+
+struct AgentSkillDiffRow: Identifiable {
+    enum Content {
+        case unified(AgentSkillDiffCell)
+        case split(left: AgentSkillDiffCell?, right: AgentSkillDiffCell?)
+        case gap(id: Int, count: Int)
     }
+    let id: String
+    let content: Content
+    /// 折叠段内的原始行，展开时原样插回。
+    var children: [AgentSkillDiffRow] = []
 
-    let lines: [Line]
-    let added: Int
-    let removed: Int
-    let truncated: Bool
-
-    init(_ diff: String) {
-        var rows = diff.replacingOccurrences(of: "\r\n", with: "\n").components(separatedBy: "\n")
-        if rows.last == "" { rows.removeLast() }
-        truncated = rows.count > 3000
-        var result: [Line] = []
-        var added = 0, removed = 0
-        for (index, raw) in rows.prefix(3000).enumerated() {
-            if raw.hasPrefix("+++") || raw.hasPrefix("---") {
-                result.append(Line(id: index, kind: .file, text: raw))
-            } else if raw.hasPrefix("@@") {
-                result.append(Line(id: index, kind: .hunk, text: raw))
-            } else if raw.hasPrefix("+") {
-                added += 1; result.append(Line(id: index, kind: .add, text: String(raw.dropFirst())))
-            } else if raw.hasPrefix("-") {
-                removed += 1; result.append(Line(id: index, kind: .del, text: String(raw.dropFirst())))
-            } else if raw.hasPrefix("\\") {
-                result.append(Line(id: index, kind: .meta, text: raw))
-            } else {
-                result.append(Line(id: index, kind: .context, text: raw.hasPrefix(" ") ? String(raw.dropFirst()) : raw))
-            }
+    var rowBackground: Color? {
+        switch content {
+        case .unified(let cell): AgentSkillCodeDiff.lineColor(cell.kind)
+        case .gap: Color.blue.opacity(0.07)
+        case .split: nil
         }
-        lines = result
-        self.added = added
-        self.removed = removed
-    }
-
-    /// `onlyChanges` 时只保留改动前后 `keep` 行上下文，其余合并为一条“已折叠 N 行”。
-    func rows(onlyChanges: Bool, keep: Int = 2) -> [Line] {
-        guard onlyChanges else { return lines }
-        let changed = lines.map { $0.kind == .add || $0.kind == .del }
-        func near(_ index: Int) -> Bool {
-            (max(0, index - keep)...min(lines.count - 1, index + keep)).contains { changed[$0] }
-        }
-        var out: [Line] = []
-        var gap = 0
-        for (index, line) in lines.enumerated() {
-            if line.kind != .context || near(index) {
-                if gap > 0 { out.append(Line(id: -index - 1, kind: .gap, text: "", hidden: gap)); gap = 0 }
-                out.append(line)
-            } else {
-                gap += 1
-            }
-        }
-        if gap > 0 { out.append(Line(id: -lines.count - 1, kind: .gap, text: "", hidden: gap)) }
-        return out
     }
 }
 
-struct AgentSkillDiffRowView: View {
-    let row: AgentSkillDiff.Line
-    let expand: () -> Void
+struct AgentSkillCodeDiff: Sendable {
+    struct Op: Sendable {
+        let kind: AgentSkillDiffKind
+        let text: String
+        let oldNo: Int?
+        let newNo: Int?
+    }
+
+    let ops: [Op]
+    let added: Int
+    let removed: Int
+    let degraded: Bool
+    var changed: Bool { added + removed > 0 }
+
+    init(old: String, new: String) {
+        let a = Self.lines(old)
+        let b = Self.lines(new)
+        var start = 0
+        while start < a.count, start < b.count, a[start] == b[start] { start += 1 }
+        var endA = a.count
+        var endB = b.count
+        while endA > start, endB > start, a[endA - 1] == b[endB - 1] { endA -= 1; endB -= 1 }
+        let midA = Array(a[start..<endA])
+        let midB = Array(b[start..<endB])
+        let pairs = Self.lcs(midA, midB)
+        var result: [Op] = []
+        var oldNo = 1
+        var newNo = 1
+        func equal(_ text: String) { result.append(Op(kind: .equal, text: text, oldNo: oldNo, newNo: newNo)); oldNo += 1; newNo += 1 }
+        func del(_ text: String) { result.append(Op(kind: .del, text: text, oldNo: oldNo, newNo: nil)); oldNo += 1 }
+        func add(_ text: String) { result.append(Op(kind: .add, text: text, oldNo: nil, newNo: newNo)); newNo += 1 }
+        for index in 0..<start { equal(a[index]) }
+        var i = 0
+        var j = 0
+        for (pi, pj) in pairs ?? [] {
+            while i < pi { del(midA[i]); i += 1 }
+            while j < pj { add(midB[j]); j += 1 }
+            equal(midA[i]); i += 1; j += 1
+        }
+        while i < midA.count { del(midA[i]); i += 1 }
+        while j < midB.count { add(midB[j]); j += 1 }
+        for index in endA..<a.count { equal(a[index]) }
+        ops = result
+        added = result.filter { $0.kind == .add }.count
+        removed = result.filter { $0.kind == .del }.count
+        degraded = pairs == nil
+    }
+
+    static func lines(_ text: String) -> [String] {
+        let normalized = text.replacingOccurrences(of: "\r\n", with: "\n")
+        if normalized.isEmpty { return [] }
+        var rows = normalized.components(separatedBy: "\n")
+        if rows.last == "" { rows.removeLast() }
+        return rows
+    }
+
+    static func lcs<T: Equatable>(_ a: [T], _ b: [T], limit: Int = 1_500_000) -> [(Int, Int)]? {
+        let n = a.count
+        let m = b.count
+        if n == 0 || m == 0 { return [] }
+        if n * m > limit { return nil }
+        let width = m + 1
+        var table = [Int32](repeating: 0, count: (n + 1) * width)
+        for i in stride(from: n - 1, through: 0, by: -1) {
+            for j in stride(from: m - 1, through: 0, by: -1) {
+                table[i * width + j] = a[i] == b[j]
+                    ? table[(i + 1) * width + j + 1] + 1
+                    : max(table[(i + 1) * width + j], table[i * width + j + 1])
+            }
+        }
+        var pairs: [(Int, Int)] = []
+        var i = 0
+        var j = 0
+        while i < n && j < m {
+            if a[i] == b[j] { pairs.append((i, j)); i += 1; j += 1 }
+            else if table[(i + 1) * width + j] >= table[i * width + j + 1] { i += 1 }
+            else { j += 1 }
+        }
+        return pairs
+    }
+
+    /// 连续空白、连续 ASCII 字母数字各为一段，其余（汉字、标点）逐字一段。
+    static func tokens(_ text: String) -> [String] {
+        var out: [String] = []
+        var current = ""
+        var currentType = 0
+        for character in text {
+            let type = character.isWhitespace ? 1 : (character.isASCII && (character.isLetter || character.isNumber || character == "_")) ? 2 : 0
+            if type != 0 && type == currentType {
+                current.append(character)
+            } else {
+                if !current.isEmpty { out.append(current) }
+                current = String(character)
+                currentType = type
+            }
+        }
+        if !current.isEmpty { out.append(current) }
+        return out
+    }
+
+    static func inline(_ old: String, _ new: String) -> ([AgentSkillDiffSegment], [AgentSkillDiffSegment]) {
+        let whole = ([AgentSkillDiffSegment(text: old, changed: true)], [AgentSkillDiffSegment(text: new, changed: true)])
+        let a = tokens(old)
+        let b = tokens(new)
+        guard a.count <= 1500, b.count <= 1500, let pairs = lcs(a, b) else { return whole }
+        let kept = pairs.reduce(0) { $0 + (a[$1.0].trimmingCharacters(in: .whitespaces).isEmpty ? 0 : a[$1.0].count) }
+        let total = max(old.filter { !$0.isWhitespace }.count, new.filter { !$0.isWhitespace }.count, 1)
+        if Double(kept) / Double(total) < 0.3 { return whole }
+        var changedA = Array(repeating: true, count: a.count)
+        var changedB = Array(repeating: true, count: b.count)
+        for (i, j) in pairs { changedA[i] = false; changedB[j] = false }
+        return (merge(a, changedA), merge(b, changedB))
+    }
+
+    private static func merge(_ tokens: [String], _ changed: [Bool]) -> [AgentSkillDiffSegment] {
+        var out: [AgentSkillDiffSegment] = []
+        for (index, token) in tokens.enumerated() {
+            if let last = out.last, last.changed == changed[index] {
+                out[out.count - 1] = AgentSkillDiffSegment(text: last.text + token, changed: last.changed)
+            } else {
+                out.append(AgentSkillDiffSegment(text: token, changed: changed[index]))
+            }
+        }
+        return out
+    }
+
+    private enum Block { case equal([Op]), change(dels: [Op], adds: [Op]) }
+
+    private var blocks: [Block] {
+        var out: [Block] = []
+        for op in ops {
+            switch (op.kind, out.last) {
+            case (.equal, .equal(let list)?): out[out.count - 1] = .equal(list + [op])
+            case (.equal, _): out.append(.equal([op]))
+            case (.del, .change(let dels, let adds)?): out[out.count - 1] = .change(dels: dels + [op], adds: adds)
+            case (.add, .change(let dels, let adds)?): out[out.count - 1] = .change(dels: dels, adds: adds + [op])
+            case (.del, _): out.append(.change(dels: [op], adds: []))
+            case (.add, _): out.append(.change(dels: [], adds: [op]))
+            }
+        }
+        return out
+    }
+
+    private static func cell(_ op: Op, segments: [AgentSkillDiffSegment]? = nil) -> AgentSkillDiffCell {
+        AgentSkillDiffCell(kind: op.kind, text: op.text, oldNo: op.oldNo, newNo: op.newNo, segments: segments)
+    }
+
+    /// 生成行（未改动长段折叠为 gap，距改动保留 `context` 行）。
+    func rows(_ layout: AgentSkillDiffLayout, context: Int = 3) -> [AgentSkillDiffRow] {
+        let blocks = self.blocks
+        var gapID = 0
+        var out: [AgentSkillDiffRow] = []
+        for (index, block) in blocks.enumerated() {
+            switch block {
+            case .equal(let list):
+                let rendered: [AgentSkillDiffRow] = list.map { op in
+                    let c = Self.cell(op)
+                    let id = "e\(op.oldNo ?? 0)-\(op.newNo ?? 0)"
+                    return layout == .split ? AgentSkillDiffRow(id: id, content: .split(left: c, right: c)) : AgentSkillDiffRow(id: id, content: .unified(c))
+                }
+                let head = index == 0 ? 0 : context
+                let tail = index == blocks.count - 1 ? 0 : context
+                if rendered.count <= head + tail + 1 {
+                    out += rendered
+                } else {
+                    let hidden = Array(rendered[head..<(rendered.count - tail)])
+                    out += rendered[0..<head]
+                    out.append(AgentSkillDiffRow(id: "g\(gapID)", content: .gap(id: gapID, count: hidden.count), children: hidden))
+                    gapID += 1
+                    out += rendered[(rendered.count - tail)...]
+                }
+            case .change(let dels, let adds):
+                let inlines: [([AgentSkillDiffSegment], [AgentSkillDiffSegment])?] = dels.indices.map { k in
+                    k < adds.count ? Self.inline(dels[k].text, adds[k].text) : nil
+                }
+                if layout == .split {
+                    for k in 0..<max(dels.count, adds.count) {
+                        let left = k < dels.count ? Self.cell(dels[k], segments: inlines[k]?.0) : nil
+                        let right = k < adds.count ? Self.cell(adds[k], segments: k < inlines.count ? inlines[k]?.1 : nil) : nil
+                        out.append(AgentSkillDiffRow(id: "c\(left?.oldNo ?? 0)-\(right?.newNo ?? 0)", content: .split(left: left, right: right)))
+                    }
+                } else {
+                    for (k, op) in dels.enumerated() {
+                        out.append(AgentSkillDiffRow(id: "d\(op.oldNo ?? 0)", content: .unified(Self.cell(op, segments: inlines[k]?.0))))
+                    }
+                    for (k, op) in adds.enumerated() {
+                        out.append(AgentSkillDiffRow(id: "a\(op.newNo ?? 0)", content: .unified(Self.cell(op, segments: k < inlines.count ? inlines[k]?.1 : nil))))
+                    }
+                }
+            }
+        }
+        return out
+    }
+
+    func gapIDs(_ layout: AgentSkillDiffLayout) -> Set<Int> {
+        Set(rows(layout).compactMap { row -> Int? in
+            if case .gap(let id, _) = row.content { return id }
+            return nil
+        })
+    }
+
+    func visibleRows(_ layout: AgentSkillDiffLayout, expanded: Set<Int>) -> [AgentSkillDiffRow] {
+        rows(layout).flatMap { row -> [AgentSkillDiffRow] in
+            if case .gap(let id, _) = row.content, expanded.contains(id) { return row.children }
+            return [row]
+        }
+    }
+
+    static func lineColor(_ kind: AgentSkillDiffKind) -> Color? {
+        switch kind {
+        case .add: Color.green.opacity(0.13)
+        case .del: Color.red.opacity(0.13)
+        case .equal: nil
+        }
+    }
+
+    static func gutterColor(_ kind: AgentSkillDiffKind) -> Color {
+        switch kind {
+        case .add: Color.green.opacity(0.22)
+        case .del: Color.red.opacity(0.22)
+        case .equal: Color.secondary.opacity(0.08)
+        }
+    }
+
+    static func attributed(_ cell: AgentSkillDiffCell) -> AttributedString {
+        guard let segments = cell.segments else { return AttributedString(cell.text.isEmpty ? " " : cell.text) }
+        var out = AttributedString()
+        for segment in segments {
+            var piece = AttributedString(segment.text)
+            if segment.changed {
+                let highlight: Color = cell.kind == .add ? Color.green.opacity(0.4) : Color.red.opacity(0.4)
+                piece.backgroundColor = highlight
+                piece.inlinePresentationIntent = .stronglyEmphasized
+            }
+            out += piece
+        }
+        return out.characters.isEmpty ? AttributedString(" ") : out
+    }
+
+    static func spokenLabel(_ cell: AgentSkillDiffCell) -> String {
+        switch cell.kind {
+        case .add: "新增：\(cell.text)"
+        case .del: "删除：\(cell.text)"
+        case .equal: cell.text
+        }
+    }
+}
+
+struct AgentSkillCodeDiffRowView: View {
+    let row: AgentSkillDiffRow
+    let expand: (Int) -> Void
+
     var body: some View {
-        if row.kind == .gap {
-            Button(action: expand) {
-                Label("已折叠 \(row.hidden) 行未改动内容", systemImage: "ellipsis")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-        } else {
-            HStack(alignment: .firstTextBaseline, spacing: 6) {
-                Text(row.kind == .add ? "+" : row.kind == .del ? "−" : " ")
-                    .font(.caption.monospaced().weight(.semibold))
-                    .foregroundStyle(row.kind == .add ? Color.green : row.kind == .del ? Color.red : Color.secondary)
-                    .frame(width: 10)
-                    .accessibilityHidden(true)
-                Text(row.text.isEmpty ? " " : row.text)
-                    .font(row.kind == .file ? .caption.monospaced().weight(.semibold) : .caption.monospaced())
-                    .foregroundStyle(row.kind == .hunk || row.kind == .file || row.kind == .meta ? Color.secondary : Color.primary)
-                    // 长行在行内换行，不撑宽列表
-                    .fixedSize(horizontal: false, vertical: true)
+        switch row.content {
+        case .gap(let id, let count):
+            Button { expand(id) } label: {
+                Label("展开 \(count) 行未改动内容", systemImage: "arrow.up.and.down")
+                    .font(.caption)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .textSelection(.enabled)
+                    .padding(.horizontal, 12).padding(.vertical, 6)
             }
-            .accessibilityElement(children: .combine)
-            .accessibilityLabel(row.kind == .add ? "新增：\(row.text)" : row.kind == .del ? "删除：\(row.text)" : row.text)
+            .accessibilityIdentifier("skills.diff.gap")
+        case .unified(let cell):
+            HStack(alignment: .top, spacing: 0) {
+                HStack(alignment: .top, spacing: 0) {
+                    number(cell.oldNo)
+                    number(cell.newNo)
+                }
+                .background(AgentSkillCodeDiff.gutterColor(cell.kind))
+                Text(cell.kind == .add ? "+" : cell.kind == .del ? "−" : " ")
+                    .foregroundStyle(cell.kind == .add ? Color.green : cell.kind == .del ? Color.red : Color.clear)
+                    .frame(width: 16)
+                code(cell)
+            }
+            .font(.caption.monospaced())
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(AgentSkillCodeDiff.spokenLabel(cell))
+            .accessibilityValue(cell.newNo.map { "当前第 \($0) 行" } ?? cell.oldNo.map { "默认第 \($0) 行" } ?? "")
+        case .split(let left, let right):
+            HStack(alignment: .top, spacing: 0) {
+                side(left, number: left?.oldNo)
+                Divider()
+                side(right, number: right?.newNo)
+            }
+            .font(.caption.monospaced())
+        }
+    }
+
+    private func number(_ value: Int?) -> some View {
+        Text(value.map(String.init) ?? "")
+            .monospacedDigit()
+            .foregroundStyle(.secondary)
+            .frame(width: 34, alignment: .trailing)
+            .padding(.trailing, 4)
+            .padding(.vertical, 2)
+    }
+
+    private func code(_ cell: AgentSkillDiffCell) -> some View {
+        Text(AgentSkillCodeDiff.attributed(cell))
+            // 长行在行内换行，不撑宽列表
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.vertical, 2)
+            .padding(.trailing, 8)
+            .textSelection(.enabled)
+    }
+
+    @ViewBuilder
+    private func side(_ cell: AgentSkillDiffCell?, number value: Int?) -> some View {
+        if let cell {
+            HStack(alignment: .top, spacing: 0) {
+                number(value).background(AgentSkillCodeDiff.gutterColor(cell.kind))
+                code(cell).padding(.leading, 6)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .background(AgentSkillCodeDiff.lineColor(cell.kind))
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(AgentSkillCodeDiff.spokenLabel(cell))
+            .accessibilityValue(value.map { "第 \($0) 行" } ?? "")
+        } else {
+            Color.secondary.opacity(0.08)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .accessibilityHidden(true)
         }
     }
 }
