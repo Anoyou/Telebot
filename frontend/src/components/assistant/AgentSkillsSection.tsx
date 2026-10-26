@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import type React from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -30,7 +30,7 @@ import { Select } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { AGENT_SKILLS_INTRO } from "@/lib/agentSkillOptions";
-import { collapseSkillDiffContext, parseSkillDiff, type SkillDiffLine } from "@/lib/skillDiff";
+import { SkillDiffViewer } from "@/components/assistant/SkillDiffViewer";
 import { cn } from "@/lib/utils";
 
 const QUERY_KEY = ["agent-skills"];
@@ -347,7 +347,11 @@ function DetailDialog({ name, onClose, onChanged }: { name: string; onClose: () 
               ) : upstreamQ.isLoading ? <Skeleton className="h-40 w-full" /> : upstreamQ.isError ? (
                 <p className="text-sm text-destructive">{getErrMsg(upstreamQ.error)}</p>
               ) : upstreamQ.data ? (
-                <SkillDiffView diff={upstreamQ.data.diff} dirty={dirty} />
+                <SkillDiffViewer
+                  oldText={upstreamQ.data.upstream_skill_md}
+                  newText={draft ?? upstreamQ.data.current_skill_md}
+                  newLabel={dirty ? "当前编辑（未保存）" : "当前版本（你的修改）"}
+                />
               ) : null}
             </div>
           ) : null}
@@ -396,62 +400,5 @@ function TabButton({ active, onClick, icon, children }: { active: boolean; onCli
       {icon}
       {children}
     </button>
-  );
-}
-
-const DIFF_LINE_STYLE: Record<SkillDiffLine["kind"], string> = {
-  add: "bg-emerald-500/15 text-emerald-900 dark:bg-emerald-400/15 dark:text-emerald-100",
-  del: "bg-rose-500/15 text-rose-900 dark:bg-rose-400/15 dark:text-rose-100",
-  hunk: "bg-sky-500/10 text-sky-800 dark:text-sky-200",
-  file: "font-semibold text-muted-foreground",
-  meta: "italic text-muted-foreground",
-  context: "text-foreground/80",
-};
-const DIFF_MARK: Record<SkillDiffLine["kind"], string> = { add: "+", del: "−", hunk: "", file: "", meta: "", context: "" };
-
-/** 默认版本 → 当前版本的差异：增删行着色并保留 +/− 标记（不只靠颜色），长行自动换行，可折叠未改动内容。 */
-function SkillDiffView({ diff, dirty }: { diff: string; dirty: boolean }) {
-  const [onlyChanges, setOnlyChanges] = useState(true);
-  const parsed = useMemo(() => parseSkillDiff(diff), [diff]);
-  const rows = useMemo(
-    () => (onlyChanges ? collapseSkillDiffContext(parsed.lines) : parsed.lines),
-    [onlyChanges, parsed.lines],
-  );
-  if (!parsed.lines.length) {
-    return <p className="rounded-md border bg-muted/30 px-3 py-6 text-center text-xs text-muted-foreground">当前内容与默认版本一致。</p>;
-  }
-  return (
-    <div className="min-w-0 space-y-2" data-testid="agent-skill-diff">
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-        <span className="font-medium text-emerald-700 dark:text-emerald-300">+{parsed.added} 行</span>
-        <span className="font-medium text-rose-700 dark:text-rose-300">−{parsed.removed} 行</span>
-        <span>“−” 为默认版本（插件内置），“+” 为你当前保存的版本</span>
-        <label className="ml-auto flex items-center gap-1.5">
-          <Switch className="scale-90" checked={onlyChanges} onCheckedChange={setOnlyChanges} aria-label="只看改动" />
-          只看改动
-        </label>
-      </div>
-      {dirty ? <p className="text-xs text-amber-700 dark:text-amber-300">编辑区有未保存的修改；对比的是服务器上已保存的版本。</p> : null}
-      <div className="overflow-hidden rounded-md border bg-muted/20 font-mono text-[12px] leading-5">
-        {rows.map((row, index) =>
-          row.kind === "gap" ? (
-            <button
-              key={`gap-${index}`}
-              type="button"
-              className="block w-full border-y border-dashed border-border/60 px-3 py-1 text-left text-[11px] text-muted-foreground hover:bg-muted/50"
-              onClick={() => setOnlyChanges(false)}
-            >
-              ⋯ 已折叠 {row.count} 行未改动内容（点击展开全部）
-            </button>
-          ) : (
-            <div key={index} data-diff-kind={row.kind} className={cn("flex min-w-0 gap-2 px-3", DIFF_LINE_STYLE[row.kind])}>
-              <span aria-hidden className="w-3 shrink-0 select-none text-center opacity-80">{DIFF_MARK[row.kind]}</span>
-              <span className="sr-only">{row.kind === "add" ? "新增：" : row.kind === "del" ? "删除：" : ""}</span>
-              <span className="min-w-0 flex-1 whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{row.text || "\u00a0"}</span>
-            </div>
-          ),
-        )}
-      </div>
-    </div>
   );
 }

@@ -60,6 +60,11 @@ const skillMd = [
   ...Array.from({ length: 30 }, (_, index) => `- 第 ${index + 1} 条规则：保持简短。`),
 ].join("\n");
 
+const upstreamMd = skillMd
+  .replace("## PT 站点种子搜索", "## PT 站点搜索")
+  .replace(LONG_LINE, LONG_LINE.replace("做种/下载、", ""))
+  .replace(`${UNBROKEN}\n`, "");
+
 const diff = [
   "--- 默认版本（插件内置）",
   "+++ 当前版本（你的修改）",
@@ -112,7 +117,7 @@ async function installSkillRoutes(page: Page) {
         upstream_changed: true,
         upstream_version: "0.4.0",
         current_skill_md: skillMd,
-        upstream_skill_md: skillMd,
+        upstream_skill_md: upstreamMd,
         diff,
       }),
     });
@@ -199,25 +204,49 @@ test.describe("Agent Skills 独立入口与详情对话框", () => {
       await detail.getByRole("tab", { name: "与默认版本对比" }).click();
       const diffView = detail.getByTestId("agent-skill-diff");
       await expect(diffView).toBeVisible();
-      await expect(diffView.getByText("+3 行")).toBeVisible();
-      await expect(diffView.getByText("−2 行")).toBeVisible();
+      // 宽屏默认双栏，窄屏自动统一视图
+      await expect(diffView).toHaveAttribute("data-diff-view", mobile ? "unified" : "split");
+      await expect(diffView.getByLabel("新增 3 行")).toHaveText("+3");
+      await expect(diffView.getByLabel("删除 2 行")).toHaveText("−2");
       await expect(diffView.locator('[data-diff-kind="add"]')).toHaveCount(3);
       await expect(diffView.locator('[data-diff-kind="del"]')).toHaveCount(2);
-      await expect(diffView.getByText(/已折叠 \d+ 行未改动内容/).first()).toBeVisible();
+      // 字词级高亮：只标出新增的“种子”和“做种/下载、”
+      const addWords = await diffView.locator('mark[data-diff-word="add"]').allTextContents();
+      expect(addWords).toContain("种子");
+      expect(addWords.join("")).toContain("做种/下载、");
+      // 两侧行号：删除行带默认版本行号，未改动大段折叠为「展开 N 行」
+      await expect(diffView.locator("[data-diff-gap]").first()).toContainText(/展开 \d+ 行/);
       await expectNoHorizontalOverflow(page, "[data-testid=agent-skill-detail]");
-      // 增删行颜色可区分
-      const [addBg, delBg] = await Promise.all([
+      const [addBg, delBg, wordBg] = await Promise.all([
         diffView.locator('[data-diff-kind="add"]').first().evaluate((el) => getComputedStyle(el).backgroundColor),
         diffView.locator('[data-diff-kind="del"]').first().evaluate((el) => getComputedStyle(el).backgroundColor),
+        diffView.locator('mark[data-diff-word="add"]').first().evaluate((el) => getComputedStyle(el).backgroundColor),
       ]);
       expect(addBg).not.toBe(delBg);
       expect(addBg).not.toBe("rgba(0, 0, 0, 0)");
+      expect(wordBg).not.toBe(addBg);
       await page.screenshot({ path: testInfo.outputPath(`agent-skill-diff-${testInfo.project.name}-${theme}.png`) });
 
-      // 展开全部后仍不溢出
-      await diffView.getByRole("switch", { name: "只看改动" }).click();
-      await expect(diffView.getByText(/已折叠/)).toHaveCount(0);
+      // 展开折叠段后行号连续、仍不溢出
+      const gaps = diffView.locator("[data-diff-gap]");
+      const before = await gaps.count();
+      await gaps.first().click();
+      await expect(gaps).toHaveCount(before - 1);
+      await diffView.getByRole("button", { name: "全部展开" }).click();
+      await expect(gaps).toHaveCount(0);
+      await expect(diffView.getByText("第 30 条规则：保持简短。")).toHaveCount(mobile ? 1 : 2);
       await expectNoHorizontalOverflow(page, "[data-testid=agent-skill-detail]");
+
+      // 手动切换另一种视图也不溢出
+      await diffView.getByRole("radio", { name: mobile ? "双栏" : "统一" }).click();
+      await expect(diffView).toHaveAttribute("data-diff-view", mobile ? "split" : "unified");
+      // 切换视图不重复渲染行
+      await expect(diffView.locator('[data-diff-kind="add"]')).toHaveCount(3);
+      await expect(diffView.locator('[data-diff-kind="del"]')).toHaveCount(2);
+      await diffView.getByRole("button", { name: "全部展开" }).click();
+      await expect(diffView.getByText("第 30 条规则：保持简短。")).toHaveCount(mobile ? 2 : 1);
+      await expectNoHorizontalOverflow(page, "[data-testid=agent-skill-detail]");
+      await page.screenshot({ path: testInfo.outputPath(`agent-skill-diff-alt-${testInfo.project.name}-${theme}.png`) });
       fixture.assertClean();
     });
   }
