@@ -97,4 +97,28 @@ final class AssistantUITests: XCTestCase {
         editor.typeText(String(repeating: "a", count: 201))
         XCTAssertFalse(save.isEnabled)
     }
+
+    func testSkillsToolbarEntryOpensListAndDiffWraps() {
+        let app = openAssistant()
+        // Skills 直接在助手工具栏，不再藏在“助手菜单”
+        let entry = app.buttons["assistant.skills"]
+        XCTAssertTrue(entry.waitForExistence(timeout: 5))
+        entry.tap()
+        let row = app.descendants(matching: .any)["skills.row.group-helper"].firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: 10))
+        row.tap()
+        let diffLink = app.buttons["查看与默认版本的差异"].firstMatch
+        for _ in 0..<4 where !(diffLink.exists && diffLink.isHittable) { app.swipeUp() }
+        XCTAssertTrue(diffLink.waitForExistence(timeout: 5))
+        diffLink.tap()
+        let toggle = app.switches["skills.diff.onlyChanges"].firstMatch
+        XCTAssertTrue(toggle.waitForExistence(timeout: 10))
+        let longLine = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@", "新增：- 结果整理成表格")).firstMatch
+        for _ in 0..<4 where !longLine.exists { app.swipeUp() }
+        XCTAssertTrue(longLine.waitForExistence(timeout: 5))
+        // 长行换行：不超出窗口宽度
+        let window = app.windows.firstMatch.frame
+        XCTAssertLessThanOrEqual(longLine.frame.maxX, window.maxX + 1)
+        XCTAssertGreaterThan(longLine.frame.height, 30)
+    }
 }

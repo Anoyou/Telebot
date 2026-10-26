@@ -9,6 +9,7 @@ import {
   MessageCircle,
   Server,
   Settings2,
+  Sparkles,
   Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -58,7 +59,7 @@ import { listAccounts } from "@/api/accounts";
 import type { LLMProviderOut } from "@/api/types";
 import { matrixToPickerItems, type ModelPickerValue } from "@/components/ai/ModelPicker";
 import { Composer, type ComposerAttachment } from "@/components/assistant/Composer";
-import { AgentSkillsSection } from "@/components/assistant/AgentSkillsSection";
+import { AgentSkillsDialog } from "@/components/assistant/AgentSkillsSection";
 import { AgentMark } from "@/components/assistant/AgentMark";
 import { useAssistantDock } from "@/components/assistant/AssistantDock";
 import { Conversation, type LiveBubble } from "@/components/assistant/Conversation";
@@ -242,6 +243,7 @@ export function AssistantIndex() {
   const [retryingMessageId, setRetryingMessageId] = useState<number | null>(null);
   const [activeRun, setActiveRun] = useState<StoredRun | null>(null);
   const [configOpen, setConfigOpen] = useState(false);
+  const [skillsOpen, setSkillsOpen] = useState(false);
   const [mobileHeaderExpanded, setMobileHeaderExpanded] = useState(false);
   const [memoryDraft, setMemoryDraft] = useState("");
   const [runtimeSelection, setRuntimeSelection] = useState<{
@@ -437,6 +439,15 @@ export function AssistantIndex() {
     // 消费一次 query，避免刷新后反复抢焦点；保留 path 便于分享
     const next = new URLSearchParams(searchParams);
     next.delete("session");
+    setSearchParams(next, { replace: true });
+  }, [searchParams, setSearchParams]);
+
+  // 深链 /assistant?skills=1 打开 Skills 对话框（插件配置等处的“去安装”链接）
+  useEffect(() => {
+    if (searchParams.get("skills") == null) return;
+    setSkillsOpen(true);
+    const next = new URLSearchParams(searchParams);
+    next.delete("skills");
     setSearchParams(next, { replace: true });
   }, [searchParams, setSearchParams]);
 
@@ -1802,10 +1813,11 @@ export function AssistantIndex() {
       </div>
 
       <div className="shrink-0 overflow-hidden rounded-lg border border-border/70 bg-muted/20 sm:overflow-visible sm:p-2.5">
+        <div className="flex items-center sm:hidden">
         <button
           type="button"
           data-assistant-mobile-summary
-          className="flex h-12 w-full items-center gap-2 px-3 text-left sm:hidden"
+          className="flex h-12 min-w-0 flex-1 items-center gap-2 pl-3 pr-2 text-left"
           aria-expanded={mobileHeaderExpanded}
           onClick={() => setMobileHeaderExpanded((value) => !value)}
         >
@@ -1819,6 +1831,23 @@ export function AssistantIndex() {
           <span className="ml-auto shrink-0 text-[11px] text-primary">展开后可配置</span>
           <ChevronDown className={`h-4 w-4 shrink-0 text-muted-foreground transition-transform ${mobileHeaderExpanded ? "rotate-180" : ""}`} />
         </button>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="mr-2 h-9 shrink-0 px-2.5"
+          data-assistant-skills-button="mobile"
+          aria-haspopup="dialog"
+          aria-expanded={skillsOpen}
+          onClick={() => {
+            setConfigOpen(false);
+            setSkillsOpen(true);
+          }}
+        >
+          <Sparkles className="h-4 w-4" />
+          Skills
+        </Button>
+        </div>
         <div data-assistant-mobile-settings className={`${mobileHeaderExpanded && !configOpen ? "block" : "hidden"} border-t p-2.5 sm:block sm:border-t-0 sm:p-0`}>
         <div className="flex items-center justify-between gap-2">
           <div className="flex min-w-0 items-center gap-2">
@@ -1833,6 +1862,22 @@ export function AssistantIndex() {
             </Link>
           </div>
           <div className="flex shrink-0 items-center gap-1.5">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="hidden h-8 px-2.5 sm:inline-flex"
+              data-assistant-skills-button="desktop"
+              aria-haspopup="dialog"
+              aria-expanded={skillsOpen}
+              onClick={() => {
+                setConfigOpen(false);
+                setSkillsOpen(true);
+              }}
+            >
+              <Sparkles className="h-4 w-4" />
+              Skills
+            </Button>
             <Button
               type="button"
               variant="outline"
@@ -2148,10 +2193,10 @@ export function AssistantIndex() {
               )}
             </div>
           </div>
-          <AgentSkillsSection />
         </div>
         </>
       ) : null}
+      <AgentSkillsDialog open={skillsOpen} onOpenChange={setSkillsOpen} />
 
       <div data-assistant-chat-window className="flex min-h-[min(20rem,40dvh)] flex-1 overflow-hidden rounded-xl border bg-card sm:min-h-[min(22rem,48dvh)]">
         <SessionDrawer

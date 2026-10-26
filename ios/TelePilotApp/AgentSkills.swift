@@ -2,9 +2,9 @@ import SwiftUI
 import TelePilotCore
 import UniformTypeIdentifiers
 
-// MARK: - Agent Skills（助手 → Skills；AI → 配置 → Skills）
+// MARK: - Agent Skills（助手页右上角「Skills」按钮；AI → 配置 → Skills）
 //
-// 与 Web「助手 → Skills」对应：列表、详情、编辑 SKILL.md、内置 skill 的差异 / 恢复默认 / 保留我的修改、
+// 与 Web 助手页顶部「Skills」按钮对应：列表、详情、编辑 SKILL.md、内置 skill 的差异 / 恢复默认 / 保留我的修改、
 // 安装（GitHub 链接、zip 链接、粘贴、选择 .zip / .md 文件）与卸载。写操作不自动重试；结果不确定时如实提示。
 
 enum AgentSkillAPI {
@@ -115,7 +115,7 @@ struct AgentSkillItem: Identifiable, Hashable {
 
 // MARK: - 列表
 
-/// 从助手菜单打开时使用的 sheet 包装。
+/// 从助手页工具栏「Skills」按钮打开时使用的 sheet 包装。
 struct AgentSkillsSheet: View {
     @Environment(\.dismiss) private var dismiss
     var body: some View {
@@ -664,10 +664,9 @@ struct AgentSkillUpstreamView: View {
     @State private var busy = false
     @State private var confirmingRestore = false
     @State private var confirmingKeep = false
+    @State private var onlyChanges = true
 
-    private var diffLines: [String] {
-        Array((upstream?["diff"]?.stringValue ?? "").split(separator: "\n", omittingEmptySubsequences: false).prefix(3000).map(String.init))
-    }
+    private var parsedDiff: AgentSkillDiff { AgentSkillDiff(upstream?["diff"]?.stringValue ?? "") }
 
     var body: some View {
         List {
@@ -677,25 +676,38 @@ struct AgentSkillUpstreamView: View {
                     Button("重新读取", systemImage: "arrow.clockwise") { Task { await load() } }
                 }
             } else if let upstream {
+                let diff = parsedDiff
                 Section {
                     if upstream["upstream_changed"]?.boolValue == true {
                         Label("插件默认版本 \(upstream["upstream_version"]?.stringValue ?? "") 有更新。", systemImage: "sparkles").foregroundStyle(.orange)
                     }
-                    Text("以“-”开头的是默认版本的内容，以“+”开头的是你当前的内容。").font(.footnote).foregroundStyle(.secondary)
+                    Text("“−”是默认版本（插件内置）的内容，“+”是你当前保存的内容；长行自动换行。").font(.footnote).foregroundStyle(.secondary)
+                    if !diff.lines.isEmpty {
+                        Toggle(isOn: $onlyChanges) { Label("只看改动", systemImage: "line.3.horizontal.decrease.circle") }
+                            .accessibilityIdentifier("skills.diff.onlyChanges")
+                    }
                 }
-                Section("差异") {
-                    if diffLines.allSatisfy({ $0.isEmpty }) {
+                Section {
+                    if diff.lines.isEmpty {
                         Text("当前内容与默认版本相同。").foregroundStyle(.secondary)
                     } else {
-                        ForEach(Array(diffLines.enumerated()), id: \.offset) { _, line in
-                            Text(line.isEmpty ? " " : line)
-                                .font(.caption.monospaced())
-                                .foregroundStyle(line.hasPrefix("+") && !line.hasPrefix("+++") ? Color.green
-                                                 : line.hasPrefix("-") && !line.hasPrefix("---") ? Color.red : Color.primary)
-                                .textSelection(.enabled)
-                                .listRowInsets(EdgeInsets(top: 1, leading: 12, bottom: 1, trailing: 12))
+                        ForEach(diff.rows(onlyChanges: onlyChanges)) { row in
+                            AgentSkillDiffRowView(row: row) { onlyChanges = false }
+                                .listRowInsets(EdgeInsets(top: 2, leading: 10, bottom: 2, trailing: 10))
+                                .listRowBackground(row.background)
                         }
                     }
+                } header: {
+                    HStack {
+                        Text("差异")
+                        Spacer()
+                        if !diff.lines.isEmpty {
+                            Text("+\(diff.added)  −\(diff.removed)").monospacedDigit()
+                                .accessibilityLabel("新增 \(diff.added) 行，删除 \(diff.removed) 行")
+                        }
+                    }
+                } footer: {
+                    if diff.truncated { Text("差异较长，只显示前 3000 行。") }
                 }
                 Section("默认版本全文") {
                     NavigationLink {
@@ -749,6 +761,109 @@ struct AgentSkillUpstreamView: View {
         }
         await onChange()
         dismiss()
+    }
+}
+
+// MARK: - 差异解析与行视图
+
+/// 服务器 unified diff（默认版本 → 当前版本）的解析结果；与 Web `frontend/src/lib/skillDiff.ts` 同一规则。
+struct AgentSkillDiff {
+    enum Kind { case file, hunk, add, del, context, meta, gap }
+    struct Line: Identifiable {
+        let id: Int
+        let kind: Kind
+        let text: String
+        var hidden = 0
+        var background: Color? {
+            switch kind {
+            case .add: Color.green.opacity(0.14)
+            case .del: Color.red.opacity(0.14)
+            case .hunk: Color.blue.opacity(0.08)
+            default: nil
+            }
+        }
+    }
+
+    let lines: [Line]
+    let added: Int
+    let removed: Int
+    let truncated: Bool
+
+    init(_ diff: String) {
+        var rows = diff.replacingOccurrences(of: "\r\n", with: "\n").components(separatedBy: "\n")
+        if rows.last == "" { rows.removeLast() }
+        truncated = rows.count > 3000
+        var result: [Line] = []
+        var added = 0, removed = 0
+        for (index, raw) in rows.prefix(3000).enumerated() {
+            if raw.hasPrefix("+++") || raw.hasPrefix("---") {
+                result.append(Line(id: index, kind: .file, text: raw))
+            } else if raw.hasPrefix("@@") {
+                result.append(Line(id: index, kind: .hunk, text: raw))
+            } else if raw.hasPrefix("+") {
+                added += 1; result.append(Line(id: index, kind: .add, text: String(raw.dropFirst())))
+            } else if raw.hasPrefix("-") {
+                removed += 1; result.append(Line(id: index, kind: .del, text: String(raw.dropFirst())))
+            } else if raw.hasPrefix("\\") {
+                result.append(Line(id: index, kind: .meta, text: raw))
+            } else {
+                result.append(Line(id: index, kind: .context, text: raw.hasPrefix(" ") ? String(raw.dropFirst()) : raw))
+            }
+        }
+        lines = result
+        self.added = added
+        self.removed = removed
+    }
+
+    /// `onlyChanges` 时只保留改动前后 `keep` 行上下文，其余合并为一条“已折叠 N 行”。
+    func rows(onlyChanges: Bool, keep: Int = 2) -> [Line] {
+        guard onlyChanges else { return lines }
+        let changed = lines.map { $0.kind == .add || $0.kind == .del }
+        func near(_ index: Int) -> Bool {
+            (max(0, index - keep)...min(lines.count - 1, index + keep)).contains { changed[$0] }
+        }
+        var out: [Line] = []
+        var gap = 0
+        for (index, line) in lines.enumerated() {
+            if line.kind != .context || near(index) {
+                if gap > 0 { out.append(Line(id: -index - 1, kind: .gap, text: "", hidden: gap)); gap = 0 }
+                out.append(line)
+            } else {
+                gap += 1
+            }
+        }
+        if gap > 0 { out.append(Line(id: -lines.count - 1, kind: .gap, text: "", hidden: gap)) }
+        return out
+    }
+}
+
+struct AgentSkillDiffRowView: View {
+    let row: AgentSkillDiff.Line
+    let expand: () -> Void
+    var body: some View {
+        if row.kind == .gap {
+            Button(action: expand) {
+                Label("已折叠 \(row.hidden) 行未改动内容", systemImage: "ellipsis")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        } else {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text(row.kind == .add ? "+" : row.kind == .del ? "−" : " ")
+                    .font(.caption.monospaced().weight(.semibold))
+                    .foregroundStyle(row.kind == .add ? Color.green : row.kind == .del ? Color.red : Color.secondary)
+                    .frame(width: 10)
+                    .accessibilityHidden(true)
+                Text(row.text.isEmpty ? " " : row.text)
+                    .font(row.kind == .file ? .caption.monospaced().weight(.semibold) : .caption.monospaced())
+                    .foregroundStyle(row.kind == .hunk || row.kind == .file || row.kind == .meta ? Color.secondary : Color.primary)
+                    // 长行在行内换行，不撑宽列表
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .textSelection(.enabled)
+            }
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(row.kind == .add ? "新增：\(row.text)" : row.kind == .del ? "删除：\(row.text)" : row.text)
+        }
     }
 }
 
@@ -1007,7 +1122,7 @@ struct AgentSkillMultiSelectField: View {
             NoticeView(title: "读取 skills 失败", message: error)
             Button("重新读取", systemImage: "arrow.clockwise") { Task { await load() } }
         } else if options.isEmpty && stale.isEmpty {
-            Text("还没有对插件启用的 skill。可在“助手 → Skills”安装并打开“对插件启用”。").font(.footnote).foregroundStyle(.secondary)
+            Text("还没有对插件启用的 skill。可在助手页右上角的“Skills”按钮里安装并打开“对插件启用”。").font(.footnote).foregroundStyle(.secondary)
         }
         ForEach(options) { option in
             Toggle(isOn: binding(option.name)) {

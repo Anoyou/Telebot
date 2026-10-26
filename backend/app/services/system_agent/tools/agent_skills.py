@@ -84,7 +84,7 @@ def _source_args(args: dict[str, Any]) -> dict[str, Any]:
     if not source:
         source = "paste" if args.get("skill_md") else "github"
     if source not in _AGENT_SOURCES:
-        raise ValueError("助手只支持 github、zip_url、paste 三种来源；上传 zip 请在 App 或 Web 的 Skills 页面操作。")
+        raise ValueError("助手只支持 github、zip_url、paste 三种来源；上传 zip 请在 Web 助手页顶部「Skills」按钮或 iOS App 助手页右上角「Skills」按钮里操作。")
     return {
         "source": source,
         "url": str(args.get("url") or "").strip() or None,

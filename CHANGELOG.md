@@ -25,6 +25,22 @@
 
 ## [Unreleased]
 
+## [0.106.0-beta.7] - 2026-10-26 · patch（补丁预发布） · Agent Skills 独立入口，详情 / 差异对话框不再溢出
+
+### 改进
+
+- Web：Skills 不再藏在助手页「配置」面板最底部（长期记忆下面），改为「配置」按钮旁单独的「Skills」按钮（带图标），点开独立对话框管理安装、启停、编辑与卸载；窄屏（移动端 Web）在顶部摘要行右侧直接显示「Skills」按钮，不用先展开。配置面板里已移除 Skills 区块。新增深链 `/assistant?skills=1`，插件配置页 skill 多选为空时的“去安装”链接直接打开该对话框。
+- 所有入口提示文案统一为新位置：插件配置控件说明、System Agent 的 `agent-skills` 技能说明与“上传 zip”报错、`docs/PLUGIN-API-REFERENCE.md`（Web 助手页顶部「Skills」按钮 / iOS 助手页右上角「Skills」按钮）。
+
+### 修复
+
+- Web skill 详情 / 编辑对话框：SKILL.md 编辑区与「默认版本 vs 当前版本」差异里的长行不换行，把对话框网格列撑宽、横向溢出整个对话框。现在对话框加宽到 `max-w-5xl`、限高并只滚动正文（标题与按钮常驻），网格列改为 `minmax(0,1fr)`；编辑区与差异自动换行（`whitespace-pre-wrap` + `overflow-wrap:anywhere`，不可断行的长 URL 也会折行）。插件内置 skill 在「编辑 / 与默认版本对比」两个标签间切换；差异按行着色（新增绿、删除红、块头蓝）并保留 +/− 标记、显示 +N/−M 统计，默认「只看改动」折叠远离改动的未修改内容，可一键展开；编辑区有未保存内容时提示对比的是已保存版本。暗色 / 亮色、桌面 / 平板 / 375px 窄屏均不溢出。列表行在窄屏不再被来源徽标挤没名称。
+- 新增前端单测 `skillDiff.test.ts`（diff 解析与折叠）与入口文案用例，Playwright 用例 `tests/visual/agent-skills.spec.ts`（入口位置、配置面板不再含 Skills、深链、对话框宽度与无横向溢出、diff 着色与折叠，三种视口 × 亮暗主题截图）。
+
+### iOS
+
+- iOS 0.11.1：助手页右上角工具栏新增「Skills」按钮（`sparkles.rectangle.stack`），不再藏在“助手菜单”里；AI → 配置 → Skills 入口保留。「与默认版本对比」改为逐行着色（新增绿底、删除红底，保留 +/− 标记与“新增/删除”朗读）、显示 +N/−M 统计、默认只看改动并可展开全部，长行与长 URL 在行内换行不撑宽。新增 UI 测试覆盖工具栏入口与差异换行。
+
 ## [0.106.0-beta.6] - 2026-10-26 · patch（补丁预发布） · Cloudflare Access 兼容：iOS 用 Google 验证，Web 过期提示
 
 ### 修复
