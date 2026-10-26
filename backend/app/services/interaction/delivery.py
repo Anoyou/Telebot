@@ -1772,12 +1772,19 @@ class InteractionDeliveryExecutor:
                 ok = True
             except Exception as exc:  # noqa: BLE001
                 error = account_bot_service.sanitize_bot_error(exc, token=token)
-                result = {"error": error, "error_code": "telegram_api_error"}
+                result = {
+                    "error": error,
+                    "error_code": "telegram_api_error",
+                    "telegram_error": error,
+                    "rich": rich_message is not None,
+                }
                 await self.write_log(
                     self.incoming,
                     "warn",
                     "interaction inline message edit failed",
                     error=error,
+                    telegram_error=error,
+                    rich=rich_message is not None,
                     **self.log_context(self.incoming),
                 )
         await record_action(

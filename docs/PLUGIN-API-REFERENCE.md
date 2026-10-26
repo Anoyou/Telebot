@@ -328,7 +328,7 @@ if not result["ok"]:
     )
 ```
 
-返回字段固定为 `ok`、`executed`、`failed`、`skipped`、`dropped`、`kinds`。`ok` 仅在没有失败动作且没有因批次上限丢弃动作时为 `true`；`kinds` 按执行顺序列出规范化动作类型。平台仍会为失败批次写结构化插件告警和逐动作 ActionEvent，插件不需要解析日志来判断成功。交互缓冲 facade 也提供同一返回契约，供延迟或即时提交，但 Interaction Bot 入口仍拒绝 `click_callback_button`。
+返回字段固定为 `ok`、`executed`、`failed`、`skipped`、`dropped`、`kinds`；0.106.0-beta.3+ 有失败动作时另带 `errors`：`[{"index", "type", "error_code", "error"}]`（`error` 已脱敏，Telegram 拒绝时为 Telegram 返回的错误描述，`error_code=telegram_api_error`），插件可直接记进自己的日志；平台的“插件消息动作部分执行失败”告警同时带 `error_code`、`error` 与 `telegram_error`。`ok` 仅在没有失败动作且没有因批次上限丢弃动作时为 `true`；`kinds` 按执行顺序列出规范化动作类型。平台仍会为失败批次写结构化插件告警和逐动作 ActionEvent，插件不需要解析日志来判断成功。交互缓冲 facade 也提供同一返回契约，供延迟或即时提交，但 Interaction Bot 入口仍拒绝 `click_callback_button`。
 
 `read_saved_message_id(key)` 与 `delete_saved_message_id(key)` 只访问平台拥有、按账号和插件隔离的 message-id 命名空间，不开放原始 Redis。普通纯 `BufferedMessageOps` 没有 live 存储时读取返回 `None`、删除返回 `False`；平台注入的交互 adapter 和 live facade 会转发到真实存储。
 
@@ -829,6 +829,7 @@ MessageOps 对应 `await ctx.messages.answer_guest_query(text=..., parse_mode="h
 - `answer_guest_query` 动作可带 `save_message_id_key`，平台把 `answerGuestQuery` 返回的 `inline_message_id` 存到该键（2 小时）；实时 MessageOps 下可用 `await ctx.messages.read_saved_inline_message_id(key)` 读回。
 - 之后返回 `{"type": "edit_message", "inline_message_id": "...", "text": "...", "parse_mode": "html"}` 编辑这条 inline 消息（只支持交互 Bot）。访客事件里带 `inline_message_id` 的编辑会直接执行，不进一次性回复缓冲。
 - 0.106.0-beta.2+：`edit_message` 同时带 `inline_message_id` 与 `rich_message` 时，平台用 `editMessageText(inline_message_id, rich_message)` 以 Telegram 原生 Rich Message 编辑 inline 消息（Bot API：rich_message 同样适用于 inline 消息，但不能直传或按 URL 上传新文件），访客模式的“🤔”占位因此也能原生渲染表格、标题等。Rich 编辑失败如实记失败、不静默降级，插件读取批次结果后自行退回 HTML。实时 MessageOps 以类属性 `ctx.messages.inline_rich_edit = True` 声明该能力，插件可据此判断，旧平台没有该属性时保持 HTML 编辑。
+- 0.106.0-beta.3+：上一条在 beta.2 只对“入口返回的动作”生效；插件在入口里用 `await ctx.messages.apply([...])` 实时编辑 inline 消息时，执行器仍要求 `chat_id` + `message_id`，请求未发到 Telegram 就以 `target_message_id_missing` 失败。beta.3 起实时 `apply` 同样支持 `inline_message_id` 编辑（`rich_message` 与 `text`/`parse_mode`，HTML 实体被拒时退回纯文本，只走交互 Bot），并以类属性 `ctx.messages.live_inline_edit = True` 声明；需要“🤔 占位后实时 Rich 编辑”的插件应以该属性为准。
 - `edit_message` 可带 `send_on_edit_failure: true`：编辑失败时改为发送一条新消息，结果带 `edit_fallback_send: true`。
 - `send_message` / `edit_message` / `answer_guest_query` 使用 `parse_mode="html"` 时，Telegram 因实体解析失败拒绝（`can't parse entities` 等）会去掉标签以纯文本重试一次，插件不必自行兜底。
 

@@ -2114,11 +2114,14 @@ async def _apply_userbot_event_bus_actions(
         run_action_batch,
     )
 
+    prepared: list[dict[str, Any]] = []
+
     def _prepare(action: dict[str, Any]) -> dict[str, Any]:
         action.setdefault(
             "context",
             trace_log_context(trace, plugin_key=plugin_key, entry_key=entry_key),
         )
+        prepared.append(action)
         return action
 
     async def _on_truncated(action: dict[str, Any]) -> bool:
@@ -2428,6 +2431,8 @@ async def _apply_userbot_event_bus_actions(
         prepare_action=_prepare,
     )
     if return_result:
+        # run_action_batch 会复制动作；执行器挂在副本上的失败原因在这里收集。
+        batch.errors = _collect_action_errors(prepared)
         return batch
     return batch.failed > 0
 
@@ -4089,12 +4094,123 @@ async def _apply_userbot_send_rich_message_action(
     return False
 
 
+def _remember_action_error(action: dict[str, Any], error_code: str, error: str | None) -> None:
+    """把失败原因（已脱敏）挂在动作上，供 ``ctx.messages.apply`` 汇总回插件与运行日志。
+
+    ``_tp_`` 前缀字段只在 worker 进程内流转，不会写进 Trace 的动作快照之外的地方。
+    """
+
+    action["_tp_error"] = {"error_code": str(error_code or "action_failed"), "error": str(error or "")[:500]}
+
+
+async def _apply_userbot_edit_inline_message_action(
+    state: _AccountState,
+    action: dict[str, Any],
+    inline_message_id: str,
+) -> bool:
+    """实时链路（``ctx.messages.apply``）编辑 inline 消息：Guest Mode 占位后编辑为最终答案。
+
+    inline 消息只能由发出它的交互 Bot 编辑：``rich_message`` 走
+    ``editMessageText(inline_message_id, rich_message)``，否则走
+    ``editMessageText(inline_message_id, text, parse_mode)``，HTML 实体被拒时退回纯文本。
+    Rich 编辑失败如实记录 Telegram 返回的错误描述，不静默降级。
+    """
+
+    from ...services.interaction.guest_reply import html_to_plain_text as guest_html_to_plain_text
+
+    rich_message = action.get("rich_message") if isinstance(action.get("rich_message"), dict) else None
+    text = str(action.get("text") or "").strip()
+    reply_markup = action.get("reply_markup") if isinstance(action.get("reply_markup"), dict) else None
+    options = action_send_via_options(action)
+
+    async def _fail(code: str, error: str) -> bool:
+        _remember_action_error(action, code, error)
+        detail: dict[str, Any] = {"inline_message_id": inline_message_id, "rich": rich_message is not None}
+        if code == "telegram_api_error":
+            detail["telegram_error"] = error
+        await record_action(action.get("context"), action, TRACE_STATUS_FAILED, error_code=code, error=error, result=detail)
+        await _emit_userbot_action_tap(
+            state,
+            action,
+            ACTION_EVENT_STATUS_FAILED,
+            channel="interaction_bot",
+            error_code=code,
+            error=error,
+            result=detail,
+        )
+        return False
+
+    if rich_message is None and not text:
+        return await _fail("empty_message_text", "edit_message text is empty")
+    if options and "interaction_bot" not in options:
+        return await _fail("unsupported_send_via", "inline message edit requires interaction_bot")
+    if _action_dev_mode_dry_run_enabled(state, action):
+        await _record_userbot_dry_run(
+            state,
+            action,
+            channel="interaction_bot",
+            result={
+                "dry_run": True,
+                "inline_message_id": inline_message_id,
+                "text": text,
+                "rich_message": rich_message,
+            },
+        )
+        return True
+    token = await _interaction_bot_token_for_account(state.account_id)
+    if not token:
+        return await _fail("bot_token_missing", "interaction bot token unavailable")
+    try:
+        if rich_message is not None:
+            result: Any = await account_bot_service.edit_inline_rich_message(
+                token,
+                inline_message_id,
+                rich_message,
+                reply_markup=reply_markup,
+            )
+        else:
+            parse_mode = "html" if _action_parse_mode(action) == "html" else None
+            try:
+                result = await account_bot_service.edit_inline_message(
+                    token,
+                    inline_message_id,
+                    text,
+                    reply_markup=reply_markup,
+                    parse_mode=parse_mode,
+                )
+            except Exception as exc:  # noqa: BLE001
+                if not parse_mode or not account_bot_service.is_bot_parse_entities_error(exc):
+                    raise
+                result = await account_bot_service.edit_inline_message(
+                    token,
+                    inline_message_id,
+                    guest_html_to_plain_text(text) or text,
+                    reply_markup=reply_markup,
+                    parse_mode=None,
+                )
+    except ValueError as exc:
+        # normalize_rich_message 的本地校验（超长、字段缺失等），请求未发出
+        return await _fail("invalid_rich_message", str(exc))
+    except Exception as exc:  # noqa: BLE001
+        return await _fail("telegram_api_error", account_bot_service.sanitize_bot_error(exc, token=token))
+    payload = {"ok": True, "inline_message_id": inline_message_id, "rich": rich_message is not None}
+    if isinstance(result, dict) and result.get("result") not in (None, True):
+        payload["result"] = result.get("result")
+    await record_action(action.get("context"), action, TRACE_STATUS_OK, actual_send_via="interaction_bot", result=payload)
+    await _emit_userbot_action_tap(state, action, ACTION_EVENT_STATUS_OK, channel="interaction_bot", result=payload)
+    return True
+
+
 async def _apply_userbot_edit_message_action(state: _AccountState, event: Any, action: dict[str, Any]) -> bool:
+    inline_message_id = str(action.get("inline_message_id") or "").strip()
+    if inline_message_id:
+        return await _apply_userbot_edit_inline_message_action(state, action, inline_message_id)
     rich_message = action.get("rich_message")
     if isinstance(rich_message, dict):
         target_chat_id = _action_chat_id(action, event)
         message_id = _int_or_none(action.get("message_id") or action.get("edit_message_id"))
         if target_chat_id is None or message_id is None:
+            _remember_action_error(action, "target_message_id_missing", "target chat_id or message_id missing")
             await record_action(
                 action.get("context"),
                 action,
@@ -4200,7 +4316,8 @@ async def _apply_userbot_edit_message_action(state: _AccountState, event: Any, a
                 break
             except Exception as exc:  # noqa: BLE001
                 last_code = "telegram_api_error"
-                last_error = f"{type(exc).__name__}: {exc}"
+                last_error = f"{type(exc).__name__}: {account_bot_service.sanitize_bot_error(exc, token=token)}"
+        _remember_action_error(action, last_code, last_error)
         await record_action(
             action.get("context"),
             action,
@@ -4318,6 +4435,7 @@ async def _apply_userbot_edit_message_action(state: _AccountState, event: Any, a
                 last_code = "telegram_api_error"
                 last_error = f"{type(exc).__name__}: {exc}"
                 continue
+    _remember_action_error(action, last_code, last_error)
     await record_action(action.get("context"), action, TRACE_STATUS_FAILED, error_code=last_code, error=last_error)
     await _emit_userbot_action_tap(
         state,
@@ -4928,6 +5046,7 @@ async def _apply_userbot_answer_guest_query_action(state: _AccountState, action:
         sent = await account_bot_service.answer_guest_query(token, guest_query_id, result=result)
     except Exception as exc:  # noqa: BLE001
         error = account_bot_service.sanitize_bot_error(exc, token=token)
+        _remember_action_error(action, "guest_answer_failed", error)
         await record_action(action.get("context"), action, TRACE_STATUS_FAILED, error_code="guest_answer_failed", error=error)
         await _emit_userbot_action_tap(
             state,
@@ -6193,6 +6312,25 @@ async def _invoke_plugin_with_resilience(
 _STATES: dict[int, _AccountState] = {}
 
 
+def _collect_action_errors(actions: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """取出执行器挂在动作上的失败原因（``_remember_action_error``），按动作顺序返回。"""
+
+    errors: list[dict[str, Any]] = []
+    for index, action in enumerate(actions):
+        info = action.get("_tp_error") if isinstance(action, dict) else None
+        if not isinstance(info, dict):
+            continue
+        errors.append(
+            {
+                "index": index,
+                "type": str(action.get("type") or ""),
+                "error_code": str(info.get("error_code") or "action_failed"),
+                "error": str(info.get("error") or ""),
+            }
+        )
+    return errors
+
+
 class _LiveMessageOps:
     """实时执行标准消息动作的插件 facade。
 
@@ -6203,6 +6341,10 @@ class _LiveMessageOps:
     # 能力标记：edit_message 同时给 inline_message_id 与 rich_message 时，平台用
     # editMessageText(inline_message_id, rich_message) 原地编辑 inline 消息（访客模式占位）。
     inline_rich_edit = True
+    # 0.106.0-beta.3 起实时 apply（本 facade）真正支持 inline_message_id 编辑（文本与 Rich），
+    # 并在结果的 ``errors`` 里带回失败原因；beta.2 只有返回动作链路支持，实时 apply 会报
+    # target_message_id_missing。插件据此判断能否“🤔 占位后 Rich 编辑”。
+    live_inline_edit = True
 
     def __init__(
         self,
@@ -6275,7 +6417,21 @@ class _LiveMessageOps:
                     "dropped": 0,
                     "kinds": [str(action.get("type") or "") for action in normalized],
                 }
+            errors = list(getattr(batch, "errors", None) or []) if isinstance(batch, ActionBatchResult) else []
+            if errors:
+                # 失败原因（已脱敏）一并返回给插件，并写进运行日志，不必再去翻动作记录。
+                result["errors"] = errors
             if not result["ok"]:
+                extra: dict[str, Any] = {}
+                telegram_error = next(
+                    (item["error"] for item in errors if item.get("error_code") == "telegram_api_error" and item.get("error")),
+                    None,
+                )
+                if telegram_error:
+                    extra["telegram_error"] = telegram_error
+                if errors:
+                    extra["error_code"] = errors[0].get("error_code")
+                    extra["error"] = errors[0].get("error")
                 await _log(
                     redis,
                     self._state.account_id,
@@ -6284,6 +6440,7 @@ class _LiveMessageOps:
                     source="plugin",
                     action_count=len(normalized),
                     action_result=result,
+                    **extra,
                     **context,
                 )
             return result
@@ -6400,7 +6557,10 @@ class _InteractionEntryMessageOps(BufferedMessageOps):
     # 能力标记：edit_message 同时给 inline_message_id 与 rich_message 时，平台用
     # editMessageText(inline_message_id, rich_message) 原地编辑 inline 消息（访客模式占位）。
     inline_rich_edit = True
-
+    # 0.106.0-beta.3 起实时 apply（本 facade）真正支持 inline_message_id 编辑（文本与 Rich），
+    # 并在结果的 ``errors`` 里带回失败原因；beta.2 只有返回动作链路支持，实时 apply 会报
+    # target_message_id_missing。插件据此判断能否“🤔 占位后 Rich 编辑”。
+    live_inline_edit = True
 
     def __init__(
         self,
