@@ -32,6 +32,8 @@ Dock 旁边的助手圆形按钮始终保留；Dock 的省略号菜单始终提�
 
 只接受有效 HTTPS 根地址，不接受 URL 中的用户名密码、查询参数、片段或反代子路径。使用私有 CA 时应先在设备上正确信任证书；App 不提供跳过证书验证或全局允许明文 HTTP 的开关。
 
+服务器前套了 Cloudflare Access（如邮箱白名单 + Google 登录）时，在登录页或 设置 → Cloudflare Access 点「使用 Google 验证」，在系统登录窗完成 Google 登录即可，Cloudflare 后台无需修改；Service Token 作为「高级」可选。详见 [docs/CLOUDFLARE-ACCESS.md](../docs/CLOUDFLARE-ACCESS.md)。
+
 免费 Personal Team 签名有有效期限制，到期需重新签名安装。付费开发者账号同样需要维护有效签名或测试分发构建；自用不要求公开上架。
 
 默认工程不强制申请推送 entitlement，普通自签可直接使用前台功能。需要 APNs 时，在 Xcode 为你的 App ID 添加 Push Notifications，并将自定义构建设置 `TELEPILOT_PUSH_ENTITLEMENTS` 设为 `TelePilotApp/TelePilot.entitlements`（或由 Xcode Signing & Capabilities 设置同等权限）。自签工具同样需要注入与描述文件一致的 `aps-environment`。App 从实际嵌入描述文件读取开发／生产环境，不根据 Debug／Release 猜测。
@@ -77,6 +79,7 @@ iOS App 的版本号独立于服务器版本：`MARKETING_VERSION`（显示版�
 - 写请求保留服务器的 `X-Requested-With` 与双提交 CSRF 校验，不修改服务器安全策略。
 - 密码、TOTP、OTP 和恢复码只在当次认证过程中使用，不写入偏好设置或日志。持久会话按服务器隔离保存到 Keychain。
 - 不共享浏览器 Cookie，不把认证信息交给网页或第三方服务，不自动跟随重定向泄露凭据。
+- Cloudflare Access 登录令牌（App 内 Google 验证取得）与可选的 Service Token 存钥匙串（按服务器隔离、仅本机），只作为 `cf-access-token` 或 `CF-Access-Client-Id` / `CF-Access-Client-Secret` 请求头发往该服务器；令牌转交轮询使用独立网络会话、不带 TelePilot 凭证；Access 拦截单独识别，其他重定向仍拒绝。
 - 401 清除失效会话。普通离线错误不等同于“未登录”。
 - 写请求网络失败不自动重试；先刷新确认服务器状态。服务器接受恢复请求，不等于进程已立即存活。
 - 助手创建任务使用持久化的客户端请求 ID；断线只恢复只读进度订阅，不自动重复发消息。待核对的本机记录只含任务／会话标识，不含消息正文或附件。

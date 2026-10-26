@@ -1,4 +1,5 @@
 import SwiftUI
+import TelePilotCore
 
 struct SettingsView: View {
     var embedded = false
@@ -47,6 +48,14 @@ struct SettingsView: View {
                         Link(destination: url) { Label("打开 Web 管理台", systemImage: "safari").frame(minHeight: 44) }
                             .accessibilityIdentifier("settings.openWeb")
                     }
+                    NavigationLink { CloudflareAccessSettingsView() } label: {
+                        Label {
+                            LabeledContent("Cloudflare Access") {
+                                Text(CloudflareAccessText.summary(model.cloudflareAccess))
+                            }
+                        } icon: { Image(systemName: "lock.icloud") }
+                    }
+                    .accessibilityIdentifier("settings.cfAccess")
                 }
                 Section {
                     Toggle(isOn: Binding(
@@ -104,6 +113,7 @@ struct SettingsView: View {
             .symbolRenderingMode(.hierarchical)
             .navigationTitle("设置").navigationBarTitleDisplayMode(.inline)
             .accessibilityIdentifier("settings.screen")
+            .task { _ = try? await model.loadCloudflareAccess() }
     }
 }
 
@@ -142,7 +152,9 @@ private struct SettingsLogoutConfirmation: ViewModifier {
                 .accessibilityIdentifier("settings.confirmLogout")
             Button("取消", role: .cancel) {}
         } message: {
-            Text("这会清除此设备的登录状态和已读取数据，不会停止服务器上的任务。")
+            Text(forgetServer
+                 ? "这会清除此设备的登录状态、已读取数据和这台服务器的 Cloudflare Access 登录与 Service Token，不会停止服务器上的任务。"
+                 : "这会清除此设备的登录状态和已读取数据，不会停止服务器上的任务。")
         }
     }
 }

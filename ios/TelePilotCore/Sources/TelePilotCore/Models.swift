@@ -137,12 +137,23 @@ public enum APIError: Error, LocalizedError, Sendable {
     case redirectRejected
     case secureStorage
     case sessionChanged
+    /// 请求被 Cloudflare Access 拦截（重定向到 `*.cloudflareaccess.com`／`/cdn-cgi/access/`，或 Access 的 401／403 页面）。
+    /// 请求没有到达 TelePilot，不清除登录会话，写操作也确定未执行。关联值说明这次带的是哪种 Access 凭证。
+    case cloudflareAccessRequired(CloudflareAccessCredentialKind)
+    /// App 内 Google 验证 Cloudflare Access 没有完成。
+    case cloudflareAccessLogin(CloudflareAccessLoginFailure)
+    case cloudflareAccessTokenInvalid
 
     public var isUnauthorized: Bool {
         switch self {
         case .unauthorized, .server(status: 401, code: _): true
         default: false
         }
+    }
+    /// 需要引导用户去填写／检查 Cloudflare Access Service Token。
+    public var isCloudflareAccess: Bool {
+        if case .cloudflareAccessRequired = self { return true }
+        return false
     }
     public var isIncompatibleResponse: Bool {
         switch self {
@@ -169,6 +180,21 @@ public enum APIError: Error, LocalizedError, Sendable {
         case .redirectRejected: "服务器返回了重定向。为保护登录信息，请直接填写最终 HTTPS 地址。"
         case .secureStorage: "无法访问系统钥匙串，请解锁设备后重试。"
         case .sessionChanged: "登录状态已改变，请重新打开此页面。"
+        case .cloudflareAccessRequired(let kind):
+            switch kind {
+            case .none: "这台服务器启用了 Cloudflare Access，请先用 Google 完成 Access 验证。"
+            case .expiredSession: "Cloudflare Access 登录已过期，请重新用 Google 验证。"
+            case .session: "Cloudflare Access 不再接受当前的登录（可能已在 Cloudflare 后台失效、策略已变更或开启了 Binding Cookie），请重新用 Google 验证。"
+            case .serviceToken: "Cloudflare Access 拒绝了已填写的 Service Token。请检查 Client ID 与 Client Secret 是否正确、Token 是否过期，并确认该 Access 应用里有一条 Action 为 Service Auth 且包含此 Token 的策略；或清除 Service Token 改用 Google 验证。"
+            }
+        case .cloudflareAccessLogin(let failure):
+            switch failure {
+            case .notProtected: "没有在这台服务器前找到 Cloudflare Access 应用，无需验证。如果确实启用了 Access，请确认服务器地址正确。"
+            case .cancelled: "已取消 Cloudflare Access 验证。"
+            case .timedOut: "等待 Google 登录完成超时，请重新验证。"
+            case .failed: "未能取回 Cloudflare Access 登录凭证，请重新验证。若一直失败，可在“高级”中改用 Service Token。"
+            }
+        case .cloudflareAccessTokenInvalid: "请同时填写 Cloudflare Access 的 Client ID 和 Client Secret（不能包含空格或换行）。"
         case .server(let status, let code):
             switch code {
             case "NO_USER": "服务器尚未创建管理员，请先在 Web 管理台完成初始化。"

@@ -13,13 +13,36 @@ protocol AppServing: Sendable {
     func resumeAccount(id: Int) async throws
     func logout() async throws
     func clearLocalSession() async throws
+    /// 本服务器保存在钥匙串里的 Cloudflare Access 凭证（Google 验证的登录令牌与高级 Service Token）。
+    func cloudflareAccessConfig() async throws -> CloudflareAccessConfig
+    /// 保存（nil 为清除）Service Token（高级），之后所有请求立即生效。不影响 Google 验证的登录令牌。
+    func setCloudflareAccess(_ credentials: CloudflareAccessCredentials?) async throws
+    /// 保存（nil 为清除）App 内 Google 验证取得的 Access 登录令牌。
+    func setCloudflareAccessSession(_ session: CloudflareAccessSession?) async throws
+    /// 开始 App 内 Google 验证：返回要在系统登录窗打开的地址和等待令牌的操作。
+    func startCloudflareAccessLogin() async throws -> CloudflareAccessLoginTicket
     func request(path: String, method: String, body: JSONValue?) async throws -> JSONValue
     func download(path: String, method: String, body: JSONValue?) async throws -> Data
     func upload(path: String, file: Data, filename: String, fields: [String: String]) async throws -> JSONValue
     func stream(path: String, onEvent: @escaping @Sendable (JSONValue) async -> Void) async throws
 }
 
-extension TelePilotClient: AppServing {}
+/// 一次 App 内 Google 验证 Cloudflare Access 的过程。
+struct CloudflareAccessLoginTicket: Sendable {
+    /// 在系统登录窗（ASWebAuthenticationSession）打开的地址；界面测试为 nil，不弹出登录窗。
+    let url: URL?
+    /// 长轮询 Cloudflare 令牌转交服务，直到取回并保存登录令牌；取消所在 Task 即停止。
+    let wait: @Sendable () async throws -> CloudflareAccessSession
+}
+
+extension TelePilotClient: AppServing {
+    func startCloudflareAccessLogin() async throws -> CloudflareAccessLoginTicket {
+        let request = try await prepareCloudflareAccessLogin()
+        return CloudflareAccessLoginTicket(url: request.authorizationURL) { [self] in
+            try await self.completeCloudflareAccessLogin(request)
+        }
+    }
+}
 
 enum AccountPresentation {
     static func name(_ account: Account) -> String {

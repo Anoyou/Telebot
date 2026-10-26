@@ -9,6 +9,24 @@
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-10-26 · minor（次版本） · Cloudflare Access：App 内 Google 验证
+
+> 对应服务器：0.106.0-beta.6
+
+### 新增
+
+- 支持服务器前套了 Cloudflare Tunnel + Access（Allow 策略 = 邮箱白名单 + Google 登录）的部署，**Cloudflare 后台无需任何修改**：登录页「Cloudflare Access（可选）」区和 设置 → Cloudflare Access 新增「使用 Google 验证」。App 照搬官方 `cloudflared access login` 流程：用系统登录窗（Google 不允许 App 内嵌网页登录）打开服务器的 Access 登录页，同时轮询 Cloudflare 令牌转交服务，取回用本机一次性密钥加密的 Access 登录令牌后自动关闭窗口。
+- 令牌只保存在本机钥匙串、按服务器分别保存、不同步 iCloud、不写日志；之后 App 的所有请求（登录、读取、写操作、下载上传、助手实时输出、推送注册等）都带 `cf-access-token` 请求头。界面显示 Access 会话的账号邮箱与到期时间，可随时「移除 Access 登录」。
+- 「高级：Service Token」保留为可选项（需要在 Access 应用里另加一条 Action 为 Service Auth 的策略）；填写后只带 `CF-Access-Client-Id` / `CF-Access-Client-Secret`，清除后自动改回 Google 验证。
+- App 内「Cloudflare Access 使用说明」：Google 验证步骤、到期处理、Binding Cookie 注意事项与 Service Token 后台配置。
+
+### 改进
+
+- 被 Cloudflare Access 拦截时不再笼统显示「服务器返回了重定向」：按情况提示「请先用 Google 完成 Access 验证」「Access 登录已过期」「Access 不再接受当前的登录」或「Service Token 被拒绝」。登录页在 Access 区显示引导；已登录时（会话过期或请求被 302 到 `*.cloudflareaccess.com`）直接弹出 Access 页面，一键重新验证，验证后自动关闭并刷新数据。
+- Access 拦截发生在 Cloudflare 边缘，不会被当成登录失效而清除 TelePilot 会话；写操作被拦截时明确是「未执行」，重新验证后不会自动重新提交。其他重定向仍按原安全规则拒绝。
+- 启动时恢复会话被 Access 拦截：在登录页完成 Google 验证后自动用原会话只读重试，无需重新输入密码。
+- 「更换服务器」会一并移除这台服务器的 Access 登录令牌与 Service Token。
+
 ## [0.10.0] - 2026-10-26 · minor（次版本） · 插件页参考 App Store 重做
 
 > 对应服务器：0.106.0-beta.4

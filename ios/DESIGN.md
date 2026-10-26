@@ -32,7 +32,7 @@
 | 模块 | 入口与符号 |
 | --- | --- |
 | 更多 | 账号 `person.2`、设置 `gearshape`、关于与更新 `info.circle`；管理模块沿用 `ManagementModule.symbol` |
-| 设置 | 首页模块 `square.grid.2x2`、Apple 推送 `bell.badge`、用户名 `person.crop.circle`、界面锁 `faceid`／`timer`、关于与更新 `info.circle`、更换服务器 `arrow.left.arrow.right.circle`、退出登录 `rectangle.portrait.and.arrow.right` |
+| 设置 | 首页模块 `square.grid.2x2`、Apple 推送 `bell.badge`、Cloudflare Access `lock.icloud`、用户名 `person.crop.circle`、界面锁 `faceid`／`timer`、关于与更新 `info.circle`、更换服务器 `arrow.left.arrow.right.circle`、退出登录 `rectangle.portrait.and.arrow.right` |
 | 关于 | App 版本 `iphone`、构建号 `hammer`、服务器版本 `shippingbox`、发布通道 `arrow.triangle.branch`、部署提交 `number`、检查服务器更新 `arrow.down.circle`（全 App 唯一更新入口）、GitHub `chevron.left.forwardslash.chevron.right`、更新日志 `list.bullet.clipboard`、使用指南 `book`、问题反馈 `exclamationmark.bubble`、开源许可 `doc.plaintext`、隐私 `hand.raised` |
 | 账号管理 | 编辑 `pencil`、重新登录 `person.badge.key`、复制配置 `doc.on.doc`、导出迁移 `square.and.arrow.up.on.square`、插件 `puzzlepiece.extension`、拟人化 `figure.walk`、限流 `gauge.with.dots.needle.33percent`、用量 `chart.bar`、覆盖规则 `slider.horizontal.below.rectangle`、直通顺序 `arrow.up.arrow.down`、会话白名单 `checklist`、最近会话 `bubble.left.and.bubble.right`、账号指令 `terminal`、Bot 用户 `person.2.badge.gearshape`、失败投递 `tray.and.arrow.down`、删除 `trash` |
 | 指令与任务 | 指令模板 `text.badge.plus`、别名 `arrow.triangle.swap`、内置指令 `terminal`、模板变量 `curlybraces`、预览 `eye`、测试发送 `paperplane` |
@@ -42,6 +42,7 @@
 | 服务器更新面板 | 当前版本 `shippingbox`、最新版本 `sparkles`、更新通道 `arrow.triangle.branch`、选择通道 `arrow.left.arrow.right`、Git 远端 `server.rack`、应用更新 `arrow.down.to.line.circle`、自动检查 `clock.arrow.2.circlepath`、检查频率 `timer` |
 | 插件中心 | 选择配置的账号 `person.crop.circle.badge.checkmark`、分类筛选 `line.3.horizontal.decrease.circle` |
 | 插件发现／已安装／产品页 | 检查更新 `arrow.triangle.2.circlepath`、新功能 `sparkles`、版本历史 `clock.arrow.circlepath`、账号启用与配置 `person.2`、全局配置 `slider.horizontal.3`、安装历史 `clock`、完整技术信息 `info.circle`、权限 `lock`／未申请权限 `lock.open`、高风险能力 `exclamationmark.shield`、管理插件仓库 `books.vertical`、从 Git 地址安装 `link.badge.plus`、从文件安装 `doc.badge.plus`、远程插件记录 `icloud.and.arrow.down`、服务器总开关 `power.circle`、卸载 `trash`；结果：成功 `checkmark.circle.fill`、失败 `exclamationmark.triangle.fill`、结果待确认 `questionmark.circle.fill` |
+| Cloudflare Access | 入口 `lock.icloud`、Google 验证状态 `person.badge.shield.checkmark`、使用 Google 验证 `person.badge.key`、账号 `envelope`、到期时间 `clock`、移除 Access 登录 `rectangle.portrait.and.arrow.right`、高级开关 `key.horizontal`、Service Token 状态 `lock.icloud`、保存并验证连接 `checkmark.shield`、清除 Token `trash`、使用说明 `book`、GitHub 说明 `safari`；结果：连接正常 `checkmark.circle.fill`、未通过 `exclamationmark.triangle.fill` |
 | 助手 | 本轮详情 `chart.bar.doc.horizontal`、工具调用 `wrench.and.screwdriver` |
 | Skills | Skills 入口 `sparkles.rectangle.stack`、安装 `plus`／`square.and.arrow.down`、编辑 SKILL.md `square.and.pencil`、查看内容 `doc.text`、与默认版本差异 `plus.forwardslash.minus`、恢复默认 `arrow.uturn.backward`、保留我的修改 `checkmark.circle`、从源地址更新 `arrow.down.circle`、卸载 `trash`、对系统 Agent 启用 `sparkles`、对插件启用 `puzzlepiece.extension`；来源：TelePilot 内置 `shippingbox`、插件内置 `puzzlepiece.extension`、GitHub `chevron.left.forwardslash.chevron.right`、其它 `doc.text` |
 
@@ -91,3 +92,10 @@ iPhone 和 iPad 使用系统安全区；支持横竖屏、长中文、辅助功�
 - 一级 Tab 根页面（概览、插件、AI、更多）使用大标题（`.large`，或省略声明保持默认）。
 - 其余所有推入页、详情页、sheet 都显式写 `.navigationBarTitleDisplayMode(.inline)`，不依赖上级继承。
 - Agent 会话页以会话标题为行内标题。
+
+## Cloudflare Access
+
+- 主方案是 App 内 Google 验证（照搬 `cloudflared access login`）：系统登录窗 `ASWebAuthenticationSession` 打开 `/cdn-cgi/access/cli`（Google 禁止 WKWebView 内嵌登录），并行轮询 Cloudflare 令牌转交服务，取回后由 App 主动关闭登录窗；令牌以 `cf-access-token` 头随所有请求发送。转交轮询用独立 URLSession，不带 TelePilot 任何凭证。
+- Service Token（`CF-Access-Client-Id` / `CF-Access-Client-Secret`）是「高级」可选项，配置后优先使用。所有网络出口统一在 `SessionTransport` 注入 Access 凭证；凭证存钥匙串、按服务器隔离、不进日志与错误文案。
+- 识别 Access 拦截（3xx 指向 `*.cloudflareaccess.com` 或 `/cdn-cgi/access/`、Access 的 401/403 或登录页）并按凭证状态单独提示；登录页在 Access 区引导，已登录时弹出 Access 页面一键重新验证。不跟随任何重定向，其他重定向仍拒绝。
+- Access 拦截不清除 TelePilot 会话；写操作被拦截时结果是确定的“未执行”，不显示“结果未知”，也不自动重试或重放。验证后只做只读刷新。

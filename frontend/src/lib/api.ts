@@ -1,5 +1,6 @@
 // axios 客户端：携带 cookie；遇 401 自动跳登录页；统一错误信息提取
 import axios, { AxiosHeaders, type AxiosError, type InternalAxiosRequestConfig } from "axios";
+import { toast } from "sonner";
 
 const CSRF_COOKIE = "csrf_token";
 const CSRF_HEADER = "X-CSRF-Token";
@@ -70,6 +71,53 @@ function resolveApiUrl(path: string): string {
   return `${base}${relative}`.replace(/\/{2,}/g, "/");
 }
 
+/** Cloudflare Access 会话过期时的统一提示文案。 */
+export const ACCESS_EXPIRED_MESSAGE = "Cloudflare Access 登录已过期，请刷新页面重新登录。";
+const ACCESS_TOAST_ID = "cloudflare-access-expired";
+let accessProbe: Promise<boolean> | null = null;
+
+/**
+ * 服务器前套了 Cloudflare Access 时，Access 会话过期后同源 API 请求会被 302 到
+ * `<team>.cloudflareaccess.com`，浏览器跟随后因跨域失败，axios / fetch 只能看到“网络错误”。
+ * 这里用一次不跟随重定向的只读 GET 探测：同源 API 返回 opaqueredirect 即视为 Access 拦截。
+ * 探测结果短暂缓存，避免一批并发失败重复探测。
+ */
+export function detectAccessRedirect(): Promise<boolean> {
+  if (typeof fetch !== "function") return Promise.resolve(false);
+  if (!accessProbe) {
+    accessProbe = fetch(resolveApiUrl("/api/auth/csrf"), {
+      method: "GET",
+      credentials: "include",
+      redirect: "manual",
+      cache: "no-store",
+      headers: { [REQUESTED_WITH_HEADER]: REQUESTED_WITH_VALUE },
+    })
+      .then((response) => response.type === "opaqueredirect")
+      .catch(() => false)
+      .finally(() => {
+        setTimeout(() => { accessProbe = null; }, 5000);
+      });
+  }
+  return accessProbe;
+}
+
+/** 提示刷新页面重新完成 Access 登录（同一时间只显示一条）。不会自动重试任何写操作。 */
+export function notifyAccessExpired() {
+  toast.error(ACCESS_EXPIRED_MESSAGE, {
+    id: ACCESS_TOAST_ID,
+    duration: Infinity,
+    action: { label: "刷新页面", onClick: () => location.reload() },
+  });
+}
+
+/** 网络层失败（没有响应）时检查是否为 Access 会话过期；是则提示并返回 true。 */
+async function checkAccessExpired(): Promise<boolean> {
+  if (typeof navigator !== "undefined" && navigator.onLine === false) return false;
+  if (!(await detectAccessRedirect())) return false;
+  notifyAccessExpired();
+  return true;
+}
+
 /** fetch 版 API 通道，供浏览器 ReadableStream 等 Axios/XHR 无法覆盖的场景使用。 */
 export async function apiFetch(path: string, init: RequestInit = {}): Promise<Response> {
   const method = (init.method || "GET").toUpperCase();
@@ -86,7 +134,13 @@ export async function apiFetch(path: string, init: RequestInit = {}): Promise<Re
     headers,
     credentials: "include",
   });
-  let response = await execute();
+  let response: Response;
+  try {
+    response = await execute();
+  } catch (error) {
+    if (!(init.signal?.aborted) && await checkAccessExpired()) throw new Error(ACCESS_EXPIRED_MESSAGE);
+    throw error;
+  }
   if (response.status === 403 && !["GET", "HEAD", "OPTIONS"].includes(method)) {
     let code: string | undefined;
     try {
@@ -145,6 +199,10 @@ api.interceptors.response.use(
     }
     if (status === 401 && !location.pathname.startsWith("/login")) {
       location.href = "/login";
+    }
+    // 没有响应的网络错误：可能是 Cloudflare Access 会话过期导致的跨域重定向失败。
+    if (!err.response && err.code === "ERR_NETWORK" && await checkAccessExpired()) {
+      err.message = ACCESS_EXPIRED_MESSAGE;
     }
     return Promise.reject(err);
   },

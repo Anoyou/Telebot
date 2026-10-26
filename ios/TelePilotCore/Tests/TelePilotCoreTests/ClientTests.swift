@@ -17,6 +17,24 @@ final class MemoryStore: SessionStore, @unchecked Sendable {
     }
 }
 
+final class MemoryAccessStore: CloudflareAccessStore, @unchecked Sendable {
+    private let lock = NSLock()
+    private var values: [String: CloudflareAccessConfig] = [:]
+    func load(origin: String) throws -> CloudflareAccessConfig? { lock.withLock { values[origin] } }
+    func save(_ config: CloudflareAccessConfig, origin: String) throws { lock.withLock { values[origin] = config } }
+    func clear(origin: String) throws { lock.withLock { values[origin] = nil } }
+    func save(token: CloudflareAccessCredentials, origin: String) throws {
+        var config = try load(origin: origin) ?? CloudflareAccessConfig()
+        config.serviceToken = token
+        try save(config, origin: origin)
+    }
+    func save(session: CloudflareAccessSession, origin: String) throws {
+        var config = try load(origin: origin) ?? CloudflareAccessConfig()
+        config.session = session
+        try save(config, origin: origin)
+    }
+}
+
 struct MockReply: Sendable {
     var status = 200
     var headers: [String: String] = [:]
@@ -71,12 +89,14 @@ struct ClientTests {
     var loginReply: MockReply { MockReply(headers: ["Set-Cookie": "auth_token=session-one; Path=/; Max-Age=3600; Secure; HttpOnly"], body: "{\"ok\":true}") }
     var userReply: MockReply { MockReply(body: "{\"id\":1,\"username\":\"admin\",\"has_totp\":false}") }
 
-    func setup(_ replies: [MockReply], store: MemoryStore = MemoryStore(), origin: String? = nil) throws -> (TelePilotClient, Script, MemoryStore) {
+    func setup(_ replies: [MockReply], store: MemoryStore = MemoryStore(), origin: String? = nil,
+               access: MemoryAccessStore = MemoryAccessStore()) throws -> (TelePilotClient, Script, MemoryStore) {
         let script = Script(replies)
         MockProtocol.lock.withLock { MockProtocol.handler = { script.handle($0) } }
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [MockProtocol.self]
-        return (try TelePilotClient(serverURL: URL(string: origin ?? self.origin)!, configuration: config, store: store), script, store)
+        return (try TelePilotClient(serverURL: URL(string: origin ?? self.origin)!, configuration: config, store: store,
+                                    accessStore: access), script, store)
     }
 
     func body(_ request: URLRequest) throws -> [String: Any] {

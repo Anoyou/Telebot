@@ -7,13 +7,15 @@ public actor TelePilotClient {
     private let client: Client
 
     public init(serverURL: URL) throws {
-        try self.init(serverURL: serverURL, configuration: .ephemeral, store: KeychainSessionStore())
+        try self.init(serverURL: serverURL, configuration: .ephemeral, store: KeychainSessionStore(),
+                      accessStore: KeychainCloudflareAccessStore())
     }
 
-    init(serverURL: URL, configuration: URLSessionConfiguration, store: any SessionStore) throws {
+    init(serverURL: URL, configuration: URLSessionConfiguration, store: any SessionStore,
+         accessStore: any CloudflareAccessStore) throws {
         let origin = try Self.normalizedServerURL(serverURL.absoluteString)
         self.serverURL = origin
-        transport = SessionTransport(origin: origin, configuration: configuration, store: store)
+        transport = SessionTransport(origin: origin, configuration: configuration, store: store, accessStore: accessStore)
         client = Client(serverURL: origin, configuration: .init(dateTranscoder: ServerDateTranscoder()), transport: transport)
     }
 
@@ -145,6 +147,33 @@ public actor TelePilotClient {
     }
 
     public func clearLocalSession() async throws { try await transport.clear() }
+
+    // MARK: Cloudflare Access
+
+    /// 这台服务器保存在钥匙串里的 Cloudflare Access 凭证（Google 验证的登录令牌与 Service Token）。
+    public func cloudflareAccessConfig() async throws -> CloudflareAccessConfig {
+        try await transport.cloudflareAccessConfig()
+    }
+
+    /// 保存（或传 nil 清除）Service Token（高级）。只改本机钥匙串，不发请求。
+    public func setCloudflareAccess(_ credentials: CloudflareAccessCredentials?) async throws {
+        try await transport.setCloudflareAccess(credentials)
+    }
+
+    /// 清除（或替换）App 内 Google 验证取得的 Access 登录令牌。只改本机钥匙串。
+    public func setCloudflareAccessSession(_ session: CloudflareAccessSession?) async throws {
+        try await transport.setCloudflareAccessSession(session)
+    }
+
+    /// 第一步：发现 Access 应用，返回要在系统登录窗（ASWebAuthenticationSession）打开的地址。
+    public func prepareCloudflareAccessLogin() async throws -> CloudflareAccessLoginRequest {
+        try await transport.prepareCloudflareAccessLogin()
+    }
+
+    /// 第二步：等待用户完成 Google 登录，取回并保存 Access 登录令牌。取消所在 Task 即停止等待。
+    public func completeCloudflareAccessLogin(_ request: CloudflareAccessLoginRequest) async throws -> CloudflareAccessSession {
+        try await transport.completeCloudflareAccessLogin(request)
+    }
 
     public func request(path: String, method: String = "GET", body: JSONValue? = nil) async throws -> JSONValue {
         let data = try await download(path: path, method: method, body: body)
