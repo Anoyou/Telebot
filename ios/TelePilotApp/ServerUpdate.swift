@@ -252,6 +252,7 @@ struct ServerUpdateSheet: View {
 
     var body: some View {
         NavigationStack {
+            ScrollViewReader { proxy in
             List {
                 statusSection
                 if jobID != nil || applying || applyError != nil || applyResult != nil { progressSection }
@@ -261,6 +262,17 @@ struct ServerUpdateSheet: View {
                 actionSection
                 channelSection
                 autoCheckSection
+            }
+            // 确认更新时列表通常停在下方“操作”分区，而进度分区在顶部且 List 懒加载：
+            // 任务创建或提交失败后自动滚回进度分区，让用户（和 UI 测试）立刻看到进度或原因。
+            .onChange(of: jobID) { _, id in
+                guard id != nil else { return }
+                withAnimation { proxy.scrollTo(Self.progressAnchor, anchor: .top) }
+            }
+            .onChange(of: applyError) { _, error in
+                guard error != nil else { return }
+                withAnimation { proxy.scrollTo(Self.progressAnchor, anchor: .top) }
+            }
             }
             .symbolRenderingMode(.hierarchical)
             .navigationTitle("服务器更新")
@@ -573,7 +585,10 @@ struct ServerUpdateSheet: View {
             }
             if let jobID { jobRows(jobID) }
         } header: { Text("更新进度") }
+        .id(Self.progressAnchor)
     }
+
+    private static let progressAnchor = "update.progressSection"
 
     @ViewBuilder private func jobRows(_ id: String) -> some View {
         let progress = Double(min(100, max(0, job?["progress"]?.intValue ?? 0)))

@@ -199,7 +199,9 @@ final class ManagementUITests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["update.progress"].waitForExistence(timeout: 10))
         XCTAssertFalse(app.buttons["update.apply"].exists)
         let applied = app.descendants(matching: .any)["update.applied"]
-        XCTAssertTrue(applied.waitForExistence(timeout: 30))
+        // “更新已完成”位于进度行下方，medium 高度的面板里可能在可见区外（List 懒加载），等不到就向下滚动找。
+        if !applied.waitForExistence(timeout: 20) { scrollUpdateSheet(to: applied, in: app) }
+        XCTAssertTrue(applied.waitForExistence(timeout: 15))
         XCTAssertFalse(app.buttons["update.apply"].exists)
     }
 
