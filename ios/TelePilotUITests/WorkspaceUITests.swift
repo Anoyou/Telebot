@@ -159,10 +159,20 @@ final class WorkspaceUITests: XCTestCase {
         field.typeText(text)
     }
 
+    /// 点系统搜索栏的“取消”。切换分页等操作会让搜索栏失去焦点，系统此时可能收起“取消”按钮：先点回搜索栏。
     private func tapCancel(_ app: XCUIApplication) {
-        let cancel = app.buttons["取消"].firstMatch
-        if cancel.waitForExistence(timeout: 3) { cancel.tap() }
-        else { app.buttons["Cancel"].firstMatch.tap() }
+        let field = app.searchFields.firstMatch
+        guard field.exists else { return }
+        let names = ["取消", "Cancel", "关闭", "Close"]
+        func cancelButton() -> XCUIElement? {
+            names.lazy.map { app.buttons[$0].firstMatch }.first { $0.exists && $0.isHittable }
+        }
+        if cancelButton() == nil { field.tap(); _ = app.buttons["取消"].firstMatch.waitForExistence(timeout: 3) }
+        guard let cancel = cancelButton() else {
+            XCTFail("找不到搜索栏的取消按钮：" + app.buttons.allElementsBoundByIndex.prefix(30).map(\.label).joined(separator: " | "))
+            return
+        }
+        cancel.tap()
     }
 
     func testPluginScreenUsesTwoColumnCards() {
