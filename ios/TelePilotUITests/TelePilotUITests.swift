@@ -317,14 +317,25 @@ final class TelePilotUITests: XCTestCase {
         capture("概览自定义", app: app)
     }
 
-    func testOverviewSurfacesItemsThatNeedAttention() {
+    func testOverviewCheckupToolbarShowsVerdictSectionsAndFixEntry() {
         let app = launch()
         XCTAssertTrue(app.buttons["overview.refresh"].waitForExistence(timeout: 45))
-        let relogin = app.buttons["overview.attention.account-3"]
-        XCTAssertTrue(relogin.waitForExistence(timeout: 10))
-        XCTAssertTrue(app.buttons["overview.attention.plugin-content_assistant"].exists)
-        capture("概览需要处理", app: app)
-        relogin.tap()
-        XCTAssertTrue(app.descendants(matching: .any)["account.status"].firstMatch.waitForExistence(timeout: 10))
+        // “需要处理”区块已移除，由导航栏右上角的「一键体检」替代
+        XCTAssertFalse(app.staticTexts["需要处理"].exists)
+        let checkup = app.buttons["overview.checkup"]
+        XCTAssertTrue(checkup.waitForExistence(timeout: 5))
+        XCTAssertEqual(checkup.label, "一键体检")
+        checkup.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["checkup.verdict"].firstMatch.waitForExistence(timeout: 15))
+        XCTAssertTrue(app.staticTexts["建议下一步"].exists)
+        let section = app.buttons["checkup.section.accounts"]
+        reveal(section, app: app)
+        capture("一键体检", app: app)
+        section.tap()
+        XCTAssertTrue(app.staticTexts["原因与修复建议"].waitForExistence(timeout: 5))
+        let fix = app.buttons["打开账号"].firstMatch
+        XCTAssertTrue(fix.waitForExistence(timeout: 5))
+        fix.tap()
+        XCTAssertTrue(app.navigationBars["账号"].waitForExistence(timeout: 10))
     }
 }

@@ -20,7 +20,7 @@
 
 ## 布局
 
-概览顶部是紧凑品牌头（BrandMark 图标、TelePilot、一句话说明与当前服务器），紧接一句话结论（一切正常 / N 项需要处理），再列出“需要处理”（失效账号、未运行进程、插件失败、AI 冷却、最近错误、待补付、待确认），随后是关键数字、快捷操作、收藏与可排序的服务模块。日志页以“最近问题 → 统一列表 → 详情 → 处理时间线”逐层下钻，每类日志都附中文解释；资金台账以汇总卡片和 Swift Charts 图表为主，明细使用中文标签。底部 Dock 支持入口选择与排序，保留始终可达的全部入口；旁边独立玻璃圆形按钮打开助手。iPad 使用导航双栏，助手有会话侧栏。系统登录与 Telegram 账号绑定分别呈现自己的验证步骤。
+概览顶部是紧凑品牌头（BrandMark 图标、TelePilot、一句话说明与当前服务器），紧接一句只陈述可确认事实的状态（服务运行中 / 部分状态未能读取 / 无法读取服务器状态），随后是关键数字、快捷操作、收藏与可排序的服务模块。概览不再自行推断“需要处理”的事项（不准确且给不出解决方法）；全面判断由导航栏右上角的「一键体检」（`stethoscope`，原生 `ToolbarItem`，无障碍标签「一键体检」）负责：点按打开体检面板，直接调用服务器 `GET /api/system-agent/checkup`（与助手“体检一下”同一个只读工具），显示总体结论、每项状态、原因与修复建议，以及可跳转的处理入口（账号、插件、AI、日志、指令与任务、备份与维护、设置、助手）。日志页以“最近问题 → 统一列表 → 详情 → 处理时间线”逐层下钻，每类日志都附中文解释；资金台账以汇总卡片和 Swift Charts 图表为主，明细使用中文标签。底部 Dock 支持入口选择与排序，保留始终可达的全部入口；旁边独立玻璃圆形按钮打开助手。iPad 使用导航双栏，助手有会话侧栏。系统登录与 Telegram 账号绑定分别呈现自己的验证步骤。
 
 ## 图标
 
@@ -40,12 +40,13 @@
 | Apple 推送 | 系统通知权限 `hand.raised`、设备已注册 `iphone`、服务器 APNs `server.rack`、推送环境 `arrow.triangle.branch`、配置教程 `book`、GitHub 教程 `safari`、授权注册 `bell.badge`、测试通知 `paperplane`、注销 `bell.slash`、助手待确认 `checkmark.shield`、助手任务结果 `sparkles`、账号告警 `exclamationmark.triangle`、Auth Key `key`；检查状态：正常 `checkmark.circle.fill`、注意 `exclamationmark.triangle.fill`、未就绪 `xmark.circle.fill`、未知 `questionmark.circle` |
 | 备份与维护 | 导入导出 `externaldrive.badge.timemachine`、网络诊断 `stethoscope`、重启服务 `restart.circle`、紧急停止 `exclamationmark.octagon` |
 | 服务器更新面板 | 当前版本／正在运行 `shippingbox`、目标版本 `sparkles`、当前通道／目标分支 `arrow.triangle.branch`、选择通道 `arrow.left.arrow.right`、当前提交 `number`、目标提交 `number.circle`、待合入提交 `arrow.triangle.pull`、Git 远端／运行方式 `server.rack`、应用更新与跟踪任务 `arrow.down.to.line.circle`、日志 `text.alignleft`、各步耗时 `timer`、自动检查 `clock.arrow.2.circlepath`、检查频率 `timer`、数据库迁移 `externaldrive.badge.exclamationmark`／不可回退迁移 `cylinder.split.1x2`、完整更新流程 `arrow.triangle.2.circlepath`、服务暂不可用重连 `wifi.exclamationmark`、核实上次任务 `checkmark.shield`、重新读取 `arrow.clockwise`、完整更新日志 `list.bullet.clipboard` |
-| 插件中心 | 选择配置的账号 `person.crop.circle.badge.checkmark`、分类筛选 `line.3.horizontal.decrease.circle`、收藏 `star`、排序保存失败 `exclamationmark.triangle.fill`（卡片长按拖动排序，无单独按钮） |
-| 统一搜索栏 | 分段控件下方的 `InlineSearchField`：搜索 `magnifyingglass`、清除 `xmark.circle.fill`（插件与 AI 页共用） |
+| 插件中心 | 选择配置的账号 `person.crop.circle.badge.checkmark`（原生 `Picker(.menu)`）、状态与分类筛选 `line.3.horizontal.decrease.circle`（有筛选时 `.fill`，原生 `Menu` 内两个内联 `Picker`）、收藏 `star`、排序保存失败 `exclamationmark.triangle.fill`（卡片长按拖动排序，无单独按钮） |
+| 统一搜索栏 | 分段控件下方的 `InlineSearchField`（系统 `UISearchTextField`，放大镜与清除按钮由系统绘制；插件与 AI 页共用） |
+| 概览 | 全局搜索 `magnifyingglass`（左上）、刷新 `arrow.clockwise`、一键体检 `stethoscope`（右上角）；体检结论：正常 `checkmark.circle.fill`、需关注 `exclamationmark.triangle.fill`、异常 `xmark.octagon.fill`、未能检查 `questionmark.circle`；前往处理 `arrow.forward.circle`、需确认 `checkmark.shield` |
 | AI 供应商与模型 | 添加供应商 `plus`（AI 页导航栏）、模型清单顶部「从供应商同步模型」`arrow.triangle.2.circlepath`、模型详情与测试 `info.circle`、单个模型快速测试 `bolt.horizontal`、多模型对话测试 `bubble.left.and.bubble.right`、发送测试 `paperplane`、连续对话 `text.bubble`、清空本页对话 `trash`、高级设置 `slider.horizontal.3`、测活 `waveform.path.ecg`；模型能力：输入（多模态（图片）／仅文本）`photo`、工具调用 `wrench.and.screwdriver`、推理 `brain`、上下文 `text.alignleft`、输出 `text.append`、联网搜索 `globe`。能力只依据服务器字段，没有数据显示“未知” |
 | 插件发现／已安装／产品页 | 检查更新 `arrow.triangle.2.circlepath`、新功能 `sparkles`、版本历史 `clock.arrow.circlepath`、账号启用与配置 `person.2`、全局配置 `slider.horizontal.3`、安装历史 `clock`、完整技术信息 `info.circle`、权限 `lock`／未申请权限 `lock.open`、高风险能力 `exclamationmark.shield`、管理插件仓库 `books.vertical`、从 Git 地址安装 `link.badge.plus`、从文件安装 `doc.badge.plus`、远程插件记录 `icloud.and.arrow.down`、服务器总开关 `power.circle`、卸载 `trash`；结果：成功 `checkmark.circle.fill`、失败 `exclamationmark.triangle.fill`、结果待确认 `questionmark.circle.fill` |
 | Cloudflare Access | 入口 `lock.icloud`、Google 验证状态 `person.badge.shield.checkmark`、使用 Google 验证 `person.badge.key`、账号 `envelope`、到期时间 `clock`、移除 Access 登录 `rectangle.portrait.and.arrow.right`、高级开关 `key.horizontal`、Service Token 状态 `lock.icloud`、保存并验证连接 `checkmark.shield`、清除 Token `trash`、使用说明 `book`、GitHub 说明 `safari`；结果：连接正常 `checkmark.circle.fill`、未通过 `exclamationmark.triangle.fill` |
-| 助手 | 本轮详情 `chart.bar.doc.horizontal`、工具调用 `wrench.and.screwdriver`；输入栏：模型选择（输入框上方左侧）`cpu`＋`chevron.up.chevron.down`、添加附件 `plus`、从照片选择 `photo`、从文件选择图片 `folder`、移除图片 `xmark.circle.fill`、停止 `stop.fill`、补充信息 `text.bubble`、插入调整说明 `arrow.turn.down.right`、加入队列 `text.badge.plus`、停止并替换 `arrow.triangle.2.circlepath` |
+| 助手 | 本轮详情 `chart.bar.doc.horizontal`、工具调用 `wrench.and.screwdriver`；输入栏（玻璃 composer：上方多行输入框，下方工具栏）：左下添加附件 `plus`（从照片选择 `photo`、从文件选择图片 `folder`，只列服务器支持的图片附件）、移除图片 `xmark.circle.fill`、右下发送 `arrow.up`（执行中且输入为空时为停止 `stop.fill`）、发送按钮左侧模型选择（模型短名＋`chevron.up.chevron.down`，原生 `Menu`＋`Picker`）、执行中“发送方式”菜单在「+」右侧：补充信息 `text.bubble`、插入调整说明 `arrow.turn.down.right`、加入队列 `text.badge.plus`、停止并替换 `arrow.triangle.2.circlepath`；回答底部本轮详情两行：第一行供应商 · 模型，第二行输入/输出词元 · 工具调用次数 · 重试 · 耗时，点开显示完整详情 |
 | Skills | Skills 入口 `sparkles.rectangle.stack`（助手页右上角工具栏按钮，AI → 配置 → Skills 也可进入）、安装 `plus`／`square.and.arrow.down`、编辑 SKILL.md `square.and.pencil`、查看内容 `doc.text`、与默认版本差异 `plus.forwardslash.minus`、展开未改动内容 `arrow.up.and.down`、恢复默认 `arrow.uturn.backward`、保留我的修改 `checkmark.circle`、从源地址更新 `arrow.down.circle`、卸载 `trash`、对系统 Agent 启用 `sparkles`、对插件启用 `puzzlepiece.extension`；来源：TelePilot 内置 `shippingbox`、插件内置 `puzzlepiece.extension`、GitHub `chevron.left.forwardslash.chevron.right`、其它 `doc.text` |
 
 新增页面沿用上表；表中没有的概念先在本节补充符号再使用，避免同一含义出现多个图标。
@@ -56,11 +57,37 @@
 
 允许的玻璃用法（用户明确要求，仅限以下原生 API，均为 iOS 26 SDK）：
 
-- **页面顶部分段切换**（插件中心／发现／已安装、AI 概览／供应商／用量、待确认操作的状态切换等）：原生 `Picker` + `.pickerStyle(.segmented)`，使用系统默认 `controlSize`（不加大），分段控件本身就是 Liquid Glass 控件；不再包白色卡片、实色背景条或额外 `glassEffect`，避免玻璃叠玻璃。
-  - 大标题页面（插件、AI 等一级 Tab 根页面）：分段控件放在滚动内容顶部（`List` 的第一个 Section，`listRowBackground(.clear)`、零边距、隐藏分隔线；`ScrollView` 则作为内容第一项），随内容滚动。**禁止**挂在 `.safeAreaBar(edge: .top)` 上——大标题折叠/展开与安全区栏顶部插入互相改变布局，滑到顶部会持续抖动。
-  - 行内标题页面（如 sheet 内的“待确认操作”）：可以挂在滚动视图上的 `.safeAreaBar(edge: .top)` 里，由系统负责滚动边缘效果。`safeAreaBar` 必须挂在 `List`／`ScrollView`（或以其为 body 的视图）上，挂在更外层时内容不会让出位置。
-- **筛选胶囊**（例如插件状态筛选）：`Button` + `.buttonStyle(.glass)`，选中项 `.buttonStyle(.glassProminent)`（使用 AccentColor），同一行放进一个 `GlassEffectContainer`，横向滚动时用 `.scrollClipDisabled()` 避免裁掉玻璃边缘。选中状态同时加 `.isSelected` 辅助功能特征，不只靠颜色。
-- 其余卡片、列表行、表单仍使用系统分组背景，不手工调用 `glassEffect(_:in:)`。
+- **页面顶部分段切换**：原生 `Picker` + `.pickerStyle(.segmented)`，系统默认 `controlSize`，分段控件本身就是 Liquid Glass 控件；不再包白色卡片、实色背景条或额外 `glassEffect`，避免玻璃叠玻璃。位置与间距见下节「分段切换与筛选」。**禁止**挂在大标题页面的 `.safeAreaBar(edge: .top)` 上——大标题折叠/展开与安全区栏顶部插入互相改变布局，滑到顶部会持续抖动。
+- **例外：Agent 输入栏**（用户第五轮明确要求）：助手底部 composer 整体是一个 `glassEffect(.regular, in: .rect(cornerRadius: 26))` 圆角玻璃容器（类似“信息”与 ChatGPT 的底部输入栏），通过 `safeAreaInset(edge: .bottom)` 贴底部安全区并随键盘上移；容器内的按钮不再叠加玻璃。助手页的“最小化”悬浮圆按钮沿用 `.glassEffect(.regular.interactive(), in: .circle)`。
+- 其余卡片、列表行、表单仍使用系统分组背景，不手工调用 `glassEffect(_:in:)`。筛选不再使用 `.buttonStyle(.glass)` 胶囊行（第五轮改为原生筛选菜单）。
+
+## 分段切换与筛选（全 App 统一）
+
+总原则：能用 iOS 原生控件就用原生控件（`Picker`、`Menu`、`TextField`、`Toggle`、`Stepper`、`DatePicker`、`.searchable`／`UISearchTextField`）；同一功能的控件全 App 同一样式、同一位置。
+
+1. **页面级分段**（插件中心／发现／已安装、AI 概览／供应商／用量、插件详情各分区、待确认操作的状态切换）：
+   - 原生 `Picker(.segmented)`，`labelsHidden()`，系统默认尺寸，不加背景或玻璃。
+   - 位置：滚动内容的第一项，紧贴导航标题下方；List 页面放在第一个 `Section`，用 `.pageHeaderRow()`（透明背景、零边距、隐藏分隔线），行宽即分组卡片宽度；ScrollView 页面（插件中心卡片网格）用 `PageLayout.margin(width:)` 取与系统分组列表相同的左右边距（宽度 ≥ 414pt 为 20pt，否则 16pt）。各页分段控件左右边缘一致，切换不跳动（UI 测试 `testSegmentedHeadersShareFrameAcrossPluginsAndAI` 校验）。
+   - 该页需要搜索时，搜索栏放在分段控件正下方，间距固定 8pt：使用 `SegmentedSearchHeader` + `InlineSearchField`（系统 `UISearchTextField`）。不用 `.searchable`，因为大标题页面的 `.searchable` 会把搜索栏放进导航栏、出现在分段控件上方。
+   - 没有分段控件的普通列表页（全局搜索、账号、日志列表、全部流水、会话列表等）仍用系统 `.searchable`。
+2. **内容内的筛选**（日志时间范围、台账时间范围／统计周期／分组方式、AI 用量范围与结果、测活结果、Skill 安装来源、差异视图）：表单 `Section` 里的一行原生 `Picker(.segmented)`；选项超过 5 个或文字较长时改为原生 `Picker`（默认 `.menu` 样式，行内显示当前值）。
+3. **筛选菜单**：一个列表需要多个维度筛选时（插件中心的状态 + 分类），用一个原生 `Menu`，菜单内每个维度一个 `.inline` 的 `Picker`，标签显示当前筛选摘要，图标 `line.3.horizontal.decrease.circle`（有筛选时用 `.fill`）。
+4. **多选**：用系统 `Toggle` 行（例如 AI 供应商“擅长的任务”、多模型对话测试的模型），不手绘勾选圆圈。
+5. **单选当前对象**（选择配置的账号、发布通道、刷新频率）：原生 `Picker(.menu)`，标签带 SF Symbol。
+
+### 第五轮原生控件替换清单
+
+| 位置 | 原实现 | 现实现 |
+| --- | --- | --- |
+| 插件中心状态筛选 | 横向滚动的 `.glass`／`.glassProminent` 胶囊按钮行 + `GlassEffectContainer` | 原生 `Menu` 内的 `Picker(.inline)`「状态」 |
+| 插件中心分类筛选 | 单独的 `Menu` 包 `Picker` | 与状态合并进同一个筛选菜单 |
+| 插件中心“选择配置的账号” | `Menu` + 自绘文字与上下箭头标签 | 原生 `Picker(.menu)` |
+| 插件／AI 页搜索栏 | 自绘 `HStack`（放大镜、`TextField`、清除按钮、填充背景） | 系统 `UISearchTextField` |
+| 插件详情分区切换 | 裸 `Picker` 行（零边距） | 同一规则的页面级分段（第一个 Section、`.pageHeaderRow()`） |
+| 待确认操作状态切换 | `.safeAreaBar(edge: .top)` 里的分段控件 | 与其它页面一致：列表第一行的页面级分段 |
+| 多模型对话测试选择模型 | 按钮 + 手绘 `checkmark.circle.fill`／`circle` | 系统 `Toggle` 行 |
+| Agent 输入栏 | 输入框上方左侧的自绘模型胶囊 + 自绘圆角描边输入框 | 原生玻璃容器：多行 `TextField` + 工具栏（`Menu`「+」、模型 `Menu`＋`Picker`、发送／停止） |
+| AI 页分段控件外层 | 第四轮已去掉白色卡片 | 沿用 `.pageHeaderRow()` |
 
 ## 必须与禁止
 

@@ -16,6 +16,18 @@ struct AssistantInboxView: View {
     var body: some View {
         NavigationStack {
             List {
+                // 页面级分段：与全 App 同一规则，作为滚动内容第一项放在导航标题正下方。
+                Section {
+                    Picker("状态", selection: $status) {
+                        Text("待确认").tag("pending")
+                        Text("全部").tag("")
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .pageHeaderRow()
+                    .accessibilityIdentifier("assistant.inbox.status")
+                }
+                .listSectionSeparator(.hidden)
                 if let error { Section { AssistantNotice(text: error, isError: true) } }
                 Section {
                     ForEach(actions) { item in
@@ -26,17 +38,6 @@ struct AssistantInboxView: View {
                     }
                     if loading { ProgressView("正在读取…") }
                 }
-            }
-            // 此页为 sheet 内的行内标题，没有大标题折叠，安全区栏不会与导航栏形成反馈循环，可保留 safeAreaBar。
-            .safeAreaBar(edge: .top) {
-                Picker("状态", selection: $status) {
-                    Text("待确认").tag("pending")
-                    Text("全部").tag("")
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .padding(.horizontal, 16)
-                .padding(.vertical, 8)
             }
             .navigationTitle("待确认操作").navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { dismiss() } } }

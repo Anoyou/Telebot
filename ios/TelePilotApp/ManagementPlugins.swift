@@ -103,6 +103,8 @@ private struct PluginCenterView: View {
     @State private var dropTarget: String?
     @State private var savingOrder = false
     @State private var orderMessage: String?
+    /// 与系统分组列表相同的左右边距（随容器宽度），让分段控件与 AI、发现、已安装页左右对齐。
+    @State private var margin: CGFloat = 16
 
     /// 服务器顺序（GET /api/feature-matrix 已按保存的展示顺序排好），拖动后暂用本地顺序。
     private var orderedFeatures: [JSONValue] {
@@ -154,18 +156,9 @@ private struct PluginCenterView: View {
                 if loading && features.isEmpty {
                     ProgressView("正在读取插件与账号状态…").frame(maxWidth: .infinity).padding(.vertical, 48)
                 } else {
-                    filterBar
+                    // 状态与分类筛选合并为一个原生筛选菜单（原玻璃胶囊 + 分类菜单）。
                     HStack {
-                        Menu {
-                            Picker("分类", selection: $category) {
-                                Text("全部分类").tag("all")
-                                ForEach(categories, id: \.self) { Text(PluginPresentation.category($0)).tag($0) }
-                            }
-                        } label: {
-                            Label(category == "all" ? "全部分类" : PluginPresentation.category(category), systemImage: "line.3.horizontal.decrease.circle")
-                                .font(.subheadline)
-                        }
-                        .accessibilityIdentifier("plugins.category")
+                        filterMenu
                         Spacer()
                         Text("\(filtered.count) / \(features.count) 个插件").font(.footnote).foregroundStyle(.secondary).monospacedDigit()
                     }
@@ -221,8 +214,9 @@ private struct PluginCenterView: View {
                     }
                 }
             }
-            .padding(.horizontal, 16).padding(.bottom, 20)
+            .padding(.horizontal, margin).padding(.bottom, 20)
         }
+        .onGeometryChange(for: CGFloat.self) { proxy in proxy.size.width } action: { width in margin = PageLayout.margin(width: width) }
         .background(Color(.systemGroupedBackground))
         .refreshable { await reload(); await loadAccountFeatures() }
         .task {
@@ -237,30 +231,21 @@ private struct PluginCenterView: View {
     }
 
     /// 选择配置的账号：决定卡片上显示“服务器整体状态”还是“某个账号里的启用与运行状态”。
+    /// 原生 `Picker(.menu)` 行（系统负责当前值与上下箭头），放在系统分组背景里。
     @ViewBuilder private var scopePicker: some View {
         if fixedAccountID == nil {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 10) {
-                    Label("选择配置的账号：", systemImage: "person.crop.circle.badge.checkmark")
-                        .font(.subheadline.weight(.semibold))
-                    Spacer(minLength: 8)
-                    Menu {
-                        Picker("选择配置的账号", selection: $selectedAccountID) {
-                            Label("全部账号", systemImage: "square.stack.3d.up").tag(Int?.none)
-                            ForEach(model.accounts) { account in
-                                Label(ManagementText.accountName(account), systemImage: "person.crop.circle").tag(Optional(account.id))
-                            }
-                        }
-                    } label: {
-                        HStack(spacing: 4) {
-                            Text(selectedAccount.map(ManagementText.accountName) ?? "全部账号").lineLimit(1)
-                            Image(systemName: "chevron.up.chevron.down").font(.caption2.weight(.semibold))
-                        }
-                        .font(.subheadline.weight(.medium))
-                        .frame(minHeight: 44)
+            VStack(alignment: .leading, spacing: 6) {
+                Picker(selection: $selectedAccountID) {
+                    Label("全部账号", systemImage: "square.stack.3d.up").tag(Int?.none)
+                    ForEach(model.accounts) { account in
+                        Label(ManagementText.accountName(account), systemImage: "person.crop.circle").tag(Optional(account.id))
                     }
-                    .accessibilityIdentifier("plugins.accountPicker")
+                } label: {
+                    Label("选择配置的账号", systemImage: "person.crop.circle.badge.checkmark")
                 }
+                .pickerStyle(.menu)
+                .frame(minHeight: 44)
+                .accessibilityIdentifier("plugins.accountPicker")
                 Text(selectedAccountID == nil
                      ? "未选择账号：卡片显示插件在服务器上的整体状态。选择一个账号后，可以查看并配置插件在该账号里的启用情况。"
                      : "正在配置此账号：卡片显示插件在这个账号里是否启用、是否正常运行。点开插件即可为此账号开关或修改配置。")
@@ -270,40 +255,37 @@ private struct PluginCenterView: View {
                     Label("还没有账号。可以先安装插件，添加账号后再到账号中启用。", systemImage: "info.circle").font(.footnote).foregroundStyle(.secondary)
                 }
             }
-            .padding(.horizontal, 14).padding(.vertical, 10)
+            .padding(.horizontal, 14).padding(.vertical, 8)
             .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 12))
             .padding(.top, 4)
         }
     }
 
-    /// 状态筛选：iOS 26 原生玻璃胶囊按钮，选中项用 glassProminent（强调色），其余为普通玻璃。
-    /// 同一个 GlassEffectContainer 让相邻胶囊在切换时由系统统一渲染与融合。
-    private var filterBar: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            GlassEffectContainer(spacing: 8) {
-                HStack(spacing: 8) {
-                    ForEach(PluginFilter.allCases, id: \.self) { item in
-                        filterButton(item)
-                    }
-                }
-                .padding(.vertical, 4)
+    /// 状态与分类筛选：一个原生 `Menu`，内含两个内联 `Picker`（系统勾选当前项），
+    /// 取代原先的玻璃胶囊按钮行与单独的分类菜单。
+    private var filterMenu: some View {
+        Menu {
+            Picker("状态", selection: $filter) {
+                ForEach(PluginFilter.allCases, id: \.self) { item in Text(item.title).tag(item) }
             }
+            .pickerStyle(.inline)
+            Picker("分类", selection: $category) {
+                Text("全部分类").tag("all")
+                ForEach(categories, id: \.self) { Text(PluginPresentation.category($0)).tag($0) }
+            }
+            .pickerStyle(.inline)
+        } label: {
+            Label(filterSummary, systemImage: filter == .all && category == "all" ? "line.3.horizontal.decrease.circle" : "line.3.horizontal.decrease.circle.fill")
+                .font(.subheadline)
+                .frame(minHeight: 44)
         }
-        .scrollClipDisabled()
+        .accessibilityLabel("筛选：\(filterSummary)")
+        .accessibilityIdentifier("plugins.category")
     }
 
-    @ViewBuilder private func filterButton(_ item: PluginFilter) -> some View {
-        let selected = filter == item
-        Group {
-            if selected {
-                Button(item.title) { filter = item }.buttonStyle(.glassProminent)
-            } else {
-                Button(item.title) { filter = item }.buttonStyle(.glass)
-            }
-        }
-        .font(.subheadline)
-        .accessibilityAddTraits(selected ? .isSelected : [])
-        .accessibilityIdentifier("plugins.filter." + item.rawValue)
+    private var filterSummary: String {
+        let parts = [filter == .all ? nil : filter.title, category == "all" ? nil : PluginPresentation.category(category)].compactMap { $0 }
+        return parts.isEmpty ? "全部插件" : parts.joined(separator: " · ")
     }
 
     /// 把 source 移到 target 的位置（基于完整顺序，不受筛选影响），然后保存。
@@ -736,10 +718,16 @@ struct ManagementPluginDetailView: View {
                 accountSwitchSection
                 if globallyDisabled { globalDisabledSection }
             }
-            Picker("插件详情", selection: $section) {
-                ForEach(sections, id: \.self) { item in Text(title(item)).tag(item) }
+            // 页面级分段：与插件、AI 页同一规则（原生分段控件、透明零边距行、与卡片左右对齐）。
+            Section {
+                Picker("插件详情", selection: $section) {
+                    ForEach(sections, id: \.self) { item in Text(title(item)).tag(item) }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .pageHeaderRow()
             }
-            .pickerStyle(.segmented).listRowInsets(EdgeInsets()).listRowBackground(Color.clear)
+            .listSectionSeparator(.hidden)
             switch section {
             case .overview: overview
             case .configuration: configuration

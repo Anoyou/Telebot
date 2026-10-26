@@ -18986,6 +18986,202 @@
         "title": "SystemAgentUserMemoryPatch",
         "type": "object"
       },
+      "SystemCheckupOut": {
+        "description": "一键体检结果（只读，与助手工具 diagnostics.system_checkup 同源）。",
+        "properties": {
+          "business_changed": {
+            "default": false,
+            "title": "Business Changed",
+            "type": "boolean"
+          },
+          "checked_at": {
+            "title": "Checked At",
+            "type": "string"
+          },
+          "counts": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Counts",
+            "type": "object"
+          },
+          "elapsed_ms": {
+            "default": 0,
+            "title": "Elapsed Ms",
+            "type": "integer"
+          },
+          "kind": {
+            "default": "system_checkup",
+            "title": "Kind",
+            "type": "string"
+          },
+          "next_steps": {
+            "items": {
+              "$ref": "#/components/schemas/SystemCheckupStepOut"
+            },
+            "title": "Next Steps",
+            "type": "array"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "sections": {
+            "items": {
+              "$ref": "#/components/schemas/SystemCheckupSectionOut"
+            },
+            "title": "Sections",
+            "type": "array"
+          },
+          "unknown_sections": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Unknown Sections",
+            "type": "array"
+          },
+          "verdict": {
+            "title": "Verdict",
+            "type": "string"
+          },
+          "verdict_text": {
+            "title": "Verdict Text",
+            "type": "string"
+          },
+          "window_hours": {
+            "title": "Window Hours",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "checked_at",
+          "window_hours",
+          "verdict",
+          "verdict_text"
+        ],
+        "title": "SystemCheckupOut",
+        "type": "object"
+      },
+      "SystemCheckupSectionOut": {
+        "properties": {
+          "elapsed_ms": {
+            "default": 0,
+            "title": "Elapsed Ms",
+            "type": "integer"
+          },
+          "facts": {
+            "additionalProperties": true,
+            "title": "Facts",
+            "type": "object"
+          },
+          "finding": {
+            "title": "Finding",
+            "type": "string"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "next_steps": {
+            "items": {
+              "$ref": "#/components/schemas/SystemCheckupStepOut"
+            },
+            "title": "Next Steps",
+            "type": "array"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "title",
+          "status",
+          "finding"
+        ],
+        "title": "SystemCheckupSectionOut",
+        "type": "object"
+      },
+      "SystemCheckupStepOut": {
+        "description": "体检建议的下一步（文本面向用户与助手，tool 为可执行该步的助手工具名）。",
+        "properties": {
+          "order": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Order"
+          },
+          "requires_confirmation": {
+            "default": false,
+            "title": "Requires Confirmation",
+            "type": "boolean"
+          },
+          "section": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Section"
+          },
+          "severity": {
+            "title": "Severity",
+            "type": "string"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "tool": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tool"
+          }
+        },
+        "required": [
+          "severity",
+          "text"
+        ],
+        "title": "SystemCheckupStepOut",
+        "type": "object"
+      },
       "SystemConsoleLogsRequest": {
         "description": "系统控制台日志查询条件。\n\nkeyword 必须放在请求体中，避免敏感搜索词进入代理和应用 access log。",
         "properties": {
@@ -20741,7 +20937,7 @@
   },
   "info": {
     "title": "TelePilot",
-    "version": "0.106.0-beta.8"
+    "version": "0.106.0-beta.9"
   },
   "openapi": "3.1.0",
   "paths": {
@@ -44507,6 +44703,93 @@
           }
         ],
         "summary": "Get Capabilities",
+        "tags": [
+          "system-agent"
+        ]
+      }
+    },
+    "/api/system-agent/checkup": {
+      "get": {
+        "description": "一键体检：与助手“体检一下”调用同一个只读工具，不经过模型、不修改任何配置。",
+        "operationId": "system_checkup_api_system_agent_checkup_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "hours",
+            "required": false,
+            "schema": {
+              "default": 24,
+              "maximum": 168,
+              "minimum": 1,
+              "title": "Hours",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "auth_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Auth Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SystemCheckupOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "认证失败"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "服务器内部错误"
+          }
+        },
+        "security": [
+          {
+            "AuthCookie": []
+          }
+        ],
+        "summary": "System Checkup",
         "tags": [
           "system-agent"
         ]

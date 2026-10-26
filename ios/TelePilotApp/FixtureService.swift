@@ -204,6 +204,7 @@ actor FixtureService: AppServing {
             }
             if !opsValue.isNull { return opsValue }
         }
+        if clean == "/api/system-agent/checkup" { return Self.checkupFixture }
         if clean == "/api/system-agent/sessions", method == "POST" {
             return ["id": "fixture-session", "title": body?["title"] ?? "新会话", "status": "active"]
         }
@@ -214,7 +215,9 @@ actor FixtureService: AppServing {
             return ["ok": true, "deleted": .string(String(clean.dropFirst("/api/system-agent/sessions/".count)))]
         }
         if clean.hasSuffix("/messages") {
-            return [["id": 1, "role": "assistant", "content": ["text": "服务状态正常。这里是界面测试数据。"], "run_status": "completed"]]
+            return [["id": 1, "role": "assistant", "content": ["text": "服务状态正常。这里是界面测试数据。"], "run_status": "completed",
+                     "usage": ["provider_name": "测试供应商", "model": "fixture-model", "input_tokens": 1200, "output_tokens": 340,
+                               "tool_calls": 2, "elapsed_ms": 3200, "schema_version": 2]]]
         }
         if clean == "/api/system-agent/actions" {
             return [["id": "fixture-action", "tool_name": "accounts.pause", "summary": "暂停备用账号", "status": "pending",
@@ -701,6 +704,39 @@ actor FixtureService: AppServing {
     }
 
     static let storeTitles = ["weather_digest": "天气早报", "dice_party": "骰子派对", "hello_world": "示例：你好世界"]
+
+    /// 一键体检（GET /api/system-agent/checkup）：一项异常、一项需关注，其余正常。
+    static var checkupFixture: JSONValue {
+        let restart: JSONValue = ["severity": "error", "text": "账号 备用账号 的 Worker 未运行：先看原因，再重启（需确认）。",
+                                  "tool": "accounts.restart_worker", "requires_confirmation": true, "section": "accounts", "order": 1]
+        let logs: JSONValue = ["severity": "warn", "text": "最近 24 小时有 3 条错误日志，最常见：连接超时。",
+                               "tool": "logs.search_errors", "requires_confirmation": false, "section": "errors", "order": 2]
+        func ok(_ key: String, _ title: String, _ finding: String) -> JSONValue {
+            ["key": .string(key), "title": .string(title), "status": "ok", "finding": .string(finding), "facts": [:], "next_steps": [], "elapsed_ms": 12]
+        }
+        return [
+            "kind": "system_checkup", "checked_at": .string(isoDate(hoursAgo: 0)), "window_hours": 24,
+            "verdict": "error", "verdict_text": "发现异常：8 项正常、1 项需关注、1 项异常、0 项未能检查",
+            "counts": ["ok": 8, "warn": 1, "error": 1, "unknown": 0], "unknown_sections": [],
+            "next_steps": [restart, logs],
+            "sections": [
+                ok("health", "基础设施（数据库 / Redis / 运行时组件）", "数据库、Redis 与运行时组件均正常。"),
+                ok("versions", "版本", "当前 0.106.0-beta.9，已是最新。"),
+                ok("safety", "总闸与平台模块", "全局总闸未开启，平台模块正常。"),
+                ["key": "accounts", "title": "账号与 Worker", "status": "error", "finding": "2 个账号中 1 个 Worker 未运行。",
+                 "facts": [:], "next_steps": [restart], "elapsed_ms": 30],
+                ["key": "errors", "title": "错误日志", "status": "warn", "finding": "最近 24 小时 3 条错误。",
+                 "facts": [:], "next_steps": [logs], "elapsed_ms": 25],
+                ok("providers", "模型 Provider", "2 个供应商可调用。"),
+                ok("system_agent", "系统助手配置", "系统助手已启用。"),
+                ok("scheduler", "定时任务", "没有逾期的定时任务。"),
+                ok("plugins", "插件", "16 个插件运行正常。"),
+                ok("notifications", "通知与推送", "APNs 推送已配置。")
+            ],
+            "elapsed_ms": 812, "business_changed": false,
+            "note": "只读体检，未修改任何配置、未调用上游模型。建议中的写操作均需用户确认后执行。"
+        ]
+    }
 
     static func isoDate(hoursAgo: Double) -> String {
         ISO8601DateFormatter().string(from: Date().addingTimeInterval(-hoursAgo * 3600))

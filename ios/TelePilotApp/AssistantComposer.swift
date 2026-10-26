@@ -9,9 +9,12 @@ struct AssistantAttachment: Identifiable {
     let value: JSONValue
 }
 
-/// 助手底部输入栏（参考“信息”App 的底部输入栏）：
-/// - 本轮模型选择器在输入框上沿左侧，显示当前模型名，点开选择；任务执行中旁边显示“发送方式”。
-/// - 输入框贴近底部安全区与键盘，背景用系统 `.bar` 材质延伸到底部，不额外留白。
+/// 助手底部输入栏：原生 Liquid Glass 圆角容器（参考“信息”与 ChatGPT 的底部 composer）。
+/// - 上方是多行 `TextField`（1–8 行自动增高）；下方一行工具栏：左下「+」添加附件，
+///   右下发送按钮（任务执行中且输入为空时变为停止），发送按钮左侧是本轮模型选择（原生 `Menu` + `Picker`，显示模型短名）。
+/// - 任务执行中，工具栏左侧在「+」旁显示“发送方式”菜单（加入队列／插入调整／补充信息／停止并替换）。
+/// - 容器用 `glassEffect(.regular, in: .rect(cornerRadius:))`，这是 DESIGN.md「材质」里明确允许的例外；
+///   通过 `safeAreaInset(edge: .bottom)` 挂在对话下方，贴底部安全区并随键盘上移。
 /// - 草稿与附件是本视图自己的状态：打字只重绘输入栏，不会让上方的对话历史重新计算。
 struct AssistantComposer: View {
     @Environment(AppModel.self) private var model
@@ -27,15 +30,24 @@ struct AssistantComposer: View {
     @State private var confirmReplace = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            if !attachments.isEmpty { attachmentStrip }
-            controlsRow
-            inputRow
+        VStack(alignment: .leading, spacing: 0) {
+            if !attachments.isEmpty {
+                attachmentStrip.padding(.horizontal, 12).padding(.top, 8)
+            }
+            TextField(placeholder, text: $draft, axis: .vertical)
+                .lineLimit(1...8)
+                .focused(focused)
+                // 请求进行中也允许继续输入，发送按钮会等待服务器确认后再可用。
+                .disabled(readOnlyReason != nil)
+                .padding(.horizontal, 16).padding(.top, 14).padding(.bottom, 4)
+                .accessibilityIdentifier("assistant.composer")
+            toolbarRow
+                .padding(.horizontal, 8).padding(.bottom, 6)
         }
-        .padding(.horizontal, 12).padding(.top, 6).padding(.bottom, 6)
+        .glassEffect(.regular, in: .rect(cornerRadius: 26))
+        .padding(.horizontal, 12).padding(.top, 6).padding(.bottom, 8)
         .frame(maxWidth: 900)
         .frame(maxWidth: .infinity)
-        .background(.bar)
         .onChange(of: store.runActive) { _, active in if !active { sendMode = "message" } }
         .onChange(of: photos) { _, items in
             Task {
@@ -82,92 +94,84 @@ struct AssistantComposer: View {
         .scrollIndicators(.hidden)
     }
 
-    // MARK: 输入框上方：模型与发送方式
+    // MARK: 输入框下方的工具栏
 
-    private var controlsRow: some View {
-        HStack(spacing: 8) {
-            Menu {
-                Picker("本轮模型", selection: $store.modelIndex) {
-                    Text("自动，使用服务器配置").tag(-1)
-                    ForEach(Array(store.models.enumerated()), id: \.offset) { index, item in
-                        Text("\(item.assistantText("provider_name")) · \(item.assistantText("model"))").tag(index)
-                    }
-                }
-            } label: {
-                compactChip(modelLabel, systemImage: "cpu", showsChevron: true)
-            }
-            .accessibilityLabel("本轮模型：\(modelLabel)")
-            .accessibilityIdentifier("assistant.model")
-            if store.runActive {
-                Menu {
-                    Section("任务执行中，新消息如何处理") {
-                        Picker("发送方式", selection: $sendMode) {
-                            Label("加入队列（当前任务结束后执行）", systemImage: "text.badge.plus").tag("message")
-                            Label("插入调整说明（当前任务参考）", systemImage: "arrow.turn.down.right").tag("steer")
-                            if store.runStatus == "waiting_input" { Label("补充信息（回答助手的提问）", systemImage: "text.bubble").tag("input") }
-                            Label("停止并替换（需确认）", systemImage: "arrow.triangle.2.circlepath").tag("replace")
-                        }
-                    }
-                } label: {
-                    compactChip(sendModeTitle, systemImage: sendModeSymbol, showsChevron: true)
-                }
-                .accessibilityLabel("发送方式：\(sendModeTitle)")
-            }
-            Spacer(minLength: 0)
-            if draft.count > 30_000 {
-                Text("\(draft.count)/32000").monospacedDigit().foregroundStyle(draft.count > 32_000 ? .red : .secondary)
-            }
-        }
-        .font(.caption)
-        .foregroundStyle(.secondary)
-        .padding(.leading, 4)
-    }
-
-    private func compactChip(_ title: String, systemImage: String, showsChevron: Bool) -> some View {
+    private var toolbarRow: some View {
         HStack(spacing: 4) {
-            Image(systemName: systemImage).imageScale(.small)
-            Text(title).lineLimit(1).truncationMode(.middle)
-            if showsChevron { Image(systemName: "chevron.up.chevron.down").imageScale(.small) }
+            attachMenu
+            if store.runActive { sendModeMenu }
+            Spacer(minLength: 4)
+            if draft.count > 30_000 {
+                Text("\(draft.count)/32000").font(.caption).monospacedDigit()
+                    .foregroundStyle(draft.count > 32_000 ? .red : .secondary)
+            }
+            modelMenu
+            if showsStop { stopButton } else { sendButton }
         }
-        .font(.caption.weight(.medium))
-        .padding(.horizontal, 10).padding(.vertical, 6)
-        .background(Color(.tertiarySystemFill), in: .capsule)
-        .frame(minHeight: 32)
-        .contentShape(.capsule)
     }
 
-    // MARK: 输入框
+    /// 左下角「+」：只列出服务器真实支持的附件（图片，最多 4 张）；没有的能力不放进菜单。
+    private var attachMenu: some View {
+        Menu {
+            PhotosPicker(selection: $photos, maxSelectionCount: max(1, 4 - attachments.count), matching: .images) { Label("从照片选择", systemImage: "photo") }
+            Button("从文件选择图片", systemImage: "folder") { importingImage = true }
+        } label: {
+            Image(systemName: "plus")
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(.primary)
+                .frame(width: 44, height: 44)
+                .contentShape(.circle)
+        }
+        .disabled(attachments.count >= 4 || loadingImage || readOnlyReason != nil)
+        .accessibilityLabel("添加图片")
+        .accessibilityHint("可从照片或文件选择图片，最多 4 张")
+        .accessibilityIdentifier("assistant.attach")
+    }
 
-    private var inputRow: some View {
-        HStack(alignment: .bottom, spacing: 4) {
-            Menu {
-                PhotosPicker(selection: $photos, maxSelectionCount: max(1, 4 - attachments.count), matching: .images) { Label("从照片选择", systemImage: "photo") }
-                Button("从文件选择图片", systemImage: "folder") { importingImage = true }
-            } label: {
-                Image(systemName: "plus")
-                    .font(.system(size: 17, weight: .semibold))
-                    .frame(width: 34, height: 34)
-                    .background(Color(.tertiarySystemFill), in: .circle)
-                    .frame(width: 44, height: 44)
+    /// 本轮模型：原生 Menu + Picker，标签只显示模型短名。
+    private var modelMenu: some View {
+        Menu {
+            Picker("本轮模型", selection: $store.modelIndex) {
+                Text("自动，使用服务器配置").tag(-1)
+                ForEach(Array(store.models.enumerated()), id: \.offset) { index, item in
+                    Text("\(item.assistantText("provider_name")) · \(item.assistantText("model"))").tag(index)
+                }
             }
-            .disabled(attachments.count >= 4 || loadingImage || readOnlyReason != nil)
-            .accessibilityLabel("添加图片")
-            TextField(placeholder, text: $draft, axis: .vertical)
-                .lineLimit(1...8)
-                .focused(focused)
-                // 请求进行中也允许继续输入，发送按钮会等待服务器确认后再可用。
-                .disabled(readOnlyReason != nil)
-                .padding(.vertical, 11)
-                .accessibilityIdentifier("assistant.composer")
-            if store.runActive { stopButton }
-            sendButton
+        } label: {
+            HStack(spacing: 3) {
+                Text(modelShortName).lineLimit(1).truncationMode(.middle)
+                Image(systemName: "chevron.up.chevron.down").imageScale(.small)
+            }
+            .font(.subheadline.weight(.medium))
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 8)
+            .frame(maxWidth: 170, minHeight: 44)
+            .contentShape(.rect)
         }
-        .padding(.horizontal, 2)
-        .background(Color(.systemBackground), in: .rect(cornerRadius: 22))
-        .overlay {
-            RoundedRectangle(cornerRadius: 22)
-                .strokeBorder(focused.wrappedValue ? Color.accentColor.opacity(0.6) : Color(.separator), lineWidth: focused.wrappedValue ? 1 : 0.5)
+        .accessibilityLabel("本轮模型：\(modelLabel)")
+        .accessibilityIdentifier("assistant.model")
+    }
+
+    private var sendModeMenu: some View {
+        Menu {
+            Section("任务执行中，新消息如何处理") {
+                Picker("发送方式", selection: $sendMode) {
+                    Label("加入队列（当前任务结束后执行）", systemImage: "text.badge.plus").tag("message")
+                    Label("插入调整说明（当前任务参考）", systemImage: "arrow.turn.down.right").tag("steer")
+                    if store.runStatus == "waiting_input" { Label("补充信息（回答助手的提问）", systemImage: "text.bubble").tag("input") }
+                    Label("停止并替换（需确认）", systemImage: "arrow.triangle.2.circlepath").tag("replace")
+                }
+            }
+        } label: {
+            Label(sendModeTitle, systemImage: sendModeSymbol)
+                .font(.footnote.weight(.medium))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .frame(minHeight: 44)
+                .contentShape(.rect)
         }
+        .accessibilityLabel("发送方式：\(sendModeTitle)")
+        .accessibilityIdentifier("assistant.sendMode")
     }
 
     private var sendButton: some View {
@@ -261,6 +265,16 @@ struct AssistantComposer: View {
         case "replace": "arrow.triangle.2.circlepath"
         default: "text.badge.plus"
         }
+    }
+
+    /// 执行中且输入为空时，右下角按钮是“停止”；输入了内容则仍是发送（按“发送方式”处理）。
+    private var showsStop: Bool { store.runActive && trimmedDraft.isEmpty && attachments.isEmpty }
+
+    /// 模型短名：去掉 “厂商/” 前缀，例如 `openai/gpt-4o` 显示为 `gpt-4o`。
+    private var modelShortName: String {
+        guard store.models.indices.contains(store.modelIndex) else { return "自动" }
+        let name = store.models[store.modelIndex].assistantText("model")
+        return name.split(separator: "/").last.map(String.init) ?? name
     }
 
     private var modelLabel: String {

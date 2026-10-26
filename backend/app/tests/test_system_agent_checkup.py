@@ -550,3 +550,55 @@ async def test_total_budget_exhausted_skips_remaining_sections(monkeypatch) -> N
     assert sections[0]["reason"] == "timeout"
     assert sections[1]["status"] == "unknown"
     assert sections[1]["reason"] == "total_budget_exceeded"
+
+
+# ── HTTP 入口：GET /api/system-agent/checkup（App/Web 概览的「一键体检」） ──
+
+
+async def test_checkup_endpoint_calls_read_only_tool_and_strips_external_markers(monkeypatch) -> None:
+    from app.api import system_agent as api
+    from app.services.system_agent.tools._helpers import mark_external_text
+
+    seen: dict[str, object] = {}
+
+    async def fake_checkup(ctx, args):
+        seen["channel"] = ctx.channel
+        seen["role"] = ctx.role
+        seen["args"] = args
+        section = diag._section(
+            diag.STATUS_WARN,
+            "最近错误：" + mark_external_text("boom"),
+            {"top": [mark_external_text("x")]},
+            [diag._step("用 logs.search_errors 查看", tool="logs.search_errors")],
+        )
+        sections = [{"key": "errors", "title": "错误日志", **section, "elapsed_ms": 3}]
+        return {
+            "kind": "system_checkup",
+            "checked_at": "2026-10-27T00:00:00+00:00",
+            "window_hours": args["hours"],
+            "scope": {"account_id": None, "note": "系统级"},
+            **diag.summarize_sections(sections),
+            "sections": sections,
+            "elapsed_ms": 5,
+            "business_changed": False,
+            "note": "只读体检",
+        }
+
+    class _DB:
+        rolled_back = False
+
+        async def rollback(self) -> None:
+            self.rolled_back = True
+
+    db = _DB()
+    monkeypatch.setattr(diag, "system_checkup", fake_checkup)
+    out = await api.system_checkup(db=db, user=SimpleNamespace(id=7), hours=12)
+    assert seen == {"channel": "web", "role": "admin", "args": {"hours": 12}}
+    assert db.rolled_back is True
+    assert out.verdict == "warn"
+    assert out.window_hours == 12
+    assert out.sections[0].finding == "最近错误：boom"
+    assert out.sections[0].facts == {"top": ["x"]}
+    assert out.next_steps[0].tool == "logs.search_errors"
+    assert out.next_steps[0].section == "errors"
+    assert out.business_changed is False

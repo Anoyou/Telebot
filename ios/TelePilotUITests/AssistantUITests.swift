@@ -27,7 +27,37 @@ final class AssistantUITests: XCTestCase {
         expectation(for: cleared, evaluatedWith: composer)
         waitForExpectations(timeout: 10)
         XCTAssertTrue(app.staticTexts["服务状态正常。这里是界面测试数据。"].exists)
-        XCTAssertFalse(send.isEnabled)
+        // 输入为空时发送不可用；若任务仍在执行，右下角按钮会变为“停止”
+        XCTAssertFalse(send.exists && send.isEnabled)
+    }
+
+    func testTurnUsageShowsModelThenMetricsOnTwoLines() {
+        let app = openAssistant()
+        XCTAssertTrue(app.staticTexts["服务状态正常。这里是界面测试数据。"].waitForExistence(timeout: 10))
+        // 第一行“供应商 · 模型”，第二行词元、工具调用次数与耗时
+        let details = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "label CONTAINS %@ AND label CONTAINS %@", "测试供应商 · fixture-model", "工具 2 次")).firstMatch
+        XCTAssertTrue(details.waitForExistence(timeout: 5))
+        XCTAssertTrue(details.label.contains("输出 340 词元"))
+        XCTAssertTrue(details.label.contains("耗时"))
+    }
+
+    func testComposerUsesGlassToolbarWithAttachModelAndSend() {
+        let app = openAssistant()
+        let attach = app.buttons["assistant.attach"]
+        let model = app.buttons["assistant.model"]
+        let send = app.buttons["assistant.send"]
+        XCTAssertTrue(attach.waitForExistence(timeout: 5))
+        XCTAssertTrue(model.exists)
+        XCTAssertTrue(send.exists)
+        let composer = app.descendants(matching: .any)["assistant.composer"].firstMatch
+        // 布局：输入框在上，工具栏在下；“+” 在左下，模型选择在发送按钮左侧
+        XCTAssertLessThan(composer.frame.minY, attach.frame.minY)
+        XCTAssertLessThan(attach.frame.midX, model.frame.midX)
+        XCTAssertLessThan(model.frame.midX, send.frame.midX)
+        XCTAssertLessThan(abs(model.frame.midY - send.frame.midY), 12)
+        model.tap()
+        XCTAssertTrue(app.buttons["自动，使用服务器配置"].firstMatch.waitForExistence(timeout: 5))
     }
 
     func testAgentHidesDockAndMinimizeReturnsToPreviousTab() {

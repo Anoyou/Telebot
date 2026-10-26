@@ -173,6 +173,18 @@ function jsonResponse(pathname: string): unknown | undefined {
     resolved_model: null, ai_enabled: true, timezone: "Asia/Shanghai",
     tools: [], stage: 1, write_tools_available: false, model_matrix: [],
   };
+  if (pathname === "/api/system-agent/checkup") return {
+    kind: "system_checkup", checked_at: "2026-10-27T00:00:00+00:00", window_hours: 24,
+    verdict: "warn", verdict_text: "基本可用，有需关注项：9 项正常、1 项需关注、0 项异常、0 项未能检查",
+    counts: { ok: 9, warn: 1, error: 0, unknown: 0 }, unknown_sections: [],
+    next_steps: [{ severity: "warn", text: "最近 24 小时有 3 条错误日志。", tool: "logs.search_errors", requires_confirmation: false, section: "errors", order: 1 }],
+    sections: [
+      { key: "health", title: "基础设施（数据库 / Redis / 运行时组件）", status: "ok", finding: "均正常。", facts: {}, next_steps: [], elapsed_ms: 10 },
+      { key: "errors", title: "错误日志", status: "warn", finding: "最近 24 小时 3 条错误。", facts: {},
+        next_steps: [{ severity: "warn", text: "最近 24 小时有 3 条错误日志。", tool: "logs.search_errors", requires_confirmation: false }], elapsed_ms: 12 },
+    ],
+    elapsed_ms: 812, business_changed: false, note: "只读体检，未修改任何配置、未调用上游模型。",
+  };
   if (pathname === "/api/system-agent/sessions") return [];
   if (pathname === "/api/system-agent/runs") return [];
   if (pathname === "/api/system-agent/queue") return [];

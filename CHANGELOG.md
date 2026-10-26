@@ -25,6 +25,22 @@
 
 ## [Unreleased]
 
+## [0.106.0-beta.9] - 2026-10-27 · patch（补丁预发布） · 一键体检开放为接口，iOS / Web 概览可直接体检
+
+### 新增
+
+- 新增只读接口 `GET /api/system-agent/checkup?hours=24`（1–168）：直接执行助手工具 `diagnostics.system_checkup`（PR #52 的一键体检，10 项检查、总预算约 25 秒），不经过模型、不写任何配置，返回总体结论、计数、每项状态 / 结论 / 原因与下一步建议；给模型看的“外部内容”包裹标记在接口层去掉（内容本身已脱敏）。新增响应模型 `SystemCheckupOut` / `SystemCheckupSectionOut` / `SystemCheckupStepOut` 与测试。
+- Web 概览页头新增「一键体检」按钮，对话框显示结论、建议下一步与各项检查，并链接到账号、插件、AI、日志、定时任务、设置等处理入口；请求超时放宽到 60 秒。Playwright 夹具补充 `/api/system-agent/checkup`，新增用例 `tests/visual/system-checkup.spec.ts`。
+
+### 改进
+
+- `make codegen` 同步新接口到 `openapi/telepilot.openapi.json`、`frontend/src/api/schema.ts` 与 iOS 契约快照。
+
+### iOS
+
+- iOS 0.13.0：概览去掉「需要处理」，导航栏右上角新增「一键体检」（调用上述接口，结论、各项状态、原因与修复建议、可跳转处理入口）；助手输入栏改为原生 Liquid Glass 输入栏（多行输入框 + 工具栏：左下「+」附件、右下发送 / 停止、发送左侧模型选择），去掉上方模型胶囊；回答底部本轮详情改两行（供应商 · 模型 / 词元、工具调用、耗时）；全 App 分段切换统一为同一位置的系统分段控件，搜索栏改用系统 `UISearchTextField`，插件中心筛选改为原生菜单，模型多选改为系统开关；体检请求走长超时通道。
+
+
 ## [0.106.0-beta.8] - 2026-10-26 · patch（补丁预发布） · iOS 体验优化第四轮配套：插件展示顺序、助手会话摘要、模型能力标签汉化
 
 ### 新增

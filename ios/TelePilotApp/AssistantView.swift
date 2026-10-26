@@ -457,18 +457,23 @@ struct AssistantRunMeta {
     }
     var hasUsage: Bool { !usage.isEmpty }
 
-    /// 折叠时的一行摘要：模型 · 输入/输出词元 · 工具 · 耗时。
-    var summaryLine: String {
+    /// 折叠时的第一行：供应商名 · 模型名（没有用量数据时为“本轮详情”）。
+    var modelLine: String { model ?? (hasUsage ? "本轮用量" : "本轮详情") }
+
+    /// 折叠时的第二行：输入/输出词元 · 工具调用 · 重试 · 耗时；没有任何数字时为 nil。
+    var metricsLine: String? {
         var bits: [String] = []
-        if let model { bits.append(model) }
         if inputTokens != nil || outputTokens != nil {
-            bits.append("输入 \(inputTokens.map(AIPresentation.tokens) ?? "–") / 输出 \(outputTokens.map(AIPresentation.tokens) ?? "–")")
+            bits.append("输入 \(inputTokens.map(AIPresentation.tokens) ?? "–") / 输出 \(outputTokens.map(AIPresentation.tokens) ?? "–") 词元")
         }
-        if let toolCalls { bits.append("工具 \(toolCalls)") }
-        if let retries { bits.append("重试 \(retries)") }
-        if let elapsedMS, elapsedMS > 0 { bits.append(AIPresentation.latency(elapsedMS)) }
-        return bits.isEmpty ? "本轮详情" : bits.joined(separator: " · ")
+        if let toolCalls { bits.append("工具 \(toolCalls) 次") }
+        if let retries { bits.append("重试 \(retries) 次") }
+        if let elapsedMS, elapsedMS > 0 { bits.append("耗时 " + AIPresentation.latency(elapsedMS)) }
+        return bits.isEmpty ? nil : bits.joined(separator: " · ")
     }
+
+    /// 无障碍朗读用的完整摘要。
+    var summaryLine: String { [modelLine, metricsLine].compactMap { $0 }.joined(separator: "，") }
 }
 
 /// 回答底部的本轮详情：默认只占一行，点按展开模型、词元、耗时、工具调用与脱敏后的原始数据。
@@ -484,16 +489,28 @@ private struct AssistantTurnDetailsView: View {
                 details(meta)
                     .padding(.top, 6)
             } label: {
+                // 两行：第一行供应商 · 模型；第二行词元、工具调用次数与耗时。
                 Label {
-                    Text(meta.summaryLine)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                        .monospacedDigit()
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(meta.modelLine)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                            .accessibilityIdentifier("assistant.turnDetails.model")
+                        if let metrics = meta.metricsLine {
+                            Text(metrics)
+                                .lineLimit(1)
+                                .truncationMode(.tail)
+                                .monospacedDigit()
+                                .foregroundStyle(.tertiary)
+                                .accessibilityIdentifier("assistant.turnDetails.metrics")
+                        }
+                    }
                 } icon: {
                     Image(systemName: meta.hasUsage ? "chart.bar.doc.horizontal" : "wrench.and.screwdriver")
                 }
                 .font(.caption)
                 .foregroundStyle(.secondary)
+                .accessibilityElement(children: .ignore)
                 .accessibilityLabel("本轮详情：\(meta.summaryLine)")
             }
             .font(.caption)

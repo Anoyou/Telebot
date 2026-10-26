@@ -7,17 +7,12 @@ struct OverviewView: View {
     @Environment(WorkspacePreferences.self) private var preferences
     @State private var signals = OverviewSignals()
     @State private var destination: OverviewDestination?
-
-    private var attention: [OverviewAttentionItem] { OverviewAttention.items(model: model, signals: signals) }
+    @State private var showCheckup = false
 
     var body: some View {
-        let items = attention
         NavigationStack {
             List {
-                statusSection(items)
-                if !preferences.hiddenHomeModules.contains("attention") {
-                    attentionSection(items)
-                }
+                statusSection
                 if !preferences.hiddenHomeModules.contains("metrics") {
                     metricsSection
                 }
@@ -76,26 +71,37 @@ struct OverviewView: View {
                     .disabled(model.isRefreshing)
                     .accessibilityIdentifier("overview.refresh")
                 }
+                // 一键体检：与助手“体检一下”同一个只读检查，结果在面板中给出结论、每项状态与修复建议。
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button { showCheckup = true } label: {
+                        Label("一键体检", systemImage: "stethoscope")
+                    }
+                    .accessibilityLabel("一键体检")
+                    .accessibilityIdentifier("overview.checkup")
+                }
             }
+            .sheet(isPresented: $showCheckup) { SystemCheckupView() }
             .refreshable { await refreshAll() }
             .task { if signals.loadedAt == nil { await signals.load(model: model) } }
             .accessibilityIdentifier("overview.screen")
         }
     }
 
-    /// 三组读取并发进行，不再串行等待；“需要处理”在刷新期间保留上次结果。
+    /// 三组读取并发进行，不再串行等待；关键数字在刷新期间保留上次结果。
     private func refreshAll() async {
         let model = self.model
         let signals = self.signals
         async let base: Void = model.refresh()
         async let workspace: Void = model.refreshWorkspace()
-        async let attention: Void = signals.load(model: model)
-        _ = await (base, workspace, attention)
+        async let metrics: Void = signals.load(model: model)
+        _ = await (base, workspace, metrics)
     }
 
     // MARK: 状态摘要
 
-    @ViewBuilder private func statusSection(_ items: [OverviewAttentionItem]) -> some View {
+    /// 顶部只陈述能确认的事实：服务器是否可达、基础数据是否读取成功。
+    /// 账号、插件、AI 与日志的全面判断交给右上角「一键体检」，不在这里猜测“需要处理”的数量。
+    @ViewBuilder private var statusSection: some View {
         Section {
             NavigationLink { AboutView() } label: {
                 OverviewServerHeader(
@@ -112,30 +118,22 @@ struct OverviewView: View {
                 } else if model.health == nil {
                     Label("无法读取服务器状态", systemImage: OpsSeverity.error.symbol)
                         .font(.title2.weight(.semibold)).foregroundStyle(.red)
+                } else if model.healthError != nil || model.accountsError != nil || model.resourcesError != nil || model.workspaceError != nil || !signals.unavailable.isEmpty {
+                    Label("部分状态未能读取", systemImage: "questionmark.circle")
+                        .font(.title2.weight(.semibold)).foregroundStyle(.secondary)
                 } else {
-                    let errors = items.filter { $0.severity == .error }.count
-                    let warnings = items.filter { $0.severity == .warning }.count
-                    if errors + warnings == 0 {
-                        if signals.loadedAt == nil {
-                            Label("正在检查工作区…", systemImage: "arrow.clockwise")
-                                .font(.title2.weight(.semibold))
-                        } else if !signals.unavailable.isEmpty || model.healthError != nil || model.accountsError != nil || model.resourcesError != nil || model.workspaceError != nil {
-                            Label("部分状态未能确认", systemImage: "questionmark.circle")
-                                .font(.title2.weight(.semibold)).foregroundStyle(.secondary)
-                        } else {
-                            Label("一切正常", systemImage: "checkmark.circle.fill")
-                                .font(.title2.weight(.semibold)).foregroundStyle(.green)
-                        }
-                    } else {
-                        Label(errors > 0 ? "\(errors + warnings) 项需要处理" : "\(warnings) 项需要留意",
-                              systemImage: errors > 0 ? OpsSeverity.error.symbol : OpsSeverity.warning.symbol)
-                            .font(.title2.weight(.semibold)).foregroundStyle(errors > 0 ? Color.red : Color.orange)
-                    }
+                    Label("服务运行中", systemImage: "checkmark.circle.fill")
+                        .font(.title2.weight(.semibold)).foregroundStyle(.green)
                 }
                 if model.healthError != nil {
                     Text(model.health == nil ? "请检查网络或服务器地址，然后下拉重试。" : "以下为上次读取结果，并非当前在线状态。")
                         .font(.subheadline).foregroundStyle(.secondary)
+                } else if !signals.unavailable.isEmpty {
+                    Text("暂时无法读取：\(signals.unavailable.joined(separator: "、"))。下拉可重试。")
+                        .font(.subheadline).foregroundStyle(.secondary)
                 }
+                Text("想全面检查账号、插件、AI、日志与推送，点右上角「一键体检」。")
+                    .font(.footnote).foregroundStyle(.secondary)
                 if model.isSyncingAfterAction {
                     Label("操作已提交，正在同步最新状态…", systemImage: "arrow.triangle.2.circlepath")
                         .font(.footnote).foregroundStyle(.secondary)
@@ -145,29 +143,6 @@ struct OverviewView: View {
             .padding(.vertical, 6)
             .accessibilityElement(children: .combine)
             .accessibilityIdentifier("overview.status")
-        }
-    }
-
-    @ViewBuilder private func attentionSection(_ items: [OverviewAttentionItem]) -> some View {
-        Section {
-            if items.isEmpty {
-                if signals.loading && signals.loadedAt == nil {
-                    ProgressView("正在检查账号、插件、AI 与日志…")
-                } else if model.health != nil && signals.unavailable.isEmpty && model.healthError == nil && model.accountsError == nil && model.resourcesError == nil && model.workspaceError == nil {
-                    Label("没有需要处理的事项", systemImage: "checkmark.circle").foregroundStyle(.green)
-                }
-            }
-            ForEach(items) { item in
-                Button { perform(item.action) } label: { OverviewAttentionRow(item: item) }
-                    .buttonStyle(.plain)
-                    .accessibilityIdentifier("overview.attention.\(item.id)")
-            }
-            if !signals.unavailable.isEmpty {
-                Text("暂时无法检查：\(signals.unavailable.joined(separator: "、"))。下拉可重试。")
-                    .font(.footnote).foregroundStyle(.secondary)
-            }
-        } header: { Text("需要处理") } footer: {
-            Text("自动检查：账号登录状态、账号进程、插件运行、AI 模型、最近 24 小时的错误日志与消息失败、待补付款和待确认操作。")
         }
     }
 
@@ -186,8 +161,8 @@ struct OverviewView: View {
                     OpsMetricTile(title: "运行进程", value: "—", symbol: "bolt.horizontal.circle", detail: "在线 / 应运行")
                 }
                 OpsMetricTile(title: "已启用插件", value: signals.enabledPluginCount.map { String($0) } ?? "—", symbol: "puzzlepiece.extension",
-                              color: signals.failingPlugins.isEmpty ? .primary : .red,
-                              detail: signals.failingPlugins.isEmpty ? "运行正常" : "\(signals.failingPlugins.count) 个出错")
+                              color: signals.failingPluginCount == 0 ? .primary : .red,
+                              detail: signals.failingPluginCount == 0 ? "运行正常" : "\(signals.failingPluginCount) 个出错")
                 OpsMetricTile(title: "AI 供应商", value: signals.providerTotal.map { "\(signals.providerReady ?? 0)/\($0)" } ?? "—", symbol: "cpu",
                               color: signals.coolingModels.isEmpty ? .primary : .orange,
                               detail: signals.coolingModels.isEmpty ? "可用 / 已配置" : "\(signals.coolingModels.count) 个模型暂停中")
@@ -228,7 +203,7 @@ struct OverviewView: View {
         } header: { Text("快捷操作") }
     }
 
-    private func perform(_ action: OverviewAttentionItem.Action) {
+    private func perform(_ action: OverviewQuickAction.Action) {
         switch action {
         case .push(let target): destination = target
         case .route(let route): model.requestedRoute = route
@@ -237,12 +212,7 @@ struct OverviewView: View {
 
     @ViewBuilder private func destinationView(_ destination: OverviewDestination) -> some View {
         switch destination {
-        case .account(let id): AccountDetailView(id: id)
-        case .health: OverviewModuleView(module: .health)
-        case .workers: OverviewModuleView(module: .workers)
         case .logs: LogsView()
-        case .errorLogs: LogListView(kinds: [.runtime], level: .error, range: .day, title: "最近错误")
-        case .failedMessages: LogListView(kinds: [.messages], level: .warning, range: .day, title: "处理失败的消息")
         case .ledger: LedgerView()
         }
     }

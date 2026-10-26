@@ -627,9 +627,7 @@ private struct PluginStoreHeaderSection: View {
         if let header {
             Section {
                 SegmentedSearchHeader(picker: { header }, search: search, prompt: prompt, identifier: "plugins.search")
-                    .listRowBackground(Color.clear)
-                    .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
-                    .listRowSeparator(.hidden)
+                    .pageHeaderRow()
             }
             .listSectionSeparator(.hidden)
         }

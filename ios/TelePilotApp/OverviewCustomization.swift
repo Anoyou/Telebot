@@ -25,11 +25,10 @@ enum OverviewModule: String, CaseIterable, Identifiable, Codable {
 
 /// 概览顶部固定区块（不参与排序，只能显示或隐藏）。
 enum OverviewHomeSection: String, CaseIterable, Identifiable {
-    case attention, metrics, quick, favorites
+    case metrics, quick, favorites
     var id: String { rawValue }
     var title: String {
         switch self {
-        case .attention: "需要处理"
         case .metrics: "关键数字"
         case .quick: "快捷操作"
         case .favorites: "收藏"
@@ -37,7 +36,6 @@ enum OverviewHomeSection: String, CaseIterable, Identifiable {
     }
     var symbol: String {
         switch self {
-        case .attention: "exclamationmark.bubble"
         case .metrics: "number.square"
         case .quick: "square.grid.2x2"
         case .favorites: "star"
@@ -138,7 +136,7 @@ struct OverviewCustomizationView: View {
                     .accessibilityIdentifier("overview.toggle.\(section.rawValue)")
                 }
             } header: { Text("快捷内容") } footer: {
-                Text("“需要处理”会汇总账号、插件、AI、日志与台账里需要你处理的事项，建议保持开启。")
+                Text("全面检查账号、插件、AI 与日志请用概览右上角的「一键体检」。")
             }
         }
         .navigationTitle("自定义概览")

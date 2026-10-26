@@ -1,4 +1,5 @@
 /** System Agent API client. */
+import type { components } from "@/api/schema";
 import { api, apiFetch } from "@/lib/api";
 import { NdjsonDecoder } from "@/lib/ndjsonStream";
 
@@ -778,4 +779,18 @@ async function consumeSystemAgentStream(
     if (!reachedEof) await reader.cancel().catch(() => undefined);
     reader.releaseLock();
   }
+}
+
+// ── 一键体检（与助手“体检一下”同一个只读工具，不经过模型） ────────────────
+export type SystemCheckup = components["schemas"]["SystemCheckupOut"];
+export type SystemCheckupSection = components["schemas"]["SystemCheckupSectionOut"];
+export type SystemCheckupStep = components["schemas"]["SystemCheckupStepOut"];
+
+/** 服务器顺序跑 10 项只读检查，总预算约 25 秒，放宽默认 15 秒超时。 */
+export async function runSystemCheckup(hours = 24): Promise<SystemCheckup> {
+  const { data } = await api.get<SystemCheckup>("/api/system-agent/checkup", {
+    params: { hours },
+    timeout: 60_000,
+  });
+  return data;
 }
