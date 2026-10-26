@@ -92,18 +92,34 @@ struct AIWorkspaceView: View {
     @State private var workspace = AIWorkspaceStore()
     @State private var section: AISection = .overview
     @State private var showLiveness = false
+    @State private var showAddProvider = false
+    @State private var providerSearch = ""
+    @State private var usageSearch = ""
+
+    /// 当前分页的搜索内容；概览没有可搜索的列表，不显示搜索栏。
+    private var searchBinding: Binding<String>? {
+        switch section {
+        case .overview: nil
+        case .providers: $providerSearch
+        case .usage: $usageSearch
+        }
+    }
 
     var body: some View {
         List {
-            // 分段切换作为滚动内容的第一行，随内容一起滚动。曾挂在 `.safeAreaBar(edge: .top)` 上，
+            // 分段切换（及当前分页的搜索栏）作为滚动内容的第一行，随内容一起滚动。曾挂在 `.safeAreaBar(edge: .top)` 上，
             // 与大标题导航栏的折叠/展开互相改变顶部安全区，滑到顶部时顶栏会持续抖动。
             Section {
-                Picker("AI 工作区", selection: $section) {
-                    ForEach(AISection.allCases) { item in Text(item.title).tag(item) }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .accessibilityIdentifier("ai.sections")
+                SegmentedSearchHeader(picker: {
+                    Picker("AI 工作区", selection: $section) {
+                        ForEach(AISection.allCases) { item in Text(item.title).tag(item) }
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .accessibilityIdentifier("ai.sections")
+                }, search: searchBinding,
+                   prompt: section == .usage ? "搜索供应商、模型、来源或错误" : "搜索供应商、类型或模型",
+                   identifier: "ai.search")
                 .listRowBackground(Color.clear)
                 .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
                 .listRowSeparator(.hidden)
@@ -111,19 +127,26 @@ struct AIWorkspaceView: View {
             .listSectionSeparator(.hidden)
             switch section {
             case .overview: AIOverviewSection(workspace: workspace, showUsage: { section = .usage }, showLiveness: { showLiveness = true })
-            case .providers: AIProviderListSection(workspace: workspace)
-            case .usage: AIUsageSection(workspace: workspace)
+            case .providers: AIProviderListSection(workspace: workspace, search: providerSearch)
+            case .usage: AIUsageSection(workspace: workspace, search: usageSearch)
             }
         }
         .navigationTitle("AI")
         .navigationDestination(isPresented: $showLiveness) {
             AILivenessView(workspace: workspace)
         }
+        .navigationDestination(isPresented: $showAddProvider) {
+            AIProviderCreateView(workspace: workspace)
+        }
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button("刷新", systemImage: "arrow.clockwise") { Task { await workspace.refresh(model) } }
                     .disabled(workspace.loading)
                     .accessibilityIdentifier("ai.refresh")
+            }
+            ToolbarItem(placement: .topBarTrailing) {
+                Button("添加供应商", systemImage: "plus") { showAddProvider = true }
+                    .accessibilityIdentifier("ai.provider.add")
             }
         }
         .task { await workspace.refresh(model) }
@@ -186,7 +209,7 @@ private struct AIOverviewSection: View {
         } header: {
             Text("常用操作")
         } footer: {
-            Text("供应商与模型的添加、编辑请在上方“供应商”中进行。")
+            Text("右上角“+”添加供应商；编辑供应商与模型请在上方“供应商”中进行。")
         }
     }
 

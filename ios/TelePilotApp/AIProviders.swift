@@ -3,11 +3,11 @@ import TelePilotCore
 
 struct AIProviderListSection: View {
     @Bindable var workspace: AIWorkspaceStore
-    /// 供应商较多时显示搜索框。
-    var showSearch = true
-    @State private var search = ""
+    /// 搜索内容由 AI 页顶部（分段控件下方）的统一搜索栏提供。
+    var search = ""
 
     private var providers: [JSONValue] {
+        let search = self.search.trimmingCharacters(in: .whitespaces)
         guard !search.isEmpty else { return workspace.providers }
         return workspace.providers.filter { provider in
             [provider["name"]?.stringValue, provider["default_model"]?.stringValue, provider["provider"]?.stringValue]
@@ -16,12 +16,6 @@ struct AIProviderListSection: View {
     }
 
     var body: some View {
-        if showSearch, workspace.providers.count > 3 {
-            Section {
-                TextField("搜索供应商、类型或模型", text: $search)
-                    .textInputAutocapitalization(.never).autocorrectionDisabled()
-            }
-        }
         Section {
             ForEach(providers, id: \.self) { provider in
                 NavigationLink { AIProviderDetailView(provider: provider, workspace: workspace) } label: {
@@ -29,12 +23,8 @@ struct AIProviderListSection: View {
                 }
                 .accessibilityIdentifier("ai.provider.\(provider["id"]?.intValue ?? 0)")
             }
-            NavigationLink {
-                AIProviderCreateView(workspace: workspace)
-            } label: { Label("添加供应商", systemImage: "plus") }
-            .accessibilityIdentifier("ai.provider.add")
             if workspace.loaded, workspace.providers.isEmpty {
-                Text("先添加一个模型供应商，再获取或添加模型。Ollama 本地服务可以不配置 API Key。")
+                Text("点右上角“+”先添加一个模型供应商，再获取或添加模型。Ollama 本地服务可以不配置 API Key。")
                     .font(.subheadline).foregroundStyle(.secondary)
             } else if workspace.loaded, providers.isEmpty {
                 Text("没有匹配的供应商").foregroundStyle(.secondary)

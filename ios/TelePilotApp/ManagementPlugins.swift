@@ -125,7 +125,11 @@ private struct PluginCenterView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
-                if let header { header }
+                if let header {
+                    SegmentedSearchHeader(picker: { header }, search: $search, prompt: "搜索插件、标识或使用说明", identifier: "plugins.search")
+                } else {
+                    InlineSearchField(prompt: "搜索插件、标识或使用说明", text: $search, identifier: "plugins.search")
+                }
                 scopePicker
                 if let loadError { NoticeView(title: "插件目录读取失败", message: loadError) }
                 if let accountError { NoticeView(title: "账号插件状态读取失败", message: accountError) }
@@ -171,7 +175,6 @@ private struct PluginCenterView: View {
             .padding(.horizontal, 16).padding(.bottom, 20)
         }
         .background(Color(.systemGroupedBackground))
-        .searchable(text: $search, prompt: "搜索插件、标识或使用说明")
         .refreshable { await reload(); await loadAccountFeatures() }
         .task {
             if fixedAccountID == nil, selectedAccountID == nil { selectedAccountID = model.accounts.first?.id }
