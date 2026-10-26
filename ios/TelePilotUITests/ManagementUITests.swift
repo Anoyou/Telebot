@@ -105,8 +105,10 @@ final class ManagementUITests: XCTestCase {
     func testAboutShowsBundledAppChangelog() {
         let app = launch()
         let about = app.buttons["more.about"]
-        XCTAssertTrue(about.waitForExistence(timeout: 10))
-        for _ in 0..<4 where !about.isHittable { app.swipeUp() }
+        // “更多”顶部的全局紧急停止说明较长，“关于与更新”可能在首屏之外；List 懒加载，先滚动再等待。
+        XCTAssertTrue(app.buttons["more.accounts"].waitForExistence(timeout: 10))
+        for _ in 0..<6 where !(about.exists && about.isHittable) { app.swipeUp() }
+        XCTAssertTrue(about.waitForExistence(timeout: 5))
         about.tap()
         let entry = app.buttons["about.appChangelog"]
         XCTAssertTrue(entry.waitForExistence(timeout: 10))
@@ -128,8 +130,10 @@ final class ManagementUITests: XCTestCase {
     func testServerUpdateRequiresConfirmationBeforeApplying() {
         let app = launch()
         let about = app.buttons["more.about"]
-        XCTAssertTrue(about.waitForExistence(timeout: 10))
-        for _ in 0..<4 where !about.isHittable { app.swipeUp() }
+        // “更多”顶部的全局紧急停止说明较长，“关于与更新”可能在首屏之外；List 懒加载，先滚动再等待。
+        XCTAssertTrue(app.buttons["more.accounts"].waitForExistence(timeout: 10))
+        for _ in 0..<6 where !(about.exists && about.isHittable) { app.swipeUp() }
+        XCTAssertTrue(about.waitForExistence(timeout: 5))
         about.tap()
         XCTAssertTrue(app.staticTexts["App 版本"].waitForExistence(timeout: 10))
         let open = app.buttons["update.open"]
@@ -168,8 +172,10 @@ final class ManagementUITests: XCTestCase {
     func testServerUpdateReceiptSurvivesClosingPanel() {
         let app = launch()
         let about = app.buttons["more.about"]
-        XCTAssertTrue(about.waitForExistence(timeout: 10))
-        for _ in 0..<4 where !about.isHittable { app.swipeUp() }
+        // “更多”顶部的全局紧急停止说明较长，“关于与更新”可能在首屏之外；List 懒加载，先滚动再等待。
+        XCTAssertTrue(app.buttons["more.accounts"].waitForExistence(timeout: 10))
+        for _ in 0..<6 where !(about.exists && about.isHittable) { app.swipeUp() }
+        XCTAssertTrue(about.waitForExistence(timeout: 5))
         about.tap()
         let open = app.buttons["update.open"]
         for _ in 0..<4 where !open.isHittable { app.swipeUp() }
@@ -183,20 +189,20 @@ final class ManagementUITests: XCTestCase {
         let confirm = app.buttons["update.confirm"].firstMatch
         XCTAssertTrue(confirm.waitForExistence(timeout: 10))
         confirm.tap()
-        let job = app.buttons["update.job"]
-        scrollUpdateSheet(to: job, in: app)
-        XCTAssertTrue(job.waitForExistence(timeout: 10))
+        // 提交后面板内直接显示更新进度（只读轮询），不再跳转到原始 JSON 任务页。
+        let progress = app.descendants(matching: .any)["update.progress"]
+        XCTAssertTrue(progress.waitForExistence(timeout: 10))
         app.buttons["update.done"].tap()
         XCTAssertTrue(open.waitForExistence(timeout: 5))
         open.tap()
-        // 面板新增“更新通道”分区后内容更长：滚到“更新结果”时，上方操作分区的行已被列表回收，
-        // 因此先在操作分区确认“应用更新”已隐藏、“允许下次更新”可用，再继续滚到升级任务。
-        let allowNext = app.buttons["update.allowNext"]
-        scrollUpdateSheet(to: allowNext, in: app)
-        XCTAssertTrue(allowNext.waitForExistence(timeout: 10))
+        // 重新打开时从本地收据恢复同一个任务继续跟踪，期间不显示“应用更新”，不能重复提交。
+        XCTAssertTrue(app.descendants(matching: .any)["update.progress"].waitForExistence(timeout: 10))
         XCTAssertFalse(app.buttons["update.apply"].exists)
-        scrollUpdateSheet(to: job, in: app)
-        XCTAssertTrue(job.waitForExistence(timeout: 10))
+        let applied = app.descendants(matching: .any)["update.applied"]
+        // “更新已完成”位于进度行下方，medium 高度的面板里可能在可见区外（List 懒加载），等不到就向下滚动找。
+        if !applied.waitForExistence(timeout: 20) { scrollUpdateSheet(to: applied, in: app) }
+        XCTAssertTrue(applied.waitForExistence(timeout: 15))
+        XCTAssertFalse(app.buttons["update.apply"].exists)
     }
 
     func testLogDetailExplainsMessageFailureAndOpensTimeline() {

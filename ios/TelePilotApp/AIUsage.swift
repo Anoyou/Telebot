@@ -12,7 +12,8 @@ struct AIUsageSection: View {
     @Environment(AppModel.self) private var model
     @State private var scope: AIUsageScope = .recent
     @State private var filter = "all"
-    @State private var search = ""
+    /// 搜索内容由 AI 页顶部（分段控件下方）的统一搜索栏提供。
+    var search = ""
     @State private var resetting = false
     @State private var confirmingReset = false
     @State private var error: String?
@@ -55,8 +56,6 @@ struct AIUsageSection: View {
             Picker("结果", selection: $filter) {
                 Text("全部").tag("all"); Text("成功").tag("success"); Text("失败").tag("failed")
             }.pickerStyle(.segmented)
-            TextField("搜索供应商、模型、来源或错误", text: $search)
-                .textInputAutocapitalization(.never).autocorrectionDisabled()
         }
 
         Section {

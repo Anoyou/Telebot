@@ -33,6 +33,7 @@ from ..schemas.feature import (
     PluginConfigActionJobResponse,
     PluginConfigActionRequest,
     PluginConfigActionResponse,
+    PluginDisplayOrder,
     PluginGlobalConfigResponse,
     PluginGlobalConfigUpdate,
 )
@@ -335,6 +336,36 @@ async def get_feature_matrix(db: DBSession, _user: CurrentUser) -> FeatureMatrix
     """返回 N(账号) × M(功能) 矩阵。"""
     data = await feature_service.feature_matrix(db)
     return FeatureMatrixResponse(**data)
+
+
+@router.get("/api/feature-matrix/order", response_model=PluginDisplayOrder)
+async def get_plugin_display_order(db: DBSession, _user: CurrentUser) -> PluginDisplayOrder:
+    """插件中心卡片的展示顺序；未自定义时为空列表（按默认顺序展示）。"""
+    return PluginDisplayOrder(keys=await feature_service.get_plugin_display_order(db))
+
+
+@router.put("/api/feature-matrix/order", response_model=PluginDisplayOrder)
+async def put_plugin_display_order(
+    payload: PluginDisplayOrder, db: DBSession, user: CurrentUser
+) -> PluginDisplayOrder:
+    """保存插件中心卡片的展示顺序（iOS 长按拖动排序）。
+
+    只影响 ``GET /api/feature-matrix`` 的 features 顺序，不影响插件执行或直通优先级；
+    未出现在列表里的插件排在后面。整表覆盖写入，重复提交同一顺序结果相同。
+    """
+    for key in payload.keys:
+        if len(key) > 128:
+            raise _bad("VALIDATION_ERROR", "插件 key 过长")
+    keys = await feature_service.set_plugin_display_order(db, payload.keys)
+    await audit.write(
+        db,
+        user.id,
+        "feature.display_order",
+        target="plugins",
+        detail={"count": len(keys)},
+    )
+    await db.commit()
+    return PluginDisplayOrder(keys=keys)
 
 
 # ─────────────────────────────────────────────────────

@@ -76,7 +76,7 @@ struct SettingsView: View {
                         NoticeView(title: "界面锁设置未改变", message: error)
                     }
                 } header: { Text("界面锁") } footer: {
-                    Text("离开 App 时始终遮住任务切换器中的内容；超过所选时间后返回，需要通过 Face ID、Touch ID 或设备密码解锁。适当的宽限期便于切到 Telegram 查看验证码。此功能不删除服务器会话。")
+                    Text("开启后，离开 App 超过所选时间再返回，需要通过 Face ID、Touch ID 或设备密码解锁。App 不会在多任务切换器、截屏或录屏时遮挡内容。适当的宽限期便于切到 Telegram 查看验证码。此功能不删除服务器会话。")
                 }
                 Section {
                     Label("密码不保存在 App 中", systemImage: "lock.shield")
@@ -96,18 +96,6 @@ struct SettingsView: View {
                     }
                     .frame(minHeight: 44).accessibilityIdentifier("settings.logout")
                     .modifier(logoutConfirmation(.logout))
-                }
-                Section {
-                    NavigationLink { AboutView() } label: {
-                        Label {
-                            LabeledContent("关于与更新") {
-                                Text(AppInfo.version).monospacedDigit()
-                            }
-                        } icon: { Image(systemName: "info.circle") }
-                    }
-                    .accessibilityIdentifier("settings.about")
-                } header: { Text("关于") } footer: {
-                    Text("版本信息、检查服务器更新、更新通道与自动检查都集中在“关于与更新”里。")
                 }
             }
             .symbolRenderingMode(.hierarchical)

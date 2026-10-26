@@ -293,6 +293,8 @@ export async function listSystemAgentRuns(params?: {
   until?: string;
   limit?: number;
   include_bot?: boolean;
+  /** 只返回指定会话的任务。 */
+  session_id?: string;
 }): Promise<SystemAgentRun[]> {
   const { data } = await api.get<SystemAgentRun[]>("/api/system-agent/runs", { params });
   return data;
@@ -397,7 +399,14 @@ export async function deleteSystemAgentUserMemory(id: number): Promise<void> {
 }
 
 export async function listSystemAgentSessions(
-  params?: { status?: string; origin?: string; include_bot?: boolean; limit?: number },
+  params?: {
+    status?: string;
+    origin?: string;
+    include_bot?: boolean;
+    limit?: number;
+    /** 只取列表摘要（不含 memory_summary / memory_state），轮询会话列表时减少传输量。 */
+    compact?: boolean;
+  },
 ): Promise<SystemAgentSession[]> {
   const { data } = await api.get<SystemAgentSession[]>("/api/system-agent/sessions", { params });
   return data;

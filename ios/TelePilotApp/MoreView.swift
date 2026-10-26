@@ -42,7 +42,15 @@ struct MoreView: View {
 
             Section {
                 NavigationLink(value: MoreDestination.about) {
-                    Label("关于与更新", systemImage: "info.circle")
+                    Label {
+                        HStack {
+                            Text("关于与更新")
+                            Spacer()
+                            if model.serverUpdateAvailable {
+                                Text("服务器有新版本").font(.caption.weight(.semibold)).foregroundStyle(.tint)
+                            }
+                        }
+                    } icon: { Image(systemName: "info.circle") }
                 }
                 .accessibilityIdentifier("more.about")
             }

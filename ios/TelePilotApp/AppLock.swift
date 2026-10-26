@@ -90,7 +90,6 @@ final class AppLockModel {
     }
 
     /// App 进入后台。宽限期为 0 时立即锁定；否则记录时间，回到前台时由 `resume()` 判断。
-    /// 任务切换器与录屏遮挡由场景遮罩独立负责，不受宽限期影响。
     func suspend() {
         guard isEnabled else { return }
         guard graceSeconds > 0 else { lockNow(); return }

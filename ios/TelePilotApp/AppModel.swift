@@ -34,6 +34,8 @@ final class AppModel {
     let catalog = APIContractCatalog.bundled
     private(set) var pendingActions: [JSONValue] = []
     private(set) var plugins: [JSONValue] = []
+    /// 服务器最近一次更新检查（自动或手动，`GET /api/system/update-status`），用于“更多”角标与关于页提示。
+    private(set) var serverUpdateStatus: JSONValue?
     private(set) var workspaceError: String?
     var requestedRoute: AppRoute?
     /// 推送或其他入口要求 Agent 标签页打开的会话；由内嵌助手读取后清空。
@@ -426,7 +428,8 @@ final class AppModel {
         // 待确认事项与插件矩阵互不依赖，并发读取以缩短概览刷新时间。
         async let actionsResult = capture { try await self.request(path: "/api/system-agent/actions?status=pending&limit=200") }
         async let pluginsResult = capture { try await self.request(path: "/api/feature-matrix") }
-        let (actions, matrix) = await (actionsResult, pluginsResult)
+        async let updateResult = capture { try await self.request(path: "/api/system/update-status") }
+        let (actions, matrix, update) = await (actionsResult, pluginsResult, updateResult)
         guard token == generation else { return }
         switch actions {
         case .success(let values):
@@ -435,6 +438,7 @@ final class AppModel {
         case .failure:
             workspaceError = "待确认事项读取失败，请重试。"
         }
+        if case .success(let value) = update { serverUpdateStatus = value }
         if case .success(let value) = matrix {
             plugins = value.arrayValue ?? value["items"]?.arrayValue ?? value["plugins"]?.arrayValue ?? value["features"]?.arrayValue ?? []
         }
@@ -444,6 +448,29 @@ final class AppModel {
     func updatePlugins(_ values: [JSONValue]) {
         guard phase == .signedIn else { return }
         plugins = values
+    }
+
+    /// 最近一次检查的结论：有新版本且没有被后续部署推翻（服务器会把陈旧结论标为 stale 并置 has_update=false）。
+    var serverUpdateAvailable: Bool {
+        guard let last = serverUpdateStatus?["last_check"] else { return false }
+        return last["has_update"]?.boolValue == true && last["stale"]?.boolValue != true
+    }
+
+    var serverUpdateTargetVersion: String? {
+        guard serverUpdateAvailable, let value = serverUpdateStatus?["last_check"]?["target_version"]?.stringValue,
+              !value.isEmpty else { return nil }
+        return value
+    }
+
+    func setServerUpdateStatus(_ value: JSONValue) {
+        guard phase == .signedIn else { return }
+        serverUpdateStatus = value
+    }
+
+    /// 只读刷新更新角标；失败时保留上一次结果。
+    func refreshServerUpdateStatus() async {
+        guard phase == .signedIn else { return }
+        if let value = try? await request(path: "/api/system/update-status") { serverUpdateStatus = value }
     }
 
     /// 服务器报告有新版本的插件数（插件 Tab 角标）。
@@ -601,6 +628,9 @@ final class AppModel {
     private func clearData() {
         pendingActions = []
         plugins = []
+        serverUpdateStatus = nil
+        // 本机缓存的助手会话与消息随登录状态一起清除。
+        AssistantHistoryCache.removeAll()
         assistantSessionRequest = nil
         isSyncingAfterAction = false
         workspaceError = nil

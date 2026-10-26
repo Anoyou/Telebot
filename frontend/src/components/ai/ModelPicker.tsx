@@ -50,13 +50,13 @@ function badge(
 
 function itemBadges(item: ModelPickerItem): { label: string; className: string }[] {
   const out: { label: string; className: string }[] = [];
-  if (item.declaredTools === true) out.push(badge("声明 Tools", "ok"));
-  if (item.declaredTools === false) out.push(badge("无 Tools", "muted"));
-  if (item.declaredVision === true) out.push(badge("Vision"));
-  if (item.declaredReasoning === true) out.push(badge("Reasoning"));
-  if (item.probedTools === true) out.push(badge("实测✓", "ok"));
+  if (item.declaredTools === true) out.push(badge("工具调用", "ok"));
+  if (item.declaredTools === false) out.push(badge("无工具调用", "muted"));
+  if (item.declaredVision === true) out.push(badge("多模态（图片）"));
+  if (item.declaredReasoning === true) out.push(badge("推理"));
+  if (item.probedTools === true) out.push(badge("实测可用", "ok"));
   if (item.probedStatus === "unsupported" || item.probedTools === false) {
-    out.push(badge("实测×", "warn"));
+    out.push(badge("实测不可用", "warn"));
   }
   if (item.healthState === "cooling") {
     const sec = item.cooldownSeconds ?? "?";

@@ -350,6 +350,10 @@ async def list_sessions(
     origin: str | None = Query(default=None, description="interactive | scheduled；缺省返回全部"),
     include_bot: bool = Query(default=False, description="管理员会话列表是否包含 Telegram Bot 会话"),
     limit: int = Query(default=50, ge=1, le=200),
+    compact: bool = Query(
+        default=False,
+        description="只返回列表需要的摘要字段：memory_summary 置空、memory_state 置为空对象，减少传输量（iOS 会话列表使用）",
+    ),
 ) -> list[SystemAgentSessionOut]:
     svc = get_system_agent_service()
     rows = await svc.list_sessions(
@@ -360,7 +364,10 @@ async def list_sessions(
         include_bot_sessions=include_bot,
         limit=limit,
     )
-    return [_session_out(r) for r in rows]
+    out = [_session_out(r) for r in rows]
+    if compact is True:
+        out = [item.model_copy(update={"memory_summary": "", "memory_state": {}}) for item in out]
+    return out
 
 
 @router.get("/sessions/{session_id}", response_model=SystemAgentSessionOut)
@@ -590,15 +597,23 @@ async def list_system_agent_runs(
     until: datetime | None = Query(default=None),
     limit: int = Query(default=100, ge=1, le=500),
     include_bot: bool = Query(default=False),
+    session_id: str | None = Query(
+        default=None,
+        max_length=64,
+        description="只返回指定会话的任务（打开会话时恢复进行中的任务，避免拉取全部会话的任务）",
+    ),
 ) -> list[SystemAgentRunOut]:
-    rows = await get_system_agent_run_manager().list_runs(
-        web_user_id=user.id,
-        status=status,
-        since=since,
-        until=until,
-        limit=limit,
-        include_bot=include_bot,
-    )
+    kwargs: dict[str, Any] = {
+        "web_user_id": user.id,
+        "status": status,
+        "since": since,
+        "until": until,
+        "limit": limit,
+        "include_bot": include_bot,
+    }
+    if isinstance(session_id, str) and session_id:
+        kwargs["session_id"] = session_id
+    rows = await get_system_agent_run_manager().list_runs(**kwargs)
     return [_run_out(row) for row in rows]
 
 

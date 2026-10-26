@@ -621,10 +621,12 @@ struct PluginStoreSkeleton: View {
 /// 分段头部（与插件中心一致）：作为列表第一个分组，随内容滚动。
 private struct PluginStoreHeaderSection: View {
     let header: AnyView?
+    var search: Binding<String>? = nil
+    var prompt = "搜索插件"
     var body: some View {
         if let header {
             Section {
-                header
+                SegmentedSearchHeader(picker: { header }, search: search, prompt: prompt, identifier: "plugins.search")
                     .listRowBackground(Color.clear)
                     .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
                     .listRowSeparator(.hidden)
@@ -662,10 +664,19 @@ struct PluginInstalledView: View {
     @Environment(AppModel.self) private var model
     @State private var route: PluginStoreRoute?
     @State private var confirmUpdateAll = false
+    @State private var search = ""
+
+    private func matches(_ key: String, _ feature: JSONValue) -> Bool {
+        let query = search.trimmingCharacters(in: .whitespaces)
+        guard !query.isEmpty else { return true }
+        return PluginStoreModel.title(feature).localizedCaseInsensitiveContains(query)
+            || key.localizedCaseInsensitiveContains(query)
+            || (store.summary(key)?.localizedCaseInsensitiveContains(query) ?? false)
+    }
 
     var body: some View {
         List {
-            PluginStoreHeaderSection(header: header)
+            PluginStoreHeaderSection(header: header, search: $search, prompt: "搜索已安装的插件")
             if let error = store.loadError {
                 Section { NoticeView(title: "插件列表读取失败", message: error + (store.features.isEmpty ? "" : "（下面是上次读取的结果）")) }
             }
@@ -697,7 +708,7 @@ struct PluginInstalledView: View {
     }
 
     @ViewBuilder private var updatesSection: some View {
-        let pending = store.pendingUpdates.map { PluginStoreModel.key($0) }
+        let pending = store.pendingUpdates.map { PluginStoreModel.key($0) }.filter { key in store.feature(key).map { matches(key, $0) } ?? false }
         let updatable = store.remotelyUpdatableKeys.count
         Section {
             if pending.isEmpty {
@@ -766,7 +777,7 @@ struct PluginInstalledView: View {
 
     @ViewBuilder private var recentSection: some View {
         let recent = store.recentUpdates
-        if !recent.isEmpty {
+        if !recent.isEmpty && search.isEmpty {
             Section {
                 ForEach(recent) { record in
                     PluginRecentUpdateRow(store: store, record: record,
@@ -778,8 +789,11 @@ struct PluginInstalledView: View {
     }
 
     @ViewBuilder private var installedSection: some View {
-        let features = store.installedFeatures
+        let features = store.installedFeatures.filter { matches(PluginStoreModel.key($0), $0) }
         Section {
+            if features.isEmpty && !search.isEmpty {
+                ContentUnavailableView.search(text: search)
+            }
             ForEach(features.map { PluginStoreModel.key($0) }, id: \.self) { key in
                 if let feature = store.feature(key) {
                     installedRow(key: key, feature: feature)
@@ -946,7 +960,7 @@ struct PluginDiscoverView: View {
 
     var body: some View {
         List {
-            PluginStoreHeaderSection(header: header)
+            PluginStoreHeaderSection(header: header, search: $search, prompt: "搜索插件名称、简介或标签")
             if let error = store.catalogError {
                 Section { NoticeView(title: "插件仓库读取失败", message: error) }
             }
@@ -983,7 +997,6 @@ struct PluginDiscoverView: View {
             }
             moreSourcesSection
         }
-        .searchable(text: $search, prompt: "搜索插件名称、简介或标签")
         .refreshable {
             await store.loadCatalog(model: model)
             await store.load(model: model)

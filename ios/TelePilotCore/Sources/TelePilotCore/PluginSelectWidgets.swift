@@ -212,7 +212,7 @@ public enum PluginSelectOptions {
         let label: String
         if !providerLabel.isEmpty && !modelText.isEmpty { label = "当前值：\(providerLabel) · \(modelText)" }
         else if !providerLabel.isEmpty { label = "当前值：\(providerLabel) · 默认模型" }
-        else { label = "当前值：\(modelText)（未固定 Provider）" }
+        else { label = "当前值：\(modelText)（未固定供应商）" }
         let legacy = PluginUnifiedModelOption(key: "legacy" + keySeparator + providerText + keySeparator + modelText, label: label,
                                               group: "", providerValue: providerText, modelValue: modelText)
         return PluginUnifiedModelSelection(options: options, selectedKey: legacy.key, legacy: legacy)

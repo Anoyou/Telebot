@@ -45,15 +45,13 @@ struct EmergencyStopSection: View {
                 }
                 Button("取消", role: .cancel) {}
             } message: {
-                Text(enabled == true
-                     ? "解除后自动化会恢复运行。请先确认当前任务和资金状态正常。"
-                     : "会立刻停止服务器上的全部自动化执行，直到手动解除。")
+                Text(enabled == true ? Self.resumeMessage : Self.stopMessage)
             }
         } footer: {
             if let resultMessage {
                 Text(resultMessage).foregroundStyle(.red)
             } else {
-                Text("启用后服务器会停止所有自动化执行（插件、AI 自动回复、定时任务等）。")
+                Text(Self.footer)
             }
         }
         .task { await load() }
@@ -62,12 +60,23 @@ struct EmergencyStopSection: View {
     private var statusText: String {
         if let loadError { return "状态读取失败：\(loadError)" }
         switch enabled {
-        case .some(true): return "已启用 · 自动化已停止"
-        case .some(false): return "未启用 · 自动化正常运行"
+        case .some(true): return "已开启 · 账号进程与 Bot 已停止"
+        case .some(false): return "未开启 · 账号与 Bot 正常运行"
         case .none: return "正在读取状态…"
         }
     }
     private var actionTitle: String { enabled == true ? "解除" : "停止" }
+
+    // 文案依据服务器实现（kill_switch_service.converge_runtime、supervisor、account_bot_runtime）：
+    // 开启时停止全部账号 worker 子进程、账号 Bot 与交互 Bot，并阻止它们再启动；
+    // 解除时重新启动所有状态为“启用”的账号与 Bot。其余服务不读取该开关。
+    static let footer = """
+    停止什么：所有 Telegram 账号的运行进程（其中的插件、自动回复、指令、定时任务随之停止），以及账号 Bot 和交互 Bot 的消息处理；开启期间新启用或恢复的账号也不会运行。
+    不影响：服务器、Web 管理台与本 App 照常可用；账号登录状态、配置与数据全部保留；助手对话、服务器通知与推送照常工作。
+    如何恢复：点按“解除”，服务器会重新启动所有处于启用状态的账号与 Bot；原本已暂停的账号保持暂停。
+    """
+    static let stopMessage = "立即停止所有 Telegram 账号的运行进程（插件、自动回复、指令、定时任务）以及账号 Bot、交互 Bot，直到你手动解除。账号登录状态和数据不会受影响，管理台与 App 仍可使用。"
+    static let resumeMessage = "解除后服务器会重新启动所有处于启用状态的账号与 Bot，插件、自动回复和定时任务随之恢复；已暂停的账号保持暂停。请先确认当前任务和资金状态正常。"
     private var confirmTitle: String { enabled == true ? "解除全局紧急停止？" : "启用全局紧急停止？" }
 
     private func load() async {

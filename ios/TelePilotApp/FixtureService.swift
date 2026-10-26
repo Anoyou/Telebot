@@ -21,6 +21,8 @@ actor FixtureService: AppServing {
         "app_update_target": ["remote": "origin", "branch": "Beta"]
     ]
     private var fixtureUpdateCheck: JSONValue = ["enabled": true, "interval_minutes": 1440]
+    /// 更新任务界面测试：前几次读取返回执行中（带进度与日志），之后返回完成。
+    private var fixtureUpdateJobReads = 0
     private var pluginGlobalEnabled: [String: Bool] = ["auto_reply": true, "content_assistant": true, "forward_guard": false]
     /// 插件商店界面测试：内容整理助手当前版本（更新后变为 2.2.0）与从仓库新装的插件。
     private var contentAssistantVersion = "2.1.0"
@@ -321,8 +323,24 @@ actor FixtureService: AppServing {
                                  "category": "automation", "version": "1.0.0", "update_available": false, "source_type": "remote",
                                  "source_label": "个人插件仓库", "is_builtin": false, "signature_ok": true, "orphan": false, "permissions": ["send_message"]])
             }
+            // 与服务器一致：按保存的展示顺序排列，未在顺序里的保持原顺序排在后面。
+            let order = (fixtureValues["/api/feature-matrix/order"]?["keys"]?.arrayValue ?? []).compactMap(\.stringValue)
+            if !order.isEmpty {
+                features = features.enumerated().sorted { lhs, rhs in
+                    let l = order.firstIndex(of: lhs.element["key"]?.stringValue ?? "") ?? Int.max
+                    let r = order.firstIndex(of: rhs.element["key"]?.stringValue ?? "") ?? Int.max
+                    return l == r ? lhs.offset < rhs.offset : l < r
+                }.map(\.element)
+            }
             object["features"] = .array(features)
             return .object(object)
+        }
+        if clean == "/api/feature-matrix/order" {
+            if method == "PUT" {
+                let keys = (body?["keys"]?.arrayValue ?? []).compactMap(\.stringValue)
+                fixtureValues[clean] = ["keys": .array(keys.map { .string($0) })]
+            }
+            return fixtureValues[clean] ?? ["keys": []]
         }
         if let match = clean.firstMatch(of: #/^\/api\/accounts\/(\d+)\/features$/#), method == "GET" {
             let accountID = Int(match.1) ?? 1
@@ -349,7 +367,10 @@ actor FixtureService: AppServing {
         if clean == "/api/commands/llm-providers" && method == "GET" {
             return [
                 ["id": 1, "name": "个人模型网关", "provider": "openai", "base_url": "https://llm.example.com/v1",
-                 "default_model": "gpt-5.4-mini", "models": [["id": "gpt-5.4-mini", "enabled": true], ["id": "gpt-5.4", "enabled": true]],
+                 "default_model": "gpt-5.4-mini", "models": [["id": "gpt-5.4-mini", "enabled": true, "supports_tools": true, "supports_images": true,
+                                                         "context_window": 400000, "max_output_tokens": 128000,
+                                                         "supported_reasoning_levels": ["low", "medium", "high"], "metadata_source": "upstream"],
+                                                        ["id": "gpt-5.4", "enabled": true]],
                  "has_api_key": true, "has_effective_key": true, "pool_keys": [["id": 1, "label": "日常密钥"]],
                  "key_strategy": "least_used", "api_format": "responses", "execution_backend": "direct", "protocol_profile": "standard",
                  "client_identity_profile": "auto", "web_search_api_format": "auto", "modality": "multimodal", "cost_tier": 2],
@@ -426,6 +447,26 @@ actor FixtureService: AppServing {
             return ["items": [["key": "codex_tui", "current": "0.50.0", "latest": "0.51.0", "up_to_date": false],
                               ["key": "codex_desktop_core", "current": "1.2.0", "latest": "1.3.0-alpha.2.1", "up_to_date": false]]]
         }
+        if clean.firstMatch(of: #/^\/api\/commands\/llm-providers\/(\d+)\/test-model$/#) != nil, method == "POST" {
+            return ["ok": true, "latency_ms": 820, "model": body?["model"] ?? "gpt-5.4-mini", "preview": "你好"]
+        }
+        if let match = clean.firstMatch(of: #/^\/api\/commands\/llm-providers\/(\d+)\/chat-test-models$/#), method == "POST" {
+            let models = (body?["models"]?.arrayValue ?? []).compactMap(\.stringValue)
+            return ["provider_id": .integer(Int64(match.1) ?? 1), "provider_name": "个人模型网关",
+                    "results": .array(models.map { id -> JSONValue in
+                        ["ok": true, "requested_model": .string(id), "model": .string(id), "latency_ms": 1240,
+                         "response": "你好！我是一个简洁的中文聊天助手。", "input_tokens": 42, "output_tokens": 18]
+                    })]
+        }
+        if let match = clean.firstMatch(of: #/^\/api\/commands\/llm-providers\/(\d+)\/fetch-models$/#), method == "POST" {
+            guard let provider = (try? await request(path: "/api/commands/llm-providers", method: "GET", body: nil))?.arrayValue?
+                .first(where: { $0["id"]?.intValue == Int(match.1) }) else { return ["fetched": 0] }
+            var object = provider.objectValue ?? [:]
+            var models = provider["models"]?.arrayValue ?? []
+            models.append(["id": "gpt-5.4-nano", "enabled": false, "metadata_source": "upstream"])
+            object["models"] = .array(models)
+            return ["fetched": 3, "provider": .object(object)]
+        }
         if clean == "/api/commands/llm-providers/fetch-models-preview", method == "POST" {
             return ["fetched": 2, "ids": ["gpt-5.4-mini", "gpt-5.4"],
                     "models": [["id": "gpt-5.4-mini", "enabled": true], ["id": "gpt-5.4", "enabled": true]]]
@@ -472,8 +513,16 @@ actor FixtureService: AppServing {
                     "plan_label": "更新任务已启动", "plan_detail": "更新将在内部 updater 中执行，期间服务可能短暂重启；请观察任务日志。"]
         }
         if clean == "/api/system/update-jobs/fixture-update" {
-            return ["ok": true, "job_id": "fixture-update", "status": "succeeded", "progress": 100, "phase": "完成", "summary": "更新任务已完成。"]
+            fixtureUpdateJobReads += 1
+            if fixtureUpdateJobReads <= 4 {
+                return ["ok": true, "job_id": "fixture-update", "status": "running", "progress": 40, "phase": "拉取镜像",
+                        "detail": "正在拉取后端镜像", "logs": ["[updater] git fetch origin Beta", "[updater] 拉取镜像 telepilot-web"],
+                        "step_timings": [["phase": "准备", "duration_ms": 1200]]]
+            }
+            return ["ok": true, "job_id": "fixture-update", "status": "succeeded", "progress": 100, "phase": "完成", "summary": "更新任务已完成。",
+                    "new_commit": "9a8b7c6d5e4f3a2b", "logs": ["[updater] git fetch origin Beta", "[updater] 完成"]]
         }
+        if clean == "/api/system/restart", method == "POST" { return ["success": true] }
         if clean == "/api/apns/config" { return ["enabled": false, "configured": false, "environment": "sandbox", "has_auth_key": false] }
         if clean == "/api/apns/devices", method == "POST" {
             return ["device_id": body?["device_id"] ?? "fixture-device", "bundle_id": body?["bundle_id"] ?? "", "environment": body?["environment"] ?? "sandbox",

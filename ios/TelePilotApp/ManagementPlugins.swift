@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 import TelePilotCore
 
 private enum PluginWorkspaceSection: String, CaseIterable {
@@ -96,11 +97,28 @@ private struct PluginCenterView: View {
     @State private var search = ""
     @State private var category = "all"
     @State private var filter: PluginFilter = .all
+    // 长按拖动排序：本地顺序在保存成功前覆盖服务器顺序；保存只提交一次，不自动重试。
+    @State private var localOrder: [String]?
+    @State private var dragging: String?
+    @State private var dropTarget: String?
+    @State private var savingOrder = false
+    @State private var orderMessage: String?
+
+    /// 服务器顺序（GET /api/feature-matrix 已按保存的展示顺序排好），拖动后暂用本地顺序。
+    private var orderedFeatures: [JSONValue] {
+        guard let localOrder else { return features }
+        let rank = Dictionary(localOrder.enumerated().map { ($1, $0) }, uniquingKeysWith: { first, _ in first })
+        return features.enumerated().sorted { lhs, rhs in
+            let l = rank[lhs.element["key"]?.stringValue ?? ""] ?? Int.max
+            let r = rank[rhs.element["key"]?.stringValue ?? ""] ?? Int.max
+            return l == r ? lhs.offset < rhs.offset : l < r
+        }.map(\.element)
+    }
 
     private var selectedAccount: Account? { model.accounts.first { $0.id == selectedAccountID } }
     private var categories: [String] { Array(Set(features.compactMap { $0["category"]?.stringValue })).sorted() }
     private var filtered: [JSONValue] {
-        features.filter { feature in
+        orderedFeatures.filter { feature in
             let key = feature["key"]?.stringValue ?? ""
             let state = accountFeatures[key]
             let matchesFilter: Bool
@@ -125,7 +143,11 @@ private struct PluginCenterView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
-                if let header { header }
+                if let header {
+                    SegmentedSearchHeader(picker: { header }, search: $search, prompt: "搜索插件、标识或使用说明", identifier: "plugins.search")
+                } else {
+                    InlineSearchField(prompt: "搜索插件、标识或使用说明", text: $search, identifier: "plugins.search")
+                }
                 scopePicker
                 if let loadError { NoticeView(title: "插件目录读取失败", message: loadError) }
                 if let accountError { NoticeView(title: "账号插件状态读取失败", message: accountError) }
@@ -148,30 +170,60 @@ private struct PluginCenterView: View {
                         Text("\(filtered.count) / \(features.count) 个插件").font(.footnote).foregroundStyle(.secondary).monospacedDigit()
                     }
                     if accountLoading { ProgressView().frame(maxWidth: .infinity, alignment: .leading) }
+                    if let orderMessage {
+                        Label(orderMessage, systemImage: "exclamationmark.triangle.fill")
+                            .font(.footnote).foregroundStyle(.orange)
+                            .accessibilityIdentifier("plugins.order.error")
+                    }
                     if filtered.isEmpty {
                         ContentUnavailableView("没有匹配的插件", systemImage: "puzzlepiece.extension", description: Text("调整所选账号、状态或分类筛选。")).padding(.vertical, 24)
                     } else {
                         LazyVGrid(columns: columns, alignment: .leading, spacing: 10) {
-                            ForEach(Array(filtered.enumerated()), id: \.offset) { _, feature in
-                                let key = feature["key"]?.stringValue ?? ""
+                            ForEach(filtered.map { (key: $0["key"]?.stringValue ?? "", feature: $0) }, id: \.key) { item in
+                                let key = item.key
+                                let feature = item.feature
                                 NavigationLink {
                                     ManagementPluginDetailView(feature: feature, accountID: selectedAccountID, accountState: accountFeatures[key])
                                 } label: {
                                     PluginCard(feature: feature, accountState: accountFeatures[key], accountScoped: selectedAccountID != nil, favorite: preferences.isFavoritePlugin(key))
                                 }
                                 .buttonStyle(.plain)
+                                .overlay {
+                                    if dropTarget == key && dragging != key {
+                                        RoundedRectangle(cornerRadius: 12).strokeBorder(Color.accentColor, lineWidth: 2)
+                                    }
+                                }
+                                .opacity(dragging == key ? 0.5 : 1)
                                 .contextMenu {
                                     Button(preferences.isFavoritePlugin(key) ? "取消收藏" : "收藏", systemImage: "star") { preferences.togglePlugin(key) }
                                 }
+                                // 长按后拖动到另一张卡片上，放下即排到该卡片的位置；顺序保存在服务器，Web 与 App 一致。
+                                .onDrag {
+                                    dragging = key
+                                    return NSItemProvider(object: key as NSString)
+                                }
+                                .dropDestination(for: String.self) { items, _ in
+                                    let source = dragging ?? items.first
+                                    dragging = nil
+                                    dropTarget = nil
+                                    guard let source, source != key else { return false }
+                                    move(source, before: key)
+                                    return true
+                                } isTargeted: { targeted in
+                                    if targeted { dropTarget = key } else if dropTarget == key { dropTarget = nil }
+                                }
+                                .accessibilityAction(named: "前移") { moveByOne(key, offset: -1) }
+                                .accessibilityAction(named: "后移") { moveByOne(key, offset: 1) }
                             }
                         }
+                        Text(savingOrder ? "正在保存排序…" : "长按卡片后拖动可调整顺序，顺序保存在服务器，Web 管理台与 App 一致。")
+                            .font(.footnote).foregroundStyle(.secondary)
                     }
                 }
             }
             .padding(.horizontal, 16).padding(.bottom, 20)
         }
         .background(Color(.systemGroupedBackground))
-        .searchable(text: $search, prompt: "搜索插件、标识或使用说明")
         .refreshable { await reload(); await loadAccountFeatures() }
         .task {
             if fixedAccountID == nil, selectedAccountID == nil { selectedAccountID = model.accounts.first?.id }
@@ -252,6 +304,49 @@ private struct PluginCenterView: View {
         .font(.subheadline)
         .accessibilityAddTraits(selected ? .isSelected : [])
         .accessibilityIdentifier("plugins.filter." + item.rawValue)
+    }
+
+    /// 把 source 移到 target 的位置（基于完整顺序，不受筛选影响），然后保存。
+    private func move(_ source: String, before target: String) {
+        var keys = orderedFeatures.compactMap { $0["key"]?.stringValue }
+        guard let from = keys.firstIndex(of: source), let to = keys.firstIndex(of: target), from != to else { return }
+        keys.remove(at: from)
+        keys.insert(source, at: to)
+        withAnimation(.snappy) { localOrder = keys }
+        Task { await saveOrder(keys) }
+    }
+
+    private func moveByOne(_ key: String, offset: Int) {
+        let visible = filtered.compactMap { $0["key"]?.stringValue }
+        guard let index = visible.firstIndex(of: key) else { return }
+        let target = index + offset
+        guard visible.indices.contains(target) else { return }
+        var keys = orderedFeatures.compactMap { $0["key"]?.stringValue }
+        guard let from = keys.firstIndex(of: key), let to = keys.firstIndex(of: visible[target]) else { return }
+        keys.swapAt(from, to)
+        withAnimation(.snappy) { localOrder = keys }
+        Task { await saveOrder(keys) }
+    }
+
+    /// 整表覆盖写入展示顺序（PUT /api/feature-matrix/order）。失败时恢复服务器顺序并提示；结果未知时提示刷新核对，不自动重试。
+    private func saveOrder(_ keys: [String]) async {
+        guard !savingOrder else { return }
+        savingOrder = true
+        orderMessage = nil
+        defer { savingOrder = false }
+        do {
+            _ = try await model.request(path: "/api/feature-matrix/order", method: "PUT",
+                                        body: .object(["keys": .array(keys.map { .string($0) })]))
+            await reload()
+            localOrder = nil
+        } catch {
+            if (error as? APIError)?.isOutcomeUncertain == true {
+                orderMessage = "未能确认排序是否已保存，下拉刷新查看实际顺序。"
+            } else {
+                orderMessage = "排序未保存：\(error.localizedDescription)"
+                withAnimation(.snappy) { localOrder = nil }
+            }
+        }
     }
 
     private func loadAccountFeatures() async {
@@ -2010,7 +2105,7 @@ private struct PluginSelectWidgetField: View {
             value = .string(next.model)
             if let providerField, editableKeys.contains(providerField) { setField(providerField, .string(next.provider)) }
         })) {
-            Text(waiting ? "正在加载 Provider…" : PluginSelectOptions.autoRouteLabel).tag(PluginSelectOptions.autoRouteKey)
+            Text(waiting ? "正在加载供应商…" : PluginSelectOptions.autoRouteLabel).tag(PluginSelectOptions.autoRouteKey)
             // 用序号作 id：不同 Provider 可能同名。
             ForEach(Array(selection.groups.enumerated()), id: \.offset) { _, group in
                 Section(group.group) {
@@ -2023,9 +2118,9 @@ private struct PluginSelectWidgetField: View {
         .disabled(waiting)
         .accessibilityIdentifier("plugin.config.select." + title)
         if let loadError, providers == nil {
-            Text("Provider 列表读取失败：\(loadError)").font(.footnote).foregroundStyle(.secondary)
+            Text("供应商列表读取失败：\(loadError)").font(.footnote).foregroundStyle(.secondary)
         } else if !waiting, selection.options.isEmpty {
-            Text("还没有已启用的模型；请先在 AI 页添加 Provider 并启用模型。").font(.footnote).foregroundStyle(.secondary)
+            Text("还没有已启用的模型；请先在 AI 页添加供应商并启用模型。").font(.footnote).foregroundStyle(.secondary)
         }
     }
 
@@ -2048,11 +2143,11 @@ private struct PluginSelectWidgetField: View {
     private func choices() -> (options: [PluginSelectOption], empty: String, disabled: Bool, note: String?) {
         switch widget {
         case .llmProvider:
-            if loading && providers == nil { return ([], "正在加载 Provider…", true, nil) }
-            if let loadError, providers == nil { return ([], "自动路由", false, "Provider 列表读取失败：\(loadError)") }
+            if loading && providers == nil { return ([], "正在加载供应商…", true, nil) }
+            if let loadError, providers == nil { return ([], "自动路由", false, "供应商列表读取失败：\(loadError)") }
             let options = PluginSelectOptions.providerOptions(providers ?? [])
-            return (options, "自动路由", false, options.isEmpty ? "尚未配置 TelePilot AI Provider；请先在 AI 页添加。"
-                                                              : "随模型自动填写；只想固定 Provider、使用其默认模型时才需要单独选择。")
+            return (options, "自动路由", false, options.isEmpty ? "尚未配置 AI 供应商；请先在 AI 页添加。"
+                                                              : "随模型自动填写；只想固定供应商、使用其默认模型时才需要单独选择。")
         case .llmModel:
             // 由 unifiedModelPicker 渲染，不会走到这里。
             return ([], PluginSelectOptions.autoRouteLabel, false, nil)

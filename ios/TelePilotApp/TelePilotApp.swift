@@ -8,7 +8,6 @@ struct TelePilotApp: App {
     @State private var overviewLayout = OverviewLayout()
     @State private var preferences = WorkspacePreferences()
     @State private var push = PushNotificationManager()
-    @State private var sceneHidden = false
     @AppStorage(AppAppearance.storageKey) private var appearanceRaw = AppAppearance.system.rawValue
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
@@ -52,13 +51,11 @@ struct TelePilotApp: App {
             }
             .onChange(of: scenePhase) { _, phase in
                 if phase == .active {
-                    sceneHidden = false
                     lock.resume()
                     if !lock.isObscured { Task { await model.refresh(); await model.refreshWorkspace(); await push.connect(model: model) } }
                     push.deliverPendingRoute(unlocked: !lock.isObscured)
-                } else {
-                    sceneHidden = true
-                    if phase == .background { lock.suspend() }
+                } else if phase == .background {
+                    lock.suspend()
                 }
             }
             .onChange(of: lock.isObscured) { _, obscured in
@@ -70,14 +67,10 @@ struct TelePilotApp: App {
                 }
             }
             .background {
-                PrivacyShield(lock: lock, hidden: sceneHidden).frame(width: 0, height: 0)
+                AppLockShield(lock: lock).frame(width: 0, height: 0)
                 if reduceTransparency {
                     Color(.systemGroupedBackground).ignoresSafeArea()
                 }
-            }
-            .overlay {
-                // A normal overlay also obscures this scene in the task switcher.
-                if sceneHidden { Color(.systemBackground).ignoresSafeArea().overlay(Label("TelePilot", systemImage: "lock.shield")) }
             }
             .onChange(of: model.user?.id) { _, id in
                 preferences.setScope(server: model.serverURL?.absoluteString ?? "", userID: id ?? 0)
@@ -117,6 +110,7 @@ private struct MainTabs: View {
             Tab("更多", systemImage: DockItem.more.symbol, value: DockItem.more) {
                 NavigationStack(path: $morePath) { MoreView(path: $morePath) }
             }
+            .badge(model.serverUpdateAvailable ? Text("新") : nil)
             .accessibilityIdentifier("dock.more")
 
             if #available(iOS 27.0, *) {

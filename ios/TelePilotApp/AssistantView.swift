@@ -3,27 +3,13 @@ import SwiftUI
 import TelePilotCore
 import UniformTypeIdentifiers
 
-private struct AssistantAttachment: Identifiable {
-    let id = UUID()
-    let image: UIImage
-    let value: JSONValue
-}
-
 struct AssistantView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @Environment(\.horizontalSizeClass) private var sizeClass
     @Environment(\.scenePhase) private var scenePhase
     @State private var store = AssistantStore()
-    @State private var draft = ""
-    @State private var sendMode = "message"
-    @State private var photos: [PhotosPickerItem] = []
-    @State private var attachments: [AssistantAttachment] = []
-    @State private var importingImage = false
-    @State private var loadingImage = false
     @State private var panel: AssistantPanel?
-    @State private var confirmStop = false
-    @State private var confirmReplace = false
     @State private var abandonPending = false
     @State private var editingPair: AssistantEditPair?
     @State private var pinnedToBottom = true
@@ -129,30 +115,6 @@ struct AssistantView: View {
                 Task { await store.regenerate(user: pair.user, assistant: pair.assistant, edited: text, model: model) }
             }
         }
-        .onChange(of: photos) { _, items in
-            Task {
-                loadingImage = true
-                defer { loadingImage = false; photos = [] }
-                for item in items.prefix(4 - attachments.count) {
-                    do {
-                        guard let data = try await item.loadTransferable(type: Data.self) else { continue }
-                        try addImage(data)
-                    } catch { store.error = "无法读取图片，请选择其他图片。" }
-                }
-            }
-        }
-        .fileImporter(isPresented: $importingImage, allowedContentTypes: [.image], allowsMultipleSelection: true) { result in
-            do {
-                for url in try result.get().prefix(4 - attachments.count) {
-                    let access = url.startAccessingSecurityScopedResource()
-                    defer { if access { url.stopAccessingSecurityScopedResource() } }
-                    guard ((try url.resourceValues(forKeys: [.fileSizeKey])).fileSize ?? 0) <= 25_000_000 else {
-                        store.error = "单张原始图片不能超过 25 MB。"; continue
-                    }
-                    try addImage(Data(contentsOf: url))
-                }
-            } catch { store.error = "无法读取图片文件，请重新选择。" }
-        }
         .accessibilityIdentifier("assistant.screen")
     }
 
@@ -183,10 +145,9 @@ struct AssistantView: View {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 24) {
                         if store.hasOlderMessages && !store.messages.isEmpty {
-                            Button("读取更早的消息", systemImage: "clock.arrow.circlepath") { Task { await store.refreshMessages(model, older: true) } }
-                                .frame(maxWidth: .infinity)
+                            olderMessagesRow(proxy)
                         }
-                        if store.messages.isEmpty && store.liveText.isEmpty {
+                        if store.messages.isEmpty && store.liveText.isEmpty && !store.loading {
                             ContentUnavailableView("有什么需要处理？", systemImage: "sparkles", description: Text(store.sessionID == nil ? "新建会话，开始管理你的 TelePilot。" : "可以查询运行状态、排查问题或安排任务。涉及写入的操作会请求确认。"))
                                 .padding(.top, 48)
                             if store.sessionID == nil {
@@ -194,10 +155,12 @@ struct AssistantView: View {
                                     .buttonStyle(.borderedProminent).frame(maxWidth: .infinity)
                             }
                         }
-                        // 工具结果不再单独成块：并入同一轮回答底部的“本轮详情”。
-                        ForEach(AssistantTurnGrouping.entries(store.messages)) { entry in
+                        // 分组与 Markdown 预处理已在后台完成（store.entries / store.rendered）；
+                        // 消息行是 Equatable 视图，输入框打字或流式输出时不会重新计算历史消息。
+                        ForEach(store.entries) { entry in
                             if let item = entry.item {
-                                AssistantMessageView(item: item, tools: entry.tools) {
+                                AssistantMessageView(item: item, rendered: store.renderedFor(item), tools: entry.tools,
+                                                     mayRegenerate: item.id == latestAssistant?.id && !store.runActive && !store.busy) {
                                     Task { await store.retry(item, model: model) }
                                 } regenerate: {
                                     if let user = latestUser {
@@ -206,24 +169,18 @@ struct AssistantView: View {
                                 } edit: {
                                     if let user = latestUser { editingPair = AssistantEditPair(user: user, assistant: item) }
                                 }
-                                .environment(\.assistantMayRegenerate, item.id == latestAssistant?.id && !store.runActive && !store.busy)
+                                .equatable()
+                                .id(entry.id)
                             } else {
                                 // 本轮还没有最终回答（执行中或失败）时，工具调用仍可在折叠详情里查看。
                                 AssistantTurnDetailsView(usage: nil, tools: entry.tools)
+                                    .id(entry.id)
                             }
                         }
-                        if !store.liveText.isEmpty || !store.liveReasoning.isEmpty {
-                            VStack(alignment: .leading, spacing: 10) {
-                                Label("助手", systemImage: "sparkles").font(.caption.weight(.medium)).foregroundStyle(.secondary)
-                                if !store.liveReasoning.isEmpty {
-                                    DisclosureGroup("推理过程") { Text(AssistantRedaction.text(store.liveReasoning)).font(.footnote).foregroundStyle(.secondary).textSelection(.enabled).privacySensitive() }
-                                }
-                                AssistantMarkdownView(text: AssistantRedaction.text(store.liveText)).privacySensitive()
-                            }.frame(maxWidth: .infinity, alignment: .leading)
-                        }
+                        AssistantLiveReplyView(store: store, pinnedToBottom: pinnedToBottom, proxy: proxy)
                         Color.clear.frame(height: 1).id("assistant.bottom")
                     }
-                    .padding(20)
+                    .padding(.horizontal, 20).padding(.top, 20).padding(.bottom, 8)
                     .frame(maxWidth: 860)
                     .frame(maxWidth: .infinity)
                 }
@@ -234,15 +191,10 @@ struct AssistantView: View {
                 .onScrollGeometryChange(for: Bool.self) { geometry in
                     geometry.visibleRect.maxY >= geometry.contentSize.height - 80
                 } action: { _, nearBottom in pinnedToBottom = nearBottom }
-                .onChange(of: store.messages.count) { _, _ in
+                // 只在出现新的最后一条消息时滚到底部；在顶部插入更早的消息不触发。
+                .onChange(of: store.messages.last?.id) { _, _ in
                     pinnedToBottom = true
                     withAnimation { proxy.scrollTo("assistant.bottom", anchor: .bottom) }
-                }
-                .onChange(of: store.liveText) { _, _ in
-                    if pinnedToBottom { proxy.scrollTo("assistant.bottom", anchor: .bottom) }
-                }
-                .onChange(of: store.liveReasoning) { _, _ in
-                    if pinnedToBottom { proxy.scrollTo("assistant.bottom", anchor: .bottom) }
                 }
             }
             .overlay(alignment: minimizeOnLeading ? .bottomLeading : .bottomTrailing) {
@@ -250,9 +202,32 @@ struct AssistantView: View {
             }
             if store.runActive { runBar }
         }
-        .safeAreaInset(edge: .bottom) { composer }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            AssistantComposer(store: store, focused: $composerFocused)
+        }
         // Agent 页隐藏底部 Dock，把空间留给对话；用悬浮的最小化按钮返回。
         .toolbarVisibility(embedded ? .hidden : .automatic, for: .tabBar)
+    }
+
+    /// 顶部的“更早的消息”：滚动到这里时自动读取上一页，读取后保持当前阅读位置。
+    @ViewBuilder private func olderMessagesRow(_ proxy: ScrollViewProxy) -> some View {
+        Group {
+            if store.loadingOlder {
+                HStack(spacing: 8) { ProgressView(); Text("正在读取更早的消息…").font(.footnote).foregroundStyle(.secondary) }
+            } else {
+                Button("读取更早的消息", systemImage: "clock.arrow.circlepath") { Task { await loadOlder(proxy) } }
+                    .font(.footnote)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .onAppear { Task { await loadOlder(proxy) } }
+        .accessibilityIdentifier("assistant.older")
+    }
+
+    private func loadOlder(_ proxy: ScrollViewProxy) async {
+        guard !store.loadingOlder, store.hasOlderMessages, let anchor = store.entries.first?.id else { return }
+        await store.refreshMessages(model, older: true)
+        proxy.scrollTo(anchor, anchor: .top)
     }
 
     private var minimizeButton: some View {
@@ -310,235 +285,6 @@ struct AssistantView: View {
         .background(.bar)
     }
 
-    private var composer: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            if !attachments.isEmpty {
-                ScrollView(.horizontal) {
-                    HStack {
-                        ForEach(attachments) { attachment in
-                            Image(uiImage: attachment.image).resizable().scaledToFill()
-                                .frame(width: 66, height: 66).clipShape(.rect(cornerRadius: 12))
-                                .overlay(alignment: .topTrailing) {
-                                    Button("移除图片", systemImage: "xmark.circle.fill") { attachments.removeAll { $0.id == attachment.id } }
-                                        .labelStyle(.iconOnly).symbolRenderingMode(.palette).foregroundStyle(.white, .black.opacity(0.7))
-                                        .frame(minWidth: 44, minHeight: 44, alignment: .topTrailing)
-                                }
-                        }
-                    }.padding(.top, 4)
-                }
-                .scrollIndicators(.hidden)
-            }
-            HStack(alignment: .bottom, spacing: 4) {
-                Menu {
-                    PhotosPicker(selection: $photos, maxSelectionCount: max(1, 4 - attachments.count), matching: .images) { Label("从照片选择", systemImage: "photo") }
-                    Button("从文件选择图片", systemImage: "folder") { importingImage = true }
-                } label: {
-                    Image(systemName: "plus")
-                        .font(.system(size: 17, weight: .semibold))
-                        .frame(width: 34, height: 34)
-                        .background(Color(.tertiarySystemFill), in: .circle)
-                        .frame(width: 44, height: 44)
-                }
-                .disabled(attachments.count >= 4 || loadingImage || composerReadOnlyReason != nil)
-                .accessibilityLabel("添加图片")
-                TextField(composerPlaceholder, text: $draft, axis: .vertical)
-                    .lineLimit(1...8)
-                    .focused($composerFocused)
-                    // 请求进行中也允许继续输入，发送按钮会等待服务器确认后再可用。
-                    .disabled(composerReadOnlyReason != nil)
-                    .padding(.vertical, 12)
-                    .accessibilityIdentifier("assistant.composer")
-                if store.runActive { stopButton }
-                sendButton
-            }
-            .padding(.leading, 2).padding(.trailing, 2)
-            .background(Color(.systemBackground), in: .rect(cornerRadius: 24))
-            .overlay {
-                RoundedRectangle(cornerRadius: 24)
-                    .strokeBorder(composerFocused ? Color.accentColor.opacity(0.6) : Color(.separator), lineWidth: composerFocused ? 1 : 0.5)
-            }
-            HStack(spacing: 8) {
-                Menu {
-                    Picker("本轮模型", selection: $store.modelIndex) {
-                        Text("自动，使用服务器配置").tag(-1)
-                        ForEach(Array(store.models.enumerated()), id: \.offset) { index, item in
-                            Text("\(item.assistantText("provider_name")) · \(item.assistantText("model"))").tag(index)
-                        }
-                    }
-                } label: {
-                    composerChip(modelLabel, systemImage: "cpu")
-                }
-                .accessibilityLabel("本轮模型：\(modelLabel)")
-                if store.runActive {
-                    Menu {
-                        Section("任务执行中，新消息如何处理") {
-                            Picker("发送方式", selection: $sendMode) {
-                                Label("加入队列（当前任务结束后执行）", systemImage: "text.badge.plus").tag("message")
-                                Label("插入调整说明（当前任务参考）", systemImage: "arrow.turn.down.right").tag("steer")
-                                if store.runStatus == "waiting_input" { Label("补充信息（回答助手的提问）", systemImage: "text.bubble").tag("input") }
-                                Label("停止并替换（需确认）", systemImage: "arrow.triangle.2.circlepath").tag("replace")
-                            }
-                        }
-                    } label: {
-                        composerChip(sendModeTitle, systemImage: sendModeSymbol)
-                    }
-                    .accessibilityLabel("发送方式：\(sendModeTitle)")
-                }
-                Spacer(minLength: 0)
-                if draft.count > 30_000 {
-                    Text("\(draft.count)/32000").monospacedDigit().foregroundStyle(draft.count > 32_000 ? .red : .secondary)
-                }
-            }
-            .font(.caption).foregroundStyle(.secondary)
-        }
-        .padding(.horizontal, 12).padding(.top, 8).padding(.bottom, 6)
-        .frame(maxWidth: 900)
-        .frame(maxWidth: .infinity)
-        .background(.bar)
-        .onChange(of: store.runActive) { _, active in if !active { sendMode = "message" } }
-    }
-
-    private func composerChip(_ title: String, systemImage: String) -> some View {
-        Label(title, systemImage: systemImage)
-            .lineLimit(1)
-            .padding(.horizontal, 10).padding(.vertical, 6)
-            .background(Color(.tertiarySystemFill), in: .capsule)
-            .frame(minHeight: 44)
-            .contentShape(.rect)
-    }
-
-    private var sendButton: some View {
-        Button(action: submit) {
-            ZStack {
-                if store.busy || loadingImage {
-                    ProgressView().controlSize(.small).tint(.white)
-                } else {
-                    Image(systemName: sendMode == "replace" && store.runActive ? "arrow.triangle.2.circlepath" : "arrow.up")
-                        .font(.system(size: 16, weight: .bold))
-                        .foregroundStyle(.white)
-                }
-            }
-            .frame(width: 34, height: 34)
-            .background(sendDisabled && !store.busy ? Color(.systemGray3) : Color.accentColor, in: .circle)
-            .frame(width: 44, height: 44)
-            .contentShape(.circle)
-        }
-        .buttonStyle(.plain)
-        .disabled(sendDisabled)
-        .keyboardShortcut(.return, modifiers: .command)
-        .accessibilityLabel(store.busy ? "正在提交" : sendMode == "replace" && store.runActive ? "停止并替换" : "发送消息")
-        .accessibilityIdentifier("assistant.send")
-        .confirmationDialog("停止当前任务并发送替代消息？", isPresented: $confirmReplace, titleVisibility: .visible) {
-            Button("停止并替换", role: .destructive) { performSend() }
-        } message: { Text("服务器会停止当前任务，并使用输入框中的内容创建替代任务。已经执行的操作不会撤销。") }
-    }
-
-    private var stopButton: some View {
-        let unavailable = store.busy || store.activeRun?["cancel_requested"]?.boolValue == true
-        return Button { confirmStop = true } label: {
-            Image(systemName: "stop.fill")
-                .font(.system(size: 13, weight: .bold))
-                .foregroundStyle(.white)
-                .frame(width: 34, height: 34)
-                .background(Color.red, in: .circle)
-                .frame(width: 44, height: 44)
-                .contentShape(.circle)
-        }
-        .buttonStyle(.plain)
-        .disabled(unavailable)
-        .opacity(unavailable ? 0.45 : 1)
-        .accessibilityLabel("停止当前任务")
-        .accessibilityIdentifier("assistant.stop")
-        .confirmationDialog("停止当前任务？", isPresented: $confirmStop, titleVisibility: .visible) {
-            Button("提交停止请求", role: .destructive) { Task { await store.cancel(model) } }
-        } message: { Text("已执行的操作不会撤销。关闭窗口不会停止服务器任务。") }
-    }
-
-    private var trimmedDraft: String { draft.trimmingCharacters(in: .whitespacesAndNewlines) }
-
-    private var sendDisabled: Bool {
-        !store.canSend || store.sessionID == nil || loadingImage
-            || (trimmedDraft.isEmpty && attachments.isEmpty) || draft.count > 32_000
-            || (sendMode == "input" && trimmedDraft.isEmpty)
-    }
-
-    private var composerReadOnlyReason: String? {
-        if store.session?.assistantText("channel") == "bot" { return "Telegram 会话为只读，请在 Telegram 中继续" }
-        if store.session?.assistantText("status") == "archived" { return "已归档的会话为只读，恢复后可继续" }
-        return nil
-    }
-
-    private var composerPlaceholder: String {
-        if let reason = composerReadOnlyReason { return reason }
-        if store.sessionID == nil { return "请先新建会话" }
-        guard store.runActive else { return "询问或安排任务…" }
-        switch sendMode {
-        case "steer": return "补充调整说明，当前任务会参考…"
-        case "input": return "回答助手的问题…"
-        case "replace": return "输入替代消息…"
-        default: return "加入队列，当前任务结束后执行…"
-        }
-    }
-
-    private var sendModeTitle: String {
-        switch sendMode {
-        case "steer": "插入调整"
-        case "input": "补充信息"
-        case "replace": "停止并替换"
-        default: "加入队列"
-        }
-    }
-
-    private var sendModeSymbol: String {
-        switch sendMode {
-        case "steer": "arrow.turn.down.right"
-        case "input": "text.bubble"
-        case "replace": "arrow.triangle.2.circlepath"
-        default: "text.badge.plus"
-        }
-    }
-
-    private func submit() {
-        guard !sendDisabled else { return }
-        if sendMode == "replace" && store.runActive { confirmReplace = true } else { performSend() }
-    }
-
-    private var modelLabel: String {
-        store.models.indices.contains(store.modelIndex) ? store.models[store.modelIndex].assistantText("model") : "自动模型"
-    }
-
-    private func performSend() {
-        let original = draft
-        let text = original.trimmingCharacters(in: .whitespacesAndNewlines)
-        let sent = attachments
-        let images = sent.map(\.value)
-        let mode = sendMode
-        let sessionID = store.sessionID
-        Task {
-            if await store.send(text, attachments: images, model: model, mode: mode) {
-                guard store.sessionID == sessionID else { return }
-                // 等待服务器确认期间允许继续输入：只移除已发出的内容，保留新输入的部分。
-                if draft == original { draft = "" }
-                else if draft.hasPrefix(original) { draft = String(draft.dropFirst(original.count)) }
-                let sentIDs = Set(sent.map(\.id))
-                attachments.removeAll { sentIDs.contains($0.id) }
-                sendMode = "message"
-            }
-        }
-    }
-
-    private func addImage(_ data: Data) throws {
-        guard attachments.count < 4, let image = UIImage(data: data), image.size.width > 0, image.size.height > 0 else { throw APIError.incompatibleResponse }
-        let longest = max(image.size.width, image.size.height)
-        let scale = min(1, 2400 / longest)
-        let format = UIGraphicsImageRendererFormat()
-        format.scale = 1
-        let size = CGSize(width: image.size.width * scale, height: image.size.height * scale)
-        let renderer = UIGraphicsImageRenderer(size: size, format: format)
-        let resized = renderer.image { _ in image.draw(in: CGRect(origin: .zero, size: size)) }
-        guard let bytes = resized.jpegData(compressionQuality: 0.82), bytes.count <= 6_000_000 else { throw APIError.incompatibleResponse }
-        attachments.append(AssistantAttachment(image: resized, value: ["kind": "image", "source": "data_url", "mime_type": "image/jpeg", "name": "image.jpg", "data_url": .string("data:image/jpeg;base64," + bytes.base64EncodedString())]))
-    }
 }
 
 private struct AssistantEditPair: Identifiable {
@@ -547,24 +293,24 @@ private struct AssistantEditPair: Identifiable {
     let assistant: AssistantItem
 }
 
-private struct AssistantMayRegenerateKey: EnvironmentKey { static let defaultValue = false }
-private extension EnvironmentValues {
-    var assistantMayRegenerate: Bool {
-        get { self[AssistantMayRegenerateKey.self] }
-        set { self[AssistantMayRegenerateKey.self] = newValue }
-    }
-}
-
-private struct AssistantMessageView: View {
-    @Environment(\.assistantMayRegenerate) private var mayRegenerate
+/// 一条消息。Equatable：只有消息内容、预处理结果、工具结果或“可重新生成”变化时才重绘，
+/// 输入框打字、流式输出等其他状态变化不会让历史消息重新计算布局。
+private struct AssistantMessageView: View, Equatable {
     let item: AssistantItem
+    let rendered: AssistantRendered?
     /// 同一轮中的工具结果消息，只在“本轮详情”展开后显示。
     var tools: [AssistantItem] = []
+    var mayRegenerate = false
     let retry: () -> Void
     let regenerate: () -> Void
     let edit: () -> Void
     private var role: String { item.text("role") }
-    private var text: String { AssistantRedaction.text(item["content"]?.assistantText("text") ?? "") }
+    private var text: String { rendered?.text ?? AssistantRedaction.text(item["content"]?.assistantText("text") ?? "") }
+
+    /// nonisolated：比较的都是 Sendable 的存储属性，Equatable 一致性不跨入主 actor（Swift 6 ConformanceIsolation）。
+    nonisolated static func == (lhs: AssistantMessageView, rhs: AssistantMessageView) -> Bool {
+        lhs.item == rhs.item && lhs.rendered == rhs.rendered && lhs.tools == rhs.tools && lhs.mayRegenerate == rhs.mayRegenerate
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -580,12 +326,14 @@ private struct AssistantMessageView: View {
                 // 正常情况下工具消息已并入回答详情；保留兜底展示，避免未知顺序的数据被吞掉。
                 AssistantToolResultView(content: item["content"] ?? [:])
                 let images = item["content"]?["images"]?.arrayValue ?? []
-                if !images.isEmpty { AssistantImagesView(images: images) }
+                if !images.isEmpty { AssistantImagesView(images: images, owner: item.id) }
             } else {
                 if !text.isEmpty {
                     Group {
                         if role == "user" {
                             Text(text).textSelection(.enabled)
+                        } else if let blocks = rendered?.blocks {
+                            AssistantRenderedMarkdownView(blocks: blocks)
                         } else {
                             AssistantMarkdownView(text: text)
                         }
@@ -596,14 +344,15 @@ private struct AssistantMessageView: View {
                             ShareLink(item: text) { Label("分享", systemImage: "square.and.arrow.up") }
                         }
                 }
-                if let reasoning = item["content"]?["reasoning"]?.stringValue, !reasoning.isEmpty {
-                    DisclosureGroup("推理过程") { Text(AssistantRedaction.text(reasoning)).font(.footnote).foregroundStyle(.secondary).textSelection(.enabled).privacySensitive() }
+                let reasoning = rendered?.reasoning ?? AssistantRedaction.text(item["content"]?["reasoning"]?.stringValue ?? "")
+                if !reasoning.isEmpty {
+                    DisclosureGroup("推理过程") { Text(reasoning).font(.footnote).foregroundStyle(.secondary).textSelection(.enabled).privacySensitive() }
                 }
                 let images = item["content"]?["images"]?.arrayValue ?? item["content"]?["attachments"]?.arrayValue ?? []
-                if !images.isEmpty { AssistantImagesView(images: images) }
+                if !images.isEmpty { AssistantImagesView(images: images, owner: item.id) }
                 // 工具产出的图片（例如截图）属于回答内容，直接显示在回答里。
                 let toolImages = tools.flatMap { $0["content"]?["images"]?.arrayValue ?? [] }
-                if !toolImages.isEmpty { AssistantImagesView(images: toolImages) }
+                if !toolImages.isEmpty { AssistantImagesView(images: toolImages, owner: item.id + "-tools") }
             }
             if role == "user" && item.text("run_status") == "failed" {
                 Text("这条消息执行失败，可以查看任务轨迹了解原因。").font(.caption).foregroundStyle(.secondary)
@@ -625,50 +374,34 @@ private struct AssistantMessageView: View {
     }
 }
 
-// MARK: - 本轮详情
+/// 正在生成的回答：单独的视图，只有它随流式输出重绘；需要时跟随滚动到底部。
+private struct AssistantLiveReplyView: View {
+    let store: AssistantStore
+    let pinnedToBottom: Bool
+    let proxy: ScrollViewProxy
 
-/// 一个显示条目：普通消息（附带同一轮的工具结果），或尚无最终回答时单独显示的工具调用。
-private struct AssistantDisplayEntry: Identifiable {
-    let id: String
-    let item: AssistantItem?
-    let tools: [AssistantItem]
-}
-
-enum AssistantTurnGrouping {
-    /// 以用户消息切分轮次：服务器在回答之后才写入工具消息，所以同一轮内的工具结果归到这一轮最后一条助手回答。
-    /// 没有助手回答的轮次（执行中、失败）把工具结果放在第一条工具消息的位置单独显示。
-    fileprivate static func entries(_ messages: [AssistantItem]) -> [AssistantDisplayEntry] {
-        var result: [AssistantDisplayEntry] = []
-        var segment: [AssistantItem] = []
-        func flush() {
-            guard !segment.isEmpty else { return }
-            let tools = segment.filter { $0.text("role") == "tool" }
-            let ownerID = segment.last { $0.text("role") == "assistant" }?.id
-            var orphanPlaced = false
-            for item in segment {
-                if item.text("role") == "tool" {
-                    if ownerID == nil && !orphanPlaced {
-                        result.append(AssistantDisplayEntry(id: "tools-\(item.id)", item: nil, tools: tools))
-                        orphanPlaced = true
+    var body: some View {
+        Group {
+            if !store.liveText.isEmpty || !store.liveReasoning.isEmpty {
+                VStack(alignment: .leading, spacing: 10) {
+                    Label("助手", systemImage: "sparkles").font(.caption.weight(.medium)).foregroundStyle(.secondary)
+                    if !store.liveReasoning.isEmpty {
+                        DisclosureGroup("推理过程") { Text(AssistantRedaction.text(store.liveReasoning)).font(.footnote).foregroundStyle(.secondary).textSelection(.enabled).privacySensitive() }
                     }
-                } else {
-                    result.append(AssistantDisplayEntry(id: item.id, item: item, tools: item.id == ownerID ? tools : []))
-                }
-            }
-            segment.removeAll()
-        }
-        for item in messages {
-            if item.text("role") == "user" {
-                flush()
-                result.append(AssistantDisplayEntry(id: item.id, item: item, tools: []))
-            } else {
-                segment.append(item)
+                    AssistantMarkdownView(text: AssistantRedaction.text(store.liveText)).privacySensitive()
+                }.frame(maxWidth: .infinity, alignment: .leading)
             }
         }
-        flush()
-        return result
+        .onChange(of: store.liveText) { _, _ in
+            if pinnedToBottom { proxy.scrollTo("assistant.bottom", anchor: .bottom) }
+        }
+        .onChange(of: store.liveReasoning) { _, _ in
+            if pinnedToBottom { proxy.scrollTo("assistant.bottom", anchor: .bottom) }
+        }
     }
 }
+
+// MARK: - 本轮详情
 
 /// 与 Web 端 ModelRunMeta 对齐的本轮执行信息（不显示费用）。
 struct AssistantRunMeta {
@@ -803,7 +536,7 @@ private struct AssistantTurnDetailsView: View {
                     if !meta.hasUsage {
                         // 没有最终回答时，工具产出的图片也在这里显示。
                         let images = tools.flatMap { $0["content"]?["images"]?.arrayValue ?? [] }
-                        if !images.isEmpty { AssistantImagesView(images: images) }
+                        if !images.isEmpty { AssistantImagesView(images: images, owner: "tools-\(tools.first?.id ?? "")") }
                     }
                 }
             }
@@ -828,11 +561,12 @@ private struct AssistantTurnDetailsView: View {
 
 private struct AssistantImagesView: View {
     let images: [JSONValue]
+    /// 所属消息，用作解码缓存的键。
+    var owner = "live"
     var body: some View {
         ForEach(Array(images.enumerated()), id: \.offset) { index, item in
-            if let encoded = item["data_url"]?.stringValue?.split(separator: ",", maxSplits: 1).last,
-               let data = Data(base64Encoded: String(encoded)), let image = UIImage(data: data) {
-                Image(uiImage: image).resizable().scaledToFit().frame(maxHeight: 300).clipShape(.rect(cornerRadius: 12)).privacySensitive()
+            if let dataURL = item["data_url"]?.stringValue, dataURL.hasPrefix("data:") {
+                AssistantDataImageView(cacheKey: "\(owner)#\(index)#\(dataURL.count)", dataURL: dataURL).privacySensitive()
             } else if let raw = item["url"]?.stringValue, let url = URL(string: raw), url.scheme?.lowercased() == "https", url.user == nil, url.password == nil {
                 Link("打开图片 \(index + 1)", destination: url)
             }
@@ -1254,7 +988,7 @@ struct AssistantMarkdownView: View {
     }
 }
 
-private struct AssistantCodeBlockView: View {
+struct AssistantCodeBlockView: View {
     let language: String
     let code: String
     @State private var copied = false

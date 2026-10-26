@@ -815,6 +815,7 @@ class SystemAgentRunManager:
         until: datetime | None = None,
         limit: int = 100,
         include_bot: bool = False,
+        session_id: str | None = None,
     ) -> list[SystemAgentRun]:
         await self.ensure_ready()
         owner_condition = (
@@ -826,6 +827,8 @@ class SystemAgentRunManager:
             else SystemAgentRun.web_user_id == web_user_id
         )
         conditions = [owner_condition]
+        if session_id:
+            conditions.append(SystemAgentRun.session_id == session_id)
         if status:
             conditions.append(SystemAgentRun.status == status)
         if since is not None:

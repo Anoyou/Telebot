@@ -301,7 +301,7 @@ struct PluginSelectWidgetTests {
         #expect(kept?.provider == "7" && kept?.model == "o3")
         #expect(PluginSelectOptions.unifiedModelSelection(Self.unifiedProviders, providerValue: "9", modelValue: "x", modality: "text").legacy?.label == "当前值：9 · x")
         #expect(PluginSelectOptions.unifiedModelSelection(Self.unifiedProviders, providerValue: "3", modelValue: "", modality: "text").legacy?.label == "当前值：DeepSeek · 默认模型")
-        #expect(PluginSelectOptions.unifiedModelSelection(Self.unifiedProviders, providerValue: "", modelValue: "orphan", modality: "text").legacy?.label == "当前值：orphan（未固定 Provider）")
+        #expect(PluginSelectOptions.unifiedModelSelection(Self.unifiedProviders, providerValue: "", modelValue: "orphan", modality: "text").legacy?.label == "当前值：orphan（未固定供应商）")
     }
 
     @Test func unifiedSelectionWithoutProvidersOnlyOffersAutoRoute() {

@@ -247,9 +247,9 @@ struct ManagementItemView: View {
             NavigationLink("密钥池") {
                 ManagementCollectionView(resource: .init(title: "密钥池", path: base + "/keys", kind: .keys, itemsKey: "keys", create: .init(title: "添加密钥", path: base + "/keys"), itemPath: base + "/keys/{id}"))
             }
-            ManagementActionLink(action: .init(title: "发现模型", path: base + "/fetch-models"))
-            ManagementActionLink(action: .init(title: "模型连通性测试", path: base + "/test-model", explanation: "服务器将向供应商发送一次真实请求，可能产生用量。"))
-            ManagementActionLink(action: .init(title: "对话批量测试", path: base + "/chat-test-models", explanation: "将对选中的模型发送真实对话请求，可能产生用量。"))
+            ManagementActionLink(action: .init(title: "从供应商同步模型", path: base + "/fetch-models"), symbol: "arrow.triangle.2.circlepath")
+            NavigationLink { AIModelQuickTestView(provider: item) } label: { Label("单个模型快速测试", systemImage: "bolt.horizontal") }
+            NavigationLink { AIModelChatTestView(provider: item) } label: { Label("多模型对话测试", systemImage: "bubble.left.and.bubble.right") }
         }
     }
     @ViewBuilder private func repoLinks(_ id: String) -> some View {
