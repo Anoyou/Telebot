@@ -159,7 +159,7 @@ final class AssistantUITests: XCTestCase {
         XCTAssertGreaterThan(longLine.frame.height, 30)
     }
 
-    /// 第七轮：「+」与模型选择改为输入栏上方的浮层卡片（参考 Grok），展开、选择、收起前后
+    /// 第七轮：「+」与模型选择改为输入栏上方的浮层卡片（参考 Grok 录屏：从按钮位置模糊＋缩放展开），展开、选择、收起前后
     /// 输入框、「+」、模型按钮、发送按钮的 frame 完全不变；选择模型生效并在浮层里标出当前选中。
     func testComposerPanelsKeepComposerFramesAndSelectModel() {
         let app = openAssistant()
@@ -190,6 +190,8 @@ final class AssistantUITests: XCTestCase {
         Thread.sleep(forTimeInterval: 0.6)
         assertUnchanged("模型浮层展开后")
         XCTAssertLessThanOrEqual(modelPanel.frame.maxY, composer.frame.minY)
+        // 卡片右缘与模型按钮右缘对齐（从按钮位置展开）。
+        XCTAssertEqual(modelPanel.frame.maxX, model.frame.maxX, accuracy: 2, "模型卡片 \(modelPanel.frame) 按钮 \(model.frame)")
         let option = app.buttons["测试供应商 · anthropic/fixture-model-with-a-much-longer-name"].firstMatch
         XCTAssertTrue(option.exists)
         XCTAssertGreaterThanOrEqual(option.frame.height, 44)
@@ -223,11 +225,12 @@ final class AssistantUITests: XCTestCase {
         XCTAssertEqual(app.buttons["assistant.attach.file"].label, "从文件选择图片")
         XCTAssertLessThan(attachPanel.frame.midX, modelPanelFrame.midX)
         XCTAssertLessThanOrEqual(attachPanel.frame.maxY, composer.frame.minY)
+        XCTAssertEqual(attachPanel.frame.minX, attach.frame.minX, accuracy: 2, "附件卡片 \(attachPanel.frame) 按钮 \(attach.frame)")
         assertUnchanged("附件浮层展开中")
         Thread.sleep(forTimeInterval: 0.6)
         assertUnchanged("附件浮层展开后")
-        // 再点「+」也能收起。
-        attach.tap()
+        // 打开时「+」模糊淡出（Grok 同款），点卡片外收起。
+        dismissPanel(app)
         XCTAssertTrue(waitUntilGone(attachPanel))
         Thread.sleep(forTimeInterval: 0.6)
         assertUnchanged("附件浮层收起后")
