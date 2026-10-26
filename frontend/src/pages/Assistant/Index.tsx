@@ -302,7 +302,8 @@ export function AssistantIndex() {
   });
   const sessionsQ = useQuery({
     queryKey: ["system-agent", "sessions"],
-    queryFn: () => listSystemAgentSessions({ status: "active", include_bot: true, limit: 100 }),
+    // 会话列表会被短周期轮询，只取摘要字段（不含会话记忆），减少每次轮询的数据量。
+    queryFn: () => listSystemAgentSessions({ status: "active", include_bot: true, limit: 100, compact: true }),
     // 本地操作与 Durable Run 事件会显式失效该查询；会话列表打开时
     // 短周期同步其它设备的新会话，其余状态保持低频，避免长会话反复刷新。
     staleTime: Infinity,

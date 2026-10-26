@@ -58,7 +58,16 @@ enum AssistantPresentation {
 @MainActor @Observable
 final class AssistantStore {
     var sessions: [AssistantItem] = []
-    var messages: [AssistantItem] = []
+    /// 当前会话已加载的消息（按时间升序）。只通过 `setMessages` 修改，以便同步更新分组与预处理结果。
+    private(set) var messages: [AssistantItem] = []
+    /// 按轮次分组后的显示条目；消息变化时计算一次，渲染时不再重复分组。
+    private(set) var entries: [AssistantDisplayEntry] = []
+    /// 消息的预处理结果（脱敏、Markdown 解析），按消息 ID 与内容缓存，后台线程生成。
+    private(set) var rendered: [String: AssistantRendered] = [:]
+    /// 正在读取更早的消息（上滑到顶部时自动触发）。
+    var loadingOlder = false
+    /// 当前显示的是本机缓存，服务器刷新尚未完成。
+    var showingCached = false
     var runs: [AssistantItem] = []
     var capabilities: JSONValue = [:]
     var sessionID: String?
@@ -85,6 +94,9 @@ final class AssistantStore {
     @ObservationIgnored private var defaultsKey = ""
     @ObservationIgnored private var requestID: String?
     @ObservationIgnored private var subscriptionID = UUID()
+    @ObservationIgnored private var cacheKey = ""
+    /// 每页消息数：先显示最近一页，上滑再按 before_id 读取更早的。
+    static let pageSize = 40
 
     var runID: String? { activeRun?["id"]?.stringValue }
     var runStatus: String { activeRun?.assistantText("status") ?? "" }
@@ -99,15 +111,43 @@ final class AssistantStore {
 
     func start(_ model: AppModel, initialID: String?) async {
         defaultsKey = "telepilot.assistant.pending.\(model.serverURL?.absoluteString ?? "").\(model.user?.id ?? 0)"
+        cacheKey = "\(model.serverURL?.absoluteString ?? "").\(model.user?.id ?? 0)"
         unresolvedSend = UserDefaults.standard.dictionary(forKey: defaultsKey) != nil
-        await loadSessions(model)
-        do { capabilities = try await model.request(path: AssistantPresentation.root + "/capabilities") }
-        catch { self.error = AssistantPresentation.error(error) }
-        if let initialID { await select(initialID, model: model) }
-        else if let pending = UserDefaults.standard.dictionary(forKey: defaultsKey)?["session_id"] as? String {
-            await select(pending, model: model)
+        let pending = UserDefaults.standard.dictionary(forKey: defaultsKey)?["session_id"] as? String
+        // 先显示本机缓存（上次的会话列表与最近消息），再从服务器刷新。
+        if sessions.isEmpty, messages.isEmpty, let snapshot = await AssistantHistoryCache.load(cacheKey) {
+            sessions = snapshot.sessions.map { AssistantItem(value: $0) }
+            let wanted = initialID ?? pending ?? snapshot.sessionID
+            if let cachedID = snapshot.sessionID, wanted == cachedID, sessionID == nil {
+                sessionID = cachedID
+                session = snapshot.session
+                accountID = snapshot.session?["account_id"]?.intValue
+                hasOlderMessages = snapshot.hasOlderMessages
+                await setMessages(snapshot.messages.map { AssistantItem(value: $0) })
+                showingCached = true
+            }
+        }
+        // 会话列表与能力并行读取。
+        async let sessionsLoad: Void = loadSessions(model)
+        let capabilitiesPath = AssistantPresentation.root + "/capabilities"
+        async let capabilitiesLoad = Self.capture { try await model.request(path: capabilitiesPath) }
+        _ = await sessionsLoad
+        switch await capabilitiesLoad {
+        case .success(let value): capabilities = value
+        case .failure(let failure): self.error = AssistantPresentation.error(failure)
+        }
+        if let initialID { await select(initialID, model: model, keepVisible: initialID == sessionID) }
+        else if let pending {
+            await select(pending, model: model, keepVisible: pending == sessionID)
             await reconcileSend(model)
+        } else if let current = sessionID, sessions.contains(where: { $0.id == current }) {
+            await select(current, model: model, keepVisible: true)
         } else if let first = sessions.first { await select(first.id, model: model) }
+        else { showingCached = false }
+    }
+
+    private static func capture<T: Sendable>(_ operation: @Sendable () async throws -> T) async -> Result<T, Error> {
+        do { return .success(try await operation()) } catch { return .failure(error) }
     }
 
     func loadSessions(_ model: AppModel) async {
@@ -115,33 +155,58 @@ final class AssistantStore {
         defer { loading = false }
         do {
             let status = includeArchived ? "archived" : "active"
-            sessions = try await model.request(path: AssistantPresentation.root + "/sessions?limit=200&status=\(status)&include_bot=\(includeBot)").assistantItems
+            // compact：服务器只返回列表需要的摘要字段（不含会话记忆），旧服务器会忽略该参数。
+            sessions = try await model.request(path: AssistantPresentation.root + "/sessions?limit=200&status=\(status)&include_bot=\(includeBot)&compact=true").assistantItems
         } catch { self.error = AssistantPresentation.error(error) }
     }
 
-    func select(_ id: String, model: AppModel) async {
+    /// 打开会话：会话详情与最近一页消息并行读取。`keepVisible` 为真时保留当前显示的内容（例如缓存），避免闪烁。
+    func select(_ id: String, model: AppModel, keepVisible: Bool = false) async {
         generation += 1
         streamTask?.cancel()
         streaming = false
+        let keep = keepVisible && sessionID == id
         sessionID = id
-        session = nil
-        messages = []
+        if !keep {
+            session = nil
+            await setMessages([])
+            hasOlderMessages = true
+        }
         events = []
         liveText = ""
         liveReasoning = ""
         activeRun = nil
         lastSeq = 0
         error = nil
-        hasOlderMessages = true
         let token = generation
-        do {
-            let row = try await model.request(path: AssistantPresentation.root + "/sessions/\(AssistantPresentation.path(id))")
-            guard token == generation else { return }
+        let base = AssistantPresentation.root + "/sessions/\(AssistantPresentation.path(id))"
+        let messagesPath = base + "/messages?limit=\(Self.pageSize)"
+        async let rowLoad = Self.capture { try await model.request(path: base) }
+        async let messagesLoad = Self.capture { try await model.request(path: messagesPath) }
+        let (rowResult, messagesResult) = await (rowLoad, messagesLoad)
+        guard token == generation else { return }
+        switch rowResult {
+        case .success(let row):
             session = row
             accountID = row["account_id"]?.intValue
-            await refreshMessages(model)
-            await restoreRun(model)
-        } catch { if token == generation { self.error = AssistantPresentation.error(error) } }
+        case .failure(let failure):
+            self.error = AssistantPresentation.error(failure)
+            showingCached = false
+            return
+        }
+        switch messagesResult {
+        case .success(let value):
+            let rows = value.assistantItems
+            await setMessages(rows)
+            guard token == generation else { return }
+            hasOlderMessages = rows.count >= Self.pageSize
+            showingCached = false
+            saveCache()
+        case .failure(let failure):
+            self.error = AssistantPresentation.error(failure)
+            showingCached = false
+        }
+        await restoreRun(model)
     }
 
     func createSession(_ model: AppModel) async {
@@ -223,7 +288,7 @@ final class AssistantStore {
             streamTask?.cancel()
             sessionID = nil
             session = nil
-            messages = []
+            await setMessages([])
             runs = []
             events = []
             activeRun = nil
@@ -240,24 +305,72 @@ final class AssistantStore {
         notice = "会话已删除。"
     }
 
+    /// 读取消息。`older` 为真时按 before_id 读取更早一页并拼到前面；否则读取最近一页，
+    /// 与已加载的更早消息合并（不丢弃用户已经上滑加载的历史）。
     func refreshMessages(_ model: AppModel, older: Bool = false) async {
         guard let sessionID else { return }
+        if older {
+            guard !loadingOlder, hasOlderMessages else { return }
+            loadingOlder = true
+        }
+        defer { if older { loadingOlder = false } }
         let token = generation
         let before = older ? messages.first?["id"]?.intValue.map { "&before_id=\($0)" } ?? "" : ""
         do {
-            let rows = try await model.request(path: AssistantPresentation.root + "/sessions/\(AssistantPresentation.path(sessionID))/messages?limit=100\(before)").assistantItems
+            let rows = try await model.request(path: AssistantPresentation.root + "/sessions/\(AssistantPresentation.path(sessionID))/messages?limit=\(Self.pageSize)\(before)").assistantItems
             guard token == generation else { return }
-            if older { messages = rows + messages.filter { row in !rows.contains(where: { $0.id == row.id }) } }
-            else { messages = rows }
-            hasOlderMessages = rows.count == 100
+            if older {
+                let known = Set(messages.map(\.id))
+                await setMessages(rows.filter { !known.contains($0.id) } + messages)
+                hasOlderMessages = rows.count >= Self.pageSize
+            } else {
+                let firstNew = rows.first?["id"]?.intValue
+                let kept = firstNew.map { first in messages.filter { ($0["id"]?.intValue ?? Int.max) < first } } ?? []
+                await setMessages(kept + rows)
+                if kept.isEmpty { hasOlderMessages = rows.count >= Self.pageSize }
+            }
+            guard token == generation else { return }
+            saveCache()
         } catch { if token == generation { self.error = AssistantPresentation.error(error) } }
+    }
+
+    /// 更新消息：先在后台线程完成脱敏与 Markdown 预处理（只处理尚未缓存的消息），再一次性替换消息与分组。
+    func setMessages(_ rows: [AssistantItem]) async {
+        let missing = rows.filter { rendered[AssistantRendered.key(for: $0)] == nil && $0.text("role") != "tool" }
+        if !missing.isEmpty {
+            let prepared = await Task.detached(priority: .userInitiated) { missing.map(AssistantRendered.make) }.value
+            var cache = rendered.count > 800 ? [:] : rendered
+            for item in prepared { cache[item.key] = item }
+            rendered = cache
+        }
+        messages = rows
+        entries = AssistantTurnGrouping.entries(rows)
+    }
+
+    func renderedFor(_ item: AssistantItem) -> AssistantRendered? { rendered[AssistantRendered.key(for: item)] }
+
+    /// 保存最近一页消息与会话列表到本机缓存，下次进入先显示。
+    private func saveCache() {
+        guard !cacheKey.isEmpty else { return }
+        let snapshot = AssistantHistoryCache.Snapshot(
+            sessions: Array(sessions.prefix(200)).map(\.value),
+            sessionID: sessionID,
+            session: session,
+            messages: Array(messages.suffix(Self.pageSize)).map(\.value),
+            hasOlderMessages: messages.count > Self.pageSize || hasOlderMessages,
+            savedAt: Date())
+        AssistantHistoryCache.save(snapshot, key: cacheKey)
     }
 
     func restoreRun(_ model: AppModel) async {
         guard let sessionID else { return }
         let token = generation
         do {
-            let rows = try await model.request(path: AssistantPresentation.root + "/runs?limit=200&include_bot=true").assistantItems
+            // 只读取本会话的任务（session_id 过滤）；旧服务器不认识该参数时会返回全部会话的任务，此时退回读取最近 200 项。
+            var rows = try await model.request(path: AssistantPresentation.root + "/runs?limit=20&include_bot=true&session_id=\(AssistantPresentation.path(sessionID))").assistantItems
+            if rows.contains(where: { $0.text("session_id") != sessionID }) {
+                rows = try await model.request(path: AssistantPresentation.root + "/runs?limit=200&include_bot=true").assistantItems
+            }
             guard token == generation else { return }
             runs = rows.filter { $0.text("session_id") == sessionID }
             if let running = runs.first(where: { !AssistantPresentation.terminal.contains($0.text("status")) }) {

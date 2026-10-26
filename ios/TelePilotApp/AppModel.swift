@@ -629,6 +629,8 @@ final class AppModel {
         pendingActions = []
         plugins = []
         serverUpdateStatus = nil
+        // 本机缓存的助手会话与消息随登录状态一起清除。
+        AssistantHistoryCache.removeAll()
         assistantSessionRequest = nil
         isSyncingAfterAction = false
         workspaceError = nil
