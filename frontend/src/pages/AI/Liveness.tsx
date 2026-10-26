@@ -1246,9 +1246,9 @@ export function LLMLivenessPage() {
             className="h-7 px-2 text-xs"
             disabled={modelsLocked || busy}
             onClick={() => setCapFilter("tools")}
-            title="仅显示声明支持 Tools 的模型"
+            title="仅显示未声明不支持工具调用的模型"
           >
-            Tools
+            工具调用
           </Button>
           <Button
             type="button"
@@ -1257,9 +1257,9 @@ export function LLMLivenessPage() {
             className="h-7 px-2 text-xs"
             disabled={modelsLocked || busy}
             onClick={() => setCapFilter("vision")}
-            title="仅显示声明支持 Vision 的模型"
+            title="仅显示声明支持图片输入的模型"
           >
-            Vision
+            多模态（图片）
           </Button>
         </div>
         <div className="max-h-[48vh] space-y-1 overflow-y-auto rounded-md border bg-background p-1 xl:max-h-[520px]">
@@ -1282,8 +1282,8 @@ export function LLMLivenessPage() {
                 <span className="block truncate font-mono" title={model.id}>{model.id}</span>
                 <div className="mt-1 flex min-w-0 flex-wrap items-center gap-1">
                   {model.id === selectedProvider.default_model ? <MetaBadge tone="success">默认</MetaBadge> : null}
-                  {model.supports_tools === true ? <MetaBadge tone="outline">Tools</MetaBadge> : null}
-                  {model.supports_images === true ? <MetaBadge tone="outline">Vision</MetaBadge> : null}
+                  {model.supports_tools === true ? <MetaBadge tone="outline">工具调用</MetaBadge> : null}
+                  {model.supports_images === true ? <MetaBadge tone="outline">多模态（图片）</MetaBadge> : null}
                   {model.enabled ? (
                     <span className="shrink-0 rounded bg-emerald-500/10 px-1.5 py-0.5 text-[9px] font-medium text-emerald-700 dark:text-emerald-300">
                       已被启用

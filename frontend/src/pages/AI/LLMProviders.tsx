@@ -2448,7 +2448,7 @@ function ModelMetadataBadges({ model }: { model: ProviderModel }) {
           className="text-[10px] leading-4"
           title={`上下文窗口 ${model.context_window.toLocaleString()} tokens（来自 ${model.metadata_source === "manual" ? "手填" : "上游 /models"}）`}
         >
-          {formatTokenCount(model.context_window)} ctx
+          上下文 {formatTokenCount(model.context_window)}
         </MetaBadge>
       ) : null}
       {model.max_output_tokens ? (
@@ -2457,12 +2457,12 @@ function ModelMetadataBadges({ model }: { model: ProviderModel }) {
           className="text-[10px] leading-4"
           title={`单次输出上限 ${model.max_output_tokens.toLocaleString()} tokens`}
         >
-          ≤{formatTokenCount(model.max_output_tokens)} out
+          输出 ≤{formatTokenCount(model.max_output_tokens)}
         </MetaBadge>
       ) : null}
       {image ? (
         <MetaBadge tone="info" className="text-[10px] leading-4" title="支持图片输入">
-          图片
+          多模态（图片）
         </MetaBadge>
       ) : null}
       {levels.length > 0 ? (
