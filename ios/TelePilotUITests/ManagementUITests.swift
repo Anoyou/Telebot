@@ -105,8 +105,10 @@ final class ManagementUITests: XCTestCase {
     func testAboutShowsBundledAppChangelog() {
         let app = launch()
         let about = app.buttons["more.about"]
-        XCTAssertTrue(about.waitForExistence(timeout: 10))
-        for _ in 0..<4 where !about.isHittable { app.swipeUp() }
+        // “更多”顶部的全局紧急停止说明较长，“关于与更新”可能在首屏之外；List 懒加载，先滚动再等待。
+        XCTAssertTrue(app.buttons["more.accounts"].waitForExistence(timeout: 10))
+        for _ in 0..<6 where !(about.exists && about.isHittable) { app.swipeUp() }
+        XCTAssertTrue(about.waitForExistence(timeout: 5))
         about.tap()
         let entry = app.buttons["about.appChangelog"]
         XCTAssertTrue(entry.waitForExistence(timeout: 10))
@@ -128,8 +130,10 @@ final class ManagementUITests: XCTestCase {
     func testServerUpdateRequiresConfirmationBeforeApplying() {
         let app = launch()
         let about = app.buttons["more.about"]
-        XCTAssertTrue(about.waitForExistence(timeout: 10))
-        for _ in 0..<4 where !about.isHittable { app.swipeUp() }
+        // “更多”顶部的全局紧急停止说明较长，“关于与更新”可能在首屏之外；List 懒加载，先滚动再等待。
+        XCTAssertTrue(app.buttons["more.accounts"].waitForExistence(timeout: 10))
+        for _ in 0..<6 where !(about.exists && about.isHittable) { app.swipeUp() }
+        XCTAssertTrue(about.waitForExistence(timeout: 5))
         about.tap()
         XCTAssertTrue(app.staticTexts["App 版本"].waitForExistence(timeout: 10))
         let open = app.buttons["update.open"]
@@ -168,8 +172,10 @@ final class ManagementUITests: XCTestCase {
     func testServerUpdateReceiptSurvivesClosingPanel() {
         let app = launch()
         let about = app.buttons["more.about"]
-        XCTAssertTrue(about.waitForExistence(timeout: 10))
-        for _ in 0..<4 where !about.isHittable { app.swipeUp() }
+        // “更多”顶部的全局紧急停止说明较长，“关于与更新”可能在首屏之外；List 懒加载，先滚动再等待。
+        XCTAssertTrue(app.buttons["more.accounts"].waitForExistence(timeout: 10))
+        for _ in 0..<6 where !(about.exists && about.isHittable) { app.swipeUp() }
+        XCTAssertTrue(about.waitForExistence(timeout: 5))
         about.tap()
         let open = app.buttons["update.open"]
         for _ in 0..<4 where !open.isHittable { app.swipeUp() }
