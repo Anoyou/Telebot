@@ -754,6 +754,44 @@ async def test_list_durable_runs_is_scoped_to_current_user(fake_run_manager) -> 
 
 
 @pytest.mark.asyncio
+async def test_list_durable_runs_can_filter_by_session(fake_run_manager) -> None:
+    user = SimpleNamespace(id=7)
+
+    await api.list_system_agent_runs(
+        user,
+        status=None,
+        since=None,
+        until=None,
+        limit=20,
+        include_bot=True,
+        session_id="s1",
+    )
+
+    assert fake_run_manager.last_list_kwargs["session_id"] == "s1"
+    assert fake_run_manager.last_list_kwargs["limit"] == 20
+
+
+@pytest.mark.asyncio
+async def test_list_sessions_compact_omits_memory(fake_svc) -> None:
+    db = AsyncMock()
+    user = SimpleNamespace(id=7)
+    await api.create_session(api.SystemAgentSessionCreate(title="hi"), db, user)
+    for session in fake_svc.sessions.values():
+        session.memory_summary = "很长的会话摘要" * 50
+        session.memory_state = {"facts": ["a"] * 20}
+
+    full = await api.list_sessions(db, user, status="active", origin=None, include_bot=False, limit=50, compact=False)
+    compact = await api.list_sessions(db, user, status="active", origin=None, include_bot=False, limit=50, compact=True)
+
+    assert full[0].memory_summary
+    assert full[0].memory_state
+    assert compact[0].memory_summary == ""
+    assert compact[0].memory_state == {}
+    assert compact[0].id == full[0].id
+    assert compact[0].title == full[0].title
+
+
+@pytest.mark.asyncio
 async def test_owned_run_releases_read_transaction_before_manager_call() -> None:
     row = SimpleNamespace(id="run-owned", web_user_id=7, channel="web")
     result = SimpleNamespace(scalar_one_or_none=lambda: row)

@@ -505,6 +505,11 @@ async def test_list_runs_filters_by_owner_and_status(run_db) -> None:
     assert [row.id for row in rows] == ["listed-failed"]
     assert {row.id for row in rows_with_bot} == {"listed-failed", "listed-bot"}
 
+    by_session = await manager.list_runs(web_user_id=7, include_bot=True, session_id="bot-session-1")
+    assert [row.id for row in by_session] == ["listed-bot"]
+    none_match = await manager.list_runs(web_user_id=7, session_id="missing-session")
+    assert none_match == []
+
 
 @pytest.mark.asyncio
 async def test_list_queue_can_include_bot_items_read_only(run_db) -> None:
