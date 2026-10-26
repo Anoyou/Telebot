@@ -37,10 +37,110 @@ final class WorkspaceUITests: XCTestCase {
         XCTAssertTrue(app.buttons["plugin.card.auto_reply"].waitForExistence(timeout: 10))
         XCTAssertTrue(app.buttons["plugins.category"].exists)
         XCTAssertTrue(app.buttons["plugins.accountPicker"].exists)
-        app.buttons["plugins.management"].tap()
-        XCTAssertTrue(app.buttons["plugins.checkUpdates"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.buttons["远程插件与更新"].exists)
-        XCTAssertTrue(app.buttons["插件仓库"].exists)
+        // 原「插件管理」拆成 App Store 式的「发现」与「已安装」。
+        app.buttons["plugins.installed"].tap()
+        XCTAssertTrue(app.buttons["plugins.checkUpdates"].waitForExistence(timeout: 10))
+        app.buttons["plugins.discover"].tap()
+        XCTAssertTrue(app.buttons["plugin.discover.row.weather_digest"].waitForExistence(timeout: 15))
+        // 其他安装方式在列表底部：懒加载列表要先滚到元素再断言。
+        XCTAssertTrue(reveal(app.buttons["plugins.repositories"], in: app))
+        XCTAssertTrue(app.buttons["plugins.installFromFile"].exists)
+    }
+
+    func testPluginStoreUpdatesShowNotesAndUpdateIndividually() {
+        let app = launch()
+        let plugins = app.tabBars.buttons["插件"]
+        XCTAssertTrue(plugins.waitForExistence(timeout: 45))
+        plugins.tap()
+        XCTAssertTrue(app.buttons["plugin.card.auto_reply"].waitForExistence(timeout: 10))
+        app.buttons["plugins.installed"].tap()
+        // 待更新区在最上：真实的可更新数、全部更新、版本 x → y 与可折叠的「新功能」（来自仓库 CHANGELOG）。
+        XCTAssertTrue(app.buttons["plugins.updateAll"].waitForExistence(timeout: 10))
+        let card = app.buttons["plugin.update.row.content_assistant"]
+        XCTAssertTrue(card.waitForExistence(timeout: 5))
+        XCTAssertTrue(card.label.contains("v2.1.0 → v2.2.0"))
+        XCTAssertTrue(app.descendants(matching: .any)["plugin.update.notes.content_assistant"].firstMatch.waitForExistence(timeout: 20))
+        // 最近已更新（来自安装历史）。
+        XCTAssertTrue(reveal(app.buttons["plugin.recent.row.forward_guard"], in: app))
+        app.swipeDown()
+        app.swipeDown()
+
+        let update = app.buttons["plugin.update.action.content_assistant"]
+        XCTAssertTrue(update.waitForExistence(timeout: 5))
+        update.tap()
+        // 更新成功后离开待更新区，出现在「最近已更新」，并显示真实的新版本。
+        XCTAssertTrue(app.staticTexts["所有插件均为最新版本"].waitForExistence(timeout: 15))
+        XCTAssertFalse(app.buttons["plugin.update.row.content_assistant"].exists)
+        let recent = app.buttons["plugin.recent.row.content_assistant"]
+        XCTAssertTrue(reveal(recent, in: app))
+        XCTAssertTrue(recent.label.contains("v2.2.0"))
+    }
+
+    func testPluginStoreDiscoverInstallsAfterConfirmation() {
+        let app = launch()
+        let plugins = app.tabBars.buttons["插件"]
+        XCTAssertTrue(plugins.waitForExistence(timeout: 45))
+        plugins.tap()
+        XCTAssertTrue(app.buttons["plugin.card.auto_reply"].waitForExistence(timeout: 10))
+        app.buttons["plugins.discover"].tap()
+        // 已安装的显示「打开」，未安装的显示「获取」。
+        let installed = app.buttons["plugin.discover.action.content_assistant"]
+        XCTAssertTrue(installed.waitForExistence(timeout: 15))
+        XCTAssertEqual(installed.label, "更新")
+        let get = app.buttons["plugin.discover.action.dice_party"]
+        XCTAssertTrue(reveal(get, in: app))
+        XCTAssertEqual(get.label, "获取")
+        get.tap()
+        let confirm = app.buttons["安装"]
+        XCTAssertTrue(confirm.waitForExistence(timeout: 5))
+        confirm.tap()
+        let open = app.buttons["plugin.discover.action.dice_party"]
+        XCTAssertTrue(open.waitForExistence(timeout: 10))
+        let opened = NSPredicate(format: "label == %@", "打开")
+        expectation(for: opened, evaluatedWith: open)
+        waitForExpectations(timeout: 10)
+    }
+
+    func testPluginProductPageShowsInfoWhatsNewAndConfirmsUninstall() {
+        let app = launch()
+        let plugins = app.tabBars.buttons["插件"]
+        XCTAssertTrue(plugins.waitForExistence(timeout: 45))
+        plugins.tap()
+        XCTAssertTrue(app.buttons["plugin.card.auto_reply"].waitForExistence(timeout: 10))
+        app.buttons["plugins.installed"].tap()
+        let card = app.buttons["plugin.update.row.content_assistant"]
+        XCTAssertTrue(card.waitForExistence(timeout: 10))
+        card.tap()
+        let primary = app.buttons["plugin.product.primary"]
+        XCTAssertTrue(primary.waitForExistence(timeout: 10))
+        XCTAssertEqual(primary.label, "更新")
+        XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "最低版本")).firstMatch.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["TelePilot 社区"].exists)
+        XCTAssertTrue(app.staticTexts["新功能"].waitForExistence(timeout: 20))
+        // 停用与卸载在底部危险区，确认框挂在触发按钮上。
+        let uninstall = app.buttons["plugin.product.uninstall"]
+        XCTAssertTrue(reveal(uninstall, in: app, maxSwipes: 10))
+        uninstall.tap()
+        // 只弹出确认，不会直接卸载。
+        XCTAssertTrue(app.buttons["卸载"].waitForExistence(timeout: 5))
+        let cancel = app.buttons["取消"]
+        if cancel.exists {
+            cancel.tap()
+        } else {
+            app.navigationBars.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+        }
+        XCTAssertTrue(app.buttons["plugin.product.uninstall"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["plugin.product.globalToggle"].exists)
+    }
+
+    /// 懒加载列表里屏幕外的行不在辅助功能树中：上滑直到元素可点，再断言。
+    private func reveal(_ element: XCUIElement, in app: XCUIApplication, maxSwipes: Int = 8) -> Bool {
+        var swipes = 0
+        while !(element.exists && element.isHittable) && swipes < maxSwipes {
+            app.swipeUp()
+            swipes += 1
+        }
+        return element.waitForExistence(timeout: 3)
     }
 
     func testPluginAccountStateIsSeparateFromGlobalMaintenance() {

@@ -406,6 +406,15 @@ final class AppModel {
         }
     }
 
+    /// 插件页读取到新的插件列表后同步过来，让 Tab 角标与概览使用同一份真实数据。
+    func updatePlugins(_ values: [JSONValue]) {
+        guard phase == .signedIn else { return }
+        plugins = values
+    }
+
+    /// 服务器报告有新版本的插件数（插件 Tab 角标）。
+    var pluginUpdateCount: Int { plugins.filter { $0["update_available"]?.boolValue == true }.count }
+
     private func finishSessionCleanup() async {
         isAuthenticating = true
         defer { isAuthenticating = false }

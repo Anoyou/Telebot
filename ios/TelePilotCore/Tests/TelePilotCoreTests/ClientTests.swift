@@ -389,7 +389,12 @@ struct ClientTests {
         #expect(SessionTransport.isSlowOperation("/api/remote-plugins/demo/update", write: true))
         #expect(SessionTransport.isSlowOperation("/api/plugins/install/upload", write: true))
         #expect(SessionTransport.isSlowOperation("/api/system/pull-update", write: true))
-        #expect(!SessionTransport.isSlowOperation("/api/plugin-repos/3/plugins", write: false))
+        #expect(SessionTransport.isSlowOperation("/api/remote-plugins/check-updates", write: true))
+        // 浏览仓库首次会在服务器上 git clone：读取也走长超时；本地参考插件与仓库列表不需要。
+        #expect(SessionTransport.isSlowOperation("/api/plugin-repos/3/plugins", write: false))
+        #expect(!SessionTransport.isSlowOperation("/api/plugin-repos/local/plugins", write: false))
+        #expect(!SessionTransport.isSlowOperation("/api/plugin-repos", write: false))
+        #expect(!SessionTransport.isSlowOperation("/api/remote-plugins/demo", write: false))
         #expect(!SessionTransport.isSlowOperation("/api/plugins/install/demo/enable", write: true))
         #expect(!SessionTransport.isSlowOperation("/api/accounts/1/features/demo", write: true))
     }

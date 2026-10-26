@@ -80,6 +80,12 @@ class PluginRepoPlugin(BaseModel):
     capabilities: dict[str, Any] = Field(default_factory=dict)
     permissions: list[str] = Field(default_factory=list)
     tags: list[str] = Field(default_factory=list)
+    category: str | None = Field(default=None, description="plugin.json 声明的分类（interactive / automation / utility）")
+    min_telepilot_version: str | None = Field(default=None, description="plugin.json 声明的最低 TelePilot 版本")
+    changelog: str | None = Field(
+        default=None,
+        description="插件目录 CHANGELOG.md 开头最多 8 KiB（通常是最新几个版本）；未提供时为 null",
+    )
     # 该插件在仓库内的相对子目录（用于安装时定位）；若插件位于仓库根目录则为 ""
     subdir: str = ""
 

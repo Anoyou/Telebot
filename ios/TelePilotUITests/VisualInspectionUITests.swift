@@ -45,9 +45,19 @@ final class VisualInspectionUITests: XCTestCase {
         XCTAssertTrue(app.buttons["plugin.card.auto_reply"].waitForExistence(timeout: 10))
         capture("02-plugin-center")
 
-        app.buttons["plugins.management"].tap()
-        XCTAssertTrue(app.buttons["plugins.checkUpdates"].waitForExistence(timeout: 5))
-        capture("03-plugin-management")
+        app.buttons["plugins.installed"].tap()
+        XCTAssertTrue(app.buttons["plugins.updateAll"].waitForExistence(timeout: 10))
+        capture("03-plugin-installed-updates")
+
+        app.buttons["plugin.update.row.content_assistant"].tap()
+        XCTAssertTrue(app.buttons["plugin.product.primary"].waitForExistence(timeout: 10))
+        capture("03b-plugin-product-page")
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+
+        XCTAssertTrue(app.buttons["plugins.discover"].waitForExistence(timeout: 5))
+        app.buttons["plugins.discover"].tap()
+        XCTAssertTrue(app.buttons["plugin.discover.row.content_assistant"].waitForExistence(timeout: 15))
+        capture("03c-plugin-discover")
 
         app.buttons["plugins.center"].tap()
         XCTAssertTrue(app.buttons["plugin.card.auto_reply"].waitForExistence(timeout: 5))

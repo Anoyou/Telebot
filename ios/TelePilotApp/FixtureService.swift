@@ -22,6 +22,10 @@ actor FixtureService: AppServing {
     ]
     private var fixtureUpdateCheck: JSONValue = ["enabled": true, "interval_minutes": 1440]
     private var pluginGlobalEnabled: [String: Bool] = ["auto_reply": true, "content_assistant": true, "forward_guard": false]
+    /// 插件商店界面测试：内容整理助手当前版本（更新后变为 2.2.0）与从仓库新装的插件。
+    private var contentAssistantVersion = "2.1.0"
+    private var contentAssistantUpdatedAt: Date?
+    private var storeInstalledPlugins: [String] = []
 
     init(offline: Bool = false) {
         self.offline = offline
@@ -221,11 +225,18 @@ actor FixtureService: AppServing {
                 ["account_id": 1, "account_name": "日常工作账号", "enabled": .bool(accountFeatureEnabled[1]?["auto_reply"] ?? true), "state": "active"],
                 ["account_id": 2, "account_name": "备用账号", "enabled": .bool(accountFeatureEnabled[2]?["auto_reply"] ?? false), "state": "stopped"]
             ]
-            return [
+            var items: [JSONValue] = [
                 ["key": "auto_reply", "display_name": "自动回复", "global_enabled": .bool(pluginGlobalEnabled["auto_reply"] ?? true), "version": "1.4.0", "signature_ok": true, "source": "builtin", "accounts": autoReplyAccounts],
-                ["key": "content_assistant", "display_name": "内容整理助手", "global_enabled": .bool(pluginGlobalEnabled["content_assistant"] ?? true), "version": "2.1.0", "signature_ok": true, "source": "git"],
+                ["key": "content_assistant", "display_name": "内容整理助手", "global_enabled": .bool(pluginGlobalEnabled["content_assistant"] ?? true),
+                 "version": .string(contentAssistantVersion), "signature_ok": true, "source": "git", "source_url": "https://github.com/example/telepilot-plugins.git",
+                 "update": ["update_available": .bool(contentAssistantVersion != "2.2.0"), "latest_version": "2.2.0", "last_update_check_at": .string(Self.isoDate(hoursAgo: 3))]],
                 ["key": "forward_guard", "display_name": "转发风控与来源保护", "global_enabled": .bool(pluginGlobalEnabled["forward_guard"] ?? false), "version": "0.9.2", "signature_ok": false, "source": "local"]
             ]
+            for name in storeInstalledPlugins {
+                items.append(["key": .string(name), "display_name": .string(Self.storeTitles[name] ?? name), "global_enabled": true, "version": "1.0.0",
+                              "signature_ok": true, "source": "repo", "source_url": "https://github.com/example/telepilot-plugins.git"])
+            }
+            return .array(items)
         }
         if clean == "/api/plugins/auto_reply/config", method == "GET" {
             return ["plugin_key": "auto_reply", "config": ["max_per_hour": 40], "global_config": ["max_per_hour": 40]]
@@ -239,8 +250,9 @@ actor FixtureService: AppServing {
             for (key, value) in fixtureValues[clean + "#effective"]?.objectValue ?? [:] { effective[key] = value }
             return .object(effective)
         }
+        if let value = pluginStoreFixture(clean, method: method) { return value }
         if clean == "/api/feature-matrix" {
-            return [
+            let matrix: JSONValue = [
                 "accounts": [
                     ["id": 1, "name": "日常工作账号", "features": ["auto_reply": "active", "content_assistant": "failed"],
                      "feature_enabled": ["auto_reply": true, "content_assistant": true]],
@@ -259,7 +271,8 @@ actor FixtureService: AppServing {
                         "notify_owner": ["type": "boolean", "title": "回复后通知我", "default": false, "level": "global"]
                      ]]],
                     ["key": "content_assistant", "display_name": "内容整理助手", "usage": "整理消息、提取摘要并交给 AI 处理。",
-                     "category": "interactive", "version": "2.1.0", "latest_version": "2.2.0", "update_available": true,
+                     "category": "interactive", "version": .string(contentAssistantVersion), "latest_version": "2.2.0",
+                     "update_available": .bool(contentAssistantVersion != "2.2.0"), "last_update_check_at": .string(Self.isoDate(hoursAgo: 3)),
                      "source_type": "remote", "source_label": "个人插件仓库", "is_builtin": false, "signature_ok": true,
                      "orphan": false, "permissions": ["call_llm"],
                      // 带分组、声明顺序与可选字段：只有“目标群组 ID”真正必填。
@@ -289,6 +302,14 @@ actor FixtureService: AppServing {
                      "orphan": true, "lint_warnings": ["插件来源目录不存在"]]
                 ]
             ]
+            guard var object = matrix.objectValue, var features = object["features"]?.arrayValue else { return matrix }
+            for name in storeInstalledPlugins {
+                features.append(["key": .string(name), "display_name": .string(Self.storeTitles[name] ?? name), "usage": "从插件仓库安装的界面测试插件。",
+                                 "category": "automation", "version": "1.0.0", "update_available": false, "source_type": "remote",
+                                 "source_label": "个人插件仓库", "is_builtin": false, "signature_ok": true, "orphan": false, "permissions": ["send_message"]])
+            }
+            object["features"] = .array(features)
+            return .object(object)
         }
         if let match = clean.firstMatch(of: #/^\/api\/accounts\/(\d+)\/features$/#), method == "GET" {
             let accountID = Int(match.1) ?? 1
@@ -589,6 +610,89 @@ actor FixtureService: AppServing {
             }
             return .null
         }
+    }
+
+    static let storeTitles = ["weather_digest": "天气早报", "dice_party": "骰子派对", "hello_world": "示例：你好世界"]
+
+    static func isoDate(hoursAgo: Double) -> String {
+        ISO8601DateFormatter().string(from: Date().addingTimeInterval(-hoursAgo * 3600))
+    }
+
+    /// 插件商店（发现 / 已安装 / 产品页）所需的接口：仓库目录、安装包清单、安装历史、更新日志、安装与更新。
+    private func pluginStoreFixture(_ clean: String, method: String) -> JSONValue? {
+        let repoURL: JSONValue = "https://github.com/example/telepilot-plugins.git"
+        switch (method, clean) {
+        case ("GET", "/api/plugins/installed-packages"):
+            var items: [JSONValue] = [
+                ["key": "content_assistant", "source": "git", "source_url": repoURL, "version": .string(contentAssistantVersion), "enabled": true,
+                 "signature_ok": true, "installed_path": "", "installed_at": .string(Self.isoDate(hoursAgo: 24 * 40)),
+                 "manifest": ["author": "TelePilot 社区", "description": "把群聊里的长消息整理成摘要，并交给 AI 回答追问。", "min_telepilot_version": "0.100.0"]],
+                ["key": "forward_guard", "source": "local", "source_url": "local://forward_guard", "version": "0.9.2", "enabled": false,
+                 "signature_ok": false, "installed_path": "", "installed_at": .string(Self.isoDate(hoursAgo: 24 * 10)),
+                 "manifest": ["author": "本机", "description": "过滤异常转发，保留原始来源。"]]
+            ]
+            for name in storeInstalledPlugins {
+                items.append(["key": .string(name), "source": "repo", "source_url": repoURL, "version": "1.0.0", "enabled": true, "signature_ok": true,
+                              "installed_path": "", "installed_at": .string(Self.isoDate(hoursAgo: 0)), "manifest": ["author": "TelePilot 社区"]])
+            }
+            return .array(items)
+        case ("GET", "/api/plugin-repos"):
+            return [["id": 1, "name": "个人插件仓库", "url": repoURL, "description": "", "auth_type": "none", "has_credentials": false]]
+        case ("GET", "/api/plugin-repos/1/plugins"):
+            let changelog = "# 更新日志\n\n## 2.2.0 (2026-10-25)\n- 新增「追问」按钮，可以就摘要继续提问。\n- 摘要支持 Telegram 富文本。\n\n## 2.1.0 (2026-09-30)\n- 修复长消息被截断。\n"
+            var items: [JSONValue] = [
+                ["name": "content_assistant", "display_name": "内容整理助手", "description": "把群聊里的长消息整理成摘要，并交给 AI 回答追问。",
+                 "author": "TelePilot 社区", "version": "2.2.0", "installed": true, "installed_version": .string(contentAssistantVersion), "installed_source": "git",
+                 "installed_source_url": repoURL, "source_matches": true, "update_available": .bool(contentAssistantVersion != "2.2.0"),
+                 "permissions": ["call_llm", "send_message"], "tags": ["ai", "summary"], "category": "interactive", "min_telepilot_version": "0.100.0",
+                 "changelog": .string(changelog), "event_subscriptions": [], "capabilities": [:], "subdir": "content_assistant"]
+            ]
+            for name in ["weather_digest", "dice_party"] {
+                let installed = storeInstalledPlugins.contains(name)
+                items.append(["name": .string(name), "display_name": .string(Self.storeTitles[name] ?? name),
+                              "description": name == "weather_digest" ? "每天早上把天气和出行提醒发到指定会话。" : "群里掷骰子比大小的小游戏。",
+                              "author": "TelePilot 社区", "version": "1.0.0", "installed": .bool(installed), "installed_version": installed ? .string("1.0.0") : .null,
+                              "source_matches": .bool(installed), "update_available": false, "permissions": ["send_message"], "tags": [],
+                              "category": name == "weather_digest" ? "automation" : "interactive",
+                              "changelog": "## 1.0.0 (2026-10-20)\n- 首个版本。", "event_subscriptions": [], "capabilities": [:], "subdir": .string(name)])
+            }
+            return .array(items)
+        case ("GET", "/api/plugin-repos/local/plugins"):
+            return [["name": "hello_world", "display_name": "示例：你好世界", "description": "最小的插件示例。", "author": "TelePilot", "version": "0.1.0",
+                     "installed": false, "permissions": [], "tags": ["example"], "category": "utility", "event_subscriptions": [], "capabilities": [:], "subdir": "hello_world"]]
+        case ("POST", "/api/remote-plugins/check-updates"):
+            return ["total": 1, "checked": 1, "update_available": .integer(contentAssistantVersion == "2.2.0" ? 0 : 1), "failed": 0]
+        case ("POST", "/api/remote-plugins/content_assistant/update"):
+            contentAssistantVersion = "2.2.0"
+            contentAssistantUpdatedAt = Date()
+            return ["id": 1, "name": "content_assistant", "display_name": "内容整理助手", "version": "2.2.0", "enabled": true]
+        case ("GET", "/api/plugins/install/content_assistant/history"):
+            guard let date = contentAssistantUpdatedAt else { return [] }
+            return [["id": 9, "plugin_key": "content_assistant", "event_type": "updated", "version": "2.2.0", "previous_version": "2.1.0",
+                     "created_at": .string(ISO8601DateFormatter().string(from: date))]]
+        case ("GET", "/api/plugins/install/forward_guard/history"):
+            return [["id": 8, "plugin_key": "forward_guard", "event_type": "updated", "version": "0.9.2", "previous_version": "0.9.1",
+                     "created_at": .string(Self.isoDate(hoursAgo: 50))]]
+        case ("GET", "/api/plugins/install/content_assistant/changelog"):
+            let content = contentAssistantVersion == "2.2.0"
+                ? "## 2.2.0 (2026-10-25)\n- 新增「追问」按钮，可以就摘要继续提问。\n\n## 2.1.0 (2026-09-30)\n- 修复长消息被截断。"
+                : "## 2.1.0 (2026-09-30)\n- 修复长消息被截断。"
+            return ["key": "content_assistant", "available": true, "content": .string(content), "truncated": false]
+        case ("GET", "/api/plugins/install/forward_guard/changelog"):
+            return ["key": "forward_guard", "available": true, "content": "## 0.9.2 (2026-10-24)\n- 修复来源校验误判。", "truncated": false]
+        default:
+            break
+        }
+        if method == "GET", clean.hasPrefix("/api/plugins/install/"), clean.hasSuffix("/history") { return [] }
+        if method == "GET", clean.hasPrefix("/api/plugins/install/"), clean.hasSuffix("/changelog") {
+            return ["available": false, "content": "", "message": "该插件未提供 CHANGELOG.md。"]
+        }
+        if method == "POST", let match = clean.firstMatch(of: #/^\/api\/plugin-repos\/(?:1|local)\/plugins\/([^\/]+)\/install$/#) {
+            let name = String(match.1)
+            if !storeInstalledPlugins.contains(name) { storeInstalledPlugins.append(name) }
+            return ["id": 2, "name": .string(name), "display_name": .string(Self.storeTitles[name] ?? name), "version": "1.0.0", "enabled": true]
+        }
+        return nil
     }
 
     private func checkConnection() throws {

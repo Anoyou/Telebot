@@ -2,8 +2,7 @@ import SwiftUI
 import TelePilotCore
 
 private enum PluginWorkspaceSection: String, CaseIterable {
-    case center, management
-    var title: String { self == .center ? "插件中心" : "插件管理" }
+    case center, discover, installed
 }
 
 private enum PluginFilter: String, CaseIterable {
@@ -25,23 +24,22 @@ struct PluginManagementView: View {
     var isTabRoot = true
     @Environment(AppModel.self) private var model
     @State private var section: PluginWorkspaceSection = .center
-    @State private var features: [JSONValue] = []
-    @State private var installed: [String: JSONValue] = [:]
-    @State private var error: String?
-    @State private var busy = false
+    @State private var store = PluginStoreModel()
 
     var body: some View {
         Group {
             if let accountID {
-                PluginCenterView(features: features, fixedAccountID: accountID, loading: busy, loadError: error, reload: load)
+                PluginCenterView(features: store.features, fixedAccountID: accountID, loading: store.loading, loadError: store.loadError, reload: load)
             } else {
                 // 分段切换作为各自滚动内容的顶部头部，随内容一起滚动。曾挂在 `.safeAreaBar(edge: .top)` 上，
                 // 与大标题导航栏的折叠/展开互相改变顶部安全区，滑到顶部时顶栏会持续抖动。
                 switch section {
                 case .center:
-                    PluginCenterView(features: features, loading: busy, loadError: error, reload: load, header: AnyView(sectionPicker))
-                case .management:
-                    PluginSourcesView(features: features, installed: installed, loading: busy, loadError: error, reload: load, header: AnyView(sectionPicker))
+                    PluginCenterView(features: store.features, loading: store.loading, loadError: store.loadError, reload: load, header: AnyView(sectionPicker))
+                case .discover:
+                    PluginDiscoverView(store: store, header: AnyView(sectionPicker))
+                case .installed:
+                    PluginInstalledView(store: store, header: AnyView(sectionPicker))
                 }
             }
         }
@@ -52,33 +50,25 @@ struct PluginManagementView: View {
         .task { await load() }
     }
 
+    /// 插件中心（按账号运行状态）/ 发现（插件仓库）/ 已安装（含待更新，数量为服务器真实的可更新数）。
     private var sectionPicker: some View {
         Picker("插件工作区", selection: $section) {
-            ForEach(PluginWorkspaceSection.allCases, id: \.self) { item in
-                Text(item.title).tag(item)
-                    .accessibilityIdentifier(item == .center ? "plugins.center" : "plugins.management")
-            }
+            Text("插件中心").tag(PluginWorkspaceSection.center)
+                .accessibilityIdentifier("plugins.center")
+            Text("发现").tag(PluginWorkspaceSection.discover)
+                .accessibilityIdentifier("plugins.discover")
+            Text(store.updateCount > 0 ? "已安装 · \(store.updateCount)" : "已安装").tag(PluginWorkspaceSection.installed)
+                .accessibilityIdentifier("plugins.installed")
         }
         .pickerStyle(.segmented)
         .labelsHidden()
     }
 
-    private func load() async {
-        guard !busy else { return }
-        busy = true
-        defer { busy = false }
-        do {
-            let response = try await model.request(path: "/api/feature-matrix")
-            features = response["features"]?.arrayValue ?? []
-            if let packages = try? await model.request(path: "/api/plugins/installed-overview").arrayValue {
-                installed = Dictionary(packages.compactMap { item in item["key"]?.stringValue.map { ($0, item) } }, uniquingKeysWith: { _, new in new })
-            }
-            error = nil
-        } catch { self.error = error.localizedDescription }
-    }
+    private func load() async { await store.load(model: model) }
 }
 
-private extension JSONValue {
+extension JSONValue {
+    /// 把 installed-overview 里的服务器总开关并入 feature-matrix 项，供插件详情使用。
     func withInstallState(_ install: JSONValue?) -> JSONValue {
         guard var object = objectValue else { return self }
         object["global_enabled"] = install?["global_enabled"] ?? .null
@@ -277,89 +267,11 @@ private struct PluginCenterView: View {
     }
 }
 
-// MARK: - 插件管理（安装与来源）
-
-private struct PluginSourcesView: View {
-    let features: [JSONValue]
-    let installed: [String: JSONValue]
-    let loading: Bool
-    let loadError: String?
-    let reload: () async -> Void
-    /// 可选的顶部头部（插件工作区的分段切换），作为列表第一个分组显示。
-    var header: AnyView? = nil
-    private var updates: Int { features.filter { $0["update_available"]?.boolValue == true }.count }
-
-    var body: some View {
-        List {
-            if let header {
-                Section {
-                    header
-                        .listRowBackground(Color.clear)
-                        .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
-                        .listRowSeparator(.hidden)
-                }
-                .listSectionSeparator(.hidden)
-            }
-            if let loadError { NoticeView(title: "插件安装状态读取失败", message: loadError) }
-            Section {
-                NavigationLink {
-                    ManagementFormView(action: .init(title: "检查插件更新", path: "/api/remote-plugins/check-updates", explanation: "只检查远程仓库版本，不会自动安装或更新插件。"))
-                } label: {
-                    LabeledContent {
-                        Text(updates > 0 ? "\(updates) 个可更新" : "查看远程版本").foregroundStyle(updates > 0 ? Color.orange : Color.secondary)
-                    } label: { Label("检查更新", systemImage: "arrow.triangle.2.circlepath") }
-                }
-                .accessibilityIdentifier("plugins.checkUpdates")
-            } header: { Text("安装与更新") } footer: { Text("这里管理服务器上的插件包，不会改变某个账号的插件开关或规则。") }
-            Section("来源") {
-                NavigationLink { remotePlugins } label: { Label("远程插件与更新", systemImage: "icloud.and.arrow.down") }
-                NavigationLink { repositories } label: { Label("插件仓库", systemImage: "books.vertical") }
-                NavigationLink { FileManagementView(mode: .plugin) } label: { Label("从文件安装", systemImage: "doc.badge.plus") }
-                NavigationLink { ManagementLocalPluginsView() } label: { Label("本地参考插件", systemImage: "folder") }
-            }
-            Section("已安装插件") {
-                if loading && features.isEmpty { ProgressView("正在读取安装记录…") }
-                ForEach(Array(features.enumerated()), id: \.offset) { _, feature in
-                    NavigationLink { ManagementPluginDetailView(feature: feature.withInstallState(installed[feature["key"]?.stringValue ?? ""]), initialSection: .maintenance) } label: {
-                        HStack(alignment: .top, spacing: 12) {
-                            PluginIcon(feature: feature, size: 30)
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(ManagementText.title(feature)).font(.headline).lineLimit(2)
-                                Text(PluginPresentation.source(feature)).font(.caption).foregroundStyle(.secondary)
-                                HStack(spacing: 6) {
-                                    if let enabled = installed[feature["key"]?.stringValue ?? ""]?["global_enabled"]?.boolValue {
-                                        PluginStatusBadge(title: enabled ? "服务器已启用" : "服务器已停用", symbol: enabled ? "checkmark.circle.fill" : "pause.circle", tone: enabled ? .running : .pending)
-                                    }
-                                    if feature["update_available"]?.boolValue == true {
-                                        PluginStatusBadge(title: "可更新", symbol: "arrow.up.circle", tone: .pending)
-                                    }
-                                }
-                                if let version = feature["version"]?.stringValue {
-                                    Text("当前 v\(version)" + (feature["latest_version"]?.stringValue.map { " · 最新 v\($0)" } ?? "")).font(.caption).foregroundStyle(.secondary)
-                                }
-                            }
-                        }
-                    }
-                }
-                if !loading, features.isEmpty { Label("暂无已安装插件", systemImage: "shippingbox").foregroundStyle(.secondary) }
-            }
-        }
-        .refreshable { await reload() }
-        .accessibilityIdentifier("plugins.management.screen")
-    }
-    private var remotePlugins: some View {
-        ManagementCollectionView(resource: .init(title: "远程插件", path: "/api/remote-plugins", kind: .remotePlugins, create: .init(title: "从地址安装插件", path: "/api/remote-plugins/install"), itemPath: "/api/remote-plugins/{id}", idField: "name"))
-    }
-    private var repositories: some View {
-        ManagementCollectionView(resource: .init(title: "插件仓库", path: "/api/plugin-repos", kind: .repos, create: .init(title: "添加仓库", path: "/api/plugin-repos"), itemPath: "/api/plugin-repos/{id}"))
-    }
-}
-
 // MARK: - 展示辅助
 
-private enum PluginStatusTone { case running, paused, pending, failed, unknown }
+enum PluginStatusTone { case running, paused, pending, failed, unknown }
 
-private enum PluginPresentation {
+enum PluginPresentation {
     static func status(feature: JSONValue, accountState: JSONValue?, accountScoped: Bool) -> (title: String, symbol: String, tone: PluginStatusTone) {
         if accountScoped {
             return accountStatus(enabled: accountState?["enabled"]?.boolValue == true,
@@ -396,12 +308,19 @@ private enum PluginPresentation {
         isGloballyDisabled(error) ? "插件已全局停用，账号开关不会生效。需在服务器总开关中全局启用后才会运行。" : error
     }
     static func category(_ value: String) -> String { ["automation": "自动化", "interactive": "交互", "utility": "工具"][value] ?? value }
-    static func symbol(_ feature: JSONValue) -> String {
-        switch feature["category"]?.stringValue {
+    static func symbol(_ feature: JSONValue) -> String { symbol(category: feature["category"]?.stringValue) }
+    static func symbol(category: String?) -> String {
+        switch category {
         case "interactive": "bubble.left.and.text.bubble.right"
         case "automation": "gearshape.2"
         default: "puzzlepiece.extension"
         }
+    }
+    /// 列表里的一句话来源：内置、仓库名或安装方式（不含签名等状态）。
+    static func sourceShort(_ feature: JSONValue) -> String {
+        if feature["is_builtin"]?.boolValue == true { return "内置" }
+        if let label = feature["source_label"]?.stringValue, !label.isEmpty, !["local", "remote", "repo", "git", "zip", "core"].contains(label) { return label }
+        return sourceType(feature["source_type"]?.stringValue)
     }
     static func source(_ feature: JSONValue) -> String {
         var parts: [String] = []
@@ -540,21 +459,17 @@ private enum PluginPresentation {
     }
 }
 
-private struct PluginIcon: View {
+struct PluginIcon: View {
     let feature: JSONValue
     var size: CGFloat = 28
     var body: some View {
-        Image(systemName: PluginPresentation.symbol(feature))
-            .font(.system(size: size * 0.5, weight: .medium))
-            .foregroundStyle(Color.accentColor)
-            .frame(width: size, height: size)
-            .background(Color.accentColor.opacity(0.12), in: .rect(cornerRadius: size * 0.26))
-            .accessibilityHidden(true)
+        PluginArtwork(key: feature["key"]?.stringValue ?? "", title: ManagementText.title(feature),
+                      category: feature["category"]?.stringValue, size: size)
     }
 }
 
 /// 状态徽标：同时使用图标、文字和颜色，不只靠颜色区分。
-private struct PluginStatusBadge: View {
+struct PluginStatusBadge: View {
     let title: String
     let symbol: String
     let tone: PluginStatusTone
@@ -570,7 +485,7 @@ private struct PluginStatusBadge: View {
     }
 }
 
-private struct PluginInfoRow: View {
+struct PluginInfoRow: View {
     let title: String
     let value: String
     let symbol: String
@@ -1210,7 +1125,7 @@ private struct PluginDetailHeader: View {
 
 // MARK: - 完整技术信息（全局与账号详情共用）
 
-private struct PluginTechnicalInfoView: View {
+struct PluginTechnicalInfoView: View {
     let feature: JSONValue
     let accountState: JSONValue?
     let installRecord: JSONValue?
@@ -1257,7 +1172,7 @@ private struct PluginTechnicalInfoView: View {
                 if let error = feature["last_update_check_error"]?.stringValue, !error.isEmpty {
                     Label(error, systemImage: "exclamationmark.triangle").font(.footnote).foregroundStyle(.red).textSelection(.enabled)
                 }
-            } header: { Text("版本更新") } footer: { Text("只检查不会自动更新；更新需要在「插件管理」中手动执行。") }
+            } header: { Text("版本更新") } footer: { Text("只检查不会自动更新；更新需要在「插件 → 已安装」中手动执行。") }
 
             let channels = (feature["available_channels"]?.arrayValue ?? []).compactMap(\.stringValue)
             let blocked = feature["blocked_entries"]?.arrayValue ?? []

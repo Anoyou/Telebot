@@ -9852,6 +9852,16 @@ export interface components {
                 [key: string]: unknown;
             };
             /**
+             * Category
+             * @description plugin.json 声明的分类（interactive / automation / utility）
+             */
+            category?: string | null;
+            /**
+             * Changelog
+             * @description 插件目录 CHANGELOG.md 开头最多 8 KiB（通常是最新几个版本）；未提供时为 null
+             */
+            changelog?: string | null;
+            /**
              * Description
              * @default
              */
@@ -9876,6 +9886,11 @@ export interface components {
             installed_source_url?: string | null;
             /** Installed Version */
             installed_version?: string | null;
+            /**
+             * Min Telepilot Version
+             * @description plugin.json 声明的最低 TelePilot 版本
+             */
+            min_telepilot_version?: string | null;
             /** Name */
             name: string;
             /** Permissions */

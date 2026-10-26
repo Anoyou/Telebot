@@ -195,16 +195,18 @@ actor SessionTransport: ClientTransport {
     /// 客户端先超时，用户误以为失败而重复提交（例如插件安装第二次撞上“已安装”的 409）。
     static func isSlowOperation(_ path: String, write: Bool) -> Bool {
         if ["/api/system/check-update", "/api/system/pull-update", "/api/system/update-target-options"].contains(path) { return true }
-        guard write else { return false }
         let parts = path.split(separator: "/", omittingEmptySubsequences: true)
+        // 浏览仓库内插件：首次访问会在服务器上 git clone，与 Web 一样放宽超时（GET /api/plugin-repos/{id}/plugins）。
+        if !write, parts.count == 4, parts[0] == "api", parts[1] == "plugin-repos", parts[3] == "plugins", parts[2] != "local" { return true }
+        guard write else { return false }
         guard parts.count >= 3, parts[0] == "api" else { return false }
         switch parts[1] {
         case "plugin-repos":
             // /api/plugin-repos/{id}/plugins/{name}/install、/{id}/refresh、/{id}/update-installed
             return parts.last == "install" || parts.last == "refresh" || parts.last == "update-installed"
         case "remote-plugins":
-            // /api/remote-plugins/install、/api/remote-plugins/{name}/update
-            return parts.last == "install" || parts.last == "update"
+            // /api/remote-plugins/install、/api/remote-plugins/{name}/update、/api/remote-plugins/check-updates
+            return parts.last == "install" || parts.last == "update" || parts.last == "check-updates"
         case "plugins":
             // /api/plugins/install/upload
             return parts.count == 4 && parts[2] == "install" && parts[3] == "upload"
