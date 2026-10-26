@@ -19,10 +19,20 @@ final class MemoryStore: SessionStore, @unchecked Sendable {
 
 final class MemoryAccessStore: CloudflareAccessStore, @unchecked Sendable {
     private let lock = NSLock()
-    private var values: [String: CloudflareAccessCredentials] = [:]
-    func load(origin: String) throws -> CloudflareAccessCredentials? { lock.withLock { values[origin] } }
-    func save(_ credentials: CloudflareAccessCredentials, origin: String) throws { lock.withLock { values[origin] = credentials } }
+    private var values: [String: CloudflareAccessConfig] = [:]
+    func load(origin: String) throws -> CloudflareAccessConfig? { lock.withLock { values[origin] } }
+    func save(_ config: CloudflareAccessConfig, origin: String) throws { lock.withLock { values[origin] = config } }
     func clear(origin: String) throws { lock.withLock { values[origin] = nil } }
+    func save(token: CloudflareAccessCredentials, origin: String) throws {
+        var config = try load(origin: origin) ?? CloudflareAccessConfig()
+        config.serviceToken = token
+        try save(config, origin: origin)
+    }
+    func save(session: CloudflareAccessSession, origin: String) throws {
+        var config = try load(origin: origin) ?? CloudflareAccessConfig()
+        config.session = session
+        try save(config, origin: origin)
+    }
 }
 
 struct MockReply: Sendable {
