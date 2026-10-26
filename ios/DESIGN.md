@@ -46,10 +46,19 @@
 | AI 供应商与模型 | 添加供应商 `plus`（AI 页导航栏）、模型清单顶部「从供应商同步模型」`arrow.triangle.2.circlepath`、模型详情与测试 `info.circle`、单个模型快速测试 `bolt.horizontal`、多模型对话测试 `bubble.left.and.bubble.right`、发送测试 `paperplane`、连续对话 `text.bubble`、清空本页对话 `trash`、高级设置 `slider.horizontal.3`、测活 `waveform.path.ecg`；模型能力：输入（多模态（图片）／仅文本）`photo`、工具调用 `wrench.and.screwdriver`、推理 `brain`、上下文 `text.alignleft`、输出 `text.append`、联网搜索 `globe`。能力只依据服务器字段，没有数据显示“未知” |
 | 插件发现／已安装／产品页 | 检查更新 `arrow.triangle.2.circlepath`、新功能 `sparkles`、版本历史 `clock.arrow.circlepath`、账号启用与配置 `person.2`、全局配置 `slider.horizontal.3`、安装历史 `clock`、完整技术信息 `info.circle`、权限 `lock`／未申请权限 `lock.open`、高风险能力 `exclamationmark.shield`、管理插件仓库 `books.vertical`、从 Git 地址安装 `link.badge.plus`、从文件安装 `doc.badge.plus`、远程插件记录 `icloud.and.arrow.down`、服务器总开关 `power.circle`、卸载 `trash`；结果：成功 `checkmark.circle.fill`、失败 `exclamationmark.triangle.fill`、结果待确认 `questionmark.circle.fill` |
 | Cloudflare Access | 入口 `lock.icloud`、Google 验证状态 `person.badge.shield.checkmark`、使用 Google 验证 `person.badge.key`、账号 `envelope`、到期时间 `clock`、移除 Access 登录 `rectangle.portrait.and.arrow.right`、高级开关 `key.horizontal`、Service Token 状态 `lock.icloud`、保存并验证连接 `checkmark.shield`、清除 Token `trash`、使用说明 `book`、GitHub 说明 `safari`；结果：连接正常 `checkmark.circle.fill`、未通过 `exclamationmark.triangle.fill` |
-| 助手 | 本轮详情 `chart.bar.doc.horizontal`、工具调用 `wrench.and.screwdriver`；输入栏（玻璃 composer：上方多行输入框，下方工具栏）：左下添加附件 `plus`（从照片选择 `photo`、从文件选择图片 `folder`，只列服务器支持的图片附件）、移除图片 `xmark.circle.fill`、右下发送 `arrow.up`（执行中且输入为空时为停止 `stop.fill`）、发送按钮左侧模型选择（模型短名＋`chevron.up.chevron.down`，原生 `Menu`＋`Picker`）、执行中“发送方式”菜单在「+」右侧：补充信息 `text.bubble`、插入调整说明 `arrow.turn.down.right`、加入队列 `text.badge.plus`、停止并替换 `arrow.triangle.2.circlepath`；回答底部本轮详情两行：第一行供应商 · 模型，第二行输入/输出词元 · 工具调用次数 · 重试 · 耗时，点开显示完整详情；消息操作（小号次要色图标按钮）：我的消息下复制消息 `doc.on.doc`、编辑消息 `pencil`（仅最新一轮），回答下复制回复 `doc.on.doc`（复制后短暂变 `checkmark`）、重新生成 `arrow.clockwise`（仅最新一轮，需确认）；正在生成的回答不显示 |
+| 助手 | 本轮详情 `chart.bar.doc.horizontal`、工具调用 `wrench.and.screwdriver`；输入栏（玻璃 composer：上方多行输入框，下方工具栏）：左下添加附件 `plus`（打开浮层时旋转为“×”；浮层：从照片选择 `photo`、从文件选择图片 `folder`，只列服务器支持的图片附件）、移除图片 `xmark.circle.fill`、右下发送 `arrow.up`（执行中且输入为空时为停止 `stop.fill`）、发送按钮左侧模型选择（模型短名＋`chevron.up.chevron.down`；浮层：自动 `sparkles`、各模型 `cpu`，当前项 `checkmark`）、执行中“发送方式”在「+」右侧（浮层）：补充信息 `text.bubble`、插入调整说明 `arrow.turn.down.right`、加入队列 `text.badge.plus`、停止并替换 `arrow.triangle.2.circlepath`；三者共用「输入栏浮层」组件，见「材质」；回答底部本轮详情两行：第一行供应商 · 模型，第二行输入/输出词元 · 工具调用次数 · 重试 · 耗时，点开显示完整详情；消息操作（图标＋文字，见下方「消息操作按钮」）：我的消息下复制 `doc.on.doc`、编辑 `pencil`（仅最新一轮），回答下复制 `doc.on.doc`（复制后短暂变 `checkmark`）、重新生成 `arrow.clockwise`（仅最新一轮，需确认）；正在生成的回答不显示 |
 | Skills | Skills 入口 `sparkles.rectangle.stack`（助手页右上角工具栏按钮，AI → 配置 → Skills 也可进入）、安装 `plus`／`square.and.arrow.down`、编辑 SKILL.md `square.and.pencil`、查看内容 `doc.text`、与默认版本差异 `plus.forwardslash.minus`、展开未改动内容 `arrow.up.and.down`、恢复默认 `arrow.uturn.backward`、保留我的修改 `checkmark.circle`、从源地址更新 `arrow.down.circle`、卸载 `trash`、对系统 Agent 启用 `sparkles`、对插件启用 `puzzlepiece.extension`；来源：TelePilot 内置 `shippingbox`、插件内置 `puzzlepiece.extension`、GitHub `chevron.left.forwardslash.chevron.right`、其它 `doc.text` |
 
 新增页面沿用上表；表中没有的概念先在本节补充符号再使用，避免同一含义出现多个图标。
+
+### 消息操作按钮（第七轮，全 App 统一）
+
+参考 Codex：消息下方一行轻量操作，不放进气泡。
+
+- 原生 `Button(标题, systemImage:)`，统一 `.buttonStyle(.plain)` ＋ `AssistantMessageActionStyle`（`LabelStyle`：SF Symbol 固定 20pt 宽＋文字，图文间距 5pt，整块至少 44pt 高、可点），`.font(.footnote)`、`.foregroundStyle(.secondary)`，无边框、无背景；按钮之间间距 20pt（`AssistantMessageActionStyle.spacing`）。按钮没有水平内边距，按钮行边缘就是图标／文字边缘。
+- 可见文字用短词（复制、编辑、重新生成），无障碍标签用完整说法（复制消息／复制回复、编辑消息、重新生成），标识 `assistant.message.copy`／`assistant.message.edit`／`assistant.reply.copy`／`assistant.reply.regenerate`。
+- 我的消息：贴右的气泡（角色标签在气泡上方），操作行在气泡外下方，右边缘与气泡右边缘对齐。助手回答：操作行在正文与本轮详情下方，左边缘与正文左边缘对齐。
+- 复制后只把图标换成 `checkmark` 1.5 秒（文字不变，按钮行不跳动）并有成功触感，VoiceOver 读“已复制”。
 
 ## 材质
 
@@ -58,7 +67,8 @@
 允许的玻璃用法（用户明确要求，仅限以下原生 API，均为 iOS 26 SDK）：
 
 - **页面顶部分段切换**：原生 `Picker` + `.pickerStyle(.segmented)`，系统默认 `controlSize`，分段控件本身就是 Liquid Glass 控件；不再包白色卡片、实色背景条或额外 `glassEffect`，避免玻璃叠玻璃。位置与间距见下节「分段切换与筛选」。**禁止**挂在大标题页面的 `.safeAreaBar(edge: .top)` 上——大标题折叠/展开与安全区栏顶部插入互相改变布局，滑到顶部会持续抖动。
-- **例外：Agent 输入栏**（用户第五轮明确要求）：助手底部 composer 整体是一个 `.regular` 圆角（26pt）玻璃容器——第六轮起玻璃画在背景层（`.background { Color.clear.glassEffect(.regular, in: .rect(cornerRadius: 26)) }`），不再用 `.glassEffect` 把含 `Menu` 的内容包进玻璃层（菜单收回动画会闪烁、错位）；输入栏内的「+」与模型 `Menu` 标签统一用 `composerMenuLabel(width:)` 固定尺寸（类似“信息”与 ChatGPT 的底部输入栏），通过 `safeAreaInset(edge: .bottom)` 贴底部安全区并随键盘上移；容器内的按钮不再叠加玻璃。助手页的“最小化”悬浮圆按钮沿用 `.glassEffect(.regular.interactive(), in: .circle)`。
+- **例外：Agent 输入栏**（用户第五轮明确要求）：助手底部 composer 整体是一个 `.regular` 圆角（26pt）玻璃容器——玻璃画在背景层（`.background { Color.clear.glassEffect(.regular, in: .rect(cornerRadius: 26)) }`），通过 `safeAreaInset(edge: .bottom)` 贴底部安全区并随键盘上移；容器内的按钮不再叠加玻璃。「+」与模型按钮是普通 `Button`，标签统一用 `composerMenuLabel(width:)` 固定尺寸。
+- **输入栏浮层**（第七轮，参考 Grok；「+」附件、模型选择、执行中的发送方式共用 `AssistantComposerPanelHost`＋`AssistantPanelRow`）：**输入栏里不再使用系统 `Menu`**——Menu 从玻璃输入栏里的标签“变形”出菜单、收回时再变回去，第六轮固定标签尺寸、玻璃移到背景层后仍有错位。现在按钮点按只切换 `AssistantComposerPanelState.open`，卡片由挂在对话区域（`safeAreaInset` 之前）的 `.overlay` 绘制：底边落在输入栏上方，与输入栏没有任何几何关联（不在玻璃容器内、不参与布局、没有 matchedGeometry）。卡片：`.regularMaterial` 圆角 22pt＋细描边＋阴影，宽 260pt（模型 300pt），附件／发送方式靠左、模型靠右；行为“图标＋标题＋一行小字说明＋当前项对勾”，至少 48pt 高；出现时卡片从按钮一侧淡入＋缩放（`.snappy`），行按顺序错峰淡入、从按钮一侧轻微滑入；对话区域加 `.ultraThinMaterial` 模糊遮罩，点遮罩或再点按钮收起，选中后自动收起；打开时「+」旋转 45° 变成“×”（只旋转，不改尺寸）。与 Grok 的差异：打开浮层**不收键盘**，因为收键盘会让输入栏随键盘下移（用户要求展开／收起时输入栏不位移）；点进输入框会收起浮层。减少动态效果时只淡入淡出。标识：`assistant.panel.attach`／`assistant.panel.model`／`assistant.panel.sendMode`、遮罩 `assistant.panel.dismiss`、行 `assistant.attach.photos`／`assistant.attach.file`／`assistant.model.option.auto`／`assistant.model.option.<序号>`／`assistant.sendMode.option.<方式>`。助手页的“最小化”悬浮圆按钮沿用 `.glassEffect(.regular.interactive(), in: .circle)`。
 - 其余卡片、列表行、表单仍使用系统分组背景，不手工调用 `glassEffect(_:in:)`。筛选不再使用 `.buttonStyle(.glass)` 胶囊行（第五轮改为原生筛选菜单）。
 
 ## 分段切换与筛选（全 App 统一）

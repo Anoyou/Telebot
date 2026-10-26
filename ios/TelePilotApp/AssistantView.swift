@@ -17,6 +17,7 @@ struct AssistantView: View {
     @State private var userScrolling = false
     @State private var sidebarVisible = true
     @FocusState private var composerFocused: Bool
+    @State private var composerPanel = AssistantComposerPanelState()
     @AppStorage("telepilot.assistant.minimizeOnLeading") private var minimizeOnLeading = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     private let initialID: String?
@@ -239,9 +240,13 @@ struct AssistantView: View {
             }
             if store.runActive { runBar }
         }
+        // 输入栏浮层（「+」附件、模型、发送方式）：挂在 safeAreaInset 之前，内容区的底部安全区已包含输入栏，
+        // 卡片底边正好落在输入栏上方；遮罩只覆盖对话区域，不覆盖输入栏与导航栏。浮层与输入栏没有几何关联。
+        .overlay { AssistantComposerPanelHost(store: store, panel: composerPanel) }
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            AssistantComposer(store: store, focused: $composerFocused)
+            AssistantComposer(store: store, panel: composerPanel, focused: $composerFocused)
         }
+        .onChange(of: store.sessionID) { _, _ in composerPanel.close(animated: false) }
         // Agent 页隐藏底部 Dock，把空间留给对话；用悬浮的最小化按钮返回。
         .toolbarVisibility(embedded ? .hidden : .automatic, for: .tabBar)
     }
@@ -371,75 +376,108 @@ private struct AssistantMessageView: View, Equatable {
     @State private var confirmRegenerate = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Label(AssistantPresentation.status(role), systemImage: role == "user" ? "person.crop.circle" : role == "tool" ? "wrench.and.screwdriver" : "sparkles")
-                    .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+        if role == "user" {
+            // 我的消息（参考 Codex）：角色标签在上，气泡贴右，操作行在气泡外下方、与气泡右边缘对齐。
+            VStack(alignment: .trailing, spacing: 6) {
+                header
+                VStack(alignment: .leading, spacing: 10) { content }
+                    .padding(14)
+                    .background(Color.accentColor.opacity(0.08), in: .rect(cornerRadius: 16))
+                    .accessibilityElement(children: .contain)
+                    .accessibilityIdentifier("assistant.message.bubble")
+                messageActions
+                    .padding(.top, 2)
+            }
+            .padding(.leading, 32)
+            .frame(maxWidth: .infinity, alignment: .trailing)
+        } else {
+            // 回答：正文从左边缘开始，操作行在正文（与本轮详情）下方、与正文左边缘对齐。
+            VStack(alignment: .leading, spacing: 10) {
+                header
+                content
+                if role != "user" {
+                    AssistantTurnDetailsView(usage: item["usage"], tools: tools)
+                }
+                if role == "assistant" { messageActions.padding(.top, 2) }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private var header: some View {
+        HStack {
+            if role == "user" {
+                if item.text("run_status") == "failed" {
+                    Text("未成功").font(.caption).foregroundStyle(.red)
+                }
+                Spacer(minLength: 0)
+            }
+            Label(AssistantPresentation.status(role), systemImage: role == "user" ? "person.crop.circle" : role == "tool" ? "wrench.and.screwdriver" : "sparkles")
+                .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+            if role != "user" {
                 Spacer()
                 if item.text("run_status") == "failed" {
                     Text("未成功").font(.caption).foregroundStyle(.red)
                 }
             }
-            if role == "tool" {
-                // 正常情况下工具消息已并入回答详情；保留兜底展示，避免未知顺序的数据被吞掉。
-                AssistantToolResultView(content: item["content"] ?? [:])
-                let images = item["content"]?["images"]?.arrayValue ?? []
-                if !images.isEmpty { AssistantImagesView(images: images, owner: item.id) }
-            } else {
-                if !text.isEmpty {
-                    Group {
-                        if role == "user" {
-                            Text(text).textSelection(.enabled)
-                        } else if let blocks = rendered?.blocks {
-                            AssistantRenderedMarkdownView(blocks: blocks)
-                        } else {
-                            AssistantMarkdownView(text: text)
-                        }
-                    }
-                        .privacySensitive()
-                        .contextMenu {
-                            Button("复制", systemImage: "doc.on.doc") { UIPasteboard.general.setItems([[UIPasteboard.typeAutomatic: text]], options: [.localOnly: true, .expirationDate: Date().addingTimeInterval(120)]) }
-                            ShareLink(item: text) { Label("分享", systemImage: "square.and.arrow.up") }
-                        }
-                }
-                let reasoning = rendered?.reasoning ?? AssistantRedaction.text(item["content"]?["reasoning"]?.stringValue ?? "")
-                if !reasoning.isEmpty {
-                    DisclosureGroup("推理过程") { Text(reasoning).font(.footnote).foregroundStyle(.secondary).textSelection(.enabled).privacySensitive() }
-                }
-                let images = item["content"]?["images"]?.arrayValue ?? item["content"]?["attachments"]?.arrayValue ?? []
-                if !images.isEmpty { AssistantImagesView(images: images, owner: item.id) }
-                // 工具产出的图片（例如截图）属于回答内容，直接显示在回答里。
-                let toolImages = tools.flatMap { $0["content"]?["images"]?.arrayValue ?? [] }
-                if !toolImages.isEmpty { AssistantImagesView(images: toolImages, owner: item.id + "-tools") }
-            }
-            if role == "user" && item.text("run_status") == "failed" {
-                Text("这条消息执行失败，可以查看任务轨迹了解原因。").font(.caption).foregroundStyle(.secondary)
-                Button("重试这条消息", systemImage: "arrow.clockwise", action: retry).font(.caption)
-            }
-            if role != "user" {
-                AssistantTurnDetailsView(usage: item["usage"], tools: tools)
-            }
-            if role == "user" || role == "assistant" { messageActions }
         }
-        .padding(role == "user" ? 14 : 0)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(role == "user" ? Color.accentColor.opacity(0.08) : .clear, in: .rect(cornerRadius: 16))
     }
 
-    /// 消息下方的操作：小号、次要色的原生按钮（只显示图标，带无障碍标签）。
-    /// - 我的消息：复制消息、编辑消息（编辑后重新生成最新一轮）。
-    /// - 助手回答：复制回复（正文 Markdown，不含本轮详情与工具卡片）、重新生成（需确认，已执行的外部操作不会撤销）。
+    @ViewBuilder private var content: some View {
+        if role == "tool" {
+            // 正常情况下工具消息已并入回答详情；保留兜底展示，避免未知顺序的数据被吞掉。
+            AssistantToolResultView(content: item["content"] ?? [:])
+            let images = item["content"]?["images"]?.arrayValue ?? []
+            if !images.isEmpty { AssistantImagesView(images: images, owner: item.id) }
+        } else {
+            if !text.isEmpty {
+                Group {
+                    if role == "user" {
+                        Text(text).textSelection(.enabled)
+                    } else if let blocks = rendered?.blocks {
+                        AssistantRenderedMarkdownView(blocks: blocks)
+                    } else {
+                        AssistantMarkdownView(text: text)
+                    }
+                }
+                    .privacySensitive()
+                    .contextMenu {
+                        Button("复制", systemImage: "doc.on.doc") { UIPasteboard.general.setItems([[UIPasteboard.typeAutomatic: text]], options: [.localOnly: true, .expirationDate: Date().addingTimeInterval(120)]) }
+                        ShareLink(item: text) { Label("分享", systemImage: "square.and.arrow.up") }
+                    }
+            }
+            let reasoning = rendered?.reasoning ?? AssistantRedaction.text(item["content"]?["reasoning"]?.stringValue ?? "")
+            if !reasoning.isEmpty {
+                DisclosureGroup("推理过程") { Text(reasoning).font(.footnote).foregroundStyle(.secondary).textSelection(.enabled).privacySensitive() }
+            }
+            let images = item["content"]?["images"]?.arrayValue ?? item["content"]?["attachments"]?.arrayValue ?? []
+            if !images.isEmpty { AssistantImagesView(images: images, owner: item.id) }
+            // 工具产出的图片（例如截图）属于回答内容，直接显示在回答里。
+            let toolImages = tools.flatMap { $0["content"]?["images"]?.arrayValue ?? [] }
+            if !toolImages.isEmpty { AssistantImagesView(images: toolImages, owner: item.id + "-tools") }
+        }
+        if role == "user" && item.text("run_status") == "failed" {
+            Text("这条消息执行失败，可以查看任务轨迹了解原因。").font(.caption).foregroundStyle(.secondary)
+            Button("重试这条消息", systemImage: "arrow.clockwise", action: retry).font(.caption)
+        }
+    }
+
+    /// 消息下方的操作行（第七轮，参考 Codex）：图标＋文字的原生 `Button`＋`Label`，统一 `.buttonStyle(.plain)`、
+    /// 次要色、无边框无背景；每个按钮至少 44pt 高，按钮之间间距 20pt；不放进气泡里。
+    /// - 我的消息：复制、编辑（编辑后重新生成最新一轮），整行与气泡右边缘对齐。
+    /// - 助手回答：复制（正文 Markdown，不含本轮详情与工具卡片）、重新生成（需确认），整行与正文左边缘对齐。
     /// 正在生成的回答在 `AssistantLiveReplyView` 里，不显示这些按钮。
     @ViewBuilder private var messageActions: some View {
         let isUser = role == "user"
-        HStack(spacing: 0) {
+        HStack(spacing: AssistantMessageActionStyle.spacing) {
             if !text.isEmpty {
-                Button(isUser ? "复制消息" : "复制回复", systemImage: copied ? "checkmark" : "doc.on.doc") { copy() }
+                // 复制后只把图标短暂换成对勾（文字不变，按钮行不跳动），并有轻触反馈；VoiceOver 读“已复制”。
+                Button("复制", systemImage: copied ? "checkmark" : "doc.on.doc") { copy() }
                     .accessibilityLabel(copied ? "已复制" : isUser ? "复制消息" : "复制回复")
                     .accessibilityIdentifier(isUser ? "assistant.message.copy" : "assistant.reply.copy")
             }
             if isUser && mayEdit {
-                Button("编辑消息", systemImage: "pencil", action: edit)
+                Button("编辑", systemImage: "pencil", action: edit)
                     .accessibilityLabel("编辑消息")
                     .accessibilityIdentifier("assistant.message.edit")
             }
@@ -452,13 +490,10 @@ private struct AssistantMessageView: View, Equatable {
                     } message: { Text("会用当前选择的模型重新回答最新一轮问题并替换现有回答；已经执行的外部操作不会撤销，需要确认的操作仍会请求确认。") }
             }
         }
-        .labelStyle(.iconOnly)
-        .buttonStyle(.borderless)
-        .font(.caption)
+        .labelStyle(AssistantMessageActionStyle())
+        .buttonStyle(.plain)
+        .font(.footnote)
         .foregroundStyle(.secondary)
-        .controlSize(.small)
-        .frame(minHeight: 32)
-        .padding(.leading, -8)
         .sensoryFeedback(.success, trigger: copyCount)
     }
 
@@ -471,6 +506,21 @@ private struct AssistantMessageView: View, Equatable {
             try? await Task.sleep(for: .seconds(1.5))
             if copyCount == token { copied = false }
         }
+    }
+}
+
+/// 消息操作按钮的统一标签样式：SF Symbol ＋ 文字，间距 5pt，整块至少 44pt 高、可点；
+/// 按钮自身没有水平内边距，所以按钮行的左右边缘就是第一个／最后一个按钮的图标或文字边缘，能与气泡、正文精确对齐。
+struct AssistantMessageActionStyle: LabelStyle {
+    static let spacing: CGFloat = 20
+
+    func makeBody(configuration: Configuration) -> some View {
+        HStack(spacing: 5) {
+            configuration.icon.imageScale(.medium).frame(width: 20)
+            configuration.title.lineLimit(1)
+        }
+        .frame(minHeight: 44)
+        .contentShape(.rect)
     }
 }
 

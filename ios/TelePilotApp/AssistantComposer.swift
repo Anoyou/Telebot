@@ -11,23 +11,34 @@ struct AssistantAttachment: Identifiable {
 
 /// 助手底部输入栏：原生 Liquid Glass 圆角容器（参考“信息”与 ChatGPT 的底部 composer）。
 /// - 上方是多行 `TextField`（1–8 行自动增高）；下方一行工具栏：左下「+」添加附件，
-///   右下发送按钮（任务执行中且输入为空时变为停止），发送按钮左侧是本轮模型选择（原生 `Menu` + `Picker`，显示模型短名）。
-/// - 任务执行中，工具栏左侧在「+」旁显示“发送方式”菜单（加入队列／插入调整／补充信息／停止并替换）。
+///   右下发送按钮（任务执行中且输入为空时变为停止），发送按钮左侧是本轮模型选择（显示模型短名）。
+/// - 任务执行中，工具栏左侧在「+」旁显示“发送方式”（加入队列／插入调整／补充信息／停止并替换）。
+/// - 第七轮起「+」、模型、发送方式都是普通 `Button`，点按后由 `AssistantComposerPanelHost` 在输入栏上方弹出浮层卡片
+///   （参考 Grok：从按钮一侧向上淡入＋缩放），不再用系统 `Menu`：Menu 收回时会把菜单“变形”回玻璃输入栏里的标签，
+///   两轮修补（固定标签尺寸、玻璃移到背景层）都没能消除收回时的错位。
 /// - 容器用 `glassEffect(.regular, in: .rect(cornerRadius:))`，这是 DESIGN.md「材质」里明确允许的例外；
 ///   通过 `safeAreaInset(edge: .bottom)` 挂在对话下方，贴底部安全区并随键盘上移。
 /// - 草稿与附件是本视图自己的状态：打字只重绘输入栏，不会让上方的对话历史重新计算。
 struct AssistantComposer: View {
     @Environment(AppModel.self) private var model
     @Bindable var store: AssistantStore
+    @Bindable var panel: AssistantComposerPanelState
     var focused: FocusState<Bool>.Binding
     @State private var draft = ""
-    @State private var sendMode = "message"
     @State private var photos: [PhotosPickerItem] = []
+    @State private var pickingPhotos = false
     @State private var attachments: [AssistantAttachment] = []
     @State private var importingImage = false
     @State private var loadingImage = false
     @State private var confirmStop = false
     @State private var confirmReplace = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    /// 发送方式放在浮层状态里（浮层里的选择直接写入），输入栏只读取。
+    private var sendMode: String {
+        get { panel.sendMode }
+        nonmutating set { panel.sendMode = newValue }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -54,7 +65,19 @@ struct AssistantComposer: View {
         .padding(.horizontal, 12).padding(.top, 6).padding(.bottom, 8)
         .frame(maxWidth: 900)
         .frame(maxWidth: .infinity)
-        .onChange(of: store.runActive) { _, active in if !active { sendMode = "message" } }
+        .onChange(of: store.runActive) { _, active in
+            if !active {
+                sendMode = "message"
+                if panel.open == .sendMode { panel.open = nil }
+            }
+        }
+        // 点进输入框（开始打字）时收起浮层；浮层打开时不收键盘，避免输入栏随键盘移动。
+        .onChange(of: focused.wrappedValue) { _, isFocused in
+            if isFocused && panel.open != nil { panel.close(animated: !reduceMotion) }
+        }
+        .onChange(of: panel.photoRequest) { _, _ in pickingPhotos = true }
+        .onChange(of: panel.fileRequest) { _, _ in importingImage = true }
+        .photosPicker(isPresented: $pickingPhotos, selection: $photos, maxSelectionCount: max(1, 4 - attachments.count), matching: .images)
         .onChange(of: photos) { _, items in
             Task {
                 loadingImage = true
@@ -116,47 +139,44 @@ struct AssistantComposer: View {
         }
     }
 
-    /// 左下角「+」：只列出服务器真实支持的附件（图片，最多 4 张）；没有的能力不放进菜单。
+    /// 左下角「+」：点按在输入栏上方弹出附件浮层（只列出服务器真实支持的附件：图片，最多 4 张）。
+    /// 打开时「+」旋转成「×」（只是旋转，不改变尺寸与位置）。
     private var attachMenu: some View {
-        Menu {
-            PhotosPicker(selection: $photos, maxSelectionCount: max(1, 4 - attachments.count), matching: .images) { Label("从照片选择", systemImage: "photo") }
-            Button("从文件选择图片", systemImage: "folder") { importingImage = true }
-        } label: {
+        let isOpen = panel.open == .attach
+        return Button { panel.toggle(.attach, animated: !reduceMotion) } label: {
             Image(systemName: "plus")
                 .font(.system(size: 17, weight: .semibold))
                 .foregroundStyle(.primary)
+                .rotationEffect(.degrees(isOpen ? 45 : 0))
+                // 外层 composerMenuLabel 关掉了隐式动画；这里单独给旋转一个动画（只旋转图标，按钮尺寸不变）。
+                .animation(reduceMotion ? nil : AssistantComposerPanelState.animation, value: isOpen)
                 .composerMenuLabel(width: 44)
         }
+        .buttonStyle(.plain)
         .fixedSize()
         .disabled(attachments.count >= 4 || loadingImage || readOnlyReason != nil)
         .accessibilityLabel("添加图片")
         .accessibilityHint("可从照片或文件选择图片，最多 4 张")
+        .accessibilityValue(isOpen ? "已展开" : "")
         .accessibilityIdentifier("assistant.attach")
     }
 
     /// 本轮模型：独立的小视图（见 `AssistantModelMenu`），选择变化只重绘它自己。
     private var modelMenu: some View {
-        AssistantModelMenu(store: store)
+        AssistantModelMenu(store: store, panel: panel)
     }
 
     private var sendModeMenu: some View {
-        Menu {
-            Section("任务执行中，新消息如何处理") {
-                Picker("发送方式", selection: $sendMode) {
-                    Label("加入队列（当前任务结束后执行）", systemImage: "text.badge.plus").tag("message")
-                    Label("插入调整说明（当前任务参考）", systemImage: "arrow.turn.down.right").tag("steer")
-                    if store.runStatus == "waiting_input" { Label("补充信息（回答助手的提问）", systemImage: "text.bubble").tag("input") }
-                    Label("停止并替换（需确认）", systemImage: "arrow.triangle.2.circlepath").tag("replace")
-                }
-            }
-        } label: {
+        Button { panel.toggle(.sendMode, animated: !reduceMotion) } label: {
             Label(sendModeTitle, systemImage: sendModeSymbol)
                 .font(.footnote.weight(.medium))
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
                 .frame(minHeight: 44)
                 .contentShape(.rect)
+                .transaction { $0.animation = nil }
         }
+        .buttonStyle(.plain)
         .accessibilityLabel("发送方式：\(sendModeTitle)")
         .accessibilityIdentifier("assistant.sendMode")
     }
@@ -236,23 +256,9 @@ struct AssistantComposer: View {
         }
     }
 
-    private var sendModeTitle: String {
-        switch sendMode {
-        case "steer": "插入调整"
-        case "input": "补充信息"
-        case "replace": "停止并替换"
-        default: "加入队列"
-        }
-    }
+    private var sendModeTitle: String { AssistantComposerPanelState.sendModeTitle(sendMode) }
 
-    private var sendModeSymbol: String {
-        switch sendMode {
-        case "steer": "arrow.turn.down.right"
-        case "input": "text.bubble"
-        case "replace": "arrow.triangle.2.circlepath"
-        default: "text.badge.plus"
-        }
-    }
+    private var sendModeSymbol: String { AssistantComposerPanelState.sendModeSymbol(sendMode) }
 
     /// 执行中且输入为空时，右下角按钮是“停止”；输入了内容则仍是发送（按“发送方式”处理）。
     private var showsStop: Bool { store.runActive && trimmedDraft.isEmpty && attachments.isEmpty }
@@ -298,62 +304,37 @@ struct AssistantComposer: View {
     }
 }
 
-/// 输入栏的本轮模型选择：原生 `Menu { Picker }`，标签是固定宽度的“模型短名 + 上下箭头”。
+/// 输入栏的本轮模型选择按钮：固定宽度的“模型短名 + 上下箭头”，点按弹出模型浮层（`AssistantComposerPanelHost`）。
 ///
-/// 第五轮的写法在菜单收回时会闪烁/错位约一秒：标签宽度随所选模型变化（`maxWidth: 170`），选择在菜单收回动画
-/// 期间写入 `AssistantStore`，整个输入栏（玻璃容器）随之重算布局，系统把菜单“收回”到一个正在移动、变宽的标签上。
-/// 现在：
 /// - 标签宽度固定（`labelWidth`），文字单行居中截断，选择变化不改变任何布局；文字切换不做动画。
 /// - 选中值先落在本视图的 `selection`，界面只读它；写回 store 的 `modelIndex` 不会让其它视图重绘
-///   （输入栏不再读取 `modelIndex`，发送时才通过 `selectedModel` 读取）。
-/// - 选项用“供应商 ID + 模型名”作稳定 ID，服务器能力刷新时不会重建菜单项。
+///   （输入栏不读取 `modelIndex`，发送时才通过 `selectedModel` 读取）。
 struct AssistantModelMenu: View {
     @Bindable var store: AssistantStore
+    @Bindable var panel: AssistantComposerPanelState
     @State private var selection = -1
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     static let labelWidth: CGFloat = 116
-
-    private struct Option: Identifiable {
-        let index: Int
-        let id: String
-        let title: String
-    }
-
-    private var options: [Option] {
-        store.models.enumerated().map { index, item in
-            Option(index: index,
-                   id: "\(item["provider_id"]?.intValue ?? 0)|\(item.assistantText("model"))",
-                   title: "\(item.assistantText("provider_name")) · \(item.assistantText("model"))")
-        }
-    }
 
     var body: some View {
         let models = store.models
-        Menu {
-            Picker("本轮模型", selection: $selection) {
-                Text("自动，使用服务器配置").tag(-1)
-                ForEach(options) { option in
-                    Text(option.title).tag(option.index)
-                }
-            }
-        } label: {
+        Button { panel.toggle(.model, animated: !reduceMotion) } label: {
             HStack(spacing: 3) {
                 Text(Self.shortName(models: models, index: selection))
                     .lineLimit(1)
                     .truncationMode(.middle)
-                    .animation(nil, value: selection)
                 Image(systemName: "chevron.up.chevron.down").imageScale(.small)
             }
             .font(.subheadline.weight(.medium))
             .foregroundStyle(.secondary)
             .composerMenuLabel(width: Self.labelWidth)
         }
+        .buttonStyle(.plain)
         .fixedSize()
         .accessibilityLabel("本轮模型：\(Self.fullName(models: models, index: selection))")
+        .accessibilityValue(panel.open == .model ? "已展开" : "")
         .accessibilityIdentifier("assistant.model")
         .onAppear { selection = store.modelIndex }
-        .onChange(of: selection) { _, value in
-            if store.modelIndex != value { store.modelIndex = value }
-        }
         .onChange(of: store.modelIndex) { _, value in
             if selection != value { selection = value }
         }
@@ -371,9 +352,244 @@ struct AssistantModelMenu: View {
     }
 }
 
+// MARK: - 输入栏浮层（第七轮，参考 Grok）
+
+/// 输入栏上方的浮层：「+」附件、本轮模型、发送方式三个选择器共用。
+enum AssistantComposerPanel: Hashable {
+    case attach, model, sendMode
+}
+
+/// 浮层状态：由 `AssistantView` 持有，输入栏（按钮）与浮层宿主（卡片）共享。
+/// 附件动作通过递增请求计数交给输入栏执行（系统照片选择器与文件选择器挂在输入栏上）。
+@MainActor @Observable
+final class AssistantComposerPanelState {
+    var open: AssistantComposerPanel?
+    var sendMode = "message"
+    var photoRequest = 0
+    var fileRequest = 0
+
+    static let animation: Animation = .snappy(duration: 0.26, extraBounce: 0.04)
+
+    func toggle(_ panel: AssistantComposerPanel, animated: Bool) {
+        withAnimation(animated ? Self.animation : nil) { open = open == panel ? nil : panel }
+    }
+
+    func close(animated: Bool) {
+        withAnimation(animated ? Self.animation : nil) { open = nil }
+    }
+
+    static func sendModeTitle(_ mode: String) -> String {
+        switch mode {
+        case "steer": "插入调整"
+        case "input": "补充信息"
+        case "replace": "停止并替换"
+        default: "加入队列"
+        }
+    }
+
+    static func sendModeSymbol(_ mode: String) -> String {
+        switch mode {
+        case "steer": "arrow.turn.down.right"
+        case "input": "text.bubble"
+        case "replace": "arrow.triangle.2.circlepath"
+        default: "text.badge.plus"
+        }
+    }
+}
+
+/// 浮层宿主：挂在助手页（`safeAreaInset` 之后的 `.overlay`），因此卡片底边正好落在输入栏上方，
+/// 且与输入栏没有任何几何关联（不在玻璃容器内、不参与输入栏布局、没有 matchedGeometry），
+/// 展开／收起只有卡片自己淡入＋缩放，输入栏、按钮、文本框都不移动。
+/// - 点卡片外（对话区域）收起；附件卡片从左下角展开，模型与发送方式卡片从右下／左下按钮一侧展开。
+/// - 打开时不收键盘：收键盘会让输入栏随键盘下移。
+struct AssistantComposerPanelHost: View {
+    @Bindable var store: AssistantStore
+    @Bindable var panel: AssistantComposerPanelState
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        ZStack(alignment: .bottom) {
+            if panel.open != nil {
+                // 参考 Grok：对话区域模糊变暗，浮层浮在上面。
+                Rectangle().fill(.ultraThinMaterial)
+                    .overlay(Color.black.opacity(0.08))
+                    .contentShape(.rect)
+                    .onTapGesture { panel.close(animated: !reduceMotion) }
+                    .accessibilityElement()
+                    .accessibilityLabel("收起")
+                    .accessibilityAddTraits(.isButton)
+                    .accessibilityAction { panel.close(animated: !reduceMotion) }
+                    .accessibilityIdentifier("assistant.panel.dismiss")
+                    .transition(.opacity)
+            }
+            if let open = panel.open {
+                card(open)
+                    .frame(maxWidth: 900, alignment: alignment(open))
+                    .frame(maxWidth: .infinity, alignment: alignment(open))
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 6)
+                    .transition(reduceMotion ? .opacity : .scale(scale: 0.86, anchor: anchor(open)).combined(with: .opacity))
+                    .id(open)
+            }
+        }
+    }
+
+    private func alignment(_ open: AssistantComposerPanel) -> Alignment {
+        open == .model ? .bottomTrailing : .bottomLeading
+    }
+
+    private func anchor(_ open: AssistantComposerPanel) -> UnitPoint {
+        open == .model ? .bottomTrailing : .bottomLeading
+    }
+
+    @ViewBuilder private func card(_ open: AssistantComposerPanel) -> some View {
+        let rows: AnyView = switch open {
+        case .attach: AnyView(attachRows)
+        case .model: AnyView(modelRows)
+        case .sendMode: AnyView(sendModeRows)
+        }
+        ViewThatFits(in: .vertical) {
+            rows
+            ScrollView { rows }.frame(maxHeight: 360)
+        }
+        .padding(.vertical, 6)
+        .frame(width: open == .model ? 300 : 260)
+        .background(.regularMaterial, in: .rect(cornerRadius: 22))
+        .overlay { RoundedRectangle(cornerRadius: 22).strokeBorder(.separator.opacity(0.6), lineWidth: 0.5) }
+        .shadow(color: .black.opacity(0.14), radius: 18, y: 6)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier(open == .attach ? "assistant.panel.attach" : open == .model ? "assistant.panel.model" : "assistant.panel.sendMode")
+        .accessibilityAction(.escape) { panel.close(animated: !reduceMotion) }
+    }
+
+    // MARK: 附件
+
+    /// 目前服务器只支持图片附件；以后新增类型在这里加一行。
+    private var attachRows: some View {
+        VStack(spacing: 0) {
+            AssistantPanelRow(title: "从照片选择", systemImage: "photo", identifier: "assistant.attach.photos", order: 0, slideFrom: -1) {
+                panel.close(animated: !reduceMotion)
+                panel.photoRequest += 1
+            }
+            AssistantPanelRow(title: "从文件选择图片", systemImage: "folder", identifier: "assistant.attach.file", order: 1, slideFrom: -1) {
+                panel.close(animated: !reduceMotion)
+                panel.fileRequest += 1
+            }
+        }
+    }
+
+    // MARK: 模型
+
+    private var modelRows: some View {
+        let models = store.models
+        let current = store.modelIndex
+        return VStack(spacing: 0) {
+            AssistantPanelRow(title: "自动", subtitle: "使用服务器配置", systemImage: "sparkles",
+                              selected: !models.indices.contains(current),
+                              accessibilityLabel: "自动，使用服务器配置",
+                              identifier: "assistant.model.option.auto", order: 0, slideFrom: 1) { select(-1) }
+            ForEach(Array(models.enumerated()), id: \.offset) { index, item in
+                let name = item.assistantText("model")
+                let provider = item.assistantText("provider_name")
+                AssistantPanelRow(title: AssistantModelMenu.shortName(models: models, index: index),
+                                  subtitle: "\(provider) · \(name)", systemImage: "cpu",
+                                  selected: current == index,
+                                  accessibilityLabel: "\(provider) · \(name)",
+                                  identifier: "assistant.model.option.\(index)", order: index + 1, slideFrom: 1) { select(index) }
+            }
+        }
+    }
+
+    private func select(_ index: Int) {
+        if store.modelIndex != index { store.modelIndex = index }
+        panel.close(animated: !reduceMotion)
+    }
+
+    // MARK: 发送方式
+
+    private var sendModeRows: some View {
+        let modes = ["message", "steer"] + (store.runStatus == "waiting_input" ? ["input"] : []) + ["replace"]
+        return VStack(alignment: .leading, spacing: 0) {
+            Text("任务执行中，新消息如何处理").font(.footnote).foregroundStyle(.secondary)
+                .padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 4)
+            ForEach(Array(modes.enumerated()), id: \.element) { order, mode in
+                AssistantPanelRow(title: AssistantComposerPanelState.sendModeTitle(mode), subtitle: Self.sendModeDetail(mode),
+                                  systemImage: AssistantComposerPanelState.sendModeSymbol(mode),
+                                  selected: panel.sendMode == mode,
+                                  identifier: "assistant.sendMode.option.\(mode)", order: order, slideFrom: -1) {
+                    panel.sendMode = mode
+                    panel.close(animated: !reduceMotion)
+                }
+            }
+        }
+    }
+
+    private static func sendModeDetail(_ mode: String) -> String {
+        switch mode {
+        case "steer": "当前任务参考这条说明"
+        case "input": "回答助手的提问"
+        case "replace": "停止当前任务，需确认"
+        default: "当前任务结束后执行"
+        }
+    }
+}
+
+/// 浮层里的一行：图标、标题（可带一行说明）、选中时右侧对勾。整行可点，高度至少 44pt。
+/// 出现时按 `order` 错峰淡入，并从按钮一侧（`slideFrom` -1 左／1 右）轻微滑入（参考 Grok 的弹簧缓动）；
+/// 只改 offset 与透明度，不影响布局。减少动态效果时直接显示。
+struct AssistantPanelRow: View {
+    let title: String
+    var subtitle: String?
+    let systemImage: String
+    var selected = false
+    var accessibilityLabel: String?
+    let identifier: String
+    var order = 0
+    var slideFrom: CGFloat = -1
+    let action: () -> Void
+    @State private var appeared = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 12) {
+                Image(systemName: systemImage)
+                    .font(.body)
+                    .foregroundStyle(.secondary)
+                    .frame(width: 24)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title).font(.body).foregroundStyle(.primary).lineLimit(1).truncationMode(.middle)
+                    if let subtitle {
+                        Text(subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                    }
+                }
+                Spacer(minLength: 8)
+                if selected {
+                    Image(systemName: "checkmark").font(.body.weight(.semibold)).foregroundStyle(.tint)
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+            .frame(minHeight: 48)
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .opacity(appeared || reduceMotion ? 1 : 0)
+        .offset(x: appeared || reduceMotion ? 0 : 14 * slideFrom)
+        .onAppear {
+            guard !reduceMotion, !appeared else { return }
+            withAnimation(.spring(response: 0.34, dampingFraction: 0.82).delay(0.03 * Double(min(order, 8)))) { appeared = true }
+        }
+        .accessibilityLabel(accessibilityLabel ?? title)
+        .accessibilityValue(selected ? "已选中" : "")
+        .accessibilityAddTraits(selected ? .isSelected : [])
+        .accessibilityIdentifier(identifier)
+    }
+}
+
 extension View {
-    /// 输入栏里 Menu 标签的统一写法（「+」附件菜单与模型菜单共用）：固定尺寸、整块可点，
-    /// 标签内容变化不做隐式动画，避免菜单收回动画期间标签改变尺寸或位置。
+    /// 输入栏里浮层按钮标签的统一写法（「+」附件与模型选择共用）：固定尺寸、整块可点，
+    /// 标签内容变化不做隐式动画，浮层展开／收起期间标签不改变尺寸或位置。
     func composerMenuLabel(width: CGFloat) -> some View {
         frame(width: width, height: 44)
             .contentShape(.rect)
