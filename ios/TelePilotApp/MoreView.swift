@@ -11,10 +11,34 @@ enum MoreDestination: Hashable {
 struct MoreView: View {
     @Binding var path: [MoreDestination]
     @Environment(AppModel.self) private var model
+    /// 全局搜索：左上角放大镜展开系统搜索栏，列表换成搜索结果（与概览、插件、AI 页同一写法）。
+    @State private var searchText = ""
     @State private var searching = false
 
     var body: some View {
         List {
+            if searching {
+                GlobalSearchResults(query: searchText)
+            } else {
+                moreContent
+            }
+        }
+        .pageSearch(text: $searchText, isActive: $searching, prompt: "管理模块、账号或插件", identifier: "more.search")
+        .symbolRenderingMode(.hierarchical)
+        .navigationTitle("更多")
+        .accessibilityIdentifier("more.screen")
+        .navigationDestination(for: MoreDestination.self) { destination in
+            switch destination {
+            case .accounts: AccountsView(embedded: true)
+            case .account(let id): AccountDetailView(id: id)
+            case .settings: SettingsView(embedded: true)
+            case .about: AboutView()
+            case .module(let module): ManagementModuleView(module: module)
+            }
+        }
+    }
+
+    @ViewBuilder private var moreContent: some View {
             EmergencyStopSection()
 
             Section("工作区") {
@@ -54,25 +78,5 @@ struct MoreView: View {
                 }
                 .accessibilityIdentifier("more.about")
             }
-        }
-        .symbolRenderingMode(.hierarchical)
-        .navigationTitle("更多")
-        .accessibilityIdentifier("more.screen")
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Button("全局搜索", systemImage: "magnifyingglass") { searching = true }
-                    .accessibilityIdentifier("more.search")
-            }
-        }
-        .navigationDestination(for: MoreDestination.self) { destination in
-            switch destination {
-            case .accounts: AccountsView(embedded: true)
-            case .account(let id): AccountDetailView(id: id)
-            case .settings: SettingsView(embedded: true)
-            case .about: AboutView()
-            case .module(let module): ManagementModuleView(module: module)
-            }
-        }
-        .sheet(isPresented: $searching) { GlobalSearchView() }
     }
 }

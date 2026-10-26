@@ -8,10 +8,49 @@ struct OverviewView: View {
     @State private var signals = OverviewSignals()
     @State private var destination: OverviewDestination?
     @State private var showCheckup = false
+    /// 全局搜索：左上角放大镜展开系统搜索栏，列表换成搜索结果（与“更多”、插件、AI 页同一写法）。
+    @State private var searchText = ""
+    @State private var searching = false
 
     var body: some View {
         NavigationStack {
             List {
+                if searching {
+                    GlobalSearchResults(query: searchText)
+                } else {
+                    overviewContent
+                }
+            }
+            .pageSearch(text: $searchText, isActive: $searching, prompt: "管理模块、账号或插件", identifier: "overview.search")
+            .navigationTitle("概览")
+            .navigationDestination(item: $destination) { destination in
+                destinationView(destination)
+            }
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button { Task { await refreshAll() } } label: {
+                        Label("刷新状态", systemImage: "arrow.clockwise")
+                    }
+                    .disabled(model.isRefreshing)
+                    .accessibilityIdentifier("overview.refresh")
+                }
+                // 一键体检：与助手“体检一下”同一个只读检查，结果在面板中给出结论、每项状态与修复建议。
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button { showCheckup = true } label: {
+                        Label("一键体检", systemImage: "stethoscope")
+                    }
+                    .accessibilityLabel("一键体检")
+                    .accessibilityIdentifier("overview.checkup")
+                }
+            }
+            .sheet(isPresented: $showCheckup) { SystemCheckupView() }
+            .refreshable { await refreshAll() }
+            .task { if signals.loadedAt == nil { await signals.load(model: model) } }
+            .accessibilityIdentifier("overview.screen")
+        }
+    }
+
+    @ViewBuilder private var overviewContent: some View {
                 statusSection
                 if !preferences.hiddenHomeModules.contains("metrics") {
                     metricsSection
@@ -54,37 +93,6 @@ struct OverviewView: View {
                         } label: { Label("上次完整刷新", systemImage: "clock") }
                     }
                 } footer: { Text("显示内容和顺序仅保存在本机；下拉或点右上角可重新读取服务器状态。") }
-            }
-            .navigationTitle("概览")
-            .navigationDestination(item: $destination) { destination in
-                destinationView(destination)
-            }
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    NavigationLink { GlobalSearchView() } label: { Label("全局搜索", systemImage: "magnifyingglass") }
-                        .accessibilityIdentifier("overview.search")
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button { Task { await refreshAll() } } label: {
-                        Label("刷新状态", systemImage: "arrow.clockwise")
-                    }
-                    .disabled(model.isRefreshing)
-                    .accessibilityIdentifier("overview.refresh")
-                }
-                // 一键体检：与助手“体检一下”同一个只读检查，结果在面板中给出结论、每项状态与修复建议。
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button { showCheckup = true } label: {
-                        Label("一键体检", systemImage: "stethoscope")
-                    }
-                    .accessibilityLabel("一键体检")
-                    .accessibilityIdentifier("overview.checkup")
-                }
-            }
-            .sheet(isPresented: $showCheckup) { SystemCheckupView() }
-            .refreshable { await refreshAll() }
-            .task { if signals.loadedAt == nil { await signals.load(model: model) } }
-            .accessibilityIdentifier("overview.screen")
-        }
     }
 
     /// 三组读取并发进行，不再串行等待；关键数字在刷新期间保留上次结果。

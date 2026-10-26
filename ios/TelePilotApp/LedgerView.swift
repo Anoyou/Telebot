@@ -695,6 +695,7 @@ struct LedgerEntriesListView: View {
     let entries: [LedgerEntry]
     @Environment(AppModel.self) private var model
     @State private var search = ""
+    @State private var searching = false
 
     private func accountName(_ id: Int?) -> String { LedgerText.accountName(id, accounts: model.accounts) }
 
@@ -719,7 +720,7 @@ struct LedgerEntriesListView: View {
         }
         .navigationTitle("全部流水")
         .navigationBarTitleDisplayMode(.inline)
-        .searchable(text: $search, prompt: "群名、收款方、插件或金额")
+        .pageSearch(text: $search, isActive: $searching, prompt: "群名、收款方、插件或金额", identifier: "ledger.search")
     }
 }
 

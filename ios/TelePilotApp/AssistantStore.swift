@@ -64,6 +64,10 @@ final class AssistantStore {
     private(set) var entries: [AssistantDisplayEntry] = []
     /// 消息的预处理结果（脱敏、Markdown 解析），按消息 ID 与内容缓存，后台线程生成。
     private(set) var rendered: [String: AssistantRendered] = [:]
+    /// 当前显示的第一条 `entries` 下标：打开会话时先显示最近一屏，其余逐帧向上追加（见 `AssistantReveal`）。
+    private(set) var revealStart = 0
+    /// 首次进入的读取流程（缓存 → 会话列表 → 当前会话）已经结束；之前不显示“空会话”提示。
+    private(set) var initialLoadFinished = false
     /// 正在读取更早的消息（上滑到顶部时自动触发）。
     var loadingOlder = false
     /// 当前显示的是本机缓存，服务器刷新尚未完成。
@@ -95,6 +99,7 @@ final class AssistantStore {
     @ObservationIgnored private var requestID: String?
     @ObservationIgnored private var subscriptionID = UUID()
     @ObservationIgnored private var cacheKey = ""
+    @ObservationIgnored private var revealTask: Task<Void, Never>?
     /// 每页消息数：先显示最近一页，上滑再按 before_id 读取更早的。
     static let pageSize = 40
 
@@ -110,6 +115,7 @@ final class AssistantStore {
     }
 
     func start(_ model: AppModel, initialID: String?) async {
+        defer { initialLoadFinished = true }
         defaultsKey = "telepilot.assistant.pending.\(model.serverURL?.absoluteString ?? "").\(model.user?.id ?? 0)"
         cacheKey = "\(model.serverURL?.absoluteString ?? "").\(model.user?.id ?? 0)"
         unresolvedSend = UserDefaults.standard.dictionary(forKey: defaultsKey) != nil
@@ -343,11 +349,28 @@ final class AssistantStore {
             for item in prepared { cache[item.key] = item }
             rendered = cache
         }
+        var grouped = AssistantTurnGrouping.entries(rows)
+        for index in grouped.indices {
+            if let item = grouped[index].item { grouped[index].rendered = rendered[AssistantRendered.key(for: item)] }
+        }
+        let start = AssistantReveal.start(wasEmpty: entries.isEmpty, count: grouped.count, current: revealStart)
         messages = rows
-        entries = AssistantTurnGrouping.entries(rows)
+        revealStart = start
+        entries = grouped
+        if start > 0 { scheduleReveal() } else { revealTask?.cancel() }
     }
 
-    func renderedFor(_ item: AssistantItem) -> AssistantRendered? { rendered[AssistantRendered.key(for: item)] }
+    /// 逐帧把更早的消息加回列表顶部，直到全部显示。
+    private func scheduleReveal() {
+        revealTask?.cancel()
+        revealTask = Task { @MainActor [weak self] in
+            while true {
+                try? await Task.sleep(for: .milliseconds(40))
+                guard let self, !Task.isCancelled, self.revealStart > 0 else { return }
+                self.revealStart = AssistantReveal.next(self.revealStart)
+            }
+        }
+    }
 
     /// 保存最近一页消息与会话列表到本机缓存，下次进入先显示。
     private func saveCache() {

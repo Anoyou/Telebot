@@ -44,7 +44,13 @@ struct AssistantComposer: View {
             toolbarRow
                 .padding(.horizontal, 8).padding(.bottom, 6)
         }
-        .glassEffect(.regular, in: .rect(cornerRadius: 26))
+        // 玻璃画在背景层，而不是用 `.glassEffect` 把整个输入栏（含两个 Menu）包进玻璃层：
+        // iOS 26 的 Menu 弹出／收回会从标签“变形”出菜单，标签在玻璃层内部时，收回动画要把菜单变回一个嵌在
+        // 另一块玻璃里的标签，约一秒内标签闪烁、错位（第六轮「+」与模型菜单同一个问题）。
+        // 背景玻璃与原写法外观一致，Menu 标签则是普通视图，收回动画干净。
+        .background {
+            Color.clear.glassEffect(.regular, in: .rect(cornerRadius: 26))
+        }
         .padding(.horizontal, 12).padding(.top, 6).padding(.bottom, 8)
         .frame(maxWidth: 900)
         .frame(maxWidth: .infinity)
@@ -119,37 +125,18 @@ struct AssistantComposer: View {
             Image(systemName: "plus")
                 .font(.system(size: 17, weight: .semibold))
                 .foregroundStyle(.primary)
-                .frame(width: 44, height: 44)
-                .contentShape(.circle)
+                .composerMenuLabel(width: 44)
         }
+        .fixedSize()
         .disabled(attachments.count >= 4 || loadingImage || readOnlyReason != nil)
         .accessibilityLabel("添加图片")
         .accessibilityHint("可从照片或文件选择图片，最多 4 张")
         .accessibilityIdentifier("assistant.attach")
     }
 
-    /// 本轮模型：原生 Menu + Picker，标签只显示模型短名。
+    /// 本轮模型：独立的小视图（见 `AssistantModelMenu`），选择变化只重绘它自己。
     private var modelMenu: some View {
-        Menu {
-            Picker("本轮模型", selection: $store.modelIndex) {
-                Text("自动，使用服务器配置").tag(-1)
-                ForEach(Array(store.models.enumerated()), id: \.offset) { index, item in
-                    Text("\(item.assistantText("provider_name")) · \(item.assistantText("model"))").tag(index)
-                }
-            }
-        } label: {
-            HStack(spacing: 3) {
-                Text(modelShortName).lineLimit(1).truncationMode(.middle)
-                Image(systemName: "chevron.up.chevron.down").imageScale(.small)
-            }
-            .font(.subheadline.weight(.medium))
-            .foregroundStyle(.secondary)
-            .padding(.horizontal, 8)
-            .frame(maxWidth: 170, minHeight: 44)
-            .contentShape(.rect)
-        }
-        .accessibilityLabel("本轮模型：\(modelLabel)")
-        .accessibilityIdentifier("assistant.model")
+        AssistantModelMenu(store: store)
     }
 
     private var sendModeMenu: some View {
@@ -270,17 +257,6 @@ struct AssistantComposer: View {
     /// 执行中且输入为空时，右下角按钮是“停止”；输入了内容则仍是发送（按“发送方式”处理）。
     private var showsStop: Bool { store.runActive && trimmedDraft.isEmpty && attachments.isEmpty }
 
-    /// 模型短名：去掉 “厂商/” 前缀，例如 `openai/gpt-4o` 显示为 `gpt-4o`。
-    private var modelShortName: String {
-        guard store.models.indices.contains(store.modelIndex) else { return "自动" }
-        let name = store.models[store.modelIndex].assistantText("model")
-        return name.split(separator: "/").last.map(String.init) ?? name
-    }
-
-    private var modelLabel: String {
-        store.models.indices.contains(store.modelIndex) ? store.models[store.modelIndex].assistantText("model") : "自动模型"
-    }
-
     // MARK: 发送
 
     private func submit() {
@@ -319,5 +295,88 @@ struct AssistantComposer: View {
         let resized = renderer.image { _ in image.draw(in: CGRect(origin: .zero, size: size)) }
         guard let bytes = resized.jpegData(compressionQuality: 0.82), bytes.count <= 6_000_000 else { throw APIError.incompatibleResponse }
         attachments.append(AssistantAttachment(image: resized, value: ["kind": "image", "source": "data_url", "mime_type": "image/jpeg", "name": "image.jpg", "data_url": .string("data:image/jpeg;base64," + bytes.base64EncodedString())]))
+    }
+}
+
+/// 输入栏的本轮模型选择：原生 `Menu { Picker }`，标签是固定宽度的“模型短名 + 上下箭头”。
+///
+/// 第五轮的写法在菜单收回时会闪烁/错位约一秒：标签宽度随所选模型变化（`maxWidth: 170`），选择在菜单收回动画
+/// 期间写入 `AssistantStore`，整个输入栏（玻璃容器）随之重算布局，系统把菜单“收回”到一个正在移动、变宽的标签上。
+/// 现在：
+/// - 标签宽度固定（`labelWidth`），文字单行居中截断，选择变化不改变任何布局；文字切换不做动画。
+/// - 选中值先落在本视图的 `selection`，界面只读它；写回 store 的 `modelIndex` 不会让其它视图重绘
+///   （输入栏不再读取 `modelIndex`，发送时才通过 `selectedModel` 读取）。
+/// - 选项用“供应商 ID + 模型名”作稳定 ID，服务器能力刷新时不会重建菜单项。
+struct AssistantModelMenu: View {
+    @Bindable var store: AssistantStore
+    @State private var selection = -1
+    static let labelWidth: CGFloat = 116
+
+    private struct Option: Identifiable {
+        let index: Int
+        let id: String
+        let title: String
+    }
+
+    private var options: [Option] {
+        store.models.enumerated().map { index, item in
+            Option(index: index,
+                   id: "\(item["provider_id"]?.intValue ?? 0)|\(item.assistantText("model"))",
+                   title: "\(item.assistantText("provider_name")) · \(item.assistantText("model"))")
+        }
+    }
+
+    var body: some View {
+        let models = store.models
+        Menu {
+            Picker("本轮模型", selection: $selection) {
+                Text("自动，使用服务器配置").tag(-1)
+                ForEach(options) { option in
+                    Text(option.title).tag(option.index)
+                }
+            }
+        } label: {
+            HStack(spacing: 3) {
+                Text(Self.shortName(models: models, index: selection))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .animation(nil, value: selection)
+                Image(systemName: "chevron.up.chevron.down").imageScale(.small)
+            }
+            .font(.subheadline.weight(.medium))
+            .foregroundStyle(.secondary)
+            .composerMenuLabel(width: Self.labelWidth)
+        }
+        .fixedSize()
+        .accessibilityLabel("本轮模型：\(Self.fullName(models: models, index: selection))")
+        .accessibilityIdentifier("assistant.model")
+        .onAppear { selection = store.modelIndex }
+        .onChange(of: selection) { _, value in
+            if store.modelIndex != value { store.modelIndex = value }
+        }
+        .onChange(of: store.modelIndex) { _, value in
+            if selection != value { selection = value }
+        }
+    }
+
+    /// 模型短名：去掉 “厂商/” 前缀，例如 `openai/gpt-4o` 显示为 `gpt-4o`。
+    static func shortName(models: [JSONValue], index: Int) -> String {
+        guard models.indices.contains(index) else { return "自动" }
+        let name = models[index].assistantText("model")
+        return name.split(separator: "/").last.map(String.init) ?? name
+    }
+
+    static func fullName(models: [JSONValue], index: Int) -> String {
+        models.indices.contains(index) ? models[index].assistantText("model") : "自动模型"
+    }
+}
+
+extension View {
+    /// 输入栏里 Menu 标签的统一写法（「+」附件菜单与模型菜单共用）：固定尺寸、整块可点，
+    /// 标签内容变化不做隐式动画，避免菜单收回动画期间标签改变尺寸或位置。
+    func composerMenuLabel(width: CGFloat) -> some View {
+        frame(width: width, height: 44)
+            .contentShape(.rect)
+            .transaction { $0.animation = nil }
     }
 }

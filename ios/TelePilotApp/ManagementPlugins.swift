@@ -26,24 +26,30 @@ struct PluginManagementView: View {
     @Environment(AppModel.self) private var model
     @State private var section: PluginWorkspaceSection = .center
     @State private var store = PluginStoreModel()
+    /// 插件中心所选账号、筛选与本地排序：放在这里，展开／收起搜索或切换分页时不丢失。
+    @State private var centerState = PluginCenterState()
+    /// 页面级搜索（左上角放大镜 → 系统搜索栏），作用于当前分页。
+    @State private var search = ""
+    @State private var searching = false
 
     var body: some View {
         Group {
             if let accountID {
-                PluginCenterView(features: store.features, fixedAccountID: accountID, loading: store.loading, loadError: store.loadError, reload: load)
+                PluginCenterView(features: store.features, state: centerState, search: search, fixedAccountID: accountID, loading: store.loading, loadError: store.loadError, reload: load)
             } else {
                 // 分段切换作为各自滚动内容的顶部头部，随内容一起滚动。曾挂在 `.safeAreaBar(edge: .top)` 上，
                 // 与大标题导航栏的折叠/展开互相改变顶部安全区，滑到顶部时顶栏会持续抖动。
                 switch section {
                 case .center:
-                    PluginCenterView(features: store.features, loading: store.loading, loadError: store.loadError, reload: load, header: AnyView(sectionPicker))
+                    PluginCenterView(features: store.features, state: centerState, search: search, loading: store.loading, loadError: store.loadError, reload: load, header: AnyView(sectionPicker))
                 case .discover:
-                    PluginDiscoverView(store: store, header: AnyView(sectionPicker))
+                    PluginDiscoverView(store: store, search: search, header: AnyView(sectionPicker))
                 case .installed:
-                    PluginInstalledView(store: store, header: AnyView(sectionPicker))
+                    PluginInstalledView(store: store, search: search, header: AnyView(sectionPicker))
                 }
             }
         }
+        .pageSearch(text: $search, isActive: $searching, prompt: searchPrompt, identifier: "plugins.search")
         .background(Color(.systemGroupedBackground))
         .navigationTitle(accountID == nil ? "插件" : "插件与规则")
         // 一级 Tab 与概览、AI、更多保持一致使用大标题；账号下的子页面仍用行内标题。
@@ -65,7 +71,28 @@ struct PluginManagementView: View {
         .labelsHidden()
     }
 
+    private var searchPrompt: String {
+        if accountID != nil { return "搜索插件、标识或使用说明" }
+        switch section {
+        case .center: return "搜索插件、标识或使用说明"
+        case .discover: return "搜索插件名称、简介或标签"
+        case .installed: return "搜索已安装的插件"
+        }
+    }
+
     private func load() async { await store.load(model: model) }
+}
+
+/// 插件中心需要跨视图重建保留的状态（所选账号、该账号的插件状态、筛选、拖动后的本地顺序）。
+@MainActor @Observable
+private final class PluginCenterState {
+    var selectedAccountID: Int?
+    var accountFeatures: [String: JSONValue] = [:]
+    /// `accountFeatures` 对应的账号。
+    var featuresAccountID: Int?
+    var category = "all"
+    var filter: PluginFilter = .all
+    var localOrder: [String]?
 }
 
 extension JSONValue {
@@ -81,6 +108,9 @@ extension JSONValue {
 
 private struct PluginCenterView: View {
     let features: [JSONValue]
+    @Bindable var state: PluginCenterState
+    /// 页面级搜索内容（来自导航栏左上角的系统搜索栏）。
+    let search: String
     var fixedAccountID: Int? = nil
     var loading = false
     var loadError: String?
@@ -90,15 +120,23 @@ private struct PluginCenterView: View {
     @Environment(AppModel.self) private var model
     @Environment(WorkspacePreferences.self) private var preferences
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
-    @State private var selectedAccountID: Int?
-    @State private var accountFeatures: [String: JSONValue] = [:]
     @State private var accountError: String?
     @State private var accountLoading = false
-    @State private var search = ""
-    @State private var category = "all"
-    @State private var filter: PluginFilter = .all
+    private var selectedAccountID: Int? {
+        get { state.selectedAccountID }
+        nonmutating set { state.selectedAccountID = newValue }
+    }
+    private var accountFeatures: [String: JSONValue] {
+        get { state.accountFeatures }
+        nonmutating set { state.accountFeatures = newValue }
+    }
+    private var category: String { state.category }
+    private var filter: PluginFilter { state.filter }
     // 长按拖动排序：本地顺序在保存成功前覆盖服务器顺序；保存只提交一次，不自动重试。
-    @State private var localOrder: [String]?
+    private var localOrder: [String]? {
+        get { state.localOrder }
+        nonmutating set { state.localOrder = newValue }
+    }
     @State private var dragging: String?
     @State private var dropTarget: String?
     @State private var savingOrder = false
@@ -122,12 +160,12 @@ private struct PluginCenterView: View {
     private var filtered: [JSONValue] {
         orderedFeatures.filter { feature in
             let key = feature["key"]?.stringValue ?? ""
-            let state = accountFeatures[key]
+            let accountState = accountFeatures[key]
             let matchesFilter: Bool
             switch filter {
             case .all: matchesFilter = true
-            case .running: matchesFilter = PluginPresentation.status(feature: feature, accountState: state, accountScoped: selectedAccountID != nil).tone == .running
-            case .attention: matchesFilter = PluginPresentation.needsAttention(feature: feature, accountState: state)
+            case .running: matchesFilter = PluginPresentation.status(feature: feature, accountState: accountState, accountScoped: selectedAccountID != nil).tone == .running
+            case .attention: matchesFilter = PluginPresentation.needsAttention(feature: feature, accountState: accountState)
             case .updates: matchesFilter = feature["update_available"]?.boolValue == true
             case .favorites: matchesFilter = preferences.isFavoritePlugin(key)
             }
@@ -145,11 +183,7 @@ private struct PluginCenterView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
-                if let header {
-                    SegmentedSearchHeader(picker: { header }, search: $search, prompt: "搜索插件、标识或使用说明", identifier: "plugins.search")
-                } else {
-                    InlineSearchField(prompt: "搜索插件、标识或使用说明", text: $search, identifier: "plugins.search")
-                }
+                if let header { header.padding(.top, PageLayout.listHeaderTop) }
                 scopePicker
                 if let loadError { NoticeView(title: "插件目录读取失败", message: loadError) }
                 if let accountError { NoticeView(title: "账号插件状态读取失败", message: accountError) }
@@ -235,7 +269,7 @@ private struct PluginCenterView: View {
     @ViewBuilder private var scopePicker: some View {
         if fixedAccountID == nil {
             VStack(alignment: .leading, spacing: 6) {
-                Picker(selection: $selectedAccountID) {
+                Picker(selection: $state.selectedAccountID) {
                     Label("全部账号", systemImage: "square.stack.3d.up").tag(Int?.none)
                     ForEach(model.accounts) { account in
                         Label(ManagementText.accountName(account), systemImage: "person.crop.circle").tag(Optional(account.id))
@@ -265,11 +299,11 @@ private struct PluginCenterView: View {
     /// 取代原先的玻璃胶囊按钮行与单独的分类菜单。
     private var filterMenu: some View {
         Menu {
-            Picker("状态", selection: $filter) {
+            Picker("状态", selection: $state.filter) {
                 ForEach(PluginFilter.allCases, id: \.self) { item in Text(item.title).tag(item) }
             }
             .pickerStyle(.inline)
-            Picker("分类", selection: $category) {
+            Picker("分类", selection: $state.category) {
                 Text("全部分类").tag("all")
                 ForEach(categories, id: \.self) { Text(PluginPresentation.category($0)).tag($0) }
             }
@@ -332,8 +366,10 @@ private struct PluginCenterView: View {
     }
 
     private func loadAccountFeatures() async {
-        accountFeatures = [:]
         accountError = nil
+        // 视图重建（展开／收起搜索、切换分页）后重新读取同一账号时保留现有状态，避免卡片闪成空白。
+        if state.featuresAccountID != selectedAccountID { accountFeatures = [:] }
+        state.featuresAccountID = selectedAccountID
         guard let selectedAccountID else { return }
         accountLoading = true
         defer { accountLoading = false }

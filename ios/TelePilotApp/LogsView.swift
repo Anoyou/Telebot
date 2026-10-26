@@ -574,6 +574,7 @@ struct LogListView: View {
     @State private var range: LogTimeRange
     @State private var accountID: Int?
     @State private var search = ""
+    @State private var searching = false
     @State private var keyword = ""
     @State private var entries: [LogEntry] = []
     @State private var errors: [String] = []
@@ -656,7 +657,7 @@ struct LogListView: View {
         }
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
-        .searchable(text: $search, prompt: "搜索内容、群名、插件或链路 ID")
+        .pageSearch(text: $search, isActive: $searching, prompt: "搜索内容、群名、插件或链路 ID", identifier: "logs.search")
         .onSubmit(of: .search) { keyword = search.trimmingCharacters(in: .whitespacesAndNewlines) }
         .onChange(of: search) { _, value in if value.isEmpty, !keyword.isEmpty { keyword = "" } }
         .task(id: loadKey) { await load() }

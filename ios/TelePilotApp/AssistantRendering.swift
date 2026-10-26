@@ -66,6 +66,27 @@ struct AssistantDisplayEntry: Identifiable, Hashable, Sendable {
     let id: String
     let item: AssistantItem?
     let tools: [AssistantItem]
+    /// 该消息的预处理结果，分组时一并取好：渲染时按行直接读取，不再在 body 里对全文求哈希查缓存。
+    var rendered: AssistantRendered? = nil
+}
+
+/// 打开会话时的“先显示最近一屏、其余增量追加”。
+///
+/// 一次把几十条带 Markdown、图片的消息塞进底部锚定的 `LazyVStack`，第一帧要为大量行估算并测量高度，
+/// 主线程忙到导航栏、输入栏都来不及画完。现在先显示最后 `firstScreen` 条，其余每帧向上追加 `step` 条。
+enum AssistantReveal {
+    static let firstScreen = 12
+    static let step = 12
+
+    /// 新的“从第几条开始显示”。原来没有内容（刚打开、切换会话）时只显示最后一屏；
+    /// 原来已有内容（缓存换成服务器数据、追加新消息、读取更早消息）时保持当前进度。
+    static func start(wasEmpty: Bool, count: Int, current: Int) -> Int {
+        if wasEmpty { return max(0, count - firstScreen) }
+        return min(current, count)
+    }
+
+    /// 下一步的起点。
+    static func next(_ start: Int) -> Int { max(0, start - step) }
 }
 
 enum AssistantTurnGrouping {

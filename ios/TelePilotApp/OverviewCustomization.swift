@@ -146,10 +146,11 @@ struct OverviewCustomizationView: View {
     }
 }
 
-struct GlobalSearchView: View {
+/// 全局搜索结果（管理模块、服务模块、账号、插件）。作为 List 的内容使用：概览与“更多”点左上角放大镜
+/// 展开系统搜索栏后，用它替换页面原有内容（`pageSearch`），结果行在当前导航栈里推入。
+struct GlobalSearchResults: View {
+    let query: String
     @Environment(AppModel.self) private var model
-    @Environment(WorkspacePreferences.self) private var preferences
-    @State private var query = ""
 
     private var modules: [OverviewModule] {
         OverviewModule.allCases.filter { query.isEmpty || $0.title.localizedCaseInsensitiveContains(query) }
@@ -173,8 +174,7 @@ struct GlobalSearchView: View {
     }
 
     var body: some View {
-        NavigationStack {
-            List {
+        Group {
                 if !managementModules.isEmpty {
                     Section("管理模块") {
                         ForEach(managementModules) { module in
@@ -223,13 +223,8 @@ struct GlobalSearchView: View {
                 if modules.isEmpty && accounts.isEmpty && model.accountsLoaded {
                     ContentUnavailableView.search(text: query)
                 }
-            }
-            .navigationTitle("全局搜索")
-            .navigationBarTitleDisplayMode(.inline)
-            .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "管理模块、账号或插件")
-            .task { if !model.accountsLoaded { await model.refresh() }; await model.refreshWorkspace() }
-            .accessibilityIdentifier("search.screen")
         }
+        .task { if !model.accountsLoaded { await model.refresh() }; await model.refreshWorkspace() }
     }
 }
 

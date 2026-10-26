@@ -1,4 +1,5 @@
 import XCTest
+import UIKit
 
 @MainActor
 final class WorkspaceUITests: XCTestCase {
@@ -29,38 +30,149 @@ final class WorkspaceUITests: XCTestCase {
         XCTAssertTrue(app.buttons["more.search"].exists)
     }
 
-    /// 第五轮：插件、发现、已安装与 AI 页的分段控件同一样式、同一位置（导航标题下方、内容顶部），
-    /// 搜索栏紧贴其下；左右边缘一致，切换页面时不跳动。
-    func testSegmentedHeadersShareFrameAcrossPluginsAndAI() {
+    /// 页面级分段控件：插件中心（ScrollView）、发现、已安装（List）与 AI 概览、供应商、用量（List）同一位置、
+    /// 同一尺寸，切换分页不跳动；并且不被分组列表的卡片圆角裁切。
+    ///
+    /// 只比 frame 查不出裁切（第五轮 frame 完全一致，但真机上发现、已安装两端被切掉），
+    /// 所以再比截图：分段控件最外侧几个点宽的竖条在“该端分段未选中”的两个分页之间应当逐像素一致，
+    /// 并与插件中心（ScrollView，不会被裁切）的同一竖条一致。
+    func testSegmentedHeadersShareFrameAndAreNotClipped() {
         let app = launch()
         let plugins = app.tabBars.buttons["插件"]
         XCTAssertTrue(plugins.waitForExistence(timeout: 45))
         plugins.tap()
         XCTAssertTrue(app.buttons["plugin.card.auto_reply"].waitForExistence(timeout: 10))
-        let center = app.segmentedControls.firstMatch.frame
-        // 搜索栏是 UISearchTextField，在不同系统版本上可能暴露为 SearchField 或 TextField，按标识符查找。
-        let centerSearch = app.descendants(matching: .any).matching(identifier: "plugins.search").firstMatch
-        XCTAssertTrue(centerSearch.waitForExistence(timeout: 5))
-        // 切到 AI 页后插件页已不在层级中，XCUIElement 会重新查询而失败：先记下搜索栏的 frame。
-        let centerSearchFrame = centerSearch.frame
-        XCTAssertEqual(centerSearchFrame.minY - center.maxY, 8, accuracy: 3)
+        // 分段控件下方不再常驻搜索框：搜索在导航栏左上角。
+        XCTAssertFalse(app.searchFields.firstMatch.exists)
+        XCTAssertTrue(app.buttons["plugins.search"].exists)
+        let center = settledHeader(app)
         app.buttons["plugins.discover"].tap()
         XCTAssertTrue(app.buttons["plugin.discover.row.weather_digest"].waitForExistence(timeout: 15))
-        let discover = app.segmentedControls.firstMatch.frame
+        let discover = settledHeader(app)
+        app.buttons["plugins.installed"].tap()
+        XCTAssertTrue(app.buttons["plugins.checkUpdates"].waitForExistence(timeout: 10))
+        let installed = settledHeader(app)
+
         app.tabBars.buttons["AI"].tap()
-        XCTAssertTrue(app.segmentedControls.buttons["供应商"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.segmentedControls.buttons["概览"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["ai.search"].exists)
+        let overview = settledHeader(app)
         app.segmentedControls.buttons["供应商"].tap()
-        let ai = app.segmentedControls.firstMatch.frame
-        let aiSearch = app.descendants(matching: .any).matching(identifier: "ai.search").firstMatch
-        XCTAssertTrue(aiSearch.waitForExistence(timeout: 5))
-        XCTAssertEqual(aiSearch.frame.minY - ai.maxY, 8, accuracy: 3)
-        let message = "插件中心 \(center)，发现 \(discover)，AI \(ai)"
-        XCTAssertEqual(center.minX, ai.minX, accuracy: 1.5, message)
-        XCTAssertEqual(center.width, ai.width, accuracy: 3, message)
-        XCTAssertEqual(discover.minX, ai.minX, accuracy: 1.5, message)
-        XCTAssertEqual(discover.width, ai.width, accuracy: 3, message)
-        XCTAssertEqual(center.height, ai.height, accuracy: 1, message)
-        XCTAssertEqual(centerSearchFrame.height, aiSearch.frame.height, accuracy: 1)
+        let providers = settledHeader(app)
+        app.segmentedControls.buttons["用量"].tap()
+        let usage = settledHeader(app)
+
+        let all = [("插件中心", center), ("发现", discover), ("已安装", installed), ("AI 概览", overview), ("AI 供应商", providers), ("AI 用量", usage)]
+        let message = all.map { "\($0.0) \($0.1.frame)" }.joined(separator: "；")
+        for (name, header) in all {
+            XCTAssertEqual(header.frame.minX, center.frame.minX, accuracy: 1, "\(name)：\(message)")
+            XCTAssertEqual(header.frame.width, center.frame.width, accuracy: 1, "\(name)：\(message)")
+            XCTAssertEqual(header.frame.height, center.frame.height, accuracy: 1, "\(name)：\(message)")
+            XCTAssertEqual(header.frame.minY, center.frame.minY, accuracy: 2, "\(name)：\(message)")
+        }
+        // 右端（第三段未选中）：插件中心 ↔ 发现 ↔ AI 概览 ↔ AI 供应商。
+        let right: (Header) -> CGRect = { h in CGRect(x: h.frame.maxX - 7, y: h.frame.minY - 2, width: 9, height: h.frame.height + 4) }
+        // 左端（第一段未选中）：发现 ↔ 已安装 ↔ AI 供应商 ↔ AI 用量。
+        let left: (Header) -> CGRect = { h in CGRect(x: h.frame.minX - 2, y: h.frame.minY - 2, width: 9, height: h.frame.height + 4) }
+        for (name, other) in [("发现", discover), ("AI 概览", overview), ("AI 供应商", providers)] {
+            let diff = PixelDiff.mean(center.shot, right(center), other.shot, right(other))
+            XCTAssertLessThan(diff, 4, "分段控件右端与插件中心不一致（被裁切？）：\(name) 平均差 \(diff)")
+        }
+        for (name, other) in [("已安装", installed), ("AI 供应商", providers), ("AI 用量", usage)] {
+            let diff = PixelDiff.mean(discover.shot, left(discover), other.shot, left(other))
+            XCTAssertLessThan(diff, 4, "分段控件左端与发现页不一致（被裁切？）：\(name) 平均差 \(diff)")
+        }
+    }
+
+    private struct Header {
+        let frame: CGRect
+        let shot: XCUIScreenshot
+    }
+
+    /// 等切换动画结束后读取分段控件的 frame 并截图。
+    private func settledHeader(_ app: XCUIApplication) -> Header {
+        let control = app.segmentedControls.firstMatch
+        XCTAssertTrue(control.waitForExistence(timeout: 10))
+        var frame = control.frame
+        for _ in 0..<10 {
+            Thread.sleep(forTimeInterval: 0.25)
+            let next = control.frame
+            if next == frame { break }
+            frame = next
+        }
+        Thread.sleep(forTimeInterval: 0.4)
+        return Header(frame: control.frame, shot: XCUIScreen.main.screenshot())
+    }
+
+    /// 页面级搜索统一为导航栏左上角的放大镜：点按展开系统搜索栏并可直接输入，作用于当前分页；取消即收起并清空。
+    func testPageSearchUsesLeadingToolbarButton() {
+        let app = launch()
+        let plugins = app.tabBars.buttons["插件"]
+        XCTAssertTrue(plugins.waitForExistence(timeout: 45))
+        plugins.tap()
+        XCTAssertTrue(app.buttons["plugin.card.auto_reply"].waitForExistence(timeout: 10))
+        let button = app.buttons["plugins.search"]
+        XCTAssertEqual(button.label, "搜索")
+        // 左上角：在屏幕左半边、导航栏高度内。
+        XCTAssertLessThan(button.frame.midX, app.frame.midX)
+        XCTAssertLessThan(button.frame.maxY, app.segmentedControls.firstMatch.frame.minY)
+        button.tap()
+        let field = app.searchFields.firstMatch
+        XCTAssertTrue(field.waitForExistence(timeout: 5))
+        type("自动", into: field, app: app)
+        XCTAssertTrue(app.buttons["plugin.card.auto_reply"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["plugin.card.content_assistant"].exists)
+        // 同一个搜索作用于切换后的分页。
+        app.buttons["plugins.installed"].tap()
+        XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", "plugin.installed.row.auto_reply")).firstMatch.waitForExistence(timeout: 10)
+                      || app.staticTexts["自动回复"].waitForExistence(timeout: 2))
+        tapCancel(app)
+        XCTAssertFalse(app.searchFields.firstMatch.waitForExistence(timeout: 2))
+        app.buttons["plugins.center"].tap()
+        XCTAssertTrue(app.buttons["plugin.card.content_assistant"].waitForExistence(timeout: 10))
+
+        app.tabBars.buttons["AI"].tap()
+        let ai = app.buttons["ai.search"]
+        XCTAssertTrue(ai.waitForExistence(timeout: 10))
+        XCTAssertLessThan(ai.frame.midX, app.frame.midX)
+        ai.tap()
+        XCTAssertTrue(app.searchFields.firstMatch.waitForExistence(timeout: 5))
+        tapCancel(app)
+        XCTAssertFalse(app.searchFields.firstMatch.waitForExistence(timeout: 2))
+
+        app.tabBars.buttons["更多"].tap()
+        let more = app.buttons["more.search"]
+        XCTAssertTrue(more.waitForExistence(timeout: 10))
+        XCTAssertLessThan(more.frame.midX, app.frame.midX)
+        more.tap()
+        let moreField = app.searchFields.firstMatch
+        XCTAssertTrue(moreField.waitForExistence(timeout: 5))
+        type("日常", into: moreField, app: app)
+        XCTAssertTrue(app.buttons["search.account.1"].waitForExistence(timeout: 10))
+        tapCancel(app)
+        XCTAssertTrue(app.buttons["more.accounts"].waitForExistence(timeout: 5))
+    }
+
+    private func type(_ text: String, into field: XCUIElement, app: XCUIApplication) {
+        // 展开后系统搜索栏应已聚焦；个别系统版本上首次聚焦较慢，未出现键盘时再点一下。
+        if !app.keyboards.firstMatch.waitForExistence(timeout: 2) { field.tap() }
+        field.typeText(text)
+    }
+
+    /// 点系统搜索栏的“取消”。切换分页等操作会让搜索栏失去焦点，系统此时可能收起“取消”按钮：先点回搜索栏。
+    private func tapCancel(_ app: XCUIApplication) {
+        let field = app.searchFields.firstMatch
+        guard field.exists else { return }
+        let names = ["取消", "Cancel", "关闭", "Close"]
+        func cancelButton() -> XCUIElement? {
+            names.lazy.map { app.buttons[$0].firstMatch }.first { $0.exists && $0.isHittable }
+        }
+        if cancelButton() == nil { field.tap(); _ = app.buttons["取消"].firstMatch.waitForExistence(timeout: 3) }
+        guard let cancel = cancelButton() else {
+            XCTFail("找不到搜索栏的取消按钮：" + app.buttons.allElementsBoundByIndex.prefix(30).map(\.label).joined(separator: " | "))
+            return
+        }
+        cancel.tap()
     }
 
     func testPluginScreenUsesTwoColumnCards() {
@@ -296,5 +408,58 @@ final class WorkspaceUITests: XCTestCase {
         XCTAssertTrue(discard.waitForExistence(timeout: 5))
         discard.tap()
         XCTAssertTrue(app.buttons["plugin.config.edit"].waitForExistence(timeout: 5))
+    }
+}
+
+/// 截图像素比对：两张截图里各取一个矩形（单位为点、尺寸相同），返回 RGB 平均绝对差（0–255）。
+enum PixelDiff {
+    static func mean(_ lhs: XCUIScreenshot, _ lhsRect: CGRect, _ rhs: XCUIScreenshot, _ rhsRect: CGRect) -> Double {
+        guard let a = Bitmap(lhs.image), let b = Bitmap(rhs.image) else { return .infinity }
+        let scale = a.scale
+        let width = Int((lhsRect.width * scale).rounded())
+        let height = Int((lhsRect.height * scale).rounded())
+        guard width > 0, height > 0 else { return .infinity }
+        let ax = Int((lhsRect.minX * scale).rounded()), ay = Int((lhsRect.minY * scale).rounded())
+        let bx = Int((rhsRect.minX * scale).rounded()), by = Int((rhsRect.minY * scale).rounded())
+        var total = 0.0
+        var count = 0
+        for row in 0..<height {
+            for column in 0..<width {
+                guard let p = a.pixel(ax + column, ay + row), let q = b.pixel(bx + column, by + row) else { continue }
+                total += Double(abs(Int(p.0) - Int(q.0)) + abs(Int(p.1) - Int(q.1)) + abs(Int(p.2) - Int(q.2))) / 3
+                count += 1
+            }
+        }
+        return count == 0 ? .infinity : total / Double(count)
+    }
+
+    private struct Bitmap {
+        let bytes: [UInt8]
+        let width: Int
+        let height: Int
+        let scale: CGFloat
+
+        init?(_ image: UIImage) {
+            guard let cg = image.cgImage else { return nil }
+            width = cg.width
+            height = cg.height
+            scale = image.size.width > 0 ? CGFloat(cg.width) / image.size.width : image.scale
+            var buffer = [UInt8](repeating: 0, count: width * height * 4)
+            let drawn = buffer.withUnsafeMutableBytes { raw -> Bool in
+                guard let context = CGContext(data: raw.baseAddress, width: cg.width, height: cg.height, bitsPerComponent: 8,
+                                              bytesPerRow: cg.width * 4, space: CGColorSpaceCreateDeviceRGB(),
+                                              bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return false }
+                context.draw(cg, in: CGRect(x: 0, y: 0, width: cg.width, height: cg.height))
+                return true
+            }
+            guard drawn else { return nil }
+            bytes = buffer
+        }
+
+        func pixel(_ x: Int, _ y: Int) -> (UInt8, UInt8, UInt8)? {
+            guard x >= 0, y >= 0, x < width, y < height else { return nil }
+            let index = (y * width + x) * 4
+            return (bytes[index], bytes[index + 1], bytes[index + 2])
+        }
     }
 }
