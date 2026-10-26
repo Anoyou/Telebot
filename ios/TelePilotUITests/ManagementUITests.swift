@@ -183,20 +183,18 @@ final class ManagementUITests: XCTestCase {
         let confirm = app.buttons["update.confirm"].firstMatch
         XCTAssertTrue(confirm.waitForExistence(timeout: 10))
         confirm.tap()
-        let job = app.buttons["update.job"]
-        scrollUpdateSheet(to: job, in: app)
-        XCTAssertTrue(job.waitForExistence(timeout: 10))
+        // 提交后面板内直接显示更新进度（只读轮询），不再跳转到原始 JSON 任务页。
+        let progress = app.descendants(matching: .any)["update.progress"]
+        XCTAssertTrue(progress.waitForExistence(timeout: 10))
         app.buttons["update.done"].tap()
         XCTAssertTrue(open.waitForExistence(timeout: 5))
         open.tap()
-        // 面板新增“更新通道”分区后内容更长：滚到“更新结果”时，上方操作分区的行已被列表回收，
-        // 因此先在操作分区确认“应用更新”已隐藏、“允许下次更新”可用，再继续滚到升级任务。
-        let allowNext = app.buttons["update.allowNext"]
-        scrollUpdateSheet(to: allowNext, in: app)
-        XCTAssertTrue(allowNext.waitForExistence(timeout: 10))
+        // 重新打开时从本地收据恢复同一个任务继续跟踪，期间不显示“应用更新”，不能重复提交。
+        XCTAssertTrue(app.descendants(matching: .any)["update.progress"].waitForExistence(timeout: 10))
         XCTAssertFalse(app.buttons["update.apply"].exists)
-        scrollUpdateSheet(to: job, in: app)
-        XCTAssertTrue(job.waitForExistence(timeout: 10))
+        let applied = app.descendants(matching: .any)["update.applied"]
+        XCTAssertTrue(applied.waitForExistence(timeout: 30))
+        XCTAssertFalse(app.buttons["update.apply"].exists)
     }
 
     func testLogDetailExplainsMessageFailureAndOpensTimeline() {

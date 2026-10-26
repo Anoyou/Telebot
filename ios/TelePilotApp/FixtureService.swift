@@ -21,6 +21,8 @@ actor FixtureService: AppServing {
         "app_update_target": ["remote": "origin", "branch": "Beta"]
     ]
     private var fixtureUpdateCheck: JSONValue = ["enabled": true, "interval_minutes": 1440]
+    /// 更新任务界面测试：前几次读取返回执行中（带进度与日志），之后返回完成。
+    private var fixtureUpdateJobReads = 0
     private var pluginGlobalEnabled: [String: Bool] = ["auto_reply": true, "content_assistant": true, "forward_guard": false]
     /// 插件商店界面测试：内容整理助手当前版本（更新后变为 2.2.0）与从仓库新装的插件。
     private var contentAssistantVersion = "2.1.0"
@@ -472,8 +474,16 @@ actor FixtureService: AppServing {
                     "plan_label": "更新任务已启动", "plan_detail": "更新将在内部 updater 中执行，期间服务可能短暂重启；请观察任务日志。"]
         }
         if clean == "/api/system/update-jobs/fixture-update" {
-            return ["ok": true, "job_id": "fixture-update", "status": "succeeded", "progress": 100, "phase": "完成", "summary": "更新任务已完成。"]
+            fixtureUpdateJobReads += 1
+            if fixtureUpdateJobReads <= 4 {
+                return ["ok": true, "job_id": "fixture-update", "status": "running", "progress": 40, "phase": "拉取镜像",
+                        "detail": "正在拉取后端镜像", "logs": ["[updater] git fetch origin Beta", "[updater] 拉取镜像 telepilot-web"],
+                        "step_timings": [["phase": "准备", "duration_ms": 1200]]]
+            }
+            return ["ok": true, "job_id": "fixture-update", "status": "succeeded", "progress": 100, "phase": "完成", "summary": "更新任务已完成。",
+                    "new_commit": "9a8b7c6d5e4f3a2b", "logs": ["[updater] git fetch origin Beta", "[updater] 完成"]]
         }
+        if clean == "/api/system/restart", method == "POST" { return ["success": true] }
         if clean == "/api/apns/config" { return ["enabled": false, "configured": false, "environment": "sandbox", "has_auth_key": false] }
         if clean == "/api/apns/devices", method == "POST" {
             return ["device_id": body?["device_id"] ?? "fixture-device", "bundle_id": body?["bundle_id"] ?? "", "environment": body?["environment"] ?? "sandbox",
