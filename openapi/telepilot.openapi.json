@@ -13374,6 +13374,21 @@
         "title": "PluginConfigActionResponse",
         "type": "object"
       },
+      "PluginDisplayOrder": {
+        "description": "插件中心卡片展示顺序（插件 key 列表）。只影响展示，不改变插件执行优先级。",
+        "properties": {
+          "keys": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 1000,
+            "title": "Keys",
+            "type": "array"
+          }
+        },
+        "title": "PluginDisplayOrder",
+        "type": "object"
+      },
       "PluginGlobalConfigResponse": {
         "description": "global config 响应。",
         "properties": {
@@ -20726,7 +20741,7 @@
   },
   "info": {
     "title": "TelePilot",
-    "version": "0.106.0-beta.7"
+    "version": "0.106.0-beta.8"
   },
   "openapi": "3.1.0",
   "paths": {
@@ -34337,6 +34352,177 @@
         ]
       }
     },
+    "/api/feature-matrix/order": {
+      "get": {
+        "description": "插件中心卡片的展示顺序；未自定义时为空列表（按默认顺序展示）。",
+        "operationId": "get_plugin_display_order_api_feature_matrix_order_get",
+        "parameters": [
+          {
+            "in": "cookie",
+            "name": "auth_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Auth Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PluginDisplayOrder"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "认证失败"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "服务器内部错误"
+          }
+        },
+        "security": [
+          {
+            "AuthCookie": []
+          }
+        ],
+        "summary": "Get Plugin Display Order",
+        "tags": [
+          "features"
+        ]
+      },
+      "put": {
+        "description": "保存插件中心卡片的展示顺序（iOS 长按拖动排序）。\n\n只影响 ``GET /api/feature-matrix`` 的 features 顺序，不影响插件执行或直通优先级；\n未出现在列表里的插件排在后面。整表覆盖写入，重复提交同一顺序结果相同。",
+        "operationId": "put_plugin_display_order_api_feature_matrix_order_put",
+        "parameters": [
+          {
+            "in": "cookie",
+            "name": "auth_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Auth Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PluginDisplayOrder"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PluginDisplayOrder"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "认证失败"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "CSRF 校验失败或权限不足"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "服务器内部错误"
+          }
+        },
+        "security": [
+          {
+            "AuthCookie": [],
+            "CsrfCookie": [],
+            "CsrfHeader": [],
+            "RequestedWith": []
+          }
+        ],
+        "summary": "Put Plugin Display Order",
+        "tags": [
+          "features"
+        ]
+      }
+    },
     "/api/ledger": {
       "get": {
         "operationId": "list_ledger_entries_api_ledger_get",
@@ -45358,6 +45544,25 @@
             }
           },
           {
+            "description": "只返回指定会话的任务（打开会话时恢复进行中的任务，避免拉取全部会话的任务）",
+            "in": "query",
+            "name": "session_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "只返回指定会话的任务（打开会话时恢复进行中的任务，避免拉取全部会话的任务）",
+              "title": "Session Id"
+            }
+          },
+          {
             "in": "cookie",
             "name": "auth_token",
             "required": false,
@@ -46384,6 +46589,18 @@
               "minimum": 1,
               "title": "Limit",
               "type": "integer"
+            }
+          },
+          {
+            "description": "只返回列表需要的摘要字段：memory_summary 置空、memory_state 置为空对象，减少传输量（iOS 会话列表使用）",
+            "in": "query",
+            "name": "compact",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "只返回列表需要的摘要字段：memory_summary 置空、memory_state 置为空对象，减少传输量（iOS 会话列表使用）",
+              "title": "Compact",
+              "type": "boolean"
             }
           },
           {

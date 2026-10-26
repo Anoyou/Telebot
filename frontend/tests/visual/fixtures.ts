@@ -204,6 +204,8 @@ function jsonResponse(pathname: string): unknown | undefined {
     leaves: [],
   };
   if (pathname === "/api/feature-matrix") return { features: [] };
+  // 插件中心卡片展示顺序（iOS 长按拖动排序保存到服务器）；基线为空 = 按默认顺序。
+  if (pathname === "/api/feature-matrix/order") return { keys: [] };
   if (pathname === "/api/ledger") return { items: [ledgerEntryFixture] };
   if (pathname === "/api/ledger/summary") return emptyLedgerSummary;
   if (pathname === "/api/ledger/stats") return emptyLedgerStats;

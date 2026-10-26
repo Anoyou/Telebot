@@ -2228,6 +2228,33 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/feature-matrix/order": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Plugin Display Order
+         * @description 插件中心卡片的展示顺序；未自定义时为空列表（按默认顺序展示）。
+         */
+        get: operations["get_plugin_display_order_api_feature_matrix_order_get"];
+        /**
+         * Put Plugin Display Order
+         * @description 保存插件中心卡片的展示顺序（iOS 长按拖动排序）。
+         *
+         *     只影响 ``GET /api/feature-matrix`` 的 features 顺序，不影响插件执行或直通优先级；
+         *     未出现在列表里的插件排在后面。整表覆盖写入，重复提交同一顺序结果相同。
+         */
+        put: operations["put_plugin_display_order_api_feature_matrix_order_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/ledger": {
         parameters: {
             query?: never;
@@ -9577,6 +9604,14 @@ export interface components {
             success: boolean;
             /** Toast */
             toast?: string | null;
+        };
+        /**
+         * PluginDisplayOrder
+         * @description 插件中心卡片展示顺序（插件 key 列表）。只影响展示，不改变插件执行优先级。
+         */
+        PluginDisplayOrder: {
+            /** Keys */
+            keys?: string[];
         };
         /**
          * PluginGlobalConfigResponse
@@ -20302,6 +20337,117 @@ export interface operations {
             };
         };
     };
+    get_plugin_display_order_api_feature_matrix_order_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: {
+                auth_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginDisplayOrder"];
+                };
+            };
+            /** @description 认证失败 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description 服务器内部错误 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    put_plugin_display_order_api_feature_matrix_order_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: {
+                auth_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PluginDisplayOrder"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginDisplayOrder"];
+                };
+            };
+            /** @description 认证失败 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description CSRF 校验失败或权限不足 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description 服务器内部错误 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
     list_ledger_entries_api_ledger_get: {
         parameters: {
             query?: {
@@ -26323,6 +26469,8 @@ export interface operations {
                 until?: string | null;
                 limit?: number;
                 include_bot?: boolean;
+                /** @description 只返回指定会话的任务（打开会话时恢复进行中的任务，避免拉取全部会话的任务） */
+                session_id?: string | null;
             };
             header?: never;
             path?: never;
@@ -26853,6 +27001,8 @@ export interface operations {
                 /** @description 管理员会话列表是否包含 Telegram Bot 会话 */
                 include_bot?: boolean;
                 limit?: number;
+                /** @description 只返回列表需要的摘要字段：memory_summary 置空、memory_state 置为空对象，减少传输量（iOS 会话列表使用） */
+                compact?: boolean;
             };
             header?: never;
             path?: never;

@@ -25,6 +25,22 @@
 
 ## [Unreleased]
 
+## [0.106.0-beta.8] - 2026-10-26 · patch（补丁预发布） · iOS 体验优化第四轮配套：插件展示顺序、助手会话摘要、模型能力标签汉化
+
+### 新增
+
+- 插件中心展示顺序保存在服务器：新增 `GET/PUT /api/feature-matrix/order`（插件 key 列表，只影响展示，不改变插件执行优先级），`/api/feature-matrix` 按保存的顺序返回，未列出的插件按原顺序排在后面；写入审计 `feature.display_order`。新增测试 `test_plugin_display_order.py`。
+- 系统助手会话列表支持 `compact=true`，只返回列表摘要（不含会话记忆），Web 助手页轮询会话列表改用该参数；任务列表支持 `session_id` 按会话过滤。
+
+### 改进
+
+- Web 模型能力标签汉化，与 iOS 用词一致：Tools → 工具调用、Vision / 图片 → 多模态（图片）、Reasoning → 推理、ctx → 上下文、out → 输出、实测✓/× → 实测可用 / 实测不可用（模型选择器、供应商模型清单、测活筛选）。
+- `make codegen` 同步新接口到 `openapi/telepilot.openapi.json` 与 `frontend/src/api/schema.ts`；Playwright 夹具补充 `/api/feature-matrix/order`。
+
+### iOS
+
+- iOS 0.12.0：服务器更新面板重构（面板内进度与日志、可读失败原因、角标同源）；插件与 AI 页统一搜索栏，添加供应商移到导航栏「+」；模型快速测试 / 多模型对话测试改为原生页面并可从本供应商模型中选择（多模型可多选）；模型行与模型详情显示能力（多模态（图片）/ 仅文本、工具调用、推理、上下文、输出，无数据为“未知”）；「从供应商发现模型」并入模型清单顶部同步；插件卡片长按拖动排序；助手分页读取与后台预处理提速、输入栏重排；全局紧急停止文案按真实行为重写；去掉隐私遮挡与设置页重复的关于入口；继续汉化界面文案。模型诊断请求（test-model、chat-test-models、fetch-models）改用长超时通道。
+
 ## [0.106.0-beta.7] - 2026-10-26 · patch（补丁预发布） · Agent Skills 独立入口，详情 / 差异对话框不再溢出
 
 ### 改进
