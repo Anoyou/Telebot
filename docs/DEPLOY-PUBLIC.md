@@ -186,8 +186,24 @@ TELEPILOT_UPDATE_BRANCH=main make prod-update
 
 文件同步生成新 web 镜像后才切换容器；Web、Frontend 或 Updater 健康检查失败都会恢复
 更新前镜像。成功部署前的 commit 与三项镜像引用保存在
-`.git/telepilot-deploy-previous.json`，失败部署保留 pending 标记，修复后可直接重试。更新前
-如果工作区存在未提交改动会拒绝执行，避免覆盖服务器上的本地修改。
+`.git/telepilot-deploy-previous.json`，失败部署保留 pending 标记，修复后可直接重试。
+
+只改前端源码时，`web` 内供 System Agent 读取的只读源码快照会热替换，`web` 与账号 worker
+不重启；只改内置 gateway 时只切换 `web` 预构建镜像；`.gitignore`、README 配图等仓库元数据
+不再触发完整更新。需要多张镜像时并行拉取并验签；健康等待会直接执行容器自身的 healthcheck
+命令，不再空等 Docker 的 15 秒检查周期。文件同步补丁镜像固定叠在预构建镜像上，旧补丁镜像
+在更新成功后自动清理（保留当前与回滚记录引用的那一张）。
+
+拉取前会检查工作区未提交改动（被 `.gitignore` 忽略的 `.env`、已安装插件等不算）：
+
+- 日志会列出 `git status --porcelain` 的前 30 行和总数，失败详情里带前 5 个文件；
+- 只有文件可执行位差异（常见于无法保存权限位的文件系统或挂载方式）时，设置仓库级
+  `core.fileMode=false` 后继续，内容不受影响；恢复用 `git config --unset core.fileMode`；
+- 跟踪文件被改动或有未忽略的新文件时，自动执行
+  `git stash push -u -m "telepilot-auto-stash <旧提交> <UTC 时间>"` 后继续更新，日志给出
+  stash 名称与恢复命令（`git stash list`、`git stash show -p <id>`、`git stash pop`）；
+- 处于 merge / rebase / cherry-pick / revert 中、存在冲突、未跟踪文件超过 100 MiB 时仍拒绝
+  更新并列出文件。
 
 高频实测统一使用 `Beta`，不要覆盖 `main`：
 

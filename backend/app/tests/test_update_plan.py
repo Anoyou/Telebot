@@ -392,3 +392,74 @@ def test_image_checkpoint_uses_merge_commit_pushed_to_branch(tmp_path: Path) -> 
     _git(root, "commit", "-qm", "docs")
     docs = _git(root, "rev-parse", "HEAD")
     assert _image_checkpoint(root, docs) == merge
+
+
+def test_gateway_change_only_switches_web_image_instead_of_full_update() -> None:
+    plan = classify_changed_files(
+        ["gateway/internal/codex/client.go", "gateway/go.mod", "gateway/UPSTREAM.md"]
+    )
+
+    assert plan.requires_full_update is False
+    assert plan.components == ["backend"]
+    assert plan.services == ["web"]
+    assert plan.rebuild_services == ["web"]
+    assert plan.file_sync_services == []
+    assert plan.reasons == []
+
+
+def test_repository_metadata_and_readme_assets_are_docs_only() -> None:
+    plan = classify_changed_files(
+        [
+            ".gitignore",
+            ".gitattributes",
+            "assets/readme/runtime-map.png",
+            "schemas/plugin.schema.json",
+        ]
+    )
+
+    assert plan.components == ["docs_only"]
+    assert plan.services == []
+    assert plan.requires_full_update is False
+
+
+def test_web_sync_scope_separates_code_from_read_only_source_mirror() -> None:
+    mirror_only = classify_changed_files(["frontend/src/pages/Dashboard.tsx"])
+    code = classify_changed_files(["backend/app/main.py", "frontend/src/pages/Dashboard.tsx"])
+    migration = classify_changed_files(["backend/alembic/versions/0099_x.py"])
+    plugins = classify_changed_files(["plugins/__init__.py"])
+
+    assert mirror_only.file_sync_services == ["web"]
+    assert mirror_only.web_sync_scope == ["source_mirror"]
+    assert code.web_sync_scope == ["code", "source_mirror"]
+    assert migration.web_sync_scope == ["code"]
+    assert plugins.web_sync_scope == ["plugins"]
+    assert classify_changed_files(["docs/USAGE-GUIDE.md"]).web_sync_scope == []
+    assert "web_sync_scope" in mirror_only.to_dict()
+
+
+def test_missing_tomllib_compares_dependency_block_text(monkeypatch, tmp_path: Path) -> None:
+    root = tmp_path / "repo"
+    (root / "backend").mkdir(parents=True)
+    _git(root, "init", "-q")
+    _git(root, "config", "user.email", "test@example.com")
+    _git(root, "config", "user.name", "Test")
+    pyproject = root / "backend/pyproject.toml"
+
+    def commit(version: str, deps: str) -> str:
+        pyproject.write_text(
+            f'[project]\nname = "x"\nversion = "{version}"\ndependencies = [\n{deps}]\n\n'
+            '[project.optional-dependencies]\ndev = ["pytest"]\n',
+            encoding="utf-8",
+        )
+        _git(root, "add", ".")
+        _git(root, "commit", "-qm", version)
+        return _git(root, "rev-parse", "HEAD").strip()
+
+    first = commit("1.0.0", '    "fastapi>=1",  # web\n')
+    version_only = commit("1.0.1", '    "fastapi>=1",  # web\n')
+    dependency = commit("1.0.2", '    "fastapi>=2",\n')
+    monkeypatch.setattr(update_plan, "tomllib", None)
+
+    assert update_plan._backend_dependencies_changed(root, first, version_only) is False
+    assert update_plan._backend_dependencies_changed(root, version_only, dependency) is True
+    assert build_update_plan(root, first, version_only).file_sync_services == ["web"]

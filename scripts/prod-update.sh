@@ -253,6 +253,7 @@ mapfile -t PLAN_SERVICES < <(plan_value services)
 mapfile -t PLAN_FILE_SYNC_SERVICES < <(plan_value file_sync_services)
 mapfile -t PLAN_REBUILD_SERVICES < <(plan_value rebuild_services)
 mapfile -t PLAN_REASONS < <(plan_value reasons)
+mapfile -t PLAN_WEB_SYNC_SCOPE < <(plan_value web_sync_scope)
 NEEDS_BACKEND=0
 NEEDS_FRONTEND=0
 NEEDS_UPDATER=0
@@ -272,6 +273,20 @@ done
 for service in "${PLAN_FILE_SYNC_SERVICES[@]}"; do
   [[ "$service" == "web" ]] && NEEDS_BACKEND_SYNC=1
 done
+# web 文件同步细分：code 需要生成补丁镜像并重建 web；source_mirror 只热替换
+# System Agent 的只读前端源码镜像（不重启 web/worker）；plugins 由插件同步处理。
+# 计划缺少该字段（旧计划）时保守地按 code 处理。
+WEB_SYNC_CODE=0
+WEB_SYNC_MIRROR=0
+if (( NEEDS_BACKEND_SYNC == 1 )); then
+  if (( ${#PLAN_WEB_SYNC_SCOPE[@]} == 0 )); then
+    WEB_SYNC_CODE=1
+  fi
+  for scope in "${PLAN_WEB_SYNC_SCOPE[@]}"; do
+    [[ "$scope" == "code" ]] && WEB_SYNC_CODE=1
+    [[ "$scope" == "source_mirror" ]] && WEB_SYNC_MIRROR=1
+  done
+fi
 for service in "${PLAN_REBUILD_SERVICES[@]}"; do
   [[ "$service" == "web" ]] && NEEDS_BACKEND_REBUILD=1
   [[ "$service" == "frontend" ]] && NEEDS_FRONTEND_REBUILD=1
@@ -331,13 +346,17 @@ if (( REQUIRES_BACKUP == 1 )); then
 fi
 
 if (( DRY_RUN == 1 )); then
+  bash "$SCRIPT_DIR/prepare-update-worktree.sh" --check-only "$CHECKED_OUT_COMMIT" || true
   ok "dry-run 完成，未拉取代码、未重建服务"
   exit 0
 fi
 
-if [[ -n "$(git status --porcelain)" ]]; then
-  die "工作区存在未提交改动，拒绝自动更新。请先提交、stash 或清理后重试。"
-fi
+# 拉取前处理未提交改动：列出文件；仅权限位差异时设置 core.fileMode=false；
+# 普通改动自动 stash 并给出恢复命令；merge/rebase 冲突等无法安全 stash 的状态
+# 仍拒绝更新。辅助脚本已打印具体原因（“✗ ...” 行会成为 UI 失败摘要），
+# 此时尚未修改任何部署状态，直接退出即可。
+emit_progress 16 "检查工作区" "确认没有会被覆盖的本地改动"
+bash "$SCRIPT_DIR/prepare-update-worktree.sh" "$CHECKED_OUT_COMMIT" || exit 1
 
 image_checkpoint_commit() {
   # 预构建镜像只为推送到 Beta/main 的提交打 sha 标签。必须沿目标分支自身的
@@ -424,7 +443,9 @@ if (( HEAD_ALREADY_UPDATED == 0 )); then
   mv "$pending_tmp" "$PENDING_FILE"
   emit_progress 18 "拉取代码" "Fast-forward 到目标 commit"
   log "执行 fast-forward 更新"
-  git pull --ff-only "$REMOTE" "$BRANCH"
+  # 目标 commit 已在上方 fetch 并完成计划校验；直接快进到它，不再让 git pull
+  # 二次访问远端（国内网络下常见 5–30 秒），也保证落地的正是已校验的提交。
+  git merge --ff-only "$TARGET_COMMIT"
   NEW_COMMIT="$(git rev-parse HEAD)"
   [[ "$NEW_COMMIT" == "$TARGET_COMMIT" ]] \
     || die "fast-forward 后 HEAD 与已校验目标不一致"
@@ -445,20 +466,56 @@ fi
 
 # 目标版本更新逻辑接管后再确认所有必需镜像。镜像缺失或验签失败时，运行中的
 # 服务仍保持旧镜像；pending 标记保留，镜像就绪或环境修复后可直接在线重试。
+# 需要多张镜像时并行拉取与验签：Docker 守护进程会合并共享层，验签互不依赖。
+# 任一镜像失败都整体失败，运行中的服务保持旧镜像不变。
+pull_verified_images_parallel() {
+  local result_dir service image_ref index failed=0
+  local -a services=() pids=()
+  result_dir="$(mktemp -d "${TMPDIR:-/tmp}/telepilot-pull.XXXXXX")"
+  # 旧 updater 可能需要先安装 gh；只在主进程安装一次，避免并发 apk 互相加锁。
+  ensure_github_cli
+  if (( NEEDS_FULL == 1 || NEEDS_BACKEND_REBUILD == 1 )); then services+=(web); fi
+  if (( NEEDS_FULL == 1 || NEEDS_FRONTEND_REBUILD == 1 )); then services+=(frontend); fi
+  if (( NEEDS_FULL == 1 || NEEDS_UPDATER_REBUILD == 1 )); then services+=(updater); fi
+  for service in "${services[@]}"; do
+    case "$service" in
+      web) image_ref="$TARGET_WEB_IMAGE" ;;
+      frontend) image_ref="$TARGET_FRONTEND_IMAGE" ;;
+      updater) image_ref="$TARGET_UPDATER_IMAGE" ;;
+    esac
+    (
+      pull_verified_image "$service" "$image_ref" "$TARGET_IMAGE_COMMIT"
+      printf '%s\n' "$VERIFIED_IMAGE_REF" > "$result_dir/$service"
+    ) &
+    pids+=("$!")
+  done
+  for index in "${!pids[@]}"; do
+    if ! wait "${pids[$index]}"; then
+      failed=1
+    fi
+  done
+  if (( failed == 0 )); then
+    for service in "${services[@]}"; do
+      [[ -s "$result_dir/$service" ]] || failed=1
+    done
+  fi
+  if (( failed == 0 )); then
+    for service in "${services[@]}"; do
+      case "$service" in
+        web) TARGET_WEB_IMAGE="$(cat "$result_dir/web")" ;;
+        frontend) TARGET_FRONTEND_IMAGE="$(cat "$result_dir/frontend")" ;;
+        updater) TARGET_UPDATER_IMAGE="$(cat "$result_dir/updater")" ;;
+      esac
+    done
+  fi
+  rm -rf "$result_dir"
+  (( failed == 0 )) || die "目标镜像预拉取或验签失败，运行中的服务未做任何切换"
+}
+
 if (( NEEDS_FULL == 1 || NEEDS_BACKEND_REBUILD == 1 || NEEDS_FRONTEND_REBUILD == 1 || NEEDS_UPDATER_REBUILD == 1 )); then
   prepare_target_images
-  if (( NEEDS_FULL == 1 || NEEDS_BACKEND_REBUILD == 1 )); then
-    pull_verified_image web "$TARGET_WEB_IMAGE" "$TARGET_IMAGE_COMMIT"
-    TARGET_WEB_IMAGE="$VERIFIED_IMAGE_REF"
-  fi
-  if (( NEEDS_FULL == 1 || NEEDS_FRONTEND_REBUILD == 1 )); then
-    pull_verified_image frontend "$TARGET_FRONTEND_IMAGE" "$TARGET_IMAGE_COMMIT"
-    TARGET_FRONTEND_IMAGE="$VERIFIED_IMAGE_REF"
-  fi
-  if (( NEEDS_FULL == 1 || NEEDS_UPDATER_REBUILD == 1 )); then
-    pull_verified_image updater "$TARGET_UPDATER_IMAGE" "$TARGET_IMAGE_COMMIT"
-    TARGET_UPDATER_IMAGE="$VERIFIED_IMAGE_REF"
-  fi
+  emit_progress 22 "拉取镜像" "并行预拉取并验签目标镜像"
+  pull_verified_images_parallel
 fi
 
 # 新版 compose 在解析任何服务前都要求 UPDATER_TOKEN。先补齐并与 JWT
@@ -499,7 +556,7 @@ if (( REQUIRES_BACKUP == 1 )); then
     warn "已由操作者确认存在可恢复备份，跳过自动备份。"
   else
     log "迁移前创建数据库与持久化卷备份"
-    TELEPILOT_BACKUP_QUIESCE=1 "$ROOT_DIR/deploy/backup.sh"
+    TELEPILOT_BACKUP_QUIESCE=1 bash "$ROOT_DIR/deploy/backup.sh"
     ok "迁移前备份已完成；尚未启动新版容器或执行迁移。"
   fi
 fi
@@ -541,8 +598,60 @@ rollback_web_runtime_image() {
   warn "web 已回到更新前镜像；仓库保留在目标 commit，后续可直接重试"
 }
 
+# 把目标 commit 的只读前端源码镜像热替换进运行中的 web 容器，不重启进程。
+# 只在本次 web 运行代码没有变化时使用（计划 web_sync_scope 仅含 source_mirror）。
+hot_sync_web_source_mirror() {
+  local web_id stage
+  web_id="$(docker compose ps -q web 2>/dev/null || true)"
+  [[ -n "$web_id" ]] || {
+    err "web 容器不存在，不能热替换源码镜像"
+    return 1
+  }
+  stage="/tmp/telepilot-mirror-${NEW_COMMIT:0:12}-$$"
+  docker exec "$web_id" sh -c 'rm -rf "$1" && mkdir -p "$1"' sh "$stage"
+  git archive "$NEW_COMMIT" \
+    frontend/src frontend/package.json frontend/tsconfig.json \
+    frontend/tsconfig.app.json frontend/vite.config.ts \
+    | docker cp - "$web_id:$stage"
+  # 同一文件系统内 rename 交换目录，读取方不会看到半套文件。
+  docker exec "$web_id" sh -c '
+    set -eu
+    stage="$1"
+    mkdir -p /app/source
+    rm -rf /app/source/frontend.previous
+    if [ -d /app/source/frontend ]; then mv /app/source/frontend /app/source/frontend.previous; fi
+    mv "$stage/frontend" /app/source/frontend
+    rm -rf /app/source/frontend.previous "$stage"
+  ' sh "$stage"
+  printf '%s\n' "$NEW_COMMIT" \
+    | docker exec -i "$web_id" sh -c 'cat > /app/.telepilot-runtime-commit'
+  ok "web 只读源码镜像已热替换（web 与账号 worker 未重启）"
+}
+
+# 删除不再被任何容器、.env 或回滚记录引用的旧文件同步补丁镜像，避免每次
+# 后端更新都在小磁盘上累积一份完整的 backend 层。只删 telepilot-web-runtime:*。
+prune_web_runtime_images() {
+  local keep_file previous_file ref
+  keep_file="$(mktemp "${TMPDIR:-/tmp}/telepilot-keep.XXXXXX")"
+  previous_file="$(git rev-parse --git-path telepilot-deploy-previous.json)"
+  {
+    docker ps -a --format '{{.Image}}' 2>/dev/null || true
+    grep -E '^TELEPILOT_WEB_IMAGE=' .env 2>/dev/null | cut -d= -f2- | tr -d ' "' || true
+    [[ -f "$previous_file" ]] && python3 -c 'import json,sys; print((json.load(open(sys.argv[1])).get("images") or {}).get("web") or "")' "$previous_file" 2>/dev/null || true
+    printf '%s\n' "$WEB_SYNC_IMAGE_REF" "$WEB_SYNC_OLD_IMAGE_REF"
+  } | sed '/^$/d' | sort -u > "$keep_file"
+  while IFS= read -r ref; do
+    [[ -n "$ref" ]] || continue
+    grep -Fxq "$ref" "$keep_file" && continue
+    docker image rm "$ref" >/dev/null 2>&1 && log "已清理旧补丁镜像：$ref" || true
+  done < <(docker image ls --format '{{.Repository}}:{{.Tag}}' telepilot-web-runtime 2>/dev/null || true)
+  rm -f "$keep_file"
+}
+
 sync_web_runtime_image() {
+  local mode="${1:-restart}"
   local web_id image_ref image_cmd image_entrypoint project stage new_image_id runtime_ref
+  local base_ref
   web_id="$(docker compose ps -q web 2>/dev/null || true)"
   [[ -n "$web_id" ]] || {
     err "web 容器不存在，不能执行文件同步快速更新"
@@ -554,8 +663,15 @@ sync_web_runtime_image() {
     return 1
   fi
   docker image inspect "$image_ref" >/dev/null
+  # 补丁镜像始终叠在最初的预构建镜像上，而不是上一张补丁镜像上：否则每次文件
+  # 同步都会多一层，连续多次更新后层数逼近 overlay 上限且磁盘持续增长。
+  # 补丁会整目录替换全部受控运行文件，所以基于哪一张起点内容都一致。
+  base_ref="$(docker image inspect --format '{{ index .Config.Labels "org.telepilot.runtime-base" }}' "$image_ref" 2>/dev/null || true)"
+  if [[ -z "$base_ref" || "$base_ref" == "<no value>" ]] || ! docker image inspect "$base_ref" >/dev/null 2>&1; then
+    base_ref="$image_ref"
+  fi
   image_cmd="$(docker image inspect --format '{{json .Config.Cmd}}' "$image_ref")"
-  image_entrypoint="$(docker image inspect --format '{{json .Config.Entrypoint}}' "$image_ref")"
+  image_entrypoint="$(docker image inspect --format '{{json .Config.Entrypoint}}' "$base_ref")"
   [[ "$image_cmd" == "null" ]] && image_cmd="[]"
   if [[ "$image_entrypoint" != "null" && "$image_entrypoint" != "[]" ]]; then
     err "web 基础镜像设置了自定义 ENTRYPOINT，无法安全生成文件补丁镜像"
@@ -565,7 +681,7 @@ sync_web_runtime_image() {
   project="$(compose_project_name)"
   PATCH_CONTAINER="${project}-web-patch-${NEW_COMMIT:0:12}-$$"
   stage="/tmp/telepilot-runtime-${NEW_COMMIT:0:12}"
-  docker create --name "$PATCH_CONTAINER" "$image_ref" \
+  docker create --name "$PATCH_CONTAINER" "$base_ref" \
     python -c 'import time; time.sleep(600)' >/dev/null
   docker start "$PATCH_CONTAINER" >/dev/null
   docker exec "$PATCH_CONTAINER" mkdir -p "$stage"
@@ -600,11 +716,17 @@ sync_web_runtime_image() {
   new_image_id="$(docker commit \
     --message "TelePilot 文件同步 ${OLD_COMMIT:0:12} -> ${NEW_COMMIT:0:12}" \
     --change "CMD $image_cmd" \
+    --change "LABEL org.telepilot.runtime-base=$base_ref" \
     "$PATCH_CONTAINER" "$runtime_ref")"
-  WEB_SYNC_ACTIVE=1
   docker rm -f "$PATCH_CONTAINER" >/dev/null
   PATCH_CONTAINER=""
-  log "web 运行文件已生成补丁镜像：${new_image_id:0:19}"
+  log "web 运行文件已生成补丁镜像：${new_image_id:0:19}（基础镜像 ${base_ref}）"
+  if [[ "$mode" == "hot" ]]; then
+    # 运行代码未变化：补丁镜像只用于以后重建 web 时保持一致，当前容器热替换即可。
+    hot_sync_web_source_mirror
+    return 0
+  fi
+  WEB_SYNC_ACTIVE=1
   if ! env TELEPILOT_WEB_IMAGE="$runtime_ref" \
     docker compose up -d --no-build --no-deps --force-recreate web; then
     rollback_web_runtime_image || true
@@ -679,6 +801,7 @@ persist_switched_services() {
 }
 
 sync_tracked_plugins() {
+  local skip_restart="${1:-0}"
   local stage old_list new_list old_tree preserved_roots path target relative plugin_root expected actual
   stage="$(mktemp -d "${TMPDIR:-/tmp}/telepilot-plugins.XXXXXX")"
   old_list="$stage/old-files"
@@ -736,6 +859,11 @@ sync_tracked_plugins() {
       "$target"
     docker compose cp "$stage/$path" "web:$target"
   done < "$new_list"
+  if [[ "$skip_restart" == "1" ]]; then
+    # 随后的 web 代码同步会重建容器并加载新插件，这里不再单独重启一次。
+    ok "Git 跟踪插件已同步到持久卷；随后的 web 重建会加载它们"
+    return 0
+  fi
   docker compose restart web >/dev/null
   wait_compose_healthy docker-compose.yml web 120
   ok "Git 跟踪插件已同步到持久卷；运行期配置与其它已安装插件保持不动"
@@ -914,13 +1042,23 @@ else
 
   if (( NEEDS_PLUGIN_SYNC == 1 )); then
     emit_progress 52 "同步插件" "只覆盖 Git 跟踪的插件文件"
-    sync_tracked_plugins
+    if (( NEEDS_BACKEND_SYNC == 1 && WEB_SYNC_CODE == 1 && NEEDS_BACKEND_REBUILD == 0 )); then
+      sync_tracked_plugins 1
+    else
+      sync_tracked_plugins
+    fi
   fi
 
-  if (( NEEDS_BACKEND_SYNC == 1 )); then
-    emit_progress 60 "同步运行文件" "覆盖目标 commit 的后端与诊断源码并重启 web"
-    log "文件级同步服务：web（无需执行 docker build）"
-    sync_web_runtime_image
+  if (( NEEDS_BACKEND_SYNC == 1 && NEEDS_BACKEND_REBUILD == 0 )); then
+    if (( WEB_SYNC_CODE == 1 )); then
+      emit_progress 60 "同步运行文件" "覆盖目标 commit 的后端与诊断源码并重启 web"
+      log "文件级同步服务：web（无需执行 docker build）"
+      sync_web_runtime_image
+    elif (( WEB_SYNC_MIRROR == 1 )); then
+      emit_progress 60 "同步运行文件" "热替换 web 内只读源码镜像，不重启 web"
+      log "文件级同步服务：web 只读源码镜像（运行代码未变化，不重启）"
+      sync_web_runtime_image hot
+    fi
   fi
 
   emit_progress 78 "健康检查" "等待新容器 ready"
@@ -978,12 +1116,13 @@ fi
 
 # 文档和 CHANGELOG 只同步公开文件，不重建或重启任何服务。放在业务服务
 # 健康检查之后，避免失败部署把运行时说明提前切到未成功上线的 commit。
-"$SCRIPT_DIR/sync-runtime-content.sh"
+bash "$SCRIPT_DIR/sync-runtime-content.sh"
 
 if [[ -n "$WEB_SYNC_IMAGE_REF" ]]; then
   set_env_value .env TELEPILOT_WEB_IMAGE "$WEB_SYNC_IMAGE_REF"
 fi
 persist_switched_services
+prune_web_runtime_images || true
 
 if (( TOKEN_ROTATION_HOST_RECREATE == 1 )); then
   token_web_id="$(docker compose ps -q web 2>/dev/null || true)"
