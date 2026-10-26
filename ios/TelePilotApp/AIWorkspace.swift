@@ -93,15 +93,15 @@ struct AIWorkspaceView: View {
     @State private var section: AISection = .overview
     @State private var showLiveness = false
     @State private var showAddProvider = false
-    @State private var providerSearch = ""
-    @State private var usageSearch = ""
+    /// 页面级搜索（导航栏左上角放大镜 → 系统搜索栏），作用于当前分页。
+    @State private var search = ""
+    @State private var searching = false
 
-    /// 当前分页的搜索内容；概览没有可搜索的列表，不显示搜索栏。
-    private var searchBinding: Binding<String>? {
+    private var searchPrompt: String {
         switch section {
-        case .overview: nil
-        case .providers: $providerSearch
-        case .usage: $usageSearch
+        case .overview: "搜索供应商、类型或模型"
+        case .providers: "搜索供应商、类型或模型"
+        case .usage: "搜索供应商、模型、来源或错误"
         }
     }
 
@@ -109,26 +109,30 @@ struct AIWorkspaceView: View {
         List {
             // 分段切换（及当前分页的搜索栏）作为滚动内容的第一行，随内容一起滚动。曾挂在 `.safeAreaBar(edge: .top)` 上，
             // 与大标题导航栏的折叠/展开互相改变顶部安全区，滑到顶部时顶栏会持续抖动。
+            // 行内只放分段控件：iOS 26 分组列表按卡片圆角裁切行内容，分段与搜索框挤在同一高行时四角会被切掉。
             Section {
-                SegmentedSearchHeader(picker: {
-                    Picker("AI 工作区", selection: $section) {
-                        ForEach(AISection.allCases) { item in Text(item.title).tag(item) }
-                    }
-                    .pickerStyle(.segmented)
-                    .labelsHidden()
-                    .accessibilityIdentifier("ai.sections")
-                }, search: searchBinding,
-                   prompt: section == .usage ? "搜索供应商、模型、来源或错误" : "搜索供应商、类型或模型",
-                   identifier: "ai.search")
+                Picker("AI 工作区", selection: $section) {
+                    ForEach(AISection.allCases) { item in Text(item.title).tag(item) }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .accessibilityIdentifier("ai.sections")
                 .pageHeaderRow()
             }
             .listSectionSeparator(.hidden)
             switch section {
-            case .overview: AIOverviewSection(workspace: workspace, showUsage: { section = .usage }, showLiveness: { showLiveness = true })
-            case .providers: AIProviderListSection(workspace: workspace, search: providerSearch)
-            case .usage: AIUsageSection(workspace: workspace, search: usageSearch)
+            case .overview:
+                // 概览没有可搜索的列表：在概览里搜索时直接显示匹配的供应商。
+                if search.isEmpty {
+                    AIOverviewSection(workspace: workspace, showUsage: { section = .usage }, showLiveness: { showLiveness = true })
+                } else {
+                    AIProviderListSection(workspace: workspace, search: search)
+                }
+            case .providers: AIProviderListSection(workspace: workspace, search: search)
+            case .usage: AIUsageSection(workspace: workspace, search: search)
             }
         }
+        .pageSearch(text: $search, isActive: $searching, prompt: searchPrompt, identifier: "ai.search")
         .navigationTitle("AI")
         .navigationDestination(isPresented: $showLiveness) {
             AILivenessView(workspace: workspace)

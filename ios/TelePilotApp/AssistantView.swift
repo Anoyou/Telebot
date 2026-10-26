@@ -142,12 +142,21 @@ struct AssistantView: View {
                 }.padding().frame(maxWidth: .infinity, alignment: .leading).background(.orange.opacity(0.1))
             }
             ScrollViewReader { proxy in
+                // 最新一轮的用户消息与回答在这里算一次，不在每一行里重复遍历全部消息。
+                let latestUser = self.latestUser
+                let latestAssistant = self.latestAssistant(after: latestUser)
+                let idle = !store.runActive && !store.busy
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 24) {
-                        if store.hasOlderMessages && !store.messages.isEmpty {
+                        if store.hasOlderMessages && !store.messages.isEmpty && store.revealStart == 0 {
                             olderMessagesRow(proxy)
                         }
-                        if store.messages.isEmpty && store.liveText.isEmpty && !store.loading {
+                        if store.messages.isEmpty && !store.initialLoadFinished {
+                            // 首次读取尚未结束：固定高度的占位，不闪“空会话”提示，也不改变滚动区域。
+                            ProgressView("正在读取对话…")
+                                .frame(maxWidth: .infinity, minHeight: 160)
+                                .accessibilityIdentifier("assistant.loading")
+                        } else if store.messages.isEmpty && store.liveText.isEmpty && !store.loading {
                             ContentUnavailableView("有什么需要处理？", systemImage: "sparkles", description: Text(store.sessionID == nil ? "新建会话，开始管理你的 TelePilot。" : "可以查询运行状态、排查问题或安排任务。涉及写入的操作会请求确认。"))
                                 .padding(.top, 48)
                             if store.sessionID == nil {
@@ -157,17 +166,24 @@ struct AssistantView: View {
                         }
                         // 分组与 Markdown 预处理已在后台完成（store.entries / store.rendered）；
                         // 消息行是 Equatable 视图，输入框打字或流式输出时不会重新计算历史消息。
-                        ForEach(store.entries) { entry in
+                        // 打开会话时先显示最近一屏（store.revealStart 之后），其余逐帧向上追加。
+                        ForEach(store.entries[min(store.revealStart, store.entries.count)...]) { entry in
                             if let item = entry.item {
-                                AssistantMessageView(item: item, rendered: store.renderedFor(item), tools: entry.tools,
-                                                     mayRegenerate: item.id == latestAssistant?.id && !store.runActive && !store.busy) {
+                                // 消息操作：我的消息下「复制消息／编辑消息」，回答下「复制回复／重新生成」。
+                                // 编辑与重新生成只针对最新一轮（服务器 regenerate 接口的语义），任务执行中不提供。
+                                AssistantMessageView(item: item, rendered: entry.rendered, tools: entry.tools,
+                                                     mayRegenerate: idle && item.id == latestAssistant?.id,
+                                                     mayEdit: idle && latestAssistant != nil && item.id == latestUser?.id) {
                                     Task { await store.retry(item, model: model) }
                                 } regenerate: {
-                                    if let user = latestUser {
+                                    // 行是 Equatable 视图，闭包可能是旧的：点按时再从 store 读取最新一轮。
+                                    if let user = self.latestUser {
                                         Task { await store.regenerate(user: user, assistant: item, edited: nil, model: model) }
                                     }
                                 } edit: {
-                                    if let user = latestUser { editingPair = AssistantEditPair(user: user, assistant: item) }
+                                    if let assistant = self.latestAssistant(after: self.latestUser) {
+                                        editingPair = AssistantEditPair(user: item, assistant: assistant)
+                                    }
                                 }
                                 .equatable()
                                 .id(entry.id)
@@ -184,7 +200,11 @@ struct AssistantView: View {
                     .frame(maxWidth: 860)
                     .frame(maxWidth: .infinity)
                 }
-                .defaultScrollAnchor(.bottom)
+                // 初次打开与内容不满一屏时贴底；内容高度变化（行测量、图片解码、读取更早消息）只在用户停留在底部时
+                // 保持贴底。原来对所有情况都贴底：加载期间每次高度变化都把正在上翻的用户拉回底部，看起来“只能滚一小段”。
+                .defaultScrollAnchor(.bottom, for: .initialOffset)
+                .defaultScrollAnchor(.bottom, for: .alignment)
+                .defaultScrollAnchor(pinnedToBottom ? .bottom : nil, for: .sizeChanges)
                 .scrollDismissesKeyboard(.interactively)
                 .refreshable { await store.refreshMessages(model); await store.restoreRun(model) }
                 // 用户停留在底部附近时才跟随；向上翻阅历史时不打断。
@@ -192,9 +212,14 @@ struct AssistantView: View {
                     geometry.visibleRect.maxY >= geometry.contentSize.height - 80
                 } action: { _, nearBottom in pinnedToBottom = nearBottom }
                 // 只在出现新的最后一条消息时滚到底部；在顶部插入更早的消息不触发。
-                .onChange(of: store.messages.last?.id) { _, _ in
+                // 首次出现内容时不做动画（由初始锚点负责），避免整页从顶部滑到底部。
+                .onChange(of: store.messages.last?.id) { old, _ in
                     pinnedToBottom = true
-                    withAnimation { proxy.scrollTo("assistant.bottom", anchor: .bottom) }
+                    if old == nil {
+                        proxy.scrollTo("assistant.bottom", anchor: .bottom)
+                    } else {
+                        withAnimation { proxy.scrollTo("assistant.bottom", anchor: .bottom) }
+                    }
                 }
             }
             .overlay(alignment: minimizeOnLeading ? .bottomLeading : .bottomTrailing) {
@@ -220,12 +245,16 @@ struct AssistantView: View {
             }
         }
         .frame(maxWidth: .infinity)
-        .onAppear { Task { await loadOlder(proxy) } }
+        // 只在首屏读取结束、显示的是服务器数据后才自动读取更早的消息；加载期间顶部行短暂可见不会连锁触发分页。
+        .onAppear {
+            guard store.initialLoadFinished, !store.showingCached else { return }
+            Task { await loadOlder(proxy) }
+        }
         .accessibilityIdentifier("assistant.older")
     }
 
     private func loadOlder(_ proxy: ScrollViewProxy) async {
-        guard !store.loadingOlder, store.hasOlderMessages, let anchor = store.entries.first?.id else { return }
+        guard !store.loadingOlder, store.hasOlderMessages, store.revealStart == 0, let anchor = store.entries.first?.id else { return }
         await store.refreshMessages(model, older: true)
         proxy.scrollTo(anchor, anchor: .top)
     }
@@ -259,8 +288,8 @@ struct AssistantView: View {
     }
 
     private var latestUser: AssistantItem? { store.messages.last { $0.text("role") == "user" } }
-    private var latestAssistant: AssistantItem? {
-        guard let id = latestUser?["id"]?.intValue else { return nil }
+    private func latestAssistant(after user: AssistantItem?) -> AssistantItem? {
+        guard let id = user?["id"]?.intValue else { return nil }
         return store.messages.last { $0.text("role") == "assistant" && ($0["id"]?.intValue ?? 0) > id }
     }
 
@@ -301,6 +330,7 @@ private struct AssistantMessageView: View, Equatable {
     /// 同一轮中的工具结果消息，只在“本轮详情”展开后显示。
     var tools: [AssistantItem] = []
     var mayRegenerate = false
+    var mayEdit = false
     let retry: () -> Void
     let regenerate: () -> Void
     let edit: () -> Void
@@ -309,8 +339,14 @@ private struct AssistantMessageView: View, Equatable {
 
     /// nonisolated：比较的都是 Sendable 的存储属性，Equatable 一致性不跨入主 actor（Swift 6 ConformanceIsolation）。
     nonisolated static func == (lhs: AssistantMessageView, rhs: AssistantMessageView) -> Bool {
-        lhs.item == rhs.item && lhs.rendered == rhs.rendered && lhs.tools == rhs.tools && lhs.mayRegenerate == rhs.mayRegenerate
+        // 预处理结果按 key（消息 ID + 内容哈希）比较，不逐个比较 AttributedString。
+        lhs.item == rhs.item && lhs.rendered?.key == rhs.rendered?.key && lhs.tools == rhs.tools
+            && lhs.mayRegenerate == rhs.mayRegenerate && lhs.mayEdit == rhs.mayEdit
     }
+
+    @State private var copied = false
+    @State private var copyCount = 0
+    @State private var confirmRegenerate = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -358,19 +394,61 @@ private struct AssistantMessageView: View, Equatable {
                 Text("这条消息执行失败，可以查看任务轨迹了解原因。").font(.caption).foregroundStyle(.secondary)
                 Button("重试这条消息", systemImage: "arrow.clockwise", action: retry).font(.caption)
             }
-            if role == "assistant" && mayRegenerate {
-                HStack(spacing: 18) {
-                    Button("重新生成", systemImage: "arrow.trianglehead.2.clockwise", action: regenerate)
-                    Button("编辑后重发", systemImage: "pencil", action: edit)
-                }.font(.caption)
-            }
             if role != "user" {
                 AssistantTurnDetailsView(usage: item["usage"], tools: tools)
             }
+            if role == "user" || role == "assistant" { messageActions }
         }
         .padding(role == "user" ? 14 : 0)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(role == "user" ? Color.accentColor.opacity(0.08) : .clear, in: .rect(cornerRadius: 16))
+    }
+
+    /// 消息下方的操作：小号、次要色的原生按钮（只显示图标，带无障碍标签）。
+    /// - 我的消息：复制消息、编辑消息（编辑后重新生成最新一轮）。
+    /// - 助手回答：复制回复（正文 Markdown，不含本轮详情与工具卡片）、重新生成（需确认，已执行的外部操作不会撤销）。
+    /// 正在生成的回答在 `AssistantLiveReplyView` 里，不显示这些按钮。
+    @ViewBuilder private var messageActions: some View {
+        let isUser = role == "user"
+        HStack(spacing: 0) {
+            if !text.isEmpty {
+                Button(isUser ? "复制消息" : "复制回复", systemImage: copied ? "checkmark" : "doc.on.doc") { copy() }
+                    .accessibilityLabel(copied ? "已复制" : isUser ? "复制消息" : "复制回复")
+                    .accessibilityIdentifier(isUser ? "assistant.message.copy" : "assistant.reply.copy")
+            }
+            if isUser && mayEdit {
+                Button("编辑消息", systemImage: "pencil", action: edit)
+                    .accessibilityLabel("编辑消息")
+                    .accessibilityIdentifier("assistant.message.edit")
+            }
+            if !isUser && mayRegenerate {
+                Button("重新生成", systemImage: "arrow.clockwise") { confirmRegenerate = true }
+                    .accessibilityLabel("重新生成")
+                    .accessibilityIdentifier("assistant.reply.regenerate")
+                    .confirmationDialog("重新生成这一轮回答？", isPresented: $confirmRegenerate, titleVisibility: .visible) {
+                        Button("重新生成", action: regenerate)
+                    } message: { Text("会用当前选择的模型重新回答最新一轮问题并替换现有回答；已经执行的外部操作不会撤销，需要确认的操作仍会请求确认。") }
+            }
+        }
+        .labelStyle(.iconOnly)
+        .buttonStyle(.borderless)
+        .font(.caption)
+        .foregroundStyle(.secondary)
+        .controlSize(.small)
+        .frame(minHeight: 32)
+        .padding(.leading, -8)
+        .sensoryFeedback(.success, trigger: copyCount)
+    }
+
+    private func copy() {
+        UIPasteboard.general.setItems([[UIPasteboard.typeAutomatic: text]], options: [.localOnly: true, .expirationDate: Date().addingTimeInterval(120)])
+        copyCount += 1
+        copied = true
+        let token = copyCount
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(1.5))
+            if copyCount == token { copied = false }
+        }
     }
 }
 
@@ -622,6 +700,7 @@ private struct AssistantSessionsView: View {
     var showsClose = false
     let select: (String) -> Void
     @State private var query = ""
+    @State private var searching = false
     @State private var pendingDelete: AssistantItem?
 
     private var filtered: [AssistantItem] {
@@ -654,7 +733,7 @@ private struct AssistantSessionsView: View {
             }
             .navigationTitle("会话")
             .navigationBarTitleDisplayMode(.inline)
-            .searchable(text: $query, prompt: "搜索会话标题")
+            .pageSearch(text: $query, isActive: $searching, prompt: "搜索会话标题", identifier: "assistant.sessions.search")
             .refreshable { await store.loadSessions(model) }
             .onChange(of: store.includeArchived) { _, _ in Task { await store.loadSessions(model) } }
             .onChange(of: store.includeBot) { _, _ in Task { await store.loadSessions(model) } }

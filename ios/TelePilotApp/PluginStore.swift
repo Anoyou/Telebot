@@ -618,15 +618,14 @@ struct PluginStoreSkeleton: View {
     }
 }
 
-/// 分段头部（与插件中心一致）：作为列表第一个分组，随内容滚动。
+/// 分段头部（与插件中心一致）：作为列表第一个分组，随内容滚动。行内只放分段控件——
+/// 搜索在导航栏左上角（`pageSearch`），不再与分段控件挤在同一个会被分组圆角裁切的高行里。
 private struct PluginStoreHeaderSection: View {
     let header: AnyView?
-    var search: Binding<String>? = nil
-    var prompt = "搜索插件"
     var body: some View {
         if let header {
             Section {
-                SegmentedSearchHeader(picker: { header }, search: search, prompt: prompt, identifier: "plugins.search")
+                header
                     .pageHeaderRow()
             }
             .listSectionSeparator(.hidden)
@@ -658,11 +657,12 @@ struct PluginStoreDestination: View {
 
 struct PluginInstalledView: View {
     let store: PluginStoreModel
+    /// 页面级搜索内容（导航栏左上角的系统搜索栏）。
+    var search = ""
     var header: AnyView? = nil
     @Environment(AppModel.self) private var model
     @State private var route: PluginStoreRoute?
     @State private var confirmUpdateAll = false
-    @State private var search = ""
 
     private func matches(_ key: String, _ feature: JSONValue) -> Bool {
         let query = search.trimmingCharacters(in: .whitespaces)
@@ -674,7 +674,7 @@ struct PluginInstalledView: View {
 
     var body: some View {
         List {
-            PluginStoreHeaderSection(header: header, search: $search, prompt: "搜索已安装的插件")
+            PluginStoreHeaderSection(header: header)
             if let error = store.loadError {
                 Section { NoticeView(title: "插件列表读取失败", message: error + (store.features.isEmpty ? "" : "（下面是上次读取的结果）")) }
             }
@@ -925,9 +925,10 @@ private struct PluginCatalogGroup: Identifiable {
 
 struct PluginDiscoverView: View {
     let store: PluginStoreModel
+    /// 页面级搜索内容（导航栏左上角的系统搜索栏）。
+    var search = ""
     var header: AnyView? = nil
     @Environment(AppModel.self) private var model
-    @State private var search = ""
     @State private var category = "all"
     @State private var route: PluginStoreRoute?
     @State private var confirmEntryID: String?
@@ -958,7 +959,7 @@ struct PluginDiscoverView: View {
 
     var body: some View {
         List {
-            PluginStoreHeaderSection(header: header, search: $search, prompt: "搜索插件名称、简介或标签")
+            PluginStoreHeaderSection(header: header)
             if let error = store.catalogError {
                 Section { NoticeView(title: "插件仓库读取失败", message: error) }
             }

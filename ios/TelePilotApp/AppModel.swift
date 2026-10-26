@@ -71,6 +71,8 @@ final class AppModel {
             isFixture = true
             serverURL = URL(string: "https://ui-test.invalid")
             service = FixtureService(offline: ProcessInfo.processInfo.arguments.contains("--ui-test-offline"))
+            // 每次界面测试从空的助手本机缓存开始，避免上一个用例的会话缓存影响首屏。
+            AssistantHistoryCache.removeAll()
             return
         }
         #endif

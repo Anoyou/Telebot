@@ -6,6 +6,7 @@ struct AccountsView: View {
     @Environment(AppModel.self) private var model
     @Environment(WorkspacePreferences.self) private var preferences
     @State private var search = ""
+    @State private var searching = false
 
     private var filteredAccounts: [Account] {
         guard !search.isEmpty else { return model.accounts }
@@ -72,7 +73,7 @@ struct AccountsView: View {
                         .accessibilityIdentifier("account.add")
                 }
             }
-            .searchable(text: $search, prompt: "姓名、手机号或用户名")
+            .pageSearch(text: $search, isActive: $searching, prompt: "姓名、手机号或用户名", identifier: "accounts.search")
             .refreshable { await model.refresh() }
             .accessibilityIdentifier("accounts.screen")
     }

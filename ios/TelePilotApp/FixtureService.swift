@@ -123,6 +123,22 @@ actor FixtureService: AppServing {
     }
 
     func logout() async throws {}
+
+    /// 长会话界面测试数据（`--ui-test-long-history`）：共 120 条消息，每页 40 条，按 before_id 往前翻。
+    /// 用户消息与带 Markdown（标题、列表、代码块）的助手回答交替，最后一轮是“第 119 条提问 / 第 120 条回答”。
+    static func longHistoryPage(before: Int?) -> JSONValue {
+        let upper = min(before.map { $0 - 1 } ?? 120, 120)
+        guard upper >= 1 else { return [] }
+        let lower = max(1, upper - 39)
+        return .array((lower...upper).map { id -> JSONValue in
+            if id % 2 == 1 {
+                return ["id": .integer(Int64(id)), "role": "user", "content": ["text": .string("第 \(id) 条提问：请检查账号与插件状态。")], "run_status": "completed"]
+            }
+            let text = "## 第 \(id) 条回答\n\n已检查完毕，以下是结果：\n\n- 账号运行正常\n- 插件全部启用\n- 最近一小时没有错误\n\n```\nstatus: ok\nchecked: \(id)\n```\n\n如需进一步排查，可以告诉我具体的群组或插件。"
+            return ["id": .integer(Int64(id)), "role": "assistant", "content": ["text": .string(text)], "run_status": "completed",
+                    "usage": ["provider_name": "测试供应商", "model": "fixture-model", "input_tokens": 800, "output_tokens": 120, "elapsed_ms": 900, "schema_version": 2]]
+        })
+    }
     /// 含超长行与不可断行 URL，用于检查代码对比视图换行、不横向溢出。
     static let agentSkillLongLine = "- 结果整理成表格，列为：标题、大小、做种/下载、优惠（Free/2xFree/50% 等）、发布时间。标题列写成加粗的详情页链接，不要再单独放“详情页”列。按做种数从高到低排列，同名多版本时优先显示官种。"
     static let agentSkillUpstreamMarkdown = (["---", "name: group-helper", "description: 群聊答疑助手", "---", "", "# 群聊答疑助手", "", "## PT 站点搜索", "",
@@ -214,6 +230,10 @@ actor FixtureService: AppServing {
         if clean.hasPrefix("/api/system-agent/sessions/"), method == "DELETE" {
             return ["ok": true, "deleted": .string(String(clean.dropFirst("/api/system-agent/sessions/".count)))]
         }
+        if clean.hasSuffix("/messages"), ProcessInfo.processInfo.arguments.contains("--ui-test-long-history") {
+            let before = URLComponents(string: path)?.queryItems?.first { $0.name == "before_id" }?.value.flatMap(Int.init)
+            return Self.longHistoryPage(before: before)
+        }
         if clean.hasSuffix("/messages") {
             return [["id": 1, "role": "assistant", "content": ["text": "服务状态正常。这里是界面测试数据。"], "run_status": "completed",
                      "usage": ["provider_name": "测试供应商", "model": "fixture-model", "input_tokens": 1200, "output_tokens": 340,
@@ -233,7 +253,12 @@ actor FixtureService: AppServing {
             if clean == "/api/system-agent/runs" { return [] }
             return ["id": "fixture-run", "session_id": "fixture-session", "status": "succeeded"]
         }
-        if clean == "/api/system-agent/capabilities" { return ["enabled": true, "model_matrix": []] }
+        if clean == "/api/system-agent/capabilities" {
+            return ["enabled": true, "model_matrix": [
+                ["provider_id": 1, "provider_name": "测试供应商", "model": "openai/fixture-model", "enabled": true],
+                ["provider_id": 1, "provider_name": "测试供应商", "model": "anthropic/fixture-model-with-a-much-longer-name", "enabled": true]
+            ]]
+        }
         if let match = clean.firstMatch(of: #/^\/api\/plugins\/install\/([^\/]+)\/(enable|disable)$/#), method == "POST" {
             pluginGlobalEnabled[String(match.1)] = match.2 == "enable"
             return ["key": .string(String(match.1)), "enabled": .bool(match.2 == "enable")]

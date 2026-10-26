@@ -23,6 +23,7 @@ struct ManagementCollectionView: View {
     @State private var error: String?
     @State private var loading = false
     @State private var search = ""
+    @State private var searching = false
     @State private var filters: JSONValue = .object([:])
     @State private var filtering = false
     @State private var exporting = false
@@ -68,7 +69,7 @@ struct ManagementCollectionView: View {
             }
         }
         .navigationTitle(resource.title).navigationBarTitleDisplayMode(.inline)
-        .searchable(text: $search, prompt: "搜索本页记录")
+        .pageSearch(text: $search, isActive: $searching, prompt: "搜索本页记录", identifier: "collection.search")
         .task { await load() }.refreshable { await load() }
         .toolbar {
             ToolbarItemGroup(placement: .topBarTrailing) {
