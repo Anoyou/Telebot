@@ -233,24 +233,17 @@ struct AIModelChatTestView: View {
             ForEach(options, id: \.self) { item in
                 let id = item["id"]?.stringValue ?? ""
                 let isOn = selected.contains(id)
-                Button {
-                    if isOn { selected.remove(id) } else if selected.count < Self.limit { selected.insert(id) }
-                } label: {
-                    HStack {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(AIModelTestOptions.title(item)).foregroundStyle(.primary)
-                            Text(item["enabled"]?.boolValue == true ? id : id + "（未启用）")
-                                .font(.caption).foregroundStyle(.secondary)
-                        }
-                        Spacer()
-                        Image(systemName: isOn ? "checkmark.circle.fill" : "circle")
-                            .foregroundStyle(isOn ? Color.accentColor : Color.secondary)
-                            .imageScale(.large)
+                // 原生多选：每个模型一行系统 Toggle（与“擅长的任务”等多选页一致），不再手绘勾选圆圈。
+                Toggle(isOn: Binding(get: { isOn }, set: { on in
+                    if !on { selected.remove(id) } else if selected.count < Self.limit { selected.insert(id) }
+                })) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(AIModelTestOptions.title(item))
+                        Text(item["enabled"]?.boolValue == true ? id : id + "（未启用）")
+                            .font(.caption).foregroundStyle(.secondary)
                     }
-                    .contentShape(Rectangle())
                 }
                 .disabled(busy || (!isOn && selected.count >= Self.limit))
-                .accessibilityAddTraits(isOn ? .isSelected : [])
                 .accessibilityIdentifier("ai.chattest.model.\(id)")
             }
         } header: {

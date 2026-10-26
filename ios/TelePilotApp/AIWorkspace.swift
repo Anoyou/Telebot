@@ -120,9 +120,7 @@ struct AIWorkspaceView: View {
                 }, search: searchBinding,
                    prompt: section == .usage ? "搜索供应商、模型、来源或错误" : "搜索供应商、类型或模型",
                    identifier: "ai.search")
-                .listRowBackground(Color.clear)
-                .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
-                .listRowSeparator(.hidden)
+                .pageHeaderRow()
             }
             .listSectionSeparator(.hidden)
             switch section {

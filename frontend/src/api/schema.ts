@@ -3775,6 +3775,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/system-agent/checkup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * System Checkup
+         * @description 一键体检：与助手“体检一下”调用同一个只读工具，不经过模型、不修改任何配置。
+         */
+        get: operations["system_checkup_api_system_agent_checkup_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/system-agent/config": {
         parameters: {
             query?: never;
@@ -11614,6 +11634,92 @@ export interface components {
             content?: string | null;
             /** Enabled */
             enabled?: boolean | null;
+        };
+        /**
+         * SystemCheckupOut
+         * @description 一键体检结果（只读，与助手工具 diagnostics.system_checkup 同源）。
+         */
+        SystemCheckupOut: {
+            /**
+             * Business Changed
+             * @default false
+             */
+            business_changed: boolean;
+            /** Checked At */
+            checked_at: string;
+            /** Counts */
+            counts?: {
+                [key: string]: number;
+            };
+            /**
+             * Elapsed Ms
+             * @default 0
+             */
+            elapsed_ms: number;
+            /**
+             * Kind
+             * @default system_checkup
+             */
+            kind: string;
+            /** Next Steps */
+            next_steps?: components["schemas"]["SystemCheckupStepOut"][];
+            /** Note */
+            note?: string | null;
+            /** Sections */
+            sections?: components["schemas"]["SystemCheckupSectionOut"][];
+            /** Unknown Sections */
+            unknown_sections?: string[];
+            /** Verdict */
+            verdict: string;
+            /** Verdict Text */
+            verdict_text: string;
+            /** Window Hours */
+            window_hours: number;
+        };
+        /** SystemCheckupSectionOut */
+        SystemCheckupSectionOut: {
+            /**
+             * Elapsed Ms
+             * @default 0
+             */
+            elapsed_ms: number;
+            /** Facts */
+            facts?: {
+                [key: string]: unknown;
+            };
+            /** Finding */
+            finding: string;
+            /** Key */
+            key: string;
+            /** Next Steps */
+            next_steps?: components["schemas"]["SystemCheckupStepOut"][];
+            /** Reason */
+            reason?: string | null;
+            /** Status */
+            status: string;
+            /** Title */
+            title: string;
+        };
+        /**
+         * SystemCheckupStepOut
+         * @description 体检建议的下一步（文本面向用户与助手，tool 为可执行该步的助手工具名）。
+         */
+        SystemCheckupStepOut: {
+            /** Order */
+            order?: number | null;
+            /**
+             * Requires Confirmation
+             * @default false
+             */
+            requires_confirmation: boolean;
+            /** Section */
+            section?: string | null;
+            /** Severity */
+            severity: string;
+            /** Text */
+            text: string;
+            /** Tool */
+            tool?: string | null;
         };
         /**
          * SystemConsoleLogsRequest
@@ -25842,6 +25948,57 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SystemAgentCapabilitiesOut"];
+                };
+            };
+            /** @description 认证失败 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description 服务器内部错误 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    system_checkup_api_system_agent_checkup_get: {
+        parameters: {
+            query?: {
+                hours?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: {
+                auth_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SystemCheckupOut"];
                 };
             };
             /** @description 认证失败 */

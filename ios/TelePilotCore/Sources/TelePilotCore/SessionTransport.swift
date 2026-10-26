@@ -285,6 +285,8 @@ actor SessionTransport: ClientTransport {
     /// 客户端先超时，用户误以为失败而重复提交（例如插件安装第二次撞上“已安装”的 409）。
     static func isSlowOperation(_ path: String, write: Bool) -> Bool {
         if ["/api/system/check-update", "/api/system/pull-update", "/api/system/update-target-options"].contains(path) { return true }
+        // 一键体检在服务器上顺序跑 10 项只读检查，总预算约 25 秒，超过普通请求的 20 秒超时。
+        if !write, path == "/api/system-agent/checkup" { return true }
         let parts = path.split(separator: "/", omittingEmptySubsequences: true)
         // 浏览仓库内插件：首次访问会在服务器上 git clone，与 Web 一样放宽超时（GET /api/plugin-repos/{id}/plugins）。
         if !write, parts.count == 4, parts[0] == "api", parts[1] == "plugin-repos", parts[3] == "plugins", parts[2] != "local" { return true }

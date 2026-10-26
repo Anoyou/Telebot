@@ -45,6 +45,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { AccountSummaryCard } from "@/components/AccountSummaryCard";
+import { SystemCheckupDialog } from "@/components/dashboard/SystemCheckupDialog";
 import { PageHeader, PageShell } from "@/components/layout/PageScaffold";
 import { Spinner } from "@/components/ui/misc";
 import { listAccounts } from "@/api/accounts";
@@ -230,6 +231,7 @@ function DashboardHero({
       description="集中查看 TelePilot 的账号、插件、AI 和资源运行情况；优先暴露需要处理的信号。"
       actions={
         <>
+          <SystemCheckupDialog />
           <Button
             variant="outline"
             className={guideActive ? "siri-glow" : undefined}

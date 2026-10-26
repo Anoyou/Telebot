@@ -404,6 +404,7 @@ struct ClientTests {
         #expect(SessionTransport.isSlowOperation("/api/plugin-repos/3/plugins/interaction-ai-chat/install", write: true))
         #expect(SessionTransport.isSlowOperation("/api/plugin-repos/local/plugins/demo/install", write: true))
         #expect(SessionTransport.isSlowOperation("/api/plugin-repos/3/refresh", write: true))
+        #expect(SessionTransport.isSlowOperation("/api/system-agent/checkup", write: false))
         #expect(SessionTransport.isSlowOperation("/api/commands/llm-providers/3/chat-test-models", write: true))
         #expect(SessionTransport.isSlowOperation("/api/commands/llm-providers/3/test-model", write: true))
         #expect(SessionTransport.isSlowOperation("/api/commands/llm-providers/3/fetch-models", write: true))

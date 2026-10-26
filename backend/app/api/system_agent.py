@@ -61,6 +61,7 @@ from ..schemas.system_agent import (
     SystemAgentUserMemoryCreate,
     SystemAgentUserMemoryOut,
     SystemAgentUserMemoryPatch,
+    SystemCheckupOut,
 )
 from ..services.system_agent import get_system_agent_service
 from ..services.system_agent.actions import (
@@ -235,6 +236,41 @@ async def get_capabilities(db: DBSession, _user: CurrentUser) -> SystemAgentCapa
     svc = get_system_agent_service()
     data = await svc.get_capabilities(db, channel=CHANNEL_WEB, role="admin")
     return SystemAgentCapabilitiesOut(**data)
+
+
+# ── 一键体检 ─────────────────────────────────────────────────────
+def _strip_external_markers(value: Any) -> Any:
+    """体检结果直接展示给用户：去掉给模型看的“外部内容”包裹标记（内容已脱敏）。"""
+
+    from ..services.system_agent.tools._helpers import _EXTERNAL_CLOSE, _EXTERNAL_OPEN
+
+    if isinstance(value, str):
+        return value.replace(_EXTERNAL_OPEN, "").replace(_EXTERNAL_CLOSE, "")
+    if isinstance(value, dict):
+        return {k: _strip_external_markers(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_strip_external_markers(v) for v in value]
+    return value
+
+
+@router.get("/checkup", response_model=SystemCheckupOut)
+async def system_checkup(
+    db: DBSession,
+    user: CurrentUser,
+    hours: int = Query(24, ge=1, le=168),
+) -> SystemCheckupOut:
+    """一键体检：与助手“体检一下”调用同一个只读工具，不经过模型、不修改任何配置。"""
+
+    from ..services.system_agent.context import ToolContext
+    from ..services.system_agent.tools.diagnostics import system_checkup as run_checkup
+
+    ctx = ToolContext(db=db, channel=CHANNEL_WEB, role="admin", web_user_id=getattr(user, "id", None))
+    try:
+        result = await run_checkup(ctx, {"hours": hours})
+    finally:
+        # 只读：丢弃检查过程中可能产生的任何会话状态
+        await db.rollback()
+    return SystemCheckupOut(**_strip_external_markers(result))
 
 
 # ── 长期记忆 ─────────────────────────────────────────────────────

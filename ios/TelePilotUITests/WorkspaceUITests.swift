@@ -29,6 +29,37 @@ final class WorkspaceUITests: XCTestCase {
         XCTAssertTrue(app.buttons["more.search"].exists)
     }
 
+    /// 第五轮：插件、发现、已安装与 AI 页的分段控件同一样式、同一位置（导航标题下方、内容顶部），
+    /// 搜索栏紧贴其下；左右边缘一致，切换页面时不跳动。
+    func testSegmentedHeadersShareFrameAcrossPluginsAndAI() {
+        let app = launch()
+        let plugins = app.tabBars.buttons["插件"]
+        XCTAssertTrue(plugins.waitForExistence(timeout: 45))
+        plugins.tap()
+        XCTAssertTrue(app.buttons["plugin.card.auto_reply"].waitForExistence(timeout: 10))
+        let center = app.segmentedControls.firstMatch.frame
+        let centerSearch = app.searchFields["plugins.search"].firstMatch
+        XCTAssertTrue(centerSearch.exists)
+        XCTAssertEqual(centerSearch.frame.minY - center.maxY, 8, accuracy: 3)
+        app.buttons["plugins.discover"].tap()
+        XCTAssertTrue(app.buttons["plugin.discover.row.weather_digest"].waitForExistence(timeout: 15))
+        let discover = app.segmentedControls.firstMatch.frame
+        app.tabBars.buttons["AI"].tap()
+        XCTAssertTrue(app.segmentedControls.buttons["供应商"].waitForExistence(timeout: 10))
+        app.segmentedControls.buttons["供应商"].tap()
+        let ai = app.segmentedControls.firstMatch.frame
+        let aiSearch = app.searchFields["ai.search"].firstMatch
+        XCTAssertTrue(aiSearch.waitForExistence(timeout: 5))
+        XCTAssertEqual(aiSearch.frame.minY - ai.maxY, 8, accuracy: 3)
+        let message = "插件中心 \(center)，发现 \(discover)，AI \(ai)"
+        XCTAssertEqual(center.minX, ai.minX, accuracy: 1.5, message)
+        XCTAssertEqual(center.width, ai.width, accuracy: 3, message)
+        XCTAssertEqual(discover.minX, ai.minX, accuracy: 1.5, message)
+        XCTAssertEqual(discover.width, ai.width, accuracy: 3, message)
+        XCTAssertEqual(center.height, ai.height, accuracy: 1, message)
+        XCTAssertEqual(centerSearch.frame.height, aiSearch.frame.height, accuracy: 1)
+    }
+
     func testPluginScreenUsesTwoColumnCards() {
         let app = launch()
         let plugins = app.tabBars.buttons["插件"]
@@ -36,7 +67,7 @@ final class WorkspaceUITests: XCTestCase {
         plugins.tap()
         XCTAssertTrue(app.buttons["plugin.card.auto_reply"].waitForExistence(timeout: 10))
         XCTAssertTrue(app.buttons["plugins.category"].exists)
-        XCTAssertTrue(app.buttons["plugins.accountPicker"].exists)
+        XCTAssertTrue(app.descendants(matching: .any)["plugins.accountPicker"].firstMatch.exists)
         // 原「插件管理」拆成 App Store 式的「发现」与「已安装」。
         app.buttons["plugins.installed"].tap()
         XCTAssertTrue(app.buttons["plugins.checkUpdates"].waitForExistence(timeout: 10))

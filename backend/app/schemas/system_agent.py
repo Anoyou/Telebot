@@ -67,6 +67,45 @@ class SystemAgentCapabilitiesOut(BaseModel):
     model_matrix: list[dict[str, Any]] = Field(default_factory=list)
 
 
+class SystemCheckupStepOut(BaseModel):
+    """体检建议的下一步（文本面向用户与助手，tool 为可执行该步的助手工具名）。"""
+
+    severity: str
+    text: str
+    tool: str | None = None
+    requires_confirmation: bool = False
+    section: str | None = None
+    order: int | None = None
+
+
+class SystemCheckupSectionOut(BaseModel):
+    key: str
+    title: str
+    status: str
+    finding: str
+    facts: dict[str, Any] = Field(default_factory=dict)
+    next_steps: list[SystemCheckupStepOut] = Field(default_factory=list)
+    reason: str | None = None
+    elapsed_ms: int = 0
+
+
+class SystemCheckupOut(BaseModel):
+    """一键体检结果（只读，与助手工具 diagnostics.system_checkup 同源）。"""
+
+    kind: str = "system_checkup"
+    checked_at: str
+    window_hours: int
+    verdict: str
+    verdict_text: str
+    counts: dict[str, int] = Field(default_factory=dict)
+    unknown_sections: list[str] = Field(default_factory=list)
+    next_steps: list[SystemCheckupStepOut] = Field(default_factory=list)
+    sections: list[SystemCheckupSectionOut] = Field(default_factory=list)
+    elapsed_ms: int = 0
+    business_changed: bool = False
+    note: str | None = None
+
+
 class SystemAgentSessionCreate(BaseModel):
     account_id: int | None = None
     title: str | None = Field(default=None, max_length=64)
