@@ -376,6 +376,48 @@ async def test_repo_listing_marks_same_name_from_other_source_for_migration(tmp_
     assert plugins[0].update_available is False
 
 
+@pytest.mark.asyncio
+async def test_repo_listing_includes_changelog_excerpt_and_store_metadata(tmp_path) -> None:
+    """仓库插件列表附带 CHANGELOG.md 开头、分类与最低版本，供 App 展示“新功能”；目录外 symlink 不读。"""
+    repo = tmp_path / "repo"
+    _write_repo_plugin(repo, "with_notes", version="1.2.0")
+    meta = json.loads((repo / "with_notes" / "plugin.json").read_text(encoding="utf-8"))
+    meta.update({"category": "interactive", "min_telepilot_version": "0.90.0"})
+    (repo / "with_notes" / "plugin.json").write_text(json.dumps(meta), encoding="utf-8")
+    (repo / "with_notes" / "CHANGELOG.md").write_text(
+        "# 更新日志\n\n## 1.2.0 (2026-10-01)\n- 新增按钮\n" + "- 填充\n" * 4000,
+        encoding="utf-8",
+    )
+    _write_repo_plugin(repo, "no_notes")
+    _write_repo_plugin(repo, "escaped")
+    outside = tmp_path / "secret.md"
+    outside.write_text("## 9.9.9\n- 不应读取\n", encoding="utf-8")
+    (repo / "escaped" / "CHANGELOG.md").symlink_to(outside)
+    row = SimpleNamespace(url="https://github.com/example/plugins.git")
+
+    class _InstalledRows:
+        def all(self):
+            return []
+
+    class _DB:
+        async def execute(self, _stmt):
+            return _InstalledRows()
+
+    plugins = {p.name: p for p in await svc._list_plugins_in_cached_repo(_DB(), row, repo)}
+
+    notes = plugins["with_notes"]
+    assert notes.category == "interactive"
+    assert notes.min_telepilot_version == "0.90.0"
+    assert notes.changelog is not None
+    assert notes.changelog.startswith("# 更新日志")
+    assert "## 1.2.0 (2026-10-01)" in notes.changelog
+    assert len(notes.changelog.encode("utf-8")) <= svc._CHANGELOG_EXCERPT_BYTES
+    assert notes.changelog.endswith("- 填充")
+    assert plugins["no_notes"].changelog is None
+    assert plugins["no_notes"].category is None
+    assert plugins["escaped"].changelog is None
+
+
 def test_same_repo_source_compares_branch_as_part_of_source() -> None:
     assert svc._same_repo_source(
         "https://github.com/example/plugins/tree/main",

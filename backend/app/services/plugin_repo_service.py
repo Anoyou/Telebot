@@ -364,6 +364,33 @@ def _scan_plugins(repo_dir: Path) -> list[tuple[str, Path]]:
     return results
 
 
+_CHANGELOG_EXCERPT_BYTES = 8 * 1024
+
+
+def _read_changelog_excerpt(plugin_dir: Path) -> str | None:
+    """读取插件目录 ``CHANGELOG.md`` 开头一段，供客户端展示“新功能”。
+
+    只读不执行；路径解析后必须仍在插件目录内（拒绝指向目录外的 symlink），
+    超过上限时截断到最后一个完整行，读取失败一律视为未提供。
+    """
+    try:
+        root = plugin_dir.resolve()
+        path = (plugin_dir / "CHANGELOG.md").resolve()
+        if not path.is_relative_to(root) or not path.is_file():
+            return None
+        with path.open("rb") as handle:
+            raw = handle.read(_CHANGELOG_EXCERPT_BYTES + 1)
+    except OSError:
+        return None
+    if len(raw) > _CHANGELOG_EXCERPT_BYTES:
+        raw = raw[:_CHANGELOG_EXCERPT_BYTES]
+        cut = raw.rfind(b"\n")
+        if cut > 0:
+            raw = raw[:cut]
+    text = raw.decode("utf-8", errors="replace").strip()
+    return text or None
+
+
 def _version_tuple(raw: str | None) -> tuple[int, ...]:
     return tuple(int(p) for p in re.findall(r"\d+", str(raw or ""))[:3])
 
@@ -476,6 +503,9 @@ async def _list_plugins_in_cached_repo(
                 capabilities=dict(meta.capabilities) if isinstance(meta.capabilities, dict) else {},
                 permissions=list(meta.permissions or []),
                 tags=list(meta.tags or []),
+                category=meta.category,
+                min_telepilot_version=meta.min_telepilot_version or meta.min_telebot_version,
+                changelog=_read_changelog_excerpt(plugin_dir),
                 subdir=subdir,
             )
         )
@@ -1175,6 +1205,9 @@ def list_local_import_candidates() -> list[PluginRepoPlugin]:
                 capabilities=dict(meta.capabilities) if isinstance(meta.capabilities, dict) else {},
                 permissions=list(meta.permissions or []),
                 tags=list(meta.tags or []),
+                category=meta.category,
+                min_telepilot_version=meta.min_telepilot_version or meta.min_telebot_version,
+                changelog=_read_changelog_excerpt(plugin_dir),
                 subdir=str(plugin_dir.relative_to(root)),
             )
         )

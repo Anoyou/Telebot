@@ -13995,6 +13995,30 @@
             "title": "Capabilities",
             "type": "object"
           },
+          "category": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "plugin.json 声明的分类（interactive / automation / utility）",
+            "title": "Category"
+          },
+          "changelog": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "插件目录 CHANGELOG.md 开头最多 8 KiB（通常是最新几个版本）；未提供时为 null",
+            "title": "Changelog"
+          },
           "description": {
             "default": "",
             "title": "Description",
@@ -14050,6 +14074,18 @@
               }
             ],
             "title": "Installed Version"
+          },
+          "min_telepilot_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "plugin.json 声明的最低 TelePilot 版本",
+            "title": "Min Telepilot Version"
           },
           "name": {
             "title": "Name",
@@ -20690,7 +20726,7 @@
   },
   "info": {
     "title": "TelePilot",
-    "version": "0.106.0-beta.3"
+    "version": "0.106.0-beta.4"
   },
   "openapi": "3.1.0",
   "paths": {

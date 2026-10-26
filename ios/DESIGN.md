@@ -41,6 +41,7 @@
 | 备份与维护 | 导入导出 `externaldrive.badge.timemachine`、网络诊断 `stethoscope`、重启服务 `restart.circle`、紧急停止 `exclamationmark.octagon` |
 | 服务器更新面板 | 当前版本 `shippingbox`、最新版本 `sparkles`、更新通道 `arrow.triangle.branch`、选择通道 `arrow.left.arrow.right`、Git 远端 `server.rack`、应用更新 `arrow.down.to.line.circle`、自动检查 `clock.arrow.2.circlepath`、检查频率 `timer` |
 | 插件中心 | 选择配置的账号 `person.crop.circle.badge.checkmark`、分类筛选 `line.3.horizontal.decrease.circle` |
+| 插件发现／已安装／产品页 | 检查更新 `arrow.triangle.2.circlepath`、新功能 `sparkles`、版本历史 `clock.arrow.circlepath`、账号启用与配置 `person.2`、全局配置 `slider.horizontal.3`、安装历史 `clock`、完整技术信息 `info.circle`、权限 `lock`／未申请权限 `lock.open`、高风险能力 `exclamationmark.shield`、管理插件仓库 `books.vertical`、从 Git 地址安装 `link.badge.plus`、从文件安装 `doc.badge.plus`、远程插件记录 `icloud.and.arrow.down`、服务器总开关 `power.circle`、卸载 `trash`；结果：成功 `checkmark.circle.fill`、失败 `exclamationmark.triangle.fill`、结果待确认 `questionmark.circle.fill` |
 | 助手 | 本轮详情 `chart.bar.doc.horizontal`、工具调用 `wrench.and.screwdriver` |
 | Skills | Skills 入口 `sparkles.rectangle.stack`、安装 `plus`／`square.and.arrow.down`、编辑 SKILL.md `square.and.pencil`、查看内容 `doc.text`、与默认版本差异 `plus.forwardslash.minus`、恢复默认 `arrow.uturn.backward`、保留我的修改 `checkmark.circle`、从源地址更新 `arrow.down.circle`、卸载 `trash`、对系统 Agent 启用 `sparkles`、对插件启用 `puzzlepiece.extension`；来源：TelePilot 内置 `shippingbox`、插件内置 `puzzlepiece.extension`、GitHub `chevron.left.forwardslash.chevron.right`、其它 `doc.text` |
 
@@ -52,7 +53,7 @@
 
 允许的玻璃用法（用户明确要求，仅限以下原生 API，均为 iOS 26 SDK）：
 
-- **页面顶部分段切换**（插件中心／插件管理、AI 概览／供应商／用量、待确认操作的状态切换等）：原生 `Picker` + `.pickerStyle(.segmented)`，使用系统默认 `controlSize`（不加大），分段控件本身就是 Liquid Glass 控件；不再包白色卡片、实色背景条或额外 `glassEffect`，避免玻璃叠玻璃。
+- **页面顶部分段切换**（插件中心／发现／已安装、AI 概览／供应商／用量、待确认操作的状态切换等）：原生 `Picker` + `.pickerStyle(.segmented)`，使用系统默认 `controlSize`（不加大），分段控件本身就是 Liquid Glass 控件；不再包白色卡片、实色背景条或额外 `glassEffect`，避免玻璃叠玻璃。
   - 大标题页面（插件、AI 等一级 Tab 根页面）：分段控件放在滚动内容顶部（`List` 的第一个 Section，`listRowBackground(.clear)`、零边距、隐藏分隔线；`ScrollView` 则作为内容第一项），随内容滚动。**禁止**挂在 `.safeAreaBar(edge: .top)` 上——大标题折叠/展开与安全区栏顶部插入互相改变布局，滑到顶部会持续抖动。
   - 行内标题页面（如 sheet 内的“待确认操作”）：可以挂在滚动视图上的 `.safeAreaBar(edge: .top)` 里，由系统负责滚动边缘效果。`safeAreaBar` 必须挂在 `List`／`ScrollView`（或以其为 body 的视图）上，挂在更外层时内容不会让出位置。
 - **筛选胶囊**（例如插件状态筛选）：`Button` + `.buttonStyle(.glass)`，选中项 `.buttonStyle(.glassProminent)`（使用 AccentColor），同一行放进一个 `GlassEffectContainer`，横向滚动时用 `.scrollClipDisabled()` 避免裁掉玻璃边缘。选中状态同时加 `.isSelected` 辅助功能特征，不只靠颜色。
@@ -74,6 +75,16 @@ iPhone 和 iPad 使用系统安全区；支持横竖屏、长中文、辅助功�
 
 通用表单根据后端契约使用原生字段、枚举、对象和数组控件；动态插件遵守服务端 schema。复杂操作保留预览、确认、结果与失败恢复，页面不泄露实现日志。新增功能沿用同一套导航和确认规范。
 
+
+## 插件商店（发现／已安装／产品页）
+
+参考 App Store 的「更新」与产品页：
+
+- 「已安装」：最上方「待更新」（标题带真实数量与「全部更新」），每张卡片显示版本 x → y、发布时间（取插件 CHANGELOG 日期，没有时显示发现时间）、可折叠的「新功能」与单个「更新」；下面「最近已更新」（安装历史中最近 30 天的更新），再下面全部已安装插件。插件 Tab 角标为服务器报告的可更新数。
+- 「发现」：插件仓库与本地参考插件按分类分组，`.searchable` 搜索；未安装显示「获取」（安装前确认），已安装显示「打开」，有同来源新版本显示「更新」。
+- 列表行：生成的圆角方块图标（插件名首字或分类符号，颜色由插件标识决定）、名称、一行简介、一行来源与版本，右侧胶囊按钮；点名称区域进入产品页，「打开」进入插件的账号启用与配置。
+- 产品页：头部大图标、名称、作者与主按钮；横向信息条（版本、权限数、最低 TelePilot 版本、来源与签名、启用账号数）；「新功能」与版本历史；简介；权限；配置与管理；信息；底部「停用与卸载」危险区，确认框挂在各自按钮上。
+- 「全部更新」逐个执行并逐项显示真实结果；某项失败继续下一项，网络中断（结果未知）时停止并重新读取状态。安装、更新、检查更新都不自动重试。没有 CHANGELOG 的插件不显示「新功能」。
 
 ## 导航标题
 

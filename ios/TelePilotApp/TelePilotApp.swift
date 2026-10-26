@@ -98,6 +98,7 @@ private struct MainTabs: View {
             Tab("插件", systemImage: DockItem.plugins.symbol, value: DockItem.plugins) {
                 NavigationStack { PluginManagementView() }
             }
+            .badge(model.pluginUpdateCount)
             .accessibilityIdentifier("dock.plugins")
 
             Tab("AI", systemImage: DockItem.ai.symbol, value: DockItem.ai) {
