@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import type { components } from "@/api/schema";
-import { pluginSkillOptions, sourceLabel } from "./agentSkillOptions.ts";
+import { AGENT_SKILLS_WEB_ENTRY, AGENT_SKILLS_WEB_PATH, pluginSkillOptions, sourceLabel } from "./agentSkillOptions.ts";
 
 type AgentSkill = components["schemas"]["AgentSkillOut"];
 
@@ -34,4 +34,11 @@ test("labels skill sources in Chinese", () => {
   assert.equal(sourceLabel({ source_type: "plugin_bundled", owner_plugin: "interaction-ai-chat" }), "插件内置 · interaction-ai-chat");
   assert.equal(sourceLabel({ source_type: "md_upload", owner_plugin: null }), "上传 SKILL.md");
   assert.equal(sourceLabel({ source_type: "builtin", owner_plugin: null }), "TelePilot 内置");
+});
+
+test("Skills 入口文案与深链一致（不再指向配置面板）", () => {
+  assert.match(AGENT_SKILLS_WEB_ENTRY, /助手/);
+  assert.match(AGENT_SKILLS_WEB_ENTRY, /Skills/);
+  assert.doesNotMatch(AGENT_SKILLS_WEB_ENTRY, /设置面板|配置面板/);
+  assert.equal(AGENT_SKILLS_WEB_PATH, "/assistant?skills=1");
 });

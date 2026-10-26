@@ -31,3 +31,12 @@ export function sourceLabel(item: Pick<AgentSkill, "source_type" | "owner_plugin
       return item.source_type;
   }
 }
+
+/** Web 端 Skills 的入口位置（所有提示文案统一引用，入口变动时只改这里）。 */
+export const AGENT_SKILLS_WEB_ENTRY = "助手页顶部「Skills」按钮";
+
+/** 直接打开助手页 Skills 对话框的深链。 */
+export const AGENT_SKILLS_WEB_PATH = "/assistant?skills=1";
+
+export const AGENT_SKILLS_INTRO =
+  "Skill 是一份 SKILL.md 说明（Anthropic Agent Skills 格式）。助手平时只看到名称和用途，需要时才读取正文；其中脚本永不执行。可分别开放给系统 Agent 与插件，插件还需在自己的配置里选择。";

@@ -1,6 +1,8 @@
 import { useState } from "react";
+import type React from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { FileDiff, Plus, Sparkles, SquarePen } from "lucide-react";
 import {
   editAgentSkill,
   fileToBase64,
@@ -27,6 +29,9 @@ import { Skeleton } from "@/components/ui/misc";
 import { Select } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
+import { AGENT_SKILLS_INTRO } from "@/lib/agentSkillOptions";
+import { SkillDiffViewer } from "@/components/assistant/SkillDiffViewer";
+import { cn } from "@/lib/utils";
 
 const QUERY_KEY = ["agent-skills"];
 type Source = AgentSkillInstall["source"];
@@ -39,7 +44,30 @@ const SOURCE_HINTS: Record<Source, string> = {
   paste: "直接粘贴 SKILL.md 全文（以 --- 包裹的 front matter 开头，含 name 与 description）。",
 };
 
-/** 助手设置面板里的 Agent Skills 管理：列表、启用范围、安装、编辑、更新、卸载。 */
+/** 助手页「Skills」按钮打开的独立对话框：标题与说明在对话框头部，正文是 {@link AgentSkillsSection}。 */
+export function AgentSkillsDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent
+        data-testid="agent-skills-dialog"
+        className="max-h-[min(88dvh,52rem)] max-w-3xl grid-cols-[minmax(0,1fr)] grid-rows-[auto_minmax(0,1fr)] overflow-hidden"
+      >
+        <DialogHeader className="pr-6">
+          <DialogTitle className="flex items-center gap-2">
+            <Sparkles className="h-4 w-4 text-primary" aria-hidden />
+            Skills
+          </DialogTitle>
+          <DialogDescription>{AGENT_SKILLS_INTRO}</DialogDescription>
+        </DialogHeader>
+        <div className="-mx-4 min-h-0 overflow-y-auto overscroll-contain px-4 sm:-mx-6 sm:px-6">
+          <AgentSkillsSection />
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/** Agent Skills 管理：列表、启用范围、安装、编辑、更新、卸载。 */
 export function AgentSkillsSection() {
   const qc = useQueryClient();
   const listQ = useQuery({ queryKey: QUERY_KEY, queryFn: listAgentSkills });
@@ -59,17 +87,14 @@ export function AgentSkillsSection() {
   const builtin = items.filter((item) => item.builtin);
 
   return (
-    <div className="mt-4 border-t pt-3" data-testid="agent-skills-section">
+    <div className="pb-1" data-testid="agent-skills-section">
       <div className="flex items-center justify-between gap-2">
-        <div className="font-medium">Skills</div>
+        <div className="text-sm font-medium">已安装（{installed.length}）</div>
         <Button type="button" size="sm" variant="outline" onClick={() => setInstalling(true)}>
+          <Plus className="h-4 w-4" aria-hidden />
           安装 skill
         </Button>
       </div>
-      <p className="mt-1 text-xs text-muted-foreground">
-        Skill 是一份 SKILL.md 说明（Anthropic Agent Skills 格式）。助手平时只看到名称和用途，需要时才读取正文；其中脚本永不执行。
-        可分别开放给系统 Agent 与插件，插件还需在自己的配置里选择。
-      </p>
       {listQ.isLoading ? (
         <Skeleton className="mt-3 h-10 w-full" />
       ) : listQ.isError ? (
@@ -113,13 +138,13 @@ function SkillRow({
 }) {
   return (
     <div className="rounded-md border border-border/70 bg-background/45 px-3 py-2.5">
-      <div className="flex items-start justify-between gap-2">
-        <button type="button" className="min-w-0 text-left" onClick={onOpen}>
-          <span className="block truncate text-sm font-medium">{item.name}</span>
-          <span className="mt-0.5 line-clamp-2 block text-xs text-muted-foreground">{item.description}</span>
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <button type="button" className="min-w-0 flex-1 basis-48 text-left" onClick={onOpen}>
+          <span className="block truncate font-mono text-sm font-medium">{item.name}</span>
+          <span className="mt-0.5 line-clamp-2 block break-words text-xs text-muted-foreground">{item.description}</span>
         </button>
-        <div className="flex shrink-0 flex-wrap justify-end gap-1">
-          <Badge variant="outline">{sourceLabel(item)}</Badge>
+        <div className="flex min-w-0 max-w-full flex-wrap gap-1">
+          <Badge variant="outline" className="max-w-full truncate">{sourceLabel(item)}</Badge>
           {item.user_modified ? <Badge variant="outline">已修改</Badge> : null}
           {item.upstream_changed ? <Badge>内置有新版本</Badge> : null}
         </div>
@@ -228,12 +253,15 @@ function InstallDialog({ open, onOpenChange, onInstalled }: { open: boolean; onO
   );
 }
 
+type DetailTab = "edit" | "diff";
+
 function DetailDialog({ name, onClose, onChanged }: { name: string; onClose: () => void; onChanged: () => void }) {
   const qc = useQueryClient();
   const detailQ = useQuery({ queryKey: [...QUERY_KEY, name], queryFn: () => getAgentSkill(name) });
   const [draft, setDraft] = useState<string | null>(null);
-  const [showDiff, setShowDiff] = useState(false);
+  const [tab, setTab] = useState<DetailTab>("edit");
   const detail = detailQ.data;
+  const showDiff = tab === "diff" && !!detail?.bundled;
   const upstreamQ = useQuery({
     queryKey: [...QUERY_KEY, name, "upstream"],
     queryFn: () => getAgentSkillUpstream(name),
@@ -246,7 +274,7 @@ function DetailDialog({ name, onClose, onChanged }: { name: string; onClose: () 
   const onError = (error: unknown) => toast.error(getErrMsg(error));
   const saveMut = useMutation({ mutationFn: () => editAgentSkill(name, draft ?? ""), onSuccess: () => { toast.success("已保存"); setDraft(null); refresh(); }, onError });
   const updateMut = useMutation({ mutationFn: () => updateAgentSkill(name), onSuccess: (r) => { toast.success(r.changed ? "已更新到最新内容" : "已是最新"); refresh(); }, onError });
-  const restoreMut = useMutation({ mutationFn: () => restoreAgentSkillDefault(name), onSuccess: () => { toast.success("已恢复默认"); setShowDiff(false); refresh(); }, onError });
+  const restoreMut = useMutation({ mutationFn: () => restoreAgentSkillDefault(name), onSuccess: () => { toast.success("已恢复默认"); setTab("edit"); refresh(); }, onError });
   const keepMut = useMutation({ mutationFn: () => keepAgentSkillModified(name), onSuccess: () => { toast.success("已保留你的修改"); refresh(); }, onError });
   const uninstallMut = useMutation({
     mutationFn: () => uninstallAgentSkill(name),
@@ -254,62 +282,87 @@ function DetailDialog({ name, onClose, onChanged }: { name: string; onClose: () 
     onError,
   });
   const busy = saveMut.isPending || updateMut.isPending || restoreMut.isPending || keepMut.isPending || uninstallMut.isPending;
+  const dirty = draft != null && draft !== detail?.skill_md;
 
   return (
     <Dialog open onOpenChange={(value) => !value && !busy && onClose()}>
-      <DialogContent className="max-w-3xl">
-        <DialogHeader>
-          <DialogTitle>{name}</DialogTitle>
-          <DialogDescription>{detail?.description}</DialogDescription>
+      {/* grid 列用 minmax(0,1fr)：长行不会把列撑出对话框；正文区独立滚动，页头与按钮常驻。 */}
+      <DialogContent
+        data-testid="agent-skill-detail"
+        className="max-h-[min(92dvh,60rem)] max-w-5xl grid-cols-[minmax(0,1fr)] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden"
+      >
+        <DialogHeader className="min-w-0 pr-6">
+          <DialogTitle className="break-all font-mono">{name}</DialogTitle>
+          <DialogDescription className="line-clamp-3 break-words">{detail?.description}</DialogDescription>
         </DialogHeader>
-        {detailQ.isLoading ? <Skeleton className="h-40 w-full" /> : detailQ.isError ? (
-          <p className="text-sm text-destructive">{getErrMsg(detailQ.error)}</p>
-        ) : detail ? (
-          <div className="space-y-3 text-sm">
-            <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
-              <span>来源：{sourceLabel(detail)}</span>
-              {detail.source_url ? <a className="text-primary underline" href={detail.source_url} target="_blank" rel="noreferrer">{detail.source_url}</a> : null}
-              {detail.source_ref ? <span>分支：{detail.source_ref}</span> : null}
-              {detail.source_commit ? <span>提交：{detail.source_commit.slice(0, 12)}</span> : null}
-              {detail.version ? <span>版本：{detail.version}</span> : null}
-              {detail.files.length ? <span>{detail.files.length} 个文件</span> : null}
+        <div className="-mx-4 min-h-0 min-w-0 overflow-y-auto overscroll-contain px-4 sm:-mx-6 sm:px-6">
+          {detailQ.isLoading ? <Skeleton className="h-40 w-full" /> : detailQ.isError ? (
+            <p className="text-sm text-destructive">{getErrMsg(detailQ.error)}</p>
+          ) : detail ? (
+            <div className="min-w-0 space-y-3 text-sm">
+              <div className="flex min-w-0 flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                <span>来源：{sourceLabel(detail)}</span>
+                {detail.source_url ? <a className="min-w-0 break-all text-primary underline" href={detail.source_url} target="_blank" rel="noreferrer">{detail.source_url}</a> : null}
+                {detail.source_ref ? <span>分支：{detail.source_ref}</span> : null}
+                {detail.source_commit ? <span>提交：{detail.source_commit.slice(0, 12)}</span> : null}
+                {detail.version ? <span>版本：{detail.version}</span> : null}
+                {detail.files.length ? <span>{detail.files.length} 个文件</span> : null}
+              </div>
+              {detail.upstream_changed ? (
+                <p className="rounded-md bg-amber-500/10 px-3 py-2 text-xs text-amber-800 dark:text-amber-200">
+                  插件升级带来了新的默认内容（{detail.upstream_version || "新版本"}），你的修改没有被覆盖。可以查看差异后恢复默认，或继续保留自己的修改。
+                </p>
+              ) : null}
+              {detail.skipped_files.length ? (
+                <p className="text-xs text-muted-foreground">已跳过 {detail.skipped_files.length} 个文件（二进制、过大、符号链接或隐藏文件）。</p>
+              ) : null}
+              {detail.bundled ? (
+                <div role="tablist" aria-label="SKILL.md 视图" className="inline-flex rounded-lg border border-border/70 bg-muted/40 p-0.5 text-xs">
+                  <TabButton active={tab === "edit"} onClick={() => setTab("edit")} icon={<SquarePen className="h-3.5 w-3.5" aria-hidden />}>
+                    {detail.editable ? "编辑" : "内容"}{dirty ? " ·未保存" : ""}
+                  </TabButton>
+                  <TabButton active={tab === "diff"} onClick={() => setTab("diff")} icon={<FileDiff className="h-3.5 w-3.5" aria-hidden />}>
+                    与默认版本对比
+                  </TabButton>
+                </div>
+              ) : null}
+              {!showDiff ? (
+                <>
+                  <Textarea
+                    rows={18}
+                    wrap="soft"
+                    spellCheck={false}
+                    className="min-h-[min(50dvh,28rem)] resize-y whitespace-pre-wrap break-words font-mono text-xs leading-5 [overflow-wrap:anywhere]"
+                    readOnly={!detail.editable}
+                    value={draft ?? detail.skill_md}
+                    onChange={(event) => setDraft(event.target.value)}
+                    aria-label="SKILL.md"
+                  />
+                  {!detail.editable ? (
+                    <p className="text-xs text-muted-foreground">
+                      {detail.builtin ? "TelePilot 内置领域技能由程序定义，只能停用。" : "来自 GitHub / zip 链接的 skill 以源地址为准，请修改源后“更新”。"}
+                    </p>
+                  ) : null}
+                </>
+              ) : upstreamQ.isLoading ? <Skeleton className="h-40 w-full" /> : upstreamQ.isError ? (
+                <p className="text-sm text-destructive">{getErrMsg(upstreamQ.error)}</p>
+              ) : upstreamQ.data ? (
+                <SkillDiffViewer
+                  oldText={upstreamQ.data.upstream_skill_md}
+                  newText={draft ?? upstreamQ.data.current_skill_md}
+                  newLabel={dirty ? "当前编辑（未保存）" : "当前版本（你的修改）"}
+                />
+              ) : null}
             </div>
-            {detail.upstream_changed ? (
-              <p className="rounded-md bg-amber-500/10 px-3 py-2 text-xs text-amber-800 dark:text-amber-200">
-                插件升级带来了新的默认内容（{detail.upstream_version || "新版本"}），你的修改没有被覆盖。可以查看差异后恢复默认，或继续保留自己的修改。
-              </p>
-            ) : null}
-            {detail.skipped_files.length ? (
-              <p className="text-xs text-muted-foreground">已跳过 {detail.skipped_files.length} 个文件（二进制、过大、符号链接或隐藏文件）。</p>
-            ) : null}
-            <Textarea
-              rows={14}
-              className="font-mono text-xs"
-              readOnly={!detail.editable}
-              value={draft ?? detail.skill_md}
-              onChange={(event) => setDraft(event.target.value)}
-              aria-label="SKILL.md"
-            />
-            {!detail.editable ? (
-              <p className="text-xs text-muted-foreground">
-                {detail.builtin ? "TelePilot 内置领域技能由程序定义，只能停用。" : "来自 GitHub / zip 链接的 skill 以源地址为准，请修改源后“更新”。"}
-              </p>
-            ) : null}
-            {showDiff ? (
-              upstreamQ.isLoading ? <Skeleton className="h-24 w-full" /> : upstreamQ.data ? (
-                <pre className="max-h-72 overflow-auto rounded-md border bg-muted/40 p-2 text-[11px] leading-5">{upstreamQ.data.diff || "当前内容与默认版本一致。"}</pre>
-              ) : null
-            ) : null}
-          </div>
-        ) : null}
-        <DialogFooter className="flex-wrap gap-2">
+          ) : null}
+        </div>
+        <DialogFooter className="flex-row flex-wrap justify-end gap-2 sm:space-x-0">
           {detail?.editable ? (
-            <Button type="button" disabled={busy || draft == null || draft === detail.skill_md} onClick={() => saveMut.mutate()}>保存修改</Button>
+            <Button type="button" disabled={busy || !dirty} onClick={() => saveMut.mutate()}>保存修改</Button>
           ) : null}
           {detail?.updatable ? <Button type="button" variant="outline" disabled={busy} onClick={() => updateMut.mutate()}>从源地址更新</Button> : null}
           {detail?.bundled ? (
             <>
-              <Button type="button" variant="outline" disabled={busy} onClick={() => setShowDiff((v) => !v)}>{showDiff ? "隐藏差异" : "与默认版本对比"}</Button>
               {detail.user_modified ? (
                 <Button type="button" variant="outline" disabled={busy} onClick={() => { if (confirm("放弃你的修改，恢复为插件内置的默认版本？")) restoreMut.mutate(); }}>恢复默认</Button>
               ) : null}
@@ -329,5 +382,23 @@ function DetailDialog({ name, onClose, onChanged }: { name: string; onClose: () 
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+function TabButton({ active, onClick, icon, children }: { active: boolean; onClick: () => void; icon: React.ReactNode; children: React.ReactNode }) {
+  return (
+    <button
+      type="button"
+      role="tab"
+      aria-selected={active}
+      onClick={onClick}
+      className={cn(
+        "inline-flex min-h-8 items-center gap-1.5 rounded-md px-3 py-1 font-medium transition-colors",
+        active ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
+      )}
+    >
+      {icon}
+      {children}
+    </button>
   );
 }

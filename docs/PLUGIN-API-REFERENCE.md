@@ -212,9 +212,9 @@ class PluginContext:
 - `ctx.ai.complete(..., thinking="disabled"|"enabled")`（0.106.0-beta.2+）：对支持的 OpenAI 兼容上游关闭/开启思考——智谱 / Z.ai（`bigmodel.cn`、`z.ai`、`glm-*`）与 DeepSeek 下发 `thinking={"type": ...}`，阿里云百炼 DashScope（Qwen3）下发 `enable_thinking`；其它上游忽略该参数（OpenAI 官方等会拒绝未知参数）。旧平台的 `complete` 没有这个参数，插件可用 `inspect.signature` 探测后再传。
 - 推理模型的输出 Token 下限：模型名属于常见推理系列（GLM-4.5+/GLM-5、DeepSeek-R1/Reasoner、QwQ/Qwen3、Kimi K2/K3、o1/o3/o4、GPT-5 等）或模型清单声明了推理档位时，`complete` 请求的 `max_tokens` 低于 `PLUGIN_AI_REASONING_MIN_OUTPUT_TOKENS`（默认 4096，0 表示不抬高）会自动抬到该值，避免额度全被推理吃掉；传 `thinking="disabled"` 时不抬高。
 - `ctx.skills`：在 `permissions` 声明 `agent_skills` 后注入（旧版本平台为 `None`，插件需降级）。只读获取 **Agent Skills**（Anthropic `SKILL.md` 目录格式）文本，**从不执行**其中脚本：
-  - `await ctx.skills.list(names=None)` 返回管理员已「对插件启用」的已安装 skill（`name` / `description` / `version` / `files`）；传 `names` 时只返回其中仍可用的，通常传插件配置里的多选值。
+  - `await ctx.skills.list(names=None)` 返回管理员已「对插件启用」（Web 助手页顶部「Skills」按钮、iOS App 助手页右上角「Skills」按钮里的开关）的已安装 skill（`name` / `description` / `version` / `files`）；传 `names` 时只返回其中仍可用的，通常传插件配置里的多选值。
   - `await ctx.skills.load(name, max_chars=None)` 返回 SKILL.md 正文（去掉 front matter，默认截断 8000 字符、上限 16000）；`await ctx.skills.read_file(name, path, max_chars=None)` 读取附属文本文件。不可用时抛 `PluginSkillUnavailable`（`LookupError` 子类）。
-  - `await ctx.skills.bundled(max_chars=None)` 返回**本插件内置**且仍对插件启用的 skill 正文：插件目录 `skills/<name>/SKILL.md` 会在插件加载时由平台登记为内置 skill（默认只对插件启用、不可卸载、可停用）；管理员在 App/Web 编辑后保存为覆盖层，插件升级不会覆盖，只标记「内置有新版本」并允许查看差异、恢复默认或保留修改。
+  - `await ctx.skills.bundled(max_chars=None)` 返回**本插件内置**且仍对插件启用的 skill 正文：插件目录 `skills/<name>/SKILL.md` 会在插件加载时由平台登记为内置 skill（默认只对插件启用、不可卸载、可停用）；管理员在上述 Skills 管理界面编辑后保存为覆盖层，插件升级不会覆盖，只标记「内置有新版本」并允许查看差异、恢复默认或保留修改。
   - 配置里让管理员选择 skills：数组字段声明 `"x-ui-widget": "agent-skill-multi-select"`（`items.type=string`，可选字段、不进 `required`）。卸载 skill 时平台会从所有插件配置的这类字段中移除该名称。
   - 推荐渐进式披露：先只把 `name + description` 交给模型判断要不要用（`ctx.ai.complete` 不支持自定义工具时用两步法），再 `load` 需要的正文拼进最终请求；面向访客时只注入文本并控制长度。
 

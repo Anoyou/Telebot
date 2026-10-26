@@ -74,13 +74,15 @@ struct AssistantView: View {
                             }
                         }
                         ToolbarItemGroup(placement: .topBarTrailing) {
+                            // Skills 单独放在工具栏，不再藏在“助手菜单”里。
+                            Button("Skills", systemImage: "sparkles.rectangle.stack") { panel = .skills }
+                                .accessibilityIdentifier("assistant.skills")
                             Menu {
                                 Button("新建会话", systemImage: "square.and.pencil") { Task { await store.createSession(model) } }
                                 Button("会话设置", systemImage: "slider.horizontal.3") { panel = .settings }.disabled(store.sessionID == nil)
                                 Button("任务与队列", systemImage: "list.bullet.rectangle") { panel = .tasks }
                                 Button("待确认操作", systemImage: "checkmark.shield") { panel = .inbox }
                                 Button("长期记忆", systemImage: "brain") { panel = .memory }
-                                Button("Skills", systemImage: "sparkles.rectangle.stack") { panel = .skills }
                                 Button("运行轨迹", systemImage: "point.3.connected.trianglepath.dotted") { panel = .trace }.disabled(store.runID == nil)
                             } label: { Image(systemName: "ellipsis.circle") }
                             .accessibilityLabel("助手菜单")

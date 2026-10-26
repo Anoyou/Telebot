@@ -309,6 +309,7 @@ BUILTIN_SKILLS: tuple[SkillSpec, ...] = (
             "安装、更新、启停与卸载都只生成待确认 Action；预览会先拉取并校验内容，执行时内容变化会被拒绝。",
             "skill 只作为说明文本提供给模型，其中脚本永不执行；内置技能不可卸载，只能对系统 Agent 停用。",
             "卸载会从所有插件配置中解绑该 skill；对插件启用后，插件还需在自己的配置里选择该 skill 才会使用。",
+            "上传 zip / SKILL.md 文件、编辑正文、查看与默认版本的差异需要管理界面：Web 在助手页顶部「Skills」按钮（配置按钮旁），iOS App 在助手页右上角「Skills」按钮；需要时这样告诉用户。",
         ),
         examples=(
             "安装这个 skill https://github.com/anthropics/skills/tree/main/skills/pdf",

@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { listAgentSkills, pluginSkillOptions } from "@/api/agentSkills";
+import { AGENT_SKILLS_WEB_ENTRY, AGENT_SKILLS_WEB_PATH } from "@/lib/agentSkillOptions";
 import { getErrMsg } from "@/lib/api";
 import { Label } from "@/components/ui/label";
 import { Spinner } from "@/components/ui/misc";
@@ -72,7 +73,7 @@ export function AgentSkillMultiSelectField({
       </div>
       {!query.isLoading && !query.isError && options.length === 0 && stale.length === 0 ? (
         <p className="text-xs text-muted-foreground">
-          还没有对插件启用的 skill。可在 <Link className="text-primary underline" to="/assistant">助手 → 设置面板 → Skills</Link> 安装并打开“插件可用”。
+          还没有对插件启用的 skill。可在 <Link className="text-primary underline" to={AGENT_SKILLS_WEB_PATH}>{AGENT_SKILLS_WEB_ENTRY}</Link> 安装并打开“插件可用”。
         </p>
       ) : null}
     </div>
