@@ -22,6 +22,11 @@ final class TelePilotUITests: XCTestCase {
             if element.exists && element.isHittable { return }
             app.swipeUp()
         }
+        // 目标可能已经滚到屏幕上方（例如先滚到底部的提交按钮），再往回找。
+        for _ in 0..<6 {
+            if element.exists && element.isHittable { return }
+            app.swipeDown()
+        }
         XCTAssertTrue(element.isHittable)
     }
 
@@ -141,6 +146,8 @@ final class TelePilotUITests: XCTestCase {
         if app.buttons["login.submit"].exists { XCTAssertFalse(app.buttons["login.submit"].isEnabled) }
         clientID.tap()
         clientID.typeText("fixture.access")
+        // 先收起键盘，否则下方的 Client Secret 被键盘挡住、无法点按。
+        app.buttons["login.keyboardDone"].firstMatch.tap()
         let secret = app.secureTextFields["login.cfAccess.clientSecret"]
         reveal(secret, app: app)
         secret.tap()
@@ -289,7 +296,10 @@ final class TelePilotUITests: XCTestCase {
         app.buttons["settings.confirmLogout"].firstMatch.tap()
         let retry = app.buttons["login.retryCleanup"]
         XCTAssertTrue(retry.waitForExistence(timeout: 10))
-        XCTAssertFalse(app.buttons["login.submit"].isEnabled)
+        // 懒加载表单：提交按钮在 Cloudflare Access 区下方，先滚动到它再断言。
+        let submit = app.buttons["login.submit"]
+        for _ in 0..<4 where !submit.exists { app.swipeUp() }
+        XCTAssertFalse(submit.isEnabled)
         reveal(retry, app: app)
         retry.tap()
         XCTAssertTrue(app.secureTextFields["login.password"].exists)
