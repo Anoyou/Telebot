@@ -41,7 +41,9 @@ final class WorkspaceUITests: XCTestCase {
         // 搜索栏是 UISearchTextField，在不同系统版本上可能暴露为 SearchField 或 TextField，按标识符查找。
         let centerSearch = app.descendants(matching: .any).matching(identifier: "plugins.search").firstMatch
         XCTAssertTrue(centerSearch.waitForExistence(timeout: 5))
-        XCTAssertEqual(centerSearch.frame.minY - center.maxY, 8, accuracy: 3)
+        // 切到 AI 页后插件页已不在层级中，XCUIElement 会重新查询而失败：先记下搜索栏的 frame。
+        let centerSearchFrame = centerSearch.frame
+        XCTAssertEqual(centerSearchFrame.minY - center.maxY, 8, accuracy: 3)
         app.buttons["plugins.discover"].tap()
         XCTAssertTrue(app.buttons["plugin.discover.row.weather_digest"].waitForExistence(timeout: 15))
         let discover = app.segmentedControls.firstMatch.frame
@@ -58,7 +60,7 @@ final class WorkspaceUITests: XCTestCase {
         XCTAssertEqual(discover.minX, ai.minX, accuracy: 1.5, message)
         XCTAssertEqual(discover.width, ai.width, accuracy: 3, message)
         XCTAssertEqual(center.height, ai.height, accuracy: 1, message)
-        XCTAssertEqual(centerSearch.frame.height, aiSearch.frame.height, accuracy: 1)
+        XCTAssertEqual(centerSearchFrame.height, aiSearch.frame.height, accuracy: 1)
     }
 
     func testPluginScreenUsesTwoColumnCards() {
