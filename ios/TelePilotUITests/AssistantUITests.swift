@@ -203,8 +203,8 @@ final class AssistantUITests: XCTestCase {
         XCTAssertTrue(menu.isHittable)
         XCTAssertTrue(app.buttons["assistant.model"].isHittable)
         let latest = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "第 119 条提问")).firstMatch
-        XCTAssertTrue(latest.waitForExistence(timeout: 5))
-        XCTAssertTrue(app.staticTexts["第 120 条回答"].waitForExistence(timeout: 5))
+        XCTAssertTrue(latest.waitForExistence(timeout: 8), visibleTexts(app))
+        XCTAssertTrue(app.staticTexts["第 120 条回答"].waitForExistence(timeout: 5), visibleTexts(app))
         let start = latest.frame.minY
         app.scrollViews.firstMatch.swipeDown()
         // 内容随手指下移，且停留 1 秒后没有被拉回底部。
@@ -222,7 +222,7 @@ final class AssistantUITests: XCTestCase {
     /// 第六轮：消息操作——我的消息下「复制消息／编辑消息」，回答下「复制回复／重新生成」（需确认）。
     func testMessageActionsSitUnderTheRightMessages() {
         let app = openAssistant(["--ui-test-long-history"])
-        XCTAssertTrue(app.staticTexts["第 120 条回答"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["第 120 条回答"].waitForExistence(timeout: 10), visibleTexts(app))
         let edit = app.buttons["assistant.message.edit"]
         let regenerate = app.buttons["assistant.reply.regenerate"]
         XCTAssertTrue(edit.waitForExistence(timeout: 5))
@@ -256,5 +256,10 @@ final class AssistantUITests: XCTestCase {
         XCTAssertTrue(app.navigationBars["编辑后重新生成"].waitForExistence(timeout: 5))
         app.buttons["取消"].firstMatch.tap()
         XCTAssertTrue(app.descendants(matching: .any)["assistant.composer"].firstMatch.waitForExistence(timeout: 5))
+    }
+
+    /// 失败时附上当前可见的文字，便于判断停在了哪里。
+    private func visibleTexts(_ app: XCUIApplication) -> String {
+        "可见文字：" + app.staticTexts.allElementsBoundByIndex.prefix(40).map { "\($0.label)@\(Int($0.frame.minY))" }.joined(separator: " | ")
     }
 }

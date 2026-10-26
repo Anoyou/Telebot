@@ -13,6 +13,8 @@ struct AssistantView: View {
     @State private var abandonPending = false
     @State private var editingPair: AssistantEditPair?
     @State private var pinnedToBottom = true
+    /// 用户正在拖动或惯性滚动；只有用户自己滚离底部才取消贴底，内容高度变化不会。
+    @State private var userScrolling = false
     @State private var sidebarVisible = true
     @FocusState private var composerFocused: Bool
     @AppStorage("telepilot.assistant.minimizeOnLeading") private var minimizeOnLeading = false
@@ -207,19 +209,29 @@ struct AssistantView: View {
                 .defaultScrollAnchor(pinnedToBottom ? .bottom : nil, for: .sizeChanges)
                 .scrollDismissesKeyboard(.interactively)
                 .refreshable { await store.refreshMessages(model); await store.restoreRun(model) }
-                // 用户停留在底部附近时才跟随；向上翻阅历史时不打断。
+                // 用户停留在底部附近时才跟随；向上翻阅历史时不打断。只有用户手势把视图带离底部才取消贴底：
+                // 加载期间内容变高、视图暂时不在底部时仍保持贴底，随后由锚点或下方的补滚回到底部。
+                .onScrollPhaseChange { _, phase in
+                    userScrolling = phase == .tracking || phase == .interacting || phase == .decelerating
+                }
                 .onScrollGeometryChange(for: Bool.self) { geometry in
                     geometry.visibleRect.maxY >= geometry.contentSize.height - 80
-                } action: { _, nearBottom in pinnedToBottom = nearBottom }
+                } action: { _, nearBottom in
+                    if nearBottom { pinnedToBottom = true } else if userScrolling { pinnedToBottom = false }
+                }
                 // 只在出现新的最后一条消息时滚到底部；在顶部插入更早的消息不触发。
                 // 首次出现内容时不做动画（由初始锚点负责），避免整页从顶部滑到底部。
                 .onChange(of: store.messages.last?.id) { old, _ in
                     pinnedToBottom = true
                     if old == nil {
-                        proxy.scrollTo("assistant.bottom", anchor: .bottom)
+                        scrollToBottomAfterLayout(proxy)
                     } else {
                         withAnimation { proxy.scrollTo("assistant.bottom", anchor: .bottom) }
                     }
+                }
+                // 首屏之后逐帧向上追加更早的消息：仍贴底时补滚一次，保证停在最新一条。
+                .onChange(of: store.revealStart) { _, _ in
+                    if pinnedToBottom { scrollToBottomAfterLayout(proxy) }
                 }
             }
             .overlay(alignment: minimizeOnLeading ? .bottomLeading : .bottomTrailing) {
@@ -251,6 +263,16 @@ struct AssistantView: View {
             Task { await loadOlder(proxy) }
         }
         .accessibilityIdentifier("assistant.older")
+    }
+
+    /// 等新内容完成一次布局后再滚到底部（同一事务里 scrollTo 拿到的是旧布局）。用户已经上翻时不滚。
+    private func scrollToBottomAfterLayout(_ proxy: ScrollViewProxy) {
+        Task { @MainActor in
+            await Task.yield()
+            try? await Task.sleep(for: .milliseconds(16))
+            guard pinnedToBottom, !userScrolling else { return }
+            proxy.scrollTo("assistant.bottom", anchor: .bottom)
+        }
     }
 
     private func loadOlder(_ proxy: ScrollViewProxy) async {

@@ -16,6 +16,12 @@ import SwiftUI
 /// ScrollView 页面用它对齐 List 页面的卡片边缘，切换分页时分段控件不左右跳动。
 enum PageLayout {
     static func margin(width: CGFloat) -> CGFloat { width >= 414 ? 20 : 16 }
+
+    /// List 页面第一行分段控件相对滚动内容顶部的下移量：insetGrouped 首个分组的上边距，加上分段控件在
+    /// 最小行高（44pt）的行里垂直居中的偏移。ScrollView 页面（插件中心）在分段控件上方留同样的距离，
+    /// 切换分页时分段控件的纵向位置一致。数值取自 iOS 26/27 模拟器实测（26px @3x），
+    /// UI 测试 `testSegmentedHeadersShareFrameAndAreNotClipped` 会校验。
+    static let listHeaderTop: CGFloat = 26.0 / 3.0
 }
 
 extension View {

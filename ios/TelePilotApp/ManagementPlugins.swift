@@ -183,7 +183,7 @@ private struct PluginCenterView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
-                if let header { header }
+                if let header { header.padding(.top, PageLayout.listHeaderTop) }
                 scopePicker
                 if let loadError { NoticeView(title: "插件目录读取失败", message: loadError) }
                 if let accountError { NoticeView(title: "账号插件状态读取失败", message: accountError) }
