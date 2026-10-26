@@ -221,16 +221,19 @@ final class TelePilotUITests: XCTestCase {
         reveal(logout, app: app)
         logout.tap()
         app.buttons["settings.confirmLogout"].firstMatch.tap()
+        // 懒加载表单：重试清理按钮在 Cloudflare Access 区下方，先等登录页出现再滚动查找。
+        XCTAssertTrue(app.textFields["login.server"].waitForExistence(timeout: 10))
         let retry = app.buttons["login.retryCleanup"]
-        XCTAssertTrue(retry.waitForExistence(timeout: 10))
-        // 懒加载表单：提交按钮在 Cloudflare Access 区下方，先滚动到它再断言。
+        reveal(retry, app: app)
+        // 提交按钮在更下方，同样先滚动到它再断言。
         let submit = app.buttons["login.submit"]
         for _ in 0..<4 where !submit.exists { app.swipeUp() }
         XCTAssertFalse(submit.isEnabled)
         reveal(retry, app: app)
         retry.tap()
-        XCTAssertTrue(app.secureTextFields["login.password"].exists)
-        XCTAssertFalse(retry.exists)
+        XCTAssertTrue(retry.waitForNonExistence(timeout: 10))
+        // 清理成功后仍停在登录页（密码框在 Access 区上方，滚回去确认）。
+        reveal(app.secureTextFields["login.password"], app: app)
     }
 
     func testRejectedResumeStillReadsChangedServerState() {
