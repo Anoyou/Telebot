@@ -68,15 +68,12 @@ struct AIModelCapabilities: Equatable {
     }
 
     var reasoningText: String {
-        switch reasoning {
-        case true?:
-            guard !reasoningLevels.isEmpty else { return "支持" }
-            var text = "支持（" + reasoningLevels.map(Self.level).joined(separator: "、")
-            if let defaultReasoningLevel { text += "；默认" + Self.level(defaultReasoningLevel) }
-            return text + "）"
-        case false?: "不支持"
-        case nil: "未知"
-        }
+        guard let reasoning else { return "未知" }
+        guard reasoning else { return "不支持" }
+        guard !reasoningLevels.isEmpty else { return "支持" }
+        var text = "支持（" + reasoningLevels.map(Self.level).joined(separator: "、")
+        if let defaultReasoningLevel { text += "；默认" + Self.level(defaultReasoningLevel) }
+        return text + "）"
     }
 
     var webSearchText: String {

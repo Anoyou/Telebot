@@ -307,7 +307,8 @@ private struct AssistantMessageView: View, Equatable {
     private var role: String { item.text("role") }
     private var text: String { rendered?.text ?? AssistantRedaction.text(item["content"]?.assistantText("text") ?? "") }
 
-    static func == (lhs: AssistantMessageView, rhs: AssistantMessageView) -> Bool {
+    /// nonisolated：比较的都是 Sendable 的存储属性，Equatable 一致性不跨入主 actor（Swift 6 ConformanceIsolation）。
+    nonisolated static func == (lhs: AssistantMessageView, rhs: AssistantMessageView) -> Bool {
         lhs.item == rhs.item && lhs.rendered == rhs.rendered && lhs.tools == rhs.tools && lhs.mayRegenerate == rhs.mayRegenerate
     }
 
