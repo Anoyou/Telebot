@@ -25,6 +25,19 @@
 
 ## [Unreleased]
 
+## [0.106.0-beta.3] - 2026-10-26 · patch（补丁预发布） · 访客模式实时 inline Rich 编辑真正生效、动作失败带回 Telegram 错误
+
+### 修复
+
+- 修复访客模式（Guest Mode）AI 答疑仍无法以原生 Rich 表格显示：0.106.0-beta.2 只给“入口返回的动作”链路（交互 Bot 投递执行器）加了 `editMessageText(inline_message_id, rich_message)`，而插件是在入口里通过 `ctx.messages.apply([...])` 实时编辑“🤔”占位的，这条实时链路的 `edit_message` 执行器仍要求 `chat_id` + `message_id`，请求根本没有发到 Telegram 就以 `target_message_id_missing` 失败，插件把它当成“Rich Message 被拒绝”退回了 HTML。现在实时链路同样识别 `inline_message_id`：带 `rich_message` 时用交互 Bot 调 `editMessageText(inline_message_id, rich_message)`，否则按 `text`/`parse_mode` 编辑（HTML 实体被拒时退回纯文本），只允许交互 Bot 通道；Rich 编辑失败如实记失败、不静默降级为文本。
+- 实时 MessageOps 新增能力标记 `ctx.messages.live_inline_edit = True`，插件据此判断实时 inline 编辑可用（beta.2 的 `inline_rich_edit` 仅代表返回动作链路）。
+
+### 可观测性
+
+- `ctx.messages.apply` 的批次结果在有失败动作时新增 `errors`（`index` / `type` / `error_code` / `error`，已脱敏），插件可以直接记录失败原因；“插件消息动作部分执行失败”运行日志同时带出 `error_code`、`error`，Telegram 拒绝时另带 `telegram_error`（Telegram 返回的错误描述，去掉 Token 与 API 地址）。
+- inline 消息编辑失败的动作记录 `result` 与运行日志带 `telegram_error`；实时链路 chat 消息 Rich 编辑失败的错误信息改为脱敏后的 Telegram 描述。
+- `docs/PLUGIN-API-REFERENCE.md` 补充 `apply` 返回的 `errors`、`live_inline_edit` 与 beta.2 inline Rich 编辑只覆盖返回动作链路的说明。
+
 ## [0.106.0-beta.2] - 2026-10-26 · patch（补丁预发布） · 推理模型思考过程不再当答案、访客 inline Rich 编辑
 
 ### 修复
