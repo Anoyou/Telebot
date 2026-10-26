@@ -207,7 +207,7 @@ def test_incremental_script_never_recreates_web_with_updater() -> None:
     assert "telepilot-updater-handoff.log" in script
     assert "com.docker.compose.project" in script
     assert script.index('mv "$pending_tmp" "$PENDING_FILE"') < script.index(
-        'git pull --ff-only "$REMOTE" "$BRANCH"'
+        'git merge --ff-only "$TARGET_COMMIT"'
     )
     assert "persist_switched_services" in script
     assert "rollback_switched_services" in script
@@ -254,7 +254,7 @@ def test_incremental_script_reloads_target_logic_before_image_verification() -> 
     repo_root = Path(__file__).resolve().parents[3]
     script = (repo_root / "scripts" / "prod-update.sh").read_text(encoding="utf-8")
 
-    fast_forward = script.index('git pull --ff-only "$REMOTE" "$BRANCH"')
+    fast_forward = script.index('git merge --ff-only "$TARGET_COMMIT"')
     reload_target = script.index('exec bash scripts/prod-update.sh "${ORIGINAL_ARGS[@]}"')
     prefetch_images = script.index(
         "# 目标版本更新逻辑接管后再确认所有必需镜像。"
@@ -268,7 +268,7 @@ def test_incremental_script_reloads_target_logic_before_image_verification() -> 
     assert 'ORIGINAL_ARGS=("$@")' in script
     assert script.count('exec bash scripts/prod-update.sh "${ORIGINAL_ARGS[@]}"') == 1
     assert fast_forward < reload_guard < reload_target < prefetch_images
-    assert script.index("pull_verified_image web", prefetch_images) > reload_target
+    assert script.index("pull_verified_images_parallel\n", prefetch_images) > reload_target
 
 
 def test_incremental_script_syncs_backend_files_with_image_rollback() -> None:
@@ -1207,3 +1207,69 @@ def test_update_plan_carries_pending_deployment_into_newer_target(
         "docker-compose.yml",
         "frontend/src/App.tsx",
     ]
+
+
+def test_incremental_script_speed_paths_keep_rollback_boundaries() -> None:
+    repo_root = Path(__file__).resolve().parents[3]
+    script = (repo_root / "scripts" / "prod-update.sh").read_text(encoding="utf-8")
+
+    # 只读源码镜像变化：热替换，不重建 web，也不登记需要回滚的 web 切换。
+    hot = script[script.index("hot_sync_web_source_mirror() {") :]
+    hot = hot[: hot.index("\n}\n")]
+    assert "--force-recreate" not in hot
+    assert "docker compose restart" not in hot
+    assert 'mv "$stage/frontend" /app/source/frontend' in hot
+    sync = script[script.index("sync_web_runtime_image() {") :]
+    sync = sync[: sync.index("\nswitch_prebuilt_service() {")]
+    assert sync.index('if [[ "$mode" == "hot" ]]; then') < sync.index("WEB_SYNC_ACTIVE=1")
+    assert "sync_web_runtime_image hot" in script
+    assert "WEB_SYNC_CODE=1" in script
+    # 计划没有 web_sync_scope 时保守按代码同步。
+    assert 'if (( ${#PLAN_WEB_SYNC_SCOPE[@]} == 0 )); then\n    WEB_SYNC_CODE=1' in script
+
+    # 补丁镜像固定叠在预构建基础镜像上，避免层数与磁盘随更新次数增长。
+    assert '--change "LABEL org.telepilot.runtime-base=$base_ref"' in script
+    assert 'docker create --name "$PATCH_CONTAINER" "$base_ref"' in script
+    assert "prune_web_runtime_images || true" in script
+    prune = script[script.index("prune_web_runtime_images() {") :]
+    prune = prune[: prune.index("\n}\n")]
+    assert "telepilot-deploy-previous.json" in prune
+    assert "docker image rm \"$ref\"" in prune
+    assert "-f" not in prune.split("docker image rm", 1)[1].split("\n", 1)[0]
+
+    # 多张镜像并行拉取；任一失败整体失败且不切换任何服务。
+    assert "pull_verified_images_parallel\n" in script
+    assert "ensure_github_cli\n" in script[script.index("pull_verified_images_parallel() {") :]
+    assert "运行中的服务未做任何切换" in script
+
+    # 插件同步与随后的 web 重建合并为一次重启。
+    assert "sync_tracked_plugins 1" in script
+
+    # 备份/运行时内容脚本用 bash 调用，不依赖可执行位（core.fileMode=false 的宿主）。
+    assert 'bash "$ROOT_DIR/deploy/backup.sh"' in script
+    assert 'bash "$SCRIPT_DIR/sync-runtime-content.sh"' in script
+
+
+def test_plan_text_reports_hot_source_mirror_without_restart() -> None:
+    from app.api.system_health import _plan_text
+
+    common = dict(
+        runtime_mode="prod_container_with_updater",
+        has_update=True,
+        components=["backend", "frontend"],
+        services=["web", "frontend"],
+        file_sync_services=["web"],
+        rebuild_services=["frontend"],
+        reasons=[],
+        requires_full_update=False,
+        requires_backup=False,
+        requires_migration=False,
+        can_apply=True,
+    )
+    _, hot = _plan_text(**common, web_sync_scope=["source_mirror"])
+    _, code = _plan_text(**common, web_sync_scope=["code", "source_mirror"])
+    _, legacy = _plan_text(**common)
+
+    assert "web 与账号 worker 不重启" in hot
+    assert "直接同步目标 commit 文件并重启：web" in code
+    assert "直接同步目标 commit 文件并重启：web" in legacy

@@ -84,10 +84,44 @@ wait_http() {
   return 1
 }
 
+# 在容器内直接执行镜像/Compose 声明的同一条 healthcheck 命令，成功返回 0。
+# 用法：compose_probe_health <container_id>
+# Docker 只按 interval（web/updater 为 15s）调度健康检查，服务其实早已就绪时
+# 也要等到下一个周期才会变 healthy；主动探测把这段空等压到约 1 秒。
+compose_probe_health() {
+  local cid="$1" health_json
+  local -a argv=()
+  [[ -n "$cid" ]] || return 1
+  health_json="$(docker inspect --format '{{json .Config.Healthcheck}}' "$cid" 2>/dev/null)" || return 1
+  mapfile -d '' -t argv < <(HEALTH_JSON="$health_json" python3 -c '
+import json, os, sys
+try:
+    test = (json.loads(os.environ.get("HEALTH_JSON") or "null") or {}).get("Test") or []
+except Exception:
+    test = []
+if test and test[0] == "CMD" and len(test) > 1:
+    argv = test[1:]
+elif test and test[0] == "CMD-SHELL" and len(test) == 2:
+    argv = ["sh", "-c", test[1]]
+else:
+    argv = []
+sys.stdout.write("".join(item + "\0" for item in argv))
+' 2>/dev/null)
+  (( ${#argv[@]} > 0 )) || return 1
+  if command -v timeout >/dev/null 2>&1; then
+    timeout 10 docker exec "$cid" "${argv[@]}" >/dev/null 2>&1
+  else
+    docker exec "$cid" "${argv[@]}" >/dev/null 2>&1
+  fi
+}
+
 # 等待 docker compose 服务 healthy：wait_compose_healthy <compose_file> <service> <max_seconds>
+# 状态为 starting（首个健康检查周期尚未到）时，同时主动执行该容器自己的
+# healthcheck 命令；判定标准与 Docker 完全一致，只是不再等调度周期。
 wait_compose_healthy() {
   local cf="$1" svc="$2" max="${3:-60}"
-  local i=0
+  local i=0 probe_cid=""
+  # 仍按轮询次数计超时（每轮至少 1 秒），与旧行为一致，不让慢机器更早判失败。
   while (( i < max )); do
     local state
     state="$(docker compose -f "$cf" ps --format json "$svc" 2>/dev/null \
@@ -110,6 +144,13 @@ except Exception:
     if [[ "$state" == "healthy" || "$state" == "running" ]]; then
       ok "compose:$svc → $state"
       return 0
+    fi
+    if [[ "$state" == "starting" ]]; then
+      [[ -n "$probe_cid" ]] || probe_cid="$(docker compose -f "$cf" ps -q "$svc" 2>/dev/null | head -n1)"
+      if compose_probe_health "$probe_cid"; then
+        ok "compose:$svc → healthy（主动探测通过）"
+        return 0
+      fi
     fi
     sleep 1
     i=$((i + 1))

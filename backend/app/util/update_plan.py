@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import tempfile
 from dataclasses import asdict, dataclass
@@ -30,13 +31,19 @@ _FRONTEND_TEST_PREFIXES = (
 )
 _NO_RUNTIME_PREFIXES = (
     ".github/",
+    # README 配图与插件 JSON Schema 快照只服务仓库文档与 CI，不进入任何镜像。
+    "assets/",
     "docs/",
     "examples/",
+    "schemas/",
     # iOS 客户端源码、测试与构建脚本只用于构建 App，不进入任何服务器镜像或挂载卷。
     "ios/",
 )
 _NO_RUNTIME_FILES = {
     ".env.example",
+    # Git 元数据不影响运行容器；以前它们会被当作“未知文件”升级成完整更新。
+    ".gitattributes",
+    ".gitignore",
     "AGENTS.md",
     "CONTRIBUTING.md",
     "LICENSE",
@@ -71,6 +78,10 @@ class UpdatePlan:
     services: list[str]
     file_sync_services: list[str]
     rebuild_services: list[str]
+    # web 文件同步的具体范围：code（后端运行代码，需要重建 web 容器）、
+    # source_mirror（仅 System Agent 只读前端源码镜像，可热替换、不重启）、
+    # plugins（Git 跟踪插件，定向同步到持久卷）。旧脚本忽略该字段。
+    web_sync_scope: list[str]
     requires_full_update: bool
     requires_backup: bool
     requires_migration: bool
@@ -111,12 +122,13 @@ def classify_changed_files(
 ) -> UpdatePlan:
     files = [_normalize(path) for path in changed_files if path.strip()]
     if not files:
-        return UpdatePlan([], ["none"], [], [], [], False, False, False, [], [])
+        return UpdatePlan([], ["none"], [], [], [], [], False, False, False, [], [])
 
     components: set[str] = set()
     services: set[str] = set()
     file_sync_services: set[str] = set()
     rebuild_services: set[str] = set()
+    web_sync_scope: set[str] = set()
     reasons: list[str] = []
     requires_full_update = compose_inspection_failed
     requires_migration = any(path.startswith("backend/alembic/versions/") for path in files)
@@ -126,8 +138,10 @@ def classify_changed_files(
         components.add("full_update")
         reasons.append("无法比较 Compose 服务配置，转入完整更新")
 
-    def require_file_sync(service: str) -> None:
+    def require_file_sync(service: str, scope: str = "code") -> None:
         services.add(service)
+        if service == "web":
+            web_sync_scope.add(scope)
         if service not in rebuild_services:
             file_sync_services.add(service)
 
@@ -184,6 +198,15 @@ def classify_changed_files(
                 require_rebuild("web")
             continue
 
+        if path.startswith("gateway/"):
+            if _is_docs_file(path):
+                continue
+            # 内置 telepilot-gateway 在 web 镜像构建阶段编译，只需切换 web 预构建镜像；
+            # 以前这里落入“无法确定运行影响范围”，会被迫拉取全部镜像并交接 updater。
+            components.add("backend")
+            require_rebuild("web")
+            continue
+
         if path.startswith("deploy/") or path.startswith("scripts/"):
             # 备份、恢复、安装和人工部署脚本由挂载工作区直接读取，不改变运行容器。
             continue
@@ -204,7 +227,7 @@ def classify_changed_files(
                 # System Agent 的只读源码镜像位于 web 镜像中，前端源码变化时
                 # 同步该快照，避免线上诊断读取到上一版代码。
                 components.add("backend")
-                require_file_sync("web")
+                require_file_sync("web", "source_mirror")
             continue
 
         if path.startswith(_BACKEND_TEST_PREFIXES):
@@ -221,7 +244,7 @@ def classify_changed_files(
             # Git 跟踪的插件文件会定向同步到持久卷，随后重启 web/worker；
             # backend 镜像本身不 COPY 根 plugins，重建 web 无法部署这些改动。
             components.add("backend")
-            require_file_sync("web")
+            require_file_sync("web", "plugins")
             continue
         if path.startswith("backend/"):
             components.add("backend")
@@ -239,6 +262,7 @@ def classify_changed_files(
         components.add("migration")
         components.add("backend")
         services.add("web")
+        web_sync_scope.add("code")
         reasons.append("包含数据库迁移，切换 web 前需要备份")
 
     if requires_full_update:
@@ -255,6 +279,7 @@ def classify_changed_files(
         services=_ordered(services, ("web", "frontend", "updater")),
         file_sync_services=_ordered(file_sync_services, ("web", "frontend", "updater")),
         rebuild_services=_ordered(rebuild_services, ("web", "frontend", "updater")),
+        web_sync_scope=_ordered(web_sync_scope, ("code", "source_mirror", "plugins")),
         requires_full_update=requires_full_update,
         requires_backup=requires_backup,
         requires_migration=requires_migration,
@@ -286,11 +311,36 @@ def _git_show(root: Path, revision: str, path: str) -> str:
     return result.stdout
 
 
+_DEPENDENCIES_BLOCK_RE = re.compile(r"^dependencies\s*=\s*\[(.*?)^\]", re.MULTILINE | re.DOTALL)
+
+
+def _dependencies_block_without_toml(content: str) -> str | None:
+    """无 tomllib 时只截取 [project] 段里的 dependencies 数组文本做比较。"""
+    section = re.search(r"^\[project\]\s*$(.*?)(?=^\[|\Z)", content, re.MULTILINE | re.DOTALL)
+    if section is None:
+        return None
+    match = _DEPENDENCIES_BLOCK_RE.search(section.group(1))
+    if match is None:
+        return None
+    lines = [line.strip() for line in match.group(1).splitlines()]
+    return "\n".join(line for line in lines if line and not line.startswith("#"))
+
+
 def _backend_dependencies_changed(root: Path, old_revision: str, new_revision: str) -> bool:
     if tomllib is None:
-        # 宿主只负责生成更新计划，未必安装后端要求的 Python 3.12。
-        # 缺少 TOML 解析器时按依赖已变化处理，宁可重建 web，也不能让更新器崩溃。
-        return True
+        # 宿主只负责生成更新计划，未必安装后端要求的 Python 3.12（如 Ubuntu 22.04
+        # 的 3.10）。退化为比较 dependencies 数组原文：完全一致才视为未变化，
+        # 否则或解析失败都按依赖已变化处理，宁可重建 web，也不能让更新器崩溃。
+        try:
+            old_block = _dependencies_block_without_toml(
+                _git_show(root, old_revision, "backend/pyproject.toml")
+            )
+            new_block = _dependencies_block_without_toml(
+                _git_show(root, new_revision, "backend/pyproject.toml")
+            )
+        except RuntimeError:
+            return True
+        return old_block is None or new_block is None or old_block != new_block
     try:
         old_data = tomllib.loads(_git_show(root, old_revision, "backend/pyproject.toml"))
         new_data = tomllib.loads(_git_show(root, new_revision, "backend/pyproject.toml"))

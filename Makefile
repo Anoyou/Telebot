@@ -86,10 +86,10 @@ init-prod-env:
 	@./scripts/init-prod-env.sh
 
 prod-up:
-	@./scripts/prod-up.sh $(PROD_UP_ARGS)
+	@bash scripts/prod-up.sh $(PROD_UP_ARGS)
 
 prod-update:
-	@./scripts/prod-update.sh $(PROD_UPDATE_ARGS)
+	@bash scripts/prod-update.sh $(PROD_UPDATE_ARGS)
 
 prod-down:
 	docker compose down
@@ -176,7 +176,7 @@ prod-build:
 	docker compose build
 
 backup:
-	./deploy/backup.sh
+	bash deploy/backup.sh
 
 clean:
 	rm -rf backend/.venv backend/.pytest_cache backend/.ruff_cache

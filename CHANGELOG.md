@@ -25,6 +25,30 @@
 
 ## [Unreleased]
 
+## [0.106.0-beta.5] - 2026-10-26 · patch（补丁预发布） · 在线更新自动处理未提交改动、增量更新提速
+
+### 修复
+
+- 在线更新遇到工作区未提交改动不再只报“退出码 1”：拉取前由新脚本 `scripts/prepare-update-worktree.sh` 检查，日志列出 `git status --porcelain` 前 30 行与总数，被 `.gitignore` 忽略的 `.env`、已安装插件等不计入。
+  - 只有文件可执行位差异（宿主文件系统或挂载方式无法保存权限位造成的“假脏”）时，设置仓库级 `core.fileMode=false` 后继续，不改动内容；恢复用 `git config --unset core.fileMode`。
+  - 跟踪文件被改动或有未忽略的新文件时，自动 `git stash push -u -m "telepilot-auto-stash <旧提交> <UTC 时间>"` 后继续更新，日志写明 stash 名称与 `git stash list` / `git stash show -p` / `git stash pop` 恢复命令；stash 自带作者信息，updater 容器无需配置 git 身份。
+  - 处于 merge / rebase / cherry-pick / revert 中、存在冲突、索引被锁或未跟踪文件超过 100 MiB 时仍拒绝更新，并列出文件。
+  - 注意：服务器上已运行的旧脚本会在拉取新代码前拒绝，本次仍需在宿主机手动处理一次，新逻辑从下一次更新起生效。
+- updater 任务失败时，失败详情 / 摘要带上脚本最后一条具体错误（例如脏文件摘要、镜像缺失原因），Web 与 App 不再只显示“prod-update 退出码 1”。
+- 排查结论：平台自身的在线更新、备份、恢复、运行时内容同步都只写入被忽略的路径（`.env`、`.run/`、`.git/` 内部文件、备份目录），web 容器不挂载仓库目录；未发现平台写入 Git 跟踪文件的路径。可执行位假脏按上面的 `core.fileMode` 处理；备份与运行时内容脚本改用 `bash` 显式调用，不依赖可执行位。
+
+### 增量更新提速
+
+- 拉取代码改为直接快进到已 fetch 并校验过的目标提交（`git merge --ff-only`），不再由 `git pull` 第二次访问远端。
+- 健康等待在容器处于 starting 时直接执行该容器自己的 healthcheck 命令，就绪即继续，不再空等 Docker 的 15 秒检查周期（web、updater 每次重启约省 0–15 秒）。
+- 只改前端源码时，web 内供 System Agent 读取的只读源码快照改为热替换，web 与账号 worker 不再重启。
+- 只改内置 gateway 时只切换 web 预构建镜像，不再走完整更新；`.gitignore`、`.gitattributes`、README 配图、插件 JSON Schema 快照不再触发完整更新。
+- 需要多张镜像时并行拉取与验签，任一失败整体失败、不切换任何服务。
+- 文件同步补丁镜像固定叠在预构建镜像上，不再每次更新多叠一层；更新成功后清理不再被容器、`.env` 或回滚记录引用的旧补丁镜像。
+- Git 跟踪插件同步与随后的 web 重建合并为一次重启。
+- 宿主 Python 缺少 `tomllib`（如 3.10）时按 `dependencies` 数组原文比较，仅版本号变化不再误判为依赖变化而拉取 web 镜像。
+- 更新计划新增 `web_sync_scope`（`code` / `source_mirror` / `plugins`），更新检查文案区分“热替换不重启”与“同步并重启”；旧计划缺少该字段时按代码同步保守处理。
+
 ## [0.106.0-beta.4] - 2026-10-26 · patch（补丁预发布） · iOS 插件页参考 App Store 重做
 
 ### 插件仓库

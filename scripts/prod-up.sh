@@ -285,7 +285,7 @@ wait_compose_healthy docker-compose.yml updater 60 || die "updater 不健康"
 wait_compose_healthy docker-compose.yml frontend 60 || die "frontend 不健康"
 
 # 所有服务成功后再切换公开文档与 revision，避免失败启动提前发布新状态。
-"$SCRIPT_DIR/sync-runtime-content.sh"
+bash "$SCRIPT_DIR/sync-runtime-content.sh"
 
 PUBLISH_PORT="$(grep -E '^WEB_PORT_PUBLISH=' .env 2>/dev/null | cut -d= -f2 | tr -d ' "' || true)"
 PUBLISH_PORT="${PUBLISH_PORT:-80}"

@@ -1674,6 +1674,7 @@ def _plan_text(
     requires_backup: bool,
     requires_migration: bool,
     can_apply: bool,
+    web_sync_scope: list[str] | None = None,
 ) -> tuple[str, str]:
     if not has_update:
         return "已是最新版本", "当前代码与目标分支一致，无需更新。"
@@ -1683,9 +1684,20 @@ def _plan_text(
     if components and components != ["none"]:
         detail_parts.append(f"变更分类：{', '.join(components)}")
     if file_sync_services:
-        detail_parts.append(
-            f"直接同步目标 commit 文件并重启：{', '.join(file_sync_services)}。"
-        )
+        scope = set(web_sync_scope or [])
+        if (
+            file_sync_services == ["web"]
+            and scope
+            and "code" not in scope
+            and "plugins" not in scope
+            and "web" not in rebuild_services
+        ):
+            # 仅 System Agent 只读源码镜像变化：热替换文件，web/worker 不重启。
+            detail_parts.append("热替换 web 内只读源码镜像，web 与账号 worker 不重启。")
+        else:
+            detail_parts.append(
+                f"直接同步目标 commit 文件并重启：{', '.join(file_sync_services)}。"
+            )
     if rebuild_services:
         detail_parts.append(f"拉取预构建镜像并切换：{', '.join(rebuild_services)}。")
     if services and not file_sync_services and not rebuild_services:
@@ -1779,6 +1791,7 @@ def _check_response_from_plan(
         requires_backup=requires_backup,
         requires_migration=requires_migration,
         can_apply=can_apply,
+        web_sync_scope=[str(item) for item in plan.get("web_sync_scope") or []],
     )
     return CheckUpdateResponse(
         has_update=has_update,

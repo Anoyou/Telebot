@@ -115,6 +115,33 @@ def _update_target_options(remote: str | None = None) -> dict[str, Any]:
     }
 
 
+# prod-update 的 err/die 统一以 “✗ ” 开头；收集它们作为失败摘要，避免 UI 只看到退出码。
+_ERROR_LINE_PREFIX = "✗ "
+# trap 收尾时打印的通用行信息量最低，有更具体的错误时不选它。
+_GENERIC_ERROR_LINES = {"增量更新失败"}
+MAX_FAILURE_REASON_CHARS = 600
+
+
+def _failure_reason(error_lines: list[str]) -> str | None:
+    """从脚本输出的错误行里挑出最能说明失败原因的一条。"""
+    specific = [line for line in error_lines if line not in _GENERIC_ERROR_LINES]
+    candidates = specific or error_lines
+    if not candidates:
+        return None
+    reason = candidates[-1]
+    if len(reason) > MAX_FAILURE_REASON_CHARS:
+        reason = reason[: MAX_FAILURE_REASON_CHARS - 1] + "…"
+    return reason
+
+
+def _error_line_text(raw_line: str) -> str | None:
+    stripped = _ANSI_RE.sub("", raw_line).strip()
+    if not stripped.startswith(_ERROR_LINE_PREFIX):
+        return None
+    text = stripped[len(_ERROR_LINE_PREFIX) :].strip()
+    return text or None
+
+
 def _parse_progress(line: str) -> tuple[int, str, str] | None:
     if not line.startswith(PROGRESS_PREFIX):
         return None
@@ -680,6 +707,7 @@ def _check_plan(remote: str, branch: str) -> dict[str, Any]:
         "services": update_plan.get("services") or [],
         "file_sync_services": update_plan.get("file_sync_services") or [],
         "rebuild_services": update_plan.get("rebuild_services") or [],
+        "web_sync_scope": update_plan.get("web_sync_scope") or [],
         "requires_full_update": bool(update_plan.get("requires_full_update")),
         "requires_backup": bool(update_plan.get("requires_backup")),
         "requires_migration": bool(update_plan.get("requires_migration")),
@@ -902,10 +930,15 @@ def _run_apply_job(job_id: str, remote: str, branch: str, force_full: bool) -> N
         handoff_wait_at: float | None = None
         marker_gone_at: float | None = None
         watchdog_reason: str | None = None
+        error_lines: list[str] = []
 
         def _consume_line(raw_line: str) -> None:
             nonlocal handoff_wait_at
             stripped = raw_line.strip()
+            error_text = _error_line_text(raw_line)
+            if error_text is not None:
+                error_lines.append(error_text)
+                del error_lines[:-20]
             progress = _parse_progress(stripped)
             if progress is not None:
                 percent, phase, detail = progress
@@ -995,6 +1028,12 @@ def _run_apply_job(job_id: str, remote: str, branch: str, force_full: bool) -> N
         head, _, _ = _run(["git", "rev-parse", "HEAD"], timeout=10)
         current_job = _job_snapshot(job_id) or {}
         final_progress = 100 if rc == 0 else int(current_job.get("progress") or 0)
+        failure_reason = _failure_reason(error_lines) if rc != 0 else None
+        failure_text = (
+            f"prod-update 退出码 {rc}：{failure_reason}"
+            if failure_reason
+            else f"prod-update 退出码 {rc}"
+        )
         _set_job(
             job_id,
             status="succeeded" if rc == 0 else "failed",
@@ -1003,9 +1042,13 @@ def _run_apply_job(job_id: str, remote: str, branch: str, force_full: bool) -> N
             new_commit=head[:12] if head else None,
             progress=final_progress,
             phase="更新完成" if rc == 0 else "更新失败",
-            detail="所有计划步骤已完成" if rc == 0 else f"prod-update 退出码 {rc}",
-            summary="更新完成。" if rc == 0 else "更新失败，请查看日志。",
-            error=None if rc == 0 else f"prod-update 退出码 {rc}",
+            detail="所有计划步骤已完成" if rc == 0 else failure_text,
+            summary=(
+                "更新完成。"
+                if rc == 0
+                else (f"更新失败：{failure_reason}" if failure_reason else "更新失败，请查看日志。")
+            ),
+            error=None if rc == 0 else failure_text,
         )
     except Exception as exc:  # noqa: BLE001
         _set_job(
