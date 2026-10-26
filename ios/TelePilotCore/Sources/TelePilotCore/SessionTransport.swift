@@ -297,6 +297,10 @@ actor SessionTransport: ClientTransport {
         case "remote-plugins":
             // /api/remote-plugins/install、/api/remote-plugins/{name}/update、/api/remote-plugins/check-updates
             return parts.last == "install" || parts.last == "update" || parts.last == "check-updates"
+        case "commands":
+            // 模型诊断会等上游真实回复：/api/commands/llm-providers/{id}/test-model、/chat-test-models、/fetch-models
+            return parts.count == 5 && parts[2] == "llm-providers"
+                && ["test-model", "chat-test-models", "fetch-models"].contains(String(parts[4]))
         case "plugins":
             // /api/plugins/install/upload
             return parts.count == 4 && parts[2] == "install" && parts[3] == "upload"

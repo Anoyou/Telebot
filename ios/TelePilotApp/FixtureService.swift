@@ -367,7 +367,10 @@ actor FixtureService: AppServing {
         if clean == "/api/commands/llm-providers" && method == "GET" {
             return [
                 ["id": 1, "name": "个人模型网关", "provider": "openai", "base_url": "https://llm.example.com/v1",
-                 "default_model": "gpt-5.4-mini", "models": [["id": "gpt-5.4-mini", "enabled": true], ["id": "gpt-5.4", "enabled": true]],
+                 "default_model": "gpt-5.4-mini", "models": [["id": "gpt-5.4-mini", "enabled": true, "supports_tools": true, "supports_images": true,
+                                                         "context_window": 400000, "max_output_tokens": 128000,
+                                                         "supported_reasoning_levels": ["low", "medium", "high"], "metadata_source": "upstream"],
+                                                        ["id": "gpt-5.4", "enabled": true]],
                  "has_api_key": true, "has_effective_key": true, "pool_keys": [["id": 1, "label": "日常密钥"]],
                  "key_strategy": "least_used", "api_format": "responses", "execution_backend": "direct", "protocol_profile": "standard",
                  "client_identity_profile": "auto", "web_search_api_format": "auto", "modality": "multimodal", "cost_tier": 2],
@@ -443,6 +446,26 @@ actor FixtureService: AppServing {
         if clean == "/api/commands/llm-providers/identity-versions/detect" {
             return ["items": [["key": "codex_tui", "current": "0.50.0", "latest": "0.51.0", "up_to_date": false],
                               ["key": "codex_desktop_core", "current": "1.2.0", "latest": "1.3.0-alpha.2.1", "up_to_date": false]]]
+        }
+        if clean.firstMatch(of: #/^\/api\/commands\/llm-providers\/(\d+)\/test-model$/#) != nil, method == "POST" {
+            return ["ok": true, "latency_ms": 820, "model": body?["model"] ?? "gpt-5.4-mini", "preview": "你好"]
+        }
+        if let match = clean.firstMatch(of: #/^\/api\/commands\/llm-providers\/(\d+)\/chat-test-models$/#), method == "POST" {
+            let models = (body?["models"]?.arrayValue ?? []).compactMap(\.stringValue)
+            return ["provider_id": .integer(Int64(match.1) ?? 1), "provider_name": "个人模型网关",
+                    "results": .array(models.map { id -> JSONValue in
+                        ["ok": true, "requested_model": .string(id), "model": .string(id), "latency_ms": 1240,
+                         "response": "你好！我是一个简洁的中文聊天助手。", "input_tokens": 42, "output_tokens": 18]
+                    })]
+        }
+        if let match = clean.firstMatch(of: #/^\/api\/commands\/llm-providers\/(\d+)\/fetch-models$/#), method == "POST" {
+            guard let provider = (try? await request(path: "/api/commands/llm-providers", method: "GET", body: nil))?.arrayValue?
+                .first(where: { $0["id"]?.intValue == Int(match.1) }) else { return ["fetched": 0] }
+            var object = provider.objectValue ?? [:]
+            var models = provider["models"]?.arrayValue ?? []
+            models.append(["id": "gpt-5.4-nano", "enabled": false, "metadata_source": "upstream"])
+            object["models"] = .array(models)
+            return ["fetched": 3, "provider": .object(object)]
         }
         if clean == "/api/commands/llm-providers/fetch-models-preview", method == "POST" {
             return ["fetched": 2, "ids": ["gpt-5.4-mini", "gpt-5.4"],

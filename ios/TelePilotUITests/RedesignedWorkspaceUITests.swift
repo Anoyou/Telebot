@@ -28,6 +28,36 @@ final class RedesignedWorkspaceUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["gpt-5.4-mini"].exists)
     }
 
+    func testAIModelCapabilitiesSyncAndNativeQuickTest() {
+        let app = launch(tab: "AI")
+        let providers = app.buttons["供应商"].firstMatch
+        XCTAssertTrue(providers.waitForExistence(timeout: 10))
+        providers.tap()
+        let provider = app.buttons["ai.provider.1"]
+        XCTAssertTrue(provider.waitForExistence(timeout: 10))
+        provider.tap()
+        let models = app.buttons["ai.provider.models"]
+        XCTAssertTrue(models.waitForExistence(timeout: 5))
+        models.tap()
+        let sync = app.buttons["ai.models.sync"]
+        XCTAssertTrue(sync.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "多模态（图片）")).firstMatch.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "能力未知")).firstMatch.exists)
+        sync.tap()
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "新增 1 个")).firstMatch.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["gpt-5.4-nano"].firstMatch.exists)
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        let quick = app.buttons["ai.provider.quicktest"]
+        for _ in 0..<5 where !quick.isHittable { app.swipeUp() }
+        XCTAssertTrue(quick.waitForExistence(timeout: 5))
+        quick.tap()
+        XCTAssertTrue(app.navigationBars["单个模型快速测试"].waitForExistence(timeout: 5))
+        let run = app.buttons["ai.quicktest.run"]
+        XCTAssertTrue(run.waitForExistence(timeout: 5))
+        run.tap()
+        XCTAssertTrue(app.staticTexts["模型回复"].waitForExistence(timeout: 5))
+    }
+
     func testAILivenessConfirmsBeforeStartingAndOffersRetry() {
         let app = launch(tab: "AI")
         let liveness = app.buttons["ai.liveness.patrol"].firstMatch

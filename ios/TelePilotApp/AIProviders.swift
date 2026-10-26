@@ -101,7 +101,7 @@ struct AIProviderDetailView: View {
                 }
             }
 
-            Section("模型") {
+            Section {
                 NavigationLink {
                     AIProviderModelsView(provider: provider, workspace: workspace)
                 } label: {
@@ -110,12 +110,10 @@ struct AIProviderDetailView: View {
                     }
                 }
                 .accessibilityIdentifier("ai.provider.models")
-                NavigationLink {
-                    ManagementFormView(action: .init(title: "发现模型", path: base + "/fetch-models",
-                        explanation: "从当前供应商读取模型列表并合并到服务器，保留已有模型的启用状态。Anthropic 可能不支持此操作。")) { value in
-                        if let updated = value["provider"] { provider = updated; workspace.replaceProvider(updated) }
-                    }
-                } label: { Label("从供应商发现模型", systemImage: "arrow.triangle.2.circlepath") }
+            } header: {
+                Text("模型")
+            } footer: {
+                Text("在模型清单顶部可以从供应商同步模型，新发现的模型会并入清单，默认不启用。")
             }
 
             Section("密钥") {
@@ -144,14 +142,14 @@ struct AIProviderDetailView: View {
                 NavigationLink { AILivenessView(workspace: workspace, providerID: provider["id"]?.intValue) } label: {
                     Label("测活此供应商", systemImage: "waveform.path.ecg")
                 }
-                NavigationLink {
-                    ManagementFormView(action: .init(title: "单个模型快速测试", path: base + "/test-model",
-                        explanation: "填写模型名称，服务器会让它回复几个字，确认能否连通，并显示耗时。会产生极少量费用。"))
-                } label: { Label("单个模型快速测试", systemImage: "bolt.horizontal") }
-                NavigationLink {
-                    ManagementFormView(action: .init(title: "多模型对话测试", path: base + "/chat-test-models",
-                        explanation: "用自定义测试语同时检查多个模型的真实对话效果，可能产生上游费用。"))
-                } label: { Label("多模型对话测试", systemImage: "bubble.left.and.bubble.right") }
+                NavigationLink { AIModelQuickTestView(provider: provider) } label: {
+                    Label("单个模型快速测试", systemImage: "bolt.horizontal")
+                }
+                .accessibilityIdentifier("ai.provider.quicktest")
+                NavigationLink { AIModelChatTestView(provider: provider) } label: {
+                    Label("多模型对话测试", systemImage: "bubble.left.and.bubble.right")
+                }
+                .accessibilityIdentifier("ai.provider.chattest")
             } header: {
                 Text("连通性")
             } footer: {
@@ -249,9 +247,10 @@ private struct AIProviderSecretView: View {
 }
 
 struct AIProviderModelsView: View {
-    let provider: JSONValue
     @Bindable var workspace: AIWorkspaceStore
     @Environment(AppModel.self) private var model
+    @State private var provider: JSONValue
+    @State private var baseline: [JSONValue] = []
     @State private var models: [JSONValue] = []
     @State private var newModel = ""
     @State private var busy = false
@@ -259,17 +258,52 @@ struct AIProviderModelsView: View {
     @State private var error: String?
     @State private var saved = false
     @State private var uncertain = false
+    @State private var syncing = false
+    @State private var syncMessage: String?
+    @State private var syncError: String?
+    @State private var syncUncertain = false
+
+    init(provider: JSONValue, workspace: AIWorkspaceStore) {
+        self.workspace = workspace
+        _provider = State(initialValue: provider)
+    }
 
     private var path: String { "/api/commands/llm-providers/\(provider["id"]?.intValue ?? 0)" }
-    private var dirty: Bool { models != (provider["models"]?.arrayValue ?? []) }
+    private var dirty: Bool { models != baseline }
+    private var anthropic: Bool {
+        (provider["api_format"]?.stringValue ?? (provider["provider"]?.stringValue == "anthropic" ? "anthropic_messages" : "")) == "anthropic_messages"
+    }
 
     var body: some View {
         List {
             Section {
-                Text("只有启用的模型才能被 AI 指令选择和参与测活。模型的能力信息（上下文长度、是否支持图片等）请在“编辑供应商”中修改。")
-                    .font(.subheadline).foregroundStyle(.secondary)
+                Button {
+                    Task { await sync() }
+                } label: {
+                    HStack {
+                        Label(syncing ? "正在从供应商读取…" : "从供应商同步模型", systemImage: "arrow.triangle.2.circlepath")
+                        if syncing { Spacer(); ProgressView() }
+                    }
+                }
+                .disabled(syncing || busy || dirty || anthropic)
+                .frame(minHeight: 44)
+                .accessibilityIdentifier("ai.models.sync")
+                if let syncMessage {
+                    Label(syncMessage, systemImage: "checkmark.circle").foregroundStyle(.green).font(.subheadline)
+                }
+                if let syncError {
+                    NoticeView(title: syncUncertain ? "同步结果未知" : "同步失败", message: syncError)
+                }
+            } footer: {
+                if anthropic {
+                    Text("Claude 消息接口（Messages）没有列出模型的接口，请在下方手动添加模型 ID。")
+                } else if dirty {
+                    Text("有未保存的修改，请先保存模型选择再同步。")
+                } else {
+                    Text("读取供应商的模型列表并并入下方清单：已有模型的启用状态保持不变，新发现的模型默认不启用。只有启用的模型才能被 AI 指令选择和参与测活。")
+                }
             }
-            Section("候选模型") {
+            Section {
                 ForEach(Array(models.enumerated()), id: \.offset) { index, item in
                     VStack(alignment: .leading, spacing: 7) {
                         Toggle(isOn: enabled(index)) {
@@ -281,14 +315,21 @@ struct AIProviderModelsView: View {
                             Spacer()
                             if item["custom"]?.boolValue == true { Text("手动添加").font(.caption2).foregroundStyle(.secondary) }
                         }
-                        NavigationLink { List { ManagementValueView(value: item) }.navigationTitle(item["id"]?.stringValue ?? "模型详情").navigationBarTitleDisplayMode(.inline) } label: {
-                            Label("查看模型详细信息", systemImage: "info.circle")
+                        Text(AIModelCapabilities(item).summary)
+                            .font(.caption).foregroundStyle(.secondary)
+                            .accessibilityLabel("能力：" + AIModelCapabilities(item).summary)
+                        NavigationLink { AIModelDetailView(provider: provider, item: item) } label: {
+                            Label("模型详情与测试", systemImage: "info.circle")
                         }
                         .font(.caption)
                     }
                     .accessibilityIdentifier("ai.model.\(item["id"]?.stringValue ?? "unknown")")
                 }
-                if models.isEmpty { Text("还没有模型。请从供应商发现模型，或手动添加。").foregroundStyle(.secondary) }
+                if models.isEmpty { Text("还没有模型。可以从供应商同步，或在下方手动添加。").foregroundStyle(.secondary) }
+            } header: {
+                Text("模型清单（\(models.filter { $0["enabled"]?.boolValue == true }.count) 启用 / \(models.count) 全部）")
+            } footer: {
+                Text("能力依据服务器记录的模型信息显示，“未知”表示没有这项数据；可在“编辑供应商”中修改。")
             }
             Section("手动添加") {
                 TextField("模型 ID", text: $newModel).textInputAutocapitalization(.never).autocorrectionDisabled()
@@ -311,7 +352,47 @@ struct AIProviderModelsView: View {
             } footer: { Text("保存时会整体更新模型清单，各模型已有的能力信息会原样保留。") }
         }
         .navigationTitle("模型清单").navigationBarTitleDisplayMode(.inline)
-        .task { models = provider["models"]?.arrayValue ?? [] }
+        .task {
+            guard baseline.isEmpty, models.isEmpty else { return }
+            baseline = provider["models"]?.arrayValue ?? []
+            models = baseline
+        }
+    }
+
+    /// POST fetch-models：服务器合并后返回最新供应商，直接替换本页清单。不自动重试；
+    /// 网络中断时只做只读刷新，确认服务器实际状态。
+    private func sync() async {
+        guard !syncing, !dirty else { return }
+        syncing = true; syncMessage = nil; syncError = nil; syncUncertain = false; saved = false
+        defer { syncing = false }
+        let before = Set(baseline.compactMap { $0["id"]?.stringValue })
+        do {
+            let response = try await model.request(path: path + "/fetch-models", method: "POST")
+            guard let updated = response["provider"] else { throw APIError.incompatibleResponse }
+            apply(updated)
+            let added = (updated["models"]?.arrayValue ?? []).compactMap { $0["id"]?.stringValue }.filter { !before.contains($0) }
+            let fetched = response["fetched"]?.intValue ?? 0
+            syncMessage = added.isEmpty
+                ? "已读取 \(fetched) 个模型，没有新模型。"
+                : "已读取 \(fetched) 个模型，新增 \(added.count) 个（默认不启用）。"
+        } catch {
+            syncError = error.localizedDescription
+            syncUncertain = (error as? APIError)?.isOutcomeUncertain == true
+            if syncUncertain {
+                await workspace.refresh(model)
+                if let id = provider["id"]?.intValue, let current = workspace.providers.first(where: { $0["id"]?.intValue == id }) {
+                    apply(current)
+                    syncError = (syncError ?? "") + "\n已重新读取服务器上的模型清单，请确认是否已同步。"
+                }
+            }
+        }
+    }
+
+    private func apply(_ updated: JSONValue) {
+        provider = updated
+        workspace.replaceProvider(updated)
+        baseline = updated["models"]?.arrayValue ?? []
+        models = baseline
     }
 
     private func enabled(_ index: Int) -> Binding<Bool> {
@@ -338,8 +419,7 @@ struct AIProviderModelsView: View {
         defer { busy = false }
         do {
             let response = try await model.request(path: path, method: "PATCH", body: ["models": .array(models)])
-            workspace.replaceProvider(response)
-            models = response["models"]?.arrayValue ?? models
+            apply(response)
             saved = true
         } catch {
             self.error = error.localizedDescription

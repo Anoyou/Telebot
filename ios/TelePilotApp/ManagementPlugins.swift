@@ -2105,7 +2105,7 @@ private struct PluginSelectWidgetField: View {
             value = .string(next.model)
             if let providerField, editableKeys.contains(providerField) { setField(providerField, .string(next.provider)) }
         })) {
-            Text(waiting ? "正在加载 Provider…" : PluginSelectOptions.autoRouteLabel).tag(PluginSelectOptions.autoRouteKey)
+            Text(waiting ? "正在加载供应商…" : PluginSelectOptions.autoRouteLabel).tag(PluginSelectOptions.autoRouteKey)
             // 用序号作 id：不同 Provider 可能同名。
             ForEach(Array(selection.groups.enumerated()), id: \.offset) { _, group in
                 Section(group.group) {
@@ -2118,9 +2118,9 @@ private struct PluginSelectWidgetField: View {
         .disabled(waiting)
         .accessibilityIdentifier("plugin.config.select." + title)
         if let loadError, providers == nil {
-            Text("Provider 列表读取失败：\(loadError)").font(.footnote).foregroundStyle(.secondary)
+            Text("供应商列表读取失败：\(loadError)").font(.footnote).foregroundStyle(.secondary)
         } else if !waiting, selection.options.isEmpty {
-            Text("还没有已启用的模型；请先在 AI 页添加 Provider 并启用模型。").font(.footnote).foregroundStyle(.secondary)
+            Text("还没有已启用的模型；请先在 AI 页添加供应商并启用模型。").font(.footnote).foregroundStyle(.secondary)
         }
     }
 
@@ -2143,11 +2143,11 @@ private struct PluginSelectWidgetField: View {
     private func choices() -> (options: [PluginSelectOption], empty: String, disabled: Bool, note: String?) {
         switch widget {
         case .llmProvider:
-            if loading && providers == nil { return ([], "正在加载 Provider…", true, nil) }
-            if let loadError, providers == nil { return ([], "自动路由", false, "Provider 列表读取失败：\(loadError)") }
+            if loading && providers == nil { return ([], "正在加载供应商…", true, nil) }
+            if let loadError, providers == nil { return ([], "自动路由", false, "供应商列表读取失败：\(loadError)") }
             let options = PluginSelectOptions.providerOptions(providers ?? [])
-            return (options, "自动路由", false, options.isEmpty ? "尚未配置 TelePilot AI Provider；请先在 AI 页添加。"
-                                                              : "随模型自动填写；只想固定 Provider、使用其默认模型时才需要单独选择。")
+            return (options, "自动路由", false, options.isEmpty ? "尚未配置 AI 供应商；请先在 AI 页添加。"
+                                                              : "随模型自动填写；只想固定供应商、使用其默认模型时才需要单独选择。")
         case .llmModel:
             // 由 unifiedModelPicker 渲染，不会走到这里。
             return ([], PluginSelectOptions.autoRouteLabel, false, nil)
