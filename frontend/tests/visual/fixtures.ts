@@ -293,3 +293,27 @@ export async function installProviderFixture(page: Page): Promise<void> {
     await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(providerFixtures) });
   });
 }
+
+/** Cloudflare Access 团队登录域名（测试用，不发真实请求）。 */
+export const ACCESS_LOGIN_ORIGIN = "https://visual-team.cloudflareaccess.com";
+
+/**
+ * 模拟 Cloudflare Access 会话过期：匹配的同源 API 被 302 到团队登录域名，登录页不带 CORS 头，
+ * 浏览器里 XHR / fetch 因跨域失败。需在 installApiFixture 之后调用（后注册的路由优先）。
+ */
+export async function installAccessExpiredFixture(page: Page, paths: RegExp): Promise<void> {
+  await page.route(`${ACCESS_LOGIN_ORIGIN}/**`, async (route: Route) => {
+    await route.fulfill({ status: 200, contentType: "text/html", body: "<!doctype html><title>Sign in ・ Cloudflare Access</title>" });
+  });
+  await page.route("**/api/**", async (route: Route) => {
+    const pathname = new URL(route.request().url()).pathname;
+    if (!paths.test(pathname)) {
+      await route.fallback();
+      return;
+    }
+    await route.fulfill({
+      status: 302,
+      headers: { location: `${ACCESS_LOGIN_ORIGIN}/cdn-cgi/access/login/visual.example?kid=visual-aud&redirect_url=%2F` },
+    });
+  });
+}

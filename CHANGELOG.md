@@ -25,9 +25,15 @@
 
 ## [Unreleased]
 
+## [0.106.0-beta.6] - 2026-10-26 · patch（补丁预发布） · Cloudflare Access 兼容：iOS 用 Google 验证，Web 过期提示
+
+### 修复
+
+- Web 管理台放在 Cloudflare Access 后面时，Access 会话过期后数据请求会被 302 到 `*.cloudflareaccess.com` 并因跨域失败，以前只显示笼统的“Network Error”。现在网络层失败时用一次不跟随重定向的只读请求探测，确认是 Access 拦截后显示常驻提示「Cloudflare Access 登录已过期，请刷新页面重新登录」并提供「刷新页面」按钮；不会自动重试任何写操作。普通断网仍按原样提示。
+
 ### iOS
 
-- iOS 0.11.0：兼容 Cloudflare Tunnel + Access（邮箱白名单 + Google 登录），后台无需新增策略。登录页与 设置 → Cloudflare Access 新增「使用 Google 验证」：照搬 `cloudflared access login`，系统登录窗（ASWebAuthenticationSession）打开 `/cdn-cgi/access/cli`，并行轮询 `login.cloudflareaccess.org/transfer` 取回用本机 X25519 密钥加密的应用令牌（纯 Swift NaCl box 解密），存钥匙串并以 `cf-access-token` 头附在所有请求上；显示 Access 会话邮箱与到期时间，过期或被 302 到 `*.cloudflareaccess.com` 时弹出一键重新验证，写操作不自动重试。Service Token 降为「高级」可选（需另加 Service Auth 策略）。`docs/CLOUDFLARE-ACCESS.md` 改为以 Google 验证为主，并说明 Binding Cookie 的影响。服务器无改动。
+- iOS 0.11.0：兼容 Cloudflare Tunnel + Access（邮箱白名单 + Google 登录），后台无需新增策略。登录页与 设置 → Cloudflare Access 新增「使用 Google 验证」：照搬 `cloudflared access login`，系统登录窗（ASWebAuthenticationSession）打开 `/cdn-cgi/access/cli`，并行轮询 `login.cloudflareaccess.org/transfer` 取回用本机 X25519 密钥加密的应用令牌（纯 Swift NaCl box 解密），存钥匙串并以 `cf-access-token` 头附在所有请求上；显示 Access 会话邮箱与到期时间，过期或被 302 到 `*.cloudflareaccess.com` 时弹出一键重新验证，写操作不自动重试。Service Token 降为「高级」可选（需另加 Service Auth 策略）。`docs/CLOUDFLARE-ACCESS.md` 改为以 Google 验证为主，并说明 Binding Cookie 的影响。
 
 ## [0.106.0-beta.5] - 2026-10-26 · patch（补丁预发布） · 在线更新自动处理未提交改动、增量更新提速
 
