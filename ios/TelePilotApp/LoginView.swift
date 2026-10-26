@@ -11,8 +11,18 @@ struct LoginView: View {
     @State private var challenge: LoginResult?
     @State private var usingRecovery = false
     @State private var error: String?
+    @State private var accessEnabled = false
+    @State private var accessClientID = ""
+    @State private var accessSecret = ""
+    /// 服务器启用了 Cloudflare Access 时的引导文案（显示在 Cloudflare Access 区内）。
+    @State private var accessNotice: String?
     @FocusState private var focusedField: Field?
-    private enum Field { case server, username, password, code }
+    private enum Field { case server, username, password, code, accessClientID, accessSecret }
+
+    private var accessIncomplete: Bool {
+        accessEnabled && (accessClientID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || accessSecret.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+    }
 
     private var isChallenged: Bool { challenge?.requireTotp == true || challenge?.requireOtp == true }
     private var submitLabel: String {
@@ -92,7 +102,9 @@ struct LoginView: View {
                         }
                     }
                 }
-                if let message = error ?? model.loginNotice {
+                accessSection
+                // 被 Cloudflare Access 拦截时，引导已显示在 Cloudflare Access 区内，不再重复。
+                if let message = error ?? (accessNotice == nil ? model.loginNotice : nil) {
                     Section { NoticeView(title: "未能完成登录", message: message) }
                 }
                 if let message = model.sessionCleanupError {
@@ -106,7 +118,8 @@ struct LoginView: View {
                     }
                 } else if model.canRetrySession {
                     Section {
-                        Button("重试已有会话", systemImage: "arrow.clockwise") { Task { await model.retrySession() } }
+                        Button("重试已有会话", systemImage: "arrow.clockwise") { retrySession() }
+                            .disabled(accessIncomplete)
                             .accessibilityIdentifier("login.retrySession")
                     } footer: { Text("连接失败没有删除原会话。恢复网络后可直接重试，无需重新输入密码。") }
                 }
@@ -120,7 +133,7 @@ struct LoginView: View {
                         }
                         .frame(minHeight: 44)
                     }
-                    .disabled(model.sessionCleanupError != nil || server.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || username.isEmpty || password.isEmpty || (isChallenged && code.isEmpty))
+                    .disabled(model.sessionCleanupError != nil || server.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || username.isEmpty || password.isEmpty || (isChallenged && code.isEmpty) || accessIncomplete)
                     .accessibilityIdentifier("login.submit")
                 } footer: {
                     Text("密码仅用于本次登录，不保存在 App 中。已有会话由系统安全存储管理。高级配置仍可在 Web 管理台完成。")
@@ -138,6 +151,8 @@ struct LoginView: View {
                 }
             }
             .onAppear { server = model.serverURL?.absoluteString ?? "" }
+            .task { await loadSavedAccess() }
+            .onChange(of: model.loginAccessBlocked) { _, blocked in if blocked { showAccessRequired(configured: accessEnabled) } }
             .onChange(of: model.serverURL) { _, value in
                 if value == nil { server = "" }
             }
@@ -154,6 +169,82 @@ struct LoginView: View {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, !trimmed.contains("://") else { return trimmed }
         return "https://" + trimmed
+    }
+
+    /// 可选的 Cloudflare Access 区：服务器前套了 Access 时填写 Service Token。
+    @ViewBuilder private var accessSection: some View {
+        Section {
+            if let accessNotice {
+                NoticeView(title: "需要 Cloudflare Access", message: accessNotice, symbol: "lock.icloud")
+                    .accessibilityIdentifier("login.cfAccess.notice")
+            }
+            Toggle(isOn: $accessEnabled.animation()) {
+                Label("通过 Cloudflare Access 连接", systemImage: "lock.icloud")
+            }
+            .accessibilityIdentifier("login.cfAccess.toggle")
+            if accessEnabled {
+                TextField("Client ID（形如 xxxx.access）", text: $accessClientID)
+                    .textInputAutocapitalization(.never).autocorrectionDisabled()
+                    .keyboardType(.asciiCapable)
+                    .focused($focusedField, equals: .accessClientID)
+                    .submitLabel(.next)
+                    .onSubmit { focusedField = .accessSecret }
+                    .accessibilityLabel("Cloudflare Access Client ID")
+                    .accessibilityIdentifier("login.cfAccess.clientID")
+                SecureField("Client Secret", text: $accessSecret)
+                    .textInputAutocapitalization(.never).autocorrectionDisabled()
+                    .focused($focusedField, equals: .accessSecret)
+                    .submitLabel(.done)
+                    .onSubmit { focusedField = nil }
+                    .accessibilityLabel("Cloudflare Access Client Secret")
+                    .accessibilityIdentifier("login.cfAccess.clientSecret")
+                NavigationLink { CloudflareAccessHelpView() } label: {
+                    Label("如何创建 Service Token", systemImage: "book")
+                }
+                .accessibilityIdentifier("login.cfAccess.help")
+            }
+        } header: { Text("Cloudflare Access（可选）") } footer: {
+            Text(accessEnabled
+                 ? "App 会给每个请求带上 Service Token 请求头。Token 只保存在本机钥匙串，按服务器分别保存，不会写入日志。"
+                 : "服务器前套了 Cloudflare Access（例如 Google 账号验证）时打开，填写 Service Token；Web 管理台照常用 Google 登录。")
+        }
+    }
+
+    /// 读取这台服务器已保存的 Service Token 并预填；启动时已被 Access 拦截则直接展开引导。
+    private func loadSavedAccess() async {
+        if let saved = try? await model.cloudflareAccess() {
+            accessEnabled = true
+            accessClientID = saved.clientID
+            accessSecret = saved.clientSecret
+        }
+        if model.loginAccessBlocked { showAccessRequired(configured: accessEnabled) }
+    }
+
+    private func showAccessRequired(configured: Bool) {
+        withAnimation { accessEnabled = true }
+        accessNotice = APIError.cloudflareAccessRequired(tokenConfigured: configured).localizedDescription
+        focusedField = configured ? nil : .accessClientID
+    }
+
+    /// 登录页填写的 Service Token；关闭开关时为 nil（清除此服务器已保存的值）。
+    private func accessCredentials() throws -> CloudflareAccessCredentials? {
+        guard accessEnabled else { return nil }
+        return try CloudflareAccessCredentials(clientID: accessClientID, clientSecret: accessSecret)
+    }
+
+    private func retrySession() {
+        error = nil
+        Task {
+            do {
+                // 先保存刚填写的 Service Token，再用原会话重试（只读请求）。
+                try await model.setCloudflareAccess(try accessCredentials())
+                accessNotice = nil
+            } catch {
+                self.error = (error as? APIError)?.localizedDescription ?? "未能保存 Cloudflare Access 设置。"
+                return
+            }
+            await model.retrySession()
+        }
     }
 
     private func resetChallenge() {
@@ -175,9 +266,16 @@ struct LoginView: View {
             otpCode: challenge?.requireOtp == true && !usingRecovery ? code : nil,
             recoveryCode: usingRecovery ? code : nil
         )
+        let access: CloudflareAccessCredentials?
+        do { access = try accessCredentials() }
+        catch {
+            self.error = (error as? APIError)?.localizedDescription ?? "Cloudflare Access 设置不完整。"
+            return
+        }
+        accessNotice = nil
         Task {
             do {
-                if let result = try await model.login(server: Self.serverInput(server), request: request), !result.ok {
+                if let result = try await model.login(server: Self.serverInput(server), request: request, access: access), !result.ok {
                     challenge = result
                     code = ""
                     usingRecovery = false
@@ -185,7 +283,10 @@ struct LoginView: View {
                     else { error = "服务器没有完成登录，请在 Web 管理台检查登录设置。" }
                 }
             } catch {
-                if let apiError = error as? APIError,
+                if let apiError = error as? APIError, case .cloudflareAccessRequired(let configured) = apiError {
+                    // 不当作普通失败：直接展开 Cloudflare Access 区并定位到 Client ID。
+                    showAccessRequired(configured: configured)
+                } else if let apiError = error as? APIError,
                    case .server(_, let code) = apiError, code == "TOTP_INVALID", challenge?.requireOtp == true {
                     resetChallenge()
                     self.error = "验证器验证码已过期或不正确，请重新开始登录验证。"

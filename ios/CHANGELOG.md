@@ -9,6 +9,22 @@
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-10-26 · minor（次版本） · Cloudflare Access 兼容
+
+> 对应服务器：Beta 0.106.0-beta.5 之后（仅 iOS 与文档改动，服务器版本不变）
+
+### 新增
+
+- 支持服务器前套了 Cloudflare Access（例如 Google 账号验证）的部署：登录页新增可选的「Cloudflare Access」区，登录后也可在 设置 → Cloudflare Access 填写、更换或清除 Service Token（Client ID 与 Client Secret）。Token 只保存在本机钥匙串、按服务器分别保存，不写入日志；之后 App 的所有请求（登录、数据读取、写操作、文件下载、助手实时输出、推送注册等）都会带上 `CF-Access-Client-Id` / `CF-Access-Client-Secret` 请求头。
+- 设置页保存 Service Token 后，用一次只读请求验证能否穿过 Cloudflare Access，如实显示「连接正常」或失败原因。
+- App 内新增「如何在 Cloudflare 后台创建 Service Token」帮助：创建 Token、在 Access 应用里新增 Action 为 Service Auth 的策略、Web 照常用 Google 登录。
+
+### 改进
+
+- 被 Cloudflare Access 拦截时不再笼统显示「服务器返回了重定向」：登录页提示「这台服务器启用了 Cloudflare Access，请填写 Service Token」并直接展开 Service Token 区；已登录时请求被拦截会直接打开 Service Token 设置。已填写的 Token 被拒绝时，提示检查 Token 与 Service Auth 策略。
+- Access 拦截发生在 Cloudflare 边缘，不会被当成登录失效而清除会话，写操作也明确是「未执行」，不会提示结果未知；其他重定向仍按原安全规则拒绝。
+- 「更换服务器」会一并移除这台服务器的 Service Token。
+
 ## [0.10.0] - 2026-10-26 · minor（次版本） · 插件页参考 App Store 重做
 
 > 对应服务器：0.106.0-beta.4

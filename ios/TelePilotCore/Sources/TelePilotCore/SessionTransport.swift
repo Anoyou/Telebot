@@ -18,16 +18,23 @@ actor SessionTransport: ClientTransport {
     private let updateTransport: URLSessionTransport
     private let updateSession: URLSession
     private let store: any SessionStore
+    private let accessStore: any CloudflareAccessStore
+    private var access: CloudflareAccessCredentials?
+    private var accessLoaded = false
     private var auth: StoredSession?
     private var csrf: StoredSession?
     private var loaded = false
     private var generation = 0
     private static let csrfHeader = HTTPField.Name("X-CSRF-Token")!
     private static let requestedWith = HTTPField.Name("X-Requested-With")!
+    private static let accessClientID = HTTPField.Name(CloudflareAccessDetector.clientIDHeader)!
+    private static let accessClientSecret = HTTPField.Name(CloudflareAccessDetector.clientSecretHeader)!
 
-    init(origin: URL, configuration: URLSessionConfiguration, store: any SessionStore) {
+    init(origin: URL, configuration: URLSessionConfiguration, store: any SessionStore,
+         accessStore: any CloudflareAccessStore) {
         self.origin = origin
         self.store = store
+        self.accessStore = accessStore
         configuration.httpCookieStorage = nil
         configuration.httpShouldSetCookies = false
         configuration.urlCredentialStorage = nil
@@ -51,6 +58,34 @@ actor SessionTransport: ClientTransport {
         auth = nil
         csrf = nil
         try store.clear(origin: origin.absoluteString)
+    }
+
+    // MARK: Cloudflare Access Service Token
+
+    /// 本服务器保存的 Service Token（首次读取钥匙串后缓存在内存）。
+    func cloudflareAccess() throws -> CloudflareAccessCredentials? {
+        if !accessLoaded {
+            access = try accessStore.load(origin: origin.absoluteString)
+            accessLoaded = true
+        }
+        return access
+    }
+
+    /// 保存或清除（传 nil）本服务器的 Service Token，之后的所有请求立即使用新值。
+    func setCloudflareAccess(_ credentials: CloudflareAccessCredentials?) throws {
+        if let credentials { try accessStore.save(credentials, origin: origin.absoluteString) }
+        else { try accessStore.clear(origin: origin.absoluteString) }
+        access = credentials
+        accessLoaded = true
+    }
+
+    /// 3xx 指向 Access 登录，或 Access 的 401／403／登录页。
+    private func isCloudflareAccessResponse(status: Int, headers: [String: String], body: Data) -> Bool {
+        if (300..<400).contains(status) {
+            let location = headers.first { $0.key.lowercased() == "location" }?.value
+            return CloudflareAccessDetector.isAccessRedirect(location: location, origin: origin)
+        }
+        return CloudflareAccessDetector.isAccessBlock(status: status, headers: headers, body: body, tokenSent: access != nil)
     }
 
     func hasSession() throws -> Bool {
@@ -106,8 +141,12 @@ actor SessionTransport: ClientTransport {
         async throws -> (HTTPResponse, Data) {
         guard generation == epoch else { throw APIError.sessionChanged }
         try loadAndExpire()
+        let accessToken = try cloudflareAccess()
         var request = original
         request.headerFields[Self.requestedWith] = "telepilot-ui"
+        // Cloudflare Access：每个请求都带 Service Token（值只进请求头，从不写日志或错误信息）。
+        request.headerFields[Self.accessClientID] = accessToken?.clientID
+        request.headerFields[Self.accessClientSecret] = accessToken?.clientSecret
         request.headerFields[.cacheControl] = "no-store"
         let cookie = [auth.map { "auth_token=\($0.token)" }, csrf.map { "csrf_token=\($0.token)" }]
             .compactMap { $0 }.joined(separator: "; ")
@@ -129,6 +168,13 @@ actor SessionTransport: ClientTransport {
             throw APIError.network(outcomeUncertain: write)
         }
         guard generation == epoch else { throw APIError.sessionChanged }
+        // 先识别 Cloudflare Access：它的 401 来自 Cloudflare 边缘，不能当成 TelePilot 会话失效而清除登录。
+        let headers = Dictionary(response.headerFields.map { ($0.name.canonicalName, $0.value) },
+                                 uniquingKeysWith: { first, _ in first })
+        if isCloudflareAccessResponse(status: response.status.code, headers: headers, body: data) {
+            throw APIError.cloudflareAccessRequired(tokenConfigured: accessToken != nil)
+        }
+        // 其他重定向一律拒绝，不跟随、不转发凭据（安全规则不变）。
         if (300..<400).contains(response.status.code) { throw APIError.redirectRejected }
         if response.status.code == 401 {
             try clear()
@@ -238,6 +284,7 @@ actor SessionTransport: ClientTransport {
     func stream(path: String, onEvent: @escaping @Sendable (JSONValue) async -> Void) async throws {
         guard Self.validPath(path) else { throw APIError.invalidServerURL }
         try loadAndExpire()
+        let accessToken = try cloudflareAccess()
         let epoch = generation
         guard let url = URL(string: origin.absoluteString + path) else { throw APIError.invalidServerURL }
         var request = URLRequest(url: url)
@@ -246,17 +293,40 @@ actor SessionTransport: ClientTransport {
         request.setValue("telepilot-ui", forHTTPHeaderField: "X-Requested-With")
         request.setValue("no-store", forHTTPHeaderField: "Cache-Control")
         if let auth { request.setValue("auth_token=" + auth.token, forHTTPHeaderField: "Cookie") }
+        if let accessToken {
+            request.setValue(accessToken.clientID, forHTTPHeaderField: CloudflareAccessDetector.clientIDHeader)
+            request.setValue(accessToken.clientSecret, forHTTPHeaderField: CloudflareAccessDetector.clientSecretHeader)
+        }
         do {
             let (bytes, response) = try await session.bytes(for: request)
             defer { bytes.task.cancel() }
             guard epoch == generation else { throw APIError.sessionChanged }
             guard let http = response as? HTTPURLResponse else { throw APIError.incompatibleResponse }
-            if (300..<400).contains(http.statusCode) { throw APIError.redirectRejected }
+            var headers: [String: String] = [:]
+            for (key, value) in http.allHeaderFields {
+                if let key = key as? String, let value = value as? String { headers[key.lowercased()] = value }
+            }
+            let isStream = headers["content-type"]?.lowercased().hasPrefix("application/x-ndjson") == true
+            if (300..<400).contains(http.statusCode) {
+                if isCloudflareAccessResponse(status: http.statusCode, headers: headers, body: Data()) {
+                    throw APIError.cloudflareAccessRequired(tokenConfigured: accessToken != nil)
+                }
+                throw APIError.redirectRejected
+            }
+            if !(200..<300).contains(http.statusCode) || !isStream {
+                // 只读取一小段正文用于识别 Access 拒绝页，不把内容带进错误信息。
+                var prefix = Data()
+                for try await byte in bytes {
+                    prefix.append(byte)
+                    if prefix.count >= 64 * 1024 { break }
+                }
+                if isCloudflareAccessResponse(status: http.statusCode, headers: headers, body: prefix) {
+                    throw APIError.cloudflareAccessRequired(tokenConfigured: accessToken != nil)
+                }
+            }
             if http.statusCode == 401 { try clear(); throw APIError.unauthorized }
             guard (200..<300).contains(http.statusCode) else { throw APIError.server(status: http.statusCode, code: nil) }
-            guard http.value(forHTTPHeaderField: "Content-Type")?.lowercased().hasPrefix("application/x-ndjson") == true else {
-                throw APIError.incompatibleResponse
-            }
+            guard isStream else { throw APIError.incompatibleResponse }
             var line = Data()
             for try await byte in bytes {
                 try Task.checkCancellation()

@@ -7,13 +7,15 @@ public actor TelePilotClient {
     private let client: Client
 
     public init(serverURL: URL) throws {
-        try self.init(serverURL: serverURL, configuration: .ephemeral, store: KeychainSessionStore())
+        try self.init(serverURL: serverURL, configuration: .ephemeral, store: KeychainSessionStore(),
+                      accessStore: KeychainCloudflareAccessStore())
     }
 
-    init(serverURL: URL, configuration: URLSessionConfiguration, store: any SessionStore) throws {
+    init(serverURL: URL, configuration: URLSessionConfiguration, store: any SessionStore,
+         accessStore: any CloudflareAccessStore) throws {
         let origin = try Self.normalizedServerURL(serverURL.absoluteString)
         self.serverURL = origin
-        transport = SessionTransport(origin: origin, configuration: configuration, store: store)
+        transport = SessionTransport(origin: origin, configuration: configuration, store: store, accessStore: accessStore)
         client = Client(serverURL: origin, configuration: .init(dateTranscoder: ServerDateTranscoder()), transport: transport)
     }
 
@@ -145,6 +147,16 @@ public actor TelePilotClient {
     }
 
     public func clearLocalSession() async throws { try await transport.clear() }
+
+    /// 本服务器保存在钥匙串里的 Cloudflare Access Service Token；没有配置时为 nil。
+    public func cloudflareAccess() async throws -> CloudflareAccessCredentials? {
+        try await transport.cloudflareAccess()
+    }
+
+    /// 保存（或传 nil 清除）Cloudflare Access Service Token。只改本机钥匙串，不发请求。
+    public func setCloudflareAccess(_ credentials: CloudflareAccessCredentials?) async throws {
+        try await transport.setCloudflareAccess(credentials)
+    }
 
     public func request(path: String, method: String = "GET", body: JSONValue? = nil) async throws -> JSONValue {
         let data = try await download(path: path, method: method, body: body)

@@ -32,6 +32,14 @@ struct TelePilotApp: App {
             .environment(preferences)
             .environment(push)
             .tint(Color("AccentColor"))
+            // 已登录时请求被 Cloudflare Access 拦截：直接打开 Service Token 设置，而不是只在各页显示错误。
+            .sheet(isPresented: Binding(
+                get: { model.cloudflareAccessPrompt && model.phase == .signedIn },
+                set: { model.cloudflareAccessPrompt = $0 }
+            )) {
+                NavigationStack { CloudflareAccessSettingsView(presentedAsSheet: true) }
+                    .environment(model)
+            }
             .task {
                 PushNotificationAppDelegate.manager = push
                 push.onRoute = { model.requestedRoute = $0 }

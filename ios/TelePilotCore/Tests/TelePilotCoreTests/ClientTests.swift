@@ -17,6 +17,14 @@ final class MemoryStore: SessionStore, @unchecked Sendable {
     }
 }
 
+final class MemoryAccessStore: CloudflareAccessStore, @unchecked Sendable {
+    private let lock = NSLock()
+    private var values: [String: CloudflareAccessCredentials] = [:]
+    func load(origin: String) throws -> CloudflareAccessCredentials? { lock.withLock { values[origin] } }
+    func save(_ credentials: CloudflareAccessCredentials, origin: String) throws { lock.withLock { values[origin] = credentials } }
+    func clear(origin: String) throws { lock.withLock { values[origin] = nil } }
+}
+
 struct MockReply: Sendable {
     var status = 200
     var headers: [String: String] = [:]
@@ -71,12 +79,14 @@ struct ClientTests {
     var loginReply: MockReply { MockReply(headers: ["Set-Cookie": "auth_token=session-one; Path=/; Max-Age=3600; Secure; HttpOnly"], body: "{\"ok\":true}") }
     var userReply: MockReply { MockReply(body: "{\"id\":1,\"username\":\"admin\",\"has_totp\":false}") }
 
-    func setup(_ replies: [MockReply], store: MemoryStore = MemoryStore(), origin: String? = nil) throws -> (TelePilotClient, Script, MemoryStore) {
+    func setup(_ replies: [MockReply], store: MemoryStore = MemoryStore(), origin: String? = nil,
+               access: MemoryAccessStore = MemoryAccessStore()) throws -> (TelePilotClient, Script, MemoryStore) {
         let script = Script(replies)
         MockProtocol.lock.withLock { MockProtocol.handler = { script.handle($0) } }
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [MockProtocol.self]
-        return (try TelePilotClient(serverURL: URL(string: origin ?? self.origin)!, configuration: config, store: store), script, store)
+        return (try TelePilotClient(serverURL: URL(string: origin ?? self.origin)!, configuration: config, store: store,
+                                    accessStore: access), script, store)
     }
 
     func body(_ request: URLRequest) throws -> [String: Any] {

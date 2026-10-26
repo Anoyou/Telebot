@@ -25,6 +25,9 @@
 
 ## [Unreleased]
 
+### iOS
+
+- iOS 0.11.0：兼容 Cloudflare Access。登录页与 设置 → Cloudflare Access 可填写、更换、清除 Service Token（存本机钥匙串，不写日志），所有请求附带 `CF-Access-Client-Id` / `CF-Access-Client-Secret`；识别 Access 拦截（3xx 指向 `*.cloudflareaccess.com` 或 `/cdn-cgi/access/`、Access 的 401/403 页面）并单独提示、直接引导到 Service Token 设置，不清除会话、不把写操作报成结果未知，其他重定向仍拒绝；新增 `docs/CLOUDFLARE-ACCESS.md` 与 App 内帮助说明 Cloudflare 后台配置步骤。服务器无改动。
 ## [0.106.0-beta.5] - 2026-10-26 · patch（补丁预发布） · 在线更新自动处理未提交改动、增量更新提速
 
 ### 修复

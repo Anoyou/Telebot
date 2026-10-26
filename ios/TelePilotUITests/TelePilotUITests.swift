@@ -108,6 +108,90 @@ final class TelePilotUITests: XCTestCase {
         XCTAssertTrue(app.buttons["overview.refresh"].waitForExistence(timeout: 10))
     }
 
+    /// 服务器启用 Cloudflare Access：登录被拦截时单独提示并展开 Service Token 区，填写后登录继续。
+    func testCloudflareAccessBlockedLoginGuidesToServiceToken() {
+        let app = launch(["--ui-test-login", "--ui-test-cf-access"])
+        let server = app.textFields["login.server"]
+        XCTAssertTrue(server.waitForExistence(timeout: 10))
+        if !(server.value as? String ?? "").hasPrefix("https://") {
+            server.tap()
+            server.typeText("https://demo.telepilot.example")
+        }
+        let username = app.textFields["login.username"]
+        username.tap()
+        username.typeText("owner")
+        app.buttons["login.keyboardDone"].firstMatch.tap()
+        let password = app.secureTextFields["login.password"]
+        reveal(password, app: app)
+        password.tap()
+        password.typeText("test-password")
+        app.buttons["login.keyboardDone"].firstMatch.tap()
+        reveal(app.buttons["login.submit"], app: app)
+        app.buttons["login.submit"].tap()
+
+        // 懒加载表单：先滚动到 Cloudflare Access 区再断言。
+        let notice = app.descendants(matching: .any)["login.cfAccess.notice"].firstMatch
+        let clientID = app.textFields["login.cfAccess.clientID"]
+        reveal(clientID, app: app)
+        XCTAssertTrue(clientID.waitForExistence(timeout: 10))
+        XCTAssertTrue(notice.exists)
+        XCTAssertFalse(app.staticTexts["服务器返回了重定向。为保护登录信息，请直接填写最终 HTTPS 地址。"].exists)
+        capture("Cloudflare Access 引导", app: app)
+        // 没填完 Service Token 时不能提交。
+        if app.buttons["login.submit"].exists { XCTAssertFalse(app.buttons["login.submit"].isEnabled) }
+        clientID.tap()
+        clientID.typeText("fixture.access")
+        let secret = app.secureTextFields["login.cfAccess.clientSecret"]
+        reveal(secret, app: app)
+        secret.tap()
+        secret.typeText("fixture-secret")
+        app.buttons["login.keyboardDone"].firstMatch.tap()
+        reveal(app.buttons["login.submit"], app: app)
+        XCTAssertTrue(app.buttons["login.submit"].isEnabled)
+        app.buttons["login.submit"].tap()
+        // Access 放行后进入原有的二次验证步骤。
+        XCTAssertTrue(app.textFields["login.code"].waitForExistence(timeout: 10))
+    }
+
+    /// 已登录后可在设置里填写、验证并清除 Cloudflare Access Service Token。
+    func testCloudflareAccessSettingsSaveAndClear() {
+        let app = launch()
+        XCTAssertTrue(app.buttons["overview.refresh"].waitForExistence(timeout: 45))
+        app.tabBars.buttons["更多"].tap()
+        let settings = app.buttons["more.settings"]
+        XCTAssertTrue(settings.waitForExistence(timeout: 10))
+        settings.tap()
+        let entry = app.buttons["settings.cfAccess"]
+        reveal(entry, app: app)
+        entry.tap()
+
+        let clientID = app.textFields["cfAccess.clientID"]
+        XCTAssertTrue(clientID.waitForExistence(timeout: 10))
+        XCTAssertFalse(app.buttons["cfAccess.clear"].exists)
+        clientID.tap()
+        clientID.typeText("fixture.access")
+        let secret = app.secureTextFields["cfAccess.clientSecret"]
+        reveal(secret, app: app)
+        secret.tap()
+        secret.typeText("fixture-secret")
+        app.buttons["cfAccess.keyboardDone"].firstMatch.tap()
+        let save = app.buttons["cfAccess.save"]
+        reveal(save, app: app)
+        XCTAssertTrue(save.isEnabled)
+        save.tap()
+
+        let result = app.descendants(matching: .any)["cfAccess.result"].firstMatch
+        XCTAssertTrue(result.waitForExistence(timeout: 10))
+        capture("Cloudflare Access 设置", app: app)
+        let clear = app.buttons["cfAccess.clear"]
+        reveal(clear, app: app)
+        clear.tap()
+        let confirm = app.buttons["cfAccess.confirmClear"].firstMatch
+        XCTAssertTrue(confirm.waitForExistence(timeout: 5))
+        confirm.tap()
+        XCTAssertTrue(clear.waitForNonExistence(timeout: 10))
+    }
+
     func testOfflineKeepsSessionAndAllowsRetry() {
         let app = launch(["--ui-test-offline"])
         let refresh = app.buttons["overview.refresh"]

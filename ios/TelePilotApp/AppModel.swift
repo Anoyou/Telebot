@@ -40,6 +40,12 @@ final class AppModel {
     private(set) var assistantSessionRequest: String?
     /// 写操作已被服务器接受，正在重新读取状态。与读取失败（*Error）区分，避免误报“已过期”。
     private(set) var isSyncingAfterAction = false
+    /// 已登录时请求被 Cloudflare Access 拦截：根视图据此弹出 Service Token 设置（每次拦截只弹一次）。
+    var cloudflareAccessPrompt = false
+    /// 启动时恢复会话就被 Cloudflare Access 拦截：登录页据此展开 Cloudflare Access 区。
+    private(set) var loginAccessBlocked = false
+    /// 当前服务器是否已保存 Service Token；nil 表示尚未读取。
+    private(set) var cloudflareAccessConfigured: Bool?
 
     @ObservationIgnored private var service: (any AppServing)?
     @ObservationIgnored private var generation = 0
@@ -49,6 +55,7 @@ final class AppModel {
     @ObservationIgnored private var cleanupNotice: String?
     @ObservationIgnored private var refreshAgain = false
     @ObservationIgnored private var detailRequestIDs: [Int: Int] = [:]
+    @ObservationIgnored private var cloudflareAccessPrompted = false
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -90,6 +97,7 @@ final class AppModel {
             else {
                 phase = .signedOut
                 canRetrySession = true
+                loginAccessBlocked = (error as? APIError)?.isCloudflareAccess == true
                 loginNotice = message(error)
             }
         }
@@ -106,16 +114,21 @@ final class AppModel {
             user = current
             phase = .signedIn
             canRetrySession = false
+            loginAccessBlocked = false
             loginNotice = nil
             await refresh()
         } catch {
             guard token == generation else { return }
             if requiresSessionCleanup(error) { await expireSession() }
-            else { loginNotice = message(error) }
+            else {
+                loginAccessBlocked = (error as? APIError)?.isCloudflareAccess == true
+                loginNotice = message(error)
+            }
         }
     }
 
-    func login(server: String, request: LoginRequest) async throws -> LoginResult? {
+    /// - Parameter access: 登录页填写的 Cloudflare Access Service Token；nil 表示不使用（会清除此服务器已保存的值）。
+    func login(server: String, request: LoginRequest, access: CloudflareAccessCredentials? = nil) async throws -> LoginResult? {
         guard !isAuthenticating, sessionCleanupError == nil else { return nil }
         isAuthenticating = true
         defer { isAuthenticating = false }
@@ -143,6 +156,9 @@ final class AppModel {
         }
         guard let service else { return nil }
         let token = generation
+        try await service.setCloudflareAccess(access)
+        cloudflareAccessConfigured = access != nil
+        cloudflareAccessPrompted = false
         let result = try await service.login(request)
         guard token == generation else { return nil }
         if result.ok {
@@ -158,6 +174,7 @@ final class AppModel {
             user = current
             phase = .signedIn
             canRetrySession = false
+            loginAccessBlocked = false
             await refresh()
         }
         return result
@@ -189,6 +206,7 @@ final class AppModel {
             await expireSession()
             return
         }
+        for error in errors { noteCloudflareAccess(error) }
         switch results.0 {
         case .success(let value): health = value; healthError = nil
         case .failure(let error): healthError = message(error)
@@ -229,6 +247,7 @@ final class AppModel {
         } catch {
             guard token == generation, detailRequestIDs[id] == readID else { return }
             if requiresSessionCleanup(error) { await expireSession(); return }
+            noteCloudflareAccess(error)
             detailErrors[id] = message(error)
         }
         guard token == generation, detailRequestIDs[id] == readID else { return }
@@ -339,6 +358,7 @@ final class AppModel {
             return value
         } catch {
             if token == generation, requiresSessionCleanup(error) { await expireSession() }
+            if token == generation { noteCloudflareAccess(error) }
             throw error
         }
     }
@@ -352,6 +372,7 @@ final class AppModel {
             return value
         } catch {
             if token == generation, requiresSessionCleanup(error) { await expireSession() }
+            if token == generation { noteCloudflareAccess(error) }
             throw error
         }
     }
@@ -365,6 +386,7 @@ final class AppModel {
             return value
         } catch {
             if token == generation, requiresSessionCleanup(error) { await expireSession() }
+            if token == generation { noteCloudflareAccess(error) }
             throw error
         }
     }
@@ -380,6 +402,7 @@ final class AppModel {
             guard token == generation else { throw APIError.sessionChanged }
         } catch {
             if token == generation, requiresSessionCleanup(error) { await expireSession() }
+            if token == generation { noteCloudflareAccess(error) }
             throw error
         }
     }
@@ -422,6 +445,10 @@ final class AppModel {
             try await service?.clearLocalSession()
             sessionCleanupError = nil
             if cleanupForgetServer {
+                // 更换服务器同时移除这台服务器的 Cloudflare Access Service Token。
+                try await service?.setCloudflareAccess(nil)
+                cloudflareAccessConfigured = nil
+                loginAccessBlocked = false
                 service = nil
                 serverURL = nil
                 if !isFixture { defaults.removeObject(forKey: serverKey) }
@@ -431,6 +458,48 @@ final class AppModel {
             loginNotice = nil
             sessionCleanupError = "未能从系统钥匙串移除旧会话，暂时无法登录或更换服务器。请解锁设备后重试清理。"
         }
+    }
+
+    // MARK: Cloudflare Access
+
+    /// 读取当前服务器保存的 Service Token（只读本机钥匙串）。
+    func cloudflareAccess() async throws -> CloudflareAccessCredentials? {
+        guard let service else { return nil }
+        let value = try await service.cloudflareAccess()
+        cloudflareAccessConfigured = value != nil
+        return value
+    }
+
+    /// 保存或清除（nil）当前服务器的 Service Token，只改本机钥匙串。
+    func setCloudflareAccess(_ credentials: CloudflareAccessCredentials?) async throws {
+        guard let service else { throw APIError.invalidServerURL }
+        try await service.setCloudflareAccess(credentials)
+        cloudflareAccessConfigured = credentials != nil
+        cloudflareAccessPrompted = false
+    }
+
+    /// 用一次只读请求（当前用户）验证能否穿过 Cloudflare Access 到达 TelePilot。成功时顺带刷新概览。
+    /// 返回 nil 表示连接正常，否则为可展示的失败原因。不重试，也不发出任何写请求。
+    func verifyCloudflareAccess() async -> String? {
+        guard phase == .signedIn, let service else { return "请先登录后再验证连接。" }
+        let token = generation
+        do {
+            _ = try await service.currentUser()
+            guard token == generation else { return APIError.sessionChanged.localizedDescription }
+            cloudflareAccessPrompt = false
+            await refresh()
+            return nil
+        } catch {
+            guard token == generation else { return APIError.sessionChanged.localizedDescription }
+            if requiresSessionCleanup(error) { await expireSession() }
+            return message(error)
+        }
+    }
+
+    private func noteCloudflareAccess(_ error: Error) {
+        guard phase == .signedIn, (error as? APIError)?.isCloudflareAccess == true, !cloudflareAccessPrompted else { return }
+        cloudflareAccessPrompted = true
+        cloudflareAccessPrompt = true
     }
 
     private func requiresSessionCleanup(_ error: Error) -> Bool {

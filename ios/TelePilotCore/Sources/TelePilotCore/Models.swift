@@ -137,12 +137,22 @@ public enum APIError: Error, LocalizedError, Sendable {
     case redirectRejected
     case secureStorage
     case sessionChanged
+    /// 请求被 Cloudflare Access 拦截（重定向到 `*.cloudflareaccess.com`／`/cdn-cgi/access/`，或 Access 的 401／403 页面）。
+    /// 请求没有到达 TelePilot，不清除登录会话，写操作也确定未执行。
+    case cloudflareAccessRequired(tokenConfigured: Bool)
+    /// Service Token 输入不完整或包含不能放进 HTTP 头的字符。
+    case cloudflareAccessTokenInvalid
 
     public var isUnauthorized: Bool {
         switch self {
         case .unauthorized, .server(status: 401, code: _): true
         default: false
         }
+    }
+    /// 需要引导用户去填写／检查 Cloudflare Access Service Token。
+    public var isCloudflareAccess: Bool {
+        if case .cloudflareAccessRequired = self { return true }
+        return false
     }
     public var isIncompatibleResponse: Bool {
         switch self {
@@ -169,6 +179,10 @@ public enum APIError: Error, LocalizedError, Sendable {
         case .redirectRejected: "服务器返回了重定向。为保护登录信息，请直接填写最终 HTTPS 地址。"
         case .secureStorage: "无法访问系统钥匙串，请解锁设备后重试。"
         case .sessionChanged: "登录状态已改变，请重新打开此页面。"
+        case .cloudflareAccessRequired(let configured): configured
+            ? "Cloudflare Access 拒绝了已填写的 Service Token。请检查 Client ID 与 Client Secret 是否正确、Token 是否过期，并确认该 Access 应用里有一条 Action 为 Service Auth 且包含此 Token 的策略。"
+            : "这台服务器启用了 Cloudflare Access，请填写 Service Token。"
+        case .cloudflareAccessTokenInvalid: "请同时填写 Cloudflare Access 的 Client ID 和 Client Secret（不能包含空格或换行）。"
         case .server(let status, let code):
             switch code {
             case "NO_USER": "服务器尚未创建管理员，请先在 Web 管理台完成初始化。"

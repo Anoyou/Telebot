@@ -13,6 +13,10 @@ protocol AppServing: Sendable {
     func resumeAccount(id: Int) async throws
     func logout() async throws
     func clearLocalSession() async throws
+    /// 本服务器保存在钥匙串里的 Cloudflare Access Service Token。
+    func cloudflareAccess() async throws -> CloudflareAccessCredentials?
+    /// 保存（nil 为清除）Cloudflare Access Service Token，之后所有请求立即生效。
+    func setCloudflareAccess(_ credentials: CloudflareAccessCredentials?) async throws
     func request(path: String, method: String, body: JSONValue?) async throws -> JSONValue
     func download(path: String, method: String, body: JSONValue?) async throws -> Data
     func upload(path: String, file: Data, filename: String, fields: [String: String]) async throws -> JSONValue
