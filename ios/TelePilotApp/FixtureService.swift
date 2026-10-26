@@ -323,8 +323,24 @@ actor FixtureService: AppServing {
                                  "category": "automation", "version": "1.0.0", "update_available": false, "source_type": "remote",
                                  "source_label": "个人插件仓库", "is_builtin": false, "signature_ok": true, "orphan": false, "permissions": ["send_message"]])
             }
+            // 与服务器一致：按保存的展示顺序排列，未在顺序里的保持原顺序排在后面。
+            let order = (fixtureValues["/api/feature-matrix/order"]?["keys"]?.arrayValue ?? []).compactMap(\.stringValue)
+            if !order.isEmpty {
+                features = features.enumerated().sorted { lhs, rhs in
+                    let l = order.firstIndex(of: lhs.element["key"]?.stringValue ?? "") ?? Int.max
+                    let r = order.firstIndex(of: rhs.element["key"]?.stringValue ?? "") ?? Int.max
+                    return l == r ? lhs.offset < rhs.offset : l < r
+                }.map(\.element)
+            }
             object["features"] = .array(features)
             return .object(object)
+        }
+        if clean == "/api/feature-matrix/order" {
+            if method == "PUT" {
+                let keys = (body?["keys"]?.arrayValue ?? []).compactMap(\.stringValue)
+                fixtureValues[clean] = ["keys": .array(keys.map { .string($0) })]
+            }
+            return fixtureValues[clean] ?? ["keys": []]
         }
         if let match = clean.firstMatch(of: #/^\/api\/accounts\/(\d+)\/features$/#), method == "GET" {
             let accountID = Int(match.1) ?? 1

@@ -747,6 +747,52 @@ async def set_account_feature(
 # ─────────────────────────────────────────────────────
 # 矩阵：行=账号、列=feature
 # ─────────────────────────────────────────────────────
+PLUGIN_DISPLAY_ORDER_KEY = "plugin_display_order"
+PLUGIN_DISPLAY_ORDER_MAX = 1000
+
+
+async def get_plugin_display_order(db: AsyncSession) -> list[str]:
+    """插件中心卡片的展示顺序（Web 与 iOS 共用）。未设置时返回空列表。"""
+    row = await db.get(SystemSetting, PLUGIN_DISPLAY_ORDER_KEY)
+    value = row.value if row is not None else None
+    keys = value.get("keys") if isinstance(value, dict) else None
+    if not isinstance(keys, list):
+        return []
+    return [k for k in keys if isinstance(k, str) and k][:PLUGIN_DISPLAY_ORDER_MAX]
+
+
+async def set_plugin_display_order(db: AsyncSession, keys: Iterable[str]) -> list[str]:
+    """保存展示顺序：去空、去重并保持首次出现的位置；只影响展示，不影响插件执行顺序。"""
+    cleaned: list[str] = []
+    seen: set[str] = set()
+    for raw in keys:
+        key = str(raw or "").strip()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        cleaned.append(key)
+    cleaned = cleaned[:PLUGIN_DISPLAY_ORDER_MAX]
+    row = await db.get(SystemSetting, PLUGIN_DISPLAY_ORDER_KEY)
+    value = {"keys": cleaned}
+    if row is None:
+        db.add(SystemSetting(key=PLUGIN_DISPLAY_ORDER_KEY, value=value))
+    else:
+        row.value = value
+        flag_modified(row, "value")
+    await db.flush()
+    return cleaned
+
+
+def apply_display_order(features: list[Feature], order: list[str]) -> list[Feature]:
+    """按保存的展示顺序排列；不在顺序里的插件（如新安装的）保持原有顺序排在后面。"""
+    if not order:
+        return features
+    rank = {key: index for index, key in enumerate(order)}
+    indexed = list(enumerate(features))
+    indexed.sort(key=lambda item: (rank.get(item[1].key, len(rank)), item[0]))
+    return [feature for _, feature in indexed]
+
+
 async def feature_matrix(db: AsyncSession) -> dict[str, Any]:
     """构造功能矩阵数据：
 
@@ -759,8 +805,8 @@ async def feature_matrix(db: AsyncSession) -> dict[str, Any]:
           ]
         }
     """
-    # 1) 保证内置 feature 行齐全
-    features = await list_features(db)
+    # 1) 保证内置 feature 行齐全；按用户保存的展示顺序排列（Web 与 iOS 插件中心共用）
+    features = apply_display_order(await list_features(db), await get_plugin_display_order(db))
     installed_plugin_rows = (await db.execute(select(InstalledPlugin))).scalars().all()
     installed_plugin_by_key = {row.key: row for row in installed_plugin_rows}
 

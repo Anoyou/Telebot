@@ -265,6 +265,12 @@ class FeatureMatrixRow(BaseModel):
     feature_enabled: dict[str, bool] = Field(default_factory=dict)  # feature_key -> account switch
 
 
+class PluginDisplayOrder(BaseModel):
+    """插件中心卡片展示顺序（插件 key 列表）。只影响展示，不改变插件执行优先级。"""
+
+    keys: list[str] = Field(default_factory=list, max_length=1000)
+
+
 class FeatureMatrixResponse(BaseModel):
     features: list[FeatureInfo]
     accounts: list[FeatureMatrixRow]
