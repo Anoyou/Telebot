@@ -38,8 +38,9 @@ final class WorkspaceUITests: XCTestCase {
         plugins.tap()
         XCTAssertTrue(app.buttons["plugin.card.auto_reply"].waitForExistence(timeout: 10))
         let center = app.segmentedControls.firstMatch.frame
-        let centerSearch = app.searchFields["plugins.search"].firstMatch
-        XCTAssertTrue(centerSearch.exists)
+        // 搜索栏是 UISearchTextField，在不同系统版本上可能暴露为 SearchField 或 TextField，按标识符查找。
+        let centerSearch = app.descendants(matching: .any).matching(identifier: "plugins.search").firstMatch
+        XCTAssertTrue(centerSearch.waitForExistence(timeout: 5))
         XCTAssertEqual(centerSearch.frame.minY - center.maxY, 8, accuracy: 3)
         app.buttons["plugins.discover"].tap()
         XCTAssertTrue(app.buttons["plugin.discover.row.weather_digest"].waitForExistence(timeout: 15))
@@ -48,7 +49,7 @@ final class WorkspaceUITests: XCTestCase {
         XCTAssertTrue(app.segmentedControls.buttons["供应商"].waitForExistence(timeout: 10))
         app.segmentedControls.buttons["供应商"].tap()
         let ai = app.segmentedControls.firstMatch.frame
-        let aiSearch = app.searchFields["ai.search"].firstMatch
+        let aiSearch = app.descendants(matching: .any).matching(identifier: "ai.search").firstMatch
         XCTAssertTrue(aiSearch.waitForExistence(timeout: 5))
         XCTAssertEqual(aiSearch.frame.minY - ai.maxY, 8, accuracy: 3)
         let message = "插件中心 \(center)，发现 \(discover)，AI \(ai)"
