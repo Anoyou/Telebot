@@ -27,7 +27,7 @@
 
 ### iOS
 
-- iOS 0.11.0：兼容 Cloudflare Access。登录页与 设置 → Cloudflare Access 可填写、更换、清除 Service Token（存本机钥匙串，不写日志），所有请求附带 `CF-Access-Client-Id` / `CF-Access-Client-Secret`；识别 Access 拦截（3xx 指向 `*.cloudflareaccess.com` 或 `/cdn-cgi/access/`、Access 的 401/403 页面）并单独提示、直接引导到 Service Token 设置，不清除会话、不把写操作报成结果未知，其他重定向仍拒绝；新增 `docs/CLOUDFLARE-ACCESS.md` 与 App 内帮助说明 Cloudflare 后台配置步骤。服务器无改动。
+- iOS 0.11.0：兼容 Cloudflare Tunnel + Access（邮箱白名单 + Google 登录），后台无需新增策略。登录页与 设置 → Cloudflare Access 新增「使用 Google 验证」：照搬 `cloudflared access login`，系统登录窗（ASWebAuthenticationSession）打开 `/cdn-cgi/access/cli`，并行轮询 `login.cloudflareaccess.org/transfer` 取回用本机 X25519 密钥加密的应用令牌（纯 Swift NaCl box 解密），存钥匙串并以 `cf-access-token` 头附在所有请求上；显示 Access 会话邮箱与到期时间，过期或被 302 到 `*.cloudflareaccess.com` 时弹出一键重新验证，写操作不自动重试。Service Token 降为「高级」可选（需另加 Service Auth 策略）。`docs/CLOUDFLARE-ACCESS.md` 改为以 Google 验证为主，并说明 Binding Cookie 的影响。服务器无改动。
 
 ## [0.106.0-beta.5] - 2026-10-26 · patch（补丁预发布） · 在线更新自动处理未提交改动、增量更新提速
 

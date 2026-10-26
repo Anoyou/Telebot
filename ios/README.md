@@ -32,7 +32,7 @@ Dock 旁边的助手圆形按钮始终保留；Dock 的省略号菜单始终提�
 
 只接受有效 HTTPS 根地址，不接受 URL 中的用户名密码、查询参数、片段或反代子路径。使用私有 CA 时应先在设备上正确信任证书；App 不提供跳过证书验证或全局允许明文 HTTP 的开关。
 
-服务器前套了 Cloudflare Access（如 Google 账号验证）时，在登录页打开「通过 Cloudflare Access 连接」或登录后在 设置 → Cloudflare Access 填写 Service Token；Cloudflare 后台配置步骤见 [docs/CLOUDFLARE-ACCESS.md](../docs/CLOUDFLARE-ACCESS.md)。
+服务器前套了 Cloudflare Access（如邮箱白名单 + Google 登录）时，在登录页或 设置 → Cloudflare Access 点「使用 Google 验证」，在系统登录窗完成 Google 登录即可，Cloudflare 后台无需修改；Service Token 作为「高级」可选。详见 [docs/CLOUDFLARE-ACCESS.md](../docs/CLOUDFLARE-ACCESS.md)。
 
 免费 Personal Team 签名有有效期限制，到期需重新签名安装。付费开发者账号同样需要维护有效签名或测试分发构建；自用不要求公开上架。
 
@@ -79,7 +79,7 @@ iOS App 的版本号独立于服务器版本：`MARKETING_VERSION`（显示版�
 - 写请求保留服务器的 `X-Requested-With` 与双提交 CSRF 校验，不修改服务器安全策略。
 - 密码、TOTP、OTP 和恢复码只在当次认证过程中使用，不写入偏好设置或日志。持久会话按服务器隔离保存到 Keychain。
 - 不共享浏览器 Cookie，不把认证信息交给网页或第三方服务，不自动跟随重定向泄露凭据。
-- Cloudflare Access Service Token 存钥匙串（按服务器隔离、仅本机），只作为 `CF-Access-Client-Id` / `CF-Access-Client-Secret` 请求头发往该服务器；Access 拦截单独识别，其他重定向仍拒绝。
+- Cloudflare Access 登录令牌（App 内 Google 验证取得）与可选的 Service Token 存钥匙串（按服务器隔离、仅本机），只作为 `cf-access-token` 或 `CF-Access-Client-Id` / `CF-Access-Client-Secret` 请求头发往该服务器；令牌转交轮询使用独立网络会话、不带 TelePilot 凭证；Access 拦截单独识别，其他重定向仍拒绝。
 - 401 清除失效会话。普通离线错误不等同于“未登录”。
 - 写请求网络失败不自动重试；先刷新确认服务器状态。服务器接受恢复请求，不等于进程已立即存活。
 - 助手创建任务使用持久化的客户端请求 ID；断线只恢复只读进度订阅，不自动重复发消息。待核对的本机记录只含任务／会话标识，不含消息正文或附件。

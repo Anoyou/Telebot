@@ -26,8 +26,8 @@ actor FixtureService: AppServing {
     private var contentAssistantVersion = "2.1.0"
     private var contentAssistantUpdatedAt: Date?
     private var storeInstalledPlugins: [String] = []
-    /// Cloudflare Access 界面测试：`--ui-test-cf-access` 时，没有 Service Token 的登录会被 Access 拦截。
-    private var accessCredentials: CloudflareAccessCredentials?
+    /// Cloudflare Access 界面测试：`--ui-test-cf-access` 时，没有任何 Access 凭证的登录会被 Access 拦截。
+    private var accessConfig = CloudflareAccessConfig()
     private let accessRequired = ProcessInfo.processInfo.arguments.contains("--ui-test-cf-access")
 
     init(offline: Bool = false) {
@@ -37,7 +37,7 @@ actor FixtureService: AppServing {
     }
 
     func login(_ request: LoginRequest) async throws -> LoginResult {
-        if accessRequired && accessCredentials == nil { throw APIError.cloudflareAccessRequired(tokenConfigured: false) }
+        if accessRequired && accessConfig.isEmpty { throw APIError.cloudflareAccessRequired(.none) }
         if request.recoveryCode == "RECOVERY-TEST" { return LoginResult(ok: true) }
         if request.otpToken == "fixture-otp" {
             guard request.otpCode == "654321" else { throw APIError.server(status: 400, code: "OTP_INVALID") }
@@ -510,9 +510,31 @@ actor FixtureService: AppServing {
         await onEvent(["type": "assistant_message", "content": "服务器任务已完成。", "seq": 1, "run_id": "fixture-run"])
         await onEvent(["type": "done", "ok": true, "seq": 2, "run_id": "fixture-run"])
     }
-    func cloudflareAccess() async throws -> CloudflareAccessCredentials? { accessCredentials }
+    func cloudflareAccessConfig() async throws -> CloudflareAccessConfig { accessConfig }
 
-    func setCloudflareAccess(_ credentials: CloudflareAccessCredentials?) async throws { accessCredentials = credentials }
+    func setCloudflareAccess(_ credentials: CloudflareAccessCredentials?) async throws { accessConfig.serviceToken = credentials }
+
+    func setCloudflareAccessSession(_ session: CloudflareAccessSession?) async throws { accessConfig.session = session }
+
+    /// 界面测试不弹出系统登录窗：稍等片刻后直接“取回”一个 30 天后到期的测试令牌。
+    func startCloudflareAccessLogin() async throws -> CloudflareAccessLoginTicket {
+        CloudflareAccessLoginTicket(url: nil) { [self] in
+            try await Task.sleep(nanoseconds: 300_000_000)
+            let session = try CloudflareAccessSession(token: Self.fixtureAccessToken())
+            try await self.setCloudflareAccessSession(session)
+            return session
+        }
+    }
+
+    private static func fixtureAccessToken() -> String {
+        func encode(_ json: String) -> String {
+            Data(json.utf8).base64EncodedString().replacingOccurrences(of: "+", with: "-")
+                .replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: "=", with: "")
+        }
+        let exp = Int(Date().timeIntervalSince1970) + 30 * 24 * 3600
+        return encode(#"{"alg":"RS256","typ":"JWT"}"#) + "."
+            + encode(#"{"aud":["fixture-aud"],"email":"owner@example.com","exp":\#(exp)}"#) + ".c2lnbmF0dXJl"
+    }
 
     func clearLocalSession() async throws {
         cleanupAttempts += 1

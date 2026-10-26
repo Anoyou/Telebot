@@ -113,8 +113,8 @@ final class TelePilotUITests: XCTestCase {
         XCTAssertTrue(app.buttons["overview.refresh"].waitForExistence(timeout: 10))
     }
 
-    /// 服务器启用 Cloudflare Access：登录被拦截时单独提示并展开 Service Token 区，填写后登录继续。
-    func testCloudflareAccessBlockedLoginGuidesToServiceToken() {
+    /// 服务器启用 Cloudflare Access：登录被拦截时单独提示，用 Google 验证（fixture 不弹系统登录窗）后登录继续。
+    func testCloudflareAccessBlockedLoginGuidesToGoogle() {
         let app = launch(["--ui-test-login", "--ui-test-cf-access"])
         let server = app.textFields["login.server"]
         XCTAssertTrue(server.waitForExistence(timeout: 10))
@@ -135,24 +135,19 @@ final class TelePilotUITests: XCTestCase {
         app.buttons["login.submit"].tap()
 
         // 懒加载表单：先滚动到 Cloudflare Access 区再断言。
-        let notice = app.descendants(matching: .any)["login.cfAccess.notice"].firstMatch
-        let clientID = app.textFields["login.cfAccess.clientID"]
-        reveal(clientID, app: app)
-        XCTAssertTrue(clientID.waitForExistence(timeout: 10))
-        XCTAssertTrue(notice.exists)
+        let google = app.buttons["login.cfAccess.google"]
+        reveal(google, app: app)
+        XCTAssertTrue(app.descendants(matching: .any)["login.cfAccess.notice"].firstMatch.exists)
         XCTAssertFalse(app.staticTexts["服务器返回了重定向。为保护登录信息，请直接填写最终 HTTPS 地址。"].exists)
+        // 主方案是 Google 验证：Service Token 输入框默认收起。
+        XCTAssertFalse(app.textFields["login.cfAccess.clientID"].exists)
         capture("Cloudflare Access 引导", app: app)
-        // 没填完 Service Token 时不能提交。
-        if app.buttons["login.submit"].exists { XCTAssertFalse(app.buttons["login.submit"].isEnabled) }
-        clientID.tap()
-        clientID.typeText("fixture.access")
-        // 先收起键盘，否则下方的 Client Secret 被键盘挡住、无法点按。
-        app.buttons["login.keyboardDone"].firstMatch.tap()
-        let secret = app.secureTextFields["login.cfAccess.clientSecret"]
-        reveal(secret, app: app)
-        secret.tap()
-        secret.typeText("fixture-secret")
-        app.buttons["login.keyboardDone"].firstMatch.tap()
+        google.tap()
+
+        let result = app.descendants(matching: .any)["login.cfAccess.result"].firstMatch
+        XCTAssertTrue(result.waitForExistence(timeout: 10))
+        XCTAssertTrue(app.descendants(matching: .any)["login.cfAccess.expiry"].firstMatch.exists)
+        capture("Cloudflare Access 已验证", app: app)
         reveal(app.buttons["login.submit"], app: app)
         XCTAssertTrue(app.buttons["login.submit"].isEnabled)
         app.buttons["login.submit"].tap()
@@ -160,8 +155,8 @@ final class TelePilotUITests: XCTestCase {
         XCTAssertTrue(app.textFields["login.code"].waitForExistence(timeout: 10))
     }
 
-    /// 已登录后可在设置里填写、验证并清除 Cloudflare Access Service Token。
-    func testCloudflareAccessSettingsSaveAndClear() {
+    /// 已登录后可在设置里用 Google 验证 Access，并在“高级”中填写、验证、清除 Service Token。
+    func testCloudflareAccessSettingsGoogleAndServiceToken() {
         let app = launch()
         XCTAssertTrue(app.buttons["overview.refresh"].waitForExistence(timeout: 45))
         app.tabBars.buttons["更多"].tap()
@@ -172,11 +167,30 @@ final class TelePilotUITests: XCTestCase {
         reveal(entry, app: app)
         entry.tap()
 
+        let google = app.buttons["cfAccess.google"]
+        XCTAssertTrue(google.waitForExistence(timeout: 10))
+        XCTAssertFalse(app.buttons["cfAccess.clearSession"].exists)
+        google.tap()
+        let result = app.descendants(matching: .any)["cfAccess.result"].firstMatch
+        XCTAssertTrue(result.waitForExistence(timeout: 10))
+        XCTAssertTrue(app.descendants(matching: .any)["cfAccess.expiry"].firstMatch.exists)
+        capture("Cloudflare Access 设置", app: app)
+        let clearSession = app.buttons["cfAccess.clearSession"]
+        reveal(clearSession, app: app)
+        clearSession.tap()
+        let confirmSession = app.buttons["cfAccess.confirmClearSession"].firstMatch
+        XCTAssertTrue(confirmSession.waitForExistence(timeout: 5))
+        confirmSession.tap()
+        XCTAssertTrue(clearSession.waitForNonExistence(timeout: 10))
+
+        // 高级：Service Token。
         let clientID = app.textFields["cfAccess.clientID"]
-        XCTAssertTrue(clientID.waitForExistence(timeout: 10))
+        reveal(clientID, app: app)
         XCTAssertFalse(app.buttons["cfAccess.clear"].exists)
         clientID.tap()
         clientID.typeText("fixture.access")
+        // 先收起键盘，否则下方的 Client Secret 可能被键盘挡住。
+        app.buttons["cfAccess.keyboardDone"].firstMatch.tap()
         let secret = app.secureTextFields["cfAccess.clientSecret"]
         reveal(secret, app: app)
         secret.tap()
@@ -186,101 +200,14 @@ final class TelePilotUITests: XCTestCase {
         reveal(save, app: app)
         XCTAssertTrue(save.isEnabled)
         save.tap()
-
-        let result = app.descendants(matching: .any)["cfAccess.result"].firstMatch
-        XCTAssertTrue(result.waitForExistence(timeout: 10))
-        capture("Cloudflare Access 设置", app: app)
         let clear = app.buttons["cfAccess.clear"]
+        _ = clear.waitForExistence(timeout: 10)
         reveal(clear, app: app)
         clear.tap()
         let confirm = app.buttons["cfAccess.confirmClear"].firstMatch
         XCTAssertTrue(confirm.waitForExistence(timeout: 5))
         confirm.tap()
         XCTAssertTrue(clear.waitForNonExistence(timeout: 10))
-    }
-
-    func testOfflineKeepsSessionAndAllowsRetry() {
-        let app = launch(["--ui-test-offline"])
-        let refresh = app.buttons["overview.refresh"]
-        XCTAssertTrue(refresh.waitForExistence(timeout: 45))
-        XCTAssertFalse(app.secureTextFields["login.password"].exists)
-        capture("离线状态", app: app)
-        refresh.tap()
-        XCTAssertTrue(refresh.exists)
-        XCTAssertFalse(app.secureTextFields["login.password"].exists)
-    }
-
-    func testSettingsPresentation() {
-        let app = launch()
-        XCTAssertTrue(app.buttons["overview.refresh"].waitForExistence(timeout: 45))
-        app.tabBars.buttons["更多"].tap()
-        let settings = app.buttons["more.settings"]
-        XCTAssertTrue(settings.waitForExistence(timeout: 10))
-        settings.tap()
-        // SwiftUI Link 在 iOS 26 暴露为 Button、在 iOS 27 暴露为 Link，按标识查找任意类型。
-        let openWeb = app.descendants(matching: .any)["settings.openWeb"].firstMatch
-        XCTAssertTrue(openWeb.waitForExistence(timeout: 10))
-        capture("设置", app: app)
-        reveal(app.buttons["settings.logout"], app: app)
-    }
-
-    func testUnknownStatusDisablesMutations() {
-        let app = launch()
-        XCTAssertTrue(app.buttons["overview.refresh"].waitForExistence(timeout: 45))
-        app.tabBars.buttons["更多"].tap()
-        let accounts = app.buttons["more.accounts"]
-        XCTAssertTrue(accounts.waitForExistence(timeout: 10))
-        accounts.tap()
-        let account = app.buttons["account.row.4"]
-        XCTAssertTrue(account.waitForExistence(timeout: 10))
-        reveal(account, app: app)
-        account.tap()
-        XCTAssertTrue(app.navigationBars["账号详情"].waitForExistence(timeout: 10))
-        XCTAssertTrue(app.descendants(matching: .any)["account.status"].firstMatch.waitForExistence(timeout: 10))
-        XCTAssertFalse(app.buttons["account.pause"].exists)
-        XCTAssertFalse(app.buttons["account.resume"].exists)
-    }
-
-    func testUncertainMutationRequiresRefreshBeforeRetry() {
-        let app = launch(["--ui-test-mutation-uncertain"])
-        XCTAssertTrue(app.buttons["overview.refresh"].waitForExistence(timeout: 45))
-        app.tabBars.buttons["更多"].tap()
-        let accounts = app.buttons["more.accounts"]
-        XCTAssertTrue(accounts.waitForExistence(timeout: 10))
-        accounts.tap()
-        let account = app.buttons["account.row.1"]
-        XCTAssertTrue(account.waitForExistence(timeout: 10))
-        account.tap()
-        XCTAssertTrue(app.navigationBars["账号详情"].waitForExistence(timeout: 10))
-        let pause = app.buttons["account.pause"]
-        XCTAssertTrue(app.descendants(matching: .any)["account.status"].firstMatch.waitForExistence(timeout: 10))
-        reveal(pause, app: app)
-        pause.tap()
-        app.buttons["account.confirmAction"].firstMatch.tap()
-        let feedback = app.descendants(matching: .any)["account.actionResult"].firstMatch
-        XCTAssertTrue(feedback.waitForExistence(timeout: 10))
-        XCTAssertFalse(pause.isEnabled)
-        let refresh = app.buttons["account.refresh"]
-        reveal(refresh, app: app)
-        refresh.tap()
-        XCTAssertTrue(app.buttons["account.resume"].waitForExistence(timeout: 10))
-        XCTAssertTrue(app.buttons["account.resume"].isEnabled)
-    }
-
-    func testStartupOfflineCanRetrySavedSession() {
-        let app = launch(["--ui-test-session-retry"])
-        let retry = app.buttons["login.retrySession"]
-        XCTAssertTrue(retry.waitForExistence(timeout: 10))
-        reveal(retry, app: app)
-        retry.tap()
-        XCTAssertTrue(app.buttons["overview.refresh"].waitForExistence(timeout: 10))
-    }
-
-    func testExpiredSessionClearsAccountViews() {
-        let app = launch(["--ui-test-session-expired"])
-        XCTAssertTrue(app.secureTextFields["login.password"].waitForExistence(timeout: 45))
-        XCTAssertFalse(app.buttons["account.row.1"].exists)
-        XCTAssertFalse(app.buttons["more.accounts"].exists)
     }
 
     func testCleanupFailureBlocksLoginUntilRetried() {

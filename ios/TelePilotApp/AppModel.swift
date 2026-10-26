@@ -40,12 +40,16 @@ final class AppModel {
     private(set) var assistantSessionRequest: String?
     /// 写操作已被服务器接受，正在重新读取状态。与读取失败（*Error）区分，避免误报“已过期”。
     private(set) var isSyncingAfterAction = false
-    /// 已登录时请求被 Cloudflare Access 拦截：根视图据此弹出 Service Token 设置（每次拦截只弹一次）。
+    /// 已登录时请求被 Cloudflare Access 拦截：根视图据此弹出“用 Google 重新验证”（每次拦截只弹一次）。
     var cloudflareAccessPrompt = false
-    /// 启动时恢复会话就被 Cloudflare Access 拦截：登录页据此展开 Cloudflare Access 区。
+    /// 最近一次被 Access 拦截时带的是哪种凭证（决定提示文案）。
+    private(set) var cloudflareAccessBlockKind: CloudflareAccessCredentialKind = .none
+    /// 启动时恢复会话就被 Cloudflare Access 拦截：登录页据此显示 Access 引导。
     private(set) var loginAccessBlocked = false
-    /// 当前服务器是否已保存 Service Token；nil 表示尚未读取。
-    private(set) var cloudflareAccessConfigured: Bool?
+    /// 当前服务器保存的 Access 凭证；nil 表示尚未读取。
+    private(set) var cloudflareAccess: CloudflareAccessConfig?
+    /// 正在进行 App 内 Google 验证。
+    private(set) var isVerifyingCloudflareAccess = false
 
     @ObservationIgnored private var service: (any AppServing)?
     @ObservationIgnored private var generation = 0
@@ -56,6 +60,7 @@ final class AppModel {
     @ObservationIgnored private var refreshAgain = false
     @ObservationIgnored private var detailRequestIDs: [Int: Int] = [:]
     @ObservationIgnored private var cloudflareAccessPrompted = false
+    @ObservationIgnored private var accessBrowser: CloudflareAccessBrowser?
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -97,7 +102,7 @@ final class AppModel {
             else {
                 phase = .signedOut
                 canRetrySession = true
-                loginAccessBlocked = (error as? APIError)?.isCloudflareAccess == true
+                noteLoginAccessBlock(error)
                 loginNotice = message(error)
             }
         }
@@ -121,18 +126,47 @@ final class AppModel {
             guard token == generation else { return }
             if requiresSessionCleanup(error) { await expireSession() }
             else {
-                loginAccessBlocked = (error as? APIError)?.isCloudflareAccess == true
+                noteLoginAccessBlock(error)
                 loginNotice = message(error)
             }
         }
     }
 
-    /// - Parameter access: 登录页填写的 Cloudflare Access Service Token；nil 表示不使用（会清除此服务器已保存的值）。
-    func login(server: String, request: LoginRequest, access: CloudflareAccessCredentials? = nil) async throws -> LoginResult? {
+    /// - Parameter serviceToken: 登录页“高级”里填写的 Service Token；nil 表示不使用（清除此服务器已保存的 Service Token，
+    ///   不影响 Google 验证取得的 Access 登录令牌）。
+    func login(server: String, request: LoginRequest, serviceToken: CloudflareAccessCredentials? = nil) async throws -> LoginResult? {
         guard !isAuthenticating, sessionCleanupError == nil else { return nil }
         isAuthenticating = true
         defer { isAuthenticating = false }
         loginNotice = nil
+        guard let service = try await ensureService(server: server) else { return nil }
+        let token = generation
+        try await service.setCloudflareAccess(serviceToken)
+        cloudflareAccess = try? await service.cloudflareAccessConfig()
+        cloudflareAccessPrompted = false
+        let result = try await service.login(request)
+        guard token == generation else { return nil }
+        if result.ok {
+            let current: CurrentUser
+            do { current = try await service.currentUser() }
+            catch {
+                guard token == generation else { return nil }
+                if requiresSessionCleanup(error) { await expireSession() }
+                else { canRetrySession = true }
+                throw error
+            }
+            guard token == generation else { return nil }
+            user = current
+            phase = .signedIn
+            canRetrySession = false
+            loginAccessBlocked = false
+            await refresh()
+        }
+        return result
+    }
+
+    /// 准备指定服务器的客户端；更换服务器时先安全移除旧会话（失败则阻止更换）。
+    private func ensureService(server: String) async throws -> (any AppServing)? {
         let url = try TelePilotClient.normalizedServerURL(server)
         if serverURL != url || service == nil {
             generation += 1
@@ -154,30 +188,7 @@ final class AppModel {
             serverURL = url
             if !isFixture { defaults.set(url.absoluteString, forKey: serverKey) }
         }
-        guard let service else { return nil }
-        let token = generation
-        try await service.setCloudflareAccess(access)
-        cloudflareAccessConfigured = access != nil
-        cloudflareAccessPrompted = false
-        let result = try await service.login(request)
-        guard token == generation else { return nil }
-        if result.ok {
-            let current: CurrentUser
-            do { current = try await service.currentUser() }
-            catch {
-                guard token == generation else { return nil }
-                if requiresSessionCleanup(error) { await expireSession() }
-                else { canRetrySession = true }
-                throw error
-            }
-            guard token == generation else { return nil }
-            user = current
-            phase = .signedIn
-            canRetrySession = false
-            loginAccessBlocked = false
-            await refresh()
-        }
-        return result
+        return service
     }
 
     func requestAssistantSession(_ id: String?) {
@@ -445,9 +456,10 @@ final class AppModel {
             try await service?.clearLocalSession()
             sessionCleanupError = nil
             if cleanupForgetServer {
-                // 更换服务器同时移除这台服务器的 Cloudflare Access Service Token。
+                // 更换服务器同时移除这台服务器的 Cloudflare Access 凭证（登录令牌与 Service Token）。
                 try await service?.setCloudflareAccess(nil)
-                cloudflareAccessConfigured = nil
+                try await service?.setCloudflareAccessSession(nil)
+                cloudflareAccess = nil
                 loginAccessBlocked = false
                 service = nil
                 serverURL = nil
@@ -462,20 +474,91 @@ final class AppModel {
 
     // MARK: Cloudflare Access
 
-    /// 读取当前服务器保存的 Service Token（只读本机钥匙串）。
-    func cloudflareAccess() async throws -> CloudflareAccessCredentials? {
-        guard let service else { return nil }
-        let value = try await service.cloudflareAccess()
-        cloudflareAccessConfigured = value != nil
+    /// 读取当前服务器保存的 Access 凭证（只读本机钥匙串）。
+    @discardableResult
+    func loadCloudflareAccess() async throws -> CloudflareAccessConfig {
+        guard let service else { return CloudflareAccessConfig() }
+        let value = try await service.cloudflareAccessConfig()
+        cloudflareAccess = value
         return value
     }
 
-    /// 保存或清除（nil）当前服务器的 Service Token，只改本机钥匙串。
+    /// 保存或清除（nil）当前服务器的 Service Token（高级），只改本机钥匙串。
     func setCloudflareAccess(_ credentials: CloudflareAccessCredentials?) async throws {
         guard let service else { throw APIError.invalidServerURL }
         try await service.setCloudflareAccess(credentials)
-        cloudflareAccessConfigured = credentials != nil
+        cloudflareAccess = try await service.cloudflareAccessConfig()
         cloudflareAccessPrompted = false
+    }
+
+    /// 清除本机保存的 Google 验证登录令牌（不影响 Cloudflare 后台，也不影响 Service Token）。
+    func clearCloudflareAccessSession() async throws {
+        guard let service else { throw APIError.invalidServerURL }
+        try await service.setCloudflareAccessSession(nil)
+        cloudflareAccess = try await service.cloudflareAccessConfig()
+    }
+
+    /// App 内用 Google 验证 Cloudflare Access（与 `cloudflared access login` 相同的流程）：
+    /// 系统登录窗（ASWebAuthenticationSession）打开服务器的 Access 登录页，同时长轮询 Cloudflare 令牌转交服务；
+    /// 取回令牌后自动关闭登录窗并保存到钥匙串。不重试也不重放任何 TelePilot 写操作。
+    /// - Parameter server: 登录页填写的服务器地址；已登录时传 nil 使用当前服务器。
+    func authenticateCloudflareAccess(server: String? = nil) async throws -> CloudflareAccessSession {
+        guard !isVerifyingCloudflareAccess, !isAuthenticating, sessionCleanupError == nil else {
+            throw APIError.cloudflareAccessLogin(.cancelled)
+        }
+        isVerifyingCloudflareAccess = true
+        defer { isVerifyingCloudflareAccess = false }
+        let target: any AppServing
+        if let server {
+            guard let value = try await ensureService(server: server) else { throw APIError.invalidServerURL }
+            target = value
+        } else {
+            guard let service else { throw APIError.invalidServerURL }
+            target = service
+        }
+        let token = generation
+        let ticket = try await target.startCloudflareAccessLogin()
+        let waiter = Task { try await ticket.wait() }
+        let browser = CloudflareAccessBrowser()
+        accessBrowser = browser
+        defer {
+            browser.close()
+            if accessBrowser === browser { accessBrowser = nil }
+        }
+        if let url = ticket.url {
+            // 用户自己关掉登录窗：再给转交服务几秒（可能刚好登录完成），之后停止等待。
+            browser.onDismiss = {
+                Task {
+                    try? await Task.sleep(nanoseconds: 4_000_000_000)
+                    waiter.cancel()
+                }
+            }
+            guard browser.open(url) else {
+                waiter.cancel()
+                throw APIError.cloudflareAccessLogin(.failed)
+            }
+        }
+        let session: CloudflareAccessSession
+        do {
+            session = try await withTaskCancellationHandler {
+                try await waiter.value
+            } onCancel: {
+                waiter.cancel()
+            }
+        } catch is CancellationError {
+            throw APIError.cloudflareAccessLogin(.cancelled)
+        } catch _ where browser.dismissedByUser {
+            throw APIError.cloudflareAccessLogin(.cancelled)
+        }
+        guard token == generation else { throw APIError.sessionChanged }
+        cloudflareAccess = try? await target.cloudflareAccessConfig()
+        cloudflareAccessPrompted = false
+        loginAccessBlocked = false
+        if phase == .signedIn {
+            cloudflareAccessPrompt = false
+            await refresh()
+        }
+        return session
     }
 
     /// 用一次只读请求（当前用户）验证能否穿过 Cloudflare Access 到达 TelePilot。成功时顺带刷新概览。
@@ -497,9 +580,16 @@ final class AppModel {
     }
 
     private func noteCloudflareAccess(_ error: Error) {
-        guard phase == .signedIn, (error as? APIError)?.isCloudflareAccess == true, !cloudflareAccessPrompted else { return }
+        guard phase == .signedIn, let kind = (error as? APIError)?.cloudflareAccessKind, !cloudflareAccessPrompted else { return }
+        cloudflareAccessBlockKind = kind
         cloudflareAccessPrompted = true
         cloudflareAccessPrompt = true
+    }
+
+    private func noteLoginAccessBlock(_ error: Error) {
+        let kind = (error as? APIError)?.cloudflareAccessKind
+        loginAccessBlocked = kind != nil
+        if let kind { cloudflareAccessBlockKind = kind }
     }
 
     private func requiresSessionCleanup(_ error: Error) -> Bool {
@@ -551,6 +641,14 @@ private func capture<T: Sendable>(_ operation: @Sendable () async throws -> T) a
 private extension Result {
     var failure: Failure? {
         if case .failure(let error) = self { return error }
+        return nil
+    }
+}
+
+extension APIError {
+    /// 被 Cloudflare Access 拦截时，这次请求带的是哪种 Access 凭证；不是 Access 拦截时为 nil。
+    var cloudflareAccessKind: CloudflareAccessCredentialKind? {
+        if case .cloudflareAccessRequired(let kind) = self { return kind }
         return nil
     }
 }

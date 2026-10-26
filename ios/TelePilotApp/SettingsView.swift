@@ -51,7 +51,7 @@ struct SettingsView: View {
                     NavigationLink { CloudflareAccessSettingsView() } label: {
                         Label {
                             LabeledContent("Cloudflare Access") {
-                                Text(Self.accessStatus(model.cloudflareAccessConfigured))
+                                Text(CloudflareAccessText.summary(model.cloudflareAccess))
                             }
                         } icon: { Image(systemName: "lock.icloud") }
                     }
@@ -113,7 +113,7 @@ struct SettingsView: View {
             .symbolRenderingMode(.hierarchical)
             .navigationTitle("设置").navigationBarTitleDisplayMode(.inline)
             .accessibilityIdentifier("settings.screen")
-            .task { _ = try? await model.cloudflareAccess() }
+            .task { _ = try? await model.loadCloudflareAccess() }
     }
 }
 
@@ -125,14 +125,6 @@ extension SettingsView {
             isPresented: Binding(get: { confirmation == kind }, set: { if !$0 { confirmation = nil } }),
             forgetServer: kind == .server,
             logout: { Task { await model.logout(forgetServer: kind == .server) } })
-    }
-
-    static func accessStatus(_ configured: Bool?) -> String {
-        switch configured {
-        case .some(true): "已配置"
-        case .some(false): "未配置"
-        case .none: "—"
-        }
     }
 
     static func graceLabel(_ seconds: Int) -> String {
@@ -161,7 +153,7 @@ private struct SettingsLogoutConfirmation: ViewModifier {
             Button("取消", role: .cancel) {}
         } message: {
             Text(forgetServer
-                 ? "这会清除此设备的登录状态、已读取数据和这台服务器的 Cloudflare Access Service Token，不会停止服务器上的任务。"
+                 ? "这会清除此设备的登录状态、已读取数据和这台服务器的 Cloudflare Access 登录与 Service Token，不会停止服务器上的任务。"
                  : "这会清除此设备的登录状态和已读取数据，不会停止服务器上的任务。")
         }
     }
