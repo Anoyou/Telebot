@@ -303,6 +303,13 @@ class SystemAgentRunOut(BaseModel):
     last_seq: int = 0
     cancel_requested: bool = False
     phase: str = "queued"
+    queue_ahead: int | None = Field(
+        default=None,
+        description=(
+            "排在该任务前面的任务数（同会话执行中的任务算 1 个，加上更早的排队项）；"
+            "只在 queued 且确实需要等待时返回正整数，其余为 null。列表接口同样计算。"
+        ),
+    )
     paused_reason: str | None = None
     usage: dict[str, Any] | None = None
     elapsed_ms: int | None = None

@@ -214,6 +214,8 @@ export interface SystemAgentRun {
     | "cancelled"
     | string;
   phase?: string;
+  /** 排在该任务前面的任务数（执行中的任务算 1 个）；只在 queued 且确实需要等待时有值。 */
+  queue_ahead?: number | null;
   paused_reason?: string | null;
   usage?: Record<string, unknown> | null;
   elapsed_ms?: number | null;

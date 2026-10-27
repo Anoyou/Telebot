@@ -652,6 +652,62 @@ async def test_stop_and_replace_is_atomic_and_idempotent(run_db) -> None:
 
 
 @pytest.mark.asyncio
+async def test_replace_with_queue_item_stops_current_and_promotes_queued(run_db) -> None:
+    """排队消息改为“停止并替换”：当前任务收到停止请求，这条排队消息排到队首并接着执行；只提交一次。"""
+
+    service = _ControlledService()
+    manager = SystemAgentRunManager(
+        session_factory=run_db,
+        service_factory=lambda: service,
+        poll_interval=0.01,
+    )
+    current = await manager.start_run(
+        session_id="session-1",
+        web_user_id=7,
+        client_request_id="request-queue-replace-current",
+        text="旧任务",
+    )
+    await _wait_for_status(manager, current.id, AGENT_RUN_RUNNING)
+    first = await manager.start_run(
+        session_id="session-1",
+        web_user_id=7,
+        client_request_id="request-queue-replace-first",
+        text="先排队的",
+    )
+    second = await manager.start_run(
+        session_id="session-1",
+        web_user_id=7,
+        client_request_id="request-queue-replace-second",
+        text="改为替换的",
+    )
+    assert await manager.get_queue_ahead(second.id) == 2
+    queue = await manager.list_queue(web_user_id=7, session_id="session-1")
+    item = next(row for row in queue if row["run_id"] == second.id)
+
+    with pytest.raises(RunNotFoundError):
+        await manager.replace_with_queue_item(item["id"], web_user_id=8)
+
+    promoted = await manager.replace_with_queue_item(item["id"], web_user_id=7)
+    assert promoted.id == second.id
+    with pytest.raises(RunConflictError, match="已在停止"):
+        await manager.replace_with_queue_item(item["id"], web_user_id=7)
+    async with run_db() as db:
+        stored_current = await db.get(SystemAgentRun, current.id)
+        assert stored_current is not None and stored_current.cancel_requested is True
+        assert stored_current.paused_reason == "stop_replace"
+    queue = await manager.list_queue(web_user_id=7, session_id="session-1")
+    order = [row["run_id"] for row in queue if row["run_id"] in {first.id, second.id}]
+    assert order == [second.id, first.id]
+
+    await _wait_for_status(manager, current.id, AGENT_RUN_CANCELLED)
+    await _wait_for_status(manager, second.id, AGENT_RUN_RUNNING)
+    assert await manager.get_queue_ahead(first.id) == 1
+    await manager.cancel_run(second.id)
+    await _wait_for_status(manager, second.id, AGENT_RUN_CANCELLED)
+    await manager.cancel_run(first.id)
+
+
+@pytest.mark.asyncio
 async def test_stop_and_replace_rejects_non_owner_and_terminal_run(run_db) -> None:
     service = _ControlledService()
     manager = SystemAgentRunManager(
@@ -1013,6 +1069,10 @@ async def test_queue_limit_position_edit_reorder_delete_and_clear(run_db) -> Non
 
     assert await manager.get_queue_position(second.id) == 1
     assert await manager.get_queue_position(third.id) == 2
+    # 前面还有几个任务：执行中的任务算 1 个；已开始执行的任务不再返回排队信息。
+    assert await manager.get_queue_ahead(second.id) == 1
+    assert await manager.get_queue_ahead(third.id) == 2
+    assert await manager.get_queue_ahead(active.id) is None
     with pytest.raises(RunConflictError, match="最多排队 2 条"):
         await manager.start_run(
             session_id="session-1",

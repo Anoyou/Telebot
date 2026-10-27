@@ -234,6 +234,20 @@ class _FakeRunManager:
             client_request_id=kwargs["client_request_id"],
         )
 
+    async def get_queue_ahead(self, run_id):
+        self.last_queue_ahead_run = run_id
+        return 2
+
+    async def replace_with_queue_item(self, turn_id, **kwargs):
+        self.last_queue_replace_kwargs = {"turn_id": turn_id, **kwargs}
+        row = await self.start_run(
+            session_id="s1",
+            web_user_id=kwargs["web_user_id"],
+            client_request_id="request-queued",
+        )
+        row.status = "queued"
+        return row
+
 
 @pytest.fixture
 def fake_svc(monkeypatch):
@@ -751,6 +765,22 @@ async def test_list_durable_runs_is_scoped_to_current_user(fake_run_manager) -> 
         "limit": 25,
         "include_bot": False,
     }
+
+
+@pytest.mark.asyncio
+async def test_queued_run_reports_tasks_ahead_and_queue_item_can_replace(fake_run_manager) -> None:
+    """排队中的任务带上 queue_ahead（前面还有几个），执行中的任务不带；排队消息可改为停止并替换。"""
+
+    user = SimpleNamespace(id=7)
+    rows = await api.list_system_agent_runs(
+        user, status=None, since=None, until=None, limit=20, include_bot=False
+    )
+    assert rows[0].status == "running" and rows[0].queue_ahead is None
+
+    out = await api.replace_with_system_agent_queue_item("turn-1", user)
+    assert fake_run_manager.last_queue_replace_kwargs == {"turn_id": "turn-1", "web_user_id": 7}
+    assert out.status == "queued"
+    assert out.queue_ahead == 2
 
 
 @pytest.mark.asyncio
