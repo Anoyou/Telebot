@@ -187,13 +187,21 @@ final class AssistantUITests: XCTestCase {
                 XCTAssertEqual(new.height, old.height, accuracy: 0.5, "\(step)：\(old) → \(new)", file: file, line: line)
             }
         }
-        /// 原生 popover 在按钮上方（箭头朝下指向按钮）：内容底边在按钮之上且贴近按钮，按钮中心落在 popover 的水平范围内。
-        /// 按钮在输入栏下方的工具栏里，锚定在按钮上的 popover 会盖住输入框那一行（系统行为），不要求在输入栏卡片之上。
-        func assertAnchored(_ card: XCUIElement, to button: XCUIElement, _ step: String, file: StaticString = #filePath, line: UInt = #line) {
-            XCTAssertLessThanOrEqual(card.frame.maxY, button.frame.minY + 0.5, "\(step)：popover 应在按钮上方 \(card.frame) / \(button.frame)", file: file, line: line)
-            XCTAssertGreaterThan(card.frame.maxY, button.frame.minY - 40, "\(step)：popover 离按钮太远 \(card.frame) / \(button.frame)", file: file, line: line)
+        /// 第十轮：popover 锚定在输入栏卡片顶边、按钮正上方的隐形锚点（`assistant.popoverAnchor.<id>`）：
+        /// 气泡整体在卡片之上（不压输入框），按钮中心落在 popover 的水平范围内；
+        /// 箭头（锚点）离气泡左右两缘都至少 40pt——落在底边平直段，不落进 iOS 26 气泡的大圆角里（真机变形的根因）。
+        func assertAnchored(_ card: XCUIElement, to button: XCUIElement, anchor id: String, _ step: String, file: StaticString = #filePath, line: UInt = #line) {
+            let anchor = app.descendants(matching: .any)["assistant.popoverAnchor.\(id)"].firstMatch
+            XCTAssertTrue(anchor.exists, "\(step)：缺少 popover 锚点", file: file, line: line)
+            print("UI-RECORD R10-POPOVER \(id): content=\(card.frame) anchor=\(anchor.frame) button=\(button.frame) bar=\(bar.frame)")
+            XCTAssertLessThanOrEqual(card.frame.maxY, bar.frame.minY + 0.5, "\(step)：popover 不应压住输入栏 \(card.frame) / \(bar.frame)", file: file, line: line)
+            XCTAssertGreaterThan(card.frame.maxY, bar.frame.minY - 40, "\(step)：popover 离输入栏太远 \(card.frame) / \(bar.frame)", file: file, line: line)
+            XCTAssertEqual(anchor.frame.midY, bar.frame.minY, accuracy: 2, "\(step)：锚点应在卡片顶边", file: file, line: line)
             XCTAssertTrue(card.frame.minX - 1 <= button.frame.midX && button.frame.midX <= card.frame.maxX + 1,
-                          "\(step)：箭头应指向按钮 \(card.frame) / \(button.frame)", file: file, line: line)
+                          "\(step)：popover 应覆盖按钮上方 \(card.frame) / \(button.frame)", file: file, line: line)
+            XCTAssertGreaterThanOrEqual(anchor.frame.midX - card.frame.minX, 40, "\(step)：箭头离气泡左缘太近（落进圆角） \(anchor.frame) / \(card.frame)", file: file, line: line)
+            XCTAssertGreaterThanOrEqual(card.frame.maxX - anchor.frame.midX, 40, "\(step)：箭头离气泡右缘太近（落进圆角） \(anchor.frame) / \(card.frame)", file: file, line: line)
+            XCTAssertLessThan(abs(anchor.frame.midX - button.frame.midX), 30, "\(step)：箭头应在按钮附近 \(anchor.frame) / \(button.frame)", file: file, line: line)
         }
 
         // 模型 popover：当前为“自动”，每行前有模型家族 logo。
@@ -206,7 +214,7 @@ final class AssistantUITests: XCTestCase {
         assertUnchanged("模型 popover 展开中")
         Thread.sleep(forTimeInterval: 0.6)
         assertUnchanged("模型 popover 展开后")
-        assertAnchored(modelPanel, to: model, "模型 popover")
+        assertAnchored(modelPanel, to: model, anchor: "model", "模型 popover")
         // 模型不多（7 行）时全部在 popover 内可见、无需滚动：最后一行（无法识别的家族）完整落在 popover 里。
         let lastRow = app.buttons["assistant.model.option.5"]
         XCTAssertTrue(lastRow.exists, "最后一个模型行未显示")
@@ -262,7 +270,10 @@ final class AssistantUITests: XCTestCase {
         assertUnchanged("附件 popover 展开中", modelWidthMayChange: true)
         Thread.sleep(forTimeInterval: 0.6)
         assertUnchanged("附件 popover 展开后", modelWidthMayChange: true)
-        assertAnchored(attachPanel, to: attach, "附件 popover")
+        assertAnchored(attachPanel, to: attach, anchor: "attach", "附件 popover")
+        // 附件 popover 宽度贴合内容（第九轮固定 250pt，比文字宽出一截）。
+        XCTAssertLessThanOrEqual(attachPanel.frame.width, 240, "附件 popover 过宽 \(attachPanel.frame)")
+        XCTAssertGreaterThanOrEqual(app.buttons["assistant.attach.file"].frame.height, 44)
         XCTAssertEqual(attach.label, "添加图片")
         dismissPopover(app)
         XCTAssertTrue(waitUntilGone(attachPanel))
@@ -290,7 +301,8 @@ final class AssistantUITests: XCTestCase {
         // 工作流「输出界面测试观察记录」步骤会把 UI-RECORD 行摘到 job 日志与摘要。
         print("UI-RECORD R9-KEYBOARD: 原生 popover 打开后键盘\(keyboardVisible ? "仍显示" : "已收起")")
         XCTContext.runActivity(named: "R9-KEYBOARD keyboardVisible=\(keyboardVisible)") { _ in }
-        XCTAssertLessThanOrEqual(modelPanel.frame.maxY, model.frame.minY + 0.5)
+        let bar = app.descendants(matching: .any)["assistant.composerBar"].firstMatch
+        XCTAssertLessThanOrEqual(modelPanel.frame.maxY, bar.frame.minY + 0.5)
         app.buttons["assistant.model.option.auto"].tap()
         XCTAssertTrue(waitUntilGone(modelPanel))
         XCTAssertTrue((composer.value as? String ?? "").contains("草稿"))

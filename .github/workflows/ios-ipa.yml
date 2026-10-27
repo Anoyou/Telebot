@@ -2,6 +2,11 @@ name: iOS 未签名 IPA
 
 # 用 macOS 运行器执行 ios/scripts/build-unsigned.sh，产出未签名 IPA 作为工件，
 # 供使用自签工具的用户下载后自行签名安装；不需要任何证书、描述文件或仓库密钥。
+#
+# 发版提速（第十轮）：Beta／main push 时先在 Ubuntu 上查找「iOS」工作流已全绿、且被测文件树与本提交完全相同的 run
+# 留下的未签名 IPA（ios-unsigned-ipa-<tree>，PR 编译 job 用同一脚本、同一 Release 配置打包）。找到则只把
+# CFBundleVersion 改写为本工作流的 run_number（未签名，改 Info.plist 不破坏签名；版本号核对等于 project.yml）
+# 后发布，约 1 分钟；找不到或任何一步失败都回退到 macOS 完整打包。
 on:
   push:
     branches: [Beta, main]
@@ -18,6 +23,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: ios-ipa-${{ github.event.pull_request.number || github.ref }}
@@ -31,8 +37,96 @@ env:
   XCODE_APP: /Applications/Xcode_27.app
 
 jobs:
+  reuse:
+    name: 复用同树已全绿的 IPA
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      reused: ${{ steps.reuse.outputs.reused }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: 查找并改写 build 号
+        id: reuse
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          REPO_ID: ${{ github.repository_id }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          set -uo pipefail
+          echo "reused=false" >> "$GITHUB_OUTPUT"
+          if [ "$EVENT" != "push" ]; then echo "非 push 事件，完整打包"; exit 0; fi
+          api() { curl -fsSL -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" "$GITHUB_API_URL/repos/$REPO/$1"; }
+          TREE=$(git rev-parse 'HEAD^{tree}')
+          echo "提交 $GITHUB_SHA，文件树 $TREE"
+          # 只认本仓库分支（非 fork）上「iOS」工作流成功结束（编译、校验与全部 UI 测试都通过）的 run。
+          SOURCE=""; ARTIFACT=""
+          while read -r ID RUN; do
+            [ -n "$ID" ] || continue
+            INFO=$(api "actions/runs/$RUN") || continue
+            if [ "$(jq -r .path <<<"$INFO")" = ".github/workflows/ios.yml" ] && [ "$(jq -r .conclusion <<<"$INFO")" = "success" ]; then
+              SOURCE="$RUN"; ARTIFACT="$ID"
+              echo "找到同树已全绿的 run $RUN（$(jq -r .event <<<"$INFO")，$(jq -r .head_branch <<<"$INFO")@$(jq -r '.head_sha[0:8]' <<<"$INFO")）"
+              break
+            fi
+          done < <(api "actions/artifacts?name=ios-unsigned-ipa-${TREE}&per_page=20" | jq -r --argjson repo "$REPO_ID" '.artifacts[]
+                    | select(.expired | not)
+                    | select(.workflow_run.repository_id == $repo and .workflow_run.head_repository_id == $repo)
+                    | "\(.id) \(.workflow_run.id)"' || true)
+          if [ -z "$ARTIFACT" ]; then echo "没有同树已全绿的 IPA，回退完整打包"; exit 0; fi
+          URL=$(curl -fsS -o /dev/null -w '%{redirect_url}' -H "Authorization: Bearer $GH_TOKEN" "$GITHUB_API_URL/repos/$REPO/actions/artifacts/$ARTIFACT/zip") || URL=""
+          if [ -z "$URL" ] || ! curl -fsSL --retry 3 --retry-all-errors -o reuse.zip "$URL" || ! unzip -q -o reuse.zip -d reuse; then
+            echo "::warning::下载复用 IPA 失败，回退完整打包"; exit 0
+          fi
+          cat reuse/source.txt || true
+          VERSION=$(sed -nE 's/^[[:space:]]*MARKETING_VERSION:[[:space:]]*"?([0-9.]+)"?.*/\1/p' ios/project.yml)
+          python3 ios/scripts/check-ios-version.py || { echo "::warning::版本校验失败，回退完整打包"; exit 0; }
+          if ! RESULT=$(python3 ios/scripts/reuse-unsigned-ipa.py reuse/TelePilot-unsigned.ipa patched.ipa "$TELEPILOT_BUILD_NUMBER" "$VERSION"); then
+            echo "::warning::改写 build 号失败，回退完整打包"; exit 0
+          fi
+          echo "$RESULT"
+          SHA=$(git rev-parse --short HEAD)
+          NAME="TelePilot-${VERSION}-${TELEPILOT_BUILD_NUMBER}-${SHA}-unsigned"
+          mkdir -p dist
+          mv patched.ipa "dist/${NAME}.ipa"
+          cp ios/TelePilotApp/TelePilot.entitlements dist/
+          {
+            echo "TelePilot 未签名 IPA"
+            echo "版本：${VERSION} (${TELEPILOT_BUILD_NUMBER})"
+            echo "提交：$(git rev-parse HEAD)"
+            echo "分支：${GITHUB_REF_NAME}"
+            echo "构建：复用「iOS」工作流 run ${SOURCE} 中同一文件树（${TREE}）、已全绿的 Release 构建，仅改写 build 号"
+            echo
+            echo "此 IPA 未签名，不能直接安装，需要用你自己的签名工具重签。"
+            echo "Bundle ID 默认 com.telepilot.personal，可在签名时改成你自己的。"
+            echo "APNs 推送需要付费开发者账号，且签名时注入 aps-environment（开发描述文件为 development，Ad Hoc/分发为 production）。"
+          } > dist/README.txt
+          echo "name=${NAME}" >> "$GITHUB_OUTPUT"
+          echo "reused=true" >> "$GITHUB_OUTPUT"
+          {
+            echo "### 未签名 IPA 已生成（复用同树已全绿的构建）"
+            echo
+            echo "- 版本：\`${VERSION} (${TELEPILOT_BUILD_NUMBER})\`"
+            echo "- 提交：\`${SHA}\`，文件树 \`${TREE:0:12}\`"
+            echo "- 来源：「iOS」run ${SOURCE}（build 号已改写为本工作流 run_number）"
+            echo "- 在本页底部 Artifacts 下载 \`${NAME}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: 上传 IPA
+        if: steps.reuse.outputs.reused == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ${{ steps.reuse.outputs.name }}
+          path: dist
+          retention-days: 30
+          if-no-files-found: error
+
   ipa:
     name: 打包未签名 IPA
+    needs: reuse
+    # 复用成功则跳过；复用 job 自身出错（结果不是 success）也照常完整打包。
+    if: ${{ !cancelled() && needs.reuse.outputs.reused != 'true' }}
     runs-on: xcode-27
     timeout-minutes: 45
     steps:

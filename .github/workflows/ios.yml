@@ -7,6 +7,10 @@ name: iOS
 #   用例清单从源码解析，新增用例自动进入某个分片，不会漏测；失败用例自动重跑一次，两次都失败才算失败。
 # - Beta push：若该提交的文件树与某个 PR 上已全绿的被测树完全相同（PR 在最新 Beta 上合并即如此），
 #   跳过重复测试，汇总检查直接成功；否则完整执行。不影响「iOS 未签名 IPA」由 Beta push 触发。
+# - 发版提速（第十轮）：编译 job 在上传测试产物后顺带用 build-unsigned.sh 打一份未签名 IPA，
+#   以被测文件树命名上传（ios-unsigned-ipa-<tree>）；Beta push 时「iOS 未签名 IPA」若找到同树且整个 run 全绿的
+#   这份 IPA，就只改写 build 号后发布，不再在 macOS 上重新编译。测试分片用 curl 直接下载测试产物
+#   （download-artifact 动作在模拟器启动时要等 1–5 分钟才开始下载）。
 on:
   pull_request:
     branches: [Beta, main]
@@ -111,6 +115,7 @@ jobs:
           python3 ios/TelePilotCore/scripts/sync-openapi.py --check
           python3 ios/TelePilotCore/scripts/sync-contract.py --check
           python3 ios/TelePilotCore/scripts/sync-model-brands.py --check
+          python3 ios/TelePilotCore/scripts/check-model-brand-icons.py
           python3 ios/scripts/ui-test-shards.py --total "$UI_TEST_SHARDS" --summary
 
       - name: 编译（build-for-testing）
@@ -144,7 +149,34 @@ jobs:
           overwrite: true
           if-no-files-found: error
 
-      # 测试产物已上传、各分片已可开始测试；以下校验在本机继续进行，不占用 UI 测试的关键路径。
+      # 测试产物已上传、各分片已可开始测试；以下步骤在本机继续进行，不占用 UI 测试的关键路径。
+      - name: 打包未签名 IPA（供 Beta push 同树复用）
+        # 与「iOS 未签名 IPA」同一脚本、同一 Release 配置；build 号用工程默认值，复用时由 ios-ipa.yml 改写为它的 run_number。
+        run: |
+          set -o pipefail
+          bash ios/scripts/build-unsigned.sh "$GITHUB_WORKSPACE/ios/build/ipa" 2>&1 | tee "$RESULTS_DIR/build-unsigned.log" | xcbeautify --renderer github-actions
+          mkdir -p ipa-reuse
+          cp ios/build/ipa/TelePilot-unsigned.ipa ipa-reuse/
+          { echo "tree=${{ needs.plan.outputs.tree }}"; echo "sha=${{ github.sha }}"; echo "run=${{ github.run_id }}"; } > ipa-reuse/source.txt
+          ls -lh ipa-reuse
+
+      - name: 上传未签名 IPA（按文件树命名）
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ios-unsigned-ipa-${{ needs.plan.outputs.tree }}
+          path: ipa-reuse
+          retention-days: 14
+          compression-level: 0
+          overwrite: true
+          if-no-files-found: error
+
+      - name: 模型家族图标 CoreSVG 渲染比对
+        # macOS 系统 SVG 渲染（与资源目录转矢量同一套 CoreSVG）实际渲染生成的图标，与 Web 参考覆盖率比对。
+        run: |
+          set -o pipefail
+          swift ios/scripts/check-model-brand-render.swift "$GITHUB_WORKSPACE" 2>&1 | tee "$RESULTS_DIR/logo-render.log"
+          { echo "### 模型家族图标 CoreSVG 渲染比对"; echo '```'; grep -E "LOGO-RECORD|通过|失败|warning" "$RESULTS_DIR/logo-render.log" || true; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
       - name: 校验 OpenAPI 生成代码
         run: sh ios/TelePilotCore/scripts/generate.sh --check
 
@@ -183,15 +215,26 @@ jobs:
           # 启动模拟器并冷启动一次系统 App（「设置」），让首次启动的系统缓存在等待编译期间完成。
           nohup sh -c "xcrun simctl boot '$UDID'; xcrun simctl bootstatus '$UDID' -b; xcrun simctl launch '$UDID' com.apple.Preferences; sleep 5; xcrun simctl terminate '$UDID' com.apple.Preferences; touch '$RUNNER_TEMP/sim-ready'" > "$RUNNER_TEMP/boot.log" 2>&1 &
 
-      - name: 等待编译产物
+      - name: 等待并下载编译产物
+        # 第十轮：不再用 actions/download-artifact（Node 动作在模拟器后台启动时要 1–5 分钟才开始下载），
+        # 改为 curl：取 artifact 的下载地址（302 到存储），再不带令牌直接下载。
         env:
           GH_TOKEN: ${{ github.token }}
           NAME: ios-test-products-${{ github.run_id }}
         run: |
           api() { curl -fsSL -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/$1"; }
+          download() {
+            START=$(date +%s)
+            URL=$(curl -fsS -o /dev/null -w '%{redirect_url}' -H "Authorization: Bearer $GH_TOKEN" "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/actions/artifacts/$1/zip")
+            [ -n "$URL" ] || { echo "::error::取不到测试产物下载地址"; return 1; }
+            curl -fsSL --retry 3 --retry-all-errors -o products.zip "$URL"
+            unzip -q -o products.zip && rm products.zip
+            ls -lh ios-test-products.tar
+            echo "下载并解压用时 $(( $(date +%s) - START )) 秒"
+          }
           for i in $(seq 1 180); do
-            COUNT=$(api "actions/runs/$GITHUB_RUN_ID/artifacts?name=$NAME" | jq '[.artifacts[] | select(.expired | not)] | length' || echo 0)
-            if [ "${COUNT:-0}" -gt 0 ]; then echo "测试产物已就绪（等待 $(( (i - 1) * 10 )) 秒）"; exit 0; fi
+            ID=$(api "actions/runs/$GITHUB_RUN_ID/artifacts?name=$NAME" | jq -r '[.artifacts[] | select(.expired | not)][0].id // empty' || true)
+            if [ -n "$ID" ]; then echo "测试产物已就绪（等待 $(( (i - 1) * 10 )) 秒）"; download "$ID"; exit $?; fi
             BUILD=$(api "actions/runs/$GITHUB_RUN_ID/jobs?per_page=50" | jq -r '[.jobs[] | select(.name == "编译与校验")][0] | "\(.status) \(.conclusion)"' || echo "unknown")
             case "$BUILD" in
               "completed failure"|"completed cancelled"|"completed skipped")
@@ -200,11 +243,6 @@ jobs:
             sleep 10
           done
           echo "::error::等待测试产物超时"; exit 1
-
-      - name: 下载测试产物
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        with:
-          name: ios-test-products-${{ github.run_id }}
 
       - name: 解包并等待模拟器就绪
         id: products

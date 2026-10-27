@@ -157,7 +157,7 @@ struct AgentSkillsView: View {
                 Section {
                     if installed.isEmpty {
                         ContentUnavailableView {
-                            Label("还没有安装 skill", systemImage: "sparkles.rectangle.stack")
+                            Label("还没有安装 skill", systemImage: "wand.and.stars")
                         } description: {
                             Text("可以从 GitHub 链接、zip 链接安装，或粘贴 / 选择 SKILL.md。")
                         } actions: {
@@ -1410,7 +1410,7 @@ struct AgentSkillMultiSelectField: View {
     private var stale: [String] { selected.filter { name in !options.contains { $0.name == name } } }
 
     var body: some View {
-        Label(title, systemImage: "sparkles.rectangle.stack")
+        Label(title, systemImage: "wand.and.stars")
         if !loaded && error == nil {
             ProgressView("正在读取已安装的 skills…")
         } else if let error {
@@ -1435,7 +1435,7 @@ struct AgentSkillMultiSelectField: View {
                 }
             }
         }
-        NavigationLink { AgentSkillsView() } label: { Label("管理 Skills", systemImage: "sparkles.rectangle.stack") }
+        NavigationLink { AgentSkillsView() } label: { Label("管理 Skills", systemImage: "wand.and.stars") }
             .task { if !loaded { await load() } }
     }
 

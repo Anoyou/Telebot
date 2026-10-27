@@ -281,7 +281,7 @@ private struct AIOverviewSection: View {
             NavigationLink {
                 AgentSkillsView()
             } label: {
-                AINavigationRow(title: "Skills", detail: "安装、编辑和启用 Agent Skills；插件可按需读取对插件启用的 skill", symbol: "sparkles.rectangle.stack")
+                AINavigationRow(title: "Skills", detail: "安装、编辑和启用 Agent Skills；插件可按需读取对插件启用的 skill", symbol: "wand.and.stars")
             }
             .accessibilityIdentifier("ai.settings.skills")
             NavigationLink {

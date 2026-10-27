@@ -75,6 +75,60 @@ final class ManagementUITests: XCTestCase {
         XCTAssertFalse(app.textFields["验证码"].exists)
     }
 
+    /// 第十轮：系统设置「权限与限制」分组里各行图标同为强调色——「修改管理员密码」此前整行设了主色，图标被染成白色。
+    /// 截图后统计两行图标区域内的暖橙色像素，「修改管理员密码」应与「Sudo 权限」一样有明显的强调色。
+    func testPermissionRowsShareAccentIconTint() {
+        let app = launch()
+        let system = app.buttons["系统设置"]
+        XCTAssertTrue(app.buttons["more.accounts"].waitForExistence(timeout: 10))
+        for _ in 0..<6 where !(system.exists && system.isHittable) { app.swipeUp() }
+        XCTAssertTrue(system.waitForExistence(timeout: 5))
+        system.tap()
+        let sudo = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Sudo 权限")).firstMatch
+        let password = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "修改管理员密码")).firstMatch
+        XCTAssertTrue(sudo.waitForExistence(timeout: 10))
+        for _ in 0..<8 where !(password.exists && password.isHittable && sudo.isHittable) { app.swipeUp() }
+        XCTAssertTrue(password.isHittable, "未找到「修改管理员密码」行")
+        XCTAssertTrue(sudo.isHittable, "未找到「Sudo 权限」行")
+        Thread.sleep(forTimeInterval: 0.5)
+        let shot = app.screenshot()
+        let attachment = XCTAttachment(screenshot: shot)
+        attachment.name = "权限与限制"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+        guard let image = shot.image.cgImage, shot.image.size.width > 0 else { return XCTFail("截图失败") }
+        let scale = CGFloat(image.width) / shot.image.size.width
+        var bytes = [UInt8](repeating: 0, count: image.width * image.height * 4)
+        let drawn = bytes.withUnsafeMutableBytes { raw -> Bool in
+            guard let context = CGContext(data: raw.baseAddress, width: image.width, height: image.height, bitsPerComponent: 8,
+                                          bytesPerRow: image.width * 4, space: CGColorSpaceCreateDeviceRGB(),
+                                          bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return false }
+            context.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
+            return true
+        }
+        XCTAssertTrue(drawn)
+        /// 行左侧图标区域（行左缘起 56pt）里的暖橙色像素数：红明显高于蓝、且足够亮。
+        func accentPixels(_ row: XCUIElement) -> Int {
+            let frame = row.frame
+            let x0 = Int(frame.minX * scale), x1 = Int((frame.minX + 56) * scale)
+            let y0 = Int((frame.minY + 4) * scale), y1 = Int((frame.maxY - 4) * scale)
+            var count = 0
+            for y in max(0, y0)..<min(image.height, max(y0, y1)) {
+                for x in max(0, x0)..<min(image.width, max(x0, x1)) {
+                    let i = (y * image.width + x) * 4
+                    let r = Int(bytes[i]), g = Int(bytes[i + 1]), b = Int(bytes[i + 2])
+                    if r > 150 && r - b > 70 && g > b { count += 1 }
+                }
+            }
+            return count
+        }
+        let sudoCount = accentPixels(sudo)
+        let passwordCount = accentPixels(password)
+        print("UI-RECORD R10-TINT: Sudo 权限 \(sudoCount) 个强调色像素，修改管理员密码 \(passwordCount) 个")
+        XCTAssertGreaterThan(sudoCount, 20, "Sudo 权限图标应为强调色")
+        XCTAssertGreaterThan(passwordCount, max(20, sudoCount / 3), "修改管理员密码图标应与同组一样为强调色（\(passwordCount) / \(sudoCount)）")
+    }
+
     func testLedgerResetRequiresExactPhraseBeforeConfirmation() {
         let app = launch()
         app.buttons["资金台账"].tap()
