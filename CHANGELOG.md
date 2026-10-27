@@ -25,6 +25,13 @@
 
 ## [Unreleased]
 
+## [0.106.0-beta.13] - 2026-10-28 · patch（补丁预发布） · 紧凑表格保留分割线；插件开发文档与示例核对
+
+### 插件与 Rich Message
+
+- 修复开启紧凑表格后表格分割线消失（如 AI 答疑插件的 PT 搜索结果表）：Bot API 的 `is_compact` / `compact` 只缩小单元格内边距，边框由 `is_bordered` / `bordered` 单独控制；0.106.0-beta.12 把 Markdown 管道表格转成 `<table compact>` 时没带 `bordered`，而管道表格本来按带边框显示，于是紧凑后边框丢失。现在转换为 `<table bordered compact>`，并继续保留表头（`th`）与列对齐（`:---` / `---:` / `:---:` → `align`）；旧 Bot API 拒绝紧凑、去掉 `compact` 重发时同样保留 `bordered`。官方文档未说明管道表格默认是否隔行着色，因此不加 `striped`。
+- `blocks` 与 `html` 写法仍只加 `is_compact` / `compact`，调用方原有的 `is_bordered` / `is_striped` / `bordered` / `striped` 保持原样。
+
 ### 插件开发文档与示例（插件库兼容性体检）
 
 - 官方示例 `examples/plugins/*`（7 个）补齐 `requires_platform_capabilities`（`plugin.json` 与 `manifest.py` 同值），此前按当前安装校验会以 `PLATFORM_CAPABILITIES_REQUIRED` 被拒；`min_telepilot_version` 统一为 `0.72.0-beta.2` 并在 `manifest.py` 同步（原 0.24.0 / 0.33.0 / 0.41.0 / 0.57.0 偏低：`Manifest(requires_platform_capabilities=...)` 0.72 起才支持，`with_ai_components` 的 AI 组件 0.54 起才有）。
