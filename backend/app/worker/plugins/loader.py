@@ -2434,6 +2434,11 @@ async def _apply_userbot_event_bus_actions(
     if return_result:
         # run_action_batch 会复制动作；执行器挂在副本上的失败原因在这里收集。
         batch.errors = _collect_action_errors(prepared)
+        batch.inline_message_ids = [
+            str(item.get("_tp_inline_message_id"))
+            for item in prepared
+            if str(item.get("_tp_inline_message_id") or "").strip()
+        ]
         return batch
     return batch.failed > 0
 
@@ -5059,6 +5064,9 @@ async def _apply_userbot_answer_guest_query_action(state: _AccountState, action:
         )
         return False
     await _save_action_inline_message_id(state, action, sent)
+    if isinstance(sent, dict) and str(sent.get("inline_message_id") or "").strip():
+        # 实时 apply 把 inline_message_id 交还给插件（批次结果 inline_message_ids / answer_guest_query 返回值）。
+        action["_tp_inline_message_id"] = str(sent.get("inline_message_id")).strip()
     await record_action(action.get("context"), action, TRACE_STATUS_OK, actual_send_via="interaction_bot", result=sent)
     await _emit_userbot_action_tap(state, action, ACTION_EVENT_STATUS_OK, channel="interaction_bot")
     return True
@@ -6352,6 +6360,11 @@ class _LiveMessageOps:
     # 0.106.0-beta.15 起：发送出口统一给 rich_message 表格补默认边框 + 隔行着色
     # （is_bordered / is_striped；Markdown 管道表格转 <table bordered striped>），调用方显式值优先。
     rich_table_default_style = True
+    # 0.106.0-beta.17 起：answer_guest_query 透传插件给的 callback_data 按钮（reply_markup），
+    # 实时 apply 结果带回 inline_message_id；访客回复上的按钮点击以 inline callback（只有
+    # inline_message_id + 点击者，没有 chat/message）投递给订阅 callback_query（scope guest_all）
+    # 的插件，插件可 answer_callback 并用 edit_message(inline_message_id=...) 编辑文本与按钮。
+    guest_reply_markup = True
 
     def __init__(
         self,
@@ -6424,6 +6437,11 @@ class _LiveMessageOps:
                     "dropped": 0,
                     "kinds": [str(action.get("type") or "") for action in normalized],
                 }
+            inline_ids = list(getattr(batch, "inline_message_ids", None) or []) if isinstance(batch, ActionBatchResult) else []
+            if inline_ids:
+                # answer_guest_query 成功时 Telegram 返回的 SentGuestMessage.inline_message_id（按动作顺序）。
+                result["inline_message_ids"] = inline_ids
+                result["inline_message_id"] = inline_ids[-1]
             errors = list(getattr(batch, "errors", None) or []) if isinstance(batch, ActionBatchResult) else []
             if errors:
                 # 失败原因（已脱敏）一并返回给插件，并写进运行日志，不必再去翻动作记录。
@@ -6531,7 +6549,11 @@ class _LiveMessageOps:
 
         buffered = BufferedMessageOps()
         action = await buffered.answer_guest_query(**kwargs)
-        await self.apply([action])
+        outcome = await self.apply([action])
+        inline_id = outcome.get("inline_message_id") if isinstance(outcome, dict) else None
+        if inline_id:
+            # 0.106.0-beta.17+：成功时把 SentGuestMessage.inline_message_id 交还给插件。
+            action = {**action, "inline_message_id": inline_id}
         return action
 
     async def payout(self, **kwargs: Any) -> dict[str, Any]:

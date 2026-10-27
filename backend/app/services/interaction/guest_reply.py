@@ -66,8 +66,12 @@ GUEST_REASON_CODES = frozenset(
     }
 )
 
-# 访客回复是 inline message，回调按钮会以 inline_message_id 回到 Bot，现有
-# 处理链路依赖 chat/message，所以只保留不需要回调的按钮类型。
+# 访客回复是 inline message，回调按钮会以 inline_message_id 回到 Bot（没有 chat/message）。
+# 平台自己合成的访客回复（命令、AI 助手、规则）依赖 chat/message 处理回调，所以缓冲合成时
+# 只保留不需要回调的按钮；插件显式 ``answer_guest_query`` 给的 callback_data 按钮从
+# 0.106.0-beta.17 起原样透传，点击后以 inline callback 投递给订阅了 ``callback_query``
+# （scope ``guest_all``）的插件。
+_GUEST_CALLBACK_BUTTON_KEYS = ("callback_data",)
 _GUEST_SAFE_BUTTON_KEYS = (
     "url",
     "copy_text",
@@ -100,8 +104,13 @@ def html_to_plain_text(value: str) -> str:
     return html.unescape(text).strip()
 
 
-def sanitize_guest_reply_markup(markup: Any) -> dict[str, Any] | None:
-    """只保留访客回复里可用的按钮（URL / 复制 / 切换 inline）。"""
+def sanitize_guest_reply_markup(markup: Any, *, allow_callback: bool = False) -> dict[str, Any] | None:
+    """只保留访客回复里可用的按钮（URL / 复制 / 切换 inline）。
+
+    ``allow_callback=True``（插件显式 ``answer_guest_query``）时也保留 ``callback_data`` 按钮。
+    """
+
+    keys = _GUEST_SAFE_BUTTON_KEYS + (_GUEST_CALLBACK_BUTTON_KEYS if allow_callback else ())
 
     if not isinstance(markup, dict):
         return None
@@ -117,7 +126,7 @@ def sanitize_guest_reply_markup(markup: Any) -> dict[str, Any] | None:
             for button in row
             if isinstance(button, dict)
             and str(button.get("text") or "").strip()
-            and any(button.get(key) not in (None, "") for key in _GUEST_SAFE_BUTTON_KEYS)
+            and any(button.get(key) not in (None, "") for key in keys)
         ]
         if safe_row:
             safe_rows.append(safe_row)
@@ -262,8 +271,9 @@ def build_guest_article(
     title: str | None = None,
     reply_markup: dict[str, Any] | None = None,
     rich_message: dict[str, Any] | None = None,
+    allow_callback: bool = False,
 ) -> dict[str, Any]:
-    """组装 ``InlineQueryResultArticle``。"""
+    """组装 ``InlineQueryResultArticle``。``allow_callback`` 见 :func:`sanitize_guest_reply_markup`。"""
 
     content: dict[str, Any]
     if rich_message:
@@ -278,7 +288,7 @@ def build_guest_article(
         "title": title or _article_title(html_to_plain_text(message_text) if parse_mode else message_text),
         "input_message_content": content,
     }
-    markup = sanitize_guest_reply_markup(reply_markup)
+    markup = sanitize_guest_reply_markup(reply_markup, allow_callback=allow_callback)
     if markup:
         result["reply_markup"] = markup
     return result
@@ -348,6 +358,9 @@ def guest_result_from_action(action: dict[str, Any]) -> dict[str, Any] | None:
     - 传 ``rich_message``（``{"markdown"|"html"|"blocks": ...}``）时用
       ``InputRichMessageContent``；
     - 否则使用 ``text`` + ``parse_mode``（``html`` / 省略为纯文本）。
+
+    ``reply_markup``（或 ``result.reply_markup``）里的 ``callback_data`` 按钮原样保留
+    （0.106.0-beta.17+）：点击产生只带 ``inline_message_id`` 的 callback_query。
     """
 
     raw_result = action.get("result")
@@ -355,7 +368,7 @@ def guest_result_from_action(action: dict[str, Any]) -> dict[str, Any] | None:
         result = dict(raw_result)
         result.setdefault("id", uuid.uuid4().hex)
         if "reply_markup" in result:
-            markup = sanitize_guest_reply_markup(result.get("reply_markup"))
+            markup = sanitize_guest_reply_markup(result.get("reply_markup"), allow_callback=True)
             if markup:
                 result["reply_markup"] = markup
             else:
@@ -372,6 +385,7 @@ def guest_result_from_action(action: dict[str, Any]) -> dict[str, Any] | None:
             title=title or _article_title(fallback),
             reply_markup=reply_markup,
             rich_message=dict(rich_message),
+            allow_callback=True,
         )
     text = str(action.get("text") or "").strip()
     if not text:
@@ -386,6 +400,7 @@ def guest_result_from_action(action: dict[str, Any]) -> dict[str, Any] | None:
         parse_mode=parse_mode,
         title=title,
         reply_markup=reply_markup,
+        allow_callback=True,
     )
 
 
@@ -429,6 +444,119 @@ async def flush_guest_reply(token: str, buffer: GuestReplyBuffer | None) -> dict
         }
     buffer.answer_error = last_error
     return {"status": "failed", "reason_code": GUEST_REASON_ANSWER_FAILED, "error": last_error}
+
+
+# ---------------------------------------------------------------------------
+# 访客回复来源（guest_query_id / inline_message_id → 原访客会话）
+# ---------------------------------------------------------------------------
+# 访客回复上的 callback 按钮被点击时，Telegram 只给 inline_message_id 与点击者，没有
+# chat/message。平台在收到 guest_message 时按 guest_query_id 记下原会话（只含 id 与类型），
+# answerGuestQuery 成功后转记到返回的 inline_message_id，之后 inline callback 投递给插件时
+# 一并带上（``payload["inline_callback"]["origin"]``）。只是附加信息：Redis 不可用时静默跳过。
+GUEST_ORIGIN_QUERY_TTL_SECONDS = 15 * 60
+GUEST_ORIGIN_INLINE_TTL_SECONDS = 48 * 3600
+_GUEST_ORIGIN_REDIS_TIMEOUT_SECONDS = 1.0
+_GUEST_ORIGIN_FIELDS = ("guest_query_id", "chat_id", "chat_type", "caller_user_id", "message_id")
+
+
+def _guest_origin_scope(token: str) -> str:
+    import hashlib  # noqa: PLC0415
+
+    return hashlib.sha256(str(token or "").encode("utf-8")).hexdigest()[:16]
+
+
+def _guest_origin_key(token: str, kind: str, value: str) -> str:
+    return f"tp:guest_origin:{kind}:{_guest_origin_scope(token)}:{value}"
+
+
+def _clean_guest_origin(origin: dict[str, Any]) -> dict[str, Any]:
+    out: dict[str, Any] = {}
+    for key in _GUEST_ORIGIN_FIELDS:
+        value = origin.get(key)
+        if value in (None, ""):
+            continue
+        if key in {"chat_id", "caller_user_id", "message_id"}:
+            try:
+                out[key] = int(value)
+            except (TypeError, ValueError):
+                continue
+        else:
+            out[key] = str(value)[:128]
+    return out
+
+
+async def _guest_origin_redis_call(method: str, *args: Any, **kwargs: Any) -> Any:
+    import asyncio  # noqa: PLC0415
+
+    from ...redis_client import get_redis  # noqa: PLC0415
+
+    redis = get_redis()
+    return await asyncio.wait_for(getattr(redis, method)(*args, **kwargs), timeout=_GUEST_ORIGIN_REDIS_TIMEOUT_SECONDS)
+
+
+async def remember_guest_query_origin(token: str, guest_query_id: str | None, origin: dict[str, Any]) -> None:
+    """收到 guest_message 时按 guest_query_id 记下原访客会话（best-effort）。"""
+
+    query_id = str(guest_query_id or "").strip()
+    if not token or not query_id:
+        return
+    payload = _clean_guest_origin({**origin, "guest_query_id": query_id})
+    try:
+        import json  # noqa: PLC0415
+
+        await _guest_origin_redis_call(
+            "set",
+            _guest_origin_key(token, "q", query_id),
+            json.dumps(payload, ensure_ascii=False),
+            ex=GUEST_ORIGIN_QUERY_TTL_SECONDS,
+        )
+    except Exception:  # noqa: BLE001
+        log.debug("remember guest query origin failed", exc_info=True)
+
+
+async def link_guest_inline_origin(token: str, guest_query_id: str | None, inline_message_id: str | None) -> None:
+    """answerGuestQuery 成功后，把 guest_query_id 的来源转记到 inline_message_id（best-effort）。"""
+
+    query_id = str(guest_query_id or "").strip()
+    inline_id = str(inline_message_id or "").strip()
+    if not token or not query_id or not inline_id:
+        return
+    try:
+        raw = await _guest_origin_redis_call("get", _guest_origin_key(token, "q", query_id))
+        if raw is None:
+            return
+        await _guest_origin_redis_call(
+            "set",
+            _guest_origin_key(token, "i", inline_id),
+            raw,
+            ex=GUEST_ORIGIN_INLINE_TTL_SECONDS,
+        )
+    except Exception:  # noqa: BLE001
+        log.debug("link guest inline origin failed", exc_info=True)
+
+
+async def guest_inline_origin(token: str, inline_message_id: str | None) -> dict[str, Any] | None:
+    """按 inline_message_id 读回原访客会话；没有记录或读取失败返回 None。"""
+
+    inline_id = str(inline_message_id or "").strip()
+    if not token or not inline_id:
+        return None
+    try:
+        raw = await _guest_origin_redis_call("get", _guest_origin_key(token, "i", inline_id))
+    except Exception:  # noqa: BLE001
+        log.debug("read guest inline origin failed", exc_info=True)
+        return None
+    if raw is None:
+        return None
+    if isinstance(raw, bytes):
+        raw = raw.decode("utf-8", errors="ignore")
+    try:
+        import json  # noqa: PLC0415
+
+        data = json.loads(raw)
+    except (TypeError, ValueError):
+        return None
+    return _clean_guest_origin(data) if isinstance(data, dict) else None
 
 
 class GuestRateLimiter:
@@ -491,9 +619,12 @@ __all__ = [
     "build_guest_article",
     "compose_guest_results",
     "flush_guest_reply",
+    "guest_inline_origin",
     "guest_result_from_action",
     "guest_rate_limiter",
     "html_to_plain_text",
+    "link_guest_inline_origin",
+    "remember_guest_query_origin",
     "sanitize_guest_reply_markup",
     "strip_guest_bot_mentions",
 ]

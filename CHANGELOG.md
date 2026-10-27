@@ -25,6 +25,19 @@
 
 ## [Unreleased]
 
+## [0.106.0-beta.17] - 2026-10-28 · patch（补丁预发布） · 访客回复支持插件 callback 按钮（AI 答疑访客模式失败可重试）
+
+### 交互 Bot 与插件（访客模式）
+
+- 插件显式 `answer_guest_query`（`text` / `rich_message` / 完整 `result`）里 `reply_markup` 的 `callback_data` 按钮现在原样保留，HTML 被拒退回纯文本时也保留；此前所有访客回复都会剥掉回调按钮，只剩 URL / 复制 / 切换 Inline 按钮。平台自己合成的访客回复（命令、AI 助手、规则动作合并）仍按原规则只保留 URL / 复制 / 切换 Inline 按钮。
+- 实时 `ctx.messages.apply([...answer_guest_query...])` 的批次结果带 `inline_message_id`（最后一条）与 `inline_message_ids`（按动作顺序），live facade 的 `answer_guest_query` 返回动作也带 `inline_message_id`，插件可随后用 `edit_message(inline_message_id=..., reply_markup=...)` 修改文字与按钮（文本或 `rich_message`）。
+- 访客回复（inline 消息）上的按钮点击：Telegram 只给 `inline_message_id`、`chat_instance`、`data` 与点击者，没有 chat / message。交互 Bot 现在把这类 inline callback 以 `callback_query` 投递给订阅了 `scope: "guest_all"` 或 `inline_all` 的插件（按会话判断的 `all_allowed_chats` 等订阅收不到，同时声明两条订阅也不会重复投递）；payload 带 `inline_message_id` 与 `inline_callback` 信封（`inline_message_id` / `chat_instance` / `data` / `clicker_user_id` / `origin`），`sender.user_id` 是点击者，`chat_id` / `message` 为空。`origin` 是 answerGuestQuery 时平台按 Bot 记下的原访客会话（`guest_query_id` / `chat_id` / `chat_type` / `caller_user_id` / `message_id`，保留 48 小时，Redis 不可用或过期时为 `null`）。
+- 能力标记 `ctx.messages.guest_reply_markup = True`（缓冲与实时 MessageOps 都有），插件据此判断；旧平台没有该属性时不要在访客回复里放回调按钮。AI 答疑插件 `interaction-ai-chat` 0.4.8 据此在访客模式失败时也附「🔄 重试」「🔀 换模型重试」（换模型仅管理员），旧服务器保持不附按钮。
+
+### 文档
+
+- 插件 API 参考新增「访客回复上的 callback 按钮」（发出、拿到 `inline_message_id`、接收点击的订阅与 payload 字段表、响应点击），版本门槛表补 0.106.0-beta.17；速查表与使用指南同步。
+
 ## [0.106.0-beta.16] - 2026-10-28 · patch（补丁预发布） · 修复交互 Bot 直接订阅 Event Bus 被交互规则群范围挡住
 
 ### 交互 Bot 与插件

@@ -210,6 +210,8 @@ class ActionBatchResult:
     kinds: list[str] = field(default_factory=list)
     # 失败动作的原因（已脱敏）：[{index, type, error_code, error}]，由执行适配器填写。
     errors: list[dict[str, Any]] = field(default_factory=list)
+    # answer_guest_query 成功时 Telegram 返回的 inline_message_id（按动作顺序），由执行适配器填写。
+    inline_message_ids: list[str] = field(default_factory=list)
 
 
 def _handler_for(kind: ActionKind, handlers: ActionHandlers) -> ActionHandler | None:

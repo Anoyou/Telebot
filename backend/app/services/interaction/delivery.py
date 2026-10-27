@@ -2827,6 +2827,7 @@ async def _answer_guest_with_plain_fallback(token: str, guest_query_id: str, res
             parse_mode=None,
             title=str(result.get("title") or "") or None,
             reply_markup=result.get("reply_markup") if isinstance(result.get("reply_markup"), dict) else None,
+            allow_callback=True,
         )
         return await account_bot_service.answer_guest_query(token, guest_query_id, result=fallback)
 

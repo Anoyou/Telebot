@@ -262,6 +262,9 @@ def normalize_bot_update(account_id: int, update: dict[str, Any], *, channel: st
             callback={
                 "id": str(callback.get("id") or ""),
                 "data": str(callback.get("data") or ""),
+                # inline 消息（含访客模式回复）上的按钮：只有 inline_message_id，没有 message/chat。
+                "inline_message_id": str(callback.get("inline_message_id") or "") or None,
+                "chat_instance": str(callback.get("chat_instance") or "") or None,
             },
             reply_to=_bot_reply_to(msg),
             raw_summary=_bot_raw_summary(
@@ -619,11 +622,15 @@ def _scope_matches(
     state: dict[str, Any],
     filters: dict[str, Any],
 ) -> tuple[bool, str]:
+    # inline 消息（inline 模式结果 / 访客模式回复）上的 callback 按钮：只有 inline_message_id，
+    # 没有 chat。0.106.0-beta.16 起由 inline_all / guest_all 订阅接收（谁发出 inline 消息谁处理按钮）。
+    inline_callback = event_type == "callback_query" and chat_id is None
     if scope == "inline_all":
-        return (event_type in {"inline_query", "chosen_inline_result"}, "scope_not_matched")
+        return (event_type in {"inline_query", "chosen_inline_result"} or inline_callback, "scope_not_matched")
     if scope == "guest_all":
-        # Guest Mode：任何会话里 @提及 Bot 的访客消息都投递（会话不在允许列表中也可）。
-        return (event_type == "guest_message", "scope_not_matched")
+        # Guest Mode：任何会话里 @提及 Bot 的访客消息都投递（会话不在允许列表中也可）；
+        # 访客回复上的 callback 按钮同样投递（只带 inline_message_id 与点击者）。
+        return (event_type == "guest_message" or inline_callback, "scope_not_matched")
     if event_type == "webhook" and scope == "all_allowed_chats":
         return True, "scope_not_matched"
     owner_ids = _int_set(state.get("owner_user_ids") or state.get("admin_user_ids"))
@@ -782,6 +789,8 @@ def _event(
     if callback:
         source["callback_query_id"] = callback.get("id")
         source["callback_data"] = callback.get("data")
+        if callback.get("inline_message_id"):
+            source["inline_message_id"] = callback.get("inline_message_id")
     if inline_query:
         source["inline_query_id"] = inline_query.get("id")
     payload = {

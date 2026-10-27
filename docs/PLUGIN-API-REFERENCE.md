@@ -849,6 +849,27 @@ MessageOps 对应 `await ctx.messages.answer_guest_query(text=..., parse_mode="h
 - 0.106.0-beta.2+：`edit_message` 同时带 `inline_message_id` 与 `rich_message` 时，平台用 `editMessageText(inline_message_id, rich_message)` 以 Telegram 原生 Rich Message 编辑 inline 消息（Bot API：rich_message 同样适用于 inline 消息，但不能直传或按 URL 上传新文件），访客模式的“🤔”占位因此也能原生渲染表格、标题等。Rich 编辑失败如实记失败、不静默降级，插件读取批次结果后自行退回 HTML。实时 MessageOps 以类属性 `ctx.messages.inline_rich_edit = True` 声明该能力，插件可据此判断，旧平台没有该属性时保持 HTML 编辑。
 - 0.106.0-beta.3+：上一条在 beta.2 只对“入口返回的动作”生效；插件在入口里用 `await ctx.messages.apply([...])` 实时编辑 inline 消息时，执行器仍要求 `chat_id` + `message_id`，请求未发到 Telegram 就以 `target_message_id_missing` 失败。beta.3 起实时 `apply` 同样支持 `inline_message_id` 编辑（`rich_message` 与 `text`/`parse_mode`，HTML 实体被拒时退回纯文本，只走交互 Bot），并以类属性 `ctx.messages.live_inline_edit = True` 声明；需要“🤔 占位后实时 Rich 编辑”的插件应以该属性为准。
 - `edit_message` 可带 `send_on_edit_failure: true`：编辑失败时改为发送一条新消息，结果带 `edit_fallback_send: true`。
+
+#### 访客回复上的 callback 按钮（0.106.0-beta.17+）
+
+访客回复是 inline 消息：按钮被点击时 Telegram 只给 `callback_query.inline_message_id`、`chat_instance`、`data` 与点击者 `from`，**没有** `message` / `chat`。平台以类属性 `ctx.messages.guest_reply_markup = True`（缓冲与实时 MessageOps 都有）声明下面整套能力，插件据此判断，旧平台没有该属性时不要在访客回复里放 callback 按钮（会被剥掉，点击也不会投递）。
+
+- **发出**：插件显式 `answer_guest_query`（`text` / `rich_message`（InputRichMessageContent）/ 完整 `result`）的 `reply_markup` 里 `callback_data` 按钮原样保留，HTML 被拒退回纯文本时同样保留；平台自己合成的访客回复（命令、AI 助手、规则的消息类动作合并）仍只保留 URL / 复制 / 切换 inline 按钮。之后用 `edit_message` 的 `inline_message_id` + `reply_markup`（文本或 `rich_message`）修改文字与按钮。
+- **拿到 inline_message_id**：实时 `await ctx.messages.apply([...answer_guest_query...])` 的批次结果带 `inline_message_id`（最后一条）与 `inline_message_ids`（按动作顺序）；live facade 的 `await ctx.messages.answer_guest_query(...)` 返回的动作带 `inline_message_id`；`save_message_id_key` + `read_saved_inline_message_id(key)` 仍可用。
+- **接收点击**：订阅 `{"events": ["callback_query"], "source": ["interaction_bot"], "scope": "guest_all"}`（`inline_all` 同样接收 inline 回调；`all_allowed_chats` 等按会话判断的范围收不到，因为没有 chat）。inline 回调不会匹配 `all_allowed_chats` 等按会话判断的 `callback_query` 订阅，所以同时声明两条订阅也不会重复投递（同一插件不要同时声明 `guest_all` 与 `inline_all` 的 `callback_query`）。payload：
+
+| 字段 | 内容 |
+| --- | --- |
+| `event_type` / `source.type` | `callback_query` |
+| `inline_message_id`、`source.inline_message_id` | 被点击的 inline 消息 |
+| `callback_query_id` / `callback_data` | 同普通按钮 |
+| `chat_id`、`message.chat_id`、`message.message_id`、`chat.id` | `null` |
+| `sender.user_id` / `sender_user_id` | **点击者** |
+| `inline_callback` | `{"inline_message_id", "chat_instance", "data", "clicker_user_id", "origin"}`；`origin` 是平台记下的原访客会话 `{"guest_query_id", "chat_id", "chat_type", "caller_user_id", "message_id"}`（answerGuestQuery 成功时按 Bot 记录 48 小时，Redis 不可用或记录过期时为 `null`）。`origin.caller_user_id` 是当初 @Bot 的访客，不是点击者，判断权限一律用 `sender.user_id`。 |
+| `owner_user_ids` / `admin_user_ids` | 同其它交互 Bot 投递（账号本人 + sudo） |
+
+  inline 回调不带 `guest` 信封（那是 `guest_message` 专用，插件常把 `guest.caller_user_id` 当发送者）。
+- **响应点击**：`answer_callback`（实时或返回动作均可）；`edit_message` 带 `inline_message_id`（不带 `chat_id` / `message_id`）编辑文字与按钮，`rich_message` 同样支持。想判断群管理员时只能用 `origin.chat_id` 或插件自己记录的原会话，平台拿不到时应按“不是群管理员”处理。
 - `send_message` / `edit_message` / `answer_guest_query` 使用 `parse_mode="html"` 时，Telegram 因实体解析失败拒绝（`can't parse entities` 等）会去掉标签以纯文本重试一次，插件不必自行兜底。
 
 事件信封补充：交互 Bot 事件带 `bot`（`{"id", "username", "can_read_all_group_messages"}`，来自 `getMe` 短缓存，读取失败时缺省），插件可据此识别 @Bot / 回复 Bot，并在群隐私模式开启（`can_read_all_group_messages=false`，群里只能收到 @Bot、回复 Bot 与命令）时提示用户；`reply_to.media` 给出被回复消息的图片/文件元数据（含 `file_id`）。
@@ -878,7 +899,7 @@ event_subscriptions=[
 - 修改允许会话后下一条消息即按新名单判断（配置包导入等其他写入路径最多 30 秒缓存后生效）。
 - 访客模式 `guest_all` 不受此限制；`owner_only` / `known_users` 订阅在名单外会话同样收不到（路由阶段已丢弃）；按钮回调（`callback_query`）不在路由阶段收窄，由订阅匹配按同一名单判断。
 
-访客事件中 `payout`、`pin_message`、`answer_callback`、`answer_inline_query` 记 `guest_action_unsupported` 跳过；`send_photo` / `send_file` 只保留说明文字并记 `guest_media_unsupported`；所有发送都不会走 `userbot_reply`。相关 reason code：`guest_reply_buffered`、`guest_reply_already_used`、`guest_no_reply`、`guest_answer_failed`、`guest_rate_limited`、`guest_updates_disabled`。
+访客事件（`guest_message`）中 `payout`、`pin_message`、`answer_callback`、`answer_inline_query` 记 `guest_action_unsupported` 跳过（访客回复上按钮的点击是独立的 `callback_query` 事件，可以 `answer_callback`）；`send_photo` / `send_file` 只保留说明文字并记 `guest_media_unsupported`；所有发送都不会走 `userbot_reply`。相关 reason code：`guest_reply_buffered`、`guest_reply_already_used`、`guest_no_reply`、`guest_answer_failed`、`guest_rate_limited`、`guest_updates_disabled`。
 
 ### 入站 webhook 事件
 
@@ -2966,6 +2987,7 @@ __all__ = ["PLUGIN_CLASS", "MANIFEST"]
 | `compact_tables`（Bot API 10.3 紧凑表格） | 0.106.0-beta.12 |
 | Event Bus payload 的 `owner_user_ids` / `admin_user_ids`（交互 Bot 投递）、`ctx.ai.list_providers()` 模型 `enabled` | 0.106.0-beta.14（探测：字段是否存在） |
 | Rich 表格默认边框 + 隔行着色（`rich_table_default_style`，平台行为，插件无需声明） | 0.106.0-beta.15 |
+| 访客回复 callback 按钮（`answer_guest_query.reply_markup` 保留 `callback_data`、`apply()` 结果的 `inline_message_id`、inline 回调投递给 `guest_all` / `inline_all` 的 `callback_query` 订阅、`inline_callback` 信封） | 0.106.0-beta.17（探测：`getattr(ctx.messages, "guest_reply_markup", False)`） |
 
 - 想兼容更旧的平台时不要提高最低版本，而是先探测再用：`getattr(ctx.messages, "rich_table_compact", False)`（紧凑表格）、`getattr(ctx.messages, "live_inline_edit", False)` / `inline_rich_edit`（inline 编辑）、`ctx.skills is None`、`getattr(ctx.ai, "vision_enabled", False)`、`hasattr(ctx.messages, "edit_rich")`，参数级新增（如 `thinking`）用 `inspect.signature` 探测或捕获 `TypeError`。
 - 声明 `requires_platform_capabilities` 的 `manifest.py` 在 0.72 之前的平台上导入就会失败，因此现在所有新插件的最低版本至少是 `0.72.0-beta.2`。
