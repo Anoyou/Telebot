@@ -476,8 +476,8 @@ final class AssistantUITests: XCTestCase {
         XCTAssertEqual(queueChip.value as? String, "已选中")
         let queueStatus = app.descendants(matching: .any).matching(identifier: "assistant.queue.status")
         XCTAssertTrue(queueStatus.firstMatch.label.contains("排队中 · 前面 1 条"), queueStatus.firstMatch.label)
-        // 状态行可能被待处理气泡推到屏幕外（懒加载列表不再创建它），只要求它在的时候不是“排队中”。
-        XCTAssertFalse(status.exists && status.label.contains("排队中"), status.label)
+        // 出现待处理消息时列表滚到底部，回答位置的状态行仍可见，且不是“排队中”。
+        XCTAssertTrue(status.exists && !status.label.contains("排队中"), status.label)
 
         // 改为插入调整：服务器把它并入当前任务。
         adjustChip.tap()

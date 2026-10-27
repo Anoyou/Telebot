@@ -207,7 +207,10 @@ actor FixtureService: AppServing {
 
     func request(path: String, method: String, body: JSONValue?) async throws -> JSONValue {
         try checkConnection()
-        let clean = String(path.split(separator: "?").first ?? "")
+        // 客户端把路径里的 ID 按 .alphanumerics 百分号编码（“fixture-session”会变成“fixture%2Dsession”），
+        // 与真实服务器一样先解码再匹配，否则按 ID 区分的界面测试数据（删除会话、运行阶段、排队消息）都不会命中。
+        let rawPath = String(path.split(separator: "?").first ?? "")
+        let clean = rawPath.removingPercentEncoding ?? rawPath
         if let value = fixtureValues[clean], method == "GET" { return value }
         if method == "GET" {
             let opsValue = Self.opsFixture(clean)
@@ -673,7 +676,7 @@ actor FixtureService: AppServing {
 
     func stream(path: String, onEvent: @escaping @Sendable (JSONValue) async -> Void) async throws {
         try checkConnection()
-        if runPhases, path.contains("/runs/fixture-run/stream") {
+        if runPhases, (path.removingPercentEncoding ?? path).contains("/runs/fixture-run/stream") {
             try await streamRunPhases(path: path, onEvent: onEvent)
             return
         }
