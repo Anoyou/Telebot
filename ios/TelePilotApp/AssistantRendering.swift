@@ -304,3 +304,157 @@ enum AssistantHistoryCache {
         try? FileManager.default.removeItem(at: directory)
     }
 }
+
+// MARK: - 选择文本（第九轮）
+
+/// 「选择文本」面板（参考 ChatGPT／Claude iOS）：SwiftUI `Text` 的 `.textSelection(.enabled)` 在 iOS 上只能整段复制，
+/// 块级 Markdown 又被拆成多个 `Text`，无法拖选部分或跨块选择。这里把整条消息（已脱敏的正文）转成一段富文本，
+/// 放进只读、可选择的 `UITextView`：可以自由拖选任意片段，并使用系统的复制／查找／翻译等菜单。
+/// 原生 sheet（中等／大两档），右上角「完成」。
+struct AssistantSelectTextSheet: View {
+    let text: String
+    /// 助手回答按 Markdown 排版；我的消息按纯文本显示（与气泡一致）。
+    let markdown: Bool
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            AssistantSelectableTextView(attributed: markdown ? AssistantSelectableText.attributed(markdown: text) : AssistantSelectableText.plain(text))
+                .privacySensitive()
+                .ignoresSafeArea(.container, edges: .bottom)
+                .navigationTitle("选择文本")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("完成") { dismiss() }.accessibilityIdentifier("assistant.selectText.done")
+                    }
+                }
+        }
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.visible)
+    }
+}
+
+/// 只读、可选择的 `UITextView`（isEditable = false、isSelectable = true），自带滚动；字体来自 Dynamic Type。
+struct AssistantSelectableTextView: UIViewRepresentable {
+    let attributed: NSAttributedString
+
+    func makeUIView(context: Context) -> UITextView {
+        let view = UITextView()
+        view.isEditable = false
+        view.isSelectable = true
+        view.isScrollEnabled = true
+        view.alwaysBounceVertical = true
+        view.backgroundColor = .clear
+        view.adjustsFontForContentSizeCategory = true
+        view.dataDetectorTypes = []
+        view.textContainerInset = UIEdgeInsets(top: 12, left: 16, bottom: 24, right: 16)
+        view.textContainer.lineFragmentPadding = 0
+        view.linkTextAttributes = [.foregroundColor: UIColor.tintColor]
+        view.accessibilityIdentifier = "assistant.selectText.textView"
+        view.attributedText = attributed
+        return view
+    }
+
+    func updateUIView(_ view: UITextView, context: Context) {
+        if view.attributedText != attributed { view.attributedText = attributed }
+    }
+}
+
+/// Markdown → `NSAttributedString`：与气泡里同一套块级解析（`AssistantMarkdown.blocks`），保留标题、列表、引用、
+/// 代码块、表格与行内粗体／斜体／代码／链接的基本样式；字体用 `UIFont.preferredFont`（Dynamic Type）。
+enum AssistantSelectableText {
+    static func plain(_ text: String) -> NSAttributedString {
+        NSAttributedString(string: text, attributes: [.font: UIFont.preferredFont(forTextStyle: .body), .foregroundColor: UIColor.label])
+    }
+
+    static func attributed(markdown source: String) -> NSAttributedString {
+        let result = NSMutableAttributedString()
+        let blocks = AssistantMarkdown.blocks(source)
+        for (index, block) in blocks.enumerated() {
+            let last = index == blocks.count - 1
+            switch block {
+            case .paragraph(let value):
+                result.append(inline(value, style: .body))
+            case .heading(let level, let value):
+                let style: UIFont.TextStyle = level <= 1 ? .title3 : level == 2 ? .headline : .subheadline
+                result.append(inline(value, style: style, bold: true))
+            case .bullet(let depth, let checked, let value):
+                let marker = checked.map { $0 ? "☑︎ " : "☐ " } ?? (depth == 0 ? "• " : "◦ ")
+                result.append(listItem(marker: marker, depth: depth, body: inline(value, style: .body)))
+            case .ordered(let number, let depth, let value):
+                result.append(listItem(marker: number + ". ", depth: depth, body: inline(value, style: .body)))
+            case .quote(let value):
+                let quote = NSMutableAttributedString(attributedString: inline(value, style: .body, color: .secondaryLabel))
+                quote.addAttribute(.paragraphStyle, value: indented(12, first: 12), range: NSRange(location: 0, length: quote.length))
+                result.append(quote)
+            case .code(_, let code):
+                let font = UIFontMetrics(forTextStyle: .footnote).scaledFont(for: .monospacedSystemFont(ofSize: 13, weight: .regular))
+                result.append(NSAttributedString(string: code, attributes: [
+                    .font: font, .foregroundColor: UIColor.label, .backgroundColor: UIColor.secondarySystemBackground,
+                    .paragraphStyle: indented(8, first: 8),
+                ]))
+            case .table(let rows):
+                let table = NSMutableAttributedString()
+                for (row, cells) in rows.enumerated() {
+                    if row > 0 { table.append(NSAttributedString(string: "\n")) }
+                    for (column, cell) in cells.enumerated() {
+                        if column > 0 { table.append(NSAttributedString(string: "\t", attributes: [.font: UIFont.preferredFont(forTextStyle: .footnote)])) }
+                        table.append(inline(cell, style: .footnote, bold: row == 0))
+                    }
+                }
+                result.append(table)
+            case .rule:
+                result.append(NSAttributedString(string: "———", attributes: [.font: UIFont.preferredFont(forTextStyle: .body), .foregroundColor: UIColor.tertiaryLabel]))
+            }
+            if !last { result.append(NSAttributedString(string: "\n\n", attributes: [.font: UIFont.preferredFont(forTextStyle: .footnote)])) }
+        }
+        return result
+    }
+
+    private static func indented(_ head: CGFloat, first: CGFloat) -> NSParagraphStyle {
+        let style = NSMutableParagraphStyle()
+        style.firstLineHeadIndent = first
+        style.headIndent = head
+        return style
+    }
+
+    private static func listItem(marker: String, depth: Int, body: NSAttributedString) -> NSAttributedString {
+        let font = UIFont.preferredFont(forTextStyle: .body)
+        let item = NSMutableAttributedString(string: marker, attributes: [.font: font, .foregroundColor: UIColor.secondaryLabel])
+        item.append(body)
+        let indent = CGFloat(depth) * 16
+        let markerWidth = (marker as NSString).size(withAttributes: [.font: font]).width
+        item.addAttribute(.paragraphStyle, value: indented(indent + markerWidth, first: indent), range: NSRange(location: 0, length: item.length))
+        return item
+    }
+
+    /// 行内 Markdown（粗体／斜体／行内代码／删除线／链接）→ UIKit 属性。
+    private static func inline(_ source: String, style: UIFont.TextStyle, bold: Bool = false, color: UIColor = .label) -> NSAttributedString {
+        let base = UIFont.preferredFont(forTextStyle: style)
+        let value = AssistantMarkdown.inline(source)
+        let output = NSMutableAttributedString()
+        for run in value.runs {
+            let piece = String(value[run.range].characters)
+            var traits: UIFontDescriptor.SymbolicTraits = bold ? [.traitBold] : []
+            var font = base
+            var attributes: [NSAttributedString.Key: Any] = [.foregroundColor: color]
+            if let intent = run.inlinePresentationIntent {
+                if intent.contains(.stronglyEmphasized) { traits.insert(.traitBold) }
+                if intent.contains(.emphasized) { traits.insert(.traitItalic) }
+                if intent.contains(.strikethrough) { attributes[.strikethroughStyle] = NSUnderlineStyle.single.rawValue }
+                if intent.contains(.code) {
+                    font = .monospacedSystemFont(ofSize: base.pointSize * 0.92, weight: .regular)
+                    attributes[.backgroundColor] = UIColor.secondarySystemFill
+                }
+            }
+            if !traits.isEmpty, let descriptor = font.fontDescriptor.withSymbolicTraits(font.fontDescriptor.symbolicTraits.union(traits)) {
+                font = UIFont(descriptor: descriptor, size: 0)
+            }
+            attributes[.font] = font
+            if let link = run.link { attributes[.link] = link }
+            output.append(NSAttributedString(string: piece, attributes: attributes))
+        }
+        return output
+    }
+}

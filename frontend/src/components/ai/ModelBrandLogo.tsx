@@ -10,34 +10,13 @@ function escapeHtml(value: string): string {
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#39;");
 }
-import { resolveModelBrand, type ModelBrandId } from "@/lib/modelBrand";
+import { listModelBrands, resolveModelBrand, type ModelBrandId } from "@/lib/modelBrand";
 import { MODEL_BRAND_ICONS } from "@/lib/modelBrandIcons";
 
-const BRAND_META_FALLBACK: Record<ModelBrandId, { label: string; accent: string }> = {
-  auto: { label: "自动路由", accent: "#8b9cff" },
-  openai: { label: "OpenAI", accent: "#10a37f" },
-  anthropic: { label: "Anthropic", accent: "#d4a27f" },
-  deepseek: { label: "DeepSeek", accent: "#4D6BFE" },
-  google: { label: "Google", accent: "#4285f4" },
-  xai: { label: "xAI", accent: "#e8e8e8" },
-  meta: { label: "Meta", accent: "#0668e1" },
-  mistral: { label: "Mistral", accent: "#ff7000" },
-  qwen: { label: "通义千问", accent: "#615ced" },
-  moonshot: { label: "Moonshot", accent: "#94a3b8" },
-  zhipu: { label: "智谱", accent: "#e8e8e8" },
-  bytedance: { label: "字节豆包", accent: "#3b82f6" },
-  microsoft: { label: "Microsoft", accent: "#00a4ef" },
-  amazon: { label: "Amazon", accent: "#ff9900" },
-  cohere: { label: "Cohere", accent: "#39594d" },
-  perplexity: { label: "Perplexity", accent: "#22b8cd" },
-  nvidia: { label: "NVIDIA", accent: "#76b900" },
-  minimax: { label: "MiniMax", accent: "#e11d48" },
-  baichuan: { label: "百川", accent: "#ff6a00" },
-  yi: { label: "零一万物", accent: "#a3a3a3" },
-  ollama: { label: "Ollama", accent: "#c4c4c4" },
-  openrouter: { label: "OpenRouter", accent: "#a78bfa" },
-  unknown: { label: "未知", accent: "#94a3b8" },
-};
+const BRAND_META = Object.fromEntries(listModelBrands().map((brand) => [brand.id, brand])) as unknown as Record<
+  ModelBrandId,
+  { label: string; accent: string }
+>;
 
 function AutoMark({ className, title, color }: { className?: string; title?: string; color?: string }) {
   const style: CSSProperties | undefined = color ? { color } : undefined;
@@ -89,6 +68,7 @@ function SourcedBrandMark({
       className={cn("shrink-0", className)}
       style={style}
       data-icon-source={icon.source}
+      fillRule={icon.fillRule}
       // Real brand paths from lobe-icons / simple-icons, monochrome currentColor.
       dangerouslySetInnerHTML={{ __html: (title ? `<title>${escapeHtml(title)}</title>` : "") + icon.paths }}
     />
@@ -117,9 +97,9 @@ export function ModelBrandLogo({
 }) {
   const resolved = resolveModelBrand(model, providerName, { auto: auto || brandId === "auto" });
   const id = brandId || resolved.id;
-  const meta = BRAND_META_FALLBACK[id] || BRAND_META_FALLBACK.unknown;
+  const meta = BRAND_META[id] || BRAND_META.unknown;
   const label = id === resolved.id ? resolved.label : meta.label;
-  const accent = BRAND_META_FALLBACK[id]?.accent || resolved.accent || meta.accent;
+  const accent = BRAND_META[id]?.accent || resolved.accent || meta.accent;
 
   return (
     <span

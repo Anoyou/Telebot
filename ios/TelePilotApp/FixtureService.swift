@@ -279,7 +279,12 @@ actor FixtureService: AppServing {
         if clean == "/api/system-agent/capabilities" {
             return ["enabled": true, "provider_name": "测试供应商", "resolved_model": "openai/fixture-model", "model_matrix": [
                 ["provider_id": 1, "provider_name": "测试供应商", "model": "openai/fixture-model", "enabled": true],
-                ["provider_id": 1, "provider_name": "测试供应商", "model": "anthropic/fixture-model-with-a-much-longer-name", "enabled": true]
+                ["provider_id": 1, "provider_name": "测试供应商", "model": "anthropic/fixture-model-with-a-much-longer-name", "enabled": true],
+                // 第九轮：不同模型家族（模型选择器每行前显示家族 logo）；最后一个无法识别，显示中性通用图标。
+                ["provider_id": 2, "provider_name": "个人模型网关", "model": "deepseek-v4-flash", "enabled": true],
+                ["provider_id": 2, "provider_name": "个人模型网关", "model": "google/gemini-3.5-flash", "enabled": true],
+                ["provider_id": 2, "provider_name": "个人模型网关", "model": "tencent/hy3-preview", "enabled": true],
+                ["provider_id": 3, "provider_name": "自建网关", "model": "my-private-model", "enabled": true]
             ]]
         }
         if let match = clean.firstMatch(of: #/^\/api\/plugins\/install\/([^\/]+)\/(enable|disable)$/#), method == "POST" {

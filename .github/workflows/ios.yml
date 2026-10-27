@@ -13,12 +13,16 @@ on:
     paths:
       - "ios/**"
       - "openapi/telepilot.openapi.json"
+      # 模型家族映射与图标由 Web 与 iOS 共用（sync-model-brands.py 校验）。
+      - "frontend/src/lib/modelBrand*.json"
       - ".github/workflows/ios.yml"
   push:
     branches: [Beta]
     paths:
       - "ios/**"
       - "openapi/telepilot.openapi.json"
+      # 模型家族映射与图标由 Web 与 iOS 共用（sync-model-brands.py 校验）。
+      - "frontend/src/lib/modelBrand*.json"
       - ".github/workflows/ios.yml"
   workflow_dispatch:
 
@@ -106,6 +110,7 @@ jobs:
           python3 ios/scripts/check-ios-version.py
           python3 ios/TelePilotCore/scripts/sync-openapi.py --check
           python3 ios/TelePilotCore/scripts/sync-contract.py --check
+          python3 ios/TelePilotCore/scripts/sync-model-brands.py --check
           python3 ios/scripts/ui-test-shards.py --total "$UI_TEST_SHARDS" --summary
 
       - name: 编译（build-for-testing）

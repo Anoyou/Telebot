@@ -260,15 +260,11 @@ struct AssistantView: View {
                 if minimize != nil && !composerFocused { minimizeButton }
             }
         }
-        // 输入栏浮层（「+」附件、模型、发送方式）：挂在 safeAreaInset 之前，内容区的底部安全区已包含输入栏，
-        // 卡片底边正好落在输入栏上方；遮罩只覆盖对话区域，不覆盖输入栏与导航栏。浮层与输入栏没有几何关联。
-        .overlay { AssistantComposerPanelHost(store: store, panel: composerPanel) }
+        // 输入栏（「+」附件、模型选择用系统原生 popover 锚定在各自按钮上，第九轮）。
         .safeAreaInset(edge: .bottom, spacing: 0) {
             AssistantComposer(store: store, panel: composerPanel, focused: $composerFocused)
         }
-        // 输入栏与浮层宿主共同的坐标空间：浮层据此（只读）摆放卡片与水滴尖，不与输入栏发生布局关联。
-        .coordinateSpace(.named(AssistantComposerPanelState.space))
-        .onChange(of: store.sessionID) { _, _ in composerPanel.close(animated: false) }
+        .onChange(of: store.sessionID) { _, _ in composerPanel.close() }
         // Agent 页隐藏底部 Dock，把空间留给对话；用悬浮的最小化按钮返回。
         .toolbarVisibility(embedded ? .hidden : .automatic, for: .tabBar)
     }
@@ -375,8 +371,17 @@ private struct AssistantMessageView: View, Equatable {
     @State private var copied = false
     @State private var copyCount = 0
     @State private var confirmRegenerate = false
+    @State private var selectingText = false
 
     var body: some View {
+        bubble
+            // 第九轮：「选择文本」面板——整条消息放进可自由拖选的原生文本视图。
+            .sheet(isPresented: $selectingText) {
+                AssistantSelectTextSheet(text: text, markdown: role == "assistant")
+            }
+    }
+
+    @ViewBuilder private var bubble: some View {
         if role == "user" {
             // 我的消息（参考 Codex）：角色标签在上，气泡贴右，操作行在气泡外下方、与气泡右边缘对齐。
             VStack(alignment: .trailing, spacing: 6) {
@@ -445,6 +450,8 @@ private struct AssistantMessageView: View, Equatable {
                     .privacySensitive()
                     .contextMenu {
                         Button("复制", systemImage: "doc.on.doc") { UIPasteboard.general.setItems([[UIPasteboard.typeAutomatic: text]], options: [.localOnly: true, .expirationDate: Date().addingTimeInterval(120)]) }
+                        // 第九轮：长按菜单里也能进入「选择文本」，拖选任意片段。
+                        Button("选择文本", systemImage: "text.cursor") { selectingText = true }
                         ShareLink(item: text) { Label("分享", systemImage: "square.and.arrow.up") }
                     }
             }
@@ -477,6 +484,12 @@ private struct AssistantMessageView: View, Equatable {
                 Button(isUser ? "复制消息" : "复制回复", systemImage: copied ? "checkmark" : "doc.on.doc") { copy() }
                     .accessibilityLabel(copied ? "已复制" : isUser ? "复制消息" : "复制回复")
                     .accessibilityIdentifier(isUser ? "assistant.message.copy" : "assistant.reply.copy")
+            }
+            if !text.isEmpty {
+                // 第九轮：打开「选择文本」面板，可拖选任意片段（系统复制／查找／翻译菜单）。
+                Button("选择文本", systemImage: "text.cursor") { selectingText = true }
+                    .accessibilityLabel("选择文本")
+                    .accessibilityIdentifier(isUser ? "assistant.message.selectText" : "assistant.reply.selectText")
             }
             if isUser && mayEdit {
                 Button("编辑消息", systemImage: "pencil", action: edit)
@@ -1424,12 +1437,18 @@ struct AssistantCodeBlockView: View {
                 Label(language.isEmpty ? "代码" : language, systemImage: "chevron.left.forwardslash.chevron.right")
                     .font(.caption.weight(.medium)).foregroundStyle(.secondary)
                 Spacer()
-                Button(copied ? "已复制" : "复制代码", systemImage: copied ? "checkmark" : "doc.on.doc") {
+                // 第九轮：右上角小「复制」按钮（图标＋文字，触控至少 44pt）。
+                Button(copied ? "已复制" : "复制", systemImage: copied ? "checkmark" : "doc.on.doc") {
                     UIPasteboard.general.setItems([[UIPasteboard.typeAutomatic: code]], options: [.localOnly: true, .expirationDate: Date().addingTimeInterval(120)])
                     copied = true
                 }
-                .labelStyle(.iconOnly).font(.caption)
-                .frame(minWidth: 44, minHeight: 36)
+                .labelStyle(.titleAndIcon).font(.caption.weight(.medium))
+                .buttonStyle(.plain).foregroundStyle(.tint)
+                .padding(.horizontal, 8)
+                .frame(minWidth: 44, minHeight: 44)
+                .contentShape(.rect)
+                .accessibilityLabel(copied ? "已复制代码" : "复制代码")
+                .accessibilityIdentifier("assistant.code.copy")
             }
             .padding(.leading, 12).padding(.trailing, 4)
             Divider()
