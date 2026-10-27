@@ -261,6 +261,9 @@ def _validate_blocks(blocks: Any, *, stats: dict[str, int]) -> None:
                 _validate_blocks(item.get("blocks"), stats=stats)
 
         if block_type == "table":
+            # Bot API 10.3：InputRichBlockTable.is_compact（True，可选）；显式传入时原样透传。
+            if "is_compact" in block and not isinstance(block.get("is_compact"), bool):
+                raise RichMessageValidationError("rich_message 表格 is_compact 必须是布尔值")
             rows = block.get("cells")
             if not isinstance(rows, list):
                 raise RichMessageValidationError("rich_message 表格 cells 必须是二维数组")
