@@ -1,5 +1,12 @@
 name: iOS
 
+# 结构（提速）：
+#   判定 ─┬─ 编译（build-for-testing，一次）→ 上传测试产物 → 校验与 Core 单元测试 ─┐
+#         └─ UI 测试分片 ×4（与编译同时开始：先启动并预热模拟器，再等测试产物）───────┴─ 汇总「iOS 构建与测试」
+# - UI 测试按历史耗时（ios/scripts/ui-test-durations.json）均衡分到 4 台机器并行执行，
+#   用例清单从源码解析，新增用例自动进入某个分片，不会漏测；失败用例自动重跑一次，两次都失败才算失败。
+# - Beta push：若该提交的文件树与某个 PR 上已全绿的被测树完全相同（PR 在最新 Beta 上合并即如此），
+#   跳过重复测试，汇总检查直接成功；否则完整执行。不影响「iOS 未签名 IPA」由 Beta push 触发。
 on:
   pull_request:
     branches: [Beta, main]
@@ -17,10 +24,12 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: ios-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  # PR 上新 push 取消旧 run；Beta push 不互相取消，保证每次合并都有结果。
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   # 工程使用 iOS 27 SDK 才有的 API（如 TabRole.prominent，运行时以 #available 兜底），
@@ -28,20 +37,68 @@ env:
   XCODE_APP: /Applications/Xcode_27.app
   DERIVED_DATA: ${{ github.workspace }}/ios/build/DerivedData
   RESULTS_DIR: ${{ github.workspace }}/ios/build/results
+  UI_TEST_SHARDS: 4
+  GREEN_TREE_PREFIX: ios-green-tree-
 
 jobs:
-  ios:
-    name: iOS 构建与测试
+  plan:
+    name: 判定是否需要测试
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      skip: ${{ steps.decide.outputs.skip }}
+      tree: ${{ steps.decide.outputs.tree }}
+      reason: ${{ steps.decide.outputs.reason }}
+    steps:
+      - name: 对比已全绿的被测文件树
+        id: decide
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+          EVENT: ${{ github.event_name }}
+          REPO_ID: ${{ github.repository_id }}
+        run: |
+          set -euo pipefail
+          api() { curl -fsSL -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" "$GITHUB_API_URL/repos/$REPO/$1"; }
+          TREE=$(api "git/commits/$SHA" | jq -r .tree.sha)
+          echo "被测提交 $SHA，文件树 $TREE"
+          echo "tree=$TREE" >> "$GITHUB_OUTPUT"
+          SKIP=false; REASON="完整执行"
+          if [ "$EVENT" = "push" ]; then
+            # 只认本仓库分支（非 fork）上「iOS」工作流成功结束的 run 留下的标记。
+            for RUN in $(api "actions/artifacts?name=${GREEN_TREE_PREFIX}${TREE}&per_page=20" \
+                | jq -r --argjson repo "$REPO_ID" '.artifacts[] | select(.expired | not)
+                    | select(.workflow_run.repository_id == $repo and .workflow_run.head_repository_id == $repo)
+                    | .workflow_run.id'); do
+              INFO=$(api "actions/runs/$RUN")
+              if [ "$(jq -r .path <<<"$INFO")" = ".github/workflows/ios.yml" ] && [ "$(jq -r .conclusion <<<"$INFO")" = "success" ]; then
+                SKIP=true
+                REASON="文件树与 run $RUN（$(jq -r .event <<<"$INFO")，$(jq -r .head_branch <<<"$INFO")@$(jq -r '.head_sha[0:8]' <<<"$INFO")）已全绿的被测树相同，跳过重复测试"
+                break
+              fi
+            done
+          fi
+          echo "$REASON"
+          echo "skip=$SKIP" >> "$GITHUB_OUTPUT"
+          echo "reason=$REASON" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: 编译与校验
+    needs: plan
+    if: needs.plan.outputs.skip != 'true'
     runs-on: xcode-27
-    timeout-minutes: 75
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - name: 选择 Xcode
+      - name: 选择 Xcode 与模拟器
+        id: simulator
         run: |
           sudo xcode-select -s "$XCODE_APP/Contents/Developer"
           xcodebuild -version
-          xcrun simctl list runtimes available
+          # 编译只需要目标设备，不需要启动模拟器（启动约 2 分钟，留给各测试分片并行完成）。
+          echo "udid=$(python3 ios/scripts/ci-select-simulator.py)" >> "$GITHUB_OUTPUT"
 
       - name: 校验工程与契约同步
         run: |
@@ -49,38 +106,9 @@ jobs:
           python3 ios/scripts/check-ios-version.py
           python3 ios/TelePilotCore/scripts/sync-openapi.py --check
           python3 ios/TelePilotCore/scripts/sync-contract.py --check
+          python3 ios/scripts/ui-test-shards.py --total "$UI_TEST_SHARDS" --summary
 
-      - name: 校验 OpenAPI 生成代码
-        run: sh ios/TelePilotCore/scripts/generate.sh --check
-
-      - name: TelePilotCore 单元测试
-        run: swift test --package-path ios/TelePilotCore
-
-      - name: 选择 iOS 26+ 模拟器
-        id: simulator
-        run: |
-          UDID=$(xcrun simctl list devices available -j | python3 -c '
-          import json, re, sys
-          data = json.load(sys.stdin)["devices"]
-          def version(runtime):
-              m = re.search(r"iOS-(\d+)-(\d+)", runtime)
-              return (int(m.group(1)), int(m.group(2))) if m else (0, 0)
-          runtimes = sorted((r for r in data if version(r)[0] >= 26), key=version, reverse=True)
-          for preferred in ("iPhone 17 Pro", "iPhone 18 Pro", "iPhone 17", None):
-              for runtime in runtimes:
-                  for device in data[runtime]:
-                      if not device.get("isAvailable", True):
-                          continue
-                      if preferred is None and device["name"].startswith("iPhone") or device["name"] == preferred:
-                          print(device["udid"]); print(device["name"], runtime, file=sys.stderr)
-                          raise SystemExit(0)
-          raise SystemExit("没有可用的 iOS 26+ iPhone 模拟器")
-          ')
-          echo "udid=$UDID" >> "$GITHUB_OUTPUT"
-          xcrun simctl boot "$UDID" || true
-          xcrun simctl bootstatus "$UDID" -b
-
-      - name: 编译 App 与 UI 测试
+      - name: 编译（build-for-testing）
         run: |
           set -o pipefail
           mkdir -p "$RESULTS_DIR"
@@ -94,40 +122,182 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             2>&1 | tee "$RESULTS_DIR/build.log" | xcbeautify --renderer github-actions
 
-      - name: 预热模拟器
-        # 刚启动的模拟器前几分钟无障碍快照和首次启动都很慢（曾出现前 3 个用例停在“连接 TelePilot…”
-        # 超时、UI 查询超时），先安装并以 UI 测试参数冷启动一次 App，再开始计时的 UI 测试。
+      - name: 打包测试产物
+        # 用 tar 保留可执行位与符号链接（artifact 本身不保留文件权限）。
         run: |
-          UDID="${{ steps.simulator.outputs.udid }}"
-          APP=$(find "$DERIVED_DATA/Build/Products" -maxdepth 2 -name TelePilot.app -path '*iphonesimulator*' | head -n 1)
-          echo "预热 App：$APP"
-          if [ -n "$APP" ]; then
-            xcrun simctl install "$UDID" "$APP" || true
-            xcrun simctl launch "$UDID" com.telepilot.personal --ui-testing -AppleLanguages "(zh-Hans)" -AppleLocale zh_CN || true
-            sleep 45
-            xcrun simctl terminate "$UDID" com.telepilot.personal || true
-          fi
-          sleep 15
+          ls "$DERIVED_DATA"/Build/Products/*.xctestrun
+          tar -cf ios-test-products.tar -C "$DERIVED_DATA/Build" Products
+          ls -lh ios-test-products.tar
 
-      - name: 运行 UI 测试（fixture 模式）
+      - name: 上传测试产物
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ios-test-products-${{ github.run_id }}
+          path: ios-test-products.tar
+          retention-days: 1
+          compression-level: 1
+          overwrite: true
+          if-no-files-found: error
+
+      # 测试产物已上传、各分片已可开始测试；以下校验在本机继续进行，不占用 UI 测试的关键路径。
+      - name: 校验 OpenAPI 生成代码
+        run: sh ios/TelePilotCore/scripts/generate.sh --check
+
+      - name: TelePilotCore 单元测试
+        run: swift test --package-path ios/TelePilotCore
+
+      - name: 上传编译日志
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ios-build-log-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ios/build/results
+          retention-days: 7
+          if-no-files-found: ignore
+
+  ui-tests:
+    name: UI 测试 ${{ matrix.shard }}/4
+    # 不等编译 job：与编译同时开始，先把模拟器启动和首次冷启动（约 2–6 分钟）做完，再等测试产物。
+    needs: plan
+    if: needs.plan.outputs.skip != 'true'
+    runs-on: xcode-27
+    timeout-minutes: 50
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: 选择 Xcode 并后台启动模拟器
+        id: simulator
+        run: |
+          sudo xcode-select -s "$XCODE_APP/Contents/Developer"
+          UDID=$(python3 ios/scripts/ci-select-simulator.py)
+          echo "udid=$UDID" >> "$GITHUB_OUTPUT"
+          # 启动模拟器并冷启动一次系统 App（「设置」），让首次启动的系统缓存在等待编译期间完成。
+          nohup sh -c "xcrun simctl boot '$UDID'; xcrun simctl bootstatus '$UDID' -b; xcrun simctl launch '$UDID' com.apple.Preferences; sleep 5; xcrun simctl terminate '$UDID' com.apple.Preferences; touch '$RUNNER_TEMP/sim-ready'" > "$RUNNER_TEMP/boot.log" 2>&1 &
+
+      - name: 等待编译产物
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NAME: ios-test-products-${{ github.run_id }}
+        run: |
+          api() { curl -fsSL -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/$1"; }
+          for i in $(seq 1 180); do
+            COUNT=$(api "actions/runs/$GITHUB_RUN_ID/artifacts?name=$NAME" | jq '[.artifacts[] | select(.expired | not)] | length' || echo 0)
+            if [ "${COUNT:-0}" -gt 0 ]; then echo "测试产物已就绪（等待 $(( (i - 1) * 10 )) 秒）"; exit 0; fi
+            BUILD=$(api "actions/runs/$GITHUB_RUN_ID/jobs?per_page=50" | jq -r '[.jobs[] | select(.name == "编译与校验")][0] | "\(.status) \(.conclusion)"' || echo "unknown")
+            case "$BUILD" in
+              "completed failure"|"completed cancelled"|"completed skipped")
+                echo "::error::编译 job 未成功（$BUILD），没有可测试的产物"; exit 1 ;;
+            esac
+            sleep 10
+          done
+          echo "::error::等待测试产物超时"; exit 1
+
+      - name: 下载测试产物
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: ios-test-products-${{ github.run_id }}
+
+      - name: 解包并等待模拟器就绪
+        id: products
+        run: |
+          mkdir -p "$DERIVED_DATA/Build" "$RESULTS_DIR"
+          tar -xf ios-test-products.tar -C "$DERIVED_DATA/Build"
+          rm ios-test-products.tar
+          XCTESTRUN=$(ls "$DERIVED_DATA"/Build/Products/*.xctestrun | head -n 1)
+          echo "xctestrun=$XCTESTRUN" >> "$GITHUB_OUTPUT"
+          for i in $(seq 1 180); do [ -f "$RUNNER_TEMP/sim-ready" ] && break; sleep 5; done
+          xcrun simctl bootstatus "${{ steps.simulator.outputs.udid }}" -b
+          cat "$RUNNER_TEMP/boot.log" || true
+
+      - name: 预热模拟器
+        # 刚启动的模拟器前几次冷启动 App 和无障碍快照都很慢（慢机器上曾超过 4 分钟，导致前几个用例停在
+        # “连接 TelePilot…”超时）。固定 sleep 不够自适应：改为反复跑一个最短的 UI 用例直到通过（最多 4 次），
+        # 同时完成 App 与测试运行器的安装；预热结果不计入测试结论，真正的用例在下一步运行。
+        run: |
+          WARMUP="-only-testing:TelePilotUITests/WorkspaceUITests/testDockKeepsPrimarySectionsAndAgentEntry"
+          for i in 1 2 3 4; do
+            START=$(date +%s)
+            if xcodebuild test-without-building \
+                -xctestrun "${{ steps.products.outputs.xctestrun }}" \
+                -destination "platform=iOS Simulator,id=${{ steps.simulator.outputs.udid }}" \
+                -resultBundlePath "$RUNNER_TEMP/warmup-$i.xcresult" \
+                -parallel-testing-enabled NO \
+                -collect-test-diagnostics never \
+                "$WARMUP" > "$RUNNER_TEMP/warmup-$i.log" 2>&1; then
+              echo "第 $i 次预热通过（$(( $(date +%s) - START )) 秒）"
+              exit 0
+            fi
+            echo "第 $i 次预热未通过（$(( $(date +%s) - START )) 秒），模拟器仍在冷启动，继续预热"
+            grep -E "error:|failed" "$RUNNER_TEMP/warmup-$i.log" | head -n 5 || true
+          done
+          echo "::warning::预热 4 次仍未通过，继续执行测试（以测试结果为准）"
+
+      - name: 运行 UI 测试分片（fixture 模式）
         run: |
           set -o pipefail
+          ONLY=$(python3 ios/scripts/ui-test-shards.py --total "$UI_TEST_SHARDS" --shard ${{ matrix.shard }})
+          echo "本分片用例："; echo "$ONLY" | sed 's/^-only-testing:/  /'
+          # 失败的用例自动重跑一次（只重跑失败的那个），两次都失败才判失败。
+          # shellcheck disable=SC2086
           xcodebuild test-without-building \
-            -project ios/TelePilot.xcodeproj \
-            -scheme TelePilot \
+            -xctestrun "${{ steps.products.outputs.xctestrun }}" \
             -destination "platform=iOS Simulator,id=${{ steps.simulator.outputs.udid }}" \
-            -derivedDataPath "$DERIVED_DATA" \
-            -resultBundlePath "$RESULTS_DIR/UITests.xcresult" \
+            -resultBundlePath "$RESULTS_DIR/UITests-${{ matrix.shard }}.xcresult" \
             -parallel-testing-enabled NO \
             -collect-test-diagnostics never \
-            CODE_SIGNING_ALLOWED=NO \
-            2>&1 | tee "$RESULTS_DIR/test.log" | xcbeautify --renderer github-actions
+            -retry-tests-on-failure \
+            -test-iterations 2 \
+            $ONLY \
+            2>&1 | tee "$RESULTS_DIR/test-${{ matrix.shard }}.log" | xcbeautify --renderer github-actions
 
       - name: 上传结果包
         if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: ios-xcresult-${{ github.run_id }}-${{ github.run_attempt }}
+          name: ios-xcresult-${{ github.run_id }}-${{ github.run_attempt }}-shard${{ matrix.shard }}
           path: ios/build/results
           retention-days: 7
           if-no-files-found: ignore
+
+  result:
+    name: iOS 构建与测试
+    needs: [plan, build, ui-tests]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: 汇总结果
+        env:
+          SKIP: ${{ needs.plan.outputs.skip }}
+          REASON: ${{ needs.plan.outputs.reason }}
+          PLAN: ${{ needs.plan.result }}
+          BUILD: ${{ needs.build.result }}
+          UI: ${{ needs.ui-tests.result }}
+        run: |
+          echo "判定=$PLAN 编译与校验=$BUILD UI 测试=$UI"
+          if [ "$PLAN" = "success" ] && [ "$SKIP" = "true" ]; then
+            echo "### 跳过重复测试" >> "$GITHUB_STEP_SUMMARY"
+            echo "$REASON" | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          if [ "$PLAN" != "success" ] || [ "$BUILD" != "success" ] || [ "$UI" != "success" ]; then
+            echo "::error::iOS 构建与测试未全部通过"
+            exit 1
+          fi
+          echo "全部通过"
+          mkdir -p green && echo "${{ github.sha }}" > green/sha.txt
+
+      - name: 记录已全绿的被测文件树
+        # 供之后合并到 Beta 的 push 判定：文件树完全相同则不重复测试。
+        if: needs.plan.outputs.skip != 'true' && needs.plan.outputs.tree != ''
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ${{ env.GREEN_TREE_PREFIX }}${{ needs.plan.outputs.tree }}
+          path: green
+          retention-days: 30
+          overwrite: true
+          if-no-files-found: error
