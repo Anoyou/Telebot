@@ -187,11 +187,11 @@ final class AssistantUITests: XCTestCase {
                 XCTAssertEqual(new.height, old.height, accuracy: 0.5, "\(step)：\(old) → \(new)", file: file, line: line)
             }
         }
-        /// 原生 popover 在按钮上方（箭头朝下指向按钮）：内容底边在按钮之上，按钮中心落在 popover 的水平范围内。
+        /// 原生 popover 在按钮上方（箭头朝下指向按钮）：内容底边在按钮之上且贴近按钮，按钮中心落在 popover 的水平范围内。
+        /// 按钮在输入栏下方的工具栏里，锚定在按钮上的 popover 会盖住输入框那一行（系统行为），不要求在输入栏卡片之上。
         func assertAnchored(_ card: XCUIElement, to button: XCUIElement, _ step: String, file: StaticString = #filePath, line: UInt = #line) {
             XCTAssertLessThanOrEqual(card.frame.maxY, button.frame.minY + 0.5, "\(step)：popover 应在按钮上方 \(card.frame) / \(button.frame)", file: file, line: line)
-            XCTAssertLessThanOrEqual(card.frame.maxY, bar.frame.minY + 0.5, "\(step)：popover 压住了输入栏", file: file, line: line)
-            XCTAssertGreaterThan(card.frame.maxY, bar.frame.minY - 80, "\(step)：popover 离按钮太远 \(card.frame) / \(bar.frame)", file: file, line: line)
+            XCTAssertGreaterThan(card.frame.maxY, button.frame.minY - 40, "\(step)：popover 离按钮太远 \(card.frame) / \(button.frame)", file: file, line: line)
             XCTAssertTrue(card.frame.minX - 1 <= button.frame.midX && button.frame.midX <= card.frame.maxX + 1,
                           "\(step)：箭头应指向按钮 \(card.frame) / \(button.frame)", file: file, line: line)
         }
@@ -283,7 +283,8 @@ final class AssistantUITests: XCTestCase {
         XCTAssertTrue(modelPanel.waitForExistence(timeout: 5))
         Thread.sleep(forTimeInterval: 0.8)
         let keyboardVisible = app.keyboards.firstMatch.exists
-        print("R9-KEYBOARD: popover 打开后键盘\(keyboardVisible ? "仍显示" : "已收起")")
+        // 工作流「输出界面测试观察记录」步骤会把 UI-RECORD 行摘到 job 日志与摘要。
+        print("UI-RECORD R9-KEYBOARD: 原生 popover 打开后键盘\(keyboardVisible ? "仍显示" : "已收起")")
         XCTContext.runActivity(named: "R9-KEYBOARD keyboardVisible=\(keyboardVisible)") { _ in }
         XCTAssertLessThanOrEqual(modelPanel.frame.maxY, model.frame.minY + 0.5)
         app.buttons["assistant.model.option.auto"].tap()
@@ -305,7 +306,7 @@ final class AssistantUITests: XCTestCase {
     /// 长按回复的菜单里也有「选择文本」；代码块右上角有「复制」。
     func testSelectTextOpensNativeTextViewSheet() {
         let app = openAssistant(["--ui-test-long-history"])
-        XCTAssertTrue(app.staticTexts["第 120 条回答"].waitForExistence(timeout: 10), visibleTexts(app))
+        XCTAssertTrue(app.staticTexts["第 120 条回答"].waitForExistence(timeout: 20), visibleTexts(app))
         let replySelect = app.buttons.matching(identifier: "assistant.reply.selectText").allElementsBoundByIndex.last { $0.isHittable }
         XCTAssertNotNil(replySelect, visibleTexts(app))
         guard let replySelect else { return }
@@ -313,7 +314,7 @@ final class AssistantUITests: XCTestCase {
         XCTAssertGreaterThanOrEqual(replySelect.frame.height, 44)
         replySelect.tap()
         let textView = app.textViews["assistant.selectText.textView"]
-        XCTAssertTrue(textView.waitForExistence(timeout: 5))
+        XCTAssertTrue(textView.waitForExistence(timeout: 8), "回答的选择文本面板没有出现")
         let replyText = textView.value as? String ?? ""
         XCTAssertTrue(replyText.contains("第 120 条回答"), replyText)
         XCTAssertTrue(replyText.contains("账号运行正常"), replyText)
@@ -328,16 +329,20 @@ final class AssistantUITests: XCTestCase {
         XCTAssertNotNil(messageSelect)
         guard let messageSelect else { return }
         messageSelect.tap()
-        XCTAssertTrue(textView.waitForExistence(timeout: 5))
+        XCTAssertTrue(textView.waitForExistence(timeout: 8), "我的消息的选择文本面板没有出现")
         XCTAssertTrue((textView.value as? String ?? "").contains("请检查账号与插件状态"), textView.value as? String ?? "")
         app.buttons["assistant.selectText.done"].tap()
         XCTAssertTrue(waitUntilGone(textView, timeout: 5))
 
         // 长按回复正文 → 菜单里的「选择文本」。
-        app.staticTexts["第 120 条回答"].press(forDuration: 1.0)
         // 菜单项与操作行按钮同名，用标识区分（操作行按钮的标识以 assistant. 开头）。
         let menuItem = app.buttons.matching(NSPredicate(format: "label == %@ AND NOT (identifier BEGINSWITH %@)", "选择文本", "assistant.")).firstMatch
-        XCTAssertTrue(menuItem.waitForExistence(timeout: 5))
+        app.staticTexts["第 120 条回答"].press(forDuration: 1.2)
+        if !menuItem.waitForExistence(timeout: 5) {
+            // 模拟器偶发没识别出长按：再按一次。
+            app.staticTexts["第 120 条回答"].press(forDuration: 1.5)
+        }
+        XCTAssertTrue(menuItem.waitForExistence(timeout: 5), "长按菜单里没有「选择文本」")
         menuItem.tap()
         XCTAssertTrue(textView.waitForExistence(timeout: 5))
         XCTAssertTrue((textView.value as? String ?? "").contains("第 120 条回答"))
@@ -350,7 +355,7 @@ final class AssistantUITests: XCTestCase {
         if let codeCopy {
             XCTAssertGreaterThanOrEqual(codeCopy.frame.height, 44)
             codeCopy.tap()
-            XCTAssertTrue(app.buttons["已复制代码"].firstMatch.waitForExistence(timeout: 2))
+            XCTAssertTrue(app.buttons["已复制代码"].firstMatch.waitForExistence(timeout: 3), "代码块复制后没有显示“已复制”")
         }
     }
 

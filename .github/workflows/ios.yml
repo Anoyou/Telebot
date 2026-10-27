@@ -259,6 +259,17 @@ jobs:
             $ONLY \
             2>&1 | tee "$RESULTS_DIR/test-${{ matrix.shard }}.log" | xcbeautify --renderer github-actions
 
+      - name: 输出界面测试观察记录（UI-RECORD）
+        # 用例里 print("UI-RECORD …") 的观察结果（不作为断言，例如原生 popover 打开时键盘是否收起），
+        # xcbeautify 会过滤掉 print 输出，这里从原始日志里摘出来显示在 job 日志与摘要里。
+        if: always()
+        run: |
+          records=$(grep -ah "UI-RECORD" "$RESULTS_DIR/test-${{ matrix.shard }}.log" | sed 's/^.*UI-RECORD/UI-RECORD/' | sort -u || true)
+          if [ -n "$records" ]; then
+            echo "$records"
+            { echo "### 界面测试观察记录（分片 ${{ matrix.shard }}）"; echo '```'; echo "$records"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
       - name: 上传结果包
         if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
