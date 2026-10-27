@@ -125,3 +125,31 @@ export function sortSystemAgentQueue(
     return timeDelta || left.id.localeCompare(right.id);
   });
 }
+
+/** 任务的真实阶段（服务器 phase 字段）；排队中且前面有任务时显示“前面 N 个”。没有数据时退回任务类型。 */
+const PHASE_LABELS: Record<string, string> = {
+  starting: "正在开始",
+  recovering: "正在恢复",
+  understanding: "理解问题",
+  checking_model: "连接模型",
+  selecting_model: "连接模型",
+  routing: "选择工具",
+  selecting_skill: "加载技能",
+  thinking: "思考中",
+  using_tool: "调用工具",
+  responding: "生成回复",
+  finalizing: "整理回复",
+  finishing: "整理回复",
+  steered: "已应用调整",
+  paused: "已暂停",
+};
+
+export function runPhaseLabel(run: { status: string; phase?: string; kind: string; queue_ahead?: number | null }): string {
+  if (run.status === "queued") {
+    return run.queue_ahead && run.queue_ahead > 0 ? `排队中 · 前面 ${run.queue_ahead} 个` : "正在开始";
+  }
+  if (run.status === "waiting_input") return "等待补充信息";
+  if (run.status === "waiting_approval") return "等待审批";
+  if (run.status !== "running") return run.kind;
+  return (run.phase && PHASE_LABELS[run.phase]) || run.phase || run.kind;
+}

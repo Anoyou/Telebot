@@ -196,7 +196,14 @@ struct AssistantView: View {
                                     .id(entry.id)
                             }
                         }
-                        AssistantLiveReplyView(store: store, pinnedToBottom: pinnedToBottom, proxy: proxy)
+                        // 正在执行的任务：回答位置显示真实阶段（流光状态行），有正文后缩为末尾的小指示。
+                        AssistantLiveReplyView(store: store, pinnedToBottom: pinnedToBottom, proxy: proxy) {
+                            panel = .tasks
+                        } resume: {
+                            Task { await store.restoreRun(model) }
+                        }
+                        // 上一轮未结束时发出的消息：虚线待处理气泡，下方选择排队／插入调整／停止并替换。
+                        AssistantPendingMessagesView(store: store)
                         Color.clear.frame(height: 1).id("assistant.bottom")
                     }
                     .padding(.horizontal, 20).padding(.top, 20).padding(.bottom, 8)
@@ -230,6 +237,20 @@ struct AssistantView: View {
                         withAnimation { proxy.scrollTo("assistant.bottom", anchor: .bottom) }
                     }
                 }
+                // 第八轮：任务开始、出现新的待处理消息时滚到底部，让回答位置的状态行与待处理气泡可见。
+                .onChange(of: store.runID) { _, id in
+                    guard id != nil else { return }
+                    pinnedToBottom = true
+                    scrollToBottomAfterLayout(proxy)
+                }
+                .onChange(of: store.pendingQueue.count + store.steered.count) { old, new in
+                    guard new > old else { return }
+                    pinnedToBottom = true
+                    scrollToBottomAfterLayout(proxy)
+                }
+                .onChange(of: store.liveStatus?.text) { _, _ in
+                    if pinnedToBottom { scrollToBottomAfterLayout(proxy) }
+                }
                 // 首屏之后逐帧向上追加更早的消息：仍贴底时补滚一次，保证停在最新一条。
                 .onChange(of: store.revealStart) { _, _ in
                     if pinnedToBottom { scrollToBottomAfterLayout(proxy) }
@@ -238,7 +259,6 @@ struct AssistantView: View {
             .overlay(alignment: minimizeOnLeading ? .bottomLeading : .bottomTrailing) {
                 if minimize != nil && !composerFocused { minimizeButton }
             }
-            if store.runActive { runBar }
         }
         // 输入栏浮层（「+」附件、模型、发送方式）：挂在 safeAreaInset 之前，内容区的底部安全区已包含输入栏，
         // 卡片底边正好落在输入栏上方；遮罩只覆盖对话区域，不覆盖输入栏与导航栏。浮层与输入栏没有几何关联。
@@ -246,6 +266,8 @@ struct AssistantView: View {
         .safeAreaInset(edge: .bottom, spacing: 0) {
             AssistantComposer(store: store, panel: composerPanel, focused: $composerFocused)
         }
+        // 输入栏与浮层宿主共同的坐标空间：浮层据此（只读）摆放卡片与水滴尖，不与输入栏发生布局关联。
+        .coordinateSpace(.named(AssistantComposerPanelState.space))
         .onChange(of: store.sessionID) { _, _ in composerPanel.close(animated: false) }
         // Agent 页隐藏底部 Dock，把空间留给对话；用悬浮的最小化按钮返回。
         .toolbarVisibility(embedded ? .hidden : .automatic, for: .tabBar)
@@ -320,27 +342,6 @@ struct AssistantView: View {
         return store.messages.last { $0.text("role") == "assistant" && ($0["id"]?.intValue ?? 0) > id }
     }
 
-    private var runBar: some View {
-        HStack(alignment: .center, spacing: 12) {
-            if store.streaming { ProgressView().controlSize(.small) }
-            VStack(alignment: .leading, spacing: 3) {
-                Text(AssistantPresentation.status(store.runStatus)).font(.subheadline.weight(.medium))
-                if store.activeRun?["cancel_requested"]?.boolValue == true { Text("正在停止，请等待服务器确认").font(.caption).foregroundStyle(.secondary) }
-            }
-            Spacer(minLength: 2)
-            if store.runStatus == "waiting_approval" {
-                Button("审批", systemImage: "checkmark.shield") { panel = .tasks }
-                    .buttonStyle(.bordered).controlSize(.small)
-            }
-            if !store.streaming {
-                Button("恢复进度", systemImage: "arrow.clockwise") { Task { await store.restoreRun(model) } }
-                    .buttonStyle(.bordered).controlSize(.small)
-            }
-        }
-        .padding(.horizontal, 20).padding(.vertical, 12)
-        .background(.bar)
-    }
-
 }
 
 private struct AssistantEditPair: Identifiable {
@@ -395,10 +396,11 @@ private struct AssistantMessageView: View, Equatable {
             VStack(alignment: .leading, spacing: 10) {
                 header
                 content
+                // 第八轮：操作行紧跟正文，模型名／本轮用量在它下方。
+                if role == "assistant" { messageActions }
                 if role != "user" {
                     AssistantTurnDetailsView(usage: item["usage"], tools: tools)
                 }
-                if role == "assistant" { messageActions.padding(.top, 2) }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
@@ -472,12 +474,12 @@ private struct AssistantMessageView: View, Equatable {
         HStack(spacing: AssistantMessageActionStyle.spacing) {
             if !text.isEmpty {
                 // 复制后只把图标短暂换成对勾（文字不变，按钮行不跳动），并有轻触反馈；VoiceOver 读“已复制”。
-                Button("复制", systemImage: copied ? "checkmark" : "doc.on.doc") { copy() }
+                Button(isUser ? "复制消息" : "复制回复", systemImage: copied ? "checkmark" : "doc.on.doc") { copy() }
                     .accessibilityLabel(copied ? "已复制" : isUser ? "复制消息" : "复制回复")
                     .accessibilityIdentifier(isUser ? "assistant.message.copy" : "assistant.reply.copy")
             }
             if isUser && mayEdit {
-                Button("编辑", systemImage: "pencil", action: edit)
+                Button("编辑消息", systemImage: "pencil", action: edit)
                     .accessibilityLabel("编辑消息")
                     .accessibilityIdentifier("assistant.message.edit")
             }
@@ -492,8 +494,9 @@ private struct AssistantMessageView: View, Equatable {
         }
         .labelStyle(AssistantMessageActionStyle())
         .buttonStyle(.plain)
-        .font(.footnote)
-        .foregroundStyle(.secondary)
+        .font(.caption.weight(.medium))
+        // 第八轮：强调色（图标与文字），比正文小一档，但触控区仍至少 44pt 高。
+        .foregroundStyle(.tint)
         .sensoryFeedback(.success, trigger: copyCount)
     }
 
@@ -509,14 +512,14 @@ private struct AssistantMessageView: View, Equatable {
     }
 }
 
-/// 消息操作按钮的统一标签样式：SF Symbol ＋ 文字，间距 5pt，整块至少 44pt 高、可点；
+/// 消息操作按钮的统一标签样式：SF Symbol（小一号）＋ 文字，间距 4pt，整块至少 44pt 高、可点；
 /// 按钮自身没有水平内边距，所以按钮行的左右边缘就是第一个／最后一个按钮的图标或文字边缘，能与气泡、正文精确对齐。
 struct AssistantMessageActionStyle: LabelStyle {
     static let spacing: CGFloat = 20
 
     func makeBody(configuration: Configuration) -> some View {
-        HStack(spacing: 5) {
-            configuration.icon.imageScale(.medium).frame(width: 20)
+        HStack(spacing: 4) {
+            configuration.icon.imageScale(.small).frame(width: 16)
             configuration.title.lineLimit(1)
         }
         .frame(minHeight: 44)
@@ -524,22 +527,38 @@ struct AssistantMessageActionStyle: LabelStyle {
     }
 }
 
-/// 正在生成的回答：单独的视图，只有它随流式输出重绘；需要时跟随滚动到底部。
+/// 正在执行的任务（第八轮）：单独的视图，只有它随流式输出重绘；需要时跟随滚动到底部。
+/// - 没有正文时，回答位置显示一行轻量状态（小图标＋次要色文字＋流光），文字来自服务器的任务状态、phase 与进度事件
+///   （排队中 · 前面 N 个／正在开始／连接模型／思考中／调用工具：名称／生成回复／等待补充信息／等待审批），阶段切换时淡入淡出；
+///   没有数据的阶段不显示，也不会在已开始执行后停留在“排队中”。
+/// - 有正文后状态行缩为正文末尾的一行小字指示。
+/// - 等待审批时状态行旁有“审批”，进度订阅中断时有“恢复进度”（原来输入栏上方独立状态条里的操作）。
 private struct AssistantLiveReplyView: View {
     let store: AssistantStore
     let pinnedToBottom: Bool
     let proxy: ScrollViewProxy
+    let approve: () -> Void
+    let resume: () -> Void
 
     var body: some View {
         Group {
-            if !store.liveText.isEmpty || !store.liveReasoning.isEmpty {
+            let status = store.liveStatus
+            let hasText = !store.liveText.isEmpty
+            if status != nil || hasText || !store.liveReasoning.isEmpty {
                 VStack(alignment: .leading, spacing: 10) {
-                    Label("助手", systemImage: "sparkles").font(.caption.weight(.medium)).foregroundStyle(.secondary)
+                    Label("助手", systemImage: "sparkles").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                    if let status, !hasText { statusRow(status, compact: false) }
                     if !store.liveReasoning.isEmpty {
                         DisclosureGroup("推理过程") { Text(AssistantRedaction.text(store.liveReasoning)).font(.footnote).foregroundStyle(.secondary).textSelection(.enabled).privacySensitive() }
                     }
-                    AssistantMarkdownView(text: AssistantRedaction.text(store.liveText)).privacySensitive()
-                }.frame(maxWidth: .infinity, alignment: .leading)
+                    if hasText {
+                        AssistantMarkdownView(text: AssistantRedaction.text(store.liveText)).privacySensitive()
+                        if let status { statusRow(status, compact: true) }
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .accessibilityElement(children: .contain)
+                .accessibilityIdentifier("assistant.live")
             }
         }
         .onChange(of: store.liveText) { _, _ in
@@ -547,6 +566,241 @@ private struct AssistantLiveReplyView: View {
         }
         .onChange(of: store.liveReasoning) { _, _ in
             if pinnedToBottom { proxy.scrollTo("assistant.bottom", anchor: .bottom) }
+        }
+    }
+
+    @ViewBuilder private func statusRow(_ status: AssistantProgress.Status, compact: Bool) -> some View {
+        HStack(spacing: 8) {
+            ZStack(alignment: .leading) {
+                Label(status.text, systemImage: status.symbol)
+                    .labelStyle(AssistantStatusLabelStyle())
+                    .font(compact ? .caption2 : .subheadline)
+                    .foregroundStyle(compact ? .tertiary : .secondary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .assistantShimmer()
+                    .id(status.text)
+                    .transition(.opacity)
+            }
+            .animation(.easeInOut(duration: 0.25), value: status.text)
+            // 朗读与界面测试读取的是同一段状态文字。
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(status.text)
+            .accessibilityAddTraits(.updatesFrequently)
+            .accessibilityIdentifier("assistant.live.status")
+            if !compact {
+                if store.runStatus == "waiting_approval" {
+                    Button("审批", systemImage: "checkmark.shield", action: approve)
+                        .font(.caption).buttonStyle(.bordered).controlSize(.small)
+                }
+                if !store.streaming && store.runStatus != "queued" {
+                    Button("恢复进度", systemImage: "arrow.clockwise", action: resume)
+                        .font(.caption).buttonStyle(.bordered).controlSize(.small)
+                }
+            }
+        }
+        .frame(minHeight: compact ? 0 : 28)
+    }
+}
+
+/// 状态行的图标与文字：图标小一号、与文字间距 6pt。
+private struct AssistantStatusLabelStyle: LabelStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        HStack(spacing: 6) {
+            configuration.icon.imageScale(.small).symbolEffect(.pulse, options: .repeating, isActive: AssistantShimmer.animated)
+            configuration.title
+        }
+    }
+}
+
+/// 流光：一条斜向高光从左到右扫过文字（只作用于文字本身的形状）。减少动态效果时不动。
+/// 界面测试中关闭（无限循环的动画会让 XCTest 一直等待界面空闲）。
+struct AssistantShimmer: ViewModifier {
+    nonisolated static let animated = !ProcessInfo.processInfo.arguments.contains("--ui-testing")
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var phase: CGFloat = 0
+
+    @ViewBuilder func body(content: Content) -> some View {
+        if reduceMotion || !Self.animated {
+            content
+        } else {
+            content
+                .overlay {
+                    GeometryReader { geometry in
+                        let width = geometry.size.width
+                        LinearGradient(colors: [.clear, .white.opacity(0.75), .clear], startPoint: .leading, endPoint: .trailing)
+                            .frame(width: max(40, width * 0.45))
+                            .offset(x: -width * 0.5 + phase * width * 1.5)
+                    }
+                    .mask(content)
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
+                }
+                .onAppear {
+                    withAnimation(.linear(duration: 1.6).repeatForever(autoreverses: false)) { phase = 1 }
+                }
+        }
+    }
+}
+
+extension View {
+    func assistantShimmer() -> some View { modifier(AssistantShimmer()) }
+}
+
+// MARK: - 待处理消息（第八轮）
+
+/// 上一轮未结束时发出的消息：虚线描边的待处理气泡（贴右，与我的消息同一位置），下方一行次要色小字显示真实状态，
+/// 再下方三个小胶囊选择处理方式——「排队」（默认、已选中）、「插入调整」、「停止并替换」（需确认）。
+/// - 排队：服务器排队项（GET /queue）；插入调整：POST /queue/{id}/steer（原子地取消排队并作为当前任务的调整说明）；
+///   停止并替换：POST /queue/{id}/replace（原子地请求停止当前任务并把这条排到队首）。每次只提交一次、不自动重试，
+///   失败时重新读取队列显示真实状态。改为插入调整／停止并替换后不能再改回（服务器已执行）。
+/// - 轮到这条消息执行时它离开队列、进入正式消息历史（实线气泡），按钮消失；插入调整的内容被服务器并入当前任务
+///   （收到 steer_applied 后变为实线），不单独存为历史消息，当前任务结束后不再单独显示。
+private struct AssistantPendingMessagesView: View {
+    @Environment(AppModel.self) private var model
+    let store: AssistantStore
+
+    var body: some View {
+        let pending = store.pendingQueue
+        let ahead = store.runActive ? 1 : 0
+        ForEach(store.steered) { item in
+            AssistantPendingBubble(text: item.content, pending: !item.applied,
+                                   status: item.applied ? "已插入当前任务" : "将插入当前任务",
+                                   mode: .adjust, busy: false, canAdjust: false, canReplace: false,
+                                   choose: { _ in })
+                .id("steered-" + item.id)
+        }
+        ForEach(Array(pending.enumerated()), id: \.element.id) { index, item in
+            let replacing = store.replacingTurnIDs.contains(item.id)
+            let paused = item.text("status") == "paused"
+            AssistantPendingBubble(
+                text: item.text("content"), pending: true,
+                status: replacing ? "等待停止当前任务…" : paused ? "排队已暂停，当前任务结束后需要继续" : "排队中 · 前面 \(index + ahead) 条",
+                mode: replacing ? .replace : .queue,
+                busy: store.queueBusyID == item.id,
+                canAdjust: !replacing && store.runStatus == "running" && store.activeRun?["cancel_requested"]?.boolValue != true,
+                canReplace: !replacing && store.runActive && store.activeRun?["cancel_requested"]?.boolValue != true
+            ) { mode in
+                Task {
+                    switch mode {
+                    case .adjust: await store.steerQueued(item, model: model)
+                    case .replace: await store.replaceWithQueued(item, model: model)
+                    case .queue: break
+                    }
+                }
+            }
+            .id("queued-" + item.id)
+        }
+    }
+}
+
+enum AssistantPendingMode: String {
+    case queue, adjust, replace
+
+    var title: String {
+        switch self {
+        case .queue: "排队"
+        case .adjust: "插入调整"
+        case .replace: "停止并替换"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .queue: "text.badge.plus"
+        case .adjust: "arrow.turn.down.right"
+        case .replace: "arrow.triangle.2.circlepath"
+        }
+    }
+}
+
+private struct AssistantPendingBubble: View {
+    let text: String
+    /// 待处理（虚线描边）；开始执行或已并入当前任务后为实线、没有选择按钮。
+    let pending: Bool
+    let status: String
+    let mode: AssistantPendingMode
+    let busy: Bool
+    let canAdjust: Bool
+    let canReplace: Bool
+    let choose: (AssistantPendingMode) -> Void
+    @State private var confirmReplace = false
+
+    var body: some View {
+        VStack(alignment: .trailing, spacing: 6) {
+            Text(AssistantRedaction.text(text))
+                .textSelection(.enabled)
+                .privacySensitive()
+                .padding(14)
+                .background {
+                    let shape = RoundedRectangle(cornerRadius: 16)
+                    if pending {
+                        shape.strokeBorder(Color.accentColor.opacity(0.55), style: StrokeStyle(lineWidth: 1.2, dash: [5, 4]))
+                    } else {
+                        shape.fill(Color.accentColor.opacity(0.08))
+                    }
+                }
+                .accessibilityElement(children: .combine)
+                .accessibilityValue(pending ? "待处理" : "")
+                .accessibilityIdentifier(pending ? "assistant.message.pending" : "assistant.message.bubble")
+            HStack(spacing: 6) {
+                if busy { ProgressView().controlSize(.mini) }
+                Text(status)
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .accessibilityElement(children: .combine)
+            .accessibilityIdentifier("assistant.queue.status")
+            if pending {
+                HStack(spacing: 8) {
+                    chip(.queue, enabled: false)
+                    chip(.adjust, enabled: canAdjust && !busy)
+                    chip(.replace, enabled: canReplace && !busy)
+                }
+            }
+        }
+        .padding(.leading, 32)
+        .frame(maxWidth: .infinity, alignment: .trailing)
+        .animation(.easeInOut(duration: 0.2), value: pending)
+        .animation(.easeInOut(duration: 0.2), value: status)
+    }
+
+    private func chip(_ option: AssistantPendingMode, enabled: Bool) -> some View {
+        let selected = option == mode
+        return Button {
+            if option == .replace { confirmReplace = true } else { choose(option) }
+        } label: {
+            Label(option.title, systemImage: option.symbol)
+                .labelStyle(AssistantMessageActionStyle.Chip())
+                .font(.caption.weight(selected ? .semibold : .regular))
+                .foregroundStyle(selected ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
+                .padding(.horizontal, 10)
+                .frame(height: 28)
+                .background(Capsule().fill(selected ? AnyShapeStyle(Color.accentColor.opacity(0.14)) : AnyShapeStyle(Color(uiColor: .tertiarySystemFill))))
+                .frame(minHeight: 44)
+                .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        // 已选中的那一项保持可读（不置灰），其余在不可用时置灰。
+        .disabled(!enabled)
+        .opacity(enabled || selected ? 1 : 0.45)
+        .accessibilityValue(selected ? "已选中" : "")
+        .accessibilityAddTraits(selected ? .isSelected : [])
+        .accessibilityIdentifier("assistant.queue.\(option.rawValue)")
+        .confirmationDialog("停止当前任务并改为执行这条消息？", isPresented: option == .replace ? $confirmReplace : .constant(false), titleVisibility: .visible) {
+            Button("确认停止并替换", role: .destructive) { choose(.replace) }
+        } message: { Text("服务器会停止当前任务，并接着执行这条消息。已经执行的操作不会撤销。") }
+    }
+}
+
+extension AssistantMessageActionStyle {
+    /// 待处理气泡下的小胶囊：小图标＋文字。
+    struct Chip: LabelStyle {
+        func makeBody(configuration: Configuration) -> some View {
+            HStack(spacing: 4) {
+                configuration.icon.imageScale(.small)
+                configuration.title.lineLimit(1)
+            }
         }
     }
 }
@@ -865,9 +1119,12 @@ private struct AssistantSessionsView: View {
             isPresented: Binding(get: { pendingDelete?.id == item.id }, set: { if !$0 { pendingDelete = nil } }),
             titleVisibility: .visible,
             presenting: pendingDelete
-        ) { item in
+        ) { _ in
+            // 用本行自己的会话 ID：点按时 SwiftUI 会先把 pendingDelete 置空，不依赖呈现数据。
             Button("删除会话", role: .destructive) {
-                Task { await store.deleteSession(id: item.id, model: model) }
+                let id = item.id
+                pendingDelete = nil
+                Task { await store.deleteSession(id: id, model: model) }
             }
         } message: { item in
             Text("“\(AssistantRedaction.text(item.text("title").nilIfEmpty ?? "新会话"))”及其全部消息会从服务器删除，此操作不可撤销。")

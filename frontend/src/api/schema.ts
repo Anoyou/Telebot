@@ -3884,6 +3884,26 @@ export interface paths {
         patch: operations["update_system_agent_queue_item_api_system_agent_queue__turn_id__patch"];
         trace?: never;
     };
+    "/api/system-agent/queue/{turn_id}/replace": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Replace With System Agent Queue Item
+         * @description 停止当前任务，并让这条排队消息排到队首、作为替代任务执行（只提交一次，不自动重试）。
+         */
+        post: operations["replace_with_system_agent_queue_item_api_system_agent_queue__turn_id__replace_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/system-agent/queue/{turn_id}/steer": {
         parameters: {
             query?: never;
@@ -11494,6 +11514,11 @@ export interface components {
              * @default queued
              */
             phase: string;
+            /**
+             * Queue Ahead
+             * @description 排在该任务前面的任务数（同会话执行中的任务算 1 个，加上更早的排队项）；只在 queued 且确实需要等待时返回正整数，其余为 null。列表接口同样计算。
+             */
+            queue_ahead?: number | null;
             /** Run Id */
             run_id: string;
             /** Session Id */
@@ -26514,6 +26539,66 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SystemAgentQueueItemOut"];
+                };
+            };
+            /** @description 认证失败 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description CSRF 校验失败或权限不足 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description 服务器内部错误 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    replace_with_system_agent_queue_item_api_system_agent_queue__turn_id__replace_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                turn_id: string;
+            };
+            cookie?: {
+                auth_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SystemAgentRunOut"];
                 };
             };
             /** @description 认证失败 */

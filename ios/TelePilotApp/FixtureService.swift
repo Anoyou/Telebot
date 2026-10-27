@@ -31,6 +31,16 @@ actor FixtureService: AppServing {
     /// Cloudflare Access 界面测试：`--ui-test-cf-access` 时，没有任何 Access 凭证的登录会被 Access 拦截。
     private var accessConfig = CloudflareAccessConfig()
     private let accessRequired = ProcessInfo.processInfo.arguments.contains("--ui-test-cf-access")
+    /// 已删除的助手会话：列表不再返回，读取返回 404。
+    private var deletedSessions: Set<String> = []
+    /// 运行阶段与排队消息界面测试（`--ui-test-run-phases`）：第一条消息开始一个一直执行中的任务，
+    /// 进度流依次给出 run_started → provider_selected → model_attempt → tool_started；执行中再发的消息进入排队。
+    private let runPhases = ProcessInfo.processInfo.arguments.contains("--ui-test-run-phases")
+    private var phaseRunActive = false
+    private var phaseRunCancelRequested = false
+    private var phaseRunStartedAt: Date?
+    private var phaseQueue: [JSONValue] = []
+    private var phaseQueueSerial = 0
 
     init(offline: Bool = false) {
         self.offline = offline
@@ -197,7 +207,10 @@ actor FixtureService: AppServing {
 
     func request(path: String, method: String, body: JSONValue?) async throws -> JSONValue {
         try checkConnection()
-        let clean = String(path.split(separator: "?").first ?? "")
+        // 客户端把路径里的 ID 按 .alphanumerics 百分号编码（“fixture-session”会变成“fixture%2Dsession”），
+        // 与真实服务器一样先解码再匹配，否则按 ID 区分的界面测试数据（删除会话、运行阶段、排队消息）都不会命中。
+        let rawPath = String(path.split(separator: "?").first ?? "")
+        let clean = rawPath.removingPercentEncoding ?? rawPath
         if let value = fixtureValues[clean], method == "GET" { return value }
         if method == "GET" {
             let opsValue = Self.opsFixture(clean)
@@ -222,14 +235,24 @@ actor FixtureService: AppServing {
         }
         if clean == "/api/system-agent/checkup" { return Self.checkupFixture }
         if clean == "/api/system-agent/sessions", method == "POST" {
+            deletedSessions.remove("fixture-session")
             return ["id": "fixture-session", "title": body?["title"] ?? "新会话", "status": "active"]
         }
         if clean == "/api/system-agent/sessions" {
-            return [["id": "fixture-session", "title": "服务检查", "status": "active", "channel": "web"]]
+            // 删除后的会话不再出现在列表里（第八轮：删除最后一个会话后重进应显示空状态）。
+            return deletedSessions.contains("fixture-session") ? [] : [["id": "fixture-session", "title": "服务检查", "status": "active", "channel": "web"]]
         }
         if clean.hasPrefix("/api/system-agent/sessions/"), method == "DELETE" {
-            return ["ok": true, "deleted": .string(String(clean.dropFirst("/api/system-agent/sessions/".count)))]
+            let id = String(clean.dropFirst("/api/system-agent/sessions/".count))
+            deletedSessions.insert(id)
+            return ["ok": true, "deleted": .string(id)]
         }
+        if clean.hasPrefix("/api/system-agent/sessions/"),
+           let id = clean.dropFirst("/api/system-agent/sessions/".count).split(separator: "/").first.map(String.init),
+           deletedSessions.contains(id) {
+            throw APIError.server(status: 404, code: "SESSION_NOT_FOUND")
+        }
+        if runPhases, let response = runPhaseResponse(clean, path: path, method: method, body: body) { return response }
         if clean.hasSuffix("/messages"), ProcessInfo.processInfo.arguments.contains("--ui-test-long-history") {
             let before = URLComponents(string: path)?.queryItems?.first { $0.name == "before_id" }?.value.flatMap(Int.init)
             return Self.longHistoryPage(before: before)
@@ -254,7 +277,7 @@ actor FixtureService: AppServing {
             return ["id": "fixture-run", "session_id": "fixture-session", "status": "succeeded"]
         }
         if clean == "/api/system-agent/capabilities" {
-            return ["enabled": true, "model_matrix": [
+            return ["enabled": true, "provider_name": "测试供应商", "resolved_model": "openai/fixture-model", "model_matrix": [
                 ["provider_id": 1, "provider_name": "测试供应商", "model": "openai/fixture-model", "enabled": true],
                 ["provider_id": 1, "provider_name": "测试供应商", "model": "anthropic/fixture-model-with-a-much-longer-name", "enabled": true]
             ]]
@@ -591,8 +614,72 @@ actor FixtureService: AppServing {
         try await request(path: path, method: method, body: body).data()
     }
 
+    /// `--ui-test-run-phases`：任务、排队与进度流。只返回服务器真实会给的字段（status／phase／queue_ahead、事件类型）。
+    private func runPhaseResponse(_ clean: String, path: String, method: String, body: JSONValue?) -> JSONValue? {
+        // 与进度流同一节奏推进 phase（每 1.2 秒一个阶段），读取任务时不会“跑在”事件前面。
+        let elapsed = phaseRunStartedAt.map { Date().timeIntervalSince($0) } ?? 0
+        let phases = ["starting", "understanding", "selecting_model", "thinking", "using_tool"]
+        let phase = phases[min(phases.count - 1, Int(elapsed / 1.2))]
+        let activeRun: JSONValue = ["id": "fixture-run", "session_id": "fixture-session", "status": "running", "phase": .string(phase),
+                                    "cancel_requested": .bool(phaseRunCancelRequested), "last_seq": .integer(Int64(min(4, Int(elapsed / 1.2))))]
+        if clean == "/api/system-agent/sessions/fixture-session/runs", method == "POST" {
+            guard phaseRunActive else {
+                phaseRunActive = true
+                phaseRunStartedAt = Date()
+                // 刚创建、尚未开始执行：queued，没有排在前面的任务（queue_ahead 为空）。
+                return ["id": "fixture-run", "session_id": "fixture-session", "status": "queued", "phase": "queued", "last_seq": 0]
+            }
+            phaseQueueSerial += 1
+            let serial = phaseQueueSerial
+            phaseQueue.append(["id": .string("turn-\(serial)"), "session_id": "fixture-session", "run_id": .string("fixture-queued-\(serial)"),
+                               "channel": "web", "kind": "message", "position": .integer(Int64(serial)), "status": "pending",
+                               "content": body?["content"] ?? ""])
+            return ["id": .string("fixture-queued-\(serial)"), "session_id": "fixture-session", "status": "queued", "phase": "queued",
+                    "queue_ahead": .integer(Int64(phaseQueue.count)), "last_seq": 0]
+        }
+        if clean == "/api/system-agent/queue" { return .array(phaseQueue) }
+        if let match = clean.firstMatch(of: #/^\/api\/system-agent\/queue\/([^\/]+)\/(steer|replace)$/#), method == "POST" {
+            let turnID = String(match.1)
+            guard let index = phaseQueue.firstIndex(where: { $0["id"]?.stringValue == turnID }) else { return nil }
+            let item = phaseQueue[index]
+            if match.2 == "steer" {
+                phaseQueue.remove(at: index)
+                return ["id": 41, "run_id": "fixture-run", "kind": "steer", "status": "pending", "client_request_id": body?["client_request_id"] ?? ""]
+            }
+            phaseQueue.remove(at: index)
+            phaseQueue.insert(item, at: 0)
+            phaseRunCancelRequested = true
+            return ["id": item["run_id"] ?? "", "session_id": "fixture-session", "status": "queued", "phase": "queued", "queue_ahead": 1, "last_seq": 0]
+        }
+        if clean == "/api/system-agent/runs/fixture-run" { return phaseRunActive ? activeRun : nil }
+        if clean == "/api/system-agent/runs", phaseRunActive { return [activeRun] }
+        return nil
+    }
+
+    /// 进度流：每隔约 1.2 秒给出下一个阶段事件，之后保持连接（任务一直执行中），直到客户端取消订阅。
+    private func streamRunPhases(path: String, onEvent: @escaping @Sendable (JSONValue) async -> Void) async throws {
+        let after = URLComponents(string: path)?.queryItems?.first { $0.name == "after_seq" }?.value.flatMap(Int.init) ?? 0
+        let events: [JSONValue] = [
+            ["type": "run_started", "seq": 1, "run_id": "fixture-run"],
+            ["type": "provider_selected", "seq": 2, "run_id": "fixture-run", "provider_name": "测试供应商", "model": "openai/fixture-model"],
+            ["type": "model_attempt", "seq": 3, "run_id": "fixture-run", "attempt": 1],
+            ["type": "tool_started", "seq": 4, "run_id": "fixture-run", "tool_name": "accounts.list", "tool_description": "读取账号列表"]
+        ]
+        for event in events where (event["seq"]?.intValue ?? 0) > after {
+            try await Task.sleep(nanoseconds: 1_200_000_000)
+            await onEvent(event)
+        }
+        for _ in 0..<240 {
+            try await Task.sleep(nanoseconds: 500_000_000)
+        }
+    }
+
     func stream(path: String, onEvent: @escaping @Sendable (JSONValue) async -> Void) async throws {
         try checkConnection()
+        if runPhases, (path.removingPercentEncoding ?? path).contains("/runs/fixture-run/stream") {
+            try await streamRunPhases(path: path, onEvent: onEvent)
+            return
+        }
         await onEvent(["type": "assistant_message", "content": "服务器任务已完成。", "seq": 1, "run_id": "fixture-run"])
         await onEvent(["type": "done", "ok": true, "seq": 2, "run_id": "fixture-run"])
     }

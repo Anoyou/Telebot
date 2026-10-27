@@ -1174,6 +1174,124 @@ class SystemAgentRunManager:
             await db.refresh(item)
             return item
 
+    async def replace_with_queue_item(
+        self,
+        turn_id: str,
+        *,
+        web_user_id: int,
+    ) -> SystemAgentRun:
+        """原子地请求停止当前任务，并把这条 Web 排队消息移到队首，作为替代任务执行。
+
+        与 stop_and_replace 相同的停止语义，但不新建消息：排队消息原样保留（内容、图片、模型选择），
+        只调整位置；同一次请求只提交一次，当前任务已在停止时返回冲突，不重复停止。
+        """
+
+        await self.ensure_ready()
+        session_id = ""
+        current_was_running = False
+        current_id = ""
+        async with self._session_factory() as db:
+            snapshot_result = await db.execute(
+                select(SystemAgentPendingTurn).where(
+                    SystemAgentPendingTurn.id == turn_id,
+                    SystemAgentPendingTurn.web_user_id == web_user_id,
+                    SystemAgentPendingTurn.channel == CHANNEL_WEB,
+                )
+            )
+            snapshot = snapshot_result.scalar_one_or_none()
+            if snapshot is None:
+                raise RunNotFoundError(f"queue:{turn_id}")
+            session_id = snapshot.session_id
+            session_result = await db.execute(
+                select(SystemAgentSession)
+                .where(
+                    SystemAgentSession.id == session_id,
+                    SystemAgentSession.web_user_id == web_user_id,
+                )
+                .with_for_update()
+            )
+            if session_result.scalar_one_or_none() is None:
+                raise RunNotFoundError(f"queue:{turn_id}")
+            pending_result = await db.execute(
+                select(SystemAgentPendingTurn)
+                .where(
+                    SystemAgentPendingTurn.id == turn_id,
+                    SystemAgentPendingTurn.web_user_id == web_user_id,
+                    SystemAgentPendingTurn.channel == CHANNEL_WEB,
+                )
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+            pending = pending_result.scalar_one_or_none()
+            if pending is None or pending.status not in {
+                PENDING_TURN_PENDING,
+                PENDING_TURN_PAUSED,
+            }:
+                raise RunNotFoundError(f"queue:{turn_id}")
+            queued_run = await db.get(
+                SystemAgentRun,
+                pending.dispatch_run_id,
+                with_for_update=True,
+            )
+            if queued_run is None or queued_run.status != AGENT_RUN_QUEUED:
+                raise RunNotFoundError(f"queue:{turn_id}")
+            active_result = await db.execute(
+                select(SystemAgentRun)
+                .where(
+                    SystemAgentRun.session_id == session_id,
+                    SystemAgentRun.web_user_id == web_user_id,
+                    SystemAgentRun.channel == CHANNEL_WEB,
+                    SystemAgentRun.id != queued_run.id,
+                    SystemAgentRun.status.in_(
+                        {
+                            AGENT_RUN_RUNNING,
+                            AGENT_RUN_WAITING_INPUT,
+                            AGENT_RUN_WAITING_APPROVAL,
+                        }
+                    ),
+                )
+                .order_by(desc(SystemAgentRun.started_at), desc(SystemAgentRun.created_at))
+                .with_for_update()
+            )
+            current = active_result.scalars().first()
+            if current is None:
+                raise RunConflictError("当前没有可停止的任务，这条消息会按顺序执行")
+            if current.cancel_requested:
+                raise RunConflictError("当前任务已在停止，不能重复提交停止并替换")
+            minimum_result = await db.execute(
+                select(func.min(SystemAgentPendingTurn.position)).where(
+                    SystemAgentPendingTurn.session_id == session_id
+                )
+            )
+            now = datetime.now(UTC)
+            pending.position = int(minimum_result.scalar_one_or_none() or 0) - 1
+            pending.status = PENDING_TURN_PENDING
+            pending.blocked_reason = None
+            pending.updated_at = now
+            current_id = current.id
+            current_was_running = current.status == AGENT_RUN_RUNNING
+            current.paused_reason = "stop_replace"
+            current.cancel_requested = True
+            current.updated_at = now
+            if not current_was_running:
+                await self._cancel_without_worker(db, current)
+                current.paused_reason = "stop_replace"
+                await self._set_following_queue_state(
+                    db,
+                    session_id=session_id,
+                    resume=True,
+                    reason=None,
+                )
+            await db.commit()
+            await db.refresh(queued_run)
+
+        cancel_event = self._cancel_events.get(current_id)
+        if cancel_event is not None:
+            cancel_event.set()
+        if not current_was_running:
+            self._kick_session(session_id)
+        return queued_run
+
     async def reorder_queue(
         self,
         *,
@@ -1453,6 +1571,55 @@ class SystemAgentRunManager:
             if not has_active and earlier_count == 0:
                 return None
             return earlier_count + 1
+
+    async def get_queue_ahead(self, run_id: str) -> int | None:
+        """返回排在该 Run 前面的任务数（同会话正在执行／等待中的任务算 1 个，加上更早的排队项）。
+
+        只对 queued 且确实需要等待的 Run 返回正整数；已开始、可立即执行或不存在等待项时返回 None。
+        客户端据此显示“排队中（前面 N 个）”，没有排队时不显示“排队中”。
+        """
+
+        await self.ensure_ready()
+        async with self._session_factory() as db:
+            run = await db.get(SystemAgentRun, run_id)
+            if run is None:
+                raise RunNotFoundError(run_id)
+            if run.status != AGENT_RUN_QUEUED or run.pending_turn_id is None:
+                return None
+            pending = await db.get(SystemAgentPendingTurn, run.pending_turn_id)
+            if pending is None or pending.status not in {
+                PENDING_TURN_PENDING,
+                PENDING_TURN_PAUSED,
+            }:
+                return None
+            active_result = await db.execute(
+                select(func.count(SystemAgentRun.id)).where(
+                    SystemAgentRun.session_id == run.session_id,
+                    SystemAgentRun.id != run.id,
+                    SystemAgentRun.status.in_(
+                        {
+                            AGENT_RUN_RUNNING,
+                            AGENT_RUN_WAITING_INPUT,
+                            AGENT_RUN_WAITING_APPROVAL,
+                        }
+                    ),
+                )
+            )
+            earlier_result = await db.execute(
+                select(func.count(SystemAgentPendingTurn.id)).where(
+                    SystemAgentPendingTurn.session_id == run.session_id,
+                    SystemAgentPendingTurn.status.in_(
+                        {
+                            PENDING_TURN_PENDING,
+                            PENDING_TURN_PAUSED,
+                        }
+                    ),
+                    SystemAgentPendingTurn.id != pending.id,
+                    SystemAgentPendingTurn.position < pending.position,
+                )
+            )
+            ahead = int(active_result.scalar_one() or 0) + int(earlier_result.scalar_one() or 0)
+            return ahead or None
 
     async def add_run_input(
         self,

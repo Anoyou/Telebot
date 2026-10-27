@@ -4,6 +4,7 @@ import test from "node:test";
 import type { SystemAgentQueueItem, SystemAgentRun } from "../../api/systemAgent.ts";
 import {
   classifySystemAgentRunSettlement,
+  runPhaseLabel,
   sessionRunStatusById,
   sortSystemAgentQueue,
   sortSystemAgentRuns,
@@ -141,4 +142,12 @@ test("任务中心只保留同一消息最新且未解决的失败", () => {
     ),
     [],
   );
+});
+
+test("runPhaseLabel 只在真的排队时显示排队中，执行中按服务器阶段显示", () => {
+  assert.equal(runPhaseLabel({ status: "queued", kind: "message", queue_ahead: 2 }), "排队中 · 前面 2 个");
+  assert.equal(runPhaseLabel({ status: "queued", kind: "message", queue_ahead: null }), "正在开始");
+  assert.equal(runPhaseLabel({ status: "running", kind: "message", phase: "using_tool" }), "调用工具");
+  assert.equal(runPhaseLabel({ status: "running", kind: "message", phase: "responding" }), "生成回复");
+  assert.equal(runPhaseLabel({ status: "waiting_input", kind: "message", phase: "paused" }), "等待补充信息");
 });

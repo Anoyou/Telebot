@@ -18539,6 +18539,18 @@
             "title": "Phase",
             "type": "string"
           },
+          "queue_ahead": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "排在该任务前面的任务数（同会话执行中的任务算 1 个，加上更早的排队项）；只在 queued 且确实需要等待时返回正整数，其余为 null。列表接口同样计算。",
+            "title": "Queue Ahead"
+          },
           "run_id": {
             "title": "Run Id",
             "type": "string"
@@ -20937,7 +20949,7 @@
   },
   "info": {
     "title": "TelePilot",
-    "version": "0.106.0-beta.9"
+    "version": "0.106.0-beta.10"
   },
   "openapi": "3.1.0",
   "paths": {
@@ -45638,6 +45650,103 @@
           }
         ],
         "summary": "Update System Agent Queue Item",
+        "tags": [
+          "system-agent"
+        ]
+      }
+    },
+    "/api/system-agent/queue/{turn_id}/replace": {
+      "post": {
+        "description": "停止当前任务，并让这条排队消息排到队首、作为替代任务执行（只提交一次，不自动重试）。",
+        "operationId": "replace_with_system_agent_queue_item_api_system_agent_queue__turn_id__replace_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "turn_id",
+            "required": true,
+            "schema": {
+              "title": "Turn Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "auth_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Auth Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SystemAgentRunOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "认证失败"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "CSRF 校验失败或权限不足"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "服务器内部错误"
+          }
+        },
+        "security": [
+          {
+            "AuthCookie": [],
+            "CsrfCookie": [],
+            "CsrfHeader": [],
+            "RequestedWith": []
+          }
+        ],
+        "summary": "Replace With System Agent Queue Item",
         "tags": [
           "system-agent"
         ]

@@ -27,9 +27,10 @@ import {
 } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
-import { sortSystemAgentQueue, taskCenterVisibleRuns } from "./taskCenterState";
+import { runPhaseLabel, sortSystemAgentQueue, taskCenterVisibleRuns } from "./taskCenterState";
 
 const DISMISSED_RUNS_KEY = "telepilot.system-agent.dismissed-task-runs.v1";
+
 
 function readDismissedRunIds(): Set<string> {
   try {
@@ -193,7 +194,7 @@ export function TaskCenter({
                           {sessionTitles.get(run.session_id) || run.session_id.slice(0, 8)}
                         </span>
                         <span className="block truncate text-[10px] text-muted-foreground">
-                          {run.phase || run.kind}
+                          {runPhaseLabel(run)}
                           {run.error_message ? ` · ${run.error_message}` : ""}
                         </span>
                       </span>

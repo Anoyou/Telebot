@@ -139,6 +139,18 @@ def _run_out(row: Any) -> SystemAgentRunOut:
     return SystemAgentRunOut.model_validate(row)
 
 
+async def _run_out_live(row: Any) -> SystemAgentRunOut:
+    """带排队信息的 Run：queued 时补上前面还有几个任务（queue_ahead），供客户端如实显示排队状态。"""
+
+    out = _run_out(row)
+    if out.status == "queued":
+        try:
+            out.queue_ahead = await get_system_agent_run_manager().get_queue_ahead(out.id)
+        except RunNotFoundError:
+            out.queue_ahead = None
+    return out
+
+
 async def _owned_run(db: DBSession, run_id: str, web_user_id: int) -> SystemAgentRun:
     result = await db.execute(
         select(SystemAgentRun).where(
@@ -650,7 +662,7 @@ async def list_system_agent_runs(
     if isinstance(session_id, str) and session_id:
         kwargs["session_id"] = session_id
     rows = await get_system_agent_run_manager().list_runs(**kwargs)
-    return [_run_out(row) for row in rows]
+    return [await _run_out_live(row) for row in rows]
 
 
 @router.get("/queue", response_model=list[SystemAgentQueueItemOut])
@@ -723,6 +735,29 @@ async def steer_system_agent_queue_item(
     except RunConflictError as exc:
         raise _err("QUEUE_STEER_CONFLICT", str(exc), 409) from None
     return SystemAgentRunInputOut.model_validate(row)
+
+
+@router.post("/queue/{turn_id}/replace", response_model=SystemAgentRunOut)
+async def replace_with_system_agent_queue_item(
+    turn_id: str,
+    user: CurrentUser,
+) -> SystemAgentRunOut:
+    """停止当前任务，并让这条排队消息排到队首、作为替代任务执行（只提交一次，不自动重试）。"""
+
+    try:
+        row = await get_system_agent_run_manager().replace_with_queue_item(
+            turn_id,
+            web_user_id=user.id,
+        )
+    except RunNotFoundError:
+        raise _err(
+            "QUEUE_ITEM_NOT_FOUND",
+            "排队消息不存在或已开始执行",
+            404,
+        ) from None
+    except RunConflictError as exc:
+        raise _err("QUEUE_REPLACE_CONFLICT", str(exc), 409) from None
+    return await _run_out_live(row)
 
 
 @router.post(
@@ -823,7 +858,7 @@ async def start_system_agent_run(
         )
     except RunConflictError as exc:
         raise _err("RUN_CONFLICT", str(exc), 409) from None
-    return _run_out(row)
+    return await _run_out_live(row)
 
 
 @router.post(
@@ -865,7 +900,7 @@ async def start_system_agent_retry_run(
         )
     except RunConflictError as exc:
         raise _err("RUN_CONFLICT", str(exc), 409) from None
-    return _run_out(row)
+    return await _run_out_live(row)
 
 
 @router.post(
@@ -927,7 +962,7 @@ async def start_system_agent_regenerate_run(
         )
     except RunConflictError as exc:
         raise _err("MESSAGE_NOT_REGENERATABLE", str(exc), 409) from None
-    return _run_out(row)
+    return await _run_out_live(row)
 
 
 @router.get("/runs/{run_id}", response_model=SystemAgentRunOut)
@@ -941,7 +976,7 @@ async def get_system_agent_run(
         row = await get_system_agent_run_manager().get_run(run_id)
     except RunNotFoundError:
         raise _err("RUN_NOT_FOUND", "助手运行不存在", 404) from None
-    return _run_out(row)
+    return await _run_out_live(row)
 
 
 @router.get("/runs/{run_id}/events", response_model=list[SystemAgentRunEventOut])
@@ -1101,7 +1136,7 @@ async def stop_and_replace_system_agent_run(
         raise _err("RUN_NOT_FOUND", "助手运行不存在", 404) from None
     except RunConflictError as exc:
         raise _err("RUN_CONFLICT", str(exc), 409) from None
-    return _run_out(row)
+    return await _run_out_live(row)
 
 
 @router.post("/runs/{run_id}/cancel", response_model=SystemAgentRunOut)
