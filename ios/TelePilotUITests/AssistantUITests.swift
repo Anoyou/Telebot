@@ -321,7 +321,13 @@ final class AssistantUITests: XCTestCase {
         XCTAssertNotNil(lastCopy)
         guard let lastCopy else { return }
         XCTAssertEqual(lastCopy.label, "复制回复")
-        XCTAssertEqual(lastCopy.frame.minX, answer.frame.minX, accuracy: 2.5, "复制 \(lastCopy.frame) 正文 \(answer.frame)")
+        let bodies = app.descendants(matching: .any).matching(identifier: "assistant.reply.body")
+        let body = bodies.allElementsBoundByIndex.last { $0.frame.contains(CGPoint(x: answer.frame.midX, y: answer.frame.midY)) }
+        XCTAssertNotNil(body, visibleTexts(app))
+        if let body {
+            XCTAssertEqual(lastCopy.frame.minX, body.frame.minX, accuracy: 2.5, "复制 \(lastCopy.frame) 正文 \(body.frame)")
+            XCTAssertGreaterThanOrEqual(lastCopy.frame.minY, body.frame.maxY - 0.5)
+        }
         XCTAssertGreaterThan(regenerate.frame.minY, answer.frame.maxY)
         XCTAssertGreaterThanOrEqual(regenerate.frame.minX - lastCopy.frame.maxX, 16, "按钮间距过小")
         // 复制回复：轻量反馈（图标短暂变为对勾，VoiceOver 读“已复制”）。
