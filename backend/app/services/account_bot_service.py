@@ -2290,7 +2290,13 @@ async def answer_guest_query(
         "guest_query_id": str(guest_query_id),
         "result": dict(result),
     }
-    return await _call_rich_bot_api(token, "answerGuestQuery", payload, timeout=httpx.Timeout(15.0))
+    sent = await _call_rich_bot_api(token, "answerGuestQuery", payload, timeout=httpx.Timeout(15.0))
+    if isinstance(sent, dict) and sent.get("inline_message_id"):
+        # 记下 inline_message_id → 原访客会话，供之后的 inline callback 投递带上（best-effort）。
+        from .interaction.guest_reply import link_guest_inline_origin  # noqa: PLC0415
+
+        await link_guest_inline_origin(token, str(guest_query_id), str(sent.get("inline_message_id")))
+    return sent
 
 
 _BOT_CAPABILITIES_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}

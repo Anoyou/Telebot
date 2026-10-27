@@ -26,6 +26,9 @@ class BufferedMessageOps:
     rich_table_compact = True
     # 能力标记（0.106.0-beta.15+）：平台发送时给所有 rich_message 表格默认补边框 + 隔行着色。
     rich_table_default_style = True
+    # 能力标记（0.106.0-beta.17+）：answer_guest_query 的 reply_markup 保留 callback_data 按钮，
+    # 访客回复上的按钮点击以 inline callback 投递给订阅 callback_query（scope guest_all）的插件。
+    guest_reply_markup = True
 
     async def send(
         self,
@@ -424,6 +427,9 @@ class BufferedMessageOps:
         ``text`` / ``rich_message``，也可以传完整的 ``InlineQueryResult``（``result``）。
         访客事件里直接 ``send`` / ``send_rich`` 也会被平台合并为一次访客回复，
         只有需要自定义结果类型时才必须使用本方法。
+
+        ``reply_markup`` 的 ``callback_data`` 按钮从 0.106.0-beta.17 起原样保留（``guest_reply_markup``）；
+        实时 ``ctx.messages.apply`` 的批次结果带回 ``inline_message_id``。
         """
 
         action: dict[str, Any] = {

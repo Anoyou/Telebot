@@ -104,7 +104,9 @@ from .interaction.guest_reply import (
     GUEST_REASON_RATE_LIMITED,
     GuestReplyBuffer,
     flush_guest_reply,
+    guest_inline_origin,
     guest_rate_limiter,
+    remember_guest_query_origin,
     strip_guest_bot_mentions,
 )
 from .interaction.rpc_broker import get_interaction_rpc_broker, new_reply_channel
@@ -952,6 +954,11 @@ class Incoming:
     chat_type: str | None = None
     callback_id: str | None = None
     callback_data: str | None = None
+    # inline 消息（inline 模式结果 / 访客模式回复）上的按钮：Telegram 只给 inline_message_id，
+    # chat_id / message_id 为空；inline_origin 是平台记下的原访客会话（可能为 None）。
+    inline_message_id: str | None = None
+    chat_instance: str | None = None
+    inline_origin: dict[str, Any] | None = None
     inline_query_id: str | None = None
     inline_query_text: str | None = None
     inline_offset: str | None = None
@@ -2629,6 +2636,17 @@ async def _prepare_guest_incoming(incoming: Incoming, flags: dict[str, bool], *,
         )
         return False
     incoming.guest_reply = GuestReplyBuffer(query_id=incoming.guest_query_id)
+    # 记下原访客会话：之后访客回复上的按钮被点击时，inline callback 投递可带上来源。
+    await remember_guest_query_origin(
+        incoming.token,
+        incoming.guest_query_id,
+        {
+            "chat_id": incoming.chat_id,
+            "chat_type": incoming.chat_type,
+            "caller_user_id": incoming.user_id,
+            "message_id": incoming.message_id,
+        },
+    )
     return True
 
 
@@ -5891,6 +5909,8 @@ async def _try_handle_event_bus_subscriptions(
             message="没有已启用插件声明 Event Bus 订阅。",
         )
         return False, True
+    if incoming.inline_message_id and incoming.inline_origin is None:
+        incoming.inline_origin = await guest_inline_origin(incoming.token, incoming.inline_message_id)
     event = _incoming_trace_payload(incoming)
     event["trace_id"] = incoming.trace_id
     account_state = await _event_bus_account_state(db, incoming, cfg)
@@ -6425,6 +6445,9 @@ def _event_bus_plugin_payload(incoming: Incoming, event: dict[str, Any], decisio
     payload["message_text"] = incoming.text
     payload["callback_query_id"] = incoming.callback_id
     payload["callback_data"] = incoming.callback_data
+    if incoming.inline_message_id:
+        # inline 消息（含访客回复）上的按钮：chat_id / message 为空，按 inline_message_id 编辑。
+        payload["inline_message_id"] = incoming.inline_message_id
     payload["sender_user_id"] = incoming.user_id
     payload["sender_name"] = incoming.display_name
     payload["sender_username"] = incoming.username
@@ -7747,6 +7770,10 @@ def _incoming_trace_payload(
             source["guest_query_id"] = incoming.guest_query_id
             raw["guest_query_id"] = incoming.guest_query_id
             payload["guest"] = _incoming_guest_envelope(incoming)
+        if incoming.inline_message_id:
+            source["inline_message_id"] = incoming.inline_message_id
+            raw["inline_message_id"] = incoming.inline_message_id
+            payload["inline_callback"] = _incoming_inline_callback_envelope(incoming)
         return payload
     fallback: dict[str, Any] = {
         "trace_id": incoming.trace_id,
@@ -7822,7 +7849,29 @@ def _incoming_trace_payload(
         fallback["source"]["guest_query_id"] = incoming.guest_query_id
         fallback["raw"]["guest_query_id"] = incoming.guest_query_id
         fallback["guest"] = _incoming_guest_envelope(incoming)
+    if incoming.inline_message_id:
+        fallback["source"]["inline_message_id"] = incoming.inline_message_id
+        fallback["raw"]["inline_message_id"] = incoming.inline_message_id
+        fallback["inline_callback"] = _incoming_inline_callback_envelope(incoming)
     return fallback
+
+
+def _incoming_inline_callback_envelope(incoming: Incoming) -> dict[str, Any]:
+    """Event Bus ``inline_callback`` 字段：inline 消息（含访客回复）上的按钮点击。
+
+    没有 chat / message；按 ``inline_message_id`` 编辑原消息（``edit_message(inline_message_id=...)``）。
+    ``clicker_user_id`` 是点击者（同 ``sender.user_id``）；``origin`` 是平台记下的原访客会话
+    （guest_query_id / chat_id / chat_type / caller_user_id / message_id，没有记录时为 None），
+    其中 ``caller_user_id`` 是当初 @Bot 的访客，不是点击者，不能当作点击者身份。
+    """
+
+    return {
+        "inline_message_id": incoming.inline_message_id,
+        "chat_instance": incoming.chat_instance,
+        "data": incoming.callback_data,
+        "clicker_user_id": incoming.user_id,
+        "origin": dict(incoming.inline_origin) if isinstance(incoming.inline_origin, dict) else None,
+    }
 
 
 def _incoming_guest_envelope(incoming: Incoming) -> dict[str, Any]:
@@ -8896,6 +8945,8 @@ def _extract_incoming(aid: int, token: str, update: dict[str, Any]) -> Incoming 
             text=str(msg.get("text") or msg.get("caption") or "").strip(),
             callback_id=str(cq.get("id") or ""),
             callback_data=str(cq.get("data") or ""),
+            inline_message_id=str(cq.get("inline_message_id") or "").strip() or None,
+            chat_instance=str(cq.get("chat_instance") or "").strip() or None,
             event_type="callback_query",
             display_name=_format_user_name(from_user),
             username=str(from_user.get("username") or "").strip() or None,
