@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import inspect
+import logging
 import time
 import weakref
 from collections.abc import Awaitable, Mapping
@@ -18,6 +19,11 @@ except ImportError:  # pragma: no cover - production dependency, retained for st
     _tl_functions = None
     _tl_types = None
 
+from .rich_compact import (
+    is_compact_unsupported_error,
+    rich_message_has_compact_tables,
+    strip_compact_tables,
+)
 from .rich_message import (
     InputRichMessage,
     RichMessageFormat,
@@ -26,6 +32,8 @@ from .rich_message import (
 )
 from .telegram_reply import ReplyParameters
 from .telegram_text import UnsupportedRichBlock, text_only_blocks_to_html
+
+log = logging.getLogger(__name__)
 
 # Rich Message raw API 的最低层要求（能力门是 ``layer < 该值`` 才报 too_old），
 # 不是对上游 Telethon 版本/Layer 的锁定：更高的 Layer 直接放行。
@@ -340,14 +348,17 @@ async def send_rich_message(
             if reply_to_id is not None
             else None
         )
-        request = _tl_functions.messages.SendMessageRequest(
-            peer=input_peer,
-            message="",
-            reply_to=reply_to,
-            reply_markup=reply_markup,
-            rich_message=raw_rich_message,
-        )
-        response = await _maybe_await(client(request))
+
+        def _request(rich: Any) -> Any:
+            return _tl_functions.messages.SendMessageRequest(
+                peer=input_peer,
+                message="",
+                reply_to=reply_to,
+                reply_markup=reply_markup,
+                rich_message=rich,
+            )
+
+        response = await _call_with_compact_fallback(client, _request, raw_rich_message, normalized)
     except UserbotRichMessageError:
         raise
     except Exception as exc:  # noqa: BLE001 - normalize Telethon RPC/serialization errors
@@ -386,13 +397,16 @@ async def edit_rich_message(
 
     try:
         input_peer = await _resolve_input_peer(client, peer)
-        request = _tl_functions.messages.EditMessageRequest(
-            peer=input_peer,
-            id=target_message_id,
-            reply_markup=reply_markup,
-            rich_message=raw_rich_message,
-        )
-        response = await _maybe_await(client(request))
+
+        def _request(rich: Any) -> Any:
+            return _tl_functions.messages.EditMessageRequest(
+                peer=input_peer,
+                id=target_message_id,
+                reply_markup=reply_markup,
+                rich_message=rich,
+            )
+
+        response = await _call_with_compact_fallback(client, _request, raw_rich_message, normalized)
     except UserbotRichMessageError:
         raise
     except Exception as exc:  # noqa: BLE001 - normalize Telethon RPC/serialization errors
@@ -459,6 +473,31 @@ async def send_rich_message_draft(
         "actual_send_via": "userbot_reply",
         "ephemeral": True,
     }
+
+
+async def _call_with_compact_fallback(
+    client: Any,
+    build_request: Any,
+    raw_rich_message: Any,
+    normalized: InputRichMessage,
+) -> Any:
+    """执行请求；服务器以 400 拒绝紧凑表格（旧 layer）时去掉 compact 重发一次。
+
+    只在 Telegram 明确返回 400 RPC 错误（请求未生效）时降级，网络错误、超时与
+    限流照常抛出，不会重复投递。
+    """
+
+    try:
+        return await _maybe_await(client(build_request(raw_rich_message)))
+    except Exception as exc:
+        neutral = normalized.to_dict()
+        if getattr(exc, "code", None) != 400 or not rich_message_has_compact_tables(neutral):
+            raise
+        if not is_compact_unsupported_error(f"Bad Request: {type(exc).__name__}: {exc}"):
+            raise
+        log.warning("Userbot Rich Message 紧凑表格被拒绝（旧 layer），去掉 compact 后重发一次：%s", type(exc).__name__)
+        fallback = build_telethon_input_rich_message(strip_compact_tables(neutral))
+        return await _maybe_await(client(build_request(fallback)))
 
 
 def _build_neutral_input(raw: Any) -> InputRichMessage:

@@ -125,6 +125,7 @@ from ...services.interaction.delivery import (
 )
 from ...services.rate_limit_service import get_effective
 from ...services.redactor import redact_text
+from ...services.rich_compact import COMPACT_TABLES_ACTION_KEY, apply_compact_tables
 from ...settings import settings as app_settings
 from ...util.sudo_permissions import sudo_chat_allowed
 from ..command import (
@@ -6345,6 +6346,9 @@ class _LiveMessageOps:
     # 并在结果的 ``errors`` 里带回失败原因；beta.2 只有返回动作链路支持，实时 apply 会报
     # target_message_id_missing。插件据此判断能否“🤔 占位后 Rich 编辑”。
     live_inline_edit = True
+    # 0.106.0-beta.12 起：send_rich / edit_rich / answer_guest_query 支持 compact_tables=True，
+    # 动作字典可带 ``compact_tables: true``（Bot API 10.3 紧凑表格）。插件据此判断能否使用。
+    rich_table_compact = True
 
     def __init__(
         self,
@@ -9295,7 +9299,26 @@ def _normalize_interaction_action(
             action["channel_selector"] = raw_channel_selector
     if isinstance(action.get("settlement"), dict):
         action["settlement"] = dict(action["settlement"])
+    if COMPACT_TABLES_ACTION_KEY in action:
+        _apply_action_compact_tables(action)
     return action
+
+
+def _apply_action_compact_tables(action: dict[str, Any]) -> None:
+    """``compact_tables: true``（Bot API 10.3）→ 把 rich_message 里的表格改为紧凑表格。
+
+    动作级开关只在平台内部消费，不会透传给 Telegram；未设置或非 True 时 rich_message
+    保持原样（与旧版本字节级一致）。
+    """
+
+    enabled = action.pop(COMPACT_TABLES_ACTION_KEY, None) is True
+    rich_message = action.get("rich_message")
+    if not enabled or not isinstance(rich_message, dict):
+        return
+    try:
+        action["rich_message"] = apply_compact_tables(rich_message)
+    except Exception:  # noqa: BLE001 - 紧凑排版只是格式增强，失败时保持原样发送
+        log.warning("compact_tables 转换失败，按原样发送 rich_message", exc_info=True)
 
 
 def _raw_interaction_channel_selector(action: dict[str, Any]) -> Any:

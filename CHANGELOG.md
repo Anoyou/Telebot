@@ -25,6 +25,15 @@
 
 ## [Unreleased]
 
+## [0.106.0-beta.12] - 2026-10-28 · patch（补丁预发布） · 接入 Bot API 10.3 紧凑富文本表格（is_compact）；含 iOS 0.13.4 / 0.13.5
+
+### 插件与 Rich Message
+
+- 接入 Telegram Bot API 10.3 紧凑表格：`InputRichBlockTable` / `RichBlockTable` 的 `is_compact`（True，可选，单元格内边距更小）与 Rich HTML 的 `<table compact>`。显式传入的 `is_compact` 原样透传（非布尔值报校验错误），接收到的 `RichBlockTable.is_compact` 原样保留。
+- 插件 `ctx.messages.send_rich()` / `edit_rich()` / `answer_guest_query()` 新增 `compact_tables=True`，标准动作（`send_rich_message`、`edit_message.rich_message`、`answer_guest_query.rich_message`）可带 `compact_tables: true`：blocks 中的表格加 `is_compact: true`，HTML 的 `<table>` 加 `compact`，Markdown 管道表格转为 `<table compact>` HTML 块（单元格内联 Markdown 转为 HTML，官方说明 Markdown 不在块级 HTML 内解析；代码块不处理）。开关由平台消费、不发给 Telegram；未设置或为 false 时输出与旧版字节级一致，平台不会发送 `is_compact: false`。
+- 新增能力标记 `ctx.messages.rich_table_compact = True`，插件据此判断平台是否支持（旧平台没有该属性）。
+- 安全回退：自建或旧版 Bot API 服务器以 `Bad Request` 明确拒绝带紧凑表格的 sendRichMessage / sendRichMessageDraft / editMessageText（含 inline）/ answerGuestQuery 时，去掉紧凑标记重发一次并记日志；Userbot（Layer 228+）收到 400 RPC 错误时同样降级一次。这是格式降级而非写操作重试：网络错误、超时、5xx、限流与“消息未修改”都不会触发，不会重复投递。
+
 ### 界面
 
 - 模型家族识别补齐服务器 9 个供应商的 238 个模型标识：新增腾讯混元（hy3）、小米 MiMo、阶跃星辰（step）、美团 LongCat、蚂蚁百灵（ling/ring）、快手 KAT（kat-coder）、IBM（granite）、Liquid AI（lfm）、Upstage（solar）、Writer（palmyra）、Reka、Inception（mercury）、小红书 dots、Arcee（trinity）、Sakana AI（fugu）、Poolside（laguna）、Thinking Machines（inkling）、TypeSafe（jev）、Agnes AI、AionLabs、Nex AGI、Perceptron 等家族与 logo（lobe-icons，MIT）；修正 NVIDIA Nemotron 识别拼写，OpenAI 覆盖 gpt-audio/gpt-latest/codex，Google 增加 Lyria，Meta 增加 Muse Spark/Glimmer，Cohere 增加 North；OpenRouter 的 free/fusion/pareto-code 路由显示 OpenRouter。无法识别时显示“其他”。

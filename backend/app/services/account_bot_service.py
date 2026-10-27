@@ -8,6 +8,7 @@ import json
 import logging
 import re
 import time
+from copy import deepcopy
 from hmac import compare_digest
 from html import escape, unescape
 from html.parser import HTMLParser
@@ -55,6 +56,11 @@ from ..schemas.account_bot import (
 from ..settings import settings
 from .event_bus import VALID_EVENT_TYPES
 from .interaction.contracts import send_via_selector_options, unsupported_send_via_values
+from .rich_compact import (
+    is_compact_unsupported_error,
+    rich_message_has_compact_tables,
+    strip_compact_tables,
+)
 from .rich_message import normalize_rich_message as _normalize_rich_message
 from .telegram_reply import ReplyParameters
 
@@ -1878,6 +1884,52 @@ def normalize_rich_message(raw: Any) -> dict[str, Any]:
     return _normalize_rich_message(raw, text_limit_unit="characters")
 
 
+async def _call_rich_bot_api(
+    token: str,
+    method: str,
+    payload: dict[str, Any],
+    *,
+    timeout: httpx.Timeout | None = None,
+) -> dict[str, Any]:
+    """调用带 rich_message 的 Bot API；紧凑表格被旧版 Bot API 拒绝时去掉后重发一次。
+
+    Bot API 10.3 才有 ``is_compact`` / ``<table compact>``。自建或旧版 Bot API 服务器
+    明确拒绝（``Bad Request``，请求未生效）且本次 rich_message 确实带紧凑表格时，
+    去掉紧凑标记再发一次——这是格式降级，不是写操作重试：网络错误、超时、5xx、
+    限流都不会触发，因此不会重复投递。
+    """
+
+    extra: dict[str, Any] = {"timeout": timeout} if timeout is not None else {}
+    try:
+        return await call_bot_api(token, method, payload, **extra)
+    except RuntimeError as exc:
+        payload = deepcopy(payload)  # 不改动调用方对象（访客候选结果会复用）
+        located = _locate_rich_message(payload)
+        if located is None or not is_compact_unsupported_error(exc):
+            raise
+        container, rich_message = located
+        if not rich_message_has_compact_tables(rich_message):
+            raise
+        log.warning(
+            "Bot API %s 拒绝紧凑表格（is_compact / compact，Bot API 10.3），去掉后重发一次：%s",
+            method,
+            sanitize_bot_error(exc, token=token),
+        )
+        container["rich_message"] = strip_compact_tables(rich_message)
+        return await call_bot_api(token, method, payload, **extra)
+
+
+def _locate_rich_message(payload: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]] | None:
+    rich_message = payload.get("rich_message")
+    if isinstance(rich_message, dict):
+        return payload, rich_message
+    result = payload.get("result")
+    content = result.get("input_message_content") if isinstance(result, dict) else None
+    if isinstance(content, dict) and isinstance(content.get("rich_message"), dict):
+        return content, content["rich_message"]
+    return None
+
+
 async def send_rich_message(
     token: str,
     chat_id: int,
@@ -1901,7 +1953,7 @@ async def send_rich_message(
                 allow_sending_without_reply=True,
             ).to_bot_api()
         )
-    return await call_bot_api(token, "sendRichMessage", payload)
+    return await _call_rich_bot_api(token, "sendRichMessage", payload)
 
 
 async def send_rich_message_draft(
@@ -1923,7 +1975,7 @@ async def send_rich_message_draft(
     }
     if message_thread_id is not None:
         payload["message_thread_id"] = message_thread_id
-    return await call_bot_api(token, "sendRichMessageDraft", payload)
+    return await _call_rich_bot_api(token, "sendRichMessageDraft", payload)
 
 
 async def send_photo_bytes(
@@ -2097,7 +2149,7 @@ async def edit_rich_message(
     }
     if reply_markup is not None:
         payload["reply_markup"] = reply_markup
-    return await call_bot_api(token, "editMessageText", payload)
+    return await _call_rich_bot_api(token, "editMessageText", payload)
 
 
 async def edit_inline_rich_message(
@@ -2119,7 +2171,7 @@ async def edit_inline_rich_message(
     }
     if reply_markup is not None:
         payload["reply_markup"] = reply_markup
-    return await call_bot_api(token, "editMessageText", payload)
+    return await _call_rich_bot_api(token, "editMessageText", payload)
 
 
 async def edit_message_caption(
@@ -2213,7 +2265,7 @@ async def answer_guest_query(
         "guest_query_id": str(guest_query_id),
         "result": dict(result),
     }
-    return await call_bot_api(token, "answerGuestQuery", payload, timeout=httpx.Timeout(15.0))
+    return await _call_rich_bot_api(token, "answerGuestQuery", payload, timeout=httpx.Timeout(15.0))
 
 
 _BOT_CAPABILITIES_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}

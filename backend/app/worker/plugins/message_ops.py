@@ -21,6 +21,10 @@ MessageChannelSelector = MessageChannel | list[MessageChannel] | tuple[MessageCh
 class BufferedMessageOps:
     actions: list[dict[str, Any]] = field(default_factory=list)
 
+    # 能力标记（0.106.0-beta.12+）：send_rich / edit_rich / answer_guest_query 接受
+    # ``compact_tables=True``，标准动作接受 ``compact_tables: true``（Bot API 10.3 紧凑表格）。
+    rich_table_compact = True
+
     async def send(
         self,
         *,
@@ -84,8 +88,13 @@ class BufferedMessageOps:
         reply_markup: dict[str, Any] | None = None,
         save_message_id_key: str | None = None,
         pin: bool = False,
+        compact_tables: bool | None = None,
     ) -> dict[str, Any]:
-        """Buffer an official Rich Message; Interaction Bot remains the default."""
+        """Buffer an official Rich Message; Interaction Bot remains the default.
+
+        ``compact_tables=True``：消息中的表格使用 Bot API 10.3 紧凑排版（blocks 加
+        ``is_compact``、HTML 加 ``compact``、Markdown 管道表格转为 ``<table compact>``）。
+        """
 
         selected = sum(value not in (None, "", []) for value in (html, markdown, blocks))
         if selected != 1:
@@ -109,6 +118,8 @@ class BufferedMessageOps:
             "rich_message": rich_message,
             "reply_to_message_id": reply_to_message_id,
         }
+        if compact_tables:
+            action["compact_tables"] = True
         if channel is None:
             action["send_via"] = "interaction_bot"
         else:
@@ -225,6 +236,7 @@ class BufferedMessageOps:
         is_rtl: bool | None = None,
         skip_entity_detection: bool | None = None,
         reply_markup: dict[str, Any] | None = None,
+        compact_tables: bool | None = None,
     ) -> dict[str, Any]:
         """Buffer an official Rich Message edit; Interaction Bot remains the default."""
 
@@ -250,6 +262,8 @@ class BufferedMessageOps:
             "message_id": message_id,
             "rich_message": rich_message,
         }
+        if compact_tables:
+            action["compact_tables"] = True
         if channel is None:
             action["send_via"] = "interaction_bot"
         else:
@@ -400,6 +414,7 @@ class BufferedMessageOps:
         result: dict[str, Any] | None = None,
         title: str | None = None,
         reply_markup: dict[str, Any] | None = None,
+        compact_tables: bool | None = None,
     ) -> dict[str, Any]:
         """Bot API 10.0 Guest Mode：回复一条 ``guest_message``（每条只能回复一次）。
 
@@ -418,6 +433,8 @@ class BufferedMessageOps:
             action["text"] = text
         if rich_message is not None:
             action["rich_message"] = dict(rich_message)
+            if compact_tables:
+                action["compact_tables"] = True
         if result is not None:
             action["result"] = dict(result)
         if title is not None:
