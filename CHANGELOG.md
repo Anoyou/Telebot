@@ -25,6 +25,16 @@
 
 ## [Unreleased]
 
+## [0.106.0-beta.15] - 2026-10-28 · patch（补丁预发布） · Rich 表格默认带边框 + 隔行着色
+
+### 插件与 Rich Message
+
+- 平台发出的所有 Rich Message 表格默认**带边框并隔行着色**（Bot API `is_bordered` / `is_striped`，Rich HTML `bordered` / `striped`）。在发送出口统一处理：Interaction Bot 的 `sendRichMessage`、`sendRichMessageDraft`、`editMessageText`（含 inline / 访客占位编辑）、`answerGuestQuery`，以及 Userbot 的 Rich 发送 / 编辑 / 草稿；插件的 `send_rich` / `edit_rich` / `answer_guest_query` 与对应标准动作、系统自身的 Rich 消息都会生效。
+- Markdown 管道表格一律转成 `<table bordered striped>` HTML 块（开 `compact_tables` 时为 `<table bordered striped compact>`），保留表头 `th` 与列对齐 `align`，单元格内联格式转 HTML，代码块内不处理；转换后超过 32768 字符上限时按原文发送。
+- `html` 写法（含 Markdown 里直接写的 `<table>`）缺哪个属性补哪个，已写的保持原样；HTML 布尔属性无法表达“关”，`bordered="false"` / `striped="0"`（`false` / `0` / `no` / `off`）视为调用方显式关闭，发送前去掉该属性。`blocks` 写法缺 `is_bordered` / `is_striped` 时补 `true`，调用方显式写的值（包括 `false`）原样保留。
+- 兼容性：按官方 Bot API changelog，Rich Message 与 `RichBlockTable` 在 10.1 引入，10.3 只新增了 `is_compact`，`bordered` / `striped` 对任何支持 Rich Message 的 Bot API / layer 都不是新字段，因此不新增降级重试；紧凑被旧 Bot API 拒绝时的重发只去掉 `compact`，边框与隔行着色保留（网络错误、超时、5xx、429 仍不重试）。
+- 插件能力标记 `ctx.messages.rich_table_default_style = True`；插件无需改动。插件 API 参考与速查表补充默认样式说明，并更正兼容表中 `owner_user_ids` / `list_providers` `enabled` 的最低版本为 0.106.0-beta.14。
+
 ## [0.106.0-beta.14] - 2026-10-28 · patch（补丁预发布） · 插件 host：Event Bus payload 提供 TelePilot 管理员 ID、模型元数据带启用状态
 
 ### 插件

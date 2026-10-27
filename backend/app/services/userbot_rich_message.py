@@ -20,6 +20,7 @@ except ImportError:  # pragma: no cover - production dependency, retained for st
     _tl_types = None
 
 from .rich_compact import (
+    apply_table_style_defaults,
     is_compact_unsupported_error,
     rich_message_has_compact_tables,
     strip_compact_tables,
@@ -502,9 +503,15 @@ async def _call_with_compact_fallback(
 
 def _build_neutral_input(raw: Any) -> InputRichMessage:
     try:
-        return build_input_rich_message(raw)
+        normalized = build_input_rich_message(raw)
     except RichMessageValidationError as exc:
         raise UserbotRichMessageError(ERROR_INVALID_RICH_MESSAGE, str(exc)) from exc
+    # 平台默认：表格带边框 + 隔行着色（调用方显式值优先）；转换失败或越限时按原样发送。
+    try:
+        return build_input_rich_message(apply_table_style_defaults(normalized.to_dict()))
+    except Exception:  # noqa: BLE001 - 表格样式只是格式增强
+        log.warning("Userbot Rich Message 表格默认样式转换失败，按原样发送", exc_info=True)
+        return normalized
 
 
 def _extract_premium(me: Any) -> bool | None:

@@ -6349,6 +6349,9 @@ class _LiveMessageOps:
     # 0.106.0-beta.12 起：send_rich / edit_rich / answer_guest_query 支持 compact_tables=True，
     # 动作字典可带 ``compact_tables: true``（Bot API 10.3 紧凑表格）。插件据此判断能否使用。
     rich_table_compact = True
+    # 0.106.0-beta.15 起：发送出口统一给 rich_message 表格补默认边框 + 隔行着色
+    # （is_bordered / is_striped；Markdown 管道表格转 <table bordered striped>），调用方显式值优先。
+    rich_table_default_style = True
 
     def __init__(
         self,
