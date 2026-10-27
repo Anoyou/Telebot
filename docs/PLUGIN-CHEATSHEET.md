@@ -18,6 +18,7 @@
 - `event_subscriptions[].source` 常用值：`userbot`、`interaction_bot`、`external_payment_notice`、`webhook`。
 - `event_subscriptions[].scope` 可选值：`all_allowed_chats`、`owner_only`、`known_users`、`rule_bound`、`inline_all`、`guest_all`；Inline 插件必须显式用 `inline_all`，访客消息任意会话用 `guest_all`。
 - 账号级“允许会话”留空表示全部会话；列表非空时才只允许名单内会话。插件自定义的 `allowed_chat_ids=[]` 不自动继承这条语义。
+- 交互 Bot 事件的 `all_allowed_chats` 只看账号级“允许会话”（会话白名单），不受交互规则（关键词 / 游戏 / 支付）配置的群范围影响；名单外会话丢弃并记 `reason=chat_not_in_allowed_chats` 日志（详见 API 参考「交互 Bot 事件的会话范围」）。
 - `known_users` 只认平台 state 提供的真实集合，不会自动把当前 sender 算进去。
 - `filters` 支持的键：`keyword` / `keywords`、`contains`、`command` / `commands`、`callback_data`、`chat_id`、`event_type`、`rule_id`、`hook_key` / `hook_keys`；未知 key 会保留但不生效，并告 warning。
 - 严格来说只有 `telegram_direct_passthrough` 叫裸直通；Event Bus、会话入口、legacy hook 都是消息分发/会话路由。

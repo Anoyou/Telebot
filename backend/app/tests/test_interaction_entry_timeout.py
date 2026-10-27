@@ -114,7 +114,7 @@ def test_chat_not_allowed_drop_logs_info(caplog) -> None:
         _log_event_bus_chat_not_allowed(incoming, dropped, {"allowed_chat_ids": "*"})
         other = SimpleNamespace(matched=False, reason_code="event_not_matched", scope="all_allowed_chats", plugin_key="x")
         _log_event_bus_chat_not_allowed(incoming, other, {"allowed_chat_ids": [-100999]})
-    records = [r for r in caplog.records if "允许的聊天" in r.getMessage()]
+    records = [r for r in caplog.records if "允许会话" in r.getMessage()]
     assert len(records) == 1
     message = records[0].getMessage()
     assert "account=7" in message and "chat_id=-100123" in message and "interaction-ai-chat" in message

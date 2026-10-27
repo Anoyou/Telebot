@@ -83,6 +83,7 @@ EVENT_REASON_CODES = {
     "event_type_not_subscribed",
     "source_not_subscribed",
     "scope_not_matched",
+    "chat_not_in_allowed_chats",
     "filter_not_matched",
     "session_not_found",
     "session_expired",
