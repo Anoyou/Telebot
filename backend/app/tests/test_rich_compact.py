@@ -1,4 +1,4 @@
-"""Bot API 10.3 紧凑表格（is_compact / <table compact>）：透传、转换开关、默认不输出、回退。"""
+"""Bot API 10.3 紧凑表格（is_compact / <table compact>）：透传、转换开关、默认不输出、回退、管道表格保留边框。"""
 
 from __future__ import annotations
 
@@ -47,7 +47,9 @@ PT_MARKDOWN = (
 def test_markdown_pipe_table_becomes_compact_html_block() -> None:
     converted = compact_markdown_tables(PT_MARKDOWN)
 
-    assert converted.startswith("找到 2 个结果：\n\n<table compact>\n")
+    # 管道表格原本带边框渲染：紧凑只缩小内边距，边框必须保留（bordered），不擅自加 striped
+    assert converted.startswith("找到 2 个结果：\n\n<table bordered compact>\n")
+    assert "striped" not in converted
     assert '<tr><th align="left">标题</th><th align="right">大小</th><th>发布时间</th></tr>' in converted
     assert (
         '<td align="left"><b><a href="https://pt.example.com/details.php?id=1&amp;hit=1">Foo.2024.1080p</a></b></td>'
@@ -78,6 +80,54 @@ def test_inline_markdown_in_cells_is_converted_and_html_escaped() -> None:
 
     assert "<td><i>斜</i> <s>删</s> | <sup>1</sup></td>" in converted
     assert "<td>1 &lt; 2 &amp; 3</td>" in converted
+
+
+def test_markdown_table_keeps_borders_header_and_every_alignment() -> None:
+    converted = compact_markdown_tables(
+        "| 左 | 右 | 中 | 默认 |\n| :--- | ---: | :---: | --- |\n| a | b | c | d |\n| e | f | g | h |"
+    )
+
+    assert converted.splitlines()[0] == "<table bordered compact>"
+    assert converted.count("<table") == 1 and converted.endswith("</table>")
+    assert (
+        '<tr><th align="left">左</th><th align="right">右</th><th align="center">中</th><th>默认</th></tr>'
+        in converted
+    )
+    assert '<tr><td align="left">a</td><td align="right">b</td><td align="center">c</td><td>d</td></tr>' in converted
+    assert '<tr><td align="left">e</td><td align="right">f</td><td align="center">g</td><td>h</td></tr>' in converted
+    assert converted.count("<th") == 4  # 只有表头行用 th
+
+
+def test_markdown_raw_html_table_keeps_author_border_choice() -> None:
+    # 作者在 Markdown 里直接写的 <table>：只加 compact，不擅自加/去 bordered
+    assert compact_markdown_tables("<table><tr><td>1</td></tr></table>") == "<table compact><tr><td>1</td></tr></table>"
+    assert compact_markdown_tables("<table striped><tr><td>1</td></tr></table>") == (
+        "<table striped compact><tr><td>1</td></tr></table>"
+    )
+
+
+def test_blocks_and_html_keep_caller_border_flags_exactly() -> None:
+    blocks = {
+        "blocks": [
+            {"type": "table", "cells": []},
+            {"type": "table", "cells": [], "is_bordered": True, "is_striped": True},
+        ]
+    }
+    compact = apply_compact_tables(blocks)
+    assert compact["blocks"][0] == {"type": "table", "cells": [], "is_compact": True}
+    assert compact["blocks"][1] == {
+        "type": "table",
+        "cells": [],
+        "is_bordered": True,
+        "is_striped": True,
+        "is_compact": True,
+    }
+    assert apply_compact_tables({"html": "<table><tr><td>1</td></tr></table>"})["html"] == (
+        "<table compact><tr><td>1</td></tr></table>"
+    )
+    assert apply_compact_tables({"html": "<table bordered striped>x</table>"})["html"] == (
+        "<table bordered striped compact>x</table>"
+    )
 
 
 def test_html_tables_get_compact_once() -> None:
@@ -116,7 +166,8 @@ def test_strip_compact_is_inverse_for_all_formats() -> None:
     assert strip_compact_tables(apply_compact_tables(blocks)) == blocks
     assert strip_compact_tables(apply_compact_tables(html)) == html
     stripped = strip_compact_tables(apply_compact_tables(markdown))["markdown"]
-    assert "<table>" in stripped and "compact" not in stripped
+    # 回退（去掉紧凑重发）仍保留边框
+    assert "<table bordered>" in stripped and "compact" not in stripped
     assert not rich_message_has_compact_tables({"markdown": stripped})
 
 
@@ -181,7 +232,7 @@ def test_normalize_action_applies_and_consumes_compact_tables() -> None:
     normalized = loader_mod._normalize_interaction_action(action)  # noqa: SLF001
 
     assert "compact_tables" not in normalized
-    assert "<table compact>" in normalized["rich_message"]["markdown"]
+    assert "<table bordered compact>" in normalized["rich_message"]["markdown"]
     assert action["rich_message"]["markdown"] == PT_MARKDOWN
 
 
@@ -250,6 +301,33 @@ async def test_send_rich_retries_once_without_compact_on_bad_request(monkeypatch
     assert len(calls) == 2
     assert calls[0]["rich_message"]["html"].startswith("<table bordered compact>")
     assert calls[1]["rich_message"]["html"].startswith("<table bordered>")
+
+
+@pytest.mark.asyncio
+async def test_pt_markdown_table_keeps_borders_on_send_and_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
+    """interaction-ai-chat 的 PT 结果表走 markdown 管道表格 + compact_tables：首发与回退都要有边框。"""
+
+    calls: list[dict] = []
+
+    async def call_bot_api(token, method, payload, **kwargs):  # noqa: ANN001, ANN003
+        calls.append(json.loads(json.dumps(payload)))
+        if len(calls) == 1:
+            raise RuntimeError("Bad Request: can't parse rich message: unknown attribute compact")
+        return {"message_id": 10}
+
+    monkeypatch.setattr(account_bot_service, "call_bot_api", call_bot_api)
+    normalized = loader_mod._normalize_interaction_action(  # noqa: SLF001
+        {"type": "send_rich_message", "chat_id": 1, "rich_message": {"markdown": PT_MARKDOWN}, "compact_tables": True}
+    )
+
+    await account_bot_service.send_rich_message("123:abc", 1, normalized["rich_message"])
+
+    assert len(calls) == 2
+    first, retry = calls[0]["rich_message"]["markdown"], calls[1]["rich_message"]["markdown"]
+    assert "<table bordered compact>" in first
+    assert "<table bordered>" in retry and "compact" not in retry
+    for body in (first, retry):
+        assert '<th align="left">标题</th>' in body and '<th align="right">大小</th>' in body
 
 
 @pytest.mark.asyncio
