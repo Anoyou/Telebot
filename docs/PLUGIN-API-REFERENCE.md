@@ -1023,7 +1023,8 @@ Rich Message 默认通过 `interaction_bot` 执行：即使当前是 UserBot 命
 Telegram Bot API 10.3 给 `InputRichBlockTable` / `RichBlockTable` 增加了 `is_compact`（类型 True，可选，“单元格内边距更小”），Rich HTML 对应 `<table compact>`。TelePilot 的支持方式：
 
 - 显式写法原样透传：`blocks` 里的 `{"type": "table", "is_compact": true, ...}`、`html` 里的 `<table bordered compact>`；`is_compact` 必须是布尔值。收到的 `RichBlockTable.is_compact` 也原样保留在事件里。
-- 一键开关：`ctx.messages.send_rich(..., compact_tables=True)`、`edit_rich(..., compact_tables=True)`、`answer_guest_query(rich_message=..., compact_tables=True)`，或在标准动作（`send_rich_message`、带 `rich_message` 的 `edit_message`、`answer_guest_query`）上写 `"compact_tables": true`。平台把消息里所有表格改为紧凑：`blocks` 加 `is_compact: true`，`html` 的 `<table>` 加 `compact`，`markdown` 的管道表格（`| a | b |` + 分隔行）转成 `<table compact>` HTML 块，单元格里的加粗、斜体、删除线、行内代码、链接转为对应 HTML（官方说明 Markdown 不在块级 HTML 标签内解析）；代码块里的内容不处理。该字段只由平台消费，不会发给 Telegram；不写或写 `false` 时请求与旧版本字节级一致，平台不会发送 `is_compact: false`。
+- 一键开关：`ctx.messages.send_rich(..., compact_tables=True)`、`edit_rich(..., compact_tables=True)`、`answer_guest_query(rich_message=..., compact_tables=True)`，或在标准动作（`send_rich_message`、带 `rich_message` 的 `edit_message`、`answer_guest_query`）上写 `"compact_tables": true`。平台把消息里所有表格改为紧凑：`blocks` 加 `is_compact: true`，`html` 的 `<table>` 加 `compact`，`markdown` 的管道表格（`| a | b |` + 分隔行）转成 `<table bordered compact>` HTML 块（0.106.0-beta.13 起保留边框：管道表格本来带边框显示，而 `compact` 只缩小单元格内边距、不包含边框；表头行用 `th`，`:---` / `---:` / `:---:` 对齐转为 `align`），单元格里的加粗、斜体、删除线、行内代码、链接转为对应 HTML（官方说明 Markdown 不在块级 HTML 标签内解析）；代码块里的内容不处理。该字段只由平台消费，不会发给 Telegram；不写或写 `false` 时请求与旧版本字节级一致，平台不会发送 `is_compact: false`。
+- 边框与紧凑是两个独立标志：Bot API 的 `is_compact` / `compact` 只缩小单元格内边距，边框由 `is_bordered` / `bordered` 控制（官方示例 `<table bordered striped compact>`）。平台对 `blocks` 与 `html` 只加紧凑标志，调用方写的 `is_bordered` / `is_striped` / `bordered` / `striped` 原样保留——这两种写法里原本没写边框的表格，开启紧凑后同样没有边框，需要边框请自己写上。旧 Bot API 拒绝时去掉紧凑重发，边框照旧保留。
 - 能力判断：0.106.0-beta.12+ 的 `ctx.messages` 带类属性 `rich_table_compact = True`。插件应先 `getattr(ctx.messages, "rich_table_compact", False) is True` 再加 `compact_tables`；旧平台没有该属性，直接按普通表格发送即可。
 - 安全回退：Bot API 服务器（自建或未升级到 10.3）以 `Bad Request` 明确拒绝带紧凑表格的请求时，平台去掉紧凑标记重发一次并写日志；Userbot 路径收到 400 RPC 错误同样降级一次。只有确认请求未生效才降级，网络错误、超时、5xx、限流与“消息未修改”不会触发重发。
 
@@ -1466,7 +1467,7 @@ class GuessNumberPlugin(Plugin):
 | `send_rich_message` | `rich_message` | Telegram 原生 Rich Message；对象中必须且只能提供 `html`、`markdown`、`blocks` 之一，可表达标题、任务列表、表格、折叠详情、公式和媒体块 |
 | `send_rich_message` | `reply_to_message_id`、`reply_markup`、`save_message_id_key`、`pin` | 可选；Userbot 路径支持回复，但 `reply_markup` 仅由 Interaction Bot 执行 |
 | `send_rich_message` | `send_via` | 可省略，平台默认选择 `interaction_bot`；显式 `userbot_reply` 使用 Layer 228+，并受 Premium/能力与格式限制 |
-| `send_rich_message` | `compact_tables` | 可选（0.106.0-beta.12+）；`true` 时把消息里的表格改为 Bot API 10.3 紧凑表格（blocks 加 `is_compact`、HTML 加 `compact`、Markdown 管道表格转 `<table compact>`），平台消费不外发；旧 Bot API 拒绝时自动去掉重发一次。`edit_message`（带 `rich_message`）与 `answer_guest_query` 同样支持 |
+| `send_rich_message` | `compact_tables` | 可选（0.106.0-beta.12+）；`true` 时把消息里的表格改为 Bot API 10.3 紧凑表格（blocks 加 `is_compact`、HTML 加 `compact`、Markdown 管道表格转 `<table bordered compact>`），平台消费不外发；旧 Bot API 拒绝时自动去掉重发一次。`edit_message`（带 `rich_message`）与 `answer_guest_query` 同样支持 |
 | `send_photo` / `send_file` | `photo_base64` / `file_base64` | 按动作通道发送图片/文件字节；交互 Bot 下 `send_photo` 走 `sendPhoto`，`send_file` 走 `sendDocument` |
 | `send_photo` / `send_file` | `filename`、`caption`、`reply_to_message_id` | 可选，文件名、说明文字、回复目标 |
 | `send_photo` / `send_file` | `save_message_id_key` | 可选；媒体发送成功后把 Telegram `message_id` 按 key 保存 2 小时，供后续 `edit_caption`、删除或替换使用 |

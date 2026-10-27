@@ -25,6 +25,13 @@
 
 ## [Unreleased]
 
+## [0.106.0-beta.13] - 2026-10-28 · patch（补丁预发布） · 紧凑表格保留分割线
+
+### 插件与 Rich Message
+
+- 修复开启紧凑表格后表格分割线消失（如 AI 答疑插件的 PT 搜索结果表）：Bot API 的 `is_compact` / `compact` 只缩小单元格内边距，边框由 `is_bordered` / `bordered` 单独控制；0.106.0-beta.12 把 Markdown 管道表格转成 `<table compact>` 时没带 `bordered`，而管道表格本来按带边框显示，于是紧凑后边框丢失。现在转换为 `<table bordered compact>`，并继续保留表头（`th`）与列对齐（`:---` / `---:` / `:---:` → `align`）；旧 Bot API 拒绝紧凑、去掉 `compact` 重发时同样保留 `bordered`。官方文档未说明管道表格默认是否隔行着色，因此不加 `striped`。
+- `blocks` 与 `html` 写法仍只加 `is_compact` / `compact`，调用方原有的 `is_bordered` / `is_striped` / `bordered` / `striped` 保持原样。
+
 ## [0.106.0-beta.12] - 2026-10-28 · patch（补丁预发布） · 接入 Bot API 10.3 紧凑富文本表格（is_compact）；含 iOS 0.13.4 / 0.13.5
 
 ### 插件与 Rich Message

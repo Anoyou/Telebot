@@ -93,7 +93,7 @@ class BufferedMessageOps:
         """Buffer an official Rich Message; Interaction Bot remains the default.
 
         ``compact_tables=True``：消息中的表格使用 Bot API 10.3 紧凑排版（blocks 加
-        ``is_compact``、HTML 加 ``compact``、Markdown 管道表格转为 ``<table compact>``）。
+        ``is_compact``、HTML 加 ``compact``、Markdown 管道表格转为 ``<table bordered compact>``）。
         """
 
         selected = sum(value not in (None, "", []) for value in (html, markdown, blocks))

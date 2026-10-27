@@ -9,7 +9,15 @@ Official contract (core.telegram.org/bots/api, Bot API 10.3, 2026-08-24):
 - Rich Markdown has no table flag, but "can contain arbitrary HTML" and
   "Markdown isn't parsed inside block HTML tags other than <details>,
   <tg-collage> and <tg-slideshow>" — so a compact Markdown table is written as
-  an HTML ``<table compact>`` block whose cells are inline HTML.
+  an HTML ``<table bordered compact>`` block whose cells are inline HTML.
+- ``is_compact`` only shrinks cell indents; borders are a separate flag
+  (``is_bordered`` / ``bordered``).  A GFM pipe table is rendered by Telegram
+  with borders, so the converted block keeps ``bordered`` — otherwise turning
+  compact on would silently drop the grid lines.  ``striped`` is not added:
+  the docs do not say pipe tables are striped by default.
+- ``blocks`` / ``html`` tables only gain ``is_compact`` / ``compact``; the
+  caller's own ``is_bordered`` / ``is_striped`` / ``bordered`` / ``striped``
+  are kept exactly as written.
 
 Helpers here never emit ``is_compact: false``; without an explicit opt-in the
 payload is returned untouched (byte-for-byte identical to older releases).
@@ -24,6 +32,8 @@ from typing import Any
 
 # Action-level opt-in understood by the plugin action normalizer.
 COMPACT_TABLES_ACTION_KEY = "compact_tables"
+# Attributes a converted GFM pipe table keeps besides ``compact`` (see module doc).
+PIPE_TABLE_ATTRS = "bordered"
 
 _TABLE_TAG_RE = re.compile(r"<table(?=[\s>/])([^<>]*)>", re.IGNORECASE)
 _COMPACT_ATTR_RE = re.compile(r"(?<![\w-])compact(?![\w-])(\s*=\s*(\"[^\"]*\"|'[^']*'|[^\s>]+))?", re.IGNORECASE)
@@ -46,8 +56,9 @@ def apply_compact_tables(rich_message: dict[str, Any]) -> dict[str, Any]:
     - ``blocks``: every ``{"type": "table"}`` block (nested ones included)
       gets ``is_compact: True``;
     - ``html``: every ``<table …>`` tag gets the ``compact`` attribute;
-    - ``markdown``: GFM pipe tables become ``<table compact>`` HTML blocks
-      (cells converted to inline HTML); raw ``<table>`` tags get ``compact``.
+    - ``markdown``: GFM pipe tables become ``<table bordered compact>`` HTML
+      blocks (header row as ``th``, column alignment as ``align``, cells
+      converted to inline HTML); raw ``<table>`` tags only get ``compact``.
     Fenced code is left untouched.  Other keys are copied as-is.
     """
 
@@ -98,7 +109,7 @@ def compact_html_tables(text: str) -> str:
 
 
 def compact_markdown_tables(text: str) -> str:
-    """Rewrite GFM pipe tables in Rich Markdown as ``<table compact>`` blocks."""
+    """Rewrite GFM pipe tables in Rich Markdown as ``<table bordered compact>`` blocks."""
 
     lines = text.split("\n")
     out: list[str] = []
@@ -327,7 +338,8 @@ def _table_html(header: list[str], aligns: list[str | None], rows: list[list[str
         attr = f' align="{align}"' if align else ""
         return f"<{tag}{attr}>{_inline_to_html(value)}</{tag}>"
 
-    parts = ["<table compact>"]
+    # Pipe tables render with borders by default; keep them when going compact.
+    parts = [f"<table {PIPE_TABLE_ATTRS} compact>"]
     parts.append("<tr>" + "".join(cell("th", value, aligns[i]) for i, value in enumerate(header)) + "</tr>")
     for row in rows:
         parts.append("<tr>" + "".join(cell("td", value, aligns[i]) for i, value in enumerate(row)) + "</tr>")
