@@ -269,11 +269,15 @@ jobs:
 
       - name: 预热模拟器
         # 刚启动的模拟器前几次冷启动 App 和无障碍快照都很慢（慢机器上曾超过 4 分钟，导致前几个用例停在
-        # “连接 TelePilot…”超时）。固定 sleep 不够自适应：改为反复跑一个最短的 UI 用例直到通过（最多 4 次），
+        # “连接 TelePilot…”超时）。固定 sleep 不够自适应：跑一个最短的 UI 用例直到通过，
         # 同时完成 App 与测试运行器的安装；预热结果不计入测试结论，真正的用例在下一步运行。
+        # 第十轮：预热时把该用例的首屏等待放宽到 240 秒（TEST_RUNNER_ 前缀的环境变量会传给测试进程），
+        # 一次等到冷启动完成，不再 45 秒超时后反复重跑（第十轮首个 run 曾重跑 4 次、6 分 23 秒）；最多 2 次。
+        env:
+          TEST_RUNNER_TELEPILOT_WARMUP_TIMEOUT: "240"
         run: |
           WARMUP="-only-testing:TelePilotUITests/WorkspaceUITests/testDockKeepsPrimarySectionsAndAgentEntry"
-          for i in 1 2 3 4; do
+          for i in 1 2; do
             START=$(date +%s)
             if xcodebuild test-without-building \
                 -xctestrun "${{ steps.products.outputs.xctestrun }}" \
@@ -288,7 +292,7 @@ jobs:
             echo "第 $i 次预热未通过（$(( $(date +%s) - START )) 秒），模拟器仍在冷启动，继续预热"
             grep -E "error:|failed" "$RUNNER_TEMP/warmup-$i.log" | head -n 5 || true
           done
-          echo "::warning::预热 4 次仍未通过，继续执行测试（以测试结果为准）"
+          echo "::warning::预热 2 次仍未通过，继续执行测试（以测试结果为准）"
 
       - name: 运行 UI 测试分片（fixture 模式）
         run: |
