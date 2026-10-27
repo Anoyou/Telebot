@@ -8,11 +8,13 @@ MANIFEST = Manifest(
     key="with_http",
     display_name="HTTP 示例",
     version="0.1.0",
+    min_telepilot_version="0.72.0-beta.2",
     author="examples",
     description="演示第三方模块通过 ctx.http 发起受控 HTTP 请求。",
     usage="安装后使用账号命令 http_status 发起受控 HTTP 请求；URL 必须匹配 allowed_hosts。该示例不订阅 Telegram Event Bus。",
     category="utility",
     permissions=["external_http", "edit_message"],
+    requires_platform_capabilities=[],
     allowed_hosts=["api.github.com"],
     config_schema={
         "type": "object",

@@ -4,11 +4,14 @@
 
 ## 0. 最快路径：简单模式 SDK
 
-只写一个 `__init__.py` 就能被 loader 加载。目录名就是插件 key；下面例子目录名必须是 `hello_ping`。
+插件逻辑只写在 `__init__.py` 里，不需要 `PLUGIN_CLASS` / `MANIFEST`。目录名就是插件 key；下面例子目录名必须是 `hello_ping`。
 
 ```text
 hello_ping/
-└── __init__.py
+├── __init__.py   # 装饰器写的命令
+├── plugin.json   # 必需：加载前的静态兼容预检和安装校验都读它
+├── manifest.py   # 安装通道要求文件存在，简单模式可以留空
+└── plugin.py     # 同上，可以留空
 ```
 
 ```python
@@ -20,12 +23,27 @@ async def ping(ctx):
     await ctx.reply("pong")
 ```
 
+`plugin.json` 最少写这些（`requires_platform_capabilities` 新装/升级必填，允许 `[]`）：
+
+```json
+{
+  "name": "hello_ping",
+  "display_name": "Hello Ping",
+  "version": "0.1.0",
+  "min_telepilot_version": "0.72.0-beta.2",
+  "permissions": ["send_message"],
+  "requires_platform_capabilities": [],
+  "usage": "账号主人发送 {prefix}ping，插件回复 pong。"
+}
+```
+
 加载逻辑：
 
 - `from telepilot import plugin` 暴露的是 SDK 装饰器命名空间。
 - `@plugin.command("ping")` 会登记一个简单模式命令函数。
 - loader 导入插件目录后，如果模块没有显式 `PLUGIN_CLASS` 和 `MANIFEST`，会尝试从简单模式装饰器合成隐式插件类和 `Manifest`。
-- 隐式 Manifest 当前会自动声明 `permissions=["read_event", "send_message"]`，插件类会带上 `commands["ping"]`，运行期再注册进命令分发表。
+- 隐式 Manifest 当前会自动声明 `permissions=["read_event", "send_message"]`（运行时以它为准，不读 `plugin.json` 的 `permissions`），插件类会带上 `commands["ping"]`，运行期再注册进命令分发表。
+- 只有 `__init__.py` 的目录会被安装型插件加载器拒绝（“缺少 plugin.json，无法在执行 Python 前验证兼容性”）；Git / 插件仓库 / zip / 本地导入的安装校验还要求四个文件都存在，所以 `manifest.py`、`plugin.py` 即使留空也要放。以上组合已用当前 loader 实测可以加载并回复 `pong`。
 
 触发方式：
 
@@ -128,9 +146,10 @@ hello_ping/
   "author": "examples",
   "version": "0.1.0",
   "entry": "plugin.py",
-  "min_telepilot_version": "0.41.0",
+  "min_telepilot_version": "0.72.0-beta.2",
   "category": "utility",
   "permissions": ["send_message"],
+  "requires_platform_capabilities": [],
   "interaction_profile": "utility_trigger",
   "usage": "安装并在账号上启用后，在已允许会话发送 ping，插件会回复 pong。账号允许会话列表留空时表示全部会话。",
   "event_subscriptions": [
@@ -150,6 +169,8 @@ hello_ping/
 - `event_subscriptions` 决定插件会收到哪些标准事件信封。
 - `permissions` 是给安装者和平台审计看的能力声明。
 - 没有高风险能力时，`capabilities` 也要写成 `{}`，不要省略。
+- `requires_platform_capabilities` 新装/升级必填，不依赖可选平台模块也要写 `[]`，否则安装报 `PLATFORM_CAPABILITIES_REQUIRED`。
+- `min_telepilot_version` 至少写 `0.72.0-beta.2`：`manifest.py` 里的 `requires_platform_capabilities` 参数从这个版本才有，更早的平台导入会直接报错。用到更新的能力时按 [API 参考：版本与兼容](./PLUGIN-API-REFERENCE.md#版本与兼容) 继续提高。
 
 ## 4. manifest.py
 
@@ -170,11 +191,13 @@ MANIFEST = Manifest(
     key="hello_ping",
     display_name="Hello Ping",
     version="0.1.0",
+    min_telepilot_version="0.72.0-beta.2",
     author="examples",
     description="最小 Event Bus + MessageOps 入门示例。",
     usage="安装并在账号上启用后，在已允许会话发送 ping，插件会回复 pong。账号允许会话列表留空时表示全部会话。",
     category="utility",
     permissions=["send_message"],
+    requires_platform_capabilities=[],
     event_subscriptions=EVENT_SUBSCRIPTIONS,
     capabilities={},
     interaction_profile="utility_trigger",

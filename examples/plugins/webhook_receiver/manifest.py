@@ -41,6 +41,7 @@ MANIFEST = Manifest(
     key="webhook_receiver",
     display_name="Webhook 订单通知示例",
     version="0.1.0",
+    min_telepilot_version="0.72.0-beta.2",
     author="examples",
     description="接收 default Webhook，并把订单事件发送到配置的 Telegram 会话。",
     usage=(
@@ -49,6 +50,7 @@ MANIFEST = Manifest(
     ),
     category="utility",
     permissions=["send_message"],
+    requires_platform_capabilities=["webhooks"],
     event_subscriptions=EVENT_SUBSCRIPTIONS,
     capabilities={},
     config_schema=CONFIG_SCHEMA,

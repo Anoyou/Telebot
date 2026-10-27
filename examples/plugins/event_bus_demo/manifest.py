@@ -51,6 +51,7 @@ MANIFEST = Manifest(
     key="event_bus_demo",
     display_name="Event Bus 示例",
     version="0.1.0",
+    min_telepilot_version="0.72.0-beta.2",
     author="examples",
     description="演示最终版 Event Bus、Trace 与 MessageOps 插件契约。",
     usage=(
@@ -60,6 +61,7 @@ MANIFEST = Manifest(
     ),
     category="interactive",
     permissions=["send_message", "read_chat"],
+    requires_platform_capabilities=["interaction_bot"],
     event_subscriptions=EVENT_SUBSCRIPTIONS,
     capabilities=CAPABILITIES,
     interaction_profile="utility_trigger",

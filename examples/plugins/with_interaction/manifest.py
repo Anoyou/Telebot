@@ -8,11 +8,13 @@ MANIFEST = Manifest(
     key="with_interaction",
     display_name="交互示例",
     version="1.0.0",
+    min_telepilot_version="0.72.0-beta.2",
     author="TelePilot",
     description="最小交互 Bot 兼容示例",
     usage="兼容桥示例：用于把历史 interaction_entries / on_interaction 插件迁移到标准事件信封。新插件优先参考 event_bus_demo。",
     category="interactive",
     permissions=["send_message", "read_chat"],
+    requires_platform_capabilities=["interaction_bot"],
     event_subscriptions=[
         {
             "events": ["message", "callback_query", "payment_confirmed", "session_close"],

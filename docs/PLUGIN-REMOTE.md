@@ -54,7 +54,7 @@ my_plugin/
   "author": "examples",
   "version": "0.1.0",
   "entry": "plugin.py",
-  "min_telepilot_version": "0.33.0",
+  "min_telepilot_version": "0.72.0-beta.2",
   "category": "interactive",
   "permissions": ["send_message", "read_chat"],
   "requires_platform_capabilities": ["interaction_bot"],
@@ -107,6 +107,7 @@ my_plugin/
 | `capabilities` | 是 | 高风险能力声明；没有高风险能力也建议写 `{}` |
 | `permissions` | 按需 | 安装提示和 facade 注入依据，如 `external_http`、`ai_text`、`send_message` |
 | `requires_platform_capabilities` | 是 | 插件需要的平台枝；无需求也必须显式写 `[]` |
+| `min_telepilot_version` | 是（建议） | 宿主在执行 Python 前比较，只看 `x.y.z`；`manifest.py` 传了 `requires_platform_capabilities` 时至少 `0.72.0-beta.2`，用到更新能力按 [API 参考：版本与兼容](./PLUGIN-API-REFERENCE.md#版本与兼容) 提高 |
 | `triggers.command` | 互动入口按需 | 声明 UserBot 命令开局名，不带前缀 |
 | `default_trigger_modes` | 互动入口按需 | `all` / `keyword_only`，决定命令与关键词是否同时开放 |
 | `callback_fast_ack` | callback 入口按需 | 点击按钮后先立即 ACK，再慢慢处理插件逻辑 |
@@ -401,7 +402,9 @@ MANIFEST = Manifest(
     key="event_bus_demo",
     display_name="Event Bus 示例",
     version="0.1.0",
+    min_telepilot_version="0.72.0-beta.2",
     category="interactive",
+    requires_platform_capabilities=[],
     permissions=["send_message", "read_chat"],
     event_subscriptions=EVENT_SUBSCRIPTIONS,
     capabilities=CAPABILITIES,

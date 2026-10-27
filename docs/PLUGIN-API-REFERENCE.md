@@ -14,7 +14,7 @@
 
 唯一例外：`payout`、收付款、发奖永远由 userbot 执行，不随会话通道切到 interaction bot。
 
-必填顶层字段 `requires_platform_capabilities` 必须同时写在 `plugin.json` 与 `Manifest`，声明插件对 `ai` / `interaction_bot` / `webhooks` / `ledger` / `dispatch_debug` 平台模块的依赖；无需求时显式写 `[]`。它不能写在 interaction entry 或 event subscription 上。存量插件缺失时只挂 warning，新装或升级缺失时拒绝；启用叶只会自动点亮允许开启的枝，不会顶开值守预设或管理员强制关闭。完整规则见[远程插件：`requires_platform_capabilities` 声明](./PLUGIN-REMOTE.md#requires_platform_capabilities-声明)和[平台能力热插拔](./PLATFORM-CAPABILITIES.md)。
+必填顶层字段 `requires_platform_capabilities` 必须同时写在 `plugin.json` 与 `Manifest`，声明插件对 `ai` / `interaction_bot` / `webhooks` / `ledger` / `dispatch_debug` 平台模块的依赖；无需求时显式写 `[]`。它不能写在 interaction entry 或 event subscription 上。存量插件缺失时只挂 warning，新装或升级缺失时拒绝（`PLATFORM_CAPABILITIES_REQUIRED`）；`Manifest(requires_platform_capabilities=...)` 参数 0.72.0-beta.2 起才有，传了它的插件 `min_telepilot_version` 不得低于 `0.72.0-beta.2`（见[版本与兼容](#版本与兼容)）；启用叶只会自动点亮允许开启的枝，不会顶开值守预设或管理员强制关闭。完整规则见[远程插件：`requires_platform_capabilities` 声明](./PLUGIN-REMOTE.md#requires_platform_capabilities-声明)和[平台能力热插拔](./PLATFORM-CAPABILITIES.md)。
 
 Event Bus、Trace、MessageOps 是两条标准消息链路的内部契约，不是第四种模式。两条标准消息链路都可使用标准事件信封，并通过 `ctx.messages` / 标准 action 输出；legacy hook 仍保留兼容语义：
 
@@ -167,7 +167,8 @@ class PluginContext:
     messages: Any | None   # MessageOps facade；发送/编辑/删除/按钮/Inline 主路径
     identities: Any | None # 群内安全公开身份 facade
     http: Any | None       # HTTP facade；需要 external_http + allowed_hosts
-    ai: Any | None         # AI facade；需要 ai_text
+    ai: Any | None         # AI facade；需要 ai_text（或独立 ai_agent）；识图另需 ai_vision
+    skills: Any | None     # Agent Skills 只读 facade；需要 agent_skills（0.106.0-beta.1+）
     engine: Any | None     # RateLimitEngine；安装型插件通常为 None
     redis: Any | None      # builtin 可为原始 Redis；安装插件为 PluginRedisFacade
     storage: Any | None    # PluginStorage；按账号和插件隔离的持久化 KV facade
@@ -176,6 +177,7 @@ class PluginContext:
     scheduler: Any         # 平台调度器 facade
     generation: int        # generation guard 计数
     account_proxy_url: str | None  # 账号代理 URL；只供平台 facade 组装，不应写入日志
+    account_proxy_error: str | None  # 账号代理配置错误（已删除/不支持/无效）；ctx.http 据此在请求前失败
 
     # 简单模式命令运行字段
     event: Any | None
@@ -203,10 +205,10 @@ class PluginContext:
 - `ctx.ai`：声明 `permissions=["ai_text"]` 后注入。它复用 TelePilot 的 LLM Provider 池、fallback 链、账号级预算和 usage 记录；插件只能拿到脱敏 provider 元数据，不能读取 `api_key_enc`、`base_url` 或代理 URL。显式绑定缺失、已停用或无效代理的 Provider 会从插件路由排除，不会自动改成 DIRECT。
 - `ctx.ai.complete()` 推荐用 `provider_tag` 按用途选择 provider；`tag` / `tags` 是兼容别名且已 deprecated，新插件不要依赖它们作为主要入口。可选 `route="fixed"|"tag"|"auto"` 显式声明路由模式（留空时按旧参数推断，向后兼容）；返回结果的 `routing` 字段是脱敏路由摘要（模式 / provider / 生效模型 / 命中 tag / 协议 / 身份 / 是否 fallback），不含 key、base_url、代理或内部分类器细节。插件不能指定 UA、身份、密钥、代理、内部分类器或全局 fallback。
 - `ctx.ai.stream_complete()` 返回 Provider 原生文本 delta 的异步迭代器，支持 Chat Completions、Responses 与 Anthropic Messages；不拆分完整响应、不在已输出部分文本后切 Provider。上游忽略 `stream=true` 而返回普通 JSON 时，同一次请求的完整文本作为一个块产出，不会再次调用模型。调用方必须消费到迭代器自然结束；取消、提前关闭、超时或异常按已发起调用保守结算。需要跨 Provider 的完整响应 fallback 时使用 `complete()`。
-- `ctx.ai.run_agent()` 需要独立 `ai_agent` 权限，并同时要求 `capabilities.agent_tools.enabled=true`、manifest `agent_tools[]` 声明和调用方传入同名 handler。平台限制轮数、工具数、重复调用、token 与总超时；只读工具可并行，副作用工具串行。同样支持 `route="fixed"|"tag"|"auto"`，且 Agent 路由会预先排除没有已启用模型的 provider（无法支撑 tools 调用）。
+- `ctx.ai.run_agent()` 需要独立 `ai_agent` 权限，并同时要求 `capabilities.agent_tools.enabled=true`、manifest `agent_tools[]` 声明和调用方传入同名 handler。平台限制轮数、工具数、重复调用、token 与总超时（插件可用 `max_steps` / `max_tool_calls` / `max_total_tokens` 在平台上限内收紧）；只读工具可并行，副作用工具串行。同样支持 `route="fixed"|"tag"|"auto"`，且 Agent 路由会预先排除没有已启用模型的 provider（无法支撑 tools 调用）。
 - `ctx.ai.list_providers()` 可用于展示当前账号可见的脱敏 provider 摘要；更完整的 AI facade 说明见 `docs/PLUGIN-AI.md`。
 - `ctx.ai.complete(..., web_search=True, web_search_context_size="low"|"medium"|"high")` 请求原生联网搜索：把 `web_search` 作为**工具**交给模型（Responses API，`tool_choice` 保持 auto，由模型自行决定是否搜索，不强制每次搜索）；OpenAI 官方 chat_completions Provider 按 `web_search_api_format` 临时切到 Responses。引用来源在 `AIResult.sources`。需要“该搜就搜”时请在系统提示里引导（并注入当前日期），不要用关键词强制。
-- `ctx.ai.complete(..., images=[bytes, ...])` 把图片交给支持图片输入的模型（最多 4 张、每张 ≤ 8MB），需要 `ai_vision` 权限；`ctx.ai.vision_enabled` 表示是否已授权。`await ctx.ai.fetch_bot_image(file_id)` 用当前账号交互 Bot 下载用户发来的图片（`message.media.file_id` 或 `reply_to.media.file_id`），同样需要 `ai_vision`，不落盘、不返回路径或 Token。
+- `ctx.ai.complete(..., images=[bytes, ...])` 把图片交给支持图片输入的模型（最多 4 张、每张 ≤ 8MB），需要 `ai_vision` 权限；`ctx.ai.vision_enabled` 表示是否已授权。`await ctx.ai.fetch_bot_image(file_id, max_bytes=...)` 用当前账号交互 Bot 下载用户发来的图片（`message.media.file_id` 或 `reply_to.media.file_id`），同样需要 `ai_vision`，不落盘、不返回路径或 Token。
 - 请求的能力（`web_search` / `images`）在所选 Provider 及 fallback 链上都不支持时抛 `AICapabilityError`（`AIUnavailableError` 子类），在发出网络请求前判定；插件可去掉该能力降级重试。
 - 推理模型（GLM / DeepSeek / Qwen / Kimi 等）：`AIResult.text` **只包含模型的最终 content**，思考过程（Chat Completions 的 `reasoning_content`、content 里的 `<think>…</think>`、Responses 的 reasoning 项）单独放在 `AIResult.reasoning`（另有 `reasoning_tokens`、`finish_reason`），插件不要把它发给用户。content 为空时平台不再用推理过程兜底：输出额度被推理耗尽（`finish_reason=length`）或只返回了推理时抛 `AIResponseTruncated`（`AIUnavailableError` 子类，fallback 链会先尝试下一个 Provider），并记一条 info 日志（finish_reason、max_tokens、推理 Token）。`ctx.ai.stream_complete` 同样跳过推理增量。
 - `ctx.ai.complete(..., thinking="disabled"|"enabled")`（0.106.0-beta.2+）：对支持的 OpenAI 兼容上游关闭/开启思考——智谱 / Z.ai（`bigmodel.cn`、`z.ai`、`glm-*`）与 DeepSeek 下发 `thinking={"type": ...}`，阿里云百炼 DashScope（Qwen3）下发 `enable_thinking`；其它上游忽略该参数（OpenAI 官方等会拒绝未知参数）。旧平台的 `complete` 没有这个参数，插件可用 `inspect.signature` 探测后再传。
@@ -299,12 +301,14 @@ if attempts is not None and attempts > 5:
 | `ctx.redis` | `await ctx.redis.get("key")` | 安装插件拿 `PluginRedisFacade`，自动添加账号 + 插件前缀；不支持 `keys/scan/eval/pipeline/pubsub` 等操作。builtin 才可能拿原始 Redis；普通状态优先用 `ctx.storage` |
 | `ctx.storage` | `await ctx.storage.get("k")` / `await ctx.storage.set("k", value, ttl=3600)` | 推荐的插件持久化 facade；按账号 + 插件自动命名空间隔离 |
 | `ctx.log` | `await ctx.log("info", "...", **detail)` | 运行日志写入器 |
-| `ctx.scheduler` | `ctx.scheduler.register(job_id, schedule, callback, *, replace=True)` / `ctx.scheduler.unregister(job_id)` | 调度 facade（按权限/能力边界开放） |
+| `ctx.scheduler` | `ctx.scheduler.register(job_id, schedule, callback, *, replace=True)` / `ctx.scheduler.unregister(job_id)` / `ctx.scheduler.unregister_all()` / `ctx.scheduler.list_jobs()` | 调度 facade；只能看到和操作本插件名下的任务 |
 | `ctx.http` | `await ctx.http.get(url, params={...})` / `await ctx.http.post(url, json={...})` | 安全 HTTP facade；第三方插件需声明 `external_http` + `allowed_hosts` |
 | `ctx.ai` | `await ctx.ai.complete(system="...", user="...")` | 文本 LLM facade；第三方插件需声明 `ai_text` |
 | `ctx.ai` | `await ctx.ai.run_agent(..., handlers={...})` | 有界工具调用；第三方插件需声明独立 `ai_agent` 与工具双白名单 |
+| `ctx.skills` | `await ctx.skills.list(names)` / `load(name)` / `read_file(name, path)` / `bundled()` | Agent Skills 只读 facade；需声明 `agent_skills`，旧平台为 `None` |
+| `ctx.data_dir` | `ctx.data_dir / "state.sqlite3"` | 插件独享、更新代码不会覆盖的持久化目录 |
 | `ctx.messages` | `await ctx.messages.send(...)` / `apply([...])` | MessageOps facade；具体 helper 取决于交互缓冲或常驻/命令/调度上下文，见下方矩阵 |
-| `ctx.identities` | 通常通过 `resolve_public_sender_identity(ctx, ...)` 间接使用；UserBot 专用场景可调用 `resolve_userbot(...)` | 平台注入的群内安全身份 facade；只返回标签、姓名、管理员状态和解析状态，不向插件开放成员目录 |
+| `ctx.identities` | 通常通过 `resolve_public_sender_identity(ctx, ...)` / `resolve_public_sender_identities(...)` 间接使用；也可直接 `await ctx.identities.resolve(...)` / `resolve_many(...)`，UserBot 专用场景调用 `resolve_userbot(...)` | 平台注入的群内安全身份 facade；只返回标签、姓名、管理员状态和解析状态，不向插件开放成员目录 |
 | `ctx.conversation(...)` | `async with ctx.conversation(peer)` | 仅真实 `TelegramClient` 的 builtin/内部兼容场景可靠；普通安装插件的 `SandboxClient` 不支持其 handler/raw MTProto 要求 |
 
 ### 4.3 `ctx.messages` 上下文 × 方法矩阵
@@ -380,6 +384,14 @@ if not result["ok"]:
 | `agent_tools` | list | Agent 工具名、说明、object JSON Schema、`read_only` 与 `strict`；必须配合 `ai_agent` 权限和 `capabilities.agent_tools` |
 | `agent_keywords` | list | 可选；暴露给系统助手时的路由关键词（最多 6 个） |
 | `strict_trace` | bool | 是否要求路由投递层常驻全链路 trace；默认 `false`，资金类 / `payout` 插件建议开启 |
+| `requires_platform_capabilities` | list | **新装/升级必填**（允许 `[]`），`plugin.json` 与 `Manifest` 同值；可选 `ai` / `interaction_bot` / `webhooks` / `ledger` / `dispatch_debug`。`Manifest` 0.72.0-beta.2 起接受该参数 |
+| `usage` | str | 插件中心展示的详细使用说明；缺失会产生高级规范警告 |
+| `allowed_hosts` | list | `external_http` 的域名白名单，支持 `example.com` / `*.example.com` / `**.example.com`；未填写时不注入 `ctx.http` |
+| `http` | dict | `ctx.http` 扩展策略，目前为 `{"allow_direct": true}`（与账号 `network_mode="direct"` 双门禁才直连） |
+| `config_actions` | list | 配置页动作按钮声明，点击后调用插件 `on_config_action`；也可写在 `config_schema["x-config-actions"]` |
+| `interaction_profile` / `interaction_entries` / `command_fallback` / `preserve_command_trigger` | — | 旧交互入口迁移字段，见下文“旧交互 Bot 兼容声明” |
+| `interaction_send_via` | list | 交互动作可选发送通道的声明性元数据（如 `interaction_bot`、`userbot_reply`）；平台负责执行和审计 |
+| `experimental` | bool | 实验性插件；序列化为 `x-experimental`，前端显示风险标记 |
 
 ### 暴露工具给系统助手（System Agent）
 
@@ -412,9 +424,11 @@ MANIFEST = Manifest(
     key="my_plugin",
     display_name="我的插件",
     version="1.0.0",
+    min_telepilot_version="0.72.0-beta.2",
     author="your_name",
     description="插件功能描述",
     category="interactive",
+    requires_platform_capabilities=[],
     permissions=["send_message", "edit_message", "read_chat"],
     event_subscriptions=[
         {
@@ -582,13 +596,15 @@ POST /api/plugin-config-action-jobs/{job_id}/control  {"action":"pause"|"cancel"
 
 ### Manifest 验证
 
-远程插件安装阶段验证的是 `plugin.json`，不会执行 Python：
+远程插件安装/升级阶段只读 `plugin.json`，不会执行 Python（`remote_plugin_service._read_plugin_metadata` + `_validate_runtime_plugin_shape`）：
 
-```python
-required = ["name 或 key", "version"]
-name_pattern = r"^[A-Za-z0-9_][A-Za-z0-9_-]*$"
-version_pattern = r"^\d+\.\d+\.\d+"
-```
+- `name` 或 `key` 必填其一，格式 `^[A-Za-z0-9_][A-Za-z0-9_-]*$`；`version` 必须以 `x.y.z` 开头；`author` 不超过 255 字符。
+- `requires_platform_capabilities` 必须显式声明（允许 `[]`），值只能是 `ai` / `interaction_bot` / `webhooks` / `ledger` / `dispatch_debug`，缺失报 `PLATFORM_CAPABILITIES_REQUIRED`。
+- `category` 只能是 `interactive` / `automation` / `utility`；`config_schema` 必须是合法的 JSON Schema（Draft 7）；`agent_tools` 的名称、参数 Schema、`read_only` / `strict` / `min_role` 会逐项校验，且必须同时声明 `capabilities.agent_tools` 与 `ai_agent` 权限。
+- 目录必须同时包含 `plugin.json`、`manifest.py`、`plugin.py`、`__init__.py`；`entry` 只能是插件目录下的 `.py` 文件。
+- 安装后还会做一次不阻断的静态 lint：缺少使用说明、硬编码命令前缀、直接 import `app.db` / `app.services`、`httpx` / `requests` 调用缺少 `timeout`、`event_subscriptions` 的未知事件/来源/范围/过滤键、`telegram_native_raw` 缺少 `reason` 等，结果在插件中心显示为规范警告。
+
+运行期加载（worker）在执行 Python 前再读一次 `plugin.json`：目录名必须等于 `name/key`，`min_telepilot_version` 高于当前版本或 `requires_features` 缺失时直接拒绝加载并给出中文原因；导入后还要求 `PLUGIN_CLASS` 是 `Plugin` 子类、`MANIFEST` 是 `Manifest` 实例，且目录名、`MANIFEST.key`、`Plugin.key` 三者一致。
 
 ZIP 上传还会在解压和加载 Python 前执行供应链门禁：
 
@@ -619,8 +635,10 @@ Telegram 来源
   "name": "event_bus_demo",
   "display_name": "Event Bus 示例",
   "version": "0.1.0",
+  "min_telepilot_version": "0.72.0-beta.2",
   "category": "interactive",
   "permissions": ["send_message", "read_chat"],
+  "requires_platform_capabilities": ["interaction_bot"],
   "usage": "启用后按 Event Bus 订阅处理 message/command/callback/inline/payment。",
   "event_subscriptions": [
     {"events": ["message", "command"], "source": ["userbot", "interaction_bot"], "scope": "all_allowed_chats"},
@@ -1316,7 +1334,9 @@ MANIFEST = Manifest(
     key="game24",
     display_name="24点游戏",
     version="1.1.0",
+    min_telepilot_version="0.72.0-beta.2",
     category="interactive",
+    requires_platform_capabilities=["interaction_bot", "ledger"],
     interaction_entries=[
         {
             "key": "start_paid_game",
@@ -2803,9 +2823,11 @@ MANIFEST = Manifest(
     key="weather",
     display_name="天气查询",
     version="1.0.0",
+    min_telepilot_version="0.72.0-beta.2",
     author="community",
     description="查询天气信息，支持城市名",
     permissions=["send_message"],
+    requires_platform_capabilities=[],
     config_schema={
         "type": "object",
         "x-ui-mode": "single",
@@ -2891,8 +2913,36 @@ __all__ = ["PLUGIN_CLASS", "MANIFEST"]
 
 ## 版本与兼容
 
-- `0.x`：开发阶段，允许快速迭代
-- `1.x`：接口稳定后
-- 不要依赖私有内部插件路径
-- 尽量只依赖 `Plugin` / `Manifest` / `PluginContext` 公开契约
-- 新增行为优先通过 `config` 可选项实现
+- `0.x`：开发阶段，允许快速迭代；`1.x`：接口稳定后。
+- 只依赖 `Plugin` / `Manifest` / `PluginContext` 与本文列出的 facade 公开契约，不要依赖私有内部插件路径；新增行为优先通过 `config` 可选项实现。
+
+### `min_telepilot_version` 怎么填
+
+- 宿主在执行插件 Python 之前比较 `plugin.json` 的 `min_telepilot_version`（旧名 `min_telebot_version`），版本不够时拒绝加载并提示“请先更新 TelePilot”。比较只取 `x.y.z` 三段数字，`-beta.N` 后缀不参与比较：写 `0.106.0-beta.12` 与 `0.106.0-beta.1` 效果相同，需要某个 beta 才有的能力必须同时做能力探测。
+- 最低版本要覆盖插件**不做探测就直接使用**的能力。常见门槛（以主仓库 CHANGELOG 为准）：
+
+| 能力 | 最低版本 |
+| --- | --- |
+| `ctx.messages` / 标准 action | 0.33.0 |
+| `event_subscriptions` / `on_event` | 0.40.0 |
+| `config_actions` / `on_config_action` | 0.45.0 |
+| `on_direct_message`（`telegram_direct_passthrough`） | 0.46.0 |
+| `ctx.messages.send_photo` / `send_file` / `edit_caption` | 0.49.13 |
+| `ctx.ai.stream_complete` | 0.51.0 |
+| `ctx.storage`、`ai_components`（QuizMaker / AnswerJudge / PersonaChat） | 0.54.0 |
+| `ctx.ai.run_agent`（`ai_agent`） | 0.56.0 |
+| `ctx.data_dir` | 0.59.1 |
+| `ctx.messages.send_rich` / `send_rich_message` | 0.60.0 |
+| `ctx.identities` | 0.60.6 |
+| `ctx.messages.edit_rich` | 0.67.1 |
+| `Manifest(requires_platform_capabilities=...)` | 0.72.0-beta.2（更早版本导入 manifest 即 `TypeError`） |
+| `ctx.messages.click_callback_button`（`click_bot_button`） | 0.90.0 |
+| `http.allow_direct` | 0.97.0 |
+| `ctx.skills`（`agent_skills`）、识图（`images=` / `fetch_bot_image` / `ai_vision`）、`web_search`、访客模式（`guest_message` / `guest_all` / `answer_guest_query`）、`timeout_seconds` | 0.106.0-beta.1（`complete()` 自 0.73 起忽略未知关键字参数：旧平台上传 `images` / `web_search` / `thinking` 不报错但不生效） |
+| `ctx.ai.complete(thinking=...)`、`AIResponseTruncated` | 0.106.0-beta.2 |
+| 实时 inline 编辑（`live_inline_edit`）、`apply()` 结果的 `errors` | 0.106.0-beta.3 |
+| `compact_tables`（Bot API 10.3 紧凑表格） | 0.106.0-beta.12 |
+
+- 想兼容更旧的平台时不要提高最低版本，而是先探测再用：`getattr(ctx.messages, "rich_table_compact", False)`（紧凑表格）、`getattr(ctx.messages, "live_inline_edit", False)` / `inline_rich_edit`（inline 编辑）、`ctx.skills is None`、`getattr(ctx.ai, "vision_enabled", False)`、`hasattr(ctx.messages, "edit_rich")`，参数级新增（如 `thinking`）用 `inspect.signature` 探测或捕获 `TypeError`。
+- 声明 `requires_platform_capabilities` 的 `manifest.py` 在 0.72 之前的平台上导入就会失败，因此现在所有新插件的最低版本至少是 `0.72.0-beta.2`。
+- 插件仓库 `Anoyou/telebot-plugins` 提供 `scripts/check_host_compat.py`：用本仓库真实的安装校验、loader、沙箱权限与 facade 签名逐个检查插件，并按上表推断最低版本；`TELEPILOT_REPO` 指向本仓库任意历史版本的检出即可验证插件在旧平台能否加载。示例插件也可以用 `--plugins-root examples/plugins` 检查。
