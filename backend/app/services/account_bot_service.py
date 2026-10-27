@@ -57,6 +57,7 @@ from ..settings import settings
 from .event_bus import VALID_EVENT_TYPES
 from .interaction.contracts import send_via_selector_options, unsupported_send_via_values
 from .rich_compact import (
+    apply_table_style_defaults,
     is_compact_unsupported_error,
     rich_message_has_compact_tables,
     strip_compact_tables,
@@ -1893,6 +1894,8 @@ async def _call_rich_bot_api(
 ) -> dict[str, Any]:
     """调用带 rich_message 的 Bot API；紧凑表格被旧版 Bot API 拒绝时去掉后重发一次。
 
+    发送前统一补表格默认样式（带边框 + 隔行着色，见 ``rich_compact`` 模块说明）。
+
     Bot API 10.3 才有 ``is_compact`` / ``<table compact>``。自建或旧版 Bot API 服务器
     明确拒绝（``Bad Request``，请求未生效）且本次 rich_message 确实带紧凑表格时，
     去掉紧凑标记再发一次——这是格式降级，不是写操作重试：网络错误、超时、5xx、
@@ -1900,6 +1903,7 @@ async def _call_rich_bot_api(
     """
 
     extra: dict[str, Any] = {"timeout": timeout} if timeout is not None else {}
+    payload = _with_default_table_style(payload)
     try:
         return await call_bot_api(token, method, payload, **extra)
     except RuntimeError as exc:
@@ -1917,6 +1921,27 @@ async def _call_rich_bot_api(
         )
         container["rich_message"] = strip_compact_tables(rich_message)
         return await call_bot_api(token, method, payload, **extra)
+
+
+def _with_default_table_style(payload: dict[str, Any]) -> dict[str, Any]:
+    """平台默认：rich_message 里的表格一律带边框 + 隔行着色（调用方显式值优先）。
+
+    ``is_bordered`` / ``is_striped``（HTML ``bordered`` / ``striped``）与 Rich Message
+    同在 Bot API 10.1 引入，任何接受 rich_message 的 Bot API 都认识，无需回退。
+    返回新对象，不改动调用方 payload；转换异常时按原样发送。
+    """
+
+    copied = deepcopy(payload)
+    located = _locate_rich_message(copied)
+    if located is None:
+        return payload
+    container, rich_message = located
+    try:
+        container["rich_message"] = apply_table_style_defaults(rich_message)
+    except Exception:  # noqa: BLE001 - 表格样式只是格式增强，失败时保持原样发送
+        log.warning("rich_message 表格默认样式转换失败，按原样发送", exc_info=True)
+        return payload
+    return copied
 
 
 def _locate_rich_message(payload: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]] | None:

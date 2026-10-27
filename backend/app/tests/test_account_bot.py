@@ -930,7 +930,7 @@ async def test_account_bot_send_rich_message_uses_native_bot_api(monkeypatch) ->
                 "html": (
                     "<h1>巡检</h1><ul><li><input type=\"checkbox\" checked>完成</li></ul>"
                     "<details><summary>详情</summary>失败原因</details>"
-                    "<table bordered><tr><th>模型</th><th>状态</th></tr>"
+                    "<table bordered striped><tr><th>模型</th><th>状态</th></tr>"
                     "<tr><td>grok</td><td>正常</td></tr></table>"
                 )
             },

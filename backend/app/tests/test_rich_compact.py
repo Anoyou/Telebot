@@ -1,4 +1,4 @@
-"""Bot API 10.3 紧凑表格（is_compact / <table compact>）：透传、转换开关、默认不输出、回退、管道表格保留边框。"""
+"""富文本表格：默认带边框 + 隔行着色（0.106.0-beta.15），Bot API 10.3 紧凑表格（is_compact / <table compact>）透传、转换开关、回退。"""
 
 from __future__ import annotations
 
@@ -13,11 +13,14 @@ from telethon.tl import functions, types
 from app.services import account_bot_service
 from app.services.rich_compact import (
     apply_compact_tables,
+    apply_table_style_defaults,
     compact_html_tables,
     compact_markdown_tables,
     is_compact_unsupported_error,
     rich_message_has_compact_tables,
     strip_compact_tables,
+    style_html_tables,
+    style_markdown_tables,
 )
 from app.services.rich_message import RichMessageValidationError, normalize_rich_message
 from app.services.telegram_text import parse_rich_message, serialize_rich_message
@@ -47,9 +50,8 @@ PT_MARKDOWN = (
 def test_markdown_pipe_table_becomes_compact_html_block() -> None:
     converted = compact_markdown_tables(PT_MARKDOWN)
 
-    # 管道表格原本带边框渲染：紧凑只缩小内边距，边框必须保留（bordered），不擅自加 striped
-    assert converted.startswith("找到 2 个结果：\n\n<table bordered compact>\n")
-    assert "striped" not in converted
+    # 平台默认带边框 + 隔行着色；紧凑只缩小内边距
+    assert converted.startswith("找到 2 个结果：\n\n<table bordered striped compact>\n")
     assert '<tr><th align="left">标题</th><th align="right">大小</th><th>发布时间</th></tr>' in converted
     assert (
         '<td align="left"><b><a href="https://pt.example.com/details.php?id=1&amp;hit=1">Foo.2024.1080p</a></b></td>'
@@ -87,7 +89,7 @@ def test_markdown_table_keeps_borders_header_and_every_alignment() -> None:
         "| 左 | 右 | 中 | 默认 |\n| :--- | ---: | :---: | --- |\n| a | b | c | d |\n| e | f | g | h |"
     )
 
-    assert converted.splitlines()[0] == "<table bordered compact>"
+    assert converted.splitlines()[0] == "<table bordered striped compact>"
     assert converted.count("<table") == 1 and converted.endswith("</table>")
     assert (
         '<tr><th align="left">左</th><th align="right">右</th><th align="center">中</th><th>默认</th></tr>'
@@ -167,7 +169,7 @@ def test_strip_compact_is_inverse_for_all_formats() -> None:
     assert strip_compact_tables(apply_compact_tables(html)) == html
     stripped = strip_compact_tables(apply_compact_tables(markdown))["markdown"]
     # 回退（去掉紧凑重发）仍保留边框
-    assert "<table bordered>" in stripped and "compact" not in stripped
+    assert "<table bordered striped>" in stripped and "compact" not in stripped
     assert not rich_message_has_compact_tables({"markdown": stripped})
 
 
@@ -219,6 +221,9 @@ async def test_send_rich_compact_tables_flag_only_when_true() -> None:
 def test_live_and_entry_facades_advertise_capability() -> None:
     assert loader_mod._LiveMessageOps.rich_table_compact is True  # noqa: SLF001
     assert loader_mod._InteractionEntryMessageOps.rich_table_compact is True  # noqa: SLF001
+    assert loader_mod._LiveMessageOps.rich_table_default_style is True  # noqa: SLF001
+    assert loader_mod._InteractionEntryMessageOps.rich_table_default_style is True  # noqa: SLF001
+    assert BufferedMessageOps.rich_table_default_style is True
 
 
 def test_normalize_action_applies_and_consumes_compact_tables() -> None:
@@ -232,7 +237,7 @@ def test_normalize_action_applies_and_consumes_compact_tables() -> None:
     normalized = loader_mod._normalize_interaction_action(action)  # noqa: SLF001
 
     assert "compact_tables" not in normalized
-    assert "<table bordered compact>" in normalized["rich_message"]["markdown"]
+    assert "<table bordered striped compact>" in normalized["rich_message"]["markdown"]
     assert action["rich_message"]["markdown"] == PT_MARKDOWN
 
 
@@ -299,8 +304,9 @@ async def test_send_rich_retries_once_without_compact_on_bad_request(monkeypatch
 
     assert result == {"message_id": 9}
     assert len(calls) == 2
-    assert calls[0]["rich_message"]["html"].startswith("<table bordered compact>")
-    assert calls[1]["rich_message"]["html"].startswith("<table bordered>")
+    # 发送时补默认 striped；回退只去掉 compact，边框与隔行着色保留
+    assert calls[0]["rich_message"]["html"].startswith("<table bordered compact striped>")
+    assert calls[1]["rich_message"]["html"].startswith("<table bordered striped>")
 
 
 @pytest.mark.asyncio
@@ -324,8 +330,8 @@ async def test_pt_markdown_table_keeps_borders_on_send_and_fallback(monkeypatch:
 
     assert len(calls) == 2
     first, retry = calls[0]["rich_message"]["markdown"], calls[1]["rich_message"]["markdown"]
-    assert "<table bordered compact>" in first
-    assert "<table bordered>" in retry and "compact" not in retry
+    assert "<table bordered striped compact>" in first
+    assert "<table bordered striped>" in retry and "compact" not in retry
     for body in (first, retry):
         assert '<th align="left">标题</th>' in body and '<th align="right">大小</th>' in body
 
@@ -370,7 +376,10 @@ async def test_guest_answer_fallback_strips_nested_rich_message(monkeypatch: pyt
 
     await account_bot_service.answer_guest_query("123:abc", "q", result=result)
 
-    assert calls[1]["result"]["input_message_content"]["rich_message"]["html"] == "<table>x</table>"
+    assert calls[0]["result"]["input_message_content"]["rich_message"]["html"] == (
+        "<table compact bordered striped>x</table>"
+    )
+    assert calls[1]["result"]["input_message_content"]["rich_message"]["html"] == "<table bordered striped>x</table>"
     # 调用方的候选结果不被改动
     assert result["input_message_content"]["rich_message"]["html"] == "<table compact>x</table>"
 
@@ -435,5 +444,195 @@ async def test_userbot_rich_message_compact_fallback_on_rpc_400() -> None:
     assert len(client.requests) == 2
     first, second = client.requests
     assert isinstance(first, functions.messages.SendMessageRequest)
-    assert first.rich_message.html == "<table compact>x</table>"
-    assert second.rich_message.html == "<table>x</table>"
+    assert first.rich_message.html == "<table compact bordered striped>x</table>"
+    assert second.rich_message.html == "<table bordered striped>x</table>"
+
+
+# -- 默认边框 + 隔行着色（0.106.0-beta.15）-----------------------------------
+
+
+def test_style_markdown_pipe_table_bordered_striped_without_compact() -> None:
+    converted = style_markdown_tables(PT_MARKDOWN)
+
+    assert converted.startswith("找到 2 个结果：\n\n<table bordered striped>\n")
+    assert "compact" not in converted
+    assert '<tr><th align="left">标题</th><th align="right">大小</th><th>发布时间</th></tr>' in converted
+    assert '<td align="right">12.3 GB</td>' in converted
+    assert "</table>\n\n以上按做种数排序。" in converted
+
+
+def test_style_markdown_raw_tags_and_fences() -> None:
+    source = "```\n| a | b |\n|---|---|\n```\n`<table>` 与 <table>x</table>\n<table striped bordered>y</table>"
+    converted = style_markdown_tables(source)
+
+    assert converted.startswith("```\n| a | b |\n|---|---|\n```\n")
+    assert "`<table>`" in converted
+    assert "<table bordered striped>x</table>" in converted
+    assert "<table striped bordered>y</table>" in converted  # 已写全：原样
+    assert style_markdown_tables("# 无表格\n\na | b") == "# 无表格\n\na | b"
+
+
+def test_style_html_fills_missing_and_honours_explicit_false() -> None:
+    assert style_html_tables("<table><tr><td>1</td></tr></table>") == (
+        "<table bordered striped><tr><td>1</td></tr></table>"
+    )
+    assert style_html_tables("<table bordered>x</table>") == "<table bordered striped>x</table>"
+    assert style_html_tables("<table striped compact>x</table>") == "<table striped compact bordered>x</table>"
+    assert style_html_tables("<table bordered striped compact>x</table>") == "<table bordered striped compact>x</table>"
+    # HTML 布尔属性无法表达 false：bordered="false" / striped='0' 视为调用方显式关闭，发送前去掉
+    assert style_html_tables('<table bordered="false">x</table>') == "<table striped>x</table>"
+    assert style_html_tables("<table striped='0' compact>x</table>") == "<table compact bordered>x</table>"
+    assert style_html_tables('<table bordered="no" striped=off>x</table>') == "<table>x</table>"
+    assert style_html_tables('<table bordered="true">x</table>') == '<table bordered="true" striped>x</table>'
+    # 属性值里的同名单词、data-* 属性不算显式指定
+    assert style_html_tables('<table class="bordered" data-striped="1">x</table>') == (
+        '<table class="bordered" data-striped="1" bordered striped>x</table>'
+    )
+    assert style_html_tables("<table/>") == "<table bordered striped />"
+    assert style_html_tables("<p>无表格</p>") == "<p>无表格</p>"
+
+
+def test_style_blocks_fill_missing_keep_explicit_values() -> None:
+    rich = {
+        "blocks": [
+            {"type": "table", "cells": []},
+            {"type": "table", "cells": [], "is_bordered": False, "is_striped": True},
+            {"type": "details", "summary": "更多", "blocks": [{"type": "table", "cells": [], "is_striped": False}]},
+            {"type": "paragraph", "text": "表格"},
+        ]
+    }
+
+    styled = apply_table_style_defaults(rich)
+
+    assert styled["blocks"][0] == {"type": "table", "cells": [], "is_bordered": True, "is_striped": True}
+    assert styled["blocks"][1] == {"type": "table", "cells": [], "is_bordered": False, "is_striped": True}
+    assert styled["blocks"][2]["blocks"][0] == {
+        "type": "table",
+        "cells": [],
+        "is_striped": False,
+        "is_bordered": True,
+    }
+    assert styled["blocks"][3] == {"type": "paragraph", "text": "表格"}
+    assert rich["blocks"][0] == {"type": "table", "cells": []}  # 不修改调用方对象
+    assert normalize_rich_message(styled) == styled  # 补出的字段通过本地校验
+
+
+def test_style_defaults_idempotent_and_compose_with_compact() -> None:
+    for rich in (
+        {"markdown": PT_MARKDOWN},
+        {"html": "<table>x</table>"},
+        {"blocks": [{"type": "table", "cells": []}]},
+    ):
+        once = apply_table_style_defaults(rich)
+        assert apply_table_style_defaults(once) == once
+        compact = apply_table_style_defaults(apply_compact_tables(rich))
+        assert apply_table_style_defaults(compact) == compact
+        assert rich_message_has_compact_tables(compact)
+        dumped = json.dumps(compact, ensure_ascii=False)
+        assert ("bordered" in dumped) and ("striped" in dumped)
+    assert apply_table_style_defaults({"markdown": "纯文本"}) == {"markdown": "纯文本"}
+    assert apply_table_style_defaults(None) is None
+
+
+def test_style_markdown_skipped_when_conversion_exceeds_text_limit() -> None:
+    row = "| " + "x" * 40 + " | " + "y" * 40 + " |\n"
+    source = "| a | b |\n|---|---|\n" + row * 360  # ≈31.7k 字符，转 HTML 后超限
+    assert len(source) <= 32_768
+    assert apply_table_style_defaults({"markdown": source}) == {"markdown": source}
+
+
+@pytest.mark.asyncio
+async def test_bot_api_exits_style_tables_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[str, dict]] = []
+
+    async def call_bot_api(token, method, payload, **kwargs):  # noqa: ANN001, ANN003
+        calls.append((method, json.loads(json.dumps(payload))))
+        return {"message_id": 1, "inline_message_id": "x"}
+
+    monkeypatch.setattr(account_bot_service, "call_bot_api", call_bot_api)
+    md = {"markdown": "| a | b |\n|:-:|--:|\n| 1 | 2 |"}
+
+    await account_bot_service.send_rich_message("123:abc", 1, md)
+    await account_bot_service.send_rich_message_draft("123:abc", 1, 5, md)
+    await account_bot_service.edit_rich_message("123:abc", 1, 2, {"html": "<table>x</table>"})
+    await account_bot_service.edit_inline_rich_message(
+        "123:abc", "inline-1", {"blocks": [{"type": "table", "cells": [], "is_striped": False}]}
+    )
+    guest_result = {
+        "type": "article",
+        "id": "1",
+        "title": "t",
+        "input_message_content": {"rich_message": {"html": '<table bordered="false">x</table>'}},
+    }
+    await account_bot_service.answer_guest_query("123:abc", "q", result=guest_result)
+
+    methods = [method for method, _ in calls]
+    assert methods == ["sendRichMessage", "sendRichMessageDraft", "editMessageText", "editMessageText", "answerGuestQuery"]
+    for _, payload in calls[:2]:
+        body = payload["rich_message"]["markdown"]
+        assert body.startswith("<table bordered striped>\n")
+        assert '<th align="center">a</th><th align="right">b</th>' in body
+    assert calls[2][1]["rich_message"]["html"] == "<table bordered striped>x</table>"
+    assert calls[3][1]["rich_message"]["blocks"][0] == {
+        "type": "table",
+        "cells": [],
+        "is_striped": False,
+        "is_bordered": True,
+    }
+    assert calls[4][1]["result"]["input_message_content"]["rich_message"]["html"] == "<table striped>x</table>"
+    # 调用方对象不被改动
+    assert md == {"markdown": "| a | b |\n|:-:|--:|\n| 1 | 2 |"}
+    assert guest_result["input_message_content"]["rich_message"]["html"] == '<table bordered="false">x</table>'
+
+
+@pytest.mark.asyncio
+async def test_plugin_action_without_compact_gets_default_style_on_send(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[dict] = []
+
+    async def call_bot_api(token, method, payload, **kwargs):  # noqa: ANN001, ANN003
+        calls.append(json.loads(json.dumps(payload)))
+        return {"message_id": 1}
+
+    monkeypatch.setattr(account_bot_service, "call_bot_api", call_bot_api)
+    normalized = loader_mod._normalize_interaction_action(  # noqa: SLF001
+        {"type": "send_rich_message", "chat_id": 1, "rich_message": {"markdown": PT_MARKDOWN}}
+    )
+    assert normalized["rich_message"] == {"markdown": PT_MARKDOWN}  # 归一化层不改，发送出口统一补
+
+    await account_bot_service.send_rich_message("123:abc", 1, normalized["rich_message"])
+
+    body = calls[0]["rich_message"]["markdown"]
+    assert "<table bordered striped>" in body and "compact" not in body
+    assert '<th align="left">标题</th>' in body
+
+
+@pytest.mark.asyncio
+async def test_styled_but_not_compact_rejection_is_not_retried(monkeypatch: pytest.MonkeyPatch) -> None:
+    """bordered/striped 与 Rich Message 同在 Bot API 10.1 引入：没有紧凑时被拒不做降级重发。"""
+
+    call = AsyncMock(side_effect=RuntimeError("Bad Request: can't parse rich message"))
+    monkeypatch.setattr(account_bot_service, "call_bot_api", call)
+    with pytest.raises(RuntimeError):
+        await account_bot_service.send_rich_message("123:abc", 1, {"markdown": PT_MARKDOWN})
+    assert call.await_count == 1
+    sent = call.await_args.args[2]["rich_message"]["markdown"]
+    assert "<table bordered striped>" in sent
+
+
+@pytest.mark.asyncio
+async def test_userbot_exits_style_tables_by_default() -> None:
+    capability = evaluate_rich_message_capability(
+        layer=228, raw_types_available=True, is_premium=True, rich_message_posting=True
+    )
+    client = _MockClient([SimpleNamespace(id=7), SimpleNamespace(id=8)])
+
+    await userbot_send_rich_message(
+        client, -100, {"markdown": "| a |\n|---|\n| 1 |"}, capability=capability
+    )
+    await userbot_send_rich_message(
+        client, -100, {"html": "<table striped=\"false\">x</table>"}, capability=capability
+    )
+
+    first, second = client.requests
+    assert first.rich_message.markdown.startswith("<table bordered striped>\n<tr><th>a</th></tr>")
+    assert second.rich_message.html == "<table bordered>x</table>"

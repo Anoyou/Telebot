@@ -24,6 +24,8 @@ class BufferedMessageOps:
     # 能力标记（0.106.0-beta.12+）：send_rich / edit_rich / answer_guest_query 接受
     # ``compact_tables=True``，标准动作接受 ``compact_tables: true``（Bot API 10.3 紧凑表格）。
     rich_table_compact = True
+    # 能力标记（0.106.0-beta.15+）：平台发送时给所有 rich_message 表格默认补边框 + 隔行着色。
+    rich_table_default_style = True
 
     async def send(
         self,

@@ -321,7 +321,8 @@ async def test_edit_inline_rich_message_payload(monkeypatch) -> None:
     assert captured["payload"]["inline_message_id"] == "im-9"
     assert "chat_id" not in captured["payload"]
     assert "text" not in captured["payload"]
-    assert captured["payload"]["rich_message"]["markdown"].startswith("| a | b |")
+    # 0.106.0-beta.15 起管道表格在发送出口统一转为带边框 + 隔行着色的表格
+    assert captured["payload"]["rich_message"]["markdown"].startswith("<table bordered striped>\n<tr><th>a</th>")
 
 
 def test_llm_error_is_importable() -> None:
