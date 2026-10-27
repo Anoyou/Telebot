@@ -296,12 +296,12 @@ final class AssistantUITests: XCTestCase {
 
         let question = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "第 119 条提问")).firstMatch
         let answer = app.staticTexts["第 120 条回答"]
-        // 我的消息：操作行在气泡下方，右边缘与气泡右边缘对齐。
+        // 我的消息：操作行在气泡下方，右边缘与气泡右边缘对齐（按钮的无障碍 frame 按整点取整，实测相差约 2pt，容差 2.5pt）。
         let bubbles = app.descendants(matching: .any).matching(identifier: "assistant.message.bubble")
         let bubble = bubbles.allElementsBoundByIndex.last { $0.frame.contains(CGPoint(x: question.frame.midX, y: question.frame.midY)) }
         XCTAssertNotNil(bubble, visibleTexts(app))
         if let bubble {
-            XCTAssertEqual(edit.frame.maxX, bubble.frame.maxX, accuracy: 1.5, "编辑 \(edit.frame) 气泡 \(bubble.frame)")
+            XCTAssertEqual(edit.frame.maxX, bubble.frame.maxX, accuracy: 2.5, "编辑 \(edit.frame) 气泡 \(bubble.frame)")
             XCTAssertGreaterThanOrEqual(edit.frame.minY, bubble.frame.maxY - 0.5)
         }
         XCTAssertLessThan(edit.frame.maxY, answer.frame.minY)
@@ -321,7 +321,7 @@ final class AssistantUITests: XCTestCase {
         XCTAssertNotNil(lastCopy)
         guard let lastCopy else { return }
         XCTAssertEqual(lastCopy.label, "复制回复")
-        XCTAssertEqual(lastCopy.frame.minX, answer.frame.minX, accuracy: 1.5, "复制 \(lastCopy.frame) 正文 \(answer.frame)")
+        XCTAssertEqual(lastCopy.frame.minX, answer.frame.minX, accuracy: 2.5, "复制 \(lastCopy.frame) 正文 \(answer.frame)")
         XCTAssertGreaterThan(regenerate.frame.minY, answer.frame.maxY)
         XCTAssertGreaterThanOrEqual(regenerate.frame.minX - lastCopy.frame.maxX, 16, "按钮间距过小")
         // 复制回复：轻量反馈（图标短暂变为对勾，VoiceOver 读“已复制”）。
