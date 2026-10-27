@@ -407,6 +407,7 @@ struct AssistantModelPopover: View {
     @Bindable var panel: AssistantComposerPanelState
 
     static let rowHeight: CGFloat = 58
+    static let rowVerticalInset: CGFloat = 7
     static let compactRowHeight: CGFloat = 50
     /// 界面测试时把每行的 logo 作为单独的无障碍元素暴露（按钮会合并子元素），便于断言家族；VoiceOver 下行的提示里读家族名。
     nonisolated static let exposesLogo = ProcessInfo.processInfo.arguments.contains("--ui-testing")
@@ -431,6 +432,8 @@ struct AssistantModelPopover: View {
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
         .scrollBounceBehavior(.basedOnSize)
+        .contentMargins(.vertical, 0, for: .scrollContent)
+        .environment(\.defaultMinListRowHeight, Self.rowHeight)
         .frame(width: 330, height: min(CGFloat(models.count + 1) * Self.rowHeight, 440))
         .accessibilityIdentifier("assistant.panel.model")
     }
@@ -452,10 +455,12 @@ struct AssistantModelPopover: View {
                     Image(systemName: "checkmark").font(.body.weight(.semibold)).foregroundStyle(.tint)
                 }
             }
-            .frame(minHeight: 44)
+            // 行高固定为 rowHeight（内容 44 ＋ 上下 7 的行内边距）：列表高度按行数计算，模型不多时全部可见、无需滚动。
+            .frame(height: Self.rowHeight - 2 * Self.rowVerticalInset)
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
+        .listRowInsets(EdgeInsets(top: Self.rowVerticalInset, leading: 16, bottom: Self.rowVerticalInset, trailing: 16))
         .accessibilityLabel(label)
         .accessibilityHint("模型家族：\(brand.label)")
         .accessibilityValue(selected ? "已选中" : "")

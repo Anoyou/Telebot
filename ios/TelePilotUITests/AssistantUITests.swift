@@ -207,6 +207,10 @@ final class AssistantUITests: XCTestCase {
         Thread.sleep(forTimeInterval: 0.6)
         assertUnchanged("模型 popover 展开后")
         assertAnchored(modelPanel, to: model, "模型 popover")
+        // 模型不多（7 行）时全部在 popover 内可见、无需滚动：最后一行（无法识别的家族）完整落在 popover 里。
+        let lastRow = app.buttons["assistant.model.option.5"]
+        XCTAssertTrue(lastRow.exists, "最后一个模型行未显示")
+        XCTAssertLessThanOrEqual(lastRow.frame.maxY, modelPanel.frame.maxY + 1, "最后一行被裁切 \(lastRow.frame) / \(modelPanel.frame)")
         for family in ["auto", "openai", "anthropic", "deepseek", "google", "tencent", "unknown"] {
             let logo = app.descendants(matching: .any)["assistant.model.logo.\(family)"].firstMatch
             XCTAssertTrue(logo.exists, "缺少家族 logo：\(family)")
