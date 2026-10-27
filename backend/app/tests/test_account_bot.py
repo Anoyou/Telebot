@@ -7436,6 +7436,56 @@ def test_event_bus_payload_removes_raw_event_backdoor_without_native_raw_capabil
     assert payload["native_raw_meta"]["reason_code"] == "native_raw_not_allowed"
 
 
+@pytest.mark.asyncio
+async def test_event_bus_account_state_and_payload_carry_admin_user_ids() -> None:
+    """Event Bus 插件 payload 带账号本人与 TelePilot 管理员（本人 + sudo）的 user id。"""
+
+    class _Result:
+        def __init__(self, rows):
+            self._rows = rows
+
+        def scalars(self):
+            return self
+
+        def all(self):
+            return self._rows
+
+    class _DB:
+        async def get(self, _model, _aid):
+            return SimpleNamespace(tg_user_id=111)
+
+        async def execute(self, _stmt):
+            return _Result([SimpleNamespace(tg_user_id=222)])
+
+    incoming = account_bot_runtime.Incoming(
+        account_id=91,
+        token="123:token",
+        update_id=1,
+        user_id=20,
+        chat_id=-100,
+        message_id=30,
+        text="hi",
+    )
+    original = account_bot_service.list_bot_users
+    account_bot_service.list_bot_users = AsyncMock(return_value=[])
+    try:
+        state = await account_bot_runtime._event_bus_account_state(_DB(), incoming, {"enabled": True})
+    finally:
+        account_bot_service.list_bot_users = original
+        account_bot_runtime._EVENT_BUS_SUDO_USERS_CACHE.pop(91, None)
+
+    assert state["owner_user_ids"] == [111]
+    assert state["admin_user_ids"] == [111, 222]
+    payload: dict[str, Any] = {}
+    account_bot_runtime._attach_event_bus_admin_ids(payload, state)
+    assert payload["owner_user_ids"] == [111]
+    assert payload["admin_user_ids"] == [111, 222]
+    # 已有字段（规则链路）不覆盖
+    existing = {"owner_user_ids": [5], "admin_user_ids": [5]}
+    account_bot_runtime._attach_event_bus_admin_ids(existing, state)
+    assert existing == {"owner_user_ids": [5], "admin_user_ids": [5]}
+
+
 def test_event_bus_payload_includes_native_raw_only_for_declared_capability(monkeypatch) -> None:
     raw = {"update_id": 10, "message": {"text": "hello"}}
     incoming = account_bot_runtime.Incoming(

@@ -77,11 +77,33 @@ async def test_list_providers_redacts_sensitive_metadata() -> None:
     assert "api_key_enc" not in payload
     assert "base_url" not in payload
     assert "proxy_url" not in payload
-    assert providers[0].models == [{"id": "gpt-test", "label": "Test"}]
+    assert providers[0].models == [{"id": "gpt-test", "label": "Test", "enabled": True}]
     assert "encrypted-secret" not in encoded
     assert "secret-base" not in encoded
     assert "user:pass" not in encoded
     assert "model-secret" not in encoded
+
+
+@pytest.mark.asyncio
+async def test_list_providers_exposes_model_enabled_flag() -> None:
+    """插件需要区分已启用 / 未启用模型（例如“换模型重试”菜单只列已启用模型）。"""
+
+    async def _loader():
+        return {
+            1: _provider(
+                1,
+                models=[
+                    {"id": "on-model", "enabled": True, "api_key_enc": "model-secret"},
+                    {"id": "off-model", "enabled": False},
+                ],
+            )
+        }
+
+    facade = PluginAI(account_id=7, plugin_key="demo", provider_loader=_loader)
+
+    providers = await facade.list_providers()
+
+    assert providers[0].models == [{"id": "on-model", "enabled": True}, {"id": "off-model", "enabled": False}]
 
 
 @pytest.mark.asyncio

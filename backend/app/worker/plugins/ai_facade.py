@@ -76,6 +76,9 @@ _SAFE_MODEL_KEYS = frozenset(
         "modality",
         "max_tokens",
         "context_window",
+        # 0.106.0-beta.13+：插件据此只列出 Provider 里已启用的模型（例如“换模型重试”菜单），
+        # 未启用模型传给 complete(model=...) 会被拒绝。
+        "enabled",
     }
 )
 

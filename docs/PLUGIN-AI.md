@@ -138,7 +138,7 @@ result = await ctx.ai.run_agent(
 
 - `ctx.ai.complete()` 复用平台 LLM Provider 池、fallback 链、账号级预算和 usage 记录。
 - 插件传入的 `max_tokens` 与超时会被平台上限收紧，不能绕过账号配额。
-- `ctx.ai.list_providers()` 只返回脱敏元数据，例如 provider 名称、默认模型、标签和成本层级。
+- `ctx.ai.list_providers()` 只返回脱敏元数据，例如 provider 名称、默认模型、标签和成本层级；`models[]` 只含 `id`、`name`、`label`、`display_name`、`modality`、`max_tokens`、`context_window` 与 `enabled`（0.106.0-beta.13+，插件据此只列已启用模型——未启用模型传给 `complete(model=...)` 会被拒绝）。
 - 插件不会拿到 `api_key_enc`、明文 API Key、`base_url` 或代理 URL。
 - 不要在插件日志里记录用户完整隐私输入或模型完整输出；需要排障时只记录长度、截断摘要或 request id。
 

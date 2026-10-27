@@ -1682,6 +1682,7 @@ Contract Guard 不是公共插件市场式硬沙箱，而是个人可信插件�
 | `trigger` | 命中的规则、入口、消息和触发类型；用于排障和幂等 |
 | `session` | 平台会话标识、作用域、TTL 和数据；插件内部状态 key 应与它一致 |
 | `raw` | 脱敏后的 Telegram 更新摘要，只用于排障，不作为常规业务字段 |
+| `owner_user_ids` / `admin_user_ids` | 交互 Bot Event Bus 投递（0.106.0-beta.13+）同样带上：`owner_user_ids` 是账号本人的 Telegram user id，`admin_user_ids` 是 TelePilot 管理员（账号本人 + 已授权 sudo 用户），与 UserBot 分发状态同义；只含 user id。插件可据此实现“仅 TelePilot 管理员可点”的按钮；群管理员另用 `ctx.identities.resolve(...).is_admin` 判断。旧平台没有这两个字段 |
 
 `payload_contract` 用来声明插件对上述信封的要求。平台和前端可以据此校验规则是否能保存，排障时也能判断是“事件没到”还是“字段不满足”。不要把敏感原文、Bot Token、完整付款通知文本写进信封；只传插件业务需要的结构化字段。
 
@@ -2943,6 +2944,7 @@ __all__ = ["PLUGIN_CLASS", "MANIFEST"]
 | `ctx.ai.complete(thinking=...)`、`AIResponseTruncated` | 0.106.0-beta.2 |
 | 实时 inline 编辑（`live_inline_edit`）、`apply()` 结果的 `errors` | 0.106.0-beta.3 |
 | `compact_tables`（Bot API 10.3 紧凑表格） | 0.106.0-beta.12 |
+| Event Bus payload 的 `owner_user_ids` / `admin_user_ids`（交互 Bot 投递）、`ctx.ai.list_providers()` 模型 `enabled` | 0.106.0-beta.13（探测：字段是否存在） |
 
 - 想兼容更旧的平台时不要提高最低版本，而是先探测再用：`getattr(ctx.messages, "rich_table_compact", False)`（紧凑表格）、`getattr(ctx.messages, "live_inline_edit", False)` / `inline_rich_edit`（inline 编辑）、`ctx.skills is None`、`getattr(ctx.ai, "vision_enabled", False)`、`hasattr(ctx.messages, "edit_rich")`，参数级新增（如 `thinking`）用 `inspect.signature` 探测或捕获 `TypeError`。
 - 声明 `requires_platform_capabilities` 的 `manifest.py` 在 0.72 之前的平台上导入就会失败，因此现在所有新插件的最低版本至少是 `0.72.0-beta.2`。
