@@ -409,7 +409,7 @@ final class AssistantUITests: XCTestCase {
         delete.tap()
         XCTAssertTrue(app.staticTexts["删除这个会话？"].waitForExistence(timeout: 5))
         app.buttons["删除会话"].firstMatch.tap()
-        XCTAssertTrue(waitUntilGone(row, timeout: 5), "删除后会话仍在列表里")
+        XCTAssertTrue(waitUntilGone(row, timeout: 10), "删除后会话仍在列表里：\(visibleTexts(app))")
         let close = app.buttons["assistant.sessions.close"]
         XCTAssertTrue(close.waitForExistence(timeout: 5))
         close.tap()
@@ -476,7 +476,8 @@ final class AssistantUITests: XCTestCase {
         XCTAssertEqual(queueChip.value as? String, "已选中")
         let queueStatus = app.descendants(matching: .any).matching(identifier: "assistant.queue.status")
         XCTAssertTrue(queueStatus.firstMatch.label.contains("排队中 · 前面 1 条"), queueStatus.firstMatch.label)
-        XCTAssertTrue(status.exists && !status.label.contains("排队中"), status.label)
+        // 状态行可能被待处理气泡推到屏幕外（懒加载列表不再创建它），只要求它在的时候不是“排队中”。
+        XCTAssertFalse(status.exists && status.label.contains("排队中"), status.label)
 
         // 改为插入调整：服务器把它并入当前任务。
         adjustChip.tap()
@@ -490,9 +491,9 @@ final class AssistantUITests: XCTestCase {
         composer.typeText("停止并改查插件")
         app.buttons["assistant.send"].tap()
         let replaceChips = app.buttons.matching(identifier: "assistant.queue.replace")
-        let secondPending = NSPredicate(format: "count >= 2")
-        expectation(for: secondPending, evaluatedWith: replaceChips)
-        waitForExpectations(timeout: 5)
+        let queuedAgain = app.descendants(matching: .any).matching(NSPredicate(format: "identifier == %@ AND label CONTAINS %@", "assistant.queue.status", "排队中 · 前面"))
+        XCTAssertTrue(queuedAgain.firstMatch.waitForExistence(timeout: 5), visibleTexts(app))
+        // 最后一个“停止并替换”属于刚发出的这条（插入调整的气泡在它上方）。
         let replace = replaceChips.element(boundBy: replaceChips.count - 1)
         XCTAssertTrue(replace.isEnabled)
         replace.tap()

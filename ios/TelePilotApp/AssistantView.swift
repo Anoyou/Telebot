@@ -237,6 +237,20 @@ struct AssistantView: View {
                         withAnimation { proxy.scrollTo("assistant.bottom", anchor: .bottom) }
                     }
                 }
+                // 第八轮：任务开始、出现新的待处理消息时滚到底部，让回答位置的状态行与待处理气泡可见。
+                .onChange(of: store.runID) { _, id in
+                    guard id != nil else { return }
+                    pinnedToBottom = true
+                    scrollToBottomAfterLayout(proxy)
+                }
+                .onChange(of: store.pendingQueue.count + store.steered.count) { old, new in
+                    guard new > old else { return }
+                    pinnedToBottom = true
+                    scrollToBottomAfterLayout(proxy)
+                }
+                .onChange(of: store.liveStatus?.text) { _, _ in
+                    if pinnedToBottom { scrollToBottomAfterLayout(proxy) }
+                }
                 // 首屏之后逐帧向上追加更早的消息：仍贴底时补滚一次，保证停在最新一条。
                 .onChange(of: store.revealStart) { _, _ in
                     if pinnedToBottom { scrollToBottomAfterLayout(proxy) }
@@ -1105,9 +1119,12 @@ private struct AssistantSessionsView: View {
             isPresented: Binding(get: { pendingDelete?.id == item.id }, set: { if !$0 { pendingDelete = nil } }),
             titleVisibility: .visible,
             presenting: pendingDelete
-        ) { item in
+        ) { _ in
+            // 用本行自己的会话 ID：点按时 SwiftUI 会先把 pendingDelete 置空，不依赖呈现数据。
             Button("删除会话", role: .destructive) {
-                Task { await store.deleteSession(id: item.id, model: model) }
+                let id = item.id
+                pendingDelete = nil
+                Task { await store.deleteSession(id: id, model: model) }
             }
         } message: { item in
             Text("“\(AssistantRedaction.text(item.text("title").nilIfEmpty ?? "新会话"))”及其全部消息会从服务器删除，此操作不可撤销。")
