@@ -1014,6 +1014,43 @@ async def test_model_router_only_allows_confirmed_cross_provider(monkeypatch) ->
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("needs_tools", (True, False))
+async def test_ambiguous_followup_routes_with_previous_result(monkeypatch, needs_tools) -> None:
+    primary, _fallback = _providers()
+    previous_result = "查询结果被截断，无法确认全部模型。"
+    captured = []
+
+    async def invoke(_provider, _providers, request, **_kwargs):  # noqa: ANN001
+        captured.append(request)
+        answer = (
+            '{"needs_tools":true,"domains":["logs"],"reason":"补全查询"}'
+            if needs_tools else '{"needs_tools":false,"domains":[],"reason":"仅整理已有完整数据"}'
+        )
+        return ModelResponse(
+            model=request.model, content=(TextContent(answer),), usage=ModelUsage()
+        ), primary, False
+
+    monkeypatch.setattr(runtime_module, "invoke_structured", invoke)
+    route = await SystemAgentRuntime(_registry())._resolve_tool_route(
+        provider_dto=primary,
+        providers={primary.id: primary},
+        model=primary.default_model,
+        user_text="我要完整的，去重后只保留名字",
+        memory_state={
+            "last_domains": ["logs"],
+            "last_user_goal": "查询全部模型",
+            "last_result": previous_result,
+        },
+        all_tool_specs=_registry().list_for(channel="web", role="admin"),
+        account_id=None,
+    )
+    assert len(captured) == 1
+    assert previous_result in captured[0].messages[1].text_content()
+    assert route.domains == (("logs",) if needs_tools else ())
+    assert route.source == "model"
+
+
+@pytest.mark.asyncio
 async def test_model_router_timeout_keeps_explicit_web_intent(monkeypatch) -> None:
     primary, fallback = _providers()
 

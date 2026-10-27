@@ -154,9 +154,11 @@ def update_session_memory(
         session.memory_summary = trim_summary_to_limit(combined)
     recent_turns = recent_turns[-RECENT_TURNS_BEFORE_COMPACTION:]
     prev_rev = int(state.get("summary_rev") or 0)
+    # 无工具的回答不抹掉最近工具领域，后续追问仍可回到原任务。
+    last_domains = domains or state.get("last_domains") or []
     state.update(
         {
-            "last_domains": list(dict.fromkeys(str(item) for item in domains))[:3],
+            "last_domains": list(dict.fromkeys(str(item) for item in last_domains))[:3],
             "last_user_goal": user,
             "last_result": result,
             "recent_tools": recent_tools[-6:],

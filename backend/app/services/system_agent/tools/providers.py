@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from sqlalchemy import select
@@ -77,6 +78,8 @@ def _reject_request_headers(args: dict[str, Any]) -> None:
 
 
 async def list_providers(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
+    if args.get("view") == "models":
+        return await _list_model_names(ctx, args)
     limit = clamp_limit(args.get("limit"), default=50, maximum=200)
     q = select(LLMProvider).order_by(LLMProvider.id.asc()).limit(limit)
     result = await ctx.db.execute(q)
@@ -85,6 +88,56 @@ async def list_providers(ctx: ToolContext, args: dict[str, Any]) -> dict[str, An
         "count": len(rows),
         "providers": [_provider_view(r) for r in rows],
         "note": "不返回 API Key 明文；has_api_key 表示是否已配置。",
+    }
+
+
+async def _list_model_names(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
+    limit = clamp_limit(args.get("limit"), default=100, maximum=200)
+    try:
+        offset = max(0, int(args.get("offset", 0)))
+    except (TypeError, ValueError):
+        raise ValueError("offset 必须是非负整数") from None
+    strip_prefix = bool(args.get("strip_prefix", False))
+    # 模型视图不读取凭据或 Provider 配置；limit 作用于合并后的模型名，而非 Provider。
+    result = await ctx.db.execute(
+        select(LLMProvider.default_model, LLMProvider.models).order_by(LLMProvider.id.asc())
+    )
+    names: set[str] = set()
+    for row in result.all():
+        candidates = [row.default_model] + [
+            item.get("id") for item in (row.models or []) if isinstance(item, dict)
+        ]
+        for value in candidates:
+            name = str(value or "").strip()
+            if strip_prefix:
+                name = name.rsplit("/", 1)[-1].strip()
+            if name:
+                names.add(name)
+    ordered = sorted(names)
+    page: list[str] = []
+    # 给分页元数据留余量，远低于 runtime 的 8000 字符门禁；按 JSON 转义后计数。
+    page_chars = 2
+    for name in ordered[offset : offset + limit]:
+        size = len(json.dumps(name, ensure_ascii=False)) + (2 if page else 0)
+        if page_chars + size > 6000:
+            if not page:
+                raise ValueError("单个模型名称超过安全输出长度，无法完整返回")
+            break
+        page.append(name)
+        page_chars += size
+    next_offset = offset + len(page)
+    has_more = next_offset < len(ordered)
+    return {
+        "view": "models",
+        "count": len(page),
+        "offset": offset,
+        "limit": limit,
+        "total": len(ordered),
+        "has_more": has_more,
+        "next_offset": next_offset if has_more else None,
+        "strip_prefix": strip_prefix,
+        # 事件/记忆摘要只保留开头；分页状态必须先于模型数组，便于下一轮续查。
+        "models": page,
     }
 
 
@@ -454,11 +507,40 @@ def register(registry: ToolRegistry) -> None:
         ToolSpec(
             name="providers.list",
             channels=("web",),
-            description="列出全部模型提供商（脱敏）：ID/名称/模型清单/has_api_key/tools 支持情况。无需 ID 或名称筛选。",
+            description=(
+                "列出全部模型提供商（脱敏）：默认返回 ID/名称/模型清单/has_api_key/tools 支持情况。"
+                "用户要完整模型名单时必须使用 view='models'，仅返回所有 Provider 的模型名称"
+                "（含默认模型与未启用模型），排序去重后分页；strip_prefix=true 可先去掉最后一个 '/'"
+                "及之前的前缀再去重。offset 从 0 开始，limit 默认 100、最多 200；"
+                "建议 limit=200 提高读取效率，字符预算可能使 count 小于 limit。"
+                "保持参数不变，用 next_offset 翻页直到 has_more=false；若安全预算耗尽仍有更多结果，"
+                "必须说明未完成并报告 next_offset/total，用户继续时从该游标续查，不得从 0 重读。"
+                "合并全部页后才能声称完整；total 为去重后总数。无需 ID 或名称筛选。"
+            ),
             input_schema={
                 "type": "object",
                 "properties": {
-                    "limit": {"type": "integer"},
+                    "view": {
+                        "type": "string",
+                        "enum": ["providers", "models"],
+                        "default": "providers",
+                        "description": "默认 Provider 配置列表；完整模型名单使用 models 紧凑分页视图。",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "条数上限，沿用 1–200 的钳制范围：默认视图为 Provider 数（默认 50）；models 为模型名数（默认 100），可因字符预算提前分页。",
+                    },
+                    "offset": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "default": 0,
+                        "description": "仅 models 视图：去重排序后模型名的起始位置，后续使用返回的 next_offset。",
+                    },
+                    "strip_prefix": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": "仅 models 视图：先去除最后一个 '/' 及之前的前缀，再全局去重；默认保留完整模型 ID。",
+                    },
                 },
                 "additionalProperties": False,
             },

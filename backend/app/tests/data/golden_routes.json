@@ -73,19 +73,19 @@
   },
   {
     "text": "今天天气怎么样",
-    "expect": "no_tools"
+    "expect": "model_route"
   },
   {
     "text": "讲个笑话",
-    "expect": "no_tools"
+    "expect": "model_route"
   },
   {
     "text": "你好",
-    "expect": "no_tools"
+    "expect": "model_route"
   },
   {
     "text": "谢谢",
-    "expect": "no_tools"
+    "expect": "model_route"
   },
   {
     "text": "show me the ledger balance",
@@ -349,7 +349,7 @@
   },
   {
     "text": "把 gateway 的 timeout 改一下",
-    "expect": "no_tools"
+    "expect": "model_route"
   },
   {
     "text": "日志咋样了",
@@ -373,7 +373,7 @@
   },
   {
     "text": "系统忙不忙",
-    "expect": "no_tools"
+    "expect": "model_route"
   },
   {
     "text": "那账号呢",

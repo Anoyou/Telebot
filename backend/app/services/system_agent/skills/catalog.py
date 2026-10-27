@@ -369,6 +369,9 @@ BUILTIN_SKILLS: tuple[SkillSpec, ...] = (
         ),
         instructions=(
             "先查询现有 Provider；排障请求优先只读查询与验证，不主动生成无关写操作。",
+            "用户首次要全部/完整模型名单时，直接使用 providers.list(view='models', offset=0, limit=200) 提高读取效率，避免默认配置列表因体积过大被截断；该视图包含默认模型与未启用模型，不代表测活结果。用户要求去掉 '/' 前缀时加 strip_prefix=true（去掉最后一个 '/' 及之前的部分并去重），否则保留完整模型 ID。",
+            "紧凑模型查询必须保持 view/strip_prefix/limit 不变，以返回的 next_offset 继续翻页直到 has_more=false；字符预算可能让 count 小于 limit，不能据此停止。合并所有页并核对 total 后才能声称完整，不得把首屏或 truncated 预览当成完整名单。",
+            "必须遵守安全步数与工具预算；预算耗尽而最后一页仍 has_more=true 时，明确告知查询未完成，报告 next_offset、total 和当前查询参数。用户要求继续时，沿上一轮报告或工具摘要中的 next_offset 读取并合并已有结果，不要从 offset=0 重读；不得自动另起循环绕过预算。",
             "用户发送新 Base URL 与 API Key 要求测活时，必须调用 providers.probe_and_add；该工具会在成功后直接生成是否添加的确认操作，失败时不得再调用 providers.save。",
             "任何回复都不得复述 API Key 或掩码；已有 Provider 的单纯复测使用 providers.verify。",
             "用户要求巡检/测活全部或多个 Provider 的模型（如“全部模型能不能用”）时调用 providers.patrol：它只生成待确认操作，确认后才真实调用上游并消耗额度；可用 provider_ids/models 缩小范围。",

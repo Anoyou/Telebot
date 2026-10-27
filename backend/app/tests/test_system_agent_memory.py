@@ -67,6 +67,24 @@ def test_clear_session_memory_resets_summary_and_state() -> None:
     assert memory_context(session) == ""
 
 
+def test_no_tool_turn_preserves_last_tool_domain_for_followups() -> None:
+    session = SimpleNamespace(memory_summary="", memory_state={}, account_id=None)
+    for text, domains in (
+        ("查询全部模型", ["providers"]),
+        ("谢谢", []),
+        ("你能做什么", []),
+    ):
+        update_session_memory(
+            session, user_text=text, assistant_text="回复", domains=domains, tool_events=[]
+        )
+        assert session.memory_state["last_domains"] == ["providers"]
+    assert session.memory_state["last_user_goal"] == "你能做什么"
+    update_session_memory(
+        session, user_text="看运行日志", assistant_text="日志", domains=["logs"], tool_events=[]
+    )
+    assert session.memory_state["last_domains"] == ["logs"]
+
+
 def test_regenerate_context_excludes_the_latest_turn() -> None:
     session = SimpleNamespace(
         memory_summary="",

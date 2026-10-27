@@ -1214,6 +1214,15 @@ class SystemAgentRuntime:
                     {
                         "last_domains": memory_state.get("last_domains"),
                         "last_user_goal": memory_state.get("last_user_goal"),
+                        "last_result": str(memory_state.get("last_result") or "")[:600],
+                        "recent_turns": [
+                            {
+                                "goal": str(item.get("goal") or "")[:500],
+                                "result": str(item.get("result") or "")[:600],
+                            }
+                            for item in (memory_state.get("recent_turns") or [])[-2:]
+                            if isinstance(item, dict)
+                        ],
                     },
                     ensure_ascii=False,
                     default=str,

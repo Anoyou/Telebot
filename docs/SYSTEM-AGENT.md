@@ -100,7 +100,7 @@ System Agent 使用四层上下文，并按预算持久化历史窗口：
 
 1. **短期上下文**：按时间顺序携带成功/已完成消息，不再限制为最近 8 条。构建请求时从 `session_token_limit` 预留 system、本轮输入和图片预算；历史超预算时一次丢弃至少 25% 并对齐下一条 user 消息，将窗口起点保存到 `memory_state.context_start_message_id`，后续不重新加载已裁掉的历史。Agent 执行过程仍受会话 token **增量预算**约束。
 2. **滚动压缩摘要**：`memory_summary` 吸收移出短期窗口的旧成功轮次；超 2000 字符时后台 LLM 压缩为状态式描述（`source=system_agent_memory`，失败静默降级）；硬上限 3000 字符，按「`- 用户目标：`」条目边界丢最旧条，避免半条记录。`memory_state.summary_rev` 用于压缩写回的乐观并发。
-3. **结构化工作记忆**：`memory_state` 保存最近工具领域、用户目标、结果、工具摘要与账号上下文，用于“把它停掉”“继续刚才那个”等指代请求。
+3. **结构化工作记忆**：`memory_state` 保存最近工具领域、用户目标、结果、工具摘要与账号上下文，用于“把它停掉”“继续刚才那个”等指代请求。无工具轮次保留最近工具领域，进入其他领域时更新，清空会话时重置。
 4. **长期偏好**：表 `system_agent_user_memory`（按 web_user / bot_tg_user 分 scope，每 scope ≤20 条）。在本轮上下文中、会话记忆之前注入 enabled 条目（总量 ≤600 字符）。Web 可在助手「配置 → 长期记忆」管理；工具 `memory.list` / `memory.save` / `memory.delete`（写操作走 Action 确认）。密钥样式内容拒绝保存。
 
 后台摘要压缩是独立任务：执行时重新读取全局 System Agent Provider/模型配置，不继承用户本轮的固定模型或客户端覆盖；其用量来源为 `system_agent_memory`，不同于主回答和本轮分类。
@@ -120,7 +120,7 @@ System Agent 使用四层上下文，并按预算持久化历史窗口：
 
 - 工具按前缀划分为账号、交互规则、Scheduler、日志、台账、Provider、插件、系统运维等领域。
 - 常见中文/英文请求先本地关键词路由；普通问答、帮助和闲聊发送 **0 个工具定义**。
-- 本地无法判断且存在操作意图时，使用轻量模型路由器，最多选择 3 个领域。
+- 本地无法判断且存在操作意图，或已有工具领域上下文而当前追问未命中关键词时，使用轻量模型路由器，最多选择 3 个领域。路由器会结合最近目标与结果判断补充要求：结果截断、遗漏或未完成时保留补查工具，仅整理已有完整数据时可不使用工具。
 - 模型路由失败时优先复用结构化记忆中的最近领域，否则安全降级为不带工具的直接回答。
 - 主 Agent 只接收所选领域的工具 Schema，不再每轮固定携带全部已注册工具。
 - 内置领域技能覆盖账号、管理 Bot、访问控制、功能/插件配置、风控、规则、定时任务、Provider、指令、插件仓库、系统设置、系统运维、诊断和联网检索等管理面。每轮最多加载 2 个技能、暴露 16 个工具；技能只补充处理流程和澄清规则，不能扩大 ToolRoute 权限，也不复制工具 Schema 或业务校验。
@@ -150,7 +150,7 @@ System Agent 使用四层上下文，并按预算持久化历史窗口：
 | `interaction.list_rules` / `get_rule` / `list_active_sessions` | 交互规则与活跃会话（账号 JSON，非 Rule 表） |
 | `rules.list` / `rules.get` / `rules.dry_run` | 通用 Rule 查询与无副作用试运行（拒绝 `feature_key=interaction`） |
 | `scheduler.list` / `scheduler.get` | 定时任务与 `next_run_at` |
-| `providers.list` | 脱敏 Provider 与 tools 模型 |
+| `providers.list` | 脱敏 Provider 与 tools 模型；`view="models"` 紧凑查询模型名称，`strip_prefix=true` 去供应商前缀后去重；按 `next_offset` 翻页至 `has_more=false`。分页进度置于结果前部，触及执行预算时报告未完成，用户继续后从该游标接着读取 |
 | `usage.recent` / `usage.plugins` / `usage.reset` | 查询近期 LLM 调用、插件用量与重置用量；近期调用包含实际 backend 与脱敏 Gateway 元数据 |
 | `commands.list` | 自定义指令与启用账号 |
 | `features.get_account_status` | 账号功能/插件启停矩阵 |

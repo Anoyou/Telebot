@@ -152,6 +152,37 @@ def test_generic_disagreement_without_memory_does_not_expose_tools() -> None:
     assert route.domains == ()
 
 
+@pytest.mark.parametrize(
+    "text",
+    (
+        "我要完整的去掉供应商后去重的 比如 x-ai/gork4.6 只需给我grok4.6即可",
+        "我要完整的，去重后只保留名字",
+        "用表格展示，遗漏的也要补全",
+    ),
+)
+def test_ambiguous_followup_uses_semantic_router_instead_of_dropping_tools(text: str) -> None:
+    assert route_locally(
+        text,
+        available={"providers", "logs"},
+        memory_state={"last_domains": ["providers"]},
+    ) is None
+
+
+def test_help_after_tool_turn_still_uses_no_tools() -> None:
+    assert route_locally(
+        "你能做什么？",
+        available={"providers", "logs"},
+        memory_state={"last_domains": ["providers"]},
+    ) == ToolRoute((), "local", "general_help")
+
+
+@pytest.mark.parametrize("text", ("你好", "谢谢", "讲个笑话", "今天天气怎么样"))
+def test_chat_without_tool_history_still_uses_no_tools(text: str) -> None:
+    assert route_locally(text, available={"providers", "logs"}) == ToolRoute(
+        (), "local", "no_live_system_data_needed"
+    )
+
+
 def test_model_route_parses_json_and_limits_to_three_domains() -> None:
     route = parse_model_route(
         '说明文字 {"needs_tools":true,"domains":["logs","ledger","system","rules","logs"],"reason":"query"}',
