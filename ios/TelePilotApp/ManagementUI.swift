@@ -224,8 +224,14 @@ struct ManagementActionLink: View {
     var symbol: String? = nil
     var body: some View {
         NavigationLink { ManagementFormView(action: action) } label: {
-            Label(action.title, systemImage: symbol ?? Self.defaultSymbol(action))
-                .foregroundStyle(action.destructive ? Color.red : Color.primary)
+            // 文字与图标分开着色：普通操作文字用主色、图标沿用强调色（与同组 collection／NavigationLink 行一致）；
+            // 此前整个 Label 设 Color.primary，图标也被染成白色（「修改管理员密码」等行与同组橙色图标不一致）。
+            Label {
+                Text(action.title).foregroundStyle(action.destructive ? Color.red : Color.primary)
+            } icon: {
+                Image(systemName: symbol ?? Self.defaultSymbol(action))
+                    .foregroundStyle(action.destructive ? Color.red : Color.accentColor)
+            }
         }
     }
     static func defaultSymbol(_ action: ManagementAction) -> String {

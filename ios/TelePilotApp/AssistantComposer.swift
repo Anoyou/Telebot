@@ -13,8 +13,10 @@ struct AssistantAttachment: Identifiable {
 /// - 上方是多行 `TextField`（1–8 行自动增高）；下方一行工具栏：左下「+」添加附件，紧挨着的是模型胶囊
 ///   （显示「供应商 · 模型」全名，过长时中间省略，可变宽），右下发送按钮（任务执行中且输入为空时变为停止）。
 /// - 「+」与模型都是普通 `Button`，点按后弹出系统原生 popover（第九轮）：`.popover(isPresented:attachmentAnchor:arrowEdge: .bottom)`
-///   ＋`.presentationCompactAdaptation(.popover)`，iPhone 上也是锚定在按钮上方的原生气泡（iOS 26 自带 Liquid Glass、
-///   箭头指向按钮、系统锚定动画）。不用系统 `Menu`（Menu 会从玻璃里的标签“变形”弹出／收回，第六、七轮的根因），
+///   ＋`.presentationCompactAdaptation(.popover)`，iPhone 上也是原生气泡（iOS 26 自带 Liquid Glass、系统锚定动画）。
+///   第十轮：popover 不再锚定在按钮本身，而是锚定在输入栏卡片**顶边**上、按钮正上方的一个 2pt 隐形锚点
+///   （`popoverAnchor`）：气泡整体在卡片之上，不再压住输入框；「+」贴近屏幕左缘，锚点 x 至少离屏幕左缘
+///   `arrowMinScreenX`，让箭头落在气泡底边的平直段，而不是落进气泡左下的大圆角里（真机上箭头与圆角连接处扭曲）。不用系统 `Menu`（Menu 会从玻璃里的标签“变形”弹出／收回，第六、七轮的根因），
 ///   也不再自绘卡片、水滴尖、模糊缩放动画和 40% 半透明按钮。popover 由系统在独立的呈现层显示，输入栏布局不受影响。
 /// - 第八轮去掉了执行中的“发送方式”按钮：上一轮未结束时发出的消息先进入排队，在对话里的待处理气泡下选择
 ///   排队／插入调整／停止并替换；任务等待补充信息时，发出的消息自动作为补充信息提交。
@@ -36,6 +38,16 @@ struct AssistantComposer: View {
     @State private var pendingAttach: AssistantAttachSource?
 
     nonisolated static let cornerRadius: CGFloat = 26
+    /// popover 箭头离屏幕左右缘的最小距离：系统 popover 版边（约 10pt）＋ iOS 26 气泡圆角（约 30pt）＋ 箭头半宽（约 14pt），再留余量。
+    /// 「+」中心离屏幕左缘只有约 42pt，直接锚在「+」上时箭头会落进气泡的圆角区，导致形状扭曲（第十轮真机截图）。
+    nonisolated static let arrowMinScreenX: CGFloat = 64
+    nonisolated static let cardSpace = "assistant.composerCard"
+    /// 输入栏卡片在窗口中的位置、「+」与模型胶囊在卡片内的中心 x：用来放 popover 的隐形锚点。
+    @State private var cardFrame: CGRect = .zero
+    @State private var attachMidX: CGFloat = 0
+    @State private var modelMidX: CGFloat = 0
+    /// 输入栏所在列的右缘（窗口坐标；iPhone 上即屏幕右缘）。
+    @State private var containerMaxX: CGFloat = 0
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -52,14 +64,37 @@ struct AssistantComposer: View {
             toolbarRow
                 .padding(.horizontal, 8).padding(.bottom, 6)
         }
+        .coordinateSpace(.named(Self.cardSpace))
         // 第八轮：恢复原生 Liquid Glass（透出后面的对话）。输入栏里没有系统 Menu，浮层也不在这个玻璃容器里，
         // 所以不会再出现菜单从玻璃标签“变形”弹出／收回的错位。
         .glassEffect(.regular, in: .rect(cornerRadius: Self.cornerRadius, style: .continuous))
+        // 第十轮：两个 popover 锚定在卡片顶边的隐形锚点上（见类型说明），气泡在卡片之上、箭头在平直边。
+        .background(alignment: .topLeading) {
+            ZStack(alignment: .topLeading) {
+                popoverAnchor(id: "attach")
+                    .popover(isPresented: panel.binding(.attach), attachmentAnchor: .rect(.bounds), arrowEdge: .bottom) {
+                        AssistantAttachPopover { source in
+                            pendingAttach = source
+                            panel.close()
+                        }
+                        .presentationCompactAdaptation(.popover)
+                    }
+                    .padding(.leading, max(0, anchorX(attachMidX) - 1))
+                popoverAnchor(id: "model")
+                    .popover(isPresented: panel.binding(.model), attachmentAnchor: .rect(.bounds), arrowEdge: .bottom) {
+                        AssistantModelPopover(store: store, panel: panel, maxHeight: popoverMaxHeight)
+                            .presentationCompactAdaptation(.popover)
+                    }
+                    .padding(.leading, max(0, anchorX(modelMidX) - 1))
+            }
+        }
+        .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { cardFrame = $0 }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("assistant.composerBar")
         .padding(.horizontal, 12).padding(.top, 6).padding(.bottom, 8)
         .frame(maxWidth: 900)
         .frame(maxWidth: .infinity)
+        .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).maxX } action: { containerMaxX = $0 }
         // 点进输入框（开始打字）时收起 popover。
         .onChange(of: focused.wrappedValue) { _, isFocused in
             if isFocused && panel.open != nil { panel.close() }
@@ -103,6 +138,36 @@ struct AssistantComposer: View {
         }
     }
 
+    // MARK: popover 锚点
+
+    /// 卡片顶边上的 2×2pt 隐形视图，popover 以它为锚（箭头指向卡片顶边、按钮正上方）。
+    /// 界面测试时暴露为 `assistant.popoverAnchor.<attach|model>`，用于断言箭头离气泡两侧圆角足够远。
+    /// 注意 `.popover` 要挂在 2×2 视图本身（`.rect(.bounds)` 即这 2pt），定位用的 `padding` 加在 popover 之后。
+    private func popoverAnchor(id: String) -> some View {
+        Color.clear
+            .frame(width: 2, height: 2)
+            .allowsHitTesting(false)
+            .accessibilityElement()
+            .accessibilityIdentifier("assistant.popoverAnchor.\(id)")
+            .accessibilityHidden(!AssistantModelPopover.exposesLogo)
+    }
+
+    /// 模型 popover 的最大高度：卡片顶边以上可用的空间（减去状态栏／导航栏与箭头的余量）。
+    /// 键盘弹起时卡片上移、上方空间变小，7 行（406pt）放不下，系统会把气泡往下推、盖住卡片顶边几 pt；
+    /// 限高后列表在气泡内滚动，气泡始终完整落在卡片之上（第十轮 CI：键盘弹起时气泡底边 450.7 > 卡片顶边 446.5）。
+    private var popoverMaxHeight: CGFloat {
+        guard cardFrame.height > 0 else { return 440 }
+        return max(170, cardFrame.minY - 130)
+    }
+
+    /// 锚点 x（卡片坐标）：按钮中心，但离屏幕左右缘至少 `arrowMinScreenX`。
+    private func anchorX(_ buttonMidX: CGFloat) -> CGFloat {
+        guard cardFrame.width > 0 else { return buttonMidX }
+        let minX = Self.arrowMinScreenX - cardFrame.minX
+        let maxX = containerMaxX - Self.arrowMinScreenX - cardFrame.minX
+        return min(max(buttonMidX, minX, 0), max(minX, min(maxX, cardFrame.width)))
+    }
+
     // MARK: 附件
 
     private var attachmentStrip: some View {
@@ -129,7 +194,9 @@ struct AssistantComposer: View {
     private var toolbarRow: some View {
         HStack(spacing: 4) {
             attachMenu
+                .onGeometryChange(for: CGFloat.self) { $0.frame(in: .named(Self.cardSpace)).midX } action: { attachMidX = $0 }
             AssistantModelMenu(store: store, panel: panel)
+                .onGeometryChange(for: CGFloat.self) { $0.frame(in: .named(Self.cardSpace)).midX } action: { modelMidX = $0 }
             Spacer(minLength: 8)
             if draft.count > 30_000 {
                 Text("\(draft.count)/32000").font(.caption).monospacedDigit()
@@ -153,13 +220,6 @@ struct AssistantComposer: View {
         .buttonStyle(.plain)
         .fixedSize()
         .disabled(attachments.count >= 4 || loadingImage || readOnlyReason != nil)
-        .popover(isPresented: panel.binding(.attach), attachmentAnchor: .rect(.bounds), arrowEdge: .bottom) {
-            AssistantAttachPopover { source in
-                pendingAttach = source
-                panel.close()
-            }
-            .presentationCompactAdaptation(.popover)
-        }
         .accessibilityLabel("添加图片")
         .accessibilityHint("可从照片或文件选择图片，最多 4 张")
         .accessibilityIdentifier("assistant.attach")
@@ -305,10 +365,7 @@ struct AssistantModelMenu: View {
             .transaction { $0.animation = nil }
         }
         .buttonStyle(.plain)
-        .popover(isPresented: panel.binding(.model), attachmentAnchor: .rect(.bounds), arrowEdge: .bottom) {
-            AssistantModelPopover(store: store, panel: panel)
-                .presentationCompactAdaptation(.popover)
-        }
+        // popover 由 AssistantComposer 挂在输入栏卡片顶边的锚点上（第十轮）。
         .accessibilityLabel("本轮模型：\(Self.fullName(models: models, index: selection))")
         .accessibilityIdentifier("assistant.model")
         .onAppear { selection = store.modelIndex }
@@ -380,23 +437,40 @@ final class AssistantComposerPanelState {
     }
 }
 
-/// 「+」popover：原生 `List` 行（目前服务器只支持图片附件；以后新增类型在这里加一行）。
+/// 「+」popover（目前服务器只支持图片附件；以后新增类型在这里加一行）。
+/// 第十轮：不再用固定 250pt 宽的 `List`（比文字宽出一截、气泡显得空），改为两行按钮的 `VStack`，
+/// 宽度按内容理想宽度（`fixedSize`，随动态字号变化），每行 50pt 高。
 struct AssistantAttachPopover: View {
     let choose: (AssistantAttachSource) -> Void
 
     var body: some View {
-        List {
-            Button { choose(.photos) } label: { Label("从照片选择", systemImage: "photo") }
-                .accessibilityIdentifier("assistant.attach.photos")
-            Button { choose(.file) } label: { Label("从文件选择图片", systemImage: "folder") }
-                .accessibilityIdentifier("assistant.attach.file")
+        VStack(alignment: .leading, spacing: 0) {
+            row("从照片选择", systemImage: "photo", identifier: "assistant.attach.photos") { choose(.photos) }
+            Divider().padding(.leading, 52)
+            row("从文件选择图片", systemImage: "folder", identifier: "assistant.attach.file") { choose(.file) }
         }
-        .listStyle(.plain)
-        .scrollContentBackground(.hidden)
-        .scrollDisabled(true)
+        .fixedSize()
         .foregroundStyle(.primary)
-        .frame(width: 250, height: 2 * AssistantModelPopover.compactRowHeight)
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("assistant.panel.attach")
+    }
+
+    private func row(_ title: String, systemImage: String, identifier: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 12) {
+                Image(systemName: systemImage)
+                    .font(.body)
+                    .frame(width: 24)
+                Text(title).font(.body).lineLimit(1)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 16)
+            .frame(minWidth: 200, maxWidth: .infinity, minHeight: AssistantModelPopover.compactRowHeight, alignment: .leading)
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(title)
+        .accessibilityIdentifier(identifier)
     }
 }
 
@@ -405,6 +479,8 @@ struct AssistantAttachPopover: View {
 struct AssistantModelPopover: View {
     @Bindable var store: AssistantStore
     @Bindable var panel: AssistantComposerPanelState
+    /// 由输入栏按卡片上方可用空间给出（见 `AssistantComposer.popoverMaxHeight`）。
+    var maxHeight: CGFloat = 440
 
     static let rowHeight: CGFloat = 58
     static let rowVerticalInset: CGFloat = 7
@@ -434,7 +510,7 @@ struct AssistantModelPopover: View {
         .scrollBounceBehavior(.basedOnSize)
         .contentMargins(.vertical, 0, for: .scrollContent)
         .environment(\.defaultMinListRowHeight, Self.rowHeight)
-        .frame(width: 330, height: min(CGFloat(models.count + 1) * Self.rowHeight, 440))
+        .frame(width: 330, height: min(CGFloat(models.count + 1) * Self.rowHeight, 440, maxHeight))
         .accessibilityIdentifier("assistant.panel.model")
     }
 

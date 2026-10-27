@@ -64,7 +64,7 @@ struct AssistantView: View {
                         }
                         ToolbarItemGroup(placement: .topBarTrailing) {
                             // Skills 单独放在工具栏，不再藏在“助手菜单”里。
-                            Button("Skills", systemImage: "sparkles.rectangle.stack") { panel = .skills }
+                            Button("Skills", systemImage: "wand.and.stars") { panel = .skills }
                                 .accessibilityIdentifier("assistant.skills")
                             Menu {
                                 Button("新建会话", systemImage: "square.and.pencil") { Task { await store.createSession(model) } }

@@ -821,7 +821,7 @@ enum AssistantProgress {
         case "understanding": return Status(symbol: "sparkles", text: "理解问题…")
         case "checking_model", "selecting_model": return Status(symbol: "cpu", text: "连接模型…")
         case "routing": return Status(symbol: "arrow.triangle.branch", text: "选择工具…")
-        case "selecting_skill": return Status(symbol: "sparkles.rectangle.stack", text: "加载技能…")
+        case "selecting_skill": return Status(symbol: "wand.and.stars", text: "加载技能…")
         case "thinking": return Status(symbol: "brain", text: "思考中…")
         case "using_tool": return Status(symbol: "wrench.and.screwdriver", text: tool.isEmpty ? "调用工具…" : "调用工具：\(tool)…")
         case "responding": return Status(symbol: "text.bubble", text: "生成回复…")

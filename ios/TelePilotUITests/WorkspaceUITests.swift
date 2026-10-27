@@ -13,7 +13,10 @@ final class WorkspaceUITests: XCTestCase {
 
     func testDockKeepsPrimarySectionsAndAgentEntry() {
         let app = launch()
-        XCTAssertTrue(app.tabBars.buttons["概览"].waitForExistence(timeout: 45))
+        // 工作流「预热模拟器」也跑这个用例：通过 TEST_RUNNER_TELEPILOT_WARMUP_TIMEOUT 放宽首次冷启动的等待，
+        // 一次等到 App 起来，而不是 45 秒超时后反复重跑（每次重跑另有 30–50 秒 xcodebuild 开销）。
+        let timeout = ProcessInfo.processInfo.environment["TELEPILOT_WARMUP_TIMEOUT"].flatMap(TimeInterval.init) ?? 45
+        XCTAssertTrue(app.tabBars.buttons["概览"].waitForExistence(timeout: timeout))
         XCTAssertTrue(app.tabBars.buttons["插件"].exists)
         XCTAssertTrue(app.tabBars.buttons["AI"].exists)
         XCTAssertTrue(app.tabBars.buttons["更多"].exists)

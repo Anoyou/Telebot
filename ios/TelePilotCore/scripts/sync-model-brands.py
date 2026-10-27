@@ -9,13 +9,17 @@
 生成（iOS）：
 - TelePilotCore/Sources/TelePilotCore/model-brands.json          （逐字节复制）
 - TelePilotCore/Tests/TelePilotCoreTests/model-brand-cases.json  （逐字节复制）
-- TelePilotApp/Assets.xcassets/ModelBrands/<id>.imageset         （矢量 SVG、模板渲染，深浅色随前景色）
+- TelePilotApp/Assets.xcassets/ModelBrands/<id>.imageset         （规范化矢量 SVG、模板渲染，深浅色随前景色）
 
 `--check` 只校验不写入，iOS 工作流会运行。
 """
 import argparse
 import json
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import svg_normalize  # noqa: E402
 
 package = Path(__file__).resolve().parents[1]
 ios = package.parent
@@ -29,11 +33,9 @@ catalog = ios / "TelePilotApp/Assets.xcassets/ModelBrands"
 
 
 def render_svg(icon: dict) -> str:
-    paths = icon["paths"].replace("currentColor", "#000000")
-    return (
-        f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="{icon["viewBox"]}" width="24" height="24">'
-        f'<g fill="#000000" fill-rule="{icon.get("fillRule", "nonzero")}">{paths}</g></svg>\n'
-    )
+    # 第十轮：不再原样拷贝 Web 的压缩路径（CoreSVG 解析不了紧挨的弧线标志位，图标错乱），
+    # 规范化为只含绝对 M/L/C/Z 的安全子集，见 svg_normalize.py；check-model-brand-icons.py 校验形状与 Web 一致。
+    return svg_normalize.normalized_svg(icon)
 
 
 def dump(value: dict) -> str:
