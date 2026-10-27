@@ -134,16 +134,22 @@ jobs:
 
       - name: 打包测试产物
         # 用 tar 保留可执行位与符号链接（artifact 本身不保留文件权限）。
+        # 第十轮：分片机器下载很慢（实测 20 MB 要 60–200 秒），有 zstd 时用 zstd 压缩（比 zip 级别 1 小），没有则退回 tar。
         run: |
           ls "$DERIVED_DATA"/Build/Products/*.xctestrun
-          tar -cf ios-test-products.tar -C "$DERIVED_DATA/Build" Products
-          ls -lh ios-test-products.tar
+          du -sh "$DERIVED_DATA"/Build/Products/*/* 2>/dev/null | sort -h | tail -n 12 || true
+          if command -v zstd >/dev/null; then
+            tar -cf - -C "$DERIVED_DATA/Build" Products | zstd -q -T0 -12 -o ios-test-products.tar.zst
+          else
+            tar -cf ios-test-products.tar -C "$DERIVED_DATA/Build" Products
+          fi
+          ls -lh ios-test-products.tar*
 
       - name: 上传测试产物
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: ios-test-products-${{ github.run_id }}
-          path: ios-test-products.tar
+          path: ios-test-products.tar*
           retention-days: 1
           compression-level: 1
           overwrite: true
@@ -229,7 +235,7 @@ jobs:
             [ -n "$URL" ] || { echo "::error::取不到测试产物下载地址"; return 1; }
             curl -fsSL --retry 3 --retry-all-errors -o products.zip "$URL"
             unzip -q -o products.zip && rm products.zip
-            ls -lh ios-test-products.tar
+            ls -lh ios-test-products.tar*
             echo "下载并解压用时 $(( $(date +%s) - START )) 秒"
           }
           for i in $(seq 1 180); do
@@ -248,8 +254,13 @@ jobs:
         id: products
         run: |
           mkdir -p "$DERIVED_DATA/Build" "$RESULTS_DIR"
-          tar -xf ios-test-products.tar -C "$DERIVED_DATA/Build"
-          rm ios-test-products.tar
+          if [ -f ios-test-products.tar.zst ]; then
+            zstd -q -d -c ios-test-products.tar.zst | tar -xf - -C "$DERIVED_DATA/Build"
+            rm ios-test-products.tar.zst
+          else
+            tar -xf ios-test-products.tar -C "$DERIVED_DATA/Build"
+            rm ios-test-products.tar
+          fi
           XCTESTRUN=$(ls "$DERIVED_DATA"/Build/Products/*.xctestrun | head -n 1)
           echo "xctestrun=$XCTESTRUN" >> "$GITHUB_OUTPUT"
           for i in $(seq 1 180); do [ -f "$RUNNER_TEMP/sim-ready" ] && break; sleep 5; done

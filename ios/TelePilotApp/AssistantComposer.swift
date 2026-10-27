@@ -82,7 +82,7 @@ struct AssistantComposer: View {
                     .padding(.leading, max(0, anchorX(attachMidX) - 1))
                 popoverAnchor(id: "model")
                     .popover(isPresented: panel.binding(.model), attachmentAnchor: .rect(.bounds), arrowEdge: .bottom) {
-                        AssistantModelPopover(store: store, panel: panel)
+                        AssistantModelPopover(store: store, panel: panel, maxHeight: popoverMaxHeight)
                             .presentationCompactAdaptation(.popover)
                     }
                     .padding(.leading, max(0, anchorX(modelMidX) - 1))
@@ -150,6 +150,14 @@ struct AssistantComposer: View {
             .accessibilityElement()
             .accessibilityIdentifier("assistant.popoverAnchor.\(id)")
             .accessibilityHidden(!AssistantModelPopover.exposesLogo)
+    }
+
+    /// 模型 popover 的最大高度：卡片顶边以上可用的空间（减去状态栏／导航栏与箭头的余量）。
+    /// 键盘弹起时卡片上移、上方空间变小，7 行（406pt）放不下，系统会把气泡往下推、盖住卡片顶边几 pt；
+    /// 限高后列表在气泡内滚动，气泡始终完整落在卡片之上（第十轮 CI：键盘弹起时气泡底边 450.7 > 卡片顶边 446.5）。
+    private var popoverMaxHeight: CGFloat {
+        guard cardFrame.height > 0 else { return 440 }
+        return max(170, cardFrame.minY - 130)
     }
 
     /// 锚点 x（卡片坐标）：按钮中心，但离屏幕左右缘至少 `arrowMinScreenX`。
@@ -471,6 +479,8 @@ struct AssistantAttachPopover: View {
 struct AssistantModelPopover: View {
     @Bindable var store: AssistantStore
     @Bindable var panel: AssistantComposerPanelState
+    /// 由输入栏按卡片上方可用空间给出（见 `AssistantComposer.popoverMaxHeight`）。
+    var maxHeight: CGFloat = 440
 
     static let rowHeight: CGFloat = 58
     static let rowVerticalInset: CGFloat = 7
@@ -500,7 +510,7 @@ struct AssistantModelPopover: View {
         .scrollBounceBehavior(.basedOnSize)
         .contentMargins(.vertical, 0, for: .scrollContent)
         .environment(\.defaultMinListRowHeight, Self.rowHeight)
-        .frame(width: 330, height: min(CGFloat(models.count + 1) * Self.rowHeight, 440))
+        .frame(width: 330, height: min(CGFloat(models.count + 1) * Self.rowHeight, 440, maxHeight))
         .accessibilityIdentifier("assistant.panel.model")
     }
 
