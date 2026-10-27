@@ -1,7 +1,7 @@
 {
   "AssistantUITests/testActionRequiresExplicitConfirmation": 59,
   "AssistantUITests/testAgentHidesDockAndMinimizeReturnsToPreviousTab": 22,
-  "AssistantUITests/testComposerMenusKeepFixedLabelFrames": 51,
+  "AssistantUITests/testComposerPanelsKeepComposerFramesAndSelectModel": 60,
   "AssistantUITests/testComposerUsesGlassToolbarWithAttachModelAndSend": 23,
   "AssistantUITests/testLongHistoryOpensResponsivelyAndScrollsImmediately": 33,
   "AssistantUITests/testLongTermMemoryRejectsOversizedEntry": 43,
