@@ -1,8 +1,8 @@
 name: iOS
 
 # 结构（提速）：
-#   判定 ─┬─ 校验与 Core 单元测试 ───────────────────────────┐
-#         └─ 编译（build-for-testing，一次）→ UI 测试分片 ×4 ─┴─ 汇总「iOS 构建与测试」
+#   判定 ─┬─ 编译（build-for-testing，一次）→ 上传测试产物 → 校验与 Core 单元测试 ─┐
+#         └─ UI 测试分片 ×4（与编译同时开始：先启动并预热模拟器，再等测试产物）───────┴─ 汇总「iOS 构建与测试」
 # - UI 测试按历史耗时（ios/scripts/ui-test-durations.json）均衡分到 4 台机器并行执行，
 #   用例清单从源码解析，新增用例自动进入某个分片，不会漏测；失败用例自动重跑一次，两次都失败才算失败。
 # - Beta push：若该提交的文件树与某个 PR 上已全绿的被测树完全相同（PR 在最新 Beta 上合并即如此），
@@ -83,34 +83,8 @@ jobs:
           echo "skip=$SKIP" >> "$GITHUB_OUTPUT"
           echo "reason=$REASON" >> "$GITHUB_OUTPUT"
 
-  checks:
-    name: 校验与 Core 单元测试
-    needs: plan
-    if: needs.plan.outputs.skip != 'true'
-    runs-on: xcode-27
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-
-      - name: 选择 Xcode
-        run: sudo xcode-select -s "$XCODE_APP/Contents/Developer"
-
-      - name: 校验工程与契约同步
-        run: |
-          python3 ios/scripts/check-xcodeproj-sources.py
-          python3 ios/scripts/check-ios-version.py
-          python3 ios/TelePilotCore/scripts/sync-openapi.py --check
-          python3 ios/TelePilotCore/scripts/sync-contract.py --check
-          python3 ios/scripts/ui-test-shards.py --total "$UI_TEST_SHARDS" --summary
-
-      - name: 校验 OpenAPI 生成代码
-        run: sh ios/TelePilotCore/scripts/generate.sh --check
-
-      - name: TelePilotCore 单元测试
-        run: swift test --package-path ios/TelePilotCore
-
   build:
-    name: 编译 App 与 UI 测试
+    name: 编译与校验
     needs: plan
     if: needs.plan.outputs.skip != 'true'
     runs-on: xcode-27
@@ -125,6 +99,14 @@ jobs:
           xcodebuild -version
           # 编译只需要目标设备，不需要启动模拟器（启动约 2 分钟，留给各测试分片并行完成）。
           echo "udid=$(python3 ios/scripts/ci-select-simulator.py)" >> "$GITHUB_OUTPUT"
+
+      - name: 校验工程与契约同步
+        run: |
+          python3 ios/scripts/check-xcodeproj-sources.py
+          python3 ios/scripts/check-ios-version.py
+          python3 ios/TelePilotCore/scripts/sync-openapi.py --check
+          python3 ios/TelePilotCore/scripts/sync-contract.py --check
+          python3 ios/scripts/ui-test-shards.py --total "$UI_TEST_SHARDS" --summary
 
       - name: 编译（build-for-testing）
         run: |
@@ -150,12 +132,19 @@ jobs:
       - name: 上传测试产物
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: ios-test-products-${{ github.run_id }}-${{ github.run_attempt }}
+          name: ios-test-products-${{ github.run_id }}
           path: ios-test-products.tar
           retention-days: 1
           compression-level: 1
           overwrite: true
           if-no-files-found: error
+
+      # 测试产物已上传、各分片已可开始测试；以下校验在本机继续进行，不占用 UI 测试的关键路径。
+      - name: 校验 OpenAPI 生成代码
+        run: sh ios/TelePilotCore/scripts/generate.sh --check
+
+      - name: TelePilotCore 单元测试
+        run: swift test --package-path ios/TelePilotCore
 
       - name: 上传编译日志
         if: failure()
@@ -168,10 +157,11 @@ jobs:
 
   ui-tests:
     name: UI 测试 ${{ matrix.shard }}/4
-    needs: [plan, build]
+    # 不等编译 job：与编译同时开始，先把模拟器启动和首次冷启动（约 2–6 分钟）做完，再等测试产物。
+    needs: plan
     if: needs.plan.outputs.skip != 'true'
     runs-on: xcode-27
-    timeout-minutes: 40
+    timeout-minutes: 50
     strategy:
       fail-fast: false
       matrix:
@@ -185,13 +175,31 @@ jobs:
           sudo xcode-select -s "$XCODE_APP/Contents/Developer"
           UDID=$(python3 ios/scripts/ci-select-simulator.py)
           echo "udid=$UDID" >> "$GITHUB_OUTPUT"
-          # 启动约 2 分钟，与下载、解包测试产物并行进行。
-          nohup sh -c "xcrun simctl boot '$UDID'; xcrun simctl bootstatus '$UDID' -b" > "$RUNNER_TEMP/boot.log" 2>&1 &
+          # 启动模拟器并冷启动一次系统 App（「设置」），让首次启动的系统缓存在等待编译期间完成。
+          nohup sh -c "xcrun simctl boot '$UDID'; xcrun simctl bootstatus '$UDID' -b; xcrun simctl launch '$UDID' com.apple.Preferences; sleep 5; xcrun simctl terminate '$UDID' com.apple.Preferences; touch '$RUNNER_TEMP/sim-ready'" > "$RUNNER_TEMP/boot.log" 2>&1 &
+
+      - name: 等待编译产物
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NAME: ios-test-products-${{ github.run_id }}
+        run: |
+          api() { curl -fsSL -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/$1"; }
+          for i in $(seq 1 180); do
+            COUNT=$(api "actions/runs/$GITHUB_RUN_ID/artifacts?name=$NAME" | jq '[.artifacts[] | select(.expired | not)] | length' || echo 0)
+            if [ "${COUNT:-0}" -gt 0 ]; then echo "测试产物已就绪（等待 $(( (i - 1) * 10 )) 秒）"; exit 0; fi
+            BUILD=$(api "actions/runs/$GITHUB_RUN_ID/jobs?per_page=50" | jq -r '[.jobs[] | select(.name == "编译与校验")][0] | "\(.status) \(.conclusion)"' || echo "unknown")
+            case "$BUILD" in
+              "completed failure"|"completed cancelled"|"completed skipped")
+                echo "::error::编译 job 未成功（$BUILD），没有可测试的产物"; exit 1 ;;
+            esac
+            sleep 10
+          done
+          echo "::error::等待测试产物超时"; exit 1
 
       - name: 下载测试产物
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          name: ios-test-products-${{ github.run_id }}-${{ github.run_attempt }}
+          name: ios-test-products-${{ github.run_id }}
 
       - name: 解包并等待模拟器就绪
         id: products
@@ -201,6 +209,7 @@ jobs:
           rm ios-test-products.tar
           XCTESTRUN=$(ls "$DERIVED_DATA"/Build/Products/*.xctestrun | head -n 1)
           echo "xctestrun=$XCTESTRUN" >> "$GITHUB_OUTPUT"
+          for i in $(seq 1 180); do [ -f "$RUNNER_TEMP/sim-ready" ] && break; sleep 5; done
           xcrun simctl bootstatus "${{ steps.simulator.outputs.udid }}" -b
           cat "$RUNNER_TEMP/boot.log" || true
 
@@ -256,7 +265,7 @@ jobs:
 
   result:
     name: iOS 构建与测试
-    needs: [plan, checks, build, ui-tests]
+    needs: [plan, build, ui-tests]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -266,17 +275,16 @@ jobs:
           SKIP: ${{ needs.plan.outputs.skip }}
           REASON: ${{ needs.plan.outputs.reason }}
           PLAN: ${{ needs.plan.result }}
-          CHECKS: ${{ needs.checks.result }}
           BUILD: ${{ needs.build.result }}
           UI: ${{ needs.ui-tests.result }}
         run: |
-          echo "判定=$PLAN 校验=$CHECKS 编译=$BUILD UI 测试=$UI"
+          echo "判定=$PLAN 编译与校验=$BUILD UI 测试=$UI"
           if [ "$PLAN" = "success" ] && [ "$SKIP" = "true" ]; then
             echo "### 跳过重复测试" >> "$GITHUB_STEP_SUMMARY"
             echo "$REASON" | tee -a "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
-          if [ "$PLAN" != "success" ] || [ "$CHECKS" != "success" ] || [ "$BUILD" != "success" ] || [ "$UI" != "success" ]; then
+          if [ "$PLAN" != "success" ] || [ "$BUILD" != "success" ] || [ "$UI" != "success" ]; then
             echo "::error::iOS 构建与测试未全部通过"
             exit 1
           fi

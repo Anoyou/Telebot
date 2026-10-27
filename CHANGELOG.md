@@ -31,7 +31,7 @@
 
 ### CI
 
-- 「iOS」工作流提速（不改 App 与服务器、不升版本）：拆成「判定 → 校验与 Core 单元测试 ∥ 编译（build-for-testing 一次）→ UI 测试 4 分片并行 → 汇总『iOS 构建与测试』」；分片清单由新增的 `ios/scripts/ui-test-shards.py` 从 UI 测试源码解析、按 `ios/scripts/ui-test-durations.json` 历史耗时均衡，新增用例自动进入分片、不会漏测；各分片在下载测试产物时后台启动模拟器；失败用例自动只重跑一次（`-retry-tests-on-failure -test-iterations 2`），两次都失败才判失败；Beta push 若文件树与某个 PR 上已全绿的被测树完全相同则跳过重复测试（汇总检查显示成功），否则完整执行；PR 上新 push 取消旧 run，Beta push 不互相取消。模拟器挑选规则抽到 `ios/scripts/ci-select-simulator.py`。
+- 「iOS」工作流提速（不改 App 与服务器、不升版本）：拆成「判定 → 编译与校验（build-for-testing 一次，上传测试产物后再做 OpenAPI 生成校验与 Core 单元测试）∥ UI 测试 4 分片并行 → 汇总『iOS 构建与测试』」；UI 测试分片与编译同时开始，先启动模拟器并冷启动一次系统 App，再轮询等待测试产物，之后以「反复跑最短用例直到通过」自适应预热，替代固定 sleep；分片清单由新增的 `ios/scripts/ui-test-shards.py` 从 UI 测试源码解析、按 `ios/scripts/ui-test-durations.json` 历史耗时均衡，新增用例自动进入分片、不会漏测；失败用例自动只重跑一次（`-retry-tests-on-failure -test-iterations 2`），两次都失败才判失败；Beta push 若文件树与某个 PR 上已全绿的被测树完全相同则跳过重复测试（汇总检查显示成功），否则完整执行；PR 上新 push 取消旧 run，Beta push 不互相取消。模拟器挑选规则抽到 `ios/scripts/ci-select-simulator.py`。
 
 ## [0.106.0-beta.9] - 2026-10-27 · patch（补丁预发布） · 一键体检开放为接口，iOS / Web 概览可直接体检
 
