@@ -29,6 +29,10 @@ final class AssistantUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["服务状态正常。这里是界面测试数据。"].exists)
         // 输入为空时发送不可用；若任务仍在执行，右下角按钮会变为“停止”
         XCTAssertFalse(send.exists && send.isEnabled)
+        // 第八轮：上一轮已结束时发出的消息直接执行——没有待处理气泡与处理方式按钮，输入栏也没有“发送方式”。
+        XCTAssertFalse(app.descendants(matching: .any)["assistant.message.pending"].exists)
+        XCTAssertFalse(app.buttons["assistant.queue.queue"].exists)
+        XCTAssertFalse(app.buttons["assistant.sendMode"].exists)
     }
 
     func testTurnUsageShowsModelThenMetricsOnTwoLines() {
@@ -57,7 +61,7 @@ final class AssistantUITests: XCTestCase {
         XCTAssertLessThan(model.frame.midX, send.frame.midX)
         XCTAssertLessThan(abs(model.frame.midY - send.frame.midY), 12)
         model.tap()
-        XCTAssertTrue(app.buttons["自动，使用服务器配置"].firstMatch.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["assistant.model.option.auto"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.descendants(matching: .any)["assistant.panel.model"].firstMatch.exists)
     }
 
@@ -168,15 +172,30 @@ final class AssistantUITests: XCTestCase {
         let model = app.buttons["assistant.model"]
         let send = app.buttons["assistant.send"]
         XCTAssertTrue(model.waitForExistence(timeout: 5))
+        let bar = app.descendants(matching: .any)["assistant.composerBar"].firstMatch
+        XCTAssertTrue(bar.exists)
         let before = [composer.frame, attach.frame, model.frame, send.frame]
-        func assertUnchanged(_ step: String, file: StaticString = #filePath, line: UInt = #line) {
+        /// 第八轮：模型胶囊显示全名、可变宽——选择模型后只允许它的宽度变化（左缘紧挨「+」不动），其余 frame 完全不变。
+        func assertUnchanged(_ step: String, modelWidthMayChange: Bool = false, file: StaticString = #filePath, line: UInt = #line) {
             let now = [composer.frame, attach.frame, model.frame, send.frame]
-            for (old, new) in zip(before, now) {
+            for (index, (old, new)) in zip(before, now).enumerated() {
                 XCTAssertEqual(new.minX, old.minX, accuracy: 0.5, "\(step)：\(old) → \(new)", file: file, line: line)
                 XCTAssertEqual(new.minY, old.minY, accuracy: 0.5, "\(step)：\(old) → \(new)", file: file, line: line)
-                XCTAssertEqual(new.width, old.width, accuracy: 0.5, "\(step)：\(old) → \(new)", file: file, line: line)
+                if !(modelWidthMayChange && index == 2) {
+                    XCTAssertEqual(new.width, old.width, accuracy: 0.5, "\(step)：\(old) → \(new)", file: file, line: line)
+                }
                 XCTAssertEqual(new.height, old.height, accuracy: 0.5, "\(step)：\(old) → \(new)", file: file, line: line)
             }
+        }
+        /// 浮层底边（水滴尖尖端）贴近输入栏上沿；尖角对准触发按钮中心。
+        func assertAnchored(_ card: XCUIElement, to button: XCUIElement, _ step: String, file: StaticString = #filePath, line: UInt = #line) {
+            let gap = bar.frame.minY - card.frame.maxY
+            XCTAssertGreaterThanOrEqual(gap, -0.5, "\(step)：浮层压住了输入栏 \(card.frame) / \(bar.frame)", file: file, line: line)
+            XCTAssertLessThanOrEqual(gap, 24, "\(step)：浮层离输入栏太远 \(card.frame) / \(bar.frame)", file: file, line: line)
+            let tail = app.descendants(matching: .any)["assistant.panel.tail"].firstMatch
+            XCTAssertTrue(tail.exists, "\(step)：没有水滴尖", file: file, line: line)
+            XCTAssertEqual(tail.frame.midX, button.frame.midX, accuracy: 3, "\(step)：尖角 \(tail.frame) 按钮 \(button.frame)", file: file, line: line)
+            XCTAssertLessThanOrEqual(tail.frame.maxY, button.frame.minY, file: file, line: line)
         }
 
         // 模型浮层：在输入栏上方、靠右展开，当前为“自动”。
@@ -190,19 +209,27 @@ final class AssistantUITests: XCTestCase {
         Thread.sleep(forTimeInterval: 0.6)
         assertUnchanged("模型浮层展开后")
         XCTAssertLessThanOrEqual(modelPanel.frame.maxY, composer.frame.minY)
-        // 卡片右缘与模型按钮右缘对齐（从按钮位置展开）。
-        XCTAssertEqual(modelPanel.frame.maxX, model.frame.maxX, accuracy: 2, "模型卡片 \(modelPanel.frame) 按钮 \(model.frame)")
+        assertAnchored(modelPanel, to: model, "模型浮层")
+        // 展开时触发按钮半透明保留在原位、仍可点。
+        XCTAssertTrue(model.exists && model.isHittable)
+        XCTAssertTrue(attach.isHittable)
+        // 选择器：每行副标题都是「供应商 · 模型」全名；“自动”显示服务器当前路由到的模型。
+        XCTAssertTrue(auto.label.contains("测试供应商 · openai/fixture-model"), auto.label)
+        XCTAssertTrue(app.buttons["测试供应商 · openai/fixture-model"].firstMatch.exists)
         let option = app.buttons["测试供应商 · anthropic/fixture-model-with-a-much-longer-name"].firstMatch
         XCTAssertTrue(option.exists)
         XCTAssertGreaterThanOrEqual(option.frame.height, 44)
         option.tap()
         XCTAssertTrue(waitUntilGone(modelPanel), "选择后浮层应收起")
-        let selected = NSPredicate(format: "label CONTAINS %@", "fixture-model-with-a-much-longer-name")
+        // 胶囊显示「供应商 · 模型」全名（与回答末尾模型名同一格式）。
+        let selected = NSPredicate(format: "label CONTAINS %@", "测试供应商 · anthropic/fixture-model-with-a-much-longer-name")
         expectation(for: selected, evaluatedWith: model)
         waitForExpectations(timeout: 5)
-        assertUnchanged("选择模型后立即")
+        assertUnchanged("选择模型后立即", modelWidthMayChange: true)
         Thread.sleep(forTimeInterval: 1)
-        assertUnchanged("选择模型 1 秒后")
+        assertUnchanged("选择模型 1 秒后", modelWidthMayChange: true)
+        // 胶囊变宽也不越过发送按钮。
+        XCTAssertLessThan(model.frame.maxX, send.frame.minX)
 
         // 再打开：浮层标出刚选的模型；点浮层外收起。
         model.tap()
@@ -214,7 +241,7 @@ final class AssistantUITests: XCTestCase {
         let modelPanelFrame = modelPanel.frame
         dismissPanel(app)
         XCTAssertTrue(waitUntilGone(modelPanel))
-        assertUnchanged("模型浮层收起后")
+        assertUnchanged("模型浮层收起后", modelWidthMayChange: true)
 
         // 附件浮层：同一套卡片，从左下「+」一侧展开，只列图片来源。
         attach.tap()
@@ -223,17 +250,25 @@ final class AssistantUITests: XCTestCase {
         XCTAssertTrue(app.buttons["assistant.attach.photos"].exists)
         XCTAssertTrue(app.buttons["assistant.attach.file"].exists)
         XCTAssertEqual(app.buttons["assistant.attach.file"].label, "从文件选择图片")
-        XCTAssertLessThan(attachPanel.frame.midX, modelPanelFrame.midX)
+        XCTAssertLessThanOrEqual(attachPanel.frame.minX, modelPanelFrame.minX + 0.5)
         XCTAssertLessThanOrEqual(attachPanel.frame.maxY, composer.frame.minY)
         XCTAssertEqual(attachPanel.frame.minX, attach.frame.minX, accuracy: 2, "附件卡片 \(attachPanel.frame) 按钮 \(attach.frame)")
-        assertUnchanged("附件浮层展开中")
+        assertUnchanged("附件浮层展开中", modelWidthMayChange: true)
         Thread.sleep(forTimeInterval: 0.6)
-        assertUnchanged("附件浮层展开后")
-        // 打开时「+」模糊淡出（Grok 同款），点卡片外收起。
+        assertUnchanged("附件浮层展开后", modelWidthMayChange: true)
+        assertAnchored(attachPanel, to: attach, "附件浮层")
+        // 打开时「+」变成半透明的“×”保留在原位：再点一次收起。
+        XCTAssertTrue(attach.isHittable)
+        XCTAssertEqual(attach.label, "收起添加图片")
+        attach.tap()
+        XCTAssertTrue(waitUntilGone(attachPanel))
+        // 再打开一次，点卡片外收起。
+        attach.tap()
+        XCTAssertTrue(attachPanel.waitForExistence(timeout: 5))
         dismissPanel(app)
         XCTAssertTrue(waitUntilGone(attachPanel))
         Thread.sleep(forTimeInterval: 0.6)
-        assertUnchanged("附件浮层收起后")
+        assertUnchanged("附件浮层收起后", modelWidthMayChange: true)
         XCTAssertTrue(attach.isHittable)
         XCTAssertTrue(model.isHittable)
     }
@@ -288,6 +323,8 @@ final class AssistantUITests: XCTestCase {
         XCTAssertEqual(app.buttons.matching(identifier: "assistant.reply.regenerate").count, 1)
         XCTAssertEqual(edit.label, "编辑消息")
         XCTAssertEqual(regenerate.label, "重新生成")
+        // 第八轮文案：我的消息「复制消息」「编辑消息」，回答「复制回复」「重新生成」（可见文字与无障碍标签一致）。
+        XCTAssertTrue(app.staticTexts["编辑消息"].exists || edit.label == "编辑消息")
         // 带文字：比单个图标宽；触控高度至少 44pt。
         XCTAssertGreaterThan(edit.frame.width, 34)
         XCTAssertGreaterThan(regenerate.frame.width, 50)
@@ -331,6 +368,15 @@ final class AssistantUITests: XCTestCase {
         }
         XCTAssertGreaterThan(regenerate.frame.minY, answer.frame.maxY)
         XCTAssertGreaterThanOrEqual(regenerate.frame.minX - lastCopy.frame.maxX, 16, "按钮间距过小")
+        // 第八轮：回答的操作行在模型名／本轮用量那一行的上方（正文 → 操作行 → 模型名）。
+        let details = app.descendants(matching: .any).matching(identifier: "assistant.turnDetails").allElementsBoundByIndex
+            .filter { $0.frame.minY > regenerate.frame.minY - 1 }
+            .min { $0.frame.minY < $1.frame.minY }
+        XCTAssertNotNil(details, visibleTexts(app))
+        if let details {
+            XCTAssertLessThanOrEqual(regenerate.frame.maxY, details.frame.minY + 1, "操作行 \(regenerate.frame) 模型名行 \(details.frame)")
+            XCTAssertLessThan(details.frame.minY - regenerate.frame.maxY, 40, "模型名行应紧跟操作行")
+        }
         // 复制回复：轻量反馈（图标短暂变为对勾，VoiceOver 读“已复制”）。
         lastCopy.tap()
         XCTAssertTrue(app.buttons["已复制"].firstMatch.waitForExistence(timeout: 2))
@@ -345,6 +391,118 @@ final class AssistantUITests: XCTestCase {
         XCTAssertTrue(app.navigationBars["编辑后重新生成"].waitForExistence(timeout: 5))
         app.buttons["取消"].firstMatch.tap()
         XCTAssertTrue(app.descendants(matching: .any)["assistant.composer"].firstMatch.waitForExistence(timeout: 5))
+    }
+
+    /// 第八轮：删除最后一个会话后离开 Agent 页再进入，仍是空会话（原来会从本机缓存把已删除会话的内容恢复出来）。
+    func testDeletingLastSessionStaysEmptyAfterReentering() {
+        let app = openAssistant()
+        let answer = app.staticTexts["服务状态正常。这里是界面测试数据。"]
+        XCTAssertTrue(answer.waitForExistence(timeout: 10))
+        let open = app.buttons["assistant.sessions"]
+        guard open.waitForExistence(timeout: 5) else { return } // iPad 使用常驻侧栏
+        open.tap()
+        let row = app.buttons["assistant.session.fixture-session"].firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: 10))
+        row.swipeLeft()
+        let delete = app.buttons["删除"].firstMatch
+        XCTAssertTrue(delete.waitForExistence(timeout: 5))
+        delete.tap()
+        XCTAssertTrue(app.staticTexts["删除这个会话？"].waitForExistence(timeout: 5))
+        app.buttons["删除会话"].firstMatch.tap()
+        XCTAssertTrue(waitUntilGone(row, timeout: 5), "删除后会话仍在列表里")
+        let close = app.buttons["assistant.sessions.close"]
+        XCTAssertTrue(close.waitForExistence(timeout: 5))
+        close.tap()
+        let empty = app.staticTexts["有什么需要处理？"]
+        XCTAssertTrue(empty.waitForExistence(timeout: 5), visibleTexts(app))
+        XCTAssertFalse(answer.exists)
+        // 离开 Agent 页（最小化回到上一个标签页）再进入。
+        let minimize = app.buttons["assistant.minimize"]
+        XCTAssertTrue(minimize.waitForExistence(timeout: 5))
+        minimize.tap()
+        let dock = app.tabBars.buttons["Agent"]
+        XCTAssertTrue(dock.waitForExistence(timeout: 5))
+        dock.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["assistant.composer"].firstMatch.waitForExistence(timeout: 10))
+        XCTAssertTrue(empty.waitForExistence(timeout: 5), visibleTexts(app))
+        Thread.sleep(forTimeInterval: 1.5)
+        XCTAssertFalse(answer.exists, "重新进入后显示了已删除会话的内容：\(visibleTexts(app))")
+        XCTAssertTrue(empty.exists)
+    }
+
+    /// 第八轮：执行阶段显示在回答位置（不再有输入栏上方的“排队中”状态条），文字随服务器事件变化；
+    /// 执行中发出的消息是虚线待处理气泡，下方可选排队／插入调整／停止并替换。
+    func testRunPhasesShowInReplyAndQueuedMessagesArePending() {
+        let app = openAssistant(["--ui-test-run-phases"])
+        XCTAssertTrue(app.staticTexts["服务状态正常。这里是界面测试数据。"].waitForExistence(timeout: 10))
+        let composer = app.descendants(matching: .any)["assistant.composer"].firstMatch
+        composer.tap()
+        composer.typeText("检查账号")
+        app.buttons["assistant.send"].tap()
+
+        // 回答位置的状态行随阶段变化，直到“调用工具：读取账号列表…”；全程不出现“排队中”。
+        let status = app.descendants(matching: .any)["assistant.live.status"].firstMatch
+        XCTAssertTrue(status.waitForExistence(timeout: 5), visibleTexts(app))
+        var seen: [String] = []
+        let deadline = Date().addingTimeInterval(12)
+        while Date() < deadline {
+            if status.exists {
+                let label = status.label
+                if seen.last != label { seen.append(label) }
+                if label.contains("调用工具：读取账号列表") { break }
+            }
+            Thread.sleep(forTimeInterval: 0.3)
+        }
+        XCTAssertTrue(seen.contains { $0.contains("调用工具：读取账号列表") }, "阶段：\(seen)")
+        XCTAssertGreaterThanOrEqual(seen.count, 2, "状态没有随阶段变化：\(seen)")
+        XCTAssertFalse(seen.contains { $0.contains("排队中") }, "执行中显示了排队中：\(seen)")
+        // 没有独立的状态条与“发送方式”按钮。
+        XCTAssertFalse(app.staticTexts["排队中"].exists)
+        XCTAssertFalse(app.staticTexts["执行中"].exists)
+        XCTAssertFalse(app.buttons["assistant.sendMode"].exists)
+
+        // 执行中再发一条：虚线待处理气泡＋三个处理方式，默认“排队”。
+        composer.tap()
+        composer.typeText("改查最近两小时")
+        app.buttons["assistant.send"].tap()
+        let pending = app.descendants(matching: .any).matching(identifier: "assistant.message.pending")
+        XCTAssertTrue(pending.firstMatch.waitForExistence(timeout: 5), visibleTexts(app))
+        XCTAssertEqual(pending.firstMatch.value as? String, "待处理")
+        let queueChip = app.buttons["assistant.queue.queue"].firstMatch
+        let adjustChip = app.buttons["assistant.queue.adjust"].firstMatch
+        XCTAssertTrue(queueChip.exists)
+        XCTAssertTrue(adjustChip.exists)
+        XCTAssertTrue(app.buttons["assistant.queue.replace"].firstMatch.exists)
+        XCTAssertEqual(queueChip.value as? String, "已选中")
+        let queueStatus = app.descendants(matching: .any).matching(identifier: "assistant.queue.status")
+        XCTAssertTrue(queueStatus.firstMatch.label.contains("排队中 · 前面 1 条"), queueStatus.firstMatch.label)
+        XCTAssertTrue(status.exists && !status.label.contains("排队中"), status.label)
+
+        // 改为插入调整：服务器把它并入当前任务。
+        adjustChip.tap()
+        let adjusted = NSPredicate(format: "value == %@", "已选中")
+        expectation(for: adjusted, evaluatedWith: app.buttons["assistant.queue.adjust"].firstMatch)
+        waitForExpectations(timeout: 5)
+        XCTAssertTrue(queueStatus.firstMatch.label.contains("将插入当前任务"), queueStatus.firstMatch.label)
+
+        // 再发一条并改为停止并替换（需要确认）。
+        composer.tap()
+        composer.typeText("停止并改查插件")
+        app.buttons["assistant.send"].tap()
+        let replaceChips = app.buttons.matching(identifier: "assistant.queue.replace")
+        let secondPending = NSPredicate(format: "count >= 2")
+        expectation(for: secondPending, evaluatedWith: replaceChips)
+        waitForExpectations(timeout: 5)
+        let replace = replaceChips.element(boundBy: replaceChips.count - 1)
+        XCTAssertTrue(replace.isEnabled)
+        replace.tap()
+        let confirm = app.buttons["确认停止并替换"].firstMatch
+        XCTAssertTrue(confirm.waitForExistence(timeout: 5))
+        confirm.tap()
+        let replaced = NSPredicate(format: "label CONTAINS %@", "等待停止当前任务")
+        expectation(for: replaced, evaluatedWith: queueStatus.element(boundBy: queueStatus.count - 1))
+        waitForExpectations(timeout: 5)
+        XCTAssertEqual(app.buttons.matching(identifier: "assistant.queue.replace").element(boundBy: replaceChips.count - 1).value as? String, "已选中")
     }
 
     /// 失败时附上当前可见的文字，便于判断停在了哪里。
