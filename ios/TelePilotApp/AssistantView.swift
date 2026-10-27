@@ -394,12 +394,7 @@ private struct AssistantMessageView: View, Equatable {
             // 回答：正文从左边缘开始，操作行在正文（与本轮详情）下方、与正文左边缘对齐。
             VStack(alignment: .leading, spacing: 10) {
                 header
-                // 正文容器单独作为无障碍容器（标识 assistant.reply.body），界面测试据此校验操作行与正文左边缘对齐；
-                // 可选中文本（textSelection）的无障碍 frame 带系统内边距，不能直接拿来比左边缘。
-                VStack(alignment: .leading, spacing: 10) { content }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .accessibilityElement(children: .contain)
-                    .accessibilityIdentifier(role == "assistant" ? "assistant.reply.body" : "assistant.tool.body")
+                content
                 if role != "user" {
                     AssistantTurnDetailsView(usage: item["usage"], tools: tools)
                 }

@@ -321,12 +321,13 @@ final class AssistantUITests: XCTestCase {
         XCTAssertNotNil(lastCopy)
         guard let lastCopy else { return }
         XCTAssertEqual(lastCopy.label, "复制回复")
-        let bodies = app.descendants(matching: .any).matching(identifier: "assistant.reply.body")
-        let body = bodies.allElementsBoundByIndex.last { $0.frame.contains(CGPoint(x: answer.frame.midX, y: answer.frame.midY)) }
-        XCTAssertNotNil(body, visibleTexts(app))
-        if let body {
-            XCTAssertEqual(lastCopy.frame.minX, body.frame.minX, accuracy: 2.5, "复制 \(lastCopy.frame) 正文 \(body.frame)")
-            XCTAssertGreaterThanOrEqual(lastCopy.frame.minY, body.frame.maxY - 0.5)
+        // 正文左边缘：可选中文本（textSelection）的无障碍 frame 左侧多出约 16pt，不能直接比较；
+        // 用同一条回答里列表项前不可选中的“•”（与正文同一左边缘）作基准。
+        let bullet = app.staticTexts.matching(NSPredicate(format: "label == %@", "•")).allElementsBoundByIndex
+            .filter { $0.frame.maxY < lastCopy.frame.minY && $0.frame.minY > answer.frame.minY }.last
+        XCTAssertNotNil(bullet, visibleTexts(app))
+        if let bullet {
+            XCTAssertEqual(lastCopy.frame.minX, bullet.frame.minX, accuracy: 2.5, "复制 \(lastCopy.frame) 正文 \(bullet.frame)")
         }
         XCTAssertGreaterThan(regenerate.frame.minY, answer.frame.maxY)
         XCTAssertGreaterThanOrEqual(regenerate.frame.minX - lastCopy.frame.maxX, 16, "按钮间距过小")
