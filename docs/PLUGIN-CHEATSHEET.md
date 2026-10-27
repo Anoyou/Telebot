@@ -3,21 +3,23 @@
 先读 [插件开发铁律](./PLUGIN-RULES.md)，再用本页回忆字段名和常用模式。
 
 - 必须理解 TelePilot 插件按个人可信插件模式运行：管理员安装并启用后，视为信任插件业务逻辑；平台负责事件信封、MessageOps 代发、Trace、风险提示、急停和审计。
-- 最快命令插件可用简单模式 SDK：`from telepilot import plugin`，再写 `@plugin.command("ping")` 的单函数 `async def ping(ctx): await ctx.reply("pong")`；插件目录只需要 `__init__.py`，目录名就是插件 key。
+- 最快命令插件可用简单模式 SDK：`from telepilot import plugin`，再写 `@plugin.command("ping")` 的单函数 `async def ping(ctx): await ctx.reply("pong")`；逻辑只写在 `__init__.py`，目录名就是插件 key。但目录里仍要有 `plugin.json`（加载前兼容预检与安装校验都读它），安装通道还要求 `manifest.py`、`plugin.py` 文件存在（简单模式可留空），见 [Quickstart](./PLUGIN-QUICKSTART.md#0-最快路径简单模式-sdk)。
 - 简单模式不写 `PLUGIN_CLASS` / `MANIFEST` 时，loader 会从装饰器合成隐式插件类和 Manifest；当前隐式权限是 `read_event` + `send_message`，命令默认是 owner-only 的账号命令。
 - 简单模式适合快速账号命令、小工具和内部玩法；需要 `plugin.json` 展示字段、`event_subscriptions`、配置 schema、HTTP/AI 权限、按钮、Inline、付款或会话时，用显式 Manifest 模式。
 - 当前 `tp_plugin new` 没有 `--profile simple`；可选 profile 只有 `session_game`、`command`、`passthrough`。其中 `session_game` / `command` 仍生成 `interaction_entries + on_interaction` 兼容桥，只用于迁移或作为包结构起点，新标准插件应改成 `event_subscriptions + on_event`。
 - 必须把新 Telegram 插件写成 Event Bus + Trace + MessageOps：`plugin.json` 写 `usage`、`event_subscriptions`、`capabilities`，插件只读标准事件信封，动作只通过 `ctx.messages` 或标准 action 返回。
 - 禁止把 `interaction_entries`、旧交互规则、旧平铺 payload、`notice` / `bbot_notice` / `notice_bot` 作为新插件模板；这些只用于迁移说明。
 - 显式 Manifest 模式必须保留最小目录：`plugin.json`、`manifest.py`、`plugin.py`、`__init__.py`。`plugin.json.name`、`MANIFEST.key`、插件类 `key` 必须一致。
+- `requires_platform_capabilities` 新装/升级必填（`plugin.json` 与 `Manifest` 同值，允许 `[]`）；`min_telepilot_version` 至少 `0.72.0-beta.2`（更早的平台不认识这个 `Manifest` 参数，导入即报错），用到更新能力再按 [版本与兼容](./PLUGIN-API-REFERENCE.md#版本与兼容) 提高。宿主比较只看 `x.y.z`，beta 序号要靠能力标记探测。
 - 必须把 `usage` 写成插件中心可展示的使用说明；有 `config_schema` 时也可以补 `x-usage-guide` / `x-usage-steps`，但不要只靠口头说明。
 - 禁止用空 `usage` 绕过检查；缺失会触发高级规范警告，插件库维护插件和示例插件都必须完整声明。
-- `event_subscriptions[].events` 常用值：`message`、`command`、`callback_query`、`inline_query`、`chosen_inline_result`、`payment_confirmed`、`webhook`、`session_close`、`message_edited`、`session_expired`、`all_events`；`all_messages` 仍只等于 `message` / `command`。
+- `event_subscriptions[].events` 可选值：`message`、`command`、`keyword`、`callback_query`、`inline_query`、`chosen_inline_result`、`payment_confirmed`、`webhook`、`session_close`、`message_edited`、`session_expired`、`guest_message`、`all_events`、`all_messages`；`all_messages` 只等于 `message` / `command`，`message` / `all_events` 都不包含 `guest_message`。
+- `event_subscriptions[]` / `interaction_entries[]` 可写 `timeout_seconds` 放宽单次处理时限（默认 15 秒，平台上限 90 秒，0.106.0-beta.1+）。
 - `event_subscriptions[].source` 常用值：`userbot`、`interaction_bot`、`external_payment_notice`、`webhook`。
-- `event_subscriptions[].scope` 常用值：`all_allowed_chats`、`owner_only`、`known_users`、`rule_bound`、`inline_all`；Inline 插件必须显式用 `inline_all`。
+- `event_subscriptions[].scope` 可选值：`all_allowed_chats`、`owner_only`、`known_users`、`rule_bound`、`inline_all`、`guest_all`；Inline 插件必须显式用 `inline_all`，访客消息任意会话用 `guest_all`。
 - 账号级“允许会话”留空表示全部会话；列表非空时才只允许名单内会话。插件自定义的 `allowed_chat_ids=[]` 不自动继承这条语义。
 - `known_users` 只认平台 state 提供的真实集合，不会自动把当前 sender 算进去。
-- `filters` 常见键：`keywords`、`contains`、`callback_data`、`commands`、`rule_id`、`hook_key`、`hook_keys`；未知 key 会保留但会告 warning。
+- `filters` 支持的键：`keyword` / `keywords`、`contains`、`command` / `commands`、`callback_data`、`chat_id`、`event_type`、`rule_id`、`hook_key` / `hook_keys`；未知 key 会保留但不生效，并告 warning。
 - 严格来说只有 `telegram_direct_passthrough` 叫裸直通；Event Bus、会话入口、legacy hook 都是消息分发/会话路由。
 - `capabilities.telegram_native_raw` 是高风险能力声明；需要原生 Telegram 字段时写 `enabled=true`、`reason`、`sources`，并处理 `native_raw_meta.enabled=false` 的降级。
 - 标准事件信封优先读：`source`、`message`、`chat`、`sender`、`actor`、`source_actor`、`player`、`payment`、`reply_to`、`trigger`、`session`、`native_raw_meta`。
@@ -27,6 +29,8 @@
 - `source` 描述事件类型和来源通道；`actor` 是当前行为主体；`sender` 是发出消息的人或 Bot；`source_actor` 可表示可信外部通知 Bot；`player` 是付款绑定玩家；`payment.status=confirmed` 才能作为到账依据。
 - `session.channel` 表示当前整段会话默认收发通道；普通发送动作不用手写 `send_via`，平台会继承会话通道。
 - 普通消息回复使用 `ctx.messages.send(...)` 或返回 `{"type": "send_message", ...}`；标题、任务列表、折叠详情、表格等原生格式使用 `ctx.messages.send_rich(html=...)` 或 `send_rich_message` action；图片题面可用 `ctx.messages.send_photo(..., save_message_id_key="round")`，后续用 `ctx.messages.edit_caption(message_id_key="round", caption="...")` 原地更新 caption。
+- 编辑已发出的 Rich Message 用 `ctx.messages.edit_rich(chat_id=..., message_id=..., html|markdown|blocks=...)`（仅交互入口的缓冲 facade 有），对应带 `rich_message` 字段的 `edit_message` action；访客模式占位消息用 `edit_message` action 的 `inline_message_id` + `rich_message` 原地编辑（实时上下文先看 `getattr(ctx.messages, "live_inline_edit", False)`）。
+- 紧凑表格（Bot API 10.3，0.106.0-beta.12+）：`send_rich` / `edit_rich` / `answer_guest_query` 传 `compact_tables=True`，或在 `send_rich_message`、带 `rich_message` 的 `edit_message`、`answer_guest_query` action 上写 `"compact_tables": true`；平台给 blocks 加 `is_compact`、HTML 表格加 `compact`、Markdown 管道表格转 `<table compact>`。先判断 `getattr(ctx.messages, "rich_table_compact", False) is True`，旧平台不要传；Bot API 拒绝时平台去掉标记重发一次。也可以直接写 `<table compact>` / `"is_compact": true`。
 - `send_rich` 的 `html` / `markdown` / `blocks` 必须三选一，继续声明 `send_message` 权限；默认走 Interaction Bot。显式 `userbot_reply` 使用 Layer 228+，支持 HTML、Markdown 和纯文本 blocks，并要求 Premium 与 `rich_message_posting`；复杂/媒体 blocks 失败时不会静默退化。
 - 当前 Interaction Bot 发按钮、用户点击：订阅 `source=["interaction_bot"]`、`events=["callback_query"]`、`scope="all_allowed_chats"`，用 `answer_callback` ACK；不依赖旧 Interaction Bot 规则或活跃会话。
 - 第三方 Bot 发按钮、TelePilot UserBot 主动点击：插件声明 `permissions=["click_bot_button"]`，在 UserBot 执行链路调用 `ctx.messages.click_callback_button(chat_id=..., message_id=..., row=..., column=..., expected_bot_id=..., expected_button_text=...)`；Interaction Bot 插件入口不支持。这不是 `callback_query`，也不能用 `answer_callback`。
@@ -42,7 +46,9 @@
 - 强按钮玩法可通过 `interaction_trigger_modes=keyword_only` 关闭命令触发；manifest 可用 `default_trigger_modes` 提供默认值。
 - `callback_fast_ack=true` 适合耗时按钮入口；启用后晚到的 `answer_callback` 不再真正调用 Telegram ACK。
 - `ctx.http` 需要 `permissions=["external_http"]` 和 `allowed_hosts`。
-- `ctx.ai` 需要 `permissions=["ai_text"]`，复用平台 LLM Provider、fallback、预算和 usage 记录。
+- `ctx.ai` 需要 `permissions=["ai_text"]`，复用平台 LLM Provider、fallback、预算和 usage 记录；`run_agent` 另需 `ai_agent` + `capabilities.agent_tools`。0.106.0-beta.1+：`complete(web_search=True)` 原生联网搜索、`complete(images=[...])` 与 `fetch_bot_image(file_id)` 识图（需 `ai_vision`），能力不可用时抛 `AICapabilityError`；0.106.0-beta.2+：`complete(thinking="disabled")`，`AIResult.text` 只含最终答案、推理在 `reasoning`。
+- `ctx.skills` 需要 `permissions=["agent_skills"]`（0.106.0-beta.1+，旧平台为 `None`）：`list` / `load` / `read_file` / `bundled` 只读获取管理员对插件启用的 Agent Skills 文本，插件目录 `skills/<name>/SKILL.md` 会被登记为内置 skill。
+- `ctx.messages` 分两种：交互入口（Event Bus / `on_interaction`）里是缓冲 facade，有 `send_photo` / `send_file` / `edit_rich` / `edit_caption` / `update_session`；命令、后台任务、scheduler、legacy `on_message` 里是 live facade，没有这几个 helper，要用标准 action + `ctx.messages.apply([...])`。
 - `ctx.client` 只保留给管理员命令和高级兼容场景；远程插件仍不能直接拿 token、session、Bot API client 或 live event。
 - `ctx.conversation()` 目前只适合获得真实 `TelegramClient` 的 builtin/内部兼容代码；普通安装插件拿到 `SandboxClient`，无法可靠注册会话 handler 或发送 raw MTProto，不应依赖它。
 - 安装插件的 `ctx.redis` 是带 `plugin_store:{account_id}:{plugin_key}:` 前缀的 `PluginRedisFacade`，不是原始 Redis client；`keys`、`scan`、`eval`、`pipeline`、`pubsub` 等操作不可用，普通状态仍优先用 `ctx.storage`。
@@ -56,7 +62,7 @@
 - 外部请求必须有 timeout；日志里不要写 token、session、完整原生 payload、隐私消息或完整文件路径。
 - 维护示例：新主模板看 `examples/plugins/event_bus_demo`；Webhook 看 `webhook_receiver`；HTTP 看 `with_http`；AI 看 `with_ai`；旧交互迁移看 `with_interaction`。
 - 迁移边界：平台功能不伪装成插件；插件库维护插件必须完整声明；示例插件只用于学习和 CI；用户安装插件可保留代码但启用/更新时要提示规范警告。
-- 验证示例：`backend/.venv/bin/python scripts/validate-plugin-examples.py`；检查已安装互动插件：`backend/.venv/bin/python scripts/validate-installed-interaction-plugins.py`。
+- 验证示例：`backend/.venv/bin/python scripts/validate-plugin-examples.py`；检查已安装互动插件：`backend/.venv/bin/python scripts/validate-installed-interaction-plugins.py`；插件仓库的宿主兼容性检查：`TELEPILOT_REPO=<本仓库> python scripts/check_host_compat.py`（在 `Anoyou/telebot-plugins` 中运行，可加 `--plugins-root <本仓库>/examples/plugins` 检查示例）。
 
 常见 `reason_code` 快查：
 

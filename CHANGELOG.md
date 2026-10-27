@@ -25,6 +25,13 @@
 
 ## [Unreleased]
 
+### 插件开发文档与示例（插件库兼容性体检）
+
+- 官方示例 `examples/plugins/*`（7 个）补齐 `requires_platform_capabilities`（`plugin.json` 与 `manifest.py` 同值），此前按当前安装校验会以 `PLATFORM_CAPABILITIES_REQUIRED` 被拒；`min_telepilot_version` 统一为 `0.72.0-beta.2` 并在 `manifest.py` 同步（原 0.24.0 / 0.33.0 / 0.41.0 / 0.57.0 偏低：`Manifest(requires_platform_capabilities=...)` 0.72 起才支持，`with_ai_components` 的 AI 组件 0.54 起才有）。
+- `tp_plugin new` 骨架的最低版本由 0.41.0 改为 0.72.0-beta.2（同样因 `requires_platform_capabilities`）；`session_game` 骨架会返回 `payout` 动作，权限补上 `payout`（安装插件未声明时运行时拒绝发奖）。
+- 插件文档按当前代码核对更新：API 参考新增「版本与兼容」（`min_telepilot_version` 只比较 `x.y.z`、能力→最低版本门槛表、能力探测写法）、重写「Manifest 验证」（安装期必填项、运行期预检与身份校验）、补全可选字段表（`requires_platform_capabilities`、`usage`、`allowed_hosts`、`http`、`config_actions`、`interaction_send_via`、`experimental` 等）与 `ctx.skills` / `ctx.data_dir` / `scheduler.list_jobs` / `identities.resolve_many` / `run_agent` 限额参数；AI 文档新增联网搜索、识图、`thinking` 与推理截断说明（含旧平台会静默忽略这些参数）；安全边界权限表补 `ai_vision`、`agent_skills`、`payout`、`forward_message` 与保留权限；速查表、开发指南补紧凑表格（`compact_tables` / `rich_table_compact`）、`edit_rich`、访客模式、完整事件/范围/过滤键与 live/缓冲 MessageOps 差异；Quickstart 更正简单模式（仍需 `plugin.json`，安装通道还要求四个文件存在）；平台能力文档更正 `requires_platform_capabilities` 新装/升级必填；各文档示例补 `requires_platform_capabilities` 与最低版本。
+- 插件仓库新增宿主兼容性检查 `scripts/check_host_compat.py` 与 CI（检出本仓库 Beta 运行），文档中给出用法。
+
 ## [0.106.0-beta.12] - 2026-10-28 · patch（补丁预发布） · 接入 Bot API 10.3 紧凑富文本表格（is_compact）；含 iOS 0.13.4 / 0.13.5
 
 ### 插件与 Rich Message

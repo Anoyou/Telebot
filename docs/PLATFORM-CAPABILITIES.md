@@ -139,14 +139,15 @@ Worker 在注册插件、命令 handler 或 scheduler 前必须先从 DB 初始�
 
 保留现有 `event_subscriptions.source`、`interaction_entries`、`result_contract.send_via`、`permissions` 与 `capabilities`。
 
-新增可选字段：
+依赖声明字段：
 
-- Manifest 级 `requires_platform_capabilities`
-- 入口级 / event subscription 级 `requires_platform_capabilities`
+- Manifest 级 `requires_platform_capabilities`：`plugin.json` 与 `manifest.py` 顶层同值；新装或升级时必填（允许 `[]`），缺失报 `PLATFORM_CAPABILITIES_REQUIRED`
+- 新插件只写顶层（详见 [远程插件](./PLUGIN-REMOTE.md#requires_platform_capabilities-声明)）；旧 `interaction_entries[]` 上的同名字段仍用于入口级裁剪（迁移兼容），`event_subscriptions[]` 上写了也不生效
 
 兼容：
 
-- 旧插件没有新字段时继续加载
+- 已安装的旧插件没有该字段时继续加载，只在插件中心挂规范警告；重新安装或升级时必须补上
+- `Manifest(requires_platform_capabilities=...)` 参数从 0.72.0-beta.2 起才有，声明它的插件 `min_telepilot_version` 不得低于 `0.72.0-beta.2`，否则旧平台导入 manifest 时直接 `TypeError`
 - 正常热切换会把现有插件上下文的 `ctx.ai` 置为 `None`；若竞态中的旧调用仍持有先前取得的 facade，则由 AI facade 返回结构化关闭错误
 - 只有显式声明全插件依赖时才整体暂停
 - Interaction Bot 专属能力不得静默降级成错误的 userbot 行为

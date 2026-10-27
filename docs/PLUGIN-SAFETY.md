@@ -44,6 +44,13 @@ Manifest 中的 `permissions` 字段声明插件需要的能力：
 | `external_http_bypass_proxy` | direct 网络出口 | 预留权限名，**当前不参与运行时门禁**：直连实际由 Manifest `http.allow_direct` + 账号 `network_mode="direct"` 双门禁决定。审计插件能否直连以 `http.allow_direct` 为准，勿以本权限是否声明为依据 |
 | `ai_text` | `ctx.ai.complete` / `ctx.ai.list_providers` | 平台文本 LLM facade；返回脱敏 provider 元数据 |
 | `ai_agent` | `ctx.ai.run_agent` | 有界工具调用；还需 `capabilities.agent_tools.enabled=true`、`agent_tools[]` 与宿主 handler 双白名单 |
+| `ai_vision` | `ctx.ai.complete(images=...)` / `ctx.ai.fetch_bot_image` | 识图；必须与 `ai_text`（或 `ai_agent`）同时声明，0.106.0-beta.1 起生效 |
+| `agent_skills` | `ctx.skills.list` / `load` / `read_file` / `bundled` | 只读获取管理员对插件启用的 Agent Skills 文本，脚本从不执行；0.106.0-beta.1 起 |
+| `payout` | `ctx.messages.payout` / `payout` action | 资金动作，由 UserBot 执行；安装插件未声明时运行时拒绝 |
+| `forward_message` | `forward_messages` | 转发消息 |
+| `ai_image` / `ai_stt` | — | 保留权限名，当前平台未提供 facade，声明后只会记录“将被忽略”的警告 |
+
+未列出的权限名不会生效（沙箱按上表映射允许的方法）。简单模式（`@plugin.command`）合成的隐式 Manifest 固定为 `read_event` + `send_message`，其中 `read_event` 只是声明性标记，实际可调用的只有 `send_message` 对应方法。
 
 `permissions` 默认是空列表。远程/本地/插件库安装型插件漏写权限时不会注入对应 facade，也不能调用未声明的 `ctx.client` / `event` helper 能力；核心平台兼容代码也建议显式写全，方便审计和后续迁移。
 
@@ -749,9 +756,11 @@ MANIFEST = Manifest(
     key="guess_number",
     display_name="猜数字",
     version="0.1.0",
+    min_telepilot_version="0.72.0-beta.2",
     author="example",
     description="一个可作为游戏插件模板的猜数字抢答插件。",
     category="interactive",
+    requires_platform_capabilities=["interaction_bot"],
     permissions=["send_message", "edit_message", "read_chat"],
     event_subscriptions=[
         {
@@ -801,9 +810,11 @@ MANIFEST = Manifest(
   "description": "一个可作为游戏插件模板的猜数字抢答插件。",
   "author": "example",
   "version": "0.1.0",
+  "min_telepilot_version": "0.72.0-beta.2",
   "entry": "plugin.py",
   "category": "interactive",
   "permissions": ["send_message", "edit_message", "read_chat"],
+  "requires_platform_capabilities": ["interaction_bot"],
   "usage": "迁移兼容示例：管理员命令开局，群友消息参与；新插件应优先改写为 Event Bus 标准事件入口。",
   "event_subscriptions": [
     {

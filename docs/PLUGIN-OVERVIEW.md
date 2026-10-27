@@ -71,10 +71,13 @@ MANIFEST = Manifest(
     key="event_ping",
     display_name="Event Ping",
     version="0.1.0",
+    min_telepilot_version="0.72.0-beta.2",
     author="example",
     description="演示 Event Bus + MessageOps 的最小插件",
     usage="在允许会话内发送 ping，插件会按当前会话通道回复 pong。",
+    category="utility",
     permissions=["send_message"],
+    requires_platform_capabilities=[],
     event_subscriptions=[
         {
             "source": ["userbot", "interaction_bot"],
@@ -94,9 +97,11 @@ MANIFEST = Manifest(
   "description": "演示 Event Bus + MessageOps 的最小插件",
   "author": "example",
   "version": "0.1.0",
+  "min_telepilot_version": "0.72.0-beta.2",
   "entry": "plugin.py",
   "category": "utility",
   "permissions": ["send_message"],
+  "requires_platform_capabilities": [],
   "usage": "在允许会话内发送 ping，插件会按当前会话通道回复 pong。",
   "event_subscriptions": [
     {

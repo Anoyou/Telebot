@@ -85,7 +85,7 @@ tp_plugin register /tmp/tp-plugins/my_game --force
 会推导的典型权限：
 
 - `ctx.messages.send()` / `send_rich()` / `reply()` 或 action `send_message`、`send_rich_message`、`send_photo`、`send_file` -> `send_message`
-- `ctx.messages.read()` / `get()` / `history()` -> `read_chat`
+- 链式调用 `ctx.messages.read()` / `get()` / `history()` 会被推导为 `read_chat`（兼容旧写法的推导规则；当前 `ctx.messages` 并不提供这些读取方法，读聊天需在声明 `read_chat` 后经 `ctx.client.get_messages` 等受控方法）
 - `ctx.messages.edit()` 或 action `edit_message`、`edit_caption` -> `edit_message`
 - `ctx.messages.delete()` 或 action `delete_message` -> `delete_message`
 - `ctx.messages.payout()` 或 action `payout` -> `payout`

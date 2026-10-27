@@ -4,8 +4,10 @@
   "description": "最小交互 Bot 兼容示例",
   "author": "TelePilot",
   "version": "1.0.0",
+  "min_telepilot_version": "0.72.0-beta.2",
   "entry": "plugin.py",
   "permissions": ["send_message", "read_chat"],
+  "requires_platform_capabilities": ["interaction_bot"],
   "category": "interactive",
   "usage": "兼容桥示例：用于把历史 interaction_entries / on_interaction 插件迁移到标准事件信封。新插件优先参考 event_bus_demo。",
   "event_subscriptions": [

@@ -4,21 +4,16 @@
   "description": "接收 default Webhook，并把订单事件发送到配置的 Telegram 会话。",
   "author": "examples",
   "version": "0.1.0",
+  "min_telepilot_version": "0.72.0-beta.2",
   "entry": "plugin.py",
-  "min_telepilot_version": "0.57.0",
   "category": "utility",
-  "permissions": [
-    "send_message"
-  ],
+  "permissions": ["send_message"],
+  "requires_platform_capabilities": ["webhooks"],
   "usage": "安装并为账号启用后，设置目标 Chat ID；外部系统向入站 Webhook 页提供的 default 地址 POST JSON，插件会通过该账号把事件摘要发送到目标会话。",
   "event_subscriptions": [
     {
-      "source": [
-        "webhook"
-      ],
-      "events": [
-        "webhook"
-      ],
+      "source": ["webhook"],
+      "events": ["webhook"],
       "scope": "all_allowed_chats",
       "filters": {
         "hook_key": "default"
@@ -31,9 +26,7 @@
     "x-ui-mode": "single",
     "x-usage-guide": "先填写接收通知的 Telegram Chat ID，再到入站 Webhook 页面复制 default 地址与 Token。外部系统只需 POST JSON；请求返回 202 后，在日志或 Trace 中确认插件执行结果。",
     "additionalProperties": false,
-    "required": [
-      "target_chat_id"
-    ],
+    "required": ["target_chat_id"],
     "properties": {
       "target_chat_id": {
         "type": "integer",
@@ -47,9 +40,6 @@
         "maxLength": 64
       }
     },
-    "x-ui-property-order": [
-      "target_chat_id",
-      "title"
-    ]
+    "x-ui-property-order": ["target_chat_id", "title"]
   }
 }

@@ -8,11 +8,13 @@ MANIFEST = Manifest(
     key="with_ai_components",
     display_name="AI 玩法组件示例",
     version="0.1.0",
+    min_telepilot_version="0.72.0-beta.2",
     author="examples",
     description="演示用 QuizMaker + AnswerJudge 组件跑一个最小问答局，AI 不可用时自动降级。",
     usage="账号命令 quiz_new [主题] 出题、quiz_answer 答案 判题；无可用 AI 时走内置题库与规则判定。",
     category="interactive",
     permissions=["ai_text", "edit_message"],
+    requires_platform_capabilities=["ai"],
     config_schema={
         "type": "object",
         "x-ui-mode": "single",

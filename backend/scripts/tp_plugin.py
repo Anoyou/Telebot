@@ -270,7 +270,8 @@ def _usage(name: str, profile: str) -> str:
 
 def _permissions(profile: str) -> list[str]:
     if profile == "session_game":
-        return ["send_message", "edit_message", "read_chat"]
+        # 骨架命中后返回 payout 动作：安装插件未声明 payout 时运行时会拒绝执行
+        return ["send_message", "edit_message", "read_chat", "payout"]
     return ["send_message", "read_chat"]
 
 
@@ -289,7 +290,7 @@ def _plugin_json_dict(name: str, profile: str) -> dict[str, Any]:
         "author": "you",
         "version": "0.1.0",
         "entry": "plugin.py",
-        "min_telepilot_version": "0.41.0",
+        "min_telepilot_version": "0.72.0-beta.2",
         "category": meta["category"],
         "interaction_profile": meta["interaction_profile"],
         "permissions": _permissions(profile),
@@ -337,7 +338,7 @@ MANIFEST = Manifest(
     key="{name}",
     display_name="{name}",
     version="0.1.0",
-    min_telepilot_version="0.41.0",
+    min_telepilot_version="0.72.0-beta.2",
     author="you",
     description="{profile} 脚手架示例插件。",
     usage={_usage(name, profile)!r},
