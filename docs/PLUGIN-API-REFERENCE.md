@@ -659,8 +659,8 @@ Telegram 来源
 
 自主发送的 Inline Keyboard 按钮不依赖交互 Bot 触发规则或活跃会话。插件只需订阅
 `source=["interaction_bot"]`、`events=["callback_query"]`、`scope="all_allowed_chats"`，
-并在 `on_event(ctx, payload)` 中处理回调；允许会话留空时，`all_allowed_chats`
-表示全部会话。只有确实依附某条旧交互规则的按钮才使用 `rule_bound`。
+并在 `on_event(ctx, payload)` 中处理回调；账号允许会话（会话白名单）留空时，`all_allowed_chats`
+表示全部会话，交互规则的群范围不影响它。只有确实依附某条旧交互规则的按钮才使用 `rule_bound`。
 新标准 `on_event` 订阅不要求 `entry_key`；`entry_key` 仅在需要回落到旧
 `on_interaction(ctx, entry_key, payload)` 入口时必填。按钮必须由当前 Interaction
 Bot 发送，Telegram 才会把点击更新投递给该 Bot。
@@ -811,7 +811,7 @@ Telegram Bot API 10.0 的访客模式让 Bot 在没有加入的群聊或私聊�
 {"events": ["guest_message"], "source": ["interaction_bot"], "scope": "guest_all"}
 ```
 
-`scope` 说明：`guest_all` 接收任意会话的访客消息（高风险，安装界面会提示）；`owner_only` / `known_users` 按调用者收窄；`all_allowed_chats` 仍按交互 Bot 允许会话判断，访客会话不在列表中会记录 `scope_not_matched`。
+`scope` 说明：`guest_all` 接收任意会话的访客消息（高风险，安装界面会提示）；`owner_only` / `known_users` 按调用者收窄；`all_allowed_chats` 仍按账号允许会话（会话白名单，留空 = 全部）判断，访客会话不在列表中会记录 `scope_not_matched`。
 
 事件信封额外字段：
 
@@ -868,7 +868,15 @@ event_subscriptions=[
 - 时限只能静态声明；想让用户可配，请声明上限，并在插件内部按配置自行超时（例如把占位改为超时提示）。
 - 长时限会占用该会话的处理并发，建议先回复占位让用户知道在处理。
 
-“允许会话”：交互 Bot 账号配置了允许会话列表时，`scope=all_allowed_chats` 的订阅只接收列表内会话的事件；其它会话的事件由平台直接丢弃（插件收不到），并记一条 info 日志（账号、`chat_id`、原因 `chat_not_in_allowed_chats`）。访客模式 `guest_all` 不受此限制。
+#### 交互 Bot 事件的会话范围（`all_allowed_chats`）
+
+“允许会话”指**账号的会话白名单**（Web 账号详情页「允许会话」、iOS 账号管理「会话白名单」，接口 `/accounts/{id}/ignored-peers`），与 UserBot 插件分发同一份名单、同一语义：
+
+- 名单**留空 = 全部会话**；配置了名单时，`scope=all_allowed_chats` 的订阅只接收名单内会话的事件。
+- **交互规则的群范围不参与**：促销、游戏等关键词规则 / 会话模块 / 支付规则各自配置的 `chat_ids` 只决定这些规则在哪些群生效，不会收窄（也不会放宽）直接订阅 Event Bus 的插件。新增、修改、停用或删除规则都不影响插件收到的事件。（0.106.0-beta.16 前，规则的群会被并进 Event Bus 的允许范围，导致把 Bot 拉进新群后 @Bot 无反应。）
+- 名单外会话的事件由平台在路由阶段丢弃（插件收不到），记一条 info 日志（`account`、`chat_id`、`reason=chat_not_in_allowed_chats`；同一账号同一会话 10 分钟内只记一次，其余为 debug），开启路由 Trace 时每条都有 `subscription_match` / `chat_not_in_allowed_chats` span。
+- 修改允许会话后下一条消息即按新名单判断（配置包导入等其他写入路径最多 30 秒缓存后生效）。
+- 访客模式 `guest_all` 不受此限制；`owner_only` / `known_users` 订阅在名单外会话同样收不到（路由阶段已丢弃）；按钮回调（`callback_query`）不在路由阶段收窄，由订阅匹配按同一名单判断。
 
 访客事件中 `payout`、`pin_message`、`answer_callback`、`answer_inline_query` 记 `guest_action_unsupported` 跳过；`send_photo` / `send_file` 只保留说明文字并记 `guest_media_unsupported`；所有发送都不会走 `userbot_reply`。相关 reason code：`guest_reply_buffered`、`guest_reply_already_used`、`guest_no_reply`、`guest_answer_failed`、`guest_rate_limited`、`guest_updates_disabled`。
 
@@ -1215,6 +1223,7 @@ userbot 会话里的 `reply_markup` 不会直接丢掉：
 | `matched` | Event Bus 订阅命中，准备投递 |
 | `subscription_not_matched` / `event_type_not_subscribed` / `source_not_subscribed` | 没有订阅命中、事件类型未订阅或来源未订阅 |
 | `scope_not_matched` / `filter_not_matched` | 允许会话、owner_only、inline_all、guest_all 等范围不匹配，或关键词、金额、callback data 等过滤不匹配 |
+| `chat_not_in_allowed_chats` | 交互 Bot 事件所在会话不在账号「允许会话」（会话白名单）中，路由阶段未投递给直接订阅 Event Bus 的插件；把群加入允许会话或清空列表即可 |
 | `plugin_disabled` / `plugin_load_failed` / `plugin_runtime_error` | 插件未启用、加载失败或运行异常 |
 | `entry_key_missing` | 订阅未声明 `entry_key`，且插件也没有实现标准 `on_event` 入口 |
 | `command_matched` / `command_not_matched` / `command_unauthorized` | 管理员命令命中、普通文本未命中命令、权限不足 |
@@ -1260,7 +1269,7 @@ userbot 会话里的 `reply_markup` 不会直接丢掉：
 
 注意：`interaction_entries` 只负责“让前端知道这个插件有哪些交互入口可选”。真正运行时，worker 会调用插件实例的 `on_interaction(ctx, entry_key, payload)`。如果插件只声明入口但没有实现这个 hook，交互 Bot 会提示“插件尚未实现交互入口”。
 
-Interaction Bot 运行时采用事件路由模型：普通 Bot 负责接收群消息、按钮回调和规则指令；UserBot/回复上下文与外部转账通知来源负责补充付款证据。新标准插件可以通过 `event_subscriptions` 自主订阅，并以 `all_allowed_chats` 接收账号允许范围内的事件，不要求先命中旧规则或存在活跃会话；平台仍会按 source、event、scope、filters 做匹配，不会无条件广播给所有插件。旧 `interaction_entries` / `on_interaction` 兼容路径才依赖规则匹配及相应会话上下文。
+Interaction Bot 运行时采用事件路由模型：普通 Bot 负责接收群消息、按钮回调和规则指令；UserBot/回复上下文与外部转账通知来源负责补充付款证据。新标准插件可以通过 `event_subscriptions` 自主订阅，并以 `all_allowed_chats` 接收账号允许会话（会话白名单，留空 = 全部；不受交互规则群范围影响）内的事件，不要求先命中旧规则或存在活跃会话；平台仍会按 source、event、scope、filters 做匹配，不会无条件广播给所有插件。旧 `interaction_entries` / `on_interaction` 兼容路径才依赖规则匹配及相应会话上下文。
 
 交互入口是新增触发面，不是命令系统的替代品。插件原有 `commands`、`on_command`、`message_channels` 和 `on_message` 语义必须保持不变；任何新入口都不得让普通 incoming 消息绕过 UserBot outgoing 指令边界。需要复用能力时，把业务逻辑抽成共享函数，由 UserBot 命令和交互入口分别调用。
 

@@ -132,7 +132,17 @@ async def remove_ignored(db: AsyncSession, aid: int, ignored_id: int) -> None:
 
 # ── IPC 通知 ─────────────────────────────────────────────────────
 async def notify_reload(aid: int) -> None:
-    """忽略名单变更后通知 worker 重拉。Redis 不可达静默吞掉。"""
+    """忽略名单变更后通知 worker 重拉。Redis 不可达静默吞掉。
+
+    同时失效交互 Bot 的「允许会话」缓存：直接订阅 Event Bus 的插件按这份名单收窄，
+    改完后下一条消息即按新名单判断（其他写入路径最多 30 秒缓存后生效）。
+    """
+    try:
+        from .account_bot_runtime import invalidate_account_allowed_chats_cache
+
+        invalidate_account_allowed_chats_cache(aid)
+    except Exception:  # noqa: BLE001
+        log.debug("失效交互 Bot 允许会话缓存失败 aid=%s", aid, exc_info=True)
     try:
         redis = get_redis()
         await redis.publish(cmd_channel(aid), make_cmd(CMD_RELOAD_IGNORED))

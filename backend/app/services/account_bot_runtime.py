@@ -37,6 +37,7 @@ from ..db.models.account_bot import (
 )
 from ..db.models.command import AccountCommandLink
 from ..db.models.feature import AccountFeature, Feature
+from ..db.models.ignored_peer import IgnoredPeer
 from ..db.models.log import LEVEL_ERROR, LEVEL_WARN, RuntimeLog
 from ..db.models.rule import Rule
 from ..db.models.system import SystemSetting
@@ -436,6 +437,13 @@ _EVENT_BUS_KNOWN_USERS_CACHE_TTL_SECONDS = 30.0
 _EVENT_BUS_KNOWN_USERS_CACHE: dict[int, tuple[float, list[int], set[int]]] = {}
 # 与 _EVENT_BUS_KNOWN_USERS_CACHE 同步刷新：账号授权的 sudo 用户（TelePilot 管理员，不含账号本人）。
 _EVENT_BUS_SUDO_USERS_CACHE: dict[int, set[int]] = {}
+# 账号「允许会话」（会话白名单，沿用 ignored_peer 表存储；空 = 允许全部）。直接订阅 Event Bus 的
+# 插件只受它约束，与交互规则自身的会话范围无关。写入后由 ignored_peer_service 主动失效。
+_ACCOUNT_ALLOWED_CHATS_CACHE_TTL_SECONDS = 30.0
+_ACCOUNT_ALLOWED_CHATS_CACHE: dict[int, tuple[float, frozenset[int]]] = {}
+# 「会话不在允许会话」拦截日志按 (账号, chat_id) 限频，避免高频群刷屏；trace 每条都记。
+_EVENT_BUS_SCOPE_BLOCK_LOG_INTERVAL_SECONDS = 600.0
+_EVENT_BUS_SCOPE_BLOCK_LOGGED: dict[tuple[int, int], float] = {}
 _INTERACTION_PAYMENT_CONFIRM_CALLBACK_PREFIX = "ip"
 _EVENT_FRAMEWORK_FLAGS_CACHE: tuple[float, dict[str, bool]] = (0.0, {})
 _ROUTE_PAYMENT_CONFIRM = "payment_confirm"
@@ -558,6 +566,7 @@ def _build_interaction_routing_index(
     *,
     subscriptions: list[Any] | None = None,
     active_session_chat_ids: set[int] | frozenset[int] | None = None,
+    account_allowed_chat_ids: set[int] | frozenset[int] | list[int] | None = None,
 ) -> InteractionRoutingIndex:
     keyword_candidates: list[str] = []
     payment_trigger_candidates: list[str] = []
@@ -628,7 +637,12 @@ def _build_interaction_routing_index(
         has_global_module_rule=has_global_module_rule,
         active_session_chat_ids=active_chats,
         active_sessions_unknown=active_session_chat_ids is None,
-        allowed_chat_ids=frozenset(_interaction_allowed_chat_ids(cfg)),
+        rule_chat_ids=frozenset(_interaction_rule_scope_chat_ids(cfg)),
+        account_allowed_chat_ids=(
+            None
+            if account_allowed_chat_ids is None
+            else frozenset(int(chat_id) for chat_id in account_allowed_chat_ids)
+        ),
         transfer_test_chat_ids=frozenset(_transfer_test_chat_ids(cfg)),
         event_bus_unknown=event_bus_unknown,
         event_bus_message_exact_texts=_unique_text_tuple(event_bus_message_exact_texts),
@@ -645,11 +659,13 @@ def _set_interaction_routing_index_cache(
     *,
     subscriptions: list[Any] | None,
     active_session_chat_ids: set[int] | frozenset[int] | None,
+    account_allowed_chat_ids: set[int] | frozenset[int] | None = None,
 ) -> None:
     index = _build_interaction_routing_index(
         cfg,
         subscriptions=subscriptions,
         active_session_chat_ids=active_session_chat_ids,
+        account_allowed_chat_ids=account_allowed_chat_ids,
     )
     _INTERACTION_ROUTING_INDEX_CACHE[int(aid)] = (time.monotonic(), dict(cfg), index)
 
@@ -741,6 +757,68 @@ def _routing_index_message_matches_event_bus(incoming: Incoming, index: Interact
     return False
 
 
+def _routing_index_event_bus_scope_matches(incoming: Incoming, index: InteractionRoutingIndex) -> bool:
+    """Event Bus 直接订阅的会话预过滤：只看账号「允许会话」，不看交互规则的群范围。"""
+
+    if incoming.guest_query_id or incoming.chat_id is None or incoming.callback_id is not None:
+        return True
+    allowed = index.account_allowed_chat_ids
+    # None = 本次未加载允许会话（慢路径），交给 dispatch_event 按 account_state 精确判断。
+    if allowed is None or not allowed:
+        return True
+    return int(incoming.chat_id) in allowed or _routing_index_chat_matches(
+        incoming.chat_id, index.active_session_chat_ids
+    )
+
+
+def _interaction_event_bus_blocked_by_account_scope(
+    incoming: Incoming,
+    index: InteractionRoutingIndex,
+    *,
+    event_bus_enabled: bool,
+) -> bool:
+    """消息本会投递给 Event Bus 订阅，只因会话不在账号「允许会话」中被拦截。"""
+
+    if not event_bus_enabled or _routing_index_event_bus_scope_matches(incoming, index):
+        return False
+    if incoming.user_id is not None and index.interaction_bot_id == incoming.user_id:
+        return False
+    return _routing_index_message_matches_event_bus(incoming, index)
+
+
+async def _record_event_bus_account_scope_block(trace: Any, incoming: Incoming) -> None:
+    """账号「允许会话」挡住 Event Bus 直接订阅时：trace 每条记，日志按 (账号, chat_id) 限频。"""
+
+    await record_span(
+        trace,
+        "subscription_match",
+        TRACE_STATUS_SKIPPED,
+        component="event_bus",
+        reason_code="chat_not_in_allowed_chats",
+        message="会话不在账号「允许会话」中，未投递给直接订阅 Event Bus 的插件。",
+    )
+    chat_id = _int_or_none(incoming.chat_id)
+    key = (int(incoming.account_id), int(chat_id) if chat_id is not None else 0)
+    now = time.monotonic()
+    last = _EVENT_BUS_SCOPE_BLOCK_LOGGED.get(key)
+    if last is not None and now - last < _EVENT_BUS_SCOPE_BLOCK_LOG_INTERVAL_SECONDS:
+        log.debug(
+            "交互 Bot 事件未投递给 Event Bus 插件（限频中） account=%s chat_id=%s reason=chat_not_in_allowed_chats",
+            incoming.account_id,
+            incoming.chat_id,
+        )
+        return
+    if len(_EVENT_BUS_SCOPE_BLOCK_LOGGED) > 4096:
+        _EVENT_BUS_SCOPE_BLOCK_LOGGED.clear()
+    _EVENT_BUS_SCOPE_BLOCK_LOGGED[key] = now
+    log.info(
+        "交互 Bot 事件未投递给 Event Bus 插件：会话不在账号「允许会话」中 account=%s chat_id=%s "
+        "reason=chat_not_in_allowed_chats（在账号详情页「允许会话」加入该群，或清空列表以允许全部）",
+        incoming.account_id,
+        incoming.chat_id,
+    )
+
+
 def _classify_interaction_routes(
     incoming: Incoming,
     index: InteractionRoutingIndex,
@@ -756,17 +834,18 @@ def _classify_interaction_routes(
     if _routing_index_text_is_userbot_command_candidate(incoming):
         routes.append(_ROUTE_USERBOT_COMMAND)
     is_guest = bool(incoming.guest_query_id)
+    # 规则链路（关键词 / 会话模块 / 支付通知）的预过滤：只看交互规则自身配置的群范围。
     scope_matches = (
         incoming.chat_id is None
         or incoming.callback_id is not None
         or index.has_global_rule
-        or _routing_index_chat_matches(incoming.chat_id, index.allowed_chat_ids)
+        or _routing_index_chat_matches(incoming.chat_id, index.rule_chat_ids)
         or _routing_index_chat_matches(incoming.chat_id, index.active_session_chat_ids)
     )
-    # 访客消息来自 Bot 未加入的任意会话：Event Bus 订阅按自己的 scope（例如
-    # guest_all / owner_only / known_users）逐条判断，这里不提前按会话收窄；
-    # 关键词规则仍按规则自身的会话范围判断。
-    event_bus_scope_matches = scope_matches or is_guest
+    # 直接订阅 Event Bus 的插件只受账号「允许会话」约束（留空 = 全部），与交互规则的
+    # 群范围无关；访客消息来自 Bot 未加入的任意会话，订阅按自己的 scope（例如
+    # guest_all / owner_only / known_users）逐条判断，这里不提前按会话收窄。
+    event_bus_scope_matches = _routing_index_event_bus_scope_matches(incoming, index)
     if (
         not is_guest
         and incoming.chat_id is not None
@@ -919,7 +998,10 @@ class InteractionRoutingIndex:
     has_global_module_rule: bool
     active_session_chat_ids: frozenset[int]
     active_sessions_unknown: bool
-    allowed_chat_ids: frozenset[int]
+    # 交互规则（含禁用规则）与旧版 cfg.chat_id/chat_ids 的群并集，只用于规则链路预过滤。
+    rule_chat_ids: frozenset[int]
+    # 账号「允许会话」：空 = 全部；None = 未加载（不在预过滤阶段收窄）。只约束 Event Bus 直接订阅。
+    account_allowed_chat_ids: frozenset[int] | None
     transfer_test_chat_ids: frozenset[int]
     event_bus_unknown: bool
     event_bus_message_exact_texts: tuple[str, ...]
@@ -2266,12 +2348,14 @@ async def _load_interaction_runtime_config(aid: int) -> tuple[str | None, dict[s
         except Exception:  # noqa: BLE001
             subscriptions = None
             log.debug("load interaction routing subscriptions failed aid=%s", aid, exc_info=True)
+        account_allowed_chat_ids = await _account_allowed_chat_ids(db, aid)
     active_session_chat_ids = await _active_interaction_session_chat_ids(aid)
     _set_interaction_routing_index_cache(
         aid,
         cfg,
         subscriptions=subscriptions,
         active_session_chat_ids=active_session_chat_ids,
+        account_allowed_chat_ids=account_allowed_chat_ids,
     )
     return token, cfg
 
@@ -2805,6 +2889,12 @@ async def _handle_interaction_update(aid: int, token: str, update: dict[str, Any
                 cached_index,
                 event_bus_enabled=event_bus_delivery_enabled,
             )
+            if _interaction_event_bus_blocked_by_account_scope(
+                incoming,
+                cached_index,
+                event_bus_enabled=event_bus_delivery_enabled,
+            ):
+                await _record_event_bus_account_scope_block(trace, incoming)
             if not routes:
                 await record_span(
                     trace,
@@ -2820,12 +2910,19 @@ async def _handle_interaction_update(aid: int, token: str, update: dict[str, Any
                 cfg,
                 subscriptions=None,
                 active_session_chat_ids=None,
+                account_allowed_chat_ids=await _account_allowed_chat_ids(db, incoming.account_id),
             )
             routes = _classify_interaction_routes(
                 incoming,
                 index,
                 event_bus_enabled=event_bus_delivery_enabled,
             )
+            if cached_index is None and _interaction_event_bus_blocked_by_account_scope(
+                incoming,
+                index,
+                event_bus_enabled=event_bus_delivery_enabled,
+            ):
+                await _record_event_bus_account_scope_block(trace, incoming)
             if not routes:
                 await record_span(
                     trace,
@@ -6147,10 +6244,10 @@ async def _event_bus_account_state(db: Any, incoming: Incoming, cfg: dict[str, A
     owner_ids, known_user_ids = await _event_bus_cached_known_user_ids(db, incoming.account_id)
     active_participant_ids = await _event_bus_active_session_participant_ids(incoming, cfg)
     known_user_ids.update(active_participant_ids)
-    allowed_chat_ids = _interaction_allowed_chat_ids(cfg)
+    allowed_chat_ids = sorted(await _account_allowed_chat_ids(db, incoming.account_id))
     return {
-        # 交互 Bot 与 UserBot 使用同一范围语义：允许会话留空表示全部，
-        # 只有显式配置会话列表时才按 chat_id 收窄。
+        # 交互 Bot 与 UserBot 使用同一范围语义：账号「允许会话」（会话白名单）留空表示全部，
+        # 只有显式配置会话列表时才按 chat_id 收窄；交互规则的群范围不参与（只约束规则自身）。
         "allowed_chat_ids": allowed_chat_ids or "*",
         "owner_user_ids": owner_ids,
         # TelePilot 管理员 = 账号本人 + 授权 sudo 用户，与 UserBot 分发状态的 admin_user_ids 同义。
@@ -6234,7 +6331,49 @@ async def _event_bus_active_session_participant_ids(incoming: Incoming, cfg: dic
     return participant_ids
 
 
-def _interaction_allowed_chat_ids(cfg: dict[str, Any]) -> list[int]:
+async def _account_allowed_chat_ids(db: Any, aid: int) -> frozenset[int]:
+    """账号「允许会话」（Web 账号详情页 / iOS「会话白名单」，ignored_peer 表，历史表名）。
+
+    空集合 = 允许全部会话，与 UserBot 插件分发（loader ``allowed_chat_ids``）同一语义。
+    读取失败时按空集合（允许全部）处理，与 worker ``_load_ignored_peers`` 的失败兜底一致。
+    """
+
+    now = time.monotonic()
+    cached = _ACCOUNT_ALLOWED_CHATS_CACHE.get(int(aid))
+    if cached is not None and now - cached[0] < _ACCOUNT_ALLOWED_CHATS_CACHE_TTL_SECONDS:
+        return cached[1]
+    chat_ids: set[int] = set()
+    try:
+        rows = (
+            await db.execute(select(IgnoredPeer.peer_id).where(IgnoredPeer.account_id == int(aid)))
+        ).scalars().all()
+        for raw in rows:
+            chat_id = _int_or_none(raw)
+            if chat_id is not None:
+                chat_ids.add(chat_id)
+    except Exception:  # noqa: BLE001
+        log.debug("load account allowed chats failed aid=%s", aid, exc_info=True)
+        return frozenset()
+    value = frozenset(chat_ids)
+    _ACCOUNT_ALLOWED_CHATS_CACHE[int(aid)] = (now, value)
+    return value
+
+
+def invalidate_account_allowed_chats_cache(aid: int) -> None:
+    """允许会话增删后调用：清掉允许会话缓存与交互路由索引，让下一条消息按新名单判断。"""
+
+    _ACCOUNT_ALLOWED_CHATS_CACHE.pop(int(aid), None)
+    _INTERACTION_ROUTING_INDEX_CACHE.pop(int(aid), None)
+    for key in [key for key in _EVENT_BUS_SCOPE_BLOCK_LOGGED if key[0] == int(aid)]:
+        _EVENT_BUS_SCOPE_BLOCK_LOGGED.pop(key, None)
+
+
+def _interaction_rule_scope_chat_ids(cfg: dict[str, Any]) -> list[int]:
+    """交互规则链路的群范围：旧版 cfg.chat_id/chat_ids（Web 保存时写入规则群并集）+ 全部规则的群。
+
+    只用于关键词 / 会话模块 / 支付通知的预过滤；不是账号「允许会话」，不得用于 Event Bus 直接订阅。
+    """
+
     ids: list[int] = []
     for key in ("chat_id",):
         chat_id = _int_or_none(cfg.get(key))
@@ -7234,7 +7373,7 @@ def _event_subscription_timeout_seconds(decision: Any) -> float:
 
 
 def _log_event_bus_chat_not_allowed(incoming: Incoming, decision: Any, account_state: dict[str, Any]) -> None:
-    """「允许的聊天」把交互 Bot 事件挡在插件之外时留一条 info 日志，便于排查“为什么不回复”。"""
+    """账号「允许会话」把交互 Bot 事件挡在插件之外时留一条 info 日志，便于排查“为什么不回复”。"""
 
     if getattr(decision, "matched", False) or getattr(decision, "reason_code", "") != "scope_not_matched":
         return
@@ -7244,7 +7383,7 @@ def _log_event_bus_chat_not_allowed(incoming: Incoming, decision: Any, account_s
     if allowed == "*" or allowed == ["*"]:
         return
     log.info(
-        "交互 Bot 事件未投递给插件：会话不在「允许的聊天」中 account=%s chat_id=%s plugin=%s reason=chat_not_in_allowed_chats",
+        "交互 Bot 事件未投递给插件：会话不在账号「允许会话」中 account=%s chat_id=%s plugin=%s reason=chat_not_in_allowed_chats",
         incoming.account_id,
         incoming.chat_id,
         getattr(decision, "plugin_key", ""),
