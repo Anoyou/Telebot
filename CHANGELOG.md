@@ -25,6 +25,13 @@
 
 ## [Unreleased]
 
+## [0.106.0-beta.14] - 2026-10-28 · patch（补丁预发布） · 插件 host：Event Bus payload 提供 TelePilot 管理员 ID、模型元数据带启用状态
+
+### 插件
+
+- 交互 Bot Event Bus 投递给插件的 payload 新增 `owner_user_ids`（账号本人）与 `admin_user_ids`（TelePilot 管理员：账号本人 + 已授权 sudo 用户），与 UserBot 分发状态、规则链路 payload 同义；插件可据此实现“仅管理员可点”的按钮（AI 答疑插件的“换模型重试”）。只含 Telegram user id；payload 已有同名字段时不覆盖。
+- `ctx.ai.list_providers()` 的 `models[]` 增加 `enabled`：插件可只列出 Provider 里已启用的模型（未启用模型传给 `complete(model=...)` 会被拒绝），仍不暴露密钥、`base_url` 等敏感字段。
+
 ## [0.106.0-beta.13] - 2026-10-28 · patch（补丁预发布） · 紧凑表格保留分割线；插件开发文档与示例核对
 
 ### 插件与 Rich Message

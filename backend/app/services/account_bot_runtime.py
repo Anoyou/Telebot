@@ -434,6 +434,8 @@ _INTERACTION_RUNTIME_STATE_SETTING_PREFIX = "account_bot:interaction_runtime_sta
 _TRANSFER_TEST_RUNTIME_STATE_SETTING_PREFIX = "account_bot:transfer_test_runtime_state:"
 _EVENT_BUS_KNOWN_USERS_CACHE_TTL_SECONDS = 30.0
 _EVENT_BUS_KNOWN_USERS_CACHE: dict[int, tuple[float, list[int], set[int]]] = {}
+# 与 _EVENT_BUS_KNOWN_USERS_CACHE 同步刷新：账号授权的 sudo 用户（TelePilot 管理员，不含账号本人）。
+_EVENT_BUS_SUDO_USERS_CACHE: dict[int, set[int]] = {}
 _INTERACTION_PAYMENT_CONFIRM_CALLBACK_PREFIX = "ip"
 _EVENT_FRAMEWORK_FLAGS_CACHE: tuple[float, dict[str, bool]] = (0.0, {})
 _ROUTE_PAYMENT_CONFIRM = "payment_confirm"
@@ -5821,6 +5823,7 @@ async def _try_handle_event_bus_subscriptions(
         entry_key = str(decision.entry_key or "").strip()
         await _maybe_fast_ack_callback(incoming, decision.plugin_key, entry_key)
         payload = _event_bus_plugin_payload(incoming, event, decision)
+        _attach_event_bus_admin_ids(payload, account_state)
         bot_identity = await _interaction_bot_identity(incoming)
         if bot_identity:
             payload["bot"] = bot_identity
@@ -6048,6 +6051,7 @@ async def _try_handle_event_bus_payment_notice(
                 )
                 continue
             payload = _event_bus_payment_plugin_payload(incoming, event, decision, parsed)
+            _attach_event_bus_admin_ids(payload, account_state)
             payload.update(
                 {
                     "rule_id": str(rule.get("id") or ""),
@@ -6149,8 +6153,24 @@ async def _event_bus_account_state(db: Any, incoming: Incoming, cfg: dict[str, A
         # 只有显式配置会话列表时才按 chat_id 收窄。
         "allowed_chat_ids": allowed_chat_ids or "*",
         "owner_user_ids": owner_ids,
+        # TelePilot 管理员 = 账号本人 + 授权 sudo 用户，与 UserBot 分发状态的 admin_user_ids 同义。
+        "admin_user_ids": sorted(set(owner_ids) | _EVENT_BUS_SUDO_USERS_CACHE.get(int(incoming.account_id), set())),
         "known_user_ids": sorted(known_user_ids),
     }
+
+
+def _attach_event_bus_admin_ids(payload: dict[str, Any], account_state: dict[str, Any]) -> dict[str, Any]:
+    """把账号本人与 TelePilot 管理员（本人 + sudo 用户）的 Telegram user id 交给 Event Bus 插件。
+
+    插件据此判断“TelePilot 管理员”（例如只允许管理员点击的按钮）；只含 user id，不含姓名或其它资料。
+    插件已有同名字段时不覆盖（规则链路 payload 早已带 owner_user_ids / admin_user_ids）。
+    """
+
+    owner_ids = [int(item) for item in (account_state.get("owner_user_ids") or []) if _int_or_none(item) is not None]
+    admin_ids = [int(item) for item in (account_state.get("admin_user_ids") or owner_ids) if _int_or_none(item) is not None]
+    payload.setdefault("owner_user_ids", owner_ids)
+    payload.setdefault("admin_user_ids", sorted(set(admin_ids) | set(owner_ids)))
+    return payload
 
 
 def _add_known_user_id(ids: set[int], raw: Any) -> None:
@@ -6166,6 +6186,7 @@ async def _event_bus_cached_known_user_ids(db: Any, aid: int) -> tuple[list[int]
         return list(cached[1]), set(cached[2])
     owner_ids: list[int] = []
     known_ids: set[int] = set()
+    sudo_ids: set[int] = set()
     try:
         account = await db.get(Account, aid)
         owner_id = _int_or_none(getattr(account, "tg_user_id", None))
@@ -6178,6 +6199,7 @@ async def _event_bus_cached_known_user_ids(db: Any, aid: int) -> tuple[list[int]
         rows = (await db.execute(select(SudoUser).where(SudoUser.account_id == aid))).scalars().all()
         for row in rows:
             _add_known_user_id(known_ids, getattr(row, "tg_user_id", None))
+            _add_known_user_id(sudo_ids, getattr(row, "tg_user_id", None))
     except Exception:  # noqa: BLE001
         log.debug("load event bus sudo users failed aid=%s", aid, exc_info=True)
     try:
@@ -6188,6 +6210,7 @@ async def _event_bus_cached_known_user_ids(db: Any, aid: int) -> tuple[list[int]
     except Exception:  # noqa: BLE001
         log.debug("load event bus account bot users failed aid=%s", aid, exc_info=True)
     _EVENT_BUS_KNOWN_USERS_CACHE[int(aid)] = (now, list(owner_ids), set(known_ids))
+    _EVENT_BUS_SUDO_USERS_CACHE[int(aid)] = set(sudo_ids)
     return owner_ids, known_ids
 
 
