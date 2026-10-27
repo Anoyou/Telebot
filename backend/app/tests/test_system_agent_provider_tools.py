@@ -287,7 +287,6 @@ async def test_model_query_agent_stops_at_step_budget_and_resumes_from_summary_c
     provider_spec = next(spec for spec in registry.list_all() if spec.name == "providers.list")
     spec = ToolSpec(provider_spec.name, provider_spec.description, provider_spec.input_schema)
     skill = next(skill for skill in BUILTIN_SKILLS if skill.name == "ai-config")
-    collected: list[str] = []
     offsets: list[int] = []
     memory_cursors: list[dict] = []
     model_requests: list[ModelRequest] = []
@@ -295,7 +294,6 @@ async def test_model_query_agent_stops_at_step_budget_and_resumes_from_summary_c
     async def handler(arguments: dict) -> dict:
         offsets.append(arguments["offset"])
         page = await list_providers(ctx, arguments)
-        collected.extend(page["models"])
         assert summarize_tool_result(page, max_chars=8000) == page
         return page
 
@@ -324,9 +322,10 @@ async def test_model_query_agent_stops_at_step_budget_and_resumes_from_summary_c
         if not request.tools or (last_page is not None and not last_page["has_more"]):
             assert last_page is not None
             report = {
-                "status": "未完成" if last_page["has_more"] else "完整",
+                "status": "分段未完成" if last_page["has_more"] else "剩余段完成",
                 "next_offset": last_page["next_offset"],
                 "total": last_page["total"],
+                "models": [name for page in pages for name in page["models"]],
             }
             return ModelResponse(model="test", content=(TextContent(json.dumps(report)),))
         cursor = last_page or json.loads(request.messages[-1].text_content())
@@ -354,7 +353,11 @@ async def test_model_query_agent_stops_at_step_budget_and_resumes_from_summary_c
     assert offsets == [0, 200, 400]
     assert len(model_requests) == 4  # 三步工具调用后仅允许一次无工具总结。
     assert model_requests[-1].tools == ()
-    assert json.loads(first.text) == {"status": "未完成", "next_offset": 600, "total": 900}
+    first_delivery = json.loads(first.text)
+    assert first_delivery["status"] == "分段未完成"
+    assert first_delivery["next_offset"] == 600
+    assert first_delivery["total"] == 900
+    assert first_delivery["models"] == [f"model-{index:04d}" for index in range(600)]
     assert memory_cursors[-1]["has_more"] is True
     assert memory_cursors[-1]["next_offset"] == 600
 
@@ -375,9 +378,15 @@ async def test_model_query_agent_stops_at_step_budget_and_resumes_from_summary_c
     assert resumed.tool_calls == 2
     assert offsets == [0, 200, 400, 600, 800]
     assert len(model_requests) == 7
-    assert json.loads(resumed.text) == {"status": "完整", "next_offset": None, "total": 900}
-    assert collected == [f"model-{index:04d}" for index in range(900)]
-    assert len(collected) == len(set(collected)) == 900
+    remaining_delivery = json.loads(resumed.text)
+    assert remaining_delivery["status"] == "剩余段完成"
+    assert remaining_delivery["next_offset"] is None
+    assert remaining_delivery["total"] == 900
+    assert remaining_delivery["models"] == [f"model-{index:04d}" for index in range(600, 900)]
+    # 验证用户实际收到的两段，而非依赖测试进程暗中保留的完整工具结果。
+    delivered = first_delivery["models"] + remaining_delivery["models"]
+    assert delivered == [f"model-{index:04d}" for index in range(900)]
+    assert len(delivered) == len(set(delivered)) == 900
 
 
 def test_probe_and_add_tool_is_a_confirmed_write_with_encrypted_secret() -> None:

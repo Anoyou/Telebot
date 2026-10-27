@@ -150,7 +150,7 @@ System Agent 使用四层上下文，并按预算持久化历史窗口：
 | `interaction.list_rules` / `get_rule` / `list_active_sessions` | 交互规则与活跃会话（账号 JSON，非 Rule 表） |
 | `rules.list` / `rules.get` / `rules.dry_run` | 通用 Rule 查询与无副作用试运行（拒绝 `feature_key=interaction`） |
 | `scheduler.list` / `scheduler.get` | 定时任务与 `next_run_at` |
-| `providers.list` | 脱敏 Provider 与 tools 模型；`view="models"` 紧凑查询模型名称，`strip_prefix=true` 去供应商前缀后去重；按 `next_offset` 翻页至 `has_more=false`。分页进度置于结果前部，触及执行预算时报告未完成，用户继续后从该游标接着读取 |
+| `providers.list` | 脱敏 Provider 与 tools 模型；`view="models"` 紧凑查询模型名称，`strip_prefix=true` 去供应商前缀后去重；按 `next_offset` 翻页至 `has_more=false`。分页进度置于结果前部，触及预算时分段交付已读取名称并报告未完成，用户继续后从游标交付剩余段；历史摘要不保证保留前段全部名称，不得仅凭游标宣称已重新合并完整总清单 |
 | `usage.recent` / `usage.plugins` / `usage.reset` | 查询近期 LLM 调用、插件用量与重置用量；近期调用包含实际 backend 与脱敏 Gateway 元数据 |
 | `commands.list` | 自定义指令与启用账号 |
 | `features.get_account_status` | 账号功能/插件启停矩阵 |
