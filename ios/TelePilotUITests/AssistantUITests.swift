@@ -163,8 +163,8 @@ final class AssistantUITests: XCTestCase {
         XCTAssertGreaterThan(longLine.frame.height, 30)
     }
 
-    /// 第七轮：「+」与模型选择改为输入栏上方的浮层卡片（参考 Grok 录屏：从按钮位置模糊＋缩放展开），展开、选择、收起前后
-    /// 输入框、「+」、模型按钮、发送按钮的 frame 完全不变；选择模型生效并在浮层里标出当前选中。
+    /// 第九轮：「+」与模型选择改为系统原生 popover（arrowEdge: .bottom，iPhone 上也以气泡呈现，箭头指向按钮）。
+    /// 展开、选择、收起前后输入框、「+」、模型按钮、发送按钮的 frame 不变；模型列表每行前有家族 logo；选择模型生效并标出当前选中。
     func testComposerPanelsKeepComposerFramesAndSelectModel() {
         let app = openAssistant()
         let composer = app.descendants(matching: .any)["assistant.composer"].firstMatch
@@ -175,7 +175,7 @@ final class AssistantUITests: XCTestCase {
         let bar = app.descendants(matching: .any)["assistant.composerBar"].firstMatch
         XCTAssertTrue(bar.exists)
         let before = [composer.frame, attach.frame, model.frame, send.frame]
-        /// 第八轮：模型胶囊显示全名、可变宽——选择模型后只允许它的宽度变化（左缘紧挨「+」不动），其余 frame 完全不变。
+        /// 模型胶囊显示全名、可变宽——选择模型后只允许它的宽度变化（左缘紧挨「+」不动），其余 frame 完全不变。
         func assertUnchanged(_ step: String, modelWidthMayChange: Bool = false, file: StaticString = #filePath, line: UInt = #line) {
             let now = [composer.frame, attach.frame, model.frame, send.frame]
             for (index, (old, new)) in zip(before, now).enumerated() {
@@ -187,32 +187,41 @@ final class AssistantUITests: XCTestCase {
                 XCTAssertEqual(new.height, old.height, accuracy: 0.5, "\(step)：\(old) → \(new)", file: file, line: line)
             }
         }
-        /// 浮层底边（水滴尖尖端）贴近输入栏上沿；尖角对准触发按钮中心。
+        /// 原生 popover 在按钮上方（箭头朝下指向按钮）：内容底边在按钮之上且贴近按钮，按钮中心落在 popover 的水平范围内。
+        /// 按钮在输入栏下方的工具栏里，锚定在按钮上的 popover 会盖住输入框那一行（系统行为），不要求在输入栏卡片之上。
         func assertAnchored(_ card: XCUIElement, to button: XCUIElement, _ step: String, file: StaticString = #filePath, line: UInt = #line) {
-            let gap = bar.frame.minY - card.frame.maxY
-            XCTAssertGreaterThanOrEqual(gap, -0.5, "\(step)：浮层压住了输入栏 \(card.frame) / \(bar.frame)", file: file, line: line)
-            XCTAssertLessThanOrEqual(gap, 24, "\(step)：浮层离输入栏太远 \(card.frame) / \(bar.frame)", file: file, line: line)
-            let tail = app.descendants(matching: .any)["assistant.panel.tail"].firstMatch
-            XCTAssertTrue(tail.exists, "\(step)：没有水滴尖", file: file, line: line)
-            XCTAssertEqual(tail.frame.midX, button.frame.midX, accuracy: 3, "\(step)：尖角 \(tail.frame) 按钮 \(button.frame)", file: file, line: line)
-            XCTAssertLessThanOrEqual(tail.frame.maxY, button.frame.minY, file: file, line: line)
+            XCTAssertLessThanOrEqual(card.frame.maxY, button.frame.minY + 0.5, "\(step)：popover 应在按钮上方 \(card.frame) / \(button.frame)", file: file, line: line)
+            XCTAssertGreaterThan(card.frame.maxY, button.frame.minY - 40, "\(step)：popover 离按钮太远 \(card.frame) / \(button.frame)", file: file, line: line)
+            XCTAssertTrue(card.frame.minX - 1 <= button.frame.midX && button.frame.midX <= card.frame.maxX + 1,
+                          "\(step)：箭头应指向按钮 \(card.frame) / \(button.frame)", file: file, line: line)
         }
 
-        // 模型浮层：在输入栏上方、靠右展开，当前为“自动”。
+        // 模型 popover：当前为“自动”，每行前有模型家族 logo。
         model.tap()
         let modelPanel = app.descendants(matching: .any)["assistant.panel.model"].firstMatch
         XCTAssertTrue(modelPanel.waitForExistence(timeout: 5))
         let auto = app.buttons["assistant.model.option.auto"]
         XCTAssertTrue(auto.waitForExistence(timeout: 3))
         XCTAssertEqual(auto.value as? String, "已选中")
-        assertUnchanged("模型浮层展开中")
+        assertUnchanged("模型 popover 展开中")
         Thread.sleep(forTimeInterval: 0.6)
-        assertUnchanged("模型浮层展开后")
-        XCTAssertLessThanOrEqual(modelPanel.frame.maxY, composer.frame.minY)
-        assertAnchored(modelPanel, to: model, "模型浮层")
-        // 展开时触发按钮半透明保留在原位、仍可点。
-        XCTAssertTrue(model.exists && model.isHittable)
-        XCTAssertTrue(attach.isHittable)
+        assertUnchanged("模型 popover 展开后")
+        assertAnchored(modelPanel, to: model, "模型 popover")
+        // 模型不多（7 行）时全部在 popover 内可见、无需滚动：最后一行（无法识别的家族）完整落在 popover 里。
+        let lastRow = app.buttons["assistant.model.option.5"]
+        XCTAssertTrue(lastRow.exists, "最后一个模型行未显示")
+        XCTAssertLessThanOrEqual(lastRow.frame.maxY, modelPanel.frame.maxY + 1, "最后一行被裁切 \(lastRow.frame) / \(modelPanel.frame)")
+        for family in ["auto", "openai", "anthropic", "deepseek", "google", "tencent", "unknown"] {
+            let logo = app.descendants(matching: .any)["assistant.model.logo.\(family)"].firstMatch
+            XCTAssertTrue(logo.exists, "缺少家族 logo：\(family)")
+        }
+        // logo 在行的最左侧（标题之前），与行垂直居中对齐。
+        let deepseekRow = app.buttons["assistant.model.option.2"]
+        let deepseekLogo = app.descendants(matching: .any)["assistant.model.logo.deepseek"].firstMatch
+        XCTAssertTrue(deepseekRow.exists)
+        XCTAssertLessThan(deepseekLogo.frame.midX, deepseekRow.frame.minX + 40, "\(deepseekLogo.frame) / \(deepseekRow.frame)")
+        XCTAssertEqual(deepseekLogo.frame.midY, deepseekRow.frame.midY, accuracy: 4)
+        XCTAssertTrue(deepseekRow.label.contains("deepseek-v4-flash"), deepseekRow.label)
         // 选择器：每行副标题都是「供应商 · 模型」全名；“自动”显示服务器当前路由到的模型。
         XCTAssertTrue(auto.label.contains("测试供应商 · openai/fixture-model"), auto.label)
         XCTAssertTrue(app.buttons["测试供应商 · openai/fixture-model"].firstMatch.exists)
@@ -220,7 +229,7 @@ final class AssistantUITests: XCTestCase {
         XCTAssertTrue(option.exists)
         XCTAssertGreaterThanOrEqual(option.frame.height, 44)
         option.tap()
-        XCTAssertTrue(waitUntilGone(modelPanel), "选择后浮层应收起")
+        XCTAssertTrue(waitUntilGone(modelPanel), "选择后 popover 应收起")
         // 胶囊显示「供应商 · 模型」全名（与回答末尾模型名同一格式）。
         let selected = NSPredicate(format: "label CONTAINS %@", "测试供应商 · anthropic/fixture-model-with-a-much-longer-name")
         expectation(for: selected, evaluatedWith: model)
@@ -231,58 +240,127 @@ final class AssistantUITests: XCTestCase {
         // 胶囊变宽也不越过发送按钮。
         XCTAssertLessThan(model.frame.maxX, send.frame.minX)
 
-        // 再打开：浮层标出刚选的模型；点浮层外收起。
+        // 再打开：标出刚选的模型；点 popover 外收起。
         model.tap()
         XCTAssertTrue(modelPanel.waitForExistence(timeout: 5))
         let chosen = app.buttons["测试供应商 · anthropic/fixture-model-with-a-much-longer-name"].firstMatch
         XCTAssertTrue(chosen.waitForExistence(timeout: 3))
         XCTAssertEqual(chosen.value as? String, "已选中")
         XCTAssertNotEqual(app.buttons["assistant.model.option.auto"].value as? String, "已选中")
-        let modelPanelFrame = modelPanel.frame
-        dismissPanel(app)
+        dismissPopover(app)
         XCTAssertTrue(waitUntilGone(modelPanel))
-        assertUnchanged("模型浮层收起后", modelWidthMayChange: true)
+        Thread.sleep(forTimeInterval: 0.6)
+        assertUnchanged("模型 popover 收起后", modelWidthMayChange: true)
 
-        // 附件浮层：同一套卡片，从左下「+」一侧展开，只列图片来源。
+        // 附件 popover：同样是原生 popover，从「+」弹出，只列图片来源。
         attach.tap()
         let attachPanel = app.descendants(matching: .any)["assistant.panel.attach"].firstMatch
         XCTAssertTrue(attachPanel.waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["assistant.attach.photos"].exists)
         XCTAssertTrue(app.buttons["assistant.attach.file"].exists)
         XCTAssertEqual(app.buttons["assistant.attach.file"].label, "从文件选择图片")
-        XCTAssertLessThanOrEqual(attachPanel.frame.minX, modelPanelFrame.minX + 0.5)
-        XCTAssertLessThanOrEqual(attachPanel.frame.maxY, composer.frame.minY)
-        XCTAssertEqual(attachPanel.frame.minX, attach.frame.minX, accuracy: 2, "附件卡片 \(attachPanel.frame) 按钮 \(attach.frame)")
-        assertUnchanged("附件浮层展开中", modelWidthMayChange: true)
+        assertUnchanged("附件 popover 展开中", modelWidthMayChange: true)
         Thread.sleep(forTimeInterval: 0.6)
-        assertUnchanged("附件浮层展开后", modelWidthMayChange: true)
-        assertAnchored(attachPanel, to: attach, "附件浮层")
-        // 打开时「+」变成半透明的“×”保留在原位：再点一次收起。
-        XCTAssertTrue(attach.isHittable)
-        XCTAssertEqual(attach.label, "收起添加图片")
-        attach.tap()
-        XCTAssertTrue(waitUntilGone(attachPanel))
-        // 再打开一次，点卡片外收起。
-        attach.tap()
-        XCTAssertTrue(attachPanel.waitForExistence(timeout: 5))
-        dismissPanel(app)
+        assertUnchanged("附件 popover 展开后", modelWidthMayChange: true)
+        assertAnchored(attachPanel, to: attach, "附件 popover")
+        XCTAssertEqual(attach.label, "添加图片")
+        dismissPopover(app)
         XCTAssertTrue(waitUntilGone(attachPanel))
         Thread.sleep(forTimeInterval: 0.6)
-        assertUnchanged("附件浮层收起后", modelWidthMayChange: true)
+        assertUnchanged("附件 popover 收起后", modelWidthMayChange: true)
         XCTAssertTrue(attach.isHittable)
         XCTAssertTrue(model.isHittable)
     }
 
-    /// 点浮层外（对话区域上部）收起浮层。
-    private func dismissPanel(_ app: XCUIApplication) {
-        let scrim = app.descendants(matching: .any)["assistant.panel.dismiss"].firstMatch
-        XCTAssertTrue(scrim.waitForExistence(timeout: 3))
-        scrim.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.08)).tap()
+    /// 第九轮：键盘弹起时打开原生 popover。只记录键盘是否被收起（写进测试日志 R9-KEYBOARD，供 PR 说明），
+    /// 并确认 popover 仍出现在模型按钮上方、选择后输入栏可继续输入。
+    func testComposerPopoverWithKeyboard() {
+        let app = openAssistant()
+        let composer = app.descendants(matching: .any)["assistant.composer"].firstMatch
+        composer.tap()
+        composer.typeText("草稿")
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
+        let model = app.buttons["assistant.model"]
+        XCTAssertTrue(model.isHittable)
+        model.tap()
+        let modelPanel = app.descendants(matching: .any)["assistant.panel.model"].firstMatch
+        XCTAssertTrue(modelPanel.waitForExistence(timeout: 5))
+        Thread.sleep(forTimeInterval: 0.8)
+        let keyboardVisible = app.keyboards.firstMatch.exists
+        // 工作流「输出界面测试观察记录」步骤会把 UI-RECORD 行摘到 job 日志与摘要。
+        print("UI-RECORD R9-KEYBOARD: 原生 popover 打开后键盘\(keyboardVisible ? "仍显示" : "已收起")")
+        XCTContext.runActivity(named: "R9-KEYBOARD keyboardVisible=\(keyboardVisible)") { _ in }
+        XCTAssertLessThanOrEqual(modelPanel.frame.maxY, model.frame.minY + 0.5)
+        app.buttons["assistant.model.option.auto"].tap()
+        XCTAssertTrue(waitUntilGone(modelPanel))
+        XCTAssertTrue((composer.value as? String ?? "").contains("草稿"))
+    }
+
+    /// 点 popover 外（对话区域上部）收起 popover。
+    private func dismissPopover(_ app: XCUIApplication) {
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.2)).tap()
     }
 
     private func waitUntilGone(_ element: XCUIElement, timeout: TimeInterval = 3) -> Bool {
         let gone = NSPredicate(format: "exists == false")
         return XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: gone, object: element)], timeout: timeout) == .completed
+    }
+
+    /// 第九轮：回答与我的消息都能打开「选择文本」面板（原生 sheet 里的只读 UITextView，可拖选任意片段）；
+    /// 长按回复的菜单里也有「选择文本」；代码块右上角有「复制」。
+    func testSelectTextOpensNativeTextViewSheet() {
+        let app = openAssistant(["--ui-test-long-history"])
+        XCTAssertTrue(app.staticTexts["第 120 条回答"].waitForExistence(timeout: 20), visibleTexts(app))
+        let replySelect = app.buttons.matching(identifier: "assistant.reply.selectText").allElementsBoundByIndex.last { $0.isHittable }
+        XCTAssertNotNil(replySelect, visibleTexts(app))
+        guard let replySelect else { return }
+        XCTAssertEqual(replySelect.label, "选择文本")
+        XCTAssertGreaterThanOrEqual(replySelect.frame.height, 44)
+        replySelect.tap()
+        let textView = app.textViews["assistant.selectText.textView"]
+        XCTAssertTrue(textView.waitForExistence(timeout: 8), "回答的选择文本面板没有出现")
+        let replyText = textView.value as? String ?? ""
+        XCTAssertTrue(replyText.contains("第 120 条回答"), replyText)
+        XCTAssertTrue(replyText.contains("账号运行正常"), replyText)
+        XCTAssertTrue(replyText.contains("status: ok"), replyText)
+        XCTAssertFalse(replyText.contains("##"), "Markdown 标记应转成样式：\(replyText)")
+        XCTAssertTrue(app.navigationBars["选择文本"].exists)
+        app.buttons["assistant.selectText.done"].tap()
+        XCTAssertTrue(waitUntilGone(textView, timeout: 5))
+
+        // 我的消息：同样的面板，内容是原文。
+        let messageSelect = app.buttons.matching(identifier: "assistant.message.selectText").allElementsBoundByIndex.last { $0.isHittable }
+        XCTAssertNotNil(messageSelect)
+        guard let messageSelect else { return }
+        messageSelect.tap()
+        XCTAssertTrue(textView.waitForExistence(timeout: 8), "我的消息的选择文本面板没有出现")
+        XCTAssertTrue((textView.value as? String ?? "").contains("请检查账号与插件状态"), textView.value as? String ?? "")
+        app.buttons["assistant.selectText.done"].tap()
+        XCTAssertTrue(waitUntilGone(textView, timeout: 5))
+
+        // 长按回复正文 → 菜单里的「选择文本」。
+        // 菜单项与操作行按钮同名，用标识区分（操作行按钮的标识以 assistant. 开头）。
+        let menuItem = app.buttons.matching(NSPredicate(format: "label == %@ AND NOT (identifier BEGINSWITH %@)", "选择文本", "assistant.")).firstMatch
+        app.staticTexts["第 120 条回答"].press(forDuration: 1.2)
+        if !menuItem.waitForExistence(timeout: 5) {
+            // 模拟器偶发没识别出长按：再按一次。
+            app.staticTexts["第 120 条回答"].press(forDuration: 1.5)
+        }
+        XCTAssertTrue(menuItem.waitForExistence(timeout: 5), "长按菜单里没有「选择文本」")
+        menuItem.tap()
+        XCTAssertTrue(textView.waitForExistence(timeout: 5))
+        XCTAssertTrue((textView.value as? String ?? "").contains("第 120 条回答"))
+        app.buttons["assistant.selectText.done"].tap()
+        XCTAssertTrue(waitUntilGone(textView, timeout: 5))
+
+        // 代码块右上角的「复制」：触控至少 44pt，点后显示“已复制”。
+        let codeCopy = app.buttons.matching(identifier: "assistant.code.copy").allElementsBoundByIndex.last { $0.isHittable }
+        XCTAssertNotNil(codeCopy)
+        if let codeCopy {
+            XCTAssertGreaterThanOrEqual(codeCopy.frame.height, 44)
+            codeCopy.tap()
+            XCTAssertTrue(app.buttons["已复制代码"].firstMatch.waitForExistence(timeout: 3), "代码块复制后没有显示“已复制”")
+        }
     }
 
     /// 第六轮：长会话（120 条、每页 40 条）打开即可操作——导航栏按钮与输入栏立刻可点，先显示最近一屏，

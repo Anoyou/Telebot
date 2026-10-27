@@ -13,12 +13,16 @@ on:
     paths:
       - "ios/**"
       - "openapi/telepilot.openapi.json"
+      # 模型家族映射与图标由 Web 与 iOS 共用（sync-model-brands.py 校验）。
+      - "frontend/src/lib/modelBrand*.json"
       - ".github/workflows/ios.yml"
   push:
     branches: [Beta]
     paths:
       - "ios/**"
       - "openapi/telepilot.openapi.json"
+      # 模型家族映射与图标由 Web 与 iOS 共用（sync-model-brands.py 校验）。
+      - "frontend/src/lib/modelBrand*.json"
       - ".github/workflows/ios.yml"
   workflow_dispatch:
 
@@ -106,6 +110,7 @@ jobs:
           python3 ios/scripts/check-ios-version.py
           python3 ios/TelePilotCore/scripts/sync-openapi.py --check
           python3 ios/TelePilotCore/scripts/sync-contract.py --check
+          python3 ios/TelePilotCore/scripts/sync-model-brands.py --check
           python3 ios/scripts/ui-test-shards.py --total "$UI_TEST_SHARDS" --summary
 
       - name: 编译（build-for-testing）
@@ -253,6 +258,17 @@ jobs:
             -test-iterations 2 \
             $ONLY \
             2>&1 | tee "$RESULTS_DIR/test-${{ matrix.shard }}.log" | xcbeautify --renderer github-actions
+
+      - name: 输出界面测试观察记录（UI-RECORD）
+        # 用例里 print("UI-RECORD …") 的观察结果（不作为断言，例如原生 popover 打开时键盘是否收起），
+        # xcbeautify 会过滤掉 print 输出，这里从原始日志里摘出来显示在 job 日志与摘要里。
+        if: always()
+        run: |
+          records=$(grep -ah "UI-RECORD" "$RESULTS_DIR/test-${{ matrix.shard }}.log" | sed 's/^.*UI-RECORD/UI-RECORD/' | sort -u || true)
+          if [ -n "$records" ]; then
+            echo "$records"
+            { echo "### 界面测试观察记录（分片 ${{ matrix.shard }}）"; echo '```'; echo "$records"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       - name: 上传结果包
         if: failure()

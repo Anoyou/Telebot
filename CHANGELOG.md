@@ -25,6 +25,12 @@
 
 ## [Unreleased]
 
+### 界面
+
+- 模型家族识别补齐服务器 9 个供应商的 238 个模型标识：新增腾讯混元（hy3）、小米 MiMo、阶跃星辰（step）、美团 LongCat、蚂蚁百灵（ling/ring）、快手 KAT（kat-coder）、IBM（granite）、Liquid AI（lfm）、Upstage（solar）、Writer（palmyra）、Reka、Inception（mercury）、小红书 dots、Arcee（trinity）、Sakana AI（fugu）、Poolside（laguna）、Thinking Machines（inkling）、TypeSafe（jev）、Agnes AI、AionLabs、Nex AGI、Perceptron 等家族与 logo（lobe-icons，MIT）；修正 NVIDIA Nemotron 识别拼写，OpenAI 覆盖 gpt-audio/gpt-latest/codex，Google 增加 Lyria，Meta 增加 Muse Spark/Glimmer，Cohere 增加 North；OpenRouter 的 free/fusion/pareto-code 路由显示 OpenRouter。无法识别时显示“其他”。
+- 模型家族映射、图标与 238 条用例抽成 `frontend/src/lib/modelBrands.json`、`modelBrandIcons.json`、`modelBrandCases.json`，Web 与 iOS 共用（iOS 由 `ios/TelePilotCore/scripts/sync-model-brands.py` 同步并在 iOS 工作流校验）。
+- iOS 0.13.4：输入栏「+」与模型选择改用系统原生 popover；模型选择器每行显示家族 logo；回复与消息支持「选择文本」（原生面板中自由拖选）；代码块「复制」按钮加大。
+
 ## [0.106.0-beta.11] - 2026-10-27 · patch（补丁预发布） · 修复助手追问丢失工具与完整模型清单查询
 
 ### 系统助手
