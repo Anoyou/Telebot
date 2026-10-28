@@ -17,7 +17,7 @@
 
 > 不要为每个微小提交单独迭代版本号。开发过程中先把变更积累在 `Unreleased`；只有准备 beta 检查点、稳定发布、推送稳定检查点、创建 release/PR，或用户明确要求“推一版/发一版”时，才按本批改动的最高影响级别统一 bump 一次版本号。
 >
-> beta 检查点和稳定发布时运行 `python3 scripts/bump-version.py --title "主题"`（0.106.0-beta.18 起）：它按规则算出下一个版本号，写入 `backend/app/__init__.py`、`frontend/package.json` 与 `openapi/telepilot.openapi.json` 的 `info.version`，并把 `Unreleased` 内容移动到对应中文版本段落。`backend/pyproject.toml`（dynamic）、`frontend/src/lib/version.ts`（导入 package.json）与 `backend/app/main.py`（`from . import __version__`）自动跟随，无需单独改。
+> beta 检查点和稳定发布时运行 `python3 scripts/bump-version.py --title "主题"`（0.106.0-beta.19 起）：它按规则算出下一个版本号，写入 `backend/app/__init__.py`、`frontend/package.json` 与 `openapi/telepilot.openapi.json` 的 `info.version`，并把 `Unreleased` 内容移动到对应中文版本段落。`backend/pyproject.toml`（dynamic）、`frontend/src/lib/version.ts`（导入 package.json）与 `backend/app/main.py`（`from . import __version__`）自动跟随，无需单独改。
 >
 > 2026-07-26 起，原 `0.73.0-beta.2` 至 `0.73.0-beta.15` 按阶段性能力回溯重整为 `0.74.0-beta.1` 至 `0.80.0-beta.3`；已存在的 Git 提交标题保留原始版本标记，不重写仓库历史。
 
@@ -31,7 +31,7 @@
 
 - 纯服务器改动不再触发 iOS 全量测试：iOS 的 OpenAPI 原生子集不再携带服务器 `info.version`（固定为 `native-subset`，生成的 Swift 代码不使用它），服务器升版本不再改动 `ios/**`；「iOS」工作流的判定 job 发现 iOS 相关路径里只有 `openapi/telepilot.openapi.json` 变化时，在 Ubuntu 上跑 `sync-openapi.py` / `sync-contract.py --check`，通过即跳过编译与 4 个 UI 分片（此前每个纯服务器 PR 约 25 分钟、约 75 macOS 分钟）。
 - 多架构镜像去掉 QEMU 重活：前端镜像的构建阶段固定在构建机原生架构（`--platform=$BUILDPLATFORM`），静态产物只构建一次；web 镜像里的 Gateway 在原生架构交叉编译、不再在镜像里跑 `go test` / `go vet`（CI「Gateway」job 是唯一测试门禁）；Python 依赖清单单独成层，版本号等变化不再打穿 pip 依赖层；`BUILD_COMMIT` 下移到最后一层，Gateway 运行时从 `TELEPILOT_GATEWAY_BUILD_COMMIT` 读取构建提交（显示不变）。
-- PR → Beta 也跑完整 CI 门禁（后端、前端、浏览器、契约、迁移、Gateway、版本同步），回归在合并前拦下；Dockerfile、依赖清单或发布工作流有变化的 PR 额外做一次不推送的多架构镜像构建校验。
+- PR → Beta 也跑 CI 门禁（按 PR 改动范围选择后端、前端、浏览器、契约、迁移等检查，与 Beta push 同一套规则；改工作流时完整执行；面向 main 仍始终完整），回归在合并前拦下；Dockerfile、依赖清单或发布工作流有变化的 PR 额外做一次不推送的多架构镜像构建校验。
 - 新增 `scripts/bump-version.py`（`make bump T="主题"`）：一条命令按 AGENTS.md 规则算出下一个版本号（读取 `origin/Beta`、`origin/main` 与工作树），写入全部版本源、直接改写 OpenAPI `info.version`，把 `Unreleased` 移到新版本段落并自检；rebase 后撞号时再跑一次即可顺延。版本源从五处减为三处字面量：`backend/pyproject.toml` 改为 `dynamic` 读取 `app.__version__`，`frontend/src/lib/version.ts` 改为从 `package.json` 导入（打包后只保留版本字段）；CI「版本同步」改用共用的 `scripts/check-version-sync.py`。
 - iOS UI 分片耗时表自动更新：各分片从 xcresult 导出逐用例耗时，全绿时汇总上传；下一个 run 合并最近 5 次（逐用例中位数）统一下发给编译 job 与所有分片，取不到时回退到仓库里的耗时表。
 
