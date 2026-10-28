@@ -76,8 +76,9 @@ Event Bus、Trace 和 MessageOps 是两条标准消息链路共用的内部契�
 
 ## 兼容说明
 
-- `plugin.json` 与 `manifest.py` 顶层都要声明 `requires_platform_capabilities`（新装/升级必填，允许 `[]`）；因此 `min_telepilot_version` 至少写 `0.72.0-beta.2`，用到 `send_rich`、`ctx.skills`、识图、访客模式、`compact_tables` 等能力时按 [API 参考：版本与兼容](./PLUGIN-API-REFERENCE.md#版本与兼容) 的门槛表提高，或先做能力探测。宿主比较版本只看 `x.y.z`。
-- 发布前可用插件仓库 `Anoyou/telebot-plugins` 的 `scripts/check_host_compat.py` 以本仓库真实运行时检查插件（安装校验、加载、manifest 一致性、权限、Host API、最低版本推断、初始化）。
+- `plugin.json` 与 `manifest.py` 顶层都要声明 `requires_platform_capabilities`（新装/升级必填，允许 `[]`）；因此 `min_telepilot_version` 至少写 `0.72.0-beta.2`，用到 `send_rich`、`ctx.skills`、识图、访客模式、`compact_tables` 等能力时按 [API 参考：版本与兼容](./PLUGIN-API-REFERENCE.md#版本与兼容) 的门槛表提高，或先做能力探测（0.107.0-beta.1+ 用 `ctx.capabilities.has(...)`，旧宿主退回 `getattr(ctx.messages, ...)`，见 [能力协商与 Plugin API 版本](./PLUGIN-API-REFERENCE.md#能力协商与-plugin-api-版本)）。0.107.0-beta.1 起声明带 beta 号时按完整 SemVer 比较，更旧的宿主只看 `x.y.z`。
+- 发布前可用插件仓库 `Anoyou/telebot-plugins` 的 `scripts/check_host_compat.py` 以本仓库真实运行时检查插件（安装校验、加载、manifest 一致性、权限、Host API、最低版本推断、初始化）；主仓库 PR 的「插件库兼容」工作流会用新宿主反向跑同一套检查和插件库 pytest。
+- 上线后在插件详情「运行统计」看各钩子的调用数、耗时、失败率与弃用接口调用次数（[钩子统计与弃用登记](./PLUGIN-API-REFERENCE.md#钩子统计与弃用登记)）。
 
 - 旧章节锚点已经不再提供。
 - `docs/PLUGIN-AI.md` 保持独立。

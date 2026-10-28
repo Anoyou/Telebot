@@ -10,7 +10,9 @@
 - 必须把新 Telegram 插件写成 Event Bus + Trace + MessageOps：`plugin.json` 写 `usage`、`event_subscriptions`、`capabilities`，插件只读标准事件信封，动作只通过 `ctx.messages` 或标准 action 返回。
 - 禁止把 `interaction_entries`、旧交互规则、旧平铺 payload、`notice` / `bbot_notice` / `notice_bot` 作为新插件模板；这些只用于迁移说明。
 - 显式 Manifest 模式必须保留最小目录：`plugin.json`、`manifest.py`、`plugin.py`、`__init__.py`。`plugin.json.name`、`MANIFEST.key`、插件类 `key` 必须一致。
-- `requires_platform_capabilities` 新装/升级必填（`plugin.json` 与 `Manifest` 同值，允许 `[]`）；`min_telepilot_version` 至少 `0.72.0-beta.2`（更早的平台不认识这个 `Manifest` 参数，导入即报错），用到更新能力再按 [版本与兼容](./PLUGIN-API-REFERENCE.md#版本与兼容) 提高。宿主比较只看 `x.y.z`，beta 序号要靠能力标记探测。
+- `requires_platform_capabilities` 新装/升级必填（`plugin.json` 与 `Manifest` 同值，允许 `[]`）；`min_telepilot_version` 至少 `0.72.0-beta.2`（更早的平台不认识这个 `Manifest` 参数，导入即报错），用到更新能力再按 [版本与兼容](./PLUGIN-API-REFERENCE.md#版本与兼容) 提高。0.107.0-beta.1 起宿主比较考虑 beta 号（可写 `0.106.0-beta.12`；不带 beta 号的声明仍只比 `x.y.z`），更旧的宿主只看 `x.y.z`，所以 beta 才有的能力仍要探测。
+- 能力探测（0.107.0-beta.1+）：`caps = getattr(ctx, "capabilities", None)`，有就用 `caps.has("messages.guest_reply_markup")`，没有再退回 `getattr(ctx.messages, "guest_reply_markup", False)`；能力全集与门槛以宿主注册表为准（`GET /api/plugins/capabilities`，见 [能力协商与 Plugin API 版本](./PLUGIN-API-REFERENCE.md#能力协商与-plugin-api-版本)）。`plugin_api: "^1.0"` 只写在 `plugin.json`，不要传给 `Manifest(...)`（旧宿主导入会失败）。
+- 插件详情「运行统计」按钩子显示调用数、耗时、失败数和已弃用接口调用次数（`GET /api/plugins/{key}/stats`，见 [钩子统计与弃用登记](./PLUGIN-API-REFERENCE.md#钩子统计与弃用登记)）；看到弃用计数就按 [弃用登记](./PLUGIN-API-REFERENCE.md#弃用登记) 换成替代写法。
 - 必须把 `usage` 写成插件中心可展示的使用说明；有 `config_schema` 时也可以补 `x-usage-guide` / `x-usage-steps`，但不要只靠口头说明。
 - 禁止用空 `usage` 绕过检查；缺失会触发高级规范警告，插件库维护插件和示例插件都必须完整声明。
 - `event_subscriptions[].events` 可选值：`message`、`command`、`keyword`、`callback_query`、`inline_query`、`chosen_inline_result`、`payment_confirmed`、`webhook`、`session_close`、`message_edited`、`session_expired`、`guest_message`、`all_events`、`all_messages`；`all_messages` 只等于 `message` / `command`，`message` / `all_events` 都不包含 `guest_message`。

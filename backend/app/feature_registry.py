@@ -10,9 +10,11 @@ log = logging.getLogger(__name__)
 
 # builtin 插件目录：backend/app/worker/plugins/builtin/
 _BUILTIN_PLUGIN_DIR: Path = Path(__file__).parent / "worker" / "plugins" / "builtin"
-# 非核心可选插件不会从 builtin registry seed；即使旧镜像/增量部署残留了目录，
-# 也必须继续走官方/远程 installed 插件安装链路。
-_NON_CORE_BUILTIN_COMPAT_KEYS: frozenset[str] = frozenset(
+# 已迁出 Core 的非核心可选插件（唯一来源；loader / feature_service / 能力依赖检查都引用这一份）。
+# - 不会从 builtin registry seed；即使旧镜像 / 增量部署残留了目录，也必须走官方 / 远程 installed 安装链路；
+# - feature_service 用它清理旧 builtin 记录、把账号开关迁到 installed 插件。
+# 计划移除：Plugin API 2.0（届时旧镜像残留目录与旧 builtin 记录都已迁移完成）。
+NON_CORE_OPTIONAL_PLUGIN_KEYS: frozenset[str] = frozenset(
     {
         "auto_reply",
         "autorepeat",
@@ -22,6 +24,8 @@ _NON_CORE_BUILTIN_COMPAT_KEYS: frozenset[str] = frozenset(
         "math10",
     }
 )
+# 旧名兼容（loader / plugin_capability_requirements 仍按旧名导入）。
+_NON_CORE_BUILTIN_COMPAT_KEYS: frozenset[str] = NON_CORE_OPTIONAL_PLUGIN_KEYS
 
 
 def _load_manifest_file(path: Path) -> Any | None:

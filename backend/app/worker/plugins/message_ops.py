@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 from ...services.interaction.contracts import action_send_via_options, apply_action_send_via_options
+from .capabilities import FACADE_BUFFERED, apply_legacy_flags
 
 MessageChannel = Literal["interaction_bot", "userbot_reply", "auto", "bot", "userbot"]
 MessageChannelSelector = MessageChannel | list[MessageChannel] | tuple[MessageChannel, ...] | dict[str, Any]
@@ -21,14 +22,9 @@ MessageChannelSelector = MessageChannel | list[MessageChannel] | tuple[MessageCh
 class BufferedMessageOps:
     actions: list[dict[str, Any]] = field(default_factory=list)
 
-    # 能力标记（0.106.0-beta.12+）：send_rich / edit_rich / answer_guest_query 接受
-    # ``compact_tables=True``，标准动作接受 ``compact_tables: true``（Bot API 10.3 紧凑表格）。
-    rich_table_compact = True
-    # 能力标记（0.106.0-beta.15+）：平台发送时给所有 rich_message 表格默认补边框 + 隔行着色。
-    rich_table_default_style = True
-    # 能力标记（0.106.0-beta.17+）：answer_guest_query 的 reply_markup 保留 callback_data 按钮，
-    # 访客回复上的按钮点击以 inline callback 投递给订阅 callback_query（scope guest_all）的插件。
-    guest_reply_markup = True
+    # 能力标记（rich_table_compact / rich_table_default_style / guest_reply_markup 等）由
+    # ``capabilities.CAPABILITIES`` 单一注册表生成，见文件末尾 ``apply_legacy_flags``；
+    # 新插件请用 ``ctx.capabilities.has("messages.<name>")`` 判断。
 
     async def send(
         self,
@@ -564,6 +560,10 @@ def _media_action(
     if save_message_id_key:
         action["save_message_id_key"] = save_message_id_key
     return action
+
+
+# 能力标记由单一注册表生成（纯缓冲 facade：没有实时 apply，不支持 inline 编辑类能力）。
+apply_legacy_flags(BufferedMessageOps, FACADE_BUFFERED)
 
 
 __all__ = ["BufferedMessageOps", "MessageChannel", "MessageChannelSelector"]

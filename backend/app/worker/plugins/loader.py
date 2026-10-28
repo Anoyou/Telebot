@@ -71,6 +71,7 @@ from ...db.models.plugin import PLUGIN_TRUST_ORPHAN, InstalledPlugin
 from ...db.models.plugin_global_config import PluginGlobalConfig
 from ...db.models.rule import Rule
 from ...db.models.system import SystemSetting
+from ...feature_registry import NON_CORE_OPTIONAL_PLUGIN_KEYS
 from ...redis_client import get_redis
 from ...services import (
     account_bot_service,
@@ -137,6 +138,7 @@ from ..ipc import RuntimeLogPayload
 from ..ratelimit.engine import RateLimitEngine
 from ..ratelimit.humanize import HumanizeOpts, simulate_read, simulate_typing
 from ..runtime_log import push_runtime_log_bounded
+from . import plugin_stats
 from .base import (
     Plugin,
     PluginContext,
@@ -147,6 +149,8 @@ from .base import (
     get_plugin,
     public_entity_display_name,
 )
+from .capabilities import FACADE_ENTRY, FACADE_LIVE, apply_legacy_flags
+from .deprecations import note_deprecated
 from .events import attach_tp_event
 from .manifest import Manifest
 from .message_ops import BufferedMessageOps
@@ -155,6 +159,12 @@ from .update_barrier import (
     acknowledge_plugin_update,
     plugin_update_in_progress,
     plugin_update_token,
+)
+from .versioning import (
+    PLUGIN_API_VERSION,
+    PluginApiRangeError,
+    host_satisfies_min_version,
+    plugin_api_satisfies,
 )
 
 log = logging.getLogger(__name__)
@@ -1585,11 +1595,19 @@ async def _invoke_userbot_event_bus_entry(
         if _plugin_overrides(inst, "on_event"):
             return await inst.on_event(call_ctx, plugin_payload)
         if _plugin_overrides(inst, "on_interaction"):
+            note_deprecated("hook.on_interaction", plugin_key=plugin_key, account_id=ctx.account_id)
             return await inst.on_interaction(call_ctx, entry_key, plugin_payload)
         raise RuntimeError("插件未实现 on_event 或 on_interaction 入口")
 
+    hook_name = "on_event" if _plugin_overrides(inst, "on_event") else "on_interaction"
     actions = (
-        await _invoke_plugin_with_resilience(state, plugin_key, _call_handler)
+        await _invoke_plugin_with_resilience(
+            state,
+            plugin_key,
+            _call_handler,
+            hook=hook_name,
+            event_type=_payload_event_type(payload),
+        )
         if state is not None
         else await _call_handler()
     )
@@ -1955,6 +1973,8 @@ async def _dispatch_userbot_direct_passthrough(
                 state,
                 plugin_key,
                 lambda _handler=handler, _ctx=call_ctx, _event=plugin_event: _handler(_ctx, _event),
+                hook=handler_name,
+                event_type=event_label,
             )
             outcome, declared_error = _coerce_direct_passthrough_outcome(result)
             if outcome == "failed":
@@ -2310,6 +2330,12 @@ async def _apply_userbot_event_bus_actions(
     async def _on_deprecated(action: dict[str, Any]) -> bool:
         action_type = str(action.get("type") or "").strip()
         deprecated_channels = deprecated_send_via_values(action_send_via_raw_selector(action))
+        note_deprecated(
+            "action.send_via_notice",
+            plugin_key=plugin_key,
+            account_id=state.account_id,
+            detail=f"{action_type}: {','.join(deprecated_channels)}",
+        )
         await record_action(
             action.get("context"),
             action,
@@ -5402,16 +5428,7 @@ _BUILTIN_DIR: Path = Path(__file__).parent / "builtin"
 _BACKEND_DIR: Path = Path(__file__).resolve().parents[3]
 # 非核心可选插件已经迁出 Core。保留这份跳过名单，是为了防止旧镜像或
 # 增量部署残留目录不能重新当作 builtin 加载；新安装必须来自使用者接入的仓库。
-_NON_CORE_BUILTIN_COMPAT_KEYS: frozenset[str] = frozenset(
-    {
-        "auto_reply",
-        "autorepeat",
-        "chatgpt_image",
-        "codex_image",
-        "game24",
-        "math10",
-    }
-)
+_NON_CORE_BUILTIN_COMPAT_KEYS: frozenset[str] = NON_CORE_OPTIONAL_PLUGIN_KEYS
 _PLUGIN_LOAD_ERRORS: dict[str, str] = {}
 
 
@@ -5636,7 +5653,10 @@ def _is_safe_plugin_key(plugin_key: str) -> bool:
 
 
 def _version_tuple(v: str | None) -> tuple[int, ...]:
-    """把 ``0.9.6`` / ``v0.9.6-beta`` 转成可比较 tuple。"""
+    """把 ``0.9.6`` / ``v0.9.6-beta`` 转成只含 ``x.y.z`` 的 tuple（旧接口，保留给外部调用方）。
+
+    插件兼容判断已改用 :func:`versioning.host_satisfies_min_version`（考虑 beta 号）。
+    """
     if not v:
         return ()
     parts = [int(p) for p in re.findall(r"\d+", str(v))]
@@ -5644,17 +5664,29 @@ def _version_tuple(v: str | None) -> tuple[int, ...]:
 
 
 def _manifest_compatible(manifest: Manifest) -> tuple[bool, str | None]:
-    """检查 manifest 的版本和插件依赖声明。"""
+    """检查 manifest 的宿主版本、Plugin API 范围和插件依赖声明。"""
     min_version = (
         getattr(manifest, "min_telepilot_version", None)
         or getattr(manifest, "min_telebot_version", None)
     )
-    if min_version and _version_tuple(TELEPILOT_VERSION) < _version_tuple(min_version):
+    if min_version and not host_satisfies_min_version(TELEPILOT_VERSION, str(min_version)):
         return False, (
             "当前 TelePilot 版本太旧，暂时不能运行这个插件。"
             f"当前版本是 {TELEPILOT_VERSION}，插件至少需要 {min_version}。"
             "请先更新 TelePilot，再重新启用插件。"
         )
+
+    plugin_api = str(getattr(manifest, "plugin_api", None) or "").strip()
+    if plugin_api:
+        try:
+            api_ok = plugin_api_satisfies(plugin_api, PLUGIN_API_VERSION)
+        except PluginApiRangeError:
+            return False, f"plugin_api 范围写法无法识别：{plugin_api!r}（示例：\"^1.0\"、\">=1.0,<2\"、\"1.x\"）"
+        if not api_ok:
+            return False, (
+                f"插件要求 Plugin API {plugin_api}，当前 TelePilot {TELEPILOT_VERSION} 提供 Plugin API "
+                f"{PLUGIN_API_VERSION}。请更新 TelePilot 或安装与当前版本兼容的插件版本。"
+            )
 
     missing = [
         key for key in list(getattr(manifest, "requires_features", None) or [])
@@ -5664,6 +5696,28 @@ def _manifest_compatible(manifest: Manifest) -> tuple[bool, str | None]:
         return False, f"缺少依赖插件: {', '.join(missing)}"
 
     return True, None
+
+
+def _merge_static_plugin_api(path: Path, manifest: Manifest) -> None:
+    """``plugin_api`` 推荐只写在 plugin.json（旧宿主 Manifest 不认识它），加载时补到 Manifest 上。
+
+    顺带登记旧字段 ``min_telebot_version`` 的使用（弃用计数）。
+    """
+
+    if not str(getattr(manifest, "plugin_api", None) or "").strip():
+        metadata_path = path / "plugin.json"
+        try:
+            raw = json.loads(metadata_path.read_text(encoding="utf-8")) if metadata_path.is_file() else {}
+        except (OSError, json.JSONDecodeError):
+            raw = {}
+        value = raw.get("plugin_api") if isinstance(raw, dict) else None
+        if isinstance(value, str) and value.strip():
+            try:
+                manifest.plugin_api = value.strip()
+            except Exception:  # noqa: BLE001 - 旧式 manifest 替身不可写时忽略
+                log.debug("写入 manifest.plugin_api 失败 plugin=%s", path.name, exc_info=True)
+    if getattr(manifest, "min_telebot_version", None) and not getattr(manifest, "min_telepilot_version", None):
+        note_deprecated("manifest.min_telebot_version", plugin_key=str(getattr(manifest, "key", "") or path.name))
 
 
 def _preflight_installed_plugin(path: Path) -> tuple[bool, str | None]:
@@ -5686,6 +5740,7 @@ def _preflight_installed_plugin(path: Path) -> tuple[bool, str | None]:
     static_manifest = SimpleNamespace(
         min_telepilot_version=raw.get("min_telepilot_version"),
         min_telebot_version=raw.get("min_telebot_version"),
+        plugin_api=raw.get("plugin_api") if isinstance(raw.get("plugin_api"), str) else None,
         requires_features=(
             raw.get("requires_features")
             if isinstance(raw.get("requires_features"), list)
@@ -5940,6 +5995,7 @@ def _load_dir(path: Path, source: str) -> dict[str, type[Plugin]]:
             manifest=manifest,
         )
         return {}
+    _merge_static_plugin_api(path, manifest)
     ok, reason = _manifest_compatible(manifest)
     if not ok:
         if reason:
@@ -6276,6 +6332,75 @@ async def _invoke_plugin_with_resilience(
     *,
     deadline_at_ms: int | None = None,
     deadline_governs: bool = False,
+    hook: str = "invoke",
+    event_type: str | None = None,
+) -> Any:
+    """带超时与熔断地调用插件钩子，并按 [账号 × 插件 × 钩子 × 事件类型] 记录统计。"""
+
+    started = time.monotonic()
+    try:
+        result = await _invoke_plugin_guarded(
+            state,
+            plugin_key,
+            factory,
+            deadline_at_ms=deadline_at_ms,
+            deadline_governs=deadline_governs,
+        )
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:
+        _record_plugin_hook(state, plugin_key, hook, event_type, plugin_stats.classify_exception(exc), started, exc)
+        raise
+    _record_plugin_hook(state, plugin_key, hook, event_type, plugin_stats.OUTCOME_OK, started, None)
+    return result
+
+
+def _record_plugin_hook(
+    state: _AccountState | None,
+    plugin_key: str,
+    hook: str,
+    event_type: str | None,
+    outcome: str,
+    started: float,
+    error: BaseException | None,
+) -> None:
+    recorder = plugin_stats.get_recorder()
+    redis = getattr(state, "redis", None) if state is not None else None
+    if redis is not None:
+        recorder.set_redis_factory(lambda _redis=redis: _redis)
+    plugin_stats.record_hook(
+        account_id=getattr(state, "account_id", None),
+        plugin_key=plugin_key,
+        hook=hook,
+        event_type=event_type,
+        outcome=outcome,
+        duration_ms=(time.monotonic() - started) * 1000,
+        error=error,
+    )
+
+
+def _payload_event_type(payload: Any) -> str | None:
+    if not isinstance(payload, dict):
+        return None
+    for key in ("event_type", "type"):
+        value = payload.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    source = payload.get("source")
+    if isinstance(source, dict):
+        value = source.get("event_type") or source.get("type")
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
+async def _invoke_plugin_guarded(
+    state: _AccountState,
+    plugin_key: str,
+    factory: Callable[[], Awaitable[Any]],
+    *,
+    deadline_at_ms: int | None = None,
+    deadline_governs: bool = False,
 ) -> Any:
     if plugin_update_in_progress(_installed_dir(), plugin_key, state.account_id):
         raise RuntimeError(f"PLUGIN_UPDATE_IN_PROGRESS: {plugin_key}")
@@ -6347,27 +6472,8 @@ class _LiveMessageOps:
     常驻上下文使用本 facade，供插件命令和后台任务继续走平台受控通道。
     """
 
-    # 能力标记：edit_message 同时给 inline_message_id 与 rich_message 时，平台用
-    # editMessageText(inline_message_id, rich_message) 原地编辑 inline 消息（访客模式占位）。
-    inline_rich_edit = True
-    # 0.106.0-beta.3 起实时 apply（本 facade）真正支持 inline_message_id 编辑（文本与 Rich），
-    # 并在结果的 ``errors`` 里带回失败原因；beta.2 只有返回动作链路支持，实时 apply 会报
-    # target_message_id_missing。插件据此判断能否“🤔 占位后 Rich 编辑”。
-    live_inline_edit = True
-    # 0.106.0-beta.12 起：send_rich / edit_rich / answer_guest_query 支持 compact_tables=True，
-    # 动作字典可带 ``compact_tables: true``（Bot API 10.3 紧凑表格）。插件据此判断能否使用。
-    rich_table_compact = True
-    # 0.106.0-beta.15 起：发送出口统一给 rich_message 表格补默认边框 + 隔行着色
-    # （is_bordered / is_striped；Markdown 管道表格转 <table bordered striped>），调用方显式值优先。
-    rich_table_default_style = True
-    # 0.106.0-beta.17 起：answer_guest_query 透传插件给的 callback_data 按钮（reply_markup），
-    # 实时 apply 结果带回 inline_message_id；访客回复上的按钮点击以 inline callback（只有
-    # inline_message_id + 点击者，没有 chat/message）投递给订阅 callback_query（scope guest_all）
-    # 的插件，插件可 answer_callback 并用 edit_message(inline_message_id=...) 编辑文本与按钮。
-    guest_reply_markup = True
-    # 0.106.0-beta.20 起：stream_editor() / stream_edit() 提供带节流的流式编辑 / 私聊草稿
-    # （中间态直走交互 Bot、处理 429，最终一次走标准动作），见 docs/PLUGIN-STREAMING.md。
-    streaming_edit = True
+    # 能力标记（inline_rich_edit / live_inline_edit / rich_table_compact / ...）由
+    # ``capabilities.CAPABILITIES`` 单一注册表生成，见类定义后的 ``apply_legacy_flags``。
 
     def __init__(
         self,
@@ -6627,18 +6733,13 @@ class _LiveMessageOps:
         return await _read_action_inline_message_id(self._state, key)
 
 
+apply_legacy_flags(_LiveMessageOps, FACADE_LIVE)
+
+
 class _InteractionEntryMessageOps(BufferedMessageOps):
     """Buffer current interaction actions while keeping live apply for delayed work."""
 
-    # 能力标记：edit_message 同时给 inline_message_id 与 rich_message 时，平台用
-    # editMessageText(inline_message_id, rich_message) 原地编辑 inline 消息（访客模式占位）。
-    inline_rich_edit = True
-    # 0.106.0-beta.3 起实时 apply（本 facade）真正支持 inline_message_id 编辑（文本与 Rich），
-    # 并在结果的 ``errors`` 里带回失败原因；beta.2 只有返回动作链路支持，实时 apply 会报
-    # target_message_id_missing。插件据此判断能否“🤔 占位后 Rich 编辑”。
-    live_inline_edit = True
-    # 0.106.0-beta.20 起：带节流的流式编辑 / 草稿（委托实时 facade），见 docs/PLUGIN-STREAMING.md。
-    streaming_edit = True
+    # 能力标记由 ``capabilities.CAPABILITIES`` 生成（见类定义后的 ``apply_legacy_flags``）。
 
     def __init__(
         self,
@@ -6694,6 +6795,9 @@ class _InteractionEntryMessageOps(BufferedMessageOps):
 
     async def stream_edit(self, **kwargs: Any) -> dict[str, Any]:
         return await self._live.stream_edit(**kwargs)
+
+
+apply_legacy_flags(_InteractionEntryMessageOps, FACADE_ENTRY)
 
 
 async def _event_sender_id(event: Any) -> int | None:
@@ -7828,6 +7932,8 @@ async def load_plugins_for_account(
                         state,
                         fkey,
                         lambda _handler=handler, _ctx=call_ctx, _event=plugin_event: _handler(_ctx, _event),
+                        hook=handler_name,
+                        event_type=event_label,
                     )
                     invoked_count += 1
                     await record_span(
@@ -8263,7 +8369,15 @@ async def _activate(db, state: _AccountState, af: AccountFeature, redis: Any) ->
     )
 
     try:
-        await inst.on_startup(ctx)
+        startup_started = time.monotonic()
+        try:
+            await inst.on_startup(ctx)
+        except Exception as startup_exc:
+            _record_plugin_hook(
+                state, af.feature_key, "on_startup", None, plugin_stats.OUTCOME_FAIL, startup_started, startup_exc
+            )
+            raise
+        _record_plugin_hook(state, af.feature_key, "on_startup", None, plugin_stats.OUTCOME_OK, startup_started, None)
         try:
             from .system_agent_tools import bind_plugin_instance
 
@@ -9494,6 +9608,8 @@ async def invoke_interaction_entry(
             return await inst.on_event(call_ctx, plugin_payload)
         if not has_interaction_handler:
             raise RuntimeError(f"模块尚未实现交互入口：{plugin_key}.{entry_key}")
+        if not has_event_handler:
+            note_deprecated("hook.on_interaction", plugin_key=plugin_key, account_id=ctx.account_id)
         return await inst.on_interaction(call_ctx, entry_key, plugin_payload)
 
     actions = await _invoke_plugin_with_resilience(
@@ -9502,6 +9618,8 @@ async def invoke_interaction_entry(
         _call_handler,
         deadline_at_ms=deadline_at_ms,
         deadline_governs=True,
+        hook="on_event" if is_event_subscription and has_event_handler else "on_interaction",
+        event_type=_payload_event_type(raw_payload),
     )
     if actions is None and not buffered_messages.actions and not (is_event_subscription and has_event_handler):
         raise RuntimeError(f"模块尚未实现交互入口：{plugin_key}.{entry_key}")

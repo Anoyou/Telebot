@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Awaitable, Callable, Mapping
 from typing import Any
 from urllib.parse import quote
@@ -16,6 +17,8 @@ from ..settings import settings as app_settings
 from ..util.proxy import ProxyConfigError, parse_proxy_url
 from ..worker.plugins.base import Plugin, PluginContext, get_plugin
 from ..worker.plugins.http_facade import PluginHTTP
+
+log = logging.getLogger(__name__)
 
 
 class PluginConfigActionError(RuntimeError):
@@ -108,12 +111,52 @@ async def run_plugin_config_action(
         "config": runtime_config,
         "action": action,
     }
-    result = await plugin.on_config_action(ctx, action_key, payload)
+    result = await _call_config_action_with_stats(plugin, ctx, action_key, payload, account_id=account.id)
     if result is None:
         raise PluginConfigActionUnavailable(f"插件 {feature.key} 未处理配置动作 {action_key}")
     if not isinstance(result, Mapping):
         raise PluginConfigActionError("配置动作必须返回对象")
     return _normalize_action_result(result)
+
+
+async def _call_config_action_with_stats(
+    plugin: Any,
+    ctx: PluginContext,
+    action_key: str,
+    payload: dict[str, Any],
+    *,
+    account_id: int | None,
+) -> Any:
+    """调用 ``on_config_action`` 并记入插件钩子统计（主进程侧，结束后立即写入 Redis）。"""
+
+    import time
+
+    from ..redis_client import get_redis
+    from ..worker.plugins import plugin_stats
+
+    started = time.monotonic()
+    outcome = plugin_stats.OUTCOME_OK
+    error: BaseException | None = None
+    try:
+        return await plugin.on_config_action(ctx, action_key, payload)
+    except Exception as exc:
+        outcome = plugin_stats.classify_exception(exc)
+        error = exc
+        raise
+    finally:
+        plugin_stats.record_hook(
+            account_id=account_id,
+            plugin_key=str(getattr(ctx, "feature_key", "") or ""),
+            hook="on_config_action",
+            event_type=action_key,
+            outcome=outcome,
+            duration_ms=(time.monotonic() - started) * 1000,
+            error=error,
+        )
+        try:
+            await plugin_stats.get_recorder().flush(get_redis())
+        except Exception:  # noqa: BLE001 - 统计写入失败不影响配置动作
+            log.debug("写入配置动作统计失败", exc_info=True)
 
 
 def _manifest_dict(feature: Feature | Mapping[str, Any] | None) -> dict[str, Any]:

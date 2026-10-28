@@ -46,6 +46,7 @@ from ..db.models.plugin import (
 from ..db.models.plugin_global_config import PluginGlobalConfig
 from ..db.models.rule import Rule
 from ..db.models.system import SystemSetting
+from ..feature_registry import NON_CORE_OPTIONAL_PLUGIN_KEYS
 from ..redis_client import get_redis
 from ..schemas.feature import (
     ConfigValidationError,
@@ -64,16 +65,8 @@ _REMOVED_BUNDLED_PLUGIN_FINGERPRINTS: dict[str, dict[str, str]] = {
         "version": "1.0.5",
     },
 }
-_LEGACY_OPTIONAL_PLUGIN_KEYS: frozenset[str] = frozenset(
-    {
-        "auto_reply",
-        "autorepeat",
-        "chatgpt_image",
-        "codex_image",
-        "game24",
-        "math10",
-    }
-)
+# 与 loader / feature_registry 共用同一份名单（feature_registry.NON_CORE_OPTIONAL_PLUGIN_KEYS）。
+_LEGACY_OPTIONAL_PLUGIN_KEYS: frozenset[str] = NON_CORE_OPTIONAL_PLUGIN_KEYS
 
 
 def _matches_removed_bundled_manifest(
@@ -214,7 +207,7 @@ def _feature_manifest_from_installed_plugin(
         manifest["requires_platform_capabilities"] = list(required_capabilities)
     if manifest_json.get("x-experimental") or manifest_json.get("experimental"):
         manifest["x-experimental"] = True
-    for version_key in ("min_telepilot_version", "min_telebot_version"):
+    for version_key in ("min_telepilot_version", "min_telebot_version", "plugin_api"):
         version_value = str(manifest_json.get(version_key) or "").strip()
         if version_value:
             manifest[version_key] = version_value

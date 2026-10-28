@@ -107,7 +107,8 @@ my_plugin/
 | `capabilities` | 是 | 高风险能力声明；没有高风险能力也建议写 `{}` |
 | `permissions` | 按需 | 安装提示和 facade 注入依据，如 `external_http`、`ai_text`、`send_message` |
 | `requires_platform_capabilities` | 是 | 插件需要的平台枝；无需求也必须显式写 `[]` |
-| `min_telepilot_version` | 是（建议） | 宿主在执行 Python 前比较，只看 `x.y.z`；`manifest.py` 传了 `requires_platform_capabilities` 时至少 `0.72.0-beta.2`，用到更新能力按 [API 参考：版本与兼容](./PLUGIN-API-REFERENCE.md#版本与兼容) 提高 |
+| `min_telepilot_version` | 是（建议） | 宿主在执行 Python 前比较；0.107.0-beta.1 起声明带 beta 号时按完整 SemVer 比较（如 `0.106.0-beta.12`），不带 beta 号仍只看 `x.y.z`，更旧的宿主一律只看 `x.y.z`；`manifest.py` 传了 `requires_platform_capabilities` 时至少 `0.72.0-beta.2`，用到更新能力按 [API 参考：版本与兼容](./PLUGIN-API-REFERENCE.md#版本与兼容) 提高 |
+| `plugin_api` | 否 | Plugin API 兼容范围（0.107.0-beta.1+，如 `"^1.0"`），宿主加载前校验；只写在 `plugin.json`，不要传给 `Manifest(...)`，见 [能力协商与 Plugin API 版本](./PLUGIN-API-REFERENCE.md#能力协商与-plugin-api-版本) |
 | `triggers.command` | 互动入口按需 | 声明 UserBot 命令开局名，不带前缀 |
 | `default_trigger_modes` | 互动入口按需 | `all` / `keyword_only`，决定命令与关键词是否同时开放 |
 | `callback_fast_ack` | callback 入口按需 | 点击按钮后先立即 ACK，再慢慢处理插件逻辑 |

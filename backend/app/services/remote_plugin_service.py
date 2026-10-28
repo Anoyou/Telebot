@@ -218,7 +218,25 @@ class PluginMetadataSchema(BaseModel):
     min_telepilot_version: str | None = None
     # 0.15 rename 前的旧字段，继续作为兼容别名解析。
     min_telebot_version: str | None = None
+    # Plugin API 兼容范围（0.107.0+），如 "^1.0"、">=1.0,<2"、"1.x"；旧宿主忽略该字段。
+    plugin_api: str | None = None
     tags: list[str] = Field(default_factory=list)
+
+    @field_validator("plugin_api")
+    @classmethod
+    def _validate_plugin_api(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        text = str(v).strip()
+        if not text:
+            return None
+        from ..worker.plugins.versioning import PluginApiRangeError, parse_plugin_api_range
+
+        try:
+            parse_plugin_api_range(text)
+        except PluginApiRangeError as exc:
+            raise ValueError(f"plugin_api 范围写法无法识别：{text!r}（示例：\"^1.0\"、\">=1.0,<2\"）") from exc
+        return text
 
     @field_validator("name", "key")
     @classmethod
@@ -353,6 +371,7 @@ class PluginMetadata:
     capabilities: dict[str, Any] | None = None
     min_telepilot_version: str | None = None
     min_telebot_version: str | None = None
+    plugin_api: str | None = None
     tags: list[str] = field(default_factory=list)
 
 
@@ -535,6 +554,8 @@ def _feature_manifest_from_meta(meta: PluginMetadata) -> dict[str, Any] | None:
         manifest["min_telepilot_version"] = meta.min_telepilot_version
     if meta.min_telebot_version:
         manifest["min_telebot_version"] = meta.min_telebot_version
+    if meta.plugin_api:
+        manifest["plugin_api"] = meta.plugin_api
     return manifest or None
 
 
@@ -1027,6 +1048,7 @@ def _read_plugin_metadata(
         capabilities=dict(validated.capabilities) if isinstance(validated.capabilities, dict) else None,
         min_telepilot_version=validated.min_telepilot_version,
         min_telebot_version=validated.min_telebot_version,
+        plugin_api=validated.plugin_api,
         tags=list(validated.tags or []),
     )
 
@@ -1362,6 +1384,8 @@ def _manifest_json_from_remote_meta(meta: PluginMetadata) -> dict[str, Any]:
         data["min_telepilot_version"] = meta.min_telepilot_version
     if meta.min_telebot_version:
         data["min_telebot_version"] = meta.min_telebot_version
+    if meta.plugin_api:
+        data["plugin_api"] = meta.plugin_api
     if meta.tags:
         data["tags"] = list(meta.tags)
     return data

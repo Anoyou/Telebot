@@ -19,7 +19,6 @@ JSONB_VARIANT = JSON().with_variant(postgresql.JSONB(), "postgresql")
 FEATURE_AUTO_REPLY = "auto_reply"
 FEATURE_FORWARD = "forward"
 FEATURE_SCHEDULER = "scheduler"
-FEATURE_GAME24 = "game24"
 FEATURE_AUTOREPEAT = "autorepeat"
 FEATURE_CODEX_IMAGE = "codex_image"
 

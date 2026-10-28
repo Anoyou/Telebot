@@ -809,6 +809,7 @@ class PluginContext:
       - ``skills``：声明 ``agent_skills`` 后注入，只读列出/读取管理员已对插件启用的 Agent Skills 文本
       - ``messages``：标准消息动作 facade；交互入口内为缓冲动作，后台任务/命令中为实时受控投递
       - ``identities``：群内安全公开身份 facade；匿名管理员只返回标签，不暴露原始客户端
+      - ``capabilities``（只读属性，0.107.0+）：能力协商，见 :mod:`.capabilities`
 
     为避免循环 import，``rules`` / ``engine`` / ``redis`` 都用 ``Any`` 标注。
     """
@@ -836,6 +837,18 @@ class PluginContext:
     event: Any | None = None
     args: list[str] = field(default_factory=list)
     command: str = ""
+
+    @property
+    def capabilities(self) -> Any:
+        """能力协商入口（0.107.0+）：``ctx.capabilities.has("messages.guest_reply_markup")``。
+
+        ``messages.*`` 能力按当前 ``ctx.messages`` facade 判断；完整清单见
+        ``capabilities.CAPABILITIES`` 与 ``GET /api/plugins/capabilities``。旧宿主没有这个属性，
+        插件可写 ``caps = getattr(ctx, "capabilities", None)`` 再回退到旧的类属性探测。
+        """
+        from .capabilities import PluginCapabilities
+
+        return PluginCapabilities(self.messages)
 
     @asynccontextmanager
     async def conversation(self, peer: Any, timeout: float = 30.0) -> AsyncIterator[Any]:

@@ -2964,6 +2964,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/plugins/capabilities": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Plugin Capabilities
+         * @description 宿主能力注册表、Plugin API 版本与弃用登记（插件作者与兼容检查用）。
+         */
+        get: operations["get_plugin_capabilities_api_plugins_capabilities_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/plugins/install": {
         parameters: {
             query?: never;
@@ -3262,6 +3282,32 @@ export interface paths {
         /** Reload Plugin Endpoint */
         post: operations["reload_plugin_endpoint_api_plugins__key__reload_post"];
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/plugins/{key}/stats": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Plugin Hook Stats
+         * @description 插件每个钩子 / 事件处理的调用数、耗时与失败数，以及已弃用接口的调用次数。
+         *
+         *     数据由各账号 worker 每几秒批量写入 Redis，保留到最近一次调用后 7 天。
+         */
+        get: operations["get_plugin_hook_stats_api_plugins__key__stats_get"];
+        put?: never;
+        post?: never;
+        /**
+         * Reset Plugin Hook Stats
+         * @description 清零插件的钩子统计与弃用计数（各 worker 进程内尚未写入的增量会在下次写入时重新出现）。
+         */
+        delete: operations["reset_plugin_hook_stats_api_plugins__key__stats_delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -9432,6 +9478,67 @@ export interface components {
             /** Succeeded */
             succeeded: number;
         };
+        /** PluginCapabilitiesResponse */
+        PluginCapabilitiesResponse: {
+            /** Capabilities */
+            capabilities: components["schemas"]["PluginCapabilityOut"][];
+            /** Deprecations */
+            deprecations: components["schemas"]["PluginDeprecationOut"][];
+            /**
+             * Host Version
+             * @description 当前 TelePilot 版本
+             */
+            host_version: string;
+            /**
+             * Plugin Api Version
+             * @description 宿主提供的 Plugin API 版本（MAJOR.MINOR）
+             */
+            plugin_api_version: string;
+        };
+        /** PluginCapabilityOut */
+        PluginCapabilityOut: {
+            /** Deprecated In */
+            deprecated_in?: string | null;
+            /**
+             * Doc
+             * @default
+             */
+            doc: string;
+            /**
+             * Facades
+             * @description 只对这些 MessageOps facade 成立；空表示宿主级能力
+             */
+            facades?: string[];
+            /**
+             * Legacy Attr
+             * @description 兼容旧探测方式的 ctx.messages 类属性名
+             */
+            legacy_attr?: string | null;
+            /**
+             * Name
+             * @description 能力名，如 messages.guest_reply_markup；插件用 ctx.capabilities.has(name) 判断
+             */
+            name: string;
+            /**
+             * Plugin Api
+             * @description 引入该能力的 Plugin API 版本
+             */
+            plugin_api: string;
+            /** Removed In */
+            removed_in?: string | null;
+            /**
+             * Since
+             * @description 首个提供该能力的 TelePilot 版本（可带 beta 号）
+             */
+            since: string;
+            /** Summary */
+            summary: string;
+            /**
+             * Version
+             * @description 能力版本，从 1 开始
+             */
+            version: number;
+        };
         /** PluginCenterAccountItem */
         PluginCenterAccountItem: {
             /** Account Id */
@@ -9645,6 +9752,43 @@ export interface components {
             /** Toast */
             toast?: string | null;
         };
+        /** PluginDeprecationOut */
+        PluginDeprecationOut: {
+            /** Deprecated Since */
+            deprecated_since: string;
+            /**
+             * Doc
+             * @default
+             */
+            doc: string;
+            /** Id */
+            id: string;
+            /** Removal */
+            removal: string;
+            /** Replacement */
+            replacement: string;
+            /** Summary */
+            summary: string;
+        };
+        /** PluginDeprecationUsageOut */
+        PluginDeprecationUsageOut: {
+            /** Account Id */
+            account_id: number;
+            /** Count */
+            count: number;
+            /** Detail */
+            detail?: string | null;
+            /** Id */
+            id: string;
+            /** Last At */
+            last_at?: number | null;
+            /** Removal */
+            removal?: string | null;
+            /** Replacement */
+            replacement?: string | null;
+            /** Summary */
+            summary?: string | null;
+        };
         /**
          * PluginDisplayOrder
          * @description 插件中心卡片展示顺序（插件 key 列表）。只影响展示，不改变插件执行优先级。
@@ -9678,6 +9822,168 @@ export interface components {
             config: {
                 [key: string]: unknown;
             };
+        };
+        /** PluginHookStatOut */
+        PluginHookStatOut: {
+            /**
+             * Account Id
+             * @description 账号 ID；0 表示与账号无关
+             */
+            account_id: number;
+            /** Avg Ms */
+            avg_ms?: number | null;
+            /**
+             * Calls
+             * @default 0
+             */
+            calls: number;
+            /**
+             * Circuit Open
+             * @description 熔断中被跳过的次数
+             * @default 0
+             */
+            circuit_open: number;
+            /**
+             * Event Type
+             * @description 事件类型或动作名；'-' 表示未区分
+             */
+            event_type: string;
+            /**
+             * Failed
+             * @description 抛异常的次数（不含超时）
+             * @default 0
+             */
+            failed: number;
+            /**
+             * Failure Rate
+             * @description (failed + timeout) / calls
+             * @default 0
+             */
+            failure_rate: number;
+            /**
+             * Hook
+             * @description 钩子名：on_event / on_interaction / on_message / on_direct_message / on_startup / on_config_action / system_agent_tool …
+             */
+            hook: string;
+            /**
+             * Last At
+             * @description 最近一次调用（Unix 秒）
+             */
+            last_at?: number | null;
+            /**
+             * Last Error
+             * @description 最近一次失败摘要（已脱敏、截断）
+             */
+            last_error?: string | null;
+            /** Last Error At */
+            last_error_at?: number | null;
+            /**
+             * Max Ms
+             * @default 0
+             */
+            max_ms: number;
+            /**
+             * Ok
+             * @default 0
+             */
+            ok: number;
+            /**
+             * P50 Ms
+             * @description 按耗时直方图估算的中位数上界
+             */
+            p50_ms?: number | null;
+            /**
+             * P95 Ms
+             * @description 按耗时直方图估算的 P95 上界
+             */
+            p95_ms?: number | null;
+            /**
+             * Since
+             * @description 开始统计的时间（Unix 秒）
+             */
+            since?: number | null;
+            /**
+             * Skipped
+             * @description 插件更新中被跳过的次数
+             * @default 0
+             */
+            skipped: number;
+            /**
+             * Sum Ms
+             * @default 0
+             */
+            sum_ms: number;
+            /**
+             * Timeout
+             * @default 0
+             */
+            timeout: number;
+        };
+        /** PluginHookStatsResponse */
+        PluginHookStatsResponse: {
+            /**
+             * Account Id
+             * @description 按账号过滤时的账号 ID
+             */
+            account_id?: number | null;
+            /**
+             * Available
+             * @description False 表示统计存储（Redis）暂不可用
+             * @default true
+             */
+            available: boolean;
+            /** Deprecations */
+            deprecations?: components["schemas"]["PluginDeprecationUsageOut"][];
+            /** Hooks */
+            hooks?: components["schemas"]["PluginHookStatOut"][];
+            /** Message */
+            message?: string | null;
+            /** Plugin Key */
+            plugin_key: string;
+            /**
+             * Retention Days
+             * @default 7
+             */
+            retention_days: number;
+            totals?: components["schemas"]["PluginHookTotalsOut"];
+        };
+        /** PluginHookTotalsOut */
+        PluginHookTotalsOut: {
+            /**
+             * Calls
+             * @default 0
+             */
+            calls: number;
+            /**
+             * Circuit Open
+             * @default 0
+             */
+            circuit_open: number;
+            /**
+             * Fail
+             * @default 0
+             */
+            fail: number;
+            /**
+             * Ok
+             * @default 0
+             */
+            ok: number;
+            /**
+             * Skipped
+             * @default 0
+             */
+            skipped: number;
+            /**
+             * Sum Ms
+             * @default 0
+             */
+            sum_ms: number;
+            /**
+             * Timeout
+             * @default 0
+             */
+            timeout: number;
         };
         /** PluginInstallHistoryOut */
         PluginInstallHistoryOut: {
@@ -22978,6 +23284,55 @@ export interface operations {
             };
         };
     };
+    get_plugin_capabilities_api_plugins_capabilities_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: {
+                auth_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginCapabilitiesResponse"];
+                };
+            };
+            /** @description 认证失败 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description 服务器内部错误 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
     install_plugin_api_plugins_install_post: {
         parameters: {
             query?: never;
@@ -24001,6 +24356,117 @@ export interface operations {
                         [key: string]: unknown;
                     };
                 };
+            };
+            /** @description 认证失败 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description CSRF 校验失败或权限不足 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description 服务器内部错误 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    get_plugin_hook_stats_api_plugins__key__stats_get: {
+        parameters: {
+            query?: {
+                account_id?: number | null;
+            };
+            header?: never;
+            path: {
+                key: string;
+            };
+            cookie?: {
+                auth_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginHookStatsResponse"];
+                };
+            };
+            /** @description 认证失败 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description 服务器内部错误 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    reset_plugin_hook_stats_api_plugins__key__stats_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                key: string;
+            };
+            cookie?: {
+                auth_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description 认证失败 */
             401: {

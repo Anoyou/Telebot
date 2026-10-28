@@ -169,6 +169,7 @@ class PluginContext:
     http: Any | None       # HTTP facade；需要 external_http + allowed_hosts
     ai: Any | None         # AI facade；需要 ai_text（或独立 ai_agent）；识图另需 ai_vision
     skills: Any | None     # Agent Skills 只读 facade；需要 agent_skills（0.106.0-beta.1+）
+    capabilities: PluginCapabilities  # 能力协商（0.107.0-beta.1+）：has / version / names
     engine: Any | None     # RateLimitEngine；安装型插件通常为 None
     redis: Any | None      # builtin 可为原始 Redis；安装插件为 PluginRedisFacade
     storage: Any | None    # PluginStorage；按账号和插件隔离的持久化 KV facade
@@ -306,6 +307,7 @@ if attempts is not None and attempts > 5:
 | `ctx.ai` | `await ctx.ai.complete(system="...", user="...")` | 文本 LLM facade；第三方插件需声明 `ai_text` |
 | `ctx.ai` | `await ctx.ai.run_agent(..., handlers={...})` | 有界工具调用；第三方插件需声明独立 `ai_agent` 与工具双白名单 |
 | `ctx.skills` | `await ctx.skills.list(names)` / `load(name)` / `read_file(name, path)` / `bundled()` | Agent Skills 只读 facade；需声明 `agent_skills`，旧平台为 `None` |
+| `ctx.capabilities` | `ctx.capabilities.has("messages.guest_reply_markup")` | 能力协商（0.107.0-beta.1+，旧平台没有该属性，用 `getattr(ctx, "capabilities", None)`），见 [能力协商与 Plugin API 版本](#能力协商与-plugin-api-版本) |
 | `ctx.data_dir` | `ctx.data_dir / "state.sqlite3"` | 插件独享、更新代码不会覆盖的持久化目录 |
 | `ctx.messages` | `await ctx.messages.send(...)` / `apply([...])` | MessageOps facade；具体 helper 取决于交互缓冲或常驻/命令/调度上下文，见下方矩阵 |
 | `ctx.identities` | 通常通过 `resolve_public_sender_identity(ctx, ...)` / `resolve_public_sender_identities(...)` 间接使用；也可直接 `await ctx.identities.resolve(...)` / `resolve_many(...)`，UserBot 专用场景调用 `resolve_userbot(...)` | 平台注入的群内安全身份 facade；只返回标签、姓名、管理员状态和解析状态，不向插件开放成员目录 |
@@ -376,8 +378,9 @@ if not result["ok"]:
 | `permissions` | list | 权限声明，默认 `[]`；第三方插件必须显式声明需要的能力 |
 | `config_schema` | dict | JSON Schema，有配置的插件必须写 |
 | `requires_features` | list | 依赖的其他插件 key |
-| `min_telepilot_version` | str | 最低 TelePilot 版本要求，远程插件建议填写 |
-| `min_telebot_version` | str | 旧字段名，仅作为兼容别名保留，新插件不要再新增 |
+| `min_telepilot_version` | str | 最低 TelePilot 版本要求，远程插件建议填写；0.107.0-beta.1 起可带 beta 号，见 [`min_telepilot_version` 怎么填](#min_telepilot_version-怎么填) |
+| `min_telebot_version` | str | 旧字段名，仅作为兼容别名保留（已弃用，加载时计入弃用统计），新插件不要再新增 |
+| `plugin_api` | str | Plugin API 兼容范围（0.107.0-beta.1+，如 `"^1.0"`）；**只写在 `plugin.json`**，不要传给 `Manifest(...)`，见 [能力协商与 Plugin API 版本](#能力协商与-plugin-api-版本) |
 | `category` | str | `interactive` / `automation` / `utility`，只决定展示分组 |
 | `event_subscriptions` | list | 标准链路订阅声明，描述插件想从 Event Bus 接收哪些事件；每条可选 `timeout_seconds` 放宽单次处理时限（默认 15 秒，平台上限 90 秒，见下文“处理时限”） |
 | `capabilities` | dict | 高风险能力声明，例如 `telegram_native_raw` |
@@ -2442,9 +2445,8 @@ config_schema={
 | 1 | `frontend/src/api/types.ts` | 添加 `XxxRuleConfig` 接口（描述单条规则的 config 字段） |
 | 2 | `frontend/src/pages/Plugins/configs/XxxConfig.tsx` | **新建**：规则列表页（参考当前可访问的 `AutoReply.tsx`） |
 | 3 | 插件包内 `manifest.py` | `config_schema["x-ui-mode"] = "rules"`；新插件应放在远程仓库或 `plugins/local_imports/xxx/` 后由 Web 安装 |
-| 4 | `frontend/src/App.tsx` | lazy import 新页面组件，并在通用 `:featureKey` 路由之前添加 `:aid/features/xxx` 显式路由 |
-| 5 | `frontend/src/pages/Plugins/_shared/featureConfig.ts` | 在共享的 `FEATURE_CONFIG_PAGE_KEYS` Set 中添加 key |
-| 6 | `backend/app/db/models/feature.py` | 添加 `FEATURE_XXX = "xxx"` 常量（如已有可跳过） |
+
+第 1–3 步是插件作者需要做的全部改动。旧文档里的「App.tsx 显式路由 / `FEATURE_CONFIG_PAGE_KEYS` / `feature.py` 常量」三步只在 TelePilot 主仓库为内置插件新增专属页时才需要，远程 / 本地插件不要改主仓库，也不要据此去提 PR；没有专属页的插件由 `:aid/features/:featureKey` 通用路由承接。
 
 #### 1. types.ts — RuleConfig 接口
 
@@ -2509,46 +2511,11 @@ config_schema={
 }
 ```
 
-#### 4. App.tsx — 专属路由
-
-```tsx
-// ① lazy import（与现有配置页一致）
-const XxxConfig = lazy(() => import("@/pages/Plugins/configs/XxxConfig"));
-
-// ② 放在 :aid/features/:featureKey 通用路由之前
-<Route path=":aid/features/xxx" element={<XxxConfig />} />
-```
-
-路由路径格式固定为 `:aid/features/{plugin_key}`，`plugin_key` 必须与 `MANIFEST.key` 一致。当前代码没有 `FEATURE_CONFIG_PAGES`；不要按旧文档重新创建这份重复注册表。没有专属 React 页面时，`App.tsx` 已有的 `:aid/features/:featureKey` 会承接通用 schema 配置页，无需新增路由。
-
-#### 5. FEATURE_CONFIG_PAGE_KEYS — 共享入口点
-
-账号详情与插件中心统一复用同一个 helper，不维护两份 Set。新增专属配置页时只改这一处：
-
-```tsx
-// frontend/src/pages/Plugins/_shared/featureConfig.ts
-const FEATURE_CONFIG_PAGE_KEYS = new Set([
-  "auto_reply", "autorepeat", "chatgpt_image", "codex_image", "scheduler", "game24",
-  "xxx",  // ← 新增
-]);
-```
-
-**作用**：Set 中的 key 会让账号详情和插件中心的“配置”按钮跳转到专属页面路由 `/accounts/:aid/features/xxx`；不在 Set 中的 key 应进入 `GenericPluginConfigPage` 通用独立配置页。该页可复用 `ConfigDialog.tsx` 中的 schema helper，但不会打开 `ConfigDialog` 弹窗；`ConfigDialog` 也不再代表一类插件形态。
-
-#### 6. feature.py — 后端常量
-
-```python
-# backend/app/db/models/feature.py
-FEATURE_XXX = "xxx"
-```
-
-此常量只在 TelePilot 主仓库为插件新增专属后端分支时需要。普通远程/本地插件不需要改 `feature.py`，安装流程会根据 `plugin.json` / `manifest.py` 自动登记 `Feature`。
-
 ---
 
 ### 规则配置页补充：后端 Dry-Run 适配
 
-规则配置页通常需要试运行功能，后端需同步适配 `rules.py`：
+规则配置页通常需要试运行功能。平台 `backend/app/api/rules.py` 的 `dry_run_rule()` 会按 feature key 从**已安装插件目录**动态导入插件包并调用其 `_dry_run_match`；插件只需导出这个纯函数，不需要（也不应）修改 `rules.py`：
 
 #### 插件侧导出 _dry_run_match
 
@@ -2571,39 +2538,11 @@ def _dry_run_match(cfg: dict, text: str, chat_id: int | None = None) -> tuple[bo
 from .plugin import _dry_run_match  # noqa: F401 — 供 API dry-run 导入
 ```
 
-#### rules.py — 添加 dry-run 分支
+#### 平台如何调用
 
-```python
-# backend/app/api/rules.py
-
-# ① import
-from ..db.models.feature import FEATURE_XXX
-# 普通插件不从 TelePilot 本体 import。需要接入平台 rules.py 时，应通过
-# 已安装插件目录动态加载其 `_dry_run_match`，并在插件自身测试中覆盖该纯函数。
-
-# ② 在 dry_run_rule() 函数中，在 fallback return 之前添加分支
-#    ⚠️ 必须放在最后的 `return RuleDryRunResponse(matched=False, ...)` 之前！
-
-if key == FEATURE_XXX:
-    cfg = rule.config or {}
-    matched, output = _xxx_dry_run_match(cfg, payload.sample_message, payload.sample_chat_id)
-    logs = [
-        {"step": "config", "msg": f"关键字段：{cfg.get('xxx_field', '(未设置)')}"},
-        # ... 更多诊断步骤
-    ]
-    if not matched:
-        logs.append({"step": "result", "msg": "未命中"})
-    else:
-        logs.append({"step": "result", "msg": "命中"})
-    return RuleDryRunResponse(
-        matched=matched,
-        output=output,
-        detail={"feature": key, "rule_id": rid, "logs": logs},
-    )
-```
-
-**常见错误**：dry-run 分支放在 `return RuleDryRunResponse(matched=False, ...)` 之后 → 永远不可达。
-**正确位置**：在所有已实现的 dry-run 分支之后、fallback return 之前。
+- 插件已安装且包里导出了 `_dry_run_match` → `POST .../rules/{rid}/dry-run` 直接调用它，返回 `(matched, output)` 填进 `RuleDryRunResponse`；
+- 插件未安装或没有导出 → 接口返回明确提示（`xxx 插件未导出 _dry_run_match，无法执行 dry-run。`），不会从 builtin 路径兜底；
+- `_dry_run_match` 必须是不访问 DB / Redis / 网络的纯函数，并在插件自己的测试里覆盖。
 
 ---
 
@@ -2614,7 +2553,7 @@ if key == FEATURE_XXX:
 - 创建 `frontend/src/pages/Plugins/configs/XxxConfig.tsx`，直接展示/编辑单个 config 对象
 - `manifest.py` 中声明 `config_schema["x-ui-mode"] = "single"`
 - 只有确实新增专属 React 页面时，才添加 App.tsx 显式路由和 `FEATURE_CONFIG_PAGE_KEYS`；使用通用 `GenericPluginConfigPage` 的插件只需正确声明 schema，不改前端注册表
-- 后端不需要 dry-run 分支
+- 不需要导出 `_dry_run_match`
 
 #### 页面布局约定
 
@@ -2798,8 +2737,8 @@ class DemoPlugin(Plugin):
 - [ ] 如会发送消息，建议提供 `template_preview` 或 `*_preview`；没有预览不会阻断运行，但会降低配置体验
 - [ ] 配置主体宽度自适应屏幕宽度，字段用响应式 grid 或分组，不使用窄 `max-w-*` 限制
 - [ ] 用户可见文案使用“插件”，不展示内部分类名或“Schema 弹窗”
-- [ ] 如需 dry-run：`plugin.py` 导出 `_dry_run_match`，`__init__.py` re-export；平台专属配置页再按需接入 `rules.py`
-- [ ] 如需接入平台 `rules.py` 专属 dry-run：`feature.py` 中有 `FEATURE_XXX` 常量，后端通过已安装插件目录动态调用 `_dry_run_match`；普通远程/本地插件可先用插件自身测试覆盖 dry-run 纯函数
+- [ ] 如需 dry-run：`plugin.py` 导出 `_dry_run_match`，`__init__.py` re-export；平台 `rules.py` 会动态加载，无需改主仓库
+- [ ] `_dry_run_match` 是纯函数，并在插件自身测试中覆盖
 - [ ] 前端 `pnpm --dir frontend typecheck` 和 `pnpm --dir frontend build` 通过
 
 ---
@@ -2962,8 +2901,12 @@ __all__ = ["PLUGIN_CLASS", "MANIFEST"]
 
 ### `min_telepilot_version` 怎么填
 
-- 宿主在执行插件 Python 之前比较 `plugin.json` 的 `min_telepilot_version`（旧名 `min_telebot_version`），版本不够时拒绝加载并提示“请先更新 TelePilot”。比较只取 `x.y.z` 三段数字，`-beta.N` 后缀不参与比较：写 `0.106.0-beta.12` 与 `0.106.0-beta.1` 效果相同，需要某个 beta 才有的能力必须同时做能力探测。
-- 最低版本要覆盖插件**不做探测就直接使用**的能力。常见门槛（以主仓库 CHANGELOG 为准）：
+- 宿主在执行插件 Python 之前比较 `plugin.json` 的 `min_telepilot_version`（旧名 `min_telebot_version`，已弃用，见 [弃用登记](#弃用登记)），版本不够时拒绝加载并提示“请先更新 TelePilot”。
+- **0.107.0-beta.1 起比较考虑 beta 号**（SemVer 规则，`manifest.min_version_prerelease`）：
+  - 声明带 beta 号（如 `0.106.0-beta.12`）→ 完整比较：`0.106.0-beta.3` 宿主拒绝，`0.106.0-beta.12`、`0.106.0`、`0.107.0-beta.1` 都满足；
+  - 声明不带 beta 号（如 `0.106.0`）→ 仍只比较 `x.y.z`，`0.106.0-beta.3` 宿主也满足（与旧行为一致，已发布插件不会在 beta 宿主上被误拒）。
+  - 0.107 之前的宿主只比较 `x.y.z`：在旧宿主上 `0.106.0-beta.12` 与 `0.106.0-beta.1` 效果相同，所以需要某个 beta 才有的能力仍要同时做能力探测。
+- 最低版本要覆盖插件**不做探测就直接使用**的能力。0.106.0-beta.2 之后新增的能力，门槛以宿主能力注册表为准（`backend/app/worker/plugins/capabilities.py`，`GET /api/plugins/capabilities` 返回同一份数据的 `since` 字段）；下表把注册表与更早的 CHANGELOG 门槛汇总在一起：
 
 | 能力 | 最低版本 |
 | --- | --- |
@@ -2983,14 +2926,103 @@ __all__ = ["PLUGIN_CLASS", "MANIFEST"]
 | `ctx.messages.click_callback_button`（`click_bot_button`） | 0.90.0 |
 | `http.allow_direct` | 0.97.0 |
 | `ctx.skills`（`agent_skills`）、识图（`images=` / `fetch_bot_image` / `ai_vision`）、`web_search`、访客模式（`guest_message` / `guest_all` / `answer_guest_query`）、`timeout_seconds` | 0.106.0-beta.1（`complete()` 自 0.73 起忽略未知关键字参数：旧平台上传 `images` / `web_search` / `thinking` 不报错但不生效） |
-| `ctx.ai.complete(thinking=...)`、`AIResponseTruncated` | 0.106.0-beta.2 |
-| 实时 inline 编辑（`live_inline_edit`）、`apply()` 结果的 `errors` | 0.106.0-beta.3 |
-| `compact_tables`（Bot API 10.3 紧凑表格） | 0.106.0-beta.12 |
+| `ctx.ai.complete(thinking=...)`、`AIResponseTruncated`；注册表 `messages.inline_rich_edit` | 0.106.0-beta.2 |
+| 注册表 `messages.live_inline_edit`（实时 inline 编辑、`apply()` 结果的 `errors`） | 0.106.0-beta.3 |
+| 注册表 `messages.rich_table_compact`（`compact_tables`，Bot API 10.3 紧凑表格） | 0.106.0-beta.12 |
 | Event Bus payload 的 `owner_user_ids` / `admin_user_ids`（交互 Bot 投递）、`ctx.ai.list_providers()` 模型 `enabled` | 0.106.0-beta.14（探测：字段是否存在） |
-| Rich 表格默认边框 + 隔行着色（`rich_table_default_style`，平台行为，插件无需声明） | 0.106.0-beta.15 |
-| 访客回复 callback 按钮（`answer_guest_query.reply_markup` 保留 `callback_data`、`apply()` 结果的 `inline_message_id`、inline 回调投递给 `guest_all` / `inline_all` 的 `callback_query` 订阅、`inline_callback` 信封） | 0.106.0-beta.17（探测：`getattr(ctx.messages, "guest_reply_markup", False)`） |
-| 流式回复节流编辑 / 私聊草稿（`ctx.messages.stream_editor()` / `stream_edit()`，见 [PLUGIN-STREAMING.md](./PLUGIN-STREAMING.md)）；`ctx.ai.complete()` 的 `timeout_seconds` 改为含重试与备用 Provider 的总时限 | 0.106.0-beta.20（探测：`getattr(ctx.messages, "streaming_edit", False)`） |
+| 注册表 `messages.rich_table_default_style`（Rich 表格默认边框 + 隔行着色，平台行为，插件无需声明） | 0.106.0-beta.15 |
+| 注册表 `messages.guest_reply_markup`（访客回复 callback 按钮、`apply()` 结果的 `inline_message_id`、inline 回调投递给 `guest_all` / `inline_all`、`inline_callback` 信封） | 0.106.0-beta.17 |
+| 注册表 `messages.streaming_edit`（`ctx.messages.stream_editor()` / `stream_edit()` 流式编辑 / 私聊草稿，见 [PLUGIN-STREAMING.md](./PLUGIN-STREAMING.md)）；`ctx.ai.complete()` 的 `timeout_seconds` 改为含重试与备用 Provider 的总时限 | 0.106.0-beta.20 |
+| 注册表 `runtime.capabilities`（`ctx.capabilities`）、`manifest.plugin_api`、`manifest.min_version_prerelease`、`runtime.hook_stats`、`runtime.deprecations` | 0.107.0-beta.1 |
 
-- 想兼容更旧的平台时不要提高最低版本，而是先探测再用：`getattr(ctx.messages, "rich_table_compact", False)`（紧凑表格）、`getattr(ctx.messages, "live_inline_edit", False)` / `inline_rich_edit`（inline 编辑）、`ctx.skills is None`、`getattr(ctx.ai, "vision_enabled", False)`、`hasattr(ctx.messages, "edit_rich")`，参数级新增（如 `thinking`）用 `inspect.signature` 探测或捕获 `TypeError`。
+- 想兼容更旧的平台时不要提高最低版本，而是先探测再用，见下一节 [能力协商与 Plugin API 版本](#能力协商与-plugin-api-版本)。
 - 声明 `requires_platform_capabilities` 的 `manifest.py` 在 0.72 之前的平台上导入就会失败，因此现在所有新插件的最低版本至少是 `0.72.0-beta.2`。
 - 插件仓库 `Anoyou/telebot-plugins` 提供 `scripts/check_host_compat.py`：用本仓库真实的安装校验、loader、沙箱权限与 facade 签名逐个检查插件，并按上表推断最低版本；`TELEPILOT_REPO` 指向本仓库任意历史版本的检出即可验证插件在旧平台能否加载。示例插件也可以用 `--plugins-root examples/plugins` 检查。
+- 主仓库 PR 也会反向检查：工作流「插件库兼容」（`.github/workflows/plugin-compat.yml` + `scripts/plugin-compat-check.py`）用本次提交的宿主跑插件库的 `check_host_compat.py` 与全量 pytest；有失败时再用目标分支的宿主重跑，只有“基线通过、本次失败”才判失败，插件库自身已有的失败只给警告。
+
+### 能力协商与 Plugin API 版本
+
+TelePilot 0.107.0-beta.1 起，宿主的可探测能力只在一张注册表里登记（`backend/app/worker/plugins/capabilities.py` 的 `CAPABILITIES`）：每项能力有名称、版本、首个提供它的宿主版本（`since`，可带 beta 号）、适用的 `ctx.messages` facade、兼容用的旧属性名与说明。注册表同时驱动三处：
+
+- 运行时：`ctx.capabilities`；
+- 接口：`GET /api/plugins/capabilities`（返回 `host_version`、`plugin_api_version`、`capabilities[]`、`deprecations[]`）；
+- 文档：上面的版本门槛表。
+
+**探测能力（推荐写法）**
+
+```python
+caps = getattr(ctx, "capabilities", None)  # 0.107 之前的宿主没有 ctx.capabilities
+if caps is not None:
+    can_button = caps.has("messages.guest_reply_markup")
+else:  # 旧宿主：退回旧属性探测
+    can_button = getattr(ctx.messages, "guest_reply_markup", False) is True
+```
+
+| 方法 / 属性 | 说明 |
+| --- | --- |
+| `caps.has(name, min_version=1)` | 当前上下文是否支持（版本不低于 `min_version`） |
+| `caps.version(name)` | 能力版本；不支持或当前 facade 不适用时为 `0` |
+| `caps.names()` / `caps.as_dict()` | 当前上下文支持的全部能力 |
+| `name in caps` | 等价于 `caps.has(name)` |
+| `caps.plugin_api` / `caps.host_version` | 宿主 Plugin API 版本（如 `1.0`）与 TelePilot 版本 |
+
+- `messages.*` 能力与当前 `ctx.messages` facade 有关：同一插件在交互 Bot 入口（`entry`）、命令 / 后台任务（`live`）、UserBot Event Bus 投递（`buffered`）里拿到的 facade 不同。例如 `messages.live_inline_edit` 在 `buffered` facade 上为 `False`，因为那里只能缓冲动作、没有实时 apply。`runtime.*` / `manifest.*` 是宿主级能力，与 facade 无关。
+- 旧探测写法继续可用：`getattr(ctx.messages, "rich_table_compact", False)`、`inline_rich_edit`、`live_inline_edit`、`rich_table_default_style`、`guest_reply_markup` 这些类属性现在由注册表生成，与 `ctx.capabilities` 结果一致。注册表之外的探测（`ctx.skills is None`、`getattr(ctx.ai, "vision_enabled", False)`、`hasattr(ctx.messages, "edit_rich")`、参数级新增用 `inspect.signature` 或捕获 `TypeError`）照旧。
+- 当前注册表全集：
+
+| 能力名 | 旧属性 | 适用 facade | since |
+| --- | --- | --- | --- |
+| `messages.inline_rich_edit` | `inline_rich_edit` | live / entry | 0.106.0-beta.2 |
+| `messages.live_inline_edit` | `live_inline_edit` | live / entry | 0.106.0-beta.3 |
+| `messages.rich_table_compact` | `rich_table_compact` | 全部 | 0.106.0-beta.12 |
+| `messages.rich_table_default_style` | `rich_table_default_style` | 全部 | 0.106.0-beta.15 |
+| `messages.guest_reply_markup` | `guest_reply_markup` | 全部 | 0.106.0-beta.17 |
+| `runtime.capabilities` | — | 宿主级 | 0.107.0-beta.1 |
+| `manifest.plugin_api` | — | 宿主级 | 0.107.0-beta.1 |
+| `manifest.min_version_prerelease` | — | 宿主级 | 0.107.0-beta.1 |
+| `runtime.hook_stats` | — | 宿主级 | 0.107.0-beta.1 |
+| `runtime.deprecations` | — | 宿主级 | 0.107.0-beta.1 |
+
+以注册表与 `GET /api/plugins/capabilities` 为准；本表随宿主发版同步。
+
+**Plugin API 版本（`plugin_api`）**
+
+- 宿主提供的 Plugin API 版本是 `MAJOR.MINOR`（当前 `1.0`）：新增向后兼容的接口 / 能力只升 MINOR；删除或改变已有接口语义才升 MAJOR，并且要先在 [弃用登记](#弃用登记) 里公告至少一个 minor 宿主版本。
+- 插件可以在 `plugin.json` 里声明兼容范围，宿主在执行插件代码前校验，不满足时拒绝加载并说明原因：
+
+```json
+{ "plugin_api": "^1.0" }
+```
+
+  支持 `"1"` / `"1.x"`（1.0 ≤ v < 2.0）、`"1.2"`（等同 `^1.2`）、`"^1.2"`、`"~1.2"`（1.2 ≤ v < 1.3）、`">=1.1"`、`">=1.0,<2"`（逗号或空格取交集）、`"*"`。写法无法识别时拒绝加载并提示示例。
+- **`plugin_api` 只写在 `plugin.json`，不要写进 `Manifest(...)`**：0.107 之前的宿主 `Manifest` 不认识这个参数，写进 `manifest.py` 会在旧宿主上导入失败；宿主加载时会自动把 `plugin.json` 里的值补到 Manifest 上。旧宿主会忽略 `plugin.json` 里的这个字段，所以它不能代替 `min_telepilot_version`。
+- 插件不声明 `plugin_api` 时视为兼容任意版本（与 0.107 之前一致）。
+
+### 钩子统计与弃用登记
+
+0.107.0-beta.1 起平台按 **账号 × 插件 × 钩子 × 事件类型** 统计每次插件调用（能力 `runtime.hook_stats`），插件无需任何改动：
+
+- 统计的钩子：`on_event`、`on_interaction`、`on_message`、`on_direct_message`、`on_startup`、`on_config_action`、系统助手工具（`system_agent_tool`）等；
+- 每行记录调用数、成功 / 失败（抛异常）/ 超时 / 熔断跳过 / 插件更新中跳过次数、平均与最大耗时、按耗时直方图估算的 p50 / p95、失败率，以及最近一次失败摘要（异常类型 + 脱敏、截断到 300 字的消息，不保存消息正文）；
+- worker 进程内累加，最多每 5 秒批量写入 Redis，主进程从 Redis 汇总，因此跨进程、跨 worker 重启都能累计；Redis 不可用时只丢统计，不影响插件运行；
+- 统计保留到最近一次调用后 7 天；
+- 查看：Web 插件详情的「运行统计」，或 `GET /api/plugins/{key}/stats?account_id=`（返回 `hooks[]`、`totals`、`deprecations[]`、`retention_days`；Redis 不可用时 `available=false`）；清零：`DELETE /api/plugins/{key}/stats`（各 worker 尚未写入的增量会在下次写入时重新出现）。
+
+同一份统计还记录插件对已弃用接口的调用次数（能力 `runtime.deprecations`），见下节。
+
+### 弃用登记
+
+每个已弃用的插件接口在 `backend/app/worker/plugins/deprecations.py` 的 `DEPRECATIONS` 里登记一次（`GET /api/plugins/capabilities` 的 `deprecations[]` 返回同一份）。插件调用到它们时：
+
+- 每次调用都计数，插件详情「运行统计」与 `GET /api/plugins/{key}/stats` 的 `deprecations[]` 可见（次数、最近时间、替代写法、计划移除版本）；
+- 每个 [进程 × 插件 × 弃用项] 每 6 小时最多写一条 WARNING 日志，避免刷屏；
+- 移除计划写在 `removal` 字段（通常是计划移除的 Plugin API 大版本），移除前至少提前一个 minor 宿主版本公告，并以使用量统计为依据。
+
+| id | 弃用内容 | 替代写法 | 弃用自 | 计划移除 |
+| --- | --- | --- | --- | --- |
+| `hook.on_interaction` | 只实现 `on_interaction(ctx, entry_key, payload)`（交互入口迁移桥），没有实现 `on_event` | 实现 `on_event(ctx, payload)`，入口信息在 `payload["trigger"]` / `payload["entry_key"]` | 0.107.0 | Plugin API 2.0 |
+| `manifest.min_telebot_version` | `plugin.json` / manifest 使用旧字段 `min_telebot_version` | `min_telepilot_version`（可带 beta 号） | 0.15.0 | Plugin API 2.0 |
+| `ai.tag_alias` | `ctx.ai.complete` / `stream_complete` 使用 `tag=` / `tags=` 兼容别名 | `provider_tag=` | 0.25.0 | Plugin API 2.0 |
+| `action.send_via_notice` | 动作 `send_via` / `channel` 使用已下线的 `notice` / `bbot_notice` / `notice_bot` 通道（动作会失败） | `send_via: interaction_bot` 或 `userbot_reply` | 0.36.0 | 已下线（只保留失败提示与计数） |
+
+宿主侧新增弃用项时：在 `DEPRECATIONS` 登记，在调用点调用 `note_deprecated("<id>", plugin_key=..., account_id=...)`，并同步本表。
