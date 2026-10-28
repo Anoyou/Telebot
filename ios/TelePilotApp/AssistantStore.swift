@@ -77,9 +77,10 @@ final class AssistantStore {
     var sessionID: String?
     var session: JSONValue?
     var activeRun: JSONValue?
-    var events: [JSONValue] = []
-    var liveText = ""
-    var liveReasoning = ""
+    /// 本轮收到的进度事件（只用于核对与调试，界面不读取，不参与观察）。
+    @ObservationIgnored var events: [JSONValue] = []
+    /// 正在生成的回答与进度阶段（第十一轮拆出的独立 Observable，只有回答位置的视图读取）。
+    let live = AssistantLiveState()
     var notice: String?
     var error: String?
     var busy = false
@@ -92,11 +93,6 @@ final class AssistantStore {
     var modelIndex = -1
     var accountID: Int?
     var deletingSessionID: String?
-    /// 当前任务最近一个进度事件（run_started／provider_selected／tool_started／assistant_delta…），
-    /// 状态行据此显示真实阶段；还没有事件时用服务器 run.phase。
-    var progressType = ""
-    /// 最近一次调用的工具（tool_started 的 tool_description，没有时为 tool_name）。
-    var progressTool = ""
     /// 本会话尚未开始执行的排队消息（服务器 GET /queue，按 position 排序）。
     var queue: [AssistantItem] = []
     /// 已改为“插入调整”的消息：服务器把它并入当前任务（不单独存为历史消息），本机显示到当前任务结束。
@@ -115,6 +111,8 @@ final class AssistantStore {
     @ObservationIgnored private var revealTask: Task<Void, Never>?
     @ObservationIgnored private var watchTask: Task<Void, Never>?
     @ObservationIgnored private var progressRunID: String?
+    /// 最近一次“读取最近一页消息”的序号：并发的多次读取只采用最后发出的那次，避免较早的结果覆盖较新的。
+    @ObservationIgnored private var messageLoadSequence = 0
     /// 每页消息数：先显示最近一页，上滑再按 before_id 读取更早的。
     static let pageSize = 40
 
@@ -207,8 +205,7 @@ final class AssistantStore {
             hasOlderMessages = true
         }
         events = []
-        liveText = ""
-        liveReasoning = ""
+        live.clearText()
         activeRun = nil
         lastSeq = 0
         error = nil
@@ -340,8 +337,7 @@ final class AssistantStore {
         events = []
         activeRun = nil
         accountID = nil
-        liveText = ""
-        liveReasoning = ""
+        live.clearText()
         streaming = false
         hasOlderMessages = false
         resetQueueState()
@@ -353,8 +349,7 @@ final class AssistantStore {
         steered = []
         replacingTurnIDs = []
         queueBusyID = nil
-        progressType = ""
-        progressTool = ""
+        live.resetProgress()
         progressRunID = nil
     }
 
@@ -369,9 +364,14 @@ final class AssistantStore {
         defer { if older { loadingOlder = false } }
         let token = generation
         let before = older ? messages.first?["id"]?.intValue.map { "&before_id=\($0)" } ?? "" : ""
+        if !older { messageLoadSequence += 1 }
+        let sequence = messageLoadSequence
         do {
             let rows = try await model.request(path: AssistantPresentation.root + "/sessions/\(AssistantPresentation.path(sessionID))/messages?limit=\(Self.pageSize)\(before)").assistantItems
             guard token == generation else { return }
+            // 发送后“订阅进度”与“读取消息”并发（第十一轮）：若本轮很快结束，结束时的读取可能比发送时的读取先返回，
+            // 较早发出的那次结果已过时，丢弃。
+            if !older && sequence != messageLoadSequence { return }
             if older {
                 let known = Set(messages.map(\.id))
                 await setMessages(rows.filter { !known.contains($0.id) } + messages)
@@ -432,7 +432,10 @@ final class AssistantStore {
         AssistantHistoryCache.save(snapshot, key: cacheKey)
     }
 
-    func restoreRun(_ model: AppModel) async {
+    /// 读取本会话的任务：有进行中／排队的任务就订阅它的进度；没有时核对上一任务的最终状态并刷新消息。
+    /// - Parameter afterTurn: 刚结束一轮（进度流已收到结束并刷新过任务与消息）时为真：只查找下一条排队任务与队列，
+    ///   不再重复读取任务详情和消息页（第十一轮：一轮结束只拉一次消息）。
+    func restoreRun(_ model: AppModel, afterTurn: Bool = false) async {
         guard let sessionID else { return }
         let token = generation
         do {
@@ -446,16 +449,15 @@ final class AssistantStore {
             // 正在执行／等待中的任务优先；都没有时取最早的排队任务（列表按创建时间倒序）。
             let unfinished = runs.filter { !AssistantPresentation.terminal.contains($0.text("status")) }
             if let running = unfinished.first(where: { $0.text("status") != "queued" }) ?? unfinished.last {
-                if runID != running.id { events = []; lastSeq = 0; liveText = ""; liveReasoning = "" }
+                if runID != running.id { events = []; lastSeq = 0; live.clearText() }
                 activeRun = running.value
                 attach(model)
-            } else if let runID {
+            } else if !afterTurn, let runID {
                 let current = try await model.request(path: AssistantPresentation.root + "/runs/\(AssistantPresentation.path(runID))")
                 guard token == generation else { return }
                 activeRun = current
                 await refreshMessages(model)
-                liveText = ""
-                liveReasoning = ""
+                live.clearText()
             }
             guard token == generation else { return }
             await refreshQueue(model)
@@ -472,9 +474,9 @@ final class AssistantStore {
                 activeRun = found.value
                 events = []
                 lastSeq = 0
-                liveText = ""
-                await refreshMessages(model)
+                live.clearText()
                 attach(model)
+                await refreshMessages(model)
                 notice = "已找到服务器接收的任务，没有重复发送。"
             } else { notice = "暂未在最近 200 项任务中找到该请求，仍保留待核对记录。请检查任务历史后决定是否放弃记录。" }
         } catch { self.error = AssistantPresentation.error(error) }
@@ -542,10 +544,10 @@ final class AssistantStore {
             activeRun = row
             events = []
             lastSeq = 0
-            liveText = ""
-            liveReasoning = ""
-            await refreshMessages(model)
+            live.clearText()
+            // 第十一轮：先订阅进度流，再并行刷新消息（显示刚发出的“我的消息”），首个字不再被一次消息页往返挡住。
             attach(model)
+            await refreshMessages(model)
             return true
         } catch {
             if let api = error as? APIError, !api.isOutcomeUncertain && !api.isIncompatibleResponse { clearPending() }
@@ -591,8 +593,7 @@ final class AssistantStore {
         guard let runID else { return }
         if progressRunID != runID {
             progressRunID = runID
-            progressType = ""
-            progressTool = ""
+            live.resetProgress()
         }
         startWatching(model)
         let token = generation
@@ -605,29 +606,31 @@ final class AssistantStore {
             for attempt in 0..<4 {
                 guard !Task.isCancelled, token == generation, subscription == subscriptionID else { return }
                 do {
-                    try await model.stream(path: AssistantPresentation.root + "/runs/\(AssistantPresentation.path(runID))/stream?after_seq=\(lastSeq)") { [weak self] event in
-                        await self?.consume(event, generation: token, subscription: subscription)
+                    // 回调本身在主线程执行：每个事件只切换一次线程（AppModel 核对会话后直接调用）。
+                    try await model.stream(path: AssistantPresentation.root + "/runs/\(AssistantPresentation.path(runID))/stream?after_seq=\(lastSeq)") { @MainActor [weak self] event in
+                        self?.consume(event, generation: token, subscription: subscription)
                     }
                 } catch {
                     if Task.isCancelled { return }
                 }
                 guard !Task.isCancelled, token == generation, subscription == subscriptionID else { return }
                 do {
+                    live.flush()
                     let row = try await model.request(path: AssistantPresentation.root + "/runs/\(AssistantPresentation.path(runID))")
                     guard token == generation else { return }
                     activeRun = row
                     await refreshMessages(model)
                     let status = row.assistantText("status")
                     if AssistantPresentation.terminal.contains(status) || status == "waiting_input" || status == "waiting_approval" {
-                        liveText = ""
-                        liveReasoning = ""
+                        live.clearText()
                         if AssistantPresentation.terminal.contains(status) {
                             // 本轮结束：插入调整已随本轮完成；接着读取下一条排队任务（如有）并订阅它的进度。
                             // 在新的任务里执行，避免当前（即将被替换的）订阅任务的取消状态影响请求。
+                            // 任务与消息刚刚读过，restoreRun 只查下一条排队任务与队列（afterTurn）。
                             steered = []
                             Task { @MainActor [weak self] in
                                 guard let self, token == self.generation else { return }
-                                await self.restoreRun(model)
+                                await self.restoreRun(model, afterTurn: true)
                             }
                         }
                         return
@@ -651,18 +654,19 @@ final class AssistantStore {
         }
         switch type {
         case "tool_started":
-            progressTool = event.assistantText("tool_description").nilIfBlank ?? event.assistantText("tool_name")
+            live.setProgress(tool: event.assistantText("tool_description").nilIfBlank ?? event.assistantText("tool_name"))
         case "steer_applied":
             if let index = steered.firstIndex(where: { !$0.applied }) { steered[index].applied = true }
         default: break
         }
-        if AssistantProgress.tracked.contains(type) { progressType = type }
+        // 写入去重在 AssistantLiveState 里：同一阶段的连续增量不会触发界面更新。
+        if AssistantProgress.tracked.contains(type) { live.setProgress(type: type) }
     }
 
     /// 回答位置的状态行：只根据服务器给出的任务状态、phase 与进度事件；没有数据的阶段不显示。
     var liveStatus: AssistantProgress.Status? {
         guard runActive else { return nil }
-        return AssistantProgress.status(run: activeRun, eventType: progressType, tool: progressTool)
+        return AssistantProgress.status(run: activeRun, eventType: live.progressType, tool: live.progressTool)
     }
 
     /// 尚未开始执行的排队消息（不含当前任务自己的排队记录）。
@@ -760,10 +764,10 @@ final class AssistantStore {
         if events.count > 500 { events.removeFirst(events.count - 500) }
         trackProgress(event, type: type)
         switch type {
-        case "assistant_delta": liveText += event.assistantText("delta")
-        case "assistant_reasoning_delta", "reasoning_delta": liveReasoning += event.assistantText("delta")
-        case "assistant_delta_reset": liveText = ""; liveReasoning = ""
-        case "assistant_message": liveText = event.assistantText("content"); liveReasoning = event.assistantText("reasoning")
+        case "assistant_delta": live.appendText(event.assistantText("delta"))
+        case "assistant_reasoning_delta", "reasoning_delta": live.appendReasoning(event.assistantText("delta"))
+        case "assistant_delta_reset": live.clearText()
+        case "assistant_message": live.replace(text: event.assistantText("content"), reasoning: event.assistantText("reasoning"))
         default: break
         }
     }

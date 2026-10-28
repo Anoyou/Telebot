@@ -111,8 +111,8 @@ actor SessionTransport: ClientTransport {
         return ([], .none, false)
     }
 
-    /// 3xx 指向 Access 登录，或 Access 的 401／403／登录页。
-    private func isCloudflareAccessResponse(status: Int, headers: [String: String], body: Data, credentialSent: Bool) -> Bool {
+    /// 3xx 指向 Access 登录，或 Access 的 401／403／登录页。只读不可变的 `origin`，可在 actor 外调用（流式订阅）。
+    private nonisolated func isCloudflareAccessResponse(status: Int, headers: [String: String], body: Data, credentialSent: Bool) -> Bool {
         if (300..<400).contains(status) {
             let location = headers.first { $0.key.lowercased() == "location" }?.value
             return CloudflareAccessDetector.isAccessRedirect(location: location, origin: origin)
@@ -330,12 +330,17 @@ actor SessionTransport: ClientTransport {
         return try await result.1.mapAsync { try await Data(collecting: $0, upTo: 64 * 1024 * 1024) } ?? Data()
     }
 
-    // Subscribe to an existing durable run. Cancelling this GET never cancels the server task.
-    func stream(path: String, onEvent: @escaping @Sendable (JSONValue) async -> Void) async throws {
-        guard Self.validPath(path) else { throw APIError.invalidServerURL }
+    /// 订阅一个运行中任务的 NDJSON 进度流前，在 actor 上取一次凭据快照。
+    private struct StreamPreparation: Sendable {
+        let request: URLRequest
+        let credentialKind: CloudflareAccessCredentialKind
+        let credentialSent: Bool
+        let epoch: Int
+    }
+
+    private func prepareStream(path: String) throws -> StreamPreparation {
         try loadAndExpire()
         let credential = try accessCredential()
-        let epoch = generation
         guard let url = URL(string: origin.absoluteString + path) else { throw APIError.invalidServerURL }
         var request = URLRequest(url: url)
         request.timeoutInterval = 90
@@ -344,10 +349,26 @@ actor SessionTransport: ClientTransport {
         request.setValue("no-store", forHTTPHeaderField: "Cache-Control")
         if let auth { request.setValue("auth_token=" + auth.token, forHTTPHeaderField: "Cookie") }
         for (name, value) in credential.headers { request.setValue(value, forHTTPHeaderField: name.rawName) }
+        return StreamPreparation(request: request, credentialKind: credential.kind, credentialSent: credential.sent, epoch: generation)
+    }
+
+    private func isCurrent(_ epoch: Int) -> Bool { epoch == generation }
+
+    private func expireAfterStreamUnauthorized() throws { try clear() }
+
+    // Subscribe to an existing durable run. Cancelling this GET never cancels the server task.
+    //
+    // 第十一轮：`nonisolated`。原来在 actor 内逐字节读取，每个字节都检查取消与会话代次，缓冲区有数据时
+    // actor 一直被流占住，其他请求只能在事件间隙进入。现在凭据快照之后在 actor 外按行（`\n`）切分，
+    // 每行只回到 actor 核对一次会话代次。服务器用 ensure_ascii=False 输出，字符串里可能有 U+2028，
+    // 所以只按 `\n` 切分，不用会把 Unicode 行分隔符也当换行的 `bytes.lines`。
+    nonisolated func stream(path: String, onEvent: @escaping @Sendable (JSONValue) async -> Void) async throws {
+        guard Self.validPath(path) else { throw APIError.invalidServerURL }
+        let prepared = try await prepareStream(path: path)
         do {
-            let (bytes, response) = try await session.bytes(for: request)
+            let (bytes, response) = try await session.bytes(for: prepared.request)
             defer { bytes.task.cancel() }
-            guard epoch == generation else { throw APIError.sessionChanged }
+            guard await isCurrent(prepared.epoch) else { throw APIError.sessionChanged }
             guard let http = response as? HTTPURLResponse else { throw APIError.incompatibleResponse }
             var headers: [String: String] = [:]
             for (key, value) in http.allHeaderFields {
@@ -356,8 +377,8 @@ actor SessionTransport: ClientTransport {
             let isStream = headers["content-type"]?.lowercased().hasPrefix("application/x-ndjson") == true
             if (300..<400).contains(http.statusCode) {
                 if isCloudflareAccessResponse(status: http.statusCode, headers: headers, body: Data(),
-                                              credentialSent: credential.sent) {
-                    throw APIError.cloudflareAccessRequired(credential.kind)
+                                              credentialSent: prepared.credentialSent) {
+                    throw APIError.cloudflareAccessRequired(prepared.credentialKind)
                 }
                 throw APIError.redirectRejected
             }
@@ -369,30 +390,31 @@ actor SessionTransport: ClientTransport {
                     if prefix.count >= 64 * 1024 { break }
                 }
                 if isCloudflareAccessResponse(status: http.statusCode, headers: headers, body: prefix,
-                                              credentialSent: credential.sent) {
-                    throw APIError.cloudflareAccessRequired(credential.kind)
+                                              credentialSent: prepared.credentialSent) {
+                    throw APIError.cloudflareAccessRequired(prepared.credentialKind)
                 }
             }
-            if http.statusCode == 401 { try clear(); throw APIError.unauthorized }
+            if http.statusCode == 401 { try await expireAfterStreamUnauthorized(); throw APIError.unauthorized }
             guard (200..<300).contains(http.statusCode) else { throw APIError.server(status: http.statusCode, code: nil) }
             guard isStream else { throw APIError.incompatibleResponse }
             var line = Data()
+            line.reserveCapacity(4096)
             for try await byte in bytes {
-                try Task.checkCancellation()
-                guard epoch == generation else { throw APIError.sessionChanged }
                 if byte == 10 {
-                    if !line.isEmpty {
-                        let event = try JSONValue(data: line)
-                        await onEvent(event)
-                        line.removeAll(keepingCapacity: true)
-                        if event["type"]?.stringValue == "done" { return }
-                    }
+                    guard !line.isEmpty else { continue }
+                    try Task.checkCancellation()
+                    guard await isCurrent(prepared.epoch) else { throw APIError.sessionChanged }
+                    let event = try JSONValue(data: line)
+                    line.removeAll(keepingCapacity: true)
+                    await onEvent(event)
+                    if event["type"]?.stringValue == "done" { return }
                 } else {
                     guard line.count < 16 * 1024 * 1024 else { throw APIError.incompatibleResponse }
                     line.append(byte)
                 }
             }
             if !line.isEmpty {
+                guard await isCurrent(prepared.epoch) else { throw APIError.sessionChanged }
                 let event = try JSONValue(data: line)
                 await onEvent(event)
                 if event["type"]?.stringValue == "done" { return }

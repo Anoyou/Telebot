@@ -159,7 +159,7 @@ struct AssistantView: View {
                             ProgressView("正在读取对话…")
                                 .frame(maxWidth: .infinity, minHeight: 160)
                                 .accessibilityIdentifier("assistant.loading")
-                        } else if store.messages.isEmpty && store.liveText.isEmpty && !store.loading {
+                        } else if store.messages.isEmpty && !store.live.hasText && !store.loading {
                             ContentUnavailableView("有什么需要处理？", systemImage: "sparkles", description: Text(store.sessionID == nil ? "新建会话，开始管理你的 TelePilot。" : "可以查询运行状态、排查问题或安排任务。涉及写入的操作会请求确认。"))
                                 .padding(.top, 48)
                             if store.sessionID == nil {
@@ -197,7 +197,10 @@ struct AssistantView: View {
                             }
                         }
                         // 正在执行的任务：回答位置显示真实阶段（流光状态行），有正文后缩为末尾的小指示。
-                        AssistantLiveReplyView(store: store, pinnedToBottom: pinnedToBottom, proxy: proxy) {
+                        // 第十一轮：流式状态在独立的 AssistantLiveState 里，只有这个视图读取；跟随滚动由它节流后回调。
+                        AssistantLiveReplyView(store: store, follow: {
+                            if pinnedToBottom { scrollToBottomAfterLayout(proxy) }
+                        }) {
                             panel = .tasks
                         } resume: {
                             Task { await store.restoreRun(model) }
@@ -247,9 +250,6 @@ struct AssistantView: View {
                     guard new > old else { return }
                     pinnedToBottom = true
                     scrollToBottomAfterLayout(proxy)
-                }
-                .onChange(of: store.liveStatus?.text) { _, _ in
-                    if pinnedToBottom { scrollToBottomAfterLayout(proxy) }
                 }
                 // 首屏之后逐帧向上追加更早的消息：仍贴底时补滚一次，保证停在最新一条。
                 .onChange(of: store.revealStart) { _, _ in
@@ -546,26 +546,38 @@ struct AssistantMessageActionStyle: LabelStyle {
 ///   没有数据的阶段不显示，也不会在已开始执行后停留在“排队中”。
 /// - 有正文后状态行缩为正文末尾的一行小字指示。
 /// - 等待审批时状态行旁有“审批”，进度订阅中断时有“恢复进度”（原来输入栏上方独立状态条里的操作）。
+/// - 第十一轮：正文来自 `AssistantLiveState`（约 12 Hz 提交）；已闭合的块是预解析好的 `stableBlocks`（Equatable 子视图，
+///   不变就不重算），每次只重绘最后一块。不再对每个增量 `scrollTo`，改为最多每 250 ms 跟随一次（贴底时）。
 private struct AssistantLiveReplyView: View {
     let store: AssistantStore
-    let pinnedToBottom: Bool
-    let proxy: ScrollViewProxy
+    let follow: () -> Void
     let approve: () -> Void
     let resume: () -> Void
+    @State private var followScheduled = false
 
     var body: some View {
+        let live = store.live
         Group {
             let status = store.liveStatus
-            let hasText = !store.liveText.isEmpty
-            if status != nil || hasText || !store.liveReasoning.isEmpty {
+            let hasText = live.hasText
+            if status != nil || hasText || !live.reasoning.isEmpty {
                 VStack(alignment: .leading, spacing: 10) {
                     Label("助手", systemImage: "sparkles").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
                     if let status, !hasText { statusRow(status, compact: false) }
-                    if !store.liveReasoning.isEmpty {
-                        DisclosureGroup("推理过程") { Text(AssistantRedaction.text(store.liveReasoning)).font(.footnote).foregroundStyle(.secondary).textSelection(.enabled).privacySensitive() }
+                    if !live.reasoning.isEmpty {
+                        DisclosureGroup("推理过程") { Text(AssistantRedaction.text(live.reasoning)).font(.footnote).foregroundStyle(.secondary).textSelection(.enabled).privacySensitive() }
                     }
                     if hasText {
-                        AssistantMarkdownView(text: AssistantRedaction.text(store.liveText)).privacySensitive()
+                        VStack(alignment: .leading, spacing: 10) {
+                            if !live.stableBlocks.isEmpty {
+                                AssistantStableBlocksView(blocks: live.stableBlocks, version: live.stableVersion)
+                                    .equatable()
+                            }
+                            if !live.tailBlocks.isEmpty {
+                                AssistantRenderedMarkdownView(blocks: live.tailBlocks)
+                            }
+                        }
+                        .privacySensitive()
                         if let status { statusRow(status, compact: true) }
                     }
                 }
@@ -574,11 +586,18 @@ private struct AssistantLiveReplyView: View {
                 .accessibilityIdentifier("assistant.live")
             }
         }
-        .onChange(of: store.liveText) { _, _ in
-            if pinnedToBottom { proxy.scrollTo("assistant.bottom", anchor: .bottom) }
-        }
-        .onChange(of: store.liveReasoning) { _, _ in
-            if pinnedToBottom { proxy.scrollTo("assistant.bottom", anchor: .bottom) }
+        .onChange(of: live.revision) { _, _ in scheduleFollow() }
+        .onChange(of: store.liveStatus?.text) { _, _ in follow() }
+    }
+
+    /// 节流跟随：一段时间内的多次提交只滚动一次（尾沿触发，保证最后一次提交后也会贴底）。
+    private func scheduleFollow() {
+        guard !followScheduled else { return }
+        followScheduled = true
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(250))
+            followScheduled = false
+            follow()
         }
     }
 
@@ -614,6 +633,18 @@ private struct AssistantLiveReplyView: View {
         }
         .frame(minHeight: compact ? 0 : 28)
     }
+}
+
+/// 流式回答里已闭合的块：按 `version` 比较，块没有增加时整段跳过重算（第十一轮）。
+private struct AssistantStableBlocksView: View, Equatable {
+    let blocks: [AssistantRenderedBlock]
+    let version: Int
+
+    nonisolated static func == (lhs: AssistantStableBlocksView, rhs: AssistantStableBlocksView) -> Bool {
+        lhs.version == rhs.version
+    }
+
+    var body: some View { AssistantRenderedMarkdownView(blocks: blocks) }
 }
 
 /// 状态行的图标与文字：图标小一号、与文字间距 6pt。
@@ -1001,6 +1032,11 @@ private struct AssistantImagesView: View {
         ForEach(Array(images.enumerated()), id: \.offset) { index, item in
             if let dataURL = item["data_url"]?.stringValue, dataURL.hasPrefix("data:") {
                 AssistantDataImageView(cacheKey: "\(owner)#\(index)#\(dataURL.count)", dataURL: dataURL).privacySensitive()
+            } else if item["data_url_omitted"]?.boolValue == true {
+                // 本机缓存不保存内联图片（第十一轮）：如实说明，读取到服务器数据后显示原图。
+                Label("图片未缓存，连接服务器后显示", systemImage: "photo")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .accessibilityIdentifier("assistant.image.notCached")
             } else if let raw = item["url"]?.stringValue, let url = URL(string: raw), url.scheme?.lowercased() == "https", url.user == nil, url.password == nil {
                 Link("打开图片 \(index + 1)", destination: url)
             }

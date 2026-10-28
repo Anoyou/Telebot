@@ -30,7 +30,8 @@ public struct LoginResult: Sendable {
     }
 }
 
-public struct CurrentUser: Sendable {
+/// 第十一轮：概览快照（本机缓存，冷启动先显示）需要编码这些只读模型，因此都是 Codable。
+public struct CurrentUser: Codable, Sendable {
     public let id: Int
     public let username: String
     public let hasTotp: Bool
@@ -39,7 +40,7 @@ public struct CurrentUser: Sendable {
     }
 }
 
-public struct Account: Identifiable, Sendable {
+public struct Account: Identifiable, Codable, Sendable {
     public let id: Int
     public let phone: String
     public let displayName: String?
@@ -59,13 +60,13 @@ public struct Account: Identifiable, Sendable {
     }
 }
 
-public struct ProbeStatus: Sendable {
+public struct ProbeStatus: Codable, Sendable {
     public let ok: Bool
     public let error: String?
     public init(ok: Bool, error: String? = nil) { self.ok = ok; self.error = error }
 }
 
-public struct WorkersStatus: Sendable {
+public struct WorkersStatus: Codable, Sendable {
     public let total: Int
     public let byStatus: [String: Int]
     public let runtimeAlive: Int
@@ -80,7 +81,7 @@ public struct WorkersStatus: Sendable {
     }
 }
 
-public struct HealthOverview: Sendable {
+public struct HealthOverview: Codable, Sendable {
     public let db: ProbeStatus
     public let redis: ProbeStatus
     public let alembic: ProbeStatus
@@ -90,7 +91,7 @@ public struct HealthOverview: Sendable {
     }
 }
 
-public struct HostResource: Sendable {
+public struct HostResource: Codable, Sendable {
     public let cpuPercent: Double?
     public let memoryUsedPercent: Double?
     public let diskUsedPercent: Double?
@@ -102,7 +103,7 @@ public struct HostResource: Sendable {
     }
 }
 
-public struct WorkerResource: Sendable {
+public struct WorkerResource: Codable, Sendable {
     public let accountID: Int
     public let alive: Bool
     public let desired: String
@@ -112,13 +113,13 @@ public struct WorkerResource: Sendable {
     }
 }
 
-public struct ResourceDashboard: Sendable {
+public struct ResourceDashboard: Codable, Sendable {
     public let host: HostResource
     public let workers: [WorkerResource]
     public init(host: HostResource, workers: [WorkerResource] = []) { self.host = host; self.workers = workers }
 }
 
-public struct ServerVersion: Sendable {
+public struct ServerVersion: Codable, Sendable {
     public let version: String
     public let channel: String
     public let revision: String?

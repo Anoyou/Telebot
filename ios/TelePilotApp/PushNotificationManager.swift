@@ -28,6 +28,10 @@ final class PushNotificationManager: NSObject, UNUserNotificationCenterDelegate 
     var canRoute: (@MainActor () -> Bool)?
     @ObservationIgnored private var pendingRoute: AppRoute?
     @ObservationIgnored private var pendingOriginHash: String?
+    /// 推送注册去重（第十一轮）：同一服务器与用户的注册正在进行时复用它；24 小时内已成功读取配置与设备时不重复读取。
+    @ObservationIgnored private var connectScope: String?
+    @ObservationIgnored private var connectedAt: Date?
+    @ObservationIgnored private var connectTask: Task<Void, Never>?
 
     static let allCategories = ["assistant_approval", "assistant_result", "account_alert"]
 
@@ -54,20 +58,42 @@ final class PushNotificationManager: NSObject, UNUserNotificationCenterDelegate 
         SHA256.hash(data: Data((model?.serverURL?.absoluteString ?? "").utf8)).map { String(format: "%02x", $0) }.joined()
     }
 
-    func connect(model: AppModel) async {
+    /// - Parameter force: 推送设置页打开时为真，总是重新读取服务器配置与设备。
+    func connect(model: AppModel, force: Bool = false) async {
         self.model = model
-        isEnabled = UserDefaults.standard.bool(forKey: preferenceKey)
-        if let saved = UserDefaults.standard.stringArray(forKey: categoriesKey) {
-            categories = Set(saved).intersection(Self.allCategories)
-        } else {
-            categories = Set(Self.allCategories)
+        let scope = (model.serverURL?.absoluteString ?? "") + "#" + String(model.user?.id ?? 0)
+        if let running = connectTask, connectScope == scope {
+            await running.value
+            if !force { return }
         }
-        await prepare()
-        await reloadConfiguration()
-        await reloadDevices()
-        if isEnabled, authorization == .authorized || authorization == .provisional {
-            UIApplication.shared.registerForRemoteNotifications()
+        if !force, connectScope == scope, let connectedAt, Date().timeIntervalSince(connectedAt) < 24 * 3600 {
+            // 系统通知权限可能在“设置”里改过：只读本机，不发请求。
+            await prepare()
+            return
         }
+        connectScope = scope
+        connectedAt = nil
+        let task = Task { @MainActor [weak self] in
+            guard let self else { return }
+            self.isEnabled = UserDefaults.standard.bool(forKey: self.preferenceKey)
+            if let saved = UserDefaults.standard.stringArray(forKey: self.categoriesKey) {
+                self.categories = Set(saved).intersection(Self.allCategories)
+            } else {
+                self.categories = Set(Self.allCategories)
+            }
+            await self.prepare()
+            // 配置与设备列表互不依赖，并发读取。
+            async let configuration: Void = self.reloadConfiguration()
+            async let devices: Void = self.reloadDevices()
+            _ = await (configuration, devices)
+            if self.isEnabled, self.authorization == .authorized || self.authorization == .provisional {
+                UIApplication.shared.registerForRemoteNotifications()
+            }
+            if self.configurationError == nil && !self.deviceLookupFailed && self.connectScope == scope { self.connectedAt = Date() }
+        }
+        connectTask = task
+        await task.value
+        if connectTask == task { connectTask = nil }
     }
 
     func reloadConfiguration() async {

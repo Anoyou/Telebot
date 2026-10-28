@@ -116,12 +116,20 @@ struct OverviewView: View {
                     host: model.serverURL?.host,
                     version: model.serverVersion,
                     username: model.user?.username,
-                    reachable: model.health == nil ? (model.healthError == nil ? nil : false) : (model.healthError == nil),
+                    // 显示本机快照时还不知道服务器是否在线，不显示“可达”。
+                    reachable: model.showingSnapshot ? nil : (model.health == nil ? (model.healthError == nil ? nil : false) : (model.healthError == nil)),
                     refreshing: model.isRefreshing || signals.loading
                 )
             }
             VStack(alignment: .leading, spacing: 8) {
-                if model.health == nil && model.healthError == nil {
+                if model.showingSnapshot {
+                    // 第十一轮：冷启动先显示上次读取的数据（DESIGN「过期数据」状态），不当作当前在线状态。
+                    Label("上次读取的状态", systemImage: "clock.arrow.circlepath")
+                        .font(.title2.weight(.semibold)).foregroundStyle(.secondary)
+                    let progress = model.isRefreshing ? "正在读取最新状态…" : "暂时无法连接服务器，下拉可重试。"
+                    Text(model.lastUpdated.map { "更新于 \($0.formatted(date: .abbreviated, time: .shortened))。\(progress)" } ?? progress)
+                        .font(.subheadline).foregroundStyle(.secondary)
+                } else if model.health == nil && model.healthError == nil {
                     Text(model.isRefreshing ? "正在读取服务状态…" : "尚无服务状态").font(.title2.weight(.semibold))
                 } else if model.health == nil {
                     Label("无法读取服务器状态", systemImage: OpsSeverity.error.symbol)
@@ -133,7 +141,9 @@ struct OverviewView: View {
                     Label("服务运行中", systemImage: "checkmark.circle.fill")
                         .font(.title2.weight(.semibold)).foregroundStyle(.green)
                 }
-                if model.healthError != nil {
+                if model.showingSnapshot {
+                    EmptyView()
+                } else if model.healthError != nil {
                     Text(model.health == nil ? "请检查网络或服务器地址，然后下拉重试。" : "以下为上次读取结果，并非当前在线状态。")
                         .font(.subheadline).foregroundStyle(.secondary)
                 } else if !signals.unavailable.isEmpty {

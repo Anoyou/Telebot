@@ -23,6 +23,38 @@ final class WorkspaceUITests: XCTestCase {
         XCTAssertTrue(app.tabBars.buttons["Agent"].exists)
     }
 
+    /// 第十一轮：冷启动有会话时先显示上次的概览快照并标“更新于 …”；断网启动（连核对会话都失败）也留在主界面，
+    /// 不误落登录页。第一次启动完整刷新后保存快照，第二次断网启动读取它。
+    func testColdStartShowsSnapshotWhenOffline() {
+        continueAfterFailure = false
+        let base = ["--ui-testing", "-AppleLanguages", "(zh-Hans)", "-AppleLocale", "zh_CN", "--ui-test-snapshot"]
+        let first = XCUIApplication()
+        first.launchArguments = base
+        first.launch()
+        let status = first.descendants(matching: .any)["overview.status"].firstMatch
+        XCTAssertTrue(status.waitForExistence(timeout: 45))
+        let loaded = NSPredicate(format: "label CONTAINS %@ OR label CONTAINS %@", "服务运行中", "部分状态未能读取")
+        expectation(for: loaded, evaluatedWith: status)
+        waitForExpectations(timeout: 30)
+        // 快照在后台写盘。
+        sleep(2)
+        first.terminate()
+
+        let second = XCUIApplication()
+        second.launchArguments = base + ["--ui-test-snapshot-reuse", "--ui-test-offline", "--ui-test-offline-start"]
+        second.launch()
+        let cached = second.descendants(matching: .any)["overview.status"].firstMatch
+        XCTAssertTrue(cached.waitForExistence(timeout: 45))
+        XCTAssertTrue(cached.label.contains("上次读取的状态"), cached.label)
+        XCTAssertTrue(cached.label.contains("更新于"), cached.label)
+        XCTAssertTrue(second.tabBars.buttons["概览"].exists)
+        XCTAssertFalse(second.textFields["login.server"].exists)
+        let attachment = XCTAttachment(screenshot: second.screenshot())
+        attachment.name = "断网冷启动显示快照"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+
     func testMoreSectionKeepsAccountsAndSettingsReachable() {
         let app = launch()
         let more = app.tabBars.buttons["更多"]

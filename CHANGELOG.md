@@ -25,6 +25,10 @@
 
 ## [Unreleased]
 
+### iOS App
+
+- iOS 0.13.6（性能优化第十一轮，仅 iOS，不改服务器接口）：流式回答拆出独立的 `AssistantLiveState`（写入去重、约 12 Hz 节流提交、已闭合块缓存只重解析最后一块、跟随滚动节流）；发送时先订阅进度流再并行刷新消息，一轮结束只读一次消息；对话图片用 ImageIO 按显示尺寸降采样、`NSCache` 设 64 MB 成本上限、本机历史缓存写盘前去掉 `data_url`；冷启动有会话时先显示概览快照（标“更新于 …”）、各项结果到达即显示，断网不误落登录页，回前台 30 秒节流，推送注册去重；`TelePilotClient` 的 JSON 解码移出 actor，NDJSON 流在 actor 外按行读取；选图附件处理移到后台（ImageIO 缩略图）。新增 TelePilotCore 单元测试 `StreamingMarkdownBoundaryTests` 与界面测试 `testColdStartShowsSnapshotWhenOffline`。
+
 ## [0.106.0-beta.18] - 2026-10-29 · patch（补丁预发布） · System Agent 协作式关闭，根治 database is locked
 
 ### System Agent（进程关闭）

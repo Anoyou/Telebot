@@ -66,41 +66,60 @@ final class OverviewSignals {
         loading = true
         defer { loading = false }
         let since = OpsFormat.iso(Date.now.addingTimeInterval(-86_400))
-        async let stats = OpsFetch.result(model, OpsFormat.path("/api/logs/runtime/stats", [("since", since)]))
-        async let matrix = OpsFetch.result(model, "/api/feature-matrix")
-        async let health = OpsFetch.result(model, "/api/commands/llm-providers/runtime-health")
-        async let providers = OpsFetch.result(model, "/api/commands/llm-providers")
-        let results = await (stats, matrix, health, providers)
-        guard !Task.isCancelled else { return }
+        // 第十一轮：四项并发读取，每项一返回就更新对应的数字，不再等最慢的一项。
         var missing: [String] = []
-
-        switch results.0 {
-        case .success(let value) where value.objectValue != nil:
-            runtimeErrors = value["error"]?.intValue ?? 0
-            runtimeWarnings = value["warn"]?.intValue ?? 0
-        case .success, .failure: runtimeErrors = nil; runtimeWarnings = nil; missing.append("日志统计")
+        let parts: [Task<String?, Never>] = [
+            Task { @MainActor in
+                let result = await OpsFetch.result(model, OpsFormat.path("/api/logs/runtime/stats", [("since", since)]))
+                switch result {
+                case .success(let value) where value.objectValue != nil:
+                    self.runtimeErrors = value["error"]?.intValue ?? 0
+                    self.runtimeWarnings = value["warn"]?.intValue ?? 0
+                    return nil
+                case .success, .failure:
+                    self.runtimeErrors = nil; self.runtimeWarnings = nil
+                    return "日志统计"
+                }
+            },
+            Task { @MainActor in
+                switch await OpsFetch.result(model, "/api/feature-matrix") {
+                case .success(let value): self.parsePlugins(value); return nil
+                case .failure:
+                    self.failingPluginCount = 0; self.enabledPluginCount = nil
+                    return "插件状态"
+                }
+            },
+            Task { @MainActor in
+                switch await OpsFetch.result(model, "/api/commands/llm-providers/runtime-health") {
+                case .success(let value):
+                    self.coolingModels = ManagementText.items(value).filter { $0["state"]?.stringValue == "cooling" }.map { item in
+                        CoolingModel(id: "\(item["provider_id"]?.intValue ?? 0)-\(OpsFormat.text(item["model"]) ?? "")")
+                    }
+                    return nil
+                case .failure:
+                    self.coolingModels = []
+                    return "AI 运行状态"
+                }
+            },
+            Task { @MainActor in
+                switch await OpsFetch.result(model, "/api/commands/llm-providers") {
+                case .success(let value):
+                    let items = ManagementText.items(value)
+                    self.providerTotal = items.count
+                    self.providerReady = items.filter { ($0["has_effective_key"]?.boolValue ?? false) || $0["provider"]?.stringValue == "ollama" }.count
+                    return nil
+                case .failure:
+                    self.providerTotal = nil; self.providerReady = nil
+                    return "AI 供应商"
+                }
+            },
+        ]
+        for part in parts {
+            if let name = await part.value { missing.append(name) }
         }
-        switch results.1 {
-        case .success(let value): parsePlugins(value)
-        case .failure:
-            failingPluginCount = 0; enabledPluginCount = nil
-            missing.append("插件状态")
-        }
-        switch results.3 {
-        case .success(let value):
-            let items = ManagementText.items(value)
-            providerTotal = items.count
-            providerReady = items.filter { ($0["has_effective_key"]?.boolValue ?? false) || $0["provider"]?.stringValue == "ollama" }.count
-        case .failure: providerTotal = nil; providerReady = nil; missing.append("AI 供应商")
-        }
-        switch results.2 {
-        case .success(let value):
-            coolingModels = ManagementText.items(value).filter { $0["state"]?.stringValue == "cooling" }.map { item in
-                CoolingModel(id: "\(item["provider_id"]?.intValue ?? 0)-\(OpsFormat.text(item["model"]) ?? "")")
-            }
-        case .failure: coolingModels = []; missing.append("AI 运行状态")
-        }
-        unavailable = missing
+        // 与原来一致的顺序：日志统计、插件状态、AI 供应商、AI 运行状态。
+        let order = ["日志统计", "插件状态", "AI 供应商", "AI 运行状态"]
+        unavailable = order.filter { missing.contains($0) }
         loadedAt = Date.now
     }
 

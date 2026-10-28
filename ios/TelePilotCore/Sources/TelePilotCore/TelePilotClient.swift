@@ -148,6 +148,9 @@ public actor TelePilotClient {
 
     public func clearLocalSession() async throws { try await transport.clear() }
 
+    /// 钥匙串里是否有这台服务器未过期的登录会话（只读本机，不发请求）。冷启动据此决定能否先显示本机快照。
+    public func hasStoredSession() async throws -> Bool { try await transport.hasSession() }
+
     // MARK: Cloudflare Access
 
     /// 这台服务器保存在钥匙串里的 Cloudflare Access 凭证（Google 验证的登录令牌与 Service Token）。
@@ -175,7 +178,9 @@ public actor TelePilotClient {
         try await transport.completeCloudflareAccessLogin(request)
     }
 
-    public func request(path: String, method: String = "GET", body: JSONValue? = nil) async throws -> JSONValue {
+    /// 第十一轮：`nonisolated`——网络收发仍由 `SessionTransport` 负责，但 JSON 解码不再排在本 actor 上，
+    /// 并发的多个请求（例如 MB 级的消息页与 feature-matrix）可以同时解码，互不阻塞。
+    public nonisolated func request(path: String, method: String = "GET", body: JSONValue? = nil) async throws -> JSONValue {
         let data = try await download(path: path, method: method, body: body)
         guard !data.isEmpty else { return .null }
         do { return try JSONValue(data: data) }
@@ -185,7 +190,7 @@ public actor TelePilotClient {
         }
     }
 
-    public func download(path: String, method: String = "GET", body: JSONValue? = nil) async throws -> Data {
+    public nonisolated func download(path: String, method: String = "GET", body: JSONValue? = nil) async throws -> Data {
         do {
             return try await transport.raw(path: path, method: method, body: try body?.data(),
                                            contentType: body == nil ? nil : "application/json")
@@ -197,7 +202,7 @@ public actor TelePilotClient {
         }
     }
 
-    public func upload(path: String, file: Data, filename: String, fields: [String: String] = [:]) async throws -> JSONValue {
+    public nonisolated func upload(path: String, file: Data, filename: String, fields: [String: String] = [:]) async throws -> JSONValue {
         let boundary = "TelePilot-" + UUID().uuidString
         let safeName = filename.filter { $0.isASCII && ($0.isLetter || $0.isNumber || "._-".contains($0)) }
         var body = Data()
@@ -223,7 +228,7 @@ public actor TelePilotClient {
         }
     }
 
-    public func stream(path: String, onEvent: @escaping @Sendable (JSONValue) async -> Void) async throws {
+    public nonisolated func stream(path: String, onEvent: @escaping @Sendable (JSONValue) async -> Void) async throws {
         try await transport.stream(path: path, onEvent: onEvent)
     }
 

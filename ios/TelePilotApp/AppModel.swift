@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import Observation
 import TelePilotCore
@@ -52,6 +53,8 @@ final class AppModel {
     private(set) var cloudflareAccess: CloudflareAccessConfig?
     /// 正在进行 App 内 Google 验证。
     private(set) var isVerifyingCloudflareAccess = false
+    /// 概览当前显示的是本机快照（冷启动先显示上次读取的数据，第十一轮）；有一项服务器数据读到后为 false。
+    private(set) var showingSnapshot = false
 
     @ObservationIgnored private var service: (any AppServing)?
     @ObservationIgnored private var generation = 0
@@ -63,6 +66,12 @@ final class AppModel {
     @ObservationIgnored private var detailRequestIDs: [Int: Int] = [:]
     @ObservationIgnored private var cloudflareAccessPrompted = false
     @ObservationIgnored private var accessBrowser: CloudflareAccessBrowser?
+    /// 最近一次开始读取概览（启动或刷新）的时间：回前台 30 秒内不重复刷新。
+    @ObservationIgnored private var lastRefreshStartedAt: Date?
+    /// 启动流程正在进行（避免解锁与启动同时触发两次）。
+    @ObservationIgnored private var starting = false
+    /// 是否使用概览本机快照；界面测试只在指定参数时启用，保证用例互不影响。
+    @ObservationIgnored private var snapshotEnabled = true
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -73,6 +82,10 @@ final class AppModel {
             service = FixtureService(offline: ProcessInfo.processInfo.arguments.contains("--ui-test-offline"))
             // 每次界面测试从空的助手本机缓存开始，避免上一个用例的会话缓存影响首屏。
             AssistantHistoryCache.removeAll()
+            // 概览快照只在快照用例里启用；第二次启动带 --ui-test-snapshot-reuse 保留第一次保存的快照。
+            let arguments = ProcessInfo.processInfo.arguments
+            snapshotEnabled = arguments.contains("--ui-test-snapshot")
+            if !arguments.contains("--ui-test-snapshot-reuse") { AppOverviewSnapshotStore.removeAll() }
             return
         }
         #endif
@@ -85,7 +98,9 @@ final class AppModel {
     }
 
     func start() async {
-        guard phase == .starting else { return }
+        guard phase == .starting, !starting else { return }
+        starting = true
+        defer { starting = false }
         #if DEBUG
         if isFixture && ProcessInfo.processInfo.arguments.contains("--ui-test-login") {
             phase = .signedOut
@@ -94,6 +109,16 @@ final class AppModel {
         #endif
         guard let service else { phase = .signedOut; return }
         let token = generation
+        lastRefreshStartedAt = Date()
+        // 第十一轮：钥匙串里有会话、本机有上次的概览快照时，先进入主界面显示快照（标“更新于 …”），
+        // 会话核对与刷新在后台进行；401 时再退回登录页。
+        if snapshotEnabled, let key = serverURL?.absoluteString,
+           let snapshot = await AppOverviewSnapshotStore.load(key),
+           (try? await service.hasStoredSession()) == true {
+            guard token == generation, phase == .starting else { return }
+            apply(snapshot)
+            phase = .signedIn
+        }
         do {
             let result = try await service.currentUser()
             guard token == generation else { return }
@@ -103,7 +128,16 @@ final class AppModel {
         } catch {
             guard token == generation else { return }
             if requiresSessionCleanup(error) { await expireSession() }
-            else {
+            else if phase == .signedIn {
+                // 已在显示快照：断网、服务器暂不可用或被 Access 拦截时留在主界面并如实标出，不误落登录页；
+                // 回到前台或下拉时重新读取（Access 拦截会弹出重新验证）。
+                noteCloudflareAccess(error)
+                let text = message(error)
+                healthError = text
+                resourcesError = text
+                accountsError = text
+                versionError = text
+            } else {
                 phase = .signedOut
                 canRetrySession = true
                 noteLoginAccessBlock(error)
@@ -208,42 +242,107 @@ final class AppModel {
         guard phase == .signedIn, let service else { return }
         if isRefreshing { refreshAgain = true; return }
         isRefreshing = true
+        lastRefreshStartedAt = Date()
         let token = generation
-        async let healthResult = capture { try await service.health() }
-        async let resourcesResult = capture { try await service.resources() }
-        async let accountsResult = capture { try await service.accounts() }
-        async let versionResult = capture { try await service.version() }
-        let results = await (healthResult, resourcesResult, accountsResult, versionResult)
+        // 第十一轮：四项并发读取，每项一返回就立即显示，不再等最慢的一项（资源面板在服务器上最多要等 6 秒）。
+        let parts: [Task<Error?, Never>] = [
+            Task { @MainActor in
+                let result = await capture { try await service.health() }
+                return self.land(result, token: token,
+                                 success: { model, value in model.health = value; model.healthError = nil },
+                                 failure: { model, text in model.healthError = text })
+            },
+            Task { @MainActor in
+                let result = await capture { try await service.resources() }
+                return self.land(result, token: token,
+                                 success: { model, value in model.resources = value; model.resourcesError = nil },
+                                 failure: { model, text in model.resourcesError = text })
+            },
+            Task { @MainActor in
+                let result = await capture { try await service.accounts() }
+                return self.land(result, token: token,
+                                 success: { model, value in model.accounts = value; model.accountsLoaded = true; model.accountsError = nil },
+                                 failure: { model, text in model.accountsError = text })
+            },
+            Task { @MainActor in
+                let result = await capture { try await service.version() }
+                return self.land(result, token: token,
+                                 success: { model, value in model.serverVersion = value; model.versionError = nil },
+                                 failure: { model, text in model.versionError = text })
+            },
+        ]
+        var errors: [Error] = []
+        for part in parts {
+            if let error = await part.value { errors.append(error) }
+        }
         guard token == generation else { return }
         isRefreshing = false
-        let errors: [Error] = [results.0.failure, results.1.failure, results.2.failure, results.3.failure].compactMap { $0 }
         if errors.contains(where: { requiresSessionCleanup($0) }) {
             await expireSession()
             return
         }
-        for error in errors { noteCloudflareAccess(error) }
-        switch results.0 {
-        case .success(let value): health = value; healthError = nil
-        case .failure(let error): healthError = message(error)
+        if errors.count < parts.count { showingSnapshot = false }
+        if errors.isEmpty {
+            lastUpdated = Date()
+            saveSnapshot()
         }
-        switch results.1 {
-        case .success(let value): resources = value; resourcesError = nil
-        case .failure(let error): resourcesError = message(error)
-        }
-        switch results.2 {
-        case .success(let value): accounts = value; accountsLoaded = true; accountsError = nil
-        case .failure(let error): accountsError = message(error)
-        }
-        switch results.3 {
-        case .success(let value): serverVersion = value; versionError = nil
-        case .failure(let error): versionError = message(error)
-        }
-        if errors.isEmpty { lastUpdated = Date() }
         if !refreshAgain { isSyncingAfterAction = false }
         if refreshAgain {
             refreshAgain = false
             await refresh()
         }
+    }
+
+    /// 一项读取返回后立即落到界面；返回错误供汇总（会话失效由调用方统一处理）。
+    private func land<T: Sendable>(_ result: Result<T, Error>, token: Int,
+                                   success: (AppModel, T) -> Void, failure: (AppModel, String) -> Void) -> Error? {
+        guard token == generation else { return nil }
+        switch result {
+        case .success(let value):
+            success(self, value)
+            showingSnapshot = false
+            return nil
+        case .failure(let error):
+            if !requiresSessionCleanup(error) {
+                noteCloudflareAccess(error)
+                failure(self, message(error))
+            }
+            return error
+        }
+    }
+
+    /// 回到前台或解锁：距上次读取不足 30 秒时跳过，避免切换应用时反复整套重读（第十一轮）。
+    func refreshOnForeground() async {
+        guard phase == .signedIn, !isRefreshing else { return }
+        if let last = lastRefreshStartedAt, Date().timeIntervalSince(last) < 30 { return }
+        async let base: Void = refresh()
+        async let workspace: Void = refreshWorkspace()
+        _ = await (base, workspace)
+    }
+
+    private func apply(_ snapshot: AppOverviewSnapshot) {
+        user = snapshot.user
+        health = snapshot.health
+        resources = snapshot.resources
+        serverVersion = snapshot.serverVersion
+        accounts = snapshot.accounts
+        accountsLoaded = snapshot.accountsLoaded
+        serverUpdateStatus = snapshot.serverUpdateStatus
+        lastUpdated = snapshot.savedAt
+        showingSnapshot = true
+    }
+
+    /// 全部读取成功后保存概览快照（手机号只留后 4 位，不含备注；退出登录或更换服务器时删除）。
+    private func saveSnapshot() {
+        guard snapshotEnabled, let user, let key = serverURL?.absoluteString else { return }
+        let masked = accounts.map {
+            Account(id: $0.id, phone: PrivacyFormatting.phone($0.phone), displayName: $0.displayName, tgUsername: $0.tgUsername,
+                    status: $0.status, tags: $0.tags, enabledFeatures: $0.enabledFeatures, notes: nil,
+                    createdAt: $0.createdAt, proxyLabel: $0.proxyLabel)
+        }
+        AppOverviewSnapshotStore.save(AppOverviewSnapshot(
+            user: user, health: health, resources: resources, serverVersion: serverVersion,
+            accounts: masked, accountsLoaded: accountsLoaded, serverUpdateStatus: serverUpdateStatus, savedAt: Date()), key: key)
     }
 
     func loadAccount(id: Int, replacingPending: Bool = false) async {
@@ -410,9 +509,9 @@ final class AppModel {
         guard phase == .signedIn, let service else { throw APIError.unauthorized }
         let token = generation
         do {
+            // 每个事件只切换一次到主线程：在主线程上核对会话后直接调用回调（助手的回调本身就是主线程闭包）。
             try await service.stream(path: path) { [weak self] event in
-                guard await self?.sessionMatches(token) == true else { return }
-                await onEvent(event)
+                await self?.deliverStreamEvent(event, token: token, to: onEvent)
             }
             guard token == generation else { throw APIError.sessionChanged }
         } catch {
@@ -423,6 +522,11 @@ final class AppModel {
     }
 
     private func sessionMatches(_ token: Int) -> Bool { token == generation && phase == .signedIn }
+
+    private func deliverStreamEvent(_ event: JSONValue, token: Int, to onEvent: @Sendable (JSONValue) async -> Void) async {
+        guard sessionMatches(token) else { return }
+        await onEvent(event)
+    }
 
     func refreshWorkspace() async {
         guard phase == .signedIn else { return }
@@ -631,8 +735,11 @@ final class AppModel {
         pendingActions = []
         plugins = []
         serverUpdateStatus = nil
-        // 本机缓存的助手会话与消息随登录状态一起清除。
+        // 本机缓存的助手会话与消息、概览快照随登录状态一起清除。
         AssistantHistoryCache.removeAll()
+        AppOverviewSnapshotStore.removeAll()
+        showingSnapshot = false
+        lastRefreshStartedAt = nil
         assistantSessionRequest = nil
         isSyncingAfterAction = false
         workspaceError = nil
@@ -682,5 +789,59 @@ extension APIError {
     var cloudflareAccessKind: CloudflareAccessCredentialKind? {
         if case .cloudflareAccessRequired(let kind) = self { return kind }
         return nil
+    }
+}
+
+// MARK: - 概览快照（第十一轮）
+
+/// 上次完整读取成功的概览数据：冷启动有会话时先显示，再在后台刷新。
+struct AppOverviewSnapshot: Codable, Sendable {
+    var user: CurrentUser
+    var health: HealthOverview?
+    var resources: ResourceDashboard?
+    var serverVersion: ServerVersion?
+    var accounts: [Account]
+    var accountsLoaded: Bool
+    var serverUpdateStatus: JSONValue?
+    var savedAt: Date
+}
+
+/// 概览快照的本机存储：按服务器隔离，放在 Caches（系统可随时清理），文件启用完整数据保护；
+/// 退出登录、会话过期或更换服务器时删除（与助手历史缓存同一策略）。
+enum AppOverviewSnapshotStore {
+    private static var directory: URL? {
+        FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first?
+            .appendingPathComponent("overview-snapshot", isDirectory: true)
+    }
+
+    private static func url(_ key: String) -> URL? {
+        let digest = SHA256.hash(data: Data(key.utf8)).map { String(format: "%02x", $0) }.joined()
+        return directory?.appendingPathComponent("\(digest).json")
+    }
+
+    static func load(_ key: String) async -> AppOverviewSnapshot? {
+        guard let url = url(key) else { return nil }
+        return await Task.detached(priority: .userInitiated) { () -> AppOverviewSnapshot? in
+            guard let data = try? Data(contentsOf: url) else { return nil }
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .secondsSince1970
+            return try? decoder.decode(AppOverviewSnapshot.self, from: data)
+        }.value
+    }
+
+    static func save(_ snapshot: AppOverviewSnapshot, key: String) {
+        guard let url = url(key), let directory else { return }
+        Task.detached(priority: .utility) {
+            let encoder = JSONEncoder()
+            encoder.dateEncodingStrategy = .secondsSince1970
+            guard let data = try? encoder.encode(snapshot) else { return }
+            try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            try? data.write(to: url, options: [.atomic, .completeFileProtection])
+        }
+    }
+
+    static func removeAll() {
+        guard let directory else { return }
+        try? FileManager.default.removeItem(at: directory)
     }
 }

@@ -1,5 +1,6 @@
 import CryptoKit
 import Foundation
+import ImageIO
 import SwiftUI
 import TelePilotCore
 import UIKit
@@ -56,6 +57,155 @@ extension AssistantMarkdown {
             case .rule: .rule
             }
         }
+    }
+}
+
+// MARK: - 正在生成的回答（第十一轮）
+
+/// 正在执行任务的流式状态，从 `AssistantStore` 拆出来的独立 Observable：只有回答位置的 `AssistantLiveReplyView`
+/// 读取它，流式输出不再让整个对话页（消息列表、待处理气泡、输入栏）重新计算。
+///
+/// - 写入去重：值没有变化时不写（Observation 不比较新旧值，写入即失效）。
+/// - 增量节流：`assistant_delta` 先追加到不参与观察的缓冲区，按约 12 Hz（80 ms）统一提交；距上次提交已超过间隔时
+///   立即提交（首个字不额外等待）。
+/// - 增量解析：已闭合的块（`StreamingMarkdownBoundary`）脱敏、解析一次后缓存在 `stableBlocks`，每次提交只重新脱敏、
+///   解析最后一块（`tailBlocks`）。
+@MainActor @Observable
+final class AssistantLiveState {
+    /// 已经有正文（父视图只读这个布尔值，决定是否显示“空会话”提示）。
+    private(set) var hasText = false
+    /// 推理过程（原文，显示时再脱敏；推理折叠时不做任何处理）。
+    private(set) var reasoning = ""
+    /// 已闭合、已脱敏并预解析的块；只追加，`stableVersion` 随之递增。
+    private(set) var stableBlocks: [AssistantRenderedBlock] = []
+    private(set) var stableVersion = 0
+    /// 最后一块（尚未闭合）的预解析结果，每次提交重算。
+    private(set) var tailBlocks: [AssistantRenderedBlock] = []
+    /// 每次提交递增：回答视图据此节流跟随滚动。
+    private(set) var revision = 0
+    /// 当前任务最近一个进度事件（run_started／provider_selected／tool_started／assistant_delta…）；
+    /// 状态行据此显示真实阶段，还没有事件时用服务器 run.phase。
+    private(set) var progressType = ""
+    /// 最近一次调用的工具（tool_started 的 tool_description，没有时为 tool_name）。
+    private(set) var progressTool = ""
+
+    @ObservationIgnored private(set) var text = ""
+    @ObservationIgnored private var pendingText = ""
+    @ObservationIgnored private var pendingReasoning = ""
+    @ObservationIgnored private var stableEnd = 0
+    @ObservationIgnored private var flushTask: Task<Void, Never>?
+    @ObservationIgnored private var lastCommit: ContinuousClock.Instant?
+
+    /// 提交间隔：约 12 Hz。
+    static let interval: Duration = .milliseconds(80)
+
+    func appendText(_ delta: String) {
+        guard !delta.isEmpty else { return }
+        pendingText += delta
+        scheduleCommit()
+    }
+
+    func appendReasoning(_ delta: String) {
+        guard !delta.isEmpty else { return }
+        pendingReasoning += delta
+        scheduleCommit()
+    }
+
+    /// 最终回答（`assistant_message`）：整段替换，立即提交。
+    func replace(text value: String, reasoning newReasoning: String) {
+        cancelPending()
+        text = value
+        stableEnd = 0
+        if !stableBlocks.isEmpty { stableBlocks = []; stableVersion += 1 }
+        if reasoning != newReasoning { reasoning = newReasoning }
+        render()
+    }
+
+    /// 清空正文与推理（进入工具阶段、任务结束、切换会话）。
+    func clearText() {
+        cancelPending()
+        text = ""
+        stableEnd = 0
+        if !stableBlocks.isEmpty { stableBlocks = []; stableVersion += 1 }
+        if !tailBlocks.isEmpty { tailBlocks = [] }
+        if !reasoning.isEmpty { reasoning = "" }
+        if hasText { hasText = false }
+    }
+
+    func setProgress(type: String) {
+        if progressType != type { progressType = type }
+    }
+
+    func setProgress(tool: String) {
+        if progressTool != tool { progressTool = tool }
+    }
+
+    func resetProgress() {
+        setProgress(type: "")
+        setProgress(tool: "")
+    }
+
+    /// 把缓冲区立即提交（例如本轮结束读取消息前）。
+    func flush() {
+        flushTask?.cancel()
+        flushTask = nil
+        commit()
+    }
+
+    private func scheduleCommit() {
+        guard flushTask == nil else { return }
+        let now = ContinuousClock.now
+        if let lastCommit, now - lastCommit < Self.interval {
+            let wait = Self.interval - (now - lastCommit)
+            flushTask = Task { @MainActor [weak self] in
+                try? await Task.sleep(for: wait)
+                guard let self, !Task.isCancelled else { return }
+                self.flushTask = nil
+                self.commit()
+            }
+        } else {
+            commit()
+        }
+    }
+
+    private func cancelPending() {
+        flushTask?.cancel()
+        flushTask = nil
+        pendingText = ""
+        pendingReasoning = ""
+    }
+
+    private func commit() {
+        lastCommit = .now
+        var changed = false
+        if !pendingReasoning.isEmpty {
+            reasoning += pendingReasoning
+            pendingReasoning = ""
+            changed = true
+        }
+        if !pendingText.isEmpty {
+            text += pendingText
+            pendingText = ""
+            render()
+            return
+        }
+        if changed { revision &+= 1 }
+    }
+
+    private func render() {
+        let end = StreamingMarkdownBoundary.stableEnd(in: text, from: stableEnd)
+        if end > stableEnd {
+            let chunk = StreamingMarkdownBoundary.slice(text, from: stableEnd, to: end)
+            stableBlocks.append(contentsOf: AssistantMarkdown.rendered(AssistantRedaction.text(chunk)))
+            stableVersion += 1
+            stableEnd = end
+        }
+        let tail = StreamingMarkdownBoundary.slice(text, from: stableEnd)
+        let blocks = tail.isEmpty ? [] : AssistantMarkdown.rendered(AssistantRedaction.text(tail))
+        if blocks != tailBlocks { tailBlocks = blocks }
+        let nonEmpty = !text.isEmpty
+        if hasText != nonEmpty { hasText = nonEmpty }
+        revision &+= 1
     }
 }
 
@@ -210,20 +360,78 @@ struct AssistantRenderedMarkdownView: View {
 
 // MARK: - 图片
 
+/// 用 ImageIO 按需要的像素尺寸直接生成缩略图（不先解码全尺寸位图）。第十一轮。
+enum AssistantImageDownsampler {
+    /// 显示用：消息里的图片最高 300pt、最宽为内容宽度（≤ 860pt），按长边需要的像素降采样。
+    nonisolated static func displayImage(data: Data, scale: CGFloat) -> UIImage? {
+        guard let source = CGImageSourceCreateWithData(data as CFData, [kCGImageSourceShouldCache: false] as CFDictionary) else { return nil }
+        var aspect: CGFloat = 1
+        if let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+           let width = (properties[kCGImagePropertyPixelWidth] as? NSNumber)?.doubleValue,
+           let height = (properties[kCGImagePropertyPixelHeight] as? NSNumber)?.doubleValue, width > 0, height > 0 {
+            let orientation = (properties[kCGImagePropertyOrientation] as? NSNumber)?.intValue ?? 1
+            let rotated = (5...8).contains(orientation)
+            let landscape = rotated ? height / width : width / height
+            aspect = CGFloat(max(landscape, 1))
+        }
+        let points = min(860, 300 * aspect)
+        guard let image = thumbnail(source: source, maxPixelSize: Int((points * max(scale, 1)).rounded(.up))) else { return nil }
+        return UIImage(cgImage: image)
+    }
+
+    nonisolated static func thumbnail(data: Data, maxPixelSize: Int) -> CGImage? {
+        guard let source = CGImageSourceCreateWithData(data as CFData, [kCGImageSourceShouldCache: false] as CFDictionary) else { return nil }
+        return thumbnail(source: source, maxPixelSize: maxPixelSize)
+    }
+
+    private nonisolated static func thumbnail(source: CGImageSource, maxPixelSize: Int) -> CGImage? {
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceShouldCacheImmediately: true,
+            kCGImageSourceThumbnailMaxPixelSize: max(1, maxPixelSize),
+        ]
+        return CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
+    }
+
+    /// 选图附件：在后台把原图缩到最长边 2400px、JPEG 0.82 编码并拼成 data URL，同时生成输入栏预览用的小缩略图。
+    nonisolated static func attachment(from data: Data) -> AssistantPreparedAttachment? {
+        guard let full = thumbnail(data: data, maxPixelSize: 2400), full.width > 0, full.height > 0 else { return nil }
+        guard let bytes = UIImage(cgImage: full).jpegData(compressionQuality: 0.82), bytes.count <= 6_000_000 else { return nil }
+        let preview = thumbnail(data: bytes, maxPixelSize: 360).map { UIImage(cgImage: $0) } ?? UIImage(cgImage: full)
+        return AssistantPreparedAttachment(preview: preview, dataURL: "data:image/jpeg;base64," + bytes.base64EncodedString())
+    }
+}
+
+/// 后台处理好的附件：预览图（UIImage 不可变，跨线程只读）与 data URL。
+struct AssistantPreparedAttachment: @unchecked Sendable {
+    let preview: UIImage
+    let dataURL: String
+}
+
 /// 解码后的对话图片缓存：data URL 只解码一次，滚动或重绘时直接复用。
+/// 第十一轮：按位图实际字节数（bytesPerRow × height）计成本，总上限 64 MB，不再只限张数。
 @MainActor
 final class AssistantImageCache {
     static let shared = AssistantImageCache()
+    static let totalCostLimit = 64 * 1024 * 1024
     private let cache = NSCache<NSString, UIImage>()
-    private init() { cache.countLimit = 60 }
+    private init() {
+        cache.countLimit = 120
+        cache.totalCostLimit = Self.totalCostLimit
+    }
     func image(_ key: String) -> UIImage? { cache.object(forKey: key as NSString) }
-    func store(_ image: UIImage, key: String) { cache.setObject(image, forKey: key as NSString) }
+    func store(_ image: UIImage, key: String) {
+        let cost = image.cgImage.map { $0.bytesPerRow * $0.height } ?? Int(image.size.width * image.size.height * image.scale * image.scale * 4)
+        cache.setObject(image, forKey: key as NSString, cost: cost)
+    }
 }
 
-/// data URL 图片：Base64 解码在后台进行，并用系统的 `byPreparingForDisplay()` 预先解压，避免滚动时卡顿。
+/// data URL 图片：Base64 解码与 ImageIO 降采样都在后台进行（按显示尺寸生成位图，不解码全尺寸原图）。
 struct AssistantDataImageView: View {
     let cacheKey: String
     let dataURL: String
+    @Environment(\.displayScale) private var displayScale
     @State private var image: UIImage?
     @State private var failed = false
 
@@ -242,16 +450,23 @@ struct AssistantDataImageView: View {
         .task(id: cacheKey) {
             guard image == nil, AssistantImageCache.shared.image(cacheKey) == nil else { return }
             let source = dataURL
-            let data = await Task.detached(priority: .userInitiated) { () -> Data? in
-                guard let encoded = source.split(separator: ",", maxSplits: 1).last else { return nil }
-                return Data(base64Encoded: String(encoded))
+            let scale = displayScale
+            let decoded = await Task.detached(priority: .userInitiated) { () -> AssistantDecodedImage? in
+                guard let encoded = source.split(separator: ",", maxSplits: 1).last,
+                      let data = Data(base64Encoded: String(encoded)),
+                      let image = AssistantImageDownsampler.displayImage(data: data, scale: scale) else { return nil }
+                return AssistantDecodedImage(image: image)
             }.value
-            guard let data, let decoded = UIImage(data: data) else { failed = true; return }
-            let prepared = await decoded.byPreparingForDisplay() ?? decoded
-            AssistantImageCache.shared.store(prepared, key: cacheKey)
-            image = prepared
+            guard let decoded else { failed = true; return }
+            AssistantImageCache.shared.store(decoded.image, key: cacheKey)
+            image = decoded.image
         }
     }
+}
+
+/// 后台生成的位图（不可变），交回主线程显示。
+struct AssistantDecodedImage: @unchecked Sendable {
+    let image: UIImage
 }
 
 // MARK: - 本机历史缓存
@@ -291,6 +506,11 @@ enum AssistantHistoryCache {
     static func save(_ snapshot: Snapshot, key: String) {
         guard let url = url(key), let directory else { return }
         Task.detached(priority: .utility) {
+            // 第十一轮：缓存只负责“先出文字”，写盘前去掉内联图片（data URL 动辄 MB 级），
+            // 换成 `data_url_omitted` 标记，显示时提示“图片未缓存”，服务器刷新后恢复。
+            var snapshot = snapshot
+            snapshot.messages = snapshot.messages.map(strippingInlineImages)
+            snapshot.session = snapshot.session.map(strippingInlineImages)
             let encoder = JSONEncoder()
             encoder.dateEncodingStrategy = .secondsSince1970
             guard let data = try? encoder.encode(snapshot) else { return }
@@ -302,6 +522,28 @@ enum AssistantHistoryCache {
     static func removeAll() {
         guard let directory else { return }
         try? FileManager.default.removeItem(at: directory)
+    }
+
+    /// 递归去掉 `data_url`（以 `data:` 开头的内联数据），保留其他字段并标记 `data_url_omitted`。
+    nonisolated static func strippingInlineImages(_ value: JSONValue) -> JSONValue {
+        switch value {
+        case .object(var fields):
+            if let inline = fields["data_url"]?.stringValue, inline.hasPrefix("data:") {
+                fields["data_url"] = nil
+                fields["data_url_omitted"] = true
+            }
+            for (key, field) in fields where key != "data_url" {
+                switch field {
+                case .object, .array: fields[key] = strippingInlineImages(field)
+                default: break
+                }
+            }
+            return .object(fields)
+        case .array(let values):
+            return .array(values.map(strippingInlineImages))
+        default:
+            return value
+        }
     }
 }
 
