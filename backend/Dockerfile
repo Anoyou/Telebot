@@ -1,21 +1,35 @@
 # syntax=docker/dockerfile:1.7
 # 后端镜像：多阶段构建
-#   - gateway-builder 阶段：构建内置 telepilot-gateway 静态二进制
-#   - builder 阶段：安装编译依赖 + 通过 pyproject.toml 安装 Python 依赖
+#   - gateway-builder 阶段：在构建机原生架构上交叉编译内置 telepilot-gateway 静态二进制
+#   - deps-spec 阶段：从 pyproject.toml 只提取依赖清单（版本号等变化不打穿依赖层）
+#   - builder 阶段：安装编译依赖 + 按依赖清单安装 Python 依赖
 #   - runtime 阶段：仅保留必要运行库 + 已装好的 site-packages，体积更小
 # 暴露端口 8000；健康检查命中 /healthz；启动命令含 alembic 迁移由 docker-compose 注入
 
-FROM golang:1.23-bookworm AS gateway-builder
+# Gateway 是纯 Go（无 cgo、无第三方依赖）：在构建机原生架构上交叉编译出目标架构的静态二进制，
+# 多架构镜像不再在 QEMU 里模拟 arm64 编译。go test / go vet 由 CI「Gateway」job 原生执行，镜像里不重复跑。
+# 构建提交不再通过 -ldflags 注入（那会让这一层随每次提交失效），改由运行时阶段最后一层的
+# ENV TELEPILOT_GATEWAY_BUILD_COMMIT 提供（gateway/internal/version 读取）。
+FROM --platform=$BUILDPLATFORM golang:1.23-bookworm AS gateway-builder
 
-ARG BUILD_COMMIT=dev
+ARG TARGETOS
+ARG TARGETARCH
 WORKDIR /src/gateway
-COPY gateway/go.mod ./go.mod
 COPY gateway/ ./
-RUN go test ./... && \
-    go vet ./... && \
-    CGO_ENABLED=0 go build -trimpath \
-    -ldflags="-s -w -X github.com/anoyou/telepilot/gateway/internal/version.BuildCommit=${BUILD_COMMIT}" \
+RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -trimpath \
+    -ldflags="-s -w" \
     -o /out/telepilot-gateway ./cmd/telepilot-gateway
+
+
+# 依赖清单单独成层：只从 pyproject.toml 提取 [project].dependencies 写成 requirements.txt。
+# 下游 COPY --from 按文件内容计算缓存，pyproject 其它内容（说明、工具配置等）变化而依赖不变时，
+# 依赖安装层继续命中缓存。这一阶段与目标架构无关，在构建机原生架构上运行。
+FROM --platform=$BUILDPLATFORM python:3.12-slim AS deps-spec
+
+WORKDIR /spec
+COPY backend/pyproject.toml ./
+RUN python -c 'import tomllib; from pathlib import Path; data = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8")); print("\n".join(data["project"]["dependencies"]))' \
+    > /spec/requirements.txt
 
 
 FROM python:3.12-slim AS builder
@@ -27,13 +41,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential gcc libffi-dev && \
     rm -rf /var/lib/apt/lists/*
 
-# 先拷贝依赖清单并安装 runtime 依赖。不要在这一层拷贝 app/，否则任意后端
-# 代码变更都会打穿依赖安装缓存，生产增量更新会被迫重装 Telethon / cryptg 等包。
-COPY backend/pyproject.toml /app/
 RUN --mount=type=cache,target=/root/.cache/pip pip install --upgrade pip
+
+# 再拷贝依赖清单并安装 runtime 依赖。不要在这一层拷贝 app/ 或 pyproject.toml，否则任意后端
+# 代码或版本号变更都会打穿依赖安装缓存，生产增量更新会被迫重装 Telethon / cryptg 等包
+# （arm64 在 QEMU 里重装约 5 分钟）。
+COPY --from=deps-spec /spec/requirements.txt /tmp/requirements.txt
 RUN --mount=type=cache,target=/root/.cache/pip \
-    python -c 'import tomllib; from pathlib import Path; data = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8")); print("\n".join(data["project"]["dependencies"]))' \
-    > /tmp/requirements.txt && \
     pip install -r /tmp/requirements.txt
 
 # 业务源码由 runtime 阶段直接复制到 /app。应用没有 console entry point，
@@ -73,6 +87,10 @@ EXPOSE 8000
 # 健康检查：访问 /healthz；连续失败 5 次则视为不健康
 HEALTHCHECK --interval=10s --timeout=3s --retries=5 \
   CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/healthz').read()" || exit 1
+
+# 构建提交放在最后：每次提交都会变化，放在前面会让之后所有层（含 Gateway 编译）缓存失效。
+ARG BUILD_COMMIT=dev
+ENV TELEPILOT_GATEWAY_BUILD_COMMIT=${BUILD_COMMIT}
 
 # 默认启动 uvicorn；docker-compose 中会用 sh -c 包一层先跑 alembic upgrade head
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

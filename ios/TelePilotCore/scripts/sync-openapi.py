@@ -8,6 +8,10 @@ from pathlib import Path
 PACKAGE = Path(__file__).resolve().parents[1]
 SOURCE = PACKAGE.parents[1] / "openapi/telepilot.openapi.json"
 OUTPUT = PACKAGE / "Sources/TelePilotCore/openapi.json"
+# 原生子集不携带服务器版本号：服务器每次升版本只改 info.version，若原样写进 iOS 副本，
+# 纯服务器 PR / 升版本也会改动 ios/** 并触发 iOS 全量编译与 UI 测试。生成的 Swift 代码不使用 info，
+# 因此这里固定为常量（OpenAPI 规范要求 info.version 必填）。
+NATIVE_INFO_VERSION = "native-subset"
 OPERATIONS = {
     "/api/auth/csrf": ["get"], "/api/auth/login": ["post"],
     "/api/auth/logout": ["post"], "/api/auth/me": ["get"],
@@ -44,7 +48,8 @@ def main():
         if "required" in schema:
             schema["required"] = [k for k in schema["required"] if k in fields]
     document = {
-        "openapi": source["openapi"], "info": source["info"],
+        "openapi": source["openapi"],
+        "info": {**source["info"], "version": NATIVE_INFO_VERSION},
         "paths": {path: {method: source["paths"][path][method] for method in methods}
                   for path, methods in OPERATIONS.items()},
         "components": {"schemas": {}, "securitySchemes": source["components"]["securitySchemes"]},
@@ -86,7 +91,6 @@ def main():
     document = normalize(document)
     if args.check:
         saved = json.loads(OUTPUT.read_text()) if OUTPUT.exists() else {}
-        saved["info"] = document["info"]
         if saved != document:
             raise SystemExit("Native OpenAPI differs; run ios/TelePilotCore/scripts/sync-openapi.py")
     else:

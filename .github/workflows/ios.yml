@@ -11,6 +11,12 @@ name: iOS
 #   以被测文件树命名上传（ios-unsigned-ipa-<tree>）；Beta push 时「iOS 未签名 IPA」若找到同树且整个 run 全绿的
 #   这份 IPA，就只改写 build 号后发布，不再在 macOS 上重新编译。测试分片用 curl 直接下载测试产物
 #   （download-artifact 动作在模拟器启动时要等 1–5 分钟才开始下载）。
+# - 发版提速（第十一轮）：
+#   · 只改了服务器 OpenAPI（iOS 相关路径里只有 openapi/telepilot.openapi.json 变化）时，「判定」job 在 Ubuntu 上
+#     跑 sync-openapi.py / sync-contract.py --check，通过即跳过编译与 UI 测试（iOS 原生子集与表单契约都没变）。
+#     iOS 副本不再携带服务器 info.version，服务器升版本本身也不再改动 ios/**。
+#   · UI 分片耗时表自动更新：各分片从 xcresult 导出逐用例耗时，全绿时汇总上传 ios-ui-durations；
+#     下一个 run 的「判定」job 合并最近 5 份（逐用例中位数）作为覆盖表下发，所有分片用同一份划分。
 on:
   pull_request:
     branches: [Beta, main]
@@ -57,7 +63,10 @@ jobs:
       skip: ${{ steps.decide.outputs.skip }}
       tree: ${{ steps.decide.outputs.tree }}
       reason: ${{ steps.decide.outputs.reason }}
+      durations: ${{ steps.durations.outputs.json }}
     steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
       - name: 对比已全绿的被测文件树
         id: decide
         env:
@@ -66,6 +75,8 @@ jobs:
           SHA: ${{ github.sha }}
           EVENT: ${{ github.event_name }}
           REPO_ID: ${{ github.repository_id }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          BEFORE: ${{ github.event.before }}
         run: |
           set -euo pipefail
           api() { curl -fsSL -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" "$GITHUB_API_URL/repos/$REPO/$1"; }
@@ -87,9 +98,61 @@ jobs:
               fi
             done
           fi
+          # 第十一轮：iOS 相关路径里只有服务器 OpenAPI 快照变化（纯服务器 PR / 合并）时，在 Ubuntu 上校验原生子集，
+          # 一致即跳过。文件清单：PR 用 pulls/N/files，push 用 compare/before...sha；取不到或过多则完整执行。
+          if [ "$SKIP" != "true" ] && { [ "$EVENT" = "pull_request" ] || [ "$EVENT" = "push" ]; }; then
+            FILES=""; COMPLETE=false
+            if [ "$EVENT" = "pull_request" ]; then
+              FILES=$(for PAGE in $(seq 1 30); do
+                  BATCH=$(api "pulls/$PR_NUMBER/files?per_page=100&page=$PAGE" | jq -r '.[].filename') || exit 1
+                  [ -n "$BATCH" ] || break
+                  echo "$BATCH"
+                done) && COMPLETE=true
+            elif [ -n "$BEFORE" ] && [ "$BEFORE" != "0000000000000000000000000000000000000000" ]; then
+              CMP=$(api "compare/$BEFORE...$SHA") && [ "$(jq '.files | length' <<<"$CMP")" -lt 300 ] \
+                && FILES=$(jq -r '.files[].filename' <<<"$CMP") && COMPLETE=true
+            fi
+            if [ "$COMPLETE" = "true" ] && [ -n "$FILES" ]; then
+              IOS_FILES=$(grep -E '^(ios/|frontend/src/lib/modelBrand[^/]*\.json$|\.github/workflows/ios\.yml$)' <<<"$FILES" || true)
+              if [ -z "$IOS_FILES" ] && grep -qx 'openapi/telepilot.openapi.json' <<<"$FILES"; then
+                if python3 ios/TelePilotCore/scripts/sync-openapi.py --check && python3 ios/TelePilotCore/scripts/sync-contract.py --check; then
+                  SKIP=true
+                  REASON="只改了服务器 OpenAPI，iOS 原生子集与表单契约校验一致（sync-openapi / sync-contract --check 通过），跳过 iOS 编译与 UI 测试"
+                else
+                  REASON="服务器 OpenAPI 变化影响 iOS 原生子集或表单契约（需要同步 ios/ 副本），完整执行"
+                fi
+              fi
+            fi
+          fi
           echo "$REASON"
           echo "skip=$SKIP" >> "$GITHUB_OUTPUT"
           echo "reason=$REASON" >> "$GITHUB_OUTPUT"
+
+      - name: 合并最近全绿 run 的 UI 用例耗时
+        # 取不到时输出为空，分片回退到仓库里的 ui-test-durations.json；任何错误都不影响判定结果。
+        id: durations
+        if: steps.decide.outputs.skip != 'true'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          REPO_ID: ${{ github.repository_id }}
+        run: |
+          set -uo pipefail
+          echo "json=" >> "$GITHUB_OUTPUT"
+          api() { curl -fsSL -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" "$GITHUB_API_URL/repos/$REPO/$1"; }
+          mkdir -p durations; N=0
+          for ID in $(api "actions/artifacts?name=ios-ui-durations&per_page=20" | jq -r --argjson repo "$REPO_ID" '[.artifacts[]
+                | select(.expired | not)
+                | select(.workflow_run.repository_id == $repo and .workflow_run.head_repository_id == $repo)][0:5][] | .id'); do
+            URL=$(curl -fsS -o /dev/null -w '%{redirect_url}' -H "Authorization: Bearer $GH_TOKEN" "$GITHUB_API_URL/repos/$REPO/actions/artifacts/$ID/zip") || continue
+            [ -n "$URL" ] && curl -fsSL --retry 2 -o "d-$ID.zip" "$URL" && unzip -q -o "d-$ID.zip" -d "durations/$ID" && N=$((N + 1))
+          done
+          FILES=$(find durations -name '*.json' | sort)
+          if [ "$N" -eq 0 ] || [ -z "$FILES" ]; then echo "没有可用的实测耗时，使用 ui-test-durations.json"; exit 0; fi
+          # shellcheck disable=SC2086
+          python3 ios/scripts/ui-test-durations-tool.py merge --compact --output merged.json $FILES
+          echo "json=$(cat merged.json)" >> "$GITHUB_OUTPUT"
 
   build:
     name: 编译与校验
@@ -109,6 +172,8 @@ jobs:
           echo "udid=$(python3 ios/scripts/ci-select-simulator.py)" >> "$GITHUB_OUTPUT"
 
       - name: 校验工程与契约同步
+        env:
+          UI_TEST_DURATIONS: ${{ needs.plan.outputs.durations }}
         run: |
           python3 ios/scripts/check-xcodeproj-sources.py
           python3 ios/scripts/check-ios-version.py
@@ -116,7 +181,8 @@ jobs:
           python3 ios/TelePilotCore/scripts/sync-contract.py --check
           python3 ios/TelePilotCore/scripts/sync-model-brands.py --check
           python3 ios/TelePilotCore/scripts/check-model-brand-icons.py
-          python3 ios/scripts/ui-test-shards.py --total "$UI_TEST_SHARDS" --summary
+          printf '%s' "$UI_TEST_DURATIONS" > "$RUNNER_TEMP/ui-test-durations-measured.json"
+          python3 ios/scripts/ui-test-shards.py --total "$UI_TEST_SHARDS" --summary --durations-override "$RUNNER_TEMP/ui-test-durations-measured.json"
 
       - name: 编译（build-for-testing）
         run: |
@@ -295,9 +361,13 @@ jobs:
           echo "::warning::预热 2 次仍未通过，继续执行测试（以测试结果为准）"
 
       - name: 运行 UI 测试分片（fixture 模式）
+        env:
+          UI_TEST_DURATIONS: ${{ needs.plan.outputs.durations }}
         run: |
           set -o pipefail
-          ONLY=$(python3 ios/scripts/ui-test-shards.py --total "$UI_TEST_SHARDS" --shard ${{ matrix.shard }})
+          # 与编译 job、其他分片使用同一份实测耗时覆盖表（来自「判定」job），保证分片划分一致。
+          printf '%s' "$UI_TEST_DURATIONS" > "$RUNNER_TEMP/ui-test-durations-measured.json"
+          ONLY=$(python3 ios/scripts/ui-test-shards.py --total "$UI_TEST_SHARDS" --shard ${{ matrix.shard }} --durations-override "$RUNNER_TEMP/ui-test-durations-measured.json")
           echo "本分片用例："; echo "$ONLY" | sed 's/^-only-testing:/  /'
           # 失败的用例自动重跑一次（只重跑失败的那个），两次都失败才判失败。
           # shellcheck disable=SC2086
@@ -322,6 +392,25 @@ jobs:
             echo "$records"
             { echo "### 界面测试观察记录（分片 ${{ matrix.shard }}）"; echo '```'; echo "$records"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
           fi
+
+      - name: 导出本分片用例耗时
+        if: success()
+        continue-on-error: true
+        run: |
+          mkdir -p ui-durations
+          xcrun xcresulttool get test-results tests --path "$RESULTS_DIR/UITests-${{ matrix.shard }}.xcresult" > "$RUNNER_TEMP/tests.json" \
+            && python3 ios/scripts/ui-test-durations-tool.py extract --input "$RUNNER_TEMP/tests.json" --output "ui-durations/shard-${{ matrix.shard }}.json"
+
+      - name: 上传本分片用例耗时
+        if: success()
+        continue-on-error: true
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ios-ui-durations-part-${{ github.run_id }}-${{ matrix.shard }}
+          path: ui-durations
+          retention-days: 1
+          overwrite: true
+          if-no-files-found: ignore
 
       - name: 上传结果包
         if: failure()
@@ -359,6 +448,47 @@ jobs:
           fi
           echo "全部通过"
           mkdir -p green && echo "${{ github.sha }}" > green/sha.txt
+
+      - name: 下载各分片用例耗时
+        if: needs.plan.outputs.skip != 'true' && needs.build.result == 'success' && needs.ui-tests.result == 'success'
+        continue-on-error: true
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: ios-ui-durations-part-${{ github.run_id }}-*
+          path: ui-durations-parts
+          merge-multiple: true
+
+      - name: 合并并上传本 run 的用例耗时（供下一个 run 均衡分片）
+        id: merge-durations
+        if: needs.plan.outputs.skip != 'true' && needs.build.result == 'success' && needs.ui-tests.result == 'success'
+        continue-on-error: true
+        run: |
+          set -uo pipefail
+          FILES=$(find ui-durations-parts -name 'shard-*.json' 2>/dev/null | sort)
+          COUNT=$(printf '%s\n' "$FILES" | grep -c . || true)
+          if [ "$COUNT" -lt "$UI_TEST_SHARDS" ]; then echo "只有 $COUNT 个分片导出了耗时，不更新耗时表"; exit 0; fi
+          mkdir -p ui-durations
+          # shellcheck disable=SC2086
+          python3 - $FILES <<'PY'
+          import json, sys
+          merged = {}
+          for path in sys.argv[1:]:
+              merged.update(json.load(open(path, encoding="utf-8")))
+          json.dump(merged, open("ui-durations/ui-test-durations.json", "w", encoding="utf-8"), ensure_ascii=False, indent=2, sort_keys=True)
+          print(f"本 run 实测 {len(merged)} 个用例，合计 {sum(merged.values())} 秒")
+          PY
+          echo "ready=true" >> "$GITHUB_OUTPUT"
+
+      - name: 上传用例耗时
+        if: steps.merge-durations.outputs.ready == 'true'
+        continue-on-error: true
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ios-ui-durations
+          path: ui-durations
+          retention-days: 30
+          overwrite: true
+          if-no-files-found: ignore
 
       - name: 记录已全绿的被测文件树
         # 供之后合并到 Beta 的 push 判定：文件树完全相同则不重复测试。

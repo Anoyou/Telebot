@@ -5,9 +5,13 @@
 新增用例无需手工登记，自动进入某个分片；ui-test-durations.json 只用于均衡耗时，
 未登记的用例按默认耗时估算。所有分片的并集严格等于全部用例，不会漏测。
 
+第十一轮：--durations-override 指向最近几次全绿 run 实测耗时的合并表（ui-test-durations-tool.py 生成，
+「判定」job 统一下发，所有分片用同一份），其中有的用例优先用实测值，没有的再用仓库里的表。
+
 用法：
   ui-test-shards.py --total 4 --shard 1     # 输出该分片的 -only-testing 参数（每行一个）
   ui-test-shards.py --total 4 --summary     # 打印每个分片的用例数与估算耗时
+  ui-test-shards.py --total 4 --shard 1 --durations-override measured.json
 """
 from __future__ import annotations
 
@@ -51,8 +55,22 @@ def discover() -> list[str]:
     return tests
 
 
-def plan(total: int) -> list[list[tuple[str, float]]]:
+def load_override(path: Path | None) -> dict[str, float]:
+    if path is None or not path.is_file() or path.stat().st_size == 0:
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        print(f"耗时覆盖表 {path} 无法解析，忽略", file=sys.stderr)
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    return {k: float(v) for k, v in data.items() if isinstance(k, str) and isinstance(v, (int, float)) and v > 0}
+
+
+def plan(total: int, override: dict[str, float] | None = None) -> list[list[tuple[str, float]]]:
     durations = json.loads(DURATIONS.read_text(encoding="utf-8")) if DURATIONS.exists() else {}
+    durations.update(override or {})
     tests = discover()
     weighted = sorted(((t, float(durations.get(t, DEFAULT_SECONDS))) for t in tests), key=lambda x: (-x[1], x[0]))
     shards: list[list[tuple[str, float]]] = [[] for _ in range(total)]
@@ -71,11 +89,16 @@ def main() -> int:
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--shard", type=int, help="从 1 开始的分片序号")
     group.add_argument("--summary", action="store_true")
+    parser.add_argument("--durations-override", type=Path, help="实测耗时覆盖表（JSON：类/用例 → 秒）")
     args = parser.parse_args()
     if args.total < 1:
         raise SystemExit("--total 必须 ≥ 1")
-    shards = plan(args.total)
+    override = load_override(args.durations_override)
+    shards = plan(args.total, override)
     if args.summary:
+        tests = {t for s in shards for t, _ in s}
+        used = len(tests & override.keys())
+        print(f"耗时来源：{'实测覆盖 ' + str(used) + ' 个用例，其余用 ui-test-durations.json' if used else 'ui-test-durations.json'}")
         for i, shard in enumerate(shards, 1):
             print(f"分片 {i}：{len(shard)} 个用例，估算 {sum(s for _, s in shard):.0f} 秒")
         print(f"共 {sum(len(s) for s in shards)} 个用例")

@@ -394,14 +394,14 @@ pnpm --dir frontend test:visual
 - 页面主入口、平台模块、部署步骤、备份恢复或更新流程。
 - System Agent 工具、权限、Action 确认和隐私边界。
 
-长期文档不要硬编码容易过期的当前版本号。版本历史放在 `CHANGELOG.md`，当前版本以四个源版本文件与生成的 OpenAPI `info.version` 共五处一致为准。接口请求体以 FastAPI `/docs` 和 Pydantic schema 为准，CLI 参数以 `--help` 为准。
+长期文档不要硬编码容易过期的当前版本号。版本历史放在 `CHANGELOG.md`，当前版本以 `backend/app/__init__.py`、`frontend/package.json` 与 OpenAPI 快照的 `info.version` 三处一致为准（`python3 scripts/check-version-sync.py` 校验）。接口请求体以 FastAPI `/docs` 和 Pydantic schema 为准，CLI 参数以 `--help` 为准。
 
 ## 版本与发布
 
 - `main` 是稳定发布线，只接收已验证的 beta。
 - 开发分支使用目标正式版本的 `-beta.N`。同一候选继续修复时只递增 beta 序号；加入新的 minor 或 major 级变化时提升基础版本并从 `beta.1` 开始。
 - 实际执行按检查点推进，检查点内多个 WP 共用一个版本号：例如 P0 修复批收口为 `0.100.0-beta.6`，随后一批新增/优化能力提升基础版本并从 `0.101.0-beta.1` 重新开始，而不是每个 WP bump 一次。
-- 检查点收口时必须全套同步五处版本并写中文 CHANGELOG：`backend/app/__init__.py`、`backend/pyproject.toml`、`frontend/package.json`、`frontend/src/lib/version.ts`，再 `make codegen` 让 `openapi/telepilot.openapi.json` 的 `info.version` 跟随。CI 会校验五处一致。
+- 检查点收口时用 `python3 scripts/bump-version.py --title "主题"`（或 `make bump T="主题"`）一条命令完成：计算下一个版本号、写入 `backend/app/__init__.py`、`frontend/package.json` 与 `openapi/telepilot.openapi.json` 的 `info.version`，并把中文 `Unreleased` 移到新版本段落。`backend/pyproject.toml`（dynamic）与 `frontend/src/lib/version.ts`（导入 package.json）自动跟随。CI 用同一个 `scripts/check-version-sync.py` 校验。
 - 开发过程中把变更写入 `CHANGELOG.md` 的 `Unreleased`，不要为每个小提交单独迭代版本号。
 - 准备 beta 检查点、稳定发布、推送稳定检查点、创建 release/PR，或维护者明确要求发版时，才统一决定版本号。
 - 发布前执行 `git fetch origin --prune`，同时检查 `origin/main` 与仍活跃的发布/开发分支。

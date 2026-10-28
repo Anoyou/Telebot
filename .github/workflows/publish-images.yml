@@ -17,12 +17,22 @@ on:
         required: false
         default: branch
         type: string
+      push:
+        # false：只做多架构构建校验，不登录 GHCR、不推送、不签发证明、不写回缓存（PR 上用）。
+        required: false
+        default: true
+        type: boolean
 permissions:
   contents: read
 
 concurrency:
-  group: publish-images-${{ inputs.ref_name || github.ref_name }}
+  group: publish-images-${{ inputs.push && 'push' || 'check' }}-${{ inputs.ref_name || github.ref_name }}
   cancel-in-progress: true
+
+# 多架构构建提速（第十一轮）：QEMU 只用于目标架构的运行时层（apt / pip 依赖层有缓存时不再执行）。
+# - frontend：builder 固定 --platform=$BUILDPLATFORM，静态产物只在原生架构构建一次；
+# - web：Gateway 在原生架构交叉编译、不在镜像里跑 go test/vet（CI「Gateway」job 已跑）；依赖清单单独成层，
+#   版本号变化不再打穿 pip 依赖层；BUILD_COMMIT 只出现在最后一层。
 
 jobs:
   scope:
@@ -142,6 +152,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: 登录 GHCR
+        if: inputs.push
         uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
           registry: ghcr.io
@@ -161,7 +172,7 @@ jobs:
           context: .
           file: ${{ matrix.dockerfile }}
           platforms: linux/amd64,linux/arm64
-          push: true
+          push: ${{ inputs.push }}
           pull: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: |
@@ -170,9 +181,11 @@ jobs:
           build-args: |
             BUILD_COMMIT=${{ needs.scope.outputs.revision }}
           cache-from: type=gha,scope=${{ matrix.service }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.service }}
+          # 构建校验（PR）只读缓存，不写回，避免 PR 分支的层挤掉 Beta 的缓存。
+          cache-to: ${{ inputs.push && format('type=gha,mode=max,scope={0}', matrix.service) || '' }}
 
       - name: 签发并推送 SLSA 构建来源证明
+        if: inputs.push
         uses: actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6 # v4
         with:
           subject-name: ${{ steps.meta.outputs.image }}

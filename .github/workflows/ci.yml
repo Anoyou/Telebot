@@ -4,8 +4,9 @@ on:
   push:
     branches: [main, Beta]
     tags: ["v*"]
+  # 第十一轮：PR → Beta 也跑完整门禁，回归在合并前拦下（此前只有 Beta push 才跑，红了再补）。
   pull_request:
-    branches: [main]
+    branches: [main, Beta]
 
 permissions:
   contents: read
@@ -27,6 +28,7 @@ jobs:
       version: ${{ steps.scope.outputs.version }}
       docs_only: ${{ steps.scope.outputs.docs_only }}
       full: ${{ steps.scope.outputs.full }}
+      images: ${{ steps.scope.outputs.images }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -37,11 +39,22 @@ jobs:
         env:
           EVENT_NAME: ${{ github.event_name }}
           REF_NAME: ${{ github.ref_name }}
+          BASE_REF: ${{ github.base_ref }}
           BEFORE_SHA: ${{ github.event.before }}
           HEAD_SHA: ${{ github.sha }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
-          args=(--root . --base "$BEFORE_SHA" --head "$HEAD_SHA" --github-output "$GITHUB_OUTPUT")
-          if [[ "$EVENT_NAME" == "pull_request" || "$REF_NAME" == "main" ]]; then
+          base="$BEFORE_SHA"; head="$HEAD_SHA"
+          if [[ "$EVENT_NAME" == "pull_request" ]]; then
+            # PR 按 merge-base…head 的文件清单判定范围（与 Beta push 同一套规则，改工作流或判定脚本时仍转为完整门禁）；
+            # 浏览器 job 跑在 macOS 上，只在前端相关改动时启动，避免与 iOS UI 分片争抢 macOS 并发。
+            head="$PR_HEAD_SHA"
+            base="$(git merge-base "$PR_BASE_SHA" "$PR_HEAD_SHA" || echo "$PR_BASE_SHA")"
+          fi
+          args=(--root . --base "$base" --head "$head" --github-output "$GITHUB_OUTPUT")
+          # 面向 main 的 PR 与 main push 始终完整门禁。
+          if [[ "$REF_NAME" == "main" || ( "$EVENT_NAME" == "pull_request" && "$BASE_REF" == "main" ) ]]; then
             args+=(--force-full)
           fi
           python scripts/ci_change_scope.py "${args[@]}"
@@ -225,6 +238,7 @@ jobs:
           go-version: "1.23"
           cache-dependency-path: gateway/go.sum
 
+      # 镜像构建不再跑 go test / go vet（多架构 QEMU 下 arm64 曾耗时 9 分钟），这里是唯一的 Gateway 测试门禁。
       - name: Test Gateway
         working-directory: gateway
         run: go test ./...
@@ -286,34 +300,10 @@ jobs:
           fetch-depth: 0
 
       - name: Check release version sync
-        run: |
-          python - <<'PY'
-          import json
-          import re
-          from pathlib import Path
-
-          backend_init = Path("backend/app/__init__.py").read_text()
-          backend_pyproject = Path("backend/pyproject.toml").read_text()
-          frontend_version = Path("frontend/src/lib/version.ts").read_text()
-          frontend_package = json.loads(Path("frontend/package.json").read_text())
-          openapi_snapshot = json.loads(Path("openapi/telepilot.openapi.json").read_text())
-          changelog = Path("CHANGELOG.md").read_text()
-
-          versions = {
-              "backend/app/__init__.py": re.search(r'__version__ = "([^"]+)"', backend_init).group(1),
-              "backend/pyproject.toml": re.search(r'version = "([^"]+)"', backend_pyproject).group(1),
-              "frontend/src/lib/version.ts": re.search(r'APP_VERSION = "([^"]+)"', frontend_version).group(1),
-              "frontend/package.json": frontend_package["version"],
-              "openapi/telepilot.openapi.json": openapi_snapshot["info"]["version"],
-          }
-          unique = set(versions.values())
-          if len(unique) != 1:
-              raise SystemExit(f"版本号不一致: {versions}")
-          version = unique.pop()
-          if f"## [{version}]" not in changelog:
-              raise SystemExit(f"CHANGELOG.md 缺少当前精确版本段：## [{version}]")
-          print(f"version sync ok: {version}")
-          PY
+        # 版本源：backend/app/__init__.py、frontend/package.json、openapi info.version 三处字面量一致；
+        # pyproject.toml（dynamic）与 frontend/src/lib/version.ts（导入 package.json）只校验结构；
+        # CHANGELOG 有当前版本段；iOS OpenAPI 子集不带服务器版本。与 scripts/bump-version.py 自检同一脚本。
+        run: python scripts/check-version-sync.py
 
       - name: Check branch release channel
         env:
@@ -362,10 +352,28 @@ jobs:
           print(f"release channel guard ok: {current} ({channel})")
           PY
 
+  image-check:
+    name: 镜像构建校验
+    needs: change-scope
+    # 只在 PR 上、且 Dockerfile / 依赖清单 / 发布工作流变化时做一次不推送的多架构构建，
+    # 让镜像构建问题在合并前暴露（push 时由「发布预构建镜像」真正构建并推送）。
+    if: github.event_name == 'pull_request' && needs.change-scope.outputs.images == 'true'
+    uses: ./.github/workflows/publish-images.yml
+    with:
+      revision: ${{ github.sha }}
+      base_revision: ${{ github.event.pull_request.base.sha }}
+      ref_name: pr-${{ github.event.pull_request.number }}
+      push: false
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+
   ci-gate:
     name: CI Gate
     if: always()
-    needs: [change-scope, backend, frontend, frontend-browser, api-contract, gateway, db-migrations, version-sync]
+    needs: [change-scope, backend, frontend, frontend-browser, api-contract, gateway, db-migrations, version-sync, image-check]
     runs-on: ubuntu-latest
     steps:
       - name: 汇总条件任务结果
@@ -378,8 +386,9 @@ jobs:
           GATEWAY: ${{ needs.gateway.result }}
           DB_MIGRATIONS: ${{ needs.db-migrations.result }}
           VERSION_SYNC: ${{ needs.version-sync.result }}
+          IMAGE_CHECK: ${{ needs.image-check.result }}
         run: |
-          for result in "$CHANGE_SCOPE" "$BACKEND" "$FRONTEND" "$BROWSER" "$API_CONTRACT" "$GATEWAY" "$DB_MIGRATIONS" "$VERSION_SYNC"; do
+          for result in "$CHANGE_SCOPE" "$BACKEND" "$FRONTEND" "$BROWSER" "$API_CONTRACT" "$GATEWAY" "$DB_MIGRATIONS" "$VERSION_SYNC" "$IMAGE_CHECK"; do
             if [[ "$result" != "success" && "$result" != "skipped" ]]; then
               echo "CI 子任务失败或取消：$result" >&2
               exit 1

@@ -19,6 +19,8 @@ class CiScope:
     version: bool
     docs_only: bool
     full: bool
+    # 镜像构建输入（Dockerfile、依赖清单、发布工作流）是否变化：PR 上据此做一次不推送的多架构构建校验。
+    images: bool = False
 
     def to_outputs(self) -> dict[str, str]:
         outputs = {key: "true" if value else "false" for key, value in asdict(self).items()}
@@ -40,6 +42,19 @@ _VERSION_FILES = {
     "backend/pyproject.toml",
     "frontend/package.json",
     "frontend/src/lib/version.ts",
+}
+_IMAGE_FILES = {
+    ".dockerignore",
+    ".github/workflows/publish-images.yml",
+    "backend/Dockerfile",
+    "backend/pyproject.toml",
+    "deploy/updater/Dockerfile",
+    "frontend/.npmrc",
+    "frontend/Dockerfile",
+    "frontend/nginx.conf",
+    "frontend/pnpm-lock.yaml",
+    "frontend/pnpm-workspace.yaml",
+    "gateway/go.mod",
 }
 _BROWSER_PREFIXES = (
     "frontend/e2e/",
@@ -66,12 +81,14 @@ def _is_docs_only_path(path: str) -> bool:
 
 def classify_paths(paths: list[str], *, force_full: bool = False) -> CiScope:
     files = [_normalize(path) for path in paths if path.strip()]
+    # 文件清单未知时按需要校验镜像处理（宁可多跑一次构建校验）。
+    images = not files or any(path in _IMAGE_FILES for path in files)
     full = force_full or not files or any(
         path == "scripts/ci_change_scope.py" or path.startswith(".github/workflows/")
         for path in files
     )
     if full:
-        return CiScope(True, True, True, True, True, True, False, True)
+        return CiScope(True, True, True, True, True, True, False, True, images)
 
     backend = any(
         path.startswith(("backend/", "deploy/", "plugins/", "scripts/"))
@@ -118,7 +135,7 @@ def classify_paths(paths: list[str], *, force_full: bool = False) -> CiScope:
     )
     version = any(path in _VERSION_FILES for path in files)
     docs_only = all(_is_docs_only_path(path) for path in files)
-    return CiScope(backend, frontend, browser, plugin, contract, version, docs_only, False)
+    return CiScope(backend, frontend, browser, plugin, contract, version, docs_only, False, images)
 
 
 def changed_paths(root: Path, base: str, head: str) -> list[str]:

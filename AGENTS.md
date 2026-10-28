@@ -17,7 +17,10 @@
   - 同阶段补丁版本从新的补丁基础版本开始，例如 `0.81.1-beta.1`。
   - beta 期间若加入新的 minor 或 major 级变化，必须提升基础版本并从 `-beta.1` 重新开始，不能只递增 beta 序号。
   - beta 稳定并合入 `main` 后去掉 prerelease 后缀，发布相同基础版本的正式版。
-- beta 检查点与稳定发布都必须同步更新：`backend/app/__init__.py`、`backend/pyproject.toml`、`frontend/package.json`、`frontend/src/lib/version.ts`，随后运行 `make codegen` 让 `openapi/telepilot.openapi.json` 的 `info.version` 跟随，并用中文写入 `CHANGELOG.md`；CI 会校验这五处版本一致。iOS App 版本独立，不在这五处之列，见下方「iOS 版本」。
+- 版本号用一条命令迭代（仓库根目录）：先把本批改动用中文写进 `CHANGELOG.md` 的 `Unreleased`，再运行 `python3 scripts/bump-version.py --title "主题"`（或 `make bump T="主题"`）。脚本会 `git fetch origin --prune`，读取 `origin/Beta`、`origin/main` 与当前工作树的版本，按上面的规则算出下一个版本号：默认 `--level patch`（同一候选版本递增 `beta.N`；当前是正式版时从下一个补丁版本 `-beta.1` 开始），`--level minor` / `--level major` 提升基础版本并从 `-beta.1` 开始，`--level stable` 去掉预发布后缀，`--set X.Y.Z-beta.N` 显式指定；随后写入所有版本源、把 `Unreleased` 移到 `## [版本] - 日期 · 级别 · 主题` 段落，并运行 CI 同款校验 `scripts/check-version-sync.py`。`--dry-run` 只打印计算结果。
+- 版本源只有三处字面量：`backend/app/__init__.py` 的 `__version__`（`backend/pyproject.toml` 用 `dynamic` 读取它，不再写 `version`）、`frontend/package.json` 的 `version`（`frontend/src/lib/version.ts` 从它导入，不再写字面量）、`openapi/telepilot.openapi.json` 的 `info.version`（bump 脚本直接改写；改 API 时仍用 `make codegen` 重新生成）。CI「版本同步」用 `scripts/check-version-sync.py` 校验三处一致、上述两个文件的结构，以及 `CHANGELOG.md` 有当前版本段落。不要手改这些文件里的版本号。
+- iOS 的 OpenAPI 原生子集（`ios/TelePilotCore/Sources/TelePilotCore/openapi.json`）不携带服务器版本（`info.version` 固定为 `native-subset`），服务器升版本不改动 `ios/**`；「iOS」工作流发现 iOS 相关路径里只有 `openapi/telepilot.openapi.json` 变化且 `sync-openapi.py` / `sync-contract.py --check` 通过时，跳过 iOS 编译与 UI 测试。iOS App 版本独立，见下方「iOS 版本」。
+- 并行 PR 撞版本号：rebase 到最新 `origin/Beta` 时，版本文件的冲突直接取目标分支的值，`CHANGELOG.md` 保留双方段落，然后再运行一次 `python3 scripts/bump-version.py`（可省略 `--title`）：脚本识别出本分支尚未合并的版本段落，顺延到下一个空闲版本号并移到最上方。
 - commit / PR / release 文案使用中文。
 
 ## iOS 版本
