@@ -63,6 +63,7 @@ from ...db.models.system_agent import (
 from .redactor import redact_content
 from .secrets import extract_plaintext_secrets, redact_known_secrets
 from .service import get_system_agent_service, is_latest_completed_pair
+from .stream_flow import RunEventSignals, coalesce_stream_deltas
 
 log = logging.getLogger(__name__)
 
@@ -212,6 +213,8 @@ class SystemAgentRunManager:
         # 协作式关闭信号：执行、心跳、恢复循环都监听它，在安全边界自行退出。
         self._stopping = False
         self._stop_event = asyncio.Event()
+        # 进程内“有新事件”信号：执行侧落库后通知，stream_events 订阅端立即醒来查询。
+        self._event_signals = RunEventSignals()
 
     async def ensure_ready(self) -> None:
         """恢复过期 lease，并继续所有可执行的 queued Run。"""
@@ -2105,7 +2108,26 @@ class SystemAgentRunManager:
         # idle_rounds：连续无新事件的轮次，用于空闲退避；收到真实事件即双双复位。
         last_emit = _stream_monotonic()
         idle_rounds = 0
+        self._event_signals.subscribe(run_id)
+        try:
+            async for item in self._stream_events_loop(
+                run_id, cursor=cursor, last_emit=last_emit, idle_rounds=idle_rounds
+            ):
+                yield item
+        finally:
+            self._event_signals.unsubscribe(run_id)
+
+    async def _stream_events_loop(
+        self,
+        run_id: str,
+        *,
+        cursor: int,
+        last_emit: float,
+        idle_rounds: int,
+    ) -> AsyncIterator[dict[str, Any]]:
         while True:
+            # 先取版本号再查询：查询之后才到达的通知会让下面的等待立即返回，不会漏掉。
+            signal_version = self._event_signals.version(run_id)
             rows = await self.list_events(run_id, after_seq=cursor)
             if rows:
                 idle_rounds = 0
@@ -2116,20 +2138,22 @@ class SystemAgentRunManager:
             run = await self.get_run(run_id)
             if run.status in AGENT_RUN_STREAM_FINAL_STATUSES and cursor >= run.last_seq:
                 return
-            # 空闲退避：无新事件时轮询间隔按倍率逐步放大（poll_interval=0.2s 时
-            # 0.2 → 0.5 → 1.0 → 2.0s 封顶），收到新事件立即回到 poll_interval 快速
-            # 跟进；list_events/get_run 双查询结构保持不变，不因轮询次数减少而合并。
-            # 代价是终态/waiting 检测最多延迟一个退避间隔（≤ 封顶值），可接受。
+            # 通知驱动：同进程执行的 Run 每次落库都会 notify，这里立即醒来查询；
+            # 没有通知（跨进程执行或真的空闲）时按空闲退避超时兜底轮询
+            # （poll_interval=0.2s 时 0.2 → 0.5 → 1.0 → 2.0s 封顶），收到新事件立即
+            # 回到 poll_interval。终态/waiting 检测最多延迟一个退避间隔（≤ 封顶值）。
             factor = _STREAM_BACKOFF_FACTORS[
                 min(idle_rounds, len(_STREAM_BACKOFF_FACTORS) - 1)
             ]
-            await asyncio.sleep(
-                max(
+            notified = await self._event_signals.wait(
+                run_id,
+                since_version=signal_version,
+                timeout=max(
                     self._poll_interval,
                     min(self._poll_interval * factor, _STREAM_BACKOFF_MAX_SECONDS),
-                )
+                ),
             )
-            idle_rounds += 1
+            idle_rounds = 0 if notified else idle_rounds + 1
             # 心跳帧：距上次产出字节超过阈值即补发一帧保活，字段对齐 events.make_event
             # 信封（type/run_id/seq/ts）；seq 固定 0，不推进 cursor、不写事件表，
             # 前端按 type 忽略并靠 seq 去重，不会误消费。退避封顶值远小于心跳间隔，
@@ -2368,7 +2392,7 @@ class SystemAgentRunManager:
                             f"message:{request.regenerate_message_id}"
                         )
 
-                stream = self._service_factory().stream_message(
+                raw_stream = self._service_factory().stream_message(
                     db,
                     session=session,
                     text=request.text,
@@ -2387,6 +2411,10 @@ class SystemAgentRunManager:
                     model_selection=request.model_selection,
                     read_only_only=request.read_only_only,
                 )
+                # 连续 token delta 合并后再落库（首条立即放行），每轮写入从“每 token
+                # 一次带锁事务”降到约每 0.2 s 一次。
+                stream = coalesce_stream_deltas(raw_stream)
+                user_linked = False
                 while True:
                     try:
                         event = await self._next_event(
@@ -2397,7 +2425,9 @@ class SystemAgentRunManager:
                         )
                     except StopAsyncIteration:
                         break
-                    await self._link_user_message(run_id, request)
+                    if not user_linked:
+                        # 关联成功后不再每个事件都开一次 FOR UPDATE 空事务
+                        user_linked = await self._link_user_message(run_id, request)
                     persisted = await self._append_event(
                         run_id,
                         event,
@@ -2878,14 +2908,16 @@ class SystemAgentRunManager:
         self,
         run_id: str,
         request: _RunRequest,
-    ) -> None:
+    ) -> bool:
+        """把 Run 关联到本轮用户消息；返回是否已关联（True 后调用方不必再调）。"""
+
         async with self._session_factory() as db:
             run = await db.get(SystemAgentRun, run_id, with_for_update=True)
             if run is None:
                 raise RunNotFoundError(run_id)
             self._assert_worker_claim(run)
             if run.user_message_id is not None:
-                return
+                return True
             if (
                 request.retry_message_id is not None
                 or request.regenerate_message_id is not None
@@ -2906,10 +2938,11 @@ class SystemAgentRunManager:
                 )
                 message = result.scalar_one_or_none()
                 if message is None:
-                    return
+                    return False
                 run.user_message_id = message.id
             run.updated_at = datetime.now(UTC)
             await db.commit()
+            return True
 
     @_db_critical
     async def _append_event(
@@ -2940,7 +2973,8 @@ class SystemAgentRunManager:
             run.last_seq = seq
             run.updated_at = datetime.now(UTC)
             await db.commit()
-            return event
+        self._event_signals.notify(run_id)
+        return event
 
     async def _append_terminal_events(
         self,
@@ -3026,6 +3060,7 @@ class SystemAgentRunManager:
                     pending.blocked_reason = status
                     pending.updated_at = now
             await db.commit()
+        self._event_signals.notify(run_id)
 
     @_db_critical
     async def _pause_following(self, session_id: str, reason: str) -> None:

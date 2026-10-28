@@ -48,6 +48,7 @@ from .llm_codecs.chat_completions import usage_from_chat
 from .llm_codecs.responses import plan_responses_body, usage_from_responses
 from .llm_codecs.sse import iter_sse_events, parse_sse_text
 from .llm_dto import LLMProviderDTO
+from .llm_http_pool import lease_llm_http_client
 from .llm_identity import (
     ClientIdentity,
     resolve_identity,
@@ -142,6 +143,22 @@ def _llm_headers(
         runtime_headers=runtime_headers,
         compatibility_headers=compatibility_headers,
     )
+
+
+_REAL_ASYNC_CLIENT = httpx.AsyncClient
+
+
+def _llm_http_client(**kwargs: Any) -> Any:
+    """返回 ``async with`` 可用的上游 HTTP 客户端：生产路径复用共享连接池。
+
+    测试会把 ``llm_client.httpx.AsyncClient`` 替换成桩；此时保持旧行为（直接构造），
+    让既有断言（构造参数里的 proxy / timeout）继续成立。
+    """
+
+    factory = httpx.AsyncClient
+    if factory is not _REAL_ASYNC_CLIENT:
+        return factory(**kwargs)
+    return lease_llm_http_client(**kwargs)
 
 
 def _timeout_for_call(base_url: str, timeout_seconds: int | None) -> httpx.Timeout:
@@ -2047,7 +2064,7 @@ class OpenAIClient(LLMClient):
         else:
             client_kwargs["trust_env"] = False
         try:
-            async with httpx.AsyncClient(**client_kwargs) as cli:
+            async with _llm_http_client(**client_kwargs) as cli:
                 resp = await cli.post(url, headers=headers, json=body)
         except httpx.HTTPError as exc:
             # 很多 httpx 异常 str() 是空（典型 SSL 握手 / ConnectError("")）；
@@ -2211,7 +2228,7 @@ class OpenAIClient(LLMClient):
         finish_received = False
         saw_content = False
         try:
-            async with httpx.AsyncClient(**client_kwargs) as cli:
+            async with _llm_http_client(**client_kwargs) as cli:
                 async with cli.stream("POST", url, headers=headers, json=body) as resp:
                     if resp.status_code >= 400:
                         error_body = ""
@@ -2370,7 +2387,7 @@ class OpenAIClient(LLMClient):
         else:
             client_kwargs["trust_env"] = False
         try:
-            async with httpx.AsyncClient(**client_kwargs) as cli:
+            async with _llm_http_client(**client_kwargs) as cli:
                 resp = await cli.post(url, headers=headers, json=body)
         except httpx.HTTPError as exc:
             raise LLMError(
@@ -2491,7 +2508,7 @@ class OpenAIClient(LLMClient):
             )
 
         try:
-            async with httpx.AsyncClient(**client_kwargs) as cli:
+            async with _llm_http_client(**client_kwargs) as cli:
                 async with cli.stream("POST", url, headers=headers, json=body) as resp:
                     if resp.status_code >= 400:
                         error_body = ""
@@ -2689,7 +2706,7 @@ class OpenAIClient(LLMClient):
         else:
             client_kwargs["trust_env"] = False
         try:
-            async with httpx.AsyncClient(**client_kwargs) as cli:
+            async with _llm_http_client(**client_kwargs) as cli:
                 resp = await cli.post(url, headers=headers, files=files, data=data)
         except httpx.HTTPError as exc:
             raise LLMError(
@@ -2767,7 +2784,7 @@ class OpenAIClient(LLMClient):
         else:
             client_kwargs["trust_env"] = False
         try:
-            async with httpx.AsyncClient(**client_kwargs) as cli:
+            async with _llm_http_client(**client_kwargs) as cli:
                 resp = await cli.post(url, headers=headers, json=body)
         except httpx.HTTPError as exc:
             raise LLMError(
@@ -2973,7 +2990,7 @@ class AnthropicClient(LLMClient):
         message_stop_received = False
 
         try:
-            async with httpx.AsyncClient(**client_kwargs) as cli:
+            async with _llm_http_client(**client_kwargs) as cli:
                 async with cli.stream("POST", url, headers=headers, json=body) as resp:
                     if resp.status_code >= 400:
                         # 流式模式下，错误仍然可能作为普通 JSON 返回
@@ -3153,7 +3170,7 @@ class AnthropicClient(LLMClient):
         else:
             client_kwargs["trust_env"] = False
         try:
-            async with httpx.AsyncClient(**client_kwargs) as cli:
+            async with _llm_http_client(**client_kwargs) as cli:
                 resp = await cli.post(url, headers=self._headers(request), json=body)
         except httpx.HTTPError as exc:
             raise LLMError(
@@ -3269,7 +3286,7 @@ class AnthropicClient(LLMClient):
             )
 
         try:
-            async with httpx.AsyncClient(**client_kwargs) as cli:
+            async with _llm_http_client(**client_kwargs) as cli:
                 async with cli.stream(
                     "POST",
                     url,
@@ -3513,7 +3530,7 @@ class AnthropicClient(LLMClient):
         text_parts: list[str] = []
 
         try:
-            async with httpx.AsyncClient(**client_kwargs) as cli:
+            async with _llm_http_client(**client_kwargs) as cli:
                 async with cli.stream("POST", url, headers=headers, json=body) as resp:
                     if resp.status_code >= 400:
                         error_body = ""
@@ -3818,7 +3835,7 @@ class ResponsesClient(LLMClient):
 
         client_kwargs = self._client_kwargs(timeout_seconds)
         try:
-            async with httpx.AsyncClient(**client_kwargs) as cli:
+            async with _llm_http_client(**client_kwargs) as cli:
                 resp = await _post_responses_compatible(cli, url, headers=headers, body=body)
         except httpx.HTTPError as exc:
             raise self._network_error(exc) from None
@@ -3923,7 +3940,7 @@ class ResponsesClient(LLMClient):
 
         client_kwargs = self._client_kwargs(None)
         try:
-            async with httpx.AsyncClient(**client_kwargs) as cli:
+            async with _llm_http_client(**client_kwargs) as cli:
                 resp = await _post_responses_compatible(cli, url, headers=headers, body=body)
         except httpx.HTTPError as exc:
             raise self._network_error(exc) from None
@@ -4122,7 +4139,7 @@ class ResponsesClient(LLMClient):
             )
 
         try:
-            async with httpx.AsyncClient(**client_kwargs) as cli:
+            async with _llm_http_client(**client_kwargs) as cli:
                 async with cli.stream("POST", url, headers=headers, json=body) as resp:
                     self._capture_response_metadata(resp)
                     if resp.status_code >= 400:
@@ -4389,7 +4406,7 @@ class ResponsesClient(LLMClient):
         saw_output_text = False
 
         try:
-            async with httpx.AsyncClient(**client_kwargs) as cli:
+            async with _llm_http_client(**client_kwargs) as cli:
                 async with cli.stream("POST", url, headers=headers, json=body) as resp:
                     self._capture_response_metadata(resp)
                     if resp.status_code >= 400:
@@ -4595,7 +4612,7 @@ class ResponsesClient(LLMClient):
 
         client_kwargs = self._client_kwargs(timeout_seconds)
         try:
-            async with httpx.AsyncClient(**client_kwargs) as cli:
+            async with _llm_http_client(**client_kwargs) as cli:
                 resp = await _post_responses_compatible(cli, url, headers=headers, body=body)
         except httpx.HTTPError as exc:
             raise LLMError(
@@ -4901,7 +4918,7 @@ class GatewayResponsesClient(ResponsesClient):
             runtime_headers=self._runtime_headers(),
         )
         try:
-            async with httpx.AsyncClient(**self._client_kwargs(15)) as client:
+            async with _llm_http_client(**self._client_kwargs(15)) as client:
                 response = await client.get(f"{self._base_url}/models", headers=headers)
         except httpx.HTTPError as exc:
             raise self._network_error(exc) from None

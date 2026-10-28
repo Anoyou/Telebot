@@ -53,8 +53,11 @@ async def invoke(
     client_factory: Callable[..., Any | Awaitable[Any]] | None = None,
     runtime_metadata: Mapping[str, Any] | None = None,
     thinking: str | None = None,
+    deadline_seconds: float | None = None,
 ) -> tuple[LLMResult, LLMProviderDTO, bool]:
     """Call a standard LLM provider with shared fallback / retry / usage logic.
+
+    ``deadline_seconds`` 是整条重试 + fallback 链的总时限（见 ``llm_reliability``）。
 
     ``override_model`` 是用户固定模型（对所有 provider 生效）；``routed_model`` 是
     auto 路由为 primary 选出的已启用模型——fallback 切换 provider 时按各自 enabled
@@ -133,6 +136,7 @@ async def invoke(
             account_id=account_id,
             triggered_by_account_id=triggered_by_account_id,
             source=source,
+            deadline_seconds=deadline_seconds,
         )
     finally:
         if token is not None:

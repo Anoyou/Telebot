@@ -28,3 +28,16 @@ def _reset_local_userbot_rate_limit_state() -> None:
         command_mod.reset_local_rate_limit_buckets()
     except Exception:  # noqa: BLE001
         yield
+
+
+@pytest.fixture(autouse=True)
+def _reset_bot_api_and_llm_reliability_state() -> None:
+    """Bot API 限速桶与 LLM Provider 熔断器都是进程内状态，避免在测试间泄漏。"""
+
+    from app.services import bot_api_limits, llm_reliability
+
+    bot_api_limits.get_rate_limiter().reset()
+    llm_reliability.get_circuit_breaker().reset()
+    yield
+    bot_api_limits.get_rate_limiter().reset()
+    llm_reliability.get_circuit_breaker().reset()
