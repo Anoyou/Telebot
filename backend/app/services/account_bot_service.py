@@ -6,6 +6,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import math
 import re
 import time
 from copy import deepcopy
@@ -54,6 +55,18 @@ from ..schemas.account_bot import (
     AccountBotUserUpdate,
 )
 from ..settings import settings
+from .bot_api_limits import (
+    DEFAULT_RATE_LIMIT_WAIT_BUDGET_SECONDS,
+    MAX_CONNECT_RETRIES,
+    MAX_RATE_LIMIT_RETRIES,
+    NO_WAIT_METHODS,
+    BotApiError,
+    BotApiRateLimitedError,
+    counts_against_chat_bucket,
+    get_rate_limiter,
+    parse_retry_after,
+)
+from .bot_api_limits import token_key as _rate_limit_token_key
 from .event_bus import VALID_EVENT_TYPES
 from .interaction.contracts import send_via_selector_options, unsupported_send_via_values
 from .rich_compact import (
@@ -275,6 +288,7 @@ ROLE_RANK = {
 }
 
 _BOT_API_CLIENT: httpx.AsyncClient | None = None
+_BOT_API_POLL_CLIENT: httpx.AsyncClient | None = None
 _BOT_API_CLIENT_LOCK = asyncio.Lock()
 
 
@@ -1796,8 +1810,14 @@ async def call_bot_api(
     payload: dict[str, Any] | None = None,
     *,
     timeout: httpx.Timeout | None = None,
+    rate_limit_wait_budget: float | None = None,
 ) -> dict[str, Any]:
-    """调用 Bot API；只在这里拼接 token URL。"""
+    """调用 Bot API；只在这里拼接 token URL。
+
+    429 只重试这一次 HTTP 调用（按 ``retry_after``，受 ``rate_limit_wait_budget`` 约束），
+    超出预算抛 :class:`BotApiRateLimitedError`；其它 ``ok=false`` 抛 :class:`BotApiError`
+    （均为 ``RuntimeError`` 子类，``str(exc)`` 仍是 Telegram description）。
+    """
 
     request_payload = payload or {}
     raw_chat_id = request_payload.get("chat_id")
@@ -1809,19 +1829,122 @@ async def call_bot_api(
     delivers_to_chat = _bot_api_method_delivers_to_chat(method)
     if delivers_to_chat and chat_id is not None and bot_chat_is_known_unavailable(token, chat_id):
         raise BotChatUnavailableError("Bot 未加入目标会话，已跳过重复 Telegram 请求")
-    url = f"{BOT_API_BASE}/bot{token}/{method}"
-    client = await get_bot_api_client()
-    resp = await client.post(url, json=request_payload, timeout=timeout or BOT_API_TIMEOUT)
-    data = resp.json() if resp.content else {}
-    if resp.status_code >= 400 or not data.get("ok", False):
-        desc = data.get("description") or f"HTTP {resp.status_code}"
-        if chat_id is not None and _looks_like_bot_chat_unavailable_error(desc):
-            _remember_bot_chat_membership(token, chat_id, "not_joined", detail=str(desc))
-        raise RuntimeError(desc)
+    try:
+        data = await _bot_api_request(
+            token,
+            method,
+            json_payload=request_payload,
+            timeout=timeout or BOT_API_TIMEOUT,
+            chat_id=chat_id if delivers_to_chat else None,
+            rate_limit_wait_budget=rate_limit_wait_budget,
+        )
+    except BotApiError as exc:
+        if chat_id is not None and _looks_like_bot_chat_unavailable_error(exc.description):
+            _remember_bot_chat_membership(token, chat_id, "not_joined", detail=exc.description)
+        raise
     result = data.get("result")
     if chat_id is not None and delivers_to_chat:
         _remember_bot_chat_membership(token, chat_id, "joined")
     return result if isinstance(result, dict) else {"result": result}
+
+
+async def _bot_api_request(
+    token: str,
+    method: str,
+    *,
+    json_payload: dict[str, Any] | None = None,
+    form_data: dict[str, Any] | None = None,
+    files: dict[str, Any] | None = None,
+    timeout: httpx.Timeout | None = None,
+    chat_id: int | None = None,
+    rate_limit_wait_budget: float | None = None,
+) -> dict[str, Any]:
+    """发出一次 Bot API 请求并处理 429 / 连接失败的**单请求**重试，返回响应 JSON。
+
+    - 429：Telegram 未执行请求，按 ``retry_after`` 等待后重发同一请求；累计等待超过预算
+      （草稿等可丢弃方法预算为 0）时抛 ``BotApiRateLimitedError``。
+    - 连接阶段失败（ConnectError / ConnectTimeout / PoolTimeout，请求未送达）重发一次。
+    - 读超时、5xx 等请求可能已生效的错误不重发，避免重复投递。
+    - ``getUpdates`` 长轮询走独立连接池，不占发送连接。
+    """
+
+    is_poll = method == "getUpdates"
+    limiter = get_rate_limiter()
+    tkey = _rate_limit_token_key(token)
+    if rate_limit_wait_budget is None:
+        budget = 0.0 if method in NO_WAIT_METHODS else DEFAULT_RATE_LIMIT_WAIT_BUDGET_SECONDS
+    else:
+        budget = max(0.0, float(rate_limit_wait_budget))
+    waited = 0.0
+    if not is_poll:
+        if method in NO_WAIT_METHODS:
+            blocked = limiter.blocked_for(tkey, chat_id)
+            if blocked > 0.0:
+                raise BotApiRateLimitedError(
+                    f"Too Many Requests: retry after {math.ceil(blocked)}（本地限速，未发送）",
+                    method=method,
+                    error_code=429,
+                    retry_after=blocked,
+                )
+        else:
+            waited += await limiter.acquire(
+                tkey,
+                chat_id,
+                budget=budget,
+                take_chat_token=counts_against_chat_bucket(method),
+            )
+    url = f"{BOT_API_BASE}/bot{token}/{method}"
+    client = await (get_bot_api_poll_client() if is_poll else get_bot_api_client())
+    rate_retries = 0
+    connect_retries = 0
+    while True:
+        post_kwargs: dict[str, Any] = {"timeout": timeout or BOT_API_TIMEOUT}
+        if files is not None or form_data is not None:
+            post_kwargs["data"] = form_data or {}
+            if files is not None:
+                post_kwargs["files"] = files
+        else:
+            post_kwargs["json"] = json_payload or {}
+        try:
+            resp = await client.post(url, **post_kwargs)
+        except (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout):
+            if is_poll or connect_retries >= MAX_CONNECT_RETRIES:
+                raise
+            connect_retries += 1
+            await asyncio.sleep(0.2)
+            continue
+        data = resp.json() if resp.content else {}
+        if not isinstance(data, dict):
+            data = {}
+        status_code = int(getattr(resp, "status_code", 200) or 200)
+        if status_code < 400 and data.get("ok", False):
+            return data
+        desc = str(data.get("description") or f"HTTP {status_code}")
+        error_code = data.get("error_code") if isinstance(data.get("error_code"), int) else status_code
+        if error_code == 429 or status_code == 429:
+            retry_after = parse_retry_after(data, headers=getattr(resp, "headers", None))
+            delay = 1.0 if retry_after is None else max(0.0, retry_after)
+            limiter.penalize(tkey, chat_id, delay)
+            if rate_retries < MAX_RATE_LIMIT_RETRIES and waited + delay <= budget:
+                rate_retries += 1
+                waited += delay
+                log.info(
+                    "Bot API %s 被限流（429），%.1fs 后只重发这一次请求（第 %s 次）chat_id=%s",
+                    method,
+                    delay,
+                    rate_retries,
+                    chat_id,
+                )
+                await asyncio.sleep(delay)
+                continue
+            raise BotApiRateLimitedError(desc, method=method, error_code=429, retry_after=delay)
+        raise BotApiError(desc, method=method, error_code=error_code)
+
+
+def is_bot_rate_limited_error(exc: BaseException) -> bool:
+    """Bot API 429（已在单请求层按预算重试过仍未成功）。"""
+
+    return isinstance(exc, BotApiRateLimitedError)
 
 
 async def get_me(token: str) -> dict[str, Any]:
@@ -2014,7 +2137,6 @@ async def send_photo_bytes(
     reply_markup: dict[str, Any] | None = None,
     parse_mode: str | None = "HTML",
 ) -> dict[str, Any]:
-    url = f"{BOT_API_BASE}/bot{token}/sendPhoto"
     normalized_parse_mode = normalize_bot_parse_mode(parse_mode)
     data: dict[str, Any] = {"chat_id": chat_id}
     if caption:
@@ -2027,12 +2149,14 @@ async def send_photo_bytes(
     if reply_markup is not None:
         data["reply_markup"] = json.dumps(reply_markup, ensure_ascii=False)
     files = {"photo": (filename or "photo.png", photo)}
-    client = await get_bot_api_client()
-    resp = await client.post(url, data=data, files=files, timeout=BOT_API_TIMEOUT)
-    payload = resp.json() if resp.content else {}
-    if resp.status_code >= 400 or not payload.get("ok", False):
-        desc = payload.get("description") or f"HTTP {resp.status_code}"
-        raise RuntimeError(desc)
+    payload = await _bot_api_request(
+        token,
+        "sendPhoto",
+        form_data=data,
+        files=files,
+        timeout=BOT_API_TIMEOUT,
+        chat_id=chat_id,
+    )
     result = payload.get("result")
     return result if isinstance(result, dict) else {"result": result}
 
@@ -2048,7 +2172,6 @@ async def send_document_bytes(
     reply_markup: dict[str, Any] | None = None,
     parse_mode: str | None = "HTML",
 ) -> dict[str, Any]:
-    url = f"{BOT_API_BASE}/bot{token}/sendDocument"
     normalized_parse_mode = normalize_bot_parse_mode(parse_mode)
     data: dict[str, Any] = {"chat_id": chat_id}
     if caption:
@@ -2061,12 +2184,14 @@ async def send_document_bytes(
     if reply_markup is not None:
         data["reply_markup"] = json.dumps(reply_markup, ensure_ascii=False)
     files = {"document": (filename or "file.bin", document)}
-    client = await get_bot_api_client()
-    resp = await client.post(url, data=data, files=files, timeout=BOT_API_TIMEOUT)
-    payload = resp.json() if resp.content else {}
-    if resp.status_code >= 400 or not payload.get("ok", False):
-        desc = payload.get("description") or f"HTTP {resp.status_code}"
-        raise RuntimeError(desc)
+    payload = await _bot_api_request(
+        token,
+        "sendDocument",
+        form_data=data,
+        files=files,
+        timeout=BOT_API_TIMEOUT,
+        chat_id=chat_id,
+    )
     result = payload.get("result")
     return result if isinstance(result, dict) else {"result": result}
 
@@ -2350,7 +2475,15 @@ def html_text(value: Any) -> str:
     return escape("" if value is None else str(value), quote=False)
 
 
+# 发送类请求连接池：长轮询不再占用它（第 11 轮审计 B6：7 个账号的长轮询就能占满 20 条）。
+BOT_API_SEND_LIMITS = httpx.Limits(max_connections=32, max_keepalive_connections=32, keepalive_expiry=30.0)
+# 长轮询专用连接池：每个 Bot 每条 polling loop 常驻占 1 条连接（最长 25 s）。
+BOT_API_POLL_LIMITS = httpx.Limits(max_connections=128, max_keepalive_connections=128, keepalive_expiry=60.0)
+
+
 async def get_bot_api_client() -> httpx.AsyncClient:
+    """发送 / 编辑 / 查询等普通 Bot API 请求共用的客户端。"""
+
     global _BOT_API_CLIENT
     client = _BOT_API_CLIENT
     if client is not None and not getattr(client, "is_closed", False):
@@ -2358,21 +2491,40 @@ async def get_bot_api_client() -> httpx.AsyncClient:
     async with _BOT_API_CLIENT_LOCK:
         client = _BOT_API_CLIENT
         if client is None or getattr(client, "is_closed", False):
-            client = httpx.AsyncClient(
-                timeout=BOT_API_TIMEOUT,
-                limits=httpx.Limits(max_connections=20, max_keepalive_connections=20),
-            )
+            client = httpx.AsyncClient(timeout=BOT_API_TIMEOUT, limits=BOT_API_SEND_LIMITS)
             _BOT_API_CLIENT = client
     return client
 
 
-async def close_bot_api_client() -> None:
-    global _BOT_API_CLIENT
-    async with _BOT_API_CLIENT_LOCK:
-        client = _BOT_API_CLIENT
-        _BOT_API_CLIENT = None
+async def get_bot_api_poll_client() -> httpx.AsyncClient:
+    """``getUpdates`` 长轮询专用客户端，与发送连接池隔离。"""
+
+    global _BOT_API_POLL_CLIENT
+    client = _BOT_API_POLL_CLIENT
     if client is not None and not getattr(client, "is_closed", False):
-        await client.aclose()
+        return client
+    async with _BOT_API_CLIENT_LOCK:
+        client = _BOT_API_POLL_CLIENT
+        if client is None or getattr(client, "is_closed", False):
+            client = httpx.AsyncClient(timeout=BOT_API_TIMEOUT, limits=BOT_API_POLL_LIMITS)
+            _BOT_API_POLL_CLIENT = client
+    return client
+
+
+async def close_bot_api_client() -> None:
+    global _BOT_API_CLIENT, _BOT_API_POLL_CLIENT
+    async with _BOT_API_CLIENT_LOCK:
+        clients = [_BOT_API_CLIENT, _BOT_API_POLL_CLIENT]
+        _BOT_API_CLIENT = None
+        _BOT_API_POLL_CLIENT = None
+    for client in clients:
+        if client is not None and not getattr(client, "is_closed", False):
+            try:
+                await client.aclose()
+            except RuntimeError:
+                # 客户端建在已关闭的事件循环上（如测试间或进程退出阶段）：连接随旧循环作废，
+                # 关闭失败不能挡住另一个连接池的关闭。
+                log.debug("bot api client close skipped: owning event loop closed", exc_info=True)
 
 
 def normalize_bot_parse_mode(parse_mode: str | None) -> str | None:

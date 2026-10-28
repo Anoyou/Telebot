@@ -405,6 +405,12 @@ async def lifespan(app: FastAPI):
             await close_bot_api_client()
         except Exception:  # noqa: BLE001
             logging.exception("关闭账号 Bot 共享 HTTP 客户端失败")
+        try:
+            from .services.llm_http_pool import close_llm_http_clients
+
+            await close_llm_http_clients()
+        except Exception:  # noqa: BLE001
+            logging.exception("关闭 LLM 共享 HTTP 客户端失败")
         cleanup_task.cancel()
         agent_secret_cleanup_task.cancel()
         remote_plugin_update_task.cancel()

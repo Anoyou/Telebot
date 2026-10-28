@@ -1993,6 +1993,20 @@ async def _replay_polling_dead_letter(aid: int, dlq_id: str) -> dict[str, Any]:
     return {"ok": True, "deleted": True, "error": None}
 
 
+def _polling_error_is_replayable(exc: BaseException) -> bool:
+    """整条 update 重跑只用于“还没触达 Telegram”的瞬时错误。
+
+    Telegram 已经明确答复的 Bot API 错误（含 429：单请求层已按 retry_after 重试过）
+    说明 handler 早已跑到投递阶段，「🤔」占位、LLM 调用、额度扣减可能都已发生；
+    重跑整条 handler 只会重复这些副作用，直接进入失败日志 / DLQ。
+    """
+
+    return not isinstance(
+        exc,
+        (account_bot_service.BotApiError, account_bot_service.BotChatUnavailableError),
+    )
+
+
 async def _handle_polling_update_with_retries(
     *,
     aid: int,
@@ -2012,7 +2026,7 @@ async def _handle_polling_update_with_retries(
         except Exception as exc:  # noqa: BLE001
             clean = account_bot_service.sanitize_bot_error(exc, token=token)
             update_id = _int_or_none(update.get("update_id"))
-            if attempt_index < len(_POLLING_UPDATE_RETRY_DELAYS_SECONDS):
+            if attempt_index < len(_POLLING_UPDATE_RETRY_DELAYS_SECONDS) and _polling_error_is_replayable(exc):
                 delay = _POLLING_UPDATE_RETRY_DELAYS_SECONDS[attempt_index]
                 log.warning(
                     "%s update failed aid=%s update_id=%s attempt=%s/%s retry_in=%ss: %s",

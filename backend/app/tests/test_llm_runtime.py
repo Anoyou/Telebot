@@ -1343,7 +1343,7 @@ async def test_openai_client_classifies_policy_403_as_account_scope(monkeypatch)
 
 @pytest.mark.asyncio
 async def test_call_with_fallback_network_error_retries_and_falls_back(monkeypatch) -> None:
-    """真实网络异常经包装成可重试 LLMError → 先重试 primary，再推进到 fallback。"""
+    """真实网络异常经包装成可重试 LLMError → 有备用时不在 primary 上空耗重试，直接切 fallback。"""
     import httpx
 
     from app.services import llm_client
@@ -1365,15 +1365,15 @@ async def test_call_with_fallback_network_error_retries_and_falls_back(monkeypat
     assert result.text == "fallback-ok"
     assert provider.id == 2
     assert used_fb is True
-    # primary 被真实重试满 _MAX_RETRIES+1 次后才 fallback
-    assert len([u for u in call_log if "fail" in u]) == _rt._MAX_RETRIES + 1
+    # 第 11 轮：不可用错误在有备用时只打 primary 一次就切 fallback（旧行为是重试满 4 次）
+    assert len([u for u in call_log if "fail" in u]) == 1
     assert any("ok.example" in u for u in call_log)
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("status", [429, 500])
 async def test_call_with_fallback_retryable_status_falls_back(monkeypatch, status) -> None:
-    """429 / 5xx 经包装成可重试 LLMError → 重试并 fallback。"""
+    """429 / 5xx 经包装成可重试 LLMError → 有备用时直接 fallback。"""
     from app.services import llm_client
     from app.services import llm_runtime as _rt
 
@@ -1392,6 +1392,31 @@ async def test_call_with_fallback_retryable_status_falls_back(monkeypatch, statu
     assert result.text == "fallback-ok"
     assert provider.id == 2
     assert used_fb is True
+    assert len([u for u in call_log if "fail" in u]) == 1
+
+
+@pytest.mark.asyncio
+async def test_call_with_fallback_single_provider_still_retries_transient(monkeypatch) -> None:
+    """没有备用 Provider 时，不可用错误仍按原策略在同一 Provider 上重试。"""
+    import httpx
+
+    from app.services import llm_client
+    from app.services import llm_runtime as _rt
+    from app.services.llm_client import LLMCallFailed
+
+    call_log: list[str] = []
+    monkeypatch.setattr(
+        llm_client.httpx,
+        "AsyncClient",
+        _make_fake_async_client(httpx.ConnectError("connection refused"), call_log),
+    )
+    monkeypatch.setattr(_rt, "_compute_retry_delay", lambda attempt: 0.0)
+    chain = _fail_ok_chain()
+    chain.fallbacks = []
+
+    with pytest.raises(LLMCallFailed):
+        await _rt.call_with_fallback(chain, "sys", "user", max_tokens=50, client_factory=_openai_client_factory)
+
     assert len([u for u in call_log if "fail" in u]) == _rt._MAX_RETRIES + 1
 
 

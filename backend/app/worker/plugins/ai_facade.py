@@ -367,6 +367,9 @@ class PluginAI:
                 source=f"plugin:{self.plugin_key}",
                 matched_tag=matched_tag,
                 thinking=_normalize_thinking(thinking),
+                # 插件的 timeout_seconds 是整次 complete() 的总时限：重试与备用 Provider
+                # 都在这段时间内完成，主 Provider 超时也能在时限内走到备用（0.106.0-beta.20+）。
+                deadline_seconds=float(clamped_timeout),
             )
             await plugin_ai_quota.release(
                 quota_ticket,

@@ -22,6 +22,7 @@ from ...db.models.system_agent import (
     SESSION_STATUS_ACTIVE,
 )
 from ...redis_client import get_redis
+from ..telegram_stream import DEFAULT_MIN_INTERVAL_SECONDS, ThrottledTextPusher
 from .actions import (
     bot_owns_action,
     decrypt_secret_payload,
@@ -1003,23 +1004,36 @@ async def run_agent_query(
 
     draft_active = False
     last_draft_text = ""
+    # 草稿节流（第 11 轮）：只保留最新快照，约每秒最多发一次 sendMessageDraft；
+    # Markdown→HTML 渲染也只在真正发送时对最新快照做一次，不再每个 delta 全文重渲染。
+    draft_pusher: ThrottledTextPusher | None = None
 
-    async def update_draft(value: str) -> None:
-        """进度/流式片段更新 draft；空串被守卫拦住，清空请走 clear_draft。"""
+    async def _push_draft(value: str) -> None:
         nonlocal last_draft_text
-        if not draft_active or draft is None or not value or value == last_draft_text:
+        if draft is None:
             return
-        try:
-            await draft(value)
-            last_draft_text = value
-        except Exception:  # noqa: BLE001
-            log.debug("system agent bot draft update failed", exc_info=True)
+        await draft(value)
+        last_draft_text = value
+
+    async def update_draft(value: str, *, markdown: bool = False) -> None:
+        """进度/流式片段更新 draft（节流）；空串被守卫拦住，清空请走 clear_draft。
+
+        ``markdown=True`` 表示 ``value`` 是未渲染的累计正文，发送时再转 Telegram HTML。
+        """
+        if not draft_active or draft is None or draft_pusher is None or not value:
+            return
+        if not markdown and value == last_draft_text:
+            return
+        await draft_pusher.offer(value, rendered=not markdown)
 
     async def clear_draft() -> None:
         """最终消息发出前清空 ephemeral draft，避免与真实消息并存。"""
         nonlocal last_draft_text
         if not draft_active or draft is None:
             return
+        if draft_pusher is not None:
+            # 先停掉节流器并等在途草稿结束，保证清空一定是最后一次草稿请求
+            await draft_pusher.aclose()
         try:
             await draft("")
             last_draft_text = ""
@@ -1031,6 +1045,12 @@ async def run_agent_query(
             last_draft_text = "⏳ 系统助手正在理解你的需求…"
             await draft(last_draft_text)
             draft_active = True
+            draft_pusher = ThrottledTextPusher(
+                _push_draft,
+                min_interval=DEFAULT_MIN_INTERVAL_SECONDS,
+                render=_markdown_to_telegram_html,
+                name="agent-bot-draft",
+            )
         except Exception:  # noqa: BLE001
             log.debug("system agent bot draft unavailable; using persistent placeholder", exc_info=True)
     placeholder_message_id: int | None = None
@@ -1125,7 +1145,7 @@ async def run_agent_query(
             elif et == "assistant_delta":
                 # 流式过程只推进 draft；最终正文只走真实消息，避免 draft 与 final 双气泡
                 streamed_assistant_text += str(event.get("delta") or "")
-                await update_draft(_markdown_to_telegram_html(streamed_assistant_text))
+                await update_draft(streamed_assistant_text, markdown=True)
             elif et == "assistant_message":
                 # 完整正文不进 draft：随后会 send 真实消息，若再 update_draft 会与 final 并存
                 assistant_text = str(event.get("content") or "")

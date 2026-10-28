@@ -86,6 +86,8 @@ async for delta in ctx.ai.stream_complete(
 answer = "".join(parts)
 ```
 
+要把流式文本显示在 Telegram 里（编辑「🤔」占位或私聊草稿），用平台的节流编辑器 `ctx.messages.stream_edit(chunks=ctx.ai.stream_complete(...), ...)`，频控、429 与最终 Rich 编辑由平台处理，见 [插件流式回复](./PLUGIN-STREAMING.md)。
+
 该窄接口支持 Chat Completions、Responses 与 Anthropic Messages。流开始后不会中途切 Provider；消费者取消、超时或上游中断会按已发起的请求保守结算预算和插件 quota。若上游接受了 `stream=true` 却返回普通 JSON，迭代器会把真实完整文本作为一个块交给插件，不会拆字，也不会再发起第二次请求。消费者必须遍历到自然结束，提前 `break` 或关闭迭代器会按中断调用结算。
 
 ## 有界 Agent 与工具调用
@@ -138,6 +140,7 @@ result = await ctx.ai.run_agent(
 
 - `ctx.ai.complete()` 复用平台 LLM Provider 池、fallback 链、账号级预算和 usage 记录。
 - 插件传入的 `max_tokens` 与超时会被平台上限收紧，不能绕过账号配额。
+- `complete()` 的 `timeout_seconds`（0.106.0-beta.20+）是**整次调用的总时限**：所有重试与备用 Provider 都在这段时间内完成。有备用 Provider 时，主 Provider 单次尝试的超时会被收紧、给备用预留约三分之一的时间；超时 / 连接失败 / 5xx / 429 不再在同一 Provider 上反复重试，而是直接切备用；同一 Provider 连续不可用会被短暂熔断（约 30 秒内优先跳过）。所以插件按自己的 handler 时限传 `timeout_seconds`，主 Provider 卡住时也能在时限内拿到备用的回答。
 - `ctx.ai.list_providers()` 只返回脱敏元数据，例如 provider 名称、默认模型、标签和成本层级；`models[]` 只含 `id`、`name`、`label`、`display_name`、`modality`、`max_tokens`、`context_window` 与 `enabled`（0.106.0-beta.13+，插件据此只列已启用模型——未启用模型传给 `complete(model=...)` 会被拒绝）。
 - 插件不会拿到 `api_key_enc`、明文 API Key、`base_url` 或代理 URL。
 - 不要在插件日志里记录用户完整隐私输入或模型完整输出；需要排障时只记录长度、截断摘要或 request id。

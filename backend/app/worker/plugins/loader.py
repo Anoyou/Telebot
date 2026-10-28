@@ -6365,6 +6365,9 @@ class _LiveMessageOps:
     # inline_message_id + 点击者，没有 chat/message）投递给订阅 callback_query（scope guest_all）
     # 的插件，插件可 answer_callback 并用 edit_message(inline_message_id=...) 编辑文本与按钮。
     guest_reply_markup = True
+    # 0.106.0-beta.20 起：stream_editor() / stream_edit() 提供带节流的流式编辑 / 私聊草稿
+    # （中间态直走交互 Bot、处理 429，最终一次走标准动作），见 docs/PLUGIN-STREAMING.md。
+    streaming_edit = True
 
     def __init__(
         self,
@@ -6504,6 +6507,50 @@ class _LiveMessageOps:
         await self.apply([action])
         return action
 
+    def stream_editor(self, **kwargs: Any) -> Any:
+        """创建一次流式回复的节流编辑器（``PluginStreamEditor``，见 stream_edit 模块）。"""
+
+        from .stream_edit import PluginStreamEditor
+
+        state = self._state
+        context = state.contexts.get(self._plugin_key)
+        return PluginStreamEditor(
+            apply=self.apply,
+            token_provider=lambda: _interaction_bot_token_for_account(state.account_id),
+            dry_run=_plugin_dev_mode_dry_run_enabled(context),
+            **kwargs,
+        )
+
+    async def stream_edit(
+        self,
+        *,
+        chunks: Any,
+        chat_id: int | None = None,
+        message_id: int | None = None,
+        inline_message_id: str | None = None,
+        mode: str = "auto",
+        parse_mode: str = "plain",
+        min_interval: float | None = None,
+        min_chars: int = 0,
+        render: Any = None,
+        **finish_kwargs: Any,
+    ) -> dict[str, Any]:
+        """边收 ``chunks``（异步文本增量流）边节流编辑，结束后发出最终内容。"""
+
+        from .stream_edit import stream_edit as _stream_edit
+
+        editor = self.stream_editor(
+            chat_id=chat_id,
+            message_id=message_id,
+            inline_message_id=inline_message_id,
+            mode=mode,
+            parse_mode=parse_mode,
+            min_interval=min_interval,
+            min_chars=min_chars,
+            render=render,
+        )
+        return await _stream_edit(editor, chunks, **finish_kwargs)
+
     async def delete(self, **kwargs: Any) -> dict[str, Any]:
         from .message_ops import BufferedMessageOps
 
@@ -6590,6 +6637,8 @@ class _InteractionEntryMessageOps(BufferedMessageOps):
     # 并在结果的 ``errors`` 里带回失败原因；beta.2 只有返回动作链路支持，实时 apply 会报
     # target_message_id_missing。插件据此判断能否“🤔 占位后 Rich 编辑”。
     live_inline_edit = True
+    # 0.106.0-beta.20 起：带节流的流式编辑 / 草稿（委托实时 facade），见 docs/PLUGIN-STREAMING.md。
+    streaming_edit = True
 
     def __init__(
         self,
@@ -6639,6 +6688,12 @@ class _InteractionEntryMessageOps(BufferedMessageOps):
 
     async def read_saved_inline_message_id(self, key: str) -> str | None:
         return await self._live.read_saved_inline_message_id(key)
+
+    def stream_editor(self, **kwargs: Any) -> Any:
+        return self._live.stream_editor(**kwargs)
+
+    async def stream_edit(self, **kwargs: Any) -> dict[str, Any]:
+        return await self._live.stream_edit(**kwargs)
 
 
 async def _event_sender_id(event: Any) -> int | None:

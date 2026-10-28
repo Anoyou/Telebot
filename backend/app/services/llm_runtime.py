@@ -29,7 +29,7 @@ if TYPE_CHECKING:
 
 from ..db.models.command import default_api_format_for
 from ..settings import settings
-from . import llm_account_budget, llm_key_pool
+from . import llm_account_budget, llm_key_pool, llm_reliability
 from .llm_client import build_client_from_dto
 from .llm_identity import resolve_identity
 from .llm_profiles import resolve_protocol_profile
@@ -140,6 +140,16 @@ def register_usage_callback(cb: Callable[[UsageRecord], Coroutine[Any, Any, None
 
 async def _emit_usage(record: UsageRecord) -> None:
     """将 usage 记录发送到所有注册的回调。"""
+    # 按 Provider 熔断：真实业务调用的成功 / 不可用失败喂给熔断器（测活等来源不计）
+    try:
+        llm_reliability.record_usage_outcome(
+            record.provider_id,
+            success=bool(record.success),
+            error_type=record.error_type,
+            source=record.source,
+        )
+    except Exception:  # noqa: BLE001
+        log.debug("[llm-runtime] circuit breaker update failed", exc_info=True)
     # 运行时健康：真实业务调用写入；测活等 source 前缀由 provider_health 过滤
     try:
         from . import provider_health
@@ -612,6 +622,22 @@ def _effective_model_for_provider(
 
 
 async def call_with_fallback(
+    *args: Any,
+    deadline_seconds: float | None = None,
+    **kwargs: Any,
+) -> tuple[LLMResult, LLMProviderDTO, bool]:
+    """使用 fallback 链调用 LLM（见 :func:`_call_with_fallback_impl`）。
+
+    ``deadline_seconds``：整条调用链（所有重试 + 所有备用 Provider）的总时限。设置后
+    每次尝试的超时收紧到剩余时间并给备用预留时间，超时 / 不可用错误直接切备用，
+    保证插件这类有硬时限的调用方在时限内能真正走到备用 Provider。
+    """
+
+    with llm_reliability.deadline_scope(deadline_seconds):
+        return await _call_with_fallback_impl(*args, **kwargs)
+
+
+async def _call_with_fallback_impl(
     chain: FallbackChain,
     system: str,
     user: str,
@@ -676,8 +702,25 @@ async def call_with_fallback(
     estimated_tokens = _estimate_legacy_request_tokens(system, user, max_tokens, images)
     last_error: Exception | None = None
 
+    breaker = llm_reliability.get_circuit_breaker()
     for idx, provider_dto in enumerate(all_providers):
         is_fallback = idx > 0
+        has_fallback = idx < len(all_providers) - 1
+        if (
+            is_fallback
+            and last_error is not None
+            and llm_reliability.deadline_exhausted(minimum=llm_reliability.MIN_FALLBACK_START_SECONDS)
+        ):
+            # 总时限已不够再发起一次有效尝试：停止切换，按最后错误失败
+            break
+        if has_fallback and not breaker.allow(provider_dto.id):
+            last_error = LLMError(
+                f"provider {provider_dto.name} 近期连续不可用，熔断中，直接改用备用 Provider",
+                retryable=True,
+                category="circuit_open",
+            )
+            log.info("[llm-runtime] 跳过熔断中的 provider=%s", provider_dto.name)
+            continue
         # 阶段 F 收口 #6：解析本 provider 实际使用的模型。
         #   - override_model（用户固定）：所有 provider 都用它（原行为）。
         #   - 否则若 routed_model 存在（auto 路由）：primary 用 routed_model，
@@ -787,6 +830,7 @@ async def call_with_fallback(
                 thinking=thinking,
                 key_scope=_key_affinity_scope(None, account_id),
                 key_trace=key_trace,
+                has_fallback=has_fallback,
             )
             _ensure_final_answer(result, provider_name=provider_dto.name, max_tokens=max_tokens)
             _ensure_legacy_result_product(result)
@@ -1772,8 +1816,13 @@ async def _call_with_retry(
     key_scope: str | None = None,
     key_trace: dict[str, Any] | None = None,
     thinking: str | None = None,
+    has_fallback: bool = False,
 ) -> LLMResult:
     """使用指数退避重试调用单个 provider。
+
+    有总时限（``llm_reliability.deadline_scope``）时：每次尝试的超时收紧到剩余时间并给
+    备用预留时间，退避放不下就不再重试；``has_fallback`` 且错误属于超时 / 不可用时
+    不在本 Provider 上重试，直接抛出交给上层切备用。
 
     ``key_trace`` 由调用方传入空 dict，返回/抛错后其中记录本次实际使用的池内密钥
     （``provider_key_id`` / ``provider_key_label``），供 usage 归因。
@@ -1792,13 +1841,14 @@ async def _call_with_retry(
         if key_trace is not None:
             key_trace.update(selection.usage_fields())
 
+        attempt_timeout = llm_reliability.attempt_timeout(timeout_seconds, has_fallback=has_fallback)
         try:
             client = _build_client(
                 client_factory or build_client_from_dto,
                 effective_provider,
                 override_model=override_model,
                 proxy_url=effective_provider.proxy_url,
-                timeout_seconds=timeout_seconds,
+                timeout_seconds=attempt_timeout,
             )
             if inspect.isawaitable(client):
                 client = await client
@@ -1807,7 +1857,7 @@ async def _call_with_retry(
                 "images": images,
                 "temperature": temperature,
                 "reasoning_effort": reasoning_effort,
-                "timeout_seconds": timeout_seconds,
+                "timeout_seconds": attempt_timeout,
             }
             if web_search:
                 kwargs["web_search"] = True
@@ -1816,9 +1866,10 @@ async def _call_with_retry(
                 # 只有声明了 thinking 参数的客户端（OpenAI 兼容）会收到；其余被 compat 过滤
                 kwargs["thinking"] = thinking
             if native_image:
-                result = await _call_generate_image_compat(client, system, user, kwargs)
+                call = _call_generate_image_compat(client, system, user, kwargs)
             else:
-                result = await _call_complete_compat(client, system, user, kwargs)
+                call = _call_complete_compat(client, system, user, kwargs)
+            result = await llm_reliability.run_within_deadline(call, attempt_timeout)
             latency_ms = int((time.monotonic() - start_time) * 1000)
 
             if attempt > 0:
@@ -1844,9 +1895,17 @@ async def _call_with_retry(
             if not _is_retryable_error(exc):
                 # 不可重试的错误（如 401/403）直接抛出
                 raise
+            if llm_reliability.should_switch_provider(exc, has_fallback=has_fallback):
+                # 超时 / 不可用：不在本 Provider 上空耗时限，直接交给上层切备用
+                log.warning(
+                    "[llm-runtime] provider=%s 不可用（%s），直接切备用 Provider",
+                    provider_dto.name,
+                    str(exc)[:100],
+                )
+                raise
 
-            if attempt < max_retries:
-                delay = _compute_retry_delay(attempt + 1)
+            delay = _compute_retry_delay(attempt + 1)
+            if attempt < max_retries and llm_reliability.can_wait_and_retry(delay, has_fallback=has_fallback):
                 log.warning(
                     "[llm-runtime] provider=%s attempt=%d/%d 失败 error=%s 等待 %.1fs",
                     provider_dto.name,
@@ -1867,9 +1926,15 @@ async def _call_with_retry(
                 continue
             if not _is_retryable_error(exc):
                 raise
+            if llm_reliability.should_switch_provider(exc, has_fallback=has_fallback):
+                log.warning(
+                    "[llm-runtime] provider=%s 网络不可用，直接切备用 Provider",
+                    provider_dto.name,
+                )
+                raise
 
-            if attempt < max_retries:
-                delay = _compute_retry_delay(attempt + 1)
+            delay = _compute_retry_delay(attempt + 1)
+            if attempt < max_retries and llm_reliability.can_wait_and_retry(delay, has_fallback=has_fallback):
                 log.warning(
                     "[llm-runtime] provider=%s 网络错误 attempt=%d/%d 等待 %.1fs",
                     provider_dto.name,

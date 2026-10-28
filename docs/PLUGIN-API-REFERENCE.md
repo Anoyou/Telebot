@@ -2988,6 +2988,7 @@ __all__ = ["PLUGIN_CLASS", "MANIFEST"]
 | Event Bus payload 的 `owner_user_ids` / `admin_user_ids`（交互 Bot 投递）、`ctx.ai.list_providers()` 模型 `enabled` | 0.106.0-beta.14（探测：字段是否存在） |
 | Rich 表格默认边框 + 隔行着色（`rich_table_default_style`，平台行为，插件无需声明） | 0.106.0-beta.15 |
 | 访客回复 callback 按钮（`answer_guest_query.reply_markup` 保留 `callback_data`、`apply()` 结果的 `inline_message_id`、inline 回调投递给 `guest_all` / `inline_all` 的 `callback_query` 订阅、`inline_callback` 信封） | 0.106.0-beta.17（探测：`getattr(ctx.messages, "guest_reply_markup", False)`） |
+| 流式回复节流编辑 / 私聊草稿（`ctx.messages.stream_editor()` / `stream_edit()`，见 [PLUGIN-STREAMING.md](./PLUGIN-STREAMING.md)）；`ctx.ai.complete()` 的 `timeout_seconds` 改为含重试与备用 Provider 的总时限 | 0.106.0-beta.20（探测：`getattr(ctx.messages, "streaming_edit", False)`） |
 
 - 想兼容更旧的平台时不要提高最低版本，而是先探测再用：`getattr(ctx.messages, "rich_table_compact", False)`（紧凑表格）、`getattr(ctx.messages, "live_inline_edit", False)` / `inline_rich_edit`（inline 编辑）、`ctx.skills is None`、`getattr(ctx.ai, "vision_enabled", False)`、`hasattr(ctx.messages, "edit_rich")`，参数级新增（如 `thinking`）用 `inspect.signature` 探测或捕获 `TypeError`。
 - 声明 `requires_platform_capabilities` 的 `manifest.py` 在 0.72 之前的平台上导入就会失败，因此现在所有新插件的最低版本至少是 `0.72.0-beta.2`。

@@ -684,7 +684,9 @@ async def test_run_agent_query_draft_never_blocks_final_delivery(monkeypatch, dr
     if draft_error is None:
         draft_texts = [call.args[0] for call in draft.await_args_list]
         assert any("演示 Provider" in t for t in draft_texts)
-        assert any("查询今日资金台账" in t for t in draft_texts)
+        # 第 11 轮起草稿节流（约 1 次/秒，只发最新快照）：同一瞬间连续到达的进度
+        # 不会逐条发出，这里只要求首个进度立即可见、总请求数少于事件数。
+        assert len(draft_texts) < 1 + 3 + 1
         # 最终正文不进 draft；发出真实消息前清空 draft
         assert "最终答案" not in "".join(draft_texts)
         assert draft_texts[-1] == ""
