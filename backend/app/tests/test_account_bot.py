@@ -6858,6 +6858,9 @@ async def test_interaction_polling_retries_failed_update_then_advances_offset_wi
             return None
 
     call_count = 0
+    # 拉取与处理已解耦：第二次 getUpdates 会在 update 处理期间立即发出，
+    # 这里等该 update 重试耗尽、写入 DLQ 后再结束 polling。
+    processed = asyncio.Event()
 
     async def _call_bot_api(_token: str, _method: str, _payload: dict[str, object]):
         nonlocal call_count
@@ -6876,12 +6879,13 @@ async def test_interaction_polling_retries_failed_update_then_advances_offset_wi
                     }
                 ]
             }
+        await asyncio.wait_for(processed.wait(), timeout=5)
         raise asyncio.CancelledError()
 
     state = AsyncMock()
     handle = AsyncMock(side_effect=RuntimeError("boom"))
     runtime_log = AsyncMock()
-    record_dlq = AsyncMock()
+    record_dlq = AsyncMock(side_effect=lambda **_kwargs: processed.set())
 
     monkeypatch.setattr(account_bot_runtime, "AsyncSessionLocal", lambda: _DB())
     monkeypatch.setattr(
@@ -7012,12 +7016,14 @@ async def test_dlq_write_failure_does_not_break_offset_advance(monkeypatch) -> N
             return None
 
     call_count = 0
+    processed = asyncio.Event()
 
     async def _call_bot_api(_token: str, _method: str, _payload: dict[str, object]):
         nonlocal call_count
         call_count += 1
         if call_count == 1:
             return {"result": [{"update_id": 42, "message": {"message_id": 10, "text": "hello", "chat": {"id": -100}}}]}
+        await asyncio.wait_for(processed.wait(), timeout=5)
         raise asyncio.CancelledError()
 
     state = AsyncMock()
@@ -7032,7 +7038,11 @@ async def test_dlq_write_failure_does_not_break_offset_advance(monkeypatch) -> N
     monkeypatch.setattr(account_bot_runtime, "_handle_interaction_update", AsyncMock(side_effect=RuntimeError("boom")))
     monkeypatch.setattr(account_bot_runtime, "_set_interaction_runtime_state", state)
     monkeypatch.setattr(account_bot_runtime, "_write_interaction_runtime_log", AsyncMock())
-    monkeypatch.setattr(account_bot_runtime, "_record_polling_dead_letter", AsyncMock(side_effect=RuntimeError("redis down")))
+    def _dlq_down(**_kwargs):
+        processed.set()
+        raise RuntimeError("redis down")
+
+    monkeypatch.setattr(account_bot_runtime, "_record_polling_dead_letter", AsyncMock(side_effect=_dlq_down))
 
     async def _sleep(_seconds: float):
         return None
@@ -7075,15 +7085,17 @@ async def test_management_polling_failure_records_dlq_with_management_loop(monke
 
     row = AccountBot(account_id=1, enabled=True, bot_token_enc="enc")
     call_count = 0
+    processed = asyncio.Event()
 
     async def _call_bot_api(_token: str, _method: str, _payload: dict[str, object]):
         nonlocal call_count
         call_count += 1
         if call_count == 1:
             return {"result": [{"update_id": 7, "message": {"message_id": 1, "text": "/x", "chat": {"id": 1}}}]}
+        await asyncio.wait_for(processed.wait(), timeout=5)
         raise asyncio.CancelledError()
 
-    record_dlq = AsyncMock()
+    record_dlq = AsyncMock(side_effect=lambda **_kwargs: processed.set())
     monkeypatch.setattr(account_bot_runtime, "AsyncSessionLocal", lambda: _DB(row))
     monkeypatch.setattr(account_bot_service, "decrypt_bot_token", lambda _row: "management-token")
     monkeypatch.setattr(account_bot_runtime, "_event_framework_flags", AsyncMock(return_value={"inline_updates_enabled": False}))

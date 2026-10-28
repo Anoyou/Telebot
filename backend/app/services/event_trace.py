@@ -262,6 +262,10 @@ async def stop_trace_writer(timeout: float = TRACE_WRITE_DRAIN_TIMEOUT_SECONDS) 
     """Flush queued trace writes and stop the background writer task."""
 
     global _TRACE_WRITE_QUEUE, _TRACE_WRITE_TASK
+    try:
+        await stop_plugin_status_writer()
+    except Exception:  # noqa: BLE001
+        log.debug("plugin status writer stop failed", exc_info=True)
     await flush_trace_writes(timeout=timeout)
     task = _TRACE_WRITE_TASK
     if task is None:
@@ -339,6 +343,14 @@ def redact_payload_snapshot(payload: Any, *, include_native_raw: bool = False) -
     return redact_text(str(payload)[:SNAPSHOT_TEXT_LIMIT])
 
 
+PLUGIN_STATUS_FLUSH_INTERVAL_SECONDS = 0.5
+_PLUGIN_STATUS_CLEAR = object()
+# (account_id, plugin_key) → 合并后的待写字段；同一插件多次调用只保留最后状态。
+_PLUGIN_STATUS_PENDING: dict[tuple[int | None, str], dict[str, Any]] = {}
+_PLUGIN_STATUS_TASK: asyncio.Task[None] | None = None
+_PLUGIN_STATUS_STATS = {"merged": 0, "flushed_rows": 0, "flushes": 0, "failed": 0}
+
+
 async def update_plugin_runtime_status(
     *,
     account_id: int | None,
@@ -350,48 +362,132 @@ async def update_plugin_runtime_status(
     last_invocation_status: str | None = None,
     last_trace_id: str | None = None,
 ) -> None:
-    """Best-effort upsert for plugin diagnostics."""
+    """Best-effort plugin diagnostics, written in background batches.
+
+    热路径（每次插件调用 1–2 次）不再同步 upsert：字段合并进内存待写表，
+    后台每 ``PLUGIN_STATUS_FLUSH_INTERVAL_SECONDS`` 批量落库一次；进程退出时
+    由 ``stop_trace_writer`` / ``flush_plugin_runtime_status_writes`` 写完。
+    诊断状态最多延迟约 0.5 s 可见。
+    """
 
     key = str(plugin_key or "").strip()
     if not key:
         return
+    fields: dict[str, Any] = {}
+    if enabled is not None:
+        fields["enabled"] = bool(enabled)
+    if installed_version is not None:
+        fields["installed_version"] = installed_version
+    if load_status is not None:
+        fields["load_status"] = load_status
+    if last_load_error is not None:
+        fields["last_load_error"] = redact_text(str(last_load_error))
+    elif load_status is not None and str(load_status).lower() in {"active", "loaded", "ok"}:
+        fields["last_load_error"] = _PLUGIN_STATUS_CLEAR
+    if last_invocation_status is not None:
+        fields["last_invocation_status"] = last_invocation_status
+        fields["last_invoked_at"] = datetime.now(UTC)
+    if last_trace_id is not None:
+        fields["last_trace_id"] = last_trace_id
+    pending_key = (account_id, key)
+    current = _PLUGIN_STATUS_PENDING.get(pending_key)
+    if current is None:
+        _PLUGIN_STATUS_PENDING[pending_key] = fields
+    else:
+        current.update(fields)
+        _PLUGIN_STATUS_STATS["merged"] += 1
+    try:
+        _ensure_plugin_status_writer()
+    except RuntimeError:
+        # 没有运行中的事件循环（同步上下文）：直接写
+        await flush_plugin_runtime_status_writes()
+
+
+def _ensure_plugin_status_writer() -> None:
+    global _PLUGIN_STATUS_TASK
+    task = _PLUGIN_STATUS_TASK
+    if task is not None and not task.done() and _task_uses_current_loop(task):
+        return
+    asyncio.get_running_loop()
+    _PLUGIN_STATUS_TASK = asyncio.create_task(_plugin_status_writer_loop(), name="telepilot-plugin-status-writer")
+
+
+async def _plugin_status_writer_loop() -> None:
+    while True:
+        await asyncio.sleep(PLUGIN_STATUS_FLUSH_INTERVAL_SECONDS)
+        if not _PLUGIN_STATUS_PENDING:
+            return
+        await flush_plugin_runtime_status_writes()
+
+
+async def flush_plugin_runtime_status_writes() -> int:
+    """把待写的插件运行状态一次性批量落库；返回写入行数。"""
+
+    if not _PLUGIN_STATUS_PENDING:
+        return 0
+    batch = dict(_PLUGIN_STATUS_PENDING)
+    _PLUGIN_STATUS_PENDING.clear()
     try:
         async with AsyncSessionLocal() as db:
-            row = (
-                await db.execute(
-                    select(PluginRuntimeStatus).where(
-                        PluginRuntimeStatus.account_id == account_id,
-                        PluginRuntimeStatus.plugin_key == key,
+            for (account_id, key), fields in batch.items():
+                row = (
+                    await db.execute(
+                        select(PluginRuntimeStatus).where(
+                            PluginRuntimeStatus.account_id == account_id,
+                            PluginRuntimeStatus.plugin_key == key,
+                        )
                     )
-                )
-            ).scalar_one_or_none()
-            if row is None:
-                row = PluginRuntimeStatus(
-                    account_id=account_id,
-                    plugin_key=key,
-                    enabled=bool(enabled),
-                    installed_version=installed_version,
-                    load_status=load_status or "unknown",
-                )
-                db.add(row)
-            if enabled is not None:
-                row.enabled = bool(enabled)
-            if installed_version is not None:
-                row.installed_version = installed_version
-            if load_status is not None:
-                row.load_status = load_status
-            if last_load_error is not None:
-                row.last_load_error = redact_text(str(last_load_error))
-            elif load_status is not None and str(load_status).lower() in {"active", "loaded", "ok"}:
-                row.last_load_error = None
-            if last_invocation_status is not None:
-                row.last_invocation_status = last_invocation_status
-                row.last_invoked_at = datetime.now(UTC)
-            if last_trace_id is not None:
-                row.last_trace_id = last_trace_id
+                ).scalar_one_or_none()
+                if row is None:
+                    row = PluginRuntimeStatus(
+                        account_id=account_id,
+                        plugin_key=key,
+                        enabled=bool(fields.get("enabled", False)),
+                        installed_version=fields.get("installed_version"),
+                        load_status=fields.get("load_status") or "unknown",
+                    )
+                    db.add(row)
+                for name, value in fields.items():
+                    setattr(row, name, None if value is _PLUGIN_STATUS_CLEAR else value)
             await db.commit()
+        _PLUGIN_STATUS_STATS["flushes"] += 1
+        _PLUGIN_STATUS_STATS["flushed_rows"] += len(batch)
+        return len(batch)
+    except asyncio.CancelledError:
+        _merge_back_plugin_status(batch)
+        raise
     except Exception:  # noqa: BLE001
-        log.debug("plugin runtime status update failed plugin=%s account=%s", key, account_id, exc_info=True)
+        _PLUGIN_STATUS_STATS["failed"] += 1
+        log.debug("plugin runtime status batch write failed rows=%s", len(batch), exc_info=True)
+        return 0
+
+
+def _merge_back_plugin_status(batch: dict[tuple[int | None, str], dict[str, Any]]) -> None:
+    for pending_key, fields in batch.items():
+        newer = _PLUGIN_STATUS_PENDING.get(pending_key)
+        merged = dict(fields)
+        if newer:
+            merged.update(newer)
+        _PLUGIN_STATUS_PENDING[pending_key] = merged
+
+
+async def stop_plugin_status_writer() -> None:
+    """停机：写完待写状态并停止后台任务（stop_trace_writer 会调用）。"""
+
+    global _PLUGIN_STATUS_TASK
+    task = _PLUGIN_STATUS_TASK
+    _PLUGIN_STATUS_TASK = None
+    if task is not None and not task.done() and _task_uses_current_loop(task):
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+    await flush_plugin_runtime_status_writes()
+
+
+def plugin_status_writer_stats() -> dict[str, int]:
+    return {**_PLUGIN_STATUS_STATS, "pending": len(_PLUGIN_STATUS_PENDING)}
 
 
 async def cleanup_event_traces(
@@ -1061,5 +1157,8 @@ __all__ = [
     "stop_trace_writer",
     "trace_log_context",
     "trace_writer_stats",
+    "flush_plugin_runtime_status_writes",
+    "plugin_status_writer_stats",
+    "stop_plugin_status_writer",
     "update_plugin_runtime_status",
 ]

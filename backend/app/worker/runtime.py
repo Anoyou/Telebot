@@ -96,6 +96,9 @@ from .ipc import (
     GCMD_KILL_SWITCH,
     GCMD_RELOAD_GLOBAL,
     GLOBAL_CHANNEL,
+    RPC_LANE_LONG,
+    RPC_LANE_SHORT,
+    RPC_LONG_LANE_TIMEOUT_THRESHOLD_SECONDS,
     RPC_RESULT_TTL_SECONDS,
     IPCMessage,
     RuntimeLogPayload,
@@ -129,8 +132,10 @@ _BACKGROUND_RPC_COMMAND_TYPES = {
     CMD_RUN_INTERACTION_ACTION,
     CMD_AGENT_PLUGIN_TOOL,
 }
+# 每条通道（long / short）各自的并发与队列上限，见 _RpcCommandExecutor。
 _RPC_MAX_CONCURRENCY = 4
 _RPC_QUEUE_CAPACITY = 32
+_RPC_LANES = (RPC_LANE_SHORT, RPC_LANE_LONG)
 _RPC_EXECUTOR_STATS: dict[int, dict[str, int]] = {}
 
 
@@ -1141,8 +1146,35 @@ async def _reject_rpc_command(redis: Any, cmd: IPCMessage, error: str) -> None:
     await _ack_cmd(redis, cmd, ok=False, error=error)
 
 
+def _rpc_command_lane(cmd: IPCMessage) -> str:
+    """长短通道判定：主进程显式标记优先；旧主进程未标记时按剩余时限推断。"""
+
+    explicit = cmd.payload.get("rpc_lane")
+    if explicit in _RPC_LANES:
+        return str(explicit)
+    if cmd.type == CMD_AGENT_PLUGIN_TOOL:
+        return RPC_LANE_LONG
+    if cmd.type in {CMD_FETCH_AVATAR, CMD_GET_RECENT_PEERS}:
+        return RPC_LANE_SHORT
+    try:
+        deadline_at_ms = int(cmd.payload.get("deadline_at_ms") or 0)
+    except (TypeError, ValueError):
+        deadline_at_ms = 0
+    if deadline_at_ms > 0:
+        remaining = deadline_at_ms / 1000 - time.time()
+        # 留 0.5 s 余量：默认 15 s 时限的请求经 Redis 抵达时剩余略小于 15 s
+        if remaining > RPC_LONG_LANE_TIMEOUT_THRESHOLD_SECONDS + 0.5:
+            return RPC_LANE_LONG
+    return RPC_LANE_SHORT
+
+
 class _RpcCommandExecutor:
-    """每账号有界 RPC 执行器；控制面指令不进此队列。"""
+    """每账号有界 RPC 执行器；控制面指令不进此队列。
+
+    分 long / short 两条通道，各自 ``_RPC_MAX_CONCURRENCY`` 并发、
+    ``_RPC_QUEUE_CAPACITY`` 队列：AI 答疑这类 45–90 s 的长请求只占 long
+    通道，游戏、按钮、命令走 short 通道，不会排在长请求后面。
+    """
 
     def __init__(
         self,
@@ -1156,22 +1188,39 @@ class _RpcCommandExecutor:
         self.client = client
         self.account_id = account_id
         self.platform_scheduler = platform_scheduler
-        self.queue: asyncio.Queue[IPCMessage] = asyncio.Queue(maxsize=_RPC_QUEUE_CAPACITY)
+        self.queues: dict[str, asyncio.Queue[tuple[IPCMessage, float]]] = {
+            lane: asyncio.Queue(maxsize=_RPC_QUEUE_CAPACITY) for lane in _RPC_LANES
+        }
         self.workers: list[asyncio.Task[None]] = []
-        self.stats = {
+        self.stats: dict[str, int] = {
             "running": 0,
             "queued": 0,
             "accepted": 0,
             "rejected": 0,
             "completed": 0,
         }
+        for lane in _RPC_LANES:
+            self.stats[f"{lane}_running"] = 0
+            self.stats[f"{lane}_queued"] = 0
+            self.stats[f"{lane}_accepted"] = 0
+            self.stats[f"{lane}_wait_ms_max"] = 0
+            self.stats[f"{lane}_wait_ms_last"] = 0
         _RPC_EXECUTOR_STATS[account_id] = self.stats
+
+    def _refresh_queued(self) -> None:
+        total = 0
+        for lane, queue in self.queues.items():
+            depth = queue.qsize()
+            self.stats[f"{lane}_queued"] = depth
+            total += depth
+        self.stats["queued"] = total
 
     def start(self) -> None:
         if self.workers:
             return
         self.workers = [
-            asyncio.create_task(self._worker(), name=f"worker-rpc:{self.account_id}:{idx}")
+            asyncio.create_task(self._worker(lane), name=f"worker-rpc:{self.account_id}:{lane}:{idx}")
+            for lane in _RPC_LANES
             for idx in range(_RPC_MAX_CONCURRENCY)
         ]
 
@@ -1185,8 +1234,10 @@ class _RpcCommandExecutor:
             self.stats["rejected"] += 1
             await _reject_rpc_command(self.redis, cmd, "rpc deadline exceeded before enqueue")
             return False
+        lane = _rpc_command_lane(cmd)
+        queue = self.queues[lane]
         try:
-            self.queue.put_nowait(cmd)
+            queue.put_nowait((cmd, time.monotonic()))
         except asyncio.QueueFull:
             self.stats["rejected"] += 1
             await _reject_rpc_command(self.redis, cmd, "worker rpc overloaded")
@@ -1195,20 +1246,28 @@ class _RpcCommandExecutor:
                 self.account_id,
                 "warn",
                 "worker RPC 队列已满，拒绝过载请求",
-                queue_depth=self.queue.qsize(),
+                lane=lane,
+                queue_depth=queue.qsize(),
                 queue_capacity=_RPC_QUEUE_CAPACITY,
                 rejected=self.stats["rejected"],
             )
             return False
         self.stats["accepted"] += 1
-        self.stats["queued"] = self.queue.qsize()
+        self.stats[f"{lane}_accepted"] += 1
+        self._refresh_queued()
         return True
 
-    async def _worker(self) -> None:
+    async def _worker(self, lane: str = RPC_LANE_SHORT) -> None:
+        queue = self.queues[lane]
         while True:
-            cmd = await self.queue.get()
-            self.stats["queued"] = self.queue.qsize()
+            cmd, enqueued_at = await queue.get()
+            wait_ms = int((time.monotonic() - enqueued_at) * 1000)
+            self.stats[f"{lane}_wait_ms_last"] = wait_ms
+            if wait_ms > self.stats[f"{lane}_wait_ms_max"]:
+                self.stats[f"{lane}_wait_ms_max"] = wait_ms
+            self._refresh_queued()
             self.stats["running"] += 1
+            self.stats[f"{lane}_running"] += 1
             try:
                 if _rpc_deadline_expired(cmd):
                     self.stats["rejected"] += 1
@@ -1233,23 +1292,27 @@ class _RpcCommandExecutor:
                 )
             finally:
                 self.stats["running"] -= 1
-                self.queue.task_done()
+                self.stats[f"{lane}_running"] -= 1
+                queue.task_done()
 
     async def stop(self) -> None:
-        while True:
-            try:
-                self.queue.get_nowait()
-            except asyncio.QueueEmpty:
-                break
-            else:
-                self.queue.task_done()
-        self.stats["queued"] = 0
+        for queue in self.queues.values():
+            while True:
+                try:
+                    queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    break
+                else:
+                    queue.task_done()
+        self._refresh_queued()
         workers, self.workers = self.workers, []
         for task in workers:
             task.cancel()
         if workers:
             await asyncio.gather(*workers, return_exceptions=True)
         self.stats["running"] = 0
+        for lane in _RPC_LANES:
+            self.stats[f"{lane}_running"] = 0
 
 
 def worker_rpc_executor_stats(account_id: int) -> dict[str, int]:

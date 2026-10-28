@@ -41,3 +41,26 @@ def _reset_bot_api_and_llm_reliability_state() -> None:
     yield
     bot_api_limits.get_rate_limiter().reset()
     llm_reliability.get_circuit_breaker().reset()
+
+
+@pytest.fixture(autouse=True)
+def _isolate_bot_polling_runtime_state(monkeypatch):
+    """r11：polling 调度器 Redis 持久化、交互配置缓存、插件状态待写表在用例间隔离。"""
+
+    try:
+        from app.services import account_bot_runtime as runtime_mod
+        from app.services import event_trace as trace_mod
+        from app.services import polling_dispatcher as dispatcher_mod
+    except Exception:  # noqa: BLE001
+        yield
+        return
+    monkeypatch.setattr(dispatcher_mod, "REDIS_PERSISTENCE_ENABLED", False)
+    runtime_mod._INTERACTION_RUNTIME_CONFIG_CACHE.clear()
+    trace_mod._PLUGIN_STATUS_PENDING.clear()
+    trace_mod._PLUGIN_STATUS_TASK = None
+    yield
+    runtime_mod._INTERACTION_RUNTIME_CONFIG_CACHE.clear()
+    runtime_mod._MANAGEMENT_AGENT_TASKS.clear()
+    runtime_mod._MANAGEMENT_AGENT_LOCKS.clear()
+    trace_mod._PLUGIN_STATUS_PENDING.clear()
+    trace_mod._PLUGIN_STATUS_TASK = None

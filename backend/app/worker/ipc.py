@@ -101,6 +101,21 @@ class IPCMessage:
 
 
 # ── 便捷构造函数 ──────────────────────────────────────────────
+# 每账号 worker RPC 分两条通道：声明处理时限 > 15 s 的长请求（AI 答疑、Agent
+# 插件工具）走 long，其余（游戏、按钮、命令、规则）走 short，互不排队。
+RPC_LANE_LONG = "long"
+RPC_LANE_SHORT = "short"
+RPC_LONG_LANE_TIMEOUT_THRESHOLD_SECONDS = 15.0
+
+
+def rpc_lane_for_timeout(timeout_seconds: float | None) -> str:
+    try:
+        value = float(timeout_seconds) if timeout_seconds is not None else 0.0
+    except (TypeError, ValueError):
+        value = 0.0
+    return RPC_LANE_LONG if value > RPC_LONG_LANE_TIMEOUT_THRESHOLD_SECONDS else RPC_LANE_SHORT
+
+
 def make_cmd(type_: str, **payload: Any) -> str:
     return IPCMessage(type=type_, payload=payload).encode()
 
