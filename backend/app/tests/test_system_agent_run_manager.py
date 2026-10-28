@@ -10,8 +10,9 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from sqlalchemy import event as sa_event
 from sqlalchemy import select, text
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.crypto import decrypt_str, encrypt_str
 from app.db.models.system_agent import (
@@ -52,6 +53,7 @@ from app.services.system_agent.run_manager import (
     SystemAgentRunManager,
     _WorkerLeaseLost,
 )
+from app.tests._sqlite_engine import create_file_sqlite_engine
 
 
 class _ControlledService:
@@ -144,12 +146,14 @@ class _WaitingService:
 
 @pytest.fixture
 async def run_db(tmp_path):
-    engine = create_async_engine(
-        f"sqlite+aiosqlite:///{tmp_path / 'runs.db'}",
+    engine = create_file_sqlite_engine(
+        tmp_path / "runs.db",
         # Durable Run tests intentionally overlap a few short-lived sessions.
         # CI hosts can briefly queue those writers; SQLite's five-second default
         # otherwise turns ordinary scheduling delay into a false lock failure.
-        connect_args={"timeout": 30},
+        # 历史上的偶发 database is locked 根因是 shutdown 硬 cancel 打断了 DB 写
+        # （已改协作式关闭），不是这里的超时；WAL 只减少读阻塞写。
+        busy_timeout_seconds=30,
     )
     async with engine.begin() as conn:
         await conn.execute(text("CREATE TABLE web_user (id INTEGER PRIMARY KEY)"))
@@ -2019,6 +2023,161 @@ async def test_shutdown_requeues_owned_run_for_next_process(run_db) -> None:
     await recovery.cancel_run(run.id)
     await _wait_for_status(recovery, run.id, AGENT_RUN_CANCELLED)
 
+
+
+async def _start_owned_run(manager: SystemAgentRunManager, request_id: str) -> Any:
+    run = await manager.start_run(
+        session_id="session-1",
+        web_user_id=7,
+        client_request_id=request_id,
+        text="关闭时运行中",
+    )
+    await _wait_for_status(manager, run.id, AGENT_RUN_RUNNING)
+    for _ in range(200):
+        run = await manager.get_run(run.id)
+        if run.user_message_id is not None:
+            return run
+        await asyncio.sleep(0.01)
+    raise AssertionError("user message was not linked")
+
+
+@pytest.mark.asyncio
+async def test_shutdown_is_cooperative_and_never_invalidates_connections(run_db) -> None:
+    """回归：shutdown 不再硬 cancel 执行协程，DB await 不会被打断、连接不会被作废。
+
+    旧实现每次 shutdown 都会触发一次 ``invalidate(CancelledError)``；作废的
+    aiosqlite 连接仍持有写锁时，随后的 requeue 会等满 busy timeout 报
+    ``database is locked``（CI 偶发失败的根因）。
+    """
+
+    engine = run_db.kw["bind"]
+    invalidations: list[str] = []
+
+    def _on_invalidate(_dbapi_conn, _record, exc) -> None:
+        invalidations.append(type(exc).__name__ if exc is not None else "None")
+
+    sa_event.listen(engine.sync_engine.pool, "invalidate", _on_invalidate)
+    try:
+        service = _ControlledService()
+        manager = SystemAgentRunManager(
+            session_factory=run_db,
+            service_factory=lambda: service,
+            poll_interval=0.01,
+            heartbeat_seconds=0.5,
+            worker_id="cooperative-worker",
+        )
+        run = await _start_owned_run(manager, "request-cooperative-shutdown")
+        hard_cancelled: list[bool] = []
+        original_dispose = manager._dispose_engine
+
+        async def spy_dispose() -> None:
+            hard_cancelled.append(True)
+            await original_dispose()
+
+        manager._dispose_engine = spy_dispose  # type: ignore[method-assign]
+
+        await manager.shutdown()
+
+        assert hard_cancelled == []
+        assert invalidations == []
+        assert manager._tasks == {}
+        async with run_db() as db:
+            stored = await db.get(SystemAgentRun, run.id)
+            assert stored is not None and stored.status == AGENT_RUN_QUEUED
+            assert stored.claimed_by is None
+            # 关闭不写伪失败终态。
+            events = list(
+                (
+                    await db.execute(
+                        select(SystemAgentRunEvent).where(
+                            SystemAgentRunEvent.run_id == run.id
+                        )
+                    )
+                ).scalars()
+            )
+            assert all(row.event.get("type") != "done" for row in events)
+        # 同一个 manager 关闭后可以重新就绪并接管自己回退的 Run。
+        await manager.ensure_ready()
+        await _wait_for_status(manager, run.id, AGENT_RUN_RUNNING)
+        await manager.cancel_run(run.id)
+        await _wait_for_status(manager, run.id, AGENT_RUN_CANCELLED)
+    finally:
+        sa_event.remove(engine.sync_engine.pool, "invalidate", _on_invalidate)
+
+
+@pytest.mark.asyncio
+async def test_shutdown_hard_cancels_after_grace_then_disposes_and_requeues(run_db) -> None:
+    """兜底：任务在宽限期内没退出才硬 cancel，随后 dispose 引擎再按数据库事实回退。"""
+
+    service = _ControlledService()
+    manager = SystemAgentRunManager(
+        session_factory=run_db,
+        service_factory=lambda: service,
+        poll_interval=0.01,
+        worker_id="hard-cancel-worker",
+        shutdown_grace_seconds=0.2,
+    )
+    run = await _start_owned_run(manager, "request-hard-cancel-shutdown")
+
+    stuck = asyncio.Event()
+    never = asyncio.Event()
+    original_append = manager._append_event
+
+    async def stuck_append(run_id, source, **kwargs):
+        if source.get("type") == "assistant_message":
+            stuck.set()
+            await never.wait()  # 模拟一个不理会停止信号的慢操作
+        return await original_append(run_id, source, **kwargs)
+
+    manager._append_event = stuck_append  # type: ignore[method-assign]
+    service.release.set()
+    await asyncio.wait_for(stuck.wait(), 5)
+
+    disposed: list[bool] = []
+    original_dispose = manager._dispose_engine
+
+    async def spy_dispose() -> None:
+        disposed.append(True)
+        await original_dispose()
+
+    manager._dispose_engine = spy_dispose  # type: ignore[method-assign]
+
+    await asyncio.wait_for(manager.shutdown(), 10)
+
+    assert disposed == [True]
+    assert manager._tasks == {}
+    async with run_db() as db:
+        stored = await db.get(SystemAgentRun, run.id)
+        assert stored is not None
+        # 服务已经提交了助手回复，requeue 会按已提交结果收敛；否则回到 queued。
+        assert stored.status in {AGENT_RUN_QUEUED, AGENT_RUN_SUCCEEDED}
+        assert stored.claimed_by is None
+        assert stored.lease_expires_at is None
+
+
+@pytest.mark.asyncio
+async def test_db_critical_section_finishes_before_cancellation_propagates() -> None:
+    """``_run_uncancellable``：调用方被取消时，关键段仍跑完，然后才抛 CancelledError。"""
+
+    entered = asyncio.Event()
+    proceed = asyncio.Event()
+    committed: list[str] = []
+
+    async def critical() -> str:
+        entered.set()
+        await proceed.wait()
+        committed.append("commit")
+        return "ok"
+
+    caller = asyncio.create_task(run_manager_module._run_uncancellable(critical()))
+    await entered.wait()
+    caller.cancel()
+    await asyncio.sleep(0.01)
+    assert not caller.done()  # 仍在等关键段落盘
+    proceed.set()
+    with pytest.raises(asyncio.CancelledError):
+        await caller
+    assert committed == ["commit"]
 
 @pytest.mark.asyncio
 async def test_regenerate_run_reuses_latest_message_pair(run_db) -> None:

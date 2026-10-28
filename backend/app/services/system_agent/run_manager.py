@@ -3,20 +3,21 @@
 from __future__ import annotations
 
 import asyncio
+import functools
 import hashlib
 import json
 import logging
 import socket
 import time
 import uuid
-from collections.abc import AsyncIterator, Callable, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable, Coroutine, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from sqlalchemy import asc, desc, func, or_, select
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from ...crypto import decrypt_str, encrypt_str
 from ...db.base import AsyncSessionLocal
@@ -81,6 +82,51 @@ def _stream_monotonic() -> float:
     return time.monotonic()
 
 
+# —— 进程关闭 ——
+# shutdown() 先发停止信号，等执行协程在事件边界自行把 Run 回退为 queued；
+# 超过该秒数仍未退出的任务才硬 cancel（兜底）。
+SHUTDOWN_GRACE_SECONDS = 5.0
+# 停止信号到达时若 Agent 流正在产出下一条事件，最多再等这么久让它停在 yield 点，
+# 之后关闭生成器不会打断其中的数据库读写；超时（通常在等 LLM 网络）才取消。
+_SHUTDOWN_STREAM_SETTLE_SECONDS = 0.5
+
+
+def _consume_task_result(task: asyncio.Task[Any]) -> None:
+    if not task.cancelled():
+        task.exception()
+
+
+async def _run_uncancellable[T](awaitable: Awaitable[T]) -> T:
+    """在独立 task 里把一段“数据库写 + 提交”跑完，外层被取消也不打断它。
+
+    取消如果落在 ``async with session`` 内的 DB await 上，SQLAlchemy 会作废该连接；
+    SQLite 上已写未提交的锁可能要等 GC 才释放（测试里的 database is locked），
+    PostgreSQL 上则是 idle-in-transaction 连接持有行锁。这里先等关键段提交或
+    回滚完毕，再把 CancelledError 继续向上抛，调用方的取消语义不变。
+    """
+
+    task = asyncio.ensure_future(awaitable)
+    task.add_done_callback(_consume_task_result)
+    try:
+        return await asyncio.shield(task)
+    except asyncio.CancelledError:
+        if not task.done():
+            await asyncio.wait({task})
+        raise
+
+
+def _db_critical[**P, T](
+    fn: Callable[P, Coroutine[Any, Any, T]],
+) -> Callable[P, Coroutine[Any, Any, T]]:
+    """把整段事务方法标记为不可取消的关键段（见 ``_run_uncancellable``）。"""
+
+    @functools.wraps(fn)
+    async def wrapper(*args: P.args, **kwargs: P.kwargs) -> T:
+        return await _run_uncancellable(fn(*args, **kwargs))
+
+    return wrapper
+
+
 class RunConflictError(RuntimeError):
     """请求与已有幂等键、队列容量或当前运行状态冲突。"""
 
@@ -118,6 +164,13 @@ class _WorkerLeaseLost(Exception):
     """当前执行协程已失去数据库 claim，必须静默退出并让新 worker 接管。"""
 
 
+class _RunShutdown(Exception):
+    """进程正在关闭：执行协程在事件边界退出，Run 回退为 queued 留给下一个进程。
+
+    与 ``_RunCancelled``（用户取消，写取消终态）语义不同。
+    """
+
+
 class SystemAgentRunManager:
     """数据库队列为事实源，进程内 task 只是当前 worker 的执行载体。"""
 
@@ -132,6 +185,7 @@ class SystemAgentRunManager:
         heartbeat_seconds: float = 5.0,
         recovery_seconds: float | None = None,
         worker_id: str | None = None,
+        shutdown_grace_seconds: float = SHUTDOWN_GRACE_SECONDS,
     ) -> None:
         self._session_factory = session_factory
         self._service_factory = service_factory
@@ -154,6 +208,10 @@ class SystemAgentRunManager:
         self._recovery_task: asyncio.Task[None] | None = None
         self._ready = False
         self._ready_lock = asyncio.Lock()
+        self._shutdown_grace_seconds = max(0.0, float(shutdown_grace_seconds))
+        # 协作式关闭信号：执行、心跳、恢复循环都监听它，在安全边界自行退出。
+        self._stopping = False
+        self._stop_event = asyncio.Event()
 
     async def ensure_ready(self) -> None:
         """恢复过期 lease，并继续所有可执行的 queued Run。"""
@@ -170,27 +228,66 @@ class SystemAgentRunManager:
                 self._kick_session(session_id)
 
     async def shutdown(self) -> None:
-        """停止本进程拥有的调度与执行任务，运行中的 Run 回退为可恢复队列。"""
+        """停止本进程拥有的调度与执行任务，运行中的 Run 回退为可恢复队列。
+
+        协作式：先发停止信号，执行协程在下一个事件边界自行把 Run 回退为
+        queued 并退出，数据库写与提交不会被中途打断；等待
+        ``shutdown_grace_seconds`` 仍未退出的任务才硬 cancel，硬 cancel 后
+        dispose 引擎，确保没有被作废却仍持锁的连接留在进程里。
+        """
+
+        self._stopping = True
+        self._stop_event.set()
 
         recovery_task = self._recovery_task
         self._recovery_task = None
+        tasks: list[asyncio.Task[None]] = []
         if recovery_task is not None:
-            recovery_task.cancel()
-            await asyncio.gather(recovery_task, return_exceptions=True)
-
-        dispatch_tasks = list(self._dispatch_tasks.values())
-        for task in dispatch_tasks:
-            task.cancel()
-        if dispatch_tasks:
-            await asyncio.gather(*dispatch_tasks, return_exceptions=True)
-
-        run_tasks = list(self._tasks.values())
-        for task in run_tasks:
-            task.cancel()
-        if run_tasks:
-            await asyncio.gather(*run_tasks, return_exceptions=True)
+            tasks.append(recovery_task)
+        tasks.extend(self._dispatch_tasks.values())
+        tasks.extend(self._tasks.values())
+        pending: set[asyncio.Task[None]] = set()
+        if tasks:
+            _done, pending = await asyncio.wait(
+                tasks,
+                timeout=self._shutdown_grace_seconds,
+            )
+        # 调度任务可能在等待期间刚把 claim 交给新的执行 task；再收一次。
+        late = [
+            task
+            for task in self._tasks.values()
+            if task not in tasks and not task.done()
+        ]
+        if late:
+            _done, late_pending = await asyncio.wait(
+                late,
+                timeout=self._shutdown_grace_seconds,
+            )
+            pending |= late_pending
+        if pending:
+            log.warning(
+                "system agent shutdown grace expired; hard cancelling %d task(s) worker=%s",
+                len(pending),
+                self._worker_id,
+            )
+            for task in pending:
+                task.cancel()
+            await asyncio.gather(*pending, return_exceptions=True)
+            await self._dispose_engine()
 
         # 调度器可能已提交 claim、但尚未来得及注册进程内 task；以数据库事实源兜底。
+        for run_id in await self._claimed_run_ids():
+            await self._requeue_claimed_run(run_id)
+
+        self._dispatch_tasks.clear()
+        self._tasks.clear()
+        self._cancel_events.clear()
+        self._ready = False
+        self._stopping = False
+        self._stop_event = asyncio.Event()
+
+    @_db_critical
+    async def _claimed_run_ids(self) -> list[str]:
         async with self._session_factory() as db:
             claimed_result = await db.execute(
                 select(SystemAgentRun.id).where(
@@ -198,14 +295,30 @@ class SystemAgentRunManager:
                     SystemAgentRun.claimed_by == self._worker_id,
                 )
             )
-            claimed_run_ids = list(claimed_result.scalars())
-        for run_id in claimed_run_ids:
-            await self._requeue_claimed_run(run_id)
+            return list(claimed_result.scalars())
 
-        self._dispatch_tasks.clear()
-        self._tasks.clear()
-        self._cancel_events.clear()
-        self._ready = False
+    async def _dispose_engine(self) -> None:
+        """硬 cancel 之后关闭连接池里的连接，让被打断的事务随连接一起结束。"""
+
+        bind = getattr(self._session_factory, "kw", {}).get("bind")
+        if not isinstance(bind, AsyncEngine):
+            return
+        try:
+            await bind.dispose()
+        except Exception:  # noqa: BLE001
+            log.exception(
+                "system agent shutdown engine dispose failed worker=%s",
+                self._worker_id,
+            )
+
+    async def _wait_for_stop(self, timeout: float) -> bool:
+        """睡 ``timeout`` 秒；期间收到停止信号则提前返回 True。"""
+
+        try:
+            await asyncio.wait_for(self._stop_event.wait(), timeout)
+        except TimeoutError:
+            return False
+        return True
 
     def _start_recovery_loop(self) -> None:
         current = self._recovery_task
@@ -219,7 +332,8 @@ class SystemAgentRunManager:
         """持续接管其它进程遗留的过期 lease 与提交后未调度的 queued Run。"""
 
         while True:
-            await asyncio.sleep(self._recovery_seconds)
+            if await self._wait_for_stop(self._recovery_seconds):
+                return
             try:
                 session_ids = await self._recover_expired_and_queued_runs()
             except asyncio.CancelledError:
@@ -233,6 +347,7 @@ class SystemAgentRunManager:
             for session_id in session_ids:
                 self._kick_session(session_id)
 
+    @_db_critical
     async def _recover_expired_and_queued_runs(self) -> set[str]:
         now = datetime.now(UTC)
         session_ids: set[str] = set()
@@ -2080,16 +2195,24 @@ class SystemAgentRunManager:
                 pending.updated_at = now
 
     def _kick_session(self, session_id: str) -> None:
+        if self._stopping:
+            # 关闭中不再领取新任务；queued Run 留给下一个进程的恢复扫描。
+            return
         current = self._dispatch_tasks.get(session_id)
         if current is not None and not current.done():
             return
-        task = asyncio.create_task(self._dispatch_session(session_id))
+        # 调度只有短事务：领取 claim 的提交不可被取消打断。
+        task = asyncio.create_task(
+            _run_uncancellable(self._dispatch_session(session_id))
+        )
         self._dispatch_tasks[session_id] = task
         task.add_done_callback(
             lambda done, sid=session_id: self._dispatch_done(sid, done)
         )
 
     async def _dispatch_session(self, session_id: str) -> None:
+        if self._stopping:
+            return
         run_id: str | None = None
         request: _RunRequest | None = None
         request_error: Exception | None = None
@@ -2189,6 +2312,9 @@ class SystemAgentRunManager:
             await self._pause_following(session_id, AGENT_RUN_FAILED)
             return
         if request is None:
+            return
+        if self._stopping:
+            # claim 已提交但进程正在关闭：不再启动执行，由 shutdown 按数据库事实回退。
             return
         cancel_event = asyncio.Event()
         self._cancel_events[run_id] = cancel_event
@@ -2375,14 +2501,17 @@ class SystemAgentRunManager:
                     request.session_id,
                     AGENT_RUN_CANCELLED,
                 )
-        except asyncio.CancelledError:
-            # 进程正常关闭时保留 queued+lease 恢复语义，不写伪失败终态。
-            heartbeat.cancel()
-            try:
-                await heartbeat
-            except asyncio.CancelledError:
-                pass
+        except _RunShutdown:
+            # 协作式关闭：此处没有进行中的 DB 写，直接回退为 queued，不写伪失败终态。
+            await self._stop_heartbeat(heartbeat)
             await self._requeue_claimed_run(run_id)
+        except asyncio.CancelledError:
+            # 硬 cancel 兜底：进程关闭时保留 queued+lease 恢复语义，不写伪失败终态。
+            await self._stop_heartbeat(heartbeat)
+            if not self._stopping:
+                await self._requeue_claimed_run(run_id)
+            # shutdown 硬 cancel 时由它先 dispose 引擎、再按数据库事实统一回退，
+            # 避免在被打断的连接释放前抢同一行锁。
             raise
         except _WorkerLeaseLost:
             log.info(
@@ -2437,11 +2566,20 @@ class SystemAgentRunManager:
             )
         finally:
             if not heartbeat.done():
-                heartbeat.cancel()
-                try:
-                    await heartbeat
-                except asyncio.CancelledError:
-                    pass
+                await self._stop_heartbeat(heartbeat)
+
+    @staticmethod
+    async def _stop_heartbeat(heartbeat: asyncio.Task[None]) -> None:
+        # 心跳的续租事务是不可取消关键段，这里的 cancel 只会打断它的 sleep，
+        # 或等它把正在进行的续租提交完。
+        if not heartbeat.done():
+            heartbeat.cancel()
+        try:
+            await heartbeat
+        except asyncio.CancelledError:
+            pass
+        except Exception:  # noqa: BLE001
+            pass
 
     async def _heartbeat(
         self,
@@ -2449,24 +2587,32 @@ class SystemAgentRunManager:
         cancel_event: asyncio.Event,
     ) -> None:
         while True:
-            await asyncio.sleep(self._heartbeat_seconds)
-            async with self._session_factory() as db:
-                row = await db.get(SystemAgentRun, run_id)
-                if (
-                    row is None
-                    or row.status != AGENT_RUN_RUNNING
-                    or row.claimed_by != self._worker_id
-                ):
-                    cancel_event.set()
-                    return
-                now = datetime.now(UTC)
-                row.heartbeat_at = now
-                row.lease_expires_at = now + timedelta(seconds=self._lease_seconds)
-                row.updated_at = now
-                should_cancel = bool(row.cancel_requested)
-                await db.commit()
-            if should_cancel:
+            if await self._wait_for_stop(self._heartbeat_seconds):
+                # 关闭中不再续租；执行协程会在事件边界回退 Run。
+                return
+            owned, should_cancel = await self._renew_lease(run_id)
+            if not owned or should_cancel:
                 cancel_event.set()
+            if not owned:
+                return
+
+    @_db_critical
+    async def _renew_lease(self, run_id: str) -> tuple[bool, bool]:
+        async with self._session_factory() as db:
+            row = await db.get(SystemAgentRun, run_id)
+            if (
+                row is None
+                or row.status != AGENT_RUN_RUNNING
+                or row.claimed_by != self._worker_id
+            ):
+                return False, False
+            now = datetime.now(UTC)
+            row.heartbeat_at = now
+            row.lease_expires_at = now + timedelta(seconds=self._lease_seconds)
+            row.updated_at = now
+            should_cancel = bool(row.cancel_requested)
+            await db.commit()
+            return True, should_cancel
 
     async def _next_event(
         self,
@@ -2476,15 +2622,21 @@ class SystemAgentRunManager:
         *,
         run_id: str,
     ) -> dict[str, Any]:
+        if self._stop_event.is_set():
+            raise _RunShutdown
         if cancel_event.is_set():
             raise _RunCancelled
         next_task = asyncio.create_task(anext(stream))
         cancel_task = asyncio.create_task(cancel_event.wait())
+        stop_task = asyncio.create_task(self._stop_event.wait())
         try:
             done, _pending = await asyncio.wait(
-                {next_task, cancel_task, heartbeat},
+                {next_task, cancel_task, heartbeat, stop_task},
                 return_when=asyncio.FIRST_COMPLETED,
             )
+            if self._stop_event.is_set():
+                await self._settle_stream_for_shutdown(stream, next_task)
+                raise _RunShutdown
             if cancel_task in done and cancel_event.is_set():
                 next_task.cancel()
                 try:
@@ -2506,10 +2658,48 @@ class SystemAgentRunManager:
                 raise _WorkerLeaseLost(run_id)
             return await next_task
         finally:
+            if not stop_task.done():
+                stop_task.cancel()
             if not cancel_task.done():
                 cancel_task.cancel()
             if not next_task.done():
                 next_task.cancel()
+
+    async def _settle_stream_for_shutdown(
+        self,
+        stream: AsyncIterator[dict[str, Any]],
+        next_task: asyncio.Task[dict[str, Any]],
+    ) -> None:
+        """关闭时让 Agent 流停在安全点再收尾。
+
+        先给正在产出的下一条事件一个短窗口：流停在 yield 点后再 ``aclose()``，
+        生成器里的数据库读写不会被打断（该事件不落库，下个进程会整轮重试）。
+        窗口内没产出（通常在等 LLM 网络）才取消它。
+        """
+
+        if not next_task.done():
+            await asyncio.wait(
+                {next_task},
+                timeout=min(
+                    _SHUTDOWN_STREAM_SETTLE_SECONDS,
+                    self._shutdown_grace_seconds / 4,
+                ),
+            )
+        if not next_task.done():
+            next_task.cancel()
+        try:
+            await next_task
+        except (asyncio.CancelledError, StopAsyncIteration):
+            pass
+        except Exception:  # noqa: BLE001
+            # 流本身的异常在关闭路径上不再处理；Run 会整轮重试。
+            pass
+        aclose = getattr(stream, "aclose", None)
+        if aclose is not None:
+            try:
+                await aclose()
+            except Exception:  # noqa: BLE001
+                pass
 
     async def _consume_steers(self, run_id: str) -> list[str | dict[str, Any]]:
         values: list[str | dict[str, Any]] = []
@@ -2683,6 +2873,7 @@ class SystemAgentRunManager:
         item.status = RUN_INPUT_APPLIED
         item.applied_at = now
 
+    @_db_critical
     async def _link_user_message(
         self,
         run_id: str,
@@ -2720,6 +2911,7 @@ class SystemAgentRunManager:
             run.updated_at = datetime.now(UTC)
             await db.commit()
 
+    @_db_critical
     async def _append_event(
         self,
         run_id: str,
@@ -2772,6 +2964,7 @@ class SystemAgentRunManager:
             )
         await self._append_event(run_id, {"type": "done", "ok": False})
 
+    @_db_critical
     async def _update_usage(self, run_id: str, usage: dict[str, Any]) -> None:
         async with self._session_factory() as db:
             row = await db.get(SystemAgentRun, run_id, with_for_update=True)
@@ -2785,6 +2978,7 @@ class SystemAgentRunManager:
             row.updated_at = datetime.now(UTC)
             await db.commit()
 
+    @_db_critical
     async def _finish_run(
         self,
         run_id: str,
@@ -2833,6 +3027,7 @@ class SystemAgentRunManager:
                     pending.updated_at = now
             await db.commit()
 
+    @_db_critical
     async def _pause_following(self, session_id: str, reason: str) -> None:
         async with self._session_factory() as db:
             session = await db.get(
@@ -2851,6 +3046,7 @@ class SystemAgentRunManager:
             if changed:
                 await db.commit()
 
+    @_db_critical
     async def _resume_all_pending(self, session_id: str) -> None:
         async with self._session_factory() as db:
             session = await db.get(
@@ -2905,6 +3101,7 @@ class SystemAgentRunManager:
             row = await db.get(SystemAgentRun, run_id)
             return bool(row is not None and row.paused_reason == "stop_replace")
 
+    @_db_critical
     async def _requeue_claimed_run(self, run_id: str) -> None:
         async with self._session_factory() as db:
             row = await db.get(SystemAgentRun, run_id, with_for_update=True)

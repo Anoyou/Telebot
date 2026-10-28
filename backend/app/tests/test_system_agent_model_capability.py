@@ -4,7 +4,7 @@ import asyncio
 from datetime import UTC, datetime
 
 import pytest
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.db.models.system import SystemSetting
 from app.services.llm_client import LLMError, LLMErrorScope
@@ -12,11 +12,12 @@ from app.services.llm_dto import LLMProviderDTO
 from app.services.llm_protocol import ModelResponse, ToolCall
 from app.services.system_agent import model_capability
 from app.services.system_agent.config import ResolvedAgentProviders
+from app.tests._sqlite_engine import create_file_sqlite_engine
 
 
 @pytest.fixture
 async def setting_db(tmp_path):
-    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'settings.sqlite'}")
+    engine = create_file_sqlite_engine(tmp_path / "settings.sqlite")
     async with engine.begin() as conn:
         await conn.run_sync(SystemSetting.__table__.create)
     factory = async_sessionmaker(engine, expire_on_commit=False)

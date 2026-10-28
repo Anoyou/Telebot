@@ -14,7 +14,7 @@ from cryptography.hazmat.primitives.asymmetric import ec, rsa
 from fastapi import FastAPI
 from pydantic import ValidationError
 from sqlalchemy import create_engine, select
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.api import apns as api
 from app.crypto import decrypt_str
@@ -27,6 +27,7 @@ from app.schemas.apns import ApnsConfigPatch, ApnsDeviceRegister
 from app.scripts.rekey import rekey_database
 from app.services import apns
 from app.services.redactor import redact_text, redact_value
+from app.tests._sqlite_engine import create_file_sqlite_engine
 
 ORIGIN_HASH = hashlib.sha256(b"https://example.test").hexdigest()
 
@@ -39,7 +40,7 @@ def pem(key=None):
 
 @pytest.fixture
 async def db_factory(tmp_path):
-    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'apns.db'}")
+    engine = create_file_sqlite_engine(tmp_path / "apns.db")
     async with engine.begin() as connection:
         for model in (SystemSetting, WebUser, SystemAgentSession, SystemAgentAction, SystemAgentRun):
             await connection.run_sync(model.__table__.create)
@@ -47,8 +48,10 @@ async def db_factory(tmp_path):
     async with factory() as db:
         db.add(WebUser(id=1, username="admin", password_hash="test", pwd_version=0))
         await db.commit()
-    yield factory
-    await engine.dispose()
+    try:
+        yield factory
+    finally:
+        await engine.dispose()
 
 
 async def configured(db):

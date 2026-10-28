@@ -20,6 +20,7 @@ from app.db.models.feature import AccountFeature
 from app.db.models.system import SystemSetting
 from app.services import plugin_install_service, remote_plugin_service
 from app.services.system_agent import model_capability
+from app.tests._sqlite_engine import create_file_sqlite_engine
 from app.worker.plugins import loader
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -35,7 +36,7 @@ async def cache_database(request, tmp_path):
         schema = f"closure_{uuid4().hex}"
         engine = create_async_engine(url, connect_args={"server_settings": {"search_path": schema}})
     else:
-        engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'cache.sqlite'}")
+        engine = create_file_sqlite_engine(tmp_path / "cache.sqlite")
     try:
         async with engine.begin() as connection:
             if schema:
@@ -63,7 +64,7 @@ def test_staging_cleanup_preserves_registered_directory_shapes(tmp_path, service
 
 @pytest.mark.asyncio
 async def test_failed_plugin_rollback_does_not_poison_next_activation(tmp_path, monkeypatch) -> None:
-    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'features.sqlite'}")
+    engine = create_file_sqlite_engine(tmp_path / "features.sqlite")
     factory = async_sessionmaker(engine, expire_on_commit=False)
     try:
         async with engine.begin() as connection:
