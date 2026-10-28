@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.db.models.command import LLMProvider, LLMProviderKey
 from app.db.models.system import SystemSetting
@@ -23,6 +23,7 @@ from app.services.system_agent import memory_compress, model_capability
 from app.services.system_agent import runtime as runtime_module
 from app.services.system_agent.config import CONFIG_KEY, ResolvedAgentProviders, tools_models_for_dto
 from app.services.system_agent.registry import ToolRegistry, ToolSpec
+from app.tests._sqlite_engine import create_file_sqlite_engine
 
 
 @pytest.fixture
@@ -35,7 +36,7 @@ async def selection_env(tmp_path, monkeypatch):
     monkeypatch.setattr(socket, "getaddrinfo", no_network)
     monkeypatch.setattr(model_capability, "build_client_from_dto", no_network)
 
-    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'selection.sqlite'}")
+    engine = create_file_sqlite_engine(tmp_path / "selection.sqlite")
     async with engine.begin() as conn:
         await conn.execute(text("CREATE TABLE proxy (id INTEGER PRIMARY KEY)"))
         for table in (LLMProvider.__table__, LLMProviderKey.__table__, SystemSetting.__table__):

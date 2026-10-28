@@ -19,8 +19,13 @@ import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT / "backend"))
+# 必须用本仓库的 backend/app：原先判断的是 REPO_ROOT 却插入 REPO_ROOT/backend，
+# PYTHONPATH 含仓库根（CI / pytest 的常见设置）时就不插入，``app`` 会落到 venv
+# 里可编辑安装指向的另一个检出（例如别的 worktree 的旧代码），回放结果随之漂移。
+_BACKEND_DIR = str(REPO_ROOT / "backend")
+if _BACKEND_DIR in sys.path:
+    sys.path.remove(_BACKEND_DIR)
+sys.path.insert(0, _BACKEND_DIR)
 
 from app.services.system_agent.tool_routing import (  # noqa: E402
     domain_catalog,

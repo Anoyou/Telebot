@@ -25,6 +25,19 @@
 
 ## [Unreleased]
 
+## [0.106.0-beta.18] - 2026-10-29 · patch（补丁预发布） · System Agent 协作式关闭，根治 database is locked
+
+### System Agent（进程关闭）
+
+- 后台助手任务的进程关闭改为协作式：先发停止信号，运行中的任务在下一个事件边界自己把本轮回退为排队（下个进程接着跑），等满 5 秒仍未退出的才强制取消；强制取消后会关闭数据库连接池，再按数据库记录统一回退。此前关闭时直接取消任务，取消可能正好落在数据库写入和提交之间，留下“已作废但仍持锁”的连接：测试里表现为偶发 `database is locked`，生产 PostgreSQL 上则可能留下持行锁的空闲事务，拖住关闭或阻塞其它进程接管。
+- 运行事件追加、关联用户消息、心跳续租、用量记录、结束/回退本轮、暂停或恢复后续排队、恢复扫描、领取任务这些数据库写入改为不可取消的关键段：外层被取消时先等它提交或回滚完，再继续取消。
+
+### 测试与工具
+
+- 文件型 SQLite 测试夹具统一开启 WAL（新增 `app/tests/_sqlite_engine.py`），teardown 时都会 dispose 引擎。
+- 新增回归用例：关闭过程不再作废任何数据库连接；宽限期超时才硬取消并 dispose 后回退；关键段在取消时仍会跑完。6 进程并行复现脚本跑 210 次 0 失败（修复前 204 次失败 25 次，约 12%；只开 WAL 不改代码仍会失败）。
+- `scripts/capture-route-selected.py` 总是优先使用本仓库的 `backend/app`：原先判断条件写错，`PYTHONPATH` 含仓库根时会改用虚拟环境里可编辑安装指向的另一个检出，导致 `test_system_agent_routing_golden.py::test_capture_script_produces_replayable_jsonl` 在本地误报（golden 本身没有过期）。
+
 ## [0.106.0-beta.17] - 2026-10-28 · patch（补丁预发布） · 访客回复支持插件 callback 按钮（AI 答疑访客模式失败可重试）
 
 ### 交互 Bot 与插件（访客模式）
