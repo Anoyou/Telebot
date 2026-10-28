@@ -63,4 +63,10 @@ def _isolate_bot_polling_runtime_state(monkeypatch):
     runtime_mod._MANAGEMENT_AGENT_TASKS.clear()
     runtime_mod._MANAGEMENT_AGENT_LOCKS.clear()
     trace_mod._PLUGIN_STATUS_PENDING.clear()
+    task = trace_mod._PLUGIN_STATUS_TASK
+    if task is not None and not task.done():
+        try:
+            task.cancel()
+        except Exception:  # noqa: BLE001
+            pass
     trace_mod._PLUGIN_STATUS_TASK = None

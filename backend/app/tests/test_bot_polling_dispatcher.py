@@ -260,6 +260,35 @@ async def test_dispatcher_cancelled_update_is_replayed_by_next_poller(monkeypatc
 
 
 @pytest.mark.asyncio
+async def test_dispatcher_does_not_replay_own_completed_update_when_redis_finish_failed(monkeypatch) -> None:
+    monkeypatch.setattr(polling_dispatcher, "REDIS_PERSISTENCE_ENABLED", True)
+    redis = _FakeRedis()
+    runs: list[int] = []
+
+    async def process(_token: str, update: dict[str, Any]) -> None:
+        runs.append(update["update_id"])
+
+    dispatcher = _dispatcher(process, redis=redis)
+    original_hdel = redis.hdel
+
+    async def broken_hdel(*_args: Any) -> int:
+        raise RuntimeError("redis blip")
+
+    redis.hdel = broken_hdel  # type: ignore[method-assign]
+    await dispatcher.submit("123:abc", [_upd(7, -1)])
+    await dispatcher.wait_idle(timeout=1)
+    redis.hdel = original_hdel  # type: ignore[method-assign]
+    dispatcher._redis_disabled_until = 0.0
+    assert "7" in redis.hashes["account_bot:polling_pending:interaction:1:123"]
+    redis.data.pop("account_bot:polling_claim:interaction:1:123:7", None)  # run claim 过期
+    await dispatcher.restore_pending("123:abc", force=True)
+    await dispatcher.wait_idle(timeout=1)
+    assert runs == [7]
+    assert redis.hashes["account_bot:polling_pending:interaction:1:123"] == {}
+    await dispatcher.aclose()
+
+
+@pytest.mark.asyncio
 async def test_dispatcher_skips_update_running_elsewhere_until_claim_expires(monkeypatch) -> None:
     """重启交接/崩溃：别的进程还持有 run claim 时不重复处理；claim 过期后补投。"""
 

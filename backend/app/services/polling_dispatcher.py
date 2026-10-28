@@ -102,6 +102,8 @@ class PollingUpdateDispatcher:
         self._inflight: set[int] = set()
         self._running: dict[int, str] = {}
         self._seen: OrderedDict[int, None] = OrderedDict()
+        # 本进程已处理完的 update：补投扫尾时跳过（防止 finish 写 Redis 失败后被重复处理）
+        self._completed: OrderedDict[int, None] = OrderedDict()
         self._pending_count = 0
         self._capacity = asyncio.Event()
         self._capacity.set()
@@ -341,6 +343,9 @@ class PollingUpdateDispatcher:
                 continue
             if not isinstance(update, dict) or update_id in self._inflight:
                 continue
+            if update_id in self._completed:
+                await self._finish_claim(token, update_id)
+                continue
             items.append((update_id, update))
         restored = 0
         for update_id, update in sorted(items, key=lambda item: item[0]):
@@ -421,6 +426,9 @@ class PollingUpdateDispatcher:
         if finished:
             if update_id is not None:
                 self._running.pop(update_id, None)
+                self._completed[update_id] = None
+                while len(self._completed) > SEEN_CACHE_SIZE:
+                    self._completed.popitem(last=False)
                 await self._finish_claim(token, update_id)
             if error is None:
                 self.stats["completed"] += 1

@@ -25,6 +25,18 @@
 
 ## [Unreleased]
 
+## [0.106.0-beta.21] - 2026-10-29 · patch（补丁预发布） · Bot 响应不再互相堵塞
+
+### Bot 响应：不再互相堵塞（审计 Top 1 / 2 / 8 / 9）
+- **交互 Bot 与管理 Bot 的 polling 不再等整批处理完**：拉取与处理解耦，update 按会话进入各自的有序队列由常驻任务持续消费，polling 入队后立即发下一次 `getUpdates`。同一会话严格保序、不同会话并行（全局并发上限 8，已拉取未处理完超过 256 条时暂停拉取）。一条 45–90 秒的 AI 提问只会挡住同一会话的后续消息，其它群的消息、游戏按钮、`/reset` 不再排队。
+- **update_id 去重与重启补投**：进程内最近 id + Redis claim（处理中 / 已完成，键含 bot id，换 Token 不串号）保证同一 update 只处理一次；已拉取未处理完的 update 记在 Redis pending 中，重启或崩溃后由新的 polling 先补投（处理中被重启打断的会重新处理，与旧版“整批重放”语义一致）。失败 update 仍按原样重试 2 次后进 DLQ。Redis 不可用时降级为内存去重。
+- **管理 Bot 的 Agent 查询放后台**：handler 立即返回，同一 chat 的 `/pause`、`/agent stop`、其它命令不再被几十秒到几分钟的 Agent 运行挡住；同一用户的多条 Agent 文本仍按到达顺序串行。访客模式（只能回复一次）仍在线等待。真正停机才取消后台转发，配置重启时让当前一轮答完。
+- **主进程等待 worker 时不再占着数据库连接**：交互 handler 在发 worker RPC 前结束只读事务、把连接还给连接池（有未提交写入时保持原样），session 之后可继续使用。生产默认池 5+2 下，8 个并发 3 秒 AI 提问时 Web/iOS API 拿连接从“池耗尽、30 秒超时报错”降到约 1 ms。
+- **插件运行状态改为后台批量写**：`update_plugin_runtime_status` 不再在每次插件调用时同步 upsert，而是按（账号, 插件）合并后每 0.5 秒批量落库；主进程与账号 worker 退出时（`stop_trace_writer`）一定写完。诊断状态最多晚约 0.5 秒可见。
+- **账号 worker 的 RPC 分长短两条通道**：声明处理时限 > 15 秒的入口（AI 答疑等）与 Agent 插件工具走 long 通道，游戏、按钮、命令走 short 通道，各自 4 并发、32 队列；AI 忙时短请求不再排队（实测按钮从 5 秒降到 52 毫秒）。RPC 统计新增 `long_*` / `short_*` 运行数、排队数与排队等待时间。
+- **热路径去掉 N+1**：交互 Bot 不再每轮 SCAN 整个 Redis 再逐个 GET 会话，改为账号级会话索引（SMEMBERS + MGET，10 分钟对账一次）；交互运行配置加 5 秒缓存（与管理 Bot 同类），`restart_interaction_bot` 与允许会话变更时立即失效。繁忙账号 50 轮拉取：DB session 50 → 1，Redis 往返约 2.6 万 → 约 500（仅首轮重建索引）。
+- 测试：新增 `test_bot_polling_dispatcher.py`（保序、跨会话并发、去重、背压、取消后补投、claim 按 bot 隔离、真实 polling 循环不被慢请求阻塞、管理 Bot Agent 后台与保序、等 worker 时释放连接、插件状态退出 flush、RPC 长短通道、会话索引、配置缓存失效）；更新 3 条旧 polling 用例以适配“入队即拉下一批”。
+
 ## [0.106.0-beta.20] - 2026-10-29 · patch（补丁预发布） · Bot API 限流与 LLM 调用可靠性
 
 ### Telegram Bot API
