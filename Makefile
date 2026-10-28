@@ -11,7 +11,7 @@
 
 .PHONY: help up down restart logs status nuke bootstrap init-prod-env auth-recovery \
         dev-up dev-down dev-logs install migrate makemigration backend frontend \
-        test lint codegen build prod-build prod-up prod-update prod-down backup clean \
+        test lint codegen bump build prod-build prod-up prod-update prod-down backup clean \
         gateway-build gateway-test gateway-run
 
 PYTHON := python3.12
@@ -51,6 +51,7 @@ help:
 	@echo "  make test          后端 pytest"
 	@echo "  make lint          ruff check"
 	@echo "  make codegen       OpenAPI → 前端类型"
+	@echo "  make bump T='主题' [L=patch|minor|major|stable]   计算下一个版本号并写入全部版本源与 CHANGELOG"
 	@echo "  make gateway-build 构建内置 Codex Gateway"
 	@echo "  make gateway-test  运行 Gateway Go 单元测试"
 	@echo "  make gateway-run   前台运行 Gateway（开发 Socket）"
@@ -158,6 +159,10 @@ test:
 
 lint:
 	cd backend && $(ACTIVATE) && ruff check app
+
+bump:
+	@test -n "$(T)" || { echo "用法：make bump T='版本主题' [L=patch|minor|major|stable]"; exit 2; }
+	python3 scripts/bump-version.py --level "$(or $(L),patch)" --title "$(T)"
 
 codegen:
 	@if [ -x backend/.venv/bin/python ]; then \

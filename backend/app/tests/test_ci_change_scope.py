@@ -128,9 +128,20 @@ def test_release_metadata_is_identified_without_forcing_browser() -> None:
 
 def test_version_sync_gate_includes_openapi_snapshot_version() -> None:
     workflow = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    script = (REPO_ROOT / "scripts" / "check-version-sync.py").read_text(encoding="utf-8")
 
-    assert 'openapi_snapshot = json.loads(Path("openapi/telepilot.openapi.json").read_text())' in workflow
-    assert '"openapi/telepilot.openapi.json": openapi_snapshot["info"]["version"]' in workflow
+    assert "python scripts/check-version-sync.py" in workflow
+    assert '"openapi/telepilot.openapi.json": str(openapi["info"]["version"])' in script
+
+
+def test_image_inputs_request_pr_image_check_even_under_full_gate() -> None:
+    assert classify_paths(["backend/Dockerfile"], force_full=True).images is True
+    assert classify_paths(["backend/pyproject.toml"]).images is True
+    assert classify_paths(["frontend/src/App.tsx"], force_full=True).images is False
+    assert classify_paths([], force_full=True).images is True
+    workflow = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    assert "needs.change-scope.outputs.images == 'true'" in workflow
+    assert "branches: [main, Beta]" in workflow
 
 
 def test_plugin_schema_codegen_is_guarded_by_contract_ci() -> None:

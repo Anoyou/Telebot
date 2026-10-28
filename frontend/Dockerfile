@@ -1,10 +1,12 @@
 # syntax=docker/dockerfile:1.7
 # 前端镜像：多阶段构建
-#   - builder：node22 alpine，corepack 启用 pnpm，依次执行类型检查与 Vite 构建
+#   - builder：node22 alpine，corepack 启用 pnpm，依次执行类型检查与 Vite 构建。
+#     产物是与架构无关的静态文件，固定在构建机原生架构（$BUILDPLATFORM）上只跑一次，
+#     多架构镜像不再在 QEMU 里模拟 arm64 跑 typecheck / vite build（曾分别 280 s / 183 s）。
 #   - runtime：nginx alpine，托管 dist 静态资源 + 反代后端
 # 暴露 80 端口；通过 docker-compose 中 ${WEB_PORT_PUBLISH:-80} 对外发布
 
-FROM node:22-alpine AS builder
+FROM --platform=$BUILDPLATFORM node:22-alpine AS builder
 WORKDIR /app
 
 # 启用 corepack，并固定 pnpm 10，避免服务器构建时漂到 pnpm 11 后忽略 onlyBuiltDependencies。

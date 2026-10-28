@@ -106,7 +106,7 @@ python3 ios/TelePilotCore/scripts/sync-contract.py
 sh ios/TelePilotCore/scripts/generate.sh
 ```
 
-投影从仓库的 `openapi/telepilot.openapi.json` 读取，不回写后端契约。FastAPI 的可空 `anyOf` 会转换为生成器支持的等价可空表示，保留 TOTP、OTP 等字段；生成结果须连同回归测试一起验证，不能把“生成成功”当成完整兼容证明。
+投影从仓库的 `openapi/telepilot.openapi.json` 读取，不回写后端契约。投影不携带服务器版本号（`info.version` 固定为 `native-subset`），服务器升版本不需要刷新，也不会触发 iOS 工作流。FastAPI 的可空 `anyOf` 会转换为生成器支持的等价可空表示，保留 TOTP、OTP 等字段；生成结果须连同回归测试一起验证，不能把“生成成功”当成完整兼容证明。
 
 在仓库根运行核心测试和模拟器 UI 测试：
 
