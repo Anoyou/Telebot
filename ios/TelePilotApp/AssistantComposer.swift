@@ -3,6 +3,13 @@ import SwiftUI
 import TelePilotCore
 import UniformTypeIdentifiers
 
+/// 后台读取选中文件的结果。
+enum AssistantFileRead: Sendable {
+    case data(Data)
+    case tooLarge
+    case failed
+}
+
 struct AssistantAttachment: Identifiable {
     let id = UUID()
     let image: UIImage
@@ -113,28 +120,41 @@ struct AssistantComposer: View {
         }
         .photosPicker(isPresented: $pickingPhotos, selection: $photos, maxSelectionCount: max(1, 4 - attachments.count), matching: .images)
         .onChange(of: photos) { _, items in
+            guard !items.isEmpty else { return }
             Task {
                 loadingImage = true
                 defer { loadingImage = false; photos = [] }
                 for item in items.prefix(4 - attachments.count) {
                     do {
                         guard let data = try await item.loadTransferable(type: Data.self) else { continue }
-                        try addImage(data)
+                        try await addImage(data)
                     } catch { store.error = "无法读取图片，请选择其他图片。" }
                 }
             }
         }
         .fileImporter(isPresented: $importingImage, allowedContentTypes: [.image], allowsMultipleSelection: true) { result in
-            do {
-                for url in try result.get().prefix(4 - attachments.count) {
-                    let access = url.startAccessingSecurityScopedResource()
-                    defer { if access { url.stopAccessingSecurityScopedResource() } }
-                    guard ((try url.resourceValues(forKeys: [.fileSizeKey])).fileSize ?? 0) <= 25_000_000 else {
-                        store.error = "单张原始图片不能超过 25 MB。"; continue
+            guard let urls = try? result.get() else { store.error = "无法读取图片文件，请重新选择。"; return }
+            Task {
+                loadingImage = true
+                defer { loadingImage = false }
+                for url in urls.prefix(4 - attachments.count) {
+                    // 第十一轮：读文件、缩放、编码都在后台进行，不卡输入栏。
+                    let loaded = await Task.detached(priority: .userInitiated) { () -> AssistantFileRead in
+                        let access = url.startAccessingSecurityScopedResource()
+                        defer { if access { url.stopAccessingSecurityScopedResource() } }
+                        guard let size = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize else { return .failed }
+                        guard size <= 25_000_000 else { return .tooLarge }
+                        guard let data = try? Data(contentsOf: url) else { return .failed }
+                        return .data(data)
+                    }.value
+                    switch loaded {
+                    case .tooLarge: store.error = "单张原始图片不能超过 25 MB。"
+                    case .failed: store.error = "无法读取图片文件，请重新选择。"
+                    case .data(let data):
+                        do { try await addImage(data) } catch { store.error = "无法读取图片文件，请重新选择。" }
                     }
-                    try addImage(Data(contentsOf: url))
                 }
-            } catch { store.error = "无法读取图片文件，请重新选择。" }
+            }
         }
     }
 
@@ -320,17 +340,13 @@ struct AssistantComposer: View {
         }
     }
 
-    private func addImage(_ data: Data) throws {
-        guard attachments.count < 4, let image = UIImage(data: data), image.size.width > 0, image.size.height > 0 else { throw APIError.incompatibleResponse }
-        let longest = max(image.size.width, image.size.height)
-        let scale = min(1, 2400 / longest)
-        let format = UIGraphicsImageRendererFormat()
-        format.scale = 1
-        let size = CGSize(width: image.size.width * scale, height: image.size.height * scale)
-        let renderer = UIGraphicsImageRenderer(size: size, format: format)
-        let resized = renderer.image { _ in image.draw(in: CGRect(origin: .zero, size: size)) }
-        guard let bytes = resized.jpegData(compressionQuality: 0.82), bytes.count <= 6_000_000 else { throw APIError.incompatibleResponse }
-        attachments.append(AssistantAttachment(image: resized, value: ["kind": "image", "source": "data_url", "mime_type": "image/jpeg", "name": "image.jpg", "data_url": .string("data:image/jpeg;base64," + bytes.base64EncodedString())]))
+    /// 第十一轮：解码、缩放（ImageIO 缩略图，最长边 2400px，不先解码全尺寸原图）、JPEG 编码与 base64 都在后台线程，
+    /// 主线程只追加结果；输入栏预览用 360px 小图。
+    private func addImage(_ data: Data) async throws {
+        guard attachments.count < 4 else { throw APIError.incompatibleResponse }
+        let prepared = await Task.detached(priority: .userInitiated) { AssistantImageDownsampler.attachment(from: data) }.value
+        guard let prepared, attachments.count < 4 else { throw APIError.incompatibleResponse }
+        attachments.append(AssistantAttachment(image: prepared.preview, value: ["kind": "image", "source": "data_url", "mime_type": "image/jpeg", "name": "image.jpg", "data_url": .string(prepared.dataURL)]))
     }
 }
 

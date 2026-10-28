@@ -40,6 +40,7 @@
   "TelePilotUITests/testRejectedResumeStillReadsChangedServerState": 27,
   "VisualInspectionUITests/testOperationsAndAssistantWorkspaces": 33,
   "VisualInspectionUITests/testPluginAndAIWorkspaces": 85,
+  "WorkspaceUITests/testColdStartShowsSnapshotWhenOffline": 28,
   "WorkspaceUITests/testDockKeepsPrimarySectionsAndAgentEntry": 15,
   "WorkspaceUITests/testMoreSectionKeepsAccountsAndSettingsReachable": 17,
   "WorkspaceUITests/testPageSearchUsesLeadingToolbarButton": 89,

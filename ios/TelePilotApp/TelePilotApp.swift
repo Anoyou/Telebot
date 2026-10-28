@@ -43,16 +43,17 @@ struct TelePilotApp: App {
                 PushNotificationAppDelegate.manager = push
                 push.onRoute = { model.requestedRoute = $0 }
                 push.canRoute = { !lock.isObscured && scenePhase == .active }
-                await push.prepare()
+                // 第十一轮：读取通知权限不阻塞解锁与启动；推送注册只由下方 user.id 变化触发一次（不再与这里重复）。
+                Task { await push.prepare() }
                 if lock.isObscured { await lock.unlock() }
                 if !lock.isObscured { await model.start() }
-                if model.phase == .signedIn { await push.connect(model: model) }
                 push.deliverPendingRoute(unlocked: !lock.isObscured)
             }
             .onChange(of: scenePhase) { _, phase in
                 if phase == .active {
                     lock.resume()
-                    if !lock.isObscured { Task { await model.refresh(); await model.refreshWorkspace(); await push.connect(model: model) } }
+                    // 回前台：距上次读取不足 30 秒时不重读；推送注册 24 小时内已成功则只更新本机权限状态。
+                    if !lock.isObscured { Task { await model.refreshOnForeground(); await push.connect(model: model) } }
                     push.deliverPendingRoute(unlocked: !lock.isObscured)
                 } else if phase == .background {
                     lock.suspend()
@@ -62,7 +63,7 @@ struct TelePilotApp: App {
                 guard !obscured, scenePhase == .active else { return }
                 Task {
                     await model.start()
-                    if model.phase == .signedIn { await model.refresh() }
+                    await model.refreshOnForeground()
                     push.deliverPendingRoute(unlocked: !lock.isObscured)
                 }
             }

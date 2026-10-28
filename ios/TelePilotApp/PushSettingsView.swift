@@ -92,7 +92,7 @@ struct PushSettingsView: View {
         .navigationTitle("Apple 推送")
         .navigationBarTitleDisplayMode(.inline)
         .task {
-            await push.connect(model: model)
+            await push.connect(model: model, force: true)
             fillConfiguration()
         }
         .refreshable { await refresh() }

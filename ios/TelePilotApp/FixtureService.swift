@@ -65,6 +65,10 @@ actor FixtureService: AppServing {
         if ProcessInfo.processInfo.arguments.contains("--ui-test-session-retry"), currentUserReads == 1 {
             throw APIError.network(outcomeUncertain: false)
         }
+        // 冷启动快照用例：模拟断网启动（核对会话也连不上服务器）。
+        if ProcessInfo.processInfo.arguments.contains("--ui-test-offline-start") {
+            throw APIError.network(outcomeUncertain: false)
+        }
         return CurrentUser(id: 1, username: "界面测试用户", hasTotp: true)
     }
 
@@ -689,6 +693,8 @@ actor FixtureService: AppServing {
         await onEvent(["type": "done", "ok": true, "seq": 2, "run_id": "fixture-run"])
     }
     func cloudflareAccessConfig() async throws -> CloudflareAccessConfig { accessConfig }
+
+    func hasStoredSession() async throws -> Bool { true }
 
     func setCloudflareAccess(_ credentials: CloudflareAccessCredentials?) async throws { accessConfig.serviceToken = credentials }
 

@@ -13,6 +13,8 @@ protocol AppServing: Sendable {
     func resumeAccount(id: Int) async throws
     func logout() async throws
     func clearLocalSession() async throws
+    /// 钥匙串里是否有这台服务器未过期的登录会话（只读本机）。冷启动据此决定能否先显示概览快照。
+    func hasStoredSession() async throws -> Bool
     /// 本服务器保存在钥匙串里的 Cloudflare Access 凭证（Google 验证的登录令牌与高级 Service Token）。
     func cloudflareAccessConfig() async throws -> CloudflareAccessConfig
     /// 保存（nil 为清除）Service Token（高级），之后所有请求立即生效。不影响 Google 验证的登录令牌。
