@@ -14,32 +14,70 @@ struct EmergencyStopSection: View {
 
     var body: some View {
         Section {
-            Button(role: .destructive) {
-                confirming = true
-            } label: {
-                HStack(spacing: 12) {
-                    Image(systemName: enabled == true ? "exclamationmark.octagon.fill" : "exclamationmark.octagon")
-                        .font(.title2)
-                        .foregroundStyle(.white)
-                        .frame(width: 40, height: 40)
-                        .background(.red, in: .rect(cornerRadius: 10))
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("全局紧急停止").font(.headline).foregroundStyle(.red)
-                        Text(statusText).font(.subheadline).foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                    if busy {
-                        ProgressView()
-                    } else {
-                        Text(actionTitle).font(.subheadline.weight(.semibold)).foregroundStyle(.red)
+            // 0.16.1：说明行（ⓘ + 文字）并入红色高亮行，替换原来的状态文字；高亮区外不再单独显示说明。
+            // 行内有两个可点目标（ⓘ 与整行），不能再把整行包成一个 Button（嵌套 Button 的点按会被外层吞掉），
+            // 所以整行用 onTapGesture 打开确认，ⓘ 是独立的 borderless Button（子视图手势优先）；
+            // 无障碍上右侧“停止／解除”是真正的按钮，承载原来的标识与状态值。
+            HStack(spacing: 12) {
+                Image(systemName: enabled == true ? "exclamationmark.octagon.fill" : "exclamationmark.octagon")
+                    .font(.title2)
+                    .foregroundStyle(.white)
+                    .frame(width: 40, height: 40)
+                    .background(.red, in: .rect(cornerRadius: 10))
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("全局紧急停止").font(.headline).foregroundStyle(.red)
+                        .accessibilityIdentifier("more.emergencyStop.title")
+                    HStack(alignment: .firstTextBaseline, spacing: 4) {
+                        Button {
+                            showingInfo = true
+                        } label: {
+                            Image(systemName: "info.circle")
+                                .font(.footnote)
+                                // 视觉保持小图标，点按区域向四周扩 10pt（约 37pt），不撑高说明行。
+                                .padding(10)
+                                .contentShape(.rect)
+                                .padding(-10)
+                        }
+                        .buttonStyle(.borderless)
+                        .accessibilityLabel("紧急停止说明")
+                        .accessibilityIdentifier("more.emergencyStop.info")
+                        .popover(isPresented: $showingInfo, arrowEdge: .top) {
+                            EmergencyStopInfoView()
+                                .presentationCompactAdaptation(.popover)
+                        }
+                        Text(summaryText)
+                            .font(.footnote)
+                            .foregroundStyle(enabled == true ? AnyShapeStyle(Color.red) : AnyShapeStyle(HierarchicalShapeStyle.secondary))
+                            .fixedSize(horizontal: false, vertical: true)
+                            .accessibilityIdentifier("more.emergencyStop.summary")
                     }
                 }
-                .padding(.vertical, 4)
+                Spacer(minLength: 8)
+                if busy {
+                    ProgressView()
+                } else {
+                    Button(role: .destructive) {
+                        confirming = true
+                    } label: {
+                        Text(actionTitle).font(.subheadline.weight(.semibold))
+                    }
+                    .buttonStyle(.borderless)
+                    .tint(.red)
+                    .disabled(enabled == nil)
+                    .accessibilityLabel("全局紧急停止")
+                    .accessibilityValue(statusText)
+                    .accessibilityHint(enabled == true ? "解除紧急停止" : "立即紧急停止")
+                    .accessibilityIdentifier("more.emergencyStop")
+                }
             }
-            .disabled(busy || enabled == nil)
+            .padding(.vertical, 4)
+            .contentShape(.rect)
+            .onTapGesture {
+                guard !busy, enabled != nil else { return }
+                confirming = true
+            }
             .listRowBackground(Color.red.opacity(enabled == true ? 0.22 : 0.10))
-            .accessibilityIdentifier("more.emergencyStop")
-            .accessibilityValue(statusText)
             .confirmationDialog(confirmTitle, isPresented: $confirming, titleVisibility: .visible) {
                 Button(enabled == true ? "解除紧急停止" : "立即紧急停止", role: enabled == true ? nil : .destructive) {
                     Task { await toggle() }
@@ -49,36 +87,16 @@ struct EmergencyStopSection: View {
                 Text(enabled == true ? Self.resumeMessage : Self.stopMessage)
             }
         } footer: {
+            // 只在切换失败或结果未知时出现；平时说明已在高亮行内。
             if let resultMessage {
                 Text(resultMessage).foregroundStyle(.red)
-            } else {
-                // 0.16.0：ⓘ 前置、说明再缩短，常见 iPhone 宽度（≥375pt）默认字号下一行放下；
-                // 按钮触控区 44pt，图标左缘用负边距对齐分组的文字边距。
-                HStack(alignment: .center, spacing: 2) {
-                    Button {
-                        showingInfo = true
-                    } label: {
-                        Image(systemName: "info.circle")
-                            .imageScale(.medium)
-                            .frame(minWidth: 44, minHeight: 44)
-                            .contentShape(.rect)
-                    }
-                    .buttonStyle(.borderless)
-                    .padding(.leading, -12)
-                    .accessibilityLabel("紧急停止说明")
-                    .accessibilityIdentifier("more.emergencyStop.info")
-                    .popover(isPresented: $showingInfo, arrowEdge: .top) {
-                        EmergencyStopInfoView()
-                            .presentationCompactAdaptation(.popover)
-                    }
-                    Text(Self.footer)
-                        .accessibilityIdentifier("more.emergencyStop.footer")
-                }
+                    .accessibilityIdentifier("more.emergencyStop.result")
             }
         }
         .task { await load() }
     }
 
+    /// 无障碍状态值（VoiceOver 读出），保留原来明确的“未开启／已开启”状态。
     private var statusText: String {
         if let loadError { return "状态读取失败：\(loadError)" }
         switch enabled {
@@ -87,12 +105,22 @@ struct EmergencyStopSection: View {
         case .none: return "正在读取状态…"
         }
     }
+    /// 高亮行内 ⓘ 右边的一行：未开启时是说明，开启时明确“已停止”和恢复方式。
+    private var summaryText: String {
+        if let loadError { return "状态读取失败：\(loadError)" }
+        switch enabled {
+        case .some(true): return Self.stoppedSummary
+        case .some(false): return Self.summary
+        case .none: return "正在读取状态…"
+        }
+    }
     private var actionTitle: String { enabled == true ? "解除" : "停止" }
 
     // 文案依据服务器实现（kill_switch_service.converge_runtime、supervisor、account_bot_runtime）：
     // 开启时停止全部账号 worker 子进程、账号 Bot 与交互 Bot，并阻止它们再启动；
     // 解除时重新启动所有状态为“启用”的账号与 Bot。其余服务不读取该开关。
-    static let footer = "停止全部消息处理，数据和管理台不受影响"
+    static let summary = "停止全部消息处理，数据和管理台不受影响"
+    static let stoppedSummary = "已停止全部消息处理，点“解除”恢复"
     /// 说明弹层的三段：停止什么 / 不影响 / 如何恢复（原 footer 全文）。
     static let details: [EmergencyStopDetail] = [
         .init(title: "停止什么", symbol: "stop.circle", text: "所有 Telegram 账号的运行进程（其中的插件、自动回复、指令、定时任务随之停止），以及账号 Bot 和交互 Bot 的消息处理；开启期间新启用或恢复的账号也不会运行。"),
