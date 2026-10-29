@@ -11,6 +11,7 @@ from starlette.requests import Request
 from app import openapi_contract
 from app.main import app, http_exc_handler
 from app.openapi_contract import (
+    NON_SCHEMA_OPERATIONS,
     PUBLIC_OPERATIONS,
     iter_api_operations,
     operation_security,
@@ -74,6 +75,10 @@ def test_security_schemes_and_operation_matrix_match_runtime_dependencies() -> N
     }
 
     for route, method in iter_api_operations(app):
+        if (method, route.path_format) in NON_SCHEMA_OPERATIONS:
+            assert route.path_format not in schema["paths"]
+            assert (method, route.path_format) in PUBLIC_OPERATIONS
+            continue
         operation = _operation(schema, route.path_format, method)
         expected = operation_security(route, method)
         assert operation["security"] == expected, f"{method} {route.path_format}"
