@@ -382,24 +382,37 @@ final class WorkspaceUITests: XCTestCase {
     }
 
     /// iOS 0.15.0 命名：「更多」里「App 设置」（0.16.0 起图标 apps.iphone）、管理模块「服务器设置」（server.rack）；
-    /// 0.16.0：紧急停止说明 ⓘ 前置、文字缩短到一行，点 ⓘ 在原生 popover 里看完整三段。
+    /// 0.16.1：紧急停止说明（ⓘ + 文字）并入红色高亮行、替换原状态文字，高亮区外不再有说明；点 ⓘ 在原生 popover 里看完整三段。
     func testRenamedSettingsAndEmergencyStopInfo() {
         let app = launch()
         app.tabBars.buttons["更多"].tap()
         let settings = app.buttons["more.settings"]
         XCTAssertTrue(settings.waitForExistence(timeout: 10))
         XCTAssertTrue(settings.label.contains("App 设置"), settings.label)
-        let footer = app.staticTexts["more.emergencyStop.footer"]
-        XCTAssertTrue(footer.waitForExistence(timeout: 5))
-        XCTAssertEqual(footer.label, "停止全部消息处理，数据和管理台不受影响")
+        let summary = app.staticTexts["more.emergencyStop.summary"]
+        XCTAssertTrue(summary.waitForExistence(timeout: 5))
+        XCTAssertEqual(summary.label, "停止全部消息处理，数据和管理台不受影响")
+        // 原状态文字与高亮区外的说明行都不再显示。
+        XCTAssertFalse(app.staticTexts["未开启 · 账号与 Bot 正常运行"].exists)
+        XCTAssertFalse(app.staticTexts["more.emergencyStop.footer"].exists)
+        XCTAssertEqual(app.staticTexts.matching(NSPredicate(format: "label == %@", "停止全部消息处理，数据和管理台不受影响")).count, 1)
         XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "停止什么：")).firstMatch.exists)
+        // 状态仍由右侧按钮的无障碍值明确给出。
+        let toggle = app.buttons["more.emergencyStop"]
+        XCTAssertTrue(toggle.exists)
+        XCTAssertEqual(toggle.value as? String, "未开启 · 账号与 Bot 正常运行")
+        let title = app.staticTexts["more.emergencyStop.title"]
+        XCTAssertTrue(title.exists)
         let info = app.buttons["more.emergencyStop.info"]
         XCTAssertTrue(info.exists)
         XCTAssertEqual(info.label, "紧急停止说明")
-        // ⓘ 在说明文字左边，说明只占一行（footnote 单行约 18pt，两行会超过 30pt）。
-        XCTAssertLessThanOrEqual(info.frame.midX, footer.frame.minX, "ⓘ 应在说明文字左边")
-        XCTAssertLessThan(footer.frame.height, 28, "说明应在一行内放下：\(footer.frame)")
-        XCTAssertLessThanOrEqual(footer.frame.maxX, app.windows.firstMatch.frame.maxX - 8)
+        // 说明在红色高亮行内：紧贴标题下方、与右侧按钮同一行；ⓘ 在文字左边。
+        XCTAssertGreaterThanOrEqual(summary.frame.minY, title.frame.maxY - 2, "说明应在标题下方：\(summary.frame) / \(title.frame)")
+        XCTAssertLessThan(summary.frame.minY - title.frame.maxY, 14, "说明应紧贴标题（同一高亮行）：\(summary.frame) / \(title.frame)")
+        XCTAssertTrue(toggle.frame.midY > title.frame.minY && toggle.frame.midY < summary.frame.maxY + 8, "右侧按钮应与说明同在高亮行：\(toggle.frame)")
+        XCTAssertLessThanOrEqual(info.frame.midX, summary.frame.minX, "ⓘ 应在说明文字左边")
+        XCTAssertGreaterThanOrEqual(info.frame.midX, title.frame.minX - 4, "ⓘ 应与标题左对齐（在高亮行内）")
+        XCTAssertLessThanOrEqual(summary.frame.maxX, toggle.frame.minX, "说明不应压到右侧按钮")
         info.tap()
         let details = app.descendants(matching: .any)["more.emergencyStop.details"].firstMatch
         XCTAssertTrue(details.waitForExistence(timeout: 5))
@@ -419,6 +432,35 @@ final class WorkspaceUITests: XCTestCase {
         app.navigationBars.buttons.element(boundBy: 0).tap()
         let server = app.buttons["服务器设置"]
         XCTAssertTrue(reveal(server, in: app))
+    }
+
+    /// 0.16.1：开启紧急停止后，高亮行内明确显示“已停止”和恢复方式；确认弹窗文案不变；解除后恢复说明。
+    func testEmergencyStopEnabledStateShowsStoppedAndResume() {
+        let app = launch()
+        app.tabBars.buttons["更多"].tap()
+        let toggle = app.buttons["more.emergencyStop"]
+        XCTAssertTrue(toggle.waitForExistence(timeout: 10))
+        let summary = app.staticTexts["more.emergencyStop.summary"]
+        XCTAssertTrue(summary.waitForExistence(timeout: 5))
+        XCTAssertEqual(summary.label, "停止全部消息处理，数据和管理台不受影响")
+        toggle.tap()
+        let stop = app.buttons["立即紧急停止"].firstMatch
+        XCTAssertTrue(stop.waitForExistence(timeout: 5))
+        stop.tap()
+        let stopped = NSPredicate(format: "label == %@", "已停止全部消息处理，点“解除”恢复")
+        expectation(for: stopped, evaluatedWith: summary)
+        waitForExpectations(timeout: 10)
+        XCTAssertEqual(toggle.value as? String, "已开启 · 账号进程与 Bot 已停止")
+        XCTAssertTrue(app.buttons["more.emergencyStop.info"].exists, "开启时仍可点 ⓘ 查看说明")
+
+        toggle.tap()
+        let resume = app.buttons["解除紧急停止"].firstMatch
+        XCTAssertTrue(resume.waitForExistence(timeout: 5))
+        resume.tap()
+        let normal = NSPredicate(format: "label == %@", "停止全部消息处理，数据和管理台不受影响")
+        expectation(for: normal, evaluatedWith: summary)
+        waitForExpectations(timeout: 10)
+        XCTAssertEqual(toggle.value as? String, "未开启 · 账号与 Bot 正常运行")
     }
 
     private func reveal(_ element: XCUIElement, in app: XCUIApplication, maxSwipes: Int = 8) -> Bool {
