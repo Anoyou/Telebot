@@ -7776,8 +7776,14 @@ export interface components {
             orphan: boolean;
             /** Permissions */
             permissions?: string[];
+            /** Provides */
+            provides?: string[];
             /** Requires Platform Capabilities */
             requires_platform_capabilities?: string[];
+            /** Rule Editor */
+            rule_editor?: {
+                [key: string]: unknown;
+            };
             /** Runtime Availability */
             runtime_availability?: string | null;
             /** Signature Ok */
@@ -23849,7 +23855,7 @@ export interface operations {
     list_plugin_ui_cards_api_plugin_ui_cards_get: {
         parameters: {
             query: {
-                /** @description plugin.overview / account.detail / dashboard */
+                /** @description plugin.overview / account.detail / dashboard / interaction.rule_editor */
                 slot: string;
                 plugin_key?: string | null;
                 account_id?: number | null;

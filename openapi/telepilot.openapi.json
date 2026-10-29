@@ -7522,12 +7522,24 @@
             "title": "Permissions",
             "type": "array"
           },
+          "provides": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Provides",
+            "type": "array"
+          },
           "requires_platform_capabilities": {
             "items": {
               "type": "string"
             },
             "title": "Requires Platform Capabilities",
             "type": "array"
+          },
+          "rule_editor": {
+            "additionalProperties": true,
+            "title": "Rule Editor",
+            "type": "object"
           },
           "runtime_availability": {
             "anyOf": [
@@ -22222,7 +22234,7 @@
   },
   "info": {
     "title": "TelePilot",
-    "version": "0.112.0-beta.1"
+    "version": "0.112.0-beta.2"
   },
   "openapi": "3.1.0",
   "paths": {
@@ -41194,12 +41206,12 @@
         "operationId": "list_plugin_ui_cards_api_plugin_ui_cards_get",
         "parameters": [
           {
-            "description": "plugin.overview / account.detail / dashboard",
+            "description": "plugin.overview / account.detail / dashboard / interaction.rule_editor",
             "in": "query",
             "name": "slot",
             "required": true,
             "schema": {
-              "description": "plugin.overview / account.detail / dashboard",
+              "description": "plugin.overview / account.detail / dashboard / interaction.rule_editor",
               "title": "Slot",
               "type": "string"
             }

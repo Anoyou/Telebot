@@ -62,7 +62,8 @@ def test_contract_lists_ios_first_batch_widgets_and_five_layouts() -> None:
     for widget in ("config-list", "allowed-peer-multi-select", "multi-select", "list-select", "secret-list"):
         assert widget in ids
     assert sorted(plugin_ui.card_layouts()) == ["buttons", "kv", "list", "stats", "table"]
-    assert plugin_ui.card_slots() == ["plugin.overview", "account.detail", "dashboard"]
+    assert plugin_ui.card_slots()[:3] == ["plugin.overview", "account.detail", "dashboard"]
+    assert "interaction.rule_editor" in plugin_ui.card_slots()
     assert plugin_ui.hook_timeout_seconds("on_ui_card") == 3
     assert plugin_ui.hook_timeout_seconds("on_config_validate") == 2
 

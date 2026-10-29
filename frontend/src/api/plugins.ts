@@ -208,7 +208,7 @@ export type PluginUICard = components["schemas"]["PluginUICard"];
 export type PluginUICardsResponse = components["schemas"]["PluginUICardsResponse"];
 export type PluginUICardData = components["schemas"]["PluginUICardData"];
 export type PluginUICardActionResponse = components["schemas"]["PluginUICardActionResponse"];
-export type PluginUICardSlot = "plugin.overview" | "account.detail" | "dashboard";
+export type PluginUICardSlot = "plugin.overview" | "account.detail" | "dashboard" | "interaction.rule_editor";
 
 /** 某个位置的卡片声明（不含数据）。 */
 export async function listPluginUICards(params: {

@@ -224,10 +224,14 @@ def legacy_dry_run_logs(
 
 
 # ─────────────────────────────────────────────────────
-# ,ai 指令图片后端：image_backend="codex_image" 桥接到同名插件（B8，计划改为 provides: image_backend）
+# ,ai 指令图片后端（B8）。0.112.0 起按扩展点 ``provides: ["ai.image_backend"]`` 选择插件
+# （worker/plugins/extension_points.py），模板默认值改为 "plugin"。这里只保留旧路径：
+# - 旧模板保存的 image_backend="codex_image" 固定走 codex_image；
+# - 没有任何已加载插件声明 ai.image_backend 时回退 codex_image（旧插件 + 新服务器行为不变）。
+# 计划移除：Plugin API 2.0。
 # ─────────────────────────────────────────────────────
 DEFAULT_IMAGE_BACKEND_PLUGIN = CODEX_IMAGE
-IMAGE_BACKENDS: tuple[str, ...] = (DEFAULT_IMAGE_BACKEND_PLUGIN, "llm")
+IMAGE_BACKENDS: tuple[str, ...] = ("plugin", DEFAULT_IMAGE_BACKEND_PLUGIN, "llm")
 
 # 缺失插件时的安装提示（只影响日志文案）。
 MISSING_PLUGIN_HINTS: dict[str, str] = {

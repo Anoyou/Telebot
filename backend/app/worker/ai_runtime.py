@@ -898,21 +898,45 @@ async def invoke(
             await event.edit("✗ 视频生成后端不可用：请先安装并在账号插件中启用 video_bridge，或在模板里填写可用的视频插件。")
         return
 
-    image_backend_plugin = plugin_compat.DEFAULT_IMAGE_BACKEND_PLUGIN
-    image_backend = str(cfg.get("image_backend") or image_backend_plugin)
-    native_image_mode = command_mode == "image" and image_backend == "llm"
+    # B8（0.112.0）：图片后端按扩展点 ai.image_backend 选择插件。旧模板保存的
+    # image_backend=codex_image 与没有任何插件声明能力时，仍走 plugin_compat 的历史默认插件（行为不变）。
+    from .plugins import extension_points as _ext
 
-    if command_mode == "image" and image_backend == image_backend_plugin:
+    legacy_image_plugin = plugin_compat.DEFAULT_IMAGE_BACKEND_PLUGIN
+    image_backend = str(cfg.get("image_backend") or _ext.IMAGE_BACKEND_PLUGIN)
+    native_image_mode = command_mode == "image" and image_backend == _ext.IMAGE_BACKEND_LLM
+
+    if command_mode == "image" and image_backend in {_ext.IMAGE_BACKEND_PLUGIN, legacy_image_plugin}:
+        providers: list[str] = []
+        if image_backend == _ext.IMAGE_BACKEND_PLUGIN and not str(cfg.get("image_plugin_key") or "").strip():
+            try:
+                from .plugins.loader import plugins_providing
+
+                providers = plugins_providing(account_id, _ext.AI_IMAGE_BACKEND)
+            except Exception:  # noqa: BLE001
+                log.debug("[ai] 读取 ai.image_backend 提供者失败 account=%s", account_id, exc_info=True)
+        image_plugin_key, reason = _ext.select_image_backend_plugin(
+            image_backend=image_backend,
+            image_plugin_key=cfg.get("image_plugin_key"),
+            providers=providers,
+            legacy_default=legacy_image_plugin,
+        )
         dispatched = await dispatch_plugin_command(
             client,
             event,
             args,
             account_id,
-            plugin_key=str(cfg.get("image_plugin_key") or image_backend_plugin),
+            plugin_key=image_plugin_key,
             method=str(cfg.get("image_plugin_method") or "") or None,
         )
         if not dispatched:
-            await event.edit("✗ codex_image 插件命令不可用：请先在账号插件中启用并配置 codex_image")
+            if reason in {"legacy", "fallback"} and image_plugin_key == legacy_image_plugin:
+                await event.edit(f"✗ {legacy_image_plugin} 插件命令不可用：请先在账号插件中启用并配置 {legacy_image_plugin}")
+            else:
+                await event.edit(
+                    f"✗ 图片生成插件 {image_plugin_key} 的命令不可用：请确认它已在账号插件中启用，"
+                    "或在模板里改选其它图片后端。"
+                )
         return
 
     provider_id = cfg.get("provider_id")

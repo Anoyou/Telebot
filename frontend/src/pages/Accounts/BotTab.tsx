@@ -87,12 +87,19 @@ import type {
   AccountBotInteractionConfigUpdate,
   AccountBotInteractionRule,
   FeatureInteractionEntry,
+  FeatureRuleEditorEntry,
   AccountBotRemotePluginPolicy,
   AccountBotRole,
   AccountBotUserCreate,
   IgnoredPeer,
 } from "@/api/types";
 import { getErrMsg } from "@/lib/api";
+import {
+  effectiveInteractionEntry,
+  ruleEditorSpecFor,
+  startKeywordsPlaceholder,
+} from "@/lib/interactionRuleEditor";
+import { PluginCardSlot } from "@/components/plugin/PluginCards";
 import { cn, formatDateTime } from "@/lib/utils";
 import {
   pluginContractRiskWarnings,
@@ -175,7 +182,6 @@ const DEFAULT_REMOTE_POLICY: AccountBotRemotePluginPolicy = {
 const DEFAULT_INTERACTION_DISABLED_MESSAGE = "本条互动规则已暂停，暂时不能开启。";
 const DEFAULT_INTERACTION_RESPONSE_TEMPLATE = "已收到 {payer_name} 给 {receiver_name} 的转账 {amount}，互动流程已准备就绪。";
 const DEFAULT_INTERACTION_MODULE_START_TEXT = "正在启动{规则名称}";
-const DEFAULT_MATH10_START_KEYWORDS = "发十以内算数\n十以内算数\n开算数题";
 const DEFAULT_INTERACTION_QUERY_COMMANDS = "。玩法\n。联动玩法";
 const DEFAULT_INTERACTION_QUERY_RESPONSE_TEMPLATE = "<b>当前可用联动玩法</b>\n{items}";
 const DEFAULT_INTERACTION_QUERY_ITEM_TEMPLATE = "{index}. <b>{name}</b>\n触发方式：{trigger}";
@@ -306,6 +312,8 @@ type InteractionEntryOption = {
   permissions?: string[];
   lintWarnings?: string[];
   entry: FeatureInteractionEntry;
+  /** 0.112.0+：插件 ui.rule_editor 对该入口的声明（参数区 schema / 默认值 / 启动词 / 提示）。 */
+  ruleEditor?: FeatureRuleEditorEntry;
   value: string;
   label: string;
 };
@@ -642,7 +650,7 @@ function defaultRuleForm(index = 0): InteractionRuleForm {
     amountMatchMode: "eq",
     action: "notice",
     mathPrize: "123",
-    moduleKey: "game24",
+    moduleKey: "",
     moduleAction: "",
     moduleSessionScope: "chat",
     participantPolicy: "open_race",
@@ -740,22 +748,22 @@ function renderInteractionQueryTemplatePreview(template: string, itemTemplate: s
   const sampleItems = [
     {
       index: "1",
-      name: "九宫格",
-      trigger: "转账或关键词；关键词：<code>。ct num=数字</code>；转账通知",
-      kind: "玩法 <code>dice_grid_hunt</code>",
+      name: "示例玩法",
+      trigger: "转账或关键词；关键词：<code>开局 num=数字</code>；转账通知",
+      kind: "玩法 <code>example_game</code>",
       limit: "限时 <code>600</code> 秒",
-      module_key: "dice_grid_hunt",
-      module_action: "start_dice_grid_hunt",
+      module_key: "example_game",
+      module_action: "start_example_game",
       chat_id: "-1001234567890",
     },
     {
       index: "2",
-      name: "置顶促销",
-      trigger: "关键词；关键词：<code>促销 id=12345</code>",
-      kind: "玩法 <code>pt_promote</code>",
+      name: "示例工具",
+      trigger: "关键词；关键词：<code>查询 id=12345</code>",
+      kind: "玩法 <code>example_tool</code>",
       limit: "每用户 CD <code>12h</code>",
-      module_key: "pt_promote",
-      module_action: "promote_torrent",
+      module_key: "example_tool",
+      module_action: "run_example_tool",
       chat_id: "-1001234567890",
     },
   ].map((values) => renderTemplateVariables(itemSource, values)).join("\n");
@@ -1043,7 +1051,8 @@ function resolveRuleModuleSelection(
   if (explicit) {
     return { ...explicit, inferred: false };
   }
-  const inferred = defaultInteractionEntryForModule(interactionEntries, rule.moduleKey || "game24");
+  if (!rule.moduleKey) return undefined;
+  const inferred = defaultInteractionEntryForModule(interactionEntries, rule.moduleKey);
   if (!inferred) return undefined;
   return {
     ...inferred,
@@ -1084,7 +1093,8 @@ function ruleFormFromRule(
   const prize = rule.action === "module" && rule.module_prize != null
     ? rule.module_prize
     : rule.math_prize || 123;
-  const moduleKey = rule.module_key || "game24";
+  // W4（0.112.0）：不再把空 module_key 显示成某个写死的插件，保持“未选择”。
+  const moduleKey = rule.module_key || "";
   const moduleAction = rule.module_action || "";
   const selectedEntry = interactionEntries.find((item) =>
     item.featureKey === moduleKey && item.entry.key === moduleAction,
@@ -1188,7 +1198,10 @@ function ruleFromForm(
   const savesPaymentFilters = triggerMode !== "keyword";
   const savesUserLimits = action !== "notice";
   const mathPrize = parseOptionalPositiveInt(form.mathPrize, `${name} 奖金`) || 123;
-  const moduleKey = form.moduleKey.trim() || "game24";
+  const moduleKey = form.moduleKey.trim();
+  if (action === "module" && !moduleKey) {
+    throw new Error(`${name}：请先选择要启动的插件入口`);
+  }
   const moduleAction = form.moduleAction.trim()
     || defaultInteractionEntryForModule(interactionEntries, moduleKey)?.entry.key
     || "";
@@ -1321,13 +1334,11 @@ function InteractionRuleEditor({
       patch.triggerMode = "payment";
     }
     if (nextAction === "math10") {
+      // 旧版“算数题”规则只允许保持原样（新规则不再提供这个选项）；启动词留空时服务器按插件默认补全。
       patch.triggerMode = rule.triggerMode === "payment" ? "both" : rule.triggerMode;
-      patch.moduleStartKeywords = rule.moduleStartKeywords.trim()
-        ? rule.moduleStartKeywords
-        : DEFAULT_MATH10_START_KEYWORDS;
     }
     if (nextAction === "module" && !rule.moduleAction) {
-      const entryOption = defaultInteractionEntryForModule(interactionEntries, rule.moduleKey || "game24");
+      const entryOption = rule.moduleKey ? defaultInteractionEntryForModule(interactionEntries, rule.moduleKey) : undefined;
       if (entryOption) {
         patch.moduleKey = entryOption.featureKey;
         patch.moduleAction = entryOption.entry.key;
@@ -1350,6 +1361,10 @@ function InteractionRuleEditor({
         : "chat") as InteractionRuleForm["moduleSessionScope"],
       participantPolicy: inferParticipantPolicy(item.entry, item.entry.session_scope),
       moduleConfig: defaultModuleConfigFromEntry(item.entry, item.featureConfig),
+      ...(item.ruleEditor?.default_start_text
+        && (!rule.moduleStartText.trim() || rule.moduleStartText === DEFAULT_INTERACTION_MODULE_START_TEXT)
+        ? { moduleStartText: item.ruleEditor.default_start_text }
+        : {}),
     });
   };
 
@@ -1528,7 +1543,7 @@ function InteractionRuleEditor({
               onChange={(e) => updateAction(e.target.value)}
             >
               <option value="notice">只发通知</option>
-              <option value="math10">发算数题</option>
+              {rule.action === "math10" ? <option value="math10">发算数题（旧规则）</option> : null}
               <option value="module">启动玩法</option>
             </Select>
           </div>
@@ -1536,11 +1551,13 @@ function InteractionRuleEditor({
 
         {showsKeywordFields ? (
           <div className="max-w-[720px] space-y-1.5">
-            <Label>{rule.action === "math10" ? "算数题启动关键词" : "玩法启动关键词"}</Label>
+            <Label>玩法启动关键词</Label>
             <Textarea
               rows={2}
               className="h-14 !min-h-14 resize-y py-2 text-xs leading-5"
-              placeholder={rule.action === "math10" ? DEFAULT_MATH10_START_KEYWORDS : "开24点\n猜骰 num=数字"}
+              placeholder={rule.action === "module"
+                ? startKeywordsPlaceholder(selectedInteractionEntry, selectedModule?.ruleEditor)
+                : "留空则使用插件默认启动词"}
               value={rule.moduleStartKeywords}
               onChange={(e) => onPatch({ moduleStartKeywords: e.target.value })}
             />
@@ -1616,7 +1633,7 @@ function InteractionRuleEditor({
       <RuleEditorSection
         step="2"
         title="启动内容"
-        description="命中规则后，决定是发通知、出一道内置题，还是启动插件玩法。"
+        description="命中规则后，决定是只发通知，还是启动插件玩法。"
       >
         {rule.action === "notice" ? (
           <div className="space-y-1.5">
@@ -1632,7 +1649,7 @@ function InteractionRuleEditor({
 
         {rule.action === "math10" ? (
           <div className="nested-surface-item border bg-background px-3 py-2 text-sm text-muted-foreground">
-            触发后会由交互 Bot 发十以内算数题，适合用来测试监听和结果链路。
+            这是旧版“算数题”规则，仍按原方式运行。新规则请选“启动玩法”并选择对应插件入口。
           </div>
         ) : null}
 
@@ -1879,6 +1896,12 @@ function InteractionRuleEditor({
             </span>
           </summary>
           <div className="mt-3 space-y-3">
+            {selectedModule?.ruleEditor?.hint ? (
+              <div className="nested-surface-item border bg-background px-3 py-2 text-xs text-muted-foreground">
+                {selectedModule.ruleEditor.hint}
+              </div>
+            ) : null}
+            <PluginCardSlot slot="interaction.rule_editor" pluginKey={selectedModule?.featureKey} accountId={aid} />
             {pluginParamCount > 0 ? (
               <div className="space-y-2">
                 <ConfigScopeSection
@@ -2127,7 +2150,10 @@ export function BotTab({
     (featuresQ.data ?? []).map((feature) => [feature.feature_key, feature.config ?? {}]),
   );
   const interactionEntries: InteractionEntryOption[] = (matrixQ.data?.features ?? []).flatMap((feature) =>
-    (feature.interaction_entries ?? []).map((entry: FeatureInteractionEntry) => ({
+    (feature.interaction_entries ?? []).map((rawEntry: FeatureInteractionEntry) => {
+      const ruleEditor = ruleEditorSpecFor(feature.rule_editor, rawEntry.key);
+      const entry = effectiveInteractionEntry(rawEntry, ruleEditor);
+      return {
       featureKey: feature.key,
       featureName: feature.display_name,
       featureVersion: feature.version,
@@ -2139,9 +2165,11 @@ export function BotTab({
       permissions: feature.permissions,
       lintWarnings: feature.lint_warnings,
       entry,
+      ruleEditor,
       value: `${feature.key}:${entry.key}`,
       label: `${feature.display_name} / ${entry.title || entry.label || entry.key}`,
-    })),
+      };
+    }),
   );
   useEffect(() => {
     if (botQ.data) {

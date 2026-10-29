@@ -29,7 +29,9 @@ from functools import total_ordering
 #      x-secret-list、控件契约 schemas/plugin-ui-widgets.json）。
 # 1.4：0.112.0 插件自带页面与菜单（ui.pages + 沙盒 Bridge、ui.actions 菜单项）、卡片 / 配置钩子只读
 #      ctx.storage、ai.models@1 只增显示名 / 可用状态 / 成本档字段。
-PLUGIN_API_VERSION = "1.4"
+# 1.5：0.112.0 业务下沉（interaction_entries[].entry_policy、扩展点 provides（ai.image_backend）、
+#      ui.rule_editor 与 slot interaction.rule_editor）。
+PLUGIN_API_VERSION = "1.5"
 
 _VERSION_RE = re.compile(
     r"^\s*v?(?P<major>\d+)(?:\.(?P<minor>\d+))?(?:\.(?P<patch>\d+))?"

@@ -793,6 +793,14 @@
         "context": [
           "plugin_key"
         ]
+      },
+      {
+        "id": "interaction.rule_editor",
+        "summary": "交互规则编辑器的插件参数区（只显示规则所选插件的卡片，需传 plugin_key；Web，0.112.0+）",
+        "context": [
+          "plugin_key",
+          "account_id"
+        ]
       }
     ],
     "layouts": [

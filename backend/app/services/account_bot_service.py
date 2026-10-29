@@ -728,6 +728,70 @@ def normalize_entry_timeout_seconds(raw: Any) -> float | None:
     return max(1.0, min(INTERACTION_ENTRY_MAX_TIMEOUT_SECONDS, value))
 
 
+def normalize_entry_policy(raw: Any) -> dict[str, Any] | None:
+    """整理交互入口的 ``entry_policy`` 声明（0.112.0 起，Plugin API 1.5）。
+
+    插件在 ``interaction_entries[].entry_policy`` 里声明入口的参与方式与会话边界::
+
+        {"session_scope": "chat", "participant_policy": "open_race", "prize": true,
+         "default_start_keywords": ["开24点"]}
+
+    只要插件任一入口声明了 ``entry_policy``（哪怕是空对象），宿主就不再查
+    ``app/plugin_compat.py`` 的兜底入口表；没声明的旧插件照旧走兜底表，行为不变。
+    非 dict 返回 None（视为未声明）。
+    """
+
+    if not isinstance(raw, dict):
+        return None
+    out: dict[str, Any] = {}
+    scope = str(raw.get("session_scope") or "").strip()
+    if scope in VALID_CONCURRENCY:
+        out["session_scope"] = scope
+    policy = str(raw.get("participant_policy") or "").strip()
+    if policy in VALID_INTERACTION_PARTICIPANT_POLICIES:
+        out["participant_policy"] = policy
+    if isinstance(raw.get("prize"), bool):
+        out["prize"] = bool(raw["prize"])
+    keywords = _normalize_string_list(raw.get("default_start_keywords"))
+    if keywords:
+        out["default_start_keywords"] = keywords
+    return out
+
+
+def _entries_declare_entry_policy(entries: Any) -> bool:
+    return isinstance(entries, list) and any(
+        isinstance(item, dict) and isinstance(item.get("entry_policy"), dict) for item in entries
+    )
+
+
+def module_declares_entry_policy(module_key: str | None) -> bool:
+    """插件是否用 ``entry_policy`` 声明了入口策略（声明后宿主不再查兜底入口表）。"""
+
+    if not module_key:
+        return False
+    try:
+        manifest = BUILTIN_FEATURES.manifest_for(module_key)
+        if _entries_declare_entry_policy(getattr(manifest, "interaction_entries", None)):
+            return True
+    except Exception:  # noqa: BLE001
+        log.debug("读取 builtin 模块入口策略失败: %s", module_key, exc_info=True)
+    try:
+        return _entries_declare_entry_policy(_plugin_json_interaction_entries(module_key))
+    except Exception:  # noqa: BLE001
+        log.debug("读取 installed 模块入口策略失败: %s", module_key, exc_info=True)
+    return False
+
+
+def declared_module_default_start_keywords(module_key: str | None, module_action: str | None) -> list[str]:
+    """入口 ``entry_policy.default_start_keywords``；未声明返回空列表（规则编辑器与迁移脚本使用）。"""
+
+    entry = declared_module_entry_manifest(module_key, module_action)
+    policy = entry.get("entry_policy") if isinstance(entry, dict) else None
+    if isinstance(policy, dict):
+        return list(policy.get("default_start_keywords") or [])
+    return []
+
+
 def normalize_interaction_entry_manifest(raw: Any) -> dict[str, Any] | None:
     """把 builtin/installed 入口声明整理成统一形态，同时保留扩展字段。"""
 
@@ -739,7 +803,11 @@ def normalize_interaction_entry_manifest(raw: Any) -> dict[str, Any] | None:
     launch_mode = str(raw.get("launch_mode") or "bridge").strip()
     if launch_mode not in VALID_INTERACTION_LAUNCH_MODES:
         launch_mode = "bridge"
-    scope = str(raw.get("session_scope") or "chat").strip()
+    entry_policy = normalize_entry_policy(raw.get("entry_policy"))
+    raw_scope = raw.get("session_scope")
+    if not str(raw_scope or "").strip() and entry_policy and entry_policy.get("session_scope"):
+        raw_scope = entry_policy["session_scope"]
+    scope = str(raw_scope or "chat").strip()
     if scope not in VALID_CONCURRENCY:
         scope = "chat"
     events: list[str] = []
@@ -799,8 +867,14 @@ def normalize_interaction_entry_manifest(raw: Any) -> dict[str, Any] | None:
     if profile:
         out["interaction_profile"] = profile
     participant_policy = str(raw.get("participant_policy") or "").strip()
+    if participant_policy not in VALID_INTERACTION_PARTICIPANT_POLICIES and entry_policy:
+        participant_policy = str(entry_policy.get("participant_policy") or "")
     if participant_policy in VALID_INTERACTION_PARTICIPANT_POLICIES:
         out["participant_policy"] = participant_policy
+    if entry_policy is not None:
+        out["entry_policy"] = entry_policy
+    else:
+        out.pop("entry_policy", None)
     result_contract = raw.get("result_contract")
     if isinstance(result_contract, dict):
         normalized_result_contract = dict(result_contract)
@@ -918,6 +992,9 @@ def _entry_has_field_from_entries(entries: Any, entry_key: str | None, field_nam
             continue
         if str(entry.get("key") or "").strip() != entry_key:
             continue
+        policy = entry.get("entry_policy")
+        if field_name == "prize" and isinstance(policy, dict) and isinstance(policy.get("prize"), bool):
+            return bool(policy["prize"])
         schema = entry.get("input_schema")
         if not isinstance(schema, dict):
             return None
@@ -1038,6 +1115,8 @@ def _declared_module_single_entry_key(module_key: str | None) -> str | None:
             return key
     except Exception:  # noqa: BLE001
         log.debug("读取 installed 模块交互入口失败: %s", module_key, exc_info=True)
+    if module_declares_entry_policy(module_key):
+        return None
     fallback_keys = plugin_compat.fallback_entry_keys(module_key)
     if len(fallback_keys) == 1:
         return fallback_keys[0]
@@ -1060,6 +1139,8 @@ def _declared_module_entry_session_scope(module_key: str | None, module_action: 
             return scope
     except Exception:  # noqa: BLE001
         log.debug("读取 installed 模块交互入口作用域失败: %s.%s", module_key, module_action, exc_info=True)
+    if module_declares_entry_policy(module_key):
+        return None
     return plugin_compat.fallback_entry_session_scope(module_key, module_action)
 
 
@@ -1079,6 +1160,8 @@ def _declared_module_entry_participant_policy(module_key: str | None, module_act
             return policy
     except Exception:  # noqa: BLE001
         log.debug("读取 installed 模块交互入口参与策略失败: %s.%s", module_key, module_action, exc_info=True)
+    if module_declares_entry_policy(module_key):
+        return None
     return plugin_compat.fallback_entry_participant_policy(module_key, module_action)
 
 
@@ -1148,6 +1231,8 @@ def declared_module_entry_has_field(module_key: str | None, module_action: str |
             return declared
     except Exception:  # noqa: BLE001
         log.debug("读取 installed 模块交互入口字段失败: %s.%s", module_key, module_action, exc_info=True)
+    if module_declares_entry_policy(module_key):
+        return None
     return plugin_compat.fallback_entry_has_field(module_key, module_action, field_name)
 
 

@@ -153,6 +153,7 @@ from .base import (
 from .capabilities import FACADE_ENTRY, FACADE_LIVE, apply_legacy_flags
 from .deprecations import note_deprecated
 from .events import attach_tp_event
+from .extension_points import manifest_provides, normalize_provides
 from .manifest import Manifest
 from .message_ops import BufferedMessageOps, install_live_action_methods
 from .storage import PluginStorage
@@ -5870,6 +5871,19 @@ def _merge_static_plugin_api(path: Path, manifest: Manifest) -> None:
             setattr(manifest, field_name, value)
         except Exception:  # noqa: BLE001 - 旧式 manifest 替身不可写时忽略
             log.debug("写入 manifest.%s 失败 plugin=%s", field_name, path.name, exc_info=True)
+    if not list(getattr(manifest, "provides", None) or []):
+        # 0.112.0：扩展点声明（provides）同样以 plugin.json 为准。
+        metadata_path = path / "plugin.json"
+        try:
+            raw = json.loads(metadata_path.read_text(encoding="utf-8")) if metadata_path.is_file() else {}
+        except (OSError, json.JSONDecodeError):
+            raw = {}
+        provides = normalize_provides(raw.get("provides") if isinstance(raw, dict) else None)
+        if provides:
+            try:
+                manifest.provides = provides
+            except Exception:  # noqa: BLE001 - 旧式 manifest 替身不可写时忽略
+                log.debug("写入 manifest.provides 失败 plugin=%s", path.name, exc_info=True)
     if not getattr(manifest, "ui", None):
         metadata_path = path / "plugin.json"
         try:
@@ -9870,6 +9884,20 @@ async def _finalize_plugin_actions(
     return normalized
 
 
+def plugins_providing(account_id: int, point: str) -> list[str]:
+    """当前账号已加载、在 ``provides`` 里声明了扩展点 ``point`` 的插件 key（按加载顺序）。"""
+
+    state = _STATES.get(int(account_id)) if account_id is not None else None
+    if state is None:
+        return []
+    out: list[str] = []
+    for key, inst in list((getattr(state, "instances", None) or {}).items()):
+        manifest = getattr(type(inst), "_manifest", None)
+        if point in manifest_provides(manifest) and key not in out:
+            out.append(str(key))
+    return out
+
+
 def _manifest_render_profile(state: Any, plugin_key: str | None) -> dict[str, Any] | None:
     if state is None or not plugin_key:
         return None
@@ -9893,6 +9921,7 @@ __all__ = [
     "get_recent_peers",
     "invoke_interaction_entry",
     "load_plugins_for_account",
+    "plugins_providing",
     "registered_plugins",
     "reload_account_config",
     "reload_ignored_peers",

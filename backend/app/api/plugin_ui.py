@@ -42,7 +42,7 @@ async def get_plugin_ui_contract(_user: CurrentUser) -> dict[str, Any]:
 async def list_plugin_ui_cards(
     db: DBSession,
     _user: CurrentUser,
-    slot: str = Query(..., description="plugin.overview / account.detail / dashboard"),
+    slot: str = Query(..., description="plugin.overview / account.detail / dashboard / interaction.rule_editor"),
     plugin_key: str | None = None,
     account_id: int | None = None,
 ) -> PluginUICardsResponse:

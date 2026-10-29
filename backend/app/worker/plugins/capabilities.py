@@ -78,6 +78,8 @@ _W1_RELEASE = "0.110.0-beta.2"
 _PAYMENT_RELEASE = "0.111.0-beta.1"
 # P4a（插件自带页面与菜单）发布的宿主版本；合并时随版本号顺延。
 _P4A_RELEASE = "0.112.0-beta.1"
+# P4b（非资金业务下沉：入口策略声明、扩展点 provides、规则编辑器 slot）发布的宿主版本；合并时随版本号顺延。
+_P4B_RELEASE = "0.112.0-beta.2"
 
 _DOC = "docs/PLUGIN-API-REFERENCE.md"
 
@@ -240,7 +242,7 @@ CAPABILITIES: tuple[Capability, ...] = (
         name="runtime.entry_policy",
         since=_P1_RELEASE,
         plugin_api="1.1",
-        summary="interaction_entries[].policy 声明参与方式 / 是否有奖 / 默认启动词，宿主不再按插件 key 写死",
+        summary="interaction_entries[] 的 session_scope / participant_policy / 入口 schema 的 prize 声明参与方式与是否有奖，宿主不再按插件 key 写死（未声明的旧插件走兜底入口表）",
         doc=f"{_DOC}#入口策略policy",
     ),
     # ── P3：声明式 UI（Plugin API 1.3）──
@@ -323,6 +325,31 @@ CAPABILITIES: tuple[Capability, ...] = (
         plugin_api="1.4",
         summary="ctx.host.read(\"ai.models@1\") 每项只增 display_name / label / available（有可用 Key 且模型启用）/ has_api_key / cost_tier（1 便宜 · 2 标准 · 3 旗舰）/ cost_tier_label，旧字段不变",
         doc=f"{_DOC}#宿主只读查询ctxhostread",
+    ),
+)
+
+# ── P4b：非资金业务下沉（Plugin API 1.5）──
+CAPABILITIES += (
+    Capability(
+        name="interaction.entry_policy",
+        since=_P4B_RELEASE,
+        plugin_api="1.5",
+        summary="interaction_entries[].entry_policy 显式声明 session_scope / participant_policy / prize / default_start_keywords；任一入口声明后宿主不再查兜底入口表（旧插件不声明则行为不变）",
+        doc=f"{_DOC}#入口策略声明entry_policy",
+    ),
+    Capability(
+        name="provides.ai.image_backend",
+        since=_P4B_RELEASE,
+        plugin_api="1.5",
+        summary='plugin.json provides: ["ai.image_backend"] 声明自己是 ,ai 图片后端；模板 image_backend="plugin"（新默认）按能力选择，没人声明时回退 plugin_compat 登记的旧默认图片插件',
+        doc=f"{_DOC}#扩展点provides",
+    ),
+    Capability(
+        name="ui.rule_editor",
+        since=_P4B_RELEASE,
+        plugin_api="1.5",
+        summary="plugin.json ui.rule_editor 按入口声明交互规则编辑器参数区（schema / defaults / 启动词 / 提示），ui.cards 可用 slot interaction.rule_editor",
+        doc=f"{_DOC}#规则编辑器参数区uirule_editor",
     ),
 )
 

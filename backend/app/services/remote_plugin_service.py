@@ -230,6 +230,8 @@ class PluginMetadataSchema(BaseModel):
     # 转账通知解析扩展点（0.111.0+）：[{"id": "cn_transfer", "title": "中文转账通知", "units": [...]}]，
     # 模块导出 parse_payment_notice(text, meta)；见 services/payment_sources.py。旧宿主忽略。
     payment_sources: list[dict[str, Any]] = Field(default_factory=list)
+    # 扩展点声明（0.112.0+，Plugin API 1.5），如 ["ai.image_backend"]；未登记的名字忽略，旧宿主忽略整个字段。
+    provides: list[str] = Field(default_factory=list)
     tags: list[str] = Field(default_factory=list)
 
     @field_validator("payment_sources")
@@ -253,6 +255,17 @@ class PluginMetadataSchema(BaseModel):
                 raise ValueError("payment_sources.units 必须是非空字符串数组")
             out.append(dict(item))
         return out
+
+    @field_validator("provides", mode="before")
+    @classmethod
+    def _validate_provides(cls, v: Any) -> list[str]:
+        from ..worker.plugins.extension_points import normalize_provides
+
+        if v is None:
+            return []
+        if not isinstance(v, list):
+            raise ValueError("provides 必须是字符串数组，例如 [\"ai.image_backend\"]")
+        return normalize_provides(v)
 
     @field_validator("render_profile")
     @classmethod
