@@ -3,8 +3,9 @@
 统一为 ``[账号 × feature]`` 下的 Rule 提供 CRUD + dry-run + 复制到其它账号。
 所有写操作完成后通过 IPC ``CMD_RELOAD_CONFIG`` 通知对应 worker 热加载。
 
-注意：普通插件不再随 TelePilot 本体分发。插件 dry-run 优先调用已安装插件导出的
-``_dry_run_match``；未安装或未导出时返回明确提示，不从 builtin 路径兜底。
+注意：普通插件不再随 TelePilot 本体分发。插件 dry-run 走 ``services/rule_dry_run_service``：
+优先调用已安装插件导出的 ``dry_run_rule``，旧版本回退 ``_dry_run_match``；未安装或未导出时返回
+明确提示，不从 builtin 路径兜底。
 """
 
 from __future__ import annotations
@@ -21,14 +22,10 @@ from sqlalchemy import select
 from ..db.models.account import Account
 from ..db.models.feature import (
     BUILTIN_FEATURES,
-    FEATURE_AUTO_REPLY,
-    FEATURE_AUTOREPEAT,
-    FEATURE_CODEX_IMAGE,
     FEATURE_FORWARD,
     FEATURE_SCHEDULER,
     Feature,
 )
-from ..db.models.plugin import PLUGIN_TRUST_ORPHAN, InstalledPlugin
 from ..db.models.rule import Rule
 from ..deps import CurrentUser, DBSession
 from ..redis_client import get_redis
@@ -40,13 +37,12 @@ from ..schemas.rule import (
     RuleOut,
     RuleUpdate,
 )
-from ..services import audit, rule_service
+from ..services import audit, rule_dry_run_service, rule_service
 from ..services.redactor import redact_value
 from ..services.scheduler_target import (
     SchedulerTargetError,
     normalize_scheduler_action_target,
 )
-from ..settings import settings
 from ..worker.ipc import CMD_RELOAD_CONFIG, cmd_channel, make_cmd, publish_cmd_with_ack
 
 log = logging.getLogger(__name__)
@@ -99,38 +95,9 @@ def _forward_dry_run_match(*args):
 
 
 async def _installed_plugin_dry_run_match(db, feature_key: str, *args):
-    installed = await db.get(InstalledPlugin, feature_key)
-    if installed is None:
-        return False, f"{feature_key} 仓库插件未安装，无法执行 dry-run。"
-    if not bool(getattr(installed, "enabled", False)):
-        return False, f"{feature_key} 已安装但全局开关关闭，无法执行 dry-run。"
-    if str(getattr(installed, "trust_tier", "") or "") == PLUGIN_TRUST_ORPHAN:
-        return False, f"{feature_key} 安装记录为 orphan，无法执行 dry-run。"
-    signature_ok = getattr(installed, "signature_ok", None)
-    if signature_ok is False:
-        return False, f"{feature_key} 签名校验失败，无法执行 dry-run。"
-    if signature_ok is None and not bool(settings.plugin_allow_legacy_unsigned_plugins):
-        return False, f"{feature_key} 签名状态未知，当前策略不允许执行 dry-run。"
-    install_error = str(getattr(installed, "last_install_error", "") or "").strip()
-    if install_error:
-        return False, f"{feature_key} 安装失败：{install_error}"
+    """旧接口：位置参数原样交给已安装插件的 ``_dry_run_match``（保留给既有调用方）。"""
 
-    import sys
-
-    from ..worker.plugins.loader import _installed_module_name, _load_installed_plugin
-
-    loaded = _load_installed_plugin(feature_key)
-    if feature_key not in loaded:
-        return False, f"{feature_key} 仓库插件未安装或加载失败，无法执行 dry-run。"
-
-    package_name = _installed_module_name(feature_key)
-    for module_name in (f"{package_name}.plugin", package_name):
-        module = sys.modules.get(module_name)
-        dry_run = getattr(module, "_dry_run_match", None)
-        if callable(dry_run):
-            return dry_run(*args)
-
-    return False, f"{feature_key} 插件未导出 _dry_run_match，无法执行 dry-run。"
+    return await rule_dry_run_service.legacy_installed_match(db, feature_key, *args)
 
 
 def _parse_scheduler_dt(raw: Any) -> datetime | None:
@@ -231,6 +198,9 @@ async def _normalize_scheduler_config_for_save(
     return cfg
 
 
+# ─────────────────────────────────────────────────────
+# 列表 / 创建
+# ─────────────────────────────────────────────────────
 # ─────────────────────────────────────────────────────
 # 列表 / 创建
 # ─────────────────────────────────────────────────────
@@ -396,44 +366,13 @@ async def dry_run_rule(
 ) -> RuleDryRunResponse:
     """试运行：把 sample 消息喂给规则，返回是否命中 + 渲染输出。
 
-    - ``auto_reply``：调用已安装插件的 ``_dry_run_match`` 完成匹配 + 渲染
-    - ``forward``：按 ``source_kind`` 判断是否进入转发流水线，输出 "would forward to ..." 描述
-    - 其它 feature：当前返回 matched=False（未实现）
+    - ``forward`` / ``scheduler``：宿主内置功能，宿主自己解释
+    - 其它插件规则：插件导出的 ``dry_run_rule(config, sample)``；旧版本插件回退 ``_dry_run_match``
+      （参数形状与日志见 ``plugin_compat.legacy_dry_run_args`` / ``legacy_dry_run_logs``）
     """
     await _ensure_account(db, aid)
     await _ensure_feature(db, key)
     rule = await _load_rule(db, aid, key, rid)
-    if key == FEATURE_AUTO_REPLY:
-        chat_type = payload.sample_chat_type or "private"
-        cfg = rule.config or {}
-        matched, output = await _installed_plugin_dry_run_match(
-            db,
-            key,
-            cfg,
-            payload.sample_message,
-            chat_type,
-            payload.sample_chat_id,
-        )
-        logs: list[dict[str, str]] = [
-            {"step": "scope", "msg": f"会话类型：{chat_type}"},
-            {"step": "scope", "msg": f"规则 scope：{cfg.get('scope', 'all')}"},
-        ]
-        if chat_type == "group" and payload.sample_chat_id:
-            logs.append({"step": "scope", "msg": f"样本 chat_id：{payload.sample_chat_id}"})
-        if cfg.get("scope") in ("group_specific", "groups"):
-            gids = cfg.get("group_ids", cfg.get("groups", []))
-            logs.append({"step": "scope", "msg": f"规则 group_ids：{gids}"})
-        logs.append({"step": "match", "msg": f"匹配模式：{cfg.get('match_mode', 'contains')}"})
-        logs.append({"step": "match", "msg": f"关键词：{cfg.get('keyword', '(any)')}"})
-        if not matched:
-            logs.append({"step": "result", "msg": "未命中：scope 检查或关键词匹配失败"})
-        else:
-            logs.append({"step": "result", "msg": "命中"})
-        return RuleDryRunResponse(
-            matched=matched,
-            output=output,
-            detail={"feature": key, "rule_id": rid, "logs": logs},
-        )
     if key == FEATURE_FORWARD:
         cfg = rule.config or {}
         matched, output = _forward_dry_run_match(
@@ -563,60 +502,22 @@ async def dry_run_rule(
                 "logs": logs,
             },
         )
-    # ── autorepeat dry-run ──
-    if key == FEATURE_AUTOREPEAT:
-        cfg = rule.config or {}
-        matched, output = await _installed_plugin_dry_run_match(
-            db,
-            key,
-            cfg,
-            payload.sample_message,
-            payload.sample_chat_id,
-        )
-        logs = [
-            {"step": "target", "msg": f"目标群组：{cfg.get('target_chat_id', '(未设置)')}"},
-            {"step": "config", "msg": f"时间窗口：{cfg.get('time_window', 300)}s"},
-            {"step": "config", "msg": f"触发人数：{cfg.get('min_users', 5)}"},
-            {"step": "sample", "msg": f"样本 chat_id：{payload.sample_chat_id or '(未填)'}"},
-        ]
-        if not matched:
-            logs.append({"step": "result", "msg": "未命中"})
-        else:
-            logs.append({"step": "result", "msg": "命中"})
-        return RuleDryRunResponse(
-            matched=matched,
-            output=output,
-            detail={"feature": key, "rule_id": rid, "logs": logs},
-        )
-    # ── codex_image dry-run ──
-    if key == FEATURE_CODEX_IMAGE:
-        cfg = rule.config or {}
-        matched, output = await _installed_plugin_dry_run_match(
-            db,
-            key,
-            cfg,
-            payload.sample_message,
-            payload.sample_chat_id,
-        )
-        logs = [
-            {"step": "auth", "msg": f"Token：{'已配置' if cfg.get('access_token') else '未配置'}"},
-            {"step": "config", "msg": f"模型：{cfg.get('model', 'gpt-5.5')}"},
-            {"step": "config", "msg": f"最大等待：{cfg.get('max_wait_seconds', 600)}s"},
-            {"step": "sample", "msg": f"提示词长度：{len(payload.sample_message)}"},
-        ]
-        if not matched:
-            logs.append({"step": "result", "msg": output or "未命中（缺 access_token）"})
-        else:
-            logs.append({"step": "result", "msg": "命中"})
-        return RuleDryRunResponse(
-            matched=matched,
-            output=output,
-            detail={"feature": key, "rule_id": rid, "logs": logs},
-        )
+    # ── 其它插件规则：通用协议（dry_run_rule），旧版 _dry_run_match 由 plugin_compat 兼容 ──
+    result = await rule_dry_run_service.plugin_dry_run(
+        db,
+        key,
+        rule.config or {},
+        sample_message=payload.sample_message,
+        sample_chat_type=payload.sample_chat_type,
+        sample_chat_id=payload.sample_chat_id,
+    )
+    logs = list(result["logs"])
+    if not logs:
+        logs = [{"step": "result", "msg": "命中" if result["matched"] else (result["output"] or "未命中")}]
     return RuleDryRunResponse(
-        matched=False,
-        output=None,
-        detail={"feature": key, "note": "dry-run for this feature is not implemented yet"},
+        matched=result["matched"],
+        output=result["output"],
+        detail={"feature": key, "rule_id": rid, "logs": logs, "protocol": result["protocol"]},
     )
 
 

@@ -72,6 +72,8 @@ _P1_RELEASE = "0.108.0-beta.1"
 _P2_RELEASE = "0.109.0-beta.1"
 # 这一版（P3 声明式 UI）发布的宿主版本；合并时随版本号顺延（只影响注册表里“本版新增”的条目）。
 _THIS_RELEASE = "0.110.0-beta.1"
+# P3 第二部分（W1 迁移：通用规则页、试运行协议）发布的宿主版本；合并时随版本号顺延。
+_W1_RELEASE = "0.110.0-beta.2"
 
 _DOC = "docs/PLUGIN-API-REFERENCE.md"
 
@@ -273,6 +275,21 @@ CAPABILITIES: tuple[Capability, ...] = (
         plugin_api="1.3",
         summary="配置控件契约 schemas/plugin-ui-widgets.json（contract_version 1）：Web 与 iOS 都实现全部控件，未知控件只读并提示更新 App",
         doc=f"{_DOC}#配置控件契约",
+    ),
+    # ── P3 第二部分：W1 迁移（专属配置页改为通用声明式）──
+    Capability(
+        name="ui.rules_page",
+        since=_W1_RELEASE,
+        plugin_api="1.3",
+        summary="x-ui-mode=rules 通用规则页：x-rule-schema（每条规则的表单）、x-rule-summary（列表摘要列）、x-dry-run（试运行卡片）、字段 x-ui-visible-if（按其它字段显示），契约 contract_version 2",
+        doc=f"{_DOC}#通用规则页x-ui-moderules",
+    ),
+    Capability(
+        name="rules.dry_run",
+        since=_W1_RELEASE,
+        plugin_api="1.3",
+        summary="插件模块导出 dry_run_rule(config, sample)（可 async，3 秒）返回 {matched, output, logs}；宿主不再按插件 key 解释试运行，旧版 _dry_run_match 仍兼容",
+        doc=f"{_DOC}#规则试运行dry_run_rule",
     ),
 )
 

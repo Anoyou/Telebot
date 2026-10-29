@@ -235,6 +235,72 @@ def lint_ui_declaration(manifest: Mapping[str, Any]) -> list[str]:
     schema = manifest.get("config_schema")
     for item in unknown_widgets_in_schema(schema):
         warnings.append(f"config_schema 使用了契约未列出的控件 {item}（客户端会只读显示「此控件需要更新 App」）")
+    warnings.extend(lint_rules_declaration(schema))
+    return warnings
+
+
+DRY_RUN_SAMPLE_FIELDS = ("message", "chat_type", "chat_id")
+
+
+def rule_schema_of(schema: Any) -> Mapping[str, Any] | None:
+    """``x-ui-mode=rules`` 时每条规则的 schema：``x-rule-schema``，省略时整个 config_schema。"""
+
+    if not isinstance(schema, Mapping) or schema.get("x-ui-mode") != "rules":
+        return None
+    declared = schema.get("x-rule-schema")
+    if isinstance(declared, Mapping):
+        return declared
+    return schema
+
+
+def lint_rules_declaration(schema: Any) -> list[str]:
+    """通用规则页声明（x-rule-schema / x-rule-summary / x-dry-run / x-ui-visible-if）的 lint。"""
+
+    warnings: list[str] = []
+    if not isinstance(schema, Mapping):
+        return warnings
+    declared = schema.get("x-rule-schema")
+    if declared is not None:
+        if schema.get("x-ui-mode") != "rules":
+            warnings.append("config_schema.x-rule-schema 只在 x-ui-mode=rules 时生效")
+        if not isinstance(declared, Mapping) or not isinstance(declared.get("properties"), Mapping):
+            warnings.append("config_schema.x-rule-schema 必须是带 properties 的对象 schema")
+            declared = None
+        else:
+            for item in unknown_widgets_in_schema(declared, prefix="x-rule-schema."):
+                warnings.append(f"config_schema 使用了契约未列出的控件 {item}（客户端会只读显示「此控件需要更新 App」）")
+    rule_schema = rule_schema_of(schema)
+    rule_props = rule_schema.get("properties") if isinstance(rule_schema, Mapping) else None
+    rule_props = rule_props if isinstance(rule_props, Mapping) else {}
+    summary = schema.get("x-rule-summary")
+    if summary is not None:
+        if not isinstance(summary, list) or not all(isinstance(item, str) for item in summary):
+            warnings.append("config_schema.x-rule-summary 必须是字段名数组")
+        else:
+            missing = [item for item in summary if item not in rule_props]
+            if missing:
+                warnings.append(f"config_schema.x-rule-summary 引用了规则 schema 里没有的字段：{', '.join(missing)}")
+    dry_run = schema.get("x-dry-run")
+    if dry_run is not None and dry_run is not False:
+        if not isinstance(dry_run, Mapping):
+            warnings.append("config_schema.x-dry-run 必须是对象或 false")
+        else:
+            fields = dry_run.get("sample_fields")
+            if fields is not None and (
+                not isinstance(fields, list) or any(item not in DRY_RUN_SAMPLE_FIELDS for item in fields)
+            ):
+                warnings.append("config_schema.x-dry-run.sample_fields 只能取 message / chat_type / chat_id")
+    for scope_name, props in (("config_schema", schema.get("properties")), ("x-rule-schema", rule_props)):
+        if not isinstance(props, Mapping):
+            continue
+        for key, field in props.items():
+            cond = field.get("x-ui-visible-if") if isinstance(field, Mapping) else None
+            if cond is None:
+                continue
+            if not isinstance(cond, Mapping) or not isinstance(cond.get("field"), str):
+                warnings.append(f"{scope_name}.{key}.x-ui-visible-if 必须是 {{field, equals|in|not_in}}")
+            elif cond["field"] not in props:
+                warnings.append(f"{scope_name}.{key}.x-ui-visible-if 引用了同级不存在的字段 {cond['field']}")
     return warnings
 
 
@@ -246,10 +312,12 @@ __all__ = [
     "card_slots",
     "explicit_widget_values",
     "hook_timeout_seconds",
+    "lint_rules_declaration",
     "lint_ui_declaration",
     "load_contract",
     "localized_text",
     "normalize_card",
+    "rule_schema_of",
     "normalize_ui_cards",
     "unknown_widgets_in_schema",
     "widget_ids",

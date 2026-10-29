@@ -156,6 +156,74 @@ def legacy_secret_list_fields(plugin_key: str | None, schema: Any = None) -> dic
 
 
 # ─────────────────────────────────────────────────────
+# 规则试运行（dry-run）的旧协议：0.110.0-beta.2 起插件导出 ``dry_run_rule(config, sample)``
+# （services/rule_dry_run_service.py）。下面只给还在用 ``_dry_run_match(*args)`` 的旧版本插件
+# 登记参数形状与日志文案，宿主其它地方不再按插件 key 分支。新插件不要加到这里。
+# ─────────────────────────────────────────────────────
+# 旧版 ``_dry_run_match`` 第三个位置参数是会话类型（其余插件是 chat_id）。
+LEGACY_DRY_RUN_WITH_CHAT_TYPE: frozenset[str] = frozenset({AUTO_REPLY})
+
+
+def legacy_dry_run_args(plugin_key: str | None, config: dict[str, Any], sample: dict[str, Any]) -> tuple[Any, ...]:
+    message = sample.get("message") or ""
+    chat_id = sample.get("chat_id")
+    if str(plugin_key or "") in LEGACY_DRY_RUN_WITH_CHAT_TYPE:
+        return (config, message, sample.get("chat_type") or "private", chat_id)
+    return (config, message, chat_id)
+
+
+def legacy_dry_run_logs(
+    plugin_key: str | None,
+    config: dict[str, Any],
+    sample: dict[str, Any],
+    *,
+    matched: bool,
+    output: str | None,
+) -> list[dict[str, str]]:
+    """旧版插件没有返回日志时，宿主补一份与 0.110.0-beta.1 之前相同的解释步骤。"""
+
+    key = str(plugin_key or "")
+    cfg = config or {}
+    chat_id = sample.get("chat_id")
+    logs: list[dict[str, str]]
+    if key == AUTO_REPLY:
+        chat_type = sample.get("chat_type") or "private"
+        logs = [
+            {"step": "scope", "msg": f"会话类型：{chat_type}"},
+            {"step": "scope", "msg": f"规则 scope：{cfg.get('scope', 'all')}"},
+        ]
+        if chat_type == "group" and chat_id:
+            logs.append({"step": "scope", "msg": f"样本 chat_id：{chat_id}"})
+        if cfg.get("scope") in ("group_specific", "groups"):
+            logs.append({"step": "scope", "msg": f"规则 group_ids：{cfg.get('group_ids', cfg.get('groups', []))}"})
+        logs.append({"step": "match", "msg": f"匹配模式：{cfg.get('match_mode', cfg.get('match', 'contains'))}"})
+        logs.append({"step": "match", "msg": f"关键词：{cfg.get('keyword') or cfg.get('patterns') or '(any)'}"})
+        logs.append({"step": "result", "msg": "命中" if matched else "未命中：scope 检查或关键词匹配失败"})
+        return logs
+    if key == AUTOREPEAT:
+        logs = [
+            {"step": "target", "msg": f"目标群组：{cfg.get('target_chat_id', '(未设置)')}"},
+            {"step": "config", "msg": f"时间窗口：{cfg.get('time_window', 300)}s"},
+            {"step": "config", "msg": f"触发人数：{cfg.get('min_users', 5)}"},
+            {"step": "sample", "msg": f"样本 chat_id：{chat_id or '(未填)'}"},
+        ]
+    elif key == CODEX_IMAGE:
+        logs = [
+            {"step": "auth", "msg": f"Token：{'已配置' if cfg.get('access_token') else '未配置'}"},
+            {"step": "config", "msg": f"模型：{cfg.get('model', 'gpt-5.5')}"},
+            {"step": "config", "msg": f"最大等待：{cfg.get('max_wait_seconds', 600)}s"},
+            {"step": "sample", "msg": f"提示词长度：{len(str(sample.get('message') or ''))}"},
+        ]
+        if not matched:
+            logs.append({"step": "result", "msg": output or "未命中（缺 access_token）"})
+            return logs
+    else:
+        logs = [{"step": "sample", "msg": f"样本 chat_id：{chat_id or '(未填)'}"}]
+    logs.append({"step": "result", "msg": "命中" if matched else "未命中"})
+    return logs
+
+
+# ─────────────────────────────────────────────────────
 # ,ai 指令图片后端：image_backend="codex_image" 桥接到同名插件（B8，计划改为 provides: image_backend）
 # ─────────────────────────────────────────────────────
 DEFAULT_IMAGE_BACKEND_PLUGIN = CODEX_IMAGE
