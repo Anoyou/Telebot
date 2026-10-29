@@ -1,0 +1,791 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://telepilot.local/schemas/plugin-contract.schema.json",
+  "title": "TelePilot plugin.json（稳定契约 1.0）",
+  "description": "由 scripts/export-plugin-contract.py 从运行时常量生成，不要手改。比 plugin.schema.json 多描述一层嵌套字段；所有对象允许额外字段（向前兼容）。",
+  "type": "object",
+  "additionalProperties": true,
+  "anyOf": [
+    {
+      "required": [
+        "name"
+      ]
+    },
+    {
+      "required": [
+        "key"
+      ]
+    }
+  ],
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "插件 key（与 key 二选一，name 优先）"
+    },
+    "key": {
+      "type": "string"
+    },
+    "display_name": {
+      "type": "string"
+    },
+    "description": {
+      "type": "string"
+    },
+    "author": {
+      "type": "string"
+    },
+    "version": {
+      "type": "string"
+    },
+    "entry": {
+      "type": "string"
+    },
+    "category": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "tags": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "usage": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "min_telepilot_version": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "min_telebot_version": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "已弃用的旧名，仍兼容"
+    },
+    "plugin_api": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Plugin API 兼容范围，如 ^1.0 / >=1.3,<2"
+    },
+    "permissions": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "allowed_hosts": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "requires_platform_capabilities": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "interaction_profile": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "interaction_entries": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "key": {
+            "type": "string",
+            "minLength": 1
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                }
+              }
+            ]
+          },
+          "description": {
+            "type": "string"
+          },
+          "interaction_profile": {
+            "type": "string"
+          },
+          "launch_mode": {
+            "type": "string",
+            "examples": [
+              "bridge",
+              "direct",
+              "hybrid"
+            ]
+          },
+          "dispatch_modes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "events": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "all_events",
+                "all_messages",
+                "callback_query",
+                "chosen_inline_result",
+                "command",
+                "guest_message",
+                "inline_query",
+                "keyword",
+                "message",
+                "message_edited",
+                "payment_confirmed",
+                "session_close",
+                "session_expired",
+                "webhook"
+              ]
+            }
+          },
+          "session_scope": {
+            "type": "string",
+            "enum": [
+              "chat",
+              "none",
+              "user"
+            ]
+          },
+          "session_policy": {
+            "type": "object"
+          },
+          "participant_policy": {
+            "type": "string",
+            "enum": [
+              "notify_only",
+              "open_race",
+              "paid_pool",
+              "solo_owner"
+            ]
+          },
+          "payload_contract": {
+            "type": "object"
+          },
+          "result_contract": {
+            "type": "object"
+          },
+          "settlement": {
+            "type": [
+              "object",
+              "boolean",
+              "string",
+              "null"
+            ]
+          },
+          "message_channels": {
+            "type": [
+              "object",
+              "array"
+            ],
+            "description": "{触发方式: 发送通道} 映射"
+          },
+          "preserve_command_trigger": {
+            "type": "boolean"
+          },
+          "command_fallback": {
+            "type": [
+              "object",
+              "boolean",
+              "string",
+              "array",
+              "null"
+            ]
+          },
+          "input_schema": {
+            "type": "object"
+          },
+          "policy": {
+            "type": "object"
+          },
+          "entry_policy": {
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "session_scope": {
+                "type": "string",
+                "enum": [
+                  "chat",
+                  "none",
+                  "user"
+                ]
+              },
+              "participant_policy": {
+                "type": "string",
+                "enum": [
+                  "notify_only",
+                  "open_race",
+                  "paid_pool",
+                  "solo_owner"
+                ]
+              },
+              "prize": {
+                "type": "boolean"
+              },
+              "default_start_keywords": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "入口参与方式与会话边界（Plugin API 1.5，0.112.0-beta.2+）；任一入口声明后宿主不再查兜底入口表"
+          },
+          "legacy_entry_keys": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true,
+              "properties": {
+                "key": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "session_scope": {
+                  "type": "string",
+                  "enum": [
+                    "chat",
+                    "none",
+                    "user"
+                  ]
+                },
+                "participant_policy": {
+                  "type": "string",
+                  "enum": [
+                    "notify_only",
+                    "open_race",
+                    "paid_pool",
+                    "solo_owner"
+                  ]
+                },
+                "prize": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "key"
+              ]
+            },
+            "description": "旧入口 key 声明（Plugin API 1.6，0.112.0-beta.3+）；不算正式入口"
+          }
+        },
+        "required": [
+          "key"
+        ]
+      }
+    },
+    "event_subscriptions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "events": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "all_events",
+                "all_messages",
+                "callback_query",
+                "chosen_inline_result",
+                "command",
+                "guest_message",
+                "inline_query",
+                "keyword",
+                "message",
+                "message_edited",
+                "payment_confirmed",
+                "session_close",
+                "session_expired",
+                "webhook"
+              ]
+            }
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "external_payment_notice",
+                  "interaction_bot",
+                  "userbot",
+                  "webhook"
+                ]
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "external_payment_notice",
+                    "interaction_bot",
+                    "userbot",
+                    "webhook"
+                  ]
+                }
+              }
+            ]
+          },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "all_allowed_chats",
+              "guest_all",
+              "inline_all",
+              "known_users",
+              "own_buttons",
+              "owner_only",
+              "rule_bound"
+            ]
+          },
+          "entry_key": {
+            "type": "string"
+          },
+          "filters": {
+            "type": "object"
+          },
+          "timeout_seconds": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "description": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "capabilities": {
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "config_schema": {
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "config_actions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "key": {
+            "type": "string",
+            "minLength": 1
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                }
+              }
+            ]
+          },
+          "description": {
+            "type": "string"
+          },
+          "placement": {
+            "type": "string"
+          },
+          "submit_label": {
+            "type": "string"
+          },
+          "input_schema": {
+            "type": "object"
+          }
+        },
+        "required": [
+          "key"
+        ]
+      }
+    },
+    "agent_tools": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "middleware": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "stage": {
+            "type": "string",
+            "enum": [
+              "delivered",
+              "inbound",
+              "outbound"
+            ]
+          },
+          "handler": {
+            "type": "string",
+            "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+          },
+          "order": {
+            "type": "integer"
+          },
+          "timeout_ms": {
+            "type": "integer",
+            "minimum": 50,
+            "maximum": 2000
+          },
+          "critical": {
+            "type": "boolean"
+          },
+          "match": {
+            "type": "object"
+          }
+        },
+        "required": [
+          "stage"
+        ]
+      }
+    },
+    "render_profile": {
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "reads": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9_.]*@\\d+$"
+      }
+    },
+    "provides": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "payment_sources": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                }
+              }
+            ]
+          },
+          "description": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      }
+    },
+    "ui": {
+      "anyOf": [
+        {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "cards": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": true,
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,47}$"
+                  },
+                  "slot": {
+                    "type": "string",
+                    "enum": [
+                      "account.detail",
+                      "dashboard",
+                      "interaction.rule_editor",
+                      "plugin.overview"
+                    ]
+                  },
+                  "title": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "object",
+                        "additionalProperties": {
+                          "type": "string"
+                        }
+                      }
+                    ]
+                  },
+                  "subtitle": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "object",
+                        "additionalProperties": {
+                          "type": "string"
+                        }
+                      }
+                    ]
+                  },
+                  "source": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "properties": {
+                      "read": {
+                        "type": "string"
+                      },
+                      "action": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "layout": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "properties": {
+                      "type": {
+                        "type": "string",
+                        "enum": [
+                          "buttons",
+                          "kv",
+                          "list",
+                          "stats",
+                          "table"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "type"
+                    ]
+                  },
+                  "blocks": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": true,
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "enum": [
+                            "buttons",
+                            "kv",
+                            "list",
+                            "stats",
+                            "table"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "type"
+                      ]
+                    }
+                  },
+                  "refresh_seconds": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "id",
+                  "slot",
+                  "source"
+                ]
+              }
+            },
+            "pages": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": true,
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,47}$"
+                  },
+                  "title": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "object",
+                        "additionalProperties": {
+                          "type": "string"
+                        }
+                      }
+                    ]
+                  },
+                  "subtitle": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "object",
+                        "additionalProperties": {
+                          "type": "string"
+                        }
+                      }
+                    ]
+                  },
+                  "file": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9_][A-Za-z0-9_./-]{0,159}\\.html?$"
+                  },
+                  "menus": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "plugin.detail",
+                        "account.detail"
+                      ]
+                    }
+                  },
+                  "bridge": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "actions.invoke",
+                        "cards.read",
+                        "config.read"
+                      ]
+                    }
+                  },
+                  "actions": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "required": [
+                  "id",
+                  "file"
+                ]
+              }
+            },
+            "actions": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": true,
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,47}$"
+                  },
+                  "menu": {
+                    "type": "string",
+                    "enum": [
+                      "plugin.detail",
+                      "account.detail"
+                    ]
+                  },
+                  "title": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "object",
+                        "additionalProperties": {
+                          "type": "string"
+                        }
+                      }
+                    ]
+                  },
+                  "confirm": {
+                    "type": [
+                      "boolean",
+                      "string"
+                    ]
+                  },
+                  "style": {
+                    "type": "string"
+                  },
+                  "page": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "id"
+                ]
+              }
+            },
+            "rule_editor": {
+              "type": "object",
+              "additionalProperties": true,
+              "properties": {
+                "entries": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  }
+}

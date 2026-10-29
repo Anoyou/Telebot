@@ -1,0 +1,1040 @@
+{
+  "events": {
+    "event_bus_demo/callback_query.json": [
+      {
+        "callback_query_id": "cbq-1001",
+        "show_alert": false,
+        "text": "按钮已收到",
+        "type": "answer_callback"
+      }
+    ],
+    "event_bus_demo/chosen_inline_result.json": [
+      {
+        "result": {
+          "chosen": true
+        },
+        "success": true,
+        "type": "result"
+      }
+    ],
+    "event_bus_demo/command.json": [
+      {
+        "chat_id": -100100200300,
+        "reply_to_message_id": 42,
+        "text": "Event Bus 收到 command: ,event_bus_demo status",
+        "type": "send_message"
+      }
+    ],
+    "event_bus_demo/deprecated_notice_action.json": [
+      {
+        "chat_id": -100100200300,
+        "reply_to_message_id": 66,
+        "text": "Event Bus 收到 message: deprecated notice probe",
+        "type": "send_message"
+      }
+    ],
+    "event_bus_demo/guest_message.json": [
+      {
+        "guest_query_id": "guest-1001",
+        "text": "访客模式收到：今天天气怎么样",
+        "type": "answer_guest_query"
+      }
+    ],
+    "event_bus_demo/inline_query.json": [
+      {
+        "cache_time": 0,
+        "inline_query_id": "inline-1001",
+        "is_personal": true,
+        "results": [
+          {
+            "id": "event-bus-demo",
+            "input_message_content": {
+              "message_text": "来自 Event Bus 的 inline 结果"
+            },
+            "title": "Event Bus 示例",
+            "type": "article"
+          }
+        ],
+        "type": "answer_inline_query"
+      }
+    ],
+    "event_bus_demo/message.json": [
+      {
+        "chat_id": -100100200300,
+        "reply_to_message_id": 41,
+        "text": "Event Bus 收到 message: hello event bus",
+        "type": "send_message"
+      }
+    ],
+    "event_bus_demo/native_raw_telethon_message.json": [
+      {
+        "chat_id": -100100200300,
+        "reply_to_message_id": 9001,
+        "text": "Event Bus 收到 message: native raw audit ping",
+        "type": "send_message"
+      }
+    ],
+    "event_bus_demo/payment_confirmed.json": [
+      {
+        "amount": 100,
+        "currency": "POINT",
+        "mode": "confirm_only",
+        "payer_user_id": 501,
+        "status": "confirmed",
+        "type": "settlement"
+      },
+      {
+        "chat_id": -100100200300,
+        "reply_to_message_id": 88,
+        "text": "Event Bus 收到 payment_confirmed: 到账 100",
+        "type": "send_message"
+      }
+    ],
+    "hello_ping/miss": [],
+    "hello_ping/ping": [
+      {
+        "chat_id": -100123,
+        "reply_to_message_id": 456,
+        "text": "pong",
+        "type": "send_message"
+      }
+    ],
+    "ui_page_demo/on_event(ping)": [],
+    "ui_page_demo/storage_after_ping": {
+      "pings": 1
+    },
+    "webhook_receiver/orders_paid": [
+      {
+        "chat_id": -100123,
+        "parse_mode": "plain",
+        "text": "订单事件\nHook：default\n接收时间：2026-07-15T00:00:00+00:00\n内容：{\"order_id\":\"A-1001\",\"status\":\"paid\",\"amount\":88}",
+        "type": "send_message"
+      }
+    ]
+  },
+  "interaction": {
+    "with_interaction/buffered": {
+      "buffered_actions": [
+        {
+          "chat_id": -100777,
+          "parse_mode": "plain",
+          "reply_to_message_id": null,
+          "text": "欢迎\n收到：开始\n触发人：Bob",
+          "type": "send_message"
+        }
+      ],
+      "returned": [
+        {
+          "result": {
+            "actor_user_id": 42,
+            "entry_key": "start_with_interaction",
+            "status": "ok"
+          },
+          "settlement": {
+            "mode": "announce_only",
+            "winner_name": "Bob",
+            "winner_user_id": 42
+          },
+          "success": true,
+          "type": "result"
+        },
+        {
+          "type": "end_session"
+        }
+      ]
+    },
+    "with_interaction/other_entry": null,
+    "with_interaction/returned": [
+      {
+        "text": "欢迎\n收到：开始\n触发人：Bob",
+        "type": "send_message"
+      },
+      {
+        "result": {
+          "actor_user_id": 42,
+          "entry_key": "start_with_interaction",
+          "status": "ok"
+        },
+        "settlement": {
+          "mode": "announce_only",
+          "winner_name": "Bob",
+          "winner_user_id": 42
+        },
+        "success": true,
+        "type": "result"
+      },
+      {
+        "type": "end_session"
+      }
+    ]
+  },
+  "manifest": {
+    "event_bus_demo": {
+      "interaction_entries": [],
+      "lint": [],
+      "metadata": {
+        "agent_tools": [],
+        "author": "examples",
+        "capabilities": {
+          "telegram_direct_passthrough": {
+            "directions": [
+              "incoming"
+            ],
+            "enabled": false,
+            "reason": "示例插件不启用低延时直通；只有抢红包、秒杀等需要跳过标准链路的插件才应声明并让账号二次手动开启。",
+            "sources": [
+              "userbot"
+            ]
+          },
+          "telegram_native_raw": {
+            "enabled": true,
+            "reason": "只在排查 Telegram 原生字段映射差异时读取 native_raw_meta；业务逻辑仍以标准事件信封为主。",
+            "sources": [
+              "interaction_bot",
+              "userbot"
+            ],
+            "store_payload": false
+          }
+        },
+        "category": "interactive",
+        "config_actions": [],
+        "config_schema": null,
+        "description": "演示最终版 Event Bus、Trace 与 MessageOps 插件契约。",
+        "display_name": "Event Bus 示例",
+        "entry": "plugin.py",
+        "event_subscriptions": [
+          {
+            "events": [
+              "message",
+              "command"
+            ],
+            "scope": "all_allowed_chats",
+            "source": [
+              "userbot",
+              "interaction_bot"
+            ]
+          },
+          {
+            "events": [
+              "callback_query"
+            ],
+            "scope": "all_allowed_chats",
+            "source": [
+              "interaction_bot"
+            ]
+          },
+          {
+            "events": [
+              "inline_query",
+              "chosen_inline_result"
+            ],
+            "scope": "inline_all",
+            "source": [
+              "interaction_bot"
+            ]
+          },
+          {
+            "events": [
+              "guest_message"
+            ],
+            "scope": "guest_all",
+            "source": [
+              "interaction_bot"
+            ]
+          },
+          {
+            "events": [
+              "payment_confirmed"
+            ],
+            "scope": "rule_bound",
+            "source": [
+              "external_payment_notice",
+              "userbot"
+            ]
+          }
+        ],
+        "interaction_entries": [],
+        "interaction_profile": "utility_trigger",
+        "min_telebot_version": null,
+        "min_telepilot_version": "0.72.0-beta.2",
+        "name": "event_bus_demo",
+        "permissions": [
+          "send_message",
+          "read_chat"
+        ],
+        "plugin_api": null,
+        "requires_platform_capabilities": [
+          "interaction_bot"
+        ],
+        "tags": [],
+        "usage": "安装后在插件中心启用；Event Bus 会按 event_subscriptions 投递 message、command、callback_query、inline_query、chosen_inline_result、guest_message（访客模式）与 payment_confirmed。插件只读取标准事件信封，发送、按钮 ACK、inline answer、访客回复与 settlement 都返回 MessageOps/action。",
+        "version": "0.1.0"
+      }
+    },
+    "hello_ping": {
+      "interaction_entries": [],
+      "lint": [],
+      "metadata": {
+        "agent_tools": [],
+        "author": "examples",
+        "capabilities": {},
+        "category": "utility",
+        "config_actions": [],
+        "config_schema": null,
+        "description": "最小 Event Bus + MessageOps 入门示例。",
+        "display_name": "Hello Ping",
+        "entry": "plugin.py",
+        "event_subscriptions": [
+          {
+            "events": [
+              "message"
+            ],
+            "scope": "all_allowed_chats",
+            "source": [
+              "userbot",
+              "interaction_bot"
+            ]
+          }
+        ],
+        "interaction_entries": [],
+        "interaction_profile": "utility_trigger",
+        "min_telebot_version": null,
+        "min_telepilot_version": "0.72.0-beta.2",
+        "name": "hello_ping",
+        "permissions": [
+          "send_message"
+        ],
+        "plugin_api": null,
+        "requires_platform_capabilities": [],
+        "tags": [],
+        "usage": "安装并在账号上启用后，在已允许会话发送 ping，插件会回复 pong。",
+        "version": "0.1.0"
+      }
+    },
+    "signature_mw": {
+      "interaction_entries": [],
+      "lint": [],
+      "metadata": {
+        "agent_tools": [],
+        "author": "examples",
+        "capabilities": {},
+        "category": "utility",
+        "config_actions": [],
+        "config_schema": {
+          "properties": {
+            "compact_tables": {
+              "default": false,
+              "title": "所有插件的表格改为紧凑样式",
+              "type": "boolean"
+            },
+            "signature": {
+              "default": "— 由 TelePilot 发送",
+              "title": "署名",
+              "type": "string"
+            }
+          },
+          "type": "object",
+          "x-ui-property-order": [
+            "signature",
+            "compact_tables"
+          ]
+        },
+        "description": "演示消息管线中间件：给交互 Bot 发出的文本消息统一加署名，按需把表格改成紧凑样式，并在 delivered 阶段统计投递结果。",
+        "display_name": "统一署名（中间件示例）",
+        "entry": "plugin.py",
+        "event_subscriptions": [],
+        "interaction_entries": [],
+        "interaction_profile": null,
+        "min_telebot_version": null,
+        "min_telepilot_version": "0.109.0-beta.1",
+        "name": "signature_mw",
+        "permissions": [
+          "message_middleware"
+        ],
+        "plugin_api": "^1.2",
+        "requires_platform_capabilities": [
+          "interaction_bot"
+        ],
+        "tags": [],
+        "usage": "启用后，本账号所有插件经交互 Bot 发出的文本消息末尾加上配置的署名（Rich 消息不加）；开启「表格紧凑」后所有插件的表格改为紧凑样式（render_profile）；投递成功 / 失败次数按动作类型记在插件存储里，可在插件详情的运行统计看到中间件耗时。",
+        "version": "0.1.0"
+      }
+    },
+    "ui_page_demo": {
+      "interaction_entries": [],
+      "lint": [],
+      "metadata": {
+        "agent_tools": [],
+        "author": "examples",
+        "capabilities": {},
+        "category": "utility",
+        "config_actions": [],
+        "config_schema": {
+          "properties": {
+            "api_token": {
+              "format": "password",
+              "title": "示例密钥（页面读不到）",
+              "type": "string"
+            },
+            "greeting": {
+              "default": "你好",
+              "title": "面板问候语",
+              "type": "string"
+            }
+          },
+          "type": "object",
+          "x-ui-property-order": [
+            "greeting",
+            "api_token"
+          ]
+        },
+        "description": "插件自带页面（ui.pages + Bridge）、菜单项（ui.actions）与卡片只读 ctx.storage 的最小示例。",
+        "display_name": "插件页面示例",
+        "entry": "plugin.py",
+        "event_subscriptions": [
+          {
+            "events": [
+              "message"
+            ],
+            "scope": "all_allowed_chats",
+            "source": [
+              "userbot",
+              "interaction_bot"
+            ]
+          }
+        ],
+        "interaction_entries": [],
+        "interaction_profile": "utility_trigger",
+        "min_telebot_version": null,
+        "min_telepilot_version": "0.112.0-beta.1",
+        "name": "ui_page_demo",
+        "permissions": [],
+        "plugin_api": "^1.4",
+        "requires_platform_capabilities": [],
+        "tags": [],
+        "usage": "在账号上启用后，已允许会话里每出现一次 ping 计数加一；插件详情的「插件页面与操作」里可打开面板页面查看计数与配置。",
+        "version": "0.1.0"
+      },
+      "ui": {
+        "actions": [
+          {
+            "confirm": null,
+            "destructive": false,
+            "id": "summarize",
+            "menu": "plugin.detail",
+            "page": null,
+            "title": "生成计数摘要"
+          },
+          {
+            "confirm": null,
+            "destructive": false,
+            "id": "open_dashboard",
+            "menu": "account.detail",
+            "page": "dashboard",
+            "title": "打开 ping 面板"
+          }
+        ],
+        "cards": [
+          {
+            "blocks": [
+              {
+                "items": [
+                  {
+                    "format": "number",
+                    "label": "累计",
+                    "path": "pings"
+                  }
+                ],
+                "type": "stats"
+              }
+            ],
+            "id": "ping_stats",
+            "refresh_seconds": null,
+            "slot": "account.detail",
+            "source": {
+              "action": "ping_stats"
+            },
+            "subtitle": null,
+            "title": "ping 计数"
+          }
+        ],
+        "pages": [
+          {
+            "actions": [
+              "summarize"
+            ],
+            "bridge": [
+              "config.read",
+              "cards.read",
+              "actions.invoke"
+            ],
+            "file": "ui/index.html",
+            "id": "dashboard",
+            "menus": [
+              "plugin.detail",
+              "account.detail"
+            ],
+            "subtitle": "插件自带页面示例",
+            "title": "ping 面板"
+          }
+        ],
+        "problems": []
+      }
+    },
+    "webhook_receiver": {
+      "interaction_entries": [],
+      "lint": [],
+      "metadata": {
+        "agent_tools": [],
+        "author": "examples",
+        "capabilities": {},
+        "category": "utility",
+        "config_actions": [],
+        "config_schema": {
+          "additionalProperties": false,
+          "properties": {
+            "target_chat_id": {
+              "description": "接收订单通知的私聊、群聊、超级群或频道 ID。",
+              "title": "目标 Chat ID",
+              "type": "integer"
+            },
+            "title": {
+              "default": "订单事件",
+              "maxLength": 64,
+              "title": "通知标题",
+              "type": "string"
+            }
+          },
+          "required": [
+            "target_chat_id"
+          ],
+          "type": "object",
+          "x-ui-mode": "single",
+          "x-ui-property-order": [
+            "target_chat_id",
+            "title"
+          ],
+          "x-usage-guide": "先填写接收通知的 Telegram Chat ID，再到入站 Webhook 页面复制 default 地址与 Token。外部系统只需 POST JSON；请求返回 202 后，在日志或 Trace 中确认插件执行结果。"
+        },
+        "description": "接收 default Webhook，并把订单事件发送到配置的 Telegram 会话。",
+        "display_name": "Webhook 订单通知示例",
+        "entry": "plugin.py",
+        "event_subscriptions": [
+          {
+            "events": [
+              "webhook"
+            ],
+            "filters": {
+              "hook_key": "default"
+            },
+            "scope": "all_allowed_chats",
+            "source": [
+              "webhook"
+            ]
+          }
+        ],
+        "interaction_entries": [],
+        "interaction_profile": null,
+        "min_telebot_version": null,
+        "min_telepilot_version": "0.72.0-beta.2",
+        "name": "webhook_receiver",
+        "permissions": [
+          "send_message"
+        ],
+        "plugin_api": null,
+        "requires_platform_capabilities": [
+          "webhooks"
+        ],
+        "tags": [],
+        "usage": "安装并为账号启用后，设置目标 Chat ID；外部系统向入站 Webhook 页提供的 default 地址 POST JSON，插件会通过该账号把事件摘要发送到目标会话。",
+        "version": "0.1.0"
+      }
+    },
+    "with_ai": {
+      "interaction_entries": [],
+      "lint": [],
+      "metadata": {
+        "agent_tools": [],
+        "author": "examples",
+        "capabilities": {},
+        "category": "utility",
+        "config_actions": [],
+        "config_schema": {
+          "additionalProperties": false,
+          "properties": {
+            "provider_tag": {
+              "default": "chat",
+              "description": "可选：优先选择带有该 tag 的可用 provider。",
+              "title": "Provider 标签",
+              "type": "string"
+            }
+          },
+          "type": "object",
+          "x-ui-mode": "single",
+          "x-ui-property-order": [
+            "provider_tag"
+          ]
+        },
+        "description": "演示第三方模块通过 ctx.ai 使用平台文本 LLM facade。",
+        "display_name": "AI 示例",
+        "entry": "plugin.py",
+        "event_subscriptions": [],
+        "interaction_entries": [],
+        "interaction_profile": null,
+        "min_telebot_version": null,
+        "min_telepilot_version": "0.72.0-beta.2",
+        "name": "with_ai",
+        "permissions": [
+          "ai_text",
+          "edit_message"
+        ],
+        "plugin_api": null,
+        "requires_platform_capabilities": [
+          "ai"
+        ],
+        "tags": [],
+        "usage": "安装后使用账号命令 ai_providers 查看可用 provider，使用 ai_complete 文本 调用平台统一 LLM facade。该示例不订阅 Telegram Event Bus。",
+        "version": "0.1.0"
+      }
+    },
+    "with_ai_components": {
+      "interaction_entries": [],
+      "lint": [],
+      "metadata": {
+        "agent_tools": [],
+        "author": "examples",
+        "capabilities": {},
+        "category": "interactive",
+        "config_actions": [],
+        "config_schema": {
+          "additionalProperties": false,
+          "properties": {
+            "default_topic": {
+              "default": "常识",
+              "description": "quiz_new 不带参数时使用的默认出题主题。",
+              "title": "默认主题",
+              "type": "string"
+            },
+            "provider_tag": {
+              "default": "chat",
+              "description": "可选：出题/判题时优先选择带该 tag 的可用 provider。",
+              "title": "Provider 标签",
+              "type": "string"
+            }
+          },
+          "type": "object",
+          "x-ui-mode": "single",
+          "x-ui-property-order": [
+            "provider_tag",
+            "default_topic"
+          ]
+        },
+        "description": "演示用 QuizMaker + AnswerJudge 组件跑一个最小问答局，AI 不可用时自动降级。",
+        "display_name": "AI 玩法组件示例",
+        "entry": "plugin.py",
+        "event_subscriptions": [],
+        "interaction_entries": [],
+        "interaction_profile": null,
+        "min_telebot_version": null,
+        "min_telepilot_version": "0.72.0-beta.2",
+        "name": "with_ai_components",
+        "permissions": [
+          "ai_text",
+          "edit_message"
+        ],
+        "plugin_api": null,
+        "requires_platform_capabilities": [
+          "ai"
+        ],
+        "tags": [],
+        "usage": "账号命令 quiz_new [主题] 出题，quiz_answer 答案 判题；无可用 AI 时走内置题库与规则判定。该示例不订阅 Telegram Event Bus。",
+        "version": "0.1.0"
+      }
+    },
+    "with_http": {
+      "interaction_entries": [],
+      "lint": [],
+      "metadata": {
+        "agent_tools": [],
+        "author": "examples",
+        "capabilities": {},
+        "category": "utility",
+        "config_actions": [],
+        "config_schema": {
+          "additionalProperties": false,
+          "properties": {
+            "url": {
+              "default": "https://api.github.com/zen",
+              "description": "必须匹配 manifest.allowed_hosts。",
+              "title": "请求地址",
+              "type": "string"
+            }
+          },
+          "type": "object",
+          "x-ui-mode": "single",
+          "x-ui-property-order": [
+            "url"
+          ]
+        },
+        "description": "演示第三方模块通过 ctx.http 发起受控 HTTP 请求。",
+        "display_name": "HTTP 示例",
+        "entry": "plugin.py",
+        "event_subscriptions": [],
+        "interaction_entries": [],
+        "interaction_profile": null,
+        "min_telebot_version": null,
+        "min_telepilot_version": "0.72.0-beta.2",
+        "name": "with_http",
+        "permissions": [
+          "external_http",
+          "edit_message"
+        ],
+        "plugin_api": null,
+        "requires_platform_capabilities": [],
+        "tags": [],
+        "usage": "安装后使用账号命令 http_status 发起受控 HTTP 请求；URL 必须匹配 allowed_hosts。该示例不订阅 Telegram Event Bus。",
+        "version": "0.1.0"
+      }
+    },
+    "with_interaction": {
+      "interaction_entries": [
+        {
+          "command_fallback": {
+            "command": "with_interaction",
+            "enabled": true,
+            "mode": "hint_only"
+          },
+          "description": "演示交互 Bot 入口与原命令双兼容。",
+          "dispatch_modes": [
+            "admin_command",
+            "public_keyword"
+          ],
+          "events": [
+            "keyword",
+            "message",
+            "session_close"
+          ],
+          "input_schema": {
+            "additionalProperties": false,
+            "properties": {
+              "message": {
+                "default": "你好，交互 Bot",
+                "deprecated": true,
+                "description": "历史字段名会与标准事件信封 payload.message 冲突，请改用 response_text。",
+                "title": "示例文案",
+                "type": "string"
+              },
+              "response_text": {
+                "default": "你好，交互 Bot",
+                "title": "示例文案",
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "interaction_profile": "utility_trigger",
+          "key": "start_with_interaction",
+          "launch_mode": "hybrid",
+          "message_channels": {
+            "admin_command": "userbot_reply",
+            "public_keyword": "interaction_bot"
+          },
+          "money_channel": "userbot_reply",
+          "payload_contract": {
+            "required_envelope": [
+              "source",
+              "actor",
+              "trigger",
+              "session"
+            ],
+            "required_event_fields": [
+              "type",
+              "chat_id"
+            ]
+          },
+          "preserve_command_trigger": true,
+          "result_contract": {
+            "actions": [
+              "send_message",
+              "result",
+              "end_session"
+            ]
+          },
+          "session_scope": "chat",
+          "settlement": {
+            "mode": "announce_only",
+            "winner_field": "actor.user_id"
+          },
+          "title": "开始示例"
+        }
+      ],
+      "lint": [],
+      "metadata": {
+        "agent_tools": [],
+        "author": "TelePilot",
+        "capabilities": {
+          "telegram_native_raw": {
+            "enabled": false,
+            "reason": "兼容示例只读取标准事件信封，不需要原生 Telegram 对象。"
+          }
+        },
+        "category": "interactive",
+        "config_actions": [],
+        "config_schema": null,
+        "description": "最小交互 Bot 兼容示例",
+        "display_name": "交互示例",
+        "entry": "plugin.py",
+        "event_subscriptions": [
+          {
+            "events": [
+              "message",
+              "callback_query",
+              "payment_confirmed",
+              "session_close"
+            ],
+            "scope": "rule_bound",
+            "source": [
+              "interaction_bot",
+              "external_payment_notice"
+            ]
+          }
+        ],
+        "interaction_entries": [
+          {
+            "command_fallback": {
+              "command": "with_interaction",
+              "enabled": true,
+              "mode": "hint_only"
+            },
+            "description": "演示交互 Bot 入口与原命令双兼容。",
+            "events": [
+              "keyword",
+              "message",
+              "session_close"
+            ],
+            "input_schema": {
+              "additionalProperties": false,
+              "properties": {
+                "message": {
+                  "default": "你好，交互 Bot",
+                  "deprecated": true,
+                  "description": "历史字段名会与标准事件信封 payload.message 冲突，请改用 response_text。",
+                  "title": "示例文案",
+                  "type": "string"
+                },
+                "response_text": {
+                  "default": "你好，交互 Bot",
+                  "title": "示例文案",
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "interaction_profile": "utility_trigger",
+            "key": "start_with_interaction",
+            "launch_mode": "hybrid",
+            "payload_contract": {
+              "required_envelope": [
+                "source",
+                "actor",
+                "trigger",
+                "session"
+              ],
+              "required_event_fields": [
+                "type",
+                "chat_id"
+              ]
+            },
+            "preserve_command_trigger": true,
+            "result_contract": {
+              "actions": [
+                "send_message",
+                "result",
+                "end_session"
+              ]
+            },
+            "session_scope": "chat",
+            "settlement": {
+              "mode": "announce_only",
+              "winner_field": "actor.user_id"
+            },
+            "title": "开始示例"
+          }
+        ],
+        "interaction_profile": "utility_trigger",
+        "min_telebot_version": null,
+        "min_telepilot_version": "0.72.0-beta.2",
+        "name": "with_interaction",
+        "permissions": [
+          "send_message",
+          "read_chat"
+        ],
+        "plugin_api": null,
+        "requires_platform_capabilities": [
+          "interaction_bot"
+        ],
+        "tags": [],
+        "usage": "兼容桥示例：用于把历史 interaction_entries / on_interaction 插件迁移到标准事件信封。新插件优先参考 event_bus_demo。",
+        "version": "1.0.0"
+      }
+    },
+    "word_guard_mw": {
+      "interaction_entries": [],
+      "lint": [],
+      "metadata": {
+        "agent_tools": [],
+        "author": "examples",
+        "capabilities": {},
+        "category": "utility",
+        "config_actions": [],
+        "config_schema": {
+          "properties": {
+            "drop_inbound": {
+              "default": true,
+              "title": "丢弃含敏感词的入站消息",
+              "type": "boolean"
+            },
+            "outbound_mode": {
+              "default": "mask",
+              "enum": [
+                "mask",
+                "reject"
+              ],
+              "title": "出站处理方式",
+              "type": "string"
+            },
+            "words": {
+              "default": [
+                "违禁词"
+              ],
+              "items": {
+                "type": "string"
+              },
+              "title": "敏感词",
+              "type": "array"
+            }
+          },
+          "type": "object",
+          "x-ui-property-order": [
+            "words",
+            "outbound_mode",
+            "drop_inbound"
+          ]
+        },
+        "description": "演示消息管线中间件：入站丢弃含敏感词的消息，出站把敏感词打码或拒绝发送，流式中间态同样打码。",
+        "display_name": "敏感词守卫（中间件示例）",
+        "entry": "plugin.py",
+        "event_subscriptions": [],
+        "interaction_entries": [],
+        "interaction_profile": null,
+        "min_telebot_version": null,
+        "min_telepilot_version": "0.109.0-beta.1",
+        "name": "word_guard_mw",
+        "permissions": [
+          "message_middleware"
+        ],
+        "plugin_api": "^1.2",
+        "requires_platform_capabilities": [],
+        "tags": [],
+        "usage": "启用后对本账号所有插件生效：群里收到含敏感词的消息时，Event Bus 插件不会收到它（inbound 丢弃）；任何插件要发出的消息里出现敏感词时按配置打码（默认）或整条拒绝（outbound）；AI 流式回复的中间态也会打码（stream_preview）。敏感词在插件配置里维护。",
+        "version": "0.1.0"
+      }
+    }
+  },
+  "middleware": {
+    "signature_mw": {
+      "delivered_calls": 1,
+      "inbound": {
+        "dropped": false,
+        "value": null
+      },
+      "outbound": [
+        {
+          "_tp_mw_delivered": true,
+          "chat_id": -1,
+          "context": {
+            "plugin_key": "other"
+          },
+          "text": "含违禁词的回复\n\n— 由 TelePilot 发送",
+          "type": "send_message"
+        },
+        {
+          "_tp_mw_delivered": true,
+          "chat_id": -1,
+          "context": {
+            "plugin_key": "other"
+          },
+          "render_profile": {
+            "table": {
+              "compact": true
+            }
+          },
+          "rich_message": {
+            "markdown": "| a |\n|---|\n| 1 |"
+          },
+          "type": "send_rich_message"
+        }
+      ],
+      "storage": {
+        "delivered:send_message:ok": 1
+      },
+      "stream_preview": "流式违禁词"
+    },
+    "word_guard_mw": {
+      "delivered_calls": 0,
+      "inbound": {
+        "dropped": true,
+        "value": null
+      },
+      "outbound": [
+        {
+          "chat_id": -1,
+          "context": {
+            "plugin_key": "other"
+          },
+          "text": "含＊＊的回复",
+          "type": "send_message"
+        },
+        {
+          "chat_id": -1,
+          "context": {
+            "plugin_key": "other"
+          },
+          "rich_message": {
+            "markdown": "| a |\n|---|\n| 1 |"
+          },
+          "type": "send_rich_message"
+        }
+      ],
+      "storage": {},
+      "stream_preview": "流式＊＊"
+    }
+  },
+  "ui_hooks": {
+    "on_ui_action(summarize, 菜单)": {
+      "data": {
+        "pings": 3
+      },
+      "message": "累计 3 次 ping（来自菜单）",
+      "refresh": false
+    },
+    "on_ui_action(summarize, 页面)": {
+      "data": {
+        "pings": 3
+      },
+      "message": "累计 3 次 ping（来自页面）",
+      "refresh": false
+    },
+    "on_ui_action(unknown)": {
+      "message": "未知操作：nope",
+      "ok": false
+    },
+    "on_ui_card(ping_stats)": {
+      "pings": 3
+    },
+    "on_ui_card(ping_stats, 旧宿主无 storage)": {
+      "pings": 0
+    },
+    "on_ui_card(unknown)": null
+  }
+}

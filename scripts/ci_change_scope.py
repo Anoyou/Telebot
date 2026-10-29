@@ -123,6 +123,7 @@ def classify_paths(paths: list[str], *, force_full: bool = False) -> CiScope:
         path.startswith(("plugins/", "backend/app/worker/plugins/", "examples/", "schemas/"))
         or path in {
             "scripts/export-plugin-schema.py",
+            "scripts/export-plugin-contract.py",
             "scripts/validate-plugin-examples.py",
             "scripts/validate-installed-interaction-plugins.py",
         }

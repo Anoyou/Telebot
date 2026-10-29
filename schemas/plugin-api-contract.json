@@ -1,0 +1,5084 @@
+{
+  "$comment": "TelePilot 插件稳定契约快照。由 scripts/export-plugin-contract.py 从运行时内省生成，不要手改；破坏性检查以 plugin-api-contract-1.0.frozen.json 为基线（docs/PLUGIN-CONTRACT.md）。",
+  "contract_version": "1.0",
+  "baseline_plugin_api": "1.6",
+  "plugin_api_version": "1.6",
+  "hooks": [
+    {
+      "name": "on_startup",
+      "kind": "plugin_method",
+      "params": [
+        {
+          "name": "self",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "has_default": false
+        },
+        {
+          "name": "ctx",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "has_default": false
+        }
+      ],
+      "async": "required",
+      "timeout_s": null,
+      "since": "0.33.0",
+      "summary": "插件实例启动（每个账号 worker 一次）"
+    },
+    {
+      "name": "on_shutdown",
+      "kind": "plugin_method",
+      "params": [
+        {
+          "name": "self",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "has_default": false
+        },
+        {
+          "name": "ctx",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "has_default": false
+        }
+      ],
+      "async": "required",
+      "timeout_s": null,
+      "since": "0.33.0",
+      "summary": "插件实例停止 / 热重载前"
+    },
+    {
+      "name": "on_message",
+      "kind": "plugin_method",
+      "params": [
+        {
+          "name": "self",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "has_default": false
+        },
+        {
+          "name": "ctx",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "has_default": false
+        },
+        {
+          "name": "event",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "has_default": false
+        }
+      ],
+      "async": "required",
+      "timeout_s": null,
+      "since": "0.33.0",
+      "summary": "UserBot 新消息（message_channels 决定收哪些）"
+    },
+    {
+      "name": "on_message_edited",
+      "kind": "plugin_method",
+      "params": [
+        {
+          "name": "self",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "has_default": false
+        },
+        {
+          "name": "ctx",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "has_default": false
+        },
+        {
+          "name": "event",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "has_default": false
+        }
+      ],
+      "async": "required",
+      "timeout_s": null,
+      "since": "0.33.0",
+      "summary": "UserBot 消息被编辑"
+    },
+    {
+      "name": "on_direct_message",
+      "kind": "plugin_method",
+      "params": [
+        {
+          "name": "self",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "has_default": false
+        },
+        {
+          "name": "ctx",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "has_default": false
+        },
+        {
+          "name": "event",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "has_default": false
+        }
+      ],
+      "async": "required",
+      "timeout_s": null,
+      "since": "0.46.0",
+      "summary": "交互 Bot 直通入口（capabilities.telegram_direct_passthrough）"
+    },
+    {
+      "name": "on_command",
+      "kind": "plugin_method",
+      "params": [
+        {
+          "name": "self",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "has_default": false
+        },
+        {
+          "name": "ctx",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "has_default": false
+        },
+        {
+          "name": "cmd",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "has_default": false
+        },
+        {
+          "name": "args",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "has_default": false
+        },
+        {
+          "name": "event",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "has_default": false
+        }
+      ],
+      "async": "required",
+      "timeout_s": null,
+      "since": "0.33.0",
+      "summary": "命令（commands / SDK 简单命令）"
+    },
+    {
+      "name": "on_interaction",
+      "kind": "plugin_method",
+      "params": [
+        {
+          "name": "self",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "has_default": false
+        },
+        {
+          "name": "ctx",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "has_default": false
+        },
+        {
+          "name": "entry_key",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "has_default": false
+        },
+        {
+          "name": "payload",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "has_default": false
+        }
+      ],
+      "async": "required",
+      "timeout_s": null,
+      "since": "0.40.0",
+      "summary": "交互入口迁移桥（interaction_entries）；新插件优先 on_event"
+    },
+    {
+      "name": "on_event",
+      "kind": "plugin_method",
+      "params": [
+        {
+          "name": "self",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "has_default": false
+        },
+        {
+          "name": "ctx",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "has_default": false
+        },
+        {
+          "name": "payload",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "has_default": false
+        }
+      ],
+      "async": "required",
+      "timeout_s": null,
+      "since": "0.40.0",
+      "summary": "Event Bus 事件（event_subscriptions），返回标准动作列表"
+    },
+    {
+      "name": "on_config_action",
+      "kind": "plugin_method",
+      "params": [
+        {
+          "name": "self",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "has_default": false
+        },
+        {
+          "name": "ctx",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "has_default": false
+        },
+        {
+          "name": "action_key",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "has_default": false
+        },
+        {
+          "name": "payload",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "has_default": false
+        }
+      ],
+      "async": "required",
+      "timeout_s": null,
+      "since": "0.45.0",
+      "summary": "配置页动作按钮（config_actions）"
+    },
+    {
+      "name": "on_config_validate",
+      "kind": "plugin_method",
+      "params": [
+        {
+          "name": "self",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "has_default": false
+        },
+        {
+          "name": "ctx",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "has_default": false
+        },
+        {
+          "name": "config",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "has_default": false
+        },
+        {
+          "name": "scope",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "has_default": false
+        }
+      ],
+      "async": "required",
+      "timeout_s": 2.0,
+      "since": "0.110.0-beta.1",
+      "summary": "保存配置前校验（fail-open）"
+    },
+    {
+      "name": "on_config_saved",
+      "kind": "plugin_method",
+      "params": [
+        {
+          "name": "self",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "has_default": false
+        },
+        {
+          "name": "ctx",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "has_default": false
+        },
+        {
+          "name": "config",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "has_default": false
+        },
+        {
+          "name": "scope",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "has_default": false
+        }
+      ],
+      "async": "required",
+      "timeout_s": null,
+      "since": "0.110.0-beta.1",
+      "summary": "配置保存后通知（后台执行）"
+    },
+    {
+      "name": "on_ui_card",
+      "kind": "plugin_method",
+      "params": [
+        {
+          "name": "self",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "has_default": false
+        },
+        {
+          "name": "ctx",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "has_default": false
+        },
+        {
+          "name": "card_id",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "has_default": false
+        },
+        {
+          "name": "context",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "has_default": false
+        }
+      ],
+      "async": "required",
+      "timeout_s": 3.0,
+      "since": "0.110.0-beta.1",
+      "summary": "声明式卡片数据（ui.cards source=action）"
+    },
+    {
+      "name": "on_ui_action",
+      "kind": "plugin_method",
+      "params": [
+        {
+          "name": "self",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "has_default": false
+        },
+        {
+          "name": "ctx",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "has_default": false
+        },
+        {
+          "name": "action_id",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "has_default": false
+        },
+        {
+          "name": "context",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "has_default": false
+        }
+      ],
+      "async": "required",
+      "timeout_s": 10.0,
+      "since": "0.110.0-beta.1",
+      "summary": "卡片按钮 / 菜单项 / 页面 Bridge action.invoke"
+    },
+    {
+      "name": "dry_run_rule",
+      "kind": "module_function",
+      "params": [
+        {
+          "name": "config",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "has_default": false
+        },
+        {
+          "name": "sample",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "has_default": false
+        }
+      ],
+      "async": "optional",
+      "returns": "dict | (matched, output)",
+      "timeout_s": 3.0,
+      "since": "0.110.0-beta.2",
+      "summary": "规则试运行（无副作用）；plugin.py 或包 __init__ 导出"
+    },
+    {
+      "name": "parse_payment_notice",
+      "kind": "module_function",
+      "params": [
+        {
+          "name": "text",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "has_default": false
+        },
+        {
+          "name": "meta",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "has_default": false
+        }
+      ],
+      "async": "optional",
+      "returns": "dict | None",
+      "timeout_s": 1.0,
+      "since": "0.111.0-beta.1",
+      "summary": "转账通知解析（plugin.json payment_sources）；只返回解析结果，结算仍由宿主执行"
+    },
+    {
+      "name": "<middleware handler>",
+      "kind": "manifest_handler",
+      "params": [
+        {
+          "name": "self",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "has_default": false
+        },
+        {
+          "name": "ctx",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "has_default": false
+        },
+        {
+          "name": "value",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "has_default": false
+        },
+        {
+          "name": "mw",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "has_default": false
+        }
+      ],
+      "async": "required",
+      "returns": "修改后的 value / None（不改）/ mw.drop(...)",
+      "timeout_s": "manifest middleware[].timeout_ms（50–2000，默认 250）",
+      "since": "0.109.0-beta.1",
+      "summary": "消息管线中间件（plugin.json middleware[].handler，默认 on_inbound / on_outbound / on_delivered）"
+    }
+  ],
+  "context": {
+    "fields": [
+      "account_id",
+      "feature_key",
+      "config",
+      "account_config",
+      "rules",
+      "client",
+      "engine",
+      "redis",
+      "storage",
+      "data_dir",
+      "log",
+      "scheduler",
+      "http",
+      "ai",
+      "skills",
+      "messages",
+      "identities",
+      "host",
+      "generation",
+      "account_proxy_url",
+      "account_proxy_error",
+      "event",
+      "args",
+      "command"
+    ],
+    "members": [
+      {
+        "name": "capabilities",
+        "kind": "property"
+      },
+      {
+        "name": "conversation",
+        "kind": "sync",
+        "params": [
+          {
+            "name": "self",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          },
+          {
+            "name": "peer",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          },
+          {
+            "name": "timeout",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": true
+          }
+        ]
+      },
+      {
+        "name": "reply",
+        "kind": "async",
+        "params": [
+          {
+            "name": "self",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          },
+          {
+            "name": "text",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          },
+          {
+            "name": "args",
+            "kind": "VAR_POSITIONAL",
+            "has_default": false
+          },
+          {
+            "name": "kwargs",
+            "kind": "VAR_KEYWORD",
+            "has_default": false
+          }
+        ]
+      }
+    ]
+  },
+  "facades": {
+    "ctx.messages[buffered]": [
+      {
+        "name": "answer_callback",
+        "kind": "async",
+        "params": [
+          {
+            "name": "self",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          },
+          {
+            "name": "callback_query_id",
+            "kind": "KEYWORD_ONLY",
+            "has_default": false
+          },
+          {
+            "name": "text",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "show_alert",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "bot_api_extra",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          }
+        ]
+      },
+      {
+        "name": "answer_guest_query",
+        "kind": "async",
+        "params": [
+          {
+            "name": "self",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          },
+          {
+            "name": "guest_query_id",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "text",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "parse_mode",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "rich_message",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "result",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "title",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "reply_markup",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "compact_tables",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          }
+        ]
+      },
+      {
+        "name": "answer_inline_query",
+        "kind": "async",
+        "params": [
+          {
+            "name": "self",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          },
+          {
+            "name": "inline_query_id",
+            "kind": "KEYWORD_ONLY",
+            "has_default": false
+          },
+          {
+            "name": "results",
+            "kind": "KEYWORD_ONLY",
+            "has_default": false
+          },
+          {
+            "name": "cache_time",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "is_personal",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "next_offset",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "button",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          }
+        ]
+      },
+      {
+        "name": "click_callback_button",
+        "kind": "async",
+        "params": [
+          {
+            "name": "self",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          },
+          {
+            "name": "chat_id",
+            "kind": "KEYWORD_ONLY",
+            "has_default": false
+          },
+          {
+            "name": "message_id",
+            "kind": "KEYWORD_ONLY",
+            "has_default": false
+          },
+          {
+            "name": "row",
+            "kind": "KEYWORD_ONLY",
+            "has_default": false
+          },
+          {
+            "name": "column",
+            "kind": "KEYWORD_ONLY",
+            "has_default": false
+          },
+          {
+            "name": "expected_bot_id",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "expected_button_text",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          }
+        ]
+      },
+      {
+        "name": "delete",
+        "kind": "async",
+        "params": [
+          {
+            "name": "self",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          },
+          {
+            "name": "channel",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "chat_id",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "message_id",
+            "kind": "KEYWORD_ONLY",
+            "has_default": false
+          }
+        ]
+      },
+      {
+        "name": "delete_saved_message_id",
+        "kind": "async",
+        "params": [
+          {
+            "name": "self",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          },
+          {
+            "name": "key",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          }
+        ]
+      },
+      {
+        "name": "edit",
+        "kind": "async",
+        "params": [
+          {
+            "name": "self",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          },
+          {
+            "name": "channel",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "chat_id",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "message_id",
+            "kind": "KEYWORD_ONLY",
+            "has_default": false
+          },
+          {
+            "name": "text",
+            "kind": "KEYWORD_ONLY",
+            "has_default": false
+          },
+          {
+            "name": "parse_mode",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "reply_markup",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "bot_api_extra",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          }
+        ]
+      },
+      {
+        "name": "edit_caption",
+        "kind": "async",
+        "params": [
+          {
+            "name": "self",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          },
+          {
+            "name": "channel",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "chat_id",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "message_id",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "message_id_key",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "caption",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "parse_mode",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "reply_markup",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "bot_api_extra",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          }
+        ]
+      },
+      {
+        "name": "edit_rich",
+        "kind": "async",
+        "params": [
+          {
+            "name": "self",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          },
+          {
+            "name": "channel",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "chat_id",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "message_id",
+            "kind": "KEYWORD_ONLY",
+            "has_default": false
+          },
+          {
+            "name": "html",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "markdown",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "blocks",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "media",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "is_rtl",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "skip_entity_detection",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "reply_markup",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "compact_tables",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "bot_api_extra",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          }
+        ]
+      },
+      {
+        "name": "payout",
+        "kind": "async",
+        "params": [
+          {
+            "name": "self",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          },
+          {
+            "name": "chat_id",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "amount",
+            "kind": "KEYWORD_ONLY",
+            "has_default": false
+          },
+          {
+            "name": "text",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "parse_mode",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "reply_to_message_id",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "reply_to_user_id",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "reply_to_display_name",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "reply_to_username",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "reply_to_search_limit",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "reply_anchor_missing_text",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          }
+        ]
+      },
+      {
+        "name": "pin",
+        "kind": "async",
+        "params": [
+          {
+            "name": "self",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          },
+          {
+            "name": "channel",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "chat_id",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "message_id",
+            "kind": "KEYWORD_ONLY",
+            "has_default": false
+          },
+          {
+            "name": "bot_api_extra",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          }
+        ]
+      },
+      {
+        "name": "read_saved_message_id",
+        "kind": "async",
+        "params": [
+          {
+            "name": "self",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          },
+          {
+            "name": "key",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          }
+        ]
+      },
+      {
+        "name": "send",
+        "kind": "async",
+        "params": [
+          {
+            "name": "self",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          },
+          {
+            "name": "channel",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "chat_id",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "text",
+            "kind": "KEYWORD_ONLY",
+            "has_default": false
+          },
+          {
+            "name": "parse_mode",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "reply_to_message_id",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "reply_to_user_id",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "reply_to_display_name",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "reply_to_username",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "reply_to_search_limit",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "reply_anchor_missing_text",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "reply_markup",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "save_message_id_key",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "replace_saved_message_id_key",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "pin",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "bot_api_extra",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          }
+        ]
+      },
+      {
+        "name": "send_file",
+        "kind": "async",
+        "params": [
+          {
+            "name": "self",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          },
+          {
+            "name": "channel",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "chat_id",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "file",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "file_base64",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "filename",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "caption",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "parse_mode",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "reply_to_message_id",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "reply_to_user_id",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "reply_to_search_limit",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "save_message_id_key",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "bot_api_extra",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          }
+        ]
+      },
+      {
+        "name": "send_photo",
+        "kind": "async",
+        "params": [
+          {
+            "name": "self",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          },
+          {
+            "name": "channel",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "chat_id",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "photo",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "photo_base64",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "filename",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "caption",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "parse_mode",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "reply_to_message_id",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "reply_to_user_id",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "reply_to_search_limit",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "save_message_id_key",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "bot_api_extra",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          }
+        ]
+      },
+      {
+        "name": "send_rich",
+        "kind": "async",
+        "params": [
+          {
+            "name": "self",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          },
+          {
+            "name": "channel",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "chat_id",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "html",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "markdown",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "blocks",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "media",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "is_rtl",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "skip_entity_detection",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "reply_to_message_id",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "reply_markup",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "save_message_id_key",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "pin",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "compact_tables",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "bot_api_extra",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          }
+        ]
+      },
+      {
+        "name": "update_session",
+        "kind": "async",
+        "params": [
+          {
+            "name": "self",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          },
+          {
+            "name": "data",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "extend_seconds",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          }
+        ]
+      }
+    ],
+    "ctx.messages[live]": [
+      {
+        "name": "answer_callback",
+        "kind": "async",
+        "params": [
+          {
+            "name": "self",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          },
+          {
+            "name": "kwargs",
+            "kind": "VAR_KEYWORD",
+            "has_default": false
+          }
+        ]
+      },
+      {
+        "name": "answer_guest_query",
+        "kind": "async",
+        "params": [
+          {
+            "name": "self",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          },
+          {
+            "name": "kwargs",
+            "kind": "VAR_KEYWORD",
+            "has_default": false
+          }
+        ]
+      },
+      {
+        "name": "answer_inline_query",
+        "kind": "async",
+        "params": [
+          {
+            "name": "self",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          },
+          {
+            "name": "kwargs",
+            "kind": "VAR_KEYWORD",
+            "has_default": false
+          }
+        ]
+      },
+      {
+        "name": "apply",
+        "kind": "async",
+        "params": [
+          {
+            "name": "self",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          },
+          {
+            "name": "actions",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          },
+          {
+            "name": "entry_key",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          }
+        ]
+      },
+      {
+        "name": "click_callback_button",
+        "kind": "async",
+        "params": [
+          {
+            "name": "self",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          },
+          {
+            "name": "kwargs",
+            "kind": "VAR_KEYWORD",
+            "has_default": false
+          }
+        ]
+      },
+      {
+        "name": "delete",
+        "kind": "async",
+        "params": [
+          {
+            "name": "self",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          },
+          {
+            "name": "kwargs",
+            "kind": "VAR_KEYWORD",
+            "has_default": false
+          }
+        ]
+      },
+      {
+        "name": "delete_saved_message_id",
+        "kind": "async",
+        "params": [
+          {
+            "name": "self",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          },
+          {
+            "name": "key",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          }
+        ]
+      },
+      {
+        "name": "edit",
+        "kind": "async",
+        "params": [
+          {
+            "name": "self",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          },
+          {
+            "name": "kwargs",
+            "kind": "VAR_KEYWORD",
+            "has_default": false
+          }
+        ]
+      },
+      {
+        "name": "edit_caption",
+        "kind": "async",
+        "params": [
+          {
+            "name": "self",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          },
+          {
+            "name": "kwargs",
+            "kind": "VAR_KEYWORD",
+            "has_default": false
+          }
+        ]
+      },
+      {
+        "name": "edit_rich",
+        "kind": "async",
+        "params": [
+          {
+            "name": "self",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          },
+          {
+            "name": "kwargs",
+            "kind": "VAR_KEYWORD",
+            "has_default": false
+          }
+        ]
+      },
+      {
+        "name": "payout",
+        "kind": "async",
+        "params": [
+          {
+            "name": "self",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          },
+          {
+            "name": "kwargs",
+            "kind": "VAR_KEYWORD",
+            "has_default": false
+          }
+        ]
+      },
+      {
+        "name": "pin",
+        "kind": "async",
+        "params": [
+          {
+            "name": "self",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          },
+          {
+            "name": "kwargs",
+            "kind": "VAR_KEYWORD",
+            "has_default": false
+          }
+        ]
+      },
+      {
+        "name": "read_saved_inline_message_id",
+        "kind": "async",
+        "params": [
+          {
+            "name": "self",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          },
+          {
+            "name": "key",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          }
+        ]
+      },
+      {
+        "name": "read_saved_message_id",
+        "kind": "async",
+        "params": [
+          {
+            "name": "self",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          },
+          {
+            "name": "key",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          }
+        ]
+      },
+      {
+        "name": "send",
+        "kind": "async",
+        "params": [
+          {
+            "name": "self",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          },
+          {
+            "name": "kwargs",
+            "kind": "VAR_KEYWORD",
+            "has_default": false
+          }
+        ]
+      },
+      {
+        "name": "send_file",
+        "kind": "async",
+        "params": [
+          {
+            "name": "self",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          },
+          {
+            "name": "kwargs",
+            "kind": "VAR_KEYWORD",
+            "has_default": false
+          }
+        ]
+      },
+      {
+        "name": "send_photo",
+        "kind": "async",
+        "params": [
+          {
+            "name": "self",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          },
+          {
+            "name": "kwargs",
+            "kind": "VAR_KEYWORD",
+            "has_default": false
+          }
+        ]
+      },
+      {
+        "name": "send_rich",
+        "kind": "async",
+        "params": [
+          {
+            "name": "self",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          },
+          {
+            "name": "kwargs",
+            "kind": "VAR_KEYWORD",
+            "has_default": false
+          }
+        ]
+      },
+      {
+        "name": "stream_edit",
+        "kind": "async",
+        "params": [
+          {
+            "name": "self",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          },
+          {
+            "name": "chunks",
+            "kind": "KEYWORD_ONLY",
+            "has_default": false
+          },
+          {
+            "name": "chat_id",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "message_id",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "inline_message_id",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "mode",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "parse_mode",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "min_interval",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "min_chars",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "render",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "finish_kwargs",
+            "kind": "VAR_KEYWORD",
+            "has_default": false
+          }
+        ]
+      },
+      {
+        "name": "stream_editor",
+        "kind": "sync",
+        "params": [
+          {
+            "name": "self",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          },
+          {
+            "name": "kwargs",
+            "kind": "VAR_KEYWORD",
+            "has_default": false
+          }
+        ]
+      }
+    ],
+    "ctx.messages[entry]": [
+      {
+        "name": "answer_callback",
+        "kind": "async",
+        "params": [
+          {
+            "name": "self",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          },
+          {
+            "name": "callback_query_id",
+            "kind": "KEYWORD_ONLY",
+            "has_default": false
+          },
+          {
+            "name": "text",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "show_alert",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "bot_api_extra",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          }
+        ]
+      },
+      {
+        "name": "answer_guest_query",
+        "kind": "async",
+        "params": [
+          {
+            "name": "self",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          },
+          {
+            "name": "guest_query_id",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "text",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "parse_mode",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "rich_message",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "result",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "title",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "reply_markup",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "compact_tables",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          }
+        ]
+      },
+      {
+        "name": "answer_inline_query",
+        "kind": "async",
+        "params": [
+          {
+            "name": "self",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          },
+          {
+            "name": "inline_query_id",
+            "kind": "KEYWORD_ONLY",
+            "has_default": false
+          },
+          {
+            "name": "results",
+            "kind": "KEYWORD_ONLY",
+            "has_default": false
+          },
+          {
+            "name": "cache_time",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "is_personal",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "next_offset",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "button",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          }
+        ]
+      },
+      {
+        "name": "apply",
+        "kind": "async",
+        "params": [
+          {
+            "name": "self",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          },
+          {
+            "name": "actions",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          },
+          {
+            "name": "entry_key",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          }
+        ]
+      },
+      {
+        "name": "click_callback_button",
+        "kind": "async",
+        "params": [
+          {
+            "name": "self",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          },
+          {
+            "name": "kwargs",
+            "kind": "VAR_KEYWORD",
+            "has_default": false
+          }
+        ]
+      },
+      {
+        "name": "delete",
+        "kind": "async",
+        "params": [
+          {
+            "name": "self",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          },
+          {
+            "name": "channel",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "chat_id",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "message_id",
+            "kind": "KEYWORD_ONLY",
+            "has_default": false
+          }
+        ]
+      },
+      {
+        "name": "delete_saved_message_id",
+        "kind": "async",
+        "params": [
+          {
+            "name": "self",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          },
+          {
+            "name": "key",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          }
+        ]
+      },
+      {
+        "name": "edit",
+        "kind": "async",
+        "params": [
+          {
+            "name": "self",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          },
+          {
+            "name": "channel",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "chat_id",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "message_id",
+            "kind": "KEYWORD_ONLY",
+            "has_default": false
+          },
+          {
+            "name": "text",
+            "kind": "KEYWORD_ONLY",
+            "has_default": false
+          },
+          {
+            "name": "parse_mode",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "reply_markup",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "bot_api_extra",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          }
+        ]
+      },
+      {
+        "name": "edit_caption",
+        "kind": "async",
+        "params": [
+          {
+            "name": "self",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          },
+          {
+            "name": "channel",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "chat_id",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "message_id",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "message_id_key",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "caption",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "parse_mode",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "reply_markup",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "bot_api_extra",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          }
+        ]
+      },
+      {
+        "name": "edit_rich",
+        "kind": "async",
+        "params": [
+          {
+            "name": "self",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          },
+          {
+            "name": "channel",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "chat_id",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "message_id",
+            "kind": "KEYWORD_ONLY",
+            "has_default": false
+          },
+          {
+            "name": "html",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "markdown",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "blocks",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "media",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "is_rtl",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "skip_entity_detection",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "reply_markup",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "compact_tables",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "bot_api_extra",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          }
+        ]
+      },
+      {
+        "name": "payout",
+        "kind": "async",
+        "params": [
+          {
+            "name": "self",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          },
+          {
+            "name": "chat_id",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "amount",
+            "kind": "KEYWORD_ONLY",
+            "has_default": false
+          },
+          {
+            "name": "text",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "parse_mode",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "reply_to_message_id",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "reply_to_user_id",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "reply_to_display_name",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "reply_to_username",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "reply_to_search_limit",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "reply_anchor_missing_text",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          }
+        ]
+      },
+      {
+        "name": "pin",
+        "kind": "async",
+        "params": [
+          {
+            "name": "self",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          },
+          {
+            "name": "channel",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "chat_id",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "message_id",
+            "kind": "KEYWORD_ONLY",
+            "has_default": false
+          },
+          {
+            "name": "bot_api_extra",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          }
+        ]
+      },
+      {
+        "name": "read_saved_inline_message_id",
+        "kind": "async",
+        "params": [
+          {
+            "name": "self",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          },
+          {
+            "name": "key",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          }
+        ]
+      },
+      {
+        "name": "read_saved_message_id",
+        "kind": "async",
+        "params": [
+          {
+            "name": "self",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          },
+          {
+            "name": "key",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          }
+        ]
+      },
+      {
+        "name": "send",
+        "kind": "async",
+        "params": [
+          {
+            "name": "self",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          },
+          {
+            "name": "channel",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "chat_id",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "text",
+            "kind": "KEYWORD_ONLY",
+            "has_default": false
+          },
+          {
+            "name": "parse_mode",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "reply_to_message_id",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "reply_to_user_id",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "reply_to_display_name",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "reply_to_username",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "reply_to_search_limit",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "reply_anchor_missing_text",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "reply_markup",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "save_message_id_key",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "replace_saved_message_id_key",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "pin",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "bot_api_extra",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          }
+        ]
+      },
+      {
+        "name": "send_file",
+        "kind": "async",
+        "params": [
+          {
+            "name": "self",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          },
+          {
+            "name": "channel",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "chat_id",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "file",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "file_base64",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "filename",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "caption",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "parse_mode",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "reply_to_message_id",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "reply_to_user_id",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "reply_to_search_limit",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "save_message_id_key",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "bot_api_extra",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          }
+        ]
+      },
+      {
+        "name": "send_photo",
+        "kind": "async",
+        "params": [
+          {
+            "name": "self",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          },
+          {
+            "name": "channel",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "chat_id",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "photo",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "photo_base64",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "filename",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "caption",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "parse_mode",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "reply_to_message_id",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "reply_to_user_id",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "reply_to_search_limit",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "save_message_id_key",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "bot_api_extra",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          }
+        ]
+      },
+      {
+        "name": "send_rich",
+        "kind": "async",
+        "params": [
+          {
+            "name": "self",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          },
+          {
+            "name": "channel",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "chat_id",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "html",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "markdown",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "blocks",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "media",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "is_rtl",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "skip_entity_detection",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "reply_to_message_id",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "reply_markup",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "save_message_id_key",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "pin",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "compact_tables",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "bot_api_extra",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          }
+        ]
+      },
+      {
+        "name": "stream_edit",
+        "kind": "async",
+        "params": [
+          {
+            "name": "self",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          },
+          {
+            "name": "kwargs",
+            "kind": "VAR_KEYWORD",
+            "has_default": false
+          }
+        ]
+      },
+      {
+        "name": "stream_editor",
+        "kind": "sync",
+        "params": [
+          {
+            "name": "self",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          },
+          {
+            "name": "kwargs",
+            "kind": "VAR_KEYWORD",
+            "has_default": false
+          }
+        ]
+      },
+      {
+        "name": "update_session",
+        "kind": "async",
+        "params": [
+          {
+            "name": "self",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          },
+          {
+            "name": "data",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "extend_seconds",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          }
+        ]
+      }
+    ],
+    "ctx.messages.stream_editor()": [
+      {
+        "name": "abort",
+        "kind": "async",
+        "params": [
+          {
+            "name": "self",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          }
+        ]
+      },
+      {
+        "name": "append",
+        "kind": "async",
+        "params": [
+          {
+            "name": "self",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          },
+          {
+            "name": "delta",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          }
+        ]
+      },
+      {
+        "name": "consume",
+        "kind": "async",
+        "params": [
+          {
+            "name": "self",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          },
+          {
+            "name": "chunks",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          }
+        ]
+      },
+      {
+        "name": "finish",
+        "kind": "async",
+        "params": [
+          {
+            "name": "self",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          },
+          {
+            "name": "text",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "parse_mode",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "html",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "markdown",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "blocks",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "reply_markup",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "compact_tables",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "reply_to_message_id",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "render_profile",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          }
+        ]
+      },
+      {
+        "name": "snapshot_stats",
+        "kind": "sync",
+        "params": [
+          {
+            "name": "self",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          }
+        ]
+      },
+      {
+        "name": "text",
+        "kind": "property"
+      },
+      {
+        "name": "update",
+        "kind": "async",
+        "params": [
+          {
+            "name": "self",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          },
+          {
+            "name": "text",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          }
+        ]
+      }
+    ],
+    "ctx.ai": [
+      {
+        "name": "complete",
+        "kind": "async",
+        "params": [
+          {
+            "name": "self",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          },
+          {
+            "name": "system",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          },
+          {
+            "name": "user",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          },
+          {
+            "name": "provider",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "provider_tag",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "route",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "tag",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "tags",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "model",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "override_model",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "max_tokens",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "timeout",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "timeout_seconds",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "images",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "web_search",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "web_search_context_size",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "thinking",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "extra_body",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "_ignored",
+            "kind": "VAR_KEYWORD",
+            "has_default": false
+          }
+        ]
+      },
+      {
+        "name": "fetch_bot_image",
+        "kind": "async",
+        "params": [
+          {
+            "name": "self",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          },
+          {
+            "name": "file_id",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          },
+          {
+            "name": "max_bytes",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          }
+        ]
+      },
+      {
+        "name": "from_context",
+        "kind": "sync",
+        "params": [
+          {
+            "name": "cls",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          },
+          {
+            "name": "ctx",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          }
+        ]
+      },
+      {
+        "name": "list_providers",
+        "kind": "async",
+        "params": [
+          {
+            "name": "self",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          }
+        ]
+      },
+      {
+        "name": "run_agent",
+        "kind": "async",
+        "params": [
+          {
+            "name": "self",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          },
+          {
+            "name": "system",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          },
+          {
+            "name": "user",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          },
+          {
+            "name": "handlers",
+            "kind": "KEYWORD_ONLY",
+            "has_default": false
+          },
+          {
+            "name": "provider",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "provider_tag",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "route",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "model",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "max_tokens",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "max_steps",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "max_tool_calls",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "max_total_tokens",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "timeout_seconds",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          }
+        ]
+      },
+      {
+        "name": "stream_complete",
+        "kind": "async",
+        "params": [
+          {
+            "name": "self",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          },
+          {
+            "name": "system",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          },
+          {
+            "name": "user",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          },
+          {
+            "name": "provider",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "provider_tag",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "route",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "tag",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "tags",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "model",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "override_model",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "max_tokens",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "timeout",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "timeout_seconds",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "temperature",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "reasoning_effort",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "extra_body",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "_ignored",
+            "kind": "VAR_KEYWORD",
+            "has_default": false
+          }
+        ]
+      },
+      {
+        "name": "vision_enabled",
+        "kind": "property"
+      }
+    ],
+    "ctx.http": [
+      {
+        "name": "from_context",
+        "kind": "sync",
+        "params": [
+          {
+            "name": "cls",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          },
+          {
+            "name": "ctx",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          },
+          {
+            "name": "allowed_hosts",
+            "kind": "KEYWORD_ONLY",
+            "has_default": false
+          },
+          {
+            "name": "manifest_http",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "timeout_seconds",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "max_response_bytes",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "resolver",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "transport",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          }
+        ]
+      },
+      {
+        "name": "get",
+        "kind": "async",
+        "params": [
+          {
+            "name": "self",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          },
+          {
+            "name": "url",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          },
+          {
+            "name": "kwargs",
+            "kind": "VAR_KEYWORD",
+            "has_default": false
+          }
+        ]
+      },
+      {
+        "name": "plugin_key",
+        "kind": "property"
+      },
+      {
+        "name": "post",
+        "kind": "async",
+        "params": [
+          {
+            "name": "self",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          },
+          {
+            "name": "url",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          },
+          {
+            "name": "kwargs",
+            "kind": "VAR_KEYWORD",
+            "has_default": false
+          }
+        ]
+      }
+    ],
+    "ctx.storage": [
+      {
+        "name": "available",
+        "kind": "property"
+      },
+      {
+        "name": "delete",
+        "kind": "async",
+        "params": [
+          {
+            "name": "self",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          },
+          {
+            "name": "keys",
+            "kind": "VAR_POSITIONAL",
+            "has_default": false
+          }
+        ]
+      },
+      {
+        "name": "from_context",
+        "kind": "sync",
+        "params": [
+          {
+            "name": "cls",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          },
+          {
+            "name": "ctx",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          }
+        ]
+      },
+      {
+        "name": "get",
+        "kind": "async",
+        "params": [
+          {
+            "name": "self",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          },
+          {
+            "name": "key",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          },
+          {
+            "name": "default",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": true
+          }
+        ]
+      },
+      {
+        "name": "get_all",
+        "kind": "async",
+        "params": [
+          {
+            "name": "self",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          }
+        ]
+      },
+      {
+        "name": "incr",
+        "kind": "async",
+        "params": [
+          {
+            "name": "self",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          },
+          {
+            "name": "key",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          },
+          {
+            "name": "amount",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": true
+          },
+          {
+            "name": "ttl",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          }
+        ]
+      },
+      {
+        "name": "items",
+        "kind": "async",
+        "params": [
+          {
+            "name": "self",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          }
+        ]
+      },
+      {
+        "name": "set",
+        "kind": "async",
+        "params": [
+          {
+            "name": "self",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          },
+          {
+            "name": "key",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          },
+          {
+            "name": "value",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          },
+          {
+            "name": "ttl",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          }
+        ]
+      }
+    ],
+    "ctx.storage[readonly]": [
+      {
+        "name": "account_id",
+        "kind": "property"
+      },
+      {
+        "name": "available",
+        "kind": "property"
+      },
+      {
+        "name": "delete",
+        "kind": "sync",
+        "params": [
+          {
+            "name": "self",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          },
+          {
+            "name": "_args",
+            "kind": "VAR_POSITIONAL",
+            "has_default": false
+          },
+          {
+            "name": "_kwargs",
+            "kind": "VAR_KEYWORD",
+            "has_default": false
+          }
+        ]
+      },
+      {
+        "name": "get",
+        "kind": "async",
+        "params": [
+          {
+            "name": "self",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          },
+          {
+            "name": "key",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          },
+          {
+            "name": "default",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": true
+          }
+        ]
+      },
+      {
+        "name": "get_all",
+        "kind": "async",
+        "params": [
+          {
+            "name": "self",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          }
+        ]
+      },
+      {
+        "name": "incr",
+        "kind": "sync",
+        "params": [
+          {
+            "name": "self",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          },
+          {
+            "name": "_args",
+            "kind": "VAR_POSITIONAL",
+            "has_default": false
+          },
+          {
+            "name": "_kwargs",
+            "kind": "VAR_KEYWORD",
+            "has_default": false
+          }
+        ]
+      },
+      {
+        "name": "items",
+        "kind": "async",
+        "params": [
+          {
+            "name": "self",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          }
+        ]
+      },
+      {
+        "name": "plugin_key",
+        "kind": "property"
+      },
+      {
+        "name": "set",
+        "kind": "sync",
+        "params": [
+          {
+            "name": "self",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          },
+          {
+            "name": "_args",
+            "kind": "VAR_POSITIONAL",
+            "has_default": false
+          },
+          {
+            "name": "_kwargs",
+            "kind": "VAR_KEYWORD",
+            "has_default": false
+          }
+        ]
+      }
+    ],
+    "ctx.skills": [
+      {
+        "name": "bundled",
+        "kind": "async",
+        "params": [
+          {
+            "name": "self",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          },
+          {
+            "name": "max_chars",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          }
+        ]
+      },
+      {
+        "name": "list",
+        "kind": "async",
+        "params": [
+          {
+            "name": "self",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          },
+          {
+            "name": "names",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": true
+          }
+        ]
+      },
+      {
+        "name": "load",
+        "kind": "async",
+        "params": [
+          {
+            "name": "self",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          },
+          {
+            "name": "name",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          },
+          {
+            "name": "max_chars",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          }
+        ]
+      },
+      {
+        "name": "read_file",
+        "kind": "async",
+        "params": [
+          {
+            "name": "self",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          },
+          {
+            "name": "name",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          },
+          {
+            "name": "path",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          },
+          {
+            "name": "max_chars",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          }
+        ]
+      }
+    ],
+    "ctx.scheduler": [
+      {
+        "name": "list_jobs",
+        "kind": "sync",
+        "params": [
+          {
+            "name": "self",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          }
+        ]
+      },
+      {
+        "name": "register",
+        "kind": "sync",
+        "params": [
+          {
+            "name": "self",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          },
+          {
+            "name": "job_id",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          },
+          {
+            "name": "schedule",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          },
+          {
+            "name": "callback",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          },
+          {
+            "name": "replace",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          }
+        ]
+      },
+      {
+        "name": "unregister",
+        "kind": "sync",
+        "params": [
+          {
+            "name": "self",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          },
+          {
+            "name": "job_id",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          }
+        ]
+      },
+      {
+        "name": "unregister_all",
+        "kind": "sync",
+        "params": [
+          {
+            "name": "self",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          }
+        ]
+      }
+    ],
+    "ctx.host": [
+      {
+        "name": "available",
+        "kind": "sync",
+        "params": [
+          {
+            "name": "self",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          }
+        ]
+      },
+      {
+        "name": "can_read",
+        "kind": "sync",
+        "params": [
+          {
+            "name": "self",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          },
+          {
+            "name": "resource",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          }
+        ]
+      },
+      {
+        "name": "declared",
+        "kind": "property"
+      },
+      {
+        "name": "read",
+        "kind": "async",
+        "params": [
+          {
+            "name": "self",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          },
+          {
+            "name": "resource",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          },
+          {
+            "name": "params",
+            "kind": "VAR_KEYWORD",
+            "has_default": false
+          }
+        ]
+      }
+    ],
+    "ctx.identities": [
+      {
+        "name": "resolve",
+        "kind": "async",
+        "params": [
+          {
+            "name": "self",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          },
+          {
+            "name": "chat_id",
+            "kind": "KEYWORD_ONLY",
+            "has_default": false
+          },
+          {
+            "name": "user_id",
+            "kind": "KEYWORD_ONLY",
+            "has_default": false
+          },
+          {
+            "name": "fallback_display_name",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "unresolved_display_name",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "anonymous_admin_display_name",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          }
+        ]
+      },
+      {
+        "name": "resolve_many",
+        "kind": "async",
+        "params": [
+          {
+            "name": "self",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          },
+          {
+            "name": "chat_id",
+            "kind": "KEYWORD_ONLY",
+            "has_default": false
+          },
+          {
+            "name": "senders",
+            "kind": "KEYWORD_ONLY",
+            "has_default": false
+          },
+          {
+            "name": "unresolved_display_name",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "anonymous_admin_display_name",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          }
+        ]
+      },
+      {
+        "name": "resolve_userbot",
+        "kind": "async",
+        "params": [
+          {
+            "name": "self",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          },
+          {
+            "name": "chat_id",
+            "kind": "KEYWORD_ONLY",
+            "has_default": false
+          },
+          {
+            "name": "user_id",
+            "kind": "KEYWORD_ONLY",
+            "has_default": false
+          },
+          {
+            "name": "fallback_display_name",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "unresolved_display_name",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          },
+          {
+            "name": "anonymous_admin_display_name",
+            "kind": "KEYWORD_ONLY",
+            "has_default": true
+          }
+        ]
+      }
+    ],
+    "ctx.capabilities": [
+      {
+        "name": "as_dict",
+        "kind": "sync",
+        "params": [
+          {
+            "name": "self",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          }
+        ]
+      },
+      {
+        "name": "has",
+        "kind": "sync",
+        "params": [
+          {
+            "name": "self",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          },
+          {
+            "name": "name",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          },
+          {
+            "name": "min_version",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": true
+          }
+        ]
+      },
+      {
+        "name": "host_version",
+        "kind": "property"
+      },
+      {
+        "name": "names",
+        "kind": "sync",
+        "params": [
+          {
+            "name": "self",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          }
+        ]
+      },
+      {
+        "name": "plugin_api",
+        "kind": "property"
+      },
+      {
+        "name": "version",
+        "kind": "sync",
+        "params": [
+          {
+            "name": "self",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          },
+          {
+            "name": "name",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          }
+        ]
+      }
+    ]
+  },
+  "capabilities": {
+    "registry": [
+      {
+        "name": "messages.inline_rich_edit",
+        "version": 1,
+        "since": "0.106.0-beta.2",
+        "plugin_api": "1.0",
+        "legacy_attr": "inline_rich_edit",
+        "facades": [
+          "buffered",
+          "entry",
+          "live"
+        ],
+        "deprecated_in": null,
+        "removed_in": null
+      },
+      {
+        "name": "messages.live_inline_edit",
+        "version": 1,
+        "since": "0.106.0-beta.3",
+        "plugin_api": "1.0",
+        "legacy_attr": "live_inline_edit",
+        "facades": [
+          "entry",
+          "live"
+        ],
+        "deprecated_in": null,
+        "removed_in": null
+      },
+      {
+        "name": "messages.rich_table_compact",
+        "version": 1,
+        "since": "0.106.0-beta.12",
+        "plugin_api": "1.0",
+        "legacy_attr": "rich_table_compact",
+        "facades": [
+          "buffered",
+          "entry",
+          "live"
+        ],
+        "deprecated_in": null,
+        "removed_in": null
+      },
+      {
+        "name": "messages.rich_table_default_style",
+        "version": 1,
+        "since": "0.106.0-beta.15",
+        "plugin_api": "1.0",
+        "legacy_attr": "rich_table_default_style",
+        "facades": [
+          "buffered",
+          "entry",
+          "live"
+        ],
+        "deprecated_in": null,
+        "removed_in": null
+      },
+      {
+        "name": "messages.guest_reply_markup",
+        "version": 1,
+        "since": "0.106.0-beta.17",
+        "plugin_api": "1.0",
+        "legacy_attr": "guest_reply_markup",
+        "facades": [
+          "buffered",
+          "entry",
+          "live"
+        ],
+        "deprecated_in": null,
+        "removed_in": null
+      },
+      {
+        "name": "messages.streaming_edit",
+        "version": 1,
+        "since": "0.106.0-beta.20",
+        "plugin_api": "1.0",
+        "legacy_attr": "streaming_edit",
+        "facades": [
+          "entry",
+          "live"
+        ],
+        "deprecated_in": null,
+        "removed_in": null
+      },
+      {
+        "name": "runtime.capabilities",
+        "version": 1,
+        "since": "0.107.0-beta.1",
+        "plugin_api": "1.0",
+        "legacy_attr": null,
+        "facades": [],
+        "deprecated_in": null,
+        "removed_in": null
+      },
+      {
+        "name": "manifest.plugin_api",
+        "version": 1,
+        "since": "0.107.0-beta.1",
+        "plugin_api": "1.0",
+        "legacy_attr": null,
+        "facades": [],
+        "deprecated_in": null,
+        "removed_in": null
+      },
+      {
+        "name": "manifest.min_version_prerelease",
+        "version": 1,
+        "since": "0.107.0-beta.1",
+        "plugin_api": "1.0",
+        "legacy_attr": null,
+        "facades": [],
+        "deprecated_in": null,
+        "removed_in": null
+      },
+      {
+        "name": "runtime.hook_stats",
+        "version": 1,
+        "since": "0.107.0-beta.1",
+        "plugin_api": "1.0",
+        "legacy_attr": null,
+        "facades": [],
+        "deprecated_in": null,
+        "removed_in": null
+      },
+      {
+        "name": "runtime.deprecations",
+        "version": 1,
+        "since": "0.107.0-beta.1",
+        "plugin_api": "1.0",
+        "legacy_attr": null,
+        "facades": [],
+        "deprecated_in": null,
+        "removed_in": null
+      },
+      {
+        "name": "messages.callback_routing",
+        "version": 1,
+        "since": "0.108.0-beta.1",
+        "plugin_api": "1.1",
+        "legacy_attr": null,
+        "facades": [
+          "buffered",
+          "entry",
+          "live"
+        ],
+        "deprecated_in": null,
+        "removed_in": null
+      },
+      {
+        "name": "messages.unified_ops",
+        "version": 1,
+        "since": "0.108.0-beta.1",
+        "plugin_api": "1.1",
+        "legacy_attr": null,
+        "facades": [
+          "buffered",
+          "entry",
+          "live"
+        ],
+        "deprecated_in": null,
+        "removed_in": null
+      },
+      {
+        "name": "messages.bot_api_extra",
+        "version": 1,
+        "since": "0.108.0-beta.1",
+        "plugin_api": "1.1",
+        "legacy_attr": null,
+        "facades": [
+          "buffered",
+          "entry",
+          "live"
+        ],
+        "deprecated_in": null,
+        "removed_in": null
+      },
+      {
+        "name": "ai.extra_body",
+        "version": 1,
+        "since": "0.108.0-beta.1",
+        "plugin_api": "1.1",
+        "legacy_attr": null,
+        "facades": [],
+        "deprecated_in": null,
+        "removed_in": null
+      },
+      {
+        "name": "host.read",
+        "version": 1,
+        "since": "0.108.0-beta.1",
+        "plugin_api": "1.1",
+        "legacy_attr": null,
+        "facades": [],
+        "deprecated_in": null,
+        "removed_in": null
+      },
+      {
+        "name": "host.read.account.admins@1",
+        "version": 1,
+        "since": "0.108.0-beta.1",
+        "plugin_api": "1.1",
+        "legacy_attr": null,
+        "facades": [],
+        "deprecated_in": null,
+        "removed_in": null
+      },
+      {
+        "name": "host.read.ai.models@1",
+        "version": 1,
+        "since": "0.108.0-beta.1",
+        "plugin_api": "1.1",
+        "legacy_attr": null,
+        "facades": [],
+        "deprecated_in": null,
+        "removed_in": null
+      },
+      {
+        "name": "host.read.chat.allowed@1",
+        "version": 1,
+        "since": "0.108.0-beta.1",
+        "plugin_api": "1.1",
+        "legacy_attr": null,
+        "facades": [],
+        "deprecated_in": null,
+        "removed_in": null
+      },
+      {
+        "name": "host.read.plugin.stats@1",
+        "version": 1,
+        "since": "0.108.0-beta.1",
+        "plugin_api": "1.1",
+        "legacy_attr": null,
+        "facades": [],
+        "deprecated_in": null,
+        "removed_in": null
+      },
+      {
+        "name": "runtime.hook_trace",
+        "version": 1,
+        "since": "0.108.0-beta.1",
+        "plugin_api": "1.1",
+        "legacy_attr": null,
+        "facades": [],
+        "deprecated_in": null,
+        "removed_in": null
+      },
+      {
+        "name": "runtime.entry_policy",
+        "version": 1,
+        "since": "0.108.0-beta.1",
+        "plugin_api": "1.1",
+        "legacy_attr": null,
+        "facades": [],
+        "deprecated_in": null,
+        "removed_in": null
+      },
+      {
+        "name": "ui.cards",
+        "version": 1,
+        "since": "0.110.0-beta.1",
+        "plugin_api": "1.3",
+        "legacy_attr": null,
+        "facades": [],
+        "deprecated_in": null,
+        "removed_in": null
+      },
+      {
+        "name": "config.validate",
+        "version": 1,
+        "since": "0.110.0-beta.1",
+        "plugin_api": "1.3",
+        "legacy_attr": null,
+        "facades": [],
+        "deprecated_in": null,
+        "removed_in": null
+      },
+      {
+        "name": "config.saved",
+        "version": 1,
+        "since": "0.110.0-beta.1",
+        "plugin_api": "1.3",
+        "legacy_attr": null,
+        "facades": [],
+        "deprecated_in": null,
+        "removed_in": null
+      },
+      {
+        "name": "config.secret_list",
+        "version": 1,
+        "since": "0.110.0-beta.1",
+        "plugin_api": "1.3",
+        "legacy_attr": null,
+        "facades": [],
+        "deprecated_in": null,
+        "removed_in": null
+      },
+      {
+        "name": "ui.widgets",
+        "version": 1,
+        "since": "0.110.0-beta.1",
+        "plugin_api": "1.3",
+        "legacy_attr": null,
+        "facades": [],
+        "deprecated_in": null,
+        "removed_in": null
+      },
+      {
+        "name": "ui.rules_page",
+        "version": 1,
+        "since": "0.110.0-beta.2",
+        "plugin_api": "1.3",
+        "legacy_attr": null,
+        "facades": [],
+        "deprecated_in": null,
+        "removed_in": null
+      },
+      {
+        "name": "rules.dry_run",
+        "version": 1,
+        "since": "0.110.0-beta.2",
+        "plugin_api": "1.3",
+        "legacy_attr": null,
+        "facades": [],
+        "deprecated_in": null,
+        "removed_in": null
+      },
+      {
+        "name": "ui.pages",
+        "version": 1,
+        "since": "0.112.0-beta.1",
+        "plugin_api": "1.4",
+        "legacy_attr": null,
+        "facades": [],
+        "deprecated_in": null,
+        "removed_in": null
+      },
+      {
+        "name": "ui.actions",
+        "version": 1,
+        "since": "0.112.0-beta.1",
+        "plugin_api": "1.4",
+        "legacy_attr": null,
+        "facades": [],
+        "deprecated_in": null,
+        "removed_in": null
+      },
+      {
+        "name": "hooks.storage_read",
+        "version": 1,
+        "since": "0.112.0-beta.1",
+        "plugin_api": "1.4",
+        "legacy_attr": null,
+        "facades": [],
+        "deprecated_in": null,
+        "removed_in": null
+      },
+      {
+        "name": "ai.models.metadata",
+        "version": 1,
+        "since": "0.112.0-beta.1",
+        "plugin_api": "1.4",
+        "legacy_attr": null,
+        "facades": [],
+        "deprecated_in": null,
+        "removed_in": null
+      },
+      {
+        "name": "interaction.entry_policy",
+        "version": 1,
+        "since": "0.112.0-beta.2",
+        "plugin_api": "1.5",
+        "legacy_attr": null,
+        "facades": [],
+        "deprecated_in": null,
+        "removed_in": null
+      },
+      {
+        "name": "provides.ai.image_backend",
+        "version": 1,
+        "since": "0.112.0-beta.2",
+        "plugin_api": "1.5",
+        "legacy_attr": null,
+        "facades": [],
+        "deprecated_in": null,
+        "removed_in": null
+      },
+      {
+        "name": "ui.rule_editor",
+        "version": 1,
+        "since": "0.112.0-beta.2",
+        "plugin_api": "1.5",
+        "legacy_attr": null,
+        "facades": [],
+        "deprecated_in": null,
+        "removed_in": null
+      },
+      {
+        "name": "interaction.legacy_entry_keys",
+        "version": 1,
+        "since": "0.112.0-beta.3",
+        "plugin_api": "1.6",
+        "legacy_attr": null,
+        "facades": [],
+        "deprecated_in": null,
+        "removed_in": null
+      },
+      {
+        "name": "middleware.outbound",
+        "version": 1,
+        "since": "0.109.0-beta.1",
+        "plugin_api": "1.2",
+        "legacy_attr": null,
+        "facades": [],
+        "deprecated_in": null,
+        "removed_in": null
+      },
+      {
+        "name": "middleware.inbound",
+        "version": 1,
+        "since": "0.109.0-beta.1",
+        "plugin_api": "1.2",
+        "legacy_attr": null,
+        "facades": [],
+        "deprecated_in": null,
+        "removed_in": null
+      },
+      {
+        "name": "middleware.delivered",
+        "version": 1,
+        "since": "0.109.0-beta.1",
+        "plugin_api": "1.2",
+        "legacy_attr": null,
+        "facades": [],
+        "deprecated_in": null,
+        "removed_in": null
+      },
+      {
+        "name": "middleware.stream_preview",
+        "version": 1,
+        "since": "0.109.0-beta.1",
+        "plugin_api": "1.2",
+        "legacy_attr": null,
+        "facades": [],
+        "deprecated_in": null,
+        "removed_in": null
+      },
+      {
+        "name": "messages.render_profile",
+        "version": 1,
+        "since": "0.109.0-beta.1",
+        "plugin_api": "1.2",
+        "legacy_attr": null,
+        "facades": [
+          "buffered",
+          "entry",
+          "live"
+        ],
+        "deprecated_in": null,
+        "removed_in": null
+      },
+      {
+        "name": "ai.stream_extra_body",
+        "version": 1,
+        "since": "0.109.0-beta.1",
+        "plugin_api": "1.2",
+        "legacy_attr": null,
+        "facades": [],
+        "deprecated_in": null,
+        "removed_in": null
+      },
+      {
+        "name": "runtime.blocking_monitor",
+        "version": 1,
+        "since": "0.109.0-beta.1",
+        "plugin_api": "1.2",
+        "legacy_attr": null,
+        "facades": [],
+        "deprecated_in": null,
+        "removed_in": null
+      },
+      {
+        "name": "payment.sources",
+        "version": 1,
+        "since": "0.111.0-beta.1",
+        "plugin_api": "1.3",
+        "legacy_attr": null,
+        "facades": [],
+        "deprecated_in": null,
+        "removed_in": null
+      }
+    ],
+    "ctx_capabilities_has": {
+      "no_messages": [
+        "ai.extra_body",
+        "ai.models.metadata",
+        "ai.stream_extra_body",
+        "config.saved",
+        "config.secret_list",
+        "config.validate",
+        "hooks.storage_read",
+        "host.read",
+        "host.read.account.admins@1",
+        "host.read.ai.models@1",
+        "host.read.chat.allowed@1",
+        "host.read.plugin.stats@1",
+        "interaction.entry_policy",
+        "interaction.legacy_entry_keys",
+        "manifest.min_version_prerelease",
+        "manifest.plugin_api",
+        "middleware.delivered",
+        "middleware.inbound",
+        "middleware.outbound",
+        "middleware.stream_preview",
+        "payment.sources",
+        "provides.ai.image_backend",
+        "rules.dry_run",
+        "runtime.blocking_monitor",
+        "runtime.capabilities",
+        "runtime.deprecations",
+        "runtime.entry_policy",
+        "runtime.hook_stats",
+        "runtime.hook_trace",
+        "ui.actions",
+        "ui.cards",
+        "ui.pages",
+        "ui.rule_editor",
+        "ui.rules_page",
+        "ui.widgets"
+      ],
+      "buffered": [
+        "ai.extra_body",
+        "ai.models.metadata",
+        "ai.stream_extra_body",
+        "config.saved",
+        "config.secret_list",
+        "config.validate",
+        "hooks.storage_read",
+        "host.read",
+        "host.read.account.admins@1",
+        "host.read.ai.models@1",
+        "host.read.chat.allowed@1",
+        "host.read.plugin.stats@1",
+        "interaction.entry_policy",
+        "interaction.legacy_entry_keys",
+        "manifest.min_version_prerelease",
+        "manifest.plugin_api",
+        "messages.bot_api_extra",
+        "messages.callback_routing",
+        "messages.guest_reply_markup",
+        "messages.inline_rich_edit",
+        "messages.render_profile",
+        "messages.rich_table_compact",
+        "messages.rich_table_default_style",
+        "messages.unified_ops",
+        "middleware.delivered",
+        "middleware.inbound",
+        "middleware.outbound",
+        "middleware.stream_preview",
+        "payment.sources",
+        "provides.ai.image_backend",
+        "rules.dry_run",
+        "runtime.blocking_monitor",
+        "runtime.capabilities",
+        "runtime.deprecations",
+        "runtime.entry_policy",
+        "runtime.hook_stats",
+        "runtime.hook_trace",
+        "ui.actions",
+        "ui.cards",
+        "ui.pages",
+        "ui.rule_editor",
+        "ui.rules_page",
+        "ui.widgets"
+      ],
+      "live": [
+        "ai.extra_body",
+        "ai.models.metadata",
+        "ai.stream_extra_body",
+        "config.saved",
+        "config.secret_list",
+        "config.validate",
+        "hooks.storage_read",
+        "host.read",
+        "host.read.account.admins@1",
+        "host.read.ai.models@1",
+        "host.read.chat.allowed@1",
+        "host.read.plugin.stats@1",
+        "interaction.entry_policy",
+        "interaction.legacy_entry_keys",
+        "manifest.min_version_prerelease",
+        "manifest.plugin_api",
+        "messages.bot_api_extra",
+        "messages.callback_routing",
+        "messages.guest_reply_markup",
+        "messages.inline_rich_edit",
+        "messages.live_inline_edit",
+        "messages.render_profile",
+        "messages.rich_table_compact",
+        "messages.rich_table_default_style",
+        "messages.streaming_edit",
+        "messages.unified_ops",
+        "middleware.delivered",
+        "middleware.inbound",
+        "middleware.outbound",
+        "middleware.stream_preview",
+        "payment.sources",
+        "provides.ai.image_backend",
+        "rules.dry_run",
+        "runtime.blocking_monitor",
+        "runtime.capabilities",
+        "runtime.deprecations",
+        "runtime.entry_policy",
+        "runtime.hook_stats",
+        "runtime.hook_trace",
+        "ui.actions",
+        "ui.cards",
+        "ui.pages",
+        "ui.rule_editor",
+        "ui.rules_page",
+        "ui.widgets"
+      ],
+      "entry": [
+        "ai.extra_body",
+        "ai.models.metadata",
+        "ai.stream_extra_body",
+        "config.saved",
+        "config.secret_list",
+        "config.validate",
+        "hooks.storage_read",
+        "host.read",
+        "host.read.account.admins@1",
+        "host.read.ai.models@1",
+        "host.read.chat.allowed@1",
+        "host.read.plugin.stats@1",
+        "interaction.entry_policy",
+        "interaction.legacy_entry_keys",
+        "manifest.min_version_prerelease",
+        "manifest.plugin_api",
+        "messages.bot_api_extra",
+        "messages.callback_routing",
+        "messages.guest_reply_markup",
+        "messages.inline_rich_edit",
+        "messages.live_inline_edit",
+        "messages.render_profile",
+        "messages.rich_table_compact",
+        "messages.rich_table_default_style",
+        "messages.streaming_edit",
+        "messages.unified_ops",
+        "middleware.delivered",
+        "middleware.inbound",
+        "middleware.outbound",
+        "middleware.stream_preview",
+        "payment.sources",
+        "provides.ai.image_backend",
+        "rules.dry_run",
+        "runtime.blocking_monitor",
+        "runtime.capabilities",
+        "runtime.deprecations",
+        "runtime.entry_policy",
+        "runtime.hook_stats",
+        "runtime.hook_trace",
+        "ui.actions",
+        "ui.cards",
+        "ui.pages",
+        "ui.rule_editor",
+        "ui.rules_page",
+        "ui.widgets"
+      ]
+    },
+    "legacy_attrs_true": {
+      "buffered": [
+        "guest_reply_markup",
+        "inline_rich_edit",
+        "rich_table_compact",
+        "rich_table_default_style"
+      ],
+      "live": [
+        "guest_reply_markup",
+        "inline_rich_edit",
+        "live_inline_edit",
+        "rich_table_compact",
+        "rich_table_default_style",
+        "streaming_edit"
+      ],
+      "entry": [
+        "guest_reply_markup",
+        "inline_rich_edit",
+        "live_inline_edit",
+        "rich_table_compact",
+        "rich_table_default_style",
+        "streaming_edit"
+      ]
+    }
+  },
+  "manifest": {
+    "install_schema": "schemas/plugin.schema.json",
+    "contract_schema": "schemas/plugin-contract.schema.json",
+    "install_fields": [
+      "agent_tools",
+      "author",
+      "capabilities",
+      "category",
+      "config_actions",
+      "config_schema",
+      "description",
+      "display_name",
+      "entry",
+      "event_subscriptions",
+      "interaction_entries",
+      "interaction_profile",
+      "key",
+      "middleware",
+      "min_telebot_version",
+      "min_telepilot_version",
+      "name",
+      "payment_sources",
+      "permissions",
+      "plugin_api",
+      "provides",
+      "reads",
+      "render_profile",
+      "requires_platform_capabilities",
+      "tags",
+      "ui",
+      "usage",
+      "version"
+    ],
+    "fields": {
+      "agent_tools": [
+        "array"
+      ],
+      "allowed_hosts": [
+        "array"
+      ],
+      "author": [
+        "string"
+      ],
+      "capabilities": [
+        "null",
+        "object"
+      ],
+      "category": [
+        "null",
+        "string"
+      ],
+      "config_actions": [
+        "array"
+      ],
+      "config_actions[].description": [
+        "string"
+      ],
+      "config_actions[].input_schema": [
+        "object"
+      ],
+      "config_actions[].key": [
+        "string"
+      ],
+      "config_actions[].placement": [
+        "string"
+      ],
+      "config_actions[].submit_label": [
+        "string"
+      ],
+      "config_actions[].title": [
+        "object",
+        "string"
+      ],
+      "config_schema": [
+        "null",
+        "object"
+      ],
+      "description": [
+        "string"
+      ],
+      "display_name": [
+        "string"
+      ],
+      "entry": [
+        "string"
+      ],
+      "event_subscriptions": [
+        "array"
+      ],
+      "event_subscriptions[].description": [
+        "string"
+      ],
+      "event_subscriptions[].entry_key": [
+        "string"
+      ],
+      "event_subscriptions[].events": [
+        "array"
+      ],
+      "event_subscriptions[].filters": [
+        "object"
+      ],
+      "event_subscriptions[].scope": [
+        "string"
+      ],
+      "event_subscriptions[].source": [
+        "array",
+        "string"
+      ],
+      "event_subscriptions[].timeout_seconds": [
+        "number"
+      ],
+      "interaction_entries": [
+        "array"
+      ],
+      "interaction_entries[].command_fallback": [
+        "array",
+        "boolean",
+        "null",
+        "object",
+        "string"
+      ],
+      "interaction_entries[].description": [
+        "string"
+      ],
+      "interaction_entries[].dispatch_modes": [
+        "array"
+      ],
+      "interaction_entries[].entry_policy": [
+        "object"
+      ],
+      "interaction_entries[].entry_policy.default_start_keywords": [
+        "array"
+      ],
+      "interaction_entries[].entry_policy.participant_policy": [
+        "string"
+      ],
+      "interaction_entries[].entry_policy.prize": [
+        "boolean"
+      ],
+      "interaction_entries[].entry_policy.session_scope": [
+        "string"
+      ],
+      "interaction_entries[].events": [
+        "array"
+      ],
+      "interaction_entries[].input_schema": [
+        "object"
+      ],
+      "interaction_entries[].interaction_profile": [
+        "string"
+      ],
+      "interaction_entries[].key": [
+        "string"
+      ],
+      "interaction_entries[].launch_mode": [
+        "string"
+      ],
+      "interaction_entries[].legacy_entry_keys": [
+        "array"
+      ],
+      "interaction_entries[].legacy_entry_keys[].key": [
+        "string"
+      ],
+      "interaction_entries[].legacy_entry_keys[].participant_policy": [
+        "string"
+      ],
+      "interaction_entries[].legacy_entry_keys[].prize": [
+        "boolean"
+      ],
+      "interaction_entries[].legacy_entry_keys[].session_scope": [
+        "string"
+      ],
+      "interaction_entries[].message_channels": [
+        "array",
+        "object"
+      ],
+      "interaction_entries[].participant_policy": [
+        "string"
+      ],
+      "interaction_entries[].payload_contract": [
+        "object"
+      ],
+      "interaction_entries[].policy": [
+        "object"
+      ],
+      "interaction_entries[].preserve_command_trigger": [
+        "boolean"
+      ],
+      "interaction_entries[].result_contract": [
+        "object"
+      ],
+      "interaction_entries[].session_policy": [
+        "object"
+      ],
+      "interaction_entries[].session_scope": [
+        "string"
+      ],
+      "interaction_entries[].settlement": [
+        "boolean",
+        "null",
+        "object",
+        "string"
+      ],
+      "interaction_entries[].title": [
+        "object",
+        "string"
+      ],
+      "interaction_profile": [
+        "null",
+        "string"
+      ],
+      "key": [
+        "string"
+      ],
+      "middleware": [
+        "array"
+      ],
+      "middleware[].critical": [
+        "boolean"
+      ],
+      "middleware[].handler": [
+        "string"
+      ],
+      "middleware[].match": [
+        "object"
+      ],
+      "middleware[].order": [
+        "integer"
+      ],
+      "middleware[].stage": [
+        "string"
+      ],
+      "middleware[].timeout_ms": [
+        "integer"
+      ],
+      "min_telebot_version": [
+        "null",
+        "string"
+      ],
+      "min_telepilot_version": [
+        "null",
+        "string"
+      ],
+      "name": [
+        "string"
+      ],
+      "payment_sources": [
+        "array"
+      ],
+      "payment_sources[].description": [
+        "string"
+      ],
+      "payment_sources[].id": [
+        "string"
+      ],
+      "payment_sources[].title": [
+        "object",
+        "string"
+      ],
+      "permissions": [
+        "array"
+      ],
+      "plugin_api": [
+        "null",
+        "string"
+      ],
+      "provides": [
+        "array"
+      ],
+      "reads": [
+        "array"
+      ],
+      "render_profile": [
+        "null",
+        "object"
+      ],
+      "requires_platform_capabilities": [
+        "array"
+      ],
+      "tags": [
+        "array"
+      ],
+      "ui": [
+        "null",
+        "object"
+      ],
+      "ui.actions": [
+        "array"
+      ],
+      "ui.actions[].confirm": [
+        "boolean",
+        "string"
+      ],
+      "ui.actions[].id": [
+        "string"
+      ],
+      "ui.actions[].menu": [
+        "string"
+      ],
+      "ui.actions[].page": [
+        "string"
+      ],
+      "ui.actions[].style": [
+        "string"
+      ],
+      "ui.actions[].title": [
+        "object",
+        "string"
+      ],
+      "ui.cards": [
+        "array"
+      ],
+      "ui.cards[].blocks": [
+        "array"
+      ],
+      "ui.cards[].blocks[].type": [
+        "string"
+      ],
+      "ui.cards[].id": [
+        "string"
+      ],
+      "ui.cards[].layout": [
+        "object"
+      ],
+      "ui.cards[].layout.type": [
+        "string"
+      ],
+      "ui.cards[].refresh_seconds": [
+        "integer",
+        "null"
+      ],
+      "ui.cards[].slot": [
+        "string"
+      ],
+      "ui.cards[].source": [
+        "object"
+      ],
+      "ui.cards[].source.action": [
+        "string"
+      ],
+      "ui.cards[].source.read": [
+        "string"
+      ],
+      "ui.cards[].subtitle": [
+        "object",
+        "string"
+      ],
+      "ui.cards[].title": [
+        "object",
+        "string"
+      ],
+      "ui.pages": [
+        "array"
+      ],
+      "ui.pages[].actions": [
+        "array"
+      ],
+      "ui.pages[].bridge": [
+        "array"
+      ],
+      "ui.pages[].file": [
+        "string"
+      ],
+      "ui.pages[].id": [
+        "string"
+      ],
+      "ui.pages[].menus": [
+        "array"
+      ],
+      "ui.pages[].subtitle": [
+        "object",
+        "string"
+      ],
+      "ui.pages[].title": [
+        "object",
+        "string"
+      ],
+      "ui.rule_editor": [
+        "object"
+      ],
+      "ui.rule_editor.entries": [
+        "object"
+      ],
+      "usage": [
+        "null",
+        "string"
+      ],
+      "version": [
+        "string"
+      ]
+    }
+  },
+  "permissions": [
+    "agent_skills",
+    "ai_agent",
+    "ai_image",
+    "ai_stt",
+    "ai_text",
+    "ai_vision",
+    "click_bot_button",
+    "delete_message",
+    "edit_message",
+    "external_http",
+    "external_http_bypass_proxy",
+    "forward_message",
+    "join_chat",
+    "message_middleware",
+    "moderate_chat",
+    "payout",
+    "read_chat",
+    "resolve_entity",
+    "send_file",
+    "send_message"
+  ],
+  "ui": {
+    "widgets_contract": "schemas/plugin-ui-widgets.json",
+    "widgets_contract_version": 3,
+    "widgets": [
+      "agent-skill-multi-select",
+      "allowed-peer-multi-select",
+      "config-list",
+      "dynamic-select",
+      "hidden",
+      "json-array",
+      "json-object",
+      "list-select",
+      "llm-model-select",
+      "llm-provider-select",
+      "multi-select",
+      "number",
+      "object",
+      "placeholders",
+      "preview",
+      "readonly",
+      "secret",
+      "secret-list",
+      "select",
+      "string-list",
+      "switch",
+      "text",
+      "textarea"
+    ],
+    "schema_keys": [
+      "x-config-actions",
+      "x-dry-run",
+      "x-rule-schema",
+      "x-rule-summary",
+      "x-secret-list",
+      "x-ui-add-label",
+      "x-ui-columns",
+      "x-ui-description-field",
+      "x-ui-enabled-field",
+      "x-ui-hidden",
+      "x-ui-mode",
+      "x-ui-model-modality",
+      "x-ui-options-field",
+      "x-ui-order",
+      "x-ui-placeholder",
+      "x-ui-property-order",
+      "x-ui-provider-field",
+      "x-ui-reorderable",
+      "x-ui-section",
+      "x-ui-section-inline",
+      "x-ui-summary",
+      "x-ui-title-field",
+      "x-ui-visible-if",
+      "x-ui-widget",
+      "x-usage-guide"
+    ],
+    "card_slots": [
+      "account.detail",
+      "dashboard",
+      "interaction.rule_editor",
+      "plugin.overview"
+    ],
+    "card_layouts": [
+      "buttons",
+      "kv",
+      "list",
+      "stats",
+      "table"
+    ],
+    "card_read_resources": [
+      "account.admins@1",
+      "chat.allowed@1",
+      "plugin.stats@1"
+    ],
+    "ui_hooks": {
+      "dry_run_rule": 3000,
+      "on_config_saved": 10000,
+      "on_config_validate": 2000,
+      "on_ui_action": 10000,
+      "on_ui_card": 3000
+    },
+    "page_menus": [
+      "account.detail",
+      "plugin.detail"
+    ],
+    "page_fields": [
+      "actions",
+      "bridge",
+      "file",
+      "id",
+      "menus",
+      "subtitle",
+      "title"
+    ],
+    "action_fields": [
+      "confirm",
+      "id",
+      "menu",
+      "page",
+      "style",
+      "title"
+    ]
+  },
+  "bridge": {
+    "protocol": 1,
+    "menus": [
+      "plugin.detail",
+      "account.detail"
+    ],
+    "methods": {
+      "action.invoke": "bridge:actions.invoke",
+      "card.data": "bridge:cards.read",
+      "config.get": "bridge:config.read",
+      "ready": "always",
+      "theme.get": "always (client)"
+    },
+    "js_api": [
+      "action",
+      "call",
+      "card",
+      "config",
+      "onTheme",
+      "protocol",
+      "ready",
+      "theme"
+    ]
+  },
+  "events": {
+    "sources": [
+      "external_payment_notice",
+      "interaction_bot",
+      "userbot",
+      "webhook"
+    ],
+    "types": [
+      "all_events",
+      "all_messages",
+      "callback_query",
+      "chosen_inline_result",
+      "command",
+      "guest_message",
+      "inline_query",
+      "keyword",
+      "message",
+      "message_edited",
+      "payment_confirmed",
+      "session_close",
+      "session_expired",
+      "webhook"
+    ],
+    "scopes": [
+      "all_allowed_chats",
+      "guest_all",
+      "inline_all",
+      "known_users",
+      "own_buttons",
+      "owner_only",
+      "rule_bound"
+    ],
+    "filter_keys": [
+      "callback_data",
+      "chat_id",
+      "command",
+      "commands",
+      "contains",
+      "event_type",
+      "hook_key",
+      "hook_keys",
+      "keyword",
+      "keywords",
+      "rule_id"
+    ]
+  },
+  "actions": [
+    "answer_callback",
+    "answer_guest_query",
+    "answer_inline_query",
+    "click_callback_button",
+    "close_session",
+    "delete_message",
+    "edit_caption",
+    "edit_message",
+    "end_session",
+    "no_session",
+    "payout",
+    "pin_message",
+    "result",
+    "send_file",
+    "send_message",
+    "send_photo",
+    "send_rich_message",
+    "settlement",
+    "start_session",
+    "update_session"
+  ],
+  "extension_points": {
+    "provides": [
+      "ai.image_backend"
+    ],
+    "payment_sources": {
+      "manifest_key": "payment_sources",
+      "hook": "parse_payment_notice",
+      "timeout_s": 1.0,
+      "settlement_fields": [
+        "payer_name",
+        "receiver_name",
+        "amount",
+        "payer_user_id",
+        "receiver_user_id"
+      ]
+    },
+    "middleware": {
+      "stages": [
+        "delivered",
+        "inbound",
+        "outbound"
+      ],
+      "timeout_ms": {
+        "default": 250,
+        "min": 50,
+        "max": 2000
+      }
+    }
+  },
+  "host_read_resources": [
+    "account.admins@1",
+    "ai.models@1",
+    "chat.allowed@1",
+    "plugin.stats@1"
+  ],
+  "deprecations": [
+    "action.send_via_notice",
+    "ai.tag_alias",
+    "hook.on_interaction",
+    "manifest.min_telebot_version",
+    "markup.raw_callback_data",
+    "payload.admin_user_ids"
+  ]
+}

@@ -25,6 +25,18 @@
 
 ## [Unreleased]
 
+## [0.112.0-beta.4] - 2026-10-30 · patch（补丁预发布） · 插件平台化 P5 第一部分：插件稳定契约 1.0 冻结（契约版本独立于 Plugin API 1.6）+ 契约 / golden 测试 + 插件库兼容 CI
+
+### 插件平台：P5 第一部分——插件稳定契约 1.0 冻结 + 契约 / golden 测试
+
+- 新增**插件稳定契约 1.0**（`docs/PLUGIN-CONTRACT.md`）：以 Plugin API 1.6 时的接口面为基线冻结——钩子（13 个插件类方法 + `dry_run_rule` / `parse_payment_notice` 模块函数 + 中间件处理函数）、`PluginContext` 字段与各 facade（`ctx.messages` 三种 / `ai` / `http` / `storage` / `skills` / `scheduler` / `host` / `identities` / `capabilities`）的方法签名、能力注册表 45 项与 `ctx.capabilities` 在各 facade 下的快照、plugin.json 字段（含 `interaction_entries[].entry_policy` / `legacy_entry_keys`、`payment_sources`、`middleware`、`ui.cards / pages / actions`、`reads`、`provides`）、权限、声明式 UI 控件与卡片 slot、页面 Bridge v1 方法、Event Bus 事件 / 范围 / 过滤键、标准动作、扩展点、只读宿主资源、弃用登记。契约 1.x 期间只增不减。
+- 版本方案：契约版本 `PLUGIN_CONTRACT_VERSION = "1.0"` 与 `PLUGIN_API_VERSION` 相互独立；Plugin API **保持 1.6 并继续递增**，插件 `plugin_api` 范围（`^1.0`、`>=1.3`、`^1.4` …）的写法与判断完全不变，没有插件会因此被拒绝加载。
+- 机器可读：`schemas/plugin-api-contract.json`（当前接口面快照，从运行时内省生成）、`schemas/plugin-api-contract-1.0.frozen.json`（冻结基线，永不修改）、`schemas/plugin-contract.schema.json`（比安装 Schema 多描述一层嵌套字段的 plugin.json 详细 Schema，枚举取自宿主常量，允许未知字段）；生成 / 检查脚本 `scripts/export-plugin-contract.py`（`--check` / `--validate-plugins DIR`）。
+- 契约测试 `app/tests/test_plugin_api_contract.py`：快照与运行时一致、冻结基线 ⊆ 当前（删除 / 改名 / 删参数 / 新增必填参数 / 可选变必填 / 能力移除或改 since / facade 不再提供能力 / 收窄字段类型 / Plugin API 升 MAJOR / Bridge 协议变化等 21 类破坏均被识别）、已发布 `plugin_api` 范围仍满足、示例与内置插件通过安装 Schema 与契约 Schema（13 类常见写错被指出）、基类与示例插件钩子按基线参数可调用。
+- golden 测试 `app/tests/test_plugin_golden.py`：10 个示例插件在宿主上的输出快照（安装解析、交互入口与 UI 声明整理、Event Bus / 交互入口 / 卡片 / 菜单钩子输出、中间件 outbound / inbound / stream_preview / delivered）。
+- CI 新增「插件 API 契约」job（进入 CI Gate）：契约快照检查、契约 + golden 测试、检出官方插件库 `telebot-plugins` main 跑 `check_host_compat.py` 与契约 Schema 校验（本地：42 个插件 0 错误）。
+- 只新增文档、Schema、测试与 CI；不改任何运行时行为、不删兼容层、不提高插件 `min_telepilot_version`，群内可见行为与游戏币结算不变。
+
 ### iOS App
 - **iOS 0.16.1**：紧急停止说明并入红色高亮区——ⓘ +「停止全部消息处理，数据和管理台不受影响」替换原状态文字「未开启 · 账号与 Bot 正常运行」，高亮区外不再单独显示说明（ⓘ 仍在左、点开原 popover）；开启时该行显示「已停止全部消息处理，点“解除”恢复」，状态全文保留在 VoiceOver 值里；确认弹窗不变（`EmergencyStopSection.swift`，UI 测试 `testRenamedSettingsAndEmergencyStopInfo` / `testEmergencyStopEnabledStateShowsStoppedAndResume`）。
 - **iOS 0.16.0**：新增原生「交互中心」（更多 › 管理，对齐 Web `/interaction`：按账号查看交互 Bot 运行状态，改交互总闸与 Token，规则的启用 / 停用 / 增删与原生编辑，高级里改可信通知 Bot、玩法查询指令与通知模板；读写 `GET`／`PUT /api/accounts/{id}/interaction-bot`，每次保存带完整 `rules`、规则以服务器原始对象为底保留未编辑字段与 `module_config`，不自动重试）；服务器设置「平台运行树」改为原生「能力与插件树」（`/api/platform/tree` 主干 / 直接接入 / 能力分支可展开，可切换账号范围，对齐 Web `PlatformTreeView`）；修复「App 设置」图标（`iphone.gear` 不存在，改 `apps.iphone`），新增 UI 测试扫描源码里全部 SF Symbol 名并逐个 `UIImage(systemName:)` 校验；紧急停止说明 ⓘ 前置、文案缩短为一行。仅 iOS，服务器版本不变，旧服务器缺接口时页面提示更新。
