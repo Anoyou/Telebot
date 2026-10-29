@@ -17,8 +17,8 @@ export const PLUGIN_MODE_META: Record<PluginMode, { label: string; plain: string
   },
 };
 
-const FALLBACK_RULE_KEYS = new Set(["auto_reply", "autorepeat", "forward"]);
-const FALLBACK_SINGLE_KEYS = new Set(["codex_image", "game24"]);
+// 平台能力（宿主自己的功能，不是插件）。插件的配置形态一律看 config_schema["x-ui-mode"]，
+// 不再按插件 key 兜底（W1，0.110.0-beta.2 起；旧版本插件没有声明时按通用配置页处理）。
 const PLATFORM_FEATURE_KEYS = new Set(["scheduler"]);
 
 export function isPlatformFeature(featureOrKey: string | Pick<FeatureInfo, "key" | "config_schema">): boolean {
@@ -31,8 +31,6 @@ export function pluginMode(feature: Pick<FeatureInfo, "key" | "config_schema">):
   if (declared === "rules" || declared === "single" || declared === "schema") {
     return declared;
   }
-  if (FALLBACK_RULE_KEYS.has(feature.key)) return "rules";
-  if (FALLBACK_SINGLE_KEYS.has(feature.key)) return "single";
   return "schema";
 }
 

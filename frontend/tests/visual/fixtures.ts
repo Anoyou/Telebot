@@ -1,5 +1,6 @@
 import type { Page, Route } from "@playwright/test";
 import { APP_VERSION } from "../../src/lib/version";
+import pluginW1Data from "./plugin-w1-features.json" with { type: "json" };
 
 const emptyResourceDashboard = {
   host: {
@@ -440,4 +441,138 @@ export async function installAccessExpiredFixture(page: Page, paths: RegExp): Pr
       headers: { location: `${ACCESS_LOGIN_ORIGIN}/cdn-cgi/access/login/visual.example?kid=visual-aud&redirect_url=%2F` },
     });
   });
+}
+
+// ─────────────────────────────────────────────────────
+// W1 迁移（0.110.0-beta.2）：插件通用配置页 / 通用规则页的接口夹具。
+// 五个插件的 feature 来自 plugin-w1-features.json（由插件库 plugin.json 生成）；
+// legacyAutoReply=true 时 auto_reply 换成没有 config_schema 的旧版本（1.0.4），验证自动落到对照旧页。
+// ─────────────────────────────────────────────────────
+
+export interface PluginConfigFixtureWrite {
+  method: string;
+  path: string;
+  body: unknown;
+}
+
+export interface PluginConfigFixtureOptions {
+  legacyAutoReply?: boolean;
+}
+
+const w1AccountConfigs: Record<string, Record<string, unknown>> = {
+  auto_reply: {},
+  autorepeat: {},
+  chatgpt_image: {
+    command: "gptimg",
+    tokens: [
+      { token: "eyJh…Qx9z", token_id: "tok_1", note: "网页 session" },
+      { token: "eyJk…Lm2c", token_id: "tok_2", note: "sub2api 分组 3" },
+    ],
+    default_model: "gpt-image-2",
+    default_count: 1,
+    max_count: 4,
+  },
+  codex_image: { command: "cximg", access_token: "***", model: "gpt-5.5", image_model: "auto", max_wait_seconds: 600 },
+  game24: { command: "24d", timeout: 500 },
+};
+
+export const w1RulesFixture: Record<string, Array<Record<string, unknown>>> = {
+  auto_reply: [
+    {
+      id: 11, account_id: 1, feature_key: "auto_reply", name: "私聊问候", enabled: true, priority: 100,
+      config: { match: "keyword", patterns: ["你好", "hello"], scope: "private", reply: "你好 {sender}，稍后回复你", cooldown_seconds: "5m", cooldown_scope: "chat", reply_to: true },
+      created_at: "2026-10-29T01:00:00Z", updated_at: "2026-10-29T01:00:00Z",
+    },
+    {
+      id: 12, account_id: 1, feature_key: "auto_reply", name: "指定群签到", enabled: false, priority: 50,
+      config: { match: "regex", patterns: ["^签到(\\d+)?$"], scope: "group_specific", group_ids: [-1001234567890], reply: "已签到 {1|1} 次" },
+      created_at: "2026-10-29T01:00:00Z", updated_at: "2026-10-29T01:00:00Z",
+    },
+  ],
+  autorepeat: [
+    {
+      id: 21, account_id: 1, feature_key: "autorepeat", name: "主群复读", enabled: true, priority: 100,
+      config: { target_chat_id: -1001234567890, time_window: 300, min_users: 5 },
+      created_at: "2026-10-29T01:00:00Z", updated_at: "2026-10-29T01:00:00Z",
+    },
+  ],
+};
+
+export function pluginW1Features(options: PluginConfigFixtureOptions = {}): Array<Record<string, unknown>> {
+  const features = (pluginW1Data as { features: Array<Record<string, unknown>> }).features.map((item) => ({ ...item }));
+  if (options.legacyAutoReply) {
+    const index = features.findIndex((item) => item.key === "auto_reply");
+    features[index] = { ...features[index], version: "1.0.4", config_schema: null };
+  }
+  return features;
+}
+
+export async function installPluginConfigFixture(
+  page: Page,
+  options: PluginConfigFixtureOptions = {},
+): Promise<{ writes: PluginConfigFixtureWrite[] }> {
+  const writes: PluginConfigFixtureWrite[] = [];
+  const features = pluginW1Features(options);
+  const json = (route: Route, body: unknown, status = 200) =>
+    route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
+  await page.route("**/api/**", async (route: Route) => {
+    const request = route.request();
+    const method = request.method();
+    const pathname = new URL(request.url()).pathname;
+    if (method === "GET" && pathname === "/api/feature-matrix") return json(route, { features });
+    if (method === "GET" && pathname === "/api/accounts/1/features") {
+      return json(route, features.map((item) => ({
+        feature_key: item.key, enabled: true, state: "running", last_error: null,
+        config: w1AccountConfigs[String(item.key)] ?? {},
+      })));
+    }
+    const globalMatch = pathname.match(/^\/api\/plugins\/([^/]+)\/config$/);
+    if (method === "GET" && globalMatch) return json(route, { plugin_key: decodeURIComponent(globalMatch[1]), config: {} });
+    if (method === "GET" && /^\/api\/accounts\/1\/features\/[^/]+\/config\/action-jobs$/.test(pathname)) return json(route, []);
+    // 旧专属页（如 legacy/ChatGPTImageConfig）读取合并后的生效配置
+    const effectiveMatch = pathname.match(/^\/api\/accounts\/1\/features\/([^/]+)\/config$/);
+    if (method === "GET" && effectiveMatch) return json(route, w1AccountConfigs[decodeURIComponent(effectiveMatch[1])] ?? {});
+    const rulesMatch = pathname.match(/^\/api\/accounts\/1\/features\/([^/]+)\/rules$/);
+    if (rulesMatch) {
+      const key = decodeURIComponent(rulesMatch[1]);
+      if (method === "GET") return json(route, w1RulesFixture[key] ?? []);
+      if (method === "POST") {
+        const body = request.postDataJSON();
+        writes.push({ method, path: pathname, body });
+        return json(route, { id: 99, account_id: 1, feature_key: key, created_at: "2026-10-29T02:00:00Z", updated_at: "2026-10-29T02:00:00Z", ...body }, 201);
+      }
+    }
+    const dryRunMatch = pathname.match(/^\/api\/accounts\/1\/features\/([^/]+)\/rules\/(\d+)\/dry-run$/);
+    if (method === "POST" && dryRunMatch) {
+      const body = request.postDataJSON() as { sample_message?: string };
+      writes.push({ method, path: pathname, body });
+      const matched = String(body.sample_message || "").includes("你好");
+      return json(route, {
+        matched,
+        output: matched ? "你好 张三，稍后回复你" : null,
+        detail: {
+          feature: decodeURIComponent(dryRunMatch[1]), rule_id: Number(dryRunMatch[2]), protocol: "dry_run_rule",
+          logs: [
+            { step: "scope", msg: "会话类型：private；规则作用范围：仅私聊" },
+            { step: "match", msg: "匹配类型：关键词；模式 2 条" },
+            { step: "result", msg: matched ? "命中，将回复下方内容" : "未命中：作用范围或模式不匹配" },
+          ],
+        },
+      });
+    }
+    const ruleMatch = pathname.match(/^\/api\/accounts\/1\/features\/([^/]+)\/rules\/(\d+)$/);
+    if (method === "PATCH" && ruleMatch) {
+      const body = request.postDataJSON();
+      writes.push({ method, path: pathname, body });
+      return json(route, { id: Number(ruleMatch[2]), account_id: 1, feature_key: decodeURIComponent(ruleMatch[1]), ...body });
+    }
+    const featureMatch = pathname.match(/^\/api\/accounts\/1\/features\/([^/]+)$/);
+    if (method === "PATCH" && featureMatch) {
+      const body = request.postDataJSON();
+      writes.push({ method, path: pathname, body });
+      return json(route, { feature_key: decodeURIComponent(featureMatch[1]), enabled: true, config: (body as { config?: unknown }).config ?? {} });
+    }
+    return route.fallback();
+  });
+  return { writes };
 }

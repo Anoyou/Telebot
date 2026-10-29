@@ -24,12 +24,8 @@ import {
 //     单独拆 chunk，大依赖只在用到的页面拉一次。
 const AccountWizard = lazy(() => import("@/pages/Accounts/Wizard").then(m => ({ default: m.AccountWizard })));
 const AccountDetail = lazy(() => import("@/pages/Accounts/Detail").then(m => ({ default: m.AccountDetail })));
-const AutoReplyConfig = lazy(() => import("@/pages/Plugins/configs/AutoReply").then(m => ({ default: m.AutoReplyConfig })));
-const AutorepeatConfig = lazy(() => import("@/pages/Plugins/configs/Autorepeat").then(m => ({ default: m.AutorepeatConfig })));
-const CodexImageConfigPage = lazy(() => import("@/pages/Plugins/configs/CodexImageConfig").then(m => ({ default: m.CodexImageConfigPage })));
-const ChatGPTImageConfigPage = lazy(() => import("@/pages/Plugins/configs/ChatGPTImageConfig").then(m => ({ default: m.ChatGPTImageConfigPage })));
 const SchedulerConfig = lazy(() => import("@/pages/Operations/SchedulerConfig").then(m => ({ default: m.SchedulerConfig })));
-const Game24ConfigPage = lazy(() => import("@/pages/Plugins/configs/Game24Config").then(m => ({ default: m.Game24ConfigPage })));
+const LegacyPluginConfigPage = lazy(() => import("@/pages/Plugins/configs/legacy/LegacyPluginConfigPage").then(m => ({ default: m.LegacyPluginConfigPage })));
 const GenericPluginConfigPage = lazy(() => import("@/pages/Plugins/configs/GenericPluginConfig").then(m => ({ default: m.GenericPluginConfigPage })));
 const Logs = lazy(() => import("@/pages/Logs").then(m => ({ default: m.Logs })));
 const SettingsIndex = lazy(() => import("@/pages/Settings/Index").then(m => ({ default: m.SettingsIndex })));
@@ -231,38 +227,6 @@ export default function App() {
               }
             />
             <Route
-              path=":aid/features/auto_reply"
-              element={
-                <Suspense fallback={<PageFallback />}>
-                  <AutoReplyConfig />
-                </Suspense>
-              }
-            />
-            <Route
-              path=":aid/features/autorepeat"
-              element={
-                <Suspense fallback={<PageFallback />}>
-                  <AutorepeatConfig />
-                </Suspense>
-              }
-            />
-            <Route
-              path=":aid/features/codex_image"
-              element={
-                <Suspense fallback={<PageFallback />}>
-                  <CodexImageConfigPage />
-                </Suspense>
-              }
-            />
-            <Route
-              path=":aid/features/chatgpt_image"
-              element={
-                <Suspense fallback={<PageFallback />}>
-                  <ChatGPTImageConfigPage />
-                </Suspense>
-              }
-            />
-            <Route
               path=":aid/features/scheduler"
               element={
                 <Suspense fallback={<PageFallback />}>
@@ -271,10 +235,10 @@ export default function App() {
               }
             />
             <Route
-              path=":aid/features/game24"
+              path=":aid/features/:featureKey/legacy"
               element={
                 <Suspense fallback={<PageFallback />}>
-                  <Game24ConfigPage />
+                  <LegacyPluginConfigPage />
                 </Suspense>
               }
             />

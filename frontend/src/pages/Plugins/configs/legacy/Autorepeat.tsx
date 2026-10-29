@@ -36,7 +36,7 @@ import {
   RuleInfoBox,
   RulePageHeader,
   useRuleCrud,
-} from "./_shared";
+} from "../_shared";
 
 function defaultConfig(): AutorepeatRuleConfig {
   return { target_chat_id: 0, time_window: 300, min_users: 5 };

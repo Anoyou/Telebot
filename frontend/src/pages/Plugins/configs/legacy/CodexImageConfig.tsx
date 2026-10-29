@@ -26,7 +26,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { getErrMsg } from "@/lib/api";
 import { confirmDiscardChanges, useUnsavedChanges } from "@/lib/unsavedChanges";
 import { featureConfigBackTarget } from "@/pages/Plugins/_shared/featureConfig";
-import { featureRuntimeText } from "./_shared/featureStatus";
+import { featureRuntimeText } from "../_shared/featureStatus";
 
 const MASKED_SECRET_PLACEHOLDER = "••••••••••••••••";
 

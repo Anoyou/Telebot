@@ -527,7 +527,7 @@
         "array<scalar>"
       ],
       "match": "",
-      "summary": "文本 / 数字列表",
+      "summary": "文本 / 数字列表；数组字段写 x-ui-widget: textarea 时每行一项（项里可含逗号，适合正则 / 关键词），否则逗号分隔（契约 2 起）",
       "keys": [],
       "ios_since": "0.13.0",
       "fallback": "readonly",

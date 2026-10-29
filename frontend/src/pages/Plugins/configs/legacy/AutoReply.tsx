@@ -42,7 +42,7 @@ import {
   RuleInfoBox,
   RulePageHeader,
   useRuleCrud,
-} from "./_shared";
+} from "../_shared";
 
 // rule.config 默认值
 function defaultConfig(): AutoReplyRuleConfig {
