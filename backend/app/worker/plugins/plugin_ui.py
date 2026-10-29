@@ -412,6 +412,43 @@ def lint_ui_declaration(manifest: Mapping[str, Any]) -> list[str]:
     for item in unknown_widgets_in_schema(schema):
         warnings.append(f"config_schema 使用了契约未列出的控件 {item}（客户端会只读显示「此控件需要更新 App」）")
     warnings.extend(lint_rules_declaration(schema))
+    warnings.extend(lint_rule_editor_declaration(manifest))
+    from .extension_points import unknown_provides
+
+    for name in unknown_provides(manifest.get("provides")):
+        warnings.append(f"provides 声明了宿主不认识的扩展点 {name}（运行时忽略）")
+    return warnings
+
+
+def lint_rule_editor_declaration(manifest: Mapping[str, Any]) -> list[str]:
+    """``ui.rule_editor``（0.112.0+）：入口 key 必须是已声明的交互入口；schema 里的控件必须在契约里。"""
+
+    warnings: list[str] = []
+    ui = manifest.get("ui")
+    raw = ui.get("rule_editor") if isinstance(ui, Mapping) else None
+    if raw is None:
+        return warnings
+    entries = raw.get("entries") if isinstance(raw, Mapping) else None
+    if not isinstance(entries, Mapping):
+        return ["ui.rule_editor 必须是 {\"entries\": {入口 key: {...}}}"]
+    declared_keys = {
+        str(item.get("key") or "").strip()
+        for item in (manifest.get("interaction_entries") or [])
+        if isinstance(item, Mapping)
+    }
+    for key, spec in entries.items():
+        if declared_keys and key not in declared_keys:
+            warnings.append(f"ui.rule_editor.entries.{key} 不是 interaction_entries 里声明的入口")
+        if not isinstance(spec, Mapping):
+            warnings.append(f"ui.rule_editor.entries.{key} 必须是对象")
+            continue
+        schema = spec.get("schema")
+        if schema is not None:
+            if not isinstance(schema, Mapping) or not isinstance(schema.get("properties"), Mapping):
+                warnings.append(f"ui.rule_editor.entries.{key}.schema 必须是带 properties 的对象 schema")
+            else:
+                for item in unknown_widgets_in_schema(schema, prefix=f"ui.rule_editor.entries.{key}.schema."):
+                    warnings.append(f"ui.rule_editor 使用了契约未列出的控件 {item}（客户端会只读显示「此控件需要更新 App」）")
     return warnings
 
 

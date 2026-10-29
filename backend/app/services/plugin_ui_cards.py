@@ -3,7 +3,8 @@
 - slot ``plugin.overview``：插件详情顶部。宿主内置的「运行统计」卡（``_host.stats``，数据来自
   ``plugin.stats@1``）总排在第一张，是卡片 DSL 的第一个用户；
 - slot ``account.detail``：账号详情，只列在该账号启用的插件；
-- slot ``dashboard``：概览末尾，只列全局启用、且至少一个账号启用的插件。
+- slot ``dashboard``：概览末尾，只列全局启用、且至少一个账号启用的插件；
+- slot ``interaction.rule_editor``（0.112.0+）：交互规则编辑器的插件参数区，必须带 ``plugin_key``。
 
 取数失败（插件未加载、超时 3 秒、抛异常、返回值不对）只影响那一张卡：返回 ``status="error"``，
 客户端显示「已停止工作 · 重试」，HTTP 仍是 200。
@@ -222,6 +223,8 @@ async def list_cards(
     keys: list[str]
     if plugin_key:
         keys = [plugin_key]
+    elif slot == "interaction.rule_editor":
+        raise PluginCardError("interaction.rule_editor 需要 plugin_key（规则所选插件）")
     elif slot == "account.detail":
         if account_id is None:
             raise PluginCardError("account.detail 需要 account_id")

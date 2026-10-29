@@ -367,6 +367,25 @@ export interface FeatureInteractionEntry {
   result_contract?: Record<string, unknown> | null;
   settlement?: Record<string, unknown> | null;
   input_schema?: Record<string, unknown> | null;
+  /** 0.112.0+（Plugin API 1.5）：入口策略显式声明；声明后宿主不再查兜底入口表。 */
+  entry_policy?: FeatureEntryPolicy | null;
+}
+
+export interface FeatureEntryPolicy {
+  session_scope?: "chat" | "user" | "none" | string;
+  participant_policy?: "open_race" | "solo_owner" | "paid_pool" | "notify_only" | string;
+  prize?: boolean;
+  default_start_keywords?: string[];
+}
+
+/** 0.112.0+：plugin.json ui.rule_editor 中某个入口的规则编辑器参数区声明。 */
+export interface FeatureRuleEditorEntry {
+  hint?: string;
+  start_keywords_placeholder?: string;
+  default_start_keywords?: string[];
+  default_start_text?: string;
+  schema?: Record<string, unknown>;
+  defaults?: Record<string, unknown>;
 }
 
 export interface FeatureInfo {
@@ -384,6 +403,10 @@ export interface FeatureInfo {
   category?: FeatureCategory | string | null;
   interaction_profile?: "session_game" | "challenge_game" | "reward_pool" | "utility_trigger" | string | null;
   interaction_entries?: FeatureInteractionEntry[];
+  /** 0.112.0+：规则编辑器参数区声明（按入口 key）；旧服务器没有这个字段。 */
+  rule_editor?: { entries?: Record<string, FeatureRuleEditorEntry> } | null;
+  /** 0.112.0+：扩展点声明，如 ["ai.image_backend"]。 */
+  provides?: string[];
   event_subscriptions?: PluginEventSubscription[];
   capabilities?: PluginCapabilities;
   permissions?: string[];
@@ -1268,8 +1291,8 @@ export interface AICommandConfig {
   web_search_context_size?: "low" | "medium" | "high";
   /** edit = 原地编辑命令消息；send_new = 删除命令并另发一条 */
   send_mode?: "edit" | "send_new";
-  /** image 模式后端：codex_image 复用图片生成插件；llm 调用 Provider 原生生图 */
-  image_backend?: "codex_image" | "llm";
+  /** image 模式后端：plugin（0.112.0+ 默认）按扩展点 ai.image_backend 选择插件；codex_image 固定该插件（旧模板）；llm 调用 Provider 原生生图 */
+  image_backend?: "plugin" | "codex_image" | "llm";
 }
 
 // ===== Sprint4 Wave1 =====

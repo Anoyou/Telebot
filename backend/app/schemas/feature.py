@@ -11,6 +11,44 @@ if TYPE_CHECKING:
     from ..db.models.plugin import InstalledPlugin
 
 
+_RULE_EDITOR_TEXT_KEYS = ("hint", "start_keywords_placeholder", "default_start_text")
+
+
+def _normalize_rule_editor(raw: Any) -> dict[str, Any]:
+    """整理 ``ui.rule_editor``：``{"entries": {entry_key: {hint, start_keywords_placeholder,
+    default_start_keywords, default_start_text, schema, defaults}}}``；不合法的部分丢弃。"""
+
+    if not isinstance(raw, dict):
+        return {}
+    entries = raw.get("entries")
+    if not isinstance(entries, dict):
+        return {}
+    out: dict[str, Any] = {}
+    for entry_key, spec in entries.items():
+        key = str(entry_key or "").strip()
+        if not key or not isinstance(spec, dict):
+            continue
+        item: dict[str, Any] = {}
+        for text_key in _RULE_EDITOR_TEXT_KEYS:
+            value = spec.get(text_key)
+            if isinstance(value, str) and value.strip():
+                item[text_key] = value.strip()[:2000]
+        keywords = spec.get("default_start_keywords")
+        if isinstance(keywords, list):
+            cleaned = [str(k).strip() for k in keywords if isinstance(k, str) and k.strip()]
+            if cleaned:
+                item["default_start_keywords"] = cleaned[:20]
+        schema = spec.get("schema")
+        if isinstance(schema, dict) and isinstance(schema.get("properties"), dict):
+            item["schema"] = schema
+        defaults = spec.get("defaults")
+        if isinstance(defaults, dict):
+            item["defaults"] = defaults
+        if item:
+            out[key] = item
+    return {"entries": out} if out else {}
+
+
 class FeatureInfo(BaseModel):
     key: str
     display_name: str
@@ -26,6 +64,9 @@ class FeatureInfo(BaseModel):
     category: str = "utility"
     interaction_profile: str | None = None
     interaction_entries: list[dict[str, Any]] = Field(default_factory=list)
+    # 0.112.0：插件 ui.rule_editor（交互规则编辑器参数区声明，按入口 key）与扩展点 provides。纯新增字段。
+    rule_editor: dict[str, Any] = Field(default_factory=dict)
+    provides: list[str] = Field(default_factory=list)
     event_subscriptions: list[dict[str, Any]] = Field(default_factory=list)
     capabilities: dict[str, Any] = Field(default_factory=dict)
     permissions: list[str] = Field(default_factory=list)
@@ -67,6 +108,8 @@ class FeatureInfo(BaseModel):
                 "interaction_entries",
                 "event_subscriptions",
                 "capabilities",
+                "ui",
+                "provides",
                 "permissions",
                 "requires_platform_capabilities",
                 "experimental",
@@ -113,6 +156,14 @@ class FeatureInfo(BaseModel):
         event_subscriptions = raw_event_subscriptions if isinstance(raw_event_subscriptions, list) else []
         raw_capabilities = manifest.get("capabilities")
         capabilities = raw_capabilities if isinstance(raw_capabilities, dict) else {}
+        raw_ui = manifest.get("ui")
+        rule_editor = _normalize_rule_editor(raw_ui.get("rule_editor") if isinstance(raw_ui, dict) else None)
+        raw_provides = manifest.get("provides")
+        provides = (
+            [str(item).strip() for item in raw_provides if isinstance(item, str) and item.strip()]
+            if isinstance(raw_provides, list)
+            else []
+        )
         raw_permissions = manifest.get("permissions")
         permissions = raw_permissions if isinstance(raw_permissions, list) else []
         raw_requires_caps = manifest.get("requires_platform_capabilities")
@@ -190,6 +241,8 @@ class FeatureInfo(BaseModel):
             category=category,
             interaction_profile=interaction_profile,
             interaction_entries=interaction_entries,
+            rule_editor=rule_editor,
+            provides=provides,
             event_subscriptions=event_subscription_items,
             capabilities=dict(capabilities),
             permissions=permission_items,

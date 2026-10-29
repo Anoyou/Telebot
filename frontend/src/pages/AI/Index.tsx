@@ -76,6 +76,7 @@ function commandModeLabel(template: CommandTemplateOut) {
   const parts = [mode, auto ? "auto" : "固定"];
   if (search || mode === "search") parts.push("联网");
   if (mode === "image" && template.config?.image_backend === "codex_image") parts.push("codex_image");
+  else if (mode === "image" && template.config?.image_backend !== "llm") parts.push("图片插件");
   return parts.join(" · ");
 }
 
@@ -512,8 +513,8 @@ export function AIIndex() {
                   {aiTemplates.map((template) => {
                     const provider = providerById.get(Number(template.config?.provider_id));
                     const modelText =
-                      template.config?.mode === "image" && template.config?.image_backend === "codex_image"
-                        ? "codex_image 插件"
+                      template.config?.mode === "image" && template.config?.image_backend !== "llm"
+                        ? (template.config?.image_backend === "codex_image" ? "codex_image 插件" : "图片插件（自动）")
                         : providerLabel(provider, template.config?.model);
                     return (
                       <TableRow key={template.id}>
@@ -544,8 +545,8 @@ export function AIIndex() {
               {aiTemplates.map((template) => {
                 const provider = providerById.get(Number(template.config?.provider_id));
                 const modelText =
-                  template.config?.mode === "image" && template.config?.image_backend === "codex_image"
-                    ? "codex_image 插件"
+                  template.config?.mode === "image" && template.config?.image_backend !== "llm"
+                    ? (template.config?.image_backend === "codex_image" ? "codex_image 插件" : "图片插件（自动）")
                     : providerLabel(provider, template.config?.model);
                 return (
                   <AICommandCard

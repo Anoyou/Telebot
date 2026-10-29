@@ -149,7 +149,7 @@ interface FormState {
   ai_escape_values: boolean;
   ai_web_search: boolean;
   ai_web_search_context_size: "low" | "medium" | "high";
-  ai_image_backend: "codex_image" | "llm";
+  ai_image_backend: "plugin" | "codex_image" | "llm";
   ai_video_backend: "plugin";
   ai_video_plugin_key: string;
   ai_video_plugin_method: string;
@@ -189,7 +189,8 @@ const EMPTY_FORM: FormState = {
   ai_escape_values: true,
   ai_web_search: false,
   ai_web_search_context_size: "medium",
-  ai_image_backend: "codex_image",
+  // 0.112.0：新模板默认按扩展点 ai.image_backend 自动选择图片插件（没人声明时服务器回退 codex_image）。
+  ai_image_backend: "plugin",
   ai_video_backend: "plugin",
   ai_video_plugin_key: "video_bridge",
   ai_video_plugin_method: "",
@@ -309,7 +310,7 @@ function formFromTemplate(t: CommandTemplateOut): FormState {
         cfg.web_search_context_size === "high"
         ? cfg.web_search_context_size
         : "medium",
-    ai_image_backend: cfg.image_backend === "llm" ? "llm" : "codex_image",
+    ai_image_backend: cfg.image_backend === "llm" ? "llm" : cfg.image_backend === "codex_image" ? "codex_image" : "plugin",
     ai_video_backend: "plugin",
     ai_video_plugin_key:
       typeof cfg.video_plugin_key === "string" ? cfg.video_plugin_key : EMPTY_FORM.ai_video_plugin_key,
@@ -384,7 +385,7 @@ function buildPayload(form: FormState): {
   }
   // ai
   const pid = Number(form.ai_provider_id);
-  const usesCodexImage = form.ai_mode === "image" && form.ai_image_backend === "codex_image";
+  const usesCodexImage = form.ai_mode === "image" && form.ai_image_backend !== "llm";
   const usesVideoPlugin = form.ai_mode === "video" && form.ai_video_backend === "plugin";
   if (!usesCodexImage && !usesVideoPlugin && (!Number.isInteger(pid) || pid <= 0))
     return { ok: false, errMsg: "AI 类型必须选择模型提供商" };
@@ -992,7 +993,7 @@ export function CommandTemplates() {
               if (
                 editing.type === "ai" &&
                 providerUnavailable &&
-                !(editing.ai_mode === "image" && editing.ai_image_backend === "codex_image") &&
+                !(editing.ai_mode === "image" && editing.ai_image_backend !== "llm") &&
                 !(editing.ai_mode === "video" && editing.ai_video_backend === "plugin")
               ) {
                 toast.error("chat/search 模式需要先添加模型提供商");
@@ -1492,15 +1493,21 @@ function CommandEditDialog({
                     onChange={(e) =>
                       setField(
                         "ai_image_backend",
-                        e.target.value === "llm" ? "llm" : "codex_image",
+                        e.target.value === "llm" ? "llm" : e.target.value === "codex_image" ? "codex_image" : "plugin",
                       )
                     }
                   >
-                    <option value="codex_image">codex_image 插件（当前推荐）</option>
+                    <option value="plugin">图片插件（自动选择，推荐）</option>
+                    <option value="codex_image">固定使用 codex_image 插件（旧模板）</option>
                     <option value="llm">LLM Provider 原生生图</option>
                   </Select>
                   <p className="text-xs text-muted-foreground">
-                    {form.ai_image_backend === "codex_image" ? (
+                    {form.ai_image_backend === "plugin" ? (
+                      <>
+                        自动选择本账号已启用、声明了 <code className="mx-1">ai.image_backend</code> 的图片插件；都没有时回退
+                        codex_image。插件自己的密钥、尺寸和发送配置在插件设置里改。
+                      </>
+                    ) : form.ai_image_backend === "codex_image" ? (
                       <>
                         codex_image 使用账号插件里的 Codex Access Token、尺寸和发送配置；本模板只负责把
                         <CommandBadge className="mx-1">{cmdPrefix}{form.name || "image"}</CommandBadge>

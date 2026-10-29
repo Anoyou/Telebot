@@ -25,6 +25,19 @@
 
 ## [Unreleased]
 
+## [0.112.0-beta.2] - 2026-10-29 · patch（补丁预发布） · 插件平台化 P4b：非资金业务下沉（入口策略声明、图片后端扩展点、规则编辑器去写死、算数题规则迁移脚本）
+
+### 插件平台：P4b 非资金业务下沉（入口策略声明、图片后端扩展点、规则编辑器去写死）
+
+- **入口策略声明 `entry_policy`**（Plugin API 1.5，能力 `interaction.entry_policy`）：插件可在 `interaction_entries[].entry_policy` 里显式声明会话范围、参与方式、是否有奖与默认启动词；任一入口声明后宿主不再查兜底入口表。没声明的旧插件照旧走兜底表，结果与 0.110 完全相同（兜底表保留到 Plugin API 2.0）。
+- **扩展点 `provides`**（能力 `provides.ai.image_backend`）：`,ai` 图片模板新增“图片插件（自动选择）”后端（新模板默认），按插件声明的 `provides: ["ai.image_backend"]` 选择插件；已保存的 `codex_image` 模板仍固定调用 codex_image，没有任何插件声明时也回退 codex_image，现有指令行为不变。
+- **交互规则编辑器去写死**：新规则不再默认选中 game24，不再提供“发算数题”选项（旧的算数题规则仍可原样编辑、照常运行），启动词提示与示例改为来自插件声明；插件可用 `ui.rule_editor` 声明参数区的字段、默认值与提示，并可在新卡片位置 `interaction.rule_editor` 放卡片。选“启动玩法”但没选插件时保存会提示先选择。
+- **算数题旧规则迁移脚本**（可回滚，默认只预演）：`python -m app.scripts.migrate_math10_rules [--apply] [--rollback]` 把 `action=math10` 规则改写成通用玩法规则；启动与发奖链路 golden 测试逐字段等价，因会话续玩等通用路径会开始生效，不自动运行，由管理员真群验证后执行。
+- 安装校验新增 `provides` 未知扩展点与 `ui.rule_editor` 入口 / 控件的 lint 警告；Plugin API 1.4 → 1.5。
+- **插件库**：`game24` 1.1.18、`pt_promote` 1.0.30、`blackjack` 1.0.33 声明 `entry_policy`（与原有顶层字段一致，新旧服务器结论相同），`game24` 声明 `ui.rule_editor` 启动词提示，`codex_image` 1.2.1 声明 `provides: ["ai.image_backend"]`；均不抬高 `min_telepilot_version`。游戏币结算与派奖逻辑无任何变化。
+- 宿主写死统计（`math10/game24/pt_promote/兜底表/codex_image` 关键字，不含测试与兼容登记处）：前端 53 → 35 行（规则编辑器 24 → 10），后端 25 → 24 行，运行时按插件名分支 3 → 2。
+- 文档：PLUGIN-API-REFERENCE 新增「入口策略声明」「扩展点」「规则编辑器参数区」三节，版本门槛表、能力注册表、Plugin API 版本说明同步。
+
 ## [0.112.0-beta.1] - 2026-10-29 · minor（次版本预发布） · 插件平台化 P4a：插件自带页面与菜单（沙箱 Bridge）、钩子只读 storage、模型元数据；iOS 0.15.0
 
 ### 新增

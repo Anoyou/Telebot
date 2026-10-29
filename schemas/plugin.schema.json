@@ -188,6 +188,13 @@
       "default": null,
       "title": "Plugin Api"
     },
+    "provides": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Provides",
+      "type": "array"
+    },
     "reads": {
       "items": {
         "type": "string"
