@@ -153,6 +153,20 @@ def test_plugin_schema_codegen_is_guarded_by_contract_ci() -> None:
     assert "schemas/plugin.schema.json" in workflow
 
 
+def test_plugin_api_contract_job_runs_for_contract_files_and_gates_ci() -> None:
+    # 只改契约快照 / 冻结基线（schemas/）或导出脚本时也要跑「插件 API 契约」job，并且它进入 CI Gate。
+    for paths in (["schemas/plugin-api-contract.json"], ["scripts/export-plugin-contract.py"], ["backend/app/services/event_bus.py"]):
+        scope = classify_paths(paths)
+        assert scope.backend or scope.plugin, paths
+    workflow = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    assert "plugin-contract:" in workflow
+    assert "python scripts/export-plugin-contract.py --check" in workflow
+    assert "scripts/check_host_compat.py" in workflow
+    assert "repository: Anoyou/telebot-plugins" in workflow
+    assert "needs: [change-scope, backend, plugin-contract," in workflow
+    assert '"$PLUGIN_CONTRACT"' in workflow
+
+
 def test_plugin_ui_contract_copy_change_runs_backend_sync_check() -> None:
     # 只改 iOS / Web 副本时也要在后端 job 跑 sync-plugin-ui-widgets.py --check。
     for path in (

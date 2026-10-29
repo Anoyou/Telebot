@@ -2840,6 +2840,7 @@ __all__ = ["PLUGIN_CLASS", "MANIFEST"]
 
 ## 版本与兼容
 
+- **稳定契约 1.0**（0.112.0-beta.4 起）：以 Plugin API 1.6 时的接口面为基线冻结，契约 1.x 期间只增不减。契约版本独立于 `PLUGIN_API_VERSION`（后者继续递增，`plugin_api` 范围的写法与判断不变）。冻结范围、承诺与 CI 检查见 [PLUGIN-CONTRACT.md](PLUGIN-CONTRACT.md)，机器可读快照在 `schemas/plugin-api-contract.json`。
 - `0.x`：开发阶段，允许快速迭代；`1.x`：接口稳定后。
 - 只依赖 `Plugin` / `Manifest` / `PluginContext` 与本文列出的 facade 公开契约，不要依赖私有内部插件路径；新增行为优先通过 `config` 可选项实现。
 

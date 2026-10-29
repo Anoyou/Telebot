@@ -20,6 +20,7 @@
 - [远程插件](./PLUGIN-REMOTE.md)
 - [`requires_platform_capabilities` 声明](./PLUGIN-REMOTE.md#requires_platform_capabilities-声明)
 - [安全边界](./PLUGIN-SAFETY.md)
+- [稳定契约 1.0（冻结范围与兼容承诺）](./PLUGIN-CONTRACT.md)
 - [开发者工具链](./PLUGIN-DEVTOOLS.md)
 - [速查表](./PLUGIN-CHEATSHEET.md)
 

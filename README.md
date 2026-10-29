@@ -209,6 +209,7 @@ make plugin-register dir=plugins/local_imports/my_game
 | 写第一个插件 | [插件 5 分钟 Quickstart](./docs/PLUGIN-QUICKSTART.md) |
 | 理解插件生命周期 | [插件开发指南](./docs/PLUGIN-DEV-GUIDE.md) |
 | 查字段、事件和 action | [插件 API 参考](./docs/PLUGIN-API-REFERENCE.md) |
+| 确认哪些接口被稳定承诺 | [插件稳定契约](./docs/PLUGIN-CONTRACT.md) |
 | 确认权限与安全边界 | [插件安全边界](./docs/PLUGIN-SAFETY.md) |
 | 发布远程插件 | [远程插件](./docs/PLUGIN-REMOTE.md) |
 | 参与 TelePilot 本体开发 | [开发指南](./CONTRIBUTING.md) |
