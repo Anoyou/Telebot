@@ -82,7 +82,9 @@ def apply_table_style_defaults(rich_message: Any) -> Any:
 
     if not isinstance(rich_message, dict):
         return rich_message
-    out = deepcopy(rich_message)
+    # 结构共享（0.109.0）：只复制被改写的路径（blocks 沿途的 dict / list 由 _style_blocks 重建，
+    # 表格 cells 与其它键共享原对象），不再整体 deepcopy。输出与旧实现逐字节一致。
+    out = dict(rich_message)
     blocks = out.get("blocks")
     if isinstance(blocks, list):
         out["blocks"] = [_style_blocks(block) for block in blocks]
@@ -92,6 +94,42 @@ def apply_table_style_defaults(rich_message: Any) -> Any:
     value = out.get("markdown")
     if isinstance(value, str) and value:
         converted = style_markdown_tables(value)
+        if len(converted) <= _RICH_TEXT_CHAR_LIMIT or len(converted) <= len(value):
+            out["markdown"] = converted
+    return out
+
+
+def apply_table_style(
+    rich_message: Any,
+    *,
+    bordered: bool | None = None,
+    striped: bool | None = None,
+) -> Any:
+    """按 ``render_profile.table`` 的显式值写表格样式（0.109.0，core.rich_table_defaults 的声明式参数）。
+
+    只处理调用方 **没写** 的表格：
+
+    - ``blocks``：缺少 ``is_bordered`` / ``is_striped`` 时写入声明值（``False`` 也写，出口不会再补）；
+    - ``html`` / Markdown 里的 ``<table>``：缺少属性时写入 ``bordered`` 或 ``bordered="false"``
+      （后者在出口按“显式关闭”去掉，Telegram 收到的是不带该属性的表格）；
+    - Markdown 管道表格：转成 ``<table …>`` 时按声明值写属性。
+
+    ``None`` 表示沿用平台默认（出口补 ``True``），两项都为 ``None`` 时原样返回。
+    """
+
+    if not isinstance(rich_message, dict) or (bordered is None and striped is None):
+        return rich_message
+    wanted = {"bordered": bordered, "striped": striped}
+    out = dict(rich_message)
+    blocks = out.get("blocks")
+    if isinstance(blocks, list):
+        out["blocks"] = [_style_blocks(block, explicit=wanted) for block in blocks]
+    value = out.get("html")
+    if isinstance(value, str) and value:
+        out["html"] = _rewrite_table_tags(value, op="explicit", skip_fences=False, explicit=wanted)
+    value = out.get("markdown")
+    if isinstance(value, str) and value:
+        converted = _convert_markdown_tables(value, compact=None, explicit=wanted)
         if len(converted) <= _RICH_TEXT_CHAR_LIMIT or len(converted) <= len(value):
             out["markdown"] = converted
     return out
@@ -123,7 +161,7 @@ def apply_compact_tables(rich_message: dict[str, Any]) -> dict[str, Any]:
     Fenced code is left untouched.  Other keys are copied as-is.
     """
 
-    out = deepcopy(rich_message)
+    out = dict(rich_message)  # 结构共享：_mark_blocks 重建沿途容器，其余键共享原对象
     blocks = out.get("blocks")
     if isinstance(blocks, list):
         out["blocks"] = [_mark_blocks(block, compact=True) for block in blocks]
@@ -175,8 +213,13 @@ def compact_markdown_tables(text: str) -> str:
     return _convert_markdown_tables(text, compact=True)
 
 
-def _convert_markdown_tables(text: str, *, compact: bool) -> str:
-    op = "compact" if compact else "style"
+def _convert_markdown_tables(
+    text: str,
+    *,
+    compact: bool | None,
+    explicit: dict[str, bool | None] | None = None,
+) -> str:
+    op = "explicit" if explicit is not None else ("compact" if compact else "style")
     lines = text.split("\n")
     out: list[str] = []
     fence: str | None = None
@@ -197,13 +240,13 @@ def _convert_markdown_tables(text: str, *, compact: bool) -> str:
             continue
         table = _match_table(lines, index)
         if table is None:
-            out.append(_rewrite_line_table_tags(line, op=op))
+            out.append(_rewrite_line_table_tags(line, op=op, explicit=explicit))
             index += 1
             continue
         header, aligns, rows, end = table
         if out and out[-1].strip():
             out.append("")
-        out.append(_table_html(header, aligns, rows, compact=compact))
+        out.append(_table_html(header, aligns, rows, compact=bool(compact), explicit=explicit))
         if end < len(lines) and lines[end].strip():
             out.append("")
         index = end
@@ -267,21 +310,25 @@ def _mark_blocks(value: Any, *, compact: bool) -> Any:
     return result
 
 
-def _style_blocks(value: Any) -> Any:
+def _style_blocks(value: Any, explicit: dict[str, bool | None] | None = None) -> Any:
     if isinstance(value, list):
-        return [_style_blocks(item) for item in value]
+        return [_style_blocks(item, explicit) for item in value]
     if not isinstance(value, dict):
         return value
     result: dict[str, Any] = {}
     for key, item in value.items():
         if key != "cells" and isinstance(item, (list, dict)):
-            result[key] = _style_blocks(item)
+            result[key] = _style_blocks(item, explicit)
         else:
             result[key] = item  # cell texts are RichText, never blocks
     if str(value.get("type") or "") == "table" and "cells" in value:
-        for flag in TABLE_STYLE_BLOCK_KEYS:
-            if flag not in result:  # explicit True/False from the caller wins
+        for attr, flag in zip(TABLE_STYLE_ATTRS, TABLE_STYLE_BLOCK_KEYS, strict=True):
+            if flag in result:  # explicit True/False from the caller wins
+                continue
+            if explicit is None:
                 result[flag] = True
+            elif explicit.get(attr) is not None:
+                result[flag] = bool(explicit[attr])
     return result
 
 
@@ -299,11 +346,17 @@ def _has_compact_block(value: Any) -> bool:
 # html tags
 
 
-def _rewrite_table_tags(text: str, *, op: str, skip_fences: bool) -> str:
+def _rewrite_table_tags(
+    text: str,
+    *,
+    op: str,
+    skip_fences: bool,
+    explicit: dict[str, bool | None] | None = None,
+) -> str:
     if "table" not in text.lower():
         return text
     if not skip_fences:
-        return _TABLE_TAG_RE.sub(lambda m: _table_tag(m, op=op), text)
+        return _TABLE_TAG_RE.sub(lambda m: _table_tag(m, op=op, explicit=explicit), text)
     lines = text.split("\n")
     fence: str | None = None
     for i, line in enumerate(lines):
@@ -315,18 +368,18 @@ def _rewrite_table_tags(text: str, *, op: str, skip_fences: bool) -> str:
         if fence_match:
             fence = fence_match.group(1)
             continue
-        lines[i] = _rewrite_line_table_tags(line, op=op)
+        lines[i] = _rewrite_line_table_tags(line, op=op, explicit=explicit)
     return "\n".join(lines)
 
 
-def _rewrite_line_table_tags(line: str, *, op: str) -> str:
+def _rewrite_line_table_tags(line: str, *, op: str, explicit: dict[str, bool | None] | None = None) -> str:
     if "<table" not in line.lower():
         return line
     # leave inline code spans alone
     parts = re.split(r"(`+[^`]*`+)", line)
     for i, part in enumerate(parts):
         if i % 2 == 0:
-            parts[i] = _TABLE_TAG_RE.sub(lambda m: _table_tag(m, op=op), part)
+            parts[i] = _TABLE_TAG_RE.sub(lambda m: _table_tag(m, op=op, explicit=explicit), part)
     return "".join(parts)
 
 
@@ -366,7 +419,29 @@ def _style_table_tag(match: re.Match[str]) -> str:
     return f"<table{body}{' /' if self_closing else ''}>"
 
 
-def _table_tag(match: re.Match[str], *, op: str) -> str:
+def _explicit_table_tag(match: re.Match[str], explicit: dict[str, bool | None]) -> str:
+    """只给缺少的属性写声明值：True → ``bordered``，False → ``bordered="false"``（出口去掉）。"""
+
+    attrs = match.group(1)
+    body = attrs.rstrip()
+    self_closing = body.endswith("/")
+    if self_closing:
+        body = body[:-1].rstrip()
+    changed = False
+    for name in TABLE_STYLE_ATTRS:
+        value = explicit.get(name)
+        if value is None or _STYLE_ATTR_RES[name].search(body) is not None:
+            continue
+        body = f"{body} {name}" if value else f'{body} {name}="false"'
+        changed = True
+    if not changed:
+        return match.group(0)
+    return f"<table{body}{' /' if self_closing else ''}>"
+
+
+def _table_tag(match: re.Match[str], *, op: str, explicit: dict[str, bool | None] | None = None) -> str:
+    if op == "explicit":
+        return _explicit_table_tag(match, explicit or {})
     if op == "style":
         return _style_table_tag(match)
     compact = op == "compact"
@@ -462,13 +537,20 @@ def _table_html(
     rows: list[list[str]],
     *,
     compact: bool = False,
+    explicit: dict[str, bool | None] | None = None,
 ) -> str:
     def cell(tag: str, value: str, align: str | None) -> str:
         attr = f' align="{align}"' if align else ""
         return f"<{tag}{attr}>{_inline_to_html(value)}</{tag}>"
 
     # Platform default: every table bordered + striped; compact only on opt-in.
-    parts = [f"<table {PIPE_TABLE_ATTRS}{' compact' if compact else ''}>"]
+    attrs = PIPE_TABLE_ATTRS
+    if explicit is not None:
+        # render_profile 显式关闭的样式写成 ="false"，出口按“显式关闭”去掉（见 _style_table_tag）。
+        attrs = " ".join(
+            name if explicit.get(name) is not False else f'{name}="false"' for name in TABLE_STYLE_ATTRS
+        )
+    parts = [f"<table {attrs}{' compact' if compact else ''}>"]
     parts.append("<tr>" + "".join(cell("th", value, aligns[i]) for i, value in enumerate(header)) + "</tr>")
     for row in rows:
         parts.append("<tr>" + "".join(cell("td", value, aligns[i]) for i, value in enumerate(row)) + "</tr>")

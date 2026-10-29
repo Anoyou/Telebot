@@ -66,8 +66,10 @@ class Capability:
 
 # P0（插件平台化地基）发布的宿主版本。
 _P0_RELEASE = "0.107.0-beta.1"
-# 这一版（P1 通用交互原语）发布的宿主版本；合并时随版本号顺延（只影响注册表里“本版新增”的条目）。
-_THIS_RELEASE = "0.108.0-beta.1"
+# P1（通用交互原语）发布的宿主版本。
+_P1_RELEASE = "0.108.0-beta.1"
+# 这一版（P2 消息管线中间件）发布的宿主版本；合并时随版本号顺延（只影响注册表里“本版新增”的条目）。
+_THIS_RELEASE = "0.109.0-beta.1"
 
 _DOC = "docs/PLUGIN-API-REFERENCE.md"
 
@@ -155,7 +157,7 @@ CAPABILITIES: tuple[Capability, ...] = (
     # ── P1：通用交互原语（Plugin API 1.1）──
     Capability(
         name="messages.callback_routing",
-        since=_THIS_RELEASE,
+        since=_P1_RELEASE,
         plugin_api="1.1",
         facades=ALL_MESSAGE_FACADES,
         summary='按钮写 {"text", "callback": {"data"}}，宿主签发 cb1.<token> 并把点击按 token 路由回本插件（订阅 scope "own_buttons"，payload.callback）',
@@ -163,7 +165,7 @@ CAPABILITIES: tuple[Capability, ...] = (
     ),
     Capability(
         name="messages.unified_ops",
-        since=_THIS_RELEASE,
+        since=_P1_RELEASE,
         plugin_api="1.1",
         facades=ALL_MESSAGE_FACADES,
         summary="三种 ctx.messages 共用一套动作构造与执行器：实时 facade 补齐 send_photo / send_file / edit_rich / edit_caption，单动作方法失败时带回 errors",
@@ -171,7 +173,7 @@ CAPABILITIES: tuple[Capability, ...] = (
     ),
     Capability(
         name="messages.bot_api_extra",
-        since=_THIS_RELEASE,
+        since=_P1_RELEASE,
         plugin_api="1.1",
         facades=ALL_MESSAGE_FACADES,
         summary="动作可带 bot_api_extra（按动作类型白名单校验，不得覆盖平台字段，交互 Bot 渠道生效；不合规整条拒绝并返回原因）",
@@ -179,59 +181,113 @@ CAPABILITIES: tuple[Capability, ...] = (
     ),
     Capability(
         name="ai.extra_body",
-        since=_THIS_RELEASE,
+        since=_P1_RELEASE,
         plugin_api="1.1",
         summary="ctx.ai.complete(extra_body={...}) 按上游格式白名单透传请求体字段（如 reasoning_effort），被拒字段明确报错",
         doc=f"{_DOC}#ai-请求体透传extra_body",
     ),
     Capability(
         name="host.read",
-        since=_THIS_RELEASE,
+        since=_P1_RELEASE,
         plugin_api="1.1",
         summary='ctx.host.read("资源@版本") 声明式只读宿主查询；plugin.json 用 reads 声明，未声明的资源拒绝',
         doc=f"{_DOC}#宿主只读查询ctxhostread",
     ),
     Capability(
         name="host.read.account.admins@1",
-        since=_THIS_RELEASE,
+        since=_P1_RELEASE,
         plugin_api="1.1",
         summary="账号本人与 TelePilot 管理员的 Telegram user id（代替 payload.owner_user_ids / admin_user_ids）",
         doc=f"{_DOC}#宿主只读查询ctxhostread",
     ),
     Capability(
         name="host.read.ai.models@1",
-        since=_THIS_RELEASE,
+        since=_P1_RELEASE,
         plugin_api="1.1",
         summary="插件可用模型清单（enabled_only=True 只列已启用），需要 ai_text / ai_agent 权限",
         doc=f"{_DOC}#宿主只读查询ctxhostread",
     ),
     Capability(
         name="host.read.chat.allowed@1",
-        since=_THIS_RELEASE,
+        since=_P1_RELEASE,
         plugin_api="1.1",
         summary="账号「允许会话」名单（all=true 表示未限制）",
         doc=f"{_DOC}#宿主只读查询ctxhostread",
     ),
     Capability(
         name="host.read.plugin.stats@1",
-        since=_THIS_RELEASE,
+        since=_P1_RELEASE,
         plugin_api="1.1",
         summary="本插件在当前账号的钩子统计",
         doc=f"{_DOC}#宿主只读查询ctxhostread",
     ),
     Capability(
         name="runtime.hook_trace",
-        since=_THIS_RELEASE,
+        since=_P1_RELEASE,
         plugin_api="1.1",
         summary="钩子失败 / 超时 / 熔断在 Trace 记 plugin_hook span（reason_code=plugin_timeout / plugin_error / plugin_circuit_open），熔断与统计同口径（连续失败 + 窗口失败率）",
         doc=f"{_DOC}#钩子统计与弃用登记",
     ),
     Capability(
         name="runtime.entry_policy",
-        since=_THIS_RELEASE,
+        since=_P1_RELEASE,
         plugin_api="1.1",
         summary="interaction_entries[].policy 声明参与方式 / 是否有奖 / 默认启动词，宿主不再按插件 key 写死",
         doc=f"{_DOC}#入口策略policy",
+    ),
+)
+
+# ── P2：消息管线中间件（Plugin API 1.2）──
+CAPABILITIES += (
+    Capability(
+        name="middleware.outbound",
+        since=_THIS_RELEASE,
+        plugin_api="1.2",
+        summary="plugin.json middleware 声明 outbound 中间件：投递前改正文 / Rich / 按钮 / render_profile 或 mw.reject；只读视图 + 字段白名单回滚 + fail-open，单钩子 250ms、每账号最多 8 个",
+        doc=f"{_DOC}#消息管线中间件middleware",
+    ),
+    Capability(
+        name="middleware.inbound",
+        since=_THIS_RELEASE,
+        plugin_api="1.2",
+        summary="inbound 中间件：事件路由前打标签（annotations）、规整 text 或 mw.drop 丢弃；需要 message_middleware 权限",
+        doc=f"{_DOC}#消息管线中间件middleware",
+    ),
+    Capability(
+        name="middleware.delivered",
+        since=_THIS_RELEASE,
+        plugin_api="1.2",
+        summary="delivered 中间件：投递结果确定后异步收到摘要（类型、成功与否、错误码、会话，不含正文），用于统计与审计",
+        doc=f"{_DOC}#消息管线中间件middleware",
+    ),
+    Capability(
+        name="middleware.stream_preview",
+        since=_THIS_RELEASE,
+        plugin_api="1.2",
+        summary='outbound 中间件在 match.action_types 声明 "stream_preview" 后也处理流式中间态文本（每个 50ms）',
+        doc="docs/PLUGIN-STREAMING.md",
+    ),
+    Capability(
+        name="messages.render_profile",
+        since=_THIS_RELEASE,
+        plugin_api="1.2",
+        facades=ALL_MESSAGE_FACADES,
+        summary='动作或 plugin.json 声明 render_profile: {"table": {"compact", "bordered", "striped"}}，由平台 core.* 中间件统一渲染（compact_tables 是它的旧写法）',
+        doc=f"{_DOC}#紧凑表格",
+    ),
+    Capability(
+        name="ai.stream_extra_body",
+        since=_THIS_RELEASE,
+        plugin_api="1.2",
+        summary="ctx.ai.stream_complete(extra_body={...}) 与 complete 同一套白名单透传；选中 Provider 的格式不支持时明确报错（流式不中途换 Provider）",
+        doc=f"{_DOC}#ai-请求体透传extra_body",
+    ),
+    Capability(
+        name="runtime.blocking_monitor",
+        since=_THIS_RELEASE,
+        plugin_api="1.2",
+        summary="插件代码同步阻塞事件循环 ≥200ms 记入该插件钩子统计的 blocked / blocking_ms（与 loop.slow_callback_duration 同口径）",
+        doc=f"{_DOC}#钩子统计与弃用登记",
     ),
 )
 

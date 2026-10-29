@@ -15,6 +15,7 @@ Redis 结构（每个插件一个 hash，便于整体读取 / 清零）::
         <account_id>|<hook>|<event_type>|calls        HINCRBY
         <account_id>|<hook>|<event_type>|ok / fail / timeout / circuit_open / skipped
         <account_id>|<hook>|<event_type>|sum_ms / max_ms
+        <account_id>|<hook>|<event_type>|blocked / blocking_ms  同步阻塞 ≥200ms 的次数与累计毫秒
         <account_id>|<hook>|<event_type>|le_<bucket>  耗时直方图（估算 p50 / p95）
         <account_id>|<hook>|<event_type>|last_at / last_error / last_error_at / since
         <account_id>|@deprecated|<deprecation_id>|count / last_at / detail
@@ -46,7 +47,10 @@ OUTCOME_TIMEOUT = "timeout"
 OUTCOME_CIRCUIT_OPEN = "circuit_open"
 OUTCOME_SKIPPED = "skipped"
 OUTCOMES: tuple[str, ...] = (OUTCOME_OK, OUTCOME_FAIL, OUTCOME_TIMEOUT, OUTCOME_CIRCUIT_OPEN, OUTCOME_SKIPPED)
-COUNTER_FIELDS: tuple[str, ...] = ("calls", *OUTCOMES, "sum_ms")
+# blocked / blocking_ms（0.109.0）：插件代码在事件循环上同步阻塞超过 :data:`BLOCKING_THRESHOLD_MS`
+# 的次数与累计毫秒（与 ``loop.slow_callback_duration`` 同口径），作为“该迁到独立进程”的依据。
+COUNTER_FIELDS: tuple[str, ...] = ("calls", *OUTCOMES, "sum_ms", "blocked", "blocking_ms")
+BLOCKING_THRESHOLD_MS = 200
 DEPRECATED_HOOK = "@deprecated"
 
 RowKey = tuple[int, str, str, str]  # (account_id, plugin_key, hook, event_type)
@@ -171,6 +175,38 @@ class PluginStatsRecorder:
             if summary:
                 row.last_error = summary
                 row.last_error_at = stamp
+        self._schedule_flush()
+
+    def record_blocking(
+        self,
+        *,
+        account_id: int | None,
+        plugin_key: str,
+        hook: str,
+        blocked_ms: float | int,
+        event_type: str | None = None,
+        now: float | None = None,
+    ) -> None:
+        """记一次同步阻塞（不增加 calls；调用本身的结果由 :meth:`record` 记）。"""
+
+        if not plugin_key:
+            return
+        key: RowKey = (
+            int(account_id or 0),
+            _clean_token(plugin_key, limit=96),
+            _clean_token(hook),
+            _clean_token(event_type),
+        )
+        if key not in self.totals and len(self.totals) >= MAX_TRACKED_ROWS:
+            self.dropped_rows += 1
+            return
+        stamp = time.time() if now is None else now
+        ms = max(0, int(round(float(blocked_ms or 0))))
+        for store in (self.pending, self.totals):
+            row = store.setdefault(key, _Row())
+            row.add("blocked")
+            row.add("blocking_ms", ms)
+            row.last_at = max(row.last_at, stamp)
         self._schedule_flush()
 
     def record_deprecation(
@@ -344,6 +380,15 @@ def record_hook(**kwargs: Any) -> None:
         _RECORDER.record(**kwargs)
     except Exception:  # noqa: BLE001
         log.debug("记录插件钩子统计失败", exc_info=True)
+
+
+def record_blocking(**kwargs: Any) -> None:
+    """记录一次同步阻塞；任何异常都吞掉。"""
+
+    try:
+        _RECORDER.record_blocking(**kwargs)
+    except Exception:  # noqa: BLE001
+        log.debug("记录插件阻塞统计失败", exc_info=True)
 
 
 # 慢调用阈值：成功但耗时超过它的钩子调用也记一条 Trace span（失败 / 超时总是记）。
@@ -550,6 +595,7 @@ __all__ = [
     "get_recorder",
     "parse_stats_hash",
     "read_plugin_stats",
+    "record_blocking",
     "record_hook",
     "reset_plugin_stats",
     "summarize_error",

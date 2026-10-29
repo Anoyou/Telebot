@@ -111,6 +111,9 @@ export function PluginHookStatsSection({
             <SignalPill tone={summary.failed > 0 ? "danger" : "neutral"} label="失败" value={summary.failed} />
             <SignalPill tone={summary.timeout > 0 ? "warn" : "neutral"} label="超时" value={summary.timeout} />
             <SignalPill tone="neutral" label="平均耗时" value={formatDurationMs(summary.avgMs)} />
+            {summary.blocked > 0 ? (
+              <SignalPill tone="warn" label="同步阻塞" value={`${summary.blocked} 次 · ${formatDurationMs(summary.blockingMs)}`} />
+            ) : null}
           </div>
 
           {deprecations.length > 0 ? (
@@ -176,6 +179,11 @@ function HookStatRow({ row, accountName }: { row: PluginHookStat; accountName?: 
         <div className="mt-1 text-[11px] text-muted-foreground">
           失败 {row.failed ?? 0} · 超时 {row.timeout ?? 0}
           {skipped > 0 ? ` · 熔断/更新跳过 ${skipped}` : ""}
+        </div>
+      ) : null}
+      {(row.blocked ?? 0) > 0 ? (
+        <div className="mt-1 text-[11px] text-warning" title="插件代码在事件循环上同步执行超过 200 毫秒，会卡住整个账号的消息处理">
+          同步阻塞 {row.blocked} 次 · 累计 {formatDurationMs(row.blocking_ms)}
         </div>
       ) : null}
       {row.last_error ? (

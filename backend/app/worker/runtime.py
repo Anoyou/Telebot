@@ -78,6 +78,7 @@ from .ipc import (
     CMD_EXECUTE_RULE,
     CMD_FETCH_AVATAR,
     CMD_GET_RECENT_PEERS,
+    CMD_MIDDLEWARE_DELIVERED,
     CMD_PAUSE,
     CMD_PING,
     CMD_RELOAD_COMMANDS,
@@ -530,6 +531,12 @@ async def run_worker(account_id: int) -> None:
     """worker 主协程；返回即代表退出（supervisor 决定是否重启）。"""
     redis = get_redis()
     try:
+        from .plugins.blocking_monitor import configure_loop
+
+        configure_loop(asyncio.get_running_loop())
+    except Exception:  # noqa: BLE001
+        log.debug("配置事件循环慢回调阈值失败", exc_info=True)
+    try:
         import telethon
         from telethon.tl import alltlobjects
 
@@ -957,6 +964,19 @@ async def _listen_cmd(
                                     ),
                                 )
                             continue
+                        except Exception as e:  # noqa: BLE001
+                            ack_ok = False
+                            ack_error = f"{type(e).__name__}: {e}"
+                    elif cmd.type == CMD_MIDDLEWARE_DELIVERED:
+                        # 交互 Bot 渠道投递结果 → delivered 中间件（异步，不阻塞命令循环）
+                        try:
+                            from .plugins.loader import _STATES  # type: ignore
+                            from .plugins.middleware import schedule_delivered  # type: ignore
+
+                            state = _STATES.get(account_id)
+                            results = cmd.payload.get("results")
+                            if state is not None and isinstance(results, list):
+                                schedule_delivered(state, [item for item in results if isinstance(item, dict)][:20])
                         except Exception as e:  # noqa: BLE001
                             ack_ok = False
                             ack_error = f"{type(e).__name__}: {e}"

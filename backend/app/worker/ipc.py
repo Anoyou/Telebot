@@ -65,6 +65,8 @@ CMD_DISPATCH_SIMULATE = "dispatch_simulate"  # WP4：命中调试模拟预埋
 CMD_WEBHOOK_DELIVER = "webhook_deliver"      # WP7：入站 Webhook 投递预埋
 # RPC：System Agent 调用插件暴露的只读 agent_tools
 CMD_AGENT_PLUGIN_TOOL = "agent_plugin_tool"
+# 通知（0.109.0）：交互 Bot 渠道的投递结果摘要（不含正文）交给 worker 里的 delivered 中间件；不应答
+CMD_MIDDLEWARE_DELIVERED = "middleware_delivered"
 
 # ── 事件类型（worker→主） ──────────────────────────────────────
 EVT_STATUS = "status"                      # payload: {status: active|paused|...}

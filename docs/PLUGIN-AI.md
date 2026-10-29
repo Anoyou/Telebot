@@ -86,6 +86,8 @@ async for delta in ctx.ai.stream_complete(
 answer = "".join(parts)
 ```
 
+`stream_complete()` 自 0.109.0-beta.1 起也接受 `extra_body={...}`（与 `complete()` 同一套白名单，见 [AI 请求体透传](./PLUGIN-API-REFERENCE.md#ai-请求体透传extra_body)）；流式不中途换 Provider，选中 Provider 不支持某字段时直接抛 `AICapabilityError`。
+
 要把流式文本显示在 Telegram 里（编辑「🤔」占位或私聊草稿），用平台的节流编辑器 `ctx.messages.stream_edit(chunks=ctx.ai.stream_complete(...), ...)`，频控、429 与最终 Rich 编辑由平台处理，见 [插件流式回复](./PLUGIN-STREAMING.md)。
 
 该窄接口支持 Chat Completions、Responses 与 Anthropic Messages。流开始后不会中途切 Provider；消费者取消、超时或上游中断会按已发起的请求保守结算预算和插件 quota。若上游接受了 `stream=true` 却返回普通 JSON，迭代器会把真实完整文本作为一个块交给插件，不会拆字，也不会再发起第二次请求。消费者必须遍历到自然结束，提前 `break` 或关闭迭代器会按中断调用结算。

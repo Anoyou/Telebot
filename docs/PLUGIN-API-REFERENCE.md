@@ -1088,6 +1088,11 @@ Telegram Bot API 10.3 给 `InputRichBlockTable` / `RichBlockTable` 增加了 `is
 - 一键开关：`ctx.messages.send_rich(..., compact_tables=True)`、`edit_rich(..., compact_tables=True)`、`answer_guest_query(rich_message=..., compact_tables=True)`，或在标准动作（`send_rich_message`、带 `rich_message` 的 `edit_message`、`answer_guest_query`）上写 `"compact_tables": true`。平台把消息里所有表格改为紧凑：`blocks` 加 `is_compact: true`，`html` 的 `<table>` 加 `compact`，`markdown` 的管道表格（`| a | b |` + 分隔行）转成 `<table bordered striped compact>` HTML 块（0.106.0-beta.15 起带隔行着色，beta.13/14 为 `<table bordered compact>`；0.106.0-beta.13 起保留边框：管道表格本来带边框显示，而 `compact` 只缩小单元格内边距、不包含边框；表头行用 `th`，`:---` / `---:` / `:---:` 对齐转为 `align`），单元格里的加粗、斜体、删除线、行内代码、链接转为对应 HTML（官方说明 Markdown 不在块级 HTML 标签内解析）；代码块里的内容不处理。该字段只由平台消费，不会发给 Telegram；不写或写 `false` 时不加紧凑（表格仍按默认样式带边框 + 隔行着色），平台不会发送 `is_compact: false`。
 - 边框与紧凑是两个独立标志：Bot API 的 `is_compact` / `compact` 只缩小单元格内边距，边框由 `is_bordered` / `bordered` 控制（官方示例 `<table bordered striped compact>`）。`compact_tables` 本身只加紧凑标志；0.106.0-beta.15 起边框与隔行着色由上面的“表格默认样式”在发送时统一补上（调用方显式值优先），0.106.0-beta.13/14 上 `blocks` 与 `html` 里没写边框的表格开启紧凑后仍无边框。旧 Bot API 拒绝时去掉紧凑重发，边框与隔行着色照旧保留。
 - 能力判断：0.106.0-beta.12+ 的 `ctx.messages` 带类属性 `rich_table_compact = True`。插件应先 `getattr(ctx.messages, "rich_table_compact", False) is True` 再加 `compact_tables`；旧平台没有该属性，直接按普通表格发送即可。
+- **声明式写法 `render_profile`（0.109.0-beta.1+，能力 `messages.render_profile`）**：在单条动作或 `plugin.json` 顶层写
+  `"render_profile": {"table": {"compact": true, "bordered": true, "striped": true}}`，三项都可省略（省略 = 平台默认：不紧凑、带边框、带隔行着色）。
+  `compact_tables: true` 就是 `{"table": {"compact": true}}` 的旧写法，两者效果逐字节一致。优先级：`plugin.json` < 动作 < 中间件改写后的动作。
+  `bordered: false` / `striped: false` 关闭对应样式（blocks 写 `is_bordered: false`；HTML / Markdown 表格不带该属性）；调用方在表格上写的显式值仍然优先。
+  `render_profile` 由平台中间件 `core.render_profile` / `core.rich_compact` 消费，不发给 Telegram；表格默认样式由发送出口的 `core.rich_table_defaults` 统一补，见 [消息管线中间件](#消息管线中间件middleware)。
 - 安全回退：Bot API 服务器（自建或未升级到 10.3）以 `Bad Request` 明确拒绝带紧凑表格的请求时，平台去掉紧凑标记重发一次并写日志；Userbot 路径收到 400 RPC 错误同样降级一次。只有确认请求未生效才降级，网络错误、超时、5xx、限流与“消息未修改”不会触发重发。
 
 ```python
@@ -2934,6 +2939,7 @@ __all__ = ["PLUGIN_CLASS", "MANIFEST"]
 | 注册表 `messages.guest_reply_markup`（访客回复 callback 按钮、`apply()` 结果的 `inline_message_id`、inline 回调投递给 `guest_all` / `inline_all`、`inline_callback` 信封） | 0.106.0-beta.17 |
 | 注册表 `messages.streaming_edit`（`ctx.messages.stream_editor()` / `stream_edit()` 流式编辑 / 私聊草稿，见 [PLUGIN-STREAMING.md](./PLUGIN-STREAMING.md)）；`ctx.ai.complete()` 的 `timeout_seconds` 改为含重试与备用 Provider 的总时限 | 0.106.0-beta.20 |
 | 注册表 `runtime.capabilities`（`ctx.capabilities`）、`manifest.plugin_api`、`manifest.min_version_prerelease`、`runtime.hook_stats`、`runtime.deprecations` | 0.107.0-beta.1 |
+| 消息管线中间件（`plugin.json` 的 `middleware`、`render_profile`）、`stream_complete(extra_body=)`、钩子统计 `blocked` / `blocking_ms` | 0.109.0-beta.1（旧宿主忽略 `middleware`，插件照常加载但中间件不生效；需要时用 `plugin_api: "^1.2"` 拒绝旧宿主） |
 
 - 想兼容更旧的平台时不要提高最低版本，而是先探测再用，见下一节 [能力协商与 Plugin API 版本](#能力协商与-plugin-api-版本)。
 - 声明 `requires_platform_capabilities` 的 `manifest.py` 在 0.72 之前的平台上导入就会失败，因此现在所有新插件的最低版本至少是 `0.72.0-beta.2`。
@@ -2945,7 +2951,7 @@ __all__ = ["PLUGIN_CLASS", "MANIFEST"]
 TelePilot 0.107.0-beta.1 起，宿主的可探测能力只在一张注册表里登记（`backend/app/worker/plugins/capabilities.py` 的 `CAPABILITIES`）：每项能力有名称、版本、首个提供它的宿主版本（`since`，可带 beta 号）、适用的 `ctx.messages` facade、兼容用的旧属性名与说明。注册表同时驱动三处：
 
 - 运行时：`ctx.capabilities`；
-- 接口：`GET /api/plugins/capabilities`（返回 `host_version`、`plugin_api_version`、`capabilities[]`、`deprecations[]`）；
+- 接口：`GET /api/plugins/capabilities`（返回 `host_version`、`plugin_api_version`、`capabilities[]`、`deprecations[]`；0.109.0 起另有 `host_resources[]`（`ctx.host.read` 可读资源，含模型清单 `ai.models@1`）、`core_middleware[]` 与 `middleware_limits`）；
 - 文档：上面的版本门槛表。
 
 **探测能力（推荐写法）**
@@ -2964,7 +2970,7 @@ else:  # 旧宿主：退回旧属性探测
 | `caps.version(name)` | 能力版本；不支持或当前 facade 不适用时为 `0` |
 | `caps.names()` / `caps.as_dict()` | 当前上下文支持的全部能力 |
 | `name in caps` | 等价于 `caps.has(name)` |
-| `caps.plugin_api` / `caps.host_version` | 宿主 Plugin API 版本（如 `1.1`）与 TelePilot 版本 |
+| `caps.plugin_api` / `caps.host_version` | 宿主 Plugin API 版本（如 `1.2`）与 TelePilot 版本 |
 
 - `messages.*` 能力与当前 `ctx.messages` facade 有关：同一插件在交互 Bot 入口（`entry`）、命令 / 后台任务（`live`）、UserBot Event Bus 投递（`buffered`）里拿到的 facade 不同。例如 `messages.live_inline_edit` 在 `buffered` facade 上为 `False`，因为那里只能缓冲动作、没有实时 apply。`runtime.*` / `manifest.*` 是宿主级能力，与 facade 无关。
 - 旧探测写法继续可用：`getattr(ctx.messages, "rich_table_compact", False)`、`inline_rich_edit`、`live_inline_edit`、`rich_table_default_style`、`guest_reply_markup` 这些类属性现在由注册表生成，与 `ctx.capabilities` 结果一致。注册表之外的探测（`ctx.skills is None`、`getattr(ctx.ai, "vision_enabled", False)`、`hasattr(ctx.messages, "edit_rich")`、参数级新增用 `inspect.signature` 或捕获 `TypeError`）照旧。
@@ -2990,12 +2996,16 @@ else:  # 旧宿主：退回旧属性探测
 | `host.read` | — | 宿主级 | 0.108.0-beta.1 |
 | `host.read.account.admins@1` / `host.read.ai.models@1` / `host.read.chat.allowed@1` / `host.read.plugin.stats@1` | — | 宿主级 | 0.108.0-beta.1 |
 | `runtime.hook_trace` | — | 宿主级 | 0.108.0-beta.1 |
+| `middleware.outbound` / `middleware.inbound` / `middleware.delivered` / `middleware.stream_preview` | — | 宿主级 | 0.109.0-beta.1 |
+| `messages.render_profile` | — | 全部 | 0.109.0-beta.1 |
+| `ai.stream_extra_body` | — | 宿主级 | 0.109.0-beta.1 |
+| `runtime.blocking_monitor` | — | 宿主级 | 0.109.0-beta.1 |
 
 以注册表与 `GET /api/plugins/capabilities` 为准；本表随宿主发版同步。
 
 **Plugin API 版本（`plugin_api`）**
 
-- 宿主提供的 Plugin API 版本是 `MAJOR.MINOR`（当前 `1.1`；`1.0` = 0.107.0，`1.1` = 0.108.0 通用交互原语）：新增向后兼容的接口 / 能力只升 MINOR；删除或改变已有接口语义才升 MAJOR，并且要先在 [弃用登记](#弃用登记) 里公告至少一个 minor 宿主版本。
+- 宿主提供的 Plugin API 版本是 `MAJOR.MINOR`（当前 `1.2`；`1.0` = 0.107.0，`1.1` = 0.108.0 通用交互原语，`1.2` = 0.109.0 消息管线中间件）：新增向后兼容的接口 / 能力只升 MINOR；删除或改变已有接口语义才升 MAJOR，并且要先在 [弃用登记](#弃用登记) 里公告至少一个 minor 宿主版本。
 - 插件可以在 `plugin.json` 里声明兼容范围，宿主在执行插件代码前校验，不满足时拒绝加载并说明原因：
 
 ```json
@@ -3015,6 +3025,9 @@ else:  # 旧宿主：退回旧属性探测
 - worker 进程内累加，最多每 5 秒批量写入 Redis，主进程从 Redis 汇总，因此跨进程、跨 worker 重启都能累计；Redis 不可用时只丢统计，不影响插件运行；
 - 统计保留到最近一次调用后 7 天；
 - 查看：Web 插件详情的「运行统计」，或 `GET /api/plugins/{key}/stats?account_id=`（返回 `hooks[]`、`totals`、`deprecations[]`、`retention_days`；Redis 不可用时 `available=false`）；清零：`DELETE /api/plugins/{key}/stats`（各 worker 尚未写入的增量会在下次写入时重新出现）。
+
+- **同步阻塞**（0.109.0+，能力 `runtime.blocking_monitor`）：插件钩子与中间件的协程由平台逐步驱动计时，两次 `await` 之间的同步代码单步执行 ≥ 200 ms（与事件循环 `loop.slow_callback_duration` 同口径）记一次 `blocked`，累计到 `blocking_ms`。它说明插件在 `async def` 里做了同步重活（`time.sleep`、同步 HTTP、大计算），会卡住整个账号的消息处理；持续偏高的插件应改成异步或迁到独立进程。中间件超时也会把阻塞算进去：同步阻塞超过时限的中间件结果作废、按超时计。
+- 中间件按 `middleware.inbound` / `middleware.outbound` / `middleware.delivered` 钩子名单独成行，平台内置中间件记在插件 key `core` 下（`core.rich_compact`、`core.rich_table_defaults`）。
 
 同一份统计还记录插件对已弃用接口的调用次数（能力 `runtime.deprecations`），见下节。
 
@@ -3111,7 +3124,7 @@ await ctx.messages.send_rich(
 
 - 不在任何白名单或覆盖平台字段（`model`、`messages`、`max_tokens`、`stream`、`tools`、`service_tier` 等）时立即抛 `AIUnavailableError`；
 - 选中的 Provider 格式不支持某字段时跳到备用 Provider，全部不支持时抛 `AICapabilityError`——不会静默丢弃；
-- `ctx.ai.stream_complete` 暂不支持 `extra_body`（传了会报错）。
+- `ctx.ai.stream_complete(..., extra_body=...)`（0.109.0-beta.1+，能力 `ai.stream_extra_body`）用同一套白名单；流式不中途换 Provider，所以选中 Provider 的格式不支持某字段时直接抛 `AICapabilityError`（0.108 上传了会报错“暂不支持”）。
 
 #### 宿主只读查询（ctx.host.read）
 
@@ -3148,3 +3161,84 @@ models = await ctx.host.read("ai.models@1", enabled_only=True)
 #### 历史插件兼容表
 
 宿主里仍按插件 key 区分的历史兼容逻辑（math10 旧规则、兜底入口表、codex_image 模型改名、chatgpt_image 多 Token 配置、`,ai` 图片后端默认值……）全部集中在 `backend/app/plugin_compat.py`，每项写明原因与计划移除版本；业务代码不再出现插件 key 字面量（有测试守护）。新插件请用 `interaction_entries[]` 的 `session_scope` / `participant_policy` 与入口 schema 声明，不要依赖兼容表。
+
+### 消息管线中间件（middleware）
+
+Plugin API 1.2，TelePilot 0.109.0-beta.1+，能力 `middleware.inbound` / `middleware.outbound` / `middleware.delivered` / `middleware.stream_preview`。以前“所有插件的表格都紧凑”“所有消息加署名”“敏感词打码”这类横切需求只能改宿主；现在插件可以在消息管线上挂中间件。示例：`examples/plugins/word_guard_mw`、`examples/plugins/signature_mw`。
+
+**声明**（只写在 `plugin.json`，旧宿主忽略；`manifest.py` 不用写）：
+
+```json
+{
+  "plugin_api": "^1.2",
+  "permissions": ["message_middleware"],
+  "middleware": [
+    {"stage": "outbound", "handler": "on_outbound", "order": 500,
+     "match": {"action_types": ["send_message", "send_rich_message", "edit_message", "answer_guest_query"],
+               "channels": ["interaction_bot", "userbot_reply"], "sources": ["self", "any_plugin"]},
+     "timeout_ms": 250},
+    {"stage": "inbound", "handler": "on_inbound", "order": 100, "match": {"events": ["message"], "sources": ["userbot", "interaction_bot"]}},
+    {"stage": "delivered", "handler": "on_delivered"}
+  ]
+}
+```
+
+| 字段 | 说明 |
+| --- | --- |
+| `stage` | `inbound` / `outbound` / `delivered` |
+| `handler` | 插件类上的公开 async 方法名，签名统一 `async def handler(self, ctx, value, mw)` |
+| `order` | 1–899，默认 500，小的先跑；900+ 留给平台 `core.*` |
+| `timeout_ms` | 50–2000，默认 250 |
+| `match.action_types`（outbound / delivered） | 默认全部消息类动作：`send_message`、`send_rich_message`、`edit_message`、`send_media` / `send_photo` / `send_document` / `send_file`、`edit_caption`、`answer_guest_query`、`answer_inline_query`、`answer_callback`；outbound 另可加 `stream_preview`（流式中间态）。资金 / 会话类动作（`payout`、`settlement`、`start_session` …）永远不进插件中间件 |
+| `match.channels`（outbound / delivered） | `interaction_bot` / `userbot_reply`，不写 = 不限 |
+| `match.sources`（outbound / delivered） | `self`（默认，只处理本插件发的动作）/ `any_plugin`（所有插件的动作，需要 `message_middleware` 权限）；`system` 预留，平台自己的消息（告警、管理 Bot）不经过插件中间件 |
+| `match.events` / `match.sources`（inbound） | 事件类型（默认 `["message"]`）与来源 `userbot` / `interaction_bot`；inbound 能看到并丢弃所有插件的事件，必须声明 `message_middleware` 权限 |
+
+`critical`（fail-closed）只允许平台 `core.*`，插件写了会被拒绝安装。安装 / 更新时严格校验声明；本地插件声明有问题时按规则修正或忽略并写警告日志。
+
+**三个阶段**
+
+| 阶段 | 位置 | `value` | 返回 |
+| --- | --- | --- | --- |
+| `inbound` | 事件信封生成之后、路由之前（UserBot Event Bus：分发前一次；交互 Bot：投给插件前，同一事件只跑一次） | 事件信封（只读） | `None` 原样；补丁 `{"text": "...", "annotations": {...}}`；`mw.drop(reason)` 丢弃，所有插件都收不到 |
+| `outbound` | 插件返回动作、规范化之后、投递之前（覆盖交互 Bot、UserBot、实时 `ctx.messages.apply`、访客合并、流式最终一次） | 动作 | `None` 原样；改过的动作 dict；`mw.reject(code, message)` 拒绝该动作 |
+| `delivered` | 投递结果确定之后，异步执行，不阻塞投递 | 结果摘要：`action_type`、`ok`、`error_code`、`chat_id`、`channel`、`source_plugin_key`、`entry_key`、`trace_id`、`inline_message_id`（不含正文） | 忽略 |
+
+```python
+async def on_outbound(self, ctx, action, mw):
+    if mw.action_type == "send_message" and not mw.is_own:
+        action["text"] = action["text"] + "\n— by bot"
+        return action
+    return None
+
+async def on_inbound(self, ctx, event, mw):
+    if "spam" in (event.get("message") or {}).get("text", ""):
+        mw.drop("spam")
+    return {"annotations": {"lang": "zh"}}   # 写进 event["annotations"]["<本插件 key>"]
+```
+
+`mw` 提供：`stage`、`plugin_key`、`account_id`、`action_type` / `event_type`、`source_plugin_key`、`is_own`、`channels`、`trace_id`，以及 `reject()` / `drop()` / `thaw()`。
+
+**执行规则**
+
+- **只读视图 + 结构共享**：`value` 顶层是普通 dict，嵌套的 `rich_message`、`reply_markup`、`context` 等是只读视图（改它会抛 `TypeError`，按失败处理）。要改嵌套值就整体替换：`markup = mw.thaw(action["reply_markup"]); markup["inline_keyboard"].append(...); action["reply_markup"] = markup`。没被替换的值原样共享，大 `rich_message` 经过多个中间件也不会被反复深拷贝。
+- **字段白名单**：outbound 只能改 `text`、`caption`、`parse_mode`、`rich_message`、`reply_markup`、`render_profile`、`disable_web_page_preview`、`link_preview_options`、`disable_notification`、`result`（访客回复）、`results`（inline 结果）、`annotations`。改了 `type`、`chat_id`、`send_via` / 通道、`message_id`、`settlement`、金额或任何别的字段，**这个中间件的整次修改回滚**，记一次失败（`reason_code=middleware_field_violation`）并计入熔断。inbound 补丁只能有 `text`（同步改 `message.text` / `source.text` / `message_text`）和 `annotations`；`chat_id`、发送者、来源改不了。
+- **fail-open**：抛异常、超时、返回畸形值（`middleware_malformed_result`）都丢弃它的修改、按原样继续，并记入插件统计与熔断（超时 `reason_code=plugin_timeout`，同步阻塞超过时限也按超时算）。熔断中的插件中间件直接跳过。
+- **预算**：单钩子默认 250 ms；一条消息整条链 1 秒，超出后剩余中间件跳过（统计记 `skipped`）；`stream_preview` 每个钩子 50 ms。
+- **链长**：每个账号每个阶段最多 8 个插件中间件，按 `order`、插件 key 排序，多出的不生效并写警告日志。
+- **拒绝**：`mw.reject()` 的动作不会发出，插件拿到的结果 / 动作记录里 `error_code=middleware_rejected`，`error` 带中间件插件 key 与 `code`。
+- **流式**：`ctx.messages.stream_editor()` 的中间态只经过 `match.action_types` 显式写了 `stream_preview` 的 outbound 中间件（`value` 是 `{"type": "stream_preview", "text": ...}`），`mw.reject()` 跳过这一次中间编辑；`finish()` 的最终一次是普通动作，走完整 outbound 链。
+- **访客模式**：outbound 在 worker 里跑完后，主进程的 `core.guest_merge` 再把消息类动作合并成一次 `answerGuestQuery`，访客回复里看到的是中间件处理后的内容。
+- **统计**：每次调用记在 `[账号 × 插件 × middleware.<stage> × 动作 / 事件类型]`；失败与超时在 Trace 记 `plugin_middleware` span。
+
+**平台内置中间件（core.\*）**：顺序固定、不能卸载，`GET /api/plugins/capabilities` 的 `core_middleware[]` 列出同一份：
+
+| 名称 | 阶段 | order | 作用 |
+| --- | --- | --- | --- |
+| `core.render_profile` | outbound | 900 | 合并 `plugin.json` 与动作上的 `render_profile`（`compact_tables: true` 是旧写法），不外发 |
+| `core.rich_compact` | outbound | 950 | 按 `render_profile.table` 写紧凑 / 显式边框 / 隔行着色 |
+| `core.rich_table_defaults` | transport | 1000 | 发送出口给没写样式的表格补边框 + 隔行着色；旧 Bot API 拒绝紧凑表格时去掉 compact 重发一次 |
+| `core.html_fallback` | transport | 1010 | Telegram 拒绝 HTML 实体时退回纯文本重发一次（fail-closed） |
+| `core.guest_merge` | delivery | 1020 | 访客模式合并成一次 `answerGuestQuery`（fail-closed） |
+
+插件中间件的 order 都小于 900，所以插件新增或改写的表格同样套平台样式。插件只想要“我的表格紧凑”时不需要写中间件，声明 `render_profile` 即可（见 [紧凑表格](#紧凑表格bot-api-103telepilot-01060-beta12)）。没有声明 `render_profile` 的消息，表格外观与 0.108 完全一致（golden 测试守护）。

@@ -455,13 +455,36 @@ class InteractionDeliveryExecutor:
             handlers.on_payout = _on_guest_unsupported
             handlers.on_answer_callback = _on_guest_unsupported
             handlers.on_answer_inline_query = _on_guest_unsupported
+        delivered: list[dict[str, Any]] = []
+
+        async def _after_action(action: dict[str, Any], ok: bool) -> None:
+            if action.get("_tp_mw_delivered"):
+                delivered.append(_delivered_summary(action, ok=ok))
+
         await run_action_batch(
             list(actions or []),
             handlers,
             limit=INTERACTION_ACTION_LIMIT,
             prepare_action=_prepare,
             preprocess=_preprocess,
+            after_action=_after_action,
         )
+        if delivered:
+            await self._notify_delivered(delivered)
+
+    async def _notify_delivered(self, summaries: list[dict[str, Any]]) -> None:
+        """delivered 中间件跑在账号 worker 里：把投递结果摘要（不含正文）经 IPC 发回去，不等待。"""
+
+        account_id = getattr(self.incoming, "account_id", None)
+        if account_id is None:
+            return
+        try:
+            from ...worker.ipc import CMD_MIDDLEWARE_DELIVERED, cmd_channel, make_cmd
+
+            redis = self.get_redis_client()
+            await redis.publish(cmd_channel(int(account_id)), make_cmd(CMD_MIDDLEWARE_DELIVERED, results=summaries))
+        except Exception:  # noqa: BLE001 - 统计 / 审计类回调不能影响投递
+            log.debug("delivered 中间件通知 worker 失败", exc_info=True)
 
     async def delete_message(
         self,
@@ -2805,6 +2828,12 @@ def _reply_to_user_id_from_action(action: dict[str, Any]) -> int | None:
     if isinstance(settlement, dict):
         return _int_or_none(settlement.get("winner_user_id") or settlement.get("player_user_id"))
     return _int_or_none(action.get("winner_user_id") or action.get("player_user_id"))
+
+
+def _delivered_summary(action: dict[str, Any], *, ok: bool) -> dict[str, Any]:
+    from ...worker.plugins.middleware import delivered_summary
+
+    return delivered_summary(action, ok=ok)
 
 
 def _action_parse_mode(action: dict[str, Any]) -> str:

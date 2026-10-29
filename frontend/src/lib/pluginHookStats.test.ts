@@ -46,12 +46,12 @@ test("汇总调用数、平均耗时与弃用调用", () => {
     available: true,
     retention_days: 7,
     hooks: [
-      { account_id: 1, hook: "on_event", event_type: "message", calls: 4, ok: 3, failed: 1, timeout: 0, circuit_open: 0, skipped: 0, sum_ms: 400, max_ms: 200, failure_rate: 0.25 },
-      { account_id: 1, hook: "on_startup", event_type: "-", calls: 2, ok: 1, failed: 0, timeout: 0, circuit_open: 1, skipped: 0, sum_ms: 100, max_ms: 100, failure_rate: 0 },
+      { account_id: 1, hook: "on_event", event_type: "message", calls: 4, ok: 3, failed: 1, timeout: 0, circuit_open: 0, skipped: 0, sum_ms: 400, max_ms: 200, failure_rate: 0.25, blocked: 1, blocking_ms: 250 },
+      { account_id: 1, hook: "on_startup", event_type: "-", calls: 2, ok: 1, failed: 0, timeout: 0, circuit_open: 1, skipped: 0, sum_ms: 100, max_ms: 100, failure_rate: 0, blocked: 0, blocking_ms: 0 },
     ],
-    totals: { calls: 6, ok: 4, fail: 1, timeout: 0, circuit_open: 1, skipped: 0, sum_ms: 500 },
+    totals: { calls: 6, ok: 4, fail: 1, timeout: 0, circuit_open: 1, skipped: 0, sum_ms: 500, blocked: 1, blocking_ms: 250 },
     deprecations: [{ account_id: 1, id: "ai.tag_alias", count: 3 }],
   });
-  assert.deepEqual(summary, { calls: 6, failed: 1, timeout: 0, avgMs: 100, hooks: 2, deprecatedCalls: 3 });
+  assert.deepEqual(summary, { calls: 6, failed: 1, timeout: 0, avgMs: 100, hooks: 2, deprecatedCalls: 3, blocked: 1, blockingMs: 250 });
   assert.equal(summarizeHookStats(undefined).avgMs, null);
 });

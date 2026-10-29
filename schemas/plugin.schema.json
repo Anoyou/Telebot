@@ -117,6 +117,14 @@
       "default": null,
       "title": "Key"
     },
+    "middleware": {
+      "items": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "title": "Middleware",
+      "type": "array"
+    },
     "min_telebot_version": {
       "anyOf": [
         {
@@ -178,6 +186,19 @@
       },
       "title": "Reads",
       "type": "array"
+    },
+    "render_profile": {
+      "anyOf": [
+        {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Render Profile"
     },
     "requires_platform_capabilities": {
       "items": {

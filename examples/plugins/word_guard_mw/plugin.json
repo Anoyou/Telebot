@@ -1,0 +1,42 @@
+{
+  "name": "word_guard_mw",
+  "display_name": "敏感词守卫（中间件示例）",
+  "description": "演示消息管线中间件：入站丢弃含敏感词的消息，出站把敏感词打码或拒绝发送，流式中间态同样打码。",
+  "author": "examples",
+  "version": "0.1.0",
+  "min_telepilot_version": "0.109.0-beta.1",
+  "plugin_api": "^1.2",
+  "entry": "plugin.py",
+  "category": "utility",
+  "permissions": ["message_middleware"],
+  "requires_platform_capabilities": [],
+  "usage": "启用后对本账号所有插件生效：群里收到含敏感词的消息时，Event Bus 插件不会收到它（inbound 丢弃）；任何插件要发出的消息里出现敏感词时按配置打码（默认）或整条拒绝（outbound）；AI 流式回复的中间态也会打码（stream_preview）。敏感词在插件配置里维护。",
+  "config_schema": {
+    "type": "object",
+    "properties": {
+      "words": {"type": "array", "items": {"type": "string"}, "default": ["违禁词"], "title": "敏感词"},
+      "outbound_mode": {"type": "string", "enum": ["mask", "reject"], "default": "mask", "title": "出站处理方式"},
+      "drop_inbound": {"type": "boolean", "default": true, "title": "丢弃含敏感词的入站消息"}
+    }
+  },
+  "middleware": [
+    {
+      "stage": "inbound",
+      "handler": "on_inbound",
+      "order": 100,
+      "match": {"events": ["message"], "sources": ["userbot", "interaction_bot"]},
+      "timeout_ms": 100
+    },
+    {
+      "stage": "outbound",
+      "handler": "on_outbound",
+      "order": 200,
+      "match": {
+        "action_types": ["send_message", "send_rich_message", "edit_message", "answer_guest_query", "stream_preview"],
+        "sources": ["self", "any_plugin"]
+      },
+      "timeout_ms": 100
+    }
+  ],
+  "capabilities": {}
+}

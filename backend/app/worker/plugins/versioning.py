@@ -23,7 +23,9 @@ from functools import total_ordering
 # 1.0：0.107.0 首次引入（能力注册表 ctx.capabilities、钩子统计、弃用登记、prerelease 版本比较）。
 # 1.1：0.108.0 通用交互原语（回调 token own_buttons、统一 MessageOps、ctx.host.read、bot_api_extra /
 #      extra_body 透传、钩子 Trace 与熔断同口径、interaction_entries[].policy）。
-PLUGIN_API_VERSION = "1.1"
+# 1.2：0.109.0 消息管线中间件（inbound / outbound / delivered、render_profile、core.*、
+#      stream_complete extra_body、同步阻塞统计）。
+PLUGIN_API_VERSION = "1.2"
 
 _VERSION_RE = re.compile(
     r"^\s*v?(?P<major>\d+)(?:\.(?P<minor>\d+))?(?:\.(?P<patch>\d+))?"

@@ -25,6 +25,17 @@
 
 ## [Unreleased]
 
+## [0.109.0-beta.1] - 2026-10-29 · minor（次版本预发布） · 插件平台化 P2：消息管线中间件（inbound / outbound / delivered、render_profile 与 core.* 内置中间件、同步阻塞监控）
+
+### 插件平台（Plugin API 1.2）：消息管线中间件——“所有消息加署名 / 表格统一紧凑 / 敏感词打码”不再需要改宿主
+- **三阶段中间件**（能力 `middleware.inbound` / `middleware.outbound` / `middleware.delivered`）：插件在 `plugin.json` 的 `middleware` 里声明，签名统一 `async def handler(self, ctx, value, mw)`。`inbound` 在事件路由前打标签（`annotations`）、规整 `text` 或 `mw.drop()` 丢弃；`outbound` 在投递前改正文 / Rich / 按钮 / `render_profile` 或 `mw.reject()` 拦截；`delivered` 在投递结果确定后异步拿摘要（不含正文）。覆盖交互 Bot、UserBot、实时 `ctx.messages.apply`、访客合并（Guest Mode）与流式最终一次；流式中间态只走显式声明 `stream_preview` 的中间件（每个 50 ms）。
+- **安全边界**：钩子拿到只读视图（顶层浅拷贝 + 嵌套只读，`mw.thaw()` 取副本），大 `rich_message` 结构共享、不再每过一个中间件深拷贝一次；outbound 只能改正文 / Rich / 按钮等白名单字段，改 `chat_id`、通道、`settlement`、金额等任何别的字段整次回滚并记一次失败；资金 / 会话类动作（payout、settlement、start_session …）永远不进插件中间件；异常、超时、返回畸形值一律按原样放行（fail-open），只有平台 `core.*` 可以 fail-closed。处理别的插件的动作或用 inbound 需要新权限 `message_middleware`。
+- **预算与统计**：单钩子默认 250 ms（50–2000 可调），一条消息整条链 1 秒，每账号每阶段最多 8 个插件中间件；每个中间件按 `middleware.<阶段>` 记入插件运行统计，超时（含同步阻塞超过时限）计入熔断，失败在 Trace 记 `plugin_middleware` span。
+- **`core.*` 平台中间件取代出站路径里写死的处理**：`core.render_profile` → `core.rich_compact`（紧凑 / 显式边框 / 隔行着色）→ 出口 `core.rich_table_defaults`（默认边框 + 隔行着色、旧 Bot API 降级重发）→ `core.html_fallback` → `core.guest_merge`；`rich_compact` 的转换只被 core 模块调用。新增声明式 `render_profile: {"table": {"compact", "bordered", "striped"}}`（动作或 `plugin.json`，能力 `messages.render_profile`），`compact_tables: true` 是它的旧写法、效果逐字节一致。**没有声明的消息表格外观与 0.108 完全一致**（新增 75 项 golden 对比测试：blocks / html / markdown × 5 种动作写法 × 交互 Bot 出口、降级重发与 Userbot 输入）。
+- **出站性能**：表格默认样式改为结构共享（只复制被改写的路径），200 行 blocks 表格出口处理从约 2.9 ms 降到约 0.05 ms；没有插件中间件时普通文本 / Markdown 表格每条耗时与改前持平（+1–20 µs，主要是统计记账），挂 2 个插件中间件时每条约增加 40 µs。
+- **P1 遗留补齐**：插件同步阻塞监控（能力 `runtime.blocking_monitor`）——插件钩子与中间件单步阻塞事件循环 ≥200 ms（与 `loop.slow_callback_duration` 同口径）记入该插件的 `blocked` / `blocking_ms`，Web 插件详情「运行统计」显示“同步阻塞”；`GET /api/plugins/capabilities` 新增 `host_resources[]`（`ctx.host.read` 资源，含模型清单 `ai.models@1`）、`core_middleware[]` 与 `middleware_limits`；`ctx.ai.stream_complete(extra_body=...)` 与 `complete` 同一套白名单（能力 `ai.stream_extra_body`），选中 Provider 不支持时明确报错。
+- 示例插件 `examples/plugins/word_guard_mw`（入站丢弃 + 出站打码 / 拒绝 + 流式中间态打码）与 `signature_mw`（署名 + `render_profile` + delivered 计数），示例校验脚本在模拟运行态里实跑三个阶段；能力注册表新增 7 项，Plugin API 升到 1.2；文档 `PLUGIN-API-REFERENCE`「消息管线中间件」、`PLUGIN-STREAMING`、`PLUGIN-AI`、`PLUGIN-CHEATSHEET` 同步。
+
 ## [0.108.0-beta.1] - 2026-10-29 · minor（次版本预发布） · 插件平台化 P1：通用回调路由 own_buttons、统一 MessageOps、ctx.host.read、Bot API / AI 受控透传、钩子 Trace 与熔断同口径、历史插件兼容表
 
 ### 插件平台（Plugin API 1.1）：通用交互原语——插件新交互不再需要改宿主

@@ -10,6 +10,9 @@ const HOOK_LABELS: Record<string, string> = {
   on_startup: "启动",
   on_config_action: "配置动作",
   system_agent_tool: "助手工具",
+  "middleware.inbound": "入站中间件",
+  "middleware.outbound": "出站中间件",
+  "middleware.delivered": "投递回调",
 };
 
 /** 钩子的中文名；未知钩子原样显示。 */
@@ -64,6 +67,9 @@ export interface HookStatsSummary {
   avgMs: number | null;
   hooks: number;
   deprecatedCalls: number;
+  /** 插件代码同步阻塞事件循环 ≥200ms 的次数与累计毫秒（0.109.0+）。 */
+  blocked: number;
+  blockingMs: number;
 }
 
 export function summarizeHookStats(data: PluginHookStatsResponse | undefined | null): HookStatsSummary {
@@ -82,5 +88,7 @@ export function summarizeHookStats(data: PluginHookStatsResponse | undefined | n
     avgMs: timedCalls ? Math.round(sumMs / timedCalls) : null,
     hooks: hooks.length,
     deprecatedCalls: (data?.deprecations ?? []).reduce((total, item) => total + (item.count ?? 0), 0),
+    blocked: data?.totals?.blocked ?? 0,
+    blockingMs: data?.totals?.blocking_ms ?? 0,
   };
 }
