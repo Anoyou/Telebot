@@ -357,7 +357,10 @@ final class ManagementUITests: XCTestCase {
         XCTAssertFalse(saveError.exists, saveError.exists ? saveError.label : "")
         XCTAssertTrue(saved.exists, "保存后应显示成功结果")
         XCTAssertFalse(save.isEnabled)
-        XCTAssertTrue(notice.waitForExistence(timeout: 5))
+        XCTAssertTrue(subscribed.waitForExistence(timeout: 5))
+        XCTAssertTrue(subscribed.label.contains("2/2"), subscribed.label)
+        for _ in 0..<6 where !(notice.exists && notice.isHittable) { app.swipeUp() }
+        XCTAssertTrue(notice.exists)
         XCTAssertTrue(notice.label.contains("启用"), notice.label)
 
         let ask = app.buttons["interaction.rule.rule-ask"]
