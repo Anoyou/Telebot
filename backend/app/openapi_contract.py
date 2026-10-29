@@ -31,6 +31,13 @@ PUBLIC_OPERATIONS = {
     ("GET", "/api/system/version"),
     ("GET", "/healthz"),
     ("GET", "/readyz"),
+    # 插件页面文件（ui.pages）：凭 1 小时签名 token 访问，不读取登录态；返回 HTML / 静态文件，不进 OpenAPI。
+    ("GET", "/api/plugin-ui/page-assets/{token}/{path}"),
+}
+
+# 不进 OpenAPI 文档的接口（非 JSON 响应），必须同时在上面的公开清单里显式登记。
+NON_SCHEMA_OPERATIONS = {
+    ("GET", "/api/plugin-ui/page-assets/{token}/{path}"),
 }
 
 
@@ -187,6 +194,7 @@ def iter_api_operations(app: FastAPI) -> list[tuple[Any, str]]:
 __all__ = [
     "ErrorDetail",
     "ErrorEnvelope",
+    "NON_SCHEMA_OPERATIONS",
     "PUBLIC_OPERATIONS",
     "build_openapi_schema",
     "install_openapi_contract",

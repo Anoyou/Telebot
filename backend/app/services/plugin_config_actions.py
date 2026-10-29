@@ -110,10 +110,13 @@ async def build_main_process_context(
     plugin_cls: type[Plugin],
     config: Mapping[str, Any],
     log: Callable[..., Awaitable[None]] | None = None,
+    readonly_storage: bool = False,
 ) -> PluginContext:
     """在主进程里为配置动作 / 配置钩子 / UI 卡片构造不带 Telegram client 的受控上下文。
 
     ``account`` 为 ``None`` 表示全局作用域（全局配置、概览卡片），``ctx.account_id`` 为 0。
+    ``readonly_storage=True``（卡片、配置钩子、页面 / 菜单动作，0.112.0+）时挂上只读的 ``ctx.storage``；
+    配置动作保持原样（``ctx.storage`` 为 None）。
     """
 
     runtime_config = dict(config or {})
@@ -124,6 +127,17 @@ async def build_main_process_context(
     if account is not None and _manifest_uses_http_facade(manifest):
         account_proxy_url, account_proxy_error = await _account_proxy_resolution(db, account)
     from ..worker.plugins import loader as plugin_loader
+
+    storage = None
+    if readonly_storage:
+        from ..redis_client import get_redis
+        from ..worker.plugins.storage import PluginStorage, ReadOnlyPluginStorage
+
+        try:
+            raw_redis = get_redis()
+        except Exception:  # noqa: BLE001 - Redis 不可用时 get 返回默认值
+            raw_redis = None
+        storage = ReadOnlyPluginStorage(PluginStorage(account_id=account_id, plugin_key=feature.key, redis=raw_redis))
 
     return PluginContext(
         account_id=account_id,
@@ -142,6 +156,7 @@ async def build_main_process_context(
         ai=_build_ai_facade(account_id, feature.key, manifest),
         account_proxy_url=account_proxy_url,
         account_proxy_error=account_proxy_error,
+        storage=storage,
     )
 
 

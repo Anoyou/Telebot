@@ -12,6 +12,7 @@
 
 - `word_guard_mw`：敏感词守卫。`inbound` 丢弃含敏感词的入站消息，`outbound` 对所有插件发出的消息打码或 `mw.reject` 拒绝，`stream_preview` 让流式中间态也打码。
 - `signature_mw`：统一署名。`outbound` 给交互 Bot 发出的文本加署名、用 `render_profile` 让所有插件的表格紧凑，`delivered` 统计投递成功 / 失败。
+- `ui_page_demo`：插件自带页面与菜单（Plugin API 1.4）。`ui.pages` 的 HTML 面板通过 `window.telepilot` Bridge 读去掉密钥的配置、读卡片、调 `on_ui_action`；`ui.actions` 在插件详情 / 账号详情加菜单项；卡片钩子只读访问 `ctx.storage`。
 
 中间件声明只写在 `plugin.json` 的 `middleware`，需要 `permissions: ["message_middleware"]`；契约见 `docs/PLUGIN-API-REFERENCE.md`「消息管线中间件（middleware）」。
 

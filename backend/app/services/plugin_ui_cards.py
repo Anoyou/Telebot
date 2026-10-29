@@ -426,7 +426,9 @@ async def _action_context(
         config = await feature_service.get_effective_plugin_config(db, account.id, plugin_key)
     else:
         config = await feature_service.get_plugin_global_config(db, plugin_key)
-    ctx = await build_main_process_context(db, account=account, feature=feature, plugin_cls=plugin_cls, config=config)
+    ctx = await build_main_process_context(
+        db, account=account, feature=feature, plugin_cls=plugin_cls, config=config, readonly_storage=True
+    )
     return feature, account, plugin_cls, ctx
 
 

@@ -76,6 +76,8 @@ _THIS_RELEASE = "0.110.0-beta.1"
 _W1_RELEASE = "0.110.0-beta.2"
 # P4c（B1 转账通知解析下沉：payment_sources 扩展点）发布的宿主版本；合并时随版本号顺延。
 _PAYMENT_RELEASE = "0.111.0-beta.1"
+# P4a（插件自带页面与菜单）发布的宿主版本；合并时随版本号顺延。
+_P4A_RELEASE = "0.112.0-beta.1"
 
 _DOC = "docs/PLUGIN-API-REFERENCE.md"
 
@@ -292,6 +294,35 @@ CAPABILITIES: tuple[Capability, ...] = (
         plugin_api="1.3",
         summary="插件模块导出 dry_run_rule(config, sample)（可 async，3 秒）返回 {matched, output, logs}；宿主不再按插件 key 解释试运行，旧版 _dry_run_match 仍兼容",
         doc=f"{_DOC}#规则试运行dry_run_rule",
+    ),
+    # ── P4a：插件自带页面与菜单（Plugin API 1.4）──
+    Capability(
+        name="ui.pages",
+        since=_P4A_RELEASE,
+        plugin_api="1.4",
+        summary="plugin.json ui.pages 声明插件自带 HTML 页面（插件目录内文件，严格 CSP 禁止联网；Web iframe sandbox / iOS WKWebView），Bridge 协议 1：ready / theme.get 总可用，config.read / cards.read / actions.invoke 需在页面 bridge 里声明",
+        doc=f"{_DOC}#插件页面uipages",
+    ),
+    Capability(
+        name="ui.actions",
+        since=_P4A_RELEASE,
+        plugin_api="1.4",
+        summary="plugin.json ui.actions 声明菜单项（menu：plugin.detail / account.detail），点击调 on_ui_action(ctx, id, {menu, account_id, page_id: None, payload: {}}) 或打开 ui.pages 页面",
+        doc=f"{_DOC}#菜单项uiactions",
+    ),
+    Capability(
+        name="hooks.storage_read",
+        since=_P4A_RELEASE,
+        plugin_api="1.4",
+        summary="卡片（on_ui_card / on_ui_action）、配置钩子（on_config_validate / on_config_saved）与页面动作里 ctx.storage 可只读访问（get / get_all / items），写入抛 PermissionError；之前这些钩子里 ctx.storage 为 None",
+        doc=f"{_DOC}#钩子里的只读-ctxstorage",
+    ),
+    Capability(
+        name="ai.models.metadata",
+        since=_P4A_RELEASE,
+        plugin_api="1.4",
+        summary="ctx.host.read(\"ai.models@1\") 每项只增 display_name / label / available（有可用 Key 且模型启用）/ has_api_key / cost_tier（1 便宜 · 2 标准 · 3 旗舰）/ cost_tier_label，旧字段不变",
+        doc=f"{_DOC}#宿主只读查询ctxhostread",
     ),
 )
 

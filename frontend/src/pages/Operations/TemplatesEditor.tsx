@@ -1,4 +1,4 @@
-// 系统设置 → 自定义指令模板（4 种类型：reply_text / forward_to / run_plugin / ai）
+// 服务器设置 → 自定义指令模板（4 种类型：reply_text / forward_to / run_plugin / ai）
 //
 // 设计：
 //   列表页：全表展示模板，name 徽章 type，编辑/删除按钮
@@ -479,7 +479,7 @@ export function CommandTemplates() {
     queryFn: listAccounts,
   });
   // 实时拉系统指令前缀，用在编辑器的"`,name` 触发"那行提示——避免硬编码逗号
-  // 跟系统设置改了不一致
+  // 跟服务器设置改了不一致
   const settingsQ = useQuery({
     queryKey: ["system", "settings"],
     queryFn: getSystemSettings,
@@ -597,7 +597,7 @@ export function CommandTemplates() {
       }
     } else if (shouldOpenNewAi) {
       if (!aiEnabled) {
-        toast.error("AI 能力已关闭，请先到系统设置启用");
+        toast.error("AI 能力已关闭，请先到服务器设置启用");
         if (returnTo) {
           nav(returnTo);
         }
@@ -986,7 +986,7 @@ export function CommandTemplates() {
                 editing.type === "ai" &&
                 !aiEnabled
               ) {
-                toast.error("AI 能力已关闭，请先到系统设置启用");
+                toast.error("AI 能力已关闭，请先到服务器设置启用");
                 return;
               }
               if (

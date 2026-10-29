@@ -27,7 +27,9 @@ from functools import total_ordering
 #      stream_complete extra_body、同步阻塞统计）。
 # 1.3：0.110.0 声明式 UI（ui.cards + on_ui_card / on_ui_action、on_config_validate / on_config_saved、
 #      x-secret-list、控件契约 schemas/plugin-ui-widgets.json）。
-PLUGIN_API_VERSION = "1.3"
+# 1.4：0.112.0 插件自带页面与菜单（ui.pages + 沙盒 Bridge、ui.actions 菜单项）、卡片 / 配置钩子只读
+#      ctx.storage、ai.models@1 只增显示名 / 可用状态 / 成本档字段。
+PLUGIN_API_VERSION = "1.4"
 
 _VERSION_RE = re.compile(
     r"^\s*v?(?P<major>\d+)(?:\.(?P<minor>\d+))?(?:\.(?P<patch>\d+))?"

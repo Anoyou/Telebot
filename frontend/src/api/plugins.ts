@@ -247,3 +247,64 @@ export async function runPluginUICardAction(
   );
   return data;
 }
+
+// ── 插件页面与菜单（ui.pages / ui.actions，Plugin API 1.4）──
+export type PluginUIEntriesResponse = components["schemas"]["PluginUIEntriesResponse"];
+export type PluginUIPageEntry = components["schemas"]["PluginUIPageEntry"];
+export type PluginUIMenuAction = components["schemas"]["PluginUIMenuAction"];
+export type PluginUIPageSession = components["schemas"]["PluginUIPageSession"];
+export type PluginUIBridgeResponse = components["schemas"]["PluginUIBridgeResponse"];
+export type PluginUIMenuActionResponse = components["schemas"]["PluginUIMenuActionResponse"];
+export type PluginUIMenu = "plugin.detail" | "account.detail";
+
+/** 某个菜单位置的插件页面与操作；插件没有声明时为空（不显示任何入口）。 */
+export async function listPluginUIEntries(params: {
+  menu: PluginUIMenu;
+  pluginKey?: string;
+  accountId?: number | null;
+}): Promise<PluginUIEntriesResponse> {
+  const { data } = await api.get<PluginUIEntriesResponse>("/api/plugin-ui/entries", {
+    params: {
+      menu: params.menu,
+      ...(params.pluginKey ? { plugin_key: params.pluginKey } : {}),
+      ...(params.accountId ? { account_id: params.accountId } : {}),
+    },
+  });
+  return data;
+}
+
+/** 打开插件页面：换一个 1 小时有效的页面地址（签名 token，不含登录凭据）。 */
+export async function openPluginUIPage(pluginKey: string, pageId: string, accountId?: number | null): Promise<PluginUIPageSession> {
+  const { data } = await api.post<PluginUIPageSession>(
+    `/api/plugin-ui/pages/${encodeURIComponent(pluginKey)}/${encodeURIComponent(pageId)}/session`,
+    { account_id: accountId ?? null },
+  );
+  return data;
+}
+
+/** 页面 Bridge 请求（宿主转发，服务器按页面声明的权限逐次校验）。 */
+export async function callPluginUIBridge(
+  pluginKey: string,
+  pageId: string,
+  method: string,
+  params: Record<string, unknown>,
+  accountId?: number | null,
+): Promise<PluginUIBridgeResponse> {
+  const { data } = await api.post<PluginUIBridgeResponse>(
+    `/api/plugin-ui/pages/${encodeURIComponent(pluginKey)}/${encodeURIComponent(pageId)}/bridge`,
+    { method, params, account_id: accountId ?? null },
+  );
+  return data;
+}
+
+/** 菜单项（插件 on_ui_action，10 秒）。不自动重试。 */
+export async function runPluginUIMenuAction(
+  action: Pick<PluginUIMenuAction, "plugin_key" | "action_id" | "menu">,
+  accountId?: number | null,
+): Promise<PluginUIMenuActionResponse> {
+  const { data } = await api.post<PluginUIMenuActionResponse>(
+    `/api/plugin-ui/actions/${encodeURIComponent(action.plugin_key)}/${encodeURIComponent(action.action_id)}`,
+    { account_id: accountId ?? null, menu: action.menu },
+  );
+  return data;
+}

@@ -732,7 +732,7 @@ def _build_plugin_host(
 ) -> Any:
     """``ctx.host``：按 manifest ``reads`` 提供声明式只读宿主查询（0.108.0+）。"""
 
-    from .host_read import PluginHost
+    from .host_read import PluginHost, ai_model_metadata
 
     declared = list(getattr(manifest, "reads", None) or []) if manifest is not None else []
 
@@ -777,6 +777,8 @@ def _build_plugin_host(
                             "enabled": enabled,
                             "default": model_id == provider.default_model,
                             "tags": list(provider.tags or []),
+                            # 0.112.0+（能力 ai.models.metadata）：只增字段，上面的旧字段保持原样。
+                            **ai_model_metadata(provider, model, model_id, enabled),
                         }
                     )
             return items

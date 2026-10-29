@@ -1,4 +1,4 @@
-"""插件声明式 UI：控件契约与 ``ui.cards`` 卡片声明（Plugin API 1.3）。
+"""插件声明式 UI：控件契约、``ui.cards`` 卡片声明（Plugin API 1.3）与 ``ui.pages`` / ``ui.actions``（1.4）。
 
 规范来源是仓库根的 ``schemas/plugin-ui-widgets.json``，本目录的 ``plugin_ui_widgets.json`` 是
 ``scripts/sync-plugin-ui-widgets.py`` 生成的逐字节副本（Web 与 iOS 各有一份，CI 校验一致）。
@@ -228,10 +228,186 @@ def normalize_ui_cards(ui: Any, *, reads: Iterable[Any] | None = None) -> tuple[
     return cards, warnings
 
 
+# ─────────────────────────────────────────────────────
+# ui.pages / ui.actions（Plugin API 1.4，全部可选）
+# ─────────────────────────────────────────────────────
+
+PAGE_FILE_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_./-]{0,159}\.html?$")
+
+
+def page_menus() -> list[str]:
+    return [str(item["id"]) for item in load_contract().get("pages", {}).get("menus", [])]
+
+
+def page_bridge_permissions() -> list[str]:
+    return [str(item["id"]) for item in load_contract().get("pages", {}).get("bridge_permissions", [])]
+
+
+def _safe_relative_path(value: Any) -> str | None:
+    text = str(value or "").strip().replace("\\", "/")
+    if not text or text.startswith("/") or any(part in {"", ".", ".."} for part in text.split("/")):
+        return None
+    return text
+
+
+def _string_list(value: Any) -> list[str] | None:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        value = [value]
+    if not isinstance(value, list):
+        return None
+    out: list[str] = []
+    for item in value:
+        text = str(item or "").strip()
+        if text and text not in out:
+            out.append(text)
+    return out
+
+
+def normalize_page(raw: Any) -> tuple[dict[str, Any] | None, list[str]]:
+    """校验一个 ``ui.pages[]`` 声明；不合规返回 ``(None, 原因)``，不影响其它页面与插件加载。"""
+
+    if not isinstance(raw, Mapping):
+        return None, ["页面必须是对象"]
+    page_id = str(raw.get("id") or "").strip()
+    label = page_id or "?"
+    problems: list[str] = []
+    if not CARD_ID_RE.match(page_id):
+        problems.append("id 只能由字母数字与 _.- 组成（≤48 字符）")
+    file = _safe_relative_path(raw.get("file"))
+    if file is None or not PAGE_FILE_RE.match(file):
+        problems.append("file 必须是插件目录内的相对路径 .html 文件（不能含 .. 或以 / 开头）")
+    menus = _string_list(raw.get("menus", ["plugin.detail"]))
+    if menus is None:
+        problems.append("menus 必须是数组")
+        menus = []
+    for menu in menus:
+        if menu not in page_menus():
+            problems.append(f"menus 含未知位置 {menu!r}（可选 {page_menus()}）")
+    bridge = _string_list(raw.get("bridge"))
+    if bridge is None:
+        problems.append("bridge 必须是数组")
+        bridge = []
+    for item in bridge:
+        if item not in page_bridge_permissions():
+            problems.append(f"bridge 含未知权限 {item!r}（可选 {page_bridge_permissions()}）")
+    actions = _string_list(raw.get("actions"))
+    if actions is None:
+        problems.append("actions 必须是数组")
+        actions = []
+    for item in actions:
+        if not ACTION_ID_RE.match(item):
+            problems.append(f"actions 含不合法的 id {item!r}")
+    if problems:
+        return None, [f"ui.pages[{label}]: {item}" for item in problems]
+    return {
+        "id": page_id,
+        "title": localized_text(raw.get("title"), page_id),
+        "subtitle": localized_text(raw.get("subtitle")) or None,
+        "file": file,
+        "menus": menus or ["plugin.detail"],
+        "bridge": bridge,
+        "actions": actions,
+    }, []
+
+
+def normalize_menu_action(raw: Any, *, page_ids: Iterable[str] = ()) -> tuple[dict[str, Any] | None, list[str]]:
+    """校验一个 ``ui.actions[]`` 菜单项。"""
+
+    if not isinstance(raw, Mapping):
+        return None, ["菜单项必须是对象"]
+    action_id = str(raw.get("id") or "").strip()
+    label = action_id or "?"
+    problems: list[str] = []
+    if not ACTION_ID_RE.match(action_id):
+        problems.append("id 只能由字母数字与 _.- 组成（≤48 字符）")
+    menu = str(raw.get("menu") or "plugin.detail").strip()
+    if menu not in page_menus():
+        problems.append(f"menu={menu!r} 不在 {page_menus()} 内")
+    page = str(raw.get("page") or "").strip() or None
+    if page is not None and page not in set(page_ids):
+        problems.append(f"page={page!r} 没有在 ui.pages 里声明")
+    confirm_raw = raw.get("confirm")
+    if confirm_raw is True:
+        confirm = "确定执行？"
+    elif isinstance(confirm_raw, (str, Mapping)):
+        confirm = localized_text(confirm_raw) or None
+    else:
+        confirm = None
+    if problems:
+        return None, [f"ui.actions[{label}]: {item}" for item in problems]
+    return {
+        "id": action_id,
+        "menu": menu,
+        "title": localized_text(raw.get("title"), action_id),
+        "confirm": confirm,
+        "destructive": str(raw.get("style") or "").strip().lower() == "destructive",
+        "page": page,
+    }, []
+
+
+def normalize_ui_pages(ui: Any) -> tuple[list[dict[str, Any]], list[str]]:
+    """``ui.pages`` → ``(合规页面, lint 警告)``；未声明返回空（旧插件行为不变）。"""
+
+    if not isinstance(ui, Mapping) or ui.get("pages") is None:
+        return [], []
+    raw_pages = ui.get("pages")
+    if not isinstance(raw_pages, list):
+        return [], ["ui.pages 必须是数组"]
+    pages: list[dict[str, Any]] = []
+    warnings: list[str] = []
+    seen: set[str] = set()
+    for raw in raw_pages:
+        page, problems = normalize_page(raw)
+        if page is None:
+            warnings.extend(problems)
+            continue
+        if page["id"] in seen:
+            warnings.append(f"ui.pages[{page['id']}]: id 重复，后一个被忽略")
+            continue
+        seen.add(page["id"])
+        pages.append(page)
+    return pages, warnings
+
+
+def normalize_ui_actions(ui: Any, *, page_ids: Iterable[str] = ()) -> tuple[list[dict[str, Any]], list[str]]:
+    """``ui.actions`` → ``(合规菜单项, lint 警告)``；未声明返回空（旧插件行为不变）。"""
+
+    if not isinstance(ui, Mapping) or ui.get("actions") is None:
+        return [], []
+    raw_actions = ui.get("actions")
+    if not isinstance(raw_actions, list):
+        return [], ["ui.actions 必须是数组"]
+    ids = list(page_ids)
+    actions: list[dict[str, Any]] = []
+    warnings: list[str] = []
+    seen: set[tuple[str, str]] = set()
+    for raw in raw_actions:
+        action, problems = normalize_menu_action(raw, page_ids=ids)
+        if action is None:
+            warnings.extend(problems)
+            continue
+        marker = (action["menu"], action["id"])
+        if marker in seen:
+            warnings.append(f"ui.actions[{action['id']}]: 同一菜单里 id 重复，后一个被忽略")
+            continue
+        seen.add(marker)
+        actions.append(action)
+    return actions, warnings
+
+
+def normalize_ui_entries(ui: Any) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[str]]:
+    pages, page_warnings = normalize_ui_pages(ui)
+    actions, action_warnings = normalize_ui_actions(ui, page_ids=[page["id"] for page in pages])
+    return pages, actions, page_warnings + action_warnings
+
+
 def lint_ui_declaration(manifest: Mapping[str, Any]) -> list[str]:
     """插件元数据 lint：卡片声明与未知控件。"""
 
     warnings = list(normalize_ui_cards(manifest.get("ui"), reads=manifest.get("reads"))[1])
+    warnings.extend(normalize_ui_entries(manifest.get("ui"))[2])
     schema = manifest.get("config_schema")
     for item in unknown_widgets_in_schema(schema):
         warnings.append(f"config_schema 使用了契约未列出的控件 {item}（客户端会只读显示「此控件需要更新 App」）")
@@ -314,6 +490,11 @@ __all__ = [
     "hook_timeout_seconds",
     "lint_rules_declaration",
     "lint_ui_declaration",
+    "normalize_ui_actions",
+    "normalize_ui_entries",
+    "normalize_ui_pages",
+    "page_bridge_permissions",
+    "page_menus",
     "load_contract",
     "localized_text",
     "normalize_card",

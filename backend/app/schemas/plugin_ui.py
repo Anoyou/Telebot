@@ -47,3 +47,77 @@ class PluginUICardActionResponse(BaseModel):
     ok: bool = True
     message: str | None = None
     refresh: bool = True
+
+
+# ── 插件页面与菜单（ui.pages / ui.actions，Plugin API 1.4）──
+
+
+class PluginUIPageEntry(BaseModel):
+    plugin_key: str
+    plugin_name: str
+    page_id: str
+    title: str
+    subtitle: str | None = None
+    # 页面声明的 Bridge 权限（config.read / cards.read / actions.invoke），只用于展示；服务器逐次校验。
+    bridge: list[str] = Field(default_factory=list)
+
+
+class PluginUIMenuAction(BaseModel):
+    plugin_key: str
+    plugin_name: str
+    action_id: str
+    menu: str
+    title: str
+    confirm: str | None = None
+    destructive: bool = False
+    # 有值时点击打开该页面，而不是调用 on_ui_action
+    page_id: str | None = None
+
+
+class PluginUIEntriesResponse(BaseModel):
+    menu: str
+    pages: list[PluginUIPageEntry] = Field(default_factory=list)
+    actions: list[PluginUIMenuAction] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+
+
+class PluginUIPageSessionRequest(BaseModel):
+    account_id: int | None = None
+
+
+class PluginUIPageSession(BaseModel):
+    plugin_key: str
+    page_id: str
+    title: str
+    token: str
+    # 相对服务器根的页面地址（/api/plugin-ui/page-assets/{token}/{entry}），不需要登录态
+    url: str
+    entry: str
+    expires_at: int
+    bridge: list[str] = Field(default_factory=list)
+    protocol: int = 1
+    csp: str
+
+
+class PluginUIBridgeRequest(BaseModel):
+    method: str = Field(..., max_length=64)
+    params: dict[str, Any] = Field(default_factory=dict)
+    account_id: int | None = None
+
+
+class PluginUIBridgeResponse(BaseModel):
+    ok: bool = True
+    result: Any = None
+    error: dict[str, str] | None = None
+
+
+class PluginUIMenuActionRequest(BaseModel):
+    account_id: int | None = None
+    menu: str | None = None
+
+
+class PluginUIMenuActionResponse(BaseModel):
+    ok: bool = True
+    message: str | None = None
+    refresh: bool = True
+    data: Any = None

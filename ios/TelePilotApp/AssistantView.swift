@@ -124,7 +124,7 @@ struct AssistantView: View {
     private var conversation: some View {
         VStack(spacing: 0) {
             if store.capabilities["enabled"]?.boolValue == false || store.capabilities["ai_enabled"]?.boolValue == false {
-                AssistantNotice(text: "服务器尚未启用系统助手或 AI，请先在系统设置中启用并配置模型。")
+                AssistantNotice(text: "服务器尚未启用系统助手或 AI，请先在服务器设置中启用并配置模型。")
             }
             if store.session?.assistantText("channel") == "bot" {
                 AssistantNotice(text: "这是 Telegram 会话，可以查看历史和任务；请在原 Telegram 对话中继续发送。")

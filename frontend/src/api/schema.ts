@@ -2964,6 +2964,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/plugin-ui/actions/{plugin_key}/{action_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run Plugin Ui Menu Action
+         * @description 执行菜单项（插件 on_ui_action，10 秒，context.menu 为菜单位置）。不自动重试。
+         */
+        post: operations["run_plugin_ui_menu_action_api_plugin_ui_actions__plugin_key___action_id__post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/plugin-ui/cards": {
         parameters: {
             query?: never;
@@ -3018,6 +3038,66 @@ export interface paths {
          * @description 读取一张卡的数据。失败（插件未加载、超时 3 秒、抛异常）返回 status=error，客户端只在这张卡上显示「已停止工作 · 重试」。
          */
         post: operations["read_plugin_ui_card_api_plugin_ui_cards__plugin_key___card_id__data_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/plugin-ui/entries": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Plugin Ui Entries
+         * @description 插件详情 / 账号详情的「插件页面与操作」入口。插件没有声明 ui.pages / ui.actions 时返回空列表（不显示任何入口）。
+         */
+        get: operations["list_plugin_ui_entries_api_plugin_ui_entries_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/plugin-ui/pages/{plugin_key}/{page_id}/bridge": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Plugin Ui Page Bridge
+         * @description 页面 Bridge 请求（宿主客户端转发）。按页面声明的 bridge 权限逐次校验；失败以 ok=false 返回给页面。
+         */
+        post: operations["plugin_ui_page_bridge_api_plugin_ui_pages__plugin_key___page_id__bridge_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/plugin-ui/pages/{plugin_key}/{page_id}/session": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Open Plugin Ui Page
+         * @description 打开插件页面：换一个 1 小时有效的页面地址（签名 token，不含登录凭据）。
+         */
+        post: operations["open_plugin_ui_page_api_plugin_ui_pages__plugin_key___page_id__session_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -10501,6 +10581,31 @@ export interface components {
              */
             version: string;
         };
+        /** PluginUIBridgeRequest */
+        PluginUIBridgeRequest: {
+            /** Account Id */
+            account_id?: number | null;
+            /** Method */
+            method: string;
+            /** Params */
+            params?: {
+                [key: string]: unknown;
+            };
+        };
+        /** PluginUIBridgeResponse */
+        PluginUIBridgeResponse: {
+            /** Error */
+            error?: {
+                [key: string]: string;
+            } | null;
+            /**
+             * Ok
+             * @default true
+             */
+            ok: boolean;
+            /** Result */
+            result?: unknown;
+        };
         /** PluginUICard */
         PluginUICard: {
             /** Blocks */
@@ -10587,6 +10692,109 @@ export interface components {
             slot: string;
             /** Warnings */
             warnings?: string[];
+        };
+        /** PluginUIEntriesResponse */
+        PluginUIEntriesResponse: {
+            /** Actions */
+            actions?: components["schemas"]["PluginUIMenuAction"][];
+            /** Menu */
+            menu: string;
+            /** Pages */
+            pages?: components["schemas"]["PluginUIPageEntry"][];
+            /** Warnings */
+            warnings?: string[];
+        };
+        /** PluginUIMenuAction */
+        PluginUIMenuAction: {
+            /** Action Id */
+            action_id: string;
+            /** Confirm */
+            confirm?: string | null;
+            /**
+             * Destructive
+             * @default false
+             */
+            destructive: boolean;
+            /** Menu */
+            menu: string;
+            /** Page Id */
+            page_id?: string | null;
+            /** Plugin Key */
+            plugin_key: string;
+            /** Plugin Name */
+            plugin_name: string;
+            /** Title */
+            title: string;
+        };
+        /** PluginUIMenuActionRequest */
+        PluginUIMenuActionRequest: {
+            /** Account Id */
+            account_id?: number | null;
+            /** Menu */
+            menu?: string | null;
+        };
+        /** PluginUIMenuActionResponse */
+        PluginUIMenuActionResponse: {
+            /** Data */
+            data?: unknown;
+            /** Message */
+            message?: string | null;
+            /**
+             * Ok
+             * @default true
+             */
+            ok: boolean;
+            /**
+             * Refresh
+             * @default true
+             */
+            refresh: boolean;
+        };
+        /** PluginUIPageEntry */
+        PluginUIPageEntry: {
+            /** Bridge */
+            bridge?: string[];
+            /** Page Id */
+            page_id: string;
+            /** Plugin Key */
+            plugin_key: string;
+            /** Plugin Name */
+            plugin_name: string;
+            /** Subtitle */
+            subtitle?: string | null;
+            /** Title */
+            title: string;
+        };
+        /** PluginUIPageSession */
+        PluginUIPageSession: {
+            /** Bridge */
+            bridge?: string[];
+            /** Csp */
+            csp: string;
+            /** Entry */
+            entry: string;
+            /** Expires At */
+            expires_at: number;
+            /** Page Id */
+            page_id: string;
+            /** Plugin Key */
+            plugin_key: string;
+            /**
+             * Protocol
+             * @default 1
+             */
+            protocol: number;
+            /** Title */
+            title: string;
+            /** Token */
+            token: string;
+            /** Url */
+            url: string;
+        };
+        /** PluginUIPageSessionRequest */
+        PluginUIPageSessionRequest: {
+            /** Account Id */
+            account_id?: number | null;
         };
         /** ProcessResource */
         ProcessResource: {
@@ -23573,6 +23781,71 @@ export interface operations {
             };
         };
     };
+    run_plugin_ui_menu_action_api_plugin_ui_actions__plugin_key___action_id__post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                plugin_key: string;
+                action_id: string;
+            };
+            cookie?: {
+                auth_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PluginUIMenuActionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginUIMenuActionResponse"];
+                };
+            };
+            /** @description 认证失败 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description CSRF 校验失败或权限不足 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description 服务器内部错误 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
     list_plugin_ui_cards_api_plugin_ui_cards_get: {
         parameters: {
             query: {
@@ -23718,6 +23991,190 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PluginUICardData"];
+                };
+            };
+            /** @description 认证失败 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description CSRF 校验失败或权限不足 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description 服务器内部错误 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    list_plugin_ui_entries_api_plugin_ui_entries_get: {
+        parameters: {
+            query: {
+                /** @description plugin.detail / account.detail */
+                menu: string;
+                plugin_key?: string | null;
+                account_id?: number | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: {
+                auth_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginUIEntriesResponse"];
+                };
+            };
+            /** @description 认证失败 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description 服务器内部错误 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    plugin_ui_page_bridge_api_plugin_ui_pages__plugin_key___page_id__bridge_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                plugin_key: string;
+                page_id: string;
+            };
+            cookie?: {
+                auth_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PluginUIBridgeRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginUIBridgeResponse"];
+                };
+            };
+            /** @description 认证失败 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description CSRF 校验失败或权限不足 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description 服务器内部错误 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    open_plugin_ui_page_api_plugin_ui_pages__plugin_key___page_id__session_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                plugin_key: string;
+                page_id: string;
+            };
+            cookie?: {
+                auth_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PluginUIPageSessionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginUIPageSession"];
                 };
             };
             /** @description 认证失败 */

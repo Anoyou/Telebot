@@ -25,7 +25,7 @@ export function HowItWorks({ cmdPrefix = ",", defaultOpen = false }: { cmdPrefix
           <CardContent className="hidden space-y-3 text-sm group-open:block">
             <ol className="list-decimal space-y-1.5 pl-5 text-muted-foreground">
               <li>
-                前缀来自系统设置里的指令前缀 <CommandBadge>{cmdPrefix}</CommandBadge>，不是固定的 <CommandBadge>/</CommandBadge>。
+                前缀来自服务器设置里的指令前缀 <CommandBadge>{cmdPrefix}</CommandBadge>，不是固定的 <CommandBadge>/</CommandBadge>。
               </li>
               <li>worker 只拦截自己发出的 outgoing 指令，别人发送同样指令不会触发。</li>
               <li>

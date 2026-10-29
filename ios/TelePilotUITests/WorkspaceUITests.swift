@@ -315,6 +315,106 @@ final class WorkspaceUITests: XCTestCase {
     }
 
     /// 懒加载列表里屏幕外的行不在辅助功能树中：上滑直到元素可点，再断言。
+    /// 插件自带页面（iOS 0.15.0，Plugin API 1.4）：插件详情「插件页面与操作」打开隔离的 WKWebView 页面，
+    /// 页面经 Bridge 读配置、调用插件操作（与 Web 同一协议），不能联网；菜单项需确认后才调用。
+    func testPluginPageBridgeAndMenuAction() {
+        let app = launch()
+        app.tabBars.buttons["插件"].tap()
+        let pluginCard = app.buttons["plugin.card.widget_gallery"]
+        XCTAssertTrue(reveal(pluginCard, in: app))
+        pluginCard.tap()
+
+        let pageEntry = app.buttons["plugin.page.panel"]
+        XCTAssertTrue(reveal(pageEntry, in: app, maxSwipes: 10))
+        XCTAssertTrue(pageEntry.label.contains("控件面板"), pageEntry.label)
+        pageEntry.tap()
+        let webView = app.webViews.firstMatch
+        XCTAssertTrue(webView.waitForExistence(timeout: 15))
+        XCTAssertTrue(webView.staticTexts["你好 · widget_gallery"].waitForExistence(timeout: 15))
+        XCTAssertTrue(webView.staticTexts["联网被阻止"].waitForExistence(timeout: 10))
+        XCTAssertTrue(webView.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "主题：")).firstMatch.exists)
+        let run = webView.buttons["调用插件操作"]
+        XCTAssertTrue(run.waitForExistence(timeout: 5))
+        run.tap()
+        XCTAssertTrue(webView.staticTexts["已完成：示例摘要"].waitForExistence(timeout: 10))
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+
+        // 菜单项：先确认，再调用
+        let action = app.buttons["plugin.menuAction.summarize"]
+        XCTAssertTrue(reveal(action, in: app))
+        action.tap()
+        let confirm = app.buttons["确定"]
+        XCTAssertTrue(confirm.waitForExistence(timeout: 5))
+        confirm.tap()
+        let result = app.descendants(matching: .any)["plugin.menuAction.result"].firstMatch
+        XCTAssertTrue(result.waitForExistence(timeout: 10))
+        XCTAssertTrue(result.label.contains("摘要已生成"), result.label)
+    }
+
+    /// 「规则与自动化」只显示插件支持的入口（iOS 0.15.0）：普通插件没有「自动化规则」「配置任务与进度」，
+    /// 声明了规则模式的插件才有「自动化规则」「复制规则到其他账号」。
+    func testPluginAutomationShowsOnlySupportedEntries() {
+        let app = launch()
+        app.tabBars.buttons["插件"].tap()
+        let widgetCard = app.buttons["plugin.card.widget_gallery"]
+        XCTAssertTrue(reveal(widgetCard, in: app))
+        widgetCard.tap()
+        XCTAssertTrue(app.buttons["账号配置"].waitForExistence(timeout: 10))
+        app.buttons["账号配置"].tap()
+        XCTAssertTrue(app.buttons["plugin.config.edit"].waitForExistence(timeout: 10))
+        Thread.sleep(forTimeInterval: 1.5)
+        for _ in 0..<6 { app.swipeUp() }
+        XCTAssertFalse(app.buttons["plugin.automation.rules"].exists)
+        XCTAssertFalse(app.buttons["plugin.automation.copyRules"].exists)
+        XCTAssertFalse(app.buttons["plugin.automation.jobs"].exists)
+        XCTAssertFalse(app.staticTexts["规则与自动化"].exists)
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+
+        let ruleCard = app.buttons["plugin.card.rule_gallery"]
+        XCTAssertTrue(reveal(ruleCard, in: app))
+        ruleCard.tap()
+        XCTAssertTrue(app.buttons["账号配置"].waitForExistence(timeout: 10))
+        app.buttons["账号配置"].tap()
+        let rules = app.buttons["plugin.automation.rules"]
+        XCTAssertTrue(reveal(rules, in: app))
+        XCTAssertTrue(app.buttons["plugin.automation.copyRules"].exists)
+        XCTAssertFalse(app.buttons["plugin.automation.jobs"].exists)
+    }
+
+    /// iOS 0.15.0 命名：「更多」里「App 设置」（iphone.gear）、管理模块「服务器设置」（server.rack）；
+    /// 紧急停止说明精简为一行，点 info 按钮在原生 popover 里看完整三段。
+    func testRenamedSettingsAndEmergencyStopInfo() {
+        let app = launch()
+        app.tabBars.buttons["更多"].tap()
+        let settings = app.buttons["more.settings"]
+        XCTAssertTrue(settings.waitForExistence(timeout: 10))
+        XCTAssertTrue(settings.label.contains("App 设置"), settings.label)
+        XCTAssertTrue(app.staticTexts["停止所有账号与 Bot 的消息处理，数据和管理台不受影响。"].exists)
+        XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "停止什么：")).firstMatch.exists)
+        let info = app.buttons["more.emergencyStop.info"]
+        XCTAssertTrue(info.exists)
+        XCTAssertEqual(info.label, "紧急停止说明")
+        info.tap()
+        let details = app.descendants(matching: .any)["more.emergencyStop.details"].firstMatch
+        XCTAssertTrue(details.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["停止什么"].exists)
+        XCTAssertTrue(app.staticTexts["不影响"].exists)
+        XCTAssertTrue(app.staticTexts["如何恢复"].exists)
+        // popover 而不是 sheet：点 popover 外收起。状态栏区域的点按不会传给 popover 的收起手势，
+        // 所以按 popover 实际位置选一处内容区空白（在它上方或下方）。
+        let window = app.windows.firstMatch.frame
+        let popover = details.frame
+        let outsideY: CGFloat = popover.minY > window.height * 0.35 ? 0.2 : 0.9
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: outsideY)).tap()
+        XCTAssertTrue(details.waitForNonExistence(timeout: 5))
+
+        settings.tap()
+        XCTAssertTrue(app.navigationBars["App 设置"].waitForExistence(timeout: 10))
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        let server = app.buttons["服务器设置"]
+        XCTAssertTrue(reveal(server, in: app))
+    }
+
     private func reveal(_ element: XCUIElement, in app: XCUIApplication, maxSwipes: Int = 8) -> Bool {
         var swipes = 0
         while !(element.exists && element.isHittable) && swipes < maxSwipes {

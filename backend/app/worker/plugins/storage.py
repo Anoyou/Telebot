@@ -227,4 +227,47 @@ class PluginStorage:
         return []
 
 
-__all__ = ["PluginStorage"]
+class ReadOnlyPluginStorage:
+    """``ctx.storage`` 的只读视图（0.112.0+，能力 ``hooks.storage_read``）。
+
+    主进程里的卡片钩子（``on_ui_card``）、配置钩子（``on_config_validate`` / ``on_config_saved``）
+    与页面 / 菜单动作拿到它：可以读插件在 worker 里写下的数据（同一个 [账号 × 插件] 命名空间），
+    写入方法一律抛 :class:`PermissionError`。全局作用域（没有账号）时命名空间是账号 0。
+    """
+
+    __slots__ = ("_inner",)
+    read_only = True
+
+    def __init__(self, inner: PluginStorage) -> None:
+        self._inner = inner
+
+    @property
+    def account_id(self) -> int:
+        return self._inner.account_id
+
+    @property
+    def plugin_key(self) -> str:
+        return self._inner.plugin_key
+
+    @property
+    def available(self) -> bool:
+        return self._inner.available
+
+    async def get(self, key: Any, default: Any = None) -> Any:
+        return await self._inner.get(key, default)
+
+    async def get_all(self) -> dict[str, Any]:
+        return await self._inner.get_all()
+
+    async def items(self) -> dict[str, Any]:
+        return await self._inner.get_all()
+
+    def _deny(self, *_args: Any, **_kwargs: Any) -> Any:
+        raise PermissionError("这里的 ctx.storage 只读（卡片 / 配置钩子 / 页面动作不能写入），请在 worker 钩子里写")
+
+    set = _deny
+    delete = _deny
+    incr = _deny
+
+
+__all__ = ["PluginStorage", "ReadOnlyPluginStorage"]

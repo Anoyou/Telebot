@@ -78,6 +78,7 @@ import { isPlatformFeature } from "@/lib/plugin-modes";
 import { queryKeys } from "@/lib/queryKeys";
 import { PluginWorkspaceHeader } from "@/pages/Plugins/WorkspaceHeader";
 import { PluginCardSlot } from "@/components/plugin/PluginCards";
+import { PluginPageEntries } from "@/components/plugin/PluginPages";
 
 import { getFeatureMatrix } from "@/api/features";
 import {
@@ -2453,6 +2454,7 @@ function PluginOverviewDetailDialog({
 
           {/* plugin.overview：宿主「运行统计」卡（卡片 DSL 的第一个用户）+ 插件自己声明的卡片 */}
           <PluginCardSlot slot="plugin.overview" pluginKey={plugin.key} />
+          <PluginPageEntries menu="plugin.detail" pluginKey={plugin.key} />
 
           <section className="rounded-md border border-border/70 bg-background/80 p-4">
             <div className="flex flex-wrap items-center gap-2">

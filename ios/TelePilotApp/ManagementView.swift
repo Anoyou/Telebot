@@ -15,7 +15,7 @@ enum ManagementModule: String, CaseIterable, Identifiable {
         case .logs: "日志与诊断"
         case .ledger: "资金台账"
         case .webhooks: "Webhook"
-        case .system: "系统设置"
+        case .system: "服务器设置"
         case .maintenance: "备份与维护"
         }
     }
@@ -27,7 +27,7 @@ enum ManagementModule: String, CaseIterable, Identifiable {
         case .logs: "list.bullet.rectangle"
         case .ledger: "book.closed"
         case .webhooks: "point.3.connected.trianglepath.dotted"
-        case .system: "gearshape"
+        case .system: "server.rack"
         case .maintenance: "wrench.and.screwdriver"
         }
     }
@@ -124,7 +124,7 @@ struct ManagementModuleView: View {
                 .init(title: "应用运行模式", path: "/api/platform/profile/apply"),
                 .init(title: "恢复运行模式", path: "/api/platform/profile/restore", destructive: true)
             ])
-            document("服务器设置", "/api/system/settings", symbol: "slider.horizontal.3", actions: [.init(title: "编辑服务器设置", path: "/api/system/settings", method: "PATCH")])
+            document("服务器参数", "/api/system/settings", symbol: "slider.horizontal.3", actions: [.init(title: "编辑服务器参数", path: "/api/system/settings", method: "PATCH")])
         }
         Section("连接与通知") {
             collection("代理", "/api/proxies", kind: .editable, create: "添加代理", itemPath: "/api/proxies/{id}", symbol: "network")

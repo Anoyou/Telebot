@@ -1,19 +1,27 @@
-"""插件声明式 UI：控件契约与原生卡片（Plugin API 1.3）。"""
+"""插件声明式 UI：控件契约与原生卡片（Plugin API 1.3），插件页面与菜单（1.4）。"""
 
 from __future__ import annotations
 
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
+from fastapi.responses import Response
 
 from ..deps import CurrentUser, DBSession
 from ..schemas.plugin_ui import (
+    PluginUIBridgeRequest,
+    PluginUIBridgeResponse,
     PluginUICardActionResponse,
     PluginUICardData,
     PluginUICardDataRequest,
     PluginUICardsResponse,
+    PluginUIEntriesResponse,
+    PluginUIMenuActionRequest,
+    PluginUIMenuActionResponse,
+    PluginUIPageSession,
+    PluginUIPageSessionRequest,
 )
-from ..services import plugin_ui_cards
+from ..services import plugin_ui_cards, plugin_ui_pages
 from ..worker.plugins import plugin_ui
 
 router = APIRouter(tags=["plugins"])
@@ -103,3 +111,145 @@ async def run_plugin_ui_card_action(
     )
     await db.commit()
     return PluginUICardActionResponse(**result)
+
+
+# ── 插件页面与菜单（ui.pages / ui.actions，Plugin API 1.4）──
+
+
+def _page_error(exc: plugin_ui_pages.PluginPageError) -> HTTPException:
+    return _bad(exc.code, str(exc), exc.status)
+
+
+@router.get("/api/plugin-ui/entries", response_model=PluginUIEntriesResponse)
+async def list_plugin_ui_entries(
+    db: DBSession,
+    _user: CurrentUser,
+    menu: str = Query(..., description="plugin.detail / account.detail"),
+    plugin_key: str | None = None,
+    account_id: int | None = None,
+) -> PluginUIEntriesResponse:
+    """插件详情 / 账号详情的「插件页面与操作」入口。插件没有声明 ui.pages / ui.actions 时返回空列表（不显示任何入口）。"""
+
+    try:
+        pages, actions, warnings = await plugin_ui_pages.list_entries(
+            db, menu=menu, plugin_key=plugin_key, account_id=account_id
+        )
+    except plugin_ui_pages.PluginPageError as exc:
+        raise _page_error(exc) from exc
+    return PluginUIEntriesResponse(menu=menu, pages=pages, actions=actions, warnings=warnings)
+
+
+@router.post("/api/plugin-ui/pages/{plugin_key}/{page_id}/session", response_model=PluginUIPageSession)
+async def open_plugin_ui_page(
+    plugin_key: str,
+    page_id: str,
+    payload: PluginUIPageSessionRequest,
+    db: DBSession,
+    _user: CurrentUser,
+) -> PluginUIPageSession:
+    """打开插件页面：换一个 1 小时有效的页面地址（签名 token，不含登录凭据）。"""
+
+    try:
+        result = await plugin_ui_pages.open_page_session(
+            db, plugin_key=plugin_key, page_id=page_id, account_id=payload.account_id
+        )
+    except plugin_ui_pages.PluginPageError as exc:
+        raise _page_error(exc) from exc
+    return PluginUIPageSession(**result)
+
+
+@router.get("/api/plugin-ui/page-assets/{token}/{path:path}", include_in_schema=False)
+async def plugin_ui_page_asset(token: str, path: str, db: DBSession) -> Response:
+    """插件页面文件（只读插件目录，严格 CSP，禁止联网）。凭 token 访问，不读取登录态。"""
+
+    headers = plugin_ui_pages.asset_headers()
+    try:
+        data, content_type = await plugin_ui_pages.read_asset(db, token=token, path=path)
+    except plugin_ui_pages.PluginPageError as exc:
+        return Response(content=str(exc), status_code=exc.status, media_type="text/plain; charset=utf-8", headers=headers)
+    return Response(content=data, media_type=content_type, headers=headers)
+
+
+@router.post("/api/plugin-ui/pages/{plugin_key}/{page_id}/bridge", response_model=PluginUIBridgeResponse)
+async def plugin_ui_page_bridge(
+    plugin_key: str,
+    page_id: str,
+    payload: PluginUIBridgeRequest,
+    db: DBSession,
+    user: CurrentUser,
+) -> PluginUIBridgeResponse:
+    """页面 Bridge 请求（宿主客户端转发）。按页面声明的 bridge 权限逐次校验；失败以 ok=false 返回给页面。"""
+
+    from ..services import audit
+
+    try:
+        result = await plugin_ui_pages.bridge_call(
+            db,
+            plugin_key=plugin_key,
+            page_id=page_id,
+            method=payload.method,
+            params=payload.params,
+            account_id=payload.account_id,
+        )
+    except plugin_ui_pages.PluginPageError as exc:
+        if exc.code == "PLUGIN_PAGE_NOT_FOUND":
+            raise _page_error(exc) from exc
+        return PluginUIBridgeResponse(ok=False, error={"code": exc.code, "message": str(exc)})
+    except TimeoutError:
+        return PluginUIBridgeResponse(
+            ok=False, error={"code": "PLUGIN_ACTION_TIMEOUT", "message": "插件处理超时（10 秒），结果未知"}
+        )
+    except Exception as exc:  # noqa: BLE001
+        return PluginUIBridgeResponse(
+            ok=False, error={"code": "PLUGIN_ACTION_FAILED", "message": f"插件处理失败：{type(exc).__name__}"}
+        )
+    if payload.method == "action.invoke":
+        await audit.write(
+            db,
+            user.id,
+            "plugin.ui.page_action",
+            target=f"plugin:{plugin_key}/page:{page_id}",
+            detail={"action_id": str(payload.params.get("id") or ""), "account_id": payload.account_id},
+        )
+        await db.commit()
+    return PluginUIBridgeResponse(ok=True, result=result)
+
+
+@router.post("/api/plugin-ui/actions/{plugin_key}/{action_id}", response_model=PluginUIMenuActionResponse)
+async def run_plugin_ui_menu_action(
+    plugin_key: str,
+    action_id: str,
+    payload: PluginUIMenuActionRequest,
+    db: DBSession,
+    user: CurrentUser,
+) -> PluginUIMenuActionResponse:
+    """执行菜单项（插件 on_ui_action，10 秒，context.menu 为菜单位置）。不自动重试。"""
+
+    from ..services import audit
+
+    try:
+        action = await plugin_ui_pages.find_menu_action(db, plugin_key, action_id, payload.menu)
+        if action.get("page"):
+            raise plugin_ui_pages.PluginPageError("这个菜单项用于打开页面", "PLUGIN_ACTION_IS_PAGE", 400)
+        result = await plugin_ui_pages.invoke_ui_action(
+            db,
+            plugin_key=plugin_key,
+            action_id=action_id,
+            account_id=payload.account_id,
+            context={"menu": action["menu"], "page_id": None, "payload": {}},
+        )
+    except plugin_ui_pages.PluginPageError as exc:
+        raise _page_error(exc) from exc
+    except TimeoutError as exc:
+        raise _bad("PLUGIN_ACTION_TIMEOUT", "插件处理超时（10 秒），结果未知，请刷新确认", 504) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise _bad("PLUGIN_ACTION_FAILED", f"插件处理失败：{type(exc).__name__}", 400) from exc
+    await audit.write(
+        db,
+        user.id,
+        "plugin.ui.menu_action",
+        target=f"plugin:{plugin_key}/action:{action_id}",
+        detail={"menu": action["menu"], "account_id": payload.account_id},
+    )
+    await db.commit()
+    return PluginUIMenuActionResponse(**result)

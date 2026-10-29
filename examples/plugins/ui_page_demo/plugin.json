@@ -1,0 +1,56 @@
+{
+  "name": "ui_page_demo",
+  "display_name": "插件页面示例",
+  "description": "插件自带页面（ui.pages + Bridge）、菜单项（ui.actions）与卡片只读 ctx.storage 的最小示例。",
+  "author": "examples",
+  "version": "0.1.0",
+  "min_telepilot_version": "0.112.0-beta.1",
+  "plugin_api": "^1.4",
+  "entry": "plugin.py",
+  "category": "utility",
+  "permissions": [],
+  "requires_platform_capabilities": [],
+  "interaction_profile": "utility_trigger",
+  "usage": "在账号上启用后，已允许会话里每出现一次 ping 计数加一；插件详情的「插件页面与操作」里可打开面板页面查看计数与配置。",
+  "event_subscriptions": [
+    {
+      "events": ["message"],
+      "source": ["userbot", "interaction_bot"],
+      "scope": "all_allowed_chats"
+    }
+  ],
+  "config_schema": {
+    "type": "object",
+    "properties": {
+      "greeting": {"type": "string", "title": "面板问候语", "default": "你好"},
+      "api_token": {"type": "string", "title": "示例密钥（页面读不到）", "format": "password"}
+    }
+  },
+  "ui": {
+    "cards": [
+      {
+        "id": "ping_stats",
+        "slot": "account.detail",
+        "title": "ping 计数",
+        "source": {"action": "ping_stats"},
+        "layout": {"type": "stats", "items": [{"label": "累计", "path": "pings", "format": "number"}]}
+      }
+    ],
+    "pages": [
+      {
+        "id": "dashboard",
+        "title": {"zh": "ping 面板", "en": "Ping dashboard"},
+        "subtitle": "插件自带页面示例",
+        "file": "ui/index.html",
+        "menus": ["plugin.detail", "account.detail"],
+        "bridge": ["config.read", "cards.read", "actions.invoke"],
+        "actions": ["summarize"]
+      }
+    ],
+    "actions": [
+      {"id": "summarize", "menu": "plugin.detail", "title": "生成计数摘要"},
+      {"id": "open_dashboard", "menu": "account.detail", "title": "打开 ping 面板", "page": "dashboard"}
+    ]
+  },
+  "capabilities": {}
+}

@@ -180,7 +180,7 @@ export function Game24ConfigPage() {
               <li>在群内发送 <CommandBadge>{cmdPrefix}{command} 奖金金额</CommandBadge> 开始游戏（例：<CommandBadge>{cmdPrefix}{command} 2000</CommandBadge>）</li>
               <li>系统生成 4 个数字，第一个用算式答对的人获得奖金</li>
               <li>可用运算符：+ - * / ( )，也支持 x / ÷ / × 别名</li>
-              <li>指令前缀跟随系统设置，可在系统配置中修改</li>
+              <li>指令前缀跟随服务器设置，可在系统配置中修改</li>
             </ul>
           </div>
         </CardContent>

@@ -79,7 +79,7 @@ def test_unknown_widgets_are_linted() -> None:
 
 
 def test_p3_capabilities_and_plugin_api() -> None:
-    assert PLUGIN_API_VERSION == "1.3"
+    assert tuple(int(x) for x in PLUGIN_API_VERSION.split(".")) >= (1, 3)
     for name in ("ui.cards", "config.validate", "config.saved", "config.secret_list", "ui.widgets"):
         item = caps_mod.CAPABILITY_INDEX[name]
         assert item.since == caps_mod._THIS_RELEASE

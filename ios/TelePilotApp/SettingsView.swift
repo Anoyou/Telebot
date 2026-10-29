@@ -99,7 +99,7 @@ struct SettingsView: View {
                 }
             }
             .symbolRenderingMode(.hierarchical)
-            .navigationTitle("设置").navigationBarTitleDisplayMode(.inline)
+            .navigationTitle("App 设置").navigationBarTitleDisplayMode(.inline)
             .accessibilityIdentifier("settings.screen")
             .task { _ = try? await model.loadCloudflareAccess() }
     }

@@ -141,7 +141,7 @@ async def run_config_validate(
 
     try:
         ctx = await build_main_process_context(
-            db, account=account, feature=feature, plugin_cls=plugin_cls, config=current
+            db, account=account, feature=feature, plugin_cls=plugin_cls, config=current, readonly_storage=True
         )
         result = await call_plugin_hook(plugin_cls, ctx, "on_config_validate", dict(current), scope, event_type=scope)
     except Exception as exc:  # noqa: BLE001 - 校验钩子失败放行
@@ -183,7 +183,12 @@ async def schedule_config_saved(
 
     try:
         ctx = await build_main_process_context(
-            db, account=account, feature=feature, plugin_cls=plugin_cls, config=dict(config or {})
+            db,
+            account=account,
+            feature=feature,
+            plugin_cls=plugin_cls,
+            config=dict(config or {}),
+            readonly_storage=True,
         )
     except Exception:  # noqa: BLE001
         log.debug("on_config_saved 上下文构造失败 plugin=%s", feature.key, exc_info=True)
