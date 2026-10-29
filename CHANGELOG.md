@@ -25,6 +25,8 @@
 
 ## [Unreleased]
 
+## [0.112.0-beta.3] - 2026-10-30 · patch（补丁预发布） · 插件平台化 P4b 收尾：算数题 / 找骰子 / 猜数字自带入口声明（legacy_entry_keys，Plugin API 1.6）
+
 ### 插件平台：P4b 收尾——算数题 / 找骰子 / 猜数字自带入口声明
 
 - 交互入口新增 `legacy_entry_keys`（Plugin API 1.6，能力 `interaction.legacy_entry_keys`）：插件把早期用过、存量规则里可能还写着的旧入口 key 写在正式入口下面，每项（`key` + 可选 `session_scope` / `participant_policy` / `prize`）与兜底入口表的一行等价；旧 key 不算正式入口（不参与单入口推断、不返回入口声明）。任一入口写了它就和 `entry_policy` 一样不再查 `app/plugin_compat.py` 的兜底入口表。
