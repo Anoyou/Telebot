@@ -161,6 +161,14 @@
       "default": null,
       "title": "Name"
     },
+    "payment_sources": {
+      "items": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "title": "Payment Sources",
+      "type": "array"
+    },
     "permissions": {
       "items": {
         "type": "string"

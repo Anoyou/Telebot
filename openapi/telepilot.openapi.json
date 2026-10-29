@@ -21384,6 +21384,17 @@
             ],
             "title": "Native Raw Retention Days"
           },
+          "payment_source_plugin_authoritative": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Payment Source Plugin Authoritative"
+          },
           "rate_limit_event_retention_days": {
             "anyOf": [
               {
@@ -21878,7 +21889,7 @@
   },
   "info": {
     "title": "TelePilot",
-    "version": "0.110.0-beta.2"
+    "version": "0.111.0-beta.1"
   },
   "openapi": "3.1.0",
   "paths": {

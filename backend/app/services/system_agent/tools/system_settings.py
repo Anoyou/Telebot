@@ -187,6 +187,7 @@ def _validate_changes(changes: dict[str, Any]) -> None:
             "inline_updates_enabled",
             "guest_updates_enabled",
             "native_raw_persist_enabled",
+            "payment_source_plugin_authoritative",
         }
         allowed = {*bounds, *bool_keys, "runtime_log_min_level"}
         unknown = sorted(set(retention) - allowed)

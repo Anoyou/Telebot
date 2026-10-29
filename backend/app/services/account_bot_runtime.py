@@ -65,6 +65,8 @@ from . import (
     audit,
     command_service,
     feature_service,
+    payment_notice_legacy,
+    payment_sources,
     remote_plugin_service,
     runtime_profile_service,
 )
@@ -899,6 +901,9 @@ def _classify_interaction_routes(
         and (
             _parse_incoming_transfer_notice(incoming) is not None
             or _message_line_equals_any(str(incoming.text or ""), list(index.payment_trigger_candidates))
+            # 「以插件结果为准」打开时，宿主旧解析认不出的可信 Bot 消息也交给 payment source 插件判断；
+            # 对照模式（默认）下这一项恒为 False，路由与旧版本一致。
+            or payment_sources.plugin_route_hint()
         )
     ):
         routes.append(_ROUTE_PAYMENT_NOTICE)
@@ -940,6 +945,8 @@ async def _event_framework_flags() -> dict[str, bool]:
         "inline_updates_enabled": True,
         "guest_updates_enabled": True,
         "native_raw_persist_enabled": False,
+        # B1 双跑对照期：默认以宿主旧解析器为准，打开后转账通知改用 payment_sources 插件结果。
+        "payment_source_plugin_authoritative": False,
     }
     try:
         async with AsyncSessionLocal() as db:
@@ -954,6 +961,12 @@ async def _event_framework_flags() -> dict[str, bool]:
             "guest_updates_enabled": bool(raw.get("guest_updates_enabled", defaults["guest_updates_enabled"])),
             "native_raw_persist_enabled": bool(
                 raw.get("native_raw_persist_enabled", defaults["native_raw_persist_enabled"])
+            ),
+            "payment_source_plugin_authoritative": bool(
+                raw.get(
+                    "payment_source_plugin_authoritative",
+                    defaults["payment_source_plugin_authoritative"],
+                )
             ),
         }
     except Exception:  # noqa: BLE001
@@ -3171,6 +3184,7 @@ async def _handle_interaction_update(aid: int, token: str, update: dict[str, Any
         return
     if not await _prepare_guest_incoming(incoming, flags, channel="interaction_bot"):
         return
+    await _refresh_payment_source_route_hint(flags)
     trace = None
     if await _router_debug_trace_enabled(incoming.account_id, chat_id=incoming.chat_id):
         trace = await _start_router_trace(incoming, channel="interaction_bot", reason="debug")
@@ -3266,6 +3280,7 @@ async def _handle_interaction_update(aid: int, token: str, update: dict[str, Any
                 incoming,
                 cfg,
                 event_bus_enabled=event_bus_delivery_enabled,
+                trace=trace,
             ):
                 final_status = TRACE_STATUS_OK
                 await record_span(trace, "route", TRACE_STATUS_OK, component="transfer_notice")
@@ -3346,52 +3361,9 @@ async def _handle_transfer_test_update(aid: int, token: str, update: dict[str, A
 
 
 def _parse_transfer_notice(text: str) -> dict[str, Any] | None:
-    """解析官方或测试阶段自定义转账通知文案。"""
+    """解析官方或测试阶段自定义转账通知文案（宿主旧解析器，见 payment_notice_legacy）。"""
 
-    if not text.strip():
-        return None
-    text = re.sub(r"<[^>]+>", "", text)
-    labeled = {
-        "payer_name": r"付款人\s*[:：]\s*(.+)",
-        "receiver_name": r"收款人\s*[:：]\s*(.+)",
-        "amount": r"金额\s*[:：]\s*(\d+)",
-    }
-    out: dict[str, Any] = {}
-    for key, pattern in labeled.items():
-        match = re.search(pattern, text)
-        if not match:
-            break
-        value = match.group(1).strip()
-        out[key] = int(value) if key == "amount" else value
-    if set(out) == {"payer_name", "receiver_name", "amount"}:
-        payer_id_match = re.search(r"付款人\s*(?:用户)?(?:ID|id)\s*[:：]\s*(\d+)", text)
-        if payer_id_match:
-            out["payer_user_id"] = int(payer_id_match.group(1))
-        receiver_id_match = re.search(r"收款人\s*(?:ID|id)\s*[:：]\s*(\d+)", text)
-        if receiver_id_match:
-            out["receiver_user_id"] = int(receiver_id_match.group(1))
-        return out
-
-    payer_match = re.search(r"^\s*(.+?)\s*(?:转出|射出|转账|扣减)\s*(\d+)\b", text, re.M)
-    receiver_match = re.search(r"^\s*(.+?)\s*(?:收到|接收|收款)\s*(\d+)\b", text, re.M)
-    if payer_match and receiver_match:
-        payer_amount = int(payer_match.group(2))
-        receiver_amount = int(receiver_match.group(2))
-        if payer_amount != receiver_amount:
-            return None
-        parsed = {
-            "payer_name": payer_match.group(1).strip(),
-            "receiver_name": receiver_match.group(1).strip(),
-            "amount": payer_amount,
-        }
-        payer_id_match = re.search(r"付款人\s*(?:用户)?(?:ID|id)\s*[:：]\s*(\d+)", text)
-        if payer_id_match:
-            parsed["payer_user_id"] = int(payer_id_match.group(1))
-        receiver_id_match = re.search(r"收款人\s*(?:ID|id)\s*[:：]\s*(\d+)", text)
-        if receiver_id_match:
-            parsed["receiver_user_id"] = int(receiver_id_match.group(1))
-        return parsed
-    return None
+    return payment_notice_legacy.parse_transfer_notice(text)
 
 
 def _render_transfer_notice_response(template: str, data: dict[str, Any]) -> str:
@@ -3602,6 +3574,137 @@ def _parse_incoming_transfer_notice(incoming: Incoming) -> dict[str, Any] | None
         if parsed is not None:
             return parsed
     return None
+
+
+def _incoming_notice_texts_with_origin(incoming: Incoming) -> list[tuple[str, str]]:
+    """与 :func:`_incoming_notice_texts` 同序同去重，带上来源（text / reply_to_text）给插件。"""
+
+    texts: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for origin, value in (("text", incoming.text), ("reply_to_text", incoming.reply_to_text)):
+        text = str(value or "").strip()
+        if text and text not in seen:
+            seen.add(text)
+            texts.append((origin, text))
+    return texts
+
+
+async def _refresh_payment_source_route_hint(flags: dict[str, Any]) -> None:
+    authoritative = bool(flags.get("payment_source_plugin_authoritative", False))
+    payment_sources.set_authoritative_hint(authoritative)
+    if authoritative:
+        # 只有「以插件结果为准」时路由才看插件来源；30 秒缓存，未到期不查库。
+        await payment_sources.load_payment_sources()
+
+
+async def _parse_incoming_transfer_notice_with_sources(
+    incoming: Incoming,
+    *,
+    trace: Any = None,
+) -> dict[str, Any] | None:
+    """B1 双跑：宿主旧解析 + payment_sources 插件对照（调用前已通过可信 Bot ID 白名单）。
+
+    默认返回宿主旧解析结果；运行设置「以插件结果为准」打开且插件正常返回时返回插件结果。
+    插件只给出解析结果，后续规则匹配、结算、幂等与补偿都不变。
+    """
+
+    flags = await _event_framework_flags()
+    authoritative = bool(flags.get("payment_source_plugin_authoritative", False))
+    texts = _incoming_notice_texts_with_origin(incoming)
+    meta = {
+        "account_id": incoming.account_id,
+        "chat_id": incoming.chat_id,
+        "message_id": incoming.message_id,
+        "sender_id": incoming.user_id,
+    }
+    try:
+        outcome = await payment_sources.dual_parse(
+            texts,
+            meta,
+            lambda text: _parse_transfer_notice(text),
+            authoritative=authoritative,
+        )
+    except Exception:  # noqa: BLE001 - 扩展点自身出错也不能影响旧链路
+        log.warning("payment source dual parse failed, fallback to legacy parser", exc_info=True)
+        return _parse_incoming_transfer_notice(incoming)
+    await _report_payment_source_outcome(incoming, outcome, trace)
+    return outcome.result
+
+
+async def _report_payment_source_outcome(
+    incoming: Incoming,
+    outcome: payment_sources.DualParseOutcome,
+    trace: Any,
+) -> None:
+    if outcome.verdict == payment_sources.VERDICT_NO_SOURCE:
+        return
+    detail = {
+        "verdict": outcome.verdict,
+        "used": "plugin" if outcome.used_plugin else "legacy",
+        "authoritative": outcome.authoritative,
+        "legacy": payment_sources.settlement_view(outcome.legacy),
+        "plugin": outcome.plugin,
+        "unit": outcome.plugin_unit,
+        "diffs": outcome.diffs,
+        "calls": [
+            {"plugin_key": call.key, "outcome": call.outcome, "duration_ms": round(call.duration_ms, 1)}
+            for call in outcome.calls
+        ],
+    }
+    if outcome.verdict == payment_sources.VERDICT_MISMATCH:
+        log.warning(
+            "payment source mismatch aid=%s chat_id=%s message_id=%s plugin=%s used=%s diffs=%s",
+            incoming.account_id,
+            incoming.chat_id,
+            incoming.message_id,
+            outcome.plugin_key,
+            detail["used"],
+            "; ".join(outcome.diffs),
+        )
+        await record_span(
+            trace,
+            "payment_source",
+            TRACE_STATUS_WARNING,
+            component="payment_source",
+            plugin_key=outcome.plugin_key,
+            reason_code=payment_sources.REASON_MISMATCH,
+            message="转账通知：插件解析结果与宿主旧解析不一致（以{}结果为准）。".format(
+                "插件" if outcome.used_plugin else "宿主"
+            ),
+            **detail,
+        )
+        return
+    if outcome.verdict == payment_sources.VERDICT_PLUGIN_FAILED:
+        failures = ", ".join(
+            f"{call.key}={call.outcome}:{type(call.error).__name__}" for call in outcome.calls if call.error is not None
+        )
+        log.warning(
+            "payment source failed, fallback to legacy parser aid=%s chat_id=%s message_id=%s %s",
+            incoming.account_id,
+            incoming.chat_id,
+            incoming.message_id,
+            failures,
+        )
+        await record_span(
+            trace,
+            "payment_source",
+            TRACE_STATUS_WARNING,
+            component="payment_source",
+            plugin_key=outcome.plugin_key,
+            reason_code=payment_sources.REASON_FAILED,
+            message="转账通知：payment source 插件超时或出错，已回退宿主旧解析。",
+            **detail,
+        )
+        return
+    await record_span(
+        trace,
+        "payment_source",
+        TRACE_STATUS_OK,
+        component="payment_source",
+        plugin_key=outcome.plugin_key,
+        message="转账通知：插件解析结果与宿主旧解析一致。",
+        **detail,
+    )
 
 
 def _is_anonymous_transfer_payer_name(name: Any) -> bool:
@@ -9153,6 +9256,7 @@ async def _try_handle_transfer_notice(
     cfg: dict[str, Any] | None = None,
     *,
     event_bus_enabled: bool = True,
+    trace: Any = None,
 ) -> bool:
     if incoming.callback_id or incoming.chat_id is None or incoming.user_id is None:
         return False
@@ -9172,7 +9276,7 @@ async def _try_handle_transfer_notice(
             )
         return False
 
-    parsed = _parse_incoming_transfer_notice(incoming)
+    parsed = await _parse_incoming_transfer_notice_with_sources(incoming, trace=trace)
     reply_chain = (
         await _resolve_transfer_notice_reply_chain(incoming)
         if _transfer_reply_chain_verification_enabled(cfg)

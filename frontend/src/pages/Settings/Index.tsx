@@ -156,6 +156,7 @@ export function SettingsIndex() {
     trace_payload_snapshot_retention_days: "7",
     native_raw_persist_enabled: false,
     native_raw_retention_days: "1",
+    payment_source_plugin_authoritative: false,
   });
   useEffect(() => {
     if (settingsQ.data) {
@@ -187,6 +188,9 @@ export function SettingsIndex() {
         trace_payload_snapshot_retention_days: String(settingsQ.data.log_retention?.trace_payload_snapshot_retention_days ?? 7),
         native_raw_persist_enabled: Boolean(settingsQ.data.log_retention?.native_raw_persist_enabled ?? false),
         native_raw_retention_days: String(settingsQ.data.log_retention?.native_raw_retention_days ?? 1),
+        payment_source_plugin_authoritative: Boolean(
+          settingsQ.data.log_retention?.payment_source_plugin_authoritative ?? false,
+        ),
       });
     }
   }, [settingsQ.data]);
@@ -338,6 +342,7 @@ export function SettingsIndex() {
         trace_payload_snapshot_retention_days: Number(logRetention.trace_payload_snapshot_retention_days) || 0,
         native_raw_persist_enabled: Boolean(logRetention.native_raw_persist_enabled),
         native_raw_retention_days: Number(logRetention.native_raw_retention_days) || 0,
+        payment_source_plugin_authoritative: Boolean(logRetention.payment_source_plugin_authoritative),
       },
     }),
     onSuccess: () => {
@@ -880,6 +885,14 @@ export function SettingsIndex() {
                   checked={logRetention.guest_updates_enabled}
                   onCheckedChange={(checked) =>
                     setLogRetention((v) => ({ ...v, guest_updates_enabled: checked }))
+                  }
+                />
+                <LogToggleCard
+                  label="转账通知以插件结果为准"
+                  description="默认关闭：以宿主旧解析器为准，转账通知插件只做对照（不一致记日志、Trace 与插件运行统计）。对照至少一个 beta 周期全部一致后再打开；插件出错或超时仍自动回退旧解析。"
+                  checked={logRetention.payment_source_plugin_authoritative}
+                  onCheckedChange={(checked) =>
+                    setLogRetention((v) => ({ ...v, payment_source_plugin_authoritative: checked }))
                   }
                 />
               </div>

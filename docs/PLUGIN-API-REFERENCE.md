@@ -2882,6 +2882,7 @@ __all__ = ["PLUGIN_CLASS", "MANIFEST"]
 | 消息管线中间件（`plugin.json` 的 `middleware`、`render_profile`）、`stream_complete(extra_body=)`、钩子统计 `blocked` / `blocking_ms` | 0.109.0-beta.1（旧宿主忽略 `middleware`，插件照常加载但中间件不生效；需要时用 `plugin_api: "^1.2"` 拒绝旧宿主） |
 | 声明式 UI（Plugin API 1.3）：`ui.cards`（`plugin.json` 的 `ui.cards` + `on_ui_card` / `on_ui_action`）、`config.validate`（`on_config_validate`）、`config.saved`（`on_config_saved`）、`config.secret_list`（`x-secret-list`）、`ui.widgets`（配置控件契约 1） | 0.110.0-beta.1（旧宿主忽略 `ui` 声明、不调用这些钩子；旧客户端把不认识的控件按普通字段显示） |
 | 表单契约 2：`ui.rules_page`（`x-ui-mode: rules` 通用规则页 + `x-rule-schema` / `x-rule-summary` / `x-dry-run`）、`rules.dry_run`（插件导出 `dry_run_rule`）、字段级 `x-ui-visible-if`、数组 `x-ui-widget: textarea` 每行一项 | 0.110.0-beta.2（iOS 0.14.1 起；旧客户端忽略这些声明，字段照常全部显示） |
+| 转账通知解析扩展点：`payment.sources`（`plugin.json` 的 `payment_sources` + 模块导出 `parse_payment_notice(text, meta)`，见 [转账通知解析（payment_sources）](#转账通知解析payment_sources)） | 0.111.0-beta.1（旧宿主忽略 `payment_sources`，插件装上不会被调用） |
 
 - 想兼容更旧的平台时不要提高最低版本，而是先探测再用，见下一节 [能力协商与 Plugin API 版本](#能力协商与-plugin-api-版本)。
 - 声明 `requires_platform_capabilities` 的 `manifest.py` 在 0.72 之前的平台上导入就会失败，因此现在所有新插件的最低版本至少是 `0.72.0-beta.2`。
@@ -2945,12 +2946,13 @@ else:  # 旧宿主：退回旧属性探测
 | `runtime.blocking_monitor` | — | 宿主级 | 0.109.0-beta.1 |
 | `ui.cards` / `config.validate` / `config.saved` / `config.secret_list` / `ui.widgets` | — | 宿主级 | 0.110.0-beta.1 |
 | `ui.rules_page` / `rules.dry_run` | — | 宿主级 | 0.110.0-beta.2 |
+| `payment.sources` | — | 宿主级 | 0.111.0-beta.1 |
 
 以注册表与 `GET /api/plugins/capabilities` 为准；本表随宿主发版同步。
 
 **Plugin API 版本（`plugin_api`）**
 
-- 宿主提供的 Plugin API 版本是 `MAJOR.MINOR`（当前 `1.3`；`1.0` = 0.107.0，`1.1` = 0.108.0 通用交互原语，`1.2` = 0.109.0 消息管线中间件，`1.3` = 0.110.0 声明式 UI；0.110.0-beta.2 的表单契约 2 / 通用规则页是同一 MINOR 内的向后兼容新增，没有再升版本）：新增向后兼容的接口 / 能力只升 MINOR；删除或改变已有接口语义才升 MAJOR，并且要先在 [弃用登记](#弃用登记) 里公告至少一个 minor 宿主版本。
+- 宿主提供的 Plugin API 版本是 `MAJOR.MINOR`（当前 `1.3`；`1.0` = 0.107.0，`1.1` = 0.108.0 通用交互原语，`1.2` = 0.109.0 消息管线中间件，`1.3` = 0.110.0 声明式 UI；0.110.0-beta.2 的表单契约 2 / 通用规则页、0.111.0-beta.1 的转账通知解析扩展点 `payment_sources` 都是同一 MINOR 内的向后兼容新增，没有再升版本）：新增向后兼容的接口 / 能力只升 MINOR；删除或改变已有接口语义才升 MAJOR，并且要先在 [弃用登记](#弃用登记) 里公告至少一个 minor 宿主版本。
 - 插件可以在 `plugin.json` 里声明兼容范围，宿主在执行插件代码前校验，不满足时拒绝加载并说明原因：
 
 ```json
@@ -3293,6 +3295,58 @@ async def on_config_saved(self, ctx, config: dict, scope: str) -> None:
 - 宿主自带一张 `_host.stats`「运行统计」卡（钩子级调用数、失败、耗时与弃用接口调用），显示在每个插件详情顶部——原来写死在插件详情里的统计区改由卡片 DSL 渲染。
 - 接口：`GET /api/plugin-ui/cards?slot=…&account_id=…` 列出卡片声明；`POST /api/plugin-ui/cards/{plugin}/{card}/data` 取数；`POST /api/plugin-ui/cards/{plugin}/{card}/actions/{action}` 执行按钮。
 
+### 转账通知解析（payment_sources）
+
+0.111.0-beta.1+（能力 `payment.sources`）。交互 Bot 收到「可信转账 Bot」发来的转账 / 扣减通知时，宿主要从文案里解析出付款人、收款人和金额，再去匹配交互规则、结算。过去这段中文正则写死在宿主里（`account_bot_runtime._parse_transfer_notice`），现在可以由插件提供；官方实现是插件库的 [`payment-source-cn-transfer`](https://github.com/Anoyou/telebot-plugins/tree/main/payment-source-cn-transfer)（宿主旧正则的逐字迁移）。
+
+> 这里的“金额”是群游戏里的积分（例如 PT 站点魔力值），不是真实货币；但它决定群游戏结算，所以按资金路径处理：插件只负责“读懂文案”，结算永远由宿主执行。
+
+**声明与导出**
+
+```json
+// plugin.json（旧宿主忽略这个字段）
+{
+  "payment_sources": [
+    {"id": "cn_transfer", "title": "中文转账通知", "units": ["蝌蚪", "魔力值"]}
+  ],
+  "permissions": [],
+  "requires_platform_capabilities": ["interaction_bot"]
+}
+```
+
+```python
+# plugin.py（或包 __init__.py）导出纯函数；可以是 async def
+def parse_payment_notice(text: str, meta: dict) -> dict | None:
+    """meta = {"account_id", "chat_id", "message_id", "sender_id", "source": "text" | "reply_to_text"}"""
+    ...
+    return {
+        "payer_name": "路人A",          # 必填，非空字符串（≤256 字）；也接受别名 payer
+        "receiver_name": "我的TG名",    # 必填；也接受别名 receiver
+        "amount": 100,                  # 必填，≥0 的整数（数字字符串也接受）
+        "payer_user_id": 1122,          # 可选，整数
+        "receiver_user_id": 9988,       # 可选，整数
+        "unit": "魔力值",                # 可选（别名 currency），只记录，不参与对照和结算
+    }  # 不是转账通知时返回 None
+```
+
+**宿主怎么调用**
+
+- 只在**可信 Bot ID 白名单**通过之后调用（交互 Bot 配置的 `trusted_bot_ids` / `transfer_bot_id`）；其它人发的消息永远到不了插件。
+- 和旧解析器同样的顺序把文本交给插件：先消息正文（`source="text"`），认不出再给被回复的那条消息（`source="reply_to_text"`），第一段认出即止。
+- 在主进程调用，限时 **1 秒**；同步函数放在线程里跑，超时后不再等待。插件拿不到 `ctx`、Telegram client、数据库或任何结算接口。
+- 只调用「已安装、全局启用、签名策略允许、并在 `plugin.json` 声明了 `payment_sources`」的插件，按插件 key 排序；第一个认出通知的插件作为结果。没声明 `payment_sources` 的插件不会因此被加载。发现结果缓存 30 秒（安装 / 升级 / 启停后最多 30 秒生效）。
+- 插件超时、抛异常、返回值不合法、未安装或未启用：一律回到宿主旧解析（fail-open）。
+- 返回结果之后的规则匹配（收款人 / 金额过滤）、回复链校验、付款人补全、幂等与补偿全部不变。
+
+**双跑对照（至少一个 beta 周期）**
+
+- 默认**以宿主旧解析器为准**（`backend/app/services/payment_notice_legacy.py`），插件结果只做对照，比较字段 `payer_name / receiver_name / amount / payer_user_id / receiver_user_id`。
+- 不一致时：warning 日志 `payment source mismatch aid=… chat_id=… message_id=… plugin=… used=legacy diffs=…`；Trace span `payment_source`（`reason_code=payment_source_mismatch`，详情里有两边结果和逐字段差异）；插件「运行统计」钩子「转账通知解析」的事件维度「与宿主一致 / 与宿主不一致 / 插件失败（已回退宿主）」，不一致行显示「对照不一致」。插件失败记 `reason_code=payment_source_failed`。
+- 系统设置 → 运行日志 → 「转账通知以插件结果为准」（`PATCH /api/system/settings` 的 `log_retention.payment_source_plugin_authoritative`，默认 `false`，30 秒内生效）打开后改用插件结果；插件明确返回 `None`（不是转账通知）时也以插件为准。打开后，可信 Bot 发来的、宿主旧正则认不出的消息也会交给插件判断（对照模式下路由与旧版本完全一样）。
+- 宿主旧解析器至少保留一个大版本作为兜底。
+
+**测试要求**：插件库的 `tests/fixtures/payment_notice_golden.json`（419 条：历史 / 现有测试文案 + 默认转账 / 扣减模板批量渲染 + 手工边界）由主仓库 `backend/app/tests/data/payment_notice_golden.json` 同步而来，期望值是宿主旧解析器的输出；新的转账通知插件至少要对这份 golden 100% 一致，再加自己格式的样本。
+
 ### 新旧平台兼容写法
 
 插件库约定：用新能力**不抬高** `min_telepilot_version`，而是先探测、再回退；兼容层保留到 Plugin API 2.0。下面是插件库 `Anoyou/telebot-plugins` 实际在用的写法。
@@ -3350,6 +3404,7 @@ async def admin_ids(ctx, payload) -> set[int]:
 | `on_config_validate` / `on_config_saved` | 保存前校验、保存后通知（0.110.0-beta.1） | 不调用，保存行为不变 |
 | `x-secret-list` | 原生密钥列表、明文不下发（0.110.0-beta.1） | 按普通数组字段显示 |
 | `x-ui-visible-if`、数组 `x-ui-widget: "textarea"`、`x-rule-schema` / `x-rule-summary` / `x-dry-run`、`dry_run_rule` | 按值显隐、每行一项、通用规则页与试运行（0.110.0-beta.2 / iOS 0.14.1） | 字段照常全部显示；数组仍按逗号分隔 |
+| `plugin.json` 的 `payment_sources` + `parse_payment_notice` | 转账通知解析（0.111.0-beta.1，双跑对照期默认只做对照） | 忽略声明，不调用；插件只是一个没有订阅的空插件 |
 | `plugin.json` 的 `middleware` / `render_profile` | 消息管线中间件（0.109.0-beta.1） | 忽略；插件照常加载但中间件不生效。中间件是插件主要功能时用 `"plugin_api": "^1.2"` 拒绝旧宿主 |
 
 - `x-ui-visible-if` 推荐写 `not_in`：`{"field": "pt_enabled", "not_in": [false]}` 只在开关被明确关掉时隐藏。Web / iOS 按表单里的当前值判断，值缺省（没保存过）或控制字段在另一作用域（全局 / 账号）时，`equals: true` 会把字段误藏起来。被隐藏的字段值保留不删。

@@ -25,6 +25,14 @@
 
 ## [Unreleased]
 
+## [0.111.0-beta.1] - 2026-10-29 · minor（次版本预发布） · 插件平台化 P4c：转账通知解析下沉为 payment_sources 插件（双跑对照）
+
+### 新增
+
+- 插件平台化 P4c · 转账通知解析下沉（B1）：新扩展点 `payment_sources`。插件在 `plugin.json` 声明 `payment_sources`，模块导出 `parse_payment_notice(text, meta)`（可 async，1 秒超时）返回 `{payer_name, receiver_name, amount, payer_user_id?, receiver_user_id?, unit?}` 或 `None`。宿主只在交互 Bot「可信转账 Bot」白名单通过后调用；插件只返回解析结果，规则匹配、结算、幂等与补偿仍走宿主受控链路；插件超时、抛异常、返回值不合法、未安装或未启用一律回退宿主旧解析（fail-open）。能力 `payment.sources` 进 `ctx.capabilities`；Plugin API 仍为 1.3。
+- 双跑对照：默认仍以宿主旧解析器为准，已安装的转账通知插件并行解析，结果不一致时记 warning 日志（`payment source mismatch`）、Trace span（`payment_source`，`reason_code=payment_source_mismatch`，带逐字段差异）和插件「运行统计」（钩子「转账通知解析」，事件「与宿主一致 / 与宿主不一致 / 插件失败（已回退宿主）」，不一致行标黄）。系统设置 → 运行日志新增开关「转账通知以插件结果为准」（`log_retention.payment_source_plugin_authoritative`，默认关闭，30 秒内生效），建议对照至少一个 beta 周期全部一致后再打开。
+- 官方插件 `payment-source-cn-transfer`（插件库）：宿主旧正则的逐字迁移；新增 419 条 golden 样本（历史/现有测试文案 + 默认转账/扣减模板批量渲染 + 手工边界），宿主与插件结果 100% 一致。旧服务器不认识 `payment_sources`，装上该插件不会被调用；没声明 `payment_sources` 的旧插件不受影响。
+
 ### 文档
 
 - 插件开发文档与代码总核对（第 15 轮）：`PLUGIN-API-REFERENCE` 的 Plugin API 当前版本改为 1.3（补 `1.3` = 0.110.0 声明式 UI），版本门槛表补 0.108.0-beta.1（通用交互原语）、0.110.0-beta.1（声明式 UI）、0.110.0-beta.2（表单契约 2）三行，能力注册表全集补 `runtime.entry_policy`、`ui.*`、`config.*`、`rules.*` 共 8 项（此前缺失）；声明式 UI 契约版本改为当前 2；新增「入口策略（policy）」小节（注册表 `runtime.entry_policy` 的文档链接此前指向不存在的锚点）。
