@@ -46,6 +46,13 @@ import {
   resolveUnifiedModelKey,
 } from "./llmModelOptions";
 import { collapsedSectionKeys, fieldAllowsNull, orderedPropertyEntries, sortedConfigEntries } from "./configFieldOrder";
+import { SecretListField } from "./SecretListField";
+import {
+  resolveConfigWidget,
+  UNKNOWN_WIDGET_MESSAGE,
+  type ConfigWidgetId,
+  type ContractFieldSchema,
+} from "@/lib/pluginUiContract";
 
 export const MASKED_SECRET_PLACEHOLDER = "••••••••••••••••";
 const EMPTY_CONFIG: Record<string, unknown> = {};
@@ -484,7 +491,18 @@ interface FieldInputProps {
   onFieldsChange?: (patch: Record<string, unknown>) => void;
 }
 
-function FieldInput({
+function FieldInput(props: FieldInputProps) {
+  const widget = resolveConfigWidget(props.fk, props.field as unknown as ContractFieldSchema);
+  if (widget === "hidden") return null;
+  return (
+    <div className="contents" data-config-widget={widget}>
+      <FieldInputBody {...props} widget={widget} />
+    </div>
+  );
+}
+
+function FieldInputBody({
+  widget,
   fk,
   field,
   value,
@@ -497,23 +515,15 @@ function FieldInput({
   previewValue,
   onChange,
   onFieldsChange,
-}: FieldInputProps) {
+}: FieldInputProps & { widget: ConfigWidgetId }) {
   const label = field.title || fk;
   const description = field.description;
   const inputId = `plugin-config-${fk}`;
   const textValue = formatConfigValue(value);
   const defaultValue = field.default != null ? formatConfigValue(field.default) : "";
-  const isPreview = isPreviewField(fk);
-  const isPlaceholders = isPlaceholderField(fk);
-  const isTemplate = isTemplateField(fk);
-  const isReadOnly = isReadOnlyField(fk, field);
-  const isSensitive = isSensitiveConfigKey(fk);
+  const isSensitive = widget === "secret";
 
-  if (field["x-ui-hidden"]) {
-    return null;
-  }
-
-  if (isPreview) {
+  if (widget === "preview") {
     return (
       <ReadOnlyField label={label} description={description}>
         <TelegramHtmlPreview value={previewValue ?? (textValue || defaultValue)} mode="html" title={label} />
@@ -521,7 +531,7 @@ function FieldInput({
     );
   }
 
-  if (isPlaceholders) {
+  if (widget === "placeholders") {
     return (
       <ReadOnlyField label={label} description={description}>
         <pre className="whitespace-pre-wrap break-words font-sans text-sm text-muted-foreground">
@@ -531,7 +541,7 @@ function FieldInput({
     );
   }
 
-  if (isReadOnly) {
+  if (widget === "readonly") {
     return (
       <ReadOnlyField label={label} description={description}>
         <pre className="whitespace-pre-wrap break-words font-sans text-sm text-muted-foreground">
@@ -541,7 +551,21 @@ function FieldInput({
     );
   }
 
-  if (field["x-ui-widget"] === "llm-provider-select") {
+  if (widget === "unknown") {
+    // 契约未列出的控件：只读显示当前值，不退化成通用编辑器，避免把插件数据改坏。
+    return (
+      <ReadOnlyField label={label} description={description}>
+        <p className="text-xs text-warning" data-config-widget-unknown={String(field["x-ui-widget"] ?? "")}>
+          {UNKNOWN_WIDGET_MESSAGE}（控件 {String(field["x-ui-widget"] ?? "")}，当前版本只能查看）
+        </p>
+        <pre className="mt-1 whitespace-pre-wrap break-words font-sans text-sm text-muted-foreground">
+          {textValue || defaultValue || "未设置"}
+        </pre>
+      </ReadOnlyField>
+    );
+  }
+
+  if (widget === "llm-provider-select") {
     return (
       <LLMProviderSelectField
         inputId={inputId}
@@ -555,7 +579,7 @@ function FieldInput({
     );
   }
 
-  if (field["x-ui-widget"] === "llm-model-select") {
+  if (widget === "llm-model-select") {
     const providerField = field["x-ui-provider-field"];
     const providerValue = providerField ? values[providerField] : undefined;
     return (
@@ -578,7 +602,7 @@ function FieldInput({
     );
   }
 
-  if (field["x-ui-widget"] === "dynamic-select") {
+  if (widget === "dynamic-select") {
     const optionsField = field["x-ui-options-field"];
     const options = dynamicSelectOptions(optionsField ? values[optionsField] : undefined);
     const selected = value != null ? String(value) : "";
@@ -601,7 +625,7 @@ function FieldInput({
     );
   }
 
-  if (field.type === "array" && field["x-ui-widget"] === "config-list") {
+  if (widget === "config-list") {
     return (
       <ConfigListField
         fk={fk}
@@ -616,7 +640,7 @@ function FieldInput({
     );
   }
 
-  if (field.type === "array" && field["x-ui-widget"] === "agent-skill-multi-select") {
+  if (widget === "agent-skill-multi-select") {
     return (
       <AgentSkillMultiSelectField
         inputId={inputId}
@@ -628,7 +652,7 @@ function FieldInput({
     );
   }
 
-  if (field.type === "array" && field["x-ui-widget"] === "allowed-peer-multi-select") {
+  if (widget === "allowed-peer-multi-select") {
     return (
       <AllowedPeerMultiSelectField
         accountId={accountId}
@@ -640,7 +664,7 @@ function FieldInput({
     );
   }
 
-  if (field.type === "array" && (field["x-ui-widget"] === "multi-select" || field.items?.enum || field.enum)) {
+  if (widget === "multi-select") {
     return (
       <MultiSelectField
         inputId={inputId}
@@ -653,8 +677,21 @@ function FieldInput({
     );
   }
 
-  if (field.enum && field.enum.length > 0) {
-    if (field["x-ui-widget"] === "list-select") {
+  if (widget === "secret-list") {
+    return (
+      <SecretListField
+        inputId={inputId}
+        label={label}
+        description={description}
+        field={field}
+        value={value}
+        onChange={onChange}
+      />
+    );
+  }
+
+  if ((widget === "select" || widget === "list-select") && field.enum && field.enum.length > 0) {
+    if (widget === "list-select") {
       return (
         <ListSelectField
           inputId={inputId}
@@ -699,7 +736,7 @@ function FieldInput({
     );
   }
 
-  if (field.type === "boolean") {
+  if (widget === "switch") {
     return (
       <div className="flex items-start justify-between gap-4">
         <div className="space-y-1.5">
@@ -715,7 +752,7 @@ function FieldInput({
     );
   }
 
-  if (field.type === "integer" || field.type === "number") {
+  if (widget === "number") {
     return (
       <div className="space-y-1.5">
         <Label htmlFor={inputId}>{label}</Label>
@@ -738,7 +775,7 @@ function FieldInput({
     );
   }
 
-  if (field.type === "object") {
+  if (widget === "object" || widget === "json-object") {
     const properties = field.properties ?? {};
     const objectValue = normalizeConfigObject(value);
     if (Object.keys(properties).length > 0) {
@@ -775,8 +812,8 @@ function FieldInput({
     );
   }
 
-  if (field.type === "array") {
-    if (field.items?.type === "object" || arrayHasObject(value)) {
+  if (widget === "json-array" || widget === "string-list") {
+    if (widget === "json-array" || arrayHasObject(value)) {
       return (
         <JsonArrayField
           inputId={inputId}
@@ -814,12 +851,9 @@ function FieldInput({
 
   // 默认：string 类型
   const multiline =
-    field.format === "textarea" ||
-    field["x-ui-widget"] === "textarea" ||
-    isTemplate ||
+    widget === "textarea" ||
     textValue.includes("\n") ||
-    defaultValue.includes("\n") ||
-    /message|text|prompt|content/i.test(fk);
+    defaultValue.includes("\n");
   const configuredPlaceholder = formatConfigValue(field["x-ui-placeholder"]);
 
   if (multiline) {

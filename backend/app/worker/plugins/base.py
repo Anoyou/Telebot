@@ -1049,6 +1049,63 @@ class Plugin:
         """
         return None
 
+    async def on_config_validate(
+        self,
+        ctx: PluginContext,
+        config: dict[str, Any],
+        scope: str,
+    ) -> dict[str, Any] | None:
+        """保存配置前的校验 / 规范化（Plugin API 1.3，宿主 0.110.0+；同步调用，超时 2 秒）。
+
+        ``scope`` 为 ``"account"`` 或 ``"global"``；``config`` 是已通过 JSON Schema 校验、
+        已合并保留原密钥后的待保存配置（密钥为明文，只在内存里）。返回：
+
+        - ``{"config": {...}}``：用规范化后的配置替换待保存配置（例如改写下线的模型名、
+          把粘贴的 session JSON 拆成 Token 列表）；
+        - ``{"errors": {"字段": "原因"}}``：拒绝保存，原因按「字段: 原因」显示在配置页；
+        - ``None``：不做处理。超时或抛异常时宿主放行保存并记入运行统计。
+        """
+        return None
+
+    async def on_config_saved(
+        self,
+        ctx: PluginContext,
+        config: dict[str, Any],
+        scope: str,
+    ) -> None:
+        """配置保存成功后的后台通知（Plugin API 1.3，宿主 0.110.0+；异步，超时 10 秒）。
+
+        适合清缓存、预热连接等；返回值与异常都不影响保存结果（异常记入运行统计）。
+        """
+        return None
+
+    async def on_ui_card(
+        self,
+        ctx: PluginContext,
+        card_id: str,
+        context: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        """``ui.cards`` 里 ``source: {"action": ...}`` 的卡片数据（Plugin API 1.3，宿主 0.110.0+）。
+
+        同步调用，超时 3 秒；``context`` 含 ``slot`` / ``account_id`` / ``action``。返回卡片数据
+        dict（结构见 schemas/plugin-ui-widgets.json 的 cards.layouts）。超时或失败时只有这张卡
+        显示「已停止工作 · 重试」。
+        """
+        return None
+
+    async def on_ui_action(
+        self,
+        ctx: PluginContext,
+        action_id: str,
+        context: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        """卡片 ``buttons`` 布局里按钮的点击（Plugin API 1.3，宿主 0.110.0+；超时 10 秒）。
+
+        返回 ``{"message": "已刷新", "refresh": true}``：``message`` 显示给管理员，
+        ``refresh`` 为真时客户端重新读取这张卡。
+        """
+        return None
+
 
 # ─────────────────────────────────────────────────────
 # 全局注册表

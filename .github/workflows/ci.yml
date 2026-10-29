@@ -108,6 +108,10 @@ jobs:
         working-directory: backend
         run: ruff check app
 
+      - name: 插件声明式 UI 契约副本一致
+        # schemas/plugin-ui-widgets.json 与后端 / Web / iOS 三份副本逐字节一致且结构合规。
+        run: python scripts/sync-plugin-ui-widgets.py --check
+
       - name: Test backend
         working-directory: backend
         run: pytest

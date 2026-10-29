@@ -269,8 +269,12 @@ struct ManagementFieldView: View {
 
     var body: some View {
         let spec = ManagementSchema.normalized(schema)
+        let pluginWidget = optionalInline ? PluginFieldWidget.resolve(key: key, spec: schema) : ""
         Group {
-            if let choices = spec["enum"]?.arrayValue {
+            if optionalInline, PluginFieldWidgetView.handles(pluginWidget) {
+                // 插件配置表单里的嵌套字段同样按控件契约渲染；不认识的控件只读，不退化成通用编辑器。
+                PluginFieldWidgetView(widget: pluginWidget, title: title, key: key, spec: schema, value: $value, accountID: nil)
+            } else if let choices = spec["enum"]?.arrayValue {
                 Picker(title, selection: $value) {
                     if value.isNull { Text("请选择").tag(JSONValue.null) }
                     ForEach(choices, id: \.self) { choice in Text(ManagementText.scalar(choice)).tag(choice) }

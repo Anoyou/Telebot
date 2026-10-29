@@ -12,7 +12,6 @@ Endpoint：
 
 from __future__ import annotations
 
-import hashlib
 import logging
 
 from fastapi import APIRouter, HTTPException, Query
@@ -62,8 +61,18 @@ router = APIRouter(tags=["features"])
 log = logging.getLogger(__name__)
 
 
-def _bad(code: str, message: str, status: int = 400) -> HTTPException:
-    return HTTPException(status_code=status, detail={"code": code, "message": message})
+def _bad(
+    code: str,
+    message: str,
+    status: int = 400,
+    *,
+    field_errors: dict[str, str] | None = None,
+) -> HTTPException:
+    detail: dict[str, object] = {"code": code, "message": message}
+    if field_errors:
+        # 插件 on_config_validate 返回的逐字段原因（0.110.0+），配置页按字段显示。
+        detail["fields"] = dict(field_errors)
+    return HTTPException(status_code=status, detail=detail)
 
 
 def _declares_direct_passthrough(manifest: object) -> bool:
@@ -169,92 +178,65 @@ def _account_config_schema(
     return _allow_account_direct_passthrough_config(scoped_schema, manifest)
 
 
-def _chatgpt_token_id(token: str) -> str:
-    value = str(token or "").strip()
-    if not value:
-        return "token:empty"
-    return f"token:{hashlib.sha256(value.encode('utf-8')).hexdigest()[:10]}"
+def _feature_schema(feature: object) -> object:
+    manifest = getattr(feature, "manifest", None)
+    return manifest.get("config_schema") if isinstance(manifest, dict) else None
 
 
-def _chatgpt_mask_token(token: str) -> str:
-    value = str(token or "").strip()
-    if not value:
-        return ""
-    if len(value) <= 24:
-        return f"{value[:4]}···{value[-4:]}"
-    return f"{value[:10]}···{value[-10:]}"
+def _secret_list_specs(key: str | None, schema: object = None) -> dict[str, dict[str, str]]:
+    """配置里声明了 ``x-secret-list`` 的字段；旧版 chatgpt_image 没有声明时由兼容表补齐。"""
 
+    from ..services import plugin_secret_list
 
-def _chatgpt_token_entries(config: dict[str, object]) -> list[dict[str, str]]:
-    entries: list[dict[str, str]] = []
-    seen: set[str] = set()
-
-    def add(token: object, note: object = "") -> None:
-        value = str(token or "").strip()
-        if not value or value in seen:
-            return
-        seen.add(value)
-        entries.append({"token": value, "note": str(note or "").strip()})
-
-    raw_tokens = config.get("tokens")
-    if isinstance(raw_tokens, list):
-        for item in raw_tokens:
-            if isinstance(item, dict):
-                add(
-                    item.get("token") or item.get("accessToken") or item.get("access_token"),
-                    item.get("note") or item.get("remark") or item.get("source") or "",
-                )
-            else:
-                add(item)
-    legacy = str(config.get("token") or "")
-    for line in legacy.replace(",", "\n").splitlines():
-        add(line)
-    return entries
+    specs = plugin_secret_list.secret_list_specs(schema)
+    if specs:
+        return specs
+    return plugin_compat.legacy_secret_list_fields(key, schema)
 
 
 def _sanitize_chatgpt_image_config(config: dict[str, object]) -> dict[str, object]:
-    from ..services.plugin_config_secrets import decrypt_config_secrets
+    """兼容旧调用：等同于对旧版 chatgpt_image（无 x-secret-list 声明）执行 :func:`_sanitize_config`。"""
 
-    # token_id 必须基于明文 token，而不是每次 rekey 都会变化的 Fernet 信封。
-    runtime_config = decrypt_config_secrets(config)
-    entries = _chatgpt_token_entries(runtime_config)
-    rest = dict(config)
-    rest["token"] = ""
-    rest["tokens"] = []
-    sanitized = redact_value(rest)
-    sanitized["tokens"] = [
-        {
-            "token": _chatgpt_mask_token(entry["token"]),
-            "note": entry["note"],
-            "token_id": _chatgpt_token_id(entry["token"]),
-        }
-        for entry in entries
-    ]
-    return sanitized
+    return _sanitize_config(config, plugin_compat.CHATGPT_IMAGE)
 
 
-def _sanitize_config(config: dict[str, object], key: str | None = None) -> dict[str, object]:
-    from ..services.plugin_config_secrets import mask_config_secrets
+def _sanitize_config(
+    config: dict[str, object],
+    key: str | None = None,
+    schema: object = None,
+) -> dict[str, object]:
+    from ..services import plugin_secret_list
+    from ..services.plugin_config_secrets import decrypt_config_secrets, mask_config_secrets
 
-    if plugin_compat.uses_multi_token_config(key):
-        return _sanitize_chatgpt_image_config(config)
     # 先遮罩加密信封/敏感键，再走通用 redactor。
-    masked = mask_config_secrets(dict(config or {}))
-    return redact_value(masked)
+    masked = redact_value(mask_config_secrets(dict(config or {})))
+    specs = _secret_list_specs(key, schema)
+    if specs:
+        # secret_id 必须基于明文，而不是每次 rekey 都会变化的 Fernet 信封。
+        masked.update(plugin_secret_list.sanitize(decrypt_config_secrets(dict(config or {})), specs))
+    return masked
 
 
 def _preserve_existing_sensitive_values(
     existing: dict[str, object] | None,
     incoming: dict[str, object],
     key: str | None = None,
+    schema: object = None,
 ) -> dict[str, object]:
     merged = dict(incoming)
     existing_dict = dict(existing or {})
-    multi_token = plugin_compat.uses_multi_token_config(key)
-    if multi_token:
-        merged = _preserve_chatgpt_image_tokens(existing_dict, merged)
+    specs = _secret_list_specs(key, schema)
+    if specs:
+        from ..services import plugin_secret_list
+        from ..services.plugin_config_secrets import decrypt_config_secrets
+
+        merged = plugin_secret_list.preserve(decrypt_config_secrets(existing_dict), merged, specs)
+    skip_keys = set(specs)
+    for spec in specs.values():
+        if spec.get("legacy_field"):
+            skip_keys.add(spec["legacy_field"])
     for item_key, value in existing_dict.items():
-        if multi_token and item_key == "token" and "tokens" in merged:
+        if item_key in skip_keys and item_key in merged:
             continue
         if not is_sensitive_key(str(item_key)) and not is_secret_envelope(value):
             continue
@@ -288,43 +270,59 @@ def _preserve_existing_read_only_values(
     return merged
 
 
-def _preserve_chatgpt_image_tokens(
-    existing: dict[str, object],
-    incoming: dict[str, object],
-) -> dict[str, object]:
-    if "tokens" not in incoming or not isinstance(incoming.get("tokens"), list):
-        return incoming
-    from ..services.plugin_config_secrets import decrypt_config_secrets
-
-    existing_entries = _chatgpt_token_entries(decrypt_config_secrets(existing))
-    by_id = {_chatgpt_token_id(entry["token"]): entry["token"] for entry in existing_entries}
-    by_mask = {_chatgpt_mask_token(entry["token"]): entry["token"] for entry in existing_entries}
-    normalized: list[dict[str, str]] = []
-    seen: set[str] = set()
-    for idx, item in enumerate(incoming["tokens"]):
-        if not isinstance(item, dict):
-            token_value = str(item or "").strip()
-            note = ""
-            token_ref = ""
-        else:
-            token_value = str(item.get("token") or "").strip()
-            note = str(item.get("note") or item.get("remark") or item.get("source") or "").strip()
-            token_ref = str(item.get("token_id") or "").strip()
-        token = by_id.get(token_ref) or by_mask.get(token_value) or token_value
-        if token in {"", "***"} and idx < len(existing_entries):
-            token = existing_entries[idx]["token"]
-        if not token or token in {"***"} or token in seen:
-            continue
-        seen.add(token)
-        normalized.append({"token": token, "note": note})
-    merged = dict(incoming)
-    merged["tokens"] = normalized
-    merged["token"] = ""
-    return merged
-
-
 def _normalize_feature_config(key: str, config: dict[str, object]) -> dict[str, object]:
+    """旧版本插件的历史配置改写（组合保存等不经过 on_config_validate 的路径使用）。"""
+
     return plugin_compat.normalize_legacy_feature_config(key, dict(config))
+
+
+def _schema_validation_error(manifest: object, config: dict[str, object]) -> tuple[dict[str, object], str | None]:
+    scoped_schema = _account_config_schema(manifest, config)
+    if scoped_schema is None:
+        return config, None
+    config = feature_service.apply_required_config_defaults(config, scoped_schema)
+    validation = feature_service.validate_config_against_schema(config, scoped_schema)
+    if validation.valid:
+        return config, None
+    return config, f"配置验证失败: {'; '.join(f'{e.field}: {e.message}' for e in validation.errors)}"
+
+
+async def _validated_account_config(
+    db: DBSession,
+    aid: int,
+    feature: Feature,
+    config: dict[str, object],
+) -> dict[str, object]:
+    """账号配置保存前：JSON Schema 校验 → 插件 on_config_validate（2 秒，可改写 / 拒绝）→ 再校验一次。
+
+    插件没有实现 on_config_validate 时套用旧版本插件的历史配置改写（plugin_compat）。
+    """
+
+    from ..services.plugin_config_hooks import SCOPE_ACCOUNT, format_validate_errors, run_config_validate
+
+    config, error = _schema_validation_error(feature.manifest, dict(config))
+    if error:
+        raise _bad("CONFIG_VALIDATION_ERROR", error)
+    account = await db.get(Account, aid)
+    outcome = await run_config_validate(db, feature=feature, account=account, config=config, scope=SCOPE_ACCOUNT)
+    if outcome.errors:
+        raise _bad("CONFIG_VALIDATION_ERROR", format_validate_errors(outcome.errors), field_errors=outcome.errors)
+    if outcome.config == config:
+        return config
+    config, error = _schema_validation_error(feature.manifest, dict(outcome.config))
+    if error:
+        raise _bad("CONFIG_VALIDATION_ERROR", f"插件规范化后的{error}")
+    return config
+
+
+async def _notify_config_saved(db: DBSession, aid: int, feature: Feature, config: dict[str, object]) -> None:
+    from ..services.plugin_config_hooks import SCOPE_ACCOUNT, schedule_config_saved
+
+    try:
+        account = await db.get(Account, aid)
+        await schedule_config_saved(db, feature=feature, account=account, config=config, scope=SCOPE_ACCOUNT)
+    except Exception:  # noqa: BLE001 - 后台通知不影响保存结果
+        log.debug("on_config_saved 调度失败 plugin=%s", feature.key, exc_info=True)
 
 
 # ─────────────────────────────────────────────────────
@@ -381,13 +379,14 @@ async def list_account_features(
     if await db.get(Account, aid) is None:
         raise _bad("ACCOUNT_NOT_FOUND", "账号不存在", 404)
     rows = await feature_service.get_account_features(db, aid)
+    schemas = {r.feature_key: _feature_schema(await db.get(Feature, r.feature_key)) for r in rows}
     return [
         AccountFeatureItem(
             feature_key=r.feature_key,
             enabled=r.enabled,
             state=r.state,
             last_error=r.last_error,
-            config=_sanitize_config(dict(r.config or {}), r.feature_key),
+            config=_sanitize_config(dict(r.config or {}), r.feature_key, schemas.get(r.feature_key)),
         )
         for r in rows
     ]
@@ -427,23 +426,9 @@ async def patch_account_feature(
             dict(existing.config or {}) if existing is not None else None,
             dict(payload.config),
             key,
+            _feature_schema(feature),
         )
-        payload.config = _normalize_feature_config(key, payload.config)
-        scoped_schema = _account_config_schema(feature.manifest, payload.config)
-        if scoped_schema is not None:
-            payload.config = feature_service.apply_required_config_defaults(
-                payload.config,
-                scoped_schema,
-            )
-            validation = feature_service.validate_config_against_schema(
-                payload.config,
-                scoped_schema,
-            )
-            if not validation.valid:
-                raise _bad(
-                    "CONFIG_VALIDATION_ERROR",
-                    f"配置验证失败: {'; '.join(f'{e.field}: {e.message}' for e in validation.errors)}",
-                )
+        payload.config = await _validated_account_config(db, aid, feature, payload.config)
 
     try:
         af = await feature_service.set_account_feature(
@@ -468,12 +453,14 @@ async def patch_account_feature(
         detail={"enabled": payload.enabled},
     )
     await db.commit()
+    if payload.config is not None:
+        await _notify_config_saved(db, aid, feature, dict(af.config or {}))
     return AccountFeatureItem(
         feature_key=af.feature_key,
         enabled=af.enabled,
         state=af.state,
         last_error=af.last_error,
-        config=_sanitize_config(dict(af.config or {}), key),
+        config=_sanitize_config(dict(af.config or {}), key, _feature_schema(feature)),
     )
 
 
@@ -509,28 +496,14 @@ async def update_account_feature_config(
         existing_config,
         dict(payload.config),
         key,
+        _feature_schema(feature),
     )
     payload.config = _preserve_existing_read_only_values(
         existing_config,
         payload.config,
         feature.manifest,
     )
-    payload.config = _normalize_feature_config(key, payload.config)
-    scoped_schema = _account_config_schema(feature.manifest, payload.config)
-    if scoped_schema is not None:
-        payload.config = feature_service.apply_required_config_defaults(
-            payload.config,
-            scoped_schema,
-        )
-        validation = feature_service.validate_config_against_schema(
-            payload.config,
-            scoped_schema,
-        )
-        if not validation.valid:
-            raise _bad(
-                "CONFIG_VALIDATION_ERROR",
-                f"配置验证失败: {'; '.join(f'{e.field}: {e.message}' for e in validation.errors)}",
-            )
+    payload.config = await _validated_account_config(db, aid, feature, payload.config)
 
     af = await feature_service.set_account_feature(
         db,
@@ -548,12 +521,13 @@ async def update_account_feature_config(
         detail={"config_keys": sorted(payload.config.keys())},
     )
     await db.commit()
+    await _notify_config_saved(db, aid, feature, dict(af.config or {}))
     return AccountFeatureItem(
         feature_key=af.feature_key,
         enabled=af.enabled,
         state=af.state,
         last_error=af.last_error,
-        config=_sanitize_config(dict(af.config or {}), key),
+        config=_sanitize_config(dict(af.config or {}), key, _feature_schema(feature)),
     )
 
 
@@ -612,7 +586,7 @@ async def update_account_feature_direct_passthrough(
         enabled=af.enabled,
         state=af.state,
         last_error=af.last_error,
-        config=_sanitize_config(dict(af.config or {}), key),
+        config=_sanitize_config(dict(af.config or {}), key, _feature_schema(feature)),
     )
 
 
@@ -678,7 +652,7 @@ async def reorder_account_direct_passthrough(
                 enabled=af.enabled,
                 state=af.state,
                 last_error=af.last_error,
-                config=_sanitize_config(dict(af.config or {}), key),
+                config=_sanitize_config(dict(af.config or {}), key, _feature_schema(feature)),
             )
         )
 
@@ -904,8 +878,8 @@ async def get_plugin_global_config(
     global_config = await feature_service.get_plugin_global_config(db, key)
     return PluginGlobalConfigResponse(
         plugin_key=key,
-        config=_sanitize_config(global_config, key),
-        global_config=_sanitize_config(global_config, key),
+        config=_sanitize_config(global_config, key, _feature_schema(feature)),
+        global_config=_sanitize_config(global_config, key, _feature_schema(feature)),
     )
 
 
@@ -926,11 +900,23 @@ async def set_plugin_global_config(
     - 通知所有使用该插件的账号的 worker reload。
     """
     existing_global_config = await feature_service.get_plugin_global_config(db, key)
+    await feature_service.seed_builtin_features(db)
+    global_feature = await db.get(Feature, key)
     payload.config = _preserve_existing_sensitive_values(
         existing_global_config,
         dict(payload.config),
         key,
+        _feature_schema(global_feature),
     )
+    if global_feature is not None:
+        from ..services.plugin_config_hooks import SCOPE_GLOBAL, format_validate_errors, run_config_validate
+
+        outcome = await run_config_validate(
+            db, feature=global_feature, account=None, config=payload.config, scope=SCOPE_GLOBAL
+        )
+        if outcome.errors:
+            raise _bad("CONFIG_VALIDATION_ERROR", format_validate_errors(outcome.errors), field_errors=outcome.errors)
+        payload.config = outcome.config
     try:
         global_config = await feature_service.set_plugin_global_config(
             db, key, payload.config
@@ -946,11 +932,15 @@ async def set_plugin_global_config(
         detail={"global_config_keys": sorted(global_config.keys())},
     )
     await db.commit()
+    if global_feature is not None:
+        from ..services.plugin_config_hooks import SCOPE_GLOBAL, schedule_config_saved
+
+        await schedule_config_saved(db, feature=global_feature, account=None, config=global_config, scope=SCOPE_GLOBAL)
 
     return PluginGlobalConfigResponse(
         plugin_key=key,
-        config=_sanitize_config(global_config, key),
-        global_config=_sanitize_config(global_config, key),
+        config=_sanitize_config(global_config, key, _feature_schema(global_feature)),
+        global_config=_sanitize_config(global_config, key, _feature_schema(global_feature)),
     )
 
 
@@ -979,7 +969,7 @@ async def get_effective_config(
         raise _bad("FEATURE_NOT_FOUND", f"未注册的 feature: {key}", 404)
 
     effective_config = await feature_service.get_effective_plugin_config(db, aid, key)
-    return _sanitize_config(effective_config, key)
+    return _sanitize_config(effective_config, key, _feature_schema(feature))
 
 
 # ─────────────────────────────────────────────────────

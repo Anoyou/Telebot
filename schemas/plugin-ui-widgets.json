@@ -1,0 +1,961 @@
+{
+  "$comment": "TelePilot 插件声明式 UI 契约（规范来源）。Web ConfigDialog / PluginCards 与 iOS ManagementPluginConfigView / PluginCardsView 都据此实现并在单测中逐项校验；副本由 scripts/sync-plugin-ui-widgets.py 生成，不要手改副本。",
+  "contract_version": 1,
+  "unknown_widget": {
+    "policy": "readonly",
+    "message": "此控件需要更新 App",
+    "summary": "客户端遇到不认识的 x-ui-widget（或本契约未列出的控件）时显示「此控件需要更新 App」并保持只读，不退化成通用编辑器，避免把数据改坏。"
+  },
+  "resolution_order": [
+    "hidden",
+    "preview",
+    "placeholders",
+    "readonly",
+    "llm-provider-select",
+    "llm-model-select",
+    "dynamic-select",
+    "config-list",
+    "agent-skill-multi-select",
+    "allowed-peer-multi-select",
+    "multi-select",
+    "list-select",
+    "secret-list",
+    "select",
+    "switch",
+    "number",
+    "object",
+    "json-object",
+    "json-array",
+    "string-list",
+    "secret",
+    "textarea",
+    "text"
+  ],
+  "widgets": [
+    {
+      "id": "hidden",
+      "x_ui_widget": null,
+      "applies_to": [
+        "any"
+      ],
+      "match": "x-ui-hidden 为 true",
+      "summary": "不显示（x-ui-hidden: true），值原样保留",
+      "keys": [
+        "x-ui-hidden"
+      ],
+      "ios_since": "0.13.0",
+      "fallback": "hidden",
+      "example": {
+        "key": "internal_state",
+        "schema": {
+          "type": "string",
+          "x-ui-hidden": true
+        }
+      }
+    },
+    {
+      "id": "preview",
+      "x_ui_widget": null,
+      "applies_to": [
+        "string"
+      ],
+      "match": "字段名 template_preview 或 *_preview",
+      "summary": "只读的 Telegram HTML 预览（字段名为 template_preview 或以 _preview 结尾）",
+      "keys": [],
+      "ios_since": "0.13.0",
+      "fallback": "readonly",
+      "example": {
+        "key": "usage_preview",
+        "schema": {
+          "type": "string",
+          "title": "命令说明"
+        }
+      }
+    },
+    {
+      "id": "placeholders",
+      "x_ui_widget": null,
+      "applies_to": [
+        "string"
+      ],
+      "match": "字段名 template_placeholders",
+      "summary": "只读的模板占位符说明（字段名 template_placeholders）",
+      "keys": [],
+      "ios_since": "0.13.0",
+      "fallback": "readonly",
+      "example": {
+        "key": "template_placeholders",
+        "schema": {
+          "type": "string",
+          "title": "占位符"
+        }
+      }
+    },
+    {
+      "id": "readonly",
+      "x_ui_widget": null,
+      "applies_to": [
+        "any"
+      ],
+      "match": "readOnly 为 true",
+      "summary": "只读展示（readOnly: true，插件自动维护）",
+      "keys": [],
+      "ios_since": "0.13.0",
+      "fallback": "readonly",
+      "example": {
+        "key": "last_sync_at",
+        "schema": {
+          "type": "string",
+          "title": "最近同步",
+          "readOnly": true
+        }
+      }
+    },
+    {
+      "id": "llm-provider-select",
+      "x_ui_widget": "llm-provider-select",
+      "applies_to": [
+        "string"
+      ],
+      "match": "",
+      "summary": "TelePilot AI 供应商选择",
+      "keys": [],
+      "ios_since": "0.13.0",
+      "fallback": "readonly",
+      "example": {
+        "key": "provider",
+        "schema": {
+          "type": "string",
+          "title": "供应商",
+          "x-ui-widget": "llm-provider-select"
+        }
+      }
+    },
+    {
+      "id": "llm-model-select",
+      "x_ui_widget": "llm-model-select",
+      "applies_to": [
+        "string"
+      ],
+      "match": "",
+      "summary": "统一模型列表（选中同时写回 x-ui-provider-field 指向的供应商字段）",
+      "keys": [
+        "x-ui-provider-field",
+        "x-ui-model-modality"
+      ],
+      "ios_since": "0.13.0",
+      "fallback": "readonly",
+      "example": {
+        "key": "model",
+        "schema": {
+          "type": "string",
+          "title": "模型",
+          "x-ui-widget": "llm-model-select",
+          "x-ui-provider-field": "provider",
+          "x-ui-model-modality": "text"
+        }
+      }
+    },
+    {
+      "id": "dynamic-select",
+      "x_ui_widget": "dynamic-select",
+      "applies_to": [
+        "string"
+      ],
+      "match": "",
+      "summary": "选项来自另一个字段（x-ui-options-field，通常由配置动作写入）",
+      "keys": [
+        "x-ui-options-field"
+      ],
+      "ios_since": "0.13.0",
+      "fallback": "readonly",
+      "example": {
+        "key": "voice",
+        "schema": {
+          "type": "string",
+          "title": "音色",
+          "x-ui-widget": "dynamic-select",
+          "x-ui-options-field": "voice_options"
+        }
+      }
+    },
+    {
+      "id": "config-list",
+      "x_ui_widget": "config-list",
+      "applies_to": [
+        "array<object>"
+      ],
+      "match": "",
+      "summary": "对象列表：每项一行摘要，点开编辑；可启停、排序、增删",
+      "keys": [
+        "x-ui-title-field",
+        "x-ui-description-field",
+        "x-ui-summary",
+        "x-ui-enabled-field",
+        "x-ui-reorderable",
+        "x-ui-add-label"
+      ],
+      "ios_since": "0.14.0",
+      "fallback": "readonly",
+      "example": {
+        "key": "rules",
+        "schema": {
+          "type": "array",
+          "title": "规则",
+          "x-ui-widget": "config-list",
+          "x-ui-title-field": "name",
+          "x-ui-summary": "{keyword} → {reply}",
+          "x-ui-enabled-field": "enabled",
+          "x-ui-add-label": "添加规则",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "title": "名称"
+              },
+              "enabled": {
+                "type": "boolean",
+                "title": "启用",
+                "default": true
+              },
+              "keyword": {
+                "type": "string",
+                "title": "关键词"
+              },
+              "reply": {
+                "type": "string",
+                "title": "回复"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "agent-skill-multi-select",
+      "x_ui_widget": "agent-skill-multi-select",
+      "applies_to": [
+        "array<string>"
+      ],
+      "match": "",
+      "summary": "对插件启用的 Agent Skills 多选",
+      "keys": [],
+      "ios_since": "0.11.1",
+      "fallback": "readonly",
+      "example": {
+        "key": "skills",
+        "schema": {
+          "type": "array",
+          "title": "Skills",
+          "x-ui-widget": "agent-skill-multi-select",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "id": "allowed-peer-multi-select",
+      "x_ui_widget": "allowed-peer-multi-select",
+      "applies_to": [
+        "array<integer|string>"
+      ],
+      "match": "",
+      "summary": "从账号「允许会话」里多选会话",
+      "keys": [],
+      "ios_since": "0.14.0",
+      "fallback": "readonly",
+      "example": {
+        "key": "chat_ids",
+        "schema": {
+          "type": "array",
+          "title": "生效会话",
+          "x-ui-widget": "allowed-peer-multi-select",
+          "items": {
+            "type": "integer"
+          }
+        }
+      }
+    },
+    {
+      "id": "multi-select",
+      "x_ui_widget": "multi-select",
+      "applies_to": [
+        "array<enum>"
+      ],
+      "match": "x-ui-widget: multi-select，或数组且 items.enum / enum 非空",
+      "summary": "固定选项多选（x-ui-widget: multi-select，或数组 items.enum）",
+      "keys": [],
+      "ios_since": "0.14.0",
+      "fallback": "readonly",
+      "example": {
+        "key": "weekdays",
+        "schema": {
+          "type": "array",
+          "title": "星期",
+          "x-ui-widget": "multi-select",
+          "items": {
+            "type": "string",
+            "enum": [
+              "mon",
+              "tue",
+              "wed"
+            ],
+            "enumNames": [
+              "周一",
+              "周二",
+              "周三"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "list-select",
+      "x_ui_widget": "list-select",
+      "applies_to": [
+        "enum"
+      ],
+      "match": "",
+      "summary": "单选，选项平铺为列表（带说明时更易读）",
+      "keys": [],
+      "ios_since": "0.14.0",
+      "fallback": "readonly",
+      "example": {
+        "key": "mode",
+        "schema": {
+          "type": "string",
+          "title": "模式",
+          "x-ui-widget": "list-select",
+          "enum": [
+            "fast",
+            "safe"
+          ],
+          "enumNames": [
+            "快速",
+            "稳妥"
+          ],
+          "enumDescriptions": [
+            "优先速度",
+            "优先稳定"
+          ]
+        }
+      }
+    },
+    {
+      "id": "secret-list",
+      "x_ui_widget": null,
+      "applies_to": [
+        "array<object>"
+      ],
+      "match": "数组字段声明了 x-secret-list",
+      "summary": "密钥列表（x-secret-list）：已保存的密钥只显示遮罩，可改备注、删除、排序；新增时填明文，服务器加密保存",
+      "keys": [
+        "x-secret-list"
+      ],
+      "ios_since": "0.14.0",
+      "fallback": "readonly",
+      "example": {
+        "key": "tokens",
+        "schema": {
+          "type": "array",
+          "title": "Token 池",
+          "x-secret-list": {
+            "secret_field": "token",
+            "note_field": "note"
+          },
+          "items": {
+            "type": "object",
+            "properties": {
+              "token": {
+                "type": "string",
+                "title": "Token"
+              },
+              "note": {
+                "type": "string",
+                "title": "备注"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "select",
+      "x_ui_widget": null,
+      "applies_to": [
+        "enum"
+      ],
+      "match": "enum 非空",
+      "summary": "单选下拉（enum）",
+      "keys": [],
+      "ios_since": "0.13.0",
+      "fallback": "readonly",
+      "example": {
+        "key": "image_format",
+        "schema": {
+          "type": "string",
+          "title": "格式",
+          "enum": [
+            "png",
+            "jpeg"
+          ],
+          "enumNames": [
+            "PNG",
+            "JPEG"
+          ]
+        }
+      }
+    },
+    {
+      "id": "switch",
+      "x_ui_widget": null,
+      "applies_to": [
+        "boolean"
+      ],
+      "match": "",
+      "summary": "开关",
+      "keys": [],
+      "ios_since": "0.13.0",
+      "fallback": "readonly",
+      "example": {
+        "key": "enabled",
+        "schema": {
+          "type": "boolean",
+          "title": "启用"
+        }
+      }
+    },
+    {
+      "id": "number",
+      "x_ui_widget": null,
+      "applies_to": [
+        "integer",
+        "number"
+      ],
+      "match": "",
+      "summary": "数字（minimum / maximum 约束）",
+      "keys": [],
+      "ios_since": "0.13.0",
+      "fallback": "readonly",
+      "example": {
+        "key": "timeout",
+        "schema": {
+          "type": "integer",
+          "title": "超时（秒）",
+          "minimum": 1,
+          "maximum": 600
+        }
+      }
+    },
+    {
+      "id": "object",
+      "x_ui_widget": null,
+      "applies_to": [
+        "object"
+      ],
+      "match": "",
+      "summary": "嵌套分组（object 带 properties）",
+      "keys": [],
+      "ios_since": "0.13.0",
+      "fallback": "readonly",
+      "example": {
+        "key": "limits",
+        "schema": {
+          "type": "object",
+          "title": "限额",
+          "properties": {
+            "daily": {
+              "type": "integer",
+              "title": "每日"
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "json-object",
+      "x_ui_widget": null,
+      "applies_to": [
+        "object"
+      ],
+      "match": "object 且没有 properties",
+      "summary": "键值对象（object 无 properties）",
+      "keys": [],
+      "ios_since": "0.13.0",
+      "fallback": "readonly",
+      "example": {
+        "key": "headers",
+        "schema": {
+          "type": "object",
+          "title": "请求头"
+        }
+      }
+    },
+    {
+      "id": "json-array",
+      "x_ui_widget": null,
+      "applies_to": [
+        "array<object>"
+      ],
+      "match": "数组且 items.type=object，未声明 x-ui-widget",
+      "summary": "对象数组（未声明 config-list 时按条目编辑）",
+      "keys": [],
+      "ios_since": "0.13.0",
+      "fallback": "readonly",
+      "example": {
+        "key": "entries",
+        "schema": {
+          "type": "array",
+          "title": "条目",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "string-list",
+      "x_ui_widget": null,
+      "applies_to": [
+        "array<scalar>"
+      ],
+      "match": "",
+      "summary": "文本 / 数字列表",
+      "keys": [],
+      "ios_since": "0.13.0",
+      "fallback": "readonly",
+      "example": {
+        "key": "keywords",
+        "schema": {
+          "type": "array",
+          "title": "关键词",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "id": "secret",
+      "x_ui_widget": null,
+      "applies_to": [
+        "string"
+      ],
+      "match": "字段名以 api_key / access_token / token / secret / password 等结尾，或 format: password、writeOnly",
+      "summary": "密码框：已保存的值不回显，留空保持原值（字段名命中敏感词，或 format: password / writeOnly）",
+      "keys": [],
+      "ios_since": "0.13.0",
+      "fallback": "readonly",
+      "example": {
+        "key": "api_key",
+        "schema": {
+          "type": "string",
+          "title": "API Key"
+        }
+      }
+    },
+    {
+      "id": "textarea",
+      "x_ui_widget": "textarea",
+      "applies_to": [
+        "string"
+      ],
+      "match": "x-ui-widget / format 为 textarea，或字段名 message_template / *_template",
+      "summary": "多行文本（x-ui-widget / format: textarea，或模板字段 *_template）",
+      "keys": [],
+      "ios_since": "0.13.0",
+      "fallback": "readonly",
+      "example": {
+        "key": "message_template",
+        "schema": {
+          "type": "string",
+          "title": "消息模板",
+          "x-ui-widget": "textarea"
+        }
+      }
+    },
+    {
+      "id": "text",
+      "x_ui_widget": null,
+      "applies_to": [
+        "string"
+      ],
+      "match": "以上都不匹配",
+      "summary": "单行文本（默认）",
+      "keys": [
+        "x-ui-placeholder"
+      ],
+      "ios_since": "0.13.0",
+      "fallback": "readonly",
+      "example": {
+        "key": "command",
+        "schema": {
+          "type": "string",
+          "title": "触发指令",
+          "x-ui-placeholder": "ai"
+        }
+      }
+    }
+  ],
+  "keys": [
+    {
+      "key": "x-ui-mode",
+      "scope": "schema",
+      "type": "string",
+      "enum": [
+        "rules",
+        "single",
+        "schema",
+        "platform"
+      ],
+      "summary": "配置入口形态（顶层）"
+    },
+    {
+      "key": "x-ui-widget",
+      "scope": "field",
+      "type": "string",
+      "summary": "显式指定控件，取值见 widgets[].x_ui_widget"
+    },
+    {
+      "key": "x-ui-hidden",
+      "scope": "field",
+      "type": "boolean",
+      "summary": "不显示该字段"
+    },
+    {
+      "key": "x-ui-section",
+      "scope": "field",
+      "type": "string",
+      "summary": "所属分组标题"
+    },
+    {
+      "key": "x-ui-section-inline",
+      "scope": "field",
+      "type": "boolean",
+      "summary": "长配置页里该分组留在顶层"
+    },
+    {
+      "key": "x-ui-order",
+      "scope": "field",
+      "type": "number",
+      "summary": "字段排序"
+    },
+    {
+      "key": "x-ui-property-order",
+      "scope": "schema",
+      "type": "array<string>",
+      "summary": "properties 声明顺序（宿主自动生成）"
+    },
+    {
+      "key": "x-ui-columns",
+      "scope": "field",
+      "type": "integer",
+      "summary": "Web 分组列数（1–3），iOS 忽略"
+    },
+    {
+      "key": "x-ui-placeholder",
+      "scope": "field",
+      "type": "string",
+      "summary": "输入提示"
+    },
+    {
+      "key": "x-ui-provider-field",
+      "scope": "field",
+      "type": "string",
+      "summary": "llm-model-select 同时写回的供应商字段"
+    },
+    {
+      "key": "x-ui-model-modality",
+      "scope": "field",
+      "type": "string",
+      "summary": "llm-model-select 只列此模态的模型（text / image）"
+    },
+    {
+      "key": "x-ui-options-field",
+      "scope": "field",
+      "type": "string",
+      "summary": "dynamic-select 的选项来源字段"
+    },
+    {
+      "key": "x-ui-title-field",
+      "scope": "field",
+      "type": "string",
+      "summary": "config-list 每项标题取自的子字段"
+    },
+    {
+      "key": "x-ui-description-field",
+      "scope": "field",
+      "type": "string",
+      "summary": "config-list 每项副标题取自的子字段"
+    },
+    {
+      "key": "x-ui-summary",
+      "scope": "field",
+      "type": "string",
+      "summary": "config-list 每项摘要模板，{子字段} 占位"
+    },
+    {
+      "key": "x-ui-enabled-field",
+      "scope": "field",
+      "type": "string",
+      "summary": "config-list 每项启停子字段（默认 enabled）"
+    },
+    {
+      "key": "x-ui-reorderable",
+      "scope": "field",
+      "type": "boolean",
+      "summary": "config-list 是否可排序（默认可）"
+    },
+    {
+      "key": "x-ui-add-label",
+      "scope": "field",
+      "type": "string",
+      "summary": "config-list 添加按钮文字"
+    },
+    {
+      "key": "x-secret-list",
+      "scope": "field",
+      "type": "object",
+      "summary": "密钥列表声明 {secret_field, note_field?, id_field?, legacy_field?}；宿主遮罩、按 id 保留原值并加密"
+    },
+    {
+      "key": "x-config-actions",
+      "scope": "schema",
+      "type": "array<object>",
+      "summary": "配置动作（也可写在 manifest config_actions）"
+    },
+    {
+      "key": "x-usage-guide",
+      "scope": "schema",
+      "type": "any",
+      "summary": "使用说明"
+    }
+  ],
+  "secret_list": {
+    "defaults": {
+      "note_field": "note",
+      "id_field": "secret_id"
+    },
+    "mask": "前 4 位…后 4 位（不足 12 位只显示 •）",
+    "summary": "读取时 secret_field 变成遮罩并附 id_field；保存时 id 或遮罩命中已保存的条目就保留原密钥，否则当作新明文；legacy_field 里按行 / 逗号分隔的旧密钥并入列表后清空。"
+  },
+  "cards": {
+    "slots": [
+      {
+        "id": "plugin.overview",
+        "summary": "插件详情顶部（Web 插件中心详情 / iOS 插件详情）",
+        "context": [
+          "plugin_key"
+        ]
+      },
+      {
+        "id": "account.detail",
+        "summary": "账号详情（只显示在该账号启用的插件的卡片）",
+        "context": [
+          "plugin_key",
+          "account_id"
+        ]
+      },
+      {
+        "id": "dashboard",
+        "summary": "概览末尾（全局启用的插件）",
+        "context": [
+          "plugin_key"
+        ]
+      }
+    ],
+    "layouts": [
+      {
+        "type": "stats",
+        "summary": "一排关键数字",
+        "fields": {
+          "items": "[{label, path | value, format?, tone?, unit?}]"
+        },
+        "example": {
+          "type": "stats",
+          "items": [
+            {
+              "label": "调用",
+              "path": "calls"
+            },
+            {
+              "label": "失败",
+              "path": "failed",
+              "tone": "danger"
+            }
+          ]
+        },
+        "example_data": {
+          "calls": 12,
+          "failed": 1
+        }
+      },
+      {
+        "type": "kv",
+        "summary": "键值行",
+        "fields": {
+          "items": "[{label, path | value, format?}]"
+        },
+        "example": {
+          "type": "kv",
+          "items": [
+            {
+              "label": "最近运行",
+              "path": "last_at",
+              "format": "relative_time"
+            }
+          ]
+        },
+        "example_data": {
+          "last_at": 1767225600
+        }
+      },
+      {
+        "type": "table",
+        "summary": "表格（手机上每行折成一张小卡）",
+        "fields": {
+          "rows_path": "数据里行数组的路径（默认 rows）",
+          "columns": "[{key, label, format?}]",
+          "empty": "空表文案"
+        },
+        "example": {
+          "type": "table",
+          "rows_path": "rows",
+          "columns": [
+            {
+              "key": "name",
+              "label": "名称"
+            },
+            {
+              "key": "count",
+              "label": "次数",
+              "format": "number"
+            }
+          ]
+        },
+        "example_data": {
+          "rows": [
+            {
+              "name": "a",
+              "count": 3
+            }
+          ]
+        }
+      },
+      {
+        "type": "list",
+        "summary": "列表（标题 / 副标题 / 右侧值）",
+        "fields": {
+          "items_path": "数据里条目数组的路径（默认 items）",
+          "title_key": "默认 title",
+          "subtitle_key": "默认 subtitle",
+          "trailing_key": "默认 trailing",
+          "tone_key": "默认 tone",
+          "empty": "空列表文案"
+        },
+        "example": {
+          "type": "list",
+          "items_path": "items"
+        },
+        "example_data": {
+          "items": [
+            {
+              "title": "群 A",
+              "subtitle": "今天 3 次",
+              "trailing": "正常",
+              "tone": "success"
+            }
+          ]
+        }
+      },
+      {
+        "type": "buttons",
+        "summary": "操作按钮，点按调插件 on_ui_action（confirm 非空时先确认）",
+        "fields": {
+          "items": "[{id, label, style?: default|destructive, confirm?}]"
+        },
+        "example": {
+          "type": "buttons",
+          "items": [
+            {
+              "id": "refresh_cache",
+              "label": "刷新缓存"
+            },
+            {
+              "id": "clear",
+              "label": "清空",
+              "style": "destructive",
+              "confirm": "清空全部记录？"
+            }
+          ]
+        },
+        "example_data": {}
+      }
+    ],
+    "formats": [
+      "text",
+      "number",
+      "percent",
+      "duration_ms",
+      "datetime",
+      "relative_time"
+    ],
+    "tones": [
+      "neutral",
+      "success",
+      "warning",
+      "danger",
+      "accent"
+    ],
+    "sources": {
+      "read": {
+        "summary": "宿主只读资源，必须在 plugin.json reads 里声明",
+        "resources": [
+          "plugin.stats@1",
+          "chat.allowed@1",
+          "account.admins@1"
+        ]
+      },
+      "action": {
+        "summary": "调插件 on_ui_card(ctx, card_id, context) -> dict",
+        "timeout_ms": 3000
+      }
+    },
+    "failure": {
+      "message": "已停止工作",
+      "retry": "重试",
+      "summary": "数据读取失败或超时只影响这张卡，显示「已停止工作 · 重试」"
+    }
+  },
+  "hooks": {
+    "on_config_validate": {
+      "mode": "sync",
+      "timeout_ms": 2000,
+      "returns": "{config?: dict, errors?: {field: message}}",
+      "on_timeout": "放行并记入运行统计（超时）"
+    },
+    "on_config_saved": {
+      "mode": "async",
+      "timeout_ms": 10000,
+      "returns": "None",
+      "summary": "保存成功后后台调用，不影响保存结果"
+    },
+    "on_ui_card": {
+      "mode": "sync",
+      "timeout_ms": 3000,
+      "returns": "dict（卡片数据）"
+    },
+    "on_ui_action": {
+      "mode": "sync",
+      "timeout_ms": 10000,
+      "returns": "{message?, refresh?: bool}"
+    }
+  }
+}

@@ -202,3 +202,48 @@ export async function listPluginInstallHistory(
 export async function uninstallPlugin(key: string): Promise<void> {
   await api.delete(`/api/plugins/install/${encodeURIComponent(key)}`);
 }
+
+// ── 插件声明式 UI：原生卡片（Plugin API 1.3）──
+export type PluginUICard = components["schemas"]["PluginUICard"];
+export type PluginUICardsResponse = components["schemas"]["PluginUICardsResponse"];
+export type PluginUICardData = components["schemas"]["PluginUICardData"];
+export type PluginUICardActionResponse = components["schemas"]["PluginUICardActionResponse"];
+export type PluginUICardSlot = "plugin.overview" | "account.detail" | "dashboard";
+
+/** 某个位置的卡片声明（不含数据）。 */
+export async function listPluginUICards(params: {
+  slot: PluginUICardSlot;
+  pluginKey?: string;
+  accountId?: number | null;
+}): Promise<PluginUICardsResponse> {
+  const { data } = await api.get<PluginUICardsResponse>("/api/plugin-ui/cards", {
+    params: {
+      slot: params.slot,
+      ...(params.pluginKey ? { plugin_key: params.pluginKey } : {}),
+      ...(params.accountId ? { account_id: params.accountId } : {}),
+    },
+  });
+  return data;
+}
+
+/** 读取一张卡的数据；失败时 status=error（HTTP 仍是 200），只影响这张卡。 */
+export async function readPluginUICard(card: Pick<PluginUICard, "plugin_key" | "card_id" | "slot">, accountId?: number | null): Promise<PluginUICardData> {
+  const { data } = await api.post<PluginUICardData>(
+    `/api/plugin-ui/cards/${encodeURIComponent(card.plugin_key)}/${encodeURIComponent(card.card_id)}/data`,
+    { account_id: accountId ?? null, slot: card.slot },
+  );
+  return data;
+}
+
+/** 卡片按钮（插件 on_ui_action）。不自动重试。 */
+export async function runPluginUICardAction(
+  card: Pick<PluginUICard, "plugin_key" | "card_id" | "slot">,
+  actionId: string,
+  accountId?: number | null,
+): Promise<PluginUICardActionResponse> {
+  const { data } = await api.post<PluginUICardActionResponse>(
+    `/api/plugin-ui/cards/${encodeURIComponent(card.plugin_key)}/${encodeURIComponent(card.card_id)}/actions/${encodeURIComponent(actionId)}`,
+    { account_id: accountId ?? null, slot: card.slot },
+  );
+  return data;
+}

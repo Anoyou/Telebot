@@ -85,6 +85,55 @@ export const pluginHookStatsFixture = (pluginKey: string) => ({
   ],
 });
 
+// 插件原生卡片（Plugin API 1.3）：插件详情顶部的宿主「运行统计」卡，结构与后端 plugin_ui_cards._host_stats_card 一致。
+export const hostStatsCardFixture = (pluginKey: string) => ({
+  plugin_key: pluginKey,
+  plugin_name: "示例插件",
+  card_id: "_host.stats",
+  slot: "plugin.overview",
+  title: "运行统计",
+  subtitle: "按钩子统计调用数、耗时与失败数，保留到最近一次调用后 7 天",
+  source_kind: "read",
+  refresh_seconds: null,
+  host: true,
+  blocks: [
+    { type: "stats", items: [
+      { label: "调用", path: "summary.calls", format: "number", tone_path: "summary.calls_tone" },
+      { label: "失败", path: "summary.failed", format: "number", tone_path: "summary.failed_tone" },
+      { label: "超时", path: "summary.timeout", format: "number", tone_path: "summary.timeout_tone" },
+      { label: "平均耗时", path: "summary.avg_ms", format: "duration_ms" },
+    ] },
+    { type: "list", id: "deprecations", title: "使用了已弃用接口", items_path: "deprecations", hide_when_empty: true },
+    { type: "table", id: "hooks", rows_path: "hooks", row_key: "key", empty: "还没有调用记录。", columns: [
+      { key: "hook", label: "钩子" }, { key: "event_type", label: "事件" }, { key: "account", label: "账号" },
+      { key: "health", label: "状态", tone_key: "health_tone" }, { key: "calls", label: "调用", format: "number" },
+      { key: "failure_rate", label: "失败率", format: "percent" }, { key: "avg_ms", label: "平均", format: "duration_ms" },
+      { key: "p95_ms", label: "P95", format: "duration_ms" }, { key: "last_at", label: "最近", format: "relative_time" },
+      { key: "last_error", label: "最近错误" },
+    ] },
+    { type: "buttons", items: [{ id: "reset_stats", label: "清零", style: "destructive", confirm: "清零这个插件的运行统计和弃用计数？" }] },
+  ],
+});
+
+export const hostStatsCardDataFixture = (pluginKey: string) => ({
+  plugin_key: pluginKey,
+  card_id: "_host.stats",
+  status: "ok",
+  message: null,
+  updated_at: 1_784_635_200,
+  duration_ms: 3,
+  data: {
+    summary: { calls: 122, failed: 2, timeout: 1, avg_ms: 85, calls_tone: "accent", failed_tone: "danger", timeout_tone: "warning" },
+    deprecations: [
+      { title: "ai.tag_alias", subtitle: "ctx.ai.complete / stream_complete 使用 tag= / tags= 兼容别名；请改用 provider_tag=；计划移除：Plugin API 2.0", trailing: "3 次", tone: "warning" },
+    ],
+    hooks: [
+      { key: "on_event", hook: "事件处理", event_type: "message", account: "视觉测试账号", health: "有失败", health_tone: "warning", calls: 120, failure_rate: 0.0167, avg_ms: 80, p95_ms: 250, last_at: 1_784_635_200, last_error: "TimeoutError: PLUGIN_INVOKE_TIMEOUT: demo_plugin" },
+      { key: "on_config_action", hook: "配置动作", event_type: "sync", account: "", health: "失败偏多", health_tone: "danger", calls: 2, failure_rate: 0.5, avg_ms: 450, p95_ms: 500, last_at: 1_784_635_000, last_error: "ValueError: 缺少 API Key" },
+    ],
+  },
+});
+
 const pluginCapabilitiesFixture = {
   host_version: APP_VERSION,
   plugin_api_version: "1.0",
@@ -319,6 +368,19 @@ export async function installApiFixture(page: Page): Promise<{ assertClean: () =
     const pathname = new URL(request.url()).pathname;
     if (!pathname.startsWith("/api/")) {
       await route.continue();
+      return;
+    }
+    if (request.method() === "GET" && pathname === "/api/plugin-ui/cards") {
+      const params = new URL(request.url()).searchParams;
+      const slot = params.get("slot") || "";
+      const pluginKey = params.get("plugin_key");
+      const cards = slot === "plugin.overview" && pluginKey ? [hostStatsCardFixture(pluginKey)] : [];
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ slot, cards, warnings: [] }) });
+      return;
+    }
+    const cardDataMatch = pathname.match(/^\/api\/plugin-ui\/cards\/([^/]+)\/_host\.stats\/data$/);
+    if (request.method() === "POST" && cardDataMatch) {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(hostStatsCardDataFixture(decodeURIComponent(cardDataMatch[1]))) });
       return;
     }
     if (request.method() === "POST" && pathname === "/api/system/check-update") {

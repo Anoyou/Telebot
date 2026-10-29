@@ -324,6 +324,63 @@ final class WorkspaceUITests: XCTestCase {
         return element.waitForExistence(timeout: 3)
     }
 
+    /// 插件声明式 UI（iOS 0.14.0）：plugin.overview 原生卡片（宿主「运行统计」、插件卡、失败只影响本卡），
+    /// 以及契约里 iOS 新补的控件与「此控件需要更新 App」只读提示。
+    func testPluginDeclarativeWidgetsAndCards() {
+        let app = launch()
+        app.tabBars.buttons["插件"].tap()
+        let pluginCard = app.buttons["plugin.card.widget_gallery"]
+        XCTAssertTrue(reveal(pluginCard, in: app))
+        pluginCard.tap()
+
+        // 卡片 DSL：运行统计（stats + table）在插件详情顶部
+        XCTAssertTrue(app.staticTexts["运行统计"].waitForExistence(timeout: 10))
+        let eventRow = app.descendants(matching: .any)["plugin.uicard.row.on_event"].firstMatch
+        XCTAssertTrue(eventRow.waitForExistence(timeout: 10))
+        XCTAssertTrue(eventRow.label.contains("事件处理"), eventRow.label)
+        XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "122")).firstMatch.exists)
+        // 插件自己的卡（action 数据源）正常显示；另一张读取超时的卡只在本卡显示「已停止工作 · 重试」
+        let failed = app.descendants(matching: .any)["plugin.uicard.failed"].firstMatch
+        XCTAssertTrue(reveal(failed, in: app))
+        XCTAssertTrue(failed.label.contains("已停止工作"), failed.label)
+        XCTAssertTrue(app.buttons["plugin.uicard.retry.broken"].exists)
+        XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "42")).firstMatch.exists)
+
+        // 配置控件
+        app.swipeDown(); app.swipeDown()
+        XCTAssertTrue(app.buttons["账号配置"].waitForExistence(timeout: 5))
+        app.buttons["账号配置"].tap()
+        XCTAssertTrue(app.buttons["plugin.config.edit"].waitForExistence(timeout: 5))
+        app.buttons["plugin.config.edit"].tap()
+        let configList = app.buttons["plugin.config.configList.回复规则"]
+        XCTAssertTrue(configList.waitForExistence(timeout: 10))
+        XCTAssertTrue(configList.label.contains("1 项"), configList.label)
+        XCTAssertTrue(reveal(app.buttons["plugin.config.allowedPeers.生效会话"], in: app))
+        XCTAssertTrue(reveal(app.buttons["plugin.config.multiSelect.生效星期"], in: app))
+        XCTAssertTrue(reveal(app.buttons["plugin.config.secretList.Token 池"], in: app))
+        let unknown = app.descendants(matching: .any)["plugin.config.unknownWidget"].firstMatch
+        XCTAssertTrue(reveal(unknown, in: app))
+        XCTAssertTrue(unknown.label.contains("此控件需要更新 App"), unknown.label)
+        // 未知控件不能编辑：没有对应的文本框
+        XCTAssertFalse(app.textFields["主题色"].exists)
+
+        // 密钥列表只显示遮罩
+        app.buttons["plugin.config.secretList.Token 池"].tap()
+        let saved = app.descendants(matching: .any)["plugin.config.secretList.item.0"].firstMatch
+        XCTAssertTrue(saved.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "abcd···wxyz")).firstMatch.exists)
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+
+        // 对象列表：每项一行摘要，点开编辑
+        app.swipeDown(); app.swipeDown(); app.swipeDown()
+        XCTAssertTrue(configList.waitForExistence(timeout: 5))
+        configList.tap()
+        let rule = app.buttons["plugin.config.configList.item.0"]
+        XCTAssertTrue(rule.waitForExistence(timeout: 5))
+        XCTAssertTrue(rule.label.contains("问候"), rule.label)
+        XCTAssertTrue(rule.label.contains("你好 → 你好呀"), rule.label)
+    }
+
     func testPluginAccountStateIsSeparateFromGlobalMaintenance() {
         let app = launch()
         app.tabBars.buttons["插件"].tap()

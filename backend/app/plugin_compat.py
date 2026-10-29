@@ -127,13 +127,32 @@ def normalize_legacy_feature_config(plugin_key: str | None, config: dict[str, An
     return normalized
 
 
-# 配置里用“多 Token 列表”保存密钥、需要专用遮罩 / 保留逻辑的插件（实现在 api/features.py）。
-# 计划替换为通用 schema 声明 ``x-secret-list``。
+# 配置里用“多 Token 列表”保存密钥的旧版插件。0.110.0 起通用 schema 声明 ``x-secret-list``
+# （services/plugin_secret_list.py）取代写死逻辑；这里只为没有声明的旧版本补一份等价声明。
 MULTI_TOKEN_CONFIG_PLUGINS: frozenset[str] = frozenset({CHATGPT_IMAGE})
+LEGACY_SECRET_LIST_FIELDS: dict[str, dict[str, dict[str, str]]] = {
+    CHATGPT_IMAGE: {
+        "tokens": {"secret_field": "token", "note_field": "note", "id_field": "token_id", "legacy_field": "token"},
+    },
+}
 
 
 def uses_multi_token_config(plugin_key: str | None) -> bool:
     return str(plugin_key or "") in MULTI_TOKEN_CONFIG_PLUGINS
+
+
+def legacy_secret_list_fields(plugin_key: str | None, schema: Any = None) -> dict[str, dict[str, str]]:
+    """旧版插件（config_schema 没有 ``x-secret-list``）的等价密钥列表声明。"""
+
+    specs = LEGACY_SECRET_LIST_FIELDS.get(str(plugin_key or ""))
+    if not specs:
+        return {}
+    properties = schema.get("properties") if isinstance(schema, dict) else None
+    if isinstance(properties, dict) and any(
+        isinstance(field, dict) and field.get("x-secret-list") for field in properties.values()
+    ):
+        return {}
+    return {key: dict(value) for key, value in specs.items()}
 
 
 # ─────────────────────────────────────────────────────
