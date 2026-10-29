@@ -80,6 +80,8 @@ _PAYMENT_RELEASE = "0.111.0-beta.1"
 _P4A_RELEASE = "0.112.0-beta.1"
 # P4b（非资金业务下沉：入口策略声明、扩展点 provides、规则编辑器 slot）发布的宿主版本；合并时随版本号顺延。
 _P4B_RELEASE = "0.112.0-beta.2"
+# 第 17 轮（P4b 收尾：旧入口 key 声明 legacy_entry_keys）发布的宿主版本；合并时随版本号顺延。
+_R17_RELEASE = "0.112.0-beta.3"
 
 _DOC = "docs/PLUGIN-API-REFERENCE.md"
 
@@ -350,6 +352,17 @@ CAPABILITIES += (
         plugin_api="1.5",
         summary="plugin.json ui.rule_editor 按入口声明交互规则编辑器参数区（schema / defaults / 启动词 / 提示），ui.cards 可用 slot interaction.rule_editor",
         doc=f"{_DOC}#规则编辑器参数区uirule_editor",
+    ),
+)
+
+# ── P4b 收尾：旧入口 key 声明（Plugin API 1.6）──
+CAPABILITIES += (
+    Capability(
+        name="interaction.legacy_entry_keys",
+        since=_R17_RELEASE,
+        plugin_api="1.6",
+        summary="interaction_entries[].legacy_entry_keys 声明插件早期用过的旧入口 key（每项 key + 可选 session_scope / participant_policy / prize，与兜底入口表一行等价，不算正式入口）；声明后宿主不再查兜底入口表。旧宿主忽略，照旧走兜底表，结论相同",
+        doc=f"{_DOC}#旧入口-key-声明legacy_entry_keys",
     ),
 )
 

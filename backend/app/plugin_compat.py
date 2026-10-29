@@ -37,7 +37,11 @@ NON_CORE_OPTIONAL_PLUGIN_KEYS: frozenset[str] = frozenset({AUTO_REPLY, AUTOREPEA
 
 # ─────────────────────────────────────────────────────
 # 交互入口兜底（旧插件 manifest 没声明 session_scope / participant_policy / prize 时才用）
-# 计划移除：Plugin API 2.0。新插件请在 interaction_entries[] 里声明。
+# 插件任一入口写了 entry_policy 或 legacy_entry_keys 后整张表对它不再生效。已自带声明的版本：
+#   game24 1.1.18+ / pt_promote 1.0.30+ / blackjack 1.0.33+（entry_policy，0.112.0-beta.2+）；
+#   math10 1.0.15+ / dice_grid_hunt 1.1.39+ / guess_number 1.0.22+（legacy_entry_keys，0.112.0-beta.3+）。
+# 表本身只为这些插件更早、没有声明的版本保留（golden：tests/test_plugin_entries_r17.py）。
+# 计划移除：Plugin API 2.0。新插件请在 interaction_entries[] 里声明，不要再往这里加条目。
 # ─────────────────────────────────────────────────────
 FALLBACK_CHAT_SESSION_MODULE_ENTRIES: frozenset[tuple[str, str]] = frozenset(
     {

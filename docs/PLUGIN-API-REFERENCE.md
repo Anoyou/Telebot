@@ -2885,6 +2885,7 @@ __all__ = ["PLUGIN_CLASS", "MANIFEST"]
 | 转账通知解析扩展点：`payment.sources`（`plugin.json` 的 `payment_sources` + 模块导出 `parse_payment_notice(text, meta)`，见 [转账通知解析（payment_sources）](#转账通知解析payment_sources)） | 0.111.0-beta.1（旧宿主忽略 `payment_sources`，插件装上不会被调用） |
 | 插件页面与菜单（Plugin API 1.4）：`ui.pages`（插件自带 HTML 页面 + Bridge）、`ui.actions`（菜单项）、`hooks.storage_read`（卡片 / 配置钩子 / 页面动作里只读 `ctx.storage`）、`ai.models.metadata`（`ai.models@1` 只增显示名 / 可用状态 / 成本档） | 0.112.0-beta.1（iOS 0.15.0 起显示页面与菜单；旧宿主忽略 `ui.pages` / `ui.actions`，卡片钩子里 `ctx.storage` 为 None；旧 App 不显示新入口、不报错） |
 | 业务下沉（Plugin API 1.5）：`interaction.entry_policy`（`interaction_entries[].entry_policy`）、`provides.ai.image_backend`（`plugin.json` 的 `provides`）、`ui.rule_editor`（`ui.rule_editor` + 卡片 slot `interaction.rule_editor`） | 0.112.0-beta.2（旧宿主忽略这三项声明；顶层字段照写即可两边一致） |
+| 旧入口 key 声明（Plugin API 1.6）：`interaction.legacy_entry_keys`（`interaction_entries[].legacy_entry_keys`，见 [旧入口 key 声明](#旧入口-key-声明legacy_entry_keys)） | 0.112.0-beta.3（旧宿主忽略该字段、照旧走兜底入口表，结论相同；不要为它提高最低版本） |
 
 - 想兼容更旧的平台时不要提高最低版本，而是先探测再用，见下一节 [能力协商与 Plugin API 版本](#能力协商与-plugin-api-版本)。
 - 声明 `requires_platform_capabilities` 的 `manifest.py` 在 0.72 之前的平台上导入就会失败，因此现在所有新插件的最低版本至少是 `0.72.0-beta.2`。
@@ -2915,7 +2916,7 @@ else:  # 旧宿主：退回旧属性探测
 | `caps.version(name)` | 能力版本；不支持或当前 facade 不适用时为 `0` |
 | `caps.names()` / `caps.as_dict()` | 当前上下文支持的全部能力 |
 | `name in caps` | 等价于 `caps.has(name)` |
-| `caps.plugin_api` / `caps.host_version` | 宿主 Plugin API 版本（如 `1.5`）与 TelePilot 版本 |
+| `caps.plugin_api` / `caps.host_version` | 宿主 Plugin API 版本（如 `1.6`）与 TelePilot 版本 |
 
 - `messages.*` 能力与当前 `ctx.messages` facade 有关：同一插件在交互 Bot 入口（`entry`）、命令 / 后台任务（`live`）、UserBot Event Bus 投递（`buffered`）里拿到的 facade 不同。例如 `messages.live_inline_edit` 在 `buffered` facade 上为 `False`，因为那里只能缓冲动作、没有实时 apply。`runtime.*` / `manifest.*` 是宿主级能力，与 facade 无关。
 - 旧探测写法继续可用：`getattr(ctx.messages, "rich_table_compact", False)`、`inline_rich_edit`、`live_inline_edit`、`rich_table_default_style`、`guest_reply_markup` 这些类属性现在由注册表生成，与 `ctx.capabilities` 结果一致。注册表之外的探测（`ctx.skills is None`、`getattr(ctx.ai, "vision_enabled", False)`、`hasattr(ctx.messages, "edit_rich")`、参数级新增用 `inspect.signature` 或捕获 `TypeError`）照旧。
@@ -2950,12 +2951,13 @@ else:  # 旧宿主：退回旧属性探测
 | `ui.rules_page` / `rules.dry_run` | — | 宿主级 | 0.110.0-beta.2 |
 | `payment.sources` | — | 宿主级 | 0.111.0-beta.1 |
 | `interaction.entry_policy` / `provides.ai.image_backend` / `ui.rule_editor` | — | 宿主级 | 0.112.0-beta.2 |
+| `interaction.legacy_entry_keys` | — | 宿主级 | 0.112.0-beta.3 |
 
 以注册表与 `GET /api/plugins/capabilities` 为准；本表随宿主发版同步。
 
 **Plugin API 版本（`plugin_api`）**
 
-- 宿主提供的 Plugin API 版本是 `MAJOR.MINOR`（当前 `1.5`；`1.0` = 0.107.0，`1.1` = 0.108.0 通用交互原语，`1.2` = 0.109.0 消息管线中间件，`1.3` = 0.110.0 声明式 UI，`1.4` = 0.112.0-beta.1 插件页面与菜单，`1.5` = 0.112.0-beta.2 业务下沉：`entry_policy` / `provides` / `ui.rule_editor`；0.110.0-beta.2 的表单契约 2 / 通用规则页、0.111.0-beta.1 的转账通知解析扩展点 `payment_sources` 都是同一 MINOR 内的向后兼容新增，没有再升版本）：新增向后兼容的接口 / 能力只升 MINOR；删除或改变已有接口语义才升 MAJOR，并且要先在 [弃用登记](#弃用登记) 里公告至少一个 minor 宿主版本。
+- 宿主提供的 Plugin API 版本是 `MAJOR.MINOR`（当前 `1.6`；`1.0` = 0.107.0，`1.1` = 0.108.0 通用交互原语，`1.2` = 0.109.0 消息管线中间件，`1.3` = 0.110.0 声明式 UI，`1.4` = 0.112.0-beta.1 插件页面与菜单，`1.5` = 0.112.0-beta.2 业务下沉：`entry_policy` / `provides` / `ui.rule_editor`，`1.6` = 0.112.0-beta.3 旧入口 key 声明 `legacy_entry_keys`；0.110.0-beta.2 的表单契约 2 / 通用规则页、0.111.0-beta.1 的转账通知解析扩展点 `payment_sources` 都是同一 MINOR 内的向后兼容新增，没有再升版本）：新增向后兼容的接口 / 能力只升 MINOR；删除或改变已有接口语义才升 MAJOR，并且要先在 [弃用登记](#弃用登记) 里公告至少一个 minor 宿主版本。
 - 插件可以在 `plugin.json` 里声明兼容范围，宿主在执行插件代码前校验，不满足时拒绝加载并说明原因：
 
 ```json
@@ -3111,7 +3113,7 @@ models = await ctx.host.read("ai.models@1", enabled_only=True)
 
 #### 入口策略（policy）
 
-能力 `runtime.entry_policy`。交互入口的参与方式与会话边界只从插件声明里读：`interaction_entries[]` 的 `session_scope`（见 [interaction_entries 迁移字段](#interaction_entries-迁移字段)）、`participant_policy`（`open_race` / `solo_owner` / `paid_pool` / `notify_only`）与入口 schema 里是否有 `prize`（是否有奖）。宿主不再按插件 key 写死这些判断；没有声明的旧插件按 `app/plugin_compat.py` 的兜底入口表推断（计划 Plugin API 2.0 移除）。注册表 `summary` 里的“policy”指的就是这三项声明，不存在名为 `policy` 的单独字段。
+能力 `runtime.entry_policy`。交互入口的参与方式与会话边界只从插件声明里读：`interaction_entries[]` 的 `session_scope`（见 [interaction_entries 迁移字段](#interaction_entries-迁移字段)）、`participant_policy`（`open_race` / `solo_owner` / `paid_pool` / `notify_only`）与入口 schema 里是否有 `prize`（是否有奖）。宿主不再按插件 key 写死这些判断；没有声明的旧插件按 `app/plugin_compat.py` 的兜底入口表推断（计划 Plugin API 2.0 移除）；插件写了 `entry_policy` 或 `legacy_entry_keys` 后宿主不再查这张表。注册表 `summary` 里的“policy”指的就是这三项声明，不存在名为 `policy` 的单独字段。
 
 #### 入口策略声明（entry_policy）
 
@@ -3137,7 +3139,32 @@ Plugin API 1.5，TelePilot 0.112.0-beta.2+，能力 `interaction.entry_policy`�
 
 - **旧插件 + 新宿主**：没写 `entry_policy` 的插件照旧按顶层字段 → 兜底入口表推断，结果与 0.110 完全相同（兜底表至少保留到 Plugin API 2.0）。
 - **新插件 + 旧宿主**（≤ 0.110）：旧宿主忽略 `entry_policy`，所以**顶层字段要照常写、并与 `entry_policy` 一致**；这样新旧宿主得出同一结论，不需要 `ctx.capabilities` 探测。插件库 `game24` / `pt_promote` / `blackjack` 就是这样写的（`tests/test_r16_entry_policy_provides.py` 守护）。
-- 插件的兜底表里还有它自己没声明的旧入口 key（例如 `math10` 的 `start_math10`、`dice_grid_hunt` 的 `answer_dice_grid_hunt`、`guess_number` 的 `start_game`）时，**先把这些入口补进 `interaction_entries` 再写 `entry_policy`**，否则这些旧规则会失去兜底推断。
+- 插件在兜底表里还有自己没正式声明的旧入口 key（例如 `math10` 的 `start_math10`、`dice_grid_hunt` 的 `answer_dice_grid_hunt`、`guess_number` 的 `start_game`）时，**不要写 `entry_policy`，也不要把旧 key 补成正式入口**：0.112.0-beta.2 见到 `entry_policy` 就整表跳过兜底，旧 key 会失去推断；补成正式入口则入口变成多个（“单入口推断”失效），旧 key 还会继承正式入口的 schema。改用下一节的 `legacy_entry_keys`。
+
+#### 旧入口 key 声明（legacy_entry_keys）
+
+Plugin API 1.6，TelePilot 0.112.0-beta.3+，能力 `interaction.legacy_entry_keys`。插件把早期用过、已不再是正式入口、但存量规则里可能还写着的旧入口 key 写在正式入口下面，每一项与兜底入口表的一行完全等价：
+
+```json
+{
+  "key": "start_math_game",
+  "session_scope": "chat",
+  "legacy_entry_keys": [{"key": "start_math10", "session_scope": "chat"}]
+}
+```
+
+| 字段 | 取值 | 说明 |
+| --- | --- | --- |
+| `key` | 字符串 | 旧入口 key（规则里的 `module_action`）；与正式入口同名时忽略，正式入口优先 |
+| `session_scope` | `chat` / `user` / `none` | 该旧 key 的会话边界；不写 = 未声明（运行时用规则自己的 `concurrency`） |
+| `participant_policy` | `open_race` / `solo_owner` / `paid_pool` / `notify_only` | 不写 = 未声明 |
+| `prize` | `true` / `false` | 是否有奖；不写 = 未声明（不按正式入口的 schema 推断） |
+
+- 旧 key **不算正式入口**：不参与“规则没写 `module_action` 时取唯一入口”的推断，`declared_module_entry_manifest` 不返回它（时限按默认 15 秒、事件与规则编辑器都按未知入口），和兜底表时代完全一样；插件代码里照旧自己接受这个 key。
+- 任一入口写了 `legacy_entry_keys`（哪怕是空列表）就和写了 `entry_policy` 一样，宿主不再查兜底表；所以要把兜底表里属于本插件、而正式入口没覆盖的旧 key 全部列出来。
+- **新插件 + 旧宿主**（0.110 / 0.112）：旧宿主忽略 `legacy_entry_keys`；只要插件没写 `entry_policy`，旧宿主照旧走兜底表，结论相同，不需要提高 `min_telepilot_version`。
+- **旧插件 + 新宿主**：没写的插件照旧走兜底表（兜底表至少保留到 Plugin API 2.0）。
+- 插件库 `math10`（1.0.15+，`start_math10`）、`dice_grid_hunt`（1.1.39+，`answer_dice_grid_hunt`）、`guess_number`（1.0.22+，`start_game`）就是这样写的；宿主 `app/tests/test_plugin_entries_r17.py` 用改动前宿主生成的 golden 逐字段比对，插件库 `tests/test_r17_legacy_entry_keys.py` 守护声明与兜底表一致。
 
 #### 扩展点（provides）
 

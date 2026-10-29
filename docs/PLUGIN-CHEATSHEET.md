@@ -68,6 +68,7 @@
 - `on_message` 是旧消息监听兼容 hook；新增 Telegram 交互优先写 `on_event` 标准事件入口，`on_interaction` 只作为迁移桥。
 - 已有 `interaction_entries` 插件迁移时，要把入口事件映射到 `event_subscriptions`，把 `payload_contract/result_contract/settlement` 转成标准信封和标准 action。
 - `interaction_entries[].session_scope` 的迁移含义：群局映射为 `session.scope=chat`，个人流程映射为 `session.scope=user`，一次性动作映射为无持久 session。
+- 改过入口 key 的老插件：存量规则里的旧 key 写进正式入口的 `legacy_entry_keys`（`[{"key": "旧key", "session_scope": "chat"}]`，0.112.0-beta.3+，旧宿主忽略），不要为它写 `entry_policy` 或补成第二个正式入口，见 [旧入口 key 声明](./PLUGIN-API-REFERENCE.md#旧入口-key-声明legacy_entry_keys)。
 - 规则 `concurrency=user` 只是触发频控粒度，不等于插件会话 key。
 - 抢答、竞猜、抽奖要加锁和二次检查；禁用、热重载、超时和卸载都要清理状态。
 - 外部请求必须有 timeout；日志里不要写 token、session、完整原生 payload、隐私消息或完整文件路径。

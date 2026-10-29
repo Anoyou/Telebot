@@ -1,0 +1,602 @@
+{
+ "math10": {
+  "old": {
+   "version": "1.0.14",
+   "interaction_entries": [
+    {
+     "key": "start_math_game",
+     "title": "随机算数题",
+     "description": "转账命中或模块关键词触发后，由交互 Bot 开启一局随机算数题。",
+     "interaction_profile": "session_game",
+     "launch_mode": "bridge",
+     "session_scope": "chat",
+     "events": [
+      "payment_confirmed",
+      "keyword",
+      "message",
+      "callback_query",
+      "session_close"
+     ],
+     "preserve_command_trigger": true,
+     "payload_contract": {
+      "required_envelope": [
+       "source",
+       "actor",
+       "trigger",
+       "session"
+      ],
+      "required_event_fields": [
+       "type",
+       "chat_id"
+      ]
+     },
+     "result_contract": {
+      "actions": [
+       "send_message",
+       "edit_message",
+       "send_photo",
+       "send_file",
+       "payout",
+       "end_session",
+       "result",
+       "settlement"
+      ]
+     },
+     "settlement": {
+      "mode": "announce_only",
+      "winner_field": "actor.user_id",
+      "amount_field": "prize"
+     },
+     "input_schema": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+       "prize": {
+        "type": "integer",
+        "title": "奖金",
+        "default": 123,
+        "minimum": 1
+       },
+       "valid_seconds": {
+        "type": "integer",
+        "title": "平台会话有效期（秒）",
+        "default": 900,
+        "minimum": 30,
+        "maximum": 86400
+       }
+      },
+      "required": [
+       "prize"
+      ]
+     }
+    }
+   ]
+  },
+  "new": {
+   "version": "1.0.15",
+   "interaction_entries": [
+    {
+     "key": "start_math_game",
+     "title": "随机算数题",
+     "description": "转账命中或模块关键词触发后，由交互 Bot 开启一局随机算数题。",
+     "interaction_profile": "session_game",
+     "launch_mode": "bridge",
+     "session_scope": "chat",
+     "legacy_entry_keys": [
+      {
+       "key": "start_math10",
+       "session_scope": "chat"
+      }
+     ],
+     "events": [
+      "payment_confirmed",
+      "keyword",
+      "message",
+      "callback_query",
+      "session_close"
+     ],
+     "preserve_command_trigger": true,
+     "payload_contract": {
+      "required_envelope": [
+       "source",
+       "actor",
+       "trigger",
+       "session"
+      ],
+      "required_event_fields": [
+       "type",
+       "chat_id"
+      ]
+     },
+     "result_contract": {
+      "actions": [
+       "send_message",
+       "edit_message",
+       "send_photo",
+       "send_file",
+       "payout",
+       "end_session",
+       "result",
+       "settlement"
+      ]
+     },
+     "settlement": {
+      "mode": "announce_only",
+      "winner_field": "actor.user_id",
+      "amount_field": "prize"
+     },
+     "input_schema": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+       "prize": {
+        "type": "integer",
+        "title": "奖金",
+        "default": 123,
+        "minimum": 1
+       },
+       "valid_seconds": {
+        "type": "integer",
+        "title": "平台会话有效期（秒）",
+        "default": 900,
+        "minimum": 30,
+        "maximum": 86400
+       }
+      },
+      "required": [
+       "prize"
+      ]
+     }
+    }
+   ]
+  }
+ },
+ "dice_grid_hunt": {
+  "old": {
+   "version": "1.1.38",
+   "interaction_entries": [
+    {
+     "key": "start_dice_grid_hunt",
+     "title": "开始九宫格竞猜",
+     "description": "由交互 Bot 在群内开启一局九宫格骰子竞猜。",
+     "interaction_profile": "session_game",
+     "launch_mode": "hybrid",
+     "session_scope": "chat",
+     "events": [
+      "command",
+      "payment_confirmed",
+      "keyword",
+      "message",
+      "callback_query",
+      "session_expired",
+      "session_close"
+     ],
+     "triggers": {
+      "command": "dicegrid"
+     },
+     "preserve_command_trigger": true,
+     "command_fallback": {
+      "enabled": true,
+      "command": "dicegrid",
+      "mode": "hint_only"
+     },
+     "session_policy": {
+      "ttl_seconds": 90,
+      "duplicate_start": "reject",
+      "close_on": [
+       "winner",
+       "timeout",
+       "session_close"
+      ]
+     },
+     "payload_contract": {
+      "required_envelope": [
+       "source",
+       "actor",
+       "trigger",
+       "session"
+      ],
+      "required_event_fields": [
+       "type",
+       "chat_id"
+      ]
+     },
+     "result_contract": {
+      "actions": [
+       "send_message",
+       "send_photo",
+       "start_session",
+       "update_session",
+       "edit_caption",
+       "payout",
+       "end_session",
+       "no_session",
+       "result",
+       "settlement"
+      ]
+     },
+     "input_schema": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+       "prize": {
+        "type": "integer",
+        "title": "奖励",
+        "default": 100,
+        "minimum": 1
+       },
+       "timeout": {
+        "type": "integer",
+        "title": "答题限时（秒）",
+        "default": 90,
+        "minimum": 10,
+        "maximum": 86400
+       },
+       "valid_seconds": {
+        "type": "integer",
+        "title": "平台会话有效期（秒）",
+        "default": 90,
+        "minimum": 30,
+        "maximum": 86400
+       }
+      }
+     },
+     "settlement": {
+      "mode": "announce_only",
+      "winner_field": "actor.user_id",
+      "amount_field": "prize"
+     },
+     "dispatch_modes": [
+      "admin_command",
+      "public_keyword"
+     ],
+     "message_channels": {
+      "admin_command": "userbot_reply",
+      "public_keyword": "interaction_bot"
+     },
+     "money_channel": "userbot_reply",
+     "participant_policy": "open_race"
+    }
+   ]
+  },
+  "new": {
+   "version": "1.1.39",
+   "interaction_entries": [
+    {
+     "key": "start_dice_grid_hunt",
+     "title": "开始九宫格竞猜",
+     "description": "由交互 Bot 在群内开启一局九宫格骰子竞猜。",
+     "interaction_profile": "session_game",
+     "launch_mode": "hybrid",
+     "session_scope": "chat",
+     "legacy_entry_keys": [
+      {
+       "key": "answer_dice_grid_hunt",
+       "session_scope": "chat"
+      }
+     ],
+     "events": [
+      "command",
+      "payment_confirmed",
+      "keyword",
+      "message",
+      "callback_query",
+      "session_expired",
+      "session_close"
+     ],
+     "triggers": {
+      "command": "dicegrid"
+     },
+     "preserve_command_trigger": true,
+     "command_fallback": {
+      "enabled": true,
+      "command": "dicegrid",
+      "mode": "hint_only"
+     },
+     "session_policy": {
+      "ttl_seconds": 90,
+      "duplicate_start": "reject",
+      "close_on": [
+       "winner",
+       "timeout",
+       "session_close"
+      ]
+     },
+     "payload_contract": {
+      "required_envelope": [
+       "source",
+       "actor",
+       "trigger",
+       "session"
+      ],
+      "required_event_fields": [
+       "type",
+       "chat_id"
+      ]
+     },
+     "result_contract": {
+      "actions": [
+       "send_message",
+       "send_photo",
+       "start_session",
+       "update_session",
+       "edit_caption",
+       "payout",
+       "end_session",
+       "no_session",
+       "result",
+       "settlement"
+      ]
+     },
+     "input_schema": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+       "prize": {
+        "type": "integer",
+        "title": "奖励",
+        "default": 100,
+        "minimum": 1
+       },
+       "timeout": {
+        "type": "integer",
+        "title": "答题限时（秒）",
+        "default": 90,
+        "minimum": 10,
+        "maximum": 86400
+       },
+       "valid_seconds": {
+        "type": "integer",
+        "title": "平台会话有效期（秒）",
+        "default": 90,
+        "minimum": 30,
+        "maximum": 86400
+       }
+      }
+     },
+     "settlement": {
+      "mode": "announce_only",
+      "winner_field": "actor.user_id",
+      "amount_field": "prize"
+     },
+     "dispatch_modes": [
+      "admin_command",
+      "public_keyword"
+     ],
+     "message_channels": {
+      "admin_command": "userbot_reply",
+      "public_keyword": "interaction_bot"
+     },
+     "money_channel": "userbot_reply",
+     "participant_policy": "open_race"
+    }
+   ]
+  }
+ },
+ "guess_number": {
+  "old": {
+   "version": "1.0.21",
+   "interaction_entries": [
+    {
+     "key": "start_guess_number",
+     "title": "开始猜数字",
+     "description": "由交互 Bot 在群内开启一局猜数字游戏。",
+     "interaction_profile": "session_game",
+     "launch_mode": "hybrid",
+     "session_scope": "chat",
+     "events": [
+      "payment_confirmed",
+      "keyword",
+      "message",
+      "session_close"
+     ],
+     "preserve_command_trigger": true,
+     "command_fallback": {
+      "enabled": true,
+      "command": "guess",
+      "mode": "hint_only"
+     },
+     "session_policy": {
+      "ttl_seconds": 300,
+      "duplicate_start": "reject",
+      "close_on": [
+       "winner",
+       "timeout",
+       "session_close"
+      ]
+     },
+     "payload_contract": {
+      "required_envelope": [
+       "source",
+       "actor",
+       "trigger",
+       "session"
+      ],
+      "required_event_fields": [
+       "type",
+       "chat_id"
+      ]
+     },
+     "result_contract": {
+      "actions": [
+       "send_message",
+       "payout",
+       "end_session",
+       "no_session",
+       "result",
+       "settlement"
+      ]
+     },
+     "input_schema": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+       "prize": {
+        "type": "integer",
+        "title": "奖励",
+        "default": 100,
+        "minimum": 1
+       },
+       "timeout": {
+        "type": "integer",
+        "title": "答题限时（秒）",
+        "default": 300,
+        "minimum": 10,
+        "maximum": 86400
+       },
+       "low": {
+        "type": "integer",
+        "title": "最小数字",
+        "default": 1,
+        "minimum": 1
+       },
+       "high": {
+        "type": "integer",
+        "title": "最大数字",
+        "default": 100,
+        "minimum": 2
+       },
+       "max_attempts": {
+        "type": "integer",
+        "title": "最大猜测次数（0 表示不限）",
+        "default": 0,
+        "minimum": 0,
+        "maximum": 1000
+       }
+      }
+     },
+     "settlement": {
+      "mode": "announce_only",
+      "winner_field": "actor.user_id",
+      "amount_field": "prize"
+     },
+     "dispatch_modes": [
+      "admin_command",
+      "public_keyword"
+     ],
+     "message_channels": {
+      "admin_command": "userbot_reply",
+      "public_keyword": "interaction_bot"
+     },
+     "money_channel": "userbot_reply",
+     "participant_policy": "open_race"
+    }
+   ]
+  },
+  "new": {
+   "version": "1.0.22",
+   "interaction_entries": [
+    {
+     "key": "start_guess_number",
+     "title": "开始猜数字",
+     "description": "由交互 Bot 在群内开启一局猜数字游戏。",
+     "interaction_profile": "session_game",
+     "launch_mode": "hybrid",
+     "session_scope": "chat",
+     "legacy_entry_keys": [
+      {
+       "key": "start_game",
+       "session_scope": "chat"
+      }
+     ],
+     "events": [
+      "payment_confirmed",
+      "keyword",
+      "message",
+      "session_close"
+     ],
+     "preserve_command_trigger": true,
+     "command_fallback": {
+      "enabled": true,
+      "command": "guess",
+      "mode": "hint_only"
+     },
+     "session_policy": {
+      "ttl_seconds": 300,
+      "duplicate_start": "reject",
+      "close_on": [
+       "winner",
+       "timeout",
+       "session_close"
+      ]
+     },
+     "payload_contract": {
+      "required_envelope": [
+       "source",
+       "actor",
+       "trigger",
+       "session"
+      ],
+      "required_event_fields": [
+       "type",
+       "chat_id"
+      ]
+     },
+     "result_contract": {
+      "actions": [
+       "send_message",
+       "payout",
+       "end_session",
+       "no_session",
+       "result",
+       "settlement"
+      ]
+     },
+     "input_schema": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+       "prize": {
+        "type": "integer",
+        "title": "奖励",
+        "default": 100,
+        "minimum": 1
+       },
+       "timeout": {
+        "type": "integer",
+        "title": "答题限时（秒）",
+        "default": 300,
+        "minimum": 10,
+        "maximum": 86400
+       },
+       "low": {
+        "type": "integer",
+        "title": "最小数字",
+        "default": 1,
+        "minimum": 1
+       },
+       "high": {
+        "type": "integer",
+        "title": "最大数字",
+        "default": 100,
+        "minimum": 2
+       },
+       "max_attempts": {
+        "type": "integer",
+        "title": "最大猜测次数（0 表示不限）",
+        "default": 0,
+        "minimum": 0,
+        "maximum": 1000
+       }
+      }
+     },
+     "settlement": {
+      "mode": "announce_only",
+      "winner_field": "actor.user_id",
+      "amount_field": "prize"
+     },
+     "dispatch_modes": [
+      "admin_command",
+      "public_keyword"
+     ],
+     "message_channels": {
+      "admin_command": "userbot_reply",
+      "public_keyword": "interaction_bot"
+     },
+     "money_channel": "userbot_reply",
+     "participant_policy": "open_race"
+    }
+   ]
+  }
+ }
+}

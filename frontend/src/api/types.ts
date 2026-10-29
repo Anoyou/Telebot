@@ -369,6 +369,15 @@ export interface FeatureInteractionEntry {
   input_schema?: Record<string, unknown> | null;
   /** 0.112.0+（Plugin API 1.5）：入口策略显式声明；声明后宿主不再查兜底入口表。 */
   entry_policy?: FeatureEntryPolicy | null;
+  /** 0.112.0-beta.3+（Plugin API 1.6）：旧入口 key 声明（不算正式入口，只提供推断）；声明后宿主不再查兜底入口表。 */
+  legacy_entry_keys?: FeatureLegacyEntryKey[] | null;
+}
+
+export interface FeatureLegacyEntryKey {
+  key: string;
+  session_scope?: "chat" | "user" | "none" | string;
+  participant_policy?: "open_race" | "solo_owner" | "paid_pool" | "notify_only" | string;
+  prize?: boolean;
 }
 
 export interface FeatureEntryPolicy {
