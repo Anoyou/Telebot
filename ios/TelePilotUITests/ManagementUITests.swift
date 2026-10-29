@@ -388,18 +388,20 @@ final class ManagementUITests: XCTestCase {
         XCTAssertTrue(autoReply.label.contains("自动回复"), autoReply.label)
         XCTAssertEqual(autoReply.value as? String, "已启用")
 
-        let hosted = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@", "接入的插件")).firstMatch
-        for _ in 0..<6 where !(hosted.exists && hosted.isHittable) { app.swipeUp() }
-        XCTAssertTrue(hosted.exists, "交互分支应有可展开的插件列表")
-        hosted.tap()
+        // 与 Web 一样，交互分支上挂的插件默认展开；点分支的「接入的插件」可收起。
         let assistant = app.descendants(matching: .any)["platformTree.leaf.content_assistant"].firstMatch
-        XCTAssertTrue(assistant.waitForExistence(timeout: 5))
+        for _ in 0..<6 where !(assistant.exists && assistant.isHittable) { app.swipeUp() }
+        XCTAssertTrue(assistant.waitForExistence(timeout: 5), "交互分支应列出接入的插件")
         XCTAssertTrue(assistant.label.contains("内容整理助手"), assistant.label)
         XCTAssertTrue(assistant.label.contains("+AI"), assistant.label)
+        let hosted = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@", "接入的插件")).firstMatch
+        XCTAssertTrue(hosted.exists)
         let screenshot = XCTAttachment(screenshot: app.screenshot())
         screenshot.name = "能力与插件树"
         screenshot.lifetime = .keepAlways
         add(screenshot)
+        hosted.tap()
+        XCTAssertTrue(assistant.waitForNonExistence(timeout: 5), "点「接入的插件」应收起插件列表")
 
         for _ in 0..<6 where !app.buttons["platformTree.scope"].isHittable { app.swipeDown() }
         app.buttons["platformTree.scope"].tap()

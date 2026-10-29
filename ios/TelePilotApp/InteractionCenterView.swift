@@ -25,6 +25,9 @@ struct InteractionCenterView: View {
     @State private var entries: [InteractionEntryOption] = []
     @State private var peers: [InteractionPeer] = []
     @State private var confirmingDiscard = false
+    /// 已读取的账号。`.task` 在推入规则编辑页再返回时会重新触发，只在换账号（或尚未读到）时读取，
+    /// 否则会用服务器值覆盖刚在编辑页里改的草稿。
+    @State private var loadedAccountID: Int?
 
     private var dirty: Bool { serverValue != nil && draft != baseline }
     private var accountID: Int? { selectedAccountID ?? model.accounts.first?.id }
@@ -82,7 +85,7 @@ struct InteractionCenterView: View {
         .refreshable { if !dirty { await load() } }
         .task(id: accountID) {
             if entries.isEmpty { await loadEntries() }
-            await load()
+            if loadedAccountID != accountID || serverValue == nil { await load() }
         }
     }
 
@@ -290,6 +293,7 @@ struct InteractionCenterView: View {
             let value = try await model.request(path: "/api/accounts/\(id)/interaction-bot")
             guard id == accountID else { return }
             apply(value)
+            loadedAccountID = id
             loadError = nil
             saveMessage = nil
             saveError = nil

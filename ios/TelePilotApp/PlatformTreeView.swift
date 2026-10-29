@@ -16,6 +16,8 @@ struct PlatformTreeView: View {
     @State private var scope = 0
     @State private var accountEnabled: [String: Bool]?
     @State private var names: [String: String] = [:]
+    /// 展开的能力分支插件列表；与 Web 一样，交互分支上挂的插件默认展开。
+    @State private var expandedBranches: Set<String> = ["interaction_bot"]
 
     var body: some View {
         List {
@@ -156,14 +158,14 @@ struct PlatformTreeView: View {
                 Label("已被强制关闭", systemImage: "lock").foregroundStyle(.red)
             }
             if !hosted.isEmpty {
-                DisclosureGroup {
+                DisclosureGroup(isExpanded: branchExpanded(key)) {
                     ForEach(hosted) { leaf in leafRow(leaf, host: key) }
                 } label: {
                     Label("接入的插件 · \(hosted.count) 个", systemImage: "puzzlepiece.extension")
                 }
                 .accessibilityIdentifier("platformTree.branch.\(key).plugins")
             } else if !callers.isEmpty {
-                DisclosureGroup {
+                DisclosureGroup(isExpanded: branchExpanded(key)) {
                     ForEach(callers) { leaf in leafRow(leaf, host: key) }
                 } label: {
                     Label("被 \(callers.count) 个插件调用", systemImage: "puzzlepiece.extension")
@@ -175,6 +177,11 @@ struct PlatformTreeView: View {
         } header: {
             Label(PlatformTree.moduleLabel(key), systemImage: PlatformTree.moduleSymbol(key))
         }
+    }
+
+    private func branchExpanded(_ key: String) -> Binding<Bool> {
+        Binding(get: { expandedBranches.contains(key) },
+                set: { if $0 { expandedBranches.insert(key) } else { expandedBranches.remove(key) } })
     }
 
     private func leafRow(_ leaf: PlatformTree.Leaf, host: String?) -> some View {
