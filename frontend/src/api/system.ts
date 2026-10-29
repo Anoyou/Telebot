@@ -211,8 +211,11 @@ export async function getPlatformCapabilities(): Promise<PlatformCapabilities> {
   return data;
 }
 
-export async function getPlatformTree(): Promise<PlatformTree> {
-  const { data } = await api.get<PlatformTree>("/api/platform/tree");
+/** 运行树；传 accountId 时由服务器按该账号口径计算（插件是否启用、模块被谁需要）。 */
+export async function getPlatformTree(accountId?: number | null): Promise<PlatformTree> {
+  const { data } = await api.get<PlatformTree>("/api/platform/tree", {
+    params: accountId != null ? { account_id: accountId } : undefined,
+  });
   return data;
 }
 

@@ -51,7 +51,20 @@ class CapabilityWorkerConvergence(BaseModel):
     notes: list[str] = Field(default_factory=list)
 
 
+# 服务器能力探测标志：客户端（iOS / Web）据此判断服务器是否支持某项新接口行为，
+# 只追加、不删除；老服务器没有 features 字段 = 全部不支持。
+PLATFORM_FEATURE_FLAGS: dict[str, bool] = {
+    # 0.113.0-beta.2：GET /api/platform/tree 支持 ?account_id= 按账号口径，并返回
+    # channel / entry_kinds / display_name / demanded_by_global / blocked_reason 等字段。
+    "platform_tree_account_scope": True,
+}
+
+
 class PlatformCapabilitiesOut(BaseModel):
+    features: dict[str, bool] = Field(
+        default_factory=lambda: dict(PLATFORM_FEATURE_FLAGS),
+        description="服务器能力探测标志；如 platform_tree_account_scope=true 表示运行树支持按账号口径",
+    )
     modules: list[CapabilityModuleState]
     channels: list[CapabilityChannelState]
     worker_convergence: CapabilityWorkerConvergence = Field(

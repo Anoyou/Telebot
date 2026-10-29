@@ -147,7 +147,7 @@ MANIFEST = Manifest(
 )
 ```
 
-新装或升级时，缺少该字段、写入五模块之外的值、或类型不是数组都会被 schema/安装入口拒绝；存量已安装插件缺声明时继续运行，只在插件叶和看树视图挂 warning，且不参与平台需求推导。`tp_plugin new` 会按 profile 自动生成字段：`session_game` 默认声明 `interaction_bot` 与 `ledger`，`command` / `passthrough` 默认生成 `[]`。
+新装或升级时，缺少该字段、写入五模块之外的值、或类型不是数组都会被 schema/安装入口拒绝；存量已安装插件缺声明时继续运行，只在插件叶和运行树视图挂 warning，且不参与平台需求推导。`tp_plugin new` 会按 profile 自动生成字段：`session_game` 默认声明 `interaction_bot` 与 `ledger`，`command` / `passthrough` 默认生成 `[]`。
 
 启用插件时，平台只会自动点亮它声明且当前允许开启的枝，不会自动关闭无叶需要的枝。值守预设或管理员强制关闭属于修枝剪，优先级高于插件需求；需求不能反向顶开，被阻断时插件启用会明确失败。
 

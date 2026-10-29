@@ -25,6 +25,18 @@
 
 ## [Unreleased]
 
+## [0.113.0-beta.2] - 2026-10-30 · patch（补丁预发布） · 运行树：按账号口径由服务器计算、按插件真实声明归类（直通 / 主通道 / 交互 Bot）、解释模块为什么关不掉
+
+### 运行树：按账号口径由服务器计算、按插件真实声明归类、解释「为什么关不掉」（群内行为零变化）
+
+- 三端统一叫「运行树」（这台服务器开了哪些模块、哪些插件在用）：后端接口文案、Web 插件页视图标题由「树状视图（能力分类）」改为「运行树」。
+- `GET /api/platform/tree` 新增 `?account_id=`：传了就由服务器按该账号口径算插件是否启用（`leaves[].enabled`）和模块被谁需要（`branches[].demanded_by`），回显 `scope`；不传时输出与旧版一致，只追加字段。账号不存在返回 404。
+- 模块全服共用，能不能关仍按全局算；新增 `branches[].demanded_by_global`、`demanders[]`（插件中文名 + 在哪些账号启用）、`blocked_code` / `blocked_reason`（如「本账号没有插件需要 AI，但其他账号启用的插件需要它……」）、`forced_off_reason`、`label`，用来解释「本账号没人用却关不掉」。
+- 「命令」标签名不符实：新增 `leaves[].channel`（`passthrough` 直通 / `main` 主通道 / `interaction` 交互 Bot）、`channel_label` 和 `entry_kinds` / `entry_labels`（命令、事件订阅、消息监听、定时任务、Webhook、交互入口、消息中间件、转账通知解析、Agent 工具），静态读取 plugin.json / manifest.py / 源码 AST 判断，不执行插件代码；旧字段 `attachment` 保留且判定不变。另返回插件中文名 `display_name`、`enabled_global`、`enabled_account_ids`、`package_enabled`、`account_state` / `account_error`。
+- `GET /api/system/capabilities` 新增 `features` 探测标志，`platform_tree_account_scope: true` 供 iOS 判断服务器是否支持按账号口径。
+- Web 插件页运行树改用服务器按账号口径的结果（不再在浏览器里重算），按「直通 / 主通道 / 交互 Bot」三组显示插件和入口种类，模块下方显示服务器给的「关不掉」原因，账号上启用失败的插件标「启用失败」。
+- 文档：`docs/PLATFORM-CAPABILITIES.md` 新增「运行树」一节（字段表）；OpenAPI、前端生成类型、iOS 契约同步（iOS 界面不改）。
+
 ## [0.113.0-beta.1] - 2026-10-30 · minor（次版本预发布） · 插件平台化 P5 第二部分：插件市场（多来源与信任等级）、并发批量更新、官方源自动更新（默认关闭）与健康窗口自动回滚
 
 ### 插件平台：P5 第二部分——插件市场 + 并发批量更新 + 自动更新与健康回滚

@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { Pencil } from "lucide-react";
 
-import type { PlatformModuleKey, PlatformTree } from "@/api/types";
+import type { PlatformModuleKey, PlatformTree, PlatformTreeChannel } from "@/api/types";
 import { Button } from "@/components/ui/button";
 import { moduleLabel, runtimeStateLabel } from "@/lib/navigation";
 import { cn } from "@/lib/utils";
@@ -22,6 +22,20 @@ const BRANCH_ORDER: PlatformModuleKey[] = [
   "dispatch_debug",
 ];
 
+const CHANNEL_LABEL: Record<PlatformTreeChannel, string> = {
+  passthrough: "直通",
+  main: "主通道",
+  interaction: "交互 Bot",
+};
+
+/** 接入通道：新服务器直接给 channel；旧服务器按 attachment 换算（「命令」即主通道）。 */
+function leafChannel(leaf: TreeLeaf): PlatformTreeChannel {
+  if (leaf.channel) return leaf.channel;
+  if (leaf.attachment === "直通") return "passthrough";
+  if (leaf.attachment === "交互") return "interaction";
+  return "main";
+}
+
 function sortLeaves(leaves: TreeLeaf[]): TreeLeaf[] {
   return [...leaves].sort(
     (a, b) => Number(b.enabled) - Number(a.enabled) || a.key.localeCompare(b.key),
@@ -40,16 +54,16 @@ export function PlatformTreeView({
   const [hover, setHover] = useState<HoverTarget>(null);
 
   const groups = useMemo(() => {
-    const trunkLeaves: TreeLeaf[] = [];
+    const passthroughLeaves: TreeLeaf[] = [];
+    const mainLeaves: TreeLeaf[] = [];
     const interactionLeaves: TreeLeaf[] = [];
     for (const leaf of sortLeaves(tree.leaves)) {
-      if (leaf.attachment === "交互") {
-        interactionLeaves.push(leaf);
-      } else {
-        trunkLeaves.push(leaf);
-      }
+      const channel = leafChannel(leaf);
+      if (channel === "interaction") interactionLeaves.push(leaf);
+      else if (channel === "passthrough") passthroughLeaves.push(leaf);
+      else mainLeaves.push(leaf);
     }
-    return { trunkLeaves, interactionLeaves };
+    return { passthroughLeaves, mainLeaves, interactionLeaves };
   }, [tree.leaves]);
 
   const leavesByKey = useMemo(
@@ -62,7 +76,7 @@ export function PlatformTreeView({
 
   // 插件的接入位置由消息通道决定；requires 是额外依赖的平台能力。
   const hostBranchOf = (leaf: TreeLeaf): PlatformModuleKey | null =>
-    leaf.attachment === "交互" ? "interaction_bot" : null;
+    leafChannel(leaf) === "interaction" ? "interaction_bot" : null;
 
   const leafFeedsFrom = (leaf: TreeLeaf, key: PlatformModuleKey): boolean =>
     leaf.requires.includes(key) || hostBranchOf(leaf) === key;
@@ -90,6 +104,10 @@ export function PlatformTreeView({
 
   const renderLeafRow = (leaf: TreeLeaf) => {
     const details = leafDetails?.get(leaf.key);
+    const displayName = details?.displayName || leaf.display_name || leaf.key;
+    const channel = leafChannel(leaf);
+    const entryLabels = (leaf.entry_labels ?? []).filter((label) => label !== CHANNEL_LABEL[channel]);
+    const failed = leaf.account_state === "failed";
     return (
     <div
       key={leaf.key}
@@ -115,18 +133,30 @@ export function PlatformTreeView({
       />
       <span className="min-w-0 max-w-full">
         <span className={cn("break-words font-medium", !leaf.enabled && "text-muted-foreground")}>
-          {details?.displayName || leaf.key}
+          {displayName}
         </span>
-        {details?.displayName && details.displayName !== leaf.key ? (
+        {displayName !== leaf.key ? (
           <span className="ml-1.5 break-all font-mono text-[10px] text-muted-foreground">
             {leaf.key}
           </span>
         ) : null}
       </span>
-      <span className="rounded bg-muted px-1 py-px text-[10px] leading-4 text-muted-foreground">
-        {leaf.attachment}
+      <span
+        data-platform-tree-channel={channel}
+        className="rounded bg-muted px-1 py-px text-[10px] leading-4 text-muted-foreground"
+      >
+        {leaf.channel_label || CHANNEL_LABEL[channel]}
       </span>
-      {!leaf.enabled ? <span className="text-muted-foreground">未启用</span> : null}
+      {entryLabels.length > 0 ? (
+        <span data-platform-tree-entries className="text-[10px] leading-4 text-muted-foreground">
+          {entryLabels.join(" · ")}
+        </span>
+      ) : null}
+      {failed ? (
+        <span className="text-destructive" title={leaf.account_error || undefined}>启用失败</span>
+      ) : !leaf.enabled ? (
+        <span className="text-muted-foreground">未启用</span>
+      ) : null}
       {leaf.requires
         .filter((key) => key !== hostBranchOf(leaf))
         .map((key) => (
@@ -155,7 +185,7 @@ export function PlatformTreeView({
           variant="outline"
           className="ml-auto h-8 shrink-0 px-2.5 text-xs"
           onClick={() => onEditLeaf(leaf.key)}
-          aria-label={`编辑 ${details.displayName || leaf.key}`}
+          aria-label={`编辑 ${displayName}`}
         >
           <Pencil className="mr-1 h-3 w-3" />
           编辑
@@ -205,7 +235,7 @@ export function PlatformTreeView({
         ) : null}
       </div>
       <p className="pb-3 text-[11px] text-muted-foreground/70">
-        按消息入口和平台能力查看插件关系：直通、命令通过主通道接入，交互通过交互 Bot 接入；「+能力」表示该插件还依赖的额外平台能力。
+        {tree.subtitle || "这台服务器开了哪些模块、哪些插件在用"}。插件按接入方式分三组：直通（最先拿到原始消息）、主通道（命令、事件订阅、定时任务等，走账号自己的消息链路）、交互 Bot；「+能力」表示该插件还依赖的额外平台模块。模块全服共用，任一账号的插件在用就关不掉。
       </p>
 
       {/* 干与枝：值守时全树入冬（降饱和），树干状态行保持可读 */}
@@ -215,10 +245,17 @@ export function PlatformTreeView({
           safeWatch && "opacity-90 saturate-[0.35]",
         )}
       >
-        {groups.trunkLeaves.length > 0 ? (
-          <div className="ptree-limb ptree-limb--flush">
-            <div className="pl-1 text-[11px] text-muted-foreground">直接接入 · 消息来自平台主通道</div>
-            <div className="ptree-twigs mt-1.5">{groups.trunkLeaves.map(renderLeafRow)}</div>
+        {groups.passthroughLeaves.length > 0 ? (
+          <div className="ptree-limb ptree-limb--flush" data-platform-tree-group="passthrough">
+            <div className="pl-1 text-[11px] text-muted-foreground">直通 · 最先拿到原始消息，可截断后续处理</div>
+            <div className="ptree-twigs mt-1.5">{groups.passthroughLeaves.map(renderLeafRow)}</div>
+          </div>
+        ) : null}
+
+        {groups.mainLeaves.length > 0 ? (
+          <div className="ptree-limb ptree-limb--flush" data-platform-tree-group="main">
+            <div className="pl-1 text-[11px] text-muted-foreground">主通道 · 命令、事件订阅、定时任务等，走账号自己的消息链路</div>
+            <div className="ptree-twigs mt-1.5">{groups.mainLeaves.map(renderLeafRow)}</div>
           </div>
         ) : null}
 
@@ -262,7 +299,9 @@ export function PlatformTreeView({
                 <span className="text-muted-foreground">
                   {branch.desired ? runtimeStateLabel(branch.state) : "已关闭"}
                 </span>
-                {branch.forced_off ? <span className="text-destructive">强制关闭</span> : null}
+                {branch.forced_off ? (
+                  <span className="text-destructive" title={branch.forced_off_reason || undefined}>强制关闭</span>
+                ) : null}
                 <span className="text-muted-foreground/80">
                   {leaves.length > 0
                     ? `${leaves.length} 个插件`
@@ -270,9 +309,19 @@ export function PlatformTreeView({
                       ? `被 ${branch.demanded_by.length} 个插件调用`
                       : branch.can_turn_off
                         ? "当前无插件调用 · 可关闭"
-                        : "当前无插件调用"}
+                        : (branch.demanded_by_global?.length ?? 0) > 0
+                          ? "本账号无插件调用 · 其他账号在用"
+                          : "当前无插件调用"}
                 </span>
               </div>
+              {branch.desired && !branch.can_turn_off && branch.blocked_reason ? (
+                <p
+                  data-platform-tree-blocked={key}
+                  className="mt-1 max-w-prose pl-1 text-[11px] leading-4 text-muted-foreground"
+                >
+                  关不掉：{branch.blocked_reason}
+                </p>
+              ) : null}
               {leaves.length > 0 ? (
                 <div className={cn("ptree-twigs mt-2", aliveBranch && "ptree-twigs--alive")}>
                   {leaves.map(renderLeafRow)}

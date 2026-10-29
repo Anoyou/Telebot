@@ -227,8 +227,9 @@ export function PluginsHome() {
     queryFn: getFeatureMatrix,
   });
   const treeQ = useQuery({
-    queryKey: ["platform", "tree"],
-    queryFn: getPlatformTree,
+    queryKey: ["platform", "tree", selectedAid],
+    queryFn: () => getPlatformTree(selectedAid),
+    enabled: selectedAid !== null && pluginView === "tree",
     staleTime: 10_000,
   });
   const installedQ = useQuery({
@@ -313,30 +314,8 @@ export function PluginsHome() {
     }
     return details;
   }, [selectedAid, treePluginFeatures]);
-  const accountTree = useMemo(() => {
-    if (!treeQ.data) return null;
-    const enabledForAccount = (key: string) => {
-      const item = accountFeatureByKey.get(key);
-      if (item) return item.enabled && item.state === "active";
-      return selectedAccount?.feature_enabled?.[key] === true
-        || selectedAccount?.features?.[key] === "active";
-    };
-    const leaves = treeQ.data.leaves.map((leaf) => ({
-      ...leaf,
-      enabled: enabledForAccount(leaf.key),
-    }));
-    const enabledKeys = new Set(leaves.filter((leaf) => leaf.enabled).map((leaf) => leaf.key));
-    const branches = Object.fromEntries(
-      Object.entries(treeQ.data.branches).map(([key, branch]) => [
-        key,
-        {
-          ...branch,
-          demanded_by: branch.demanded_by.filter((pluginKey) => enabledKeys.has(pluginKey)),
-        },
-      ]),
-    ) as typeof treeQ.data.branches;
-    return { ...treeQ.data, branches, leaves };
-  }, [accountFeatureByKey, selectedAccount, treeQ.data]);
+  // 运行树按账号口径由服务器计算（0.113.0-beta.2 起，?account_id=），客户端不再自己重算。
+  const accountTree = treeQ.data ?? null;
   const openTreeLeafEditor = (key: string) => {
     const feature = treePluginFeatures.find((item) => item.key === key);
     if (!feature) return;
@@ -550,7 +529,7 @@ export function PluginsHome() {
           <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-muted/20 p-2.5">
             <div>
               <div className="text-sm font-medium">插件视图</div>
-              <div className="text-xs text-muted-foreground">按使用目的浏览卡片，或按平台能力查看树状依赖。</div>
+              <div className="text-xs text-muted-foreground">按使用目的浏览卡片，或在运行树里看模块开关与插件的接入方式。</div>
             </div>
             <Tabs
               className="w-full sm:w-auto"
@@ -564,7 +543,7 @@ export function PluginsHome() {
                 </TabsTrigger>
                 <TabsTrigger value="tree" className="min-w-0 flex-1 gap-1.5 px-2.5 sm:flex-none">
                   <Waypoints className="h-4 w-4" />
-                  树状视图<span className="hidden sm:inline">（能力分类）</span>
+                  运行树
                 </TabsTrigger>
               </TabsList>
             </Tabs>
@@ -719,15 +698,15 @@ export function PluginsHome() {
               <CardHeader className="pb-3">
                 <SectionHeader
                   icon={Waypoints}
-                  title="树状视图（能力分类）"
-                  description="按消息入口和平台能力查看插件关系；悬停任一插件或能力可查看关联。"
+                  title="运行树"
+                  description="这台服务器开了哪些模块、哪些插件在用（按上方所选账号计算）；悬停任一插件或模块可查看关联。"
                 />
               </CardHeader>
               <CardContent>
                 {treeQ.isLoading ? (
-                  <div className="flex items-center gap-2 text-sm text-muted-foreground"><Spinner className="h-4 w-4" />正在读取平台树</div>
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground"><Spinner className="h-4 w-4" />正在读取运行树</div>
                 ) : treeQ.isError ? (
-                  <p className="text-sm text-destructive">树状视图读取失败，请稍后重试。</p>
+                  <p className="text-sm text-destructive">运行树读取失败，请稍后重试。</p>
                 ) : accountTree ? (
                   <PlatformTreeView tree={accountTree} leafDetails={treeLeafDetails} onEditLeaf={openTreeLeafEditor} />
                 ) : null}

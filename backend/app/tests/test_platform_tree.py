@@ -50,6 +50,9 @@ class _Result:
     def scalars(self):
         return _Scalars(self.rows)
 
+    def all(self):
+        return list(self.rows)
+
 
 class _TreeDB:
     def __init__(

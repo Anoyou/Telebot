@@ -603,7 +603,7 @@ app.include_router(webhooks_api.router)  # WP7：入站 Webhook 接口空桩
 app.include_router(system_agent_api.router)  # System Agent：自然语言系统助手
 app.include_router(agent_skills_api.router)  # Agent Skills：安装 / 卸载 / 启用范围
 app.include_router(platform_capabilities_api.router)  # 平台能力热插拔
-app.include_router(platform_tree_api.router)  # WP-T4：平台看树视图
+app.include_router(platform_tree_api.router)  # WP-T4：运行树（原「平台看树」）
 app.include_router(runtime_profiles_api.router)  # 值守运行预设
 
 
