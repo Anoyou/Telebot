@@ -1,4 +1,5 @@
 import XCTest
+import UIKit
 
 @MainActor
 final class ManagementUITests: XCTestCase {
@@ -291,5 +292,191 @@ final class ManagementUITests: XCTestCase {
         screenshot.name = "资金台账汇总与图表"
         screenshot.lifetime = .keepAlways
         add(screenshot)
+    }
+
+    // MARK: 第 17 轮（iOS 0.16.0）
+
+    /// 源码里写死的 SF Symbol 名都必须真实存在（0.15.0 的「App 设置」用了不存在的 `iphone.gear`，真机上没有图标）。
+    /// 扫描 TelePilotApp/*.swift 中 `systemImage:` / `systemName:` / `symbol:` 后面的字面量（含三元表达式两侧），
+    /// 在模拟器上逐个 `UIImage(systemName:)`。不启动 App。
+    func testAllSFSymbolNamesInSourcesExist() throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("TelePilotApp")
+        let files = try FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)
+            .filter { $0.pathExtension == "swift" }
+        XCTAssertFalse(files.isEmpty, "没有读到 App 源文件：\(root.path)")
+        var checked = Set<String>()
+        var missing: [String] = []
+        for file in files {
+            let text = try String(contentsOf: file, encoding: .utf8)
+            for name in SymbolLiteralScanner.names(in: text) where checked.insert(name).inserted {
+                if UIImage(systemName: name) == nil { missing.append("\(file.lastPathComponent): \(name)") }
+            }
+        }
+        XCTAssertGreaterThan(checked.count, 150, "扫描到的符号太少，扫描规则可能失效")
+        XCTAssertTrue(missing.isEmpty, "不存在的 SF Symbol：\(missing.joined(separator: "、"))")
+    }
+
+    /// 交互中心（对齐 Web /interaction）：运行状态、规则列表；在规则编辑页启用一条规则后保存，
+    /// 保存后服务器返回的状态刷新，插件玩法参数（module_config）原样保留。
+    func testInteractionCenterEditsRulesAndSaves() {
+        let app = launch()
+        let entry = app.buttons["交互中心"]
+        XCTAssertTrue(app.buttons["more.accounts"].waitForExistence(timeout: 10))
+        for _ in 0..<6 where !(entry.exists && entry.isHittable) { app.swipeUp() }
+        XCTAssertTrue(entry.waitForExistence(timeout: 5))
+        entry.tap()
+        let runtime = app.descendants(matching: .any)["interaction.status.runtime"].firstMatch
+        XCTAssertTrue(runtime.waitForExistence(timeout: 10))
+        XCTAssertTrue(runtime.label.contains("运行中"), runtime.label)
+        let subscribed = app.descendants(matching: .any)["interaction.status.rules"].firstMatch
+        XCTAssertTrue(subscribed.label.contains("1/2"), subscribed.label)
+        let save = app.buttons["interaction.save"]
+        XCTAssertTrue(save.exists)
+        XCTAssertFalse(save.isEnabled, "没有修改时不能保存")
+
+        let notice = app.buttons["interaction.rule.rule-notice"]
+        for _ in 0..<6 where !(notice.exists && notice.isHittable) { app.swipeUp() }
+        XCTAssertTrue(notice.exists)
+        XCTAssertTrue(notice.label.contains("停用"), notice.label)
+        notice.tap()
+        let enabled = app.switches["interaction.rule.enabled"]
+        XCTAssertTrue(enabled.waitForExistence(timeout: 10))
+        enabled.coordinate(withNormalizedOffset: CGVector(dx: 0.92, dy: 0.5)).tap()
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+
+        XCTAssertTrue(save.waitForExistence(timeout: 5))
+        XCTAssertTrue(save.isEnabled, "修改后应能保存")
+        save.tap()
+        // 保存结果显示在列表顶部，保存后列表会滚回顶部。
+        let saved = app.descendants(matching: .any)["interaction.saved"].firstMatch
+        let saveError = app.descendants(matching: .any)["interaction.saveError"].firstMatch
+        if !saved.waitForExistence(timeout: 10) {
+            for _ in 0..<4 where !(saved.exists || saveError.exists) { app.swipeDown() }
+        }
+        XCTAssertFalse(saveError.exists, saveError.exists ? saveError.label : "")
+        XCTAssertTrue(saved.exists, "保存后应显示成功结果")
+        XCTAssertFalse(save.isEnabled)
+        XCTAssertTrue(subscribed.waitForExistence(timeout: 5))
+        XCTAssertTrue(subscribed.label.contains("2/2"), subscribed.label)
+        for _ in 0..<6 where !(notice.exists && notice.isHittable) { app.swipeUp() }
+        XCTAssertTrue(notice.exists)
+        XCTAssertTrue(notice.label.contains("启用"), notice.label)
+
+        let ask = app.buttons["interaction.rule.rule-ask"]
+        for _ in 0..<6 where !(ask.exists && ask.isHittable) { app.swipeUp() }
+        ask.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["interaction.ruleEditor"].firstMatch.waitForExistence(timeout: 10))
+        let params = app.staticTexts["玩法参数"]
+        for _ in 0..<6 where !params.exists { app.swipeUp() }
+        XCTAssertTrue(params.exists, "保存后插件玩法参数应保留")
+        let screenshot = XCTAttachment(screenshot: app.screenshot())
+        screenshot.name = "交互中心规则编辑"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+    }
+
+    /// 服务器设置里的「能力与插件树」（原「平台运行树」原始文档）：主干、直接接入的插件、能力分支可展开；
+    /// 切换到账号范围后按该账号的插件启用状态显示。
+    func testPlatformTreeShowsNativeHierarchy() {
+        let app = launch()
+        let system = app.buttons["服务器设置"]
+        XCTAssertTrue(app.buttons["more.accounts"].waitForExistence(timeout: 10))
+        for _ in 0..<8 where !(system.exists && system.isHittable) { app.swipeUp() }
+        system.tap()
+        let entry = app.buttons["system.platformTree"]
+        XCTAssertTrue(entry.waitForExistence(timeout: 10))
+        XCTAssertTrue(entry.label.contains("能力与插件树"), entry.label)
+        entry.tap()
+        XCTAssertTrue(app.navigationBars["能力与插件树"].waitForExistence(timeout: 10))
+        let workers = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "1/2 在线")).firstMatch
+        XCTAssertTrue(workers.waitForExistence(timeout: 10))
+        let killSwitch = app.descendants(matching: .any)["platformTree.killSwitch"].firstMatch
+        XCTAssertTrue(killSwitch.label.contains("正常"), killSwitch.label)
+        let autoReply = app.descendants(matching: .any)["platformTree.leaf.auto_reply"].firstMatch
+        XCTAssertTrue(autoReply.waitForExistence(timeout: 5))
+        XCTAssertTrue(autoReply.label.contains("自动回复"), autoReply.label)
+        XCTAssertEqual(autoReply.value as? String, "已启用")
+
+        // 与 Web 一样，交互分支上挂的插件默认展开；点分支的「接入的插件」可收起。
+        let assistant = app.descendants(matching: .any)["platformTree.leaf.content_assistant"].firstMatch
+        for _ in 0..<6 where !(assistant.exists && assistant.isHittable) { app.swipeUp() }
+        XCTAssertTrue(assistant.waitForExistence(timeout: 5), "交互分支应列出接入的插件")
+        XCTAssertTrue(assistant.label.contains("内容整理助手"), assistant.label)
+        XCTAssertTrue(assistant.label.contains("+AI"), assistant.label)
+        let hosted = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@", "接入的插件")).firstMatch
+        XCTAssertTrue(hosted.exists)
+        let screenshot = XCTAttachment(screenshot: app.screenshot())
+        screenshot.name = "能力与插件树"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+        hosted.tap()
+        XCTAssertTrue(assistant.waitForNonExistence(timeout: 5), "点「接入的插件」应收起插件列表")
+
+        for _ in 0..<6 where !app.buttons["platformTree.scope"].isHittable { app.swipeDown() }
+        app.buttons["platformTree.scope"].tap()
+        let backup = app.buttons["备用账号"]
+        XCTAssertTrue(backup.waitForExistence(timeout: 5))
+        backup.tap()
+        let disabled = NSPredicate(format: "value == %@", "未启用")
+        expectation(for: disabled, evaluatedWith: autoReply)
+        waitForExpectations(timeout: 10)
+    }
+}
+
+/// 从 Swift 源码里取出 `systemImage:` / `systemName:` / `symbol:` 参数里的 SF Symbol 字面量。
+/// 只取参数表达式（到同层的逗号或右括号为止）里紧跟在参数名、`?` 或 `:` 之后的字面量，
+/// 这样 `x == "module" ? "puzzlepiece.extension" : "bell.badge"` 只取后两个，不会把比较值当成符号名。
+enum SymbolLiteralScanner {
+    static func names(in text: String) -> [String] {
+        let chars = Array(text)
+        let keys = ["systemImage:", "systemName:", "symbol:"].map { Array($0) }
+        var out: [String] = []
+        var i = 0
+        while i < chars.count {
+            guard let key = keys.first(where: { key in
+                i + key.count <= chars.count && Array(chars[i..<(i + key.count)]) == key
+            }), i == 0 || !(chars[i - 1].isLetter || chars[i - 1].isNumber) else {
+                i += 1
+                continue
+            }
+            var j = i + key.count
+            var depth = 0
+            var last: Character = ":"
+            scan: while j < chars.count {
+                let c = chars[j]
+                switch c {
+                case "\n":
+                    break scan
+                case "\"":
+                    var k = j + 1
+                    var literal = ""
+                    while k < chars.count, chars[k] != "\"", chars[k] != "\n" {
+                        if chars[k] == "\\" { k += 1 }
+                        if k < chars.count { literal.append(chars[k]) }
+                        k += 1
+                    }
+                    if (last == ":" || last == "?"), literal.range(of: #"^[a-z0-9]+(\.[a-z0-9]+)*$"#, options: .regularExpression) != nil {
+                        out.append(literal)
+                    }
+                    last = "\""
+                    j = k + 1
+                    continue scan
+                case "(", "[":
+                    depth += 1
+                case ")", "]":
+                    if depth == 0 { break scan }
+                    depth -= 1
+                case ",", "{":
+                    if depth == 0 { break scan }
+                default:
+                    break
+                }
+                if !c.isWhitespace { last = c }
+                j += 1
+            }
+            i = max(j, i + 1)
+        }
+        return out
     }
 }

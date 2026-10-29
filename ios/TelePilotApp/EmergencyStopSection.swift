@@ -52,8 +52,9 @@ struct EmergencyStopSection: View {
             if let resultMessage {
                 Text(resultMessage).foregroundStyle(.red)
             } else {
-                HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Text(Self.footer)
+                // 0.16.0：ⓘ 前置、说明再缩短，常见 iPhone 宽度（≥375pt）默认字号下一行放下；
+                // 按钮触控区 44pt，图标左缘用负边距对齐分组的文字边距。
+                HStack(alignment: .center, spacing: 2) {
                     Button {
                         showingInfo = true
                     } label: {
@@ -63,12 +64,15 @@ struct EmergencyStopSection: View {
                             .contentShape(.rect)
                     }
                     .buttonStyle(.borderless)
+                    .padding(.leading, -12)
                     .accessibilityLabel("紧急停止说明")
                     .accessibilityIdentifier("more.emergencyStop.info")
                     .popover(isPresented: $showingInfo, arrowEdge: .top) {
                         EmergencyStopInfoView()
                             .presentationCompactAdaptation(.popover)
                     }
+                    Text(Self.footer)
+                        .accessibilityIdentifier("more.emergencyStop.footer")
                 }
             }
         }
@@ -88,7 +92,7 @@ struct EmergencyStopSection: View {
     // 文案依据服务器实现（kill_switch_service.converge_runtime、supervisor、account_bot_runtime）：
     // 开启时停止全部账号 worker 子进程、账号 Bot 与交互 Bot，并阻止它们再启动；
     // 解除时重新启动所有状态为“启用”的账号与 Bot。其余服务不读取该开关。
-    static let footer = "停止所有账号与 Bot 的消息处理，数据和管理台不受影响。"
+    static let footer = "停止全部消息处理，数据和管理台不受影响"
     /// 说明弹层的三段：停止什么 / 不影响 / 如何恢复（原 footer 全文）。
     static let details: [EmergencyStopDetail] = [
         .init(title: "停止什么", symbol: "stop.circle", text: "所有 Telegram 账号的运行进程（其中的插件、自动回复、指令、定时任务随之停止），以及账号 Bot 和交互 Bot 的消息处理；开启期间新启用或恢复的账号也不会运行。"),

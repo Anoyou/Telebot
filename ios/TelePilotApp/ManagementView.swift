@@ -2,15 +2,16 @@ import SwiftUI
 import TelePilotCore
 
 enum ManagementModule: String, CaseIterable, Identifiable {
-    case plugins, operations, ai, logs, ledger, webhooks, system, maintenance
+    case plugins, operations, interaction, ai, logs, ledger, webhooks, system, maintenance
     var id: String { rawValue }
     static var moreCases: [ManagementModule] {
-        [.operations, .logs, .ledger, .webhooks, .system, .maintenance]
+        [.operations, .interaction, .logs, .ledger, .webhooks, .system, .maintenance]
     }
     var title: String {
         switch self {
         case .plugins: "插件中心"
         case .operations: "指令与任务"
+        case .interaction: "交互中心"
         case .ai: "AI 管理"
         case .logs: "日志与诊断"
         case .ledger: "资金台账"
@@ -23,6 +24,7 @@ enum ManagementModule: String, CaseIterable, Identifiable {
         switch self {
         case .plugins: "puzzlepiece.extension"
         case .operations: "terminal"
+        case .interaction: "bubble.left.and.text.bubble.right"
         case .ai: "cpu"
         case .logs: "list.bullet.rectangle"
         case .ledger: "book.closed"
@@ -56,13 +58,14 @@ struct ManagementModuleView: View {
             else if module == .ai { AIWorkspaceView().navigationBarTitleDisplayMode(.inline) }
             else if module == .logs { LogsView() }
             else if module == .ledger { LedgerView() }
+            else if module == .interaction { InteractionCenterView() }
             else {
                 List {
                     switch module {
                     case .plugins: EmptyView()
                     case .operations: operationSections
                     case .ai: aiSections
-                    case .logs, .ledger: EmptyView() // 由 LogsView / LedgerView 承载
+                    case .logs, .ledger, .interaction: EmptyView() // 由 LogsView / LedgerView / InteractionCenterView 承载
                     case .webhooks: webhookSections
                     case .system: systemSections
                     case .maintenance: maintenanceSections
@@ -118,7 +121,8 @@ struct ManagementModuleView: View {
     @ViewBuilder private var systemSections: some View {
         Section("平台") {
             collection("平台能力开关", "/api/system/capabilities", kind: .capabilities, itemsKey: "modules", idField: "key", symbol: "switch.2")
-            document("平台运行树", "/api/platform/tree", symbol: "point.3.filled.connected.trianglepath.dotted")
+            NavigationLink { PlatformTreeView() } label: { Label("能力与插件树", systemImage: "point.3.filled.connected.trianglepath.dotted") }
+                .accessibilityIdentifier("system.platformTree")
             document("平台运行模式", "/api/platform/profile", symbol: "dial.medium", actions: [
                 .init(title: "预览运行模式", path: "/api/platform/profile/dry-run"),
                 .init(title: "应用运行模式", path: "/api/platform/profile/apply"),
