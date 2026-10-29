@@ -13,6 +13,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from .. import plugin_compat
 from ..db.models.command import (
     ALL_COMMAND_TYPES,
     ALL_LLM_MODALITIES,
@@ -147,9 +148,10 @@ class CommandTemplateBase(BaseModel):
             if mode not in ("chat", "search", "image", "video"):
                 raise ValueError("mode 只能是 chat / search / image / video")
             v["mode"] = mode
-            image_backend = str(v.get("image_backend", "codex_image") or "codex_image").strip()
-            if image_backend not in ("codex_image", "llm"):
-                raise ValueError("image_backend 只能是 codex_image / llm")
+            default_backend = plugin_compat.DEFAULT_IMAGE_BACKEND_PLUGIN
+            image_backend = str(v.get("image_backend", default_backend) or default_backend).strip()
+            if image_backend not in plugin_compat.IMAGE_BACKENDS:
+                raise ValueError(f"image_backend 只能是 {' / '.join(plugin_compat.IMAGE_BACKENDS)}")
             if mode == "image":
                 v["image_backend"] = image_backend
             video_backend = str(v.get("video_backend", "plugin") or "plugin").strip()
@@ -166,7 +168,7 @@ class CommandTemplateBase(BaseModel):
                     v["video_plugin_method"] = plugin_method
                 else:
                     v.pop("video_plugin_method", None)
-            needs_provider = (mode != "image" or image_backend != "codex_image") and mode != "video"
+            needs_provider = (mode != "image" or image_backend != default_backend) and mode != "video"
             if not v.get("provider_id"):
                 if needs_provider:
                     raise ValueError("ai 类型必须配置 provider_id（在系统设置 → LLM Provider 里建）")

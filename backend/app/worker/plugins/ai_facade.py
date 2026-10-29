@@ -269,6 +269,7 @@ class PluginAI:
         web_search: bool = False,
         web_search_context_size: str | None = None,
         thinking: str | None = None,
+        extra_body: dict[str, Any] | None = None,
         **_ignored: Any,
     ) -> AIResult:
         """Call a text LLM through TelePilot's shared LLM runtime.
@@ -288,7 +289,18 @@ class PluginAI:
         Provider 会按 ``web_search_api_format`` 临时切到 Responses）。不支持时运行时
         会跳过该 Provider 走 fallback；全部不兼容时抛 :class:`AICapabilityError`。
         联网搜索的引用来源在 ``AIResult.sources``。
+
+        ``extra_body``（0.108.0+，能力 ``ai.extra_body``）：按上游格式白名单透传请求体字段，
+        如 ``{"reasoning_effort": "low"}``；不在白名单或覆盖平台字段时抛 :class:`AIUnavailableError`，
+        选中 Provider 的格式不支持时跳到备用 Provider，全部不支持时抛 :class:`AICapabilityError`。
         """
+
+        from ...services import llm_extra_body
+
+        try:
+            extra_values = llm_extra_body.validate_extra_body(extra_body)
+        except llm_extra_body.ExtraBodyRejected as exc:
+            raise AIUnavailableError(str(exc)) from exc
 
         if tag is not None or tags:
             import warnings
@@ -354,26 +366,30 @@ class PluginAI:
                 estimated_tokens=estimated_tokens,
             )
             # The shared runtime enforces account budgets and records actual usage.
-            result, used_provider, used_fallback = await invoke_ai_runtime(
-                primary,
-                providers,
-                system_prompt,
-                user_prompt,
-                override_model=selected_model,
-                routed_model=routed_model,
-                max_tokens=clamped_tokens,
-                images=image_list or None,
-                web_search=bool(web_search),
-                web_search_context_size=search_size,
-                timeout_seconds=clamped_timeout,
-                account_id=self.account_id,
-                source=f"plugin:{self.plugin_key}",
-                matched_tag=matched_tag,
-                thinking=_normalize_thinking(thinking),
-                # 插件的 timeout_seconds 是整次 complete() 的总时限：重试与备用 Provider
-                # 都在这段时间内完成，主 Provider 超时也能在时限内走到备用（0.106.0-beta.20+）。
-                deadline_seconds=float(clamped_timeout),
-            )
+            extra_token = llm_extra_body.activate(extra_values)
+            try:
+                result, used_provider, used_fallback = await invoke_ai_runtime(
+                    primary,
+                    providers,
+                    system_prompt,
+                    user_prompt,
+                    override_model=selected_model,
+                    routed_model=routed_model,
+                    max_tokens=clamped_tokens,
+                    images=image_list or None,
+                    web_search=bool(web_search),
+                    web_search_context_size=search_size,
+                    timeout_seconds=clamped_timeout,
+                    account_id=self.account_id,
+                    source=f"plugin:{self.plugin_key}",
+                    matched_tag=matched_tag,
+                    thinking=_normalize_thinking(thinking),
+                    # 插件的 timeout_seconds 是整次 complete() 的总时限：重试与备用 Provider
+                    # 都在这段时间内完成，主 Provider 超时也能在时限内走到备用（0.106.0-beta.20+）。
+                    deadline_seconds=float(clamped_timeout),
+                )
+            finally:
+                llm_extra_body.reset(extra_token)
             await plugin_ai_quota.release(
                 quota_ticket,
                 int(result.input_tokens or 0) + int(result.output_tokens or 0),
@@ -596,6 +612,7 @@ class PluginAI:
         timeout_seconds: int | None = None,
         temperature: float | None = None,
         reasoning_effort: str | None = None,
+        extra_body: dict[str, Any] | None = None,
         **_ignored: Any,
     ) -> AsyncIterator[str]:
         """Yield text deltas from providers with native streaming support.
@@ -616,6 +633,8 @@ class PluginAI:
             from .deprecations import note_deprecated
 
             note_deprecated("ai.tag_alias", plugin_key=self.plugin_key, account_id=self.account_id, detail="ctx.ai.stream_complete")
+        if extra_body:
+            raise AIUnavailableError("ctx.ai.stream_complete 暂不支持 extra_body，请改用 ctx.ai.complete")
         system_prompt = str(system or "")
         user_prompt = str(user or "")
         if not system_prompt.strip() and not user_prompt.strip():

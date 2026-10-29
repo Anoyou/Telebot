@@ -2964,7 +2964,7 @@ else:  # 旧宿主：退回旧属性探测
 | `caps.version(name)` | 能力版本；不支持或当前 facade 不适用时为 `0` |
 | `caps.names()` / `caps.as_dict()` | 当前上下文支持的全部能力 |
 | `name in caps` | 等价于 `caps.has(name)` |
-| `caps.plugin_api` / `caps.host_version` | 宿主 Plugin API 版本（如 `1.0`）与 TelePilot 版本 |
+| `caps.plugin_api` / `caps.host_version` | 宿主 Plugin API 版本（如 `1.1`）与 TelePilot 版本 |
 
 - `messages.*` 能力与当前 `ctx.messages` facade 有关：同一插件在交互 Bot 入口（`entry`）、命令 / 后台任务（`live`）、UserBot Event Bus 投递（`buffered`）里拿到的 facade 不同。例如 `messages.live_inline_edit` 在 `buffered` facade 上为 `False`，因为那里只能缓冲动作、没有实时 apply。`runtime.*` / `manifest.*` 是宿主级能力，与 facade 无关。
 - 旧探测写法继续可用：`getattr(ctx.messages, "rich_table_compact", False)`、`inline_rich_edit`、`live_inline_edit`、`rich_table_default_style`、`guest_reply_markup` 这些类属性现在由注册表生成，与 `ctx.capabilities` 结果一致。注册表之外的探测（`ctx.skills is None`、`getattr(ctx.ai, "vision_enabled", False)`、`hasattr(ctx.messages, "edit_rich")`、参数级新增用 `inspect.signature` 或捕获 `TypeError`）照旧。
@@ -2972,7 +2972,7 @@ else:  # 旧宿主：退回旧属性探测
 
 | 能力名 | 旧属性 | 适用 facade | since |
 | --- | --- | --- | --- |
-| `messages.inline_rich_edit` | `inline_rich_edit` | live / entry | 0.106.0-beta.2 |
+| `messages.inline_rich_edit` | `inline_rich_edit` | 全部（0.108.0 起含 buffered） | 0.106.0-beta.2 |
 | `messages.live_inline_edit` | `live_inline_edit` | live / entry | 0.106.0-beta.3 |
 | `messages.rich_table_compact` | `rich_table_compact` | 全部 | 0.106.0-beta.12 |
 | `messages.rich_table_default_style` | `rich_table_default_style` | 全部 | 0.106.0-beta.15 |
@@ -2982,12 +2982,20 @@ else:  # 旧宿主：退回旧属性探测
 | `manifest.min_version_prerelease` | — | 宿主级 | 0.107.0-beta.1 |
 | `runtime.hook_stats` | — | 宿主级 | 0.107.0-beta.1 |
 | `runtime.deprecations` | — | 宿主级 | 0.107.0-beta.1 |
+| `messages.streaming_edit` | `streaming_edit` | live / entry | 0.106.0-beta.20 |
+| `messages.callback_routing` | — | 全部 | 0.108.0-beta.1 |
+| `messages.unified_ops` | — | 全部 | 0.108.0-beta.1 |
+| `messages.bot_api_extra` | — | 全部 | 0.108.0-beta.1 |
+| `ai.extra_body` | — | 宿主级 | 0.108.0-beta.1 |
+| `host.read` | — | 宿主级 | 0.108.0-beta.1 |
+| `host.read.account.admins@1` / `host.read.ai.models@1` / `host.read.chat.allowed@1` / `host.read.plugin.stats@1` | — | 宿主级 | 0.108.0-beta.1 |
+| `runtime.hook_trace` | — | 宿主级 | 0.108.0-beta.1 |
 
 以注册表与 `GET /api/plugins/capabilities` 为准；本表随宿主发版同步。
 
 **Plugin API 版本（`plugin_api`）**
 
-- 宿主提供的 Plugin API 版本是 `MAJOR.MINOR`（当前 `1.0`）：新增向后兼容的接口 / 能力只升 MINOR；删除或改变已有接口语义才升 MAJOR，并且要先在 [弃用登记](#弃用登记) 里公告至少一个 minor 宿主版本。
+- 宿主提供的 Plugin API 版本是 `MAJOR.MINOR`（当前 `1.1`；`1.0` = 0.107.0，`1.1` = 0.108.0 通用交互原语）：新增向后兼容的接口 / 能力只升 MINOR；删除或改变已有接口语义才升 MAJOR，并且要先在 [弃用登记](#弃用登记) 里公告至少一个 minor 宿主版本。
 - 插件可以在 `plugin.json` 里声明兼容范围，宿主在执行插件代码前校验，不满足时拒绝加载并说明原因：
 
 ```json
@@ -3024,5 +3032,119 @@ else:  # 旧宿主：退回旧属性探测
 | `manifest.min_telebot_version` | `plugin.json` / manifest 使用旧字段 `min_telebot_version` | `min_telepilot_version`（可带 beta 号） | 0.15.0 | Plugin API 2.0 |
 | `ai.tag_alias` | `ctx.ai.complete` / `stream_complete` 使用 `tag=` / `tags=` 兼容别名 | `provider_tag=` | 0.25.0 | Plugin API 2.0 |
 | `action.send_via_notice` | 动作 `send_via` / `channel` 使用已下线的 `notice` / `bbot_notice` / `notice_bot` 通道（动作会失败） | `send_via: interaction_bot` 或 `userbot_reply` | 0.36.0 | 已下线（只保留失败提示与计数） |
+| `markup.raw_callback_data` | 插件动作的 `reply_markup` 直接写 `callback_data`（点击按会话范围投递，可能被其它插件或规则收到） | 按钮写 `{"text", "callback": {"data"}}`，订阅 `scope: "own_buttons"` | 0.108.0 | Plugin API 2.0（至少保留到 0.109.0 之后） |
+| `payload.admin_user_ids` | 从 Event Bus payload 的 `owner_user_ids` / `admin_user_ids` 读取管理员名单（0.106.0-beta.14 临时字段，继续下发，只登记不计数） | `reads: ["account.admins@1"]` + `await ctx.host.read("account.admins@1")` | 0.108.0 | Plugin API 2.0 |
 
 宿主侧新增弃用项时：在 `DEPRECATIONS` 登记，在调用点调用 `note_deprecated("<id>", plugin_key=..., account_id=...)`，并同步本表。
+
+### 通用交互原语（Plugin API 1.1，0.108.0-beta.1+）
+
+目标：插件的新交互需求只改插件、不改宿主。下面五项都在能力注册表登记，用 `ctx.capabilities.has(...)` 探测；旧宿主上探测为 `False` 时请退回旧写法。
+
+#### 通用回调路由（own_buttons）
+
+能力 `messages.callback_routing`。任意动作（`send` / `send_rich` / `edit` / `answer_guest_query` / `answer_inline_query` 的结果……）的 `reply_markup` 里，按钮可以不写 `callback_data`，改写：
+
+```python
+await ctx.messages.send_rich(
+    chat_id=chat_id,
+    markdown=answer,
+    reply_markup={"inline_keyboard": [[
+        {"text": "🔄 重试", "callback": {"data": f"retry:{turn_id}"}},
+        {"text": "🔀 换模型", "callback": {"data": {"op": "switch", "turn": turn_id}, "ttl_seconds": 3600}},
+    ]]},
+)
+```
+
+- 宿主为每个这样的按钮签发 `cb1.<token>` 作为真实 `callback_data`（≤ 64 字节），Redis 记下 `token → {plugin_key, account_id, data, origin}`。`data` 可以是字符串或任意 JSON（≤ 4 KB，不再受 64 字节限制）；`ttl_seconds` 默认 7 天，范围 60 秒～30 天。
+- `origin.kind`：`chat`（普通消息，带 `chat_id`）、`inline`（inline 结果 / inline 消息编辑）、`guest`（访客回复，带 `guest_query_id`）、`userbot_text`（UserBot 渠道发出）。签发时还没有 `message_id`。
+- 点击后宿主按 token 找到发按钮的插件，只投递给它：订阅 `{"events": ["callback_query"], "scope": "own_buttons"}` 即可收到，**与会话白名单、chat scope 无关**（访客回复、inline 消息上的按钮同样收得到）。其它插件即使订阅了 `callback_query` 也收不到（Trace reason `callback_not_owned`）。
+- payload 新增统一字段 `callback`：
+
+```json
+{"data": "retry:42", "token": "cb1.…", "plugin_key": "demo",
+ "origin": {"kind": "guest", "guest_query_id": "…"},
+ "clicker": {"user_id": 1, "display_name": "…", "username": "…"},
+ "chat_id": null, "message_id": null, "inline_message_id": "…"}
+```
+
+  兼容旧字段：`payload["callback_data"]`、`source.callback_data`、`inline_callback.data` 也换成插件自己写的 `data`，所以 `filters.callback_data` 照常可用。ACK 照旧用 `answer_callback`。
+- **fail-closed**：Redis 不可用时，点击一律拒绝（提示“按钮暂时不可用”，Trace `callback_token_unavailable`）；token 过期或不存在提示“按钮已过期”（`callback_token_expired`）。发出时 Redis 不可用，签发失败的按钮会被去掉、消息照常发出（动作记录 `callback_token_warnings`）。
+- 平台合成的访客回复原本会去掉 callback 按钮，`cb1.` 按钮因为不依赖 chat/message，会保留。
+- 旧写法（直接写 `callback_data`）原样透传，并计入弃用 `markup.raw_callback_data`。旧宿主不认识 `own_buttons`，会按 `all_allowed_chats` 处理——请先探测能力再声明。
+
+#### 统一 MessageOps
+
+能力 `messages.unified_ops`。`ctx.messages` 的三种 facade（交互入口 `entry`、命令 / 后台任务 `live`、UserBot Event Bus `buffered`）共用一套动作构造与执行器：
+
+- `live` facade 补齐 `send_photo` / `send_file` / `edit_rich` / `edit_caption`，参数与缓冲 facade 完全一致；
+- `live` / `entry` 的单动作方法（`send`、`edit_rich`……）失败时，返回的动作字典带 `errors`（与 `apply()` 结果同结构）；
+- 同一段插件代码在三种上下文里行为一致，差异只剩 `buffered` 没有实时 `apply()`（因此没有 `live_inline_edit`、`streaming_edit`）；`inline_rich_edit` 现在三种 facade 都为真。
+
+#### Bot API 字段透传（bot_api_extra）
+
+能力 `messages.bot_api_extra`。动作（或 `ctx.messages.send(..., bot_api_extra={...})`）可附带白名单内的 Bot API 字段，宿主只把它合并进该动作对应的 Bot API 方法：
+
+| 动作 | 允许的字段 |
+| --- | --- |
+| `send_message` / `send_rich_message` | `disable_notification`、`protect_content`、`message_effect_id`、`message_thread_id`、`direct_messages_topic_id`、`link_preview_options` |
+| `send_photo` | 同上通用字段 + `has_spoiler`、`show_caption_above_media` |
+| `send_file` | 同上通用字段 + `disable_content_type_detection` |
+| `edit_message` | `link_preview_options` |
+| `edit_caption` | `show_caption_above_media` |
+| `pin_message` | `disable_notification` |
+| `answer_callback` | `url`、`cache_time` |
+
+- 平台字段（`chat_id`、`text`、`parse_mode`、`reply_markup`、`reply_parameters`、`business_connection_id`、`allow_paid_broadcast` 等）不能透传；未知字段、非 JSON 值或超过 2 KB 时**整条动作拒绝**，`apply()` 结果的 `errors` 带 `error_code=bot_api_extra_rejected` 与原因。
+- 平台已给出的同名字段优先，透传只补缺；只在交互 Bot 渠道生效（UserBot 渠道忽略）。`payout` 等资金动作不支持透传。
+- Trace 与日志只记字段名（`bot_api_extra_fields`），不记值。
+
+#### AI 请求体透传（extra_body）
+
+能力 `ai.extra_body`。`ctx.ai.complete(..., extra_body={"reasoning_effort": "low"})` 按上游 API 格式白名单透传：
+
+| 上游格式 | 允许的字段 |
+| --- | --- |
+| OpenAI 兼容 `chat_completions` | `reasoning_effort`、`verbosity`、`top_p`、`top_k`、`min_p`、`frequency_penalty`、`presence_penalty`、`repetition_penalty`、`seed`、`stop`、`response_format`、`logit_bias`、`enable_thinking`、`thinking` |
+| `responses` | `reasoning`、`text`、`top_p`、`truncation` |
+| Anthropic | `top_p`、`top_k`、`stop_sequences`、`thinking` |
+
+- 不在任何白名单或覆盖平台字段（`model`、`messages`、`max_tokens`、`stream`、`tools`、`service_tier` 等）时立即抛 `AIUnavailableError`；
+- 选中的 Provider 格式不支持某字段时跳到备用 Provider，全部不支持时抛 `AICapabilityError`——不会静默丢弃；
+- `ctx.ai.stream_complete` 暂不支持 `extra_body`（传了会报错）。
+
+#### 宿主只读查询（ctx.host.read）
+
+能力 `host.read`，每个资源另有子能力 `host.read.<名称>@<版本>`。先在 `plugin.json` 声明（推荐只写在 plugin.json，旧宿主 Manifest 不认识 `reads`）：
+
+```json
+{ "reads": ["account.admins@1", "ai.models@1"] }
+```
+
+```python
+admins = await ctx.host.read("account.admins@1")
+if clicker_id in admins["admin_user_ids"]:
+    ...
+models = await ctx.host.read("ai.models@1", enabled_only=True)
+```
+
+| 资源 | 返回 | 备注 |
+| --- | --- | --- |
+| `account.admins@1` | `{owner_user_ids: [...], admin_user_ids: [...]}` | 账号本人 + 授权 sudo 用户；代替 payload 的 `owner_user_ids` / `admin_user_ids` |
+| `ai.models@1` | `[{provider_id, provider_name, provider, model, enabled, default, tags}]` | 参数 `enabled_only`（默认 True）；需 `ai_text` / `ai_agent` 权限 |
+| `chat.allowed@1` | `{all: bool, chat_ids: [...]}` | 账号「允许会话」；`all=true` 表示未限制 |
+| `plugin.stats@1` | 与 `GET /api/plugins/{key}/stats` 同结构 | 只含本插件、本账号 |
+
+- 未声明、未知资源、当前上下文不提供（例如没有 AI 权限读 `ai.models@1`）都抛 `HostReadError`（`PermissionError` 子类）；资源结构变化会发新版本号，旧版本继续可读。
+- 安装 / 更新时校验 `reads`，未知资源会被拒绝。
+
+#### 钩子 Trace 与熔断
+
+能力 `runtime.hook_trace`。钩子统计、Trace 与熔断用同一份结果：
+
+- 钩子失败 / 超时 / 熔断跳过在消息链路 Trace 记一条 `plugin_hook` span，`reason_code` 为 `plugin_error` / `plugin_timeout` / `plugin_circuit_open` / `plugin_update_in_progress`，带 `plugin_key`、`hook`、`event_type`、`duration_ms`；成功但耗时 ≥ 1 秒的调用也记一条，便于找慢插件。
+- 熔断：连续失败 N 次（`plugin_circuit_failure_threshold`，默认 3）照旧熔断 60 秒；另外最近 120 秒内调用 ≥ 20 次且失败率 ≥ 80% 也会熔断（时好时坏、从不连续失败的插件）。成功一次即关闭熔断。
+
+#### 历史插件兼容表
+
+宿主里仍按插件 key 区分的历史兼容逻辑（math10 旧规则、兜底入口表、codex_image 模型改名、chatgpt_image 多 Token 配置、`,ai` 图片后端默认值……）全部集中在 `backend/app/plugin_compat.py`，每项写明原因与计划移除版本；业务代码不再出现插件 key 字面量（有测试守护）。新插件请用 `interaction_entries[]` 的 `session_scope` / `participant_policy` 与入口 schema 声明，不要依赖兼容表。

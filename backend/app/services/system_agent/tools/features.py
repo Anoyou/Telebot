@@ -8,6 +8,7 @@ from typing import Any
 
 from sqlalchemy import select
 
+from .... import plugin_compat
 from ....db.models.account import Account
 from ....db.models.feature import AccountFeature, Feature
 from ....db.models.plugin import InstalledPlugin
@@ -445,8 +446,7 @@ async def _prepare_account_config(
     )
     patch = preserve_masked_config_secrets(current, patch, schema=raw_schema)
     merged = _merge_patch(current, patch)
-    if feature_key == "codex_image" and merged.get("model") == "gpt-5.4":
-        merged["model"] = "gpt-5.5"
+    merged = plugin_compat.normalize_legacy_feature_config(feature_key, merged)
     merged = _validate_config(merged, _scope_schema(feature, "account"))
     return account_id, feature, patch, merged
 

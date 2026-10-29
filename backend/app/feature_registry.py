@@ -6,6 +6,8 @@ import logging
 from pathlib import Path
 from typing import Any
 
+from . import plugin_compat as _plugin_compat
+
 log = logging.getLogger(__name__)
 
 # builtin 插件目录：backend/app/worker/plugins/builtin/
@@ -14,16 +16,8 @@ _BUILTIN_PLUGIN_DIR: Path = Path(__file__).parent / "worker" / "plugins" / "buil
 # - 不会从 builtin registry seed；即使旧镜像 / 增量部署残留了目录，也必须走官方 / 远程 installed 安装链路；
 # - feature_service 用它清理旧 builtin 记录、把账号开关迁到 installed 插件。
 # 计划移除：Plugin API 2.0（届时旧镜像残留目录与旧 builtin 记录都已迁移完成）。
-NON_CORE_OPTIONAL_PLUGIN_KEYS: frozenset[str] = frozenset(
-    {
-        "auto_reply",
-        "autorepeat",
-        "chatgpt_image",
-        "codex_image",
-        "game24",
-        "math10",
-    }
-)
+# 0.108.0：插件 key 名单集中在 app/plugin_compat.py（历史插件兼容表）。
+NON_CORE_OPTIONAL_PLUGIN_KEYS: frozenset[str] = _plugin_compat.NON_CORE_OPTIONAL_PLUGIN_KEYS
 # 旧名兼容（loader / plugin_capability_requirements 仍按旧名导入）。
 _NON_CORE_BUILTIN_COMPAT_KEYS: frozenset[str] = NON_CORE_OPTIONAL_PLUGIN_KEYS
 

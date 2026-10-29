@@ -64,8 +64,10 @@ class Capability:
         }
 
 
-# 这一版发布的宿主版本；合并时随版本号顺延（只影响注册表里“本版新增”的条目）。
-_THIS_RELEASE = "0.107.0-beta.1"
+# P0（插件平台化地基）发布的宿主版本。
+_P0_RELEASE = "0.107.0-beta.1"
+# 这一版（P1 通用交互原语）发布的宿主版本；合并时随版本号顺延（只影响注册表里“本版新增”的条目）。
+_THIS_RELEASE = "0.108.0-beta.1"
 
 _DOC = "docs/PLUGIN-API-REFERENCE.md"
 
@@ -74,8 +76,8 @@ CAPABILITIES: tuple[Capability, ...] = (
         name="messages.inline_rich_edit",
         legacy_attr="inline_rich_edit",
         since="0.106.0-beta.2",
-        # 纯缓冲 facade 用在 UserBot Event Bus 投递，inline 消息只能由交互 Bot 编辑，所以不标记。
-        facades=frozenset({FACADE_LIVE, FACADE_ENTRY}),
+        # 0.108.0 统一执行器后，纯缓冲 facade 返回的 inline 编辑动作也由同一执行器经交互 Bot 完成。
+        facades=ALL_MESSAGE_FACADES,
         summary="edit_message 同时给 inline_message_id 与 rich_message 时用 editMessageText 原地编辑 inline 消息（访客占位）",
         doc=f"{_DOC}#访客模式guest-mode",
     ),
@@ -122,33 +124,114 @@ CAPABILITIES: tuple[Capability, ...] = (
     ),
     Capability(
         name="runtime.capabilities",
-        since=_THIS_RELEASE,
+        since=_P0_RELEASE,
         summary="ctx.capabilities 能力协商（has / version / names）与 GET /api/plugins/capabilities",
         doc=f"{_DOC}#能力协商与-plugin-api-版本",
     ),
     Capability(
         name="manifest.plugin_api",
-        since=_THIS_RELEASE,
+        since=_P0_RELEASE,
         summary="plugin.json 可声明 plugin_api 兼容范围（如 ^1.0），宿主加载前校验",
         doc=f"{_DOC}#能力协商与-plugin-api-版本",
     ),
     Capability(
         name="manifest.min_version_prerelease",
-        since=_THIS_RELEASE,
+        since=_P0_RELEASE,
         summary="min_telepilot_version 比较考虑 beta 号（可声明 0.106.0-beta.12）",
         doc=f"{_DOC}#能力协商与-plugin-api-版本",
     ),
     Capability(
         name="runtime.hook_stats",
-        since=_THIS_RELEASE,
+        since=_P0_RELEASE,
         summary="平台按插件 × 钩子统计调用数、耗时与失败数（GET /api/plugins/{key}/stats，Web 插件详情可见）",
         doc=f"{_DOC}#钩子统计与弃用登记",
     ),
     Capability(
         name="runtime.deprecations",
-        since=_THIS_RELEASE,
+        since=_P0_RELEASE,
         summary="调用已弃用接口时记录警告与次数，插件详情可见",
         doc=f"{_DOC}#钩子统计与弃用登记",
+    ),
+    # ── P1：通用交互原语（Plugin API 1.1）──
+    Capability(
+        name="messages.callback_routing",
+        since=_THIS_RELEASE,
+        plugin_api="1.1",
+        facades=ALL_MESSAGE_FACADES,
+        summary='按钮写 {"text", "callback": {"data"}}，宿主签发 cb1.<token> 并把点击按 token 路由回本插件（订阅 scope "own_buttons"，payload.callback）',
+        doc=f"{_DOC}#通用回调路由own_buttons",
+    ),
+    Capability(
+        name="messages.unified_ops",
+        since=_THIS_RELEASE,
+        plugin_api="1.1",
+        facades=ALL_MESSAGE_FACADES,
+        summary="三种 ctx.messages 共用一套动作构造与执行器：实时 facade 补齐 send_photo / send_file / edit_rich / edit_caption，单动作方法失败时带回 errors",
+        doc=f"{_DOC}#统一-messageops",
+    ),
+    Capability(
+        name="messages.bot_api_extra",
+        since=_THIS_RELEASE,
+        plugin_api="1.1",
+        facades=ALL_MESSAGE_FACADES,
+        summary="动作可带 bot_api_extra（按动作类型白名单校验，不得覆盖平台字段，交互 Bot 渠道生效；不合规整条拒绝并返回原因）",
+        doc=f"{_DOC}#bot-api-字段透传bot_api_extra",
+    ),
+    Capability(
+        name="ai.extra_body",
+        since=_THIS_RELEASE,
+        plugin_api="1.1",
+        summary="ctx.ai.complete(extra_body={...}) 按上游格式白名单透传请求体字段（如 reasoning_effort），被拒字段明确报错",
+        doc=f"{_DOC}#ai-请求体透传extra_body",
+    ),
+    Capability(
+        name="host.read",
+        since=_THIS_RELEASE,
+        plugin_api="1.1",
+        summary='ctx.host.read("资源@版本") 声明式只读宿主查询；plugin.json 用 reads 声明，未声明的资源拒绝',
+        doc=f"{_DOC}#宿主只读查询ctxhostread",
+    ),
+    Capability(
+        name="host.read.account.admins@1",
+        since=_THIS_RELEASE,
+        plugin_api="1.1",
+        summary="账号本人与 TelePilot 管理员的 Telegram user id（代替 payload.owner_user_ids / admin_user_ids）",
+        doc=f"{_DOC}#宿主只读查询ctxhostread",
+    ),
+    Capability(
+        name="host.read.ai.models@1",
+        since=_THIS_RELEASE,
+        plugin_api="1.1",
+        summary="插件可用模型清单（enabled_only=True 只列已启用），需要 ai_text / ai_agent 权限",
+        doc=f"{_DOC}#宿主只读查询ctxhostread",
+    ),
+    Capability(
+        name="host.read.chat.allowed@1",
+        since=_THIS_RELEASE,
+        plugin_api="1.1",
+        summary="账号「允许会话」名单（all=true 表示未限制）",
+        doc=f"{_DOC}#宿主只读查询ctxhostread",
+    ),
+    Capability(
+        name="host.read.plugin.stats@1",
+        since=_THIS_RELEASE,
+        plugin_api="1.1",
+        summary="本插件在当前账号的钩子统计",
+        doc=f"{_DOC}#宿主只读查询ctxhostread",
+    ),
+    Capability(
+        name="runtime.hook_trace",
+        since=_THIS_RELEASE,
+        plugin_api="1.1",
+        summary="钩子失败 / 超时 / 熔断在 Trace 记 plugin_hook span（reason_code=plugin_timeout / plugin_error / plugin_circuit_open），熔断与统计同口径（连续失败 + 窗口失败率）",
+        doc=f"{_DOC}#钩子统计与弃用登记",
+    ),
+    Capability(
+        name="runtime.entry_policy",
+        since=_THIS_RELEASE,
+        plugin_api="1.1",
+        summary="interaction_entries[].policy 声明参与方式 / 是否有奖 / 默认启动词，宿主不再按插件 key 写死",
+        doc=f"{_DOC}#入口策略policy",
     ),
 )
 

@@ -31,7 +31,16 @@ VALID_EVENT_TYPES = {
     "message_edited",
     "webhook",
 }
-VALID_EVENT_SCOPES = {"all_allowed_chats", "owner_only", "known_users", "inline_all", "guest_all", "rule_bound"}
+VALID_EVENT_SCOPES = {
+    "all_allowed_chats",
+    "owner_only",
+    "known_users",
+    "inline_all",
+    "guest_all",
+    "rule_bound",
+    # 0.108.0：本插件签发的回调按钮（callback token）被点击时投递，与会话范围无关。
+    "own_buttons",
+}
 SUPPORTED_FILTER_KEYS = {
     "callback_data",
     "chat_id",
@@ -94,6 +103,15 @@ EVENT_REASON_CODES = {
     "invalid_rich_message",
     "callback_query",
     "callback_query_expired",
+    "callback_not_owned",
+    "callback_token_expired",
+    "callback_token_unavailable",
+    "bot_api_extra_rejected",
+    "callback_owner_unknown",
+    "plugin_timeout",
+    "plugin_error",
+    "plugin_circuit_open",
+    "plugin_update_in_progress",
     "command_matched",
     "command_not_matched",
     "command_unauthorized",
@@ -590,7 +608,22 @@ def _match_one(
             reason_message=_with_warnings("事件类型未订阅", base["warnings"]),
             **base,
         )
-    scope_ok, scope_reason = _scope_matches(subscription.scope, event_type, chat_id, sender_user_id, state, subscription.filters)
+    callback_owner = str(state.get("callback_owner_plugin_key") or "").strip()
+    if callback_owner and event_type == "callback_query" and subscription.plugin_key != callback_owner:
+        # 回调 token 只属于签发它的插件：其它插件即使订阅了 callback_query 也不投递。
+        return SubscriptionDecision(
+            matched=False,
+            reason_code="callback_not_owned",
+            reason_message=_with_warnings("回调按钮属于其它插件", base["warnings"]),
+            **base,
+        )
+    if subscription.scope == "own_buttons":
+        scope_ok = event_type == "callback_query" and bool(callback_owner) and subscription.plugin_key == callback_owner
+        scope_reason = "scope_not_matched"
+    else:
+        scope_ok, scope_reason = _scope_matches(
+            subscription.scope, event_type, chat_id, sender_user_id, state, subscription.filters
+        )
     if not scope_ok:
         return SubscriptionDecision(
             matched=False,

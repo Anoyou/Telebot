@@ -30,6 +30,8 @@ from collections import deque
 from dataclasses import dataclass, field
 from typing import Any
 
+from .action_extensions import is_callback_token
+
 log = logging.getLogger(__name__)
 
 # InputTextMessageContent.message_text：1-4096 characters（解析实体后）。
@@ -126,7 +128,12 @@ def sanitize_guest_reply_markup(markup: Any, *, allow_callback: bool = False) ->
             for button in row
             if isinstance(button, dict)
             and str(button.get("text") or "").strip()
-            and any(button.get(key) not in (None, "") for key in keys)
+            and (
+                any(button.get(key) not in (None, "") for key in keys)
+                # 0.108.0：宿主签发的回调 token（cb1.）按 token 路由回发按钮的插件，不依赖 chat/message，
+                # 平台合成的访客回复里也可以安全保留。
+                or is_callback_token(button.get("callback_data"))
+            )
         ]
         if safe_row:
             safe_rows.append(safe_row)

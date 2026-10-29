@@ -369,6 +369,30 @@ class InteractionDeliveryExecutor:
             )
             return False
 
+        async def _on_rejected(action: dict[str, Any]) -> bool:
+            rejection = action.get("_tp_reject") or {}
+            error_code = str(rejection.get("error_code") or "action_rejected")
+            error = str(rejection.get("error") or "")
+            await record_action(action.get("context"), action, TRACE_STATUS_FAILED, error_code=error_code, error=error)
+            await self.write_log(
+                self.incoming,
+                "warn",
+                f"interaction action rejected: {error}",
+                reason_code=error_code,
+                action_type=str(action.get("type") or ""),
+                **self.log_context(self.incoming),
+            )
+            return False
+
+        async def _preprocess(action: dict[str, Any]) -> dict[str, Any]:
+            from .action_extensions import preprocess_plugin_action
+
+            return await preprocess_plugin_action(
+                action,
+                account_id=getattr(self.incoming, "account_id", None),
+                redis_factory=self.get_redis_client,
+            )
+
         if len(actions) > INTERACTION_ACTION_LIMIT:
             dropped_actions = actions[INTERACTION_ACTION_LIMIT:]
             await self.write_log(
@@ -404,6 +428,7 @@ class InteractionDeliveryExecutor:
             on_deprecated_send_via=_on_deprecated,
             on_unsupported=_on_unsupported,
             on_truncated=_on_truncated,
+            on_rejected=_on_rejected,
         )
         guest_buffer = self._guest_buffer()
         if guest_buffer is not None:
@@ -435,6 +460,7 @@ class InteractionDeliveryExecutor:
             handlers,
             limit=INTERACTION_ACTION_LIMIT,
             prepare_action=_prepare,
+            preprocess=_preprocess,
         )
 
     async def delete_message(

@@ -199,6 +199,8 @@ class ActionHandlers:
     on_deprecated_send_via: ActionHandler | None = None
     on_unsupported: ActionHandler | None = None
     on_truncated: ActionHandler | None = None  # actions beyond limit
+    # 预处理（action_extensions.preprocess_plugin_action）拒绝的动作：记录失败原因，返回 False。
+    on_rejected: ActionHandler | None = None
 
 
 @dataclass(slots=True)
@@ -244,8 +246,16 @@ async def run_action_batch(
     *,
     limit: int = INTERACTION_ACTION_LIMIT,
     prepare_action: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
+    preprocess: Callable[[dict[str, Any]], Awaitable[dict[str, Any]]] | None = None,
 ) -> ActionBatchResult:
-    """Shared dispatch loop. Handlers return True on success, False on failure."""
+    """Shared dispatch loop. Handlers return True on success, False on failure.
+
+    ``preprocess``（0.108.0）：渠道无关的异步预处理（回调 token 签发、``bot_api_extra`` 校验），
+    被拒绝的动作交给 ``handlers.on_rejected``，不再进入渠道 handler；通过校验的
+    ``bot_api_extra`` 只在该动作的 handler 执行期间生效。
+    """
+
+    from .action_extensions import action_rejection, activate_bot_api_extra, reset_bot_api_extra
 
     result = ActionBatchResult()
     raw_list = [item for item in (actions or []) if isinstance(item, dict)]
@@ -264,19 +274,23 @@ async def run_action_batch(
         action = dict(raw)
         if prepare_action is not None:
             action = prepare_action(action)
+        if preprocess is not None:
+            action = await preprocess(action)
         kind = classify_action(action)
         result.kinds.append(kind.value)
+        rejection = action_rejection(action)
+        if rejection is not None:
+            result.executed += 1
+            if handlers.on_rejected is not None:
+                await handlers.on_rejected(action)
+            result.failed += 1
+            continue
         handler = _handler_for(kind, handlers)
-        if handler is None:
-            # No adapter for this kind → treat as unsupported if possible
-            if handlers.on_unsupported is not None and kind != ActionKind.UNSUPPORTED:
-                ok = await handlers.on_unsupported(action)
-            else:
-                # An unknown action is a contract failure, never a silent
-                # success.  Keep the batch moving while exposing it in failed.
-                ok = False
-        else:
-            ok = await handler(action)
+        extra_token = activate_bot_api_extra(action)
+        try:
+            ok = await _dispatch_one(kind, action, handler, handlers)
+        finally:
+            reset_bot_api_extra(extra_token)
         result.executed += 1
         if ok:
             if kind in {
@@ -288,6 +302,22 @@ async def run_action_batch(
         else:
             result.failed += 1
     return result
+
+
+async def _dispatch_one(
+    kind: ActionKind,
+    action: dict[str, Any],
+    handler: ActionHandler | None,
+    handlers: ActionHandlers,
+) -> bool:
+    if handler is not None:
+        return bool(await handler(action))
+    # No adapter for this kind → treat as unsupported if possible
+    if handlers.on_unsupported is not None and kind != ActionKind.UNSUPPORTED:
+        return bool(await handlers.on_unsupported(action))
+    # An unknown action is a contract failure, never a silent
+    # success.  Keep the batch moving while exposing it in failed.
+    return False
 
 
 __all__ = [

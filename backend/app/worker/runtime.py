@@ -236,9 +236,11 @@ def _is_settlement_send_payload(payload: dict[str, Any]) -> bool:
 
 
 def _should_defer_interaction_entry_error_log(plugin_key: str, error: str | None) -> bool:
-    """math10 可在主进程本地 fallback，worker 不应先写误导性 WARN。"""
+    """有主进程本地兜底的模块（历史兼容表），worker 不应先写误导性 WARN。"""
 
-    return plugin_key == "math10" and "模块未加载或未启用" in str(error or "")
+    from .. import plugin_compat
+
+    return plugin_compat.has_main_process_fallback(plugin_key) and "模块未加载或未启用" in str(error or "")
 
 
 def _resolve_httpx_account_proxy(proxy: Proxy | None) -> tuple[str | None, str | None]:

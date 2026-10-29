@@ -43,6 +43,7 @@ class BufferedMessageOps:
         save_message_id_key: str | None = None,
         replace_saved_message_id_key: str | None = None,
         pin: bool = False,
+        bot_api_extra: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         action: dict[str, Any] = {
             "type": "send_message",
@@ -71,6 +72,7 @@ class BufferedMessageOps:
             action["replace_saved_message_id_key"] = replace_saved_message_id_key
         if pin:
             action["pin"] = True
+        _apply_bot_api_extra(action, bot_api_extra)
         self.actions.append(action)
         return action
 
@@ -90,6 +92,7 @@ class BufferedMessageOps:
         save_message_id_key: str | None = None,
         pin: bool = False,
         compact_tables: bool | None = None,
+        bot_api_extra: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Buffer an official Rich Message; Interaction Bot remains the default.
 
@@ -131,6 +134,7 @@ class BufferedMessageOps:
             action["save_message_id_key"] = save_message_id_key
         if pin:
             action["pin"] = True
+        _apply_bot_api_extra(action, bot_api_extra)
         self.actions.append(action)
         return action
 
@@ -148,6 +152,7 @@ class BufferedMessageOps:
         reply_to_user_id: int | None = None,
         reply_to_search_limit: int | None = None,
         save_message_id_key: str | None = None,
+        bot_api_extra: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         action = _media_action(
             "send_photo",
@@ -164,6 +169,7 @@ class BufferedMessageOps:
             reply_to_search_limit=reply_to_search_limit,
             save_message_id_key=save_message_id_key,
         )
+        _apply_bot_api_extra(action, bot_api_extra)
         self.actions.append(action)
         return action
 
@@ -181,6 +187,7 @@ class BufferedMessageOps:
         reply_to_user_id: int | None = None,
         reply_to_search_limit: int | None = None,
         save_message_id_key: str | None = None,
+        bot_api_extra: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         action = _media_action(
             "send_file",
@@ -197,6 +204,7 @@ class BufferedMessageOps:
             reply_to_search_limit=reply_to_search_limit,
             save_message_id_key=save_message_id_key,
         )
+        _apply_bot_api_extra(action, bot_api_extra)
         self.actions.append(action)
         return action
 
@@ -209,6 +217,7 @@ class BufferedMessageOps:
         text: str,
         parse_mode: Literal["html", "plain"] = "plain",
         reply_markup: dict[str, Any] | None = None,
+        bot_api_extra: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         action: dict[str, Any] = {
             "type": "edit_message",
@@ -221,6 +230,7 @@ class BufferedMessageOps:
             _apply_channel(action, channel)
         if reply_markup is not None:
             action["reply_markup"] = dict(reply_markup)
+        _apply_bot_api_extra(action, bot_api_extra)
         self.actions.append(action)
         return action
 
@@ -238,6 +248,7 @@ class BufferedMessageOps:
         skip_entity_detection: bool | None = None,
         reply_markup: dict[str, Any] | None = None,
         compact_tables: bool | None = None,
+        bot_api_extra: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Buffer an official Rich Message edit; Interaction Bot remains the default."""
 
@@ -271,6 +282,7 @@ class BufferedMessageOps:
             _apply_channel(action, channel)
         if reply_markup is not None:
             action["reply_markup"] = dict(reply_markup)
+        _apply_bot_api_extra(action, bot_api_extra)
         self.actions.append(action)
         return action
 
@@ -284,6 +296,7 @@ class BufferedMessageOps:
         caption: str = "",
         parse_mode: Literal["html", "plain"] = "plain",
         reply_markup: dict[str, Any] | None = None,
+        bot_api_extra: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         action: dict[str, Any] = {
             "type": "edit_caption",
@@ -299,6 +312,7 @@ class BufferedMessageOps:
             _apply_channel(action, channel)
         if reply_markup is not None:
             action["reply_markup"] = dict(reply_markup)
+        _apply_bot_api_extra(action, bot_api_extra)
         self.actions.append(action)
         return action
 
@@ -325,6 +339,7 @@ class BufferedMessageOps:
         channel: MessageChannelSelector | None = None,
         chat_id: int | None = None,
         message_id: int,
+        bot_api_extra: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         action = {
             "type": "pin_message",
@@ -333,6 +348,7 @@ class BufferedMessageOps:
         }
         if channel is not None:
             _apply_channel(action, channel)
+        _apply_bot_api_extra(action, bot_api_extra)
         self.actions.append(action)
         return action
 
@@ -342,6 +358,7 @@ class BufferedMessageOps:
         callback_query_id: str | None,
         text: str = "",
         show_alert: bool = False,
+        bot_api_extra: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         action = {
             "type": "answer_callback",
@@ -349,6 +366,7 @@ class BufferedMessageOps:
             "text": text,
             "show_alert": show_alert,
         }
+        _apply_bot_api_extra(action, bot_api_extra)
         self.actions.append(action)
         return action
 
@@ -516,6 +534,74 @@ class BufferedMessageOps:
         return False
 
 
+def _apply_bot_api_extra(action: dict[str, Any], extra: dict[str, Any] | None) -> None:
+    """``bot_api_extra``：白名单内的 Bot API 字段，由执行器校验（不合规时整条动作拒绝并返回原因）。"""
+
+    if extra:
+        action["bot_api_extra"] = dict(extra)
+
+
+# 统一 MessageOps（0.108.0）：三种 facade 共用 BufferedMessageOps 的动作构造；实时 facade 由
+# :func:`install_live_action_methods` 生成“构造 → 立即 apply”的同名方法，不再逐个手写。
+LIVE_ACTION_METHODS: tuple[str, ...] = (
+    "send",
+    "send_rich",
+    "send_photo",
+    "send_file",
+    "edit",
+    "edit_rich",
+    "edit_caption",
+    "delete",
+    "pin",
+    "answer_callback",
+    "click_callback_button",
+    "answer_inline_query",
+    "answer_guest_query",
+    "payout",
+)
+
+
+def _live_action_result(name: str, action: dict[str, Any], outcome: Any) -> dict[str, Any]:
+    if not isinstance(outcome, dict):
+        return action
+    inline_id = outcome.get("inline_message_id")
+    if name == "answer_guest_query" and inline_id:
+        # 0.106.0-beta.17+：成功时把 SentGuestMessage.inline_message_id 交还给插件。
+        action = {**action, "inline_message_id": inline_id}
+    errors = outcome.get("errors")
+    if errors and not outcome.get("ok", True):
+        # 0.108.0：实时 facade 的单动作方法也把失败原因带回（与 apply() 的 errors 同结构）。
+        action = {**action, "errors": list(errors)}
+    return action
+
+
+def _make_live_method(name: str) -> Any:
+    builder = getattr(BufferedMessageOps, name)
+
+    async def _live(self: Any, **kwargs: Any) -> dict[str, Any]:
+        action = await builder(BufferedMessageOps(), **kwargs)
+        outcome = await self.apply([action])
+        return _live_action_result(name, action, outcome)
+
+    _live.__name__ = name
+    _live.__qualname__ = f"LiveMessageOps.{name}"
+    _live.__doc__ = builder.__doc__
+    return _live
+
+
+def install_live_action_methods(cls: type) -> type:
+    """给实时 facade（要求实现 ``apply(actions)``）装上与缓冲 facade 同名同参的动作方法。
+
+    类里已显式定义的方法保留（例如需要额外权限判断的覆盖）。
+    """
+
+    for name in LIVE_ACTION_METHODS:
+        if name in vars(cls):
+            continue
+        setattr(cls, name, _make_live_method(name))
+    return cls
+
+
 def _apply_channel(action: dict[str, Any], channel: MessageChannelSelector) -> None:
     action["channel_selector"] = channel
     apply_action_send_via_options(action, action_send_via_options(action))
@@ -566,4 +652,10 @@ def _media_action(
 apply_legacy_flags(BufferedMessageOps, FACADE_BUFFERED)
 
 
-__all__ = ["BufferedMessageOps", "MessageChannel", "MessageChannelSelector"]
+__all__ = [
+    "LIVE_ACTION_METHODS",
+    "BufferedMessageOps",
+    "MessageChannel",
+    "MessageChannelSelector",
+    "install_live_action_methods",
+]

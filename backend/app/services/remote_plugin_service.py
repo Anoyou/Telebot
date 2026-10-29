@@ -220,7 +220,19 @@ class PluginMetadataSchema(BaseModel):
     min_telebot_version: str | None = None
     # Plugin API 兼容范围（0.107.0+），如 "^1.0"、">=1.0,<2"、"1.x"；旧宿主忽略该字段。
     plugin_api: str | None = None
+    # 声明式只读宿主查询（0.108.0+）：ctx.host.read 可读资源，如 ["account.admins@1"]；旧宿主忽略。
+    reads: list[str] = Field(default_factory=list)
     tags: list[str] = Field(default_factory=list)
+
+    @field_validator("reads")
+    @classmethod
+    def _validate_reads(cls, v: list[str] | None) -> list[str]:
+        from ..worker.plugins.host_read import validate_reads
+
+        valid, unknown = validate_reads(v or [])
+        if unknown:
+            raise ValueError(f"reads 含未知宿主资源：{', '.join(unknown)}")
+        return valid
 
     @field_validator("plugin_api")
     @classmethod
@@ -1285,7 +1297,7 @@ def lint_plugin_metadata_files(plugin_dir: Path) -> list[str]:
                             warnings.append(f"plugin.json event_subscriptions[{idx}] source 含有未支持值")
                     scope = str(raw_subscription.get("scope") or "all_allowed_chats").strip()
                     if scope not in VALID_EVENT_SCOPES:
-                        warnings.append(f"plugin.json event_subscriptions[{idx}] scope 必须是 all_allowed_chats / owner_only / known_users / inline_all / guest_all / rule_bound")
+                        warnings.append(f"plugin.json event_subscriptions[{idx}] scope 必须是 all_allowed_chats / owner_only / known_users / inline_all / guest_all / rule_bound / own_buttons")
                     filters = raw_subscription.get("filters")
                     if isinstance(filters, dict):
                         unknown = sorted(

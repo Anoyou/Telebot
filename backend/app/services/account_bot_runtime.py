@@ -17,6 +17,7 @@ from typing import Any
 
 from sqlalchemy import delete, desc, select
 
+from .. import plugin_compat
 from ..account_bot_defaults import (
     DEFAULT_DEBIT_NOTICE_TEMPLATE,
     DEFAULT_INTERACTION_QUERY_EMPTY_MESSAGE,
@@ -3943,8 +3944,8 @@ def _interaction_query_commands(cfg: dict[str, Any]) -> list[str]:
 
 def _interaction_rule_kind_label(rule: dict[str, Any]) -> str:
     action = str(rule.get("action") or "")
-    if action == "math10":
-        return "算数题"
+    if action in plugin_compat.LEGACY_RULE_ACTION_LABELS:
+        return plugin_compat.LEGACY_RULE_ACTION_LABELS[action]
     if action == "module":
         module_key = str(rule.get("module_key") or "").strip()
         return f"玩法 <code>{account_bot_service.html_text(module_key)}</code>" if module_key else "玩法"
@@ -3963,7 +3964,7 @@ def _interaction_trigger_mode_label(rule: dict[str, Any]) -> str:
 def _math10_compat_module_rule(rule: dict[str, Any]) -> dict[str, Any]:
     converted = dict(rule)
     converted["action"] = "module"
-    converted["module_key"] = "math10"
+    converted["module_key"] = plugin_compat.MATH10
     converted["module_action"] = str(rule.get("module_action") or "start_math10")
     if _int_or_none(converted.get("module_prize")) is None:
         converted["module_prize"] = _int_or_none(rule.get("math_prize")) or 123
@@ -4059,7 +4060,7 @@ async def _render_interaction_rules_query(_db: Any, incoming: Incoming, cfg: dic
     for rule in _interaction_rules(cfg):
         if not _rule_chat_matches(rule, incoming.chat_id):
             continue
-        if str(rule.get("action") or "") not in {"math10", "module"}:
+        if str(rule.get("action") or "") not in plugin_compat.LEGACY_RULE_MODULE_ACTIONS:
             continue
         matched.append((rule, await _is_interaction_rule_open(incoming.account_id, rule, incoming.chat_id)))
     if not matched:
@@ -5292,7 +5293,7 @@ async def _resolve_payout_mode(
         return "manual"
     for rule in _interaction_rules(cfg):
         action = str(rule.get("action") or "")
-        if action not in {"math10", "module"}:
+        if action not in plugin_compat.LEGACY_RULE_MODULE_ACTIONS:
             continue
         if _rule_chat_matches(rule, int(chat_id)):
             return "auto"
@@ -5995,7 +5996,7 @@ async def _execute_interaction_rule(
             event_type,
         )
         return False
-    if rule.get("action") == "math10":
+    if plugin_compat.is_legacy_math10_action(rule.get("action")):
         log.warning(
             "deprecated interaction rule action=math10 used aid=%s chat_id=%s rule=%s; use action=module module_key=math10 instead",
             incoming.account_id,
@@ -6194,7 +6195,12 @@ async def _try_handle_event_bus_subscriptions(
         incoming.inline_origin = await guest_inline_origin(incoming.token, incoming.inline_message_id)
     event = _incoming_trace_payload(incoming)
     event["trace_id"] = incoming.trace_id
+    callback_owner, callback_handled = await _resolve_event_bus_callback_token(incoming, event)
+    if callback_handled is not None:
+        return callback_handled
     account_state = await _event_bus_account_state(db, incoming, cfg)
+    if callback_owner:
+        account_state["callback_owner_plugin_key"] = callback_owner
     result = dispatch_event(event, subscriptions, account_state)
     terminal_handled = False
     all_ok = True
@@ -6264,6 +6270,83 @@ async def _try_handle_event_bus_subscriptions(
             show_alert=not all_ok,
         )
     return terminal_handled, all_ok
+
+
+async def _resolve_event_bus_callback_token(
+    incoming: Incoming,
+    event: dict[str, Any],
+) -> tuple[str | None, tuple[bool, bool] | None]:
+    """宿主签发的回调 token（``cb1.``）：解析出所属插件与原始 data，写进事件 ``callback`` 字段。
+
+    返回 ``(所属插件 key, 提前结束的处理结果)``。不是 token 时返回 ``(None, None)``；
+    token 过期或 Redis 不可用（fail-closed）时直接答复点击并结束。
+    """
+
+    from .interaction.action_extensions import (
+        CALLBACK_REASON_EXPIRED,
+        CALLBACK_REASON_UNAVAILABLE,
+        CallbackTokenUnavailable,
+        is_callback_token,
+        resolve_callback_token,
+    )
+
+    if not incoming.callback_id or not is_callback_token(incoming.callback_data):
+        return None, None
+    try:
+        record = await resolve_callback_token(
+            get_redis(),
+            account_id=incoming.account_id,
+            callback_data=str(incoming.callback_data),
+        )
+    except CallbackTokenUnavailable as exc:
+        await record_span(
+            trace_log_context(incoming.trace_id),
+            "subscription_match",
+            TRACE_STATUS_SKIPPED,
+            component="event_bus",
+            reason_code=CALLBACK_REASON_UNAVAILABLE,
+            message="回调 token 无法读取（Redis 不可用），按 fail-closed 拒绝本次点击。",
+            error=str(exc)[:200],
+        )
+        await _answer_callback(incoming, text="按钮暂时不可用，请稍后再试", show_alert=True)
+        return None, (True, False)
+    if record is None:
+        await record_span(
+            trace_log_context(incoming.trace_id),
+            "subscription_match",
+            TRACE_STATUS_SKIPPED,
+            component="event_bus",
+            reason_code=CALLBACK_REASON_EXPIRED,
+            message="回调 token 不存在或已过期。",
+        )
+        await _answer_callback(incoming, text="按钮已过期")
+        return None, (True, True)
+    owner = str(record.get("plugin_key") or "").strip() or None
+    data = str(record.get("data") or "")
+    event["callback"] = {
+        "data": data,
+        "token": record.get("token"),
+        "plugin_key": owner,
+        "origin": dict(record.get("origin") or {}),
+        "clicker": {
+            "user_id": incoming.user_id,
+            "display_name": incoming.display_name,
+            "username": incoming.username,
+        },
+        "chat_id": incoming.chat_id,
+        "message_id": incoming.message_id,
+        "inline_message_id": incoming.inline_message_id,
+    }
+    source = event.get("source") if isinstance(event.get("source"), dict) else {}
+    source["callback_data"] = data
+    source["callback_token"] = record.get("token")
+    event["source"] = source
+    raw = event.get("raw") if isinstance(event.get("raw"), dict) else None
+    if raw is not None:
+        raw["callback_data"] = data
+    if isinstance(event.get("inline_callback"), dict):
+        event["inline_callback"]["data"] = data
+    return owner, None
 
 
 def _legacy_rule_event_bus_decision(
@@ -6727,6 +6810,9 @@ def _event_bus_plugin_payload(incoming: Incoming, event: dict[str, Any], decisio
     payload["message_text"] = incoming.text
     payload["callback_query_id"] = incoming.callback_id
     payload["callback_data"] = incoming.callback_data
+    if isinstance(event.get("callback"), dict):
+        # 回调 token：插件看到的是自己当初写的 data（token 本身在 callback.token）。
+        payload["callback_data"] = event["callback"].get("data")
     if incoming.inline_message_id:
         # inline 消息（含访客回复）上的按钮：chat_id / message 为空，按 inline_message_id 编辑。
         payload["inline_message_id"] = incoming.inline_message_id

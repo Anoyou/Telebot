@@ -346,6 +346,72 @@ def record_hook(**kwargs: Any) -> None:
         log.debug("记录插件钩子统计失败", exc_info=True)
 
 
+# 慢调用阈值：成功但耗时超过它的钩子调用也记一条 Trace span（失败 / 超时总是记）。
+SLOW_HOOK_TRACE_MS = 1000
+# 熔断窗口：除“连续失败 N 次”外，窗口内调用数 ≥ CIRCUIT_MIN_CALLS 且失败率 ≥ CIRCUIT_FAILURE_RATE 也熔断。
+CIRCUIT_WINDOW_SECONDS = 120.0
+CIRCUIT_WINDOW_MAX_SAMPLES = 50
+CIRCUIT_MIN_CALLS = 20
+CIRCUIT_FAILURE_RATE = 0.8
+
+_REASON_CODES = {
+    OUTCOME_TIMEOUT: "plugin_timeout",
+    OUTCOME_FAIL: "plugin_error",
+    OUTCOME_CIRCUIT_OPEN: "plugin_circuit_open",
+    OUTCOME_SKIPPED: "plugin_update_in_progress",
+}
+
+
+def reason_code_for_outcome(outcome: str) -> str | None:
+    """统计 outcome → Trace reason_code（plugin_timeout / plugin_error / plugin_circuit_open / …）。"""
+
+    return _REASON_CODES.get(outcome)
+
+
+def update_circuit(
+    entry: Mapping[str, Any] | None,
+    *,
+    ok: bool,
+    now: float,
+    threshold: int,
+    cooldown: float,
+) -> dict[str, Any] | None:
+    """按一次调用结果更新 [账号 × 插件] 熔断状态；返回 None 表示状态已完全恢复。
+
+    - 连续失败 ``threshold`` 次 → 熔断 ``cooldown`` 秒（与 0.107.0 及之前一致）；
+    - 最近 :data:`CIRCUIT_WINDOW_SECONDS` 秒内调用 ≥ :data:`CIRCUIT_MIN_CALLS` 且失败率 ≥
+      :data:`CIRCUIT_FAILURE_RATE` → 同样熔断（时好时坏、从不连续失败的插件）；
+    - 成功一次即清零连续失败数并关闭熔断，窗口样本保留到过期。
+    """
+
+    previous = dict(entry or {})
+    window = [
+        (float(stamp), bool(result))
+        for stamp, result in (previous.get("window") or [])
+        if now - float(stamp) <= CIRCUIT_WINDOW_SECONDS
+    ]
+    window.append((now, bool(ok)))
+    window = window[-CIRCUIT_WINDOW_MAX_SAMPLES:]
+    failed = sum(1 for _stamp, result in window if not result)
+    if ok:
+        if failed == 0:
+            return None
+        return {"failures": 0, "opened_until": 0.0, "window": window}
+    failures = int(previous.get("failures") or 0) + 1
+    opened_until = 0.0
+    reason = None
+    if failures >= max(1, int(threshold)):
+        reason = "consecutive"
+    elif len(window) >= CIRCUIT_MIN_CALLS and failed / len(window) >= CIRCUIT_FAILURE_RATE:
+        reason = "failure_rate"
+    if reason is not None:
+        opened_until = now + max(1.0, float(cooldown))
+    result: dict[str, Any] = {"failures": failures, "opened_until": opened_until, "window": window}
+    if reason is not None:
+        result["reason"] = reason
+    return result
+
+
 def classify_exception(exc: BaseException) -> str:
     """把插件调用异常归类为 timeout / circuit_open / skipped / fail。"""
 
