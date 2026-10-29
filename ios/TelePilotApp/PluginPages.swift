@@ -21,10 +21,24 @@ struct PluginPageEntriesSection: View {
     @State private var running: String?
     @State private var resultMessage: String?
     @State private var resultFailed = false
+    /// 已读取过入口的 menu/插件/账号组合；没读完前放一行 1pt 透明占位，否则空 Group 在 List 里不渲染，`.task` 永远不会触发。
+    @State private var loadedKey: String?
+
+    private var taskKey: String { "\(menu)/\(pluginKey ?? "")/\(accountID ?? 0)" }
 
     var body: some View {
         Group {
-            if !pages.isEmpty || !actions.isEmpty {
+            if loadedKey != taskKey {
+                Section {
+                    Color.clear.frame(height: 1).listRowBackground(Color.clear).accessibilityHidden(true)
+                }
+                .listSectionSpacing(.compact)
+                .task(id: taskKey) {
+                    let key = taskKey
+                    await load()
+                    if !Task.isCancelled { loadedKey = key }
+                }
+            } else if !pages.isEmpty || !actions.isEmpty {
                 Section {
                     ForEach(Array(pages.enumerated()), id: \.offset) { _, page in
                         NavigationLink { PluginPageView(entry: page, accountID: accountID) } label: {
@@ -44,7 +58,6 @@ struct PluginPageEntriesSection: View {
                 }
             }
         }
-        .task(id: "\(menu)/\(pluginKey ?? "")/\(accountID ?? 0)") { await load() }
     }
 
     private func subtitle(_ item: JSONValue) -> String? {
@@ -108,7 +121,11 @@ struct PluginPageEntriesSection: View {
         if let pluginKey { path += "&plugin_key=" + (pluginKey.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? pluginKey) }
         if let accountID { path += "&account_id=\(accountID)" }
         // 旧服务器没有这个接口或读取失败：不显示入口（不打扰没有声明的插件）。
-        guard let value = try? await model.request(path: path) else { return }
+        guard let value = try? await model.request(path: path) else {
+            pages = []
+            actions = []
+            return
+        }
         pages = value["pages"]?.arrayValue ?? []
         actions = value["actions"]?.arrayValue ?? []
     }
