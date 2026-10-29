@@ -203,28 +203,17 @@ async def update_installed_plugins_from_repo(
     db: DBSession,
     user: CurrentUser,
 ):
-    """更新该仓库里所有已安装且版本低于仓库版本的插件。"""
+    """更新该仓库里所有已安装且版本低于仓库版本的插件。
+
+    0.113.0 起并行执行（并发上限见插件市场“更新参数”，默认 3），每个插件独立提交并通知重载；
+    单个失败或重载未确认只体现在该插件的结果里，不影响其它插件。
+    """
+    from ..services import plugin_market_service
+
     try:
-        result = await svc.update_installed_plugins_from_repo(
+        return await plugin_market_service.update_repo_installed(
             db, repo_id, triggered_by_user_id=user.id
         )
-        await db.commit()
-        reload_errors: list[RemotePluginError] = []
-        for item in result.items:
-            if item.status == "updated":
-                try:
-                    await trigger_reload(db, item.name)
-                except RemotePluginError as exc:
-                    reload_errors.append(exc)
-        if reload_errors:
-            affected = ", ".join(
-                item.name for item in result.items if item.status == "updated"
-            )
-            raise RemotePluginError(
-                "PLUGIN_BULK_RELOAD_UNCONFIRMED",
-                f"插件 {affected} 已写入磁盘，但部分 worker 未确认重载；相应旧实例已被更新屏障阻止调用",
-            )
-        return result
     except PluginRepoNotFound as e:
         raise HTTPException(404, detail={"code": e.code, "message": e.message}) from e
     except (GitOperationFailed, InvalidPluginMetadata) as e:

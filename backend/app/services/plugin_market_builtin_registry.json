@@ -1,0 +1,1309 @@
+{
+  "schema_version": 1,
+  "name": "TelePilot 官方插件库",
+  "trust": "official",
+  "repository": "https://github.com/Anoyou/telebot-plugins.git",
+  "homepage": "https://github.com/Anoyou/telebot-plugins",
+  "plugins": [
+    {
+      "key": "ai-chat",
+      "name": {
+        "zh": "AI-Chat",
+        "en": "ai-chat"
+      },
+      "kind": "utility",
+      "icon": "🧰",
+      "summary": "调用 TelePilot AI Provider 的 AI-Chat 聊天与消息解释助手，支持私聊/群聊触发和短期上下文记忆。",
+      "version": "0.1.15",
+      "author": "Anoyou",
+      "min_telepilot_version": "0.72.0-beta.2",
+      "plugin_api": null,
+      "permissions": [
+        "send_message",
+        "edit_message",
+        "read_chat",
+        "ai_text"
+      ],
+      "reads": [],
+      "tags": [
+        "llm",
+        "chat",
+        "assistant"
+      ],
+      "path": "ai-chat",
+      "channels": {
+        "stable": "main"
+      }
+    },
+    {
+      "key": "ai_redpacket",
+      "name": {
+        "zh": "AI 答题红包",
+        "en": "ai_redpacket"
+      },
+      "kind": "interactive",
+      "icon": "🎮",
+      "summary": "从网页生成 AI 三选一题库，并通过交互 Bot 答题、UserBot payout 发放整数红包。",
+      "version": "0.1.44",
+      "author": "Anoyou",
+      "min_telepilot_version": "0.73.0-beta.15",
+      "plugin_api": null,
+      "permissions": [
+        "send_message",
+        "edit_message",
+        "delete_message",
+        "read_chat",
+        "external_http",
+        "ai_text",
+        "payout"
+      ],
+      "reads": [],
+      "tags": [
+        "redpacket",
+        "quiz",
+        "ai",
+        "interaction-bot",
+        "payout"
+      ],
+      "path": "ai_redpacket",
+      "channels": {
+        "stable": "main"
+      }
+    },
+    {
+      "key": "ais-byRBQ",
+      "name": {
+        "zh": "ais-byRBQ",
+        "en": "ais-byRBQ"
+      },
+      "kind": "utility",
+      "icon": "🧰",
+      "summary": "AI 查询插件，支持联网搜索增强、参考网址追加、实体查询图片预览、API URL/base url 快速切换与备用模型重试",
+      "version": "1.0.12",
+      "author": "RBQ (migrated from zhiluop/pagermaid_plugins)",
+      "min_telepilot_version": "0.72.0-beta.2",
+      "plugin_api": null,
+      "permissions": [
+        "send_message",
+        "edit_message",
+        "delete_message",
+        "send_file",
+        "read_chat",
+        "external_http"
+      ],
+      "reads": [],
+      "tags": [
+        "migrated",
+        "pagermaid",
+        "byRBQ"
+      ],
+      "path": "ais-byRBQ",
+      "channels": {
+        "stable": "main"
+      }
+    },
+    {
+      "key": "auto_reply",
+      "name": {
+        "zh": "自动回复",
+        "en": "auto_reply"
+      },
+      "kind": "automation",
+      "icon": "⚙️",
+      "summary": "按规则匹配关键词或正则后自动回复目标会话",
+      "version": "1.1.0",
+      "author": "TelePilot Official",
+      "min_telepilot_version": "0.72.0-beta.2",
+      "plugin_api": null,
+      "permissions": [
+        "send_message",
+        "edit_message",
+        "read_chat",
+        "resolve_entity"
+      ],
+      "reads": [],
+      "tags": [
+        "official",
+        "recommended",
+        "automation"
+      ],
+      "path": "auto_reply",
+      "channels": {
+        "stable": "main"
+      }
+    },
+    {
+      "key": "autorepeat",
+      "name": {
+        "zh": "自动复读",
+        "en": "autorepeat"
+      },
+      "kind": "automation",
+      "icon": "⚙️",
+      "summary": "当群组中多名用户在指定时间内发送相同内容时自动复读",
+      "version": "1.1.0",
+      "author": "TelePilot Official",
+      "min_telepilot_version": "0.72.0-beta.2",
+      "plugin_api": null,
+      "permissions": [
+        "send_message",
+        "edit_message",
+        "read_chat",
+        "resolve_entity"
+      ],
+      "reads": [],
+      "tags": [
+        "official",
+        "recommended",
+        "automation"
+      ],
+      "path": "autorepeat",
+      "channels": {
+        "stable": "main"
+      }
+    },
+    {
+      "key": "blackjack",
+      "name": {
+        "zh": "21点",
+        "en": "blackjack"
+      },
+      "kind": "interactive",
+      "icon": "🎮",
+      "summary": "经典21点纸牌游戏，群内庄家模式，支持要牌/停牌/加倍",
+      "version": "1.0.33",
+      "author": "Anoyou",
+      "min_telepilot_version": "0.72.0-beta.2",
+      "plugin_api": null,
+      "permissions": [
+        "send_message",
+        "edit_message",
+        "read_chat",
+        "delete_message",
+        "payout"
+      ],
+      "reads": [],
+      "tags": [
+        "game",
+        "card",
+        "casino"
+      ],
+      "path": "blackjack",
+      "channels": {
+        "stable": "main"
+      }
+    },
+    {
+      "key": "bot_mute_guard",
+      "name": {
+        "zh": "Bot 防广告守卫",
+        "en": "bot_mute_guard"
+      },
+      "kind": "automation",
+      "icon": "⚙️",
+      "summary": "针对指定群组删除非白名单 @bot 提及、inline Bot 与 Bot 发言广告触发消息",
+      "version": "1.1.14",
+      "author": "Anoyou",
+      "min_telepilot_version": "0.72.0-beta.2",
+      "plugin_api": null,
+      "permissions": [
+        "send_message",
+        "delete_message",
+        "read_chat",
+        "resolve_entity",
+        "moderate_chat"
+      ],
+      "reads": [],
+      "tags": [
+        "moderation",
+        "anti-spam",
+        "bot"
+      ],
+      "path": "bot_mute_guard",
+      "channels": {
+        "stable": "main"
+      }
+    },
+    {
+      "key": "cai-byRBQ",
+      "name": {
+        "zh": "cai-byRBQ",
+        "en": "cai-byRBQ"
+      },
+      "kind": "automation",
+      "icon": "⚙️",
+      "summary": "# CAI - 自动点踩插件 自动点踩插件，支持多目标配置、冷却时间限制、标准表情和自定义表情。支...",
+      "version": "1.0.11",
+      "author": "RBQ (migrated from zhiluop/pagermaid_plugins)",
+      "min_telepilot_version": "0.72.0-beta.2",
+      "plugin_api": null,
+      "permissions": [
+        "send_message",
+        "edit_message",
+        "delete_message",
+        "read_chat"
+      ],
+      "reads": [],
+      "tags": [
+        "migrated",
+        "pagermaid",
+        "byRBQ"
+      ],
+      "path": "cai-byRBQ",
+      "channels": {
+        "stable": "main"
+      }
+    },
+    {
+      "key": "chatgpt_image",
+      "name": {
+        "zh": "ChatGPT2API",
+        "en": "chatgpt_image"
+      },
+      "kind": "utility",
+      "icon": "🧰",
+      "summary": "实验性：按 chatgpt2api 的核心思路在 Telegram 内完成 ChatGPT 图片生成、编辑与 token 池管理。",
+      "version": "0.2.0",
+      "author": "TelePilot Official",
+      "min_telepilot_version": "0.72.0-beta.2",
+      "plugin_api": null,
+      "permissions": [
+        "send_message",
+        "edit_message",
+        "read_chat",
+        "send_file",
+        "external_http"
+      ],
+      "reads": [],
+      "tags": [
+        "official",
+        "image",
+        "experimental"
+      ],
+      "path": "chatgpt_image",
+      "channels": {
+        "stable": "main"
+      }
+    },
+    {
+      "key": "chatter_challenge",
+      "name": {
+        "zh": "话痨挑战",
+        "en": "chatter_challenge"
+      },
+      "kind": "automation",
+      "icon": "⚙️",
+      "summary": "设定聊天规则，违反者自动扣分，全程被动监听",
+      "version": "1.0.12",
+      "author": "Anoyou",
+      "min_telepilot_version": "0.72.0-beta.2",
+      "plugin_api": null,
+      "permissions": [
+        "send_message",
+        "edit_message",
+        "read_chat"
+      ],
+      "reads": [],
+      "tags": [
+        "game",
+        "social",
+        "monitor"
+      ],
+      "path": "chatter_challenge",
+      "channels": {
+        "stable": "main"
+      }
+    },
+    {
+      "key": "codex_image",
+      "name": {
+        "zh": "Codex 图片生成",
+        "en": "codex_image"
+      },
+      "kind": "utility",
+      "icon": "🧰",
+      "summary": "通过 Codex API 调用 GPT 图片生成模型，支持纯文生图和参考图生成",
+      "version": "1.2.1",
+      "author": "TelePilot Official",
+      "min_telepilot_version": "0.72.0-beta.2",
+      "plugin_api": null,
+      "permissions": [
+        "send_message",
+        "edit_message",
+        "delete_message",
+        "read_chat",
+        "send_file",
+        "external_http"
+      ],
+      "reads": [],
+      "tags": [
+        "official",
+        "image",
+        "experimental"
+      ],
+      "path": "codex_image",
+      "channels": {
+        "stable": "main"
+      }
+    },
+    {
+      "key": "dead_revolver",
+      "name": {
+        "zh": "死亡左轮",
+        "en": "dead_revolver"
+      },
+      "kind": "interactive",
+      "icon": "🎮",
+      "summary": "群聊俄罗斯轮盘游戏。创建游戏后群成员转账加入，轮流对自己或他人开枪，最终存活者赢得奖池。",
+      "version": "1.0.16",
+      "author": "Anoyou",
+      "min_telepilot_version": "0.72.0-beta.2",
+      "plugin_api": null,
+      "permissions": [
+        "send_message",
+        "edit_message",
+        "read_chat",
+        "delete_message",
+        "payout"
+      ],
+      "reads": [],
+      "tags": [
+        "game",
+        "revolver",
+        "russian_roulette",
+        "interactive"
+      ],
+      "path": "dead_revolver",
+      "channels": {
+        "stable": "main"
+      }
+    },
+    {
+      "key": "dice_battle",
+      "name": {
+        "zh": "骰子比大小",
+        "en": "dice_battle"
+      },
+      "kind": "interactive",
+      "icon": "🎮",
+      "summary": "群内骰子对战，两人各掷骰子比点数，支持下注",
+      "version": "1.0.19",
+      "author": "Anoyou",
+      "min_telepilot_version": "0.72.0-beta.2",
+      "plugin_api": null,
+      "permissions": [
+        "send_message",
+        "edit_message",
+        "read_chat",
+        "payout"
+      ],
+      "reads": [],
+      "tags": [
+        "game",
+        "dice",
+        "casino"
+      ],
+      "path": "dice_battle",
+      "channels": {
+        "stable": "main"
+      }
+    },
+    {
+      "key": "dice_grid_hunt",
+      "name": {
+        "zh": "九宫格骰子竞猜",
+        "en": "dice_grid_hunt"
+      },
+      "kind": "interactive",
+      "icon": "🎮",
+      "summary": "发送九宫格骰子图片。公布唯一目标点数并让群内抢答格子赢奖励",
+      "version": "1.1.39",
+      "author": "Anoyou",
+      "min_telepilot_version": "0.72.0-beta.2",
+      "plugin_api": null,
+      "permissions": [
+        "send_message",
+        "edit_message",
+        "delete_message",
+        "read_chat",
+        "send_file",
+        "payout"
+      ],
+      "reads": [],
+      "tags": [
+        "game",
+        "dice",
+        "quiz"
+      ],
+      "path": "dice_grid_hunt",
+      "channels": {
+        "stable": "main"
+      }
+    },
+    {
+      "key": "game24",
+      "name": {
+        "zh": "24点游戏",
+        "en": "game24"
+      },
+      "kind": "interactive",
+      "icon": "🎮",
+      "summary": "随机生成 24 点题目，群内竞速答题，第一名获得奖金",
+      "version": "1.1.18",
+      "author": "TelePilot Official",
+      "min_telepilot_version": "0.72.0-beta.2",
+      "plugin_api": null,
+      "permissions": [
+        "send_message",
+        "edit_message",
+        "read_chat",
+        "delete_message",
+        "payout"
+      ],
+      "reads": [],
+      "tags": [
+        "official",
+        "interactive",
+        "game"
+      ],
+      "path": "game24",
+      "channels": {
+        "stable": "main"
+      }
+    },
+    {
+      "key": "get_reactions-byRBQ",
+      "name": {
+        "zh": "get_reactions-byRBQ",
+        "en": "get_reactions-byRBQ"
+      },
+      "kind": "utility",
+      "icon": "🧰",
+      "summary": "表情获取辅助命令，用于测试环境是否支持自定义表情反应",
+      "version": "1.0.10",
+      "author": "RBQ (migrated from zhiluop/pagermaid_plugins)",
+      "min_telepilot_version": "0.72.0-beta.2",
+      "plugin_api": null,
+      "permissions": [
+        "send_message",
+        "edit_message",
+        "delete_message",
+        "read_chat"
+      ],
+      "reads": [],
+      "tags": [
+        "migrated",
+        "pagermaid",
+        "byRBQ"
+      ],
+      "path": "get_reactions-byRBQ",
+      "channels": {
+        "stable": "main"
+      }
+    },
+    {
+      "key": "gi2-byRBQ",
+      "name": {
+        "zh": "gi2-byRBQ",
+        "en": "gi2-byRBQ"
+      },
+      "kind": "utility",
+      "icon": "🧰",
+      "summary": "图片生成与改图插件，支持直接生图、回复图片改图、GI2 结果图原地继续编辑，并对高风险原图断流做诊断提示",
+      "version": "1.0.11",
+      "author": "RBQ (migrated from zhiluop/pagermaid_plugins)",
+      "min_telepilot_version": "0.72.0-beta.2",
+      "plugin_api": null,
+      "permissions": [
+        "send_message",
+        "edit_message",
+        "delete_message",
+        "send_file",
+        "read_chat",
+        "external_http"
+      ],
+      "reads": [],
+      "tags": [
+        "migrated",
+        "pagermaid",
+        "byRBQ"
+      ],
+      "path": "gi2-byRBQ",
+      "channels": {
+        "stable": "main"
+      }
+    },
+    {
+      "key": "guess_number",
+      "name": {
+        "zh": "猜数字",
+        "en": "guess_number"
+      },
+      "kind": "interactive",
+      "icon": "🎮",
+      "summary": "群内猜数字游戏，系统随机一个数字，群友轮流猜，提示大了/小了",
+      "version": "1.0.22",
+      "author": "Anoyou",
+      "min_telepilot_version": "0.72.0-beta.2",
+      "plugin_api": null,
+      "permissions": [
+        "send_message",
+        "edit_message",
+        "read_chat",
+        "payout"
+      ],
+      "reads": [],
+      "tags": [
+        "game",
+        "number",
+        "casual"
+      ],
+      "path": "guess_number",
+      "channels": {
+        "stable": "main"
+      }
+    },
+    {
+      "key": "idiom_chain",
+      "name": {
+        "zh": "成语接龙",
+        "en": "idiom_chain"
+      },
+      "kind": "interactive",
+      "icon": "🎮",
+      "summary": "群内成语接龙，第一个答对的获奖，支持禁词规则",
+      "version": "1.0.20",
+      "author": "Anoyou",
+      "min_telepilot_version": "0.72.0-beta.2",
+      "plugin_api": null,
+      "permissions": [
+        "send_message",
+        "edit_message",
+        "read_chat",
+        "payout"
+      ],
+      "reads": [],
+      "tags": [
+        "game",
+        "culture",
+        "word"
+      ],
+      "path": "idiom_chain",
+      "channels": {
+        "stable": "main"
+      }
+    },
+    {
+      "key": "interaction-ai-chat",
+      "name": {
+        "zh": "AI 答疑（交互 Bot）",
+        "en": "interaction-ai-chat"
+      },
+      "kind": "utility",
+      "icon": "🧰",
+      "summary": "交互 Bot 被 @提及/回复（含访客模式）时调用 TelePilot 已配置的 AI Provider 回答，带按会话+用户的短期记忆、白名单与每日限额。",
+      "version": "0.4.13",
+      "author": "Anoyou",
+      "min_telepilot_version": "0.105.0-beta.1",
+      "plugin_api": null,
+      "permissions": [
+        "send_message",
+        "read_chat",
+        "ai_text",
+        "ai_vision",
+        "external_http",
+        "agent_skills"
+      ],
+      "reads": [
+        "account.admins@1"
+      ],
+      "tags": [
+        "llm",
+        "chat",
+        "assistant",
+        "interaction_bot",
+        "guest_mode"
+      ],
+      "path": "interaction-ai-chat",
+      "channels": {
+        "stable": "main"
+      }
+    },
+    {
+      "key": "jpm-byRBQ",
+      "name": {
+        "zh": "jpm-byRBQ",
+        "en": "jpm-byRBQ"
+      },
+      "kind": "automation",
+      "icon": "⚙️",
+      "summary": "关键词触发回复插件，支持多关键词、频率限制、锚点消息系统",
+      "version": "1.0.11",
+      "author": "RBQ (migrated from zhiluop/pagermaid_plugins)",
+      "min_telepilot_version": "0.72.0-beta.2",
+      "plugin_api": null,
+      "permissions": [
+        "send_message",
+        "edit_message",
+        "delete_message",
+        "read_chat"
+      ],
+      "reads": [],
+      "tags": [
+        "migrated",
+        "pagermaid",
+        "byRBQ"
+      ],
+      "path": "jpm-byRBQ",
+      "channels": {
+        "stable": "main"
+      }
+    },
+    {
+      "key": "jpmai-byRBQ",
+      "name": {
+        "zh": "jpmai-byRBQ",
+        "en": "jpmai-byRBQ"
+      },
+      "kind": "utility",
+      "icon": "🧰",
+      "summary": "AI 生成艳情文案插件，支持完整 chat/completions URL 兼容、非标准响应文本提取和连通性测试",
+      "version": "1.0.11",
+      "author": "RBQ (migrated from zhiluop/pagermaid_plugins)",
+      "min_telepilot_version": "0.72.0-beta.2",
+      "plugin_api": null,
+      "permissions": [
+        "send_message",
+        "edit_message",
+        "delete_message",
+        "send_file",
+        "read_chat",
+        "external_http"
+      ],
+      "reads": [],
+      "tags": [
+        "migrated",
+        "pagermaid",
+        "byRBQ"
+      ],
+      "path": "jpmai-byRBQ",
+      "channels": {
+        "stable": "main"
+      }
+    },
+    {
+      "key": "lottery_plus",
+      "name": {
+        "zh": "彩票系统 Plus",
+        "en": "lottery_plus"
+      },
+      "kind": "interactive",
+      "icon": "🎮",
+      "summary": "群内彩票玩法：下注、开奖、奖池滚存、历史与统计，支持高可配置模板与预览",
+      "version": "1.0.19",
+      "author": "Anoyou",
+      "min_telepilot_version": "0.72.0-beta.2",
+      "plugin_api": null,
+      "permissions": [
+        "send_message",
+        "edit_message",
+        "read_chat",
+        "delete_message",
+        "payout"
+      ],
+      "reads": [],
+      "tags": [
+        "game",
+        "lottery",
+        "interactive"
+      ],
+      "path": "lottery_plus",
+      "channels": {
+        "stable": "main"
+      }
+    },
+    {
+      "key": "lucky_redpack",
+      "name": {
+        "zh": "拼手气口令红包",
+        "en": "lucky_redpack"
+      },
+      "kind": "interactive",
+      "icon": "🎮",
+      "summary": "纯 UserBot 口令红包插件，支持多红包并行、红包代码管理和图片财富密码",
+      "version": "1.4.14",
+      "author": "Anoyou",
+      "min_telepilot_version": "0.72.0-beta.2",
+      "plugin_api": null,
+      "permissions": [
+        "send_message",
+        "edit_message",
+        "read_chat",
+        "resolve_entity",
+        "delete_message",
+        "send_file",
+        "payout"
+      ],
+      "reads": [],
+      "tags": [
+        "redpack",
+        "lucky",
+        "userbot"
+      ],
+      "path": "lucky_redpack",
+      "channels": {
+        "stable": "main"
+      }
+    },
+    {
+      "key": "luckydraw-byRBQ",
+      "name": {
+        "zh": "luckydraw-byRBQ",
+        "en": "luckydraw-byRBQ"
+      },
+      "kind": "automation",
+      "icon": "⚙️",
+      "summary": "# 自动抽奖插件 (LuckyDraw) 在指定群组中自动识别红包/抽奖活动并发送口令参与，支持机...",
+      "version": "1.0.11",
+      "author": "RBQ (migrated from zhiluop/pagermaid_plugins)",
+      "min_telepilot_version": "0.72.0-beta.2",
+      "plugin_api": null,
+      "permissions": [
+        "send_message",
+        "edit_message",
+        "delete_message",
+        "read_chat",
+        "click_bot_button"
+      ],
+      "reads": [],
+      "tags": [
+        "migrated",
+        "pagermaid",
+        "byRBQ"
+      ],
+      "path": "luckydraw-byRBQ",
+      "channels": {
+        "stable": "main"
+      }
+    },
+    {
+      "key": "math10",
+      "name": {
+        "zh": "随机算数题",
+        "en": "math10"
+      },
+      "kind": "interactive",
+      "icon": "🎮",
+      "summary": "由交互 Bot 开启一局 10 以内算数题，群内第一个答对者获得奖金",
+      "version": "1.0.15",
+      "author": "TelePilot Official",
+      "min_telepilot_version": "0.72.0-beta.2",
+      "plugin_api": null,
+      "permissions": [
+        "send_message",
+        "edit_message",
+        "payout"
+      ],
+      "reads": [],
+      "tags": [
+        "official",
+        "interactive",
+        "game"
+      ],
+      "path": "math10",
+      "channels": {
+        "stable": "main"
+      }
+    },
+    {
+      "key": "mindreader_survival",
+      "name": {
+        "zh": "读心生存赛",
+        "en": "mindreader_survival"
+      },
+      "kind": "interactive",
+      "icon": "🎮",
+      "summary": "多人读心生存赛游戏。玩家转账加入，通过读心（猜庄家答案）逐轮淘汰，最终存活者瓜分奖池。",
+      "version": "1.1.14",
+      "author": "Anoyou",
+      "min_telepilot_version": "0.72.0-beta.2",
+      "plugin_api": null,
+      "permissions": [
+        "send_message",
+        "edit_message",
+        "read_chat"
+      ],
+      "reads": [],
+      "tags": [
+        "game",
+        "survival",
+        "multiplayer",
+        "pool"
+      ],
+      "path": "mindreader_survival",
+      "channels": {
+        "stable": "main"
+      }
+    },
+    {
+      "key": "payment-source-cn-transfer",
+      "name": {
+        "zh": "转账通知解析（中文）",
+        "en": "payment-source-cn-transfer"
+      },
+      "kind": "payment_source",
+      "icon": "💱",
+      "summary": "交互 Bot 转账通知解析：识别中文转账 / 扣减通知的付款人、收款人与金额（payment_sources 扩展点）。",
+      "version": "1.0.0",
+      "author": "Anoyou",
+      "min_telepilot_version": "0.72.0-beta.2",
+      "plugin_api": "^1.0",
+      "permissions": [],
+      "reads": [],
+      "tags": [
+        "payment_source",
+        "interaction_bot",
+        "transfer",
+        "utility"
+      ],
+      "path": "payment-source-cn-transfer",
+      "channels": {
+        "stable": "main"
+      }
+    },
+    {
+      "key": "pixivshow-byRBQ",
+      "name": {
+        "zh": "pixivshow-byRBQ",
+        "en": "pixivshow-byRBQ"
+      },
+      "kind": "utility",
+      "icon": "🧰",
+      "summary": "Pixiv 美少女推图插件，支持普通图与 R18 图推送，R18 自动添加 Telegram 遮罩，可指定单次推送数量",
+      "version": "1.0.10",
+      "author": "RBQ (migrated from zhiluop/pagermaid_plugins)",
+      "min_telepilot_version": "0.72.0-beta.2",
+      "plugin_api": null,
+      "permissions": [
+        "send_message",
+        "edit_message",
+        "delete_message",
+        "send_file",
+        "read_chat",
+        "external_http"
+      ],
+      "reads": [],
+      "tags": [
+        "migrated",
+        "pagermaid",
+        "byRBQ"
+      ],
+      "path": "pixivshow-byRBQ",
+      "channels": {
+        "stable": "main"
+      }
+    },
+    {
+      "key": "poetry_blank",
+      "name": {
+        "zh": "诗词填空",
+        "en": "poetry_blank"
+      },
+      "kind": "interactive",
+      "icon": "🎮",
+      "summary": "古诗词填空抢答，答对获奖",
+      "version": "1.0.20",
+      "author": "Anoyou",
+      "min_telepilot_version": "0.72.0-beta.2",
+      "plugin_api": null,
+      "permissions": [
+        "send_message",
+        "edit_message",
+        "read_chat",
+        "payout"
+      ],
+      "reads": [],
+      "tags": [
+        "game",
+        "culture",
+        "poetry"
+      ],
+      "path": "poetry_blank",
+      "channels": {
+        "stable": "main"
+      }
+    },
+    {
+      "key": "private_chat_assistant",
+      "name": {
+        "zh": "私聊助理",
+        "en": "private_chat_assistant"
+      },
+      "kind": "automation",
+      "icon": "⚙️",
+      "summary": "监听账号收到的私聊消息，并通过插件专用 Bot 向指定账号发送聚合提醒",
+      "version": "0.1.5",
+      "author": "Anoyou",
+      "min_telepilot_version": "0.97.0-beta.1",
+      "plugin_api": null,
+      "permissions": [
+        "read_chat",
+        "resolve_entity",
+        "external_http"
+      ],
+      "reads": [],
+      "tags": [
+        "private-chat",
+        "notification",
+        "automation"
+      ],
+      "path": "private_chat_assistant",
+      "channels": {
+        "stable": "main"
+      }
+    },
+    {
+      "key": "pt_promote",
+      "name": {
+        "zh": "PT 种子促销",
+        "en": "pt_promote"
+      },
+      "kind": "utility",
+      "icon": "🧰",
+      "summary": "在青娃PT置顶促销某个种子（消耗蝌蚪）",
+      "version": "1.0.30",
+      "author": "xiaoyou",
+      "min_telepilot_version": "0.72.0-beta.2",
+      "plugin_api": null,
+      "permissions": [
+        "send_message",
+        "edit_message",
+        "external_http"
+      ],
+      "reads": [],
+      "tags": [
+        "pt",
+        "torrent",
+        "promote",
+        "utility"
+      ],
+      "path": "pt_promote",
+      "channels": {
+        "stable": "main"
+      }
+    },
+    {
+      "key": "quick_qa",
+      "name": {
+        "zh": "快问快答",
+        "en": "quick_qa"
+      },
+      "kind": "interactive",
+      "icon": "🎮",
+      "summary": "支持 URL + AI 生成题库的转账报名三选一快问快答积分淘汰赛。",
+      "version": "1.4.9",
+      "author": "Anoyou",
+      "min_telepilot_version": "0.72.0-beta.2",
+      "plugin_api": null,
+      "permissions": [
+        "send_message",
+        "edit_message",
+        "delete_message",
+        "read_chat",
+        "external_http",
+        "ai_text",
+        "payout"
+      ],
+      "reads": [],
+      "tags": [
+        "game",
+        "quiz",
+        "ai",
+        "interactive"
+      ],
+      "path": "quick_qa",
+      "channels": {
+        "stable": "main"
+      }
+    },
+    {
+      "key": "random_benefit",
+      "name": {
+        "zh": "随机福利",
+        "en": "random_benefit"
+      },
+      "kind": "interactive",
+      "icon": "🎮",
+      "summary": "监听指定群组发言，随机引用某条消息回复自定义福利语",
+      "version": "1.5.6",
+      "author": "Anoyou",
+      "min_telepilot_version": "0.72.0-beta.2",
+      "plugin_api": null,
+      "permissions": [
+        "send_message",
+        "read_chat",
+        "resolve_entity"
+      ],
+      "reads": [],
+      "tags": [
+        "interactive",
+        "random",
+        "userbot"
+      ],
+      "path": "random_benefit",
+      "channels": {
+        "stable": "main"
+      }
+    },
+    {
+      "key": "redpack-byRBQ",
+      "name": {
+        "zh": "红包",
+        "en": "redpack-byRBQ"
+      },
+      "kind": "interactive",
+      "icon": "🎮",
+      "summary": "口令红包插件，支持文字红包与图片数学题红包，并通过平台 payout 完成可审计派奖与结算",
+      "version": "1.1.31",
+      "author": "RBQ (migrated from zhiluop/pagermaid_plugins)",
+      "min_telepilot_version": "0.72.0-beta.2",
+      "plugin_api": null,
+      "permissions": [
+        "send_message",
+        "edit_message",
+        "read_chat",
+        "send_file",
+        "delete_message",
+        "payout"
+      ],
+      "reads": [],
+      "tags": [
+        "migrated",
+        "pagermaid",
+        "byRBQ"
+      ],
+      "path": "redpack-byRBQ",
+      "channels": {
+        "stable": "main"
+      }
+    },
+    {
+      "key": "reply_anchor_test",
+      "name": {
+        "zh": "近期发言回复测试",
+        "en": "reply_anchor_test"
+      },
+      "kind": "utility",
+      "icon": "🧰",
+      "summary": "测试近期发言回复和 TelePilot 安全公开姓名解析。",
+      "version": "0.2.6",
+      "author": "Anoyou",
+      "min_telepilot_version": "0.72.0-beta.2",
+      "plugin_api": null,
+      "permissions": [
+        "send_message",
+        "read_chat",
+        "payout"
+      ],
+      "reads": [],
+      "tags": [
+        "test",
+        "utility",
+        "userbot",
+        "payout"
+      ],
+      "path": "reply_anchor_test",
+      "channels": {
+        "stable": "main"
+      }
+    },
+    {
+      "key": "sar-byRBQ",
+      "name": {
+        "zh": "sar-byRBQ",
+        "en": "sar-byRBQ"
+      },
+      "kind": "automation",
+      "icon": "⚙️",
+      "summary": "# SAR - 贴纸自动回复插件 ## 功能描述 在指定群组中，当有人用贴纸回复你的消息时，自动...",
+      "version": "1.0.11",
+      "author": "RBQ (migrated from zhiluop/pagermaid_plugins)",
+      "min_telepilot_version": "0.72.0-beta.2",
+      "plugin_api": null,
+      "permissions": [
+        "send_message",
+        "edit_message",
+        "delete_message",
+        "send_file",
+        "read_chat"
+      ],
+      "reads": [],
+      "tags": [
+        "migrated",
+        "pagermaid",
+        "byRBQ"
+      ],
+      "path": "sar-byRBQ",
+      "channels": {
+        "stable": "main"
+      }
+    },
+    {
+      "key": "sfl-byRBQ",
+      "name": {
+        "zh": "sfl-byRBQ",
+        "en": "sfl-byRBQ"
+      },
+      "kind": "automation",
+      "icon": "⚙️",
+      "summary": "贴纸跟随插件，在特定群组中自动跟随发送特定贴纸",
+      "version": "1.0.11",
+      "author": "RBQ (migrated from zhiluop/pagermaid_plugins)",
+      "min_telepilot_version": "0.72.0-beta.2",
+      "plugin_api": null,
+      "permissions": [
+        "send_message",
+        "edit_message",
+        "delete_message",
+        "send_file",
+        "read_chat"
+      ],
+      "reads": [],
+      "tags": [
+        "migrated",
+        "pagermaid",
+        "byRBQ"
+      ],
+      "path": "sfl-byRBQ",
+      "channels": {
+        "stable": "main"
+      }
+    },
+    {
+      "key": "share_plugins-byRBQ",
+      "name": {
+        "zh": "share_plugins-byRBQ",
+        "en": "share_plugins-byRBQ"
+      },
+      "kind": "utility",
+      "icon": "🧰",
+      "summary": "分享插件，将现有插件以文件形式分享，支持列表查看和序号选择",
+      "version": "1.0.10",
+      "author": "RBQ (migrated from zhiluop/pagermaid_plugins)",
+      "min_telepilot_version": "0.72.0-beta.2",
+      "plugin_api": null,
+      "permissions": [
+        "send_message",
+        "edit_message",
+        "delete_message",
+        "send_file",
+        "read_chat"
+      ],
+      "reads": [],
+      "tags": [
+        "migrated",
+        "pagermaid",
+        "byRBQ"
+      ],
+      "path": "share_plugins-byRBQ",
+      "channels": {
+        "stable": "main"
+      }
+    },
+    {
+      "key": "sum",
+      "name": {
+        "zh": "群消息总结",
+        "en": "sum"
+      },
+      "kind": "utility",
+      "icon": "🧰",
+      "summary": "调用 TelePilot 已配置的 AI 总结群组消息，支持快捷总结与可配置定时任务",
+      "version": "1.1.38",
+      "author": "Anoyou",
+      "min_telepilot_version": "0.72.0-beta.2",
+      "plugin_api": null,
+      "permissions": [
+        "send_message",
+        "edit_message",
+        "read_chat",
+        "resolve_entity",
+        "ai_text",
+        "send_file",
+        "delete_message"
+      ],
+      "reads": [],
+      "tags": [
+        "ai",
+        "summary",
+        "automation"
+      ],
+      "path": "sum",
+      "channels": {
+        "stable": "main"
+      }
+    },
+    {
+      "key": "ten_half",
+      "name": {
+        "zh": "十点半",
+        "en": "ten_half"
+      },
+      "kind": "interactive",
+      "icon": "🎮",
+      "summary": "经典十点半纸牌游戏，支持多人对战、加倍、五小等规则",
+      "version": "0.4.22",
+      "author": "Anoyou",
+      "min_telepilot_version": "0.72.0-beta.2",
+      "plugin_api": null,
+      "permissions": [
+        "send_message",
+        "edit_message",
+        "delete_message",
+        "read_chat",
+        "payout"
+      ],
+      "reads": [],
+      "tags": [
+        "game",
+        "card",
+        "casino"
+      ],
+      "path": "ten_half",
+      "channels": {
+        "stable": "main"
+      }
+    },
+    {
+      "key": "todo_reminder",
+      "name": {
+        "zh": "Todo 提醒",
+        "en": "todo_reminder"
+      },
+      "kind": "automation",
+      "icon": "⚙️",
+      "summary": "用自然语言创建单次或重复、可完成确认的 Telegram Todo 提醒。",
+      "version": "0.1.6",
+      "author": "Anoyou",
+      "min_telepilot_version": "0.97.0-beta.1",
+      "plugin_api": null,
+      "permissions": [
+        "send_message",
+        "edit_message",
+        "delete_message",
+        "read_chat",
+        "resolve_entity"
+      ],
+      "reads": [],
+      "tags": [
+        "automation",
+        "todo",
+        "reminder"
+      ],
+      "path": "todo_reminder",
+      "channels": {
+        "stable": "main"
+      }
+    }
+  ]
+}

@@ -2774,6 +2774,197 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/plugin-market/catalog": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Catalog
+         * @description 所有已启用来源的插件目录（含已安装版本、更新角标、兼容性、固定版本与健康窗口状态）。
+         */
+        get: operations["get_catalog_api_plugin_market_catalog_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/plugin-market/install": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Install Plugin
+         * @description 从市场安装插件（与“插件仓库”安装同一流程：克隆、校验 plugin.json、写库、通知重载）。
+         */
+        post: operations["install_plugin_api_plugin_market_install_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/plugin-market/pins/{key}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set Pin
+         * @description 固定 / 取消固定插件版本：固定后“全部更新”和自动更新都会跳过它。
+         */
+        put: operations["set_pin_api_plugin_market_pins__key__put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/plugin-market/rollouts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Rollouts */
+        get: operations["list_rollouts_api_plugin_market_rollouts_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/plugin-market/rollouts/{key}/accept": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Accept Now
+         * @description 提前确认新版本正常：结束观察期并删除保留的旧版目录。
+         */
+        post: operations["accept_now_api_plugin_market_rollouts__key__accept_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/plugin-market/rollouts/{key}/rollback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Rollback Now
+         * @description 健康观察期内立即回滚到更新前的版本。
+         */
+        post: operations["rollback_now_api_plugin_market_rollouts__key__rollback_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/plugin-market/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Settings */
+        get: operations["get_settings_api_plugin_market_settings_get"];
+        /** Put Settings */
+        put: operations["put_settings_api_plugin_market_settings_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/plugin-market/sources": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Sources */
+        get: operations["list_sources_api_plugin_market_sources_get"];
+        put?: never;
+        /** Add Source */
+        post: operations["add_source_api_plugin_market_sources_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/plugin-market/sources/{source_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete Source */
+        delete: operations["delete_source_api_plugin_market_sources__source_id__delete"];
+        options?: never;
+        head?: never;
+        /** Update Source */
+        patch: operations["update_source_api_plugin_market_sources__source_id__patch"];
+        trace?: never;
+    };
+    "/api/plugin-market/update": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Update Plugins
+         * @description 更新指定插件，或（不传 keys）一键更新全部有新版本且未固定的插件；并行执行，结果逐个返回。
+         */
+        post: operations["update_plugins_api_plugin_market_update_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/plugin-repos": {
         parameters: {
             query?: never;
@@ -2956,6 +3147,9 @@ export interface paths {
         /**
          * Update Installed Plugins From Repo
          * @description 更新该仓库里所有已安装且版本低于仓库版本的插件。
+         *
+         *     0.113.0 起并行执行（并发上限见插件市场“更新参数”，默认 3），每个插件独立提交并通知重载；
+         *     单个失败或重载未确认只体现在该插件的结果里，不影响其它插件。
          */
         post: operations["update_installed_plugins_from_repo_api_plugin_repos__repo_id__update_installed_post"];
         delete?: never;
@@ -10325,6 +10519,328 @@ export interface components {
             /** Items */
             items: components["schemas"]["PluginLLMUsageSummaryItem"][];
         };
+        /** PluginMarketCatalog */
+        PluginMarketCatalog: {
+            /** Items */
+            items: components["schemas"]["PluginMarketItem"][];
+            /** Plugin Api */
+            plugin_api: string;
+            /** Rollouts */
+            rollouts?: components["schemas"]["PluginMarketRollout"][];
+            /** Server Version */
+            server_version: string;
+            settings: components["schemas"]["PluginMarketSettings"];
+            /** Sources */
+            sources: components["schemas"]["PluginMarketSource"][];
+            /**
+             * Updates Available
+             * @description 有新版本且未固定的插件数（更新角标）
+             */
+            updates_available: number;
+        };
+        /** PluginMarketInstallBody */
+        PluginMarketInstallBody: {
+            /**
+             * Default Enabled
+             * @default false
+             */
+            default_enabled: boolean;
+            /** Key */
+            key: string;
+            /** Source Id */
+            source_id: string;
+        };
+        /** PluginMarketInstalled */
+        PluginMarketInstalled: {
+            /** Enabled */
+            enabled: boolean;
+            /**
+             * Same Source
+             * @description 已安装版本是否来自该条目的同一仓库（只有同源才提示更新）
+             */
+            same_source: boolean;
+            /** Source */
+            source?: string | null;
+            /** Source Url */
+            source_url?: string | null;
+            /** Version */
+            version: string;
+        };
+        /** PluginMarketItem */
+        PluginMarketItem: {
+            /**
+             * Author
+             * @default
+             */
+            author: string;
+            /**
+             * Auto Update
+             * @default false
+             */
+            auto_update: boolean;
+            /** Channels */
+            channels?: {
+                [key: string]: string;
+            };
+            /** Compatible */
+            compatible: boolean;
+            /** Icon */
+            icon?: string | null;
+            /**
+             * Id
+             * @description 来源 id:插件 key
+             */
+            id: string;
+            /** Incompatible Reason */
+            incompatible_reason?: string | null;
+            installed?: components["schemas"]["PluginMarketInstalled"] | null;
+            /** Key */
+            key: string;
+            /** Kind */
+            kind: string;
+            /** Min Telepilot Version */
+            min_telepilot_version?: string | null;
+            name: components["schemas"]["PluginMarketName"];
+            /** Path */
+            path: string;
+            /** Permissions */
+            permissions?: string[];
+            /** Pinned Version */
+            pinned_version?: string | null;
+            /** Plugin Api */
+            plugin_api?: string | null;
+            /** Reads */
+            reads?: string[];
+            /** Repository */
+            repository: string;
+            rollout?: components["schemas"]["PluginMarketRollout"] | null;
+            /** Source Id */
+            source_id: string;
+            /** Source Name */
+            source_name: string;
+            /**
+             * Summary
+             * @default
+             */
+            summary: string;
+            /** Tags */
+            tags?: string[];
+            /** Trust */
+            trust: string;
+            /**
+             * Update Available
+             * @default false
+             */
+            update_available: boolean;
+            /** Version */
+            version: string;
+        };
+        /** PluginMarketName */
+        PluginMarketName: {
+            /** En */
+            en: string;
+            /** Zh */
+            zh: string;
+        };
+        /** PluginMarketPinBody */
+        PluginMarketPinBody: {
+            /** Pinned */
+            pinned: boolean;
+        };
+        /** PluginMarketPinResult */
+        PluginMarketPinResult: {
+            /** Key */
+            key: string;
+            /** Pinned Version */
+            pinned_version?: string | null;
+        };
+        /** PluginMarketRollout */
+        PluginMarketRollout: {
+            /** Deadline */
+            deadline?: string | null;
+            /** Finished At */
+            finished_at?: string | null;
+            /** From Version */
+            from_version?: string | null;
+            /** Key */
+            key?: string | null;
+            /** Reason */
+            reason?: string | null;
+            /** Started At */
+            started_at?: string | null;
+            /**
+             * Status
+             * @description watching / healthy / rolled_back / rollback_failed
+             */
+            status?: string | null;
+            /** To Version */
+            to_version?: string | null;
+            /**
+             * Trigger
+             * @description manual / auto / repo
+             */
+            trigger?: string | null;
+        };
+        /** PluginMarketSettings */
+        PluginMarketSettings: {
+            /**
+             * Health Window Minutes
+             * @description 更新后的健康观察窗口（分钟，3–60，默认 10）
+             */
+            health_window_minutes: number;
+            /**
+             * Pinned
+             * @description 固定版本的插件：key → 固定时的版本
+             */
+            pinned?: {
+                [key: string]: string;
+            };
+            /**
+             * Update Concurrency
+             * @description 批量更新并发上限（1–8，默认 3）
+             */
+            update_concurrency: number;
+        };
+        /** PluginMarketSettingsPatch */
+        PluginMarketSettingsPatch: {
+            /** Health Window Minutes */
+            health_window_minutes?: number | null;
+            /** Update Concurrency */
+            update_concurrency?: number | null;
+        };
+        /** PluginMarketSource */
+        PluginMarketSource: {
+            /**
+             * Auto Update
+             * @description 是否自动更新（只有 official 来源可以开启）
+             */
+            auto_update: boolean;
+            /**
+             * Available
+             * @description 内置官方源被 TELEPILOT_PLUGIN_MARKET=off 关闭时为 false
+             * @default true
+             */
+            available: boolean;
+            /**
+             * Builtin
+             * @description 内置官方源：不能删除，只能停用
+             */
+            builtin: boolean;
+            /** Enabled */
+            enabled: boolean;
+            /** Error */
+            error?: string | null;
+            /**
+             * Fallback
+             * @description 官方源拉取失败，正在使用随服务器打包的索引副本
+             * @default false
+             */
+            fallback: boolean;
+            /** Fetched At */
+            fetched_at?: string | null;
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+            /**
+             * Plugin Count
+             * @default 0
+             */
+            plugin_count: number;
+            /**
+             * Status
+             * @description ok / stale / fallback / error / disabled
+             * @default disabled
+             */
+            status: string;
+            /**
+             * Trust
+             * @description official / community / unreviewed
+             */
+            trust: string;
+            /** Url */
+            url: string;
+        };
+        /** PluginMarketSourceCreate */
+        PluginMarketSourceCreate: {
+            /** Name */
+            name?: string | null;
+            /**
+             * Trust
+             * @description official / community / unreviewed
+             * @default unreviewed
+             */
+            trust: string | null;
+            /**
+             * Url
+             * @description registry.json 的 https 地址
+             */
+            url: string;
+        };
+        /** PluginMarketSourcePatch */
+        PluginMarketSourcePatch: {
+            /** Auto Update */
+            auto_update?: boolean | null;
+            /** Enabled */
+            enabled?: boolean | null;
+            /** Name */
+            name?: string | null;
+            /** Trust */
+            trust?: string | null;
+        };
+        /** PluginMarketUpdateBody */
+        PluginMarketUpdateBody: {
+            /**
+             * Keys
+             * @description 要更新的插件；不传表示全部有更新且未固定的插件
+             */
+            keys?: string[] | null;
+        };
+        /** PluginMarketUpdateItem */
+        PluginMarketUpdateItem: {
+            /**
+             * Display Name
+             * @default
+             */
+            display_name: string;
+            /** From Version */
+            from_version?: string | null;
+            /**
+             * Health Check
+             * @description 是否进入了健康观察窗口（失败会自动回滚）
+             * @default false
+             */
+            health_check: boolean;
+            /** Key */
+            key: string;
+            /**
+             * Message
+             * @default
+             */
+            message: string;
+            /**
+             * Status
+             * @description updated / skipped / pinned / failed
+             */
+            status: string;
+            /** To Version */
+            to_version?: string | null;
+        };
+        /** PluginMarketUpdateResult */
+        PluginMarketUpdateResult: {
+            /** Concurrency */
+            concurrency: number;
+            /** Failed */
+            failed: number;
+            /** Items */
+            items: components["schemas"]["PluginMarketUpdateItem"][];
+            /** Skipped */
+            skipped: number;
+            /** Total */
+            total: number;
+            /** Updated */
+            updated: number;
+        };
         /** PluginMiddlewareLimitsOut */
         PluginMiddlewareLimitsOut: {
             /**
@@ -10404,6 +10920,11 @@ export interface components {
              * @default 0
              */
             checked: number;
+            /**
+             * Concurrency
+             * @description 本次并行更新的并发上限（0.113.0+）
+             */
+            concurrency?: number | null;
             /**
              * Failed
              * @default 0
@@ -23163,6 +23684,760 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PluginConfigActionJobResponse"];
+                };
+            };
+            /** @description 认证失败 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description CSRF 校验失败或权限不足 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description 服务器内部错误 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    get_catalog_api_plugin_market_catalog_get: {
+        parameters: {
+            query?: {
+                refresh?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: {
+                auth_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginMarketCatalog"];
+                };
+            };
+            /** @description 认证失败 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description 服务器内部错误 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    install_plugin_api_plugin_market_install_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: {
+                auth_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PluginMarketInstallBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RemotePluginOut"];
+                };
+            };
+            /** @description 认证失败 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description CSRF 校验失败或权限不足 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description 服务器内部错误 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    set_pin_api_plugin_market_pins__key__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                key: string;
+            };
+            cookie?: {
+                auth_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PluginMarketPinBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginMarketPinResult"];
+                };
+            };
+            /** @description 认证失败 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description CSRF 校验失败或权限不足 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description 服务器内部错误 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    list_rollouts_api_plugin_market_rollouts_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: {
+                auth_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginMarketRollout"][];
+                };
+            };
+            /** @description 认证失败 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description 服务器内部错误 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    accept_now_api_plugin_market_rollouts__key__accept_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                key: string;
+            };
+            cookie?: {
+                auth_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginMarketRollout"];
+                };
+            };
+            /** @description 认证失败 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description CSRF 校验失败或权限不足 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description 服务器内部错误 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    rollback_now_api_plugin_market_rollouts__key__rollback_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                key: string;
+            };
+            cookie?: {
+                auth_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginMarketRollout"];
+                };
+            };
+            /** @description 认证失败 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description CSRF 校验失败或权限不足 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description 服务器内部错误 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    get_settings_api_plugin_market_settings_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: {
+                auth_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginMarketSettings"];
+                };
+            };
+            /** @description 认证失败 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description 服务器内部错误 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    put_settings_api_plugin_market_settings_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: {
+                auth_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PluginMarketSettingsPatch"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginMarketSettings"];
+                };
+            };
+            /** @description 认证失败 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description CSRF 校验失败或权限不足 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description 服务器内部错误 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    list_sources_api_plugin_market_sources_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: {
+                auth_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginMarketSource"][];
+                };
+            };
+            /** @description 认证失败 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description 服务器内部错误 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    add_source_api_plugin_market_sources_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: {
+                auth_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PluginMarketSourceCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginMarketSource"];
+                };
+            };
+            /** @description 认证失败 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description CSRF 校验失败或权限不足 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description 服务器内部错误 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    delete_source_api_plugin_market_sources__source_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                source_id: string;
+            };
+            cookie?: {
+                auth_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description 认证失败 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description CSRF 校验失败或权限不足 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description 服务器内部错误 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    update_source_api_plugin_market_sources__source_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                source_id: string;
+            };
+            cookie?: {
+                auth_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PluginMarketSourcePatch"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginMarketSource"];
+                };
+            };
+            /** @description 认证失败 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description CSRF 校验失败或权限不足 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description 服务器内部错误 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    update_plugins_api_plugin_market_update_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: {
+                auth_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PluginMarketUpdateBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginMarketUpdateResult"];
                 };
             };
             /** @description 认证失败 */

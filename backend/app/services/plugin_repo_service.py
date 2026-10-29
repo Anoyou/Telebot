@@ -865,8 +865,13 @@ async def _replace_installed_plugin_from_repo_dir(
     meta: PluginMetadata,
     installed: InstalledPlugin,
     triggered_by_user_id: int | None = None,
+    keep_previous_dir: Path | None = None,
 ) -> RemotePluginView:
-    """用仓库缓存中的插件目录覆盖已安装插件，并保留用户启停状态。"""
+    """用仓库缓存中的插件目录覆盖已安装插件，并保留用户启停状态。
+
+    ``keep_previous_dir``（插件市场 0.113.0）：成功后把旧版目录移到这里保留，供健康窗口内回滚；
+    为 ``None`` 时与之前一样直接删除旧版目录。
+    """
 
     final_name = meta.name
     install_path = Path(installed.installed_path or _plugin_dir(final_name))
@@ -989,8 +994,24 @@ async def _replace_installed_plugin_from_repo_dir(
         raise
 
     if backup.exists():
-        shutil.rmtree(backup, ignore_errors=True)
+        if keep_previous_dir is not None:
+            _keep_previous_plugin_dir(backup, keep_previous_dir)
+        else:
+            shutil.rmtree(backup, ignore_errors=True)
     return remote_plugin_view_from_installed(row)
+
+
+def _keep_previous_plugin_dir(backup: Path, keep_previous_dir: Path) -> None:
+    """把更新前的旧版目录移到 ``keep_previous_dir``；失败只记日志并删除，不影响已完成的更新。"""
+
+    try:
+        keep_previous_dir.parent.mkdir(parents=True, exist_ok=True)
+        if keep_previous_dir.exists():
+            shutil.rmtree(keep_previous_dir, ignore_errors=True)
+        backup.rename(keep_previous_dir)
+    except OSError:
+        log.warning("保留旧版插件目录失败 %s", backup, exc_info=True)
+        shutil.rmtree(backup, ignore_errors=True)
 
 
 def _installed_plugin_metadata_needs_refresh(installed: InstalledPlugin, meta: PluginMetadata) -> bool:

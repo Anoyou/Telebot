@@ -111,4 +111,5 @@ class PluginRepoBulkUpdateResult(BaseModel):
     updated: int = 0
     skipped: int = 0
     failed: int = 0
+    concurrency: int | None = Field(default=None, description="本次并行更新的并发上限（0.113.0+）")
     items: list[PluginRepoBulkUpdateItem] = Field(default_factory=list)
