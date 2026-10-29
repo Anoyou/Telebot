@@ -32,6 +32,15 @@ struct PluginManagementView: View {
     @State private var search = ""
     @State private var searching = false
 
+    /// - Parameter initialMode: 打开时显示「插件」卡片还是「运行」（运行树）；服务器设置里的旧入口跳到这里用 `.runtime`。
+    init(accountID: Int? = nil, isTabRoot: Bool = true, initialMode: PluginCenterMode = .plugins) {
+        self.accountID = accountID
+        self.isTabRoot = isTabRoot
+        let state = PluginCenterState()
+        state.mode = accountID == nil ? initialMode : .plugins
+        _centerState = State(initialValue: state)
+    }
+
     var body: some View {
         Group {
             if let accountID {
@@ -41,7 +50,11 @@ struct PluginManagementView: View {
                 // 与大标题导航栏的折叠/展开互相改变顶部安全区，滑到顶部时顶栏会持续抖动。
                 switch section {
                 case .center:
-                    PluginCenterView(features: store.features, state: centerState, search: search, loading: store.loading, loadError: store.loadError, reload: load, header: AnyView(sectionPicker))
+                    if centerState.mode == .runtime {
+                        RuntimeTreeView(header: AnyView(sectionPicker), accountID: $centerState.selectedAccountID, mode: $centerState.mode, features: store.features)
+                    } else {
+                        PluginCenterView(features: store.features, state: centerState, search: search, loading: store.loading, loadError: store.loadError, reload: load, header: AnyView(sectionPicker))
+                    }
                 case .discover:
                     PluginDiscoverView(store: store, search: search, header: AnyView(sectionPicker))
                 case .installed:
@@ -49,6 +62,7 @@ struct PluginManagementView: View {
                 }
             }
         }
+        // 运行树没有可搜索的列表，不显示页面级搜索。
         .pageSearch(text: $search, isActive: $searching, prompt: searchPrompt, identifier: "plugins.search")
         .background(Color(.systemGroupedBackground))
         .navigationTitle(accountID == nil ? "插件" : "插件与规则")
@@ -80,7 +94,13 @@ struct PluginManagementView: View {
         }
     }
 
-    private func load() async { await store.load(model: model) }
+    private func load() async {
+        await store.load(model: model)
+        if accountID == nil, !centerState.scopeInitialized, !model.accounts.isEmpty {
+            centerState.scopeInitialized = true
+            if centerState.selectedAccountID == nil { centerState.selectedAccountID = model.accounts.first?.id }
+        }
+    }
 }
 
 /// 插件中心需要跨视图重建保留的状态（所选账号、该账号的插件状态、筛选、拖动后的本地顺序）。
@@ -93,6 +113,10 @@ private final class PluginCenterState {
     var category = "all"
     var filter: PluginFilter = .all
     var localOrder: [String]?
+    /// 「插件 | 运行」：插件卡片或运行树。
+    var mode: PluginCenterMode = .plugins
+    /// 首次读取后默认选中第一个账号（之后尊重用户选的「全部账号」）。
+    var scopeInitialized = false
 }
 
 extension JSONValue {
@@ -185,6 +209,7 @@ private struct PluginCenterView: View {
             VStack(alignment: .leading, spacing: 14) {
                 if let header { header.padding(.top, PageLayout.listHeaderTop) }
                 scopePicker
+                if fixedAccountID == nil { PluginCenterModePicker(mode: $state.mode) }
                 if let loadError { NoticeView(title: "插件目录读取失败", message: loadError) }
                 if let accountError { NoticeView(title: "账号插件状态读取失败", message: accountError) }
                 if loading && features.isEmpty {

@@ -40,6 +40,11 @@ actor FixtureService: AppServing {
     private var deletedSessions: Set<String> = []
     /// 交互中心界面测试（0.16.0）：按账号保存的交互配置，PUT 按服务器语义合并（Token 只记“已配置”）。
     private var interactionConfigs: [Int: JSONValue] = [:]
+    /// 运行树界面测试（第 19 轮）：运行模式（生产／值守）与模块开关，值守按服务器预设关闭 AI／交互 Bot／Webhook 并在恢复时还原。
+    private var runtimeSafeWatch = false
+    private var runtimeModules: [String: Bool] = ["ai": true, "interaction_bot": true, "webhooks": false, "ledger": true, "dispatch_debug": true]
+    private var runtimeForced: [String: Bool] = ["dispatch_debug": true]
+    private var runtimeSnapshot: ([String: Bool], [String: Bool])?
     /// 运行阶段与排队消息界面测试（`--ui-test-run-phases`）：第一条消息开始一个一直执行中的任务，
     /// 进度流依次给出 run_started → provider_selected → model_attempt → tool_started；执行中再发的消息进入排队。
     private let runPhases = ProcessInfo.processInfo.arguments.contains("--ui-test-run-phases")
@@ -556,6 +561,7 @@ actor FixtureService: AppServing {
                     "recommended_api_format": "responses", "recommended_protocol_profile": "standard",
                     "recommended_client_identity_profile": "openai_sdk", "recommended_web_search_api_format": "responses"]
         }
+        if let value = runtimeTreeFixture(path, clean: clean, method: method, body: body) { return value }
         if let value = interactionFixture(clean, method: method, body: body) { return value }
         if clean == "/api/system/kill-switch" {
             if method == "POST" {
@@ -987,9 +993,110 @@ actor FixtureService: AppServing {
         return nil
     }
 
-    /// 交互中心与能力与插件树（0.16.0）。
+    /// 运行树（第 19 轮）：不带 account_id 时返回旧服务器的形状（客户端回退计算）；带 account_id 时按新服务器
+    /// （0.113.0-beta.2 起）回显 scope 并给出账号口径的需求、全局需求、关不掉的原因与插件中文名。
+    private func runtimeTreeFixture(_ path: String, clean: String, method: String, body: JSONValue?) -> JSONValue? {
+        let presetOff = ["ai", "interaction_bot", "webhooks"]
+        switch (clean, method) {
+        case ("/api/platform/profile", "GET"):
+            return runtimeProfileFixture()
+        case ("/api/platform/profile/dry-run", "POST"):
+            return ["preset": "safe_watch",
+                    "diff": .array(presetOff.filter { runtimeModules[$0] == true }.map { (key: String) -> JSONValue in ["key": .string(key), "from_enabled": true, "to_enabled": false] }),
+                    "blind_spot": "值守期间交互 Bot 不处理消息，群里的交互玩法不会有回应（观测盲区）。"]
+        case ("/api/platform/profile/apply", "POST"):
+            runtimeSnapshot = (runtimeModules, runtimeForced)
+            for key in presetOff { runtimeModules[key] = false; runtimeForced[key] = true }
+            runtimeSafeWatch = true
+            return runtimeProfileFixture()
+        case ("/api/platform/profile/restore", "POST"):
+            if let snapshot = runtimeSnapshot { runtimeModules = snapshot.0; runtimeForced = snapshot.1 }
+            runtimeSnapshot = nil
+            runtimeSafeWatch = false
+            return runtimeProfileFixture()
+        default:
+            break
+        }
+        if let match = clean.firstMatch(of: #/^\/api\/system\/capabilities\/([a-z_]+)$/#), method == "PATCH" {
+            let key = String(match.1)
+            let enabled = body?["enabled"]?.boolValue ?? false
+            runtimeModules[key] = enabled
+            runtimeForced[key] = !enabled
+            return ["module": ["key": .string(key), "label": .string(key), "desired_enabled": .bool(enabled), "forced_off": .bool(!enabled),
+                               "generation": 2, "runtime_state": .string(enabled ? "ready" : "stopped")],
+                    "worker_convergence": ["total_accounts": 2, "notified": 2, "acked": 2, "offline_or_timeout": 0, "timeout_seconds": 5],
+                    "ok": true, "message": .null]
+        }
+        guard clean == "/api/platform/tree", method == "GET" else { return nil }
+        guard var tree = Self.platformTreeFixture.objectValue, var branches = tree["branches"]?.objectValue,
+              var trunk = tree["trunk"]?.objectValue else { return Self.platformTreeFixture }
+        trunk["current_profile"] = .string(runtimeSafeWatch ? "safe_watch" : "production")
+        tree["trunk"] = .object(trunk)
+        for (key, value) in branches {
+            guard var branch = value.objectValue else { continue }
+            let desired = runtimeModules[key] ?? false
+            let demand = (branch["demanded_by"]?.arrayValue ?? [])
+            branch["desired"] = .bool(desired)
+            branch["forced_off"] = .bool(runtimeForced[key] ?? false)
+            if !desired { branch["state"] = .string("stopped") } else if key != "dispatch_debug" { branch["state"] = .string("ready") }
+            branch["can_turn_off"] = .bool(desired && demand.isEmpty)
+            branches[key] = .object(branch)
+        }
+        tree["branches"] = .object(branches)
+        let accountID = (URLComponents(string: path)?.queryItems ?? []).first { $0.name == "account_id" }?.value.flatMap(Int.init)
+        guard let accountID else { return .object(tree) }
+        // 新服务器：账号 1 启用自动回复与内容整理助手；账号 2 只启用内容整理助手。
+        let enabledHere: Set<String> = accountID == 1 ? ["auto_reply", "content_assistant"] : ["content_assistant"]
+        let names = ["auto_reply": "自动回复", "content_assistant": "内容整理助手", "forward_guard": "转发风控与来源保护"]
+        let channels = ["直通": ("passthrough", "直通"), "交互": ("interaction", "交互 Bot"), "命令": ("main", "主通道")]
+        tree["scope"] = .object(["kind": .string("account"), "account_id": .integer(Int64(accountID)), "account_name": .string(accountID == 1 ? "日常工作账号" : "备用账号")])
+        tree["leaves"] = .array((tree["leaves"]?.arrayValue ?? []).map { leaf in
+            guard var object = leaf.objectValue, let key = object["key"]?.stringValue else { return leaf }
+            let channel = channels[object["attachment"]?.stringValue ?? "命令"] ?? ("main", "主通道")
+            object["display_name"] = .string(names[key] ?? key)
+            object["channel"] = .string(channel.0)
+            object["channel_label"] = .string(channel.1)
+            object["entry_labels"] = .array((key == "auto_reply" ? ["直通", "命令"] : (key == "content_assistant" ? ["交互入口"] : [])).map { JSONValue.string($0) })
+            object["enabled"] = .bool(enabledHere.contains(key))
+            object["enabled_global"] = .bool(key != "forward_guard")
+            object["account_error"] = accountID == 1 && key == "content_assistant" ? .string("模型供应商连接超时，请检查密钥与网络。") : .null
+            return .object(object)
+        })
+        for (key, value) in branches {
+            guard var branch = value.objectValue else { continue }
+            let global = (branch["demanded_by"]?.arrayValue ?? []).compactMap(\.stringValue)
+            let here = global.filter { enabledHere.contains($0) }
+            let desired = runtimeModules[key] ?? false
+            branch["demanded_by"] = .array(here.map { .string($0) })
+            branch["demanded_by_global"] = .array(global.map { .string($0) })
+            if !desired {
+                branch["blocked_code"] = .string("already_off")
+                branch["blocked_reason"] = .string("已经是关闭状态")
+                if runtimeForced[key] == true {
+                    branch["forced_off_reason"] = .string(runtimeSafeWatch && presetOff.contains(key)
+                        ? "值守模式关闭了它；恢复生产后才会重新打开" : "管理员手动关闭了它；在平台能力里重新打开即可")
+                }
+            } else if !global.isEmpty {
+                branch["blocked_code"] = .string("required_by_this_account")
+                branch["blocked_reason"] = .string("本账号启用的 \(here.count) 个插件需要它：内容整理助手（#1、#2）。模块是全服共用的，要先停用这些插件才能关闭。")
+            }
+            branches[key] = .object(branch)
+        }
+        tree["branches"] = .object(branches)
+        return .object(tree)
+    }
+
+    private func runtimeProfileFixture() -> JSONValue {
+        let blind: JSONValue = runtimeSafeWatch ? .string("值守期间交互 Bot 不处理消息，群里的交互玩法不会有回应（观测盲区）。") : .null
+        return ["active_profile": runtimeSafeWatch ? .string("safe_watch") : .null,
+                "current_profile": .string(runtimeSafeWatch ? "safe_watch" : "production"),
+                "status": .string(runtimeSafeWatch ? "active" : "idle"), "last_error": .null,
+                "modules": .object(runtimeModules.mapValues { JSONValue.bool($0) }),
+                "blind_spot": blind]
+    }
+
+    /// 交互中心（0.16.0）。
     private func interactionFixture(_ clean: String, method: String, body: JSONValue?) -> JSONValue? {
-        if clean == "/api/platform/tree" { return Self.platformTreeFixture }
         // 会话白名单（ignored-peers）沿用 pluginUIFixture 里的「测试群 A／B」。
         guard let match = clean.firstMatch(of: #/^\/api\/accounts\/(\d+)\/interaction-bot$/#) else { return nil }
         let accountID = Int(match.1) ?? 1
