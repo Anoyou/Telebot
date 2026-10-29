@@ -57,7 +57,7 @@ async def test_composite_save_writes_plugins_and_interaction_then_commits(monkey
     monkeypatch.setattr(
         account_bots.features_api,
         "_preserve_existing_sensitive_values",
-        lambda existing, incoming, key: dict(incoming),
+        lambda existing, incoming, key, schema=None: dict(incoming),
     )
     monkeypatch.setattr(
         account_bots.features_api,

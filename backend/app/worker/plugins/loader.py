@@ -5868,6 +5868,18 @@ def _merge_static_plugin_api(path: Path, manifest: Manifest) -> None:
             setattr(manifest, field_name, value)
         except Exception:  # noqa: BLE001 - 旧式 manifest 替身不可写时忽略
             log.debug("写入 manifest.%s 失败 plugin=%s", field_name, path.name, exc_info=True)
+    if not getattr(manifest, "ui", None):
+        metadata_path = path / "plugin.json"
+        try:
+            raw = json.loads(metadata_path.read_text(encoding="utf-8")) if metadata_path.is_file() else {}
+        except (OSError, json.JSONDecodeError):
+            raw = {}
+        ui = raw.get("ui") if isinstance(raw, dict) else None
+        if isinstance(ui, dict) and ui:
+            try:
+                manifest.ui = dict(ui)
+            except Exception:  # noqa: BLE001 - 旧式 manifest 替身不可写时忽略
+                log.debug("写入 manifest.ui 失败 plugin=%s", path.name, exc_info=True)
     if getattr(manifest, "min_telebot_version", None) and not getattr(manifest, "min_telepilot_version", None):
         note_deprecated("manifest.min_telebot_version", plugin_key=str(getattr(manifest, "key", "") or path.name))
 

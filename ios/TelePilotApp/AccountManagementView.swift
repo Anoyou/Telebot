@@ -49,6 +49,8 @@ struct AccountManagementView: View {
                     ManagementCollectionView(resource: .init(title: "账号指令", path: base + "/commands", kind: .accountCommands, itemPath: base + "/commands/{id}"))
                 } label: { Label("账号指令与白名单", systemImage: "terminal") }
             }
+            // account.detail：在该账号启用的插件声明的原生卡片（没有时不显示）。
+            PluginCardSections(slot: "account.detail", accountID: id)
             Section {
                 BotGuestModeStatusRows(accountID: id)
             } header: {

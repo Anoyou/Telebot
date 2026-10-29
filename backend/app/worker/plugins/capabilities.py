@@ -68,8 +68,10 @@ class Capability:
 _P0_RELEASE = "0.107.0-beta.1"
 # P1（通用交互原语）发布的宿主版本。
 _P1_RELEASE = "0.108.0-beta.1"
-# 这一版（P2 消息管线中间件）发布的宿主版本；合并时随版本号顺延（只影响注册表里“本版新增”的条目）。
-_THIS_RELEASE = "0.109.0-beta.1"
+# P2（消息管线中间件）发布的宿主版本。
+_P2_RELEASE = "0.109.0-beta.1"
+# 这一版（P3 声明式 UI）发布的宿主版本；合并时随版本号顺延（只影响注册表里“本版新增”的条目）。
+_THIS_RELEASE = "0.110.0-beta.1"
 
 _DOC = "docs/PLUGIN-API-REFERENCE.md"
 
@@ -235,41 +237,78 @@ CAPABILITIES: tuple[Capability, ...] = (
         summary="interaction_entries[].policy 声明参与方式 / 是否有奖 / 默认启动词，宿主不再按插件 key 写死",
         doc=f"{_DOC}#入口策略policy",
     ),
+    # ── P3：声明式 UI（Plugin API 1.3）──
+    Capability(
+        name="ui.cards",
+        since=_THIS_RELEASE,
+        plugin_api="1.3",
+        summary="plugin.json ui.cards 声明原生卡片（stats / table / kv / list / buttons），slot：plugin.overview / account.detail / dashboard；数据来自 reads 资源或 on_ui_card（3 秒），按钮调 on_ui_action",
+        doc=f"{_DOC}#声明式卡片uicards",
+    ),
+    Capability(
+        name="config.validate",
+        since=_THIS_RELEASE,
+        plugin_api="1.3",
+        summary="on_config_validate(ctx, config, scope) 保存前同步校验 / 规范化（2 秒，超时放行），返回 {config} 或 {errors: {字段: 原因}}",
+        doc=f"{_DOC}#配置钩子on_config_validate--on_config_saved",
+    ),
+    Capability(
+        name="config.saved",
+        since=_THIS_RELEASE,
+        plugin_api="1.3",
+        summary="on_config_saved(ctx, config, scope) 保存成功后后台调用（10 秒），不影响保存结果",
+        doc=f"{_DOC}#配置钩子on_config_validate--on_config_saved",
+    ),
+    Capability(
+        name="config.secret_list",
+        since=_THIS_RELEASE,
+        plugin_api="1.3",
+        summary="config_schema 数组字段声明 x-secret-list：宿主遮罩显示、按 id 保留原密钥并加密保存，Web / iOS 原生密钥列表控件",
+        doc=f"{_DOC}#密钥列表x-secret-list",
+    ),
+    Capability(
+        name="ui.widgets",
+        version=1,
+        since=_THIS_RELEASE,
+        plugin_api="1.3",
+        summary="配置控件契约 schemas/plugin-ui-widgets.json（contract_version 1）：Web 与 iOS 都实现全部控件，未知控件只读并提示更新 App",
+        doc=f"{_DOC}#配置控件契约",
+    ),
 )
 
 # ── P2：消息管线中间件（Plugin API 1.2）──
 CAPABILITIES += (
     Capability(
         name="middleware.outbound",
-        since=_THIS_RELEASE,
+        since=_P2_RELEASE,
         plugin_api="1.2",
         summary="plugin.json middleware 声明 outbound 中间件：投递前改正文 / Rich / 按钮 / render_profile 或 mw.reject；只读视图 + 字段白名单回滚 + fail-open，单钩子 250ms、每账号最多 8 个",
         doc=f"{_DOC}#消息管线中间件middleware",
     ),
     Capability(
         name="middleware.inbound",
-        since=_THIS_RELEASE,
+        since=_P2_RELEASE,
         plugin_api="1.2",
         summary="inbound 中间件：事件路由前打标签（annotations）、规整 text 或 mw.drop 丢弃；需要 message_middleware 权限",
         doc=f"{_DOC}#消息管线中间件middleware",
     ),
     Capability(
         name="middleware.delivered",
-        since=_THIS_RELEASE,
+        since=_P2_RELEASE,
         plugin_api="1.2",
         summary="delivered 中间件：投递结果确定后异步收到摘要（类型、成功与否、错误码、会话，不含正文），用于统计与审计",
         doc=f"{_DOC}#消息管线中间件middleware",
     ),
     Capability(
         name="middleware.stream_preview",
-        since=_THIS_RELEASE,
+        since=_P2_RELEASE,
         plugin_api="1.2",
         summary='outbound 中间件在 match.action_types 声明 "stream_preview" 后也处理流式中间态文本（每个 50ms）',
         doc="docs/PLUGIN-STREAMING.md",
     ),
     Capability(
         name="messages.render_profile",
-        since=_THIS_RELEASE,
+        since=_P2_RELEASE,
         plugin_api="1.2",
         facades=ALL_MESSAGE_FACADES,
         summary='动作或 plugin.json 声明 render_profile: {"table": {"compact", "bordered", "striped"}}，由平台 core.* 中间件统一渲染（compact_tables 是它的旧写法）',
@@ -277,14 +316,14 @@ CAPABILITIES += (
     ),
     Capability(
         name="ai.stream_extra_body",
-        since=_THIS_RELEASE,
+        since=_P2_RELEASE,
         plugin_api="1.2",
         summary="ctx.ai.stream_complete(extra_body={...}) 与 complete 同一套白名单透传；选中 Provider 的格式不支持时明确报错（流式不中途换 Provider）",
         doc=f"{_DOC}#ai-请求体透传extra_body",
     ),
     Capability(
         name="runtime.blocking_monitor",
-        since=_THIS_RELEASE,
+        since=_P2_RELEASE,
         plugin_api="1.2",
         summary="插件代码同步阻塞事件循环 ≥200ms 记入该插件钩子统计的 blocked / blocking_ms（与 loop.slow_callback_duration 同口径）",
         doc=f"{_DOC}#钩子统计与弃用登记",

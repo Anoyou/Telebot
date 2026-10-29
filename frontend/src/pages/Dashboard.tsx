@@ -1,4 +1,5 @@
 // Dashboard：轻量概览工作台。账号列表和系统状态都从页面正文改为锚定浮层。
+import { PluginCardSlot } from "@/components/plugin/PluginCards";
 import { useEffect, useState, type ReactNode } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
@@ -213,6 +214,7 @@ export function Dashboard() {
           error={resourceQ.error}
         />
       </div>
+      <PluginCardSlot slot="dashboard" title="插件卡片" />
     </PageShell>
   );
 }

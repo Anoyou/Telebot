@@ -25,6 +25,18 @@
 
 ## [Unreleased]
 
+## [0.110.0-beta.1] - 2026-10-29 · minor（次版本预发布） · 插件平台化 P3：声明式 UI（控件契约、ui.cards 原生卡片、配置钩子、x-secret-list 密钥列表、iOS 4 个新控件与未知控件只读）
+
+### 插件平台（Plugin API 1.3）：声明式 UI——插件加卡片、加配置控件不再需要改宿主和 App
+- **控件契约** `schemas/plugin-ui-widgets.json`（能力 `ui.widgets`，contract_version 1）：列出全部 23 种配置控件的识别顺序、`x-ui-*` 键、最低 iOS 版本与示例；`scripts/sync-plugin-ui-widgets.py` 生成后端 / Web / iOS 三份副本，CI「后端」与「iOS」工作流运行 `--check`（iOS 工作流的触发路径与「只改服务器就跳过」判断同步纳入该文件）；`GET /api/plugins/ui-contract` 返回契约。Web 与 iOS 都按契约逐项单测。
+- **iOS 补齐 4 种控件**：多选 `multi-select`、列表选择 `list-select`、允许的会话 `allowed-peer-multi-select`、配置列表 `config-list`；客户端遇到不认识的控件只读显示「此控件需要更新 App」，不再退化成通用编辑器。
+- **密钥列表 `x-secret-list`**（`config.secret_list`）：宿主读取时遮罩、保存时按 id / 遮罩保留原密钥并加密，`legacy_field` 旧单字段并入；Web / iOS 原生密钥列表控件。原来只为 chatgpt_image 写死在 `api/features.py` 的多 Token 逻辑改为通用实现，旧版 chatgpt_image 经 `plugin_compat` 补等价声明，行为不变。
+- **配置钩子** `on_config_validate`（保存前同步 2 秒，可规范化或逐字段拒绝，超时放行）/ `on_config_saved`（保存后后台 10 秒）；能力 `config.validate` / `config.saved`。
+- **原生卡片 `ui.cards`**（`ui.cards`）：`plugin.json` 声明卡片，slot `plugin.overview` / `account.detail` / `dashboard`，块类型 stats / kv / table / list / buttons；数据来自 `reads` 资源或 `on_ui_card`（3 秒），按钮调 `on_ui_action`（10 秒，可确认）；每张卡单独取数，失败只显示「已停止工作 · 重试」。接口 `GET /api/plugin-ui/cards`、`POST /api/plugin-ui/cards/{plugin}/{card}/data`、`POST .../actions/{action}`。插件详情原来写死的「运行统计」改为宿主卡 `_host.stats`。
+- Web：插件详情顶部、账号详情、概览显示插件卡片；配置页支持密钥列表与未知控件只读。
+- iOS 0.14.0：插件详情顶部 / 账号详情 / 概览显示插件卡片，4 种新控件与密钥列表编辑保存，未知控件与未知卡片布局只读提示更新 App。
+- 文档：PLUGIN-API-REFERENCE 新增「声明式 UI」章节，速查表补充入口。迁移现有插件（W1：rules 通用页、chatgpt / codex / game24 声明式）留到下一 PR。
+
 ## [0.109.0-beta.1] - 2026-10-29 · minor（次版本预发布） · 插件平台化 P2：消息管线中间件（inbound / outbound / delivered、render_profile 与 core.* 内置中间件、同步阻塞监控）
 
 ### 插件平台（Plugin API 1.2）：消息管线中间件——“所有消息加署名 / 表格统一紧凑 / 敏感词打码”不再需要改宿主

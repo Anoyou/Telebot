@@ -77,7 +77,7 @@ import { splitPluginWarnings } from "@/lib/plugin-config-contract";
 import { isPlatformFeature } from "@/lib/plugin-modes";
 import { queryKeys } from "@/lib/queryKeys";
 import { PluginWorkspaceHeader } from "@/pages/Plugins/WorkspaceHeader";
-import { PluginHookStatsSection } from "@/components/plugin/PluginHookStatsSection";
+import { PluginCardSlot } from "@/components/plugin/PluginCards";
 
 import { getFeatureMatrix } from "@/api/features";
 import {
@@ -2451,10 +2451,8 @@ function PluginOverviewDetailDialog({
             </div>
           </section>
 
-          <PluginHookStatsSection
-            pluginKey={plugin.key}
-            accountNames={Object.fromEntries(plugin.accounts.map((account) => [account.account_id, account.account_name]))}
-          />
+          {/* plugin.overview：宿主「运行统计」卡（卡片 DSL 的第一个用户）+ 插件自己声明的卡片 */}
+          <PluginCardSlot slot="plugin.overview" pluginKey={plugin.key} />
 
           <section className="rounded-md border border-border/70 bg-background/80 p-4">
             <div className="flex flex-wrap items-center gap-2">

@@ -82,6 +82,8 @@ struct OverviewView: View {
                 ForEach(layout.modules.filter { !preferences.hiddenHomeModules.contains($0.id) }) { module in
                     moduleSection(module)
                 }
+                // dashboard：全局启用的插件声明的原生卡片（没有时不显示）。
+                PluginCardSections(slot: "dashboard")
                 Section {
                     NavigationLink { OverviewCustomizationView() } label: {
                         Label("自定义概览", systemImage: "slider.horizontal.3")

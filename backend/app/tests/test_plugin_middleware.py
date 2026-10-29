@@ -676,7 +676,7 @@ def test_capabilities_catalog_lists_middleware() -> None:
     from app.worker.plugins.message_ops import BufferedMessageOps
     from app.worker.plugins.versioning import PLUGIN_API_VERSION
 
-    assert PLUGIN_API_VERSION == "1.2"
+    assert tuple(int(part) for part in PLUGIN_API_VERSION.split(".")) >= (1, 2)
     for name in ("middleware.outbound", "middleware.inbound", "middleware.delivered", "middleware.stream_preview", "ai.stream_extra_body", "runtime.blocking_monitor"):
         assert name in CAPABILITY_INDEX and CAPABILITY_INDEX[name].plugin_api == "1.2"
         assert PluginCapabilities().has(name)

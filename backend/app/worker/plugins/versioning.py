@@ -25,7 +25,9 @@ from functools import total_ordering
 #      extra_body 透传、钩子 Trace 与熔断同口径、interaction_entries[].policy）。
 # 1.2：0.109.0 消息管线中间件（inbound / outbound / delivered、render_profile、core.*、
 #      stream_complete extra_body、同步阻塞统计）。
-PLUGIN_API_VERSION = "1.2"
+# 1.3：0.110.0 声明式 UI（ui.cards + on_ui_card / on_ui_action、on_config_validate / on_config_saved、
+#      x-secret-list、控件契约 schemas/plugin-ui-widgets.json）。
+PLUGIN_API_VERSION = "1.3"
 
 _VERSION_RE = re.compile(
     r"^\s*v?(?P<major>\d+)(?:\.(?P<minor>\d+))?(?:\.(?P<patch>\d+))?"

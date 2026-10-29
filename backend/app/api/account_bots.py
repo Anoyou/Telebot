@@ -327,6 +327,7 @@ async def _prepare_account_feature_config_for_save(
         dict(existing.config or {}) if existing is not None else None,
         dict(item.config or {}),
         key,
+        features_api._feature_schema(feature),  # noqa: SLF001
     )
     config = features_api._normalize_feature_config(key, config)  # noqa: SLF001
     scoped_schema = features_api._account_config_schema(feature.manifest, config)  # noqa: SLF001

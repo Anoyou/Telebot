@@ -225,6 +225,8 @@ class PluginMetadataSchema(BaseModel):
     # 消息管线中间件与出站渲染声明（0.109.0+，Plugin API 1.2）；旧宿主忽略。
     middleware: list[dict[str, Any]] = Field(default_factory=list)
     render_profile: dict[str, Any] | None = None
+    # 声明式 UI（0.110.0+，Plugin API 1.3）：{"cards": [...]}，结构见 schemas/plugin-ui-widgets.json；旧宿主忽略。
+    ui: dict[str, Any] | None = None
     tags: list[str] = Field(default_factory=list)
 
     @field_validator("render_profile")
@@ -1233,6 +1235,10 @@ def lint_plugin_metadata_files(plugin_dir: Path) -> list[str]:
                 warning = _warn_hardcoded_prefix("plugin.json", path, text)
                 if warning:
                     warnings.append(warning)
+            if isinstance(data, dict):
+                from ..worker.plugins.plugin_ui import lint_ui_declaration
+
+                warnings.extend(f"声明式 UI：{item}" for item in lint_ui_declaration(data))
         except Exception:  # noqa: BLE001
             pass
 

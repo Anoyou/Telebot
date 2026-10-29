@@ -80,30 +80,13 @@ async def run_plugin_config_action(
         raise PluginConfigActionUnavailable(f"插件 {feature.key} 未实现配置动作处理器")
 
     runtime_config = _merge_current_config(effective_config, current_config)
-    manifest = _plugin_manifest_dict(plugin_cls, feature)
-    account_proxy_url: str | None = None
-    account_proxy_error: str | None = None
-    if _manifest_uses_http_facade(manifest):
-        account_proxy_url, account_proxy_error = await _account_proxy_resolution(db, account)
-    from ..worker.plugins import loader as plugin_loader
-
-    ctx = PluginContext(
-        account_id=account.id,
-        feature_key=feature.key,
+    ctx = await build_main_process_context(
+        db,
+        account=account,
+        feature=feature,
+        plugin_cls=plugin_cls,
         config=runtime_config,
-        data_dir=plugin_loader._plugin_data_dir(feature.key),  # noqa: SLF001 - shared plugin runtime contract
         log=log,
-        http=_build_http_facade(
-            account.id,
-            feature.key,
-            manifest,
-            runtime_config,
-            account_proxy_url=account_proxy_url,
-            account_proxy_error=account_proxy_error,
-        ),
-        ai=_build_ai_facade(account.id, feature.key, manifest),
-        account_proxy_url=account_proxy_url,
-        account_proxy_error=account_proxy_error,
     )
     plugin = plugin_cls()
     payload = {
@@ -117,6 +100,61 @@ async def run_plugin_config_action(
     if not isinstance(result, Mapping):
         raise PluginConfigActionError("配置动作必须返回对象")
     return _normalize_action_result(result)
+
+
+async def build_main_process_context(
+    db: AsyncSession,
+    *,
+    account: Account | None,
+    feature: Feature,
+    plugin_cls: type[Plugin],
+    config: Mapping[str, Any],
+    log: Callable[..., Awaitable[None]] | None = None,
+) -> PluginContext:
+    """在主进程里为配置动作 / 配置钩子 / UI 卡片构造不带 Telegram client 的受控上下文。
+
+    ``account`` 为 ``None`` 表示全局作用域（全局配置、概览卡片），``ctx.account_id`` 为 0。
+    """
+
+    runtime_config = dict(config or {})
+    manifest = _plugin_manifest_dict(plugin_cls, feature)
+    account_id = int(account.id) if account is not None else 0
+    account_proxy_url: str | None = None
+    account_proxy_error: str | None = None
+    if account is not None and _manifest_uses_http_facade(manifest):
+        account_proxy_url, account_proxy_error = await _account_proxy_resolution(db, account)
+    from ..worker.plugins import loader as plugin_loader
+
+    return PluginContext(
+        account_id=account_id,
+        feature_key=feature.key,
+        config=runtime_config,
+        data_dir=plugin_loader._plugin_data_dir(feature.key),  # noqa: SLF001 - shared plugin runtime contract
+        log=log,
+        http=_build_http_facade(
+            account_id,
+            feature.key,
+            manifest,
+            runtime_config,
+            account_proxy_url=account_proxy_url,
+            account_proxy_error=account_proxy_error,
+        ),
+        ai=_build_ai_facade(account_id, feature.key, manifest),
+        account_proxy_url=account_proxy_url,
+        account_proxy_error=account_proxy_error,
+    )
+
+
+async def load_plugin_class(
+    db: AsyncSession,
+    plugin_key: str,
+    account_id: int,
+    *,
+    installed_plugin: InstalledPlugin | Mapping[str, Any] | None = None,
+) -> type[Plugin]:
+    """公开入口：加载（必要时重新加载）插件类，供配置钩子与 UI 卡片复用。"""
+
+    return await _load_plugin_class(db, plugin_key, account_id, installed_plugin=installed_plugin)
 
 
 async def _call_config_action_with_stats(

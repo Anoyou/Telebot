@@ -1,4 +1,5 @@
 // 账号详情：3 个 Tab —— 概览 / 插件启停 / 风控
+import { PluginCardSlot } from "@/components/plugin/PluginCards";
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -464,6 +465,7 @@ export function AccountDetail() {
               </div>
             </CardContent>
           </Card>
+          <PluginCardSlot slot="account.detail" accountId={aid} title="插件卡片" className="mt-4" />
         </TabsContent>
 
         {/* 自定义指令 */}

@@ -2964,6 +2964,66 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/plugin-ui/cards": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Plugin Ui Cards
+         * @description 列出某个位置的插件卡片声明（不含数据，数据逐卡读取，互不影响）。
+         */
+        get: operations["list_plugin_ui_cards_api_plugin_ui_cards_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/plugin-ui/cards/{plugin_key}/{card_id}/actions/{action_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run Plugin Ui Card Action
+         * @description 执行卡片 buttons 布局里的按钮（插件 on_ui_action，10 秒；宿主卡片由宿主处理）。不自动重试。
+         */
+        post: operations["run_plugin_ui_card_action_api_plugin_ui_cards__plugin_key___card_id__actions__action_id__post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/plugin-ui/cards/{plugin_key}/{card_id}/data": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Read Plugin Ui Card
+         * @description 读取一张卡的数据。失败（插件未加载、超时 3 秒、抛异常）返回 status=error，客户端只在这张卡上显示「已停止工作 · 重试」。
+         */
+        post: operations["read_plugin_ui_card_api_plugin_ui_cards__plugin_key___card_id__data_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/plugins/capabilities": {
         parameters: {
             query?: never;
@@ -3163,6 +3223,26 @@ export interface paths {
         };
         /** List Installed Packages */
         get: operations["list_installed_packages_api_plugins_installed_packages_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/plugins/ui-contract": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Plugin Ui Contract
+         * @description 控件 / 卡片契约（schemas/plugin-ui-widgets.json）。客户端遇到不认识的控件时据此提示需要的 App 版本。
+         */
+        get: operations["get_plugin_ui_contract_api_plugins_ui_contract_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -10420,6 +10500,93 @@ export interface components {
              * @default 0.0.0
              */
             version: string;
+        };
+        /** PluginUICard */
+        PluginUICard: {
+            /** Blocks */
+            blocks?: {
+                [key: string]: unknown;
+            }[];
+            /** Card Id */
+            card_id: string;
+            /**
+             * Host
+             * @default false
+             */
+            host: boolean;
+            /** Plugin Key */
+            plugin_key: string;
+            /** Plugin Name */
+            plugin_name: string;
+            /** Refresh Seconds */
+            refresh_seconds?: number | null;
+            /** Slot */
+            slot: string;
+            /**
+             * Source Kind
+             * @enum {string}
+             */
+            source_kind: "read" | "action";
+            /** Subtitle */
+            subtitle?: string | null;
+            /** Title */
+            title: string;
+        };
+        /** PluginUICardActionResponse */
+        PluginUICardActionResponse: {
+            /** Message */
+            message?: string | null;
+            /**
+             * Ok
+             * @default true
+             */
+            ok: boolean;
+            /**
+             * Refresh
+             * @default true
+             */
+            refresh: boolean;
+        };
+        /** PluginUICardData */
+        PluginUICardData: {
+            /** Card Id */
+            card_id: string;
+            /** Data */
+            data?: {
+                [key: string]: unknown;
+            } | null;
+            /**
+             * Duration Ms
+             * @default 0
+             */
+            duration_ms: number;
+            /** Message */
+            message?: string | null;
+            /** Plugin Key */
+            plugin_key: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "ok" | "error";
+            /** Updated At */
+            updated_at: number;
+        };
+        /** PluginUICardDataRequest */
+        PluginUICardDataRequest: {
+            /** Account Id */
+            account_id?: number | null;
+            /** Slot */
+            slot?: string | null;
+        };
+        /** PluginUICardsResponse */
+        PluginUICardsResponse: {
+            /** Cards */
+            cards?: components["schemas"]["PluginUICard"][];
+            /** Slot */
+            slot: string;
+            /** Warnings */
+            warnings?: string[];
         };
         /** ProcessResource */
         ProcessResource: {
@@ -23404,6 +23571,191 @@ export interface operations {
             };
         };
     };
+    list_plugin_ui_cards_api_plugin_ui_cards_get: {
+        parameters: {
+            query: {
+                /** @description plugin.overview / account.detail / dashboard */
+                slot: string;
+                plugin_key?: string | null;
+                account_id?: number | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: {
+                auth_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginUICardsResponse"];
+                };
+            };
+            /** @description 认证失败 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description 服务器内部错误 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    run_plugin_ui_card_action_api_plugin_ui_cards__plugin_key___card_id__actions__action_id__post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                plugin_key: string;
+                card_id: string;
+                action_id: string;
+            };
+            cookie?: {
+                auth_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PluginUICardDataRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginUICardActionResponse"];
+                };
+            };
+            /** @description 认证失败 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description CSRF 校验失败或权限不足 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description 服务器内部错误 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    read_plugin_ui_card_api_plugin_ui_cards__plugin_key___card_id__data_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                plugin_key: string;
+                card_id: string;
+            };
+            cookie?: {
+                auth_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PluginUICardDataRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginUICardData"];
+                };
+            };
+            /** @description 认证失败 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description CSRF 校验失败或权限不足 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description 服务器内部错误 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
     get_plugin_capabilities_api_plugins_capabilities_get: {
         parameters: {
             query?: never;
@@ -24043,6 +24395,57 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PluginInstallOut"][];
+                };
+            };
+            /** @description 认证失败 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description 服务器内部错误 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    get_plugin_ui_contract_api_plugins_ui_contract_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: {
+                auth_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
                 };
             };
             /** @description 认证失败 */

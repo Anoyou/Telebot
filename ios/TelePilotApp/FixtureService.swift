@@ -316,6 +316,7 @@ actor FixtureService: AppServing {
         if clean == "/api/plugins/auto_reply/config", method == "GET" {
             return ["plugin_key": "auto_reply", "config": ["max_per_hour": 40], "global_config": ["max_per_hour": 40]]
         }
+        if let value = pluginUIFixture(clean, method: method, path: path) { return value }
         if clean.firstMatch(of: #/^\/api\/accounts\/\d+\/features\/[^\/]+\/config$/#) != nil {
             if method == "PATCH" {
                 fixtureValues[clean + "#effective"] = body?["config"]
@@ -374,7 +375,8 @@ actor FixtureService: AppServing {
                     ["key": "forward_guard", "display_name": "转发风控与来源保护", "usage": "过滤异常转发并保留来源。",
                      "category": "utility", "version": "0.9.2", "update_available": false,
                      "source_type": "local", "source_label": "本地导入", "is_builtin": false, "signature_ok": false,
-                     "orphan": true, "lint_warnings": ["插件来源目录不存在"]]
+                     "orphan": true, "lint_warnings": ["插件来源目录不存在"]],
+                    Self.widgetGalleryFeature
                 ]
             ]
             guard var object = matrix.objectValue, var features = object["features"]?.arrayValue else { return matrix }
@@ -409,7 +411,8 @@ actor FixtureService: AppServing {
                 ["feature_key": "auto_reply", "enabled": .bool(autoReplyEnabled), "state": autoReplyEnabled ? (accountID == 1 ? "active" : "pending") : "stopped", "last_error": nil, "config": ["reply": "收到"]],
                 ["feature_key": "content_assistant", "enabled": true, "state": accountID == 1 ? "failed" : "active",
                  "last_error": accountID == 1 ? "模型供应商连接超时，请检查密钥与网络。" : nil, "config": [:]],
-                ["feature_key": "forward_guard", "enabled": false, "state": "stopped", "last_error": nil, "config": [:]]
+                ["feature_key": "forward_guard", "enabled": false, "state": "stopped", "last_error": nil, "config": [:]],
+                ["feature_key": "widget_gallery", "enabled": true, "state": "active", "last_error": nil, "config": [:]]
             ]
         }
         if let match = clean.firstMatch(of: #/^\/api\/accounts\/(\d+)\/features\/([^\/]+)$/#), method == "PATCH" {
@@ -863,6 +866,96 @@ actor FixtureService: AppServing {
 
     static func isoDate(hoursAgo: Double) -> String {
         ISO8601DateFormatter().string(from: Date().addingTimeInterval(-hoursAgo * 3600))
+    }
+
+    /// 控件契约示例插件（iOS 0.14.0）：契约里 iOS 新补的控件、密钥列表、未知控件，以及插件原生卡片。
+    static let widgetGalleryFeature: JSONValue = [
+        "key": "widget_gallery", "display_name": "控件示例", "usage": "用于界面测试的声明式控件与卡片示例。",
+        "category": "utility", "version": "1.0.0", "update_available": false, "source_type": "remote", "source_label": "个人插件仓库",
+        "is_builtin": false, "signature_ok": true, "orphan": false, "permissions": [],
+        "config_schema": ["type": "object", "properties": [
+            "reply_rules": ["type": "array", "title": "回复规则", "x-ui-widget": "config-list", "x-ui-title-field": "name",
+                      "x-ui-summary": "{keyword} → {reply}", "x-ui-add-label": "添加规则",
+                      "items": ["type": "object", "properties": [
+                        "name": ["type": "string", "title": "名称"], "enabled": ["type": "boolean", "title": "启用", "default": true],
+                        "keyword": ["type": "string", "title": "关键词"], "reply": ["type": "string", "title": "回复"]]]],
+            "target_chats": ["type": "array", "title": "生效会话", "x-ui-widget": "allowed-peer-multi-select", "items": ["type": "integer"]],
+            "weekdays": ["type": "array", "title": "生效星期", "x-ui-widget": "multi-select",
+                         "items": ["type": "string", "enum": ["mon", "tue", "wed"], "enumNames": ["周一", "周二", "周三"]]],
+            "handle_mode": ["type": "string", "title": "处理模式", "x-ui-widget": "list-select", "enum": ["fast", "safe"],
+                     "enumNames": ["快速", "稳妥"], "enumDescriptions": ["优先速度", "优先稳定"], "default": "safe"],
+            "tokens": ["type": "array", "title": "Token 池", "x-secret-list": ["secret_field": "token", "note_field": "note"],
+                       "items": ["type": "object", "properties": ["token": ["type": "string"], "note": ["type": "string"]]]],
+            "palette": ["type": "string", "title": "主题色", "x-ui-widget": "color-wheel", "default": "#ff8800"]
+        ], "x-ui-property-order": ["reply_rules", "target_chats", "weekdays", "handle_mode", "tokens", "palette"]]
+    ]
+
+    /// 插件原生卡片（GET /api/plugin-ui/cards、POST …/data、POST …/actions/{id}）与控件契约。
+    private func pluginUIFixture(_ clean: String, method: String, path: String) -> JSONValue? {
+        if clean == "/api/plugins/ui-contract", method == "GET" {
+            return ["widgets": [["id": "color-wheel", "x_ui_widget": "color-wheel", "ios_since": "0.15.0"]]]
+        }
+        if clean.firstMatch(of: #/^\/api\/accounts\/\d+\/ignored-peers$/#) != nil, method == "GET" {
+            return [["id": 1, "account_id": 1, "peer_id": -1001, "peer_kind": "group", "peer_label": "测试群 A", "added_at": .string(Self.isoDate(hoursAgo: 5))],
+                    ["id": 2, "account_id": 1, "peer_id": -1002, "peer_kind": "group", "peer_label": "测试群 B", "added_at": .string(Self.isoDate(hoursAgo: 4))]]
+        }
+        if clean == "/api/plugins/widget_gallery/config", method == "GET" {
+            return ["plugin_key": "widget_gallery", "config": [:], "global_config": [:]]
+        }
+        if clean.firstMatch(of: #/^\/api\/accounts\/\d+\/features\/widget_gallery\/config$/#) != nil, method == "GET" {
+            var effective: [String: JSONValue] = [
+                "reply_rules": [["name": "问候", "enabled": true, "keyword": "你好", "reply": "你好呀"]],
+                "target_chats": [-1001], "weekdays": ["mon"], "handle_mode": "safe", "palette": "#ff8800",
+                "tokens": [["token": "abcd···wxyz", "note": "主号", "secret_id": "token:0123456789"]]
+            ]
+            for (key, value) in fixtureValues[clean + "#effective"]?.objectValue ?? [:] { effective[key] = value }
+            return .object(effective)
+        }
+        guard clean.hasPrefix("/api/plugin-ui/cards") else { return nil }
+        if clean == "/api/plugin-ui/cards", method == "GET" {
+            let query = URLComponents(string: path)?.queryItems ?? []
+            let slot = query.first { $0.name == "slot" }?.value ?? ""
+            let plugin = query.first { $0.name == "plugin_key" }?.value
+            guard slot == "plugin.overview", plugin == "widget_gallery" else { return ["slot": .string(slot), "cards": [], "warnings": []] }
+            let statsBlocks: JSONValue = [
+                ["type": "stats", "items": [["label": "调用", "path": "summary.calls", "format": "number"],
+                                            ["label": "失败", "path": "summary.failed", "format": "number", "tone_path": "summary.failed_tone"]]],
+                ["type": "table", "rows_path": "hooks", "row_key": "key", "columns": [
+                    ["key": "hook", "label": "钩子"], ["key": "health", "label": "状态", "tone_key": "health_tone"],
+                    ["key": "calls", "label": "调用", "format": "number"], ["key": "failure_rate", "label": "失败率", "format": "percent"]]],
+                ["type": "buttons", "items": [["id": "reset_stats", "label": "清零", "style": "destructive", "confirm": "清零这个插件的运行统计和弃用计数？"]]]
+            ]
+            let stats: JSONValue = ["plugin_key": "widget_gallery", "plugin_name": "控件示例", "card_id": "_host.stats", "slot": "plugin.overview",
+                                    "title": "运行统计", "subtitle": "按钩子统计调用数、耗时与失败数，保留到最近一次调用后 7 天",
+                                    "source_kind": "read", "host": true, "blocks": statsBlocks]
+            let quota: JSONValue = ["plugin_key": "widget_gallery", "plugin_name": "控件示例", "card_id": "quota", "slot": "plugin.overview", "title": "今日配额",
+                                    "source_kind": "action", "host": false, "blocks": [["type": "kv", "items": [["label": "剩余", "path": "left", "format": "number"]]]]]
+            let broken: JSONValue = ["plugin_key": "widget_gallery", "plugin_name": "控件示例", "card_id": "broken", "slot": "plugin.overview", "title": "外部服务",
+                                     "source_kind": "action", "host": false, "blocks": [["type": "kv", "items": [["label": "状态", "path": "status"]]]]]
+            return ["slot": .string(slot), "warnings": [], "cards": [stats, quota, broken]]
+        }
+        if method == "POST", clean.hasSuffix("/_host.stats/actions/reset_stats") {
+            fixtureValues["plugin-ui#stats-reset"] = true
+            return ["ok": true, "message": "已清零运行统计", "refresh": true]
+        }
+        if method == "POST", clean.hasSuffix("/_host.stats/data") {
+            let reset = fixtureValues["plugin-ui#stats-reset"]?.boolValue == true
+            let hooks: JSONValue = [
+                ["key": "on_event", "hook": "事件处理", "health": "有失败", "health_tone": "warning", "calls": 120, "failure_rate": 0.0167],
+                ["key": "on_config_action", "hook": "配置动作", "health": "失败偏多", "health_tone": "danger", "calls": 2, "failure_rate": 0.5]
+            ]
+            let summary: JSONValue = reset ? ["calls": 0, "failed": 0, "failed_tone": "neutral"] : ["calls": 122, "failed": 2, "failed_tone": "danger"]
+            let data: JSONValue = ["summary": summary, "hooks": reset ? JSONValue.array([]) : hooks]
+            return ["plugin_key": "widget_gallery", "card_id": "_host.stats", "status": "ok", "message": nil, "updated_at": 1_784_635_200, "duration_ms": 3, "data": data]
+        }
+        if method == "POST", clean.hasSuffix("/quota/data") {
+            return ["plugin_key": "widget_gallery", "card_id": "quota", "status": "ok", "message": nil, "updated_at": 1_784_635_200, "duration_ms": 5, "data": ["left": 42]]
+        }
+        if method == "POST", clean.hasSuffix("/data") {
+            return ["plugin_key": "widget_gallery", "card_id": "broken", "status": "error", "data": nil, "message": "已停止工作：读取超时（3 秒）",
+                    "updated_at": 1_784_635_200, "duration_ms": 3000]
+        }
+        return nil
     }
 
     /// 插件商店（发现 / 已安装 / 产品页）所需的接口：仓库目录、安装包清单、安装历史、更新日志、安装与更新。

@@ -677,15 +677,17 @@ test.describe("移动端交互细节", () => {
     await dialog.getByRole("button", { name: "更新日志" }).click();
     await expect(dialog.getByText("该插件未提供 CHANGELOG.md。", { exact: true })).toBeVisible();
 
-    // 运行统计（0.107.0+）：钩子级调用数 / 失败 / 耗时与弃用接口调用
-    const statsSection = dialog.locator("[data-plugin-hook-stats]");
+    // 运行统计（0.107.0+；0.110.0 起是 plugin.overview 卡片 DSL 的宿主卡）：钩子级调用数 / 失败 / 耗时与弃用接口调用
+    const statsSection = dialog.locator('[data-plugin-card="_host.stats"]');
     await statsSection.scrollIntoViewIfNeeded();
     await expect(statsSection.getByText("运行统计", { exact: true })).toBeVisible();
-    await expect(statsSection.locator('[data-plugin-hook-row="on_event"]')).toContainText("事件处理");
-    await expect(statsSection.locator('[data-plugin-hook-row="on_event"]')).toContainText("120");
-    await expect(statsSection.locator('[data-plugin-hook-row="on_config_action"]')).toContainText("失败偏多");
-    await expect(statsSection.locator("[data-plugin-deprecations]")).toContainText("ai.tag_alias");
-    await expect(statsSection.locator('[data-plugin-hook-row="on_event"]')).toContainText("视觉测试账号");
+    const eventRow = statsSection.locator('[data-plugin-card-row="on_event"]:visible');
+    await expect(eventRow).toContainText("事件处理");
+    await expect(eventRow).toContainText("120");
+    await expect(eventRow).toContainText("视觉测试账号");
+    await expect(statsSection.locator('[data-plugin-card-row="on_config_action"]:visible')).toContainText("失败偏多");
+    await expect(statsSection.locator('[data-plugin-card-list="deprecations"]')).toContainText("ai.tag_alias");
+    await expect(statsSection.getByRole("button", { name: "清零" })).toBeVisible();
 
     const footerButtons = ["查看最近 trace", "去插件中心", "关闭"];
     const detailFooter = dialog.locator("[data-plugin-detail-footer]");

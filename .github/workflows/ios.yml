@@ -25,6 +25,8 @@ on:
       - "openapi/telepilot.openapi.json"
       # 模型家族映射与图标由 Web 与 iOS 共用（sync-model-brands.py 校验）。
       - "frontend/src/lib/modelBrand*.json"
+      # 插件声明式 UI 契约规范（iOS 副本由 sync-plugin-ui-widgets.py 校验）。
+      - "schemas/plugin-ui-widgets.json"
       - ".github/workflows/ios.yml"
   push:
     branches: [Beta]
@@ -33,6 +35,8 @@ on:
       - "openapi/telepilot.openapi.json"
       # 模型家族映射与图标由 Web 与 iOS 共用（sync-model-brands.py 校验）。
       - "frontend/src/lib/modelBrand*.json"
+      # 插件声明式 UI 契约规范（iOS 副本由 sync-plugin-ui-widgets.py 校验）。
+      - "schemas/plugin-ui-widgets.json"
       - ".github/workflows/ios.yml"
   workflow_dispatch:
 
@@ -114,12 +118,14 @@ jobs:
             fi
             if [ "$COMPLETE" = "true" ] && [ -n "$FILES" ]; then
               IOS_FILES=$(grep -E '^(ios/|frontend/src/lib/modelBrand[^/]*\.json$|\.github/workflows/ios\.yml$)' <<<"$FILES" || true)
-              if [ -z "$IOS_FILES" ] && grep -qx 'openapi/telepilot.openapi.json' <<<"$FILES"; then
-                if python3 ios/TelePilotCore/scripts/sync-openapi.py --check && python3 ios/TelePilotCore/scripts/sync-contract.py --check; then
+              # 插件 UI 契约规范 schemas/plugin-ui-widgets.json 同理：iOS 副本经 sync-plugin-ui-widgets.py --check 一致即可跳过。
+              if [ -z "$IOS_FILES" ] && grep -qxE 'openapi/telepilot\.openapi\.json|schemas/plugin-ui-widgets\.json' <<<"$FILES"; then
+                if python3 ios/TelePilotCore/scripts/sync-openapi.py --check && python3 ios/TelePilotCore/scripts/sync-contract.py --check \
+                    && python3 scripts/sync-plugin-ui-widgets.py --check; then
                   SKIP=true
-                  REASON="只改了服务器 OpenAPI，iOS 原生子集与表单契约校验一致（sync-openapi / sync-contract --check 通过），跳过 iOS 编译与 UI 测试"
+                  REASON="只改了服务器 OpenAPI / 插件 UI 契约规范，iOS 原生子集、表单契约与插件 UI 契约副本校验一致（sync-openapi / sync-contract / sync-plugin-ui-widgets --check 通过），跳过 iOS 编译与 UI 测试"
                 else
-                  REASON="服务器 OpenAPI 变化影响 iOS 原生子集或表单契约（需要同步 ios/ 副本），完整执行"
+                  REASON="服务器 OpenAPI 或插件 UI 契约变化影响 iOS 副本（需要同步 ios/ 副本），完整执行"
                 fi
               fi
             fi
@@ -180,6 +186,7 @@ jobs:
           python3 ios/TelePilotCore/scripts/sync-openapi.py --check
           python3 ios/TelePilotCore/scripts/sync-contract.py --check
           python3 ios/TelePilotCore/scripts/sync-model-brands.py --check
+          python3 scripts/sync-plugin-ui-widgets.py --check
           python3 ios/TelePilotCore/scripts/check-model-brand-icons.py
           printf '%s' "$UI_TEST_DURATIONS" > "$RUNNER_TEMP/ui-test-durations-measured.json"
           python3 ios/scripts/ui-test-shards.py --total "$UI_TEST_SHARDS" --summary --durations-override "$RUNNER_TEMP/ui-test-durations-measured.json"

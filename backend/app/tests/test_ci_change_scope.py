@@ -151,3 +151,13 @@ def test_plugin_schema_codegen_is_guarded_by_contract_ci() -> None:
     assert scope.plugin is True
     assert scope.contract is True
     assert "schemas/plugin.schema.json" in workflow
+
+
+def test_plugin_ui_contract_copy_change_runs_backend_sync_check() -> None:
+    # 只改 iOS / Web 副本时也要在后端 job 跑 sync-plugin-ui-widgets.py --check。
+    for path in (
+        "schemas/plugin-ui-widgets.json",
+        "frontend/src/lib/pluginUiWidgets.json",
+        "ios/TelePilotCore/Sources/TelePilotCore/plugin-ui-widgets.json",
+    ):
+        assert classify_paths([path]).backend is True, path

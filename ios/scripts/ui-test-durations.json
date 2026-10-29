@@ -48,6 +48,7 @@
   "WorkspaceUITests/testPluginConfigFollowsSectionsAndMarksOnlyRequiredFields": 39,
   "WorkspaceUITests/testPluginConfigSubpageReturnsToConfigurationTab": 20,
   "WorkspaceUITests/testPluginConfigUsesNativeProviderAndModelPickers": 20,
+  "WorkspaceUITests/testPluginDeclarativeWidgetsAndCards": 75,
   "WorkspaceUITests/testPluginProductPageShowsInfoWhatsNewAndConfirmsUninstall": 30,
   "WorkspaceUITests/testPluginScreenUsesTwoColumnCards": 22,
   "WorkspaceUITests/testPluginStoreDiscoverInstallsAfterConfirmation": 33,

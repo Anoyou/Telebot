@@ -77,6 +77,9 @@ class Manifest:
     middleware: list[dict[str, Any]] = field(default_factory=list)
     # 出站渲染声明（0.109.0+），如 {"table": {"compact": true}}；由 core.render_profile 读取。推荐只写在 plugin.json。
     render_profile: dict[str, Any] | None = None
+    # 声明式 UI（0.110.0+，Plugin API 1.3）：{"cards": [...]}，见 schemas/plugin-ui-widgets.json。
+    # 同 reads，推荐只写在 plugin.json（旧宿主的 Manifest 不接受这个参数）。
+    ui: dict[str, Any] | None = None
     author: str = "builtin"
     description: str = ""
     usage: str = ""
@@ -142,6 +145,7 @@ class Manifest:
             "reads": list(self.reads or []),
             "middleware": list(self.middleware or []),
             "render_profile": self.render_profile,
+            "ui": self.ui,
             "author": self.author,
             "description": self.description,
             "usage": self.usage,

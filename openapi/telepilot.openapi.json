@@ -14868,6 +14868,225 @@
         "title": "PluginRepoPlugin",
         "type": "object"
       },
+      "PluginUICard": {
+        "properties": {
+          "blocks": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Blocks",
+            "type": "array"
+          },
+          "card_id": {
+            "title": "Card Id",
+            "type": "string"
+          },
+          "host": {
+            "default": false,
+            "title": "Host",
+            "type": "boolean"
+          },
+          "plugin_key": {
+            "title": "Plugin Key",
+            "type": "string"
+          },
+          "plugin_name": {
+            "title": "Plugin Name",
+            "type": "string"
+          },
+          "refresh_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Refresh Seconds"
+          },
+          "slot": {
+            "title": "Slot",
+            "type": "string"
+          },
+          "source_kind": {
+            "enum": [
+              "read",
+              "action"
+            ],
+            "title": "Source Kind",
+            "type": "string"
+          },
+          "subtitle": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subtitle"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "plugin_key",
+          "plugin_name",
+          "card_id",
+          "slot",
+          "title",
+          "source_kind"
+        ],
+        "title": "PluginUICard",
+        "type": "object"
+      },
+      "PluginUICardActionResponse": {
+        "properties": {
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message"
+          },
+          "ok": {
+            "default": true,
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "refresh": {
+            "default": true,
+            "title": "Refresh",
+            "type": "boolean"
+          }
+        },
+        "title": "PluginUICardActionResponse",
+        "type": "object"
+      },
+      "PluginUICardData": {
+        "properties": {
+          "card_id": {
+            "title": "Card Id",
+            "type": "string"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Data"
+          },
+          "duration_ms": {
+            "default": 0,
+            "title": "Duration Ms",
+            "type": "integer"
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message"
+          },
+          "plugin_key": {
+            "title": "Plugin Key",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "ok",
+              "error"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "plugin_key",
+          "card_id",
+          "status",
+          "updated_at"
+        ],
+        "title": "PluginUICardData",
+        "type": "object"
+      },
+      "PluginUICardDataRequest": {
+        "properties": {
+          "account_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Account Id"
+          },
+          "slot": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Slot"
+          }
+        },
+        "title": "PluginUICardDataRequest",
+        "type": "object"
+      },
+      "PluginUICardsResponse": {
+        "properties": {
+          "cards": {
+            "items": {
+              "$ref": "#/components/schemas/PluginUICard"
+            },
+            "title": "Cards",
+            "type": "array"
+          },
+          "slot": {
+            "title": "Slot",
+            "type": "string"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "slot"
+        ],
+        "title": "PluginUICardsResponse",
+        "type": "object"
+      },
       "ProcessResource": {
         "properties": {
           "cpu_percent": {
@@ -21659,7 +21878,7 @@
   },
   "info": {
     "title": "TelePilot",
-    "version": "0.109.0-beta.1"
+    "version": "0.110.0-beta.1"
   },
   "openapi": "3.1.0",
   "paths": {
@@ -40509,6 +40728,365 @@
         ]
       }
     },
+    "/api/plugin-ui/cards": {
+      "get": {
+        "description": "列出某个位置的插件卡片声明（不含数据，数据逐卡读取，互不影响）。",
+        "operationId": "list_plugin_ui_cards_api_plugin_ui_cards_get",
+        "parameters": [
+          {
+            "description": "plugin.overview / account.detail / dashboard",
+            "in": "query",
+            "name": "slot",
+            "required": true,
+            "schema": {
+              "description": "plugin.overview / account.detail / dashboard",
+              "title": "Slot",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "plugin_key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Plugin Key"
+            }
+          },
+          {
+            "in": "query",
+            "name": "account_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Account Id"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "auth_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Auth Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PluginUICardsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "认证失败"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "服务器内部错误"
+          }
+        },
+        "security": [
+          {
+            "AuthCookie": []
+          }
+        ],
+        "summary": "List Plugin Ui Cards",
+        "tags": [
+          "plugins"
+        ]
+      }
+    },
+    "/api/plugin-ui/cards/{plugin_key}/{card_id}/actions/{action_id}": {
+      "post": {
+        "description": "执行卡片 buttons 布局里的按钮（插件 on_ui_action，10 秒；宿主卡片由宿主处理）。不自动重试。",
+        "operationId": "run_plugin_ui_card_action_api_plugin_ui_cards__plugin_key___card_id__actions__action_id__post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "plugin_key",
+            "required": true,
+            "schema": {
+              "title": "Plugin Key",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "card_id",
+            "required": true,
+            "schema": {
+              "title": "Card Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "action_id",
+            "required": true,
+            "schema": {
+              "title": "Action Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "auth_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Auth Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PluginUICardDataRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PluginUICardActionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "认证失败"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "CSRF 校验失败或权限不足"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "服务器内部错误"
+          }
+        },
+        "security": [
+          {
+            "AuthCookie": [],
+            "CsrfCookie": [],
+            "CsrfHeader": [],
+            "RequestedWith": []
+          }
+        ],
+        "summary": "Run Plugin Ui Card Action",
+        "tags": [
+          "plugins"
+        ]
+      }
+    },
+    "/api/plugin-ui/cards/{plugin_key}/{card_id}/data": {
+      "post": {
+        "description": "读取一张卡的数据。失败（插件未加载、超时 3 秒、抛异常）返回 status=error，客户端只在这张卡上显示「已停止工作 · 重试」。",
+        "operationId": "read_plugin_ui_card_api_plugin_ui_cards__plugin_key___card_id__data_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "plugin_key",
+            "required": true,
+            "schema": {
+              "title": "Plugin Key",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "card_id",
+            "required": true,
+            "schema": {
+              "title": "Card Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "auth_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Auth Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PluginUICardDataRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PluginUICardData"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "认证失败"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "CSRF 校验失败或权限不足"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "服务器内部错误"
+          }
+        },
+        "security": [
+          {
+            "AuthCookie": [],
+            "CsrfCookie": [],
+            "CsrfHeader": [],
+            "RequestedWith": []
+          }
+        ],
+        "summary": "Read Plugin Ui Card",
+        "tags": [
+          "plugins"
+        ]
+      }
+    },
     "/api/plugins/capabilities": {
       "get": {
         "description": "宿主能力注册表、Plugin API 版本、弃用登记、ctx.host.read 资源（含模型清单 ai.models@1）与中间件限制。",
@@ -41586,6 +42164,83 @@
           }
         ],
         "summary": "List Installed Packages",
+        "tags": [
+          "plugins"
+        ]
+      }
+    },
+    "/api/plugins/ui-contract": {
+      "get": {
+        "description": "控件 / 卡片契约（schemas/plugin-ui-widgets.json）。客户端遇到不认识的控件时据此提示需要的 App 版本。",
+        "operationId": "get_plugin_ui_contract_api_plugins_ui_contract_get",
+        "parameters": [
+          {
+            "in": "cookie",
+            "name": "auth_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Auth Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Plugin Ui Contract Api Plugins Ui Contract Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "认证失败"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "服务器内部错误"
+          }
+        },
+        "security": [
+          {
+            "AuthCookie": []
+          }
+        ],
+        "summary": "Get Plugin Ui Contract",
         "tags": [
           "plugins"
         ]

@@ -221,6 +221,19 @@
       "title": "Tags",
       "type": "array"
     },
+    "ui": {
+      "anyOf": [
+        {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Ui"
+    },
     "usage": {
       "anyOf": [
         {

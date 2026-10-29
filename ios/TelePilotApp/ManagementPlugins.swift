@@ -843,6 +843,8 @@ struct ManagementPluginDetailView: View {
     // MARK: 概况
 
     @ViewBuilder private var overview: some View {
+        // plugin.overview：宿主「运行统计」卡（卡片 DSL 的第一个用户）+ 插件自己声明的原生卡片。
+        PluginCardSections(slot: "plugin.overview", pluginKey: key, accountID: accountID)
         Section("插件信息") {
             if let usage = feature["usage"]?.stringValue, !usage.isEmpty { Text(usage).font(.subheadline) }
             PluginInfoRow(title: "版本", value: feature["version"]?.stringValue.map { "v" + $0 } ?? "未标注", symbol: "number")
@@ -1396,7 +1398,12 @@ private struct PluginConfigField: Identifiable {
     let required: Bool
     var id: String { key }
     var label: String { ManagementText.fieldLabel(key, schema: spec) }
-    var secret: Bool { ManagementText.secret(key) || spec["format"]?.stringValue == "password" || spec["writeOnly"]?.boolValue == true }
+    /// 契约控件 id（schemas/plugin-ui-widgets.json），与 Web resolveConfigWidget 一致。
+    var widget: String { PluginFieldWidget.resolve(key: key, spec: spec) }
+    /// 密钥列表（x-secret-list）本身是遮罩后的条目列表，不按单个密钥处理。
+    var secret: Bool {
+        widget != "secret-list" && (ManagementText.secret(key) || spec["format"]?.stringValue == "password" || spec["writeOnly"]?.boolValue == true)
+    }
     var readOnly: Bool { spec["readOnly"]?.boolValue == true }
     var hidden: Bool { spec["x-ui-hidden"]?.boolValue == true }
     var description: String? { spec["description"]?.stringValue.flatMap { $0.isEmpty ? nil : $0 } }
@@ -1842,6 +1849,9 @@ struct ManagementPluginConfigView: View {
                 LabeledContent {
                     Text(PluginConfigFormat.text(snapshot?.values[field.key], secret: field.secret)).foregroundStyle(.secondary)
                 } label: { Label(field.label, systemImage: field.symbol) }
+            } else if !field.secret, PluginFieldWidgetView.handles(field.widget) {
+                PluginFieldWidgetView(widget: field.widget, title: field.label, key: field.key, spec: field.spec,
+                                      value: binding(field.key), accountID: accountID)
             } else if !field.secret, AgentSkillMultiSelectField.matches(field.spec) {
                 AgentSkillMultiSelectField(title: field.label, value: binding(field.key))
             } else if !field.secret, let widget = PluginSelectWidget(spec: field.spec) {
@@ -2179,6 +2189,635 @@ private struct PluginSelectWidgetField: View {
             let source = optionsField.flatMap { draft[$0] ?? stored[$0] }
             let options = PluginSelectOptions.dynamicOptions(source)
             return (options, "未设置", false, options.isEmpty ? "暂无可选项。" : nil)
+        }
+    }
+}
+
+// MARK: - 插件配置控件契约（schemas/plugin-ui-widgets.json，iOS 0.14.0 补齐）
+
+/// 契约里由 App 专门实现、不走通用表单的控件：config-list、allowed-peer-multi-select、multi-select、
+/// list-select、secret-list，以及不认识的控件（只读并提示更新 App）。
+struct PluginFieldWidgetView: View {
+    static let handled: Set<String> = [PluginFieldWidget.unknown, "config-list", "allowed-peer-multi-select", "multi-select", "list-select", "secret-list"]
+    static func handles(_ widget: String) -> Bool { handled.contains(widget) }
+
+    let widget: String
+    let title: String
+    let key: String
+    let spec: JSONValue
+    @Binding var value: JSONValue
+    var accountID: Int?
+
+    var body: some View {
+        switch widget {
+        case "config-list": PluginConfigListField(title: title, spec: spec, value: $value)
+        case "allowed-peer-multi-select": PluginAllowedPeerField(title: title, value: $value, accountID: accountID)
+        case "multi-select": PluginMultiSelectField(title: title, spec: spec, value: $value)
+        case "list-select": PluginListSelectField(title: title, spec: spec, value: $value)
+        case "secret-list": PluginSecretListField(title: title, spec: spec, value: $value)
+        default: PluginUnknownWidgetRow(title: title, widget: spec["x-ui-widget"]?.stringValue ?? "", value: value)
+        }
+    }
+}
+
+/// 不认识的控件：只读显示当前值并提示更新 App（版本要求来自服务器契约）。
+private struct PluginUnknownWidgetRow: View {
+    let title: String
+    let widget: String
+    let value: JSONValue
+    @Environment(AppModel.self) private var model
+    @State private var required: String?
+
+    var body: some View {
+        LabeledContent {
+            Text(PluginConfigFormat.text(value, secret: false)).foregroundStyle(.secondary).multilineTextAlignment(.trailing)
+        } label: { Label(title, systemImage: "lock") }
+        Label(PluginUIContract.unknownWidgetMessage + (required.map { "（需 iOS \($0)）" } ?? ""), systemImage: "arrow.down.app")
+            .font(.footnote).foregroundStyle(.orange)
+            .accessibilityIdentifier("plugin.config.unknownWidget")
+            .task {
+                guard required == nil, !widget.isEmpty else { return }
+                let contract = try? await model.request(path: "/api/plugins/ui-contract")
+                required = PluginUIContract.requiredIOSVersion(widget: widget, serverContract: contract)
+            }
+        Text("控件「\(widget)」由插件声明，这个版本的 App 只能查看、不能修改，避免把数据改坏。可在 Web 管理台修改。")
+            .font(.caption).foregroundStyle(.secondary)
+    }
+}
+
+private enum PluginChoice {
+    /// 选项与显示名：enum + enumNames（数组字段取 items 上的声明）。
+    static func options(_ raw: JSONValue, array: Bool) -> [(value: JSONValue, label: String, detail: String?)] {
+        let spec = ManagementSchema.normalized(raw)
+        let source = array ? ManagementSchema.normalized(spec["items"] ?? .object([:])) : spec
+        let choices = source["enum"]?.arrayValue ?? spec["enum"]?.arrayValue ?? []
+        let names = (source["enumNames"]?.arrayValue ?? spec["enumNames"]?.arrayValue ?? []).compactMap(\.stringValue)
+        let details = (source["enumDescriptions"]?.arrayValue ?? spec["enumDescriptions"]?.arrayValue ?? []).compactMap(\.stringValue)
+        return choices.enumerated().map { index, choice in
+            (choice, names.indices.contains(index) && !names[index].isEmpty ? names[index] : ManagementText.scalar(choice),
+             details.indices.contains(index) && !details[index].isEmpty ? details[index] : nil)
+        }
+    }
+}
+
+/// multi-select：固定选项多选（系统 Toggle 行）。
+private struct PluginMultiSelectField: View {
+    let title: String
+    let spec: JSONValue
+    @Binding var value: JSONValue
+
+    var body: some View {
+        let options = PluginChoice.options(spec, array: true)
+        let selected = value.arrayValue ?? []
+        NavigationLink {
+            List {
+                Section {
+                    ForEach(Array(options.enumerated()), id: \.offset) { _, option in
+                        Toggle(option.label, isOn: Binding(get: { selected.contains(option.value) }, set: { on in
+                            var next = (value.arrayValue ?? []).filter { $0 != option.value }
+                            if on {
+                                // 保持声明顺序，方便与 Web 比对。
+                                next.append(option.value)
+                                let order = options.map { $0.value }
+                                next.sort { (order.firstIndex(of: $0) ?? .max) < (order.firstIndex(of: $1) ?? .max) }
+                            }
+                            value = .array(next)
+                        }))
+                    }
+                    ForEach(Array(selected.filter { item in !options.contains { $0.value == item } }.enumerated()), id: \.offset) { _, stale in
+                        Toggle("当前值：\(ManagementText.scalar(stale))", isOn: Binding(get: { true }, set: { on in
+                            if !on { value = .array((value.arrayValue ?? []).filter { $0 != stale }) }
+                        }))
+                    }
+                } footer: { Text("可以选择多项；保存前会列出修改。") }
+            }
+            .navigationTitle(title).navigationBarTitleDisplayMode(.inline)
+        } label: {
+            LabeledContent { Text(selected.isEmpty ? "未选择" : "已选 \(selected.count) 项") } label: { Label(title, systemImage: "checklist") }
+        }
+        .accessibilityIdentifier("plugin.config.multiSelect." + title)
+    }
+}
+
+/// list-select：单选，选项平铺并显示说明（原生 inline Picker）。
+private struct PluginListSelectField: View {
+    let title: String
+    let spec: JSONValue
+    @Binding var value: JSONValue
+
+    var body: some View {
+        let options = PluginChoice.options(spec, array: false)
+        Picker(title, selection: $value) {
+            if value.isNull { Text("未选择").tag(JSONValue.null) }
+            ForEach(Array(options.enumerated()), id: \.offset) { _, option in
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(option.label)
+                    if let detail = option.detail { Text(detail).font(.caption).foregroundStyle(.secondary) }
+                }
+                .tag(option.value)
+            }
+            if !value.isNull, !options.contains(where: { $0.value == value }) {
+                Text("当前值：\(ManagementText.scalar(value))").tag(value)
+            }
+        }
+        .pickerStyle(.inline)
+        .accessibilityIdentifier("plugin.config.listSelect." + title)
+    }
+}
+
+/// allowed-peer-multi-select：从账号「允许会话」里多选。
+private struct PluginAllowedPeerField: View {
+    let title: String
+    @Binding var value: JSONValue
+    var accountID: Int?
+
+    var body: some View {
+        let selected = value.arrayValue ?? []
+        NavigationLink {
+            PluginAllowedPeerPicker(title: title, value: $value, accountID: accountID)
+        } label: {
+            LabeledContent { Text(selected.isEmpty ? "未选择" : "已选 \(selected.count) 个会话") } label: { Label(title, systemImage: "checklist") }
+        }
+        .accessibilityIdentifier("plugin.config.allowedPeers." + title)
+    }
+}
+
+private struct PluginAllowedPeerPicker: View {
+    let title: String
+    @Binding var value: JSONValue
+    var accountID: Int?
+    @Environment(AppModel.self) private var model
+    @State private var peers: [JSONValue]?
+    @State private var error: String?
+
+    private func ids(_ raw: JSONValue) -> [Int64] {
+        (raw.arrayValue ?? []).compactMap { item in
+            if case .integer(let id) = item { return id }
+            if let double = item.doubleValue { return Int64(double) }
+            return item.stringValue.flatMap { Int64($0.trimmingCharacters(in: .whitespaces)) }
+        }
+    }
+
+    var body: some View {
+        let selected = ids(value)
+        List {
+            if accountID == nil {
+                Section {
+                    Label("全局配置不属于某个账号，不能从允许会话里选择；请在账号配置里修改。", systemImage: "info.circle")
+                        .font(.subheadline).foregroundStyle(.secondary)
+                    ForEach(selected, id: \.self) { id in Text(String(id)).monospacedDigit() }
+                }
+            } else if let error, peers == nil {
+                Section { NoticeView(title: "允许会话读取失败", message: error) }
+            } else if let peers {
+                Section {
+                    if peers.isEmpty { Text("这个账号的「允许会话」为空（全部会话都允许）。先在账号的会话白名单里添加会话。").foregroundStyle(.secondary) }
+                    ForEach(Array(peers.enumerated()), id: \.offset) { _, peer in
+                        let id = Int64(peer["peer_id"]?.intValue ?? 0)
+                        let label = peer["peer_label"]?.stringValue.flatMap { $0.isEmpty ? nil : $0 } ?? "会话"
+                        Toggle(isOn: Binding(get: { selected.contains(id) }, set: { on in
+                            var next = selected.filter { $0 != id }
+                            if on { next.append(id) }
+                            value = .array(next.map { .integer($0) })
+                        })) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(label)
+                                Text(String(id)).font(.caption).foregroundStyle(.secondary).monospacedDigit()
+                            }
+                        }
+                    }
+                    ForEach(selected.filter { id in !peers.contains { Int64($0["peer_id"]?.intValue ?? 0) == id } }, id: \.self) { id in
+                        Toggle("\(id)（已不在允许会话里）", isOn: Binding(get: { true }, set: { on in
+                            if !on { value = .array(selected.filter { $0 != id }.map { .integer($0) }) }
+                        }))
+                    }
+                } footer: { Text("只能从账号的「允许会话」里选择。") }
+            } else {
+                Section { ProgressView("正在读取允许会话…") }
+            }
+        }
+        .navigationTitle(title).navigationBarTitleDisplayMode(.inline)
+        .task {
+            guard let accountID, peers == nil else { return }
+            do { peers = try await model.request(path: "/api/accounts/\(accountID)/ignored-peers").arrayValue ?? []; error = nil }
+            catch { self.error = error.localizedDescription }
+        }
+    }
+}
+
+/// config-list：对象列表，每项一行摘要，点开编辑；可增删、排序。
+private struct PluginConfigListField: View {
+    let title: String
+    let spec: JSONValue
+    @Binding var value: JSONValue
+
+    var body: some View {
+        let count = value.arrayValue?.count ?? 0
+        NavigationLink {
+            PluginConfigListEditor(title: title, spec: spec, value: $value)
+        } label: {
+            LabeledContent { Text(count == 0 ? "空" : "\(count) 项") } label: { Label(title, systemImage: "list.bullet.rectangle") }
+        }
+        .accessibilityIdentifier("plugin.config.configList." + title)
+    }
+}
+
+private struct PluginConfigListEditor: View {
+    let title: String
+    let spec: JSONValue
+    @Binding var value: JSONValue
+    @Environment(\.managementOptionalFieldsInline) private var optionalInline
+
+    private var schema: JSONValue { ManagementSchema.normalized(spec) }
+    private var itemSchema: JSONValue { ManagementSchema.normalized(schema["items"] ?? .object(["type": .string("object")])) }
+    private var enabledField: String {
+        if let field = schema["x-ui-enabled-field"]?.stringValue, !field.isEmpty { return field }
+        return itemSchema["properties"]?["enabled"] != nil ? "enabled" : ""
+    }
+    private var reorderable: Bool { schema["x-ui-reorderable"]?.boolValue != false }
+    private var maxItems: Int { schema["maxItems"]?.intValue ?? .max }
+    private var minItems: Int { schema["minItems"]?.intValue ?? 0 }
+
+    private func itemTitle(_ item: JSONValue, index: Int) -> String {
+        if let field = schema["x-ui-title-field"]?.stringValue, let text = item[field].map({ ManagementText.scalar($0) }), !text.isEmpty, text != "-" { return text }
+        for field in ["name", "title", "label", "keyword"] {
+            if let text = item[field]?.stringValue, !text.isEmpty { return text }
+        }
+        return "第 \(index + 1) 项"
+    }
+    private func itemSubtitle(_ item: JSONValue) -> String {
+        if let field = schema["x-ui-description-field"]?.stringValue, let text = item[field]?.stringValue, !text.isEmpty { return text }
+        guard let template = schema["x-ui-summary"]?.stringValue, !template.isEmpty else { return "" }
+        var result = template
+        for match in template.matches(of: #/\{([A-Za-z0-9_.]+)\}/#) {
+            let path = String(match.1)
+            let text = PluginCardFormat.value(at: path, in: item).map { ManagementText.scalar($0) } ?? ""
+            result = result.replacingOccurrences(of: "{\(path)}", with: text)
+        }
+        return result
+    }
+    private func item(_ index: Int) -> Binding<JSONValue> {
+        Binding(get: { (value.arrayValue ?? []).indices.contains(index) ? value.arrayValue![index] : .null }, set: { new in
+            var array = value.arrayValue ?? []; guard array.indices.contains(index) else { return }; array[index] = new; value = .array(array)
+        })
+    }
+
+    var body: some View {
+        let items = value.arrayValue ?? []
+        List {
+            Section {
+                ForEach(Array(items.enumerated()), id: \.offset) { index, entry in
+                    NavigationLink {
+                        Form { ManagementFieldsView(schema: itemSchema, value: item(index)) }
+                            .environment(\.managementOptionalFieldsInline, optionalInline)
+                            .navigationTitle(itemTitle(entry, index: index)).navigationBarTitleDisplayMode(.inline)
+                    } label: {
+                        VStack(alignment: .leading, spacing: 2) {
+                            HStack {
+                                Text(itemTitle(entry, index: index))
+                                if !enabledField.isEmpty {
+                                    let on = entry[enabledField]?.boolValue != false
+                                    Text(on ? "已启用" : "已停用").font(.caption).foregroundStyle(on ? Color.green : Color.secondary)
+                                }
+                            }
+                            let subtitle = itemSubtitle(entry)
+                            if !subtitle.isEmpty { Text(subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(2) }
+                        }
+                    }
+                    .accessibilityIdentifier("plugin.config.configList.item.\(index)")
+                }
+                .onDelete { offsets in
+                    var array = value.arrayValue ?? []
+                    guard array.count - offsets.count >= minItems else { return }
+                    array.remove(atOffsets: offsets); value = .array(array)
+                }
+                .onMove { offsets, destination in
+                    guard reorderable else { return }
+                    var array = value.arrayValue ?? []; array.move(fromOffsets: offsets, toOffset: destination); value = .array(array)
+                }
+                if items.isEmpty { Text("还没有内容。").foregroundStyle(.secondary) }
+            } footer: { Text("左滑删除；点右上角“编辑”调整顺序。修改暂存在本次编辑里，回到配置页统一检查并保存。") }
+            Section {
+                Button(schema["x-ui-add-label"]?.stringValue ?? "添加一组", systemImage: "plus") {
+                    var array = value.arrayValue ?? []
+                    array.append(ManagementSchema.initial(itemSchema))
+                    value = .array(array)
+                }
+                .disabled(items.count >= maxItems)
+                .accessibilityIdentifier("plugin.config.configList.add")
+            }
+        }
+        .navigationTitle(title).navigationBarTitleDisplayMode(.inline)
+        .toolbar { if reorderable { EditButton() } }
+    }
+}
+
+/// secret-list（x-secret-list）：已保存的密钥只显示服务器给的遮罩，可改备注、删除、排序；新增填明文，保存后服务器加密。
+private struct PluginSecretListField: View {
+    let title: String
+    let spec: JSONValue
+    @Binding var value: JSONValue
+
+    var body: some View {
+        let count = value.arrayValue?.count ?? 0
+        NavigationLink {
+            PluginSecretListEditor(title: title, spec: PluginSecretListSpec(field: spec), value: $value)
+        } label: {
+            LabeledContent { Text(count == 0 ? "未保存" : "\(count) 个（内容隐藏）") } label: { Label(title, systemImage: "key") }
+        }
+        .accessibilityIdentifier("plugin.config.secretList." + title)
+    }
+}
+
+private struct PluginSecretListEditor: View {
+    let title: String
+    let spec: PluginSecretListSpec
+    @Binding var value: JSONValue
+    @State private var draft = ""
+    @State private var draftNote = ""
+
+    private func field(_ index: Int, _ name: String) -> Binding<String> {
+        Binding(get: { (value.arrayValue ?? []).indices.contains(index) ? (value.arrayValue![index][name]?.stringValue ?? "") : "" }, set: { new in
+            var array = value.arrayValue ?? []
+            guard array.indices.contains(index) else { return }
+            var object = array[index].objectValue ?? [:]
+            object[name] = .string(new)
+            array[index] = .object(object)
+            value = .array(array)
+        })
+    }
+
+    var body: some View {
+        let items = value.arrayValue ?? []
+        List {
+            Section {
+                ForEach(Array(items.enumerated()), id: \.offset) { index, item in
+                    let saved = item[spec.idField] != nil
+                    let secret = item[spec.secretField]?.stringValue ?? ""
+                    VStack(alignment: .leading, spacing: 6) {
+                        Label(saved ? secret : String(secret.prefix(4)) + "…（新增，保存后加密）", systemImage: saved ? "key" : "key.fill")
+                            .font(.callout.monospaced()).lineLimit(1).truncationMode(.middle).privacySensitive()
+                        TextField("备注（可选）", text: field(index, spec.noteField))
+                            .font(.subheadline).textInputAutocapitalization(.never).autocorrectionDisabled()
+                    }
+                    .accessibilityIdentifier("plugin.config.secretList.item.\(index)")
+                }
+                .onDelete { offsets in var array = value.arrayValue ?? []; array.remove(atOffsets: offsets); value = .array(array) }
+                .onMove { offsets, destination in var array = value.arrayValue ?? []; array.move(fromOffsets: offsets, toOffset: destination); value = .array(array) }
+                if items.isEmpty { Text("还没有保存任何\(title)。").foregroundStyle(.secondary) }
+            } header: { Text("已保存 \(items.count) 个") } footer: {
+                Text("出于安全只显示遮罩，不会显示完整内容。左滑删除，点“编辑”调整顺序；回到配置页检查并保存后生效。")
+            }
+            Section {
+                TextField("每行一个；也可粘贴插件支持的导入格式（如 JSON）", text: $draft, axis: .vertical)
+                    .lineLimit(2...6).textInputAutocapitalization(.never).autocorrectionDisabled().privacySensitive()
+                    .accessibilityIdentifier("plugin.config.secretList.input")
+                TextField("备注（可选）", text: $draftNote).textInputAutocapitalization(.never).autocorrectionDisabled()
+                Button("添加", systemImage: "plus") {
+                    let secrets = PluginSecretListSpec.split(draft)
+                    guard !secrets.isEmpty else { return }
+                    var array = value.arrayValue ?? []
+                    let note = draftNote.trimmingCharacters(in: .whitespacesAndNewlines)
+                    array.append(contentsOf: secrets.map { JSONValue.object([spec.secretField: .string($0), spec.noteField: .string(note)]) })
+                    value = .array(array)
+                    draft = ""; draftNote = ""
+                }
+                .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .accessibilityIdentifier("plugin.config.secretList.add")
+            } header: { Text("新增") }
+        }
+        .navigationTitle(title).navigationBarTitleDisplayMode(.inline)
+        .toolbar { EditButton() }
+    }
+}
+
+// MARK: - 插件原生卡片（ui.cards：stats / table / kv / list / buttons）
+
+/// 某个位置（plugin.overview / account.detail / dashboard）的插件卡片，作为 List 里的若干 Section 插入。
+/// 声明一次读取，数据逐卡读取：一张卡失败只在这张卡上显示「已停止工作 · 重试」。
+struct PluginCardSections: View {
+    let slot: String
+    var pluginKey: String?
+    var accountID: Int?
+    @Environment(AppModel.self) private var model
+    @State private var cards: [JSONValue] = []
+    @State private var loaded = false
+    @State private var error: String?
+
+    var body: some View {
+        if !loaded {
+            Section {
+                if pluginKey != nil { ProgressView("正在读取插件卡片…") }
+                else { Color.clear.frame(height: 1).listRowBackground(Color.clear).accessibilityHidden(true) }
+            }
+            .listSectionSpacing(pluginKey != nil ? ListSectionSpacing.default : ListSectionSpacing.compact)
+            .task { await load() }
+        } else {
+            if let error, pluginKey != nil {
+                Section {
+                    Label("插件卡片读取失败：\(error)", systemImage: "exclamationmark.triangle").font(.footnote).foregroundStyle(.secondary)
+                    Button("重新读取", systemImage: "arrow.clockwise") { Task { await load() } }
+                }
+            }
+            ForEach(Array(cards.enumerated()), id: \.offset) { _, card in
+                PluginCardSection(card: card, accountID: accountID, showPluginName: pluginKey == nil)
+            }
+        }
+    }
+
+    private func load() async {
+        var path = "/api/plugin-ui/cards?slot=\(slot)"
+        if let pluginKey { path += "&plugin_key=" + (pluginKey.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? pluginKey) }
+        if let accountID { path += "&account_id=\(accountID)" }
+        do {
+            cards = try await model.request(path: path)["cards"]?.arrayValue ?? []
+            error = nil
+        } catch {
+            self.error = error.localizedDescription
+        }
+        loaded = true
+    }
+}
+
+private struct PluginCardSection: View {
+    let card: JSONValue
+    var accountID: Int?
+    var showPluginName = false
+    @Environment(AppModel.self) private var model
+    @State private var result: JSONValue?
+    @State private var loading = true
+    @State private var requestError: String?
+    @State private var busyAction: String?
+    @State private var confirming: String?
+    @State private var actionMessage: String?
+    @State private var actionError: String?
+
+    private var cardID: String { card["card_id"]?.stringValue ?? "" }
+    private var pluginKey: String { card["plugin_key"]?.stringValue ?? "" }
+    private var basePath: String {
+        let plugin = pluginKey.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? pluginKey
+        let id = cardID.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? cardID
+        return "/api/plugin-ui/cards/\(plugin)/\(id)"
+    }
+    private var requestBody: JSONValue {
+        .object(["account_id": accountID.map { JSONValue.integer(Int64($0)) } ?? JSONValue.null, "slot": card["slot"] ?? JSONValue.null])
+    }
+    private var failed: Bool { requestError != nil || (result != nil && result?["status"]?.stringValue != "ok") }
+
+    var body: some View {
+        Section {
+            if loading, result == nil, requestError == nil {
+                ProgressView("正在读取…")
+            } else if failed {
+                VStack(alignment: .leading, spacing: 6) {
+                    Label("\(PluginUIContract.cardFailureMessage) · \(PluginUIContract.cardRetryLabel)", systemImage: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.red)
+                    if let detail = requestError ?? result?["message"]?.stringValue { Text(detail).font(.caption).foregroundStyle(.secondary) }
+                }
+                .accessibilityElement(children: .combine)
+                .accessibilityIdentifier("plugin.uicard.failed")
+                Button("重试", systemImage: "arrow.clockwise") { Task { await load() } }
+                    .disabled(loading)
+                    .accessibilityIdentifier("plugin.uicard.retry.\(cardID)")
+            } else if let result {
+                let blocks = (card["blocks"]?.arrayValue ?? []).map { PluginCardBlock.build($0, data: result["data"] ?? .object([:])) }
+                ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in blockView(block) }
+            }
+            if let actionMessage { Label(actionMessage, systemImage: "checkmark.circle.fill").foregroundStyle(.green).font(.footnote) }
+            if let actionError { Label(actionError, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.red).font(.footnote) }
+        } header: {
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(card["title"]?.stringValue ?? cardID).font(.headline).foregroundStyle(.primary).textCase(nil)
+                    if showPluginName, let name = card["plugin_name"]?.stringValue { Text(name).font(.caption).textCase(nil) }
+                }
+                Spacer()
+                Button("刷新", systemImage: "arrow.clockwise") { Task { await load() } }
+                    .labelStyle(.iconOnly).disabled(loading)
+                    .accessibilityIdentifier("plugin.uicard.refresh.\(cardID)")
+            }
+            // 只挂在分组标题上：挂在 Section 上会被逐行套用，导致重复读取。
+            .task(id: "\(pluginKey)|\(cardID)|\(accountID ?? 0)") {
+                let interval = card["refresh_seconds"]?.intValue
+                repeat {
+                    await load()
+                    guard let interval, interval > 0 else { break }
+                    try? await Task.sleep(for: .seconds(interval))
+                } while !Task.isCancelled
+            }
+        } footer: {
+            if let subtitle = card["subtitle"]?.stringValue, !subtitle.isEmpty { Text(subtitle) }
+        }
+    }
+
+    private func tone(_ tone: PluginCardTone) -> Color {
+        switch tone {
+        case .neutral: .primary
+        case .success: .green
+        case .warning: .orange
+        case .danger: .red
+        case .accent: .accentColor
+        }
+    }
+
+    @ViewBuilder private func blockView(_ block: PluginCardBlock) -> some View {
+        switch block {
+        case .stats(_, let items):
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 92), alignment: .leading)], alignment: .leading, spacing: 10) {
+                ForEach(Array(items.enumerated()), id: \.offset) { _, item in
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(item.label).font(.caption).foregroundStyle(.secondary)
+                        Text(item.text).font(.title3.weight(.semibold)).monospacedDigit().foregroundStyle(tone(item.tone))
+                    }
+                    .accessibilityElement(children: .combine)
+                }
+            }
+            .padding(.vertical, 4)
+        case .kv(_, let items):
+            ForEach(Array(items.enumerated()), id: \.offset) { _, item in
+                LabeledContent(item.label) { Text(item.text).monospacedDigit().foregroundStyle(tone(item.tone)) }
+            }
+        case .table(let title, let columns, let rows, let empty):
+            if let title { Text(title).font(.subheadline.weight(.semibold)) }
+            if rows.isEmpty { Text(empty).font(.footnote).foregroundStyle(.secondary) }
+            ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
+                VStack(alignment: .leading, spacing: 4) {
+                    if let first = row.cells.first { Text(first.text).font(.subheadline.weight(.semibold)).foregroundStyle(tone(first.tone)) }
+                    ForEach(Array(row.cells.enumerated().dropFirst()), id: \.offset) { index, cell in
+                        if cell.text != "-", !cell.text.isEmpty {
+                            HStack(alignment: .firstTextBaseline) {
+                                Text(columns.indices.contains(index) ? columns[index] : "").font(.caption).foregroundStyle(.secondary)
+                                Spacer(minLength: 8)
+                                Text(cell.text).font(.caption).monospacedDigit().foregroundStyle(tone(cell.tone))
+                                    .multilineTextAlignment(.trailing).lineLimit(3)
+                            }
+                        }
+                    }
+                }
+                .accessibilityElement(children: .combine)
+                .accessibilityIdentifier("plugin.uicard.row.\(row.key)")
+            }
+        case .list(let title, let items, let empty, let hidden):
+            if !hidden {
+                if let title { Text(title).font(.subheadline.weight(.semibold)) }
+                if items.isEmpty { Text(empty).font(.footnote).foregroundStyle(.secondary) }
+                ForEach(Array(items.enumerated()), id: \.offset) { _, item in
+                    HStack(alignment: .firstTextBaseline) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(item.title).font(.callout.monospaced())
+                            if !item.subtitle.isEmpty { Text(item.subtitle).font(.caption).foregroundStyle(.secondary) }
+                        }
+                        Spacer(minLength: 8)
+                        if !item.trailing.isEmpty { Text(item.trailing).font(.caption.weight(.medium)).foregroundStyle(tone(item.tone)) }
+                    }
+                    .accessibilityElement(children: .combine)
+                }
+            }
+        case .buttons(let buttons):
+            ForEach(buttons, id: \.id) { button in
+                Button(role: button.destructive ? .destructive : nil) {
+                    if button.confirm.isEmpty { Task { await run(button.id) } } else { confirming = button.id }
+                } label: {
+                    Label(button.label, systemImage: button.destructive ? "exclamationmark.triangle" : "play.circle").frame(minHeight: 44)
+                }
+                .disabled(busyAction != nil)
+                .accessibilityIdentifier("plugin.uicard.action.\(button.id)")
+                .confirmationDialog(button.confirm, isPresented: Binding(get: { confirming == button.id }, set: { if !$0 { confirming = nil } }),
+                                    titleVisibility: .visible) {
+                    Button(button.label, role: button.destructive ? .destructive : nil) { Task { await run(button.id) } }
+                    Button("取消", role: .cancel) {}
+                }
+            }
+        case .unsupported(let layout):
+            Label("这张卡片的布局（\(layout)）需要更新 App 才能显示。", systemImage: "arrow.down.app").font(.footnote).foregroundStyle(.orange)
+        }
+    }
+
+    private func load() async {
+        loading = true
+        defer { loading = false }
+        do {
+            result = try await model.request(path: basePath + "/data", method: "POST", body: requestBody)
+            requestError = nil
+        } catch {
+            requestError = error.localizedDescription
+        }
+    }
+
+    /// 按钮只提交一次、不自动重试；网络中断时如实提示结果未知。
+    private func run(_ actionID: String) async {
+        guard busyAction == nil else { return }
+        busyAction = actionID
+        actionMessage = nil; actionError = nil
+        defer { busyAction = nil }
+        do {
+            let id = actionID.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? actionID
+            let response = try await model.request(path: basePath + "/actions/\(id)", method: "POST", body: requestBody)
+            actionMessage = response["message"]?.stringValue ?? "已完成"
+            if response["refresh"]?.boolValue != false { await load() }
+        } catch {
+            actionError = (error as? APIError)?.isOutcomeUncertain == true
+                ? "网络中断，结果未知。请刷新这张卡确认，不要重复点。" : "操作失败：\(error.localizedDescription)"
         }
     }
 }

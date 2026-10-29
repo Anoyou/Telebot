@@ -688,12 +688,14 @@ async def readyz() -> dict:
 
 # Agent D：功能矩阵 / 规则 / 插件市场
 from .api import features as features_api  # noqa: E402
+from .api import plugin_ui as plugin_ui_api  # noqa: E402
 from .api import plugins as plugins_api  # noqa: E402
 from .api import plugins_install as plugins_install_api  # noqa: E402
 from .api import rules as rules_api  # noqa: E402
 
 app.include_router(features_api.router)
 app.include_router(rules_api.router)
+app.include_router(plugin_ui_api.router)
 app.include_router(plugins_api.router)
 # Sprint2 #4：第三方插件 zip 上传 / 启停 / 卸载
 app.include_router(plugins_install_api.router)

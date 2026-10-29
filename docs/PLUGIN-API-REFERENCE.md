@@ -3242,3 +3242,88 @@ async def on_inbound(self, ctx, event, mw):
 | `core.guest_merge` | delivery | 1020 | 访客模式合并成一次 `answerGuestQuery`（fail-closed） |
 
 插件中间件的 order 都小于 900，所以插件新增或改写的表格同样套平台样式。插件只想要“我的表格紧凑”时不需要写中间件，声明 `render_profile` 即可（见 [紧凑表格](#紧凑表格bot-api-103telepilot-01060-beta12)）。没有声明 `render_profile` 的消息，表格外观与 0.108 完全一致（golden 测试守护）。
+
+### 声明式 UI（Plugin API 1.3，0.110.0-beta.1+）
+
+目标：插件要在 Web / iOS 上多一张卡片、多一种配置控件，只改 `plugin.json` 与插件代码，不改宿主与 App。规范来源是仓库根的 [`schemas/plugin-ui-widgets.json`](../schemas/plugin-ui-widgets.json)（`contract_version` 1），后端、Web、iOS 各有一份由 `scripts/sync-plugin-ui-widgets.py` 生成的逐字节副本，CI「后端」与「iOS」工作流都运行 `--check`。`GET /api/plugins/ui-contract` 返回同一份契约。能力用 `ctx.capabilities.has("ui.cards")` 等探测。
+
+#### 配置控件契约
+
+能力 `ui.widgets`（version 1）。契约列出全部 23 种配置控件、各自识别条件（`resolution_order` 自上而下第一个命中）、可用的 `x-ui-*` 键、最低 iOS 版本与示例。Web `ConfigDialog` 与 iOS 插件配置页都实现全部控件，并在单测里逐项对照契约。本版补齐 iOS 的 4 种控件：
+
+| 控件 | 写法 | 说明 |
+| --- | --- | --- |
+| `multi-select` | `x-ui-widget: "multi-select"`，或数组字段 `items.enum` 非空 | 固定选项多选，`enumNames`（数组字段写在 `items` 上）作显示名 |
+| `list-select` | `x-ui-widget: "list-select"`（字段带 `enum`） | 单选，选项平铺为列表 |
+| `allowed-peer-multi-select` | `x-ui-widget: "allowed-peer-multi-select"`（数组） | 从账号「允许会话」里多选；全局配置只读 |
+| `config-list` | `x-ui-widget: "config-list"`（对象数组） | 每项一行摘要（`x-ui-title-field` / `x-ui-description-field`），点开编辑，可增删排序 |
+
+**未知控件**：客户端遇到不认识的 `x-ui-widget` 时显示「此控件需要更新 App」并保持只读，保存时原值不动，不会退化成通用编辑器把数据改坏。
+
+#### 密钥列表（x-secret-list）
+
+能力 `config.secret_list`。在 `config_schema` 的数组字段上声明：
+
+```json
+"tokens": {
+  "type": "array", "title": "Token 列表",
+  "x-secret-list": {"secret_field": "token", "note_field": "note", "legacy_field": "token"},
+  "items": {"type": "object", "properties": {"token": {"type": "string"}, "note": {"type": "string"}}}
+}
+```
+
+- 读取配置时宿主把每项的 `secret_field` 换成遮罩（前几位…后几位），并附稳定的 `id_field`（默认 `secret_id`）；明文密钥不会下发到客户端。
+- 保存时 `id_field` 或遮罩命中已保存条目就保留原密钥，否则当作新填写的明文，加密保存；空值与重复项丢弃。
+- `legacy_field`（可选，顶层字符串字段）里按行 / 逗号分隔的旧密钥会并入列表后清空，方便从单 Token 字段迁移。
+- Web 与 iOS 显示原生密钥列表：已保存的只显示遮罩，可删除、改备注；新加的显示前几位并标「保存后加密」。
+- 旧版 `chatgpt_image`（未声明 `x-secret-list`）由 `app/plugin_compat.py` 补一份等价声明，行为不变。
+
+#### 配置钩子（on_config_validate / on_config_saved）
+
+能力 `config.validate`、`config.saved`。
+
+```python
+async def on_config_validate(self, ctx, config: dict, scope: str) -> dict | None:
+    if config.get("model") == "gpt-image-old":
+        return {"config": {**config, "model": "gpt-image-1"}}          # 规范化后保存
+    if not config.get("tokens"):
+        return {"errors": {"tokens": "至少填写一个 Token"}}             # 拒绝保存，逐字段提示
+    return None
+
+async def on_config_saved(self, ctx, config: dict, scope: str) -> None:
+    self._client_cache.clear()                                         # 后台执行，不影响保存结果
+```
+
+- `scope` 为 `"account"` 或 `"global"`；`config` 已通过 JSON Schema 校验、已合并保留原密钥（明文只在内存里）。
+- `on_config_validate` 同步调用、超时 2 秒；超时或抛异常时**放行保存**（fail-open）并记入钩子运行统计。返回 `errors` 时保存接口返回 400（`code: CONFIG_VALIDATION_ERROR`，`detail.fields` 为逐字段原因），Web / iOS 配置页显示「字段: 原因」。
+- `on_config_saved` 在保存成功后后台调用、超时 10 秒，返回值与异常都不影响保存结果。
+
+#### 声明式卡片（ui.cards）
+
+能力 `ui.cards`。在 `plugin.json` 声明：
+
+```json
+"reads": ["plugin.stats@1"],
+"ui": {"cards": [
+  {"id": "health", "slot": "plugin.overview", "title": "最近 24 小时",
+   "source": {"read": "plugin.stats@1"},
+   "layout": {"type": "stats", "items": [{"label": "调用", "path": "totals.calls"},
+                                         {"label": "失败", "path": "totals.failed", "tone": "danger"}]}},
+  {"id": "quota", "slot": "account.detail", "title": "配额",
+   "source": {"action": "quota"},
+   "blocks": [
+     {"type": "kv", "items": [{"label": "剩余", "path": "left", "format": "number"},
+                              {"label": "最近刷新", "path": "refreshed_at", "format": "relative_time"}]},
+     {"type": "buttons", "items": [{"id": "refresh", "label": "立即刷新"},
+                                   {"id": "reset", "label": "重置", "style": "destructive", "confirm": "确定重置配额？"}]}
+   ]}
+]}
+```
+
+- **slot**：`plugin.overview`（插件详情顶部）、`account.detail`（账号详情，只显示该账号启用的插件）、`dashboard`（概览末尾，全局启用的插件）。
+- **布局**：`layout` 单块或 `blocks` 多块，首批块类型 `stats` / `kv` / `table`（手机上每行折成小卡）/ `list` / `buttons`。取值写 `path`（点分路径）或 `value`；`format`：`text` / `number` / `percent` / `duration_ms` / `datetime` / `relative_time`；`tone`：`neutral` / `success` / `warning` / `danger` / `accent`。
+- **数据来源**：`source.read` 必须是 `reads` 里声明过的宿主资源（`plugin.stats@1` / `chat.allowed@1` / `account.admins@1`）；`source.action` 调插件 `on_ui_card(ctx, card_id, context) -> dict`，同步、超时 3 秒，`context` 含 `slot` / `account_id` / `action`。
+- **按钮**：点按调 `on_ui_action(ctx, action_id, context)`，超时 10 秒；`confirm` 非空时客户端先确认；返回 `{"message": "已刷新", "refresh": true}`，`message` 显示给管理员，`refresh` 为真时重新读取这张卡。
+- **隔离**：每张卡单独读取（`POST /api/plugin-ui/cards/{plugin}/{card}/data`），读取失败或超时只让这张卡显示「已停止工作 · 重试」，不影响页面其它部分；不合规的卡片整张忽略并给出 lint 警告。客户端不认识的块类型只读提示「需要更新 App」。
+- 宿主自带一张 `_host.stats`「运行统计」卡（钩子级调用数、失败、耗时与弃用接口调用），显示在每个插件详情顶部——原来写死在插件详情里的统计区改由卡片 DSL 渲染。
+- 接口：`GET /api/plugin-ui/cards?slot=…&account_id=…` 列出卡片声明；`POST /api/plugin-ui/cards/{plugin}/{card}/data` 取数；`POST /api/plugin-ui/cards/{plugin}/{card}/actions/{action}` 执行按钮。

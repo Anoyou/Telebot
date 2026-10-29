@@ -64,6 +64,14 @@ _BROWSER_PREFIXES = (
 )
 
 
+_PLUGIN_UI_CONTRACT_FILES = {
+    "schemas/plugin-ui-widgets.json",
+    "backend/app/worker/plugins/plugin_ui_widgets.json",
+    "frontend/src/lib/pluginUiWidgets.json",
+    "ios/TelePilotCore/Sources/TelePilotCore/plugin-ui-widgets.json",
+}
+
+
 def _normalize(path: str) -> str:
     value = path.strip()
     while value.startswith("./"):
@@ -93,6 +101,8 @@ def classify_paths(paths: list[str], *, force_full: bool = False) -> CiScope:
     backend = any(
         path.startswith(("backend/", "deploy/", "plugins/", "scripts/"))
         or path in {"docker-compose.yml", ".dockerignore", "Makefile"}
+        # 插件声明式 UI 契约：规范与副本任一变化都要在后端 job 跑 sync-plugin-ui-widgets.py --check。
+        or path in _PLUGIN_UI_CONTRACT_FILES
         for path in files
     )
     frontend = any(path.startswith("frontend/") for path in files)
