@@ -25,6 +25,8 @@
 
 ## [Unreleased]
 
+## [0.110.0-beta.1] - 2026-10-29 · minor（次版本预发布） · 插件平台化 P3：声明式 UI（控件契约、ui.cards 原生卡片、配置钩子、x-secret-list 密钥列表、iOS 4 个新控件与未知控件只读）
+
 ### 插件平台（Plugin API 1.3）：声明式 UI——插件加卡片、加配置控件不再需要改宿主和 App
 - **控件契约** `schemas/plugin-ui-widgets.json`（能力 `ui.widgets`，contract_version 1）：列出全部 23 种配置控件的识别顺序、`x-ui-*` 键、最低 iOS 版本与示例；`scripts/sync-plugin-ui-widgets.py` 生成后端 / Web / iOS 三份副本，CI「后端」与「iOS」工作流运行 `--check`（iOS 工作流的触发路径与「只改服务器就跳过」判断同步纳入该文件）；`GET /api/plugins/ui-contract` 返回契约。Web 与 iOS 都按契约逐项单测。
 - **iOS 补齐 4 种控件**：多选 `multi-select`、列表选择 `list-select`、允许的会话 `allowed-peer-multi-select`、配置列表 `config-list`；客户端遇到不认识的控件只读显示「此控件需要更新 App」，不再退化成通用编辑器。
