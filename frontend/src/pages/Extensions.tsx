@@ -77,6 +77,7 @@ import { splitPluginWarnings } from "@/lib/plugin-config-contract";
 import { isPlatformFeature } from "@/lib/plugin-modes";
 import { queryKeys } from "@/lib/queryKeys";
 import { PluginWorkspaceHeader } from "@/pages/Plugins/WorkspaceHeader";
+import { PluginHookStatsSection } from "@/components/plugin/PluginHookStatsSection";
 
 import { getFeatureMatrix } from "@/api/features";
 import {
@@ -2449,6 +2450,11 @@ function PluginOverviewDetailDialog({
               )}
             </div>
           </section>
+
+          <PluginHookStatsSection
+            pluginKey={plugin.key}
+            accountNames={Object.fromEntries(plugin.accounts.map((account) => [account.account_id, account.account_name]))}
+          />
 
           <section className="rounded-md border border-border/70 bg-background/80 p-4">
             <div className="flex flex-wrap items-center gap-2">

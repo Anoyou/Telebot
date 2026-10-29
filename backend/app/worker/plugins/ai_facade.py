@@ -298,6 +298,9 @@ class PluginAI:
                 DeprecationWarning,
                 stacklevel=2,
             )
+            from .deprecations import note_deprecated
+
+            note_deprecated("ai.tag_alias", plugin_key=self.plugin_key, account_id=self.account_id, detail="ctx.ai.complete")
         system_prompt = str(system or "")
         user_prompt = str(user or "")
         if not system_prompt.strip() and not user_prompt.strip():
@@ -610,6 +613,9 @@ class PluginAI:
                 DeprecationWarning,
                 stacklevel=2,
             )
+            from .deprecations import note_deprecated
+
+            note_deprecated("ai.tag_alias", plugin_key=self.plugin_key, account_id=self.account_id, detail="ctx.ai.stream_complete")
         system_prompt = str(system or "")
         user_prompt = str(user or "")
         if not system_prompt.strip() and not user_prompt.strip():

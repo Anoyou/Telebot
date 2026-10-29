@@ -11,7 +11,8 @@ loader 在扫描目录阶段读取这个常量来决定加载方式、显示名�
 - ``description``：一句话描述（前端"插件管理"列表展示）
 - ``usage``：插件必须声明的详细使用说明；插件配置页和规范警告会据此提示安装者
 - ``requires_features``：声明依赖的其它插件 key 列表（先注册了才能加载本插件）
-- ``min_telepilot_version``：声明最低 TelePilot 版本；旧 ``min_telebot_version`` 保留兼容
+- ``min_telepilot_version``：声明最低 TelePilot 版本（0.107.0 起可带 beta 号）；旧 ``min_telebot_version`` 保留兼容（已弃用）
+- ``plugin_api``：Plugin API 兼容范围（0.107.0+，推荐只写在 plugin.json）
 - ``config_schema``：``rule.config`` 的 JSON Schema，前端可据此生成动态表单
 - ``config_actions``：配置页动作声明，前端按声明渲染按钮，后端调插件 ``on_config_action``
 - ``category``：模块身份分类（interactive / automation / utility）
@@ -65,6 +66,9 @@ class Manifest:
     version: str = "0.1.0"
     min_telepilot_version: str | None = None
     min_telebot_version: str | None = None
+    # Plugin API 兼容范围（0.107.0+，如 "^1.0"）。推荐只写在 plugin.json：旧宿主的 Manifest
+    # 不接受这个参数，写进 manifest.py 会在旧宿主上导入失败；宿主加载时会从 plugin.json 补齐。
+    plugin_api: str | None = None
     author: str = "builtin"
     description: str = ""
     usage: str = ""
@@ -126,6 +130,7 @@ class Manifest:
             "version": self.version,
             "min_telepilot_version": self.min_telepilot_version,
             "min_telebot_version": self.min_telebot_version,
+            "plugin_api": self.plugin_api,
             "author": self.author,
             "description": self.description,
             "usage": self.usage,

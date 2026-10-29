@@ -1397,7 +1397,7 @@ def _feature_manifest_from_manifest_json(manifest_json: dict[str, Any]) -> dict[
     permissions = manifest_json.get("permissions")
     if isinstance(permissions, list):
         manifest["permissions"] = list(permissions)
-    for version_key in ("min_telepilot_version", "min_telebot_version"):
+    for version_key in ("min_telepilot_version", "min_telebot_version", "plugin_api"):
         version_value = str(manifest_json.get(version_key) or "").strip()
         if version_value:
             manifest[version_key] = version_value

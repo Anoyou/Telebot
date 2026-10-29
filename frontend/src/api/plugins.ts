@@ -1,3 +1,4 @@
+import type { components } from "@/api/schema";
 import { api } from "@/lib/api";
 
 export interface PluginInstallOut {
@@ -120,6 +121,30 @@ export async function getInstalledPluginChangelog(key: string): Promise<PluginCh
   const { data } = await api.get<PluginChangelogResponse>(
     `/api/plugins/install/${encodeURIComponent(key)}/changelog`,
   );
+  return data;
+}
+
+export type PluginHookStatsResponse = components["schemas"]["PluginHookStatsResponse"];
+export type PluginHookStat = components["schemas"]["PluginHookStatOut"];
+export type PluginDeprecationUsage = components["schemas"]["PluginDeprecationUsageOut"];
+export type PluginCapabilitiesResponse = components["schemas"]["PluginCapabilitiesResponse"];
+
+/** 插件每个钩子 / 事件处理的调用数、耗时与失败数，以及已弃用接口的调用次数（0.107.0+）。 */
+export async function getPluginHookStats(key: string, accountId?: number | null): Promise<PluginHookStatsResponse> {
+  const { data } = await api.get<PluginHookStatsResponse>(
+    `/api/plugins/${encodeURIComponent(key)}/stats`,
+    { params: accountId ? { account_id: accountId } : undefined },
+  );
+  return data;
+}
+
+export async function resetPluginHookStats(key: string): Promise<void> {
+  await api.delete(`/api/plugins/${encodeURIComponent(key)}/stats`);
+}
+
+/** 宿主能力注册表、Plugin API 版本与弃用登记。 */
+export async function getPluginCapabilities(): Promise<PluginCapabilitiesResponse> {
+  const { data } = await api.get<PluginCapabilitiesResponse>("/api/plugins/capabilities");
   return data;
 }
 

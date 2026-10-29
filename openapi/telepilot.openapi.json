@@ -12739,6 +12739,126 @@
         "title": "PluginBatchStateOut",
         "type": "object"
       },
+      "PluginCapabilitiesResponse": {
+        "properties": {
+          "capabilities": {
+            "items": {
+              "$ref": "#/components/schemas/PluginCapabilityOut"
+            },
+            "title": "Capabilities",
+            "type": "array"
+          },
+          "deprecations": {
+            "items": {
+              "$ref": "#/components/schemas/PluginDeprecationOut"
+            },
+            "title": "Deprecations",
+            "type": "array"
+          },
+          "host_version": {
+            "description": "当前 TelePilot 版本",
+            "title": "Host Version",
+            "type": "string"
+          },
+          "plugin_api_version": {
+            "description": "宿主提供的 Plugin API 版本（MAJOR.MINOR）",
+            "title": "Plugin Api Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "host_version",
+          "plugin_api_version",
+          "capabilities",
+          "deprecations"
+        ],
+        "title": "PluginCapabilitiesResponse",
+        "type": "object"
+      },
+      "PluginCapabilityOut": {
+        "properties": {
+          "deprecated_in": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deprecated In"
+          },
+          "doc": {
+            "default": "",
+            "title": "Doc",
+            "type": "string"
+          },
+          "facades": {
+            "description": "只对这些 MessageOps facade 成立；空表示宿主级能力",
+            "items": {
+              "type": "string"
+            },
+            "title": "Facades",
+            "type": "array"
+          },
+          "legacy_attr": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "兼容旧探测方式的 ctx.messages 类属性名",
+            "title": "Legacy Attr"
+          },
+          "name": {
+            "description": "能力名，如 messages.guest_reply_markup；插件用 ctx.capabilities.has(name) 判断",
+            "title": "Name",
+            "type": "string"
+          },
+          "plugin_api": {
+            "description": "引入该能力的 Plugin API 版本",
+            "title": "Plugin Api",
+            "type": "string"
+          },
+          "removed_in": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Removed In"
+          },
+          "since": {
+            "description": "首个提供该能力的 TelePilot 版本（可带 beta 号）",
+            "title": "Since",
+            "type": "string"
+          },
+          "summary": {
+            "title": "Summary",
+            "type": "string"
+          },
+          "version": {
+            "description": "能力版本，从 1 开始",
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "name",
+          "version",
+          "since",
+          "plugin_api",
+          "summary"
+        ],
+        "title": "PluginCapabilityOut",
+        "type": "object"
+      },
       "PluginCenterAccountItem": {
         "properties": {
           "account_id": {
@@ -13374,6 +13494,122 @@
         "title": "PluginConfigActionResponse",
         "type": "object"
       },
+      "PluginDeprecationOut": {
+        "properties": {
+          "deprecated_since": {
+            "title": "Deprecated Since",
+            "type": "string"
+          },
+          "doc": {
+            "default": "",
+            "title": "Doc",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "removal": {
+            "title": "Removal",
+            "type": "string"
+          },
+          "replacement": {
+            "title": "Replacement",
+            "type": "string"
+          },
+          "summary": {
+            "title": "Summary",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "summary",
+          "replacement",
+          "deprecated_since",
+          "removal"
+        ],
+        "title": "PluginDeprecationOut",
+        "type": "object"
+      },
+      "PluginDeprecationUsageOut": {
+        "properties": {
+          "account_id": {
+            "title": "Account Id",
+            "type": "integer"
+          },
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "last_at": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last At"
+          },
+          "removal": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Removal"
+          },
+          "replacement": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Replacement"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Summary"
+          }
+        },
+        "required": [
+          "account_id",
+          "id",
+          "count"
+        ],
+        "title": "PluginDeprecationUsageOut",
+        "type": "object"
+      },
       "PluginDisplayOrder": {
         "description": "插件中心卡片展示顺序（插件 key 列表）。只影响展示，不改变插件执行优先级。",
         "properties": {
@@ -13434,6 +13670,268 @@
           "config"
         ],
         "title": "PluginGlobalConfigUpdate",
+        "type": "object"
+      },
+      "PluginHookStatOut": {
+        "properties": {
+          "account_id": {
+            "description": "账号 ID；0 表示与账号无关",
+            "title": "Account Id",
+            "type": "integer"
+          },
+          "avg_ms": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avg Ms"
+          },
+          "calls": {
+            "default": 0,
+            "title": "Calls",
+            "type": "integer"
+          },
+          "circuit_open": {
+            "default": 0,
+            "description": "熔断中被跳过的次数",
+            "title": "Circuit Open",
+            "type": "integer"
+          },
+          "event_type": {
+            "description": "事件类型或动作名；'-' 表示未区分",
+            "title": "Event Type",
+            "type": "string"
+          },
+          "failed": {
+            "default": 0,
+            "description": "抛异常的次数（不含超时）",
+            "title": "Failed",
+            "type": "integer"
+          },
+          "failure_rate": {
+            "default": 0.0,
+            "description": "(failed + timeout) / calls",
+            "title": "Failure Rate",
+            "type": "number"
+          },
+          "hook": {
+            "description": "钩子名：on_event / on_interaction / on_message / on_direct_message / on_startup / on_config_action / system_agent_tool …",
+            "title": "Hook",
+            "type": "string"
+          },
+          "last_at": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "最近一次调用（Unix 秒）",
+            "title": "Last At"
+          },
+          "last_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "最近一次失败摘要（已脱敏、截断）",
+            "title": "Last Error"
+          },
+          "last_error_at": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Error At"
+          },
+          "max_ms": {
+            "default": 0,
+            "title": "Max Ms",
+            "type": "integer"
+          },
+          "ok": {
+            "default": 0,
+            "title": "Ok",
+            "type": "integer"
+          },
+          "p50_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "按耗时直方图估算的中位数上界",
+            "title": "P50 Ms"
+          },
+          "p95_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "按耗时直方图估算的 P95 上界",
+            "title": "P95 Ms"
+          },
+          "since": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "开始统计的时间（Unix 秒）",
+            "title": "Since"
+          },
+          "skipped": {
+            "default": 0,
+            "description": "插件更新中被跳过的次数",
+            "title": "Skipped",
+            "type": "integer"
+          },
+          "sum_ms": {
+            "default": 0,
+            "title": "Sum Ms",
+            "type": "integer"
+          },
+          "timeout": {
+            "default": 0,
+            "title": "Timeout",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "account_id",
+          "hook",
+          "event_type"
+        ],
+        "title": "PluginHookStatOut",
+        "type": "object"
+      },
+      "PluginHookStatsResponse": {
+        "properties": {
+          "account_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "按账号过滤时的账号 ID",
+            "title": "Account Id"
+          },
+          "available": {
+            "default": true,
+            "description": "False 表示统计存储（Redis）暂不可用",
+            "title": "Available",
+            "type": "boolean"
+          },
+          "deprecations": {
+            "items": {
+              "$ref": "#/components/schemas/PluginDeprecationUsageOut"
+            },
+            "title": "Deprecations",
+            "type": "array"
+          },
+          "hooks": {
+            "items": {
+              "$ref": "#/components/schemas/PluginHookStatOut"
+            },
+            "title": "Hooks",
+            "type": "array"
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message"
+          },
+          "plugin_key": {
+            "title": "Plugin Key",
+            "type": "string"
+          },
+          "retention_days": {
+            "default": 7,
+            "title": "Retention Days",
+            "type": "integer"
+          },
+          "totals": {
+            "$ref": "#/components/schemas/PluginHookTotalsOut"
+          }
+        },
+        "required": [
+          "plugin_key"
+        ],
+        "title": "PluginHookStatsResponse",
+        "type": "object"
+      },
+      "PluginHookTotalsOut": {
+        "properties": {
+          "calls": {
+            "default": 0,
+            "title": "Calls",
+            "type": "integer"
+          },
+          "circuit_open": {
+            "default": 0,
+            "title": "Circuit Open",
+            "type": "integer"
+          },
+          "fail": {
+            "default": 0,
+            "title": "Fail",
+            "type": "integer"
+          },
+          "ok": {
+            "default": 0,
+            "title": "Ok",
+            "type": "integer"
+          },
+          "skipped": {
+            "default": 0,
+            "title": "Skipped",
+            "type": "integer"
+          },
+          "sum_ms": {
+            "default": 0,
+            "title": "Sum Ms",
+            "type": "integer"
+          },
+          "timeout": {
+            "default": 0,
+            "title": "Timeout",
+            "type": "integer"
+          }
+        },
+        "title": "PluginHookTotalsOut",
         "type": "object"
       },
       "PluginInstallHistoryOut": {
@@ -20949,7 +21447,7 @@
   },
   "info": {
     "title": "TelePilot",
-    "version": "0.106.0-beta.21"
+    "version": "0.107.0-beta.1"
   },
   "openapi": "3.1.0",
   "paths": {
@@ -39799,6 +40297,81 @@
         ]
       }
     },
+    "/api/plugins/capabilities": {
+      "get": {
+        "description": "宿主能力注册表、Plugin API 版本与弃用登记（插件作者与兼容检查用）。",
+        "operationId": "get_plugin_capabilities_api_plugins_capabilities_get",
+        "parameters": [
+          {
+            "in": "cookie",
+            "name": "auth_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Auth Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PluginCapabilitiesResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "认证失败"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "服务器内部错误"
+          }
+        },
+        "security": [
+          {
+            "AuthCookie": []
+          }
+        ],
+        "summary": "Get Plugin Capabilities",
+        "tags": [
+          "plugins"
+        ]
+      }
+    },
     "/api/plugins/install": {
       "post": {
         "operationId": "install_plugin_api_plugins_install_post",
@@ -41520,6 +42093,194 @@
           }
         ],
         "summary": "Reload Plugin Endpoint",
+        "tags": [
+          "plugins"
+        ]
+      }
+    },
+    "/api/plugins/{key}/stats": {
+      "delete": {
+        "description": "清零插件的钩子统计与弃用计数（各 worker 进程内尚未写入的增量会在下次写入时重新出现）。",
+        "operationId": "reset_plugin_hook_stats_api_plugins__key__stats_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "title": "Key",
+              "type": "string"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "auth_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Auth Token"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "认证失败"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "CSRF 校验失败或权限不足"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "服务器内部错误"
+          }
+        },
+        "security": [
+          {
+            "AuthCookie": [],
+            "CsrfCookie": [],
+            "CsrfHeader": [],
+            "RequestedWith": []
+          }
+        ],
+        "summary": "Reset Plugin Hook Stats",
+        "tags": [
+          "plugins"
+        ]
+      },
+      "get": {
+        "description": "插件每个钩子 / 事件处理的调用数、耗时与失败数，以及已弃用接口的调用次数。\n\n数据由各账号 worker 每几秒批量写入 Redis，保留到最近一次调用后 7 天。",
+        "operationId": "get_plugin_hook_stats_api_plugins__key__stats_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "title": "Key",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "account_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Account Id"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "auth_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Auth Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PluginHookStatsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "认证失败"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "服务器内部错误"
+          }
+        },
+        "security": [
+          {
+            "AuthCookie": []
+          }
+        ],
+        "summary": "Get Plugin Hook Stats",
         "tags": [
           "plugins"
         ]

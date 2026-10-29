@@ -49,8 +49,59 @@ async def invoke_system_agent_tool(
     arguments: dict[str, Any],
     plugin_context: Any | None = None,
 ) -> Any:
-    """执行已注册 handler；若插件实例实现 system_agent_tool(name, args) 也可委托。"""
+    """执行已注册 handler；若插件实例实现 system_agent_tool(name, args) 也可委托。
 
+    每次调用按 ``system_agent_tool`` 钩子记入插件统计（事件类型 = 工具名）。
+    """
+
+    import time
+
+    from .plugin_stats import OUTCOME_FAIL, OUTCOME_OK, classify_exception, get_recorder, record_hook
+
+    started = time.monotonic()
+    account_id = getattr(plugin_context, "account_id", None)
+    redis = getattr(plugin_context, "redis", None)
+    if redis is not None:
+        get_recorder().set_redis_factory(lambda _redis=redis: _redis)
+    try:
+        result = await _invoke_system_agent_tool(
+            plugin_key=plugin_key,
+            tool_name=tool_name,
+            arguments=arguments,
+            plugin_context=plugin_context,
+        )
+    except LookupError:
+        raise
+    except Exception as exc:
+        outcome = classify_exception(exc)
+        record_hook(
+            account_id=account_id,
+            plugin_key=str(plugin_key),
+            hook="system_agent_tool",
+            event_type=str(tool_name),
+            outcome=outcome if outcome != OUTCOME_OK else OUTCOME_FAIL,
+            duration_ms=(time.monotonic() - started) * 1000,
+            error=exc,
+        )
+        raise
+    record_hook(
+        account_id=account_id,
+        plugin_key=str(plugin_key),
+        hook="system_agent_tool",
+        event_type=str(tool_name),
+        outcome=OUTCOME_OK,
+        duration_ms=(time.monotonic() - started) * 1000,
+    )
+    return result
+
+
+async def _invoke_system_agent_tool(
+    *,
+    plugin_key: str,
+    tool_name: str,
+    arguments: dict[str, Any],
+    plugin_context: Any | None = None,
+) -> Any:
     key = (str(plugin_key), str(tool_name))
     handler = _HANDLERS.get(key)
     if handler is not None:

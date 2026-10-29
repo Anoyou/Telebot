@@ -55,6 +55,51 @@ const platformCapabilitiesFixture = {
   updated_at: "2026-07-21T00:00:00Z",
 };
 
+// 插件运行统计（0.107.0+，插件详情「运行统计」）：固定一条正常事件钩子 + 一条有失败的配置动作 + 一条弃用登记。
+export const pluginHookStatsFixture = (pluginKey: string) => ({
+  plugin_key: pluginKey,
+  account_id: null,
+  available: true,
+  message: null,
+  retention_days: 7,
+  hooks: [
+    {
+      account_id: 1, hook: "on_event", event_type: "message",
+      calls: 120, ok: 118, failed: 1, timeout: 1, circuit_open: 0, skipped: 0,
+      sum_ms: 9600, avg_ms: 80, p50_ms: 50, p95_ms: 250, max_ms: 1800, failure_rate: 0.0167,
+      last_at: 1_784_635_200, last_error: "TimeoutError: PLUGIN_INVOKE_TIMEOUT: demo_plugin", last_error_at: 1_784_635_100, since: 1_784_000_000,
+    },
+    {
+      account_id: 0, hook: "on_config_action", event_type: "sync",
+      calls: 2, ok: 1, failed: 1, timeout: 0, circuit_open: 0, skipped: 0,
+      sum_ms: 900, avg_ms: 450, p50_ms: 500, p95_ms: 500, max_ms: 600, failure_rate: 0.5,
+      last_at: 1_784_635_000, last_error: "ValueError: 缺少 API Key", last_error_at: 1_784_635_000, since: 1_784_600_000,
+    },
+  ],
+  totals: { calls: 122, ok: 119, fail: 2, timeout: 1, circuit_open: 0, skipped: 0, sum_ms: 10500 },
+  deprecations: [
+    {
+      account_id: 1, id: "ai.tag_alias", count: 3, last_at: 1_784_635_200, detail: null,
+      summary: "ctx.ai.complete / stream_complete 使用 tag= / tags= 兼容别名", replacement: "provider_tag=", removal: "Plugin API 2.0",
+    },
+  ],
+});
+
+const pluginCapabilitiesFixture = {
+  host_version: APP_VERSION,
+  plugin_api_version: "1.0",
+  capabilities: [
+    {
+      name: "messages.guest_reply_markup", version: 1, since: "0.106.0-beta.17", plugin_api: "1.0",
+      summary: "answer_guest_query 保留 callback_data 按钮", legacy_attr: "guest_reply_markup",
+      facades: ["buffered", "entry", "live"], doc: "", deprecated_in: null, removed_in: null,
+    },
+  ],
+  deprecations: [
+    { id: "ai.tag_alias", summary: "ctx.ai.complete 使用 tag= 兼容别名", replacement: "provider_tag=", deprecated_since: "0.25.0", removal: "Plugin API 2.0", doc: "" },
+  ],
+};
+
 const accountFixture = {
   id: 1,
   phone: "+8613800000000",
@@ -231,6 +276,9 @@ function jsonResponse(pathname: string): unknown | undefined {
   if (pathname === "/api/proxies") return [];
   if (pathname === "/api/plugin-repos" || pathname === "/api/plugin-repos/local/plugins") return [];
   if (pathname === "/api/plugins/installed-overview" || pathname === "/api/plugins/installed-packages") return [];
+  if (pathname === "/api/plugins/capabilities") return pluginCapabilitiesFixture;
+  const pluginStatsMatch = pathname.match(/^\/api\/plugins\/([^/]+)\/stats$/);
+  if (pluginStatsMatch) return pluginHookStatsFixture(decodeURIComponent(pluginStatsMatch[1]));
   if (pathname === "/api/remote-plugins") return [];
   if (pathname === "/api/system/network") return { online: true };
   if (pathname === "/api/system/version") return { version: APP_VERSION };

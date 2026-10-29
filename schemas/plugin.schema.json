@@ -160,6 +160,18 @@
       "title": "Permissions",
       "type": "array"
     },
+    "plugin_api": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Plugin Api"
+    },
     "requires_platform_capabilities": {
       "items": {
         "enum": [

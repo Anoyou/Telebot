@@ -25,6 +25,31 @@
 
 ## [Unreleased]
 
+## [0.107.0-beta.1] - 2026-10-29 · minor（次版本预发布） · 插件平台化：能力注册表与 Plugin API 版本、钩子运行统计、弃用登记、插件库兼容 CI
+
+### 插件平台（Plugin API 1.0）
+
+- **能力单一注册表**：插件可探测的宿主能力只在 `backend/app/worker/plugins/capabilities.py` 登记一次（名称、版本、首个提供它的宿主版本、适用的 MessageOps facade、旧属性名、说明与文档锚点）。此前 `rich_table_compact` / `guest_reply_markup` 等能力标记分别手写在三个 MessageOps 类里、彼此不一致；现在由注册表统一生成，旧插件 `getattr(ctx.messages, "...", False)` 的探测写法继续可用、结果不变。
+- **`ctx.capabilities` 能力协商**：新插件用 `ctx.capabilities.has("messages.guest_reply_markup")` / `version(name)` / `names()` 判断，`messages.*` 能力按当前 `ctx.messages` facade（交互入口 / 后台任务 / UserBot Event Bus）判断。新接口 `GET /api/plugins/capabilities` 返回宿主版本、Plugin API 版本、能力清单与弃用登记。
+- **Plugin API 版本**：宿主提供 Plugin API `1.0`（新增能力升 MINOR，破坏兼容升 MAJOR 并提前公告）。插件可在 `plugin.json` 声明 `plugin_api`（如 `"^1.0"`、`">=1.0,<2"`、`"1.x"`），宿主加载前校验，不满足或写法无法识别时拒绝加载并说明原因；远程插件 / 插件仓库索引同步透传该字段。`plugin_api` 只写在 `plugin.json`（旧宿主的 `Manifest` 不认识它），宿主加载时自动补到 Manifest。
+- **`min_telepilot_version` 支持 beta 号比较**：声明带 beta 号（如 `0.106.0-beta.12`）时按完整 SemVer 比较，`0.106.0-beta.3` 宿主会拒绝加载；不带 beta 号的声明仍只比较 `x.y.z`，已发布插件不会在 beta 宿主上被误拒。
+- **钩子级运行统计**：平台按账号 × 插件 × 钩子 × 事件类型统计 `on_event` / `on_interaction` / `on_message` / `on_direct_message` / `on_startup` / `on_config_action` / 系统助手工具的调用数、成功 / 失败 / 超时 / 熔断 / 更新中跳过次数、平均与最大耗时、估算 p50 / p95 和最近一次失败摘要（脱敏、截断，不存消息正文）。worker 内累加、每 5 秒批量写 Redis，保留到最近一次调用后 7 天；Redis 不可用只丢统计、不影响插件。新接口 `GET /api/plugins/{key}/stats`、`DELETE /api/plugins/{key}/stats`。
+- **弃用登记**：已弃用接口（只实现 `on_interaction` 没有 `on_event`、旧字段 `min_telebot_version`、`ctx.ai` 的 `tag=` / `tags=` 别名、已下线的 `notice` 发送通道）统一登记在 `deprecations.py`，调用时计数并按插件每 6 小时最多记一条 WARNING 日志，插件详情可见次数与替代写法。
+- 非核心可选插件名单（`auto_reply` / `autorepeat` / `chatgpt_image` / `codex_image` / `game24` / `math10`）合并为 `feature_registry.NON_CORE_OPTIONAL_PLUGIN_KEYS` 一份，loader、feature_service 与能力依赖检查共用；移除未使用的 `FEATURE_GAME24` 常量。
+
+### Web
+
+- 插件详情新增「运行统计」：按钩子 / 事件类型列出调用数、平均与 P95 耗时、失败率与最近错误，单独列出已弃用接口调用次数与替代写法，可按账号筛选、一键清零。
+
+### CI
+
+- 新工作流「插件库兼容」（`.github/workflows/plugin-compat.yml` + `scripts/plugin-compat-check.py`）：主仓库 PR / 推送改动后端或插件 schema 时，用本次提交的宿主运行官方插件库 `telebot-plugins` 的 `check_host_compat.py` 与全量 pytest；有失败时再用目标分支宿主重跑，只有“基线通过、本次失败”才判失败，插件库自身已有的失败只给警告。
+
+### 文档
+
+- 插件 API 参考新增「能力协商与 Plugin API 版本」「钩子统计与弃用登记」「弃用登记」三节；「`min_telepilot_version` 怎么填」改为说明 beta 号比较，版本门槛表以能力注册表为准并补 0.107.0-beta.1；PluginContext 字段表与 Manifest 可选字段补 `ctx.capabilities` / `plugin_api`。
+- 删去过时的规则页适配步骤（App.tsx 路由 / `FEATURE_CONFIG_PAGE_KEYS` / `feature.py` 常量）与「rules.py 添加 dry-run 分支」：平台 `rules.py` 已从已安装插件动态加载 `_dry_run_match`，插件只需导出该纯函数。速查表、远程插件文档、开发指南同步。
+
 ## [0.106.0-beta.21] - 2026-10-29 · patch（补丁预发布） · Bot 响应不再互相堵塞
 
 ### Bot 响应：不再互相堵塞（审计 Top 1 / 2 / 8 / 9）

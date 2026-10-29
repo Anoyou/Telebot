@@ -13,8 +13,13 @@ from ..db.models.account import Account
 from ..db.models.feature import BUILTIN_FEATURES, AccountFeature, Feature
 from ..deps import CurrentUser, DBSession
 from ..redis_client import get_redis
+from ..schemas.plugin_runtime import PluginCapabilitiesResponse, PluginHookStatsResponse
 from ..services import audit, feature_service, platform_capabilities
 from ..worker.ipc import CMD_RELOAD_PLUGIN, cmd_channel, make_cmd
+from ..worker.plugins import plugin_stats
+from ..worker.plugins.capabilities import capability_catalog
+from ..worker.plugins.deprecations import DEPRECATION_INDEX, deprecation_catalog
+from ..worker.plugins.versioning import PLUGIN_API_VERSION
 
 log = logging.getLogger(__name__)
 router = APIRouter(tags=["plugins"])
@@ -64,6 +69,85 @@ async def list_installed(
             }
         )
     return out
+
+
+@router.get("/api/plugins/capabilities", response_model=PluginCapabilitiesResponse)
+async def get_plugin_capabilities(_user: CurrentUser) -> PluginCapabilitiesResponse:
+    """宿主能力注册表、Plugin API 版本与弃用登记（插件作者与兼容检查用）。"""
+
+    from .. import __version__
+
+    return PluginCapabilitiesResponse(
+        host_version=str(__version__),
+        plugin_api_version=PLUGIN_API_VERSION,
+        capabilities=capability_catalog(),
+        deprecations=deprecation_catalog(),
+    )
+
+
+def _validated_plugin_key(key: str) -> str:
+    text = str(key or "").strip()
+    if not text or len(text) > 96 or not all(ch.isalnum() or ch in "._-" for ch in text):
+        raise _bad("INVALID_PLUGIN_KEY", "插件 key 不合法")
+    return text
+
+
+@router.get("/api/plugins/{key}/stats", response_model=PluginHookStatsResponse)
+async def get_plugin_hook_stats(
+    key: str,
+    _user: CurrentUser,
+    account_id: int | None = None,
+) -> PluginHookStatsResponse:
+    """插件每个钩子 / 事件处理的调用数、耗时与失败数，以及已弃用接口的调用次数。
+
+    数据由各账号 worker 每几秒批量写入 Redis，保留到最近一次调用后 7 天。
+    """
+
+    plugin_key = _validated_plugin_key(key)
+    try:
+        await plugin_stats.get_recorder().flush(get_redis())
+    except Exception:  # noqa: BLE001 - 主进程本地增量写入失败不影响读取
+        log.debug("flush local plugin stats failed", exc_info=True)
+    try:
+        data = await plugin_stats.read_plugin_stats(get_redis(), plugin_key, account_id=account_id)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("读取插件钩子统计失败 plugin=%s: %s", plugin_key, type(exc).__name__)
+        return PluginHookStatsResponse(
+            plugin_key=plugin_key,
+            account_id=account_id,
+            available=False,
+            message="统计存储暂时不可用（Redis 无法连接），稍后再试。",
+        )
+    deprecations = []
+    for item in data["deprecations"]:
+        meta = DEPRECATION_INDEX.get(item["id"])
+        deprecations.append(
+            {
+                **item,
+                "summary": meta.summary if meta else None,
+                "replacement": meta.replacement if meta else None,
+                "removal": meta.removal if meta else None,
+            }
+        )
+    return PluginHookStatsResponse(
+        plugin_key=plugin_key,
+        account_id=account_id,
+        hooks=data["hooks"],
+        totals=data["totals"],
+        deprecations=deprecations,
+        retention_days=plugin_stats.STATS_TTL_SECONDS // 86400,
+    )
+
+
+@router.delete("/api/plugins/{key}/stats", status_code=204)
+async def reset_plugin_hook_stats(key: str, _user: CurrentUser) -> None:
+    """清零插件的钩子统计与弃用计数（各 worker 进程内尚未写入的增量会在下次写入时重新出现）。"""
+
+    plugin_key = _validated_plugin_key(key)
+    try:
+        await plugin_stats.reset_plugin_stats(get_redis(), plugin_key)
+    except Exception as exc:  # noqa: BLE001
+        raise _bad("STATS_UNAVAILABLE", "统计存储暂时不可用（Redis 无法连接），稍后再试。", 503) from exc
 
 
 def _ensure_builtin_or_501(plugin_key: str) -> None:
