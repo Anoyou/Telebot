@@ -15,10 +15,25 @@ log = logging.getLogger(__name__)
 SESSION_KEY_PREFIX = "account_bot:interaction_session:"
 CHAT_INDEX_PREFIX = "account_bot:interaction_session_chat:"
 CHAT_INDEX_TTL_SECONDS = 7 * 24 * 3600
+# 账号级索引：account → 全部会话 key。交互 Bot 每轮需要「有活跃会话的 chat」
+# 集合，旧实现对整个 Redis 键空间 SCAN 再逐个 GET（N+1）；改为 SMEMBERS + MGET。
+ACCOUNT_INDEX_PREFIX = "account_bot:interaction_session_account:"
+# 对账标记：存在时信任账号索引（即使为空集合）；过期后读取方用 SCAN 重建一次，
+# 修正写入方漏记或升级前遗留的会话（定期对账）。
+ACCOUNT_INDEX_BUILT_PREFIX = "account_bot:interaction_session_account_built:"
+ACCOUNT_INDEX_RECONCILE_SECONDS = 600
 
 
 def chat_index_key(account_id: int, chat_id: int) -> str:
     return f"{CHAT_INDEX_PREFIX}{int(account_id)}:{int(chat_id)}"
+
+
+def account_index_key(account_id: int) -> str:
+    return f"{ACCOUNT_INDEX_PREFIX}{int(account_id)}"
+
+
+def account_index_built_key(account_id: int) -> str:
+    return f"{ACCOUNT_INDEX_BUILT_PREFIX}{int(account_id)}"
 
 
 async def index_session_key(
@@ -40,6 +55,9 @@ async def index_session_key(
         ex = max(session_ttl, CHAT_INDEX_TTL_SECONDS) if session_ttl > 0 else CHAT_INDEX_TTL_SECONDS
         if ex > 0:
             await redis.expire(key, ex)
+        account_key = account_index_key(account_id)
+        await redis.sadd(account_key, session_key)
+        await redis.expire(account_key, CHAT_INDEX_TTL_SECONDS)
     except Exception:  # noqa: BLE001
         log.debug(
             "index session key failed account=%s chat=%s key=%s",
@@ -57,10 +75,12 @@ async def unindex_session_key(
     chat_id: int | None,
     session_key: str,
 ) -> None:
-    if redis is None or chat_id is None or not session_key:
+    if redis is None or not session_key:
         return
     try:
-        await redis.srem(chat_index_key(account_id, int(chat_id)), session_key)
+        if chat_id is not None:
+            await redis.srem(chat_index_key(account_id, int(chat_id)), session_key)
+        await redis.srem(account_index_key(account_id), session_key)
     except Exception:  # noqa: BLE001
         log.debug(
             "unindex session key failed account=%s chat=%s key=%s",
@@ -146,6 +166,70 @@ async def rebuild_chat_index_from_scan(
         return list(scan_keys)
 
 
+def _decode_members(members: Any) -> list[str]:
+    out: list[str] = []
+    for raw in members or []:
+        text = raw.decode("utf-8", errors="ignore") if isinstance(raw, bytes) else str(raw)
+        if text:
+            out.append(text)
+    return out
+
+
+async def list_account_session_keys(redis: Any, *, account_id: int) -> list[str] | None:
+    """账号下全部会话 key；对账标记缺失（需要 SCAN 重建）或读取失败时返回 ``None``。"""
+
+    if redis is None:
+        return None
+    try:
+        built = await redis.exists(account_index_built_key(account_id))
+        if not int(built or 0):
+            return None
+        return _decode_members(await redis.smembers(account_index_key(account_id)))
+    except Exception:  # noqa: BLE001
+        log.debug("list account session keys failed account=%s", account_id, exc_info=True)
+        return None
+
+
+async def rebuild_account_index_from_scan(
+    redis: Any,
+    *,
+    account_id: int,
+    scan_keys: list[str],
+) -> list[str]:
+    """把 SCAN 结果并入账号索引（只做并集，不删并发新增），并写对账标记。"""
+
+    if redis is None:
+        return list(scan_keys)
+    key = account_index_key(account_id)
+    try:
+        if scan_keys:
+            await redis.sadd(key, *scan_keys)
+            await redis.expire(key, CHAT_INDEX_TTL_SECONDS)
+        await redis.set(account_index_built_key(account_id), "1", ex=ACCOUNT_INDEX_RECONCILE_SECONDS)
+        members = _decode_members(await redis.smembers(key))
+    except Exception:  # noqa: BLE001
+        log.debug("rebuild account session index failed account=%s", account_id, exc_info=True)
+        return list(scan_keys)
+    seen: set[str] = set()
+    out: list[str] = []
+    for item in list(scan_keys) + members:
+        if item not in seen:
+            seen.add(item)
+            out.append(item)
+    return out
+
+
+async def drop_account_session_keys(redis: Any, *, account_id: int, session_keys: list[str]) -> None:
+    """读取方发现会话 key 已不存在（过期）时，从账号索引里移除。"""
+
+    if redis is None or not session_keys:
+        return
+    try:
+        await redis.srem(account_index_key(account_id), *session_keys)
+    except Exception:  # noqa: BLE001
+        log.debug("drop account session keys failed account=%s", account_id, exc_info=True)
+
+
 def session_still_active(session: dict[str, Any], *, now: float | None = None) -> bool:
     if not isinstance(session, dict) or not session:
         return False
@@ -159,11 +243,18 @@ def session_still_active(session: dict[str, Any], *, now: float | None = None) -
 
 
 __all__ = [
+    "ACCOUNT_INDEX_BUILT_PREFIX",
+    "ACCOUNT_INDEX_PREFIX",
     "CHAT_INDEX_PREFIX",
     "SESSION_KEY_PREFIX",
+    "account_index_built_key",
+    "account_index_key",
     "chat_index_key",
+    "drop_account_session_keys",
     "index_session_key",
+    "list_account_session_keys",
     "list_indexed_session_keys",
+    "rebuild_account_index_from_scan",
     "rebuild_chat_index_from_scan",
     "session_still_active",
     "unindex_session_key",

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import contextvars
 import hashlib
 import json
@@ -54,6 +55,7 @@ from ..worker.ipc import (
     cmd_channel,
     make_cmd,
     publish_cmd_with_ack,
+    rpc_lane_for_timeout,
 )
 from ..worker.runtime_log import push_runtime_log_bounded
 from . import (
@@ -110,6 +112,7 @@ from .interaction.guest_reply import (
     strip_guest_bot_mentions,
 )
 from .interaction.rpc_broker import get_interaction_rpc_broker, new_reply_channel
+from .polling_dispatcher import PollingUpdateDispatcher
 
 log = logging.getLogger(__name__)
 
@@ -428,6 +431,8 @@ _POLLING_DLQ_MAX = 500
 _POLLING_DLQ_LOOPS = {"interaction", "management", "transfer_test"}
 _INTERACTION_UPDATE_CONCURRENCY = 8
 _MANAGEMENT_UPDATE_CONCURRENCY = 8
+# 拉取/处理解耦后，已拉取未处理完的 update 上限；超过时 polling 暂停 getUpdates（背压）
+_POLLING_MAX_PENDING_UPDATES = 256
 _INTERACTION_DEBUG_PAYLOAD_SAMPLE_MODULO = 5
 _INTERACTION_DEBUG_FULL_STAGES = {"plugin_error", "actions_guarded"}
 _INTERACTION_DEBUG_SAMPLED_STAGES = {"payload_built"}
@@ -703,15 +708,39 @@ def _remember_interaction_active_session_chat(aid: int, chat_id: int | None) -> 
     )
 
 
+async def _interaction_session_keys_for_account_indexed(redis: Any, aid: int) -> list[str]:
+    """账号下的会话 key：优先读账号索引（SMEMBERS），索引未建/对账到期时 SCAN 重建一次。"""
+
+    from .interaction import session_index
+
+    keys = await session_index.list_account_session_keys(redis, account_id=aid)
+    if keys is not None:
+        return keys
+    scanned = await _iter_interaction_session_keys_for_account(aid)
+    return await session_index.rebuild_account_index_from_scan(redis, account_id=aid, scan_keys=scanned)
+
+
+async def _mget_session_values(redis: Any, keys: list[str]) -> list[Any]:
+    mget = getattr(redis, "mget", None)
+    if callable(mget) and keys:
+        values = await mget(keys)
+        if isinstance(values, list) and len(values) == len(keys):
+            return values
+    return [await redis.get(key) for key in keys]
+
+
 async def _active_interaction_session_chat_ids(aid: int) -> set[int]:
     chat_ids: set[int] = set()
     try:
         redis = get_redis()
-        for key in await _iter_interaction_session_keys_for_account(aid):
-            raw = await redis.get(key)
+        keys = await _interaction_session_keys_for_account_indexed(redis, aid)
+        values = await _mget_session_values(redis, keys)
+        stale: list[str] = []
+        for key, raw in zip(keys, values, strict=False):
             if isinstance(raw, bytes):
                 raw = raw.decode("utf-8", errors="ignore")
             if not raw:
+                stale.append(key)
                 continue
             try:
                 session = json.loads(raw)
@@ -724,6 +753,10 @@ async def _active_interaction_session_chat_ids(aid: int) -> set[int]:
             chat_id = _int_or_none(session.get("chat_id"))
             if chat_id is not None:
                 chat_ids.add(chat_id)
+        if stale:
+            from .interaction.session_index import drop_account_session_keys
+
+            await drop_account_session_keys(redis, account_id=aid, session_keys=stale)
     except Exception:  # noqa: BLE001
         log.debug("load active interaction session chats failed aid=%s", aid, exc_info=True)
     return chat_ids
@@ -1443,6 +1476,9 @@ def is_interaction_bot_manager_running() -> bool:
 async def restart_interaction_bot(aid: int) -> None:
     """重启单个交互 Bot polling task。"""
 
+    # 配置（token / 开关 / 规则）刚被变更，运行配置缓存立即失效
+    invalidate_interaction_runtime_config_cache(aid)
+
     if not await _interaction_bot_capability_enabled():
         # 模块关闭、缓存未就绪或检查失败时确保旧 task 被停掉，不再重新拉起。
         async with _TASK_LOCK:
@@ -2078,6 +2114,76 @@ def _polling_update_chat_key(aid: int, token: str, update: dict[str, Any]) -> st
     return f"object:{id(update)}"
 
 
+def _new_polling_dispatcher(
+    *,
+    aid: int,
+    loop: str,
+    token_role: str,
+    loop_name: str,
+    handler: Any,
+    concurrency: int,
+    persist: bool = True,
+    on_failure: Any | None = None,
+) -> PollingUpdateDispatcher:
+    """拉取/处理解耦：每会话一个有序队列持续消费，跨会话并行（见 polling_dispatcher）。
+
+    ``handler`` 为 None 时每次调用前按名字取模块级 handler，便于测试替换。
+    """
+
+    async def _process(token: str, update: dict[str, Any]) -> str | None:
+        return await _handle_polling_update_with_retries(
+            aid=aid,
+            token=token,
+            update=update,
+            loop_name=loop_name,
+            loop=loop,
+            token_role=token_role,
+            handler=handler() if callable(handler) and getattr(handler, "_resolve_late", False) else handler,
+        )
+
+    return PollingUpdateDispatcher(
+        aid=aid,
+        loop=loop,
+        process=_process,
+        key_fn=lambda token, update: _polling_update_chat_key(aid, token, update),
+        concurrency=concurrency,
+        max_pending=_POLLING_MAX_PENDING_UPDATES,
+        redis_getter=get_redis if persist else None,
+        on_failure=on_failure,
+        name=loop_name,
+    )
+
+
+def _late_handler(name: str) -> Any:
+    """返回一个按名字延迟解析模块级 handler 的工厂（测试 monkeypatch 生效）。"""
+
+    def _resolve() -> Any:
+        return globals()[name]
+
+    _resolve._resolve_late = True  # type: ignore[attr-defined]
+    return _resolve
+
+
+async def _run_polling_batch_to_completion(
+    dispatcher: PollingUpdateDispatcher,
+    *,
+    token: str,
+    updates: list[dict[str, Any]],
+) -> tuple[int | None, str | None]:
+    batch_last_update_id: int | None = None
+    for update in updates:
+        update_id = _int_or_none(update.get("update_id")) if isinstance(update, dict) else None
+        if update_id is not None:
+            batch_last_update_id = update_id if batch_last_update_id is None else max(batch_last_update_id, update_id)
+    try:
+        await dispatcher.submit(token, updates)
+        await dispatcher.wait_idle()
+    finally:
+        await dispatcher.aclose()
+    _had_error, batch_error = dispatcher.take_error()
+    return batch_last_update_id, batch_error
+
+
 async def _handle_interaction_polling_updates_batch(
     *,
     aid: int,
@@ -2085,35 +2191,23 @@ async def _handle_interaction_polling_updates_batch(
     updates: list[dict[str, Any]],
     handler: Any,
 ) -> tuple[int | None, str | None]:
-    buckets: dict[str, list[tuple[int, dict[str, Any]]]] = {}
-    batch_last_update_id: int | None = None
-    for index, update in enumerate(updates):
-        update_id = int(update.get("update_id", 0))
-        batch_last_update_id = update_id if batch_last_update_id is None else max(batch_last_update_id, update_id)
-        key = _polling_update_chat_key(aid, token, update)
-        buckets.setdefault(key, []).append((index, update))
+    """一次性处理一批 update 并等待全部完成（DLQ 重放 / 基准用）。
 
-    semaphore = asyncio.Semaphore(_INTERACTION_UPDATE_CONCURRENCY)
-    batch_errors: list[tuple[int, str]] = []
+    polling 主循环不再调用它：主循环只入队、立即拉下一批，见
+    ``_interaction_polling_loop``。同 chat 保序、跨 chat 并发、全局并发上限
+    与主循环共用同一个调度器实现。
+    """
 
-    async def _run_bucket(items: list[tuple[int, dict[str, Any]]]) -> None:
-        async with semaphore:
-            for index, update in items:
-                update_error = await _handle_polling_update_with_retries(
-                    aid=aid,
-                    token=token,
-                    update=update,
-                    loop_name="interaction bot",
-                    loop="interaction",
-                    token_role="interaction",
-                    handler=handler,
-                )
-                if update_error is not None:
-                    batch_errors.append((index, update_error))
-
-    await asyncio.gather(*(_run_bucket(items) for items in buckets.values()))
-    batch_error = max(batch_errors, key=lambda item: item[0])[1] if batch_errors else None
-    return batch_last_update_id, batch_error
+    dispatcher = _new_polling_dispatcher(
+        aid=aid,
+        loop="interaction",
+        token_role="interaction",
+        loop_name="interaction bot",
+        handler=handler,
+        concurrency=_INTERACTION_UPDATE_CONCURRENCY,
+        persist=False,
+    )
+    return await _run_polling_batch_to_completion(dispatcher, token=token, updates=updates)
 
 
 async def _set_account_bot_runtime_state_best_effort(
@@ -2179,59 +2273,83 @@ async def _handle_management_polling_updates_batch(
     token: str,
     updates: list[dict[str, Any]],
 ) -> tuple[int | None, str | None]:
-    """管理 Bot 批量处理：同 chat 顺序串行，不同 chat 并发。
+    """管理 Bot 一次性处理一批 update 并等待全部完成（DLQ 重放 / 测试用）。
 
-    一轮内可能混有触发长 Agent 查询的 chat 与普通命令 chat；串行逐条
-    await 会让 getUpdates 停摆最长达单轮 Agent 超时。这里对照交互侧
-    _handle_interaction_polling_updates_batch 按 chat 分桶并发，整批
-    （所有桶）处理完后再由调用方推进 update 游标，语义保持不变。
+    polling 主循环已改为「入队即拉下一批」，见 ``_polling_loop``。
 
-    游标语义是刻意的 at-most-once：batch_last_update_id 取整批（含处理
-    失败的 update）的最大 update_id 一并推进，失败 update 不会被下一轮
-    重新拉取、即被永久跳过——否则毒丸消息（必失败的 update）会让游标
-    永远卡住，阻断该账号后续全部消息。补偿途径：处理失败（重试耗尽）的
-    update 由 _record_polling_dead_letter 连同原始 payload 写入 Redis
+    游标语义仍是刻意的 at-most-once：失败（重试耗尽）的 update 不会被重新
+    拉取，而是由 _record_polling_dead_letter 连同原始 payload 写入 Redis
     DLQ（每账号上限 _POLLING_DLQ_MAX 条），可经 _replay_polling_dead_letter
     人工重放，不会无迹丢失。
     """
 
-    buckets: dict[str, list[tuple[int, dict[str, Any]]]] = {}
-    batch_last_update_id: int | None = None
-    for index, update in enumerate(updates):
-        update_id = int(update.get("update_id", 0))
-        batch_last_update_id = update_id if batch_last_update_id is None else max(batch_last_update_id, update_id)
-        key = _polling_update_chat_key(aid, token, update)
-        buckets.setdefault(key, []).append((index, update))
+    dispatcher = _new_polling_dispatcher(
+        aid=aid,
+        loop="management",
+        token_role="management",
+        loop_name="account bot",
+        handler=_late_handler("_handle_update"),
+        concurrency=_MANAGEMENT_UPDATE_CONCURRENCY,
+        persist=False,
+    )
+    return await _run_polling_batch_to_completion(dispatcher, token=token, updates=updates)
 
-    semaphore = asyncio.Semaphore(_MANAGEMENT_UPDATE_CONCURRENCY)
-    batch_errors: list[tuple[int, str]] = []
 
-    async def _run_bucket(items: list[tuple[int, dict[str, Any]]]) -> None:
-        async with semaphore:
-            for index, update in items:
-                update_error = await _handle_polling_update_with_retries(
-                    aid=aid,
-                    token=token,
-                    update=update,
-                    loop_name="account bot",
-                    loop="management",
-                    token_role="management",
-                    handler=_handle_update,
-                )
-                if update_error is not None:
-                    batch_errors.append((index, update_error))
+async def _persist_management_polling_progress(
+    aid: int,
+    *,
+    last_update_id: int | None,
+    error: str | None,
+) -> int | None:
+    """推进管理 Bot 游标并写运行状态；返回 DB 里的最新游标。"""
 
-    await asyncio.gather(*(_run_bucket(items) for items in buckets.values()))
-    batch_error = max(batch_errors, key=lambda item: item[0])[1] if batch_errors else None
-    return batch_last_update_id, batch_error
+    async with AsyncSessionLocal() as db:
+        row = (
+            await db.execute(
+                select(AccountBot).where(AccountBot.account_id == aid)
+            )
+        ).scalar_one_or_none()
+        if row is None:
+            return None
+        if last_update_id is not None and (row.last_update_id is None or last_update_id > row.last_update_id):
+            row.last_update_id = last_update_id
+        row.status = ACCOUNT_BOT_STATUS_RUNNING
+        row.last_error = error
+        await db.commit()
+        return row.last_update_id
 
 
 async def _polling_loop(aid: int) -> None:
     backoff = 2.0
     token = ""
-    # 游标用局部变量跟踪：缓存命中的周期不再查库，批处理提交后同步推进；
-    # 缓存未命中（≤5s 一次）重读配置时与 DB 里的 last_update_id 重新对齐
-    offset: int | None = None
+    # 游标：DB 里已持久化的 last_update_id（缓存未命中时重读对齐）；实际
+    # getUpdates offset 取它与调度器「已入队最大 update_id」的较大者 + 1。
+    db_cursor: int | None = None
+    first_round = True
+
+    async def _on_failure(_update_id: int | None, error: str) -> None:
+        try:
+            await _persist_management_polling_progress(
+                aid,
+                last_update_id=dispatcher.max_enqueued_update_id,
+                error=error,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001
+            log.warning("account bot polling failure state update failed aid=%s", aid, exc_info=True)
+
+    # 拉取与处理解耦：update 入各 chat 的有序队列后立即拉下一批，慢 Agent
+    # 查询 / 慢命令只挡住自己所在 chat，不再挡住其它 chat 与 getUpdates。
+    dispatcher = _new_polling_dispatcher(
+        aid=aid,
+        loop="management",
+        token_role="management",
+        loop_name="account bot",
+        handler=_late_handler("_handle_update"),
+        concurrency=_MANAGEMENT_UPDATE_CONCURRENCY,
+        on_failure=_on_failure,
+    )
     try:
         while True:
             try:
@@ -2257,7 +2375,7 @@ async def _polling_loop(aid: int) -> None:
                             row.last_error = account_bot_service.sanitize_bot_error(exc)
                             await db.commit()
                             return
-                        offset = (row.last_update_id + 1) if row.last_update_id is not None else None
+                        db_cursor = row.last_update_id
                         if row.status != ACCOUNT_BOT_STATUS_RUNNING:
                             row.status = ACCOUNT_BOT_STATUS_RUNNING
                             row.last_error = None
@@ -2280,11 +2398,15 @@ async def _polling_loop(aid: int) -> None:
                 continue
 
             try:
+                # 上一任 polling（重启/崩溃）已拉取但没处理完的 update 先补投
+                await dispatcher.restore_pending(token, force=first_round)
+                first_round = False
+                await dispatcher.wait_for_capacity()
                 result = await account_bot_service.call_bot_api(
                     token,
                     "getUpdates",
                     {
-                        "offset": offset,
+                        "offset": dispatcher.next_offset(db_cursor),
                         "timeout": 25,
                         "allowed_updates": _inline_update_allowed_updates(
                             event_flags,
@@ -2296,32 +2418,16 @@ async def _polling_loop(aid: int) -> None:
                 if not isinstance(updates, list):
                     updates = []
                 backoff = 2.0
-                # 按 chat 分桶并发处理整批 update，避免单 chat 的长 Agent
-                # 查询阻塞其他 chat 的命令；批处理完成后再推进游标
-                batch_last_update_id, batch_error = await _handle_management_polling_updates_batch(
-                    aid=aid,
-                    token=token,
-                    updates=updates,
-                )
-                if batch_last_update_id is not None:
-                    async with AsyncSessionLocal() as db:
-                        row = (
-                            await db.execute(
-                                select(AccountBot).where(AccountBot.account_id == aid)
-                            )
-                        ).scalar_one_or_none()
-                        if row is not None:
-                            if row.last_update_id is None or batch_last_update_id > row.last_update_id:
-                                row.last_update_id = batch_last_update_id
-                            row.status = ACCOUNT_BOT_STATUS_RUNNING
-                            row.last_error = batch_error
-                            await db.commit()
-                            # 游标提交后同步局部 offset，缓存命中周期直接复用
-                            offset = (
-                                (row.last_update_id + 1)
-                                if row.last_update_id is not None
-                                else None
-                            )
+                accepted = await dispatcher.submit(token, updates)
+                had_error, batch_error = dispatcher.take_error()
+                if accepted or had_error:
+                    persisted = await _persist_management_polling_progress(
+                        aid,
+                        last_update_id=dispatcher.max_enqueued_update_id,
+                        error=batch_error,
+                    )
+                    if persisted is not None:
+                        db_cursor = persisted
             except asyncio.CancelledError:
                 raise
             except Exception as exc:  # noqa: BLE001
@@ -2336,21 +2442,67 @@ async def _polling_loop(aid: int) -> None:
                 await asyncio.sleep(backoff)
                 backoff = min(backoff * 2, 60.0)
     except asyncio.CancelledError:
+        await dispatcher.aclose()
         # restart_account_bot 在锁内先登记新任务、锁外再等旧任务退出：本
         # 处理器可能与新任务的 RUNNING 写入交错。若 _TASKS[aid] 槽位已被
         # 其他 task 接管，说明这是重启交接而非真正停机，跳过 STOPPED 回写，
         # 避免状态页短暂回退成"已停止"；槽位为空或仍是本任务时保持原行为。
         successor = _TASKS.get(aid)
         if successor is None or successor is asyncio.current_task():
+            # 真正停机才取消后台 Agent 转发；重启交接时让它把这一轮答完
+            await _cancel_management_agent_tasks(aid)
             await _set_account_bot_runtime_state_best_effort(
                 aid,
                 status=ACCOUNT_BOT_STATUS_STOPPED,
                 only_if_enabled=True,
             )
         raise
+    finally:
+        await dispatcher.aclose()
+
+
+# 交互 Bot 运行配置短 TTL 缓存（与管理 Bot 的 _MANAGEMENT_POLLING_CONFIG_CACHE 同类）：
+# 繁忙账号每轮 getUpdates 都要读 transfer 配置（2 次查询）、游标、token 解密、
+# Event Bus 订阅、允许会话和活跃会话集合。配置变更经 restart_interaction_bot /
+# 允许会话失效钩子显式清掉；TTL 只兜底进程外直改 DB 的场景。游标由 polling 自己
+# 推进（见 _note_interaction_runtime_cursor），实际 offset 以调度器已入队最大 id 为准。
+_INTERACTION_RUNTIME_CONFIG_CACHE: dict[int, tuple[float, str | None, dict[str, Any]]] = {}
+_INTERACTION_RUNTIME_CONFIG_TTL_SECONDS = 5.0
+
+
+def invalidate_interaction_runtime_config_cache(aid: int | None = None) -> None:
+    if aid is None:
+        _INTERACTION_RUNTIME_CONFIG_CACHE.clear()
+        return
+    _INTERACTION_RUNTIME_CONFIG_CACHE.pop(int(aid), None)
+
+
+def _note_interaction_runtime_cursor(aid: int, last_update_id: int | None) -> None:
+    cached = _INTERACTION_RUNTIME_CONFIG_CACHE.get(int(aid))
+    if cached is None or last_update_id is None:
+        return
+    cached_at, token, cfg = cached
+    current = _int_or_none(cfg.get("interaction_last_update_id"))
+    if current is None or int(last_update_id) > current:
+        cfg = dict(cfg)
+        cfg["interaction_last_update_id"] = int(last_update_id)
+        _INTERACTION_RUNTIME_CONFIG_CACHE[int(aid)] = (cached_at, token, cfg)
 
 
 async def _load_interaction_runtime_config(aid: int) -> tuple[str | None, dict[str, Any]]:
+    cached = _INTERACTION_RUNTIME_CONFIG_CACHE.get(int(aid))
+    if cached is not None:
+        cached_at, cached_token, cached_cfg = cached
+        if time.monotonic() - cached_at <= _INTERACTION_RUNTIME_CONFIG_TTL_SECONDS:
+            return cached_token, dict(cached_cfg)
+        _INTERACTION_RUNTIME_CONFIG_CACHE.pop(int(aid), None)
+    token, cfg = await _load_interaction_runtime_config_uncached(aid)
+    if cfg.get("enabled") and token:
+        _INTERACTION_RUNTIME_CONFIG_CACHE[int(aid)] = (time.monotonic(), token, dict(cfg))
+    return token, cfg
+
+
+async def _load_interaction_runtime_config_uncached(aid: int) -> tuple[str | None, dict[str, Any]]:
     async with AsyncSessionLocal() as db:
         cfg = await account_bot_service.get_transfer_notice_config(db, aid)
         state = await _load_cursor_runtime_state(
@@ -2466,6 +2618,28 @@ async def _set_polling_runtime_state_best_effort(
 async def _interaction_polling_loop(aid: int) -> None:
     backoff = 2.0
     token = ""
+    first_round = True
+
+    async def _on_failure(_update_id: int | None, error: str) -> None:
+        await _set_polling_runtime_state_best_effort(
+            aid,
+            _set_interaction_runtime_state,
+            loop_name="interaction bot",
+            last_update_id=dispatcher.max_enqueued_update_id,
+            error=error,
+        )
+
+    # 拉取与处理解耦：update 入各 chat 的有序队列后立即拉下一批。一条 45–90 s
+    # 的 AI 提问只挡住同 chat 的后续消息，其它会话、按钮回调不再排队。
+    dispatcher = _new_polling_dispatcher(
+        aid=aid,
+        loop="interaction",
+        token_role="interaction",
+        loop_name="interaction bot",
+        handler=_late_handler("_handle_interaction_update"),
+        concurrency=_INTERACTION_UPDATE_CONCURRENCY,
+        on_failure=_on_failure,
+    )
     try:
         while True:
             try:
@@ -2479,17 +2653,17 @@ async def _interaction_polling_loop(aid: int) -> None:
                     )
                     return
                 token = token_opt
-                offset = (
-                    int(cfg["interaction_last_update_id"]) + 1
-                    if cfg.get("interaction_last_update_id") is not None
-                    else None
-                )
+                db_cursor = _int_or_none(cfg.get("interaction_last_update_id"))
+                # 上一任 polling（重启/崩溃）已拉取但没处理完的 update 先补投
+                await dispatcher.restore_pending(token, force=first_round)
+                first_round = False
+                await dispatcher.wait_for_capacity()
                 event_flags = await _event_framework_flags()
                 result = await account_bot_service.call_bot_api(
                     token,
                     "getUpdates",
                     {
-                        "offset": offset,
+                        "offset": dispatcher.next_offset(db_cursor),
                         "timeout": 25,
                         "allowed_updates": _inline_update_allowed_updates(
                             event_flags,
@@ -2501,20 +2675,18 @@ async def _interaction_polling_loop(aid: int) -> None:
                 if not isinstance(updates, list):
                     updates = []
                 backoff = 2.0
-                batch_last_update_id, batch_error = await _handle_interaction_polling_updates_batch(
-                    aid=aid,
-                    token=token,
-                    updates=updates,
-                    handler=_handle_interaction_update,
-                )
-                if batch_last_update_id is not None:
+                accepted = await dispatcher.submit(token, updates)
+                had_error, batch_error = dispatcher.take_error()
+                if accepted or had_error:
+                    max_enqueued = dispatcher.max_enqueued_update_id
                     await _set_polling_runtime_state_best_effort(
                         aid,
                         _set_interaction_runtime_state,
                         loop_name="interaction bot",
-                        last_update_id=batch_last_update_id,
+                        last_update_id=max_enqueued,
                         error=batch_error,
                     )
+                    _note_interaction_runtime_cursor(aid, max_enqueued)
             except asyncio.CancelledError:
                 raise
             except Exception as exc:  # noqa: BLE001
@@ -2530,13 +2702,17 @@ async def _interaction_polling_loop(aid: int) -> None:
                 await asyncio.sleep(backoff)
                 backoff = min(backoff * 2, 60.0)
     except asyncio.CancelledError:
+        await dispatcher.aclose()
         await _set_polling_runtime_state_best_effort(
             aid,
             _set_interaction_runtime_state,
             loop_name="interaction bot",
+            last_update_id=dispatcher.max_enqueued_update_id,
             error="已停止",
         )
         raise
+    finally:
+        await dispatcher.aclose()
 
 
 async def _transfer_test_polling_loop(aid: int) -> None:
@@ -2705,6 +2881,80 @@ async def _finish_guest_reply(incoming: Incoming, trace: Any, *, channel: str) -
         )
 
 
+_MANAGEMENT_AGENT_TASKS: dict[int, set[asyncio.Task[None]]] = {}
+_MANAGEMENT_AGENT_LOCKS: dict[tuple[int, int], tuple[asyncio.Lock, int]] = {}
+
+
+def _spawn_management_agent_query(
+    aid: int,
+    tg_user_id: int,
+    factory: Any,
+    *,
+    update_id: int | None = None,
+) -> asyncio.Task[None]:
+    """管理 Bot Agent 查询后台运行；同一 (账号, 用户) 按到达顺序串行。"""
+
+    lock_key = (int(aid), int(tg_user_id))
+    lock, refs = _MANAGEMENT_AGENT_LOCKS.get(lock_key, (None, 0))
+    if lock is None:
+        lock = asyncio.Lock()
+    _MANAGEMENT_AGENT_LOCKS[lock_key] = (lock, refs + 1)
+
+    async def _run() -> None:
+        async with lock:
+            try:
+                await factory()
+            except asyncio.CancelledError:
+                raise
+            except Exception:  # noqa: BLE001
+                log.exception(
+                    "management bot agent query failed aid=%s tg_user=%s update_id=%s",
+                    aid,
+                    tg_user_id,
+                    update_id,
+                )
+
+    task = asyncio.create_task(_run(), name=f"account-bot-agent:{aid}:{tg_user_id}:{update_id}")
+    tasks = _MANAGEMENT_AGENT_TASKS.setdefault(int(aid), set())
+    tasks.add(task)
+
+    def _done(done_task: asyncio.Task[None]) -> None:
+        tasks.discard(done_task)
+        if not tasks:
+            _MANAGEMENT_AGENT_TASKS.pop(int(aid), None)
+        current = _MANAGEMENT_AGENT_LOCKS.get(lock_key)
+        if current is not None and current[0] is lock:
+            remaining = current[1] - 1
+            if remaining <= 0:
+                _MANAGEMENT_AGENT_LOCKS.pop(lock_key, None)
+            else:
+                _MANAGEMENT_AGENT_LOCKS[lock_key] = (lock, remaining)
+
+    task.add_done_callback(_done)
+    return task
+
+
+async def _drain_management_agent_tasks(aid: int, timeout: float | None = None) -> None:
+    """测试/停机辅助：等待某账号的后台 Agent 查询结束。"""
+
+    tasks = list(_MANAGEMENT_AGENT_TASKS.get(int(aid), set()))
+    if tasks:
+        await asyncio.wait(tasks, timeout=timeout)
+
+
+async def _cancel_management_agent_tasks(aid: int) -> None:
+    """管理 Bot polling 停止/重启时取消该账号仍在跑的 Agent 查询转发。
+
+    Durable Run 本身在 run manager 里继续执行，这里只停止向 Telegram 转发进度。
+    """
+
+    tasks = [task for task in _MANAGEMENT_AGENT_TASKS.pop(int(aid), set()) if not task.done()]
+    for task in tasks:
+        task.cancel()
+    if tasks:
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+
 async def _handle_update(aid: int, token: str, update: dict[str, Any]) -> None:
     incoming = _extract_incoming(aid, token, update)
     if incoming is None:
@@ -2817,18 +3067,35 @@ async def _handle_update(aid: int, token: str, update: dict[str, Any]) -> None:
                         text,
                     )
 
-                await system_agent_bot.run_agent_query(
-                    account_id=incoming.account_id,
-                    tg_user_id=incoming.user_id,
-                    role=role,
-                    text=text_body,
-                    send=_agent_send,
-                    draft=_agent_draft,
-                    client_request_id=(
-                        f"tg:{incoming.account_id}:{incoming.user_id}:"
-                        f"{incoming.message_id or incoming.update_id}"
-                    ),
-                )
+                agent_tg_user_id = int(incoming.user_id)
+
+                async def _run_agent() -> None:
+                    await system_agent_bot.run_agent_query(
+                        account_id=incoming.account_id,
+                        tg_user_id=agent_tg_user_id,
+                        role=role,
+                        text=text_body,
+                        send=_agent_send,
+                        draft=_agent_draft,
+                        client_request_id=(
+                            f"tg:{incoming.account_id}:{agent_tg_user_id}:"
+                            f"{incoming.message_id or incoming.update_id}"
+                        ),
+                    )
+
+                if incoming.guest_query_id:
+                    # 访客查询只能回复一次，且由本 handler 的 finally 收尾，必须在线等待
+                    await _run_agent()
+                else:
+                    # Agent 一轮可能几十秒到几分钟：放后台运行，handler 立即返回，
+                    # 本 chat 的 /pause、/agent stop 等命令不再被挡住。同一用户的
+                    # 多条 Agent 文本按到达顺序串行（每用户一把锁）。
+                    _spawn_management_agent_query(
+                        aid,
+                        agent_tg_user_id,
+                        _run_agent,
+                        update_id=incoming.update_id,
+                    )
                 final_status = TRACE_STATUS_OK
                 return
         await record_span(
@@ -2936,7 +3203,7 @@ async def _handle_interaction_update(aid: int, token: str, update: dict[str, Any
                     reason_code="subscription_not_matched",
                 )
                 return
-        async with AsyncSessionLocal() as db:
+        async with _interaction_handler_session() as db:
             cfg = await account_bot_service.get_transfer_notice_config(db, incoming.account_id)
             index = _build_interaction_routing_index(
                 cfg,
@@ -6398,6 +6665,7 @@ def invalidate_account_allowed_chats_cache(aid: int) -> None:
 
     _ACCOUNT_ALLOWED_CHATS_CACHE.pop(int(aid), None)
     _INTERACTION_ROUTING_INDEX_CACHE.pop(int(aid), None)
+    _INTERACTION_RUNTIME_CONFIG_CACHE.pop(int(aid), None)
     for key in [key for key in _EVENT_BUS_SCOPE_BLOCK_LOGGED if key[0] == int(aid)]:
         _EVENT_BUS_SCOPE_BLOCK_LOGGED.pop(key, None)
 
@@ -7376,6 +7644,90 @@ async def _interaction_module_payload_async(
     return data
 
 
+# 交互 handler 当前持有的 DB session。等待 worker RPC（AI 插件最长 90 s）前先把
+# 它的事务结束、连接还给连接池，避免几条慢请求占满主进程池（5+2）让 Web/iOS
+# API 排队到 pool_timeout。session 对象仍可继续使用：下次查询自动重新借连接。
+_INTERACTION_HANDLER_DB: contextvars.ContextVar[tuple[Any, Any] | None] = contextvars.ContextVar(
+    "interaction_handler_db", default=None
+)
+
+
+def _mark_session_flushed(session: Any, _flush_context: Any) -> None:
+    session.info["tp_flushed_since_commit"] = True
+
+
+def _mark_session_clean(session: Any) -> None:
+    session.info.pop("tp_flushed_since_commit", None)
+
+
+@contextlib.asynccontextmanager
+async def _interaction_handler_session() -> Any:
+    """``AsyncSessionLocal()`` 的包装：把 session 绑定给 _release_interaction_db_before_wait。"""
+
+    async with AsyncSessionLocal() as db:
+        sync_session = getattr(db, "sync_session", None)
+        listening = False
+        if sync_session is not None:
+            try:
+                from sqlalchemy import event as sa_event
+
+                sa_event.listen(sync_session, "after_flush", _mark_session_flushed)
+                sa_event.listen(sync_session, "after_commit", _mark_session_clean)
+                sa_event.listen(sync_session, "after_rollback", _mark_session_clean)
+                listening = True
+            except Exception:  # noqa: BLE001
+                log.debug("interaction session flush listener unavailable", exc_info=True)
+        # 记下持有者 task：handler 内 create_task 出去的后台协程会继承 contextvar，
+        # 但不能替 handler 提交它的 session（AsyncSession 不支持并发操作）。
+        token = _INTERACTION_HANDLER_DB.set((db, asyncio.current_task()))
+        try:
+            yield db
+        finally:
+            _INTERACTION_HANDLER_DB.reset(token)
+            if listening:
+                from sqlalchemy import event as sa_event
+
+                with contextlib.suppress(Exception):
+                    sa_event.remove(sync_session, "after_flush", _mark_session_flushed)
+                    sa_event.remove(sync_session, "after_commit", _mark_session_clean)
+                    sa_event.remove(sync_session, "after_rollback", _mark_session_clean)
+
+
+async def _release_interaction_db_before_wait() -> bool:
+    """在等待 worker 前释放交互 handler 的 DB 连接；返回是否已释放。
+
+    只在 session 没有未提交写入时释放（commit 一个只读事务，等价于结束事务；
+    expire_on_commit=False，已加载对象仍可用）。若 session 里有待写对象或已
+    flush 未提交的写入，保持原样（不替调用方提前提交）。
+    """
+
+    bound = _INTERACTION_HANDLER_DB.get()
+    if bound is None:
+        return False
+    db, owner = bound
+    if owner is not asyncio.current_task():
+        return False
+    try:
+        in_transaction = getattr(db, "in_transaction", None)
+        if callable(in_transaction) and not in_transaction():
+            return True
+        if getattr(db, "new", None) or getattr(db, "dirty", None) or getattr(db, "deleted", None):
+            return False
+        info = getattr(getattr(db, "sync_session", None), "info", None)
+        if isinstance(info, dict) and info.get("tp_flushed_since_commit"):
+            return False
+        commit = getattr(db, "commit", None)
+        if not callable(commit):
+            return False
+        await commit()
+        return True
+    except asyncio.CancelledError:
+        raise
+    except Exception:  # noqa: BLE001
+        log.debug("release interaction db before worker wait failed", exc_info=True)
+        return False
+
+
 # Event Bus 订阅声明的处理时限（秒）；None 表示按入口声明 / 默认 15 秒。
 _ENTRY_TIMEOUT_OVERRIDE: contextvars.ContextVar[float | None] = contextvars.ContextVar(
     "interaction_entry_timeout_override", default=None
@@ -7449,23 +7801,28 @@ async def _run_worker_interaction_entry(
         entry_key=entry_key,
     )
     try:
+        await _release_interaction_db_before_wait()
         broker = await get_interaction_rpc_broker()
+        effective_timeout = (
+            float(timeout_seconds)
+            if timeout_seconds is not None
+            else _interaction_entry_timeout_seconds(plugin_key, entry_key)
+        )
         command = make_cmd(
             CMD_RUN_INTERACTION_ENTRY,
             plugin_key=plugin_key,
             entry_key=entry_key,
             payload=payload,
             reply_to=reply_channel,
+            # worker 按此分通道：声明时限 > 15 s 的入口（AI 等）走 long，其余走 short，
+            # AI 忙时游戏、按钮、命令不再排在长请求后面
+            rpc_lane=rpc_lane_for_timeout(effective_timeout),
         )
         online, publish_attempts, response, error = await broker.request(
             cmd_channel=cmd_channel(incoming.account_id),
             command=command,
             reply_channel=reply_channel,
-            timeout_seconds=(
-                float(timeout_seconds)
-                if timeout_seconds is not None
-                else _interaction_entry_timeout_seconds(plugin_key, entry_key)
-            ),
+            timeout_seconds=effective_timeout,
             online_wait_seconds=_INTERACTION_WORKER_ONLINE_WAIT_SECONDS,
             redis=redis,
             request_id=(
@@ -7575,6 +7932,7 @@ async def _run_worker_interaction_action(
     redis = get_redis()
     started = time.time()
     try:
+        await _release_interaction_db_before_wait()
         broker = await get_interaction_rpc_broker()
         online, _attempts, response, error = await broker.request(
             cmd_channel=cmd_channel(incoming.account_id),
