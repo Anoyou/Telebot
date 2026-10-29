@@ -1,5 +1,5 @@
 /** 根据 config_schema 渲染通用插件配置字段与预览。 */
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import {
@@ -46,6 +46,7 @@ import {
   resolveUnifiedModelKey,
 } from "./llmModelOptions";
 import { collapsedSectionKeys, fieldAllowsNull, orderedPropertyEntries, sortedConfigEntries } from "./configFieldOrder";
+import { visibleEntries } from "@/lib/pluginRules";
 import { SecretListField } from "./SecretListField";
 import {
   resolveConfigWidget,
@@ -81,6 +82,8 @@ export interface ConfigField {
   "x-ui-enabled-field"?: string;
   "x-ui-reorderable"?: boolean;
   "x-ui-add-label"?: string;
+  /** 按其它字段的值显示（契约 2）：{field, equals?|in?|not_in?} */
+  "x-ui-visible-if"?: unknown;
   enum?: Array<string | number | boolean>;
   enumNames?: string[];
   enumDescriptions?: string[];
@@ -153,7 +156,9 @@ export function ConfigScopeSection({
 }: ConfigScopeSectionProps) {
   const [openTemplates, setOpenTemplates] = useState<Record<string, boolean>>({});
   const [openSections, setOpenSections] = useState<Record<string, boolean>>({});
-  const groups = groupConfigFields(fields);
+  // x-ui-visible-if：条件不满足的字段不显示（值保留，不删）。
+  const visibleFields = visibleEntries(fields, values);
+  const groups = groupConfigFields(visibleFields);
   // 长配置页：非基础分组默认折叠（与 iOS 子页面同一规则），x-ui-section-inline 可让分组留在顶层。
   const collapsed = collapsedSectionKeys(
     groups.sections,
@@ -825,27 +830,14 @@ function FieldInputBody({
       );
     }
     return (
-      <div className="space-y-1.5">
-        <Label htmlFor={inputId}>{label}</Label>
-        {description && <p className="text-xs text-muted-foreground">{description}</p>}
-        <Input
-          id={inputId}
-          type="text"
-          value={textValue}
-          onChange={(e) => {
-            const parts = e.target.value
-              .split(",")
-              .map((part) => part.trim())
-              .filter(Boolean);
-            if (field.items?.type === "integer" || field.items?.type === "number") {
-              onChange(parts.map((part) => Number(part)).filter((part) => Number.isFinite(part)));
-            } else {
-              onChange(parts);
-            }
-          }}
-          placeholder="用逗号分隔多个值"
-        />
-      </div>
+      <StringListField
+        inputId={inputId}
+        label={label}
+        description={description}
+        field={field}
+        value={value}
+        onChange={onChange}
+      />
     );
   }
 
@@ -1432,6 +1424,74 @@ function ListSelectField({
           );
         })}
       </div>
+    </div>
+  );
+}
+
+/**
+ * 文本 / 数字列表。x-ui-widget: "textarea" 时每行一项（项里可以有逗号，适合正则 / 关键词），
+ * 否则单行逗号分隔。输入框保留草稿文本，分隔符不会在敲下时被吞掉。
+ */
+function StringListField({
+  inputId,
+  label,
+  description,
+  field,
+  value,
+  onChange,
+}: {
+  inputId: string;
+  label: string;
+  description?: string;
+  field: ConfigField;
+  value: unknown;
+  onChange: (value: unknown) => void;
+}) {
+  const multiline = field["x-ui-widget"] === "textarea";
+  const separator = multiline ? "\n" : ", ";
+  const items = Array.isArray(value) ? value.map((item) => String(item)) : [];
+  const joined = items.join(separator);
+  const [draft, setDraft] = useState(joined);
+  const lastEmitted = useRef(joined);
+  useEffect(() => {
+    // 外部改了值（切换规则、撤销）时用新值覆盖草稿；自己刚发出的值不覆盖，保留正在输入的分隔符。
+    if (joined !== lastEmitted.current) {
+      lastEmitted.current = joined;
+      setDraft(joined);
+    }
+  }, [joined]);
+  const numeric = field.items?.type === "integer" || field.items?.type === "number";
+  const commit = (text: string) => {
+    setDraft(text);
+    const parts = (multiline ? text.split(/\r?\n/) : text.split(","))
+      .map((part) => part.trim())
+      .filter(Boolean);
+    const next = numeric ? parts.map((part) => Number(part)).filter((part) => Number.isFinite(part)) : parts;
+    lastEmitted.current = next.map((item) => String(item)).join(separator);
+    onChange(next);
+  };
+  const placeholder = formatConfigValue(field["x-ui-placeholder"]);
+  return (
+    <div className="space-y-1.5">
+      <Label htmlFor={inputId}>{label}</Label>
+      {description && <p className="text-xs text-muted-foreground">{description}</p>}
+      {multiline ? (
+        <Textarea
+          id={inputId}
+          rows={Math.min(8, Math.max(3, items.length + 1))}
+          value={draft}
+          onChange={(e) => commit(e.target.value)}
+          placeholder={placeholder || "每行一项"}
+        />
+      ) : (
+        <Input
+          id={inputId}
+          type="text"
+          value={draft}
+          onChange={(e) => commit(e.target.value)}
+          placeholder={placeholder || "用逗号分隔多个值"}
+        />
+      )}
     </div>
   );
 }

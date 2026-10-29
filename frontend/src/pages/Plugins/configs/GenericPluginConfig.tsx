@@ -6,7 +6,7 @@ import {
   type SetStateAction,
 } from "react";
 import { createPortal } from "react-dom";
-import { useLocation, useNavigate, useParams } from "react-router-dom";
+import { Link, Navigate, useLocation, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
@@ -89,7 +89,15 @@ import {
   pluginOperationalCapabilityLabels,
   pluginSupportsDirectPassthrough,
 } from "@/types/pluginContract";
-import { featureConfigBackTarget, formatFeatureVersion } from "@/pages/Plugins/_shared/featureConfig";
+import {
+  featureConfigBackTarget,
+  formatFeatureVersion,
+  isLegacyConfigPageKey,
+  legacyConfigPagePath,
+  needsLegacyConfigPage,
+} from "@/pages/Plugins/_shared/featureConfig";
+import { PluginRulesSection } from "@/components/plugin/PluginRulesSection";
+import { pluginRulesLayout } from "@/lib/pluginRules";
 import { orderedPropertyEntries } from "@/components/plugin/configFieldOrder";
 import { CollapsibleUsageContent } from "./_shared/CollapsibleUsageContent";
 import { featureRuntimeText, featureSwitchText } from "./_shared/featureStatus";
@@ -123,6 +131,7 @@ function directPassthroughPriority(config: Record<string, unknown>): number {
 }
 
 const EMPTY_CONFIG: Record<string, unknown> = {};
+const EMPTY_PROPERTIES: Record<string, ConfigField> = {};
 const CONFIG_ACTION_TERMINAL_STATUSES = new Set(["succeeded", "failed", "paused", "cancelled"]);
 
 function normalizeConfigActions(rawActions: unknown[]): ConfigAction[] {
@@ -197,6 +206,9 @@ export function GenericPluginConfigPage() {
   const feature = matrixQ.data?.features.find((item) => item.key === featureKey);
   const accountFeature = featuresQ.data?.find((item) => item.feature_key === featureKey);
   const schema = isConfigSchema(feature?.config_schema) ? feature.config_schema : null;
+  // x-ui-mode=rules：规则表单来自 x-rule-schema；没有声明时整个 config_schema 都是规则字段（没有账号级表单）。
+  const rulesLayout = useMemo(() => pluginRulesLayout(feature?.config_schema), [feature?.config_schema]);
+  const accountSchemaProperties = rulesLayout && !rulesLayout.explicit ? EMPTY_PROPERTIES : (schema?.properties ?? EMPTY_PROPERTIES);
   const globalConfig = globalConfigQ.data ?? EMPTY_CONFIG;
   const accountConfig = accountFeature?.config ?? EMPTY_CONFIG;
   const supportsDirectPassthrough = pluginSupportsDirectPassthrough(feature?.capabilities);
@@ -266,7 +278,7 @@ export function GenericPluginConfigPage() {
   useUnsavedChanges(dirty);
 
   const { globalFields, accountFields, previewFields } = useMemo(() => {
-    const properties = schema?.properties ?? {};
+    const properties = accountSchemaProperties;
     const isGuideField = (key: string) =>
       key === "usage_preview" ||
       key === "usage_guide" ||
@@ -292,7 +304,7 @@ export function GenericPluginConfigPage() {
       ),
       previewFields: entries.filter(([key, field]) => !isUsageOnlyField(key) && !field["x-ui-hidden"]),
     };
-  }, [schema]);
+  }, [schema, accountSchemaProperties]);
   const usageGuide = useMemo(
     () => buildUsageGuide({
       schema,
@@ -526,10 +538,14 @@ export function GenericPluginConfigPage() {
     );
   }
 
+  if (feature && needsLegacyConfigPage(featureKey, feature)) {
+    return <Navigate to={legacyConfigPagePath(aid, featureKey, location.search)} replace />;
+  }
+
   const accountLabel =
     accountQ.data?.display_name ||
     (accountQ.data?.tg_username ? `@${accountQ.data.tg_username}` : `#${aid}`);
-  const hasSchemaFields = Boolean(schema && Object.keys(schema.properties).length > 0);
+  const hasSchemaFields = Boolean(schema && Object.keys(accountSchemaProperties).length > 0);
   const backTarget = featureConfigBackTarget(aid, location.search);
 
   function resetForm() {
@@ -587,6 +603,16 @@ export function GenericPluginConfigPage() {
               >
                 {directRankLabel}
               </Badge>
+            ) : null}
+            {isLegacyConfigPageKey(featureKey) ? (
+              <Link
+                to={legacyConfigPagePath(aid, featureKey, location.search)}
+                className="text-primary underline-offset-2 hover:underline"
+                data-testid="legacy-config-link"
+                title="旧版专属页面只保留一个版本，下一版删除"
+              >
+                对照旧版页面
+              </Link>
             ) : null}
           </div>
         </div>
@@ -841,7 +867,19 @@ export function GenericPluginConfigPage() {
         />
       ) : null}
 
-      {!hasSchemaFields ? (
+      {rulesLayout ? (
+        <PluginRulesSection
+          aid={aid}
+          featureKey={featureKey}
+          schema={feature?.config_schema}
+          layout={rulesLayout}
+          commandPrefix={commandPrefix}
+          llmProviders={llmProvidersQ.data}
+          llmProvidersLoading={llmProvidersQ.isLoading || llmProvidersQ.isFetching}
+        />
+      ) : null}
+
+      {!hasSchemaFields && rulesLayout ? null : !hasSchemaFields ? (
         <Card>
           <CardHeader>
             <CardTitle className="text-base">插件配置</CardTitle>

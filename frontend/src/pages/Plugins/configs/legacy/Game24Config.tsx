@@ -23,7 +23,7 @@ import { Switch } from "@/components/ui/switch";
 import { getErrMsg } from "@/lib/api";
 import { confirmDiscardChanges, useUnsavedChanges } from "@/lib/unsavedChanges";
 import { featureConfigBackTarget, formatFeatureVersion } from "@/pages/Plugins/_shared/featureConfig";
-import { featureRuntimeText } from "./_shared/featureStatus";
+import { featureRuntimeText } from "../_shared/featureStatus";
 
 interface Game24Config {
   command: string;

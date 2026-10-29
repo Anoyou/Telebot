@@ -317,6 +317,7 @@ actor FixtureService: AppServing {
             return ["plugin_key": "auto_reply", "config": ["max_per_hour": 40], "global_config": ["max_per_hour": 40]]
         }
         if let value = pluginUIFixture(clean, method: method, path: path) { return value }
+        if let value = ruleGalleryFixture(clean, method: method, body: body) { return value }
         if clean.firstMatch(of: #/^\/api\/accounts\/\d+\/features\/[^\/]+\/config$/#) != nil {
             if method == "PATCH" {
                 fixtureValues[clean + "#effective"] = body?["config"]
@@ -376,7 +377,8 @@ actor FixtureService: AppServing {
                      "category": "utility", "version": "0.9.2", "update_available": false,
                      "source_type": "local", "source_label": "本地导入", "is_builtin": false, "signature_ok": false,
                      "orphan": true, "lint_warnings": ["插件来源目录不存在"]],
-                    Self.widgetGalleryFeature
+                    Self.widgetGalleryFeature,
+                    Self.ruleGalleryFeature
                 ]
             ]
             guard var object = matrix.objectValue, var features = object["features"]?.arrayValue else { return matrix }
@@ -412,7 +414,8 @@ actor FixtureService: AppServing {
                 ["feature_key": "content_assistant", "enabled": true, "state": accountID == 1 ? "failed" : "active",
                  "last_error": accountID == 1 ? "模型供应商连接超时，请检查密钥与网络。" : nil, "config": [:]],
                 ["feature_key": "forward_guard", "enabled": false, "state": "stopped", "last_error": nil, "config": [:]],
-                ["feature_key": "widget_gallery", "enabled": true, "state": "active", "last_error": nil, "config": [:]]
+                ["feature_key": "widget_gallery", "enabled": true, "state": "active", "last_error": nil, "config": [:]],
+                ["feature_key": "rule_gallery", "enabled": true, "state": "active", "last_error": nil, "config": [:]]
             ]
         }
         if let match = clean.firstMatch(of: #/^\/api\/accounts\/(\d+)\/features\/([^\/]+)$/#), method == "PATCH" {
@@ -889,6 +892,58 @@ actor FixtureService: AppServing {
             "palette": ["type": "string", "title": "主题色", "x-ui-widget": "color-wheel", "default": "#ff8800"]
         ], "x-ui-property-order": ["reply_rules", "target_chats", "weekdays", "handle_mode", "tokens", "palette"]]
     ]
+
+    /// 通用规则页示例插件（插件 UI 契约 2，iOS 0.14.1）：x-ui-mode=rules、x-rule-schema、x-rule-summary、
+    /// x-dry-run 与字段级 x-ui-visible-if（作用范围选「指定群」才显示群 ID）。
+    static let ruleGalleryFeature: JSONValue = [
+        "key": "rule_gallery", "display_name": "规则示例", "usage": "用于界面测试的通用规则页示例。",
+        "category": "automation", "version": "1.1.0", "update_available": false, "source_type": "remote", "source_label": "个人插件仓库",
+        "is_builtin": false, "signature_ok": true, "orphan": false, "permissions": ["send_message"],
+        "config_schema": [
+            "type": "object", "x-ui-mode": "rules", "properties": [:],
+            "x-rule-summary": ["match", "patterns", "scope"],
+            "x-dry-run": ["sample_fields": ["message", "chat_type", "chat_id"], "title": "试运行",
+                          "description": "输入一条样例消息并选择会话类型，验证规则是否命中；不会真的发送。"],
+            "x-rule-schema": ["type": "object", "required": ["patterns", "reply"], "properties": [
+                "match": ["type": "string", "title": "匹配类型", "enum": ["keyword", "regex"], "enumNames": ["关键词", "正则"], "default": "keyword"],
+                "scope": ["type": "string", "title": "作用范围", "enum": ["private", "group_all", "group_specific"],
+                          "enumNames": ["仅私聊", "所有群", "指定群"], "default": "private"],
+                "group_ids": ["type": "array", "title": "指定群 ID", "x-ui-widget": "textarea", "items": ["type": "string"],
+                              "x-ui-visible-if": ["field": "scope", "equals": "group_specific"]],
+                "patterns": ["type": "array", "title": "模式", "x-ui-widget": "textarea", "items": ["type": "string"]],
+                "reply": ["type": "string", "title": "回复内容", "x-ui-widget": "textarea"]
+            ], "x-ui-property-order": ["match", "scope", "group_ids", "patterns", "reply"]]
+        ]
+    ]
+
+    private func ruleGalleryFixture(_ clean: String, method: String, body: JSONValue?) -> JSONValue? {
+        guard clean.contains("/features/rule_gallery") || clean == "/api/plugins/rule_gallery/config" else { return nil }
+        if clean == "/api/plugins/rule_gallery/config", method == "GET" {
+            return ["plugin_key": "rule_gallery", "config": [:], "global_config": [:]]
+        }
+        if clean.firstMatch(of: #/^\/api\/accounts\/\d+\/features\/rule_gallery\/rules$/#) != nil, method == "GET" {
+            return [
+                ["id": 31, "account_id": 1, "feature_key": "rule_gallery", "name": "指定群问候", "enabled": true, "priority": 100,
+                 "config": ["match": "keyword", "scope": "group_specific", "group_ids": ["-1001234567890"], "patterns": ["你好", "hello"],
+                            "reply": "你好 {sender}"],
+                 "created_at": "Thu 2026-10-29 9:00 AM CST (UTC+08:00)", "updated_at": "Thu 2026-10-29 9:00 AM CST (UTC+08:00)"],
+                ["id": 32, "account_id": 1, "feature_key": "rule_gallery", "name": "私聊签到", "enabled": false, "priority": 50,
+                 "config": ["match": "regex", "scope": "private", "patterns": ["^签到$"], "reply": "已签到"],
+                 "created_at": "Thu 2026-10-29 9:00 AM CST (UTC+08:00)", "updated_at": "Thu 2026-10-29 9:00 AM CST (UTC+08:00)"]
+            ]
+        }
+        if let match = clean.firstMatch(of: #/^\/api\/accounts\/\d+\/features\/rule_gallery\/rules\/(\d+)\/dry-run$/#), method == "POST" {
+            let message = body?["sample_message"]?.stringValue ?? ""
+            let matched = message.localizedCaseInsensitiveContains("hello") || message.contains("你好")
+            let output: JSONValue = matched ? .string("你好 张三") : .null
+            let chatType = body?["sample_chat_type"]?.stringValue ?? "private"
+            let verdict: JSONValue = .string(matched ? "命中，将回复下方内容" : "未命中：模式不匹配")
+            let logs: JSONValue = [["step": "scope", "msg": .string("会话类型：" + chatType)], ["step": "result", "msg": verdict]]
+            let detail: JSONValue = ["feature": "rule_gallery", "rule_id": .integer(Int64(match.1) ?? 0), "protocol": "dry_run_rule", "logs": logs]
+            return ["matched": .bool(matched), "output": output, "detail": detail]
+        }
+        return nil
+    }
 
     /// 插件原生卡片（GET /api/plugin-ui/cards、POST …/data、POST …/actions/{id}）与控件契约。
     private func pluginUIFixture(_ clean: String, method: String, path: String) -> JSONValue? {

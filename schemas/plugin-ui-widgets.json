@@ -1,6 +1,6 @@
 {
   "$comment": "TelePilot 插件声明式 UI 契约（规范来源）。Web ConfigDialog / PluginCards 与 iOS ManagementPluginConfigView / PluginCardsView 都据此实现并在单测中逐项校验；副本由 scripts/sync-plugin-ui-widgets.py 生成，不要手改副本。",
-  "contract_version": 1,
+  "contract_version": 2,
   "unknown_widget": {
     "policy": "readonly",
     "message": "此控件需要更新 App",
@@ -527,7 +527,7 @@
         "array<scalar>"
       ],
       "match": "",
-      "summary": "文本 / 数字列表",
+      "summary": "文本 / 数字列表；数组字段写 x-ui-widget: textarea 时每行一项（项里可含逗号，适合正则 / 关键词），否则逗号分隔（契约 2 起）",
       "keys": [],
       "ios_since": "0.13.0",
       "fallback": "readonly",
@@ -616,6 +616,24 @@
         "platform"
       ],
       "summary": "配置入口形态（顶层）"
+    },
+    {
+      "key": "x-rule-schema",
+      "scope": "schema",
+      "type": "object",
+      "summary": "x-ui-mode=rules 时每条规则 rule.config 的 JSON Schema（即 rule_schema）；省略时整个 config_schema 视为规则字段、没有账号级表单（契约 2 起）"
+    },
+    {
+      "key": "x-rule-summary",
+      "scope": "schema",
+      "type": "array<string>",
+      "summary": "规则列表里作为摘要列显示的规则字段（最多 3 个，按顺序）；省略时取规则 schema 的前两个可见字段（契约 2 起）"
+    },
+    {
+      "key": "x-dry-run",
+      "scope": "schema",
+      "type": "object|false",
+      "summary": "规则试运行卡片：{sample_fields?: [message|chat_type|chat_id], title?, description?}；false 隐藏。插件导出 dry_run_rule(config, sample) 或旧版 _dry_run_match（契约 2 起）"
     },
     {
       "key": "x-ui-widget",
@@ -718,6 +736,12 @@
       "scope": "field",
       "type": "string",
       "summary": "config-list 添加按钮文字"
+    },
+    {
+      "key": "x-ui-visible-if",
+      "scope": "field",
+      "type": "object",
+      "summary": "按其它字段的值显示：{field, equals?|in?|not_in?}；条件不满足时隐藏（值保留不删）。客户端不认识时一律显示（契约 2 起）"
     },
     {
       "key": "x-secret-list",
@@ -956,6 +980,12 @@
       "mode": "sync",
       "timeout_ms": 10000,
       "returns": "{message?, refresh?: bool}"
+    },
+    "dry_run_rule": {
+      "mode": "sync",
+      "timeout_ms": 3000,
+      "returns": "{matched: bool, output?: str, logs?: [{step, msg}]}",
+      "summary": "模块级函数 dry_run_rule(config, sample)（可为 async）；sample = {message, chat_type, chat_id}；不得发送消息或改业务数据。未导出时回退旧版 _dry_run_match"
     }
   }
 }

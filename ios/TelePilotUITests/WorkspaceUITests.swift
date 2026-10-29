@@ -381,6 +381,69 @@ final class WorkspaceUITests: XCTestCase {
         XCTAssertTrue(rule.label.contains("你好 → 你好呀"), rule.label)
     }
 
+    /// 通用规则页（插件 UI 契约 2，iOS 0.14.1）：规则列表按 x-rule-summary 显示摘要；试运行按 x-dry-run 的样例字段；
+    /// 规则表单里「指定群 ID」按 x-ui-visible-if 只在作用范围为「指定群」时出现，模式每行一项。
+    func testPluginRulesFormVisibleIfAndDryRun() {
+        let app = launch()
+        app.tabBars.buttons["插件"].tap()
+        let pluginCard = app.buttons["plugin.card.rule_gallery"]
+        XCTAssertTrue(reveal(pluginCard, in: app))
+        pluginCard.tap()
+        XCTAssertTrue(app.buttons["账号配置"].waitForExistence(timeout: 10))
+        app.buttons["账号配置"].tap()
+        // 规则模式且声明了 x-rule-schema：顶层没有账号配置字段
+        let rulesLink = app.buttons["自动化规则"]
+        XCTAssertTrue(reveal(rulesLink, in: app))
+        rulesLink.tap()
+
+        let row = app.descendants(matching: .any).matching(identifier: "plugin.rule.row").firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: 10))
+        XCTAssertTrue(row.label.contains("指定群问候"), row.label)
+        XCTAssertTrue(row.label.contains("关键词"), row.label)
+        XCTAssertTrue(row.label.contains("你好、hello"), row.label)
+        XCTAssertTrue(row.label.contains("指定群"), row.label)
+
+        // 新建：默认作用范围「仅私聊」，不显示「指定群 ID」；模式是每行一项的文本框
+        app.buttons["添加"].tap()
+        let createConfig = app.buttons["management.object.config"]
+        XCTAssertTrue(reveal(createConfig, in: app))
+        createConfig.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["management.lineList.patterns"].firstMatch.waitForExistence(timeout: 5))
+        XCTAssertFalse(app.descendants(matching: .any)["management.lineList.group_ids"].firstMatch.exists)
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+
+        // 已有规则（作用范围「指定群」）：编辑时显示「指定群 ID」
+        XCTAssertTrue(row.waitForExistence(timeout: 5))
+        row.tap()
+        let edit = app.buttons["编辑"]
+        XCTAssertTrue(reveal(edit, in: app))
+        edit.tap()
+        let editConfig = app.buttons["management.object.config"]
+        XCTAssertTrue(reveal(editConfig, in: app))
+        editConfig.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["management.lineList.group_ids"].firstMatch.waitForExistence(timeout: 5))
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+
+        // 试运行：填样例消息后运行，显示命中与将输出的内容
+        let dryRun = app.buttons["plugin.rule.dryRun"]
+        XCTAssertTrue(reveal(dryRun, in: app))
+        dryRun.tap()
+        let message = app.descendants(matching: .any)["plugin.rule.dryRun.message"].firstMatch
+        XCTAssertTrue(message.waitForExistence(timeout: 5))
+        message.tap()
+        message.typeText("hello there")
+        XCTAssertTrue(app.descendants(matching: .any)["plugin.rule.dryRun.chatType"].firstMatch.exists)
+        app.buttons["plugin.rule.dryRun.submit"].tap()
+        let matched = app.descendants(matching: .any)["plugin.rule.dryRun.matched"].firstMatch
+        XCTAssertTrue(matched.waitForExistence(timeout: 10))
+        XCTAssertTrue(matched.label.contains("命中：是"), matched.label)
+        let output = app.descendants(matching: .any)["plugin.rule.dryRun.output"].firstMatch
+        XCTAssertTrue(reveal(output, in: app))
+        XCTAssertTrue(output.label.contains("你好 张三"), output.label)
+    }
+
     func testPluginAccountStateIsSeparateFromGlobalMaintenance() {
         let app = launch()
         app.tabBars.buttons["插件"].tap()

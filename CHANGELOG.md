@@ -25,6 +25,18 @@
 
 ## [Unreleased]
 
+## [0.110.0-beta.2] - 2026-10-29 · patch（补丁预发布） · 插件平台化 W1 迁移：通用规则页与表单契约 2
+
+### 插件平台：W1 迁移——五个插件的专属配置页改为通用声明式页面
+
+- **通用规则页**：`x-ui-mode: rules` 的插件由宿主统一渲染规则列表、新建 / 编辑表单与试运行卡片，宿主不再按插件 key 写死规则页。`auto_reply`、`autorepeat` 迁移到通用规则页；`chatgpt_image`（密钥列表 + 配置校验）、`codex_image`、`game24` 迁移到通用配置表单。
+- **表单契约 2**（`schemas/plugin-ui-widgets.json` `contract_version` 2）：新增 `x-rule-schema`（每条规则的字段）、`x-rule-summary`（列表摘要列）、`x-dry-run`（试运行样例字段，可关闭）、字段级 `x-ui-visible-if`（按同级字段显隐，例如作用范围选“指定群”才出现群 ID）；数组字段写 `x-ui-widget: textarea` 时每行一项，正则里的逗号不再被拆开。宿主安装 / 兼容检查对这些声明做 lint。
+- **规则试运行通用协议**：插件导出 `dry_run_rule(config, sample)`（3 秒时限，返回命中、输出与判断过程），REST 与助手共用；旧插件的 `_dry_run_match` 参数形状与日志统一登记在兼容文件里，宿主代码不再按插件分支。新增能力 `ui.rules_page`、`rules.dry_run`（since 0.110.0-beta.2，Plugin API 仍为 1.3）。
+- **旧页对照**：五个专属页移到 `/accounts/:aid/features/:key/legacy`，带“旧版页面”横幅；新页面右上角有“对照旧版页面”入口，保留一个版本后删除。没有声明规则 schema 的旧版 `auto_reply` 自动打开旧页，功能不变。去掉 `App.tsx` 里的专属路由与兜底名单。
+- **iOS 0.14.1**：“自动化规则”使用插件声明的规则表单——列表显示摘要与启用状态、字段按 `x-ui-visible-if` 显隐、选项显示中文名、列表字段每行一项、规则详情有专门的试运行页；规则字段全部在规则里编辑的插件（如自动复读）账号配置页不再重复显示这些字段。
+- **插件库**：`auto_reply` 1.1.0、`autorepeat` 1.1.0、`chatgpt_image` 0.2.0、`codex_image` 1.2.0、`game24` 1.1.17 改用上述声明，不抬高 `min_telepilot_version`（旧服务器照旧可用）。
+- 文档：PLUGIN-API-REFERENCE「规则配置页」「规则试运行协议」「表单契约 2」、速查表同步更新。
+
 ## [0.110.0-beta.1] - 2026-10-29 · minor（次版本预发布） · 插件平台化 P3：声明式 UI（控件契约、ui.cards 原生卡片、配置钩子、x-secret-list 密钥列表、iOS 4 个新控件与未知控件只读）
 
 ### 插件平台（Plugin API 1.3）：声明式 UI——插件加卡片、加配置控件不再需要改宿主和 App

@@ -727,9 +727,9 @@ export interface paths {
          * Dry Run Rule
          * @description 试运行：把 sample 消息喂给规则，返回是否命中 + 渲染输出。
          *
-         *     - ``auto_reply``：调用已安装插件的 ``_dry_run_match`` 完成匹配 + 渲染
-         *     - ``forward``：按 ``source_kind`` 判断是否进入转发流水线，输出 "would forward to ..." 描述
-         *     - 其它 feature：当前返回 matched=False（未实现）
+         *     - ``forward`` / ``scheduler``：宿主内置功能，宿主自己解释
+         *     - 其它插件规则：插件导出的 ``dry_run_rule(config, sample)``；旧版本插件回退 ``_dry_run_match``
+         *       （参数形状与日志见 ``plugin_compat.legacy_dry_run_args`` / ``legacy_dry_run_logs``）
          */
         post: operations["dry_run_rule_api_accounts__aid__features__key__rules__rid__dry_run_post"];
         delete?: never;

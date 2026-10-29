@@ -50,6 +50,7 @@
   "WorkspaceUITests/testPluginConfigUsesNativeProviderAndModelPickers": 20,
   "WorkspaceUITests/testPluginDeclarativeWidgetsAndCards": 75,
   "WorkspaceUITests/testPluginProductPageShowsInfoWhatsNewAndConfirmsUninstall": 30,
+  "WorkspaceUITests/testPluginRulesFormVisibleIfAndDryRun": 60,
   "WorkspaceUITests/testPluginScreenUsesTwoColumnCards": 22,
   "WorkspaceUITests/testPluginStoreDiscoverInstallsAfterConfirmation": 33,
   "WorkspaceUITests/testPluginStoreUpdatesShowNotesAndUpdateIndividually": 26,

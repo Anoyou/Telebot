@@ -2437,132 +2437,71 @@ config_schema={
 
 ---
 
-### 规则配置页（AutoReply / Autorepeat / 远程规则插件）
+### 规则配置页：通用规则页（0.110.0-beta.2+，能力 `ui.rules_page`）
 
-规则配置页每条 rule 存储独立的 `config` JSON，通过 CRUD API 管理。前端专属页面提供：规则列表 + 创建/编辑对话框 + 试运行（dry-run）。这只定义配置数据和页面形态；真正的 Telegram 消息投递仍应通过 Event Bus 的 `event_subscriptions`、标准事件信封和标准 action 完成。
-
-`forward` 是核心兼容能力，当前插件中心不提供它的专属管理 UI，不应把历史 `Forward.tsx` 文件当成可访问入口或新规则页模板。通用 `GenericPluginConfigPage` 也不会把 `config_schema` 自动升级成规则 CRUD；需要多规则管理的插件必须有对应 Rules API 和专属页面。
-
-#### 专属规则页适配清单
-
-| # | 文件 | 修改内容 |
-|---|------|---------|
-| 1 | `frontend/src/api/types.ts` | 添加 `XxxRuleConfig` 接口（描述单条规则的 config 字段） |
-| 2 | `frontend/src/pages/Plugins/configs/XxxConfig.tsx` | **新建**：规则列表页（参考当前可访问的 `AutoReply.tsx`） |
-| 3 | 插件包内 `manifest.py` | `config_schema["x-ui-mode"] = "rules"`；新插件应放在远程仓库或 `plugins/local_imports/xxx/` 后由 Web 安装 |
-
-第 1–3 步是插件作者需要做的全部改动。旧文档里的「App.tsx 显式路由 / `FEATURE_CONFIG_PAGE_KEYS` / `feature.py` 常量」三步只在 TelePilot 主仓库为内置插件新增专属页时才需要，远程 / 本地插件不要改主仓库，也不要据此去提 PR；没有专属页的插件由 `:aid/features/:featureKey` 通用路由承接。
-
-#### 1. types.ts — RuleConfig 接口
-
-```typescript
-// frontend/src/api/types.ts
-export interface AutorepeatRuleConfig {
-  target_chat_id: number;   // 必填
-  time_window?: number;     // 可选，默认 300
-  min_users?: number;       // 可选，默认 5
-}
-```
-
-接口字段应与 `manifest.py` 中 `config_schema.properties` 一一对应，必填字段不加 `?`。
-
-#### 2. 新建配置页面
-
-创建 `frontend/src/pages/Plugins/configs/XxxConfig.tsx`，核心结构：
-
-```tsx
-// 标准页面骨架（以 AutoReply 为模板）
-import { useParams } from "react-router-dom";
-// ... UI 组件导入
-
-export function XxxConfig() {
-  const { aid } = useParams<{ aid: string }>();
-  const queryClient = useQueryClient();
-
-  // ① 规则列表查询
-  const { data: rules } = useQuery({
-    queryKey: ["rules", Number(aid), "xxx"],
-    queryFn: () => api.getRules(Number(aid), "xxx"),
-  });
-
-  // ② 创建/编辑对话框状态
-  const [dialogOpen, setDialogOpen] = useState(false);
-  const [editing, setEditing] = useState<RuleOut | null>(null);
-
-  // ③ CRUD mutations（create / update / delete）
-  // ④ 试运行 mutation（dry-run）
-  // ⑤ 表单渲染 + 规则表格
-}
-```
-
-**页面要素**：
-- 顶部：返回按钮 + 插件标题
-- 使用说明：独立 `Card`，复用 `RuleInfoBox`，写清触发方向、指令/规则用法和排障入口
-- 功能总开关：独立 `Card`，复用 `RuleFeatureToggleCard`，展示启用 Badge、运行状态和最近错误
-- 规则卡片：标题为“规则”，右侧放新建按钮，主体为规则表格（序号 / 关键字段 / 启用状态 / 操作按钮）
-- 对话框：创建/编辑表单，字段来自 RuleConfig；保存按钮留在 Dialog 内
-- 试运行：选规则 → 填样本消息 → 显示命中结果
-
-#### 3. manifest.py — UI 分类
+每条 rule 存储独立的 `config` JSON，通过 Rules CRUD API（`/api/accounts/{aid}/features/{key}/rules`）管理。**宿主不再为插件写专属规则页**：`config_schema["x-ui-mode"] = "rules"` 的插件由 Web `GenericPluginConfigPage` 的规则区与 iOS「自动化规则」统一渲染（规则列表 + 新建 / 编辑表单 + 试运行卡片），表单声明见下方「表单契约 2」。真正的 Telegram 消息投递仍走 Event Bus 的 `event_subscriptions`、标准事件信封和标准 action，规则页只管理配置数据。
 
 ```python
-config_schema={
+config_schema = {
     "type": "object",
     "x-ui-mode": "rules",
-    "properties": {
-        "target_chat_id": {"type": "integer", "title": "目标聊天"},
-        "enabled": {"type": "boolean", "title": "启用", "default": True},
+    "x-rule-summary": ["match", "patterns", "scope"],          # 列表每行显示的摘要字段（最多 3 个）
+    "x-dry-run": {"sample_fields": ["message", "chat_type"],    # 试运行卡片要填的样例字段
+                  "title": "试运行", "description": "不会真的发送。"},
+    "properties": {"max_per_hour": {"type": "integer", "level": "global"}},   # 账号 / 全局配置（与规则无关）
+    "x-rule-schema": {                                           # 每条规则 rule.config 的 schema
+        "type": "object", "required": ["patterns", "reply"],
+        "properties": {
+            "scope": {"type": "string", "enum": ["private", "group_specific"], "enumNames": ["仅私聊", "指定群"]},
+            "group_ids": {"type": "array", "items": {"type": "string"}, "x-ui-widget": "textarea",
+                          "x-ui-visible-if": {"field": "scope", "equals": "group_specific"}},
+            "patterns": {"type": "array", "items": {"type": "string"}, "x-ui-widget": "textarea"},
+            "reply": {"type": "string", "x-ui-widget": "textarea"},
+        },
     },
 }
 ```
 
----
+- 省略 `x-rule-schema` 时整个 `config_schema` 视为规则字段（例如 `autorepeat`），客户端不再把这些字段重复渲染成账号配置表单。
+- `x-rule-schema` 写在 `config_schema` 里，旧宿主的 Manifest 校验会忽略未知 `x-*` 键，旧客户端照旧显示原表单；新插件不必为此抬高 `min_telepilot_version`。
+- 旧专属页（`AutoReply` / `Autorepeat` / `ChatGPTImageConfig` / `CodexImageConfig` / `Game24Config`）在 0.110.0-beta.2 移到 `/accounts/:aid/features/:key/legacy`，带横幅与「对照旧版页面」入口，保留一个版本用于对比，之后删除；没有声明规则 schema 的旧版 `auto_reply` 自动落到旧页，功能不变。不要再新增专属规则页，也不要改 `App.tsx` 路由或兜底名单。
+- `forward`（转发）与 `scheduler`（定时任务）是宿主内置功能，规则 schema 与试运行由宿主自己解释。
 
-### 规则配置页补充：后端 Dry-Run 适配
+### 规则试运行协议：`dry_run_rule`（能力 `rules.dry_run`）
 
-规则配置页通常需要试运行功能。平台 `backend/app/api/rules.py` 的 `dry_run_rule()` 会按 feature key 从**已安装插件目录**动态导入插件包并调用其 `_dry_run_match`；插件只需导出这个纯函数，不需要（也不应）修改 `rules.py`：
-
-#### 插件侧导出 _dry_run_match
-
-```python
-# plugins/local_imports/xxx/plugin.py
-# 或远程插件仓库中的 xxx/plugin.py
-
-def _dry_run_match(cfg: dict, text: str, chat_id: int | None = None) -> tuple[bool, str | None]:
-    """纯函数：给定规则 config + 样本消息，返回 (matched, output)。
-    不访问 DB / Redis / 网络，仅做模式匹配逻辑判断。
-    """
-    # 匹配逻辑（与 on_message 中使用的判断一致）
-    if cfg.get("target_chat_id") and chat_id == cfg["target_chat_id"]:
-        return True, "命中目标群组"
-    return False, None
-```
+`POST /api/accounts/{aid}/features/{key}/rules/{rid}/dry-run`（请求体 `{sample_message, sample_chat_type, sample_chat_id}`）由 `services/rule_dry_run_service.plugin_dry_run` 处理，REST 与 System Agent 共用。插件包导出一个纯函数即可，**不要改 `rules.py`**：
 
 ```python
-# 插件包 __init__.py
-from .plugin import _dry_run_match  # noqa: F401 — 供 API dry-run 导入
+# 插件包 plugin.py（并在 __init__.py 里 from .plugin import dry_run_rule）
+def dry_run_rule(config: dict, sample: dict) -> dict:
+    """sample = {"message": str, "chat_type": "private" | "group" | "channel", "chat_id": int | None}"""
+    hit = any(p in sample["message"] for p in config.get("patterns", []))
+    return {
+        "matched": hit,
+        "output": config.get("reply") if hit else None,          # 命中后将发送的内容（渲染后）
+        "logs": [{"step": "match", "msg": f"模式 {len(config.get('patterns', []))} 条"}],  # 显示在「判断过程」
+    }
 ```
 
-#### 平台如何调用
-
-- 插件已安装且包里导出了 `_dry_run_match` → `POST .../rules/{rid}/dry-run` 直接调用它，返回 `(matched, output)` 填进 `RuleDryRunResponse`；
-- 插件未安装或没有导出 → 接口返回明确提示（`xxx 插件未导出 _dry_run_match，无法执行 dry-run。`），不会从 builtin 路径兜底；
-- `_dry_run_match` 必须是不访问 DB / Redis / 网络的纯函数，并在插件自己的测试里覆盖。
+- 可以是 `async def`；宿主限时 **3 秒**，超时或抛异常返回明确的失败原因，不影响规则本身。也接受返回 `(matched, output)` 元组。
+- 必须无副作用：不发消息、不访问 DB / Redis / 网络，判断逻辑与 `on_message` 共用同一个函数，并在插件自己的测试里覆盖。
+- 插件未安装、全局关闭、签名不合规或没有导出时，接口返回明确提示，不会从内置路径兜底。
+- **旧协议兼容**：没有 `dry_run_rule` 时回退旧的 `_dry_run_match(cfg, text, chat_id)`；各旧插件的参数形状与日志文案登记在 `app/plugin_compat.py`（`legacy_dry_run_args` / `legacy_dry_run_logs`），宿主的服务代码里不再按插件 key 分支。新插件只写 `dry_run_rule`。
+- 插件可用 `config_schema["x-dry-run"] = false` 关闭试运行入口。
 
 ---
 
 ### 单配置对象页（Game24 / Codex Image）
 
-只有一份配置、无规则列表的插件，使用专属页面但不需要 CRUD 和 dry-run：
+只有一份配置、无规则列表的插件，由通用 `GenericPluginConfigPage`（Web）与 iOS 插件配置页按 `config_schema` 渲染，不需要 CRUD 和 dry-run：
 
-- 创建 `frontend/src/pages/Plugins/configs/XxxConfig.tsx`，直接展示/编辑单个 config 对象
-- `manifest.py` 中声明 `config_schema["x-ui-mode"] = "single"`
-- 只有确实新增专属 React 页面时，才添加 App.tsx 显式路由和 `FEATURE_CONFIG_PAGE_KEYS`；使用通用 `GenericPluginConfigPage` 的插件只需正确声明 schema，不改前端注册表
-- 不需要导出 `_dry_run_match`
+- `manifest.py` 中声明 `config_schema["x-ui-mode"] = "single"`，字段用配置控件契约里的 `x-ui-*` 声明（多 Token 用 `x-secret-list`、需要校验用 `on_config_validate`）
+- 0.110.0-beta.2 起不再新增专属 React 页面，也不改 `App.tsx` 路由或兜底名单；`game24` / `codex_image` / `chatgpt_image` 的旧专属页只在 `…/legacy` 对照路由保留一个版本
+- 不需要导出 `dry_run_rule`
 
 #### 页面布局约定
 
-单配置对象页参考 `Game24Config.tsx`、`CodexImageConfig.tsx` 与 `ChatGPTImageConfig.tsx`，并遵守“统一配置页样式规范”。页面从上到下固定为：
+通用配置页遵守“统一配置页样式规范”，页面从上到下固定为：
 
 1. 返回按钮 + 插件标题
 2. 使用说明（真实触发指令示例、参数示例、注意事项）
@@ -2608,7 +2547,7 @@ config_schema={
 | `game24` | `command`, `timeout` | 触发指令名、答题限时 |
 | `codex_image` | `command`, `access_token`, `model`, `message_template`, `image_size`, `aspect_ratio`, `image_format`, `max_wait_seconds`, `status_interval_seconds`, `delete_command_message`, `show_revised_prompt`, `reasoning_effort`, `custom_instructions` | 触发指令、鉴权、模型、消息模板、图片尺寸/比例/格式、等待与状态提示、输出行为、自定义生成指令 |
 
-专属页面字段应与运行时实际读取的配置保持一致；`manifest.config_schema` 也要同步，避免通用配置页、接口校验和文档出现三套口径。
+配置字段应与运行时实际读取的配置保持一致；`manifest.config_schema` 也要同步，避免通用配置页、接口校验和文档出现三套口径。
 
 `codex_image` 现在是插件库图片插件，源码由插件库分发，用户需在“安装插件”页安装后才会复制到 `plugins/installed/codex_image/` 并加载。旧数据库中已经启用或保存配置的 `codex_image` 会在 seed 阶段尝试从插件库登记为 repo installed 插件，保留账号配置和规则引用；未使用过的旧 builtin feature 行会被清理，避免误展示。
 
@@ -3259,6 +3198,19 @@ async def on_inbound(self, ctx, event, mw):
 | `config-list` | `x-ui-widget: "config-list"`（对象数组） | 每项一行摘要（`x-ui-title-field` / `x-ui-description-field`），点开编辑，可增删排序 |
 
 **未知控件**：客户端遇到不认识的 `x-ui-widget` 时显示「此控件需要更新 App」并保持只读，保存时原值不动，不会退化成通用编辑器把数据改坏。
+
+#### 表单契约 2（0.110.0-beta.2+）
+
+`schemas/plugin-ui-widgets.json` 升到 `contract_version` 2，新增四个声明，Web 与 iOS（0.14.1 起）都实现；不认识的客户端忽略它们，表单照旧可用：
+
+| 声明 | 写在 | 含义 |
+| --- | --- | --- |
+| `x-rule-schema` | `config_schema`（`x-ui-mode: rules`） | 每条规则 `rule.config` 的 schema；省略时整个 `config_schema` 都是规则字段 |
+| `x-rule-summary` | `config_schema` | 规则列表每行显示的字段名数组（最多 3 个，只取规则 schema 里有的）；省略时取前两个可见字段 |
+| `x-dry-run` | `config_schema` | 试运行卡片 `{sample_fields, title, description}`，`sample_fields` 取 `message` / `chat_type` / `chat_id`；`false` 关闭；省略时默认「样例消息 + 会话 ID」 |
+| `x-ui-visible-if` | 任一字段（配置或规则） | `{field, equals}` / `{field, in: [...]}` / `{field, not_in: [...]}`，按**同级**字段当前值显示 / 隐藏；隐藏的必填字段不再要求填写；写法不合法时一律显示 |
+
+另外：数组字段写 `x-ui-widget: "textarea"` 时是**每行一项**的多行文本框（项里可以有逗号，适合正则 / 关键词 / 会话 ID 列表），否则仍按逗号分隔。宿主安装与兼容检查会 lint 这些声明（引用了不存在的字段、`sample_fields` 取值不对等给出警告）。
 
 #### 密钥列表（x-secret-list）
 

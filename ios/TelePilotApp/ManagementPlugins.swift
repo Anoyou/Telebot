@@ -1437,6 +1437,8 @@ private enum PluginConfigSchema {
     /// 顺序与 Web 相同：按插件声明顺序（`x-ui-property-order`），再按 `x-ui-order`；不按标题或字母排序。
     static func fields(feature: JSONValue, global: Bool) -> [PluginConfigField] {
         guard let schema = feature["config_schema"], let properties = schema["properties"]?.objectValue else { return [] }
+        // 规则模式（契约 2）且没有 x-rule-schema：config_schema 的字段都是规则字段，在「自动化规则」里编辑，不再当账号配置。
+        if PluginRuleForm.configFieldsAreRuleFields(schema) { return [] }
         let required = Set(schema["required"]?.arrayValue?.compactMap(\.stringValue) ?? [])
         return PluginConfigLayout.orderedKeys(schema: schema).compactMap { key -> PluginConfigField? in
             guard let spec = properties[key], !isGuide(key) else { return nil }
@@ -1842,7 +1844,14 @@ struct ManagementPluginConfigView: View {
         .accessibilityIdentifier("plugin.config.page.\(title)")
     }
 
+    /// 字段级 `x-ui-visible-if`（插件 UI 契约 2）：按草稿里同级字段的当前值显示 / 隐藏。
     @ViewBuilder private func fieldSection(_ field: PluginConfigField, groupTitle: String? = nil) -> some View {
+        if PluginRuleForm.isVisible(field.spec, values: draft) {
+            visibleFieldSection(field, groupTitle: groupTitle)
+        }
+    }
+
+    @ViewBuilder private func visibleFieldSection(_ field: PluginConfigField, groupTitle: String? = nil) -> some View {
         let changed = isChanged(field)
         Section {
             if field.readOnly {
