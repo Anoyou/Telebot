@@ -335,34 +335,22 @@ final class PluginStoreModel {
         bulkRunning = true
         bulkMessage = nil
         bulkProblem = false
-        var updated = 0
-        var failed = 0
-        var stopped = false
         // 并行更新（0.17.0）：同时更新数量取服务器插件市场的“同时更新数量”（旧服务器没有该接口时为 3）；
         // 某个结果未知（网络中断）时不再开始新的更新，已经开始的等它们结束。
         let settings = try? await model.request(path: "/api/plugin-market/settings")
         let limit = max(1, min(8, settings?["update_concurrency"]?.intValue ?? 3))
-        var finished = 0
+        bulkQueue = keys
+        bulkTally = BulkTally()
         bulkMessage = "正在更新 \(keys.count) 个（同时 \(limit) 个）…"
-        await withTaskGroup(of: PluginOperationPhase?.self) { group in
-            var pending = keys.makeIterator()
-            for _ in 0..<limit {
-                guard let key = pending.next() else { break }
-                group.addTask { @MainActor in await self.update(key, model: model, reload: false) }
-            }
-            while let phase = await group.next() {
-                finished += 1
-                switch phase {
-                case .succeeded?: updated += 1
-                case .uncertain?: stopped = true
-                default: failed += 1
-                }
-                bulkMessage = "已完成 \(finished) / \(keys.count) 个（同时 \(limit) 个）…"
-                if !stopped, let key = pending.next() {
-                    group.addTask { @MainActor in await self.update(key, model: model, reload: false) }
-                }
-            }
+        let total = keys.count
+        var workers: [Task<Void, Never>] = []
+        for _ in 0..<min(limit, total) {
+            workers.append(Task { await self.bulkWorker(model: model, total: total, limit: limit) })
         }
+        for worker in workers { await worker.value }
+        let updated = bulkTally.updated
+        let failed = bulkTally.failed
+        let stopped = bulkTally.stopped
         await load(model: model)
         for key in keys where sessionUpdates.contains(where: { $0.key == key }) { await loadInstalledNotes(key, model: model) }
         var parts: [String] = []
@@ -377,6 +365,31 @@ final class PluginStoreModel {
         bulkMessage = parts.joined(separator: "；") + "。"
         bulkProblem = stopped || failed > 0
         bulkRunning = false
+    }
+
+    private struct BulkTally {
+        var updated = 0
+        var failed = 0
+        var finished = 0
+        var stopped = false
+    }
+
+    @ObservationIgnored private var bulkQueue: [String] = []
+    @ObservationIgnored private var bulkTally = BulkTally()
+
+    /// 「全部更新」的一个并行工作者：从队列取下一个插件更新，直到队列取空或出现结果未知。
+    private func bulkWorker(model: AppModel, total: Int, limit: Int) async {
+        while !bulkTally.stopped, !bulkQueue.isEmpty {
+            let key = bulkQueue.removeFirst()
+            let phase = await update(key, model: model, reload: false)
+            bulkTally.finished += 1
+            switch phase {
+            case .succeeded?: bulkTally.updated += 1
+            case .uncertain?: bulkTally.stopped = true
+            default: bulkTally.failed += 1
+            }
+            bulkMessage = "已完成 \(bulkTally.finished) / \(total) 个（同时 \(limit) 个）…"
+        }
     }
 
     func checkUpdates(model: AppModel) async {
