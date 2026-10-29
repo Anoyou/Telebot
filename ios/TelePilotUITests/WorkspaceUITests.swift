@@ -3,12 +3,67 @@ import UIKit
 
 @MainActor
 final class WorkspaceUITests: XCTestCase {
-    private func launch() -> XCUIApplication {
+    private func launch(_ extra: [String] = []) -> XCUIApplication {
         continueAfterFailure = false
         let app = XCUIApplication()
-        app.launchArguments = ["--ui-testing", "-AppleLanguages", "(zh-Hans)", "-AppleLocale", "zh_CN"]
+        app.launchArguments = ["--ui-testing", "-AppleLanguages", "(zh-Hans)", "-AppleLocale", "zh_CN"] + extra
         app.launch()
         return app
+    }
+
+    private func openPluginMarket(_ app: XCUIApplication) {
+        let plugins = app.tabBars.buttons["插件"]
+        XCTAssertTrue(plugins.waitForExistence(timeout: 45))
+        plugins.tap()
+        XCTAssertTrue(app.buttons["plugin.card.auto_reply"].waitForExistence(timeout: 10))
+        app.buttons["plugins.discover"].tap()
+        let entry = app.buttons["plugins.market.entry"]
+        XCTAssertTrue(entry.waitForExistence(timeout: 10))
+        entry.tap()
+    }
+
+    /// 插件市场（iOS 0.17.0 / 服务器 0.113.0）：更新角标、一键全部更新（服务器并行，结果逐个显示）、已自动回滚提示、来源管理。
+    func testPluginMarketUpdatesAllAndManagesSources() {
+        let app = launch()
+        openPluginMarket(app)
+        let count = app.staticTexts["plugins.market.updateCount"]
+        XCTAssertTrue(count.waitForExistence(timeout: 15))
+        XCTAssertEqual(count.label, "1 个插件可更新")
+        XCTAssertTrue(app.descendants(matching: .any)["plugins.market.rolledBack.dice_party"].firstMatch.exists)
+        let action = app.buttons["plugins.market.action.content_assistant"]
+        XCTAssertTrue(action.waitForExistence(timeout: 5))
+        XCTAssertEqual(action.label, "更新")
+        XCTAssertEqual(app.buttons["plugins.market.action.weather_digest"].label, "获取")
+
+        app.buttons["plugins.market.updateAll"].tap()
+        let confirm = app.buttons.matching(NSPredicate(format: "label == %@ AND identifier != %@", "全部更新", "plugins.market.updateAll")).firstMatch
+        XCTAssertTrue(confirm.waitForExistence(timeout: 5))
+        confirm.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["plugins.market.result.content_assistant"].firstMatch.waitForExistence(timeout: 15))
+        let updated = NSPredicate(format: "label == %@", "所有已安装插件都是最新的")
+        expectation(for: updated, evaluatedWith: count)
+        waitForExpectations(timeout: 10)
+
+        let sources = app.buttons["plugins.market.sources"]
+        XCTAssertTrue(reveal(sources, in: app))
+        sources.tap()
+        XCTAssertTrue(app.switches["plugins.market.source.auto.official"].waitForExistence(timeout: 10))
+        XCTAssertFalse(app.buttons["plugins.market.source.delete.official"].exists)
+        let url = app.textFields["plugins.market.source.url"]
+        XCTAssertTrue(reveal(url, in: app))
+        url.tap()
+        url.typeText("https://example.com/registry.json")
+        let add = app.buttons["plugins.market.source.add"]
+        XCTAssertTrue(reveal(add, in: app))
+        add.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["plugins.market.source.src-fixture"].firstMatch.waitForExistence(timeout: 10))
+    }
+
+    /// 旧服务器没有插件市场接口：页面提示更新服务器，“发现”页的其它安装方式不受影响。
+    func testPluginMarketAsksToUpdateOldServer() {
+        let app = launch(["--ui-test-market-unsupported"])
+        openPluginMarket(app)
+        XCTAssertTrue(app.descendants(matching: .any)["plugins.market.unsupported"].firstMatch.waitForExistence(timeout: 15))
     }
 
     func testDockKeepsPrimarySectionsAndAgentEntry() {

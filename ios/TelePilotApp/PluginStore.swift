@@ -326,7 +326,7 @@ final class PluginStoreModel {
         return phase
     }
 
-    /// 「全部更新」：逐个执行并记录每一项的真实结果；某项失败继续下一项，网络中断（结果未知）时停止。
+    /// 「全部更新」：并行执行（有并发上限）并记录每一项的真实结果；某项失败不影响其它，网络中断（结果未知）时不再开始新的更新。
     func updateAll(model: AppModel) async {
         guard !bulkRunning else { return }
         let keys = remotelyUpdatableKeys.filter { !(operations[$0]?.blocksAction ?? false) }
@@ -335,23 +335,27 @@ final class PluginStoreModel {
         bulkRunning = true
         bulkMessage = nil
         bulkProblem = false
-        var updated = 0
-        var failed = 0
-        var stopped = false
-        for (index, key) in keys.enumerated() {
-            bulkMessage = "正在更新第 \(index + 1) / \(keys.count) 个…"
-            switch await update(key, model: model, reload: false) {
-            case .succeeded?: updated += 1
-            case .uncertain?: stopped = true
-            default: failed += 1
-            }
-            if stopped { break }
+        // 并行更新（0.17.0）：同时更新数量取服务器插件市场的“同时更新数量”（旧服务器没有该接口时为 3）；
+        // 某个结果未知（网络中断）时不再开始新的更新，已经开始的等它们结束。
+        let settings = try? await model.request(path: "/api/plugin-market/settings")
+        let limit = max(1, min(8, settings?["update_concurrency"]?.intValue ?? 3))
+        bulkQueue = keys
+        bulkTally = BulkTally()
+        bulkMessage = "正在更新 \(keys.count) 个（同时 \(limit) 个）…"
+        let total = keys.count
+        var workers: [Task<Void, Never>] = []
+        for _ in 0..<min(limit, total) {
+            workers.append(Task { await self.bulkWorker(model: model, total: total, limit: limit) })
         }
+        for worker in workers { await worker.value }
+        let updated = bulkTally.updated
+        let failed = bulkTally.failed
+        let stopped = bulkTally.stopped
         await load(model: model)
         for key in keys where sessionUpdates.contains(where: { $0.key == key }) { await loadInstalledNotes(key, model: model) }
         var parts: [String] = []
         if stopped {
-            parts.append("已更新 \(updated) 个；第 \(updated + failed + 1) 个因网络中断结果待确认，已停止后续更新。已重新读取状态，请核对后再操作")
+            parts.append("已更新 \(updated) 个；有插件因网络中断结果待确认，已停止后续更新。已重新读取状态，请核对后再操作")
         } else if failed > 0 {
             parts.append("已更新 \(updated) 个，\(failed) 个失败（原因见各项）")
         } else {
@@ -361,6 +365,31 @@ final class PluginStoreModel {
         bulkMessage = parts.joined(separator: "；") + "。"
         bulkProblem = stopped || failed > 0
         bulkRunning = false
+    }
+
+    private struct BulkTally {
+        var updated = 0
+        var failed = 0
+        var finished = 0
+        var stopped = false
+    }
+
+    @ObservationIgnored private var bulkQueue: [String] = []
+    @ObservationIgnored private var bulkTally = BulkTally()
+
+    /// 「全部更新」的一个并行工作者：从队列取下一个插件更新，直到队列取空或出现结果未知。
+    private func bulkWorker(model: AppModel, total: Int, limit: Int) async {
+        while !bulkTally.stopped, !bulkQueue.isEmpty {
+            let key = bulkQueue.removeFirst()
+            let phase = await update(key, model: model, reload: false)
+            bulkTally.finished += 1
+            switch phase {
+            case .succeeded?: bulkTally.updated += 1
+            case .uncertain?: bulkTally.stopped = true
+            default: bulkTally.failed += 1
+            }
+            bulkMessage = "已完成 \(bulkTally.finished) / \(total) 个（同时 \(limit) 个）…"
+        }
     }
 
     func checkUpdates(model: AppModel) async {
@@ -932,6 +961,8 @@ struct PluginDiscoverView: View {
     @State private var category = "all"
     @State private var route: PluginStoreRoute?
     @State private var confirmEntryID: String?
+    /// 插件市场（服务器 0.113.0+）的可更新数；旧服务器没有接口时为 nil，入口仍显示，点进去提示更新服务器。
+    @State private var marketUpdates: Int?
 
     private static let categoryOrder = ["interactive", "automation", "utility", "other"]
     private var categories: [String] {
@@ -960,6 +991,7 @@ struct PluginDiscoverView: View {
     var body: some View {
         List {
             PluginStoreHeaderSection(header: header)
+            marketSection
             if let error = store.catalogError {
                 Section { NoticeView(title: "插件仓库读取失败", message: error) }
             }
@@ -1001,8 +1033,28 @@ struct PluginDiscoverView: View {
             await store.load(model: model)
         }
         .task { if !store.catalogLoaded { await store.loadCatalog(model: model) } }
+        .task { await loadMarketBadge() }
         .navigationDestination(item: $route) { PluginStoreDestination(route: $0, store: store) }
         .accessibilityIdentifier("plugins.discover.screen")
+    }
+
+    private var marketSection: some View {
+        Section {
+            NavigationLink {
+                PluginMarketView()
+            } label: {
+                Label("插件市场", systemImage: "storefront")
+            }
+            .badge(marketUpdates ?? 0)
+            .accessibilityIdentifier("plugins.market.entry")
+        } footer: {
+            Text("官方与自定义来源、一键全部更新、固定版本、自动更新与更新后自动回滚。")
+        }
+    }
+
+    private func loadMarketBadge() async {
+        guard let catalog = try? await model.request(path: "/api/plugin-market/catalog") else { return }
+        marketUpdates = catalog["updates_available"]?.intValue
     }
 
     private var categorySection: some View {

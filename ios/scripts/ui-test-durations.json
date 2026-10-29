@@ -53,6 +53,8 @@
   "WorkspaceUITests/testPluginConfigSubpageReturnsToConfigurationTab": 20,
   "WorkspaceUITests/testPluginConfigUsesNativeProviderAndModelPickers": 20,
   "WorkspaceUITests/testPluginDeclarativeWidgetsAndCards": 75,
+  "WorkspaceUITests/testPluginMarketAsksToUpdateOldServer": 30,
+  "WorkspaceUITests/testPluginMarketUpdatesAllAndManagesSources": 75,
   "WorkspaceUITests/testPluginPageBridgeAndMenuAction": 60,
   "WorkspaceUITests/testPluginProductPageShowsInfoWhatsNewAndConfirmsUninstall": 30,
   "WorkspaceUITests/testPluginRulesFormVisibleIfAndDryRun": 60,

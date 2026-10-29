@@ -183,6 +183,70 @@ const ledgerCompensationFixture = {
   updated_at: "2026-07-21T08:01:00Z",
 };
 
+export const pluginMarketItemFixture = (overrides: Record<string, unknown> = {}) => ({
+  id: "official:game24",
+  key: "game24",
+  name: { zh: "24 点", en: "game24" },
+  kind: "interactive",
+  icon: "🎮",
+  summary: "群内 24 点小游戏。",
+  version: "1.1.18",
+  author: "Anoyou",
+  min_telepilot_version: "0.72.0-beta.2",
+  plugin_api: null,
+  permissions: ["send_message"],
+  reads: [],
+  tags: ["game"],
+  channels: { stable: "main" },
+  path: "game24",
+  repository: "https://github.com/Anoyou/telebot-plugins.git",
+  trust: "official",
+  source_id: "official",
+  source_name: "官方插件库",
+  compatible: true,
+  incompatible_reason: null,
+  installed: null,
+  update_available: false,
+  pinned_version: null,
+  auto_update: false,
+  rollout: null,
+  ...overrides,
+});
+
+export const pluginMarketCatalogFixture = ({
+  items,
+  updates,
+  rollouts = [],
+}: {
+  items: Array<Record<string, unknown>>;
+  updates: number;
+  rollouts?: Array<Record<string, unknown>>;
+}) => ({
+  server_version: APP_VERSION,
+  plugin_api: "1.6",
+  sources: [
+    {
+      id: "official",
+      name: "官方插件库",
+      url: "https://raw.githubusercontent.com/Anoyou/telebot-plugins/main/registry.json",
+      trust: "official",
+      enabled: true,
+      auto_update: false,
+      builtin: true,
+      available: true,
+      status: "ok",
+      plugin_count: items.length,
+      fetched_at: "2026-10-30T03:00:00+00:00",
+      error: null,
+      fallback: false,
+    },
+  ],
+  items,
+  updates_available: updates,
+  settings: { update_concurrency: 3, health_window_minutes: 10, pinned: {} },
+  rollouts,
+});
+
 export const providerFixtures = [
   {
     id: 2,
@@ -330,6 +394,8 @@ function jsonResponse(pathname: string): unknown | undefined {
   const pluginStatsMatch = pathname.match(/^\/api\/plugins\/([^/]+)\/stats$/);
   if (pluginStatsMatch) return pluginHookStatsFixture(decodeURIComponent(pluginStatsMatch[1]));
   if (pathname === "/api/remote-plugins") return [];
+  // 插件市场（0.113.0）：插件中心顶部“插件市场”页签的更新角标读这里；基线没有可更新插件（不显示角标）。
+  if (pathname === "/api/plugin-market/catalog") return pluginMarketCatalogFixture({ items: [], updates: 0 });
   if (pathname === "/api/system/network") return { online: true };
   if (pathname === "/api/system/version") return { version: APP_VERSION };
   // 自动检查更新状态：基线固定为"尚未执行过自动检查"，避免顶栏角标让截图产生随机差异。

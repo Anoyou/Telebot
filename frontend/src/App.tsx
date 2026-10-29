@@ -32,6 +32,7 @@ const SettingsIndex = lazy(() => import("@/pages/Settings/Index").then(m => ({ d
 const PluginsHome = lazy(() => import("@/pages/Plugins/Home").then(m => ({ default: m.PluginsHome })));
 const OperationsWorkspaceRoutes = lazy(() => import("@/pages/Operations/Index").then(m => ({ default: m.OperationsWorkspaceRoutes })));
 const MessageTemplateLabPage = lazy(() => import("@/pages/Plugins/MessageTemplateLab").then(m => ({ default: m.MessageTemplateLabPage })));
+const PluginsMarketPage = lazy(() => import("@/pages/Plugins/Market").then(m => ({ default: m.PluginsMarketPage })));
 const PluginsManagePage = lazy(() => import("@/pages/Extensions").then(m => ({ default: m.Extensions })));
 const InteractionIndex = lazy(() => import("@/pages/Interaction/Index").then(m => ({ default: m.InteractionIndex })));
 const LedgerPage = lazy(() => import("@/pages/Ledger").then(m => ({ default: m.LedgerPage })));
@@ -272,6 +273,14 @@ export default function App() {
             element={
               <Suspense fallback={<PageFallback />}>
                 <MessageTemplateLabPage />
+              </Suspense>
+            }
+          />
+          <Route
+            path="plugins/market"
+            element={
+              <Suspense fallback={<PageFallback />}>
+                <PluginsMarketPage />
               </Suspense>
             }
           />

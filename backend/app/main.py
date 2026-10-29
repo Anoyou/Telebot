@@ -46,6 +46,7 @@ from .services import (
     notify_service,
     platform_capabilities,
     plugin_config_action_jobs,
+    plugin_market_service,
     remote_plugin_service,
     runtime_profile_service,
 )
@@ -291,6 +292,7 @@ async def lifespan(app: FastAPI):
         name="system-agent-secret-cleanup",
     )
     remote_plugin_update_task = asyncio.create_task(remote_plugin_service.auto_update_check_loop())
+    plugin_market_task = asyncio.create_task(plugin_market_service.market_loop(), name="plugin-market")
     app_update_check_task = asyncio.create_task(
         auto_update_check_loop(),
         name="app-update-check",
@@ -414,6 +416,7 @@ async def lifespan(app: FastAPI):
         cleanup_task.cancel()
         agent_secret_cleanup_task.cancel()
         remote_plugin_update_task.cancel()
+        plugin_market_task.cancel()
         app_update_check_task.cancel()
         try:
             await cleanup_task
@@ -425,6 +428,10 @@ async def lifespan(app: FastAPI):
             pass
         try:
             await remote_plugin_update_task
+        except (asyncio.CancelledError, Exception):  # noqa: BLE001
+            pass
+        try:
+            await plugin_market_task
         except (asyncio.CancelledError, Exception):  # noqa: BLE001
             pass
         try:
@@ -724,6 +731,11 @@ app.include_router(remote_plugin_api.router)
 from .api import plugin_repo as plugin_repo_api  # noqa: E402
 
 app.include_router(plugin_repo_api.router)
+
+# 插件市场（registry 索引、多来源、并发更新、自动更新与健康回滚，0.113.0）
+from .api import plugin_market as plugin_market_api  # noqa: E402
+
+app.include_router(plugin_market_api.router)
 
 # 所有路由注册完成后再安装内部契约，确保 OpenAPI 快照覆盖完整 API。
 from .openapi_contract import install_openapi_contract  # noqa: E402
