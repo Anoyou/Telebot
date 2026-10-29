@@ -51,6 +51,8 @@ struct AccountManagementView: View {
             }
             // account.detail：在该账号启用的插件声明的原生卡片（没有时不显示）。
             PluginCardSections(slot: "account.detail", accountID: id)
+            // 插件自带页面与菜单项（ui.pages / ui.actions）：没有声明时不显示。
+            PluginPageEntriesSection(menu: "account.detail", accountID: id)
             Section {
                 BotGuestModeStatusRows(accountID: id)
             } header: {

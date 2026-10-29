@@ -316,6 +316,7 @@ actor FixtureService: AppServing {
         if clean == "/api/plugins/auto_reply/config", method == "GET" {
             return ["plugin_key": "auto_reply", "config": ["max_per_hour": 40], "global_config": ["max_per_hour": 40]]
         }
+        if let value = pluginPagesFixture(clean, method: method, path: path, body: body) { return value }
         if let value = pluginUIFixture(clean, method: method, path: path) { return value }
         if let value = ruleGalleryFixture(clean, method: method, body: body) { return value }
         if clean.firstMatch(of: #/^\/api\/accounts\/\d+\/features\/[^\/]+\/config$/#) != nil {
@@ -626,8 +627,29 @@ actor FixtureService: AppServing {
     }
 
     func download(path: String, method: String, body: JSONValue?) async throws -> Data {
-        try await request(path: path, method: method, body: body).data()
+        if path.hasPrefix("/api/plugin-ui/page-assets/fixture-page-token/") { return Data(Self.pluginPageHTML.utf8) }
+        return try await request(path: path, method: method, body: body).data()
     }
+
+    /// 插件自带页面示例（与服务器注入的 Bridge 脚本同一协议；fixture 里没有服务器，这里内联一份精简版）。
+    static let pluginPageHTML = #"""
+    <!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'none'">
+    <script>(function(){var p={},s=0;var wk=window.webkit&&window.webkit.messageHandlers&&window.webkit.messageHandlers.telepilot;
+    window.__telepilotReceive=function(m){if(!m||m.tp!=="telepilot")return;if(m.event){document.documentElement.setAttribute("data-theme",m.data.scheme);return;}
+    var q=p[m.id];if(!q)return;delete p[m.id];if(m.ok){q.resolve(m.result);}else{var e=new Error(m.error&&m.error.message);e.code=m.error&&m.error.code;q.reject(e);}};
+    function call(method,params){return new Promise(function(resolve,reject){var id="r"+(++s);p[id]={resolve:resolve,reject:reject};wk.postMessage({tp:"telepilot",v:1,id:id,method:method,params:params||{}});});}
+    window.telepilot={ready:function(){return call("ready");},theme:function(){return call("theme.get");},config:function(){return call("config.get");},action:function(id,payload){return call("action.invoke",{id:id,payload:payload||{}});}};})();</script>
+    <style>body{font:17px -apple-system,sans-serif;padding:16px}button{font:inherit;min-height:44px;padding:8px 14px}</style></head>
+    <body><p id="greeting">正在连接宿主…</p><p id="theme"></p><p id="isolation"></p><button id="run" type="button">调用插件操作</button><p id="result"></p>
+    <script>(async function(){var tp=window.telepilot;
+    try{await fetch("https://example.com/");document.getElementById("isolation").textContent="可以联网";}catch(e){document.getElementById("isolation").textContent="联网被阻止";}
+    var info=await tp.ready();var theme=await tp.theme();var cfg=await tp.config();
+    document.getElementById("greeting").textContent=cfg.config.greeting+" · "+info.plugin_key;
+    document.getElementById("theme").textContent="主题："+theme.scheme;
+    document.getElementById("run").addEventListener("click",async function(){try{var r=await tp.action("summarize",{});document.getElementById("result").textContent=r.message;}catch(e){document.getElementById("result").textContent="失败："+e.code;}});})();</script>
+    </body></html>
+    """#
 
     /// `--ui-test-run-phases`：任务、排队与进度流。只返回服务器真实会给的字段（status／phase／queue_ahead、事件类型）。
     private func runPhaseResponse(_ clean: String, path: String, method: String, body: JSONValue?) -> JSONValue? {
@@ -941,6 +963,40 @@ actor FixtureService: AppServing {
             let logs: JSONValue = [["step": "scope", "msg": .string("会话类型：" + chatType)], ["step": "result", "msg": verdict]]
             let detail: JSONValue = ["feature": "rule_gallery", "rule_id": .integer(Int64(match.1) ?? 0), "protocol": "dry_run_rule", "logs": logs]
             return ["matched": .bool(matched), "output": output, "detail": detail]
+        }
+        return nil
+    }
+
+    /// 插件自带页面与菜单项（Plugin API 1.4）：widget_gallery 在插件详情声明一个页面和两个菜单项。
+    private func pluginPagesFixture(_ clean: String, method: String, path: String, body: JSONValue?) -> JSONValue? {
+        guard clean.hasPrefix("/api/plugin-ui/entries") || clean.hasPrefix("/api/plugin-ui/pages/") || clean.hasPrefix("/api/plugin-ui/actions/") else { return nil }
+        if clean == "/api/plugin-ui/entries", method == "GET" {
+            let query = URLComponents(string: path)?.queryItems ?? []
+            let menu = query.first { $0.name == "menu" }?.value ?? ""
+            let plugin = query.first { $0.name == "plugin_key" }?.value
+            guard menu == "plugin.detail", plugin == "widget_gallery" else { return ["menu": .string(menu), "pages": [], "actions": [], "warnings": []] }
+            return ["menu": "plugin.detail", "warnings": [],
+                    "pages": [["plugin_key": "widget_gallery", "plugin_name": "控件示例", "page_id": "panel", "title": "控件面板", "subtitle": "插件自带页面示例",
+                               "bridge": ["config.read", "actions.invoke"]]],
+                    "actions": [["plugin_key": "widget_gallery", "plugin_name": "控件示例", "action_id": "summarize", "menu": "plugin.detail",
+                                 "title": "生成摘要", "confirm": "生成一份今日摘要？", "destructive": false, "page_id": nil]]]
+        }
+        if clean == "/api/plugin-ui/pages/widget_gallery/panel/session", method == "POST" {
+            return ["plugin_key": "widget_gallery", "page_id": "panel", "title": "控件面板", "token": "fixture-page-token", "entry": "ui/index.html",
+                    "url": "/api/plugin-ui/page-assets/fixture-page-token/ui/index.html", "expires_at": 4_102_444_800,
+                    "bridge": ["config.read", "actions.invoke"], "protocol": 1,
+                    "csp": "default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'none'"]
+        }
+        if clean == "/api/plugin-ui/pages/widget_gallery/panel/bridge", method == "POST" {
+            switch body?["method"]?.stringValue {
+            case "ready": return ["ok": true, "result": ["plugin_key": "widget_gallery", "page_id": "panel", "protocol": 1]]
+            case "config.get": return ["ok": true, "result": ["scope": "account", "config": ["greeting": "你好"]]]
+            case "action.invoke": return ["ok": true, "result": ["ok": true, "message": "已完成：示例摘要"]]
+            default: return ["ok": false, "error": ["code": "BRIDGE_METHOD_UNKNOWN", "message": "未知方法"]]
+            }
+        }
+        if clean == "/api/plugin-ui/actions/widget_gallery/summarize", method == "POST" {
+            return ["ok": true, "message": "摘要已生成", "refresh": true, "data": nil]
         }
         return nil
     }
