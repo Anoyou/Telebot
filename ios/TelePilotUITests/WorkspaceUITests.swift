@@ -400,8 +400,12 @@ final class WorkspaceUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["停止什么"].exists)
         XCTAssertTrue(app.staticTexts["不影响"].exists)
         XCTAssertTrue(app.staticTexts["如何恢复"].exists)
-        // popover 而不是 sheet：点 popover 外（导航栏区域）收起
-        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.06)).tap()
+        // popover 而不是 sheet：点 popover 外收起。状态栏区域的点按不会传给 popover 的收起手势，
+        // 所以按 popover 实际位置选一处内容区空白（在它上方或下方）。
+        let window = app.windows.firstMatch.frame
+        let popover = details.frame
+        let outsideY: CGFloat = popover.minY > window.height * 0.35 ? 0.2 : 0.9
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: outsideY)).tap()
         XCTAssertTrue(details.waitForNonExistence(timeout: 5))
 
         settings.tap()
