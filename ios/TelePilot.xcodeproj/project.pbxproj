@@ -31,6 +31,8 @@
 		7901764592C78E770F0844FC /* MoreView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 128DDC606C3A511DB8D00C74 /* MoreView.swift */; };
 		4723C566E9CA12B1FFA659B3 /* EmergencyStopSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8CA613B49564EAA36E5FAC1C /* EmergencyStopSection.swift */; };
 		2A27079EEB316EFE7A1054CD /* PluginPages.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFA4832262FFA5371E6F02CE /* PluginPages.swift */; };
+		05FA4FCE593C8D60A4D597D4 /* PlatformTreeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E564110517C4A539271891C8 /* PlatformTreeView.swift */; };
+		9A0D87B26356B975DE7B6046 /* InteractionCenterView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3FE7D3593571A9978C5D030B /* InteractionCenterView.swift */; };
 		79B21DFFE85F22B61B1D26CA /* AILiveness.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C32028841D2B2274B6BFD3C /* AILiveness.swift */; };
 		88885830FD6DBAA8702EB75E /* TelePilotApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7345E48AE830986E3B98514 /* TelePilotApp.swift */; };
 		8BD74933286E7D1248175ECE /* OverviewCustomization.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1129B1323A246221ADC267A8 /* OverviewCustomization.swift */; };
@@ -88,6 +90,8 @@
 		128DDC606C3A511DB8D00C74 /* MoreView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MoreView.swift; sourceTree = "<group>"; };
 		8CA613B49564EAA36E5FAC1C /* EmergencyStopSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmergencyStopSection.swift; sourceTree = "<group>"; };
 		DFA4832262FFA5371E6F02CE /* PluginPages.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PluginPages.swift; sourceTree = "<group>"; };
+		E564110517C4A539271891C8 /* PlatformTreeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlatformTreeView.swift; sourceTree = "<group>"; };
+		3FE7D3593571A9978C5D030B /* InteractionCenterView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InteractionCenterView.swift; sourceTree = "<group>"; };
 		164FB264CCA22ACBC35826C8 /* AppServing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppServing.swift; sourceTree = "<group>"; };
 		18587ABAD612072898FB2976 /* TelePilotUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TelePilotUITests.swift; sourceTree = "<group>"; };
 		1E32918F7013C607C4AB25DC /* AccountsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountsView.swift; sourceTree = "<group>"; };
@@ -207,6 +211,8 @@
 				2EFDEDF45ECBEE066D2B91CC /* ManagementView.swift */,
 				8CA613B49564EAA36E5FAC1C /* EmergencyStopSection.swift */,
 				DFA4832262FFA5371E6F02CE /* PluginPages.swift */,
+				E564110517C4A539271891C8 /* PlatformTreeView.swift */,
+				3FE7D3593571A9978C5D030B /* InteractionCenterView.swift */,
 				128DDC606C3A511DB8D00C74 /* MoreView.swift */,
 				4BB022269DBE2DE7F5E3C7A1 /* OpsSupport.swift */,
 				DB2CCF9898F9CE1A2073AFA2 /* OverviewComponents.swift */,
@@ -407,6 +413,8 @@
 				6831F006FD21A32133940BE3 /* ManagementView.swift in Sources */,
 				4723C566E9CA12B1FFA659B3 /* EmergencyStopSection.swift in Sources */,
 				2A27079EEB316EFE7A1054CD /* PluginPages.swift in Sources */,
+				05FA4FCE593C8D60A4D597D4 /* PlatformTreeView.swift in Sources */,
+				9A0D87B26356B975DE7B6046 /* InteractionCenterView.swift in Sources */,
 				7901764592C78E770F0844FC /* MoreView.swift in Sources */,
 				C729DBBC8C4DCCC0301B973D /* OpsSupport.swift in Sources */,
 				702EA3E96F61E657A0C12224 /* OverviewComponents.swift in Sources */,
@@ -514,7 +522,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
-				MARKETING_VERSION = 0.15.0;
+				MARKETING_VERSION = 0.16.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -603,7 +611,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
-				MARKETING_VERSION = 0.15.0;
+				MARKETING_VERSION = 0.16.0;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;

@@ -25,6 +25,9 @@
 
 ## [Unreleased]
 
+### iOS App
+- **iOS 0.16.0**：新增原生「交互中心」（更多 › 管理，对齐 Web `/interaction`：按账号查看交互 Bot 运行状态，改交互总闸与 Token，规则的启用 / 停用 / 增删与原生编辑，高级里改可信通知 Bot、玩法查询指令与通知模板；读写 `GET`／`PUT /api/accounts/{id}/interaction-bot`，每次保存带完整 `rules`、规则以服务器原始对象为底保留未编辑字段与 `module_config`，不自动重试）；服务器设置「平台运行树」改为原生「能力与插件树」（`/api/platform/tree` 主干 / 直接接入 / 能力分支可展开，可切换账号范围，对齐 Web `PlatformTreeView`）；修复「App 设置」图标（`iphone.gear` 不存在，改 `apps.iphone`），新增 UI 测试扫描源码里全部 SF Symbol 名并逐个 `UIImage(systemName:)` 校验；紧急停止说明 ⓘ 前置、文案缩短为一行。仅 iOS，服务器版本不变，旧服务器缺接口时页面提示更新。
+
 ## [0.112.0-beta.3] - 2026-10-30 · patch（补丁预发布） · 插件平台化 P4b 收尾：算数题 / 找骰子 / 猜数字自带入口声明（legacy_entry_keys，Plugin API 1.6）
 
 ### 插件平台：P4b 收尾——算数题 / 找骰子 / 猜数字自带入口声明

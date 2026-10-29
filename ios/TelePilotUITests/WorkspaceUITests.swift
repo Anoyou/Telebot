@@ -381,19 +381,25 @@ final class WorkspaceUITests: XCTestCase {
         XCTAssertFalse(app.buttons["plugin.automation.jobs"].exists)
     }
 
-    /// iOS 0.15.0 命名：「更多」里「App 设置」（iphone.gear）、管理模块「服务器设置」（server.rack）；
-    /// 紧急停止说明精简为一行，点 info 按钮在原生 popover 里看完整三段。
+    /// iOS 0.15.0 命名：「更多」里「App 设置」（0.16.0 起图标 apps.iphone）、管理模块「服务器设置」（server.rack）；
+    /// 0.16.0：紧急停止说明 ⓘ 前置、文字缩短到一行，点 ⓘ 在原生 popover 里看完整三段。
     func testRenamedSettingsAndEmergencyStopInfo() {
         let app = launch()
         app.tabBars.buttons["更多"].tap()
         let settings = app.buttons["more.settings"]
         XCTAssertTrue(settings.waitForExistence(timeout: 10))
         XCTAssertTrue(settings.label.contains("App 设置"), settings.label)
-        XCTAssertTrue(app.staticTexts["停止所有账号与 Bot 的消息处理，数据和管理台不受影响。"].exists)
+        let footer = app.staticTexts["more.emergencyStop.footer"]
+        XCTAssertTrue(footer.waitForExistence(timeout: 5))
+        XCTAssertEqual(footer.label, "停止全部消息处理，数据和管理台不受影响")
         XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "停止什么：")).firstMatch.exists)
         let info = app.buttons["more.emergencyStop.info"]
         XCTAssertTrue(info.exists)
         XCTAssertEqual(info.label, "紧急停止说明")
+        // ⓘ 在说明文字左边，说明只占一行（footnote 单行约 18pt，两行会超过 30pt）。
+        XCTAssertLessThanOrEqual(info.frame.midX, footer.frame.minX, "ⓘ 应在说明文字左边")
+        XCTAssertLessThan(footer.frame.height, 28, "说明应在一行内放下：\(footer.frame)")
+        XCTAssertLessThanOrEqual(footer.frame.maxX, app.windows.firstMatch.frame.maxX - 8)
         info.tap()
         let details = app.descendants(matching: .any)["more.emergencyStop.details"].firstMatch
         XCTAssertTrue(details.waitForExistence(timeout: 5))

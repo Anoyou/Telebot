@@ -33,6 +33,8 @@ actor FixtureService: AppServing {
     private let accessRequired = ProcessInfo.processInfo.arguments.contains("--ui-test-cf-access")
     /// 已删除的助手会话：列表不再返回，读取返回 404。
     private var deletedSessions: Set<String> = []
+    /// 交互中心界面测试（0.16.0）：按账号保存的交互配置，PUT 按服务器语义合并（Token 只记“已配置”）。
+    private var interactionConfigs: [Int: JSONValue] = [:]
     /// 运行阶段与排队消息界面测试（`--ui-test-run-phases`）：第一条消息开始一个一直执行中的任务，
     /// 进度流依次给出 run_started → provider_selected → model_attempt → tool_started；执行中再发的消息进入排队。
     private let runPhases = ProcessInfo.processInfo.arguments.contains("--ui-test-run-phases")
@@ -353,6 +355,8 @@ actor FixtureService: AppServing {
                      "update_available": .bool(contentAssistantVersion != "2.2.0"), "last_update_check_at": .string(Self.isoDate(hoursAgo: 3)),
                      "source_type": "remote", "source_label": "个人插件仓库", "is_builtin": false, "signature_ok": true,
                      "orphan": false, "permissions": ["call_llm"],
+                     "interaction_entries": [["key": "ask", "title": "AI 答疑", "description": "群成员发关键词后由 AI 回答。",
+                                              "session_scope": "user", "participant_policy": "open_race"]],
                      // 带分组、声明顺序与可选字段：只有“目标群组 ID”真正必填。
                      "config_schema": ["type": "object", "properties": [
                         "telepilot_provider": ["type": "string", "title": "固定 TelePilot Provider（可选）", "default": "", "x-ui-widget": "llm-provider-select",
@@ -546,6 +550,7 @@ actor FixtureService: AppServing {
                     "recommended_api_format": "responses", "recommended_protocol_profile": "standard",
                     "recommended_client_identity_profile": "openai_sdk", "recommended_web_search_api_format": "responses"]
         }
+        if let value = interactionFixture(clean, method: method, body: body) { return value }
         if clean == "/api/system/kill-switch" {
             if method == "POST" {
                 let value: JSONValue = ["enabled": .bool(body?["enabled"]?.boolValue ?? false)]
@@ -966,6 +971,80 @@ actor FixtureService: AppServing {
         }
         return nil
     }
+
+    /// 交互中心与能力与插件树（0.16.0）。
+    private func interactionFixture(_ clean: String, method: String, body: JSONValue?) -> JSONValue? {
+        if clean == "/api/platform/tree" { return Self.platformTreeFixture }
+        // 会话白名单（ignored-peers）沿用 pluginUIFixture 里的「测试群 A／B」。
+        guard let match = clean.firstMatch(of: #/^\/api\/accounts\/(\d+)\/interaction-bot$/#) else { return nil }
+        let accountID = Int(match.1) ?? 1
+        var current = (interactionConfigs[accountID] ?? Self.interactionConfigFixture(accountID)).objectValue ?? [:]
+        if method == "PUT", let patch = body?.objectValue {
+            if patch["rules"] == nil { current["rules"] = [] }
+            if patch["clear_interaction_bot_token"]?.boolValue == true {
+                current["has_interaction_bot_token"] = false
+                current["interaction_bot_username"] = nil
+            }
+            if let token = patch["interaction_bot_token"]?.stringValue, !token.isEmpty {
+                current["has_interaction_bot_token"] = true
+                current["interaction_bot_username"] = "fixture_new_bot"
+            }
+            for (key, value) in patch where !["interaction_bot_token", "clear_interaction_bot_token"].contains(key) { current[key] = value }
+            current["interaction_running"] = .bool((current["enabled"]?.boolValue ?? false) && (current["has_interaction_bot_token"]?.boolValue ?? false))
+            interactionConfigs[accountID] = .object(current)
+        }
+        return .object(current)
+    }
+
+    static func interactionConfigFixture(_ accountID: Int) -> JSONValue {
+        guard accountID == 1 else {
+            return ["enabled": false, "has_interaction_bot_token": false, "interaction_running": false, "chat_ids": [], "rules": [],
+                    "trigger_mode": "payment", "trigger_texts": ["转账成功"], "action": "notice", "trusted_bot_ids": [],
+                    "query_commands": ["。玩法"], "polling_dlq_count": 0]
+        }
+        return [
+            "enabled": true, "has_interaction_bot_token": true, "interaction_bot_username": "telepilot_play_bot",
+            "interaction_running": true, "interaction_runtime_status": "running", "interaction_last_error": nil,
+            "chat_id": -1001234567890, "chat_ids": [-1001234567890], "trusted_bot_ids": [777000], "trusted_bot_id": 777000,
+            "polling_dlq_count": 0,
+            "interaction_chat_memberships": [["chat_id": -1001234567890, "status": "joined"],
+                                             ["chat_id": -1009876543210, "status": "not_joined", "detail": "交互 Bot 还没有加入这个群"]],
+            "query_commands": ["。玩法", "。联动玩法"], "query_response_template": "<b>当前可用联动玩法</b>\n{items}",
+            "query_item_template": "• {name}", "query_empty_message": "当前没有可用玩法。",
+            "transfer_notice_template": "收到 {amount}", "debit_notice_template": "扣除 {amount}",
+            "rules": [
+                ["id": "rule-ask", "name": "AI 答疑", "enabled": true, "chat_ids": [-1001234567890], "trigger_mode": "keyword",
+                 "trigger_texts": ["问问"], "module_start_keywords": [], "action": "module", "module_key": "content_assistant",
+                 "module_action": "ask", "module_session_scope": "user", "participant_policy": "open_race",
+                 "module_config": ["max_tokens": 600], "math_prize": 123, "valid_seconds": 600, "concurrency": "user",
+                 "amount_match_mode": "eq", "response_template": "收到问题，正在回答。"],
+                ["id": "rule-notice", "name": "转账通知", "enabled": false, "chat_ids": [], "trigger_mode": "payment",
+                 "trigger_texts": ["转账成功"], "action": "notice", "math_prize": 123, "valid_seconds": 600, "concurrency": "chat",
+                 "amount_match_mode": "eq", "response_template": "已收到 {payer_name} 给 {receiver_name} 的转账 {amount}。"]
+            ]
+        ]
+    }
+
+    static let platformTreeFixture: JSONValue = [
+        "trunk": [
+            "userbot": ["workers": [["account_id": 1, "pid": 4242, "alive": true, "desired": "running", "fail_count": 0, "queued": false, "starting": false],
+                                    ["account_id": 2, "pid": nil, "alive": false, "desired": "running", "fail_count": 2, "queued": true, "starting": false]],
+                        "total": 2, "alive": 1],
+            "kill_switch": false, "current_profile": "production"
+        ],
+        "branches": [
+            "ai": ["state": "ready", "desired": true, "forced_off": false, "demanded_by": ["content_assistant"], "can_turn_off": false],
+            "interaction_bot": ["state": "ready", "desired": true, "forced_off": false, "demanded_by": ["content_assistant"], "can_turn_off": false],
+            "webhooks": ["state": "stopped", "desired": false, "forced_off": false, "demanded_by": [], "can_turn_off": false],
+            "ledger": ["state": "ready", "desired": true, "forced_off": false, "demanded_by": [], "can_turn_off": true],
+            "dispatch_debug": ["state": "failed", "desired": true, "forced_off": true, "demanded_by": [], "can_turn_off": false]
+        ],
+        "leaves": [
+            ["key": "auto_reply", "attachment": "直通", "enabled": true, "requires": [], "warnings": [], "source_missing": false],
+            ["key": "content_assistant", "attachment": "交互", "enabled": true, "requires": ["ai", "interaction_bot"], "warnings": [], "source_missing": false],
+            ["key": "forward_guard", "attachment": "命令", "enabled": false, "requires": [], "warnings": ["插件来源目录不存在"], "source_missing": true]
+        ]
+    ]
 
     /// 插件自带页面与菜单项（Plugin API 1.4）：widget_gallery 在插件详情声明一个页面和两个菜单项。
     private func pluginPagesFixture(_ clean: String, method: String, path: String, body: JSONValue?) -> JSONValue? {

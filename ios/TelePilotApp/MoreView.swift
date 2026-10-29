@@ -51,7 +51,7 @@ struct MoreView: View {
                 }
                 .accessibilityIdentifier("more.accounts")
                 NavigationLink(value: MoreDestination.settings) {
-                    Label("App 设置", systemImage: "iphone.gear")
+                    Label("App 设置", systemImage: "apps.iphone")
                 }
                 .accessibilityIdentifier("more.settings")
             }
