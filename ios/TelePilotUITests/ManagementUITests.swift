@@ -348,7 +348,14 @@ final class ManagementUITests: XCTestCase {
         XCTAssertTrue(save.waitForExistence(timeout: 5))
         XCTAssertTrue(save.isEnabled, "修改后应能保存")
         save.tap()
-        XCTAssertTrue(app.descendants(matching: .any)["interaction.saved"].firstMatch.waitForExistence(timeout: 10))
+        // 保存结果显示在列表顶部，保存后列表会滚回顶部。
+        let saved = app.descendants(matching: .any)["interaction.saved"].firstMatch
+        let saveError = app.descendants(matching: .any)["interaction.saveError"].firstMatch
+        if !saved.waitForExistence(timeout: 10) {
+            for _ in 0..<4 where !(saved.exists || saveError.exists) { app.swipeDown() }
+        }
+        XCTAssertFalse(saveError.exists, saveError.exists ? saveError.label : "")
+        XCTAssertTrue(saved.exists, "保存后应显示成功结果")
         XCTAssertFalse(save.isEnabled)
         XCTAssertTrue(notice.waitForExistence(timeout: 5))
         XCTAssertTrue(notice.label.contains("启用"), notice.label)

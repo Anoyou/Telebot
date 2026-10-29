@@ -28,11 +28,23 @@ struct InteractionCenterView: View {
     /// 已读取的账号。`.task` 在推入规则编辑页再返回时会重新触发，只在换账号（或尚未读到）时读取，
     /// 否则会用服务器值覆盖刚在编辑页里改的草稿。
     @State private var loadedAccountID: Int?
+    /// 每次保存（成功或失败）递增，用来把列表滚回顶部的结果行。
+    @State private var resultToken = 0
 
     private var dirty: Bool { serverValue != nil && draft != baseline }
     private var accountID: Int? { selectedAccountID ?? model.accounts.first?.id }
 
     var body: some View {
+        ScrollViewReader { proxy in
+            content
+                .onChange(of: resultToken) { _, _ in
+                    // 结果显示在列表顶部：保存时多半停在下方的规则区，滚回顶部让结果可见。
+                    withAnimation { proxy.scrollTo("interaction.result", anchor: .top) }
+                }
+        }
+    }
+
+    private var content: some View {
         List {
             if model.accounts.isEmpty {
                 Section {
@@ -45,11 +57,13 @@ struct InteractionCenterView: View {
                     Section {
                         Label(saveError, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.red)
                             .accessibilityIdentifier("interaction.saveError")
+                            .id("interaction.result")
                     }
                 } else if let saveMessage {
                     Section {
                         Label(saveMessage, systemImage: "checkmark.circle.fill").foregroundStyle(.green)
                             .accessibilityIdentifier("interaction.saved")
+                            .id("interaction.result")
                     }
                 }
                 if let serverValue {
@@ -167,8 +181,8 @@ struct InteractionCenterView: View {
                 } label: {
                     let joined = memberships.filter { $0["status"]?.stringValue == "joined" }.count
                     Label("Bot 入群情况 · \(joined)/\(memberships.count) 已加入", systemImage: "person.2")
+                        .accessibilityIdentifier("interaction.memberships")
                 }
-                .accessibilityIdentifier("interaction.memberships")
             }
         } header: { Text("运行状态") } footer: {
             Text("状态取自服务器最近一次读取或保存的结果；保存后交互 Bot 会按新配置自动重启。")
@@ -327,6 +341,7 @@ struct InteractionCenterView: View {
 
     private func save() async {
         guard let id = accountID, let serverValue, !saving else { return }
+        defer { resultToken += 1 }
         let hasToken = (serverValue["has_interaction_bot_token"]?.boolValue ?? false) && !draft.clearToken
         let payload: JSONValue
         do {

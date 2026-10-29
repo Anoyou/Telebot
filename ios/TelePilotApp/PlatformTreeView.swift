@@ -83,6 +83,7 @@ struct PlatformTreeView: View {
                 }
                 ForEach(workers) { worker in workerRow(worker) }
             } label: {
+                // 标识放在标签上：挂在 DisclosureGroup 上会覆盖展开后每一行自己的标识。
                 LabeledContent {
                     Text("\(alive)/\(total) 在线").monospacedDigit().foregroundStyle(.secondary)
                 } label: {
@@ -92,7 +93,6 @@ struct PlatformTreeView: View {
                     }
                 }
             }
-            .accessibilityIdentifier("platformTree.workers")
             LabeledContent {
                 Text(tree.killSwitch ? "已拉闸" : "正常").foregroundStyle(tree.killSwitch ? Color.red : Color.secondary)
             } label: {
@@ -162,15 +162,15 @@ struct PlatformTreeView: View {
                     ForEach(hosted) { leaf in leafRow(leaf, host: key) }
                 } label: {
                     Label("接入的插件 · \(hosted.count) 个", systemImage: "puzzlepiece.extension")
+                        .accessibilityIdentifier("platformTree.branch.\(key).plugins")
                 }
-                .accessibilityIdentifier("platformTree.branch.\(key).plugins")
             } else if !callers.isEmpty {
                 DisclosureGroup(isExpanded: branchExpanded(key)) {
                     ForEach(callers) { leaf in leafRow(leaf, host: key) }
                 } label: {
                     Label("被 \(callers.count) 个插件调用", systemImage: "puzzlepiece.extension")
+                        .accessibilityIdentifier("platformTree.branch.\(key).plugins")
                 }
-                .accessibilityIdentifier("platformTree.branch.\(key).plugins")
             } else {
                 Text(branch.canTurnOff ? "当前无插件调用 · 可关闭" : "当前无插件调用").foregroundStyle(.secondary)
             }
