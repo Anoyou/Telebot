@@ -14868,6 +14868,64 @@
         "title": "PluginRepoPlugin",
         "type": "object"
       },
+      "PluginUIBridgeRequest": {
+        "properties": {
+          "account_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Account Id"
+          },
+          "method": {
+            "maxLength": 64,
+            "title": "Method",
+            "type": "string"
+          },
+          "params": {
+            "additionalProperties": true,
+            "title": "Params",
+            "type": "object"
+          }
+        },
+        "required": [
+          "method"
+        ],
+        "title": "PluginUIBridgeRequest",
+        "type": "object"
+      },
+      "PluginUIBridgeResponse": {
+        "properties": {
+          "error": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "ok": {
+            "default": true,
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "result": {
+            "title": "Result"
+          }
+        },
+        "title": "PluginUIBridgeResponse",
+        "type": "object"
+      },
       "PluginUICard": {
         "properties": {
           "blocks": {
@@ -15085,6 +15143,281 @@
           "slot"
         ],
         "title": "PluginUICardsResponse",
+        "type": "object"
+      },
+      "PluginUIEntriesResponse": {
+        "properties": {
+          "actions": {
+            "items": {
+              "$ref": "#/components/schemas/PluginUIMenuAction"
+            },
+            "title": "Actions",
+            "type": "array"
+          },
+          "menu": {
+            "title": "Menu",
+            "type": "string"
+          },
+          "pages": {
+            "items": {
+              "$ref": "#/components/schemas/PluginUIPageEntry"
+            },
+            "title": "Pages",
+            "type": "array"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "menu"
+        ],
+        "title": "PluginUIEntriesResponse",
+        "type": "object"
+      },
+      "PluginUIMenuAction": {
+        "properties": {
+          "action_id": {
+            "title": "Action Id",
+            "type": "string"
+          },
+          "confirm": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confirm"
+          },
+          "destructive": {
+            "default": false,
+            "title": "Destructive",
+            "type": "boolean"
+          },
+          "menu": {
+            "title": "Menu",
+            "type": "string"
+          },
+          "page_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Page Id"
+          },
+          "plugin_key": {
+            "title": "Plugin Key",
+            "type": "string"
+          },
+          "plugin_name": {
+            "title": "Plugin Name",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "plugin_key",
+          "plugin_name",
+          "action_id",
+          "menu",
+          "title"
+        ],
+        "title": "PluginUIMenuAction",
+        "type": "object"
+      },
+      "PluginUIMenuActionRequest": {
+        "properties": {
+          "account_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Account Id"
+          },
+          "menu": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Menu"
+          }
+        },
+        "title": "PluginUIMenuActionRequest",
+        "type": "object"
+      },
+      "PluginUIMenuActionResponse": {
+        "properties": {
+          "data": {
+            "title": "Data"
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message"
+          },
+          "ok": {
+            "default": true,
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "refresh": {
+            "default": true,
+            "title": "Refresh",
+            "type": "boolean"
+          }
+        },
+        "title": "PluginUIMenuActionResponse",
+        "type": "object"
+      },
+      "PluginUIPageEntry": {
+        "properties": {
+          "bridge": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Bridge",
+            "type": "array"
+          },
+          "page_id": {
+            "title": "Page Id",
+            "type": "string"
+          },
+          "plugin_key": {
+            "title": "Plugin Key",
+            "type": "string"
+          },
+          "plugin_name": {
+            "title": "Plugin Name",
+            "type": "string"
+          },
+          "subtitle": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subtitle"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "plugin_key",
+          "plugin_name",
+          "page_id",
+          "title"
+        ],
+        "title": "PluginUIPageEntry",
+        "type": "object"
+      },
+      "PluginUIPageSession": {
+        "properties": {
+          "bridge": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Bridge",
+            "type": "array"
+          },
+          "csp": {
+            "title": "Csp",
+            "type": "string"
+          },
+          "entry": {
+            "title": "Entry",
+            "type": "string"
+          },
+          "expires_at": {
+            "title": "Expires At",
+            "type": "integer"
+          },
+          "page_id": {
+            "title": "Page Id",
+            "type": "string"
+          },
+          "plugin_key": {
+            "title": "Plugin Key",
+            "type": "string"
+          },
+          "protocol": {
+            "default": 1,
+            "title": "Protocol",
+            "type": "integer"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "token": {
+            "title": "Token",
+            "type": "string"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "plugin_key",
+          "page_id",
+          "title",
+          "token",
+          "url",
+          "entry",
+          "expires_at",
+          "csp"
+        ],
+        "title": "PluginUIPageSession",
+        "type": "object"
+      },
+      "PluginUIPageSessionRequest": {
+        "properties": {
+          "account_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Account Id"
+          }
+        },
+        "title": "PluginUIPageSessionRequest",
         "type": "object"
       },
       "ProcessResource": {
@@ -40739,6 +41072,122 @@
         ]
       }
     },
+    "/api/plugin-ui/actions/{plugin_key}/{action_id}": {
+      "post": {
+        "description": "执行菜单项（插件 on_ui_action，10 秒，context.menu 为菜单位置）。不自动重试。",
+        "operationId": "run_plugin_ui_menu_action_api_plugin_ui_actions__plugin_key___action_id__post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "plugin_key",
+            "required": true,
+            "schema": {
+              "title": "Plugin Key",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "action_id",
+            "required": true,
+            "schema": {
+              "title": "Action Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "auth_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Auth Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PluginUIMenuActionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PluginUIMenuActionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "认证失败"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "CSRF 校验失败或权限不足"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "服务器内部错误"
+          }
+        },
+        "security": [
+          {
+            "AuthCookie": [],
+            "CsrfCookie": [],
+            "CsrfHeader": [],
+            "RequestedWith": []
+          }
+        ],
+        "summary": "Run Plugin Ui Menu Action",
+        "tags": [
+          "plugins"
+        ]
+      }
+    },
     "/api/plugin-ui/cards": {
       "get": {
         "description": "列出某个位置的插件卡片声明（不含数据，数据逐卡读取，互不影响）。",
@@ -41093,6 +41542,356 @@
           }
         ],
         "summary": "Read Plugin Ui Card",
+        "tags": [
+          "plugins"
+        ]
+      }
+    },
+    "/api/plugin-ui/entries": {
+      "get": {
+        "description": "插件详情 / 账号详情的「插件页面与操作」入口。插件没有声明 ui.pages / ui.actions 时返回空列表（不显示任何入口）。",
+        "operationId": "list_plugin_ui_entries_api_plugin_ui_entries_get",
+        "parameters": [
+          {
+            "description": "plugin.detail / account.detail",
+            "in": "query",
+            "name": "menu",
+            "required": true,
+            "schema": {
+              "description": "plugin.detail / account.detail",
+              "title": "Menu",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "plugin_key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Plugin Key"
+            }
+          },
+          {
+            "in": "query",
+            "name": "account_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Account Id"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "auth_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Auth Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PluginUIEntriesResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "认证失败"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "服务器内部错误"
+          }
+        },
+        "security": [
+          {
+            "AuthCookie": []
+          }
+        ],
+        "summary": "List Plugin Ui Entries",
+        "tags": [
+          "plugins"
+        ]
+      }
+    },
+    "/api/plugin-ui/pages/{plugin_key}/{page_id}/bridge": {
+      "post": {
+        "description": "页面 Bridge 请求（宿主客户端转发）。按页面声明的 bridge 权限逐次校验；失败以 ok=false 返回给页面。",
+        "operationId": "plugin_ui_page_bridge_api_plugin_ui_pages__plugin_key___page_id__bridge_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "plugin_key",
+            "required": true,
+            "schema": {
+              "title": "Plugin Key",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "page_id",
+            "required": true,
+            "schema": {
+              "title": "Page Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "auth_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Auth Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PluginUIBridgeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PluginUIBridgeResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "认证失败"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "CSRF 校验失败或权限不足"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "服务器内部错误"
+          }
+        },
+        "security": [
+          {
+            "AuthCookie": [],
+            "CsrfCookie": [],
+            "CsrfHeader": [],
+            "RequestedWith": []
+          }
+        ],
+        "summary": "Plugin Ui Page Bridge",
+        "tags": [
+          "plugins"
+        ]
+      }
+    },
+    "/api/plugin-ui/pages/{plugin_key}/{page_id}/session": {
+      "post": {
+        "description": "打开插件页面：换一个 1 小时有效的页面地址（签名 token，不含登录凭据）。",
+        "operationId": "open_plugin_ui_page_api_plugin_ui_pages__plugin_key___page_id__session_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "plugin_key",
+            "required": true,
+            "schema": {
+              "title": "Plugin Key",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "page_id",
+            "required": true,
+            "schema": {
+              "title": "Page Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "auth_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Auth Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PluginUIPageSessionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PluginUIPageSession"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "认证失败"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "CSRF 校验失败或权限不足"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "服务器内部错误"
+          }
+        },
+        "security": [
+          {
+            "AuthCookie": [],
+            "CsrfCookie": [],
+            "CsrfHeader": [],
+            "RequestedWith": []
+          }
+        ],
+        "summary": "Open Plugin Ui Page",
         "tags": [
           "plugins"
         ]

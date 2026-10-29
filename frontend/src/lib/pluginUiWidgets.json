@@ -1,6 +1,6 @@
 {
   "$comment": "TelePilot 插件声明式 UI 契约（规范来源）。Web ConfigDialog / PluginCards 与 iOS ManagementPluginConfigView / PluginCardsView 都据此实现并在单测中逐项校验；副本由 scripts/sync-plugin-ui-widgets.py 生成，不要手改副本。",
-  "contract_version": 2,
+  "contract_version": 3,
   "unknown_widget": {
     "policy": "readonly",
     "message": "此控件需要更新 App",
@@ -987,5 +987,78 @@
       "returns": "{matched: bool, output?: str, logs?: [{step, msg}]}",
       "summary": "模块级函数 dry_run_rule(config, sample)（可为 async）；sample = {message, chat_type, chat_id}；不得发送消息或改业务数据。未导出时回退旧版 _dry_run_match"
     }
+  },
+  "pages": {
+    "summary": "插件自带 HTML 页面（ui.pages）与菜单项（ui.actions），Plugin API 1.4 / 服务器 0.111.0 / iOS 0.15.0 起。全部可选：未声明时插件详情与账号详情不出现任何新入口。旧 App 不认识这些声明，直接忽略。",
+    "min_ios": "0.15.0",
+    "menus": [
+      {
+        "id": "plugin.detail",
+        "summary": "插件详情（Web 插件中心详情 / iOS 插件详情）的「插件页面与操作」分组"
+      },
+      {
+        "id": "account.detail",
+        "summary": "账号详情的「插件页面与操作」分组（只列在该账号启用的插件）"
+      }
+    ],
+    "page_fields": {
+      "id": "≤48 字符，字母数字与 _.-",
+      "title": "文本或 {zh, en}",
+      "subtitle": "可选",
+      "file": "插件目录内相对路径的 .html 文件",
+      "menus": "默认 [\"plugin.detail\"]",
+      "bridge": "Bridge 权限（默认空，只能 ready / theme.get）",
+      "actions": "页面可调用的 on_ui_action id 白名单（空 = 任意合法 id）"
+    },
+    "action_fields": {
+      "id": "≤48 字符",
+      "menu": "plugin.detail / account.detail（默认 plugin.detail）",
+      "title": "文本或 {zh, en}",
+      "confirm": "true 或确认文案",
+      "style": "destructive 可选",
+      "page": "可选：点击后打开这个页面，而不是调 on_ui_action"
+    },
+    "bridge_permissions": [
+      {
+        "id": "config.read",
+        "methods": [
+          "config.get"
+        ],
+        "summary": "读当前作用域（全局或账号）的插件配置；密钥字段（x-secret-list、format password/secret/token、敏感键名）一律去掉"
+      },
+      {
+        "id": "cards.read",
+        "methods": [
+          "card.data"
+        ],
+        "summary": "读本插件声明的卡片数据（与原生卡片同一取数通道，3 秒）"
+      },
+      {
+        "id": "actions.invoke",
+        "methods": [
+          "action.invoke"
+        ],
+        "summary": "调用本插件的 on_ui_action(ctx, id, context)（10 秒），context.page_id 为页面 id；不自动重试，有审计"
+      }
+    ],
+    "bridge": {
+      "protocol": 1,
+      "request": "{tp: \"telepilot\", v: 1, id, method, params}",
+      "response": "{tp: \"telepilot\", v: 1, id, ok, result | error: {code, message}}",
+      "event": "{tp: \"telepilot\", v: 1, event: \"theme\", data: {scheme: \"light\" | \"dark\"}}",
+      "always": [
+        "ready",
+        "theme.get"
+      ],
+      "timeout_ms": 15000,
+      "js": "window.telepilot：ready() / theme() / onTheme(cb) / config() / card(id) / action(id, payload)；宿主在页面 <head> 最前面注入"
+    },
+    "sandbox": {
+      "web": "iframe sandbox=\"allow-scripts\"（无 allow-same-origin：拿不到 Cookie / localStorage / 宿主 token）",
+      "ios": "WKWebView 非持久数据存储，内容规则屏蔽所有 http(s) 子资源，只允许 about: 与 tp-plugin: 导航，Bridge 走 WKScriptMessageHandler",
+      "csp": "default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; media-src 'self' data: blob:; connect-src 'none'; frame-src 'none'; worker-src 'none'; object-src 'none'; form-action 'none'; base-uri 'none'; frame-ancestors 'self'"
+    },
+    "session_ttl_seconds": 3600,
+    "max_file_bytes": 2097152
   }
 }

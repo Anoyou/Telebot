@@ -19,7 +19,7 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Awaitable, Callable, Iterable
+from collections.abc import Awaitable, Callable, Iterable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -67,7 +67,10 @@ HOST_RESOURCES: tuple[HostResource, ...] = (
         version=1,
         since=_SINCE,
         params=("enabled_only",),
-        summary="插件可用的模型清单（需 ai_text / ai_agent 权限）：[{provider_id, provider_name, provider, model, enabled, default, tags}]",
+        summary=(
+            "插件可用的模型清单（需 ai_text / ai_agent 权限）：[{provider_id, provider_name, provider, model, enabled, default, tags,"
+            " display_name, label, available, has_api_key, cost_tier, cost_tier_label}]；后 6 个字段 0.111.0 起（能力 ai.models.metadata）"
+        ),
     ),
     HostResource(
         name="chat.allowed",
@@ -82,6 +85,38 @@ HOST_RESOURCES: tuple[HostResource, ...] = (
         summary="本插件在当前账号的钩子统计（与 GET /api/plugins/{key}/stats 同结构，只含本账号）",
     ),
 )
+
+COST_TIER_LABELS = {1: "便宜", 2: "标准", 3: "旗舰"}
+
+
+def ai_model_metadata(provider: Any, model: Mapping[str, Any], model_id: str, enabled: bool) -> dict[str, Any]:
+    """``ai.models@1`` 0.111.0 新增的只增字段：显示名、可用状态（有可用 Key 且模型启用）、成本档。
+
+    ``provider`` 是脱敏后的 ``AIProviderInfo``（不含任何密钥），``has_api_key`` 只是布尔值。
+    """
+
+    display = ""
+    for key in ("display_name", "name", "label"):
+        value = model.get(key) if isinstance(model, Mapping) else None
+        if isinstance(value, str) and value.strip():
+            display = value.strip()
+            break
+    display = display or model_id
+    has_key = bool(getattr(provider, "has_api_key", False))
+    try:
+        tier = int(getattr(provider, "cost_tier", 2) or 2)
+    except (TypeError, ValueError):
+        tier = 2
+    tier = min(3, max(1, tier))
+    return {
+        "display_name": display,
+        "label": f"{getattr(provider, 'name', '')} · {display}",
+        "available": bool(has_key and enabled),
+        "has_api_key": has_key,
+        "cost_tier": tier,
+        "cost_tier_label": COST_TIER_LABELS[tier],
+    }
+
 
 HOST_RESOURCE_INDEX: dict[str, HostResource] = {item.ref: item for item in HOST_RESOURCES}
 

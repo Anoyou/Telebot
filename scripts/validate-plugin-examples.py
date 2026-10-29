@@ -35,6 +35,7 @@ INCLUDED_EXAMPLES = {
     "webhook_receiver",
     "word_guard_mw",
     "signature_mw",
+    "ui_page_demo",
 }
 MIDDLEWARE_EXAMPLES = {"word_guard_mw", "signature_mw"}
 SKIPPED_EXAMPLES: dict[str, str] = {}

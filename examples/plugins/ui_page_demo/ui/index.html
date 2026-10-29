@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ping 面板</title>
+  <style>
+    :root { color-scheme: light dark; font-family: -apple-system, system-ui, sans-serif; }
+    body { margin: 0; padding: 16px; line-height: 1.5; }
+    [data-theme="dark"] body { background: #111; color: #eee; }
+    .num { font-size: 40px; font-weight: 600; }
+    button { font: inherit; padding: 8px 14px; border-radius: 8px; min-height: 44px; }
+    .muted { opacity: .65; font-size: 13px; }
+  </style>
+</head>
+<body>
+  <div class="muted" id="greeting">正在连接宿主…</div>
+  <div class="num" id="pings">-</div>
+  <div class="muted">累计 ping 次数（只读读取 ctx.storage）</div>
+  <p><button id="summarize" type="button">生成计数摘要</button></p>
+  <div id="result" class="muted"></div>
+  <script>
+    (async function () {
+      var tp = window.telepilot;
+      try {
+        var info = await tp.ready();
+        await tp.theme();
+        var cfg = await tp.config();
+        document.getElementById("greeting").textContent = (cfg.config.greeting || "你好") + " · " + info.plugin_key;
+        var card = await tp.card("ping_stats");
+        document.getElementById("pings").textContent = card.status === "ok" ? card.data.pings : "读取失败";
+      } catch (e) {
+        document.getElementById("greeting").textContent = "出错：" + e.message;
+      }
+      document.getElementById("summarize").addEventListener("click", async function () {
+        try {
+          var r = await tp.action("summarize", {});
+          document.getElementById("result").textContent = r.message || "已完成";
+        } catch (e) {
+          document.getElementById("result").textContent = "失败：" + e.message;
+        }
+      });
+    })();
+  </script>
+</body>
+</html>
