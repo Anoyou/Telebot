@@ -21878,7 +21878,7 @@
   },
   "info": {
     "title": "TelePilot",
-    "version": "0.110.0-beta.1"
+    "version": "0.110.0-beta.2"
   },
   "openapi": "3.1.0",
   "paths": {
@@ -26604,7 +26604,7 @@
     },
     "/api/accounts/{aid}/features/{key}/rules/{rid}/dry-run": {
       "post": {
-        "description": "试运行：把 sample 消息喂给规则，返回是否命中 + 渲染输出。\n\n- ``auto_reply``：调用已安装插件的 ``_dry_run_match`` 完成匹配 + 渲染\n- ``forward``：按 ``source_kind`` 判断是否进入转发流水线，输出 \"would forward to ...\" 描述\n- 其它 feature：当前返回 matched=False（未实现）",
+        "description": "试运行：把 sample 消息喂给规则，返回是否命中 + 渲染输出。\n\n- ``forward`` / ``scheduler``：宿主内置功能，宿主自己解释\n- 其它插件规则：插件导出的 ``dry_run_rule(config, sample)``；旧版本插件回退 ``_dry_run_match``\n  （参数形状与日志见 ``plugin_compat.legacy_dry_run_args`` / ``legacy_dry_run_logs``）",
         "operationId": "dry_run_rule_api_accounts__aid__features__key__rules__rid__dry_run_post",
         "parameters": [
           {
