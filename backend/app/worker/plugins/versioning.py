@@ -31,7 +31,9 @@ from functools import total_ordering
 #      ctx.storage、ai.models@1 只增显示名 / 可用状态 / 成本档字段。
 # 1.5：0.112.0 业务下沉（interaction_entries[].entry_policy、扩展点 provides（ai.image_backend）、
 #      ui.rule_editor 与 slot interaction.rule_editor）。
-PLUGIN_API_VERSION = "1.5"
+# 1.6：0.112.0-beta.3 旧入口 key 声明（interaction_entries[].legacy_entry_keys，P4b 收尾：math10 / dice_grid_hunt /
+#      guess_number 不再依赖宿主兜底入口表）。
+PLUGIN_API_VERSION = "1.6"
 
 _VERSION_RE = re.compile(
     r"^\s*v?(?P<major>\d+)(?:\.(?P<minor>\d+))?(?:\.(?P<patch>\d+))?"

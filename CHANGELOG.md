@@ -25,6 +25,16 @@
 
 ## [Unreleased]
 
+## [0.112.0-beta.3] - 2026-10-30 · patch（补丁预发布） · 插件平台化 P4b 收尾：算数题 / 找骰子 / 猜数字自带入口声明（legacy_entry_keys，Plugin API 1.6）
+
+### 插件平台：P4b 收尾——算数题 / 找骰子 / 猜数字自带入口声明
+
+- 交互入口新增 `legacy_entry_keys`（Plugin API 1.6，能力 `interaction.legacy_entry_keys`）：插件把早期用过、存量规则里可能还写着的旧入口 key 写在正式入口下面，每项（`key` + 可选 `session_scope` / `participant_policy` / `prize`）与兜底入口表的一行等价；旧 key 不算正式入口（不参与单入口推断、不返回入口声明）。任一入口写了它就和 `entry_policy` 一样不再查 `app/plugin_compat.py` 的兜底入口表。
+- 插件库 `math10` 1.0.15（`start_math10`）、`dice_grid_hunt` 1.1.39（`answer_dice_grid_hunt`）、`guess_number` 1.0.22（`start_game`）声明了自己的旧入口 key；兜底表只为这些插件更早、没有声明的版本保留（计划 Plugin API 2.0 移除）。
+- 群内行为零变化：新增 golden 对比测试 `app/tests/test_plugin_entries_r17.py`，用改动前的宿主（0.112.0-beta.2）装旧插件算出的全部入口推断与 1190 条规则归一化结果作基准，逐字段证明“旧插件 + 新宿主”“新插件 + 新宿主”“新插件 + 旧宿主”三种组合与之完全相同，并证明新插件即使清空兜底表结论也不变。旧动作 `action="math10"` 规则不转换。
+- 兼容：旧宿主（0.110.0-beta.2 / 0.112.0-beta.2）忽略 `legacy_entry_keys`；这三个插件没有写 `entry_policy`（0.112.0-beta.2 见到它会整表跳过兜底），所以照旧走兜底表，结论相同；插件不提高 `min_telepilot_version`。
+- 文档：`PLUGIN-API-REFERENCE.md` 新增「旧入口 key 声明（legacy_entry_keys）」，更正“先把旧 key 补成正式入口再写 entry_policy”的建议（会让单入口推断失效）；门槛表、能力表、Plugin API 版本说明同步；`PLUGIN-CHEATSHEET.md` 补一条。
+
 ## [0.112.0-beta.2] - 2026-10-29 · patch（补丁预发布） · 插件平台化 P4b：非资金业务下沉（入口策略声明、图片后端扩展点、规则编辑器去写死、算数题规则迁移脚本）
 
 ### 插件平台：P4b 非资金业务下沉（入口策略声明、图片后端扩展点、规则编辑器去写死）

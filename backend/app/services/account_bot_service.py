@@ -758,14 +758,89 @@ def normalize_entry_policy(raw: Any) -> dict[str, Any] | None:
     return out
 
 
+def normalize_legacy_entry_keys(raw: Any) -> list[dict[str, Any]] | None:
+    """整理交互入口的 ``legacy_entry_keys`` 声明（0.112.0-beta.3 起，Plugin API 1.6）。
+
+    插件把自己早期用过、但已不再是正式入口的旧入口 key 写在正式入口下面::
+
+        "legacy_entry_keys": [{"key": "start_math10", "session_scope": "chat"}]
+
+    每一项与 ``app/plugin_compat.py`` 兜底入口表的一行完全等价：只提供该旧 key 的
+    ``session_scope`` / ``participant_policy`` / ``prize`` 三项推断（没写的项就是“未声明”），
+    **不算正式入口**——不参与单入口推断、不返回入口声明（时限 / 事件 / 规则编辑器按未知入口处理）。
+    与正式入口同名的项忽略（正式入口优先）。非 list 返回 None（视为未声明）；空列表也算已声明。
+    """
+
+    if not isinstance(raw, list):
+        return None
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        key = str(item.get("key") or "").strip()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        entry: dict[str, Any] = {"key": key}
+        scope = str(item.get("session_scope") or "").strip()
+        if scope in VALID_CONCURRENCY:
+            entry["session_scope"] = scope
+        policy = str(item.get("participant_policy") or "").strip()
+        if policy in VALID_INTERACTION_PARTICIPANT_POLICIES:
+            entry["participant_policy"] = policy
+        if isinstance(item.get("prize"), bool):
+            entry["prize"] = bool(item["prize"])
+        out.append(entry)
+    return out
+
+
 def _entries_declare_entry_policy(entries: Any) -> bool:
+    """任一入口写了 ``entry_policy``（dict）或 ``legacy_entry_keys``（list）即视为插件自己声明了入口策略。"""
+
     return isinstance(entries, list) and any(
-        isinstance(item, dict) and isinstance(item.get("entry_policy"), dict) for item in entries
+        isinstance(item, dict)
+        and (isinstance(item.get("entry_policy"), dict) or isinstance(item.get("legacy_entry_keys"), list))
+        for item in entries
     )
 
 
+def _legacy_entry_from_entries(entries: Any, entry_key: str | None) -> dict[str, Any] | None:
+    """在入口声明的 ``legacy_entry_keys`` 里找旧入口 key；正式入口同名时返回 None（正式入口优先）。"""
+
+    if not entry_key or not isinstance(entries, list):
+        return None
+    formal_keys = {str(item.get("key") or "").strip() for item in entries if isinstance(item, dict)}
+    if entry_key in formal_keys:
+        return None
+    for item in entries:
+        if not isinstance(item, dict):
+            continue
+        for legacy in normalize_legacy_entry_keys(item.get("legacy_entry_keys")) or []:
+            if legacy["key"] == entry_key:
+                return legacy
+    return None
+
+
+def _declared_legacy_entry(module_key: str | None, entry_key: str | None) -> dict[str, Any] | None:
+    if not module_key or not entry_key:
+        return None
+    try:
+        manifest = BUILTIN_FEATURES.manifest_for(module_key)
+        legacy = _legacy_entry_from_entries(getattr(manifest, "interaction_entries", None), entry_key)
+        if legacy is not None:
+            return legacy
+    except Exception:  # noqa: BLE001
+        log.debug("读取 builtin 模块旧入口声明失败: %s.%s", module_key, entry_key, exc_info=True)
+    try:
+        return _legacy_entry_from_entries(_plugin_json_interaction_entries(module_key), entry_key)
+    except Exception:  # noqa: BLE001
+        log.debug("读取 installed 模块旧入口声明失败: %s.%s", module_key, entry_key, exc_info=True)
+    return None
+
+
 def module_declares_entry_policy(module_key: str | None) -> bool:
-    """插件是否用 ``entry_policy`` 声明了入口策略（声明后宿主不再查兜底入口表）。"""
+    """插件是否自己声明了入口策略（``entry_policy`` 或 ``legacy_entry_keys``；声明后宿主不再查兜底入口表）。"""
 
     if not module_key:
         return False
@@ -875,6 +950,11 @@ def normalize_interaction_entry_manifest(raw: Any) -> dict[str, Any] | None:
         out["entry_policy"] = entry_policy
     else:
         out.pop("entry_policy", None)
+    legacy_entry_keys = normalize_legacy_entry_keys(raw.get("legacy_entry_keys"))
+    if legacy_entry_keys is not None:
+        out["legacy_entry_keys"] = legacy_entry_keys
+    else:
+        out.pop("legacy_entry_keys", None)
     result_contract = raw.get("result_contract")
     if isinstance(result_contract, dict):
         normalized_result_contract = dict(result_contract)
@@ -1139,6 +1219,9 @@ def _declared_module_entry_session_scope(module_key: str | None, module_action: 
             return scope
     except Exception:  # noqa: BLE001
         log.debug("读取 installed 模块交互入口作用域失败: %s.%s", module_key, module_action, exc_info=True)
+    legacy = _declared_legacy_entry(module_key, module_action)
+    if legacy is not None:
+        return legacy.get("session_scope")
     if module_declares_entry_policy(module_key):
         return None
     return plugin_compat.fallback_entry_session_scope(module_key, module_action)
@@ -1160,6 +1243,9 @@ def _declared_module_entry_participant_policy(module_key: str | None, module_act
             return policy
     except Exception:  # noqa: BLE001
         log.debug("读取 installed 模块交互入口参与策略失败: %s.%s", module_key, module_action, exc_info=True)
+    legacy = _declared_legacy_entry(module_key, module_action)
+    if legacy is not None:
+        return legacy.get("participant_policy")
     if module_declares_entry_policy(module_key):
         return None
     return plugin_compat.fallback_entry_participant_policy(module_key, module_action)
@@ -1231,6 +1317,9 @@ def declared_module_entry_has_field(module_key: str | None, module_action: str |
             return declared
     except Exception:  # noqa: BLE001
         log.debug("读取 installed 模块交互入口字段失败: %s.%s", module_key, module_action, exc_info=True)
+    legacy = _declared_legacy_entry(module_key, module_action)
+    if legacy is not None:
+        return legacy.get("prize") if field_name == "prize" else None
     if module_declares_entry_policy(module_key):
         return None
     return plugin_compat.fallback_entry_has_field(module_key, module_action, field_name)
