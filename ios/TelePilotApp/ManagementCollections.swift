@@ -51,7 +51,7 @@ struct ManagementCollectionView: View {
             }
             Section {
                 ForEach(Array(items.enumerated()), id: \.offset) { _, item in
-                    NavigationLink { ManagementItemView(resource: resource, item: item) } label: { ManagementRecordRow(value: item) }
+                    NavigationLink { ManagementItemView(resource: resource, item: item) } label: { rowLabel(item) }
                 }
                 if !loading, response != nil, items.isEmpty {
                     ContentUnavailableView("暂无匹配记录", systemImage: "tray", description: Text("可调整搜索或筛选条件后重新读取。"))
@@ -94,6 +94,15 @@ struct ManagementCollectionView: View {
         }
         .fileExporter(isPresented: $exporting, document: exportFile, contentType: .json, defaultFilename: "TelePilot-\(resource.title)") { result in
             if case .failure(let failure) = result { error = failure.localizedDescription }
+        }
+    }
+    /// 规则模式插件（契约 2）的规则按 `x-rule-summary` 显示摘要；其余沿用通用记录行。
+    @ViewBuilder private func rowLabel(_ item: JSONValue) -> some View {
+        if resource.kind == .rules, let schema = resource.ruleSchema,
+           schema["properties"]?["config"]?["x-telepilot-kind"]?.stringValue == ManagementRuleSchemas.pluginRuleKind {
+            PluginRuleRow(item: item, requestSchema: schema)
+        } else {
+            ManagementRecordRow(value: item)
         }
     }
     private var queryParameters: [JSONValue] {
@@ -200,8 +209,14 @@ struct ManagementItemView: View {
                 }
             case .rules:
                 if let itemPath {
+                    let dryRun = PluginRuleForm.dryRunSpec(resource.ruleSchema?["x-dry-run"])
                     Section("规则验证") {
-                        ManagementActionLink(action: .init(title: "试运行", path: itemPath + "/dry-run", explanation: "用模拟消息验证命中和输出。"))
+                        if dryRun.enabled {
+                            NavigationLink { PluginRuleDryRunView(path: itemPath + "/dry-run", spec: dryRun) } label: {
+                                Label(dryRun.title, systemImage: "play.rectangle")
+                            }
+                            .accessibilityIdentifier("plugin.rule.dryRun")
+                        }
                         ManagementActionLink(action: .init(title: "立即执行", path: itemPath + "/execute", explanation: "此操作会实际发送或执行规则，请确认目标账号与会话。"))
                     }
                 }

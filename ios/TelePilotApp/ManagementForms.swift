@@ -80,11 +80,11 @@ enum ManagementSchema {
         }
         if let object = schema["properties"]?.objectValue {
             let required = schema["required"]?.arrayValue?.compactMap(\.stringValue) ?? []
-            for key in required {
+            for key in required where PluginRuleForm.isVisible(object[key], values: value) {
                 guard let item = value[key] else { return "请填写\(ManagementText.label(key))。" }
                 if item.isNull, !allowsNull(object[key] ?? .object([:])) { return "请填写\(ManagementText.label(key))。" }
             }
-            for (key, spec) in object {
+            for (key, spec) in object where PluginRuleForm.isVisible(spec, values: value) {
                 if let item = value[key], let error = validate(item, schema: spec, name: ManagementText.fieldLabel(key, schema: spec)) { return error }
             }
         }
@@ -204,7 +204,8 @@ struct ManagementFieldsView: View {
         let required = Set(schema["required"]?.arrayValue?.compactMap(\.stringValue) ?? [])
         if !properties.isEmpty {
             ForEach(Self.orderedKeys(schema: schema, properties: properties, required: required), id: \.self) { key in
-                if let spec = properties[key], spec["readOnly"]?.boolValue != true {
+                // x-ui-visible-if（插件 UI 契约 2）：按同级字段的当前值显示 / 隐藏，不认识的声明一律显示。
+                if let spec = properties[key], spec["readOnly"]?.boolValue != true, PluginRuleForm.isVisible(spec, values: value) {
                     // 可选布尔字段本身就是开关：不再额外渲染“是否提交此项”的同名开关，
                     // 否则会出现两个同名开关（一个开、一个关），且实际提交的是用户没注意到的那个值。
                     let inlineToggle = ManagementSchema.isPlainBoolean(spec)
@@ -275,19 +276,29 @@ struct ManagementFieldView: View {
                 // 插件配置表单里的嵌套字段同样按控件契约渲染；不认识的控件只读，不退化成通用编辑器。
                 PluginFieldWidgetView(widget: pluginWidget, title: title, key: key, spec: schema, value: $value, accountID: nil)
             } else if let choices = spec["enum"]?.arrayValue {
+                let names = spec["enumNames"]?.arrayValue?.compactMap(\.stringValue) ?? []
                 Picker(title, selection: $value) {
                     if value.isNull { Text("请选择").tag(JSONValue.null) }
-                    ForEach(choices, id: \.self) { choice in Text(ManagementText.scalar(choice)).tag(choice) }
+                    // 插件声明了 enumNames 时显示中文名称，提交的仍是 enum 原值。
+                    ForEach(Array(choices.enumerated()), id: \.offset) { index, choice in
+                        Text(index < names.count && !names[index].isEmpty ? names[index] : ManagementText.scalar(choice)).tag(choice)
+                    }
                     // 保留不在候选里的旧值（例如插件升级后移除了某个模型），避免选择器显示为空。
                     if !value.isNull, !choices.contains(value) { Text("当前值：\(ManagementText.scalar(value))").tag(value) }
                 }
             } else if spec["type"]?.stringValue == "boolean" || value.boolValue != nil {
                 Toggle(title, isOn: Binding(get: { value.boolValue ?? false }, set: { value = .bool($0) }))
             } else if spec["type"]?.stringValue == "object" || spec["properties"] != nil || value.objectValue != nil {
+                // 规则模式插件的规则配置（契约 2）：与插件配置页一样，可选字段直接显示控件。
+                let inline = optionalInline || spec["x-telepilot-kind"]?.stringValue == ManagementRuleSchemas.pluginRuleKind
                 NavigationLink {
                     Form { ManagementFieldsView(schema: spec, value: $value) }.navigationTitle(title).navigationBarTitleDisplayMode(.inline)
-                        .environment(\.managementOptionalFieldsInline, optionalInline)
+                        .environment(\.managementOptionalFieldsInline, inline)
                 } label: { LabeledContent("编辑" + title, value: ManagementText.scalar(value)) }
+                .accessibilityIdentifier("management.object.\(key.isEmpty ? title : key)")
+            } else if PluginRuleForm.isLineList(spec) {
+                // 数组字段写 x-ui-widget: textarea：每行一项（项里可含逗号，适合正则 / 关键词）。
+                ManagementLineListField(title: title, key: key, itemType: spec["items"]?["type"]?.stringValue, value: $value)
             } else if spec["type"]?.stringValue == "array" || value.arrayValue != nil {
                 NavigationLink {
                     ManagementArrayView(title: title, schema: spec["items"] ?? .object(["type": .string("string")]), value: $value)
@@ -404,5 +415,35 @@ struct ManagementDictionaryView: View {
     private func inferred(_ value: JSONValue) -> JSONValue {
         let type = value.objectValue != nil ? "object" : value.arrayValue != nil ? "array" : value.boolValue != nil ? "boolean" : value.intValue != nil ? "integer" : value.doubleValue != nil ? "number" : "string"
         return .object(["type": .string(type)])
+    }
+}
+
+/// 每行一项的文本列表（数组字段 `x-ui-widget: textarea`，插件 UI 契约 2）；与 Web 同样按行拆分、去掉空行。
+struct ManagementLineListField: View {
+    let title: String
+    var key = ""
+    let itemType: String?
+    @Binding var value: JSONValue
+    @State private var text = ""
+    @State private var loaded = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title).font(.subheadline)
+            TextField("每行一项", text: $text, axis: .vertical)
+                .lineLimit(3...10).textInputAutocapitalization(.never).autocorrectionDisabled()
+                .accessibilityLabel(title)
+                .accessibilityIdentifier("management.lineList.\(key.isEmpty ? title : key)")
+                .onChange(of: text) { _, next in
+                    guard loaded else { return }
+                    value = PluginRuleForm.splitLines(next, itemType: itemType)
+                }
+            Text("每行一项，可以包含逗号。").font(.caption).foregroundStyle(.secondary)
+        }
+        .onAppear {
+            guard !loaded else { return }
+            text = PluginRuleForm.joinLines(value)
+            loaded = true
+        }
     }
 }
