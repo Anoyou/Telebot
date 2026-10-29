@@ -379,6 +379,12 @@ export async function installApiFixture(page: Page): Promise<{ assertClean: () =
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ slot, cards, warnings: [] }) });
       return;
     }
+    if (request.method() === "GET" && pathname === "/api/plugin-ui/entries") {
+      // 插件页面与菜单（Plugin API 1.4）：基线里的插件都没有声明，返回空列表（不显示入口）。
+      const menu = new URL(request.url()).searchParams.get("menu") || "";
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ menu, pages: [], actions: [], warnings: [] }) });
+      return;
+    }
     const cardDataMatch = pathname.match(/^\/api\/plugin-ui\/cards\/([^/]+)\/_host\.stats\/data$/);
     if (request.method() === "POST" && cardDataMatch) {
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(hostStatsCardDataFixture(decodeURIComponent(cardDataMatch[1]))) });
