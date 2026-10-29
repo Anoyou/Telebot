@@ -322,7 +322,7 @@ CAPABILITIES: tuple[Capability, ...] = (
         since=_P4A_RELEASE,
         plugin_api="1.4",
         summary="ctx.host.read(\"ai.models@1\") 每项只增 display_name / label / available（有可用 Key 且模型启用）/ has_api_key / cost_tier（1 便宜 · 2 标准 · 3 旗舰）/ cost_tier_label，旧字段不变",
-        doc=f"{_DOC}#宿主只读资源ctxhostread",
+        doc=f"{_DOC}#宿主只读查询ctxhostread",
     ),
 )
 

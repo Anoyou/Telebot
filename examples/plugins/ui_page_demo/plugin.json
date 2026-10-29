@@ -4,7 +4,7 @@
   "description": "插件自带页面（ui.pages + Bridge）、菜单项（ui.actions）与卡片只读 ctx.storage 的最小示例。",
   "author": "examples",
   "version": "0.1.0",
-  "min_telepilot_version": "0.111.0-beta.1",
+  "min_telepilot_version": "0.112.0-beta.1",
   "plugin_api": "^1.4",
   "entry": "plugin.py",
   "category": "utility",

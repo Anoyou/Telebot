@@ -25,6 +25,24 @@
 
 ## [Unreleased]
 
+## [0.112.0-beta.1] - 2026-10-29 · minor（次版本预发布） · 插件平台化 P4a：插件自带页面与菜单（沙箱 Bridge）、钩子只读 storage、模型元数据；iOS 0.15.0
+
+### 新增
+
+- 插件平台化 P4a · 插件自带页面与菜单（Plugin API 1.4）：`plugin.json` 的 `ui.pages` 声明插件目录内的 HTML 页面，`ui.actions` 声明菜单项（插件详情 / 账号详情的「插件页面与操作」）。页面在沙箱里运行：Web 为 `iframe sandbox="allow-scripts"`（不给同源，读不到宿主 Cookie / token），iOS 为非持久数据的 WKWebView（`tp-plugin://` 自定义协议代取文件、内容规则屏蔽 http(s)、只允许 `tp-plugin:` / `about:` 导航）；服务器响应头与注入的 meta 都是严格 CSP（`connect-src 'none'`，页面不能联网）。页面只能经 `window.telepilot` Bridge（协议 1，Web postMessage / iOS WKScriptMessageHandler 同一格式）调 `ready` / `theme` / `config`（去掉全部密钥字段）/ `card` / `action`，服务器按页面声明的 `bridge` 权限与 `actions` 白名单逐次校验，动作有审计、不自动重试。新接口：`GET /api/plugin-ui/entries`、`POST /api/plugin-ui/pages/{key}/{page}/session`（1 小时签名地址）、`GET /api/plugin-ui/page-assets/{token}/{path}`（只读页面目录、≤2 MB）、`POST /api/plugin-ui/pages/{key}/{page}/bridge`、`POST /api/plugin-ui/actions/{key}/{id}`；nginx 为页面文件单独放开同源嵌入。示例插件 `examples/plugins/ui_page_demo`。
+- 卡片钩子（`on_ui_card` / `on_ui_action`）、配置钩子（`on_config_validate` / `on_config_saved`）与页面 / 菜单动作里 `ctx.storage` 改为只读视图（`get` / `get_all` / `items`，写入抛 `PermissionError`；此前为 None）。
+- `ctx.host.read("ai.models@1")` 每项只增 `display_name` / `label` / `available`（有可用 Key 且模型启用）/ `has_api_key` / `cost_tier`（1 便宜 · 2 标准 · 3 旗舰）/ `cost_tier_label`，旧字段不变。
+- 能力注册表新增 `ui.pages`、`ui.actions`、`hooks.storage_read`、`ai.models.metadata`（since 0.112.0-beta.1）；Plugin API 1.3 → 1.4。兼容：没有声明 `ui.pages` / `ui.actions` 的插件完全不变（不出现任何入口）；旧宿主忽略这些声明；旧 App 不显示新入口、不报错。
+- **iOS 0.15.0**：插件详情（概况）与账号详情新增「插件页面与操作」，可打开插件自带页面、执行菜单操作（需确认的先确认）；「规则与自动化」只显示插件支持的入口（规则入口要插件声明规则或该账号已有规则，「配置任务与进度」要插件有配置操作或已有任务）；「更多」里「设置」改名「App 设置」（`iphone.gear`），管理模块「系统设置」改名「服务器设置」（`server.rack`，其中原「服务器设置」一行改名「服务器参数」）；紧急停止说明精简为一行，点 ⓘ 在原生 popover 里看「停止什么 / 不影响 / 如何恢复」，确认弹窗文案不变。
+
+### 改进
+
+- Web：插件详情与账号详情新增「插件页面与操作」（同一 Bridge 协议，页面在对话框里以沙箱 iframe 打开，跟随浅色 / 深色主题）；页面标题与说明里的「系统设置」统一改为「服务器设置」。Web 的规则区本来就只在插件声明规则模式时出现，配置任务只在有任务时显示，与 iOS 新口径一致。
+
+### 文档
+
+- `PLUGIN-API-REFERENCE` 新增「插件页面与菜单」一节（页面字段、沙箱、Bridge 方法与权限表、菜单项、只读 `ctx.storage`、模型清单新增字段），版本门槛表与「新旧平台兼容写法」补 0.112.0-beta.1 行，Plugin API 当前版本改为 1.4；速查表加入口。
+
 ## [0.111.0-beta.1] - 2026-10-29 · minor（次版本预发布） · 插件平台化 P4c：转账通知解析下沉为 payment_sources 插件（双跑对照）
 
 ### 新增

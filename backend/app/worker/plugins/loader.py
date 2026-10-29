@@ -777,7 +777,7 @@ def _build_plugin_host(
                             "enabled": enabled,
                             "default": model_id == provider.default_model,
                             "tags": list(provider.tags or []),
-                            # 0.111.0+（能力 ai.models.metadata）：只增字段，上面的旧字段保持原样。
+                            # 0.112.0+（能力 ai.models.metadata）：只增字段，上面的旧字段保持原样。
                             **ai_model_metadata(provider, model, model_id, enabled),
                         }
                     )

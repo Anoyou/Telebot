@@ -115,7 +115,7 @@ async def build_main_process_context(
     """在主进程里为配置动作 / 配置钩子 / UI 卡片构造不带 Telegram client 的受控上下文。
 
     ``account`` 为 ``None`` 表示全局作用域（全局配置、概览卡片），``ctx.account_id`` 为 0。
-    ``readonly_storage=True``（卡片、配置钩子、页面 / 菜单动作，0.111.0+）时挂上只读的 ``ctx.storage``；
+    ``readonly_storage=True``（卡片、配置钩子、页面 / 菜单动作，0.112.0+）时挂上只读的 ``ctx.storage``；
     配置动作保持原样（``ctx.storage`` 为 None）。
     """
 

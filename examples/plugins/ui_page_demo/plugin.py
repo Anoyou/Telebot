@@ -1,7 +1,7 @@
 """插件页面示例：worker 里计数 ping，卡片 / 页面 / 菜单在主进程里只读展示。
 
 - ``on_event``（worker）：已允许会话出现 ``ping`` 时 ``ctx.storage.incr("pings")``；
-- ``on_ui_card``：读 ``ctx.storage``（0.111.0+ 卡片钩子里是只读视图，旧宿主为 None）；
+- ``on_ui_card``：读 ``ctx.storage``（0.112.0+ 卡片钩子里是只读视图，旧宿主为 None）；
 - ``on_ui_action``：菜单项 ``summarize`` 与页面 Bridge ``action.invoke`` 共用，``context.page_id``
   区分来源；返回 ``data`` 会原样交给页面。
 """
@@ -16,7 +16,7 @@ from app.worker.plugins.events import event_from_interaction_payload
 
 async def _read_pings(ctx: PluginContext) -> int:
     storage = getattr(ctx, "storage", None)
-    if storage is None:  # 0.111.0 之前的宿主：卡片钩子里没有 ctx.storage
+    if storage is None:  # 0.112.0 之前的宿主：卡片钩子里没有 ctx.storage
         return 0
     return int(await storage.get("pings", 0) or 0)
 

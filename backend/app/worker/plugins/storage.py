@@ -228,7 +228,7 @@ class PluginStorage:
 
 
 class ReadOnlyPluginStorage:
-    """``ctx.storage`` 的只读视图（0.111.0+，能力 ``hooks.storage_read``）。
+    """``ctx.storage`` 的只读视图（0.112.0+，能力 ``hooks.storage_read``）。
 
     主进程里的卡片钩子（``on_ui_card``）、配置钩子（``on_config_validate`` / ``on_config_saved``）
     与页面 / 菜单动作拿到它：可以读插件在 worker 里写下的数据（同一个 [账号 × 插件] 命名空间），

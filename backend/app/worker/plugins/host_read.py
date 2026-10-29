@@ -69,7 +69,7 @@ HOST_RESOURCES: tuple[HostResource, ...] = (
         params=("enabled_only",),
         summary=(
             "插件可用的模型清单（需 ai_text / ai_agent 权限）：[{provider_id, provider_name, provider, model, enabled, default, tags,"
-            " display_name, label, available, has_api_key, cost_tier, cost_tier_label}]；后 6 个字段 0.111.0 起（能力 ai.models.metadata）"
+            " display_name, label, available, has_api_key, cost_tier, cost_tier_label}]；后 6 个字段 0.112.0 起（能力 ai.models.metadata）"
         ),
     ),
     HostResource(
@@ -90,7 +90,7 @@ COST_TIER_LABELS = {1: "便宜", 2: "标准", 3: "旗舰"}
 
 
 def ai_model_metadata(provider: Any, model: Mapping[str, Any], model_id: str, enabled: bool) -> dict[str, Any]:
-    """``ai.models@1`` 0.111.0 新增的只增字段：显示名、可用状态（有可用 Key 且模型启用）、成本档。
+    """``ai.models@1`` 0.112.0 新增的只增字段：显示名、可用状态（有可用 Key 且模型启用）、成本档。
 
     ``provider`` 是脱敏后的 ``AIProviderInfo``（不含任何密钥），``has_api_key`` 只是布尔值。
     """

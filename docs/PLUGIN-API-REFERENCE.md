@@ -2883,6 +2883,7 @@ __all__ = ["PLUGIN_CLASS", "MANIFEST"]
 | 声明式 UI（Plugin API 1.3）：`ui.cards`（`plugin.json` 的 `ui.cards` + `on_ui_card` / `on_ui_action`）、`config.validate`（`on_config_validate`）、`config.saved`（`on_config_saved`）、`config.secret_list`（`x-secret-list`）、`ui.widgets`（配置控件契约 1） | 0.110.0-beta.1（旧宿主忽略 `ui` 声明、不调用这些钩子；旧客户端把不认识的控件按普通字段显示） |
 | 表单契约 2：`ui.rules_page`（`x-ui-mode: rules` 通用规则页 + `x-rule-schema` / `x-rule-summary` / `x-dry-run`）、`rules.dry_run`（插件导出 `dry_run_rule`）、字段级 `x-ui-visible-if`、数组 `x-ui-widget: textarea` 每行一项 | 0.110.0-beta.2（iOS 0.14.1 起；旧客户端忽略这些声明，字段照常全部显示） |
 | 转账通知解析扩展点：`payment.sources`（`plugin.json` 的 `payment_sources` + 模块导出 `parse_payment_notice(text, meta)`，见 [转账通知解析（payment_sources）](#转账通知解析payment_sources)） | 0.111.0-beta.1（旧宿主忽略 `payment_sources`，插件装上不会被调用） |
+| 插件页面与菜单（Plugin API 1.4）：`ui.pages`（插件自带 HTML 页面 + Bridge）、`ui.actions`（菜单项）、`hooks.storage_read`（卡片 / 配置钩子 / 页面动作里只读 `ctx.storage`）、`ai.models.metadata`（`ai.models@1` 只增显示名 / 可用状态 / 成本档） | 0.112.0-beta.1（iOS 0.15.0 起显示页面与菜单；旧宿主忽略 `ui.pages` / `ui.actions`，卡片钩子里 `ctx.storage` 为 None；旧 App 不显示新入口、不报错） |
 
 - 想兼容更旧的平台时不要提高最低版本，而是先探测再用，见下一节 [能力协商与 Plugin API 版本](#能力协商与-plugin-api-版本)。
 - 声明 `requires_platform_capabilities` 的 `manifest.py` 在 0.72 之前的平台上导入就会失败，因此现在所有新插件的最低版本至少是 `0.72.0-beta.2`。
@@ -2913,7 +2914,7 @@ else:  # 旧宿主：退回旧属性探测
 | `caps.version(name)` | 能力版本；不支持或当前 facade 不适用时为 `0` |
 | `caps.names()` / `caps.as_dict()` | 当前上下文支持的全部能力 |
 | `name in caps` | 等价于 `caps.has(name)` |
-| `caps.plugin_api` / `caps.host_version` | 宿主 Plugin API 版本（如 `1.3`）与 TelePilot 版本 |
+| `caps.plugin_api` / `caps.host_version` | 宿主 Plugin API 版本（如 `1.4`）与 TelePilot 版本 |
 
 - `messages.*` 能力与当前 `ctx.messages` facade 有关：同一插件在交互 Bot 入口（`entry`）、命令 / 后台任务（`live`）、UserBot Event Bus 投递（`buffered`）里拿到的 facade 不同。例如 `messages.live_inline_edit` 在 `buffered` facade 上为 `False`，因为那里只能缓冲动作、没有实时 apply。`runtime.*` / `manifest.*` 是宿主级能力，与 facade 无关。
 - 旧探测写法继续可用：`getattr(ctx.messages, "rich_table_compact", False)`、`inline_rich_edit`、`live_inline_edit`、`rich_table_default_style`、`guest_reply_markup` 这些类属性现在由注册表生成，与 `ctx.capabilities` 结果一致。注册表之外的探测（`ctx.skills is None`、`getattr(ctx.ai, "vision_enabled", False)`、`hasattr(ctx.messages, "edit_rich")`、参数级新增用 `inspect.signature` 或捕获 `TypeError`）照旧。
@@ -2952,7 +2953,7 @@ else:  # 旧宿主：退回旧属性探测
 
 **Plugin API 版本（`plugin_api`）**
 
-- 宿主提供的 Plugin API 版本是 `MAJOR.MINOR`（当前 `1.3`；`1.0` = 0.107.0，`1.1` = 0.108.0 通用交互原语，`1.2` = 0.109.0 消息管线中间件，`1.3` = 0.110.0 声明式 UI；0.110.0-beta.2 的表单契约 2 / 通用规则页、0.111.0-beta.1 的转账通知解析扩展点 `payment_sources` 都是同一 MINOR 内的向后兼容新增，没有再升版本）：新增向后兼容的接口 / 能力只升 MINOR；删除或改变已有接口语义才升 MAJOR，并且要先在 [弃用登记](#弃用登记) 里公告至少一个 minor 宿主版本。
+- 宿主提供的 Plugin API 版本是 `MAJOR.MINOR`（当前 `1.4`；`1.0` = 0.107.0，`1.1` = 0.108.0 通用交互原语，`1.2` = 0.109.0 消息管线中间件，`1.3` = 0.110.0 声明式 UI，`1.4` = 0.112.0 插件页面与菜单；0.110.0-beta.2 的表单契约 2 / 通用规则页、0.111.0-beta.1 的转账通知解析扩展点 `payment_sources` 都是同一 MINOR 内的向后兼容新增，没有再升版本）：新增向后兼容的接口 / 能力只升 MINOR；删除或改变已有接口语义才升 MAJOR，并且要先在 [弃用登记](#弃用登记) 里公告至少一个 minor 宿主版本。
 - 插件可以在 `plugin.json` 里声明兼容范围，宿主在执行插件代码前校验，不满足时拒绝加载并说明原因：
 
 ```json
@@ -3295,6 +3296,71 @@ async def on_config_saved(self, ctx, config: dict, scope: str) -> None:
 - 宿主自带一张 `_host.stats`「运行统计」卡（钩子级调用数、失败、耗时与弃用接口调用），显示在每个插件详情顶部——原来写死在插件详情里的统计区改由卡片 DSL 渲染。
 - 接口：`GET /api/plugin-ui/cards?slot=…&account_id=…` 列出卡片声明；`POST /api/plugin-ui/cards/{plugin}/{card}/data` 取数；`POST /api/plugin-ui/cards/{plugin}/{card}/actions/{action}` 执行按钮。
 
+### 插件页面与菜单（Plugin API 1.4，0.112.0-beta.1+）
+
+声明式卡片放不下的界面（图表、表格编辑、小游戏面板），插件可以自带 HTML 页面；不需要页面的一次性操作，可以声明菜单项。全部可选：**没有声明时插件详情与账号详情不出现任何新入口**，旧插件行为完全不变。契约见 [`schemas/plugin-ui-widgets.json`](../schemas/plugin-ui-widgets.json) 的 `pages` 段（Web / iOS / 后端同一份）。示例：`examples/plugins/ui_page_demo`。
+
+#### 插件页面（ui.pages）
+
+```json
+"ui": {
+  "pages": [{
+    "id": "dashboard",
+    "title": {"zh": "ping 面板", "en": "Ping dashboard"},
+    "subtitle": "插件自带页面示例",
+    "file": "ui/index.html",
+    "menus": ["plugin.detail", "account.detail"],
+    "bridge": ["config.read", "cards.read", "actions.invoke"],
+    "actions": ["summarize"]
+  }]
+}
+```
+
+- `file`：插件目录内的 `.html` 文件。服务器只对页面开放入口文件所在目录（如 `ui/`），`plugin.json` 与插件代码不对页面开放；单文件 ≤ 2 MB。
+- `menus`：出现在哪里，默认 `["plugin.detail"]`（插件详情「插件页面与操作」）；`account.detail` 是账号详情，只列在该账号启用的插件。
+- 打开页面时客户端调 `POST /api/plugin-ui/pages/{key}/{page}/session` 换一个 1 小时有效的签名地址（不含登录凭据），文件由 `GET /api/plugin-ui/page-assets/{token}/{path}` 提供。
+- **沙箱**：Web 用 `iframe sandbox="allow-scripts"`（不给 `allow-same-origin`，页面读不到宿主 Cookie / localStorage / token）；iOS 用非持久数据的 `WKWebView`，页面文件经 `tp-plugin://` 自定义协议由 App 代取，内容规则屏蔽所有 http(s) 请求，只允许 `tp-plugin:` / `about:` 导航。服务器响应头与注入的 `<meta>` 都是严格 CSP：`connect-src 'none'`（页面不能联网，`fetch` / XHR / WebSocket 一律失败），只能加载插件目录内的脚本、样式与图片。
+- **Bridge 协议 1**：宿主在页面 `<head>` 最前面注入 `window.telepilot`：
+
+| 方法 | 需要的 `bridge` 权限 | 说明 |
+| --- | --- | --- |
+| `ready()` | 无 | `{plugin_key, page_id, account_id, bridge, protocol, host_version}` |
+| `theme()` / `onTheme(cb)` | 无 | `{scheme: "light" \| "dark"}`，宿主切换外观时推送事件，并自动设置 `<html data-theme>` |
+| `config()` | `config.read` | 当前作用域（全局或账号）的配置；密钥字段（`x-secret-list`、`format: password/secret/token`、敏感键名）一律去掉 |
+| `card(id)` | `cards.read` | 本插件声明的卡片数据，与原生卡片同一取数通道（3 秒） |
+| `action(id, payload)` | `actions.invoke` | 调插件 `on_ui_action(ctx, id, context)`（10 秒），`context.page_id` 为页面 id、`context.payload` 为页面传的对象（≤ 16 KB）；`actions` 非空时只能调列出的 id。不自动重试，有审计 |
+
+  底层消息格式：页面 → 宿主 `{tp: "telepilot", v: 1, id, method, params}`，宿主 → 页面 `{tp, v, id, ok, result | error: {code, message}}`。宿主只做格式校验与转发，**权限由服务器按页面声明逐次校验**（`POST /api/plugin-ui/pages/{key}/{page}/bridge`），失败以 `ok: false` 返回给页面（`BRIDGE_PERMISSION_DENIED`、`BRIDGE_METHOD_UNKNOWN` 等），15 秒无响应页面侧报 `BRIDGE_TIMEOUT`。
+
+#### 菜单项（ui.actions）
+
+```json
+"ui": {
+  "actions": [
+    {"id": "summarize", "menu": "plugin.detail", "title": "生成计数摘要"},
+    {"id": "reset", "menu": "account.detail", "title": "清零计数", "confirm": "清零 ping 计数？", "style": "destructive"},
+    {"id": "open_dashboard", "menu": "account.detail", "title": "打开 ping 面板", "page": "dashboard"}
+  ]
+}
+```
+
+- 点击后调用 `on_ui_action(ctx, id, {"menu", "account_id", "page_id": None, "payload": {}})`（10 秒），返回 `{"ok", "message"}` 显示给用户；带 `page` 时改为打开该页面。
+- `confirm`（`true` 或确认文案）与 `style: "destructive"` 会先弹确认；客户端不自动重试，结果未知时提示刷新确认。
+- 接口：`GET /api/plugin-ui/entries?menu=plugin.detail|account.detail[&plugin_key][&account_id]` 列入口，`POST /api/plugin-ui/actions/{key}/{id}` 执行。
+
+#### 钩子里的只读 ctx.storage
+
+能力 `hooks.storage_read`：卡片（`on_ui_card` / `on_ui_action`）、配置钩子（`on_config_validate` / `on_config_saved`）与页面 / 菜单动作里，`ctx.storage` 是只读视图（`get` / `get_all` / `items`），写入抛 `PermissionError`。之前这些钩子里 `ctx.storage` 为 `None`，兼容写法：
+
+```python
+storage = getattr(ctx, "storage", None)
+pings = int((await storage.get("pings")) or 0) if storage is not None else 0
+```
+
+#### 模型清单新增字段（ai.models@1）
+
+能力 `ai.models.metadata`：`ctx.host.read("ai.models@1")` 每项**只增**字段 `display_name`、`label`、`available`（有可用 Key 且模型启用）、`has_api_key`、`cost_tier`（1 便宜 · 2 标准 · 3 旗舰）、`cost_tier_label`；旧字段与语义不变，旧宿主没有这些字段，读取时用 `item.get(...)`。
+
 ### 转账通知解析（payment_sources）
 
 0.111.0-beta.1+（能力 `payment.sources`）。交互 Bot 收到「可信转账 Bot」发来的转账 / 扣减通知时，宿主要从文案里解析出付款人、收款人和金额，再去匹配交互规则、结算。过去这段中文正则写死在宿主里（`account_bot_runtime._parse_transfer_notice`），现在可以由插件提供；官方实现是插件库的 [`payment-source-cn-transfer`](https://github.com/Anoyou/telebot-plugins/tree/main/payment-source-cn-transfer)（宿主旧正则的逐字迁移）。
@@ -3405,6 +3471,7 @@ async def admin_ids(ctx, payload) -> set[int]:
 | `x-secret-list` | 原生密钥列表、明文不下发（0.110.0-beta.1） | 按普通数组字段显示 |
 | `x-ui-visible-if`、数组 `x-ui-widget: "textarea"`、`x-rule-schema` / `x-rule-summary` / `x-dry-run`、`dry_run_rule` | 按值显隐、每行一项、通用规则页与试运行（0.110.0-beta.2 / iOS 0.14.1） | 字段照常全部显示；数组仍按逗号分隔 |
 | `plugin.json` 的 `payment_sources` + `parse_payment_notice` | 转账通知解析（0.111.0-beta.1，双跑对照期默认只做对照） | 忽略声明，不调用；插件只是一个没有订阅的空插件 |
+| `plugin.json` 的 `ui.pages` / `ui.actions`、钩子里的只读 `ctx.storage` | 插件页面与菜单项（0.112.0-beta.1 / iOS 0.15.0）；卡片与配置钩子能读 `ctx.storage` | 忽略声明，不出现入口；旧 App 不显示新入口、不报错；钩子里 `ctx.storage` 为 None（先判断再用） |
 | `plugin.json` 的 `middleware` / `render_profile` | 消息管线中间件（0.109.0-beta.1） | 忽略；插件照常加载但中间件不生效。中间件是插件主要功能时用 `"plugin_api": "^1.2"` 拒绝旧宿主 |
 
 - `x-ui-visible-if` 推荐写 `not_in`：`{"field": "pt_enabled", "not_in": [false]}` 只在开关被明确关掉时隐藏。Web / iOS 按表单里的当前值判断，值缺省（没保存过）或控制字段在另一作用域（全局 / 账号）时，`equals: true` 会把字段误藏起来。被隐藏的字段值保留不删。

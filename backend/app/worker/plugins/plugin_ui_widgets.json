@@ -989,7 +989,7 @@
     }
   },
   "pages": {
-    "summary": "插件自带 HTML 页面（ui.pages）与菜单项（ui.actions），Plugin API 1.4 / 服务器 0.111.0 / iOS 0.15.0 起。全部可选：未声明时插件详情与账号详情不出现任何新入口。旧 App 不认识这些声明，直接忽略。",
+    "summary": "插件自带 HTML 页面（ui.pages）与菜单项（ui.actions），Plugin API 1.4 / 服务器 0.112.0 / iOS 0.15.0 起。全部可选：未声明时插件详情与账号详情不出现任何新入口。旧 App 不认识这些声明，直接忽略。",
     "min_ios": "0.15.0",
     "menus": [
       {
