@@ -4,7 +4,7 @@ import { PageHeader } from "@/components/layout/PageScaffold";
 
 import { PluginWorkspaceNav } from "./WorkspaceNav";
 
-type PluginWorkspaceTab = "home" | "manage";
+type PluginWorkspaceTab = "home" | "market" | "manage";
 
 type PluginWorkspaceHeaderProps = {
   activeTab: PluginWorkspaceTab;

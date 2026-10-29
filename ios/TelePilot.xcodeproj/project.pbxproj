@@ -41,6 +41,7 @@
 		939CB8EB7AF2DC4E52E410BE /* PushNotificationAppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9F684A78746D7C8E9770D93F /* PushNotificationAppDelegate.swift */; };
 		952761BD17159D6FA34C5361 /* AIProviders.swift in Sources */ = {isa = PBXBuildFile; fileRef = F74BB888C1F18820B172C6A8 /* AIProviders.swift */; };
 		F1FB3BAB8AD560DB96610EAD /* AgentSkills.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EDEE2A9A43C320E4B867405 /* AgentSkills.swift */; };
+		BCB092D38DF9B397AC13E6A4 /* PluginMarket.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1154D80F209A0E39D9FAC9C8 /* PluginMarket.swift */; };
 		AD4A7867DBC885D07543AD58 /* SystemCheckupView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BE8C7F6ECD2E334810DBF553 /* SystemCheckupView.swift */; };
 		3291C425BDC732FE566BBBF9 /* AssistantComposer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 27E9079470A75C124D86ED8C /* AssistantComposer.swift */; };
 		DC9617B0CA420D6149644C5F /* AIModelTesting.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F63B50ACF478AA88D292B95 /* AIModelTesting.swift */; };
@@ -145,6 +146,7 @@
 		F7345E48AE830986E3B98514 /* TelePilotApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TelePilotApp.swift; sourceTree = "<group>"; };
 		F74BB888C1F18820B172C6A8 /* AIProviders.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIProviders.swift; sourceTree = "<group>"; };
 		5EDEE2A9A43C320E4B867405 /* AgentSkills.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSkills.swift; sourceTree = "<group>"; };
+		1154D80F209A0E39D9FAC9C8 /* PluginMarket.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PluginMarket.swift; sourceTree = "<group>"; };
 		BE8C7F6ECD2E334810DBF553 /* SystemCheckupView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemCheckupView.swift; sourceTree = "<group>"; };
 		27E9079470A75C124D86ED8C /* AssistantComposer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssistantComposer.swift; sourceTree = "<group>"; };
 		3F63B50ACF478AA88D292B95 /* AIModelTesting.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIModelTesting.swift; sourceTree = "<group>"; };
@@ -177,6 +179,7 @@
 				45704C3929B3B6D40D3AB3A7 /* AIPresentation.swift */,
 				F74BB888C1F18820B172C6A8 /* AIProviders.swift */,
 				5EDEE2A9A43C320E4B867405 /* AgentSkills.swift */,
+				1154D80F209A0E39D9FAC9C8 /* PluginMarket.swift */,
 				BE8C7F6ECD2E334810DBF553 /* SystemCheckupView.swift */,
 				27E9079470A75C124D86ED8C /* AssistantComposer.swift */,
 				3F63B50ACF478AA88D292B95 /* AIModelTesting.swift */,
@@ -377,6 +380,7 @@
 				E9D1A0EBEDC2BCFEA5589DA4 /* AIPresentation.swift in Sources */,
 				952761BD17159D6FA34C5361 /* AIProviders.swift in Sources */,
 				F1FB3BAB8AD560DB96610EAD /* AgentSkills.swift in Sources */,
+				BCB092D38DF9B397AC13E6A4 /* PluginMarket.swift in Sources */,
 				AD4A7867DBC885D07543AD58 /* SystemCheckupView.swift in Sources */,
 				3291C425BDC732FE566BBBF9 /* AssistantComposer.swift in Sources */,
 				DC9617B0CA420D6149644C5F /* AIModelTesting.swift in Sources */,

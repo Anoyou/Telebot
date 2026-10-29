@@ -28,6 +28,11 @@ actor FixtureService: AppServing {
     private var contentAssistantVersion = "2.1.0"
     private var contentAssistantUpdatedAt: Date?
     private var storeInstalledPlugins: [String] = []
+    /// 插件市场界面测试（服务器 0.113.0）：自定义来源、官方源开关、固定版本与更新参数。
+    private var marketCustomSources: [JSONValue] = []
+    private var marketOfficialAutoUpdate = false
+    private var marketPinned: [String: String] = [:]
+    private var marketConcurrency = 3
     /// Cloudflare Access 界面测试：`--ui-test-cf-access` 时，没有任何 Access 凭证的登录会被 Access 拦截。
     private var accessConfig = CloudflareAccessConfig()
     private let accessRequired = ProcessInfo.processInfo.arguments.contains("--ui-test-cf-access")
@@ -330,6 +335,7 @@ actor FixtureService: AppServing {
             for (key, value) in fixtureValues[clean + "#effective"]?.objectValue ?? [:] { effective[key] = value }
             return .object(effective)
         }
+        if let value = try pluginMarketFixture(clean, method: method, body: body) { return value }
         if let value = pluginStoreFixture(clean, method: method) { return value }
         if clean == "/api/feature-matrix" {
             let matrix: JSONValue = [
@@ -1146,6 +1152,136 @@ actor FixtureService: AppServing {
                     "updated_at": 1_784_635_200, "duration_ms": 3000]
         }
         return nil
+    }
+
+    /// 插件市场（/api/plugin-market/*）：`--ui-test-market-unsupported` 模拟旧服务器（404）。
+    private func pluginMarketFixture(_ clean: String, method: String, body: JSONValue?) throws -> JSONValue? {
+        guard clean.hasPrefix("/api/plugin-market/") else { return nil }
+        if ProcessInfo.processInfo.arguments.contains("--ui-test-market-unsupported") {
+            throw APIError.server(status: 404, code: nil)
+        }
+        let repoURL: JSONValue = "https://github.com/example/telepilot-plugins.git"
+        let settings: JSONValue = ["update_concurrency": .integer(Int64(marketConcurrency)), "health_window_minutes": 10,
+                                   "pinned": .object(marketPinned.mapValues { JSONValue.string($0) })]
+        switch (method, clean) {
+        case ("GET", "/api/plugin-market/catalog"):
+            let updatable = contentAssistantVersion != "2.2.0"
+            func item(_ key: String, title: String, kind: String, icon: String, version: String, summary: String, installed: String?) -> JSONValue {
+                var installedValue: JSONValue = .null
+                if let installed {
+                    let fields: [String: JSONValue] = ["version": .string(installed), "enabled": .bool(true), "source": .string("repo"),
+                                                       "source_url": repoURL, "same_source": .bool(true)]
+                    installedValue = .object(fields)
+                }
+                let pinned: JSONValue = marketPinned[key].map { JSONValue.string($0) } ?? .null
+                let hasUpdate = installed != nil && installed != version
+                var object: [String: JSONValue] = ["id": .string("official:" + key), "key": .string(key), "kind": .string(kind),
+                                                   "icon": .string(icon), "summary": .string(summary), "version": .string(version)]
+                object["name"] = .object(["zh": .string(title), "en": .string(key)])
+                object["author"] = .string("TelePilot 社区")
+                object["min_telepilot_version"] = .string("0.100.0")
+                object["plugin_api"] = .null
+                object["permissions"] = .array([.string("send_message")])
+                object["reads"] = .array([])
+                object["tags"] = .array([])
+                object["channels"] = .object(["stable": .string("main")])
+                object["path"] = .string(key)
+                object["repository"] = repoURL
+                object["trust"] = .string("official")
+                object["source_id"] = .string("official")
+                object["source_name"] = .string("官方插件库")
+                object["compatible"] = .bool(true)
+                object["incompatible_reason"] = .null
+                object["installed"] = installedValue
+                object["update_available"] = .bool(hasUpdate)
+                object["pinned_version"] = pinned
+                object["auto_update"] = .bool(marketOfficialAutoUpdate && marketPinned[key] == nil)
+                object["rollout"] = .null
+                return .object(object)
+            }
+            let items: [JSONValue] = [
+                item("content_assistant", title: "内容整理助手", kind: "interactive", icon: "🧠", version: "2.2.0",
+                     summary: "把群聊里的长消息整理成摘要，并交给 AI 回答追问。", installed: contentAssistantVersion),
+                item("weather_digest", title: "天气早报", kind: "automation", icon: "⛅️", version: "1.0.0",
+                     summary: "每天早上把天气和出行提醒发到指定会话。", installed: storeInstalledPlugins.contains("weather_digest") ? "1.0.0" : nil)
+            ]
+            var official: [String: JSONValue] = ["id": "official", "name": "官方插件库", "trust": "official", "enabled": true, "builtin": true]
+            official["url"] = .string("https://raw.githubusercontent.com/Anoyou/telebot-plugins/main/registry.json")
+            official["auto_update"] = .bool(marketOfficialAutoUpdate)
+            official["available"] = .bool(true)
+            official["status"] = .string("ok")
+            official["plugin_count"] = .integer(2)
+            official["fetched_at"] = .string(Self.isoDate(hoursAgo: 1))
+            official["error"] = .null
+            official["fallback"] = .bool(false)
+            var sources: [JSONValue] = [.object(official)]
+            sources += marketCustomSources
+            let pinnedUpdate = updatable && marketPinned["content_assistant"] != nil
+            var rollout: [String: JSONValue] = ["key": "dice_party", "status": "rolled_back", "trigger": "auto", "from_version": "1.0.0", "to_version": "1.1.0"]
+            rollout["started_at"] = .string(Self.isoDate(hoursAgo: 3))
+            rollout["deadline"] = .null
+            rollout["finished_at"] = .string(Self.isoDate(hoursAgo: 3))
+            rollout["reason"] = .string("熔断打开（3 次调用被熔断拦截）")
+            var catalog: [String: JSONValue] = ["server_version": "0.113.0-beta.1", "plugin_api": "1.6"]
+            catalog["sources"] = .array(sources)
+            catalog["items"] = .array(items)
+            catalog["updates_available"] = .integer(updatable && !pinnedUpdate ? 1 : 0)
+            catalog["settings"] = settings
+            catalog["rollouts"] = .array([.object(rollout)])
+            return .object(catalog)
+        case ("POST", "/api/plugin-market/update"):
+            let from = contentAssistantVersion
+            if marketPinned["content_assistant"] != nil {
+                return ["concurrency": .integer(Int64(marketConcurrency)), "total": 0, "updated": 0, "skipped": 0, "failed": 0, "items": []]
+            }
+            contentAssistantVersion = "2.2.0"
+            contentAssistantUpdatedAt = Date()
+            var row: [String: JSONValue] = ["key": "content_assistant", "display_name": "内容整理助手", "to_version": "2.2.0", "status": "updated"]
+            row["from_version"] = .string(from)
+            row["message"] = .string("已更新")
+            row["health_check"] = .bool(true)
+            var result: [String: JSONValue] = ["total": 1, "updated": 1, "skipped": 0, "failed": 0]
+            result["concurrency"] = .integer(Int64(marketConcurrency))
+            result["items"] = .array([.object(row)])
+            return .object(result)
+        case ("POST", "/api/plugin-market/install"):
+            let key = body?["key"]?.stringValue ?? ""
+            if !storeInstalledPlugins.contains(key) { storeInstalledPlugins.append(key) }
+            return ["id": 0, "name": .string(key), "display_name": .string(Self.storeTitles[key] ?? key), "version": "1.0.0", "enabled": false]
+        case ("GET", "/api/plugin-market/settings"):
+            return settings
+        case ("PUT", "/api/plugin-market/settings"):
+            marketConcurrency = max(1, min(8, body?["update_concurrency"]?.intValue ?? marketConcurrency))
+            return ["update_concurrency": .integer(Int64(marketConcurrency)), "health_window_minutes": 10, "pinned": [:]]
+        case ("POST", "/api/plugin-market/sources"):
+            let url = body?["url"]?.stringValue ?? ""
+            var source: [String: JSONValue] = ["id": "src-fixture", "enabled": true, "auto_update": false, "builtin": false, "available": true]
+            source["name"] = body?["name"]?.stringValue.map { JSONValue.string($0) } ?? .string("example.com")
+            source["url"] = .string(url)
+            source["trust"] = .string(body?["trust"]?.stringValue ?? "unreviewed")
+            source["status"] = .string("ok")
+            source["plugin_count"] = .integer(0)
+            source["fetched_at"] = .null
+            source["error"] = .null
+            source["fallback"] = .bool(false)
+            marketCustomSources.append(.object(source))
+            return .object(source)
+        case ("PATCH", "/api/plugin-market/sources/official"):
+            if let value = body?["auto_update"]?.boolValue { marketOfficialAutoUpdate = value }
+            return ["id": "official", "name": "官方插件库", "url": "", "trust": "official", "enabled": true,
+                    "auto_update": .bool(marketOfficialAutoUpdate), "builtin": true, "available": true]
+        case ("DELETE", "/api/plugin-market/sources/src-fixture"):
+            marketCustomSources.removeAll()
+            return ["ok": true, "id": "src-fixture"]
+        default:
+            break
+        }
+        if method == "PUT", let match = clean.firstMatch(of: #/^\/api\/plugin-market\/pins\/([^\/]+)$/#) {
+            let key = String(match.1)
+            if body?["pinned"]?.boolValue == true { marketPinned[key] = contentAssistantVersion } else { marketPinned[key] = nil }
+            return ["key": .string(key), "pinned_version": marketPinned[key].map { JSONValue.string($0) } ?? .null]
+        }
+        throw APIError.server(status: 404, code: nil)
     }
 
     /// 插件商店（发现 / 已安装 / 产品页）所需的接口：仓库目录、安装包清单、安装历史、更新日志、安装与更新。
