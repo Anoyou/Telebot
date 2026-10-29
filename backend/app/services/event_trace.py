@@ -323,6 +323,10 @@ def redact_payload_snapshot(payload: Any, *, include_native_raw: bool = False) -
         out: dict[str, Any] = {}
         for key, value in list(payload.items())[:SNAPSHOT_DICT_LIMIT]:
             k = str(key)
+            if k == "_tp_bot_api_extra":
+                # bot_api_extra 的值不进 Trace，只记字段名
+                out[k] = sorted(str(item) for item in value) if isinstance(value, dict) else "[omitted]"
+                continue
             if k == "native_raw":
                 out[k] = redact_payload_snapshot(value, include_native_raw=include_native_raw) if include_native_raw else "[omitted]"
                 continue

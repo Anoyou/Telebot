@@ -21,7 +21,9 @@ from functools import total_ordering
 # - 新增插件可用的接口 / 能力（向后兼容）→ MINOR + 1；
 # - 删除或改变已有接口语义（不兼容）→ MAJOR + 1，并在弃用登记里提前至少一个 minor 宿主版本公告。
 # 1.0：0.107.0 首次引入（能力注册表 ctx.capabilities、钩子统计、弃用登记、prerelease 版本比较）。
-PLUGIN_API_VERSION = "1.0"
+# 1.1：0.108.0 通用交互原语（回调 token own_buttons、统一 MessageOps、ctx.host.read、bot_api_extra /
+#      extra_body 透传、钩子 Trace 与熔断同口径、interaction_entries[].policy）。
+PLUGIN_API_VERSION = "1.1"
 
 _VERSION_RE = re.compile(
     r"^\s*v?(?P<major>\d+)(?:\.(?P<minor>\d+))?(?:\.(?P<patch>\d+))?"

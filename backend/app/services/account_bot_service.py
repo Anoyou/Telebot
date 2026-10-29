@@ -21,6 +21,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from .. import plugin_compat
 from ..account_bot_defaults import (
     DEFAULT_DEBIT_NOTICE_TEMPLATE,
     DEFAULT_INTERACTION_DISABLED_MESSAGE,
@@ -99,13 +100,8 @@ TRUSTED_INTERACTION_SEND_VIA = ["interaction_bot", "userbot_reply"]
 VALID_INTERACTION_DISPATCH_MODES = {"admin_command", "public_keyword"}
 VALID_INTERACTION_MESSAGE_CHANNELS = {"interaction_bot", "userbot_reply", "auto"}
 VALID_INTERACTION_PARTICIPANT_POLICIES = {"open_race", "solo_owner", "paid_pool", "notify_only"}
-FALLBACK_CHAT_SESSION_MODULE_ENTRIES = {
-    ("dice_grid_hunt", "start_dice_grid_hunt"),
-    ("dice_grid_hunt", "answer_dice_grid_hunt"),
-    ("game24", "start_paid_game"),
-    ("math10", "start_math10"),
-    ("guess_number", "start_game"),
-}
+# 旧插件没声明入口策略时的兜底表（历史插件兼容表，0.108.0 起集中在 app/plugin_compat.py）。
+FALLBACK_CHAT_SESSION_MODULE_ENTRIES = plugin_compat.FALLBACK_CHAT_SESSION_MODULE_ENTRIES
 
 
 class BotChatUnavailableError(RuntimeError):
@@ -272,14 +268,10 @@ async def inspect_bot_chat_memberships(
         if len(normalized_chat_ids) >= BOT_CHAT_MEMBERSHIP_INSPECTION_MAX_ITEMS:
             break
     return list(await asyncio.gather(*(inspect_one(chat_id) for chat_id in normalized_chat_ids)))
-FALLBACK_NO_PRIZE_MODULE_ENTRIES = {
-    ("pt_promote", "promote_torrent"),
-}
-FALLBACK_SOLO_OWNER_MODULE_ENTRIES = {
-    ("blackjack", "start_blackjack"),
-}
+FALLBACK_NO_PRIZE_MODULE_ENTRIES = plugin_compat.FALLBACK_NO_PRIZE_MODULE_ENTRIES
+FALLBACK_SOLO_OWNER_MODULE_ENTRIES = plugin_compat.FALLBACK_SOLO_OWNER_MODULE_ENTRIES
 RULE_CONTROLLED_MODULE_CONFIG_KEYS = {"prize", "valid_seconds"}
-DEFAULT_MATH10_START_KEYWORDS = ["发十以内算数", "十以内算数", "开算数题"]
+DEFAULT_MATH10_START_KEYWORDS = list(plugin_compat.DEFAULT_MATH10_START_KEYWORDS)
 
 ROLE_RANK = {
     ACCOUNT_BOT_ROLE_VIEWER: 0,
@@ -526,7 +518,7 @@ def normalize_transfer_notice_config(raw: Any) -> dict[str, Any]:
     if base.get("math_prize") is None or int(base["math_prize"]) <= 0:
         base["math_prize"] = 123
     action = str(base.get("action") or "notice").strip()
-    base["action"] = action if action in {"notice", "math10", "module"} else "notice"
+    base["action"] = action if action in plugin_compat.RULE_ACTIONS else "notice"
     trigger_mode = str(base.get("trigger_mode") or "payment").strip()
     base["trigger_mode"] = trigger_mode if trigger_mode in VALID_TRIGGER_MODES else "payment"
     amount_match_mode = str(base.get("amount_match_mode") or "eq").strip()
@@ -1037,15 +1029,7 @@ def _declared_module_single_entry_key(module_key: str | None) -> str | None:
             return key
     except Exception:  # noqa: BLE001
         log.debug("读取 installed 模块交互入口失败: %s", module_key, exc_info=True)
-    fallback_keys = sorted(
-        entry_key
-        for fallback_module_key, entry_key in (
-            set(FALLBACK_CHAT_SESSION_MODULE_ENTRIES)
-            | set(FALLBACK_NO_PRIZE_MODULE_ENTRIES)
-            | set(FALLBACK_SOLO_OWNER_MODULE_ENTRIES)
-        )
-        if fallback_module_key == module_key
-    )
+    fallback_keys = plugin_compat.fallback_entry_keys(module_key)
     if len(fallback_keys) == 1:
         return fallback_keys[0]
     return None
@@ -1067,9 +1051,7 @@ def _declared_module_entry_session_scope(module_key: str | None, module_action: 
             return scope
     except Exception:  # noqa: BLE001
         log.debug("读取 installed 模块交互入口作用域失败: %s.%s", module_key, module_action, exc_info=True)
-    if (module_key, module_action) in FALLBACK_CHAT_SESSION_MODULE_ENTRIES:
-        return "chat"
-    return None
+    return plugin_compat.fallback_entry_session_scope(module_key, module_action)
 
 
 def _declared_module_entry_participant_policy(module_key: str | None, module_action: str | None) -> str | None:
@@ -1088,9 +1070,7 @@ def _declared_module_entry_participant_policy(module_key: str | None, module_act
             return policy
     except Exception:  # noqa: BLE001
         log.debug("读取 installed 模块交互入口参与策略失败: %s.%s", module_key, module_action, exc_info=True)
-    if (module_key, module_action) in FALLBACK_SOLO_OWNER_MODULE_ENTRIES:
-        return "solo_owner"
-    return None
+    return plugin_compat.fallback_entry_participant_policy(module_key, module_action)
 
 
 def declared_module_entry_events(module_key: str | None, module_action: str | None) -> list[str]:
@@ -1159,9 +1139,7 @@ def declared_module_entry_has_field(module_key: str | None, module_action: str |
             return declared
     except Exception:  # noqa: BLE001
         log.debug("读取 installed 模块交互入口字段失败: %s.%s", module_key, module_action, exc_info=True)
-    if field_name == "prize" and (module_key, module_action) in FALLBACK_NO_PRIZE_MODULE_ENTRIES:
-        return False
-    return None
+    return plugin_compat.fallback_entry_has_field(module_key, module_action, field_name)
 
 
 def normalize_interaction_rules(raw: Any) -> list[dict[str, Any]]:
@@ -1230,11 +1208,12 @@ def normalize_interaction_rules(raw: Any) -> list[dict[str, Any]]:
         except (TypeError, ValueError):
             math_prize = 123
         action = str(item.get("action") or "notice").strip()
-        if action not in {"notice", "math10", "module"}:
+        if action not in plugin_compat.RULE_ACTIONS:
             action = "notice"
-        if action == "math10" and not module_start_keywords:
+        legacy_math10 = plugin_compat.is_legacy_math10_action(action)
+        if legacy_math10 and not module_start_keywords:
             module_start_keywords = list(DEFAULT_MATH10_START_KEYWORDS)
-        if action == "math10" and amount is None and trigger_mode == "payment" and item.get("trigger_mode") in (None, "", "payment"):
+        if legacy_math10 and amount is None and trigger_mode == "payment" and item.get("trigger_mode") in (None, "", "payment"):
             trigger_mode = "both"
         if trigger_mode == "keyword":
             amount = None
@@ -1341,8 +1320,8 @@ def _enabled_interaction_module_keys(data: dict[str, Any]) -> list[str]:
         if not isinstance(rule, dict) or not bool(rule.get("enabled", True)):
             continue
         action = str(rule.get("action") or "").strip()
-        if action == "math10":
-            module_key = "math10"
+        if plugin_compat.is_legacy_math10_action(action):
+            module_key = plugin_compat.MATH10
         elif action == "module":
             module_key = str(rule.get("module_key") or "").strip()
         else:
@@ -1869,6 +1848,14 @@ async def _bot_api_request(
     """
 
     is_poll = method == "getUpdates"
+    if not is_poll:
+        # 插件动作的 bot_api_extra（白名单校验后）只合并进该动作对应的方法，平台字段优先。
+        from .interaction.action_extensions import merge_bot_api_extra_form, merge_bot_api_extra_json
+
+        if files is not None or form_data is not None:
+            form_data = merge_bot_api_extra_form(method, form_data)
+        else:
+            json_payload = merge_bot_api_extra_json(method, json_payload)
     limiter = get_rate_limiter()
     tkey = _rate_limit_token_key(token)
     if rate_limit_wait_budget is None:

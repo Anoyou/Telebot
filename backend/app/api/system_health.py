@@ -37,7 +37,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import func, select, text
 
-from .. import __version__
+from .. import __version__, plugin_compat
 from ..crypto import decrypt_str
 from ..db.base import AsyncSessionLocal
 from ..db.models.account import Account, Proxy
@@ -2708,7 +2708,7 @@ _EXPORT_DEFS: dict[str, dict[str, Any]] = {
     "auto_reply_rules": {
         "model": "Rule",
         "exclude_fields": set(),
-        "filter": {"feature_key": "auto_reply"},
+        "filter": {"feature_key": plugin_compat.AUTO_REPLY},
         "id_fields": ("account_id", "feature_key", "name"),
         "pk_field": "id",
         "map_group": "rules",

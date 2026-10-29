@@ -39,6 +39,7 @@ const CAPABILITY_LABELS: Record<string, string> = {
   llm_text: "AI 文本",
   inline_all: "Inline 全量",
   guest_all: "访客全量",
+  own_buttons: "本插件按钮",
   settlement: "结算动作",
   telegram_direct_passthrough: "裸直通",
   telegram_native_raw: "native_raw",

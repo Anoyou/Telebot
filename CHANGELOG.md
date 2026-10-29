@@ -25,6 +25,24 @@
 
 ## [Unreleased]
 
+## [0.108.0-beta.1] - 2026-10-29 · minor（次版本预发布） · 插件平台化 P1：通用回调路由 own_buttons、统一 MessageOps、ctx.host.read、Bot API / AI 受控透传、钩子 Trace 与熔断同口径、历史插件兼容表
+
+### 插件平台（Plugin API 1.1）：通用交互原语——插件新交互不再需要改宿主
+- **通用回调路由**（能力 `messages.callback_routing`）：插件按钮写 `{"text", "callback": {"data": ...}}`，宿主签发 `cb1.<token>` 作为真实 `callback_data`，Redis 记录所属插件、原始 data（可为 JSON，≤4 KB）与来源（chat / inline / guest / userbot_text），默认 7 天有效。新订阅范围 `scope: "own_buttons"`：本插件按钮的点击只投递给本插件，与会话白名单无关；其它插件收不到（`callback_not_owned`）。payload 统一带 `callback: {data, token, origin, clicker, …}`，`callback_data` / `inline_callback.data` 同步换成原始 data。Redis 不可用时点击一律拒绝（fail-closed），过期提示“按钮已过期”；平台合成的访客回复也保留 `cb1.` 按钮。旧写法 `callback_data` 原样透传并计入弃用 `markup.raw_callback_data`。
+- **统一 MessageOps**（`messages.unified_ops`）：三种 `ctx.messages` 共用一套动作构造与执行器；后台任务 / 命令里的实时 facade 补齐 `send_photo` / `send_file` / `edit_rich` / `edit_caption`，单动作方法失败时带回 `errors`；`inline_rich_edit` 在 UserBot Event Bus 的缓冲 facade 上也可用。
+- **`ctx.host.read` 声明式只读宿主查询**（`host.read`）：`plugin.json` 声明 `reads`，可读 `account.admins@1`（本人 + sudo 管理员）、`ai.models@1`（可用模型，`enabled_only`）、`chat.allowed@1`（允许会话）、`plugin.stats@1`（本插件统计）；未声明 / 未知资源拒绝，安装时校验。payload 里的 `owner_user_ids` / `admin_user_ids` 继续下发，登记弃用 `payload.admin_user_ids`。
+- **Bot API 字段受控透传**（`messages.bot_api_extra`）：动作可带 `bot_api_extra`，按动作类型白名单（如 `disable_notification`、`protect_content`、`message_effect_id`、`link_preview_options`、`has_spoiler`）校验，不得覆盖平台字段，不合规整条拒绝并返回 `bot_api_extra_rejected`；只合并进该动作对应的 Bot API 方法（交互 Bot 渠道），Trace 只记字段名。资金类动作不支持。
+- **AI 请求体透传**（`ai.extra_body`）：`ctx.ai.complete(extra_body={...})` 按上游格式白名单透传（OpenAI 兼容 `reasoning_effort` / `verbosity` / `top_p` …，Responses `reasoning` / `text`，Anthropic `top_k` / `stop_sequences` …），未知或平台字段直接报错，选中 Provider 不支持时走备用、全部不支持时明确报错，不再静默丢弃。
+- **钩子统计接入 Trace 与熔断**（`runtime.hook_trace`）：钩子失败 / 超时 / 熔断在 Trace 记 `plugin_hook` span（`reason_code=plugin_error / plugin_timeout / plugin_circuit_open`，带 hook、duration_ms），耗时 ≥1 秒的成功调用也记录；熔断与统计同口径：连续失败 3 次（原规则）或 120 秒内 ≥20 次调用且失败率 ≥80% 时熔断 60 秒。
+- 能力注册表新增 11 项（since `0.108.0-beta.1`），Plugin API 升到 1.1；`GET /api/plugins/capabilities` 同步。插件库兼容检查改为直接读取宿主能力注册表与弃用登记（见插件库 PR）。
+
+### 宿主去插件化
+- 新增 `backend/app/plugin_compat.py`「历史插件兼容表」：math10 旧规则动作、兜底入口表（dice_grid_hunt / game24 / math10 / guess_number / pt_promote / blackjack）、codex_image 模型改名、chatgpt_image 多 Token 配置、`,ai` 图片后端默认值、非核心插件名单与缺失插件提示全部集中到这里，每项写明原因与计划移除版本。业务代码中按插件 key 写死的文件从 13 个降到 1 个（交互规则 API 枚举 `schemas/account_bot.py`，改动会影响 OpenAPI，暂留），并加测试守护不再新增；行为不变（含金额、转账、奖励相关逻辑）。
+- worker「有主进程兜底的模块」判定、缺失插件提示改为查表的通用逻辑。
+
+### 文档
+- `docs/PLUGIN-API-REFERENCE.md` 新增「通用交互原语」一节（own_buttons、统一 MessageOps、bot_api_extra、extra_body、ctx.host.read、钩子 Trace 与熔断、历史插件兼容表），能力表与弃用表同步；`docs/PLUGIN-CHEATSHEET.md` 补 `own_buttons` 与 0.108 推荐写法。
+
 ## [0.107.0-beta.1] - 2026-10-29 · minor（次版本预发布） · 插件平台化：能力注册表与 Plugin API 版本、钩子运行统计、弃用登记、插件库兼容 CI
 
 ### 插件平台（Plugin API 1.0）

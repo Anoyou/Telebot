@@ -153,7 +153,7 @@ from .capabilities import FACADE_ENTRY, FACADE_LIVE, apply_legacy_flags
 from .deprecations import note_deprecated
 from .events import attach_tp_event
 from .manifest import Manifest
-from .message_ops import BufferedMessageOps
+from .message_ops import BufferedMessageOps, install_live_action_methods
 from .storage import PluginStorage
 from .update_barrier import (
     acknowledge_plugin_update,
@@ -720,6 +720,68 @@ def _event_bus_subscriptions_from_state(state: _AccountState) -> list[Any]:
         # 过滤器本身依赖平台能力快照。未知状态不能回退为全部订阅，
         # 否则关闭的 Interaction/Webhook 入口会在异常窗口重新放行。
         return []
+
+
+def _build_plugin_host(
+    state: _AccountState,
+    plugin_key: str,
+    manifest: Any,
+    plugin_ai: Any,
+    redis: Any,
+) -> Any:
+    """``ctx.host``：按 manifest ``reads`` 提供声明式只读宿主查询（0.108.0+）。"""
+
+    from .host_read import PluginHost
+
+    declared = list(getattr(manifest, "reads", None) or []) if manifest is not None else []
+
+    async def _admins() -> dict[str, Any]:
+        snapshot = _event_bus_state_for_userbot_dispatch(state)
+        return {
+            "owner_user_ids": list(snapshot["owner_user_ids"]),
+            "admin_user_ids": list(snapshot["admin_user_ids"]),
+        }
+
+    async def _allowed() -> dict[str, Any]:
+        chat_ids = sorted(int(item) for item in state.ignored_peers)
+        return {"all": not chat_ids, "chat_ids": chat_ids}
+
+    async def _stats() -> dict[str, Any]:
+        stats_redis = state.redis or redis or get_redis()
+        return await plugin_stats.read_plugin_stats(stats_redis, plugin_key, account_id=state.account_id)
+
+    resolvers: dict[str, Any] = {
+        "account.admins@1": _admins,
+        "chat.allowed@1": _allowed,
+        "plugin.stats@1": _stats,
+    }
+    if plugin_ai is not None:
+
+        async def _models(*, enabled_only: bool = True) -> list[dict[str, Any]]:
+            items: list[dict[str, Any]] = []
+            for provider in await plugin_ai.list_providers():
+                for model in provider.models or []:
+                    model_id = str(model.get("id") or "").strip()
+                    if not model_id:
+                        continue
+                    enabled = model.get("enabled") is not False
+                    if enabled_only and not enabled:
+                        continue
+                    items.append(
+                        {
+                            "provider_id": provider.id,
+                            "provider_name": provider.name,
+                            "provider": provider.provider,
+                            "model": model_id,
+                            "enabled": enabled,
+                            "default": model_id == provider.default_model,
+                            "tags": list(provider.tags or []),
+                        }
+                    )
+            return items
+
+        resolvers["ai.models@1"] = _models
+    return PluginHost(plugin_key=plugin_key, account_id=state.account_id, declared=declared, resolvers=resolvers)
 
 
 def _event_bus_state_for_userbot_dispatch(state: _AccountState) -> dict[str, Any]:
@@ -1607,6 +1669,7 @@ async def _invoke_userbot_event_bus_entry(
             _call_handler,
             hook=hook_name,
             event_type=_payload_event_type(payload),
+            trace=trace_id or None,
         )
         if state is not None
         else await _call_handler()
@@ -1975,6 +2038,7 @@ async def _dispatch_userbot_direct_passthrough(
                 lambda _handler=handler, _ctx=call_ctx, _event=plugin_event: _handler(_ctx, _event),
                 hook=handler_name,
                 event_type=event_label,
+                trace=trace,
             )
             outcome, declared_error = _coerce_direct_passthrough_outcome(result)
             if outcome == "failed":
@@ -2409,6 +2473,36 @@ async def _apply_userbot_event_bus_actions(
         )
         return False
 
+    async def _on_rejected(action: dict[str, Any]) -> bool:
+        rejection = action.get("_tp_reject") or {}
+        error_code = str(rejection.get("error_code") or "action_rejected")
+        error = str(rejection.get("error") or "")
+        _remember_action_error(action, error_code, error)
+        await record_action(action.get("context"), action, TRACE_STATUS_FAILED, error_code=error_code, error=error)
+        await _log(
+            redis,
+            state.account_id,
+            "warn",
+            f"插件动作被拒绝：{error}",
+            source="plugin",
+            plugin_key=plugin_key,
+            entry_key=entry_key,
+            reason_code=error_code,
+            action_type=str(action.get("type") or ""),
+            **trace_log_context(trace),
+        )
+        return False
+
+    async def _preprocess(action: dict[str, Any]) -> dict[str, Any]:
+        from ...services.interaction.action_extensions import preprocess_plugin_action
+
+        return await preprocess_plugin_action(
+            action,
+            account_id=state.account_id,
+            redis_factory=lambda: redis or state.redis or get_redis(),
+            plugin_key=plugin_key,
+        )
+
     # Truncation log once (not per dropped action) when over limit.
     if len(actions) > INTERACTION_ACTION_LIMIT:
         dropped_actions = actions[INTERACTION_ACTION_LIMIT:]
@@ -2450,12 +2544,14 @@ async def _apply_userbot_event_bus_actions(
         on_deprecated_send_via=_on_deprecated,
         on_unsupported=_on_unsupported,
         on_truncated=_on_truncated,
+        on_rejected=_on_rejected,
     )
     batch = await run_action_batch(
         list(actions or []),
         handlers,
         limit=INTERACTION_ACTION_LIMIT,
         prepare_action=_prepare,
+        preprocess=_preprocess,
     )
     if return_result:
         # run_action_batch 会复制动作；执行器挂在副本上的失败原因在这里收集。
@@ -5514,14 +5610,13 @@ def _builtin_plugin_path(plugin_key: str) -> Path | None:
 
 def _missing_plugin_error(feature_key: str) -> tuple[str, str]:
     """为缺失插件提供统一错误码与可读日志，便于前端/运维识别。"""
-    if feature_key == "codex_image":
+    from ... import plugin_compat
+
+    hint = plugin_compat.missing_plugin_hint(feature_key)
+    if hint:
         return (
-            "plugin codex_image not installed",
-            (
-                "feature codex_image 已启用但未找到仓库插件实现。"
-                "请先在“安装插件”页安装 Codex 图片生成，并确认 plugins/installed/codex_image 存在；"
-                "已跳过加载并保持 worker 运行。"
-            ),
+            f"plugin {feature_key} not installed",
+            f"feature {feature_key} 已启用但未找到仓库插件实现。{hint}已跳过加载并保持 worker 运行。",
         )
     return ("plugin not found", f"feature {feature_key} 已启用但未找到插件实现")
 
@@ -5716,6 +5811,18 @@ def _merge_static_plugin_api(path: Path, manifest: Manifest) -> None:
                 manifest.plugin_api = value.strip()
             except Exception:  # noqa: BLE001 - 旧式 manifest 替身不可写时忽略
                 log.debug("写入 manifest.plugin_api 失败 plugin=%s", path.name, exc_info=True)
+    if not list(getattr(manifest, "reads", None) or []):
+        metadata_path = path / "plugin.json"
+        try:
+            raw = json.loads(metadata_path.read_text(encoding="utf-8")) if metadata_path.is_file() else {}
+        except (OSError, json.JSONDecodeError):
+            raw = {}
+        reads = raw.get("reads") if isinstance(raw, dict) else None
+        if isinstance(reads, list) and reads:
+            try:
+                manifest.reads = [str(item) for item in reads if str(item or "").strip()]
+            except Exception:  # noqa: BLE001 - 旧式 manifest 替身不可写时忽略
+                log.debug("写入 manifest.reads 失败 plugin=%s", path.name, exc_info=True)
     if getattr(manifest, "min_telebot_version", None) and not getattr(manifest, "min_telepilot_version", None):
         note_deprecated("manifest.min_telebot_version", plugin_key=str(getattr(manifest, "key", "") or path.name))
 
@@ -6334,8 +6441,14 @@ async def _invoke_plugin_with_resilience(
     deadline_governs: bool = False,
     hook: str = "invoke",
     event_type: str | None = None,
+    trace: Any | None = None,
 ) -> Any:
-    """带超时与熔断地调用插件钩子，并按 [账号 × 插件 × 钩子 × 事件类型] 记录统计。"""
+    """带超时与熔断地调用插件钩子，并按 [账号 × 插件 × 钩子 × 事件类型] 记录统计。
+
+    0.108.0：统计、Trace 与熔断用同一份结果——失败 / 超时在 Trace 记 ``plugin_hook`` span
+    （``reason_code=plugin_timeout / plugin_error / plugin_circuit_open``，带 hook 与 duration_ms），
+    慢调用（≥ :data:`plugin_stats.SLOW_HOOK_TRACE_MS`）也记一条；熔断判定见 ``plugin_stats.update_circuit``。
+    """
 
     started = time.monotonic()
     try:
@@ -6349,10 +6462,49 @@ async def _invoke_plugin_with_resilience(
     except asyncio.CancelledError:
         raise
     except Exception as exc:
-        _record_plugin_hook(state, plugin_key, hook, event_type, plugin_stats.classify_exception(exc), started, exc)
+        outcome = plugin_stats.classify_exception(exc)
+        _record_plugin_hook(state, plugin_key, hook, event_type, outcome, started, exc)
+        await _record_plugin_hook_span(trace, plugin_key, hook, event_type, outcome, started, exc)
         raise
     _record_plugin_hook(state, plugin_key, hook, event_type, plugin_stats.OUTCOME_OK, started, None)
+    if (time.monotonic() - started) * 1000 >= plugin_stats.SLOW_HOOK_TRACE_MS:
+        await _record_plugin_hook_span(trace, plugin_key, hook, event_type, plugin_stats.OUTCOME_OK, started, None)
     return result
+
+
+async def _record_plugin_hook_span(
+    trace: Any | None,
+    plugin_key: str,
+    hook: str,
+    event_type: str | None,
+    outcome: str,
+    started: float,
+    error: BaseException | None,
+) -> None:
+    if not trace:
+        return
+    try:
+        detail: dict[str, Any] = {
+            "component": "plugin_runtime",
+            "plugin_key": plugin_key,
+            "hook": hook,
+            "event_type": event_type,
+            "outcome": outcome,
+            "duration_ms": int((time.monotonic() - started) * 1000),
+        }
+        if outcome == plugin_stats.OUTCOME_OK:
+            await record_span(trace, "plugin_hook", TRACE_STATUS_OK, message="插件钩子耗时较长", **detail)
+            return
+        await record_span(
+            trace,
+            "plugin_hook",
+            TRACE_STATUS_FAILED,
+            reason_code=plugin_stats.reason_code_for_outcome(outcome),
+            error=plugin_stats.summarize_error(error),
+            **detail,
+        )
+    except Exception:  # noqa: BLE001 - Trace 不能影响插件调用
+        log.debug("记录插件钩子 span 失败 plugin=%s hook=%s", plugin_key, hook, exc_info=True)
 
 
 def _record_plugin_hook(
@@ -6425,21 +6577,27 @@ async def _invoke_plugin_guarded(
     except asyncio.CancelledError:
         raise
     except Exception:
-        failed_at = time.monotonic()
-        threshold = max(1, int(app_settings.plugin_circuit_failure_threshold or 3))
-        current = state.plugin_circuits.get(plugin_key) or {}
-        failures = int(current.get("failures") or 0) + 1
-        opened_until = 0.0
-        if failures >= threshold:
-            opened_until = failed_at + max(1.0, float(app_settings.plugin_circuit_cooldown_seconds or 60.0))
-        state.plugin_circuits[plugin_key] = {
-            "failures": failures,
-            "opened_until": opened_until,
-        }
+        _update_plugin_circuit(state, plugin_key, ok=False)
         raise
     else:
-        state.plugin_circuits.pop(plugin_key, None)
+        _update_plugin_circuit(state, plugin_key, ok=True)
         return result
+
+
+def _update_plugin_circuit(state: _AccountState, plugin_key: str, *, ok: bool) -> None:
+    """熔断判定（连续失败 + 窗口失败率）与钩子统计同口径：超时、异常都算失败。"""
+
+    entry = plugin_stats.update_circuit(
+        state.plugin_circuits.get(plugin_key),
+        ok=ok,
+        now=time.monotonic(),
+        threshold=max(1, int(app_settings.plugin_circuit_failure_threshold or 3)),
+        cooldown=max(1.0, float(app_settings.plugin_circuit_cooldown_seconds or 60.0)),
+    )
+    if entry is None:
+        state.plugin_circuits.pop(plugin_key, None)
+    else:
+        state.plugin_circuits[plugin_key] = entry
 
 
 # 进程级状态字典（一个 worker 进程通常只服务一个账号；用 dict 是为了灵活）
@@ -6581,38 +6739,6 @@ class _LiveMessageOps:
         finally:
             self.actions.clear()
 
-    async def send(self, **kwargs: Any) -> dict[str, Any]:
-        from .message_ops import BufferedMessageOps
-
-        buffered = BufferedMessageOps()
-        action = await buffered.send(**kwargs)
-        await self.apply([action])
-        return action
-
-    async def send_rich(self, **kwargs: Any) -> dict[str, Any]:
-        """Send a Rich Message from a resident/background plugin context.
-
-        ``BufferedMessageOps`` owns action construction for both interaction
-        handlers and scheduled jobs.  The live facade must expose the same
-        operation so background tasks do not fail before reaching the shared
-        delivery executor.
-        """
-
-        from .message_ops import BufferedMessageOps
-
-        buffered = BufferedMessageOps()
-        action = await buffered.send_rich(**kwargs)
-        await self.apply([action])
-        return action
-
-    async def edit(self, **kwargs: Any) -> dict[str, Any]:
-        from .message_ops import BufferedMessageOps
-
-        buffered = BufferedMessageOps()
-        action = await buffered.edit(**kwargs)
-        await self.apply([action])
-        return action
-
     def stream_editor(self, **kwargs: Any) -> Any:
         """创建一次流式回复的节流编辑器（``PluginStreamEditor``，见 stream_edit 模块）。"""
 
@@ -6657,66 +6783,6 @@ class _LiveMessageOps:
         )
         return await _stream_edit(editor, chunks, **finish_kwargs)
 
-    async def delete(self, **kwargs: Any) -> dict[str, Any]:
-        from .message_ops import BufferedMessageOps
-
-        buffered = BufferedMessageOps()
-        action = await buffered.delete(**kwargs)
-        await self.apply([action])
-        return action
-
-    async def pin(self, **kwargs: Any) -> dict[str, Any]:
-        from .message_ops import BufferedMessageOps
-
-        buffered = BufferedMessageOps()
-        action = await buffered.pin(**kwargs)
-        await self.apply([action])
-        return action
-
-    async def answer_callback(self, **kwargs: Any) -> dict[str, Any]:
-        from .message_ops import BufferedMessageOps
-
-        buffered = BufferedMessageOps()
-        action = await buffered.answer_callback(**kwargs)
-        await self.apply([action])
-        return action
-
-    async def click_callback_button(self, **kwargs: Any) -> dict[str, Any]:
-        from .message_ops import BufferedMessageOps
-
-        buffered = BufferedMessageOps()
-        action = await buffered.click_callback_button(**kwargs)
-        await self.apply([action])
-        return action
-
-    async def answer_inline_query(self, **kwargs: Any) -> dict[str, Any]:
-        from .message_ops import BufferedMessageOps
-
-        buffered = BufferedMessageOps()
-        action = await buffered.answer_inline_query(**kwargs)
-        await self.apply([action])
-        return action
-
-    async def answer_guest_query(self, **kwargs: Any) -> dict[str, Any]:
-        from .message_ops import BufferedMessageOps
-
-        buffered = BufferedMessageOps()
-        action = await buffered.answer_guest_query(**kwargs)
-        outcome = await self.apply([action])
-        inline_id = outcome.get("inline_message_id") if isinstance(outcome, dict) else None
-        if inline_id:
-            # 0.106.0-beta.17+：成功时把 SentGuestMessage.inline_message_id 交还给插件。
-            action = {**action, "inline_message_id": inline_id}
-        return action
-
-    async def payout(self, **kwargs: Any) -> dict[str, Any]:
-        from .message_ops import BufferedMessageOps
-
-        buffered = BufferedMessageOps()
-        action = await buffered.payout(**kwargs)
-        await self.apply([action])
-        return action
-
     async def read_saved_message_id(self, key: str) -> int | None:
         """Read a platform-owned saved message id without exposing raw Redis."""
 
@@ -6733,6 +6799,10 @@ class _LiveMessageOps:
         return await _read_action_inline_message_id(self._state, key)
 
 
+# 动作方法（send / send_rich / send_photo / send_file / edit / edit_rich / edit_caption / delete / pin /
+# answer_callback / click_callback_button / answer_inline_query / answer_guest_query / payout）与缓冲 facade
+# 共用同一套构造逻辑，由 message_ops.install_live_action_methods 生成“构造 → 立即 apply”（0.108.0 统一 MessageOps）。
+install_live_action_methods(_LiveMessageOps)
 apply_legacy_flags(_LiveMessageOps, FACADE_LIVE)
 
 
@@ -7934,6 +8004,7 @@ async def load_plugins_for_account(
                         lambda _handler=handler, _ctx=call_ctx, _event=plugin_event: _handler(_ctx, _event),
                         hook=handler_name,
                         event_type=event_label,
+                        trace=trace,
                     )
                     invoked_count += 1
                     await record_span(
@@ -8292,6 +8363,7 @@ async def _activate(db, state: _AccountState, af: AccountFeature, redis: Any) ->
             )
         except Exception:  # noqa: BLE001 - 内置 skill 登记失败不影响插件加载
             log.warning("登记插件内置 skill 失败 feature=%s", af.feature_key, exc_info=True)
+    plugin_host = _build_plugin_host(state, af.feature_key, plugin_manifest, plugin_ai, redis)
     declared_facade_permissions = plugin_permissions & (
         _SUPPORTED_FACADE_PERMISSIONS | _RESERVED_UNSUPPORTED_FACADE_PERMISSIONS
     )
@@ -8343,6 +8415,7 @@ async def _activate(db, state: _AccountState, af: AccountFeature, redis: Any) ->
         ai=plugin_ai,
         skills=plugin_skills,
         messages=_LiveMessageOps(state, plugin_key=af.feature_key),
+        host=plugin_host,
         identities=(
             PluginIdentityFacade(
                 state.client,
@@ -9620,6 +9693,7 @@ async def invoke_interaction_entry(
         deadline_governs=True,
         hook="on_event" if is_event_subscription and has_event_handler else "on_interaction",
         event_type=_payload_event_type(raw_payload),
+        trace=trace_id or None,
     )
     if actions is None and not buffered_messages.actions and not (is_event_subscription and has_event_handler):
         raise RuntimeError(f"模块尚未实现交互入口：{plugin_key}.{entry_key}")

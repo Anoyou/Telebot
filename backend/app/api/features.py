@@ -17,6 +17,7 @@ import logging
 
 from fastapi import APIRouter, HTTPException, Query
 
+from .. import plugin_compat
 from ..db.models.account import Account
 from ..db.models.feature import AccountFeature, Feature
 from ..db.models.plugin import InstalledPlugin
@@ -235,7 +236,7 @@ def _sanitize_chatgpt_image_config(config: dict[str, object]) -> dict[str, objec
 def _sanitize_config(config: dict[str, object], key: str | None = None) -> dict[str, object]:
     from ..services.plugin_config_secrets import mask_config_secrets
 
-    if key == "chatgpt_image":
+    if plugin_compat.uses_multi_token_config(key):
         return _sanitize_chatgpt_image_config(config)
     # 先遮罩加密信封/敏感键，再走通用 redactor。
     masked = mask_config_secrets(dict(config or {}))
@@ -249,10 +250,11 @@ def _preserve_existing_sensitive_values(
 ) -> dict[str, object]:
     merged = dict(incoming)
     existing_dict = dict(existing or {})
-    if key == "chatgpt_image":
+    multi_token = plugin_compat.uses_multi_token_config(key)
+    if multi_token:
         merged = _preserve_chatgpt_image_tokens(existing_dict, merged)
     for item_key, value in existing_dict.items():
-        if key == "chatgpt_image" and item_key == "token" and "tokens" in merged:
+        if multi_token and item_key == "token" and "tokens" in merged:
             continue
         if not is_sensitive_key(str(item_key)) and not is_secret_envelope(value):
             continue
@@ -322,10 +324,7 @@ def _preserve_chatgpt_image_tokens(
 
 
 def _normalize_feature_config(key: str, config: dict[str, object]) -> dict[str, object]:
-    normalized = dict(config)
-    if key == "codex_image" and normalized.get("model") == "gpt-5.4":
-        normalized["model"] = "gpt-5.5"
-    return normalized
+    return plugin_compat.normalize_legacy_feature_config(key, dict(config))
 
 
 # ─────────────────────────────────────────────────────

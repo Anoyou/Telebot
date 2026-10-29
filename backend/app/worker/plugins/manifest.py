@@ -69,6 +69,9 @@ class Manifest:
     # Plugin API 兼容范围（0.107.0+，如 "^1.0"）。推荐只写在 plugin.json：旧宿主的 Manifest
     # 不接受这个参数，写进 manifest.py 会在旧宿主上导入失败；宿主加载时会从 plugin.json 补齐。
     plugin_api: str | None = None
+    # 声明式只读宿主查询（0.108.0+，Plugin API 1.1）：ctx.host.read 只能读这里列出的资源，
+    # 如 ["account.admins@1", "ai.models@1"]。同 plugin_api，推荐只写在 plugin.json。
+    reads: list[str] = field(default_factory=list)
     author: str = "builtin"
     description: str = ""
     usage: str = ""
@@ -131,6 +134,7 @@ class Manifest:
             "min_telepilot_version": self.min_telepilot_version,
             "min_telebot_version": self.min_telebot_version,
             "plugin_api": self.plugin_api,
+            "reads": list(self.reads or []),
             "author": self.author,
             "description": self.description,
             "usage": self.usage,

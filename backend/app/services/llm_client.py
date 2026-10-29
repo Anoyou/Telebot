@@ -999,6 +999,26 @@ def thinking_param_style(base_url: str | None, model: str | None) -> str | None:
     return None
 
 
+def apply_plugin_extra_body(body: dict[str, Any], api_format: str) -> None:
+    """插件 ``ctx.ai.complete(extra_body=...)`` 透传（见 :mod:`.llm_extra_body`）。
+
+    该格式不支持的字段抛 ``LLMError(CAPABILITY_MISMATCH)``，由运行时跳到备用 Provider。
+    """
+
+    from . import llm_extra_body
+
+    extra = llm_extra_body.current()
+    if not extra:
+        return
+    unsupported = llm_extra_body.unsupported_for(api_format, extra)
+    if unsupported:
+        raise LLMError(
+            f"上游格式 {api_format} 不支持 extra_body 字段：{', '.join(unsupported)}",
+            scope=LLMErrorScope.CAPABILITY_MISMATCH,
+        )
+    body.update(extra)
+
+
 def apply_thinking_param(body: dict[str, Any], *, base_url: str | None, model: str | None, thinking: str | None) -> None:
     mode = str(thinking or "").strip().lower()
     if mode not in {"enabled", "disabled"}:
@@ -2053,6 +2073,7 @@ class OpenAIClient(LLMClient):
         if normalized_effort is not None:
             body["reasoning_effort"] = normalized_effort
         apply_thinking_param(body, base_url=self._base_url, model=self._model, thinking=thinking)
+        apply_plugin_extra_body(body, "chat_completions")
         # httpx 0.28+ 用 proxy=<str> 单参数；socks5 需要 httpx[socks] 安装的 socksio
         # 当 proxy_url 为空时，显式 trust_env=False 避免 httpx 读取环境变量中的
         # HTTP_PROXY / NO_PROXY（NO_PROXY 含 ::1 会导致 httpx InvalidURL 崩溃）
@@ -2214,6 +2235,7 @@ class OpenAIClient(LLMClient):
         normalized_effort = _normalize_reasoning_effort(reasoning_effort)
         if normalized_effort is not None:
             body["reasoning_effort"] = normalized_effort
+        apply_plugin_extra_body(body, "chat_completions")
 
         client_kwargs: dict[str, object] = {"timeout": _timeout_for_call(self._base_url, timeout_seconds)}
         if self._proxy_url:
@@ -2967,6 +2989,7 @@ class AnthropicClient(LLMClient):
         if normalized_temperature is not None:
             body["temperature"] = min(1.0, normalized_temperature)
         self._apply_reasoning_effort(body, reasoning_effort)
+        apply_plugin_extra_body(body, "anthropic")
         client_kwargs: dict[str, object] = {"timeout": _timeout_for_call(self._base_url, timeout_seconds)}
         if self._proxy_url:
             client_kwargs["proxy"] = self._proxy_url
@@ -3516,6 +3539,7 @@ class AnthropicClient(LLMClient):
         if normalized_temperature is not None:
             body["temperature"] = min(1.0, normalized_temperature)
         self._apply_reasoning_effort(body, reasoning_effort)
+        apply_plugin_extra_body(body, "anthropic")
 
         client_kwargs: dict[str, object] = {"timeout": _timeout_for_call(self._base_url, timeout_seconds)}
         if self._proxy_url:
@@ -3825,6 +3849,7 @@ class ResponsesClient(LLMClient):
         normalized_effort = _normalize_reasoning_effort(reasoning_effort)
         if normalized_effort is not None:
             body["reasoning"] = {"effort": normalized_effort}
+        apply_plugin_extra_body(body, "responses")
         if web_search:
             size = (web_search_context_size or "medium").lower()
             if size not in {"low", "medium", "high"}:
@@ -4389,6 +4414,7 @@ class ResponsesClient(LLMClient):
         normalized_effort = _normalize_reasoning_effort(reasoning_effort)
         if normalized_effort is not None:
             body["reasoning"] = {"effort": normalized_effort}
+        apply_plugin_extra_body(body, "responses")
         if web_search:
             size = (web_search_context_size or "medium").lower()
             if size not in {"low", "medium", "high"}:
@@ -4608,6 +4634,7 @@ class ResponsesClient(LLMClient):
         normalized_effort = _normalize_reasoning_effort(reasoning_effort)
         if normalized_effort is not None:
             body["reasoning"] = {"effort": normalized_effort}
+        apply_plugin_extra_body(body, "responses")
         body = plan_responses_body(body, self._protocol_profile)
 
         client_kwargs = self._client_kwargs(timeout_seconds)

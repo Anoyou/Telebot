@@ -9,6 +9,7 @@ from sqlalchemy import JSON, BigInteger, Boolean, DateTime, ForeignKey, Text, fu
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.orm import Mapped, mapped_column
 
+from ... import plugin_compat as _plugin_compat
 from ...feature_registry import BUILTIN_FEATURES  # noqa: F401 - 兼容旧导入路径的 re-export
 from ..base import Base
 
@@ -16,11 +17,11 @@ from ..base import Base
 JSONB_VARIANT = JSON().with_variant(postgresql.JSONB(), "postgresql")
 
 # ── 历史功能常量（各处 import 用；不再有新增必要，以后新 builtin 直接建目录即可）──
-FEATURE_AUTO_REPLY = "auto_reply"
+FEATURE_AUTO_REPLY = _plugin_compat.AUTO_REPLY
 FEATURE_FORWARD = "forward"
 FEATURE_SCHEDULER = "scheduler"
-FEATURE_AUTOREPEAT = "autorepeat"
-FEATURE_CODEX_IMAGE = "codex_image"
+FEATURE_AUTOREPEAT = _plugin_compat.AUTOREPEAT
+FEATURE_CODEX_IMAGE = _plugin_compat.CODEX_IMAGE
 
 # AccountFeature.state
 FEATURE_STATE_ACTIVE = "active"

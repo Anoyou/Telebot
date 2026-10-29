@@ -810,6 +810,7 @@ class PluginContext:
       - ``messages``：标准消息动作 facade；交互入口内为缓冲动作，后台任务/命令中为实时受控投递
       - ``identities``：群内安全公开身份 facade；匿名管理员只返回标签，不暴露原始客户端
       - ``capabilities``（只读属性，0.107.0+）：能力协商，见 :mod:`.capabilities`
+      - ``host``（0.108.0+）：声明式只读宿主查询 ``await ctx.host.read("account.admins@1")``，见 :mod:`.host_read`
 
     为避免循环 import，``rules`` / ``engine`` / ``redis`` 都用 ``Any`` 标注。
     """
@@ -831,6 +832,8 @@ class PluginContext:
     skills: Any = None  # PluginSkills
     messages: Any = None
     identities: Any = None  # PluginIdentityFacade
+    # 声明式只读宿主查询（0.108.0+）：await ctx.host.read("account.admins@1")，见 host_read 模块。
+    host: Any = None  # PluginHost
     generation: int = 0
     account_proxy_url: str | None = None
     account_proxy_error: str | None = None

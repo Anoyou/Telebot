@@ -72,6 +72,22 @@ DEPRECATIONS: tuple[Deprecation, ...] = (
         deprecated_since="0.36.0",
         removal="已下线（只保留失败提示与计数）",
     ),
+    Deprecation(
+        id="markup.raw_callback_data",
+        summary="插件动作的 reply_markup 直接写 callback_data（点击按会话范围投递，可能被其它插件或规则收到）",
+        replacement='按钮写 {"text": ..., "callback": {"data": ...}}，订阅 scope "own_buttons"（宿主签发 token 并路由回本插件）',
+        deprecated_since="0.108.0",
+        removal="Plugin API 2.0（至少保留到 0.109.0 之后）",
+        doc="docs/PLUGIN-API-REFERENCE.md#通用回调路由own_buttons",
+    ),
+    Deprecation(
+        id="payload.admin_user_ids",
+        summary="从 Event Bus payload 的 owner_user_ids / admin_user_ids 读取管理员名单（0.106.0-beta.14 临时字段）",
+        replacement='plugin.json 声明 reads: ["account.admins@1"]，用 await ctx.host.read("account.admins@1")',
+        deprecated_since="0.108.0",
+        removal="Plugin API 2.0（字段继续下发，只做登记，无法统计读取次数）",
+        doc="docs/PLUGIN-API-REFERENCE.md#宿主只读查询ctxhostread",
+    ),
 )
 
 DEPRECATION_INDEX: dict[str, Deprecation] = {item.id: item for item in DEPRECATIONS}

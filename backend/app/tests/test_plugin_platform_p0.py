@@ -189,7 +189,8 @@ def test_legacy_flags_are_generated_from_single_registry() -> None:
     for attr in LEGACY_FLAGS:
         assert getattr(loader._LiveMessageOps, attr) is True
         assert getattr(loader._InteractionEntryMessageOps, attr) is True
-    assert getattr(BufferedMessageOps, "inline_rich_edit", False) is False
+    # 0.108.0 统一执行器：缓冲 facade 返回的 inline 编辑动作同样由交互 Bot 执行。
+    assert getattr(BufferedMessageOps, "inline_rich_edit", False) is True
     assert getattr(BufferedMessageOps, "live_inline_edit", False) is False
     assert getattr(BufferedMessageOps, "streaming_edit", False) is False
     for attr in ("rich_table_compact", "rich_table_default_style", "guest_reply_markup"):

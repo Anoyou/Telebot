@@ -5,6 +5,7 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
+from .. import plugin_compat
 from ..services.llm_call_context import runtime_metadata as build_runtime_metadata
 from ..services.llm_invoke import resolved_api_format_for_call
 from ..services.redactor import redact_text
@@ -897,15 +898,17 @@ async def invoke(
             await event.edit("✗ 视频生成后端不可用：请先安装并在账号插件中启用 video_bridge，或在模板里填写可用的视频插件。")
         return
 
-    native_image_mode = command_mode == "image" and str(cfg.get("image_backend") or "codex_image") == "llm"
+    image_backend_plugin = plugin_compat.DEFAULT_IMAGE_BACKEND_PLUGIN
+    image_backend = str(cfg.get("image_backend") or image_backend_plugin)
+    native_image_mode = command_mode == "image" and image_backend == "llm"
 
-    if command_mode == "image" and str(cfg.get("image_backend") or "codex_image") == "codex_image":
+    if command_mode == "image" and image_backend == image_backend_plugin:
         dispatched = await dispatch_plugin_command(
             client,
             event,
             args,
             account_id,
-            plugin_key=str(cfg.get("image_plugin_key") or "codex_image"),
+            plugin_key=str(cfg.get("image_plugin_key") or image_backend_plugin),
             method=str(cfg.get("image_plugin_method") or "") or None,
         )
         if not dispatched:

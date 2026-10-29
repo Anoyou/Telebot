@@ -172,6 +172,13 @@
       "default": null,
       "title": "Plugin Api"
     },
+    "reads": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Reads",
+      "type": "array"
+    },
     "requires_platform_capabilities": {
       "items": {
         "enum": [
