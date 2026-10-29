@@ -12748,6 +12748,14 @@
             "title": "Capabilities",
             "type": "array"
           },
+          "core_middleware": {
+            "description": "平台内置中间件，0.109.0+",
+            "items": {
+              "$ref": "#/components/schemas/PluginCoreMiddlewareOut"
+            },
+            "title": "Core Middleware",
+            "type": "array"
+          },
           "deprecations": {
             "items": {
               "$ref": "#/components/schemas/PluginDeprecationOut"
@@ -12755,10 +12763,29 @@
             "title": "Deprecations",
             "type": "array"
           },
+          "host_resources": {
+            "description": "ctx.host.read 可读的宿主资源（含 ai.models@1 模型清单），0.109.0+",
+            "items": {
+              "$ref": "#/components/schemas/PluginHostResourceOut"
+            },
+            "title": "Host Resources",
+            "type": "array"
+          },
           "host_version": {
             "description": "当前 TelePilot 版本",
             "title": "Host Version",
             "type": "string"
+          },
+          "middleware_limits": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PluginMiddlewareLimitsOut"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "插件中间件的预算与限制，0.109.0+"
           },
           "plugin_api_version": {
             "description": "宿主提供的 Plugin API 版本（MAJOR.MINOR）",
@@ -13494,6 +13521,42 @@
         "title": "PluginConfigActionResponse",
         "type": "object"
       },
+      "PluginCoreMiddlewareOut": {
+        "properties": {
+          "critical": {
+            "default": false,
+            "description": "True 表示失败时不放行（fail-closed），只有平台中间件可以",
+            "title": "Critical",
+            "type": "boolean"
+          },
+          "name": {
+            "description": "平台内置中间件名（core.*），顺序固定、不能卸载",
+            "title": "Name",
+            "type": "string"
+          },
+          "order": {
+            "title": "Order",
+            "type": "integer"
+          },
+          "stage": {
+            "description": "outbound / transport / delivery",
+            "title": "Stage",
+            "type": "string"
+          },
+          "summary": {
+            "title": "Summary",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "stage",
+          "order",
+          "summary"
+        ],
+        "title": "PluginCoreMiddlewareOut",
+        "type": "object"
+      },
       "PluginDeprecationOut": {
         "properties": {
           "deprecated_since": {
@@ -13689,6 +13752,18 @@
               }
             ],
             "title": "Avg Ms"
+          },
+          "blocked": {
+            "default": 0,
+            "description": "插件代码同步阻塞事件循环 ≥200ms 的次数（0.109.0+）",
+            "title": "Blocked",
+            "type": "integer"
+          },
+          "blocking_ms": {
+            "default": 0,
+            "description": "同步阻塞累计毫秒（0.109.0+）；持续偏高说明该插件适合迁到独立进程",
+            "title": "Blocking Ms",
+            "type": "integer"
           },
           "calls": {
             "default": 0,
@@ -13895,6 +13970,16 @@
       },
       "PluginHookTotalsOut": {
         "properties": {
+          "blocked": {
+            "default": 0,
+            "title": "Blocked",
+            "type": "integer"
+          },
+          "blocking_ms": {
+            "default": 0,
+            "title": "Blocking Ms",
+            "type": "integer"
+          },
           "calls": {
             "default": 0,
             "title": "Calls",
@@ -13932,6 +14017,48 @@
           }
         },
         "title": "PluginHookTotalsOut",
+        "type": "object"
+      },
+      "PluginHostResourceOut": {
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "params": {
+            "description": "ctx.host.read 接受的关键字参数",
+            "items": {
+              "type": "string"
+            },
+            "title": "Params",
+            "type": "array"
+          },
+          "ref": {
+            "description": "资源引用（名称@版本），写进 plugin.json reads 后用 ctx.host.read(ref) 读取",
+            "title": "Ref",
+            "type": "string"
+          },
+          "since": {
+            "title": "Since",
+            "type": "string"
+          },
+          "summary": {
+            "title": "Summary",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "ref",
+          "name",
+          "version",
+          "summary",
+          "since"
+        ],
+        "title": "PluginHostResourceOut",
         "type": "object"
       },
       "PluginInstallHistoryOut": {
@@ -14245,6 +14372,91 @@
           "items"
         ],
         "title": "PluginLLMUsageSummaryResponse",
+        "type": "object"
+      },
+      "PluginMiddlewareLimitsOut": {
+        "properties": {
+          "chain_budget_ms": {
+            "description": "一条消息整条链的预算；超出后剩余中间件跳过",
+            "title": "Chain Budget Ms",
+            "type": "integer"
+          },
+          "default_timeout_ms": {
+            "title": "Default Timeout Ms",
+            "type": "integer"
+          },
+          "inbound_patch_fields": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Inbound Patch Fields",
+            "type": "array"
+          },
+          "max_chain_length": {
+            "description": "每个账号每个阶段最多生效的插件中间件数",
+            "title": "Max Chain Length",
+            "type": "integer"
+          },
+          "max_timeout_ms": {
+            "title": "Max Timeout Ms",
+            "type": "integer"
+          },
+          "min_timeout_ms": {
+            "title": "Min Timeout Ms",
+            "type": "integer"
+          },
+          "order_max": {
+            "title": "Order Max",
+            "type": "integer"
+          },
+          "order_min": {
+            "title": "Order Min",
+            "type": "integer"
+          },
+          "outbound_action_types": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Outbound Action Types",
+            "type": "array"
+          },
+          "outbound_mutable_fields": {
+            "description": "outbound 中间件可以改的动作字段；改了别的字段整次修改回滚",
+            "items": {
+              "type": "string"
+            },
+            "title": "Outbound Mutable Fields",
+            "type": "array"
+          },
+          "stages": {
+            "description": "插件可声明的阶段",
+            "items": {
+              "type": "string"
+            },
+            "title": "Stages",
+            "type": "array"
+          },
+          "stream_preview_timeout_ms": {
+            "description": "stream_preview（流式中间态）每个中间件的时限",
+            "title": "Stream Preview Timeout Ms",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "stages",
+          "default_timeout_ms",
+          "min_timeout_ms",
+          "max_timeout_ms",
+          "stream_preview_timeout_ms",
+          "chain_budget_ms",
+          "max_chain_length",
+          "order_min",
+          "order_max",
+          "outbound_action_types",
+          "outbound_mutable_fields",
+          "inbound_patch_fields"
+        ],
+        "title": "PluginMiddlewareLimitsOut",
         "type": "object"
       },
       "PluginRepoBulkUpdateItem": {
@@ -21447,7 +21659,7 @@
   },
   "info": {
     "title": "TelePilot",
-    "version": "0.108.0-beta.1"
+    "version": "0.109.0-beta.1"
   },
   "openapi": "3.1.0",
   "paths": {
@@ -40299,7 +40511,7 @@
     },
     "/api/plugins/capabilities": {
       "get": {
-        "description": "宿主能力注册表、Plugin API 版本与弃用登记（插件作者与兼容检查用）。",
+        "description": "宿主能力注册表、Plugin API 版本、弃用登记、ctx.host.read 资源（含模型清单 ai.models@1）与中间件限制。",
         "operationId": "get_plugin_capabilities_api_plugins_capabilities_get",
         "parameters": [
           {

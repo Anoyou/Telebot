@@ -222,7 +222,37 @@ class PluginMetadataSchema(BaseModel):
     plugin_api: str | None = None
     # 声明式只读宿主查询（0.108.0+）：ctx.host.read 可读资源，如 ["account.admins@1"]；旧宿主忽略。
     reads: list[str] = Field(default_factory=list)
+    # 消息管线中间件与出站渲染声明（0.109.0+，Plugin API 1.2）；旧宿主忽略。
+    middleware: list[dict[str, Any]] = Field(default_factory=list)
+    render_profile: dict[str, Any] | None = None
     tags: list[str] = Field(default_factory=list)
+
+    @field_validator("render_profile")
+    @classmethod
+    def _validate_render_profile(cls, v: dict[str, Any] | None) -> dict[str, Any] | None:
+        from .render_profile import RenderProfileError, normalize_render_profile
+
+        try:
+            return normalize_render_profile(v, strict=True)
+        except RenderProfileError as exc:
+            raise ValueError(str(exc)) from exc
+
+    @model_validator(mode="after")
+    def _validate_middleware(self) -> PluginMetadataSchema:
+        if not self.middleware:
+            return self
+        from ..worker.plugins.middleware import MiddlewareDeclarationError, parse_middleware
+
+        try:
+            parse_middleware(
+                self.middleware,
+                plugin_key=str(self.name or self.key or ""),
+                permissions=self.permissions,
+                strict=True,
+            )
+        except MiddlewareDeclarationError as exc:
+            raise ValueError(f"middleware 声明不合法：{exc}") from exc
+        return self
 
     @field_validator("reads")
     @classmethod

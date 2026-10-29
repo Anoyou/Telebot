@@ -13,7 +13,7 @@ from app.services.llm_dto import LLMProviderDTO
 from app.services.llm_protocol import ModelResponse, ModelUsage, StopReason, TextContent
 from app.util.proxy import ProxyConfigError
 from app.worker.plugins import ai_facade
-from app.worker.plugins.ai_facade import AIQuotaError, AIUnavailableError, PluginAI
+from app.worker.plugins.ai_facade import AICapabilityError, AIQuotaError, AIUnavailableError, PluginAI
 
 
 def _provider(
@@ -1199,3 +1199,42 @@ async def test_fetch_bot_image_wraps_loader_errors() -> None:
     facade = PluginAI(account_id=7, plugin_key="demo", allow_vision=True, bot_file_loader=_file_loader)
     with pytest.raises(AIUnavailableError, match="读取图片失败"):
         await facade.fetch_bot_image("file-1")
+
+
+@pytest.mark.asyncio
+async def test_stream_complete_passes_extra_body_only_during_request(monkeypatch) -> None:
+    """0.109.0：stream_complete 也支持 extra_body；只在客户端构建请求体期间生效。"""
+
+    from app.services import llm_extra_body
+
+    seen: list[Any] = []
+
+    class _Client:
+        async def stream_complete(self, *_args, **_kwargs):
+            seen.append(llm_extra_body.current())
+            yield LLMStreamChunk(delta="a", model="m")
+            seen.append(llm_extra_body.current())
+            yield LLMStreamChunk(delta="", done=True, input_tokens=1, output_tokens=1, model="m")
+
+    facade, *_ = _install_stream_test_doubles(monkeypatch, _Client(), api_format="chat_completions")
+    deltas = []
+    async for delta in facade.stream_complete("sys", "hi", extra_body={"reasoning_effort": "low"}):
+        deltas.append(delta)
+        assert llm_extra_body.current() is None  # 不泄漏到插件代码
+    assert deltas == ["a"]
+    assert seen[0] == {"reasoning_effort": "low"}
+
+
+@pytest.mark.asyncio
+async def test_stream_complete_extra_body_rejections(monkeypatch) -> None:
+    class _Client:
+        async def stream_complete(self, *_args, **_kwargs):
+            yield LLMStreamChunk(delta="a", model="m")
+
+    facade, *_ = _install_stream_test_doubles(monkeypatch, _Client(), api_format="responses")
+    with pytest.raises(AIUnavailableError, match="平台字段"):
+        async for _ in facade.stream_complete("sys", "hi", extra_body={"model": "x"}):
+            pass
+    with pytest.raises(AICapabilityError, match="reasoning_effort"):
+        async for _ in facade.stream_complete("sys", "hi", extra_body={"reasoning_effort": "low"}):
+            pass

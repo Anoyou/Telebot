@@ -19,11 +19,18 @@ except ImportError:  # pragma: no cover - production dependency, retained for st
     _tl_functions = None
     _tl_types = None
 
-from .rich_compact import (
-    apply_table_style_defaults,
+# 表格样式只经 core.* 中间件（render_profile 模块）调用 rich_compact（0.109.0）。
+from .render_profile import (
+    apply_transport_table_defaults as apply_table_style_defaults,
+)
+from .render_profile import (
+    has_compact_tables as rich_message_has_compact_tables,
+)
+from .render_profile import (
     is_compact_unsupported_error,
-    rich_message_has_compact_tables,
-    strip_compact_tables,
+)
+from .render_profile import (
+    strip_compact_for_retry as strip_compact_tables,
 )
 from .rich_message import (
     InputRichMessage,

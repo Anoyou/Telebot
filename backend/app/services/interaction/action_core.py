@@ -247,8 +247,12 @@ async def run_action_batch(
     limit: int = INTERACTION_ACTION_LIMIT,
     prepare_action: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
     preprocess: Callable[[dict[str, Any]], Awaitable[dict[str, Any]]] | None = None,
+    after_action: Callable[[dict[str, Any], bool], Awaitable[None]] | None = None,
 ) -> ActionBatchResult:
     """Shared dispatch loop. Handlers return True on success, False on failure.
+
+    ``after_action``（0.109.0）：每个动作执行（或被拒绝）后回调 ``(action, ok)``，供 delivered
+    中间件收集投递结果；回调异常不影响后续动作。
 
     ``preprocess``（0.108.0）：渠道无关的异步预处理（回调 token 签发、``bot_api_extra`` 校验），
     被拒绝的动作交给 ``handlers.on_rejected``，不再进入渠道 handler；通过校验的
@@ -284,6 +288,7 @@ async def run_action_batch(
             if handlers.on_rejected is not None:
                 await handlers.on_rejected(action)
             result.failed += 1
+            await _after(after_action, action, False)
             continue
         handler = _handler_for(kind, handlers)
         extra_token = activate_bot_api_extra(action)
@@ -301,7 +306,23 @@ async def run_action_batch(
                 result.skipped += 1
         else:
             result.failed += 1
+        await _after(after_action, action, bool(ok))
     return result
+
+
+async def _after(
+    callback: Callable[[dict[str, Any], bool], Awaitable[None]] | None,
+    action: dict[str, Any],
+    ok: bool,
+) -> None:
+    if callback is None:
+        return
+    try:
+        await callback(action, ok)
+    except Exception:  # noqa: BLE001 - 结果回调（delivered 中间件收集）不能影响投递
+        import logging
+
+        logging.getLogger(__name__).debug("after_action 回调失败", exc_info=True)
 
 
 async def _dispatch_one(

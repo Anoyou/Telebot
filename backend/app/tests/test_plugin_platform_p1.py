@@ -428,7 +428,7 @@ async def test_live_facade_has_every_builder_and_applies(monkeypatch: pytest.Mon
 
 
 def test_new_capabilities_registered() -> None:
-    assert PLUGIN_API_VERSION == "1.1"
+    assert PLUGIN_API_VERSION >= "1.1"
     names = {item.name: item for item in caps_mod.CAPABILITIES}
     for name in (
         "messages.callback_routing",
@@ -442,7 +442,7 @@ def test_new_capabilities_registered() -> None:
         "host.read.plugin.stats@1",
         "runtime.hook_trace",
     ):
-        assert names[name].since == caps_mod._THIS_RELEASE, name
+        assert names[name].since == caps_mod._P1_RELEASE, name
         assert names[name].plugin_api == "1.1"
     assert names["runtime.capabilities"].since == "0.107.0-beta.1"
     ctx = PluginContext(account_id=1, feature_key="demo", messages=BufferedMessageOps())

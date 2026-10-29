@@ -14,7 +14,9 @@
 - **最终一次走标准动作**：``finish()`` 先停掉节流器并等在途请求结束，再通过
   ``ctx.messages.apply`` 发出最终 ``edit_message``（或草稿模式下的 ``send_message``），
   因此 Rich Message、紧凑表格、表格默认样式、inline 消息编辑、动作记录与 Trace 全部沿用
-  既有链路；最终编辑失败会在结果的 ``errors`` 里带回原因。
+  既有链路（含出站中间件）；最终编辑失败会在结果的 ``errors`` 里带回原因。
+- **中间态过中间件**（0.109.0）：声明了 ``"action_types": ["stream_preview"]`` 的 outbound 中间件
+  也会处理每次节流后的中间态文本（每个 50 ms，失败按原文）；``mw.reject`` 跳过本次中间编辑。
 
 目标：
 
@@ -70,8 +72,11 @@ class PluginStreamEditor:
         render: Callable[[str], str] | None = None,
         max_preview_chars: int = STREAM_PREVIEW_MAX_CHARS,
         dry_run: bool = False,
+        preview_filter: Callable[[str, int | None], Awaitable[str | None]] | None = None,
     ) -> None:
         self._apply = apply
+        # 中间态过 outbound 中间件（0.109.0，只跑声明了 stream_preview 的，每个 50ms）；None 表示跳过本次。
+        self._preview_filter = preview_filter
         self._token_provider = token_provider
         self.chat_id = int(chat_id) if chat_id is not None else None
         self.message_id = int(message_id) if message_id is not None else None
@@ -145,6 +150,16 @@ class PluginStreamEditor:
         token = await self._ensure_token()
         if not token:
             return
+        if self._preview_filter is not None:
+            try:
+                filtered = await self._preview_filter(text, self.chat_id)
+            except Exception:  # noqa: BLE001 - 中间件管线 fail-open
+                log.debug("stream preview middleware failed", exc_info=True)
+                filtered = text
+            if filtered is None:
+                self.stats["preview_rejected"] = int(self.stats.get("preview_rejected") or 0) + 1
+                return
+            text = filtered
         preview = _preview(text, self._max_preview_chars)
         parse_mode = "HTML" if self.parse_mode == "html" else None
         if self.mode == "draft":
@@ -229,6 +244,7 @@ class PluginStreamEditor:
         reply_markup: dict[str, Any] | None = None,
         compact_tables: bool | None = None,
         reply_to_message_id: int | None = None,
+        render_profile: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """停掉节流器并通过标准动作发出最终内容；返回 ``ctx.messages.apply`` 的结果。
 
@@ -267,6 +283,8 @@ class PluginStreamEditor:
             action["rich_message"] = rich_message
             if compact_tables:
                 action["compact_tables"] = True
+            if render_profile:
+                action["render_profile"] = dict(render_profile)
         else:
             final_text = self._text if text is None else str(text)
             if not final_text.strip():

@@ -81,9 +81,17 @@ if not result.get("ok"):
 
 > 中间态建议保持纯文本：半截 Markdown / HTML 很容易渲染失败（Telegram 会拒绝整条编辑）。最终格式放到 `finish()` 里一次性给出。
 
+`finish()` 另接受 `render_profile={"table": {"compact": True}}`（0.109.0-beta.1+，等价于 `compact_tables=True` 的声明式写法）。
+
+## 与消息管线中间件的关系（0.109.0-beta.1+）
+
+- `finish()` 的最终一次是标准动作，经过完整的 outbound 中间件链（署名、敏感词打码、`render_profile` 等），与普通 `ctx.messages.apply` 一致。
+- 中间态默认**不**经过中间件（避免每秒调用一串插件）；在 `match.action_types` 里显式写了 `"stream_preview"` 的 outbound 中间件会处理每次真正发出的中间态文本（每个钩子 50 ms，失败按原文继续），`mw.reject()` 跳过这一次中间编辑（`stats["preview_rejected"]` 计数）。敏感词打码这类必须覆盖中间态的需求用它，见 `examples/plugins/word_guard_mw`。
+
 ## 与超时、fallback 的关系
 
 - `ctx.ai.stream_complete()` 开始输出后不会中途切 Provider；首个 delta 之前失败时平台按 fallback 链切换。
+- `ctx.ai.stream_complete(..., extra_body={...})`（0.109.0-beta.1+）与 `complete()` 同一套白名单；选中 Provider 的格式不支持某个字段时直接抛 `AICapabilityError`（流式不换 Provider）。
 - `ctx.ai.complete()` 的 `timeout_seconds` 自 0.106.0-beta.20 起是**整次调用的总时限**：重试和备用 Provider 都在这段时间内完成，主 Provider 超时 / 不可用时会直接切备用（见 [PLUGIN-AI.md](./PLUGIN-AI.md#quota-与脱敏)）。
 - 插件自己的 handler 时限仍然有效：`stream_edit()` 不会替你截断流，需要时用 `asyncio.timeout(...)` 包住，并在超时分支里 `await editor.abort()` 后走失败提示。
 

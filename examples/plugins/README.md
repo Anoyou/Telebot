@@ -8,6 +8,13 @@
 - `event_bus_demo`：最终版主模板，演示 `usage` / `event_subscriptions` / `capabilities.telegram_native_raw`、message/command/callback/inline/payment fixtures、`answer_inline_query` 与 `settlement`。
 - `webhook_receiver`：入站 Webhook 完整示例，订阅 `default` Hook、读取标准 Webhook payload，并把订单摘要发送到配置的 Telegram Chat ID。
 
+## 消息管线中间件示例（0.109.0+，Plugin API 1.2）
+
+- `word_guard_mw`：敏感词守卫。`inbound` 丢弃含敏感词的入站消息，`outbound` 对所有插件发出的消息打码或 `mw.reject` 拒绝，`stream_preview` 让流式中间态也打码。
+- `signature_mw`：统一署名。`outbound` 给交互 Bot 发出的文本加署名、用 `render_profile` 让所有插件的表格紧凑，`delivered` 统计投递成功 / 失败。
+
+中间件声明只写在 `plugin.json` 的 `middleware`，需要 `permissions: ["message_middleware"]`；契约见 `docs/PLUGIN-API-REFERENCE.md`「消息管线中间件（middleware）」。
+
 ## Facade 兼容示例
 
 - `with_http`：最小 HTTP facade 示例，演示 `manifest.py` 如何声明 `external_http`、`allowed_hosts`，以及管理员命令兼容入口如何通过 `ctx.http` 发起受控请求。它不是公共群互动插件的新模板。

@@ -2973,7 +2973,7 @@ export interface paths {
         };
         /**
          * Get Plugin Capabilities
-         * @description 宿主能力注册表、Plugin API 版本与弃用登记（插件作者与兼容检查用）。
+         * @description 宿主能力注册表、Plugin API 版本、弃用登记、ctx.host.read 资源（含模型清单 ai.models@1）与中间件限制。
          */
         get: operations["get_plugin_capabilities_api_plugins_capabilities_get"];
         put?: never;
@@ -9482,13 +9482,25 @@ export interface components {
         PluginCapabilitiesResponse: {
             /** Capabilities */
             capabilities: components["schemas"]["PluginCapabilityOut"][];
+            /**
+             * Core Middleware
+             * @description 平台内置中间件，0.109.0+
+             */
+            core_middleware?: components["schemas"]["PluginCoreMiddlewareOut"][];
             /** Deprecations */
             deprecations: components["schemas"]["PluginDeprecationOut"][];
+            /**
+             * Host Resources
+             * @description ctx.host.read 可读的宿主资源（含 ai.models@1 模型清单），0.109.0+
+             */
+            host_resources?: components["schemas"]["PluginHostResourceOut"][];
             /**
              * Host Version
              * @description 当前 TelePilot 版本
              */
             host_version: string;
+            /** @description 插件中间件的预算与限制，0.109.0+ */
+            middleware_limits?: components["schemas"]["PluginMiddlewareLimitsOut"] | null;
             /**
              * Plugin Api Version
              * @description 宿主提供的 Plugin API 版本（MAJOR.MINOR）
@@ -9752,6 +9764,29 @@ export interface components {
             /** Toast */
             toast?: string | null;
         };
+        /** PluginCoreMiddlewareOut */
+        PluginCoreMiddlewareOut: {
+            /**
+             * Critical
+             * @description True 表示失败时不放行（fail-closed），只有平台中间件可以
+             * @default false
+             */
+            critical: boolean;
+            /**
+             * Name
+             * @description 平台内置中间件名（core.*），顺序固定、不能卸载
+             */
+            name: string;
+            /** Order */
+            order: number;
+            /**
+             * Stage
+             * @description outbound / transport / delivery
+             */
+            stage: string;
+            /** Summary */
+            summary: string;
+        };
         /** PluginDeprecationOut */
         PluginDeprecationOut: {
             /** Deprecated Since */
@@ -9832,6 +9867,18 @@ export interface components {
             account_id: number;
             /** Avg Ms */
             avg_ms?: number | null;
+            /**
+             * Blocked
+             * @description 插件代码同步阻塞事件循环 ≥200ms 的次数（0.109.0+）
+             * @default 0
+             */
+            blocked: number;
+            /**
+             * Blocking Ms
+             * @description 同步阻塞累计毫秒（0.109.0+）；持续偏高说明该插件适合迁到独立进程
+             * @default 0
+             */
+            blocking_ms: number;
             /**
              * Calls
              * @default 0
@@ -9950,6 +9997,16 @@ export interface components {
         /** PluginHookTotalsOut */
         PluginHookTotalsOut: {
             /**
+             * Blocked
+             * @default 0
+             */
+            blocked: number;
+            /**
+             * Blocking Ms
+             * @default 0
+             */
+            blocking_ms: number;
+            /**
              * Calls
              * @default 0
              */
@@ -9984,6 +10041,27 @@ export interface components {
              * @default 0
              */
             timeout: number;
+        };
+        /** PluginHostResourceOut */
+        PluginHostResourceOut: {
+            /** Name */
+            name: string;
+            /**
+             * Params
+             * @description ctx.host.read 接受的关键字参数
+             */
+            params?: string[];
+            /**
+             * Ref
+             * @description 资源引用（名称@版本），写进 plugin.json reads 后用 ctx.host.read(ref) 读取
+             */
+            ref: string;
+            /** Since */
+            since: string;
+            /** Summary */
+            summary: string;
+            /** Version */
+            version: number;
         };
         /** PluginInstallHistoryOut */
         PluginInstallHistoryOut: {
@@ -10080,6 +10158,48 @@ export interface components {
         PluginLLMUsageSummaryResponse: {
             /** Items */
             items: components["schemas"]["PluginLLMUsageSummaryItem"][];
+        };
+        /** PluginMiddlewareLimitsOut */
+        PluginMiddlewareLimitsOut: {
+            /**
+             * Chain Budget Ms
+             * @description 一条消息整条链的预算；超出后剩余中间件跳过
+             */
+            chain_budget_ms: number;
+            /** Default Timeout Ms */
+            default_timeout_ms: number;
+            /** Inbound Patch Fields */
+            inbound_patch_fields: string[];
+            /**
+             * Max Chain Length
+             * @description 每个账号每个阶段最多生效的插件中间件数
+             */
+            max_chain_length: number;
+            /** Max Timeout Ms */
+            max_timeout_ms: number;
+            /** Min Timeout Ms */
+            min_timeout_ms: number;
+            /** Order Max */
+            order_max: number;
+            /** Order Min */
+            order_min: number;
+            /** Outbound Action Types */
+            outbound_action_types: string[];
+            /**
+             * Outbound Mutable Fields
+             * @description outbound 中间件可以改的动作字段；改了别的字段整次修改回滚
+             */
+            outbound_mutable_fields: string[];
+            /**
+             * Stages
+             * @description 插件可声明的阶段
+             */
+            stages: string[];
+            /**
+             * Stream Preview Timeout Ms
+             * @description stream_preview（流式中间态）每个中间件的时限
+             */
+            stream_preview_timeout_ms: number;
         };
         /**
          * PluginRepoBulkUpdateItem

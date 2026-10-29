@@ -13,6 +13,7 @@ loader 在扫描目录阶段读取这个常量来决定加载方式、显示名�
 - ``requires_features``：声明依赖的其它插件 key 列表（先注册了才能加载本插件）
 - ``min_telepilot_version``：声明最低 TelePilot 版本（0.107.0 起可带 beta 号）；旧 ``min_telebot_version`` 保留兼容（已弃用）
 - ``plugin_api``：Plugin API 兼容范围（0.107.0+，推荐只写在 plugin.json）
+- ``middleware`` / ``render_profile``：消息管线中间件与出站渲染声明（0.109.0+，推荐只写在 plugin.json）
 - ``config_schema``：``rule.config`` 的 JSON Schema，前端可据此生成动态表单
 - ``config_actions``：配置页动作声明，前端按声明渲染按钮，后端调插件 ``on_config_action``
 - ``category``：模块身份分类（interactive / automation / utility）
@@ -72,6 +73,10 @@ class Manifest:
     # 声明式只读宿主查询（0.108.0+，Plugin API 1.1）：ctx.host.read 只能读这里列出的资源，
     # 如 ["account.admins@1", "ai.models@1"]。同 plugin_api，推荐只写在 plugin.json。
     reads: list[str] = field(default_factory=list)
+    # 消息管线中间件声明（0.109.0+，Plugin API 1.2，见 middleware 模块）。同 plugin_api，推荐只写在 plugin.json。
+    middleware: list[dict[str, Any]] = field(default_factory=list)
+    # 出站渲染声明（0.109.0+），如 {"table": {"compact": true}}；由 core.render_profile 读取。推荐只写在 plugin.json。
+    render_profile: dict[str, Any] | None = None
     author: str = "builtin"
     description: str = ""
     usage: str = ""
@@ -135,6 +140,8 @@ class Manifest:
             "min_telebot_version": self.min_telebot_version,
             "plugin_api": self.plugin_api,
             "reads": list(self.reads or []),
+            "middleware": list(self.middleware or []),
+            "render_profile": self.render_profile,
             "author": self.author,
             "description": self.description,
             "usage": self.usage,

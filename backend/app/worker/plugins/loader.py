@@ -82,6 +82,7 @@ from ...services import (
     recent_message_anchor,
     userbot_rich_message,
 )
+from ...services import render_profile as core_render
 from ...services.action_tap import (
     ACTION_EVENT_STATUS_DRY_RUN,
     ACTION_EVENT_STATUS_FAILED,
@@ -126,7 +127,6 @@ from ...services.interaction.delivery import (
 )
 from ...services.rate_limit_service import get_effective
 from ...services.redactor import redact_text
-from ...services.rich_compact import COMPACT_TABLES_ACTION_KEY, apply_compact_tables
 from ...settings import settings as app_settings
 from ...util.sudo_permissions import sudo_chat_allowed
 from ..command import (
@@ -138,7 +138,8 @@ from ..ipc import RuntimeLogPayload
 from ..ratelimit.engine import RateLimitEngine
 from ..ratelimit.humanize import HumanizeOpts, simulate_read, simulate_typing
 from ..runtime_log import push_runtime_log_bounded
-from . import plugin_stats
+from . import blocking_monitor, plugin_stats
+from . import middleware as plugin_middleware
 from .base import (
     Plugin,
     PluginContext,
@@ -934,6 +935,16 @@ async def _dispatch_userbot_event_bus_matches(
     failed_count = 0
     consumed_plugin_keys: set[str] = set()
     trace = dispatch.trace
+    # inbound 中间件（0.109.0）：信封生成之后、按订阅分发之前跑一次；丢弃时所有订阅插件都收不到。
+    event_payload = dispatch.event_payload
+    inbound = await _run_inbound_middleware(state, event_payload, source="userbot", trace=trace)
+    if inbound is not None:
+        if inbound.dropped is not None:
+            dropped_keys = {
+                str(getattr(decision, "plugin_key", "") or "").strip() for decision in dispatch.matched_decisions
+            }
+            return 0, 0, frozenset(key for key in dropped_keys if key)
+        event_payload = inbound.payload
     for decision in dispatch.matched_decisions:
         plugin_key = str(getattr(decision, "plugin_key", "") or "").strip()
         entry_key = str(getattr(decision, "entry_key", "") or "").strip()
@@ -986,7 +997,7 @@ async def _dispatch_userbot_event_bus_matches(
             )
             continue
         consumed_plugin_keys.add(plugin_key)
-        payload = _userbot_event_payload_for_plugin(dispatch.event_payload, inst, plugin_key)
+        payload = _userbot_event_payload_for_plugin(event_payload, inst, plugin_key)
         payload.setdefault("trigger", {})
         if isinstance(payload["trigger"], dict):
             payload["trigger"].update(
@@ -1678,7 +1689,13 @@ async def _invoke_userbot_event_bus_entry(
         actions = []
     if not isinstance(actions, list) or not all(isinstance(item, dict) for item in actions):
         raise TypeError("Event Bus 入口必须返回 list[dict] 标准动作")
-    return _normalize_interaction_actions([*buffered_messages.actions, *actions], default_send_via=["userbot_reply"])
+    return await _finalize_plugin_actions(
+        state,
+        [*buffered_messages.actions, *actions],
+        plugin_key=plugin_key,
+        default_send_via=["userbot_reply"],
+        trace=trace_id or None,
+    )
 
 
 def _userbot_event_payload_for_plugin(
@@ -2546,13 +2563,23 @@ async def _apply_userbot_event_bus_actions(
         on_truncated=_on_truncated,
         on_rejected=_on_rejected,
     )
+    delivered: list[dict[str, Any]] = []
+
+    async def _after_action(action: dict[str, Any], ok: bool) -> None:
+        if plugin_middleware.wants_delivered(action):
+            delivered.append(plugin_middleware.delivered_summary(action, ok=ok))
+
     batch = await run_action_batch(
         list(actions or []),
         handlers,
         limit=INTERACTION_ACTION_LIMIT,
         prepare_action=_prepare,
         preprocess=_preprocess,
+        after_action=_after_action,
     )
+    if delivered:
+        # delivered 中间件：投递结果确定之后异步执行，不阻塞投递。
+        plugin_middleware.schedule_delivered(state, delivered, trace=trace)
     if return_result:
         # run_action_batch 会复制动作；执行器挂在副本上的失败原因在这里收集。
         batch.errors = _collect_action_errors(prepared)
@@ -5823,6 +5850,24 @@ def _merge_static_plugin_api(path: Path, manifest: Manifest) -> None:
                 manifest.reads = [str(item) for item in reads if str(item or "").strip()]
             except Exception:  # noqa: BLE001 - 旧式 manifest 替身不可写时忽略
                 log.debug("写入 manifest.reads 失败 plugin=%s", path.name, exc_info=True)
+    for field_name in ("middleware", "render_profile"):
+        # 0.109.0：中间件与渲染声明同样以 plugin.json 为唯一可信来源。
+        if getattr(manifest, field_name, None):
+            continue
+        metadata_path = path / "plugin.json"
+        try:
+            raw = json.loads(metadata_path.read_text(encoding="utf-8")) if metadata_path.is_file() else {}
+        except (OSError, json.JSONDecodeError):
+            raw = {}
+        value = raw.get(field_name) if isinstance(raw, dict) else None
+        if field_name == "middleware" and not isinstance(value, list):
+            continue
+        if field_name == "render_profile" and not isinstance(value, dict):
+            continue
+        try:
+            setattr(manifest, field_name, value)
+        except Exception:  # noqa: BLE001 - 旧式 manifest 替身不可写时忽略
+            log.debug("写入 manifest.%s 失败 plugin=%s", field_name, path.name, exc_info=True)
     if getattr(manifest, "min_telebot_version", None) and not getattr(manifest, "min_telepilot_version", None):
         note_deprecated("manifest.min_telebot_version", plugin_key=str(getattr(manifest, "key", "") or path.name))
 
@@ -6458,6 +6503,8 @@ async def _invoke_plugin_with_resilience(
             factory,
             deadline_at_ms=deadline_at_ms,
             deadline_governs=deadline_governs,
+            hook=hook,
+            event_type=event_type,
         )
     except asyncio.CancelledError:
         raise
@@ -6553,6 +6600,8 @@ async def _invoke_plugin_guarded(
     *,
     deadline_at_ms: int | None = None,
     deadline_governs: bool = False,
+    hook: str = "invoke",
+    event_type: str | None = None,
 ) -> Any:
     if plugin_update_in_progress(_installed_dir(), plugin_key, state.account_id):
         raise RuntimeError(f"PLUGIN_UPDATE_IN_PROGRESS: {plugin_key}")
@@ -6573,7 +6622,17 @@ async def _invoke_plugin_guarded(
         raise TimeoutError(f"PLUGIN_INVOKE_TIMEOUT: {plugin_key}")
 
     try:
-        result = await asyncio.wait_for(factory(), timeout=timeout)
+        # 同步阻塞检测（0.109.0）：插件代码单步阻塞事件循环 ≥200ms 记到该插件的 blocking_ms。
+        result = await asyncio.wait_for(
+            blocking_monitor.probe(
+                factory(),
+                account_id=state.account_id,
+                plugin_key=plugin_key,
+                hook=hook,
+                event_type=event_type,
+            ),
+            timeout=timeout,
+        )
     except asyncio.CancelledError:
         raise
     except Exception:
@@ -6650,7 +6709,13 @@ class _LiveMessageOps:
         self.actions: list[dict[str, Any]] = []
 
     async def apply(self, actions: list[dict[str, Any]], *, entry_key: str | None = None) -> dict[str, Any]:
-        normalized = _normalize_interaction_actions(actions, default_send_via=self._default_send_via)
+        normalized = await _finalize_plugin_actions(
+            self._state,
+            actions,
+            plugin_key=self._plugin_key,
+            default_send_via=self._default_send_via,
+            trace=self._trace,
+        )
         if not normalized:
             return {
                 "ok": True,
@@ -6746,10 +6811,20 @@ class _LiveMessageOps:
 
         state = self._state
         context = state.contexts.get(self._plugin_key)
+        plugin_key = self._plugin_key
+        trace = self._trace
+
+        async def _preview_filter(text: str, chat_id: Any) -> str | None:
+            # 流式中间态也过 outbound 中间件（只有显式声明 stream_preview 的，每个 50ms）。
+            return await plugin_middleware.run_stream_preview(
+                state, text, source_plugin_key=plugin_key, chat_id=chat_id, trace=trace
+            )
+
         return PluginStreamEditor(
             apply=self.apply,
             token_provider=lambda: _interaction_bot_token_for_account(state.account_id),
             dry_run=_plugin_dev_mode_dry_run_enabled(context),
+            preview_filter=_preview_filter,
             **kwargs,
         )
 
@@ -9546,8 +9621,13 @@ def _normalize_interaction_action(
     raw: dict[str, Any],
     *,
     default_send_via: list[str] | None = None,
+    render: bool = True,
 ) -> dict[str, Any]:
-    """保持旧动作兼容，同时给新版发送动作补齐默认发送通道。"""
+    """保持旧动作兼容，同时给新版发送动作补齐默认发送通道。
+
+    ``render=True``（默认）时顺带执行 ``core.render_profile`` / ``core.rich_compact``；出站中间件
+    管线（:func:`_finalize_plugin_actions`）传 ``render=False``，等插件中间件跑完再执行。
+    """
 
     action = dict(raw)
     raw_channel_selector = _raw_interaction_channel_selector(action)
@@ -9566,26 +9646,13 @@ def _normalize_interaction_action(
             action["channel_selector"] = raw_channel_selector
     if isinstance(action.get("settlement"), dict):
         action["settlement"] = dict(action["settlement"])
-    if COMPACT_TABLES_ACTION_KEY in action:
-        _apply_action_compact_tables(action)
+    if render:
+        # core.render_profile + core.rich_compact：compact_tables / render_profile 只在平台内部消费，
+        # 不会透传给 Telegram；未声明时 rich_message 保持原样（与旧版本字节级一致）。
+        core_render.apply_outbound_core(action)
+    else:
+        core_render.absorb_legacy_compact(action)
     return action
-
-
-def _apply_action_compact_tables(action: dict[str, Any]) -> None:
-    """``compact_tables: true``（Bot API 10.3）→ 把 rich_message 里的表格改为紧凑表格。
-
-    动作级开关只在平台内部消费，不会透传给 Telegram；未设置或非 True 时 rich_message
-    保持原样（与旧版本字节级一致）。
-    """
-
-    enabled = action.pop(COMPACT_TABLES_ACTION_KEY, None) is True
-    rich_message = action.get("rich_message")
-    if not enabled or not isinstance(rich_message, dict):
-        return
-    try:
-        action["rich_message"] = apply_compact_tables(rich_message)
-    except Exception:  # noqa: BLE001 - 紧凑排版只是格式增强，失败时保持原样发送
-        log.warning("compact_tables 转换失败，按原样发送 rich_message", exc_info=True)
 
 
 def _raw_interaction_channel_selector(action: dict[str, Any]) -> Any:
@@ -9606,9 +9673,10 @@ def _normalize_interaction_actions(
     actions: list[dict[str, Any]],
     *,
     default_send_via: list[str] | None = None,
+    render: bool = True,
 ) -> list[dict[str, Any]]:
     return [
-        _normalize_interaction_action(item, default_send_via=default_send_via)
+        _normalize_interaction_action(item, default_send_via=default_send_via, render=render)
         for item in actions
         if isinstance(item, dict)
     ]
@@ -9674,6 +9742,12 @@ async def invoke_interaction_entry(
 
         call_log = _trace_log
     call_ctx = replace(ctx, messages=buffered_messages, client=call_client, log=call_log)
+    inbound = await _run_inbound_middleware(state, raw_payload, source="interaction_bot", trace=trace_id or None)
+    if inbound is not None:
+        if inbound.dropped is not None:
+            # inbound 中间件丢弃了事件：插件不调用，也没有动作。
+            return []
+        raw_payload = inbound.payload
     plugin_payload = attach_tp_event(raw_payload)
 
     async def _call_handler() -> Any:
@@ -9701,7 +9775,100 @@ async def invoke_interaction_entry(
         actions = []
     if not isinstance(actions, list) or not all(isinstance(item, dict) for item in actions):
         raise TypeError("交互入口必须返回 list[dict] 标准动作")
-    return _normalize_interaction_actions([*buffered_messages.actions, *actions], default_send_via=default_send_via)
+    return await _finalize_plugin_actions(
+        state,
+        [*buffered_messages.actions, *actions],
+        plugin_key=plugin_key,
+        default_send_via=default_send_via,
+        trace=trace_id or None,
+    )
+
+
+_INBOUND_CACHE_SIZE = 64
+
+
+async def _run_inbound_middleware(
+    state: Any,
+    payload: dict[str, Any],
+    *,
+    source: str,
+    trace: Any = None,
+) -> plugin_middleware.InboundResult | None:
+    """inbound 中间件；同一事件（trace_id）投给多个插件时只跑一次。没有 inbound 中间件时返回 None。"""
+
+    if state is None or not isinstance(payload, dict):
+        return None
+    if not plugin_middleware.chains_for(state).inbound:
+        return None
+    if payload.get("_tp_inbound_done"):
+        return None
+    event_type = _payload_event_type(payload)
+    trace_id = str(getattr(trace, "trace_id", None) or trace or payload.get("trace_id") or "").strip()
+    cache: collections.OrderedDict[Any, Any] | None = getattr(state, "_tp_inbound_cache", None)
+    if cache is None:
+        cache = collections.OrderedDict()
+        try:
+            state._tp_inbound_cache = cache
+        except Exception:  # noqa: BLE001
+            cache = None
+    cache_key = (trace_id, event_type, source) if trace_id else None
+    if cache is not None and cache_key is not None and cache_key in cache:
+        return cache[cache_key]
+    try:
+        result = await plugin_middleware.run_inbound(state, payload, event_type=event_type, source=source, trace=trace)
+    except Exception:  # noqa: BLE001 - 管线自身出错按原样继续（fail-open）
+        log.warning("inbound 中间件管线异常，按原样继续", exc_info=True)
+        return None
+    if cache is not None and cache_key is not None:
+        cache[cache_key] = result
+        while len(cache) > _INBOUND_CACHE_SIZE:
+            cache.popitem(last=False)
+    return result
+
+
+async def _finalize_plugin_actions(
+    state: Any,
+    actions: list[dict[str, Any]],
+    *,
+    plugin_key: str | None,
+    default_send_via: list[str] | None,
+    trace: Any = None,
+) -> list[dict[str, Any]]:
+    """插件动作出站收尾：规范化 → 插件 outbound 中间件 → ``core.render_profile`` / ``core.rich_compact``。
+
+    交互 Bot 入口（结果经 RPC 交给主进程投递，含访客合并）、UserBot Event Bus 入口与实时
+    ``ctx.messages.apply`` 都经过这里，因此中间件覆盖全部插件出站动作；平台自身的消息（告警、
+    管理 Bot）不经过插件中间件，只在出口走 ``core.rich_table_defaults``。
+    """
+
+    normalized = _normalize_interaction_actions(actions, default_send_via=default_send_via, render=False)
+    if state is not None and normalized:
+        try:
+            normalized = await plugin_middleware.run_outbound(
+                state, normalized, source_plugin_key=plugin_key, trace=trace
+            )
+        except Exception:  # noqa: BLE001 - 管线自身出错也按原样投递（fail-open）
+            log.warning("出站中间件管线异常，按原样投递", exc_info=True)
+    manifest_profile = _manifest_render_profile(state, plugin_key)
+    account_id = getattr(state, "account_id", None)
+    for action in normalized:
+        core_render.apply_outbound_core(action, manifest_profile=manifest_profile, account_id=account_id)
+    return normalized
+
+
+def _manifest_render_profile(state: Any, plugin_key: str | None) -> dict[str, Any] | None:
+    if state is None or not plugin_key:
+        return None
+    inst = (getattr(state, "instances", None) or {}).get(plugin_key)
+    manifest = getattr(type(inst), "_manifest", None) if inst is not None else None
+    value = getattr(manifest, "render_profile", None) if manifest is not None else None
+    return core_render.normalize_render_profile(value) if value else None
+
+
+async def _finalize_actions_for_golden(actions: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """golden 测试：无账号运行态时的出站收尾（等价于没有插件中间件的账号）。"""
+
+    return await _finalize_plugin_actions(None, actions, plugin_key=None, default_send_via=None)
 
 
 __all__ = [

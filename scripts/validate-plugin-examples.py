@@ -33,7 +33,10 @@ INCLUDED_EXAMPLES = {
     "with_http",
     "with_interaction",
     "webhook_receiver",
+    "word_guard_mw",
+    "signature_mw",
 }
+MIDDLEWARE_EXAMPLES = {"word_guard_mw", "signature_mw"}
 SKIPPED_EXAMPLES: dict[str, str] = {}
 REQUIRED_FILES = {"plugin.json", "manifest.py", "plugin.py", "__init__.py"}
 REQUIRED_PERMISSIONS = {
@@ -41,6 +44,8 @@ REQUIRED_PERMISSIONS = {
     "with_ai_components": {"ai_text"},
     "with_http": {"external_http"},
     "webhook_receiver": {"send_message"},
+    "word_guard_mw": {"message_middleware"},
+    "signature_mw": {"message_middleware"},
 }
 EVENT_EXAMPLES = {"event_bus_demo", "hello_ping", "with_interaction", "webhook_receiver"}
 NATIVE_RAW_EXAMPLES = {"event_bus_demo", "with_interaction"}
@@ -330,6 +335,75 @@ def _validate_webhook_receiver_runtime(name: str, plugin_dir: Path, plugin: Plug
         raise AssertionError(f"{name}: Webhook 消息缺少 Hook 或订单摘要: {text}")
 
 
+def _validate_middleware_runtime(name: str, metadata: dict[str, Any], plugin: Plugin, manifest: Manifest) -> None:
+    """中间件示例：plugin.json middleware 严格校验 + 在模拟账号运行态里跑一遍 outbound / inbound / delivered。"""
+
+    if name not in MIDDLEWARE_EXAMPLES:
+        return
+    from app.worker.plugins import middleware
+    from app.worker.plugins.base import PluginContext
+
+    specs, _problems = middleware.parse_middleware(
+        metadata.get("middleware"),
+        plugin_key=manifest.key,
+        permissions=metadata.get("permissions"),
+        strict=True,
+    )
+    for spec in specs:
+        if not callable(getattr(plugin, spec.handler, None)):
+            raise AssertionError(f"{name}: middleware handler {spec.handler} 未实现")
+    manifest.middleware = list(metadata.get("middleware") or [])
+    type(plugin)._manifest = manifest
+
+    class _Storage:
+        def __init__(self) -> None:
+            self.data: dict[str, Any] = {}
+
+        async def get(self, key: Any, default: Any = None) -> Any:
+            return self.data.get(key, default)
+
+        async def set(self, key: Any, value: Any, **_kw: Any) -> bool:
+            self.data[key] = value
+            return True
+
+    storage = _Storage()
+    config = {"compact_tables": True} if name == "signature_mw" else {}
+    state = SimpleNamespace(
+        account_id=1,
+        generation=1,
+        instances={manifest.key: plugin},
+        contexts={manifest.key: PluginContext(account_id=1, feature_key=manifest.key, config=config, storage=storage)},
+        plugin_circuits={},
+        redis=None,
+    )
+
+    async def _run() -> None:
+        action = {"type": "send_message", "chat_id": -1, "text": "含违禁词的回复", "context": {"plugin_key": "other"}}
+        rich = {"type": "send_rich_message", "chat_id": -1, "rich_message": {"markdown": "| a |\n|---|\n| 1 |"}, "context": {"plugin_key": "other"}}
+        out = await middleware.run_outbound(state, [action, rich], source_plugin_key="other")
+        if name == "word_guard_mw":
+            if "违禁词" in out[0]["text"]:
+                raise AssertionError(f"{name}: outbound 未打码: {out[0]['text']}")
+            preview = await middleware.run_stream_preview(state, "流式违禁词", source_plugin_key="other")
+            if preview is None or "违禁词" in preview:
+                raise AssertionError(f"{name}: stream_preview 未打码: {preview}")
+            inbound = await middleware.run_inbound(
+                state, {"event_type": "message", "message": {"text": "违禁词"}}, event_type="message", source="userbot"
+            )
+            if inbound.dropped is None:
+                raise AssertionError(f"{name}: inbound 未丢弃含敏感词的消息")
+        else:
+            if not out[0]["text"].endswith("— 由 TelePilot 发送"):
+                raise AssertionError(f"{name}: outbound 未加署名: {out[0]['text']}")
+            if out[1].get("render_profile") != {"table": {"compact": True}}:
+                raise AssertionError(f"{name}: 未声明 render_profile: {out[1]}")
+            calls = await middleware.run_delivered(state, [middleware.delivered_summary(out[0], ok=True)])
+            if calls != 1 or storage.data.get("delivered:send_message:ok") != 1:
+                raise AssertionError(f"{name}: delivered 未计数: {storage.data}")
+
+    asyncio.run(_run())
+
+
 def _validate_example(name: str) -> None:
     plugin_dir = EXAMPLES_ROOT / name
     missing = sorted(file for file in REQUIRED_FILES if not (plugin_dir / file).is_file())
@@ -379,6 +453,7 @@ def _validate_example(name: str) -> None:
     _validate_event_demo_runtime(name, plugin_dir, instance)
     _validate_hello_ping_runtime(name, instance)
     _validate_webhook_receiver_runtime(name, plugin_dir, instance)
+    _validate_middleware_runtime(name, metadata, instance, manifest)
 
     for field in ("permissions", "allowed_hosts"):
         expected = list(metadata.get(field) or [])

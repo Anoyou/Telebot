@@ -73,15 +73,21 @@ async def list_installed(
 
 @router.get("/api/plugins/capabilities", response_model=PluginCapabilitiesResponse)
 async def get_plugin_capabilities(_user: CurrentUser) -> PluginCapabilitiesResponse:
-    """宿主能力注册表、Plugin API 版本与弃用登记（插件作者与兼容检查用）。"""
+    """宿主能力注册表、Plugin API 版本、弃用登记、ctx.host.read 资源（含模型清单 ai.models@1）与中间件限制。"""
 
     from .. import __version__
+    from ..services.render_profile import core_middleware_catalog
+    from ..worker.plugins.host_read import host_resource_catalog
+    from ..worker.plugins.middleware import limits_catalog
 
     return PluginCapabilitiesResponse(
         host_version=str(__version__),
         plugin_api_version=PLUGIN_API_VERSION,
         capabilities=capability_catalog(),
         deprecations=deprecation_catalog(),
+        host_resources=host_resource_catalog(),
+        core_middleware=core_middleware_catalog(),
+        middleware_limits=limits_catalog(),
     )
 
 

@@ -633,8 +633,12 @@ class PluginAI:
             from .deprecations import note_deprecated
 
             note_deprecated("ai.tag_alias", plugin_key=self.plugin_key, account_id=self.account_id, detail="ctx.ai.stream_complete")
-        if extra_body:
-            raise AIUnavailableError("ctx.ai.stream_complete 暂不支持 extra_body，请改用 ctx.ai.complete")
+        from ...services import llm_extra_body
+
+        try:
+            extra_values = llm_extra_body.validate_extra_body(extra_body)
+        except llm_extra_body.ExtraBodyRejected as exc:
+            raise AIUnavailableError(str(exc)) from exc
         system_prompt = str(system or "")
         user_prompt = str(user or "")
         if not system_prompt.strip() and not user_prompt.strip():
@@ -662,6 +666,14 @@ class PluginAI:
                 "chat_completions、responses 或 anthropic_messages provider"
             )
 
+        if extra_values:
+            # 流式不中途换 Provider：选中 Provider 的格式不支持某个字段就直接明确报错（0.109.0+）。
+            extra_format = _STREAM_EXTRA_BODY_FORMATS.get(api_format, api_format)
+            unsupported = llm_extra_body.unsupported_for(extra_format, extra_values)
+            if unsupported:
+                raise AICapabilityError(
+                    f"provider {primary.name}（{api_format}）不支持 extra_body 字段：{', '.join(unsupported)}"
+                )
         clamped_tokens = self._clamp_max_tokens(max_tokens)
         clamped_timeout = self._clamp_timeout(timeout_seconds if timeout_seconds is not None else timeout)
         requested_model = str(model or override_model or "").strip() or None
@@ -747,14 +759,18 @@ class PluginAI:
             active_client = client
             provider_call_started = True
             async with asyncio.timeout(clamped_timeout):
-                async for chunk in client.stream_complete(
+                stream = client.stream_complete(
                     system_prompt,
                     user_prompt,
                     max_tokens=clamped_tokens,
                     temperature=temperature,
                     reasoning_effort=reasoning_effort,
                     timeout_seconds=clamped_timeout,
-                ):
+                )
+                if extra_values:
+                    # extra_body 只在第一次取数（请求体构建、发出请求）期间生效，不泄漏到插件后续调用。
+                    stream = _with_extra_body_on_first_chunk(stream, extra_values)
+                async for chunk in stream:
                     if getattr(chunk, "done", False):
                         stream_terminal_received = True
                         terminal_chunk = chunk
@@ -1250,6 +1266,37 @@ def _facade_error_from_llm_call(exc: LLMCallFailed) -> PluginAIError:
     if str(scope or "") == "capability_mismatch":
         return AICapabilityError(message)
     return AIUnavailableError(message)
+
+
+_STREAM_EXTRA_BODY_FORMATS = {
+    "chat_completions": "chat_completions",
+    "responses": "responses",
+    "anthropic_messages": "anthropic",
+}
+
+
+async def _with_extra_body_on_first_chunk(stream: Any, extra_values: dict[str, Any]) -> AsyncIterator[Any]:
+    """在第一次 ``__anext__``（客户端构建请求体并发出请求）期间激活 extra_body contextvar。"""
+
+    from ...services import llm_extra_body
+
+    iterator = stream.__aiter__()
+    token = llm_extra_body.activate(extra_values)
+    try:
+        first = await iterator.__anext__()
+    except StopAsyncIteration:
+        return
+    finally:
+        llm_extra_body.reset(token)
+    try:
+        yield first
+        async for chunk in iterator:
+            yield chunk
+    finally:
+        closer = getattr(iterator, "aclose", None)
+        if closer is not None:
+            with contextlib.suppress(Exception):
+                await closer()
 
 
 def _estimate_total_tokens(system_prompt: str, user_prompt: str, max_output_tokens: int) -> int:

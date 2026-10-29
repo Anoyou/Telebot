@@ -1,0 +1,3224 @@
+{
+ "blocks_basic::edit_inline_compact": {
+  "action_keys": [
+   "inline_message_id",
+   "rich_message",
+   "send_via",
+   "type"
+  ],
+  "action_rich_message": {
+   "blocks": [
+    {
+     "text": "hi",
+     "type": "paragraph"
+    },
+    {
+     "cells": [
+      [
+       {
+        "text": "a"
+       },
+       {
+        "text": "b"
+       }
+      ],
+      [
+       {
+        "text": "1"
+       },
+       {
+        "text": "2"
+       }
+      ]
+     ],
+     "is_compact": true,
+     "type": "table"
+    }
+   ]
+  },
+  "bot_payload": {
+   "chat_id": 1,
+   "rich_message": {
+    "blocks": [
+     {
+      "text": "hi",
+      "type": "paragraph"
+     },
+     {
+      "cells": [
+       [
+        {
+         "text": "a"
+        },
+        {
+         "text": "b"
+        }
+       ],
+       [
+        {
+         "text": "1"
+        },
+        {
+         "text": "2"
+        }
+       ]
+      ],
+      "is_bordered": true,
+      "is_compact": true,
+      "is_striped": true,
+      "type": "table"
+     }
+    ]
+   }
+  },
+  "bot_retry_payload": {
+   "chat_id": 1,
+   "rich_message": {
+    "blocks": [
+     {
+      "text": "hi",
+      "type": "paragraph"
+     },
+     {
+      "cells": [
+       [
+        {
+         "text": "a"
+        },
+        {
+         "text": "b"
+        }
+       ],
+       [
+        {
+         "text": "1"
+        },
+        {
+         "text": "2"
+        }
+       ]
+      ],
+      "is_bordered": true,
+      "is_striped": true,
+      "type": "table"
+     }
+    ]
+   }
+  },
+  "userbot": {
+   "blocks": [
+    {
+     "text": "hi",
+     "type": "paragraph"
+    },
+    {
+     "cells": [
+      [
+       {
+        "text": "a"
+       },
+       {
+        "text": "b"
+       }
+      ],
+      [
+       {
+        "text": "1"
+       },
+       {
+        "text": "2"
+       }
+      ]
+     ],
+     "is_bordered": true,
+     "is_compact": true,
+     "is_striped": true,
+     "type": "table"
+    }
+   ]
+  }
+ },
+ "blocks_basic::send_rich": {
+  "action_keys": [
+   "chat_id",
+   "rich_message",
+   "send_via",
+   "type"
+  ],
+  "action_rich_message": {
+   "blocks": [
+    {
+     "text": "hi",
+     "type": "paragraph"
+    },
+    {
+     "cells": [
+      [
+       {
+        "text": "a"
+       },
+       {
+        "text": "b"
+       }
+      ],
+      [
+       {
+        "text": "1"
+       },
+       {
+        "text": "2"
+       }
+      ]
+     ],
+     "type": "table"
+    }
+   ]
+  },
+  "bot_payload": {
+   "chat_id": 1,
+   "rich_message": {
+    "blocks": [
+     {
+      "text": "hi",
+      "type": "paragraph"
+     },
+     {
+      "cells": [
+       [
+        {
+         "text": "a"
+        },
+        {
+         "text": "b"
+        }
+       ],
+       [
+        {
+         "text": "1"
+        },
+        {
+         "text": "2"
+        }
+       ]
+      ],
+      "is_bordered": true,
+      "is_striped": true,
+      "type": "table"
+     }
+    ]
+   }
+  },
+  "bot_retry_payload": null,
+  "userbot": {
+   "blocks": [
+    {
+     "text": "hi",
+     "type": "paragraph"
+    },
+    {
+     "cells": [
+      [
+       {
+        "text": "a"
+       },
+       {
+        "text": "b"
+       }
+      ],
+      [
+       {
+        "text": "1"
+       },
+       {
+        "text": "2"
+       }
+      ]
+     ],
+     "is_bordered": true,
+     "is_striped": true,
+     "type": "table"
+    }
+   ]
+  }
+ },
+ "blocks_basic::send_rich_compact": {
+  "action_keys": [
+   "chat_id",
+   "rich_message",
+   "send_via",
+   "type"
+  ],
+  "action_rich_message": {
+   "blocks": [
+    {
+     "text": "hi",
+     "type": "paragraph"
+    },
+    {
+     "cells": [
+      [
+       {
+        "text": "a"
+       },
+       {
+        "text": "b"
+       }
+      ],
+      [
+       {
+        "text": "1"
+       },
+       {
+        "text": "2"
+       }
+      ]
+     ],
+     "is_compact": true,
+     "type": "table"
+    }
+   ]
+  },
+  "bot_payload": {
+   "chat_id": 1,
+   "rich_message": {
+    "blocks": [
+     {
+      "text": "hi",
+      "type": "paragraph"
+     },
+     {
+      "cells": [
+       [
+        {
+         "text": "a"
+        },
+        {
+         "text": "b"
+        }
+       ],
+       [
+        {
+         "text": "1"
+        },
+        {
+         "text": "2"
+        }
+       ]
+      ],
+      "is_bordered": true,
+      "is_compact": true,
+      "is_striped": true,
+      "type": "table"
+     }
+    ]
+   }
+  },
+  "bot_retry_payload": {
+   "chat_id": 1,
+   "rich_message": {
+    "blocks": [
+     {
+      "text": "hi",
+      "type": "paragraph"
+     },
+     {
+      "cells": [
+       [
+        {
+         "text": "a"
+        },
+        {
+         "text": "b"
+        }
+       ],
+       [
+        {
+         "text": "1"
+        },
+        {
+         "text": "2"
+        }
+       ]
+      ],
+      "is_bordered": true,
+      "is_striped": true,
+      "type": "table"
+     }
+    ]
+   }
+  },
+  "userbot": {
+   "blocks": [
+    {
+     "text": "hi",
+     "type": "paragraph"
+    },
+    {
+     "cells": [
+      [
+       {
+        "text": "a"
+       },
+       {
+        "text": "b"
+       }
+      ],
+      [
+       {
+        "text": "1"
+       },
+       {
+        "text": "2"
+       }
+      ]
+     ],
+     "is_bordered": true,
+     "is_compact": true,
+     "is_striped": true,
+     "type": "table"
+    }
+   ]
+  }
+ },
+ "blocks_basic::send_rich_compact_false": {
+  "action_keys": [
+   "chat_id",
+   "rich_message",
+   "send_via",
+   "type"
+  ],
+  "action_rich_message": {
+   "blocks": [
+    {
+     "text": "hi",
+     "type": "paragraph"
+    },
+    {
+     "cells": [
+      [
+       {
+        "text": "a"
+       },
+       {
+        "text": "b"
+       }
+      ],
+      [
+       {
+        "text": "1"
+       },
+       {
+        "text": "2"
+       }
+      ]
+     ],
+     "type": "table"
+    }
+   ]
+  },
+  "bot_payload": {
+   "chat_id": 1,
+   "rich_message": {
+    "blocks": [
+     {
+      "text": "hi",
+      "type": "paragraph"
+     },
+     {
+      "cells": [
+       [
+        {
+         "text": "a"
+        },
+        {
+         "text": "b"
+        }
+       ],
+       [
+        {
+         "text": "1"
+        },
+        {
+         "text": "2"
+        }
+       ]
+      ],
+      "is_bordered": true,
+      "is_striped": true,
+      "type": "table"
+     }
+    ]
+   }
+  },
+  "bot_retry_payload": null,
+  "userbot": {
+   "blocks": [
+    {
+     "text": "hi",
+     "type": "paragraph"
+    },
+    {
+     "cells": [
+      [
+       {
+        "text": "a"
+       },
+       {
+        "text": "b"
+       }
+      ],
+      [
+       {
+        "text": "1"
+       },
+       {
+        "text": "2"
+       }
+      ]
+     ],
+     "is_bordered": true,
+     "is_striped": true,
+     "type": "table"
+    }
+   ]
+  }
+ },
+ "blocks_basic::send_rich_userbot_compact": {
+  "action_keys": [
+   "chat_id",
+   "rich_message",
+   "send_via",
+   "type"
+  ],
+  "action_rich_message": {
+   "blocks": [
+    {
+     "text": "hi",
+     "type": "paragraph"
+    },
+    {
+     "cells": [
+      [
+       {
+        "text": "a"
+       },
+       {
+        "text": "b"
+       }
+      ],
+      [
+       {
+        "text": "1"
+       },
+       {
+        "text": "2"
+       }
+      ]
+     ],
+     "is_compact": true,
+     "type": "table"
+    }
+   ]
+  },
+  "bot_payload": {
+   "chat_id": 1,
+   "rich_message": {
+    "blocks": [
+     {
+      "text": "hi",
+      "type": "paragraph"
+     },
+     {
+      "cells": [
+       [
+        {
+         "text": "a"
+        },
+        {
+         "text": "b"
+        }
+       ],
+       [
+        {
+         "text": "1"
+        },
+        {
+         "text": "2"
+        }
+       ]
+      ],
+      "is_bordered": true,
+      "is_compact": true,
+      "is_striped": true,
+      "type": "table"
+     }
+    ]
+   }
+  },
+  "bot_retry_payload": {
+   "chat_id": 1,
+   "rich_message": {
+    "blocks": [
+     {
+      "text": "hi",
+      "type": "paragraph"
+     },
+     {
+      "cells": [
+       [
+        {
+         "text": "a"
+        },
+        {
+         "text": "b"
+        }
+       ],
+       [
+        {
+         "text": "1"
+        },
+        {
+         "text": "2"
+        }
+       ]
+      ],
+      "is_bordered": true,
+      "is_striped": true,
+      "type": "table"
+     }
+    ]
+   }
+  },
+  "userbot": {
+   "blocks": [
+    {
+     "text": "hi",
+     "type": "paragraph"
+    },
+    {
+     "cells": [
+      [
+       {
+        "text": "a"
+       },
+       {
+        "text": "b"
+       }
+      ],
+      [
+       {
+        "text": "1"
+       },
+       {
+        "text": "2"
+       }
+      ]
+     ],
+     "is_bordered": true,
+     "is_compact": true,
+     "is_striped": true,
+     "type": "table"
+    }
+   ]
+  }
+ },
+ "blocks_explicit_false::edit_inline_compact": {
+  "action_keys": [
+   "inline_message_id",
+   "rich_message",
+   "send_via",
+   "type"
+  ],
+  "action_rich_message": {
+   "blocks": [
+    {
+     "cells": [
+      [
+       {
+        "text": "a"
+       }
+      ]
+     ],
+     "is_bordered": false,
+     "is_compact": true,
+     "type": "table"
+    },
+    {
+     "cells": [
+      [
+       {
+        "text": "b"
+       }
+      ]
+     ],
+     "is_compact": true,
+     "is_striped": false,
+     "type": "table"
+    }
+   ]
+  },
+  "bot_payload": {
+   "chat_id": 1,
+   "rich_message": {
+    "blocks": [
+     {
+      "cells": [
+       [
+        {
+         "text": "a"
+        }
+       ]
+      ],
+      "is_bordered": false,
+      "is_compact": true,
+      "is_striped": true,
+      "type": "table"
+     },
+     {
+      "cells": [
+       [
+        {
+         "text": "b"
+        }
+       ]
+      ],
+      "is_bordered": true,
+      "is_compact": true,
+      "is_striped": false,
+      "type": "table"
+     }
+    ]
+   }
+  },
+  "bot_retry_payload": {
+   "chat_id": 1,
+   "rich_message": {
+    "blocks": [
+     {
+      "cells": [
+       [
+        {
+         "text": "a"
+        }
+       ]
+      ],
+      "is_bordered": false,
+      "is_striped": true,
+      "type": "table"
+     },
+     {
+      "cells": [
+       [
+        {
+         "text": "b"
+        }
+       ]
+      ],
+      "is_bordered": true,
+      "is_striped": false,
+      "type": "table"
+     }
+    ]
+   }
+  },
+  "userbot": {
+   "blocks": [
+    {
+     "cells": [
+      [
+       {
+        "text": "a"
+       }
+      ]
+     ],
+     "is_bordered": false,
+     "is_compact": true,
+     "is_striped": true,
+     "type": "table"
+    },
+    {
+     "cells": [
+      [
+       {
+        "text": "b"
+       }
+      ]
+     ],
+     "is_bordered": true,
+     "is_compact": true,
+     "is_striped": false,
+     "type": "table"
+    }
+   ]
+  }
+ },
+ "blocks_explicit_false::send_rich": {
+  "action_keys": [
+   "chat_id",
+   "rich_message",
+   "send_via",
+   "type"
+  ],
+  "action_rich_message": {
+   "blocks": [
+    {
+     "cells": [
+      [
+       {
+        "text": "a"
+       }
+      ]
+     ],
+     "is_bordered": false,
+     "type": "table"
+    },
+    {
+     "cells": [
+      [
+       {
+        "text": "b"
+       }
+      ]
+     ],
+     "is_compact": true,
+     "is_striped": false,
+     "type": "table"
+    }
+   ]
+  },
+  "bot_payload": {
+   "chat_id": 1,
+   "rich_message": {
+    "blocks": [
+     {
+      "cells": [
+       [
+        {
+         "text": "a"
+        }
+       ]
+      ],
+      "is_bordered": false,
+      "is_striped": true,
+      "type": "table"
+     },
+     {
+      "cells": [
+       [
+        {
+         "text": "b"
+        }
+       ]
+      ],
+      "is_bordered": true,
+      "is_compact": true,
+      "is_striped": false,
+      "type": "table"
+     }
+    ]
+   }
+  },
+  "bot_retry_payload": {
+   "chat_id": 1,
+   "rich_message": {
+    "blocks": [
+     {
+      "cells": [
+       [
+        {
+         "text": "a"
+        }
+       ]
+      ],
+      "is_bordered": false,
+      "is_striped": true,
+      "type": "table"
+     },
+     {
+      "cells": [
+       [
+        {
+         "text": "b"
+        }
+       ]
+      ],
+      "is_bordered": true,
+      "is_striped": false,
+      "type": "table"
+     }
+    ]
+   }
+  },
+  "userbot": {
+   "blocks": [
+    {
+     "cells": [
+      [
+       {
+        "text": "a"
+       }
+      ]
+     ],
+     "is_bordered": false,
+     "is_striped": true,
+     "type": "table"
+    },
+    {
+     "cells": [
+      [
+       {
+        "text": "b"
+       }
+      ]
+     ],
+     "is_bordered": true,
+     "is_compact": true,
+     "is_striped": false,
+     "type": "table"
+    }
+   ]
+  }
+ },
+ "blocks_explicit_false::send_rich_compact": {
+  "action_keys": [
+   "chat_id",
+   "rich_message",
+   "send_via",
+   "type"
+  ],
+  "action_rich_message": {
+   "blocks": [
+    {
+     "cells": [
+      [
+       {
+        "text": "a"
+       }
+      ]
+     ],
+     "is_bordered": false,
+     "is_compact": true,
+     "type": "table"
+    },
+    {
+     "cells": [
+      [
+       {
+        "text": "b"
+       }
+      ]
+     ],
+     "is_compact": true,
+     "is_striped": false,
+     "type": "table"
+    }
+   ]
+  },
+  "bot_payload": {
+   "chat_id": 1,
+   "rich_message": {
+    "blocks": [
+     {
+      "cells": [
+       [
+        {
+         "text": "a"
+        }
+       ]
+      ],
+      "is_bordered": false,
+      "is_compact": true,
+      "is_striped": true,
+      "type": "table"
+     },
+     {
+      "cells": [
+       [
+        {
+         "text": "b"
+        }
+       ]
+      ],
+      "is_bordered": true,
+      "is_compact": true,
+      "is_striped": false,
+      "type": "table"
+     }
+    ]
+   }
+  },
+  "bot_retry_payload": {
+   "chat_id": 1,
+   "rich_message": {
+    "blocks": [
+     {
+      "cells": [
+       [
+        {
+         "text": "a"
+        }
+       ]
+      ],
+      "is_bordered": false,
+      "is_striped": true,
+      "type": "table"
+     },
+     {
+      "cells": [
+       [
+        {
+         "text": "b"
+        }
+       ]
+      ],
+      "is_bordered": true,
+      "is_striped": false,
+      "type": "table"
+     }
+    ]
+   }
+  },
+  "userbot": {
+   "blocks": [
+    {
+     "cells": [
+      [
+       {
+        "text": "a"
+       }
+      ]
+     ],
+     "is_bordered": false,
+     "is_compact": true,
+     "is_striped": true,
+     "type": "table"
+    },
+    {
+     "cells": [
+      [
+       {
+        "text": "b"
+       }
+      ]
+     ],
+     "is_bordered": true,
+     "is_compact": true,
+     "is_striped": false,
+     "type": "table"
+    }
+   ]
+  }
+ },
+ "blocks_explicit_false::send_rich_compact_false": {
+  "action_keys": [
+   "chat_id",
+   "rich_message",
+   "send_via",
+   "type"
+  ],
+  "action_rich_message": {
+   "blocks": [
+    {
+     "cells": [
+      [
+       {
+        "text": "a"
+       }
+      ]
+     ],
+     "is_bordered": false,
+     "type": "table"
+    },
+    {
+     "cells": [
+      [
+       {
+        "text": "b"
+       }
+      ]
+     ],
+     "is_compact": true,
+     "is_striped": false,
+     "type": "table"
+    }
+   ]
+  },
+  "bot_payload": {
+   "chat_id": 1,
+   "rich_message": {
+    "blocks": [
+     {
+      "cells": [
+       [
+        {
+         "text": "a"
+        }
+       ]
+      ],
+      "is_bordered": false,
+      "is_striped": true,
+      "type": "table"
+     },
+     {
+      "cells": [
+       [
+        {
+         "text": "b"
+        }
+       ]
+      ],
+      "is_bordered": true,
+      "is_compact": true,
+      "is_striped": false,
+      "type": "table"
+     }
+    ]
+   }
+  },
+  "bot_retry_payload": {
+   "chat_id": 1,
+   "rich_message": {
+    "blocks": [
+     {
+      "cells": [
+       [
+        {
+         "text": "a"
+        }
+       ]
+      ],
+      "is_bordered": false,
+      "is_striped": true,
+      "type": "table"
+     },
+     {
+      "cells": [
+       [
+        {
+         "text": "b"
+        }
+       ]
+      ],
+      "is_bordered": true,
+      "is_striped": false,
+      "type": "table"
+     }
+    ]
+   }
+  },
+  "userbot": {
+   "blocks": [
+    {
+     "cells": [
+      [
+       {
+        "text": "a"
+       }
+      ]
+     ],
+     "is_bordered": false,
+     "is_striped": true,
+     "type": "table"
+    },
+    {
+     "cells": [
+      [
+       {
+        "text": "b"
+       }
+      ]
+     ],
+     "is_bordered": true,
+     "is_compact": true,
+     "is_striped": false,
+     "type": "table"
+    }
+   ]
+  }
+ },
+ "blocks_explicit_false::send_rich_userbot_compact": {
+  "action_keys": [
+   "chat_id",
+   "rich_message",
+   "send_via",
+   "type"
+  ],
+  "action_rich_message": {
+   "blocks": [
+    {
+     "cells": [
+      [
+       {
+        "text": "a"
+       }
+      ]
+     ],
+     "is_bordered": false,
+     "is_compact": true,
+     "type": "table"
+    },
+    {
+     "cells": [
+      [
+       {
+        "text": "b"
+       }
+      ]
+     ],
+     "is_compact": true,
+     "is_striped": false,
+     "type": "table"
+    }
+   ]
+  },
+  "bot_payload": {
+   "chat_id": 1,
+   "rich_message": {
+    "blocks": [
+     {
+      "cells": [
+       [
+        {
+         "text": "a"
+        }
+       ]
+      ],
+      "is_bordered": false,
+      "is_compact": true,
+      "is_striped": true,
+      "type": "table"
+     },
+     {
+      "cells": [
+       [
+        {
+         "text": "b"
+        }
+       ]
+      ],
+      "is_bordered": true,
+      "is_compact": true,
+      "is_striped": false,
+      "type": "table"
+     }
+    ]
+   }
+  },
+  "bot_retry_payload": {
+   "chat_id": 1,
+   "rich_message": {
+    "blocks": [
+     {
+      "cells": [
+       [
+        {
+         "text": "a"
+        }
+       ]
+      ],
+      "is_bordered": false,
+      "is_striped": true,
+      "type": "table"
+     },
+     {
+      "cells": [
+       [
+        {
+         "text": "b"
+        }
+       ]
+      ],
+      "is_bordered": true,
+      "is_striped": false,
+      "type": "table"
+     }
+    ]
+   }
+  },
+  "userbot": {
+   "blocks": [
+    {
+     "cells": [
+      [
+       {
+        "text": "a"
+       }
+      ]
+     ],
+     "is_bordered": false,
+     "is_compact": true,
+     "is_striped": true,
+     "type": "table"
+    },
+    {
+     "cells": [
+      [
+       {
+        "text": "b"
+       }
+      ]
+     ],
+     "is_bordered": true,
+     "is_compact": true,
+     "is_striped": false,
+     "type": "table"
+    }
+   ]
+  }
+ },
+ "blocks_nested::edit_inline_compact": {
+  "action_keys": [
+   "inline_message_id",
+   "rich_message",
+   "send_via",
+   "type"
+  ],
+  "action_rich_message": {
+   "blocks": [
+    {
+     "blocks": [
+      {
+       "cells": [
+        [
+         {
+          "text": "x",
+          "type": "table"
+         }
+        ]
+       ],
+       "is_compact": true,
+       "type": "table"
+      }
+     ],
+     "summary": "s",
+     "type": "details"
+    }
+   ]
+  },
+  "bot_payload": {
+   "chat_id": 1,
+   "rich_message": {
+    "blocks": [
+     {
+      "blocks": [
+       {
+        "cells": [
+         [
+          {
+           "text": "x",
+           "type": "table"
+          }
+         ]
+        ],
+        "is_bordered": true,
+        "is_compact": true,
+        "is_striped": true,
+        "type": "table"
+       }
+      ],
+      "summary": "s",
+      "type": "details"
+     }
+    ]
+   }
+  },
+  "bot_retry_payload": {
+   "chat_id": 1,
+   "rich_message": {
+    "blocks": [
+     {
+      "blocks": [
+       {
+        "cells": [
+         [
+          {
+           "text": "x",
+           "type": "table"
+          }
+         ]
+        ],
+        "is_bordered": true,
+        "is_striped": true,
+        "type": "table"
+       }
+      ],
+      "summary": "s",
+      "type": "details"
+     }
+    ]
+   }
+  },
+  "userbot": {
+   "blocks": [
+    {
+     "blocks": [
+      {
+       "cells": [
+        [
+         {
+          "text": "x",
+          "type": "table"
+         }
+        ]
+       ],
+       "is_bordered": true,
+       "is_compact": true,
+       "is_striped": true,
+       "type": "table"
+      }
+     ],
+     "summary": "s",
+     "type": "details"
+    }
+   ]
+  }
+ },
+ "blocks_nested::send_rich": {
+  "action_keys": [
+   "chat_id",
+   "rich_message",
+   "send_via",
+   "type"
+  ],
+  "action_rich_message": {
+   "blocks": [
+    {
+     "blocks": [
+      {
+       "cells": [
+        [
+         {
+          "text": "x",
+          "type": "table"
+         }
+        ]
+       ],
+       "type": "table"
+      }
+     ],
+     "summary": "s",
+     "type": "details"
+    }
+   ]
+  },
+  "bot_payload": {
+   "chat_id": 1,
+   "rich_message": {
+    "blocks": [
+     {
+      "blocks": [
+       {
+        "cells": [
+         [
+          {
+           "text": "x",
+           "type": "table"
+          }
+         ]
+        ],
+        "is_bordered": true,
+        "is_striped": true,
+        "type": "table"
+       }
+      ],
+      "summary": "s",
+      "type": "details"
+     }
+    ]
+   }
+  },
+  "bot_retry_payload": null,
+  "userbot": {
+   "blocks": [
+    {
+     "blocks": [
+      {
+       "cells": [
+        [
+         {
+          "text": "x",
+          "type": "table"
+         }
+        ]
+       ],
+       "is_bordered": true,
+       "is_striped": true,
+       "type": "table"
+      }
+     ],
+     "summary": "s",
+     "type": "details"
+    }
+   ]
+  }
+ },
+ "blocks_nested::send_rich_compact": {
+  "action_keys": [
+   "chat_id",
+   "rich_message",
+   "send_via",
+   "type"
+  ],
+  "action_rich_message": {
+   "blocks": [
+    {
+     "blocks": [
+      {
+       "cells": [
+        [
+         {
+          "text": "x",
+          "type": "table"
+         }
+        ]
+       ],
+       "is_compact": true,
+       "type": "table"
+      }
+     ],
+     "summary": "s",
+     "type": "details"
+    }
+   ]
+  },
+  "bot_payload": {
+   "chat_id": 1,
+   "rich_message": {
+    "blocks": [
+     {
+      "blocks": [
+       {
+        "cells": [
+         [
+          {
+           "text": "x",
+           "type": "table"
+          }
+         ]
+        ],
+        "is_bordered": true,
+        "is_compact": true,
+        "is_striped": true,
+        "type": "table"
+       }
+      ],
+      "summary": "s",
+      "type": "details"
+     }
+    ]
+   }
+  },
+  "bot_retry_payload": {
+   "chat_id": 1,
+   "rich_message": {
+    "blocks": [
+     {
+      "blocks": [
+       {
+        "cells": [
+         [
+          {
+           "text": "x",
+           "type": "table"
+          }
+         ]
+        ],
+        "is_bordered": true,
+        "is_striped": true,
+        "type": "table"
+       }
+      ],
+      "summary": "s",
+      "type": "details"
+     }
+    ]
+   }
+  },
+  "userbot": {
+   "blocks": [
+    {
+     "blocks": [
+      {
+       "cells": [
+        [
+         {
+          "text": "x",
+          "type": "table"
+         }
+        ]
+       ],
+       "is_bordered": true,
+       "is_compact": true,
+       "is_striped": true,
+       "type": "table"
+      }
+     ],
+     "summary": "s",
+     "type": "details"
+    }
+   ]
+  }
+ },
+ "blocks_nested::send_rich_compact_false": {
+  "action_keys": [
+   "chat_id",
+   "rich_message",
+   "send_via",
+   "type"
+  ],
+  "action_rich_message": {
+   "blocks": [
+    {
+     "blocks": [
+      {
+       "cells": [
+        [
+         {
+          "text": "x",
+          "type": "table"
+         }
+        ]
+       ],
+       "type": "table"
+      }
+     ],
+     "summary": "s",
+     "type": "details"
+    }
+   ]
+  },
+  "bot_payload": {
+   "chat_id": 1,
+   "rich_message": {
+    "blocks": [
+     {
+      "blocks": [
+       {
+        "cells": [
+         [
+          {
+           "text": "x",
+           "type": "table"
+          }
+         ]
+        ],
+        "is_bordered": true,
+        "is_striped": true,
+        "type": "table"
+       }
+      ],
+      "summary": "s",
+      "type": "details"
+     }
+    ]
+   }
+  },
+  "bot_retry_payload": null,
+  "userbot": {
+   "blocks": [
+    {
+     "blocks": [
+      {
+       "cells": [
+        [
+         {
+          "text": "x",
+          "type": "table"
+         }
+        ]
+       ],
+       "is_bordered": true,
+       "is_striped": true,
+       "type": "table"
+      }
+     ],
+     "summary": "s",
+     "type": "details"
+    }
+   ]
+  }
+ },
+ "blocks_nested::send_rich_userbot_compact": {
+  "action_keys": [
+   "chat_id",
+   "rich_message",
+   "send_via",
+   "type"
+  ],
+  "action_rich_message": {
+   "blocks": [
+    {
+     "blocks": [
+      {
+       "cells": [
+        [
+         {
+          "text": "x",
+          "type": "table"
+         }
+        ]
+       ],
+       "is_compact": true,
+       "type": "table"
+      }
+     ],
+     "summary": "s",
+     "type": "details"
+    }
+   ]
+  },
+  "bot_payload": {
+   "chat_id": 1,
+   "rich_message": {
+    "blocks": [
+     {
+      "blocks": [
+       {
+        "cells": [
+         [
+          {
+           "text": "x",
+           "type": "table"
+          }
+         ]
+        ],
+        "is_bordered": true,
+        "is_compact": true,
+        "is_striped": true,
+        "type": "table"
+       }
+      ],
+      "summary": "s",
+      "type": "details"
+     }
+    ]
+   }
+  },
+  "bot_retry_payload": {
+   "chat_id": 1,
+   "rich_message": {
+    "blocks": [
+     {
+      "blocks": [
+       {
+        "cells": [
+         [
+          {
+           "text": "x",
+           "type": "table"
+          }
+         ]
+        ],
+        "is_bordered": true,
+        "is_striped": true,
+        "type": "table"
+       }
+      ],
+      "summary": "s",
+      "type": "details"
+     }
+    ]
+   }
+  },
+  "userbot": {
+   "blocks": [
+    {
+     "blocks": [
+      {
+       "cells": [
+        [
+         {
+          "text": "x",
+          "type": "table"
+         }
+        ]
+       ],
+       "is_bordered": true,
+       "is_compact": true,
+       "is_striped": true,
+       "type": "table"
+      }
+     ],
+     "summary": "s",
+     "type": "details"
+    }
+   ]
+  }
+ },
+ "empty::edit_inline_compact": {
+  "action_keys": [
+   "inline_message_id",
+   "rich_message",
+   "send_via",
+   "type"
+  ],
+  "action_rich_message": {},
+  "bot_payload": {
+   "chat_id": 1,
+   "rich_message": {}
+  },
+  "bot_retry_payload": null,
+  "userbot": {
+   "error": "UserbotRichMessageError"
+  }
+ },
+ "empty::send_rich": {
+  "action_keys": [
+   "chat_id",
+   "rich_message",
+   "send_via",
+   "type"
+  ],
+  "action_rich_message": {},
+  "bot_payload": {
+   "chat_id": 1,
+   "rich_message": {}
+  },
+  "bot_retry_payload": null,
+  "userbot": {
+   "error": "UserbotRichMessageError"
+  }
+ },
+ "empty::send_rich_compact": {
+  "action_keys": [
+   "chat_id",
+   "rich_message",
+   "send_via",
+   "type"
+  ],
+  "action_rich_message": {},
+  "bot_payload": {
+   "chat_id": 1,
+   "rich_message": {}
+  },
+  "bot_retry_payload": null,
+  "userbot": {
+   "error": "UserbotRichMessageError"
+  }
+ },
+ "empty::send_rich_compact_false": {
+  "action_keys": [
+   "chat_id",
+   "rich_message",
+   "send_via",
+   "type"
+  ],
+  "action_rich_message": {},
+  "bot_payload": {
+   "chat_id": 1,
+   "rich_message": {}
+  },
+  "bot_retry_payload": null,
+  "userbot": {
+   "error": "UserbotRichMessageError"
+  }
+ },
+ "empty::send_rich_userbot_compact": {
+  "action_keys": [
+   "chat_id",
+   "rich_message",
+   "send_via",
+   "type"
+  ],
+  "action_rich_message": {},
+  "bot_payload": {
+   "chat_id": 1,
+   "rich_message": {}
+  },
+  "bot_retry_payload": null,
+  "userbot": {
+   "error": "UserbotRichMessageError"
+  }
+ },
+ "html_attrs::edit_inline_compact": {
+  "action_keys": [
+   "inline_message_id",
+   "rich_message",
+   "send_via",
+   "type"
+  ],
+  "action_rich_message": {
+   "html": "<table bordered=\"false\" striped compact><tr><td>1</td></tr></table>\n<table class=\"x\" compact><tr><td>2</td></tr></table>"
+  },
+  "bot_payload": {
+   "chat_id": 1,
+   "rich_message": {
+    "html": "<table striped compact><tr><td>1</td></tr></table>\n<table class=\"x\" compact bordered striped><tr><td>2</td></tr></table>"
+   }
+  },
+  "bot_retry_payload": {
+   "chat_id": 1,
+   "rich_message": {
+    "html": "<table striped><tr><td>1</td></tr></table>\n<table class=\"x\" bordered striped><tr><td>2</td></tr></table>"
+   }
+  },
+  "userbot": {
+   "html": "<table striped compact><tr><td>1</td></tr></table>\n<table class=\"x\" compact bordered striped><tr><td>2</td></tr></table>"
+  }
+ },
+ "html_attrs::send_rich": {
+  "action_keys": [
+   "chat_id",
+   "rich_message",
+   "send_via",
+   "type"
+  ],
+  "action_rich_message": {
+   "html": "<table bordered=\"false\" striped><tr><td>1</td></tr></table>\n<table class=\"x\" compact><tr><td>2</td></tr></table>"
+  },
+  "bot_payload": {
+   "chat_id": 1,
+   "rich_message": {
+    "html": "<table striped><tr><td>1</td></tr></table>\n<table class=\"x\" compact bordered striped><tr><td>2</td></tr></table>"
+   }
+  },
+  "bot_retry_payload": {
+   "chat_id": 1,
+   "rich_message": {
+    "html": "<table striped><tr><td>1</td></tr></table>\n<table class=\"x\" bordered striped><tr><td>2</td></tr></table>"
+   }
+  },
+  "userbot": {
+   "html": "<table striped><tr><td>1</td></tr></table>\n<table class=\"x\" compact bordered striped><tr><td>2</td></tr></table>"
+  }
+ },
+ "html_attrs::send_rich_compact": {
+  "action_keys": [
+   "chat_id",
+   "rich_message",
+   "send_via",
+   "type"
+  ],
+  "action_rich_message": {
+   "html": "<table bordered=\"false\" striped compact><tr><td>1</td></tr></table>\n<table class=\"x\" compact><tr><td>2</td></tr></table>"
+  },
+  "bot_payload": {
+   "chat_id": 1,
+   "rich_message": {
+    "html": "<table striped compact><tr><td>1</td></tr></table>\n<table class=\"x\" compact bordered striped><tr><td>2</td></tr></table>"
+   }
+  },
+  "bot_retry_payload": {
+   "chat_id": 1,
+   "rich_message": {
+    "html": "<table striped><tr><td>1</td></tr></table>\n<table class=\"x\" bordered striped><tr><td>2</td></tr></table>"
+   }
+  },
+  "userbot": {
+   "html": "<table striped compact><tr><td>1</td></tr></table>\n<table class=\"x\" compact bordered striped><tr><td>2</td></tr></table>"
+  }
+ },
+ "html_attrs::send_rich_compact_false": {
+  "action_keys": [
+   "chat_id",
+   "rich_message",
+   "send_via",
+   "type"
+  ],
+  "action_rich_message": {
+   "html": "<table bordered=\"false\" striped><tr><td>1</td></tr></table>\n<table class=\"x\" compact><tr><td>2</td></tr></table>"
+  },
+  "bot_payload": {
+   "chat_id": 1,
+   "rich_message": {
+    "html": "<table striped><tr><td>1</td></tr></table>\n<table class=\"x\" compact bordered striped><tr><td>2</td></tr></table>"
+   }
+  },
+  "bot_retry_payload": {
+   "chat_id": 1,
+   "rich_message": {
+    "html": "<table striped><tr><td>1</td></tr></table>\n<table class=\"x\" bordered striped><tr><td>2</td></tr></table>"
+   }
+  },
+  "userbot": {
+   "html": "<table striped><tr><td>1</td></tr></table>\n<table class=\"x\" compact bordered striped><tr><td>2</td></tr></table>"
+  }
+ },
+ "html_attrs::send_rich_userbot_compact": {
+  "action_keys": [
+   "chat_id",
+   "rich_message",
+   "send_via",
+   "type"
+  ],
+  "action_rich_message": {
+   "html": "<table bordered=\"false\" striped compact><tr><td>1</td></tr></table>\n<table class=\"x\" compact><tr><td>2</td></tr></table>"
+  },
+  "bot_payload": {
+   "chat_id": 1,
+   "rich_message": {
+    "html": "<table striped compact><tr><td>1</td></tr></table>\n<table class=\"x\" compact bordered striped><tr><td>2</td></tr></table>"
+   }
+  },
+  "bot_retry_payload": {
+   "chat_id": 1,
+   "rich_message": {
+    "html": "<table striped><tr><td>1</td></tr></table>\n<table class=\"x\" bordered striped><tr><td>2</td></tr></table>"
+   }
+  },
+  "userbot": {
+   "html": "<table striped compact><tr><td>1</td></tr></table>\n<table class=\"x\" compact bordered striped><tr><td>2</td></tr></table>"
+  }
+ },
+ "html_no_table::edit_inline_compact": {
+  "action_keys": [
+   "inline_message_id",
+   "rich_message",
+   "send_via",
+   "type"
+  ],
+  "action_rich_message": {
+   "html": "<b>no tables here</b>"
+  },
+  "bot_payload": {
+   "chat_id": 1,
+   "rich_message": {
+    "html": "<b>no tables here</b>"
+   }
+  },
+  "bot_retry_payload": null,
+  "userbot": {
+   "html": "<b>no tables here</b>"
+  }
+ },
+ "html_no_table::send_rich": {
+  "action_keys": [
+   "chat_id",
+   "rich_message",
+   "send_via",
+   "type"
+  ],
+  "action_rich_message": {
+   "html": "<b>no tables here</b>"
+  },
+  "bot_payload": {
+   "chat_id": 1,
+   "rich_message": {
+    "html": "<b>no tables here</b>"
+   }
+  },
+  "bot_retry_payload": null,
+  "userbot": {
+   "html": "<b>no tables here</b>"
+  }
+ },
+ "html_no_table::send_rich_compact": {
+  "action_keys": [
+   "chat_id",
+   "rich_message",
+   "send_via",
+   "type"
+  ],
+  "action_rich_message": {
+   "html": "<b>no tables here</b>"
+  },
+  "bot_payload": {
+   "chat_id": 1,
+   "rich_message": {
+    "html": "<b>no tables here</b>"
+   }
+  },
+  "bot_retry_payload": null,
+  "userbot": {
+   "html": "<b>no tables here</b>"
+  }
+ },
+ "html_no_table::send_rich_compact_false": {
+  "action_keys": [
+   "chat_id",
+   "rich_message",
+   "send_via",
+   "type"
+  ],
+  "action_rich_message": {
+   "html": "<b>no tables here</b>"
+  },
+  "bot_payload": {
+   "chat_id": 1,
+   "rich_message": {
+    "html": "<b>no tables here</b>"
+   }
+  },
+  "bot_retry_payload": null,
+  "userbot": {
+   "html": "<b>no tables here</b>"
+  }
+ },
+ "html_no_table::send_rich_userbot_compact": {
+  "action_keys": [
+   "chat_id",
+   "rich_message",
+   "send_via",
+   "type"
+  ],
+  "action_rich_message": {
+   "html": "<b>no tables here</b>"
+  },
+  "bot_payload": {
+   "chat_id": 1,
+   "rich_message": {
+    "html": "<b>no tables here</b>"
+   }
+  },
+  "bot_retry_payload": null,
+  "userbot": {
+   "html": "<b>no tables here</b>"
+  }
+ },
+ "html_plain::edit_inline_compact": {
+  "action_keys": [
+   "inline_message_id",
+   "rich_message",
+   "send_via",
+   "type"
+  ],
+  "action_rich_message": {
+   "html": "<p>t</p><table compact><tr><td>1</td></tr></table>"
+  },
+  "bot_payload": {
+   "chat_id": 1,
+   "rich_message": {
+    "html": "<p>t</p><table compact bordered striped><tr><td>1</td></tr></table>"
+   }
+  },
+  "bot_retry_payload": {
+   "chat_id": 1,
+   "rich_message": {
+    "html": "<p>t</p><table bordered striped><tr><td>1</td></tr></table>"
+   }
+  },
+  "userbot": {
+   "html": "<p>t</p><table compact bordered striped><tr><td>1</td></tr></table>"
+  }
+ },
+ "html_plain::send_rich": {
+  "action_keys": [
+   "chat_id",
+   "rich_message",
+   "send_via",
+   "type"
+  ],
+  "action_rich_message": {
+   "html": "<p>t</p><table><tr><td>1</td></tr></table>"
+  },
+  "bot_payload": {
+   "chat_id": 1,
+   "rich_message": {
+    "html": "<p>t</p><table bordered striped><tr><td>1</td></tr></table>"
+   }
+  },
+  "bot_retry_payload": null,
+  "userbot": {
+   "html": "<p>t</p><table bordered striped><tr><td>1</td></tr></table>"
+  }
+ },
+ "html_plain::send_rich_compact": {
+  "action_keys": [
+   "chat_id",
+   "rich_message",
+   "send_via",
+   "type"
+  ],
+  "action_rich_message": {
+   "html": "<p>t</p><table compact><tr><td>1</td></tr></table>"
+  },
+  "bot_payload": {
+   "chat_id": 1,
+   "rich_message": {
+    "html": "<p>t</p><table compact bordered striped><tr><td>1</td></tr></table>"
+   }
+  },
+  "bot_retry_payload": {
+   "chat_id": 1,
+   "rich_message": {
+    "html": "<p>t</p><table bordered striped><tr><td>1</td></tr></table>"
+   }
+  },
+  "userbot": {
+   "html": "<p>t</p><table compact bordered striped><tr><td>1</td></tr></table>"
+  }
+ },
+ "html_plain::send_rich_compact_false": {
+  "action_keys": [
+   "chat_id",
+   "rich_message",
+   "send_via",
+   "type"
+  ],
+  "action_rich_message": {
+   "html": "<p>t</p><table><tr><td>1</td></tr></table>"
+  },
+  "bot_payload": {
+   "chat_id": 1,
+   "rich_message": {
+    "html": "<p>t</p><table bordered striped><tr><td>1</td></tr></table>"
+   }
+  },
+  "bot_retry_payload": null,
+  "userbot": {
+   "html": "<p>t</p><table bordered striped><tr><td>1</td></tr></table>"
+  }
+ },
+ "html_plain::send_rich_userbot_compact": {
+  "action_keys": [
+   "chat_id",
+   "rich_message",
+   "send_via",
+   "type"
+  ],
+  "action_rich_message": {
+   "html": "<p>t</p><table compact><tr><td>1</td></tr></table>"
+  },
+  "bot_payload": {
+   "chat_id": 1,
+   "rich_message": {
+    "html": "<p>t</p><table compact bordered striped><tr><td>1</td></tr></table>"
+   }
+  },
+  "bot_retry_payload": {
+   "chat_id": 1,
+   "rich_message": {
+    "html": "<p>t</p><table bordered striped><tr><td>1</td></tr></table>"
+   }
+  },
+  "userbot": {
+   "html": "<p>t</p><table compact bordered striped><tr><td>1</td></tr></table>"
+  }
+ },
+ "html_self_closing::edit_inline_compact": {
+  "action_keys": [
+   "inline_message_id",
+   "rich_message",
+   "send_via",
+   "type"
+  ],
+  "action_rich_message": {
+   "html": "<table compact /><table striped='0' compact />"
+  },
+  "bot_payload": {
+   "chat_id": 1,
+   "rich_message": {
+    "html": "<table compact bordered striped /><table compact bordered />"
+   }
+  },
+  "bot_retry_payload": {
+   "chat_id": 1,
+   "rich_message": {
+    "html": "<table bordered striped /><table bordered />"
+   }
+  },
+  "userbot": {
+   "html": "<table compact bordered striped /><table compact bordered />"
+  }
+ },
+ "html_self_closing::send_rich": {
+  "action_keys": [
+   "chat_id",
+   "rich_message",
+   "send_via",
+   "type"
+  ],
+  "action_rich_message": {
+   "html": "<table/><table striped='0' />"
+  },
+  "bot_payload": {
+   "chat_id": 1,
+   "rich_message": {
+    "html": "<table bordered striped /><table bordered />"
+   }
+  },
+  "bot_retry_payload": null,
+  "userbot": {
+   "html": "<table bordered striped /><table bordered />"
+  }
+ },
+ "html_self_closing::send_rich_compact": {
+  "action_keys": [
+   "chat_id",
+   "rich_message",
+   "send_via",
+   "type"
+  ],
+  "action_rich_message": {
+   "html": "<table compact /><table striped='0' compact />"
+  },
+  "bot_payload": {
+   "chat_id": 1,
+   "rich_message": {
+    "html": "<table compact bordered striped /><table compact bordered />"
+   }
+  },
+  "bot_retry_payload": {
+   "chat_id": 1,
+   "rich_message": {
+    "html": "<table bordered striped /><table bordered />"
+   }
+  },
+  "userbot": {
+   "html": "<table compact bordered striped /><table compact bordered />"
+  }
+ },
+ "html_self_closing::send_rich_compact_false": {
+  "action_keys": [
+   "chat_id",
+   "rich_message",
+   "send_via",
+   "type"
+  ],
+  "action_rich_message": {
+   "html": "<table/><table striped='0' />"
+  },
+  "bot_payload": {
+   "chat_id": 1,
+   "rich_message": {
+    "html": "<table bordered striped /><table bordered />"
+   }
+  },
+  "bot_retry_payload": null,
+  "userbot": {
+   "html": "<table bordered striped /><table bordered />"
+  }
+ },
+ "html_self_closing::send_rich_userbot_compact": {
+  "action_keys": [
+   "chat_id",
+   "rich_message",
+   "send_via",
+   "type"
+  ],
+  "action_rich_message": {
+   "html": "<table compact /><table striped='0' compact />"
+  },
+  "bot_payload": {
+   "chat_id": 1,
+   "rich_message": {
+    "html": "<table compact bordered striped /><table compact bordered />"
+   }
+  },
+  "bot_retry_payload": {
+   "chat_id": 1,
+   "rich_message": {
+    "html": "<table bordered striped /><table bordered />"
+   }
+  },
+  "userbot": {
+   "html": "<table compact bordered striped /><table compact bordered />"
+  }
+ },
+ "markdown_center_and_escape::edit_inline_compact": {
+  "action_keys": [
+   "inline_message_id",
+   "rich_message",
+   "send_via",
+   "type"
+  ],
+  "action_rich_message": {
+   "markdown": "<table bordered striped compact>\n<tr><th align=\"center\">h | x</th><th>c</th></tr>\n<tr><td align=\"center\"><s>s</s></td><td></td></tr>\n</table>"
+  },
+  "bot_payload": {
+   "chat_id": 1,
+   "rich_message": {
+    "markdown": "<table bordered striped compact>\n<tr><th align=\"center\">h | x</th><th>c</th></tr>\n<tr><td align=\"center\"><s>s</s></td><td></td></tr>\n</table>"
+   }
+  },
+  "bot_retry_payload": {
+   "chat_id": 1,
+   "rich_message": {
+    "markdown": "<table bordered striped>\n<tr><th align=\"center\">h | x</th><th>c</th></tr>\n<tr><td align=\"center\"><s>s</s></td><td></td></tr>\n</table>"
+   }
+  },
+  "userbot": {
+   "markdown": "<table bordered striped compact>\n<tr><th align=\"center\">h | x</th><th>c</th></tr>\n<tr><td align=\"center\"><s>s</s></td><td></td></tr>\n</table>"
+  }
+ },
+ "markdown_center_and_escape::send_rich": {
+  "action_keys": [
+   "chat_id",
+   "rich_message",
+   "send_via",
+   "type"
+  ],
+  "action_rich_message": {
+   "markdown": "| h \\| x | c |\n|:-:|---|\n| ~~s~~ | ||sp|| ==m== _i_ *j* |"
+  },
+  "bot_payload": {
+   "chat_id": 1,
+   "rich_message": {
+    "markdown": "<table bordered striped>\n<tr><th align=\"center\">h | x</th><th>c</th></tr>\n<tr><td align=\"center\"><s>s</s></td><td></td></tr>\n</table>"
+   }
+  },
+  "bot_retry_payload": null,
+  "userbot": {
+   "markdown": "<table bordered striped>\n<tr><th align=\"center\">h | x</th><th>c</th></tr>\n<tr><td align=\"center\"><s>s</s></td><td></td></tr>\n</table>"
+  }
+ },
+ "markdown_center_and_escape::send_rich_compact": {
+  "action_keys": [
+   "chat_id",
+   "rich_message",
+   "send_via",
+   "type"
+  ],
+  "action_rich_message": {
+   "markdown": "<table bordered striped compact>\n<tr><th align=\"center\">h | x</th><th>c</th></tr>\n<tr><td align=\"center\"><s>s</s></td><td></td></tr>\n</table>"
+  },
+  "bot_payload": {
+   "chat_id": 1,
+   "rich_message": {
+    "markdown": "<table bordered striped compact>\n<tr><th align=\"center\">h | x</th><th>c</th></tr>\n<tr><td align=\"center\"><s>s</s></td><td></td></tr>\n</table>"
+   }
+  },
+  "bot_retry_payload": {
+   "chat_id": 1,
+   "rich_message": {
+    "markdown": "<table bordered striped>\n<tr><th align=\"center\">h | x</th><th>c</th></tr>\n<tr><td align=\"center\"><s>s</s></td><td></td></tr>\n</table>"
+   }
+  },
+  "userbot": {
+   "markdown": "<table bordered striped compact>\n<tr><th align=\"center\">h | x</th><th>c</th></tr>\n<tr><td align=\"center\"><s>s</s></td><td></td></tr>\n</table>"
+  }
+ },
+ "markdown_center_and_escape::send_rich_compact_false": {
+  "action_keys": [
+   "chat_id",
+   "rich_message",
+   "send_via",
+   "type"
+  ],
+  "action_rich_message": {
+   "markdown": "| h \\| x | c |\n|:-:|---|\n| ~~s~~ | ||sp|| ==m== _i_ *j* |"
+  },
+  "bot_payload": {
+   "chat_id": 1,
+   "rich_message": {
+    "markdown": "<table bordered striped>\n<tr><th align=\"center\">h | x</th><th>c</th></tr>\n<tr><td align=\"center\"><s>s</s></td><td></td></tr>\n</table>"
+   }
+  },
+  "bot_retry_payload": null,
+  "userbot": {
+   "markdown": "<table bordered striped>\n<tr><th align=\"center\">h | x</th><th>c</th></tr>\n<tr><td align=\"center\"><s>s</s></td><td></td></tr>\n</table>"
+  }
+ },
+ "markdown_center_and_escape::send_rich_userbot_compact": {
+  "action_keys": [
+   "chat_id",
+   "rich_message",
+   "send_via",
+   "type"
+  ],
+  "action_rich_message": {
+   "markdown": "<table bordered striped compact>\n<tr><th align=\"center\">h | x</th><th>c</th></tr>\n<tr><td align=\"center\"><s>s</s></td><td></td></tr>\n</table>"
+  },
+  "bot_payload": {
+   "chat_id": 1,
+   "rich_message": {
+    "markdown": "<table bordered striped compact>\n<tr><th align=\"center\">h | x</th><th>c</th></tr>\n<tr><td align=\"center\"><s>s</s></td><td></td></tr>\n</table>"
+   }
+  },
+  "bot_retry_payload": {
+   "chat_id": 1,
+   "rich_message": {
+    "markdown": "<table bordered striped>\n<tr><th align=\"center\">h | x</th><th>c</th></tr>\n<tr><td align=\"center\"><s>s</s></td><td></td></tr>\n</table>"
+   }
+  },
+  "userbot": {
+   "markdown": "<table bordered striped compact>\n<tr><th align=\"center\">h | x</th><th>c</th></tr>\n<tr><td align=\"center\"><s>s</s></td><td></td></tr>\n</table>"
+  }
+ },
+ "markdown_fence::edit_inline_compact": {
+  "action_keys": [
+   "inline_message_id",
+   "rich_message",
+   "send_via",
+   "type"
+  ],
+  "action_rich_message": {
+   "markdown": "```\n| a | b |\n|---|---|\n| 1 | 2 |\n```\n\n<table bordered striped compact>\n<tr><th>c</th><th>d</th></tr>\n<tr><td>3</td><td>4</td></tr>\n</table>"
+  },
+  "bot_payload": {
+   "chat_id": 1,
+   "rich_message": {
+    "markdown": "```\n| a | b |\n|---|---|\n| 1 | 2 |\n```\n\n<table bordered striped compact>\n<tr><th>c</th><th>d</th></tr>\n<tr><td>3</td><td>4</td></tr>\n</table>"
+   }
+  },
+  "bot_retry_payload": {
+   "chat_id": 1,
+   "rich_message": {
+    "markdown": "```\n| a | b |\n|---|---|\n| 1 | 2 |\n```\n\n<table bordered striped>\n<tr><th>c</th><th>d</th></tr>\n<tr><td>3</td><td>4</td></tr>\n</table>"
+   }
+  },
+  "userbot": {
+   "markdown": "```\n| a | b |\n|---|---|\n| 1 | 2 |\n```\n\n<table bordered striped compact>\n<tr><th>c</th><th>d</th></tr>\n<tr><td>3</td><td>4</td></tr>\n</table>"
+  }
+ },
+ "markdown_fence::send_rich": {
+  "action_keys": [
+   "chat_id",
+   "rich_message",
+   "send_via",
+   "type"
+  ],
+  "action_rich_message": {
+   "markdown": "```\n| a | b |\n|---|---|\n| 1 | 2 |\n```\n\n| c | d |\n|---|---|\n| 3 | 4 |"
+  },
+  "bot_payload": {
+   "chat_id": 1,
+   "rich_message": {
+    "markdown": "```\n| a | b |\n|---|---|\n| 1 | 2 |\n```\n\n<table bordered striped>\n<tr><th>c</th><th>d</th></tr>\n<tr><td>3</td><td>4</td></tr>\n</table>"
+   }
+  },
+  "bot_retry_payload": null,
+  "userbot": {
+   "markdown": "```\n| a | b |\n|---|---|\n| 1 | 2 |\n```\n\n<table bordered striped>\n<tr><th>c</th><th>d</th></tr>\n<tr><td>3</td><td>4</td></tr>\n</table>"
+  }
+ },
+ "markdown_fence::send_rich_compact": {
+  "action_keys": [
+   "chat_id",
+   "rich_message",
+   "send_via",
+   "type"
+  ],
+  "action_rich_message": {
+   "markdown": "```\n| a | b |\n|---|---|\n| 1 | 2 |\n```\n\n<table bordered striped compact>\n<tr><th>c</th><th>d</th></tr>\n<tr><td>3</td><td>4</td></tr>\n</table>"
+  },
+  "bot_payload": {
+   "chat_id": 1,
+   "rich_message": {
+    "markdown": "```\n| a | b |\n|---|---|\n| 1 | 2 |\n```\n\n<table bordered striped compact>\n<tr><th>c</th><th>d</th></tr>\n<tr><td>3</td><td>4</td></tr>\n</table>"
+   }
+  },
+  "bot_retry_payload": {
+   "chat_id": 1,
+   "rich_message": {
+    "markdown": "```\n| a | b |\n|---|---|\n| 1 | 2 |\n```\n\n<table bordered striped>\n<tr><th>c</th><th>d</th></tr>\n<tr><td>3</td><td>4</td></tr>\n</table>"
+   }
+  },
+  "userbot": {
+   "markdown": "```\n| a | b |\n|---|---|\n| 1 | 2 |\n```\n\n<table bordered striped compact>\n<tr><th>c</th><th>d</th></tr>\n<tr><td>3</td><td>4</td></tr>\n</table>"
+  }
+ },
+ "markdown_fence::send_rich_compact_false": {
+  "action_keys": [
+   "chat_id",
+   "rich_message",
+   "send_via",
+   "type"
+  ],
+  "action_rich_message": {
+   "markdown": "```\n| a | b |\n|---|---|\n| 1 | 2 |\n```\n\n| c | d |\n|---|---|\n| 3 | 4 |"
+  },
+  "bot_payload": {
+   "chat_id": 1,
+   "rich_message": {
+    "markdown": "```\n| a | b |\n|---|---|\n| 1 | 2 |\n```\n\n<table bordered striped>\n<tr><th>c</th><th>d</th></tr>\n<tr><td>3</td><td>4</td></tr>\n</table>"
+   }
+  },
+  "bot_retry_payload": null,
+  "userbot": {
+   "markdown": "```\n| a | b |\n|---|---|\n| 1 | 2 |\n```\n\n<table bordered striped>\n<tr><th>c</th><th>d</th></tr>\n<tr><td>3</td><td>4</td></tr>\n</table>"
+  }
+ },
+ "markdown_fence::send_rich_userbot_compact": {
+  "action_keys": [
+   "chat_id",
+   "rich_message",
+   "send_via",
+   "type"
+  ],
+  "action_rich_message": {
+   "markdown": "```\n| a | b |\n|---|---|\n| 1 | 2 |\n```\n\n<table bordered striped compact>\n<tr><th>c</th><th>d</th></tr>\n<tr><td>3</td><td>4</td></tr>\n</table>"
+  },
+  "bot_payload": {
+   "chat_id": 1,
+   "rich_message": {
+    "markdown": "```\n| a | b |\n|---|---|\n| 1 | 2 |\n```\n\n<table bordered striped compact>\n<tr><th>c</th><th>d</th></tr>\n<tr><td>3</td><td>4</td></tr>\n</table>"
+   }
+  },
+  "bot_retry_payload": {
+   "chat_id": 1,
+   "rich_message": {
+    "markdown": "```\n| a | b |\n|---|---|\n| 1 | 2 |\n```\n\n<table bordered striped>\n<tr><th>c</th><th>d</th></tr>\n<tr><td>3</td><td>4</td></tr>\n</table>"
+   }
+  },
+  "userbot": {
+   "markdown": "```\n| a | b |\n|---|---|\n| 1 | 2 |\n```\n\n<table bordered striped compact>\n<tr><th>c</th><th>d</th></tr>\n<tr><td>3</td><td>4</td></tr>\n</table>"
+  }
+ },
+ "markdown_long::edit_inline_compact": {
+  "action_keys": [
+   "inline_message_id",
+   "rich_message",
+   "send_via",
+   "type"
+  ],
+  "action_rich_message": {
+   "markdown": "sha256:39f171117cb38ee770e0c28bb23160f86b1a63a75eee4f3a736442c834db19d8:83151"
+  },
+  "bot_payload": {
+   "chat_id": 1,
+   "rich_message": {
+    "markdown": "sha256:39f171117cb38ee770e0c28bb23160f86b1a63a75eee4f3a736442c834db19d8:83151"
+   }
+  },
+  "bot_retry_payload": {
+   "chat_id": 1,
+   "rich_message": {
+    "markdown": "sha256:2e00e969dc26fc62339e4bb3d6a096683b7d8bcb58cf423982982b880ae892d4:83143"
+   }
+  },
+  "userbot": {
+   "error": "UserbotRichMessageError"
+  }
+ },
+ "markdown_long::send_rich": {
+  "action_keys": [
+   "chat_id",
+   "rich_message",
+   "send_via",
+   "type"
+  ],
+  "action_rich_message": {
+   "markdown": "sha256:dc60578982dc56a69d40650fe0631286e2bdf97d150ff298fe72a3fac5842999:35097"
+  },
+  "bot_payload": {
+   "chat_id": 1,
+   "rich_message": {
+    "markdown": "sha256:dc60578982dc56a69d40650fe0631286e2bdf97d150ff298fe72a3fac5842999:35097"
+   }
+  },
+  "bot_retry_payload": null,
+  "userbot": {
+   "error": "UserbotRichMessageError"
+  }
+ },
+ "markdown_long::send_rich_compact": {
+  "action_keys": [
+   "chat_id",
+   "rich_message",
+   "send_via",
+   "type"
+  ],
+  "action_rich_message": {
+   "markdown": "sha256:39f171117cb38ee770e0c28bb23160f86b1a63a75eee4f3a736442c834db19d8:83151"
+  },
+  "bot_payload": {
+   "chat_id": 1,
+   "rich_message": {
+    "markdown": "sha256:39f171117cb38ee770e0c28bb23160f86b1a63a75eee4f3a736442c834db19d8:83151"
+   }
+  },
+  "bot_retry_payload": {
+   "chat_id": 1,
+   "rich_message": {
+    "markdown": "sha256:2e00e969dc26fc62339e4bb3d6a096683b7d8bcb58cf423982982b880ae892d4:83143"
+   }
+  },
+  "userbot": {
+   "error": "UserbotRichMessageError"
+  }
+ },
+ "markdown_long::send_rich_compact_false": {
+  "action_keys": [
+   "chat_id",
+   "rich_message",
+   "send_via",
+   "type"
+  ],
+  "action_rich_message": {
+   "markdown": "sha256:dc60578982dc56a69d40650fe0631286e2bdf97d150ff298fe72a3fac5842999:35097"
+  },
+  "bot_payload": {
+   "chat_id": 1,
+   "rich_message": {
+    "markdown": "sha256:dc60578982dc56a69d40650fe0631286e2bdf97d150ff298fe72a3fac5842999:35097"
+   }
+  },
+  "bot_retry_payload": null,
+  "userbot": {
+   "error": "UserbotRichMessageError"
+  }
+ },
+ "markdown_long::send_rich_userbot_compact": {
+  "action_keys": [
+   "chat_id",
+   "rich_message",
+   "send_via",
+   "type"
+  ],
+  "action_rich_message": {
+   "markdown": "sha256:39f171117cb38ee770e0c28bb23160f86b1a63a75eee4f3a736442c834db19d8:83151"
+  },
+  "bot_payload": {
+   "chat_id": 1,
+   "rich_message": {
+    "markdown": "sha256:39f171117cb38ee770e0c28bb23160f86b1a63a75eee4f3a736442c834db19d8:83151"
+   }
+  },
+  "bot_retry_payload": {
+   "chat_id": 1,
+   "rich_message": {
+    "markdown": "sha256:2e00e969dc26fc62339e4bb3d6a096683b7d8bcb58cf423982982b880ae892d4:83143"
+   }
+  },
+  "userbot": {
+   "error": "UserbotRichMessageError"
+  }
+ },
+ "markdown_not_table::edit_inline_compact": {
+  "action_keys": [
+   "inline_message_id",
+   "rich_message",
+   "send_via",
+   "type"
+  ],
+  "action_rich_message": {
+   "markdown": "a | b\nno delimiter row"
+  },
+  "bot_payload": {
+   "chat_id": 1,
+   "rich_message": {
+    "markdown": "a | b\nno delimiter row"
+   }
+  },
+  "bot_retry_payload": null,
+  "userbot": {
+   "markdown": "a | b\nno delimiter row"
+  }
+ },
+ "markdown_not_table::send_rich": {
+  "action_keys": [
+   "chat_id",
+   "rich_message",
+   "send_via",
+   "type"
+  ],
+  "action_rich_message": {
+   "markdown": "a | b\nno delimiter row"
+  },
+  "bot_payload": {
+   "chat_id": 1,
+   "rich_message": {
+    "markdown": "a | b\nno delimiter row"
+   }
+  },
+  "bot_retry_payload": null,
+  "userbot": {
+   "markdown": "a | b\nno delimiter row"
+  }
+ },
+ "markdown_not_table::send_rich_compact": {
+  "action_keys": [
+   "chat_id",
+   "rich_message",
+   "send_via",
+   "type"
+  ],
+  "action_rich_message": {
+   "markdown": "a | b\nno delimiter row"
+  },
+  "bot_payload": {
+   "chat_id": 1,
+   "rich_message": {
+    "markdown": "a | b\nno delimiter row"
+   }
+  },
+  "bot_retry_payload": null,
+  "userbot": {
+   "markdown": "a | b\nno delimiter row"
+  }
+ },
+ "markdown_not_table::send_rich_compact_false": {
+  "action_keys": [
+   "chat_id",
+   "rich_message",
+   "send_via",
+   "type"
+  ],
+  "action_rich_message": {
+   "markdown": "a | b\nno delimiter row"
+  },
+  "bot_payload": {
+   "chat_id": 1,
+   "rich_message": {
+    "markdown": "a | b\nno delimiter row"
+   }
+  },
+  "bot_retry_payload": null,
+  "userbot": {
+   "markdown": "a | b\nno delimiter row"
+  }
+ },
+ "markdown_not_table::send_rich_userbot_compact": {
+  "action_keys": [
+   "chat_id",
+   "rich_message",
+   "send_via",
+   "type"
+  ],
+  "action_rich_message": {
+   "markdown": "a | b\nno delimiter row"
+  },
+  "bot_payload": {
+   "chat_id": 1,
+   "rich_message": {
+    "markdown": "a | b\nno delimiter row"
+   }
+  },
+  "bot_retry_payload": null,
+  "userbot": {
+   "markdown": "a | b\nno delimiter row"
+  }
+ },
+ "markdown_pipe::edit_inline_compact": {
+  "action_keys": [
+   "inline_message_id",
+   "rich_message",
+   "send_via",
+   "type"
+  ],
+  "action_rich_message": {
+   "markdown": "# T\n\n<table bordered striped compact>\n<tr><th align=\"left\">a</th><th align=\"right\">b</th></tr>\n<tr><td align=\"left\">1</td><td align=\"right\"><b>2</b></td></tr>\n<tr><td align=\"left\"><code>x|y</code></td><td align=\"right\"><a href=\"https://e.x\">l</a></td></tr>\n</table>\n\ntext after"
+  },
+  "bot_payload": {
+   "chat_id": 1,
+   "rich_message": {
+    "markdown": "# T\n\n<table bordered striped compact>\n<tr><th align=\"left\">a</th><th align=\"right\">b</th></tr>\n<tr><td align=\"left\">1</td><td align=\"right\"><b>2</b></td></tr>\n<tr><td align=\"left\"><code>x|y</code></td><td align=\"right\"><a href=\"https://e.x\">l</a></td></tr>\n</table>\n\ntext after"
+   }
+  },
+  "bot_retry_payload": {
+   "chat_id": 1,
+   "rich_message": {
+    "markdown": "# T\n\n<table bordered striped>\n<tr><th align=\"left\">a</th><th align=\"right\">b</th></tr>\n<tr><td align=\"left\">1</td><td align=\"right\"><b>2</b></td></tr>\n<tr><td align=\"left\"><code>x|y</code></td><td align=\"right\"><a href=\"https://e.x\">l</a></td></tr>\n</table>\n\ntext after"
+   }
+  },
+  "userbot": {
+   "markdown": "# T\n\n<table bordered striped compact>\n<tr><th align=\"left\">a</th><th align=\"right\">b</th></tr>\n<tr><td align=\"left\">1</td><td align=\"right\"><b>2</b></td></tr>\n<tr><td align=\"left\"><code>x|y</code></td><td align=\"right\"><a href=\"https://e.x\">l</a></td></tr>\n</table>\n\ntext after"
+  }
+ },
+ "markdown_pipe::send_rich": {
+  "action_keys": [
+   "chat_id",
+   "rich_message",
+   "send_via",
+   "type"
+  ],
+  "action_rich_message": {
+   "markdown": "# T\n| a | b |\n|:--|--:|\n| 1 | **2** |\n| `x|y` | [l](https://e.x) |\ntext after"
+  },
+  "bot_payload": {
+   "chat_id": 1,
+   "rich_message": {
+    "markdown": "# T\n\n<table bordered striped>\n<tr><th align=\"left\">a</th><th align=\"right\">b</th></tr>\n<tr><td align=\"left\">1</td><td align=\"right\"><b>2</b></td></tr>\n<tr><td align=\"left\"><code>x|y</code></td><td align=\"right\"><a href=\"https://e.x\">l</a></td></tr>\n</table>\n\ntext after"
+   }
+  },
+  "bot_retry_payload": null,
+  "userbot": {
+   "markdown": "# T\n\n<table bordered striped>\n<tr><th align=\"left\">a</th><th align=\"right\">b</th></tr>\n<tr><td align=\"left\">1</td><td align=\"right\"><b>2</b></td></tr>\n<tr><td align=\"left\"><code>x|y</code></td><td align=\"right\"><a href=\"https://e.x\">l</a></td></tr>\n</table>\n\ntext after"
+  }
+ },
+ "markdown_pipe::send_rich_compact": {
+  "action_keys": [
+   "chat_id",
+   "rich_message",
+   "send_via",
+   "type"
+  ],
+  "action_rich_message": {
+   "markdown": "# T\n\n<table bordered striped compact>\n<tr><th align=\"left\">a</th><th align=\"right\">b</th></tr>\n<tr><td align=\"left\">1</td><td align=\"right\"><b>2</b></td></tr>\n<tr><td align=\"left\"><code>x|y</code></td><td align=\"right\"><a href=\"https://e.x\">l</a></td></tr>\n</table>\n\ntext after"
+  },
+  "bot_payload": {
+   "chat_id": 1,
+   "rich_message": {
+    "markdown": "# T\n\n<table bordered striped compact>\n<tr><th align=\"left\">a</th><th align=\"right\">b</th></tr>\n<tr><td align=\"left\">1</td><td align=\"right\"><b>2</b></td></tr>\n<tr><td align=\"left\"><code>x|y</code></td><td align=\"right\"><a href=\"https://e.x\">l</a></td></tr>\n</table>\n\ntext after"
+   }
+  },
+  "bot_retry_payload": {
+   "chat_id": 1,
+   "rich_message": {
+    "markdown": "# T\n\n<table bordered striped>\n<tr><th align=\"left\">a</th><th align=\"right\">b</th></tr>\n<tr><td align=\"left\">1</td><td align=\"right\"><b>2</b></td></tr>\n<tr><td align=\"left\"><code>x|y</code></td><td align=\"right\"><a href=\"https://e.x\">l</a></td></tr>\n</table>\n\ntext after"
+   }
+  },
+  "userbot": {
+   "markdown": "# T\n\n<table bordered striped compact>\n<tr><th align=\"left\">a</th><th align=\"right\">b</th></tr>\n<tr><td align=\"left\">1</td><td align=\"right\"><b>2</b></td></tr>\n<tr><td align=\"left\"><code>x|y</code></td><td align=\"right\"><a href=\"https://e.x\">l</a></td></tr>\n</table>\n\ntext after"
+  }
+ },
+ "markdown_pipe::send_rich_compact_false": {
+  "action_keys": [
+   "chat_id",
+   "rich_message",
+   "send_via",
+   "type"
+  ],
+  "action_rich_message": {
+   "markdown": "# T\n| a | b |\n|:--|--:|\n| 1 | **2** |\n| `x|y` | [l](https://e.x) |\ntext after"
+  },
+  "bot_payload": {
+   "chat_id": 1,
+   "rich_message": {
+    "markdown": "# T\n\n<table bordered striped>\n<tr><th align=\"left\">a</th><th align=\"right\">b</th></tr>\n<tr><td align=\"left\">1</td><td align=\"right\"><b>2</b></td></tr>\n<tr><td align=\"left\"><code>x|y</code></td><td align=\"right\"><a href=\"https://e.x\">l</a></td></tr>\n</table>\n\ntext after"
+   }
+  },
+  "bot_retry_payload": null,
+  "userbot": {
+   "markdown": "# T\n\n<table bordered striped>\n<tr><th align=\"left\">a</th><th align=\"right\">b</th></tr>\n<tr><td align=\"left\">1</td><td align=\"right\"><b>2</b></td></tr>\n<tr><td align=\"left\"><code>x|y</code></td><td align=\"right\"><a href=\"https://e.x\">l</a></td></tr>\n</table>\n\ntext after"
+  }
+ },
+ "markdown_pipe::send_rich_userbot_compact": {
+  "action_keys": [
+   "chat_id",
+   "rich_message",
+   "send_via",
+   "type"
+  ],
+  "action_rich_message": {
+   "markdown": "# T\n\n<table bordered striped compact>\n<tr><th align=\"left\">a</th><th align=\"right\">b</th></tr>\n<tr><td align=\"left\">1</td><td align=\"right\"><b>2</b></td></tr>\n<tr><td align=\"left\"><code>x|y</code></td><td align=\"right\"><a href=\"https://e.x\">l</a></td></tr>\n</table>\n\ntext after"
+  },
+  "bot_payload": {
+   "chat_id": 1,
+   "rich_message": {
+    "markdown": "# T\n\n<table bordered striped compact>\n<tr><th align=\"left\">a</th><th align=\"right\">b</th></tr>\n<tr><td align=\"left\">1</td><td align=\"right\"><b>2</b></td></tr>\n<tr><td align=\"left\"><code>x|y</code></td><td align=\"right\"><a href=\"https://e.x\">l</a></td></tr>\n</table>\n\ntext after"
+   }
+  },
+  "bot_retry_payload": {
+   "chat_id": 1,
+   "rich_message": {
+    "markdown": "# T\n\n<table bordered striped>\n<tr><th align=\"left\">a</th><th align=\"right\">b</th></tr>\n<tr><td align=\"left\">1</td><td align=\"right\"><b>2</b></td></tr>\n<tr><td align=\"left\"><code>x|y</code></td><td align=\"right\"><a href=\"https://e.x\">l</a></td></tr>\n</table>\n\ntext after"
+   }
+  },
+  "userbot": {
+   "markdown": "# T\n\n<table bordered striped compact>\n<tr><th align=\"left\">a</th><th align=\"right\">b</th></tr>\n<tr><td align=\"left\">1</td><td align=\"right\"><b>2</b></td></tr>\n<tr><td align=\"left\"><code>x|y</code></td><td align=\"right\"><a href=\"https://e.x\">l</a></td></tr>\n</table>\n\ntext after"
+  }
+ },
+ "markdown_raw_table::edit_inline_compact": {
+  "action_keys": [
+   "inline_message_id",
+   "rich_message",
+   "send_via",
+   "type"
+  ],
+  "action_rich_message": {
+   "markdown": "before\n<table compact><tr><td>raw</td></tr></table>\n`<table>` inline code"
+  },
+  "bot_payload": {
+   "chat_id": 1,
+   "rich_message": {
+    "markdown": "before\n<table compact bordered striped><tr><td>raw</td></tr></table>\n`<table>` inline code"
+   }
+  },
+  "bot_retry_payload": {
+   "chat_id": 1,
+   "rich_message": {
+    "markdown": "before\n<table bordered striped><tr><td>raw</td></tr></table>\n`<table>` inline code"
+   }
+  },
+  "userbot": {
+   "markdown": "before\n<table compact bordered striped><tr><td>raw</td></tr></table>\n`<table>` inline code"
+  }
+ },
+ "markdown_raw_table::send_rich": {
+  "action_keys": [
+   "chat_id",
+   "rich_message",
+   "send_via",
+   "type"
+  ],
+  "action_rich_message": {
+   "markdown": "before\n<table><tr><td>raw</td></tr></table>\n`<table>` inline code"
+  },
+  "bot_payload": {
+   "chat_id": 1,
+   "rich_message": {
+    "markdown": "before\n<table bordered striped><tr><td>raw</td></tr></table>\n`<table>` inline code"
+   }
+  },
+  "bot_retry_payload": null,
+  "userbot": {
+   "markdown": "before\n<table bordered striped><tr><td>raw</td></tr></table>\n`<table>` inline code"
+  }
+ },
+ "markdown_raw_table::send_rich_compact": {
+  "action_keys": [
+   "chat_id",
+   "rich_message",
+   "send_via",
+   "type"
+  ],
+  "action_rich_message": {
+   "markdown": "before\n<table compact><tr><td>raw</td></tr></table>\n`<table>` inline code"
+  },
+  "bot_payload": {
+   "chat_id": 1,
+   "rich_message": {
+    "markdown": "before\n<table compact bordered striped><tr><td>raw</td></tr></table>\n`<table>` inline code"
+   }
+  },
+  "bot_retry_payload": {
+   "chat_id": 1,
+   "rich_message": {
+    "markdown": "before\n<table bordered striped><tr><td>raw</td></tr></table>\n`<table>` inline code"
+   }
+  },
+  "userbot": {
+   "markdown": "before\n<table compact bordered striped><tr><td>raw</td></tr></table>\n`<table>` inline code"
+  }
+ },
+ "markdown_raw_table::send_rich_compact_false": {
+  "action_keys": [
+   "chat_id",
+   "rich_message",
+   "send_via",
+   "type"
+  ],
+  "action_rich_message": {
+   "markdown": "before\n<table><tr><td>raw</td></tr></table>\n`<table>` inline code"
+  },
+  "bot_payload": {
+   "chat_id": 1,
+   "rich_message": {
+    "markdown": "before\n<table bordered striped><tr><td>raw</td></tr></table>\n`<table>` inline code"
+   }
+  },
+  "bot_retry_payload": null,
+  "userbot": {
+   "markdown": "before\n<table bordered striped><tr><td>raw</td></tr></table>\n`<table>` inline code"
+  }
+ },
+ "markdown_raw_table::send_rich_userbot_compact": {
+  "action_keys": [
+   "chat_id",
+   "rich_message",
+   "send_via",
+   "type"
+  ],
+  "action_rich_message": {
+   "markdown": "before\n<table compact><tr><td>raw</td></tr></table>\n`<table>` inline code"
+  },
+  "bot_payload": {
+   "chat_id": 1,
+   "rich_message": {
+    "markdown": "before\n<table compact bordered striped><tr><td>raw</td></tr></table>\n`<table>` inline code"
+   }
+  },
+  "bot_retry_payload": {
+   "chat_id": 1,
+   "rich_message": {
+    "markdown": "before\n<table bordered striped><tr><td>raw</td></tr></table>\n`<table>` inline code"
+   }
+  },
+  "userbot": {
+   "markdown": "before\n<table compact bordered striped><tr><td>raw</td></tr></table>\n`<table>` inline code"
+  }
+ },
+ "mixed_other_keys::edit_inline_compact": {
+  "action_keys": [
+   "inline_message_id",
+   "rich_message",
+   "send_via",
+   "type"
+  ],
+  "action_rich_message": {
+   "extra": {
+    "k": [
+     1,
+     2
+    ]
+   },
+   "markdown": "<table bordered striped compact>\n<tr><th>a</th></tr>\n<tr><td>1</td></tr>\n</table>",
+   "skip_entities": true
+  },
+  "bot_payload": {
+   "chat_id": 1,
+   "rich_message": {
+    "extra": {
+     "k": [
+      1,
+      2
+     ]
+    },
+    "markdown": "<table bordered striped compact>\n<tr><th>a</th></tr>\n<tr><td>1</td></tr>\n</table>",
+    "skip_entities": true
+   }
+  },
+  "bot_retry_payload": {
+   "chat_id": 1,
+   "rich_message": {
+    "extra": {
+     "k": [
+      1,
+      2
+     ]
+    },
+    "markdown": "<table bordered striped>\n<tr><th>a</th></tr>\n<tr><td>1</td></tr>\n</table>",
+    "skip_entities": true
+   }
+  },
+  "userbot": {
+   "error": "UserbotRichMessageError"
+  }
+ },
+ "mixed_other_keys::send_rich": {
+  "action_keys": [
+   "chat_id",
+   "rich_message",
+   "send_via",
+   "type"
+  ],
+  "action_rich_message": {
+   "extra": {
+    "k": [
+     1,
+     2
+    ]
+   },
+   "markdown": "| a |\n|---|\n| 1 |",
+   "skip_entities": true
+  },
+  "bot_payload": {
+   "chat_id": 1,
+   "rich_message": {
+    "extra": {
+     "k": [
+      1,
+      2
+     ]
+    },
+    "markdown": "<table bordered striped>\n<tr><th>a</th></tr>\n<tr><td>1</td></tr>\n</table>",
+    "skip_entities": true
+   }
+  },
+  "bot_retry_payload": null,
+  "userbot": {
+   "error": "UserbotRichMessageError"
+  }
+ },
+ "mixed_other_keys::send_rich_compact": {
+  "action_keys": [
+   "chat_id",
+   "rich_message",
+   "send_via",
+   "type"
+  ],
+  "action_rich_message": {
+   "extra": {
+    "k": [
+     1,
+     2
+    ]
+   },
+   "markdown": "<table bordered striped compact>\n<tr><th>a</th></tr>\n<tr><td>1</td></tr>\n</table>",
+   "skip_entities": true
+  },
+  "bot_payload": {
+   "chat_id": 1,
+   "rich_message": {
+    "extra": {
+     "k": [
+      1,
+      2
+     ]
+    },
+    "markdown": "<table bordered striped compact>\n<tr><th>a</th></tr>\n<tr><td>1</td></tr>\n</table>",
+    "skip_entities": true
+   }
+  },
+  "bot_retry_payload": {
+   "chat_id": 1,
+   "rich_message": {
+    "extra": {
+     "k": [
+      1,
+      2
+     ]
+    },
+    "markdown": "<table bordered striped>\n<tr><th>a</th></tr>\n<tr><td>1</td></tr>\n</table>",
+    "skip_entities": true
+   }
+  },
+  "userbot": {
+   "error": "UserbotRichMessageError"
+  }
+ },
+ "mixed_other_keys::send_rich_compact_false": {
+  "action_keys": [
+   "chat_id",
+   "rich_message",
+   "send_via",
+   "type"
+  ],
+  "action_rich_message": {
+   "extra": {
+    "k": [
+     1,
+     2
+    ]
+   },
+   "markdown": "| a |\n|---|\n| 1 |",
+   "skip_entities": true
+  },
+  "bot_payload": {
+   "chat_id": 1,
+   "rich_message": {
+    "extra": {
+     "k": [
+      1,
+      2
+     ]
+    },
+    "markdown": "<table bordered striped>\n<tr><th>a</th></tr>\n<tr><td>1</td></tr>\n</table>",
+    "skip_entities": true
+   }
+  },
+  "bot_retry_payload": null,
+  "userbot": {
+   "error": "UserbotRichMessageError"
+  }
+ },
+ "mixed_other_keys::send_rich_userbot_compact": {
+  "action_keys": [
+   "chat_id",
+   "rich_message",
+   "send_via",
+   "type"
+  ],
+  "action_rich_message": {
+   "extra": {
+    "k": [
+     1,
+     2
+    ]
+   },
+   "markdown": "<table bordered striped compact>\n<tr><th>a</th></tr>\n<tr><td>1</td></tr>\n</table>",
+   "skip_entities": true
+  },
+  "bot_payload": {
+   "chat_id": 1,
+   "rich_message": {
+    "extra": {
+     "k": [
+      1,
+      2
+     ]
+    },
+    "markdown": "<table bordered striped compact>\n<tr><th>a</th></tr>\n<tr><td>1</td></tr>\n</table>",
+    "skip_entities": true
+   }
+  },
+  "bot_retry_payload": {
+   "chat_id": 1,
+   "rich_message": {
+    "extra": {
+     "k": [
+      1,
+      2
+     ]
+    },
+    "markdown": "<table bordered striped>\n<tr><th>a</th></tr>\n<tr><td>1</td></tr>\n</table>",
+    "skip_entities": true
+   }
+  },
+  "userbot": {
+   "error": "UserbotRichMessageError"
+  }
+ }
+}

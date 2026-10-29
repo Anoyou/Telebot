@@ -70,11 +70,20 @@ from .bot_api_limits import (
 from .bot_api_limits import token_key as _rate_limit_token_key
 from .event_bus import VALID_EVENT_TYPES
 from .interaction.contracts import send_via_selector_options, unsupported_send_via_values
-from .rich_compact import (
-    apply_table_style_defaults,
+
+# 表格样式只经 core.* 中间件（render_profile 模块）调用 rich_compact（0.109.0）。
+from .render_profile import (
+    apply_transport_table_defaults as apply_table_style_defaults,
+)
+from .render_profile import (
+    has_compact_tables as rich_message_has_compact_tables,
+)
+from .render_profile import (
     is_compact_unsupported_error,
-    rich_message_has_compact_tables,
-    strip_compact_tables,
+    record_core,
+)
+from .render_profile import (
+    strip_compact_for_retry as strip_compact_tables,
 )
 from .rich_message import normalize_rich_message as _normalize_rich_message
 from .telegram_reply import ReplyParameters
@@ -2041,16 +2050,27 @@ def _with_default_table_style(payload: dict[str, Any]) -> dict[str, Any]:
     返回新对象，不改动调用方 payload；转换异常时按原样发送。
     """
 
-    copied = deepcopy(payload)
-    located = _locate_rich_message(copied)
+    located = _locate_rich_message(payload)
     if located is None:
         return payload
-    container, rich_message = located
+    # core.rich_table_defaults：结构共享，只复制到 rich_message 的路径（0.109.0 前整体 deepcopy）。
+    copied = dict(payload)
+    container = copied
+    if located[0] is not payload:
+        result = dict(copied["result"])
+        content = dict(result["input_message_content"])
+        result["input_message_content"] = content
+        copied["result"] = result
+        container = content
+    rich_message = located[1]
+    started = time.monotonic()
     try:
         container["rich_message"] = apply_table_style_defaults(rich_message)
-    except Exception:  # noqa: BLE001 - 表格样式只是格式增强，失败时保持原样发送
+    except Exception as exc:  # noqa: BLE001 - 表格样式只是格式增强，失败时保持原样发送
         log.warning("rich_message 表格默认样式转换失败，按原样发送", exc_info=True)
+        record_core("core.rich_table_defaults", started=started, ok=False, error=exc)
         return payload
+    record_core("core.rich_table_defaults", started=started)
     return copied
 
 
