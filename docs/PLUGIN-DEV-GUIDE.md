@@ -12,6 +12,7 @@
 - [入站 Webhook Quickstart](./PLUGIN-WEBHOOK-QUICKSTART.md)
 - [插件开发铁律](./PLUGIN-RULES.md)
 - [完整 API 参考](./PLUGIN-API-REFERENCE.md)
+- [新旧平台兼容写法（先探测、再回退）](./PLUGIN-API-REFERENCE.md#新旧平台兼容写法)
 - [插件概览](./PLUGIN-OVERVIEW.md)
 - [HTTP facade](./PLUGIN-HTTP.md)
 - [AI facade](./PLUGIN-AI.md)

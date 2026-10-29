@@ -25,6 +25,12 @@
 
 ## [Unreleased]
 
+### 文档
+
+- 插件开发文档与代码总核对（第 15 轮）：`PLUGIN-API-REFERENCE` 的 Plugin API 当前版本改为 1.3（补 `1.3` = 0.110.0 声明式 UI），版本门槛表补 0.108.0-beta.1（通用交互原语）、0.110.0-beta.1（声明式 UI）、0.110.0-beta.2（表单契约 2）三行，能力注册表全集补 `runtime.entry_policy`、`ui.*`、`config.*`、`rules.*` 共 8 项（此前缺失）；声明式 UI 契约版本改为当前 2；新增「入口策略（policy）」小节（注册表 `runtime.entry_policy` 的文档链接此前指向不存在的锚点）。
+- 补充代码里已有、文档未写的行为：同一插件的多条事件订阅不去重（`own_buttons` 与 `all_allowed_chats` 同时订阅 `callback_query` 会收到两次，兼容旧宿主时只改按钮写法、不加 `own_buttons`）；卡片块字段（`rows_path` / `columns` / `items_path` / `title_key` …）；`on_ui_card` / `on_config_validate` 等在主进程以新实例调用，`ctx` 没有 `storage` / `messages` / `host`。
+- 新增「新旧平台兼容写法」：能力探测助手、按钮回调路由回退、`host.read` 管理员名单回退（含 UserBot 渠道口径变化提醒）、只在新宿主生效的声明一览、`x-ui-visible-if` 推荐 `not_in`、`stream_complete(extra_body=)` 探测；速查表与开发指南索引加入口。仅文档，服务器版本不变。
+
 ## [0.110.0-beta.2] - 2026-10-29 · patch（补丁预发布） · 插件平台化 W1 迁移：通用规则页与表单契约 2
 
 ### 插件平台：W1 迁移——五个插件的专属配置页改为通用声明式页面

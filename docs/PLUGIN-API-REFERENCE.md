@@ -2878,7 +2878,10 @@ __all__ = ["PLUGIN_CLASS", "MANIFEST"]
 | 注册表 `messages.guest_reply_markup`（访客回复 callback 按钮、`apply()` 结果的 `inline_message_id`、inline 回调投递给 `guest_all` / `inline_all`、`inline_callback` 信封） | 0.106.0-beta.17 |
 | 注册表 `messages.streaming_edit`（`ctx.messages.stream_editor()` / `stream_edit()` 流式编辑 / 私聊草稿，见 [PLUGIN-STREAMING.md](./PLUGIN-STREAMING.md)）；`ctx.ai.complete()` 的 `timeout_seconds` 改为含重试与备用 Provider 的总时限 | 0.106.0-beta.20 |
 | 注册表 `runtime.capabilities`（`ctx.capabilities`）、`manifest.plugin_api`、`manifest.min_version_prerelease`、`runtime.hook_stats`、`runtime.deprecations` | 0.107.0-beta.1 |
+| 通用交互原语（Plugin API 1.1）：`messages.callback_routing`（按钮 `{"callback": {...}}` + 订阅 `own_buttons`）、`messages.unified_ops`、`messages.bot_api_extra`、`ai.extra_body`、`host.read`（`plugin.json` 的 `reads` + `ctx.host.read`）及 4 个 `host.read.*@1` 资源、`runtime.hook_trace`、`runtime.entry_policy` | 0.108.0-beta.1（旧宿主把不认识的 `own_buttons` 当 `all_allowed_chats`、忽略 `reads`，没有 `ctx.host`） |
 | 消息管线中间件（`plugin.json` 的 `middleware`、`render_profile`）、`stream_complete(extra_body=)`、钩子统计 `blocked` / `blocking_ms` | 0.109.0-beta.1（旧宿主忽略 `middleware`，插件照常加载但中间件不生效；需要时用 `plugin_api: "^1.2"` 拒绝旧宿主） |
+| 声明式 UI（Plugin API 1.3）：`ui.cards`（`plugin.json` 的 `ui.cards` + `on_ui_card` / `on_ui_action`）、`config.validate`（`on_config_validate`）、`config.saved`（`on_config_saved`）、`config.secret_list`（`x-secret-list`）、`ui.widgets`（配置控件契约 1） | 0.110.0-beta.1（旧宿主忽略 `ui` 声明、不调用这些钩子；旧客户端把不认识的控件按普通字段显示） |
+| 表单契约 2：`ui.rules_page`（`x-ui-mode: rules` 通用规则页 + `x-rule-schema` / `x-rule-summary` / `x-dry-run`）、`rules.dry_run`（插件导出 `dry_run_rule`）、字段级 `x-ui-visible-if`、数组 `x-ui-widget: textarea` 每行一项 | 0.110.0-beta.2（iOS 0.14.1 起；旧客户端忽略这些声明，字段照常全部显示） |
 
 - 想兼容更旧的平台时不要提高最低版本，而是先探测再用，见下一节 [能力协商与 Plugin API 版本](#能力协商与-plugin-api-版本)。
 - 声明 `requires_platform_capabilities` 的 `manifest.py` 在 0.72 之前的平台上导入就会失败，因此现在所有新插件的最低版本至少是 `0.72.0-beta.2`。
@@ -2909,7 +2912,7 @@ else:  # 旧宿主：退回旧属性探测
 | `caps.version(name)` | 能力版本；不支持或当前 facade 不适用时为 `0` |
 | `caps.names()` / `caps.as_dict()` | 当前上下文支持的全部能力 |
 | `name in caps` | 等价于 `caps.has(name)` |
-| `caps.plugin_api` / `caps.host_version` | 宿主 Plugin API 版本（如 `1.2`）与 TelePilot 版本 |
+| `caps.plugin_api` / `caps.host_version` | 宿主 Plugin API 版本（如 `1.3`）与 TelePilot 版本 |
 
 - `messages.*` 能力与当前 `ctx.messages` facade 有关：同一插件在交互 Bot 入口（`entry`）、命令 / 后台任务（`live`）、UserBot Event Bus 投递（`buffered`）里拿到的 facade 不同。例如 `messages.live_inline_edit` 在 `buffered` facade 上为 `False`，因为那里只能缓冲动作、没有实时 apply。`runtime.*` / `manifest.*` 是宿主级能力，与 facade 无关。
 - 旧探测写法继续可用：`getattr(ctx.messages, "rich_table_compact", False)`、`inline_rich_edit`、`live_inline_edit`、`rich_table_default_style`、`guest_reply_markup` 这些类属性现在由注册表生成，与 `ctx.capabilities` 结果一致。注册表之外的探测（`ctx.skills is None`、`getattr(ctx.ai, "vision_enabled", False)`、`hasattr(ctx.messages, "edit_rich")`、参数级新增用 `inspect.signature` 或捕获 `TypeError`）照旧。
@@ -2935,16 +2938,19 @@ else:  # 旧宿主：退回旧属性探测
 | `host.read` | — | 宿主级 | 0.108.0-beta.1 |
 | `host.read.account.admins@1` / `host.read.ai.models@1` / `host.read.chat.allowed@1` / `host.read.plugin.stats@1` | — | 宿主级 | 0.108.0-beta.1 |
 | `runtime.hook_trace` | — | 宿主级 | 0.108.0-beta.1 |
+| `runtime.entry_policy` | — | 宿主级 | 0.108.0-beta.1 |
 | `middleware.outbound` / `middleware.inbound` / `middleware.delivered` / `middleware.stream_preview` | — | 宿主级 | 0.109.0-beta.1 |
 | `messages.render_profile` | — | 全部 | 0.109.0-beta.1 |
 | `ai.stream_extra_body` | — | 宿主级 | 0.109.0-beta.1 |
 | `runtime.blocking_monitor` | — | 宿主级 | 0.109.0-beta.1 |
+| `ui.cards` / `config.validate` / `config.saved` / `config.secret_list` / `ui.widgets` | — | 宿主级 | 0.110.0-beta.1 |
+| `ui.rules_page` / `rules.dry_run` | — | 宿主级 | 0.110.0-beta.2 |
 
 以注册表与 `GET /api/plugins/capabilities` 为准；本表随宿主发版同步。
 
 **Plugin API 版本（`plugin_api`）**
 
-- 宿主提供的 Plugin API 版本是 `MAJOR.MINOR`（当前 `1.2`；`1.0` = 0.107.0，`1.1` = 0.108.0 通用交互原语，`1.2` = 0.109.0 消息管线中间件）：新增向后兼容的接口 / 能力只升 MINOR；删除或改变已有接口语义才升 MAJOR，并且要先在 [弃用登记](#弃用登记) 里公告至少一个 minor 宿主版本。
+- 宿主提供的 Plugin API 版本是 `MAJOR.MINOR`（当前 `1.3`；`1.0` = 0.107.0，`1.1` = 0.108.0 通用交互原语，`1.2` = 0.109.0 消息管线中间件，`1.3` = 0.110.0 声明式 UI；0.110.0-beta.2 的表单契约 2 / 通用规则页是同一 MINOR 内的向后兼容新增，没有再升版本）：新增向后兼容的接口 / 能力只升 MINOR；删除或改变已有接口语义才升 MAJOR，并且要先在 [弃用登记](#弃用登记) 里公告至少一个 minor 宿主版本。
 - 插件可以在 `plugin.json` 里声明兼容范围，宿主在执行插件代码前校验，不满足时拒绝加载并说明原因：
 
 ```json
@@ -3024,6 +3030,7 @@ await ctx.messages.send_rich(
 - **fail-closed**：Redis 不可用时，点击一律拒绝（提示“按钮暂时不可用”，Trace `callback_token_unavailable`）；token 过期或不存在提示“按钮已过期”（`callback_token_expired`）。发出时 Redis 不可用，签发失败的按钮会被去掉、消息照常发出（动作记录 `callback_token_warnings`）。
 - 平台合成的访客回复原本会去掉 callback 按钮，`cb1.` 按钮因为不依赖 chat/message，会保留。
 - 旧写法（直接写 `callback_data`）原样透传，并计入弃用 `markup.raw_callback_data`。旧宿主不认识 `own_buttons`，会按 `all_allowed_chats` 处理——请先探测能力再声明。
+- **同一插件的多条订阅不去重**：一次点击命中几条订阅就投递几次。`cb1.` 按钮在允许会话里被点击时，`own_buttons` 与 `all_allowed_chats`（或 inline 消息上的 `guest_all` / `inline_all`）的 `callback_query` 订阅都会命中；旧宿主又把 `own_buttons` 当 `all_allowed_chats`。所以已经有 `all_allowed_chats` / `guest_all` 的 `callback_query` 订阅、又要兼容旧宿主的插件，**只改按钮写法、不要再加 `own_buttons` 订阅**：点击仍经原订阅投递，`payload["callback_data"]` 已还原成插件自己的 `data`，原有解析不用改，其它插件也收不到这些点击（`callback_not_owned`）。新插件只想要“与会话白名单无关”的按钮时，才单独订阅 `own_buttons` 而不订阅其它 `callback_query`。写法见 [新旧平台兼容写法](#新旧平台兼容写法)。
 
 #### 统一 MessageOps
 
@@ -3096,6 +3103,10 @@ models = await ctx.host.read("ai.models@1", enabled_only=True)
 
 - 钩子失败 / 超时 / 熔断跳过在消息链路 Trace 记一条 `plugin_hook` span，`reason_code` 为 `plugin_error` / `plugin_timeout` / `plugin_circuit_open` / `plugin_update_in_progress`，带 `plugin_key`、`hook`、`event_type`、`duration_ms`；成功但耗时 ≥ 1 秒的调用也记一条，便于找慢插件。
 - 熔断：连续失败 N 次（`plugin_circuit_failure_threshold`，默认 3）照旧熔断 60 秒；另外最近 120 秒内调用 ≥ 20 次且失败率 ≥ 80% 也会熔断（时好时坏、从不连续失败的插件）。成功一次即关闭熔断。
+
+#### 入口策略（policy）
+
+能力 `runtime.entry_policy`。交互入口的参与方式与会话边界只从插件声明里读：`interaction_entries[]` 的 `session_scope`（见 [interaction_entries 迁移字段](#interaction_entries-迁移字段)）、`participant_policy`（`open_race` / `solo_owner` / `paid_pool` / `notify_only`）与入口 schema 里是否有 `prize`（是否有奖）。宿主不再按插件 key 写死这些判断；没有声明的旧插件按 `app/plugin_compat.py` 的兜底入口表推断（计划 Plugin API 2.0 移除）。注册表 `summary` 里的“policy”指的就是这三项声明，不存在名为 `policy` 的单独字段。
 
 #### 历史插件兼容表
 
@@ -3184,7 +3195,7 @@ async def on_inbound(self, ctx, event, mw):
 
 ### 声明式 UI（Plugin API 1.3，0.110.0-beta.1+）
 
-目标：插件要在 Web / iOS 上多一张卡片、多一种配置控件，只改 `plugin.json` 与插件代码，不改宿主与 App。规范来源是仓库根的 [`schemas/plugin-ui-widgets.json`](../schemas/plugin-ui-widgets.json)（`contract_version` 1），后端、Web、iOS 各有一份由 `scripts/sync-plugin-ui-widgets.py` 生成的逐字节副本，CI「后端」与「iOS」工作流都运行 `--check`。`GET /api/plugins/ui-contract` 返回同一份契约。能力用 `ctx.capabilities.has("ui.cards")` 等探测。
+目标：插件要在 Web / iOS 上多一张卡片、多一种配置控件，只改 `plugin.json` 与插件代码，不改宿主与 App。规范来源是仓库根的 [`schemas/plugin-ui-widgets.json`](../schemas/plugin-ui-widgets.json)（当前 `contract_version` 2：1 = 0.110.0-beta.1 控件与卡片，2 = 0.110.0-beta.2 表单契约 2），后端、Web、iOS 各有一份由 `scripts/sync-plugin-ui-widgets.py` 生成的逐字节副本，CI「后端」与「iOS」工作流都运行 `--check`。`GET /api/plugins/ui-contract` 返回同一份契约。能力名 `ui.cards` 等登记在注册表里；这些都是声明 + 钩子，旧宿主自动忽略，插件不需要为它们写探测分支（见 [新旧平台兼容写法](#新旧平台兼容写法)）。
 
 #### 配置控件契约
 
@@ -3275,7 +3286,83 @@ async def on_config_saved(self, ctx, config: dict, scope: str) -> None:
 - **slot**：`plugin.overview`（插件详情顶部）、`account.detail`（账号详情，只显示该账号启用的插件）、`dashboard`（概览末尾，全局启用的插件）。
 - **布局**：`layout` 单块或 `blocks` 多块，首批块类型 `stats` / `kv` / `table`（手机上每行折成小卡）/ `list` / `buttons`。取值写 `path`（点分路径）或 `value`；`format`：`text` / `number` / `percent` / `duration_ms` / `datetime` / `relative_time`；`tone`：`neutral` / `success` / `warning` / `danger` / `accent`。
 - **数据来源**：`source.read` 必须是 `reads` 里声明过的宿主资源（`plugin.stats@1` / `chat.allowed@1` / `account.admins@1`）；`source.action` 调插件 `on_ui_card(ctx, card_id, context) -> dict`，同步、超时 3 秒，`context` 含 `slot` / `account_id` / `action`。
+- **块字段**（完整定义以契约 `cards.layouts` 为准）：`stats` / `kv` 的 `items: [{label, path | value, format?, tone?, unit?}]`；`table` 的 `rows_path`（默认 `rows`）、`columns: [{key, label, format?}]`、`empty`（空表文案）；`list` 的 `items_path`（默认 `items`）、`title_key` / `subtitle_key` / `trailing_key` / `tone_key`（默认 `title` / `subtitle` / `trailing` / `tone`）、`empty`；`buttons` 的 `items: [{id, label, style?, confirm?}]`。`relative_time` / `datetime` 接受秒级时间戳。
+- **钩子上下文**：`on_ui_card` / `on_ui_action`（以及 `on_config_validate` / `on_config_saved`、`on_config_action`）在**主进程**里调用，`ctx` 是不带 Telegram client 的受控上下文：有 `ctx.config`（该作用域的有效配置）、`ctx.account_id`（全局作用域 / 概览卡片为 `0`）、`ctx.data_dir`、`ctx.http`、`ctx.ai`；**没有** `ctx.storage`、`ctx.messages`、`ctx.host`、client。每次调用都是新的插件实例（不执行 `on_startup`），所以不能读 worker 里内存状态。数据放在 `ctx.storage` 里的插件目前只能用 `source.read` 宿主资源出卡片；数据在 `ctx.data_dir` 文件里的插件可以只读打开文件（参考插件库 `sum` 的「定时总结任务」卡片）。
 - **按钮**：点按调 `on_ui_action(ctx, action_id, context)`，超时 10 秒；`confirm` 非空时客户端先确认；返回 `{"message": "已刷新", "refresh": true}`，`message` 显示给管理员，`refresh` 为真时重新读取这张卡。
 - **隔离**：每张卡单独读取（`POST /api/plugin-ui/cards/{plugin}/{card}/data`），读取失败或超时只让这张卡显示「已停止工作 · 重试」，不影响页面其它部分；不合规的卡片整张忽略并给出 lint 警告。客户端不认识的块类型只读提示「需要更新 App」。
 - 宿主自带一张 `_host.stats`「运行统计」卡（钩子级调用数、失败、耗时与弃用接口调用），显示在每个插件详情顶部——原来写死在插件详情里的统计区改由卡片 DSL 渲染。
 - 接口：`GET /api/plugin-ui/cards?slot=…&account_id=…` 列出卡片声明；`POST /api/plugin-ui/cards/{plugin}/{card}/data` 取数；`POST /api/plugin-ui/cards/{plugin}/{card}/actions/{action}` 执行按钮。
+
+### 新旧平台兼容写法
+
+插件库约定：用新能力**不抬高** `min_telepilot_version`，而是先探测、再回退；兼容层保留到 Plugin API 2.0。下面是插件库 `Anoyou/telebot-plugins` 实际在用的写法。
+
+**1. 能力探测助手**（旧宿主没有 `ctx.capabilities`；探测本身出错也按“不支持”处理）
+
+```python
+def host_has(ctx, name: str) -> bool:
+    caps = getattr(ctx, "capabilities", None)      # 0.107.0-beta.1 之前为 None
+    if caps is None:
+        return False
+    try:
+        return bool(caps.has(name))
+    except Exception:  # noqa: BLE001
+        return False
+```
+
+**2. 按钮：通用回调路由（0.108.0+），旧宿主写 `callback_data`**
+
+```python
+def button(text: str, data: str, *, routed: bool) -> dict:
+    return {"text": text, "callback": {"data": data}} if routed else {"text": text, "callback_data": data}
+
+routed = host_has(ctx, "messages.callback_routing")
+markup = {"inline_keyboard": [[button("🔄 重试", f"demo:r:{token}", routed=routed)]]}
+
+# 点击处理两种宿主都一样：新宿主把 payload["callback_data"] 还原成上面的 data
+data = (payload.get("source") or {}).get("callback_data") or payload.get("callback_data") \
+    or (payload.get("callback") or {}).get("data")
+```
+
+订阅保持原来的 `all_allowed_chats` / `guest_all` 的 `callback_query`，**不要再加 `own_buttons`**（原因见 [通用回调路由](#通用回调路由own_buttons)）。参考：插件库 `interaction-ai-chat` 的 `retry.button()` / `callback_routing_supported()`。
+
+**3. 管理员名单：`ctx.host.read`（0.108.0+），旧宿主读 payload**
+
+```python
+async def admin_ids(ctx, payload) -> set[int]:
+    ids = {int(x) for k in ("owner_user_ids", "admin_user_ids") for x in payload.get(k) or []}  # 旧字段（已弃用但仍下发）
+    if host_has(ctx, "host.read.account.admins@1") and getattr(ctx, "host", None) is not None:
+        try:
+            data = await ctx.host.read("account.admins@1")   # plugin.json 声明 "reads": ["account.admins@1"]
+            ids |= {int(x) for k in ("owner_user_ids", "admin_user_ids") for x in data.get(k) or []}
+        except Exception:  # noqa: BLE001 - 未声明 / 不可用按“没有额外管理员”
+            pass
+    return ids
+```
+
+注意 `account.admins@1` 是“账号本人 + sudo 用户”。UserBot 渠道的 Event Bus payload 本来不带这两个字段，改用 `host.read` 会让 sudo 用户也被当成管理员——这是行为变化，迁移前先确认插件原本的判定口径。
+
+**4. 只在新宿主生效、旧宿主自动忽略的声明**（不用探测，也不用抬版本）
+
+| 声明 / 钩子 | 新宿主（门槛） | 旧宿主 / 旧客户端 |
+| --- | --- | --- |
+| `plugin.json` 的 `ui.cards` + `on_ui_card` / `on_ui_action` | 插件详情 / 账号详情 / 概览出卡片（0.110.0-beta.1） | 忽略 `ui`，不调用钩子 |
+| `on_config_validate` / `on_config_saved` | 保存前校验、保存后通知（0.110.0-beta.1） | 不调用，保存行为不变 |
+| `x-secret-list` | 原生密钥列表、明文不下发（0.110.0-beta.1） | 按普通数组字段显示 |
+| `x-ui-visible-if`、数组 `x-ui-widget: "textarea"`、`x-rule-schema` / `x-rule-summary` / `x-dry-run`、`dry_run_rule` | 按值显隐、每行一项、通用规则页与试运行（0.110.0-beta.2 / iOS 0.14.1） | 字段照常全部显示；数组仍按逗号分隔 |
+| `plugin.json` 的 `middleware` / `render_profile` | 消息管线中间件（0.109.0-beta.1） | 忽略；插件照常加载但中间件不生效。中间件是插件主要功能时用 `"plugin_api": "^1.2"` 拒绝旧宿主 |
+
+- `x-ui-visible-if` 推荐写 `not_in`：`{"field": "pt_enabled", "not_in": [false]}` 只在开关被明确关掉时隐藏。Web / iOS 按表单里的当前值判断，值缺省（没保存过）或控制字段在另一作用域（全局 / 账号）时，`equals: true` 会把字段误藏起来。被隐藏的字段值保留不删。
+- `on_config_validate` 拿到的 `config` 已合并保留的敏感字段（明文只在内存里），只校验本作用域里出现的字段；只拦确实无法工作的值，不要用它改变既有配置的含义。
+
+**5. 参数级新增：`stream_complete(extra_body=...)`**
+
+0.108 的 `stream_complete` 收到 `extra_body` 会报“暂不支持”，更早的宿主静默忽略（不生效）。先探测再传：
+
+```python
+kwargs = {"extra_body": {"reasoning_effort": "low"}} if host_has(ctx, "ai.stream_extra_body") else {}
+async for chunk in ctx.ai.stream_complete(system, user, **kwargs):
+    ...
+```
+
+`complete(extra_body=...)` 同理探测 `ai.extra_body`（0.108.0-beta.1+）；0.73 起 `complete()` 会忽略未知关键字参数，所以旧宿主上传了不报错、但也不生效。
