@@ -57,7 +57,7 @@ interface ConfigImportResult {
 const CATEGORIES: CategoryDef[] = [
   {
     key: "system_settings",
-    label: "系统设置",
+    label: "服务器设置",
     desc: "指令前缀等全局配置；Webhook Token 和恢复码仅在开启敏感导出时包含",
     sensitive: ["webhook_token", "recovery_code"],
   },

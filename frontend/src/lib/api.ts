@@ -6,7 +6,7 @@ const CSRF_COOKIE = "csrf_token";
 const CSRF_HEADER = "X-CSRF-Token";
 const REQUESTED_WITH_HEADER = "X-Requested-With";
 const REQUESTED_WITH_VALUE = "telepilot-ui";
-const API_BASE = import.meta.env.VITE_API_BASE || "/";
+export const API_BASE = import.meta.env.VITE_API_BASE || "/";
 
 let csrfFetch: Promise<string | null> | null = null;
 

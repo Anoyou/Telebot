@@ -115,7 +115,7 @@ enum OpsFormat {
     static func errorMessage(_ error: Error) -> String {
         if let error = error as? APIError {
             if case .server(let status, _) = error, status == 403 || status == 409 || status == 423 {
-                return "服务器上这个功能模块未启用或被暂停（HTTP \(status)）。可在“系统设置 › 平台能力开关”中检查。"
+                return "服务器上这个功能模块未启用或被暂停（HTTP \(status)）。可在“服务器设置 › 平台能力开关”中检查。"
             }
             return error.localizedDescription
         }

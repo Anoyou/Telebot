@@ -422,7 +422,7 @@ function HealthGrid({ data }: { data: HealthOverview }) {
               如果你在中国大陆访问 OpenAI / Anthropic，需要至少配一条
               socks5/http；去{" "}
               <Link to="/settings?tab=proxy-identity" className="text-primary hover:underline">
-                系统设置 → 代理与标识
+                服务器设置 → 代理与标识
               </Link>
               {" "}加。
             </div>

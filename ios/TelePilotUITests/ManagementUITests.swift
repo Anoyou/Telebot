@@ -75,11 +75,11 @@ final class ManagementUITests: XCTestCase {
         XCTAssertFalse(app.textFields["验证码"].exists)
     }
 
-    /// 第十轮：系统设置「权限与限制」分组里各行图标同为强调色——「修改管理员密码」此前整行设了主色，图标被染成白色。
+    /// 第十轮：服务器设置（原系统设置）「权限与限制」分组里各行图标同为强调色——「修改管理员密码」此前整行设了主色，图标被染成白色。
     /// 截图后统计两行图标区域内的暖橙色像素，「修改管理员密码」应与「Sudo 权限」一样有明显的强调色。
     func testPermissionRowsShareAccentIconTint() {
         let app = launch()
-        let system = app.buttons["系统设置"]
+        let system = app.buttons["服务器设置"]
         XCTAssertTrue(app.buttons["more.accounts"].waitForExistence(timeout: 10))
         for _ in 0..<6 where !(system.exists && system.isHittable) { app.swipeUp() }
         XCTAssertTrue(system.waitForExistence(timeout: 5))

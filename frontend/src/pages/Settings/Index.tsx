@@ -80,7 +80,7 @@ const GUIDE_STEPS: Array<{
   },
   {
     title: "2. 设置指令前缀",
-    desc: "在系统设置里确定 Telegram 指令开头字符。",
+    desc: "在服务器设置里确定 Telegram 指令开头字符。",
     actionLabel: "去设置前缀",
     actionTo: "/settings?tab=platform",
   },
@@ -376,7 +376,7 @@ export function SettingsIndex() {
   return (
     <PageShell className="pb-24">
       <PageHeader
-        title="系统设置"
+        title="服务器设置"
         description="按用户管理、前缀通知、网络身份、风控限额和备份恢复拆分，保留常用入口并收敛历史配置位。"
         icon={Cog}
       />
@@ -1145,7 +1145,7 @@ function GuideInlineCard({
     ...GUIDE_STEPS[currentStep],
     desc:
       currentStep === 1
-        ? <>在系统设置里确定指令开头字符，比如 <CommandBadge>{cmdPrefix}ai</CommandBadge>。</>
+        ? <>在服务器设置里确定指令开头字符，比如 <CommandBadge>{cmdPrefix}ai</CommandBadge>。</>
         : GUIDE_STEPS[currentStep].desc,
   };
   const percent = ((currentStep + 1) / GUIDE_STEPS.length) * 100;

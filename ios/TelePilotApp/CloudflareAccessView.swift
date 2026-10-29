@@ -388,7 +388,7 @@ struct CloudflareAccessHelpView: View {
     private let tokenSteps: [(title: String, detail: String)] = [
         ("创建 Service Token", "Cloudflare 控制台 → Zero Trust → Access → Service Auth → Service Tokens，点击“Create Service Token”。Client Secret 只显示一次。"),
         ("另加一条 Service Auth 策略", "编辑保护 TelePilot 的 Access 应用，新增策略：Action 选 Service Auth，Include 选 Service Token 并选中刚创建的 Token。原来的 Google 策略保留。"),
-        ("在 App 里填写", "设置 → Cloudflare Access → 高级：Service Token，填写 Client ID 与 Client Secret。"),
+        ("在 App 里填写", "App 设置 → Cloudflare Access → 高级：Service Token，填写 Client ID 与 Client Secret。"),
     ]
 
     var body: some View {

@@ -615,6 +615,65 @@ struct PluginInfoRow: View {
     }
 }
 
+/// 「规则与自动化」：只显示插件真正支持的入口（iOS 0.15.0）。规则入口要插件声明规则或该账号已有规则，
+/// 配置任务入口要插件声明配置操作或该账号已有任务；都没有时整个分组不显示。
+private struct PluginAutomationSection: View {
+    let feature: JSONValue
+    let accountID: Int
+    let segment: String
+    @Environment(AppModel.self) private var model
+    @State private var ruleCount = 0
+    @State private var jobCount = 0
+
+    private var base: String { "/api/accounts/\(accountID)/features/\(segment)" }
+    private var showsRules: Bool { PluginAutomation.showsRules(feature, existingRuleCount: ruleCount) }
+    private var showsJobs: Bool { PluginAutomation.showsConfigJobs(feature, existingJobCount: jobCount) }
+    private var actions: [JSONValue] { PluginAutomation.configActions(feature) }
+    private var passthrough: Bool { PluginPresentation.supportsDirectPassthrough(feature) }
+
+    var body: some View {
+        Group {
+            if showsRules || showsJobs || passthrough || !actions.isEmpty {
+                Section {
+                    if showsRules {
+                        NavigationLink {
+                            ManagementCollectionView(resource: .init(title: "自动化规则", path: base + "/rules", kind: .rules, create: .init(title: "添加规则", path: base + "/rules", schema: ManagementRuleSchemas.request(feature: feature)), itemPath: base + "/rules/{id}", ruleSchema: ManagementRuleSchemas.request(feature: feature)))
+                        } label: { Label("自动化规则", systemImage: "text.badge.checkmark") }
+                        .accessibilityIdentifier("plugin.automation.rules")
+                        PluginActionRow(action: .init(title: "复制规则到其他账号", path: base + "/rules/copy", explanation: "把此账号的规则复制到选择的账号。"), systemImage: "doc.on.doc")
+                            .accessibilityIdentifier("plugin.automation.copyRules")
+                    }
+                    if passthrough {
+                        PluginActionRow(action: .init(title: "直通开关与优先级", path: base + "/direct-passthrough", method: "PATCH", explanation: "裸直通让插件先于正常处理流程收到原始消息；优先级数字越小越先调用。"), systemImage: "arrow.triangle.branch")
+                    }
+                    if !actions.isEmpty {
+                        NavigationLink { PluginConfigActionsView(feature: feature, accountID: accountID) } label: { Label("试运行与插件操作", systemImage: "play.rectangle") }
+                    }
+                    if showsJobs {
+                        NavigationLink { ManagementCollectionView(resource: .init(title: "配置任务", path: base + "/config/action-jobs", kind: .jobs, idField: "job_id")) } label: {
+                            Label("配置任务与进度", systemImage: "clock.arrow.circlepath")
+                        }
+                        .accessibilityIdentifier("plugin.automation.jobs")
+                    }
+                } header: { Text("规则与自动化") } footer: {
+                    if showsRules { Text("规则决定插件在什么消息上触发、做什么，只对当前账号生效。") }
+                }
+            }
+        }
+        .task(id: "\(accountID)/\(segment)") { await loadCounts() }
+    }
+
+    /// 不支持规则 / 配置操作的插件才需要查询“已有”数量（旧数据仍可管理）；读取失败按 0 处理，不影响其它入口。
+    private func loadCounts() async {
+        if !PluginAutomation.supportsRules(feature) {
+            ruleCount = PluginAutomation.count(try? await model.request(path: base + "/rules"))
+        }
+        if PluginAutomation.configActions(feature).isEmpty {
+            jobCount = PluginAutomation.count(try? await model.request(path: base + "/config/action-jobs"))
+        }
+    }
+}
+
 private struct PluginActionRow: View {
     let action: ManagementAction
     let systemImage: String
@@ -845,6 +904,8 @@ struct ManagementPluginDetailView: View {
     @ViewBuilder private var overview: some View {
         // plugin.overview：宿主「运行统计」卡（卡片 DSL 的第一个用户）+ 插件自己声明的原生卡片。
         PluginCardSections(slot: "plugin.overview", pluginKey: key, accountID: accountID)
+        // 插件自带页面与菜单项（ui.pages / ui.actions，Plugin API 1.4）；没有声明时不显示。
+        PluginPageEntriesSection(menu: "plugin.detail", pluginKey: key, accountID: accountID)
         Section("插件信息") {
             if let usage = feature["usage"]?.stringValue, !usage.isEmpty { Text(usage).font(.subheadline) }
             PluginInfoRow(title: "版本", value: feature["version"]?.stringValue.map { "v" + $0 } ?? "未标注", symbol: "number")
@@ -923,23 +984,7 @@ struct ManagementPluginDetailView: View {
             Section { Label { Text(guide).font(.subheadline) } icon: { Image(systemName: "lightbulb") } } header: { Text("使用说明") }
         }
         if let accountID {
-            let base = "/api/accounts/\(accountID)/features/\(segment)"
-            let actions = feature["config_actions"]?.arrayValue ?? feature["config_schema"]?["x-config-actions"]?.arrayValue ?? []
-            Section {
-                NavigationLink {
-                    ManagementCollectionView(resource: .init(title: "自动化规则", path: base + "/rules", kind: .rules, create: .init(title: "添加规则", path: base + "/rules", schema: ManagementRuleSchemas.request(feature: feature)), itemPath: base + "/rules/{id}", ruleSchema: ManagementRuleSchemas.request(feature: feature)))
-                } label: { Label("自动化规则", systemImage: "text.badge.checkmark") }
-                PluginActionRow(action: .init(title: "复制规则到其他账号", path: base + "/rules/copy", explanation: "把此账号的规则复制到选择的账号。"), systemImage: "doc.on.doc")
-                if PluginPresentation.supportsDirectPassthrough(feature) {
-                    PluginActionRow(action: .init(title: "直通开关与优先级", path: base + "/direct-passthrough", method: "PATCH", explanation: "裸直通让插件先于正常处理流程收到原始消息；优先级数字越小越先调用。"), systemImage: "arrow.triangle.branch")
-                }
-                if !actions.isEmpty {
-                    NavigationLink { PluginConfigActionsView(feature: feature, accountID: accountID) } label: { Label("试运行与插件操作", systemImage: "play.rectangle") }
-                }
-                NavigationLink { ManagementCollectionView(resource: .init(title: "配置任务", path: base + "/config/action-jobs", kind: .jobs, idField: "job_id")) } label: {
-                    Label("配置任务与进度", systemImage: "clock.arrow.circlepath")
-                }
-            } header: { Text("规则与自动化") } footer: { Text("规则决定插件在什么消息上触发、做什么，只对当前账号生效。") }
+            PluginAutomationSection(feature: feature, accountID: accountID, segment: segment)
         }
     }
 

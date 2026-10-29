@@ -1,5 +1,6 @@
 // 账号详情：3 个 Tab —— 概览 / 插件启停 / 风控
 import { PluginCardSlot } from "@/components/plugin/PluginCards";
+import { PluginPageEntries } from "@/components/plugin/PluginPages";
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -466,6 +467,7 @@ export function AccountDetail() {
             </CardContent>
           </Card>
           <PluginCardSlot slot="account.detail" accountId={aid} title="插件卡片" className="mt-4" />
+          <PluginPageEntries menu="account.detail" accountId={aid} className="mt-4" />
         </TabsContent>
 
         {/* 自定义指令 */}
@@ -1042,7 +1044,7 @@ function ProxyTab({
 
         {!proxiesQ.isLoading && (proxiesQ.data?.length ?? 0) === 0 ? (
           <p className="rounded-md border border-dashed px-3 py-3 text-xs text-muted-foreground">
-            代理库为空。先到「系统设置 → 代理库」新建
+            代理库为空。先到「服务器设置 → 代理库」新建
           </p>
         ) : null}
 
@@ -1148,7 +1150,7 @@ function DeviceProfileTab({
         ) : null}
 
         <div className="border-t pt-3 text-xs text-muted-foreground">
-          要新增 / 修改 profile，请到「系统设置 → 设备伪装库」。
+          要新增 / 修改 profile，请到「服务器设置 → 设备伪装库」。
         </div>
       </CardContent>
     </Card>

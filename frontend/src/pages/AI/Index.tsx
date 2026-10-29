@@ -207,7 +207,7 @@ export function AIIndex() {
           </CardHeader>
           <CardContent className="flex flex-wrap gap-2">
             <Button asChild>
-              <Link to="/settings?tab=platform">去系统设置启用</Link>
+              <Link to="/settings?tab=platform">去服务器设置启用</Link>
             </Button>
             <Button asChild variant="outline">
               <Link to="/plugins">返回插件中心</Link>

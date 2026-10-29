@@ -310,7 +310,7 @@ struct BotGuestModeStatusRows: View {
             row(title: "管理 Bot", status: value?["management_bot"])
             row(title: "交互 Bot", status: value?["interaction_bot"])
             if value?["guest_updates_enabled"]?.boolValue == false {
-                Label("系统设置中的“访客消息”运行开关已关闭，当前不会处理访客消息。", systemImage: "pause.circle")
+                Label("服务器设置中的“访客消息”运行开关已关闭，当前不会处理访客消息。", systemImage: "pause.circle")
                     .font(.footnote).foregroundStyle(.orange)
             }
             if let error {

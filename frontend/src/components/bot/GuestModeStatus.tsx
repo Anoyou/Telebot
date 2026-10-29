@@ -83,7 +83,7 @@ export function GuestModeStatus({ aid, role }: { aid: number; role: GuestModeRol
       ) : null}
       {status?.error ? <p className="break-words text-xs text-warning">{status.error}</p> : null}
       {runtimeDisabled ? (
-        <p className="text-xs text-warning">系统设置里的“访客消息（Guest Mode）”运行开关已关闭，当前不会处理访客消息。</p>
+        <p className="text-xs text-warning">服务器设置里的“访客消息（Guest Mode）”运行开关已关闭，当前不会处理访客消息。</p>
       ) : null}
       <p className="text-xs leading-5 text-muted-foreground">
         {status?.supports_guest_queries
