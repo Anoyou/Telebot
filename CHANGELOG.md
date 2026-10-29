@@ -25,6 +25,22 @@
 
 ## [Unreleased]
 
+## [0.113.0-beta.1] - 2026-10-30 · minor（次版本预发布） · 插件平台化 P5 第二部分：插件市场（多来源与信任等级）、并发批量更新、官方源自动更新（默认关闭）与健康窗口自动回滚
+
+### 插件平台：P5 第二部分——插件市场 + 并发批量更新 + 自动更新与健康回滚
+
+- 新增**插件市场**（`/api/plugin-market/*`，Web「插件中心 → 插件市场」页签与 iOS「插件 → 发现 → 插件市场」）：浏览、搜索、按类型筛选、安装、更新角标、单个更新、一键全部更新、固定版本、来源管理、更新参数。旧的插件仓库 / Git 地址 / ZIP / 本地导入全部保留。
+- **来源可自行添加**：内置官方源（插件库根目录 `registry.json`，环境变量 `TELEPILOT_PLUGIN_MARKET=<url>|off` 可覆盖或关闭）；管理员可添加、停用、删除多个自定义来源（https 地址），每个来源有信任等级 `official / community / unreviewed`，索引条目的等级取“来源等级”和“索引自报等级”里更低的一个，自定义来源不能把自己抬成官方。官方源不能删除、只能停用；拉取失败时用随服务器打包的索引副本兜底。索引在服务器内存缓存 6 小时，只用于展示与兼容性预判，安装 / 更新仍克隆插件库并完整校验插件自己的 `plugin.json`。
+- **批量更新并行**：多个插件更新时每个仓库只拉取一次，再按并发上限（默认 3，管理台「更新参数」或 `TELEPILOT_PLUGIN_UPDATE_CONCURRENCY` 可调，1–8）并行替换、提交、通知 worker 重载；每个插件独立数据库会话，单个失败或重载未确认只体现在该插件的结果里，结果逐个返回。「插件仓库 → 全部更新」（`POST /api/plugin-repos/{id}/update-installed`）也改走并行，响应多一个 `concurrency` 字段；iOS「已安装 → 全部更新」改为客户端并行（上限同上，旧服务器为 3）。
+- **健康窗口与自动回滚**：通过市场或仓库批量更新换版本时，旧版目录保留在安装根的 `.previous/<key>`，并记录更新前的元数据与钩子统计基线；观察窗口（默认 10 分钟，3–60 可调）内出现加载失败（账号插件状态变为失败）、熔断打开或钩子失败率显著升高（窗口内 ≥10 次调用、失败率 ≥30%、且是更新前的 2 倍以上并高出 20 个百分点），自动换回旧版目录、恢复元数据、通知重载，并告警：通知 Bot `alert` 频道、warning 日志、插件运行统计 `@market / rollback` 行、安装历史 `rolled_back`。窗口结束仍健康则删除旧版目录。观察期内可手动「立即回滚」或「确认正常」。插件数据目录不随版本回滚。
+- **自动更新**：默认关闭；只有信任等级为 official 的来源可以在界面里打开。打开后按「远程插件检查更新」的周期自动更新该来源里有新版本、兼容当前服务器、没有固定版本、且没有在上次观察期里被回滚过同一版本的插件。
+- **固定版本**：固定后「全部更新」与自动更新都会跳过；单独更新会提示先取消固定。
+- 新接口：`GET /api/plugin-market/catalog`、`POST /install`、`POST /update`、`GET/POST /sources`、`PATCH/DELETE /sources/{id}`、`GET/PUT /settings`、`PUT /pins/{key}`、`GET /rollouts`、`POST /rollouts/{key}/rollback|accept`。设置存 `system_setting`（`plugin_market_sources`、`plugin_market_settings`、每个插件一行 `plugin_market_rollout:<key>`），无数据库迁移。
+- 兼容：不改插件 API（Plugin API 仍 1.6）、不提高任何插件的 `min_telepilot_version`、不删兼容层、不改游戏币结算；旧 App 不显示市场入口、照常使用；新 App 连旧服务器时市场页提示更新服务器。
+
+### iOS App
+- **iOS 0.17.0**：原生「插件市场」（插件 › 发现 › 插件市场，与 Web 同一组 `/api/plugin-market/*` 接口）：浏览 / 搜索 / 按类型筛选 / 安装 / 更新角标 / 单个更新 / 全部更新（结果逐个列出）、插件详情与固定版本、观察中的更新「确认正常 / 立即回滚」与已自动回滚原因、来源管理（官方源启停与自动更新开关、自定义来源增删与信任等级）、更新参数；旧服务器 404 时提示更新服务器（`PluginMarket.swift`，UI 测试 `testPluginMarketUpdatesAllAndManagesSources` / `testPluginMarketAsksToUpdateOldServer`）。「已安装 › 全部更新」改为客户端并行（上限取服务器设置，旧服务器 3）。
+
 ## [0.112.0-beta.4] - 2026-10-30 · patch（补丁预发布） · 插件平台化 P5 第一部分：插件稳定契约 1.0 冻结（契约版本独立于 Plugin API 1.6）+ 契约 / golden 测试 + 插件库兼容 CI
 
 ### 插件平台：P5 第一部分——插件稳定契约 1.0 冻结 + 契约 / golden 测试

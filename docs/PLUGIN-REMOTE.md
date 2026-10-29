@@ -515,6 +515,46 @@ backend/.venv/bin/python scripts/validate-installed-interaction-plugins.py
 
 安装态校验会对已安装互动插件做一致性检查；旧插件缺少最终版字段时会输出 warning，避免在本轮无法改 installed 插件时误判为脚本故障。
 
+## 插件市场与 registry.json（0.113.0+）
+
+TelePilot 0.113.0 起，管理台「插件中心 → 插件市场」（iOS「插件 → 发现 → 插件市场」）从一个或多个**来源**读取插件索引 `registry.json`：
+
+- **官方源**：`https://raw.githubusercontent.com/Anoyou/telebot-plugins/main/registry.json`，由插件库的 `scripts/build_registry.py` 从各插件 `plugin.json` 生成（CI 校验、main 上自动更新），服务器也打包了一份副本用于离线兜底。部署时可用 `TELEPILOT_PLUGIN_MARKET=<url>` 换成自己的地址，或 `TELEPILOT_PLUGIN_MARKET=off` 关闭官方源。
+- **自定义来源**：管理员在市场页「来源管理」添加任意 https 的 `registry.json`，并选择信任等级 `official / community / unreviewed`；条目的有效等级取“来源等级”和“索引里自报等级”中更低的一个。只有 official 等级的来源可以开启自动更新（默认关闭）。
+
+`registry.json` 格式（`schema_version: 1`）：
+
+```json
+{
+  "schema_version": 1,
+  "name": "我的插件库",
+  "trust": "community",
+  "repository": "https://github.com/me/my-plugins.git",
+  "plugins": [
+    {
+      "key": "my_plugin",
+      "name": {"zh": "我的插件", "en": "My Plugin"},
+      "kind": "utility",
+      "icon": "🧰",
+      "summary": "一句话简介",
+      "version": "1.2.0",
+      "min_telepilot_version": "0.110.0-beta.1",
+      "plugin_api": "^1.3",
+      "permissions": ["send_message"],
+      "reads": [],
+      "tags": ["tool"],
+      "path": "my_plugin",
+      "channels": {"stable": "main"}
+    }
+  ]
+}
+```
+
+- `kind`：`interactive / automation / utility / middleware / payment_source / ui`；`repository` 可在条目里单独覆盖；`key` 必须与插件 `plugin.json` 的 `name` 一致。
+- 索引只用于浏览、更新角标和兼容性预判（`min_telepilot_version`、`plugin_api` 不满足时市场里显示“不兼容”且不能安装）。安装 / 更新时宿主仍克隆 `repository`，读取插件自己的 `plugin.json` 并走与「插件仓库」相同的完整校验。
+- 只有已安装插件的来源仓库与条目的 `repository` 相同时才提示更新，避免同名插件被别的仓库悄悄替换。
+- 通过市场或「插件仓库 → 全部更新」换版本后有健康观察窗口（默认 10 分钟）：加载失败、熔断打开或钩子失败率显著升高会自动回滚到旧版本并告警；插件数据目录不随版本回滚，**数据格式变更请保持向后兼容**（新版能读旧数据、旧版也能容忍新版写过的数据）。
+
 ## 发布前检查
 
 - [ ] `plugin.json` 有 `usage`，并能让用户不用读旧规则也知道怎么启用。
