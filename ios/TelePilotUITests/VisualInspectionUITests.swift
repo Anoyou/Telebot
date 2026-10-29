@@ -7,7 +7,8 @@ final class VisualInspectionUITests: XCTestCase {
     override func setUp() {
         continueAfterFailure = false
         app = XCUIApplication()
-        app.launchArguments = ["--ui-testing", "-AppleLanguages", "(zh-Hans)", "-AppleLocale", "zh_CN"]
+        // 0.18.0 起 AI 默认在「更多」里；这组截图沿用 AI 在 Dock 的布局。
+        app.launchArguments = ["--ui-testing", "--ui-test-dock=overview,plugins,ai", "-AppleLanguages", "(zh-Hans)", "-AppleLocale", "zh_CN"]
         app.launch()
         XCTAssertTrue(app.tabBars.buttons["概览"].waitForExistence(timeout: 45))
         app.tabBars.buttons["概览"].tap()

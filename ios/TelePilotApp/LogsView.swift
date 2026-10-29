@@ -454,20 +454,23 @@ struct LogsView: View {
                 } label: {
                     LogKindLabel(title: "系统控制台", symbol: "terminal", detail: "服务器进程的原始输出，适合把内容复制给开发者。")
                 }
-                NavigationLink {
-                    ManagementFormView(action: .init(title: "模拟消息路由", path: "/api/dispatch/simulate", explanation: "模拟一条消息会被哪些插件和规则处理，不会真的发到 Telegram。"))
-                } label: {
-                    LogKindLabel(title: "模拟消息路由", symbol: "arrow.triangle.branch", detail: "输入一条示例消息，看它会命中哪些插件或规则。")
-                }
-                NavigationLink {
-                    ManagementDocumentView(title: "投递统计", path: "/api/dispatch/router-delivery-stats")
-                } label: {
-                    LogKindLabel(title: "投递统计", symbol: "chart.bar.doc.horizontal", detail: "消息分发到各插件的次数与失败数。")
-                }
-                NavigationLink {
-                    ManagementFormView(action: .init(title: "开启路由诊断记录", path: "/api/dispatch/router-debug-trace", explanation: "临时记录更详细的路由过程，用完记得关闭，避免日志过多。"))
-                } label: {
-                    LogKindLabel(title: "开启路由诊断记录", symbol: "record.circle", detail: "临时打开更详细的路由记录，排查完关闭。")
+                // 命中调试模块（dispatch_debug）关闭时这三项接口都会被服务器拒绝：与 Web 一样隐藏入口；旧服务器没有模块信息时照常显示。
+                if model.isModuleEnabled("dispatch_debug") {
+                    NavigationLink {
+                        ManagementFormView(action: .init(title: "模拟消息路由", path: "/api/dispatch/simulate", explanation: "模拟一条消息会被哪些插件和规则处理，不会真的发到 Telegram。"))
+                    } label: {
+                        LogKindLabel(title: "模拟消息路由", symbol: "arrow.triangle.branch", detail: "输入一条示例消息，看它会命中哪些插件或规则。")
+                    }
+                    NavigationLink {
+                        ManagementDocumentView(title: "投递统计", path: "/api/dispatch/router-delivery-stats")
+                    } label: {
+                        LogKindLabel(title: "投递统计", symbol: "chart.bar.doc.horizontal", detail: "消息分发到各插件的次数与失败数。")
+                    }
+                    NavigationLink {
+                        ManagementFormView(action: .init(title: "开启路由诊断记录", path: "/api/dispatch/router-debug-trace", explanation: "临时记录更详细的路由过程，用完记得关闭，避免日志过多。"))
+                    } label: {
+                        LogKindLabel(title: "开启路由诊断记录", symbol: "record.circle", detail: "临时打开更详细的路由记录，排查完关闭。")
+                    }
                 }
             } header: { Text("高级诊断") }
         }

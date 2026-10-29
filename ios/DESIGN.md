@@ -20,7 +20,45 @@
 
 ## 布局
 
-概览顶部是紧凑品牌头（BrandMark 图标、TelePilot、一句话说明与当前服务器），紧接一句只陈述可确认事实的状态（服务运行中 / 部分状态未能读取 / 无法读取服务器状态），随后是关键数字、快捷操作、收藏与可排序的服务模块。概览不再自行推断“需要处理”的事项（不准确且给不出解决方法）；全面判断由导航栏右上角的「一键体检」（`stethoscope`，原生 `ToolbarItem`，无障碍标签「一键体检」）负责：点按打开体检面板，直接调用服务器 `GET /api/system-agent/checkup`（与助手“体检一下”同一个只读工具），显示总体结论、每项状态、原因与修复建议，以及可跳转的处理入口（账号、插件、AI、日志、指令与任务、备份与维护、设置、助手）。日志页以“最近问题 → 统一列表 → 详情 → 处理时间线”逐层下钻，每类日志都附中文解释；资金台账以汇总卡片和 Swift Charts 图表为主，明细使用中文标签。底部 Dock 支持入口选择与排序，保留始终可达的全部入口；旁边独立玻璃圆形按钮打开助手。iPad 使用导航双栏，助手有会话侧栏。系统登录与 Telegram 账号绑定分别呈现自己的验证步骤。
+概览顶部是紧凑品牌头（BrandMark 图标、TelePilot、一句话说明与当前服务器），紧接一句只陈述可确认事实的状态（服务运行中 / 部分状态未能读取 / 无法读取服务器状态），随后是关键数字、快捷操作、收藏与可排序的服务模块。概览不再自行推断“需要处理”的事项（不准确且给不出解决方法）；全面判断由导航栏右上角的「一键体检」（`stethoscope`，原生 `ToolbarItem`，无障碍标签「一键体检」）负责：点按打开体检面板，直接调用服务器 `GET /api/system-agent/checkup`（与助手“体检一下”同一个只读工具），显示总体结论、每项状态、原因与修复建议，以及可跳转的处理入口（账号、插件、AI、日志、指令与任务、备份与维护、设置、助手）。日志页以“最近问题 → 统一列表 → 详情 → 处理时间线”逐层下钻，每类日志都附中文解释；资金台账以汇总卡片和 Swift Charts 图表为主，明细使用中文标签。底部 Dock 见下方「底部 Dock」一节：默认「概览 · 插件 · 交互 · 更多」，旁边独立的 Agent 打开助手；中间 3 格可在「App 设置 › 自定义 Dock」里选择与排序，没放进 Dock 的入口都在「更多」里，始终可达。iPad 使用导航双栏，助手有会话侧栏。系统登录与 Telegram 账号绑定分别呈现自己的验证步骤。
+
+## 底部 Dock（0.18.0）
+
+- 结构：中间最多 3 个自选格 +「更多」（固定最后）+ Agent（iOS 27 起 `Tab(role: .prominent)` 独立圆钮；**iOS 26 上是第 5 个普通 Tab，不是 bug**）。普通 Tab 不超过 4 个：再多 iPhone 的 `TabView` 会自动生成系统自己的“更多”，与我们的「更多」重复。
+- 默认：概览 · 插件 · 交互。AI 在「更多 › 管理」。
+- 可选入口（一级 + 二级，顺序即补位顺序）：概览、插件、交互、AI、指令与任务、账号、日志、资金台账（`DockItem.customizable`）。三级入口（Webhook、命中调试、服务器设置、备份与维护）不可选。
+- 「App 设置 › 自定义 Dock」（`DockCustomizationView`，图标 `dock.rectangle`）：当前 Dock 预览（`dock.preview`）、已选入口行内「上移」`arrow.up`（`dock.moveUp.<项>`）与「移除」`minus.circle.fill`（`dock.remove.<项>`，至少保留一个）、其余入口「加入」`plus.circle.fill`（`dock.add.<项>`，放满 3 个时禁用并说明原因）、恢复默认（`dock.reset`）。自定义只存本机 `UserDefaults`（`telepilot.dock.slots`），不跨服务器区分。iPhone 底部不支持系统 `TabViewCustomization`（只在 iPad 侧边栏生效），所以用自己的设置页。
+- 模块开关联动：`AppModel.disabledModules` 取自 `GET /api/system/capabilities` 中 `desired_enabled == false` 的模块（读取失败或旧服务器没有接口时为空 = 全部显示，与 Web `capabilityEnabledMap` 缺省为开一致）。Dock 里模块关闭的格隐藏，由可选顺序里下一个不在 Dock、模块开着的入口补在原位置（默认 Dock 关掉交互时补上 AI），没有可补的就少一格（`DockLayout.effective`）。「更多」、全局搜索里同样隐藏：交互（interaction_bot）、资金台账（ledger）、Webhook（webhooks）、AI（ai）；命中调试（dispatch_debug）关闭时隐藏「日志与诊断 › 高级诊断」里的模拟消息路由／投递统计／路由诊断记录。
+- 「更多」分组：紧急停止 → 常用（被移出 Dock 的概览／插件／交互；全在 Dock 时不显示）→ 管理（账号、AI、指令与任务、资金台账、日志）→ 工具与设置（Webhook、服务器设置、备份与维护；命中调试原生页上线后在这里单独一行）→ App（App 设置、关于与更新）。已在 Dock 的入口不重复列出。
+- 路由（推送、体检、概览快捷操作）：目标在 Dock 里就切到那一格（自选格各有自己的导航路径），否则进「更多」里对应页面。
+- 导航名 = 页面标题：Dock「交互」进入的页面标题也叫「交互」（作为 Dock 根页面用大标题）。
+- 插件 ↔ 交互：声明了 `interaction_entries` 的插件详情「概况」里有「交互规则」`bubble.left.and.text.bubble.right`（`plugin.detail.interactionRules`，交互模块关闭时不显示），打开交互中心并只列出启动该插件的规则（「显示全部规则」开关 `interaction.showAllRules`；新增规则预填该插件第一个入口）；规则编辑页「玩法入口」分组里「插件配置」`slider.horizontal.3`（`interaction.rule.pluginConfig`）打开该插件在本账号的配置分区。
+
+## Web ↔ iOS 页面对照表
+
+以代码为准（Web：`frontend/src/components/layout/Sidebar.tsx` 的 `NAV` 与路由；iOS 0.18.0）。**Web 新增、移动或删除侧栏项／设置分页／独立页面时，必须在同一个 PR 里更新这张表，并写明 iOS 的处理方式（做／不做＋理由），见根目录 `AGENTS.md`。**
+
+| Web 页面（路由） | iOS 位置 | 状态 |
+| --- | --- | --- |
+| 插件 `/plugins`（卡片视图、按账号、启停、配置） | Dock「插件」› 插件中心 | ✅ 对齐（无批量全局启停，手机少用） |
+| 插件 · 运行模式卡（生产／值守） | 更多 › 服务器设置 › 运行模式（插件页「运行」视图由后续任务重做） | ⚠️ 位置与 Web 不同 |
+| 插件 · 树状视图（能力分类） | 更多 › 服务器设置 › 能力与插件树（插件页「运行」视图由后续任务重做） | ⚠️ 位置与 Web 不同 |
+| 插件管理／安装 `/plugins/manage`、插件市场 | 插件 › 发现／已安装、插件市场 | ✅ 对齐 |
+| 消息模板实验室 `/plugins/message-template-lab` | 更多 › 指令与任务 › 模板预览与测试（原始表单） | ⚠️ 缩水（无所见即所得预览） |
+| AI `/ai`（概览／供应商／用量）+ 存活检测 `/ai/liveness` | 更多 › 管理 › AI（可自选进 Dock） | ✅ 对齐 |
+| 待确认 `/assistant/inbox` | Agent 角标 + 待确认页 | ✅ 对齐 |
+| 系统助手 `/assistant` | Dock 独立「Agent」 | ✅ 对齐 |
+| 交互 `/interaction` | Dock「交互」（0.18.0 起；可自选移出，移出后在更多 › 常用） | ✅ 对齐 |
+| 指令与任务 `/operations`（模板／定时／白名单） | 更多 › 管理 › 指令与任务（可自选进 Dock；白名单在账号 › 定时任务与白名单） | ✅ 基本对齐 |
+| 概览 `/overview` | Dock「概览」+ 一键体检 | ✅ 对齐 |
+| 资金台账 `/ledger` | 更多 › 管理 › 资金台账（可自选进 Dock） | ✅ 对齐 |
+| 入站 Webhook `/webhooks` | 更多 › 工具与设置 › Webhook | ✅ 基本对齐 |
+| 命中调试 `/dispatch-debug` | 更多 › 管理 › 日志与诊断 › 模拟消息路由（通用表单；原生页由命中调试任务提供后进「工具与设置」） | ⚠️ 明显缩水 |
+| 日志 `/logs`（消息流／系统控制台／Agent 运行／运行事件） | 更多 › 管理 › 日志与诊断（可自选进 Dock） | ⚠️ 少「Agent 运行」 |
+| 账号详情 `/accounts/:aid`（7 分页）+ 新增向导 `/accounts/new` | 更多 › 管理 › 账号（可自选进 Dock）› 详情 | ✅ 基本对齐 |
+| 系统设置 `/settings`（5 分页） | 更多 › 工具与设置 › 服务器设置、备份与维护；App 设置 | ⚠️ 指令前缀、时区、Trace 等只能在「服务器参数」原始键值里改 |
+| 能力开关联动导航（模块关了入口隐藏） | Dock、更多、全局搜索按 `/api/system/capabilities` 隐藏（0.18.0） | ✅ 对齐 |
+| 导航顺序偏好（侧栏、PWA 底栏，跨设备） | App 设置 › 自定义 Dock（只存本机，可换入口，不读 Web 的 `ui_preferences`） | ⚠️ 不跨设备同步 |
 
 ## 图标
 
@@ -32,9 +70,9 @@
 
 | 模块 | 入口与符号 |
 | --- | --- |
-| 更多 | 账号 `person.2`、App 设置 `apps.iphone`（0.15.0 由「设置」`gearshape` 改名，与管理模块「服务器设置」区分；0.15.0 写的 `iphone.gear` 不是有效符号、真机无图标，0.16.0 改 `apps.iphone`，SF Symbols 2.0／iOS 14 起可用）、关于与更新 `info.circle`；管理模块沿用 `ManagementModule.symbol`（0.16.0 新增「交互中心」`bubble.left.and.text.bubble.right`，排在「指令与任务」后）；紧急停止红色高亮行（0.16.1 起说明并入行内，替换原状态文字，Section footer 只在切换失败／结果未知时显示错误）：左侧红底图标 `exclamationmark.octagon`（开启后 `.fill`），标题「全局紧急停止」（`more.emergencyStop.title`），标题下一行说明按钮 `info.circle` **在文字左边**（footnote，无障碍标签「紧急停止说明」，视觉小图标、点按区域四周扩 10pt），文字（`more.emergencyStop.summary`，footnote，可换行）未开启时为「停止全部消息处理，数据和管理台不受影响」（次要色），开启时为「已停止全部消息处理，点“解除”恢复」（红色），读取中／失败显示「正在读取状态…」／「状态读取失败：…」；右侧「停止／解除」是 borderless 按钮（`more.emergencyStop`，无障碍值保留完整状态「未开启 · 账号与 Bot 正常运行」／「已开启 · 账号进程与 Bot 已停止」），整行其它位置点按同样弹出确认（行用 onTapGesture，ⓘ 子按钮优先，不能把整行包成 Button，否则 ⓘ 点不到）；ⓘ 点开原生 popover（`.presentationCompactAdaptation(.popover)`）：停止什么 `stop.circle`、不影响 `checkmark.shield`、如何恢复 `arrow.uturn.backward.circle`；确认弹窗文案不变 |
-| 交互中心（0.16.0） | 对齐 Web `/interaction`。账号 `person.crop.circle.badge.checkmark`（原生 `Picker(.menu)`，有未保存修改时禁用）、放弃修改 `arrow.uturn.backward`；运行状态：交互总闸 `power.circle.fill`／`power.circle`、交互 Bot 已配置 `checkmark.circle.fill`／待配置 `exclamationmark.triangle.fill`、监听运行中 `checkmark.circle.fill`／未运行 `exclamationmark.triangle.fill`／未启用 `pause.circle`、启用订阅 `bubble.left.and.text.bubble.right`、失败投递 `tray.and.arrow.down`、Bot 入群情况 `person.2`（可展开）；交互总闸 `power.circle`（Toggle）、交互 Bot Token `key`（`SecureField`，只在保存时提交）、清除 Token `trash`；规则行：插件玩法 `puzzlepiece.extension`／算数题 `function`／只发通知 `bell.badge`，状态启用 `checkmark.circle.fill`／停用 `pause.circle`（文字＋图标），左滑停用／启用、删除 `trash`，添加规则 `plus`；规则编辑：命中后 `play.circle`、触发方式 `bolt.horizontal`、插件入口 `puzzlepiece.extension`、从会话白名单选择 `checklist`；高级 `slider.horizontal.3`。导航栏右上「保存」（`interaction.save`，没有修改时禁用）一次提交 `PUT /api/accounts/{id}/interaction-bot`，不自动重试，失败保留草稿 |
-| App 设置 | 首页模块 `square.grid.2x2`、Apple 推送 `bell.badge`、Cloudflare Access `lock.icloud`、用户名 `person.crop.circle`、界面锁 `faceid`／`timer`、更换服务器 `arrow.left.arrow.right.circle`、退出登录 `rectangle.portrait.and.arrow.right`（“关于与更新”只在“更多”里出现一次，设置页不再重复） |
+| 更多 | 分组与入口见「底部 Dock」一节；AI `cpu`、指令与任务 `terminal`、账号 `person.2`、App 设置 `apps.iphone`（0.15.0 由「设置」`gearshape` 改名，与管理模块「服务器设置」区分；0.15.0 写的 `iphone.gear` 不是有效符号、真机无图标，0.16.0 改 `apps.iphone`，SF Symbols 2.0／iOS 14 起可用）、关于与更新 `info.circle`；管理模块沿用 `ManagementModule.symbol`（0.16.0 新增「交互中心」`bubble.left.and.text.bubble.right`，排在「指令与任务」后）；紧急停止红色高亮行（0.16.1 起说明并入行内，替换原状态文字，Section footer 只在切换失败／结果未知时显示错误）：左侧红底图标 `exclamationmark.octagon`（开启后 `.fill`），标题「全局紧急停止」（`more.emergencyStop.title`），标题下一行说明按钮 `info.circle` **在文字左边**（footnote，无障碍标签「紧急停止说明」，视觉小图标、点按区域四周扩 10pt），文字（`more.emergencyStop.summary`，footnote，可换行）未开启时为「停止全部消息处理，数据和管理台不受影响」（次要色），开启时为「已停止全部消息处理，点“解除”恢复」（红色），读取中／失败显示「正在读取状态…」／「状态读取失败：…」；右侧「停止／解除」是 borderless 按钮（`more.emergencyStop`，无障碍值保留完整状态「未开启 · 账号与 Bot 正常运行」／「已开启 · 账号进程与 Bot 已停止」），整行其它位置点按同样弹出确认（行用 onTapGesture，ⓘ 子按钮优先，不能把整行包成 Button，否则 ⓘ 点不到）；ⓘ 点开原生 popover（`.presentationCompactAdaptation(.popover)`）：停止什么 `stop.circle`、不影响 `checkmark.shield`、如何恢复 `arrow.uturn.backward.circle`；确认弹窗文案不变 |
+| 交互中心（0.16.0；0.18.0 起在 Dock「交互」，页面标题「交互」） | 对齐 Web `/interaction`。账号 `person.crop.circle.badge.checkmark`（原生 `Picker(.menu)`，有未保存修改时禁用）、放弃修改 `arrow.uturn.backward`；运行状态：交互总闸 `power.circle.fill`／`power.circle`、交互 Bot 已配置 `checkmark.circle.fill`／待配置 `exclamationmark.triangle.fill`、监听运行中 `checkmark.circle.fill`／未运行 `exclamationmark.triangle.fill`／未启用 `pause.circle`、启用订阅 `bubble.left.and.text.bubble.right`、失败投递 `tray.and.arrow.down`、Bot 入群情况 `person.2`（可展开）；交互总闸 `power.circle`（Toggle）、交互 Bot Token `key`（`SecureField`，只在保存时提交）、清除 Token `trash`；规则行：插件玩法 `puzzlepiece.extension`／算数题 `function`／只发通知 `bell.badge`，状态启用 `checkmark.circle.fill`／停用 `pause.circle`（文字＋图标），左滑停用／启用、删除 `trash`，添加规则 `plus`；规则编辑：命中后 `play.circle`、触发方式 `bolt.horizontal`、插件入口 `puzzlepiece.extension`、从会话白名单选择 `checklist`；高级 `slider.horizontal.3`。导航栏右上「保存」（`interaction.save`，没有修改时禁用）一次提交 `PUT /api/accounts/{id}/interaction-bot`，不自动重试，失败保留草稿 |
+| App 设置 | 首页模块 `square.grid.2x2`、自定义 Dock `dock.rectangle`、Apple 推送 `bell.badge`、Cloudflare Access `lock.icloud`、用户名 `person.crop.circle`、界面锁 `faceid`／`timer`、更换服务器 `arrow.left.arrow.right.circle`、退出登录 `rectangle.portrait.and.arrow.right`（“关于与更新”只在“更多”里出现一次，设置页不再重复） |
 | 关于 | App 版本 `iphone`、构建号 `hammer`、服务器版本 `shippingbox`、发布通道 `arrow.triangle.branch`、部署提交 `number`、检查服务器更新 `arrow.down.circle`（全 App 唯一更新入口）、GitHub `chevron.left.forwardslash.chevron.right`、更新日志 `list.bullet.clipboard`、使用指南 `book`、问题反馈 `exclamationmark.bubble`、开源许可 `doc.plaintext`、隐私 `hand.raised` |
 | 账号管理 | 编辑 `pencil`、重新登录 `person.badge.key`、复制配置 `doc.on.doc`、导出迁移 `square.and.arrow.up.on.square`、插件 `puzzlepiece.extension`、拟人化 `figure.walk`、限流 `gauge.with.dots.needle.33percent`、用量 `chart.bar`、覆盖规则 `slider.horizontal.below.rectangle`、直通顺序 `arrow.up.arrow.down`、会话白名单 `checklist`、最近会话 `bubble.left.and.bubble.right`、账号指令 `terminal`、Bot 用户 `person.2.badge.gearshape`、失败投递 `tray.and.arrow.down`、删除 `trash` |
 | 指令与任务 | 指令模板 `text.badge.plus`、别名 `arrow.triangle.swap`、内置指令 `terminal`、模板变量 `curlybraces`、预览 `eye`、测试发送 `paperplane` |
@@ -154,7 +192,7 @@ iPhone 和 iPad 使用系统安全区；支持横竖屏、长中文、辅助功�
 
 ## 导航标题
 
-- 一级 Tab 根页面（概览、插件、AI、更多）使用大标题（`.large`，或省略声明保持默认）。
+- 一级 Tab 根页面（概览、插件、交互、AI、更多）使用大标题（自选进 Dock 的账号、日志、资金台账、指令与任务沿用原页面的行内标题）（`.large`，或省略声明保持默认）。
 - 其余所有推入页、详情页、sheet 都显式写 `.navigationBarTitleDisplayMode(.inline)`，不依赖上级继承。
 - Agent 会话页以会话标题为行内标题。
 

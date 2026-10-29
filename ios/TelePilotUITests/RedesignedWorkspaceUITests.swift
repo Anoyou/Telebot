@@ -5,7 +5,8 @@ final class RedesignedWorkspaceUITests: XCTestCase {
     private func launch(tab: String) -> XCUIApplication {
         continueAfterFailure = false
         let app = XCUIApplication()
-        app.launchArguments = ["--ui-testing", "-AppleLanguages", "(zh-Hans)", "-AppleLocale", "zh_CN"]
+        // 0.18.0 起 AI 默认在「更多」里；这组用例把 AI 放回 Dock，直接从底部进入。
+        app.launchArguments = ["--ui-testing", "--ui-test-dock=overview,plugins,ai", "-AppleLanguages", "(zh-Hans)", "-AppleLocale", "zh_CN"]
         app.launch()
         XCTAssertTrue(app.tabBars.buttons[tab].waitForExistence(timeout: 45))
         app.tabBars.buttons[tab].tap()

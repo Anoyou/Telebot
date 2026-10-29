@@ -10,6 +10,7 @@ enum AppRoute: Hashable, Sendable {
     case ai
     case assistant(sessionID: String? = nil)
     case action(String)
+    case interaction
     case logs
     case ledger
     case webhooks
@@ -34,6 +35,7 @@ enum AppRoute: Hashable, Sendable {
         case "action":
             guard let id = notificationUserInfo["action_id"] as? String, !id.isEmpty else { return nil }
             self = .action(id)
+        case "interaction": self = .interaction
         case "logs": self = .logs
         case "ledger": self = .ledger
         case "webhooks": self = .webhooks

@@ -88,25 +88,22 @@ private struct MainTabs: View {
     // Agent 页隐藏 Dock，最小化按钮返回进入 Agent 前所在的标签页。
     @State private var previousTab: DockItem = .overview
     @State private var morePath: [MoreDestination] = []
+    /// 自选 Dock 格各自的导航路径（账号、交互、日志等推送路由时用）。
+    @State private var tabPaths: [DockItem: [MoreDestination]] = [:]
     @State private var modal: WorkspaceModal?
+
+    /// 实际显示的中间格：用户自选（App 设置 › 自定义 Dock）经服务器模块开关调整后的结果。
+    private var dockItems: [DockItem] { preferences.dockItems(disabledModules: model.disabledModules) }
 
     var body: some View {
         TabView(selection: $selected) {
-            Tab("概览", systemImage: DockItem.overview.symbol, value: DockItem.overview) {
-                OverviewView()
+            ForEach(dockItems) { item in
+                Tab(item.title, systemImage: item.symbol, value: item) {
+                    tabRoot(item)
+                }
+                .badge(badge(item))
+                .accessibilityIdentifier("dock.\(item.rawValue)")
             }
-            .accessibilityIdentifier("dock.overview")
-
-            Tab("插件", systemImage: DockItem.plugins.symbol, value: DockItem.plugins) {
-                NavigationStack { PluginManagementView() }
-            }
-            .badge(model.pluginUpdateCount)
-            .accessibilityIdentifier("dock.plugins")
-
-            Tab("AI", systemImage: DockItem.ai.symbol, value: DockItem.ai) {
-                NavigationStack { AIWorkspaceView() }
-            }
-            .accessibilityIdentifier("dock.ai")
 
             Tab("更多", systemImage: DockItem.more.symbol, value: DockItem.more) {
                 NavigationStack(path: $morePath) { MoreView(path: $morePath) }
@@ -141,13 +138,73 @@ private struct MainTabs: View {
         }
         .task {
             preferences.setScope(server: model.serverURL?.absoluteString ?? "", userID: model.user?.id ?? 0)
+            keepSelectionVisible()
             await model.refreshWorkspace()
             openRequestedRoute()
         }
         .onChange(of: model.requestedRoute) { _, _ in openRequestedRoute() }
+        // 用户改了 Dock、或服务器关掉了某个模块：当前格不在 Dock 里时回到第一格，不停在一个看不见的 Tab 上。
+        .onChange(of: dockItems) { _, _ in keepSelectionVisible() }
         .onChange(of: selected) { old, new in
             if new == .agent && old != .agent { previousTab = old }
         }
+    }
+
+    @ViewBuilder private func tabRoot(_ item: DockItem) -> some View {
+        switch item {
+        case .overview: OverviewView()
+        case .plugins: NavigationStack { PluginManagementView() }
+        case .ai: NavigationStack { AIWorkspaceView() }
+        default:
+            NavigationStack(path: pathBinding(item)) {
+                Group {
+                    switch item {
+                    case .interaction: InteractionCenterView(isTabRoot: true)
+                    case .operations: ManagementModuleView(module: .operations)
+                    case .accounts: AccountsView(embedded: true)
+                    case .logs: LogsView()
+                    case .ledger: LedgerView()
+                    default: EmptyView()
+                    }
+                }
+                .navigationDestination(for: MoreDestination.self) { MoreDestinationView(destination: $0) }
+            }
+        }
+    }
+
+    private func badge(_ item: DockItem) -> Text? {
+        switch item {
+        case .plugins: model.pluginUpdateCount > 0 ? Text("\(model.pluginUpdateCount)") : nil
+        default: nil
+        }
+    }
+
+    private func pathBinding(_ item: DockItem) -> Binding<[MoreDestination]> {
+        Binding(get: { tabPaths[item] ?? [] }, set: { tabPaths[item] = $0 })
+    }
+
+    private func keepSelectionVisible() {
+        guard selected != .more, selected != .agent, !dockItems.contains(selected) else { return }
+        selected = dockItems.first ?? .more
+        if previousTab != .more, !dockItems.contains(previousTab) { previousTab = selected }
+    }
+
+    /// 打开某个入口：在 Dock 里就切到那一格，否则进「更多」里对应的页面；`then` 是在该页面之上继续推入的页面。
+    private func open(_ item: DockItem, then: [MoreDestination] = []) {
+        modal = nil
+        if dockItems.contains(item) {
+            selected = item
+            tabPaths[item] = then
+        } else {
+            selected = .more
+            morePath = (MoreDestination.workspace(item).map { [$0] } ?? []) + then
+        }
+    }
+
+    private func openMore(_ path: [MoreDestination]) {
+        modal = nil
+        selected = .more
+        morePath = path
     }
 
     private func openRequestedRoute() {
@@ -156,17 +213,18 @@ private struct MainTabs: View {
             // 助手只保留 Agent 标签页一个实例，避免两个会话状态与流式订阅并存。
             case .assistant(let id): modal = nil; model.requestAssistantSession(id); selected = .agent
             case .action(let id): modal = .action(id.isEmpty ? nil : id)
-            case .account(let id): modal = nil; selected = .more; morePath = [.accounts, .account(id)]
-            case .overview: modal = nil; selected = .overview
-            case .accounts: modal = nil; selected = .more; morePath = [.accounts]
-            case .settings: modal = nil; selected = .more; morePath = [.settings]
-            case .plugins: modal = nil; selected = .plugins
-            case .ai: modal = nil; selected = .ai
-            case .operations: modal = nil; selected = .more; morePath = [.module(.operations)]
-            case .logs: modal = nil; selected = .more; morePath = [.module(.logs)]
-            case .ledger: modal = nil; selected = .more; morePath = [.module(.ledger)]
-            case .webhooks: modal = nil; selected = .more; morePath = [.module(.webhooks)]
-            case .maintenance: modal = nil; selected = .more; morePath = [.module(.maintenance)]
+            case .account(let id): open(.accounts, then: [.account(id)])
+            case .overview: open(.overview)
+            case .accounts: open(.accounts)
+            case .settings: openMore([.settings])
+            case .plugins: open(.plugins)
+            case .ai: open(.ai)
+            case .interaction: open(.interaction)
+            case .operations: open(.operations)
+            case .logs: open(.logs)
+            case .ledger: open(.ledger)
+            case .webhooks: openMore([.module(.webhooks)])
+            case .maintenance: openMore([.module(.maintenance)])
             }
             model.requestedRoute = nil
     }

@@ -156,7 +156,10 @@ struct GlobalSearchResults: View {
         OverviewModule.allCases.filter { query.isEmpty || $0.title.localizedCaseInsensitiveContains(query) }
     }
     private var managementModules: [ManagementModule] {
-        ManagementModule.allCases.filter { query.isEmpty || $0.title.localizedCaseInsensitiveContains(query) }
+        ManagementModule.allCases.filter {
+            ($0.platformModule.map { model.isModuleEnabled($0) } ?? true)
+                && (query.isEmpty || $0.title.localizedCaseInsensitiveContains(query))
+        }
     }
     private var plugins: [JSONValue] {
         model.plugins.filter {

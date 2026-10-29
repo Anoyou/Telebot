@@ -11,7 +11,7 @@ enum ManagementModule: String, CaseIterable, Identifiable {
         switch self {
         case .plugins: "插件中心"
         case .operations: "指令与任务"
-        case .interaction: "交互中心"
+        case .interaction: "交互"
         case .ai: "AI 管理"
         case .logs: "日志与诊断"
         case .ledger: "资金台账"
@@ -31,6 +31,28 @@ enum ManagementModule: String, CaseIterable, Identifiable {
         case .webhooks: "point.3.connected.trianglepath.dotted"
         case .system: "server.rack"
         case .maintenance: "wrench.and.screwdriver"
+        }
+    }
+    /// 对应的服务器平台模块；模块关闭时「更多」与全局搜索里隐藏入口（与 Web 侧栏一致），旧服务器没有信息时照常显示。
+    var platformModule: String? {
+        switch self {
+        case .interaction: "interaction_bot"
+        case .ai: "ai"
+        case .ledger: "ledger"
+        case .webhooks: "webhooks"
+        default: nil
+        }
+    }
+    /// 可以放进 Dock 的同一入口；已在 Dock 里时「更多」不再重复列出。
+    var dockItem: DockItem? {
+        switch self {
+        case .plugins: .plugins
+        case .interaction: .interaction
+        case .ai: .ai
+        case .operations: .operations
+        case .logs: .logs
+        case .ledger: .ledger
+        default: nil
         }
     }
 }
