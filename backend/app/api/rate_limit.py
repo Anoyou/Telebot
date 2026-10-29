@@ -723,6 +723,9 @@ async def get_system_settings(db: DBSession, _user: CurrentUser) -> dict[str, An
             ),
             "native_raw_persist_enabled": bool(log_retention.get("native_raw_persist_enabled", False)),
             "native_raw_retention_days": max(0, int(log_retention.get("native_raw_retention_days", 1) or 0)),
+            "payment_source_plugin_authoritative": bool(
+                log_retention.get("payment_source_plugin_authoritative", False)
+            ),
             "llm_usage_retention_days": max(
                 0, int(log_retention.get("llm_usage_retention_days", 30) or 0)
             ),
@@ -771,6 +774,8 @@ class _LogRetentionPatch(BaseModel):
     trace_payload_snapshot_retention_days: int | None = None
     native_raw_persist_enabled: bool | None = None
     native_raw_retention_days: int | None = None
+    # B1 双跑对照：转账通知「以插件结果为准」（payment_sources 插件），默认关闭 = 以宿主旧解析器为准。
+    payment_source_plugin_authoritative: bool | None = None
     llm_usage_retention_days: int | None = None
     rate_limit_event_retention_days: int | None = None
 
@@ -1078,6 +1083,7 @@ async def patch_system_settings(payload: _SettingsPatch, db: DBSession, user: Cu
             ),
             "native_raw_persist_enabled": bool(current.get("native_raw_persist_enabled", False)),
             "native_raw_retention_days": max(0, int(current.get("native_raw_retention_days", 1) or 0)),
+            "payment_source_plugin_authoritative": bool(current.get("payment_source_plugin_authoritative", False)),
             "llm_usage_retention_days": max(
                 0, int(current.get("llm_usage_retention_days", 30) or 0)
             ),
@@ -1091,6 +1097,7 @@ async def patch_system_settings(payload: _SettingsPatch, db: DBSession, user: Cu
             "inline_updates_enabled",
             "guest_updates_enabled",
             "native_raw_persist_enabled",
+            "payment_source_plugin_authoritative",
         }
         bounds = {
             "runtime_log_retention_days": (0, 3650),

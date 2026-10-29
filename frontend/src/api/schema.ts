@@ -12776,6 +12776,8 @@ export interface components {
             native_raw_persist_enabled?: boolean | null;
             /** Native Raw Retention Days */
             native_raw_retention_days?: number | null;
+            /** Payment Source Plugin Authoritative */
+            payment_source_plugin_authoritative?: boolean | null;
             /** Rate Limit Event Retention Days */
             rate_limit_event_retention_days?: number | null;
             /** Runtime Log Max Detail Chars */

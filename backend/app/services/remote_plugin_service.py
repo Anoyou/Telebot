@@ -227,7 +227,32 @@ class PluginMetadataSchema(BaseModel):
     render_profile: dict[str, Any] | None = None
     # 声明式 UI（0.110.0+，Plugin API 1.3）：{"cards": [...]}，结构见 schemas/plugin-ui-widgets.json；旧宿主忽略。
     ui: dict[str, Any] | None = None
+    # 转账通知解析扩展点（0.111.0+）：[{"id": "cn_transfer", "title": "中文转账通知", "units": [...]}]，
+    # 模块导出 parse_payment_notice(text, meta)；见 services/payment_sources.py。旧宿主忽略。
+    payment_sources: list[dict[str, Any]] = Field(default_factory=list)
     tags: list[str] = Field(default_factory=list)
+
+    @field_validator("payment_sources")
+    @classmethod
+    def _validate_payment_sources(cls, v: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+        out: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for item in v or []:
+            if not isinstance(item, dict):
+                raise ValueError("payment_sources 每一项必须是对象")
+            source_id = str(item.get("id") or "").strip()
+            if not re.match(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$", source_id):
+                raise ValueError(f"payment_sources.id 只允许字母/数字/_/./-（≤64 字符），得到 {source_id!r}")
+            if source_id in seen:
+                raise ValueError(f"payment_sources.id 重复：{source_id}")
+            seen.add(source_id)
+            units = item.get("units")
+            if units is not None and (
+                not isinstance(units, list) or not all(isinstance(unit, str) and unit.strip() for unit in units)
+            ):
+                raise ValueError("payment_sources.units 必须是非空字符串数组")
+            out.append(dict(item))
+        return out
 
     @field_validator("render_profile")
     @classmethod

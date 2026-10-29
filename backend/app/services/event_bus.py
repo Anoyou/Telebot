@@ -93,6 +93,8 @@ EVENT_REASON_CODES = {
     "source_not_subscribed",
     "scope_not_matched",
     "chat_not_in_allowed_chats",
+    "payment_source_mismatch",
+    "payment_source_failed",
     "filter_not_matched",
     "session_not_found",
     "session_expired",

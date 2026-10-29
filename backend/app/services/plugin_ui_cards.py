@@ -51,6 +51,14 @@ _HOOK_LABELS = {
     "middleware.inbound": "入站中间件",
     "middleware.outbound": "出站中间件",
     "middleware.delivered": "投递回调",
+    "parse_payment_notice": "转账通知解析",
+}
+
+# payment_sources 双跑对照的事件维度（payment_sources.VERDICT_*）→ 卡片上的中文。
+_PAYMENT_VERDICT_LABELS = {
+    "agree": "与宿主一致",
+    "mismatch": "与宿主不一致",
+    "plugin_failed": "插件失败（已回退宿主）",
 }
 
 
@@ -291,6 +299,11 @@ def _format_hook_rows(data: Mapping[str, Any], account_names: Mapping[int, str])
         sum_ms += float(row.get("sum_ms") or 0)
         account_id = row.get("account_id")
         event_type = str(row.get("event_type") or "")
+        if str(row.get("hook") or "") == "parse_payment_notice":
+            if event_type == "mismatch" and calls:
+                # 对照不一致不是插件失败，但需要人工看一眼（Trace / 日志里有逐字段差异）。
+                health, tone = "对照不一致", "warning"
+            event_type = _PAYMENT_VERDICT_LABELS.get(event_type, event_type)
         blocked = int(row.get("blocked") or 0)
         if blocked > 0:
             hook_label = _HOOK_LABELS.get(str(row.get("hook") or ""), str(row.get("hook") or ""))

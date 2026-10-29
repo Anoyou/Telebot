@@ -70,3 +70,20 @@ def _isolate_bot_polling_runtime_state(monkeypatch):
         except Exception:  # noqa: BLE001
             pass
     trace_mod._PLUGIN_STATUS_TASK = None
+
+
+@pytest.fixture(autouse=True)
+def _isolate_payment_sources():
+    """B1：payment_sources 发现缓存是进程内状态；默认视为“没有插件来源”且不查库，用例按需注入。"""
+
+    try:
+        from app.services import payment_sources
+    except Exception:  # noqa: BLE001
+        yield
+        return
+    payment_sources.reset_cache()
+    payment_sources.set_sources_for_test([])
+    payment_sources.set_authoritative_hint(False)
+    yield
+    payment_sources.reset_cache()
+    payment_sources.set_authoritative_hint(False)

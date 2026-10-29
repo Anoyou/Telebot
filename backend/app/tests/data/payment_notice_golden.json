@@ -1,0 +1,3701 @@
+{
+ "version": 1,
+ "parser": "TelePilot host legacy parse_transfer_notice (backend/app/services/payment_notice_legacy.py)",
+ "cases": [
+  {
+   "origin": "harvest:backend/app/api/ignored_peers.py",
+   "text": "通过 IPC RPC 向对应 worker 拉一次\"最近活跃 peer\"列表（≤50 条）。\n\n    超时 1.5s。返回包含 ``worker_alive`` 字段以便前端区分：\n    - ``worker_alive=False`` → worker 没在跑（让用户去暂停 → 启动）\n    - ``worker_alive=True``  且 ``items=[]`` → worker 在跑但没收到 incoming\n    - ``worker_alive=True``  且 ``items=[...]`` → 正常\n    ",
+   "expected": null
+  },
+  {
+   "origin": "harvest:backend/app/db/models/ignored_peer.py",
+   "text": "被账号忽略的 Telegram peer（私聊 / 群 / 频道）。\n\n每个账号维护一份\"忽略名单\"。worker 收到来自这些 peer 的 incoming 消息时\n会直接短路所有插件分发——不消耗任何风控配额、也不触发 auto_reply 等回调。\n\n设计说明：\n- ``peer_id`` 是 Telethon 的 ``event.chat_id``，可正可负（supergroup 形如 -100xxxxxxxxxx，\n  超出 32 位整型范围），所以这里用 ``BigInteger``。\n- ``peer_kind`` 为字符串枚举（``private`` / ``group`` / ``supergroup`` / ``channel``），\n  仅作展示用途，业务逻辑只看 ``peer_id``。\n- ``peer_label`` 为加入忽略名单时的群名/用户名快照；后续群名变更不会自动同步。\n- ``UniqueConstraint(account_id, peer_id)`` 保证同一账号下不会重复加入同一 peer。\n",
+   "expected": null
+  },
+  {
+   "origin": "harvest:backend/app/schemas/account_bot.py",
+   "text": "交互 Bot / 转账联动测试配置。\n\n    用于测试阶段：\n    - 交互 Bot 监听群内回复 ``+数字``，用 Abot token 发出模拟转账通知\n    - 转账通知命中后，交互 Bot 可继续发出简单算数题\n    ",
+   "expected": null
+  },
+  {
+   "origin": "harvest:backend/app/schemas/command.py",
+   "text": "``POST /api/commands/llm-providers/liveness/run`` 入参。\n\n    全量测活不携带历史，确保所有模型收到完全相同的输入并可横向比较。\n    可选 ``only_provider_ids`` / ``only_models`` 用于失败重测等范围过滤。\n    ",
+   "expected": null
+  },
+  {
+   "origin": "harvest:backend/app/services/account_bot_runtime.py",
+   "text": "整条 update 重跑只用于“还没触达 Telegram”的瞬时错误。\n\n    Telegram 已经明确答复的 Bot API 错误（含 429：单请求层已按 retry_after 重试过）\n    说明 handler 早已跑到投递阶段，「🤔」占位、LLM 调用、额度扣减可能都已发生；\n    重跑整条 handler 只会重复这些副作用，直接进入失败日志 / DLQ。\n    ",
+   "expected": null
+  },
+  {
+   "origin": "harvest:backend/app/services/account_bot_runtime.py",
+   "text": "」。\n付款人请点击下方按钮确认开始。",
+   "expected": null
+  },
+  {
+   "origin": "harvest:backend/app/services/account_service.py",
+   "text": "检查本地头像缓存：\n\n    - 文件存在且未过期（24h）→ 直接返；\n    - 文件不存在 / 过期 → fire-and-forget 发 IPC 让 worker 写盘，本次返当前\n      路径（可能为 None）；\n    - 账号不存在 → 抛 404。\n\n    worker 离线时 IPC 没人接收，本次仍返 None；前端会走首字母 fallback，\n    下次刷新（等 worker 起来）就能看到。\n    ",
+   "expected": null
+  },
+  {
+   "origin": "harvest:backend/app/services/interaction/guest_reply.py",
+   "text": "Bot API 10.0 Guest Mode（访客模式）回复缓冲。\n\nGuest Mode 下 Bot 会在**未加入**的群或私聊里被 ``@提及``（或被回复），收到\n``guest_message`` 更新；它不能向该会话 ``sendMessage``，只能用\n``answerGuestQuery(guest_query_id, result)`` 回复**一次**（官方文档：\nhttps://core.telegram.org/bots/features#guest-bots ，\"is able to issue one reply\"）。\n\nTelePilot 的命令、AI 助手、交互规则和插件都会按普通消息的方式多次调用\n``send/edit/delete``。为了让这些能力在访客场景下零改动复用，这里提供一个按\n``Incoming`` 绑定的缓冲区：\n\n- 处理期间的发送会被记录为缓冲条目，返回一个仅在本次处理内有效的合成\n  ``message_id``；对它的编辑会原地替换内容，删除会移除条目；\n- 处理结束后由 runtime 调用 :func:`flush_guest_reply`，把缓冲内容合成一条\n  ``InlineQueryResultArticle`` 并只调用一次 ``answerGuestQuery``；\n- 插件也可以显式返回 ``answer_guest_query`` 动作立即回答，之后缓冲不再发送。\n\n这样 AI 等耗时流程只会在最终结果出来后发送一次，不会被“思考中…”占位消息\n占掉唯一的回复机会。\n",
+   "expected": null
+  },
+  {
+   "origin": "harvest:backend/app/services/ledger_service.py",
+   "text": "按日和按群汇总真实资金净盈亏。\n\n    总额/条数通过 SQL SUM/COUNT 聚合（不再全量拉行）；按日/按群/按收款人\n    分组仍需 JSON 标签与收款人信息，只拉取 SQL 过滤后的资金行。\n    ",
+   "expected": null
+  },
+  {
+   "origin": "harvest:backend/app/services/ledger_service.py",
+   "text": "台账行过滤条件（SQL 下推）。\n\n    - direction/amount 提取列为 NULL 的行（params_summary 缺字段，或未经 0062\n      回填的旧行）不产生台账条目，与旧 Python 侧 `_entry_from_action_event`\n      /`_entry_matches` 的\"缺字段行跳过\"口径一致。\n    - 金额过滤使用绝对金额：旧行为比较的是 `entry.amount`（copy_abs 后的值），\n      因此 SQL 侧用 abs(amount) 比较。\n    ",
+   "expected": null
+  },
+  {
+   "origin": "harvest:backend/app/services/llm_agent.py",
+   "text": "(?:没有|未).{0,12}(?:收到|提供|附带|上传).{0,12}(?:图片|图像)",
+   "expected": null
+  },
+  {
+   "origin": "harvest:backend/app/services/log_funel.py",
+   "text": "消息漏斗判定。\n\n这里是日志中心的唯一判据：输入一条 trace 的 spans/actions/status，\n输出收到、匹配、执行、发送四段状态和最终排查结论。函数保持无 DB 依赖，\n方便 API 聚合和单元测试共用。\n",
+   "expected": null
+  },
+  {
+   "origin": "harvest:backend/app/services/message_template_service.py",
+   "text": "付款人ID：10001",
+   "expected": null
+  },
+  {
+   "origin": "harvest:backend/app/services/message_template_service.py",
+   "text": "收款人ID：10002",
+   "expected": null
+  },
+  {
+   "origin": "harvest:backend/app/services/payout_limit.py",
+   "text": "校验并消费一次 payout 额度。\n\n    返回 ``(allowed, reason)``：allowed=False 时 reason 为中文超限说明（含当前值与\n    限额值）。single_max / daily_max 为 0 表示不限。金额校验由上游承担，这里对非正\n    金额 / 缺账号直接放行（不承担越权校验，也不消费额度）。\n    ",
+   "expected": null
+  },
+  {
+   "origin": "harvest:backend/app/services/rich_compact.py",
+   "text": "按 ``render_profile.table`` 的显式值写表格样式（0.109.0，core.rich_table_defaults 的声明式参数）。\n\n    只处理调用方 **没写** 的表格：\n\n    - ``blocks``：缺少 ``is_bordered`` / ``is_striped`` 时写入声明值（``False`` 也写，出口不会再补）；\n    - ``html`` / Markdown 里的 ``<table>``：缺少属性时写入 ``bordered`` 或 ``bordered=\"false\"``\n      （后者在出口按“显式关闭”去掉，Telegram 收到的是不带该属性的表格）；\n    - Markdown 管道表格：转成 ``<table …>`` 时按声明值写属性。\n\n    ``None`` 表示沿用平台默认（出口补 ``True``），两项都为 ``None`` 时原样返回。\n    ",
+   "expected": null
+  },
+  {
+   "origin": "harvest:backend/app/services/system_agent/runtime.py",
+   "text": "## 原生媒体输入\n用户消息附带的图片已经作为模型原生视觉输入提供，不属于工具。即使本轮工具列表为空，也必须直接查看并回答图片相关问题；不得因为没有工具而声称未收到或无法查看图片。",
+   "expected": null
+  },
+  {
+   "origin": "harvest:backend/app/tests/test_account_bot.py",
+   "text": "Yy 射出 1 蝌蚪\n你心里已经有答案了 接收 1 蝌蚪",
+   "expected": {
+    "payer_name": "Yy",
+    "receiver_name": "你心里已经有答案了",
+    "amount": 1
+   }
+  },
+  {
+   "origin": "harvest:backend/app/tests/test_account_bot.py",
+   "text": "测试到账\n付款人：{payer_name}\n收款人：{receiver_name}\n金额：{amount}",
+   "expected": null
+  },
+  {
+   "origin": "harvest:backend/app/tests/test_account_bot.py",
+   "text": "转账成功：\n付款人：路人A\n收款人：我的TG名\n金额：100",
+   "expected": {
+    "payer_name": "路人A",
+    "receiver_name": "我的TG名",
+    "amount": 100
+   }
+  },
+  {
+   "origin": "harvest:backend/app/tests/test_account_bot.py",
+   "text": "转账成功\nAAA 转出 100\n你心里已经有答案了 收到 100",
+   "expected": {
+    "payer_name": "AAA",
+    "receiver_name": "你心里已经有答案了",
+    "amount": 100
+   }
+  },
+  {
+   "origin": "harvest:backend/app/tests/test_account_bot.py",
+   "text": "<pre><code class=\"language-转账成功\">付款人：付款方\n付款人ID：1122\n收款人：收款方\n金额：88\n收款人ID：9988</code></pre>",
+   "expected": {
+    "payer_name": "付款方",
+    "receiver_name": "收款方",
+    "amount": 88,
+    "payer_user_id": 1122,
+    "receiver_user_id": 9988
+   }
+  },
+  {
+   "origin": "harvest:backend/app/tests/test_account_bot.py",
+   "text": "<pre><code class=\"language-扣减成功\">玩家A 扣减 100 蝌蚪\nOwner 接收 100 蝌蚪</code></pre>",
+   "expected": {
+    "payer_name": "玩家A",
+    "receiver_name": "Owner",
+    "amount": 100
+   }
+  },
+  {
+   "origin": "harvest:backend/app/tests/test_account_bot.py",
+   "text": "匿名小尾巴测试 扣减 101",
+   "expected": null
+  },
+  {
+   "origin": "harvest:backend/app/tests/test_account_bot.py",
+   "text": "转账成功\n付款人：AAA",
+   "expected": null
+  },
+  {
+   "origin": "harvest:backend/app/tests/test_account_bot.py",
+   "text": "玩家A 射出 234",
+   "expected": null
+  },
+  {
+   "origin": "harvest:backend/app/tests/test_account_bot.py",
+   "text": "uhaveanswer 接收 234",
+   "expected": null
+  },
+  {
+   "origin": "harvest:backend/app/tests/test_account_bot.py",
+   "text": "收款人ID：1682400007",
+   "expected": null
+  },
+  {
+   "origin": "harvest:backend/app/tests/test_account_bot.py",
+   "text": "该24点门票是付费娱乐模块，请对收款人：@owner的任意消息回复+100即可参与。",
+   "expected": null
+  },
+  {
+   "origin": "harvest:backend/app/tests/test_account_bot.py",
+   "text": "金额 = <code>123</code>",
+   "expected": null
+  },
+  {
+   "origin": "harvest:backend/app/tests/test_account_bot.py",
+   "text": "转账成功\n付款人：",
+   "expected": null
+  },
+  {
+   "origin": "harvest:backend/app/tests/test_account_bot.py",
+   "text": "\n付款人ID：",
+   "expected": null
+  },
+  {
+   "origin": "harvest:backend/app/tests/test_account_bot.py",
+   "text": "\n收款人：",
+   "expected": null
+  },
+  {
+   "origin": "harvest:backend/app/tests/test_account_bot.py",
+   "text": "\n金额：",
+   "expected": null
+  },
+  {
+   "origin": "harvest:backend/app/tests/test_account_bot.py",
+   "text": " 测试到账\n付款人：{payer_name}\n收款人：{receiver_name}\n金额：{amount} ",
+   "expected": null
+  },
+  {
+   "origin": "harvest:backend/app/tests/test_account_bot.py",
+   "text": "转账成功：金额：100",
+   "expected": null
+  },
+  {
+   "origin": "harvest:backend/app/tests/test_account_bot.py",
+   "text": "转账成功\nAAA 射出 100\nOwner 接收 100\n收款人ID：8875144459",
+   "expected": {
+    "payer_name": "AAA",
+    "receiver_name": "Owner",
+    "amount": 100,
+    "receiver_user_id": 8875144459
+   }
+  },
+  {
+   "origin": "harvest:backend/app/tests/test_account_bot.py",
+   "text": "转账成功\n付款人：AAA\n收款人：Owner\n金额：100",
+   "expected": {
+    "payer_name": "AAA",
+    "receiver_name": "Owner",
+    "amount": 100
+   }
+  },
+  {
+   "origin": "harvest:backend/app/tests/test_account_bot.py",
+   "text": "匿名用户 扣减 1000 蝌蚪\n管理员 接收 1000 蝌蚪",
+   "expected": {
+    "payer_name": "匿名用户",
+    "receiver_name": "管理员",
+    "amount": 1000
+   }
+  },
+  {
+   "origin": "harvest:backend/app/tests/test_account_bot.py",
+   "text": "<pre><code class=\"language-转账成功\">付款人：PayoutUser\n付款人ID：999\n收款人：Winner\n金额：123\n收款人ID：111</code></pre>",
+   "expected": {
+    "payer_name": "PayoutUser",
+    "receiver_name": "Winner",
+    "amount": 123,
+    "payer_user_id": 999,
+    "receiver_user_id": 111
+   }
+  },
+  {
+   "origin": "harvest:backend/app/tests/test_account_bot.py",
+   "text": "转账成功\n付款人：{payer_name}\n金额：{amount:.2f}\n收款人：{receiver_name}",
+   "expected": null
+  },
+  {
+   "origin": "harvest:backend/app/tests/test_account_bot.py",
+   "text": "转账成功\n付款人：{payer_name\n收款人：{receiver_name}\n金额：{amount}",
+   "expected": null
+  },
+  {
+   "origin": "harvest:backend/app/tests/test_account_bot.py",
+   "text": "玩家A 射出 7895 蝌蚪\nOwner 接收 7895 蝌蚪",
+   "expected": {
+    "payer_name": "玩家A",
+    "receiver_name": "Owner",
+    "amount": 7895
+   }
+  },
+  {
+   "origin": "harvest:backend/app/tests/test_account_bot.py",
+   "text": "转账成功\n付款人：玩家A\n收款人：Owner\n金额：10",
+   "expected": {
+    "payer_name": "玩家A",
+    "receiver_name": "Owner",
+    "amount": 10
+   }
+  },
+  {
+   "origin": "harvest:backend/app/tests/test_account_bot.py",
+   "text": "检测到 路人A 向 我的TG名 转账 100，已进入游戏流程。",
+   "expected": null
+  },
+  {
+   "origin": "harvest:backend/app/tests/test_account_bot.py",
+   "text": "<pre><code class=\"language-转账成功\">付款人：AAA\n付款人ID：111\n收款人：BBB\n金额：254\n收款人ID：222</code></pre>",
+   "expected": {
+    "payer_name": "AAA",
+    "receiver_name": "BBB",
+    "amount": 254,
+    "payer_user_id": 111,
+    "receiver_user_id": 222
+   }
+  },
+  {
+   "origin": "harvest:backend/app/tests/test_account_bot.py",
+   "text": "模拟到账\n付款人：AAA\n收款人：BBB\n金额：100",
+   "expected": {
+    "payer_name": "AAA",
+    "receiver_name": "BBB",
+    "amount": 100
+   }
+  },
+  {
+   "origin": "harvest:backend/app/tests/test_account_bot.py",
+   "text": "转账成功\nAAA 射出 88\nBBB 接收 88",
+   "expected": {
+    "payer_name": "AAA",
+    "receiver_name": "BBB",
+    "amount": 88
+   }
+  },
+  {
+   "origin": "harvest:backend/app/tests/test_account_bot.py",
+   "text": "<pre><code class=\"language-转账成功\">付款人：AAA\n付款人ID：111\n收款人：B\n金额：100\n收款人ID：222</code></pre>",
+   "expected": {
+    "payer_name": "AAA",
+    "receiver_name": "B",
+    "amount": 100,
+    "payer_user_id": 111,
+    "receiver_user_id": 222
+   }
+  },
+  {
+   "origin": "harvest:backend/app/tests/test_account_bot.py",
+   "text": "<pre><code class=\"language-转账成功\">付款人：你心里已经有答案了\n付款人ID：1682400007\n收款人：你心里没点数？\n金额：111\n收款人ID：8629045843</code></pre>",
+   "expected": {
+    "payer_name": "你心里已经有答案了",
+    "receiver_name": "你心里没点数？",
+    "amount": 111,
+    "payer_user_id": 1682400007,
+    "receiver_user_id": 8629045843
+   }
+  },
+  {
+   "origin": "harvest:backend/app/tests/test_account_bot.py",
+   "text": "转账成功\nAAA 射出 120\nBBB 接收 120",
+   "expected": {
+    "payer_name": "AAA",
+    "receiver_name": "BBB",
+    "amount": 120
+   }
+  },
+  {
+   "origin": "harvest:backend/app/tests/test_account_bot.py",
+   "text": "转账成功\nPayoutUser 射出 123\nWinner 接收 123",
+   "expected": {
+    "payer_name": "PayoutUser",
+    "receiver_name": "Winner",
+    "amount": 123
+   }
+  },
+  {
+   "origin": "harvest:backend/app/tests/test_account_bot.py",
+   "text": "<pre><code class=\"language-扣减成功\">Winner 扣减 123 蝌蚪\nPayoutUser 接收 123 蝌蚪</code></pre>",
+   "expected": {
+    "payer_name": "Winner",
+    "receiver_name": "PayoutUser",
+    "amount": 123
+   }
+  },
+  {
+   "origin": "harvest:backend/app/tests/test_account_bot.py",
+   "text": "<b>今日台账</b>\n<pre>类型  金额</pre>",
+   "expected": null
+  },
+  {
+   "origin": "harvest:backend/app/tests/test_account_bot.py",
+   "text": "## 今日台账\n\n| 类型 | 金额 |\n| --- | ---: |\n| 收入 | 12.5 |",
+   "expected": null
+  },
+  {
+   "origin": "harvest:backend/app/tests/test_account_bot.py",
+   "text": "该傻瓜玩法是付费娱乐模块，请对收款人：@uhaveanswer的任意消息回复+234即可参与。",
+   "expected": null
+  },
+  {
+   "origin": "harvest:backend/app/tests/test_account_bot.py",
+   "text": "该付费猜骰是付费娱乐模块，请对收款人：BBB的任意消息回复+100即可参与。",
+   "expected": null
+  },
+  {
+   "origin": "harvest:backend/app/tests/test_account_bot.py",
+   "text": "## 今日台账\n\n| 类型 | 金额 |",
+   "expected": null
+  },
+  {
+   "origin": "harvest:backend/app/tests/test_account_bot.py",
+   "text": "转账成功\nAAA 射出 100\nBBB 接收 100",
+   "expected": {
+    "payer_name": "AAA",
+    "receiver_name": "BBB",
+    "amount": 100
+   }
+  },
+  {
+   "origin": "harvest:backend/app/tests/test_account_bot.py",
+   "text": "转账成功\n奖金：888",
+   "expected": null
+  },
+  {
+   "origin": "harvest:backend/app/tests/test_account_bot.py",
+   "text": "转账成功\n付款人：玩家A\n收款人：Owner\n金额：100",
+   "expected": {
+    "payer_name": "玩家A",
+    "receiver_name": "Owner",
+    "amount": 100
+   }
+  },
+  {
+   "origin": "harvest:backend/app/tests/test_account_bot.py",
+   "text": "转账成功\n付款人：玩家A\n收款人：Owner\n金额：95",
+   "expected": {
+    "payer_name": "玩家A",
+    "receiver_name": "Owner",
+    "amount": 95
+   }
+  },
+  {
+   "origin": "harvest:backend/app/tests/test_account_bot.py",
+   "text": "转账成功\n付款人：路人A\n收款人：我的TG名\n金额：100",
+   "expected": {
+    "payer_name": "路人A",
+    "receiver_name": "我的TG名",
+    "amount": 100
+   }
+  },
+  {
+   "origin": "harvest:backend/app/tests/test_account_bot.py",
+   "text": "模拟到账\n付款人：{payer_name}\n收款人：{receiver_name}\n金额：{amount}",
+   "expected": null
+  },
+  {
+   "origin": "harvest:backend/app/tests/test_account_bot.py",
+   "text": "转账成功\n{payer_name} 射出 {amount}\n{receiver_name} 接收 {amount}",
+   "expected": null
+  },
+  {
+   "origin": "harvest:backend/app/tests/test_account_bot.py",
+   "text": "转账成功\n{payer_name} 射出 {amount}\n{receiver_name} 接收 {amount}\n{receiver_user_id_line}",
+   "expected": null
+  },
+  {
+   "origin": "harvest:backend/app/tests/test_account_bot.py",
+   "text": "转账成功\n付款人：A&B\n付款人ID：111\n收款人：B&B\n金额：100\n收款人ID：222",
+   "expected": {
+    "payer_name": "A&B",
+    "receiver_name": "B&B",
+    "amount": 100,
+    "payer_user_id": 111,
+    "receiver_user_id": 222
+   }
+  },
+  {
+   "origin": "harvest:backend/app/tests/test_account_bot.py",
+   "text": "转账成功\n玩家A 射出 10\nOwner 接收 10",
+   "expected": {
+    "payer_name": "玩家A",
+    "receiver_name": "Owner",
+    "amount": 10
+   }
+  },
+  {
+   "origin": "harvest:backend/app/tests/test_account_bot.py",
+   "text": "转账成功\nAAA 射出 200\nBBB 接收 200",
+   "expected": {
+    "payer_name": "AAA",
+    "receiver_name": "BBB",
+    "amount": 200
+   }
+  },
+  {
+   "origin": "harvest:backend/app/tests/test_account_bot.py",
+   "text": "转账成功\nAAA 射出 10\nBBB 接收 10",
+   "expected": {
+    "payer_name": "AAA",
+    "receiver_name": "BBB",
+    "amount": 10
+   }
+  },
+  {
+   "origin": "harvest:backend/app/tests/test_account_bot.py",
+   "text": "转账成功\nAAA 射出 100\nB 接收 100",
+   "expected": {
+    "payer_name": "AAA",
+    "receiver_name": "B",
+    "amount": 100
+   }
+  },
+  {
+   "origin": "harvest:backend/app/tests/test_account_bot.py",
+   "text": "转账成功\nAAA 射出 100\nA 接收 100",
+   "expected": {
+    "payer_name": "AAA",
+    "receiver_name": "A",
+    "amount": 100
+   }
+  },
+  {
+   "origin": "harvest:backend/app/tests/test_account_bot.py",
+   "text": "转账成功\n你心里已经有答案了 (@uhaveanswer) 射出 111\n你心里没点数？ (@uhavebnum) 接收 111\n收款人ID：8629045843",
+   "expected": {
+    "payer_name": "你心里已经有答案了 (@uhaveanswer)",
+    "receiver_name": "你心里没点数？ (@uhavebnum)",
+    "amount": 111,
+    "receiver_user_id": 8629045843
+   }
+  },
+  {
+   "origin": "harvest:backend/app/tests/test_account_bot.py",
+   "text": "转账成功\n你心里没点数？ 射出 1000\n你心里已经有答案了 接收 1000",
+   "expected": {
+    "payer_name": "你心里没点数？",
+    "receiver_name": "你心里已经有答案了",
+    "amount": 1000
+   }
+  },
+  {
+   "origin": "harvest:backend/app/tests/test_account_bot.py",
+   "text": "转账成功\n你心里没点数？ 射出 100\n你心里已经有答案了 接收 100",
+   "expected": {
+    "payer_name": "你心里没点数？",
+    "receiver_name": "你心里已经有答案了",
+    "amount": 100
+   }
+  },
+  {
+   "origin": "harvest:backend/app/tests/test_account_bot.py",
+   "text": "你心里没点数？ 射出 1000 蝌蚪\n你心里已经有答案了 接收 1000 蝌蚪",
+   "expected": {
+    "payer_name": "你心里没点数？",
+    "receiver_name": "你心里已经有答案了",
+    "amount": 1000
+   }
+  },
+  {
+   "origin": "harvest:backend/app/tests/test_account_bot.py",
+   "text": "转账成功\nAAA 射出 234\nOwner 接收 234",
+   "expected": {
+    "payer_name": "AAA",
+    "receiver_name": "Owner",
+    "amount": 234
+   }
+  },
+  {
+   "origin": "harvest:backend/app/tests/test_account_bot.py",
+   "text": "<pre><code class=\"language-扣减成功\">{payer_name} 扣减 {amount} 蝌蚪\n{receiver_name} 接收 {amount} 蝌蚪</code></pre>",
+   "expected": null
+  },
+  {
+   "origin": "harvest:backend/app/tests/test_account_bot.py",
+   "text": "转账成功\n付款人：AAA\n付款人ID：111\n收款人：Owner\n金额：234",
+   "expected": {
+    "payer_name": "AAA",
+    "receiver_name": "Owner",
+    "amount": 234,
+    "payer_user_id": 111
+   }
+  },
+  {
+   "origin": "harvest:backend/app/tests/test_account_bot.py",
+   "text": "转账成功\n付款人：AAA\n付款人ID：111\n收款人：BBB\n金额：100",
+   "expected": {
+    "payer_name": "AAA",
+    "receiver_name": "BBB",
+    "amount": 100,
+    "payer_user_id": 111
+   }
+  },
+  {
+   "origin": "harvest:backend/app/tests/test_account_bot.py",
+   "text": "转账成功\nAAA 射出 100\nA 接收 100\n收款人ID：",
+   "expected": {
+    "payer_name": "AAA",
+    "receiver_name": "A",
+    "amount": 100
+   }
+  },
+  {
+   "origin": "harvest:backend/app/tests/test_commands.py",
+   "text": "命令消息**自身**含图（caption 触发模式：用户发 \"图 + ,ai 这是什么\"）也要下载并发给 vision。\n\n    回归这一条是因为之前只看 ``replied.photo``，自己发图时反而被\n    反幻觉守卫误伤——明明带了图却被告知\"未收到图像数据\"。",
+   "expected": null
+  },
+  {
+   "origin": "harvest:backend/app/tests/test_event_bus.py",
+   "text": "付款人：Bob\n金额：100",
+   "expected": null
+  },
+  {
+   "origin": "harvest:backend/app/tests/test_inline_override.py",
+   "text": "``,ai @AnyGPT 问题`` 应清空模板里配的 model，让 build_client 用 AnyGPT.default_model。\n    \n    Bug 场景：\n    - 模板配了 provider_id=1 (Mimo), model=\"mimo-v2.5\"\n    - 用户用 inline override: @AnyGPT (provider_id=2)\n    - 旧逻辑：override_model 还是 \"mimo-v2.5\" → AnyGPT 收到错误的 model\n    - 新逻辑：override_model 应为 None → build_client 用 AnyGPT.default_model\n    ",
+   "expected": null
+  },
+  {
+   "origin": "harvest:backend/app/tests/test_installed_interaction_plugin_contracts.py",
+   "text": "你好，交互 Bot\n收到：框架消息\n触发人：AAA",
+   "expected": null
+  },
+  {
+   "origin": "harvest:backend/app/tests/test_payout_limit.py",
+   "text": "payout 限额服务测试：mock DB 限额读取 + 假 Redis，另含可选真 Redis Lua 回归。\n\n覆盖：\n  - 单笔上限：超限直接拒，且不触碰 Redis（不消费日累计）\n  - 日累计上限：累计到上限后拒，被拒的那笔不计入\n  - 0 = 不限：single_max/daily_max 都为 0 时放行且不触碰 Redis\n  - Redis / DB 故障：fail-closed 拒绝并返回可辨识原因\n  - 金额非正 / 缺账号：直接放行\n",
+   "expected": null
+  },
+  {
+   "origin": "harvest:backend/app/tests/test_ratelimit_buckets.py",
+   "text": "TokenBuckets 测试：用纯 Python fake redis 复现 Lua 脚本语义，验证 ``check_and_consume``。\n\n由于 CI 环境没有 fakeredis 也没有 Redis 实例，这里直接用一个最小内存替身重放脚本逻辑。\n重点验证：\n  - 阈值未到 → allowed\n  - 阈值到顶 → not allowed + retry_after > 0\n  - 多窗口任一超限即挡\n  - same_peer 桶按 peer_id 隔离\n  - consume=False 不扣减\n",
+   "expected": null
+  },
+  {
+   "origin": "harvest:backend/app/tests/test_system_agent_bot.py",
+   "text": "## 今日台账\n\n| 类型 | 金额 |\n| --- | ---: |\n| 收入 | **12.5** |",
+   "expected": null
+  },
+  {
+   "origin": "harvest:backend/app/tests/test_system_agent_service.py",
+   "text": "已收到，我会用 [[TP-CRED-1]] 注册，密钥是 ",
+   "expected": null
+  },
+  {
+   "origin": "harvest:backend/app/tests/test_system_agent_service.py",
+   "text": "收到 [[TP-CRED-1]]",
+   "expected": null
+  },
+  {
+   "origin": "harvest:backend/app/worker/ai_runtime.py",
+   "text": "\n\n[严格规则]\n1. 当且仅当 user 输入包含真实图像数据时，才描述图像。\n2. 如果 user 输入只有 [图片] / 📷 等占位符而无真实图像数据，必须直接回答\"未收到图像数据，无法识别\"，绝对禁止臆测、编造或推断图像内容。\n3. 同样禁止仅凭 user 提问中出现的关键词（如\"这是 X 的封面\"）就肯定它是 X。",
+   "expected": null
+  },
+  {
+   "origin": "harvest:backend/app/worker/command.py",
+   "text": "被回复消息没正文（媒体类）时返回个 emoji+标签占位字符串。\n\n    用途：\n    - UI 上 ``{quoted}`` blockquote 不至于显示空白\n    - LLM 收到 ``[原文]\\n📷 [图片]`` 时知道用户在问图，能体面地说\"我看不到图片\"\n\n    支持的媒体类型与 telethon 1.36 ``Message`` 上对应字段同名（``photo`` / ``video`` /\n    ``voice`` / ``sticker`` / ``audio`` / ``gif`` / ``document`` / ``geo`` / ``contact``\n    / ``poll`` / ``video_note``）。匹配不到任何媒体返回空串。\n    ",
+   "expected": null
+  },
+  {
+   "origin": "harvest:backend/app/worker/conversation.py",
+   "text": "与其他 Bot 进行多轮对话的工具类。\n\n插件通过 ``PluginContext.conversation(peer)`` 获取 async context manager，\n在 with 块内可以 send → get_response → click_button 循环交互。\n\n实现原理：注册一次性 NewMessage handler 监听目标 peer 的回复，\n收到后通过 asyncio.Event 通知等待方；超时或 close 时自动移除 handler。\n",
+   "expected": null
+  },
+  {
+   "origin": "harvest:backend/app/worker/plugins/base.py",
+   "text": "插件基类。\n\n    子类必须设置类属性 ``key`` / ``display_name``；可重写以下 hook：\n      - ``on_startup``：[账号 × feature] 被激活时调用一次\n      - ``on_shutdown``：禁用 / 卸载 / 热重载前调用一次\n      - ``on_message``：消息派发回调，具体接收哪些方向由 ``message_channels`` 声明\n      - ``on_message_edited``：可选的消息编辑事件回调；未重写时不会收到编辑消息\n      - ``on_command``：插件可声明的\"账号内命令\"；返回 True 表示已处理\n\n    ``message_channels`` 控制 loader 向该插件派发哪些方向的消息：\n      - ``\"incoming\"``（默认）：群/私聊中别人发的消息\n      - ``\"outgoing\"``：自己发送的消息\n      插件可设 ``{\"incoming\", \"outgoing\"}`` 同时监听两个方向。\n      loader 已按订阅方向分发；若确需在 hook 内判断原生消息方向，\n      请读取 ``event.message.out``（或裸 ``Message`` 的 ``out``），不要使用\n      Telethon 1.44 已移除的 ``event.outgoing`` 别名。\n\n    插件如要追加 TG 内命令，可在类属性 ``commands`` 里登记\n    （key 是命令名，value 是 ``async fn(client, event, args, account_id, ctx)``），\n    loader 会在 ``on_startup`` 后通过 ``register_plugin_command`` 暴露给命令分发。\n    ",
+   "expected": null
+  },
+  {
+   "origin": "harvest:backend/app/worker/plugins/base.py",
+   "text": "消息事件回调；默认 no-op。\n\n        接收的方向由 ``message_channels`` 类属性控制。\n        原生 Telethon 事件的方向字段是 ``event.message.out``；\n        ``event.outgoing`` 在 Telethon 1.44 中不存在。\n        ",
+   "expected": null
+  },
+  {
+   "origin": "harvest:backend/app/worker/plugins/loader.py",
+   "text": "收到 IPC ``reload_config`` 时调用：\n\n    - **先刷新 BUILTIN_FEATURES**：动态重扫 builtin 目录，让新增插件立即可见\n    - builtin / installed 插件都在 ``_activate`` 中按需加载，避免每次热更新导入全部实现\n    - 已实例化的 feature：刷新 ``ctx.config`` / ``ctx.rules``；若该 feature 已被禁用则 shutdown\n    - 数据库新增的 enabled feature：调 ``_activate`` 加载\n    - 平台能力切换（``source=platform_capabilities``）复用本路径刷新能力快照与插件入口\n\n    普通热更新尽量局部降级；平台能力控制面刷新失败或 generation 不一致时必须\n    向调用方抛错，让 IPC 返回失败 ACK，不能把未收敛状态报告为成功。\n    ",
+   "expected": null
+  },
+  {
+   "origin": "harvest:backend/app/worker/plugins/manifest.py",
+   "text": "插件 Manifest 数据类。\n\n每个插件目录里的 ``manifest.py`` 顶层导出 ``MANIFEST: Manifest`` 实例，\nloader 在扫描目录阶段读取这个常量来决定加载方式、显示名、版本以及（阶段 C 引入的）权限范围。\n\n字段说明：\n- ``key``：插件唯一 key（与 ``Plugin.key`` 一致；同时也是 ``feature.key``）\n- ``display_name``：用户可见名称\n- ``version``：语义化版本号；第三方插件通过 zip / 仓库升级时按此对比\n- ``author``：作者；核心兼容代码可以沿用历史默认值，第三方插件应填写真实作者或组织名\n- ``description``：一句话描述（前端\"插件管理\"列表展示）\n- ``usage``：插件必须声明的详细使用说明；插件配置页和规范警告会据此提示安装者\n- ``requires_features``：声明依赖的其它插件 key 列表（先注册了才能加载本插件）\n- ``min_telepilot_version``：声明最低 TelePilot 版本（0.107.0 起可带 beta 号）；旧 ``min_telebot_version`` 保留兼容（已弃用）\n- ``plugin_api``：Plugin API 兼容范围（0.107.0+，推荐只写在 plugin.json）\n- ``middleware`` / ``render_profile``：消息管线中间件与出站渲染声明（0.109.0+，推荐只写在 plugin.json）\n- ``config_schema``：``rule.config`` 的 JSON Schema，前端可据此生成动态表单\n- ``config_actions``：配置页动作声明，前端按声明渲染按钮，后端调插件 ``on_config_action``\n- ``category``：模块身份分类（interactive / automation / utility）\n- ``interaction_entries``：声明可由 TelePilot 调度的插件入口，既可被管理员命令触发，也可由群内关键词/交互 Bot 触发；\n  入口可声明 ``timeout_seconds``（默认 15 秒，平台上限 90 秒）放宽单次执行时限\n- ``event_subscriptions``：声明插件希望从 Event Bus 接收的 Telegram 事件\n- ``interaction_profile``：声明交互入口属于哪类玩法（如群局抢答、对战、奖池）\n- ``command_fallback``：交互入口无法直接接入时的受控回退声明\n- ``preserve_command_trigger``：是否保留原有 UserBot 命令触发\n- ``capabilities``：可信插件高风险能力声明，例如 ``telegram_native_raw``\n- ``strict_trace``：插件是否要求路由投递层常驻全链路 trace（资金类 / payout 插件建议开启）\n- ``experimental``：是否为实验性插件；前端可据此提示风险\n- ``permissions``：可信插件的能力说明（如 ``send_message`` / ``edit_message``），用于安装提示、审计和 UI 展示\n- ``allowed_hosts``：声明 ``external_http`` 能访问的外部域名白名单\n- ``http``：``ctx.http`` 的扩展策略元数据（如是否允许 direct 出口）\n",
+   "expected": null
+  },
+  {
+   "origin": "harvest:backend/app/worker/ratelimit/buckets.py",
+   "text": "检查五窗口并按需扣减。\n\n        返回 ``(allowed, retry_after_seconds, hit_window_idx)``：\n          - ``allowed=True`` 表示通过；``retry_after`` 总是 0。\n          - ``allowed=False`` 表示被某个窗口挡住，``hit_window_idx`` 为 1..5（顺序见 ``_WINDOWS``）。\n          - ``retry_after`` 是浮点秒，调用方应当至少 sleep 这么久再重试。\n        ",
+   "expected": null
+  },
+  {
+   "origin": "harvest:backend/app/worker/ratelimit/exceptions.py",
+   "text": "账号已被风控暂停（``policy=pause`` 触发或外部强制暂停）。\n\n    收到该异常表示当前 worker 不应再发起任何主动 TG 调用，应停止 / 退出循环。\n    ",
+   "expected": null
+  },
+  {
+   "origin": "harvest:backend/app/worker/runtime.py",
+   "text": "监听 ``worker_cmd:{aid}`` 频道，处理 pause/resume/stop/ping/reload/*。\n\n    内置自动重连：Redis 连接断开（如 Docker 重启、网络抖动）时，\n    等待 3s 后重新 subscribe，不会让 IPC 命令通道永久失效。\n    仅在收到 CMD_STOP（主动退出）时才真正退出循环。\n    ",
+   "expected": null
+  },
+  {
+   "origin": "harvest:backend/app/worker/runtime.py",
+   "text": "从 DB 拉本账号已启用的命令模板 + 全部 LLM provider，写入 worker-local ctx。\n\n    用作以下时机：\n    - worker 启动时一次（确保新连上 TG 就能响应 ``,模板名``）\n    - 收到 IPC ``CMD_RELOAD_COMMANDS`` 时热更新\n    - 周期 reconcile 与全局配置刷新时兜底收敛\n\n    实现细节：\n    - 避免拿原 ORM 实例（脱离 session 后属性访问会报 DetachedInstanceError），转 dict\n    - LLM provider 仍持有 ``api_key_enc``（Fernet token）；解密在调用前的 ``build_client`` 里做\n    ",
+   "expected": null
+  },
+  {
+   "origin": "harvest:backend/app/worker/supervisor.py",
+   "text": "主进程内：账号 worker 子进程的拉起 / 监控 / 重启 / 停止。\n\n被 main.py 的 lifespan 调用：\n  - startup:  ``await start_supervisor()``\n  - shutdown: ``await stop_all_workers()``\n\n接收 ``worker_global`` 上的 ``\"start_worker\"`` 指令（A Agent 在登录完成时发）。\n进程崩溃 → 指数退避重启（5/10/20/60/300s），连续 5 次失败置 ``status='dead'``。\n\n主进程同时在这里**消费** Redis stream（runtime_log / ratelimit_event）落库。\n（也可以拆到独立模块；此处合并，便于一个 supervisor 启动协程管全部。）\n\n⚠ 子进程通过 ``_MP_CTX.Process`` 拉起，``_MP_CTX`` 固定为 spawn context（不是\n默认的 mp.Process / Linux fork），见模块内 ``_MP_CTX`` 注释解释为什么不能 fork。\n\n⚠ 关停保护：注册 ``atexit`` 与 ``SIGTERM/SIGINT`` 处理，确保即使 lifespan 来不及\n跑（被 ``kill -9 uvicorn`` 等暴力中断），也尽量先把所有 worker 子进程 terminate\n掉，避免遗留同 session 的孤儿 worker（多实例 worker 会争抢同一个 TG client 事件）。\n\n⚠ 启动孤儿清理：``kill -9 uvicorn`` 时 atexit / signal handler 都不会跑，子进程\n就成了 PPID=1 的孤儿继续连着 TG。下次启动时多个 worker 抢同一个账号事件会写出\n互相覆盖的回答（典型症状：\"新 provider 后第 1-2 次能找到，第 3 次又找不到\"）。\n所以 ``start_supervisor`` 现在会扫描 PID 文件目录，把上次启动留下的、命令行能\n对上号的 worker 进程显式 SIGTERM 掉，再起新的。\n",
+   "expected": null
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：路人A\n收款人：我的TG名\n金额：0\n</code></pre>",
+   "expected": {
+    "payer_name": "路人A",
+    "receiver_name": "我的TG名",
+    "amount": 0
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：路人A\n付款人ID：1122\n收款人：我的TG名\n金额：0\n收款人ID：9988</code></pre>",
+   "expected": {
+    "payer_name": "路人A",
+    "receiver_name": "我的TG名",
+    "amount": 0,
+    "payer_user_id": 1122,
+    "receiver_user_id": 9988
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：路人A\n付款人ID：5843467471\n收款人：我的TG名\n金额：0\n</code></pre>",
+   "expected": {
+    "payer_name": "路人A",
+    "receiver_name": "我的TG名",
+    "amount": 0,
+    "payer_user_id": 5843467471
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：路人A\n收款人：我的TG名\n金额：0\n收款人ID：8875144459</code></pre>",
+   "expected": {
+    "payer_name": "路人A",
+    "receiver_name": "我的TG名",
+    "amount": 0,
+    "receiver_user_id": 8875144459
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：路人A\n收款人：我的TG名\n金额：1\n</code></pre>",
+   "expected": {
+    "payer_name": "路人A",
+    "receiver_name": "我的TG名",
+    "amount": 1
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：路人A\n付款人ID：1122\n收款人：我的TG名\n金额：1\n收款人ID：9988</code></pre>",
+   "expected": {
+    "payer_name": "路人A",
+    "receiver_name": "我的TG名",
+    "amount": 1,
+    "payer_user_id": 1122,
+    "receiver_user_id": 9988
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：路人A\n付款人ID：5843467471\n收款人：我的TG名\n金额：1\n</code></pre>",
+   "expected": {
+    "payer_name": "路人A",
+    "receiver_name": "我的TG名",
+    "amount": 1,
+    "payer_user_id": 5843467471
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：路人A\n收款人：我的TG名\n金额：1\n收款人ID：8875144459</code></pre>",
+   "expected": {
+    "payer_name": "路人A",
+    "receiver_name": "我的TG名",
+    "amount": 1,
+    "receiver_user_id": 8875144459
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：路人A\n收款人：我的TG名\n金额：88\n</code></pre>",
+   "expected": {
+    "payer_name": "路人A",
+    "receiver_name": "我的TG名",
+    "amount": 88
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：路人A\n付款人ID：1122\n收款人：我的TG名\n金额：88\n收款人ID：9988</code></pre>",
+   "expected": {
+    "payer_name": "路人A",
+    "receiver_name": "我的TG名",
+    "amount": 88,
+    "payer_user_id": 1122,
+    "receiver_user_id": 9988
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：路人A\n付款人ID：5843467471\n收款人：我的TG名\n金额：88\n</code></pre>",
+   "expected": {
+    "payer_name": "路人A",
+    "receiver_name": "我的TG名",
+    "amount": 88,
+    "payer_user_id": 5843467471
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：路人A\n收款人：我的TG名\n金额：88\n收款人ID：8875144459</code></pre>",
+   "expected": {
+    "payer_name": "路人A",
+    "receiver_name": "我的TG名",
+    "amount": 88,
+    "receiver_user_id": 8875144459
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：路人A\n收款人：我的TG名\n金额：100\n</code></pre>",
+   "expected": {
+    "payer_name": "路人A",
+    "receiver_name": "我的TG名",
+    "amount": 100
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：路人A\n付款人ID：1122\n收款人：我的TG名\n金额：100\n收款人ID：9988</code></pre>",
+   "expected": {
+    "payer_name": "路人A",
+    "receiver_name": "我的TG名",
+    "amount": 100,
+    "payer_user_id": 1122,
+    "receiver_user_id": 9988
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：路人A\n付款人ID：5843467471\n收款人：我的TG名\n金额：100\n</code></pre>",
+   "expected": {
+    "payer_name": "路人A",
+    "receiver_name": "我的TG名",
+    "amount": 100,
+    "payer_user_id": 5843467471
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：路人A\n收款人：我的TG名\n金额：100\n收款人ID：8875144459</code></pre>",
+   "expected": {
+    "payer_name": "路人A",
+    "receiver_name": "我的TG名",
+    "amount": 100,
+    "receiver_user_id": 8875144459
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：路人A\n收款人：我的TG名\n金额：1000\n</code></pre>",
+   "expected": {
+    "payer_name": "路人A",
+    "receiver_name": "我的TG名",
+    "amount": 1000
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：路人A\n付款人ID：1122\n收款人：我的TG名\n金额：1000\n收款人ID：9988</code></pre>",
+   "expected": {
+    "payer_name": "路人A",
+    "receiver_name": "我的TG名",
+    "amount": 1000,
+    "payer_user_id": 1122,
+    "receiver_user_id": 9988
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：路人A\n付款人ID：5843467471\n收款人：我的TG名\n金额：1000\n</code></pre>",
+   "expected": {
+    "payer_name": "路人A",
+    "receiver_name": "我的TG名",
+    "amount": 1000,
+    "payer_user_id": 5843467471
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：路人A\n收款人：我的TG名\n金额：1000\n收款人ID：8875144459</code></pre>",
+   "expected": {
+    "payer_name": "路人A",
+    "receiver_name": "我的TG名",
+    "amount": 1000,
+    "receiver_user_id": 8875144459
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：路人A\n收款人：我的TG名\n金额：999999999\n</code></pre>",
+   "expected": {
+    "payer_name": "路人A",
+    "receiver_name": "我的TG名",
+    "amount": 999999999
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：路人A\n付款人ID：1122\n收款人：我的TG名\n金额：999999999\n收款人ID：9988</code></pre>",
+   "expected": {
+    "payer_name": "路人A",
+    "receiver_name": "我的TG名",
+    "amount": 999999999,
+    "payer_user_id": 1122,
+    "receiver_user_id": 9988
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：路人A\n付款人ID：5843467471\n收款人：我的TG名\n金额：999999999\n</code></pre>",
+   "expected": {
+    "payer_name": "路人A",
+    "receiver_name": "我的TG名",
+    "amount": 999999999,
+    "payer_user_id": 5843467471
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：路人A\n收款人：我的TG名\n金额：999999999\n收款人ID：8875144459</code></pre>",
+   "expected": {
+    "payer_name": "路人A",
+    "receiver_name": "我的TG名",
+    "amount": 999999999,
+    "receiver_user_id": 8875144459
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：付款方\n收款人：收款方\n金额：0\n</code></pre>",
+   "expected": {
+    "payer_name": "付款方",
+    "receiver_name": "收款方",
+    "amount": 0
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：付款方\n付款人ID：1122\n收款人：收款方\n金额：0\n收款人ID：9988</code></pre>",
+   "expected": {
+    "payer_name": "付款方",
+    "receiver_name": "收款方",
+    "amount": 0,
+    "payer_user_id": 1122,
+    "receiver_user_id": 9988
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：付款方\n付款人ID：5843467471\n收款人：收款方\n金额：0\n</code></pre>",
+   "expected": {
+    "payer_name": "付款方",
+    "receiver_name": "收款方",
+    "amount": 0,
+    "payer_user_id": 5843467471
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：付款方\n收款人：收款方\n金额：0\n收款人ID：8875144459</code></pre>",
+   "expected": {
+    "payer_name": "付款方",
+    "receiver_name": "收款方",
+    "amount": 0,
+    "receiver_user_id": 8875144459
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：付款方\n收款人：收款方\n金额：1\n</code></pre>",
+   "expected": {
+    "payer_name": "付款方",
+    "receiver_name": "收款方",
+    "amount": 1
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：付款方\n付款人ID：1122\n收款人：收款方\n金额：1\n收款人ID：9988</code></pre>",
+   "expected": {
+    "payer_name": "付款方",
+    "receiver_name": "收款方",
+    "amount": 1,
+    "payer_user_id": 1122,
+    "receiver_user_id": 9988
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：付款方\n付款人ID：5843467471\n收款人：收款方\n金额：1\n</code></pre>",
+   "expected": {
+    "payer_name": "付款方",
+    "receiver_name": "收款方",
+    "amount": 1,
+    "payer_user_id": 5843467471
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：付款方\n收款人：收款方\n金额：1\n收款人ID：8875144459</code></pre>",
+   "expected": {
+    "payer_name": "付款方",
+    "receiver_name": "收款方",
+    "amount": 1,
+    "receiver_user_id": 8875144459
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：付款方\n收款人：收款方\n金额：88\n</code></pre>",
+   "expected": {
+    "payer_name": "付款方",
+    "receiver_name": "收款方",
+    "amount": 88
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：付款方\n付款人ID：5843467471\n收款人：收款方\n金额：88\n</code></pre>",
+   "expected": {
+    "payer_name": "付款方",
+    "receiver_name": "收款方",
+    "amount": 88,
+    "payer_user_id": 5843467471
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：付款方\n收款人：收款方\n金额：88\n收款人ID：8875144459</code></pre>",
+   "expected": {
+    "payer_name": "付款方",
+    "receiver_name": "收款方",
+    "amount": 88,
+    "receiver_user_id": 8875144459
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：付款方\n收款人：收款方\n金额：100\n</code></pre>",
+   "expected": {
+    "payer_name": "付款方",
+    "receiver_name": "收款方",
+    "amount": 100
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：付款方\n付款人ID：1122\n收款人：收款方\n金额：100\n收款人ID：9988</code></pre>",
+   "expected": {
+    "payer_name": "付款方",
+    "receiver_name": "收款方",
+    "amount": 100,
+    "payer_user_id": 1122,
+    "receiver_user_id": 9988
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：付款方\n付款人ID：5843467471\n收款人：收款方\n金额：100\n</code></pre>",
+   "expected": {
+    "payer_name": "付款方",
+    "receiver_name": "收款方",
+    "amount": 100,
+    "payer_user_id": 5843467471
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：付款方\n收款人：收款方\n金额：100\n收款人ID：8875144459</code></pre>",
+   "expected": {
+    "payer_name": "付款方",
+    "receiver_name": "收款方",
+    "amount": 100,
+    "receiver_user_id": 8875144459
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：付款方\n收款人：收款方\n金额：1000\n</code></pre>",
+   "expected": {
+    "payer_name": "付款方",
+    "receiver_name": "收款方",
+    "amount": 1000
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：付款方\n付款人ID：1122\n收款人：收款方\n金额：1000\n收款人ID：9988</code></pre>",
+   "expected": {
+    "payer_name": "付款方",
+    "receiver_name": "收款方",
+    "amount": 1000,
+    "payer_user_id": 1122,
+    "receiver_user_id": 9988
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：付款方\n付款人ID：5843467471\n收款人：收款方\n金额：1000\n</code></pre>",
+   "expected": {
+    "payer_name": "付款方",
+    "receiver_name": "收款方",
+    "amount": 1000,
+    "payer_user_id": 5843467471
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：付款方\n收款人：收款方\n金额：1000\n收款人ID：8875144459</code></pre>",
+   "expected": {
+    "payer_name": "付款方",
+    "receiver_name": "收款方",
+    "amount": 1000,
+    "receiver_user_id": 8875144459
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：付款方\n收款人：收款方\n金额：999999999\n</code></pre>",
+   "expected": {
+    "payer_name": "付款方",
+    "receiver_name": "收款方",
+    "amount": 999999999
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：付款方\n付款人ID：1122\n收款人：收款方\n金额：999999999\n收款人ID：9988</code></pre>",
+   "expected": {
+    "payer_name": "付款方",
+    "receiver_name": "收款方",
+    "amount": 999999999,
+    "payer_user_id": 1122,
+    "receiver_user_id": 9988
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：付款方\n付款人ID：5843467471\n收款人：收款方\n金额：999999999\n</code></pre>",
+   "expected": {
+    "payer_name": "付款方",
+    "receiver_name": "收款方",
+    "amount": 999999999,
+    "payer_user_id": 5843467471
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：付款方\n收款人：收款方\n金额：999999999\n收款人ID：8875144459</code></pre>",
+   "expected": {
+    "payer_name": "付款方",
+    "receiver_name": "收款方",
+    "amount": 999999999,
+    "receiver_user_id": 8875144459
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：ㅤㅤ\n收款人：Owner\n金额：0\n</code></pre>",
+   "expected": {
+    "payer_name": "ㅤㅤ",
+    "receiver_name": "Owner",
+    "amount": 0
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：ㅤㅤ\n付款人ID：1122\n收款人：Owner\n金额：0\n收款人ID：9988</code></pre>",
+   "expected": {
+    "payer_name": "ㅤㅤ",
+    "receiver_name": "Owner",
+    "amount": 0,
+    "payer_user_id": 1122,
+    "receiver_user_id": 9988
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：ㅤㅤ\n付款人ID：5843467471\n收款人：Owner\n金额：0\n</code></pre>",
+   "expected": {
+    "payer_name": "ㅤㅤ",
+    "receiver_name": "Owner",
+    "amount": 0,
+    "payer_user_id": 5843467471
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：ㅤㅤ\n收款人：Owner\n金额：0\n收款人ID：8875144459</code></pre>",
+   "expected": {
+    "payer_name": "ㅤㅤ",
+    "receiver_name": "Owner",
+    "amount": 0,
+    "receiver_user_id": 8875144459
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：ㅤㅤ\n收款人：Owner\n金额：1\n</code></pre>",
+   "expected": {
+    "payer_name": "ㅤㅤ",
+    "receiver_name": "Owner",
+    "amount": 1
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：ㅤㅤ\n付款人ID：1122\n收款人：Owner\n金额：1\n收款人ID：9988</code></pre>",
+   "expected": {
+    "payer_name": "ㅤㅤ",
+    "receiver_name": "Owner",
+    "amount": 1,
+    "payer_user_id": 1122,
+    "receiver_user_id": 9988
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：ㅤㅤ\n付款人ID：5843467471\n收款人：Owner\n金额：1\n</code></pre>",
+   "expected": {
+    "payer_name": "ㅤㅤ",
+    "receiver_name": "Owner",
+    "amount": 1,
+    "payer_user_id": 5843467471
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：ㅤㅤ\n收款人：Owner\n金额：1\n收款人ID：8875144459</code></pre>",
+   "expected": {
+    "payer_name": "ㅤㅤ",
+    "receiver_name": "Owner",
+    "amount": 1,
+    "receiver_user_id": 8875144459
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：ㅤㅤ\n收款人：Owner\n金额：88\n</code></pre>",
+   "expected": {
+    "payer_name": "ㅤㅤ",
+    "receiver_name": "Owner",
+    "amount": 88
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：ㅤㅤ\n付款人ID：1122\n收款人：Owner\n金额：88\n收款人ID：9988</code></pre>",
+   "expected": {
+    "payer_name": "ㅤㅤ",
+    "receiver_name": "Owner",
+    "amount": 88,
+    "payer_user_id": 1122,
+    "receiver_user_id": 9988
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：ㅤㅤ\n付款人ID：5843467471\n收款人：Owner\n金额：88\n</code></pre>",
+   "expected": {
+    "payer_name": "ㅤㅤ",
+    "receiver_name": "Owner",
+    "amount": 88,
+    "payer_user_id": 5843467471
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：ㅤㅤ\n收款人：Owner\n金额：88\n收款人ID：8875144459</code></pre>",
+   "expected": {
+    "payer_name": "ㅤㅤ",
+    "receiver_name": "Owner",
+    "amount": 88,
+    "receiver_user_id": 8875144459
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：ㅤㅤ\n收款人：Owner\n金额：100\n</code></pre>",
+   "expected": {
+    "payer_name": "ㅤㅤ",
+    "receiver_name": "Owner",
+    "amount": 100
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：ㅤㅤ\n付款人ID：1122\n收款人：Owner\n金额：100\n收款人ID：9988</code></pre>",
+   "expected": {
+    "payer_name": "ㅤㅤ",
+    "receiver_name": "Owner",
+    "amount": 100,
+    "payer_user_id": 1122,
+    "receiver_user_id": 9988
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：ㅤㅤ\n付款人ID：5843467471\n收款人：Owner\n金额：100\n</code></pre>",
+   "expected": {
+    "payer_name": "ㅤㅤ",
+    "receiver_name": "Owner",
+    "amount": 100,
+    "payer_user_id": 5843467471
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：ㅤㅤ\n收款人：Owner\n金额：100\n收款人ID：8875144459</code></pre>",
+   "expected": {
+    "payer_name": "ㅤㅤ",
+    "receiver_name": "Owner",
+    "amount": 100,
+    "receiver_user_id": 8875144459
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：ㅤㅤ\n收款人：Owner\n金额：1000\n</code></pre>",
+   "expected": {
+    "payer_name": "ㅤㅤ",
+    "receiver_name": "Owner",
+    "amount": 1000
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：ㅤㅤ\n付款人ID：1122\n收款人：Owner\n金额：1000\n收款人ID：9988</code></pre>",
+   "expected": {
+    "payer_name": "ㅤㅤ",
+    "receiver_name": "Owner",
+    "amount": 1000,
+    "payer_user_id": 1122,
+    "receiver_user_id": 9988
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：ㅤㅤ\n付款人ID：5843467471\n收款人：Owner\n金额：1000\n</code></pre>",
+   "expected": {
+    "payer_name": "ㅤㅤ",
+    "receiver_name": "Owner",
+    "amount": 1000,
+    "payer_user_id": 5843467471
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：ㅤㅤ\n收款人：Owner\n金额：1000\n收款人ID：8875144459</code></pre>",
+   "expected": {
+    "payer_name": "ㅤㅤ",
+    "receiver_name": "Owner",
+    "amount": 1000,
+    "receiver_user_id": 8875144459
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：ㅤㅤ\n收款人：Owner\n金额：999999999\n</code></pre>",
+   "expected": {
+    "payer_name": "ㅤㅤ",
+    "receiver_name": "Owner",
+    "amount": 999999999
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：ㅤㅤ\n付款人ID：1122\n收款人：Owner\n金额：999999999\n收款人ID：9988</code></pre>",
+   "expected": {
+    "payer_name": "ㅤㅤ",
+    "receiver_name": "Owner",
+    "amount": 999999999,
+    "payer_user_id": 1122,
+    "receiver_user_id": 9988
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：ㅤㅤ\n付款人ID：5843467471\n收款人：Owner\n金额：999999999\n</code></pre>",
+   "expected": {
+    "payer_name": "ㅤㅤ",
+    "receiver_name": "Owner",
+    "amount": 999999999,
+    "payer_user_id": 5843467471
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：ㅤㅤ\n收款人：Owner\n金额：999999999\n收款人ID：8875144459</code></pre>",
+   "expected": {
+    "payer_name": "ㅤㅤ",
+    "receiver_name": "Owner",
+    "amount": 999999999,
+    "receiver_user_id": 8875144459
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：匿名用户\n收款人：管理员\n金额：0\n</code></pre>",
+   "expected": {
+    "payer_name": "匿名用户",
+    "receiver_name": "管理员",
+    "amount": 0
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：匿名用户\n付款人ID：1122\n收款人：管理员\n金额：0\n收款人ID：9988</code></pre>",
+   "expected": {
+    "payer_name": "匿名用户",
+    "receiver_name": "管理员",
+    "amount": 0,
+    "payer_user_id": 1122,
+    "receiver_user_id": 9988
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：匿名用户\n付款人ID：5843467471\n收款人：管理员\n金额：0\n</code></pre>",
+   "expected": {
+    "payer_name": "匿名用户",
+    "receiver_name": "管理员",
+    "amount": 0,
+    "payer_user_id": 5843467471
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：匿名用户\n收款人：管理员\n金额：0\n收款人ID：8875144459</code></pre>",
+   "expected": {
+    "payer_name": "匿名用户",
+    "receiver_name": "管理员",
+    "amount": 0,
+    "receiver_user_id": 8875144459
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：匿名用户\n收款人：管理员\n金额：1\n</code></pre>",
+   "expected": {
+    "payer_name": "匿名用户",
+    "receiver_name": "管理员",
+    "amount": 1
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：匿名用户\n付款人ID：1122\n收款人：管理员\n金额：1\n收款人ID：9988</code></pre>",
+   "expected": {
+    "payer_name": "匿名用户",
+    "receiver_name": "管理员",
+    "amount": 1,
+    "payer_user_id": 1122,
+    "receiver_user_id": 9988
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：匿名用户\n付款人ID：5843467471\n收款人：管理员\n金额：1\n</code></pre>",
+   "expected": {
+    "payer_name": "匿名用户",
+    "receiver_name": "管理员",
+    "amount": 1,
+    "payer_user_id": 5843467471
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：匿名用户\n收款人：管理员\n金额：1\n收款人ID：8875144459</code></pre>",
+   "expected": {
+    "payer_name": "匿名用户",
+    "receiver_name": "管理员",
+    "amount": 1,
+    "receiver_user_id": 8875144459
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：匿名用户\n收款人：管理员\n金额：88\n</code></pre>",
+   "expected": {
+    "payer_name": "匿名用户",
+    "receiver_name": "管理员",
+    "amount": 88
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：匿名用户\n付款人ID：1122\n收款人：管理员\n金额：88\n收款人ID：9988</code></pre>",
+   "expected": {
+    "payer_name": "匿名用户",
+    "receiver_name": "管理员",
+    "amount": 88,
+    "payer_user_id": 1122,
+    "receiver_user_id": 9988
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：匿名用户\n付款人ID：5843467471\n收款人：管理员\n金额：88\n</code></pre>",
+   "expected": {
+    "payer_name": "匿名用户",
+    "receiver_name": "管理员",
+    "amount": 88,
+    "payer_user_id": 5843467471
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：匿名用户\n收款人：管理员\n金额：88\n收款人ID：8875144459</code></pre>",
+   "expected": {
+    "payer_name": "匿名用户",
+    "receiver_name": "管理员",
+    "amount": 88,
+    "receiver_user_id": 8875144459
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：匿名用户\n收款人：管理员\n金额：100\n</code></pre>",
+   "expected": {
+    "payer_name": "匿名用户",
+    "receiver_name": "管理员",
+    "amount": 100
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：匿名用户\n付款人ID：1122\n收款人：管理员\n金额：100\n收款人ID：9988</code></pre>",
+   "expected": {
+    "payer_name": "匿名用户",
+    "receiver_name": "管理员",
+    "amount": 100,
+    "payer_user_id": 1122,
+    "receiver_user_id": 9988
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：匿名用户\n付款人ID：5843467471\n收款人：管理员\n金额：100\n</code></pre>",
+   "expected": {
+    "payer_name": "匿名用户",
+    "receiver_name": "管理员",
+    "amount": 100,
+    "payer_user_id": 5843467471
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：匿名用户\n收款人：管理员\n金额：100\n收款人ID：8875144459</code></pre>",
+   "expected": {
+    "payer_name": "匿名用户",
+    "receiver_name": "管理员",
+    "amount": 100,
+    "receiver_user_id": 8875144459
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：匿名用户\n收款人：管理员\n金额：1000\n</code></pre>",
+   "expected": {
+    "payer_name": "匿名用户",
+    "receiver_name": "管理员",
+    "amount": 1000
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：匿名用户\n付款人ID：1122\n收款人：管理员\n金额：1000\n收款人ID：9988</code></pre>",
+   "expected": {
+    "payer_name": "匿名用户",
+    "receiver_name": "管理员",
+    "amount": 1000,
+    "payer_user_id": 1122,
+    "receiver_user_id": 9988
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：匿名用户\n付款人ID：5843467471\n收款人：管理员\n金额：1000\n</code></pre>",
+   "expected": {
+    "payer_name": "匿名用户",
+    "receiver_name": "管理员",
+    "amount": 1000,
+    "payer_user_id": 5843467471
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：匿名用户\n收款人：管理员\n金额：1000\n收款人ID：8875144459</code></pre>",
+   "expected": {
+    "payer_name": "匿名用户",
+    "receiver_name": "管理员",
+    "amount": 1000,
+    "receiver_user_id": 8875144459
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：匿名用户\n收款人：管理员\n金额：999999999\n</code></pre>",
+   "expected": {
+    "payer_name": "匿名用户",
+    "receiver_name": "管理员",
+    "amount": 999999999
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：匿名用户\n付款人ID：1122\n收款人：管理员\n金额：999999999\n收款人ID：9988</code></pre>",
+   "expected": {
+    "payer_name": "匿名用户",
+    "receiver_name": "管理员",
+    "amount": 999999999,
+    "payer_user_id": 1122,
+    "receiver_user_id": 9988
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：匿名用户\n付款人ID：5843467471\n收款人：管理员\n金额：999999999\n</code></pre>",
+   "expected": {
+    "payer_name": "匿名用户",
+    "receiver_name": "管理员",
+    "amount": 999999999,
+    "payer_user_id": 5843467471
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：匿名用户\n收款人：管理员\n金额：999999999\n收款人ID：8875144459</code></pre>",
+   "expected": {
+    "payer_name": "匿名用户",
+    "receiver_name": "管理员",
+    "amount": 999999999,
+    "receiver_user_id": 8875144459
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：A B C\n收款人：x_y-z\n金额：0\n</code></pre>",
+   "expected": {
+    "payer_name": "A B C",
+    "receiver_name": "x_y-z",
+    "amount": 0
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：A B C\n付款人ID：1122\n收款人：x_y-z\n金额：0\n收款人ID：9988</code></pre>",
+   "expected": {
+    "payer_name": "A B C",
+    "receiver_name": "x_y-z",
+    "amount": 0,
+    "payer_user_id": 1122,
+    "receiver_user_id": 9988
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：A B C\n付款人ID：5843467471\n收款人：x_y-z\n金额：0\n</code></pre>",
+   "expected": {
+    "payer_name": "A B C",
+    "receiver_name": "x_y-z",
+    "amount": 0,
+    "payer_user_id": 5843467471
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：A B C\n收款人：x_y-z\n金额：0\n收款人ID：8875144459</code></pre>",
+   "expected": {
+    "payer_name": "A B C",
+    "receiver_name": "x_y-z",
+    "amount": 0,
+    "receiver_user_id": 8875144459
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：A B C\n收款人：x_y-z\n金额：1\n</code></pre>",
+   "expected": {
+    "payer_name": "A B C",
+    "receiver_name": "x_y-z",
+    "amount": 1
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：A B C\n付款人ID：1122\n收款人：x_y-z\n金额：1\n收款人ID：9988</code></pre>",
+   "expected": {
+    "payer_name": "A B C",
+    "receiver_name": "x_y-z",
+    "amount": 1,
+    "payer_user_id": 1122,
+    "receiver_user_id": 9988
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：A B C\n付款人ID：5843467471\n收款人：x_y-z\n金额：1\n</code></pre>",
+   "expected": {
+    "payer_name": "A B C",
+    "receiver_name": "x_y-z",
+    "amount": 1,
+    "payer_user_id": 5843467471
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：A B C\n收款人：x_y-z\n金额：1\n收款人ID：8875144459</code></pre>",
+   "expected": {
+    "payer_name": "A B C",
+    "receiver_name": "x_y-z",
+    "amount": 1,
+    "receiver_user_id": 8875144459
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：A B C\n收款人：x_y-z\n金额：88\n</code></pre>",
+   "expected": {
+    "payer_name": "A B C",
+    "receiver_name": "x_y-z",
+    "amount": 88
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：A B C\n付款人ID：1122\n收款人：x_y-z\n金额：88\n收款人ID：9988</code></pre>",
+   "expected": {
+    "payer_name": "A B C",
+    "receiver_name": "x_y-z",
+    "amount": 88,
+    "payer_user_id": 1122,
+    "receiver_user_id": 9988
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：A B C\n付款人ID：5843467471\n收款人：x_y-z\n金额：88\n</code></pre>",
+   "expected": {
+    "payer_name": "A B C",
+    "receiver_name": "x_y-z",
+    "amount": 88,
+    "payer_user_id": 5843467471
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：A B C\n收款人：x_y-z\n金额：88\n收款人ID：8875144459</code></pre>",
+   "expected": {
+    "payer_name": "A B C",
+    "receiver_name": "x_y-z",
+    "amount": 88,
+    "receiver_user_id": 8875144459
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：A B C\n收款人：x_y-z\n金额：100\n</code></pre>",
+   "expected": {
+    "payer_name": "A B C",
+    "receiver_name": "x_y-z",
+    "amount": 100
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：A B C\n付款人ID：1122\n收款人：x_y-z\n金额：100\n收款人ID：9988</code></pre>",
+   "expected": {
+    "payer_name": "A B C",
+    "receiver_name": "x_y-z",
+    "amount": 100,
+    "payer_user_id": 1122,
+    "receiver_user_id": 9988
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：A B C\n付款人ID：5843467471\n收款人：x_y-z\n金额：100\n</code></pre>",
+   "expected": {
+    "payer_name": "A B C",
+    "receiver_name": "x_y-z",
+    "amount": 100,
+    "payer_user_id": 5843467471
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：A B C\n收款人：x_y-z\n金额：100\n收款人ID：8875144459</code></pre>",
+   "expected": {
+    "payer_name": "A B C",
+    "receiver_name": "x_y-z",
+    "amount": 100,
+    "receiver_user_id": 8875144459
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：A B C\n收款人：x_y-z\n金额：1000\n</code></pre>",
+   "expected": {
+    "payer_name": "A B C",
+    "receiver_name": "x_y-z",
+    "amount": 1000
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：A B C\n付款人ID：1122\n收款人：x_y-z\n金额：1000\n收款人ID：9988</code></pre>",
+   "expected": {
+    "payer_name": "A B C",
+    "receiver_name": "x_y-z",
+    "amount": 1000,
+    "payer_user_id": 1122,
+    "receiver_user_id": 9988
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：A B C\n付款人ID：5843467471\n收款人：x_y-z\n金额：1000\n</code></pre>",
+   "expected": {
+    "payer_name": "A B C",
+    "receiver_name": "x_y-z",
+    "amount": 1000,
+    "payer_user_id": 5843467471
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：A B C\n收款人：x_y-z\n金额：1000\n收款人ID：8875144459</code></pre>",
+   "expected": {
+    "payer_name": "A B C",
+    "receiver_name": "x_y-z",
+    "amount": 1000,
+    "receiver_user_id": 8875144459
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：A B C\n收款人：x_y-z\n金额：999999999\n</code></pre>",
+   "expected": {
+    "payer_name": "A B C",
+    "receiver_name": "x_y-z",
+    "amount": 999999999
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：A B C\n付款人ID：1122\n收款人：x_y-z\n金额：999999999\n收款人ID：9988</code></pre>",
+   "expected": {
+    "payer_name": "A B C",
+    "receiver_name": "x_y-z",
+    "amount": 999999999,
+    "payer_user_id": 1122,
+    "receiver_user_id": 9988
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：A B C\n付款人ID：5843467471\n收款人：x_y-z\n金额：999999999\n</code></pre>",
+   "expected": {
+    "payer_name": "A B C",
+    "receiver_name": "x_y-z",
+    "amount": 999999999,
+    "payer_user_id": 5843467471
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：A B C\n收款人：x_y-z\n金额：999999999\n收款人ID：8875144459</code></pre>",
+   "expected": {
+    "payer_name": "A B C",
+    "receiver_name": "x_y-z",
+    "amount": 999999999,
+    "receiver_user_id": 8875144459
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：<b>粗体</b>\n收款人：&amp;\n金额：0\n</code></pre>",
+   "expected": {
+    "payer_name": "粗体",
+    "receiver_name": "&amp;",
+    "amount": 0
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：<b>粗体</b>\n付款人ID：1122\n收款人：&amp;\n金额：0\n收款人ID：9988</code></pre>",
+   "expected": {
+    "payer_name": "粗体",
+    "receiver_name": "&amp;",
+    "amount": 0,
+    "payer_user_id": 1122,
+    "receiver_user_id": 9988
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：<b>粗体</b>\n付款人ID：5843467471\n收款人：&amp;\n金额：0\n</code></pre>",
+   "expected": {
+    "payer_name": "粗体",
+    "receiver_name": "&amp;",
+    "amount": 0,
+    "payer_user_id": 5843467471
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：<b>粗体</b>\n收款人：&amp;\n金额：0\n收款人ID：8875144459</code></pre>",
+   "expected": {
+    "payer_name": "粗体",
+    "receiver_name": "&amp;",
+    "amount": 0,
+    "receiver_user_id": 8875144459
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：<b>粗体</b>\n收款人：&amp;\n金额：1\n</code></pre>",
+   "expected": {
+    "payer_name": "粗体",
+    "receiver_name": "&amp;",
+    "amount": 1
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：<b>粗体</b>\n付款人ID：1122\n收款人：&amp;\n金额：1\n收款人ID：9988</code></pre>",
+   "expected": {
+    "payer_name": "粗体",
+    "receiver_name": "&amp;",
+    "amount": 1,
+    "payer_user_id": 1122,
+    "receiver_user_id": 9988
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：<b>粗体</b>\n付款人ID：5843467471\n收款人：&amp;\n金额：1\n</code></pre>",
+   "expected": {
+    "payer_name": "粗体",
+    "receiver_name": "&amp;",
+    "amount": 1,
+    "payer_user_id": 5843467471
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：<b>粗体</b>\n收款人：&amp;\n金额：1\n收款人ID：8875144459</code></pre>",
+   "expected": {
+    "payer_name": "粗体",
+    "receiver_name": "&amp;",
+    "amount": 1,
+    "receiver_user_id": 8875144459
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：<b>粗体</b>\n收款人：&amp;\n金额：88\n</code></pre>",
+   "expected": {
+    "payer_name": "粗体",
+    "receiver_name": "&amp;",
+    "amount": 88
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：<b>粗体</b>\n付款人ID：1122\n收款人：&amp;\n金额：88\n收款人ID：9988</code></pre>",
+   "expected": {
+    "payer_name": "粗体",
+    "receiver_name": "&amp;",
+    "amount": 88,
+    "payer_user_id": 1122,
+    "receiver_user_id": 9988
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：<b>粗体</b>\n付款人ID：5843467471\n收款人：&amp;\n金额：88\n</code></pre>",
+   "expected": {
+    "payer_name": "粗体",
+    "receiver_name": "&amp;",
+    "amount": 88,
+    "payer_user_id": 5843467471
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：<b>粗体</b>\n收款人：&amp;\n金额：88\n收款人ID：8875144459</code></pre>",
+   "expected": {
+    "payer_name": "粗体",
+    "receiver_name": "&amp;",
+    "amount": 88,
+    "receiver_user_id": 8875144459
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：<b>粗体</b>\n收款人：&amp;\n金额：100\n</code></pre>",
+   "expected": {
+    "payer_name": "粗体",
+    "receiver_name": "&amp;",
+    "amount": 100
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：<b>粗体</b>\n付款人ID：1122\n收款人：&amp;\n金额：100\n收款人ID：9988</code></pre>",
+   "expected": {
+    "payer_name": "粗体",
+    "receiver_name": "&amp;",
+    "amount": 100,
+    "payer_user_id": 1122,
+    "receiver_user_id": 9988
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：<b>粗体</b>\n付款人ID：5843467471\n收款人：&amp;\n金额：100\n</code></pre>",
+   "expected": {
+    "payer_name": "粗体",
+    "receiver_name": "&amp;",
+    "amount": 100,
+    "payer_user_id": 5843467471
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：<b>粗体</b>\n收款人：&amp;\n金额：100\n收款人ID：8875144459</code></pre>",
+   "expected": {
+    "payer_name": "粗体",
+    "receiver_name": "&amp;",
+    "amount": 100,
+    "receiver_user_id": 8875144459
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：<b>粗体</b>\n收款人：&amp;\n金额：1000\n</code></pre>",
+   "expected": {
+    "payer_name": "粗体",
+    "receiver_name": "&amp;",
+    "amount": 1000
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：<b>粗体</b>\n付款人ID：1122\n收款人：&amp;\n金额：1000\n收款人ID：9988</code></pre>",
+   "expected": {
+    "payer_name": "粗体",
+    "receiver_name": "&amp;",
+    "amount": 1000,
+    "payer_user_id": 1122,
+    "receiver_user_id": 9988
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：<b>粗体</b>\n付款人ID：5843467471\n收款人：&amp;\n金额：1000\n</code></pre>",
+   "expected": {
+    "payer_name": "粗体",
+    "receiver_name": "&amp;",
+    "amount": 1000,
+    "payer_user_id": 5843467471
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：<b>粗体</b>\n收款人：&amp;\n金额：1000\n收款人ID：8875144459</code></pre>",
+   "expected": {
+    "payer_name": "粗体",
+    "receiver_name": "&amp;",
+    "amount": 1000,
+    "receiver_user_id": 8875144459
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：<b>粗体</b>\n收款人：&amp;\n金额：999999999\n</code></pre>",
+   "expected": {
+    "payer_name": "粗体",
+    "receiver_name": "&amp;",
+    "amount": 999999999
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：<b>粗体</b>\n付款人ID：1122\n收款人：&amp;\n金额：999999999\n收款人ID：9988</code></pre>",
+   "expected": {
+    "payer_name": "粗体",
+    "receiver_name": "&amp;",
+    "amount": 999999999,
+    "payer_user_id": 1122,
+    "receiver_user_id": 9988
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：<b>粗体</b>\n付款人ID：5843467471\n收款人：&amp;\n金额：999999999\n</code></pre>",
+   "expected": {
+    "payer_name": "粗体",
+    "receiver_name": "&amp;",
+    "amount": 999999999,
+    "payer_user_id": 5843467471
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：<b>粗体</b>\n收款人：&amp;\n金额：999999999\n收款人ID：8875144459</code></pre>",
+   "expected": {
+    "payer_name": "粗体",
+    "receiver_name": "&amp;",
+    "amount": 999999999,
+    "receiver_user_id": 8875144459
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：付款人：套娃\n收款人：收款人：套娃\n金额：0\n</code></pre>",
+   "expected": {
+    "payer_name": "付款人：套娃",
+    "receiver_name": "收款人：套娃",
+    "amount": 0
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：付款人：套娃\n付款人ID：1122\n收款人：收款人：套娃\n金额：0\n收款人ID：9988</code></pre>",
+   "expected": {
+    "payer_name": "付款人：套娃",
+    "receiver_name": "收款人：套娃",
+    "amount": 0,
+    "payer_user_id": 1122,
+    "receiver_user_id": 9988
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：付款人：套娃\n付款人ID：5843467471\n收款人：收款人：套娃\n金额：0\n</code></pre>",
+   "expected": {
+    "payer_name": "付款人：套娃",
+    "receiver_name": "收款人：套娃",
+    "amount": 0,
+    "payer_user_id": 5843467471
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：付款人：套娃\n收款人：收款人：套娃\n金额：0\n收款人ID：8875144459</code></pre>",
+   "expected": {
+    "payer_name": "付款人：套娃",
+    "receiver_name": "收款人：套娃",
+    "amount": 0,
+    "receiver_user_id": 8875144459
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：付款人：套娃\n收款人：收款人：套娃\n金额：1\n</code></pre>",
+   "expected": {
+    "payer_name": "付款人：套娃",
+    "receiver_name": "收款人：套娃",
+    "amount": 1
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：付款人：套娃\n付款人ID：1122\n收款人：收款人：套娃\n金额：1\n收款人ID：9988</code></pre>",
+   "expected": {
+    "payer_name": "付款人：套娃",
+    "receiver_name": "收款人：套娃",
+    "amount": 1,
+    "payer_user_id": 1122,
+    "receiver_user_id": 9988
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：付款人：套娃\n付款人ID：5843467471\n收款人：收款人：套娃\n金额：1\n</code></pre>",
+   "expected": {
+    "payer_name": "付款人：套娃",
+    "receiver_name": "收款人：套娃",
+    "amount": 1,
+    "payer_user_id": 5843467471
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：付款人：套娃\n收款人：收款人：套娃\n金额：1\n收款人ID：8875144459</code></pre>",
+   "expected": {
+    "payer_name": "付款人：套娃",
+    "receiver_name": "收款人：套娃",
+    "amount": 1,
+    "receiver_user_id": 8875144459
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：付款人：套娃\n收款人：收款人：套娃\n金额：88\n</code></pre>",
+   "expected": {
+    "payer_name": "付款人：套娃",
+    "receiver_name": "收款人：套娃",
+    "amount": 88
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：付款人：套娃\n付款人ID：1122\n收款人：收款人：套娃\n金额：88\n收款人ID：9988</code></pre>",
+   "expected": {
+    "payer_name": "付款人：套娃",
+    "receiver_name": "收款人：套娃",
+    "amount": 88,
+    "payer_user_id": 1122,
+    "receiver_user_id": 9988
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：付款人：套娃\n付款人ID：5843467471\n收款人：收款人：套娃\n金额：88\n</code></pre>",
+   "expected": {
+    "payer_name": "付款人：套娃",
+    "receiver_name": "收款人：套娃",
+    "amount": 88,
+    "payer_user_id": 5843467471
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：付款人：套娃\n收款人：收款人：套娃\n金额：88\n收款人ID：8875144459</code></pre>",
+   "expected": {
+    "payer_name": "付款人：套娃",
+    "receiver_name": "收款人：套娃",
+    "amount": 88,
+    "receiver_user_id": 8875144459
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：付款人：套娃\n收款人：收款人：套娃\n金额：100\n</code></pre>",
+   "expected": {
+    "payer_name": "付款人：套娃",
+    "receiver_name": "收款人：套娃",
+    "amount": 100
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：付款人：套娃\n付款人ID：1122\n收款人：收款人：套娃\n金额：100\n收款人ID：9988</code></pre>",
+   "expected": {
+    "payer_name": "付款人：套娃",
+    "receiver_name": "收款人：套娃",
+    "amount": 100,
+    "payer_user_id": 1122,
+    "receiver_user_id": 9988
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：付款人：套娃\n付款人ID：5843467471\n收款人：收款人：套娃\n金额：100\n</code></pre>",
+   "expected": {
+    "payer_name": "付款人：套娃",
+    "receiver_name": "收款人：套娃",
+    "amount": 100,
+    "payer_user_id": 5843467471
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：付款人：套娃\n收款人：收款人：套娃\n金额：100\n收款人ID：8875144459</code></pre>",
+   "expected": {
+    "payer_name": "付款人：套娃",
+    "receiver_name": "收款人：套娃",
+    "amount": 100,
+    "receiver_user_id": 8875144459
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：付款人：套娃\n收款人：收款人：套娃\n金额：1000\n</code></pre>",
+   "expected": {
+    "payer_name": "付款人：套娃",
+    "receiver_name": "收款人：套娃",
+    "amount": 1000
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：付款人：套娃\n付款人ID：1122\n收款人：收款人：套娃\n金额：1000\n收款人ID：9988</code></pre>",
+   "expected": {
+    "payer_name": "付款人：套娃",
+    "receiver_name": "收款人：套娃",
+    "amount": 1000,
+    "payer_user_id": 1122,
+    "receiver_user_id": 9988
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：付款人：套娃\n付款人ID：5843467471\n收款人：收款人：套娃\n金额：1000\n</code></pre>",
+   "expected": {
+    "payer_name": "付款人：套娃",
+    "receiver_name": "收款人：套娃",
+    "amount": 1000,
+    "payer_user_id": 5843467471
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：付款人：套娃\n收款人：收款人：套娃\n金额：1000\n收款人ID：8875144459</code></pre>",
+   "expected": {
+    "payer_name": "付款人：套娃",
+    "receiver_name": "收款人：套娃",
+    "amount": 1000,
+    "receiver_user_id": 8875144459
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：付款人：套娃\n收款人：收款人：套娃\n金额：999999999\n</code></pre>",
+   "expected": {
+    "payer_name": "付款人：套娃",
+    "receiver_name": "收款人：套娃",
+    "amount": 999999999
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：付款人：套娃\n付款人ID：1122\n收款人：收款人：套娃\n金额：999999999\n收款人ID：9988</code></pre>",
+   "expected": {
+    "payer_name": "付款人：套娃",
+    "receiver_name": "收款人：套娃",
+    "amount": 999999999,
+    "payer_user_id": 1122,
+    "receiver_user_id": 9988
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：付款人：套娃\n付款人ID：5843467471\n收款人：收款人：套娃\n金额：999999999\n</code></pre>",
+   "expected": {
+    "payer_name": "付款人：套娃",
+    "receiver_name": "收款人：套娃",
+    "amount": 999999999,
+    "payer_user_id": 5843467471
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：付款人：套娃\n收款人：收款人：套娃\n金额：999999999\n收款人ID：8875144459</code></pre>",
+   "expected": {
+    "payer_name": "付款人：套娃",
+    "receiver_name": "收款人：套娃",
+    "amount": 999999999,
+    "receiver_user_id": 8875144459
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：玩家 100\n收款人：接收者\n金额：0\n</code></pre>",
+   "expected": {
+    "payer_name": "玩家 100",
+    "receiver_name": "接收者",
+    "amount": 0
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：玩家 100\n付款人ID：1122\n收款人：接收者\n金额：0\n收款人ID：9988</code></pre>",
+   "expected": {
+    "payer_name": "玩家 100",
+    "receiver_name": "接收者",
+    "amount": 0,
+    "payer_user_id": 1122,
+    "receiver_user_id": 9988
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：玩家 100\n付款人ID：5843467471\n收款人：接收者\n金额：0\n</code></pre>",
+   "expected": {
+    "payer_name": "玩家 100",
+    "receiver_name": "接收者",
+    "amount": 0,
+    "payer_user_id": 5843467471
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：玩家 100\n收款人：接收者\n金额：0\n收款人ID：8875144459</code></pre>",
+   "expected": {
+    "payer_name": "玩家 100",
+    "receiver_name": "接收者",
+    "amount": 0,
+    "receiver_user_id": 8875144459
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：玩家 100\n收款人：接收者\n金额：1\n</code></pre>",
+   "expected": {
+    "payer_name": "玩家 100",
+    "receiver_name": "接收者",
+    "amount": 1
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：玩家 100\n付款人ID：1122\n收款人：接收者\n金额：1\n收款人ID：9988</code></pre>",
+   "expected": {
+    "payer_name": "玩家 100",
+    "receiver_name": "接收者",
+    "amount": 1,
+    "payer_user_id": 1122,
+    "receiver_user_id": 9988
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：玩家 100\n付款人ID：5843467471\n收款人：接收者\n金额：1\n</code></pre>",
+   "expected": {
+    "payer_name": "玩家 100",
+    "receiver_name": "接收者",
+    "amount": 1,
+    "payer_user_id": 5843467471
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：玩家 100\n收款人：接收者\n金额：1\n收款人ID：8875144459</code></pre>",
+   "expected": {
+    "payer_name": "玩家 100",
+    "receiver_name": "接收者",
+    "amount": 1,
+    "receiver_user_id": 8875144459
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：玩家 100\n收款人：接收者\n金额：88\n</code></pre>",
+   "expected": {
+    "payer_name": "玩家 100",
+    "receiver_name": "接收者",
+    "amount": 88
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：玩家 100\n付款人ID：1122\n收款人：接收者\n金额：88\n收款人ID：9988</code></pre>",
+   "expected": {
+    "payer_name": "玩家 100",
+    "receiver_name": "接收者",
+    "amount": 88,
+    "payer_user_id": 1122,
+    "receiver_user_id": 9988
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：玩家 100\n付款人ID：5843467471\n收款人：接收者\n金额：88\n</code></pre>",
+   "expected": {
+    "payer_name": "玩家 100",
+    "receiver_name": "接收者",
+    "amount": 88,
+    "payer_user_id": 5843467471
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：玩家 100\n收款人：接收者\n金额：88\n收款人ID：8875144459</code></pre>",
+   "expected": {
+    "payer_name": "玩家 100",
+    "receiver_name": "接收者",
+    "amount": 88,
+    "receiver_user_id": 8875144459
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：玩家 100\n收款人：接收者\n金额：100\n</code></pre>",
+   "expected": {
+    "payer_name": "玩家 100",
+    "receiver_name": "接收者",
+    "amount": 100
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：玩家 100\n付款人ID：1122\n收款人：接收者\n金额：100\n收款人ID：9988</code></pre>",
+   "expected": {
+    "payer_name": "玩家 100",
+    "receiver_name": "接收者",
+    "amount": 100,
+    "payer_user_id": 1122,
+    "receiver_user_id": 9988
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：玩家 100\n付款人ID：5843467471\n收款人：接收者\n金额：100\n</code></pre>",
+   "expected": {
+    "payer_name": "玩家 100",
+    "receiver_name": "接收者",
+    "amount": 100,
+    "payer_user_id": 5843467471
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：玩家 100\n收款人：接收者\n金额：100\n收款人ID：8875144459</code></pre>",
+   "expected": {
+    "payer_name": "玩家 100",
+    "receiver_name": "接收者",
+    "amount": 100,
+    "receiver_user_id": 8875144459
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：玩家 100\n收款人：接收者\n金额：1000\n</code></pre>",
+   "expected": {
+    "payer_name": "玩家 100",
+    "receiver_name": "接收者",
+    "amount": 1000
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：玩家 100\n付款人ID：1122\n收款人：接收者\n金额：1000\n收款人ID：9988</code></pre>",
+   "expected": {
+    "payer_name": "玩家 100",
+    "receiver_name": "接收者",
+    "amount": 1000,
+    "payer_user_id": 1122,
+    "receiver_user_id": 9988
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：玩家 100\n付款人ID：5843467471\n收款人：接收者\n金额：1000\n</code></pre>",
+   "expected": {
+    "payer_name": "玩家 100",
+    "receiver_name": "接收者",
+    "amount": 1000,
+    "payer_user_id": 5843467471
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：玩家 100\n收款人：接收者\n金额：1000\n收款人ID：8875144459</code></pre>",
+   "expected": {
+    "payer_name": "玩家 100",
+    "receiver_name": "接收者",
+    "amount": 1000,
+    "receiver_user_id": 8875144459
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：玩家 100\n收款人：接收者\n金额：999999999\n</code></pre>",
+   "expected": {
+    "payer_name": "玩家 100",
+    "receiver_name": "接收者",
+    "amount": 999999999
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：玩家 100\n付款人ID：1122\n收款人：接收者\n金额：999999999\n收款人ID：9988</code></pre>",
+   "expected": {
+    "payer_name": "玩家 100",
+    "receiver_name": "接收者",
+    "amount": 999999999,
+    "payer_user_id": 1122,
+    "receiver_user_id": 9988
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：玩家 100\n付款人ID：5843467471\n收款人：接收者\n金额：999999999\n</code></pre>",
+   "expected": {
+    "payer_name": "玩家 100",
+    "receiver_name": "接收者",
+    "amount": 999999999,
+    "payer_user_id": 5843467471
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：玩家 100\n收款人：接收者\n金额：999999999\n收款人ID：8875144459</code></pre>",
+   "expected": {
+    "payer_name": "玩家 100",
+    "receiver_name": "接收者",
+    "amount": 999999999,
+    "receiver_user_id": 8875144459
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：😀表情\n收款人：🎲\n金额：0\n</code></pre>",
+   "expected": {
+    "payer_name": "😀表情",
+    "receiver_name": "🎲",
+    "amount": 0
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：😀表情\n付款人ID：1122\n收款人：🎲\n金额：0\n收款人ID：9988</code></pre>",
+   "expected": {
+    "payer_name": "😀表情",
+    "receiver_name": "🎲",
+    "amount": 0,
+    "payer_user_id": 1122,
+    "receiver_user_id": 9988
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：😀表情\n付款人ID：5843467471\n收款人：🎲\n金额：0\n</code></pre>",
+   "expected": {
+    "payer_name": "😀表情",
+    "receiver_name": "🎲",
+    "amount": 0,
+    "payer_user_id": 5843467471
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：😀表情\n收款人：🎲\n金额：0\n收款人ID：8875144459</code></pre>",
+   "expected": {
+    "payer_name": "😀表情",
+    "receiver_name": "🎲",
+    "amount": 0,
+    "receiver_user_id": 8875144459
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：😀表情\n收款人：🎲\n金额：1\n</code></pre>",
+   "expected": {
+    "payer_name": "😀表情",
+    "receiver_name": "🎲",
+    "amount": 1
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：😀表情\n付款人ID：1122\n收款人：🎲\n金额：1\n收款人ID：9988</code></pre>",
+   "expected": {
+    "payer_name": "😀表情",
+    "receiver_name": "🎲",
+    "amount": 1,
+    "payer_user_id": 1122,
+    "receiver_user_id": 9988
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：😀表情\n付款人ID：5843467471\n收款人：🎲\n金额：1\n</code></pre>",
+   "expected": {
+    "payer_name": "😀表情",
+    "receiver_name": "🎲",
+    "amount": 1,
+    "payer_user_id": 5843467471
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：😀表情\n收款人：🎲\n金额：1\n收款人ID：8875144459</code></pre>",
+   "expected": {
+    "payer_name": "😀表情",
+    "receiver_name": "🎲",
+    "amount": 1,
+    "receiver_user_id": 8875144459
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：😀表情\n收款人：🎲\n金额：88\n</code></pre>",
+   "expected": {
+    "payer_name": "😀表情",
+    "receiver_name": "🎲",
+    "amount": 88
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：😀表情\n付款人ID：1122\n收款人：🎲\n金额：88\n收款人ID：9988</code></pre>",
+   "expected": {
+    "payer_name": "😀表情",
+    "receiver_name": "🎲",
+    "amount": 88,
+    "payer_user_id": 1122,
+    "receiver_user_id": 9988
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：😀表情\n付款人ID：5843467471\n收款人：🎲\n金额：88\n</code></pre>",
+   "expected": {
+    "payer_name": "😀表情",
+    "receiver_name": "🎲",
+    "amount": 88,
+    "payer_user_id": 5843467471
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：😀表情\n收款人：🎲\n金额：88\n收款人ID：8875144459</code></pre>",
+   "expected": {
+    "payer_name": "😀表情",
+    "receiver_name": "🎲",
+    "amount": 88,
+    "receiver_user_id": 8875144459
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：😀表情\n收款人：🎲\n金额：100\n</code></pre>",
+   "expected": {
+    "payer_name": "😀表情",
+    "receiver_name": "🎲",
+    "amount": 100
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：😀表情\n付款人ID：1122\n收款人：🎲\n金额：100\n收款人ID：9988</code></pre>",
+   "expected": {
+    "payer_name": "😀表情",
+    "receiver_name": "🎲",
+    "amount": 100,
+    "payer_user_id": 1122,
+    "receiver_user_id": 9988
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：😀表情\n付款人ID：5843467471\n收款人：🎲\n金额：100\n</code></pre>",
+   "expected": {
+    "payer_name": "😀表情",
+    "receiver_name": "🎲",
+    "amount": 100,
+    "payer_user_id": 5843467471
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：😀表情\n收款人：🎲\n金额：100\n收款人ID：8875144459</code></pre>",
+   "expected": {
+    "payer_name": "😀表情",
+    "receiver_name": "🎲",
+    "amount": 100,
+    "receiver_user_id": 8875144459
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：😀表情\n收款人：🎲\n金额：1000\n</code></pre>",
+   "expected": {
+    "payer_name": "😀表情",
+    "receiver_name": "🎲",
+    "amount": 1000
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：😀表情\n付款人ID：1122\n收款人：🎲\n金额：1000\n收款人ID：9988</code></pre>",
+   "expected": {
+    "payer_name": "😀表情",
+    "receiver_name": "🎲",
+    "amount": 1000,
+    "payer_user_id": 1122,
+    "receiver_user_id": 9988
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：😀表情\n付款人ID：5843467471\n收款人：🎲\n金额：1000\n</code></pre>",
+   "expected": {
+    "payer_name": "😀表情",
+    "receiver_name": "🎲",
+    "amount": 1000,
+    "payer_user_id": 5843467471
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：😀表情\n收款人：🎲\n金额：1000\n收款人ID：8875144459</code></pre>",
+   "expected": {
+    "payer_name": "😀表情",
+    "receiver_name": "🎲",
+    "amount": 1000,
+    "receiver_user_id": 8875144459
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：😀表情\n收款人：🎲\n金额：999999999\n</code></pre>",
+   "expected": {
+    "payer_name": "😀表情",
+    "receiver_name": "🎲",
+    "amount": 999999999
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：😀表情\n付款人ID：1122\n收款人：🎲\n金额：999999999\n收款人ID：9988</code></pre>",
+   "expected": {
+    "payer_name": "😀表情",
+    "receiver_name": "🎲",
+    "amount": 999999999,
+    "payer_user_id": 1122,
+    "receiver_user_id": 9988
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：😀表情\n付款人ID：5843467471\n收款人：🎲\n金额：999999999\n</code></pre>",
+   "expected": {
+    "payer_name": "😀表情",
+    "receiver_name": "🎲",
+    "amount": 999999999,
+    "payer_user_id": 5843467471
+   }
+  },
+  {
+   "origin": "template:transfer_default",
+   "text": "<pre><code class=\"language-转账成功\">付款人：😀表情\n收款人：🎲\n金额：999999999\n收款人ID：8875144459</code></pre>",
+   "expected": {
+    "payer_name": "😀表情",
+    "receiver_name": "🎲",
+    "amount": 999999999,
+    "receiver_user_id": 8875144459
+   }
+  },
+  {
+   "origin": "template:debit_default",
+   "text": "<pre><code class=\"language-扣减成功\">路人A 扣减 0 蝌蚪\n我的TG名 接收 0 蝌蚪</code></pre>",
+   "expected": {
+    "payer_name": "路人A",
+    "receiver_name": "我的TG名",
+    "amount": 0
+   }
+  },
+  {
+   "origin": "template:debit_default",
+   "text": "<pre><code class=\"language-扣减成功\">路人A 扣减 1 蝌蚪\n我的TG名 接收 1 蝌蚪</code></pre>",
+   "expected": {
+    "payer_name": "路人A",
+    "receiver_name": "我的TG名",
+    "amount": 1
+   }
+  },
+  {
+   "origin": "template:debit_default",
+   "text": "<pre><code class=\"language-扣减成功\">路人A 扣减 88 蝌蚪\n我的TG名 接收 88 蝌蚪</code></pre>",
+   "expected": {
+    "payer_name": "路人A",
+    "receiver_name": "我的TG名",
+    "amount": 88
+   }
+  },
+  {
+   "origin": "template:debit_default",
+   "text": "<pre><code class=\"language-扣减成功\">路人A 扣减 100 蝌蚪\n我的TG名 接收 100 蝌蚪</code></pre>",
+   "expected": {
+    "payer_name": "路人A",
+    "receiver_name": "我的TG名",
+    "amount": 100
+   }
+  },
+  {
+   "origin": "template:debit_default",
+   "text": "<pre><code class=\"language-扣减成功\">路人A 扣减 1000 蝌蚪\n我的TG名 接收 1000 蝌蚪</code></pre>",
+   "expected": {
+    "payer_name": "路人A",
+    "receiver_name": "我的TG名",
+    "amount": 1000
+   }
+  },
+  {
+   "origin": "template:debit_default",
+   "text": "<pre><code class=\"language-扣减成功\">路人A 扣减 999999999 蝌蚪\n我的TG名 接收 999999999 蝌蚪</code></pre>",
+   "expected": {
+    "payer_name": "路人A",
+    "receiver_name": "我的TG名",
+    "amount": 999999999
+   }
+  },
+  {
+   "origin": "template:debit_default",
+   "text": "<pre><code class=\"language-扣减成功\">付款方 扣减 0 蝌蚪\n收款方 接收 0 蝌蚪</code></pre>",
+   "expected": {
+    "payer_name": "付款方",
+    "receiver_name": "收款方",
+    "amount": 0
+   }
+  },
+  {
+   "origin": "template:debit_default",
+   "text": "<pre><code class=\"language-扣减成功\">付款方 扣减 1 蝌蚪\n收款方 接收 1 蝌蚪</code></pre>",
+   "expected": {
+    "payer_name": "付款方",
+    "receiver_name": "收款方",
+    "amount": 1
+   }
+  },
+  {
+   "origin": "template:debit_default",
+   "text": "<pre><code class=\"language-扣减成功\">付款方 扣减 88 蝌蚪\n收款方 接收 88 蝌蚪</code></pre>",
+   "expected": {
+    "payer_name": "付款方",
+    "receiver_name": "收款方",
+    "amount": 88
+   }
+  },
+  {
+   "origin": "template:debit_default",
+   "text": "<pre><code class=\"language-扣减成功\">付款方 扣减 100 蝌蚪\n收款方 接收 100 蝌蚪</code></pre>",
+   "expected": {
+    "payer_name": "付款方",
+    "receiver_name": "收款方",
+    "amount": 100
+   }
+  },
+  {
+   "origin": "template:debit_default",
+   "text": "<pre><code class=\"language-扣减成功\">付款方 扣减 1000 蝌蚪\n收款方 接收 1000 蝌蚪</code></pre>",
+   "expected": {
+    "payer_name": "付款方",
+    "receiver_name": "收款方",
+    "amount": 1000
+   }
+  },
+  {
+   "origin": "template:debit_default",
+   "text": "<pre><code class=\"language-扣减成功\">付款方 扣减 999999999 蝌蚪\n收款方 接收 999999999 蝌蚪</code></pre>",
+   "expected": {
+    "payer_name": "付款方",
+    "receiver_name": "收款方",
+    "amount": 999999999
+   }
+  },
+  {
+   "origin": "template:debit_default",
+   "text": "<pre><code class=\"language-扣减成功\">ㅤㅤ 扣减 0 蝌蚪\nOwner 接收 0 蝌蚪</code></pre>",
+   "expected": {
+    "payer_name": "ㅤㅤ",
+    "receiver_name": "Owner",
+    "amount": 0
+   }
+  },
+  {
+   "origin": "template:debit_default",
+   "text": "<pre><code class=\"language-扣减成功\">ㅤㅤ 扣减 1 蝌蚪\nOwner 接收 1 蝌蚪</code></pre>",
+   "expected": {
+    "payer_name": "ㅤㅤ",
+    "receiver_name": "Owner",
+    "amount": 1
+   }
+  },
+  {
+   "origin": "template:debit_default",
+   "text": "<pre><code class=\"language-扣减成功\">ㅤㅤ 扣减 88 蝌蚪\nOwner 接收 88 蝌蚪</code></pre>",
+   "expected": {
+    "payer_name": "ㅤㅤ",
+    "receiver_name": "Owner",
+    "amount": 88
+   }
+  },
+  {
+   "origin": "template:debit_default",
+   "text": "<pre><code class=\"language-扣减成功\">ㅤㅤ 扣减 100 蝌蚪\nOwner 接收 100 蝌蚪</code></pre>",
+   "expected": {
+    "payer_name": "ㅤㅤ",
+    "receiver_name": "Owner",
+    "amount": 100
+   }
+  },
+  {
+   "origin": "template:debit_default",
+   "text": "<pre><code class=\"language-扣减成功\">ㅤㅤ 扣减 1000 蝌蚪\nOwner 接收 1000 蝌蚪</code></pre>",
+   "expected": {
+    "payer_name": "ㅤㅤ",
+    "receiver_name": "Owner",
+    "amount": 1000
+   }
+  },
+  {
+   "origin": "template:debit_default",
+   "text": "<pre><code class=\"language-扣减成功\">ㅤㅤ 扣减 999999999 蝌蚪\nOwner 接收 999999999 蝌蚪</code></pre>",
+   "expected": {
+    "payer_name": "ㅤㅤ",
+    "receiver_name": "Owner",
+    "amount": 999999999
+   }
+  },
+  {
+   "origin": "template:debit_default",
+   "text": "<pre><code class=\"language-扣减成功\">匿名用户 扣减 0 蝌蚪\n管理员 接收 0 蝌蚪</code></pre>",
+   "expected": {
+    "payer_name": "匿名用户",
+    "receiver_name": "管理员",
+    "amount": 0
+   }
+  },
+  {
+   "origin": "template:debit_default",
+   "text": "<pre><code class=\"language-扣减成功\">匿名用户 扣减 1 蝌蚪\n管理员 接收 1 蝌蚪</code></pre>",
+   "expected": {
+    "payer_name": "匿名用户",
+    "receiver_name": "管理员",
+    "amount": 1
+   }
+  },
+  {
+   "origin": "template:debit_default",
+   "text": "<pre><code class=\"language-扣减成功\">匿名用户 扣减 88 蝌蚪\n管理员 接收 88 蝌蚪</code></pre>",
+   "expected": {
+    "payer_name": "匿名用户",
+    "receiver_name": "管理员",
+    "amount": 88
+   }
+  },
+  {
+   "origin": "template:debit_default",
+   "text": "<pre><code class=\"language-扣减成功\">匿名用户 扣减 100 蝌蚪\n管理员 接收 100 蝌蚪</code></pre>",
+   "expected": {
+    "payer_name": "匿名用户",
+    "receiver_name": "管理员",
+    "amount": 100
+   }
+  },
+  {
+   "origin": "template:debit_default",
+   "text": "<pre><code class=\"language-扣减成功\">匿名用户 扣减 1000 蝌蚪\n管理员 接收 1000 蝌蚪</code></pre>",
+   "expected": {
+    "payer_name": "匿名用户",
+    "receiver_name": "管理员",
+    "amount": 1000
+   }
+  },
+  {
+   "origin": "template:debit_default",
+   "text": "<pre><code class=\"language-扣减成功\">匿名用户 扣减 999999999 蝌蚪\n管理员 接收 999999999 蝌蚪</code></pre>",
+   "expected": {
+    "payer_name": "匿名用户",
+    "receiver_name": "管理员",
+    "amount": 999999999
+   }
+  },
+  {
+   "origin": "template:debit_default",
+   "text": "<pre><code class=\"language-扣减成功\">A B C 扣减 0 蝌蚪\nx_y-z 接收 0 蝌蚪</code></pre>",
+   "expected": {
+    "payer_name": "A B C",
+    "receiver_name": "x_y-z",
+    "amount": 0
+   }
+  },
+  {
+   "origin": "template:debit_default",
+   "text": "<pre><code class=\"language-扣减成功\">A B C 扣减 1 蝌蚪\nx_y-z 接收 1 蝌蚪</code></pre>",
+   "expected": {
+    "payer_name": "A B C",
+    "receiver_name": "x_y-z",
+    "amount": 1
+   }
+  },
+  {
+   "origin": "template:debit_default",
+   "text": "<pre><code class=\"language-扣减成功\">A B C 扣减 88 蝌蚪\nx_y-z 接收 88 蝌蚪</code></pre>",
+   "expected": {
+    "payer_name": "A B C",
+    "receiver_name": "x_y-z",
+    "amount": 88
+   }
+  },
+  {
+   "origin": "template:debit_default",
+   "text": "<pre><code class=\"language-扣减成功\">A B C 扣减 100 蝌蚪\nx_y-z 接收 100 蝌蚪</code></pre>",
+   "expected": {
+    "payer_name": "A B C",
+    "receiver_name": "x_y-z",
+    "amount": 100
+   }
+  },
+  {
+   "origin": "template:debit_default",
+   "text": "<pre><code class=\"language-扣减成功\">A B C 扣减 1000 蝌蚪\nx_y-z 接收 1000 蝌蚪</code></pre>",
+   "expected": {
+    "payer_name": "A B C",
+    "receiver_name": "x_y-z",
+    "amount": 1000
+   }
+  },
+  {
+   "origin": "template:debit_default",
+   "text": "<pre><code class=\"language-扣减成功\">A B C 扣减 999999999 蝌蚪\nx_y-z 接收 999999999 蝌蚪</code></pre>",
+   "expected": {
+    "payer_name": "A B C",
+    "receiver_name": "x_y-z",
+    "amount": 999999999
+   }
+  },
+  {
+   "origin": "template:debit_default",
+   "text": "<pre><code class=\"language-扣减成功\"><b>粗体</b> 扣减 0 蝌蚪\n&amp; 接收 0 蝌蚪</code></pre>",
+   "expected": {
+    "payer_name": "粗体",
+    "receiver_name": "&amp;",
+    "amount": 0
+   }
+  },
+  {
+   "origin": "template:debit_default",
+   "text": "<pre><code class=\"language-扣减成功\"><b>粗体</b> 扣减 1 蝌蚪\n&amp; 接收 1 蝌蚪</code></pre>",
+   "expected": {
+    "payer_name": "粗体",
+    "receiver_name": "&amp;",
+    "amount": 1
+   }
+  },
+  {
+   "origin": "template:debit_default",
+   "text": "<pre><code class=\"language-扣减成功\"><b>粗体</b> 扣减 88 蝌蚪\n&amp; 接收 88 蝌蚪</code></pre>",
+   "expected": {
+    "payer_name": "粗体",
+    "receiver_name": "&amp;",
+    "amount": 88
+   }
+  },
+  {
+   "origin": "template:debit_default",
+   "text": "<pre><code class=\"language-扣减成功\"><b>粗体</b> 扣减 100 蝌蚪\n&amp; 接收 100 蝌蚪</code></pre>",
+   "expected": {
+    "payer_name": "粗体",
+    "receiver_name": "&amp;",
+    "amount": 100
+   }
+  },
+  {
+   "origin": "template:debit_default",
+   "text": "<pre><code class=\"language-扣减成功\"><b>粗体</b> 扣减 1000 蝌蚪\n&amp; 接收 1000 蝌蚪</code></pre>",
+   "expected": {
+    "payer_name": "粗体",
+    "receiver_name": "&amp;",
+    "amount": 1000
+   }
+  },
+  {
+   "origin": "template:debit_default",
+   "text": "<pre><code class=\"language-扣减成功\"><b>粗体</b> 扣减 999999999 蝌蚪\n&amp; 接收 999999999 蝌蚪</code></pre>",
+   "expected": {
+    "payer_name": "粗体",
+    "receiver_name": "&amp;",
+    "amount": 999999999
+   }
+  },
+  {
+   "origin": "template:debit_default",
+   "text": "<pre><code class=\"language-扣减成功\">付款人：套娃 扣减 0 蝌蚪\n收款人：套娃 接收 0 蝌蚪</code></pre>",
+   "expected": {
+    "payer_name": "付款人：套娃",
+    "receiver_name": "收款人：套娃",
+    "amount": 0
+   }
+  },
+  {
+   "origin": "template:debit_default",
+   "text": "<pre><code class=\"language-扣减成功\">付款人：套娃 扣减 1 蝌蚪\n收款人：套娃 接收 1 蝌蚪</code></pre>",
+   "expected": {
+    "payer_name": "付款人：套娃",
+    "receiver_name": "收款人：套娃",
+    "amount": 1
+   }
+  },
+  {
+   "origin": "template:debit_default",
+   "text": "<pre><code class=\"language-扣减成功\">付款人：套娃 扣减 88 蝌蚪\n收款人：套娃 接收 88 蝌蚪</code></pre>",
+   "expected": {
+    "payer_name": "付款人：套娃",
+    "receiver_name": "收款人：套娃",
+    "amount": 88
+   }
+  },
+  {
+   "origin": "template:debit_default",
+   "text": "<pre><code class=\"language-扣减成功\">付款人：套娃 扣减 100 蝌蚪\n收款人：套娃 接收 100 蝌蚪</code></pre>",
+   "expected": {
+    "payer_name": "付款人：套娃",
+    "receiver_name": "收款人：套娃",
+    "amount": 100
+   }
+  },
+  {
+   "origin": "template:debit_default",
+   "text": "<pre><code class=\"language-扣减成功\">付款人：套娃 扣减 1000 蝌蚪\n收款人：套娃 接收 1000 蝌蚪</code></pre>",
+   "expected": {
+    "payer_name": "付款人：套娃",
+    "receiver_name": "收款人：套娃",
+    "amount": 1000
+   }
+  },
+  {
+   "origin": "template:debit_default",
+   "text": "<pre><code class=\"language-扣减成功\">付款人：套娃 扣减 999999999 蝌蚪\n收款人：套娃 接收 999999999 蝌蚪</code></pre>",
+   "expected": {
+    "payer_name": "付款人：套娃",
+    "receiver_name": "收款人：套娃",
+    "amount": 999999999
+   }
+  },
+  {
+   "origin": "template:debit_default",
+   "text": "<pre><code class=\"language-扣减成功\">玩家 100 扣减 0 蝌蚪\n接收者 接收 0 蝌蚪</code></pre>",
+   "expected": {
+    "payer_name": "玩家 100",
+    "receiver_name": "接收者",
+    "amount": 0
+   }
+  },
+  {
+   "origin": "template:debit_default",
+   "text": "<pre><code class=\"language-扣减成功\">玩家 100 扣减 1 蝌蚪\n接收者 接收 1 蝌蚪</code></pre>",
+   "expected": {
+    "payer_name": "玩家 100",
+    "receiver_name": "接收者",
+    "amount": 1
+   }
+  },
+  {
+   "origin": "template:debit_default",
+   "text": "<pre><code class=\"language-扣减成功\">玩家 100 扣减 88 蝌蚪\n接收者 接收 88 蝌蚪</code></pre>",
+   "expected": {
+    "payer_name": "玩家 100",
+    "receiver_name": "接收者",
+    "amount": 88
+   }
+  },
+  {
+   "origin": "template:debit_default",
+   "text": "<pre><code class=\"language-扣减成功\">玩家 100 扣减 100 蝌蚪\n接收者 接收 100 蝌蚪</code></pre>",
+   "expected": {
+    "payer_name": "玩家 100",
+    "receiver_name": "接收者",
+    "amount": 100
+   }
+  },
+  {
+   "origin": "template:debit_default",
+   "text": "<pre><code class=\"language-扣减成功\">玩家 100 扣减 1000 蝌蚪\n接收者 接收 1000 蝌蚪</code></pre>",
+   "expected": {
+    "payer_name": "玩家 100",
+    "receiver_name": "接收者",
+    "amount": 1000
+   }
+  },
+  {
+   "origin": "template:debit_default",
+   "text": "<pre><code class=\"language-扣减成功\">玩家 100 扣减 999999999 蝌蚪\n接收者 接收 999999999 蝌蚪</code></pre>",
+   "expected": {
+    "payer_name": "玩家 100",
+    "receiver_name": "接收者",
+    "amount": 999999999
+   }
+  },
+  {
+   "origin": "template:debit_default",
+   "text": "<pre><code class=\"language-扣减成功\">😀表情 扣减 0 蝌蚪\n🎲 接收 0 蝌蚪</code></pre>",
+   "expected": {
+    "payer_name": "😀表情",
+    "receiver_name": "🎲",
+    "amount": 0
+   }
+  },
+  {
+   "origin": "template:debit_default",
+   "text": "<pre><code class=\"language-扣减成功\">😀表情 扣减 1 蝌蚪\n🎲 接收 1 蝌蚪</code></pre>",
+   "expected": {
+    "payer_name": "😀表情",
+    "receiver_name": "🎲",
+    "amount": 1
+   }
+  },
+  {
+   "origin": "template:debit_default",
+   "text": "<pre><code class=\"language-扣减成功\">😀表情 扣减 88 蝌蚪\n🎲 接收 88 蝌蚪</code></pre>",
+   "expected": {
+    "payer_name": "😀表情",
+    "receiver_name": "🎲",
+    "amount": 88
+   }
+  },
+  {
+   "origin": "template:debit_default",
+   "text": "<pre><code class=\"language-扣减成功\">😀表情 扣减 100 蝌蚪\n🎲 接收 100 蝌蚪</code></pre>",
+   "expected": {
+    "payer_name": "😀表情",
+    "receiver_name": "🎲",
+    "amount": 100
+   }
+  },
+  {
+   "origin": "template:debit_default",
+   "text": "<pre><code class=\"language-扣减成功\">😀表情 扣减 1000 蝌蚪\n🎲 接收 1000 蝌蚪</code></pre>",
+   "expected": {
+    "payer_name": "😀表情",
+    "receiver_name": "🎲",
+    "amount": 1000
+   }
+  },
+  {
+   "origin": "template:debit_default",
+   "text": "<pre><code class=\"language-扣减成功\">😀表情 扣减 999999999 蝌蚪\n🎲 接收 999999999 蝌蚪</code></pre>",
+   "expected": {
+    "payer_name": "😀表情",
+    "receiver_name": "🎲",
+    "amount": 999999999
+   }
+  },
+  {
+   "origin": "handmade",
+   "text": "",
+   "expected": null
+  },
+  {
+   "origin": "handmade",
+   "text": "   ",
+   "expected": null
+  },
+  {
+   "origin": "handmade",
+   "text": "\n\n",
+   "expected": null
+  },
+  {
+   "origin": "handmade",
+   "text": "转账成功",
+   "expected": null
+  },
+  {
+   "origin": "handmade",
+   "text": "付款人：A\n收款人：B\n金额：100",
+   "expected": {
+    "payer_name": "A",
+    "receiver_name": "B",
+    "amount": 100
+   }
+  },
+  {
+   "origin": "handmade",
+   "text": "付款人:A\n收款人:B\n金额:100",
+   "expected": {
+    "payer_name": "A",
+    "receiver_name": "B",
+    "amount": 100
+   }
+  },
+  {
+   "origin": "handmade",
+   "text": "付款人 ： A \n收款人 ：B\n金额 ： 7",
+   "expected": {
+    "payer_name": "A",
+    "receiver_name": "B",
+    "amount": 7
+   }
+  },
+  {
+   "origin": "handmade",
+   "text": "付款人：A\n收款人：B\n金额：一百",
+   "expected": null
+  },
+  {
+   "origin": "handmade",
+   "text": "付款人：A\n金额：100",
+   "expected": null
+  },
+  {
+   "origin": "handmade",
+   "text": "收款人：B\n付款人：A\n金额：100",
+   "expected": {
+    "payer_name": "A",
+    "receiver_name": "B",
+    "amount": 100
+   }
+  },
+  {
+   "origin": "handmade",
+   "text": "金额：100\n付款人：A\n收款人：B",
+   "expected": {
+    "payer_name": "A",
+    "receiver_name": "B",
+    "amount": 100
+   }
+  },
+  {
+   "origin": "handmade",
+   "text": "付款人：A\r\n收款人：B\r\n金额：100\r\n",
+   "expected": {
+    "payer_name": "A",
+    "receiver_name": "B",
+    "amount": 100
+   }
+  },
+  {
+   "origin": "handmade",
+   "text": "付款人：A\n付款人ID：12\n收款人：B\n收款人ID：34\n金额：5",
+   "expected": {
+    "payer_name": "A",
+    "receiver_name": "B",
+    "amount": 5,
+    "payer_user_id": 12,
+    "receiver_user_id": 34
+   }
+  },
+  {
+   "origin": "handmade",
+   "text": "付款人：A\n付款人用户ID：12\n收款人：B\n收款人id:34\n金额：5",
+   "expected": {
+    "payer_name": "A",
+    "receiver_name": "B",
+    "amount": 5,
+    "payer_user_id": 12,
+    "receiver_user_id": 34
+   }
+  },
+  {
+   "origin": "handmade",
+   "text": "付款人：A\n付款人 ID : 12\n收款人：B\n金额：5",
+   "expected": {
+    "payer_name": "A",
+    "receiver_name": "B",
+    "amount": 5,
+    "payer_user_id": 12
+   }
+  },
+  {
+   "origin": "handmade",
+   "text": "付款人：\n收款人：B\n金额：100",
+   "expected": {
+    "payer_name": "收款人：B",
+    "receiver_name": "B",
+    "amount": 100
+   }
+  },
+  {
+   "origin": "handmade",
+   "text": "付款人：A\n收款人：B\n金额：100.5",
+   "expected": {
+    "payer_name": "A",
+    "receiver_name": "B",
+    "amount": 100
+   }
+  },
+  {
+   "origin": "handmade",
+   "text": "付款人：A\n收款人：B\n金额：-100",
+   "expected": null
+  },
+  {
+   "origin": "handmade",
+   "text": "付款人：A\n收款人：B\n金额：１００",
+   "expected": {
+    "payer_name": "A",
+    "receiver_name": "B",
+    "amount": 100
+   }
+  },
+  {
+   "origin": "handmade",
+   "text": "转账成功\nAAA 转出 100\nBBB 收到 100",
+   "expected": {
+    "payer_name": "AAA",
+    "receiver_name": "BBB",
+    "amount": 100
+   }
+  },
+  {
+   "origin": "handmade",
+   "text": "转账成功\nAAA 转出 100\nBBB 收到 99",
+   "expected": null
+  },
+  {
+   "origin": "handmade",
+   "text": "AAA 转出 100\nBBB 收到 100\n收款人ID：1",
+   "expected": {
+    "payer_name": "AAA",
+    "receiver_name": "BBB",
+    "amount": 100,
+    "receiver_user_id": 1
+   }
+  },
+  {
+   "origin": "handmade",
+   "text": "AAA 射出 100\nBBB 接收 100",
+   "expected": {
+    "payer_name": "AAA",
+    "receiver_name": "BBB",
+    "amount": 100
+   }
+  },
+  {
+   "origin": "handmade",
+   "text": "AAA 转账 100\nBBB 收款 100",
+   "expected": {
+    "payer_name": "AAA",
+    "receiver_name": "BBB",
+    "amount": 100
+   }
+  },
+  {
+   "origin": "handmade",
+   "text": "AAA 扣减 100 蝌蚪\nBBB 接收 100 蝌蚪",
+   "expected": {
+    "payer_name": "AAA",
+    "receiver_name": "BBB",
+    "amount": 100
+   }
+  },
+  {
+   "origin": "handmade",
+   "text": "AAA扣减100蝌蚪\nBBB接收100蝌蚪",
+   "expected": null
+  },
+  {
+   "origin": "handmade",
+   "text": "  AAA   转出   100  \n  BBB  收到 100",
+   "expected": {
+    "payer_name": "AAA",
+    "receiver_name": "BBB",
+    "amount": 100
+   }
+  },
+  {
+   "origin": "handmade",
+   "text": "BBB 收到 100\nAAA 转出 100",
+   "expected": {
+    "payer_name": "AAA",
+    "receiver_name": "BBB",
+    "amount": 100
+   }
+  },
+  {
+   "origin": "handmade",
+   "text": "AAA 转出 100abc\nBBB 收到 100",
+   "expected": null
+  },
+  {
+   "origin": "handmade",
+   "text": "AAA 转出 1000\nBBB 收到 100",
+   "expected": null
+  },
+  {
+   "origin": "handmade",
+   "text": "AAA 转出 100\nCCC 转出 200\nBBB 收到 100",
+   "expected": {
+    "payer_name": "AAA",
+    "receiver_name": "BBB",
+    "amount": 100
+   }
+  },
+  {
+   "origin": "handmade",
+   "text": "转出 100\n收到 100",
+   "expected": null
+  },
+  {
+   "origin": "handmade",
+   "text": "A 转出 100\n\nB 收到 100",
+   "expected": {
+    "payer_name": "A",
+    "receiver_name": "B",
+    "amount": 100
+   }
+  },
+  {
+   "origin": "handmade",
+   "text": "<b>AAA</b> 转出 100\n<i>BBB</i> 收到 100",
+   "expected": {
+    "payer_name": "AAA",
+    "receiver_name": "BBB",
+    "amount": 100
+   }
+  },
+  {
+   "origin": "handmade",
+   "text": "<pre><code class=\"language-转账成功\">付款人：X\n收款人：Y\n金额：3</code></pre>",
+   "expected": {
+    "payer_name": "X",
+    "receiver_name": "Y",
+    "amount": 3
+   }
+  },
+  {
+   "origin": "handmade",
+   "text": "<a href='tg://user?id=1'>甲</a> 转出 10\n<a href='x'>乙</a> 收到 10",
+   "expected": {
+    "payer_name": "甲",
+    "receiver_name": "乙",
+    "amount": 10
+   }
+  },
+  {
+   "origin": "handmade",
+   "text": "付款人：A\n收款人：B\n金额：100\nAAA 转出 200\nBBB 收到 200",
+   "expected": {
+    "payer_name": "A",
+    "receiver_name": "B",
+    "amount": 100
+   }
+  },
+  {
+   "origin": "handmade",
+   "text": "付款人：A\n收款人：B\nAAA 转出 200\nBBB 收到 200",
+   "expected": {
+    "payer_name": "AAA",
+    "receiver_name": "BBB",
+    "amount": 200
+   }
+  },
+  {
+   "origin": "handmade",
+   "text": "甲 转出 5 魔力值\n乙 收到 5 魔力值",
+   "expected": {
+    "payer_name": "甲",
+    "receiver_name": "乙",
+    "amount": 5
+   }
+  },
+  {
+   "origin": "handmade",
+   "text": "甲 转出 0\n乙 收到 0",
+   "expected": {
+    "payer_name": "甲",
+    "receiver_name": "乙",
+    "amount": 0
+   }
+  },
+  {
+   "origin": "handmade",
+   "text": "甲 转出 007\n乙 收到 7",
+   "expected": {
+    "payer_name": "甲",
+    "receiver_name": "乙",
+    "amount": 7
+   }
+  },
+  {
+   "origin": "handmade",
+   "text": "甲 转出 123456789012345678901234567890\n乙 收到 123456789012345678901234567890",
+   "expected": {
+    "payer_name": "甲",
+    "receiver_name": "乙",
+    "amount": 123456789012345678901234567890
+   }
+  },
+  {
+   "origin": "handmade",
+   "text": "收到 100 元，谢谢",
+   "expected": null
+  },
+  {
+   "origin": "handmade",
+   "text": "我刚转出 100 给你\n你收到 100 了吗",
+   "expected": {
+    "payer_name": "我刚",
+    "receiver_name": "你",
+    "amount": 100
+   }
+  },
+  {
+   "origin": "handmade",
+   "text": "付款人：A B\n收款人：C D\n金额：12 魔力",
+   "expected": {
+    "payer_name": "A B",
+    "receiver_name": "C D",
+    "amount": 12
+   }
+  },
+  {
+   "origin": "handmade",
+   "text": "付款人：A\t\n收款人：B\n金额：\t12",
+   "expected": {
+    "payer_name": "A",
+    "receiver_name": "B",
+    "amount": 12
+   }
+  },
+  {
+   "origin": "handmade",
+   "text": "⚠️ 转账失败\n付款人：A\n收款人：B\n金额：100",
+   "expected": {
+    "payer_name": "A",
+    "receiver_name": "B",
+    "amount": 100
+   }
+  },
+  {
+   "origin": "handmade",
+   "text": "付款人：A\n收款人：B\n金额：100\n付款人ID：abc",
+   "expected": {
+    "payer_name": "A",
+    "receiver_name": "B",
+    "amount": 100
+   }
+  }
+ ]
+}

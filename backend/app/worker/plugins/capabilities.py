@@ -74,6 +74,8 @@ _P2_RELEASE = "0.109.0-beta.1"
 _THIS_RELEASE = "0.110.0-beta.1"
 # P3 第二部分（W1 迁移：通用规则页、试运行协议）发布的宿主版本；合并时随版本号顺延。
 _W1_RELEASE = "0.110.0-beta.2"
+# P4c（B1 转账通知解析下沉：payment_sources 扩展点）发布的宿主版本；合并时随版本号顺延。
+_PAYMENT_RELEASE = "0.111.0-beta.1"
 
 _DOC = "docs/PLUGIN-API-REFERENCE.md"
 
@@ -344,6 +346,17 @@ CAPABILITIES += (
         plugin_api="1.2",
         summary="插件代码同步阻塞事件循环 ≥200ms 记入该插件钩子统计的 blocked / blocking_ms（与 loop.slow_callback_duration 同口径）",
         doc=f"{_DOC}#钩子统计与弃用登记",
+    ),
+)
+
+# ── P4c：转账通知解析扩展点（B1 下沉）──
+CAPABILITIES += (
+    Capability(
+        name="payment.sources",
+        since=_PAYMENT_RELEASE,
+        plugin_api="1.3",
+        summary="plugin.json 声明 payment_sources，模块导出 parse_payment_notice(text, meta)（可 async，1 秒）返回 {payer_name, receiver_name, amount, payer_user_id?, receiver_user_id?, unit?} 或 None；只在可信 Bot ID 白名单通过后调用，只返回解析结果，结算仍由宿主执行；双跑对照期默认以宿主旧解析为准",
+        doc=f"{_DOC}#转账通知解析payment_sources",
     ),
 )
 

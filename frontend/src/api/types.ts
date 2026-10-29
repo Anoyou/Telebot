@@ -1022,6 +1022,8 @@ export interface SystemSettings {
     trace_payload_snapshot_retention_days: number;
     native_raw_persist_enabled: boolean;
     native_raw_retention_days: number;
+    /** 转账通知以 payment_sources 插件结果为准（0.111.0+，默认 false = 以宿主旧解析器为准）。 */
+    payment_source_plugin_authoritative?: boolean;
   };
   /** 控制台界面偏好；保存在服务端，PWA/浏览器间共享。 */
   ui_preferences?: {
