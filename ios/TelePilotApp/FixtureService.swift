@@ -1174,7 +1174,7 @@ actor FixtureService: AppServing {
                                              ["chat_id": -1009876543210, "status": "not_joined", "detail": "交互 Bot 还没有加入这个群"]],
             "query_commands": ["。玩法", "。联动玩法"], "query_response_template": "<b>当前可用联动玩法</b>\n{items}",
             "query_item_template": "• {name}", "query_empty_message": "当前没有可用玩法。",
-            "transfer_notice_template": "收到 {amount}", "debit_notice_template": "扣除 {amount}",
+            "transfer_notice_template": "收到 {amount}", "debit_notice_template": "<pre><code class=\"language-扣减成功\">{payer_name} 扣减 {amount} 蝌蚪\n{receiver_name} 接收 {amount} 蝌蚪，备注：这一行足够长，需要自动换行才能在气泡里完整显示</code></pre>",
             "rules": [
                 ["id": "rule-ask", "name": "AI 答疑", "enabled": true, "chat_ids": [-1001234567890], "trigger_mode": "keyword",
                  "trigger_texts": ["问问"], "module_start_keywords": [], "action": "module", "module_key": "content_assistant",
