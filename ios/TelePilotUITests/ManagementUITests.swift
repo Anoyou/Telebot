@@ -146,7 +146,11 @@ final class ManagementUITests: XCTestCase {
 
     func testRestoreCannotCommitWithoutPreviewingAFile() {
         let app = launch()
-        app.buttons["备份与维护"].tap()
+        // 0.21.0 起「备份与维护」排在「工具与设置」最后（命中调试之后），小屏首屏可能放不下：先滚到它。
+        let maintenance = app.buttons["备份与维护"]
+        XCTAssertTrue(app.buttons["more.accounts"].waitForExistence(timeout: 10))
+        reveal(maintenance, in: app)
+        maintenance.tap()
         app.buttons["配置导入与导出"].tap()
         let choose = app.buttons["选择文件"]
         for _ in 0..<8 where !choose.isHittable { app.swipeUp() }
@@ -155,16 +159,11 @@ final class ManagementUITests: XCTestCase {
         XCTAssertFalse(app.buttons["预览导入影响"].isEnabled)
     }
 
-    /// “关于 → App 更新日志”读取随 App 打包的 ios/CHANGELOG.md，fixture 模式下不连服务器也能显示，
+    /// “App 设置 › 关于 → App 更新日志”读取随 App 打包的 ios/CHANGELOG.md，fixture 模式下不连服务器也能显示，
     /// 并标出当前安装的版本。
     func testAboutShowsBundledAppChangelog() {
         let app = launch()
-        let about = app.buttons["more.about"]
-        // “更多”顶部的全局紧急停止说明较长，“关于与更新”可能在首屏之外；List 懒加载，先滚动再等待。
-        XCTAssertTrue(app.buttons["more.accounts"].waitForExistence(timeout: 10))
-        for _ in 0..<6 where !(about.exists && about.isHittable) { app.swipeUp() }
-        XCTAssertTrue(about.waitForExistence(timeout: 5))
-        about.tap()
+        openAppSettingsEntry("settings.about", in: app)
         let entry = app.buttons["about.appChangelog"]
         XCTAssertTrue(entry.waitForExistence(timeout: 10))
         for _ in 0..<4 where !entry.isHittable { app.swipeUp() }
@@ -185,13 +184,8 @@ final class ManagementUITests: XCTestCase {
 
     func testServerUpdateRequiresConfirmationBeforeApplying() {
         let app = launch()
-        let about = app.buttons["more.about"]
-        // “更多”顶部的全局紧急停止说明较长，“关于与更新”可能在首屏之外；List 懒加载，先滚动再等待。
-        XCTAssertTrue(app.buttons["more.accounts"].waitForExistence(timeout: 10))
-        for _ in 0..<6 where !(about.exists && about.isHittable) { app.swipeUp() }
-        XCTAssertTrue(about.waitForExistence(timeout: 5))
-        about.tap()
-        XCTAssertTrue(app.staticTexts["App 版本"].waitForExistence(timeout: 10))
+        openAppSettingsEntry("settings.update", in: app)
+        XCTAssertTrue(app.navigationBars["软件更新"].waitForExistence(timeout: 10))
         let open = app.buttons["update.open"]
         for _ in 0..<4 where !open.isHittable { app.swipeUp() }
         open.tap()
@@ -227,12 +221,7 @@ final class ManagementUITests: XCTestCase {
 
     func testServerUpdateReceiptSurvivesClosingPanel() {
         let app = launch()
-        let about = app.buttons["more.about"]
-        // “更多”顶部的全局紧急停止说明较长，“关于与更新”可能在首屏之外；List 懒加载，先滚动再等待。
-        XCTAssertTrue(app.buttons["more.accounts"].waitForExistence(timeout: 10))
-        for _ in 0..<6 where !(about.exists && about.isHittable) { app.swipeUp() }
-        XCTAssertTrue(about.waitForExistence(timeout: 5))
-        about.tap()
+        openAppSettingsEntry("settings.update", in: app)
         let open = app.buttons["update.open"]
         for _ in 0..<4 where !open.isHittable { app.swipeUp() }
         XCTAssertTrue(open.waitForExistence(timeout: 10))
@@ -384,6 +373,107 @@ final class ManagementUITests: XCTestCase {
         XCTAssertTrue(mode.waitForExistence(timeout: 15))
         mode.tap()
         XCTAssertTrue(app.staticTexts["runtime.profile"].waitForExistence(timeout: 15))
+    }
+
+    /// 0.21.0 按 iPhone「设置 › 通用」排序：
+    /// - 「更多」：「工具与设置」为 服务器设置 → Webhook → 命中调试 → 备份与维护；最后一组 App 只有「App 设置」，不再有「关于与更新」。
+    /// - 「App 设置」：最顶部一组「关于」「软件更新」（两页，标题 = 入口名），常用配置居中，「更换服务器／退出登录」单独在最底部一组。
+    /// - 「关于」只看信息不含更新按钮；「软件更新」有全 App 唯一的「检查服务器更新」与 App 安装包入口。
+    func testAppSettingsFollowsGeneralSettingsOrder() {
+        let app = launch()
+        XCTAssertTrue(app.buttons["more.accounts"].waitForExistence(timeout: 10))
+        let server = app.buttons["服务器设置"]
+        let webhook = app.buttons["Webhook"]
+        let debug = app.buttons["more.dispatchDebug"]
+        let maintenance = app.buttons["备份与维护"]
+        let settings = app.buttons["more.settings"]
+        reveal(settings, in: app)
+        // 小屏时滑到底后「服务器设置」可能已滚出可见区（List 回收单元格）：小步下拉直到整组都在。
+        for _ in 0..<3 where !(server.exists && settings.exists) {
+            let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.4))
+            start.press(forDuration: 0.05, thenDragTo: start.withOffset(CGVector(dx: 0, dy: 120)))
+        }
+        for element in [server, webhook, debug, maintenance] {
+            XCTAssertTrue(element.waitForExistence(timeout: 5), "\(element) 应在「工具与设置」里")
+        }
+        XCTAssertLessThan(server.frame.minY, webhook.frame.minY, "服务器设置应排在 Webhook 前")
+        XCTAssertLessThan(webhook.frame.minY, debug.frame.minY, "Webhook 应排在命中调试前")
+        XCTAssertLessThan(debug.frame.minY, maintenance.frame.minY, "备份与维护应排在本组最后")
+        XCTAssertLessThan(maintenance.frame.maxY, settings.frame.minY, "App 设置应在最后一组")
+        XCTAssertFalse(app.buttons["more.about"].exists, "「关于与更新」已拆分并移进 App 设置")
+        XCTAssertFalse(app.staticTexts["关于与更新"].exists)
+
+        reveal(settings, in: app)
+        settings.tap()
+        XCTAssertTrue(app.navigationBars["App 设置"].waitForExistence(timeout: 10))
+        let about = app.buttons["settings.about"]
+        let update = app.buttons["settings.update"]
+        let appearance = app.descendants(matching: .any)["settings.appearance"].firstMatch
+        XCTAssertTrue(about.waitForExistence(timeout: 10))
+        XCTAssertTrue(update.exists)
+        XCTAssertTrue(about.label.contains("关于"), about.label)
+        XCTAssertTrue(update.label.contains("软件更新"), update.label)
+        XCTAssertTrue(appearance.waitForExistence(timeout: 5))
+        XCTAssertLessThan(about.frame.minY, update.frame.minY, "关于在软件更新上方")
+        XCTAssertLessThan(update.frame.maxY, appearance.frame.minY, "关于／软件更新在最顶部一组，外观在其下")
+        let screenshot = XCTAttachment(screenshot: app.screenshot())
+        screenshot.name = "App 设置顶部"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+
+        // 危险操作单独在最底部一组：更换服务器、退出登录排在 Cloudflare Access 与其它配置之后。
+        let access = app.buttons["settings.cfAccess"]
+        let change = app.buttons["settings.changeServer"]
+        let logout = app.buttons["settings.logout"]
+        reveal(logout, in: app)
+        XCTAssertTrue(change.exists)
+        XCTAssertLessThan(change.frame.minY, logout.frame.minY)
+        if access.exists { XCTAssertLessThan(access.frame.maxY, change.frame.minY, "退出登录一组应在常用配置之后") }
+        let usage = app.staticTexts["管理功能使用服务器现有权限"]
+        if usage.exists { XCTAssertLessThan(usage.frame.maxY, change.frame.minY, "危险操作应在最底部") }
+
+        // 「关于」：标题 = 入口名，只有信息，不含更新按钮。
+        reveal(about, in: app, up: false)
+        about.tap()
+        XCTAssertTrue(app.navigationBars["关于"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.descendants(matching: .any)["about.appVersion"].firstMatch.waitForExistence(timeout: 10))
+        XCTAssertTrue(app.descendants(matching: .any)["about.serverVersion"].firstMatch.exists)
+        let changelog = app.buttons["about.appChangelog"]
+        XCTAssertTrue(changelog.exists)
+        for _ in 0..<4 { app.swipeUp() }
+        XCTAssertFalse(app.buttons["update.open"].exists, "检查服务器更新只在「软件更新」里")
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+
+        // 「软件更新」：标题 = 入口名，服务器与 App 两组。
+        XCTAssertTrue(update.waitForExistence(timeout: 10))
+        update.tap()
+        XCTAssertTrue(app.navigationBars["软件更新"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.descendants(matching: .any)["softwareUpdate.serverVersion"].firstMatch.waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["update.open"].waitForExistence(timeout: 10))
+        let appVersion = app.descendants(matching: .any)["softwareUpdate.appVersion"].firstMatch
+        let download = app.descendants(matching: .any)["softwareUpdate.appDownload"].firstMatch
+        if !appVersion.exists { app.swipeUp() }
+        XCTAssertTrue(appVersion.waitForExistence(timeout: 5))
+        XCTAssertTrue(download.exists)
+        XCTAssertFalse(app.buttons["about.appChangelog"].exists, "更新日志在「关于」里，不在软件更新重复")
+        let updateShot = XCTAttachment(screenshot: app.screenshot())
+        updateShot.name = "软件更新"
+        updateShot.lifetime = .keepAlways
+        add(updateShot)
+    }
+
+    /// 0.21.0：「关于」「软件更新」拆成两页，放在「更多 › App 设置」最顶部一组（像 iPhone「通用」的「关于本机／软件更新」）。
+    /// 「App 设置」在「更多」最后一组，List 懒加载：先滑到它再点，再点设置页顶部的入口。
+    private func openAppSettingsEntry(_ identifier: String, in app: XCUIApplication) {
+        let settings = app.buttons["more.settings"]
+        XCTAssertTrue(app.buttons["more.accounts"].waitForExistence(timeout: 10))
+        reveal(settings, in: app)
+        XCTAssertTrue(settings.waitForExistence(timeout: 5))
+        settings.tap()
+        XCTAssertTrue(app.navigationBars["App 设置"].waitForExistence(timeout: 10))
+        let entry = app.buttons[identifier]
+        XCTAssertTrue(entry.waitForExistence(timeout: 10))
+        entry.tap()
     }
 
     /// 在运行树列表里上下滑动，直到元素可点。Dock 的标签栏浮在列表之上，元素中心落在标签栏里时

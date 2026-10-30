@@ -25,6 +25,10 @@
 
 ## [Unreleased]
 
+### iOS 0.21.0：设置按 iPhone「通用」排序，关于与软件更新拆开置顶
+
+- **iOS 0.21.0**：「关于与更新」拆为「关于」（`AboutView`，只放版本、更新日志、服务器信息、项目与许可）与「软件更新」（新 `SoftwareUpdateView`：服务器当前版本 / 通道 / 可更新版本 + 全 App 唯一的「检查服务器更新」`ServerUpdateButton`；App 当前版本 + 「获取最新安装包」链接到「iOS 未签名 IPA」工作流），两页放在「App 设置」最顶部一组（`settings.about` / `settings.update`）。「App 设置」改为 关于·软件更新 → 外观 → 原生体验 → 界面锁 → 当前连接 → 使用方式 → 更换服务器·退出登录（最底部单独一组）。「更多」主结构不变（紧急停止 → 常用 → 管理 → 工具与设置 → App），「工具与设置」改为 服务器设置 → Webhook → 命中调试 → 备份与维护，App 组只剩「App 设置」（服务器有新版本时行内提示），去掉 `MoreDestination.about` 与 `more.about`。UI 测试新增 `testAppSettingsFollowsGeneralSettingsOrder`，原来经「更多 › 关于与更新」进入的 4 条用例改走「App 设置 › 关于 / 软件更新」；`ios/DESIGN.md` 新增「设置类页面排序」。不改服务器。
+
 ## [0.113.0-beta.4] - 2026-10-30 · patch（补丁预发布） · Agent 系统级上下文主动查账号：新增管理 Bot 汇总工具、未关联账号时先查账号
 
 ### Agent：系统级上下文主动查账号（不再让用户报账号 ID）

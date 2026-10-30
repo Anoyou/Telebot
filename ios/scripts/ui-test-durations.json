@@ -20,6 +20,7 @@
   "DiagnosticsUITests/testServerSettingsEditsCommonKeysAndKeepsRawEditor": 60,
   "ManagementUITests/testAboutShowsBundledAppChangelog": 102,
   "ManagementUITests/testAllSFSymbolNamesInSourcesExist": 8,
+  "ManagementUITests/testAppSettingsFollowsGeneralSettingsOrder": 55,
   "ManagementUITests/testInteractionCenterEditsRulesAndSaves": 60,
   "ManagementUITests/testLedgerResetRequiresExactPhraseBeforeConfirmation": 28,
   "ManagementUITests/testLedgerShowsSummaryAndCharts": 16,

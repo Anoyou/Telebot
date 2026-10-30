@@ -313,7 +313,7 @@ extension LabelStyle where Self == VerticalQuickLabelStyle {
 }
 
 /// 概览顶部的紧凑品牌头：App 图标、名称、一句话说明与当前连接的服务器（原“关于”页顶部卡片）。
-/// 概览顶部：当前连接的服务器。点按进入“关于”查看完整服务器信息与检查更新。
+/// 概览顶部：当前连接的服务器。点按进入“关于”查看完整服务器信息（检查更新在 App 设置 › 软件更新）。
 private struct OverviewServerHeader: View {
     let host: String?
     let version: ServerVersion?

@@ -9,6 +9,8 @@ enum AppInfo {
     static let issuesURL = URL(string: "https://github.com/Anoyou/Telebot/issues")!
     static let licenseURL = URL(string: "https://github.com/Anoyou/Telebot/blob/main/LICENSE")!
     static let usageGuideURL = URL(string: "https://github.com/Anoyou/Telebot/blob/main/docs/USAGE-GUIDE.md")!
+    /// 未签名 IPA 由「iOS 未签名 IPA」工作流生成（Beta 合并后自动打包），在这里下载最新工件。
+    static let ipaBuildsURL = URL(string: "https://github.com/Anoyou/Telebot/actions/workflows/ios-ipa.yml")!
 
     static var version: String { Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "未知" }
     static var build: String { Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "未知" }
@@ -36,6 +38,8 @@ enum AppInfo {
     }
 }
 
+/// App 设置 › 关于（0.21.0 从「关于与更新」拆出，像 iPhone「通用 › 关于本机」）：App 与服务器的版本信息、
+/// 更新日志、项目链接与许可。检查／应用更新在「App 设置 › 软件更新」（SoftwareUpdateView）。
 struct AboutView: View {
     @Environment(AppModel.self) private var model
 
@@ -83,7 +87,6 @@ struct AboutView: View {
                 if let error = model.versionError {
                     NoticeView(title: model.serverVersion == nil ? "版本读取失败" : "版本信息已过期", message: error)
                 }
-                ServerUpdateButton()
                 if let url = model.serverURL {
                     Link(destination: url) { Label("打开 Web 管理台", systemImage: "safari") }
                 }
@@ -107,6 +110,52 @@ struct AboutView: View {
         .navigationTitle("关于")
         .navigationBarTitleDisplayMode(.inline)
         .accessibilityIdentifier("about.screen")
+    }
+}
+
+/// App 设置 › 软件更新（0.21.0 从「关于与更新」拆出，像 iPhone「通用 › 软件更新」）：服务器更新（全 App 唯一的
+/// 「检查服务器更新」入口，面板里检查、切换通道、自动检查、确认后应用）与 App 安装包的获取方式。
+struct SoftwareUpdateView: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        List {
+            Section {
+                LabeledContent {
+                    Text(model.serverVersion?.version ?? "尚未读取").monospacedDigit().textSelection(.enabled)
+                } label: { Label("当前版本", systemImage: "shippingbox") }
+                    .accessibilityIdentifier("softwareUpdate.serverVersion")
+                if let version = model.serverVersion {
+                    LabeledContent {
+                        Text(AppInfo.channelLabel(version.channel))
+                    } label: { Label("发布通道", systemImage: "arrow.triangle.branch") }
+                }
+                if let target = model.serverUpdateTargetVersion {
+                    LabeledContent {
+                        Text(target).monospacedDigit().foregroundStyle(.tint)
+                    } label: { Label("可更新到", systemImage: "sparkles") }
+                        .accessibilityIdentifier("softwareUpdate.serverTarget")
+                }
+                ServerUpdateButton()
+            } header: { Text("服务器") } footer: {
+                Text("显示服务器最近一次检查（自动或手动）的结论。点“检查服务器更新”立即检查，也可以切换更新通道、设置自动检查；应用更新前都会先确认。")
+            }
+
+            Section {
+                LabeledContent {
+                    Text(AppInfo.versionLabel).monospacedDigit().textSelection(.enabled)
+                } label: { Label("当前版本", systemImage: "iphone") }
+                    .accessibilityIdentifier("softwareUpdate.appVersion")
+                Link(destination: AppInfo.ipaBuildsURL) { Label("获取最新安装包", systemImage: "arrow.down.app") }
+                    .accessibilityIdentifier("softwareUpdate.appDownload")
+            } header: { Text("App") } footer: {
+                Text("App 以未签名安装包（IPA）分发，不经过 App Store，不能在 App 内自动更新：在 GitHub「iOS 未签名 IPA」里下载最新工件（需登录 GitHub），用自签工具安装。服务器与 App 独立更新，版本号不同不代表不兼容；每个版本的变化见“关于 › App 更新日志”。")
+            }
+        }
+        .symbolRenderingMode(.hierarchical)
+        .navigationTitle("软件更新")
+        .navigationBarTitleDisplayMode(.inline)
+        .accessibilityIdentifier("softwareUpdate.screen")
     }
 }
 

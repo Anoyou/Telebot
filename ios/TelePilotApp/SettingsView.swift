@@ -21,6 +21,25 @@ struct SettingsView: View {
 
     private var form: some View {
             Form {
+                // 0.21.0 起按 iPhone「设置 › 通用」排序：信息类在最上（关于、软件更新，像「关于本机／软件更新」），
+                // 常用配置居中，危险操作（更换服务器、退出登录）单独放最底部一组。
+                Section {
+                    NavigationLink { AboutView() } label: { Label("关于", systemImage: "info.circle") }
+                        .accessibilityIdentifier("settings.about")
+                    NavigationLink { SoftwareUpdateView() } label: {
+                        Label {
+                            HStack {
+                                Text("软件更新")
+                                Spacer()
+                                if model.serverUpdateAvailable {
+                                    Text(model.serverUpdateTargetVersion.map { "服务器 \($0)" } ?? "服务器有新版本")
+                                        .font(.caption.weight(.semibold)).foregroundStyle(.tint)
+                                }
+                            }
+                        } icon: { Image(systemName: "arrow.down.circle") }
+                    }
+                    .accessibilityIdentifier("settings.update")
+                }
                 Section {
                     Picker(selection: $appearanceRaw) {
                         ForEach(AppAppearance.allCases) { item in
@@ -37,6 +56,27 @@ struct SettingsView: View {
                     NavigationLink { DockCustomizationView() } label: { Label("自定义 Dock", systemImage: "dock.rectangle") }
                         .accessibilityIdentifier("settings.dock")
                     NavigationLink { PushSettingsView() } label: { Label("Apple 推送通知", systemImage: "bell.badge") }
+                }
+                Section {
+                    Toggle(isOn: Binding(
+                        get: { lock.isEnabled },
+                        set: { enabled in Task { await lock.setEnabled(enabled) } }
+                    )) { Label("Face ID／设备验证", systemImage: "faceid") }
+                    .disabled(lock.isAuthenticating)
+                    .accessibilityIdentifier("settings.interfaceLock")
+                    if lock.isEnabled {
+                        Picker(selection: Binding(get: { lock.graceSeconds }, set: { lock.graceSeconds = $0 })) {
+                            ForEach(AppLockModel.graceOptions, id: \.self) { seconds in
+                                Text(Self.graceLabel(seconds)).tag(seconds)
+                            }
+                        } label: { Label("需要验证", systemImage: "timer") }
+                        .accessibilityIdentifier("settings.interfaceLockGrace")
+                    }
+                    if let error = lock.failureMessage {
+                        NoticeView(title: "界面锁设置未改变", message: error)
+                    }
+                } header: { Text("界面锁") } footer: {
+                    Text("开启后，离开 App 超过所选时间再返回，需要通过 Face ID、Touch ID 或设备密码解锁。App 不会在多任务切换器、截屏或录屏时遮挡内容。适当的宽限期便于切到 Telegram 查看验证码。此功能不删除服务器会话。")
                 }
                 Section("当前连接") {
                     LabeledContent {
@@ -60,27 +100,6 @@ struct SettingsView: View {
                     .accessibilityIdentifier("settings.cfAccess")
                 }
                 Section {
-                    Toggle(isOn: Binding(
-                        get: { lock.isEnabled },
-                        set: { enabled in Task { await lock.setEnabled(enabled) } }
-                    )) { Label("Face ID／设备验证", systemImage: "faceid") }
-                    .disabled(lock.isAuthenticating)
-                    .accessibilityIdentifier("settings.interfaceLock")
-                    if lock.isEnabled {
-                        Picker(selection: Binding(get: { lock.graceSeconds }, set: { lock.graceSeconds = $0 })) {
-                            ForEach(AppLockModel.graceOptions, id: \.self) { seconds in
-                                Text(Self.graceLabel(seconds)).tag(seconds)
-                            }
-                        } label: { Label("需要验证", systemImage: "timer") }
-                        .accessibilityIdentifier("settings.interfaceLockGrace")
-                    }
-                    if let error = lock.failureMessage {
-                        NoticeView(title: "界面锁设置未改变", message: error)
-                    }
-                } header: { Text("界面锁") } footer: {
-                    Text("开启后，离开 App 超过所选时间再返回，需要通过 Face ID、Touch ID 或设备密码解锁。App 不会在多任务切换器、截屏或录屏时遮挡内容。适当的宽限期便于切到 Telegram 查看验证码。此功能不删除服务器会话。")
-                }
-                Section {
                     Label("密码不保存在 App 中", systemImage: "lock.shield")
                     Label("仅在前台读取服务器数据", systemImage: "iphone")
                     Label("管理功能使用服务器现有权限", systemImage: "server.rack")
@@ -98,12 +117,15 @@ struct SettingsView: View {
                     }
                     .frame(minHeight: 44).accessibilityIdentifier("settings.logout")
                     .modifier(logoutConfirmation(.logout))
+                } footer: {
+                    Text("会清除这台设备上的登录状态和已读取的数据，不会停止服务器上的任务。")
                 }
             }
             .symbolRenderingMode(.hierarchical)
             .navigationTitle("App 设置").navigationBarTitleDisplayMode(.inline)
             .accessibilityIdentifier("settings.screen")
             .task { _ = try? await model.loadCloudflareAccess() }
+            .task { await model.refreshServerUpdateStatus() }
     }
 }
 

@@ -126,7 +126,7 @@ enum ServerUpdateText {
 
 // MARK: - 入口按钮
 
-/// 唯一的“检查服务器更新”入口（关于与更新页）：显示服务器最近一次检查（自动或手动）的结论，点按打开更新面板。
+/// 唯一的“检查服务器更新”入口（App 设置 › 软件更新）：显示服务器最近一次检查（自动或手动）的结论，点按打开更新面板。
 struct ServerUpdateButton: View {
     @Environment(AppModel.self) private var model
     @State private var presented = false
