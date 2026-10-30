@@ -681,3 +681,75 @@ export async function installPluginConfigFixture(
   });
   return { writes };
 }
+
+// 第 20 轮：Agent 会话账号上下文（只有 1 个账号时新会话默认关联；账号页 / 插件页带账号进入）。
+export type AgentAccountFixtureOptions = {
+  /** 账号列表；缺省只有 accountFixture 一个。 */
+  accounts?: Array<Record<string, unknown>>;
+  /** 服务器是否声明 features.agent_session_default_account（旧服务器为 false）。 */
+  serverDefault?: boolean;
+  /** 已有会话。 */
+  sessions?: Array<Record<string, unknown>>;
+};
+
+export const agentSessionFixture = (overrides: Record<string, unknown> = {}) => ({
+  id: "agent-account-session", web_user_id: 1, bot_tg_user_id: null, account_id: null, channel: "web",
+  title: "已有会话", origin: "interactive", status: "active", memory_summary: "", memory_state: {},
+  created_at: "Wed 2026-10-21 8:00 AM CST (UTC+08:00)", updated_at: "Wed 2026-10-21 8:00 AM CST (UTC+08:00)",
+  ...overrides,
+});
+
+export async function installAgentAccountFixture(page: Page, options: AgentAccountFixtureOptions = {}) {
+  const accounts = options.accounts ?? [accountFixture];
+  const state = {
+    sessions: [...(options.sessions ?? [])] as Array<Record<string, unknown>>,
+    creates: [] as Array<Record<string, unknown>>,
+    patches: [] as Array<{ id: string; body: Record<string, unknown> }>,
+  };
+  const fulfill = (route: Route, body: unknown) =>
+    route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) });
+  await page.route((url) => url.pathname === "/api/accounts", (route) => fulfill(route, accounts));
+  await page.route((url) => url.pathname === "/api/system/capabilities", (route) =>
+    fulfill(route, {
+      ...platformCapabilitiesFixture,
+      features: options.serverDefault === false ? {} : { agent_session_default_account: true },
+    }));
+  await page.route((url) => url.pathname === "/api/system-agent/config", (route) => fulfill(route, {
+    enabled: true, provider_id: 1, model: "fixture-model", fallback_provider_ids: [],
+    require_tool_approval: false, max_steps: 8, max_tool_calls: 24, session_token_limit: 16_384,
+  }));
+  await page.route((url) => url.pathname === "/api/system-agent/sessions", async (route) => {
+    const request = route.request();
+    if (request.method() === "POST") {
+      const body = (request.postDataJSON() ?? {}) as Record<string, unknown>;
+      state.creates.push(body);
+      // 与后端一致：未指定账号且 default_account=true 时，只有 1 个账号才自动关联；旧服务器忽略该字段。
+      let accountId = (body.account_id as number | null | undefined) ?? null;
+      let autoLinked = false;
+      if (accountId == null && body.default_account === true && options.serverDefault !== false && accounts.length === 1) {
+        accountId = accounts[0].id as number;
+        autoLinked = true;
+      }
+      const session = agentSessionFixture({
+        id: `agent-account-new-${state.creates.length}`, title: "新会话", account_id: accountId,
+      });
+      state.sessions.unshift(session);
+      await fulfill(route, options.serverDefault === false ? session : { ...session, account_auto_linked: autoLinked });
+      return;
+    }
+    await fulfill(route, state.sessions);
+  });
+  await page.route((url) => /^\/api\/system-agent\/sessions\/[^/]+$/.test(url.pathname), async (route) => {
+    const id = decodeURIComponent(new URL(route.request().url()).pathname.split("/").pop() || "");
+    const session = state.sessions.find((item) => item.id === id);
+    if (route.request().method() === "PATCH" && session) {
+      const body = (route.request().postDataJSON() ?? {}) as Record<string, unknown>;
+      state.patches.push({ id, body });
+      if ("account_id" in body) session.account_id = body.account_id ?? null;
+    }
+    if (!session) return route.fulfill({ status: 404, contentType: "application/json", body: JSON.stringify({ detail: { code: "SESSION_NOT_FOUND" } }) });
+    await fulfill(route, session);
+  });
+  await page.route((url) => /^\/api\/system-agent\/sessions\/[^/]+\/messages$/.test(url.pathname), (route) => fulfill(route, []));
+  return state;
+}

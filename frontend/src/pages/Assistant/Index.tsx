@@ -19,6 +19,7 @@ import {
   cancelSystemAgentRun,
   clearSystemAgentQueue,
   createSystemAgentSession,
+  updateSystemAgentSession,
   deleteSystemAgentQueueItem,
   deleteSystemAgentSession,
   getSystemAgentRun,
@@ -62,6 +63,16 @@ import { Composer, type ComposerAttachment } from "@/components/assistant/Compos
 import { AgentSkillsDialog } from "@/components/assistant/AgentSkillsSection";
 import { AgentMark } from "@/components/assistant/AgentMark";
 import { useAssistantDock } from "@/components/assistant/AssistantDock";
+import {
+  AGENT_ACCOUNT_PARAM,
+  AGENT_ACCOUNT_SOURCE_LABEL,
+  AGENT_FROM_PARAM,
+  agentAccountFromSearch,
+  draftDisplayAccountId,
+  newSessionAccountPayload,
+  type AgentPageAccount,
+} from "@/components/assistant/assistantDockState";
+import { getPlatformCapabilities } from "@/api/system";
 import { Conversation, type LiveBubble } from "@/components/assistant/Conversation";
 import { TaskCenter } from "@/components/assistant/TaskCenter";
 import {
@@ -227,6 +238,7 @@ export function AssistantIndex() {
     collapsed: assistantCollapsed,
     setStreaming: setDockStreaming,
     notifyOutcome,
+    pageAccount,
   } = useAssistantDock();
   const [activeId, setActiveId] = useState<string | null>(null);
   const activeIdRef = useRef(activeId);
@@ -238,6 +250,12 @@ export function AssistantIndex() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [sessionSidebarCollapsed, setSessionSidebarCollapsed] = useState(false);
   const [accountId, setAccountId] = useState<number | "">("");
+  /** 草稿（尚未建会话）里用户显式选了「系统级」：不再默认关联唯一账号。 */
+  const [explicitGlobal, setExplicitGlobal] = useState(false);
+  /** 新会话草稿：有历史会话时也不自动恢复最近会话（从账号页 / 插件页带账号进入时使用）。 */
+  const [newDraft, setNewDraft] = useState(false);
+  /** 账号上下文提示（自动关联唯一账号 / 从某页带入账号）。 */
+  const [accountNotice, setAccountNotice] = useState("");
   const [live, setLive] = useState<LiveBubble[]>([]);
   const [streaming, setStreaming] = useState(false);
   const [retryingMessageId, setRetryingMessageId] = useState<number | null>(null);
@@ -342,6 +360,9 @@ export function AssistantIndex() {
     () => (Array.isArray(sessionsQ.data) ? sessionsQ.data : []),
     [sessionsQ.data],
   );
+  const sessionOptionsRef = useRef(sessionOptions);
+  sessionOptionsRef.current = sessionOptions;
+  const hasOpenRunRef = useRef(false);
   const accountsQ = useQuery({
     queryKey: ["accounts"],
     queryFn: listAccounts,
@@ -352,6 +373,20 @@ export function AssistantIndex() {
     refetchOnMount: "always",
   });
   const accountOptions = Array.isArray(accountsQ.data) ? accountsQ.data : [];
+  const platformCapsQ = useQuery({
+    queryKey: ["system", "capabilities"],
+    queryFn: getPlatformCapabilities,
+    staleTime: 15_000,
+  });
+  // 新服务器（features.agent_session_default_account）由服务器决定是否关联唯一账号；旧服务器客户端按账号数自己填。
+  const serverSupportsDefaultAccount = platformCapsQ.data?.features?.agent_session_default_account === true;
+  const accountIds = accountsQ.isSuccess ? accountOptions.map((account) => account.id) : null;
+  const accountLabel = (id: number | null | undefined): string => {
+    if (id == null) return "";
+    const account = accountOptions.find((item) => item.id === id);
+    const name = account?.display_name || account?.phone || account?.tg_username || "";
+    return name ? `${name}（#${id}）` : `#${id}`;
+  };
   const activeSession = sessionOptions.find((session) => session.id === activeId) ?? null;
   const viewingBotSession = activeSession?.channel === "bot";
   const allRuns = useMemo(
@@ -394,6 +429,7 @@ export function AssistantIndex() {
     [currentQueue],
   );
   const hasOpenRun = Boolean(currentRun || streaming);
+  hasOpenRunRef.current = hasOpenRun;
   const memoryQ = useQuery({
     queryKey: ["system-agent", "user-memory"],
     queryFn: listSystemAgentUserMemory,
@@ -457,22 +493,79 @@ export function AssistantIndex() {
     if (!activeId || !sessionOptions.length) return;
     const match = sessionOptions.find((s) => s.id === activeId);
     if (!match) return;
-    if (match.account_id != null) {
-      setAccountId(match.account_id);
-    }
+    // 切到系统级会话时也要清空，否则下一条消息会把上个会话的账号带进来。
+    setAccountId(match.account_id ?? "");
     if (match.origin === "scheduled") {
       setOriginFilter((prev) => (prev === "all" ? "scheduled" : prev));
     }
   }, [activeId, sessionOptions]);
 
+  useEffect(() => {
+    if (activeId) {
+      setNewDraft(false);
+      setExplicitGlobal(false);
+    }
+  }, [activeId]);
+
+  // 进入新会话草稿并带入账号（从账号页 / 插件页进入 Agent）。
+  const accountDraftAtRef = useRef(0);
+  const startAccountDraft = useCallback(
+    (account: AgentPageAccount) => {
+      accountDraftAtRef.current = Date.now();
+      abortRef.current?.abort();
+      abortRef.current = null;
+      clearLiveStreamingState();
+      setStreaming(false);
+      setLive([]);
+      setNewDraft(true);
+      setActiveId(null);
+      setAccountId(account.id);
+      setExplicitGlobal(false);
+      setAccountNotice(`已带入账号（来自${AGENT_ACCOUNT_SOURCE_LABEL[account.source]}），发送后新建会话。`);
+    },
+    [clearLiveStreamingState],
+  );
+
+  // 深链 ?agent_account=ID&agent_from=…：账号页 / 插件页「问 Agent」按钮
+  useEffect(() => {
+    const requested = agentAccountFromSearch(`?${searchParams.toString()}`);
+    if (!requested) return;
+    startAccountDraft(requested);
+    const next = new URLSearchParams(searchParams);
+    next.delete(AGENT_ACCOUNT_PARAM);
+    next.delete(AGENT_FROM_PARAM);
+    setSearchParams(next, { replace: true });
+  }, [searchParams, setSearchParams, startAccountDraft]);
+
+  // 在带账号的页面（账号详情、账号插件配置、插件页所选账号）打开 Agent：当前会话不是这个账号时，
+  // 进入带该账号的新会话草稿；正在生成回答时不打断。
+  const pageAccountRef = useRef(pageAccount);
+  pageAccountRef.current = pageAccount;
+  useEffect(() => {
+    if (assistantCollapsed) return;
+    const account = pageAccountRef.current;
+    if (!account) return;
+    if (agentAccountFromSearch(window.location.search)) return;
+    // 同一次展开里「问 Agent」深链已经带入过账号
+    if (Date.now() - accountDraftAtRef.current < 1_000) return;
+    if (hasOpenRunRef.current) return;
+    const current = activeIdRef.current
+      ? sessionOptionsRef.current.find((session) => session.id === activeIdRef.current)
+      : null;
+    if (activeIdRef.current && (current?.account_id ?? null) === account.id) return;
+    startAccountDraft(account);
+    // 只在 Dock 展开的那一刻判断；之后用户切换会话不再干预。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [assistantCollapsed]);
+
   // 恢复最后一个 active 会话
   useEffect(() => {
-    if (activeId || !sessionOptions.length) return;
+    if (activeId || newDraft || !sessionOptions.length) return;
     setActiveId(sessionOptions[0].id);
     if (sessionOptions[0].account_id != null) {
       setAccountId(sessionOptions[0].account_id);
     }
-  }, [sessionOptions, activeId]);
+  }, [sessionOptions, activeId, newDraft]);
 
   useEffect(() => {
     setRuntimeSelection(null);
@@ -517,12 +610,38 @@ export function AssistantIndex() {
     writeDraft(meQ.data.id, activeId, composerValue);
   }, [activeId, composerValue, meQ.data?.id]);
 
+  /** 新会话账号字段：草稿里用草稿的选择，否则按默认（只有 1 个账号时关联它，多账号系统级）。 */
+  const newSessionPayload = (fromDraft: boolean) =>
+    newSessionAccountPayload({
+      selectedAccountId: fromDraft && accountId !== "" ? Number(accountId) : null,
+      explicitGlobal: fromDraft && explicitGlobal,
+      accountIds,
+      serverSupportsDefault: serverSupportsDefaultAccount,
+    });
+
+  const noteCreatedSessionAccount = (
+    session: SystemAgentSession,
+    payload: ReturnType<typeof newSessionAccountPayload>,
+  ) => {
+    setAccountId(session.account_id ?? "");
+    const autoLinked =
+      session.account_auto_linked === true
+      || (payload.default_account === true && payload.account_id != null && session.account_id === payload.account_id);
+    if (autoLinked && session.account_id != null) {
+      setAccountNotice(`只有一个账号，新会话已自动关联 ${accountLabel(session.account_id)}；可在「账号上下文」改回系统级。`);
+    } else if (session.account_id == null) {
+      setAccountNotice("");
+    }
+  };
+
   const createMut = useMutation({
-    mutationFn: () =>
-      createSystemAgentSession({
-        account_id: accountId === "" ? null : Number(accountId),
-      }),
-    onSuccess: (session) => {
+    mutationFn: async () => {
+      const payload = newSessionPayload(!activeIdRef.current);
+      const session = await createSystemAgentSession(payload);
+      return { session, payload };
+    },
+    onSuccess: ({ session, payload }) => {
+      noteCreatedSessionAccount(session, payload);
       void qc.invalidateQueries({ queryKey: ["system-agent", "sessions"] });
       abortRef.current?.abort();
       abortRef.current = null;
@@ -574,6 +693,40 @@ export function AssistantIndex() {
     },
     onError: (e) => toast.error(getErrMsg(e)),
   });
+
+  // 账号上下文下拉：草稿里只记选择；已有会话时立即 PATCH 会话（含改回系统级），与 iOS 会话设置一致。
+  const accountSelectValue: number | null = activeId
+    ? accountId === "" ? null : Number(accountId)
+    : draftDisplayAccountId({
+      selectedAccountId: accountId === "" ? null : Number(accountId),
+      explicitGlobal,
+      accountIds,
+    });
+  const accountContextMut = useMutation({
+    mutationFn: ({ sessionId, nextAccountId }: { sessionId: string; nextAccountId: number | null }) =>
+      updateSystemAgentSession(sessionId, { account_id: nextAccountId }),
+    onSuccess: (session) => {
+      qc.setQueryData<SystemAgentSession[]>(["system-agent", "sessions"], (prev) =>
+        Array.isArray(prev) ? prev.map((item) => (item.id === session.id ? { ...item, account_id: session.account_id } : item)) : prev,
+      );
+      if (activeIdRef.current === session.id) setAccountId(session.account_id ?? "");
+      void qc.invalidateQueries({ queryKey: ["system-agent", "sessions"] });
+    },
+    onError: (e) => {
+      toast.error(getErrMsg(e));
+      const current = sessionOptionsRef.current.find((item) => item.id === activeIdRef.current);
+      setAccountId(current?.account_id ?? "");
+    },
+  });
+  const changeAccountContext = (next: number | null) => {
+    setAccountNotice("");
+    setAccountId(next ?? "");
+    if (!activeId) {
+      setExplicitGlobal(next === null);
+      return;
+    }
+    accountContextMut.mutate({ sessionId: activeId, nextAccountId: next });
+  };
 
   const createMemoryMut = useMutation({
     mutationFn: (content: string) => createSystemAgentUserMemory({ content }),
@@ -756,12 +909,14 @@ export function AssistantIndex() {
   const ensureSession = async (): Promise<string> => {
     if (activeId) return activeId;
     const startedActiveId = activeIdRef.current;
-    const session = await createSystemAgentSession({
-      account_id: accountId === "" ? null : Number(accountId),
-    });
+    const payload = newSessionPayload(true);
+    const session = await createSystemAgentSession(payload);
     await qc.invalidateQueries({ queryKey: ["system-agent", "sessions"] });
     // POST 期间用户可能已手动切换到别的会话；迟到的 setActiveId 会把用户拽回新会话。
-    if (activeIdRef.current === startedActiveId) setActiveId(session.id);
+    if (activeIdRef.current === startedActiveId) {
+      setActiveId(session.id);
+      noteCreatedSessionAccount(session, payload);
+    }
     return session.id;
   };
 
@@ -1781,8 +1936,11 @@ export function AssistantIndex() {
         <label className="flex min-w-0 items-center gap-1.5">
           <span className="shrink-0 text-sm text-muted-foreground">账号上下文</span>
           <Select
-            value={accountId === "" ? "" : String(accountId)}
-            onChange={(event) => setAccountId(event.target.value ? Number(event.target.value) : "")}
+            aria-label="账号上下文"
+            data-testid="agent-account-context"
+            value={accountSelectValue === null ? "" : String(accountSelectValue)}
+            disabled={viewingBotSession || accountContextMut.isPending}
+            onChange={(event) => changeAccountContext(event.target.value ? Number(event.target.value) : null)}
             className="h-8 w-44 min-w-0 text-xs"
           >
             <option value="">系统级</option>
@@ -1793,6 +1951,15 @@ export function AssistantIndex() {
             ))}
           </Select>
         </label>
+        {accountNotice ? (
+          <span
+            data-testid="agent-account-notice"
+            className="min-w-0 max-w-72 truncate text-xs text-muted-foreground"
+            title={accountNotice}
+          >
+            {accountNotice}
+          </span>
+        ) : null}
         {(streaming || actualSelectionDiffers) && displayedSelection ? (
           <span className="min-w-0 max-w-56 truncate text-xs text-muted-foreground">
             实际调用：{displayedSelection.providerName} · {displayedSelection.model}
@@ -2245,7 +2412,7 @@ export function AssistantIndex() {
             onClearQueue={(sessionId) => void clearQueue(sessionId)}
             onResumeQueue={(sessionId) => void resumeQueue(sessionId)}
           />
-          {!activeId ? (
+          {!activeId && !newDraft ? (
             <div className="flex flex-1 items-center justify-center p-6">
               <div className="max-w-sm text-center">
                 <MessageCircle className="mx-auto h-10 w-10 text-muted-foreground/50" />

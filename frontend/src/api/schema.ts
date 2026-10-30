@@ -13076,11 +13076,23 @@ export interface components {
         SystemAgentSessionCreate: {
             /** Account Id */
             account_id?: number | null;
+            /**
+             * Default Account
+             * @description 第 20 轮：未传 account_id 时，若服务器只有 1 个账号则自动关联它（多账号仍为系统级）。客户端用户显式选「全局 / 系统级」时不要传 true。旧服务器忽略该字段，客户端可按 GET /api/system/capabilities 的 features.agent_session_default_account 探测。
+             * @default false
+             */
+            default_account: boolean;
             /** Title */
             title?: string | null;
         };
         /** SystemAgentSessionOut */
         SystemAgentSessionOut: {
+            /**
+             * Account Auto Linked
+             * @description 仅新建会话响应：本次因 default_account=true 且服务器只有 1 个账号而自动关联了 account_id
+             * @default false
+             */
+            account_auto_linked: boolean;
             /** Account Id */
             account_id?: number | null;
             /** Bot Tg User Id */

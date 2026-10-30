@@ -75,6 +75,8 @@ import {
 
 import { featureConfigPath } from "./_shared/featureConfig";
 import { AccountRuntimePanel } from "./AccountRuntimePanel";
+import { AskAgentButton } from "@/components/assistant/AskAgentButton";
+import { useAgentPageAccount } from "@/components/assistant/AssistantDock";
 import { PluginWorkspaceHeader } from "./WorkspaceHeader";
 
 type ModuleCategory = "direct_passthrough" | "interactive" | "automation" | "utility";
@@ -276,6 +278,8 @@ export function PluginsHome() {
   }, [accounts, searchParams]);
 
   const selectedAccount = accounts.find((a) => a.id === selectedAid) ?? null;
+  // 在插件页打开 Agent 时带入当前所选账号（第 20 轮）。
+  useAgentPageAccount(selectedAccount ? { id: selectedAccount.id, source: "plugins" } : null);
   const accountFeaturesQ = useQuery({
     queryKey: ["account", selectedAid, "features"],
     queryFn: () => listAccountFeatures(selectedAid!),
@@ -524,6 +528,7 @@ export function PluginsHome() {
                 <MessageSquareText className="mr-1 h-4 w-4" />
                 消息模板测试
               </Button>
+              <AskAgentButton accountId={selectedAid} source="plugins" className="px-3" />
             </div>
           ) : null}
           <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-muted/20 p-2.5">

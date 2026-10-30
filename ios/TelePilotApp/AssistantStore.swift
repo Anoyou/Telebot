@@ -241,17 +241,27 @@ final class AssistantStore {
         await restoreRun(model)
     }
 
-    func createSession(_ model: AppModel) async {
+    /// 新建会话。第 20 轮：不再沿用当前会话的账号；只有 1 个账号时默认关联它（新服务器由服务器判断，
+    /// 旧服务器由 App 按账号数代填），多账号保持「全局」。`accountID` 参数用于从某个账号的页面进入时带入该账号。
+    func createSession(_ model: AppModel, accountID requested: Int? = nil) async {
         guard !busy else { return }
         busy = true
         defer { busy = false }
         do {
-            var body: [String: JSONValue] = [:]
-            if let accountID { body["account_id"] = .number(Double(accountID)) }
+            let body = AgentSessionAccount.newSessionBody(
+                requestedAccountID: requested,
+                accountIDs: model.accountsLoaded ? model.accounts.map(\.id) : nil,
+                serverSupportsDefault: model.supportsAgentSessionDefaultAccount
+            )
             let created = try await model.request(path: AssistantPresentation.root + "/sessions", method: "POST", body: .object(body))
             guard let id = created["id"]?.stringValue else { throw APIError.incompatibleResponse }
             await loadSessions(model)
             await select(id, model: model)
+            if AgentSessionAccount.wasAutoLinked(request: body, response: created),
+               let linked = created["account_id"]?.intValue {
+                let name = model.accounts.first(where: { $0.id == linked }).map { AccountPresentation.name($0) } ?? "#\(linked)"
+                notice = "只有一个账号，新会话已自动关联「\(name)」；可在会话设置 › 账号上下文改回全局。"
+            }
         } catch { self.error = AssistantPresentation.error(error) }
     }
 
