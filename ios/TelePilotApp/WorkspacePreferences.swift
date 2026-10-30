@@ -24,7 +24,7 @@ enum DockItem: String, CaseIterable, Codable, Identifiable {
     var longTitle: String {
         switch self {
         case .operations: "指令与任务"
-        case .logs: "日志与诊断"
+        case .logs: "日志"
         case .ledger: "资金台账"
         default: title
         }

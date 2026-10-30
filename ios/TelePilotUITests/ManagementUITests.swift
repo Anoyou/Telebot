@@ -205,7 +205,7 @@ final class ManagementUITests: XCTestCase {
 
     func testRuntimeLogCredentialsAreMaskedByDefault() {
         let app = launch()
-        app.buttons["日志与诊断"].tap()
+        app.buttons["more.logs"].tap()
         let runtime = app.buttons["logs.kind.runtime"]
         for _ in 0..<8 where !(runtime.exists && runtime.isHittable) { app.swipeUp() }
         XCTAssertTrue(runtime.waitForExistence(timeout: 10))
@@ -252,7 +252,7 @@ final class ManagementUITests: XCTestCase {
 
     func testLogDetailExplainsMessageFailureAndOpensTimeline() {
         let app = launch()
-        app.buttons["日志与诊断"].tap()
+        app.buttons["more.logs"].tap()
         let messages = app.buttons["logs.kind.messages"]
         for _ in 0..<8 where !(messages.exists && messages.isHittable) { app.swipeUp() }
         XCTAssertTrue(messages.waitForExistence(timeout: 10))
@@ -478,7 +478,13 @@ final class ManagementUITests: XCTestCase {
         notice.tap()
         let enabled = app.switches["interaction.rule.enabled"]
         XCTAssertTrue(enabled.waitForExistence(timeout: 10))
-        enabled.coordinate(withNormalizedOffset: CGVector(dx: 0.92, dy: 0.5)).tap()
+        // 推入编辑页的转场刚结束时点按偶尔被吞（CI 两次迭代都没打开）：等开关真的变成「开」，没变就再点一次。
+        let turnedOn = NSPredicate(format: "value == %@", "1")
+        for _ in 0..<3 where (enabled.value as? String) != "1" {
+            enabled.coordinate(withNormalizedOffset: CGVector(dx: 0.92, dy: 0.5)).tap()
+            if XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: turnedOn, object: enabled)], timeout: 3) == .completed { break }
+        }
+        XCTAssertEqual(enabled.value as? String, "1", "规则开关应已打开")
         app.navigationBars.buttons.element(boundBy: 0).tap()
 
         XCTAssertTrue(save.waitForExistence(timeout: 5))
@@ -507,7 +513,7 @@ final class ManagementUITests: XCTestCase {
         for _ in 0..<6 where !params.exists { app.swipeUp() }
         XCTAssertTrue(params.exists, "保存后插件玩法参数应保留")
         let screenshot = XCTAttachment(screenshot: app.screenshot())
-        screenshot.name = "交互中心规则编辑"
+        screenshot.name = "交互规则编辑"
         screenshot.lifetime = .keepAlways
         add(screenshot)
     }
@@ -628,18 +634,33 @@ final class ManagementUITests: XCTestCase {
     /// 仍算 isHittable，但点击会落到标签栏上：此时小步上拖，把它挪到标签栏上方。
     private func reveal(_ element: XCUIElement, in app: XCUIApplication, up: Bool = true, attempts: Int = 10) {
         func underTabBar() -> Bool {
+            var top = CGFloat.infinity
             let bar = app.tabBars.firstMatch
-            guard bar.exists, !bar.frame.isEmpty else { return false }
-            return element.frame.midY >= bar.frame.minY - 8
+            if bar.exists, !bar.frame.isEmpty { top = bar.frame.minY }
+            // 第 20 轮：值守中 Dock 上方多了全局提示（系统底部附件），同样会挡住下面的行。
+            // 附件在 Dock 缩小 / 展开切换时不一定能按标识查到（CI 实测），所以另外要求元素在屏幕下方 1/4 以上。
+            let banner = app.descendants(matching: .any)["safeWatch.banner"].firstMatch
+            if banner.exists, !banner.frame.isEmpty { top = min(top, banner.frame.minY) }
+            let window = app.windows.firstMatch.frame
+            let safeWatchOn = banner.exists || app.descendants(matching: .any)["safeWatch.restore"].firstMatch.exists
+                || app.buttons["runtime.restore"].exists
+            if !window.isEmpty, safeWatchOn {
+                top = min(top, window.minY + window.height * 0.75)
+            }
+            guard top.isFinite else { return false }
+            return element.frame.midY >= top - 8
         }
         for _ in 0..<attempts {
             if element.exists && element.isHittable {
                 guard underTabBar() else { break }
                 let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.6))
                 start.press(forDuration: 0.05, thenDragTo: start.withOffset(CGVector(dx: 0, dy: -180)))
+                Thread.sleep(forTimeInterval: 0.4)
                 continue
             }
             if up { app.swipeUp() } else { app.swipeDown() }
+            // 等滚动停下再判断位置，避免按惯性滚动中的位置多滑一次。
+            Thread.sleep(forTimeInterval: 0.4)
         }
         XCTAssertTrue(element.exists && element.isHittable && !underTabBar(), "\(element) 不可见或被标签栏遮住")
     }

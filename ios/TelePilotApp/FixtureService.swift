@@ -58,6 +58,12 @@ actor FixtureService: AppServing {
         self.offline = offline
         mutationUncertain = ProcessInfo.processInfo.arguments.contains("--ui-test-mutation-uncertain")
         refetchError = ProcessInfo.processInfo.arguments.contains("--ui-test-refetch-error")
+        // 值守全局提示界面测试（第 20 轮）：启动时已在值守（与 apply 后的状态相同，可恢复生产）。
+        if ProcessInfo.processInfo.arguments.contains("--ui-test-safe-watch") {
+            runtimeSnapshot = (runtimeModules, runtimeForced)
+            for key in ["ai", "interaction_bot", "webhooks"] { runtimeModules[key] = false; runtimeForced[key] = true }
+            runtimeSafeWatch = true
+        }
     }
 
     func login(_ request: LoginRequest) async throws -> LoginResult {
@@ -232,6 +238,10 @@ actor FixtureService: AppServing {
             if Self.oldServerSecrets { throw APIError.server(status: 404, code: nil) }
             let kind = (URLComponents(string: path)?.queryItems ?? []).first { $0.name == "kind" }?.value ?? ""
             return ["kind": .string(kind), "label": .string(kind), "configured": true, "value": .string(Self.secretRevealValue(kind))]
+        }
+        // `--ui-test-old-server-profile` 模拟没有运行模式接口的旧服务器（框架 404）：不显示值守全局提示。
+        if clean.hasPrefix("/api/platform/profile"), ProcessInfo.processInfo.arguments.contains("--ui-test-old-server-profile") {
+            throw APIError.server(status: 404, code: nil)
         }
         if let value = fixtureValues[clean], method == "GET" { return value }
         if clean.hasPrefix("/api/message-templates/") { return Self.messageTemplateFixture(clean, method: method, body: body) }

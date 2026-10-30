@@ -65,7 +65,7 @@ struct MoreView: View {
     private var commonItems: [DockItem] { [DockItem.overview, .plugins, .interaction].filter { visible($0) } }
     private var managementItems: [DockItem] { [DockItem.accounts, .ai, .operations, .ledger, .logs].filter { visible($0) } }
     /// 三级入口，不能放进 Dock。顺序（0.21.0）：服务器设置 → Webhook → 命中调试 → 备份与维护（含重启服务、导入配置，放最后）。
-    /// 命中调试（原生页 DispatchDebugView）在本组单独一行，「日志与诊断 › 高级诊断」里保留同一入口。
+    /// 命中调试（原生页 DispatchDebugView）在本组单独一行，「日志 › 高级诊断」里保留同一入口。
     private var leadingToolModules: [ManagementModule] { [ManagementModule.system, .webhooks].filter { visible($0) } }
     private var trailingToolModules: [ManagementModule] { [ManagementModule.maintenance].filter { visible($0) } }
 
@@ -132,7 +132,8 @@ struct MoreView: View {
     }
 
     /// 一级／二级入口的一行：账号带数量；其余用完整名称（与页面标题一致）。
-    /// 只给账号、AI、概览、插件、交互加标识；指令与任务、台账、日志沿用标题查找（与之前「管理」模块行一致）。
+    /// 只给账号、AI、概览、插件、交互、日志加标识（日志第 20 轮由「日志与诊断」改名「日志」，测试改用 `more.logs`）；
+    /// 指令与任务、台账沿用标题查找（与之前「管理」模块行一致）。
     @ViewBuilder private func workspaceRow(_ item: DockItem) -> some View {
         if let destination = MoreDestination.workspace(item) {
             let link = NavigationLink(value: destination) {
@@ -144,7 +145,7 @@ struct MoreView: View {
                     Label(item.longTitle, systemImage: item.symbol)
                 }
             }
-            if [DockItem.accounts, .ai, .overview, .plugins, .interaction].contains(item) {
+            if [DockItem.accounts, .ai, .overview, .plugins, .interaction, .logs].contains(item) {
                 link.accessibilityIdentifier("more.\(item.rawValue)")
             } else {
                 link

@@ -475,7 +475,7 @@ struct LogsView: View {
                 }
             } header: { Text("高级诊断") }
         }
-        .navigationTitle("日志与诊断")
+        .navigationTitle("日志")
         .navigationBarTitleDisplayMode(.inline)
         .task { if !loaded { await load() } }
         .refreshable { await load() }
@@ -780,6 +780,7 @@ struct LogDetailView: View {
                 .padding(.vertical, 4)
             }
             if entry.kind == .messages { messageSections }
+            if entry.kind == .messages { reproduceSection }
             Section("详细信息") { fields }
             if let traceID = entry.traceID {
                 Section {
@@ -802,6 +803,22 @@ struct LogDetailView: View {
         }
         .navigationTitle(entry.kind.title)
         .navigationBarTitleDisplayMode(.inline)
+    }
+
+    /// 「用命中调试复现」（第 20 轮，对齐 Web 日志消息详情）：把账号、会话、发送者、来源和正文带到原生命中调试页。
+    /// 命中调试模块关闭时隐藏（与 Dock / 更多 / 日志页高级诊断一致）；旧服务器的记录没有正文也没有会话时不显示。
+    @ViewBuilder private var reproduceSection: some View {
+        let prefill = DispatchDebugPrefill(logMessage: entry.raw, accountID: entry.accountID)
+        if model.isModuleEnabled("dispatch_debug"), prefill.isUseful {
+            Section {
+                NavigationLink { DispatchDebugView(prefill: prefill) } label: {
+                    Label("用命中调试复现", systemImage: "scope")
+                }
+                .accessibilityIdentifier("logs.detail.dispatchDebug")
+            } footer: {
+                Text("把这条消息的账号、会话、发送者和正文带到命中调试，看它现在会被谁处理。只做模拟，不会发到 Telegram。")
+            }
+        }
     }
 
     @ViewBuilder private var messageSections: some View {

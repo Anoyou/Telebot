@@ -13,7 +13,7 @@ enum ManagementModule: String, CaseIterable, Identifiable {
         case .operations: "指令与任务"
         case .interaction: "交互"
         case .ai: "AI 管理"
-        case .logs: "日志与诊断"
+        case .logs: "日志"
         case .ledger: "资金台账"
         case .webhooks: "Webhook"
         case .system: "服务器设置"

@@ -133,7 +133,7 @@ final class WorkspaceUITests: XCTestCase {
     }
 
     /// 服务器关闭交互、台账、Webhook、命中调试模块：Dock 的「交互」格隐藏，由下一个入口（AI）补位；
-    /// 「更多」里台账、Webhook 隐藏，「日志与诊断」里命中调试相关入口隐藏；插件详情不再显示「交互规则」。
+    /// 「更多」里台账、Webhook 隐藏，「日志」里命中调试相关入口隐藏；插件详情不再显示「交互规则」。
     func testDisabledModulesHideEntriesAndRefillDock() {
         let app = launch(["--ui-test-modules-off=interaction_bot,ledger,webhooks,dispatch_debug"])
         XCTAssertTrue(app.tabBars.buttons["AI"].waitForExistence(timeout: 45))
@@ -153,7 +153,7 @@ final class WorkspaceUITests: XCTestCase {
         XCTAssertTrue(reveal(app.buttons["服务器设置"], in: app))
         XCTAssertFalse(app.buttons["Webhook"].exists)
         XCTAssertFalse(app.buttons["资金台账"].exists)
-        let logs = app.buttons["日志与诊断"]
+        let logs = app.buttons["more.logs"]
         for _ in 0..<4 where !(logs.exists && logs.isHittable) { app.swipeDown() }
         XCTAssertTrue(logs.waitForExistence(timeout: 3))
         logs.tap()
