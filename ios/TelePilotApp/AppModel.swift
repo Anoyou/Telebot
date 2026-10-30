@@ -564,7 +564,8 @@ final class AppModel {
         guard phase == .signedIn else { return }
         let token = generation
         guard let value = try? await request(path: "/api/system/capabilities"), token == generation else { return }
-        disabledModules = Self.disabledModules(value)
+        let next = Self.disabledModules(value)
+        if next != disabledModules { disabledModules = next }
     }
 
     nonisolated static func disabledModules(_ value: JSONValue) -> Set<String> {

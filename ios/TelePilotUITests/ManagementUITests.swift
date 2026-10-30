@@ -386,12 +386,24 @@ final class ManagementUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["runtime.profile"].waitForExistence(timeout: 15))
     }
 
-    /// 在运行树列表里上下滑动，直到元素可点。
+    /// 在运行树列表里上下滑动，直到元素可点。Dock 的标签栏浮在列表之上，元素中心落在标签栏里时
+    /// 仍算 isHittable，但点击会落到标签栏上：此时小步上拖，把它挪到标签栏上方。
     private func reveal(_ element: XCUIElement, in app: XCUIApplication, up: Bool = true, attempts: Int = 10) {
-        for _ in 0..<attempts where !(element.exists && element.isHittable) {
+        func underTabBar() -> Bool {
+            let bar = app.tabBars.firstMatch
+            guard bar.exists, !bar.frame.isEmpty else { return false }
+            return element.frame.midY >= bar.frame.minY - 8
+        }
+        for _ in 0..<attempts {
+            if element.exists && element.isHittable {
+                guard underTabBar() else { break }
+                let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.6))
+                start.press(forDuration: 0.05, thenDragTo: start.withOffset(CGVector(dx: 0, dy: -180)))
+                continue
+            }
             if up { app.swipeUp() } else { app.swipeDown() }
         }
-        XCTAssertTrue(element.exists && element.isHittable, "\(element) 不可见")
+        XCTAssertTrue(element.exists && element.isHittable && !underTabBar(), "\(element) 不可见或被标签栏遮住")
     }
 
     /// 运行模式卡（预演 → 确认进入值守 → 恢复生产）与 5 个可选模块：被插件需要的关不掉并写明原因；
