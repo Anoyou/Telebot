@@ -228,6 +228,7 @@ actor FixtureService: AppServing {
         let rawPath = String(path.split(separator: "?").first ?? "")
         let clean = rawPath.removingPercentEncoding ?? rawPath
         if let value = fixtureValues[clean], method == "GET" { return value }
+        if clean.hasPrefix("/api/message-templates/") { return Self.messageTemplateFixture(clean, method: method, body: body) }
         if method == "GET" {
             let opsValue = Self.opsFixture(clean)
             if let rows = opsValue.arrayValue {
@@ -385,6 +386,7 @@ actor FixtureService: AppServing {
                         "pt_site_url": ["type": "string", "title": "站点地址", "default": "", "x-ui-section": "PT 站点数据源"],
                         "pt_user_agent": ["type": "string", "title": "User-Agent（可选）", "default": "", "x-ui-section": "PT 站点数据源"],
                         "help_template": ["type": "string", "title": "帮助提示", "default": "@我 + 问题即可提问。"],
+                        "help_preview": ["type": "string", "title": "帮助提示预览", "readOnly": true],
                         "error_template": ["type": "string", "title": "模型调用失败提示", "default": "AI 暂时不可用，请稍后再试。"]
                      ],
                      "x-ui-property-order": ["telepilot_provider", "telepilot_model", "enable_guest", "bot_username", "target_chat_id", "trigger_keywords",
@@ -1483,3 +1485,45 @@ actor FixtureService: AppServing {
     }
 }
 #endif
+
+// MARK: - 消息模板实验室
+
+extension FixtureService {
+    /// `/api/message-templates/catalog|render|test-send`：render 只做 `{key}` 替换并校验 `<b>` 是否成对（足够界面测试）。
+    static func messageTemplateFixture(_ path: String, method: String, body: JSONValue?) -> JSONValue {
+        if path == "/api/message-templates/catalog" {
+            let notice: JSONValue = [
+                "id": "plugin:redpacket:result_template", "group": "plugin", "feature_key": "redpacket", "field_key": "result_template",
+                "title": "红包结算", "description": "红包领完后发到群里的结算消息。", "parse_mode": "HTML",
+                "template": "<b>{title}</b> 已领完\n<tg-spoiler>手气最佳：{luckiest_name}</tg-spoiler>\n<blockquote expandable>领取名单\n1. 好运用户 · 9888\n2. 保底用户 · 1\n3. 路人 · 50</blockquote>\n<a href=\"https://example.com/rp\">查看详情</a>",
+                "sample_data": ["title": "AI 红包", "luckiest_name": "好运用户"],
+                "reply_markup": ["inline_keyboard": [[["text": "再来一个", "callback_data": "again"], ["text": "规则", "url": "https://example.com/rules"]]]],
+            ]
+            let help: JSONValue = [
+                "id": "system:help", "group": "system", "field_key": "help_template", "title": "帮助指令回复",
+                "description": "", "parse_mode": "HTML", "template": "可用指令：<code>{prefix}help</code>", "sample_data": ["prefix": ","],
+            ]
+            return ["account_id": 1, "groups": [
+                ["group": "plugin", "title": "插件消息", "items": [notice]],
+                ["group": "system", "title": "系统消息", "items": [help]],
+            ], "items": [notice, help]]
+        }
+        if path == "/api/message-templates/render", method == "POST" {
+            var text = body?["template"]?.stringValue ?? ""
+            for (key, value) in body?["sample_data"]?.objectValue ?? [:] {
+                text = text.replacingOccurrences(of: "{\(key)}", with: value.stringValue ?? "\(value)")
+            }
+            let opens = text.components(separatedBy: "<b>").count, closes = text.components(separatedBy: "</b>").count
+            let ok = opens == closes
+            return ["text": .string(text), "parse_mode": body?["parse_mode"] ?? "HTML", "plain_text": .string(text),
+                    "entities": [["type": "bold", "raw_type": "MessageEntityBold", "offset": 0, "length": 2]],
+                    "validation": ["ok": .bool(ok), "errors": .array(ok ? [] : [.string("<b> 标签没有闭合")]), "warnings": .array([]), "plain_text": .string(text)]]
+        }
+        if path == "/api/message-templates/test-send", method == "POST" {
+            return ["ok": true, "target_chat_id": body?["target_chat_id"] ?? .integer(0), "parse_mode": "HTML", "message_id": 42,
+                    "message": "测试消息已发送（消息 ID 42）。"]
+        }
+        return ["detail": "not found"]
+    }
+}
+

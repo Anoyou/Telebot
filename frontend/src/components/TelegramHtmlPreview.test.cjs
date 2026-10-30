@@ -80,3 +80,17 @@ test("ignores invalid numeric entities in allowed attributes", () => {
     sanitizeTelegramHtml('<a href="https://example.com/?x=&#9999999999;">链接</a>'),
   );
 });
+
+test("matches the shared iOS fixture (iOS TelegramHTML.sanitizeToWebHTML must stay identical)", () => {
+  // iOS 原生预览移植了同一套规则；用例的 expected 由本文件的 sanitizeTelegramHtml 生成。
+  // 修改上面的清洗规则后这里会失败：同步修改 ios/TelePilotCore/Sources/TelePilotCore/TelegramHTML.swift，
+  // 再用 Web 输出重新生成 fixture（每条 expected = sanitizeTelegramHtml(input)）。
+  const fixturePath = path.join(
+    __dirname, "..", "..", "..", "ios", "TelePilotCore", "Tests", "TelePilotCoreTests", "telegram-html-cases.json",
+  );
+  const { cases } = JSON.parse(fs.readFileSync(fixturePath, "utf8"));
+  assert.ok(cases.length >= 80);
+  for (const item of cases) {
+    assert.equal(sanitizeTelegramHtml(item.input), item.expected, item.name);
+  }
+});

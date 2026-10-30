@@ -198,7 +198,27 @@ struct ManagementFieldsView: View {
     let schema: JSONValue
     @Binding var value: JSONValue
     @Environment(\.managementOptionalFieldsInline) private var optionalInline
+    @Environment(\.telegramPreviewContext) private var telegramContext
     var body: some View {
+        fields.environment(\.telegramPreviewContext, Self.previewContext(telegramContext, value: value))
+    }
+    /// 指令模板（reply_text 的 `text`、ai 的 `output_template`）与解析模式由所在对象决定，传给下层字段做 Telegram 预览。
+    static func previewContext(_ inherited: TelegramPreviewContext, value: JSONValue) -> TelegramPreviewContext {
+        var context = inherited
+        switch value["type"]?.stringValue {
+        case "reply_text":
+            context.kind = .commandReply
+            context.extraTemplateKeys.insert("text")
+        case "ai":
+            context.kind = .aiOutput
+        default: break
+        }
+        if let format = value["output_format"]?.stringValue ?? value["parse_mode"]?.stringValue {
+            context.mode = TelegramParseMode(serverValue: format)
+        }
+        return context
+    }
+    @ViewBuilder private var fields: some View {
         let schema = ManagementSchema.normalized(schema)
         let properties = schema["properties"]?.objectValue ?? [:]
         let required = Set(schema["required"]?.arrayValue?.compactMap(\.stringValue) ?? [])
@@ -267,6 +287,7 @@ struct ManagementFieldView: View {
     @Binding var value: JSONValue
     @State private var inputError: String?
     @Environment(\.managementOptionalFieldsInline) private var optionalInline
+    @Environment(\.telegramPreviewContext) private var telegramContext
 
     var body: some View {
         let spec = ManagementSchema.normalized(schema)
@@ -294,6 +315,7 @@ struct ManagementFieldView: View {
                 NavigationLink {
                     Form { ManagementFieldsView(schema: spec, value: $value) }.navigationTitle(title).navigationBarTitleDisplayMode(.inline)
                         .environment(\.managementOptionalFieldsInline, inline)
+                        .environment(\.telegramPreviewContext, telegramContext)
                 } label: { LabeledContent("编辑" + title, value: ManagementText.scalar(value)) }
                 .accessibilityIdentifier("management.object.\(key.isEmpty ? title : key)")
             } else if PluginRuleForm.isLineList(spec) {
@@ -310,6 +332,10 @@ struct ManagementFieldView: View {
                 SecureField(title, text: stringBinding).textInputAutocapitalization(.never).autocorrectionDisabled().privacySensitive()
             } else if ["integer", "number"].contains(spec["type"]?.stringValue ?? "") {
                 ManagementNumberField(title: title, integer: spec["type"]?.stringValue == "integer", value: $value)
+            } else if telegramContext.applies(to: key), (spec["type"]?.stringValue ?? "string") == "string" {
+                // 消息模板字段：输入时实时显示 Telegram 气泡预览、字数与格式检查（对应 Web 的 TelegramHtmlPreview）。
+                TelegramTemplateInlineField(title: title, text: stringBinding, spec: telegramContext.spec(for: key, title: title),
+                                            identifier: "tgField.\(key)")
             } else {
                 TextField(title, text: stringBinding, axis: .vertical)
                     .lineLimit(1...8).textInputAutocapitalization(.never).autocorrectionDisabled()

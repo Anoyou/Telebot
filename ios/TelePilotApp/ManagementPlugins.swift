@@ -1750,9 +1750,33 @@ struct ManagementPluginConfigView: View {
     @State private var llmLoading = false
     @State private var llmError: String?
     @State private var confirmingDiscard = false
+    @State private var commandPrefix = ","
     @Environment(\.dismiss) private var dismiss
 
     private var global: Bool { accountID == nil }
+    /// 模板字段的 Telegram 预览上下文：示例值取自当前草稿（指令名、超时等），与 Web ConfigDialog 相同。
+    private var telegramContext: TelegramPreviewContext {
+        var config = snapshot?.values ?? [:]
+        for (key, value) in draft.objectValue ?? [:] { config[key] = value }
+        return TelegramPreviewContext(kind: .plugin(featureKey: feature["key"]?.stringValue ?? ""), config: config, prefix: commandPrefix)
+    }
+    /// `*_preview` / `template_preview` 字段：按模板顺序显示一组消息气泡（Web「预览结果」）。
+    private var previewItems: [TelegramPreviewThreadSection.Item] {
+        guard let properties = feature["config_schema"]?["properties"]?.objectValue else { return [] }
+        let keys = Set(properties.keys)
+        let context = telegramContext
+        let samples = TelegramTemplateSamples.plugin(config: context.config, prefix: commandPrefix)
+        return PluginConfigLayout.orderedKeys(schema: feature["config_schema"] ?? .object([:])).compactMap { (key: String) -> TelegramPreviewThreadSection.Item? in
+            guard key == "template_preview" || key.lowercased().hasSuffix("_preview"), key != "usage_preview",
+                  let previewSpec = properties[key] else { return nil }
+            let templateKey = TelegramTemplateSamples.templateKey(forPreview: key, keys: keys)
+            let templateValue = templateKey.flatMap { draft[$0] ?? snapshot?.values[$0] ?? properties[$0]?["default"] } ?? previewSpec["default"]
+            let template = TelegramTemplate.normalizeEscapes(TelegramTemplate.format(templateValue))
+            guard !template.isEmpty else { return nil }
+            let title = previewSpec["title"]?.stringValue ?? key
+            return TelegramPreviewThreadSection.Item(id: key, title: title, model: TelegramMessagePreviewModel(template: template, values: samples))
+        }
+    }
     /// 有未保存的修改（含子页面里改的）：离开前需要确认。
     private var hasUnsavedChanges: Bool { snapshot != nil && !changes.isEmpty && !saving }
     private var segment: String { ManagementText.pathSegment(feature["key"]?.stringValue ?? "") }
@@ -1811,6 +1835,10 @@ struct ManagementPluginConfigView: View {
                             fieldSection(field, groupTitle: index == 0 ? group.title : nil)
                         }
                     }
+                    let previews = previewItems
+                    if !previews.isEmpty {
+                        TelegramPreviewThreadSection(title: "预览结果", items: previews, prompt: "发送指令并参与竞猜。", identifier: "plugin.config.previews")
+                    }
                     if !plan.pages.isEmpty {
                         Section {
                             ForEach(plan.pages) { group in pageRow(group) }
@@ -1837,6 +1865,7 @@ struct ManagementPluginConfigView: View {
         }
         // 可选字段只显示一个控件（不渲染“是否提交此项”开关），留空由服务器按默认值处理。
         .environment(\.managementOptionalFieldsInline, true)
+        .environment(\.telegramPreviewContext, telegramContext)
         .navigationTitle(global ? "修改全局配置" : "修改账号配置").navigationBarTitleDisplayMode(.inline)
         // 有未保存的修改时用自己的返回按钮（同时停用滑动返回），离开前确认是否放弃。
         .navigationBarBackButtonHidden(hasUnsavedChanges)
@@ -1858,6 +1887,10 @@ struct ManagementPluginConfigView: View {
         }
         // 只在首次进入时读取：从嵌套的列表/分组编辑页返回时不能覆盖尚未保存的修改。
         .task { if snapshot == nil { await load() } }
+        .task {
+            if let settings = try? await model.request(path: "/api/system/settings"),
+               let prefix = settings["command_prefix"]?.stringValue, !prefix.isEmpty { commandPrefix = prefix }
+        }
         .sheet(isPresented: $reviewing) { reviewSheet }
     }
 
@@ -1910,6 +1943,7 @@ struct ManagementPluginConfigView: View {
                 ForEach(group.fields) { field in fieldSection(field) }
             }
             .environment(\.managementOptionalFieldsInline, true)
+            .environment(\.telegramPreviewContext, telegramContext)
             .navigationTitle(title).navigationBarTitleDisplayMode(.inline)
         } label: {
             HStack(spacing: 12) {

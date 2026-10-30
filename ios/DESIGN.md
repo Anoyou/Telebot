@@ -49,7 +49,7 @@
 
 ## Web ↔ iOS 页面对照表
 
-以代码为准（Web：`frontend/src/components/layout/Sidebar.tsx` 的 `NAV` 与路由；iOS 0.21.0）。第 20 轮起 Web 遵守「导航名 = 页面标题」，统一叫法见下方「统一命名」。**Web 新增、移动或删除侧栏项／设置分页／独立页面时，必须在同一个 PR 里更新这张表，并写明 iOS 的处理方式（做／不做＋理由），见根目录 `AGENTS.md`。**
+以代码为准（Web：`frontend/src/components/layout/Sidebar.tsx` 的 `NAV` 与路由；iOS 0.22.0）。第 20 轮起 Web 遵守「导航名 = 页面标题」，统一叫法见下方「统一命名」。**Web 新增、移动或删除侧栏项／设置分页／独立页面时，必须在同一个 PR 里更新这张表，并写明 iOS 的处理方式（做／不做＋理由），见根目录 `AGENTS.md`。**
 
 | Web 页面（路由） | iOS 位置 | 状态 |
 | --- | --- | --- |
@@ -58,7 +58,7 @@
 | 值守全局提示条（第 20 轮：值守中每页顶部黄色条 +「恢复生产」，与紧急停止红条同位置） | 未做：iOS 只在插件 ›「运行」显示值守状态（后续 iOS 任务在概览状态行加同样提示） | ⚠️ 缺全局提示 |
 | 插件 · 运行树 | 插件 ›「运行」（0.19.0） | ✅ 对齐 |
 | 插件管理／安装 `/plugins/manage`、插件市场 | 插件 › 发现／已安装、插件市场 | ✅ 对齐 |
-| 消息模板实验室 `/plugins/message-template-lab` | 更多 › 指令与任务 › 模板预览与测试（原始表单） | ⚠️ 缩水（无所见即所得预览） |
+| 消息模板实验室 `/plugins/message-template-lab` | 更多 › 指令与任务 › 模板预览与测试 › 消息模板实验室（原生，0.22.0） | ✅ 对齐（另有实时预览、格式检查、字数，见「Telegram 消息预览」） |
 | AI `/ai`（概览／供应商／用量）+ 存活检测 `/ai/liveness` | 更多 › 管理 › AI（可自选进 Dock） | ✅ 对齐 |
 | 待确认 `/assistant/inbox` | Agent 角标 + 待确认页 | ✅ 对齐 |
 | Agent `/assistant`（第 20 轮前 Web 叫「系统助手」） | Dock 独立「Agent」 | ✅ 对齐 |
@@ -94,6 +94,28 @@
 
 插件页子分页「插件中心 / 插件市场 / 插件管理」改名（启用与配置 / 市场 / 已安装）属于第二批，第一批不动。
 
+## Telegram 消息预览（0.22.0）
+
+对齐并超越 Web `frontend/src/components/TelegramHtmlPreview.tsx`。凡是填写“要发到 Telegram 的消息模板”的地方，都在输入框下面直接显示仿 Telegram 的气泡预览。
+
+- **解析规则与 Web 一致**：`TelePilotCore.TelegramHTML` 逐条移植 Web `sanitizeTelegramHtml`（转义 → 白名单标签 → 安全属性；`span.tg-spoiler` 与 `<tg-spoiler>`、`blockquote expandable`、`code class="language-…"`、链接只放行 http/https/mailto/tel/tg/#、`tg-emoji` 显示替代文字、Rich 标签与结构空白），`sanitizeToWebHTML` 输出与 Web 逐字相同；用例 `TelePilotCore/Tests/TelePilotCoreTests/telegram-html-cases.json` 由 Web 实际输出生成，`swift test` 与前端 `TelegramHtmlPreview.test.cjs` 都校验——改其中一端的规则，另一端的测试会失败。有意差异两处：原文写成实体的 `&lt;b&gt;` 按文字显示（Telegram 实际如此，Web 会误当标签）；代码块语言名允许中文（Telegram 客户端会显示，Web 只认 ASCII）。
+- **气泡**（`TelegramChatPreview`）：聊天背景 + 可选的“示例用户”消息 + Bot 回复气泡（Bot 名、正文、时间 12:30），浅色／深色跟随系统，完整编辑页可单独切换外观；内联按钮（`reply_markup.inline_keyboard`）显示在气泡下方，链接按钮带 `arrow.up.right`。正文用原生 `Text(AttributedString)`：粗斜体、下划线、删除线、行内代码底色、链接（预览中点按不打开，只在下方提示地址）、剧透（灰色 `░` 块，点按整段揭开，VoiceOver 也不会读出隐藏内容）、折叠引用（默认露出约三行，“展开／收起”）、代码块（语言名 + 复制 + 横向滚动）、标题、列表、表格（`Grid`，bordered／striped）、details、媒体占位。示例值浅色强调底，没有示例值的变量橙色底。
+- **字数**（`TelegramLengthBadge`）：按 Telegram 口径（去掉标签后的文字，UTF-16 计数）显示「已用 / 上限」，普通消息 4096、带图说明文字 1024（字段名含 caption，或 chatgpt_image／codex_image 的 `message_template`）；≥90% 橙色，超出红色并写明“Telegram 会拒绝发送”。
+- **格式检查**（`TelegramIssueRow`）：只针对用户写的原文（不含示例值），写明“第 N 行第 M 列”并把出问题的片段标出来：标签没闭合、交叉嵌套、多余的结束标签、Telegram 不支持的标签（预览中忽略、文字保留）、`<span>` 不是 tg-spoiler、裸“<”、单独的“&”、非 Telegram 支持的命名实体、不安全的链接、富文本专用标签（提示）、AI 模板条件块缺 `{/?}`、变量没有示例值（提示）。
+- **两种形态**：表单行内 `TelegramTemplateInlineField`（输入框、字数、问题数与第一个问题、实时预览可收起、「展开编辑」）；sheet／独立页 `TelegramTemplateEditorPage`（原生分段「分屏 / 编辑 / 预览」，默认分屏；格式检查全部列出；示例值逐个可改，只影响预览；外观菜单）。
+- 标识：行内字段 `<前缀>.editor`／`.counter`／`.issueCount`／`.firstIssue`／`.togglePreview`／`.expand`／`.preview.bubble`；编辑页 `<前缀>.layout`／`.page.editor`／`.page.counter`／`.noIssues`／`.issue.<序号>`／`.sample.<变量>`／`.appearance`／`.page.preview.bubble`；气泡内 `…spoiler`、`…quote.toggle`、`…code`、`…button.<行>.<列>`、`…linkNotice`。
+
+| Web 预览位置 | iOS 位置 | 前缀 / 说明 |
+| --- | --- | --- |
+| 插件 › 消息模板实验室 `MessageTemplateLab` | 指令与任务 › 消息模板实验室（`MessageTemplateLabView`）：账号 → 分组模板 → 编辑页 + 「服务器渲染」（POST render，显示校验错误／警告、服务器渲染结果气泡、实体数）+ 「测试发送」（确认框挂在按钮上，结果待确认时不再允许发送） | `templateLab` |
+| 插件配置 `ConfigDialog`：`*_template` 字段 + `*_preview` 预览串 | 插件 › 配置（`ManagementPluginConfigView`）：模板字段行内预览；声明了 `*_preview` 的插件在主页显示「预览结果」消息串（按 `x-ui-property-order`，`findTemplateKeyForPreview` 同规则）；示例值取当前草稿（指令名、超时、开奖时间等，同 Web `renderTemplateSample`），指令前缀读服务器设置 | `tgField.<字段>`、`plugin.config.previews` |
+| 旧版专属页 `ChatGPTImageConfig` / `CodexImageConfig` 的 `message_template` | 没有专属原生页：这两个插件走通用插件配置，`message_template` 同样行内预览，按图片说明文字 1024 上限 | `tgField.message_template` |
+| AI `OutputTemplateEditor`（输出模板 + parse_mode） | AI › 指令 › 编辑模型、路由与回复格式 › 编辑 Config 里的 `output_template`（通用表单，按同级 `output_format` 选解析模式；`{?…}{/?}` 条件块、缺值为空、留空预览默认格式 `PRESET_SIMPLE_TEMPLATE`）；配置里还没有 `output_template` 时需先“添加字段”（无原生的占位符插入器，记为后续） | `tgField.output_template` |
+| 指令模板 `TemplatesEditor`（reply_text 回复文本） | 指令与任务 › 指令模板 › 编辑 › Config 的 `text`（`type == reply_text` 时，示例 `{args}` / `{cmd}`） | `tgField.text` |
+| 账号 › Bot `BotTab`：玩法查询、转账／扣款通知 | 交互 › 查询指令、通知模板与可信 Bot（`InteractionAdvancedView`）：回复模板 + 条目模板组合成整条消息预览（同 Web 两条示例玩法）、收款／扣款通知（留空时预览 Web 默认模板）；另外规则编辑「命中回复」也有预览（Web 没有） | `interaction.query.response`／`.item`、`interaction.notice.transfer`／`.debit`、`interaction.rule.response` |
+
+Web 目前没有任何页面配置内联按钮；iOS 气泡已支持，服务器模板目录项带 `reply_markup` 时显示（界面测试夹具覆盖）。
+
 ## 图标
 
 - 每个导航行、列表入口和分组内的次要操作按钮都用 `Label(标题, systemImage:)` 带一个 SF Symbol；不再出现只有文字的 `NavigationLink("…")`。纯数据展示行（`ReadOnlyRow`、记录行）和主要提交按钮（如登录“连接”）可以不带图标。
@@ -110,7 +132,8 @@
 | 关于 | App 版本 `iphone`、构建号 `hammer`、服务器版本 `shippingbox`、发布通道 `arrow.triangle.branch`、部署提交 `number`、GitHub `chevron.left.forwardslash.chevron.right`、更新日志 `list.bullet.clipboard`、使用指南 `book`、问题反馈 `exclamationmark.bubble`、开源许可 `doc.plaintext`、隐私 `hand.raised`（0.21.0 起不含更新按钮） |
 | 软件更新（0.21.0） | 服务器当前版本 `shippingbox`、发布通道 `arrow.triangle.branch`、可更新到 `sparkles`、检查服务器更新 `arrow.down.circle`（全 App 唯一更新入口）、App 当前版本 `iphone`、获取最新安装包 `arrow.down.app` |
 | 账号管理 | 编辑 `pencil`、重新登录 `person.badge.key`、复制配置 `doc.on.doc`、导出迁移 `square.and.arrow.up.on.square`、插件 `puzzlepiece.extension`、拟人化 `figure.walk`、限流 `gauge.with.dots.needle.33percent`、用量 `chart.bar`、覆盖规则 `slider.horizontal.below.rectangle`、直通顺序 `arrow.up.arrow.down`、会话白名单 `checklist`、最近会话 `bubble.left.and.bubble.right`、账号指令 `terminal`、Bot 用户 `person.2.badge.gearshape`、失败投递 `tray.and.arrow.down`、删除 `trash` |
-| 指令与任务 | 指令模板 `text.badge.plus`、别名 `arrow.triangle.swap`、内置指令 `terminal`、模板变量 `curlybraces`、预览 `eye`、测试发送 `paperplane` |
+| 指令与任务 | 指令模板 `text.badge.plus`、别名 `arrow.triangle.swap`、内置指令 `terminal`、消息模板实验室 `text.bubble`（0.22.0 替换原「模板变量与示例 / 预览消息模板 / 测试发送模板」三个原始表单）、测试发送 `paperplane` |
+| Telegram 消息预览（0.22.0） | 字数 `character.cursor.ibeam`（接近上限 `exclamationmark.triangle.fill` 橙、超出 `exclamationmark.octagon.fill` 红）、格式问题 警告 `exclamationmark.triangle.fill`／提示 `info.circle`、没有问题 `checkmark.circle.fill`、显示／收起预览 `eye`／`eye.slash`、展开编辑 `arrow.up.left.and.arrow.down.right`、代码块复制 `doc.on.doc`（复制后 `checkmark`）、折叠引用 展开 `chevron.down`／收起 `chevron.up`、details `chevron.right`／`chevron.down`、链接按钮 `arrow.up.right`、预览中点了链接 `link`、恢复原模板／默认示例值 `arrow.uturn.backward`、服务器渲染校验 `checkmark.shield` |
 | 服务器设置（0.15.0 由「系统设置」改名，模块图标 `server.rack`） | 能力开关 `switch.2`、运行树与运行模式 `point.3.filled.connected.trianglepath.dotted`（0.18.0 起只是一行跳转「已移到 插件 › 运行」，见下一行；原「能力与插件树」与「平台运行模式」原始文档已删除）、服务器参数 `slider.horizontal.3`、代理 `network`、设备配置 `iphone.gen3`、通知 Bot `bell.badge`、Sudo `person.badge.shield.checkmark`、管理员密码 `key`、验证器 `lock.shield` |
 | 运行树（0.18.0，插件页「插件 \| 运行」） | 对齐 Web 插件页「树状视图」+「运行模式」卡，三端统一叫「运行树」。插件中心第二行（账号选择下方）原生 `Picker(.segmented)`「插件 \| 运行」（`plugins.mode`），两种视图共用插件页的账号选择（`plugins.accountPicker`，含「全部账号」）。运行视图是 `List`：运行模式分组——当前模式 `dial.medium`（值守 `moon.zzz.fill`）、账号进程 `person.2`、紧急停止 `exclamationmark.octagon`（拉闸 `.fill` 红色）、观测盲区 `eye.slash`、进入值守… `moon.zzz`（先 dry-run 预演，`confirmationDialog` 挂在按钮上、列出将关闭的模块）、恢复生产 `arrow.uturn.backward.circle`（确认按钮「确认恢复生产」）；可选模块分组——每行左侧是可点区域（borderless 按钮：模块图标 AI `cpu`／交互 Bot `bubble.left.and.text.bubble.right`／入站 Webhook `point.3.connected.trianglepath.dotted`／资金台账 `book.closed`／命中调试 `scope` + 状态 运行中 `checkmark.circle.fill`／启动中 `arrow.triangle.2.circlepath`／停用中 `hourglass`／已暂停 `pause.circle`／失败 `xmark.octagon.fill`／已关闭 `minus.circle`（被强制关闭 `lock`）+「被 N 个插件需要」+ 锁定原因 `lock` + `chevron.right`，点按进模块详情列出需要它的插件），右侧系统 `Toggle`（确认框挂在 Toggle 上）；被任一账号的插件需要时不能关、值守中不能单独开；插件分组——直通（最先处理）`bolt.horizontal`、主通道 `arrow.down.forward.circle`、交互 Bot `bubble.left.and.text.bubble.right`，插件行启用 `checkmark.circle.fill`／未启用 `circle`、「靠…工作」、「+模块」、缺模块起不来与警告 `exclamationmark.triangle.fill`、运行异常 `exclamationmark.circle.fill`，点按进本账号插件配置；交互插件下一行「交互规则 ›」进交互中心；底部「想看一条消息怎么走 → 命中调试」`scope`。旧服务器没有账号口径字段时客户端按 `/api/accounts/{id}/features` 回退计算 |
 | Apple 推送 | 系统通知权限 `hand.raised`、设备已注册 `iphone`、服务器 APNs `server.rack`、推送环境 `arrow.triangle.branch`、配置教程 `book`、GitHub 教程 `safari`、授权注册 `bell.badge`、测试通知 `paperplane`、注销 `bell.slash`、助手待确认 `checkmark.shield`、助手任务结果 `sparkles`、账号告警 `exclamationmark.triangle`、Auth Key `key`；检查状态：正常 `checkmark.circle.fill`、注意 `exclamationmark.triangle.fill`、未就绪 `xmark.circle.fill`、未知 `questionmark.circle` |

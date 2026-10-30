@@ -104,10 +104,11 @@ struct ManagementModuleView: View {
             document("内置指令", "/api/commands/builtin", symbol: "terminal")
             NavigationLink { AICommandEnablementView() } label: { Label("AI 指令与账号启用", systemImage: "text.bubble") }
         }
-        Section("模板预览与测试") {
-            document("模板变量与示例", "/api/message-templates/catalog", symbol: "curlybraces")
-            ManagementActionLink(action: .init(title: "预览消息模板", path: "/api/message-templates/render", explanation: "仅渲染模板，不发送消息。"), symbol: "eye")
-            ManagementActionLink(action: .init(title: "测试发送模板", path: "/api/message-templates/test-send", explanation: "将通过指定账号向目标会话发送真实消息。"), symbol: "paperplane")
+        Section {
+            NavigationLink { MessageTemplateLabView() } label: { Label("消息模板实验室", systemImage: "text.bubble") }
+                .accessibilityIdentifier("operations.templateLab")
+        } header: { Text("模板预览与测试") } footer: {
+            Text("按 Telegram 气泡实时预览插件与系统消息模板，检查格式与字数，再由服务器渲染校验和测试发送。")
         }
         Section("按账号配置") {
             ForEach(model.accounts) { account in

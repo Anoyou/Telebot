@@ -1,0 +1,445 @@
+{
+  "note": "由 Web sanitizeTelegramHtml 生成（work/notes/round20/tg-preview/gen-cases.cjs）；前端 TelegramHtmlPreview.test.cjs 与 iOS TelegramHTMLTests 都校验这些用例。",
+  "cases": [
+    {
+      "name": "基础行内格式",
+      "input": "<b>粗体</b> <strong>强调</strong> <i>斜体</i> <em>em</em> <u>下划线</u> <ins>ins</ins> <s>删除</s> <strike>strike</strike> <del>del</del>",
+      "expected": "<strong>粗体</strong> <strong>强调</strong> <em>斜体</em> <em>em</em> <u>下划线</u> <u>ins</u> <del>删除</del> <del>strike</del> <del>del</del>"
+    },
+    {
+      "name": "嵌套",
+      "input": "<b>粗<i>斜<u>下划线</u></i></b>",
+      "expected": "<strong>粗<em>斜<u>下划线</u></em></strong>"
+    },
+    {
+      "name": "大写标签与空白",
+      "input": "<B>大写</B> < b>前空格</b> </ b>",
+      "expected": "<strong>大写</strong> <strong>前空格</strong> </strong>"
+    },
+    {
+      "name": "新旧两种剧透",
+      "input": "<tg-spoiler>新语法</tg-spoiler> <span class=\"tg-spoiler\">兼容语法</span> <span class='TG-SPOILER'>单引号</span> <span class=other>普通</span>",
+      "expected": "<button type=\"button\" class=\"telegram-spoiler\" aria-label=\"显示隐藏文本\">新语法</button> <button type=\"button\" class=\"telegram-spoiler\" aria-label=\"显示隐藏文本\">兼容语法</button> <button type=\"button\" class=\"telegram-spoiler\" aria-label=\"显示隐藏文本\">单引号</button> 普通"
+    },
+    {
+      "name": "代码与语言",
+      "input": "<code>inline</code>\n<pre><code class=\"language-python\">print('hi')</code></pre>\n<pre>纯 pre</pre>",
+      "expected": "<code>inline</code><pre class=\"telegram-pre\"><span class=\"telegram-code-language\">python</span><code class=\"telegram-code-language-python\">print(&#39;hi&#39;)</code></pre><pre class=\"telegram-pre\">纯 pre</pre>"
+    },
+    {
+      "name": "非 ASCII 语言名",
+      "input": "<pre><code class=\"language-转账成功\">付款人：Alice</code></pre>",
+      "expected": "<pre class=\"telegram-pre\"><code>付款人：Alice</code></pre>"
+    },
+    {
+      "name": "链接",
+      "input": "<a href=\"https://example.com/?a=1&amp;b=2\">链接</a> <a href='tg://user?id=1'>用户</a> <a href=mailto:a@b.c>邮件</a> <a name=\"x\">锚点</a> <a>空</a>",
+      "expected": "<span class=\"telegram-link\" title=\"https://example.com/?a=1&amp;b=2\">链接</span> <span class=\"telegram-link\" title=\"tg://user?id=1\">用户</span> <span class=\"telegram-link\" title=\"mailto:a@b.c\">邮件</span> <span class=\"telegram-link\" title=\"#x\">锚点</span> <span class=\"telegram-link\">空</span>"
+    },
+    {
+      "name": "危险链接与事件",
+      "input": "<script>alert(1)</script>\n<img src=\"x\" onerror=\"alert(2)\">\n<a href=\"javascript:alert(3)\" onclick=\"alert(4)\">危险链接</a>",
+      "expected": "alert(1)\n<span class=\"telegram-media-placeholder telegram-media-img\" title=\"富文本图片占位\">图片</span>\n<span class=\"telegram-link\">危险链接</span>"
+    },
+    {
+      "name": "引用与折叠引用",
+      "input": "<blockquote>普通引用</blockquote>\n<blockquote expandable><b>完整名单</b>\n1. A\n2. B</blockquote>",
+      "expected": "<blockquote class=\"telegram-quote\">普通引用</blockquote><details class=\"telegram-expandable-quote\"><summary>展开引用</summary><blockquote class=\"telegram-quote\"><strong>完整名单</strong>\n1. A\n2. B</blockquote></details>"
+    },
+    {
+      "name": "自定义 emoji",
+      "input": "<tg-emoji emoji-id=\"5368324170671202286\">👍</tg-emoji> <tg-emoji>😀</tg-emoji>",
+      "expected": "<span class=\"telegram-custom-emoji\" title=\"自定义 Emoji 5368324170671202286\">👍</span> <span class=\"telegram-custom-emoji\">😀</span>"
+    },
+    {
+      "name": "实体",
+      "input": "Tom &amp; Jerry &quot;引号&quot; &nbsp;&hellip; &#x1F600; &#128512; &copy; & 单独",
+      "expected": "Tom &amp; Jerry &quot;引号&quot; &nbsp;&hellip; &#x1F600; &#128512; &amp;copy; &amp; 单独"
+    },
+    {
+      "name": "Rich 块",
+      "input": "\n<h1>结算报告</h1>\n<p>Tom &amp; Jerry <mark>重点</mark> H<sub>2</sub>O x<sup>2</sup></p>\n<ul><li><input type=\"checkbox\" checked>已完成</li><li><input type=checkbox>未完成</li></ul>\n<table bordered striped><tr><th>项目</th><td align=\"right\" colspan=2>1</td></tr></table>\n<details open><summary>详情</summary>正文</details>\n<tg-time unix=\"1647531900\" format=\"r\">明天</tg-time>\n<tg-math>x^2</tg-math>\n  ",
+      "expected": "\n<h1>结算报告</h1><p>Tom &amp; Jerry <mark>重点</mark> H<sub>2</sub>O x<sup>2</sup></p><ul><li><span class=\"telegram-checkbox is-checked\" role=\"checkbox\" aria-checked=\"true\">✓</span>已完成</li><li><span class=\"telegram-checkbox\" role=\"checkbox\" aria-checked=\"false\"></span>未完成</li></ul><div class=\"telegram-table-scroll\"><table class=\"telegram-table telegram-table--bordered telegram-table--striped\"><tr><th>项目</th><td colspan=\"2\" data-align=\"right\">1</td></tr></table></div><details class=\"telegram-details\" open><summary class=\"telegram-details-summary\">详情</summary>正文</details>\n<span class=\"telegram-time\" title=\"Telegram 时间 1647531900 · r\">明天</span>\n<span class=\"telegram-math\">x^2</span>\n  "
+    },
+    {
+      "name": "有序列表属性",
+      "input": "<ol start=\"3\" type=\"i\" reversed><li>三</li><li>二</li></ol><ol start=abc type=x><li>x</li></ol>",
+      "expected": "<ol start=\"3\" type=\"i\" reversed><li>三</li><li>二</li></ol><ol><li>x</li></ol>"
+    },
+    {
+      "name": "媒体与地图",
+      "input": "<img src=\"tg://emoji?id=1\" alt=\"🔥\"><img class=emoji><img src=a.png alt=\"图\"><video></video><audio alt=\"歌\"></audio><tg-map lat=\"31.2\" long=\"121.5\"></tg-map><tg-map></tg-map>",
+      "expected": "<span class=\"telegram-inline-emoji\">🔥</span><span class=\"telegram-inline-emoji\">🙂</span><span class=\"telegram-media-placeholder telegram-media-img\" title=\"富文本图片占位\">图</span><span class=\"telegram-media-placeholder telegram-media-video\" title=\"富文本视频占位\">视频</span><span class=\"telegram-media-placeholder telegram-media-audio\" title=\"富文本音频占位\">歌</span><span class=\"telegram-map-placeholder\" title=\"富文本位置占位\">31.2, 121.5</span><span class=\"telegram-map-placeholder\" title=\"富文本位置占位\">位置</span>"
+    },
+    {
+      "name": "拼贴与幻灯片",
+      "input": "<tg-collage><img alt=a><img alt=b></tg-collage><tg-slideshow><img></tg-slideshow>",
+      "expected": "<div class=\"telegram-media-grid\"><span class=\"telegram-media-placeholder telegram-media-img\" title=\"富文本图片占位\">a</span><span class=\"telegram-media-placeholder telegram-media-img\" title=\"富文本图片占位\">b</span></div><div class=\"telegram-media-grid telegram-media-slideshow\"><span class=\"telegram-media-placeholder telegram-media-img\" title=\"富文本图片占位\">图片</span></div>"
+    },
+    {
+      "name": "分隔线与换行",
+      "input": "第一行<br>第二行<br/>第三行<hr>尾<hr />",
+      "expected": "第一行<br />第二行<br />第三行<hr class=\"telegram-divider\" />尾<hr class=\"telegram-divider\" />"
+    },
+    {
+      "name": "其他 tg 标签",
+      "input": "<tg-reference>参考</tg-reference><tg-math-block>\\int x</tg-math-block><tg-thinking>思考</tg-thinking><aside>旁注</aside><footer>页脚</footer><figure><figcaption>图注</figcaption></figure><cite>出处</cite>",
+      "expected": "<span class=\"telegram-reference\">参考</span><pre class=\"telegram-math-block\">\\int x</pre><span class=\"telegram-thinking\">思考</span><aside class=\"telegram-pullquote\">旁注</aside><footer>页脚</footer><figure><figcaption>图注</figcaption></figure><cite>出处</cite>"
+    },
+    {
+      "name": "不支持的标签保留文字",
+      "input": "<div>块</div><font color=red>字体</font><unknown-tag x=1>未知</unknown-tag><input type=text>",
+      "expected": "块字体未知"
+    },
+    {
+      "name": "不闭合与多余结束",
+      "input": "<b>没闭合 <i>斜体</b> 多余</u> </span>",
+      "expected": "<strong>没闭合 <em>斜体</strong> 多余</u> "
+    },
+    {
+      "name": "裸小于号",
+      "input": "a < b, 3<4, <> <1> </>",
+      "expected": "a <strong> &lt;1&gt; &lt;/&gt;"
+    },
+    {
+      "name": "属性里的引号与 gt",
+      "input": "<a href=\"https://e.com/?q=a>b\">x</a>",
+      "expected": "<span class=\"telegram-link\">b&quot;&gt;x</span>"
+    },
+    {
+      "name": "超大数字实体",
+      "input": "<a href=\"https://example.com/?x=&#9999999999;\">链接</a>",
+      "expected": "<span class=\"telegram-link\" title=\"https://example.com/?x=\">链接</span>"
+    },
+    {
+      "name": "结构空白",
+      "input": "<ul>\n  <li>一</li>\n  <li>二</li>\n</ul>\n<p>段</p>   <table>\n<tr>\n<td>格</td></tr></table>",
+      "expected": "<ul><li>一</li><li>二</li></ul><p>段</p><div class=\"telegram-table-scroll\"><table class=\"telegram-table\"><tr><td>格</td></tr></table></div>"
+    },
+    {
+      "name": "引号属性大小写",
+      "input": "<a HREF=\"HTTPS://E.COM\">大写</a><blockquote EXPANDABLE>大写折叠</blockquote>",
+      "expected": "<span class=\"telegram-link\" title=\"HTTPS://E.COM\">大写</span><details class=\"telegram-expandable-quote\"><summary>展开引用</summary><blockquote class=\"telegram-quote\">大写折叠</blockquote></details>"
+    },
+    {
+      "name": "模板变量",
+      "input": "<b>{title}</b>\n{body}\n<blockquote>{summary}</blockquote>",
+      "expected": "<strong>{title}</strong>\n{body}\n<blockquote class=\"telegram-quote\">{summary}</blockquote>"
+    },
+    {
+      "name": "转账通知默认模板",
+      "input": "<pre><code class=\"language-转账成功\">付款人：Alice\n付款人ID：10001\n收款人：Bob\n金额：88.00\n收款人ID：10002</code></pre>",
+      "expected": "<pre class=\"telegram-pre\"><code>付款人：Alice\n付款人ID：10001\n收款人：Bob\n金额：88.00\n收款人ID：10002</code></pre>"
+    },
+    {
+      "name": "自闭合与斜杠",
+      "input": "<br / ><hr/><b/>粗</b>",
+      "expected": "<br /><hr class=\"telegram-divider\" /><strong>粗</strong>"
+    },
+    {
+      "name": "td 对齐",
+      "input": "<table><tr><td valign=\"middle\" align=\"CENTER\" rowspan=\"2\">a</td><td align=justify>b</td></tr></table>",
+      "expected": "<div class=\"telegram-table-scroll\"><table class=\"telegram-table\"><tr><td rowspan=\"2\" data-align=\"center\" data-valign=\"middle\">a</td><td>b</td></tr></table></div>"
+    },
+    {
+      "name": "随机组合 0",
+      "input": "</ol><blockquote></li>&quot;</I><span class=tg-spoiler>",
+      "expected": "</ol><blockquote class=\"telegram-quote\"></li>&quot;</em><button type=\"button\" class=\"telegram-spoiler\" aria-label=\"显示隐藏文本\">"
+    },
+    {
+      "name": "随机组合 1",
+      "input": "<tg-emoji emoji-id=1><span><ul></zz></I></tg-spoiler></table><pre><i></span><table bordered></ul><span class=tg-spoiler><code class=\"language-py\">",
+      "expected": "<span class=\"telegram-custom-emoji\" title=\"自定义 Emoji 1\"><ul></em></button></table></div><pre class=\"telegram-pre\"><em><div class=\"telegram-table-scroll\"><table class=\"telegram-table telegram-table--bordered\"></ul><button type=\"button\" class=\"telegram-spoiler\" aria-label=\"显示隐藏文本\"><span class=\"telegram-code-language\">py</span><code class=\"telegram-code-language-py\">"
+    },
+    {
+      "name": "随机组合 2",
+      "input": "</tg-emoji><table bordered>",
+      "expected": "</span><div class=\"telegram-table-scroll\"><table class=\"telegram-table telegram-table--bordered\">"
+    },
+    {
+      "name": "随机组合 3",
+      "input": "<details open>",
+      "expected": "<details class=\"telegram-details\" open>"
+    },
+    {
+      "name": "随机组合 4",
+      "input": "<blockquote expandable></ol></pre>&amp;&amp;</zz></ol></I><x-y></zz>",
+      "expected": "<details class=\"telegram-expandable-quote\"><summary>展开引用</summary><blockquote class=\"telegram-quote\"></ol></pre>&amp;&amp;</ol></em>"
+    },
+    {
+      "name": "随机组合 5",
+      "input": "</I></pre><i></tg-emoji></summary></blockquote><hr/>",
+      "expected": "</em></pre><em></span></summary></blockquote><hr class=\"telegram-divider\" />"
+    },
+    {
+      "name": "随机组合 6",
+      "input": "<blockquote><tg-emoji emoji-id=1><blockquote expandable><x-y><h2></tg-emoji><details open>",
+      "expected": "<blockquote class=\"telegram-quote\"><span class=\"telegram-custom-emoji\" title=\"自定义 Emoji 1\"><details class=\"telegram-expandable-quote\"><summary>展开引用</summary><blockquote class=\"telegram-quote\"><h2></span><details class=\"telegram-details\" open>"
+    },
+    {
+      "name": "随机组合 7",
+      "input": "<a href=javascript:1><span></zz><x-y>&amp;</a><ul><span></tg-emoji>  <span class=tg-spoiler>",
+      "expected": "<span class=\"telegram-link\">&amp;</span><ul></span>  <button type=\"button\" class=\"telegram-spoiler\" aria-label=\"显示隐藏文本\">"
+    },
+    {
+      "name": "随机组合 8",
+      "input": "</I>> <pre></tr>&<tg-emoji emoji-id=1><table bordered>\"</h2><td align=left>",
+      "expected": "</em>&gt; <pre class=\"telegram-pre\"></tr>&amp;<span class=\"telegram-custom-emoji\" title=\"自定义 Emoji 1\"><div class=\"telegram-table-scroll\"><table class=\"telegram-table telegram-table--bordered\">&quot;</h2><td data-align=\"left\">"
+    },
+    {
+      "name": "随机组合 9",
+      "input": "<ol start=2><td align=left><ul><h2><code class=\"language-py\">=<a href=javascript:1>\n\"<code class=\"language-py\">",
+      "expected": "<ol start=\"2\"><td data-align=\"left\"><ul><h2><span class=\"telegram-code-language\">py</span><code class=\"telegram-code-language-py\">=<span class=\"telegram-link\">\n&quot;<span class=\"telegram-code-language\">py</span><code class=\"telegram-code-language-py\">"
+    },
+    {
+      "name": "随机组合 10",
+      "input": "<x-y><h2>",
+      "expected": "<h2>"
+    },
+    {
+      "name": "随机组合 11",
+      "input": "</tr><input type=checkbox checked><p>文字<tr><hr/><<span class=tg-spoiler><blockquote expandable>",
+      "expected": "</tr><span class=\"telegram-checkbox is-checked\" role=\"checkbox\" aria-checked=\"true\">✓</span><p>文字<tr><hr class=\"telegram-divider\" />&lt;<button type=\"button\" class=\"telegram-spoiler\" aria-label=\"显示隐藏文本\"><details class=\"telegram-expandable-quote\"><summary>展开引用</summary><blockquote class=\"telegram-quote\">"
+    },
+    {
+      "name": "随机组合 12",
+      "input": "</ul><a href='https://x.y'>'<p><blockquote><ol start=2></tr></ul><i>",
+      "expected": "</ul><span class=\"telegram-link\" title=\"https://x.y\">&#39;<p><blockquote class=\"telegram-quote\"><ol start=\"2\"></tr></ul><em>"
+    },
+    {
+      "name": "随机组合 13",
+      "input": "<span class=tg-spoiler>'</tg-emoji><x-y>=<input type=checkbox checked><details open></h2><p>\n</p>",
+      "expected": "<button type=\"button\" class=\"telegram-spoiler\" aria-label=\"显示隐藏文本\">&#39;</span>=<span class=\"telegram-checkbox is-checked\" role=\"checkbox\" aria-checked=\"true\">✓</span><details class=\"telegram-details\" open></h2><p></p>"
+    },
+    {
+      "name": "随机组合 14",
+      "input": "</tr></zz>/<td align=left><span class=tg-spoiler><summary></span></ol><br></td>",
+      "expected": "</tr>/<td data-align=\"left\"><button type=\"button\" class=\"telegram-spoiler\" aria-label=\"显示隐藏文本\"><summary class=\"telegram-details-summary\"></button></ol><br /></td>"
+    },
+    {
+      "name": "随机组合 15",
+      "input": "&#65;<span class=tg-spoiler></I>文字\n<h2>&quot;<x-y>&<details open><tr><hr/>",
+      "expected": "&#65;<button type=\"button\" class=\"telegram-spoiler\" aria-label=\"显示隐藏文本\"></em>文字\n<h2>&quot;&amp;<details class=\"telegram-details\" open><tr><hr class=\"telegram-divider\" />"
+    },
+    {
+      "name": "随机组合 16",
+      "input": "<li><input type=checkbox checked>&#65;</p></b></ol><td align=left></p><a href='https://x.y'>> <blockquote expandable></tr>",
+      "expected": "<li><span class=\"telegram-checkbox is-checked\" role=\"checkbox\" aria-checked=\"true\">✓</span>&#65;</p></strong></ol><td data-align=\"left\"></p><span class=\"telegram-link\" title=\"https://x.y\">&gt; <details class=\"telegram-expandable-quote\"><summary>展开引用</summary><blockquote class=\"telegram-quote\"></tr>"
+    },
+    {
+      "name": "随机组合 17",
+      "input": "<pre>",
+      "expected": "<pre class=\"telegram-pre\">"
+    },
+    {
+      "name": "随机组合 18",
+      "input": "<hr/></blockquote>a<code class=\"language-py\"></li></li></tg-spoiler></details></tr></span><a href='https://x.y'><tr></li>",
+      "expected": "<hr class=\"telegram-divider\" /></blockquote>a<span class=\"telegram-code-language\">py</span><code class=\"telegram-code-language-py\"></li></li></button></details></tr><span class=\"telegram-link\" title=\"https://x.y\"><tr></li>"
+    },
+    {
+      "name": "随机组合 19",
+      "input": "<br><input type=checkbox checked></blockquote><details open><table bordered></details></tg-emoji><br>  ",
+      "expected": "<br /><span class=\"telegram-checkbox is-checked\" role=\"checkbox\" aria-checked=\"true\">✓</span></blockquote><details class=\"telegram-details\" open><div class=\"telegram-table-scroll\"><table class=\"telegram-table telegram-table--bordered\"></details></span><br />  "
+    },
+    {
+      "name": "随机组合 20",
+      "input": "</p>&<input type=checkbox checked><li></pre><blockquote></span>",
+      "expected": "</p>&amp;<span class=\"telegram-checkbox is-checked\" role=\"checkbox\" aria-checked=\"true\">✓</span><li></pre><blockquote class=\"telegram-quote\">"
+    },
+    {
+      "name": "随机组合 21",
+      "input": "<blockquote></pre>&#65;",
+      "expected": "<blockquote class=\"telegram-quote\"></pre>&#65;"
+    },
+    {
+      "name": "随机组合 22",
+      "input": "<b></tr><summary></zz>",
+      "expected": "<strong></tr><summary class=\"telegram-details-summary\">"
+    },
+    {
+      "name": "随机组合 23",
+      "input": "</code><hr/><b>",
+      "expected": "</code><hr class=\"telegram-divider\" /><strong>"
+    },
+    {
+      "name": "随机组合 24",
+      "input": "</ul><tg-emoji emoji-id=1><ul>",
+      "expected": "</ul><span class=\"telegram-custom-emoji\" title=\"自定义 Emoji 1\"><ul>"
+    },
+    {
+      "name": "随机组合 25",
+      "input": "<x-y></h2></ol></blockquote>\n</summary></table></ol>> &quot;",
+      "expected": "</h2></ol></blockquote></summary></table></div></ol>&gt; &quot;"
+    },
+    {
+      "name": "随机组合 26",
+      "input": "a</I><td align=left><tg-spoiler></details>\"</ol></details>&/</tg-emoji>",
+      "expected": "a</em><td data-align=\"left\"><button type=\"button\" class=\"telegram-spoiler\" aria-label=\"显示隐藏文本\"></details>&quot;</ol></details>&amp;/</span>"
+    },
+    {
+      "name": "随机组合 27",
+      "input": "</li></li></li><span></td>&amp;</li>",
+      "expected": "</li></li></li></td>&amp;</li>"
+    },
+    {
+      "name": "随机组合 28",
+      "input": "</a>",
+      "expected": "</span>"
+    },
+    {
+      "name": "随机组合 29",
+      "input": "<pre><tr>",
+      "expected": "<pre class=\"telegram-pre\"><tr>"
+    },
+    {
+      "name": "随机组合 30",
+      "input": "<blockquote expandable><p><",
+      "expected": "<details class=\"telegram-expandable-quote\"><summary>展开引用</summary><blockquote class=\"telegram-quote\"><p>&lt;"
+    },
+    {
+      "name": "随机组合 31",
+      "input": "<span>",
+      "expected": ""
+    },
+    {
+      "name": "随机组合 32",
+      "input": "<x-y>",
+      "expected": ""
+    },
+    {
+      "name": "随机组合 33",
+      "input": "<tg-emoji emoji-id=1><span></ol>",
+      "expected": "<span class=\"telegram-custom-emoji\" title=\"自定义 Emoji 1\"></ol>"
+    },
+    {
+      "name": "随机组合 34",
+      "input": "> </b><span class=tg-spoiler></details><pre>> ",
+      "expected": "&gt; </strong><button type=\"button\" class=\"telegram-spoiler\" aria-label=\"显示隐藏文本\"></details><pre class=\"telegram-pre\">&gt; "
+    },
+    {
+      "name": "随机组合 35",
+      "input": "<blockquote>&amp;</code></p><<ul></td>",
+      "expected": "<blockquote class=\"telegram-quote\">&amp;</code></p>&lt;<ul></td>"
+    },
+    {
+      "name": "随机组合 36",
+      "input": "<blockquote expandable></summary>",
+      "expected": "<details class=\"telegram-expandable-quote\"><summary>展开引用</summary><blockquote class=\"telegram-quote\"></summary>"
+    },
+    {
+      "name": "随机组合 37",
+      "input": "<td align=left></td></td><h2></span><blockquote><span>a",
+      "expected": "<td data-align=\"left\"></td></td><h2><blockquote class=\"telegram-quote\">a"
+    },
+    {
+      "name": "随机组合 38",
+      "input": "a</code></td><summary>\n<a href='https://x.y'>",
+      "expected": "a</code></td><summary class=\"telegram-details-summary\">\n<span class=\"telegram-link\" title=\"https://x.y\">"
+    },
+    {
+      "name": "随机组合 39",
+      "input": "</b><pre></ol></ol><img alt=x><ul><blockquote>\n<tg-emoji emoji-id=1>",
+      "expected": "</strong><pre class=\"telegram-pre\"></ol></ol><span class=\"telegram-media-placeholder telegram-media-img\" title=\"富文本图片占位\">x</span><ul><blockquote class=\"telegram-quote\">\n<span class=\"telegram-custom-emoji\" title=\"自定义 Emoji 1\">"
+    },
+    {
+      "name": "随机组合 40",
+      "input": "'",
+      "expected": "&#39;"
+    },
+    {
+      "name": "随机组合 41",
+      "input": "<h2>&quot;</details></span>\n</summary></code><img alt=x><ul>",
+      "expected": "<h2>&quot;</details></summary></code><span class=\"telegram-media-placeholder telegram-media-img\" title=\"富文本图片占位\">x</span><ul>"
+    },
+    {
+      "name": "随机组合 42",
+      "input": "</p>\"</pre>",
+      "expected": "</p>&quot;</pre>"
+    },
+    {
+      "name": "随机组合 43",
+      "input": "<tg-emoji emoji-id=1>\"</table><p>&amp;</pre>> /=",
+      "expected": "<span class=\"telegram-custom-emoji\" title=\"自定义 Emoji 1\">&quot;</table></div><p>&amp;</pre>&gt; /="
+    },
+    {
+      "name": "随机组合 44",
+      "input": "</summary></a>/<code class=\"language-py\"><details open></li>a/</pre></a><img alt=x></tr></p>",
+      "expected": "</summary></span>/<span class=\"telegram-code-language\">py</span><code class=\"telegram-code-language-py\"><details class=\"telegram-details\" open></li>a/</pre></span><span class=\"telegram-media-placeholder telegram-media-img\" title=\"富文本图片占位\">x</span></tr></p>"
+    },
+    {
+      "name": "随机组合 45",
+      "input": "</b></b>=<br></td></code></a>\n<</p><tr>/",
+      "expected": "</strong></strong>=<br /></td></code></span>\n&lt;</p><tr>/"
+    },
+    {
+      "name": "随机组合 46",
+      "input": "</p><ul></span></pre><span></pre></td></a><p><pre></td>> ",
+      "expected": "</p><ul></pre></pre></td></span><p><pre class=\"telegram-pre\"></td>&gt; "
+    },
+    {
+      "name": "随机组合 47",
+      "input": "<summary><b></td></tg-spoiler>&quot;</p>/&quot;</span><summary>",
+      "expected": "<summary class=\"telegram-details-summary\"><strong></td></button>&quot;</p>/&quot;<summary class=\"telegram-details-summary\">"
+    },
+    {
+      "name": "随机组合 48",
+      "input": "<blockquote expandable></tg-spoiler><li>=  '</a></td><input type=checkbox checked><a href=javascript:1><table bordered>",
+      "expected": "<details class=\"telegram-expandable-quote\"><summary>展开引用</summary><blockquote class=\"telegram-quote\"></button><li>=  &#39;</span></td><span class=\"telegram-checkbox is-checked\" role=\"checkbox\" aria-checked=\"true\">✓</span><span class=\"telegram-link\"><div class=\"telegram-table-scroll\"><table class=\"telegram-table telegram-table--bordered\">"
+    },
+    {
+      "name": "随机组合 49",
+      "input": "&amp;<p></span>/</ol>文字</li><td align=left></li>a</ol></span>文字",
+      "expected": "&amp;<p>/</ol>文字</li><td data-align=\"left\"></li>a</ol>文字"
+    },
+    {
+      "name": "随机组合 50",
+      "input": "<a href='https://x.y'></blockquote></b>",
+      "expected": "<span class=\"telegram-link\" title=\"https://x.y\"></blockquote></strong>"
+    },
+    {
+      "name": "随机组合 51",
+      "input": "</zz><tg-spoiler><td align=left>",
+      "expected": "<button type=\"button\" class=\"telegram-spoiler\" aria-label=\"显示隐藏文本\"><td data-align=\"left\">"
+    },
+    {
+      "name": "随机组合 52",
+      "input": "&quot;<blockquote>> <details open><</td>&#65;<ol start=2></p><blockquote></tg-emoji></tg-emoji></blockquote>",
+      "expected": "&quot;<blockquote class=\"telegram-quote\">&gt; <details class=\"telegram-details\" open>&lt;</td>&#65;<ol start=\"2\"></p><blockquote class=\"telegram-quote\"></span></span></blockquote>"
+    },
+    {
+      "name": "随机组合 53",
+      "input": "<b>",
+      "expected": "<strong>"
+    },
+    {
+      "name": "随机组合 54",
+      "input": "文字&quot;<span><img alt=x>a<ol start=2></blockquote><table bordered></details></a><details open></details><pre>",
+      "expected": "文字&quot;<span class=\"telegram-media-placeholder telegram-media-img\" title=\"富文本图片占位\">x</span>a<ol start=\"2\"></blockquote><div class=\"telegram-table-scroll\"><table class=\"telegram-table telegram-table--bordered\"></details></span><details class=\"telegram-details\" open></details><pre class=\"telegram-pre\">"
+    },
+    {
+      "name": "随机组合 55",
+      "input": "</code>",
+      "expected": "</code>"
+    },
+    {
+      "name": "随机组合 56",
+      "input": "<hr/></table><code class=\"language-py\">'",
+      "expected": "<hr class=\"telegram-divider\" /></table></div><span class=\"telegram-code-language\">py</span><code class=\"telegram-code-language-py\">&#39;"
+    },
+    {
+      "name": "随机组合 57",
+      "input": "</h2></code><tg-emoji emoji-id=1></ul><summary></blockquote></I></tg-spoiler>a</p>",
+      "expected": "</h2></code><span class=\"telegram-custom-emoji\" title=\"自定义 Emoji 1\"></ul><summary class=\"telegram-details-summary\"></blockquote></em></button>a</p>"
+    },
+    {
+      "name": "随机组合 58",
+      "input": "&#65;</zz><details open><tg-spoiler><img alt=x></ul><details open></tg-spoiler>",
+      "expected": "&#65;<details class=\"telegram-details\" open><button type=\"button\" class=\"telegram-spoiler\" aria-label=\"显示隐藏文本\"><span class=\"telegram-media-placeholder telegram-media-img\" title=\"富文本图片占位\">x</span></ul><details class=\"telegram-details\" open></button>"
+    },
+    {
+      "name": "随机组合 59",
+      "input": "</blockquote><tg-emoji emoji-id=1><blockquote><img alt=x></table></b></details><tr>\"",
+      "expected": "</blockquote><span class=\"telegram-custom-emoji\" title=\"自定义 Emoji 1\"><blockquote class=\"telegram-quote\"><span class=\"telegram-media-placeholder telegram-media-img\" title=\"富文本图片占位\">x</span></table></div></strong></details><tr>&quot;"
+    }
+  ]
+}
