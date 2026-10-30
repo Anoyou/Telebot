@@ -16,7 +16,7 @@ final class VisualInspectionUITests: XCTestCase {
 
     func testOperationsAndAssistantWorkspaces() {
         app.tabBars.buttons["更多"].tap()
-        app.buttons["日志与诊断"].tap()
+        app.buttons["more.logs"].tap()
         XCTAssertTrue(app.descendants(matching: .any)["logs.screen"].firstMatch.waitForExistence(timeout: 10))
         capture("11-log-overview")
         app.navigationBars.buttons.element(boundBy: 0).tap()

@@ -109,6 +109,12 @@ struct RuntimeTreeView: View {
         .accessibilityIdentifier("runtime.screen")
         .refreshable { await load(force: true) }
         .task(id: accountID) { await load(force: false) }
+        // 值守全局提示条（Dock 上方）里恢复生产、或 30 秒轮询读到别处切换了运行模式：这里跟着重读。
+        .onChange(of: model.runtimeProfile) { _, latest in
+            guard !profileBusy, let latest, latest != profile else { return }
+            profile = latest
+            Task { await load(force: true) }
+        }
         .navigationDestination(item: $route) { route in destination(route) }
     }
 
@@ -915,7 +921,7 @@ struct RuntimeTree {
 }
 
 /// `GET /api/platform/profile`。
-struct RuntimeProfile {
+struct RuntimeProfile: Equatable {
     let current: String
     let active: String?
     let status: String
@@ -976,5 +982,86 @@ struct RuntimeProfilePreview {
         lines.append("同时暂停所有插件投递与定时任务，拒绝资金动作；账号保持在线，平台通知与内置管理命令仍可用。")
         if let blindSpot, !blindSpot.isEmpty { lines.append(blindSpot) }
         return lines.joined(separator: "\n")
+    }
+}
+
+// MARK: - 值守全局提示（第 20 轮，对齐 Web `GlobalAlertBar` 的 `SafeWatchBar`）
+//
+// 与 Web 同一接口、同一判断：`GET /api/platform/profile` 的 `active_profile == "safe_watch"` 时显示，
+// 旧服务器没有该接口（404）时不显示；「恢复生产」先确认，再 `POST /api/platform/profile/restore`。
+// iPhone 上挂在 Dock 上方的系统底部附件（`tabViewBottomAccessory`），每个 Tab 都能看到；
+// Dock 随滚动缩小时附件并入 Dock 一行，只留状态与按钮。
+
+extension RuntimeProfile {
+    /// 全局提示条的状态文字（与 Web `SAFE_WATCH_STATUS_TEXT` 相同）。
+    var globalAlertText: String {
+        switch status {
+        case "applying": "正在进入值守"
+        case "restoring": "正在恢复生产"
+        case "failed": "值守收敛失败"
+        default: "值守中"
+        }
+    }
+
+    /// 正在进入值守或正在恢复时不能再点「恢复生产」（与 Web 一致）。
+    var isTransitioning: Bool { status == "applying" || status == "restoring" }
+}
+
+struct SafeWatchAccessory: View {
+    let profile: RuntimeProfile
+    let restoring: Bool
+    let onRestore: () -> Void
+    @Environment(\.tabViewBottomAccessoryPlacement) private var placement
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "moon.zzz.fill")
+                .foregroundStyle(profile.status == "failed" ? Color.red : Color.orange)
+                .imageScale(.medium)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(profile.globalAlertText)
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(1)
+                if placement != TabViewBottomAccessoryPlacement.inline {
+                    Text("插件投递、定时任务和资金动作已暂停")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.85)
+                }
+            }
+            .accessibilityElement(children: .combine)
+            .accessibilityIdentifier("safeWatch.status")
+            Spacer(minLength: 6)
+            Button {
+                onRestore()
+            } label: {
+                Text(restoring ? "正在恢复…" : "恢复生产")
+                    .font(.subheadline.weight(.semibold))
+                    .frame(minHeight: 44)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.borderless)
+            .disabled(restoring || profile.isTransitioning)
+            .accessibilityIdentifier("safeWatch.restore")
+        }
+        .padding(.horizontal, 16)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("safeWatch.banner")
+    }
+}
+
+extension View {
+    /// Dock 上方的值守提示。iOS 26.1 起用 `isEnabled` 控制显示；26.0 上不带 `isEnabled` 的写法内容为空时不显示附件。
+    @ViewBuilder func safeWatchAccessory<Content: View>(isEnabled: Bool, @ViewBuilder content: () -> Content) -> some View {
+        let accessory = content()
+        if #available(iOS 26.1, *) {
+            tabViewBottomAccessory(isEnabled: isEnabled) { accessory }
+        } else {
+            tabViewBottomAccessory {
+                if isEnabled { accessory }
+            }
+        }
     }
 }

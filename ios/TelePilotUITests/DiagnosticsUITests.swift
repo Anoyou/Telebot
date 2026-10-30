@@ -3,10 +3,10 @@ import XCTest
 /// 第 19 轮（iOS 0.20.0）：命中调试原生页、服务器参数原生表单、日志补「系统控制台」「Agent 运行」。
 @MainActor
 final class DiagnosticsUITests: XCTestCase {
-    private func launch() -> XCUIApplication {
+    private func launch(_ extra: [String] = []) -> XCUIApplication {
         continueAfterFailure = false
         let app = XCUIApplication()
-        app.launchArguments = ["--ui-testing", "-AppleLanguages", "(zh-Hans)", "-AppleLocale", "zh_CN"]
+        app.launchArguments = ["--ui-testing", "-AppleLanguages", "(zh-Hans)", "-AppleLocale", "zh_CN"] + extra
         app.launch()
         XCTAssertTrue(app.tabBars.buttons["更多"].waitForExistence(timeout: 45))
         app.tabBars.buttons["更多"].tap()
@@ -67,7 +67,7 @@ final class DiagnosticsUITests: XCTestCase {
     }
 
     private func openLogs(_ app: XCUIApplication) {
-        let logs = app.buttons["日志与诊断"]
+        let logs = app.buttons["more.logs"]
         XCTAssertTrue(app.buttons["more.accounts"].waitForExistence(timeout: 10))
         scrollTo(logs, in: app, attempts: 6)
         XCTAssertTrue(logs.waitForExistence(timeout: 5))
@@ -79,7 +79,7 @@ final class DiagnosticsUITests: XCTestCase {
         openLogs(app)
         let entry = app.buttons["logs.dispatchDebug"]
         scrollTo(entry, in: app)
-        XCTAssertTrue(entry.exists, "日志与诊断里应有「命中调试」入口")
+        XCTAssertTrue(entry.exists, "日志里应有「命中调试」入口")
         XCTAssertTrue(entry.label.contains("命中调试"), entry.label)
         entry.tap()
         XCTAssertTrue(app.navigationBars["命中调试"].waitForExistence(timeout: 10))
@@ -175,7 +175,7 @@ final class DiagnosticsUITests: XCTestCase {
         let app = launch()
         let system = app.buttons["服务器设置"]
         XCTAssertTrue(app.buttons["more.accounts"].waitForExistence(timeout: 10))
-        // 「更多 › 工具与设置」里有命中调试原生页入口（与日志与诊断里的同一页）。
+        // 「更多 › 工具与设置」里有命中调试原生页入口（与日志里的同一页）。
         let moreDebug = app.buttons["more.dispatchDebug"]
         scrollTo(moreDebug, in: app, attempts: 8)
         XCTAssertTrue(moreDebug.exists, "更多 › 工具与设置 应有「命中调试」")
@@ -275,5 +275,114 @@ final class DiagnosticsUITests: XCTestCase {
         screenshot.name = "Agent 运行详情"
         screenshot.lifetime = .keepAlways
         add(screenshot)
+    }
+
+    // MARK: 第 20 轮 iOS 信息架构补缺
+
+    /// 值守全局提示（对齐 Web `SafeWatchBar`）：服务器在值守时 Dock 上方每个 Tab 都显示「值守中 · 恢复生产」，
+    /// 恢复生产先确认，确认后提示消失（同一接口 `/api/platform/profile/restore`）。「日志」改名后标题也一致。
+    func testSafeWatchGlobalBannerRestoresProduction() {
+        let app = launch(["--ui-test-safe-watch"])
+        let banner = element(app, "safeWatch.banner")
+        XCTAssertTrue(banner.waitForExistence(timeout: 20), "值守中应在 Dock 上方显示全局提示")
+        let status = element(app, "safeWatch.status")
+        XCTAssertTrue(status.waitForExistence(timeout: 5))
+        XCTAssertTrue(status.label.contains("值守中"), status.label)
+
+        // 换到别的 Tab 仍然显示（全局，不只在插件 › 运行）。
+        let overview = app.tabBars.buttons["概览"]
+        XCTAssertTrue(overview.waitForExistence(timeout: 5))
+        overview.tap()
+        XCTAssertTrue(banner.waitForExistence(timeout: 5), "切到概览后全局提示仍应显示")
+        let screenshot = XCTAttachment(screenshot: app.screenshot())
+        screenshot.name = "值守全局提示"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+
+        let restore = app.buttons["safeWatch.restore"]
+        XCTAssertTrue(restore.waitForExistence(timeout: 5))
+        XCTAssertTrue(restore.isEnabled)
+        restore.tap()
+        let alert = app.alerts["恢复生产？"]
+        XCTAssertTrue(alert.waitForExistence(timeout: 5), "恢复生产前应有确认框")
+        alert.buttons["确认恢复生产"].tap()
+        let gone = expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: banner)
+        wait(for: [gone], timeout: 15)
+    }
+
+    /// 旧服务器没有 `/api/platform/profile`（404）时不显示值守提示，也不报错；默认生产模式同样不显示。
+    func testSafeWatchBannerHiddenOnOldServerAndInProduction() {
+        let old = launch(["--ui-test-safe-watch", "--ui-test-old-server-profile"])
+        XCTAssertTrue(old.buttons["more.accounts"].waitForExistence(timeout: 10))
+        XCTAssertFalse(element(old, "safeWatch.banner").waitForExistence(timeout: 3), "旧服务器不应显示值守提示")
+        old.terminate()
+
+        let production = launch()
+        XCTAssertTrue(production.buttons["more.accounts"].waitForExistence(timeout: 10))
+        XCTAssertFalse(element(production, "safeWatch.banner").waitForExistence(timeout: 3), "生产模式不应显示值守提示")
+        // 「日志与诊断」改名「日志」：更多里的行与页面标题一致。
+        openLogs(production)
+        XCTAssertTrue(production.navigationBars["日志"].exists, "日志页标题应为「日志」")
+        XCTAssertFalse(production.staticTexts["日志与诊断"].exists)
+    }
+
+    /// 日志消息详情「用命中调试复现」：跳到原生命中调试页，账号、Chat ID、会话类型、发送者、来源与正文都已填好，可直接模拟。
+    func testLogMessageDetailReproducesInDispatchDebug() {
+        let app = launch()
+        openLogs(app)
+        let messages = app.buttons["logs.kind.messages"]
+        scrollTo(messages, in: app)
+        XCTAssertTrue(messages.waitForExistence(timeout: 10))
+        messages.tap()
+        let failure = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "处理失败")).firstMatch
+        XCTAssertTrue(failure.waitForExistence(timeout: 10))
+        failure.tap()
+
+        let reproduce = app.buttons["logs.detail.dispatchDebug"]
+        scrollTo(reproduce, in: app)
+        XCTAssertTrue(reproduce.exists, "消息详情应有「用命中调试复现」")
+        XCTAssertTrue(reproduce.label.contains("用命中调试复现"), reproduce.label)
+        reproduce.tap()
+        XCTAssertTrue(app.navigationBars["命中调试"].waitForExistence(timeout: 10))
+
+        let chatID = app.textFields["dispatchDebug.chatID"]
+        scrollTo(chatID, in: app, attempts: 4)
+        XCTAssertEqual(chatID.value as? String, "-1001234567", "应带入这条消息的 Chat ID")
+        let sender = app.textFields["dispatchDebug.senderID"]
+        scrollTo(sender, in: app, attempts: 4)
+        XCTAssertEqual(sender.value as? String, "42", "应带入发送者 ID")
+        let chatType = app.buttons["dispatchDebug.chatType"]
+        scrollTo(chatType, in: app, up: false, attempts: 4)
+        XCTAssertTrue(chatType.exists)
+        XCTAssertTrue(chatType.label.contains("普通群") || (chatType.value as? String ?? "").contains("普通群"),
+                      "按 Chat ID 推断为普通群：\(chatType.label) \(chatType.value ?? "")")
+        let text = element(app, "dispatchDebug.text")
+        scrollTo(text, in: app, attempts: 6)
+        XCTAssertEqual(text.value as? String, "帮我总结一下今天的讨论", "应带入消息正文")
+        let screenshot = XCTAttachment(screenshot: app.screenshot())
+        screenshot.name = "日志 → 命中调试复现"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+
+        runSimulation(app)
+        let summary = element(app, "dispatchDebug.summary")
+        scrollTo(summary, in: app, attempts: 6)
+        XCTAssertTrue(summary.waitForExistence(timeout: 10), "带入的参数应能直接模拟")
+    }
+
+    /// 命中调试模块关闭时，日志消息详情不显示「用命中调试复现」。
+    func testLogMessageDetailHidesReproduceWhenDispatchDebugOff() {
+        let app = launch(["--ui-test-modules-off=dispatch_debug"])
+        openLogs(app)
+        let messages = app.buttons["logs.kind.messages"]
+        scrollTo(messages, in: app)
+        messages.tap()
+        let failure = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "处理失败")).firstMatch
+        XCTAssertTrue(failure.waitForExistence(timeout: 10))
+        failure.tap()
+        let timeline = app.buttons["logs.openTrace"]
+        scrollTo(timeline, in: app)
+        XCTAssertTrue(timeline.exists)
+        XCTAssertFalse(app.buttons["logs.detail.dispatchDebug"].exists, "命中调试关闭时不显示复现入口")
     }
 }

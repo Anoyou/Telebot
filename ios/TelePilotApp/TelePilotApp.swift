@@ -1,4 +1,5 @@
 import SwiftUI
+import TelePilotCore
 
 @main
 struct TelePilotApp: App {
@@ -91,6 +92,10 @@ private struct MainTabs: View {
     /// 自选 Dock 格各自的导航路径（账号、交互、日志等推送路由时用）。
     @State private var tabPaths: [DockItem: [MoreDestination]] = [:]
     @State private var modal: WorkspaceModal?
+    /// 值守全局提示：「恢复生产」确认框、请求中、失败说明。
+    @State private var confirmRestoreProduction = false
+    @State private var restoringProduction = false
+    @State private var restoreProductionFailure: String?
 
     /// 实际显示的中间格：用户自选（App 设置 › 自定义 Dock）经服务器模块开关调整后的结果。
     private var dockItems: [DockItem] { preferences.dockItems(disabledModules: model.disabledModules) }
@@ -127,6 +132,31 @@ private struct MainTabs: View {
         }
         .tabViewStyle(.sidebarAdaptable)
         .tabBarMinimizeBehavior(.onScrollDown)
+        // 值守全局提示（第 20 轮，对齐 Web 每页顶部的 SafeWatchBar）：Dock 上方，每个 Tab 都能看到。
+        .safeWatchAccessory(isEnabled: model.safeWatchActive) {
+            if let profile = model.runtimeProfile {
+                SafeWatchAccessory(profile: profile, restoring: restoringProduction) { confirmRestoreProduction = true }
+            }
+        }
+        .alert("恢复生产？", isPresented: $confirmRestoreProduction) {
+            Button("取消", role: .cancel) {}
+            Button("确认恢复生产") { Task { await restoreProduction() } }
+        } message: {
+            Text("按进入值守前的快照逐项还原模块开关，插件投递、定时任务和资金动作恢复。")
+        }
+        .alert("恢复生产没有完成", isPresented: Binding(get: { restoreProductionFailure != nil }, set: { if !$0 { restoreProductionFailure = nil } })) {
+            Button("好", role: .cancel) {}
+        } message: {
+            Text(restoreProductionFailure ?? "")
+        }
+        // 与 Web 一样每 30 秒重读运行模式：在别的设备上进入值守 / 恢复生产，这里也跟上。
+        .task {
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(30))
+                guard !Task.isCancelled else { return }
+                await model.refreshRuntimeProfile()
+            }
+        }
         .sheet(item: $modal, onDismiss: { Task { await model.refreshWorkspace() } }) { route in
             Group {
                 switch route {
@@ -147,6 +177,18 @@ private struct MainTabs: View {
         .onChange(of: dockItems) { _, _ in keepSelectionVisible() }
         .onChange(of: selected) { old, new in
             if new == .agent && old != .agent { previousTab = old }
+        }
+    }
+
+    private func restoreProduction() async {
+        restoringProduction = true
+        defer { restoringProduction = false }
+        do {
+            try await model.restoreProduction()
+        } catch {
+            restoreProductionFailure = (error as? APIError)?.isOutcomeUncertain == true
+                ? "未能确认是否已恢复生产，已重新读取运行模式；提示条还在就说明仍在值守。"
+                : "恢复失败：\(OpsFormat.errorMessage(error))"
         }
     }
 

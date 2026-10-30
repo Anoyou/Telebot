@@ -205,7 +205,7 @@ final class ManagementUITests: XCTestCase {
 
     func testRuntimeLogCredentialsAreMaskedByDefault() {
         let app = launch()
-        app.buttons["日志与诊断"].tap()
+        app.buttons["more.logs"].tap()
         let runtime = app.buttons["logs.kind.runtime"]
         for _ in 0..<8 where !(runtime.exists && runtime.isHittable) { app.swipeUp() }
         XCTAssertTrue(runtime.waitForExistence(timeout: 10))
@@ -252,7 +252,7 @@ final class ManagementUITests: XCTestCase {
 
     func testLogDetailExplainsMessageFailureAndOpensTimeline() {
         let app = launch()
-        app.buttons["日志与诊断"].tap()
+        app.buttons["more.logs"].tap()
         let messages = app.buttons["logs.kind.messages"]
         for _ in 0..<8 where !(messages.exists && messages.isHittable) { app.swipeUp() }
         XCTAssertTrue(messages.waitForExistence(timeout: 10))
@@ -507,7 +507,7 @@ final class ManagementUITests: XCTestCase {
         for _ in 0..<6 where !params.exists { app.swipeUp() }
         XCTAssertTrue(params.exists, "保存后插件玩法参数应保留")
         let screenshot = XCTAttachment(screenshot: app.screenshot())
-        screenshot.name = "交互中心规则编辑"
+        screenshot.name = "交互规则编辑"
         screenshot.lifetime = .keepAlways
         add(screenshot)
     }
@@ -628,9 +628,14 @@ final class ManagementUITests: XCTestCase {
     /// 仍算 isHittable，但点击会落到标签栏上：此时小步上拖，把它挪到标签栏上方。
     private func reveal(_ element: XCUIElement, in app: XCUIApplication, up: Bool = true, attempts: Int = 10) {
         func underTabBar() -> Bool {
+            var top = CGFloat.infinity
             let bar = app.tabBars.firstMatch
-            guard bar.exists, !bar.frame.isEmpty else { return false }
-            return element.frame.midY >= bar.frame.minY - 8
+            if bar.exists, !bar.frame.isEmpty { top = bar.frame.minY }
+            // 第 20 轮：值守中 Dock 上方多了全局提示（系统底部附件），同样会挡住下面的行。
+            let banner = app.descendants(matching: .any)["safeWatch.banner"].firstMatch
+            if banner.exists, !banner.frame.isEmpty { top = min(top, banner.frame.minY) }
+            guard top.isFinite else { return false }
+            return element.frame.midY >= top - 8
         }
         for _ in 0..<attempts {
             if element.exists && element.isHittable {

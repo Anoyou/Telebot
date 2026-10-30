@@ -46,6 +46,11 @@ final class AppModel {
     var supportsAgentSessionDefaultAccount: Bool { serverFeatures.contains(AgentSessionAccount.featureKey) }
     /// 服务器最近一次更新检查（自动或手动，`GET /api/system/update-status`），用于“更多”角标、App 设置行与软件更新页提示。
     private(set) var serverUpdateStatus: JSONValue?
+    /// 运行模式（`GET /api/platform/profile`，与 Web 全局提示条 `SafeWatchBar` 同一接口）。
+    /// 旧服务器没有该接口（404）时为 nil：不显示值守全局提示；其它读取失败保留上一次结果。
+    private(set) var runtimeProfile: RuntimeProfile?
+    /// 值守全局提示（第 20 轮）：与 Web 一样只看 `active_profile == "safe_watch"`。
+    var safeWatchActive: Bool { runtimeProfile?.active == "safe_watch" }
     private(set) var workspaceError: String?
     var requestedRoute: AppRoute?
     /// 推送或其他入口要求 Agent 标签页打开的会话；由内嵌助手读取后清空。
@@ -545,8 +550,11 @@ final class AppModel {
         async let pluginsResult = capture { try await self.request(path: "/api/feature-matrix") }
         async let updateResult = capture { try await self.request(path: "/api/system/update-status") }
         async let modulesResult = capture { try await self.request(path: "/api/system/capabilities") }
+        async let profileResult = capture { try await self.request(path: "/api/platform/profile") }
         let (actions, matrix, update, modules) = await (actionsResult, pluginsResult, updateResult, modulesResult)
+        let profile = await profileResult
         guard token == generation else { return }
+        applyRuntimeProfile(profile)
         // 读取失败（含旧服务器 404）时保留上一次结果，不把入口误隐藏。
         if case .success(let value) = modules {
             disabledModules = Self.disabledModules(value)
@@ -577,6 +585,40 @@ final class AppModel {
         if next != disabledModules { disabledModules = next }
         let features = Self.serverFeatures(value)
         if features != serverFeatures { serverFeatures = features }
+        await refreshRuntimeProfile()
+    }
+
+    /// 只重读运行模式（值守全局提示每 30 秒、运行树进入值守 / 恢复生产后调用）。
+    func refreshRuntimeProfile() async {
+        guard phase == .signedIn else { return }
+        let token = generation
+        let result = await capture { try await self.request(path: "/api/platform/profile") }
+        guard token == generation else { return }
+        applyRuntimeProfile(result)
+    }
+
+    private func applyRuntimeProfile(_ result: Result<JSONValue, Error>) {
+        switch result {
+        case .success(let value):
+            let next = RuntimeProfile(value)
+            if next != runtimeProfile { runtimeProfile = next }
+        case .failure(let error):
+            // 旧服务器没有运行模式接口：不显示值守提示；网络等其它失败保留上一次结果，不让提示闪烁。
+            if case .server(let status, _)? = error as? APIError, status == 404 { runtimeProfile = nil }
+        }
+    }
+
+    /// 恢复生产（`POST /api/platform/profile/restore`，与 Web 全局提示条、插件 › 运行同一接口）。
+    /// 不自动重试；成功或结果未知都重新读取运行模式与模块开关，以服务器为准。
+    func restoreProduction() async throws {
+        do {
+            let value = try await request(path: "/api/platform/profile/restore", method: "POST")
+            if let next = RuntimeProfile(value) { runtimeProfile = next }
+        } catch {
+            await refreshModules()
+            throw error
+        }
+        await refreshModules()
     }
 
     nonisolated static func serverFeatures(_ value: JSONValue) -> Set<String> {
@@ -777,6 +819,7 @@ final class AppModel {
         disabledModules = []
         serverFeatures = []
         serverUpdateStatus = nil
+        runtimeProfile = nil
         // 本机缓存的助手会话与消息、概览快照随登录状态一起清除。
         AssistantHistoryCache.removeAll()
         AppOverviewSnapshotStore.removeAll()

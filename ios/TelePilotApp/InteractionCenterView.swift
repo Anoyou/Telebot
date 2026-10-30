@@ -75,7 +75,7 @@ struct InteractionCenterView: View {
         List {
             if model.accounts.isEmpty {
                 Section {
-                    NoticeView(title: "暂无账号", message: "交互中心需要先绑定一个 Telegram 账号，再配置对应的交互 Bot 和互动规则。",
+                    NoticeView(title: "暂无账号", message: "交互需要先绑定一个 Telegram 账号，再配置对应的交互 Bot 和互动规则。",
                                symbol: "exclamationmark.triangle")
                 }
             } else {

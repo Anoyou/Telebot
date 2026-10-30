@@ -30,6 +30,58 @@ struct DispatchDebugEntryLink: View {
     }
 }
 
+/// 命中调试的预填参数（第 20 轮，对齐 Web `dispatchDebugHref` / `parseDispatchDebugPrefill`）：
+/// 日志消息详情「用命中调试复现」把这条消息的账号、会话、发送者、来源和正文带过去。
+/// 规则与 Web 相同：来源只保留命中调试支持的 userbot / interaction_bot / webhook；会话类型按 chat_id 推断
+/// （-100… 超级群，其它负数普通群，正数私聊）；正文去掉首尾空白、最多 2000 字。
+struct DispatchDebugPrefill: Hashable {
+    static let vias: Set<String> = ["userbot", "interaction_bot", "webhook"]
+    static let chatTypes: Set<String> = ["group", "supergroup", "private", "channel"]
+
+    var accountID: Int?
+    var chatID: Int?
+    var chatType: String?
+    var senderID: Int?
+    var text: String?
+    var via: String?
+
+    init(accountID: Int? = nil, chatID: Int? = nil, chatType: String? = nil, senderID: Int? = nil, text: String? = nil, via: String? = nil) {
+        self.accountID = accountID
+        self.chatID = chatID
+        let type = chatType ?? Self.inferChatType(chatID)
+        self.chatType = type.flatMap { Self.chatTypes.contains($0) ? $0 : nil }
+        self.senderID = senderID
+        let trimmed = text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        self.text = trimmed.isEmpty ? nil : String(trimmed.prefix(2000))
+        self.via = via.flatMap { Self.vias.contains($0) ? $0 : nil }
+    }
+
+    /// 日志消息流的一条记录（`GET /api/logs/messages`）。旧服务器缺哪个字段就不带哪个。
+    init(logMessage raw: JSONValue, accountID: Int? = nil) {
+        self.init(accountID: accountID ?? raw["account_id"]?.intValue,
+                  chatID: raw["chat_id"]?.intValue,
+                  senderID: raw["sender_user_id"]?.intValue,
+                  text: raw["text_preview"]?.stringValue,
+                  via: raw["source_channel"]?.stringValue)
+    }
+
+    /// 至少有正文或会话才值得复现（旧服务器的记录可能两者都没有）。
+    var isUseful: Bool { text != nil || chatID != nil }
+
+    static func inferChatType(_ chatID: Int?) -> String? {
+        guard let chatID, chatID != 0 else { return nil }
+        if chatID <= -1_000_000_000_000 { return "supergroup" }
+        return chatID < 0 ? "group" : "private"
+    }
+}
+
+extension DispatchDebugView {
+    init(prefill: DispatchDebugPrefill) {
+        self.init(accountID: prefill.accountID, chatID: prefill.chatID, chatType: prefill.chatType,
+                  senderID: prefill.senderID, text: prefill.text, via: prefill.via)
+    }
+}
+
 /// 分发阶段与原因码的中文说明。原因码以服务器为准，没有收录的原样显示。
 enum DispatchDebugText {
     static let stageOrder = ["direct_passthrough", "prefix_command", "keyword", "event_subscription"]

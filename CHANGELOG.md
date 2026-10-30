@@ -25,6 +25,10 @@
 
 ## [Unreleased]
 
+### iOS 0.25.0：值守全局提示、日志消息详情「用命中调试复现」、统一叫「日志」「交互」
+
+- **iOS 0.25.0**：对照 Web 第 20 轮信息架构第一批补齐 iOS。①值守全局提示：`AppModel.runtimeProfile` 读 `GET /api/platform/profile`（与 Web `GlobalAlertBar` / `SafeWatchBar` 同一接口、同一判断 `active_profile == "safe_watch"`；随工作区刷新、运行树操作后与每 30 秒重读；404 旧服务器为 nil 不显示，其它失败保留上次结果），`MainTabs` 用系统 `tabViewBottomAccessory`（iOS 26.1+ `isEnabled:`，26.0 用空内容不显示的写法）在 Dock 上方显示 `SafeWatchAccessory`（`safeWatch.banner` / `safeWatch.status` / `safeWatch.restore`，Dock 缩小为 inline 时只留状态与按钮；正在进入值守 / 正在恢复时按钮禁用），「恢复生产」系统确认框后 `POST /api/platform/profile/restore`，不自动重试，结果未知如实提示；插件 ›「运行」随全局状态变化重读。②日志消息详情「用命中调试复现」（`logs.detail.dispatchDebug`）：新增 `DispatchDebugPrefill`（规则同 Web `dispatchDebugHref`：来源只留 userbot / interaction_bot / webhook，按 chat_id 推断会话类型，正文去空白截 2000 字）与 `DispatchDebugView(prefill:)`，命中调试模块关闭或记录既无正文也无会话时隐藏。③「日志与诊断」改名「日志」（`ManagementModule` / `DockItem.longTitle` / 页面标题；「更多」日志行加标识 `more.logs`）。④清理残留「交互中心」文案。夹具 `--ui-test-safe-watch`、`--ui-test-old-server-profile`（`#if DEBUG`）；UI 测试新增 `DiagnosticsUITests` 4 条，运行树用例的遮挡判断计入 Dock 上方提示；`ios/DESIGN.md` 对照表与统一命名表更新。不改服务器。
+
 ## [0.113.0-beta.7] - 2026-10-31 · patch（补丁预发布） · Agent 账号上下文：只有一个账号时新会话默认关联，账号页 / 插件页「问 Agent」带入账号，iOS 0.24.3
 
 ### Agent 账号上下文：只有一个账号时新会话默认关联；从账号页、插件页进入 Agent 自动带入账号（#111 后续）
