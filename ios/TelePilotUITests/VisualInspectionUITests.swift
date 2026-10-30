@@ -28,8 +28,12 @@ final class VisualInspectionUITests: XCTestCase {
         capture("13-ledger-charts")
         app.navigationBars.buttons.element(boundBy: 0).tap()
 
-        let about = app.buttons["more.about"]
-        for _ in 0..<4 where !about.isHittable { app.swipeUp() }
+        // 0.21.0：「关于」在「更多 › App 设置」最顶部一组。
+        let settings = app.buttons["more.settings"]
+        for _ in 0..<4 where !(settings.exists && settings.isHittable) { app.swipeUp() }
+        settings.tap()
+        let about = app.buttons["settings.about"]
+        XCTAssertTrue(about.waitForExistence(timeout: 10))
         about.tap()
         XCTAssertTrue(app.descendants(matching: .any)["about.appVersion"].firstMatch.waitForExistence(timeout: 10))
         capture("14-about")

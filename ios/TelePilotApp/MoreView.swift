@@ -5,7 +5,6 @@ enum MoreDestination: Hashable {
     case accounts
     case account(Int)
     case settings
-    case about
     case module(ManagementModule)
 
     /// 没放进 Dock 的入口在「更多」里对应的页面。
@@ -33,14 +32,16 @@ struct MoreDestinationView: View {
         case .accounts: AccountsView(embedded: true)
         case .account(let id): AccountDetailView(id: id)
         case .settings: SettingsView(embedded: true)
-        case .about: AboutView()
         case .module(let module): ManagementModuleView(module: module)
         }
     }
 }
 
 /// 「更多」（0.18.0 起按信息架构分组）：紧急停止 → 常用（被移出 Dock 的概览／插件／交互）→ 管理（账号 · AI · 指令与任务 ·
-/// 资金台账 · 日志）→ 工具与设置（Webhook · 服务器设置 · 备份与维护 · 命中调试）→ App（App 设置 · 关于与更新）。
+/// 资金台账 · 日志）→ 工具与设置（服务器设置 · Webhook · 命中调试 · 备份与维护）→ App（App 设置）。
+/// 0.21.0 按 iPhone「设置 › 通用」的思路：组内常用配置在上、带重启／导入等维护操作的「备份与维护」放最后；
+/// 原「关于与更新」拆成「关于」「软件更新」两页，放到「App 设置」最顶部一组（像通用里的「关于本机／软件更新」），
+/// 服务器有新版本时在「App 设置」这一行右侧提示（Tab 角标「新」同源）。
 /// 已在 Dock 里的入口不重复列出；服务器关闭了对应模块的入口隐藏（与 Web 侧栏一致），旧服务器没有模块信息时照常显示。
 struct MoreView: View {
     @Binding var path: [MoreDestination]
@@ -63,8 +64,10 @@ struct MoreView: View {
 
     private var commonItems: [DockItem] { [DockItem.overview, .plugins, .interaction].filter { visible($0) } }
     private var managementItems: [DockItem] { [DockItem.accounts, .ai, .operations, .ledger, .logs].filter { visible($0) } }
-    /// 三级入口，不能放进 Dock。命中调试（原生页 DispatchDebugView）在本组单独一行，「日志与诊断 › 高级诊断」里保留同一入口。
-    private var toolModules: [ManagementModule] { [ManagementModule.webhooks, .system, .maintenance].filter { visible($0) } }
+    /// 三级入口，不能放进 Dock。顺序（0.21.0）：服务器设置 → Webhook → 命中调试 → 备份与维护（含重启服务、导入配置，放最后）。
+    /// 命中调试（原生页 DispatchDebugView）在本组单独一行，「日志与诊断 › 高级诊断」里保留同一入口。
+    private var leadingToolModules: [ManagementModule] { [ManagementModule.system, .webhooks].filter { visible($0) } }
+    private var trailingToolModules: [ManagementModule] { [ManagementModule.maintenance].filter { visible($0) } }
 
     var body: some View {
         List {
@@ -97,34 +100,34 @@ struct MoreView: View {
         }
 
         Section("工具与设置") {
-            ForEach(toolModules) { module in
-                NavigationLink(value: MoreDestination.module(module)) {
-                    Label(module.title, systemImage: module.symbol)
-                }
-            }
+            ForEach(leadingToolModules) { module in toolRow(module) }
             // 命中调试模块（dispatch_debug）关闭时与 Web 侧栏一样隐藏；旧服务器没有模块信息时照常显示。
             if model.isModuleEnabled("dispatch_debug") {
                 DispatchDebugEntryLink(detail: nil, identifier: "more.dispatchDebug")
             }
+            ForEach(trailingToolModules) { module in toolRow(module) }
         }
 
         Section("App") {
             NavigationLink(value: MoreDestination.settings) {
-                Label("App 设置", systemImage: "apps.iphone")
-            }
-            .accessibilityIdentifier("more.settings")
-            NavigationLink(value: MoreDestination.about) {
                 Label {
                     HStack {
-                        Text("关于与更新")
+                        Text("App 设置")
                         Spacer()
+                        // 像 iPhone「通用」行上的角标：更新入口在 App 设置里，这里先提示一句。
                         if model.serverUpdateAvailable {
                             Text("服务器有新版本").font(.caption.weight(.semibold)).foregroundStyle(.tint)
                         }
                     }
-                } icon: { Image(systemName: "info.circle") }
+                } icon: { Image(systemName: "apps.iphone") }
             }
-            .accessibilityIdentifier("more.about")
+            .accessibilityIdentifier("more.settings")
+        }
+    }
+
+    private func toolRow(_ module: ManagementModule) -> some View {
+        NavigationLink(value: MoreDestination.module(module)) {
+            Label(module.title, systemImage: module.symbol)
         }
     }
 

@@ -38,7 +38,7 @@ final class AppModel {
     /// 服务器上已关闭的平台模块（`/api/system/capabilities` 里 `desired_enabled == false` 的 `key`）。
     /// 旧服务器没有这个接口或读取失败时为空：所有入口照常显示（与 Web `capabilityEnabledMap` 缺省为开一致）。
     private(set) var disabledModules: Set<String> = []
-    /// 服务器最近一次更新检查（自动或手动，`GET /api/system/update-status`），用于“更多”角标与关于页提示。
+    /// 服务器最近一次更新检查（自动或手动，`GET /api/system/update-status`），用于“更多”角标、App 设置行与软件更新页提示。
     private(set) var serverUpdateStatus: JSONValue?
     private(set) var workspaceError: String?
     var requestedRoute: AppRoute?
