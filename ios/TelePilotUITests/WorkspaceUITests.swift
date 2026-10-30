@@ -145,7 +145,7 @@ final class WorkspaceUITests: XCTestCase {
         card.tap()
         XCTAssertTrue(reveal(app.buttons["plugin.detail.technical"], in: app))
         XCTAssertFalse(app.buttons["plugin.detail.interactionRules"].exists)
-        app.tabBars.buttons["更多"].tap()
+        tapTab("更多", in: app)
         XCTAssertTrue(app.buttons["more.accounts"].waitForExistence(timeout: 10))
         XCTAssertFalse(app.buttons["more.ai"].exists, "AI 已补进 Dock")
         XCTAssertFalse(app.buttons["more.interaction"].exists)
@@ -633,6 +633,14 @@ final class WorkspaceUITests: XCTestCase {
         expectation(for: normal, evaluatedWith: summary)
         waitForExpectations(timeout: 10)
         XCTAssertEqual(toggle.value as? String, "未开启 · 账号与 Bot 正常运行")
+    }
+
+    /// 上滑后 `tabBarMinimizeBehavior(.onScrollDown)` 会把 Tab 栏缩成只剩当前格：先下滑让它展开再点。
+    private func tapTab(_ title: String, in app: XCUIApplication) {
+        let tab = app.tabBars.buttons[title]
+        for _ in 0..<5 where !(tab.exists && tab.isHittable) { app.swipeDown() }
+        XCTAssertTrue(tab.waitForExistence(timeout: 5), "Tab 栏里找不到「\(title)」")
+        tab.tap()
     }
 
     private func reveal(_ element: XCUIElement, in app: XCUIApplication, maxSwipes: Int = 8) -> Bool {
