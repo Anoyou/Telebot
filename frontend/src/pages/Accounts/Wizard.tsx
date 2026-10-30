@@ -7,6 +7,7 @@ import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { SecretInput } from "@/components/ui/secret-input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import {
@@ -401,14 +402,13 @@ export function AccountWizard() {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="space-y-1.5 max-w-xs">
-              <Label>密码</Label>
-              <Input
-                type="password"
-                value={twoFa}
-                onChange={(e) => setTwoFa(e.target.value)}
-              />
-            </div>
+            <SecretInput
+              className="max-w-xs"
+              label="Telegram 两步验证密码"
+              autoComplete="current-password"
+              value={twoFa}
+              onChange={setTwoFa}
+            />
             <div className="flex justify-end gap-2">
               <Button variant="outline" onClick={() => setStep(2)}>
                 上一步

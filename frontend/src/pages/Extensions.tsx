@@ -113,6 +113,7 @@ import {
   updatePluginRepoCredential,
 } from "@/api/pluginRepo";
 import { Input } from "@/components/ui/input";
+import { SecretInput } from "@/components/ui/secret-input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import {
@@ -1232,13 +1233,13 @@ function RemoteInstallCard() {
             }}
             disabled={addRepoMut.isPending}
           />
-          <Input
-            className="h-9 min-w-0 rounded-md bg-background"
-            type="password"
-            autoComplete="off"
+          <SecretInput
+            hideLabel
+            label="GitHub Token（私有库可选）"
+            inputClassName="h-9 rounded-md bg-background"
             placeholder="GitHub Token（私有库可选）"
             value={addToken}
-            onChange={(e) => setAddToken(e.target.value)}
+            onChange={setAddToken}
             disabled={addRepoMut.isPending}
           />
           <Button
@@ -1355,15 +1356,16 @@ function RemoteInstallCard() {
                   {expandedRepoId === repo.id && (
                     <div className="border-t px-3 py-2">
                     <div className="mb-3 grid gap-2 rounded-md bg-muted/30 p-2 sm:grid-cols-[minmax(180px,1fr)_auto_auto] sm:items-center">
-                      <Input
-                        className="h-8 rounded-md bg-background"
-                        type="password"
-                        autoComplete="off"
-                        placeholder={repo.has_credentials ? "输入新 GitHub Token 可替换凭证" : "GitHub Token（私有库可选）"}
+                      <SecretInput
+                        hideLabel
+                        label="GitHub Token"
+                        inputClassName="h-8 rounded-md bg-background"
+                        configured={Boolean(repo.has_credentials)}
+                        revealTarget={{ kind: "plugin_repo_credential", id: repo.id }}
+                        configuredPlaceholder="GitHub Token 已配置 ••••••••（输入新值替换）"
+                        placeholder="GitHub Token（私有库可选）"
                         value={repoTokens[repo.id] ?? ""}
-                        onChange={(event) =>
-                          setRepoTokens((prev) => ({ ...prev, [repo.id]: event.target.value }))
-                        }
+                        onChange={(next) => setRepoTokens((prev) => ({ ...prev, [repo.id]: next }))}
                         disabled={updateRepoCredentialMut.isPending}
                       />
                       <Button

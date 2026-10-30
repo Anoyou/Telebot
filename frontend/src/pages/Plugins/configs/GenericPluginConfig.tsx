@@ -906,6 +906,7 @@ export function GenericPluginConfigPage() {
                 showPreviews={false}
                 configActions={configActions}
                 onConfigAction={handleConfigAction}
+                secretScope={featureKey ? { pluginKey: featureKey, accountId: null } : null}
                 onChange={(key, value) => {
                   setGlobalVals((prev) => ({ ...prev, [key]: value }));
                   setDirty(true);
@@ -925,6 +926,7 @@ export function GenericPluginConfigPage() {
                 showPreviews={false}
                 configActions={configActions}
                 onConfigAction={handleConfigAction}
+                secretScope={featureKey && Number.isFinite(aid) && aid > 0 ? { pluginKey: featureKey, accountId: aid } : null}
                 onChange={(key, value) => {
                   setAccountVals((prev) => ({ ...prev, [key]: value }));
                   setDirty(true);

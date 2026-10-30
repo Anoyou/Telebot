@@ -24,6 +24,7 @@ import {
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
+import { SecretInput } from "@/components/ui/secret-input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
@@ -51,7 +52,6 @@ import {
   shouldClearCredentialsForMigration,
 } from "@/lib/proxySupport";
 
-const MASKED_SECRET_PLACEHOLDER = "••••••••••••••••";
 
 const TYPE_OPTIONS: { value: ProxyType; label: string }[] = [
   { value: "socks5", label: "SOCKS5" },
@@ -297,14 +297,11 @@ export function ProxyManager() {
               onChange={(e) => setUsername(e.target.value)}
             />
           </div>
-          <div className="space-y-1.5">
-            <Label className="text-xs">密码（可选）</Label>
-            <Input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-            />
-          </div>
+          <SecretInput
+            label={<span className="text-xs">代理密码（可选）</span>}
+            value={password}
+            onChange={setPassword}
+          />
           <div className="flex items-end">
             <Button
               onClick={() => createMut.mutate()}
@@ -390,18 +387,17 @@ export function ProxyManager() {
                             }
                           />
                         </div>
-                        <div className="space-y-1.5">
-                          <Label className="text-xs">新密码</Label>
-                          <Input
-                            type="password"
-                            placeholder={p.has_password ? MASKED_SECRET_PLACEHOLDER : "可选"}
-                            value={editDraft.password}
-                            disabled={editDraft.clear_password}
-                            onChange={(e) =>
-                              setEditDraft((v) => v ? { ...v, password: e.target.value } : v)
-                            }
-                          />
-                        </div>
+                        <SecretInput
+                          label={<span className="text-xs">代理密码</span>}
+                          configured={Boolean(p.has_password) && !editDraft.clear_password}
+                          revealTarget={{ kind: "proxy_password", id: p.id }}
+                          placeholder="可选"
+                          value={editDraft.password}
+                          disabled={editDraft.clear_password}
+                          onChange={(next) =>
+                            setEditDraft((v) => v ? { ...v, password: next } : v)
+                          }
+                        />
                       </div>
                       {!isSupportedProxyType(p.type) ? (
                         <p className="text-xs leading-5 text-warning">

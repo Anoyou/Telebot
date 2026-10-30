@@ -35,6 +35,7 @@ router = APIRouter(prefix="/api/secrets", tags=["secrets"])
 
 SecretKind = Literal[
     "interaction_bot_token",
+    "transfer_bot_token",
     "management_bot_token",
     "notify_bot_token",
     "llm_provider_api_key",
@@ -48,6 +49,7 @@ SecretKind = Literal[
 # kind → (中文名, 需要的定位参数)
 SECRET_KINDS: dict[str, tuple[str, tuple[str, ...]]] = {
     "interaction_bot_token": ("交互 Bot Token", ("account_id",)),
+    "transfer_bot_token": ("测试模拟通知 Bot Token", ("account_id",)),
     "management_bot_token": ("管理 Bot Token", ("account_id",)),
     "notify_bot_token": ("通知 Bot Token", ("id",)),
     "llm_provider_api_key": ("AI 供应商 API Key", ("id",)),
@@ -158,7 +160,7 @@ async def read_secret(
 ) -> str | None:
     """按 kind 取回明文；未配置返回 None，定位不到抛 404。"""
 
-    if kind == "interaction_bot_token":
+    if kind in {"interaction_bot_token", "transfer_bot_token"}:
         from ..services import account_bot_service
 
         assert account_id is not None
@@ -167,7 +169,7 @@ async def read_secret(
 
         row = await db.get(SystemSetting, account_bot_service.transfer_notice_setting_key(account_id))
         data = account_bot_service.normalize_transfer_notice_config(row.value if row is not None else None)
-        return _decrypt(data.get("interaction_bot_token_enc"))
+        return _decrypt(data.get(f"{kind}_enc"))
     if kind == "management_bot_token":
         assert account_id is not None
         await _require_account(db, account_id)

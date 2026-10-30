@@ -10,6 +10,7 @@ import { KeyRound, Pencil, Plus, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { SecretInput } from "@/components/ui/secret-input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
@@ -379,17 +380,15 @@ export function ProviderKeyPoolSection({
                 placeholder="例如：key-a / 主号 / 备用2"
               />
             </div>
-            <div className="space-y-1">
-              <Label className="text-xs">
-                API Key{editingKey ? "（留空不改）" : ""}
-              </Label>
-              <Input
-                type="password"
-                value={form.api_key}
-                onChange={(event) => setForm({ ...form, api_key: event.target.value })}
-                placeholder={editingKey ? "留空保持原 Key" : "sk-..."}
-              />
-            </div>
+            <SecretInput
+              className="space-y-1"
+              label={<span className="text-xs">密钥池 API Key{editingKey ? "（留空不改）" : ""}</span>}
+              configured={Boolean(editingKey)}
+              revealTarget={editingKey ? { kind: "llm_provider_key", id: editingKey.id } : null}
+              value={form.api_key}
+              onChange={(next) => setForm({ ...form, api_key: next })}
+              placeholder="sk-..."
+            />
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1">
                 <Label className="text-xs">优先级（越小越先选中）</Label>

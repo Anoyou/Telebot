@@ -28241,7 +28241,7 @@ export interface operations {
         parameters: {
             query: {
                 /** @description 密钥类型 */
-                kind: "interaction_bot_token" | "management_bot_token" | "notify_bot_token" | "llm_provider_api_key" | "llm_provider_key" | "proxy_password" | "webhook_token" | "plugin_repo_credential" | "plugin_config_secret";
+                kind: "interaction_bot_token" | "transfer_bot_token" | "management_bot_token" | "notify_bot_token" | "llm_provider_api_key" | "llm_provider_key" | "proxy_password" | "webhook_token" | "plugin_repo_credential" | "plugin_config_secret";
                 /** @description 账号级密钥的账号 ID；插件配置留空表示全局配置 */
                 account_id?: number | null;
                 /** @description 通知 Bot / AI 供应商 / 密钥池 Key / 代理 / 插件仓库的 ID */

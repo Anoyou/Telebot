@@ -14,6 +14,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
+import { SecretInput } from "@/components/ui/secret-input";
 import { Switch } from "@/components/ui/switch";
 import { Select } from "@/components/ui/select";
 import {
@@ -403,16 +404,13 @@ export function ConfigBackup() {
                 <span>敏感导出需要重新验证。导出后请妥善保管文件，导入端需使用相同的 MASTER_KEY。</span>
               </div>
               <div className="grid gap-3 sm:grid-cols-2">
-                <div className="space-y-1.5">
-                  <Label htmlFor="sensitive-export-password">当前密码</Label>
-                  <Input
-                    id="sensitive-export-password"
-                    type="password"
-                    autoComplete="current-password"
-                    value={sensitivePassword}
-                    onChange={(event) => setSensitivePassword(event.target.value)}
-                  />
-                </div>
+                <SecretInput
+                  id="sensitive-export-password"
+                  label="当前管理员密码"
+                  autoComplete="current-password"
+                  value={sensitivePassword}
+                  onChange={setSensitivePassword}
+                />
                 <div className="space-y-1.5">
                   <Label htmlFor="sensitive-export-totp">TOTP 动态码（已绑定时必填）</Label>
                   <Input

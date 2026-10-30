@@ -24,6 +24,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { SecretInput } from "@/components/ui/secret-input";
 import { Label } from "@/components/ui/label";
 import { Spinner } from "@/components/ui/misc";
 import { Select } from "@/components/ui/select";
@@ -269,17 +270,14 @@ export function NotifyBots() {
                 </Select>
               </div>
             ) : (
-              <div className="space-y-1.5">
-                <Label htmlFor="notify-bot-token">独立 Bot Token</Label>
-                <Input
-                  id="notify-bot-token"
-                  type="password"
-                  autoComplete="off"
-                  placeholder="123456:ABC-DEF..."
-                  value={form.bot_token}
-                  onChange={(e) => setForm((p) => ({ ...p, bot_token: e.target.value }))}
-                />
-              </div>
+              <SecretInput
+                id="notify-bot-token"
+                label="通知 Bot Token（独立 Bot）"
+                description="BotFather 给的 Token，只用于发送项目通知。"
+                placeholder="123456:ABC-DEF..."
+                value={form.bot_token}
+                onChange={(next) => setForm((p) => ({ ...p, bot_token: next }))}
+              />
             )}
             <div className="flex justify-end border-t pt-3">
               <Switch

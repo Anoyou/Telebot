@@ -36,6 +36,7 @@ from app.services import account_bot_service
 from app.services.plugin_config_secrets import wrap_secret
 
 INTERACTION_TOKEN = "7000000001:AAInteractionTokenForRevealTest_abc"
+TRANSFER_TOKEN = "7000000004:AATransferTokenForRevealTest_jkl"
 MANAGEMENT_TOKEN = "7000000002:AAManagementTokenForRevealTest_def"
 NOTIFY_TOKEN = "7000000003:AANotifyTokenForRevealTest_ghi"
 PROVIDER_KEY = "sk-reveal-provider-key-0123456789"
@@ -46,6 +47,7 @@ REPO_CREDENTIAL = "ghp_revealRepoCredential123"
 PLUGIN_SECRET = "plugin-secret-reveal-777"
 ALL_SECRETS = [
     INTERACTION_TOKEN,
+    TRANSFER_TOKEN,
     MANAGEMENT_TOKEN,
     NOTIFY_TOKEN,
     PROVIDER_KEY,
@@ -90,7 +92,11 @@ async def _seed(db: AsyncSession) -> None:
     db.add(
         SystemSetting(
             key=account_bot_service.transfer_notice_setting_key(1),
-            value={"enabled": True, "interaction_bot_token_enc": encrypt_str(INTERACTION_TOKEN)},
+            value={
+                "enabled": True,
+                "interaction_bot_token_enc": encrypt_str(INTERACTION_TOKEN),
+                "transfer_bot_token_enc": encrypt_str(TRANSFER_TOKEN),
+            },
         )
     )
     db.add(
@@ -205,6 +211,7 @@ async def _audit_rows(maker) -> list[AuditLog]:
     ("params", "expected"),
     [
         ({"kind": "interaction_bot_token", "account_id": 1}, INTERACTION_TOKEN),
+        ({"kind": "transfer_bot_token", "account_id": 1}, TRANSFER_TOKEN),
         ({"kind": "management_bot_token", "account_id": 1}, MANAGEMENT_TOKEN),
         ({"kind": "notify_bot_token", "id": 3}, NOTIFY_TOKEN),
         ({"kind": "notify_bot_token", "id": 4}, MANAGEMENT_TOKEN),

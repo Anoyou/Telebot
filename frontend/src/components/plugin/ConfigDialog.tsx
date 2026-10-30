@@ -1,5 +1,5 @@
 /** 根据 config_schema 渲染通用插件配置字段与预览。 */
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import {
@@ -33,6 +33,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { SecretInput } from "@/components/ui/secret-input";
 import { Label } from "@/components/ui/label";
 import { Spinner } from "@/components/ui/misc";
 import { Select } from "@/components/ui/select";
@@ -122,6 +123,16 @@ export interface ConfigSchema {
 
 export type FieldEntry = [string, ConfigField];
 
+/** 插件密钥字段「眼睛」查看已保存值的定位：插件 key + 账号（全局配置为 null）。 */
+export interface PluginSecretScope {
+  pluginKey: string;
+  accountId: number | null;
+}
+
+const PluginSecretScopeContext = createContext<PluginSecretScope | null>(null);
+
+const MASKED_SECRET_VALUES = new Set(["***", MASKED_SECRET_PLACEHOLDER]);
+
 interface ConfigScopeSectionProps {
   title: string;
   description: string;
@@ -137,9 +148,19 @@ interface ConfigScopeSectionProps {
   onChange: (key: string, value: unknown) => void;
   /** 一次写入多个字段（统一模型列表同时写模型与 Provider）；缺省时逐个调用 onChange。 */
   onChangeMany?: (patch: Record<string, unknown>) => void;
+  /** 密钥字段查看已保存值；不传则眼睛只对新输入生效。 */
+  secretScope?: PluginSecretScope | null;
 }
 
-export function ConfigScopeSection({
+export function ConfigScopeSection(props: ConfigScopeSectionProps) {
+  return (
+    <PluginSecretScopeContext.Provider value={props.secretScope ?? null}>
+      <ConfigScopeSectionBody {...props} />
+    </PluginSecretScopeContext.Provider>
+  );
+}
+
+function ConfigScopeSectionBody({
   title,
   description,
   fields,
@@ -864,18 +885,73 @@ function FieldInputBody({
     );
   }
 
+  if (isSensitive) {
+    return (
+      <PluginSecretField
+        fk={fk}
+        inputId={inputId}
+        label={label}
+        description={description}
+        textValue={textValue}
+        placeholder={configuredPlaceholder || defaultValue}
+        onChange={onChange}
+      />
+    );
+  }
+
   return (
     <div className="space-y-1.5">
       <Label htmlFor={inputId}>{label}</Label>
       {description && <p className="text-xs text-muted-foreground">{description}</p>}
       <Input
         id={inputId}
-        type={isSensitive ? "password" : "text"}
+        type="text"
         value={textValue}
         onChange={(e) => onChange(e.target.value)}
-        placeholder={isSensitive && !textValue ? MASKED_SECRET_PLACEHOLDER : configuredPlaceholder || defaultValue}
+        placeholder={configuredPlaceholder || defaultValue}
       />
     </div>
+  );
+}
+
+/** 插件配置里的密钥字段：服务器返回遮罩（***）表示已保存，留空保持不变。 */
+function PluginSecretField({
+  fk,
+  inputId,
+  label,
+  description,
+  textValue,
+  placeholder,
+  onChange,
+}: {
+  fk: string;
+  inputId: string;
+  label: string;
+  description?: string;
+  textValue: string;
+  placeholder?: string;
+  onChange: (value: unknown) => void;
+}) {
+  const scope = useContext(PluginSecretScopeContext);
+  const [maskValue] = useState(() => (MASKED_SECRET_VALUES.has(textValue) ? textValue : ""));
+  const isMasked = MASKED_SECRET_VALUES.has(textValue);
+  const configured = isMasked || (Boolean(maskValue) && textValue === "");
+  return (
+    <SecretInput
+      id={inputId}
+      label={label}
+      description={description}
+      configured={configured}
+      revealTarget={
+        scope?.pluginKey && configured
+          ? { kind: "plugin_config_secret", plugin_key: scope.pluginKey, account_id: scope.accountId, field: fk }
+          : null
+      }
+      placeholder={placeholder}
+      value={isMasked ? "" : textValue}
+      // 清空新输入时恢复遮罩，保存时服务器保留旧值
+      onChange={(next) => onChange(next === "" && maskValue ? maskValue : next)}
+    />
   );
 }
 
