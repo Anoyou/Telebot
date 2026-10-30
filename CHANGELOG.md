@@ -25,6 +25,10 @@
 
 ## [Unreleased]
 
+### iOS 0.24.0：交互页补齐「测试模拟通知 Bot」与转账结果通知 Bot 配置
+
+- **iOS 0.24.0**：对照 Web 账号 › Bot（`BotTab`「身份配置」右栏）补齐交互页（`InteractionCenterView`）：新增「真实转账结果通知 Bot」分组（`trusted_bot_ids`，从“高级”页搬来，`interaction.trustedBotIDs`）与「测试模拟通知 Bot」分组（服务器返回有 `has_transfer_bot_token` 时才显示）：`SecretField`「测试模拟通知 Bot Token」（`transfer_bot_token` / `clear_transfer_bot_token`，查看走 `/api/secrets/reveal?kind=transfer_bot_token`）、当前测试 Bot ID（`transfer_bot_id`）、模拟测试群（`transfer_test_chat_ids`，新页 `InteractionTestChatPicker`：会话白名单原生 Toggle 多选 + 手填 Chat ID + 不在白名单的 ID 单列移除，最多 20 个；旧服务器没有该字段时不显示也不提交）、测试 Bot 群成员状态（`transfer_test_chat_memberships`）、清空通知 Bot（确认后清空真实 ID 与测试 Token，点保存生效）。交互 Bot 入群情况改名「监听群成员状态」移入「交互总闸与 Bot」，`unknown` 显示「无法确认」。规则列表补「全部 / 启用 / 暂停」筛选与长按上移 / 下移 / 复制。仍是一次 `PUT /api/accounts/{id}/interaction-bot`，字段与 Web `buildInteractionPayload` 相同，不改服务器。UI 测试新增 `testInteractionTestNotifyBotSection`、`testInteractionTestNotifyBotHiddenOnOldServer`；`ios/DESIGN.md` 对照表补「交互页字段对照」。
+
 ## [0.113.0-beta.5] - 2026-10-30 · patch（补丁预发布） · 密钥 / 密码 / Token 输入框统一：按需查看已保存密钥（审计、no-store），iOS 0.23.0
 
 ### iOS 0.22.0：原生 Telegram 消息格式预览

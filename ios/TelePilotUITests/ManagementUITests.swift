@@ -356,6 +356,106 @@ final class ManagementUITests: XCTestCase {
         XCTAssertEqual(plain.value as? String, "123:NEW")
     }
 
+    /// 第 20 轮（iOS 0.24.0）：交互页补齐 Web「身份配置」右栏——真实转账结果通知 Bot ID 搬到交互页，
+    /// 新增「测试模拟通知 Bot」：Token（统一密钥框，已保存值点眼睛读取）、当前测试 Bot ID、模拟测试群原生多选 + 手填、
+    /// 测试 Bot 群成员状态；交互 Bot 的入群情况改名「监听群成员状态」并放进交互 Bot 分组。保存一次提交全部字段。
+    func testInteractionTestNotifyBotSection() {
+        let app = launch()
+        let entry = app.tabBars.buttons["交互"]
+        XCTAssertTrue(entry.waitForExistence(timeout: 10))
+        entry.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["interaction.status.runtime"].firstMatch.waitForExistence(timeout: 10))
+
+        let listen = app.descendants(matching: .any)["interaction.memberships"].firstMatch
+        reveal(listen, in: app)
+        XCTAssertTrue(listen.label.contains("监听群成员状态"), listen.label)
+
+        let trusted = app.descendants(matching: .any)["interaction.trustedBotIDs"].firstMatch
+        reveal(trusted, in: app)
+        XCTAssertTrue((trusted.value as? String ?? "").contains("777000"), "真实通知 Bot ID 现在在交互页上")
+
+        let title = app.staticTexts["interaction.transferToken.title"]
+        reveal(title, in: app)
+        XCTAssertEqual(title.label, "测试模拟通知 Bot Token")
+        let secure = app.secureTextFields["interaction.transferToken"]
+        XCTAssertTrue(secure.exists)
+        XCTAssertTrue((secure.placeholderValue ?? "").contains("已配置"), secure.placeholderValue ?? "")
+        let eye = app.buttons["interaction.transferToken.reveal"]
+        reveal(eye, in: app)
+        eye.tap()
+        let plain = app.textFields["interaction.transferToken"]
+        XCTAssertTrue(plain.waitForExistence(timeout: 10))
+        XCTAssertEqual(plain.value as? String, "fixture-transfer_bot_token-plaintext")
+        eye.tap()
+        XCTAssertTrue(app.secureTextFields["interaction.transferToken"].waitForExistence(timeout: 5))
+
+        let botID = app.descendants(matching: .any)["interaction.transferBotID"].firstMatch
+        reveal(botID, in: app)
+        XCTAssertTrue(botID.label.contains("8980553289"), botID.label)
+
+        let testChats = app.buttons["interaction.testChats"]
+        reveal(testChats, in: app)
+        XCTAssertTrue(testChats.label.contains("2 个已选"), testChats.label)
+        let testMembers = app.descendants(matching: .any)["interaction.testMemberships"].firstMatch
+        reveal(testMembers, in: app)
+        XCTAssertTrue(testMembers.label.contains("测试 Bot 群成员状态"), testMembers.label)
+        XCTAssertTrue(testMembers.label.contains("1/2"), testMembers.label)
+        XCTAssertTrue(app.buttons["interaction.clearNotify"].exists)
+
+        reveal(testChats, in: app)
+        testChats.tap()
+        XCTAssertTrue(app.navigationBars["模拟测试群"].waitForExistence(timeout: 10))
+        let count = app.staticTexts["interaction.testChats.count"]
+        XCTAssertTrue(count.waitForExistence(timeout: 5))
+        XCTAssertEqual(count.label, "2 个已选")
+        XCTAssertTrue(app.buttons["移除 -1003806095342"].exists, "不在已允许会话里的手填 Chat ID 单独列出")
+        let peerA = app.switches["interaction.testChats.peer.-1001"]
+        let peerB = app.switches["interaction.testChats.peer.-1002"]
+        XCTAssertTrue(peerA.exists)
+        XCTAssertEqual(peerA.value as? String, "1", "测试群 A 已选")
+        XCTAssertEqual(peerB.value as? String, "0")
+        peerB.coordinate(withNormalizedOffset: CGVector(dx: 0.92, dy: 0.5)).tap()
+        XCTAssertEqual(peerB.value as? String, "1")
+        XCTAssertEqual(count.label, "3 个已选")
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+
+        XCTAssertTrue(testChats.waitForExistence(timeout: 5))
+        XCTAssertTrue(testChats.label.contains("3 个已选"), testChats.label)
+        let save = app.buttons["interaction.save"]
+        XCTAssertTrue(save.isEnabled, "改了模拟测试群后应能保存")
+        save.tap()
+        let saved = app.descendants(matching: .any)["interaction.saved"].firstMatch
+        let saveError = app.descendants(matching: .any)["interaction.saveError"].firstMatch
+        if !saved.waitForExistence(timeout: 10) {
+            for _ in 0..<8 where !(saved.exists || saveError.exists) { app.swipeDown() }
+        }
+        XCTAssertFalse(saveError.exists, saveError.exists ? saveError.label : "")
+        XCTAssertTrue(saved.exists, "保存后应显示成功结果")
+        XCTAssertFalse(save.isEnabled)
+        reveal(testChats, in: app)
+        XCTAssertTrue(testChats.label.contains("3 个已选"), "保存后服务器返回的模拟测试群：\(testChats.label)")
+        let screenshot = XCTAttachment(screenshot: app.screenshot())
+        screenshot.name = "交互页测试模拟通知 Bot"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+    }
+
+    /// 旧服务器的交互配置没有测试模拟通知 Bot 字段：整组隐藏，真实通知 Bot ID 仍可编辑。
+    func testInteractionTestNotifyBotHiddenOnOldServer() {
+        let app = launch(["--ui-test-old-server-interaction"])
+        let entry = app.tabBars.buttons["交互"]
+        XCTAssertTrue(entry.waitForExistence(timeout: 10))
+        entry.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["interaction.status.runtime"].firstMatch.waitForExistence(timeout: 10))
+        let trusted = app.descendants(matching: .any)["interaction.trustedBotIDs"].firstMatch
+        reveal(trusted, in: app)
+        let rule = app.buttons["interaction.rule.rule-ask"]
+        reveal(rule, in: app)
+        XCTAssertFalse(app.staticTexts["interaction.transferToken.title"].exists)
+        XCTAssertFalse(app.buttons["interaction.testChats"].exists)
+        XCTAssertFalse(app.buttons["interaction.clearNotify"].exists)
+    }
+
     func testInteractionCenterEditsRulesAndSaves() {
         let app = launch()
         // 0.18.0 起交互中心在默认 Dock 的「交互」格。
@@ -372,7 +472,7 @@ final class ManagementUITests: XCTestCase {
         XCTAssertFalse(save.isEnabled, "没有修改时不能保存")
 
         let notice = app.buttons["interaction.rule.rule-notice"]
-        for _ in 0..<6 where !(notice.exists && notice.isHittable) { app.swipeUp() }
+        for _ in 0..<10 where !(notice.exists && notice.isHittable) { app.swipeUp() }
         XCTAssertTrue(notice.exists)
         XCTAssertTrue(notice.label.contains("停用"), notice.label)
         notice.tap()
@@ -388,19 +488,19 @@ final class ManagementUITests: XCTestCase {
         let saved = app.descendants(matching: .any)["interaction.saved"].firstMatch
         let saveError = app.descendants(matching: .any)["interaction.saveError"].firstMatch
         if !saved.waitForExistence(timeout: 10) {
-            for _ in 0..<4 where !(saved.exists || saveError.exists) { app.swipeDown() }
+            for _ in 0..<8 where !(saved.exists || saveError.exists) { app.swipeDown() }
         }
         XCTAssertFalse(saveError.exists, saveError.exists ? saveError.label : "")
         XCTAssertTrue(saved.exists, "保存后应显示成功结果")
         XCTAssertFalse(save.isEnabled)
         XCTAssertTrue(subscribed.waitForExistence(timeout: 5))
         XCTAssertTrue(subscribed.label.contains("2/2"), subscribed.label)
-        for _ in 0..<6 where !(notice.exists && notice.isHittable) { app.swipeUp() }
+        for _ in 0..<10 where !(notice.exists && notice.isHittable) { app.swipeUp() }
         XCTAssertTrue(notice.exists)
         XCTAssertTrue(notice.label.contains("启用"), notice.label)
 
         let ask = app.buttons["interaction.rule.rule-ask"]
-        for _ in 0..<6 where !(ask.exists && ask.isHittable) { app.swipeUp() }
+        for _ in 0..<10 where !(ask.exists && ask.isHittable) { app.swipeUp() }
         ask.tap()
         XCTAssertTrue(app.descendants(matching: .any)["interaction.ruleEditor"].firstMatch.waitForExistence(timeout: 10))
         let params = app.staticTexts["玩法参数"]
