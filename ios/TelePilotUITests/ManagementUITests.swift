@@ -478,7 +478,13 @@ final class ManagementUITests: XCTestCase {
         notice.tap()
         let enabled = app.switches["interaction.rule.enabled"]
         XCTAssertTrue(enabled.waitForExistence(timeout: 10))
-        enabled.coordinate(withNormalizedOffset: CGVector(dx: 0.92, dy: 0.5)).tap()
+        // 推入编辑页的转场刚结束时点按偶尔被吞（CI 两次迭代都没打开）：等开关真的变成「开」，没变就再点一次。
+        let turnedOn = NSPredicate(format: "value == %@", "1")
+        for _ in 0..<3 where (enabled.value as? String) != "1" {
+            enabled.coordinate(withNormalizedOffset: CGVector(dx: 0.92, dy: 0.5)).tap()
+            if XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: turnedOn, object: enabled)], timeout: 3) == .completed { break }
+        }
+        XCTAssertEqual(enabled.value as? String, "1", "规则开关应已打开")
         app.navigationBars.buttons.element(boundBy: 0).tap()
 
         XCTAssertTrue(save.waitForExistence(timeout: 5))
