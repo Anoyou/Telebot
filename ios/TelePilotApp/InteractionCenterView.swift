@@ -554,8 +554,10 @@ struct InteractionRuleEditor: View {
 
     private var replySection: some View {
         Section {
-            TextField("回复模板", text: $rule.responseTemplate, axis: .vertical).lineLimit(2...8)
-                .accessibilityIdentifier("interaction.rule.response")
+            TelegramTemplateInlineField(title: "回复模板", text: $rule.responseTemplate,
+                                        spec: TelegramTemplateSpec(botName: "交互 Bot", samples: TelegramTemplateSamples.interactionReply,
+                                                                   prompt: "（转账 88.00 给 Bob）"),
+                                        identifier: "interaction.rule.response")
         } header: { Text("命中回复") } footer: {
             Text("可用变量：{payer_name} 付款人、{receiver_name} 收款人、{amount} 金额、{规则名称}。")
         }
@@ -684,17 +686,54 @@ private struct InteractionAdvancedView: View {
             }
             Section {
                 field("查询指令（每行一条）", text: $draft.queryCommands)
-                field("查询回复模板", text: $draft.queryResponseTemplate)
-                field("每个玩法的条目模板", text: $draft.queryItemTemplate)
-                field("没有可用玩法时回复", text: $draft.queryEmptyMessage)
-            } header: { Text("玩法查询") } footer: { Text("群成员发查询指令时，交互 Bot 列出当前可用的联动玩法。留空的模板保持服务器当前值。") }
+            } header: { Text("玩法查询") } footer: { Text("群成员发查询指令时，交互 Bot 列出当前可用的联动玩法。") }
             Section {
-                field("收款通知模板", text: $draft.transferNoticeTemplate)
-                field("扣款通知模板", text: $draft.debitNoticeTemplate)
-            } header: { Text("通知模板") } footer: { Text("留空保持服务器当前值。") }
+                TelegramTemplateInlineField(title: "查询回复模板", text: $draft.queryResponseTemplate, spec: querySpec(response: true),
+                                            identifier: "interaction.query.response")
+            } header: { Text("查询回复模板") } footer: { Text("{items} 是下面条目模板逐个渲染后的列表；{count} 可用数量、{closed_count} 已关闭数量、{chat_id} 群 ID。留空保持服务器当前值，预览用默认模板。") }
+            Section {
+                TelegramTemplateInlineField(title: "每个玩法的条目模板", text: $draft.queryItemTemplate, spec: querySpec(response: false),
+                                            identifier: "interaction.query.item", previewInitiallyShown: false)
+            } header: { Text("每个玩法的条目模板") } footer: { Text("{index} 序号、{name} 规则名称、{trigger} 触发方式、{kind} 玩法类型、{limit} 限制摘要、{module_key} 插件 key。预览与上面的回复模板组合成整条消息。") }
+            Section {
+                field("没有可用玩法时回复", text: $draft.queryEmptyMessage)
+            }
+            Section {
+                TelegramTemplateInlineField(title: "收款通知模板", text: $draft.transferNoticeTemplate,
+                                            spec: noticeSpec(TelegramTemplateSamples.defaultTransferNoticeTemplate, prompt: "+88"),
+                                            identifier: "interaction.notice.transfer")
+            } header: { Text("收款通知模板") } footer: { Text("{payer_name} 付款人、{payer_user_id} 付款人 ID、{receiver_name} 收款人、{receiver_user_id} 收款人 ID、{amount} 金额；{payer_user_id_line} / {receiver_user_id_line} 有 ID 时渲染为一行。留空保持服务器当前值。") }
+            Section {
+                TelegramTemplateInlineField(title: "扣款通知模板", text: $draft.debitNoticeTemplate,
+                                            spec: noticeSpec(TelegramTemplateSamples.defaultDebitNoticeTemplate, prompt: "-88"),
+                                            identifier: "interaction.notice.debit")
+            } header: { Text("扣款通知模板") } footer: { Text("群里回复任意消息发送 +123 / -123 时，测试用的通知 Bot 按这两个模板发出转账 / 扣款通知。留空保持服务器当前值。") }
         }
         .navigationTitle("高级")
         .navigationBarTitleDisplayMode(.inline)
+    }
+
+    /// 玩法查询：回复模板与条目模板组合成一条消息（与 Web BotTab 的查询预览相同的示例玩法）。
+    private func querySpec(response: Bool) -> TelegramTemplateSpec {
+        let responseTemplate = draft.queryResponseTemplate
+        let itemTemplate = draft.queryItemTemplate
+        var spec = TelegramTemplateSpec(botName: "交互 Bot", samples: ["count": "2", "closed_count": "0", "chat_id": "-1001234567890"])
+        spec.prompt = draft.queryCommands.split(whereSeparator: \.isNewline).first.map(String.init) ?? "。玩法"
+        if response {
+            spec.samples["items"] = "（下方条目模板渲染的列表）"
+            spec.compose = { TelegramTemplateSamples.interactionQuery(response: $0, item: itemTemplate) }
+            spec.defaultTemplate = TelegramTemplateSamples.defaultQueryResponseTemplate
+        } else {
+            spec.samples = ["index": "1", "name": "示例玩法", "trigger": "转账或关键词", "kind": "玩法 <code>example_game</code>",
+                            "limit": "限时 <code>600</code> 秒", "module_key": "example_game"]
+            spec.compose = { TelegramTemplateSamples.interactionQuery(response: responseTemplate, item: $0) }
+            spec.defaultTemplate = TelegramTemplateSamples.defaultQueryItemTemplate
+        }
+        return spec
+    }
+
+    private func noticeSpec(_ fallback: String, prompt: String) -> TelegramTemplateSpec {
+        TelegramTemplateSpec(botName: "转账通知 Bot", samples: TelegramTemplateSamples.transferNotice, defaultTemplate: fallback, prompt: prompt)
     }
 
     private func field(_ title: String, text: Binding<String>, numbers: Bool = false) -> some View {

@@ -25,6 +25,10 @@
 
 ## [Unreleased]
 
+### iOS 0.22.0：原生 Telegram 消息格式预览
+
+- **iOS 0.22.0**：新增 `TelePilotCore.TelegramHTML`（逐条移植 Web `sanitizeTelegramHtml` 的白名单规则，`sanitizeToWebHTML` 输出与 Web 逐字相同；同一次扫描生成原生节点树与带行列位置的中文诊断：不闭合、交叉嵌套、多余结束标签、不支持的标签、裸“<”/“&”、命名实体、不安全链接、富文本专用标签）与 `TelegramTemplate`（`{name}` / `{?name}…{/?}` 代入、示例值高亮、Web 各页面的示例值常量、`*_preview` → 模板字段映射、4096 / 1024 长度上限）。两端一致性用例 `ios/TelePilotCore/Tests/TelePilotCoreTests/telegram-html-cases.json`（88 条，由 Web 实际输出生成），`swift test` 与前端 `TelegramHtmlPreview.test.cjs` 同时校验。有意差异：原文里写成实体的 `&lt;b&gt;` 按文字显示（Telegram 实际效果，Web 会误当标签）；代码块语言名允许中文。App 端 `TelegramMessagePreview.swift`：仿 Telegram 气泡（浅/深色、Bot 名、时间、内联按钮）、剧透点按揭开、折叠引用展开、代码块复制；`TelegramTemplateInlineField`（输入框 + 字数 + 首个问题 + 实时预览）与 `TelegramTemplateEditorPage`（分屏/编辑/预览、格式检查标出位置、示例值可改、外观切换）。接入：通用表单里 `*_template` 字段与 reply_text 的 `text`（`ManagementFieldView`，按所在对象的 `type` / `output_format` 决定示例值与解析模式）、插件配置（示例值取草稿配置，`*_preview` 字段显示「预览结果」消息串）、交互中心高级页（玩法查询组合预览、收款/扣款通知）与规则命中回复；「指令与任务 › 模板预览与测试」改为原生 `MessageTemplateLabView`（catalog → 本机预览 → POST render 校验 → test-send）。UI 测试新增 `TelegramPreviewUITests` 3 条，`ios/DESIGN.md` 新增「Telegram 消息预览」一节并更新对照表。不改服务器。
+
 ### iOS 0.21.0：设置按 iPhone「通用」排序，关于与软件更新拆开置顶
 
 - **iOS 0.21.0**：「关于与更新」拆为「关于」（`AboutView`，只放版本、更新日志、服务器信息、项目与许可）与「软件更新」（新 `SoftwareUpdateView`：服务器当前版本 / 通道 / 可更新版本 + 全 App 唯一的「检查服务器更新」`ServerUpdateButton`；App 当前版本 + 「获取最新安装包」链接到「iOS 未签名 IPA」工作流），两页放在「App 设置」最顶部一组（`settings.about` / `settings.update`）。「App 设置」改为 关于·软件更新 → 外观 → 原生体验 → 界面锁 → 当前连接 → 使用方式 → 更换服务器·退出登录（最底部单独一组）。「更多」主结构不变（紧急停止 → 常用 → 管理 → 工具与设置 → App），「工具与设置」改为 服务器设置 → Webhook → 命中调试 → 备份与维护，App 组只剩「App 设置」（服务器有新版本时行内提示），去掉 `MoreDestination.about` 与 `more.about`。UI 测试新增 `testAppSettingsFollowsGeneralSettingsOrder`，原来经「更多 › 关于与更新」进入的 4 条用例改走「App 设置 › 关于 / 软件更新」；`ios/DESIGN.md` 新增「设置类页面排序」。不改服务器。

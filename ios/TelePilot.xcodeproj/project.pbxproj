@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		00F4613DE15D81F631F58F58 /* ManagementUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5166A9DAB15A2783E85E7038 /* ManagementUITests.swift */; };
 		2EDD3F33CAD653F563EE4EC2 /* DiagnosticsUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F3A33FD2CAE2FB89AA47415 /* DiagnosticsUITests.swift */; };
+		AF1A2CDFA8F1181342915EEC /* TelegramPreviewUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EDEFEA1C4588218486E420AD /* TelegramPreviewUITests.swift */; };
 		0DE54EE0D849DBAFF02D2F18 /* PrivacyFormatting.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2B2718B75FA9808D8DCE77A /* PrivacyFormatting.swift */; };
 		0EC7CD8B95AA2E333E404B52 /* AssistantView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 698666CDC618CD52DE256E14 /* AssistantView.swift */; };
 		1228565DBAEBE9623DC753A0 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4FC94FA14558B4E6B86D9C8F /* SettingsView.swift */; };
@@ -38,6 +39,8 @@
 		ADF64C9C60E7B80BCBC9E4D6 /* LogsConsoleAgentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A90EF50BC1A564D60CC343D /* LogsConsoleAgentView.swift */; };
 		74C941D09E1B35056C6F4420 /* ServerSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CEFE73772108DFD3365EFBA5 /* ServerSettingsView.swift */; };
 		AA2D466DDCE7B9D1708EACE7 /* DispatchDebugView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C279933B24854B7ED73A79BB /* DispatchDebugView.swift */; };
+		06B0591DFCADBFDEE403893B /* MessageTemplateLabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 041038A909B34A8D8359EDD8 /* MessageTemplateLabView.swift */; };
+		EBE1099F08CFEE4226C24EC0 /* TelegramMessagePreview.swift in Sources */ = {isa = PBXBuildFile; fileRef = 31B81DE4BC88FDC3B2B0D176 /* TelegramMessagePreview.swift */; };
 		79B21DFFE85F22B61B1D26CA /* AILiveness.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C32028841D2B2274B6BFD3C /* AILiveness.swift */; };
 		88885830FD6DBAA8702EB75E /* TelePilotApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7345E48AE830986E3B98514 /* TelePilotApp.swift */; };
 		8BD74933286E7D1248175ECE /* OverviewCustomization.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1129B1323A246221ADC267A8 /* OverviewCustomization.swift */; };
@@ -102,6 +105,8 @@
 		6A90EF50BC1A564D60CC343D /* LogsConsoleAgentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LogsConsoleAgentView.swift; sourceTree = "<group>"; };
 		CEFE73772108DFD3365EFBA5 /* ServerSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerSettingsView.swift; sourceTree = "<group>"; };
 		C279933B24854B7ED73A79BB /* DispatchDebugView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DispatchDebugView.swift; sourceTree = "<group>"; };
+		041038A909B34A8D8359EDD8 /* MessageTemplateLabView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessageTemplateLabView.swift; sourceTree = "<group>"; };
+		31B81DE4BC88FDC3B2B0D176 /* TelegramMessagePreview.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TelegramMessagePreview.swift; sourceTree = "<group>"; };
 		164FB264CCA22ACBC35826C8 /* AppServing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppServing.swift; sourceTree = "<group>"; };
 		18587ABAD612072898FB2976 /* TelePilotUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TelePilotUITests.swift; sourceTree = "<group>"; };
 		1E32918F7013C607C4AB25DC /* AccountsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountsView.swift; sourceTree = "<group>"; };
@@ -123,6 +128,7 @@
 		4FC94FA14558B4E6B86D9C8F /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		5166A9DAB15A2783E85E7038 /* ManagementUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManagementUITests.swift; sourceTree = "<group>"; };
 		3F3A33FD2CAE2FB89AA47415 /* DiagnosticsUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiagnosticsUITests.swift; sourceTree = "<group>"; };
+		EDEFEA1C4588218486E420AD /* TelegramPreviewUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TelegramPreviewUITests.swift; sourceTree = "<group>"; };
 		5277FE76AA8D203AF01F17DF /* TelePilotCore */ = {isa = PBXFileReference; lastKnownFileType = folder; name = TelePilotCore; path = TelePilotCore; sourceTree = SOURCE_ROOT; };
 		658A9CA792F9E9A4F5292F66 /* TelePilotUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = TelePilotUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		698666CDC618CD52DE256E14 /* AssistantView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssistantView.swift; sourceTree = "<group>"; };
@@ -230,6 +236,8 @@
 				6A90EF50BC1A564D60CC343D /* LogsConsoleAgentView.swift */,
 				CEFE73772108DFD3365EFBA5 /* ServerSettingsView.swift */,
 				C279933B24854B7ED73A79BB /* DispatchDebugView.swift */,
+				041038A909B34A8D8359EDD8 /* MessageTemplateLabView.swift */,
+				31B81DE4BC88FDC3B2B0D176 /* TelegramMessagePreview.swift */,
 				128DDC606C3A511DB8D00C74 /* MoreView.swift */,
 				4BB022269DBE2DE7F5E3C7A1 /* OpsSupport.swift */,
 				DB2CCF9898F9CE1A2073AFA2 /* OverviewComponents.swift */,
@@ -275,6 +283,7 @@
 				C58570A86D880181446561E2 /* AssistantUITests.swift */,
 				5166A9DAB15A2783E85E7038 /* ManagementUITests.swift */,
 				3F3A33FD2CAE2FB89AA47415 /* DiagnosticsUITests.swift */,
+				EDEFEA1C4588218486E420AD /* TelegramPreviewUITests.swift */,
 				91EAA20EE5B3D74CA2166B91 /* RedesignedWorkspaceUITests.swift */,
 				18587ABAD612072898FB2976 /* TelePilotUITests.swift */,
 				F98EB034681A1D9B4FEC79A1 /* VisualInspectionUITests.swift */,
@@ -438,6 +447,8 @@
 				ADF64C9C60E7B80BCBC9E4D6 /* LogsConsoleAgentView.swift in Sources */,
 				74C941D09E1B35056C6F4420 /* ServerSettingsView.swift in Sources */,
 				AA2D466DDCE7B9D1708EACE7 /* DispatchDebugView.swift in Sources */,
+				06B0591DFCADBFDEE403893B /* MessageTemplateLabView.swift in Sources */,
+				EBE1099F08CFEE4226C24EC0 /* TelegramMessagePreview.swift in Sources */,
 				7901764592C78E770F0844FC /* MoreView.swift in Sources */,
 				C729DBBC8C4DCCC0301B973D /* OpsSupport.swift in Sources */,
 				702EA3E96F61E657A0C12224 /* OverviewComponents.swift in Sources */,
@@ -461,6 +472,7 @@
 				ED354A1E77C52EA112C2F31D /* AssistantUITests.swift in Sources */,
 				00F4613DE15D81F631F58F58 /* ManagementUITests.swift in Sources */,
 				2EDD3F33CAD653F563EE4EC2 /* DiagnosticsUITests.swift in Sources */,
+				AF1A2CDFA8F1181342915EEC /* TelegramPreviewUITests.swift in Sources */,
 				98BE1FA3E101EA2808E885EB /* RedesignedWorkspaceUITests.swift in Sources */,
 				3215E1001048E63F337EDB20 /* TelePilotUITests.swift in Sources */,
 				1D2A8324084D0725E692908E /* VisualInspectionUITests.swift in Sources */,
@@ -546,7 +558,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
-				MARKETING_VERSION = 0.21.0;
+				MARKETING_VERSION = 0.22.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -635,7 +647,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
-				MARKETING_VERSION = 0.21.0;
+				MARKETING_VERSION = 0.22.0;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;

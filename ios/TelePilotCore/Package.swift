@@ -16,6 +16,6 @@ let package = Package(
             .product(name: "OpenAPIURLSession", package: "swift-openapi-urlsession"),
             .product(name: "HTTPTypes", package: "swift-http-types"),
         ], exclude: ["openapi.json", "openapi-generator-config.yaml"], resources: [.process("contract.json"), .process("model-brands.json"), .process("plugin-ui-widgets.json")]),
-        .testTarget(name: "TelePilotCoreTests", dependencies: ["TelePilotCore"], resources: [.process("model-brand-cases.json")]),
+        .testTarget(name: "TelePilotCoreTests", dependencies: ["TelePilotCore"], resources: [.process("model-brand-cases.json"), .process("telegram-html-cases.json")]),
     ]
 )
