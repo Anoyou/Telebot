@@ -745,15 +745,20 @@ struct TelegramLengthBadge: View {
     var body: some View {
         let color: Color = model.isOverLimit ? .red : model.isNearLimit ? .orange : .secondary
         let kind = model.limit == TelegramHTML.captionLimit ? "图片说明" : "消息"
+        // 用 String 拼好再交给 Text：Text 的字符串插值会按地区给数字加千分位（4,096）。
+        let summary: String = model.isOverLimit
+            ? "\(model.length) / \(model.limit) · 超出\(kind)上限 \(model.length - model.limit) 字，Telegram 会拒绝发送"
+            : "\(model.length) / \(model.limit) 字（\(kind)上限）"
+        let spoken: String = (model.isOverLimit ? "字数超出上限：" : "已用字数：") + "\(model.length) / \(model.limit)"
         Label {
-            Text(model.isOverLimit
-                 ? "\(model.length) / \(model.limit) · 超出\(kind)上限 \(model.length - model.limit) 字，Telegram 会拒绝发送"
-                 : "\(model.length) / \(model.limit) 字（\(kind)上限）")
+            Text(summary)
         } icon: {
             Image(systemName: model.isOverLimit ? "exclamationmark.octagon.fill" : model.isNearLimit ? "exclamationmark.triangle.fill" : "character.cursor.ibeam")
         }
         .font(.caption.monospacedDigit())
         .foregroundStyle(color)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(spoken)
         .accessibilityIdentifier("\(identifier).counter")
     }
 }
@@ -840,6 +845,7 @@ struct TelegramTemplateInlineField: View {
                 if models.diagnostics.warningCount > 0 {
                     Label("\(models.diagnostics.warningCount) 个格式问题", systemImage: "exclamationmark.triangle.fill")
                         .font(.caption).foregroundStyle(.orange)
+                        .accessibilityElement(children: .combine)
                         .accessibilityIdentifier("\(identifier).issueCount")
                 }
             }

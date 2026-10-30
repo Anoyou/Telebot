@@ -1484,7 +1484,6 @@ actor FixtureService: AppServing {
         if offline { throw APIError.network(outcomeUncertain: false) }
     }
 }
-#endif
 
 // MARK: - 消息模板实验室
 
@@ -1526,4 +1525,4 @@ extension FixtureService {
         return ["detail": "not found"]
     }
 }
-
+#endif
