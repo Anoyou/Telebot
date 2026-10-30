@@ -233,8 +233,11 @@ final class WorkspaceUITests: XCTestCase {
         XCTAssertTrue(more.waitForExistence(timeout: 45))
         more.tap()
         XCTAssertTrue(app.buttons["more.accounts"].waitForExistence(timeout: 10))
-        XCTAssertTrue(app.buttons["more.settings"].exists)
         XCTAssertTrue(app.buttons["more.search"].exists)
+        // 「App 设置」在最后一组：0.20.0 起「工具与设置」多了命中调试一行，小屏首屏放不下时向上滑到底部再找。
+        let settings = app.buttons["more.settings"]
+        for _ in 0..<4 where !(settings.exists && settings.isHittable) { app.swipeUp() }
+        XCTAssertTrue(settings.exists, "更多里应能找到「App 设置」")
     }
 
     /// 页面级分段控件：插件中心（ScrollView）、发现、已安装（List）与 AI 概览、供应商、用量（List）同一位置、
@@ -559,8 +562,7 @@ final class WorkspaceUITests: XCTestCase {
         let app = launch()
         app.tabBars.buttons["更多"].tap()
         let settings = app.buttons["more.settings"]
-        XCTAssertTrue(settings.waitForExistence(timeout: 10))
-        XCTAssertTrue(settings.label.contains("App 设置"), settings.label)
+        XCTAssertTrue(app.buttons["more.accounts"].waitForExistence(timeout: 10))
         let summary = app.staticTexts["more.emergencyStop.summary"]
         XCTAssertTrue(summary.waitForExistence(timeout: 5))
         XCTAssertEqual(summary.label, "停止全部消息处理，数据和管理台不受影响")
@@ -599,6 +601,10 @@ final class WorkspaceUITests: XCTestCase {
         app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: outsideY)).tap()
         XCTAssertTrue(details.waitForNonExistence(timeout: 5))
 
+        // 「App 设置」在「更多」最后一组，小屏首屏可能放不下（List 懒加载）：先滑到底部再找。
+        for _ in 0..<4 where !(settings.exists && settings.isHittable) { app.swipeUp() }
+        XCTAssertTrue(settings.waitForExistence(timeout: 10))
+        XCTAssertTrue(settings.label.contains("App 设置"), settings.label)
         settings.tap()
         XCTAssertTrue(app.navigationBars["App 设置"].waitForExistence(timeout: 10))
         app.navigationBars.buttons.element(boundBy: 0).tap()

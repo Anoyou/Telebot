@@ -249,6 +249,7 @@ actor FixtureService: AppServing {
             }
             if !opsValue.isNull { return opsValue }
         }
+        if let value = try Self.diagnosticsFixture(clean, path: path, method: method, body: body) { return value }
         if clean == "/api/system-agent/checkup" { return Self.checkupFixture }
         if clean == "/api/system-agent/sessions", method == "POST" {
             deletedSessions.remove("fixture-session")

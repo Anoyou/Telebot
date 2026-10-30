@@ -409,20 +409,12 @@ struct RuntimeTreeView: View {
 
     // MARK: 命中调试
 
+    /// 直接打开原生命中调试页（iOS 0.20.0），带上当前选中的账号。
     private var debugSection: some View {
         Section {
-            Button {
-                route = .dispatchDebug
-            } label: {
-                HStack {
-                    Label("想看一条消息怎么走 → 命中调试", systemImage: "scope")
-                    Spacer()
-                    Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary)
-                }
-                .contentShape(.rect)
-            }
-            .buttonStyle(.borderless)
-            .accessibilityIdentifier("runtime.dispatchDebug")
+            DispatchDebugEntryLink(accountID: accountID, title: "命中调试",
+                                   detail: "想看一条消息怎么走：模拟直通、命令、关键词、事件订阅四步为什么命中或没命中。",
+                                   identifier: "runtimeTree.dispatchDebug")
         } footer: {
             Text("运行树只看结构：开了哪些模块、哪些插件在用。一条消息具体被谁处理、为什么，用命中调试模拟。")
         }
@@ -451,9 +443,6 @@ struct RuntimeTreeView: View {
             }
         case .interaction:
             InteractionCenterView(initialAccountID: accountID)
-        case .dispatchDebug:
-            ManagementFormView(action: .init(title: "命中调试", path: "/api/dispatch/simulate",
-                                             explanation: "模拟一条消息会经过直通、命令、关键词、事件订阅四个阶段中的哪些插件和规则，以及为什么命中或没命中。不会真的发到 Telegram。"))
         }
     }
 
@@ -601,7 +590,6 @@ enum RuntimeRoute: Hashable {
     case module(String)
     case plugin(String)
     case interaction
-    case dispatchDebug
 }
 
 struct RuntimeModuleChange: Equatable {

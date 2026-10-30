@@ -40,7 +40,7 @@ struct MoreDestinationView: View {
 }
 
 /// 「更多」（0.18.0 起按信息架构分组）：紧急停止 → 常用（被移出 Dock 的概览／插件／交互）→ 管理（账号 · AI · 指令与任务 ·
-/// 资金台账 · 日志）→ 工具与设置（Webhook · 服务器设置 · 备份与维护）→ App（App 设置 · 关于与更新）。
+/// 资金台账 · 日志）→ 工具与设置（Webhook · 服务器设置 · 备份与维护 · 命中调试）→ App（App 设置 · 关于与更新）。
 /// 已在 Dock 里的入口不重复列出；服务器关闭了对应模块的入口隐藏（与 Web 侧栏一致），旧服务器没有模块信息时照常显示。
 struct MoreView: View {
     @Binding var path: [MoreDestination]
@@ -63,7 +63,7 @@ struct MoreView: View {
 
     private var commonItems: [DockItem] { [DockItem.overview, .plugins, .interaction].filter { visible($0) } }
     private var managementItems: [DockItem] { [DockItem.accounts, .ai, .operations, .ledger, .logs].filter { visible($0) } }
-    /// 三级入口，不能放进 Dock。命中调试暂在「日志与诊断 › 高级诊断」里（原生页由命中调试任务提供后在这里单独一行）。
+    /// 三级入口，不能放进 Dock。命中调试（原生页 DispatchDebugView）在本组单独一行，「日志与诊断 › 高级诊断」里保留同一入口。
     private var toolModules: [ManagementModule] { [ManagementModule.webhooks, .system, .maintenance].filter { visible($0) } }
 
     var body: some View {
@@ -101,6 +101,10 @@ struct MoreView: View {
                 NavigationLink(value: MoreDestination.module(module)) {
                     Label(module.title, systemImage: module.symbol)
                 }
+            }
+            // 命中调试模块（dispatch_debug）关闭时与 Web 侧栏一样隐藏；旧服务器没有模块信息时照常显示。
+            if model.isModuleEnabled("dispatch_debug") {
+                DispatchDebugEntryLink(detail: nil, identifier: "more.dispatchDebug")
             }
         }
 

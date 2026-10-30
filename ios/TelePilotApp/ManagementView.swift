@@ -153,7 +153,8 @@ struct ManagementModuleView: View {
                 } icon: { Image(systemName: "point.3.filled.connected.trianglepath.dotted") }
             }
             .accessibilityIdentifier("system.runtimeTree")
-            document("服务器参数", "/api/system/settings", symbol: "slider.horizontal.3", actions: [.init(title: "编辑服务器参数", path: "/api/system/settings", method: "PATCH")])
+            NavigationLink { ServerSettingsView() } label: { Label("服务器参数", systemImage: "slider.horizontal.3") }
+                .accessibilityIdentifier("system.serverSettings")
         }
         Section("连接与通知") {
             collection("代理", "/api/proxies", kind: .editable, create: "添加代理", itemPath: "/api/proxies/{id}", symbol: "network")

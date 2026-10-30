@@ -446,21 +446,22 @@ struct LogsView: View {
                     }
                     .accessibilityIdentifier("logs.kind.\(kind.rawValue)")
                 }
+                NavigationLink { SystemConsoleLogView() } label: {
+                    LogKindLabel(title: "系统控制台", symbol: "terminal",
+                                 detail: "服务器容器的原始输出（类似 docker compose logs），排查启动失败、异常堆栈，适合复制给开发者。")
+                }
+                .accessibilityIdentifier("logs.kind.console")
+                NavigationLink { AgentRunLogView() } label: {
+                    LogKindLabel(title: "Agent 运行", symbol: "sparkles",
+                                 detail: "每一轮系统助手请求的状态与事件轨迹，助手没回答或报错时看这里。")
+                }
+                .accessibilityIdentifier("logs.kind.agent")
             } header: { Text("按类型查看") }
             Section {
-                NavigationLink {
-                    ManagementFormView(action: .init(title: "查看系统控制台", path: "/api/logs/system-console",
-                        explanation: "读取服务器进程的原始输出（类似 docker compose logs），用于排查启动失败、异常堆栈等。内容较技术化。"))
-                } label: {
-                    LogKindLabel(title: "系统控制台", symbol: "terminal", detail: "服务器进程的原始输出，适合把内容复制给开发者。")
-                }
                 // 命中调试模块（dispatch_debug）关闭时这三项接口都会被服务器拒绝：与 Web 一样隐藏入口；旧服务器没有模块信息时照常显示。
                 if model.isModuleEnabled("dispatch_debug") {
-                    NavigationLink {
-                        ManagementFormView(action: .init(title: "模拟消息路由", path: "/api/dispatch/simulate", explanation: "模拟一条消息会被哪些插件和规则处理，不会真的发到 Telegram。"))
-                    } label: {
-                        LogKindLabel(title: "模拟消息路由", symbol: "arrow.triangle.branch", detail: "输入一条示例消息，看它会命中哪些插件或规则。")
-                    }
+                    // 第 19 轮：原通用「模拟消息路由」表单换成原生命中调试页（对齐 Web /dispatch-debug）。
+                    DispatchDebugEntryLink(identifier: "logs.dispatchDebug")
                     NavigationLink {
                         ManagementDocumentView(title: "投递统计", path: "/api/dispatch/router-delivery-stats")
                     } label: {
