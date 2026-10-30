@@ -25,6 +25,8 @@
 
 ## [Unreleased]
 
+## [0.113.0-beta.5] - 2026-10-30 · patch（补丁预发布） · 密钥 / 密码 / Token 输入框统一：按需查看已保存密钥（审计、no-store），iOS 0.23.0
+
 ### iOS 0.22.0：原生 Telegram 消息格式预览
 
 - **iOS 0.22.0**：新增 `TelePilotCore.TelegramHTML`（逐条移植 Web `sanitizeTelegramHtml` 的白名单规则，`sanitizeToWebHTML` 输出与 Web 逐字相同；同一次扫描生成原生节点树与带行列位置的中文诊断：不闭合、交叉嵌套、多余结束标签、不支持的标签、裸“<”/“&”、命名实体、不安全链接、富文本专用标签）与 `TelegramTemplate`（`{name}` / `{?name}…{/?}` 代入、示例值高亮、Web 各页面的示例值常量、`*_preview` → 模板字段映射、4096 / 1024 长度上限）。两端一致性用例 `ios/TelePilotCore/Tests/TelePilotCoreTests/telegram-html-cases.json`（88 条，由 Web 实际输出生成），`swift test` 与前端 `TelegramHtmlPreview.test.cjs` 同时校验。有意差异：原文里写成实体的 `&lt;b&gt;` 按文字显示（Telegram 实际效果，Web 会误当标签）；代码块语言名允许中文。App 端 `TelegramMessagePreview.swift`：仿 Telegram 气泡（浅/深色、Bot 名、时间、内联按钮）、剧透点按揭开、折叠引用展开、代码块复制；`TelegramTemplateInlineField`（输入框 + 字数 + 首个问题 + 实时预览）与 `TelegramTemplateEditorPage`（分屏/编辑/预览、格式检查标出位置、示例值可改、外观切换）。接入：通用表单里 `*_template` 字段与 reply_text 的 `text`（`ManagementFieldView`，按所在对象的 `type` / `output_format` 决定示例值与解析模式）、插件配置（示例值取草稿配置，`*_preview` 字段显示「预览结果」消息串）、交互中心高级页（玩法查询组合预览、收款/扣款通知）与规则命中回复；「指令与任务 › 模板预览与测试」改为原生 `MessageTemplateLabView`（catalog → 本机预览 → POST render 校验 → test-send）。UI 测试新增 `TelegramPreviewUITests` 3 条，`ios/DESIGN.md` 新增「Telegram 消息预览」一节并更新对照表。不改服务器。
@@ -32,6 +34,13 @@
 ### iOS 0.21.0：设置按 iPhone「通用」排序，关于与软件更新拆开置顶
 
 - **iOS 0.21.0**：「关于与更新」拆为「关于」（`AboutView`，只放版本、更新日志、服务器信息、项目与许可）与「软件更新」（新 `SoftwareUpdateView`：服务器当前版本 / 通道 / 可更新版本 + 全 App 唯一的「检查服务器更新」`ServerUpdateButton`；App 当前版本 + 「获取最新安装包」链接到「iOS 未签名 IPA」工作流），两页放在「App 设置」最顶部一组（`settings.about` / `settings.update`）。「App 设置」改为 关于·软件更新 → 外观 → 原生体验 → 界面锁 → 当前连接 → 使用方式 → 更换服务器·退出登录（最底部单独一组）。「更多」主结构不变（紧急停止 → 常用 → 管理 → 工具与设置 → App），「工具与设置」改为 服务器设置 → Webhook → 命中调试 → 备份与维护，App 组只剩「App 设置」（服务器有新版本时行内提示），去掉 `MoreDestination.about` 与 `more.about`。UI 测试新增 `testAppSettingsFollowsGeneralSettingsOrder`，原来经「更多 › 关于与更新」进入的 4 条用例改走「App 设置 › 关于 / 软件更新」；`ios/DESIGN.md` 新增「设置类页面排序」。不改服务器。
+
+### 密钥 / 密码 / Token 输入框统一（三端，iOS 0.23.0）
+
+- **问题**：iOS「交互」页「交互总闸与 Bot」分组里有一行只有钥匙图标和占位字「已配置，留空保持不变」，没有标题，看不出是交互 Bot 的 Token；各处密钥框有的有眼睛、有的没有，已保存的值也无法核对。
+- **后端**：新增 `GET /api/secrets/reveal?kind=…`（`account_id` / `id` / `plugin_key` + `field` 定位），按需取回一项已保存密钥的明文：需要登录（系统唯一管理员）、每次读取写审计 `secret.reveal`（只记是哪一项与是否已配置，不记值）、响应 `Cache-Control: no-store` + `Pragma: no-cache`。支持：交互 Bot Token、测试模拟通知 Bot Token、管理 Bot Token、通知 Bot Token（含复用管理 Bot）、AI 供应商主密钥、密钥池 Key、代理密码、Webhook 密钥、插件仓库凭据、插件配置里声明为密钥的顶层字段（`x-sensitive` / `format: password` / `writeOnly` / 敏感键名，其它字段 400）。普通配置读取接口照旧不返回明文。`/api/system/capabilities` 的 `features` 新增 `secret_reveal: true`，客户端据此判断服务器是否支持。测试 `test_secret_reveal.py` 23 条（逐类取值 + no-store + 审计不含值、每次读取各写一条审计、未配置返回 `configured: false`、未登录 401 且不写审计、参数缺失/目标不存在/非密钥字段被拒且不写审计、未知类型 422、交互 Bot / 管理 Bot / 通知 Bot / 代理 / 插件配置普通 GET 不含任何明文、能力标志）。
+- **Web**：新组件 `SecretInput`（`components/ui/secret-input.tsx`）：标题 + 可选说明、圆点遮罩、右侧眼睛；新输入的值本地切换明文；已保存的值显示「已配置 ••••••••（留空保持不变）」，点眼睛才请求查看接口，明文只在组件内存里，隐藏或离开页面即丢弃。替换：账号管理 Bot Token、交互 Bot Token、测试模拟通知 Bot Token、通知 Bot Token（新建）、代理密码（新建 / 编辑）、AI 密钥池 Key、插件仓库 GitHub Token（新增 / 已有仓库）、插件配置密钥字段（全局 / 账号，`ConfigScopeSection` 新增 `secretScope`）、新增账号两步验证密码、敏感导出与修改管理员密码；Webhook 页 Token 与 curl 示例默认遮罩，点眼睛显示（复制按钮照旧复制完整值）。AI 供应商主密钥与请求头原本就有眼睛，不变。Playwright `secret-fields.spec.ts`（mock 在 `tests/visual/fixtures.ts` 的 `SECRET_REVEAL_FIXTURE`）。
+- **iOS 0.23.0**：新组件 `SecretField`（标题行 + 圆点 + 眼睛；已保存值点眼睛先过界面锁验证再读取，离开页面 / 进入后台即隐藏；旧服务器显示「已配置（此服务器版本不支持查看）」，眼睛只对新输入生效）与 `RevealableSecureField`（登录页等保持焦点链的输入框 + 眼睛）。交互页「交互 Bot Token」有了标题并可查看已保存的值；插件配置密钥字段（原来标题是「留空则保持原值」）显示真实字段名并可查看；添加 AI 供应商的 API Key、新增账号的 API Hash 与两步验证密码、待确认操作补填密钥、敏感导出的管理员密码、通用管理表单里的密钥字段、登录密码、Cloudflare Access Client Secret 都换成带眼睛的输入框。`AppModel.serverFeatures` 读取能力标志。UI 测试 2 条（`testInteractionTokenSecretFieldRevealsSavedValue`、`testInteractionTokenSecretFieldOnOldServer`），夹具 `--ui-test-old-server-secrets` 模拟旧服务器。
 
 ## [0.113.0-beta.4] - 2026-10-30 · patch（补丁预发布） · Agent 系统级上下文主动查账号：新增管理 Bot 汇总工具、未关联账号时先查账号
 

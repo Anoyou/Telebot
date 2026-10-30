@@ -38,6 +38,10 @@ final class AppModel {
     /// 服务器上已关闭的平台模块（`/api/system/capabilities` 里 `desired_enabled == false` 的 `key`）。
     /// 旧服务器没有这个接口或读取失败时为空：所有入口照常显示（与 Web `capabilityEnabledMap` 缺省为开一致）。
     private(set) var disabledModules: Set<String> = []
+    /// 服务器能力探测标志（`/api/system/capabilities` 的 `features`，值为 true 的键）；旧服务器没有该字段时为空。
+    private(set) var serverFeatures: Set<String> = []
+    /// 服务器支持 `GET /api/secrets/reveal`（第 20 轮）：密钥行的眼睛可查看已保存的值。
+    var supportsSecretReveal: Bool { serverFeatures.contains("secret_reveal") }
     /// 服务器最近一次更新检查（自动或手动，`GET /api/system/update-status`），用于“更多”角标、App 设置行与软件更新页提示。
     private(set) var serverUpdateStatus: JSONValue?
     private(set) var workspaceError: String?
@@ -542,7 +546,10 @@ final class AppModel {
         let (actions, matrix, update, modules) = await (actionsResult, pluginsResult, updateResult, modulesResult)
         guard token == generation else { return }
         // 读取失败（含旧服务器 404）时保留上一次结果，不把入口误隐藏。
-        if case .success(let value) = modules { disabledModules = Self.disabledModules(value) }
+        if case .success(let value) = modules {
+            disabledModules = Self.disabledModules(value)
+            serverFeatures = Self.serverFeatures(value)
+        }
         switch actions {
         case .success(let values):
             pendingActions = values.arrayValue ?? []
@@ -566,6 +573,12 @@ final class AppModel {
         guard let value = try? await request(path: "/api/system/capabilities"), token == generation else { return }
         let next = Self.disabledModules(value)
         if next != disabledModules { disabledModules = next }
+        let features = Self.serverFeatures(value)
+        if features != serverFeatures { serverFeatures = features }
+    }
+
+    nonisolated static func serverFeatures(_ value: JSONValue) -> Set<String> {
+        Set((value["features"]?.objectValue ?? [:]).compactMap { key, flag in flag.boolValue == true ? key : nil })
     }
 
     nonisolated static func disabledModules(_ value: JSONValue) -> Set<String> {
@@ -760,6 +773,7 @@ final class AppModel {
         pendingActions = []
         plugins = []
         disabledModules = []
+        serverFeatures = []
         serverUpdateStatus = nil
         // 本机缓存的助手会话与消息、概览快照随登录状态一起清除。
         AssistantHistoryCache.removeAll()

@@ -10,6 +10,7 @@ import { Copy, KeyRound, LogOut, Send, ShieldAlert, ShieldCheck, ShieldOff } fro
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { SecretInput } from "@/components/ui/secret-input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import {
@@ -245,39 +246,33 @@ export function UserAccount() {
         {/* 修改密码 */}
         <div className="space-y-3 max-w-md">
           <h3 className="text-sm font-medium">修改密码</h3>
-          <div className="space-y-2">
-            <Label htmlFor="oldpwd">当前密码</Label>
-            <Input
-              id="oldpwd"
-              type="password"
-              autoComplete="current-password"
-              value={oldPwd}
-              onChange={(e) => setOldPwd(e.target.value)}
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="newpwd">新密码（≥ 8 位）</Label>
-            <Input
-              id="newpwd"
-              type="password"
-              autoComplete="new-password"
-              value={newPwd}
-              onChange={(e) => setNewPwd(e.target.value)}
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="newpwd2">确认新密码</Label>
-            <Input
-              id="newpwd2"
-              type="password"
-              autoComplete="new-password"
-              value={newPwd2}
-              onChange={(e) => setNewPwd2(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") handleChange();
-              }}
-            />
-          </div>
+          <SecretInput
+            id="oldpwd"
+            className="space-y-2"
+            label="当前密码"
+            autoComplete="current-password"
+            value={oldPwd}
+            onChange={setOldPwd}
+          />
+          <SecretInput
+            id="newpwd"
+            className="space-y-2"
+            label="新密码（≥ 8 位）"
+            autoComplete="new-password"
+            value={newPwd}
+            onChange={setNewPwd}
+          />
+          <SecretInput
+            id="newpwd2"
+            className="space-y-2"
+            label="确认新密码"
+            autoComplete="new-password"
+            value={newPwd2}
+            onChange={setNewPwd2}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") handleChange();
+            }}
+          />
           <Button onClick={handleChange} disabled={changeMut.isPending}>
             <KeyRound className="mr-2 h-4 w-4" />
             修改密码

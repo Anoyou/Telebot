@@ -47,6 +47,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { SecretInput } from "@/components/ui/secret-input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { Spinner } from "@/components/ui/misc";
@@ -110,7 +111,6 @@ import {
   type PluginEventSubscription,
 } from "@/types/pluginContract";
 
-const MASKED_SECRET_PLACEHOLDER = "••••••••••••••••";
 
 function localizeBotRuntimeError(message: string): string {
   if (message.includes("terminated by other getUpdates request") || message.includes("Conflict:")) {
@@ -2699,17 +2699,16 @@ export function BotTab({
               </div>
             </div>
 
-            <div className="space-y-1.5">
-              <Label htmlFor="account-bot-token">Bot Token</Label>
-              <div className="flex gap-2">
-                <Input
-                  id="account-bot-token"
-                  type="password"
-                  autoComplete="off"
-                  placeholder={bot?.has_token ? MASKED_SECRET_PLACEHOLDER : "123456:ABC-DEF..."}
-                  value={token}
-                  onChange={(e) => setToken(e.target.value)}
-                />
+            <SecretInput
+              id="account-bot-token"
+              label="管理 Bot Token"
+              description="BotFather 给的 Token，用来登录这个账号的管理 Bot。"
+              configured={Boolean(bot?.has_token) && !clearToken}
+              revealTarget={{ kind: "management_bot_token", account_id: aid }}
+              placeholder="123456:ABC-DEF..."
+              value={token}
+              onChange={setToken}
+              trailing={
                 <Button
                   type="button"
                   variant={clearToken ? "destructive" : "outline"}
@@ -2718,8 +2717,8 @@ export function BotTab({
                   <KeyRound className="mr-1 h-4 w-4" />
                   {clearToken ? "将清空" : "清空"}
                 </Button>
-              </div>
-            </div>
+              }
+            />
 
             {bot?.last_error ? (
               <div className="nested-surface-item border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
@@ -2928,19 +2927,18 @@ export function BotTab({
                         : "保存 Token 后自动读取"}
                     </div>
                   </div>
-                  <div className="space-y-1.5">
-                    <Label>Token</Label>
-                    <Input
-                      type="password"
-                      autoComplete="off"
-                      placeholder={interactionQ.data?.has_interaction_bot_token ? MASKED_SECRET_PLACEHOLDER : "123456:ABC-DEF..."}
-                      value={interactionBotToken}
-                      onChange={(e) => {
-                        markInteractionDirty();
-                        setInteractionBotToken(e.target.value);
-                      }}
-                    />
-                  </div>
+                  <SecretInput
+                    label="交互 Bot Token"
+                    description="BotFather 给的 Token，交互规则用这个 Bot 在群里收发消息。"
+                    configured={Boolean(interactionQ.data?.has_interaction_bot_token) && !clearInteractionBotToken}
+                    revealTarget={{ kind: "interaction_bot_token", account_id: aid }}
+                    placeholder="123456:ABC-DEF..."
+                    value={interactionBotToken}
+                    onChange={(next) => {
+                      markInteractionDirty();
+                      setInteractionBotToken(next);
+                    }}
+                  />
                 </div>
                 <BotMembershipList
                   title="监听群成员状态"
@@ -3004,15 +3002,15 @@ export function BotTab({
                     </div>
                   </div>
                   <div className="space-y-1.5">
-                    <Label>测试模拟通知 Bot Token</Label>
-                    <Input
-                      type="password"
-                      autoComplete="off"
-                      placeholder={interactionQ.data?.has_transfer_bot_token ? MASKED_SECRET_PLACEHOLDER : "测试模拟通知时填写"}
+                    <SecretInput
+                      label="测试模拟通知 Bot Token"
+                      configured={Boolean(interactionQ.data?.has_transfer_bot_token)}
+                      revealTarget={{ kind: "transfer_bot_token", account_id: aid }}
+                      placeholder="测试模拟通知时填写"
                       value={transferBotToken}
-                      onChange={(e) => {
+                      onChange={(next) => {
                         markInteractionDirty();
-                        setTransferBotToken(e.target.value);
+                        setTransferBotToken(next);
                       }}
                     />
                     <div className="text-xs text-muted-foreground">

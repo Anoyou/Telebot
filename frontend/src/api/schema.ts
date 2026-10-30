@@ -4004,6 +4004,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/secrets/reveal": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 按需查看一项已保存的密钥（每次读取写审计日志） */
+        get: operations["reveal_secret_api_secrets_reveal_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/sudo": {
         parameters: {
             query?: never;
@@ -12412,6 +12429,26 @@ export interface components {
             status: "idle" | "applying" | "active" | "restoring" | "failed";
             /** Updated At */
             updated_at?: string | null;
+        };
+        /** SecretRevealOut */
+        SecretRevealOut: {
+            /**
+             * Configured
+             * @description 服务器上是否保存了这一项；false 时 value 为 null
+             */
+            configured: boolean;
+            /** Kind */
+            kind: string;
+            /**
+             * Label
+             * @description 这一项的中文名，例如「交互 Bot Token」
+             */
+            label: string;
+            /**
+             * Value
+             * @description 明文；仅在用户点「显示」时按需读取
+             */
+            value?: string | null;
         };
         /**
          * StrictRequest
@@ -28173,6 +28210,66 @@ export interface operations {
             };
             /** @description CSRF 校验失败或权限不足 */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description 服务器内部错误 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    reveal_secret_api_secrets_reveal_get: {
+        parameters: {
+            query: {
+                /** @description 密钥类型 */
+                kind: "interaction_bot_token" | "transfer_bot_token" | "management_bot_token" | "notify_bot_token" | "llm_provider_api_key" | "llm_provider_key" | "proxy_password" | "webhook_token" | "plugin_repo_credential" | "plugin_config_secret";
+                /** @description 账号级密钥的账号 ID；插件配置留空表示全局配置 */
+                account_id?: number | null;
+                /** @description 通知 Bot / AI 供应商 / 密钥池 Key / 代理 / 插件仓库的 ID */
+                id?: number | null;
+                /** @description plugin_config_secret：插件 key */
+                plugin_key?: string | null;
+                /** @description plugin_config_secret：顶层字段名 */
+                field?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: {
+                auth_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SecretRevealOut"];
+                };
+            };
+            /** @description 认证失败 */
+            401: {
                 headers: {
                     [name: string]: unknown;
                 };

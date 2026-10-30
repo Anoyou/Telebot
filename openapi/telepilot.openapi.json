@@ -19121,6 +19121,43 @@
         "title": "RuntimeProfileStatusOut",
         "type": "object"
       },
+      "SecretRevealOut": {
+        "properties": {
+          "configured": {
+            "description": "服务器上是否保存了这一项；false 时 value 为 null",
+            "title": "Configured",
+            "type": "boolean"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "description": "这一项的中文名，例如「交互 Bot Token」",
+            "title": "Label",
+            "type": "string"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "明文；仅在用户点「显示」时按需读取",
+            "title": "Value"
+          }
+        },
+        "required": [
+          "kind",
+          "label",
+          "configured"
+        ],
+        "title": "SecretRevealOut",
+        "type": "object"
+      },
       "StrictRequest": {
         "description": "一键调严：阈值 ×multiplier，TTL 秒。",
         "properties": {
@@ -23323,7 +23360,7 @@
   },
   "info": {
     "title": "TelePilot",
-    "version": "0.113.0-beta.4"
+    "version": "0.113.0-beta.5"
   },
   "openapi": "3.1.0",
   "paths": {
@@ -48333,6 +48370,177 @@
         "summary": "Api Update",
         "tags": [
           "remote-plugins"
+        ]
+      }
+    },
+    "/api/secrets/reveal": {
+      "get": {
+        "operationId": "reveal_secret_api_secrets_reveal_get",
+        "parameters": [
+          {
+            "description": "密钥类型",
+            "in": "query",
+            "name": "kind",
+            "required": true,
+            "schema": {
+              "description": "密钥类型",
+              "enum": [
+                "interaction_bot_token",
+                "transfer_bot_token",
+                "management_bot_token",
+                "notify_bot_token",
+                "llm_provider_api_key",
+                "llm_provider_key",
+                "proxy_password",
+                "webhook_token",
+                "plugin_repo_credential",
+                "plugin_config_secret"
+              ],
+              "title": "Kind",
+              "type": "string"
+            }
+          },
+          {
+            "description": "账号级密钥的账号 ID；插件配置留空表示全局配置",
+            "in": "query",
+            "name": "account_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "账号级密钥的账号 ID；插件配置留空表示全局配置",
+              "title": "Account Id"
+            }
+          },
+          {
+            "description": "通知 Bot / AI 供应商 / 密钥池 Key / 代理 / 插件仓库的 ID",
+            "in": "query",
+            "name": "id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "通知 Bot / AI 供应商 / 密钥池 Key / 代理 / 插件仓库的 ID",
+              "title": "Id"
+            }
+          },
+          {
+            "description": "plugin_config_secret：插件 key",
+            "in": "query",
+            "name": "plugin_key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 128,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "plugin_config_secret：插件 key",
+              "title": "Plugin Key"
+            }
+          },
+          {
+            "description": "plugin_config_secret：顶层字段名",
+            "in": "query",
+            "name": "field",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 128,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "plugin_config_secret：顶层字段名",
+              "title": "Field"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "auth_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Auth Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SecretRevealOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "认证失败"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "服务器内部错误"
+          }
+        },
+        "security": [
+          {
+            "AuthCookie": []
+          }
+        ],
+        "summary": "按需查看一项已保存的密钥（每次读取写审计日志）",
+        "tags": [
+          "secrets"
         ]
       }
     },

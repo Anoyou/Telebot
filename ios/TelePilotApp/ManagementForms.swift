@@ -329,7 +329,7 @@ struct ManagementFieldView: View {
             } else if spec["format"]?.stringValue == "date-time" {
                 ManagementDateField(title: title, value: $value)
             } else if ManagementText.secret(key) || spec["format"]?.stringValue == "password" || spec["writeOnly"]?.boolValue == true {
-                SecureField(title, text: stringBinding).textInputAutocapitalization(.never).autocorrectionDisabled().privacySensitive()
+                SecretField(title: title, text: stringBinding, placeholder: "留空则不修改", identifier: "management.secret.\(key.isEmpty ? title : key)")
             } else if ["integer", "number"].contains(spec["type"]?.stringValue ?? "") {
                 ManagementNumberField(title: title, integer: spec["type"]?.stringValue == "integer", value: $value)
             } else if telegramContext.applies(to: key), (spec["type"]?.stringValue ?? "string") == "string" {

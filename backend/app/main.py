@@ -34,6 +34,7 @@ from .api import platform_tree as platform_tree_api
 from .api import proxies as proxies_api
 from .api import rate_limit as rate_limit_api
 from .api import runtime_profiles as runtime_profiles_api
+from .api import secrets as secrets_api
 from .api import sudo as sudo_api
 from .api import system_agent as system_agent_api
 from .api import webhooks as webhooks_api
@@ -605,6 +606,7 @@ app.include_router(agent_skills_api.router)  # Agent Skills：安装 / 卸载 / 
 app.include_router(platform_capabilities_api.router)  # 平台能力热插拔
 app.include_router(platform_tree_api.router)  # WP-T4：运行树（原「平台看树」）
 app.include_router(runtime_profiles_api.router)  # 值守运行预设
+app.include_router(secrets_api.router)  # 第 20 轮：已保存密钥按需查看（审计、no-store）
 
 
 # ── 健康检查 ─────────────────────────────────────────────────────

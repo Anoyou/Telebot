@@ -1990,8 +1990,22 @@ struct ManagementPluginConfigView: View {
                 PluginSelectWidgetField(widget: widget, title: field.label, value: binding(field.key), draft: draft,
                                         stored: snapshot?.values ?? [:], providers: llmProviders, loading: llmLoading, loadError: llmError,
                                         editableKeys: Set(fields.filter { !$0.readOnly }.map(\.key)), setField: set)
+            } else if field.secret {
+                // 第 20 轮：密钥字段统一 SecretField（标题 + 圆点 + 眼睛；已保存值按需从服务器读取）。
+                let saved = !PluginConfigFormat.text(snapshot?.values[field.key], secret: true).hasPrefix("未")
+                // 账号配置里没存、继承自全局配置的密钥，按全局配置读取。
+                let inheritedOnly = snapshot?.stored[field.key] == nil && snapshot?.inherited[field.key] != nil
+                SecretField(
+                    title: field.label,
+                    text: Binding(get: { draft[field.key]?.stringValue ?? "" }, set: { set(field.key, .string($0)) }),
+                    configured: saved,
+                    reveal: (feature["key"]?.stringValue).map {
+                    SecretRevealTarget(kind: "plugin_config_secret", accountID: inheritedOnly ? nil : accountID, pluginKey: $0, field: field.key)
+                },
+                    placeholder: "未设置",
+                    identifier: "plugin.config.secret.\(field.key)")
             } else {
-                ManagementFieldView(title: field.secret ? "留空则保持原值" : field.label, key: field.key, schema: field.spec, value: binding(field.key))
+                ManagementFieldView(title: field.label, key: field.key, schema: field.spec, value: binding(field.key))
                 if ManagementSchema.allowsNull(field.spec), let value = draft[field.key], !value.isNull, !field.secret {
                     Button("清空此项", systemImage: "xmark.circle", role: .destructive) { set(field.key, .null) }
                 }

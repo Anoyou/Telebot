@@ -431,6 +431,27 @@ function jsonResponse(pathname: string): unknown | undefined {
   return undefined;
 }
 
+// 第 20 轮：已保存密钥按需查看（GET /api/secrets/reveal）。每个 kind 一个固定明文，
+// 真实服务器每次读取都会写审计并带 no-store。
+export const SECRET_REVEAL_FIXTURE: Record<string, string> = {
+  interaction_bot_token: "7000000001:AAFixtureInteractionToken",
+  transfer_bot_token: "7000000004:AAFixtureTransferToken",
+  management_bot_token: "7000000002:AAFixtureManagementToken",
+  notify_bot_token: "7000000003:AAFixtureNotifyToken",
+  llm_provider_api_key: "sk-fixture-provider-key",
+  llm_provider_key: "sk-fixture-pool-key",
+  proxy_password: "fixture-proxy-password",
+  webhook_token: "fixture-webhook-token",
+  plugin_repo_credential: "ghp_fixtureRepoCredential",
+  plugin_config_secret: "fixture-plugin-secret",
+};
+
+export function secretRevealFixture(params: URLSearchParams): Record<string, unknown> {
+  const kind = params.get("kind") || "";
+  const value = SECRET_REVEAL_FIXTURE[kind];
+  return { kind, label: kind, configured: value !== undefined, value: value ?? null };
+}
+
 export async function installApiFixture(page: Page): Promise<{ assertClean: () => void }> {
   const unexpected: string[] = [];
   await page.route("**/api/**", async (route: Route) => {
@@ -446,6 +467,15 @@ export async function installApiFixture(page: Page): Promise<{ assertClean: () =
       const pluginKey = params.get("plugin_key");
       const cards = slot === "plugin.overview" && pluginKey ? [hostStatsCardFixture(pluginKey)] : [];
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ slot, cards, warnings: [] }) });
+      return;
+    }
+    if (request.method() === "GET" && pathname === "/api/secrets/reveal") {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        headers: { "Cache-Control": "no-store" },
+        body: JSON.stringify(secretRevealFixture(new URL(request.url()).searchParams)),
+      });
       return;
     }
     if (request.method() === "GET" && pathname === "/api/plugin-ui/entries") {

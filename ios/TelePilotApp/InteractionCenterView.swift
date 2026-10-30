@@ -247,13 +247,14 @@ struct InteractionCenterView: View {
                 Label("交互总闸", systemImage: "power.circle")
             }
             .accessibilityIdentifier("interaction.enabled")
-            Label {
-                SecureField(hasToken ? "已配置，留空保持不变" : "粘贴 BotFather 给的 Token", text: $draft.newToken)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .disabled(draft.clearToken)
-                    .accessibilityIdentifier("interaction.token")
-            } icon: { Image(systemName: "key") }
+            SecretField(
+                title: "交互 Bot Token",
+                text: $draft.newToken,
+                configured: hasToken && !draft.clearToken,
+                reveal: accountID.map { SecretRevealTarget(kind: "interaction_bot_token", accountID: $0) },
+                placeholder: "粘贴 BotFather 给的 Token",
+                identifier: "interaction.token",
+                disabled: draft.clearToken)
             if hasToken {
                 Toggle(isOn: $draft.clearToken) {
                     Label("清除已保存的 Token", systemImage: "trash")
@@ -262,7 +263,7 @@ struct InteractionCenterView: View {
                 .accessibilityIdentifier("interaction.clearToken")
             }
         } header: { Text("交互总闸与 Bot") } footer: {
-            Text("总闸关闭时所有互动规则都不生效。交互 Bot 不能和管理 Bot 使用同一个 Bot；Token 只在保存时提交，App 不保存也不显示。")
+            Text("总闸关闭时所有互动规则都不生效。交互 Bot 不能和管理 Bot 使用同一个 Bot；新 Token 只在保存时提交。点眼睛可查看已保存的 Token（服务器会记录这次查看），离开页面即隐藏，App 不保存。")
         }
     }
 

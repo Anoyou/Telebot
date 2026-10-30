@@ -569,9 +569,11 @@ struct AIProviderCreateView: View {
             TextField(Self.defaultBaseURLs[providerKind] ?? "https://api.example.com/v1", text: $baseURL)
                 .keyboardType(.URL).textInputAutocapitalization(.never).autocorrectionDisabled()
                 .accessibilityIdentifier("ai.providerCreate.baseURL")
-            SecureField(providerKind == "ollama" ? "API Key（本地 Ollama 可留空）" : "API Key", text: $apiKey)
-                .textInputAutocapitalization(.never).autocorrectionDisabled()
-                .accessibilityIdentifier("ai.providerCreate.apiKey")
+            SecretField(
+                title: "API Key",
+                text: $apiKey,
+                placeholder: providerKind == "ollama" ? "本地 Ollama 可留空" : "sk-…",
+                identifier: "ai.providerCreate.apiKey")
         } header: {
             Text("连接信息")
         } footer: {

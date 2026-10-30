@@ -57,6 +57,8 @@ PLATFORM_FEATURE_FLAGS: dict[str, bool] = {
     # 0.113.0-beta.2：GET /api/platform/tree 支持 ?account_id= 按账号口径，并返回
     # channel / entry_kinds / display_name / demanded_by_global / blocked_reason 等字段。
     "platform_tree_account_scope": True,
+    # 第 20 轮：GET /api/secrets/reveal 按需查看已保存的密钥（登录、审计、no-store）。
+    "secret_reveal": True,
 }
 
 

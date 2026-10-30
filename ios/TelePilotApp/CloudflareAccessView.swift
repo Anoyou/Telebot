@@ -220,13 +220,11 @@ struct CloudflareAccessSettingsView: View {
                     .onSubmit { focusedField = .clientSecret }
                     .accessibilityLabel("Cloudflare Access Client ID")
                     .accessibilityIdentifier("cfAccess.clientID")
-                SecureField("Client Secret", text: $clientSecret)
-                    .textInputAutocapitalization(.never).autocorrectionDisabled()
-                    .focused($focusedField, equals: .clientSecret)
-                    .submitLabel(.done)
-                    .onSubmit { if canSave { save() } }
-                    .accessibilityLabel("Cloudflare Access Client Secret")
-                    .accessibilityIdentifier("cfAccess.clientSecret")
+                RevealableSecureField(
+                    placeholder: "Client Secret", text: $clientSecret, identifier: "cfAccess.clientSecret",
+                    accessibilityLabel: "Cloudflare Access Client Secret",
+                    focus: $focusedField, focusValue: .clientSecret
+                ) { if canSave { save() } }
                 Button(action: save) {
                     HStack {
                         Label(isWorking ? "正在保存并验证…" : "保存并验证连接", systemImage: "checkmark.shield")

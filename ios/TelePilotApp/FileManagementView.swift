@@ -102,7 +102,7 @@ struct FileManagementView: View {
                 }
                 Toggle(isOn: $includeSensitive) { Label("包含敏感配置", systemImage: "lock") }
                 if includeSensitive {
-                    SecureField("当前管理员密码", text: $password).privacySensitive()
+                    SecretField(title: "当前管理员密码", text: $password, placeholder: "输入管理员密码", identifier: "backup.export.password", contentType: .password)
                     SecureField("验证器验证码（如已启用）", text: $totp).keyboardType(.numberPad).privacySensitive()
                 }
             }

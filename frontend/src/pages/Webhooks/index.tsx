@@ -10,6 +10,8 @@ import {
   ShieldCheck,
   TerminalSquare,
   Webhook,
+  Eye,
+  EyeOff,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -61,11 +63,13 @@ function deliveryUrl(accountId: number, hookKey: string): string {
   return `${origin}/api/webhooks/${accountId}/${hookKey}`;
 }
 
-function curlExample(config: AccountWebhookConfig, hookKey: string): string {
+const TOKEN_MASK = "••••••••••••••••";
+
+function curlExample(config: AccountWebhookConfig, hookKey: string, revealToken = true): string {
   const url = deliveryUrl(config.account_id, hookKey);
   return [
     `curl -X POST '${url}' \\`,
-    `  -H '${config.token_header}: ${config.token}' \\`,
+    `  -H '${config.token_header}: ${revealToken ? config.token : TOKEN_MASK}' \\`,
     "  -H 'Content-Type: application/json' \\",
     "  -d '{\"event\":\"demo\",\"value\":1}'",
   ].join("\n");
@@ -156,6 +160,10 @@ export function WebhooksPage() {
   );
   const selectedHook = config?.hooks.find((hook) => hook.key === selectedHookKey) ?? config?.hooks[0] ?? null;
   const example = config && selectedHook ? curlExample(config, selectedHook.key) : "";
+  // Token 默认圆点遮罩，点眼睛显示；复制按钮始终复制完整值。
+  const [tokenVisible, setTokenVisible] = useState(false);
+  useEffect(() => setTokenVisible(false), [selectedAid]);
+  const exampleShown = config && selectedHook ? curlExample(config, selectedHook.key, tokenVisible) : "";
 
   const resetMut = useMutation({
     mutationFn: () => resetAccountWebhookToken(selectedAid as number),
@@ -313,8 +321,20 @@ export function WebhooksPage() {
                       <Label>Webhook Token</Label>
                       <Badge variant="outline">{config.token_header}</Badge>
                     </div>
-                    <div className="min-w-0 rounded-lg border bg-muted/40 p-3">
-                      <code className="block break-all text-xs leading-5 text-foreground">{config.token}</code>
+                    <div className="flex min-w-0 items-start gap-2 rounded-lg border bg-muted/40 p-3">
+                      <code className="block min-w-0 flex-1 break-all text-xs leading-5 text-foreground" data-webhook-token={tokenVisible ? "visible" : "masked"}>
+                        {tokenVisible ? config.token : TOKEN_MASK}
+                      </code>
+                      <button
+                        type="button"
+                        className="shrink-0 text-muted-foreground hover:text-foreground"
+                        aria-label={tokenVisible ? "隐藏" : "显示"}
+                        aria-pressed={tokenVisible}
+                        data-secret-eye=""
+                        onClick={() => setTokenVisible((v) => !v)}
+                      >
+                        {tokenVisible ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                      </button>
                     </div>
                     <div className="flex flex-col gap-2 sm:flex-row">
                       <Button
@@ -412,7 +432,7 @@ export function WebhooksPage() {
               <CardContent className="pt-5">
                 {example ? (
                   <pre className="max-h-80 overflow-auto rounded-lg border bg-muted/50 p-4 text-xs leading-6">
-                    <code>{example}</code>
+                    <code>{exampleShown}</code>
                   </pre>
                 ) : (
                   <div className="flex h-24 items-center justify-center rounded-lg border border-dashed text-sm text-muted-foreground">

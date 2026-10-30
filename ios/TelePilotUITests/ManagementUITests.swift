@@ -3,10 +3,10 @@ import UIKit
 
 @MainActor
 final class ManagementUITests: XCTestCase {
-    private func launch() -> XCUIApplication {
+    private func launch(_ extra: [String] = []) -> XCUIApplication {
         continueAfterFailure = false
         let app = XCUIApplication()
-        app.launchArguments = ["--ui-testing", "-AppleLanguages", "(zh-Hans)", "-AppleLocale", "zh_CN"]
+        app.launchArguments = ["--ui-testing", "-AppleLanguages", "(zh-Hans)", "-AppleLocale", "zh_CN"] + extra
         app.launch()
         XCTAssertTrue(app.tabBars.buttons["更多"].waitForExistence(timeout: 45))
         app.tabBars.buttons["更多"].tap()
@@ -308,6 +308,54 @@ final class ManagementUITests: XCTestCase {
 
     /// 交互中心（对齐 Web /interaction）：运行状态、规则列表；在规则编辑页启用一条规则后保存，
     /// 保存后服务器返回的状态刷新，插件玩法参数（module_config）原样保留。
+    /// 第 20 轮：交互 Bot Token 行有标题，圆点遮罩；已保存的 Token 点眼睛才向服务器读取明文，再点隐藏。
+    func testInteractionTokenSecretFieldRevealsSavedValue() {
+        let app = launch()
+        let entry = app.tabBars.buttons["交互"]
+        XCTAssertTrue(entry.waitForExistence(timeout: 10))
+        entry.tap()
+        let title = app.staticTexts["interaction.token.title"]
+        XCTAssertTrue(title.waitForExistence(timeout: 10))
+        XCTAssertEqual(title.label, "交互 Bot Token")
+        let secure = app.secureTextFields["interaction.token"]
+        XCTAssertTrue(secure.exists)
+        XCTAssertTrue((secure.placeholderValue ?? "").contains("已配置"), secure.placeholderValue ?? "")
+        let eye = app.buttons["interaction.token.reveal"]
+        reveal(eye, in: app)
+        XCTAssertTrue(eye.isEnabled, "已保存的 Token 在新服务器上可以查看")
+        XCTAssertEqual(eye.label, "显示")
+        eye.tap()
+        let plain = app.textFields["interaction.token"]
+        XCTAssertTrue(plain.waitForExistence(timeout: 10))
+        XCTAssertEqual(plain.value as? String, "fixture-interaction_bot_token-plaintext")
+        XCTAssertEqual(eye.label, "隐藏")
+        eye.tap()
+        XCTAssertTrue(app.secureTextFields["interaction.token"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.textFields["interaction.token"].exists)
+    }
+
+    /// 旧服务器没有查看接口：已保存的 Token 显示「已配置（此服务器版本不支持查看）」，眼睛只对新输入生效。
+    func testInteractionTokenSecretFieldOnOldServer() {
+        let app = launch(["--ui-test-old-server-secrets"])
+        let entry = app.tabBars.buttons["交互"]
+        XCTAssertTrue(entry.waitForExistence(timeout: 10))
+        entry.tap()
+        let note = app.staticTexts["interaction.token.note"]
+        XCTAssertTrue(note.waitForExistence(timeout: 10))
+        XCTAssertTrue(note.label.contains("此服务器版本不支持查看"), note.label)
+        let eye = app.buttons["interaction.token.reveal"]
+        reveal(eye, in: app)
+        XCTAssertFalse(eye.isEnabled, "旧服务器上已保存的值不能查看")
+        let secure = app.secureTextFields["interaction.token"]
+        secure.tap()
+        secure.typeText("123:NEW")
+        XCTAssertTrue(eye.isEnabled, "新输入的值可以切换明文")
+        eye.tap()
+        let plain = app.textFields["interaction.token"]
+        XCTAssertTrue(plain.waitForExistence(timeout: 5))
+        XCTAssertEqual(plain.value as? String, "123:NEW")
+    }
+
     func testInteractionCenterEditsRulesAndSaves() {
         let app = launch()
         // 0.18.0 起交互中心在默认 Dock 的「交互」格。
