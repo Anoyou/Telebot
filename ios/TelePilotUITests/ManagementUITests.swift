@@ -174,8 +174,8 @@ final class ManagementUITests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["changelog.list"].firstMatch.waitForExistence(timeout: 10))
         XCTAssertTrue(app.staticTexts["changelog.current"].firstMatch.waitForExistence(timeout: 5))
         let oldest = app.staticTexts["首个原生客户端与 APNs"]
-        // 更新日志随版本增长，最旧条目在底部：多给几次滑动。
-        for _ in 0..<30 where !oldest.exists { app.swipeUp() }
+        // 更新日志随版本增长，最旧条目在底部：快速滑动并多给几次（0.19.0 起 30 次普通滑动到不了底）。
+        for _ in 0..<60 where !oldest.exists { app.swipeUp(velocity: .fast) }
         XCTAssertTrue(oldest.exists)
         let screenshot = XCTAttachment(screenshot: app.screenshot())
         screenshot.name = "App 更新日志"
