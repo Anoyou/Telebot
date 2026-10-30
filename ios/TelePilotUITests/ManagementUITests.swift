@@ -321,10 +321,9 @@ final class ManagementUITests: XCTestCase {
     /// 保存后服务器返回的状态刷新，插件玩法参数（module_config）原样保留。
     func testInteractionCenterEditsRulesAndSaves() {
         let app = launch()
-        let entry = app.buttons["交互中心"]
-        XCTAssertTrue(app.buttons["more.accounts"].waitForExistence(timeout: 10))
-        for _ in 0..<6 where !(entry.exists && entry.isHittable) { app.swipeUp() }
-        XCTAssertTrue(entry.waitForExistence(timeout: 5))
+        // 0.18.0 起交互中心在默认 Dock 的「交互」格。
+        let entry = app.tabBars.buttons["交互"]
+        XCTAssertTrue(entry.waitForExistence(timeout: 10))
         entry.tap()
         let runtime = app.descendants(matching: .any)["interaction.status.runtime"].firstMatch
         XCTAssertTrue(runtime.waitForExistence(timeout: 10))

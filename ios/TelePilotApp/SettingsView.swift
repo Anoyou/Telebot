@@ -34,6 +34,8 @@ struct SettingsView: View {
                 }
                 Section("原生体验") {
                     NavigationLink { OverviewCustomizationView() } label: { Label("首页模块", systemImage: "square.grid.2x2") }
+                    NavigationLink { DockCustomizationView() } label: { Label("自定义 Dock", systemImage: "dock.rectangle") }
+                        .accessibilityIdentifier("settings.dock")
                     NavigationLink { PushSettingsView() } label: { Label("Apple 推送通知", systemImage: "bell.badge") }
                 }
                 Section("当前连接") {
@@ -172,5 +174,107 @@ enum AppAppearance: String, CaseIterable, Identifiable {
         case .light: .light
         case .dark: .dark
         }
+    }
+}
+
+// MARK: - 自定义 Dock
+
+/// App 设置 › 自定义 Dock：中间最多 3 格从「概览 / 插件 / 交互 / AI / 账号 / 日志 / 资金台账」里选并排序；
+/// 「更多」与 Agent 固定。没放进 Dock 的入口自动出现在「更多」，任何入口始终可达。只保存在本机。
+///
+/// iPhone 底部 Dock 不支持系统的 Tab 编辑（`TabViewCustomization` 只在 iPad 侧边栏生效），所以这里用自己的设置页；
+/// 不提供第 4 格：普通 Tab 超过 4 个（加 Agent 超过 5 个）时系统会自动生成第二个“更多”。
+struct DockCustomizationView: View {
+    @Environment(AppModel.self) private var model
+    @Environment(WorkspacePreferences.self) private var preferences
+
+    private var slots: [DockItem] { preferences.dockSlots }
+    private var available: [DockItem] { DockItem.customizable.filter { !slots.contains($0) } }
+    private var effective: [DockItem] { preferences.dockItems(disabledModules: model.disabledModules) }
+    private var full: Bool { slots.count >= DockItem.maxSlots }
+
+    var body: some View {
+        Form {
+            Section {
+                Text((effective + [.more]).map(\.title).joined(separator: " · ") + "　+ Agent")
+                    .font(.subheadline.weight(.medium))
+                    .accessibilityIdentifier("dock.preview")
+            } header: { Text("当前 Dock") } footer: {
+                if effective != slots {
+                    Text("服务器关闭了部分模块，对应的格暂时隐藏，由下面列表顺序里的下一个入口补上（默认是 AI）。模块重新开启后自动恢复。")
+                }
+            }
+
+            Section {
+                ForEach(Array(slots.enumerated()), id: \.element) { index, item in
+                    HStack(spacing: 12) {
+                        Label {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(item.longTitle)
+                                if let note = moduleNote(item) { Text(note).font(.caption).foregroundStyle(.secondary) }
+                            }
+                        } icon: { Image(systemName: item.symbol) }
+                        Spacer(minLength: 8)
+                        if index > 0 {
+                            Button { preferences.moveDockSlotUp(item) } label: {
+                                Image(systemName: "arrow.up").frame(width: 44, height: 44)
+                            }
+                            .buttonStyle(.borderless)
+                            .accessibilityLabel("上移\(item.longTitle)")
+                            .accessibilityIdentifier("dock.moveUp.\(item.rawValue)")
+                        }
+                        Button(role: .destructive) { preferences.removeDockSlot(item) } label: {
+                            Image(systemName: "minus.circle.fill").foregroundStyle(slots.count > 1 ? Color.red : Color.secondary)
+                                .frame(width: 44, height: 44)
+                        }
+                        .buttonStyle(.borderless)
+                        .disabled(slots.count <= 1)
+                        .accessibilityLabel("从 Dock 移除\(item.longTitle)")
+                        .accessibilityIdentifier("dock.remove.\(item.rawValue)")
+                    }
+                }
+            } header: { Text("Dock 中间的入口（\(slots.count)/\(DockItem.maxSlots)）") } footer: {
+                Text("从左到右排列；「更多」固定在最后，Agent 固定在右侧。至少保留一个入口。")
+            }
+
+            Section {
+                ForEach(available) { item in
+                    Button { preferences.addDockSlot(item) } label: {
+                        HStack(spacing: 12) {
+                            Label {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(item.longTitle).foregroundStyle(Color.primary)
+                                    if let note = moduleNote(item) { Text(note).font(.caption).foregroundStyle(.secondary) }
+                                }
+                            } icon: { Image(systemName: item.symbol) }
+                            Spacer(minLength: 8)
+                            Image(systemName: "plus.circle.fill").foregroundStyle(full ? Color.secondary : Color.green)
+                        }
+                        .frame(minHeight: 44)
+                    }
+                    .disabled(full)
+                    .accessibilityLabel("加入 Dock：\(item.longTitle)")
+                    .accessibilityIdentifier("dock.add.\(item.rawValue)")
+                }
+            } header: { Text("在「更多」里的入口") } footer: {
+                Text(full ? "Dock 已放满 \(DockItem.maxSlots) 个，先移除一个再添加。iPhone 底部最多 4 个普通标签（含「更多」），再多系统会自动生成第二个“更多”。"
+                          : "没放进 Dock 的入口都在「更多」里，随时可以打开。")
+            }
+
+            Section {
+                Button("恢复默认（概览 · 插件 · 交互）", systemImage: "arrow.uturn.backward") { preferences.resetDock() }
+                    .disabled(slots == DockItem.defaultSlots)
+                    .accessibilityIdentifier("dock.reset")
+            } footer: { Text("设置只保存在这台设备上。") }
+        }
+        .symbolRenderingMode(.hierarchical)
+        .navigationTitle("自定义 Dock")
+        .navigationBarTitleDisplayMode(.inline)
+        .accessibilityIdentifier("dock.settings")
+    }
+
+    private func moduleNote(_ item: DockItem) -> String? {
+        guard let module = item.platformModule, !model.isModuleEnabled(module) else { return nil }
+        return "服务器已关闭此模块，暂不显示"
     }
 }

@@ -12,8 +12,16 @@ import TelePilotCore
 /// - 规则以服务器返回的原始对象为底改写已编辑的字段，App 不认识的字段（如插件玩法参数 `module_config`）原样保留；
 /// - 写操作只提交一次，不自动重试；失败或结果未知时保留草稿并提示核对。
 struct InteractionCenterView: View {
+    /// 作为 Dock 一级 Tab 根页面时为真：大标题（与概览、插件、更多一致）。
+    var isTabRoot = false
+    /// 从插件详情「交互规则 ›」进入：先选中该账号，并只列出启动这个插件的规则（可切换为全部）。
+    var initialAccountID: Int? = nil
+    var focusPluginKey: String? = nil
     @Environment(AppModel.self) private var model
     @State private var selectedAccountID: Int?
+    /// 插件矩阵里的插件（按 key），规则编辑页「插件配置 ›」跳转用。
+    @State private var features: [String: JSONValue] = [:]
+    @State private var showAllRules = false
     @State private var serverValue: JSONValue?
     @State private var baseline = InteractionDraft()
     @State private var draft = InteractionDraft()
@@ -32,7 +40,16 @@ struct InteractionCenterView: View {
     @State private var resultToken = 0
 
     private var dirty: Bool { serverValue != nil && draft != baseline }
-    private var accountID: Int? { selectedAccountID ?? model.accounts.first?.id }
+    private var accountID: Int? { selectedAccountID ?? initialAccountID ?? model.accounts.first?.id }
+    /// 只看某个插件的规则（来自插件详情跳转，且用户没切到“全部规则”）。
+    private var focusKey: String? { showAllRules ? nil : focusPluginKey }
+    private var visibleRuleIDs: [String] {
+        draft.rules.filter { rule in focusKey.map { rule.action == "module" && rule.moduleKey == $0 } ?? true }.map(\.id)
+    }
+    private var focusPluginName: String {
+        guard let key = focusPluginKey else { return "" }
+        return features[key]?["display_name"]?.stringValue ?? key
+    }
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -82,8 +99,9 @@ struct InteractionCenterView: View {
             }
         }
         .symbolRenderingMode(.hierarchical)
-        .navigationTitle("交互中心")
-        .navigationBarTitleDisplayMode(.inline)
+        // 导航名 = 页面标题：Dock 格与「更多」里都叫「交互」。
+        .navigationTitle("交互")
+        .navigationBarTitleDisplayMode(isTabRoot ? .large : .inline)
         .accessibilityIdentifier("interaction.screen")
         .toolbar {
             ToolbarItem(placement: .confirmationAction) {
@@ -250,11 +268,57 @@ struct InteractionCenterView: View {
 
     // MARK: 规则
 
+    private func ruleBinding(_ id: String) -> Binding<InteractionRuleDraft>? {
+        guard let rule = draft.rules.first(where: { $0.id == id }) else { return nil }
+        return Binding(
+            get: { draft.rules.first(where: { $0.id == id }) ?? rule },
+            set: { value in
+                if let index = draft.rules.firstIndex(where: { $0.id == id }) { draft.rules[index] = value }
+            })
+    }
+
     private var rulesSection: some View {
         Section {
-            ForEach($draft.rules) { $rule in
-                NavigationLink {
-                    InteractionRuleEditor(rule: $rule, entries: entries, peers: peers)
+            if focusPluginKey != nil {
+                Toggle(isOn: $showAllRules) {
+                    Label("显示全部规则", systemImage: "line.3.horizontal.decrease.circle")
+                }
+                .accessibilityIdentifier("interaction.showAllRules")
+                if focusKey != nil && visibleRuleIDs.isEmpty {
+                    Text("还没有启动「\(focusPluginName)」的规则。点下方「添加规则」新建一条，或打开“显示全部规则”查看其它规则。")
+                        .font(.footnote).foregroundStyle(.secondary)
+                        .accessibilityIdentifier("interaction.focusEmpty")
+                }
+            }
+            ForEach(visibleRuleIDs, id: \.self) { id in
+                if let binding = ruleBinding(id) { ruleRow(binding) }
+            }
+            if draft.rules.count < 20 {
+                Button("添加规则", systemImage: "plus") {
+                    var rule = InteractionRuleDraft.new(index: draft.rules.count)
+                    // 从插件详情进来时，新规则直接指向这个插件的第一个玩法入口。
+                    if let key = focusKey, let entry = entries.first(where: { $0.featureKey == key }) {
+                        rule.action = "module"
+                        rule.moduleKey = entry.featureKey
+                        rule.moduleAction = entry.entryKey
+                        if let scope = entry.sessionScope { rule.moduleSessionScope = scope }
+                        if let policy = entry.participantPolicy { rule.participantPolicy = policy }
+                    }
+                    draft.rules.append(rule)
+                }
+                .accessibilityIdentifier("interaction.addRule")
+            }
+        } header: {
+            Text(focusKey != nil ? "启动「\(focusPluginName)」的规则" : "互动规则与玩法入口")
+        } footer: {
+            Text("设置别人发什么关键词、在哪些群生效、启动哪个玩法；保存后交互 Bot 会自动监听并交给对应插件处理。左滑可停用或删除，至少保留一条规则。")
+        }
+    }
+
+    private func ruleRow(_ binding: Binding<InteractionRuleDraft>) -> some View {
+        let rule = binding.wrappedValue
+        return NavigationLink {
+                    InteractionRuleEditor(rule: binding, entries: entries, peers: peers, accountID: accountID, features: features)
                 } label: {
                     InteractionRuleRow(rule: rule, entries: entries)
                 }
@@ -266,20 +330,10 @@ struct InteractionCenterView: View {
                         }
                     }
                     Button(rule.enabled ? "停用" : "启用", systemImage: rule.enabled ? "pause.circle" : "checkmark.circle") {
-                        rule.enabled.toggle()
+                        binding.wrappedValue.enabled.toggle()
                     }
                     .tint(rule.enabled ? .orange : .green)
                 }
-            }
-            if draft.rules.count < 20 {
-                Button("添加规则", systemImage: "plus") {
-                    draft.rules.append(InteractionRuleDraft.new(index: draft.rules.count))
-                }
-                .accessibilityIdentifier("interaction.addRule")
-            }
-        } header: { Text("互动规则与玩法入口") } footer: {
-            Text("设置别人发什么关键词、在哪些群生效、启动哪个玩法；保存后交互 Bot 会自动监听并交给对应插件处理。左滑可停用或删除，至少保留一条规则。")
-        }
     }
 
     // MARK: 高级
@@ -330,6 +384,8 @@ struct InteractionCenterView: View {
     private func loadEntries() async {
         guard let value = try? await model.request(path: "/api/feature-matrix") else { return }
         entries = InteractionEntryOption.parse(value)
+        features = Dictionary((value["features"]?.arrayValue ?? []).compactMap { item in item["key"]?.stringValue.map { ($0, item) } },
+                              uniquingKeysWith: { first, _ in first })
     }
 
     private func apply(_ value: JSONValue) {
@@ -398,6 +454,8 @@ struct InteractionRuleEditor: View {
     @Binding var rule: InteractionRuleDraft
     let entries: [InteractionEntryOption]
     let peers: [InteractionPeer]
+    var accountID: Int? = nil
+    var features: [String: JSONValue] = [:]
 
     private var effectiveTrigger: String { rule.action == "notice" ? "payment" : rule.triggerMode }
     private var selectedEntry: InteractionEntryOption? {
@@ -526,6 +584,17 @@ struct InteractionRuleEditor: View {
             .accessibilityIdentifier("interaction.rule.entry")
             if let description = selectedEntry?.description, !description.isEmpty {
                 Text(description).font(.footnote).foregroundStyle(.secondary)
+            }
+            // 插件 ↔ 交互双向跳转：直接打开该插件在本账号的配置（玩法参数、开关都在那里）。
+            if let feature = features[rule.moduleKey] {
+                NavigationLink {
+                    ManagementPluginDetailView(feature: feature, accountID: accountID, initialSection: .configuration)
+                } label: {
+                    Label {
+                        LabeledContent("插件配置") { Text(feature["display_name"]?.stringValue ?? rule.moduleKey) }
+                    } icon: { Image(systemName: "slider.horizontal.3") }
+                }
+                .accessibilityIdentifier("interaction.rule.pluginConfig")
             }
             Picker("会话范围", selection: $rule.moduleSessionScope) {
                 Text("按群会话").tag("chat")

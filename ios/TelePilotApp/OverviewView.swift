@@ -2,6 +2,8 @@ import SwiftUI
 import TelePilotCore
 
 struct OverviewView: View {
+    /// 被移出 Dock 后从「更多」推入时为真：不再自带 NavigationStack，使用行内标题。
+    var embedded = false
     @Environment(AppModel.self) private var model
     @Environment(OverviewLayout.self) private var layout
     @Environment(WorkspacePreferences.self) private var preferences
@@ -13,7 +15,14 @@ struct OverviewView: View {
     @State private var searching = false
 
     var body: some View {
-        NavigationStack {
+        if embedded {
+            page.navigationBarTitleDisplayMode(.inline)
+        } else {
+            NavigationStack { page }
+        }
+    }
+
+    private var page: some View {
             List {
                 if searching {
                     GlobalSearchResults(query: searchText)
@@ -47,7 +56,6 @@ struct OverviewView: View {
             .refreshable { await refreshAll() }
             .task { if signals.loadedAt == nil { await signals.load(model: model) } }
             .accessibilityIdentifier("overview.screen")
-        }
     }
 
     @ViewBuilder private var overviewContent: some View {

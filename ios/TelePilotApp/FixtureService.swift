@@ -621,7 +621,16 @@ actor FixtureService: AppServing {
             }
             return fixtureSettings
         }
-        if clean == "/api/system/capabilities" { return ["modules": []] }
+        if clean == "/api/system/capabilities" {
+            // 默认像旧服务器一样没有模块信息（所有入口照常显示）；`--ui-test-modules-off=a,b` 模拟服务器关闭这些模块。
+            guard let flag = ProcessInfo.processInfo.arguments.first(where: { $0.hasPrefix("--ui-test-modules-off=") }) else { return ["modules": []] }
+            let off = Set(flag.dropFirst("--ui-test-modules-off=".count).split(separator: ",").map(String.init))
+            let keys = ["ai", "interaction_bot", "webhooks", "ledger", "dispatch_debug"]
+            return ["modules": .array(keys.map { key -> JSONValue in
+                ["key": .string(key), "label": .string(key), "desired_enabled": .bool(!off.contains(key)), "forced_off": .bool(off.contains(key)),
+                 "generation": 1, "runtime_state": .string(off.contains(key) ? "stopped" : "ready")]
+            })]
+        }
         if clean.contains("/import-config/preview") { return ["preview_signature": "fixture-signature", "warnings": [], "imported": 0] }
         if method == "GET" {
             if clean.contains("/config") || clean.contains("/health") || clean.contains("/network") || clean.contains("/status") {

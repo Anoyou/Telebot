@@ -72,10 +72,127 @@ final class WorkspaceUITests: XCTestCase {
         // 一次等到 App 起来，而不是 45 秒超时后反复重跑（每次重跑另有 30–50 秒 xcodebuild 开销）。
         let timeout = ProcessInfo.processInfo.environment["TELEPILOT_WARMUP_TIMEOUT"].flatMap(TimeInterval.init) ?? 45
         XCTAssertTrue(app.tabBars.buttons["概览"].waitForExistence(timeout: timeout))
+        // 0.18.0 默认 Dock：概览 · 插件 · 交互 · 更多 + Agent；AI 在「更多」里。
         XCTAssertTrue(app.tabBars.buttons["插件"].exists)
-        XCTAssertTrue(app.tabBars.buttons["AI"].exists)
+        XCTAssertTrue(app.tabBars.buttons["交互"].exists)
+        XCTAssertFalse(app.tabBars.buttons["AI"].exists)
         XCTAssertTrue(app.tabBars.buttons["更多"].exists)
         XCTAssertTrue(app.tabBars.buttons["Agent"].exists)
+    }
+
+    /// 0.18.0 自定义 Dock：默认「概览 · 插件 · 交互 · 更多 + Agent」，AI 在「更多 › 管理」；在 App 设置里把「交互」换成「AI」、
+    /// 上移排序，放满 3 个后不能再加；没放进 Dock 的「交互」回到「更多 › 常用」；重启后保留（本机持久化）。
+    func testDockCustomizationSwapsEntriesAndPersists() {
+        let app = launch()
+        XCTAssertTrue(app.tabBars.buttons["交互"].waitForExistence(timeout: 45))
+        XCTAssertFalse(app.tabBars.buttons["AI"].exists)
+        app.tabBars.buttons["更多"].tap()
+        XCTAssertTrue(app.buttons["more.ai"].waitForExistence(timeout: 10))
+        XCTAssertFalse(app.buttons["more.interaction"].exists, "已在 Dock 的入口不在「更多」里重复")
+        XCTAssertTrue(app.buttons["more.accounts"].exists)
+        let settings = app.buttons["more.settings"]
+        XCTAssertTrue(reveal(settings, in: app))
+        settings.tap()
+        let dockEntry = app.buttons["settings.dock"]
+        XCTAssertTrue(reveal(dockEntry, in: app))
+        dockEntry.tap()
+        let preview = app.staticTexts["dock.preview"]
+        XCTAssertTrue(preview.waitForExistence(timeout: 10))
+        XCTAssertTrue(preview.label.hasPrefix("概览 · 插件 · 交互 · 更多"), preview.label)
+        // 已放满 3 个：添加按钮不可用。
+        let addAI = app.buttons["dock.add.ai"]
+        XCTAssertTrue(addAI.exists)
+        XCTAssertFalse(addAI.isEnabled)
+        XCTAssertTrue(app.buttons["dock.add.operations"].exists, "指令与任务可以放进 Dock")
+        app.buttons["dock.remove.interaction"].tap()
+        XCTAssertTrue(addAI.isEnabled)
+        addAI.tap()
+        XCTAssertTrue(preview.label.hasPrefix("概览 · 插件 · AI · 更多"), preview.label)
+        app.buttons["dock.moveUp.ai"].tap()
+        XCTAssertTrue(preview.label.hasPrefix("概览 · AI · 插件 · 更多"), preview.label)
+        // 这里不查 Tab 栏：前面为找设置行向上滑动过，`tabBarMinimizeBehavior(.onScrollDown)` 会把 Tab 栏缩成只剩当前格。
+        // Tab 栏的实际内容在下面重启后检查。
+        let attachment = XCTAttachment(screenshot: app.screenshot())
+        attachment.name = "自定义 Dock"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        let interaction = app.buttons["more.interaction"]
+        XCTAssertTrue(interaction.waitForExistence(timeout: 10), "移出 Dock 的交互回到「更多 › 常用」")
+        XCTAssertFalse(app.buttons["more.ai"].exists)
+        interaction.tap()
+        XCTAssertTrue(app.navigationBars["交互"].waitForExistence(timeout: 10))
+        app.terminate()
+
+        let again = launch(["--ui-test-dock-keep"])
+        XCTAssertTrue(again.tabBars.buttons["AI"].waitForExistence(timeout: 45))
+        XCTAssertFalse(again.tabBars.buttons["交互"].exists)
+        let order = ["概览", "AI", "插件", "更多"].map { again.tabBars.buttons[$0].frame.midX }
+        XCTAssertEqual(order, order.sorted(), "Dock 顺序应保留：\(order)")
+    }
+
+    /// 服务器关闭交互、台账、Webhook、命中调试模块：Dock 的「交互」格隐藏，由下一个入口（AI）补位；
+    /// 「更多」里台账、Webhook 隐藏，「日志与诊断」里命中调试相关入口隐藏；插件详情不再显示「交互规则」。
+    func testDisabledModulesHideEntriesAndRefillDock() {
+        let app = launch(["--ui-test-modules-off=interaction_bot,ledger,webhooks,dispatch_debug"])
+        XCTAssertTrue(app.tabBars.buttons["AI"].waitForExistence(timeout: 45))
+        XCTAssertFalse(app.tabBars.buttons["交互"].exists)
+        // 先看插件详情（后面「更多」里要上滑，Tab 栏会缩小成只剩当前格）。
+        app.tabBars.buttons["插件"].tap()
+        let card = app.buttons["plugin.card.content_assistant"]
+        XCTAssertTrue(card.waitForExistence(timeout: 10))
+        card.tap()
+        XCTAssertTrue(reveal(app.buttons["plugin.detail.technical"], in: app))
+        XCTAssertFalse(app.buttons["plugin.detail.interactionRules"].exists)
+        tapTab("更多", in: app)
+        XCTAssertTrue(app.buttons["more.accounts"].waitForExistence(timeout: 10))
+        XCTAssertFalse(app.buttons["more.ai"].exists, "AI 已补进 Dock")
+        XCTAssertFalse(app.buttons["more.interaction"].exists)
+        // 关掉台账、Webhook、AI（已进 Dock）后「更多」很短：管理组与工具组同屏。
+        XCTAssertTrue(reveal(app.buttons["服务器设置"], in: app))
+        XCTAssertFalse(app.buttons["Webhook"].exists)
+        XCTAssertFalse(app.buttons["资金台账"].exists)
+        let logs = app.buttons["日志与诊断"]
+        for _ in 0..<4 where !(logs.exists && logs.isHittable) { app.swipeDown() }
+        XCTAssertTrue(logs.waitForExistence(timeout: 3))
+        logs.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["logs.screen"].firstMatch.waitForExistence(timeout: 10))
+        let console = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "系统控制台")).firstMatch
+        XCTAssertTrue(reveal(console, in: app), "高级诊断分组仍在")
+        XCTAssertFalse(app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "模拟消息路由")).firstMatch.exists)
+    }
+
+    /// 插件 ↔ 交互双向跳转：交互类插件详情有「交互规则 ›」，只列出启动它的规则；规则编辑页「插件配置 ›」打开该插件在本账号的配置。
+    func testPluginAndInteractionCrossLinks() {
+        let app = launch()
+        let plugins = app.tabBars.buttons["插件"]
+        XCTAssertTrue(plugins.waitForExistence(timeout: 45))
+        plugins.tap()
+        let card = app.buttons["plugin.card.content_assistant"]
+        XCTAssertTrue(card.waitForExistence(timeout: 10))
+        card.tap()
+        let rulesLink = app.buttons["plugin.detail.interactionRules"]
+        XCTAssertTrue(reveal(rulesLink, in: app))
+        rulesLink.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["interaction.status.runtime"].firstMatch.waitForExistence(timeout: 10))
+        // 规则区在运行状态与总闸下方，列表里屏幕外的行不存在：先滑到规则区。
+        let ask = app.buttons["interaction.rule.rule-ask"]
+        XCTAssertTrue(reveal(ask, in: app))
+        XCTAssertFalse(app.buttons["interaction.rule.rule-notice"].exists, "只列出启动本插件的规则")
+        let showAll = app.switches["interaction.showAllRules"]
+        XCTAssertTrue(showAll.exists)
+        showAll.coordinate(withNormalizedOffset: CGVector(dx: 0.92, dy: 0.5)).tap()
+        XCTAssertTrue(reveal(app.buttons["interaction.rule.rule-notice"], in: app))
+        showAll.coordinate(withNormalizedOffset: CGVector(dx: 0.92, dy: 0.5)).tap()
+        XCTAssertTrue(reveal(ask, in: app))
+        ask.tap()
+        let config = app.buttons["interaction.rule.pluginConfig"]
+        XCTAssertTrue(reveal(config, in: app))
+        XCTAssertTrue(config.label.contains("内容整理助手"), config.label)
+        config.tap()
+        XCTAssertTrue(app.buttons["plugin.config.edit"].waitForExistence(timeout: 10), "打开的是插件的账号配置分区")
+        XCTAssertTrue(app.buttons["账号配置"].isSelected)
     }
 
     /// 第十一轮：冷启动有会话时先显示上次的概览快照并标“更新于 …”；断网启动（连核对会话都失败）也留在主界面，
@@ -127,7 +244,7 @@ final class WorkspaceUITests: XCTestCase {
     /// 所以再比截图：分段控件最外侧几个点宽的竖条在“该端分段未选中”的两个分页之间应当逐像素一致，
     /// 并与插件中心（ScrollView，不会被裁切）的同一竖条一致。
     func testSegmentedHeadersShareFrameAndAreNotClipped() {
-        let app = launch()
+        let app = launch(["--ui-test-dock=overview,plugins,ai"])
         let plugins = app.tabBars.buttons["插件"]
         XCTAssertTrue(plugins.waitForExistence(timeout: 45))
         plugins.tap()
@@ -196,7 +313,7 @@ final class WorkspaceUITests: XCTestCase {
 
     /// 页面级搜索统一为导航栏左上角的放大镜：点按展开系统搜索栏并可直接输入，作用于当前分页；取消即收起并清空。
     func testPageSearchUsesLeadingToolbarButton() {
-        let app = launch()
+        let app = launch(["--ui-test-dock=overview,plugins,ai"])
         let plugins = app.tabBars.buttons["插件"]
         XCTAssertTrue(plugins.waitForExistence(timeout: 45))
         plugins.tap()
@@ -516,6 +633,14 @@ final class WorkspaceUITests: XCTestCase {
         expectation(for: normal, evaluatedWith: summary)
         waitForExpectations(timeout: 10)
         XCTAssertEqual(toggle.value as? String, "未开启 · 账号与 Bot 正常运行")
+    }
+
+    /// 上滑后 `tabBarMinimizeBehavior(.onScrollDown)` 会把 Tab 栏缩成只剩当前格：先下滑让它展开再点。
+    private func tapTab(_ title: String, in app: XCUIApplication) {
+        let tab = app.tabBars.buttons[title]
+        for _ in 0..<5 where !(tab.exists && tab.isHittable) { app.swipeDown() }
+        XCTAssertTrue(tab.waitForExistence(timeout: 5), "Tab 栏里找不到「\(title)」")
+        tab.tap()
     }
 
     private func reveal(_ element: XCUIElement, in app: XCUIApplication, maxSwipes: Int = 8) -> Bool {

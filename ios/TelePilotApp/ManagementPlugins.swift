@@ -774,6 +774,8 @@ struct ManagementPluginDetailView: View {
     private var key: String { feature["key"]?.stringValue ?? "" }
     private var segment: String { ManagementText.pathSegment(key) }
     private var isBuiltin: Bool { feature["is_builtin"]?.boolValue == true }
+    /// 声明了交互入口（经交互 Bot 启动的玩法）的插件。
+    private var isInteractionPlugin: Bool { !(feature["interaction_entries"]?.arrayValue ?? []).isEmpty }
 
     init(feature: JSONValue, accountID: Int? = nil, accountState: JSONValue? = nil, initialSection: PluginDetailSection = .overview) {
         self.feature = feature
@@ -832,7 +834,11 @@ struct ManagementPluginDetailView: View {
         }
         .navigationTitle(ManagementText.title(feature)).navigationBarTitleDisplayMode(.inline)
         .toolbar { Button(preferences.isFavoritePlugin(key) ? "取消收藏" : "收藏", systemImage: preferences.isFavoritePlugin(key) ? "star.fill" : "star") { preferences.togglePlugin(key) } }
-        .task { await loadInstallRecord() }
+        .task {
+            await loadInstallRecord()
+            // 从交互规则「插件配置」跳来时没有带账号状态：补读一次，账号开关与运行状态才真实。
+            if accountID != nil && currentAccountState == nil { await reloadAccountState() }
+        }
         .refreshable { await loadInstallRecord(); if accountID != nil { await reloadAccountState() } }
     }
 
@@ -906,6 +912,19 @@ struct ManagementPluginDetailView: View {
         PluginCardSections(slot: "plugin.overview", pluginKey: key, accountID: accountID)
         // 插件自带页面与菜单项（ui.pages / ui.actions，Plugin API 1.4）；没有声明时不显示。
         PluginPageEntriesSection(menu: "plugin.detail", pluginKey: key, accountID: accountID)
+        // 交互类插件（声明了交互入口）：直达交互中心里启动它的规则。交互模块关闭时不显示（与 Web 隐藏入口一致）。
+        if isInteractionPlugin && model.isModuleEnabled("interaction_bot") {
+            Section {
+                NavigationLink {
+                    InteractionCenterView(initialAccountID: accountID, focusPluginKey: key)
+                } label: {
+                    Label("交互规则", systemImage: "bubble.left.and.text.bubble.right")
+                }
+                .accessibilityIdentifier("plugin.detail.interactionRules")
+            } footer: {
+                Text("群里发什么关键词、转多少游戏币会启动这个插件，在「交互」的规则里设置。")
+            }
+        }
         Section("插件信息") {
             if let usage = feature["usage"]?.stringValue, !usage.isEmpty { Text(usage).font(.subheadline) }
             PluginInfoRow(title: "版本", value: feature["version"]?.stringValue.map { "v" + $0 } ?? "未标注", symbol: "number")

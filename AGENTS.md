@@ -33,6 +33,11 @@
 - `CURRENT_PROJECT_VERSION`（`CFBundleVersion`，build 号）由 CI 生成：工作流「iOS 未签名 IPA」以本工作流的 `github.run_number` 通过 `TELEPILOT_BUILD_NUMBER` 注入 `ios/scripts/build-unsigned.sh`，保证每次打包严格递增；工程里的值只是本地构建默认值，不要手工递增。IPA 工件名为 `TelePilot-<版本>-<build>-<短提交>-unsigned`。
 - 改版本时 `ios/project.yml` 与 `ios/TelePilot.xcodeproj/project.pbxproj` 必须同步修改；`python3 ios/scripts/check-ios-version.py` 校验两处一致、格式合规，且 `ios/CHANGELOG.md` 最新版本段落等于当前 `MARKETING_VERSION`，「iOS」与「iOS 未签名 IPA」工作流都会运行它。
 
+## Web 与 iOS 入口同步
+
+- Web 新增、移动、改名或删除入口（侧栏项、PWA 底栏、设置分页、独立页面路由）时，必须在同一个 PR 里更新 `ios/DESIGN.md`「Web ↔ iOS 页面对照表」，并在 PR 说明里写明 iOS 的处理方式：同步做（本 PR 或指明后续任务）、或不做及理由。只改 Web 不写 iOS 处理方式的入口改动不合并。
+- iOS 新增或挪动入口（Dock、「更多」、App 设置）同样更新这张表；Dock 结构与模块开关联动规则见 `ios/DESIGN.md`「底部 Dock」。
+
 ## 工作区安全
 
 - 可能存在用户或其他 agent 的未提交改动。不要 revert、checkout 或 reset 你没有明确负责的改动。

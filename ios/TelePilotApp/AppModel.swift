@@ -35,6 +35,9 @@ final class AppModel {
     let catalog = APIContractCatalog.bundled
     private(set) var pendingActions: [JSONValue] = []
     private(set) var plugins: [JSONValue] = []
+    /// 服务器上已关闭的平台模块（`/api/system/capabilities` 里 `desired_enabled == false` 的 `key`）。
+    /// 旧服务器没有这个接口或读取失败时为空：所有入口照常显示（与 Web `capabilityEnabledMap` 缺省为开一致）。
+    private(set) var disabledModules: Set<String> = []
     /// 服务器最近一次更新检查（自动或手动，`GET /api/system/update-status`），用于“更多”角标与关于页提示。
     private(set) var serverUpdateStatus: JSONValue?
     private(set) var workspaceError: String?
@@ -535,8 +538,11 @@ final class AppModel {
         async let actionsResult = capture { try await self.request(path: "/api/system-agent/actions?status=pending&limit=200") }
         async let pluginsResult = capture { try await self.request(path: "/api/feature-matrix") }
         async let updateResult = capture { try await self.request(path: "/api/system/update-status") }
-        let (actions, matrix, update) = await (actionsResult, pluginsResult, updateResult)
+        async let modulesResult = capture { try await self.request(path: "/api/system/capabilities") }
+        let (actions, matrix, update, modules) = await (actionsResult, pluginsResult, updateResult, modulesResult)
         guard token == generation else { return }
+        // 读取失败（含旧服务器 404）时保留上一次结果，不把入口误隐藏。
+        if case .success(let value) = modules { disabledModules = Self.disabledModules(value) }
         switch actions {
         case .success(let values):
             pendingActions = values.arrayValue ?? []
@@ -548,6 +554,16 @@ final class AppModel {
         if case .success(let value) = matrix {
             plugins = value.arrayValue ?? value["items"]?.arrayValue ?? value["plugins"]?.arrayValue ?? value["features"]?.arrayValue ?? []
         }
+    }
+
+    /// 平台模块是否开启（交互、台账、Webhook、命中调试、AI）；没有信息时视为开启。
+    func isModuleEnabled(_ key: String) -> Bool { !disabledModules.contains(key) }
+
+    nonisolated static func disabledModules(_ value: JSONValue) -> Set<String> {
+        Set((value["modules"]?.arrayValue ?? []).compactMap { module -> String? in
+            guard let key = module["key"]?.stringValue, module["desired_enabled"]?.boolValue == false else { return nil }
+            return key
+        })
     }
 
     /// 插件页读取到新的插件列表后同步过来，让 Tab 角标与概览使用同一份真实数据。
@@ -734,6 +750,7 @@ final class AppModel {
     private func clearData() {
         pendingActions = []
         plugins = []
+        disabledModules = []
         serverUpdateStatus = nil
         // 本机缓存的助手会话与消息、概览快照随登录状态一起清除。
         AssistantHistoryCache.removeAll()
