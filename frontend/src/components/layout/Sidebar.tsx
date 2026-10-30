@@ -54,7 +54,8 @@ export interface NavItem {
   badgeKey?: "pending-actions";
 }
 
-// 顶层导航条目。默认落地页是插件中心；概览降权到 /overview。
+// 顶层导航条目。默认落地页是插件页；概览降权到 /overview。
+// 导航名 = 页面标题（第 20 轮统一命名，见 ios/DESIGN.md「Web ↔ iOS 页面对照表」）。
 export const NAV: NavItem[] = [
   { to: "/plugins", label: "插件", icon: Boxes },
   { to: "/ai", label: "AI", icon: Sparkles },
@@ -63,10 +64,10 @@ export const NAV: NavItem[] = [
   { to: "/operations", label: "指令与任务", icon: ListTodo },
   { to: "/overview", label: "概览", icon: Home },
   { to: "/ledger", label: "资金台账", icon: WalletCards },
-  { to: "/webhooks", label: "入站 Webhook", icon: Webhook },
+  { to: "/webhooks", label: "Webhook", icon: Webhook },
   { to: "/dispatch-debug", label: "命中调试", icon: Bug },
   { to: "/logs", label: "日志", icon: ScrollText },
-  { to: "/settings", label: "系统", icon: Cog },
+  { to: "/settings", label: "服务器设置", icon: Cog },
 ];
 
 export function navForCapabilities(enabled: CapabilityEnabledMap): NavItem[] {

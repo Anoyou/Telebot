@@ -146,7 +146,7 @@ function CapabilityGate({
           <div>
             <h1 className="text-lg font-semibold">模块已暂停</h1>
             <p className="mt-2 text-sm leading-6 text-muted-foreground">
-              {label} 平台能力当前已关闭。配置、Token 与历史数据均保留；重新启用后即可继续使用。
+              「{label}」模块当前已关闭。配置、Token 与历史数据均保留；重新启用后即可继续使用。
               页面地址保持不变，便于书签与深链接。
             </p>
           </div>
@@ -154,7 +154,7 @@ function CapabilityGate({
             to="/settings?tab=platform"
             className="rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground"
           >
-            前往平台能力设置
+            去服务器设置开启
           </Link>
         </div>
       </PageShell>

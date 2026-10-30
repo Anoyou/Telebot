@@ -25,6 +25,19 @@
 
 ## [Unreleased]
 
+## [0.113.0-beta.3] - 2026-10-30 · patch（补丁预发布） · Web 信息架构第一批：统一命名、值守全局提示、绑定管理 Bot 跳转修正、日志 → 命中调试
+
+### Web 信息架构第一批：统一命名、值守全局提示、修正「绑定管理 Bot」跳转、日志 → 命中调试（不改变习惯路径）
+
+- **统一命名（导航名 = 页面标题）**：侧栏「系统」→「服务器设置」、「入站 Webhook」→「Webhook」；页面标题「插件中心 / 交互中心 / AI 中心 / 待确认收件箱」→「插件 / 交互 / AI / 待确认」；「系统助手」→「Agent」（页面标题、悬浮小助手、日志说明、定时任务「Agent 巡检」）；紧急停止全站只叫「紧急停止」（顶栏按钮「紧急停止 / 解除紧急停止」、红色提示条「紧急停止已开启 · 解除」、服务器设置卡片、账号状态「已紧急停止」，不再出现紧急停用 / 全局总闸 / Kill Switch）；运行树顶部「总闸 / 预设」→「紧急停止 / 运行模式」；运行模式按钮「进入值守 / 恢复生产」（原「进入值守模式 / 恢复值守前快照」，行为不变）；手机顶栏与登录页副标题统一「Telegram 控制台」；模块暂停页按钮「去服务器设置开启」。所有网址不变，Web 默认仍进插件页。
+- **值守全局提示**：值守中每个页面顶部显示黄色提示条（与紧急停止红色提示条同位置），带「查看运行模式」与「恢复生产」（确认框后按进入值守前的快照还原）；读 `GET /api/platform/profile`，旧服务器没有该接口时不显示。紧急停止提示条的「解除」也改为正式确认框（原浏览器 `confirm()`）。
+- **修正**：服务器设置「猜你想要 › 绑定管理 Bot」在多账号时选完账号会跳到交互页，现在和单账号一样进入该账号的「管理 Bot」分页（对话框文案本来就是这么写的）。
+- **日志 → 命中调试**：日志页顶部新增「命中调试」按钮；消息详情新增「用命中调试复现」，把账号、会话、发送者、来源和正文带过去（`/dispatch-debug?account_id=&chat_id=&chat_type=&sender_id=&via=&text=`，命中调试页按参数预填，旧链接不带参数照旧）；交互页也加「命中调试」入口。命中调试模块关闭时这些入口隐藏。
+- **过时文案**：插件页说明不再写「沉淀指令、消息和 AI 模板」，新手指引第 3 步不再提「指令模板在插件页」（自定义指令在「指令与任务」）；概览「插件」卡片改为「启用与配置」。
+- **更新日志分工**：主仓库 CHANGELOG 只写主仓库改动，历史段落里属于插件库的插件版本与改动说明已移到插件库 `telebot-plugins` 的 CHANGELOG，这里留一句指向。
+- iOS：本批不改 App（紧急停止、运行树、服务器设置、交互、Agent、Webhook 在 iOS 已是统一名字）；`ios/DESIGN.md` 对照表更新并新增「统一命名」表，iOS 尚缺的值守全局提示、日志消息「带参数复现」、「日志与诊断」改名记为后续 iOS 任务。
+- 测试：Playwright `web-ia-r20.spec.ts`（导航名与标题、值守提示条与恢复生产、旧服务器不显示、紧急停止命名与解除确认、多账号绑定管理 Bot、日志 → 命中调试带参数、模块关闭时隐藏入口）；单元测试 `navigation.dispatchDebug.test.ts`。
+
 ### iOS 0.20.0：原生命中调试、服务器参数中文表单、日志补系统控制台与 Agent 运行
 
 - **iOS 0.20.0**：补齐与 Web 对齐的三处缩水页面（只用现有接口，服务器行为不变）。①原生「命中调试」替换日志里的通用「模拟消息路由」表单：账号 / 会话白名单 / 最近消息一键填写，`POST /api/dispatch/simulate` 结果按直通 → 命令 → 关键词 → 事件订阅逐项显示命中、说明与中文原因码，可展开命中项 / 候选项 / 订阅决策（`DispatchDebugView.swift`；可复用导航目标 `DispatchDebugView(accountID:chatID:chatType:senderID:text:via:)` 与入口行 `DispatchDebugEntryLink`）。②「服务器参数」改为中文表单（指令前缀、前缀要求、AI 上下文、回声防误触、时区、运行日志与 Trace / Event Bus / Inline / 访客 / native_raw 设置与保留期限），`PATCH /api/system/settings` 只提交改动键、校验与服务器一致；转账通知判定开关只读；未知键仍可原始编辑（`ServerSettingsView.swift`）。③日志补「系统控制台」（`POST /api/logs/system-console`）与「Agent 运行」（`GET /api/system-agent/runs`、`/runs/{id}/events`）两类（`LogsConsoleAgentView.swift`）。插件页「运行」视图底部的命中调试链接也改用原生页（`DispatchDebugEntryLink(identifier: "runtimeTree.dispatchDebug")`，仍受 `dispatch_debug` 模块开关控制）。服务器参数页的保存结果 / 未保存提示固定在页面底部（`safeAreaInset`，随键盘上移），无需滚动即可看到。UI 测试 `DiagnosticsUITests` 4 条。
@@ -93,7 +106,7 @@
 ### 插件平台：P4b 收尾——算数题 / 找骰子 / 猜数字自带入口声明
 
 - 交互入口新增 `legacy_entry_keys`（Plugin API 1.6，能力 `interaction.legacy_entry_keys`）：插件把早期用过、存量规则里可能还写着的旧入口 key 写在正式入口下面，每项（`key` + 可选 `session_scope` / `participant_policy` / `prize`）与兜底入口表的一行等价；旧 key 不算正式入口（不参与单入口推断、不返回入口声明）。任一入口写了它就和 `entry_policy` 一样不再查 `app/plugin_compat.py` 的兜底入口表。
-- 插件库 `math10` 1.0.15（`start_math10`）、`dice_grid_hunt` 1.1.39（`answer_dice_grid_hunt`）、`guess_number` 1.0.22（`start_game`）声明了自己的旧入口 key；兜底表只为这些插件更早、没有声明的版本保留（计划 Plugin API 2.0 移除）。
+- 兜底入口表只为没有声明 `legacy_entry_keys` 的旧版插件保留（计划 Plugin API 2.0 移除）；配套插件版本见插件库 `telebot-plugins` 的 CHANGELOG。
 - 群内行为零变化：新增 golden 对比测试 `app/tests/test_plugin_entries_r17.py`，用改动前的宿主（0.112.0-beta.2）装旧插件算出的全部入口推断与 1190 条规则归一化结果作基准，逐字段证明“旧插件 + 新宿主”“新插件 + 新宿主”“新插件 + 旧宿主”三种组合与之完全相同，并证明新插件即使清空兜底表结论也不变。旧动作 `action="math10"` 规则不转换。
 - 兼容：旧宿主（0.110.0-beta.2 / 0.112.0-beta.2）忽略 `legacy_entry_keys`；这三个插件没有写 `entry_policy`（0.112.0-beta.2 见到它会整表跳过兜底），所以照旧走兜底表，结论相同；插件不提高 `min_telepilot_version`。
 - 文档：`PLUGIN-API-REFERENCE.md` 新增「旧入口 key 声明（legacy_entry_keys）」，更正“先把旧 key 补成正式入口再写 entry_policy”的建议（会让单入口推断失效）；门槛表、能力表、Plugin API 版本说明同步；`PLUGIN-CHEATSHEET.md` 补一条。
@@ -107,7 +120,7 @@
 - **交互规则编辑器去写死**：新规则不再默认选中 game24，不再提供“发算数题”选项（旧的算数题规则仍可原样编辑、照常运行），启动词提示与示例改为来自插件声明；插件可用 `ui.rule_editor` 声明参数区的字段、默认值与提示，并可在新卡片位置 `interaction.rule_editor` 放卡片。选“启动玩法”但没选插件时保存会提示先选择。
 - **算数题旧规则迁移脚本**（可回滚，默认只预演）：`python -m app.scripts.migrate_math10_rules [--apply] [--rollback]` 把 `action=math10` 规则改写成通用玩法规则；启动与发奖链路 golden 测试逐字段等价，因会话续玩等通用路径会开始生效，不自动运行，由管理员真群验证后执行。
 - 安装校验新增 `provides` 未知扩展点与 `ui.rule_editor` 入口 / 控件的 lint 警告；Plugin API 1.4 → 1.5。
-- **插件库**：`game24` 1.1.18、`pt_promote` 1.0.30、`blackjack` 1.0.33 声明 `entry_policy`（与原有顶层字段一致，新旧服务器结论相同），`game24` 声明 `ui.rule_editor` 启动词提示，`codex_image` 1.2.1 声明 `provides: ["ai.image_backend"]`；均不抬高 `min_telepilot_version`。游戏币结算与派奖逻辑无任何变化。
+- 游戏币结算与派奖逻辑无任何变化；配套插件版本见插件库 `telebot-plugins` 的 CHANGELOG。
 - 宿主写死统计（`math10/game24/pt_promote/兜底表/codex_image` 关键字，不含测试与兼容登记处）：前端 53 → 35 行（规则编辑器 24 → 10），后端 25 → 24 行，运行时按插件名分支 3 → 2。
 - 文档：PLUGIN-API-REFERENCE 新增「入口策略声明」「扩展点」「规则编辑器参数区」三节，版本门槛表、能力注册表、Plugin API 版本说明同步。
 
@@ -135,7 +148,7 @@
 
 - 插件平台化 P4c · 转账通知解析下沉（B1）：新扩展点 `payment_sources`。插件在 `plugin.json` 声明 `payment_sources`，模块导出 `parse_payment_notice(text, meta)`（可 async，1 秒超时）返回 `{payer_name, receiver_name, amount, payer_user_id?, receiver_user_id?, unit?}` 或 `None`。宿主只在交互 Bot「可信转账 Bot」白名单通过后调用；插件只返回解析结果，规则匹配、结算、幂等与补偿仍走宿主受控链路；插件超时、抛异常、返回值不合法、未安装或未启用一律回退宿主旧解析（fail-open）。能力 `payment.sources` 进 `ctx.capabilities`；Plugin API 仍为 1.3。
 - 双跑对照：默认仍以宿主旧解析器为准，已安装的转账通知插件并行解析，结果不一致时记 warning 日志（`payment source mismatch`）、Trace span（`payment_source`，`reason_code=payment_source_mismatch`，带逐字段差异）和插件「运行统计」（钩子「转账通知解析」，事件「与宿主一致 / 与宿主不一致 / 插件失败（已回退宿主）」，不一致行标黄）。系统设置 → 运行日志新增开关「转账通知以插件结果为准」（`log_retention.payment_source_plugin_authoritative`，默认关闭，30 秒内生效），建议对照至少一个 beta 周期全部一致后再打开。
-- 官方插件 `payment-source-cn-transfer`（插件库）：宿主旧正则的逐字迁移；新增 419 条 golden 样本（历史/现有测试文案 + 默认转账/扣减模板批量渲染 + 手工边界），宿主与插件结果 100% 一致。旧服务器不认识 `payment_sources`，装上该插件不会被调用；没声明 `payment_sources` 的旧插件不受影响。
+- 宿主新增 419 条转账通知 golden 样本（历史/现有测试文案 + 默认转账/扣减模板批量渲染 + 手工边界），宿主旧解析与官方插件 `payment-source-cn-transfer` 结果 100% 一致（插件本身见插件库 CHANGELOG）。旧服务器不认识 `payment_sources`，装上该插件不会被调用；没声明 `payment_sources` 的旧插件不受影响。
 
 ### 文档
 
@@ -152,7 +165,7 @@
 - **规则试运行通用协议**：插件导出 `dry_run_rule(config, sample)`（3 秒时限，返回命中、输出与判断过程），REST 与助手共用；旧插件的 `_dry_run_match` 参数形状与日志统一登记在兼容文件里，宿主代码不再按插件分支。新增能力 `ui.rules_page`、`rules.dry_run`（since 0.110.0-beta.2，Plugin API 仍为 1.3）。
 - **旧页对照**：五个专属页移到 `/accounts/:aid/features/:key/legacy`，带“旧版页面”横幅；新页面右上角有“对照旧版页面”入口，保留一个版本后删除。没有声明规则 schema 的旧版 `auto_reply` 自动打开旧页，功能不变。去掉 `App.tsx` 里的专属路由与兜底名单。
 - **iOS 0.14.1**：“自动化规则”使用插件声明的规则表单——列表显示摘要与启用状态、字段按 `x-ui-visible-if` 显隐、选项显示中文名、列表字段每行一项、规则详情有专门的试运行页；规则字段全部在规则里编辑的插件（如自动复读）账号配置页不再重复显示这些字段。
-- **插件库**：`auto_reply` 1.1.0、`autorepeat` 1.1.0、`chatgpt_image` 0.2.0、`codex_image` 1.2.0、`game24` 1.1.17 改用上述声明，不抬高 `min_telepilot_version`（旧服务器照旧可用）。
+- 未改用上述声明的旧版插件照旧可用；配套插件版本见插件库 `telebot-plugins` 的 CHANGELOG。
 - 文档：PLUGIN-API-REFERENCE「规则配置页」「规则试运行协议」「表单契约 2」、速查表同步更新。
 
 ## [0.110.0-beta.1] - 2026-10-29 · minor（次版本预发布） · 插件平台化 P3：声明式 UI（控件契约、ui.cards 原生卡片、配置钩子、x-secret-list 密钥列表、iOS 4 个新控件与未知控件只读）
@@ -301,7 +314,7 @@
 - 插件显式 `answer_guest_query`（`text` / `rich_message` / 完整 `result`）里 `reply_markup` 的 `callback_data` 按钮现在原样保留，HTML 被拒退回纯文本时也保留；此前所有访客回复都会剥掉回调按钮，只剩 URL / 复制 / 切换 Inline 按钮。平台自己合成的访客回复（命令、AI 助手、规则动作合并）仍按原规则只保留 URL / 复制 / 切换 Inline 按钮。
 - 实时 `ctx.messages.apply([...answer_guest_query...])` 的批次结果带 `inline_message_id`（最后一条）与 `inline_message_ids`（按动作顺序），live facade 的 `answer_guest_query` 返回动作也带 `inline_message_id`，插件可随后用 `edit_message(inline_message_id=..., reply_markup=...)` 修改文字与按钮（文本或 `rich_message`）。
 - 访客回复（inline 消息）上的按钮点击：Telegram 只给 `inline_message_id`、`chat_instance`、`data` 与点击者，没有 chat / message。交互 Bot 现在把这类 inline callback 以 `callback_query` 投递给订阅了 `scope: "guest_all"` 或 `inline_all` 的插件（按会话判断的 `all_allowed_chats` 等订阅收不到，同时声明两条订阅也不会重复投递）；payload 带 `inline_message_id` 与 `inline_callback` 信封（`inline_message_id` / `chat_instance` / `data` / `clicker_user_id` / `origin`），`sender.user_id` 是点击者，`chat_id` / `message` 为空。`origin` 是 answerGuestQuery 时平台按 Bot 记下的原访客会话（`guest_query_id` / `chat_id` / `chat_type` / `caller_user_id` / `message_id`，保留 48 小时，Redis 不可用或过期时为 `null`）。
-- 能力标记 `ctx.messages.guest_reply_markup = True`（缓冲与实时 MessageOps 都有），插件据此判断；旧平台没有该属性时不要在访客回复里放回调按钮。AI 答疑插件 `interaction-ai-chat` 0.4.8 据此在访客模式失败时也附「🔄 重试」「🔀 换模型重试」（换模型仅管理员），旧服务器保持不附按钮。
+- 能力标记 `ctx.messages.guest_reply_markup = True`（缓冲与实时 MessageOps 都有），插件据此判断；旧平台没有该属性时不要在访客回复里放回调按钮。
 
 ### 文档
 
@@ -353,7 +366,7 @@
 - 官方示例 `examples/plugins/*`（7 个）补齐 `requires_platform_capabilities`（`plugin.json` 与 `manifest.py` 同值），此前按当前安装校验会以 `PLATFORM_CAPABILITIES_REQUIRED` 被拒；`min_telepilot_version` 统一为 `0.72.0-beta.2` 并在 `manifest.py` 同步（原 0.24.0 / 0.33.0 / 0.41.0 / 0.57.0 偏低：`Manifest(requires_platform_capabilities=...)` 0.72 起才支持，`with_ai_components` 的 AI 组件 0.54 起才有）。
 - `tp_plugin new` 骨架的最低版本由 0.41.0 改为 0.72.0-beta.2（同样因 `requires_platform_capabilities`）；`session_game` 骨架会返回 `payout` 动作，权限补上 `payout`（安装插件未声明时运行时拒绝发奖）。
 - 插件文档按当前代码核对更新：API 参考新增「版本与兼容」（`min_telepilot_version` 只比较 `x.y.z`、能力→最低版本门槛表、能力探测写法）、重写「Manifest 验证」（安装期必填项、运行期预检与身份校验）、补全可选字段表（`requires_platform_capabilities`、`usage`、`allowed_hosts`、`http`、`config_actions`、`interaction_send_via`、`experimental` 等）与 `ctx.skills` / `ctx.data_dir` / `scheduler.list_jobs` / `identities.resolve_many` / `run_agent` 限额参数；AI 文档新增联网搜索、识图、`thinking` 与推理截断说明（含旧平台会静默忽略这些参数）；安全边界权限表补 `ai_vision`、`agent_skills`、`payout`、`forward_message` 与保留权限；速查表、开发指南补紧凑表格（`compact_tables` / `rich_table_compact`）、`edit_rich`、访客模式、完整事件/范围/过滤键与 live/缓冲 MessageOps 差异；Quickstart 更正简单模式（仍需 `plugin.json`，安装通道还要求四个文件存在）；平台能力文档更正 `requires_platform_capabilities` 新装/升级必填；各文档示例补 `requires_platform_capabilities` 与最低版本。
-- 插件仓库新增宿主兼容性检查 `scripts/check_host_compat.py` 与 CI（检出本仓库 Beta 运行），文档中给出用法。
+- 插件开发文档补充插件库宿主兼容性检查 `scripts/check_host_compat.py` 的用法（检查脚本与 CI 在插件库，见插件库 CHANGELOG）。
 
 ## [0.106.0-beta.12] - 2026-10-28 · patch（补丁预发布） · 接入 Bot API 10.3 紧凑富文本表格（is_compact）；含 iOS 0.13.4 / 0.13.5
 
@@ -520,7 +533,7 @@
 
 ### 交互 Bot
 
-- 访客模式 inline 消息编辑支持 Rich Message：`edit_message` 同时带 `inline_message_id` 与 `rich_message` 时走 `editMessageText(inline_message_id, rich_message)`（Bot API 10.2 文档确认 rich_message 同样适用于 inline 消息，但不能直传/按 URL 上传新文件），“🤔 占位后编辑”的表格、标题等终于能原生渲染；失败如实记 `telegram_api_error`、不静默降级。实时 MessageOps 新增能力标记 `inline_rich_edit = True`。配套插件 interaction-ai-chat 0.4.3 已优先使用并在失败时退回 HTML。
+- 访客模式 inline 消息编辑支持 Rich Message：`edit_message` 同时带 `inline_message_id` 与 `rich_message` 时走 `editMessageText(inline_message_id, rich_message)`（Bot API 10.2 文档确认 rich_message 同样适用于 inline 消息，但不能直传/按 URL 上传新文件），“🤔 占位后编辑”的表格、标题等终于能原生渲染；失败如实记 `telegram_api_error`、不静默降级。实时 MessageOps 新增能力标记 `inline_rich_edit = True`。
 - `docs/PLUGIN-API-REFERENCE.md` 补充 `AIResult.reasoning`、`AIResponseTruncated`、`thinking` 参数、推理模型输出下限与 inline Rich 编辑。
 
 ## [0.106.0-beta.1] - 2026-10-26 · minor（次版本预发布） · Agent Skills、插件 AI 能力与配置表单
@@ -4009,7 +4022,6 @@
 - TOTP 登录验证新增“每次登录验证 / 连续输错后验证”策略与失败阈值设置；旧版已开启 TOTP 的配置保持每次登录验证，不会在升级后自动降级。
 - 交互 Bot 主链路新增 R15 路由分类器与缓存索引，普通未命中消息可在命中判断阶段直接跳过，不再逐层触发转账、Event Bus、关键词规则和会话 handler。
 - 已安装互动插件校验脚本同步新开发指南口径：显式 `capabilities: {}` 不再被误报为缺失，并强制校验 `plugin.json` 与 `MANIFEST` 的事件订阅 / 能力声明一致性。
-- 远程插件库已按最新开发指南完成全量契约迁移：补齐 `usage`、`event_subscriptions`、`capabilities`，移除旧 notice 通道声明，并为交互插件补充 `session_expired` 会话过期兼容。
 
 ## [0.48.0] — 2026-07-04 · minor（次版本） · 消息链路统一与会话通道
 
@@ -5193,7 +5205,7 @@
 ## [0.26.1] — 2026-05-29 · patch · 插件交互入口失败计数修复
 
 ### Fixed
-- 修复插件交互入口返回“已处于置顶状态/不再处理”等业务失败时仍会被规则层当作成功扣次数的问题，配合 `pt_promote 1.0.6` 保证置顶失败、重复触发或已冷却时不消耗用户每日次数。
+- 修复插件交互入口返回“已处于置顶状态/不再处理”等业务失败时仍会被规则层当作成功扣次数的问题，插件返回业务失败（如置顶失败、重复触发或已冷却）时不再消耗用户每日次数。
 
 ## [0.26.0] — 2026-05-29 · stable · 交互 Bot 规则模板与用户限流
 

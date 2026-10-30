@@ -990,7 +990,7 @@ test.describe("移动端交互细节", () => {
     const mobileSettings = surface.locator("[data-assistant-mobile-settings]");
     const conversation = surface.locator(".overflow-y-auto").filter({ hasText: "第 30 条用于撑开消息列表的测试内容。" });
     if (testInfo.project.name === "mobile") {
-      await expect(surface.getByRole("heading", { name: "系统助手" })).toBeHidden();
+      await expect(surface.getByRole("heading", { name: "Agent", exact: true })).toBeHidden();
       await expect(mobileSummary).toBeVisible();
       await expect(mobileSummary).toHaveAttribute("aria-expanded", "false");
       await expect(mobileSettings).toBeHidden();
@@ -1042,7 +1042,7 @@ test.describe("移动端交互细节", () => {
       await surface.getByRole("button", { name: "收起配置" }).click();
       await expect(configPanel).toBeHidden();
     } else {
-      await expect(surface.getByRole("heading", { name: "系统助手" })).toBeVisible();
+      await expect(surface.getByRole("heading", { name: "Agent", exact: true })).toBeVisible();
       await expect(mobileSummary).toBeHidden();
       await expect(mobileSettings).toBeVisible();
     }
@@ -1241,7 +1241,7 @@ test.describe("移动端交互细节", () => {
     await expect(page).toHaveURL(/\/plugins\/templates$/);
     await expect(page.getByRole("heading", { name: "页面已移除" })).toBeVisible();
     await page.goto("/ai", { waitUntil: "networkidle" });
-    await expect(page.getByRole("button", { name: "配置系统助手" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "配置 Agent" })).toHaveCount(0);
     fixture.assertClean();
   });
 

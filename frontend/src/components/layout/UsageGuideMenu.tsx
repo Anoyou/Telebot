@@ -27,7 +27,7 @@ export default function UsageGuideMenu() {
       <div className="border-b px-4 py-3">
         <div className="text-base font-semibold">使用指南</div>
         <div className="mt-1 text-sm text-muted-foreground">
-          安装、界面导览、Telegram 通道、系统助手、密钥池与排障入口。
+          安装、界面导览、Telegram 通道、Agent、密钥池与排障入口。
         </div>
       </div>
       <div className="space-y-5 p-4">

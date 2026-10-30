@@ -870,12 +870,12 @@ function GuideContextCard({
           收起
         </button>
       </div>
-      <div className="mb-2 text-sm font-semibold">3. 启用指令模板或调用插件</div>
+      <div className="mb-2 text-sm font-semibold">3. 启用插件或自定义指令</div>
       <p className="text-xs leading-relaxed text-muted-foreground">
-        这一页主要看三处：先用“指令模板”复用指令；再看下方插件卡片，按账号启用和配置；需要外部能力时点“插件管理”添加远程插件。
+        这一页主要看三处：先在上方选账号；再看下方插件卡片，按账号启用和配置；需要新插件时点“插件市场”或“插件管理”安装。自定义指令在侧栏「指令与任务」里。
       </p>
       <div className="mt-3 grid gap-2 text-xs text-muted-foreground sm:grid-cols-3">
-        <div className="rounded-lg border bg-muted/30 p-2">A. 指令模板</div>
+        <div className="rounded-lg border bg-muted/30 p-2">A. 选择账号</div>
         <div className="rounded-lg border bg-muted/30 p-2">B. 插件启用状态</div>
         <div className="rounded-lg border bg-muted/30 p-2">C. 插件管理</div>
       </div>

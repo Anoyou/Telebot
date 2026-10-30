@@ -56,7 +56,7 @@ export function AccountRuntimePanel() {
     mutationFn: () => applyRuntimeProfile("safe_watch"),
     onSuccess: () => {
       setConfirmOpen(false);
-      toast.success("值守模式已激活：插件叶投递、定时任务和资金动作已冻结");
+      toast.success("已进入值守：插件叶投递、定时任务和资金动作已冻结");
       invalidate();
     },
     onError: (err) => {
@@ -67,7 +67,7 @@ export function AccountRuntimePanel() {
   const restoreMut = useMutation({
     mutationFn: restoreRuntimeProfile,
     onSuccess: () => {
-      toast.success("已恢复值守前快照，插件投递与定时任务恢复");
+      toast.success("已恢复生产：按进入值守前的快照还原，插件投递与定时任务恢复");
       invalidate();
     },
     onError: (err) => {
@@ -156,7 +156,7 @@ export function AccountRuntimePanel() {
                   loadingText="正在恢复"
                   disabled={profile?.status === "restoring" || profile?.status === "applying"}
                 >
-                  恢复值守前快照
+                  恢复生产
                 </Button>
               ) : (
                 <Button
@@ -165,7 +165,7 @@ export function AccountRuntimePanel() {
                   loadingText="正在预检"
                   disabled={profileQ.isLoading || profile?.status === "applying"}
                 >
-                  进入值守模式
+                  进入值守
                 </Button>
               )}
             </div>
@@ -176,7 +176,7 @@ export function AccountRuntimePanel() {
       <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
         <DialogContent className="max-w-lg">
           <DialogHeader>
-            <DialogTitle>确认进入值守模式</DialogTitle>
+            <DialogTitle>确认进入值守</DialogTitle>
             <DialogDescription>
               值守会暂停插件叶投递与定时任务，并注册资金动作拒绝原因。平台观测、告警通知和内置管理命令仍可用。
             </DialogDescription>

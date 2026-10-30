@@ -1228,7 +1228,7 @@ export function AssistantIndex() {
         "Notification" in window &&
         Notification.permission === "granted"
       ) {
-        new Notification(settlement === "complete" ? "系统助手任务已完成" : "系统助手任务失败", {
+        new Notification(settlement === "complete" ? "Agent 任务已完成" : "Agent 任务失败", {
           body:
             settlement === "complete"
               ? "点击返回查看结果。"
@@ -1277,7 +1277,7 @@ export function AssistantIndex() {
       return false;
     }
     if (!enabled) {
-      toast.error("请先在右上角开启系统助手并选择支持 tools 的 Provider");
+      toast.error("请先在右上角开启 Agent 并选择支持 tools 的 Provider");
       setConfigOpen(true);
       return false;
     }
@@ -1404,7 +1404,7 @@ export function AssistantIndex() {
   const onSend = async (text: string, attachments: ComposerAttachment[]) => {
     try {
       if (!enabled) {
-        toast.error("请先开启系统助手");
+        toast.error("请先开启 Agent");
         setConfigOpen(true);
         return false;
       }
@@ -1806,7 +1806,7 @@ export function AssistantIndex() {
     <PageShell className="flex h-full min-h-0 flex-col gap-3 space-y-0">
       <div className="hidden shrink-0 sm:block">
         <PageHeader
-          title="系统助手"
+          title="Agent"
           description="用自然语言查询并操作系统能力；写操作需内联确认。"
           icon={AgentMark}
           actions={renderAgentContextControls()}
@@ -1825,7 +1825,7 @@ export function AssistantIndex() {
           <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary">
             <AgentMark className="h-4 w-4" />
           </span>
-          <span className="shrink-0 text-sm font-semibold">系统助手</span>
+          <span className="shrink-0 text-sm font-semibold">Agent</span>
           <span className="min-w-0 truncate text-[11px] text-muted-foreground">
             {configQ.isLoading ? "加载中" : enabled ? (streaming ? "调用中" : "已启用") : "未启用"}
           </span>
@@ -1908,19 +1908,19 @@ export function AssistantIndex() {
           className="fixed bottom-[calc(4.75rem+env(safe-area-inset-bottom))] right-0 top-[calc(5rem+env(safe-area-inset-top))] z-[70] w-[min(320px,88vw)] animate-in overflow-y-auto overscroll-contain rounded-l-2xl border-l border-border/70 bg-card p-4 text-sm shadow-[0_6px_18px_rgba(15,23,42,0.10)] slide-in-from-right-3 duration-200 sm:static sm:z-auto sm:mt-0 sm:max-h-96 sm:w-auto sm:shrink sm:rounded-lg sm:border sm:shadow-none sm:animate-none"
         >
           <div className="mb-3 flex items-center justify-between gap-3">
-            <div className="font-medium">系统助手模型</div>
+            <div className="font-medium">Agent 模型</div>
             <Button type="button" size="sm" variant="ghost" className="h-7 px-2 text-xs sm:hidden" onClick={() => setConfigOpen(false)}>
               收起配置
             </Button>
           </div>
           <div className="grid gap-3 sm:grid-cols-2">
             <div className="flex min-h-11 items-center justify-between gap-3 rounded-md border px-3 py-2">
-              <span>启用系统助手</span>
+              <span>启用 Agent</span>
               <Switch
                 checked={!!configQ.data?.enabled}
                 disabled={saveConfigMut.isPending}
                 onCheckedChange={(checked) => saveConfigMut.mutate({ enabled: checked })}
-                aria-label="启用系统助手"
+                aria-label="启用 Agent"
               />
             </div>
             <div className="flex min-h-11 items-center justify-between gap-3 rounded-md border px-3 py-2">
@@ -2086,7 +2086,7 @@ export function AssistantIndex() {
             </div>
           </div>
           <p className="mt-2 text-xs text-muted-foreground">
-            仅允许声明支持 tools 的模型。写操作会生成待确认卡片；未配置时助手会给出 AI 中心入口。
+            仅允许声明支持 tools 的模型。写操作会生成待确认卡片；未配置时 Agent 会给出 AI 页入口。
             {capsQ.data ? ` · 已注册 ${capsQ.data.tools.filter((t) => t.available).length} 个可用工具` : null}
           </p>
           {capsQ.data?.tools?.length ? (

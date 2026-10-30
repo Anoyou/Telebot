@@ -176,7 +176,7 @@ export function WebhooksPage() {
   if (accountsQ.isLoading) {
     return (
       <PageShell>
-        <PageHeader icon={Webhook} title="入站 Webhook" description="正在读取账号列表。" />
+        <PageHeader icon={Webhook} title="Webhook" description="正在读取账号列表。" />
         <div className="flex h-36 items-center justify-center rounded-lg border bg-card">
           <Spinner className="text-primary" />
         </div>
@@ -188,7 +188,7 @@ export function WebhooksPage() {
   if (accountsQ.isError) {
     return (
       <PageShell>
-        <PageHeader icon={Webhook} title="入站 Webhook" description="账号列表加载失败。" />
+        <PageHeader icon={Webhook} title="Webhook" description="账号列表加载失败。" />
         <Card><CardContent className="flex flex-wrap items-center justify-between gap-3 pt-6 text-sm text-muted-foreground">
           <span>{getErrMsg(accountsQ.error)}</span>
           <Button size="sm" variant="outline" onClick={() => void accountsQ.refetch()}>重试</Button>
@@ -201,7 +201,7 @@ export function WebhooksPage() {
     <PageShell>
       <PageHeader
         icon={Webhook}
-        title="入站 Webhook"
+        title="Webhook"
         description="为账号生成 HTTP 入口，把外部系统事件投递到声明 webhook 订阅的插件。"
         actions={
           <Button
@@ -260,7 +260,7 @@ export function WebhooksPage() {
             </CardTitle>
           </CardHeader>
           <CardContent className="text-sm text-muted-foreground">
-            入站 Webhook 需要先绑定至少一个 Telegram 账号。
+            Webhook 需要先绑定至少一个 Telegram 账号。
           </CardContent>
         </Card>
       ) : (

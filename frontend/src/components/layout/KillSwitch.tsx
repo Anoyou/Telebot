@@ -1,4 +1,5 @@
-// 顶部紧急停用按钮：调 POST /api/system/kill-switch 切换全局总闸
+// 顶栏「紧急停止」按钮：调 POST /api/system/kill-switch 开启 / 解除紧急停止（kill switch）。
+// 第 20 轮统一命名：全站只叫「紧急停止」，按钮「停止 / 解除」，与 iOS 一致。
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ShieldAlert, ShieldCheck } from "lucide-react";
@@ -28,7 +29,7 @@ async function fetchKillSwitch(): Promise<KillSwitchState> {
 export function KillSwitch({ compact = false }: { compact?: boolean }) {
   const qc = useQueryClient();
   const [confirmOpen, setConfirmOpen] = useState(false);
-  // 实时显示总闸状态；轻量轮询：30s 刷新
+  // 实时显示紧急停止状态；轻量轮询：30s 刷新
   const { data } = useQuery({
     queryKey: ["system", "kill-switch"],
     queryFn: fetchKillSwitch,
@@ -42,7 +43,7 @@ export function KillSwitch({ compact = false }: { compact?: boolean }) {
       await api.post("/api/system/kill-switch", { enabled: next });
     },
     onSuccess: (_, next) => {
-      toast.success(next ? "已开启紧急停用：所有账号 worker 已停止" : "已恢复运行");
+      toast.success(next ? "已紧急停止：所有账号 worker 已停止" : "已解除紧急停止，账号恢复运行");
       setConfirmOpen(false);
       qc.invalidateQueries({ queryKey: ["system", "kill-switch"] });
       qc.invalidateQueries({ queryKey: ["accounts"] });
@@ -71,19 +72,19 @@ export function KillSwitch({ compact = false }: { compact?: boolean }) {
             ? "border-destructive/30 bg-destructive/10 text-destructive hover:bg-destructive/[0.18]"
             : "border-destructive/30 text-destructive hover:border-destructive/50 hover:bg-destructive/10",
         )}
-        title={enabled ? "恢复全部账号 worker" : "紧急停用全部账号 worker"}
-        aria-label={enabled ? "恢复全部账号 worker" : "紧急停用全部账号 worker"}
+        title={enabled ? "解除紧急停止，恢复全部账号 worker" : "紧急停止全部账号 worker"}
+        aria-label={enabled ? "解除紧急停止" : "紧急停止"}
         onClick={requestToggle}
       >
         {enabled ? (
           <>
             <ShieldCheck className="h-3.5 w-3.5" />
-            {compact ? null : <span className="hidden sm:inline">恢复运行</span>}
+            {compact ? null : <span className="hidden sm:inline">解除紧急停止</span>}
           </>
         ) : (
           <>
             <ShieldAlert className="h-3.5 w-3.5" />
-            {compact ? null : <span className="hidden sm:inline">紧急停用</span>}
+            {compact ? null : <span className="hidden sm:inline">紧急停止</span>}
           </>
         )}
       </Button>
@@ -91,7 +92,7 @@ export function KillSwitch({ compact = false }: { compact?: boolean }) {
         <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle className="text-destructive">
-              确认紧急停用？
+              确认紧急停止？
             </DialogTitle>
             <DialogDescription>
               所有账号 worker 会立即停止，Telegram 侧的自动回复、转发、定时任务和 AI
@@ -99,7 +100,7 @@ export function KillSwitch({ compact = false }: { compact?: boolean }) {
             </DialogDescription>
           </DialogHeader>
           <div className="rounded-xl border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-            这是全局总闸。确认后可从同一个按钮恢复运行。
+            确认后顶部会出现红色提示条；可从同一个按钮或提示条「解除」恢复运行。
           </div>
           <DialogFooter className="!flex !flex-row gap-2 sm:space-x-0 [&>*]:min-w-0 [&>*]:flex-1 sm:[&>*]:flex-none">
             <Button
@@ -114,7 +115,7 @@ export function KillSwitch({ compact = false }: { compact?: boolean }) {
               onClick={() => mut.mutate(true)}
               disabled={mut.isPending}
             >
-              确认停用
+              确认停止
             </Button>
           </DialogFooter>
         </DialogContent>

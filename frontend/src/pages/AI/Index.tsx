@@ -153,7 +153,7 @@ export function AIIndex() {
     return (
       <PageShell>
         <AIHeader />
-        <div role="status" aria-label="AI 中心加载中" className="space-y-3">
+        <div role="status" aria-label="AI 加载中" className="space-y-3">
           <div className="flex gap-1.5 overflow-hidden">
             <Skeleton className="h-9 w-20 shrink-0 rounded-md" />
             <Skeleton className="h-9 w-28 shrink-0 rounded-md" />
@@ -211,7 +211,7 @@ export function AIIndex() {
               <Link to="/settings?tab=platform">去服务器设置启用</Link>
             </Button>
             <Button asChild variant="outline">
-              <Link to="/plugins">返回插件中心</Link>
+              <Link to="/plugins">返回插件</Link>
             </Button>
           </CardContent>
         </Card>
@@ -569,7 +569,7 @@ export function AIIndex() {
 function AIHeader() {
   return (
     <PageHeader
-      title="AI 中心"
+      title="AI"
       description="把模型、指令模板、调用记录和帮助信息集中管理。"
       icon={Sparkles}
     />

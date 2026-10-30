@@ -149,7 +149,7 @@ export function Login() {
           </div>
           <div>
             <div className="text-2xl font-bold tracking-tight">TelePilot</div>
-            <p className="text-xs font-medium text-muted-foreground">管理控制台</p>
+            <p className="text-xs font-medium text-muted-foreground">Telegram 控制台</p>
           </div>
         </div>
         <Card>

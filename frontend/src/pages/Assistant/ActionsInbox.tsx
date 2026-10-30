@@ -105,8 +105,8 @@ export function ActionsInboxPage() {
   return (
     <PageShell>
       <PageHeader
-        title="待确认收件箱"
-        description="集中处理系统助手挂起的写操作：确认、拒绝或批量清空。"
+        title="待确认"
+        description="集中处理 Agent 挂起的写操作：确认、拒绝或批量清空。"
         icon={Inbox}
         actions={
           <div className="flex flex-wrap gap-2">
@@ -143,7 +143,7 @@ export function ActionsInboxPage() {
           <Inbox className="h-10 w-10 text-muted-foreground/50" />
           <p className="mt-3 text-sm text-muted-foreground">暂无待确认操作</p>
           <Link to="/assistant" className="mt-4 text-sm text-primary hover:underline">
-            打开系统助手
+            打开 Agent
           </Link>
         </div>
       ) : (

@@ -383,7 +383,7 @@ export function Conversation({
     return (
       <div className="flex flex-1 flex-col items-center justify-center gap-2 p-8 text-center text-muted-foreground">
         <Bot className="h-10 w-10 opacity-40" />
-        <p className="text-sm">向系统助手提问，例如：</p>
+        <p className="text-sm">向 Agent 提问，例如：</p>
         <ul className="text-sm">
           <li>「一键体检：系统整体有没有问题？」</li>
           <li>「交互里有哪些规则？」</li>

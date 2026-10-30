@@ -189,9 +189,9 @@ export function Dashboard() {
         />
         <OverviewTile
           icon={Boxes}
-          title="插件中心"
-          value="指令与插件"
-          description="管理指令和自动化"
+          title="插件"
+          value="启用与配置"
+          description="按账号启用和配置插件"
           tone="primary"
           railTone="warn"
           to="/plugins"
@@ -496,7 +496,7 @@ function GuidePanel({
           确认触发前缀，并把重要事件推送到合适的通知渠道。
         </GuideStep>
         <GuideStep no="3" title="启用插件与指令" onAction={onGoPlugins} action="打开插件">
-          在插件中心启用指令、插件和自动化能力，再按账号配置。
+          在插件页按账号启用和配置插件；自定义指令在「指令与任务」里。
         </GuideStep>
       </CardContent>
     </Card>
