@@ -67,13 +67,13 @@ struct LoginView: View {
                         .submitLabel(.next)
                         .onSubmit { focusedField = .password }
                         .accessibilityIdentifier("login.username")
-                    SecureField("密码", text: $password)
-                        .textContentType(.password).focused($focusedField, equals: .password)
-                        .submitLabel(.go)
-                        .onSubmit {
-                            if !server.isEmpty && !username.isEmpty && !password.isEmpty && !isChallenged { submit() }
-                        }
-                        .accessibilityIdentifier("login.password")
+                    RevealableSecureField(
+                        placeholder: "密码", text: $password, identifier: "login.password",
+                        accessibilityLabel: "管理员密码", contentType: .password,
+                        focus: $focusedField, focusValue: .password, submitLabel: .go
+                    ) {
+                        if !server.isEmpty && !username.isEmpty && !password.isEmpty && !isChallenged { submit() }
+                    }
                 }
                 if isChallenged {
                     Section {
@@ -220,13 +220,11 @@ struct LoginView: View {
                     .onSubmit { focusedField = .accessSecret }
                     .accessibilityLabel("Cloudflare Access Client ID")
                     .accessibilityIdentifier("login.cfAccess.clientID")
-                SecureField("Client Secret", text: $accessSecret)
-                    .textInputAutocapitalization(.never).autocorrectionDisabled()
-                    .focused($focusedField, equals: .accessSecret)
-                    .submitLabel(.done)
-                    .onSubmit { focusedField = nil }
-                    .accessibilityLabel("Cloudflare Access Client Secret")
-                    .accessibilityIdentifier("login.cfAccess.clientSecret")
+                RevealableSecureField(
+                    placeholder: "Client Secret", text: $accessSecret, identifier: "login.cfAccess.clientSecret",
+                    accessibilityLabel: "Cloudflare Access Client Secret",
+                    focus: $focusedField, focusValue: .accessSecret
+                ) { focusedField = nil }
             }
             NavigationLink { CloudflareAccessHelpView() } label: {
                 Label("Cloudflare Access 使用说明", systemImage: "book")

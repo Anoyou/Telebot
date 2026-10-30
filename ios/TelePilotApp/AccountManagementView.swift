@@ -169,7 +169,7 @@ struct AccountManagementLoginView: View {
             } else if token == nil {
                 Section {
                     TextField("API ID", text: $apiID).keyboardType(.numberPad)
-                    SecureField("API Hash", text: $apiHash).textInputAutocapitalization(.never).autocorrectionDisabled().privacySensitive()
+                    SecretField(title: "API Hash", text: $apiHash, placeholder: "my.telegram.org 给的 API Hash", identifier: "account.create.apiHash")
                     TextField("国际区号与手机号", text: $phone).keyboardType(.phonePad).textContentType(.telephoneNumber).privacySensitive()
                 } header: { Text("Telegram API 凭据") } footer: { Text("使用你自己的 Telegram API 凭据。验证码将由 Telegram 发送，账号会话保存在服务器。") }
                 Section("连接") {
@@ -188,7 +188,7 @@ struct AccountManagementLoginView: View {
                 }
             } else if requiresPassword {
                 Section("Telegram 两步验证") {
-                    SecureField("Telegram 两步验证密码", text: $password).textContentType(.password).privacySensitive()
+                    SecretField(title: "Telegram 两步验证密码", text: $password, placeholder: "输入两步验证密码", identifier: "account.create.twoFactor", contentType: .password)
                 }
             } else {
                 Section("Telegram 验证码") {

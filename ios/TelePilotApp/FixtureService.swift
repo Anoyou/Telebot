@@ -227,6 +227,12 @@ actor FixtureService: AppServing {
         // 与真实服务器一样先解码再匹配，否则按 ID 区分的界面测试数据（删除会话、运行阶段、排队消息）都不会命中。
         let rawPath = String(path.split(separator: "?").first ?? "")
         let clean = rawPath.removingPercentEncoding ?? rawPath
+        if clean == "/api/secrets/reveal" {
+            // 第 20 轮：已保存密钥按需查看。`--ui-test-old-server-secrets` 模拟没有该接口的旧服务器（框架 404）。
+            if Self.oldServerSecrets { throw APIError.server(status: 404, code: nil) }
+            let kind = (URLComponents(string: path)?.queryItems ?? []).first { $0.name == "kind" }?.value ?? ""
+            return ["kind": .string(kind), "label": .string(kind), "configured": true, "value": .string(Self.secretRevealValue(kind))]
+        }
         if let value = fixtureValues[clean], method == "GET" { return value }
         if clean.hasPrefix("/api/message-templates/") { return Self.messageTemplateFixture(clean, method: method, body: body) }
         if method == "GET" {
@@ -632,10 +638,11 @@ actor FixtureService: AppServing {
         }
         if clean == "/api/system/capabilities" {
             // 默认像旧服务器一样没有模块信息（所有入口照常显示）；`--ui-test-modules-off=a,b` 模拟服务器关闭这些模块。
-            guard let flag = ProcessInfo.processInfo.arguments.first(where: { $0.hasPrefix("--ui-test-modules-off=") }) else { return ["modules": []] }
+            let features: JSONValue = Self.oldServerSecrets ? [:] : ["secret_reveal": true]
+            guard let flag = ProcessInfo.processInfo.arguments.first(where: { $0.hasPrefix("--ui-test-modules-off=") }) else { return ["modules": [], "features": features] }
             let off = Set(flag.dropFirst("--ui-test-modules-off=".count).split(separator: ",").map(String.init))
             let keys = ["ai", "interaction_bot", "webhooks", "ledger", "dispatch_debug"]
-            return ["modules": .array(keys.map { key -> JSONValue in
+            return ["features": features, "modules": .array(keys.map { key -> JSONValue in
                 ["key": .string(key), "label": .string(key), "desired_enabled": .bool(!off.contains(key)), "forced_off": .bool(off.contains(key)),
                  "generation": 1, "runtime_state": .string(off.contains(key) ? "stopped" : "ready")]
             })]
@@ -1097,6 +1104,9 @@ actor FixtureService: AppServing {
                 "modules": .object(runtimeModules.mapValues { JSONValue.bool($0) }),
                 "blind_spot": blind]
     }
+
+    static var oldServerSecrets: Bool { ProcessInfo.processInfo.arguments.contains("--ui-test-old-server-secrets") }
+    static func secretRevealValue(_ kind: String) -> String { "fixture-\(kind)-plaintext" }
 
     /// 交互中心（0.16.0）。
     private func interactionFixture(_ clean: String, method: String, body: JSONValue?) -> JSONValue? {

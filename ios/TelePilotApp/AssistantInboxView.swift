@@ -124,7 +124,7 @@ private struct AssistantActionDetailView: View {
                     if requiresSecret && pending {
                         Section {
                             ForEach(secretFields, id: \.self) { field in
-                                SecureField(field, text: secretBinding(field)).textInputAutocapitalization(.never).autocorrectionDisabled().privacySensitive()
+                                SecretField(title: field, text: secretBinding(field), placeholder: "粘贴 \(field)", identifier: "assistant.action.secret.\(field)")
                             }
                             Button("加密保存密钥") { Task { await saveSecrets() } }
                                 .disabled(busy || !secretFields.contains(where: { !(secrets[$0] ?? "").isEmpty }))
