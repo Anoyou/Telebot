@@ -138,26 +138,29 @@ final class WorkspaceUITests: XCTestCase {
         let app = launch(["--ui-test-modules-off=interaction_bot,ledger,webhooks,dispatch_debug"])
         XCTAssertTrue(app.tabBars.buttons["AI"].waitForExistence(timeout: 45))
         XCTAssertFalse(app.tabBars.buttons["交互"].exists)
+        // 先看插件详情（后面「更多」里要上滑，Tab 栏会缩小成只剩当前格）。
+        app.tabBars.buttons["插件"].tap()
+        let card = app.buttons["plugin.card.content_assistant"]
+        XCTAssertTrue(card.waitForExistence(timeout: 10))
+        card.tap()
+        XCTAssertTrue(reveal(app.buttons["plugin.detail.technical"], in: app))
+        XCTAssertFalse(app.buttons["plugin.detail.interactionRules"].exists)
         app.tabBars.buttons["更多"].tap()
         XCTAssertTrue(app.buttons["more.accounts"].waitForExistence(timeout: 10))
         XCTAssertFalse(app.buttons["more.ai"].exists, "AI 已补进 Dock")
         XCTAssertFalse(app.buttons["more.interaction"].exists)
-        XCTAssertFalse(app.buttons["资金台账"].exists)
+        // 关掉台账、Webhook、AI（已进 Dock）后「更多」很短：管理组与工具组同屏。
+        XCTAssertTrue(reveal(app.buttons["服务器设置"], in: app))
         XCTAssertFalse(app.buttons["Webhook"].exists)
+        XCTAssertFalse(app.buttons["资金台账"].exists)
         let logs = app.buttons["日志与诊断"]
-        XCTAssertTrue(reveal(logs, in: app))
+        for _ in 0..<4 where !(logs.exists && logs.isHittable) { app.swipeDown() }
+        XCTAssertTrue(logs.waitForExistence(timeout: 3))
         logs.tap()
         XCTAssertTrue(app.descendants(matching: .any)["logs.screen"].firstMatch.waitForExistence(timeout: 10))
         let console = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "系统控制台")).firstMatch
         XCTAssertTrue(reveal(console, in: app), "高级诊断分组仍在")
         XCTAssertFalse(app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "模拟消息路由")).firstMatch.exists)
-
-        app.tabBars.buttons["插件"].tap()
-        let card = app.buttons["plugin.card.content_assistant"]
-        XCTAssertTrue(card.waitForExistence(timeout: 10))
-        card.tap()
-        XCTAssertTrue(app.descendants(matching: .any)["plugin.detail.technical"].firstMatch.waitForExistence(timeout: 10))
-        XCTAssertFalse(app.buttons["plugin.detail.interactionRules"].exists)
     }
 
     /// 插件 ↔ 交互双向跳转：交互类插件详情有「交互规则 ›」，只列出启动它的规则；规则编辑页「插件配置 ›」打开该插件在本账号的配置。
@@ -172,8 +175,10 @@ final class WorkspaceUITests: XCTestCase {
         let rulesLink = app.buttons["plugin.detail.interactionRules"]
         XCTAssertTrue(reveal(rulesLink, in: app))
         rulesLink.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["interaction.status.runtime"].firstMatch.waitForExistence(timeout: 10))
+        // 规则区在运行状态与总闸下方，列表里屏幕外的行不存在：先滑到规则区。
         let ask = app.buttons["interaction.rule.rule-ask"]
-        XCTAssertTrue(ask.waitForExistence(timeout: 10))
+        XCTAssertTrue(reveal(ask, in: app))
         XCTAssertFalse(app.buttons["interaction.rule.rule-notice"].exists, "只列出启动本插件的规则")
         let showAll = app.switches["interaction.showAllRules"]
         XCTAssertTrue(showAll.exists)
