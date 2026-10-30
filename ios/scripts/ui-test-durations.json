@@ -22,6 +22,8 @@
   "ManagementUITests/testAllSFSymbolNamesInSourcesExist": 8,
   "ManagementUITests/testAppSettingsFollowsGeneralSettingsOrder": 55,
   "ManagementUITests/testInteractionCenterEditsRulesAndSaves": 60,
+  "ManagementUITests/testInteractionTestNotifyBotHiddenOnOldServer": 40,
+  "ManagementUITests/testInteractionTestNotifyBotSection": 75,
   "ManagementUITests/testInteractionTokenSecretFieldOnOldServer": 45,
   "ManagementUITests/testInteractionTokenSecretFieldRevealsSavedValue": 45,
   "ManagementUITests/testLedgerResetRequiresExactPhraseBeforeConfirmation": 28,

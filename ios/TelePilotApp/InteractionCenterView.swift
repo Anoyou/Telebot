@@ -22,6 +22,9 @@ struct InteractionCenterView: View {
     /// 插件矩阵里的插件（按 key），规则编辑页「插件配置 ›」跳转用。
     @State private var features: [String: JSONValue] = [:]
     @State private var showAllRules = false
+    /// 规则列表筛选（与 Web 规则列表「全部 / 启用 / 暂停」一致）。
+    @State private var ruleFilter = "all"
+    @State private var confirmingClearNotify = false
     @State private var serverValue: JSONValue?
     @State private var baseline = InteractionDraft()
     @State private var draft = InteractionDraft()
@@ -44,7 +47,14 @@ struct InteractionCenterView: View {
     /// 只看某个插件的规则（来自插件详情跳转，且用户没切到“全部规则”）。
     private var focusKey: String? { showAllRules ? nil : focusPluginKey }
     private var visibleRuleIDs: [String] {
-        draft.rules.filter { rule in focusKey.map { rule.action == "module" && rule.moduleKey == $0 } ?? true }.map(\.id)
+        draft.rules.filter { rule in
+            switch ruleFilter {
+            case "enabled" where !rule.enabled: return false
+            case "paused" where rule.enabled: return false
+            default: break
+            }
+            return focusKey.map { rule.action == "module" && rule.moduleKey == $0 } ?? true
+        }.map(\.id)
     }
     private var focusPluginName: String {
         guard let key = focusPluginKey else { return "" }
@@ -86,6 +96,10 @@ struct InteractionCenterView: View {
                 if let serverValue {
                     statusSection(serverValue)
                     switchSection(serverValue)
+                    trustedNotifySection
+                    if serverValue["has_transfer_bot_token"] != nil {
+                        testNotifySection(serverValue)
+                    }
                     rulesSection
                     advancedSection
                 } else if let loadError {
@@ -166,7 +180,6 @@ struct InteractionCenterView: View {
         let rules = value["rules"]?.arrayValue ?? []
         let activeRules = rules.filter { $0["enabled"]?.boolValue ?? true }.count
         let chats = Set(rules.flatMap { ($0["chat_ids"]?.arrayValue ?? []).compactMap(\.intValue) }).count
-        let memberships = value["interaction_chat_memberships"]?.arrayValue ?? []
         let dlq = value["polling_dlq_count"]?.intValue ?? 0
         return Section {
             statusRow("交互总闸", enabled ? "已启用" : "未启用", symbol: enabled ? "power.circle.fill" : "power.circle",
@@ -191,17 +204,6 @@ struct InteractionCenterView: View {
             if dlq > 0 {
                 statusRow("失败投递", "\(dlq) 条待处理", symbol: "tray.and.arrow.down", tint: .orange, id: "dlq")
             }
-            if !memberships.isEmpty {
-                DisclosureGroup {
-                    ForEach(Array(memberships.enumerated()), id: \.offset) { _, item in
-                        membershipRow(item)
-                    }
-                } label: {
-                    let joined = memberships.filter { $0["status"]?.stringValue == "joined" }.count
-                    Label("Bot 入群情况 · \(joined)/\(memberships.count) 已加入", systemImage: "person.2")
-                        .accessibilityIdentifier("interaction.memberships")
-                }
-            }
         } header: { Text("运行状态") } footer: {
             Text("状态取自服务器最近一次读取或保存的结果；保存后交互 Bot 会按新配置自动重启。")
         }
@@ -225,7 +227,7 @@ struct InteractionCenterView: View {
         switch status {
         case "joined": state = ("已加入", "checkmark.circle.fill", .green)
         case "not_joined": state = ("未加入", "exclamationmark.triangle.fill", .orange)
-        default: state = ("未知", "questionmark.circle", .secondary)
+        default: state = ("无法确认", "questionmark.circle", .secondary)
         }
         return VStack(alignment: .leading, spacing: 2) {
             LabeledContent {
@@ -236,6 +238,23 @@ struct InteractionCenterView: View {
             }
         }
         .accessibilityElement(children: .combine)
+    }
+
+    /// 群成员状态（Web `BotMembershipList`）：交互 Bot「监听群成员状态」、测试 Bot「测试 Bot 群成员状态」。
+    /// 服务器缓存 5 分钟；没有数据时不显示。
+    @ViewBuilder
+    private func membershipGroup(_ title: String, _ memberships: [JSONValue], id: String) -> some View {
+        if !memberships.isEmpty {
+            DisclosureGroup {
+                ForEach(Array(memberships.enumerated()), id: \.offset) { _, item in
+                    membershipRow(item)
+                }
+            } label: {
+                let joined = memberships.filter { $0["status"]?.stringValue == "joined" }.count
+                Label("\(title) · \(joined)/\(memberships.count) 已加入", systemImage: "person.2")
+                    .accessibilityIdentifier(id)
+            }
+        }
     }
 
     // MARK: 总闸与 Bot
@@ -262,8 +281,82 @@ struct InteractionCenterView: View {
                 .tint(.red)
                 .accessibilityIdentifier("interaction.clearToken")
             }
+            membershipGroup("监听群成员状态", value["interaction_chat_memberships"]?.arrayValue ?? [], id: "interaction.memberships")
         } header: { Text("交互总闸与 Bot") } footer: {
-            Text("总闸关闭时所有互动规则都不生效。交互 Bot 不能和管理 Bot 使用同一个 Bot；新 Token 只在保存时提交。点眼睛可查看已保存的 Token（服务器会记录这次查看），离开页面即隐藏，App 不保存。")
+            Text("总闸关闭时所有互动规则都不生效。交互 Bot 不能和管理 Bot 使用同一个 Bot；新 Token 只在保存时提交。点眼睛可查看已保存的 Token（服务器会记录这次查看），离开页面即隐藏，App 不保存。群成员状态服务器缓存 5 分钟。")
+        }
+    }
+
+    // MARK: 转账结果通知 Bot（Web「身份配置」右栏）
+
+    private var trustedNotifySection: some View {
+        Section {
+            TextField("真实通知 Bot ID（每行一个，不是 @ 用户名）", text: $draft.trustedBotIDs, axis: .vertical)
+                .lineLimit(1...6)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .keyboardType(.numbersAndPunctuation)
+                .accessibilityIdentifier("interaction.trustedBotIDs")
+        } header: { Text("真实转账结果通知 Bot") } footer: {
+            Text("填群里实际发送到账结果的 Bot ID（参考转账结果消息的发送者 ID），多个群用不同通知 Bot 时可以全部加入；保存时自动去重，测试模拟 Token 识别出的 Bot 会额外加入信任。启用转账触发的规则前必须至少有一个。")
+        }
+    }
+
+    private func testNotifySection(_ value: JSONValue) -> some View {
+        let hasTransferToken = value["has_transfer_bot_token"]?.boolValue ?? false
+        let botID = value["transfer_bot_id"]?.intValue
+        let selected = InteractionDraft.parseLines(draft.transferTestChatIDs).count
+        return Section {
+            SecretField(
+                title: "测试模拟通知 Bot Token",
+                text: $draft.newTransferToken,
+                configured: hasTransferToken && !draft.clearTransferToken,
+                reveal: accountID.map { SecretRevealTarget(kind: "transfer_bot_token", accountID: $0) },
+                placeholder: "测试模拟通知时填写",
+                identifier: "interaction.transferToken",
+                disabled: draft.clearTransferToken)
+            LabeledContent {
+                Text(botID.map(String.init) ?? "未识别").foregroundStyle(.secondary).monospacedDigit()
+            } label: {
+                Label("当前测试 Bot ID", systemImage: "number")
+            }
+            .accessibilityElement(children: .combine)
+            .accessibilityIdentifier("interaction.transferBotID")
+            if hasTransferToken {
+                Toggle(isOn: $draft.clearTransferToken) {
+                    Label("清除已保存的测试 Token", systemImage: "trash")
+                }
+                .tint(.red)
+                .accessibilityIdentifier("interaction.clearTransferToken")
+            }
+            if draft.supportsTransferTestChats {
+                NavigationLink {
+                    InteractionTestChatPicker(chatIDs: $draft.transferTestChatIDs, peers: peers)
+                } label: {
+                    Label {
+                        LabeledContent("模拟测试群") { Text(selected > 0 ? "\(selected) 个已选" : "未选择") }
+                    } icon: { Image(systemName: "checklist") }
+                }
+                .accessibilityIdentifier("interaction.testChats")
+            }
+            membershipGroup("测试 Bot 群成员状态", value["transfer_test_chat_memberships"]?.arrayValue ?? [],
+                            id: "interaction.testMemberships")
+            Button("清空通知 Bot", systemImage: "trash", role: .destructive) { confirmingClearNotify = true }
+                .disabled(draft.trustedBotIDs.isEmpty && draft.newTransferToken.isEmpty && (!hasTransferToken || draft.clearTransferToken))
+                .accessibilityIdentifier("interaction.clearNotify")
+                .confirmationDialog("清空转账结果通知 Bot？", isPresented: $confirmingClearNotify, titleVisibility: .visible) {
+                    Button("清空", role: .destructive) {
+                        draft.trustedBotIDs = ""
+                        draft.newTransferToken = ""
+                        draft.clearTransferToken = hasTransferToken
+                    }
+                    Button("取消", role: .cancel) {}
+                } message: {
+                    Text("清空真实通知 Bot ID 和测试模拟 Token（模拟测试群保留），点右上角「保存」后生效。")
+                }
+        } header: { Text("测试模拟通知 Bot") } footer: {
+            let trust = botID.map { "系统会同时信任真实通知 Bot ID 和这个测试 Bot ID（\($0)）。" } ?? "没有测试模拟 Token 时，系统只监听群里真实出现的转账结果通知。"
+            Text("\(trust)只有明确选择的模拟测试群会响应 +金额、-金额模拟命令；留空不会启用任何测试群，真实转账规则群也不会自动启用测试 Bot。")
         }
     }
 
@@ -280,6 +373,20 @@ struct InteractionCenterView: View {
 
     private var rulesSection: some View {
         Section {
+            if draft.rules.count > 1 {
+                Picker("规则筛选", selection: $ruleFilter) {
+                    Text("全部").tag("all")
+                    Text("启用").tag("enabled")
+                    Text("暂停").tag("paused")
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .accessibilityIdentifier("interaction.ruleFilter")
+                if ruleFilter != "all" && visibleRuleIDs.isEmpty {
+                    Text("没有符合当前筛选的规则").font(.footnote).foregroundStyle(.secondary)
+                        .accessibilityIdentifier("interaction.filterEmpty")
+                }
+            }
             if focusPluginKey != nil {
                 Toggle(isOn: $showAllRules) {
                     Label("显示全部规则", systemImage: "line.3.horizontal.decrease.circle")
@@ -312,7 +419,7 @@ struct InteractionCenterView: View {
         } header: {
             Text(focusKey != nil ? "启动「\(focusPluginName)」的规则" : "互动规则与玩法入口")
         } footer: {
-            Text("设置别人发什么关键词、在哪些群生效、启动哪个玩法；保存后交互 Bot 会自动监听并交给对应插件处理。左滑可停用或删除，至少保留一条规则。")
+            Text("设置别人发什么关键词、在哪些群生效、启动哪个玩法；保存后交互 Bot 会自动监听并交给对应插件处理。左滑可停用或删除，长按可上移、下移或复制，至少保留一条规则。")
         }
     }
 
@@ -335,6 +442,42 @@ struct InteractionCenterView: View {
                     }
                     .tint(rule.enabled ? .orange : .green)
                 }
+                .contextMenu {
+                    let index = draft.rules.firstIndex(where: { $0.id == rule.id }) ?? 0
+                    Button("上移", systemImage: "arrow.up") { moveRule(rule.id, by: -1) }
+                        .disabled(index == 0)
+                    Button("下移", systemImage: "arrow.down") { moveRule(rule.id, by: 1) }
+                        .disabled(index >= draft.rules.count - 1)
+                    if draft.rules.count < 20 {
+                        Button("复制", systemImage: "doc.on.doc") { copyRule(rule.id) }
+                    }
+                    Button(rule.enabled ? "停用" : "启用", systemImage: rule.enabled ? "pause.circle" : "checkmark.circle") {
+                        binding.wrappedValue.enabled.toggle()
+                    }
+                    if draft.rules.count > 1 {
+                        Button("删除", systemImage: "trash", role: .destructive) {
+                            draft.rules.removeAll { $0.id == rule.id }
+                        }
+                    }
+                }
+    }
+
+    /// 上移／下移（与 Web 规则列表的上下箭头相同：和相邻规则交换位置；顺序决定旧版顶层字段镜像哪条启用规则）。
+    private func moveRule(_ id: String, by offset: Int) {
+        guard let index = draft.rules.firstIndex(where: { $0.id == id }) else { return }
+        let target = index + offset
+        guard draft.rules.indices.contains(target) else { return }
+        draft.rules.swapAt(index, target)
+    }
+
+    /// 复制规则（与 Web `copyInteractionRule` 相同：新 ID、名称加「副本」、插在原规则后面，玩法参数一并复制）。
+    private func copyRule(_ id: String) {
+        guard draft.rules.count < 20, let index = draft.rules.firstIndex(where: { $0.id == id }) else { return }
+        var copy = draft.rules[index]
+        copy.id = "rule-\(Int(Date().timeIntervalSince1970 * 1000))-\(index + 2)"
+        copy.raw["id"] = .string(copy.id)
+        copy.name = "\(draft.rules[index].displayName) 副本"
+        draft.rules.insert(copy, at: index + 1)
     }
 
     // MARK: 高级
@@ -344,7 +487,7 @@ struct InteractionCenterView: View {
             NavigationLink {
                 InteractionAdvancedView(draft: $draft)
             } label: {
-                Label("查询指令、通知模板与可信 Bot", systemImage: "slider.horizontal.3")
+                Label("查询指令与通知模板", systemImage: "slider.horizontal.3")
             }
             .accessibilityIdentifier("interaction.advanced")
         } footer: {
@@ -524,7 +667,7 @@ struct InteractionRuleEditor: View {
             TextField("指定收款人用户 ID（可选）", text: $rule.receiverUserID).keyboardType(.numberPad)
             TextField("收款人文字（可选）", text: $rule.receiverText)
         } header: { Text("转账过滤") } footer: {
-            Text("金额是群内游戏币。启用转账触发前，服务器要求在“高级”里配置可信通知 Bot ID。")
+            Text("金额是群内游戏币。启用转账触发前，服务器要求在交互页「真实转账结果通知 Bot」里填写至少一个 Bot ID。")
         }
     }
 
@@ -645,6 +788,83 @@ struct InteractionRuleEditor: View {
     }
 }
 
+/// 模拟测试群（Web `AllowedPeerMultiSelect`，`emptyMeansAll = false`）：从已允许会话多选 + 手动填写 Chat ID。
+/// 留空 = 不启用任何测试群（不是“全部”）。最多 20 个。
+private struct InteractionTestChatPicker: View {
+    @Binding var chatIDs: String
+    let peers: [InteractionPeer]
+
+    private var selectedItems: [String] { InteractionDraft.parseLines(chatIDs) }
+    private var unknownSelected: [String] {
+        let known = Set(peers.map { String($0.id) })
+        return selectedItems.filter { !known.contains($0) }
+    }
+
+    var body: some View {
+        List {
+            Section {
+                if peers.isEmpty {
+                    Text("暂无已允许会话可点选。可以在下方手填 Chat ID，或到账号详情的「会话白名单」（Web「允许会话」）添加。")
+                        .font(.footnote).foregroundStyle(.secondary)
+                        .accessibilityIdentifier("interaction.testChats.empty")
+                }
+                ForEach(peers) { peer in
+                    Toggle(isOn: Binding(
+                        get: { selectedItems.contains(String(peer.id)) },
+                        set: { on in
+                            var items = selectedItems
+                            let id = String(peer.id)
+                            if on { if !items.contains(id) { items.append(id) } } else { items.removeAll { $0 == id } }
+                            chatIDs = items.joined(separator: "\n")
+                        })) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(peer.label)
+                            Text("\(peer.kindLabel) · \(String(peer.id))").font(.caption).foregroundStyle(.secondary).monospacedDigit()
+                        }
+                    }
+                    .accessibilityIdentifier("interaction.testChats.peer.\(peer.id)")
+                }
+            } header: {
+                HStack {
+                    Text(peers.isEmpty ? "已允许会话" : "从已允许会话选择")
+                    Spacer()
+                    Text(selectedItems.isEmpty ? "未选择" : "\(selectedItems.count) 个已选")
+                        .accessibilityIdentifier("interaction.testChats.count")
+                }
+            }
+            if !unknownSelected.isEmpty {
+                Section {
+                    ForEach(unknownSelected, id: \.self) { id in
+                        Button(role: .destructive) {
+                            chatIDs = selectedItems.filter { $0 != id }.joined(separator: "\n")
+                        } label: {
+                            LabeledContent {
+                                Image(systemName: "minus.circle.fill")
+                            } label: {
+                                Text(id).monospacedDigit()
+                            }
+                        }
+                        .accessibilityLabel("移除 \(id)")
+                    }
+                } header: { Text("不在已允许会话里") } footer: { Text("点按从模拟测试群移除。") }
+            }
+            Section {
+                TextField("例如：-1001234567890", text: $chatIDs, axis: .vertical)
+                    .lineLimit(2...8)
+                    .font(.body.monospacedDigit())
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .keyboardType(.numbersAndPunctuation)
+                    .accessibilityIdentifier("interaction.testChats.manual")
+            } header: { Text("手动填写 Chat ID（可选，一行一个）") } footer: {
+                Text("没有找到想选的会话时，可手填 Chat ID，或到账号详情的「会话白名单」添加快捷选项。只有明确选择的群会响应 +金额、-金额模拟命令；留空不会启用任何测试群。最多 20 个，点交互页右上角「保存」后生效。")
+            }
+        }
+        .navigationTitle("模拟测试群")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
 private struct InteractionPeerPicker: View {
     @Binding var chatIDs: String
     let peers: [InteractionPeer]
@@ -680,11 +900,6 @@ private struct InteractionAdvancedView: View {
 
     var body: some View {
         Form {
-            Section {
-                field("可信通知 Bot ID（每行一个）", text: $draft.trustedBotIDs, numbers: true)
-            } header: { Text("可信通知 Bot") } footer: {
-                Text("只接受这些 Bot 发出的转账通知；启用转账触发的规则前必须至少填写一个。")
-            }
             Section {
                 field("查询指令（每行一条）", text: $draft.queryCommands)
             } header: { Text("玩法查询") } footer: { Text("群成员发查询指令时，交互 Bot 列出当前可用的联动玩法。") }
@@ -782,11 +997,15 @@ struct InteractionEntryOption: Identifiable, Hashable {
 struct InteractionPeer: Identifiable, Hashable {
     let id: Int
     let label: String
+    /// 会话类型（与 Web `peerKindLabel` 相同：私聊／普通群／超级群／频道）。
+    var kindLabel: String = "会话"
     init?(_ value: JSONValue) {
         guard let peerID = value["peer_id"]?.intValue else { return nil }
         id = peerID
+        let kind = value["peer_kind"]?.stringValue ?? ""
+        kindLabel = ["private": "私聊", "group": "普通群", "supergroup": "超级群", "channel": "频道"][kind] ?? (kind.isEmpty ? "会话" : kind)
         let raw = value["peer_label"]?.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        label = raw.isEmpty ? "会话 \(peerID)" : raw
+        label = raw.isEmpty ? "\(kindLabel) \(peerID)" : raw
     }
 }
 
@@ -798,6 +1017,13 @@ struct InteractionDraft: Equatable {
     var newToken = ""
     var clearToken = false
     var trustedBotIDs = ""
+    /// 测试模拟通知 Bot（Web「身份配置 › 真实转账结果通知 Bot」）：新 Token 只在保存时提交。
+    var newTransferToken = ""
+    var clearTransferToken = false
+    /// 模拟测试群（`transfer_test_chat_ids`），每行一个 Chat ID；只有明确选择的群响应 +金额／-金额。
+    var transferTestChatIDs = ""
+    /// 服务器返回里有 `transfer_test_chat_ids` 字段（旧服务器没有时不显示、也不提交这一项）。
+    var supportsTransferTestChats = false
     var queryCommands = ""
     var queryResponseTemplate = ""
     var queryItemTemplate = ""
@@ -813,6 +1039,8 @@ struct InteractionDraft: Equatable {
         var trusted = (value["trusted_bot_ids"]?.arrayValue ?? []).compactMap(\.intValue)
         if trusted.isEmpty, let single = value["trusted_bot_id"]?.intValue { trusted = [single] }
         trustedBotIDs = trusted.map(String.init).joined(separator: "\n")
+        supportsTransferTestChats = value["transfer_test_chat_ids"] != nil
+        transferTestChatIDs = Self.lines(value["transfer_test_chat_ids"])
         queryCommands = Self.lines(value["query_commands"])
         queryResponseTemplate = value["query_response_template"]?.stringValue ?? ""
         queryItemTemplate = value["query_item_template"]?.stringValue ?? ""
@@ -856,7 +1084,7 @@ struct InteractionDraft: Equatable {
         for rule in ruleValues {
             for id in (rule["chat_ids"]?.arrayValue ?? []).compactMap(\.intValue) where !chats.contains(id) { chats.append(id) }
         }
-        let trusted = try Self.parseInts(trustedBotIDs, label: "可信通知 Bot ID", positive: true)
+        let trusted = try Self.parseInts(trustedBotIDs, label: "真实通知 Bot ID", positive: true)
         var body: [String: JSONValue] = [
             "enabled": .bool(enabled),
             "chat_id": chats.first.map { JSONValue.integer(Int64($0)) } ?? JSONValue.null,
@@ -874,6 +1102,15 @@ struct InteractionDraft: Equatable {
         }
         if clearToken { body["clear_interaction_bot_token"] = true }
         if !token.isEmpty { body["interaction_bot_token"] = .string(token) }
+        // 测试模拟通知 Bot：与 Web buildInteractionPayload 相同字段；旧服务器没有模拟测试群字段时不提交（服务器按未设置保留原值）。
+        let transferToken = newTransferToken.trimmingCharacters(in: .whitespacesAndNewlines)
+        if clearTransferToken { body["clear_transfer_bot_token"] = true }
+        if !transferToken.isEmpty { body["transfer_bot_token"] = .string(transferToken) }
+        if supportsTransferTestChats {
+            let testChats = try Self.parseInts(transferTestChatIDs, label: "模拟测试群 Chat ID")
+            guard testChats.count <= 20 else { throw InteractionDraftError(message: "模拟测试群最多选择 20 个") }
+            body["transfer_test_chat_ids"] = .array(testChats.map { JSONValue.integer(Int64($0)) })
+        }
         // 旧版顶层字段镜像第一条启用规则（服务器与旧 Worker 仍会读取）。
         let first = ruleValues.first { $0["enabled"]?.boolValue ?? true } ?? ruleValues[0]
         for (key, value) in first.objectValue ?? [:] where !["id", "name", "enabled", "chat_ids"].contains(key) {

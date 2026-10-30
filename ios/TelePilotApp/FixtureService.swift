@@ -1124,24 +1124,52 @@ actor FixtureService: AppServing {
                 current["has_interaction_bot_token"] = true
                 current["interaction_bot_username"] = "fixture_new_bot"
             }
-            for (key, value) in patch where !["interaction_bot_token", "clear_interaction_bot_token"].contains(key) { current[key] = value }
+            // 测试模拟通知 Bot（与服务器 update_transfer_notice_config 一致：清除 → 没有 Token 与 Bot ID；新 Token → 识别出 Bot ID）。
+            if patch["clear_transfer_bot_token"]?.boolValue == true {
+                current["has_transfer_bot_token"] = false
+                current["transfer_bot_id"] = nil
+            }
+            if let token = patch["transfer_bot_token"]?.stringValue, !token.isEmpty {
+                current["has_transfer_bot_token"] = true
+                current["transfer_bot_id"] = 123456789
+            }
+            let transient: Set<String> = ["interaction_bot_token", "clear_interaction_bot_token", "transfer_bot_token", "clear_transfer_bot_token"]
+            for (key, value) in patch where !transient.contains(key) { current[key] = value }
             current["interaction_running"] = .bool((current["enabled"]?.boolValue ?? false) && (current["has_interaction_bot_token"]?.boolValue ?? false))
             interactionConfigs[accountID] = .object(current)
         }
         return .object(current)
     }
 
+    /// `--ui-test-old-server-interaction`：旧服务器的交互配置没有测试模拟通知 Bot 字段（has_transfer_bot_token / transfer_test_chat_ids）。
+    static var oldServerInteraction: Bool { ProcessInfo.processInfo.arguments.contains("--ui-test-old-server-interaction") }
+
     static func interactionConfigFixture(_ accountID: Int) -> JSONValue {
+        let value = interactionConfigBase(accountID)
+        guard oldServerInteraction, var object = value.objectValue else { return value }
+        for key in ["has_transfer_bot_token", "transfer_bot_id", "transfer_test_chat_ids", "transfer_test_chat_memberships"] {
+            object.removeValue(forKey: key)
+        }
+        return .object(object)
+    }
+
+    private static func interactionConfigBase(_ accountID: Int) -> JSONValue {
         guard accountID == 1 else {
             return ["enabled": false, "has_interaction_bot_token": false, "interaction_running": false, "chat_ids": [], "rules": [],
                     "trigger_mode": "payment", "trigger_texts": ["转账成功"], "action": "notice", "trusted_bot_ids": [],
-                    "query_commands": ["。玩法"], "polling_dlq_count": 0]
+                    "query_commands": ["。玩法"], "polling_dlq_count": 0,
+                    "has_transfer_bot_token": false, "transfer_bot_id": nil, "transfer_test_chat_ids": [], "transfer_test_chat_memberships": []]
         }
         return [
             "enabled": true, "has_interaction_bot_token": true, "interaction_bot_username": "telepilot_play_bot",
             "interaction_running": true, "interaction_runtime_status": "running", "interaction_last_error": nil,
             "chat_id": -1001234567890, "chat_ids": [-1001234567890], "trusted_bot_ids": [777000], "trusted_bot_id": 777000,
             "polling_dlq_count": 0,
+            // 测试模拟通知 Bot：已保存 Token、识别出的 Bot ID；模拟测试群一个在会话白名单里（测试群 A），一个只手填。
+            "has_transfer_bot_token": true, "transfer_bot_id": 8980553289,
+            "transfer_test_chat_ids": [-1001, -1003806095342],
+            "transfer_test_chat_memberships": [["chat_id": -1001, "status": "joined"],
+                                               ["chat_id": -1003806095342, "status": "unknown", "detail": "Telegram 没有返回成员信息"]],
             "interaction_chat_memberships": [["chat_id": -1001234567890, "status": "joined"],
                                              ["chat_id": -1009876543210, "status": "not_joined", "detail": "交互 Bot 还没有加入这个群"]],
             "query_commands": ["。玩法", "。联动玩法"], "query_response_template": "<b>当前可用联动玩法</b>\n{items}",
