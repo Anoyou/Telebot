@@ -137,7 +137,7 @@ async def test_start_login_connect_error_is_structured_and_disconnects():
 
     assert exc_info.value.status_code == 502
     assert exc_info.value.detail["code"] == "LOGIN_START_FAILED"
-    assert "检查代理与标识" in exc_info.value.detail["message"]
+    assert "检查「代理与登录设备」" in exc_info.value.detail["message"]
     fake_client.disconnect.assert_awaited()
 
 

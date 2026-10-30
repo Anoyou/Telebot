@@ -330,7 +330,7 @@ export function AccountWizard() {
                 </p>
               ) : (
                 <p className="text-xs text-muted-foreground">
-                  若代理列表为空，先到「服务器设置 → 代理与标识」创建
+                  若代理列表为空，先到「服务器设置 → 代理与登录设备」创建
                 </p>
               )}
             </div>

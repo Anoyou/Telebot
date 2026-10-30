@@ -179,8 +179,8 @@ struct AccountManagementLoginView: View {
                             if let id = item["id"]?.intValue { Text(ManagementText.title(item)).tag(Optional(id)) }
                         }
                     }
-                    Picker("设备配置", selection: $deviceID) {
-                        Text("服务器默认配置").tag(nil as Int?)
+                    Picker("登录设备", selection: $deviceID) {
+                        Text("服务器默认登录设备").tag(nil as Int?)
                         ForEach(Array(devices.enumerated()), id: \.offset) { _, item in
                             if let id = item["id"]?.intValue { Text(ManagementText.title(item)).tag(Optional(id)) }
                         }

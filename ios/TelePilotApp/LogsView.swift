@@ -351,7 +351,7 @@ enum LogText {
         "llm_provider.api_key_reveal": "查看 AI 密钥明文", "message_template.test_send": "测试发送消息模板",
         "plugin.ai_quota_release_failed": "插件 AI 配额释放失败", "account_bot.transfer_notice_matched": "匹配到转账通知",
         "account_bot.polling_dlq_replay": "重新投递失败消息", "account_bot.polling_dlq_discard": "丢弃失败消息",
-        "set_default_device_profile": "设置默认设备配置"
+        "set_default_device_profile": "设置默认登录设备"
     ]
     private static let auditSubjects: [String: String] = [
         "account": "账号", "account_bot": "管理 Bot", "account_bot_user": "管理 Bot 用户", "account_command": "账号指令",
@@ -359,7 +359,7 @@ enum LogText {
         "command_template": "指令模板", "feature": "插件功能", "feature.config": "插件配置", "feature.global_config": "插件全局配置",
         "feature.direct_passthrough": "直通转发", "ignored_peer": "忽略会话", "ledger": "资金台账", "llm_provider": "AI 供应商",
         "message_template": "消息模板", "notify_bot": "通知 Bot", "plugin": "插件", "rule": "规则", "sudo": "Sudo 权限",
-        "proxy": "代理", "device_profile": "设备配置", "system": "系统", "webhook": "Webhook"
+        "proxy": "代理", "device_profile": "登录设备", "system": "系统", "webhook": "Webhook"
     ]
     private static let auditVerbs: [String: String] = [
         "create": "新建", "update": "修改", "delete": "删除", "add": "添加", "remove": "移除", "enable": "启用",

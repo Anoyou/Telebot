@@ -1,4 +1,4 @@
-// 设备伪装库管理：列表 + 新建 + 内联编辑 + 设为默认 + 删除。
+// 登录设备管理（第 20 轮前叫「设备标识模板 / 设备伪装库」，API 与字段名不变）：列表 + 新建 + 内联编辑 + 设为默认 + 删除。
 // 在 Settings 页里以一个 Card 形式嵌入。
 //
 // 为什么需要：Telegram 会把 `device_model` / `system_version` / `app_version` 显示在设备列表里，
@@ -93,12 +93,12 @@ export function DeviceProfileManager() {
         <div className="flex flex-wrap items-start justify-between gap-2">
           <div className="min-w-0">
             <SectionHeader
-              title="设备标识模板"
-              description="控制 TG 设备列表里看到的设备名、系统、客户端版本。修改只对新登录的 session 生效，改了已有账号要重登才会显示新值。"
+              title="登录设备"
+              description="登录 Telegram 时上报的设备信息，会显示在 Telegram「设置 › 设备」列表里，例如 iPhone 15 Pro · iOS 18。修改只对之后新登录的账号生效，已登录的账号要重新登录才会显示新值。"
               meta={
                 <SignalPill
                   tone={(profilesQ.data?.length ?? 0) > 0 ? "primary" : "neutral"}
-                  label="模板数"
+                  label="数量"
                   value={profilesQ.data?.length ?? 0}
                 />
               }
@@ -161,7 +161,7 @@ export function DeviceProfileManager() {
                 profile={p}
                 onSetDefault={() => setDefaultMut.mutate(p.id)}
                 onDelete={() => {
-                  if (confirm(`确认删除「${p.name}」？引用该 profile 的账号会回落到默认。`))
+                  if (confirm(`确认删除登录设备「${p.name}」？使用它的账号会改用默认登录设备。`))
                     deleteMut.mutate(p.id);
                 }}
               />
@@ -169,7 +169,7 @@ export function DeviceProfileManager() {
           </ul>
         ) : (
           <p className="rounded-md border border-dashed py-8 text-center text-sm text-muted-foreground">
-            尚无 profile（迁移会预置 3 条 macOS / iPhone / Windows）
+            还没有登录设备（迁移会预置 macOS / iPhone / Windows 等几条）
           </p>
         )}
       </CardContent>
@@ -251,7 +251,7 @@ function ProfileRow({
                 {profile.device_model} · {profile.system_version} · {profile.app_version}
               </div>
               <div className="text-[11px]">
-                lang: {profile.lang_code} / {profile.system_lang_code}
+                语言代码：{profile.lang_code} / {profile.system_lang_code}
               </div>
             </div>
           ) : null}
@@ -286,7 +286,7 @@ function ProfileRow({
                 className="h-8 px-2 text-destructive hover:text-destructive"
                 onClick={onDelete}
                 disabled={profile.is_default}
-                title={profile.is_default ? "默认 profile 不可删除" : "删除"}
+                title={profile.is_default ? "默认登录设备不可删除" : "删除"}
               >
                 <Trash2 className="h-3.5 w-3.5" />
               </Button>
@@ -359,39 +359,39 @@ function ProfileForm({
           <Input
             value={value.name}
             onChange={(e) => set("name", e.target.value)}
-            placeholder="profile 名称"
+            placeholder="登录设备名称"
           />
         </Field>
       ) : null}
-      <Field label="设备型号 (device_model)" hint="TG 设备列表里的主标题">
+      <Field label="机型" hint="device_model · Telegram 设备列表里的主标题，例如 iPhone 15 Pro">
         <Input
           value={value.device_model}
           onChange={(e) => set("device_model", e.target.value)}
           placeholder="MacBook Pro"
         />
       </Field>
-      <Field label="系统版本 (system_version)" hint="副标题前半段">
+      <Field label="系统版本" hint="system_version · 副标题前半段，例如 iOS 18">
         <Input
           value={value.system_version}
           onChange={(e) => set("system_version", e.target.value)}
           placeholder="macOS 14.5"
         />
       </Field>
-      <Field label="客户端版本 (app_version)" hint="副标题后半段">
+      <Field label="App 版本" hint="app_version · 副标题后半段，例如 Telegram iOS 11.5">
         <Input
           value={value.app_version}
           onChange={(e) => set("app_version", e.target.value)}
           placeholder="Telegram macOS 11.5"
         />
       </Field>
-      <Field label="lang_code" hint="客户端 UI 语言（BCP-47 简写）">
+      <Field label="语言代码" hint="lang_code · App 界面语言，例如 zh">
         <Input
           value={value.lang_code ?? "zh"}
           onChange={(e) => set("lang_code", e.target.value)}
           placeholder="zh"
         />
       </Field>
-      <Field label="system_lang_code" hint="系统语言">
+      <Field label="系统语言代码" hint="system_lang_code · 系统语言，例如 zh-Hans">
         <Input
           value={value.system_lang_code ?? "zh-Hans"}
           onChange={(e) => set("system_lang_code", e.target.value)}
@@ -399,7 +399,7 @@ function ProfileForm({
         />
       </Field>
       {showIsDefault ? (
-        <Field label="设为默认" hint="勾上后其它 profile 自动取消默认">
+        <Field label="设为默认" hint="打开后其它登录设备自动取消默认">
           <div className="flex h-10 items-center">
             <Switch
               checked={value.is_default ?? false}

@@ -89,7 +89,7 @@ async def get_profile(
 ) -> DeviceProfile:
     p = await db.get(DeviceProfile, pid)
     if not p:
-        raise _err("NOT_FOUND", "设备伪装不存在", 404)
+        raise _err("NOT_FOUND", "登录设备不存在", 404)
     return p
 
 
@@ -102,7 +102,7 @@ async def patch_profile(
 ) -> DeviceProfile:
     p = await db.get(DeviceProfile, pid)
     if not p:
-        raise _err("NOT_FOUND", "设备伪装不存在", 404)
+        raise _err("NOT_FOUND", "登录设备不存在", 404)
 
     # 字段更新
     for field in (
@@ -141,7 +141,7 @@ async def set_default(
 ) -> DeviceProfile:
     p = await db.get(DeviceProfile, pid)
     if not p:
-        raise _err("NOT_FOUND", "设备伪装不存在", 404)
+        raise _err("NOT_FOUND", "登录设备不存在", 404)
     await _clear_other_defaults(db, keep_id=pid)
     p.is_default = True
     await db.commit()
@@ -157,7 +157,7 @@ async def set_default(
 async def delete_profile(pid: int, db: DBSession, user: CurrentUser) -> None:
     p = await db.get(DeviceProfile, pid)
     if not p:
-        raise _err("NOT_FOUND", "设备伪装不存在", 404)
+        raise _err("NOT_FOUND", "登录设备不存在", 404)
     if p.is_default:
         # 删掉默认会导致没有 fallback；要求用户先把别的设为默认
         raise _err(

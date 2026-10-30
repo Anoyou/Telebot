@@ -467,7 +467,7 @@ export function SettingsIndex() {
             <SlidersHorizontal className="h-4 w-4" /> 能力与通知
           </TabsTrigger>
           <TabsTrigger value="proxy-identity" className="gap-1.5">
-            <Waypoints className="h-4 w-4" /> 代理与标识
+            <Waypoints className="h-4 w-4" /> 代理与登录设备
           </TabsTrigger>
           <TabsTrigger value="security" className="gap-1.5">
             <UserPlus className="h-4 w-4" /> 风控与限额

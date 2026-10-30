@@ -159,7 +159,9 @@ struct ManagementModuleView: View {
         }
         Section("连接与通知") {
             collection("代理", "/api/proxies", kind: .editable, create: "添加代理", itemPath: "/api/proxies/{id}", symbol: "network")
-            collection("设备配置", "/api/device-profiles", kind: .editable, create: "添加设备配置", itemPath: "/api/device-profiles/{id}", symbol: "iphone.gen3")
+            collection("登录设备", "/api/device-profiles", kind: .editable, create: "添加登录设备", itemPath: "/api/device-profiles/{id}",
+                       explanation: ManagementText.deviceProfileExplanation, symbol: "iphone.gen3")
+                .accessibilityIdentifier("system.deviceProfiles")
             collection("通知 Bot", "/api/notify-bots", kind: .editable, create: "添加通知 Bot", itemPath: "/api/notify-bots/{id}", symbol: "bell.badge")
         }
         Section("权限与限制") {
@@ -186,10 +188,11 @@ struct ManagementModuleView: View {
 
     private func collection(_ title: String, _ path: String, kind: ManagementCollection.Kind = .records,
                             itemsKey: String? = nil, create: String? = nil, itemPath: String? = nil, idField: String = "id",
-                            symbol: String = "list.bullet.rectangle.portrait") -> some View {
+                            explanation: String? = nil, symbol: String = "list.bullet.rectangle.portrait") -> some View {
         NavigationLink {
             ManagementCollectionView(resource: .init(title: title, path: path, kind: kind, itemsKey: itemsKey,
-                create: create.map { .init(title: $0, path: path) }, itemPath: itemPath, idField: idField))
+                create: create.map { ManagementAction(title: $0, path: path, explanation: explanation ?? ManagementText.defaultActionExplanation) },
+                itemPath: itemPath, idField: idField, explanation: explanation))
         } label: { Label(title, systemImage: symbol) }
     }
     private func document(_ title: String, _ path: String, symbol: String = "doc.text", actions: [ManagementAction] = []) -> some View {

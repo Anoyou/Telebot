@@ -170,14 +170,17 @@ struct ManagementItemView: View {
                         ManagementActionLink(action: .init(title: "发送测试通知", path: "/api/notify-bots/\(identifier)/test", explanation: "向所配置的通知接收方发送真实测试消息。"))
                     }
                     if resource.path == "/api/device-profiles" {
-                        ManagementActionLink(action: .init(title: "设为默认设备配置", path: "/api/device-profiles/\(identifier)/default"))
+                        ManagementActionLink(action: .init(title: "设为默认登录设备", path: "/api/device-profiles/\(identifier)/default",
+                            explanation: "之后新登录的账号（未单独选择登录设备时）会使用这台登录设备。"))
                     }
                 }
             }
             if let itemPath {
                 Section("管理") {
                     if model.catalog.operation(path: itemPath, method: resource.editMethod) != nil {
-                        ManagementActionLink(action: .init(title: "编辑", path: itemPath, method: resource.editMethod, schema: resource.ruleSchema, seed: item))
+                        ManagementActionLink(action: .init(title: "编辑", path: itemPath, method: resource.editMethod,
+                            explanation: resource.path == "/api/device-profiles" ? ManagementText.deviceProfileExplanation : ManagementText.defaultActionExplanation,
+                            schema: resource.ruleSchema, seed: item))
                     }
                     if resource.kind != .accountCommands, model.catalog.operation(path: itemPath, method: "DELETE") != nil {
                         ManagementActionLink(action: .init(title: "删除", path: itemPath, method: "DELETE", destructive: true,

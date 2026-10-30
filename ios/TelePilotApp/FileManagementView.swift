@@ -39,7 +39,7 @@ struct FileManagementView: View {
     private let categories = [
         ("account_settings", "账号设置"), ("feature_config", "账号插件配置"), ("plugin_global_configs", "插件全局配置"),
         ("command_templates", "指令模板"), ("llm_providers", "AI 供应商"), ("system_settings", "服务器设置"),
-        ("proxies", "代理"), ("device_profiles", "设备配置"), ("rate_limit_templates", "限流模板"),
+        ("proxies", "代理"), ("device_profiles", "登录设备"), ("rate_limit_templates", "限流模板"),
         ("rate_limit_rules", "限流规则"), ("humanize_configs", "消息频率"), ("ignored_peers", "会话白名单"), ("notify_bots", "通知 Bot")
     ]
     private var title: String {

@@ -1627,7 +1627,7 @@ async def _cmd_status(client, event, args, account_id):
         f"DB 状态：{db_status}\n"
         f"命令前缀：`{prefix}`\n"
         f"代理：{proxy_text}\n"
-        f"设备档案：{profile_text}\n"
+        f"登录设备：{profile_text}\n"
         f"系统：{platform.system()} {platform.release()}\n"
         f"运行时：Python {sys.version.split()[0]} · Telethon {tlv}"
     )

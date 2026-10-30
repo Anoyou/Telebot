@@ -2,13 +2,18 @@ import SwiftUI
 import TelePilotCore
 
 enum ManagementText {
+    static let defaultActionExplanation = "修改会提交到当前连接的服务器。"
+    /// 「登录设备」（第 20 轮前叫「设备配置」，接口仍是 /api/device-profiles）列表与编辑表单顶部的说明。
+    static let deviceProfileExplanation = "登录 Telegram 时上报的设备信息，会显示在 Telegram「设置 › 设备」列表里，例如 iPhone 15 Pro · iOS 18。修改只对之后新登录的账号生效。"
     static let labels: [String: String] = [
         "name": "名称", "display_name": "显示名称", "title": "标题", "description": "说明",
         "enabled": "启用", "status": "状态", "state": "运行状态", "id": "编号", "key": "标识",
         "phone": "手机号", "notes": "备注", "tags": "标签", "config": "配置", "features": "功能",
         "api_id": "Telegram API ID", "api_hash": "Telegram API Hash", "api_key": "API 密钥",
         "api_keys": "API 密钥", "token": "Token", "bot_token": "Bot Token", "password": "密码",
-        "proxy_id": "代理编号", "device_profile_id": "设备配置编号", "template_id": "模板编号",
+        "proxy_id": "代理编号", "device_profile_id": "登录设备编号",
+        "device_model": "机型", "system_version": "系统版本", "app_version": "App 版本", "lang_code": "语言代码",
+        "system_lang_code": "系统语言代码", "is_default": "默认", "template_id": "模板编号",
         "account_id": "账号编号", "account_ids": "账号编号", "from_account_id": "来源账号编号",
         "feature_key": "插件", "plugin_key": "插件标识", "rule_ids": "规则编号", "target_account_ids": "目标账号编号",
         "priority": "优先级", "per_day": "每日上限", "per_hour": "每小时上限", "per_minute": "每分钟上限",
@@ -186,7 +191,7 @@ struct ManagementAction: Identifiable, Hashable {
     let path: String
     var method: String = "POST"
     var destructive = false
-    var explanation: String = "修改会提交到当前连接的服务器。"
+    var explanation: String = ManagementText.defaultActionExplanation
     var schema: JSONValue? = nil
     var seed: JSONValue? = nil
     var envelope: String? = nil

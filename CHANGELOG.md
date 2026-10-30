@@ -25,13 +25,26 @@
 
 ## [Unreleased]
 
+## [0.113.0-beta.6] - 2026-10-30 · patch（补丁预发布） · 「设备配置」改名为「登录设备」（Web + iOS 0.24.2，只改文案）
+
+### 「设备配置」改名为「登录设备」（Web + iOS 0.24.2，位置不变）
+
+- **改名**：设备配置改名为登录设备，位置不变。它指账号登录 Telegram（MTProto）时上报的机型、系统版本、App 版本和语言代码（`device_model` / `system_version` / `app_version` / `lang_code`），也就是 Telegram「设置 › 设备」列表里显示的那一行，不是 HTTP 的 User-Agent。原来各处叫法不一（设备配置、设备伪装、设备伪装库、设备档案、设备标识模板），现在统一叫「登录设备」。
+- **Web**：服务器设置分页「代理与标识」→「代理与登录设备」（网址 `?tab=proxy-identity` 及旧的 `?tab=device` 照旧），卡片标题「设备标识模板」→「登录设备」，顶部说明「登录 Telegram 时上报的设备信息，会显示在 Telegram「设置 › 设备」列表里，例如 iPhone 15 Pro · iOS 18」；新增 / 编辑表单字段改为中文：机型、系统版本、App 版本、语言代码、系统语言代码（原字段名放在提示里）。账号详情分页「出口/伪装」→「代理/登录设备」，卡片与选择器叫「登录设备」，预览「Telegram「设置 › 设备」中将显示」。配置备份类别「设备配置」→「登录设备」（说明：账号登录 Telegram 时上报的机型、系统、App 版本和语言）。账号向导、系统健康卡、使用指南里的「代理与标识」同步改名；登录失败提示改为「请检查「代理与登录设备」里的代理配置」。
+- **iOS 0.24.2**：服务器设置 › 连接与通知「设备配置」→「登录设备」（「添加登录设备」「设为默认登录设备」），列表、添加和编辑表单顶部加同一句说明；字段名显示为机型、系统版本、App 版本、语言代码、系统语言代码、默认；新增账号的选择器「登录设备」（默认项「服务器默认登录设备」）；日志里「设置默认登录设备」与对象名「登录设备」；配置备份类别「登录设备」；字段「登录设备编号」。新 UI 测试 `testDeviceProfilesRenamedToLoginDevice`。
+- **Agent**：技能、工具说明、提示词与操作预览里的「设备档案 / 设备伪装」改称「登录设备」；路由关键词新增「登录设备」「设备配置」（旧词保留）；Telegram 账号信息指令的「设备档案」一行改为「登录设备」。
+- **兼容**：只改文案。接口路径 `/api/device-profiles`、字段名、数据库表 `device_profile`、配置备份 key `device_profiles`、审计动作名都不变，旧客户端与旧备份照常使用。
+- 测试：Playwright `device-rename-r20.spec.ts`（服务器设置分页名、卡片说明、中文字段名、账号详情分页与预览）；`test_accounts.py` 登录失败提示断言同步。
+
 ### iOS 0.24.1：消息预览代码块完整显示、折叠引用「展开」挪到右下角
 
 - **iOS 0.24.1**：`TelegramMessagePreview.swift` 折叠引用（`<blockquote expandable>`）的「展开 / 收起」从引用框左下独占一行改为叠在内容右下角（`overlay(.bottomTrailing)`），控件文字改用 `Text` 插值（箭头 + 不换行空格 + 文字，不再用 `Label`，列表里 `Label` 给图标留整列宽导致间距过大）；最后一块是段落 / 标题时在末尾追加等宽透明占位，放得下与最后一行同行、放不下随文字折到新行，最后一块是列表 / 代码块时另起一行右对齐。代码块原来放在横向 `ScrollView` 里且 `fixedSize(horizontal: true, vertical: false)`，在表单行里纵向被压成一行、多行 `<pre>` 截成「…」；改为整块完整显示、按宽度自动换行（`fixedSize(horizontal: false, vertical: true)`，新标识 `<id>.code.text`），「复制」与链接提示同样改为图标 + 文字紧挨的 `Text`（`inlineIconText`）。预览气泡内强调色（引用竖条与底色、代码块语言名、链接、变量底色）改为 Telegram 名字蓝（`.tint(palette.name)` + 环境值 `telegramAccent`）。UI 测试 `testMessageTemplateLabLivePreviewRenderAndSend` 补断言：展开 / 收起都在引用框右下角且箭头与文字紧挨；`testInteractionTemplatesShowLivePreviewAndFullEditor` 补断言扣款通知代码块全文可见（多行高度、不超出代码框）且「复制」紧挨，夹具扣款通知模板改为真实默认的 `<pre><code>` 两行 + 一段需折行的长文字。不改服务器。
 
+
 ### iOS 0.24.0：交互页补齐「测试模拟通知 Bot」与转账结果通知 Bot 配置
 
 - **iOS 0.24.0**：对照 Web 账号 › Bot（`BotTab`「身份配置」右栏）补齐交互页（`InteractionCenterView`）：新增「真实转账结果通知 Bot」分组（`trusted_bot_ids`，从“高级”页搬来，`interaction.trustedBotIDs`）与「测试模拟通知 Bot」分组（服务器返回有 `has_transfer_bot_token` 时才显示）：`SecretField`「测试模拟通知 Bot Token」（`transfer_bot_token` / `clear_transfer_bot_token`，查看走 `/api/secrets/reveal?kind=transfer_bot_token`）、当前测试 Bot ID（`transfer_bot_id`）、模拟测试群（`transfer_test_chat_ids`，新页 `InteractionTestChatPicker`：会话白名单原生 Toggle 多选 + 手填 Chat ID + 不在白名单的 ID 单列移除，最多 20 个；旧服务器没有该字段时不显示也不提交）、测试 Bot 群成员状态（`transfer_test_chat_memberships`）、清空通知 Bot（确认后清空真实 ID 与测试 Token，点保存生效）。交互 Bot 入群情况改名「监听群成员状态」移入「交互总闸与 Bot」，`unknown` 显示「无法确认」。规则列表补「全部 / 启用 / 暂停」筛选与长按上移 / 下移 / 复制。仍是一次 `PUT /api/accounts/{id}/interaction-bot`，字段与 Web `buildInteractionPayload` 相同，不改服务器。UI 测试新增 `testInteractionTestNotifyBotSection`、`testInteractionTestNotifyBotHiddenOnOldServer`；`ios/DESIGN.md` 对照表补「交互页字段对照」。
+
 
 ## [0.113.0-beta.5] - 2026-10-30 · patch（补丁预发布） · 密钥 / 密码 / Token 输入框统一：按需查看已保存密钥（审计、no-store），iOS 0.23.0
 

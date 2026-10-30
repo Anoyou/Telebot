@@ -288,7 +288,7 @@ export function AccountDetail() {
               <Gauge className="h-4 w-4" /> 风控基础
             </TabsTrigger>
             <TabsTrigger value="proxy" className="shrink-0 gap-1.5">
-              <Network className="h-4 w-4" /> 出口/伪装
+              <Network className="h-4 w-4" /> 代理/登录设备
             </TabsTrigger>
             <TabsTrigger value="ignored" className="shrink-0 gap-1.5">
               <ShieldCheck className="h-4 w-4" /> 允许会话
@@ -723,7 +723,7 @@ export function AccountDetail() {
           </Card>
         </TabsContent>
 
-        {/* 出口 / 代理 + 设备伪装 */}
+        {/* 出口 / 代理 + 登录设备 */}
         <TabsContent value="proxy" className="space-y-4">
           <ProxyTab aid={aid} currentProxyId={acc.proxy_id ?? null} />
           <DeviceProfileTab
@@ -1056,7 +1056,7 @@ function ProxyTab({
   );
 }
 
-// 设备伪装 tab：选 profile + 保存。与 ProxyTab 同位级。
+// 登录设备 tab（第 20 轮前叫「设备伪装」）：选 profile + 保存。与 ProxyTab 同位级。
 //
 // ⚠ 切换 profile 不会让 TG 端立即显示新设备名 —— TG 把设备名绑在 auth_key 上，
 // 切换后必须让账号重新登录（删除/重登）才会重新注册到 TG 那边。
@@ -1082,7 +1082,7 @@ function DeviceProfileTab({
         device_profile_id: selected ? Number(selected) : null,
       }),
     onSuccess: () => {
-      toast.success("已保存。账号下次重新登录时 TG 才会显示新设备名");
+      toast.success("已保存。账号下次重新登录 Telegram 时才会显示新的登录设备");
       qc.invalidateQueries({ queryKey: ["account", aid] });
     },
     onError: (err) => toast.error(getErrMsg(err)),
@@ -1095,17 +1095,17 @@ function DeviceProfileTab({
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-base">设备伪装</CardTitle>
+        <CardTitle className="text-base">登录设备</CardTitle>
         <CardDescription>
-          决定 TG 设备列表里看到的设备名 / 系统 / 客户端版本。空 = 用系统默认 profile。
+          登录 Telegram 时上报的设备信息，会显示在 Telegram「设置 › 设备」列表里，例如 iPhone 15 Pro · iOS 18。不选则跟随默认登录设备。
           <br />
-          ⚠ 切换 profile 对**已登录的 session 无效**；TG 把设备名绑在 auth_key 上，
-          要让 TG 显示新名字必须让账号重新登录。
+          ⚠ 切换只对之后的新登录生效：Telegram 把设备名绑在已登录的会话上，
+          要让 Telegram 显示新名字必须让账号重新登录。
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4 text-sm">
         <div className="space-y-1.5 max-w-xl">
-          <Label className="text-xs text-muted-foreground">设备伪装 profile</Label>
+          <Label className="text-xs text-muted-foreground">登录设备</Label>
           <div className="flex flex-wrap gap-2">
             <Select
               className="min-w-[16rem] flex-1"
@@ -1113,7 +1113,7 @@ function DeviceProfileTab({
               onChange={(e) => setSelected(e.target.value)}
             >
               <option value="">
-                跟随系统默认
+                跟随默认登录设备
                 {defaultProfile ? `（${defaultProfile.name}）` : ""}
               </option>
               {profilesQ.data?.map((p) => (
@@ -1136,7 +1136,7 @@ function DeviceProfileTab({
 
         {previewProfile ? (
           <div className="rounded-lg border bg-muted/30 p-3 text-xs">
-            <div className="mb-1 font-medium">TG 设备列表中将显示：</div>
+            <div className="mb-1 font-medium">Telegram「设置 › 设备」中将显示：</div>
             <div className="font-mono text-foreground">
               {previewProfile.device_model}
             </div>
@@ -1144,13 +1144,13 @@ function DeviceProfileTab({
               {previewProfile.system_version} · {previewProfile.app_version}
             </div>
             <div className="mt-1 text-[11px] text-muted-foreground">
-              lang: {previewProfile.lang_code} / {previewProfile.system_lang_code}
+              语言代码：{previewProfile.lang_code} / {previewProfile.system_lang_code}
             </div>
           </div>
         ) : null}
 
         <div className="border-t pt-3 text-xs text-muted-foreground">
-          要新增 / 修改 profile，请到「服务器设置 → 设备伪装库」。
+          要新增 / 修改登录设备，请到「服务器设置 → 代理与登录设备」。
         </div>
       </CardContent>
     </Card>

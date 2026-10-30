@@ -70,7 +70,7 @@ const CATEGORIES: CategoryDef[] = [
   { key: "rate_limit_templates", label: "风控模板", desc: "限速规则模板" },
   { key: "rate_limit_rules", label: "风控规则", desc: "账号级限速配置" },
   { key: "proxies", label: "代理配置", desc: "账号和模型提供商引用的代理", sensitive: ["password"] },
-  { key: "device_profiles", label: "设备配置", desc: "账号登录使用的设备伪装参数" },
+  { key: "device_profiles", label: "登录设备", desc: "账号登录 Telegram 时上报的机型、系统、App 版本和语言" },
   { key: "feature_registry", label: "插件索引", desc: "插件配置依赖的功能登记信息" },
   {
     key: "plugin_global_configs",
