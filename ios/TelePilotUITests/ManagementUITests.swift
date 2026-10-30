@@ -447,6 +447,7 @@ final class ManagementUITests: XCTestCase {
         app.buttons["确认进入值守"].firstMatch.tap()
         let restore = app.buttons["runtime.restore"]
         XCTAssertTrue(restore.waitForExistence(timeout: 10), "值守中应显示「恢复生产」")
+        reveal(profile, in: app, up: false)
         expectation(for: NSPredicate(format: "label CONTAINS %@", "值守"), evaluatedWith: profile)
         waitForExpectations(timeout: 10)
         reveal(ai, in: app)
@@ -459,6 +460,8 @@ final class ManagementUITests: XCTestCase {
         XCTAssertTrue(confirmRestore.waitForExistence(timeout: 5))
         confirmRestore.tap()
         XCTAssertTrue(app.buttons["runtime.safeWatch"].waitForExistence(timeout: 10))
+        // List 行滚出屏幕后不在无障碍树里：先滚回顶部让运行模式行可见再断言。
+        reveal(profile, in: app, up: false)
         expectation(for: NSPredicate(format: "label CONTAINS %@", "生产"), evaluatedWith: profile)
         waitForExpectations(timeout: 10)
     }
