@@ -13792,6 +13792,11 @@ export interface components {
         _UIPreferencesPatch: {
             /** Mobile Nav Order */
             mobile_nav_order?: string[] | null;
+            /**
+             * Primary Nav
+             * @description 常用入口（桌面侧栏「常用」组与手机底栏共用，有序，最多 4 个）。
+             */
+            primary_nav?: string[] | null;
             /** Provider Order */
             provider_order?: number[] | null;
             /** Sidebar Order */

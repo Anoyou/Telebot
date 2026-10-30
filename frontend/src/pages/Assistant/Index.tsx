@@ -9,6 +9,7 @@ import {
   MessageCircle,
   Server,
   Settings2,
+  Inbox,
   Sparkles,
   Trash2,
 } from "lucide-react";
@@ -62,6 +63,7 @@ import { matrixToPickerItems, type ModelPickerValue } from "@/components/ai/Mode
 import { Composer, type ComposerAttachment } from "@/components/assistant/Composer";
 import { AgentSkillsDialog } from "@/components/assistant/AgentSkillsSection";
 import { AgentMark } from "@/components/assistant/AgentMark";
+import { usePendingActionsCount } from "@/components/assistant/usePendingActionsCount";
 import { useAssistantDock } from "@/components/assistant/AssistantDock";
 import {
   AGENT_ACCOUNT_PARAM,
@@ -104,6 +106,7 @@ import {
   toApiModelSelection,
   type SessionModelSelection,
 } from "./sessionModelSelection";
+import { confirmDialog } from "@/components/ui/confirm-dialog";
 
 const ACTIVE_RUNS_KEY = "telepilot.system-agent.active-runs.v1";
 const DRAFTS_KEY = "telepilot.system-agent.drafts.v1";
@@ -2015,6 +2018,7 @@ export function AssistantIndex() {
           <Sparkles className="h-4 w-4" />
           Skills
         </Button>
+        <PendingActionsLink className="mr-2 h-9 shrink-0 px-2.5" />
         </div>
         <div data-assistant-mobile-settings className={`${mobileHeaderExpanded && !configOpen ? "block" : "hidden"} border-t p-2.5 sm:block sm:border-t-0 sm:p-0`}>
         <div className="flex items-center justify-between gap-2">
@@ -2030,6 +2034,8 @@ export function AssistantIndex() {
             </Link>
           </div>
           <div className="flex shrink-0 items-center gap-1.5">
+            {/* 「待确认」放在 Skills 左侧，Skills 仍紧挨「配置」 */}
+            <PendingActionsLink className="hidden h-8 px-2.5 sm:inline-flex" />
             <Button
               type="button"
               variant="outline"
@@ -2347,8 +2353,8 @@ export function AssistantIndex() {
                         variant="ghost"
                         className="h-7 w-7 shrink-0 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
                         disabled={deleteMemoryMut.isPending}
-                        onClick={() => {
-                          if (confirm("确认删除这条记忆？")) deleteMemoryMut.mutate(item.id);
+                        onClick={async () => {
+                          if (await confirmDialog({ title: "删除这条记忆？", description: "Agent 之后不会再参考这条长期记忆。", confirmLabel: "删除", tone: "danger" })) deleteMemoryMut.mutate(item.id);
                         }}
                         aria-label="删除长期记忆"
                         title="删除长期记忆"
@@ -2594,3 +2600,21 @@ export function AssistantIndex() {
 }
 
 export default AssistantIndex;
+
+/** Agent 页内「待确认」入口（第 20 轮第二批：待确认从侧栏一级挪到 Agent 上，/assistant/inbox 地址不变）。 */
+function PendingActionsLink({ className }: { className?: string }) {
+  const pendingCount = usePendingActionsCount();
+  return (
+    <Button asChild type="button" variant="outline" size="sm" className={className}>
+      <Link to="/assistant/inbox" data-assistant-inbox-link aria-label={pendingCount > 0 ? `待确认（${pendingCount}）` : "待确认"}>
+        <Inbox className="h-4 w-4" />
+        待确认
+        {pendingCount > 0 ? (
+          <span className="ml-0.5 inline-flex min-w-[1.15rem] items-center justify-center rounded-full bg-destructive px-1 text-[10px] font-medium leading-4 text-destructive-foreground">
+            {pendingCount > 99 ? "99+" : pendingCount}
+          </span>
+        ) : null}
+      </Link>
+    </Button>
+  );
+}

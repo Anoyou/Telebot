@@ -80,7 +80,9 @@ test.describe("移动端交互细节", () => {
   });
 
   test("侧栏明确展示更新日志入口并可打开内容", async ({ page }, testInfo) => {
+    // 第 20 轮第二批：手机（<sm）由底栏「更多」承担导航，汉堡抽屉只在平板宽度（sm–md）保留
     test.skip(testInfo.project.name !== "mobile", "仅移动视口");
+    await page.setViewportSize({ width: 700, height: 900 });
     const fixture = await installApiFixture(page);
     await page.goto("/ledger", { waitUntil: "networkidle" });
 
@@ -712,7 +714,7 @@ test.describe("移动端交互细节", () => {
     await expect(statsSection.locator('[data-plugin-card-list="deprecations"]')).toContainText("ai.tag_alias");
     await expect(statsSection.getByRole("button", { name: "清零" })).toBeVisible();
 
-    const footerButtons = ["查看最近 trace", "去插件中心", "关闭"];
+    const footerButtons = ["查看最近 trace", "去启用与配置", "关闭"];
     const detailFooter = dialog.locator("[data-plugin-detail-footer]");
     const tops = await Promise.all(footerButtons.map(async (name) => {
       const box = await detailFooter.getByRole("button", { name, exact: true }).boundingBox();
@@ -1215,7 +1217,8 @@ test.describe("移动端交互细节", () => {
     await expect(page.getByRole("heading", { name: "指令与任务" })).toBeVisible();
     await expect(page.getByRole("tab", { name: "自定义指令" })).toBeVisible();
     await expect(page.getByRole("tab", { name: "定时任务" })).toBeVisible();
-    await expect(page.getByRole("tab", { name: "自动指令白名单" })).toBeVisible();
+    // 第 20 轮第二批：自动指令白名单并入「定时任务」，不再单独占一个分页
+    await expect(page.getByRole("tab", { name: "自动指令白名单" })).toHaveCount(0);
     await expect(page.getByRole("button", { name: /内置指令（只读）/ })).toHaveAttribute("aria-expanded", "false");
     await expect(page.getByText("作用：定义能做什么", { exact: true })).toBeVisible();
     await expect(page.getByText("插件中心", { exact: true })).toHaveCount(0);
@@ -1231,10 +1234,6 @@ test.describe("移动端交互细节", () => {
     await expect(page.getByText("作用：定义何时执行", { exact: true })).toBeVisible();
     await expect(page.getByRole("combobox")).toBeVisible();
 
-    await page.getByRole("tab", { name: "自动指令白名单" }).click();
-    await expect(page).toHaveURL(/\/operations\/auto-command-whitelist$/);
-    await expect(workspaceShell).toHaveAttribute("data-runtime-marker", "stable");
-    await expect(page.getByText("作用：定义哪些指令允许被自动执行", { exact: true })).toBeVisible();
     await expect(page.getByLabel("页面加载中")).toHaveCount(0);
 
     await page.goto("/plugins/templates", { waitUntil: "networkidle" });
@@ -1348,12 +1347,13 @@ test.describe("移动端交互细节", () => {
         await route.fallback();
         return;
       }
-      const payload = route.request().postDataJSON() as { ui_preferences?: { sidebar_order?: string[] } };
-      savedOrder = payload.ui_preferences?.sidebar_order ?? null;
+      // 第 20 轮第二批：「常用」组内拖动保存为 primary_nav（常用入口），其它组保存 sidebar_order
+      const payload = route.request().postDataJSON() as { ui_preferences?: { primary_nav?: string[] } };
+      savedOrder = payload.ui_preferences?.primary_nav ?? null;
       await route.fulfill({
         status: 200,
         contentType: "application/json",
-        body: JSON.stringify({ timezone: "Asia/Shanghai", login_security: {}, ui_preferences: { sidebar_order: savedOrder } }),
+        body: JSON.stringify({ timezone: "Asia/Shanghai", login_security: {}, ui_preferences: { sidebar_order: [], primary_nav: savedOrder } }),
       });
     });
     await page.goto("/overview", { waitUntil: "networkidle" });

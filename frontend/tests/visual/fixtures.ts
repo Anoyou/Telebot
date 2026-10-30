@@ -420,6 +420,7 @@ function jsonResponse(pathname: string): unknown | undefined {
     workers: { total: 0, by_status: {}, runtime_failing: 0, runtime_desired_running: 0, runtime_desired_running_alive: 0 },
     codex_gateway: { state: "not_required", required: false, provider_count: 0, revision: 0 },
   };
+  if (pathname === "/api/notify-bots") return [];
   if (pathname === "/api/accounts/1") return { ...accountFixture, notes: null, template_id: null, proxy_id: null, device_profile_id: null };
   if (pathname === "/api/accounts/1/features") return [];
   if (pathname === "/api/accounts/1/commands") return [];
@@ -433,6 +434,28 @@ function jsonResponse(pathname: string): unknown | undefined {
 
 // 第 20 轮：已保存密钥按需查看（GET /api/secrets/reveal）。每个 kind 一个固定明文，
 // 真实服务器每次读取都会写审计并带 no-store。
+// 第 20 轮 Web IA 第二批：Agent 待确认角标与「常用入口」偏好。
+export const pendingActionsFixture = [1, 2].map((index) => ({
+  id: `act-${index}`,
+  session_id: "s-1",
+  account_id: 1,
+  channel: "web",
+  tool_name: "update_plugin_config",
+  summary: `示例待确认操作 ${index}`,
+  preview: {},
+  risk: index === 1 ? "dangerous" : "normal",
+  status: "pending",
+  expires_at: "2026-10-31T12:00:00+08:00",
+  created_at: "2026-10-31T10:00:00+08:00",
+  session_title: "示例会话",
+}));
+
+export const settingsWithPrimaryNav = (primaryNav: string[]) => ({
+  timezone: "Asia/Shanghai",
+  login_security: {},
+  ui_preferences: { sidebar_order: [], mobile_nav_order: [], primary_nav: primaryNav, provider_order: [] },
+});
+
 export const SECRET_REVEAL_FIXTURE: Record<string, string> = {
   interaction_bot_token: "7000000001:AAFixtureInteractionToken",
   transfer_bot_token: "7000000004:AAFixtureTransferToken",

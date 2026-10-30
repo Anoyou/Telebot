@@ -23302,6 +23302,22 @@
             ],
             "title": "Mobile Nav Order"
           },
+          "primary_nav": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 4,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "常用入口（桌面侧栏「常用」组与手机底栏共用，有序，最多 4 个）。",
+            "title": "Primary Nav"
+          },
           "provider_order": {
             "anyOf": [
               {
@@ -23323,7 +23339,7 @@
                 "items": {
                   "type": "string"
                 },
-                "maxItems": 10,
+                "maxItems": 12,
                 "type": "array"
               },
               {
@@ -23372,7 +23388,7 @@
   },
   "info": {
     "title": "TelePilot",
-    "version": "0.113.0-beta.7"
+    "version": "0.114.0-beta.1"
   },
   "openapi": "3.1.0",
   "paths": {

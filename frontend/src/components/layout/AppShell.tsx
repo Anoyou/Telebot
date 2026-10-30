@@ -5,14 +5,15 @@ import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react"
 import { flushSync } from "react-dom";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { History, MoreHorizontal } from "lucide-react";
+import { BookOpen, Github, History, MoreHorizontal } from "lucide-react";
 
 import {
   MobileSidebar,
   Sidebar,
-  mobileMoreNavForCapabilities,
-  mobilePrimaryNavForCapabilities,
+  pendingBadgeText,
+  useNavModel,
 } from "./Sidebar";
+import { NAV_GROUP_LABELS } from "@/lib/navGroups";
 import { TopBar } from "./TopBar";
 import { GlobalAlertBar } from "./GlobalAlertBar";
 import {
@@ -22,13 +23,15 @@ import {
 } from "@/components/assistant/AssistantDock";
 import { AssistantPet, AssistantPetSprite } from "@/components/assistant/AssistantPet";
 import { fetchMe } from "@/lib/auth";
-import { getBackendVersion, getPlatformCapabilities, getSystemSettings } from "@/api/system";
-import { capabilityEnabledMap } from "@/lib/navigation";
+import { getBackendVersion } from "@/api/system";
 import { Skeleton } from "@/components/ui/misc";
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
@@ -37,12 +40,14 @@ import { formatRuntimeVersionLabel } from "@/lib/runtime-version";
 
 const AssistantIndex = lazy(() => import("@/pages/Assistant/Index").then((module) => ({ default: module.AssistantIndex })));
 const ChangelogMenu = lazy(() => import("./ChangelogMenu"));
+const UsageGuideMenu = lazy(() => import("./UsageGuideMenu"));
 
 type MobileScrollEdge = "top" | "bottom" | null;
 
 export function AppShell() {
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [mobileChangelogOpen, setMobileChangelogOpen] = useState(false);
+  const [mobileGuideOpen, setMobileGuideOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileScrollEdge, setMobileScrollEdge] = useState<MobileScrollEdge>(null);
   const mainRef = useRef<HTMLElement>(null);
@@ -74,16 +79,7 @@ export function AppShell() {
     queryKey: ["auth", "me"],
     queryFn: fetchMe,
   });
-  const settingsQ = useQuery({
-    queryKey: ["system", "settings"],
-    queryFn: getSystemSettings,
-    staleTime: 30_000,
-  });
-  const capsQ = useQuery({
-    queryKey: ["system", "capabilities"],
-    queryFn: getPlatformCapabilities,
-    staleTime: 15_000,
-  });
+  const navModel = useNavModel();
   const versionQ = useQuery({
     queryKey: ["system", "version"],
     queryFn: getBackendVersion,
@@ -156,10 +152,12 @@ export function AppShell() {
     };
   }, [isLoading]);
 
-  const enabled = capabilityEnabledMap(capsQ.data, settingsQ.data?.ai_enabled ?? true);
-  const mobilePreferredOrder = settingsQ.data?.ui_preferences?.mobile_nav_order;
-  const mobileNavItems = mobilePrimaryNavForCapabilities(enabled, mobilePreferredOrder);
-  const mobileMoreNavItems = mobileMoreNavForCapabilities(enabled, mobilePreferredOrder);
+  // 手机底栏 = 「常用入口」（与桌面侧栏第一组同一份偏好）；其余入口按「管理」「工具与设置」两组放进「更多」。
+  const mobileNavItems = navModel.groups.primary;
+  const mobileMoreGroups = (["manage", "tools"] as const)
+    .map((key) => ({ key, items: navModel.groups[key] }))
+    .filter((group) => group.items.length > 0);
+  const mobileMoreNavItems = mobileMoreGroups.flatMap((group) => group.items);
   const mobileMoreActive = mobileMoreNavItems.some((item) =>
     isMobileNavActive(item.to, item.end, mobileActivePath),
   );
@@ -211,6 +209,8 @@ export function AppShell() {
             <main
               ref={mainRef}
               data-app-main
+              // 手机去掉顶栏汉堡后，部分页面主区域内可能没有可聚焦元素；让滚动区本身可被键盘聚焦（axe scrollable-region-focusable）
+              tabIndex={0}
               className="
                 app-main
                 relative flex-1 overflow-auto
@@ -307,24 +307,43 @@ export function AppShell() {
                 align="end"
                 sideOffset={12}
                 collisionPadding={12}
-                className="mb-2 w-56 p-1.5"
+                className="mb-2 max-h-[min(70dvh,32rem)] w-60 overflow-auto p-1.5"
+                // 内容超出时可滚动；tabIndex=0 让滚动区本身可被键盘聚焦（axe scrollable-region-focusable）
+                tabIndex={0}
               >
-                {mobileMoreNavItems.map((item) => {
-                  const active = isMobileNavActive(item.to, item.end, mobileActivePath);
-                  return (
-                    <DropdownMenuItem
-                      key={item.to}
-                      onClick={() => {
-                        flushSync(() => setMobileActivePath(item.to));
-                        navigate(item.to);
-                      }}
-                      className={cn("min-h-11 gap-3 rounded-lg px-3 text-sm", active && "bg-accent text-accent-foreground")}
-                    >
-                      <item.icon className="h-4 w-4 shrink-0" />
-                      <span className="truncate">{item.label}</span>
-                    </DropdownMenuItem>
-                  );
-                })}
+                {mobileMoreGroups.map((group, index) => (
+                  <DropdownMenuGroup key={group.key} aria-label={NAV_GROUP_LABELS[group.key]}>
+                    {index > 0 ? <DropdownMenuSeparator /> : null}
+                    <DropdownMenuLabel className="px-3 pb-1 pt-1.5 text-xs font-semibold text-muted-foreground">
+                      {NAV_GROUP_LABELS[group.key]}
+                    </DropdownMenuLabel>
+                    {group.items.map((item) => {
+                      const active = isMobileNavActive(item.to, item.end, mobileActivePath);
+                      return (
+                        <DropdownMenuItem
+                          key={item.to}
+                          data-mobile-more-path={item.to}
+                          onClick={() => {
+                            flushSync(() => setMobileActivePath(item.to));
+                            navigate(item.to);
+                          }}
+                          className={cn("min-h-11 gap-3 rounded-lg px-3 text-sm", active && "bg-accent text-accent-foreground")}
+                        >
+                          <item.icon className="h-4 w-4 shrink-0" />
+                          <span className="truncate">{item.label}</span>
+                        </DropdownMenuItem>
+                      );
+                    })}
+                  </DropdownMenuGroup>
+                ))}
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  onSelect={() => setMobileGuideOpen(true)}
+                  className="min-h-11 gap-3 rounded-lg px-3 text-sm"
+                >
+                  <BookOpen className="h-4 w-4 shrink-0" />
+                  <span className="min-w-0 flex-1 truncate">使用指南</span>
+                </DropdownMenuItem>
                 <DropdownMenuItem
                   onSelect={() => setMobileChangelogOpen(true)}
                   className="min-h-11 gap-3 rounded-lg px-3 text-sm"
@@ -333,12 +352,26 @@ export function AppShell() {
                   <span className="min-w-0 flex-1 truncate">更新日志</span>
                   <span className="text-xs text-muted-foreground">{runtimeVersionLabel}</span>
                 </DropdownMenuItem>
+                <DropdownMenuItem asChild className="min-h-11 gap-3 rounded-lg px-3 text-sm">
+                  <a href="https://github.com/Anoyou/Telebot" target="_blank" rel="noreferrer">
+                    <Github className="h-4 w-4 shrink-0" />
+                    <span className="min-w-0 flex-1 truncate">GitHub</span>
+                  </a>
+                </DropdownMenuItem>
               </DropdownMenuContent>
               </DropdownMenu>
               </div>
-              <MobileAssistantButton />
+              {navModel.agentEnabled ? <MobileAssistantButton pendingCount={navModel.pendingCount} /> : null}
             </div>
           </nav>
+          <Dialog open={mobileGuideOpen} onOpenChange={setMobileGuideOpen}>
+            <DialogContent className="max-h-[calc(100dvh-2rem-env(safe-area-inset-top)-env(safe-area-inset-bottom))] w-[calc(100vw-1.5rem)] max-w-lg overflow-y-auto p-0">
+              <DialogTitle className="sr-only">使用指南</DialogTitle>
+              <Suspense fallback={<div className="p-4 text-sm text-muted-foreground">正在加载使用指南…</div>}>
+                <UsageGuideMenu />
+              </Suspense>
+            </DialogContent>
+          </Dialog>
           <Dialog open={mobileChangelogOpen} onOpenChange={setMobileChangelogOpen}>
             <DialogContent className="max-h-[calc(100dvh-2rem-env(safe-area-inset-top)-env(safe-area-inset-bottom))] w-[calc(100vw-1.5rem)] max-w-lg overflow-y-auto p-0">
               <DialogTitle className="sr-only">更新日志</DialogTitle>
@@ -353,7 +386,7 @@ export function AppShell() {
   );
 }
 
-function MobileAssistantButton() {
+function MobileAssistantButton({ pendingCount = 0 }: { pendingCount?: number }) {
   const { collapsed, setCollapsed, streaming, outcomeSignal } = useAssistantDock();
   const [mobileVisible, setMobileVisible] = useState(() => (
     typeof window !== "undefined" && window.matchMedia("(max-width: 639px)").matches
@@ -400,7 +433,7 @@ function MobileAssistantButton() {
     <button
       type="button"
       data-assistant-mobile-button
-      aria-label={collapsed ? "打开 Agent" : "关闭 Agent"}
+      aria-label={`${collapsed ? "打开 Agent" : "关闭 Agent"}${pendingCount > 0 ? `（${pendingCount} 条待确认）` : ""}`}
       aria-expanded={!collapsed}
       aria-controls={ASSISTANT_SURFACE_ID}
       onClick={() => setCollapsed(!collapsed)}
@@ -415,6 +448,15 @@ function MobileAssistantButton() {
       {notice ? (
         <span aria-hidden="true" data-assistant-mobile-notice={notice} className="assistant-nav-orb-notice">
           {notice === "complete" ? "完成啦" : notice === "failed" ? "出错了" : "我在"}
+        </span>
+      ) : null}
+      {pendingCount > 0 ? (
+        <span
+          aria-hidden="true"
+          data-assistant-pending-badge
+          className="absolute right-0.5 top-0.5 z-10 inline-flex min-w-[1.15rem] items-center justify-center rounded-full bg-destructive px-1 text-[10px] font-medium leading-4 text-destructive-foreground"
+        >
+          {pendingBadgeText(pendingCount)}
         </span>
       ) : null}
       <span className="relative grid place-items-center">

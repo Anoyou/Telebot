@@ -43,6 +43,8 @@ import {
   RulePageHeader,
   useRuleCrud,
 } from "../_shared";
+import { confirmDialog } from "@/components/ui/confirm-dialog";
+import { EmptyState } from "@/components/feedback/EmptyState";
 
 // rule.config 默认值
 function defaultConfig(): AutoReplyRuleConfig {
@@ -248,7 +250,7 @@ export function AutoReplyConfig() {
         <CardContent>
           <Button
             variant="outline"
-            onClick={() => nav(`/operations/auto-command-whitelist?aid=${aid}`)}
+            onClick={() => nav(`/operations/scheduler?aid=${aid}&section=whitelist`)}
           >
             配置自动指令白名单
           </Button>
@@ -321,8 +323,8 @@ export function AutoReplyConfig() {
                             size="sm"
                             variant="ghost"
                             className="text-destructive"
-                            onClick={() => {
-                              if (confirm(`删除规则 ${r.name}？`)) crud.removeRule(r.id);
+                            onClick={async () => {
+                              if (await confirmDialog({ title: `删除规则「${r.name}」？`, description: "删除后不可恢复。", confirmLabel: "删除", tone: "danger" })) crud.removeRule(r.id);
                             }}
                           >
                             <Trash2 className="mr-1 h-3.5 w-3.5" /> 删除
@@ -335,9 +337,7 @@ export function AutoReplyConfig() {
               </TableBody>
             </Table>
           ) : (
-            <p className="py-8 text-center text-sm text-muted-foreground">
-              暂无规则，点击右上角「新建规则」
-            </p>
+            <EmptyState title="还没有规则" description="点右上角「新建规则」添加第一条。" />
           )}
         </CardContent>
       </Card>

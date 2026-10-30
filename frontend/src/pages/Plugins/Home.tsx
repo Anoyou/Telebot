@@ -78,6 +78,7 @@ import { AccountRuntimePanel } from "./AccountRuntimePanel";
 import { AskAgentButton } from "@/components/assistant/AskAgentButton";
 import { useAgentPageAccount } from "@/components/assistant/AssistantDock";
 import { PluginWorkspaceHeader } from "./WorkspaceHeader";
+import { confirmDialog } from "@/components/ui/confirm-dialog";
 
 type ModuleCategory = "direct_passthrough" | "interactive" | "automation" | "utility";
 type ModuleCategoryFilter = "all" | ModuleCategory;
@@ -198,9 +199,9 @@ function moduleUpdateMessage(feature: FeatureInfo) {
   const current = moduleVersionLabel(feature.version);
   const latest = moduleVersionLabel(feature.latest_version);
   if (feature.latest_version) {
-    return `当前 ${current}，远程 ${latest}；请到“插件管理”更新。`;
+    return `当前 ${current}，远程 ${latest}；请到「已安装」更新。`;
   }
-  return "远程插件有新版，请到“插件管理”更新。";
+  return "远程插件有新版，请到「已安装」更新。";
 }
 
 function formatCompactNumber(value: number) {
@@ -408,11 +409,11 @@ export function PluginsHome() {
     },
     onError: (error) => toast.error(error instanceof Error ? error.message : "批量操作失败"),
   });
-  const runBatchInstallAction = (enabled: boolean) => {
+  const runBatchInstallAction = async (enabled: boolean) => {
     const keys = Array.from(selectedPluginKeys);
     if (!keys.length) return toast.info("请先选择插件");
     const action = enabled ? "全局启用" : "全局停用";
-    if (!window.confirm(`${action}所选 ${keys.length} 个插件？账号级配置不会被覆盖。`)) return;
+    if (!(await confirmDialog({ title: `${action}所选 ${keys.length} 个插件？`, description: "账号级配置不会被覆盖。", confirmLabel: action, tone: enabled ? "default" : "danger" }))) return;
     batchInstallMutation.mutate({ keys, enabled });
   };
   const visibleCategoryMeta = selectedCategory === "all"
@@ -464,7 +465,7 @@ export function PluginsHome() {
             </CardDescription>
           </CardHeader>
           <CardContent className="pt-0 text-sm text-warning">
-            如需恢复，请确认已在“插件管理”中安装 Codex 图片生成，并检查该账号的 Codex 配置或运行日志。
+            如需恢复，请确认已在「已安装」中安装 Codex 图片生成，并检查该账号的 Codex 配置或运行日志。
           </CardContent>
         </Card>
       ) : null}
@@ -544,7 +545,7 @@ export function PluginsHome() {
               <TabsList aria-label="切换插件视图">
                 <TabsTrigger value="cards" className="min-w-0 flex-1 gap-1.5 px-2.5 sm:flex-none">
                   <Rows3 className="h-4 w-4" />
-                  卡片视图<span className="hidden sm:inline">（功能分类）</span>
+                  卡片
                 </TabsTrigger>
                 <TabsTrigger value="tree" className="min-w-0 flex-1 gap-1.5 px-2.5 sm:flex-none">
                   <Waypoints className="h-4 w-4" />
@@ -877,12 +878,12 @@ function GuideContextCard({
       </div>
       <div className="mb-2 text-sm font-semibold">3. 启用插件或自定义指令</div>
       <p className="text-xs leading-relaxed text-muted-foreground">
-        这一页主要看三处：先在上方选账号；再看下方插件卡片，按账号启用和配置；需要新插件时点“插件市场”或“插件管理”安装。自定义指令在侧栏「指令与任务」里。
+        这一页主要看三处：先在上方选账号；再看下方插件卡片，按账号启用和配置；需要新插件时点「市场」安装，更新和卸载在「已安装」。自定义指令在侧栏「指令与任务」里。
       </p>
       <div className="mt-3 grid gap-2 text-xs text-muted-foreground sm:grid-cols-3">
         <div className="rounded-lg border bg-muted/30 p-2">A. 选择账号</div>
         <div className="rounded-lg border bg-muted/30 p-2">B. 插件启用状态</div>
-        <div className="rounded-lg border bg-muted/30 p-2">C. 插件管理</div>
+        <div className="rounded-lg border bg-muted/30 p-2">C. 市场 / 已安装</div>
       </div>
       <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-muted">
         <div

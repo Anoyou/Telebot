@@ -74,6 +74,7 @@ import type {
   LLMProviderOut,
 } from "@/api/types";
 import { getErrMsg } from "@/lib/api";
+import { confirmDialog } from "@/components/ui/confirm-dialog";
 
 // 指令名仅允许 [a-zA-Z0-9_]，与后端正则对齐
 const NAME_RE = /^[a-zA-Z0-9_]{1,64}$/;
@@ -871,11 +872,14 @@ export function CommandTemplates() {
                         variant="ghost"
                         size="sm"
                         disabled={deleteMut.isPending}
-                        onClick={() => {
+                        onClick={async () => {
                           if (
-                            confirm(
-                              `确认删除模板「${t.name}」？所有启用此模板的账号都会失去这个指令`,
-                            )
+                            await confirmDialog({
+                              title: `删除指令「${t.name}」？`,
+                              description: "所有启用这个指令的账号都会失去它，删除后不可恢复。",
+                              confirmLabel: "删除",
+                              tone: "danger",
+                            })
                           ) {
                             deleteMut.mutate(t.id);
                           }
@@ -944,11 +948,14 @@ export function CommandTemplates() {
                         size="sm"
                         className="border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive"
                         disabled={deleteMut.isPending}
-                        onClick={() => {
+                        onClick={async () => {
                           if (
-                            confirm(
-                              `确认删除模板「${t.name}」？所有启用此模板的账号都会失去这个指令`,
-                            )
+                            await confirmDialog({
+                              title: `删除指令「${t.name}」？`,
+                              description: "所有启用这个指令的账号都会失去它，删除后不可恢复。",
+                              confirmLabel: "删除",
+                              tone: "danger",
+                            })
                           ) {
                             deleteMut.mutate(t.id);
                           }

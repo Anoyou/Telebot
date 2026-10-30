@@ -51,6 +51,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { getErrMsg } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { confirmDialog } from "@/components/ui/confirm-dialog";
 
 type FilterState = {
   since: string;
@@ -166,8 +167,8 @@ export function LedgerPage() {
     manualPaidMut.mutate({ id: item.id, note });
   };
 
-  const handleReset = () => {
-    if (!window.confirm("确认清空资金台账与运营统计？流水、趋势、开局统计和待补付记录都会被永久删除，此操作不可恢复。")) return;
+  const handleReset = async () => {
+    if (!(await confirmDialog({ title: "清空资金台账与运营统计？", description: "流水、趋势、开局统计和待补付记录都会被永久删除，此操作不可恢复。", confirmLabel: "永久清空", tone: "danger" }))) return;
     resetMut.mutate();
   };
 

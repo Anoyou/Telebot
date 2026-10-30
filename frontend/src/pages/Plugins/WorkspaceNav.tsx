@@ -46,11 +46,11 @@ export function PluginWorkspaceNav({
         <TabsList>
           <TabsTrigger value="home" className="gap-1.5">
             <Boxes className="h-4 w-4" />
-            插件中心
+            启用与配置
           </TabsTrigger>
           <TabsTrigger value="market" className="gap-1.5" data-testid="plugin-workspace-market-tab">
             <Store className="h-4 w-4" />
-            插件市场
+            市场
             {updates > 0 && (
               <span
                 className="ml-0.5 rounded-full bg-primary px-1.5 text-[10px] font-semibold leading-4 text-primary-foreground"
@@ -62,7 +62,7 @@ export function PluginWorkspaceNav({
           </TabsTrigger>
           <TabsTrigger value="manage" className={`gap-1.5 ${guideActive ? "siri-glow" : ""}`}>
             <PackagePlus className="h-4 w-4" />
-            插件管理
+            已安装
           </TabsTrigger>
         </TabsList>
       </Tabs>

@@ -197,9 +197,12 @@ async def test_system_settings_ui_preferences_roundtrip(monkeypatch) -> None:
     assert result["ui_preferences"] == {
         "sidebar_order": ["/ai", "/operations", "/plugins", "/settings"],
         "mobile_nav_order": ["/ai", "/plugins", "/overview", "/interaction"],
+        "primary_nav": [],
         "provider_order": [9, 3, 12],
     }
-    assert db.rows["ui_preferences"].value == result["ui_preferences"]
+    assert db.rows["ui_preferences"].value == {
+        key: value for key, value in result["ui_preferences"].items() if key != "primary_nav"
+    }
     audit.assert_awaited_once()
 
 
@@ -310,3 +313,37 @@ async def test_system_settings_login_security_defaults_off_and_roundtrip(monkeyp
     assert stored["recovery_code_ttl_seconds"] == 1200
     assert result["login_security"]["totp_enabled"] is True
     assert result["login_security"]["totp_failed_attempt_threshold"] == 4
+
+
+@pytest.mark.asyncio
+async def test_system_settings_primary_nav_and_accounts_route(monkeypatch) -> None:
+    """第 20 轮：常用入口 primary_nav（最多 4 个一级/二级入口）与侧栏新增的 /accounts。"""
+    db = _FakeSettingsDB()
+    monkeypatch.setattr(rate_limit, "_audit", AsyncMock())
+
+    result = await rate_limit.patch_system_settings(
+        rate_limit._SettingsPatch(
+            ui_preferences=rate_limit._UIPreferencesPatch(
+                primary_nav=["/overview", "/plugins", "/accounts"],
+                sidebar_order=["/accounts", "/ai", "/logs"],
+            )
+        ),
+        db,  # type: ignore[arg-type]
+        SimpleNamespace(id=1),
+    )
+    assert result["ui_preferences"]["primary_nav"] == ["/overview", "/plugins", "/accounts"]
+    assert result["ui_preferences"]["sidebar_order"] == ["/accounts", "/ai", "/logs"]
+
+    # 三级入口不能选进常用
+    with pytest.raises(HTTPException) as exc_info:
+        await rate_limit.patch_system_settings(
+            rate_limit._SettingsPatch(
+                ui_preferences=rate_limit._UIPreferencesPatch(primary_nav=["/settings"]),
+            ),
+            db,  # type: ignore[arg-type]
+            SimpleNamespace(id=1),
+        )
+    assert exc_info.value.status_code == 400
+
+    with pytest.raises(ValidationError):
+        rate_limit._UIPreferencesPatch(primary_nav=["/ai", "/plugins", "/overview", "/logs", "/ledger"])

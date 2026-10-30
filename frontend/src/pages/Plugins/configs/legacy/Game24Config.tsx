@@ -154,7 +154,7 @@ export function Game24ConfigPage() {
   return (
     <div className="space-y-6 pb-24">
       <div className="flex flex-wrap items-center gap-3">
-        <Button variant="default" size="sm" className="gap-1.5 shadow-sm" onClick={() => confirmDiscardChanges(dirty) && nav(backTarget.backHref)}>
+        <Button variant="default" size="sm" className="gap-1.5 shadow-sm" onClick={() => void confirmDiscardChanges(dirty).then((ok) => ok && nav(backTarget.backHref))}>
           <ArrowLeft className="h-4 w-4" /> {backTarget.backLabel}
         </Button>
         <div className="min-w-0">

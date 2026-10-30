@@ -23,6 +23,7 @@ import {
   type CardTone,
 } from "@/lib/pluginCards";
 import { cn } from "@/lib/utils";
+import { confirmDialog } from "@/components/ui/confirm-dialog";
 
 // 插件原生卡片（ui.cards）：Web 与 iOS 按同一份契约原生渲染，不为单个插件写页面。
 // 数据逐卡读取，失败只影响那一张卡（「已停止工作 · 重试」）。
@@ -175,8 +176,8 @@ export function PluginCardView({
               model={model}
               blockId={String((card.blocks[index] as CardBlock)?.id ?? index)}
               busyAction={actionMut.isPending ? actionMut.variables : undefined}
-              onAction={(actionId, confirm) => {
-                if (confirm && !window.confirm(confirm)) return;
+              onAction={async (actionId, confirmText) => {
+                if (confirmText && !(await confirmDialog({ title: "确认执行这个操作？", description: confirmText, confirmLabel: "执行" }))) return;
                 actionMut.mutate(actionId);
               }}
             />

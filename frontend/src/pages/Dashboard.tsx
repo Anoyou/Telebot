@@ -54,6 +54,7 @@ import { listLLMProviders } from "@/api/commands";
 import { getResourceDashboard, getSystemSettings } from "@/api/system";
 import type { ResourceDashboard } from "@/api/types";
 import { cn } from "@/lib/utils";
+import { EmptyState } from "@/components/feedback/EmptyState";
 
 export function Dashboard() {
   const nav = useNavigate();
@@ -343,9 +344,7 @@ function AccountWorkerPanel({
             账号列表读取失败：{(error as Error)?.message || "未知错误"}
           </div>
         ) : accounts.length === 0 ? (
-          <div className="rounded-xl border border-dashed p-8 text-center text-sm text-muted-foreground">
-            尚未绑定账号，请从概览顶部新增账号。
-          </div>
+          <EmptyState icon={Users} title="还没有绑定账号" description="从概览顶部或侧栏「账号」页新增账号。" />
         ) : compact ? (
           <div className="space-y-2">
             {accounts.map((account) => (

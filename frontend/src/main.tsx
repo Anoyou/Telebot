@@ -9,6 +9,7 @@ import App, { AppErrorBoundary } from "./App";
 import "./index.css";
 import { registerPWA } from "./pwa";
 import { ThemeProvider, useTheme } from "@/lib/theme";
+import { ConfirmDialogHost } from "@/components/ui/confirm-dialog";
 
 // 全局 query client：默认 30s 缓存、失焦不刷新（避免与 401 跳转冲突）
 const qc = new QueryClient({
@@ -36,6 +37,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
           </AppErrorBoundary>
         </BrowserRouter>
         <ThemedToaster />
+        <ConfirmDialogHost />
       </QueryClientProvider>
     </ThemeProvider>
   </React.StrictMode>,

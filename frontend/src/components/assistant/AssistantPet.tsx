@@ -11,6 +11,7 @@ import {
   ASSISTANT_SURFACE_ID,
   useAssistantDock,
 } from "@/components/assistant/AssistantDock";
+import { usePendingActionsCount } from "@/components/assistant/usePendingActionsCount";
 import petSpritesheetUrl from "@/assets/agent-pet-spritesheet.webp";
 import { cn } from "@/lib/utils";
 import {
@@ -306,6 +307,8 @@ export function AssistantPetSprite({
 
 export function AssistantPet() {
   const { collapsed, setCollapsed, streaming, outcomeSignal } = useAssistantDock();
+  // 「待确认」第 20 轮第二批起挂在 Agent 上：小宠物右上角显示待确认数。
+  const pendingCount = usePendingActionsCount();
   const [desktopVisible, setDesktopVisible] = useState(() => (
     typeof window !== "undefined" && window.matchMedia("(min-width: 640px)").matches
   ));
@@ -561,7 +564,7 @@ export function AssistantPet() {
       data-docked={docked ? position.side : "false"}
       data-side={position.side}
       data-dragging={dragging ? "true" : undefined}
-      aria-label={collapsed ? "打开 Agent" : "关闭 Agent"}
+      aria-label={`${collapsed ? "打开 Agent" : "关闭 Agent"}${pendingCount > 0 ? `（${pendingCount} 条待确认）` : ""}`}
       aria-expanded={!collapsed}
       aria-controls={ASSISTANT_SURFACE_ID}
       title={collapsed ? "拖动小助手，点击打开 Agent" : "关闭 Agent"}
@@ -595,6 +598,15 @@ export function AssistantPet() {
           className="assistant-pet-notice"
         >
           {notice.text}
+        </span>
+      ) : null}
+      {pendingCount > 0 ? (
+        <span
+          aria-hidden="true"
+          data-assistant-pending-badge
+          className="absolute right-3 top-3 z-10 inline-flex min-w-[1.25rem] items-center justify-center rounded-full bg-destructive px-1 text-[11px] font-semibold leading-5 text-destructive-foreground shadow"
+        >
+          {pendingCount > 99 ? "99+" : pendingCount}
         </span>
       ) : null}
       <AssistantPetSprite

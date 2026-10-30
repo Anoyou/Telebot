@@ -31,6 +31,8 @@ import { Select } from "@/components/ui/select";
 import { SignalPill } from "@/components/ui/status";
 import { Switch } from "@/components/ui/switch";
 import { getErrMsg } from "@/lib/api";
+import { confirmDialog } from "@/components/ui/confirm-dialog";
+import { EmptyState } from "@/components/feedback/EmptyState";
 
 const QK = ["notify-bots"] as const;
 
@@ -356,8 +358,8 @@ export function NotifyBots() {
                     </Button>
                     <Button
                       variant="destructive"
-                      onClick={() => {
-                        if (!confirm(`确认删除通知路由 ${row.name} ?`)) return;
+                      onClick={async () => {
+                        if (!(await confirmDialog({ title: `删除通知路由「${row.name}」？`, description: "这条路由的系统事件将不再推送。", confirmLabel: "删除", tone: "danger" }))) return;
                         delMut.mutate(row.id);
                       }}
                       disabled={delMut.isPending}
@@ -375,9 +377,7 @@ export function NotifyBots() {
               </div>
             ))}
             {(listQ.data || []).length === 0 ? (
-              <div className="nested-surface-item flex items-center gap-2 border px-3 py-4 text-sm text-muted-foreground">
-                <BellRing className="h-4 w-4" /> 暂无通知路由，建议先创建 default。
-              </div>
+              <EmptyState icon={BellRing} size="sm" title="还没有通知路由" description="建议先创建名为 default 的路由，系统事件会推送到这里。" />
             ) : null}
           </div>
         )}

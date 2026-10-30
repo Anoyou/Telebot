@@ -54,6 +54,7 @@ function LLMProvidersFallback() {
   );
 }
 import { RecentUsageContent } from "@/pages/AI/_components/RecentUsage";
+import { confirmDialog } from "@/components/ui/confirm-dialog";
 
 type AITab = "overview" | "providers" | "usage";
 
@@ -131,8 +132,8 @@ export function AIIndex() {
     onError: (err) => toast.error(getErrMsg(err)),
   });
 
-  const handleResetUsage = () => {
-    if (!window.confirm("确认清空 AI 调用记录？近期调用情况、成功率和插件 AI 用量统计都会从零开始。")) return;
+  const handleResetUsage = async () => {
+    if (!(await confirmDialog({ title: "清空 AI 调用记录？", description: "近期调用情况、成功率和插件 AI 用量统计都会从零开始，不可恢复。", confirmLabel: "清空", tone: "danger" }))) return;
     resetUsageMut.mutate();
   };
 

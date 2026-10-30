@@ -740,6 +740,10 @@ async def get_system_settings(db: DBSession, _user: CurrentUser) -> dict[str, An
             "mobile_nav_order": [
                 str(item) for item in ui_preferences.get("mobile_nav_order", []) if isinstance(item, str)
             ],
+            # 第 20 轮：「常用入口」——桌面侧栏第一组与手机底栏共用；空列表表示用默认。
+            "primary_nav": [
+                str(item) for item in ui_preferences.get("primary_nav", []) if isinstance(item, str)
+            ],
             "provider_order": [
                 int(item)
                 for item in ui_preferences.get("provider_order", [])
@@ -803,8 +807,13 @@ class _LoginSecurityPatch(BaseModel):
 
 
 class _UIPreferencesPatch(BaseModel):
-    sidebar_order: list[str] | None = Field(default=None, max_length=10)
+    sidebar_order: list[str] | None = Field(default=None, max_length=12)
     mobile_nav_order: list[str] | None = Field(default=None, max_length=4)
+    primary_nav: list[str] | None = Field(
+        default=None,
+        max_length=4,
+        description="常用入口（桌面侧栏「常用」组与手机底栏共用，有序，最多 4 个）。",
+    )
     provider_order: list[int] | None = Field(default=None, max_length=2048)
 
 
@@ -851,15 +860,19 @@ async def patch_system_settings(payload: _SettingsPatch, db: DBSession, user: Cu
             "/dispatch-debug",
             "/logs",
             "/settings",
+            "/accounts",
         }
+        # 「常用入口」只能选一级/二级入口；Webhook、命中调试、服务器设置属于三级。
+        primary_routes = allowed_routes - {"/webhooks", "/dispatch-debug", "/settings"}
         current_raw = await _get_setting(db, "ui_preferences", {})
         next_preferences = current_raw.copy() if isinstance(current_raw, dict) else {}
         data = payload.ui_preferences.model_dump(exclude_unset=True)
-        for key in ("sidebar_order", "mobile_nav_order"):
+        for key in ("sidebar_order", "mobile_nav_order", "primary_nav"):
             if key not in data or data[key] is None:
                 continue
             values = [str(item) for item in data[key]]
-            if len(values) != len(set(values)) or any(item not in allowed_routes for item in values):
+            routes = primary_routes if key == "primary_nav" else allowed_routes
+            if len(values) != len(set(values)) or any(item not in routes for item in values):
                 raise _bad("invalid_ui_preferences", f"{key} 包含重复或未知页面")
             next_preferences[key] = values
         if data.get("provider_order") is not None:

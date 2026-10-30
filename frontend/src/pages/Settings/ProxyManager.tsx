@@ -46,6 +46,7 @@ import type {
   ProxyUsageResponse,
 } from "@/api/types";
 import { getErrMsg } from "@/lib/api";
+import { confirmDialog } from "@/components/ui/confirm-dialog";
 import {
   isSupportedProxyType,
   normalizeSupportedProxyType,
@@ -181,7 +182,7 @@ export function ProxyManager() {
     } catch {
       // usage 探测失败也不阻塞——后端 delete 接口本身会拒被引用的代理
     }
-    let confirmText = `确认删除代理 ${p.host}:${p.port}？`;
+    let description = "删除后不可恢复。";
     if (usage && usage.total > 0) {
       const parts: string[] = [];
       if (usage.accounts.length > 0) {
@@ -190,12 +191,11 @@ export function ProxyManager() {
       if (usage.llm_providers.length > 0) {
         parts.push(`${usage.llm_providers.length} 个 LLM`);
       }
-      confirmText =
-        `代理 ${p.host}:${p.port} 正被 ${parts.join(" + ")}使用——\n` +
-        `直接删除会让这些功能立刻断网。\n\n` +
-        `继续？（强烈建议先去那些地方改换代理）`;
+      description =
+        `这个代理正被 ${parts.join(" + ")}使用，直接删除会让这些功能立刻断网。\n` +
+        `强烈建议先去那些地方改换代理。`;
     }
-    if (!confirm(confirmText)) return;
+    if (!(await confirmDialog({ title: `删除代理 ${p.host}:${p.port}？`, description, confirmLabel: "删除", tone: "danger" }))) return;
     deleteMut.mutate(p.id);
   }
 

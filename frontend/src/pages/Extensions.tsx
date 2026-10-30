@@ -124,6 +124,7 @@ import {
 } from "@/types/pluginContract";
 import type { PluginRepo, PluginRepoPlugin } from "@/types/pluginRepo";
 import type { RemotePlugin } from "@/types/remotePlugin";
+import { confirmDialog } from "@/components/ui/confirm-dialog";
 
 // ── 常量 ──────────────────────────────────────────────────────────
 type TabValue = "plugins" | "guide";
@@ -694,7 +695,7 @@ function PluginInstallGuide({
         aria-label="打开新手指引"
       >
         <Sparkles className="h-4 w-4" />
-        新手指引：安装后回插件中心启用
+        新手指引：安装后回「启用与配置」启用
       </Button>
     );
   }
@@ -704,12 +705,12 @@ function PluginInstallGuide({
       <CardHeader className="pb-2">
         <CardTitle className="text-base">3. 启用插件或自定义指令</CardTitle>
         <CardDescription>
-          这里只负责安装、更新和卸载远程插件。安装完成后，回插件中心选择账号，再启用和配置对应插件。
+          这里只负责安装、更新和卸载远程插件。安装完成后，回「启用与配置」选择账号，再启用和配置对应插件。
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-wrap gap-2">
         <Button size="sm" onClick={onBack}>
-          返回插件中心 <ChevronRight className="ml-1 h-4 w-4" />
+          返回启用与配置 <ChevronRight className="ml-1 h-4 w-4" />
         </Button>
         <Button size="sm" variant="outline" onClick={onDone}>
           我学会了！
@@ -1856,7 +1857,7 @@ function InstalledPluginsSection() {
                     </TableCell>
                     <TableCell className="text-right">
                       <Button size="sm" variant="outline" onClick={() => nav("/plugins")}>
-                        去插件中心
+                        去启用与配置
                       </Button>
                     </TableCell>
                   </TableRow>
@@ -1984,8 +1985,8 @@ function InstalledPluginsSection() {
                           size="sm"
                           variant="outline"
                           className={DANGER_OUTLINE_BUTTON_CLASS}
-                          onClick={() => {
-                            if (!confirm(`确认卸载「${row.key}」？`)) return;
+                          onClick={async () => {
+                            if (!(await confirmDialog({ title: `卸载「${row.key}」？`, description: "插件文件会被删除，各账号对它的启用状态随之失效；之后可在「市场」重新安装。", confirmLabel: "卸载", tone: "danger" }))) return;
                             if (canUseRemoteActions) uninstallRMMut.mutate(row.key);
                             else uninstallInstalledMut.mutate(row.key);
                           }}
@@ -2067,7 +2068,7 @@ function InstalledPluginsSection() {
                     </div>
                   ) : null}
                   <Button size="sm" variant="outline" className="mt-3 w-full" onClick={() => nav("/plugins")}>
-                    去插件中心
+                    去启用与配置
                   </Button>
                 </div>
               );
@@ -2196,8 +2197,8 @@ function InstalledPluginsSection() {
                       size="sm"
                       variant="outline"
                       className={cn(DANGER_OUTLINE_BUTTON_CLASS, "min-w-0 flex-1 px-2")}
-                      onClick={() => {
-                        if (!confirm(`确认卸载「${row.key}」？`)) return;
+                      onClick={async () => {
+                        if (!(await confirmDialog({ title: `卸载「${row.key}」？`, description: "插件文件会被删除，各账号对它的启用状态随之失效；之后可在「市场」重新安装。", confirmLabel: "卸载", tone: "danger" }))) return;
                         if (canUseRemoteActions) uninstallRMMut.mutate(row.key);
                         else uninstallInstalledMut.mutate(row.key);
                       }}
@@ -2517,7 +2518,7 @@ function PluginOverviewDetailDialog({
             查看最近 trace
           </Button>
           <Button variant="outline" onClick={onOpenPluginCenter}>
-            去插件中心
+            去启用与配置
           </Button>
           <Button onClick={() => onOpenChange(false)}>关闭</Button>
         </DialogFooter>

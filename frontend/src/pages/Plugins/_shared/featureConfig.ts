@@ -61,7 +61,7 @@ export function featureConfigBackTarget(
   if (source === "plugins") {
     const params = new URLSearchParams({ account: String(aid) });
     return {
-      backLabel: "返回插件中心",
+      backLabel: "返回启用与配置",
       backHref: `/plugins?${params.toString()}`,
     };
   }
