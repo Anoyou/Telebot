@@ -110,8 +110,8 @@ final class WorkspaceUITests: XCTestCase {
         XCTAssertTrue(preview.label.hasPrefix("概览 · 插件 · AI · 更多"), preview.label)
         app.buttons["dock.moveUp.ai"].tap()
         XCTAssertTrue(preview.label.hasPrefix("概览 · AI · 插件 · 更多"), preview.label)
-        XCTAssertTrue(app.tabBars.buttons["AI"].exists)
-        XCTAssertFalse(app.tabBars.buttons["交互"].exists)
+        // 这里不查 Tab 栏：前面为找设置行向上滑动过，`tabBarMinimizeBehavior(.onScrollDown)` 会把 Tab 栏缩成只剩当前格。
+        // Tab 栏的实际内容在下面重启后检查。
         let attachment = XCTAttachment(screenshot: app.screenshot())
         attachment.name = "自定义 Dock"
         attachment.lifetime = .keepAlways
