@@ -42,6 +42,8 @@ final class AppModel {
     private(set) var serverFeatures: Set<String> = []
     /// 服务器支持 `GET /api/secrets/reveal`（第 20 轮）：密钥行的眼睛可查看已保存的值。
     var supportsSecretReveal: Bool { serverFeatures.contains("secret_reveal") }
+    /// 服务器支持新建 Agent 会话时 `default_account`（第 20 轮）：只有 1 个账号时由服务器自动关联。
+    var supportsAgentSessionDefaultAccount: Bool { serverFeatures.contains(AgentSessionAccount.featureKey) }
     /// 服务器最近一次更新检查（自动或手动，`GET /api/system/update-status`），用于“更多”角标、App 设置行与软件更新页提示。
     private(set) var serverUpdateStatus: JSONValue?
     private(set) var workspaceError: String?

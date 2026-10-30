@@ -109,6 +109,14 @@ class SystemCheckupOut(BaseModel):
 class SystemAgentSessionCreate(BaseModel):
     account_id: int | None = None
     title: str | None = Field(default=None, max_length=64)
+    default_account: bool = Field(
+        default=False,
+        description=(
+            "第 20 轮：未传 account_id 时，若服务器只有 1 个账号则自动关联它（多账号仍为系统级）。"
+            "客户端用户显式选「全局 / 系统级」时不要传 true。旧服务器忽略该字段，"
+            "客户端可按 GET /api/system/capabilities 的 features.agent_session_default_account 探测。"
+        ),
+    )
 
 
 class SystemAgentSessionUpdate(BaseModel):
@@ -130,6 +138,10 @@ class SystemAgentSessionOut(BaseModel):
     memory_state: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime | None = None
     updated_at: datetime | None = None
+    account_auto_linked: bool = Field(
+        default=False,
+        description="仅新建会话响应：本次因 default_account=true 且服务器只有 1 个账号而自动关联了 account_id",
+    )
 
     model_config = ConfigDict(from_attributes=True)
 

@@ -25,6 +25,14 @@
 
 ## [Unreleased]
 
+## [0.113.0-beta.7] - 2026-10-31 · patch（补丁预发布） · Agent 账号上下文：只有一个账号时新会话默认关联，账号页 / 插件页「问 Agent」带入账号，iOS 0.24.3
+
+### Agent 账号上下文：只有一个账号时新会话默认关联；从账号页、插件页进入 Agent 自动带入账号（#111 后续）
+
+- **服务器**：`POST /api/system-agent/sessions` 新增可选字段 `default_account`（缺省 false）：未传 `account_id` 且服务器只有 1 个账号时自动关联它，响应 `account_auto_linked=true`；0 个或多个账号保持系统级，显式 `account_id` 优先，不传该字段（旧客户端）行为不变。`GET /api/system/capabilities` 的 `features` 新增 `agent_session_default_account=true` 供客户端探测；`SystemAgentService.sole_account_id()`。新测 `test_system_agent_session_default_account.py`（10 条）。
+- **Web**：新建会话不再沿用上一个会话的账号下拉值，改按 `newSessionAccountPayload` 决定（新服务器带 `default_account` 交给服务器判断；旧服务器只读到 1 个账号时客户端自己填 `account_id`；多账号系统级），自动关联时页头「账号上下文」旁提示「只有一个账号，新会话已自动关联…；可改回系统级」。「账号上下文」下拉在已有会话里改为立即 `PATCH` 会话（含改回系统级；原来只在下次发消息时带非空值，改不回系统级）；切到系统级会话时清空下拉（原来保留上一个会话的账号，下一条消息会把它带进系统级会话）。账号详情页头与插件页账号行新增「问 Agent」（`?agent_account=ID&agent_from=account|plugins`，Dock 展开后参数即被消费，不因地址变化收起）；在账号详情 / 账号插件配置（路由 `/accounts/:aid`）或插件页（登记所选账号）直接打开 Agent 时，当前会话不是该账号就进入带该账号的新会话草稿（发送后才建会话，正在生成回答时不打断），提示「已带入账号（来自账号页 / 插件页 / 插件配置）」。Playwright `agent-account-context.spec.ts`（6 条，夹具 `installAgentAccountFixture`）。
+- **iOS 0.24.3**：新建 Agent 会话不再沿用当前会话的账号；只有 1 个账号时默认关联（新服务器由服务器判断，旧服务器 App 按账号数代填），多账号保持全局，自动关联时提示可在会话设置改回全局（`TelePilotCore.AgentSessionAccount` + `AgentSessionAccountTests`）。App 账号页 / 插件页目前没有进入 Agent 的入口，暂不加（记入 `ios/DESIGN.md` 对照表）。
+
 ## [0.113.0-beta.6] - 2026-10-30 · patch（补丁预发布） · 「设备配置」改名为「登录设备」（Web + iOS 0.24.2，只改文案）
 
 ### 「设备配置」改名为「登录设备」（Web + iOS 0.24.2，位置不变）

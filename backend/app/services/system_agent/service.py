@@ -252,6 +252,12 @@ class SystemAgentService:
         if found is None:
             raise LookupError(f"account {account_id} 不存在")
 
+    async def sole_account_id(self, db: AsyncSession) -> int | None:
+        """服务器只有 1 个账号时返回它的 id，否则（0 个或多个）返回 None。"""
+
+        rows = (await db.scalars(select(Account.id).order_by(Account.id).limit(2))).all()
+        return int(rows[0]) if len(rows) == 1 else None
+
     async def create_session(
         self,
         db: AsyncSession,

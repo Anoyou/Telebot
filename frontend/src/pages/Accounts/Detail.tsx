@@ -49,6 +49,7 @@ import { AccountStatusBadge } from "@/components/AccountStatusBadge";
 import { MaskedPhone } from "@/components/MaskedPhone";
 import { IgnoredTab } from "@/pages/Accounts/IgnoredTab";
 import { BotTab } from "@/pages/Accounts/BotTab";
+import { AskAgentButton } from "@/components/assistant/AskAgentButton";
 import {
   deleteAccount,
   getAccount,
@@ -258,6 +259,7 @@ export function AccountDetail() {
             (acc.tg_username ? `@${acc.tg_username}` : `#${acc.id}`)}
         </h1>
         <AccountStatusBadge status={acc.status} />
+        <AskAgentButton accountId={acc.id} source="account" className="ml-auto" />
       </div>
       <div className="flex flex-wrap gap-2">
         <SignalPill

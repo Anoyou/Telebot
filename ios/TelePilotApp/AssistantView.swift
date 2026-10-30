@@ -1467,6 +1467,11 @@ struct AssistantCodeBlockView: View {
     let code: String
     @State private var copied = false
 
+    /// 「已复制」提示停留时长。界面测试里放长：XCTest 点按后要先等界面空闲（长会话里实测 5 秒以上）
+    /// 才开始查找，2 秒的提示在查找前就已恢复成「复制」，断言会落空。
+    nonisolated static let copiedFeedback: Duration =
+        ProcessInfo.processInfo.arguments.contains("--ui-testing") ? .seconds(15) : .seconds(2)
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
@@ -1498,7 +1503,7 @@ struct AssistantCodeBlockView: View {
         .background(Color(.secondarySystemBackground), in: .rect(cornerRadius: 12))
         .task(id: copied) {
             guard copied else { return }
-            try? await Task.sleep(for: .seconds(2))
+            try? await Task.sleep(for: Self.copiedFeedback)
             copied = false
         }
     }

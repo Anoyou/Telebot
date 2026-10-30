@@ -338,7 +338,7 @@ final class AssistantUITests: XCTestCase {
         XCTAssertFalse(replyText.contains("##"), "Markdown 标记应转成样式：\(replyText)")
         XCTAssertTrue(app.navigationBars["选择文本"].exists)
         app.buttons["assistant.selectText.done"].tap()
-        XCTAssertTrue(waitUntilGone(textView, timeout: 5))
+        XCTAssertTrue(waitUntilGone(textView, timeout: 10))
 
         // 我的消息：同样的面板，内容是原文。
         let messageSelect = app.buttons.matching(identifier: "assistant.message.selectText").allElementsBoundByIndex.last { $0.isHittable }
@@ -348,7 +348,7 @@ final class AssistantUITests: XCTestCase {
         XCTAssertTrue(textView.waitForExistence(timeout: 8), "我的消息的选择文本面板没有出现")
         XCTAssertTrue((textView.value as? String ?? "").contains("请检查账号与插件状态"), textView.value as? String ?? "")
         app.buttons["assistant.selectText.done"].tap()
-        XCTAssertTrue(waitUntilGone(textView, timeout: 5))
+        XCTAssertTrue(waitUntilGone(textView, timeout: 10))
 
         // 长按回复正文 → 菜单里的「选择文本」。
         // 菜单项与操作行按钮同名，用标识区分（操作行按钮的标识以 assistant. 开头）。
@@ -363,7 +363,7 @@ final class AssistantUITests: XCTestCase {
         XCTAssertTrue(textView.waitForExistence(timeout: 5))
         XCTAssertTrue((textView.value as? String ?? "").contains("第 120 条回答"))
         app.buttons["assistant.selectText.done"].tap()
-        XCTAssertTrue(waitUntilGone(textView, timeout: 5))
+        XCTAssertTrue(waitUntilGone(textView, timeout: 10))
 
         // 代码块右上角的「复制」：触控至少 44pt，点后显示“已复制”。
         let codeCopy = app.buttons.matching(identifier: "assistant.code.copy").allElementsBoundByIndex.last { $0.isHittable }
@@ -371,7 +371,8 @@ final class AssistantUITests: XCTestCase {
         if let codeCopy {
             XCTAssertGreaterThanOrEqual(codeCopy.frame.height, 44)
             codeCopy.tap()
-            XCTAssertTrue(app.buttons["已复制代码"].firstMatch.waitForExistence(timeout: 3), "代码块复制后没有显示“已复制”")
+            // App 在界面测试里把「已复制」停留放长到 15 秒（点按后 XCTest 等空闲可能就要 5 秒以上）。
+            XCTAssertTrue(app.buttons["已复制代码"].firstMatch.waitForExistence(timeout: 8), "代码块复制后没有显示“已复制”")
         }
     }
 

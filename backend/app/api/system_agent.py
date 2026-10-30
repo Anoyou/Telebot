@@ -374,12 +374,18 @@ async def create_session(
     user: CurrentUser,
 ) -> SystemAgentSessionOut:
     svc = get_system_agent_service()
+    account_id = payload.account_id
+    auto_linked = False
+    if account_id is None and payload.default_account:
+        # 第 20 轮：只有 1 个账号时新会话默认关联它；多账号保持系统级。
+        account_id = await svc.sole_account_id(db)
+        auto_linked = account_id is not None
     try:
         session = await svc.create_session(
             db,
             channel=CHANNEL_WEB,
             web_user_id=user.id,
-            account_id=payload.account_id,
+            account_id=account_id,
             title=payload.title,
         )
     except LookupError as exc:
@@ -387,7 +393,10 @@ async def create_session(
         raise _account_not_found(exc) from exc
     await db.commit()
     await db.refresh(session)
-    return _session_out(session)
+    out = _session_out(session)
+    if auto_linked:
+        out = out.model_copy(update={"account_auto_linked": True})
+    return out
 
 
 @router.get("/sessions", response_model=list[SystemAgentSessionOut])

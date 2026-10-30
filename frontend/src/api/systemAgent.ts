@@ -74,6 +74,8 @@ export interface SystemAgentSession {
   memory_state?: Record<string, unknown>;
   created_at: string | null;
   updated_at: string | null;
+  /** 仅新建会话响应（第 20 轮）：因 default_account 且服务器只有 1 个账号而自动关联。 */
+  account_auto_linked?: boolean;
 }
 
 export interface SystemAgentMessage {
@@ -418,6 +420,8 @@ export async function listSystemAgentSessions(
 export async function createSystemAgentSession(payload?: {
   account_id?: number | null;
   title?: string;
+  /** 第 20 轮：未指定账号时只有 1 个账号则自动关联（旧服务器忽略）。 */
+  default_account?: boolean;
 }): Promise<SystemAgentSession> {
   const { data } = await api.post<SystemAgentSession>("/api/system-agent/sessions", payload || {});
   return data;
