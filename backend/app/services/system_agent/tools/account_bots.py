@@ -4,6 +4,14 @@ from __future__ import annotations
 
 from typing import Any
 
+from sqlalchemy import func, select
+
+from ....db.models.account import Account
+from ....db.models.account_bot import (
+    ACCOUNT_BOT_STATUS_DISABLED,
+    AccountBot,
+    AccountBotUser,
+)
 from ....schemas.account_bot import (
     AccountBotConfigUpdate,
     AccountBotRemotePluginPolicyUpdate,
@@ -46,6 +54,69 @@ async def get_config(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
     return {
         "configured": True,
         **account_bot_service.config_to_response(row).model_dump(mode="json"),
+    }
+
+
+async def list_all(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
+    """一次汇总所有账号的管理 Bot（只读，不返回 Token）。
+
+    系统级上下文（未绑定单一账号）下，用户问“管理 Bot 是哪个”时弱模型往往不会先
+    列账号再逐个查询；这个工具一次给出全部账号的用户名、启用与绑定状态。Bot 渠道
+    与 accounts.list 一致，只返回当前绑定账号。
+    """
+
+    limit = clamp_limit(args.get("limit"), default=50, maximum=200)
+    q = select(Account).order_by(Account.id.asc()).limit(limit)
+    if ctx.channel == "bot" and ctx.account_id is not None:
+        q = q.where(Account.id == ctx.account_id)
+    accounts = list((await ctx.db.execute(q)).scalars().all())
+    ids = [int(row.id) for row in accounts]
+    bots: dict[int, AccountBot] = {}
+    user_counts: dict[int, int] = {}
+    if ids:
+        for bot in (
+            await ctx.db.execute(select(AccountBot).where(AccountBot.account_id.in_(ids)))
+        ).scalars():
+            bots[int(bot.account_id)] = bot
+        rows = await ctx.db.execute(
+            select(AccountBotUser.account_id, func.count(AccountBotUser.id))
+            .where(AccountBotUser.account_id.in_(ids), AccountBotUser.enabled.is_(True))
+            .group_by(AccountBotUser.account_id)
+        )
+        user_counts = {int(aid): int(count) for aid, count in rows.all()}
+    items: list[dict[str, Any]] = []
+    for account in accounts:
+        aid = int(account.id)
+        bot = bots.get(aid)
+        has_token = bool(bot is not None and bot.bot_token_enc)
+        username = bot.username if bot is not None else None
+        enabled = bool(bot is not None and bot.enabled)
+        last_error = (
+            account_bot_service.label_bot_polling_error(bot.last_error, role="management")
+            if bot is not None and enabled and has_token and bot.last_error
+            else None
+        )
+        items.append(
+            {
+                "account_id": aid,
+                "account_name": account.display_name or account.tg_username or f"账号 #{aid}",
+                "account_username": account.tg_username,
+                "configured": bot is not None,
+                "bound": has_token,
+                "bot_username": username,
+                "bot_link": f"https://t.me/{username}" if username else None,
+                "enabled": enabled,
+                "status": (bot.status if bot is not None else None) or ACCOUNT_BOT_STATUS_DISABLED,
+                "authorized_users": user_counts.get(aid, 0),
+                "last_error": last_error,
+            }
+        )
+    return {
+        "count": len(items),
+        "bound_count": sum(1 for item in items if item["bound"]),
+        "enabled_count": sum(1 for item in items if item["enabled"] and item["bound"]),
+        "accounts": items,
+        "note": "Bot Token 永不返回；bound=已保存 Token，enabled=已启用 polling。",
     }
 
 
@@ -366,6 +437,22 @@ def _obj(properties: dict[str, Any], *, required: list[str] | None = None) -> di
 
 def register(registry: ToolRegistry) -> None:
     account = {"account_id": {"type": "integer"}}
+    registry.register(
+        ToolSpec(
+            name="account_bots.list_all",
+            description=(
+                "一次列出所有账号的管理 Bot 汇总（账号名、Bot 用户名、是否绑定 Token、是否启用、"
+                "状态、授权用户数），不需要 account_id，不返回 Token。系统级上下文问“管理 Bot 是哪个/"
+                "设置了哪些”时优先调用。Bot 渠道仅返回当前绑定账号。"
+            ),
+            input_schema=_obj(
+                {"limit": {"type": "integer", "description": "账号数量上限，默认 50，最大 200"}}
+            ),
+            read_only=True,
+            min_role="viewer",
+            read_handler=list_all,
+        )
+    )
     registry.register(
         ToolSpec(
             name="account_bots.get",

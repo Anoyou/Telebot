@@ -947,12 +947,58 @@ def select_tool_specs(specs: Iterable[ToolSpec], route: ToolRoute) -> list[ToolS
     return [spec for spec in specs if tool_domain(spec) in allowed]
 
 
+ACCOUNT_LOOKUP_TOOL = "accounts.list"
+
+
+def _requires_account_id(spec: ToolSpec) -> bool:
+    schema = spec.input_schema if isinstance(spec.input_schema, dict) else {}
+    required = schema.get("required") or []
+    return "account_id" in required
+
+
+def ensure_account_lookup_tool(
+    tool_specs: list[ToolSpec],
+    all_specs: Iterable[ToolSpec],
+    *,
+    account_id: int | None,
+    channel: str,
+) -> list[ToolSpec]:
+    """系统级上下文下补上 accounts.list，让模型能先查账号再查账号级信息。
+
+    关键词路由命中“管理 Bot / 交互规则”等账号级领域时会去掉通用账号域，
+    结果本轮只有一组都要求 account_id 的工具，弱模型就会直接让用户报账号 ID。
+    只追加只读的 accounts.list，且必须已在本轮可用（角色/渠道已过滤）的工具里，
+    不扩大权限。Bot 渠道始终绑定账号，不追加。
+    """
+
+    if account_id is not None or channel == "bot":
+        return tool_specs
+    names = {spec.name for spec in tool_specs}
+    if ACCOUNT_LOOKUP_TOOL in names:
+        return tool_specs
+    if not any(_requires_account_id(spec) for spec in tool_specs):
+        return tool_specs
+    lookup = next(
+        (
+            spec
+            for spec in all_specs
+            if spec.name == ACCOUNT_LOOKUP_TOOL and spec.read_only
+        ),
+        None,
+    )
+    if lookup is None:
+        return tool_specs
+    return [*tool_specs, lookup]
+
+
 __all__ = [
+    "ACCOUNT_LOOKUP_TOOL",
     "CHECKUP_KEYWORDS",
     "DOMAIN_CATALOG",
     "ToolRoute",
     "available_domains",
     "domain_catalog",
+    "ensure_account_lookup_tool",
     "has_explicit_web_intent",
     "parse_model_route",
     "register_dynamic_domain",

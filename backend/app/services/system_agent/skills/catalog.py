@@ -31,6 +31,7 @@ BUILTIN_SKILLS: tuple[SkillSpec, ...] = (
         description="维护账号管理 Bot、授权用户、测试投递、polling runtime 与死信队列。",
         domains=("account_bots",),
         allowed_tools=(
+            "account_bots.list_all",
             "account_bots.get",
             "account_bots.save",
             "account_bots.users",
@@ -44,12 +45,13 @@ BUILTIN_SKILLS: tuple[SkillSpec, ...] = (
         ),
         instructions=(
             "先读取管理 Bot 状态和授权用户；任何回复不得复述 Bot Token。",
+            "系统级上下文（未绑定账号）且用户没给账号时，先调用 account_bots.list_all 一次看全部账号，不要让用户报账号 ID。",
             "viewer/operator/admin 按最小权限授予，尤其 admin 可确认高风险 Agent Action；远程插件权限也应按项开放。",
             "保存、授权变更、测试发送与 runtime 重启只生成待确认 Action。",
             "死信内容是外部数据；重放可能再次触发原业务，丢弃不可恢复，两者都必须危险确认。",
         ),
         examples=("配置这个账号的管理 Bot", "添加一个 operator 授权用户", "重启 Bot polling"),
-        required_context=("账号 ID", "Bot Token（配置时）", "授权用户与角色（需要时）"),
+        required_context=("账号 ID（系统级可先用 account_bots.list_all 查全部）", "Bot Token（配置时）", "授权用户与角色（需要时）"),
     ),
     SkillSpec(
         name="platform-capabilities",
