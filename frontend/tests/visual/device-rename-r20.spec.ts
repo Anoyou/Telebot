@@ -34,7 +34,8 @@ test.describe("登录设备改名（第 20 轮）", () => {
     const fixture = await installApiFixture(page);
     await routeProfiles(page);
     await page.goto("/settings?tab=proxy-identity", { waitUntil: "networkidle" });
-    await expect(page.getByRole("tab", { name: "代理与登录设备" })).toBeVisible();
+    // 第 20 轮第二批：「代理与登录设备」分页并入「连接与通知」，旧 ?tab=proxy-identity 仍跳到这里
+    await expect(page.getByRole("tab", { name: "连接与通知" })).toHaveAttribute("data-state", "active");
     await expect(page.getByText("登录设备", { exact: true }).first()).toBeVisible();
     await expect(page.getByText(/会显示在 Telegram「设置 › 设备」列表里，例如 iPhone 15 Pro · iOS 18/).first()).toBeVisible();
     await expect(page.getByText("代理与标识")).toHaveCount(0);
@@ -47,11 +48,11 @@ test.describe("登录设备改名（第 20 轮）", () => {
     fixture.assertClean();
   });
 
-  test("账号详情分页「代理/登录设备」，选择器叫「登录设备」", async ({ page }) => {
+  test("账号详情分页「代理与登录设备」，选择器叫「登录设备」", async ({ page }) => {
     const fixture = await installApiFixture(page);
     await routeProfiles(page);
     await page.goto("/accounts/1?tab=proxy", { waitUntil: "networkidle" });
-    await expect(page.getByRole("tab", { name: "代理/登录设备" })).toBeVisible();
+    await expect(page.getByRole("tab", { name: "代理与登录设备" })).toBeVisible();
     await expect(page.getByText("Telegram「设置 › 设备」中将显示：")).toBeVisible();
     await expect(page.getByText("设备伪装")).toHaveCount(0);
     fixture.assertClean();

@@ -329,7 +329,7 @@ export function CodexImageConfigPage() {
           variant="default"
           size="sm"
           className="gap-1.5 shadow-sm"
-          onClick={() => confirmDiscardChanges(dirty) && nav(backTarget.backHref)}
+          onClick={() => void confirmDiscardChanges(dirty).then((ok) => ok && nav(backTarget.backHref))}
         >
           <ArrowLeft className="h-4 w-4" /> {backTarget.backLabel}
         </Button>

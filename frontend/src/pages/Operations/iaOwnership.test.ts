@@ -8,7 +8,7 @@ import test from "node:test";
 import { readFileSync, readdirSync } from "node:fs";
 
 const dir = "src/pages/Operations";
-const PAGE_SHELLS = ["Templates.tsx", "Scheduler.tsx", "AutoCommandWhitelist.tsx", "Index.tsx"];
+const PAGE_SHELLS = ["Templates.tsx", "Scheduler.tsx", "SchedulerCommandWhitelist.tsx", "Index.tsx"];
 
 test("指令与任务页面壳不再从 @/pages/Plugins 导入页面组件", () => {
   for (const name of PAGE_SHELLS) {
@@ -31,7 +31,9 @@ test("路由 URL 保持不变", () => {
   const index = readFileSync(`${dir}/Index.tsx`, "utf8");
   assert.ok(index.includes('path="templates"'));
   assert.ok(index.includes('path="scheduler"'));
+  // 第 20 轮第二批：白名单并入定时任务，旧地址保留为跳转
   assert.ok(index.includes('path="auto-command-whitelist"'));
+  assert.ok(index.includes("SchedulerWhitelistRedirect"));
   assert.ok(index.includes('<Navigate to="/operations/templates" replace />'));
 });
 

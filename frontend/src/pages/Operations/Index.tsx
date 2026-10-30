@@ -1,6 +1,6 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 
-import { OperationsAutoCommandWhitelistPage } from "./AutoCommandWhitelist";
+import { SchedulerWhitelistRedirect } from "./SchedulerCommandWhitelist";
 import { OperationsSchedulerPage } from "./Scheduler";
 import { OperationsTemplatesPage } from "./Templates";
 
@@ -14,7 +14,8 @@ export function OperationsWorkspaceRoutes() {
       <Route index element={<Navigate to="/operations/templates" replace />} />
       <Route path="templates" element={<OperationsTemplatesPage />} />
       <Route path="scheduler" element={<OperationsSchedulerPage />} />
-      <Route path="auto-command-whitelist" element={<OperationsAutoCommandWhitelistPage />} />
+      {/* 第 20 轮第二批：白名单并入「定时任务」，旧地址跳转并保留 aid */}
+      <Route path="auto-command-whitelist" element={<SchedulerWhitelistRedirect />} />
       <Route path="*" element={<Navigate to="/operations/templates" replace />} />
     </Routes>
   );

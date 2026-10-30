@@ -73,6 +73,7 @@ import {
 } from "@/components/ai/ProviderCreateVerification";
 import { ProviderKeyPoolSection } from "@/components/ai/ProviderKeyPoolSection";
 import { UpstreamErrorFacts } from "@/components/ai/UpstreamErrorFacts";
+import { confirmDialog } from "@/components/ui/confirm-dialog";
 
 // 各 provider 的默认 base_url 提示，仅作 placeholder
 const DEFAULT_BASE_URLS: Record<LLMProviderKind, string> = {
@@ -1325,8 +1326,8 @@ export function LLMProviders({
                           aria-label={`删除 ${p.name}`}
                           title={`删除 ${p.name}`}
                           disabled={deleteMut.isPending}
-                          onClick={() => {
-                            if (confirm(`确认删除模型提供商「${p.name}」？引用此模型提供商的 AI 指令将失败`)) {
+                          onClick={async () => {
+                            if (await confirmDialog({ title: `删除供应商「${p.name}」？`, description: "引用这个供应商的 AI 指令会失败，删除后不可恢复。", confirmLabel: "删除", tone: "danger" })) {
                               deleteMut.mutate(p.id);
                             }
                           }}
@@ -1348,8 +1349,8 @@ export function LLMProviders({
                   proxyById={proxyById}
                   deletePending={deleteMut.isPending}
                   onEdit={() => onEdit(p)}
-                  onDelete={() => {
-                    if (confirm(`确认删除模型提供商「${p.name}」？引用此模型提供商的 AI 指令将失败`)) {
+                  onDelete={async () => {
+                    if (await confirmDialog({ title: `删除供应商「${p.name}」？`, description: "引用这个供应商的 AI 指令会失败，删除后不可恢复。", confirmLabel: "删除", tone: "danger" })) {
                       deleteMut.mutate(p.id);
                     }
                   }}
@@ -2159,8 +2160,8 @@ function ProviderCreateWorkspace({
               type="button"
               loading={saving}
               disabled={!form.name.trim() || !form.default_model.trim() || gatewayBlocked || proxySelectionBlocked}
-              onClick={() => {
-                if (!isEdit && !verified && !window.confirm("当前 Provider 尚未通过真实模型验证。仍要保存吗？保存后建议立即进入模型测活确认可用性。")) return;
+              onClick={async () => {
+                if (!isEdit && !verified && !(await confirmDialog({ title: "还没通过真实模型验证，仍要保存？", description: "保存后建议立即进入「模型测活」确认可用性。", confirmLabel: "仍要保存" }))) return;
                 onSave();
               }}
             >
@@ -2209,8 +2210,8 @@ function ProviderEditDialog({
   const initialFormRef = useRef(JSON.stringify(form));
   const dirty = JSON.stringify(form) !== initialFormRef.current;
   useUnsavedChanges(dirty);
-  const requestCancel = () => {
-    if (saving || !confirmDiscardChanges(dirty)) return;
+  const requestCancel = async () => {
+    if (saving || !(await confirmDiscardChanges(dirty))) return;
     onCancel();
   };
   const proxiesQ = useQuery({

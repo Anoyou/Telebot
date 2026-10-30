@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Check, ChevronRight } from "lucide-react";
+import { ArrowLeft, Check, ChevronRight, UserPlus } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -35,6 +35,7 @@ import {
   visibleProxyOptions,
 } from "@/lib/proxySupport";
 import { cn } from "@/lib/utils";
+import { PageHeader, PageShell } from "@/components/layout/PageScaffold";
 
 // 中文错误码翻译表（PRD 列出的几种）
 const ERR_MAP: Record<string, string> = {
@@ -200,15 +201,17 @@ export function AccountWizard() {
   );
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center gap-3">
-        <Button variant="ghost" size="sm" onClick={() => nav(-1)}>
-          <ArrowLeft className="mr-1 h-4 w-4" /> 返回
-        </Button>
-        <h1 className="text-2xl font-semibold tracking-tight">
-          {isRelogin ? `重新登录账号 #${reloginAid}` : "新增账号"}
-        </h1>
-      </div>
+    <PageShell>
+      <PageHeader
+        icon={UserPlus}
+        title={isRelogin ? `重新登录账号 #${reloginAid}` : "新增账号"}
+        description={isRelogin ? "重新走一遍 Telegram 登录，只覆盖 session，配置全部保留。" : "绑定一个 Telegram 账号：手机号 → 验证码 → 两步密码（可选）→ 完成。"}
+        actions={
+          <Button variant="outline" size="sm" onClick={() => nav(-1)}>
+            <ArrowLeft className="mr-1 h-4 w-4" /> 返回
+          </Button>
+        }
+      />
 
       {isRelogin ? (
         <Card className="border-warning/30 bg-warning/10">
@@ -330,7 +333,7 @@ export function AccountWizard() {
                 </p>
               ) : (
                 <p className="text-xs text-muted-foreground">
-                  若代理列表为空，先到「服务器设置 → 代理与登录设备」创建
+                  若代理列表为空，先到「服务器设置 → 连接与通知」创建
                 </p>
               )}
             </div>
@@ -473,6 +476,6 @@ export function AccountWizard() {
           </CardContent>
         </Card>
       )}
-    </div>
+    </PageShell>
   );
 }

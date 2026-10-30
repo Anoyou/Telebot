@@ -23,6 +23,7 @@ import {
 //   - vite.config.ts 里另有 manualChunks 把 echarts / highlight.js / react-markdown
 //     单独拆 chunk，大依赖只在用到的页面拉一次。
 const AccountWizard = lazy(() => import("@/pages/Accounts/Wizard").then(m => ({ default: m.AccountWizard })));
+const AccountsListPage = lazy(() => import("@/pages/Accounts/List").then(m => ({ default: m.AccountsListPage })));
 const AccountDetail = lazy(() => import("@/pages/Accounts/Detail").then(m => ({ default: m.AccountDetail })));
 const SchedulerConfig = lazy(() => import("@/pages/Operations/SchedulerConfig").then(m => ({ default: m.SchedulerConfig })));
 const LegacyPluginConfigPage = lazy(() => import("@/pages/Plugins/configs/legacy/LegacyPluginConfigPage").then(m => ({ default: m.LegacyPluginConfigPage })));
@@ -210,7 +211,15 @@ export default function App() {
           <Route index element={<Navigate to="/plugins" replace />} />
           <Route path="overview" element={<Dashboard />} />
           <Route path="accounts">
-            <Route index element={<Navigate to="/overview?accounts=1" replace />} />
+            {/* 第 20 轮第二批：/accounts 成为账号列表页（侧栏「管理」组）；概览浮层 /overview?accounts=1 仍可用 */}
+            <Route
+              index
+              element={
+                <Suspense fallback={<PageFallback />}>
+                  <AccountsListPage />
+                </Suspense>
+              }
+            />
             <Route
               path="new"
               element={

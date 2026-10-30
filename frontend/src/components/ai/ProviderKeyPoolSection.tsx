@@ -39,6 +39,7 @@ import type {
   ProxyOut,
 } from "@/api/types";
 import { getErrMsg } from "@/lib/api";
+import { confirmDialog } from "@/components/ui/confirm-dialog";
 
 const STRATEGY_OPTIONS: { value: LLMKeyStrategy; label: string; hint: string }[] = [
   { value: "order", label: "按优先级顺序", hint: "永远先用 priority 最小的那把；只有它不可用时才落到下一把" },
@@ -335,8 +336,8 @@ export function ProviderKeyPoolSection({
                   variant="ghost"
                   title="移除"
                   disabled={disabled || deleteMut.isPending}
-                  onClick={() => {
-                    if (!window.confirm(`确定移除密钥「${key.label}」？`)) return;
+                  onClick={async () => {
+                    if (!(await confirmDialog({ title: `移除密钥「${key.label}」？`, description: "移除后这把密钥不再参与轮换，需要时可以重新添加。", confirmLabel: "移除", tone: "danger" }))) return;
                     deleteMut.mutate(key.id);
                   }}
                 >

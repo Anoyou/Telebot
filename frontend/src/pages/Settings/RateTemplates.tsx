@@ -23,6 +23,7 @@ import {
 } from "@/api/system";
 import { getErrMsg } from "@/lib/api";
 import { formatDateTime } from "@/lib/utils";
+import { confirmDialog } from "@/components/ui/confirm-dialog";
 
 export function RateTemplates() {
   const qc = useQueryClient();
@@ -128,8 +129,8 @@ export function RateTemplates() {
                   variant="ghost"
                   size="sm"
                   disabled={deleteMut.isPending}
-                  onClick={() => {
-                    if (!confirm(`确认删除模板「${t.name}」？`)) return;
+                  onClick={async () => {
+                    if (!(await confirmDialog({ title: `删除限流模板「${t.name}」？`, description: "删除后不可恢复。", confirmLabel: "删除", tone: "danger" }))) return;
                     deleteMut.mutate(t.id);
                   }}
                 >

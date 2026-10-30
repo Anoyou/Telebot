@@ -114,7 +114,7 @@ export function AccountSummaryCard({
           {linkToDetail ? (
             <Link
               to={`/accounts/${account.id}`}
-              className="text-primary hover:underline"
+              className="font-medium text-foreground underline-offset-4 hover:text-primary hover:underline"
             >
               详情 →
             </Link>

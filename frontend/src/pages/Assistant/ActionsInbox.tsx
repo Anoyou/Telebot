@@ -15,6 +15,10 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/misc";
 import { getErrMsg } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { confirmDialog } from "@/components/ui/confirm-dialog";
+import { EmptyState } from "@/components/feedback/EmptyState";
+import { useAssistantDock } from "@/components/assistant/AssistantDock";
+import { AgentMark } from "@/components/assistant/AgentMark";
 
 function formatExpiry(iso?: string | null): string {
   if (!iso) return "—";
@@ -47,6 +51,7 @@ function sourceLabel(action: SystemAgentAction): { text: string; href?: string }
 export function ActionsInboxPage() {
   const qc = useQueryClient();
   const [busyId, setBusyId] = useState<string | null>(null);
+  const { setCollapsed: setDockCollapsed } = useAssistantDock();
   const [batchBusy, setBatchBusy] = useState(false);
 
   const pendingQ = useQuery({
@@ -84,7 +89,7 @@ export function ActionsInboxPage() {
 
   const onBatchReject = async () => {
     if (!items.length) return;
-    if (!confirm(`确认批量拒绝 ${items.length} 条待确认操作？`)) return;
+    if (!(await confirmDialog({ title: `批量拒绝 ${items.length} 条待确认操作？`, description: "这些操作不会执行，Agent 会收到「已拒绝」。", confirmLabel: "全部拒绝", tone: "danger" }))) return;
     setBatchBusy(true);
     let ok = 0;
     let fail = 0;
@@ -106,10 +111,14 @@ export function ActionsInboxPage() {
     <PageShell>
       <PageHeader
         title="待确认"
-        description="集中处理 Agent 挂起的写操作：确认、拒绝或批量清空。"
+        description="Agent 挂起的写操作在这里确认或拒绝；入口挂在侧栏顶部「Agent」的红点上。"
         icon={Inbox}
         actions={
           <div className="flex flex-wrap gap-2">
+            <Button type="button" variant="outline" size="sm" onClick={() => setDockCollapsed(false)}>
+              <AgentMark className="mr-1 h-4 w-4" />
+              回到 Agent
+            </Button>
             <Button
               type="button"
               variant="outline"
@@ -139,13 +148,17 @@ export function ActionsInboxPage() {
           <Skeleton className="h-24 w-full" />
         </div>
       ) : items.length === 0 ? (
-        <div className="flex flex-col items-center justify-center rounded-xl border bg-card/40 px-6 py-16 text-center">
-          <Inbox className="h-10 w-10 text-muted-foreground/50" />
-          <p className="mt-3 text-sm text-muted-foreground">暂无待确认操作</p>
-          <Link to="/assistant" className="mt-4 text-sm text-primary hover:underline">
-            打开 Agent
-          </Link>
-        </div>
+        <EmptyState
+          icon={Inbox}
+          size="lg"
+          title="没有待确认的操作"
+          description="Agent 发起的写操作会先停在这里等你确认。"
+          action={
+            <Button type="button" size="sm" variant="outline" onClick={() => setDockCollapsed(false)}>
+              打开 Agent
+            </Button>
+          }
+        />
       ) : (
         <ul className="space-y-3">
           {items.map((action) => {

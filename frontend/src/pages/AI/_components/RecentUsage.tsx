@@ -16,6 +16,7 @@ import { MetaBadge } from "@/components/ui/meta-badge";
 import { MeterBar, SectionHeader, SignalPill, ToneRailCard } from "@/components/ui/status";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { confirmDialog } from "@/components/ui/confirm-dialog";
 
 function cacheTokenLabel(record: LLMUsageRecord): string {
   return `读 ${record.cache_read_tokens ?? "未采集"} / 写 ${record.cache_write_tokens ?? "未采集"}`;
@@ -49,8 +50,8 @@ export function RecentUsageContent() {
     onError: (err) => toast.error(getErrMsg(err)),
   });
 
-  const handleResetUsage = () => {
-    if (!window.confirm("确认清空 AI 调用记录？近期调用列表、成功率和插件 AI 用量统计都会从零开始。")) return;
+  const handleResetUsage = async () => {
+    if (!(await confirmDialog({ title: "清空 AI 调用记录？", description: "近期调用列表、成功率和插件 AI 用量统计都会从零开始，不可恢复。", confirmLabel: "清空", tone: "danger" }))) return;
     resetUsageMut.mutate();
   };
 

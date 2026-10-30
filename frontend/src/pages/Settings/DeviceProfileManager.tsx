@@ -35,6 +35,8 @@ import type {
 } from "@/api/types";
 import { getErrMsg } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { confirmDialog } from "@/components/ui/confirm-dialog";
+import { EmptyState } from "@/components/feedback/EmptyState";
 
 // 默认值方便快速创建：直接照抄 macOS Telegram
 const DEFAULT_FORM: DeviceProfileCreate = {
@@ -160,17 +162,15 @@ export function DeviceProfileManager() {
                 key={p.id}
                 profile={p}
                 onSetDefault={() => setDefaultMut.mutate(p.id)}
-                onDelete={() => {
-                  if (confirm(`确认删除登录设备「${p.name}」？使用它的账号会改用默认登录设备。`))
+                onDelete={async () => {
+                  if (await confirmDialog({ title: `删除登录设备「${p.name}」？`, description: "使用它的账号会改用默认登录设备。", confirmLabel: "删除", tone: "danger" }))
                     deleteMut.mutate(p.id);
                 }}
               />
             ))}
           </ul>
         ) : (
-          <p className="rounded-md border border-dashed py-8 text-center text-sm text-muted-foreground">
-            还没有登录设备（迁移会预置 macOS / iPhone / Windows 等几条）
-          </p>
+          <EmptyState title="还没有登录设备" description="数据库迁移会预置 macOS / iPhone / Windows 等几条，也可以在上方新增。" />
         )}
       </CardContent>
     </Card>

@@ -114,7 +114,7 @@ export function PluginsMarketPage() {
       return installFromMarket({ source_id: item.source_id, key: item.key });
     },
     onSuccess: (_data, item) => {
-      toast.success(`已安装 ${item.name.zh}，到插件中心按账号启用`);
+      toast.success(`已安装 ${item.name.zh}，到「启用与配置」按账号启用`);
       void invalidate();
     },
     onError: (error) => toast.error(getErrMsg(error)),
@@ -186,7 +186,7 @@ export function PluginsMarketPage() {
             <EmptyState
               icon={AlertTriangle}
               title="服务器版本过旧，暂不支持插件市场"
-              description="插件市场需要 TelePilot 服务器 0.113.0 或更新。请先更新服务器；在此之前仍可在“插件管理”里用插件仓库、Git、ZIP 或本地导入安装插件。"
+              description="插件市场需要 TelePilot 服务器 0.113.0 或更新。请先更新服务器；在此之前仍可在「已安装」里用插件仓库、Git、ZIP 或本地导入安装插件。"
             />
           </CardContent>
         </Card>

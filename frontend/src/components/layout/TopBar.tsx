@@ -110,18 +110,17 @@ export function TopBar({
               </div>
             </div>
           </button>
-          {!isStandalone ? (
-            <Button
-              variant="outline"
-              size="sm"
-              className={cn(topbarActionClass(false), "h-7 w-7 shrink-0 px-0")}
-              onClick={onMenuClick}
-              aria-label="打开导航菜单"
-              title="打开导航菜单"
-            >
-              <Menu className="h-3.5 w-3.5" />
-            </Button>
-          ) : null}
+          {/* 手机（<sm）由底栏「更多」承担完整导航，只在平板宽度（sm–md）保留抽屉入口 */}
+          <Button
+            variant="outline"
+            size="sm"
+            className={cn(topbarActionClass(false), "hidden h-7 w-7 shrink-0 px-0 sm:inline-flex")}
+            onClick={onMenuClick}
+            aria-label="打开导航菜单"
+            title="打开导航菜单"
+          >
+            <Menu className="h-3.5 w-3.5" />
+          </Button>
         </div>
         <Button
           variant="outline"

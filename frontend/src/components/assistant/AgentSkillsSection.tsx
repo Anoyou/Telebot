@@ -32,6 +32,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { AGENT_SKILLS_INTRO } from "@/lib/agentSkillOptions";
 import { SkillDiffViewer } from "@/components/assistant/SkillDiffViewer";
 import { cn } from "@/lib/utils";
+import { confirmDialog } from "@/components/ui/confirm-dialog";
 
 const QUERY_KEY = ["agent-skills"];
 type Source = AgentSkillInstall["source"];
@@ -364,7 +365,7 @@ function DetailDialog({ name, onClose, onChanged }: { name: string; onClose: () 
           {detail?.bundled ? (
             <>
               {detail.user_modified ? (
-                <Button type="button" variant="outline" disabled={busy} onClick={() => { if (confirm("放弃你的修改，恢复为插件内置的默认版本？")) restoreMut.mutate(); }}>恢复默认</Button>
+                <Button type="button" variant="outline" disabled={busy} onClick={async () => { if (await confirmDialog({ title: "恢复为默认版本？", description: "会放弃你对这个 Skill 的修改，恢复为插件内置的默认版本。", confirmLabel: "恢复默认", tone: "danger" })) restoreMut.mutate(); }}>恢复默认</Button>
               ) : null}
               {detail.upstream_changed ? <Button type="button" variant="outline" disabled={busy} onClick={() => keepMut.mutate()}>保留我的修改</Button> : null}
             </>
@@ -374,7 +375,7 @@ function DetailDialog({ name, onClose, onChanged }: { name: string; onClose: () 
               type="button"
               variant="destructive"
               disabled={busy}
-              onClick={() => { if (confirm(`卸载 ${name}？会删除文件，并从所有插件配置中移除；不可恢复。`)) uninstallMut.mutate(); }}
+              onClick={async () => { if (await confirmDialog({ title: `卸载 ${name}？`, description: "会删除文件，并从所有插件配置中移除；不可恢复。", confirmLabel: "卸载", tone: "danger" })) uninstallMut.mutate(); }}
             >
               卸载
             </Button>

@@ -22,6 +22,7 @@ import { SectionHeader, SignalPill } from "@/components/ui/status";
 import { fetchMe, logout } from "@/lib/auth";
 import { api, getErrMsg } from "@/lib/api";
 import { getSystemSettings, patchSystemSettings } from "@/api/system";
+import { confirmDialog } from "@/components/ui/confirm-dialog";
 
 interface TotpSetup {
   secret: string;
@@ -460,12 +461,12 @@ export function UserAccount() {
                 </div>
                 <Button
                   variant="outline"
-                  onClick={() => {
+                  onClick={async () => {
                     if (totpCode.length < 6) {
                       toast.error("TOTP 码至少 6 位");
                       return;
                     }
-                    if (!confirm("确认移除 TOTP 密钥？移除后需要重新绑定验证器。")) return;
+                    if (!(await confirmDialog({ title: "移除 TOTP 密钥？", description: "移除后需要重新绑定验证器。", confirmLabel: "移除", tone: "danger" }))) return;
                     disableTotpMut.mutate();
                   }}
                   disabled={disableTotpMut.isPending}

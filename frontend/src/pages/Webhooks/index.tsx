@@ -34,6 +34,7 @@ import { Select } from "@/components/ui/select";
 import { SignalPill } from "@/components/ui/status";
 import { getErrMsg } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { confirmDialog } from "@/components/ui/confirm-dialog";
 
 function accountLabel(account: AccountSummary): string {
   const name = account.display_name?.trim();
@@ -352,8 +353,8 @@ export function WebhooksPage() {
                         variant="outline"
                         size="sm"
                         loading={resetMut.isPending}
-                        onClick={() => {
-                          if (window.confirm("确定重置该账号 Webhook token？旧 token 会立即失效。")) {
+                        onClick={async () => {
+                          if (await confirmDialog({ title: "重置这个账号的 Webhook Token？", description: "旧 Token 会立即失效，外部调用需要换成新 Token。", confirmLabel: "重置", tone: "danger" })) {
                             resetMut.mutate();
                           }
                         }}

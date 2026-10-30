@@ -7,11 +7,12 @@ import {
   ChevronDown,
   Cog,
   Download,
+  Gauge,
+  LayoutPanelLeft,
   Save,
   ShieldCheck,
   SlidersHorizontal,
   Sparkles,
-  UserPlus,
   Waypoints,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -99,12 +100,50 @@ function getGuideStepByPath(pathname: string, search: string): number {
   return 0;
 }
 
+export type SettingsTab = "account" | "platform" | "connections" | "security" | "migration" | "interface";
+
+/** 服务器设置 ?tab= → 分页。包含第 20 轮之前的旧值（proxy-identity / backup / rate …）。 */
+export function resolveSettingsTab(raw: string | null): SettingsTab | null {
+  switch (raw) {
+    case "account":
+    case "user":
+    case "sudo":
+      return "account";
+    case "platform":
+    case "modules":
+    case "timezone":
+    case "logs":
+      return "platform";
+    case "connections":
+    case "proxy-identity":
+    case "proxy":
+    case "device":
+    case "resource":
+    case "notify":
+      return "connections";
+    case "security":
+    case "rate":
+    case "risk":
+      return "security";
+    case "migration":
+    case "backup":
+    case "maintenance":
+      return "migration";
+    case "interface":
+    case "navigation":
+    case "ui":
+      return "interface";
+    default:
+      return null;
+  }
+}
+
 export function SettingsIndex() {
   const qc = useQueryClient();
   const location = useLocation();
   const nav = useNavigate();
-  const [searchParams] = useSearchParams();
-  const [tab, setTab] = useState<"account" | "platform" | "proxy-identity" | "security" | "migration">("account");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [tab, setTab] = useState<SettingsTab>("account");
   const [rateExpanded, setRateExpanded] = useState(false);
   const [guideExpanded, setGuideExpanded] = useState(false);
   const [quickAid, setQuickAid] = useState("");
@@ -207,27 +246,9 @@ export function SettingsIndex() {
   }, [accountsQ.data, quickAid]);
 
   useEffect(() => {
-    const tabParam = searchParams.get("tab");
-    if (tabParam === "backup") {
-      setTab("migration");
-      return;
-    }
-    if (tabParam === "proxy" || tabParam === "device" || tabParam === "resource" || tabParam === "proxy-identity") {
-      setTab("proxy-identity");
-      return;
-    }
-    if (tabParam === "rate") {
-      setTab("security");
-      return;
-    }
-    if (
-      tabParam === "account" ||
-      tabParam === "platform" ||
-      tabParam === "security" ||
-      tabParam === "migration"
-    ) {
-      setTab(tabParam as "account" | "platform" | "security" | "migration");
-    }
+    // 第 20 轮分页重排：旧 ?tab= 值全部映射到新分页，书签 / 深链 / iOS 跳转不坏。
+    const mapped = resolveSettingsTab(searchParams.get("tab"));
+    if (mapped) setTab(mapped);
   }, [searchParams]);
 
   useEffect(() => {
@@ -352,19 +373,6 @@ export function SettingsIndex() {
     onError: (err) => toast.error(getErrMsg(err)),
   });
 
-  const killMut = useMutation({
-    mutationFn: async (next: boolean) => {
-      await api.post("/api/system/kill-switch", { enabled: next });
-    },
-    onSuccess: () => {
-      toast.success("已下发");
-      qc.invalidateQueries({ queryKey: ["system", "kill-switch"] });
-      qc.invalidateQueries({ queryKey: ["accounts"] });
-      qc.invalidateQueries({ queryKey: ["platform", "tree"] });
-    },
-    onError: (err) => toast.error(getErrMsg(err)),
-  });
-
   const loading = settingsQ.isLoading || killQ.isLoading;
   if (loading) {
     return (
@@ -458,22 +466,35 @@ export function SettingsIndex() {
         </DialogContent>
       </Dialog>
 
-      <Tabs value={tab} onValueChange={(v) => setTab(v as typeof tab)}>
+      <Tabs
+        value={tab}
+        onValueChange={(v) => {
+          const next = v as SettingsTab;
+          setTab(next);
+          // 切换分页写回网址，分享 / 刷新不丢分页
+          const params = new URLSearchParams(searchParams);
+          params.set("tab", next);
+          setSearchParams(params, { replace: true });
+        }}
+      >
         <TabsList className="flex h-auto flex-wrap justify-start gap-1">
           <TabsTrigger value="account" className="gap-1.5">
-            <ShieldCheck className="h-4 w-4" /> 用户与管理
+            <ShieldCheck className="h-4 w-4" /> 账号与安全
           </TabsTrigger>
           <TabsTrigger value="platform" className="gap-1.5">
-            <SlidersHorizontal className="h-4 w-4" /> 能力与通知
+            <SlidersHorizontal className="h-4 w-4" /> 平台与模块
           </TabsTrigger>
-          <TabsTrigger value="proxy-identity" className="gap-1.5">
-            <Waypoints className="h-4 w-4" /> 代理与登录设备
+          <TabsTrigger value="connections" className="gap-1.5">
+            <Waypoints className="h-4 w-4" /> 连接与通知
           </TabsTrigger>
           <TabsTrigger value="security" className="gap-1.5">
-            <UserPlus className="h-4 w-4" /> 风控与限额
+            <Gauge className="h-4 w-4" /> 限流与风控
           </TabsTrigger>
           <TabsTrigger value="migration" className="gap-1.5">
-            <Download className="h-4 w-4" /> 备份与恢复
+            <Download className="h-4 w-4" /> 备份与维护
+          </TabsTrigger>
+          <TabsTrigger value="interface" className="gap-1.5">
+            <LayoutPanelLeft className="h-4 w-4" /> 界面偏好
           </TabsTrigger>
         </TabsList>
 
@@ -483,8 +504,6 @@ export function SettingsIndex() {
         </TabsContent>
 
         <TabsContent value="platform" className="space-y-6">
-          <NavigationPreferences settings={settingsQ.data} />
-
           <Card className={guideActive && currentStep === 1 ? "siri-glow-soft" : undefined}>
             <CardHeader>
               <CardTitle className="text-base">指令前缀</CardTitle>
@@ -608,7 +627,7 @@ export function SettingsIndex() {
 
           <Card>
             <CardHeader>
-              <CardTitle className="text-base">平台能力</CardTitle>
+              <CardTitle className="text-base">平台模块</CardTitle>
               <CardDescription>
                 可选平台模块热关闭 / 热启动。关闭只暂停入口与运行时资源，不删除配置、Token、规则或资金数据。
                 userbot、审计、结算与补偿属于平台内核，不受这些开关影响。
@@ -697,67 +716,6 @@ export function SettingsIndex() {
 
           <Card>
             <CardHeader>
-              <CardTitle className="text-base">通知渠道</CardTitle>
-              <CardDescription>设置系统事件的推送目标与通知机器人。</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <NotifyBots />
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="proxy-identity" className="space-y-6">
-          <ProxyManager />
-          <DeviceProfileManager />
-        </TabsContent>
-
-        <TabsContent value="security" className="space-y-6">
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">紧急停止</CardTitle>
-              <CardDescription>
-                开启后所有账号 worker 立即暂停，仅保留接收。与顶栏「紧急停止」按钮是同一个开关。
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="flex items-center gap-4">
-              <Switch
-                checked={!!killQ.data?.enabled}
-                onCheckedChange={(v) => {
-                  if (v && !confirm("确认紧急停止？所有账号立即暂停！")) return;
-                  killMut.mutate(v);
-                }}
-              />
-              <span className="text-sm text-muted-foreground">
-                当前：{killQ.data?.enabled ? "已紧急停止" : "正常运行"}
-              </span>
-            </CardContent>
-          </Card>
-
-          <div className="rounded-lg border bg-card">
-            <div className="p-6">
-              <button
-                type="button"
-                className="flex w-full items-center justify-between gap-2 text-left"
-                onClick={() => setRateExpanded((v) => !v)}
-              >
-                <div>
-                  <CardTitle className="text-base">频控模板</CardTitle>
-                  <CardDescription>管理历史的速率限制模板，默认收起。</CardDescription>
-                </div>
-                <ChevronDown
-                  className={`h-4 w-4 text-muted-foreground transition-transform ${rateExpanded ? "rotate-180" : ""}`}
-                />
-              </button>
-            </div>
-            {rateExpanded ? (
-              <div className="border-t p-4">
-                <RateTemplates />
-              </div>
-            ) : null}
-          </div>
-
-          <Card>
-            <CardHeader>
               <CardTitle className="text-base">时区设置</CardTitle>
               <CardDescription>
                 全局时区，影响定时任务"下次触发/上次触发"等时间显示。默认使用 Asia/Shanghai。
@@ -786,7 +744,7 @@ export function SettingsIndex() {
 
           <Card>
             <CardHeader>
-              <CardTitle className="text-base">运行日志与 Trace / Event Bus 设置</CardTitle>
+              <CardTitle className="text-base">日志与调用链（Trace / Event Bus）保留</CardTitle>
               <CardDescription>
                 控制运行日志、Trace、Event Bus、Inline 和 native_raw 保留策略。日志等级保存后立即影响新日志落库，0 天表示不自动删除。
               </CardDescription>
@@ -963,6 +921,63 @@ export function SettingsIndex() {
             </CardContent>
           </Card>
 
+        </TabsContent>
+
+        <TabsContent value="connections" className="space-y-6">
+          <ProxyManager />
+          <DeviceProfileManager />
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">通知渠道</CardTitle>
+              <CardDescription>设置系统事件的推送目标与通知机器人。</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <NotifyBots />
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="security" className="space-y-6">
+          <Card data-settings-emergency-status>
+            <CardHeader>
+              <CardTitle className="text-base">紧急停止</CardTitle>
+              <CardDescription>
+                开启后所有账号 worker 立即暂停，仅保留接收。开关统一放在顶栏右上角的「紧急停止」按钮，这里只显示当前状态。
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="flex flex-wrap items-center gap-3">
+              <SignalPill
+                tone={killQ.data?.enabled ? "danger" : "success"}
+                label="当前"
+                value={killQ.data?.enabled ? "已紧急停止" : "正常运行"}
+              />
+              <span className="text-xs text-muted-foreground">需要停止或解除时，点顶栏「紧急停止」按钮操作。</span>
+            </CardContent>
+          </Card>
+
+          <div className="rounded-lg border bg-card">
+            <div className="p-6">
+              <button
+                type="button"
+                className="flex w-full items-center justify-between gap-2 text-left"
+                onClick={() => setRateExpanded((v) => !v)}
+              >
+                <div>
+                  <CardTitle className="text-base">限流模板</CardTitle>
+                  <CardDescription>账号可套用的限流规则模板（历史叫「频控模板」），默认收起。</CardDescription>
+                </div>
+                <ChevronDown
+                  className={`h-4 w-4 text-muted-foreground transition-transform ${rateExpanded ? "rotate-180" : ""}`}
+                />
+              </button>
+            </div>
+            {rateExpanded ? (
+              <div className="border-t p-4">
+                <RateTemplates />
+              </div>
+            ) : null}
+          </div>
+
           <Card>
             <CardHeader>
               <SectionHeader
@@ -1047,8 +1062,12 @@ export function SettingsIndex() {
           </Card>
         </TabsContent>
 
-        <TabsContent value="migration">
+        <TabsContent value="migration" className="space-y-6">
           <ConfigBackup />
+        </TabsContent>
+
+        <TabsContent value="interface" className="space-y-6">
+          <NavigationPreferences settings={settingsQ.data} />
         </TabsContent>
       </Tabs>
     </PageShell>
@@ -1117,6 +1136,7 @@ function RiskLimitField({
       </div>
       <Input
         inputMode="numeric"
+        aria-label={label}
         value={value}
         onChange={(e) => onChange(normalizeLimitInput(e.target.value))}
       />

@@ -19,8 +19,10 @@ import {
   ShieldCheck,
   Terminal,
   Trash2,
+  Users,
 } from "lucide-react";
 import { toast } from "sonner";
+import { PageHeader, PageShell } from "@/components/layout/PageScaffold";
 
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -89,6 +91,7 @@ import { SignalPill } from "@/components/ui/status";
 import type { FeatureInfo, HumanizeConfig, ProxyTestResult } from "@/api/types";
 import { actionHint, actionLabel } from "@/lib/rate-actions";
 import { featureConfigPath } from "@/pages/Plugins/_shared/featureConfig";
+import { confirmDialog } from "@/components/ui/confirm-dialog";
 
 const COMMAND_TYPE_LABELS: Record<string, string> = {
   reply_text: "回复文本",
@@ -107,15 +110,41 @@ function featureSourceLabel(feature: Pick<FeatureInfo, "is_builtin" | "source_la
   return "第三方";
 }
 
+const ACCOUNT_TABS = ["overview", "features", "commands", "bot-management", "rate", "proxy", "ignored"] as const;
+
+/** 账号详情 ?tab= → 分页；含旧别名（bot）与按新名字写的别名。 */
+export function resolveAccountTab(raw: string | null): (typeof ACCOUNT_TABS)[number] {
+  switch (raw) {
+    case "bot":
+      return "bot-management";
+    case "plugins":
+      return "features";
+    case "risk":
+    case "limits":
+      return "rate";
+    case "device":
+    case "network":
+      return "proxy";
+    case "allowed-chats":
+    case "chats":
+      return "ignored";
+    default:
+      return (ACCOUNT_TABS as readonly string[]).includes(raw ?? "") ? (raw as (typeof ACCOUNT_TABS)[number]) : "overview";
+  }
+}
+
 export function AccountDetail() {
   const params = useParams();
-  const [searchParams] = useSearchParams();
-  const tabParam = searchParams.get("tab") || "overview";
-  const defaultTab = tabParam === "bot"
-    ? "bot-management"
-    : ["overview", "commands", "features", "bot-management", "rate", "proxy", "ignored"].includes(tabParam)
-    ? tabParam
-    : "overview";
+  const [searchParams, setSearchParams] = useSearchParams();
+  // 分页与网址 ?tab= 双向同步（第 20 轮第二批），分享链接不丢分页；旧别名继续可用。
+  const tabParam = searchParams.get("tab");
+  const activeTab = resolveAccountTab(tabParam);
+  const setActiveTab = (next: string) => {
+    const params = new URLSearchParams(searchParams);
+    if (next === "overview") params.delete("tab");
+    else params.set("tab", next);
+    setSearchParams(params, { replace: true });
+  };
   const aid = Number(params.aid);
   const nav = useNavigate();
   const qc = useQueryClient();
@@ -134,7 +163,7 @@ export function AccountDetail() {
   const featuresQ = useQuery({
     queryKey: ["account", aid, "features"],
     queryFn: () => listAccountFeatures(aid),
-    enabled: !!aid && (defaultTab === "overview" || defaultTab === "features"),
+    enabled: !!aid && (activeTab === "overview" || activeTab === "features"),
   });
 
   // 动态获取已注册功能列表（替代硬编码 FEATURE_KEYS）
@@ -142,13 +171,13 @@ export function AccountDetail() {
     queryKey: ["matrix"],
     queryFn: getFeatureMatrix,
     select: (data) => data.features,
-    enabled: defaultTab === "overview" || defaultTab === "features",
+    enabled: activeTab === "overview" || activeTab === "features",
   });
 
   const rateQ = useQuery({
     queryKey: ["account", aid, "rate-limit"],
     queryFn: () => getAccountRateLimit(aid),
-    enabled: !!aid && defaultTab === "rate",
+    enabled: !!aid && activeTab === "rate",
   });
 
   // ===================== 操作 mutations =====================
@@ -243,42 +272,46 @@ export function AccountDetail() {
   const idMissing = acc.tg_user_id == null && !acc.tg_username;
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-wrap items-center gap-2 sm:gap-3">
-        <Button variant="ghost" size="sm" onClick={() => nav("/accounts")}>
-          <ArrowLeft className="mr-1 h-4 w-4" /> 返回列表
-        </Button>
-        <AccountAvatar
-          id={acc.id}
-          name={acc.display_name}
-          username={acc.tg_username}
-          size={36}
-        />
-        <h1 className="min-w-0 truncate text-2xl font-semibold tracking-tight">
-          {acc.display_name ||
-            (acc.tg_username ? `@${acc.tg_username}` : `#${acc.id}`)}
-        </h1>
-        <AccountStatusBadge status={acc.status} />
-        <AskAgentButton accountId={acc.id} source="account" className="ml-auto" />
-      </div>
-      <div className="flex flex-wrap gap-2">
-        <SignalPill
-          tone={acc.status === "active" ? "success" : acc.status === "paused" ? "warn" : "neutral"}
-          label="Worker"
-          value={acc.status}
-        />
-        <SignalPill tone="primary" label="已启用插件" value={`${enabledPluginCount} 项`} />
-        <SignalPill tone={idMissing ? "warn" : "success"} label="TG 身份" value={idMissing ? "待同步" : "已同步"} />
-      </div>
+    <PageShell>
+      <PageHeader
+        icon={Users}
+        title={acc.display_name || (acc.tg_username ? `@${acc.tg_username}` : `账号 #${acc.id}`)}
+        description={
+          <span className="inline-flex flex-wrap items-center gap-2">
+            <AccountAvatar id={acc.id} name={acc.display_name} username={acc.tg_username} size={20} />
+            <span>账号详情{acc.tg_username ? ` · @${acc.tg_username}` : ""}</span>
+            <AccountStatusBadge status={acc.status} />
+          </span>
+        }
+        actions={
+          <>
+            <AskAgentButton accountId={acc.id} source="account" />
+            <Button variant="outline" size="sm" onClick={() => nav("/accounts")}>
+              <ArrowLeft className="mr-1 h-4 w-4" /> 返回账号列表
+            </Button>
+          </>
+        }
+        signals={
+          <>
+            <SignalPill
+              tone={acc.status === "active" ? "success" : acc.status === "paused" ? "warn" : "neutral"}
+              label="Worker"
+              value={acc.status}
+            />
+            <SignalPill tone="primary" label="已启用插件" value={`${enabledPluginCount} 项`} />
+            <SignalPill tone={idMissing ? "warn" : "success"} label="TG 身份" value={idMissing ? "待同步" : "已同步"} />
+          </>
+        }
+      />
 
-      <Tabs defaultValue={defaultTab}>
+      <Tabs value={activeTab} onValueChange={setActiveTab}>
         <div className="w-full max-w-full overflow-x-auto overscroll-x-contain pb-1 [-webkit-overflow-scrolling:touch] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           <TabsList className="!mx-0 !inline-flex !w-max !max-w-none !justify-start flex-nowrap whitespace-nowrap">
             <TabsTrigger value="overview" className="shrink-0 gap-1.5">
               <LayoutDashboard className="h-4 w-4" /> 概览
             </TabsTrigger>
             <TabsTrigger value="features" className="shrink-0 gap-1.5">
-              <Bot className="h-4 w-4" /> 插件启停
+              <Bot className="h-4 w-4" /> 插件
             </TabsTrigger>
             <TabsTrigger value="commands" className="shrink-0 gap-1.5">
               <Terminal className="h-4 w-4" /> 自定义指令
@@ -287,10 +320,10 @@ export function AccountDetail() {
               <MessageCircle className="h-4 w-4" /> 管理 Bot
             </TabsTrigger>
             <TabsTrigger value="rate" className="shrink-0 gap-1.5">
-              <Gauge className="h-4 w-4" /> 风控基础
+              <Gauge className="h-4 w-4" /> 限流与风控
             </TabsTrigger>
             <TabsTrigger value="proxy" className="shrink-0 gap-1.5">
-              <Network className="h-4 w-4" /> 代理/登录设备
+              <Network className="h-4 w-4" /> 代理与登录设备
             </TabsTrigger>
             <TabsTrigger value="ignored" className="shrink-0 gap-1.5">
               <ShieldCheck className="h-4 w-4" /> 允许会话
@@ -395,14 +428,17 @@ export function AccountDetail() {
                   variant="outline"
                   size="sm"
                   className="text-destructive"
-                  onClick={() => {
+                  onClick={async () => {
                     const label =
                       acc.display_name ||
                       (acc.tg_username ? `@${acc.tg_username}` : `#${acc.id}`);
                     if (
-                      confirm(
-                        `二次确认：删除账号 ${label}，将撤销 session 并清空所有规则。`,
-                      )
+                      await confirmDialog({
+                        title: `删除账号 ${label}？`,
+                        description: "会撤销登录 session 并清空这个账号的所有规则，不可恢复。",
+                        confirmLabel: "删除账号",
+                        tone: "danger",
+                      })
                     )
                       deleteMut.mutate();
                   }}
@@ -671,8 +707,8 @@ export function AccountDetail() {
                 <Button
                   variant="destructive"
                   size="sm"
-                  onClick={() => {
-                    if (confirm("确认要紧急调严？阈值 ×0.5，TTL 2 小时"))
+                  onClick={async () => {
+                    if (await confirmDialog({ title: "紧急调严限流？", description: "这个账号的限流阈值 ×0.5，持续 2 小时后自动恢复。", confirmLabel: "紧急调严", tone: "danger" }))
                       strictMut.mutate();
                   }}
                 >
@@ -739,7 +775,7 @@ export function AccountDetail() {
           <IgnoredTab aid={aid} />
         </TabsContent>
       </Tabs>
-    </div>
+    </PageShell>
   );
 }
 
@@ -1152,7 +1188,7 @@ function DeviceProfileTab({
         ) : null}
 
         <div className="border-t pt-3 text-xs text-muted-foreground">
-          要新增 / 修改登录设备，请到「服务器设置 → 代理与登录设备」。
+          要新增 / 修改登录设备，请到「服务器设置 → 连接与通知」。
         </div>
       </CardContent>
     </Card>

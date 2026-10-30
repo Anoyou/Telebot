@@ -29,6 +29,7 @@ import type { SudoUserResponse } from "@/types/sudo";
 import { listAccounts } from "@/api/accounts";
 import { getErrMsg } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { confirmDialog } from "@/components/ui/confirm-dialog";
 
 const QK = ["sudo-users"] as const;
 
@@ -244,8 +245,8 @@ export function SudoManagement() {
     });
   };
 
-  const handleDelete = (id: number) => {
-    if (!window.confirm("确定要删除这个 Sudo 用户吗？此操作不可撤销。")) return;
+  const handleDelete = async (id: number) => {
+    if (!(await confirmDialog({ title: "删除这个 Sudo 用户？", description: "此操作不可撤销。", confirmLabel: "删除", tone: "danger" }))) return;
     deleteMut.mutate(id);
   };
 

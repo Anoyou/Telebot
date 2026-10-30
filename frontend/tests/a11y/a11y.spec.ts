@@ -11,6 +11,10 @@ const pages = [
   ["ai", "/ai"],
   ["llm-providers", "/ai?tab=providers"],
   ["bot", "/accounts/1?tab=bot"],
+  // 第 20 轮 Web IA 第二批：账号列表、服务器设置新分页（含移动视口）
+  ["accounts-list", "/accounts"],
+  ["settings-interface", "/settings?tab=interface"],
+  ["settings-security", "/settings?tab=security"],
 ] as const;
 
 for (const [name, path] of pages) {

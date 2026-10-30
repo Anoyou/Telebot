@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { History, Pencil, Play, Plus, Trash2, Zap } from "lucide-react";
+import { History, Pencil, Play, Plus, Trash2, Zap, CalendarClock } from "lucide-react";
 import { toast } from "sonner";
 
 import { getSystemSettings } from "@/api/system";
@@ -55,6 +55,9 @@ import {
   RulePageHeader,
   useRuleCrud,
 } from "@/pages/Plugins/configs/_shared";
+import { confirmDialog } from "@/components/ui/confirm-dialog";
+import { SchedulerCommandWhitelistCard } from "./SchedulerCommandWhitelist";
+import { EmptyState } from "@/components/feedback/EmptyState";
 
 function defaultConfig(commandPrefix = ","): SchedulerRuleConfig {
   return {
@@ -507,8 +510,8 @@ export function SchedulerConfig() {
                             size="sm"
                             variant="ghost"
                             className="text-destructive"
-                            onClick={() => {
-                              if (confirm(`删除规则 ${r.name}？`)) crud.removeRule(r.id);
+                            onClick={async () => {
+                              if (await confirmDialog({ title: `删除规则「${r.name}」？`, description: "删除后不可恢复。", confirmLabel: "删除", tone: "danger" })) crud.removeRule(r.id);
                             }}
                           >
                             <Trash2 className="mr-1 h-3.5 w-3.5" /> 删除
@@ -521,10 +524,12 @@ export function SchedulerConfig() {
               </TableBody>
             </Table>
           ) : (
-            <p className="text-sm text-muted-foreground">暂无规则，点击"新建规则"。</p>
+            <EmptyState icon={CalendarClock} title="还没有定时任务" description="点右上角「新建规则」，或用「巡检模板」快速建一条每日巡检。" />
           )}
         </CardContent>
       </Card>
+
+      <SchedulerCommandWhitelistCard aid={aid} />
 
       <RuleEditDialogShell
         open={editOpen}

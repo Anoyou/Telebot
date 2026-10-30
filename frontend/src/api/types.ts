@@ -1105,6 +1105,8 @@ export interface SystemSettings {
   ui_preferences?: {
     sidebar_order: string[];
     mobile_nav_order: string[];
+    /** 第 20 轮「常用入口」：桌面侧栏第一组与手机底栏共用；空列表 = 默认（插件 · 交互 · 概览）。旧服务器没有该字段。 */
+    primary_nav?: string[];
     provider_order: number[];
   };
 }

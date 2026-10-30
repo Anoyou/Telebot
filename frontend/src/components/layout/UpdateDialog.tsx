@@ -48,6 +48,7 @@ import {
   loadActiveUpdateJob,
   saveActiveUpdateJob,
 } from "@/lib/updateJobPersistence";
+import { confirmDialog } from "@/components/ui/confirm-dialog";
 
 type UpdateActionRequired =
   | "none"
@@ -558,7 +559,7 @@ export function UpdateDialog({ open, onOpenChange }: UpdateDialogProps) {
   };
 
   const doRestart = async () => {
-    if (!window.confirm("确认重启应用？页面将在 5 秒后自动刷新。")) return;
+    if (!(await confirmDialog({ title: "重启应用？", description: "服务会短暂中断，页面将在 5 秒后自动刷新。", confirmLabel: "重启", tone: "danger" }))) return;
     try {
       await restartApp();
       setStep({ kind: "restarting", countdown: 5 });

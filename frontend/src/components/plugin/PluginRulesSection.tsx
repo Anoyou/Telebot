@@ -28,6 +28,8 @@ import {
 } from "@/lib/pluginRules";
 import { useRuleCrud } from "@/pages/Plugins/configs/_shared/useRuleCrud";
 import { RuleEditDialogShell } from "@/pages/Plugins/configs/_shared/RuleEditDialogShell";
+import { confirmDialog } from "@/components/ui/confirm-dialog";
+import { EmptyState } from "@/components/feedback/EmptyState";
 
 interface FormState {
   name: string;
@@ -160,7 +162,7 @@ export function PluginRulesSection({
               <Spinner className="text-primary" />
             </div>
           ) : rules.length === 0 ? (
-            <p className="py-8 text-center text-sm text-muted-foreground">暂无规则，点击「新建规则」添加。</p>
+            <EmptyState title="还没有规则" description="点「新建规则」添加第一条。" />
           ) : (
             <ul className="space-y-2" data-testid="plugin-rules-list">
               {rules.map((rule) => {
@@ -201,8 +203,8 @@ export function PluginRulesSection({
                         size="sm"
                         variant="ghost"
                         className="text-destructive"
-                        onClick={() => {
-                          if (confirm(`删除规则 ${rule.name}？`)) crud.removeRule(rule.id);
+                        onClick={async () => {
+                          if (await confirmDialog({ title: `删除规则「${rule.name}」？`, description: "删除后不可恢复。", confirmLabel: "删除", tone: "danger" })) crud.removeRule(rule.id);
                         }}
                       >
                         <Trash2 className="mr-1 h-3.5 w-3.5" /> 删除

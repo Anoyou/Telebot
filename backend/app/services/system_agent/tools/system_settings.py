@@ -35,7 +35,9 @@ _UI_ROUTES = {
     "/dispatch-debug",
     "/logs",
     "/settings",
+    "/accounts",
 }
+_PRIMARY_NAV_ROUTES = _UI_ROUTES - {"/webhooks", "/dispatch-debug", "/settings"}
 
 
 async def _value(ctx: ToolContext, key: str, default: Any) -> Any:
@@ -204,15 +206,19 @@ def _validate_changes(changes: dict[str, Any]) -> None:
             raise ValueError("log_retention.runtime_log_min_level 必须是 debug/info/warn/error")
     ui = changes.get("ui_preferences")
     if isinstance(ui, dict):
-        for key in ("sidebar_order", "mobile_nav_order", "provider_order"):
+        for key in ("sidebar_order", "mobile_nav_order", "primary_nav", "provider_order"):
             if key in ui and ui[key] is not None:
                 items = list(ui[key])
                 if len(items) != len(set(items)):
                     raise ValueError(f"ui_preferences.{key} 不能包含重复项")
                 if key == "sidebar_order" and (
-                    len(items) > 10 or any(str(item) not in _UI_ROUTES for item in items)
+                    len(items) > 12 or any(str(item) not in _UI_ROUTES for item in items)
                 ):
-                    raise ValueError("ui_preferences.sidebar_order 包含未知页面或超过 10 项")
+                    raise ValueError("ui_preferences.sidebar_order 包含未知页面或超过 12 项")
+                if key == "primary_nav" and (
+                    len(items) > 4 or any(str(item) not in _PRIMARY_NAV_ROUTES for item in items)
+                ):
+                    raise ValueError("ui_preferences.primary_nav 只能选一级/二级入口，最多 4 项")
                 if key == "mobile_nav_order" and (
                     len(items) > 4 or any(str(item) not in _UI_ROUTES for item in items)
                 ):

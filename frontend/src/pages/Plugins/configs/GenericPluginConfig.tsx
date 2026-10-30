@@ -101,6 +101,7 @@ import { pluginRulesLayout } from "@/lib/pluginRules";
 import { orderedPropertyEntries } from "@/components/plugin/configFieldOrder";
 import { CollapsibleUsageContent } from "./_shared/CollapsibleUsageContent";
 import { featureRuntimeText, featureSwitchText } from "./_shared/featureStatus";
+import { confirmDialog } from "@/components/ui/confirm-dialog";
 
 function isConfigSchema(schema: unknown): schema is ConfigSchema {
   const candidate = schema as Record<string, unknown> | null | undefined;
@@ -576,7 +577,7 @@ export function GenericPluginConfigPage() {
   return (
     <div className="space-y-6 pb-24">
       <div className="flex flex-wrap items-center gap-3">
-        <Button variant="default" size="sm" className="gap-1.5 shadow-sm" onClick={() => confirmDiscardChanges(dirty) && nav(backTarget.backHref)}>
+        <Button variant="default" size="sm" className="gap-1.5 shadow-sm" onClick={() => void confirmDiscardChanges(dirty).then((ok) => ok && nav(backTarget.backHref))}>
           <ArrowLeft className="h-4 w-4" /> {backTarget.backLabel}
         </Button>
         <div>
@@ -710,7 +711,7 @@ export function GenericPluginConfigPage() {
                     variant="outline"
                     size="sm"
                     className="h-7 border-destructive/40 bg-destructive/10 px-2 text-destructive hover:bg-destructive/15 hover:text-destructive"
-                    onClick={() => confirmDiscardChanges(dirty) && nav(`/logs?tab=plugins&account_id=${aid}&plugin_key=${encodeURIComponent(featureKey)}&status=failed`)}
+                    onClick={() => void confirmDiscardChanges(dirty).then((ok) => ok && nav(`/logs?tab=plugins&account_id=${aid}&plugin_key=${encodeURIComponent(featureKey)}&status=failed`))}
                   >
                     查看日志
                   </Button>
@@ -1010,9 +1011,9 @@ export function GenericPluginConfigPage() {
           onClose={() => setActiveActionJob((prev) => prev ? { ...prev, hidden: true } : prev)}
           controlling={controlActionJobMut.isPending}
           onPause={() => activeActionJob && controlActionJobMut.mutate({ jobId: activeActionJob.jobId, action: "pause" })}
-          onCancel={() => {
+          onCancel={async () => {
             if (!activeActionJob) return;
-            if (!window.confirm("确定终止当前任务吗？已经保存的阶段性结果会保留。")) return;
+            if (!(await confirmDialog({ title: "终止当前任务？", description: "已经保存的阶段性结果会保留。", confirmLabel: "终止", tone: "danger" }))) return;
             controlActionJobMut.mutate({ jobId: activeActionJob.jobId, action: "cancel" });
           }}
         />
