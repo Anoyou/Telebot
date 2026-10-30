@@ -354,8 +354,8 @@ final class DiagnosticsUITests: XCTestCase {
         let chatType = app.buttons["dispatchDebug.chatType"]
         scrollTo(chatType, in: app, up: false, attempts: 4)
         XCTAssertTrue(chatType.exists)
-        XCTAssertTrue(chatType.label.contains("普通群") || (chatType.value as? String ?? "").contains("普通群"),
-                      "按 Chat ID 推断为普通群：\(chatType.label) \(chatType.value ?? "")")
+        XCTAssertTrue(chatType.label.contains("群组") || (chatType.value as? String ?? "").contains("群组"),
+                      "按 Chat ID 推断为普通群（显示「群组」）：\(chatType.label) \(chatType.value ?? "")")
         let text = element(app, "dispatchDebug.text")
         scrollTo(text, in: app, attempts: 6)
         XCTAssertEqual(text.value as? String, "帮我总结一下今天的讨论", "应带入消息正文")

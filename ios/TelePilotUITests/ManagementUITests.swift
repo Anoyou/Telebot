@@ -632,8 +632,15 @@ final class ManagementUITests: XCTestCase {
             let bar = app.tabBars.firstMatch
             if bar.exists, !bar.frame.isEmpty { top = bar.frame.minY }
             // 第 20 轮：值守中 Dock 上方多了全局提示（系统底部附件），同样会挡住下面的行。
+            // 附件在 Dock 缩小 / 展开切换时不一定能按标识查到（CI 实测），所以另外要求元素在屏幕下方 1/4 以上。
             let banner = app.descendants(matching: .any)["safeWatch.banner"].firstMatch
             if banner.exists, !banner.frame.isEmpty { top = min(top, banner.frame.minY) }
+            let window = app.windows.firstMatch.frame
+            let safeWatchOn = banner.exists || app.descendants(matching: .any)["safeWatch.restore"].firstMatch.exists
+                || app.buttons["runtime.restore"].exists
+            if !window.isEmpty, safeWatchOn {
+                top = min(top, window.minY + window.height * 0.75)
+            }
             guard top.isFinite else { return false }
             return element.frame.midY >= top - 8
         }
@@ -642,9 +649,12 @@ final class ManagementUITests: XCTestCase {
                 guard underTabBar() else { break }
                 let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.6))
                 start.press(forDuration: 0.05, thenDragTo: start.withOffset(CGVector(dx: 0, dy: -180)))
+                Thread.sleep(forTimeInterval: 0.4)
                 continue
             }
             if up { app.swipeUp() } else { app.swipeDown() }
+            // 等滚动停下再判断位置，避免按惯性滚动中的位置多滑一次。
+            Thread.sleep(forTimeInterval: 0.4)
         }
         XCTAssertTrue(element.exists && element.isHittable && !underTabBar(), "\(element) 不可见或被标签栏遮住")
     }
