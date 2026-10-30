@@ -174,8 +174,8 @@ final class ManagementUITests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["changelog.list"].firstMatch.waitForExistence(timeout: 10))
         XCTAssertTrue(app.staticTexts["changelog.current"].firstMatch.waitForExistence(timeout: 5))
         let oldest = app.staticTexts["首个原生客户端与 APNs"]
-        // 更新日志随版本增长，最旧条目在底部：多给几次滑动。
-        for _ in 0..<30 where !oldest.exists { app.swipeUp() }
+        // 更新日志随版本增长，最旧条目在底部：快速滑动并多给几次（0.19.0 起 30 次普通滑动到不了底）。
+        for _ in 0..<60 where !oldest.exists { app.swipeUp(velocity: .fast) }
         XCTAssertTrue(oldest.exists)
         let screenshot = XCTAttachment(screenshot: app.screenshot())
         screenshot.name = "App 更新日志"
@@ -375,50 +375,186 @@ final class ManagementUITests: XCTestCase {
         add(screenshot)
     }
 
-    /// 服务器设置里的「能力与插件树」（原「平台运行树」原始文档）：主干、直接接入的插件、能力分支可展开；
-    /// 切换到账号范围后按该账号的插件启用状态显示。
-    func testPlatformTreeShowsNativeHierarchy() {
+    /// 运行树（第 19 轮）：插件页「插件 | 运行」切到运行视图。
+    private func openRuntimeTree(_ app: XCUIApplication) {
+        let plugins = app.tabBars.buttons["插件"]
+        XCTAssertTrue(plugins.waitForExistence(timeout: 20))
+        plugins.tap()
+        let mode = app.buttons["plugins.mode.runtime"]
+        XCTAssertTrue(mode.waitForExistence(timeout: 15))
+        mode.tap()
+        XCTAssertTrue(app.staticTexts["runtime.profile"].waitForExistence(timeout: 15))
+    }
+
+    /// 在运行树列表里上下滑动，直到元素可点。Dock 的标签栏浮在列表之上，元素中心落在标签栏里时
+    /// 仍算 isHittable，但点击会落到标签栏上：此时小步上拖，把它挪到标签栏上方。
+    private func reveal(_ element: XCUIElement, in app: XCUIApplication, up: Bool = true, attempts: Int = 10) {
+        func underTabBar() -> Bool {
+            let bar = app.tabBars.firstMatch
+            guard bar.exists, !bar.frame.isEmpty else { return false }
+            return element.frame.midY >= bar.frame.minY - 8
+        }
+        for _ in 0..<attempts {
+            if element.exists && element.isHittable {
+                guard underTabBar() else { break }
+                let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.6))
+                start.press(forDuration: 0.05, thenDragTo: start.withOffset(CGVector(dx: 0, dy: -180)))
+                continue
+            }
+            if up { app.swipeUp() } else { app.swipeDown() }
+        }
+        XCTAssertTrue(element.exists && element.isHittable && !underTabBar(), "\(element) 不可见或被标签栏遮住")
+    }
+
+    /// 运行模式卡（预演 → 确认进入值守 → 恢复生产）与 5 个可选模块：被插件需要的关不掉并写明原因；
+    /// 没人需要的可以关（确认框 + 现有平台能力接口）；点模块看需要它的插件。服务器设置里的旧入口跳到这里。
+    func testRuntimeTreeSafeWatchAndModules() {
+        let app = launch()
+        openRuntimeTree(app)
+        let profile = app.staticTexts["runtime.profile"]
+        XCTAssertTrue(profile.label.contains("生产"), profile.label)
+        let workers = app.staticTexts["runtime.workers"]
+        XCTAssertTrue(workers.label.contains("1/2 在线"), workers.label)
+
+        // AI 被本账号的内容整理助手需要：开关不可用，并写明原因（新服务器 blocked_reason）。
+        let ai = app.buttons["runtime.module.ai"]
+        reveal(ai, in: app)
+        XCTAssertTrue(ai.label.contains("被 1 个插件需要"), ai.label)
+        XCTAssertTrue(ai.label.contains("本账号启用的 1 个插件需要它"), ai.label)
+        XCTAssertFalse(app.switches["runtime.module.ai.toggle"].isEnabled, "被插件需要的模块不能关")
+
+        // 资金台账没人需要：可关闭，走确认框。
+        let ledger = app.buttons["runtime.module.ledger"]
+        reveal(ledger, in: app)
+        XCTAssertTrue(ledger.label.contains("可关闭"), ledger.label)
+        let ledgerToggle = app.switches["runtime.module.ledger.toggle"]
+        XCTAssertTrue(ledgerToggle.isEnabled)
+        XCTAssertEqual(ledgerToggle.value as? String, "1")
+        ledgerToggle.tap()
+        let close = app.buttons["关闭"].firstMatch
+        XCTAssertTrue(close.waitForExistence(timeout: 5), "关闭模块前应有确认框")
+        close.tap()
+        let message = app.descendants(matching: .any)["runtime.module.message"].firstMatch
+        XCTAssertTrue(message.waitForExistence(timeout: 10))
+        expectation(for: NSPredicate(format: "value == %@", "0"), evaluatedWith: app.switches["runtime.module.ledger.toggle"])
+        waitForExpectations(timeout: 10)
+
+        // 点模块：列出需要它的插件。
+        reveal(ai, in: app, up: false)
+        ai.tap()
+        XCTAssertTrue(app.navigationBars["AI"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["runtime.moduleDetail.plugin.content_assistant"].waitForExistence(timeout: 5))
+        app.navigationBars["AI"].buttons.firstMatch.tap()
+
+        // 进入值守：先预演，确认框列出会关掉什么。
+        let safeWatch = app.buttons["runtime.safeWatch"]
+        reveal(safeWatch, in: app, up: false)
+        safeWatch.tap()
+        let preview = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "将关闭：AI、交互 Bot")).firstMatch
+        XCTAssertTrue(preview.waitForExistence(timeout: 10), "确认框应列出将关闭的模块")
+        let screenshot = XCTAttachment(screenshot: app.screenshot())
+        screenshot.name = "运行树 · 进入值守确认"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+        app.buttons["确认进入值守"].firstMatch.tap()
+        let restore = app.buttons["runtime.restore"]
+        XCTAssertTrue(restore.waitForExistence(timeout: 10), "值守中应显示「恢复生产」")
+        reveal(profile, in: app, up: false)
+        expectation(for: NSPredicate(format: "label CONTAINS %@", "值守"), evaluatedWith: profile)
+        waitForExpectations(timeout: 10)
+        reveal(ai, in: app)
+        XCTAssertTrue(ai.label.contains("值守模式关闭了它"), ai.label)
+        XCTAssertFalse(app.switches["runtime.module.ai.toggle"].isEnabled, "值守中不能单独开模块")
+
+        reveal(restore, in: app, up: false)
+        restore.tap()
+        let confirmRestore = app.buttons["确认恢复生产"].firstMatch
+        XCTAssertTrue(confirmRestore.waitForExistence(timeout: 5))
+        confirmRestore.tap()
+        XCTAssertTrue(app.buttons["runtime.safeWatch"].waitForExistence(timeout: 10))
+        // List 行滚出屏幕后不在无障碍树里：先滚回顶部让运行模式行可见再断言。
+        reveal(profile, in: app, up: false)
+        expectation(for: NSPredicate(format: "label CONTAINS %@", "生产"), evaluatedWith: profile)
+        waitForExpectations(timeout: 10)
+    }
+
+    /// 服务器设置里的旧「能力与插件树」「平台运行模式」入口删除，改为一行跳转到 插件 › 运行。
+    func testServerSettingsLinksToRuntimeTree() {
         let app = launch()
         let system = app.buttons["服务器设置"]
         XCTAssertTrue(app.buttons["more.accounts"].waitForExistence(timeout: 10))
         for _ in 0..<8 where !(system.exists && system.isHittable) { app.swipeUp() }
         system.tap()
-        let entry = app.buttons["system.platformTree"]
+        let entry = app.buttons["system.runtimeTree"]
         XCTAssertTrue(entry.waitForExistence(timeout: 10))
-        XCTAssertTrue(entry.label.contains("能力与插件树"), entry.label)
+        XCTAssertTrue(entry.label.contains("已移到 插件 › 运行"), entry.label)
+        XCTAssertFalse(app.buttons["system.platformTree"].exists, "旧「能力与插件树」入口应删除")
         entry.tap()
-        XCTAssertTrue(app.navigationBars["能力与插件树"].waitForExistence(timeout: 10))
-        let workers = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "1/2 在线")).firstMatch
-        XCTAssertTrue(workers.waitForExistence(timeout: 10))
-        let killSwitch = app.descendants(matching: .any)["platformTree.killSwitch"].firstMatch
-        XCTAssertTrue(killSwitch.label.contains("正常"), killSwitch.label)
-        let autoReply = app.descendants(matching: .any)["platformTree.leaf.auto_reply"].firstMatch
-        XCTAssertTrue(autoReply.waitForExistence(timeout: 5))
-        XCTAssertTrue(autoReply.label.contains("自动回复"), autoReply.label)
-        XCTAssertEqual(autoReply.value as? String, "已启用")
+        XCTAssertTrue(app.staticTexts["runtime.profile"].waitForExistence(timeout: 15))
+    }
 
-        // 与 Web 一样，交互分支上挂的插件默认展开；点分支的「接入的插件」可收起。
-        let assistant = app.descendants(matching: .any)["platformTree.leaf.content_assistant"].firstMatch
-        for _ in 0..<6 where !(assistant.exists && assistant.isHittable) { app.swipeUp() }
-        XCTAssertTrue(assistant.waitForExistence(timeout: 5), "交互分支应列出接入的插件")
+    /// 插件按「直通 / 主通道 / 交互 Bot」分组；点插件进本账号配置，交互插件旁「交互规则 ›」跳交互中心；
+    /// 底部链接到命中调试。「全部账号」走旧服务器形状（没有 scope／中文名），客户端回退计算照常显示。
+    func testRuntimeTreePluginGroupsAndNavigation() {
+        let app = launch()
+        openRuntimeTree(app)
+        let autoReply = app.buttons["runtime.plugin.auto_reply"]
+        reveal(autoReply, in: app)
+        XCTAssertTrue(app.descendants(matching: .any)["runtime.group.passthrough"].firstMatch.exists)
+        XCTAssertTrue(autoReply.label.contains("自动回复"), autoReply.label)
+        XCTAssertTrue(autoReply.label.contains("靠直通、命令工作"), autoReply.label)
+        XCTAssertEqual(autoReply.value as? String, "已启用")
+        let assistant = app.buttons["runtime.plugin.content_assistant"]
+        reveal(assistant, in: app)
+        XCTAssertTrue(app.descendants(matching: .any)["runtime.group.interaction"].firstMatch.exists)
         XCTAssertTrue(assistant.label.contains("内容整理助手"), assistant.label)
         XCTAssertTrue(assistant.label.contains("+AI"), assistant.label)
-        let hosted = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@", "接入的插件")).firstMatch
-        XCTAssertTrue(hosted.exists)
+        XCTAssertTrue(assistant.label.contains("运行异常"), assistant.label)
         let screenshot = XCTAttachment(screenshot: app.screenshot())
-        screenshot.name = "能力与插件树"
+        screenshot.name = "运行树 · 插件分组"
         screenshot.lifetime = .keepAlways
         add(screenshot)
-        hosted.tap()
-        XCTAssertTrue(assistant.waitForNonExistence(timeout: 5), "点「接入的插件」应收起插件列表")
 
-        for _ in 0..<6 where !app.buttons["platformTree.scope"].isHittable { app.swipeDown() }
-        app.buttons["platformTree.scope"].tap()
+        // 交互规则 › → 交互中心。
+        let rules = app.buttons["runtime.plugin.content_assistant.rules"]
+        reveal(rules, in: app)
+        rules.tap()
+        XCTAssertTrue(app.navigationBars["交互"].waitForExistence(timeout: 10))
+        app.navigationBars["交互"].buttons.firstMatch.tap()
+
+        // 点插件 → 本账号配置。
+        reveal(autoReply, in: app, up: false)
+        autoReply.tap()
+        XCTAssertTrue(app.navigationBars["自动回复"].waitForExistence(timeout: 10))
+        app.navigationBars["自动回复"].buttons.firstMatch.tap()
+
+        // 命中调试链接。
+        let debug = app.buttons["runtime.dispatchDebug"]
+        reveal(debug, in: app, attempts: 14)
+        debug.tap()
+        XCTAssertTrue(app.navigationBars["命中调试"].waitForExistence(timeout: 10))
+        app.navigationBars["命中调试"].buttons.firstMatch.tap()
+
+        // 全部账号：旧服务器形状，中文名来自插件目录，「命令」归入主通道。
+        let picker = app.buttons["plugins.accountPicker"]
+        reveal(picker, in: app, up: false, attempts: 14)
+        picker.tap()
+        let all = app.buttons["全部账号"]
+        XCTAssertTrue(all.waitForExistence(timeout: 5))
+        all.tap()
+        let guardRow = app.buttons["runtime.plugin.forward_guard"]
+        reveal(guardRow, in: app, attempts: 14)
+        XCTAssertTrue(guardRow.label.contains("转发风控与来源保护"), guardRow.label)
+        XCTAssertTrue(app.descendants(matching: .any)["runtime.group.main"].firstMatch.exists)
+
+        // 备用账号（新服务器账号口径）：自动回复在这个账号未启用。
+        reveal(picker, in: app, up: false, attempts: 14)
+        picker.tap()
         let backup = app.buttons["备用账号"]
         XCTAssertTrue(backup.waitForExistence(timeout: 5))
         backup.tap()
-        let disabled = NSPredicate(format: "value == %@", "未启用")
-        expectation(for: disabled, evaluatedWith: autoReply)
+        reveal(autoReply, in: app)
+        expectation(for: NSPredicate(format: "value == %@", "未启用"), evaluatedWith: autoReply)
         waitForExpectations(timeout: 10)
     }
 }

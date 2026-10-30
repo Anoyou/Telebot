@@ -143,13 +143,16 @@ struct ManagementModuleView: View {
     @ViewBuilder private var systemSections: some View {
         Section("平台") {
             collection("平台能力开关", "/api/system/capabilities", kind: .capabilities, itemsKey: "modules", idField: "key", symbol: "switch.2")
-            NavigationLink { PlatformTreeView() } label: { Label("能力与插件树", systemImage: "point.3.filled.connected.trianglepath.dotted") }
-                .accessibilityIdentifier("system.platformTree")
-            document("平台运行模式", "/api/platform/profile", symbol: "dial.medium", actions: [
-                .init(title: "预览运行模式", path: "/api/platform/profile/dry-run"),
-                .init(title: "应用运行模式", path: "/api/platform/profile/apply"),
-                .init(title: "恢复运行模式", path: "/api/platform/profile/restore", destructive: true)
-            ])
+            // 运行树与运行模式（值守）已移到 插件 › 运行，这里只保留一行跳转（第 19 轮）。
+            NavigationLink { PluginManagementView(isTabRoot: false, initialMode: .runtime) } label: {
+                Label {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("运行树与运行模式")
+                        Text("已移到 插件 › 运行").font(.caption).foregroundStyle(.secondary)
+                    }
+                } icon: { Image(systemName: "point.3.filled.connected.trianglepath.dotted") }
+            }
+            .accessibilityIdentifier("system.runtimeTree")
             document("服务器参数", "/api/system/settings", symbol: "slider.horizontal.3", actions: [.init(title: "编辑服务器参数", path: "/api/system/settings", method: "PATCH")])
         }
         Section("连接与通知") {

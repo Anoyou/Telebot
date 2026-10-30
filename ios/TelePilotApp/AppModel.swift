@@ -559,6 +559,15 @@ final class AppModel {
     /// 平台模块是否开启（交互、台账、Webhook、命中调试、AI）；没有信息时视为开启。
     func isModuleEnabled(_ key: String) -> Bool { !disabledModules.contains(key) }
 
+    /// 只重读模块开关（运行树里开关模块、进入值守 / 恢复生产后调用），让 Dock 与「更多」立刻跟上。
+    func refreshModules() async {
+        guard phase == .signedIn else { return }
+        let token = generation
+        guard let value = try? await request(path: "/api/system/capabilities"), token == generation else { return }
+        let next = Self.disabledModules(value)
+        if next != disabledModules { disabledModules = next }
+    }
+
     nonisolated static func disabledModules(_ value: JSONValue) -> Set<String> {
         Set((value["modules"]?.arrayValue ?? []).compactMap { module -> String? in
             guard let key = module["key"]?.stringValue, module["desired_enabled"]?.boolValue == false else { return nil }
