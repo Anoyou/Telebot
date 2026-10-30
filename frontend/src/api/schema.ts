@@ -2724,7 +2724,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Get Platform Tree */
+        /**
+         * 运行树
+         * @description 运行树：这台服务器开了哪些模块、哪些插件在用、哪些模块能关以及关不掉的原因。
+         */
         get: operations["get_platform_tree_api_platform_tree_get"];
         put?: never;
         post?: never;
@@ -9677,6 +9680,13 @@ export interface components {
             cache_ready: boolean;
             /** Channels */
             channels: components["schemas"]["CapabilityChannelState"][];
+            /**
+             * Features
+             * @description 服务器能力探测标志；如 platform_tree_account_scope=true 表示运行树支持按账号口径
+             */
+            features?: {
+                [key: string]: boolean;
+            };
             /** Modules */
             modules: components["schemas"]["CapabilityModuleState"][];
             /** Updated At */
@@ -9686,12 +9696,36 @@ export interface components {
         /** PlatformTreeBranch */
         PlatformTreeBranch: {
             /**
+             * Blocked Code
+             * @description can_turn_off 为 false 的原因代码：already_off 已关闭；required_by_plugins 有插件需要（服务器口径）；required_by_this_account 本账号启用的插件需要；required_by_other_accounts 本账号没人用但其他账号的插件需要
+             */
+            blocked_code?: ("already_off" | "required_by_plugins" | "required_by_this_account" | "required_by_other_accounts") | null;
+            /**
+             * Blocked Reason
+             * @description 关不掉的中文说明，可直接展示；能关时为 null
+             */
+            blocked_reason?: string | null;
+            /**
              * Can Turn Off
+             * @description 现在能否关闭：模块开着且全局没有插件需要它（模块全服共用）
              * @default false
              */
             can_turn_off: boolean;
-            /** Demanded By */
+            /**
+             * Demanded By
+             * @description 需要该模块的插件 key；传 account_id 时只算该账号启用的插件，否则为全局（任一账号）
+             */
             demanded_by?: string[];
+            /**
+             * Demanded By Global
+             * @description 全局口径：任一账号启用且需要该模块的插件 key（决定能不能关）
+             */
+            demanded_by_global?: string[];
+            /**
+             * Demanders
+             * @description 全局口径的需要者明细（中文名 + 在哪些账号启用）
+             */
+            demanders?: components["schemas"]["PlatformTreeDemander"][];
             /** Desired */
             desired: boolean;
             /**
@@ -9700,25 +9734,112 @@ export interface components {
              */
             forced_off: boolean;
             /**
+             * Forced Off Reason
+             * @description 被强制关闭时的中文原因（值守模式 / 管理员手动关闭）
+             */
+            forced_off_reason?: string | null;
+            /**
+             * Label
+             * @description 模块中文名
+             * @default
+             */
+            label: string;
+            /**
              * State
              * @enum {string}
              */
             state: "starting" | "ready" | "quiescing" | "stopped" | "failed";
         };
+        /** PlatformTreeDemander */
+        PlatformTreeDemander: {
+            /**
+             * Account Ids
+             * @description 在哪些账号上启用了这个插件（全局事实）
+             */
+            account_ids?: number[];
+            /**
+             * Display Name
+             * @description 插件中文名（缺省为 key）
+             */
+            display_name: string;
+            /**
+             * Key
+             * @description 需要该模块的插件 key
+             */
+            key: string;
+        };
         /** PlatformTreeLeaf */
         PlatformTreeLeaf: {
             /**
+             * Account Error
+             * @description 传 account_id 时该账号上最近的失败原因
+             */
+            account_error?: string | null;
+            /**
+             * Account State
+             * @description 传 account_id 时该账号上的状态：active / failed / disabled；否则为 null
+             */
+            account_state?: string | null;
+            /**
              * Attachment
+             * @description 旧字段，保留兼容：其中「命令」实际指主通道（含事件订阅、定时任务等），新客户端请用 channel
              * @enum {string}
              */
             attachment: "直通" | "命令" | "交互";
             /**
+             * Channel
+             * @description 接入通道：passthrough 直通（最先拿到原始消息）/ main 主通道（账号自己的消息链路）/ interaction 交互 Bot
+             * @default main
+             * @enum {string}
+             */
+            channel: "passthrough" | "main" | "interaction";
+            /**
+             * Channel Label
+             * @description 接入通道中文名：直通 / 主通道 / 交互 Bot
+             * @default 主通道
+             */
+            channel_label: string;
+            /**
+             * Display Name
+             * @description 插件中文名（缺省为 key）
+             * @default
+             */
+            display_name: string;
+            /**
              * Enabled
+             * @description 是否启用；传 account_id 时为该账号口径，否则为任一账号启用即算
              * @default false
              */
             enabled: boolean;
+            /**
+             * Enabled Account Ids
+             * @description 在哪些账号上启用
+             */
+            enabled_account_ids?: number[];
+            /**
+             * Enabled Global
+             * @description 全局口径：任一账号启用即为 true
+             * @default false
+             */
+            enabled_global: boolean;
+            /**
+             * Entry Kinds
+             * @description 插件真实声明或实现的入口：命令、事件订阅、消息监听、定时任务、Webhook、交互入口、中间件、转账通知解析、Agent 工具等
+             */
+            entry_kinds?: ("passthrough" | "command" | "event" | "message" | "schedule" | "webhook" | "interaction" | "middleware" | "payment_source" | "agent_tool")[];
+            /**
+             * Entry Labels
+             * @description entry_kinds 对应的中文名，顺序一致
+             */
+            entry_labels?: string[];
             /** Key */
             key: string;
+            /**
+             * Package Enabled
+             * @description 插件包本身是否启用（内置插件恒为 true）
+             * @default true
+             */
+            package_enabled: boolean;
             /** Requires */
             requires?: ("ai" | "interaction_bot" | "webhooks" | "ledger" | "dispatch_debug")[];
             /**
@@ -9737,7 +9858,33 @@ export interface components {
             };
             /** Leaves */
             leaves?: components["schemas"]["PlatformTreeLeaf"][];
+            scope?: components["schemas"]["PlatformTreeScope"];
+            /**
+             * Subtitle
+             * @default 这台服务器开了哪些模块、哪些插件在用
+             */
+            subtitle: string;
+            /**
+             * Title
+             * @description 三端统一名称
+             * @default 运行树
+             */
+            title: string;
             trunk: components["schemas"]["PlatformTreeTrunk"];
+        };
+        /** PlatformTreeScope */
+        PlatformTreeScope: {
+            /** Account Id */
+            account_id?: number | null;
+            /** Account Name */
+            account_name?: string | null;
+            /**
+             * Kind
+             * @description server 全服口径（未传 account_id）/ account 按账号口径
+             * @default server
+             * @enum {string}
+             */
+            kind: "server" | "account";
         };
         /** PlatformTreeTrunk */
         PlatformTreeTrunk: {
@@ -23562,7 +23709,10 @@ export interface operations {
     };
     get_platform_tree_api_platform_tree_get: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description 按账号口径计算：leaves[].enabled 与 branches[].demanded_by 只算该账号；全局事实见 demanded_by_global / demanders / blocked_reason。不传时与旧版输出一致（全局口径）。 */
+                account_id?: number | null;
+            };
             header?: never;
             path?: never;
             cookie?: {

@@ -12365,6 +12365,14 @@
             "title": "Channels",
             "type": "array"
           },
+          "features": {
+            "additionalProperties": {
+              "type": "boolean"
+            },
+            "description": "服务器能力探测标志；如 platform_tree_account_scope=true 表示运行树支持按账号口径",
+            "title": "Features",
+            "type": "object"
+          },
           "modules": {
             "items": {
               "$ref": "#/components/schemas/CapabilityModuleState"
@@ -12397,16 +12405,64 @@
       },
       "PlatformTreeBranch": {
         "properties": {
+          "blocked_code": {
+            "anyOf": [
+              {
+                "enum": [
+                  "already_off",
+                  "required_by_plugins",
+                  "required_by_this_account",
+                  "required_by_other_accounts"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "can_turn_off 为 false 的原因代码：already_off 已关闭；required_by_plugins 有插件需要（服务器口径）；required_by_this_account 本账号启用的插件需要；required_by_other_accounts 本账号没人用但其他账号的插件需要",
+            "title": "Blocked Code"
+          },
+          "blocked_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "关不掉的中文说明，可直接展示；能关时为 null",
+            "title": "Blocked Reason"
+          },
           "can_turn_off": {
             "default": false,
+            "description": "现在能否关闭：模块开着且全局没有插件需要它（模块全服共用）",
             "title": "Can Turn Off",
             "type": "boolean"
           },
           "demanded_by": {
+            "description": "需要该模块的插件 key；传 account_id 时只算该账号启用的插件，否则为全局（任一账号）",
             "items": {
               "type": "string"
             },
             "title": "Demanded By",
+            "type": "array"
+          },
+          "demanded_by_global": {
+            "description": "全局口径：任一账号启用且需要该模块的插件 key（决定能不能关）",
+            "items": {
+              "type": "string"
+            },
+            "title": "Demanded By Global",
+            "type": "array"
+          },
+          "demanders": {
+            "description": "全局口径的需要者明细（中文名 + 在哪些账号启用）",
+            "items": {
+              "$ref": "#/components/schemas/PlatformTreeDemander"
+            },
+            "title": "Demanders",
             "type": "array"
           },
           "desired": {
@@ -12417,6 +12473,24 @@
             "default": false,
             "title": "Forced Off",
             "type": "boolean"
+          },
+          "forced_off_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "被强制关闭时的中文原因（值守模式 / 管理员手动关闭）",
+            "title": "Forced Off Reason"
+          },
+          "label": {
+            "default": "",
+            "description": "模块中文名",
+            "title": "Label",
+            "type": "string"
           },
           "state": {
             "enum": [
@@ -12437,9 +12511,62 @@
         "title": "PlatformTreeBranch",
         "type": "object"
       },
+      "PlatformTreeDemander": {
+        "properties": {
+          "account_ids": {
+            "description": "在哪些账号上启用了这个插件（全局事实）",
+            "items": {
+              "type": "integer"
+            },
+            "title": "Account Ids",
+            "type": "array"
+          },
+          "display_name": {
+            "description": "插件中文名（缺省为 key）",
+            "title": "Display Name",
+            "type": "string"
+          },
+          "key": {
+            "description": "需要该模块的插件 key",
+            "title": "Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "display_name"
+        ],
+        "title": "PlatformTreeDemander",
+        "type": "object"
+      },
       "PlatformTreeLeaf": {
         "properties": {
+          "account_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "传 account_id 时该账号上最近的失败原因",
+            "title": "Account Error"
+          },
+          "account_state": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "传 account_id 时该账号上的状态：active / failed / disabled；否则为 null",
+            "title": "Account State"
+          },
           "attachment": {
+            "description": "旧字段，保留兼容：其中「命令」实际指主通道（含事件订阅、定时任务等），新客户端请用 channel",
             "enum": [
               "直通",
               "命令",
@@ -12448,14 +12575,86 @@
             "title": "Attachment",
             "type": "string"
           },
+          "channel": {
+            "default": "main",
+            "description": "接入通道：passthrough 直通（最先拿到原始消息）/ main 主通道（账号自己的消息链路）/ interaction 交互 Bot",
+            "enum": [
+              "passthrough",
+              "main",
+              "interaction"
+            ],
+            "title": "Channel",
+            "type": "string"
+          },
+          "channel_label": {
+            "default": "主通道",
+            "description": "接入通道中文名：直通 / 主通道 / 交互 Bot",
+            "title": "Channel Label",
+            "type": "string"
+          },
+          "display_name": {
+            "default": "",
+            "description": "插件中文名（缺省为 key）",
+            "title": "Display Name",
+            "type": "string"
+          },
           "enabled": {
             "default": false,
+            "description": "是否启用；传 account_id 时为该账号口径，否则为任一账号启用即算",
             "title": "Enabled",
             "type": "boolean"
+          },
+          "enabled_account_ids": {
+            "description": "在哪些账号上启用",
+            "items": {
+              "type": "integer"
+            },
+            "title": "Enabled Account Ids",
+            "type": "array"
+          },
+          "enabled_global": {
+            "default": false,
+            "description": "全局口径：任一账号启用即为 true",
+            "title": "Enabled Global",
+            "type": "boolean"
+          },
+          "entry_kinds": {
+            "description": "插件真实声明或实现的入口：命令、事件订阅、消息监听、定时任务、Webhook、交互入口、中间件、转账通知解析、Agent 工具等",
+            "items": {
+              "enum": [
+                "passthrough",
+                "command",
+                "event",
+                "message",
+                "schedule",
+                "webhook",
+                "interaction",
+                "middleware",
+                "payment_source",
+                "agent_tool"
+              ],
+              "type": "string"
+            },
+            "title": "Entry Kinds",
+            "type": "array"
+          },
+          "entry_labels": {
+            "description": "entry_kinds 对应的中文名，顺序一致",
+            "items": {
+              "type": "string"
+            },
+            "title": "Entry Labels",
+            "type": "array"
           },
           "key": {
             "title": "Key",
             "type": "string"
+          },
+          "package_enabled": {
+            "default": true,
+            "description": "插件包本身是否启用（内置插件恒为 true）",
+            "title": "Package Enabled",
+            "type": "boolean"
           },
           "requires": {
             "items": {
@@ -12516,6 +12715,20 @@
             "title": "Leaves",
             "type": "array"
           },
+          "scope": {
+            "$ref": "#/components/schemas/PlatformTreeScope"
+          },
+          "subtitle": {
+            "default": "这台服务器开了哪些模块、哪些插件在用",
+            "title": "Subtitle",
+            "type": "string"
+          },
+          "title": {
+            "default": "运行树",
+            "description": "三端统一名称",
+            "title": "Title",
+            "type": "string"
+          },
           "trunk": {
             "$ref": "#/components/schemas/PlatformTreeTrunk"
           }
@@ -12525,6 +12738,44 @@
           "branches"
         ],
         "title": "PlatformTreeOut",
+        "type": "object"
+      },
+      "PlatformTreeScope": {
+        "properties": {
+          "account_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Account Id"
+          },
+          "account_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Account Name"
+          },
+          "kind": {
+            "default": "server",
+            "description": "server 全服口径（未传 account_id）/ account 按账号口径",
+            "enum": [
+              "server",
+              "account"
+            ],
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "title": "PlatformTreeScope",
         "type": "object"
       },
       "PlatformTreeTrunk": {
@@ -23072,7 +23323,7 @@
   },
   "info": {
     "title": "TelePilot",
-    "version": "0.113.0-beta.1"
+    "version": "0.113.0-beta.2"
   },
   "openapi": "3.1.0",
   "paths": {
@@ -40680,8 +40931,27 @@
     },
     "/api/platform/tree": {
       "get": {
+        "description": "运行树：这台服务器开了哪些模块、哪些插件在用、哪些模块能关以及关不掉的原因。",
         "operationId": "get_platform_tree_api_platform_tree_get",
         "parameters": [
+          {
+            "description": "按账号口径计算：leaves[].enabled 与 branches[].demanded_by 只算该账号；全局事实见 demanded_by_global / demanders / blocked_reason。不传时与旧版输出一致（全局口径）。",
+            "in": "query",
+            "name": "account_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "按账号口径计算：leaves[].enabled 与 branches[].demanded_by 只算该账号；全局事实见 demanded_by_global / demanders / blocked_reason。不传时与旧版输出一致（全局口径）。",
+              "title": "Account Id"
+            }
+          },
           {
             "in": "cookie",
             "name": "auth_token",
@@ -40746,7 +41016,7 @@
             "AuthCookie": []
           }
         ],
-        "summary": "Get Platform Tree",
+        "summary": "运行树",
         "tags": [
           "platform-tree"
         ]

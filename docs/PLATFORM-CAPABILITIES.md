@@ -88,13 +88,48 @@ Worker 在注册插件、命令 handler 或 scheduler 前必须先从 DB 初始�
 
 ## API
 
-- `GET /api/system/capabilities`：模块状态、固定通道、generation、worker 收敛摘要（不含 Token/密钥）
+- `GET /api/system/capabilities`：模块状态、固定通道、generation、worker 收敛摘要（不含 Token/密钥）；`features` 是服务器能力探测标志（0.113.0-beta.2 起，只追加），如 `platform_tree_account_scope: true` 表示运行树支持按账号口径，老服务器没有该字段即视为不支持
 - `PATCH /api/system/capabilities/{module_key}`：写入单个模块目标状态并热切换 + 审计
+- `GET /api/platform/tree[?account_id=]`：运行树，见下一节
 
 兼容：
 
 - `GET/PATCH /api/system/settings` 的 `ai_enabled` 仍可用，委托平台能力服务处理
 - 新增四个开关不继续堆入 `rate_limit.py` 设置接口
+
+## 运行树
+
+三端统一叫「运行树」：这台服务器开了哪些模块、哪些插件在用、哪些模块能关。它是「部署组成 + 值守 + 排障」的运维视图，**不是消息流程图**（一条消息怎么走看「命中调试」和调用链 Trace）。
+
+`GET /api/platform/tree`（只读，登录即可）：
+
+- 不传 `account_id`：与旧版输出一致（全局口径，任一账号启用即算启用），只多了下面的新增字段。
+- 传 `account_id`：`leaves[].enabled` 与 `branches[].demanded_by` 改为该账号口径；`scope = {kind: "account", account_id, account_name}`；账号不存在返回 404 `ACCOUNT_NOT_FOUND`。
+
+模块是全服共用的，**能不能关始终按全局算**（`can_turn_off` 不随账号变化）。因此会出现「本账号 0 个插件需要，却关不掉」，用以下字段解释：
+
+| 字段 | 含义 |
+|---|---|
+| `branches[].label` | 模块中文名 |
+| `branches[].demanded_by_global` | 全局口径的需要者（决定能不能关） |
+| `branches[].demanders[]` | `{key, display_name, account_ids}`：谁需要、在哪些账号启用 |
+| `branches[].blocked_code` | `can_turn_off=false` 的原因：`already_off` / `required_by_plugins`（服务器口径）/ `required_by_this_account` / `required_by_other_accounts` |
+| `branches[].blocked_reason` | 可直接展示的中文说明；能关时为 `null` |
+| `branches[].forced_off_reason` | 被强制关闭时的原因（值守模式 / 管理员手动关闭） |
+
+插件（叶）的接入方式按插件真实声明判断（静态读取 `plugin.json`、`manifest.py` 字面量和源码 AST，不执行插件代码）：
+
+| 字段 | 含义 |
+|---|---|
+| `leaves[].display_name` | 插件中文名（feature 表登记名，缺省为 key） |
+| `leaves[].channel` / `channel_label` | `passthrough` 直通（最先拿到原始消息）/ `main` 主通道（账号自己的消息链路）/ `interaction` 交互 Bot |
+| `leaves[].entry_kinds` / `entry_labels` | 实际入口：`command` 命令、`event` 事件订阅、`message` 消息监听（`on_message`）、`schedule` 定时任务（用到 `ctx.scheduler`）、`webhook`、`interaction` 交互入口、`middleware` 消息中间件、`payment_source` 转账通知解析、`agent_tool` Agent 工具、`passthrough` 直通 |
+| `leaves[].enabled_global` / `enabled_account_ids` / `package_enabled` | 全局启用、在哪些账号启用、插件包本身是否启用 |
+| `leaves[].account_state` / `account_error` | 传 `account_id` 时该账号上的状态（active / failed / disabled）与最近失败原因 |
+
+旧字段 `attachment`（直通 / 命令 / 交互）保留兼容，判定不变；其中「命令」实际就是主通道（包括只靠事件订阅、定时任务工作的插件），新客户端请改用 `channel` + `entry_labels`。
+
+Web：插件页「运行树」视图带当前所选账号的 `account_id`，按直通 / 主通道 / 交互 Bot 三组显示插件，模块下方显示服务器给的「关不掉」原因。
 
 ## 各模块关闭语义
 
@@ -189,6 +224,7 @@ Worker 在注册插件、命令 handler 或 scheduler 前必须先从 DB 初始�
 - 侧边栏与移动端导航统一按 capabilities 过滤（泛化原 `navForAIState`）
 - 直达已关闭页面时显示“模块已暂停”，URL 保留
 - 插件中心可展示“正常 / 部分可用 / 已暂停 / 等待热加载”
+- 插件中心「运行树」视图（原「树状视图（能力分类）」）：按所选账号由服务器计算，见上文「运行树」
 
 ## 回滚
 
@@ -201,3 +237,4 @@ Worker 在注册插件、命令 handler 或 scheduler 前必须先从 DB 初始�
 - `backend/app/services/platform_capabilities.py`
 - `backend/app/api/platform_capabilities.py`
 - `backend/app/schemas/platform_capabilities.py`
+- `backend/app/services/platform_tree_service.py`、`backend/app/services/platform_tree_shape.py`（运行树与插件接入方式）

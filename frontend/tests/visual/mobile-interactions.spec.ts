@@ -517,23 +517,35 @@ test.describe("移动端交互细节", () => {
         }),
       });
     });
-    await page.route("**/api/platform/tree", async (route) => {
+    const treeAccountIds: Array<string | null> = [];
+    await page.route("**/api/platform/tree*", async (route) => {
+      // 运行树（0.113.0-beta.2）：Web 带 ?account_id= 让服务器按所选账号口径计算。
+      treeAccountIds.push(new URL(route.request().url()).searchParams.get("account_id"));
       await route.fulfill({
         status: 200,
         contentType: "application/json",
         body: JSON.stringify({
+          title: "运行树",
+          subtitle: "这台服务器开了哪些模块、哪些插件在用",
+          scope: { kind: "account", account_id: 1, account_name: "视觉测试账号" },
           trunk: {
             userbot: { workers: [{ account_id: 1, alive: true, desired: "running", fail_count: 0, queued: false, starting: false }], total: 1, alive: 1 },
             kill_switch: false,
             current_profile: "custom",
           },
           branches: {
-            interaction_bot: { state: "running", desired: true, forced_off: false, demanded_by: ["game_demo"], can_turn_off: true },
+            ai: {
+              label: "AI", state: "running", desired: true, forced_off: false, demanded_by: [], demanded_by_global: ["auto_demo"],
+              demanders: [{ key: "auto_demo", display_name: "自动化示例", account_ids: [2] }], can_turn_off: false,
+              blocked_code: "required_by_other_accounts",
+              blocked_reason: "本账号没有插件需要 AI，但其他账号启用的插件需要它：自动化示例（#2）。模块是全服共用的，要先在那些账号停用这些插件才能关闭。",
+            },
+            interaction_bot: { label: "交互 Bot", state: "running", desired: true, forced_off: false, demanded_by: ["game_demo"], demanded_by_global: ["game_demo"], can_turn_off: false, blocked_code: "required_by_this_account", blocked_reason: "本账号启用的 1 个插件需要 交互 Bot：互动示例（#1）。" },
           },
           leaves: [
-            { key: "game_demo", attachment: "交互", enabled: true, requires: [], warnings: [], source_missing: false },
-            { key: "auto_demo", attachment: "命令", enabled: false, requires: [], warnings: [], source_missing: false },
-            { key: "tool_demo", attachment: "直通", enabled: true, requires: [], warnings: [], source_missing: false },
+            { key: "game_demo", display_name: "互动示例", attachment: "交互", channel: "interaction", channel_label: "交互 Bot", entry_kinds: ["interaction"], entry_labels: ["交互入口"], enabled: true, requires: [], warnings: [], source_missing: false },
+            { key: "auto_demo", display_name: "自动化示例", attachment: "命令", channel: "main", channel_label: "主通道", entry_kinds: ["schedule"], entry_labels: ["定时任务"], enabled: false, requires: ["ai"], warnings: [], source_missing: false },
+            { key: "tool_demo", display_name: "工具示例", attachment: "直通", channel: "passthrough", channel_label: "直通", entry_kinds: ["passthrough"], entry_labels: ["直通"], enabled: true, requires: [], warnings: [], source_missing: false },
           ],
         }),
       });
@@ -597,7 +609,7 @@ test.describe("移动端交互细节", () => {
     await expect(page.locator('[data-plugin-key="game_demo"]')).toBeVisible();
     await expect(page.locator('[data-plugin-key="auto_demo"]')).toHaveCount(0);
     if (testInfo.project.name === "mobile") {
-      await page.getByRole("tab", { name: "树状视图" }).click();
+      await page.getByRole("tab", { name: "运行树" }).click();
       const gameLeaf = page.locator('[data-platform-tree-leaf="game_demo"]');
       const toolLeaf = page.locator('[data-platform-tree-leaf="tool_demo"]');
       await expect(gameLeaf).toBeVisible();
@@ -608,6 +620,17 @@ test.describe("移动端交互细节", () => {
       });
       expect(leafStyle.paddingTop).toBeGreaterThanOrEqual(4.5);
       expect(leafStyle.paddingBottom).toBeGreaterThanOrEqual(4.5);
+      // 按服务器真实声明分三组：直通 / 主通道 / 交互 Bot；「命令」标签不再出现。
+      expect(treeAccountIds).toContain("1");
+      await expect(page.locator('[data-platform-tree-group="passthrough"] [data-platform-tree-leaf="tool_demo"]')).toBeVisible();
+      const autoLeaf = page.locator('[data-platform-tree-group="main"] [data-platform-tree-leaf="auto_demo"]');
+      await expect(autoLeaf).toBeVisible();
+      await expect(autoLeaf.locator("[data-platform-tree-channel]")).toHaveText("主通道");
+      await expect(autoLeaf.locator("[data-platform-tree-entries]")).toHaveText("定时任务");
+      await expect(page.locator("[data-platform-tree-channel]").filter({ hasText: /^命令$/ })).toHaveCount(0);
+      // 关不掉的原因由服务器按账号口径给出
+      await expect(page.locator('[data-platform-tree-blocked="ai"]')).toContainText("其他账号启用的插件需要它");
+      await expect(page.getByText("本账号无插件调用 · 其他账号在用")).toBeVisible();
       const editButton = gameLeaf.getByRole("button", { name: "编辑 互动示例" });
       await expect(editButton).toHaveCSS("border-top-style", "solid");
       const editButtonBox = await editButton.boundingBox();

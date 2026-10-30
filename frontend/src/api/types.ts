@@ -917,6 +917,8 @@ export interface PlatformWorkerConvergence {
 }
 
 export interface PlatformCapabilities {
+  /** 服务器能力探测标志（0.113.0-beta.2 起），如 platform_tree_account_scope。 */
+  features?: Record<string, boolean>;
   modules: PlatformCapabilityModule[];
   channels: PlatformCapabilityChannel[];
   worker_convergence: PlatformWorkerConvergence;
@@ -931,7 +933,31 @@ export interface PlatformCapabilityPatchResult {
   message?: string | null;
 }
 
+export type PlatformTreeChannel = "passthrough" | "main" | "interaction";
+
+export type PlatformTreeEntryKind =
+  | "passthrough"
+  | "command"
+  | "event"
+  | "message"
+  | "schedule"
+  | "webhook"
+  | "interaction"
+  | "middleware"
+  | "payment_source"
+  | "agent_tool";
+
+export type PlatformTreeBlockedCode =
+  | "already_off"
+  | "required_by_plugins"
+  | "required_by_this_account"
+  | "required_by_other_accounts";
+
+/** 运行树（GET /api/platform/tree[?account_id=]）。带 ? 的字段为 0.113.0-beta.2 起追加，旧服务器可能缺失。 */
 export interface PlatformTree {
+  title?: string;
+  subtitle?: string;
+  scope?: { kind: "server" | "account"; account_id?: number | null; account_name?: string | null };
   trunk: {
     userbot: {
       workers: Array<{
@@ -952,17 +978,35 @@ export interface PlatformTree {
   branches: Record<
     PlatformModuleKey,
     {
+      label?: string;
       state: PlatformRuntimeState;
       desired: boolean;
       forced_off: boolean;
+      forced_off_reason?: string | null;
+      /** 传 account_id 时只算该账号启用的插件。 */
       demanded_by: string[];
+      demanded_by_global?: string[];
+      demanders?: Array<{ key: string; display_name: string; account_ids: number[] }>;
       can_turn_off: boolean;
+      blocked_code?: PlatformTreeBlockedCode | null;
+      blocked_reason?: string | null;
     }
   >;
   leaves: Array<{
     key: string;
+    display_name?: string;
+    /** 旧字段：「命令」实际指主通道；新代码用 channel。 */
     attachment: "直通" | "命令" | "交互";
+    channel?: PlatformTreeChannel;
+    channel_label?: string;
+    entry_kinds?: PlatformTreeEntryKind[];
+    entry_labels?: string[];
     enabled: boolean;
+    enabled_global?: boolean;
+    enabled_account_ids?: number[];
+    package_enabled?: boolean;
+    account_state?: string | null;
+    account_error?: string | null;
     requires: PlatformModuleKey[];
     warnings: string[];
     source_missing: boolean;
