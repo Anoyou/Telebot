@@ -574,7 +574,8 @@ final class AssistantUITests: XCTestCase {
         adjustChip.tap()
         let adjusted = NSPredicate(format: "value == %@", "已选中")
         expectation(for: adjusted, evaluatedWith: app.buttons["assistant.queue.adjust"].firstMatch)
-        waitForExpectations(timeout: 5)
+        // CI 模拟器负载高时界面已切到「插入调整」，无障碍值要 5～11 秒才跟上（录像与快照日志实测），放宽到 15 秒。
+        waitForExpectations(timeout: 15)
         XCTAssertTrue(queueStatus.firstMatch.label.contains("将插入当前任务"), queueStatus.firstMatch.label)
 
         // 再发一条并改为停止并替换（需要确认）。
@@ -593,7 +594,7 @@ final class AssistantUITests: XCTestCase {
         confirm.tap()
         let replaced = NSPredicate(format: "label CONTAINS %@", "等待停止当前任务")
         expectation(for: replaced, evaluatedWith: queueStatus.element(boundBy: queueStatus.count - 1))
-        waitForExpectations(timeout: 5)
+        waitForExpectations(timeout: 15)
         XCTAssertEqual(app.buttons.matching(identifier: "assistant.queue.replace").element(boundBy: replaceChips.count - 1).value as? String, "已选中")
     }
 
