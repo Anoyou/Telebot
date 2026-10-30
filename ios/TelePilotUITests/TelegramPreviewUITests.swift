@@ -29,6 +29,22 @@ final class TelegramPreviewUITests: XCTestCase {
         }
     }
 
+    /// 控件在容器右半边、贴着右下角（允许内边距）。
+    private func assertAtBottomTrailing(_ control: XCUIElement, of container: XCUIElement, strictBottom: Bool, file: StaticString = #filePath, line: UInt = #line) {
+        let inner = control.frame, outer = container.frame
+        XCTAssertGreaterThan(inner.minX, outer.midX, "应在引用框右半边：\(inner) / \(outer)", file: file, line: line)
+        XCTAssertLessThanOrEqual(outer.maxX - inner.maxX, 24, "应贴着引用框右边：\(inner) / \(outer)", file: file, line: line)
+        XCTAssertLessThanOrEqual(inner.maxY, outer.maxY + 1, "应在引用框内：\(inner) / \(outer)", file: file, line: line)
+        if strictBottom {
+            XCTAssertLessThanOrEqual(outer.maxY - inner.maxY, 16, "应贴着引用框底边：\(inner) / \(outer)", file: file, line: line)
+        } else {
+            XCTAssertGreaterThan(inner.minY, outer.midY, "应在引用框下半部分：\(inner) / \(outer)", file: file, line: line)
+        }
+        XCTAssertGreaterThanOrEqual(inner.minY, outer.minY, file: file, line: line)
+        // 箭头与文字紧挨：整个控件约 40pt；Label 给图标留整列宽时会宽到 50pt 以上。
+        XCTAssertLessThan(inner.width, 48, "箭头与文字应紧挨：\(inner)", file: file, line: line)
+    }
+
     private func text(_ app: XCUIApplication, containing value: String) -> XCUIElement {
         app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", value)).firstMatch
     }
@@ -63,8 +79,17 @@ final class TelegramPreviewUITests: XCTestCase {
         reveal(toggle, in: app)
         XCTAssertTrue(toggle.waitForExistence(timeout: 5))
         XCTAssertTrue(toggle.label.contains("展开"), toggle.label)
+        // 与 Telegram 一致：「展开 / 收起」贴在引用框内右下角。
+        let quote = element(app, "templateLab.page.preview.quote.expandable")
+        XCTAssertTrue(quote.exists)
+        // 折叠时内容被裁切，但无障碍容器的 frame 仍按未裁切的全文计算，底边只要求落在下半部分。
+        assertAtBottomTrailing(toggle, of: quote, strictBottom: false)
         toggle.tap()
-        XCTAssertTrue(app.buttons["templateLab.page.preview.quote.toggle"].label.contains("收起"))
+        let collapse = app.buttons["templateLab.page.preview.quote.toggle"]
+        XCTAssertTrue(collapse.label.contains("收起"), collapse.label)
+        // 等展开动画结束、引用框长高后再量位置（动画中读到的仍是折叠时的位置）。
+        for _ in 0..<15 where quote.frame.maxY - collapse.frame.maxY > 16 { Thread.sleep(forTimeInterval: 0.2) }
+        assertAtBottomTrailing(collapse, of: quote, strictBottom: true)
         let ruleButton = element(app, "templateLab.page.preview.button.0.1")
         reveal(ruleButton, in: app)
         XCTAssertTrue(ruleButton.exists)
@@ -139,6 +164,23 @@ final class TelegramPreviewUITests: XCTestCase {
         XCTAssertFalse(element(app, "interaction.notice.transfer.page.editor").exists)
         app.buttons["interaction.notice.transfer.done"].tap()
         XCTAssertTrue(element(app, "interaction.notice.transfer.editor").waitForExistence(timeout: 5))
+
+        // 扣款通知（<pre><code> 代码块，第二行很长）：与 Telegram 一致完整显示、自动换行，不截成一行「…」。
+        let code = element(app, "interaction.notice.debit.preview.code.text")
+        reveal(code, in: app)
+        XCTAssertTrue(code.waitForExistence(timeout: 10))
+        XCTAssertTrue(code.label.contains("Alice 扣减 88.00 蝌蚪"), code.label)
+        XCTAssertTrue(code.label.contains("Bob 接收 88.00 蝌蚪"), code.label)
+        XCTAssertTrue(code.label.contains("在气泡里完整显示"), code.label)
+        // XCUI 的 label 总是全文，截断与否要看高度：两行原文 + 长行折行，至少三行。
+        let copy = app.buttons["interaction.notice.debit.preview.code.copy"]
+        XCTAssertTrue(copy.exists)
+        XCTAssertGreaterThanOrEqual(code.frame.height, 40, "代码块应完整显示多行：\(code.frame)")
+        let box = element(app, "interaction.notice.debit.preview.code")
+        XCTAssertLessThanOrEqual(code.frame.maxX, box.frame.maxX + 1, "代码块不应超出气泡：\(code.frame) / \(box.frame)")
+        XCTAssertLessThanOrEqual(code.frame.maxY, box.frame.maxY + 1, "代码块不应被裁掉：\(code.frame) / \(box.frame)")
+        // 「复制」图标与文字紧挨：整个按钮不应比文字宽太多（Label 给图标留整列宽时 50pt 以上）。
+        XCTAssertLessThan(copy.frame.width, 48, "复制按钮图标与文字应紧挨：\(copy.frame)")
     }
 
     func testPluginTemplateFieldsPreviewWhileEditing() {

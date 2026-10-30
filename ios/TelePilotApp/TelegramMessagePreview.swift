@@ -209,7 +209,10 @@ private struct TelegramChatPreviewContent: View {
                             if message.nodes.isEmpty {
                                 Text("预览内容为空。").font(.subheadline).foregroundStyle(.secondary)
                             } else {
+                                // Telegram 里引用、代码块、链接都用发送者的名字色，不用 App 的强调色。
                                 TelegramRichText(nodes: message.nodes, identifier: identifier)
+                                    .tint(palette.name)
+                                    .environment(\.telegramAccent, palette.name)
                             }
                             Text(timeText(message.id)).font(.caption2.monospacedDigit()).foregroundStyle(palette.meta)
                                 .frame(maxWidth: .infinity, alignment: .trailing)
@@ -519,7 +522,7 @@ struct TelegramRichText: View {
                 TelegramBlockView(block: block, revealed: $revealed, expanded: $expanded, identifier: identifier)
             }
             if let tappedLink {
-                Label("预览中不打开链接：\(tappedLink.isEmpty ? "（地址不受支持）" : tappedLink)", systemImage: "link")
+                Text("\(Image(systemName: "link")) 预览中不打开链接：\(tappedLink.isEmpty ? "（地址不受支持）" : tappedLink)")
                     .font(.caption2).foregroundStyle(.secondary).lineLimit(2)
                     .accessibilityIdentifier("\(identifier).linkNotice")
             }
@@ -537,6 +540,9 @@ private struct TelegramBlockView: View {
     @Binding var revealed: Set<Int>
     @Binding var expanded: Set<Int>
     let identifier: String
+    /// 折叠引用的最后一段：末尾留出「展开」按钮的位置。
+    var trailingReserve = false
+    @Environment(\.telegramAccent) private var accent
     @State private var copied = false
 
     var body: some View {
@@ -571,7 +577,7 @@ private struct TelegramBlockView: View {
                 Button { toggle(block.id) } label: {
                     HStack(spacing: 4) {
                         Image(systemName: isOpen ? "chevron.down" : "chevron.right").font(.caption.weight(.semibold))
-                        Text(TelegramAttributed.string(summary, revealed: revealed, font: .subheadline.weight(.semibold)))
+                        Text(TelegramAttributed.string(summary, revealed: revealed, font: .subheadline.weight(.semibold), accent: accent))
                     }
                 }
                 .buttonStyle(.plain)
@@ -588,9 +594,17 @@ private struct TelegramBlockView: View {
 
     @ViewBuilder private func paragraph(_ runs: [TelegramInlineRun], font: Font) -> some View {
         let hidden = runs.compactMap(\.style.spoiler).filter { !revealed.contains($0) }
-        let text = Text(TelegramAttributed.string(runs, revealed: revealed, font: font))
-            .fixedSize(horizontal: false, vertical: true)
-            .frame(maxWidth: .infinity, alignment: .leading)
+        let attributed = TelegramAttributed.string(runs, revealed: revealed, font: font, accent: accent)
+        let text = Group {
+            if trailingReserve {
+                let reserve = Self.quoteToggleLabel(expanded: false).foregroundStyle(.clear)
+                Text("\(attributed) \(reserve)").accessibilityLabel(Text(attributed))
+            } else {
+                Text(attributed)
+            }
+        }
+        .fixedSize(horizontal: false, vertical: true)
+        .frame(maxWidth: .infinity, alignment: .leading)
         if hidden.isEmpty {
             text
         } else {
@@ -614,14 +628,19 @@ private struct TelegramBlockView: View {
                     copied = true
                     Task { try? await Task.sleep(for: .seconds(1.5)); copied = false }
                 } label: {
-                    Label(copied ? "已复制" : "复制", systemImage: copied ? "checkmark" : "doc.on.doc").font(.caption2)
+                    // 图标与文字紧挨：不用 Label（列表里 Label 给图标留一整列宽）。
+                    Self.inlineIconText(copied ? "checkmark" : "doc.on.doc", copied ? "已复制" : "复制").font(.caption2)
                 }
                 .buttonStyle(.borderless)
+                .accessibilityLabel(copied ? "已复制" : "复制")
                 .accessibilityIdentifier("\(identifier).code.copy")
             }
-            ScrollView(.horizontal, showsIndicators: false) {
-                Text(text).font(.footnote.monospaced()).textSelection(.enabled).fixedSize(horizontal: true, vertical: false)
-            }
+            // 与 Telegram 一致：代码块完整显示、按宽度自动换行，不截断、不横向滚动。
+            Text(text).font(.footnote.monospaced()).textSelection(.enabled)
+                .lineLimit(nil)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .accessibilityIdentifier("\(identifier).code.text")
         }
         .padding(8)
         .background(Color.primary.opacity(0.06), in: .rect(cornerRadius: 8, style: .continuous))
@@ -633,35 +652,69 @@ private struct TelegramBlockView: View {
 
     @ViewBuilder private func quote(_ blocks: [TelegramBlock], expandable: Bool, pull: Bool) -> some View {
         let isExpanded = expanded.contains(block.id)
+        // 与 Telegram 一致：「⌄ 展开 / ⌃ 收起」贴在引用框内右下角，不单独占一行。
+        // 最后一块是段落时，在段落末尾留出与按钮等宽的透明占位：最后一行放得下就与文字同行右对齐，
+        // 放不下占位自然折到下一行，按钮也就落在新的一行右侧（同 Telegram 气泡里时间的做法）。
+        let lastReservable = expandable && (blocks.last.map { Self.canReserveTrailing($0) } ?? false)
         let content = VStack(alignment: .leading, spacing: 4) {
             ForEach(blocks) { child in
-                TelegramBlockView(block: child, revealed: $revealed, expanded: $expanded, identifier: identifier)
+                TelegramBlockView(
+                    block: child, revealed: $revealed, expanded: $expanded, identifier: identifier,
+                    trailingReserve: lastReservable && child.id == blocks.last?.id
+                )
+            }
+            if expandable && !lastReservable {
+                // 最后一块是列表、代码块等无法续排的内容：另起一行右对齐。
+                Self.quoteToggleLabel(expanded: false).hidden().frame(maxWidth: .infinity, alignment: .trailing)
+                    .accessibilityHidden(true)
             }
         }
         HStack(alignment: .top, spacing: 8) {
             RoundedRectangle(cornerRadius: 1.5).fill(.tint).frame(width: 3)
-            VStack(alignment: .leading, spacing: 2) {
+            Group {
                 if expandable && !isExpanded {
                     content.frame(maxHeight: 62, alignment: .top).clipped()
                         .mask(LinearGradient(colors: [.black, .black, .black.opacity(0.2)], startPoint: .top, endPoint: .bottom))
                 } else {
                     content
                 }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .overlay(alignment: .bottomTrailing) {
                 if expandable {
                     Button { toggle(block.id) } label: {
-                        Label(isExpanded ? "收起" : "展开", systemImage: isExpanded ? "chevron.up" : "chevron.down")
-                            .font(.caption2.weight(.semibold))
+                        Self.quoteToggleLabel(expanded: isExpanded).foregroundStyle(.tint)
                     }
                     .buttonStyle(.borderless)
+                    .accessibilityLabel(isExpanded ? "收起" : "展开")
                     .accessibilityIdentifier("\(identifier).quote.toggle")
                 }
             }
         }
         .padding(.vertical, 4).padding(.trailing, 8)
-        .background(Color.accentColor.opacity(pull ? 0.06 : 0.1), in: .rect(cornerRadius: 6, style: .continuous))
+        .background(.tint.opacity(pull ? 0.06 : 0.1), in: .rect(cornerRadius: 6, style: .continuous))
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier(expandable ? "\(identifier).quote.expandable" : "\(identifier).quote")
         .accessibilityValue(expandable ? (isExpanded ? "已展开" : "已折叠") : "")
+    }
+
+    /// 折叠引用的控件文字：箭头与「展开 / 收起」紧挨（不走 Label，列表里 Label 会给图标留一整列宽）。
+    /// 不换行空格与词连接符保证占位不会在中间折行。
+    static func quoteToggleLabel(expanded: Bool) -> Text {
+        inlineIconText(expanded ? "chevron.up" : "chevron.down", expanded ? "收起" : "展开").font(.caption2.weight(.semibold))
+    }
+
+    /// 图标 + 文字紧挨成一段 Text（图标后不换行空格，文字字间加词连接符，整段不会被拆到两行）。
+    static func inlineIconText(_ systemImage: String, _ title: String) -> Text {
+        let glued = title.map(String.init).joined(separator: "\u{2060}")
+        return Text("\(Image(systemName: systemImage))\u{00A0}\(glued)")
+    }
+
+    nonisolated private static func canReserveTrailing(_ block: TelegramBlock) -> Bool {
+        switch block.content {
+        case .paragraph, .heading: true
+        default: false
+        }
     }
 
     private func table(_ rows: [[TelegramTableCell]], bordered: Bool, striped: Bool) -> some View {
@@ -670,7 +723,7 @@ private struct TelegramBlockView: View {
                 ForEach(Array(rows.enumerated()), id: \.offset) { rowIndex, row in
                     GridRow {
                         ForEach(Array(row.enumerated()), id: \.offset) { _, cell in
-                            Text(TelegramAttributed.string(cell.runs, revealed: revealed, font: .footnote))
+                            Text(TelegramAttributed.string(cell.runs, revealed: revealed, font: .footnote, accent: accent))
                                 .padding(.horizontal, 8).padding(.vertical, 4)
                                 .frame(minWidth: 44, alignment: cell.align == "right" ? .trailing : cell.align == "center" ? .center : .leading)
                                 .background(striped && rowIndex % 2 == 1 ? Color.primary.opacity(0.05) : Color.clear)
@@ -692,8 +745,14 @@ private struct TelegramBlockView: View {
 
 private typealias SwiftUIAttr = AttributeScopes.SwiftUIAttributes
 
+extension EnvironmentValues {
+    /// 预览气泡内的强调色（引用竖条与底色、代码块语言名、链接、变量底色）。默认 App 强调色，气泡里设为 Telegram 名字蓝。
+    @Entry var telegramAccent: Color = .accentColor
+}
+
 enum TelegramAttributed {
-    static func string(_ runs: [TelegramInlineRun], revealed: Set<Int>, font base: Font) -> AttributedString {
+    /// `accent`：链接、引用标记与变量底色用的强调色；气泡里取 Telegram 的名字蓝，不跟 App 的橙色。
+    static func string(_ runs: [TelegramInlineRun], revealed: Set<Int>, font base: Font, accent: Color = .accentColor) -> AttributedString {
         var result = AttributedString()
         for run in runs {
             let style = run.style
@@ -714,16 +773,16 @@ enum TelegramAttributed {
             if style.code { piece[SwiftUIAttr.BackgroundColorAttribute.self] = Color.primary.opacity(0.08) }
             if style.mark { piece[SwiftUIAttr.BackgroundColorAttribute.self] = Color.yellow.opacity(0.35) }
             if style.thinking { piece[SwiftUIAttr.ForegroundColorAttribute.self] = .secondary }
-            if style.accent { piece[SwiftUIAttr.ForegroundColorAttribute.self] = .accentColor }
+            if style.accent { piece[SwiftUIAttr.ForegroundColorAttribute.self] = accent }
             if let link = style.link {
                 if let url = URL(string: link), !link.isEmpty {
                     piece[AttributeScopes.FoundationAttributes.LinkAttribute.self] = url
                 } else {
-                    piece[SwiftUIAttr.ForegroundColorAttribute.self] = .accentColor
+                    piece[SwiftUIAttr.ForegroundColorAttribute.self] = accent
                     piece[SwiftUIAttr.UnderlineStyleAttribute.self] = .single
                 }
             }
-            if style.variable { piece[SwiftUIAttr.BackgroundColorAttribute.self] = Color.accentColor.opacity(0.2) }
+            if style.variable { piece[SwiftUIAttr.BackgroundColorAttribute.self] = accent.opacity(0.2) }
             if style.missing { piece[SwiftUIAttr.BackgroundColorAttribute.self] = Color.orange.opacity(0.28) }
             if hidden {
                 piece[SwiftUIAttr.ForegroundColorAttribute.self] = .secondary
