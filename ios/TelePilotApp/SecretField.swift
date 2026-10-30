@@ -103,7 +103,8 @@ struct SecretField: View {
                     .privacySensitive()
                     .disabled(disabled)
                     .accessibilityLabel(title)
-                    .accessibilityValue(visible ? (display.wrappedValue.isEmpty ? fieldPlaceholder : "已显示") : (showingSaved ? "已配置，已隐藏" : (hasDraft ? "已输入，已隐藏" : "未填写")))
+                    // 明文可见时朗读真实内容（与系统 TextField 一致），隐藏时只报状态、不念圆点。
+                    .accessibilityValue(visible ? (display.wrappedValue.isEmpty ? fieldPlaceholder : display.wrappedValue) : (showingSaved ? "已配置，已隐藏" : (hasDraft ? "已输入，已隐藏" : "未填写")))
                     .accessibilityIdentifier(identifier)
                     Button {
                         Task { await toggle() }
