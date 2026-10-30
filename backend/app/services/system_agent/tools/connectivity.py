@@ -1,4 +1,4 @@
-"""出口代理与 Telegram 设备档案工作流。"""
+"""出口代理与 Telegram 登录设备工作流。"""
 
 from __future__ import annotations
 
@@ -342,22 +342,22 @@ async def save_device_preview(ctx: ToolContext, args: dict[str, Any]) -> dict[st
     if profile_id not in (None, ""):
         row = await ctx.db.get(DeviceProfile, int(profile_id))
         if row is None:
-            raise ValueError(f"设备档案 #{profile_id} 不存在")
+            raise ValueError(f"登录设备 #{profile_id} 不存在")
         return {
-            "summary": f"更新设备档案 #{profile_id} {row.name}",
+            "summary": f"更新登录设备 #{profile_id} {row.name}",
             "mode": "update",
             "current": _device_view(row),
             "target_fields": {key: value for key, value in args.items() if key not in {"id", "profile_id"}},
-            "note": "设备信息只影响后续新登录，已有 Telegram session 不会改变。",
+            "note": "登录设备只影响后续新登录，已有 Telegram session 不会改变。",
         }
     required = ("name", "device_model", "system_version", "app_version")
     if any(not str(args.get(key) or "").strip() for key in required):
-        raise ValueError("创建设备档案需要 name、device_model、system_version、app_version")
+        raise ValueError("创建登录设备需要 name、device_model、system_version、app_version")
     return {
-        "summary": f"创建设备档案「{args['name']}」",
+        "summary": f"创建登录设备「{args['name']}」",
         "mode": "create",
         "target_fields": args,
-        "note": "设备信息只影响后续新登录，已有 Telegram session 不会改变。",
+        "note": "登录设备只影响后续新登录，已有 Telegram session 不会改变。",
     }
 
 
@@ -366,7 +366,7 @@ async def save_device_execute(ctx: ToolContext, args: dict[str, Any]) -> dict[st
     if profile_id not in (None, ""):
         row = await ctx.db.get(DeviceProfile, int(profile_id))
         if row is None:
-            raise ValueError(f"设备档案 #{profile_id} 不存在")
+            raise ValueError(f"登录设备 #{profile_id} 不存在")
         for key in (
             "name",
             "device_model",
@@ -394,7 +394,7 @@ async def save_device_execute(ctx: ToolContext, args: dict[str, Any]) -> dict[st
         await ctx.db.execute(update(DeviceProfile).values(is_default=False))
         row.is_default = True
     elif args.get("is_default") is False and row.is_default:
-        raise ValueError("不能直接取消默认设备档案，请把另一条设为默认")
+        raise ValueError("不能直接取消默认登录设备，请把另一条设为默认")
     await ctx.db.flush()
     await ctx.db.refresh(row)
     return {
@@ -408,19 +408,19 @@ async def delete_device_preview(ctx: ToolContext, args: dict[str, Any]) -> dict[
     profile_id = int(args.get("id") or args.get("profile_id"))
     row = await ctx.db.get(DeviceProfile, profile_id)
     if row is None:
-        raise ValueError(f"设备档案 #{profile_id} 不存在")
+        raise ValueError(f"登录设备 #{profile_id} 不存在")
     if row.is_default:
-        raise ValueError("默认设备档案不能删除，请先把另一条设为默认")
+        raise ValueError("默认登录设备不能删除，请先把另一条设为默认")
     account_ids = list(
         (await ctx.db.execute(select(Account.id).where(Account.device_profile_id == profile_id)))
         .scalars()
         .all()
     )
     return {
-        "summary": f"删除设备档案 #{profile_id} {row.name}",
+        "summary": f"删除登录设备 #{profile_id} {row.name}",
         "device_profile": _device_view(row),
         "affected_account_ids": account_ids,
-        "warning": "引用它的账号会改为使用默认设备档案；已有 session 不受影响。",
+        "warning": "引用它的账号会改为使用默认登录设备；已有 session 不受影响。",
     }
 
 
@@ -428,9 +428,9 @@ async def delete_device_execute(ctx: ToolContext, args: dict[str, Any]) -> dict[
     profile_id = int(args.get("id") or args.get("profile_id"))
     row = await ctx.db.get(DeviceProfile, profile_id)
     if row is None:
-        raise ValueError(f"设备档案 #{profile_id} 不存在")
+        raise ValueError(f"登录设备 #{profile_id} 不存在")
     if row.is_default:
-        raise ValueError("默认设备档案不能删除，请先把另一条设为默认")
+        raise ValueError("默认登录设备不能删除，请先把另一条设为默认")
     await ctx.db.delete(row)
     await ctx.db.flush()
     return {"deleted": True, "profile_id": profile_id, "business_changed": True}
@@ -527,7 +527,7 @@ def register(registry: ToolRegistry) -> None:
         ToolSpec(
             name="devices.list",
             channels=("web",),
-            description="列出 Telegram 设备伪装档案。",
+            description="列出 Telegram 登录设备（账号登录时上报的机型、系统、App 版本和语言）。",
             input_schema=_obj({}),
             read_handler=list_devices,
         )
@@ -547,7 +547,7 @@ def register(registry: ToolRegistry) -> None:
         ToolSpec(
             name="devices.save",
             channels=("web",),
-            description="创建、更新或设为默认 Telegram 设备档案。",
+            description="创建、更新或设为默认 Telegram 登录设备。",
             input_schema=_obj(device_fields),
             read_only=False,
             min_role="admin",
@@ -559,7 +559,7 @@ def register(registry: ToolRegistry) -> None:
         ToolSpec(
             name="devices.delete",
             channels=("web",),
-            description="删除非默认 Telegram 设备档案。",
+            description="删除非默认 Telegram 登录设备。",
             input_schema=_obj({"id": {"type": "integer"}, "profile_id": {"type": "integer"}}),
             read_only=False,
             min_role="admin",

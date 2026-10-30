@@ -125,16 +125,16 @@ BUILTIN_SKILLS: tuple[SkillSpec, ...] = (
     ),
     SkillSpec(
         name="device-profiles",
-        description="查询和维护 Telegram 登录使用的设备伪装档案。",
+        description="查询和维护登录设备（账号登录 Telegram 时上报的机型、系统、App 版本和语言，显示在 Telegram「设置 › 设备」列表里）。",
         domains=("devices",),
         allowed_tools=("devices.list", "devices.save", "devices.delete"),
         instructions=(
-            "先读取现有档案；设默认或删除前确认当前默认项和受影响账号。",
-            "明确提示：设备档案变化只影响后续新登录，已有 Telegram session 不会改变。",
+            "先读取现有登录设备；设默认或删除前确认当前默认项和受影响账号。",
+            "向用户统一称为「登录设备」；明确提示：登录设备变化只影响后续新登录，已有 Telegram session 不会改变。",
             "保存和删除只生成待确认 Action。",
         ),
-        examples=("列出设备伪装", "把 iPhone 档案设为默认", "删除旧设备档案"),
-        required_context=("设备档案 ID/名称", "设备、系统与 App 版本"),
+        examples=("列出登录设备", "把 iPhone 登录设备设为默认", "删除旧登录设备"),
+        required_context=("登录设备 ID/名称", "机型、系统版本与 App 版本"),
     ),
     SkillSpec(
         name="interaction",

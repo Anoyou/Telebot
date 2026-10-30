@@ -551,8 +551,8 @@ DOMAIN_CATALOG: dict[str, tuple[str, tuple[str, ...]]] = {
         ("sudo", "sudo用户", "管理用户", "授权用户", "指令权限", "聊天权限"),
     ),
     "devices": (
-        "Telegram 设备伪装档案",
-        ("设备档案", "设备伪装", "device profile", "device_model", "系统版本伪装"),
+        "Telegram 登录设备（账号登录时上报的机型/系统/App 版本）",
+        ("登录设备", "设备配置", "设备档案", "设备伪装", "device profile", "device_model", "系统版本伪装"),
     ),
 }
 

@@ -192,7 +192,7 @@ async def start_login(
         await _safe_disconnect(client)
         raise _err(
             "LOGIN_START_FAILED",
-            f"发起登录失败：无法连接 Telegram，请检查代理与标识里的代理配置或服务器网络。原始错误：{e}",
+            f"发起登录失败：无法连接 Telegram，请检查「代理与登录设备」里的代理配置或服务器网络。原始错误：{e}",
             502,
         ) from e
 

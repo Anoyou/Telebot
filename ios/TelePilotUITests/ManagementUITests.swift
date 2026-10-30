@@ -797,6 +797,29 @@ final class ManagementUITests: XCTestCase {
         expectation(for: NSPredicate(format: "value == %@", "未启用"), evaluatedWith: autoReply)
         waitForExpectations(timeout: 10)
     }
+
+    /// 第 20 轮：「设备配置」改名「登录设备」，列表顶部说明这是登录 Telegram 时上报、显示在 Telegram「设置 › 设备」里的信息。
+    func testDeviceProfilesRenamedToLoginDevice() {
+        let app = launch()
+        let system = app.buttons["服务器设置"]
+        XCTAssertTrue(app.buttons["more.accounts"].waitForExistence(timeout: 10))
+        for _ in 0..<6 where !(system.exists && system.isHittable) { app.swipeUp() }
+        XCTAssertTrue(system.waitForExistence(timeout: 5))
+        system.tap()
+        let entry = app.buttons["system.deviceProfiles"]
+        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Sudo 权限")).firstMatch.waitForExistence(timeout: 10))
+        // 「登录设备」在「连接与通知」组，位于 Sudo 之上：先小步上滑找，滑过头再往回拉。
+        for _ in 0..<4 where !(entry.exists && entry.isHittable) { app.swipeUp() }
+        for _ in 0..<6 where !(entry.exists && entry.isHittable) { app.swipeDown() }
+        XCTAssertTrue(entry.isHittable, "未找到「登录设备」行")
+        XCTAssertTrue(entry.label.contains("登录设备"), "行标题应为「登录设备」：\(entry.label)")
+        XCTAssertFalse(app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "设备配置")).firstMatch.exists, "不应再出现「设备配置」")
+        entry.tap()
+        XCTAssertTrue(app.navigationBars["登录设备"].waitForExistence(timeout: 10))
+        let intro = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Telegram「设置 › 设备」")).firstMatch
+        XCTAssertTrue(intro.waitForExistence(timeout: 5), "列表顶部应有登录设备说明")
+        XCTAssertTrue(intro.label.contains("iPhone 15 Pro · iOS 18"))
+    }
 }
 
 /// 从 Swift 源码里取出 `systemImage:` / `systemName:` / `symbol:` 参数里的 SF Symbol 字面量。

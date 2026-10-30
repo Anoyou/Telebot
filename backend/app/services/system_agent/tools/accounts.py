@@ -229,7 +229,7 @@ async def _validated_update(
     if payload.get("device_profile_id") is not None and await ctx.db.get(
         DeviceProfile, int(payload["device_profile_id"])
     ) is None:
-        raise ValueError(f"设备档案 #{payload['device_profile_id']} 不存在")
+        raise ValueError(f"登录设备 #{payload['device_profile_id']} 不存在")
     return row, payload
 
 
@@ -396,7 +396,7 @@ def register(registry: ToolRegistry) -> None:
         ToolSpec(
             name="accounts.update",
             description=(
-                "更新账号显示名、备注、标签、风控模板、代理或设备档案。代理/模板变化后自动重启 Worker。"
+                "更新账号显示名、备注、标签、风控模板、代理或登录设备。代理/模板变化后自动重启 Worker。"
             ),
             input_schema={
                 "type": "object",
