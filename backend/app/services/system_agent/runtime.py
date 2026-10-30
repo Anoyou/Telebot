@@ -68,6 +68,7 @@ from .skills import SkillRegistry, get_skill_registry
 from .tool_routing import (
     ToolRoute,
     available_domains,
+    ensure_account_lookup_tool,
     has_explicit_web_intent,
     parse_model_route,
     route_locally,
@@ -528,6 +529,12 @@ class SystemAgentRuntime:
         routed_tool_specs = select_tool_specs(all_tool_specs, route)
         selected_skills = turn_skill_registry.select(route)
         tool_specs = turn_skill_registry.narrow_tools(routed_tool_specs, selected_skills)
+        tool_specs = ensure_account_lookup_tool(
+            tool_specs,
+            all_tool_specs,
+            account_id=session.account_id,
+            channel=channel,
+        )
         if installed_skill_catalog:
             present_tool_names = {spec.name for spec in tool_specs}
             tool_specs.extend(
