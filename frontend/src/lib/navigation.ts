@@ -91,7 +91,7 @@ export function moduleLabel(key: PlatformModuleKey | string): string {
   const labels: Record<string, string> = {
     ai: "AI",
     interaction_bot: "交互",
-    webhooks: "入站 Webhook",
+    webhooks: "Webhook",
     ledger: "资金台账",
     dispatch_debug: "命中调试",
   };
@@ -129,4 +129,59 @@ export function pluginRuntimeAvailabilityLabel(
     default:
       return "正常";
   }
+}
+
+/** 命中调试预填参数（日志 → 命中调试「用这条消息复现」）。全部可省略。 */
+export interface DispatchDebugPrefill {
+  accountId?: number | null;
+  chatId?: number | null;
+  chatType?: string | null;
+  senderId?: number | null;
+  text?: string | null;
+  via?: string | null;
+}
+
+const DISPATCH_DEBUG_VIAS = new Set(["userbot", "interaction_bot", "webhook"]);
+const DISPATCH_DEBUG_CHAT_TYPES = new Set(["group", "supergroup", "private", "channel"]);
+
+/** 按 chat_id 推断会话类型：-100… 超级群，其它负数普通群，正数私聊。 */
+export function inferChatType(chatId: number | null | undefined): string | undefined {
+  if (chatId == null || !Number.isFinite(chatId) || chatId === 0) return undefined;
+  if (chatId <= -1_000_000_000_000) return "supergroup";
+  return chatId < 0 ? "group" : "private";
+}
+
+/** 生成 /dispatch-debug 链接；来源不是命中调试支持的值（如 account_bot、scheduler）时不带 via。 */
+export function dispatchDebugHref(prefill: DispatchDebugPrefill = {}): string {
+  const params = new URLSearchParams();
+  if (prefill.accountId != null) params.set("account_id", String(prefill.accountId));
+  if (prefill.chatId != null) params.set("chat_id", String(prefill.chatId));
+  const chatType = prefill.chatType ?? inferChatType(prefill.chatId);
+  if (chatType && DISPATCH_DEBUG_CHAT_TYPES.has(chatType)) params.set("chat_type", chatType);
+  if (prefill.senderId != null) params.set("sender_id", String(prefill.senderId));
+  if (prefill.via && DISPATCH_DEBUG_VIAS.has(prefill.via)) params.set("via", prefill.via);
+  const text = prefill.text?.trim();
+  if (text) params.set("text", text.slice(0, 2000));
+  const query = params.toString();
+  return query ? `/dispatch-debug?${query}` : "/dispatch-debug";
+}
+
+/** 读回 dispatchDebugHref 写入的参数；非法值丢弃。 */
+export function parseDispatchDebugPrefill(search: URLSearchParams): DispatchDebugPrefill {
+  const num = (key: string) => {
+    const raw = search.get(key);
+    if (raw == null || raw.trim() === "") return undefined;
+    const value = Number(raw);
+    return Number.isSafeInteger(value) ? value : undefined;
+  };
+  const via = search.get("via");
+  const chatType = search.get("chat_type");
+  return {
+    accountId: num("account_id"),
+    chatId: num("chat_id"),
+    chatType: chatType && DISPATCH_DEBUG_CHAT_TYPES.has(chatType) ? chatType : undefined,
+    senderId: num("sender_id"),
+    text: search.get("text") ?? undefined,
+    via: via && DISPATCH_DEBUG_VIAS.has(via) ? via : undefined,
+  };
 }

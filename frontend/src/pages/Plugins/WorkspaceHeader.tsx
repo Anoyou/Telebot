@@ -19,8 +19,8 @@ export function PluginWorkspaceHeader({
     <>
       <PageHeader
         icon={Boxes}
-        title="插件中心"
-        description="先在这里沉淀一套好用的指令、消息和 AI 模板，再按账号启用复用；新账号不用从零重配。"
+        title="插件"
+        description="按账号启用和配置插件；在「插件市场」发现新插件，在「插件管理」安装、更新和卸载。"
       />
       <PluginWorkspaceNav activeTab={activeTab} guideActive={guideActive} />
     </>

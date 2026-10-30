@@ -701,7 +701,7 @@ function PluginInstallGuide({
   return (
     <Card className="max-w-2xl border-primary/30 bg-card/95 shadow-lg shadow-primary/10">
       <CardHeader className="pb-2">
-        <CardTitle className="text-base">3. 启用指令模板或调用插件</CardTitle>
+        <CardTitle className="text-base">3. 启用插件或自定义指令</CardTitle>
         <CardDescription>
           这里只负责安装、更新和卸载远程插件。安装完成后，回插件中心选择账号，再启用和配置对应插件。
         </CardDescription>

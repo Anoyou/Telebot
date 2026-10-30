@@ -150,7 +150,7 @@ const pluginCapabilitiesFixture = {
   ],
 };
 
-const accountFixture = {
+export const accountFixture = {
   id: 1,
   phone: "+8613800000000",
   display_name: "视觉测试账号",
@@ -411,6 +411,9 @@ function jsonResponse(pathname: string): unknown | undefined {
     plan_detail: "更新前端资源后重启服务。", components: ["frontend"], services: ["frontend"], can_apply: true,
   };
   if (pathname === "/api/system/kill-switch") return { enabled: false };
+  // 第 20 轮信息架构：服务器设置（Sudo 列表）与 Webhook 页标题核对用。
+  if (pathname === "/api/sudo") return [];
+  if (pathname === "/api/webhooks/1") return { account_id: 1, token: "fixture-webhook-token", token_header: "X-TelePilot-Token", token_storage: "encrypted", hooks: [], max_body_bytes: 65536, rate_limit: { action: "reject", per_minute: 60 } };
   if (pathname === "/api/system/health-overview") return {
     db: { ok: true }, redis: { ok: true }, alembic: { ok: true, pending: [] },
     providers: { total: 0, with_api_key: 0 }, proxies: { total: 0 },

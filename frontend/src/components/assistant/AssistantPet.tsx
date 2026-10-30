@@ -561,10 +561,10 @@ export function AssistantPet() {
       data-docked={docked ? position.side : "false"}
       data-side={position.side}
       data-dragging={dragging ? "true" : undefined}
-      aria-label={collapsed ? "打开系统助手" : "关闭系统助手"}
+      aria-label={collapsed ? "打开 Agent" : "关闭 Agent"}
       aria-expanded={!collapsed}
       aria-controls={ASSISTANT_SURFACE_ID}
-      title={collapsed ? "拖动小助手，点击打开" : "关闭系统助手"}
+      title={collapsed ? "拖动小助手，点击打开 Agent" : "关闭 Agent"}
       onClick={() => {
         if (suppressClickRef.current) {
           suppressClickRef.current = false;

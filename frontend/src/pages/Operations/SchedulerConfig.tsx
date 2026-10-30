@@ -348,7 +348,7 @@ export function SchedulerConfig() {
         <li>定时任务按账号隔离运行，每个账号独立维护规则。</li>
         <li>支持 cron 定时、once 单次和 interval 间隔触发。</li>
         <li>
-          动作：发送消息 / 执行指令 / 调用 LLM / 系统助手巡检（只读）。助手巡检不会自动写配置或改代码。
+          动作：发送消息 / 执行指令 / 调用 LLM / Agent 巡检（只读）。Agent 巡检不会自动写配置或改代码。
         </li>
       </RuleInfoBox>
 
@@ -630,7 +630,7 @@ export function SchedulerConfig() {
               <option value="send_message">发送消息</option>
               <option value="run_command">执行指令</option>
               <option value="call_llm">调用 LLM</option>
-              <option value="agent_prompt">系统助手巡检（只读）</option>
+              <option value="agent_prompt">Agent 巡检（只读）</option>
             </Select>
           </Field>
 

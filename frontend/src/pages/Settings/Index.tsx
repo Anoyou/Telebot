@@ -85,9 +85,9 @@ const GUIDE_STEPS: Array<{
     actionTo: "/settings?tab=platform",
   },
   {
-    title: "3. 启用指令模板或调用插件",
-    desc: "去插件中心启用模板或插件，然后就能在 Telegram 里直接调用。",
-    actionLabel: "去插件中心",
+    title: "3. 启用插件或自定义指令",
+    desc: "去插件页按账号启用插件；自定义指令在「指令与任务」里新建后按账号启用，然后就能在 Telegram 里直接调用。",
+    actionLabel: "去插件页",
     actionTo: "/plugins",
   },
 ];
@@ -359,6 +359,7 @@ export function SettingsIndex() {
     onSuccess: () => {
       toast.success("已下发");
       qc.invalidateQueries({ queryKey: ["system", "kill-switch"] });
+      qc.invalidateQueries({ queryKey: ["accounts"] });
       qc.invalidateQueries({ queryKey: ["platform", "tree"] });
     },
     onError: (err) => toast.error(getErrMsg(err)),
@@ -447,7 +448,8 @@ export function SettingsIndex() {
               disabled={!quickAid}
               onClick={() => {
                 setQuickBindOpen(false);
-                nav(`/interaction?aid=${quickAid}`);
+                // 第 20 轮修正：多账号时也进该账号的「管理 Bot」分页（此前误跳交互页）。
+                nav(`/accounts/${quickAid}?tab=bot-management`);
               }}
             >
               前往配置
@@ -712,21 +714,21 @@ export function SettingsIndex() {
         <TabsContent value="security" className="space-y-6">
           <Card>
             <CardHeader>
-              <CardTitle className="text-base">全局总闸（Kill Switch）</CardTitle>
+              <CardTitle className="text-base">紧急停止</CardTitle>
               <CardDescription>
-                开启后所有账号 worker 立即暂停，仅保留接收
+                开启后所有账号 worker 立即暂停，仅保留接收。与顶栏「紧急停止」按钮是同一个开关。
               </CardDescription>
             </CardHeader>
             <CardContent className="flex items-center gap-4">
               <Switch
                 checked={!!killQ.data?.enabled}
                 onCheckedChange={(v) => {
-                  if (v && !confirm("确认开启总闸？所有账号立即暂停！")) return;
+                  if (v && !confirm("确认紧急停止？所有账号立即暂停！")) return;
                   killMut.mutate(v);
                 }}
               />
               <span className="text-sm text-muted-foreground">
-                当前：{killQ.data?.enabled ? "已暂停" : "正常运行"}
+                当前：{killQ.data?.enabled ? "已紧急停止" : "正常运行"}
               </span>
             </CardContent>
           </Card>
@@ -1184,7 +1186,7 @@ function GuideInlineCard({
       </div>
       <div className="mt-3 flex flex-wrap gap-2">
         <Button size="sm" onClick={onPrimary}>
-          下一步：去插件中心 <ArrowRight className="ml-1 h-4 w-4" />
+          下一步：去插件页 <ArrowRight className="ml-1 h-4 w-4" />
         </Button>
         <Button size="sm" variant="outline" onClick={onSkip}>
           跳过这步

@@ -1,4 +1,4 @@
-// 顶栏：移动端汉堡按钮 + 副标题（仅 sm+ 显示）+ 系统健康灯 + 更新检查 + 紧急停用 + 登出
+// 顶栏：移动端汉堡按钮 + 副标题（仅 sm+ 显示）+ 系统健康灯 + 更新检查 + 紧急停止 + 登出
 // iOS PWA：背景色延伸到 safe-area-inset-top，并随主题同步系统状态栏底色。
 // 内容区高度约 3.25rem（相对旧版 5rem 收约 1/3）。
 import { Component, lazy, Suspense, useEffect, useState, type ErrorInfo, type ReactNode } from "react";
@@ -106,7 +106,7 @@ export function TopBar({
             <div className="min-w-0">
               <div className="truncate text-sm font-semibold leading-none">TelePilot</div>
               <div className="mt-0.5 truncate text-[10px] leading-none text-muted-foreground">
-                管理控制台
+                Telegram 控制台
               </div>
             </div>
           </button>

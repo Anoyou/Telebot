@@ -18,6 +18,7 @@ import type {
   AccountSummary,
 } from "@/api/types";
 import { AccountStatusBadge } from "@/components/AccountStatusBadge";
+import { DispatchDebugLink } from "@/components/DispatchDebugLink";
 import { PageHeader, PageShell } from "@/components/layout/PageScaffold";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -111,10 +112,10 @@ export function InteractionIndex() {
       <PageShell>
         <PageHeader
           icon={GitFork}
-          title="交互中心"
+          title="交互"
           description="正在读取账号与交互 Bot 配置。"
         />
-        <div role="status" aria-label="交互中心加载中" className="space-y-4 rounded-lg border bg-card p-4">
+        <div role="status" aria-label="交互加载中" className="space-y-4 rounded-lg border bg-card p-4">
           <div className="flex items-center justify-between gap-3">
             <div className="space-y-2"><Skeleton className="h-5 w-36" /><Skeleton className="h-3 w-64" /></div>
             <Skeleton className="h-9 w-24 rounded-md" />
@@ -133,7 +134,7 @@ export function InteractionIndex() {
   if (accountsQ.isError) {
     return (
       <PageShell>
-        <PageHeader icon={GitFork} title="交互中心" description="账号列表加载失败。" />
+        <PageHeader icon={GitFork} title="交互" description="账号列表加载失败。" />
         <Card>
           <CardHeader><CardTitle className="flex items-center gap-2 text-base"><AlertTriangle className="h-4 w-4 text-destructive" />无法读取账号</CardTitle></CardHeader>
           <CardContent className="flex flex-wrap items-center justify-between gap-3 text-sm text-muted-foreground">
@@ -149,7 +150,7 @@ export function InteractionIndex() {
     <PageShell>
       <PageHeader
         icon={GitFork}
-        title="交互中心"
+        title="交互"
         description="按账号管理交互 Bot、关键词规则、玩法入口和会话运行状态。"
         actions={
           <>
@@ -171,6 +172,7 @@ export function InteractionIndex() {
                 </Link>
               </Button>
             ) : null}
+            <DispatchDebugLink prefill={{ accountId: selectedAid, via: "interaction_bot" }} />
           </>
         }
       />
@@ -184,7 +186,7 @@ export function InteractionIndex() {
             </CardTitle>
           </CardHeader>
           <CardContent className="flex flex-col gap-3 text-sm text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
-            <span>交互中心需要先绑定一个 Telegram 账号，再配置对应的交互 Bot 和互动规则。</span>
+            <span>交互需要先绑定一个 Telegram 账号，再配置对应的交互 Bot 和互动规则。</span>
             <Button asChild size="sm">
               <Link to="/accounts/new">添加账号</Link>
             </Button>

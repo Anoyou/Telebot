@@ -49,6 +49,7 @@ import type {
   RuntimeLogItem,
   SystemConsoleLogsResponse,
 } from "@/api/types";
+import { DispatchDebugLink } from "@/components/DispatchDebugLink";
 import { PageHeader, PageShell } from "@/components/layout/PageScaffold";
 import { RunTrace } from "@/components/assistant/RunTrace";
 import { Badge } from "@/components/ui/badge";
@@ -321,7 +322,7 @@ export function Logs() {
   const activeDescription = view === "messages"
     ? "按消息追踪收到、路由、执行、发送四段状态，直接定位卡点、失败和正常跳过。"
     : view === "agent"
-      ? "查看系统助手每一轮的状态、错误代码与完整执行轨迹。"
+      ? "查看 Agent 每一轮的状态、错误代码与完整执行轨迹。"
     : view === "console"
       ? "查看 Docker / stdout / stderr 级别的原始系统日志，适合排查服务启动、异常堆栈和部署输出。"
       : "查看 TelePilot 写入数据库的结构化运行事件，适合按插件、账号、等级和 JSON 详情排查。";
@@ -423,6 +424,7 @@ export function Logs() {
         )}
         actions={(
           <>
+            <DispatchDebugLink />
             <Button type="button" variant="outline" size="sm" onClick={exportCurrentView}>
               <Download className="mr-1.5 h-4 w-4" />
               导出当前结果
@@ -567,7 +569,7 @@ export function Logs() {
             <SectionHeader
               icon={Bot}
               title="Agent 运行筛选"
-              description="按状态和时间查看系统助手的持久运行记录，失败轮次可直接展开轨迹。"
+              description="按状态和时间查看 Agent 的持久运行记录，失败轮次可直接展开轨迹。"
             />
           </CardHeader>
           <CardContent className="space-y-4">
@@ -1175,7 +1177,7 @@ function AgentRunStream({
         <SectionHeader
           icon={Bot}
           title="Agent 运行"
-          description="每一轮系统助手请求都会保留状态与事件轨迹，失败时优先查看错误代码和最后几步。"
+          description="每一轮 Agent 请求都会保留状态与事件轨迹，失败时优先查看错误代码和最后几步。"
           meta={(
             <div className="flex flex-wrap gap-1.5">
               <SignalPill tone="neutral" label="运行中" value={String(stats.running)} />
@@ -1574,7 +1576,20 @@ function TraceDetailPanel({
             <p className="mt-2 text-sm font-medium">{message?.reason_text || "后端消息流未返回本条判定"}</p>
             <p className="mt-1 text-xs leading-5 text-muted-foreground">{message?.next_step || "请从消息流列表进入详情，或用链路 ID 重新筛选。"}</p>
           </div>
-          <div className="shrink-0 text-xs text-muted-foreground">{formatDateTime(detail.started_at, timezone)}</div>
+          <div className="flex shrink-0 flex-col items-start gap-2 md:items-end">
+            <div className="text-xs text-muted-foreground">{formatDateTime(detail.started_at, timezone)}</div>
+            <DispatchDebugLink
+              label="用命中调试复现"
+              title="把这条消息的账号、会话、发送者和正文带到命中调试，看它现在会被谁处理"
+              prefill={{
+                accountId: detail.account_id ?? message?.account_id,
+                chatId: detail.chat_id ?? message?.chat_id,
+                senderId: detail.sender_user_id ?? message?.sender_user_id,
+                via: detail.source_channel ?? message?.source_channel,
+                text: detail.text_preview ?? message?.text_preview,
+              }}
+            />
+          </div>
         </div>
       </section>
 

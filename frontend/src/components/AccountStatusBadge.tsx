@@ -1,6 +1,6 @@
 // 账号状态 → 中文标签 + Badge 颜色
 //
-// 复合状态：当全局 kill switch 开启时，所有账号的"运行中"应该被覆盖为"总闸暂停"，
+// 复合状态：当紧急停止（kill switch）开启时，所有账号的"运行中"应该被覆盖为"已紧急停止"，
 // 否则用户看到 banner 红条但单条账号还是绿色，会困惑。badge 通过 react-query
 // 直接查 ["system","kill-switch"] cache，跟 GlobalAlertBar / KillSwitch 共享数据。
 import { useQuery } from "@tanstack/react-query";
@@ -44,11 +44,11 @@ export function AccountStatusBadge({ status }: { status: AccountStatus }) {
     refetchIntervalInBackground: false,
   });
 
-  // 总闸开 + 当前 active → 显示为"总闸暂停"，引导用户去顶部恢复
+  // 紧急停止 + 当前 active → 显示为"已紧急停止"，引导用户去顶部解除
   if (kill?.enabled && status === "active") {
     return (
-      <Badge variant="destructive" title="全局总闸已开启，所有账号已被暂停">
-        总闸暂停
+      <Badge variant="destructive" title="紧急停止已开启，所有账号已暂停；在顶栏或提示条点「解除」恢复">
+        已紧急停止
       </Badge>
     );
   }

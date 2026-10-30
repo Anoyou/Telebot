@@ -400,7 +400,7 @@ function MobileAssistantButton() {
     <button
       type="button"
       data-assistant-mobile-button
-      aria-label={collapsed ? "打开系统助手" : "关闭系统助手"}
+      aria-label={collapsed ? "打开 Agent" : "关闭 Agent"}
       aria-expanded={!collapsed}
       aria-controls={ASSISTANT_SURFACE_ID}
       onClick={() => setCollapsed(!collapsed)}
@@ -458,7 +458,7 @@ function AssistantSurface() {
       id={ASSISTANT_SURFACE_ID}
       tabIndex={-1}
       data-assistant-surface
-      aria-label="系统助手"
+      aria-label="Agent"
       aria-hidden={collapsed}
       className={cn(
         "absolute inset-0 z-30 origin-bottom overflow-hidden bg-background px-3 py-3 transition-[opacity,transform,visibility] duration-200 ease-out will-change-[opacity,transform] motion-reduce:transform-none motion-reduce:transition-none sm:px-4 sm:py-4 sm:pb-7 md:px-8 md:py-7 xl:px-10",
@@ -479,7 +479,7 @@ function AssistantSurface() {
 
 function AssistantSurfaceSkeleton() {
   return (
-    <div role="status" aria-label="系统助手加载中" className="space-y-4">
+    <div role="status" aria-label="Agent 加载中" className="space-y-4">
       <div className="flex items-center gap-3 rounded-lg border border-border/70 bg-card p-4">
         <div className="skeleton-shimmer h-10 w-10 rounded-lg" />
         <div className="min-w-0 flex-1 space-y-2">

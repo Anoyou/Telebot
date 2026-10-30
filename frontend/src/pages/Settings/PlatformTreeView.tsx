@@ -197,7 +197,7 @@ export function PlatformTreeView({
 
   return (
     <div className="text-xs" onMouseLeave={clearHover}>
-      {/* 树干：账号本体、总闸、预设 */}
+      {/* 树干：账号本体、紧急停止、运行模式 */}
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 pb-3">
         <span className="inline-flex items-center gap-1.5 font-medium">
           <span
@@ -218,10 +218,10 @@ export function PlatformTreeView({
             tree.trunk.kill_switch ? "font-medium text-destructive" : "text-muted-foreground",
           )}
         >
-          总闸 {tree.trunk.kill_switch ? "已拉闸" : "正常"}
+          紧急停止 {tree.trunk.kill_switch ? "已开启" : "未开启"}
         </span>
         <span className="text-muted-foreground">
-          预设{" "}
+          运行模式{" "}
           {tree.trunk.current_profile === "safe_watch"
             ? "值守"
             : tree.trunk.current_profile === "custom"

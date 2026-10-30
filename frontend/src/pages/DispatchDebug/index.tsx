@@ -10,6 +10,7 @@ import {
   Search,
   XCircle,
 } from "lucide-react";
+import { useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 
 import { listAccounts } from "@/api/accounts";
@@ -30,6 +31,7 @@ import { Select } from "@/components/ui/select";
 import { SignalPill } from "@/components/ui/status";
 import { Textarea } from "@/components/ui/textarea";
 import { getErrMsg } from "@/lib/api";
+import { parseDispatchDebugPrefill } from "@/lib/navigation";
 import { cn } from "@/lib/utils";
 import { queryKeys } from "@/lib/queryKeys";
 
@@ -282,12 +284,15 @@ export function DispatchDebugPage() {
   });
   const settingsQ = useQuery({ queryKey: ["system", "settings"], queryFn: getSystemSettings });
   const accounts = accountsQ.data ?? [];
-  const [selectedAid, setSelectedAid] = useState<number | null>(null);
-  const [chatType, setChatType] = useState("group");
-  const [chatId, setChatId] = useState("-100123");
-  const [senderId, setSenderId] = useState("");
-  const [via, setVia] = useState("userbot");
-  const [text, setText] = useState("");
+  // 从日志「用命中调试复现」进入时带预填参数（?account_id=&chat_id=&chat_type=&sender_id=&via=&text=）。
+  const [searchParams] = useSearchParams();
+  const [prefill] = useState(() => parseDispatchDebugPrefill(searchParams));
+  const [selectedAid, setSelectedAid] = useState<number | null>(prefill.accountId ?? null);
+  const [chatType, setChatType] = useState(prefill.chatType ?? "group");
+  const [chatId, setChatId] = useState(prefill.chatId != null ? String(prefill.chatId) : "-100123");
+  const [senderId, setSenderId] = useState(prefill.senderId != null ? String(prefill.senderId) : "");
+  const [via, setVia] = useState(prefill.via ?? "userbot");
+  const [text, setText] = useState(prefill.text ?? "");
   const [trace, setTrace] = useState<DispatchTrace | null>(null);
 
   const selectedAccount = useMemo(
@@ -303,10 +308,10 @@ export function DispatchDebugPage() {
   const allowedPeers = allowedPeersQ.data ?? [];
 
   useEffect(() => {
-    if (selectedAid !== null) return;
-    if (accounts.length > 0) {
-      setSelectedAid(accounts[0].id);
-    }
+    if (accounts.length === 0) return;
+    // 预填的账号不存在（已删除或参数写错）时回到第一个账号。
+    if (selectedAid !== null && accounts.some((account) => account.id === selectedAid)) return;
+    setSelectedAid(accounts[0].id);
   }, [accounts, selectedAid]);
 
   const simulateMut = useMutation({
