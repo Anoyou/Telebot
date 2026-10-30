@@ -507,8 +507,8 @@ final class ManagementUITests: XCTestCase {
         let rules = app.buttons["runtime.plugin.content_assistant.rules"]
         reveal(rules, in: app)
         rules.tap()
-        XCTAssertTrue(app.navigationBars["交互中心"].waitForExistence(timeout: 10))
-        app.navigationBars["交互中心"].buttons.firstMatch.tap()
+        XCTAssertTrue(app.navigationBars["交互"].waitForExistence(timeout: 10))
+        app.navigationBars["交互"].buttons.firstMatch.tap()
 
         // 点插件 → 本账号配置。
         reveal(autoReply, in: app, up: false)

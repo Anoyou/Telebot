@@ -30,6 +30,7 @@
 - 插件页加「插件 | 运行」切换（对应 Web 插件页「卡片视图 | 树状视图」），账号选择沿用插件页的。运行树从上到下：运行模式卡（生产 / 值守，进入值守先调 `POST /api/platform/profile/dry-run` 预演并在确认框列出会关掉的模块，值守中显示「恢复生产」）；5 个可选模块的开关（`PATCH /api/system/capabilities/{key}`，与 Web 系统设置同一接口、同样带确认），被插件需要时开关不可用并写明原因，点模块查看需要它的插件；插件按「直通 / 主通道 / 交互 Bot」分组，点插件进本账号配置，交互插件旁「交互规则 ›」跳交互中心；底部链接到命中调试。
 - 数据读 `GET /api/platform/tree?account_id=`：新服务器回显 `scope.kind == "account"` 时直接用账号口径的 `demanded_by` / `demanded_by_global` / `blocked_reason` / `forced_off_reason`、插件 `display_name` / `channel` / `entry_labels` / `account_error`；旧服务器没有这些字段时按 `/api/accounts/{id}/features` 与插件目录回退计算（「命令」归入主通道），照常显示。不改服务器行为。
 - 「服务器设置」里的「能力与插件树」「平台运行模式」入口删除，改为跳转到 插件 › 运行。
+- 与 Dock 模块联动一致：命中调试 / 交互 Bot 模块关闭时运行树里对应链接隐藏；运行树里开关模块、进入值守或恢复生产后，Dock 与「更多」入口立即刷新。
 
 ### iOS 0.18.0：Dock 改造（交互进 Dock、自定义 Dock、模块开关联动、插件 ↔ 交互跳转）
 

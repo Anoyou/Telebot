@@ -100,7 +100,10 @@ struct RuntimeTreeView: View {
             } else {
                 Section { ProgressView("正在读取运行树…").frame(maxWidth: .infinity) }
             }
-            debugSection
+            // 服务器关闭了「命中调试」模块时不显示入口（与 Dock / 更多 / 日志页一致）。
+            if model.isModuleEnabled("dispatch_debug") {
+                debugSection
+            }
         }
         .symbolRenderingMode(.hierarchical)
         .accessibilityIdentifier("runtime.screen")
@@ -385,7 +388,7 @@ struct RuntimeTreeView: View {
             .accessibilityValue(plugin.enabled ? "已启用" : "未启用")
             .accessibilityHint(hint)
             .accessibilityIdentifier("runtime.plugin.\(plugin.key)")
-            if plugin.channel == .interaction {
+            if plugin.channel == .interaction && model.isModuleEnabled("interaction_bot") {
                 Button {
                     route = .interaction
                 } label: {
@@ -549,6 +552,7 @@ struct RuntimeTreeView: View {
                 : "进入值守失败：\(OpsFormat.errorMessage(error))"
         }
         await load(force: true)
+        await model.refreshModules()
     }
 
     private func restore() async {
@@ -566,6 +570,7 @@ struct RuntimeTreeView: View {
                 : "恢复失败：\(OpsFormat.errorMessage(error))"
         }
         await load(force: true)
+        await model.refreshModules()
     }
 
     private func setModule(_ key: String, enabled: Bool) async {
@@ -588,6 +593,7 @@ struct RuntimeTreeView: View {
                 : "\(label)切换失败：\(OpsFormat.errorMessage(error))"
         }
         await load(force: true)
+        await model.refreshModules()
     }
 }
 
