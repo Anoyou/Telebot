@@ -383,7 +383,7 @@ final class ManagementUITests: XCTestCase {
         let mode = app.buttons["plugins.mode.runtime"]
         XCTAssertTrue(mode.waitForExistence(timeout: 15))
         mode.tap()
-        XCTAssertTrue(app.descendants(matching: .any)["runtime.profile"].firstMatch.waitForExistence(timeout: 15))
+        XCTAssertTrue(app.staticTexts["runtime.profile"].waitForExistence(timeout: 15))
     }
 
     /// 在运行树列表里上下滑动，直到元素可点。
@@ -399,9 +399,9 @@ final class ManagementUITests: XCTestCase {
     func testRuntimeTreeSafeWatchAndModules() {
         let app = launch()
         openRuntimeTree(app)
-        let profile = app.descendants(matching: .any)["runtime.profile"].firstMatch
+        let profile = app.staticTexts["runtime.profile"]
         XCTAssertTrue(profile.label.contains("生产"), profile.label)
-        let workers = app.descendants(matching: .any)["runtime.workers"].firstMatch
+        let workers = app.staticTexts["runtime.workers"]
         XCTAssertTrue(workers.label.contains("1/2 在线"), workers.label)
 
         // AI 被本账号的内容整理助手需要：开关不可用，并写明原因（新服务器 blocked_reason）。
@@ -461,10 +461,13 @@ final class ManagementUITests: XCTestCase {
         XCTAssertTrue(app.buttons["runtime.safeWatch"].waitForExistence(timeout: 10))
         expectation(for: NSPredicate(format: "label CONTAINS %@", "生产"), evaluatedWith: profile)
         waitForExpectations(timeout: 10)
+    }
 
-        // 服务器设置里的旧入口改为跳转到运行树。
-        app.tabBars.buttons["更多"].tap()
+    /// 服务器设置里的旧「能力与插件树」「平台运行模式」入口删除，改为一行跳转到 插件 › 运行。
+    func testServerSettingsLinksToRuntimeTree() {
+        let app = launch()
         let system = app.buttons["服务器设置"]
+        XCTAssertTrue(app.buttons["more.accounts"].waitForExistence(timeout: 10))
         for _ in 0..<8 where !(system.exists && system.isHittable) { app.swipeUp() }
         system.tap()
         let entry = app.buttons["system.runtimeTree"]
@@ -472,7 +475,7 @@ final class ManagementUITests: XCTestCase {
         XCTAssertTrue(entry.label.contains("已移到 插件 › 运行"), entry.label)
         XCTAssertFalse(app.buttons["system.platformTree"].exists, "旧「能力与插件树」入口应删除")
         entry.tap()
-        XCTAssertTrue(app.descendants(matching: .any)["runtime.profile"].firstMatch.waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["runtime.profile"].waitForExistence(timeout: 15))
     }
 
     /// 插件按「直通 / 主通道 / 交互 Bot」分组；点插件进本账号配置，交互插件旁「交互规则 ›」跳交互中心；

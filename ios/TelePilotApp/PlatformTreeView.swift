@@ -495,7 +495,8 @@ struct RuntimeTreeView: View {
             return
         } catch {
             guard scope == accountID else { return }
-            if case .server(let status, _)? = error as? APIError, status == 404 {
+            // 新服务器对不存在的账号返回 404 ACCOUNT_NOT_FOUND；不带账号的 404 才是旧服务器没有这个接口。
+            if case .server(let status, _)? = error as? APIError, status == 404, scope == nil {
                 treeError = "服务器没有运行树接口（版本较旧），请先更新服务器。"
             } else {
                 treeError = OpsFormat.errorMessage(error)
