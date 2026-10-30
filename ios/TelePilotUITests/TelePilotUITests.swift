@@ -161,6 +161,9 @@ final class TelePilotUITests: XCTestCase {
         XCTAssertTrue(app.buttons["overview.refresh"].waitForExistence(timeout: 45))
         app.tabBars.buttons["更多"].tap()
         let settings = app.buttons["more.settings"]
+        // 「App 设置」在「更多」最后一组，小屏首屏可能放不下（List 懒加载）：先滑到底部再找。
+        XCTAssertTrue(app.buttons["more.accounts"].waitForExistence(timeout: 10))
+        for _ in 0..<4 where !(settings.exists && settings.isHittable) { app.swipeUp() }
         XCTAssertTrue(settings.waitForExistence(timeout: 10))
         settings.tap()
         let entry = app.buttons["settings.cfAccess"]
@@ -215,6 +218,9 @@ final class TelePilotUITests: XCTestCase {
         XCTAssertTrue(app.buttons["overview.refresh"].waitForExistence(timeout: 45))
         app.tabBars.buttons["更多"].tap()
         let settings = app.buttons["more.settings"]
+        // 「App 设置」在「更多」最后一组，小屏首屏可能放不下（List 懒加载）：先滑到底部再找。
+        XCTAssertTrue(app.buttons["more.accounts"].waitForExistence(timeout: 10))
+        for _ in 0..<4 where !(settings.exists && settings.isHittable) { app.swipeUp() }
         XCTAssertTrue(settings.waitForExistence(timeout: 10))
         settings.tap()
         let logout = app.buttons["settings.logout"]

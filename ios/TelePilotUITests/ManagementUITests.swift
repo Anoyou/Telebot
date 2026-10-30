@@ -528,11 +528,13 @@ final class ManagementUITests: XCTestCase {
         XCTAssertTrue(app.navigationBars["自动回复"].waitForExistence(timeout: 10))
         app.navigationBars["自动回复"].buttons.firstMatch.tap()
 
-        // 命中调试链接。
-        let debug = app.buttons["runtime.dispatchDebug"]
+        // 命中调试链接：直接打开原生命中调试页（iOS 0.20.0）。
+        let debug = app.buttons["runtimeTree.dispatchDebug"]
         reveal(debug, in: app, attempts: 14)
         debug.tap()
         XCTAssertTrue(app.navigationBars["命中调试"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.descendants(matching: .any)["dispatchDebug.screen"].firstMatch.waitForExistence(timeout: 10),
+                      "运行树底部应打开原生命中调试页")
         app.navigationBars["命中调试"].buttons.firstMatch.tap()
 
         // 全部账号：旧服务器形状，中文名来自插件目录，「命令」归入主通道。

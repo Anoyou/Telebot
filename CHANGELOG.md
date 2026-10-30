@@ -25,6 +25,10 @@
 
 ## [Unreleased]
 
+### iOS 0.20.0：原生命中调试、服务器参数中文表单、日志补系统控制台与 Agent 运行
+
+- **iOS 0.20.0**：补齐与 Web 对齐的三处缩水页面（只用现有接口，服务器行为不变）。①原生「命中调试」替换日志里的通用「模拟消息路由」表单：账号 / 会话白名单 / 最近消息一键填写，`POST /api/dispatch/simulate` 结果按直通 → 命令 → 关键词 → 事件订阅逐项显示命中、说明与中文原因码，可展开命中项 / 候选项 / 订阅决策（`DispatchDebugView.swift`；可复用导航目标 `DispatchDebugView(accountID:chatID:chatType:senderID:text:via:)` 与入口行 `DispatchDebugEntryLink`）。②「服务器参数」改为中文表单（指令前缀、前缀要求、AI 上下文、回声防误触、时区、运行日志与 Trace / Event Bus / Inline / 访客 / native_raw 设置与保留期限），`PATCH /api/system/settings` 只提交改动键、校验与服务器一致；转账通知判定开关只读；未知键仍可原始编辑（`ServerSettingsView.swift`）。③日志补「系统控制台」（`POST /api/logs/system-console`）与「Agent 运行」（`GET /api/system-agent/runs`、`/runs/{id}/events`）两类（`LogsConsoleAgentView.swift`）。插件页「运行」视图底部的命中调试链接也改用原生页（`DispatchDebugEntryLink(identifier: "runtimeTree.dispatchDebug")`，仍受 `dispatch_debug` 模块开关控制）。服务器参数页的保存结果 / 未保存提示固定在页面底部（`safeAreaInset`，随键盘上移），无需滚动即可看到。UI 测试 `DiagnosticsUITests` 4 条。
+
 ### iOS：插件页「运行树」（iOS 0.19.0）
 
 - 插件页加「插件 | 运行」切换（对应 Web 插件页「卡片视图 | 树状视图」），账号选择沿用插件页的。运行树从上到下：运行模式卡（生产 / 值守，进入值守先调 `POST /api/platform/profile/dry-run` 预演并在确认框列出会关掉的模块，值守中显示「恢复生产」）；5 个可选模块的开关（`PATCH /api/system/capabilities/{key}`，与 Web 系统设置同一接口、同样带确认），被插件需要时开关不可用并写明原因，点模块查看需要它的插件；插件按「直通 / 主通道 / 交互 Bot」分组，点插件进本账号配置，交互插件旁「交互规则 ›」跳交互中心；底部链接到命中调试。
