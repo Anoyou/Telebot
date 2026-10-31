@@ -155,9 +155,16 @@ final class WorkspaceUITests: XCTestCase {
         XCTAssertTrue(preview.label.hasPrefix("账号 · 插件 · 日志 · 更多"), preview.label)
         let source = app.descendants(matching: .any)["dock.source"].firstMatch
         XCTAssertTrue(source.label.contains("跟随服务器常用入口"), source.label)
+        // 「恢复」在列表最下面，List 懒加载：不在可见区时不存在，先滚过去再读状态，读完滚回顶部。
         let reset = app.buttons["dock.reset"]
+        XCTAssertTrue(reveal(reset, in: app))
         XCTAssertFalse(reset.isEnabled, "跟随服务器时不需要恢复")
-        app.buttons["dock.remove.logs"].tap()
+        for _ in 0..<6 where !(preview.exists && preview.isHittable) { app.swipeDown() }
+        let removeLogs = app.buttons["dock.remove.logs"]
+        XCTAssertTrue(reveal(removeLogs, in: app))
+        removeLogs.tap()
+        for _ in 0..<6 where !(preview.exists && preview.isHittable) { app.swipeDown() }
+        XCTAssertTrue(preview.waitForExistence(timeout: 5))
         XCTAssertTrue(preview.label.hasPrefix("账号 · 插件 · 更多"), preview.label)
         XCTAssertTrue(source.label.contains("本机自定义"), source.label)
         XCTAssertTrue(reveal(reset, in: app))
