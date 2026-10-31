@@ -25,6 +25,10 @@
 
 ## [Unreleased]
 
+### iOS 0.28.0：交互页重排——通知 Bot 收进二级页、运行状态缩成一行、玩法条目模板接上消息预览
+
+- **iOS 0.28.0**（只改 iOS，不改服务器）：`InteractionCenterView` ①「真实转账结果通知 Bot」「测试模拟通知 Bot」两组移到二级页 `InteractionNotifyBotsView`（「通知 Bot 设置」，`interaction.notifyBots`），交互页一行显示摘要（真实 N 个 · 测试 Bot 已配置/未配置 · N 个测试群 · 未保存），二级页编辑同一份草稿，仍由交互页导航栏「保存」一次提交（字段与 Web `buildInteractionPayload` 不变）；旧服务器没有 `has_transfer_bot_token` 时二级页只有真实通知 Bot。②「运行状态」分组改为一行 `InteractionStatusCard`（状态点 + 一句话 + Bot · 启用规则 · 群数，错误 / 失败投递小标记，`interaction.statusCard`），细节移到 `InteractionStatusDetailView`（原 `interaction.status.*` 标识保留在详情页）。③「每个玩法的条目模板」接上 #112 原生 Telegram 预览：TelePilotCore 新增 `InteractionQueryPreview`，逐条移植服务器 `_render_interaction_rules_query` 的 `trigger` / `kind` / `limit` 标签（`html_text` 转义、入口未声明奖金时不显示模块奖金、只列启用的 module / math10 规则），用账号当前草稿规则代入；条目模板默认展开预览，规则行「查询里显示：…」、规则区底部「查询回复预览」、规则编辑页「在玩法查询里显示为」。Core 单测 `InteractionQueryPreviewTests` 期望值由服务器函数实际运行得出；UI 测试新增 `testInteractionStatusCardIsCompactAndOpensDetail`、`testInteractionQueryItemTemplatePreviewsEverywhere`，更新通知 Bot 与交互保存相关用例。
+
 ### iOS 0.27.0：输入框统一带标题
 
 - **iOS 0.27.0**：新增统一输入行组件（`ios/TelePilotApp/SecretField.swift`）：单行 `LabeledTextField`（iPhone「设置」风格，左侧固定标题、右侧右对齐值 + 单位，空值灰色提示，可选项默认「可选」，辅助功能大字号自动改上下排列）、多行 `StackedTextField`（标题在上，与 `SecretField` 同字号，可选项标「可选」）、布局容器 `LabeledFieldRow`（登录页 / Cloudflare Access 保留焦点链）；`FieldUnit.infer` 按字段名推断单位（`*_seconds` 秒等），`FieldUnit.ifNumeric` 给冷却这类可写「15s」的时长只在纯数字时补「秒」；`TelegramTemplateInlineField` 新增 `showsTitle`（插件配置、规则「命中回复」显示标题）。全 App 替换只靠占位文字当标签的 `TextField` / `SecureField`：交互规则编辑、真实通知 Bot ID、查询指令、插件配置通用表单（文本 / 数字带推断单位 / 消息模板 / 添加字段）、插件密钥列表、规则试运行、AI 新增供应商与模型清单、多模型对话测试系统提示词、新增账号、Skills 链接安装、插件仓库、Apple 推送、登录页、Cloudflare Access、备份与维护、消息模板实验室、任务进度查询。服务器参数页本来就是左标题右输入，未改。UI 测试新增 `ManagementUITests/testRuleEditorFieldsKeepTitlesAndUnits`，按标签查找的 3 处断言改为按标签前缀匹配；`ios/DESIGN.md` 新增「输入行」规范。不改服务器。

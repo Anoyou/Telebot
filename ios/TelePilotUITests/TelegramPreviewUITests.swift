@@ -139,7 +139,9 @@ final class TelegramPreviewUITests: XCTestCase {
         let queryPreview = element(app, "interaction.query.response.preview.bubble")
         reveal(queryPreview, in: app)
         XCTAssertTrue(queryPreview.waitForExistence(timeout: 10))
-        XCTAssertTrue(text(app, containing: "示例玩法").exists)
+        // 第 21 轮：用本账号真实的玩法规则代入条目模板（夹具条目模板「• {name}」，启用的插件玩法「AI 答疑」）。
+        XCTAssertTrue(text(app, containing: "AI 答疑").exists)
+        XCTAssertFalse(text(app, containing: "示例玩法").exists, "有真实规则时不再用示例玩法")
         let counter = element(app, "interaction.query.response.counter")
         XCTAssertTrue(counter.label.contains("/ 4096"), counter.label)
 
@@ -181,6 +183,64 @@ final class TelegramPreviewUITests: XCTestCase {
         XCTAssertLessThanOrEqual(code.frame.maxY, box.frame.maxY + 1, "代码块不应被裁掉：\(code.frame) / \(box.frame)")
         // 「复制」图标与文字紧挨：整个按钮不应比文字宽太多（Label 给图标留整列宽时 50pt 以上）。
         XCTAssertLessThan(copy.frame.width, 48, "复制按钮图标与文字应紧挨：\(copy.frame)")
+    }
+
+    /// 第 21 轮：「每个玩法的条目模板」有示例效果——模板编辑处默认显示预览（按真实规则逐条代入），
+    /// 交互页规则行显示「查询里显示：…」，规则区底部可展开整条查询回复，规则编辑页显示这条玩法在查询里的样子；改模板即时跟着变。
+    func testInteractionQueryItemTemplatePreviewsEverywhere() {
+        let app = launch()
+        app.tabBars.buttons["交互"].tap()
+
+        // 交互页规则行：会出现在查询回复里的规则带一行「查询里显示」。
+        let ask = app.buttons["interaction.rule.rule-ask"]
+        reveal(ask, in: app, attempts: 12)
+        XCTAssertTrue(ask.waitForExistence(timeout: 10))
+        XCTAssertTrue(ask.label.contains("查询里显示：• AI 答疑"), ask.label)
+        let notice = app.buttons["interaction.rule.rule-notice"]
+        reveal(notice, in: app)
+        XCTAssertFalse(notice.label.contains("查询里显示"), "只发通知的规则不出现在查询回复里：\(notice.label)")
+
+        // 规则区底部：整条查询回复（默认收起）。
+        let toggle = app.buttons["interaction.queryPreview.toggle"]
+        reveal(toggle, in: app)
+        XCTAssertTrue(toggle.label.contains("列出 1 个玩法"), toggle.label)
+        XCTAssertFalse(element(app, "interaction.queryPreview.bubble").exists)
+        toggle.tap()
+        let bubble = element(app, "interaction.queryPreview.bubble")
+        reveal(bubble, in: app)
+        XCTAssertTrue(bubble.waitForExistence(timeout: 5))
+        XCTAssertTrue(text(app, containing: "当前可用联动玩法").exists)
+        XCTAssertTrue(element(app, "interaction.queryPreview.prompt").exists, "上方是群成员发的查询指令")
+
+        // 模板编辑处：条目模板默认显示预览；改模板后规则行跟着变。
+        let advanced = app.buttons["interaction.advanced"]
+        reveal(advanced, in: app)
+        advanced.tap()
+        let itemPreview = element(app, "interaction.query.item.preview.bubble")
+        reveal(itemPreview, in: app)
+        XCTAssertTrue(itemPreview.waitForExistence(timeout: 10), "条目模板默认显示示例效果")
+        let itemEditor = element(app, "interaction.query.item.editor")
+        reveal(itemEditor, in: app)
+        itemEditor.coordinate(withNormalizedOffset: CGVector(dx: 0.97, dy: 0.8)).tap()
+        itemEditor.typeText("（{kind}）")
+        XCTAssertTrue(text(app, containing: "AI 答疑（玩法 content_assistant）").waitForExistence(timeout: 5))
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        XCTAssertTrue(advanced.waitForExistence(timeout: 10))
+        // 回到交互页时停在下方的「查询指令与通知模板」，规则行在上面。
+        for _ in 0..<8 where !(ask.exists && ask.isHittable) { app.swipeDown() }
+        XCTAssertTrue(ask.isHittable)
+        XCTAssertTrue(ask.label.contains("AI 答疑（玩法 content_assistant）"), ask.label)
+
+        // 规则编辑页：这条玩法在查询里的样子。
+        ask.tap()
+        let rulePreview = element(app, "interaction.rule.queryPreview.bubble")
+        reveal(rulePreview, in: app, attempts: 14)
+        XCTAssertTrue(rulePreview.waitForExistence(timeout: 10))
+        XCTAssertTrue(text(app, containing: "AI 答疑（玩法 content_assistant）").exists)
+        let screenshot = XCTAttachment(screenshot: app.screenshot())
+        screenshot.name = "规则编辑页玩法查询预览"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
     }
 
     func testPluginTemplateFieldsPreviewWhileEditing() {

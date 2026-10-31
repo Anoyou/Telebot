@@ -97,7 +97,7 @@
 
 ## Web ↔ iOS 页面对照表
 
-以代码为准（Web：`frontend/src/components/layout/Sidebar.tsx` 的 `NAV` 与路由；iOS 0.26.0）。第 20 轮起 Web 遵守「导航名 = 页面标题」，统一叫法见下方「统一命名」。**Web 新增、移动或删除侧栏项／设置分页／独立页面时，必须在同一个 PR 里更新这张表，并写明 iOS 的处理方式（做／不做＋理由），见根目录 `AGENTS.md`。**
+以代码为准（Web：`frontend/src/components/layout/Sidebar.tsx` 的 `NAV` 与路由；iOS 0.28.0）。第 20 轮起 Web 遵守「导航名 = 页面标题」，统一叫法见下方「统一命名」。**Web 新增、移动或删除侧栏项／设置分页／独立页面时，必须在同一个 PR 里更新这张表，并写明 iOS 的处理方式（做／不做＋理由），见根目录 `AGENTS.md`。**
 
 | Web 页面（路由） | iOS 位置 | 状态 |
 | --- | --- | --- |
@@ -112,7 +112,7 @@
 | 待确认 `/assistant/inbox`（第 20 轮第二批起不再是侧栏一级：挂在侧栏 Agent 行、桌面小宠物、手机底栏 Agent 圆钮的红点上，Agent 页右上角「待确认」进入；地址不变） | Agent 角标 + 待确认页 | ✅ 对齐（两端都挂在 Agent 上） |
 | Agent `/assistant`（第 20 轮前 Web 叫「系统助手」） | Dock 独立「Agent」 | ✅ 对齐 |
 | 账号详情页头、插件页账号行「问 Agent」（第 20 轮，`?agent_account=ID&agent_from=…`；在 `/accounts/:aid` 或插件页直接打开 Agent 也带入该账号） | 无对应入口（Agent 是 Dock 独立标签，账号页 / 插件页没有进入 Agent 的按钮） | ⏸ 暂不做：iOS 账号页 / 插件页没有进 Agent 的入口，本轮只做「只有一个账号时新会话默认关联」（iOS 0.24.3，Web 同）；多账号时在会话设置 › 账号上下文选账号。以后若加入口，用 `AssistantStore.createSession(model, accountID:)` 带入 |
-| 交互 `/interaction` | Dock「交互」（0.18.0 起；可自选移出，移出后在更多 › 常用） | ✅ 对齐（0.24.0 补齐「身份配置」测试模拟通知 Bot，字段见下方「交互页字段对照」） |
+| 交互 `/interaction` | Dock「交互」（0.18.0 起；可自选移出，移出后在更多 › 常用） | ✅ 对齐（0.24.0 补齐「身份配置」测试模拟通知 Bot；0.28.0 页面重排：两种通知 Bot 收进二级页「通知 Bot 设置」、运行状态缩成一行小卡，字段见下方「交互页字段对照」） |
 | 指令与任务 `/operations`（自定义指令／定时任务；第 20 轮第二批起「自动指令白名单」并入「定时任务」页底部，旧地址 `/operations/auto-command-whitelist?aid=` 跳到 `/operations/scheduler?aid=&section=whitelist`） | 更多 › 管理 › 指令与任务（可自选进 Dock；白名单在账号 › 定时任务与白名单） | ✅ 对齐（两端白名单都在定时任务里） |
 | 概览 `/overview`（账号 Worker / AI / 插件 / 5 分钟日志 四格 + 资源占用 + 插件卡片） | Dock「概览」+ 一键体检；0.26.0 起 3 列小指标格（见「概览卡片规范」） | ✅ 对齐（叫法：AI 同名「可用 / 已配置」；Web「账号 Worker」在 iOS 拆成「账号」与「运行进程」两格；Web「5 分钟日志」iOS 是「24 小时错误」；iOS 多运行模式、待确认两格，Web 的运行模式在插件页、待确认在 Agent 红点） |
 | 资金台账 `/ledger` | 更多 › 管理 › 资金台账（可自选进 Dock） | ✅ 对齐 |
@@ -128,16 +128,22 @@
 | 界面偏好 `/settings?tab=interface`：常用入口（`ui_preferences.primary_nav`，1–4 个一级/二级入口，侧栏第一组与手机底栏共用）+ 「管理」「工具与设置」组内顺序（`sidebar_order`），跨设备 | App 设置 › 自定义 Dock（只存本机，可换入口，不读 Web 的 `ui_preferences`） | ⚠️ 不跨设备同步（后续可让 iOS 读 `primary_nav` 作默认，round19 方案 3.2-9） |
 | 危险操作确认（第 20 轮第二批：Web 全部改用统一确认对话框，标题 + 后果说明 + 红色确认按钮，焦点默认在「取消」） | iOS 原生 `confirmationDialog` | ✅ 对齐 |
 
-### 交互页字段对照（0.24.0，Web 账号 › Bot `BotTab` 交互部分 ↔ iOS `InteractionCenterView`）
+### 交互页字段对照（0.24.0，0.28.0 重排；Web 账号 › Bot `BotTab` 交互部分 ↔ iOS `InteractionCenterView`）
+
+交互页从上到下（0.28.0）：账号 → 保存结果 → 运行状态一行小卡（`interaction.statusCard`）→「交互总闸与 Bot」→「通知 Bot 设置」一行（`interaction.notifyBots`）→ 互动规则与玩法入口（含「查询回复预览」）→「查询指令与通知模板」。
+
+- **运行状态小卡**（`InteractionStatusCard`）：10pt 状态点（绿 运行中／橙 未运行或 Bot 待配置／红 最近运行有错误／灰 未启用，颜色之外标题文字也写明状态）+ 一句话（交互运行中／交互未运行／交互 Bot 待配置／交互未启用）+ 关键数字一行（@Bot · 启用/全部 条规则启用 · N 个群，等宽数字）；有错误时右侧红色 `exclamationmark.triangle.fill`、有失败投递时橙色 `tray.and.arrow.down` + 条数。点按进「运行状态」详情（`InteractionStatusDetailView`，`interaction.statusDetail`）：交互总闸、交互 Bot、监听状态、启用订阅、失败投递各一行（`interaction.status.gate／token／runtime／rules／dlq`）与错误原文（`interaction.status.error`）。
+- **通知 Bot 设置**（`InteractionNotifyBotsView`，`bell.badge`）：行上第二行写摘要「真实 N 个 · 测试 Bot 已配置/未配置 · N 个测试群」，二级页字段有未保存修改时摘要后加橙色「未保存」、二级页顶部提示回交互页保存。二级页编辑交互页同一份草稿（与规则编辑页一样不单独保存），内容即原「真实转账结果通知 Bot」「测试模拟通知 Bot」两组。
+- **玩法查询预览**：「每个玩法的条目模板」按账号当前草稿里启用的「启动插件」「算数题」规则逐条代入（`TelePilotCore.InteractionQueryPreview`，逐条移植服务器 `_render_interaction_rules_query` 的 trigger／kind／limit 标签），出现在：模板编辑处（默认展开预览）、规则行第三行「查询里显示：…」（纯文本一行，三级色）、规则区底部「查询回复预览」（`interaction.queryPreview.toggle`，`eye`／`eye.slash`，默认收起，展开为整条回复气泡 `interaction.queryPreview.bubble`）、规则编辑页最下面「在玩法查询里显示为」（`interaction.rule.queryPreview.bubble`，停用规则按启用后的样子）。没有可列出的规则时：模板编辑处沿用 Web 的两条示例玩法，交互页预览「没有可用玩法时回复」。
 
 两端读写同一个 `GET`／`PUT /api/accounts/{id}/interaction-bot`，iOS 提交字段与 Web `buildInteractionPayload` 相同；Web 每组各有「保存 / 清空」按钮，iOS 统一用导航栏右上「保存」一次提交（清空类操作改草稿，保存后生效）。
 
 | Web（BotTab） | iOS 位置 | 标识 / 说明 |
 | --- | --- | --- |
-| 身份配置 › 交互 Bot：用户名、交互 Bot Token、清空交互 Bot | 运行状态「交互 Bot @用户名」；「交互总闸与 Bot」› 交互 Bot Token、清除已保存的 Token | `interaction.status.token`、`interaction.token`、`interaction.clearToken` |
+| 身份配置 › 交互 Bot：用户名、交互 Bot Token、清空交互 Bot | 运行状态小卡「@用户名」与详情「交互 Bot」；「交互总闸与 Bot」› 交互 Bot Token、清除已保存的 Token | `interaction.status.token`、`interaction.token`、`interaction.clearToken` |
 | 身份配置 › 监听群成员状态（缓存 5 分钟） | 「交互总闸与 Bot」› 监听群成员状态（可展开，`unknown` 显示「无法确认」） | `interaction.memberships` |
-| 身份配置 › 真实转账结果通知 Bot：真实通知 Bot ID 列表 | 「真实转账结果通知 Bot」分组（0.24.0 从“高级”页搬来） | `interaction.trustedBotIDs` |
-| 身份配置 › 测试模拟通知 Bot Token（SecretInput，`transfer_bot_token`） | 「测试模拟通知 Bot」› `SecretField`（查看 `kind=transfer_bot_token`）、清除已保存的测试 Token | `interaction.transferToken`、`interaction.clearTransferToken` |
+| 身份配置 › 真实转账结果通知 Bot：真实通知 Bot ID 列表 | 通知 Bot 设置 ›「真实转账结果通知 Bot」分组（0.24.0 从“高级”页搬来，0.28.0 收进二级页） | `interaction.trustedBotIDs` |
+| 身份配置 › 测试模拟通知 Bot Token（SecretInput，`transfer_bot_token`） | 通知 Bot 设置 ›「测试模拟通知 Bot」› `SecretField`（查看 `kind=transfer_bot_token`）、清除已保存的测试 Token | `interaction.transferToken`、`interaction.clearTransferToken` |
 | 当前测试模拟 Bot ID 说明 | 「当前测试 Bot ID」行 + 分组 footer | `interaction.transferBotID` |
 | 模拟测试群（已允许会话芯片多选、N 个已选、手动填写 Chat ID、说明） | 「模拟测试群 · N 个已选」› `InteractionTestChatPicker`：会话白名单 Toggle 多选（私聊／普通群／超级群／频道 · ID）、不在白名单的 ID 单列点按移除、手填多行；留空 = 不启用任何测试群，最多 20 个；服务器返回没有 `transfer_test_chat_ids` 时不显示、不提交 | `interaction.testChats`、`.count`、`.peer.<chat_id>`、`.manual` |
 | 测试 Bot 群成员状态 | 「测试 Bot 群成员状态」（可展开） | `interaction.testMemberships` |
@@ -189,7 +195,7 @@ iOS 暂不做（理由）：规则搜索框（规则最多 20 条，手机上筛
 | 旧版专属页 `ChatGPTImageConfig` / `CodexImageConfig` 的 `message_template` | 没有专属原生页：这两个插件走通用插件配置，`message_template` 同样行内预览，按图片说明文字 1024 上限 | `tgField.message_template` |
 | AI `OutputTemplateEditor`（输出模板 + parse_mode） | AI › 指令 › 编辑模型、路由与回复格式 › 编辑 Config 里的 `output_template`（通用表单，按同级 `output_format` 选解析模式；`{?…}{/?}` 条件块、缺值为空、留空预览默认格式 `PRESET_SIMPLE_TEMPLATE`）；配置里还没有 `output_template` 时需先“添加字段”（无原生的占位符插入器，记为后续） | `tgField.output_template` |
 | 指令模板 `TemplatesEditor`（reply_text 回复文本） | 指令与任务 › 指令模板 › 编辑 › Config 的 `text`（`type == reply_text` 时，示例 `{args}` / `{cmd}`） | `tgField.text` |
-| 账号 › Bot `BotTab`：玩法查询、转账／扣款通知 | 交互 › 查询指令与通知模板（`InteractionAdvancedView`，0.24.0 前叫「查询指令、通知模板与可信 Bot」）：回复模板 + 条目模板组合成整条消息预览（同 Web 两条示例玩法）、收款／扣款通知（留空时预览 Web 默认模板）；另外规则编辑「命中回复」也有预览（Web 没有） | `interaction.query.response`／`.item`、`interaction.notice.transfer`／`.debit`、`interaction.rule.response` |
+| 账号 › Bot `BotTab`：玩法查询、转账／扣款通知 | 交互 › 查询指令与通知模板（`InteractionAdvancedView`，0.24.0 前叫「查询指令、通知模板与可信 Bot」）：回复模板 + 条目模板组合成整条消息预览（0.28.0 起用账号真实玩法规则逐条代入、条目模板默认展开预览；没有玩法规则时同 Web 两条示例玩法；交互页规则行与规则编辑页也有，见「交互页字段对照」）、收款／扣款通知（留空时预览 Web 默认模板）；另外规则编辑「命中回复」也有预览（Web 没有） | `interaction.query.response`／`.item`、`interaction.notice.transfer`／`.debit`、`interaction.rule.response` |
 
 Web 目前没有任何页面配置内联按钮；iOS 气泡已支持，服务器模板目录项带 `reply_markup` 时显示（界面测试夹具覆盖）。
 
@@ -204,7 +210,7 @@ Web 目前没有任何页面配置内联按钮；iOS 气泡已支持，服务器
 | 模块 | 入口与符号 |
 | --- | --- |
 | 更多 | 分组与入口见「底部 Dock」一节；AI `cpu`、指令与任务 `terminal`、账号 `person.2`、App 设置 `apps.iphone`（0.15.0 由「设置」`gearshape` 改名，与管理模块「服务器设置」区分；0.15.0 写的 `iphone.gear` 不是有效符号、真机无图标，0.16.0 改 `apps.iphone`，SF Symbols 2.0／iOS 14 起可用）（0.21.0 起「更多 › App」只剩这一行，「关于」「软件更新」移进 App 设置顶部）；管理模块沿用 `ManagementModule.symbol`（0.16.0 新增「交互」（当时叫交互中心）`bubble.left.and.text.bubble.right`，排在「指令与任务」后）；紧急停止红色高亮行（0.16.1 起说明并入行内，替换原状态文字，Section footer 只在切换失败／结果未知时显示错误）：左侧红底图标 `exclamationmark.octagon`（开启后 `.fill`），标题「全局紧急停止」（`more.emergencyStop.title`），标题下一行说明按钮 `info.circle` **在文字左边**（footnote，无障碍标签「紧急停止说明」，视觉小图标、点按区域四周扩 10pt），文字（`more.emergencyStop.summary`，footnote，可换行）未开启时为「停止全部消息处理，数据和管理台不受影响」（次要色），开启时为「已停止全部消息处理，点“解除”恢复」（红色），读取中／失败显示「正在读取状态…」／「状态读取失败：…」；右侧「停止／解除」是 borderless 按钮（`more.emergencyStop`，无障碍值保留完整状态「未开启 · 账号与 Bot 正常运行」／「已开启 · 账号进程与 Bot 已停止」），整行其它位置点按同样弹出确认（行用 onTapGesture，ⓘ 子按钮优先，不能把整行包成 Button，否则 ⓘ 点不到）；ⓘ 点开原生 popover（`.presentationCompactAdaptation(.popover)`）：停止什么 `stop.circle`、不影响 `checkmark.shield`、如何恢复 `arrow.uturn.backward.circle`；确认弹窗文案不变 |
-| 交互（0.16.0 起，当时叫交互中心；0.18.0 起在 Dock「交互」，页面标题「交互」） | 对齐 Web `/interaction`。账号 `person.crop.circle.badge.checkmark`（原生 `Picker(.menu)`，有未保存修改时禁用）、放弃修改 `arrow.uturn.backward`；运行状态：交互总闸 `power.circle.fill`／`power.circle`、交互 Bot 已配置 `checkmark.circle.fill`／待配置 `exclamationmark.triangle.fill`、监听运行中 `checkmark.circle.fill`／未运行 `exclamationmark.triangle.fill`／未启用 `pause.circle`、启用订阅 `bubble.left.and.text.bubble.right`、失败投递 `tray.and.arrow.down`；交互总闸 `power.circle`（Toggle）、交互 Bot Token `key`（`SecretField`，只在保存时提交）、清除 Token `trash`、监听群成员状态 `person.2`（可展开，0.24.0 前叫「Bot 入群情况」、在运行状态里）；真实转账结果通知 Bot ID（多行文本，0.24.0 从高级页搬来）；测试模拟通知 Bot（0.24.0）：Token `key`、当前测试 Bot ID `number`、清除测试 Token `trash`、模拟测试群 `checklist`（多选页里不在白名单的 ID 用 `minus.circle.fill` 移除）、测试 Bot 群成员状态 `person.2`、清空通知 Bot `trash`（红色）；规则筛选原生分段；规则长按菜单 上移 `arrow.up`／下移 `arrow.down`／复制 `doc.on.doc`；规则行：插件玩法 `puzzlepiece.extension`／算数题 `function`／只发通知 `bell.badge`，状态启用 `checkmark.circle.fill`／停用 `pause.circle`（文字＋图标），左滑停用／启用、删除 `trash`，添加规则 `plus`；规则编辑：命中后 `play.circle`、触发方式 `bolt.horizontal`、插件入口 `puzzlepiece.extension`、从会话白名单选择 `checklist`；高级 `slider.horizontal.3`。导航栏右上「保存」（`interaction.save`，没有修改时禁用）一次提交 `PUT /api/accounts/{id}/interaction-bot`，不自动重试，失败保留草稿 |
+| 交互（0.16.0 起，当时叫交互中心；0.18.0 起在 Dock「交互」，页面标题「交互」） | 对齐 Web `/interaction`。账号 `person.crop.circle.badge.checkmark`（原生 `Picker(.menu)`，有未保存修改时禁用）、放弃修改 `arrow.uturn.backward`；运行状态（0.28.0 起首页一行小卡：状态点 + 错误 `exclamationmark.triangle.fill` + 失败投递 `tray.and.arrow.down`，详情页）：交互总闸 `power.circle.fill`／`power.circle`、交互 Bot 已配置 `checkmark.circle.fill`／待配置 `exclamationmark.triangle.fill`、监听运行中 `checkmark.circle.fill`／未运行 `exclamationmark.triangle.fill`／未启用 `pause.circle`、启用订阅 `bubble.left.and.text.bubble.right`、失败投递 `tray.and.arrow.down`；交互总闸 `power.circle`（Toggle）、交互 Bot Token `key`（`SecretField`，只在保存时提交）、清除 Token `trash`、监听群成员状态 `person.2`（可展开，0.24.0 前叫「Bot 入群情况」、在运行状态里）；通知 Bot 设置 `bell.badge`（0.28.0 二级页）：真实转账结果通知 Bot ID（多行文本，0.24.0 从高级页搬来）；测试模拟通知 Bot（0.24.0）：Token `key`、当前测试 Bot ID `number`、清除测试 Token `trash`、模拟测试群 `checklist`（多选页里不在白名单的 ID 用 `minus.circle.fill` 移除）、测试 Bot 群成员状态 `person.2`、清空通知 Bot `trash`（红色）；查询回复预览 `eye`／`eye.slash`（0.28.0）；规则筛选原生分段；规则长按菜单 上移 `arrow.up`／下移 `arrow.down`／复制 `doc.on.doc`；规则行：插件玩法 `puzzlepiece.extension`／算数题 `function`／只发通知 `bell.badge`，状态启用 `checkmark.circle.fill`／停用 `pause.circle`（文字＋图标），左滑停用／启用、删除 `trash`，添加规则 `plus`；规则编辑：命中后 `play.circle`、触发方式 `bolt.horizontal`、插件入口 `puzzlepiece.extension`、从会话白名单选择 `checklist`；高级 `slider.horizontal.3`。导航栏右上「保存」（`interaction.save`，没有修改时禁用）一次提交 `PUT /api/accounts/{id}/interaction-bot`，不自动重试，失败保留草稿 |
 | App 设置 | 关于 `info.circle`、软件更新 `arrow.down.circle`（0.21.0 起在最顶部一组）、外观 `circle.lefthalf.filled`、首页模块 `square.grid.2x2`、自定义 Dock `dock.rectangle`、Apple 推送 `bell.badge`、界面锁 `faceid`／`timer`、用户名 `person.crop.circle`、Cloudflare Access `lock.icloud`、更换服务器 `arrow.left.arrow.right.circle`、退出登录 `rectangle.portrait.and.arrow.right`（后两项单独在最底部一组）；排序见「设置类页面排序」 |
 | 关于 | App 版本 `iphone`、构建号 `hammer`、服务器版本 `shippingbox`、发布通道 `arrow.triangle.branch`、部署提交 `number`、GitHub `chevron.left.forwardslash.chevron.right`、更新日志 `list.bullet.clipboard`、使用指南 `book`、问题反馈 `exclamationmark.bubble`、开源许可 `doc.plaintext`、隐私 `hand.raised`（0.21.0 起不含更新按钮） |
 | 软件更新（0.21.0） | 服务器当前版本 `shippingbox`、发布通道 `arrow.triangle.branch`、可更新到 `sparkles`、检查服务器更新 `arrow.down.circle`（全 App 唯一更新入口）、App 当前版本 `iphone`、获取最新安装包 `arrow.down.app` |

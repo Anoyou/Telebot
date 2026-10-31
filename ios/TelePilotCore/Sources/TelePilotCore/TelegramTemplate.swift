@@ -458,3 +458,118 @@ public struct TelegramMessagePreviewModel: Equatable, Sendable {
         issues = problems.sorted { $0.offset == $1.offset ? $0.severity > $1.severity : $0.offset < $1.offset }
     }
 }
+
+// MARK: - 玩法查询：用真实规则预览条目模板（第 21 轮）
+
+/// 群里发查询指令时交互 Bot 的回复，按账号当前（草稿）规则逐条渲染「每个玩法的条目模板」。
+/// 变量取值逐条移植服务器 `account_bot_runtime._render_interaction_rules_query`：
+/// `_interaction_rule_query_trigger_label`、`_interaction_rule_kind_label`、`_interaction_rule_limit_label`，
+/// 值按 `html_text` 转义（只转 `&` `<` `>`）。规则用服务器形状的 JSON（`InteractionRuleDraft.json` 的输出）。
+/// 只有启用的「启动插件」与「算数题」规则会被列出（只发通知的规则不出现在查询回复里）；
+/// 是否已被管理指令临时关闭只有服务器知道，预览按全部开启处理。
+public enum InteractionQueryPreview {
+    public static let sampleChatID = "-1001234567890"
+
+    /// 会出现在查询回复里的规则（顺序与服务器相同）。
+    public static func listedRules(_ rules: [JSONValue]) -> [JSONValue] {
+        rules.filter { rule in
+            (rule["enabled"]?.boolValue ?? true) && ["module", "math10"].contains(rule["action"]?.stringValue ?? "")
+        }
+    }
+
+    /// 一条规则在条目模板里的变量值。`prizeDeclared`：入口 schema 是否声明了奖金字段（未知为 nil，保留奖金）。
+    public static func itemValues(rule: JSONValue, index: Int, chatID: String = sampleChatID, prizeDeclared: Bool? = nil) -> [String: String] {
+        let name = text(rule["name"]).isEmpty ? (text(rule["id"]).isEmpty ? "玩法 \(index)" : text(rule["id"])) : text(rule["name"])
+        return [
+            "index": String(index),
+            "name": escape(name),
+            "trigger": triggerLabel(rule),
+            "kind": kindLabel(rule),
+            "limit": limitLabel(rule, prizeDeclared: prizeDeclared),
+            "module_key": escape(text(rule["module_key"])),
+            "module_action": escape(text(rule["module_action"])),
+            "chat_id": escape(chatID),
+        ]
+    }
+
+    /// 单条规则渲染出的条目（服务器渲染后会去掉首尾空白）。
+    public static func renderItem(template: String, rule: JSONValue, index: Int, prizeDeclared: Bool? = nil) -> String {
+        let source = template.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? TelegramTemplateSamples.defaultQueryItemTemplate : template
+        return TelegramTemplate.render(source, values: itemValues(rule: rule, index: index, chatID: chatID(of: rule), prizeDeclared: prizeDeclared))
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// 整条查询回复。没有可列出的规则时返回「没有可用玩法时回复」（留空用服务器默认）。
+    public static func compose(response: String, item: String, empty: String = "", rules: [JSONValue],
+                               prizeDeclared: (JSONValue) -> Bool? = { _ in nil }) -> String {
+        let listed = listedRules(rules)
+        guard !listed.isEmpty else {
+            let trimmed = empty.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? TelegramTemplateSamples.defaultQueryEmptyMessage : trimmed
+        }
+        let items = listed.enumerated().map { offset, rule in
+            renderItem(template: item, rule: rule, index: offset + 1, prizeDeclared: prizeDeclared(rule))
+        }.joined(separator: "\n")
+        let source = response.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? TelegramTemplateSamples.defaultQueryResponseTemplate : response
+        let chat = listed.lazy.compactMap { rule -> String? in
+            let id = chatID(of: rule)
+            return id == sampleChatID ? nil : id
+        }.first ?? sampleChatID
+        let values = ["items": items, "count": String(listed.count), "closed_count": "0", "chat_id": escape(chat)]
+        return TelegramTemplate.render(source, values: values).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    // MARK: 标签（与服务器逐条一致）
+
+    static func triggerLabel(_ rule: JSONValue) -> String {
+        let mode = text(rule["trigger_mode"]).isEmpty ? "payment" : text(rule["trigger_mode"])
+        var labels = [mode == "both" ? "转账或关键词" : (mode == "keyword" ? "关键词" : "转账")]
+        if mode == "both" || mode == "keyword" {
+            let keywords = (rule["module_start_keywords"]?.arrayValue ?? []).map { text($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+            if keywords.isEmpty {
+                labels.append("关键词未配置")
+            } else {
+                labels.append("关键词：" + keywords.prefix(5).map { "<code>\(escape($0))</code>" }.joined(separator: " / "))
+            }
+        }
+        if mode == "both" || mode == "payment" { labels.append("转账通知") }
+        return labels.joined(separator: "；")
+    }
+
+    static func kindLabel(_ rule: JSONValue) -> String {
+        switch text(rule["action"]) {
+        case "math10": return "算数题"
+        case "module":
+            let key = text(rule["module_key"]).trimmingCharacters(in: .whitespacesAndNewlines)
+            return key.isEmpty ? "玩法" : "玩法 <code>\(escape(key))</code>"
+        default: return "通知"
+        }
+    }
+
+    static func limitLabel(_ rule: JSONValue, prizeDeclared: Bool?) -> String {
+        var parts: [String] = []
+        let action = text(rule["action"])
+        var prize = action == "module" ? rule["module_prize"] : rule["math_prize"]
+        if action == "module", prize?.isNull == false, prizeDeclared == false { prize = nil }
+        if let prize, !prize.isNull { parts.append("奖金 <code>\(escape(text(prize)))</code>") }
+        if let seconds = rule["valid_seconds"], !seconds.isNull { parts.append("限时 <code>\(escape(text(seconds)))</code> 秒") }
+        let cooldown = text(rule["user_cooldown_seconds"]).trimmingCharacters(in: .whitespacesAndNewlines)
+        if !cooldown.isEmpty { parts.append("每用户 CD <code>\(escape(cooldown))</code>") }
+        if let daily = rule["daily_limit_per_user"], !daily.isNull { parts.append("每用户日上限 <code>\(escape(text(daily)))</code>") }
+        return parts.isEmpty ? "无限制" : parts.joined(separator: "；")
+    }
+
+    static func chatID(of rule: JSONValue) -> String {
+        rule["chat_ids"]?.arrayValue?.first.map { text($0) } ?? sampleChatID
+    }
+
+    static func text(_ value: JSONValue?) -> String { TelegramTemplate.format(value) }
+
+    /// 服务器 `html_text`：`html.escape(quote=False)`。
+    static func escape(_ value: String) -> String {
+        value.replacingOccurrences(of: "&", with: "&amp;").replacingOccurrences(of: "<", with: "&lt;").replacingOccurrences(of: ">", with: "&gt;")
+    }
+}

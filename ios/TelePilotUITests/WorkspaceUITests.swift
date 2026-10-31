@@ -175,7 +175,7 @@ final class WorkspaceUITests: XCTestCase {
         let rulesLink = app.buttons["plugin.detail.interactionRules"]
         XCTAssertTrue(reveal(rulesLink, in: app))
         rulesLink.tap()
-        XCTAssertTrue(app.descendants(matching: .any)["interaction.status.runtime"].firstMatch.waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["interaction.statusCard"].waitForExistence(timeout: 10))
         // 规则区在运行状态与总闸下方，列表里屏幕外的行不存在：先滑到规则区。
         let ask = app.buttons["interaction.rule.rule-ask"]
         XCTAssertTrue(reveal(ask, in: app))

@@ -364,11 +364,22 @@ final class ManagementUITests: XCTestCase {
         let entry = app.tabBars.buttons["交互"]
         XCTAssertTrue(entry.waitForExistence(timeout: 10))
         entry.tap()
-        XCTAssertTrue(app.descendants(matching: .any)["interaction.status.runtime"].firstMatch.waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["interaction.statusCard"].waitForExistence(timeout: 10))
 
         let listen = app.descendants(matching: .any)["interaction.memberships"].firstMatch
         reveal(listen, in: app)
         XCTAssertTrue(listen.label.contains("监听群成员状态"), listen.label)
+
+        // 第 21 轮：两种通知 Bot 收进二级页「通知 Bot 设置」，交互页只剩一行带状态摘要的入口。
+        XCTAssertFalse(app.staticTexts["interaction.transferToken.title"].exists, "测试模拟通知 Bot 不再直接放在交互页")
+        let notifyBots = app.buttons["interaction.notifyBots"]
+        reveal(notifyBots, in: app)
+        XCTAssertTrue(notifyBots.label.contains("通知 Bot 设置"), notifyBots.label)
+        XCTAssertTrue(notifyBots.label.contains("真实 1 个"), notifyBots.label)
+        XCTAssertTrue(notifyBots.label.contains("测试 Bot 已配置"), notifyBots.label)
+        XCTAssertTrue(notifyBots.label.contains("2 个测试群"), notifyBots.label)
+        notifyBots.tap()
+        XCTAssertTrue(app.navigationBars["通知 Bot 设置"].waitForExistence(timeout: 10))
 
         let trusted = app.descendants(matching: .any)["interaction.trustedBotIDs"].firstMatch
         reveal(trusted, in: app)
@@ -421,6 +432,12 @@ final class ManagementUITests: XCTestCase {
 
         XCTAssertTrue(testChats.waitForExistence(timeout: 5))
         XCTAssertTrue(testChats.label.contains("3 个已选"), testChats.label)
+        XCTAssertTrue(app.descendants(matching: .any)["interaction.notifyBots.unsaved"].firstMatch.exists, "二级页提示回交互页保存")
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+
+        XCTAssertTrue(notifyBots.waitForExistence(timeout: 5))
+        XCTAssertTrue(notifyBots.label.contains("3 个测试群"), notifyBots.label)
+        XCTAssertTrue(notifyBots.label.contains("未保存"), notifyBots.label)
         let save = app.buttons["interaction.save"]
         XCTAssertTrue(save.isEnabled, "改了模拟测试群后应能保存")
         save.tap()
@@ -432,10 +449,11 @@ final class ManagementUITests: XCTestCase {
         XCTAssertFalse(saveError.exists, saveError.exists ? saveError.label : "")
         XCTAssertTrue(saved.exists, "保存后应显示成功结果")
         XCTAssertFalse(save.isEnabled)
-        reveal(testChats, in: app)
-        XCTAssertTrue(testChats.label.contains("3 个已选"), "保存后服务器返回的模拟测试群：\(testChats.label)")
+        reveal(notifyBots, in: app)
+        XCTAssertTrue(notifyBots.label.contains("3 个测试群"), "保存后服务器返回的模拟测试群：\(notifyBots.label)")
+        XCTAssertFalse(notifyBots.label.contains("未保存"), notifyBots.label)
         let screenshot = XCTAttachment(screenshot: app.screenshot())
-        screenshot.name = "交互页测试模拟通知 Bot"
+        screenshot.name = "交互页通知 Bot 设置入口"
         screenshot.lifetime = .keepAlways
         add(screenshot)
     }
@@ -446,14 +464,50 @@ final class ManagementUITests: XCTestCase {
         let entry = app.tabBars.buttons["交互"]
         XCTAssertTrue(entry.waitForExistence(timeout: 10))
         entry.tap()
-        XCTAssertTrue(app.descendants(matching: .any)["interaction.status.runtime"].firstMatch.waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["interaction.statusCard"].waitForExistence(timeout: 10))
+        let notifyBots = app.buttons["interaction.notifyBots"]
+        reveal(notifyBots, in: app)
+        XCTAssertTrue(notifyBots.label.contains("真实 1 个"), notifyBots.label)
+        XCTAssertFalse(notifyBots.label.contains("测试"), "旧服务器没有测试模拟通知 Bot：\(notifyBots.label)")
+        notifyBots.tap()
+        XCTAssertTrue(app.navigationBars["通知 Bot 设置"].waitForExistence(timeout: 10))
         let trusted = app.descendants(matching: .any)["interaction.trustedBotIDs"].firstMatch
-        reveal(trusted, in: app)
-        let rule = app.buttons["interaction.rule.rule-ask"]
-        reveal(rule, in: app)
+        XCTAssertTrue(trusted.waitForExistence(timeout: 5), "真实通知 Bot ID 仍可编辑")
         XCTAssertFalse(app.staticTexts["interaction.transferToken.title"].exists)
         XCTAssertFalse(app.buttons["interaction.testChats"].exists)
         XCTAssertFalse(app.buttons["interaction.clearNotify"].exists)
+    }
+
+    /// 第 21 轮：交互页「运行状态」从 4～6 行的分组缩成一行小卡（状态点 + 一句话 + 关键数字），点进去看全部细节。
+    func testInteractionStatusCardIsCompactAndOpensDetail() {
+        let app = launch()
+        let entry = app.tabBars.buttons["交互"]
+        XCTAssertTrue(entry.waitForExistence(timeout: 10))
+        entry.tap()
+        let card = app.buttons["interaction.statusCard"]
+        XCTAssertTrue(card.waitForExistence(timeout: 10))
+        XCTAssertTrue(card.label.contains("交互运行中"), card.label)
+        XCTAssertTrue(card.label.contains("@telepilot_play_bot"), card.label)
+        XCTAssertTrue(card.label.contains("1/2 条规则启用"), card.label)
+        XCTAssertTrue(card.label.contains("1 个群"), card.label)
+        XCTAssertLessThan(card.frame.height, 90, "运行状态应是一行紧凑卡片：\(card.frame)")
+        XCTAssertFalse(app.descendants(matching: .any)["interaction.status.gate"].firstMatch.exists, "细节不再铺在交互页上")
+        // 紧接着就是交互总闸，不用再滑过一整组状态。
+        XCTAssertTrue(app.switches["interaction.enabled"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.switches["interaction.enabled"].isHittable)
+
+        card.tap()
+        XCTAssertTrue(app.navigationBars["运行状态"].waitForExistence(timeout: 10))
+        let runtime = app.descendants(matching: .any)["interaction.status.runtime"].firstMatch
+        XCTAssertTrue(runtime.waitForExistence(timeout: 5))
+        XCTAssertTrue(runtime.label.contains("运行中"), runtime.label)
+        XCTAssertTrue(app.descendants(matching: .any)["interaction.status.gate"].firstMatch.label.contains("已启用"))
+        XCTAssertTrue(app.descendants(matching: .any)["interaction.status.token"].firstMatch.label.contains("@telepilot_play_bot"))
+        XCTAssertTrue(app.descendants(matching: .any)["interaction.status.rules"].firstMatch.label.contains("1/2"))
+        let screenshot = XCTAttachment(screenshot: app.screenshot())
+        screenshot.name = "交互运行状态详情"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
     }
 
     func testInteractionCenterEditsRulesAndSaves() {
@@ -462,10 +516,10 @@ final class ManagementUITests: XCTestCase {
         let entry = app.tabBars.buttons["交互"]
         XCTAssertTrue(entry.waitForExistence(timeout: 10))
         entry.tap()
-        let runtime = app.descendants(matching: .any)["interaction.status.runtime"].firstMatch
-        XCTAssertTrue(runtime.waitForExistence(timeout: 10))
-        XCTAssertTrue(runtime.label.contains("运行中"), runtime.label)
-        let subscribed = app.descendants(matching: .any)["interaction.status.rules"].firstMatch
+        // 第 21 轮：运行状态缩成一行卡片（状态点 + 一句话 + 关键数字）。
+        let subscribed = app.buttons["interaction.statusCard"]
+        XCTAssertTrue(subscribed.waitForExistence(timeout: 10))
+        XCTAssertTrue(subscribed.label.contains("运行中"), subscribed.label)
         XCTAssertTrue(subscribed.label.contains("1/2"), subscribed.label)
         let save = app.buttons["interaction.save"]
         XCTAssertTrue(save.exists)
@@ -525,7 +579,7 @@ final class ManagementUITests: XCTestCase {
         let entry = app.tabBars.buttons["交互"]
         XCTAssertTrue(entry.waitForExistence(timeout: 10))
         entry.tap()
-        XCTAssertTrue(app.descendants(matching: .any)["interaction.status.runtime"].firstMatch.waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["interaction.statusCard"].waitForExistence(timeout: 10))
         let ask = app.buttons["interaction.rule.rule-ask"]
         for _ in 0..<10 where !(ask.exists && ask.isHittable) { app.swipeUp() }
         ask.tap()
