@@ -37,7 +37,8 @@ final class DiagnosticsUITests: XCTestCase {
             }
             let start = window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: towardBottom ? 0.45 : 0.2))
             let end = window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: towardBottom ? 0.2 : 0.45))
-            start.press(forDuration: 0.05, thenDragTo: end)
+            // 停住再松手：没有惯性，返回时列表已停（第 22 轮：惯性滚动中点输入框，点按只让列表停下、输入框拿不到焦点）。
+            start.press(forDuration: 0.05, thenDragTo: end, withVelocity: .default, thenHoldForDuration: 0.3)
         }
     }
 
@@ -55,8 +56,15 @@ final class DiagnosticsUITests: XCTestCase {
     }
 
     /// 点输入框的右端，让光标落在已有文字之后（右对齐的输入框点中间会把光标放到开头）。
+    /// 第 22 轮：点完等输入框真正拿到键盘焦点（`hasKeyboardFocus`），没拿到就再点，最多 3 次——CI 偶发
+    /// “Neither element nor any descendant has keyboard focus”：点按被吞后直接 typeText。
     private func tapAtEnd(_ field: XCUIElement) {
-        field.coordinate(withNormalizedOffset: CGVector(dx: 0.97, dy: 0.5)).tap()
+        let focused = NSPredicate(format: "hasKeyboardFocus == true")
+        for _ in 0..<3 {
+            field.coordinate(withNormalizedOffset: CGVector(dx: 0.97, dy: 0.5)).tap()
+            if XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: focused, object: field)], timeout: 5) == .completed { return }
+        }
+        XCTAssertTrue(field.value(forKey: "hasKeyboardFocus") as? Bool ?? false, "\(field) 没有拿到键盘焦点")
     }
 
     /// 菜单（Menu / menu 样式 Picker）弹出的选项：不同系统版本是按钮或菜单项。

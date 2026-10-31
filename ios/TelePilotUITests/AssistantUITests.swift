@@ -313,7 +313,10 @@ final class AssistantUITests: XCTestCase {
         app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.2)).tap()
     }
 
-    private func waitUntilGone(_ element: XCUIElement, timeout: TimeInterval = 3) -> Bool {
+    /// 等元素消失（消失即返回，不是固定等待）。第 22 轮：默认 3 秒 → 10 秒。CI 录像里选完模型后 popover 确实收起了，
+    /// 但负载高的模拟器上点按要先等 App 空闲 1～2 秒、收起动画与每次无障碍快照又各要 1 秒以上，3 秒内常常查不完
+    /// （testComposerPopoverWithKeyboard 近 30 次 iOS 运行里 10 次首跑失败于此）。
+    private func waitUntilGone(_ element: XCUIElement, timeout: TimeInterval = 10) -> Bool {
         let gone = NSPredicate(format: "exists == false")
         return XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: gone, object: element)], timeout: timeout) == .completed
     }
@@ -470,7 +473,9 @@ final class AssistantUITests: XCTestCase {
         }
         // 复制回复：轻量反馈（图标短暂变为对勾，VoiceOver 读“已复制”）。
         lastCopy.tap()
-        XCTAssertTrue(app.buttons["已复制"].firstMatch.waitForExistence(timeout: 2))
+        // App 在界面测试里把「已复制」停留放长到 15 秒（与代码块复制同一个时长）：点按后 XCTest 先等 App 空闲，
+        // 长会话里实测 5 秒以上，原先 1.5 秒的对勾在查找前就已恢复（第 22 轮）。
+        XCTAssertTrue(app.buttons["已复制"].firstMatch.waitForExistence(timeout: 8), "复制回复后没有显示“已复制”")
         // 重新生成需要确认。
         regenerate.tap()
         XCTAssertTrue(app.staticTexts["重新生成这一轮回答？"].waitForExistence(timeout: 5))
@@ -534,16 +539,12 @@ final class AssistantUITests: XCTestCase {
         // 回答位置的状态行随阶段变化，直到“调用工具：读取账号列表…”；全程不出现“排队中”。
         let status = app.descendants(matching: .any)["assistant.live.status"].firstMatch
         XCTAssertTrue(status.waitForExistence(timeout: 5), visibleTexts(app))
-        var seen: [String] = []
-        let deadline = Date().addingTimeInterval(12)
-        while Date() < deadline {
-            if status.exists {
-                let label = status.label
-                if seen.last != label { seen.append(label) }
-                if label.contains("调用工具：读取账号列表") { break }
-            }
-            Thread.sleep(forTimeInterval: 0.3)
-        }
+        // 第 22 轮：不再靠 0.3 秒轮询去“碰”每个阶段——负载高时每次无障碍快照就要 1 秒以上，阶段 1.2 秒一换，
+        // 常常只看到最后一个（近 30 次运行 8 次首跑失败）。App 在界面测试里把状态行显示过的阶段依次记进无障碍值
+        // （`assistant.live.status` 的 value，用「›」连接），等到最后一个阶段后一次读出。
+        expectation(for: NSPredicate(format: "label CONTAINS %@", "调用工具：读取账号列表"), evaluatedWith: status)
+        waitForExpectations(timeout: 20)
+        let seen = (status.value as? String ?? "").components(separatedBy: " › ").filter { !$0.isEmpty }
         XCTAssertTrue(seen.contains { $0.contains("调用工具：读取账号列表") }, "阶段：\(seen)")
         XCTAssertGreaterThanOrEqual(seen.count, 2, "状态没有随阶段变化：\(seen)")
         XCTAssertFalse(seen.contains { $0.contains("排队中") }, "执行中显示了排队中：\(seen)")
