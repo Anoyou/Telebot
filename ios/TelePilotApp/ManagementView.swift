@@ -205,7 +205,8 @@ struct ManagementRunLookupView: View {
     @State private var identifier = ""
     var body: some View {
         Form {
-            TextField(updateJob ? "升级任务编号" : "测活任务编号", text: $identifier).textInputAutocapitalization(.never).autocorrectionDisabled()
+            LabeledTextField(title: updateJob ? "升级任务编号" : "测活任务编号", text: $identifier, prompt: "粘贴任务编号",
+                             monospaced: true, identifier: "management.runLookup.id")
             if !identifier.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 NavigationLink {
                     ManagementJobView(id: identifier.trimmingCharacters(in: .whitespacesAndNewlines), updateJob: updateJob, liveness: !updateJob)

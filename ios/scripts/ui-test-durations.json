@@ -35,6 +35,7 @@
   "ManagementUITests/testLogDetailExplainsMessageFailureAndOpensTimeline": 45,
   "ManagementUITests/testPermissionRowsShareAccentIconTint": 40,
   "ManagementUITests/testRestoreCannotCommitWithoutPreviewingAFile": 32,
+  "ManagementUITests/testRuleEditorFieldsKeepTitlesAndUnits": 45,
   "ManagementUITests/testRuntimeLogCredentialsAreMaskedByDefault": 23,
   "ManagementUITests/testRuntimeTreePluginGroupsAndNavigation": 110,
   "ManagementUITests/testRuntimeTreeSafeWatchAndModules": 80,

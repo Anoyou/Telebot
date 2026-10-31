@@ -243,3 +243,170 @@ struct RevealableSecureField<Focus: Hashable>: View {
         .onChange(of: scenePhase) { _, phase in if phase != .active { visible = false } }
     }
 }
+
+// MARK: - 带标题的输入行（第 21 轮，全 App 统一，见 ios/DESIGN.md「输入行」）
+
+/// 输入框的单位：数字项在值后面显示「秒 / 次 / 个」等，空值时不显示（只显示灰色提示）。
+enum FieldUnit {
+    /// 按插件 / 服务器字段名推断单位（`*_seconds` → 秒、`*_minutes` → 分钟…）；推断不出时返回 nil。
+    static func infer(key: String, title: String = "") -> String? {
+        let key = key.lowercased()
+        let suffixes: [(String, String)] = [
+            ("_ms", "毫秒"), ("_millis", "毫秒"), ("_milliseconds", "毫秒"),
+            ("_seconds", "秒"), ("_secs", "秒"), ("_sec", "秒"),
+            ("_minutes", "分钟"), ("_mins", "分钟"),
+            ("_hours", "小时"), ("_hrs", "小时"),
+            ("_days", "天"),
+        ]
+        for (suffix, unit) in suffixes where key.hasSuffix(suffix) { return unit }
+        if key == "timeout" || key == "seconds" || key == "cooldown" { return "秒" }
+        if title.hasSuffix("（秒）") || title.hasSuffix("秒数") { return "秒" }
+        if title.hasSuffix("（分钟）") { return "分钟" }
+        return nil
+    }
+
+    /// 时长文本（如冷却「15」或「15s」）：纯数字时补上单位，带了单位的值原样显示。
+    static func ifNumeric(_ text: String, _ unit: String) -> String? {
+        let trimmed = text.trimmingCharacters(in: .whitespaces)
+        return !trimmed.isEmpty && trimmed.allSatisfy(\.isNumber) ? unit : nil
+    }
+}
+
+/// iPhone「设置」风格的一行：左侧固定标题，右侧右对齐的输入控件（+ 单位）。
+///
+/// 只负责布局：输入控件由调用方给出，保留它自己的焦点链、提交键等修饰（登录页、Cloudflare Access）。
+/// 普通文本 / 数字直接用 `LabeledTextField`。
+struct LabeledFieldRow<Field: View>: View {
+    let title: String
+    var symbol: String? = nil
+    var unit: String? = nil
+    var identifier: String? = nil
+    @ViewBuilder var field: () -> Field
+
+    @Environment(\.dynamicTypeSize) private var typeSize
+
+    private var titleView: some View {
+        Group {
+            if let symbol {
+                Label(title, systemImage: symbol)
+            } else {
+                Text(title)
+            }
+        }
+        .foregroundStyle(.primary)
+        .accessibilityIdentifier(identifier.map { "\($0).title" } ?? "field.title")
+    }
+
+    private var valueView: some View {
+        HStack(spacing: 4) {
+            field()
+                .multilineTextAlignment(typeSize.isAccessibilitySize ? .leading : .trailing)
+                .frame(maxWidth: .infinity, alignment: typeSize.isAccessibilitySize ? .leading : .trailing)
+            if let unit {
+                Text(unit)
+                    .foregroundStyle(.secondary)
+                    .accessibilityIdentifier(identifier.map { "\($0).unit" } ?? "field.unit")
+            }
+        }
+    }
+
+    var body: some View {
+        // 辅助功能大字号下左右放不下：标题在上、输入在下（与系统「设置」一致）。
+        if typeSize.isAccessibilitySize {
+            VStack(alignment: .leading, spacing: 6) { titleView; valueView }
+        } else {
+            HStack(alignment: .center, spacing: 12) {
+                titleView.layoutPriority(1)
+                valueView
+            }
+            .frame(minHeight: 32)
+        }
+    }
+}
+
+/// 带标题的单行输入（第 21 轮）：「标题 ……… 值 单位」。空值时右侧显示灰色提示（可选项默认「可选」）。
+/// 标题始终可见，填了值也能看出这一栏是什么；VoiceOver 读「标题（单位），可选」。
+struct LabeledTextField: View {
+    let title: String
+    @Binding var text: String
+    var prompt: String? = nil
+    var unit: String? = nil
+    var optional = false
+    var symbol: String? = nil
+    var keyboard: UIKeyboardType = .default
+    var capitalization: TextInputAutocapitalization = .never
+    var monospaced = false
+    var contentType: UITextContentType? = nil
+    var identifier: String? = nil
+
+    private var promptText: String { prompt ?? (optional ? "可选" : "未填写") }
+    private var spokenTitle: String {
+        title + (unit.map { "（\($0)）" } ?? "") + (optional ? "，可选" : "")
+    }
+
+    var body: some View {
+        LabeledFieldRow(title: title, symbol: symbol, unit: text.isEmpty ? nil : unit, identifier: identifier) {
+            TextField(title, text: $text, prompt: Text(promptText))
+                .keyboardType(keyboard)
+                .textInputAutocapitalization(capitalization)
+                .autocorrectionDisabled()
+                .textContentType(contentType)
+                .font(monospaced ? .body.monospaced() : .body)
+                .monospacedDigit()
+                .accessibilityLabel(spokenTitle)
+                .fieldIdentifier(identifier)
+        }
+    }
+}
+
+/// 带标题的多行 / 长文本输入（第 21 轮）：标题在上（与 `SecretField` 同一字号），输入框占满整行。
+/// 用于每行一项的列表、网址、提示词、回复文字等放不进右侧的内容。
+struct StackedTextField: View {
+    let title: String
+    @Binding var text: String
+    var prompt: String? = nil
+    var optional = false
+    var symbol: String? = nil
+    var lines: ClosedRange<Int> = 1...6
+    var keyboard: UIKeyboardType = .default
+    var capitalization: TextInputAutocapitalization = .never
+    var monospaced = false
+    var identifier: String? = nil
+
+    private var content: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Text(title)
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(.primary)
+                if optional {
+                    Text("可选").font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            .accessibilityElement(children: .combine)
+            .accessibilityIdentifier(identifier.map { "\($0).title" } ?? "field.title")
+            TextField(title, text: $text, prompt: Text(prompt ?? (optional ? "可选" : "未填写")), axis: .vertical)
+                .lineLimit(lines)
+                .keyboardType(keyboard)
+                .textInputAutocapitalization(capitalization)
+                .autocorrectionDisabled()
+                .font(monospaced ? .callout.monospaced() : .body)
+                .accessibilityLabel(title + (optional ? "，可选" : ""))
+                .fieldIdentifier(identifier)
+        }
+    }
+
+    var body: some View {
+        if let symbol {
+            Label { content } icon: { Image(systemName: symbol) }
+        } else {
+            content
+        }
+    }
+}
+
+private extension View {
+    @ViewBuilder func fieldIdentifier(_ identifier: String?) -> some View {
+        if let identifier { accessibilityIdentifier(identifier) } else { self }
+    }
+}

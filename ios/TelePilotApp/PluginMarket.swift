@@ -550,12 +550,10 @@ private struct PluginMarketSourcesView: View {
                 sourceSection(source)
             }
             Section {
-                TextField("https://example.com/registry.json", text: $url)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .keyboardType(.URL)
-                    .accessibilityIdentifier("plugins.market.source.url")
-                TextField("名称（可选）", text: $name)
+                StackedTextField(title: "仓库地址", text: $url, prompt: "https://example.com/registry.json", lines: 1...3,
+                                 keyboard: .URL, identifier: "plugins.market.source.url")
+                LabeledTextField(title: "名称", text: $name, optional: true, capitalization: .sentences,
+                                 identifier: "plugins.market.source.name")
                 Picker("信任等级", selection: $trust) {
                     Text("未审核").tag("unreviewed")
                     Text("社区").tag("community")

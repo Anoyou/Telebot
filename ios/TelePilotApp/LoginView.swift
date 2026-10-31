@@ -61,18 +61,22 @@ struct LoginView: View {
                     Text("填写管理台的 HTTPS 根地址，可省略 https://。登录信息只发送到这台服务器，不经过第三方服务。")
                 }
                 Section("登录账号") {
-                    TextField("用户名", text: $username)
-                        .textContentType(.username).textInputAutocapitalization(.never)
-                        .autocorrectionDisabled().focused($focusedField, equals: .username)
-                        .submitLabel(.next)
-                        .onSubmit { focusedField = .password }
-                        .accessibilityIdentifier("login.username")
-                    RevealableSecureField(
-                        placeholder: "密码", text: $password, identifier: "login.password",
-                        accessibilityLabel: "管理员密码", contentType: .password,
-                        focus: $focusedField, focusValue: .password, submitLabel: .go
-                    ) {
-                        if !server.isEmpty && !username.isEmpty && !password.isEmpty && !isChallenged { submit() }
+                    LabeledFieldRow(title: "用户名", identifier: "login.username") {
+                        TextField("用户名", text: $username, prompt: Text("管理员用户名"))
+                            .textContentType(.username).textInputAutocapitalization(.never)
+                            .autocorrectionDisabled().focused($focusedField, equals: .username)
+                            .submitLabel(.next)
+                            .onSubmit { focusedField = .password }
+                            .accessibilityIdentifier("login.username")
+                    }
+                    LabeledFieldRow(title: "密码", identifier: "login.password") {
+                        RevealableSecureField(
+                            placeholder: "管理员密码", text: $password, identifier: "login.password",
+                            accessibilityLabel: "管理员密码", contentType: .password,
+                            focus: $focusedField, focusValue: .password, submitLabel: .go
+                        ) {
+                            if !server.isEmpty && !username.isEmpty && !password.isEmpty && !isChallenged { submit() }
+                        }
                     }
                 }
                 if isChallenged {
@@ -83,12 +87,15 @@ struct LoginView: View {
                             symbol: "lock.shield"
                         )
                         .accessibilityIdentifier("login.challenge")
-                        TextField(usingRecovery ? "恢复码" : "验证码", text: $code)
-                            .keyboardType(usingRecovery ? .asciiCapable : .numberPad)
-                            .textContentType(.oneTimeCode)
-                            .textInputAutocapitalization(.never).autocorrectionDisabled()
-                            .focused($focusedField, equals: .code)
-                            .accessibilityIdentifier("login.code")
+                        LabeledFieldRow(title: usingRecovery ? "恢复码" : "验证码", identifier: "login.code") {
+                            TextField(usingRecovery ? "恢复码" : "验证码", text: $code,
+                                      prompt: Text(usingRecovery ? "保存的恢复码" : "6 位数字"))
+                                .keyboardType(usingRecovery ? .asciiCapable : .numberPad)
+                                .textContentType(.oneTimeCode)
+                                .textInputAutocapitalization(.never).autocorrectionDisabled()
+                                .focused($focusedField, equals: .code)
+                                .accessibilityIdentifier("login.code")
+                        }
                         if challenge?.recoveryAvailable == true || challenge?.requireTotp == true {
                             Button(usingRecovery ? "改用验证码" : "改用恢复码", systemImage: usingRecovery ? "number" : "key") {
                                 usingRecovery.toggle()
@@ -212,19 +219,23 @@ struct LoginView: View {
             }
             .accessibilityIdentifier("login.cfAccess.toggle")
             if accessEnabled {
-                TextField("Client ID（形如 xxxx.access）", text: $accessClientID)
-                    .textInputAutocapitalization(.never).autocorrectionDisabled()
-                    .keyboardType(.asciiCapable)
-                    .focused($focusedField, equals: .accessClientID)
-                    .submitLabel(.next)
-                    .onSubmit { focusedField = .accessSecret }
-                    .accessibilityLabel("Cloudflare Access Client ID")
-                    .accessibilityIdentifier("login.cfAccess.clientID")
-                RevealableSecureField(
-                    placeholder: "Client Secret", text: $accessSecret, identifier: "login.cfAccess.clientSecret",
-                    accessibilityLabel: "Cloudflare Access Client Secret",
-                    focus: $focusedField, focusValue: .accessSecret
-                ) { focusedField = nil }
+                LabeledFieldRow(title: "Client ID", identifier: "login.cfAccess.clientID") {
+                    TextField("Client ID", text: $accessClientID, prompt: Text("形如 xxxx.access"))
+                        .textInputAutocapitalization(.never).autocorrectionDisabled()
+                        .keyboardType(.asciiCapable)
+                        .focused($focusedField, equals: .accessClientID)
+                        .submitLabel(.next)
+                        .onSubmit { focusedField = .accessSecret }
+                        .accessibilityLabel("Cloudflare Access Client ID")
+                        .accessibilityIdentifier("login.cfAccess.clientID")
+                }
+                LabeledFieldRow(title: "Client Secret", identifier: "login.cfAccess.clientSecret") {
+                    RevealableSecureField(
+                        placeholder: "未填写", text: $accessSecret, identifier: "login.cfAccess.clientSecret",
+                        accessibilityLabel: "Cloudflare Access Client Secret",
+                        focus: $focusedField, focusValue: .accessSecret
+                    ) { focusedField = nil }
+                }
             }
             NavigationLink { CloudflareAccessHelpView() } label: {
                 Label("Cloudflare Access 使用说明", systemImage: "book")

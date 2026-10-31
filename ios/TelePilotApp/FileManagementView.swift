@@ -57,7 +57,8 @@ struct FileManagementView: View {
                     Toggle("已确认会话 ID 冲突", isOn: $confirmChatConflicts).disabled(busy)
                 }
                 if mode == .plugin {
-                    TextField("可选签名（粘贴签名文本）", text: $signature, axis: .vertical).textInputAutocapitalization(.never).autocorrectionDisabled()
+                    StackedTextField(title: "签名", text: $signature, prompt: "粘贴签名文本，或选择签名文件", optional: true,
+                                     lines: 1...6, monospaced: true, identifier: "management.file.signature")
                     Button("选择签名文件", systemImage: "signature") { selectingSignature = true; picking = true }.disabled(busy)
                     if !signatureFilename.isEmpty { LabeledContent("签名文件", value: signatureFilename) }
                     Text("安装包会由服务器验证，签名和权限检查结果以服务器为准。").font(.footnote).foregroundStyle(.secondary)
@@ -103,7 +104,11 @@ struct FileManagementView: View {
                 Toggle(isOn: $includeSensitive) { Label("包含敏感配置", systemImage: "lock") }
                 if includeSensitive {
                     SecretField(title: "当前管理员密码", text: $password, placeholder: "输入管理员密码", identifier: "backup.export.password", contentType: .password)
-                    SecureField("验证器验证码（如已启用）", text: $totp).keyboardType(.numberPad).privacySensitive()
+                    LabeledFieldRow(title: "验证器验证码", identifier: "backup.export.totp") {
+                        SecureField("验证器验证码", text: $totp, prompt: Text("如已启用"))
+                            .keyboardType(.numberPad).textContentType(.oneTimeCode).privacySensitive()
+                            .accessibilityIdentifier("backup.export.totp")
+                    }
                 }
             }
             Button("导出到文件", systemImage: "square.and.arrow.up") { Task { await export() } }

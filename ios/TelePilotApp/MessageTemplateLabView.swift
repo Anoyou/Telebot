@@ -207,9 +207,8 @@ struct MessageTemplateLabDetailView: View {
             Text("服务器用与实际发送相同的代码渲染模板（POST /api/message-templates/render），只渲染、不发送。")
         }
         Section {
-            TextField("目标用户 ID（私聊过 Bot 的授权用户）", text: $targetChat)
-                .keyboardType(.numbersAndPunctuation)
-                .accessibilityIdentifier("templateLab.target")
+            LabeledTextField(title: "目标用户 ID", text: $targetChat, prompt: "私聊过 Bot 的授权用户",
+                             keyboard: .numbersAndPunctuation, identifier: "templateLab.target")
             Button("测试发送", systemImage: "paperplane") { confirmingSend = true }
                 .disabled(!canSend(stale: stale))
                 .accessibilityIdentifier("templateLab.send")

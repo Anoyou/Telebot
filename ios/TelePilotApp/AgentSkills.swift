@@ -1265,13 +1265,13 @@ struct AgentSkillInstallView: View {
         switch source {
         case .github, .zipURL:
             Section {
-                TextField(source == .github ? "https://github.com/owner/repo" : "https://example.com/skill.zip", text: $url, axis: .vertical)
-                    .keyboardType(.URL).textInputAutocapitalization(.never).autocorrectionDisabled()
-                    .accessibilityIdentifier("skills.install.url")
+                StackedTextField(title: source == .github ? "GitHub 仓库地址" : "zip 下载地址", text: $url,
+                                 prompt: source == .github ? "https://github.com/owner/repo" : "https://example.com/skill.zip",
+                                 lines: 1...4, keyboard: .URL, identifier: "skills.install.url")
                 if source == .github {
-                    TextField("分支 / 标签 / 提交（可选）", text: $ref).textInputAutocapitalization(.never).autocorrectionDisabled()
+                    LabeledTextField(title: "分支 / 标签 / 提交", text: $ref, optional: true, identifier: "skills.install.ref")
                 }
-                TextField("子目录（可选，多个 skill 时填写）", text: $subpath).textInputAutocapitalization(.never).autocorrectionDisabled()
+                LabeledTextField(title: "子目录", text: $subpath, prompt: "可选，多个 skill 时填写", identifier: "skills.install.subpath")
             } header: { Text("链接") }
         case .paste:
             Section {
@@ -1292,7 +1292,7 @@ struct AgentSkillInstallView: View {
                     } label: { Label(fileName, systemImage: fileIsZip ? "doc.zipper" : "doc.text") }
                 }
                 if fileIsZip {
-                    TextField("zip 内的子目录（可选）", text: $subpath).textInputAutocapitalization(.never).autocorrectionDisabled()
+                    LabeledTextField(title: "zip 内的子目录", text: $subpath, optional: true, identifier: "skills.install.subpath")
                 }
             } header: { Text("文件") }
         }

@@ -284,7 +284,8 @@ struct AIModelChatTestView: View {
                 .disabled(busy)
             }
             DisclosureGroup {
-                TextField("系统提示词", text: $systemPrompt, axis: .vertical).lineLimit(2...6)
+                StackedTextField(title: "系统提示词", text: $systemPrompt, prompt: "告诉模型该如何回答", optional: true,
+                                 lines: 2...6, capitalization: .sentences, identifier: "ai.chattest.systemPrompt")
                 Picker("最长输出", selection: $maxTokens) {
                     Text("600 词元").tag(600)
                     Text("1200 词元").tag(1200)

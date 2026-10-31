@@ -291,12 +291,8 @@ struct InteractionCenterView: View {
 
     private var trustedNotifySection: some View {
         Section {
-            TextField("真实通知 Bot ID（每行一个，不是 @ 用户名）", text: $draft.trustedBotIDs, axis: .vertical)
-                .lineLimit(1...6)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-                .keyboardType(.numbersAndPunctuation)
-                .accessibilityIdentifier("interaction.trustedBotIDs")
+            StackedTextField(title: "真实通知 Bot ID", text: $draft.trustedBotIDs, prompt: "每行一个数字 ID，不是 @ 用户名",
+                             keyboard: .numbersAndPunctuation, monospaced: true, identifier: "interaction.trustedBotIDs")
         } header: { Text("真实转账结果通知 Bot") } footer: {
             Text("填群里实际发送到账结果的 Bot ID（参考转账结果消息的发送者 ID），多个群用不同通知 Bot 时可以全部加入；保存时自动去重，测试模拟 Token 识别出的 Bot 会额外加入信任。启用转账触发的规则前必须至少有一个。")
         }
@@ -625,8 +621,8 @@ struct InteractionRuleEditor: View {
 
     private var basicSection: some View {
         Section {
-            TextField("规则名称", text: $rule.name)
-                .accessibilityIdentifier("interaction.rule.name")
+            LabeledTextField(title: "规则名称", text: $rule.name, prompt: "例如：猜数字", capitalization: .sentences,
+                             identifier: "interaction.rule.name")
             Toggle(isOn: $rule.enabled) { Label("启用这条规则", systemImage: "checkmark.circle") }
                 .accessibilityIdentifier("interaction.rule.enabled")
             Picker(selection: $rule.action) {
@@ -648,9 +644,9 @@ struct InteractionRuleEditor: View {
 
     private var triggerTextSection: some View {
         Section {
-            multiline(effectiveTrigger == "keyword" ? "触发关键词" : "转账通知里的关键词", text: $rule.triggerTexts, id: "keywords")
+            multiline(effectiveTrigger == "keyword" ? "触发关键词" : "转账通知里的关键词", prompt: "每行一项", text: $rule.triggerTexts, id: "keywords")
             if rule.action == "module" && effectiveTrigger != "payment" {
-                multiline("开局关键词（可选）", text: $rule.moduleStartKeywords, id: "startKeywords")
+                multiline("开局关键词", optional: true, prompt: "每行一项", text: $rule.moduleStartKeywords, id: "startKeywords")
             }
         } header: { Text("触发文本") } footer: {
             Text("每行一项。转账触发时匹配转账通知文字；关键词触发时匹配群成员发的消息。")
@@ -659,13 +655,16 @@ struct InteractionRuleEditor: View {
 
     private var paymentSection: some View {
         Section {
-            TextField("金额（留空不限）", text: $rule.amount).keyboardType(.numberPad)
+            LabeledTextField(title: "金额", text: $rule.amount, prompt: "不限", keyboard: .numberPad,
+                             identifier: "interaction.rule.amount")
             Picker("金额匹配", selection: $rule.amountMatchMode) {
                 Text("等于").tag("eq")
                 Text("大于等于").tag("gte")
             }
-            TextField("指定收款人用户 ID（可选）", text: $rule.receiverUserID).keyboardType(.numberPad)
-            TextField("收款人文字（可选）", text: $rule.receiverText)
+            LabeledTextField(title: "收款人用户 ID", text: $rule.receiverUserID, optional: true, keyboard: .numberPad,
+                             identifier: "interaction.rule.receiverUserID")
+            LabeledTextField(title: "收款人文字", text: $rule.receiverText, optional: true,
+                             identifier: "interaction.rule.receiverText")
         } header: { Text("转账过滤") } footer: {
             Text("金额是群内游戏币。启用转账触发前，服务器要求在交互页「真实转账结果通知 Bot」里填写至少一个 Bot ID。")
         }
@@ -673,32 +672,38 @@ struct InteractionRuleEditor: View {
 
     private var limitSection: some View {
         Section {
-            TextField("每用户冷却秒数（可选）", text: $rule.cooldown)
-            TextField("每用户每日上限（可选）", text: $rule.dailyLimit).keyboardType(.numberPad)
-            TextField("参与有效期（秒）", text: $rule.validSeconds).keyboardType(.numberPad)
+            // 冷却允许写「15」或「15s」「2m」：纯数字时补「秒」，带单位的原样显示。
+            LabeledTextField(title: "每用户冷却", text: $rule.cooldown, prompt: "可选，如 15 或 15s",
+                             unit: FieldUnit.ifNumeric(rule.cooldown, "秒"), identifier: "interaction.rule.cooldown")
+            LabeledTextField(title: "每用户每日上限", text: $rule.dailyLimit, unit: "次", optional: true, keyboard: .numberPad,
+                             identifier: "interaction.rule.dailyLimit")
+            LabeledTextField(title: "参与有效期", text: $rule.validSeconds, prompt: "可选", unit: "秒", keyboard: .numberPad,
+                             identifier: "interaction.rule.validSeconds")
             Picker("并发方式", selection: $rule.concurrency) {
                 Text("按群").tag("chat")
                 Text("按用户").tag("user")
                 Text("不并发").tag("none")
             }
             if rule.action == "math10" || selectedEntry?.supportsPrize == true {
-                TextField("奖金", text: $rule.prize).keyboardType(.numberPad)
+                LabeledTextField(title: "奖金", text: $rule.prize, prompt: "默认 123", keyboard: .numberPad,
+                                 identifier: "interaction.rule.prize")
             }
         } header: { Text("限制") }
     }
 
     private var commandSection: some View {
         Section {
-            multiline("开启指令（可选）", text: $rule.openCommands, id: "open")
-            multiline("关闭指令（可选）", text: $rule.closeCommands, id: "close")
-            multiline("状态指令（可选）", text: $rule.statusCommands, id: "status")
-            TextField("暂停时回复（可选）", text: $rule.disabledMessage, axis: .vertical).lineLimit(1...4)
+            multiline("开启指令", optional: true, prompt: "每行一条", text: $rule.openCommands, id: "open")
+            multiline("关闭指令", optional: true, prompt: "每行一条", text: $rule.closeCommands, id: "close")
+            multiline("状态指令", optional: true, prompt: "每行一条", text: $rule.statusCommands, id: "status")
+            StackedTextField(title: "暂停时回复", text: $rule.disabledMessage, prompt: "规则关闭时群成员触发会收到这句话",
+                             optional: true, lines: 1...4, capitalization: .sentences, identifier: "interaction.rule.disabledMessage")
         } header: { Text("管理指令") } footer: { Text("每行一条，管理员在群里发这些指令可开启、关闭或查询本规则。") }
     }
 
     private var replySection: some View {
         Section {
-            TelegramTemplateInlineField(title: "回复模板", text: $rule.responseTemplate,
+            TelegramTemplateInlineField(title: "回复模板", showsTitle: true, text: $rule.responseTemplate,
                                         spec: TelegramTemplateSpec(botName: "交互 Bot", samples: TelegramTemplateSamples.interactionReply,
                                                                    prompt: "（转账 88.00 给 Bob）"),
                                         identifier: "interaction.rule.response")
@@ -753,7 +758,8 @@ struct InteractionRuleEditor: View {
                 Text("仅付费玩家").tag("paid_pool")
                 Text("只通知").tag("notify_only")
             }
-            TextField("开局提示（可选）", text: $rule.moduleStartText, axis: .vertical).lineLimit(1...4)
+            StackedTextField(title: "开局提示", text: $rule.moduleStartText, optional: true, lines: 1...4,
+                             capitalization: .sentences, identifier: "interaction.rule.moduleStartText")
             if rule.moduleConfigCount > 0 {
                 LabeledContent("玩法参数", value: "\(rule.moduleConfigCount) 项 · 保存时保留")
             }
@@ -764,7 +770,7 @@ struct InteractionRuleEditor: View {
 
     private var chatSection: some View {
         Section {
-            multiline("生效群 Chat ID（每行一个，留空不限）", text: $rule.chatIDs, id: "chats", numbers: true)
+            multiline("生效群 Chat ID", prompt: "每行一个，留空不限", text: $rule.chatIDs, id: "chats", numbers: true)
             if !peers.isEmpty {
                 NavigationLink {
                     InteractionPeerPicker(chatIDs: $rule.chatIDs, peers: peers)
@@ -778,13 +784,11 @@ struct InteractionRuleEditor: View {
         }
     }
 
-    private func multiline(_ title: String, text: Binding<String>, id: String, numbers: Bool = false) -> some View {
-        TextField(title, text: text, axis: .vertical)
-            .lineLimit(1...6)
-            .textInputAutocapitalization(.never)
-            .autocorrectionDisabled()
-            .keyboardType(numbers ? .numbersAndPunctuation : .default)
-            .accessibilityIdentifier("interaction.rule.\(id)")
+    private func multiline(_ title: String, optional: Bool = false, prompt: String, text: Binding<String>, id: String,
+                           numbers: Bool = false) -> some View {
+        StackedTextField(title: title, text: text, prompt: prompt, optional: optional,
+                         keyboard: numbers ? .numbersAndPunctuation : .default, monospaced: numbers,
+                         identifier: "interaction.rule.\(id)")
     }
 }
 
@@ -901,7 +905,7 @@ private struct InteractionAdvancedView: View {
     var body: some View {
         Form {
             Section {
-                field("查询指令（每行一条）", text: $draft.queryCommands)
+                field("查询指令", prompt: "每行一条", text: $draft.queryCommands, id: "interaction.query.commands")
             } header: { Text("玩法查询") } footer: { Text("群成员发查询指令时，交互 Bot 列出当前可用的联动玩法。") }
             Section {
                 TelegramTemplateInlineField(title: "查询回复模板", text: $draft.queryResponseTemplate, spec: querySpec(response: true),
@@ -912,7 +916,7 @@ private struct InteractionAdvancedView: View {
                                             identifier: "interaction.query.item", previewInitiallyShown: false)
             } header: { Text("每个玩法的条目模板") } footer: { Text("{index} 序号、{name} 规则名称、{trigger} 触发方式、{kind} 玩法类型、{limit} 限制摘要、{module_key} 插件 key。预览与上面的回复模板组合成整条消息。") }
             Section {
-                field("没有可用玩法时回复", text: $draft.queryEmptyMessage)
+                field("没有可用玩法时回复", prompt: "留空保持服务器当前值", text: $draft.queryEmptyMessage, id: "interaction.query.empty")
             }
             Section {
                 TelegramTemplateInlineField(title: "收款通知模板", text: $draft.transferNoticeTemplate,
@@ -952,12 +956,8 @@ private struct InteractionAdvancedView: View {
         TelegramTemplateSpec(botName: "转账通知 Bot", samples: TelegramTemplateSamples.transferNotice, defaultTemplate: fallback, prompt: prompt)
     }
 
-    private func field(_ title: String, text: Binding<String>, numbers: Bool = false) -> some View {
-        TextField(title, text: text, axis: .vertical)
-            .lineLimit(1...8)
-            .textInputAutocapitalization(.never)
-            .autocorrectionDisabled()
-            .keyboardType(numbers ? .numbersAndPunctuation : .default)
+    private func field(_ title: String, prompt: String, text: Binding<String>, id: String) -> some View {
+        StackedTextField(title: title, text: text, prompt: prompt, lines: 1...8, identifier: id)
     }
 }
 

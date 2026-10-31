@@ -332,7 +332,7 @@ struct AIProviderModelsView: View {
                 Text("能力依据服务器记录的模型信息显示，“未知”表示没有这项数据；可在“编辑供应商”中修改。")
             }
             Section("手动添加") {
-                TextField("模型 ID", text: $newModel).textInputAutocapitalization(.never).autocorrectionDisabled()
+                LabeledTextField(title: "模型 ID", text: $newModel, prompt: "例如 gpt-5.4-mini", identifier: "ai.models.newModel")
                 Button("添加模型", systemImage: "plus") { addModel() }
                     .disabled(newModel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || busy)
             }
@@ -563,12 +563,10 @@ struct AIProviderCreateView: View {
 
     private var connectionSection: some View {
         Section {
-            TextField("名称（可留空，自动生成）", text: $name)
-                .textInputAutocapitalization(.never).autocorrectionDisabled()
-                .accessibilityIdentifier("ai.providerCreate.name")
-            TextField(Self.defaultBaseURLs[providerKind] ?? "https://api.example.com/v1", text: $baseURL)
-                .keyboardType(.URL).textInputAutocapitalization(.never).autocorrectionDisabled()
-                .accessibilityIdentifier("ai.providerCreate.baseURL")
+            LabeledTextField(title: "名称", text: $name, prompt: "可留空，自动生成", identifier: "ai.providerCreate.name")
+            StackedTextField(title: "接口地址（Base URL）", text: $baseURL,
+                             prompt: Self.defaultBaseURLs[providerKind] ?? "https://api.example.com/v1",
+                             lines: 1...3, keyboard: .URL, identifier: "ai.providerCreate.baseURL")
             SecretField(
                 title: "API Key",
                 text: $apiKey,
@@ -649,10 +647,9 @@ struct AIProviderCreateView: View {
                 }
                 .disabled(locked)
             }
-            TextField("默认模型 ID，例如 gpt-5.4-mini", text: $defaultModel)
-                .textInputAutocapitalization(.never).autocorrectionDisabled()
+            LabeledTextField(title: "默认模型 ID", text: $defaultModel, prompt: "例如 gpt-5.4-mini",
+                             identifier: "ai.providerCreate.defaultModel")
                 .disabled(locked)
-                .accessibilityIdentifier("ai.providerCreate.defaultModel")
         } header: {
             Text("模型")
         } footer: {

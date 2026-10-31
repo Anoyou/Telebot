@@ -696,7 +696,7 @@ final class WorkspaceUITests: XCTestCase {
         XCTAssertTrue(reveal(unknown, in: app))
         XCTAssertTrue(unknown.label.contains("此控件需要更新 App"), unknown.label)
         // 未知控件不能编辑：没有对应的文本框
-        XCTAssertFalse(app.textFields["主题色"].exists)
+        XCTAssertFalse(app.textFields.matching(NSPredicate(format: "label BEGINSWITH %@", "主题色")).firstMatch.exists)
 
         // 密钥列表只显示遮罩
         app.buttons["plugin.config.secretList.Token 池"].tap()
@@ -832,7 +832,7 @@ final class WorkspaceUITests: XCTestCase {
         let provider = app.descendants(matching: .any)["plugin.config.select.固定 TelePilot Provider（可选）"].firstMatch
         XCTAssertTrue(provider.waitForExistence(timeout: 10))
         XCTAssertTrue(app.descendants(matching: .any)["plugin.config.select.TelePilot 模型覆盖（可选）"].firstMatch.exists)
-        XCTAssertFalse(app.textFields["固定 TelePilot Provider（可选）"].exists)
+        XCTAssertFalse(app.textFields.matching(NSPredicate(format: "label BEGINSWITH %@", "固定 TelePilot Provider")).firstMatch.exists)
         // 统一模型列表：Provider 选择器保留，但标注随模型自动填写。
         XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "随模型自动填写")).firstMatch.waitForExistence(timeout: 5))
     }

@@ -212,19 +212,23 @@ struct CloudflareAccessSettingsView: View {
                         Text(saved.maskedClientID).font(.body.monospaced()).foregroundStyle(.secondary)
                     } label: { Label("Client ID", systemImage: "person.badge.key") }
                 }
-                TextField("Client ID（形如 xxxx.access）", text: $clientID)
-                    .textInputAutocapitalization(.never).autocorrectionDisabled()
-                    .keyboardType(.asciiCapable)
-                    .focused($focusedField, equals: .clientID)
-                    .submitLabel(.next)
-                    .onSubmit { focusedField = .clientSecret }
-                    .accessibilityLabel("Cloudflare Access Client ID")
-                    .accessibilityIdentifier("cfAccess.clientID")
-                RevealableSecureField(
-                    placeholder: "Client Secret", text: $clientSecret, identifier: "cfAccess.clientSecret",
-                    accessibilityLabel: "Cloudflare Access Client Secret",
-                    focus: $focusedField, focusValue: .clientSecret
-                ) { if canSave { save() } }
+                LabeledFieldRow(title: "Client ID", identifier: "cfAccess.clientID") {
+                    TextField("Client ID", text: $clientID, prompt: Text("形如 xxxx.access"))
+                        .textInputAutocapitalization(.never).autocorrectionDisabled()
+                        .keyboardType(.asciiCapable)
+                        .focused($focusedField, equals: .clientID)
+                        .submitLabel(.next)
+                        .onSubmit { focusedField = .clientSecret }
+                        .accessibilityLabel("Cloudflare Access Client ID")
+                        .accessibilityIdentifier("cfAccess.clientID")
+                }
+                LabeledFieldRow(title: "Client Secret", identifier: "cfAccess.clientSecret") {
+                    RevealableSecureField(
+                        placeholder: "未填写", text: $clientSecret, identifier: "cfAccess.clientSecret",
+                        accessibilityLabel: "Cloudflare Access Client Secret",
+                        focus: $focusedField, focusValue: .clientSecret
+                    ) { if canSave { save() } }
+                }
                 Button(action: save) {
                     HStack {
                         Label(isWorking ? "正在保存并验证…" : "保存并验证连接", systemImage: "checkmark.shield")

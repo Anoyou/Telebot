@@ -880,6 +880,9 @@ struct TelegramIssueRow: View {
 /// 表单行内的模板字段：输入框 + 字数 + 问题摘要 + 实时气泡预览；「展开编辑」进入完整编辑页（分屏 / 编辑 / 预览、示例值、外观）。
 struct TelegramTemplateInlineField: View {
     let title: String
+    /// 在输入框上方显示标题（第 21 轮：插件配置等没有同名分组标题的地方必须显示，否则填了模板就看不出是哪一项）。
+    /// 分组标题已经写着同一个名字时（交互 › 查询指令与通知模板）保持 false，避免重复。
+    var showsTitle = false
     @Binding var text: String
     let spec: TelegramTemplateSpec
     var identifier: String
@@ -892,6 +895,12 @@ struct TelegramTemplateInlineField: View {
     var body: some View {
         let models = spec.models(for: text)
         VStack(alignment: .leading, spacing: 8) {
+            if showsTitle {
+                Text(title)
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(.primary)
+                    .accessibilityIdentifier("\(identifier).title")
+            }
             TextField(spec.defaultTemplate ?? title, text: $text, axis: .vertical)
                 .font(.callout.monospaced())
                 .lineLimit(2...10)

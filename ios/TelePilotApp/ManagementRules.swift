@@ -159,9 +159,8 @@ struct PluginRuleDryRunView: View {
             Section { Text(spec.description).font(.subheadline).foregroundStyle(.secondary) }
             Section("样例") {
                 if spec.sampleFields.contains("message") {
-                    TextField("样例消息", text: $message, axis: .vertical)
-                        .lineLimit(1...6).textInputAutocapitalization(.never).autocorrectionDisabled()
-                        .accessibilityIdentifier("plugin.rule.dryRun.message")
+                    StackedTextField(title: "样例消息", text: $message, prompt: "模拟群里收到的一条消息",
+                                     identifier: "plugin.rule.dryRun.message")
                 }
                 if spec.sampleFields.contains("chat_type") {
                     Picker("会话类型", selection: $chatType) {
@@ -172,9 +171,8 @@ struct PluginRuleDryRunView: View {
                     .accessibilityIdentifier("plugin.rule.dryRun.chatType")
                 }
                 if spec.sampleFields.contains("chat_id") {
-                    TextField("会话 ID（可选）", text: $chatID)
-                        .keyboardType(.numbersAndPunctuation).textInputAutocapitalization(.never).autocorrectionDisabled()
-                        .accessibilityIdentifier("plugin.rule.dryRun.chatID")
+                    LabeledTextField(title: "会话 ID", text: $chatID, optional: true, keyboard: .numbersAndPunctuation,
+                                     identifier: "plugin.rule.dryRun.chatID")
                     if chatIDInvalid { Text("会话 ID 只能是整数，例如 -1001234567890。").font(.caption).foregroundStyle(.red) }
                 }
             }
