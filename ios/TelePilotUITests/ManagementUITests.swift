@@ -652,6 +652,15 @@ final class ManagementUITests: XCTestCase {
         XCTAssertEqual(nameTitle.label, "规则名称")
         XCTAssertLessThan(nameTitle.frame.minX, name.frame.minX, "标题在输入框左边")
 
+        // 按页面从上到下的顺序查：「每用户每日上限」在「参与有效期」上方（第 22 轮：原先先查下面那项，
+        // 偶尔把上面那项滚出屏幕顶部，再往下找就永远找不到）。
+        // 空的可选数字项：灰色提示「可选」，不显示单位
+        let daily = app.textFields["interaction.rule.dailyLimit"]
+        reveal(daily, in: app)
+        XCTAssertEqual(daily.placeholderValue, "可选")
+        let dailyUnit = app.staticTexts["interaction.rule.dailyLimit.unit"]
+        XCTAssertFalse(dailyUnit.exists, "空值不显示单位")
+
         // 有值的数字项：标题 + 值 + 单位
         let valid = app.textFields["interaction.rule.validSeconds"]
         reveal(valid, in: app)
@@ -661,13 +670,6 @@ final class ManagementUITests: XCTestCase {
         XCTAssertTrue(validUnit.exists)
         XCTAssertEqual(validUnit.label, "秒")
         XCTAssertGreaterThanOrEqual(validUnit.frame.minX, valid.frame.maxX - 1, "单位在值的右边")
-
-        // 空的可选数字项：灰色提示「可选」，不显示单位
-        let daily = app.textFields["interaction.rule.dailyLimit"]
-        reveal(daily, in: app)
-        XCTAssertEqual(daily.placeholderValue, "可选")
-        let dailyUnit = app.staticTexts["interaction.rule.dailyLimit.unit"]
-        XCTAssertFalse(dailyUnit.exists, "空值不显示单位")
 
         // 多行项：标题在输入框上方，可选项标「可选」（先查这一项，数字键盘弹出后没有收起键，会挡住下面的行）
         let open = app.descendants(matching: .any)["interaction.rule.open"].firstMatch
@@ -679,7 +681,7 @@ final class ManagementUITests: XCTestCase {
 
         // 回到每日上限填值：出现单位，标题不消失
         reveal(daily, in: app, up: false)
-        daily.tap()
+        focus(daily)
         daily.typeText("6")
         XCTAssertTrue(dailyUnit.waitForExistence(timeout: 3))
         XCTAssertEqual(dailyUnit.label, "次")
@@ -762,9 +764,7 @@ final class ManagementUITests: XCTestCase {
 
         // 「关于」：标题 = 入口名，只有信息，不含更新按钮。
         reveal(about, in: app, up: false)
-        waitUntilStill(about)
-        about.tap()
-        XCTAssertTrue(app.navigationBars["关于"].waitForExistence(timeout: 10))
+        XCTAssertTrue(tap(about, expecting: app.navigationBars["关于"]))
         XCTAssertTrue(app.descendants(matching: .any)["about.appVersion"].firstMatch.waitForExistence(timeout: 10))
         XCTAssertTrue(app.descendants(matching: .any)["about.serverVersion"].firstMatch.exists)
         let changelog = app.buttons["about.appChangelog"]
@@ -775,9 +775,7 @@ final class ManagementUITests: XCTestCase {
 
         // 「软件更新」：标题 = 入口名，服务器与 App 两组。
         XCTAssertTrue(update.waitForExistence(timeout: 10))
-        waitUntilStill(update)
-        update.tap()
-        XCTAssertTrue(app.navigationBars["软件更新"].waitForExistence(timeout: 10))
+        XCTAssertTrue(tap(update, expecting: app.navigationBars["软件更新"]))
         XCTAssertTrue(app.descendants(matching: .any)["softwareUpdate.serverVersion"].firstMatch.waitForExistence(timeout: 10))
         XCTAssertTrue(app.buttons["update.open"].waitForExistence(timeout: 10))
         let appVersion = app.descendants(matching: .any)["softwareUpdate.appVersion"].firstMatch
@@ -821,39 +819,110 @@ final class ManagementUITests: XCTestCase {
         entry.tap()
     }
 
-    /// 在运行树列表里上下滑动，直到元素可点。Dock 的标签栏浮在列表之上，元素中心落在标签栏里时
-    /// 仍算 isHittable，但点击会落到标签栏上：此时小步上拖，把它挪到标签栏上方。
+    /// 在列表里上下滚动，直到元素整行落在「导航栏下沿」与「Dock／值守提示上沿」之间，再交给调用方点按。
+    ///
+    /// 第 22 轮：
+    /// - **上沿**：iOS 26 起导航栏是悬浮在列表之上的玻璃层，行滚到它下面时仍 exists/isHittable，但点按落在导航栏上
+    ///   （CI 录像：「关于」行停在「App 设置」导航栏下面，点了没进「关于」；值守中「恢复生产」同理）。
+    /// - **下沿**：Dock 标签栏与值守提示浮在列表之上，元素中心落在它们里面时同样会被截走；值守中另外要求在屏幕上 3/4。
+    /// - **不用惯性滑动**：`swipeUp/Down` 是快速轻扫，松手后列表还在滚，偶尔把懒加载的行整段滑过去，或在滚动中点按
+    ///   （滚动中的第一次点按只会让列表停下）。改为「按住—拖动—停住再松手」的受控拖动，没有惯性。
+    /// - **两个方向都找**：先按 `up` 指定的方向找，到头还没找到就反向（CI 录像：「每用户每日上限」在「参与有效期」上方，
+    ///   先找后者时已滚出屏幕上方，只往下找永远找不到）。
     private func reveal(_ element: XCUIElement, in app: XCUIApplication, up: Bool = true, attempts: Int = 10) {
-        func underTabBar() -> Bool {
-            var top = CGFloat.infinity
+        let window = app.windows.firstMatch.frame
+        func bottomLimit() -> CGFloat {
+            var bottom = CGFloat.infinity
             let bar = app.tabBars.firstMatch
-            if bar.exists, !bar.frame.isEmpty { top = bar.frame.minY }
+            if bar.exists, !bar.frame.isEmpty { bottom = bar.frame.minY }
             // 第 20 轮：值守中 Dock 上方多了全局提示（系统底部附件），同样会挡住下面的行。
             // 附件在 Dock 缩小 / 展开切换时不一定能按标识查到（CI 实测），所以另外要求元素在屏幕下方 1/4 以上。
             let banner = app.descendants(matching: .any)["safeWatch.banner"].firstMatch
-            if banner.exists, !banner.frame.isEmpty { top = min(top, banner.frame.minY) }
-            let window = app.windows.firstMatch.frame
+            if banner.exists, !banner.frame.isEmpty { bottom = min(bottom, banner.frame.minY) }
             let safeWatchOn = banner.exists || app.descendants(matching: .any)["safeWatch.restore"].firstMatch.exists
                 || app.buttons["runtime.restore"].exists
             if !window.isEmpty, safeWatchOn {
-                top = min(top, window.minY + window.height * 0.75)
+                bottom = min(bottom, window.minY + window.height * 0.75)
             }
-            guard top.isFinite else { return false }
-            return element.frame.midY >= top - 8
+            return bottom
         }
-        for _ in 0..<attempts {
-            if element.exists && element.isHittable {
-                guard underTabBar() else { break }
-                let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.6))
-                start.press(forDuration: 0.05, thenDragTo: start.withOffset(CGVector(dx: 0, dy: -180)))
-                Thread.sleep(forTimeInterval: 0.4)
+        func topLimit() -> CGFloat {
+            let bar = app.navigationBars.firstMatch
+            guard bar.exists else { return -.infinity }
+            let frame = bar.frame
+            // 只认屏幕上部的正常导航栏，防止异常帧把整屏都算成“被遮住”。
+            guard !frame.isEmpty, window.isEmpty || frame.maxY < window.minY + window.height * 0.4 else { return -.infinity }
+            return frame.maxY
+        }
+        /// 受控拖动：`contentUp` 为 true 时内容上移（看下面的行），false 时内容下移（看上面的行）。
+        func drag(contentUp: Bool, distance: CGFloat) {
+            let height = window.isEmpty ? 800 : window.height
+            let from = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: contentUp ? 0.7 : 0.3))
+            let sign: CGFloat = contentUp ? -1 : 1
+            let dy = sign * min(distance, height * 0.45)
+            from.press(forDuration: 0.05, thenDragTo: from.withOffset(CGVector(dx: 0, dy: dy)),
+                       withVelocity: .default, thenHoldForDuration: 0.3)
+        }
+        func placed() -> (ok: Bool, fix: Bool?) {
+            // 返回 ok=整行在可点区内；fix=需要往哪边挪（true=内容上移），nil=不存在或不可点。
+            guard element.exists, element.isHittable else { return (false, nil) }
+            let frame = element.frame
+            if frame.midY >= bottomLimit() - 8 { return (false, true) }
+            if frame.minY < topLimit() + 2 { return (false, false) }
+            return (true, nil)
+        }
+        let height = window.isEmpty ? 800 : window.height
+        var contentUp = up
+        var moves = 0
+        var reversed = false
+        for _ in 0..<(attempts * 2 + 6) {
+            let state = placed()
+            if state.ok {
+                waitUntilStill(element)
+                if placed().ok { break }
                 continue
             }
-            if up { app.swipeUp() } else { app.swipeDown() }
-            // 等滚动停下再判断位置，避免按惯性滚动中的位置多滑一次。
-            Thread.sleep(forTimeInterval: 0.4)
+            if let fix = state.fix {
+                // 已在屏幕上，只是压在导航栏或 Dock 下面：小步挪进来。
+                drag(contentUp: fix, distance: 160)
+                continue
+            }
+            if moves >= attempts {
+                guard !reversed else { break }
+                reversed = true
+                contentUp.toggle()
+                moves = 0
+            }
+            drag(contentUp: contentUp, distance: height * 0.45)
+            moves += 1
         }
-        XCTAssertTrue(element.exists && element.isHittable && !underTabBar(), "\(element) 不可见或被标签栏遮住")
+        XCTAssertTrue(placed().ok, "\(element) 不可见或被导航栏／标签栏遮住")
+    }
+
+    /// 点按后等目标出现；点按被吞（转场刚结束、列表刚停）且原元素还在原处时再点一次，最多 `retries` 次。
+    /// 只在“原元素仍可点、目标没出现”时重点，避免点到新页面上。
+    @discardableResult
+    private func tap(_ element: XCUIElement, expecting target: XCUIElement, timeout: TimeInterval = 10, retries: Int = 1) -> Bool {
+        waitUntilStill(element)
+        element.tap()
+        if target.waitForExistence(timeout: timeout) { return true }
+        for _ in 0..<retries where element.exists && element.isHittable && !target.exists {
+            element.tap()
+            if target.waitForExistence(timeout: timeout) { return true }
+        }
+        return target.exists
+    }
+
+    /// 点输入框并等它真正拿到键盘焦点再输入：点按落在列表停稳前会被吞，直接 typeText 报
+    /// “Neither element nor any descendant has keyboard focus”。
+    private func focus(_ field: XCUIElement, at offset: CGVector = CGVector(dx: 0.9, dy: 0.5)) {
+        waitUntilStill(field)
+        let focused = NSPredicate(format: "hasKeyboardFocus == true")
+        for _ in 0..<3 {
+            field.coordinate(withNormalizedOffset: offset).tap()
+            if XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: focused, object: field)], timeout: 5) == .completed { return }
+        }
+        XCTAssertTrue(field.value(forKey: "hasKeyboardFocus") as? Bool ?? false, "\(field) 没有拿到键盘焦点")
     }
 
     /// 运行模式卡（预演 → 确认进入值守 → 恢复生产）与 5 个可选模块：被插件需要的关不掉并写明原因；
@@ -917,9 +986,8 @@ final class ManagementUITests: XCTestCase {
         XCTAssertFalse(app.switches["runtime.module.ai.toggle"].isEnabled, "值守中不能单独开模块")
 
         reveal(restore, in: app, up: false)
-        restore.tap()
         let confirmRestore = app.buttons["确认恢复生产"].firstMatch
-        XCTAssertTrue(confirmRestore.waitForExistence(timeout: 5))
+        XCTAssertTrue(tap(restore, expecting: confirmRestore), "点「恢复生产」应弹出确认框")
         confirmRestore.tap()
         XCTAssertTrue(app.buttons["runtime.safeWatch"].waitForExistence(timeout: 10))
         // List 行滚出屏幕后不在无障碍树里：先滚回顶部让运行模式行可见再断言。
@@ -966,8 +1034,8 @@ final class ManagementUITests: XCTestCase {
         // 交互规则 › → 交互中心。
         let rules = app.buttons["runtime.plugin.content_assistant.rules"]
         reveal(rules, in: app)
-        rules.tap()
-        XCTAssertTrue(app.navigationBars["交互"].waitForExistence(timeout: 10))
+        // 第 22 轮：CI 录像里点「交互规则 ›」后页面原地不动（点按被吞）；原元素还在原处时再点一次。
+        XCTAssertTrue(tap(rules, expecting: app.navigationBars["交互"]))
         app.navigationBars["交互"].buttons.firstMatch.tap()
 
         // 点插件 → 本账号配置。
