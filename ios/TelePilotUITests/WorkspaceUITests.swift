@@ -732,6 +732,45 @@ final class WorkspaceUITests: XCTestCase {
         return element.waitForExistence(timeout: 3)
     }
 
+    /// 第 22 轮：转账通知插件详情显示「转账通知以插件结果为准」开关状态（只读）+ 大白话说明 + 只读「转账识别」卡片；
+    /// 旧服务器（没有状态接口与宿主卡）不显示、不报错。
+    func testPaymentSourceSwitchAndReadonlyCard() {
+        let app = launch(["--ui-test-payment-source"])
+        app.tabBars.buttons["插件"].tap()
+        let pluginCard = app.buttons["plugin.card.payment-source-cn-transfer"]
+        XCTAssertTrue(reveal(pluginCard, in: app))
+        pluginCard.tap()
+
+        let switchRow = app.descendants(matching: .any)["paymentSource.switch"].firstMatch
+        XCTAssertTrue(switchRow.waitForExistence(timeout: 10))
+        XCTAssertTrue(switchRow.label.contains("关"), switchRow.label)
+        let state = app.descendants(matching: .any)["paymentSource.state"].firstMatch
+        XCTAssertTrue(state.label.contains("以旧解析为准"), state.label)
+        let explanation = app.descendants(matching: .any)["paymentSource.explanation"].firstMatch
+        XCTAssertTrue(reveal(explanation, in: app))
+        XCTAssertTrue(explanation.label.contains("开：以这个插件读出的"), explanation.label)
+        // App 里没有可拨动的开关（只读）。
+        XCTAssertFalse(app.switches["转账通知以插件结果为准"].exists)
+        // 只读统计卡片
+        XCTAssertTrue(reveal(app.staticTexts["转账识别（只读）"], in: app))
+        XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "17")).firstMatch.exists)
+        XCTAssertFalse(app.descendants(matching: .any)["plugin.uicard.failed"].firstMatch.exists)
+        app.terminate()
+
+        let old = launch(["--ui-test-payment-source", "--ui-test-old-server-payment-source"])
+        old.tabBars.buttons["插件"].tap()
+        let oldCard = old.buttons["plugin.card.payment-source-cn-transfer"]
+        XCTAssertTrue(reveal(oldCard, in: old))
+        oldCard.tap()
+        // 详情顶部：等读取结束后既没有开关区，也没有宿主卡或失败提示。
+        XCTAssertTrue(old.navigationBars.firstMatch.waitForExistence(timeout: 10))
+        sleep(3)
+        XCTAssertFalse(old.descendants(matching: .any)["paymentSource.switch"].firstMatch.exists)
+        XCTAssertFalse(old.staticTexts["转账识别（只读）"].exists)
+        XCTAssertFalse(old.descendants(matching: .any)["plugin.uicard.failed"].firstMatch.exists)
+        XCTAssertTrue(reveal(old.staticTexts["插件信息"], in: old), "旧服务器下插件详情其余内容照常显示")
+    }
+
     /// 插件声明式 UI（iOS 0.14.0）：plugin.overview 原生卡片（宿主「运行统计」、插件卡、失败只影响本卡），
     /// 以及契约里 iOS 新补的控件与「此控件需要更新 App」只读提示。
     func testPluginDeclarativeWidgetsAndCards() {

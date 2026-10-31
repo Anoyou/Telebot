@@ -222,9 +222,10 @@ enum ServerParamCatalog {
                         kind: .bool, group: "trace", defaultValue: false, alsoIn: [platform], advanced: true),
         days("log_retention.native_raw_retention_days", "原始数据保留天数", "Telegram 原始数据保存多少天。", group: "trace", fallback: 1, max: 30),
         ServerParamMeta(key: "log_retention.payment_source_plugin_authoritative", label: "转账通知以插件结果为准",
-                        detail: "默认关闭：转账通知以系统自带的解析为准，插件只做对照。对照长期一致后才建议打开。",
+                        detail: "关 = 以系统自带的旧解析为准，转账通知插件只做对照；开 = 以转账通知插件的结果为准，插件出错或超时自动回退旧解析。随时可关，30 秒内生效，不影响结算规则本身。",
                         kind: .bool, group: "trace", defaultValue: false, editable: false,
-                        readOnlyReason: "涉及转账通知判定，App 里只读，请在 Web 修改。", alsoIn: [platform], advanced: true),
+                        readOnlyReason: "涉及转账通知判定，App 里只显示状态，请在 Web 修改。",
+                        alsoIn: [platform], advanced: true),
         days("log_retention.llm_usage_retention_days", "AI 用量记录保留天数", "每次 AI 调用的用量记录保存多少天。", group: "retention",
              fallback: 30, alsoIn: [aiGlobal]),
         days("log_retention.rate_limit_event_retention_days", "风控事件保留天数", "限流 / 风控拦截记录保存多少天。", group: "retention", fallback: 30),
@@ -708,6 +709,7 @@ struct ServerParamElsewhereRow: View {
         case "software_update": "arrow.down.circle"
         case "sudo": "person.badge.shield.checkmark"
         case "totp": "lock.shield"
+        case "payment_source": "scalemass"
         case "emergency_stop": "exclamationmark.octagon"
         default: "arrow.forward.circle"
         }
@@ -725,6 +727,7 @@ struct ServerParamElsewhereRow: View {
                 create: ManagementAction(title: "添加 Sudo 用户", path: "/api/sudo", explanation: ManagementText.defaultActionExplanation),
                 itemPath: "/api/sudo/{id}")))
         case "totp": AnyView(ManagementTOTPView())
+        case "payment_source": AnyView(PaymentSourceStatusPage())
         default: nil
         }
     }

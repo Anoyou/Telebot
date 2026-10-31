@@ -57,6 +57,9 @@ IOS_RUNTIME_TREE = "runtime_tree"
 IOS_SOFTWARE_UPDATE = "software_update"
 IOS_SUDO = "sudo"
 IOS_TOTP = "totp"
+# 第 22 轮：「转账通知以插件结果为准」也放在转账通知插件详情里（Web 插件详情 / iOS 转账通知判定页）。
+IOS_PAYMENT_SOURCE = "payment_source"
+WEB_PAYMENT_SOURCE_PLUGIN = "/plugins/manage?detail=payment-source-cn-transfer"
 
 _WEB_PLATFORM = "/settings?tab=platform"
 _WEB_SECURITY = "/settings?tab=security"
@@ -184,10 +187,13 @@ SETTINGS_META: list[dict[str, Any]] = [
        "integer", "trace", default=1, unit=_DAYS, minimum=0, maximum=30, advanced=True,
        also_in=[_loc("服务器设置 › 平台与模块", web=_WEB_PLATFORM)]),
     _p("log_retention.payment_source_plugin_authoritative", "转账通知以插件结果为准",
-       "默认关闭：转账通知以系统自带的解析为准，插件只做对照。对照长期一致后才建议打开。",
+       "关 = 以系统自带的旧解析为准，转账通知插件只做对照；开 = 以转账通知插件的结果为准，插件出错或超时自动回退旧解析。"
+       "随时可关，30 秒内生效，不影响结算规则本身。",
        "bool", "trace", default=False, editable=False, advanced=True,
-       read_only_reason="涉及转账通知判定，App 里只读，请在 Web 修改。",
-       also_in=[_loc("服务器设置 › 平台与模块", web=_WEB_PLATFORM)]),
+       read_only_reason="涉及转账通知判定，App 里只显示状态，请在 Web 修改。",
+       also_in=[_loc("服务器设置 › 平台与模块", web=_WEB_PLATFORM),
+                _loc("插件 › 转账通知插件详情", web=WEB_PAYMENT_SOURCE_PLUGIN, ios=IOS_PAYMENT_SOURCE,
+                     ios_label="插件 › 转账通知判定")]),
     # ── 其它保留期限 ──
     _p("log_retention.llm_usage_retention_days", "AI 用量记录保留天数", "每次 AI 调用的用量记录保存多少天。",
        "integer", "retention", default=30, unit=_DAYS, minimum=0, maximum=3650, zero_means=_NO_DELETE,

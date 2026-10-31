@@ -79,6 +79,7 @@
   "WorkspaceUITests/testDockKeepsPrimarySectionsAndAgentEntry": 15,
   "WorkspaceUITests/testMoreSectionKeepsAccountsAndSettingsReachable": 17,
   "WorkspaceUITests/testPageSearchUsesLeadingToolbarButton": 89,
+  "WorkspaceUITests/testPaymentSourceSwitchAndReadonlyCard": 60,
   "WorkspaceUITests/testPluginAccountStateIsSeparateFromGlobalMaintenance": 27,
   "WorkspaceUITests/testPluginAndInteractionCrossLinks": 50,
   "WorkspaceUITests/testPluginAutomationShowsOnlySupportedEntries": 45,

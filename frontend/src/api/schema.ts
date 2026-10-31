@@ -2649,6 +2649,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/payment-sources/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Payment Source Status
+         * @description 「转账通知以插件结果为准」开关当前状态 + 已安装的转账通知插件（只读）。
+         *
+         *     生效与否完全以服务器当下配置为准；修改仍走 ``PATCH /api/system/settings`` 的
+         *     ``log_retention.payment_source_plugin_authoritative``（30 秒内生效）。旧服务器没有这个接口（404），
+         *     客户端据此不显示插件详情里的开关区。
+         */
+        get: operations["get_payment_source_status_api_payment_sources_status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/platform/profile": {
         parameters: {
             query?: never;
@@ -9733,6 +9757,43 @@ export interface components {
             /** Started Sessions */
             started_sessions: number;
         };
+        /** PaymentSourcePluginStatus */
+        PaymentSourcePluginStatus: {
+            /** Active */
+            active: boolean;
+            /** Display Name */
+            display_name: string;
+            /** Inactive Reason */
+            inactive_reason?: string | null;
+            /** Plugin Key */
+            plugin_key: string;
+            /** Source Ids */
+            source_ids?: string[];
+            /**
+             * Version
+             * @default
+             */
+            version: string;
+        };
+        /**
+         * PaymentSourceStatusResponse
+         * @description 「转账通知以插件结果为准」开关的当前状态（第 22 轮，插件详情与服务器参数页共用）。
+         */
+        PaymentSourceStatusResponse: {
+            /** Authoritative */
+            authoritative: boolean;
+            /**
+             * Effective
+             * @enum {string}
+             */
+            effective: "plugin" | "legacy";
+            /** Label */
+            label: string;
+            /** Setting Key */
+            setting_key: string;
+            /** Sources */
+            sources?: components["schemas"]["PaymentSourcePluginStatus"][];
+        };
         /** PlatformCapabilitiesOut */
         PlatformCapabilitiesOut: {
             /**
@@ -13995,7 +14056,7 @@ export interface components {
             native_raw_retention_days?: number | null;
             /**
              * 转账通知以插件结果为准 · payment_source_plugin_authoritative
-             * @description 默认关闭：转账通知以系统自带的解析为准，插件只做对照。对照长期一致后才建议打开。
+             * @description 关 = 以系统自带的旧解析为准，转账通知插件只做对照；开 = 以转账通知插件的结果为准，插件出错或超时自动回退旧解析。随时可关，30 秒内生效，不影响结算规则本身。
              */
             payment_source_plugin_authoritative?: boolean | null;
             /**
@@ -23892,6 +23953,55 @@ export interface operations {
             };
             /** @description CSRF 校验失败或权限不足 */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description 服务器内部错误 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    get_payment_source_status_api_payment_sources_status_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: {
+                auth_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaymentSourceStatusResponse"];
+                };
+            };
+            /** @description 认证失败 */
+            401: {
                 headers: {
                     [name: string]: unknown;
                 };

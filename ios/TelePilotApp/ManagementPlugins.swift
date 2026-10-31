@@ -944,7 +944,10 @@ struct ManagementPluginDetailView: View {
     // MARK: 概况
 
     @ViewBuilder private var overview: some View {
-        // plugin.overview：宿主「运行统计」卡（卡片 DSL 的第一个用户）+ 插件自己声明的原生卡片。
+        // 第 22 轮：转账通知插件的「转账通知以插件结果为准」开关状态（只读；旧服务器 / 非转账通知插件不显示）。
+        PaymentSourceSwitchSection(pluginKey: key)
+        // plugin.overview：宿主「运行统计」卡（卡片 DSL 的第一个用户）+ 插件自己声明的原生卡片；
+        // 第 22 轮起资金类插件多一张宿主只读卡（转账识别 / 资金往来），旧服务器没有就不显示。
         PluginCardSections(slot: "plugin.overview", pluginKey: key, accountID: accountID)
         // 插件自带页面与菜单项（ui.pages / ui.actions，Plugin API 1.4）；没有声明时不显示。
         PluginPageEntriesSection(menu: "plugin.detail", pluginKey: key, accountID: accountID)
@@ -2746,6 +2749,95 @@ private struct PluginSecretListEditor: View {
         }
         .navigationTitle(title).navigationBarTitleDisplayMode(.inline)
         .toolbar { EditButton() }
+    }
+}
+
+// MARK: - 转账通知判定（第 22 轮）
+
+/// 「转账通知以插件结果为准」开关状态与大白话说明，作为 List 里的一个 Section 插入。
+/// 只读：App 不改这个开关（涉及转账通知判定，请在 Web 改）。读取 `GET /api/payment-sources/status`；
+/// 旧服务器没有该接口或读取失败时整段不显示、不报错。`pluginKey` 为 nil 时显示全部转账通知插件（服务器参数页跳转用）。
+struct PaymentSourceSwitchSection: View {
+    var pluginKey: String?
+    @Environment(AppModel.self) private var model
+    @State private var view: PaymentSourceSwitchView?
+    @State private var loaded = false
+
+    var body: some View {
+        if let view {
+            Section {
+                LabeledContent("转账通知以插件结果为准") {
+                    Text(view.checked ? "开" : "关").foregroundStyle(view.checked ? Color.green : Color.secondary)
+                }
+                .accessibilityElement(children: .combine)
+                .accessibilityIdentifier("paymentSource.switch")
+                Label(view.stateLabel, systemImage: symbol(view.tone))
+                    .foregroundStyle(color(view.tone))
+                    .accessibilityIdentifier("paymentSource.state")
+                if pluginKey == nil {
+                    ForEach(view.sources, id: \.pluginKey) { source in
+                        LabeledContent(source.displayName) {
+                            Text(source.active ? "工作中" : (source.warning ?? "未工作")).font(.caption)
+                                .foregroundStyle(source.active ? Color.green : Color.orange).multilineTextAlignment(.trailing)
+                        }
+                    }
+                } else if let warning = view.warning {
+                    Label(warning, systemImage: "exclamationmark.triangle").font(.footnote).foregroundStyle(.orange)
+                        .accessibilityIdentifier("paymentSource.warning")
+                }
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(PaymentSourceSwitchView.explanation, id: \.self) { line in
+                        Text(line).font(.footnote).foregroundStyle(.secondary)
+                    }
+                }
+                .accessibilityElement(children: .combine)
+                .accessibilityIdentifier("paymentSource.explanation")
+            } header: {
+                Text("转账通知判定")
+            } footer: {
+                Text(PaymentSourceSwitchView.editHint)
+            }
+        } else if !loaded {
+            Color.clear.frame(height: 1).listRowBackground(Color.clear).accessibilityHidden(true)
+                .task { await load() }
+        }
+    }
+
+    private func load() async {
+        // 旧服务器 404 / 任何读取失败：不显示，不打扰。
+        let status = try? await model.request(path: "/api/payment-sources/status")
+        view = PaymentSourceSwitchView.build(status, pluginKey: pluginKey)
+        loaded = true
+    }
+
+    private func symbol(_ tone: PaymentSourceSwitchView.Tone) -> String {
+        switch tone {
+        case .neutral: "scalemass"
+        case .success: "checkmark.circle.fill"
+        case .warning: "exclamationmark.triangle.fill"
+        }
+    }
+
+    private func color(_ tone: PaymentSourceSwitchView.Tone) -> Color {
+        switch tone {
+        case .neutral: .primary
+        case .success: .green
+        case .warning: .orange
+        }
+    }
+}
+
+/// 服务器参数页「在别处修改 › 插件 › 转账通知判定」跳过来的独立页面。
+struct PaymentSourceStatusPage: View {
+    var body: some View {
+        List {
+            PaymentSourceSwitchSection(pluginKey: nil)
+            Section {
+                Text("没有显示内容时，说明服务器版本较旧或没有安装转账通知插件。").font(.footnote).foregroundStyle(.secondary)
+            }
+        }
+        .navigationTitle("转账通知判定")
+        .navigationBarTitleDisplayMode(.inline)
     }
 }
 
