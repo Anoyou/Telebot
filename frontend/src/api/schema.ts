@@ -4955,6 +4955,28 @@ export interface paths {
         patch: operations["patch_system_settings_api_system_settings_patch"];
         trace?: never;
     };
+    "/api/system/settings/meta": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get System Settings Meta
+         * @description 服务器参数元数据：中文名、英文原名、大白话说明、单位 / 范围 / 默认值、也在哪些页面可改。
+         *
+         *     第 21 轮新增，只读、不访问数据库；iOS / Web 显示服务器参数时以它为准，旧服务器没有时回退到原键名。
+         */
+        get: operations["get_system_settings_meta_api_system_settings_meta_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/system/update-check": {
         parameters: {
             query?: never;
@@ -13308,6 +13330,112 @@ export interface components {
             /** Tail */
             tail: number;
         };
+        /** SystemSettingGroupOut */
+        SystemSettingGroupOut: {
+            /** Description */
+            description: string;
+            /** Id */
+            id: string;
+            /** Label */
+            label: string;
+        };
+        /**
+         * SystemSettingLocationOut
+         * @description 参数也能修改的专门页面。
+         */
+        SystemSettingLocationOut: {
+            /**
+             * Ios Label
+             * @description iOS 上的位置名；为空表示 iOS 没有专门页面
+             */
+            ios_label?: string | null;
+            /**
+             * Ios Target
+             * @description iOS 原生页面标识；老 App 不认识时只显示文字
+             */
+            ios_target?: string | null;
+            /**
+             * Label
+             * @description Web 上的位置名，例如「服务器设置 › 限流与风控」
+             */
+            label: string;
+            /**
+             * Web Route
+             * @description Web 路由；为空表示 Web 没有专门页面
+             */
+            web_route?: string | null;
+        };
+        /** SystemSettingMetaOut */
+        SystemSettingMetaOut: {
+            /**
+             * Advanced
+             * @description 排障类参数，界面可折叠到“高级”
+             * @default false
+             */
+            advanced: boolean;
+            /** Also In */
+            also_in?: components["schemas"]["SystemSettingLocationOut"][];
+            /** Default */
+            default?: unknown;
+            /**
+             * Description
+             * @description 一句大白话说明
+             */
+            description: string;
+            /**
+             * Editable
+             * @default true
+             */
+            editable: boolean;
+            /** Group */
+            group: string;
+            /**
+             * Key
+             * @description 参数键；嵌套参数用点号，例如 log_retention.trace_enabled
+             */
+            key: string;
+            /**
+             * Label
+             * @description 中文名
+             */
+            label: string;
+            /** Max */
+            max?: number | null;
+            /** Max Length */
+            max_length?: number | null;
+            /** Min */
+            min?: number | null;
+            /**
+             * Options
+             * @description enum 的可选值 {value, label}
+             */
+            options?: {
+                [key: string]: string;
+            }[];
+            /** Read Only Reason */
+            read_only_reason?: string | null;
+            /**
+             * Type
+             * @description bool / integer / string / enum / timezone / list
+             */
+            type: string;
+            /** Unit */
+            unit?: string | null;
+            /**
+             * Zero Means
+             * @description 填 0 的含义，例如「不自动删除」
+             */
+            zero_means?: string | null;
+        };
+        /** SystemSettingsMetaOut */
+        SystemSettingsMetaOut: {
+            /** Groups */
+            groups: components["schemas"]["SystemSettingGroupOut"][];
+            /** Params */
+            params: components["schemas"]["SystemSettingMetaOut"][];
+            /** Version */
+            version: number;
+        };
         /** TemplateCreate */
         TemplateCreate: {
             /**
@@ -13677,88 +13805,190 @@ export interface components {
         };
         /** _AppUpdateTargetPatch */
         _AppUpdateTargetPatch: {
-            /** Branch */
+            /**
+             * 服务器更新通道（分支） · branch
+             * @description 跟随哪个分支更新：main 是正式版，Beta 是测试版。
+             */
             branch?: string | null;
-            /** Remote */
+            /**
+             * 服务器更新来源（Git 远端） · remote
+             * @description 服务器更新时从哪个 Git 远端拉代码，一般是 origin。
+             */
             remote?: string | null;
         };
         /** _LLMLimitsPatch */
         _LLMLimitsPatch: {
-            /** Daily Requests */
+            /**
+             * AI 每日调用上限 · daily_requests
+             * @description 每个账号每天最多调用 AI 几次。单位：次。0 = 不限制。
+             */
             daily_requests?: number | null;
-            /** Daily Tokens */
+            /**
+             * AI 每日 Token 上限 · daily_tokens
+             * @description 每个账号每天最多用掉多少 Token（模型计费的字数单位）。单位：Token。0 = 不限制。
+             */
             daily_tokens?: number | null;
-            /** Per Minute */
+            /**
+             * AI 每分钟调用上限 · per_minute
+             * @description 每个账号每分钟最多调用 AI 几次，防止循环触发。单位：次。0 = 不限制。
+             */
             per_minute?: number | null;
-            /** Premium Daily */
+            /**
+             * 高价模型每日调用上限 · premium_daily
+             * @description 每个账号每天最多调用几次贵的模型（成本等级 3 及以上）。单位：次。0 = 不限制。
+             */
             premium_daily?: number | null;
         };
         /** _LogRetentionPatch */
         _LogRetentionPatch: {
-            /** Event Bus Delivery Enabled */
+            /**
+             * 事件投递给插件（Event Bus） · event_bus_delivery_enabled
+             * @description 把收到的消息事件交给订阅它的插件处理。关掉会退回旧的交互规则链路，只在回滚观察时用。
+             */
             event_bus_delivery_enabled?: boolean | null;
-            /** Guest Updates Enabled */
+            /**
+             * 接收访客消息（Guest Mode） · guest_updates_enabled
+             * @description Bot 没进的群里有人 @它时也能收到并回复。关掉后不再接收这类消息。
+             */
             guest_updates_enabled?: boolean | null;
-            /** Inline Updates Enabled */
+            /**
+             * 接收内联查询（Inline） · inline_updates_enabled
+             * @description 接收别人在输入框里 @Bot 发起的内联查询和选中结果。关掉后 Bot 不再响应内联查询。
+             */
             inline_updates_enabled?: boolean | null;
-            /** Llm Usage Retention Days */
+            /**
+             * AI 用量记录保留天数 · llm_usage_retention_days
+             * @description 每次 AI 调用的用量记录保存多少天。单位：天。范围 0～3650。0 = 不自动删除。
+             */
             llm_usage_retention_days?: number | null;
-            /** Native Raw Persist Enabled */
+            /**
+             * 保存 Telegram 原始数据（native_raw） · native_raw_persist_enabled
+             * @description 把 Telegram 推来的原始更新完整存下来，用于深度排查，会占更多空间。平时保持关闭。
+             */
             native_raw_persist_enabled?: boolean | null;
-            /** Native Raw Retention Days */
+            /**
+             * 原始数据保留天数 · native_raw_retention_days
+             * @description Telegram 原始数据保存多少天。单位：天。范围 0～30。
+             */
             native_raw_retention_days?: number | null;
-            /** Payment Source Plugin Authoritative */
+            /**
+             * 转账通知以插件结果为准 · payment_source_plugin_authoritative
+             * @description 默认关闭：转账通知以系统自带的解析为准，插件只做对照。对照长期一致后才建议打开。
+             */
             payment_source_plugin_authoritative?: boolean | null;
-            /** Rate Limit Event Retention Days */
+            /**
+             * 风控事件保留天数 · rate_limit_event_retention_days
+             * @description 限流 / 风控拦截记录保存多少天。单位：天。范围 0～3650。0 = 不自动删除。
+             */
             rate_limit_event_retention_days?: number | null;
-            /** Runtime Log Max Detail Chars */
+            /**
+             * 日志附加详情最多字符 · runtime_log_max_detail_chars
+             * @description 日志附带的结构化详情（排查用的额外字段）最多保存多少字。0 = 不保存详情。单位：字。范围 0～50000。0 = 不保存详情。
+             */
             runtime_log_max_detail_chars?: number | null;
-            /** Runtime Log Max Message Chars */
+            /**
+             * 日志正文最多字符 · runtime_log_max_message_chars
+             * @description 一条日志的正文太长时，超出部分截掉再保存。单位：字。范围 200～20000。
+             */
             runtime_log_max_message_chars?: number | null;
-            /** Runtime Log Min Level */
+            /**
+             * 运行日志等级 · runtime_log_min_level
+             * @description 比这个等级低的日志不保存。排查问题时可以临时调到“调试”，平时用“信息”。
+             */
             runtime_log_min_level?: string | null;
-            /** Runtime Log Retention Days */
+            /**
+             * 运行日志保留天数 · runtime_log_retention_days
+             * @description 运行日志保存多少天后自动删除。单位：天。范围 0～3650。0 = 不自动删除。
+             */
             runtime_log_retention_days?: number | null;
-            /** Trace Enabled */
+            /**
+             * 记录调用链（Trace） · trace_enabled
+             * @description 记录每条消息在系统里经过了哪些步骤，方便排查。只有调用链存储出问题时才需要关。
+             */
             trace_enabled?: boolean | null;
-            /** Trace Payload Snapshot Retention Days */
+            /**
+             * 消息内容快照保留天数 · trace_payload_snapshot_retention_days
+             * @description 调用链里附带的消息原文快照保存多少天；到期只清快照，调用链本身还在。单位：天。范围 0～3650。0 = 不自动删除。
+             */
             trace_payload_snapshot_retention_days?: number | null;
-            /** Trace Retention Days */
+            /**
+             * 调用链保留天数 · trace_retention_days
+             * @description 调用链记录保存多少天后自动删除。单位：天。范围 0～3650。0 = 不自动删除。
+             */
             trace_retention_days?: number | null;
         };
         /** _LoginSecurityPatch */
         _LoginSecurityPatch: {
-            /** Notify Otp Enabled */
+            /**
+             * 登录失败后发通知验证码 · notify_otp_enabled
+             * @description 管理台连续登录失败后，要求输入发到通知 Bot 的验证码才能继续。
+             */
             notify_otp_enabled?: boolean | null;
-            /** Notify Otp Fail Window Seconds */
+            /**
+             * 失败次数统计时长 · notify_otp_fail_window_seconds
+             * @description 在这段时间内累计的失败次数才算数。单位：秒。范围 60～86400。
+             */
             notify_otp_fail_window_seconds?: number | null;
-            /** Notify Otp Failed Attempt Threshold */
+            /**
+             * 失败几次后要通知验证码 · notify_otp_failed_attempt_threshold
+             * @description 连续输错密码达到这个次数后，开始要求通知验证码。0 = 不启用。单位：次。范围 0～50。0 = 不启用。
+             */
             notify_otp_failed_attempt_threshold?: number | null;
-            /** Notify Otp Max Attempts */
+            /**
+             * 通知验证码最多试几次 · notify_otp_max_attempts
+             * @description 同一个验证码最多允许输错几次。单位：次。范围 1～10。
+             */
             notify_otp_max_attempts?: number | null;
-            /** Notify Otp Ttl Seconds */
+            /**
+             * 通知验证码有效期 · notify_otp_ttl_seconds
+             * @description 发出的通知验证码多久后失效。单位：秒。范围 60～1800。
+             */
             notify_otp_ttl_seconds?: number | null;
-            /** Recovery Code Ttl Seconds */
+            /**
+             * 恢复码有效期 · recovery_code_ttl_seconds
+             * @description 申请的一次性恢复码多久后失效。单位：秒。范围 60～86400。
+             */
             recovery_code_ttl_seconds?: number | null;
-            /** Totp Enabled */
+            /**
+             * 验证器（TOTP）保护 · totp_enabled
+             * @description 登录时要求输入手机验证器 App 里的 6 位动态码。请先在验证器页面完成绑定再打开。
+             */
             totp_enabled?: boolean | null;
-            /** Totp Failed Attempt Threshold */
+            /**
+             * 失败几次后要验证器码 · totp_failed_attempt_threshold
+             * @description “连续失败后”模式下，输错几次开始要求验证器码。单位：次。范围 1～50。
+             */
             totp_failed_attempt_threshold?: number | null;
-            /** Totp Mode */
+            /**
+             * 何时要求验证器码 · totp_mode
+             * @description 每次登录都要，还是连续失败几次后才要。
+             */
             totp_mode?: string | null;
         };
         /** _PayoutLimitsPatch */
         _PayoutLimitsPatch: {
-            /** Daily Max */
+            /**
+             * 每日出款上限 · daily_max
+             * @description 一天累计最多发出多少游戏币。0 = 不限制。
+             */
             daily_max?: number | null;
-            /** Single Max */
+            /**
+             * 单笔出款上限 · single_max
+             * @description 一次最多发出多少游戏币（按你的业务币种填写）。0 = 不限制。
+             */
             single_max?: number | null;
         };
         /** _RemotePluginUpdateCheckPatch */
         _RemotePluginUpdateCheckPatch: {
-            /** Enabled */
+            /**
+             * 自动检查插件更新 · enabled
+             * @description 定期去插件仓库看看已安装的插件有没有新版本。
+             */
             enabled?: boolean | null;
-            /** Interval Minutes */
+            /**
+             * 插件更新检查间隔 · interval_minutes
+             * @description 多久检查一次插件更新。单位：分钟。范围 30～10080。
+             */
             interval_minutes?: number | null;
         };
         /**
@@ -13766,40 +13996,77 @@ export interface components {
          * @description 前端只会传子集；未传字段保持不变。
          */
         _SettingsPatch: {
-            /** Ai Context Messages */
+            /**
+             * AI 指令上下文条数 · ai_context_messages
+             * @description 用 AI 指令时顺带把最近几条聊天记录发给模型，让它看懂前因后果。0 = 不带。单位：条。范围 0～20。0 = 不带上下文。
+             */
             ai_context_messages?: number | null;
-            /** Ai Enabled */
+            /**
+             * AI 模块总开关 · ai_enabled
+             * @description 关掉后所有 AI 指令和插件里的 AI 调用都停用，配置保留。
+             */
             ai_enabled?: boolean | null;
+            /** 服务器更新来源 · app_update_target */
             app_update_target?: components["schemas"]["_AppUpdateTargetPatch"] | null;
-            /** Command Echo Guard Previous Messages */
+            /**
+             * 命令回声防误触 · command_echo_guard_previous_messages
+             * @description 群里有人原样复读一条指令时，往前看这么多条消息，避免被复读误触发。0 = 关闭。单位：条。范围 0～50。0 = 关闭。
+             */
             command_echo_guard_previous_messages?: number | null;
-            /** Command Prefix */
+            /**
+             * 指令前缀 · command_prefix
+             * @description 在 Telegram 里发指令时开头的符号，比如“,ai”里的“,”。最多 3 个字符。
+             */
             command_prefix?: string | null;
-            /** Command Prefix Required */
+            /**
+             * 账号本人必须带前缀 · command_prefix_required
+             * @description 关掉后，只有你这个账号本人发的消息可以不带前缀直接用指令名触发；群里其他人仍然不能用裸指令触发。
+             */
             command_prefix_required?: boolean | null;
+            /** AI 调用上限 · llm_limits */
             llm_limits?: components["schemas"]["_LLMLimitsPatch"] | null;
+            /** 日志、调用链与保留期限 · log_retention */
             log_retention?: components["schemas"]["_LogRetentionPatch"] | null;
+            /** 登录安全 · login_security */
             login_security?: components["schemas"]["_LoginSecurityPatch"] | null;
+            /** 出款上限 · payout_limits */
             payout_limits?: components["schemas"]["_PayoutLimitsPatch"] | null;
+            /** 自动检查插件更新 · remote_plugin_update_check */
             remote_plugin_update_check?: components["schemas"]["_RemotePluginUpdateCheckPatch"] | null;
-            /** Sudo Enabled */
+            /**
+             * Sudo 功能 · sudo_enabled
+             * @description 允许你授权的用户在 Telegram 里用 sudo 指令代你执行操作。
+             */
             sudo_enabled?: boolean | null;
-            /** Timezone */
+            /**
+             * 服务器时区 · timezone
+             * @description IANA 时区名，例如 Asia/Shanghai。定时任务的下次 / 上次触发时间都按它算。
+             */
             timezone?: string | null;
+            /** Web 界面偏好 · ui_preferences */
             ui_preferences?: components["schemas"]["_UIPreferencesPatch"] | null;
         };
         /** _UIPreferencesPatch */
         _UIPreferencesPatch: {
-            /** Mobile Nav Order */
+            /**
+             * 手机底栏顺序（旧） · mobile_nav_order
+             * @description 第 20 轮前的手机网页底栏顺序，现在由“常用入口”代替，保留兼容。
+             */
             mobile_nav_order?: string[] | null;
             /**
-             * Primary Nav
-             * @description 常用入口（桌面侧栏「常用」组与手机底栏共用，有序，最多 4 个）。
+             * 常用入口 · primary_nav
+             * @description Web 侧栏第一组和手机网页底栏放哪几个页面（1～4 个）。空 = 默认。
              */
             primary_nav?: string[] | null;
-            /** Provider Order */
+            /**
+             * AI 供应商排序 · provider_order
+             * @description AI 供应商列表里的先后顺序（供应商编号）。
+             */
             provider_order?: number[] | null;
-            /** Sidebar Order */
+            /**
+             * 侧栏组内顺序 · sidebar_order
+             * @description Web 侧栏「管理」「工具与设置」两组里页面的先后顺序。
+             */
             sidebar_order?: string[] | null;
         };
     };
@@ -32034,6 +32301,55 @@ export interface operations {
             };
             /** @description CSRF 校验失败或权限不足 */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description 服务器内部错误 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    get_system_settings_meta_api_system_settings_meta_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: {
+                auth_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SystemSettingsMetaOut"];
+                };
+            };
+            /** @description 认证失败 */
+            401: {
                 headers: {
                     [name: string]: unknown;
                 };

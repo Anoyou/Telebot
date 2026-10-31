@@ -55,6 +55,7 @@ from ..services import audit as audit_svc
 from ..services import auth_login_security, event_trace
 from ..services import platform_capabilities as platform_caps
 from ..services import rate_limit_service as svc
+from ..services import system_settings_meta as settings_meta
 from ..services.ai_feature import AI_ENABLED_SETTING_KEY, normalize_ai_enabled
 from ..util.update_target import normalize_update_branch, normalize_update_remote
 from ..worker.ipc import GCMD_RELOAD_GLOBAL, GLOBAL_CHANNEL, make_cmd
@@ -753,87 +754,159 @@ async def get_system_settings(db: DBSession, _user: CurrentUser) -> dict[str, An
     }
 
 
+
+class SystemSettingLocationOut(BaseModel):
+    """参数也能修改的专门页面。"""
+
+    label: str = Field(description="Web 上的位置名，例如「服务器设置 › 限流与风控」")
+    web_route: str | None = Field(default=None, description="Web 路由；为空表示 Web 没有专门页面")
+    ios_target: str | None = Field(default=None, description="iOS 原生页面标识；老 App 不认识时只显示文字")
+    ios_label: str | None = Field(default=None, description="iOS 上的位置名；为空表示 iOS 没有专门页面")
+
+
+class SystemSettingMetaOut(BaseModel):
+    key: str = Field(description="参数键；嵌套参数用点号，例如 log_retention.trace_enabled")
+    label: str = Field(description="中文名")
+    description: str = Field(description="一句大白话说明")
+    type: str = Field(description="bool / integer / string / enum / timezone / list")
+    group: str
+    default: Any = None
+    unit: str | None = None
+    min: int | None = None
+    max: int | None = None
+    max_length: int | None = None
+    options: list[dict[str, str]] = Field(default_factory=list, description="enum 的可选值 {value, label}")
+    editable: bool = True
+    read_only_reason: str | None = None
+    also_in: list[SystemSettingLocationOut] = Field(default_factory=list)
+    advanced: bool = Field(default=False, description="排障类参数，界面可折叠到“高级”")
+    zero_means: str | None = Field(default=None, description="填 0 的含义，例如「不自动删除」")
+
+
+class SystemSettingGroupOut(BaseModel):
+    id: str
+    label: str
+    description: str
+
+
+class SystemSettingsMetaOut(BaseModel):
+    version: int
+    groups: list[SystemSettingGroupOut]
+    params: list[SystemSettingMetaOut]
+
+
+def _meta_field(key: str, **kwargs: Any) -> Any:
+    """PATCH 字段：标题 / 说明取自服务器参数元数据（单一来源），不改变校验行为。"""
+
+    return Field(
+        default=None,
+        title=settings_meta.field_title(key),
+        description=settings_meta.field_description(key),
+        **kwargs,
+    )
+
+
+def _meta_group_title(key: str) -> str:
+    group = {
+        "login_security": "登录安全",
+        "remote_plugin_update_check": "自动检查插件更新",
+        "app_update_target": "服务器更新来源",
+        "llm_limits": "AI 调用上限",
+        "payout_limits": "出款上限",
+        "log_retention": "日志、调用链与保留期限",
+        "ui_preferences": "Web 界面偏好",
+    }.get(key, key)
+    return settings_meta.object_title(key, group)
+
+
+@router.get("/api/system/settings/meta", response_model=SystemSettingsMetaOut)
+async def get_system_settings_meta(_user: CurrentUser) -> dict[str, Any]:
+    """服务器参数元数据：中文名、英文原名、大白话说明、单位 / 范围 / 默认值、也在哪些页面可改。
+
+    第 21 轮新增，只读、不访问数据库；iOS / Web 显示服务器参数时以它为准，旧服务器没有时回退到原键名。
+    """
+
+    return settings_meta.payload()
+
+
 class _LLMLimitsPatch(BaseModel):
-    per_minute: int | None = None
-    daily_requests: int | None = None
-    daily_tokens: int | None = None
-    premium_daily: int | None = None
+    per_minute: int | None = _meta_field("llm_limits.per_minute")
+    daily_requests: int | None = _meta_field("llm_limits.daily_requests")
+    daily_tokens: int | None = _meta_field("llm_limits.daily_tokens")
+    premium_daily: int | None = _meta_field("llm_limits.premium_daily")
 
 
 class _PayoutLimitsPatch(BaseModel):
-    single_max: int | None = None
-    daily_max: int | None = None
+    single_max: int | None = _meta_field("payout_limits.single_max")
+    daily_max: int | None = _meta_field("payout_limits.daily_max")
 
 
 class _LogRetentionPatch(BaseModel):
-    trace_enabled: bool | None = None
-    event_bus_delivery_enabled: bool | None = None
-    inline_updates_enabled: bool | None = None
-    guest_updates_enabled: bool | None = None
-    runtime_log_retention_days: int | None = None
-    runtime_log_max_message_chars: int | None = None
-    runtime_log_max_detail_chars: int | None = None
-    runtime_log_min_level: str | None = None
-    trace_retention_days: int | None = None
-    trace_payload_snapshot_retention_days: int | None = None
-    native_raw_persist_enabled: bool | None = None
-    native_raw_retention_days: int | None = None
+    trace_enabled: bool | None = _meta_field("log_retention.trace_enabled")
+    event_bus_delivery_enabled: bool | None = _meta_field("log_retention.event_bus_delivery_enabled")
+    inline_updates_enabled: bool | None = _meta_field("log_retention.inline_updates_enabled")
+    guest_updates_enabled: bool | None = _meta_field("log_retention.guest_updates_enabled")
+    runtime_log_retention_days: int | None = _meta_field("log_retention.runtime_log_retention_days")
+    runtime_log_max_message_chars: int | None = _meta_field("log_retention.runtime_log_max_message_chars")
+    runtime_log_max_detail_chars: int | None = _meta_field("log_retention.runtime_log_max_detail_chars")
+    runtime_log_min_level: str | None = _meta_field("log_retention.runtime_log_min_level")
+    trace_retention_days: int | None = _meta_field("log_retention.trace_retention_days")
+    trace_payload_snapshot_retention_days: int | None = _meta_field("log_retention.trace_payload_snapshot_retention_days")
+    native_raw_persist_enabled: bool | None = _meta_field("log_retention.native_raw_persist_enabled")
+    native_raw_retention_days: int | None = _meta_field("log_retention.native_raw_retention_days")
     # B1 双跑对照：转账通知「以插件结果为准」（payment_sources 插件），默认关闭 = 以宿主旧解析器为准。
-    payment_source_plugin_authoritative: bool | None = None
-    llm_usage_retention_days: int | None = None
-    rate_limit_event_retention_days: int | None = None
+    payment_source_plugin_authoritative: bool | None = _meta_field("log_retention.payment_source_plugin_authoritative")
+    llm_usage_retention_days: int | None = _meta_field("log_retention.llm_usage_retention_days")
+    rate_limit_event_retention_days: int | None = _meta_field("log_retention.rate_limit_event_retention_days")
 
 
 class _RemotePluginUpdateCheckPatch(BaseModel):
-    enabled: bool | None = None
-    interval_minutes: int | None = None
+    enabled: bool | None = _meta_field("remote_plugin_update_check.enabled")
+    interval_minutes: int | None = _meta_field("remote_plugin_update_check.interval_minutes")
 
 
 class _AppUpdateTargetPatch(BaseModel):
-    remote: str | None = None
-    branch: str | None = None
+    remote: str | None = _meta_field("app_update_target.remote")
+    branch: str | None = _meta_field("app_update_target.branch")
 
 
 class _LoginSecurityPatch(BaseModel):
-    notify_otp_enabled: bool | None = None
-    notify_otp_failed_attempt_threshold: int | None = None
-    notify_otp_fail_window_seconds: int | None = None
-    notify_otp_ttl_seconds: int | None = None
-    notify_otp_max_attempts: int | None = None
-    totp_enabled: bool | None = None
-    totp_mode: str | None = None
-    totp_failed_attempt_threshold: int | None = None
-    recovery_code_ttl_seconds: int | None = None
+    notify_otp_enabled: bool | None = _meta_field("login_security.notify_otp_enabled")
+    notify_otp_failed_attempt_threshold: int | None = _meta_field("login_security.notify_otp_failed_attempt_threshold")
+    notify_otp_fail_window_seconds: int | None = _meta_field("login_security.notify_otp_fail_window_seconds")
+    notify_otp_ttl_seconds: int | None = _meta_field("login_security.notify_otp_ttl_seconds")
+    notify_otp_max_attempts: int | None = _meta_field("login_security.notify_otp_max_attempts")
+    totp_enabled: bool | None = _meta_field("login_security.totp_enabled")
+    totp_mode: str | None = _meta_field("login_security.totp_mode")
+    totp_failed_attempt_threshold: int | None = _meta_field("login_security.totp_failed_attempt_threshold")
+    recovery_code_ttl_seconds: int | None = _meta_field("login_security.recovery_code_ttl_seconds")
 
 
 class _UIPreferencesPatch(BaseModel):
-    sidebar_order: list[str] | None = Field(default=None, max_length=12)
-    mobile_nav_order: list[str] | None = Field(default=None, max_length=4)
-    primary_nav: list[str] | None = Field(
-        default=None,
-        max_length=4,
-        description="常用入口（桌面侧栏「常用」组与手机底栏共用，有序，最多 4 个）。",
-    )
-    provider_order: list[int] | None = Field(default=None, max_length=2048)
+    sidebar_order: list[str] | None = _meta_field("ui_preferences.sidebar_order", max_length=12)
+    mobile_nav_order: list[str] | None = _meta_field("ui_preferences.mobile_nav_order", max_length=4)
+    # 常用入口（桌面侧栏「常用」组与手机底栏共用，有序，最多 4 个）。
+    primary_nav: list[str] | None = _meta_field("ui_preferences.primary_nav", max_length=4)
+    provider_order: list[int] | None = _meta_field("ui_preferences.provider_order", max_length=2048)
 
 
 class _SettingsPatch(BaseModel):
     """前端只会传子集；未传字段保持不变。"""
 
-    command_prefix: str | None = None
-    timezone: str | None = None
-    ai_enabled: bool | None = None
-    sudo_enabled: bool | None = None
-    command_prefix_required: bool | None = None
-    command_echo_guard_previous_messages: int | None = None
-    ai_context_messages: int | None = None
-    login_security: _LoginSecurityPatch | None = None
-    remote_plugin_update_check: _RemotePluginUpdateCheckPatch | None = None
-    app_update_target: _AppUpdateTargetPatch | None = None
-    llm_limits: _LLMLimitsPatch | None = None
-    payout_limits: _PayoutLimitsPatch | None = None
-    log_retention: _LogRetentionPatch | None = None
-    ui_preferences: _UIPreferencesPatch | None = None
+    command_prefix: str | None = _meta_field("command_prefix")
+    timezone: str | None = _meta_field("timezone")
+    ai_enabled: bool | None = _meta_field("ai_enabled")
+    sudo_enabled: bool | None = _meta_field("sudo_enabled")
+    command_prefix_required: bool | None = _meta_field("command_prefix_required")
+    command_echo_guard_previous_messages: int | None = _meta_field("command_echo_guard_previous_messages")
+    ai_context_messages: int | None = _meta_field("ai_context_messages")
+    login_security: _LoginSecurityPatch | None = Field(default=None, title=_meta_group_title("login_security"))
+    remote_plugin_update_check: _RemotePluginUpdateCheckPatch | None = Field(default=None, title=_meta_group_title("remote_plugin_update_check"))
+    app_update_target: _AppUpdateTargetPatch | None = Field(default=None, title=_meta_group_title("app_update_target"))
+    llm_limits: _LLMLimitsPatch | None = Field(default=None, title=_meta_group_title("llm_limits"))
+    payout_limits: _PayoutLimitsPatch | None = Field(default=None, title=_meta_group_title("payout_limits"))
+    log_retention: _LogRetentionPatch | None = Field(default=None, title=_meta_group_title("log_retention"))
+    ui_preferences: _UIPreferencesPatch | None = Field(default=None, title=_meta_group_title("ui_preferences"))
 
 
 @router.patch("/api/system/settings")
