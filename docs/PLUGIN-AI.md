@@ -67,6 +67,8 @@ Provider 的 `execution_backend` 同样由平台配置决定，插件不能要�
 | 关闭 / 开启思考 | `complete(..., thinking="disabled"\|"enabled")` | 0.106.0-beta.2+；只对智谱 / Z.ai、DeepSeek、DashScope（Qwen3）生效，其它上游忽略 | — |
 | 推理被截断 | 模型只给出推理、没有最终答案（含 `finish_reason=length`） | 0.106.0-beta.2+ | 抛 `AIResponseTruncated`（`AIUnavailableError` 子类），fallback 链会先尝试下一个 Provider |
 
+错误类型属于 Plugin API 1.0 冻结范围的**稳定**部分：`AIUnavailableError`、`AICapabilityError`、`AIResponseTruncated` 三个名字及“后两者都是 `AIUnavailableError` 子类”在契约 1.x 内不变（`except AIUnavailableError` 一定接得住；以后细分只会加子类），错误提示文字不冻结。见 [PLUGIN-CONTRACT.md](./PLUGIN-CONTRACT.md) 第 2.6 节。
+
 注意：`complete()` 自 0.73 起就接受并忽略未知关键字参数，所以在旧平台上传 `images` / `web_search` / `thinking` **不会报错，但也不会生效**。依赖这些能力时要么把 `min_telepilot_version` 提到表中版本，要么先用 `inspect.signature(ctx.ai.complete).parameters` 或 `getattr(ctx.ai, "vision_enabled", False)` 探测。更多细节见 [API 参考 4.0](./PLUGIN-API-REFERENCE.md#40-受控-facadectxhttp-与-ctxai)。
 
 ## 原生文本流

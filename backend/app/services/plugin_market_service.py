@@ -77,6 +77,10 @@ TRUST_COMMUNITY = "community"
 TRUST_UNREVIEWED = "unreviewed"
 TRUST_LEVELS: tuple[str, ...] = (TRUST_OFFICIAL, TRUST_COMMUNITY, TRUST_UNREVIEWED)
 KINDS: tuple[str, ...] = ("interactive", "automation", "utility", "middleware", "payment_source", "ui")
+# registry.json 目录版本 1（Plugin API 1.0 冻结范围，第 22 轮定死）：版本 1 的字段只增不减，见
+# app.worker.plugins.stability.REGISTRY_V1_*。以后改格式发「目录版本 2」，宿主两版都读；parse_registry
+# 目前不按 schema_version 拒绝任何索引（行为不变）。
+REGISTRY_SCHEMA_VERSION = 1
 
 SOURCES_KEY = "plugin_market_sources"
 SETTINGS_KEY = "plugin_market_settings"

@@ -1,5 +1,7 @@
 # 入站 Webhook Quickstart
 
+> **稳定级别：实验**（Plugin API 1.0 冻结范围第 22 轮决定）。入站 Webhook 照常可用，但信封字段（`webhook` / `hook_key` / `body` / `headers`）还没有真实用户验证，可能调整，调整前会提前公告；见 [PLUGIN-CONTRACT.md](./PLUGIN-CONTRACT.md) 第 2.6 节。
+
 入站 Webhook 把外部 HTTP 事件交给指定账号的插件。外部系统向 TelePilot 发送 JSON，Web/API 进程先完成平台能力 gate、入口限流、账号/Token/Hook 校验和事件归一化，再通过 IPC 投递账号 Worker；Worker 按插件的 `event_subscriptions` 匹配 `hook_key` 并执行插件。HTTP `202` 只证明 Worker 已确认接收，不等于插件动作已成功。
 
 当系统设置中 **入站 Webhook 平台能力**关闭时，公开投递 URL 最前层返回 `404`（不访问 DB、不校验 Token），配置与 Token 仍保留；重新开启后即可继续投递。详见 [平台能力热插拔](./PLATFORM-CAPABILITIES.md)。

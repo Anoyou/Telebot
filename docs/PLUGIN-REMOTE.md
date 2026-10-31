@@ -35,6 +35,8 @@ my_plugin/
 
 `plugin.json` 是静态安装元数据，不执行 Python；安装后运行时仍会读取 `manifest.py` 的 `MANIFEST`。两边的 `name/key`、`version`、`category`、`event_subscriptions`、`capabilities` 必须保持一致。
 
+这四个文件的包结构与 ZIP 的 Ed25519 detached 签名（签整个 ZIP 字节、公钥 PEM、上传 `.sig`）属于 Plugin API 1.0 冻结范围的**稳定**部分；`manifest.py` 与 `plugin.json` 的一致性（两边都写了就必须相同，以 plugin.json 为准，`author` / `description` / `usage` 只警告）由主仓库与插件库 CI 检查，见 [PLUGIN-CONTRACT.md](./PLUGIN-CONTRACT.md) 第 2.6 节。
+
 标准会话链路里的互动入口，还要额外关注 4 个字段：
 
 - `triggers.command`：把某个入口声明成可由 UserBot 前缀命令开局。
@@ -522,7 +524,7 @@ TelePilot 0.113.0 起，管理台「插件中心 → 插件市场」（iOS「插
 - **官方源**：`https://raw.githubusercontent.com/Anoyou/telebot-plugins/main/registry.json`，由插件库的 `scripts/build_registry.py` 从各插件 `plugin.json` 生成（CI 校验、main 上自动更新），服务器也打包了一份副本用于离线兜底。部署时可用 `TELEPILOT_PLUGIN_MARKET=<url>` 换成自己的地址，或 `TELEPILOT_PLUGIN_MARKET=off` 关闭官方源。
 - **自定义来源**：管理员在市场页「来源管理」添加任意 https 的 `registry.json`，并选择信任等级 `official / community / unreviewed`；条目的有效等级取“来源等级”和“索引里自报等级”中更低的一个。只有 official 等级的来源可以开启自动更新（默认关闭）。
 
-`registry.json` 格式（`schema_version: 1`）：
+`registry.json` 格式（`schema_version: 1`，**目录版本 1 已定死**：下面这些字段在契约 1.x 内只增不减；以后改格式会发目录版本 2，宿主两版都读）：
 
 ```json
 {

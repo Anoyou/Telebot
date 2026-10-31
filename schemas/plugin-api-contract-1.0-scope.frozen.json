@@ -1,0 +1,362 @@
+{
+  "action_fields": {
+    "level": "stable",
+    "stable": {
+      "send_message": [
+        "text",
+        "chat_id",
+        "reply_to_message_id",
+        "parse_mode",
+        "reply_markup",
+        "save_message_id_key"
+      ],
+      "edit_message": [
+        "message_id",
+        "chat_id",
+        "text",
+        "parse_mode",
+        "reply_markup"
+      ],
+      "delete_message": [
+        "message_id",
+        "chat_id"
+      ],
+      "end_session": [],
+      "answer_callback": [
+        "callback_query_id",
+        "text",
+        "show_alert"
+      ],
+      "payout": [
+        "amount",
+        "chat_id",
+        "text",
+        "reply_to_message_id",
+        "parse_mode",
+        "payout_key"
+      ]
+    }
+  },
+  "event_payload": {
+    "level": "stable",
+    "stable": {
+      "source": [
+        "type",
+        "channel",
+        "account_id",
+        "update_id",
+        "callback_query_id",
+        "callback_data"
+      ],
+      "message": [
+        "text",
+        "message_id",
+        "chat_id",
+        "reply_to_message_id"
+      ],
+      "chat": [
+        "id",
+        "type"
+      ],
+      "sender": [
+        "user_id",
+        "display_name",
+        "username"
+      ],
+      "actor": [
+        "user_id",
+        "display_name",
+        "username"
+      ],
+      "source_actor": [
+        "user_id",
+        "display_name"
+      ],
+      "player": [
+        "user_id",
+        "display_name"
+      ],
+      "payment": [
+        "status",
+        "amount",
+        "payer_user_id",
+        "payer_display_name",
+        "receiver_display_name"
+      ],
+      "reply_to": [
+        "message_id"
+      ],
+      "trigger": [
+        "type",
+        "rule_id",
+        "module_key",
+        "entry_key"
+      ],
+      "session": [
+        "key",
+        "scope",
+        "ttl_seconds",
+        "active",
+        "data"
+      ]
+    }
+  },
+  "client_methods": {
+    "level": "advanced_compat",
+    "returns": "telethon",
+    "stable": {
+      "send_message": [
+        "reply",
+        "respond",
+        "send_message"
+      ],
+      "edit_message": [
+        "edit",
+        "edit_message"
+      ],
+      "read_chat": [
+        "get_chat",
+        "get_messages",
+        "iter_messages"
+      ],
+      "resolve_entity": [
+        "get_entity"
+      ],
+      "send_file": [
+        "send_file"
+      ],
+      "forward_message": [
+        "forward_messages"
+      ],
+      "join_chat": [
+        "join_chat"
+      ],
+      "delete_message": [
+        "delete_messages",
+        "unpin_message"
+      ],
+      "moderate_chat": [
+        "ban_user",
+        "kick_user",
+        "mute_user",
+        "unban_user"
+      ]
+    },
+    "always_allowed": [
+      "get_me"
+    ]
+  },
+  "manifest_py": {
+    "level": "stable",
+    "stable": {
+      "key": {
+        "present": true,
+        "has_default": false,
+        "position": 0
+      },
+      "display_name": {
+        "present": true,
+        "has_default": false,
+        "position": 1
+      },
+      "version": {
+        "present": true,
+        "has_default": true
+      },
+      "min_telepilot_version": {
+        "present": true,
+        "has_default": true
+      },
+      "author": {
+        "present": true,
+        "has_default": true
+      },
+      "description": {
+        "present": true,
+        "has_default": true
+      },
+      "usage": {
+        "present": true,
+        "has_default": true
+      },
+      "permissions": {
+        "present": true,
+        "has_default": true
+      },
+      "category": {
+        "present": true,
+        "has_default": true
+      },
+      "requires_platform_capabilities": {
+        "present": true,
+        "has_default": true
+      },
+      "config_schema": {
+        "present": true,
+        "has_default": true
+      },
+      "config_actions": {
+        "present": true,
+        "has_default": true
+      },
+      "interaction_entries": {
+        "present": true,
+        "has_default": true
+      },
+      "interaction_profile": {
+        "present": true,
+        "has_default": true
+      },
+      "event_subscriptions": {
+        "present": true,
+        "has_default": true
+      },
+      "capabilities": {
+        "present": true,
+        "has_default": true
+      },
+      "allowed_hosts": {
+        "present": true,
+        "has_default": true
+      },
+      "agent_tools": {
+        "present": true,
+        "has_default": true
+      },
+      "plugin_api": {
+        "present": true,
+        "has_default": true
+      },
+      "reads": {
+        "present": true,
+        "has_default": true
+      },
+      "middleware": {
+        "present": true,
+        "has_default": true
+      },
+      "render_profile": {
+        "present": true,
+        "has_default": true
+      },
+      "ui": {
+        "present": true,
+        "has_default": true
+      },
+      "provides": {
+        "present": true,
+        "has_default": true
+      }
+    },
+    "parity_fields": {
+      "key": "name",
+      "display_name": "display_name",
+      "version": "version",
+      "min_telepilot_version": "min_telepilot_version",
+      "permissions": "permissions",
+      "category": "category",
+      "requires_platform_capabilities": "requires_platform_capabilities",
+      "config_schema": "config_schema",
+      "config_actions": "config_actions",
+      "interaction_entries": "interaction_entries",
+      "interaction_profile": "interaction_profile",
+      "event_subscriptions": "event_subscriptions",
+      "capabilities": "capabilities",
+      "allowed_hosts": "allowed_hosts",
+      "agent_tools": "agent_tools"
+    }
+  },
+  "ai_errors": {
+    "level": "stable",
+    "module": "app.worker.plugins.ai_facade",
+    "stable": {
+      "AIUnavailableError": {
+        "ancestors": [
+          "AIUnavailableError",
+          "PluginAIError",
+          "RuntimeError",
+          "Exception",
+          "BaseException"
+        ]
+      },
+      "AICapabilityError": {
+        "ancestors": [
+          "AICapabilityError",
+          "AIUnavailableError",
+          "PluginAIError",
+          "RuntimeError",
+          "Exception",
+          "BaseException"
+        ]
+      },
+      "AIResponseTruncated": {
+        "ancestors": [
+          "AIResponseTruncated",
+          "AIUnavailableError",
+          "PluginAIError",
+          "RuntimeError",
+          "Exception",
+          "BaseException"
+        ]
+      }
+    }
+  },
+  "remote_package": {
+    "level": "stable",
+    "required_files": [
+      "__init__.py",
+      "manifest.py",
+      "plugin.json",
+      "plugin.py"
+    ],
+    "signature": {
+      "algorithm": "Ed25519",
+      "form": "detached",
+      "signed_payload": "zip_bytes",
+      "public_key_format": "PEM"
+    }
+  },
+  "registry": {
+    "level": "stable",
+    "schema_version": 1,
+    "top_fields": [
+      "schema_version",
+      "name",
+      "trust",
+      "repository",
+      "homepage",
+      "plugins"
+    ],
+    "entry_fields": [
+      "key",
+      "name",
+      "kind",
+      "icon",
+      "summary",
+      "version",
+      "author",
+      "min_telepilot_version",
+      "plugin_api",
+      "permissions",
+      "reads",
+      "tags",
+      "path",
+      "channels",
+      "repository",
+      "trust"
+    ],
+    "kinds": [
+      "interactive",
+      "automation",
+      "utility",
+      "middleware",
+      "payment_source",
+      "ui"
+    ],
+    "trust_levels": [
+      "official",
+      "community",
+      "unreviewed"
+    ]
+  }
+}

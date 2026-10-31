@@ -25,11 +25,23 @@
 
 ## [Unreleased]
 
+## [0.115.0-beta.4] - 2026-11-01 · patch（补丁预发布） · Plugin API 1.0 冻结范围已定（只加保修、不动现状）
+
 ### 「iOS」工作流：先编译、后开 UI 分片（不改 App 与服务器、不升版本）
 
 - UI 测试分片改为等「编译测试产物」job（build-for-testing，整个 run 只编译一次）成功后才开始，下载 xctestrun + Products 后 test-without-building；不再与编译同时开始、先占住 macOS 机器再空等产物。此前多个 PR 同时跑时，分片占满机器、编译反而排不上队，分片空等 12–35 分钟甚至超时失败。
 - 编译 job 只做到上传测试产物为止；未签名 IPA 打包、模型图标渲染比对、OpenAPI 生成校验与 Core 单元测试挪到与分片并行的新 job「校验与打包」，汇总检查「iOS 构建与测试」名称与判定规则不变（多了「校验与打包」必须成功）。
 - 测试产物打包时排除 `*.swiftmodule`、`*.o`（测试运行用不到），上传/下载更快。PR 上新推送取消旧 run 的 concurrency 保持不变。
+
+### 插件平台：Plugin API 1.0 冻结范围已定（只加保修、不动现状）
+
+- 按项目负责人 11-01 的选择（1B 2B 3B 4B 5A 6B 7A）把 7 块接口逐项分成「稳定 / 实验 / 高级·兼容」：标准动作字段（6 种常用动作的常用字段稳定，`send_via` / `send_via_options` / `rich_message` 等实验）、Event Bus 信封（高频标准栏目稳定，`raw` / `native_raw` 等实验，C07 旧字段照留不进保修单）、`ctx.client`（方法名与权限对应稳定，返回值不承诺，定级高级 / 兼容）、`manifest.py` 的 `Manifest(...)`（与 plugin.json 对应 + 在用参数稳定，冷门参数实验）、AI 错误类型（三个名字与继承关系稳定）、插件包与 Ed25519 签名（稳定）/ 入站 Webhook 信封（实验）、`registry.json` 目录版本 1（定死）。
+- 新模块 `app/worker/plugins/stability.py` 登记范围；契约快照 `schemas/plugin-api-contract.json` 新增 `stability` 段；稳定部分冻结在新文件 `schemas/plugin-api-contract-1.0-scope.frozen.json`（永不修改，以后实验项转正追加带日期的新文件），`scripts/export-plugin-contract.py --check` 同时检查冻结范围，删字段、改名、稳定降级、改签名算法、改目录版本都会被 CI 拦下；新增 `--freeze-scope`。
+- `manifest.py` ↔ `plugin.json` 一致性检查进 CI：`stability.manifest_parity_problems`（两边都写了且不一致才报错，以 plugin.json 为准；author / description / usage 只警告），主仓库对全部示例插件运行，插件库 `check_host_compat.py` 在新宿主上调用它（旧宿主回退插件库自带检查，结论不变）。
+- 新守护测试 `test_plugin_api_stability.py`（CI「插件 API 契约」job 运行）：确认每个稳定条目宿主今天仍在提供，检测器识别 14 类破坏并放行追加与实验调整。
+- `plugin_market_service.REGISTRY_SCHEMA_VERSION = 1`（只登记，`parse_registry` 行为不变）。
+- 文档：`PLUGIN-API-1.0-PLAN.md` 改为「已定」并新增第 0 节逐块写明稳定 / 实验划分；`PLUGIN-CONTRACT.md` 新增第 2.6 节与检查表；`PLUGIN-API-REFERENCE.md` 新增「稳定级别」；`PLUGIN-AI.md`、`PLUGIN-REMOTE.md`、`PLUGIN-WEBHOOK-QUICKSTART.md`（标「实验」）、`PLUGIN-CHEATSHEET.md`、`PLUGIN-DEV-GUIDE.md`、README 索引同步。
+- 版本判断：契约版本保持 1.0（0.112.0-beta.4 起已是正式 1.0，本次属 1.x 内追加冻结范围），Plugin API 保持 1.7（无新增运行时能力）。20 项兼容层全部保留、不标即将删除；不改群内行为与游戏币结算；不抬任何插件的 `min_telepilot_version`；无 API / 数据库 / 前端 / iOS 改动。
 
 ## [0.115.0-beta.3] - 2026-11-01 · patch（补丁预发布） · 兼容层使用统计（只计数，不删除、不告警）
 

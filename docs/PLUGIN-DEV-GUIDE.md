@@ -21,7 +21,7 @@
 - [`requires_platform_capabilities` 声明](./PLUGIN-REMOTE.md#requires_platform_capabilities-声明)
 - [安全边界](./PLUGIN-SAFETY.md)
 - [稳定契约 1.0（冻结范围与兼容承诺）](./PLUGIN-CONTRACT.md)
-- [Plugin API 1.0 冻结计划（草案：接口盘点、兼容层清单与保留理由）](./PLUGIN-API-1.0-PLAN.md)
+- [Plugin API 1.0 冻结计划（已定：每块接口的稳定 / 实验划分、接口盘点、兼容层清单与保留理由）](./PLUGIN-API-1.0-PLAN.md)
 - [开发者工具链](./PLUGIN-DEVTOOLS.md)
 - [速查表](./PLUGIN-CHEATSHEET.md)
 
