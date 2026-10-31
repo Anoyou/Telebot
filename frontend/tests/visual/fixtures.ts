@@ -295,6 +295,232 @@ export const providerFixtures = [
   },
 ] as const;
 
+/** 第 21 轮：服务器参数元数据（后端 system_settings_meta.py 的子集），平台与模块页「全部服务器参数」用。 */
+export const systemSettingsMetaFixture = {
+  "version": 1,
+  "groups": [
+    {
+      "id": "command",
+      "label": "指令",
+      "description": "Telegram 里怎么触发指令。修改后各账号自动热加载，不用重启。"
+    },
+    {
+      "id": "logs",
+      "label": "运行日志",
+      "description": "运行日志保存多少、保存多久。日志等级保存后立即生效。"
+    },
+    {
+      "id": "ai",
+      "label": "AI",
+      "description": "AI 模块开关与预算。"
+    },
+    {
+      "id": "permissions",
+      "label": "权限与紧急控制",
+      "description": "Sudo 功能与全局紧急停止。"
+    },
+    {
+      "id": "interface",
+      "label": "Web 界面偏好",
+      "description": "Web 管理台的导航与排序偏好，跨设备同步。"
+    }
+  ],
+  "params": [
+    {
+      "key": "command_prefix",
+      "label": "指令前缀",
+      "description": "在 Telegram 里发指令时开头的符号，比如“,ai”里的“,”。最多 3 个字符。",
+      "type": "string",
+      "group": "command",
+      "default": ",",
+      "unit": null,
+      "min": null,
+      "max": null,
+      "max_length": 3,
+      "options": [],
+      "editable": true,
+      "read_only_reason": null,
+      "also_in": [
+        {
+          "label": "服务器设置 › 平台与模块",
+          "web_route": "/settings?tab=platform",
+          "ios_target": null,
+          "ios_label": null
+        }
+      ],
+      "advanced": false,
+      "zero_means": null
+    },
+    {
+      "key": "ai_context_messages",
+      "label": "AI 指令上下文条数",
+      "description": "用 AI 指令时顺带把最近几条聊天记录发给模型，让它看懂前因后果。0 = 不带。",
+      "type": "integer",
+      "group": "command",
+      "default": 0,
+      "unit": "条",
+      "min": 0,
+      "max": 20,
+      "max_length": null,
+      "options": [],
+      "editable": true,
+      "read_only_reason": null,
+      "also_in": [
+        {
+          "label": "服务器设置 › 平台与模块",
+          "web_route": "/settings?tab=platform",
+          "ios_target": "ai_global_settings",
+          "ios_label": "AI › AI 全局设置"
+        }
+      ],
+      "advanced": false,
+      "zero_means": "不带上下文"
+    },
+    {
+      "key": "log_retention.runtime_log_min_level",
+      "label": "运行日志等级",
+      "description": "比这个等级低的日志不保存。排查问题时可以临时调到“调试”，平时用“信息”。",
+      "type": "enum",
+      "group": "logs",
+      "default": "info",
+      "unit": null,
+      "min": null,
+      "max": null,
+      "max_length": null,
+      "options": [
+        {
+          "value": "debug",
+          "label": "调试（最详细）"
+        },
+        {
+          "value": "info",
+          "label": "信息（默认）"
+        },
+        {
+          "value": "warn",
+          "label": "警告（只留告警和错误）"
+        },
+        {
+          "value": "error",
+          "label": "错误（只留错误）"
+        }
+      ],
+      "editable": true,
+      "read_only_reason": null,
+      "also_in": [
+        {
+          "label": "服务器设置 › 平台与模块",
+          "web_route": "/settings?tab=platform",
+          "ios_target": null,
+          "ios_label": null
+        }
+      ],
+      "advanced": false,
+      "zero_means": null
+    },
+    {
+      "key": "log_retention.runtime_log_retention_days",
+      "label": "运行日志保留天数",
+      "description": "运行日志保存多少天后自动删除。",
+      "type": "integer",
+      "group": "logs",
+      "default": 30,
+      "unit": "天",
+      "min": 0,
+      "max": 3650,
+      "max_length": null,
+      "options": [],
+      "editable": true,
+      "read_only_reason": null,
+      "also_in": [
+        {
+          "label": "服务器设置 › 平台与模块",
+          "web_route": "/settings?tab=platform",
+          "ios_target": null,
+          "ios_label": null
+        }
+      ],
+      "advanced": false,
+      "zero_means": "不自动删除"
+    },
+    {
+      "key": "llm_limits.per_minute",
+      "label": "AI 每分钟调用上限",
+      "description": "每个账号每分钟最多调用 AI 几次，防止循环触发。",
+      "type": "integer",
+      "group": "ai",
+      "default": 0,
+      "unit": "次",
+      "min": 0,
+      "max": null,
+      "max_length": null,
+      "options": [],
+      "editable": true,
+      "read_only_reason": null,
+      "also_in": [
+        {
+          "label": "服务器设置 › 限流与风控",
+          "web_route": "/settings?tab=security",
+          "ios_target": "ai_global_settings",
+          "ios_label": "AI › AI 全局设置"
+        }
+      ],
+      "advanced": false,
+      "zero_means": "不限制"
+    },
+    {
+      "key": "kill_switch",
+      "label": "全局紧急停止",
+      "description": "开启后停止全部消息处理，数据和管理台不受影响。",
+      "type": "bool",
+      "group": "permissions",
+      "default": false,
+      "unit": null,
+      "min": null,
+      "max": null,
+      "max_length": null,
+      "options": [],
+      "editable": false,
+      "read_only_reason": "只能用「紧急停止」按钮开关（需要确认），这里只显示状态。",
+      "also_in": [
+        {
+          "label": "顶栏 › 紧急停止",
+          "web_route": null,
+          "ios_target": "emergency_stop",
+          "ios_label": "更多 › 紧急停止"
+        }
+      ],
+      "advanced": false,
+      "zero_means": null
+    },
+    {
+      "key": "ui_preferences.primary_nav",
+      "label": "常用入口",
+      "description": "Web 侧栏第一组和手机网页底栏放哪几个页面（1～4 个）。空 = 默认。",
+      "type": "list",
+      "group": "interface",
+      "default": [],
+      "unit": null,
+      "min": null,
+      "max": null,
+      "max_length": null,
+      "options": [],
+      "editable": false,
+      "read_only_reason": "请在 Web「界面偏好」里拖动调整。",
+      "also_in": [
+        {
+          "label": "服务器设置 › 界面偏好",
+          "web_route": "/settings?tab=interface",
+          "ios_target": null,
+          "ios_label": null
+        }
+      ],
+      "advanced": false,
+      "zero_means": null
+    }
+  ]
+};
+
 function jsonResponse(pathname: string): unknown | undefined {
   if (pathname === "/api/auth/me") return { id: 1, username: "visual-test", has_totp: false };
   if (pathname === "/api/auth/csrf") return { csrf_token: "visual-test-csrf" };
@@ -322,6 +548,7 @@ function jsonResponse(pathname: string): unknown | undefined {
   };
   if (pathname === "/api/system/resource-dashboard") return emptyResourceDashboard;
   if (pathname === "/api/system/settings") return { timezone: "Asia/Shanghai", login_security: {} };
+  if (pathname === "/api/system/settings/meta") return systemSettingsMetaFixture;
   if (pathname === "/api/system-agent/config") return {
     enabled: false, provider_id: null, model: null, fallback_provider_ids: [],
     require_tool_approval: false, max_steps: 8, max_tool_calls: 24,

@@ -212,7 +212,8 @@ SETTINGS_META: list[dict[str, Any]] = [
     _p("ai_enabled", "AI 模块总开关", "关掉后所有 AI 指令和插件里的 AI 调用都停用，配置保留。",
        "bool", "ai", default=True,
        also_in=[
-           _loc("服务器设置 › 平台与模块", web=_WEB_PLATFORM, ios=IOS_RUNTIME_TREE, ios_label="插件 › 运行"),
+           _loc("服务器设置 › 平台与模块", web=_WEB_PLATFORM, ios=IOS_AI_GLOBAL, ios_label="AI › AI 全局设置"),
+           _loc("插件 › 运行（模块开关）", web="/plugins", ios=IOS_RUNTIME_TREE, ios_label="插件 › 运行"),
        ]),
     _p("llm_limits.per_minute", "AI 每分钟调用上限", "每个账号每分钟最多调用 AI 几次，防止循环触发。",
        "integer", "ai", default=0, unit="次", minimum=0, zero_means=_UNLIMITED,
