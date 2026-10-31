@@ -1,8 +1,12 @@
 name: iOS
 
-# 结构（提速）：
-#   判定 ─┬─ 编译（build-for-testing，一次）→ 上传测试产物 → 校验与 Core 单元测试 ─┐
-#         └─ UI 测试分片 ×4（与编译同时开始：先启动并预热模拟器，再等测试产物）───────┴─ 汇总「iOS 构建与测试」
+# 结构（第二十二轮：先编译、后开分片）：
+#   判定 → 编译测试产物（build-for-testing，整个 run 只编译一次，上传 xctestrun + Products）─┬─ UI 测试分片 ×4（下载产物，test-without-building）─┐
+#                                                                                         └─ 校验与打包（未签名 IPA、OpenAPI 生成校验、Core 单元测试）┴─ 汇总「iOS 构建与测试」
+# - 第二十二轮：分片不再与编译同时开始。原先分片一启动就占住 macOS runner 再轮询等产物，多个 PR 同时跑时，
+#   A 的分片占满机器、A 的编译反而排不上队，分片空等 12–35 分钟（甚至等到超时失败），几乎死锁。
+#   现在分片 needs 编译 job：每个占用 macOS 的 job 一开始就有活可干，不会持机空等；编译 job 只做到上传产物为止（约 3–4 分钟），
+#   IPA 打包与其余校验挪到与分片并行的「校验与打包」job，不在分片关键路径上。
 # - UI 测试按历史耗时（ios/scripts/ui-test-durations.json）均衡分到 4 台机器并行执行，
 #   用例清单从源码解析，新增用例自动进入某个分片，不会漏测；失败用例自动重跑一次，两次都失败才算失败。
 # - Beta push：若该提交的文件树与某个 PR 上已全绿的被测树完全相同（PR 在最新 Beta 上合并即如此），
@@ -161,11 +165,11 @@ jobs:
           echo "json=$(cat merged.json)" >> "$GITHUB_OUTPUT"
 
   build:
-    name: 编译与校验
+    name: 编译测试产物
     needs: plan
     if: needs.plan.outputs.skip != 'true'
     runs-on: xcode-27
-    timeout-minutes: 40
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
@@ -174,7 +178,7 @@ jobs:
         run: |
           sudo xcode-select -s "$XCODE_APP/Contents/Developer"
           xcodebuild -version
-          # 编译只需要目标设备，不需要启动模拟器（启动约 2 分钟，留给各测试分片并行完成）。
+          # 编译只需要目标设备，不需要启动模拟器（启动约 2 分钟，由各测试分片自己完成）。
           echo "udid=$(python3 ios/scripts/ci-select-simulator.py)" >> "$GITHUB_OUTPUT"
 
       - name: 校验工程与契约同步
@@ -208,13 +212,16 @@ jobs:
       - name: 打包测试产物
         # 用 tar 保留可执行位与符号链接（artifact 本身不保留文件权限）。
         # 第十轮：分片机器下载很慢（实测 20 MB 要 60–200 秒），有 zstd 时用 zstd 压缩（比 zip 级别 1 小），没有则退回 tar。
+        # 第二十二轮：排除测试运行用不到的编译中间件（*.swiftmodule、*.o，约占一半体积），App 与测试包本身完整保留。
         run: |
           ls "$DERIVED_DATA"/Build/Products/*.xctestrun
           du -sh "$DERIVED_DATA"/Build/Products/*/* 2>/dev/null | sort -h | tail -n 12 || true
+          EXCLUDES="--exclude=*.swiftmodule --exclude=*.o"
+          # shellcheck disable=SC2086
           if command -v zstd >/dev/null; then
-            tar -cf - -C "$DERIVED_DATA/Build" Products | zstd -q -T0 -12 -o ios-test-products.tar.zst
+            tar -cf - $EXCLUDES -C "$DERIVED_DATA/Build" Products | zstd -q -T0 -12 -o ios-test-products.tar.zst
           else
-            tar -cf ios-test-products.tar -C "$DERIVED_DATA/Build" Products
+            tar -cf ios-test-products.tar $EXCLUDES -C "$DERIVED_DATA/Build" Products
           fi
           ls -lh ios-test-products.tar*
 
@@ -228,7 +235,31 @@ jobs:
           overwrite: true
           if-no-files-found: error
 
-      # 测试产物已上传、各分片已可开始测试；以下步骤在本机继续进行，不占用 UI 测试的关键路径。
+      - name: 上传编译日志
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ios-build-log-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ios/build/results
+          retention-days: 7
+          if-no-files-found: ignore
+
+  verify:
+    name: 校验与打包
+    # 与 UI 分片并行（都在编译成功后开始），不在分片关键路径上；编译失败时不再占用 macOS。
+    needs: [plan, build]
+    if: needs.plan.outputs.skip != 'true'
+    runs-on: xcode-27
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: 选择 Xcode
+        run: |
+          sudo xcode-select -s "$XCODE_APP/Contents/Developer"
+          xcodebuild -version
+          mkdir -p "$RESULTS_DIR"
+
       - name: 打包未签名 IPA（供 Beta push 同树复用）
         # 与「iOS 未签名 IPA」同一脚本、同一 Release 配置；build 号用工程默认值，复用时由 ios-ipa.yml 改写为它的 run_number。
         run: |
@@ -262,19 +293,20 @@ jobs:
       - name: TelePilotCore 单元测试
         run: swift test --package-path ios/TelePilotCore
 
-      - name: 上传编译日志
+      - name: 上传校验日志
         if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: ios-build-log-${{ github.run_id }}-${{ github.run_attempt }}
+          name: ios-verify-log-${{ github.run_id }}-${{ github.run_attempt }}
           path: ios/build/results
           retention-days: 7
           if-no-files-found: ignore
 
   ui-tests:
     name: UI 测试 ${{ matrix.shard }}/4
-    # 不等编译 job：与编译同时开始，先把模拟器启动和首次冷启动（约 2–6 分钟）做完，再等测试产物。
-    needs: plan
+    # 第二十二轮：等编译 job 成功后才开始（不再与编译同时开始、持机空等产物）；编译失败或跳过时分片随之跳过。
+    # 开始后模拟器在后台启动，同时下载并解包产物。
+    needs: [plan, build]
     if: needs.plan.outputs.skip != 'true'
     runs-on: xcode-27
     timeout-minutes: 50
@@ -294,9 +326,10 @@ jobs:
           # 启动模拟器并冷启动一次系统 App（「设置」），让首次启动的系统缓存在等待编译期间完成。
           nohup sh -c "xcrun simctl boot '$UDID'; xcrun simctl bootstatus '$UDID' -b; xcrun simctl launch '$UDID' com.apple.Preferences; sleep 5; xcrun simctl terminate '$UDID' com.apple.Preferences; touch '$RUNNER_TEMP/sim-ready'" > "$RUNNER_TEMP/boot.log" 2>&1 &
 
-      - name: 等待并下载编译产物
+      - name: 下载测试产物
         # 第十轮：不再用 actions/download-artifact（Node 动作在模拟器后台启动时要 1–5 分钟才开始下载），
         # 改为 curl：取 artifact 的下载地址（302 到存储），再不带令牌直接下载。
+        # 第二十二轮：编译 job 已成功结束，产物必然已上传；只为 artifact 列表的短暂延迟保留最多 3 分钟的重试。
         env:
           GH_TOKEN: ${{ github.token }}
           NAME: ios-test-products-${{ github.run_id }}
@@ -311,17 +344,12 @@ jobs:
             ls -lh ios-test-products.tar*
             echo "下载并解压用时 $(( $(date +%s) - START )) 秒"
           }
-          for i in $(seq 1 180); do
+          for i in $(seq 1 18); do
             ID=$(api "actions/runs/$GITHUB_RUN_ID/artifacts?name=$NAME" | jq -r '[.artifacts[] | select(.expired | not)][0].id // empty' || true)
-            if [ -n "$ID" ]; then echo "测试产物已就绪（等待 $(( (i - 1) * 10 )) 秒）"; download "$ID"; exit $?; fi
-            BUILD=$(api "actions/runs/$GITHUB_RUN_ID/jobs?per_page=50" | jq -r '[.jobs[] | select(.name == "编译与校验")][0] | "\(.status) \(.conclusion)"' || echo "unknown")
-            case "$BUILD" in
-              "completed failure"|"completed cancelled"|"completed skipped")
-                echo "::error::编译 job 未成功（$BUILD），没有可测试的产物"; exit 1 ;;
-            esac
+            if [ -n "$ID" ]; then echo "测试产物已就绪（重试等待 $(( (i - 1) * 10 )) 秒）"; download "$ID"; exit $?; fi
             sleep 10
           done
-          echo "::error::等待测试产物超时"; exit 1
+          echo "::error::编译 job 已成功但找不到测试产物 $NAME"; exit 1
 
       - name: 解包并等待模拟器就绪
         id: products
@@ -430,7 +458,7 @@ jobs:
 
   result:
     name: iOS 构建与测试
-    needs: [plan, build, ui-tests]
+    needs: [plan, build, verify, ui-tests]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -441,15 +469,16 @@ jobs:
           REASON: ${{ needs.plan.outputs.reason }}
           PLAN: ${{ needs.plan.result }}
           BUILD: ${{ needs.build.result }}
+          VERIFY: ${{ needs.verify.result }}
           UI: ${{ needs.ui-tests.result }}
         run: |
-          echo "判定=$PLAN 编译与校验=$BUILD UI 测试=$UI"
+          echo "判定=$PLAN 编译测试产物=$BUILD 校验与打包=$VERIFY UI 测试=$UI"
           if [ "$PLAN" = "success" ] && [ "$SKIP" = "true" ]; then
             echo "### 跳过重复测试" >> "$GITHUB_STEP_SUMMARY"
             echo "$REASON" | tee -a "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
-          if [ "$PLAN" != "success" ] || [ "$BUILD" != "success" ] || [ "$UI" != "success" ]; then
+          if [ "$PLAN" != "success" ] || [ "$BUILD" != "success" ] || [ "$VERIFY" != "success" ] || [ "$UI" != "success" ]; then
             echo "::error::iOS 构建与测试未全部通过"
             exit 1
           fi
