@@ -150,7 +150,7 @@ final class WorkspacePreferences {
         hiddenHomeModules = Set(defaults.stringArray(forKey: "telepilot.home.hidden") ?? [])
         accountFavorites = Set(defaults.stringArray(forKey: "telepilot.favorites.accounts") ?? [])
         pluginFavorites = Set(defaults.stringArray(forKey: "telepilot.favorites.plugins") ?? [])
-        // 0.27.0 之前没有“是否自定义”的记录：存过且不是默认 Dock 的，按自定义处理（保持原样，不被服务器常用入口覆盖）。
+        // 0.29.0 之前没有“是否自定义”的记录：存过且不是默认 Dock 的，按自定义处理（保持原样，不被服务器常用入口覆盖）。
         let savedSlots = (defaults.stringArray(forKey: Self.dockKey) ?? []).compactMap(DockItem.init(rawValue:))
         let customizedFlag = defaults.object(forKey: Self.dockCustomizedKey) as? Bool
         #if DEBUG
