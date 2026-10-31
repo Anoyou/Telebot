@@ -23,6 +23,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import { ServerParamsOverview } from "./ServerParamsOverview";
 import {
   Dialog,
   DialogContent,
@@ -514,7 +515,7 @@ export function SettingsIndex() {
             <CardContent>
               <div className="flex max-w-xs items-end gap-2">
                 <div className="flex-1 space-y-1.5">
-                  <Label>前缀</Label>
+                  <Label>前缀<ParamKey k="command_prefix" /></Label>
                   <Input
                     value={prefix}
                     maxLength={3}
@@ -536,7 +537,10 @@ export function SettingsIndex() {
               </div>
               <div className="mt-4 flex max-w-xl flex-col gap-2 sm:flex-row sm:items-end sm:gap-3">
                 <div className="w-full space-y-1.5 sm:max-w-xs">
-                  <Label htmlFor="ai-context-messages">AI 指令上下文条数</Label>
+                  <div>
+                    <Label htmlFor="ai-context-messages">AI 指令上下文条数</Label>
+                    <ParamKey k="ai_context_messages" />
+                  </div>
                   <Input
                     id="ai-context-messages"
                     type="number"
@@ -558,7 +562,7 @@ export function SettingsIndex() {
               </div>
               <div className="mt-4 flex max-w-xl items-start justify-between gap-4 rounded-md border bg-muted/20 px-3 py-3">
                 <div className="space-y-1">
-                  <div className="text-sm font-medium">账号本人必须带前缀</div>
+                  <div className="text-sm font-medium">账号本人必须带前缀<ParamKey k="command_prefix_required" /></div>
                   <p className="text-xs leading-5 text-muted-foreground">
                     关闭后，只有当前 userbot 账号本人发出的消息可以直接用命令名触发；群成员仍不会因为裸命令或系统前缀触发 userbot 命令。
                   </p>
@@ -724,7 +728,7 @@ export function SettingsIndex() {
             <CardContent>
               <div className="flex max-w-sm items-end gap-2">
                 <div className="flex-1 space-y-1.5">
-                  <Label>IANA 时区</Label>
+                  <Label>IANA 时区<ParamKey k="timezone" /></Label>
                   <Input
                     value={timezone}
                     onChange={(e) => setTimezone(e.target.value)}
@@ -752,7 +756,7 @@ export function SettingsIndex() {
             <CardContent>
               <div className="grid gap-3 md:grid-cols-4">
                 <div className="space-y-1.5">
-                  <Label>保留天数</Label>
+                  <Label>保留天数<ParamKey k="runtime_log_retention_days" /></Label>
                   <Input
                     inputMode="numeric"
                     value={logRetention.runtime_log_retention_days}
@@ -766,7 +770,7 @@ export function SettingsIndex() {
                   <p className="text-xs text-muted-foreground">默认 30；0 = 不自动删除</p>
                 </div>
                 <div className="space-y-1.5">
-                  <Label>消息正文最多字符</Label>
+                  <Label>消息正文最多字符<ParamKey k="runtime_log_max_message_chars" /></Label>
                   <Input
                     inputMode="numeric"
                     value={logRetention.runtime_log_max_message_chars}
@@ -780,7 +784,7 @@ export function SettingsIndex() {
                   <p className="text-xs text-muted-foreground">默认 2000，最小 200</p>
                 </div>
                 <div className="space-y-1.5">
-                  <Label>结构化详情最多字符</Label>
+                  <Label>结构化详情最多字符<ParamKey k="runtime_log_max_detail_chars" /></Label>
                   <Input
                     inputMode="numeric"
                     value={logRetention.runtime_log_max_detail_chars}
@@ -794,7 +798,7 @@ export function SettingsIndex() {
                   <p className="text-xs text-muted-foreground">默认 8000；0 = 不保存 detail</p>
                 </div>
                 <div className="space-y-1.5">
-                  <Label>运行日志等级（即时生效）</Label>
+                  <Label>运行日志等级（即时生效）<ParamKey k="runtime_log_min_level" /></Label>
                   <Select
                     value={logRetention.runtime_log_min_level}
                     onChange={(e) =>
@@ -817,6 +821,7 @@ export function SettingsIndex() {
               <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
                 <LogToggleCard
                   label="写入 Trace"
+                  paramKey="trace_enabled"
                   description="关闭后保留旧运行日志；仅用于排查 Trace 存储异常。"
                   checked={logRetention.trace_enabled}
                   onCheckedChange={(checked) =>
@@ -825,6 +830,7 @@ export function SettingsIndex() {
                 />
                 <LogToggleCard
                   label="Event Bus 投递"
+                  paramKey="event_bus_delivery_enabled"
                   description="关闭后回退旧交互规则链路，适合部署回滚观察。"
                   checked={logRetention.event_bus_delivery_enabled}
                   onCheckedChange={(checked) =>
@@ -833,6 +839,7 @@ export function SettingsIndex() {
                 />
                 <LogToggleCard
                   label="Inline 更新"
+                  paramKey="inline_updates_enabled"
                   description="关闭后不拉取 inline_query / chosen_inline_result。"
                   checked={logRetention.inline_updates_enabled}
                   onCheckedChange={(checked) =>
@@ -841,6 +848,7 @@ export function SettingsIndex() {
                 />
                 <LogToggleCard
                   label="访客消息（Guest Mode）"
+                  paramKey="guest_updates_enabled"
                   description="关闭后不拉取 guest_message：Bot 在未加入的会话被 @提及时不再回复。"
                   checked={logRetention.guest_updates_enabled}
                   onCheckedChange={(checked) =>
@@ -849,6 +857,7 @@ export function SettingsIndex() {
                 />
                 <LogToggleCard
                   label="转账通知以插件结果为准"
+                  paramKey="payment_source_plugin_authoritative"
                   description="默认关闭：以宿主旧解析器为准，转账通知插件只做对照（不一致记日志、Trace 与插件运行统计）。对照至少一个 beta 周期全部一致后再打开；插件出错或超时仍自动回退旧解析。"
                   checked={logRetention.payment_source_plugin_authoritative}
                   onCheckedChange={(checked) =>
@@ -858,7 +867,7 @@ export function SettingsIndex() {
               </div>
               <div className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-4">
                 <div className="space-y-1.5">
-                  <Label>Trace 保留天数</Label>
+                  <Label>Trace 保留天数<ParamKey k="trace_retention_days" /></Label>
                   <Input
                     inputMode="numeric"
                     value={logRetention.trace_retention_days}
@@ -872,7 +881,7 @@ export function SettingsIndex() {
                   <p className="text-xs text-muted-foreground">默认 30；0 = 不自动删除链路记录</p>
                 </div>
                 <div className="space-y-1.5">
-                  <Label>Payload 快照保留天数</Label>
+                  <Label>Payload 快照保留天数<ParamKey k="trace_payload_snapshot_retention_days" /></Label>
                   <Input
                     inputMode="numeric"
                     value={logRetention.trace_payload_snapshot_retention_days}
@@ -886,7 +895,7 @@ export function SettingsIndex() {
                   <p className="text-xs text-muted-foreground">默认 7；到期只清空快照，保留主链路</p>
                 </div>
                 <div className="flex min-w-0 flex-col gap-1.5">
-                  <Label>保存完整 native_raw</Label>
+                  <Label>保存完整 native_raw<ParamKey k="native_raw_persist_enabled" /></Label>
                   <p className="text-xs leading-5 text-muted-foreground">默认关闭；仅用于短期深度排障</p>
                   <div className="mt-auto flex min-h-10 items-end justify-end pt-2">
                     <Switch
@@ -898,7 +907,7 @@ export function SettingsIndex() {
                   </div>
                 </div>
                 <div className="space-y-1.5">
-                  <Label>native_raw 保留天数</Label>
+                  <Label>native_raw 保留天数<ParamKey k="native_raw_retention_days" /></Label>
                   <Input
                     inputMode="numeric"
                     value={logRetention.native_raw_retention_days}
@@ -921,6 +930,7 @@ export function SettingsIndex() {
             </CardContent>
           </Card>
 
+          <ServerParamsOverview />
         </TabsContent>
 
         <TabsContent value="connections" className="space-y-6">
@@ -1078,20 +1088,34 @@ function normalizeLimitInput(value: string): string {
   return value.replace(/[^0-9]/g, "");
 }
 
+/** 第 21 轮：标签旁保留英文原名（参数键），与「全部服务器参数」、iOS 同一叫法。 */
+function ParamKey({ k }: { k: string }) {
+  return (
+    <code aria-hidden="true" className="mt-0.5 block truncate text-[11px] font-normal text-muted-foreground" title={k}>
+      {k}
+    </code>
+  );
+}
+
 function LogToggleCard({
   label,
+  paramKey,
   description,
   checked,
   onCheckedChange,
 }: {
   label: string;
+  paramKey?: string;
   description: string;
   checked: boolean;
   onCheckedChange: (checked: boolean) => void;
 }) {
   return (
     <div className="flex min-h-36 flex-col rounded-md border border-border/70 bg-muted/20 p-3">
-      <Label>{label}</Label>
+      <Label>
+        {label}
+        {paramKey ? <ParamKey k={paramKey} /> : null}
+      </Label>
       <p className="mt-2 text-xs leading-5 text-muted-foreground">{description}</p>
       <div className="mt-auto flex justify-end pt-4">
         <Switch

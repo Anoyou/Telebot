@@ -170,7 +170,7 @@ final class DiagnosticsUITests: XCTestCase {
         XCTAssertTrue(error.label.contains("worker 未在线"), error.label)
     }
 
-    /// 服务器参数：中文名称与说明、只提交改动、校验与服务器一致；其它键仍可原始编辑。
+    /// 服务器参数：明显可编辑的输入行、只提交改动、校验与服务器一致；重复项集中到「在别处修改」；全部参数带中英文名。
     func testServerSettingsEditsCommonKeysAndKeepsRawEditor() {
         let app = launch()
         let system = app.buttons["服务器设置"]
@@ -209,13 +209,19 @@ final class DiagnosticsUITests: XCTestCase {
         prefix.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 3))
         XCTAssertEqual(prefix.value as? String, ".")
 
-        let context = app.textFields["serverSettings.field.ai_context_messages"]
-        scrollTo(context, in: app, attempts: 6)
-        XCTAssertTrue(context.exists, "AI 指令上下文条数应为原生输入框")
-        XCTAssertEqual(context.value as? String, "3")
-        tapAtEnd(context)
-        context.typeText(XCUIKeyboardKey.delete.rawValue + "5")
-        XCTAssertEqual(context.value as? String, "5")
+        // 第 21 轮：数字是带边框的输入框 + 单位 + 步进器；改过的行标「已修改」，和默认值不同时可「恢复默认」。
+        let days = app.textFields["serverSettings.field.runtime_log_retention_days"]
+        scrollTo(days, in: app, attempts: 8)
+        XCTAssertTrue(days.exists, "运行日志保留天数应为原生输入框")
+        XCTAssertEqual(days.value as? String, "30")
+        XCTAssertTrue(element(app, "serverSettings.stepper.runtime_log_retention_days").exists, "数字参数旁边应有步进器")
+        XCTAssertFalse(element(app, "serverSettings.modified.runtime_log_retention_days").exists, "没改时不显示「已修改」")
+        tapAtEnd(days)
+        days.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 2) + "45")
+        XCTAssertEqual(days.value as? String, "45")
+        XCTAssertTrue(element(app, "serverSettings.modified.runtime_log_retention_days").waitForExistence(timeout: 5), "改过的行应标「已修改」")
+        XCTAssertTrue(element(app, "serverSettings.reset.runtime_log_retention_days").exists, "和默认值不同时应可恢复默认")
+        XCTAssertTrue(element(app, "serverSettings.dirtyCount").label.contains("1 项未保存"), element(app, "serverSettings.dirtyCount").label)
         save.tap()
         // 保存结果固定在页面底部（键盘上方），不用滚动就能看到。
         let saved = element(app, "serverSettings.saved")
@@ -224,21 +230,73 @@ final class DiagnosticsUITests: XCTestCase {
         XCTAssertTrue(saved.label.contains("已保存"), saved.label)
         assertVisibleWithoutScrolling(saved, in: app)
         XCTAssertFalse(save.isEnabled, "保存后回到无修改状态")
-        XCTAssertEqual(context.value as? String, "5")
+        XCTAssertEqual(days.value as? String, "45")
+        XCTAssertFalse(element(app, "serverSettings.modified.runtime_log_retention_days").exists, "保存后不再标「已修改」")
 
+        // 已在 AI 全局设置里能改的「AI 指令上下文条数」不在常用页重复，集中在「在别处修改」并可跳转。
+        XCTAssertFalse(app.textFields["serverSettings.field.ai_context_messages"].exists, "AI 上下文条数应只在 AI 全局设置里改")
         let trace = app.switches["serverSettings.toggle.trace_enabled"]
         scrollTo(trace, in: app)
-        XCTAssertTrue(trace.exists, "Trace 设置应为原生开关")
-        let raw = app.buttons["serverSettings.raw"]
-        scrollTo(raw, in: app)
-        XCTAssertTrue(raw.exists, "其它参数仍可原始编辑")
-        XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "AI 调用限额")).firstMatch.exists, "未原生化的键列在「其它参数」里")
+        XCTAssertTrue(trace.exists, "调用链设置应为原生开关")
+        let elsewhere = element(app, "serverSettings.elsewhere.ai_global_settings")
+        scrollTo(elsewhere, in: app, attempts: 20)
+        XCTAssertTrue(elsewhere.exists, "应有「在别处修改」→ AI 全局设置")
+        XCTAssertTrue(elsewhere.label.contains("AI 指令上下文条数"), elsewhere.label)
         let screenshot = XCTAttachment(screenshot: app.screenshot())
         screenshot.name = "服务器参数"
         screenshot.lifetime = .keepAlways
         add(screenshot)
+        elsewhere.tap()
+        XCTAssertTrue(app.navigationBars["AI 全局设置"].waitForExistence(timeout: 10))
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        XCTAssertTrue(app.navigationBars["服务器参数"].waitForExistence(timeout: 10))
+
+        // 全部参数：每个参数中文名 + 英文原名 + 说明，标注「也在」哪里。
+        let raw = app.buttons["serverSettings.raw"]
+        scrollTo(raw, in: app, attempts: 20)
+        XCTAssertTrue(raw.exists, "应能打开全部参数")
         raw.tap()
         XCTAssertTrue(app.navigationBars["全部服务器参数"].waitForExistence(timeout: 10))
+        let alsoIn = element(app, "serverSettings.alsoIn.ai_context_messages")
+        scrollTo(alsoIn, in: app, attempts: 6)
+        XCTAssertTrue(alsoIn.exists, "全部参数里保留 AI 上下文条数并标注也在哪里")
+        XCTAssertTrue(alsoIn.label.contains("AI › AI 全局设置"), alsoIn.label)
+        XCTAssertTrue(app.textFields["serverSettings.field.ai_context_messages"].exists, "全部参数里仍可直接改")
+        XCTAssertTrue(app.staticTexts["ai_context_messages"].exists, "应显示英文原名")
+        let allShot = XCTAttachment(screenshot: app.screenshot())
+        allShot.name = "全部服务器参数"
+        allShot.lifetime = .keepAlways
+        add(allShot)
+        let perMinute = app.textFields["serverSettings.field.llm_limits.per_minute"]
+        scrollTo(perMinute, in: app, attempts: 40)
+        XCTAssertTrue(perMinute.exists, "AI 每分钟调用上限应有中文名与输入框")
+        XCTAssertEqual(perMinute.value as? String, "30")
+    }
+
+    /// 旧服务器没有参数元数据接口：常用参数用 App 内置说明，其余参数按原键名显示，不影响编辑。
+    func testServerSettingsFallsBackWithoutMetadata() {
+        let app = launch(["--ui-test-old-server-meta"])
+        let system = app.buttons["服务器设置"]
+        XCTAssertTrue(app.buttons["more.accounts"].waitForExistence(timeout: 10))
+        scrollTo(system, in: app, attempts: 8)
+        system.tap()
+        let entry = app.buttons["system.serverSettings"]
+        XCTAssertTrue(entry.waitForExistence(timeout: 10))
+        entry.tap()
+        XCTAssertTrue(app.navigationBars["服务器参数"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.textFields["serverSettings.field.command_prefix"].waitForExistence(timeout: 10))
+        XCTAssertTrue(element(app, "serverSettings.metaFallback").exists, "旧服务器应提示按原键名显示")
+        XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "指令前缀")).firstMatch.exists)
+        let raw = app.buttons["serverSettings.raw"]
+        scrollTo(raw, in: app, attempts: 30)
+        raw.tap()
+        XCTAssertTrue(app.navigationBars["全部服务器参数"].waitForExistence(timeout: 10))
+        let rawKey = element(app, "serverSettings.rawKey.ai_enabled")
+        scrollTo(rawKey, in: app, attempts: 40)
+        XCTAssertTrue(rawKey.exists, "没有说明的参数按原键名列出")
+        let rawJSON = app.buttons["serverSettings.rawJSON"]
+        scrollTo(rawJSON, in: app, attempts: 10)
+        XCTAssertTrue(rawJSON.exists, "仍保留按键名原始编辑")
     }
 
     /// 日志补两类：系统控制台（原始行、默认脱敏）与 Agent 运行（失败轮次的错误与事件轨迹）。

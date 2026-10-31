@@ -29,6 +29,7 @@ import type {
   PlatformModuleKey,
   PlatformTree,
   SystemSettings,
+  SystemSettingsMeta,
   TemplateOut,
 } from "@/api/types";
 
@@ -189,6 +190,18 @@ export async function getEventTrace(traceId: string): Promise<EventTraceDetail> 
 export async function getSystemSettings(): Promise<SystemSettings> {
   const { data } = await api.get<SystemSettings>("/api/system/settings");
   return data;
+}
+
+/** 服务器参数元数据（第 21 轮）。旧服务器没有该接口（404 / 405）时返回 null，界面回退到原键名显示。 */
+export async function getSystemSettingsMeta(): Promise<SystemSettingsMeta | null> {
+  try {
+    const { data } = await api.get<SystemSettingsMeta>("/api/system/settings/meta");
+    return data;
+  } catch (error) {
+    const status = (error as { response?: { status?: number } } | null)?.response?.status;
+    if (status === 404 || status === 405) return null;
+    throw error;
+  }
 }
 export type SystemSettingsPatch = Partial<Omit<SystemSettings, "login_security" | "ui_preferences">> & {
   login_security?: Partial<NonNullable<SystemSettings["login_security"]>>;

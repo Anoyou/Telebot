@@ -1192,6 +1192,10 @@ export interface HealthOverview {
   codex_gateway?: CodexGatewayHealthStatus;
 }
 
+// 第 21 轮：服务器参数元数据（中文名 + 英文原名 + 说明 + 也在哪些页面可改），后端单一来源。
+export type SystemSettingsMeta = ApiComponents["schemas"]["SystemSettingsMetaOut"];
+export type SystemSettingMeta = ApiComponents["schemas"]["SystemSettingMetaOut"];
+export type SystemSettingLocation = ApiComponents["schemas"]["SystemSettingLocationOut"];
 export type HostResourceStatus = ApiComponents["schemas"]["HostResource"];
 export type ProcessResourceStatus = ApiComponents["schemas"]["ProcessResource"];
 export type WorkerRuntimeResourceStatus = ApiComponents["schemas"]["WorkerRuntimeResource"];
