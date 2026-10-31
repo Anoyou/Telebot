@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
 
 class SystemAgentConfigOut(BaseModel):
@@ -106,61 +106,6 @@ class SystemCheckupOut(BaseModel):
     note: str | None = None
 
 
-class SystemAgentSessionCreate(BaseModel):
-    account_id: int | None = None
-    title: str | None = Field(default=None, max_length=64)
-    default_account: bool = Field(
-        default=False,
-        description=(
-            "第 20 轮：未传 account_id 时，若服务器只有 1 个账号则自动关联它（多账号仍为系统级）。"
-            "客户端用户显式选「全局 / 系统级」时不要传 true。旧服务器忽略该字段，"
-            "客户端可按 GET /api/system/capabilities 的 features.agent_session_default_account 探测。"
-        ),
-    )
-
-
-class SystemAgentSessionUpdate(BaseModel):
-    title: str | None = Field(default=None, max_length=64)
-    status: str | None = None
-    account_id: int | None = None
-
-
-class SystemAgentSessionOut(BaseModel):
-    id: str
-    web_user_id: int | None = None
-    bot_tg_user_id: int | None = None
-    account_id: int | None = None
-    channel: str
-    title: str | None = None
-    origin: str = "interactive"
-    status: str
-    memory_summary: str = ""
-    memory_state: dict[str, Any] = Field(default_factory=dict)
-    created_at: datetime | None = None
-    updated_at: datetime | None = None
-    account_auto_linked: bool = Field(
-        default=False,
-        description="仅新建会话响应：本次因 default_account=true 且服务器只有 1 个账号而自动关联了 account_id",
-    )
-
-    model_config = ConfigDict(from_attributes=True)
-
-
-class SystemAgentMessageOut(BaseModel):
-    id: int
-    session_id: str
-    role: str
-    content: dict[str, Any]
-    usage: dict[str, Any] | None = None
-    run_status: str = "completed"
-    error_code: str | None = None
-    error_message: str | None = None
-    retry_count: int = 0
-    created_at: datetime | None = None
-
-    model_config = ConfigDict(from_attributes=True)
-
-
 class SystemAgentModelSelection(BaseModel):
     """本轮模型选择：auto 用全局配置；pinned 固定 provider+model，失败不静默换模型。"""
 
@@ -184,6 +129,92 @@ class SystemAgentModelSelection(BaseModel):
         if self.mode == "pinned" and (self.provider_id is None or not str(self.model or "").strip()):
             raise ValueError("pinned 模式必须同时提供 provider_id 与 model")
         return self
+
+
+class SystemAgentSessionCreate(BaseModel):
+    account_id: int | None = None
+    title: str | None = Field(default=None, max_length=64)
+    default_account: bool = Field(
+        default=False,
+        description=(
+            "第 20 轮：未传 account_id 时，若服务器只有 1 个账号则自动关联它（多账号仍为系统级）。"
+            "客户端用户显式选「全局 / 系统级」时不要传 true。旧服务器忽略该字段，"
+            "客户端可按 GET /api/system/capabilities 的 features.agent_session_default_account 探测。"
+        ),
+    )
+    model_selection: SystemAgentModelSelection | None = Field(
+        default=None,
+        description="第 22 轮：新会话初始的本轮模型选择（缺省 = 自动）。旧服务器忽略该字段。",
+    )
+
+
+class SystemAgentSessionUpdate(BaseModel):
+    title: str | None = Field(default=None, max_length=64)
+    status: str | None = None
+    account_id: int | None = None
+    model_selection: SystemAgentModelSelection | None = Field(
+        default=None,
+        description=(
+            "第 22 轮：记住本会话上次选择的本轮模型；显式传 null 清除（= 自动）。"
+            "只改它不会刷新会话的 updated_at（不影响会话列表排序）。"
+            "客户端按 GET /api/system/capabilities 的 features.agent_session_model_selection 探测。"
+        ),
+    )
+
+
+class SystemAgentSessionOut(BaseModel):
+    id: str
+    web_user_id: int | None = None
+    bot_tg_user_id: int | None = None
+    account_id: int | None = None
+    channel: str
+    title: str | None = None
+    origin: str = "interactive"
+    status: str
+    memory_summary: str = ""
+    memory_state: dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+    account_auto_linked: bool = Field(
+        default=False,
+        description="仅新建会话响应：本次因 default_account=true 且服务器只有 1 个账号而自动关联了 account_id",
+    )
+    model_selection: SystemAgentModelSelection | None = Field(
+        default=None,
+        description=(
+            "第 22 轮：本会话上次选择的本轮模型；null = 从未选择（按自动）。"
+            "所选模型之后被删除或停用时仍原样返回，由客户端回落到自动。"
+        ),
+    )
+
+    model_config = ConfigDict(from_attributes=True)
+
+    @field_validator("model_selection", mode="before")
+    @classmethod
+    def _tolerate_stored_selection(cls, value: Any) -> Any:
+        """库里保存的选择格式不合法（手改、旧格式）时当作未选择，不让会话读取报错。"""
+
+        if value is None or isinstance(value, SystemAgentModelSelection):
+            return value
+        try:
+            return SystemAgentModelSelection.model_validate(value)
+        except ValidationError:
+            return None
+
+
+class SystemAgentMessageOut(BaseModel):
+    id: int
+    session_id: str
+    role: str
+    content: dict[str, Any]
+    usage: dict[str, Any] | None = None
+    run_status: str = "completed"
+    error_code: str | None = None
+    error_message: str | None = None
+    retry_count: int = 0
+    created_at: datetime | None = None
+
+    model_config = ConfigDict(from_attributes=True)
 
 
 class SystemAgentImageAttachment(BaseModel):

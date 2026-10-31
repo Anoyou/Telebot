@@ -44,6 +44,8 @@ final class AppModel {
     var supportsSecretReveal: Bool { serverFeatures.contains("secret_reveal") }
     /// 服务器支持新建 Agent 会话时 `default_account`（第 20 轮）：只有 1 个账号时由服务器自动关联。
     var supportsAgentSessionDefaultAccount: Bool { serverFeatures.contains(AgentSessionAccount.featureKey) }
+    /// 服务器在会话上记住本轮模型（第 22 轮，`model_selection`）；旧服务器由 App 按会话 id 在本机记忆。
+    var supportsAgentSessionModelSelection: Bool { serverFeatures.contains(AgentSessionModel.featureKey) }
     /// 服务器「常用入口」（网页 设置 › 界面偏好，`GET /api/system/settings` 的 `ui_preferences.primary_nav`，第 21 轮）。
     /// nil = 还没读到；`paths == nil` = 旧服务器没有该字段。本机没自定义 Dock 时 Dock 跟随它（见 `WorkspacePreferences`）。
     private(set) var serverPrimaryNav: ServerPrimaryNav?
@@ -100,6 +102,8 @@ final class AppModel {
             service = FixtureService(offline: ProcessInfo.processInfo.arguments.contains("--ui-test-offline"))
             // 每次界面测试从空的助手本机缓存开始，避免上一个用例的会话缓存影响首屏。
             AssistantHistoryCache.removeAll()
+            // 第 22 轮：会话记住的模型（本机兜底）同样每次清空；`--ui-test-session-models-keep` 保留（验证重启后恢复）。
+            if !ProcessInfo.processInfo.arguments.contains("--ui-test-session-models-keep") { AgentSessionModel.LocalStore.removeAll() }
             // 概览快照只在快照用例里启用；第二次启动带 --ui-test-snapshot-reuse 保留第一次保存的快照。
             let arguments = ProcessInfo.processInfo.arguments
             snapshotEnabled = arguments.contains("--ui-test-snapshot")

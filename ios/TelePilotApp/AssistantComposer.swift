@@ -578,7 +578,7 @@ struct AssistantModelPopover: View {
     }
 
     private func select(_ index: Int) {
-        if store.modelIndex != index { store.modelIndex = index }
+        store.chooseModel(index)
         panel.close()
     }
 }

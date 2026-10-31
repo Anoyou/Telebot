@@ -41,6 +41,13 @@ actor FixtureService: AppServing {
     private let accessRequired = ProcessInfo.processInfo.arguments.contains("--ui-test-cf-access")
     /// 已删除的助手会话：列表不再返回，读取返回 404。
     private var deletedSessions: Set<String> = []
+    /// 第 22 轮：`--ui-test-session-models` 模拟支持「会话记住模型」的新服务器：两个会话，
+    /// 第二个会话在服务器上已记住 deepseek；PATCH 会话的 model_selection 会被记住。默认（无该参数）像旧服务器，App 走本机记忆。
+    private let sessionModelsMode = ProcessInfo.processInfo.arguments.contains("--ui-test-session-models")
+    private var sessionModelSelections: [String: JSONValue] = [
+        "fixture-session-2": ["mode": "pinned", "provider_id": 2, "model": "deepseek-v4-flash"],
+    ]
+    private var createdModelSession = false
     /// 交互中心界面测试（0.16.0）：按账号保存的交互配置，PUT 按服务器语义合并（Token 只记“已配置”）。
     private var interactionConfigs: [Int: JSONValue] = [:]
     /// 运行树界面测试（第 19 轮）：运行模式（生产／值守）与模块开关，值守按服务器预设关闭 AI／交互 Bot／Webhook 并在恢复时还原。
@@ -283,9 +290,20 @@ actor FixtureService: AppServing {
         }
         if let value = try Self.diagnosticsFixture(clean, path: path, method: method, body: body) { return value }
         if clean == "/api/system-agent/checkup" { return Self.checkupFixture }
+        if clean == "/api/system-agent/sessions", method == "POST", sessionModelsMode {
+            // 会话模型用例：新建的是一个全新的会话（服务器上没记过模型），应显示「自动」。
+            createdModelSession = true
+            return ["id": "fixture-session-new", "title": body?["title"] ?? "新会话", "status": "active", "channel": "web", "model_selection": .null]
+        }
         if clean == "/api/system-agent/sessions", method == "POST" {
             deletedSessions.remove("fixture-session")
             return ["id": "fixture-session", "title": body?["title"] ?? "新会话", "status": "active"]
+        }
+        if clean == "/api/system-agent/sessions", sessionModelsMode {
+            var rows: [JSONValue] = [["id": "fixture-session", "title": "服务检查", "status": "active", "channel": "web"],
+                                     ["id": "fixture-session-2", "title": "第二个会话", "status": "active", "channel": "web"]]
+            if createdModelSession { rows.insert(["id": "fixture-session-new", "title": "新会话", "status": "active", "channel": "web"], at: 0) }
+            return .array(rows)
         }
         if clean == "/api/system-agent/sessions" {
             // 删除后的会话不再出现在列表里（第八轮：删除最后一个会话后重进应显示空状态）。
@@ -300,6 +318,15 @@ actor FixtureService: AppServing {
            let id = clean.dropFirst("/api/system-agent/sessions/".count).split(separator: "/").first.map(String.init),
            deletedSessions.contains(id) {
             throw APIError.server(status: 404, code: "SESSION_NOT_FOUND")
+        }
+        if sessionModelsMode, clean.hasPrefix("/api/system-agent/sessions/"), method == "GET" || method == "PATCH" {
+            let id = String(clean.dropFirst("/api/system-agent/sessions/".count))
+            if !id.contains("/") {
+                if method == "PATCH", let selection = body?["model_selection"] { sessionModelSelections[id] = selection }
+                let title = id == "fixture-session-2" ? "第二个会话" : id == "fixture-session-new" ? "新会话" : "服务检查"
+                return ["id": .string(id), "title": .string(title), "status": "active", "channel": "web",
+                        "model_selection": sessionModelSelections[id] ?? .null]
+            }
         }
         if runPhases, let response = runPhaseResponse(clean, path: path, method: method, body: body) { return response }
         if clean.hasSuffix("/messages"), ProcessInfo.processInfo.arguments.contains("--ui-test-long-history") {
@@ -676,7 +703,11 @@ actor FixtureService: AppServing {
         }
         if clean == "/api/system/capabilities" {
             // 默认像旧服务器一样没有模块信息（所有入口照常显示）；`--ui-test-modules-off=a,b` 模拟服务器关闭这些模块。
-            let features: JSONValue = Self.oldServerSecrets ? [:] : ["secret_reveal": true]
+            var features: JSONValue = Self.oldServerSecrets ? [:] : ["secret_reveal": true]
+            if sessionModelsMode, case .object(var flags) = features {
+                flags["agent_session_model_selection"] = true
+                features = .object(flags)
+            }
             guard let flag = ProcessInfo.processInfo.arguments.first(where: { $0.hasPrefix("--ui-test-modules-off=") }) else { return ["modules": [], "features": features] }
             let off = Set(flag.dropFirst("--ui-test-modules-off=".count).split(separator: ",").map(String.init))
             let keys = ["ai", "interaction_bot", "webhooks", "ledger", "dispatch_debug"]

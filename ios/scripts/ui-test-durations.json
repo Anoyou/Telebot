@@ -12,6 +12,8 @@
   "AssistantUITests/testRunPhasesShowInReplyAndQueuedMessagesArePending": 44,
   "AssistantUITests/testSelectTextOpensNativeTextViewSheet": 52,
   "AssistantUITests/testSessionListClosesAndDeleteNeedsConfirmation": 50,
+  "AssistantUITests/testSessionModelRestoresLocallyAfterRelaunchAndReplyNamedTelePilot": 70,
+  "AssistantUITests/testSessionModelRestoresPerSessionFromServer": 50,
   "AssistantUITests/testSkillsToolbarEntryOpensListAndDiffWraps": 66,
   "AssistantUITests/testTurnUsageShowsModelThenMetricsOnTwoLines": 16,
   "DiagnosticsUITests/testDispatchDebugFillsFromRecentMessageAndReportsOfflineWorker": 50,

@@ -103,6 +103,8 @@ import {
   loadSessionModelSelection,
   DEFAULT_SESSION_MODEL_SELECTION,
   saveSessionModelSelection,
+  isDefaultSelection,
+  resolveAvailableSelection,
   toApiModelSelection,
   type SessionModelSelection,
 } from "./sessionModelSelection";
@@ -843,10 +845,41 @@ export function AssistantIndex() {
     return "自动路由";
   }, [sessionModel, modelPickerItems, configuredProvider, configuredModel]);
 
-  // 切换会话时沿用 localStorage 中最近一次本轮选择。
+  // 第 22 轮：每个会话记住自己上次的选择。切换 / 打开会话时恢复：服务器会话上的 model_selection
+  // 优先，其次本机按会话 id 记的值；新会话草稿为「自动」。会话行（列表）晚于 activeId 到达时，
+  // 到达后再按服务器值恢复一次；之后的列表轮询不再覆盖，避免与刚做的选择互相打架。
+  const activeSessionLoaded = activeSession != null;
+  const restoredForRef = useRef<string | null | undefined>(undefined);
   useEffect(() => {
-    setSessionModel(loadSessionModelSelection(activeId));
-  }, [activeId]);
+    const key = activeId ? `${activeId}:${activeSessionLoaded ? "row" : "pending"}` : null;
+    if (restoredForRef.current === key) return;
+    restoredForRef.current = key;
+    const row = sessionOptionsRef.current.find((item) => item.id === activeId);
+    setSessionModel(loadSessionModelSelection(activeId, row?.model_selection));
+  }, [activeId, activeSessionLoaded]);
+  // 所选模型被删除 / 停用后回落「自动」，不报错（模型列表读到后才判断）。
+  const availableModelKeys = capsQ.isSuccess ? modelPickerItems : null;
+  useEffect(() => {
+    setSessionModel((current) => resolveAvailableSelection(current, availableModelKeys));
+  }, [availableModelKeys]);
+
+  const sessionModelMut = useMutation({
+    mutationFn: ({ sessionId, selection }: { sessionId: string; selection: SessionModelSelection }) =>
+      updateSystemAgentSession(sessionId, { model_selection: toApiModelSelection(selection) }),
+    onSuccess: (session) => {
+      qc.setQueryData<SystemAgentSession[]>(["system-agent", "sessions"], (prev) =>
+        Array.isArray(prev)
+          ? prev.map((item) => (item.id === session.id ? { ...item, model_selection: session.model_selection } : item))
+          : prev,
+      );
+    },
+    // 记不住只影响下次打开时的默认值，不打扰用户；本机兜底已经记下。
+    onError: () => undefined,
+  });
+  const rememberSessionModel = (selection: SessionModelSelection) => {
+    saveSessionModelSelection(activeId, selection);
+    if (activeId && !viewingBotSession) sessionModelMut.mutate({ sessionId: activeId, selection });
+  };
 
   const onSessionModelChange = (next: ModelPickerValue) => {
     const selection: SessionModelSelection =
@@ -864,7 +897,7 @@ export function AssistantIndex() {
             clientIdentityProfile: sessionModel.clientIdentityProfile,
           };
     setSessionModel(selection);
-    saveSessionModelSelection(activeId, selection);
+    rememberSessionModel(selection);
   };
 
   const onSessionClientChange = (next: {
@@ -887,7 +920,7 @@ export function AssistantIndex() {
         }
       : { ...sessionModel, ...next } as SessionModelSelection;
     setSessionModel(selection);
-    saveSessionModelSelection(activeId, selection);
+    rememberSessionModel(selection);
   };
 
   const onSetDefaultModel = (providerId: number, model: string) => {
@@ -913,7 +946,14 @@ export function AssistantIndex() {
     if (activeId) return activeId;
     const startedActiveId = activeIdRef.current;
     const payload = newSessionPayload(true);
-    const session = await createSystemAgentSession(payload);
+    const draftSelection = sessionModel;
+    const session = await createSystemAgentSession(
+      isDefaultSelection(draftSelection)
+        ? payload
+        : { ...payload, model_selection: toApiModelSelection(draftSelection) },
+    );
+    // 草稿里选的模型属于这个新会话：先在本机记下，切到新会话时恢复的就是它，而不是「自动」。
+    saveSessionModelSelection(session.id, draftSelection);
     await qc.invalidateQueries({ queryKey: ["system-agent", "sessions"] });
     // POST 期间用户可能已手动切换到别的会话；迟到的 setActiveId 会把用户拽回新会话。
     if (activeIdRef.current === startedActiveId) {
@@ -2344,7 +2384,7 @@ export function AssistantIndex() {
                         />
                         <span>{item.enabled ? "已启用" : "已停用"}</span>
                         <span className="truncate text-[10px] text-muted-foreground/65">
-                          {item.source === "agent_learned" ? "助手记录" : "手动添加"}
+                          {item.source === "agent_learned" ? "TelePilot 记录" : "手动添加"}
                         </span>
                       </div>
                       <Button
