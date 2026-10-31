@@ -598,6 +598,64 @@ final class AssistantUITests: XCTestCase {
         XCTAssertEqual(app.buttons.matching(identifier: "assistant.queue.replace").element(boundBy: replaceChips.count - 1).value as? String, "已选中")
     }
 
+    /// 第 22 轮：账号详情「问 Agent」切到 Agent 标签页，新建关联这个账号的会话并提示来源（对齐 Web #118）。
+    func testAskAgentFromAccountDetailLinksAccount() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--ui-testing", "-AppleLanguages", "(zh-Hans)", "-AppleLocale", "zh_CN"]
+        app.launch()
+        XCTAssertTrue(app.buttons["overview.refresh"].waitForExistence(timeout: 45))
+        app.tabBars.buttons["更多"].tap()
+        let accounts = app.buttons["more.accounts"]
+        XCTAssertTrue(accounts.waitForExistence(timeout: 10))
+        accounts.tap()
+        let row = app.buttons["account.row.2"]
+        XCTAssertTrue(row.waitForExistence(timeout: 10))
+        row.tap()
+        XCTAssertTrue(app.navigationBars["账号详情"].waitForExistence(timeout: 10))
+        let ask = app.buttons["account.askAgent"]
+        XCTAssertTrue(ask.waitForExistence(timeout: 10))
+        XCTAssertEqual(ask.label, "问 Agent")
+        ask.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["assistant.composer"].firstMatch.waitForExistence(timeout: 10))
+        let notice = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "已带入账号「备用账号」（来自账号页）")).firstMatch
+        XCTAssertTrue(notice.waitForExistence(timeout: 10), visibleTexts(app))
+        // 账号页进入不预填输入栏。
+        let composer = app.descendants(matching: .any)["assistant.composer"].firstMatch
+        XCTAssertFalse((composer.value as? String ?? "").contains("关于插件"))
+    }
+
+    /// 第 22 轮：插件详情「问 Agent」带上所选账号，并把插件名填进输入栏开头（不自动发送）。
+    func testAskAgentFromPluginDetailPrefillsPluginName() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--ui-testing", "-AppleLanguages", "(zh-Hans)", "-AppleLocale", "zh_CN"]
+        app.launch()
+        let plugins = app.tabBars.buttons["插件"]
+        XCTAssertTrue(plugins.waitForExistence(timeout: 45))
+        plugins.tap()
+        let card = app.buttons["plugin.card.auto_reply"]
+        XCTAssertTrue(card.waitForExistence(timeout: 10))
+        // 插件页账号行：选了账号时也有「问 Agent」。
+        XCTAssertTrue(app.buttons["plugins.askAgent"].waitForExistence(timeout: 10))
+        card.tap()
+        let ask = app.buttons["plugin.detail.askAgent"]
+        XCTAssertTrue(ask.waitForExistence(timeout: 10))
+        ask.tap()
+        let composer = app.descendants(matching: .any)["assistant.composer"].firstMatch
+        XCTAssertTrue(composer.waitForExistence(timeout: 10))
+        let prefilled = NSPredicate { _, _ in (composer.value as? String ?? "").contains("关于插件「自动回复」（auto_reply）：") }
+        expectation(for: prefilled, evaluatedWith: composer)
+        waitForExpectations(timeout: 10)
+        let notice = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "（来自插件页）")).firstMatch
+        XCTAssertTrue(notice.waitForExistence(timeout: 10), visibleTexts(app))
+        XCTAssertTrue(notice.label.contains("已带入账号「日常工作账号」"), notice.label)
+        XCTAssertTrue(notice.label.contains("插件名已填进输入栏"), notice.label)
+        // 预填后发送按钮可用，但不会自动发出。
+        XCTAssertTrue(app.buttons["assistant.send"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.descendants(matching: .any)["assistant.message.pending"].exists)
+    }
+
     /// 失败时附上当前可见的文字，便于判断停在了哪里。
     private func visibleTexts(_ app: XCUIApplication) -> String {
         "可见文字：" + app.staticTexts.allElementsBoundByIndex.prefix(40).map { "\($0.label)@\(Int($0.frame.minY))" }.joined(separator: " | ")

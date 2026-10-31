@@ -1,6 +1,8 @@
 {
   "AssistantUITests/testActionRequiresExplicitConfirmation": 38,
   "AssistantUITests/testAgentHidesDockAndMinimizeReturnsToPreviousTab": 18,
+  "AssistantUITests/testAskAgentFromAccountDetailLinksAccount": 40,
+  "AssistantUITests/testAskAgentFromPluginDetailPrefillsPluginName": 40,
   "AssistantUITests/testComposerPanelsKeepComposerFramesAndSelectModel": 71,
   "AssistantUITests/testComposerPopoverWithKeyboard": 34,
   "AssistantUITests/testComposerUsesGlassToolbarWithAttachModelAndSend": 24,

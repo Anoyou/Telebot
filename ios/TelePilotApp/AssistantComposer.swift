@@ -102,6 +102,14 @@ struct AssistantComposer: View {
         .frame(maxWidth: 900)
         .frame(maxWidth: .infinity)
         .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).maxX } action: { containerMaxX = $0 }
+        // 插件页「问 Agent」（第 22 轮）：把插件名填进输入栏开头；已经写了内容时不覆盖，接在后面另起一行。
+        .onChange(of: store.composerPrefill, initial: true) { _, value in
+            guard let value else { return }
+            store.composerPrefill = nil
+            let current = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+            if current.isEmpty { draft = value }
+            else if !current.contains(value) { draft += "\n" + value }
+        }
         // 点进输入框（开始打字）时收起 popover。
         .onChange(of: focused.wrappedValue) { _, isFocused in
             if isFocused && panel.open != nil { panel.close() }
