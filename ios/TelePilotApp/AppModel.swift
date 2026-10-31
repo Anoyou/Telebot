@@ -59,6 +59,8 @@ final class AppModel {
     var requestedRoute: AppRoute?
     /// 推送或其他入口要求 Agent 标签页打开的会话；由内嵌助手读取后清空。
     private(set) var assistantSessionRequest: String?
+    /// 账号页 / 插件页「问 Agent」（第 22 轮）：Agent 标签页读取后新建带该账号的会话并清空。
+    private(set) var agentAskRequest: AgentAskRequest?
     /// 写操作已被服务器接受，正在重新读取状态。与读取失败（*Error）区分，避免误报“已过期”。
     private(set) var isSyncingAfterAction = false
     /// 已登录时请求被 Cloudflare Access 拦截：根视图据此弹出“用 Google 重新验证”（每次拦截只弹一次）。
@@ -254,6 +256,20 @@ final class AppModel {
     func consumeAssistantSessionRequest() -> String? {
         defer { assistantSessionRequest = nil }
         return assistantSessionRequest
+    }
+
+    /// 「问 Agent」入口是否显示：服务器关闭 AI 模块时隐藏（旧服务器无模块信息时照常显示，见 `AgentAskContext.isAvailable`）。
+    var canAskAgent: Bool { AgentAskContext.isAvailable(disabledModules: disabledModules) }
+
+    /// 从账号页 / 插件页打开 Agent：切到 Agent 标签页，由内嵌助手新建关联该账号的会话。
+    func askAgent(_ request: AgentAskRequest) {
+        agentAskRequest = request
+        requestedRoute = .assistant()
+    }
+
+    func consumeAgentAskRequest() -> AgentAskRequest? {
+        defer { agentAskRequest = nil }
+        return agentAskRequest
     }
 
     func refresh() async {
@@ -850,6 +866,7 @@ final class AppModel {
         showingSnapshot = false
         lastRefreshStartedAt = nil
         assistantSessionRequest = nil
+        agentAskRequest = nil
         isSyncingAfterAction = false
         workspaceError = nil
         requestedRoute = nil

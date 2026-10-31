@@ -306,11 +306,16 @@ private struct PluginCenterView: View {
                 .pickerStyle(.menu)
                 .frame(minHeight: 44)
                 .accessibilityIdentifier("plugins.accountPicker")
-                Text(selectedAccountID == nil
-                     ? "未选择账号：卡片显示插件在服务器上的整体状态。选择一个账号后，可以查看并配置插件在该账号里的启用情况。"
-                     : "正在配置此账号：卡片显示插件在这个账号里是否启用、是否正常运行。点开插件即可为此账号开关或修改配置。")
-                    .font(.footnote).foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                HStack(alignment: .top, spacing: 10) {
+                    Text(selectedAccountID == nil
+                         ? "未选择账号：卡片显示插件在服务器上的整体状态。选择一个账号后，可以查看并配置插件在该账号里的启用情况。"
+                         : "正在配置此账号：卡片显示插件在这个账号里是否启用、是否正常运行。点开插件即可为此账号开关或修改配置。")
+                        .font(.footnote).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    // 第 22 轮：与 Web 插件页账号行一致，选了账号时可以带上这个账号问 Agent。
+                    if let selectedAccountID { AskAgentButton(accountID: selectedAccountID, source: .plugin, identifier: "plugins.askAgent") }
+                }
                 if model.accounts.isEmpty {
                     Label("还没有账号。可以先安装插件，添加账号后再到账号中启用。", systemImage: "info.circle").font(.footnote).foregroundStyle(.secondary)
                 }
@@ -836,6 +841,8 @@ struct ManagementPluginDetailView: View {
         List {
             Section {
                 PluginDetailHeader(feature: feature, accountState: currentAccountState, accountScoped: accountID != nil, globalEnabled: globalEnabled)
+                // 第 22 轮：问 Agent 带上插件名（输入栏开头）；账号作用域时同时关联该账号，全局详情按「单账号默认关联」。
+                AskAgentButton(accountID: accountID, source: .plugin, pluginName: ManagementText.title(feature), pluginKey: key, identifier: "plugin.detail.askAgent")
             }
             if accountID != nil {
                 accountSwitchSection

@@ -118,6 +118,9 @@ struct AccountDetailView: View {
                         Label(AccountPresentation.status(account.status), systemImage: AccountPresentation.statusSymbol(account.status))
                             .font(.subheadline.weight(.medium))
                             .accessibilityIdentifier("account.status")
+                        // 第 22 轮：与 Web 账号详情页头一致，带上这个账号打开 Agent。
+                        AskAgentButton(accountID: id, source: .account, identifier: "account.askAgent")
+                            .padding(.top, 2)
                     }
                     .padding(.vertical, 6)
                 }
