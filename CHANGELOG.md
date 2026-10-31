@@ -27,7 +27,7 @@
 
 ### iOS 0.31.0：账号页、插件页加「问 Agent」入口（对齐 Web #118）
 
-- iOS 账号详情页头、插件详情页、插件页「启用与配置」所选账号行新增「问 Agent」：切到 Agent 标签页，`POST /api/system-agent/sessions` 带 `account_id` 新建会话（插件全局详情没有账号时按第 20 轮「单账号默认关联」规则，旧服务器由 App 按账号数代填），提示来源；插件页把「关于插件「名称」（key）：」预填进输入栏，不自动发送。当前会话已是同一账号且还没有消息时复用，不重复建空会话。服务器关闭 AI 模块（`/api/system/capabilities` 的 `modules`）时隐藏入口；`account_id` 自 0.72 起就有，旧服务器无需新能力标志。逻辑在 `TelePilotCore/AgentAskContext.swift`（含单测），UI 测试 2 条。后端、Web 无改动；`ios/DESIGN.md` 对照表同步。
+- iOS 账号详情页头、插件详情页（导航栏）、插件页「启用与配置」所选账号行新增「问 Agent」：切到 Agent 标签页，`POST /api/system-agent/sessions` 带 `account_id` 新建会话（插件全局详情没有账号时按第 20 轮「单账号默认关联」规则，旧服务器由 App 按账号数代填），提示来源；插件页把「关于插件「名称」（key）：」预填进输入栏，不自动发送。当前会话已是同一账号且还没有消息时复用，不重复建空会话。服务器关闭 AI 模块（`/api/system/capabilities` 的 `modules`）时隐藏入口；`account_id` 自 0.72 起就有，旧服务器无需新能力标志。逻辑在 `TelePilotCore/AgentAskContext.swift`（含单测），UI 测试 2 条。后端、Web 无改动；`ios/DESIGN.md` 对照表同步。
 
 ## [0.115.0-beta.4] - 2026-11-01 · patch（补丁预发布） · Plugin API 1.0 冻结范围已定（只加保修、不动现状）
 

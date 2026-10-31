@@ -841,8 +841,6 @@ struct ManagementPluginDetailView: View {
         List {
             Section {
                 PluginDetailHeader(feature: feature, accountState: currentAccountState, accountScoped: accountID != nil, globalEnabled: globalEnabled)
-                // 第 22 轮：问 Agent 带上插件名（输入栏开头）；账号作用域时同时关联该账号，全局详情按「单账号默认关联」。
-                AskAgentButton(accountID: accountID, source: .plugin, pluginName: ManagementText.title(feature), pluginKey: key, identifier: "plugin.detail.askAgent")
             }
             if accountID != nil {
                 accountSwitchSection
@@ -866,7 +864,12 @@ struct ManagementPluginDetailView: View {
             }
         }
         .navigationTitle(ManagementText.title(feature)).navigationBarTitleDisplayMode(.inline)
-        .toolbar { Button(preferences.isFavoritePlugin(key) ? "取消收藏" : "收藏", systemImage: preferences.isFavoritePlugin(key) ? "star.fill" : "star") { preferences.togglePlugin(key) } }
+        .toolbar {
+            // 第 22 轮：问 Agent 带上插件名（输入栏开头）；账号作用域时同时关联该账号，全局详情按「单账号默认关联」。
+            // 放在导航栏（与收藏并排），不占列表一行、不把下面的开关与运行详情往下挤。
+            AskAgentButton(accountID: accountID, source: .plugin, pluginName: ManagementText.title(feature), pluginKey: key, identifier: "plugin.detail.askAgent", inToolbar: true)
+            Button(preferences.isFavoritePlugin(key) ? "取消收藏" : "收藏", systemImage: preferences.isFavoritePlugin(key) ? "star.fill" : "star") { preferences.togglePlugin(key) }
+        }
         .task {
             await loadInstallRecord()
             // 从交互规则「插件配置」跳来时没有带账号状态：补读一次，账号开关与运行状态才真实。

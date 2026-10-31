@@ -309,19 +309,29 @@ struct AskAgentButton: View {
     var pluginName: String? = nil
     var pluginKey: String? = nil
     var identifier = "askAgent"
+    /// 放在导航栏时只显示图标（系统工具栏样式），无障碍标签仍是「问 Agent」。
+    var inToolbar = false
 
     var body: some View {
         if model.canAskAgent {
-            Button {
-                model.askAgent(AgentAskRequest(accountID: accountID, source: source, pluginName: pluginName, pluginKey: pluginKey))
-            } label: {
-                Label("问 Agent", systemImage: "sparkles")
-                    .font(.subheadline.weight(.medium))
-                    .frame(minHeight: 32)
+            if inToolbar {
+                Button("问 Agent", systemImage: "sparkles", action: ask)
+                    .accessibilityIdentifier(identifier)
+                    .accessibilityHint("打开 Agent 并新建会话，插件名会填进输入栏")
+            } else {
+                Button(action: ask) {
+                    Label("问 Agent", systemImage: "sparkles")
+                        .font(.subheadline.weight(.medium))
+                        .frame(minHeight: 32)
+                }
+                .buttonStyle(.bordered)
+                .accessibilityIdentifier(identifier)
+                .accessibilityHint("打开 Agent 并新建关联当前账号的会话")
             }
-            .buttonStyle(.bordered)
-            .accessibilityIdentifier(identifier)
-            .accessibilityHint("打开 Agent 并新建关联当前账号的会话")
         }
+    }
+
+    private func ask() {
+        model.askAgent(AgentAskRequest(accountID: accountID, source: source, pluginName: pluginName, pluginKey: pluginKey))
     }
 }
