@@ -285,8 +285,27 @@ final class ManagementUITests: XCTestCase {
         let finish = app.buttons["update.finishJob"]
         scrollUpdateSheet(to: finish, in: app)
         finish.tap()
-        XCTAssertTrue(app.staticTexts["服务器已是最新版本"].waitForExistence(timeout: 10))
-        XCTAssertTrue(app.staticTexts["当前版本 0.105.0-beta.1"].exists)
+        // 状态区在面板最上方；刚才为点「收起更新记录」滚到了下面，List 懒加载时它不在可见区就不存在，往回滚找。
+        let latest = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "label CONTAINS %@", "服务器已是最新版本")).firstMatch
+        scrollUpdateSheetBack(to: latest, in: app)
+        XCTAssertTrue(latest.waitForExistence(timeout: 10), "收起后状态区应显示「服务器已是最新版本」")
+        let current = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "label CONTAINS %@", "0.105.0-beta.1")).firstMatch
+        XCTAssertTrue(current.exists)
+    }
+
+    /// 在更新面板里往回（向上）滚，直到目标出现；只在列表内慢拖，找到即停，避免拖到顶后把面板拉下关闭。
+    private func scrollUpdateSheetBack(to element: XCUIElement, in app: XCUIApplication, attempts: Int = 8) {
+        let list = app.otherElements["update.sheet"].collectionViews.firstMatch
+        guard list.waitForExistence(timeout: 10) else { return }
+        for _ in 0..<attempts {
+            if element.waitForExistence(timeout: 1.5) { return }
+            let frame = list.frame
+            let start = list.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3))
+            let end = start.withOffset(CGVector(dx: 0, dy: frame.height * 0.4))
+            start.press(forDuration: 0.1, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0.4)
+        }
     }
 
     func testLogDetailExplainsMessageFailureAndOpensTimeline() {
