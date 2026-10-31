@@ -25,6 +25,15 @@
 
 ## [Unreleased]
 
+## [0.115.0-beta.5] - 2026-11-01 · patch（补丁预发布） · Agent 会话记住模型、回答者名称 TelePilot
+
+### Agent 每个会话记住上次所选模型；回答者名称改为「TelePilot」（iOS 0.32.0）
+
+- 每个 Agent 会话记住上次选择的本轮模型：退出再进、切换会话、刷新页面 / 重启 App 后自动恢复；新会话默认「自动」，不再沿用上一次全局选择；记住的模型被删除或停用时自动回落「自动」，不报错。
+- 服务器：Agent 会话新增 `model_selection`（迁移 `0066`，可空，旧会话为空 = 自动）。新建会话可带初始值，`PATCH` 会话可修改或传 `null` 清除（只改它不会改变会话列表排序），发送消息 / 重试时顺带记住；`capabilities.features.agent_session_model_selection` 供客户端探测。
+- Web：改选模型立即记到会话上；服务器值优先，旧服务器按会话 id 在本机记忆。Agent 回答头像名称、记忆来源「助手记录」改为「TelePilot」。
+- iOS：同上（新服务器存服务器，旧服务器按会话 id 本机记忆）；回答气泡与消息署名、AI 用量来源中指 Agent 的「助手」改为「TelePilot」。
+
 ### iOS 0.31.0：账号页、插件页加「问 Agent」入口（对齐 Web #118）
 
 - iOS 账号详情页头、插件详情页（导航栏）、插件页「启用与配置」所选账号行新增「问 Agent」：切到 Agent 标签页，`POST /api/system-agent/sessions` 带 `account_id` 新建会话（插件全局详情没有账号时按第 20 轮「单账号默认关联」规则，旧服务器由 App 按账号数代填），提示来源；插件页把「关于插件「名称」（key）：」预填进输入栏，不自动发送。当前会话已是同一账号且还没有消息时复用，不重复建空会话。服务器关闭 AI 模块（`/api/system/capabilities` 的 `modules`）时隐藏入口；`account_id` 自 0.72 起就有，旧服务器无需新能力标志。逻辑在 `TelePilotCore/AgentAskContext.swift`（含单测），UI 测试 2 条。后端、Web 无改动；`ios/DESIGN.md` 对照表同步。

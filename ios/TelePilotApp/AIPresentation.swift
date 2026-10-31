@@ -62,7 +62,7 @@ enum AIPresentation {
         guard let source, !source.isEmpty else { return "未记录来源" }
         if source.hasPrefix("plugin:") { return "插件 · " + source.dropFirst(7) }
         if source.hasPrefix("diagnostic:") { return "模型诊断" }
-        return ["command": "AI 指令", "agent": "助手", "assistant": "助手", "system_agent": "助手"][source] ?? source
+        return ["command": "AI 指令", "agent": AssistantPresentation.senderName, "assistant": AssistantPresentation.senderName, "system_agent": AssistantPresentation.senderName][source] ?? source
     }
 
     static func tokens(_ value: Int) -> String {

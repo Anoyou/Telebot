@@ -11,6 +11,7 @@ from typing import Any
 
 from sqlalchemy import delete, desc, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm.attributes import set_committed_value
 
 from ...db.models.account import Account
 from ...db.models.system_agent import (
@@ -357,7 +358,19 @@ class SystemAgentService:
         title: str | None = None,
         status: str | None = None,
         account_id: int | None = ...,  # type: ignore[assignment]
+        model_selection: dict[str, Any] | None = ...,  # type: ignore[assignment]
     ) -> SystemAgentSession:
+        if (
+            model_selection is not ...
+            and title is None
+            and status is None
+            and account_id is ...
+        ):
+            # 只记住模型选择：不刷新 updated_at，避免切换模型就把会话顶到列表最上面。
+            await self.remember_model_selection(db, session, model_selection)
+            return session
+        if model_selection is not ...:
+            session.model_selection = _clean_model_selection(model_selection)
         if title is not None:
             session.title = title[:64] if title else None
         if status is not None:
@@ -371,6 +384,26 @@ class SystemAgentService:
         session.updated_at = datetime.now(UTC)
         await db.flush()
         return session
+
+    async def remember_model_selection(
+        self,
+        db: AsyncSession,
+        session: SystemAgentSession,
+        model_selection: dict[str, Any] | None,
+    ) -> None:
+        """第 22 轮：记住会话上次选择的本轮模型；显式 UPDATE 保留原 updated_at（不改列表排序）。"""
+
+        value = _clean_model_selection(model_selection)
+        if session.model_selection == value:
+            return
+        await db.execute(
+            update(SystemAgentSession)
+            .where(SystemAgentSession.id == session.id)
+            .values(model_selection=value, updated_at=session.updated_at)
+            .execution_options(synchronize_session=False)
+        )
+        # 上面的 UPDATE 已落库；把属性标记为已提交，避免下一次 flush 再写一遍（会触发 onupdate）。
+        set_committed_value(session, "model_selection", value)
 
     async def delete_session(self, db: AsyncSession, session: SystemAgentSession) -> None:
         await db.delete(session)
@@ -1120,6 +1153,14 @@ class SystemAgentService:
             error_code=str(row.error_code or "AGENT_RUN_FAILED"),
         )
         return row
+
+
+def _clean_model_selection(value: dict[str, Any] | None) -> dict[str, Any] | None:
+    """去掉空字段后保存；None 表示清除（= 自动）。"""
+
+    if not isinstance(value, dict):
+        return None
+    return {key: item for key, item in value.items() if item is not None} or None
 
 
 def _message_available_to_context(message: SystemAgentMessage) -> bool:

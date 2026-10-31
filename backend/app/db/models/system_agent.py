@@ -170,6 +170,9 @@ class SystemAgentSession(Base):
         default=dict,
         server_default="{}",
     )
+    # 第 22 轮：会话上次选择的本轮模型（与运行请求同格式：mode / provider_id / model /
+    # execution_backend / client_identity_profile）。NULL = 从未选择，客户端按「自动」处理。
+    model_selection: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     # 会话内密钥占位符 `[[TP-CRED-n]]` → 真实值的映射，经 MASTER_KEY 加密的 JSON。
     # 只在面向 owner 的显示边界（Bot 发送前、Web SSE、Web 历史）还原；
     # 运行事件 / 日志 / trace / 记忆 / 工具摘要始终保持占位符。FIFO 上限见

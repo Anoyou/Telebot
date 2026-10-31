@@ -1016,6 +1016,7 @@ export async function installAgentAccountFixture(page: Page, options: AgentAccou
       }
       const session = agentSessionFixture({
         id: `agent-account-new-${state.creates.length}`, title: "新会话", account_id: accountId,
+        model_selection: body.model_selection ?? null,
       });
       state.sessions.unshift(session);
       await fulfill(route, options.serverDefault === false ? session : { ...session, account_auto_linked: autoLinked });
@@ -1030,6 +1031,8 @@ export async function installAgentAccountFixture(page: Page, options: AgentAccou
       const body = (route.request().postDataJSON() ?? {}) as Record<string, unknown>;
       state.patches.push({ id, body });
       if ("account_id" in body) session.account_id = body.account_id ?? null;
+      // 第 22 轮：会话记住上次选择的本轮模型（null 清除）。
+      if ("model_selection" in body) session.model_selection = body.model_selection ?? null;
     }
     if (!session) return route.fulfill({ status: 404, contentType: "application/json", body: JSON.stringify({ detail: { code: "SESSION_NOT_FOUND" } }) });
     await fulfill(route, session);

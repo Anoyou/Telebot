@@ -656,6 +656,98 @@ final class AssistantUITests: XCTestCase {
         XCTAssertFalse(app.descendants(matching: .any)["assistant.message.pending"].exists)
     }
 
+    // MARK: 第 22 轮：每个会话记住本轮模型、回答者名称 TelePilot
+
+    /// 本轮模型胶囊的无障碍标签是「本轮模型：供应商 · 模型」，自动时为「本轮模型：自动」。
+    private func waitForModelChip(_ app: XCUIApplication, contains text: String, _ step: String, file: StaticString = #filePath, line: UInt = #line) {
+        let chip = app.buttons["assistant.model"]
+        XCTAssertTrue(chip.waitForExistence(timeout: 10), step, file: file, line: line)
+        let predicate = NSPredicate(format: "label CONTAINS %@", text)
+        let ok = XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: predicate, object: chip)], timeout: 10) == .completed
+        XCTAssertTrue(ok, "\(step)：模型应为「\(text)」，实际 \(chip.label)", file: file, line: line)
+    }
+
+    private func chooseModel(_ app: XCUIApplication, option: String) {
+        app.buttons["assistant.model"].tap()
+        let panel = app.descendants(matching: .any)["assistant.panel.model"].firstMatch
+        XCTAssertTrue(panel.waitForExistence(timeout: 5))
+        let row = app.buttons["assistant.model.option.\(option)"]
+        XCTAssertTrue(row.waitForExistence(timeout: 3))
+        row.tap()
+        XCTAssertTrue(waitUntilGone(panel), "选择后 popover 应收起")
+    }
+
+    /// 打开会话列表切到指定会话（iPhone 为弹出列表；iPad 为常驻侧栏）。
+    private func openSession(_ app: XCUIApplication, _ id: String) {
+        let open = app.buttons["assistant.sessions"]
+        if open.waitForExistence(timeout: 3) { open.tap() }
+        let row = app.buttons["assistant.session.\(id)"].firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: 10), visibleTexts(app))
+        row.tap()
+        let close = app.buttons["assistant.sessions.close"]
+        if close.waitForExistence(timeout: 1.5), close.isHittable { close.tap() }
+        XCTAssertTrue(app.descendants(matching: .any)["assistant.composer"].firstMatch.waitForExistence(timeout: 10))
+    }
+
+    /// 新服务器（`features.agent_session_model_selection`）：切会话时恢复各自记住的模型（服务器值），
+    /// 改选择后切走再切回仍在；新建会话默认「自动」。
+    func testSessionModelRestoresPerSessionFromServer() {
+        let app = openAssistant(["--ui-test-session-models"])
+        openSession(app, "fixture-session")
+        waitForModelChip(app, contains: "自动", "未记过模型的会话")
+        chooseModel(app, option: "1")
+        waitForModelChip(app, contains: "fixture-model-with-a-much-longer-name", "选择后")
+        openSession(app, "fixture-session-2")
+        waitForModelChip(app, contains: "deepseek-v4-flash", "服务器上已记住 deepseek 的会话")
+        openSession(app, "fixture-session")
+        waitForModelChip(app, contains: "fixture-model-with-a-much-longer-name", "切回第一个会话")
+        // 新建会话：不沿用当前会话的模型，默认「自动」。
+        let open = app.buttons["assistant.sessions"]
+        if open.waitForExistence(timeout: 3) { open.tap() }
+        let create = app.buttons["新建会话"].firstMatch
+        XCTAssertTrue(create.waitForExistence(timeout: 5))
+        create.tap()
+        let close = app.buttons["assistant.sessions.close"]
+        if close.waitForExistence(timeout: 1.5), close.isHittable { close.tap() }
+        XCTAssertTrue(app.buttons["assistant.session.fixture-session-new"].firstMatch.waitForExistence(timeout: 10) || app.buttons["assistant.model"].exists)
+        waitForModelChip(app, contains: "自动", "新建会话")
+    }
+
+    /// 旧服务器（无该能力）：App 按会话 id 在本机记住所选模型，退出 Agent 再进、重启 App 都恢复；
+    /// Agent 回答的发送者名称显示「TelePilot」（不再是「助手」）。
+    func testSessionModelRestoresLocallyAfterRelaunchAndReplyNamedTelePilot() {
+        let app = openAssistant()
+        XCTAssertTrue(app.staticTexts["服务状态正常。这里是界面测试数据。"].waitForExistence(timeout: 10))
+        let named = { (name: String) in app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", name)).firstMatch }
+        XCTAssertTrue(named("TelePilot").waitForExistence(timeout: 5), "回答气泡应署名 TelePilot：\(visibleTexts(app))")
+        // 导航栏标题在会话无标题时仍是「助手」（页面名），只要求回答署名处不再出现「助手」。
+        let assistantLabel = NSPredicate(format: "label == %@", "助手")
+        XCTAssertEqual(
+            app.staticTexts.matching(assistantLabel).count,
+            app.navigationBars.staticTexts.matching(assistantLabel).count,
+            "回答署名不应再显示「助手」：\(visibleTexts(app))"
+        )
+        waitForModelChip(app, contains: "自动", "初始")
+        chooseModel(app, option: "2")
+        waitForModelChip(app, contains: "deepseek-v4-flash", "选择后")
+        // 退出 Agent 页再进入。
+        let minimize = app.buttons["assistant.minimize"]
+        XCTAssertTrue(minimize.waitForExistence(timeout: 5))
+        minimize.tap()
+        let dock = app.tabBars.buttons["Agent"]
+        XCTAssertTrue(dock.waitForExistence(timeout: 5))
+        dock.tap()
+        waitForModelChip(app, contains: "deepseek-v4-flash", "退出再进")
+        // 重启 App（保留本机记忆）。
+        app.terminate()
+        app.launchArguments = ["--ui-testing", "--ui-test-session-models-keep", "-AppleLanguages", "(zh-Hans)", "-AppleLocale", "zh_CN"]
+        app.launch()
+        XCTAssertTrue(dock.waitForExistence(timeout: 45))
+        dock.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["assistant.composer"].firstMatch.waitForExistence(timeout: 10))
+        waitForModelChip(app, contains: "deepseek-v4-flash", "重启 App 后")
+    }
+
     /// 失败时附上当前可见的文字，便于判断停在了哪里。
     private func visibleTexts(_ app: XCUIApplication) -> String {
         "可见文字：" + app.staticTexts.allElementsBoundByIndex.prefix(40).map { "\($0.label)@\(Int($0.frame.minY))" }.joined(separator: " | ")

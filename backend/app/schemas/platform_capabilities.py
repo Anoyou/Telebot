@@ -62,6 +62,9 @@ PLATFORM_FEATURE_FLAGS: dict[str, bool] = {
     # 第 20 轮：POST /api/system-agent/sessions 支持 default_account=true（只有 1 个账号时
     # 新会话自动关联它，响应 account_auto_linked=true）；旧服务器由客户端按账号数自行决定。
     "agent_session_default_account": True,
+    # 第 22 轮：Agent 会话记住上次选择的本轮模型（会话的 model_selection 字段；PATCH 会话可改，
+    # 发送消息时也会顺带记住）。旧服务器由客户端按会话 id 在本机记忆。
+    "agent_session_model_selection": True,
 }
 
 

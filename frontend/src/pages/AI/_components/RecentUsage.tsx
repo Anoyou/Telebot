@@ -483,7 +483,7 @@ function llmErrorPreview(record: LLMUsageRecord): string | null {
 function usageSourceLabel(source?: string | null): string {
   const value = source || "";
   const labels: Record<string, string> = {
-    system_agent: "Agent",
+    system_agent: "TelePilot",
     system_agent_router: "Agent 意图路由",
     "diagnostic:protocol_detection": "协议检测",
     "diagnostic:chat-test": "模型对话测试",

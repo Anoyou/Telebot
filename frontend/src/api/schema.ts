@@ -13220,6 +13220,8 @@ export interface components {
              * @default false
              */
             default_account: boolean;
+            /** @description 第 22 轮：新会话初始的本轮模型选择（缺省 = 自动）。旧服务器忽略该字段。 */
+            model_selection?: components["schemas"]["SystemAgentModelSelection"] | null;
             /** Title */
             title?: string | null;
         };
@@ -13250,6 +13252,8 @@ export interface components {
              * @default
              */
             memory_summary: string;
+            /** @description 第 22 轮：本会话上次选择的本轮模型；null = 从未选择（按自动）。所选模型之后被删除或停用时仍原样返回，由客户端回落到自动。 */
+            model_selection?: components["schemas"]["SystemAgentModelSelection"] | null;
             /**
              * Origin
              * @default interactive
@@ -13268,6 +13272,8 @@ export interface components {
         SystemAgentSessionUpdate: {
             /** Account Id */
             account_id?: number | null;
+            /** @description 第 22 轮：记住本会话上次选择的本轮模型；显式传 null 清除（= 自动）。只改它不会刷新会话的 updated_at（不影响会话列表排序）。客户端按 GET /api/system/capabilities 的 features.agent_session_model_selection 探测。 */
+            model_selection?: components["schemas"]["SystemAgentModelSelection"] | null;
             /** Status */
             status?: string | null;
             /** Title */

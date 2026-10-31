@@ -391,6 +391,8 @@ async def create_session(
     except LookupError as exc:
         # account_id 前置校验失败：404 结构化错误，而不是 FK IntegrityError 500
         raise _account_not_found(exc) from exc
+    if payload.model_selection is not None:
+        await svc.remember_model_selection(db, session, payload.model_selection.model_dump())
     await db.commit()
     await db.refresh(session)
     out = _session_out(session)
@@ -463,6 +465,11 @@ async def update_session(
             title=payload.title,
             status=payload.status,
             account_id=payload.account_id if "account_id" in payload.model_fields_set else ...,
+            model_selection=(
+                (payload.model_selection.model_dump() if payload.model_selection else None)
+                if "model_selection" in payload.model_fields_set
+                else ...
+            ),
         )
     except LookupError as exc:
         raise _account_not_found(exc) from exc
@@ -581,6 +588,9 @@ async def stream_message(
     if payload.account_id is not None and session.account_id != payload.account_id:
         await _apply_session_account_context(svc, db, session, payload.account_id)
 
+    if payload.model_selection is not None:
+        # 第 22 轮：发送时顺带记住本会话的模型选择（旧客户端不调 PATCH 也能记住）。
+        await svc.remember_model_selection(db, session, payload.model_selection.model_dump())
     await db.commit()
     try:
         run = await get_system_agent_run_manager().start_run(
@@ -619,6 +629,9 @@ async def retry_message(
     if payload.account_id is not None and session.account_id != payload.account_id:
         await _apply_session_account_context(svc, db, session, payload.account_id)
 
+    if payload.model_selection is not None:
+        # 第 22 轮：发送时顺带记住本会话的模型选择（旧客户端不调 PATCH 也能记住）。
+        await svc.remember_model_selection(db, session, payload.model_selection.model_dump())
     await db.commit()
     try:
         run = await get_system_agent_run_manager().start_run(
@@ -853,6 +866,9 @@ async def start_system_agent_run(
         raise _err("EMPTY_MESSAGE", "消息不能为空", 422)
     if payload.account_id is not None and session.account_id != payload.account_id:
         await _apply_session_account_context(svc, db, session, payload.account_id)
+    if payload.model_selection is not None:
+        # 第 22 轮：发送时顺带记住本会话的模型选择（旧客户端不调 PATCH 也能记住）。
+        await svc.remember_model_selection(db, session, payload.model_selection.model_dump())
     await db.commit()
     try:
         row = await get_system_agent_run_manager().start_run(
@@ -893,6 +909,9 @@ async def start_system_agent_retry_run(
         raise _err("MESSAGE_NOT_RETRYABLE", "只有失败消息可以重试", 409)
     if payload.account_id is not None and session.account_id != payload.account_id:
         await _apply_session_account_context(svc, db, session, payload.account_id)
+    if payload.model_selection is not None:
+        # 第 22 轮：发送时顺带记住本会话的模型选择（旧客户端不调 PATCH 也能记住）。
+        await svc.remember_model_selection(db, session, payload.model_selection.model_dump())
     await db.commit()
     try:
         row = await get_system_agent_run_manager().start_run(

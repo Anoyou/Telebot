@@ -17,6 +17,8 @@ extension JSONValue {
 
 enum AssistantPresentation {
     static let root = "/api/system-agent"
+    /// Agent 回答的发送者名称（第 22 轮由「助手」改为产品名，与 Web 一致）。
+    static let senderName = "TelePilot"
     static let terminal: Set<String> = ["succeeded", "failed", "cancelled"]
     static func path(_ component: String) -> String {
         component.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? ""
@@ -28,7 +30,7 @@ enum AssistantPresentation {
          "active": "进行中", "archived": "已归档", "paused": "已暂停", "dispatching": "正在派发",
          "applied": "已应用", "not_required": "无需同步", "synced": "已同步", "normal": "普通",
          "high": "高风险", "critical": "危险", "completed": "已完成", "user": "我",
-         "assistant": "助手", "tool": "工具", "system": "系统"][value] ?? value
+         "assistant": AssistantPresentation.senderName, "tool": "工具", "system": "系统"][value] ?? value
     }
     static func error(_ error: Error) -> String {
         (error as? APIError)?.errorDescription ?? "无法完成请求，请重新读取服务器状态后再试。"
@@ -123,14 +125,43 @@ final class AssistantStore {
     var runActive: Bool { !runStatus.isEmpty && !AssistantPresentation.terminal.contains(runStatus) }
     var models: [JSONValue] { (capabilities["model_matrix"]?.arrayValue ?? []).filter { $0["enabled"]?.boolValue != false && $0["provider_id"]?.intValue != nil && $0["model"]?.stringValue?.isEmpty == false } }
     var canSend: Bool { !busy && !unresolvedSend && capabilities["enabled"]?.boolValue == true && capabilities["ai_enabled"]?.boolValue != false && session?.assistantText("channel") != "bot" && session?.assistantText("status") != "archived" }
-    var selectedModel: JSONValue {
-        guard models.indices.contains(modelIndex), let provider = models[modelIndex]["provider_id"],
-              let model = models[modelIndex]["model"] else { return ["mode": "auto"] }
-        return ["mode": "pinned", "provider_id": provider, "model": model]
+    var selectedModel: JSONValue { AgentSessionModel.selection(models: models, index: modelIndex) }
+
+    /// 第 22 轮：每个会话记住上次选择的本轮模型。打开会话时恢复（服务器值优先，其次本机），
+    /// 新会话为「自动」；所选模型已不在清单里时回落「自动」。模型清单晚于会话读到时，读到后再套用一次。
+    @ObservationIgnored private var sessionModelSelection: JSONValue?
+    @ObservationIgnored private weak var appModel: AppModel?
+    private var sessionModelStore: AgentSessionModel.LocalStore { AgentSessionModel.LocalStore(scope: cacheKey) }
+
+    private func applySessionModel(_ selection: JSONValue?) {
+        sessionModelSelection = selection
+        let index = AgentSessionModel.index(of: selection, in: models)
+        if modelIndex != index { modelIndex = index }
+    }
+
+    /// 用户在输入栏选了模型：立即生效，并记到会话上（新服务器 PATCH 会话；同时本机按会话 id 记一份兜底）。
+    func chooseModel(_ index: Int) {
+        if modelIndex != index { modelIndex = index }
+        let selection = selectedModel
+        sessionModelSelection = selection
+        guard let sessionID, session?.assistantText("channel") != "bot" else { return }
+        sessionModelStore.save(sessionID, selection)
+        guard let model = appModel, model.supportsAgentSessionModelSelection else { return }
+        let path = AssistantPresentation.root + "/sessions/\(AssistantPresentation.path(sessionID))"
+        Task { @MainActor [weak self] in
+            // 记不住只影响下次打开时的默认值：失败不打扰用户（本机兜底已记下）。
+            guard let row = try? await model.request(path: path, method: "PATCH", body: ["model_selection": selection]) else { return }
+            guard let self, self.sessionID == sessionID, let saved = row["model_selection"] else { return }
+            if var current = self.session?.objectValue {
+                current["model_selection"] = saved
+                self.session = .object(current)
+            }
+        }
     }
 
     func start(_ model: AppModel, initialID: String?) async {
         defer { initialLoadFinished = true }
+        appModel = model
         defaultsKey = "telepilot.assistant.pending.\(model.serverURL?.absoluteString ?? "").\(model.user?.id ?? 0)"
         cacheKey = "\(model.serverURL?.absoluteString ?? "").\(model.user?.id ?? 0)"
         unresolvedSend = UserDefaults.standard.dictionary(forKey: defaultsKey) != nil
@@ -154,7 +185,10 @@ final class AssistantStore {
         async let capabilitiesLoad = Self.capture { try await model.request(path: capabilitiesPath) }
         let sessionsLoaded = await sessionsLoad
         switch await capabilitiesLoad {
-        case .success(let value): capabilities = value
+        case .success(let value):
+            capabilities = value
+            // 模型清单可能晚于缓存里的会话读到：按当前会话记住的选择重新对上下标。
+            applySessionModel(sessionModelSelection)
         case .failure(let failure): self.error = AssistantPresentation.error(failure)
         }
         if let initialID { await select(initialID, model: model, keepVisible: initialID == sessionID) }
@@ -212,6 +246,9 @@ final class AssistantStore {
         lastSeq = 0
         error = nil
         resetQueueState()
+        // 先按本机记的值恢复（立即显示），读到服务器会话后再以服务器值为准。
+        let localModel = cacheKey.isEmpty ? nil : sessionModelStore.load(id)
+        if !keep { applySessionModel(localModel) }
         let token = generation
         let base = AssistantPresentation.root + "/sessions/\(AssistantPresentation.path(id))"
         let messagesPath = base + "/messages?limit=\(Self.pageSize)"
@@ -223,6 +260,7 @@ final class AssistantStore {
         case .success(let row):
             session = row
             accountID = row["account_id"]?.intValue
+            applySessionModel(AgentSessionModel.restored(serverRow: row, serverSupports: model.supportsAgentSessionModelSelection, local: localModel))
         case .failure(let failure):
             self.error = AssistantPresentation.error(failure)
             showingCached = false
@@ -361,6 +399,7 @@ final class AssistantStore {
 
     private func finishDeletingSession(_ id: String, model: AppModel) async {
         sessions.removeAll { $0.id == id }
+        sessionModelStore.remove(id)
         let wasCurrent = id == sessionID
         if wasCurrent { await clearCurrentSession() }
         let token = generation
@@ -379,6 +418,7 @@ final class AssistantStore {
         streamTask?.cancel()
         sessionID = nil
         session = nil
+        applySessionModel(nil)
         await setMessages([])
         runs = []
         events = []
@@ -538,6 +578,8 @@ final class AssistantStore {
     func send(_ content: String, attachments: [JSONValue], model: AppModel, mode: String = "message") async -> Bool {
         guard let sessionID, canSend else { return false }
         var body: [String: JSONValue] = ["content": .string(content), "attachments": .array(attachments), "model_selection": selectedModel]
+        // 新服务器发送时会顺带记住；旧服务器靠本机按会话 id 记。
+        if mode != "input" { sessionModelStore.save(sessionID, selectedModel) }
         if let accountID { body["account_id"] = .number(Double(accountID)) }
         let path: String
         // 第八轮：输入栏不再手选发送方式。任务等待补充信息时自动作为补充信息提交；

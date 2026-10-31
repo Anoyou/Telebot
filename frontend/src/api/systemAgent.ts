@@ -76,6 +76,8 @@ export interface SystemAgentSession {
   updated_at: string | null;
   /** 仅新建会话响应（第 20 轮）：因 default_account 且服务器只有 1 个账号而自动关联。 */
   account_auto_linked?: boolean;
+  /** 第 22 轮：本会话上次选择的本轮模型；null = 从未选择（按自动）。旧服务器没有该字段。 */
+  model_selection?: SystemAgentModelSelection | null;
 }
 
 export interface SystemAgentMessage {
@@ -422,6 +424,8 @@ export async function createSystemAgentSession(payload?: {
   title?: string;
   /** 第 20 轮：未指定账号时只有 1 个账号则自动关联（旧服务器忽略）。 */
   default_account?: boolean;
+  /** 第 22 轮：新会话初始的模型选择（草稿里选过模型再发送时带上；旧服务器忽略）。 */
+  model_selection?: SystemAgentModelSelection | null;
 }): Promise<SystemAgentSession> {
   const { data } = await api.post<SystemAgentSession>("/api/system-agent/sessions", payload || {});
   return data;
@@ -434,7 +438,13 @@ export async function getSystemAgentSession(sessionId: string): Promise<SystemAg
 
 export async function updateSystemAgentSession(
   sessionId: string,
-  payload: { title?: string; status?: string; account_id?: number | null },
+  payload: {
+    title?: string;
+    status?: string;
+    account_id?: number | null;
+    /** 第 22 轮：记住本会话的模型选择；null 清除（= 自动）。只改它不刷新会话排序。 */
+    model_selection?: SystemAgentModelSelection | null;
+  },
 ): Promise<SystemAgentSession> {
   const { data } = await api.patch<SystemAgentSession>(
     `/api/system-agent/sessions/${sessionId}`,
