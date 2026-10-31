@@ -20,7 +20,34 @@
 
 ## 布局
 
-概览顶部是紧凑品牌头（BrandMark 图标、TelePilot、一句话说明与当前服务器），紧接一句只陈述可确认事实的状态（服务运行中 / 部分状态未能读取 / 无法读取服务器状态），随后是关键数字、快捷操作、收藏与可排序的服务模块。概览不再自行推断“需要处理”的事项（不准确且给不出解决方法）；全面判断由导航栏右上角的「一键体检」（`stethoscope`，原生 `ToolbarItem`，无障碍标签「一键体检」）负责：点按打开体检面板，直接调用服务器 `GET /api/system-agent/checkup`（与助手“体检一下”同一个只读工具），显示总体结论、每项状态、原因与修复建议，以及可跳转的处理入口（账号、插件、AI、日志、指令与任务、备份与维护、设置、助手）。日志页以“最近问题 → 统一列表 → 详情 → 处理时间线”逐层下钻，每类日志都附中文解释；资金台账以汇总卡片和 Swift Charts 图表为主，明细使用中文标签。底部 Dock 见下方「底部 Dock」一节：默认「概览 · 插件 · 交互 · 更多」，旁边独立的 Agent 打开助手；中间 3 格可在「App 设置 › 自定义 Dock」里选择与排序，没放进 Dock 的入口都在「更多」里，始终可达。iPad 使用导航双栏，助手有会话侧栏。系统登录与 Telegram 账号绑定分别呈现自己的验证步骤。
+概览（0.26.0 起紧凑版，见下方「概览卡片规范」）顶部是两行服务器头（BrandMark 图标、主机名；连接状态 · 版本 · 通道 · 用户名），紧接一句只陈述可确认事实的状态（服务运行中 / 部分状态未能读取 / 无法读取服务器状态）与「更新于」，随后是一张 3 列小指标格（关键状态 + 可排序的服务模块）、一行快捷操作与收藏。概览不再自行推断“需要处理”的事项（不准确且给不出解决方法）；全面判断由导航栏右上角的「一键体检」（`stethoscope`，原生 `ToolbarItem`，无障碍标签「一键体检」）负责：点按打开体检面板，直接调用服务器 `GET /api/system-agent/checkup`（与助手“体检一下”同一个只读工具），显示总体结论、每项状态、原因与修复建议，以及可跳转的处理入口（账号、插件、AI、日志、指令与任务、备份与维护、设置、助手）。日志页以“最近问题 → 统一列表 → 详情 → 处理时间线”逐层下钻，每类日志都附中文解释；资金台账以汇总卡片和 Swift Charts 图表为主，明细使用中文标签。底部 Dock 见下方「底部 Dock」一节：默认「概览 · 插件 · 交互 · 更多」，旁边独立的 Agent 打开助手；中间 3 格可在「App 设置 › 自定义 Dock」里选择与排序，没放进 Dock 的入口都在「更多」里，始终可达。iPad 使用导航双栏，助手有会话侧栏。系统登录与 Telegram 账号绑定分别呈现自己的验证步骤。
+
+## 概览卡片规范（0.26.0，第 21 轮）
+
+目标：首屏（iPhone 竖屏、默认字号、Dock 之上）一屏看全关键状态，不滚动。所有卡片只放“一个数字 + 一个短名字 + 一个状态”，解释性文字一律收进点开后的页面或长按菜单。
+
+- **顺序**：服务器头（`overview.server`，点按进「关于」）→ 状态行（`overview.status`）→ 小指标格（`overview.tiles`）→ 快捷操作一行 → 收藏（有收藏才出现）→ 插件 dashboard 卡片 →「自定义概览」（`overview.customizeButton`）。各组之间用 `.listSectionSpacing(.compact)`。
+- **服务器头**：36pt 图标 + 两行：主机名（`.subheadline.weight(.semibold)`）；状态点 + 已连接／连接异常／正在连接… · v版本 · 通道 · 用户名（`.caption` 次要色，单行）。不再写「当前服务器」小标题和单独的用户名行。
+- **状态行**：一句 `.headline` 状态（服务运行中 / 部分状态未能读取 / 无法读取服务器状态 / 上次读取的状态）+ 右侧「更新于 HH:mm」（原「上次完整刷新」行并入）；只有出问题时才多一行 `.caption` 说明（读不到哪些、断网怎么办），正常时没有说明。不写“想全面检查点一键体检”之类的引导——一键体检在导航栏右上角。
+- **小指标格**（`OverviewStatTileView`）：`LazyVGrid` 3 列等宽（辅助功能字号时 2 列），间距 8pt，行内边距 10/12pt；每格最小高 50pt、圆角 10、`tertiarySystemGroupedBackground`；左上数字 `.headline` 等宽数字（只在需关注／异常时变橙／红，平时主文字色），右上状态图标 `.caption2`，下面短名字 `.caption2` 次要色、单行、不超过 6 个汉字。状态四种 + 无：正常 `checkmark.circle.fill` 绿、需关注 `exclamationmark.triangle.fill` 橙、异常 `xmark.octagon.fill` 红、未读取 `questionmark.circle` 次要色、无（如待确认为 0）`circle.fill` 次要色——图标形状不同，不只靠颜色。没读到的数字显示“—”。
+- **格子与入口**（`overview.tile.<id>`，无障碍标签 = 短名字，值 = “数字，状态”，提示 = 细节）：
+
+  | id | 短名字 | 数字 | 状态规则 | 点开 |
+  | --- | --- | --- | --- | --- |
+  | runtime | 运行模式 | 生产 / 值守 / 紧急停止（同 Web 运行模式卡、紧急停止红条） | 紧急停止异常；值守／进入中／恢复中需关注；收敛失败异常 | 插件 ›「运行」；紧急停止开启时进紧急停止页（与「更多」顶部同一行，可直接解除） |
+  | accounts | 账号 | 已启用/全部 | 有需重登／停用／限流账号需关注 | 账号列表 |
+  | plugins | 插件 | 已启用数 | 有运行失败异常 | Dock「插件」 |
+  | ai | AI | 可用/已配置供应商（同 Web「AI」格）；模块关闭时「已关闭」 | 有模型暂停或没有可用供应商需关注 | AI（关闭时进插件 ›「运行」） |
+  | pending | 待确认 | 条数 | >0 需关注，0 为“无” | Agent 待确认 |
+  | errors | 24 小时错误 | 错误数（告警数进细节） | 有错误异常，只有告警需关注 | 日志 |
+  | health | 基础服务 | 正常 / N 项异常 | 数据库、缓存、数据库结构任一异常 | 原「基础服务」整组明细 |
+  | workers | 运行进程 | 在线/应运行 | 不足异常，有失败记录需关注 | 原「账号运行进程」整组明细（含“已启用不等于在跑”说明） |
+  | resources | 主机资源 | 处理器／内存／磁盘中最高占用 | ≥90% 需关注 | 原「主机资源」整组明细（含主机运行时间） |
+
+  前 6 个是「关键状态」（自定义概览里整组开关，`hiddenHomeModules` 键仍是 `metrics`）；后 3 个是服务模块，顺序与显示沿用 `OverviewLayout`（`telepilot.overview.order`），排在格子最后。长按格子是原生菜单：第一行细节说明（原来卡片里的“已启用 / 全部”“在线 / 应运行 · 失败记录 N”“告警 N”等），第二行「打开」。
+- **合并重复**：一个数据只出现在一个格子里。原「关键数字 › 运行进程」与「账号运行进程」整组合并为 workers 格；快捷操作里已被格子覆盖的账号 / 插件 / AI 不再重复，只留「日志 · 资金台账（模块开着时）· 问 Agent」一行等宽 `.bordered` 小按钮（`overview.quick.<id>`，最小高 32pt）。
+- **收藏**：收藏的账号与插件合成一组「收藏」，都没有时整组不显示（说明写在「自定义概览」footer）。
+- **新增概览信息**时：能用一个数字表达就加一格（同上规则、同一套状态图标）；放不下就进对应详情页，不在概览加整组列表或说明段落。格子超过 12 个（4 行）前先考虑合并。
 
 ## 设置类页面排序（0.21.0，参照 iPhone「设置 › 通用」）
 
@@ -57,7 +84,7 @@
 
 ## Web ↔ iOS 页面对照表
 
-以代码为准（Web：`frontend/src/components/layout/Sidebar.tsx` 的 `NAV` 与路由；iOS 0.25.0）。第 20 轮起 Web 遵守「导航名 = 页面标题」，统一叫法见下方「统一命名」。**Web 新增、移动或删除侧栏项／设置分页／独立页面时，必须在同一个 PR 里更新这张表，并写明 iOS 的处理方式（做／不做＋理由），见根目录 `AGENTS.md`。**
+以代码为准（Web：`frontend/src/components/layout/Sidebar.tsx` 的 `NAV` 与路由；iOS 0.26.0）。第 20 轮起 Web 遵守「导航名 = 页面标题」，统一叫法见下方「统一命名」。**Web 新增、移动或删除侧栏项／设置分页／独立页面时，必须在同一个 PR 里更新这张表，并写明 iOS 的处理方式（做／不做＋理由），见根目录 `AGENTS.md`。**
 
 | Web 页面（路由） | iOS 位置 | 状态 |
 | --- | --- | --- |
@@ -74,7 +101,7 @@
 | 账号详情页头、插件页账号行「问 Agent」（第 20 轮，`?agent_account=ID&agent_from=…`；在 `/accounts/:aid` 或插件页直接打开 Agent 也带入该账号） | 无对应入口（Agent 是 Dock 独立标签，账号页 / 插件页没有进入 Agent 的按钮） | ⏸ 暂不做：iOS 账号页 / 插件页没有进 Agent 的入口，本轮只做「只有一个账号时新会话默认关联」（iOS 0.24.3，Web 同）；多账号时在会话设置 › 账号上下文选账号。以后若加入口，用 `AssistantStore.createSession(model, accountID:)` 带入 |
 | 交互 `/interaction` | Dock「交互」（0.18.0 起；可自选移出，移出后在更多 › 常用） | ✅ 对齐（0.24.0 补齐「身份配置」测试模拟通知 Bot，字段见下方「交互页字段对照」） |
 | 指令与任务 `/operations`（自定义指令／定时任务；第 20 轮第二批起「自动指令白名单」并入「定时任务」页底部，旧地址 `/operations/auto-command-whitelist?aid=` 跳到 `/operations/scheduler?aid=&section=whitelist`） | 更多 › 管理 › 指令与任务（可自选进 Dock；白名单在账号 › 定时任务与白名单） | ✅ 对齐（两端白名单都在定时任务里） |
-| 概览 `/overview` | Dock「概览」+ 一键体检 | ✅ 对齐 |
+| 概览 `/overview`（账号 Worker / AI / 插件 / 5 分钟日志 四格 + 资源占用 + 插件卡片） | Dock「概览」+ 一键体检；0.26.0 起 3 列小指标格（见「概览卡片规范」） | ✅ 对齐（叫法：AI 同名「可用 / 已配置」；Web「账号 Worker」在 iOS 拆成「账号」与「运行进程」两格；Web「5 分钟日志」iOS 是「24 小时错误」；iOS 多运行模式、待确认两格，Web 的运行模式在插件页、待确认在 Agent 红点） |
 | 资金台账 `/ledger` | 更多 › 管理 › 资金台账（可自选进 Dock） | ✅ 对齐 |
 | Webhook `/webhooks`（第 20 轮前 Web 叫「入站 Webhook」） | 更多 › 工具与设置 › Webhook | ✅ 对齐（同名） |
 | 命中调试 `/dispatch-debug`（第 20 轮起日志页顶栏、日志消息详情「用命中调试复现」、交互页也有入口；可用 `?account_id=&chat_id=&chat_type=&sender_id=&via=&text=` 预填） | 更多 › 工具与设置 › 命中调试（原生页，0.20.0）；日志 › 高级诊断里同一入口；日志消息详情「用命中调试复现」（`logs.detail.dispatchDebug`，0.25.0，`DispatchDebugPrefill` 规则同 Web `dispatchDebugHref`） | ✅ 对齐（交互页入口 iOS 不做：交互页规则编辑本身有命中回复预览，排查走日志） |
@@ -182,7 +209,7 @@ Web 目前没有任何页面配置内联按钮；iOS 气泡已支持，服务器
 | 服务器更新面板 | 当前版本／正在运行 `shippingbox`、目标版本 `sparkles`、当前通道／目标分支 `arrow.triangle.branch`、选择通道 `arrow.left.arrow.right`、当前提交 `number`、目标提交 `number.circle`、待合入提交 `arrow.triangle.pull`、Git 远端／运行方式 `server.rack`、应用更新与跟踪任务 `arrow.down.to.line.circle`、日志 `text.alignleft`、各步耗时 `timer`、自动检查 `clock.arrow.2.circlepath`、检查频率 `timer`、数据库迁移 `externaldrive.badge.exclamationmark`／不可回退迁移 `cylinder.split.1x2`、完整更新流程 `arrow.triangle.2.circlepath`、服务暂不可用重连 `wifi.exclamationmark`、核实上次任务 `checkmark.shield`、重新读取 `arrow.clockwise`、完整更新日志 `list.bullet.clipboard` |
 | 插件中心 | 选择配置的账号 `person.crop.circle.badge.checkmark`（原生 `Picker(.menu)`）、状态与分类筛选 `line.3.horizontal.decrease.circle`（有筛选时 `.fill`，原生 `Menu` 内两个内联 `Picker`）、收藏 `star`、排序保存失败 `exclamationmark.triangle.fill`（卡片长按拖动排序，无单独按钮） |
 | 页面级搜索 | 导航栏左上角 `magnifyingglass` 按钮（无障碍标签「搜索」，`.pageSearch(...)`），点按展开系统搜索栏（`.searchable`）；插件、AI、更多、概览、账号、日志列表、全部流水、管理记录列表、助手会话列表共用 |
-| 概览 | 全局搜索 `magnifyingglass`（左上，展开系统搜索栏，列表换成全局搜索结果；“更多”同一写法）、刷新 `arrow.clockwise`、一键体检 `stethoscope`（右上角）；体检结论：正常 `checkmark.circle.fill`、需关注 `exclamationmark.triangle.fill`、异常 `xmark.octagon.fill`、未能检查 `questionmark.circle`；前往处理 `arrow.forward.circle`、需确认 `checkmark.shield` |
+| 概览 | 全局搜索 `magnifyingglass`（左上，展开系统搜索栏，列表换成全局搜索结果；“更多”同一写法）、刷新 `arrow.clockwise`、一键体检 `stethoscope`（右上角）；小指标格状态 正常 `checkmark.circle.fill`／需关注 `exclamationmark.triangle.fill`／异常 `xmark.octagon.fill`／未读取 `questionmark.circle`／无 `circle.fill`，长按菜单「打开」`arrow.forward.circle`；快捷行 日志 `list.bullet.rectangle`、资金台账 `book.closed`、问 Agent `sparkles`；体检结论：正常 `checkmark.circle.fill`、需关注 `exclamationmark.triangle.fill`、异常 `xmark.octagon.fill`、未能检查 `questionmark.circle`；前往处理 `arrow.forward.circle`、需确认 `checkmark.shield` |
 | AI 供应商与模型 | 添加供应商 `plus`（AI 页导航栏）、模型清单顶部「从供应商同步模型」`arrow.triangle.2.circlepath`、模型详情与测试 `info.circle`、单个模型快速测试 `bolt.horizontal`、多模型对话测试 `bubble.left.and.bubble.right`、发送测试 `paperplane`、连续对话 `text.bubble`、清空本页对话 `trash`、高级设置 `slider.horizontal.3`、测活 `waveform.path.ecg`；模型能力：输入（多模态（图片）／仅文本）`photo`、工具调用 `wrench.and.screwdriver`、推理 `brain`、上下文 `text.alignleft`、输出 `text.append`、联网搜索 `globe`。能力只依据服务器字段，没有数据显示“未知” |
 | 插件发现／已安装／产品页 | 检查更新 `arrow.triangle.2.circlepath`、新功能 `sparkles`、版本历史 `clock.arrow.circlepath`、账号启用与配置 `person.2`、全局配置 `slider.horizontal.3`、安装历史 `clock`、完整技术信息 `info.circle`、权限 `lock`／未申请权限 `lock.open`、高风险能力 `exclamationmark.shield`、管理插件仓库 `books.vertical`、从 Git 地址安装 `link.badge.plus`、从文件安装 `doc.badge.plus`、远程插件记录 `icloud.and.arrow.down`、服务器总开关 `power.circle`、卸载 `trash`；结果：成功 `checkmark.circle.fill`、失败 `exclamationmark.triangle.fill`、结果待确认 `questionmark.circle.fill` |
 | Cloudflare Access | 入口 `lock.icloud`、Google 验证状态 `person.badge.shield.checkmark`、使用 Google 验证 `person.badge.key`、账号 `envelope`、到期时间 `clock`、移除 Access 登录 `rectangle.portrait.and.arrow.right`、高级开关 `key.horizontal`、Service Token 状态 `lock.icloud`、保存并验证连接 `checkmark.shield`、清除 Token `trash`、使用说明 `book`、GitHub 说明 `safari`；结果：连接正常 `checkmark.circle.fill`、未通过 `exclamationmark.triangle.fill` |

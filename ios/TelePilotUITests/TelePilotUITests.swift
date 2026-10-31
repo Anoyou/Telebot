@@ -323,6 +323,67 @@ final class TelePilotUITests: XCTestCase {
         capture("概览自定义", app: app)
     }
 
+    /// 第 21 轮：概览改紧凑版。关键状态（运行模式、账号、插件、AI、待确认、24 小时错误）与三个服务模块
+    /// 合成一张 3 列小指标格，不滚动就能在 Dock 上方看全；每格保留原来的入口。
+    func testOverviewCompactTilesFitFirstScreen() {
+        let app = launch()
+        XCTAssertTrue(app.buttons["overview.refresh"].waitForExistence(timeout: 45))
+        let runtime = app.buttons["overview.tile.runtime"]
+        XCTAssertTrue(runtime.waitForExistence(timeout: 15))
+        expectation(for: NSPredicate(format: "value CONTAINS %@", "生产"), evaluatedWith: runtime)
+        waitForExpectations(timeout: 20)
+
+        let tabBar = app.tabBars.firstMatch
+        XCTAssertTrue(tabBar.waitForExistence(timeout: 5))
+        let ids = ["runtime", "accounts", "plugins", "ai", "pending", "errors", "health", "workers", "resources"]
+        for id in ids {
+            let tile = app.buttons["overview.tile.\(id)"]
+            XCTAssertTrue(tile.waitForExistence(timeout: 5), "缺少格子 \(id)")
+            XCTAssertTrue(tile.isHittable, "格子 \(id) 应在首屏可点")
+            XCTAssertLessThanOrEqual(tile.frame.maxY, tabBar.frame.minY + 1, "格子 \(id) 不应被 Dock 挡住")
+            // 紧凑：一格不超过 80pt 高。
+            XCTAssertLessThan(tile.frame.height, 80, "格子 \(id) 太高：\(tile.frame.height)")
+        }
+        let accounts = app.buttons["overview.tile.accounts"]
+        expectation(for: NSPredicate(format: "value CONTAINS %@", "/"), evaluatedWith: accounts)
+        waitForExpectations(timeout: 15)
+        // 旧的大块标题不再出现；格子已能进入的入口不在快捷行里重复。
+        XCTAssertFalse(app.staticTexts["关键数字"].exists)
+        XCTAssertFalse(app.staticTexts["快捷操作"].exists)
+        XCTAssertFalse(app.buttons["overview.quick.accounts"].exists)
+        XCTAssertTrue(app.buttons["overview.quick.logs"].exists)
+        capture("概览紧凑版", app: app)
+
+        // 服务模块格点开是原来整组的内容。
+        app.buttons["overview.tile.workers"].tap()
+        XCTAssertTrue(app.navigationBars["账号运行进程"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["应运行进程"].waitForExistence(timeout: 5))
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+
+        // 待确认格进 Agent 待确认。
+        let pending = app.buttons["overview.tile.pending"]
+        XCTAssertTrue(pending.waitForExistence(timeout: 10))
+        pending.tap()
+        XCTAssertTrue(app.navigationBars["待确认操作"].waitForExistence(timeout: 10))
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+
+        // 运行模式格进插件 ›「运行」。
+        XCTAssertTrue(runtime.waitForExistence(timeout: 10))
+        runtime.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["plugins.mode"].firstMatch.waitForExistence(timeout: 10))
+    }
+
+    /// 第 21 轮：值守中「运行模式」格显示「值守」并标需关注（与 Web 运行模式卡同名）。
+    func testOverviewRuntimeTileShowsSafeWatch() {
+        let app = launch(["--ui-test-safe-watch"])
+        XCTAssertTrue(app.buttons["overview.refresh"].waitForExistence(timeout: 45))
+        let runtime = app.buttons["overview.tile.runtime"]
+        XCTAssertTrue(runtime.waitForExistence(timeout: 15))
+        expectation(for: NSPredicate(format: "value CONTAINS %@ AND value CONTAINS %@", "值守", "需关注"), evaluatedWith: runtime)
+        waitForExpectations(timeout: 20)
+        XCTAssertTrue(runtime.isHittable)
+    }
+
     func testOverviewCheckupToolbarShowsVerdictSectionsAndFixEntry() {
         let app = launch()
         XCTAssertTrue(app.buttons["overview.refresh"].waitForExistence(timeout: 45))

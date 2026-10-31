@@ -58,37 +58,18 @@ struct OverviewView: View {
             .accessibilityIdentifier("overview.screen")
     }
 
+    // 第 21 轮：概览改紧凑版（DESIGN「概览卡片规范」）。首屏只放「服务器 + 一句状态」与一张 3 列小指标格，
+    // 原来的关键数字、运行进程、基础服务、主机资源合并进同一张格子；次要细节收进点开后的页面与长按菜单。
     @ViewBuilder private var overviewContent: some View {
                 statusSection
-                if !preferences.hiddenHomeModules.contains("metrics") {
-                    metricsSection
+                if !tiles.isEmpty {
+                    tilesSection
                 }
                 if !preferences.hiddenHomeModules.contains("quick") {
                     quickSection
                 }
                 if !preferences.hiddenHomeModules.contains("favorites") {
-                    Section("常用账号") {
-                        let favorites = model.accounts.filter { preferences.isFavoriteAccount($0.id) }
-                        if favorites.isEmpty { Text("在账号详情中收藏，便可从这里快速打开。").font(.footnote).foregroundStyle(.secondary) }
-                        ForEach(favorites) { account in
-                            NavigationLink { AccountDetailView(id: account.id) } label: {
-                                Label(AccountPresentation.name(account), systemImage: AccountPresentation.statusSymbol(account.status))
-                            }
-                        }
-                    }
-                    let favoritePlugins = model.plugins.filter { preferences.isFavoritePlugin($0["key"]?.stringValue ?? "") }
-                    if !favoritePlugins.isEmpty {
-                        Section("常用插件") {
-                            ForEach(Array(favoritePlugins.enumerated()), id: \.offset) { _, plugin in
-                                NavigationLink {
-                                    ManagementPluginDetailView(feature: plugin, accountID: nil, accountState: nil)
-                                } label: { Label(plugin["display_name"]?.stringValue ?? plugin["key"]?.stringValue ?? "插件", systemImage: "star") }
-                            }
-                        }
-                    }
-                }
-                ForEach(layout.modules.filter { !preferences.hiddenHomeModules.contains($0.id) }) { module in
-                    moduleSection(module)
+                    favoritesSection
                 }
                 // dashboard：全局启用的插件声明的原生卡片（没有时不显示）。
                 PluginCardSections(slot: "dashboard")
@@ -97,12 +78,7 @@ struct OverviewView: View {
                         Label("自定义概览", systemImage: "slider.horizontal.3")
                     }
                     .accessibilityIdentifier("overview.customizeButton")
-                    if let date = model.lastUpdated {
-                        LabeledContent {
-                            Text(date.formatted(date: .omitted, time: .standard)).monospacedDigit()
-                        } label: { Label("上次完整刷新", systemImage: "clock") }
-                    }
-                } footer: { Text("显示内容和顺序仅保存在本机；下拉或点右上角可重新读取服务器状态。") }
+                }
     }
 
     /// 三组读取并发进行，不再串行等待；关键数字在刷新期间保留上次结果。
@@ -131,104 +107,154 @@ struct OverviewView: View {
                     refreshing: model.isRefreshing || signals.loading
                 )
             }
-            VStack(alignment: .leading, spacing: 8) {
-                if model.showingSnapshot {
-                    // 第十一轮：冷启动先显示上次读取的数据（DESIGN「过期数据」状态），不当作当前在线状态。
-                    Label("上次读取的状态", systemImage: "clock.arrow.circlepath")
-                        .font(.title2.weight(.semibold)).foregroundStyle(.secondary)
-                    let progress = model.isRefreshing ? "正在读取最新状态…" : "暂时无法连接服务器，下拉可重试。"
-                    Text(model.lastUpdated.map { "更新于 \($0.formatted(date: .abbreviated, time: .shortened))。\(progress)" } ?? progress)
-                        .font(.subheadline).foregroundStyle(.secondary)
-                } else if model.health == nil && model.healthError == nil {
-                    Text(model.isRefreshing ? "正在读取服务状态…" : "尚无服务状态").font(.title2.weight(.semibold))
-                } else if model.health == nil {
-                    Label("无法读取服务器状态", systemImage: OpsSeverity.error.symbol)
-                        .font(.title2.weight(.semibold)).foregroundStyle(.red)
-                } else if model.healthError != nil || model.accountsError != nil || model.resourcesError != nil || model.workspaceError != nil || !signals.unavailable.isEmpty {
-                    Label("部分状态未能读取", systemImage: "questionmark.circle")
-                        .font(.title2.weight(.semibold)).foregroundStyle(.secondary)
-                } else {
-                    Label("服务运行中", systemImage: "checkmark.circle.fill")
-                        .font(.title2.weight(.semibold)).foregroundStyle(.green)
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    statusHeadline.font(.headline)
+                    Spacer(minLength: 4)
+                    if !model.showingSnapshot, let date = model.lastUpdated {
+                        // 原「上次完整刷新」一行并入状态行右侧。
+                        Text("更新于 \(date.formatted(date: .omitted, time: .shortened))")
+                            .font(.caption).foregroundStyle(.secondary).monospacedDigit()
+                    }
                 }
-                if model.showingSnapshot {
-                    EmptyView()
-                } else if model.healthError != nil {
-                    Text(model.health == nil ? "请检查网络或服务器地址，然后下拉重试。" : "以下为上次读取结果，并非当前在线状态。")
-                        .font(.subheadline).foregroundStyle(.secondary)
-                } else if !signals.unavailable.isEmpty {
-                    Text("暂时无法读取：\(signals.unavailable.joined(separator: "、"))。下拉可重试。")
-                        .font(.subheadline).foregroundStyle(.secondary)
+                if let note = statusNote {
+                    Text(note).font(.caption).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-                Text("想全面检查账号、插件、AI、日志与推送，点右上角「一键体检」。")
-                    .font(.footnote).foregroundStyle(.secondary)
                 if model.isSyncingAfterAction {
                     Label("操作已提交，正在同步最新状态…", systemImage: "arrow.triangle.2.circlepath")
-                        .font(.footnote).foregroundStyle(.secondary)
+                        .font(.caption).foregroundStyle(.secondary)
                         .accessibilityIdentifier("overview.syncing")
                 }
             }
-            .padding(.vertical, 6)
             .accessibilityElement(children: .combine)
             .accessibilityIdentifier("overview.status")
         }
+        .listSectionSpacing(.compact)
     }
 
-    @ViewBuilder private var metricsSection: some View {
+    @ViewBuilder private var statusHeadline: some View {
+        if model.showingSnapshot {
+            // 第十一轮：冷启动先显示上次读取的数据（DESIGN「过期数据」状态），不当作当前在线状态。
+            Label("上次读取的状态", systemImage: "clock.arrow.circlepath").foregroundStyle(.secondary)
+        } else if model.health == nil && model.healthError == nil {
+            Text(model.isRefreshing ? "正在读取服务状态…" : "尚无服务状态")
+        } else if model.health == nil {
+            Label("无法读取服务器状态", systemImage: OpsSeverity.error.symbol).foregroundStyle(.red)
+        } else if model.healthError != nil || model.accountsError != nil || model.resourcesError != nil || model.workspaceError != nil || !signals.unavailable.isEmpty {
+            Label("部分状态未能读取", systemImage: "questionmark.circle").foregroundStyle(.secondary)
+        } else {
+            Label("服务运行中", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
+        }
+    }
+
+    /// 状态行下方最多一行说明；正常时不显示（全面检查在右上角「一键体检」）。
+    private var statusNote: String? {
+        if model.showingSnapshot {
+            let progress = model.isRefreshing ? "正在读取最新状态…" : "暂时无法连接服务器，下拉可重试。"
+            return model.lastUpdated.map { "更新于 \($0.formatted(date: .abbreviated, time: .shortened))。\(progress)" } ?? progress
+        }
+        if model.healthError != nil {
+            return model.health == nil ? "请检查网络或服务器地址，然后下拉重试。" : "以下为上次读取结果，并非当前在线状态。"
+        }
+        if !signals.unavailable.isEmpty {
+            return "暂时无法读取：\(signals.unavailable.joined(separator: "、"))。下拉可重试。"
+        }
+        return nil
+    }
+
+    // MARK: 小指标格
+
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    /// 要显示的格子：先是关键状态（可在「自定义概览 › 关键状态」整组隐藏），再是三个服务模块（按本机顺序，可逐个隐藏）。
+    private var tiles: [OverviewTile] {
+        var result: [OverviewTile] = []
+        if !preferences.hiddenHomeModules.contains("metrics") {
+            result += OverviewTileBuilder.keyTiles(model: model, signals: signals)
+        }
+        for module in layout.modules where !preferences.hiddenHomeModules.contains(module.id) {
+            result.append(OverviewTileBuilder.moduleTile(module, model: model))
+        }
+        return result
+    }
+
+    @ViewBuilder private var tilesSection: some View {
         Section {
-            OpsMetricGrid {
-                let active = model.accounts.filter { $0.status == "active" }.count
-                OpsMetricTile(title: "账号", value: model.accountsLoaded ? "\(active)/\(model.accounts.count)" : "—",
-                              symbol: "person.2", detail: "已启用 / 全部")
-                if let workers = model.health?.workers {
-                    OpsMetricTile(title: "运行进程", value: "\(workers.runtimeDesiredRunningAlive)/\(workers.runtimeDesiredRunning)",
-                                  symbol: "bolt.horizontal.circle",
-                                  color: workers.runtimeDesiredRunningAlive < workers.runtimeDesiredRunning ? .red : .primary,
-                                  detail: "在线 / 应运行")
-                } else {
-                    OpsMetricTile(title: "运行进程", value: "—", symbol: "bolt.horizontal.circle", detail: "在线 / 应运行")
+            let columns = dynamicTypeSize.isAccessibilitySize ? 2 : 3
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: columns), spacing: 8) {
+                ForEach(tiles) { tile in
+                    Button { perform(tile.action) } label: {
+                        OverviewStatTileView(tile: tile)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(tile.title)
+                    .accessibilityValue(tile.accessibilityValue)
+                    .accessibilityHint(tile.detail ?? "")
+                    .accessibilityIdentifier("overview.tile.\(tile.id)")
+                    .contextMenu {
+                        // 次要细节：长按看到原来写在卡片里的说明，不占首屏。
+                        if let detail = tile.detail { Text(detail) }
+                        Button("打开", systemImage: "arrow.forward.circle") { perform(tile.action) }
+                    }
                 }
-                OpsMetricTile(title: "已启用插件", value: signals.enabledPluginCount.map { String($0) } ?? "—", symbol: "puzzlepiece.extension",
-                              color: signals.failingPluginCount == 0 ? .primary : .red,
-                              detail: signals.failingPluginCount == 0 ? "运行正常" : "\(signals.failingPluginCount) 个出错")
-                OpsMetricTile(title: "AI 供应商", value: signals.providerTotal.map { "\(signals.providerReady ?? 0)/\($0)" } ?? "—", symbol: "cpu",
-                              color: signals.coolingModels.isEmpty ? .primary : .orange,
-                              detail: signals.coolingModels.isEmpty ? "可用 / 已配置" : "\(signals.coolingModels.count) 个模型暂停中")
-                OpsMetricTile(title: "24 小时错误", value: signals.runtimeErrors.map { OpsFormat.integer($0) } ?? "—", symbol: OpsSeverity.error.symbol,
-                              color: (signals.runtimeErrors ?? 0) > 0 ? .red : .primary,
-                              detail: "告警 \(signals.runtimeWarnings.map { OpsFormat.integer($0) } ?? "—")")
-                OpsMetricTile(title: "待确认", value: "\(model.pendingActions.count)", symbol: "checkmark.bubble",
-                              color: model.pendingActions.isEmpty ? .primary : .blue, detail: "助手操作")
             }
-        } header: { Text("关键数字") }
+            .listRowInsets(EdgeInsets(top: 10, leading: 12, bottom: 10, trailing: 12))
+            .accessibilityIdentifier("overview.tiles")
+        }
+        .listSectionSpacing(.compact)
     }
 
+    // MARK: 快捷操作与收藏
+
+    /// 小指标格已经能进入账号、插件、AI、日志，这里只留格子里没有的入口，排成一行。
     private var quickActions: [OverviewQuickAction] {
-        [
-            OverviewQuickAction(id: "logs", title: "日志", symbol: "list.bullet.rectangle", action: .push(.logs)),
-            OverviewQuickAction(id: "ledger", title: "资金台账", symbol: "book.closed", action: .push(.ledger)),
-            OverviewQuickAction(id: "accounts", title: "账号", symbol: "person.2", action: .route(.accounts)),
-            OverviewQuickAction(id: "plugins", title: "插件", symbol: "puzzlepiece.extension", action: .route(.plugins)),
-            OverviewQuickAction(id: "ai", title: "AI", symbol: "cpu", action: .route(.ai)),
-            OverviewQuickAction(id: "assistant", title: "问助手", symbol: "sparkles", action: .route(.assistant()))
-        ]
+        var items = [OverviewQuickAction(id: "logs", title: "日志", symbol: "list.bullet.rectangle", action: .push(.logs))]
+        if model.isModuleEnabled("ledger") {
+            items.append(OverviewQuickAction(id: "ledger", title: "资金台账", symbol: "book.closed", action: .push(.ledger)))
+        }
+        items.append(OverviewQuickAction(id: "assistant", title: "问 Agent", symbol: "sparkles", action: .route(.assistant())))
+        return items
     }
 
     @ViewBuilder private var quickSection: some View {
         Section {
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 96), spacing: 10)], spacing: 10) {
+            HStack(spacing: 8) {
                 ForEach(quickActions) { quick in
                     Button { perform(quick.action) } label: {
                         Label(quick.title, systemImage: quick.symbol)
-                            .labelStyle(.verticalQuick)
-                            .frame(maxWidth: .infinity, minHeight: 52)
+                            .font(.subheadline)
+                            .lineLimit(1).minimumScaleFactor(0.8)
+                            .frame(maxWidth: .infinity, minHeight: 32)
                     }
                     .buttonStyle(.bordered)
                     .accessibilityIdentifier("overview.quick.\(quick.id)")
                 }
             }
-            .padding(.vertical, 4)
-        } header: { Text("快捷操作") }
+            .listRowInsets(EdgeInsets(top: 8, leading: 12, bottom: 8, trailing: 12))
+        }
+        .listSectionSpacing(.compact)
+    }
+
+    /// 收藏的账号与插件合成一组；一个都没有时整组不显示（说明移到「自定义概览」）。
+    @ViewBuilder private var favoritesSection: some View {
+        let favorites = model.accounts.filter { preferences.isFavoriteAccount($0.id) }
+        let favoritePlugins = model.plugins.filter { preferences.isFavoritePlugin($0["key"]?.stringValue ?? "") }
+        if !favorites.isEmpty || !favoritePlugins.isEmpty {
+            Section("收藏") {
+                ForEach(favorites) { account in
+                    NavigationLink { AccountDetailView(id: account.id) } label: {
+                        Label(AccountPresentation.name(account), systemImage: AccountPresentation.statusSymbol(account.status))
+                    }
+                }
+                ForEach(Array(favoritePlugins.enumerated()), id: \.offset) { _, plugin in
+                    NavigationLink {
+                        ManagementPluginDetailView(feature: plugin, accountID: nil, accountState: nil)
+                    } label: { Label(plugin["display_name"]?.stringValue ?? plugin["key"]?.stringValue ?? "插件", systemImage: "star") }
+                }
+            }
+            .listSectionSpacing(.compact)
+        }
     }
 
     private func perform(_ action: OverviewQuickAction.Action) {
@@ -242,59 +268,14 @@ struct OverviewView: View {
         switch destination {
         case .logs: LogsView()
         case .ledger: LedgerView()
+        case .module(let module): OverviewModuleView(module: module)
+        case .runtime: PluginManagementView(isTabRoot: false, initialMode: .runtime)
+        case .inbox: AssistantInboxView()
+        case .emergencyStop:
+            List { EmergencyStopSection() }
+                .navigationTitle("紧急停止")
+                .navigationBarTitleDisplayMode(.inline)
         }
-    }
-
-    // MARK: 可排序模块
-
-    @ViewBuilder private func moduleSection(_ module: OverviewModule) -> some View {
-        switch module {
-        case .health:
-            Section {
-                if let error = model.healthError {
-                    NoticeView(title: model.health == nil ? "状态读取失败" : "服务状态已过期", message: error)
-                }
-                if let health = model.health {
-                    ProbeStatusRow(name: "数据库", symbol: "externaldrive", probe: health.db)
-                    ProbeStatusRow(name: "缓存服务", symbol: "memorychip", probe: health.redis)
-                    ProbeStatusRow(name: "数据库结构", symbol: "checklist", probe: health.alembic)
-                }
-            } header: { Text(OverviewModule.health.title) }
-        case .workers:
-            Section {
-                if let health = model.health {
-                    ReadOnlyRow(title: "应运行进程", value: "\(health.workers.runtimeDesiredRunning)")
-                    ReadOnlyRow(title: "其中已存活", value: "\(health.workers.runtimeDesiredRunningAlive)")
-                    ReadOnlyRow(title: "全部存活进程", value: "\(health.workers.runtimeAlive)")
-                    ReadOnlyRow(title: "存在失败记录", value: "\(health.workers.runtimeFailing)")
-                } else if model.healthError == nil {
-                    ProgressView("正在读取进程…")
-                }
-            } header: { Text(OverviewModule.workers.title) } footer: {
-                Text("“已启用”是账号配置，不代表进程正在运行。操作后的进程状态以服务器后续读取结果为准。")
-            }
-        case .resources:
-            Section {
-                if let error = model.resourcesError {
-                    NoticeView(title: model.resources == nil ? "资源读取失败" : "资源数据已过期", message: error)
-                }
-                if let resources = model.resources {
-                    ResourceStatusRow(title: "处理器", value: resources.host.cpuPercent, symbol: "cpu")
-                    ResourceStatusRow(title: "内存", value: resources.host.memoryUsedPercent, symbol: "memorychip")
-                    ResourceStatusRow(title: "磁盘", value: resources.host.diskUsedPercent, symbol: "internaldrive")
-                    if let uptime = resources.host.uptimeSeconds {
-                        ReadOnlyRow(title: "主机运行时间", value: duration(uptime))
-                    }
-                } else if model.resourcesError == nil {
-                    ProgressView("正在读取资源…")
-                }
-            } header: { Text(OverviewModule.resources.title) }
-        }
-    }
-
-    private func duration(_ seconds: Int) -> String {
-        let hours = max(0, seconds) / 3_600
-        return hours >= 24 ? "\(hours / 24) 天 \(hours % 24) 小时" : "\(hours) 小时"
     }
 }
 
@@ -338,29 +319,31 @@ private struct OverviewServerHeader: View {
     }
 
     var body: some View {
-        HStack(alignment: .center, spacing: 14) {
+        // 第 21 轮：48pt 图标 + 四行文字压成 36pt 图标 + 两行（主机名；状态 · 版本 · 通道 · 用户名）。
+        HStack(alignment: .center, spacing: 12) {
             Image("BrandMark")
                 .resizable()
                 .scaledToFit()
-                .frame(width: 48, height: 48)
-                .clipShape(.rect(cornerRadius: 11, style: .continuous))
+                .frame(width: 36, height: 36)
+                .clipShape(.rect(cornerRadius: 8, style: .continuous))
                 .overlay {
-                    RoundedRectangle(cornerRadius: 11, style: .continuous)
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
                         .strokeBorder(Color(.separator), lineWidth: 0.5)
                 }
                 .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 3) {
-                Text("当前服务器").font(.caption).foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 2) {
                 Text(host ?? "未连接服务器")
-                    .font(.headline)
+                    .font(.subheadline.weight(.semibold))
                     .lineLimit(1).truncationMode(.middle)
-                HStack(spacing: 6) {
+                HStack(spacing: 4) {
                     Circle().fill(statusColor).frame(width: 7, height: 7)
                     Text(statusText)
                     if let version {
-                        Text("·")
-                        Text("v\(version.version)").monospacedDigit()
+                        Text("· v\(version.version)").monospacedDigit()
                         Text(AppInfo.channelLabel(version.channel))
+                    }
+                    if let username {
+                        Text("· \(username)")
                     }
                     if refreshing {
                         ProgressView().controlSize(.mini)
@@ -368,16 +351,12 @@ private struct OverviewServerHeader: View {
                 }
                 .font(.caption).foregroundStyle(.secondary)
                 .lineLimit(1)
-                if let username {
-                    Label(username, systemImage: "person.crop.circle")
-                        .font(.caption).foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
             }
             Spacer(minLength: 0)
         }
-        .padding(.vertical, 4)
         .accessibilityElement(children: .combine)
+        .accessibilityLabel("当前服务器")
+        .accessibilityValue([host ?? "未连接服务器", statusText, version.map { "v\($0.version)" }, username].compactMap { $0 }.joined(separator: "，"))
         .accessibilityIdentifier("overview.server")
     }
 }

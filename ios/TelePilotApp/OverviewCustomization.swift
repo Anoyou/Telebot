@@ -14,6 +14,14 @@ enum OverviewModule: String, CaseIterable, Identifiable, Codable {
         case .resources: "主机资源"
         }
     }
+    /// 概览小指标格里的短标签（第 21 轮）。
+    var shortTitle: String {
+        switch self {
+        case .health: "基础服务"
+        case .workers: "运行进程"
+        case .resources: "主机资源"
+        }
+    }
     var symbol: String {
         switch self {
         case .health: "heart.text.square"
@@ -29,7 +37,7 @@ enum OverviewHomeSection: String, CaseIterable, Identifiable {
     var id: String { rawValue }
     var title: String {
         switch self {
-        case .metrics: "关键数字"
+        case .metrics: "关键状态"
         case .quick: "快捷操作"
         case .favorites: "收藏"
         }
@@ -119,8 +127,8 @@ struct OverviewCustomizationView: View {
                     }
                 }
                 .onMove(perform: layout.move)
-            } header: { Text("模块顺序") } footer: {
-                Text("调整本机首页模块的显示与顺序。")
+            } header: { Text("服务模块") } footer: {
+                Text("这三项排在概览小指标格的最后，顺序与显示只存本机；点格子看完整内容。")
             }
             Section {
                 Button("恢复默认顺序", role: .destructive) { layout.reset() }
@@ -136,7 +144,7 @@ struct OverviewCustomizationView: View {
                     .accessibilityIdentifier("overview.toggle.\(section.rawValue)")
                 }
             } header: { Text("快捷内容") } footer: {
-                Text("全面检查账号、插件、AI 与日志请用概览右上角的「一键体检」。")
+                Text("关键状态：运行模式、账号、插件、AI、待确认、24 小时错误。收藏：在账号详情或插件详情里收藏后出现在概览。全面检查请用概览右上角的「一键体检」。")
             }
         }
         .navigationTitle("自定义概览")
@@ -243,7 +251,10 @@ struct OverviewModuleView: View {
                     ResourceStatusRow(title: "处理器", value: resources.host.cpuPercent, symbol: "cpu")
                     ResourceStatusRow(title: "内存", value: resources.host.memoryUsedPercent, symbol: "memorychip")
                     ResourceStatusRow(title: "磁盘", value: resources.host.diskUsedPercent, symbol: "internaldrive")
-                } else { ProgressView("正在读取资源…") }
+                    if let uptime = resources.host.uptimeSeconds {
+                        ReadOnlyRow(title: "主机运行时间", value: Self.duration(uptime))
+                    }
+                } else if model.resourcesError == nil { ProgressView("正在读取资源…") }
             } else if let error = model.healthError {
                 NoticeView(title: "服务数据已过期", message: error)
             }
@@ -254,15 +265,27 @@ struct OverviewModuleView: View {
                     ProbeStatusRow(name: "缓存服务", symbol: "memorychip", probe: health.redis)
                     ProbeStatusRow(name: "数据库结构", symbol: "checklist", probe: health.alembic)
                 case .workers:
-                    ReadOnlyRow(title: "应运行进程", value: "\(health.workers.runtimeDesiredRunning)")
-                    ReadOnlyRow(title: "其中已存活", value: "\(health.workers.runtimeDesiredRunningAlive)")
-                    ReadOnlyRow(title: "全部存活进程", value: "\(health.workers.runtimeAlive)")
-                    ReadOnlyRow(title: "存在失败记录", value: "\(health.workers.runtimeFailing)")
+                    Section {
+                        ReadOnlyRow(title: "应运行进程", value: "\(health.workers.runtimeDesiredRunning)")
+                        ReadOnlyRow(title: "其中已存活", value: "\(health.workers.runtimeDesiredRunningAlive)")
+                        ReadOnlyRow(title: "全部存活进程", value: "\(health.workers.runtimeAlive)")
+                        ReadOnlyRow(title: "存在失败记录", value: "\(health.workers.runtimeFailing)")
+                    } footer: {
+                        Text("“已启用”是账号配置，不代表进程正在运行。操作后的进程状态以服务器后续读取结果为准。")
+                    }
                 case .resources: EmptyView()
                 }
+            } else if module != .resources, model.healthError == nil {
+                ProgressView("正在读取…")
             }
         }
         .navigationTitle(module.title).navigationBarTitleDisplayMode(.inline)
         .refreshable { await model.refresh() }
+        .accessibilityIdentifier("overview.module.\(module.id)")
+    }
+
+    static func duration(_ seconds: Int) -> String {
+        let hours = max(0, seconds) / 3_600
+        return hours >= 24 ? "\(hours / 24) 天 \(hours % 24) 小时" : "\(hours) 小时"
     }
 }
