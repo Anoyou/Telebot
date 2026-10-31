@@ -168,9 +168,12 @@ struct AccountManagementLoginView: View {
                 }
             } else if token == nil {
                 Section {
-                    TextField("API ID", text: $apiID).keyboardType(.numberPad)
+                    LabeledTextField(title: "API ID", text: $apiID, prompt: "my.telegram.org 给的数字", keyboard: .numberPad,
+                                     identifier: "account.create.apiID")
                     SecretField(title: "API Hash", text: $apiHash, placeholder: "my.telegram.org 给的 API Hash", identifier: "account.create.apiHash")
-                    TextField("国际区号与手机号", text: $phone).keyboardType(.phonePad).textContentType(.telephoneNumber).privacySensitive()
+                    LabeledTextField(title: "手机号", text: $phone, prompt: "带国际区号，如 +86…", keyboard: .phonePad,
+                                     contentType: .telephoneNumber, identifier: "account.create.phone")
+                        .privacySensitive()
                 } header: { Text("Telegram API 凭据") } footer: { Text("使用你自己的 Telegram API 凭据。验证码将由 Telegram 发送，账号会话保存在服务器。") }
                 Section("连接") {
                     Picker("代理", selection: $proxyID) {

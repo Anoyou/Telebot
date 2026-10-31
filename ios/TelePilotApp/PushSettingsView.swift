@@ -60,9 +60,11 @@ struct PushSettingsView: View {
             Section {
                 if let error = push.configurationError { NoticeView(title: "无法读取服务器配置", message: error) }
                 Toggle(isOn: $enabled) { Label("启用 APNs 服务", systemImage: "antenna.radiowaves.left.and.right") }
-                TextField("Team ID（10 位）", text: $teamID).textInputAutocapitalization(.characters).autocorrectionDisabled()
-                TextField("Key ID（10 位）", text: $keyID).textInputAutocapitalization(.characters).autocorrectionDisabled()
-                TextField("Bundle ID", text: $bundleID).textInputAutocapitalization(.never).autocorrectionDisabled()
+                LabeledTextField(title: "Team ID", text: $teamID, prompt: "10 位", capitalization: .characters, monospaced: true,
+                                 identifier: "push.apns.teamID")
+                LabeledTextField(title: "Key ID", text: $keyID, prompt: "10 位", capitalization: .characters, monospaced: true,
+                                 identifier: "push.apns.keyID")
+                LabeledTextField(title: "Bundle ID", text: $bundleID, prompt: "App 的 Bundle ID", identifier: "push.apns.bundleID")
                 Picker("推送环境", selection: $environment) {
                     Text("sandbox（开发／Xcode 调试）").tag("sandbox")
                     Text("production（Ad Hoc／TestFlight）").tag("production")

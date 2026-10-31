@@ -25,6 +25,10 @@
 
 ## [Unreleased]
 
+### iOS 0.27.0：输入框统一带标题
+
+- **iOS 0.27.0**：新增统一输入行组件（`ios/TelePilotApp/SecretField.swift`）：单行 `LabeledTextField`（iPhone「设置」风格，左侧固定标题、右侧右对齐值 + 单位，空值灰色提示，可选项默认「可选」，辅助功能大字号自动改上下排列）、多行 `StackedTextField`（标题在上，与 `SecretField` 同字号，可选项标「可选」）、布局容器 `LabeledFieldRow`（登录页 / Cloudflare Access 保留焦点链）；`FieldUnit.infer` 按字段名推断单位（`*_seconds` 秒等），`FieldUnit.ifNumeric` 给冷却这类可写「15s」的时长只在纯数字时补「秒」；`TelegramTemplateInlineField` 新增 `showsTitle`（插件配置、规则「命中回复」显示标题）。全 App 替换只靠占位文字当标签的 `TextField` / `SecureField`：交互规则编辑、真实通知 Bot ID、查询指令、插件配置通用表单（文本 / 数字带推断单位 / 消息模板 / 添加字段）、插件密钥列表、规则试运行、AI 新增供应商与模型清单、多模型对话测试系统提示词、新增账号、Skills 链接安装、插件仓库、Apple 推送、登录页、Cloudflare Access、备份与维护、消息模板实验室、任务进度查询。服务器参数页本来就是左标题右输入，未改。UI 测试新增 `ManagementUITests/testRuleEditorFieldsKeepTitlesAndUnits`，按标签查找的 3 处断言改为按标签前缀匹配；`ios/DESIGN.md` 新增「输入行」规范。不改服务器。
+
 ### iOS 0.26.0：概览改紧凑版，一屏看全关键状态
 
 - iOS 概览：「关键数字」6 张卡与「账号运行进程 / 基础服务 / 主机资源」三整组合并为一张 3 列小指标格（数字 + 短名字 + 状态图标），运行模式（生产 / 值守 / 紧急停止，新读 `GET /api/system/kill-switch`）、账号、插件、AI、待确认、24 小时错误、基础服务、运行进程、主机资源；每格点开保留原入口，次要说明收进长按菜单与 VoiceOver 提示。服务器卡片压成两行、「上次完整刷新」并入状态行、快捷操作缩成一行（日志 · 资金台账 · 问 Agent）、收藏合并且为空时隐藏、去掉大段说明。不改后端。`ios/DESIGN.md` 新增「概览卡片规范」。新 UI 测试 `testOverviewCompactTilesFitFirstScreen`、`testOverviewRuntimeTileShowsSafeWatch`。

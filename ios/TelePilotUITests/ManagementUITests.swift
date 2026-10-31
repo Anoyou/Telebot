@@ -137,7 +137,7 @@ final class ManagementUITests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["ledger.screen"].firstMatch.waitForExistence(timeout: 10))
         for _ in 0..<12 where !(reset.exists && reset.isHittable) { app.swipeUp() }
         reset.tap()
-        let field = app.textFields["确认口令"]
+        let field = app.textFields.matching(NSPredicate(format: "label == %@", "确认口令")).firstMatch
         XCTAssertTrue(field.waitForExistence(timeout: 10))
         app.buttons["management.submit"].tap()
         XCTAssertTrue(app.staticTexts["请输入确认口令：RESET_LEDGER。"].waitForExistence(timeout: 5))
@@ -514,6 +514,64 @@ final class ManagementUITests: XCTestCase {
         XCTAssertTrue(params.exists, "保存后插件玩法参数应保留")
         let screenshot = XCTAttachment(screenshot: app.screenshot())
         screenshot.name = "交互规则编辑"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+    }
+
+    /// 第 21 轮：输入行左侧始终有标题（填了值也看得出是哪一项），数字项带单位，空的可选项显示「可选」；
+    /// 多行项标题在输入框上方。
+    func testRuleEditorFieldsKeepTitlesAndUnits() {
+        let app = launch()
+        let entry = app.tabBars.buttons["交互"]
+        XCTAssertTrue(entry.waitForExistence(timeout: 10))
+        entry.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["interaction.status.runtime"].firstMatch.waitForExistence(timeout: 10))
+        let ask = app.buttons["interaction.rule.rule-ask"]
+        for _ in 0..<10 where !(ask.exists && ask.isHittable) { app.swipeUp() }
+        ask.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["interaction.ruleEditor"].firstMatch.waitForExistence(timeout: 10))
+
+        // 规则名称：左标题 + 右侧值
+        let name = app.textFields["interaction.rule.name"]
+        XCTAssertTrue(name.waitForExistence(timeout: 5))
+        XCTAssertEqual(name.value as? String, "AI 答疑")
+        let nameTitle = app.staticTexts["interaction.rule.name.title"]
+        XCTAssertTrue(nameTitle.exists)
+        XCTAssertEqual(nameTitle.label, "规则名称")
+        XCTAssertLessThan(nameTitle.frame.minX, name.frame.minX, "标题在输入框左边")
+
+        // 有值的数字项：标题 + 值 + 单位
+        let valid = app.textFields["interaction.rule.validSeconds"]
+        reveal(valid, in: app)
+        XCTAssertEqual(valid.value as? String, "600")
+        XCTAssertEqual(app.staticTexts["interaction.rule.validSeconds.title"].label, "参与有效期")
+        let validUnit = app.staticTexts["interaction.rule.validSeconds.unit"]
+        XCTAssertTrue(validUnit.exists)
+        XCTAssertEqual(validUnit.label, "秒")
+        XCTAssertGreaterThanOrEqual(validUnit.frame.minX, valid.frame.maxX - 1, "单位在值的右边")
+
+        // 空的可选数字项：灰色提示「可选」，不显示单位；填值后出现单位，标题不消失
+        let daily = app.textFields["interaction.rule.dailyLimit"]
+        reveal(daily, in: app)
+        XCTAssertEqual(daily.placeholderValue, "可选")
+        let dailyUnit = app.staticTexts["interaction.rule.dailyLimit.unit"]
+        XCTAssertFalse(dailyUnit.exists, "空值不显示单位")
+        daily.tap()
+        daily.typeText("6")
+        XCTAssertTrue(dailyUnit.waitForExistence(timeout: 3))
+        XCTAssertEqual(dailyUnit.label, "次")
+        XCTAssertEqual(app.staticTexts["interaction.rule.dailyLimit.title"].label, "每用户每日上限")
+
+        // 多行项：标题在输入框上方，可选项标「可选」
+        let open = app.descendants(matching: .any)["interaction.rule.open"].firstMatch
+        reveal(open, in: app)
+        let openTitle = app.descendants(matching: .any)["interaction.rule.open.title"].firstMatch
+        XCTAssertTrue(openTitle.exists)
+        XCTAssertTrue(openTitle.label.contains("开启指令") && openTitle.label.contains("可选"), openTitle.label)
+        XCTAssertLessThanOrEqual(openTitle.frame.maxY, open.frame.minY + 2, "多行项标题在输入框上方")
+
+        let screenshot = XCTAttachment(screenshot: app.screenshot())
+        screenshot.name = "输入行标题与单位"
         screenshot.lifetime = .keepAlways
         add(screenshot)
     }

@@ -2703,8 +2703,9 @@ private struct PluginSecretListEditor: View {
                     VStack(alignment: .leading, spacing: 6) {
                         Label(saved ? secret : String(secret.prefix(4)) + "…（新增，保存后加密）", systemImage: saved ? "key" : "key.fill")
                             .font(.callout.monospaced()).lineLimit(1).truncationMode(.middle).privacySensitive()
-                        TextField("备注（可选）", text: field(index, spec.noteField))
-                            .font(.subheadline).textInputAutocapitalization(.never).autocorrectionDisabled()
+                        LabeledTextField(title: "备注", text: field(index, spec.noteField), optional: true,
+                                         identifier: "plugin.config.secretList.note.\(index)")
+                            .font(.subheadline)
                     }
                     .accessibilityIdentifier("plugin.config.secretList.item.\(index)")
                 }
@@ -2715,10 +2716,10 @@ private struct PluginSecretListEditor: View {
                 Text("出于安全只显示遮罩，不会显示完整内容。左滑删除，点“编辑”调整顺序；回到配置页检查并保存后生效。")
             }
             Section {
-                TextField("每行一个；也可粘贴插件支持的导入格式（如 JSON）", text: $draft, axis: .vertical)
-                    .lineLimit(2...6).textInputAutocapitalization(.never).autocorrectionDisabled().privacySensitive()
-                    .accessibilityIdentifier("plugin.config.secretList.input")
-                TextField("备注（可选）", text: $draftNote).textInputAutocapitalization(.never).autocorrectionDisabled()
+                StackedTextField(title: "新增\(title)", text: $draft, prompt: "每行一个；也可粘贴插件支持的导入格式（如 JSON）",
+                                 lines: 2...6, monospaced: true, identifier: "plugin.config.secretList.input")
+                    .privacySensitive()
+                LabeledTextField(title: "备注", text: $draftNote, optional: true, identifier: "plugin.config.secretList.draftNote")
                 Button("添加", systemImage: "plus") {
                     let secrets = PluginSecretListSpec.split(draft)
                     guard !secrets.isEmpty else { return }

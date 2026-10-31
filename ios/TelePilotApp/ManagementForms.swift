@@ -331,31 +331,42 @@ struct ManagementFieldView: View {
             } else if ManagementText.secret(key) || spec["format"]?.stringValue == "password" || spec["writeOnly"]?.boolValue == true {
                 SecretField(title: title, text: stringBinding, placeholder: "留空则不修改", identifier: "management.secret.\(key.isEmpty ? title : key)")
             } else if ["integer", "number"].contains(spec["type"]?.stringValue ?? "") {
-                ManagementNumberField(title: title, integer: spec["type"]?.stringValue == "integer", value: $value)
+                ManagementNumberField(title: title, integer: spec["type"]?.stringValue == "integer",
+                                      unit: FieldUnit.infer(key: key, title: title), value: $value)
             } else if telegramContext.applies(to: key), (spec["type"]?.stringValue ?? "string") == "string" {
                 // 消息模板字段：输入时实时显示 Telegram 气泡预览、字数与格式检查（对应 Web 的 TelegramHtmlPreview）。
-                TelegramTemplateInlineField(title: title, text: stringBinding, spec: telegramContext.spec(for: key, title: title),
+                TelegramTemplateInlineField(title: title, showsTitle: true, text: stringBinding, spec: telegramContext.spec(for: key, title: title),
                                             identifier: "tgField.\(key)")
             } else {
-                TextField(title, text: stringBinding, axis: .vertical)
-                    .lineLimit(1...8).textInputAutocapitalization(.never).autocorrectionDisabled()
+                // 第 21 轮：标题在上、输入在下，填了值也能看出是哪一项（插件配置里可选字段没有分组标题）。
+                StackedTextField(title: title, text: stringBinding, prompt: Self.prompt(spec), lines: 1...8,
+                                 identifier: "management.text.\(key.isEmpty ? title : key)")
             }
         }
     }
     private var stringBinding: Binding<String> {
         Binding(get: { value.stringValue ?? "" }, set: { value = .string($0) })
     }
+    /// 空值时的灰色提示：schema 的 `default` / 第一个 `examples`，都没有时「未填写」。
+    static func prompt(_ spec: JSONValue) -> String {
+        if let text = spec["default"]?.stringValue, !text.isEmpty { return "默认：" + text }
+        if let text = spec["examples"]?.arrayValue?.first?.stringValue, !text.isEmpty { return "例如：" + text }
+        return "未填写"
+    }
 }
 
 struct ManagementNumberField: View {
     let title: String
     let integer: Bool
+    var unit: String? = nil
     @Binding var value: JSONValue
     @State private var text = ""
     @State private var invalid = false
     var body: some View {
         VStack(alignment: .leading) {
-            TextField(title, text: $text).keyboardType(.numbersAndPunctuation)
+            // 第 21 轮：「标题 ……… 数值 单位」，不再只靠占位文字说明是哪一项。
+            LabeledTextField(title: title, text: $text, prompt: "未填写", unit: unit, keyboard: .numbersAndPunctuation,
+                             identifier: "management.number.\(title)")
                 .onChange(of: text) { _, next in
                     if next.isEmpty { value = .null; invalid = false }
                     else if integer, let parsed = Int64(next) { value = .integer(parsed); invalid = false }
@@ -421,7 +432,7 @@ struct ManagementDictionaryView: View {
             }
         }
         Section("添加字段") {
-            TextField("字段名称", text: $newKey).textInputAutocapitalization(.never).autocorrectionDisabled()
+            LabeledTextField(title: "字段名称", text: $newKey, prompt: "例如 timeout", identifier: "management.dictionary.newKey")
             Picker("内容类型", selection: $newType) {
                 Text("文本").tag("string"); Text("整数").tag("integer"); Text("数字").tag("number")
                 Text("开关").tag("boolean"); Text("列表").tag("array"); Text("分组").tag("object")
