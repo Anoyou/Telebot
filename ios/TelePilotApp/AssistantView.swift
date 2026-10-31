@@ -131,6 +131,7 @@ struct AssistantView: View {
             }
             if let error = store.error { AssistantNotice(text: error, isError: true) { store.error = nil } }
             if let notice = store.notice { AssistantNotice(text: notice) { store.notice = nil } }
+            if let reconnect = store.streamReconnect { StreamReconnectBanner(status: reconnect) }
             if store.unresolvedSend {
                 VStack(alignment: .leading, spacing: 8) {
                     Label("有一条发送尚未核实", systemImage: "exclamationmark.arrow.triangle.2.circlepath").font(.subheadline.weight(.medium))

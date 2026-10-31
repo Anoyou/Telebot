@@ -11,6 +11,8 @@ struct LoginView: View {
     @State private var challenge: LoginResult?
     @State private var usingRecovery = false
     @State private var error: String?
+    /// 第 22 轮：本页登录失败是连接问题时的诊断详情（原因已写在提示里）。
+    @State private var connectionReport: ConnectionReport?
     @State private var accessEnabled = false
     @State private var accessClientID = ""
     @State private var accessSecret = ""
@@ -115,7 +117,13 @@ struct LoginView: View {
                 accessSection
                 // 被 Cloudflare Access 拦截时，引导已显示在 Cloudflare Access 区内，不再重复。
                 if let message = error ?? (accessNotice == nil ? model.loginNotice : nil) {
-                    Section { NoticeView(title: "未能完成登录", message: message) }
+                    Section {
+                        NoticeView(title: (error == nil ? model.connectionReport : connectionReport)?.diagnosis.title ?? "未能完成登录",
+                                   message: message)
+                        if let report = error == nil ? model.connectionReport : connectionReport {
+                            ConnectionProblemView(report: report, showsReason: false)
+                        }
+                    }
                 }
                 if let message = model.sessionCleanupError {
                     Section {
@@ -175,6 +183,8 @@ struct LoginView: View {
             // 不清空密码：系统密码自动填充可能先写入密码再写入用户名。
             .onChange(of: username) { _, _ in resetChallenge(); error = nil }
             .onChange(of: password) { _, _ in resetChallenge(); error = nil }
+            // 提示被清除（开始新的操作）时，诊断详情一起清除，避免挂在别的错误下面。
+            .onChange(of: error) { _, value in if value == nil { connectionReport = nil } }
             .onDisappear { password = ""; resetChallenge() }
         }
     }
@@ -353,6 +363,7 @@ struct LoginView: View {
                     resetChallenge()
                     self.error = "验证器验证码已过期或不正确，请重新开始登录验证。"
                 } else {
+                    connectionReport = await model.reportConnectionFailure(error)
                     self.error = (error as? APIError)?.localizedDescription ?? "无法完成登录，请检查服务器地址和网络后重试。"
                 }
             }

@@ -27,6 +27,9 @@ actor SessionTransport: ClientTransport {
     private var csrf: StoredSession?
     private var loaded = false
     private var generation = 0
+    /// 第 22 轮：最近一次连接类失败的诊断记录（不含凭证）与最近一次收到服务器响应的时间。
+    private var lastFailure: ConnectionFailureRecord?
+    private var lastSuccess: Date?
     private static let csrfHeader = HTTPField.Name("X-CSRF-Token")!
     private static let requestedWith = HTTPField.Name("X-Requested-With")!
     private static let accessClientID = HTTPField.Name(CloudflareAccessDetector.clientIDHeader)!
@@ -155,34 +158,72 @@ actor SessionTransport: ClientTransport {
               !path.hasPrefix("//"), request.authority == nil || request.authority == origin.host() else {
             throw APIError.invalidServerURL
         }
-        try loadAndExpire()
-        let epoch = generation
-        let write = ![HTTPRequest.Method.get, .head, .options].contains(request.method)
-        if write { try await ensureCSRF(epoch: epoch) }
-        // Buffer the small generated request once, allowing only middleware-rejected CSRF retries.
-        let payload = try await body.mapAsync { try await Data(collecting: $0, upTo: 64 * 1024 * 1024) }
-        var result = try await execute(request, payload: payload, operationID: operationID, epoch: epoch)
-        let code = Self.errorCode(result.1)
-        if write, result.0.status.code == 403,
-           code == "CSRF_TOKEN_REQUIRED" || code == "CSRF_HEADER_REQUIRED" {
-            csrf = nil
-            try await ensureCSRF(epoch: epoch)
-            result = try await execute(request, payload: payload, operationID: operationID, epoch: epoch)
+        let started = Date()
+        var trace = RequestTrace()
+        do {
+            try loadAndExpire()
+            let epoch = generation
+            let write = ![HTTPRequest.Method.get, .head, .options].contains(request.method)
+            if write { try await ensureCSRF(epoch: epoch, trace: &trace) }
+            // Buffer the small generated request once, allowing only middleware-rejected CSRF retries.
+            let payload = try await body.mapAsync { try await Data(collecting: $0, upTo: 64 * 1024 * 1024) }
+            var result = try await execute(request, payload: payload, operationID: operationID, epoch: epoch, trace: &trace)
+            let code = Self.errorCode(result.1)
+            if write, result.0.status.code == 403,
+               code == "CSRF_TOKEN_REQUIRED" || code == "CSRF_HEADER_REQUIRED" {
+                csrf = nil
+                try await ensureCSRF(epoch: epoch, trace: &trace)
+                result = try await execute(request, payload: payload, operationID: operationID, epoch: epoch, trace: &trace)
+            }
+            try validateStatus(result.0, data: result.1)
+            return (result.0, HTTPBody(result.1))
+        } catch {
+            noteFailure(error, method: request.method.rawValue, path: path, trace: trace, started: started, stream: false)
+            throw error
         }
-        try validateStatus(result.0, data: result.1)
-        return (result.0, HTTPBody(result.1))
     }
 
-    private func ensureCSRF(epoch: Int) async throws {
+    /// 一次请求（含 CSRF 预取与重试）的诊断信息，只在本次调用内传递，不跨请求共享。
+    struct RequestTrace: Sendable {
+        var attempts = 0
+        var status: Int?
+        var cloudflareRay: String?
+        var server: String?
+        var urlErrorCode: Int?
+    }
+
+    /// 连接类失败（ConnectionDiagnoser 能归类的）记下诊断记录；业务错误不记。
+    private func noteFailure(_ error: any Error, method: String, path: String, trace: RequestTrace, started: Date, stream: Bool) {
+        guard ConnectionDiagnoser.diagnose(error) != nil else { return }
+        var code: String?
+        if case .server(_, let serverCode)? = error as? APIError { code = serverCode }
+        lastFailure = ConnectionFailureRecord(
+            origin: origin.absoluteString, path: path, method: method, attempts: max(trace.attempts, 1),
+            elapsed: Date().timeIntervalSince(started), urlErrorCode: trace.urlErrorCode, httpStatus: trace.status,
+            errorCode: code, cloudflareRay: trace.cloudflareRay, server: trace.server, isStream: stream)
+    }
+
+    private func noteSuccess() { lastSuccess = Date() }
+
+    /// 最近一次连接类失败的诊断记录（诊断详情用）。
+    func connectionFailure() -> ConnectionFailureRecord? { lastFailure }
+    /// 最近一次收到服务器响应（任何 HTTP 状态都算连上了）的时间。
+    func lastConnectedAt() -> Date? { lastSuccess }
+
+    private static func headerMap(_ fields: HTTPFields) -> [String: String] {
+        Dictionary(fields.map { ($0.name.canonicalName.lowercased(), $0.value) }, uniquingKeysWith: { first, _ in first })
+    }
+
+    private func ensureCSRF(epoch: Int, trace: inout RequestTrace) async throws {
         if csrf != nil { return }
         let request = HTTPRequest(method: .get, scheme: nil, authority: nil, path: "/api/auth/csrf")
-        let result = try await execute(request, payload: nil, operationID: "csrf", epoch: epoch)
+        let result = try await execute(request, payload: nil, operationID: "csrf", epoch: epoch, trace: &trace)
         try validateStatus(result.0, data: result.1)
         guard csrf != nil else { throw APIError.incompatibleResponse }
     }
 
-    private func execute(_ original: HTTPRequest, payload: Data?, operationID: String, epoch: Int)
-        async throws -> (HTTPResponse, Data) {
+    private func execute(_ original: HTTPRequest, payload: Data?, operationID: String, epoch: Int,
+                         trace: inout RequestTrace) async throws -> (HTTPResponse, Data) {
         guard generation == epoch else { throw APIError.sessionChanged }
         try loadAndExpire()
         let credential = try accessCredential()
@@ -198,6 +239,7 @@ actor SessionTransport: ClientTransport {
         if write { request.headerFields[Self.csrfHeader] = csrf?.token }
         let response: HTTPResponse
         let data: Data
+        trace.attempts += 1
         do {
             let path = original.path?.split(separator: "?").first.map(String.init)
             let selectedTransport = Self.isSlowOperation(path ?? "", write: write) ? updateTransport : transport
@@ -207,13 +249,19 @@ actor SessionTransport: ClientTransport {
             data = try await result.1.mapAsync { try await Data(collecting: $0, upTo: 64 * 1024 * 1024) } ?? Data()
         } catch {
             // Never expose ClientError/URLSession diagnostics, which can include credentials.
+            // 第 22 轮：只取 URLError 的数字码归类原因（没网 / DNS / 拒绝 / 超时 / 证书 / 中途断开）。
             if Task.isCancelled && !write { throw CancellationError() }
-            throw APIError.network(outcomeUncertain: write)
+            let code = NetworkFailureCause.urlErrorCode(in: error)
+            trace.urlErrorCode = code
+            throw APIError.network(outcomeUncertain: write, cause: NetworkFailureCause.classify(urlErrorCode: code))
         }
         guard generation == epoch else { throw APIError.sessionChanged }
+        noteSuccess()
         // 先识别 Cloudflare Access：它的 401 来自 Cloudflare 边缘，不能当成 TelePilot 会话失效而清除登录。
-        let headers = Dictionary(response.headerFields.map { ($0.name.canonicalName, $0.value) },
-                                 uniquingKeysWith: { first, _ in first })
+        let headers = Self.headerMap(response.headerFields)
+        trace.status = response.status.code
+        trace.cloudflareRay = headers["cf-ray"]
+        trace.server = headers["server"]
         if isCloudflareAccessResponse(status: response.status.code, headers: headers, body: data,
                                       credentialSent: credential.sent) {
             throw APIError.cloudflareAccessRequired(credential.kind)
@@ -236,7 +284,10 @@ actor SessionTransport: ClientTransport {
 
     private func validateStatus(_ response: HTTPResponse, data: Data) throws {
         guard (200..<300).contains(response.status.code) else {
-            throw APIError.server(status: response.status.code, code: Self.errorCode(data))
+            // 非 TelePilot 的错误页（Cloudflare 1033 / 502、框架默认 404）合成 code，界面据此说清原因。
+            let code = Self.errorCode(data) ?? ConnectionEdgeDetector.syntheticCode(
+                status: response.status.code, headers: Self.headerMap(response.headerFields), body: data)
+            throw APIError.server(status: response.status.code, code: code)
         }
     }
 
@@ -365,6 +416,8 @@ actor SessionTransport: ClientTransport {
     nonisolated func stream(path: String, onEvent: @escaping @Sendable (JSONValue) async -> Void) async throws {
         guard Self.validPath(path) else { throw APIError.invalidServerURL }
         let prepared = try await prepareStream(path: path)
+        let started = Date()
+        var trace = RequestTrace(attempts: 1)
         do {
             let (bytes, response) = try await session.bytes(for: prepared.request)
             defer { bytes.task.cancel() }
@@ -374,6 +427,10 @@ actor SessionTransport: ClientTransport {
             for (key, value) in http.allHeaderFields {
                 if let key = key as? String, let value = value as? String { headers[key.lowercased()] = value }
             }
+            await noteSuccess()
+            trace.status = http.statusCode
+            trace.cloudflareRay = headers["cf-ray"]
+            trace.server = headers["server"]
             let isStream = headers["content-type"]?.lowercased().hasPrefix("application/x-ndjson") == true
             if (300..<400).contains(http.statusCode) {
                 if isCloudflareAccessResponse(status: http.statusCode, headers: headers, body: Data(),
@@ -382,9 +439,9 @@ actor SessionTransport: ClientTransport {
                 }
                 throw APIError.redirectRejected
             }
+            var prefix = Data()
             if !(200..<300).contains(http.statusCode) || !isStream {
                 // 只读取一小段正文用于识别 Access 拒绝页，不把内容带进错误信息。
-                var prefix = Data()
                 for try await byte in bytes {
                     prefix.append(byte)
                     if prefix.count >= 64 * 1024 { break }
@@ -395,7 +452,10 @@ actor SessionTransport: ClientTransport {
                 }
             }
             if http.statusCode == 401 { try await expireAfterStreamUnauthorized(); throw APIError.unauthorized }
-            guard (200..<300).contains(http.statusCode) else { throw APIError.server(status: http.statusCode, code: nil) }
+            guard (200..<300).contains(http.statusCode) else {
+                throw APIError.server(status: http.statusCode,
+                                      code: Self.errorCode(prefix) ?? ConnectionEdgeDetector.syntheticCode(status: http.statusCode, headers: headers, body: prefix))
+            }
             guard isStream else { throw APIError.incompatibleResponse }
             var line = Data()
             line.reserveCapacity(4096)
@@ -419,11 +479,21 @@ actor SessionTransport: ClientTransport {
                 await onEvent(event)
                 if event["type"]?.stringValue == "done" { return }
             }
-            throw APIError.network(outcomeUncertain: false)
-        } catch let error as APIError { throw error }
-        catch {
+            // 服务器没发 done 就关闭了流：中途断开。
+            throw APIError.network(outcomeUncertain: false, cause: .connectionLost)
+        } catch let error as APIError {
+            await noteFailure(error, method: "GET", path: path, trace: trace, started: started, stream: true)
+            throw error
+        } catch {
             if Task.isCancelled { throw CancellationError() }
-            throw APIError.network(outcomeUncertain: false)
+            let code = NetworkFailureCause.urlErrorCode(in: error)
+            trace.urlErrorCode = code
+            // 已收到响应头后读流时断开，原因不明也算“中途断开”。
+            var cause = NetworkFailureCause.classify(urlErrorCode: code)
+            if cause == .unknown, trace.status != nil { cause = .connectionLost }
+            let mapped = APIError.network(outcomeUncertain: false, cause: cause)
+            await noteFailure(mapped, method: "GET", path: path, trace: trace, started: started, stream: true)
+            throw mapped
         }
     }
 }

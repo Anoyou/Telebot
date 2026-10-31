@@ -10,6 +10,7 @@ actor FixtureService: AppServing {
     private var firstStatus = "active"
     private var secondStatus = "paused"
     private var currentUserReads = 0
+    private var streamDrops = 0
     private var cleanupAttempts = 0
     private var fixtureValues: [String: JSONValue] = [:]
     private var accountFeatureEnabled: [Int: [String: Bool]] = [1: ["auto_reply": true], 2: ["auto_reply": false]]
@@ -791,6 +792,17 @@ actor FixtureService: AppServing {
 
     func stream(path: String, onEvent: @escaping @Sendable (JSONValue) async -> Void) async throws {
         try checkConnection()
+        // 第 22 轮：`--ui-test-stream-drop` 让 Agent 进度流前两次订阅中途断开（第一次先收到一个事件），第三次恢复正常。
+        if runPhases, streamDrops < 2, ProcessInfo.processInfo.arguments.contains("--ui-test-stream-drop"),
+           (path.removingPercentEncoding ?? path).contains("/runs/fixture-run/stream") {
+            streamDrops += 1
+            if streamDrops == 1 {
+                try await Task.sleep(nanoseconds: 1_200_000_000)
+                await onEvent(["type": "run_started", "seq": 1, "run_id": "fixture-run"])
+            }
+            try await Task.sleep(nanoseconds: 800_000_000)
+            throw APIError.network(outcomeUncertain: false, cause: .connectionLost)
+        }
         if runPhases, (path.removingPercentEncoding ?? path).contains("/runs/fixture-run/stream") {
             try await streamRunPhases(path: path, onEvent: onEvent)
             return
@@ -1561,8 +1573,27 @@ actor FixtureService: AppServing {
     }
 
     private func checkConnection() throws {
+        // 第 22 轮：模拟 Cloudflare Tunnel 不在线（cloudflared 没跑：530 + 错误 1033）。
+        if Self.tunnelOffline { throw APIError.server(status: 530, code: "CLOUDFLARE_1033") }
         if offline { throw APIError.network(outcomeUncertain: false) }
     }
+
+    private static let tunnelOffline = ProcessInfo.processInfo.arguments.contains("--ui-test-tunnel-offline")
+
+    func lastConnectionFailure() async -> ConnectionFailureRecord? {
+        if Self.tunnelOffline {
+            return ConnectionFailureRecord(origin: "https://ui-test.invalid", path: "/api/system/version", method: "GET",
+                                           attempts: 1, elapsed: 0.3, httpStatus: 530, errorCode: "CLOUDFLARE_1033",
+                                           cloudflareRay: "8d2f00000000abcd-SJC", server: "cloudflare")
+        }
+        if offline {
+            return ConnectionFailureRecord(origin: "https://ui-test.invalid", path: "/api/system/version", method: "GET",
+                                           attempts: 1, elapsed: 0.1)
+        }
+        return nil
+    }
+
+    func lastConnectedAt() async -> Date? { nil }
 }
 
 // MARK: - 消息模板实验室
