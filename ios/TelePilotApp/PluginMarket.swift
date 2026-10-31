@@ -115,7 +115,7 @@ final class PluginMarketModel {
     func install(_ item: JSONValue, model: AppModel) async {
         let key = item["key"]?.stringValue ?? ""
         let title = item["name"]?["zh"]?.stringValue ?? key
-        await run(key, model: model, success: "已安装「\(title)」，到插件中心按账号启用。") {
+        await run(key, model: model, success: "已安装「\(title)」，到插件 ›「启用与配置」按账号启用。") {
             _ = try await model.request(path: "/api/plugin-market/install", method: "POST",
                                         body: ["source_id": item["source_id"] ?? .null, "key": .string(key)])
         }

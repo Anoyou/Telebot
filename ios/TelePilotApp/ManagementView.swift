@@ -9,7 +9,7 @@ enum ManagementModule: String, CaseIterable, Identifiable {
     }
     var title: String {
         switch self {
-        case .plugins: "插件中心"
+        case .plugins: "插件"
         case .operations: "指令与任务"
         case .interaction: "交互"
         case .ai: "AI 管理"
@@ -144,16 +144,7 @@ struct ManagementModuleView: View {
     @ViewBuilder private var systemSections: some View {
         Section("平台") {
             collection("平台能力开关", "/api/system/capabilities", kind: .capabilities, itemsKey: "modules", idField: "key", symbol: "switch.2")
-            // 运行树与运行模式（值守）已移到 插件 › 运行，这里只保留一行跳转（第 19 轮）。
-            NavigationLink { PluginManagementView(isTabRoot: false, initialMode: .runtime) } label: {
-                Label {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("运行树与运行模式")
-                        Text("已移到 插件 › 运行").font(.caption).foregroundStyle(.secondary)
-                    }
-                } icon: { Image(systemName: "point.3.filled.connected.trianglepath.dotted") }
-            }
-            .accessibilityIdentifier("system.runtimeTree")
+            // 运行树与运行模式（值守）在 插件 ›「运行」；第 21 轮起服务器设置里不再保留跳转行。
             NavigationLink { ServerSettingsView() } label: { Label("服务器参数", systemImage: "slider.horizontal.3") }
                 .accessibilityIdentifier("system.serverSettings")
         }

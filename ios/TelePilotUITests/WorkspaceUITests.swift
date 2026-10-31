@@ -132,6 +132,73 @@ final class WorkspaceUITests: XCTestCase {
         XCTAssertEqual(order, order.sorted(), "Dock 顺序应保留：\(order)")
     }
 
+    /// 第 21 轮：本机没自定义 Dock 时跟随服务器「常用入口」（网页 界面偏好 `ui_preferences.primary_nav`，取前 3 个）；
+    /// 在 App 设置里改动后变成本机自定义，「恢复跟随服务器常用入口」后重新跟随。
+    func testDockFollowsServerPrimaryNavUntilCustomized() {
+        let app = launch(["--ui-test-primary-nav=/accounts,/plugins,/logs,/overview"])
+        XCTAssertTrue(app.tabBars.buttons["账号"].waitForExistence(timeout: 45))
+        XCTAssertTrue(app.tabBars.buttons["插件"].exists)
+        XCTAssertTrue(app.tabBars.buttons["日志"].exists)
+        XCTAssertFalse(app.tabBars.buttons["概览"].exists, "常用入口第 4 个放不进 Dock")
+        XCTAssertFalse(app.tabBars.buttons["交互"].exists)
+        let order = ["账号", "插件", "日志", "更多"].map { app.tabBars.buttons[$0].frame.midX }
+        XCTAssertEqual(order, order.sorted(), "Dock 顺序应与常用入口一致：\(order)")
+        tapTab("更多", in: app)
+        let settings = app.buttons["more.settings"]
+        XCTAssertTrue(reveal(settings, in: app))
+        settings.tap()
+        let dockEntry = app.buttons["settings.dock"]
+        XCTAssertTrue(reveal(dockEntry, in: app))
+        dockEntry.tap()
+        let preview = app.staticTexts["dock.preview"]
+        XCTAssertTrue(preview.waitForExistence(timeout: 10))
+        XCTAssertTrue(preview.label.hasPrefix("账号 · 插件 · 日志 · 更多"), preview.label)
+        let source = app.descendants(matching: .any)["dock.source"].firstMatch
+        XCTAssertTrue(source.label.contains("跟随服务器常用入口"), source.label)
+        let reset = app.buttons["dock.reset"]
+        XCTAssertFalse(reset.isEnabled, "跟随服务器时不需要恢复")
+        app.buttons["dock.remove.logs"].tap()
+        XCTAssertTrue(preview.label.hasPrefix("账号 · 插件 · 更多"), preview.label)
+        XCTAssertTrue(source.label.contains("本机自定义"), source.label)
+        XCTAssertTrue(reveal(reset, in: app))
+        XCTAssertTrue(reset.isEnabled)
+        XCTAssertTrue(reset.label.contains("恢复跟随服务器常用入口"), reset.label)
+        reset.tap()
+        for _ in 0..<4 where !(preview.exists && preview.isHittable) { app.swipeDown() }
+        XCTAssertTrue(preview.waitForExistence(timeout: 5))
+        XCTAssertTrue(preview.label.hasPrefix("账号 · 插件 · 日志 · 更多"), preview.label)
+        XCTAssertTrue(source.label.contains("跟随服务器常用入口"), source.label)
+    }
+
+    /// 第 21 轮：插件页三分段、账号管理分组与 Web 同名（启用与配置 / 市场 / 已安装；代理与登录设备 · 限流与风控 · 允许会话 · 管理 Bot）。
+    func testPluginSegmentsAndAccountGroupsUseWebNames() {
+        let app = launch()
+        let plugins = app.tabBars.buttons["插件"]
+        XCTAssertTrue(plugins.waitForExistence(timeout: 45))
+        plugins.tap()
+        XCTAssertTrue(app.buttons["plugins.center"].waitForExistence(timeout: 10))
+        XCTAssertEqual(app.buttons["plugins.center"].label, "启用与配置")
+        XCTAssertEqual(app.buttons["plugins.discover"].label, "市场")
+        XCTAssertTrue(app.buttons["plugins.installed"].label.hasPrefix("已安装"), app.buttons["plugins.installed"].label)
+        tapTab("更多", in: app)
+        let accounts = app.buttons["more.accounts"]
+        XCTAssertTrue(accounts.waitForExistence(timeout: 10))
+        accounts.tap()
+        let first = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "account.row.")).firstMatch
+        XCTAssertTrue(first.waitForExistence(timeout: 10))
+        first.tap()
+        let manage = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "资料、插件与自动化")).firstMatch
+        XCTAssertTrue(reveal(manage, in: app))
+        manage.tap()
+        XCTAssertTrue(app.navigationBars["账号管理"].waitForExistence(timeout: 10))
+        for title in ["代理与登录设备", "限流与风控", "允许会话", "管理 Bot"] {
+            let header = app.staticTexts[title].firstMatch
+            XCTAssertTrue(reveal(header, in: app), "账号管理应有「\(title)」分组")
+        }
+        XCTAssertFalse(app.staticTexts["账号 Bot"].exists)
+        XCTAssertFalse(app.staticTexts["会话白名单"].exists)
+    }
+
     /// 服务器关闭交互、台账、Webhook、命中调试模块：Dock 的「交互」格隐藏，由下一个入口（AI）补位；
     /// 「更多」里台账、Webhook 隐藏，「日志」里命中调试相关入口隐藏；插件详情不再显示「交互规则」。
     func testDisabledModulesHideEntriesAndRefillDock() {
@@ -272,7 +339,7 @@ final class WorkspaceUITests: XCTestCase {
         app.segmentedControls.buttons["用量"].tap()
         let usage = settledHeader(app)
 
-        let all = [("插件中心", center), ("发现", discover), ("已安装", installed), ("AI 概览", overview), ("AI 供应商", providers), ("AI 用量", usage)]
+        let all = [("启用与配置", center), ("市场", discover), ("已安装", installed), ("AI 概览", overview), ("AI 供应商", providers), ("AI 用量", usage)]
         let message = all.map { "\($0.0) \($0.1.frame)" }.joined(separator: "；")
         for (name, header) in all {
             XCTAssertEqual(header.frame.minX, center.frame.minX, accuracy: 1, "\(name)：\(message)")
@@ -284,7 +351,7 @@ final class WorkspaceUITests: XCTestCase {
         let right: (Header) -> CGRect = { h in CGRect(x: h.frame.maxX - 7, y: h.frame.minY - 2, width: 9, height: h.frame.height + 4) }
         // 左端（第一段未选中）：发现 ↔ 已安装 ↔ AI 供应商 ↔ AI 用量。
         let left: (Header) -> CGRect = { h in CGRect(x: h.frame.minX - 2, y: h.frame.minY - 2, width: 9, height: h.frame.height + 4) }
-        for (name, other) in [("发现", discover), ("AI 概览", overview), ("AI 供应商", providers)] {
+        for (name, other) in [("市场", discover), ("AI 概览", overview), ("AI 供应商", providers)] {
             let diff = PixelDiff.mean(center.shot, right(center), other.shot, right(other))
             XCTAssertLessThan(diff, 4, "分段控件右端与插件中心不一致（被裁切？）：\(name) 平均差 \(diff)")
         }

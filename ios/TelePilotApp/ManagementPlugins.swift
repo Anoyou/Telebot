@@ -32,7 +32,7 @@ struct PluginManagementView: View {
     @State private var search = ""
     @State private var searching = false
 
-    /// - Parameter initialMode: 打开时显示「插件」卡片还是「运行」（运行树）；服务器设置里的旧入口跳到这里用 `.runtime`。
+    /// - Parameter initialMode: 打开时显示「插件」卡片还是「运行」（运行树）。
     init(accountID: Int? = nil, isTabRoot: Bool = true, initialMode: PluginCenterMode = .plugins) {
         self.accountID = accountID
         self.isTabRoot = isTabRoot
@@ -71,12 +71,13 @@ struct PluginManagementView: View {
         .task { await load() }
     }
 
-    /// 插件中心（按账号运行状态）/ 发现（插件仓库）/ 已安装（含待更新，数量为服务器真实的可更新数）。
+    /// 启用与配置（按账号运行状态，第 21 轮前叫「插件中心」）/ 市场（插件仓库，原「发现」）/ 已安装（含待更新，数量为服务器真实的可更新数）。
+    /// 名称与 Web 插件页三个子分页一致（第 20 轮 #119）；无障碍标识沿用旧值。
     private var sectionPicker: some View {
         Picker("插件工作区", selection: $section) {
-            Text("插件中心").tag(PluginWorkspaceSection.center)
+            Text("启用与配置").tag(PluginWorkspaceSection.center)
                 .accessibilityIdentifier("plugins.center")
-            Text("发现").tag(PluginWorkspaceSection.discover)
+            Text("市场").tag(PluginWorkspaceSection.discover)
                 .accessibilityIdentifier("plugins.discover")
             Text(store.updateCount > 0 ? "已安装 · \(store.updateCount)" : "已安装").tag(PluginWorkspaceSection.installed)
                 .accessibilityIdentifier("plugins.installed")

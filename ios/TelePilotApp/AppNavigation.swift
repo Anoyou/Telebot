@@ -26,7 +26,8 @@ enum AppRoute: Hashable, Sendable {
             guard let raw = notificationUserInfo["account_id"],
                   let id = Int(String(describing: raw)), id > 0 else { return nil }
             self = .account(id)
-        case "plugins": self = .plugins
+        // 旧推送里的运行树目标（运行树已搬到 插件 ›「运行」）一律打开插件页。
+        case "plugins", "runtime", "runtime_tree", "platform_tree": self = .plugins
         case "operations": self = .operations
         case "ai": self = .ai
         case "assistant":

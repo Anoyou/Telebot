@@ -244,10 +244,49 @@ final class ManagementUITests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["update.progress"].waitForExistence(timeout: 10))
         XCTAssertFalse(app.buttons["update.apply"].exists)
         let applied = app.descendants(matching: .any)["update.applied"]
-        // “更新已完成”位于进度行下方，medium 高度的面板里可能在可见区外（List 懒加载），等不到就向下滚动找。
-        if !applied.waitForExistence(timeout: 20) { scrollUpdateSheet(to: applied, in: app) }
+        // 任务完成后先等服务器恢复（第 21 轮），恢复后才显示“更新完成”；位于进度区下方，medium 高度的面板里
+        // 可能在可见区外（List 懒加载），等不到就向下滚动找。
+        if !applied.waitForExistence(timeout: 30) { scrollUpdateSheet(to: applied, in: app) }
         XCTAssertTrue(applied.waitForExistence(timeout: 15))
         XCTAssertFalse(app.buttons["update.apply"].exists)
+    }
+
+    /// 第 21 轮：更新任务到 100% 后不再停在进度条，自动等服务器恢复（期间第一次读版本失败 = 重启中），
+    /// 读到新版本后自动重新检查：显示新版本号和「已是最新」，不用手动关闭任务或下拉。
+    func testServerUpdateWaitsForServerAndRefreshesVersion() {
+        let app = launch()
+        openAppSettingsEntry("settings.update", in: app)
+        let open = app.buttons["update.open"]
+        for _ in 0..<4 where !open.isHittable { app.swipeUp() }
+        XCTAssertTrue(open.waitForExistence(timeout: 10))
+        open.tap()
+        let apply = app.buttons["update.apply"]
+        scrollUpdateSheet(to: apply, in: app)
+        XCTAssertTrue(apply.waitForExistence(timeout: 10))
+        apply.tap()
+        let confirm = app.buttons["update.confirm"].firstMatch
+        XCTAssertTrue(confirm.waitForExistence(timeout: 10))
+        confirm.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["update.progress"].waitForExistence(timeout: 10))
+        let recovering = app.descendants(matching: .any)["update.recovering"]
+        XCTAssertTrue(recovering.waitForExistence(timeout: 25), "任务完成后应进入「等待服务器恢复」，而不是停在 100%")
+        XCTAssertFalse(app.descendants(matching: .any)["update.progress"].exists, "等恢复时不再显示 100% 进度条")
+        let applied = app.descendants(matching: .any)["update.applied"]
+        if !applied.waitForExistence(timeout: 20) { scrollUpdateSheet(to: applied, in: app) }
+        XCTAssertTrue(applied.waitForExistence(timeout: 10))
+        let recovered = NSPredicate(format: "label CONTAINS %@ AND label CONTAINS %@", "0.105.0-beta.1", "已是最新")
+        expectation(for: recovered, evaluatedWith: applied)
+        waitForExpectations(timeout: 15)
+        XCTAssertFalse(app.buttons["update.apply"].exists)
+        let screenshot = XCTAttachment(screenshot: app.screenshot())
+        screenshot.name = "服务器更新完成后自动刷新版本"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+        let finish = app.buttons["update.finishJob"]
+        scrollUpdateSheet(to: finish, in: app)
+        finish.tap()
+        XCTAssertTrue(app.staticTexts["服务器已是最新版本"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["当前版本 0.105.0-beta.1"].exists)
     }
 
     func testLogDetailExplainsMessageFailureAndOpensTimeline() {
@@ -673,6 +712,7 @@ final class ManagementUITests: XCTestCase {
         XCTAssertFalse(app.staticTexts["关于与更新"].exists)
 
         reveal(settings, in: app)
+        waitUntilStill(settings)
         settings.tap()
         XCTAssertTrue(app.navigationBars["App 设置"].waitForExistence(timeout: 10))
         let about = app.buttons["settings.about"]
@@ -703,6 +743,7 @@ final class ManagementUITests: XCTestCase {
 
         // 「关于」：标题 = 入口名，只有信息，不含更新按钮。
         reveal(about, in: app, up: false)
+        waitUntilStill(about)
         about.tap()
         XCTAssertTrue(app.navigationBars["关于"].waitForExistence(timeout: 10))
         XCTAssertTrue(app.descendants(matching: .any)["about.appVersion"].firstMatch.waitForExistence(timeout: 10))
@@ -715,6 +756,7 @@ final class ManagementUITests: XCTestCase {
 
         // 「软件更新」：标题 = 入口名，服务器与 App 两组。
         XCTAssertTrue(update.waitForExistence(timeout: 10))
+        waitUntilStill(update)
         update.tap()
         XCTAssertTrue(app.navigationBars["软件更新"].waitForExistence(timeout: 10))
         XCTAssertTrue(app.descendants(matching: .any)["softwareUpdate.serverVersion"].firstMatch.waitForExistence(timeout: 10))
@@ -731,6 +773,20 @@ final class ManagementUITests: XCTestCase {
         add(updateShot)
     }
 
+    /// 等列表滚动停下（元素位置连续两次不变）再点：滑动后的惯性滚动还没停就点，偶尔会点到别的行（CI 偶发失败）。
+    private func waitUntilStill(_ element: XCUIElement, timeout: TimeInterval = 3) {
+        guard element.exists else { return }
+        let deadline = Date().addingTimeInterval(timeout)
+        var last = element.frame
+        var stable = 0
+        while Date() < deadline && stable < 2 {
+            Thread.sleep(forTimeInterval: 0.2)
+            let now = element.exists ? element.frame : .zero
+            stable = now == last ? stable + 1 : 0
+            last = now
+        }
+    }
+
     /// 0.21.0：「关于」「软件更新」拆成两页，放在「更多 › App 设置」最顶部一组（像 iPhone「通用」的「关于本机／软件更新」）。
     /// 「App 设置」在「更多」最后一组，List 懒加载：先滑到它再点，再点设置页顶部的入口。
     private func openAppSettingsEntry(_ identifier: String, in app: XCUIApplication) {
@@ -738,6 +794,7 @@ final class ManagementUITests: XCTestCase {
         XCTAssertTrue(app.buttons["more.accounts"].waitForExistence(timeout: 10))
         reveal(settings, in: app)
         XCTAssertTrue(settings.waitForExistence(timeout: 5))
+        waitUntilStill(settings)
         settings.tap()
         XCTAssertTrue(app.navigationBars["App 设置"].waitForExistence(timeout: 10))
         let entry = app.buttons[identifier]
@@ -852,19 +909,17 @@ final class ManagementUITests: XCTestCase {
         waitForExpectations(timeout: 10)
     }
 
-    /// 服务器设置里的旧「能力与插件树」「平台运行模式」入口删除，改为一行跳转到 插件 › 运行。
-    func testServerSettingsLinksToRuntimeTree() {
+    /// 第 21 轮：运行树只在 插件 ›「运行」，服务器设置里不再有运行树或它的跳转行；插件页「运行」照常可用。
+    func testServerSettingsHasNoRuntimeTreeEntry() {
         let app = launch()
         let system = app.buttons["服务器设置"]
         XCTAssertTrue(app.buttons["more.accounts"].waitForExistence(timeout: 10))
         for _ in 0..<8 where !(system.exists && system.isHittable) { app.swipeUp() }
         system.tap()
-        let entry = app.buttons["system.runtimeTree"]
-        XCTAssertTrue(entry.waitForExistence(timeout: 10))
-        XCTAssertTrue(entry.label.contains("已移到 插件 › 运行"), entry.label)
+        XCTAssertTrue(app.buttons["system.serverSettings"].waitForExistence(timeout: 10))
+        XCTAssertFalse(app.buttons["system.runtimeTree"].exists, "服务器设置里不再保留运行树跳转")
         XCTAssertFalse(app.buttons["system.platformTree"].exists, "旧「能力与插件树」入口应删除")
-        entry.tap()
-        XCTAssertTrue(app.staticTexts["runtime.profile"].waitForExistence(timeout: 15))
+        XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "运行树")).firstMatch.exists)
     }
 
     /// 插件按「直通 / 主通道 / 交互 Bot」分组；点插件进本账号配置，交互插件旁「交互规则 ›」跳交互中心；

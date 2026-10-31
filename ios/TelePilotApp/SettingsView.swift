@@ -210,7 +210,7 @@ struct DockCustomizationView: View {
     @Environment(AppModel.self) private var model
     @Environment(WorkspacePreferences.self) private var preferences
 
-    private var slots: [DockItem] { preferences.dockSlots }
+    private var slots: [DockItem] { preferences.activeDockSlots }
     private var available: [DockItem] { DockItem.customizable.filter { !slots.contains($0) } }
     private var effective: [DockItem] { preferences.dockItems(disabledModules: model.disabledModules) }
     private var full: Bool { slots.count >= DockItem.maxSlots }
@@ -221,9 +221,16 @@ struct DockCustomizationView: View {
                 Text((effective + [.more]).map(\.title).joined(separator: " · ") + "　+ Agent")
                     .font(.subheadline.weight(.medium))
                     .accessibilityIdentifier("dock.preview")
+                Label("来源：" + sourceTitle, systemImage: sourceSymbol)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("dock.source")
             } header: { Text("当前 Dock") } footer: {
-                if effective != slots {
-                    Text("服务器关闭了部分模块，对应的格暂时隐藏，由下面列表顺序里的下一个入口补上（默认是 AI）。模块重新开启后自动恢复。")
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(sourceExplanation)
+                    if effective != slots {
+                        Text("服务器关闭了部分模块，对应的格暂时隐藏，由下面列表顺序里的下一个入口补上（默认是 AI）。模块重新开启后自动恢复。")
+                    }
                 }
             }
 
@@ -284,15 +291,46 @@ struct DockCustomizationView: View {
             }
 
             Section {
-                Button("恢复默认（概览 · 插件 · 交互）", systemImage: "arrow.uturn.backward") { preferences.resetDock() }
-                    .disabled(slots == DockItem.defaultSlots)
+                Button(resetTitle, systemImage: "arrow.uturn.backward") { preferences.resetDock() }
+                    .disabled(preferences.dockSource != .local)
                     .accessibilityIdentifier("dock.reset")
-            } footer: { Text("设置只保存在这台设备上。") }
+            } footer: { Text("在这里改动后只保存在这台设备上，不会改网页的「常用入口」；恢复后重新跟随服务器。") }
         }
         .symbolRenderingMode(.hierarchical)
         .navigationTitle("自定义 Dock")
         .navigationBarTitleDisplayMode(.inline)
         .accessibilityIdentifier("dock.settings")
+    }
+
+    private var sourceTitle: String {
+        switch preferences.dockSource {
+        case .server: "跟随服务器常用入口"
+        case .local: "本机自定义"
+        case .defaults: "App 默认"
+        }
+    }
+
+    private var sourceSymbol: String {
+        switch preferences.dockSource {
+        case .server: "server.rack"
+        case .local: "iphone"
+        case .defaults: "square.grid.2x2"
+        }
+    }
+
+    private var sourceExplanation: String {
+        switch preferences.dockSource {
+        case .server:
+            "与网页「设置 › 界面偏好 › 常用入口」一致（取前 \(DockItem.maxSlots) 个能放进 Dock 的入口），在网页上改了这里会跟着变。"
+        case .local:
+            "你在这台设备上改过 Dock，不再跟随网页的「常用入口」。"
+        case .defaults:
+            "服务器没有设置「常用入口」（或版本较旧），使用 App 默认：概览 · 插件 · 交互。"
+        }
+    }
+
+    private var resetTitle: String {
+        preferences.serverDockSlots == nil ? "恢复默认（概览 · 插件 · 交互）" : "恢复跟随服务器常用入口"
     }
 
     private func moduleNote(_ item: DockItem) -> String? {

@@ -44,6 +44,10 @@ final class AppModel {
     var supportsSecretReveal: Bool { serverFeatures.contains("secret_reveal") }
     /// 服务器支持新建 Agent 会话时 `default_account`（第 20 轮）：只有 1 个账号时由服务器自动关联。
     var supportsAgentSessionDefaultAccount: Bool { serverFeatures.contains(AgentSessionAccount.featureKey) }
+    /// 服务器「常用入口」（网页 设置 › 界面偏好，`GET /api/system/settings` 的 `ui_preferences.primary_nav`，第 21 轮）。
+    /// nil = 还没读到；`paths == nil` = 旧服务器没有该字段。本机没自定义 Dock 时 Dock 跟随它（见 `WorkspacePreferences`）。
+    private(set) var serverPrimaryNav: ServerPrimaryNav?
+    struct ServerPrimaryNav: Equatable { let paths: [String]? }
     /// 服务器最近一次更新检查（自动或手动，`GET /api/system/update-status`），用于“更多”角标、App 设置行与软件更新页提示。
     private(set) var serverUpdateStatus: JSONValue?
     /// 运行模式（`GET /api/platform/profile`，与 Web 全局提示条 `SafeWatchBar` 同一接口）。
@@ -491,6 +495,18 @@ final class AppModel {
         }
     }
 
+    /// 服务器更新后等恢复（第 21 轮）：只读无鉴权的 `GET /api/system/version`。重启期间读不到是正常的，
+    /// 所以失败时不清理会话、不记成版本读取错误；读到时同步「服务器版本」，关于页与更新面板立刻显示新版本号。
+    func probeServerVersion() async throws -> ServerVersion {
+        guard phase == .signedIn, let service else { throw APIError.unauthorized }
+        let token = generation
+        let value = try await service.version()
+        guard token == generation else { throw APIError.sessionChanged }
+        serverVersion = value
+        versionError = nil
+        return value
+    }
+
     func upload(path: String, file: Data, filename: String, fields: [String: String] = [:]) async throws -> JSONValue {
         guard phase == .signedIn, let service else { throw APIError.unauthorized }
         let token = generation
@@ -551,10 +567,18 @@ final class AppModel {
         async let updateResult = capture { try await self.request(path: "/api/system/update-status") }
         async let modulesResult = capture { try await self.request(path: "/api/system/capabilities") }
         async let profileResult = capture { try await self.request(path: "/api/platform/profile") }
+        async let settingsResult = capture { try await self.request(path: "/api/system/settings") }
         let (actions, matrix, update, modules) = await (actionsResult, pluginsResult, updateResult, modulesResult)
         let profile = await profileResult
+        let settings = await settingsResult
         guard token == generation else { return }
         applyRuntimeProfile(profile)
+        // 读取失败保留上一次结果；读到了但没有 ui_preferences.primary_nav 字段 = 旧服务器（paths 为 nil）。
+        if case .success(let value) = settings {
+            let paths = value["ui_preferences"]?["primary_nav"]?.arrayValue?.compactMap(\.stringValue)
+            let next = ServerPrimaryNav(paths: paths)
+            if next != serverPrimaryNav { serverPrimaryNav = next }
+        }
         // 读取失败（含旧服务器 404）时保留上一次结果，不把入口误隐藏。
         if case .success(let value) = modules {
             disabledModules = Self.disabledModules(value)
@@ -833,6 +857,7 @@ final class AppModel {
         health = nil
         resources = nil
         serverVersion = nil
+        serverPrimaryNav = nil
         accounts = []
         accountsLoaded = false
         healthError = nil

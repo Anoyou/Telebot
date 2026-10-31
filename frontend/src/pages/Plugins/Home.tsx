@@ -57,8 +57,9 @@ import {
 } from "@/components/ui/dialog";
 import { pluginUsageGuideWarning, splitPluginWarnings } from "@/lib/plugin-config-contract";
 import { isPlatformFeature } from "@/lib/plugin-modes";
+import { pluginViewFromSearch } from "@/lib/runtimeTreeLinks";
 import { cn, formatDateTime } from "@/lib/utils";
-import { PlatformTreeView } from "@/pages/Settings/PlatformTreeView";
+import { PlatformTreeView } from "@/pages/Plugins/PlatformTreeView";
 import {
   compactUsageText,
   pluginContractRiskWarnings,
@@ -221,10 +222,15 @@ export function PluginsHome() {
   const [pluginSearch, setPluginSearch] = useState("");
   const [pluginStatus, setPluginStatus] = useState<PluginStatusFilter>("all");
   const [mobileSearchExpanded, setMobileSearchExpanded] = useState(false);
-  const [pluginView, setPluginView] = useState<PluginView>("cards");
+  // ?view=tree 直达运行树（旧服务器设置 / 独立路由的运行树深链都跳到这里，第 21 轮）。
+  const [pluginView, setPluginView] = useState<PluginView>(() => pluginViewFromSearch(searchParams.toString()));
   const [selectedPluginKeys, setSelectedPluginKeys] = useState<Set<string>>(() => new Set());
   const [historyPluginKey, setHistoryPluginKey] = useState<string | null>(null);
   const guideActive = searchParams.get("guide") === "1";
+  const requestedView = pluginViewFromSearch(searchParams.toString());
+  useEffect(() => {
+    if (requestedView === "tree") setPluginView("tree");
+  }, [requestedView]);
   const matrixQ = useQuery({
     queryKey: ["matrix"],
     queryFn: getFeatureMatrix,

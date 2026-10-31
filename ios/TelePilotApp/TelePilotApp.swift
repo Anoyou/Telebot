@@ -173,6 +173,10 @@ private struct MainTabs: View {
             openRequestedRoute()
         }
         .onChange(of: model.requestedRoute) { _, _ in openRequestedRoute() }
+        // 服务器「常用入口」（网页 界面偏好）：本机没自定义 Dock 时跟随它；旧服务器没有该字段时保持现有 Dock。
+        .onChange(of: model.serverPrimaryNav) { _, value in
+            if let value { preferences.setServerPrimaryNav(value.paths) }
+        }
         // 用户改了 Dock、或服务器关掉了某个模块：当前格不在 Dock 里时回到第一格，不停在一个看不见的 Tab 上。
         .onChange(of: dockItems) { _, _ in keepSelectionVisible() }
         .onChange(of: selected) { old, new in

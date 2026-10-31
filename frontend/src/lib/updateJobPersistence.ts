@@ -13,6 +13,9 @@ export interface PersistedUpdateJob<TPlan = unknown> {
   jobId: string;
   plan: TPlan;
   savedAt: number;
+  /** 第 21 轮：应用更新前的服务器版本与提交，重新打开弹窗时等服务器恢复用来比对。 */
+  fromVersion?: string | null;
+  fromRevision?: string | null;
 }
 
 export function saveActiveUpdateJob<TPlan>(

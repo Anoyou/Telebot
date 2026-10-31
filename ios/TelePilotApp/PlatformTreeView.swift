@@ -37,7 +37,7 @@ struct PluginCenterModePicker: View {
 /// `POST /api/platform/profile/dry-run` 预演；模块开关 `PATCH /api/system/capabilities/{key}`（与 Web 系统设置同一接口）。
 /// 所有写操作只提交一次、不自动重试；网络中断显示「结果未知」并提示刷新核对。
 struct RuntimeTreeView: View {
-    /// 插件页的工作区分段（插件中心／发现／已安装），作为第一行。
+    /// 插件页的工作区分段（启用与配置／市场／已安装），作为第一行。
     var header: AnyView?
     @Binding var accountID: Int?
     @Binding var mode: PluginCenterMode

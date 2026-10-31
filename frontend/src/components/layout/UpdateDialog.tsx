@@ -48,6 +48,12 @@ import {
   loadActiveUpdateJob,
   saveActiveUpdateJob,
 } from "@/lib/updateJobPersistence";
+import {
+  RECOVERY_POLL_INTERVAL_MS,
+  RECOVERY_TIMEOUT_MS,
+  recoveryVerdict,
+  type RecoveryBaseline,
+} from "@/lib/updateRecovery";
 import { confirmDialog } from "@/components/ui/confirm-dialog";
 
 type UpdateActionRequired =
@@ -84,7 +90,7 @@ interface UpdatePlanMeta {
 
 type Step =
   | { kind: "checking" }
-  | { kind: "up_to_date"; commit: string }
+  | { kind: "up_to_date"; commit: string; version?: string | null }
   | { kind: "cannot_check"; plan: UpdatePlanMeta }
   | { kind: "has_update"; current: string; remote: string; currentVersion: string; targetVersion: string; ahead: number; changedFiles: string[]; commitTitles: string[]; plan: UpdatePlanMeta }
   | { kind: "pulling" }
@@ -100,6 +106,16 @@ type Step =
       stepTimings?: Array<{ phase?: string; duration_ms?: number; detail?: string }>;
     }
   | { kind: "pulled"; newCommit: string | null; summary: string | null; plan: UpdatePlanMeta }
+  // 第 21 轮：任务到 100% 后自动等服务器恢复（轮询 /api/system/version），恢复后自动重新检查。
+  | {
+      kind: "recovering";
+      newCommit: string | null;
+      plan: UpdatePlanMeta;
+      attempts: number;
+      stillOld: boolean;
+      lastError: string | null;
+    }
+  | { kind: "recovery_timeout"; newCommit: string | null; plan: UpdatePlanMeta }
   | { kind: "pull_failed"; error: string; progress?: number; phase?: string; detail?: string | null }
   | { kind: "check_failed"; error: string }
   | { kind: "restarting"; countdown: number };
@@ -169,6 +185,12 @@ export function UpdateDialog({ open, onOpenChange }: UpdateDialogProps) {
   const [autoCheckCustomHours, setAutoCheckCustomHours] = useState<string | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval>>();
   const jobPollTokenRef = useRef(0);
+  const recoveryTokenRef = useRef(0);
+  /** 应用更新前的版本与提交：等恢复时比对用。 */
+  const recoveryBaselineRef = useRef<RecoveryBaseline | null>(null);
+  const startRecoveryRef = useRef<(newCommit: string | null, plan: UpdatePlanMeta) => void>(() => {});
+  /** 恢复后读到的新版本（显示「更新完成，服务器已恢复」与刷新页面按钮）。 */
+  const [recovered, setRecovered] = useState<{ version: string; revision: string | null } | null>(null);
   const checkTokenRef = useRef(0);
   const dialogGenerationRef = useRef(0);
   const targetOptionsTokenRef = useRef(0);
@@ -185,6 +207,10 @@ export function UpdateDialog({ open, onOpenChange }: UpdateDialogProps) {
     enabled: open,
     staleTime: 30_000,
   });
+  const runtimeVersionRefetchRef = useRef(runtimeVersionQ.refetch);
+  runtimeVersionRefetchRef.current = runtimeVersionQ.refetch;
+  const autoCheckRefetchRef = useRef(autoCheckQ.refetch);
+  autoCheckRefetchRef.current = autoCheckQ.refetch;
 
   const normalizeAction = (raw: CheckUpdateResult["action_required"]): UpdateActionRequired => {
     return typeof raw === "string" ? raw : "none";
@@ -298,6 +324,9 @@ export function UpdateDialog({ open, onOpenChange }: UpdateDialogProps) {
     jobPollTokenRef.current = pollToken;
     let stopped = false;
     let failures = 0;
+    // 进度到 100% 但任务迟迟不结束（更新器自己在重启 / 交接）：不再干等任务，直接确认服务器版本。
+    let fullSince: number | null = null;
+    let lastNewCommit: string | null = null;
     const poll = async () => {
       if (stopped || jobPollTokenRef.current !== pollToken) return;
       try {
@@ -310,14 +339,12 @@ export function UpdateDialog({ open, onOpenChange }: UpdateDialogProps) {
         if (job.status === "succeeded") {
           stopped = true;
           clearActiveUpdateJob(getUpdateJobStorage());
-          setStep({
-            kind: "pulled",
-            newCommit: job.new_commit ?? null,
-            summary: job.summary || "更新任务已完成。",
-            plan,
-          });
+          startRecoveryRef.current(job.new_commit ?? null, plan);
           return;
         }
+        lastNewCommit = job.new_commit ?? lastNewCommit;
+        if ((job.progress ?? 0) >= 100) fullSince = fullSince ?? Date.now();
+        else fullSince = null;
         if (job.status === "failed") {
           stopped = true;
           clearActiveUpdateJob(getUpdateJobStorage());
@@ -353,6 +380,12 @@ export function UpdateDialog({ open, onOpenChange }: UpdateDialogProps) {
           };
         });
       }
+      if (!stopped && fullSince !== null && Date.now() - fullSince >= 15_000) {
+        stopped = true;
+        clearActiveUpdateJob(getUpdateJobStorage());
+        startRecoveryRef.current(lastNewCommit, plan);
+        return;
+      }
       if (!stopped && jobPollTokenRef.current === pollToken) {
         const retryDelay = getUpdateJobRetryDelay(failures);
         window.setTimeout(poll, retryDelay);
@@ -374,7 +407,7 @@ export function UpdateDialog({ open, onOpenChange }: UpdateDialogProps) {
       } else if (res.can_check === false) {
         setStep({ kind: "cannot_check", plan: parsePlanMeta(res) });
       } else if (!res.has_update) {
-        setStep({ kind: "up_to_date", commit: res.current_commit || "?" });
+        setStep({ kind: "up_to_date", commit: res.current_commit || "?", version: res.current_version ?? null });
       } else {
         setStep({
           kind: "has_update",
@@ -397,12 +430,73 @@ export function UpdateDialog({ open, onOpenChange }: UpdateDialogProps) {
     }
   }, []);
 
+  /** 等服务器恢复：每 3 秒读一次无鉴权的版本接口，对上新版本即自动重新检查；3 分钟没恢复给出说明与重试。 */
+  const startRecovery = useCallback(
+    (newCommit: string | null, plan: UpdatePlanMeta) => {
+      const token = recoveryTokenRef.current + 1;
+      recoveryTokenRef.current = token;
+      const baseline: RecoveryBaseline = {
+        ...(recoveryBaselineRef.current ?? {}),
+        expectedCommit: newCommit ?? recoveryBaselineRef.current?.expectedCommit ?? null,
+      };
+      const startedAt = Date.now();
+      let healthy = 0;
+      let attempts = 0;
+      setStep({ kind: "recovering", newCommit, plan, attempts: 0, stillOld: false, lastError: null });
+      const tick = async () => {
+        if (recoveryTokenRef.current !== token) return;
+        attempts += 1;
+        try {
+          const version = await getBackendVersion();
+          if (recoveryTokenRef.current !== token) return;
+          healthy += 1;
+          const verdict = recoveryVerdict(baseline, version, healthy);
+          if (verdict === "recovered") {
+            recoveryTokenRef.current += 1;
+            setRecovered({ version: version.version, revision: version.revision ?? null });
+            void runtimeVersionRefetchRef.current();
+            void autoCheckRefetchRef.current();
+            await doCheck({ remote: plan.remote || "origin", branch: plan.branch || "main" });
+            return;
+          }
+          setStep((current) =>
+            current?.kind === "recovering"
+              ? { ...current, attempts, stillOld: verdict === "still_old", lastError: null }
+              : current,
+          );
+        } catch (error) {
+          if (recoveryTokenRef.current !== token) return;
+          healthy = 0;
+          const message = error instanceof Error ? error.message : String(error);
+          setStep((current) =>
+            current?.kind === "recovering"
+              ? { ...current, attempts, stillOld: false, lastError: message }
+              : current,
+          );
+        }
+        if (recoveryTokenRef.current !== token) return;
+        if (Date.now() - startedAt >= RECOVERY_TIMEOUT_MS) {
+          setStep({ kind: "recovery_timeout", newCommit, plan });
+          return;
+        }
+        window.setTimeout(() => void tick(), RECOVERY_POLL_INTERVAL_MS);
+      };
+      window.setTimeout(() => void tick(), RECOVERY_POLL_INTERVAL_MS);
+    },
+    [doCheck],
+  );
+  startRecoveryRef.current = startRecovery;
+
   useEffect(() => {
     if (open) {
       const dialogGeneration = dialogGenerationRef.current + 1;
       dialogGenerationRef.current = dialogGeneration;
       const activeJob = loadActiveUpdateJob<UpdatePlanMeta>(getUpdateJobStorage());
       if (activeJob) {
+        recoveryBaselineRef.current = {
+          version: activeJob.fromVersion ?? null,
+          revision: activeJob.fromRevision ?? null,
+        };
         const remote = activeJob.plan.remote || "origin";
         const branch = activeJob.plan.branch || "main";
         setUpdateRemote(remote);
@@ -437,6 +531,8 @@ export function UpdateDialog({ open, onOpenChange }: UpdateDialogProps) {
       }
     } else {
       dialogGenerationRef.current += 1;
+      recoveryTokenRef.current += 1;
+      setRecovered(null);
       setStep(null);
       setPlanExpanded(false);
       setReleaseNotesExpanded(false);
@@ -452,6 +548,7 @@ export function UpdateDialog({ open, onOpenChange }: UpdateDialogProps) {
     return () => {
       dialogGenerationRef.current += 1;
       jobPollTokenRef.current += 1;
+      recoveryTokenRef.current += 1;
       checkTokenRef.current += 1;
       targetOptionsTokenRef.current += 1;
       if (timerRef.current) {
@@ -462,6 +559,11 @@ export function UpdateDialog({ open, onOpenChange }: UpdateDialogProps) {
   }, [open, doCheck, loadTargetOptions, pollUpdateJob]);
 
   const doPull = async () => {
+    recoveryBaselineRef.current = {
+      version: (step?.kind === "has_update" ? step.currentVersion : null) ?? runtimeVersionQ.data?.version ?? null,
+      revision: (step?.kind === "has_update" ? step.current : null) ?? runtimeVersionQ.data?.revision ?? null,
+    };
+    setRecovered(null);
     setStep({ kind: "pulling" });
     try {
       const activePlan = step?.kind === "has_update" ? step.plan : null;
@@ -479,6 +581,8 @@ export function UpdateDialog({ open, onOpenChange }: UpdateDialogProps) {
             jobId: res.job_id,
             plan,
             savedAt: Date.now(),
+            fromVersion: recoveryBaselineRef.current?.version ?? null,
+            fromRevision: recoveryBaselineRef.current?.revision ?? null,
           });
           setStep({
             kind: "job_running",
@@ -493,7 +597,8 @@ export function UpdateDialog({ open, onOpenChange }: UpdateDialogProps) {
           pollUpdateJob(res.job_id, plan);
           return;
         }
-        setStep({ kind: "pulled", newCommit: res.new_commit, summary: res.summary, plan });
+        // 没有后台任务（例如源码直接运行）：拉取后服务会重启，等它恢复再刷新。
+        startRecovery(res.new_commit ?? null, plan);
       } else {
         setStep({ kind: "pull_failed", error: res.error || "未知错误" });
       }
@@ -613,7 +718,9 @@ export function UpdateDialog({ open, onOpenChange }: UpdateDialogProps) {
     step?.kind === "cannot_check" ||
     step?.kind === "pulled" ||
     step?.kind === "pull_failed" ||
-    step?.kind === "check_failed";
+    step?.kind === "check_failed" ||
+    step?.kind === "recovery_timeout" ||
+    (step?.kind === "up_to_date" && recovered !== null);
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="dialog-center siri-glow-soft !flex h-[min(34rem,calc(100dvh-1.5rem))] w-[calc(100vw-1.5rem)] max-w-md flex-col overflow-hidden border-primary/45 shadow-2xl shadow-primary/10 ring-1 ring-primary/35">
@@ -627,6 +734,8 @@ export function UpdateDialog({ open, onOpenChange }: UpdateDialogProps) {
             {step?.kind === "pulling" && "正在应用更新计划..."}
             {step?.kind === "job_running" && "更新任务正在执行"}
             {step?.kind === "pulled" && "更新计划已执行"}
+            {step?.kind === "recovering" && "更新已执行，正在等待服务器恢复"}
+            {step?.kind === "recovery_timeout" && "服务器还没有恢复"}
             {step?.kind === "pull_failed" && "拉取失败"}
             {step?.kind === "check_failed" && "检查失败"}
             {step?.kind === "restarting" && "正在重启应用..."}
@@ -798,12 +907,62 @@ export function UpdateDialog({ open, onOpenChange }: UpdateDialogProps) {
             </div>
           )}
 
+          {recovered && step?.kind !== "recovering" && (
+            <div
+              className="mb-3 flex items-start gap-3 rounded-md border border-success/30 bg-success/10 px-3 py-2 text-sm text-success"
+              data-testid="update-recovered"
+            >
+              <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0" />
+              <div className="min-w-0 space-y-1">
+                <p className="font-medium">
+                  更新完成，服务器已恢复到 <code className="rounded bg-background px-1">{recovered.version}</code>
+                  {recovered.revision ? <span className="text-muted-foreground">（{recovered.revision.slice(0, 7)}）</span> : null}
+                </p>
+                <p className="text-xs text-muted-foreground">如果网页界面也更新了，刷新页面即可加载新版本。</p>
+              </div>
+            </div>
+          )}
+
+          {step?.kind === "recovering" && (
+            <div className="space-y-3 text-sm" data-testid="update-recovering">
+              <div className="flex items-center gap-3 text-muted-foreground">
+                <Spinner size="lg" />
+                <span>{step.stillOld ? "服务器已响应，正在等新版本启动…" : "正在等待服务器重启恢复…"}</span>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                {step.attempts > 0
+                  ? `已确认 ${step.attempts} 次，恢复后自动显示新版本并重新检查（最长等 ${Math.round(RECOVERY_TIMEOUT_MS / 60_000)} 分钟）。`
+                  : "更新步骤已执行完毕，恢复后自动显示新版本并重新检查。"}
+              </p>
+              {step.lastError && !step.stillOld ? (
+                <p className="text-xs text-muted-foreground">重启期间暂时连不上是正常的（{step.lastError}）</p>
+              ) : null}
+            </div>
+          )}
+
+          {step?.kind === "recovery_timeout" && (
+            <div className="flex min-w-0 items-start gap-3 text-warning" data-testid="update-recovery-timeout">
+              <AlertCircle className="mt-0.5 h-5 w-5 shrink-0" />
+              <div className="min-w-0 space-y-1 text-sm">
+                <p className="font-medium">服务器还没有恢复</p>
+                <p className="text-muted-foreground">
+                  已等待 {Math.round(RECOVERY_TIMEOUT_MS / 60_000)} 分钟仍读不到新版本。更新步骤已执行完，服务可能还在重启或拉取镜像；可以继续等待，或稍后重新检查。一直不恢复时，请在服务器上用 docker compose ps 查看容器状态。
+                </p>
+              </div>
+            </div>
+          )}
+
           {step?.kind === "up_to_date" && (
-            <div className="flex items-center gap-3 text-success">
+            <div className="flex items-center gap-3 text-success" data-testid="update-up-to-date">
               <CheckCircle2 className="h-5 w-5" />
               <div className="text-sm space-y-1">
-                <p>当前版本 <code className="bg-muted px-1 rounded">{step.commit}</code></p>
-                <p className="text-muted-foreground">无需更新</p>
+                <p>
+                  当前版本{" "}
+                  {step.version ? <code className="bg-muted px-1 rounded">{step.version}</code> : null}
+                  {step.version ? " · " : null}
+                  <code className="bg-muted px-1 rounded">{step.commit.slice(0, 12)}</code>
+                </p>
+                <p className="text-muted-foreground">已是最新，无需更新</p>
               </div>
             </div>
           )}
@@ -1110,6 +1269,24 @@ export function UpdateDialog({ open, onOpenChange }: UpdateDialogProps) {
                   </Button>
                 )}
               </>
+            )}
+            {step?.kind === "recovery_timeout" && (
+              <>
+                <Button variant="outline" size="sm" onClick={() => void doCheck({ remote: updateRemote, branch: updateBranch })}>
+                  <RefreshCw className="mr-1 h-3.5 w-3.5" />
+                  重新检查
+                </Button>
+                <Button size="sm" onClick={() => startRecovery(step.newCommit, step.plan)}>
+                  <Clock className="mr-1 h-3.5 w-3.5" />
+                  继续等待
+                </Button>
+              </>
+            )}
+            {step?.kind === "up_to_date" && recovered !== null && (
+              <Button size="sm" onClick={() => window.location.reload()}>
+                <RefreshCw className="mr-1 h-3.5 w-3.5" />
+                刷新页面
+              </Button>
             )}
             {step?.kind === "has_update" && (
               <Button

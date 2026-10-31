@@ -10,7 +10,7 @@ struct AccountManagementView: View {
                 AccountAvatarView(id: id).frame(maxWidth: .infinity)
                 NavigationLink {
                     ManagementLoadedEditorView(title: "编辑账号", path: base, method: "PATCH")
-                } label: { Label("编辑名称、标签与连接", systemImage: "pencil") }
+                } label: { Label("编辑名称与标签", systemImage: "pencil") }
                 NavigationLink { AccountManagementLoginView(accountID: id, initialPhone: model.details[id]?.phone ?? "") } label: {
                     Label("重新登录 Telegram", systemImage: "person.badge.key")
                 }
@@ -20,6 +20,15 @@ struct AccountManagementView: View {
                     Label("导出与迁移配置", systemImage: "square.and.arrow.up.on.square")
                 }
             }
+            // 分组名与 Web 账号详情分页一致（第 20 轮 #119）：代理与登录设备 · 限流与风控 · 允许会话 · 管理 Bot。
+            Section {
+                NavigationLink {
+                    ManagementLoadedEditorView(title: "代理与登录设备", path: base, method: "PATCH")
+                } label: { Label("更换代理与登录设备", systemImage: "network") }
+                    .accessibilityIdentifier("account.proxyDevice")
+            } header: { Text("代理与登录设备") } footer: {
+                Text("这个账号走哪个代理出口、用哪套登录设备信息。代理与登录设备本身在「服务器设置 › 连接与通知」里添加。")
+            }
             Section("自动化") {
                 NavigationLink { AccountManagementSchedulerView(id: id) } label: {
                     Label("定时任务与自动指令白名单", systemImage: "calendar.badge.clock")
@@ -27,6 +36,14 @@ struct AccountManagementView: View {
                 NavigationLink { PluginManagementView(accountID: id) } label: {
                     Label("插件配置与规则", systemImage: "puzzlepiece.extension")
                 }
+                NavigationLink { AccountManagementPassthroughView(id: id) } label: {
+                    Label("直通优先顺序", systemImage: "arrow.up.arrow.down")
+                }
+                NavigationLink {
+                    ManagementCollectionView(resource: .init(title: "账号指令", path: base + "/commands", kind: .accountCommands, itemPath: base + "/commands/{id}"))
+                } label: { Label("账号指令与白名单", systemImage: "terminal") }
+            }
+            Section("限流与风控") {
                 document("消息频率与拟人化", "/humanize", edit: "PUT", symbol: "figure.walk")
                 document("账号限流", "/rate-limit", edit: "PUT", symbol: "gauge.with.dots.needle.33percent")
                 document("限流用量", "/rate-limit/usage", symbol: "chart.bar")
@@ -36,18 +53,14 @@ struct AccountManagementView: View {
                 } label: { Label("限流覆盖规则", systemImage: "slider.horizontal.below.rectangle") }
                 ManagementActionLink(action: .init(title: "估算发送频率", path: base + "/rate-limit/estimate"), symbol: "function")
                 ManagementActionLink(action: .init(title: "严格限流模式", path: base + "/rate-limit/strict"), symbol: "hand.raised")
-                NavigationLink { AccountManagementPassthroughView(id: id) } label: {
-                    Label("直通优先顺序", systemImage: "arrow.up.arrow.down")
-                }
+            }
+            Section("允许会话") {
                 NavigationLink {
-                    ManagementCollectionView(resource: .init(title: "会话白名单", path: base + "/ignored-peers", kind: .editable,
+                    ManagementCollectionView(resource: .init(title: "允许会话", path: base + "/ignored-peers", kind: .editable,
                         create: .init(title: "添加允许会话", path: base + "/ignored-peers"), itemPath: base + "/ignored-peers/{id}",
                         explanation: "列表为空时允许全部会话；列表非空时，仅这些会话会触发消息自动化。"))
-                } label: { Label("会话白名单", systemImage: "checklist") }
+                } label: { Label("允许会话", systemImage: "checklist") }
                 collection("最近会话", "/recent-peers", symbol: "bubble.left.and.bubble.right")
-                NavigationLink {
-                    ManagementCollectionView(resource: .init(title: "账号指令", path: base + "/commands", kind: .accountCommands, itemPath: base + "/commands/{id}"))
-                } label: { Label("账号指令与白名单", systemImage: "terminal") }
             }
             // account.detail：在该账号启用的插件声明的原生卡片（没有时不显示）。
             PluginCardSections(slot: "account.detail", accountID: id)
@@ -60,7 +73,7 @@ struct AccountManagementView: View {
             } footer: {
                 Text("Bot API 10.0：开启后，Bot 在未加入的群聊或私聊里被 @提及（或被回复）时可回复一次。开启方法：在 Telegram 打开 @BotFather 的 Mini App，进入对应 Bot 的设置并启用 “Guest Mode”。")
             }
-            Section("账号 Bot") {
+            Section("管理 Bot") {
                 document("Bot 配置", "/bot", edit: "PUT", symbol: "gearshape", actions: [
                     .init(title: "测试 Bot", path: base + "/bot/test"),
                     .init(title: "重启 Bot 运行进程", path: base + "/bot/restart-runtime", destructive: true)
