@@ -5,7 +5,7 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
-from .. import plugin_compat
+from .. import compat_usage, plugin_compat
 from ..services.llm_call_context import runtime_metadata as build_runtime_metadata
 from ..services.llm_invoke import resolved_api_format_for_call
 from ..services.redactor import redact_text
@@ -921,6 +921,8 @@ async def invoke(
             providers=providers,
             legacy_default=legacy_image_plugin,
         )
+        if reason in {"legacy", "fallback"}:
+            compat_usage.hit("C13", image_plugin_key)
         dispatched = await dispatch_plugin_command(
             client,
             event,

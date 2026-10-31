@@ -57,6 +57,7 @@ from telethon.tl.types import (
 )
 
 from ... import __version__ as TELEPILOT_VERSION
+from ... import compat_usage
 from ...db.base import AsyncSessionLocal
 from ...db.models.account import Account, HumanizeConfig, SudoUser
 from ...db.models.feature import (
@@ -2061,6 +2062,8 @@ async def _dispatch_userbot_direct_passthrough(
                 trace=trace,
             )
             outcome, declared_error = _coerce_direct_passthrough_outcome(result)
+            if result is True or (isinstance(result, dict) and "status" not in result and "consume" in result):
+                compat_usage.hit("C16", plugin_key)
             if outcome == "failed":
                 failed_count += 1
                 await record_span(
@@ -6234,6 +6237,7 @@ def _load_installed_plugin(plugin_key: str) -> dict[str, type[Plugin]]:
             legacy_path,
             path,
         )
+        compat_usage.hit("C17", plugin_key)
         path = legacy_path
     return _load_dir(path, source="installed")
 
@@ -6312,6 +6316,8 @@ async def _authorize_via_installed_plugin(
                 "且 plugin_allow_legacy_unsigned_plugins=False，已拒绝加载"
             ),
         )
+    if signature_ok is None:
+        compat_usage.hit("C19", plugin_key)
 
     last_install_error = str(getattr(installed_plugin, "last_install_error", "") or "").strip()
     if last_install_error:
@@ -8048,6 +8054,7 @@ async def load_plugins_for_account(
                     continue
                 if edited and getattr(type(inst), handler_name, None) is getattr(Plugin, handler_name, None):
                     continue
+                compat_usage.hit("C15", fkey)
                 await record_span(
                     trace,
                     "subscription_match",
@@ -9000,6 +9007,8 @@ async def _merge_plugin_config(
     else:
         legacy_config = manifest.get("global_config", {})
         global_config = dict(legacy_config) if isinstance(legacy_config, dict) else {}
+        if global_config:
+            compat_usage.hit("C18", feature_key)
 
     # 提取 schema defaults
     defaults: dict[str, Any] = {}
@@ -9035,6 +9044,7 @@ async def _merge_plugin_config(
         if key in global_config:
             result[key] = global_config[key]
         elif key in account_config:
+            compat_usage.hit("C18", feature_key)
             # Compatibility for configs saved before a plugin moved a field to
             # level="global". Keep the old account-level value usable until
             # the next successful global-config save migrates it.
@@ -9869,6 +9879,9 @@ async def _finalize_plugin_actions(
     管理 Bot）不经过插件中间件，只在出口走 ``core.rich_table_defaults``。
     """
 
+    for raw_action in actions:
+        if isinstance(raw_action, dict) and "compact_tables" in raw_action:
+            compat_usage.hit("C14", plugin_key)
     normalized = _normalize_interaction_actions(actions, default_send_via=default_send_via, render=False)
     if state is not None and normalized:
         try:

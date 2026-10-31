@@ -3321,6 +3321,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/plugins/compat-usage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Plugin Compat Usage
+         * @description 兼容层使用统计（只读，仅登录的管理员）：每个兼容层（C01–C20）按插件累计的命中次数与最近使用时间。
+         *
+         *     只统计、不告警：插件作者和群用户看不到，也不影响任何兼容层的行为。各进程最多每分钟把计数写入数据库，
+         *     读取前先把主进程自己的增量写入。
+         */
+        get: operations["get_plugin_compat_usage_api_plugins_compat_usage_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/plugins/install": {
         parameters: {
             query?: never;
@@ -10029,6 +10052,12 @@ export interface components {
             /** Capabilities */
             capabilities: components["schemas"]["PluginCapabilityOut"][];
             /**
+             * Compat Usage
+             * @description 宿主是否提供兼容层使用统计 GET /api/plugins/compat-usage（只读、仅管理员），0.115.0-beta.3+；旧服务器不返回该字段（按 false 处理），客户端据此决定是否显示统计卡片
+             * @default false
+             */
+            compat_usage: boolean;
+            /**
              * Contract Baseline Plugin Api
              * @description 契约冻结基线对应的 Plugin API 版本（契约 1.0 = 1.6），0.115.0+
              */
@@ -10213,6 +10242,83 @@ export interface components {
              * @default false
              */
             truncated: boolean;
+        };
+        /** PluginCompatUsageItemOut */
+        PluginCompatUsageItemOut: {
+            /**
+             * Counts
+             * @description 计数口径：什么时候 +1
+             */
+            counts: string;
+            /** First At */
+            first_at?: number | null;
+            /**
+             * Id
+             * @description 兼容层编号 C01–C20（docs/PLUGIN-API-1.0-PLAN.md 第 3 节）
+             */
+            id: string;
+            /** Last At */
+            last_at?: number | null;
+            /** Name */
+            name: string;
+            /**
+             * Plugin Count
+             * @default 0
+             */
+            plugin_count: number;
+            /** Plugins */
+            plugins?: components["schemas"]["PluginCompatUsagePluginOut"][];
+            /**
+             * Total
+             * @default 0
+             */
+            total: number;
+            /**
+             * Trackable
+             * @description False 表示这一项无法计数（如插件读取事件字段），计数恒为 0
+             */
+            trackable: boolean;
+        };
+        /** PluginCompatUsagePluginOut */
+        PluginCompatUsagePluginOut: {
+            /**
+             * Count
+             * @description 累计命中次数
+             */
+            count: number;
+            /**
+             * First At
+             * @description 首次命中（Unix 秒）
+             */
+            first_at?: number | null;
+            /**
+             * Last At
+             * @description 最近一次命中（Unix 秒）
+             */
+            last_at?: number | null;
+            /**
+             * Plugin Key
+             * @description 插件 key；'-' 表示与具体插件无关的宿主兜底（如没有转账来源插件时的内置解析）
+             */
+            plugin_key: string;
+        };
+        /** PluginCompatUsageResponse */
+        PluginCompatUsageResponse: {
+            /**
+             * Available
+             * @description False 表示统计暂时读不到（数据库表未就绪等）
+             * @default true
+             */
+            available: boolean;
+            /**
+             * Flush Interval Seconds
+             * @description 各进程把内存计数写入数据库的最长间隔；刚发生的命中可能晚这么久才出现
+             */
+            flush_interval_seconds: number;
+            /** Items */
+            items?: components["schemas"]["PluginCompatUsageItemOut"][];
+            /** Message */
+            message?: string | null;
         };
         /**
          * PluginConfigActionControlRequest
@@ -25995,6 +26101,55 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PluginCapabilitiesResponse"];
+                };
+            };
+            /** @description 认证失败 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description 服务器内部错误 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    get_plugin_compat_usage_api_plugins_compat_usage_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: {
+                auth_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginCompatUsageResponse"];
                 };
             };
             /** @description 认证失败 */

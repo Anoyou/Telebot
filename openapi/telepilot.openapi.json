@@ -13011,6 +13011,12 @@
             "title": "Capabilities",
             "type": "array"
           },
+          "compat_usage": {
+            "default": false,
+            "description": "宿主是否提供兼容层使用统计 GET /api/plugins/compat-usage（只读、仅管理员），0.115.0-beta.3+；旧服务器不返回该字段（按 false 处理），客户端据此决定是否显示统计卡片",
+            "title": "Compat Usage",
+            "type": "boolean"
+          },
           "contract_baseline_plugin_api": {
             "anyOf": [
               {
@@ -13567,6 +13573,158 @@
           "available"
         ],
         "title": "PluginChangelogOut",
+        "type": "object"
+      },
+      "PluginCompatUsageItemOut": {
+        "properties": {
+          "counts": {
+            "description": "计数口径：什么时候 +1",
+            "title": "Counts",
+            "type": "string"
+          },
+          "first_at": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First At"
+          },
+          "id": {
+            "description": "兼容层编号 C01–C20（docs/PLUGIN-API-1.0-PLAN.md 第 3 节）",
+            "title": "Id",
+            "type": "string"
+          },
+          "last_at": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last At"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "plugin_count": {
+            "default": 0,
+            "title": "Plugin Count",
+            "type": "integer"
+          },
+          "plugins": {
+            "items": {
+              "$ref": "#/components/schemas/PluginCompatUsagePluginOut"
+            },
+            "title": "Plugins",
+            "type": "array"
+          },
+          "total": {
+            "default": 0,
+            "title": "Total",
+            "type": "integer"
+          },
+          "trackable": {
+            "description": "False 表示这一项无法计数（如插件读取事件字段），计数恒为 0",
+            "title": "Trackable",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "trackable",
+          "counts"
+        ],
+        "title": "PluginCompatUsageItemOut",
+        "type": "object"
+      },
+      "PluginCompatUsagePluginOut": {
+        "properties": {
+          "count": {
+            "description": "累计命中次数",
+            "title": "Count",
+            "type": "integer"
+          },
+          "first_at": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "首次命中（Unix 秒）",
+            "title": "First At"
+          },
+          "last_at": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "最近一次命中（Unix 秒）",
+            "title": "Last At"
+          },
+          "plugin_key": {
+            "description": "插件 key；'-' 表示与具体插件无关的宿主兜底（如没有转账来源插件时的内置解析）",
+            "title": "Plugin Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "plugin_key",
+          "count"
+        ],
+        "title": "PluginCompatUsagePluginOut",
+        "type": "object"
+      },
+      "PluginCompatUsageResponse": {
+        "properties": {
+          "available": {
+            "default": true,
+            "description": "False 表示统计暂时读不到（数据库表未就绪等）",
+            "title": "Available",
+            "type": "boolean"
+          },
+          "flush_interval_seconds": {
+            "description": "各进程把内存计数写入数据库的最长间隔；刚发生的命中可能晚这么久才出现",
+            "title": "Flush Interval Seconds",
+            "type": "integer"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/PluginCompatUsageItemOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message"
+          }
+        },
+        "required": [
+          "flush_interval_seconds"
+        ],
+        "title": "PluginCompatUsageResponse",
         "type": "object"
       },
       "PluginConfigActionControlRequest": {
@@ -23702,7 +23860,7 @@
   },
   "info": {
     "title": "TelePilot",
-    "version": "0.115.0-beta.2"
+    "version": "0.115.0-beta.3"
   },
   "openapi": "3.1.0",
   "paths": {
@@ -44666,6 +44824,81 @@
           }
         ],
         "summary": "Get Plugin Capabilities",
+        "tags": [
+          "plugins"
+        ]
+      }
+    },
+    "/api/plugins/compat-usage": {
+      "get": {
+        "description": "兼容层使用统计（只读，仅登录的管理员）：每个兼容层（C01–C20）按插件累计的命中次数与最近使用时间。\n\n只统计、不告警：插件作者和群用户看不到，也不影响任何兼容层的行为。各进程最多每分钟把计数写入数据库，\n读取前先把主进程自己的增量写入。",
+        "operationId": "get_plugin_compat_usage_api_plugins_compat_usage_get",
+        "parameters": [
+          {
+            "in": "cookie",
+            "name": "auth_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Auth Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PluginCompatUsageResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "认证失败"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "服务器内部错误"
+          }
+        },
+        "security": [
+          {
+            "AuthCookie": []
+          }
+        ],
+        "summary": "Get Plugin Compat Usage",
         "tags": [
           "plugins"
         ]

@@ -2899,7 +2899,7 @@ __all__ = ["PLUGIN_CLASS", "MANIFEST"]
 TelePilot 0.107.0-beta.1 起，宿主的可探测能力只在一张注册表里登记（`backend/app/worker/plugins/capabilities.py` 的 `CAPABILITIES`）：每项能力有名称、版本、首个提供它的宿主版本（`since`，可带 beta 号）、适用的 `ctx.messages` facade、兼容用的旧属性名与说明。注册表同时驱动三处：
 
 - 运行时：`ctx.capabilities`；
-- 接口：`GET /api/plugins/capabilities`（返回 `host_version`、`plugin_api_version`、`capabilities[]`、`deprecations[]`；0.115.0-beta.2 起另有 `contract_version` / `contract_baseline_plugin_api`；0.109.0 起另有 `host_resources[]`（`ctx.host.read` 可读资源，含模型清单 `ai.models@1`）、`core_middleware[]` 与 `middleware_limits`）；
+- 接口：`GET /api/plugins/capabilities`（返回 `host_version`、`plugin_api_version`、`capabilities[]`、`deprecations[]`；0.115.0-beta.2 起另有 `contract_version` / `contract_baseline_plugin_api`；0.115.0-beta.3 起另有 `compat_usage` 探测标志；0.109.0 起另有 `host_resources[]`（`ctx.host.read` 可读资源，含模型清单 `ai.models@1`）、`core_middleware[]` 与 `middleware_limits`）；
 - 文档：上面的版本门槛表。
 
 **探测能力（推荐写法）**
@@ -2983,7 +2983,7 @@ if contract is None:
     ...  # 旧宿主：按“契约之前”处理，照旧用 caps.has(...) / 旧属性探测具体能力
 ```
 
-- `GET /api/plugins/capabilities` 同时返回 `contract_version` 与 `contract_baseline_plugin_api`（契约冻结基线对应的 Plugin API 版本，契约 1.0 = `1.6`）；旧服务器不返回这两个字段，客户端按缺省处理。
+- `GET /api/plugins/capabilities` 同时返回 `contract_version` 与 `contract_baseline_plugin_api`（契约冻结基线对应的 Plugin API 版本，契约 1.0 = `1.6`）；旧服务器不返回这两个字段，客户端按缺省处理。0.115.0-beta.3 起另有 `compat_usage`（布尔，管理员可读兼容层使用统计 `GET /api/plugins/compat-usage`），同样是旧服务器不返回、按 `false` 处理。
 - 契约版本与 Plugin API 版本相互独立：契约 1.x 期间 `contract_version` 保持 `"1.0"`，Plugin API 继续 1.7、1.8 … 递增。具体能力仍以 `caps.has(...)` 为准，不要用契约版本代替能力探测。
 - 不要因为读取 `contract_version` 而抬 `min_telepilot_version`：旧宿主上它是 `None`，回退即可。
 
@@ -3010,6 +3010,7 @@ if contract is None:
 - 每个 [进程 × 插件 × 弃用项] 每 6 小时最多写一条 WARNING 日志，避免刷屏；
 - 移除计划写在 `removal` 字段（通常是计划移除的 Plugin API 大版本），移除前至少提前一个 minor 宿主版本公告，并以使用量统计为依据。
 - **登记 ≠ 删除**：2026-10-31 起兼容层暂时全部保留（不删除、不标记即将删除）。宿主为旧插件保留的全部兼容层（含没有登记计数的项目）、各自的用途与保留理由见 [PLUGIN-API-1.0-PLAN.md](PLUGIN-API-1.0-PLAN.md) 第 3 节，守护测试 `backend/app/tests/test_plugin_compat_layer.py`。
+- **兼容层使用统计**（0.115.0-beta.3+）：宿主另按「兼容项 C01–C20 × 插件」统计每个兼容层的命中次数与最近使用时间，**只计数**，不写警告日志、不提醒插件作者，插件无需任何改动、也读不到这份数据。管理员在 Web「插件 → 安装与更新」底部的「兼容层使用统计」卡片或 `GET /api/plugins/compat-usage`（只读）查看；`GET /api/plugins/capabilities` 的 `compat_usage: true` 表示服务器支持（旧服务器不返回该字段）。计数口径见 [PLUGIN-API-1.0-PLAN.md](PLUGIN-API-1.0-PLAN.md) 第 3.2 节。
 
 | id | 弃用内容 | 替代写法 | 弃用自 | 计划移除 |
 | --- | --- | --- | --- | --- |

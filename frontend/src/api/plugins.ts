@@ -148,6 +148,15 @@ export async function getPluginCapabilities(): Promise<PluginCapabilitiesRespons
   return data;
 }
 
+export type PluginCompatUsageResponse = components["schemas"]["PluginCompatUsageResponse"];
+export type PluginCompatUsageItem = components["schemas"]["PluginCompatUsageItemOut"];
+
+/** 兼容层使用统计（只读、仅管理员；0.115.0-beta.3+，capabilities.compat_usage 为 true 时可用）。 */
+export async function getPluginCompatUsage(): Promise<PluginCompatUsageResponse> {
+  const { data } = await api.get<PluginCompatUsageResponse>("/api/plugins/compat-usage");
+  return data;
+}
+
 export async function uploadPluginZip(
   file: File,
   signature?: File | null,

@@ -31,6 +31,17 @@
 - 编译 job 只做到上传测试产物为止；未签名 IPA 打包、模型图标渲染比对、OpenAPI 生成校验与 Core 单元测试挪到与分片并行的新 job「校验与打包」，汇总检查「iOS 构建与测试」名称与判定规则不变（多了「校验与打包」必须成功）。
 - 测试产物打包时排除 `*.swiftmodule`、`*.o`（测试运行用不到），上传/下载更快。PR 上新推送取消旧 run 的 concurrency 保持不变。
 
+## [0.115.0-beta.3] - 2026-11-01 · patch（补丁预发布） · 兼容层使用统计（只计数，不删除、不告警）
+
+### 插件平台：兼容层使用统计（只计数，不删除、不告警）
+
+- 给宿主为旧插件 / 旧数据保留的 20 项兼容层（`docs/PLUGIN-API-1.0-PLAN.md` 第 3 节 C01–C20）补**使用统计**：每次命中按「兼容项 × 插件」累计次数与首次 / 最近使用时间。20 项里 18 项可计数；C01（插件读类属性）、C07（事件里的管理员名单字段）技术上拦截不到，标为“无法计数”。此前 14 项没有任何数据的缺口已补上。
+- **只统计**：不删除、不改名、不标记“即将删除”任何兼容层；不写警告日志、不提醒插件作者或群用户；旧插件、旧服务器行为都不变。命中时只做一次内存计数（`backend/app/compat_usage.py`），主进程与各账号 worker 最多每 60 秒批量写入新表 `plugin_compat_usage`（迁移 `0065`，纯新增表），进程退出时再写一次；SQLite 与 PostgreSQL 都用 `INSERT … ON CONFLICT DO UPDATE` 累加，多进程并发写不丢计数，写库失败只会延后统计、不影响插件。
+- 新增只读接口 `GET /api/plugins/compat-usage`（需登录，即管理员）；`GET /api/plugins/capabilities` 新增探测标志 `compat_usage: true`（旧服务器不返回，按不支持处理）。
+- **Web**：插件 › 安装与更新 底部新增「兼容层使用统计」卡片（默认收起，展开后按使用次数列出各兼容项、用到它的插件与最近使用时间；只读）。服务器不支持时不显示。iOS 不加界面（只同步 `contract.json` 里新增的接口 schema，App 无变化）。
+- 文档：PLUGIN-API-1.0-PLAN 新增第 3.2 节（计数口径表），第 5 节待办「补使用量统计」标为完成；PLUGIN-API-REFERENCE、PLUGIN-CONTRACT、PLUGIN-CHEATSHEET 同步。
+- 测试：pytest `test_plugin_compat_usage.py`（计数不写日志、各兼容层入口命中且结果不变、SQLite / PostgreSQL 双库 upsert 累加、写库失败保留计数、接口与探测标志、表未迁移时降级）；前端 `compatUsage.test.ts`；Playwright `compat-usage-r22.spec.ts`（三端，含旧服务器不显示）。
+
 ## [0.115.0-beta.2] - 2026-10-31 · patch（补丁预发布） · 插件契约版本可探测、Plugin API 1.0 冻结准备（兼容层全部保留）
 
 ### 插件平台：契约版本可探测、Plugin API 1.0 冻结准备（兼容层全部保留）

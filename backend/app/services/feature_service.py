@@ -29,6 +29,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
 
+from .. import compat_usage
 from ..db.models.account import Account
 from ..db.models.feature import (
     BUILTIN_FEATURES,
@@ -429,6 +430,7 @@ async def _migrate_optional_builtin_features(
 
     changed = False
     for key in keys:
+        compat_usage.hit("C17", key)
         feature = existing[key]
         if key not in used_keys:
             await db.delete(feature)

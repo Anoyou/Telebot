@@ -17,7 +17,7 @@ from typing import Any
 
 from sqlalchemy import delete, desc, select
 
-from .. import plugin_compat
+from .. import compat_usage, plugin_compat
 from ..account_bot_defaults import (
     DEFAULT_DEBIT_NOTICE_TEMPLATE,
     DEFAULT_INTERACTION_QUERY_EMPTY_MESSAGE,
@@ -6100,6 +6100,7 @@ async def _execute_interaction_rule(
         )
         return False
     if plugin_compat.is_legacy_math10_action(rule.get("action")):
+        compat_usage.hit("C09", plugin_compat.MATH10)
         log.warning(
             "deprecated interaction rule action=math10 used aid=%s chat_id=%s rule=%s; use action=module module_key=math10 instead",
             incoming.account_id,

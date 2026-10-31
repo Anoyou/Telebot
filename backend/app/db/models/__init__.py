@@ -21,6 +21,7 @@ from .log import (
 from .notify import NotifyBot
 from .payout_compensation import PayoutCompensation
 from .plugin import InstalledPlugin, PluginInstall, PluginInstallHistory
+from .plugin_compat_usage import PluginCompatUsage
 from .plugin_global_config import PluginGlobalConfig
 from .plugin_repo import PluginRepo
 from .rate_limit import RateLimitEvent, RateLimitOverride, RateLimitRule, RateLimitTemplate
@@ -57,6 +58,7 @@ __all__ = [
     "PayoutCompensation",
     "PluginInstall",
     "PluginInstallHistory",
+    "PluginCompatUsage",
     "PluginGlobalConfig",
     "PluginConfigActionJob",
     "PluginRepo",
