@@ -3,7 +3,7 @@
 为什么单独有一个“契约版本”
 --------------------------
 
-``PLUGIN_API_VERSION``（见 :mod:`.versioning`）从 0.107.0 的 1.0 一路递增到 1.6，已发布插件在
+``PLUGIN_API_VERSION``（见 :mod:`.versioning`）从 0.107.0 的 1.0 一路递增（1.6 冻结为契约基线，之后继续 1.7 …），已发布插件在
 ``plugin.json`` 里写的是 ``"plugin_api": "^1.0"`` / ``">=1.3"`` 之类的范围。若把它“重置”成 1.0，
 声明了 ``>=1.3`` 的插件会被判不兼容。所以：
 
@@ -28,10 +28,11 @@ from collections.abc import Callable, Iterable, Mapping
 from pathlib import Path
 from typing import Any
 
-from .versioning import PLUGIN_API_VERSION
+from .versioning import PLUGIN_API_VERSION, PLUGIN_CONTRACT_VERSION
 
-# 稳定契约版本（与 PLUGIN_API_VERSION 相互独立，见模块说明）。
-PLUGIN_CONTRACT_VERSION = "1.0"
+# 稳定契约版本 PLUGIN_CONTRACT_VERSION（与 PLUGIN_API_VERSION 相互独立，见模块说明）定义在
+# :mod:`.versioning`，这里重新导出：插件运行时 ctx.capabilities.contract_version 与
+# GET /api/plugins/capabilities 的 contract_version 都读同一个常量。
 # 契约 1.0 冻结时的 Plugin API 版本：这一版的接口面就是基线。
 CONTRACT_BASELINE_PLUGIN_API = "1.6"
 # 宿主开始承诺契约 1.0 的版本；合并时随版本号顺延（只影响文档与快照里的说明字段）。

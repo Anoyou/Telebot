@@ -62,6 +62,16 @@ class PluginMiddlewareLimitsOut(BaseModel):
 class PluginCapabilitiesResponse(BaseModel):
     host_version: str = Field(description="当前 TelePilot 版本")
     plugin_api_version: str = Field(description="宿主提供的 Plugin API 版本（MAJOR.MINOR）")
+    contract_version: str | None = Field(
+        default=None,
+        description=(
+            "宿主承诺的插件稳定契约版本（如 1.0，见 docs/PLUGIN-CONTRACT.md），0.115.0+ / Plugin API 1.7+；"
+            "旧服务器不返回该字段，客户端按缺省（契约之前）处理"
+        ),
+    )
+    contract_baseline_plugin_api: str | None = Field(
+        default=None, description="契约冻结基线对应的 Plugin API 版本（契约 1.0 = 1.6），0.115.0+"
+    )
     capabilities: list[PluginCapabilityOut]
     deprecations: list[PluginDeprecationOut]
     host_resources: list[PluginHostResourceOut] = Field(

@@ -2840,7 +2840,7 @@ __all__ = ["PLUGIN_CLASS", "MANIFEST"]
 
 ## 版本与兼容
 
-- **稳定契约 1.0**（0.112.0-beta.4 起）：以 Plugin API 1.6 时的接口面为基线冻结，契约 1.x 期间只增不减。契约版本独立于 `PLUGIN_API_VERSION`（后者继续递增，`plugin_api` 范围的写法与判断不变）。冻结范围、承诺与 CI 检查见 [PLUGIN-CONTRACT.md](PLUGIN-CONTRACT.md)，机器可读快照在 `schemas/plugin-api-contract.json`。
+- **稳定契约 1.0**（0.112.0-beta.4 起）：以 Plugin API 1.6 时的接口面为基线冻结，契约 1.x 期间只增不减。契约版本独立于 `PLUGIN_API_VERSION`（后者继续递增，`plugin_api` 范围的写法与判断不变）。冻结范围、承诺与 CI 检查见 [PLUGIN-CONTRACT.md](PLUGIN-CONTRACT.md)，机器可读快照在 `schemas/plugin-api-contract.json`。 0.115.0-beta.2（Plugin API 1.7）起插件可读 `ctx.capabilities.contract_version` 得到契约版本，见 [契约版本探测](#契约版本探测contract_version)；冻结准备与兼容层清单见 [PLUGIN-API-1.0-PLAN.md](PLUGIN-API-1.0-PLAN.md)（草案）。
 - `0.x`：开发阶段，允许快速迭代；`1.x`：接口稳定后。
 - 只依赖 `Plugin` / `Manifest` / `PluginContext` 与本文列出的 facade 公开契约，不要依赖私有内部插件路径；新增行为优先通过 `config` 可选项实现。
 
@@ -2887,6 +2887,7 @@ __all__ = ["PLUGIN_CLASS", "MANIFEST"]
 | 插件页面与菜单（Plugin API 1.4）：`ui.pages`（插件自带 HTML 页面 + Bridge）、`ui.actions`（菜单项）、`hooks.storage_read`（卡片 / 配置钩子 / 页面动作里只读 `ctx.storage`）、`ai.models.metadata`（`ai.models@1` 只增显示名 / 可用状态 / 成本档） | 0.112.0-beta.1（iOS 0.15.0 起显示页面与菜单；旧宿主忽略 `ui.pages` / `ui.actions`，卡片钩子里 `ctx.storage` 为 None；旧 App 不显示新入口、不报错） |
 | 业务下沉（Plugin API 1.5）：`interaction.entry_policy`（`interaction_entries[].entry_policy`）、`provides.ai.image_backend`（`plugin.json` 的 `provides`）、`ui.rule_editor`（`ui.rule_editor` + 卡片 slot `interaction.rule_editor`） | 0.112.0-beta.2（旧宿主忽略这三项声明；顶层字段照写即可两边一致） |
 | 旧入口 key 声明（Plugin API 1.6）：`interaction.legacy_entry_keys`（`interaction_entries[].legacy_entry_keys`，见 [旧入口 key 声明](#旧入口-key-声明legacy_entry_keys)） | 0.112.0-beta.3（旧宿主忽略该字段、照旧走兜底入口表，结论相同；不要为它提高最低版本） |
+| 契约版本探测（Plugin API 1.7）：`runtime.contract_version`（`ctx.capabilities.contract_version`、`GET /api/plugins/capabilities` 的 `contract_version`，见 [契约版本探测](#契约版本探测contract_version)） | 0.115.0-beta.2（旧宿主没有该属性，用 `getattr(..., None)` 回退） |
 
 - 想兼容更旧的平台时不要提高最低版本，而是先探测再用，见下一节 [能力协商与 Plugin API 版本](#能力协商与-plugin-api-版本)。
 - 声明 `requires_platform_capabilities` 的 `manifest.py` 在 0.72 之前的平台上导入就会失败，因此现在所有新插件的最低版本至少是 `0.72.0-beta.2`。
@@ -2898,7 +2899,7 @@ __all__ = ["PLUGIN_CLASS", "MANIFEST"]
 TelePilot 0.107.0-beta.1 起，宿主的可探测能力只在一张注册表里登记（`backend/app/worker/plugins/capabilities.py` 的 `CAPABILITIES`）：每项能力有名称、版本、首个提供它的宿主版本（`since`，可带 beta 号）、适用的 `ctx.messages` facade、兼容用的旧属性名与说明。注册表同时驱动三处：
 
 - 运行时：`ctx.capabilities`；
-- 接口：`GET /api/plugins/capabilities`（返回 `host_version`、`plugin_api_version`、`capabilities[]`、`deprecations[]`；0.109.0 起另有 `host_resources[]`（`ctx.host.read` 可读资源，含模型清单 `ai.models@1`）、`core_middleware[]` 与 `middleware_limits`）；
+- 接口：`GET /api/plugins/capabilities`（返回 `host_version`、`plugin_api_version`、`capabilities[]`、`deprecations[]`；0.115.0-beta.2 起另有 `contract_version` / `contract_baseline_plugin_api`；0.109.0 起另有 `host_resources[]`（`ctx.host.read` 可读资源，含模型清单 `ai.models@1`）、`core_middleware[]` 与 `middleware_limits`）；
 - 文档：上面的版本门槛表。
 
 **探测能力（推荐写法）**
@@ -2917,7 +2918,8 @@ else:  # 旧宿主：退回旧属性探测
 | `caps.version(name)` | 能力版本；不支持或当前 facade 不适用时为 `0` |
 | `caps.names()` / `caps.as_dict()` | 当前上下文支持的全部能力 |
 | `name in caps` | 等价于 `caps.has(name)` |
-| `caps.plugin_api` / `caps.host_version` | 宿主 Plugin API 版本（如 `1.6`）与 TelePilot 版本 |
+| `caps.plugin_api` / `caps.host_version` | 宿主 Plugin API 版本（如 `1.7`）与 TelePilot 版本 |
+| `caps.contract_version` | 宿主承诺的插件稳定契约版本（如 `1.0`）；0.115.0-beta.2 起，旧宿主没有该属性，用 `getattr(caps, "contract_version", None)` |
 
 - `messages.*` 能力与当前 `ctx.messages` facade 有关：同一插件在交互 Bot 入口（`entry`）、命令 / 后台任务（`live`）、UserBot Event Bus 投递（`buffered`）里拿到的 facade 不同。例如 `messages.live_inline_edit` 在 `buffered` facade 上为 `False`，因为那里只能缓冲动作、没有实时 apply。`runtime.*` / `manifest.*` 是宿主级能力，与 facade 无关。
 - 旧探测写法继续可用：`getattr(ctx.messages, "rich_table_compact", False)`、`inline_rich_edit`、`live_inline_edit`、`rich_table_default_style`、`guest_reply_markup` 这些类属性现在由注册表生成，与 `ctx.capabilities` 结果一致。注册表之外的探测（`ctx.skills is None`、`getattr(ctx.ai, "vision_enabled", False)`、`hasattr(ctx.messages, "edit_rich")`、参数级新增用 `inspect.signature` 或捕获 `TypeError`）照旧。
@@ -2953,12 +2955,13 @@ else:  # 旧宿主：退回旧属性探测
 | `payment.sources` | — | 宿主级 | 0.111.0-beta.1 |
 | `interaction.entry_policy` / `provides.ai.image_backend` / `ui.rule_editor` | — | 宿主级 | 0.112.0-beta.2 |
 | `interaction.legacy_entry_keys` | — | 宿主级 | 0.112.0-beta.3 |
+| `runtime.contract_version` | — | 宿主级 | 0.115.0-beta.2 |
 
 以注册表与 `GET /api/plugins/capabilities` 为准；本表随宿主发版同步。
 
 **Plugin API 版本（`plugin_api`）**
 
-- 宿主提供的 Plugin API 版本是 `MAJOR.MINOR`（当前 `1.6`；`1.0` = 0.107.0，`1.1` = 0.108.0 通用交互原语，`1.2` = 0.109.0 消息管线中间件，`1.3` = 0.110.0 声明式 UI，`1.4` = 0.112.0-beta.1 插件页面与菜单，`1.5` = 0.112.0-beta.2 业务下沉：`entry_policy` / `provides` / `ui.rule_editor`，`1.6` = 0.112.0-beta.3 旧入口 key 声明 `legacy_entry_keys`；0.110.0-beta.2 的表单契约 2 / 通用规则页、0.111.0-beta.1 的转账通知解析扩展点 `payment_sources` 都是同一 MINOR 内的向后兼容新增，没有再升版本）：新增向后兼容的接口 / 能力只升 MINOR；删除或改变已有接口语义才升 MAJOR，并且要先在 [弃用登记](#弃用登记) 里公告至少一个 minor 宿主版本。
+- 宿主提供的 Plugin API 版本是 `MAJOR.MINOR`（当前 `1.7`；`1.0` = 0.107.0，`1.1` = 0.108.0 通用交互原语，`1.2` = 0.109.0 消息管线中间件，`1.3` = 0.110.0 声明式 UI，`1.4` = 0.112.0-beta.1 插件页面与菜单，`1.5` = 0.112.0-beta.2 业务下沉：`entry_policy` / `provides` / `ui.rule_editor`，`1.6` = 0.112.0-beta.3 旧入口 key 声明 `legacy_entry_keys`（稳定契约 1.0 的冻结基线），`1.7` = 0.115.0-beta.2 契约版本探测 `contract_version`；0.110.0-beta.2 的表单契约 2 / 通用规则页、0.111.0-beta.1 的转账通知解析扩展点 `payment_sources` 都是同一 MINOR 内的向后兼容新增，没有再升版本）：新增向后兼容的接口 / 能力只升 MINOR；删除或改变已有接口语义才升 MAJOR，并且要先在 [弃用登记](#弃用登记) 里公告至少一个 minor 宿主版本。
 - 插件可以在 `plugin.json` 里声明兼容范围，宿主在执行插件代码前校验，不满足时拒绝加载并说明原因：
 
 ```json
@@ -2968,6 +2971,21 @@ else:  # 旧宿主：退回旧属性探测
   支持 `"1"` / `"1.x"`（1.0 ≤ v < 2.0）、`"1.2"`（等同 `^1.2`）、`"^1.2"`、`"~1.2"`（1.2 ≤ v < 1.3）、`">=1.1"`、`">=1.0,<2"`（逗号或空格取交集）、`"*"`。写法无法识别时拒绝加载并提示示例。
 - **`plugin_api` 只写在 `plugin.json`，不要写进 `Manifest(...)`**：0.107 之前的宿主 `Manifest` 不认识这个参数，写进 `manifest.py` 会在旧宿主上导入失败；宿主加载时会自动把 `plugin.json` 里的值补到 Manifest 上。旧宿主会忽略 `plugin.json` 里的这个字段，所以它不能代替 `min_telepilot_version`。
 - 插件不声明 `plugin_api` 时视为兼容任意版本（与 0.107 之前一致）。
+
+### 契约版本探测（contract_version）
+
+Plugin API 1.7，TelePilot 0.115.0-beta.2+，能力 `runtime.contract_version`。宿主把自己承诺的 [插件稳定契约](PLUGIN-CONTRACT.md) 版本告诉插件（当前 `"1.0"`），插件据此判断“这个宿主是否承诺契约 1.x 的只增不减”。它是只读字段，不改变任何已有行为；不读它的插件完全不受影响。
+
+```python
+caps = getattr(ctx, "capabilities", None)                            # 0.107 之前没有 ctx.capabilities
+contract = getattr(caps, "contract_version", None) if caps else None  # 0.115 之前没有这个属性
+if contract is None:
+    ...  # 旧宿主：按“契约之前”处理，照旧用 caps.has(...) / 旧属性探测具体能力
+```
+
+- `GET /api/plugins/capabilities` 同时返回 `contract_version` 与 `contract_baseline_plugin_api`（契约冻结基线对应的 Plugin API 版本，契约 1.0 = `1.6`）；旧服务器不返回这两个字段，客户端按缺省处理。
+- 契约版本与 Plugin API 版本相互独立：契约 1.x 期间 `contract_version` 保持 `"1.0"`，Plugin API 继续 1.7、1.8 … 递增。具体能力仍以 `caps.has(...)` 为准，不要用契约版本代替能力探测。
+- 不要因为读取 `contract_version` 而抬 `min_telepilot_version`：旧宿主上它是 `None`，回退即可。
 
 ### 钩子统计与弃用登记
 
@@ -2991,6 +3009,7 @@ else:  # 旧宿主：退回旧属性探测
 - 每次调用都计数，插件详情「运行统计」与 `GET /api/plugins/{key}/stats` 的 `deprecations[]` 可见（次数、最近时间、替代写法、计划移除版本）；
 - 每个 [进程 × 插件 × 弃用项] 每 6 小时最多写一条 WARNING 日志，避免刷屏；
 - 移除计划写在 `removal` 字段（通常是计划移除的 Plugin API 大版本），移除前至少提前一个 minor 宿主版本公告，并以使用量统计为依据。
+- **登记 ≠ 删除**：2026-10-31 起兼容层暂时全部保留（不删除、不标记即将删除）。宿主为旧插件保留的全部兼容层（含没有登记计数的项目）、各自的用途与保留理由见 [PLUGIN-API-1.0-PLAN.md](PLUGIN-API-1.0-PLAN.md) 第 3 节，守护测试 `backend/app/tests/test_plugin_compat_layer.py`。
 
 | id | 弃用内容 | 替代写法 | 弃用自 | 计划移除 |
 | --- | --- | --- | --- | --- |

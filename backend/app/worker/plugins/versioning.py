@@ -33,7 +33,14 @@ from functools import total_ordering
 #      ui.rule_editor 与 slot interaction.rule_editor）。
 # 1.6：0.112.0-beta.3 旧入口 key 声明（interaction_entries[].legacy_entry_keys，P4b 收尾：math10 / dice_grid_hunt /
 #      guess_number 不再依赖宿主兜底入口表）。
-PLUGIN_API_VERSION = "1.6"
+# 1.7：0.115.0 契约版本探测（ctx.capabilities.contract_version、GET /api/plugins/capabilities 的
+#      contract_version，能力 runtime.contract_version）；只读字段，不改任何已有行为。
+PLUGIN_API_VERSION = "1.7"
+
+# 插件稳定契约版本（与 PLUGIN_API_VERSION 相互独立，见 :mod:`.contract` 模块说明与 docs/PLUGIN-CONTRACT.md）。
+# 契约 1.x 期间保持 "1.0"；只有发布不兼容的新契约才会变成 "2.0"。放在本模块是为了让
+# :mod:`.capabilities`（ctx.capabilities.contract_version）与 API 层不依赖 :mod:`.contract` 的内省代码。
+PLUGIN_CONTRACT_VERSION = "1.0"
 
 _VERSION_RE = re.compile(
     r"^\s*v?(?P<major>\d+)(?:\.(?P<minor>\d+))?(?:\.(?P<patch>\d+))?"
@@ -236,6 +243,7 @@ def plugin_api_satisfies(spec: str | None, api_version: str = PLUGIN_API_VERSION
 
 __all__ = [
     "PLUGIN_API_VERSION",
+    "PLUGIN_CONTRACT_VERSION",
     "PluginApiRangeError",
     "Version",
     "compare_versions",
