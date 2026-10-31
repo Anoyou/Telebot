@@ -1,12 +1,32 @@
-# Plugin API 1.0 冻结计划（草案）
+# Plugin API 1.0 冻结计划
 
-> **状态：草案，未冻结，不删除任何东西。**
+> **状态：已定（第 22 轮，2026-11-01 项目负责人拍板 1B 2B 3B 4B 5A 6B 7A）。只加保修、不动现状，不删除任何东西。**
 >
-> - 2026-10-31 项目负责人决定：**兼容层暂时全部保留**，不删除、不标记“即将删除”。本文只做盘点和准备。
-> - 本文回答三个问题：现在对插件开放了哪些接口（第 2 节）；为旧插件保留了哪些兼容层、各自为什么还在（第 3 节）；离“Plugin API 1.0 冻结”还差什么（第 5 节）。
-> - 已经生效的正式承诺仍以 [PLUGIN-CONTRACT.md](PLUGIN-CONTRACT.md)（稳定契约 1.0）为准；本文不改变那份承诺，也不抬任何插件的 `min_telepilot_version`。
+> - 2026-10-31 项目负责人决定：**兼容层全部保留**，不删除、不标记“即将删除”；真要删只能放在契约 2.0。
+> - 2026-11-01 冻结范围定下：每块接口的「稳定 / 实验」划分见**第 0 节**，稳定部分已写进契约快照的 `stability` 段并冻结在 [`schemas/plugin-api-contract-1.0-scope.frozen.json`](../schemas/plugin-api-contract-1.0-scope.frozen.json)，CI 自动拦截破坏性改动。
+> - 正式承诺以 [PLUGIN-CONTRACT.md](PLUGIN-CONTRACT.md)（稳定契约 1.0）为准；本文记录范围决定、接口盘点（第 2 节）和兼容层清单（第 3 节）。不抬任何插件的 `min_telepilot_version`，不改群内行为与游戏币结算。
 > - 兼容层清单的机器可读版本与守护测试：`backend/app/tests/test_plugin_compat_layer.py`（`COMPAT_LAYER`，与第 3 节编号一一对应，增删兼容层必须同时改两边，CI 会检查）。
-- 0.115.0-beta.3（第 22 轮）起每个兼容层都有**使用统计**（只计数、不告警，见第 3.2 节）：管理员在 Web「插件 → 安装与更新」底部的「兼容层使用统计」卡片，或 `GET /api/plugins/compat-usage` 查看。
+> - 0.115.0-beta.3（第 22 轮）起每个兼容层都有**使用统计**（只计数、不告警，见第 3.2 节）：管理员在 Web「插件 → 安装与更新」底部的「兼容层使用统计」卡片，或 `GET /api/plugins/compat-usage` 查看。
+
+## 0. 1.0 冻结范围（已定）
+
+**大白话**：契约就是给插件作者的「保修单」。下表「稳定」= 写进保修单，契约 1.x 期间只会加、不会删或改名，CI 自动拦截；「实验」= 照样能用，但可能调整（会提前公告），不在保修范围；「兼容」= 兼容层照常生效，但不推荐新插件用、也不进保修单。
+
+| # | 部分 | 决定 | 稳定（进保修单） | 实验 / 不承诺 | 机器可读 |
+| --- | --- | --- | --- | --- | --- |
+| 1 | 标准动作字段 | B | 6 种常用动作的常用字段：`send_message`（`text` `chat_id` `reply_to_message_id` `parse_mode` `reply_markup` `save_message_id_key`）、`edit_message`（`message_id` `chat_id` `text` `parse_mode` `reply_markup`）、`delete_message`（`message_id` `chat_id`）、`end_session`（只有 `type`）、`answer_callback`（`callback_query_id` `text` `show_alert`）、`payout`（`amount` `chat_id` `text` `reply_to_message_id` `parse_mode` `payout_key`，只冻结字段名与含义，结算仍由平台执行，“金额”是群内游戏币） | 实验：`send_via` 通道覆盖、`send_via_options`、`channel_selector`、`rich_message`（Rich Message 走 UserBot 等）、`bot_api_extra`、`render_profile`、`reply_to_user_id` 等回复锚点细项、`edit_message_id` / `message_id_key` / `replace_saved_message_id_key` / `pin` / `send_on_edit_failure`；其余 14 种动作只冻结类型名、字段不承诺。兼容：`compact_tables`（C14） | `stability.action_fields` |
+| 2 | Event Bus 信封 | B | 栏目 `source`（`type` `channel` `account_id` `update_id` `callback_query_id` `callback_data`）、`message`（`text` `message_id` `chat_id` `reply_to_message_id`）、`chat`（`id` `type`）、`sender` / `actor`（`user_id` `display_name` `username`）、`source_actor` / `player`（`user_id` `display_name`）、`payment`（`status` `amount` `payer_user_id` `payer_display_name` `receiver_display_name`）、`reply_to`（`message_id`）、`trigger`（`type` `rule_id` `module_key` `entry_key`）、`session`（`key` `scope` `ttl_seconds` `active` `data`）。栏目在某类事件里可能为空（如非转账事件没有 `payment`） | 实验：`raw`、`native_raw` / `native_raw_meta`、`inline_query`、`chosen_inline_result`、`module_config`、`event_type`、`webhook`，以及表里没列的子字段。兼容：`owner_user_ids` / `admin_user_ids`（C07）与旧平铺字段照常下发，但不进保修单 | `stability.event_payload` |
+| 3 | `ctx.client` | B | **方法名 + 权限对应**不变：`send_message`→`send_message` `respond` `reply`；`edit_message`→`edit` `edit_message`；`read_chat`→`get_messages` `get_chat` `iter_messages`；`resolve_entity`→`get_entity`；`send_file`→`send_file`；`forward_message`→`forward_messages`；`join_chat`→`join_chat`；`delete_message`→`delete_messages` `unpin_message`；`moderate_chat`→`ban_user` `kick_user` `mute_user` `unban_user`；免权限的 `get_me` | 整体定级「**高级 / 兼容**」：返回值是 Telethon 对象，以 Telethon 为准、不承诺；新插件请用标准动作 / `ctx.messages` | `stability.client_methods` |
+| 4 | `manifest.py` 的 `Manifest(...)` | B | 以 plugin.json 为准。稳定参数：`key` `display_name`（唯二承诺位置的参数）`version` `min_telepilot_version` `author` `description` `usage` `permissions` `category` `requires_platform_capabilities` `config_schema` `config_actions` `interaction_entries` `interaction_profile` `event_subscriptions` `capabilities` `allowed_hosts` `agent_tools`，以及推荐只写在 plugin.json 的 `plugin_api` `reads` `middleware` `render_profile` `ui` `provides`。**两边一致性**进 CI（见下） | 实验：`requires_features` `agent_keywords` `command_fallback` `preserve_command_trigger` `strict_trace` `experimental` `http` `interaction_send_via` `on_install`。兼容：`min_telebot_version`（C03） | `stability.manifest_py` |
+| 5 | AI 错误类型 | A | `AIUnavailableError`、`AICapabilityError`、`AIResponseTruncated` 三个名字（`app.worker.plugins.ai_facade`），后两个都继承 `AIUnavailableError`（`except AIUnavailableError` 一定能接住）。以后细分只能加子类 | 错误提示文字不冻结 | `stability.ai_errors` |
+| 6 | 远程插件 / Webhook | B | 插件包结构：`__init__.py` `manifest.py` `plugin.json` `plugin.py` 四个文件；签名：**Ed25519 detached 签名，签的是整个 ZIP 的字节**，公钥 PEM（`PLUGIN_PUBKEY`），上传 `.sig` 文件 | 实验：入站 **Webhook** 信封（`webhook` `hook_key` `body` `headers`）——等有真实用户再转正 | `stability.remote_package`、`stability.webhook_envelope` |
+| 7 | 插件市场 `registry.json` | A | **目录版本 1（`schema_version: 1`）定死**：顶层 `schema_version` `name` `trust` `repository` `homepage` `plugins`；条目 `key` `name` `kind` `icon` `summary` `version` `author` `min_telepilot_version` `plugin_api` `permissions` `reads` `tags` `path` `channels` `repository` `trust`；`kind` 六种、信任等级三种。以后改格式发「目录版本 2」，宿主两版都读 | 宿主读索引的行为不变（不按 `schema_version` 拒绝任何索引） | `stability.registry` |
+
+**manifest.py ↔ plugin.json 一致性检查**（题 4）：`app.worker.plugins.stability.manifest_parity_problems`——两边都写了且不一致才报错（以 plugin.json 为准），一边没写不算矛盾；`author` / `description` / `usage` 这类说明文字不一致只给警告。主仓库 CI 用它检查全部示例插件（`test_plugin_api_stability.py`），插件库 `scripts/check_host_compat.py` 在宿主提供该函数时同样调用（旧宿主回退到插件库自带的检查，结论不变）。
+
+**版本号**：契约版本保持 **1.0**（0.112.0-beta.4 起就是正式的契约 1.0，本次是 1.x 内追加冻结范围，按 PLUGIN-CONTRACT.md 第 1 节规则不升）；Plugin API 保持 **1.7**（没有新增运行时能力，插件感知不到任何变化）。
+
+**怎么防破坏**：`python scripts/export-plugin-contract.py --check`（CI「插件 API 契约」job）除了冻结基线，还对照冻结范围文件检查 `stability` 段——删字段、改名、把稳定降成实验、改签名算法、改 registry 目录版本都会失败；实验部分可以随时调整。守护测试 `test_plugin_api_stability.py` 确认每个稳定条目宿主今天确实还在提供（执行器仍读取字段、事件信封仍产出栏目、白名单仍有方法、继承关系不变、签名能验、registry 字段都被读取）。
 
 ## 1. 名词先说清楚
 
@@ -14,7 +34,7 @@
 | --- | --- | --- |
 | Plugin API 版本 | 宿主给插件的接口版本，插件 `plugin.json` 用 `plugin_api` 范围声明，`ctx.capabilities.plugin_api` 可读 | **1.7**（0.115.0 起；1.6 → 1.7 只新增了契约版本探测） |
 | 插件稳定契约版本 | 宿主“只增不减”的正式承诺，见 PLUGIN-CONTRACT.md | **1.0**（冻结基线 = Plugin API 1.6 的接口面） |
-| “Plugin API 1.0 冻结” | 路线图 P5 的目标：把对外接口的**范围**定死、写清每项的稳定级别、对兼容层做出去留决定、以此作为插件市场的长期基础 | 本文是它的准备稿 |
+| “Plugin API 1.0 冻结” | 路线图 P5 的目标：把对外接口的**范围**定死、写清每项的稳定级别、对兼容层做出去留决定、以此作为插件市场的长期基础 | 第 22 轮已定，见第 0 节 |
 
 为什么不把 Plugin API 版本“改回 1.0”：已发布插件写的是 `"^1.0"`、`">=1.3"`、`"^1.4"` 这类范围，改回 1.0 会让声明 `>=1.3` 的插件被误判“宿主太旧”。所以“1.0 冻结”用**契约版本号**表达，Plugin API 版本继续单调递增（详见 PLUGIN-CONTRACT.md 第 1 节）。
 
@@ -54,11 +74,11 @@ if contract is None:
 | 只读宿主资源 | `account.admins@1` `ai.models@1` `chat.allowed@1` `plugin.stats@1` | 4 | ✅ |
 | 弃用登记 | 见第 3 节 C02–C06 等 | 6 | ✅ |
 
-### 2.2 插件实际在用、但还没进快照的部分
+### 2.2 第 22 轮补进快照的部分（原“在用但没进快照”）
 
-这些接口今天同样被插件依赖，只是没有被机器逐项冻结，靠文档和各自的测试维持。**“1.0 冻结”要先决定它们进不进冻结范围**（第 5 节第 1 项）。
+这些接口原来只靠文档和各自的测试维持，第 22 轮按第 0 节的决定补进契约快照 `stability` 段：稳定部分受冻结范围文件保护，实验部分只做标注。
 
-| 接口 | 现状 | 谁在用 |
+| 接口 | 原状（第 21 轮） | 谁在用 |
 | --- | --- | --- |
 | 标准动作的**字段**（`send_message` 的 `text` / `reply_markup` / `send_via` …） | 快照只记录动作类型名；字段语义在 PLUGIN-API-REFERENCE.md 与 golden 测试里 | 全部交互插件 |
 | Event Bus **payload 信封字段**（`trigger`、`entry_key`、`callback_data`、`session` …） | 文档 + golden 测试 | 全部 `on_event` 插件 |
@@ -68,6 +88,8 @@ if contract is None:
 | 远程插件协议、入站 Webhook 信封 | 见 PLUGIN-REMOTE.md、PLUGIN-WEBHOOK-QUICKSTART.md | 远程 / Webhook 插件 |
 | 插件市场 `registry.json` 格式、ZIP 包与签名格式 | 见 PLUGIN-REMOTE.md「插件市场与 registry.json」、PLUGIN-SAFETY.md | 插件库、安装流程 |
 | `GET /api/plugins/capabilities` 等插件相关 HTTP 接口 | OpenAPI 快照（`openapi/telepilot.openapi.json`）约束，不在插件契约里 | Web / iOS / 开发工具 |
+
+上表前 7 行现在的归属见第 0 节；最后一行（HTTP 接口）仍由 OpenAPI 快照约束，不属于插件契约。
 
 ## 3. 兼容层清单（全部保留）
 
@@ -145,20 +167,21 @@ if contract is None:
 - `test_plugin_compat_layer.py`：兼容层清单 + 每项至少一个守护测试；守护测试被删或改名、文档与清单不一致时 CI 失败；新增直接守护覆盖 C01–C03、C07–C14、C17（用“旧插件的写法”调用宿主，断言结果不变）。
 - 契约快照 / golden / 插件库兼容检查照旧运行，旧插件在新服务器上的行为不变。
 
-## 5. 离“Plugin API 1.0 冻结”还差什么
+## 5. 冻结进度
 
 | # | 待办 | 说明 | 需要谁 |
 | --- | --- | --- | --- |
-| 1 | 决定冻结范围 | 第 2.2 节那些还没进快照的接口（动作字段、payload 信封、`ctx.client`、`Manifest` 构造参数、异常类型、远程 / Webhook 协议、registry.json 格式）哪些纳入 1.0，纳入的要补进契约快照与破坏检测 | 项目负责人拍板范围，然后工程实现 |
-| 2 | 给每项接口标稳定级别 | 在 PLUGIN-API-REFERENCE.md 里把每项标成“稳定 / 实验 / 已弃用”，实验项不进冻结承诺 | 工程 |
+| 1 | ✅ 决定冻结范围（第 22 轮） | 7 块全部定下（第 0 节），稳定部分补进契约快照 `stability` 段与冻结范围文件，CI 破坏检测覆盖 | 已完成 |
+| 2 | ✅ 给每项接口标稳定级别（第 22 轮） | 第 0 节 + PLUGIN-CONTRACT.md 第 2.6 节 + PLUGIN-API-REFERENCE.md「稳定级别」一节；实验项不进冻结承诺 | 已完成 |
 | 3 | 兼容层去留决定 | 当前决定：全部保留。若将来要动，只能在契约 2.0 里做，且要先在弃用登记公告至少一个 minor 宿主版本、征得负责人同意（PLUGIN-CONTRACT.md 第 3 节） | 项目负责人 |
 | 4 | ~~补使用量统计~~ ✅ 第 22 轮完成 | 0.115.0-beta.3 起 20 项中可计数的 18 项都有按插件的使用统计（第 3.2 节）；C01、C07 技术上无法计数 | 工程（已完成）；之后由负责人定期查看数据 |
 | 5 | 官方插件迁到新写法（可选，不影响冻结） | 17 个插件的规则入口改走 `on_event`、7 个插件按钮改 `own_buttons`、codex_image 导出 `dry_run_rule`、interaction-ai-chat 改 `render_profile`；迁移不抬最低版本、旧宿主照旧可用 | 插件库 |
 | 6 | 插件作者工具 | 目前没有可 `pip install` 的 SDK / 类型存根；插件库兼容检查会显示宿主契约版本（第 21 轮插件库 PR），但还不会按契约版本给建议 | 工程 |
-| 7 | 正式公告 | 范围定下来后，把本文从“草案”改为正式计划，并在插件库 README / 市场页说明 | 项目负责人 |
+| 7 | ✅ 正式公告（第 22 轮） | 本文已改为「已定」；插件库 README / CHANGELOG 同步说明稳定 / 实验划分与 manifest 一致性检查 | 已完成 |
 
 ## 6. 本文明确**不**做的事
 
 - 不删除、不改名、不标记“即将删除”任何兼容层或已弃用接口；
 - 不抬任何插件的 `min_telepilot_version`，不改变群内可见行为或游戏币结算；
-- 不修改冻结基线 `schemas/plugin-api-contract-1.0.frozen.json`。
+- 不修改冻结基线 `schemas/plugin-api-contract-1.0.frozen.json`，也不修改冻结范围 `schemas/plugin-api-contract-1.0-scope.frozen.json`（第 22 轮写入后永不修改）；
+- 不抬契约版本、不抬 Plugin API 版本（冻结范围只是把已有接口写进保修单）。

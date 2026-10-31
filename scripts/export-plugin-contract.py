@@ -6,9 +6,11 @@
     python scripts/export-plugin-contract.py            # 重新生成
     python scripts/export-plugin-contract.py --check    # CI：快照过期或相对冻结基线有破坏性改动时失败
     python scripts/export-plugin-contract.py --freeze   # 仅在发布新的契约 MAJOR 时使用：写冻结基线
+    python scripts/export-plugin-contract.py --freeze-scope   # 写 1.0 冻结范围（第 22 轮已写入；以后实验项转正时追加带日期的新文件）
     python scripts/export-plugin-contract.py --validate-plugins ../telebot-plugins   # 用详细 Schema 校验插件库全部 plugin.json
 
-冻结基线 schemas/plugin-api-contract-1.0.frozen.json 一旦提交就不再修改（见 docs/PLUGIN-CONTRACT.md）。
+冻结基线 schemas/plugin-api-contract-1.0.frozen.json 与 1.0 冻结范围 schemas/plugin-api-contract-1.0-scope.frozen.json
+一旦提交就不再修改（见 docs/PLUGIN-CONTRACT.md）。
 """
 
 from __future__ import annotations
@@ -58,6 +60,11 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--check", action="store_true", help="只检查，不写文件")
     parser.add_argument("--freeze", action="store_true", help="把当前快照写成冻结基线（仅新契约 MAJOR）")
+    parser.add_argument(
+        "--freeze-scope",
+        action="store_true",
+        help="把当前 stability 段的稳定部分写成 1.0 冻结范围文件；主文件已存在时追加带日期的新文件，从不覆盖",
+    )
     parser.add_argument("--validate-plugins", type=Path, help="用 plugin-contract.schema.json 校验该目录下每个 */plugin.json")
     args = parser.parse_args()
 
@@ -84,7 +91,8 @@ def main() -> int:
         if problems:
             print(
                 f"相对冻结基线 {contract.FROZEN_BASELINE_PATH.relative_to(ROOT)} 有 {len(problems)} 处破坏性改动；"
-                "契约 1.x 期间只允许新增（见 docs/PLUGIN-CONTRACT.md「变更规则」）。",
+                "契约 1.x 期间只允许新增（见 docs/PLUGIN-CONTRACT.md「变更规则」）；"
+                f"$.stability 开头的条目对照 {contract.SCOPE_BASELINE_PATH.relative_to(ROOT)}（1.0 冻结范围）。",
                 file=sys.stderr,
             )
         if failed or problems:
@@ -98,6 +106,18 @@ def main() -> int:
     if args.freeze:
         contract.FROZEN_BASELINE_PATH.write_text(snapshot_text, encoding="utf-8")
         print(contract.FROZEN_BASELINE_PATH.relative_to(ROOT))
+    if args.freeze_scope:
+        target = contract.SCOPE_BASELINE_PATH
+        if target.exists():
+            import datetime
+
+            stamp = datetime.date.today().strftime("%Y%m%d")
+            target = target.with_name(f"plugin-api-contract-1.0-scope-{stamp}.frozen.json")
+            if target.exists():
+                print(f"::error::{target.relative_to(ROOT)} 已存在，冻结范围文件不允许覆盖", file=sys.stderr)
+                return 1
+        target.write_text(contract.dumps(contract.scope_of(current)), encoding="utf-8")
+        print(target.relative_to(ROOT))
     return 0
 
 

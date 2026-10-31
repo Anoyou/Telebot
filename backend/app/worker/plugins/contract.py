@@ -41,6 +41,12 @@ CONTRACT_SINCE_HOST = "0.112.0-beta.4"
 REPO_ROOT = Path(__file__).resolve().parents[4]
 CONTRACT_PATH = REPO_ROOT / "schemas" / "plugin-api-contract.json"
 FROZEN_BASELINE_PATH = REPO_ROOT / "schemas" / "plugin-api-contract-1.0.frozen.json"
+# Plugin API 1.0 冻结范围（第 22 轮拍板）：快照 stability 段里的稳定部分。与冻结基线一样一旦提交就不再修改，
+# CI 检查“冻结范围 ⊆ 当前 stability 段”；实验部分不进这个文件（见 stability 模块）。
+SCOPE_BASELINE_PATH = REPO_ROOT / "schemas" / "plugin-api-contract-1.0-scope.frozen.json"
+# 以后把实验项转正时追加新的冻结范围文件（plugin-api-contract-1.0-scope-<日期>.frozen.json），旧文件不动；
+# 所有匹配的文件都要 ⊆ 当前。
+SCOPE_BASELINE_GLOB = "plugin-api-contract-1.0-scope*.frozen.json"
 MANIFEST_SCHEMA_PATH = REPO_ROOT / "schemas" / "plugin.schema.json"
 CONTRACT_SCHEMA_PATH = REPO_ROOT / "schemas" / "plugin-contract.schema.json"
 
@@ -391,6 +397,12 @@ def _host_read() -> list[str]:
     return sorted(item.ref for item in HOST_RESOURCES)
 
 
+def _stability() -> dict[str, Any]:
+    from .stability import build_stability
+
+    return build_stability()
+
+
 def _deprecations() -> list[str]:
     from .deprecations import DEPRECATIONS
 
@@ -637,6 +649,9 @@ def build_contract() -> dict[str, Any]:
         "extension_points": _extension_points(),
         "host_read_resources": _host_read(),
         "deprecations": _deprecations(),
+        # Plugin API 1.0 冻结范围（第 22 轮）：动作字段、事件信封、ctx.client、Manifest 参数、AI 错误类型、
+        # 插件包与签名、registry.json 目录版本 1 —— 每块标明稳定 / 实验，稳定部分受 SCOPE_BASELINE_PATH 保护。
+        "stability": _stability(),
     }
 
 
@@ -773,6 +788,34 @@ def iter_contract_problems(current: Mapping[str, Any] | None = None) -> Iterable
 
     current = current if current is not None else build_contract()
     yield from breaking_changes(load_json(FROZEN_BASELINE_PATH), current)
+    yield from iter_scope_problems(current)
+
+
+def scope_of(current: Mapping[str, Any]) -> dict[str, Any]:
+    """当前快照里属于 Plugin API 1.0 冻结范围（稳定部分）的内容。"""
+
+    from .stability import stable_scope
+
+    return stable_scope(dict(current.get("stability") or {}))
+
+
+def iter_scope_problems(current: Mapping[str, Any] | None = None) -> Iterable[str]:
+    """当前宿主相对 1.0 冻结范围（scope 基线）的破坏性差异；路径前缀 ``$.stability``。"""
+
+    current = current if current is not None else build_contract()
+    if not SCOPE_BASELINE_PATH.is_file():
+        yield f"缺少冻结范围基线 {SCOPE_BASELINE_PATH.name}"
+        return
+    scope = scope_of(current)
+    for path in scope_baseline_paths():
+        for item in breaking_changes(load_json(path), scope, path="$.stability"):
+            yield item if path == SCOPE_BASELINE_PATH else f"{item}（{path.name}）"
+
+
+def scope_baseline_paths() -> list[Path]:
+    """全部冻结范围文件：第 22 轮的主文件 + 以后转正时追加的文件。"""
+
+    return sorted(SCOPE_BASELINE_PATH.parent.glob(SCOPE_BASELINE_GLOB))
 
 
 __all__ = [
@@ -781,9 +824,13 @@ __all__ = [
     "CONTRACT_SINCE_HOST",
     "FROZEN_BASELINE_PATH",
     "PLUGIN_CONTRACT_VERSION",
+    "SCOPE_BASELINE_PATH",
     "breaking_changes",
     "build_contract",
     "build_manifest_schema",
     "dumps",
     "iter_contract_problems",
+    "iter_scope_problems",
+    "scope_baseline_paths",
+    "scope_of",
 ]

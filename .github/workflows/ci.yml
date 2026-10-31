@@ -159,12 +159,13 @@ jobs:
         run: python -m pip install -e ".[dev]"
 
       - name: 契约快照最新且相对冻结基线无破坏性改动
-        # schemas/plugin-api-contract.json 与运行时一致；schemas/plugin-api-contract-1.0.frozen.json ⊆ 当前（docs/PLUGIN-CONTRACT.md）。
+        # schemas/plugin-api-contract.json 与运行时一致；schemas/plugin-api-contract-1.0.frozen.json ⊆ 当前；
+        # 1.0 冻结范围 schemas/plugin-api-contract-1.0-scope.frozen.json ⊆ 当前 stability 段（docs/PLUGIN-CONTRACT.md）。
         run: python scripts/export-plugin-contract.py --check
 
-      - name: 契约测试 + golden 测试
+      - name: 契约测试 + 冻结范围守护 + golden 测试
         working-directory: backend
-        run: pytest -q app/tests/test_plugin_api_contract.py app/tests/test_plugin_golden.py
+        run: pytest -q app/tests/test_plugin_api_contract.py app/tests/test_plugin_api_stability.py app/tests/test_plugin_golden.py
 
       - name: 插件库宿主兼容检查（check_host_compat.py）
         env:

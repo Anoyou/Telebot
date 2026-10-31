@@ -2840,7 +2840,7 @@ __all__ = ["PLUGIN_CLASS", "MANIFEST"]
 
 ## 版本与兼容
 
-- **稳定契约 1.0**（0.112.0-beta.4 起）：以 Plugin API 1.6 时的接口面为基线冻结，契约 1.x 期间只增不减。契约版本独立于 `PLUGIN_API_VERSION`（后者继续递增，`plugin_api` 范围的写法与判断不变）。冻结范围、承诺与 CI 检查见 [PLUGIN-CONTRACT.md](PLUGIN-CONTRACT.md)，机器可读快照在 `schemas/plugin-api-contract.json`。 0.115.0-beta.2（Plugin API 1.7）起插件可读 `ctx.capabilities.contract_version` 得到契约版本，见 [契约版本探测](#契约版本探测contract_version)；冻结准备与兼容层清单见 [PLUGIN-API-1.0-PLAN.md](PLUGIN-API-1.0-PLAN.md)（草案）。
+- **稳定契约 1.0**（0.112.0-beta.4 起）：以 Plugin API 1.6 时的接口面为基线冻结，契约 1.x 期间只增不减。契约版本独立于 `PLUGIN_API_VERSION`（后者继续递增，`plugin_api` 范围的写法与判断不变）。冻结范围、承诺与 CI 检查见 [PLUGIN-CONTRACT.md](PLUGIN-CONTRACT.md)，机器可读快照在 `schemas/plugin-api-contract.json`。 0.115.0-beta.2（Plugin API 1.7）起插件可读 `ctx.capabilities.contract_version` 得到契约版本，见 [契约版本探测](#契约版本探测contract_version)；1.0 冻结范围（每块接口的稳定 / 实验划分，第 22 轮已定）与兼容层清单见 [PLUGIN-API-1.0-PLAN.md](PLUGIN-API-1.0-PLAN.md) 第 0 节与 [稳定级别](#稳定级别第-22-轮已定)。
 - `0.x`：开发阶段，允许快速迭代；`1.x`：接口稳定后。
 - 只依赖 `Plugin` / `Manifest` / `PluginContext` 与本文列出的 facade 公开契约，不要依赖私有内部插件路径；新增行为优先通过 `config` 可选项实现。
 
@@ -2986,6 +2986,16 @@ if contract is None:
 - `GET /api/plugins/capabilities` 同时返回 `contract_version` 与 `contract_baseline_plugin_api`（契约冻结基线对应的 Plugin API 版本，契约 1.0 = `1.6`）；旧服务器不返回这两个字段，客户端按缺省处理。0.115.0-beta.3 起另有 `compat_usage`（布尔，管理员可读兼容层使用统计 `GET /api/plugins/compat-usage`），同样是旧服务器不返回、按 `false` 处理。
 - 契约版本与 Plugin API 版本相互独立：契约 1.x 期间 `contract_version` 保持 `"1.0"`，Plugin API 继续 1.7、1.8 … 递增。具体能力仍以 `caps.has(...)` 为准，不要用契约版本代替能力探测。
 - 不要因为读取 `contract_version` 而抬 `min_telepilot_version`：旧宿主上它是 `None`，回退即可。
+
+### 稳定级别（第 22 轮已定）
+
+本参考里的字段分三级，完整清单见 [PLUGIN-API-1.0-PLAN.md](PLUGIN-API-1.0-PLAN.md) 第 0 节，机器可读在契约快照 `stability` 段：
+
+- **稳定**：契约 1.x 只增不减，CI 拦截破坏。包括 6 种常用动作（`send_message` `edit_message` `delete_message` `end_session` `answer_callback` `payout`）的常用字段、事件信封的标准栏目、`Manifest(...)` 里与 plugin.json 对应及在用的参数、AI 错误类型 `AIUnavailableError` / `AICapabilityError` / `AIResponseTruncated`、插件包四文件与 Ed25519 签名格式、`registry.json` 目录版本 1。
+- **实验**：照样能用，可能调整（提前公告）。包括 `send_via` / `send_via_options` / `channel_selector` 通道覆盖、`rich_message`、`bot_api_extra`、`render_profile`、事件信封的 `raw` / `native_raw` / `inline_query`、冷门 `Manifest` 参数、入站 Webhook 信封。
+- **高级 / 兼容**：`ctx.client`——方法名与权限的对应关系不变，返回值以 Telethon 为准、不承诺；新插件请用标准动作。兼容层（C01–C20）全部保留，照常生效，但不进保修单。
+
+判断一个字段属于哪级：读 `schemas/plugin-api-contract.json` 的 `stability`，或看上面的清单；没列出的字段按“实验”对待。
 
 ### 钩子统计与弃用登记
 

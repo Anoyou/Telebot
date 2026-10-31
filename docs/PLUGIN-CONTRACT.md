@@ -8,7 +8,7 @@
 > - 机器可读快照：[`schemas/plugin-api-contract.json`](../schemas/plugin-api-contract.json)（当前）/ [`schemas/plugin-api-contract-1.0.frozen.json`](../schemas/plugin-api-contract-1.0.frozen.json)（冻结基线，永不修改）
 > - 详细 plugin.json Schema：[`schemas/plugin-contract.schema.json`](../schemas/plugin-contract.schema.json)
 > - 插件运行时探测：`ctx.capabilities.contract_version`（0.115.0-beta.2 / Plugin API 1.7 起；旧宿主为 `None`，见第 6 节）
-> - 冻结准备与兼容层清单（草案，不冻结、不删除）：[PLUGIN-API-1.0-PLAN.md](PLUGIN-API-1.0-PLAN.md)
+> - **1.0 冻结范围**（第 22 轮已定，见第 2.6 节）：[`schemas/plugin-api-contract-1.0-scope.frozen.json`](../schemas/plugin-api-contract-1.0-scope.frozen.json)（永不修改）；决定过程、接口盘点与兼容层清单见 [PLUGIN-API-1.0-PLAN.md](PLUGIN-API-1.0-PLAN.md)
 
 ## 1. 版本号：契约版本与 Plugin API 版本各管各的
 
@@ -82,6 +82,23 @@ TelePilot 有三种和插件相关的版本号：
 | 只读宿主资源 | `host_read_resources` | `account.admins@1`、`ai.models@1`、`chat.allowed@1`、`plugin.stats@1` |
 | 弃用登记 | `deprecations` | 已登记弃用的接口 id（登记 ≠ 删除，见下） |
 
+### 2.6 1.0 冻结范围：稳定 / 实验 / 高级（`stability`，第 22 轮）
+
+快照的 `stability` 段把原来只靠文档维持的 7 块接口逐项分级；稳定部分冻结在 `schemas/plugin-api-contract-1.0-scope.frozen.json`，受同样的“只增不减”规则与 CI 保护。完整清单见 [PLUGIN-API-1.0-PLAN.md](PLUGIN-API-1.0-PLAN.md) 第 0 节。
+
+| 块 | 快照键 | 稳定（承诺） | 实验 / 不承诺 |
+| --- | --- | --- | --- |
+| 标准动作字段 | `stability.action_fields` | `send_message` `edit_message` `delete_message` `end_session` `answer_callback` `payout` 的常用字段（文字、聊天、回复、格式、按钮、保存消息编号、按钮应答、发奖金额与幂等键）；`payout` 只冻结字段名与含义，结算仍由平台执行 | **实验**：`send_via`、`send_via_options`、`channel_selector`、`rich_message`、`bot_api_extra`、`render_profile` 等高级字段；其余动作只冻结类型名 |
+| Event Bus 信封 | `stability.event_payload` | `source` `message` `chat` `sender` `actor` `source_actor` `player` `payment` `reply_to` `trigger` `session` 里的高频字段 | **实验**：`raw`、`native_raw`、`inline_query`、`module_config` 等；旧平铺字段与 `owner_user_ids` / `admin_user_ids`（兼容层 C07）照常下发但不进保修单 |
+| `ctx.client` | `stability.client_methods` | 方法名与权限的对应关系（沙箱白名单）、`get_me` | 定级「**高级 / 兼容**」：返回值以 Telethon 为准、不承诺；新插件请用标准动作 |
+| `Manifest(...)` | `stability.manifest_py` | 与 plugin.json 对应的参数 + 官方插件在用参数；只有 `key`、`display_name` 承诺位置 | **实验**：`strict_trace`、`interaction_send_via`、`http`、`command_fallback` 等冷门参数；`min_telebot_version` 属兼容层 C03 |
+| AI 错误类型 | `stability.ai_errors` | `AIUnavailableError`、`AICapabilityError`、`AIResponseTruncated` 及“后两者继承 `AIUnavailableError`” | 错误提示文字 |
+| 插件包与签名 | `stability.remote_package` | 必需文件 `__init__.py` `manifest.py` `plugin.json` `plugin.py`；Ed25519 detached 签名（签整个 ZIP 字节，公钥 PEM） | — |
+| 入站 Webhook | `stability.webhook_envelope` | — | **实验**：信封 `webhook` / `hook_key` / `body` / `headers`，有真实用户后再转正 |
+| 插件市场索引 | `stability.registry` | `registry.json` **目录版本 1**（`schema_version: 1`）的顶层与条目字段、`kind` 与信任等级；以后改格式发目录版本 2，宿主两版都读 | — |
+
+“实验”不等于不能用：照样能用，调整前会在 CHANGELOG / 弃用登记里提前公告；只是不在 1.x 的“只增不减”承诺里。
+
 ## 3. 承诺
 
 契约 1.x 期间，宿主**可以**：
@@ -110,7 +127,9 @@ TelePilot 有三种和插件相关的版本号：
 
 | 检查 | 位置 | 内容 |
 | --- | --- | --- |
-| 契约快照最新 + 无破坏性改动 | `scripts/export-plugin-contract.py --check`；`backend/app/tests/test_plugin_api_contract.py` | 运行时内省结果与快照一致；冻结基线 ⊆ 当前；破坏检测器自测（21 类破坏、1 组允许的追加） |
+| 契约快照最新 + 无破坏性改动 | `scripts/export-plugin-contract.py --check`；`backend/app/tests/test_plugin_api_contract.py` | 运行时内省结果与快照一致；冻结基线 ⊆ 当前；1.0 冻结范围 ⊆ 当前 `stability` 段；破坏检测器自测（21 类破坏、1 组允许的追加） |
+| 1.0 冻结范围 | `backend/app/tests/test_plugin_api_stability.py` | 稳定条目宿主今天仍在提供（执行器仍读取动作字段、事件信封仍产出栏目、`ctx.client` 白名单、`Manifest` 参数、AI 错误继承、Ed25519 签名、registry 目录版本 1 字段）；检测器识别 14 类破坏、放行追加与实验调整；示例插件 manifest.py ↔ plugin.json 一致 |
+| manifest.py ↔ plugin.json 一致 | `app.worker.plugins.stability.manifest_parity_problems`；插件库 `scripts/check_host_compat.py` | 两边都写了且不一致即报错（以 plugin.json 为准）；`author` / `description` / `usage` 不一致只警告。插件库检查在宿主提供该函数时调用它，旧宿主回退插件库自带检查 |
 | manifest 校验 | 同上 | 示例 / 内置插件通过安装 Schema 与契约 Schema；13 类常见写错会被契约 Schema 指出；未知字段放行 |
 | `ctx.capabilities` 快照、钩子签名 | 同上 | 基线能力在同一 facade 下仍可探测；基类钩子与示例插件重写的钩子能按基线参数调用 |
 | 兼容层 | `backend/app/tests/test_plugin_compat_layer.py` | 20 项兼容层（C01–C20）每项至少一个守护测试；守护测试被删 / 改名或与 PLUGIN-API-1.0-PLAN.md 不一致时失败；按旧插件写法直接调用宿主，断言行为不变 |
@@ -126,7 +145,7 @@ TelePilot 有三种和插件相关的版本号：
    python scripts/export-plugin-contract.py
    ```
    重新生成 `schemas/plugin-api-contract.json` 与 `schemas/plugin-contract.schema.json` 并提交。新增能力仍按原规则抬 `PLUGIN_API_VERSION` 的 MINOR、登记到能力注册表。
-2. `--check` 报“破坏性改动”：说明改动删除或改变了冻结条目。**不要修改冻结基线文件**；改成追加式写法（新参数给默认值、旧名保留为别名、旧能力保留）。确实需要不兼容时，走契约 2.0 流程（先在弃用登记里公告、征得同意，再用 `--freeze` 写新的 `plugin-api-contract-2.0.frozen.json`）。
+2. `--check` 报“破坏性改动”：说明改动删除或改变了冻结条目（`$.stability` 开头的对照 1.0 冻结范围文件）。**不要修改冻结基线文件或冻结范围文件**；把实验项转正 = 在 `app/worker/plugins/stability.py` 里把它挪进稳定清单，重新导出快照，再运行 `python scripts/export-plugin-contract.py --freeze-scope` 追加一份带日期的冻结范围文件（旧文件不动，所有冻结范围文件都要 ⊆ 当前）；改成追加式写法（新参数给默认值、旧名保留为别名、旧能力保留）。确实需要不兼容时，走契约 2.0 流程（先在弃用登记里公告、征得同意，再用 `--freeze` 写新的 `plugin-api-contract-2.0.frozen.json`）。
 3. golden 测试失败：先确认是不是有意的行为变化。若是，运行
    ```bash
    TELEPILOT_UPDATE_GOLDEN=1 pytest app/tests/test_plugin_golden.py
