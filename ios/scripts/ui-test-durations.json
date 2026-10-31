@@ -55,6 +55,8 @@
   "TelePilotUITests/testNativeLoginChallenges": 56,
   "TelePilotUITests/testOverviewAndAccountActions": 32,
   "TelePilotUITests/testOverviewCheckupToolbarShowsVerdictSectionsAndFixEntry": 36,
+  "TelePilotUITests/testOverviewCompactTilesFitFirstScreen": 45,
+  "TelePilotUITests/testOverviewRuntimeTileShowsSafeWatch": 20,
   "TelePilotUITests/testRejectedResumeStillReadsChangedServerState": 27,
   "TelegramPreviewUITests/testInteractionTemplatesShowLivePreviewAndFullEditor": 70,
   "TelegramPreviewUITests/testMessageTemplateLabLivePreviewRenderAndSend": 95,
