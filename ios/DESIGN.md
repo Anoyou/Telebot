@@ -105,7 +105,7 @@
 
 ## Web ↔ iOS 页面对照表
 
-以代码为准（Web：`frontend/src/components/layout/Sidebar.tsx` 的 `NAV` 与路由；iOS 0.29.0）。第 20 轮起 Web 遵守「导航名 = 页面标题」，统一叫法见下方「统一命名」。**Web 新增、移动或删除侧栏项／设置分页／独立页面时，必须在同一个 PR 里更新这张表，并写明 iOS 的处理方式（做／不做＋理由），见根目录 `AGENTS.md`。**
+以代码为准（Web：`frontend/src/components/layout/Sidebar.tsx` 的 `NAV` 与路由；iOS 0.31.0）。第 20 轮起 Web 遵守「导航名 = 页面标题」，统一叫法见下方「统一命名」。**Web 新增、移动或删除侧栏项／设置分页／独立页面时，必须在同一个 PR 里更新这张表，并写明 iOS 的处理方式（做／不做＋理由），见根目录 `AGENTS.md`。**
 
 | Web 页面（路由） | iOS 位置 | 状态 |
 | --- | --- | --- |
@@ -119,7 +119,7 @@
 | AI `/ai`（概览／供应商／用量）+ 存活检测 `/ai/liveness` | 更多 › 管理 › AI（可自选进 Dock） | ✅ 对齐 |
 | 待确认 `/assistant/inbox`（第 20 轮第二批起不再是侧栏一级：挂在侧栏 Agent 行、桌面小宠物、手机底栏 Agent 圆钮的红点上，Agent 页右上角「待确认」进入；地址不变） | Agent 角标 + 待确认页 | ✅ 对齐（两端都挂在 Agent 上） |
 | Agent `/assistant`（第 20 轮前 Web 叫「系统助手」） | Dock 独立「Agent」 | ✅ 对齐 |
-| 账号详情页头、插件页账号行「问 Agent」（第 20 轮，`?agent_account=ID&agent_from=…`；在 `/accounts/:aid` 或插件页直接打开 Agent 也带入该账号） | 无对应入口（Agent 是 Dock 独立标签，账号页 / 插件页没有进入 Agent 的按钮） | ⏸ 暂不做：iOS 账号页 / 插件页没有进 Agent 的入口，本轮只做「只有一个账号时新会话默认关联」（iOS 0.24.3，Web 同）；多账号时在会话设置 › 账号上下文选账号。以后若加入口，用 `AssistantStore.createSession(model, accountID:)` 带入 |
+| 账号详情页头、插件页账号行「问 Agent」（第 20 轮，`?agent_account=ID&agent_from=…`；在 `/accounts/:aid` 或插件页直接打开 Agent 也带入该账号） | 账号详情页头、插件页「启用与配置」所选账号行的「问 Agent」（`sparkles`，`.bordered`），插件详情页放在导航栏（与收藏并排，只显示图标，不占列表行；iOS 0.31.0）：切到 Agent 标签页，`AssistantStore.ask` 用 `createSession(model, accountID:)` 新建关联该账号的会话并提示来源；插件详情把「关于插件「名称」（key）：」预填进输入栏 | ✅ 对齐（第 22 轮）。差异：iOS 立即新建会话（当前会话已是同一账号且无消息时复用），Web 是发送时才建的草稿；iOS 插件详情多预填插件名；Agent 是独立标签页，iOS 不做「在账号页直接点 Agent 标签也带入账号」。服务器关闭 AI 模块时隐藏入口 |
 | 交互 `/interaction` | Dock「交互」（0.18.0 起；可自选移出，移出后在更多 › 常用） | ✅ 对齐（0.24.0 补齐「身份配置」测试模拟通知 Bot；0.28.0 页面重排：两种通知 Bot 收进二级页「通知 Bot 设置」、运行状态缩成一行小卡，字段见下方「交互页字段对照」） |
 | 指令与任务 `/operations`（自定义指令／定时任务；第 20 轮第二批起「自动指令白名单」并入「定时任务」页底部，旧地址 `/operations/auto-command-whitelist?aid=` 跳到 `/operations/scheduler?aid=&section=whitelist`） | 更多 › 管理 › 指令与任务（可自选进 Dock；白名单在账号 › 定时任务与白名单） | ✅ 对齐（两端白名单都在定时任务里） |
 | 概览 `/overview`（账号 Worker / AI / 插件 / 5 分钟日志 四格 + 资源占用 + 插件卡片） | Dock「概览」+ 一键体检；0.26.0 起 3 列小指标格（见「概览卡片规范」） | ✅ 对齐（叫法：AI 同名「可用 / 已配置」；Web「账号 Worker」在 iOS 拆成「账号」与「运行进程」两格；Web「5 分钟日志」iOS 是「24 小时错误」；iOS 多运行模式、待确认两格，Web 的运行模式在插件页、待确认在 Agent 红点） |

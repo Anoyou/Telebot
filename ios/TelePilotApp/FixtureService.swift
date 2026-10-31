@@ -41,6 +41,8 @@ actor FixtureService: AppServing {
     private let accessRequired = ProcessInfo.processInfo.arguments.contains("--ui-test-cf-access")
     /// 已删除的助手会话：列表不再返回，读取返回 404。
     private var deletedSessions: Set<String> = []
+    /// 「问 Agent」界面测试（第 22 轮）：新建会话时带的账号，会话详情按它返回 `account_id`（没带账号时不改原有数据）。
+    private var createdSessionAccountID: Int?
     /// 交互中心界面测试（0.16.0）：按账号保存的交互配置，PUT 按服务器语义合并（Token 只记“已配置”）。
     private var interactionConfigs: [Int: JSONValue] = [:]
     /// 运行树界面测试（第 19 轮）：运行模式（生产／值守）与模块开关，值守按服务器预设关闭 AI／交互 Bot／Webhook 并在恢复时还原。
@@ -285,7 +287,10 @@ actor FixtureService: AppServing {
         if clean == "/api/system-agent/checkup" { return Self.checkupFixture }
         if clean == "/api/system-agent/sessions", method == "POST" {
             deletedSessions.remove("fixture-session")
-            return ["id": "fixture-session", "title": body?["title"] ?? "新会话", "status": "active"]
+            createdSessionAccountID = body?["account_id"]?.intValue
+            var created: [String: JSONValue] = ["id": "fixture-session", "title": body?["title"] ?? "新会话", "status": "active"]
+            if let account = createdSessionAccountID { created["account_id"] = .integer(Int64(account)); created["channel"] = "web" }
+            return .object(created)
         }
         if clean == "/api/system-agent/sessions" {
             // 删除后的会话不再出现在列表里（第八轮：删除最后一个会话后重进应显示空状态）。
@@ -300,6 +305,9 @@ actor FixtureService: AppServing {
            let id = clean.dropFirst("/api/system-agent/sessions/".count).split(separator: "/").first.map(String.init),
            deletedSessions.contains(id) {
             throw APIError.server(status: 404, code: "SESSION_NOT_FOUND")
+        }
+        if clean == "/api/system-agent/sessions/fixture-session", method == "GET", let account = createdSessionAccountID {
+            return ["id": "fixture-session", "status": "active", "channel": "web", "account_id": .integer(Int64(account))]
         }
         if runPhases, let response = runPhaseResponse(clean, path: path, method: method, body: body) { return response }
         if clean.hasSuffix("/messages"), ProcessInfo.processInfo.arguments.contains("--ui-test-long-history") {

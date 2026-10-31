@@ -16,6 +16,8 @@ struct AssistantView: View {
     /// 用户正在拖动或惯性滚动；只有用户自己滚离底部才取消贴底，内容高度变化不会。
     @State private var userScrolling = false
     @State private var sidebarVisible = true
+    /// Agent 标签页当前在屏幕上：不在时「问 Agent」请求留给下次出现时的 .task 处理（与恢复会话串行，避免互相覆盖）。
+    @State private var onScreen = false
     @FocusState private var composerFocused: Bool
     @State private var composerPanel = AssistantComposerPanelState()
     @AppStorage("telepilot.assistant.minimizeOnLeading") private var minimizeOnLeading = false
@@ -85,12 +87,20 @@ struct AssistantView: View {
         .task {
             let requested = embedded ? model.consumeAssistantSessionRequest() : nil
             await store.start(model, initialID: initialID ?? requested)
+            // 账号页 / 插件页「问 Agent」在 Agent 标签页首次打开前发出：读取完会话列表后再新建带账号的会话。
+            if embedded, let ask = model.consumeAgentAskRequest() { await store.ask(ask, model: model) }
         }
         .onChange(of: model.assistantSessionRequest) { _, value in
             guard embedded, value != nil, let id = model.consumeAssistantSessionRequest() else { return }
             Task { await store.select(id, model: model) }
         }
-        .onDisappear { store.pauseSubscription() }
+        .onChange(of: model.agentAskRequest) { _, value in
+            // 标签页不在屏幕上或首次读取还没结束时留给 .task 处理（切到 Agent 时 .task 会重新运行），避免与恢复会话互相覆盖。
+            guard embedded, value != nil, onScreen, store.initialLoadFinished, let ask = model.consumeAgentAskRequest() else { return }
+            Task { await store.ask(ask, model: model) }
+        }
+        .onAppear { onScreen = true }
+        .onDisappear { onScreen = false; store.pauseSubscription() }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active { Task { await store.restoreRun(model); if store.unresolvedSend { await store.reconcileSend(model) } } }
             else if phase == .background { store.pauseSubscription() }

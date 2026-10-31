@@ -92,6 +92,8 @@ final class AssistantStore {
     var includeBot = false
     var modelIndex = -1
     var accountID: Int?
+    /// 「问 Agent」从插件页带来的输入栏开头（第 22 轮）；输入栏读取后清空，不会自动发送。
+    var composerPrefill: String?
     var deletingSessionID: String?
     /// 本会话尚未开始执行的排队消息（服务器 GET /queue，按 position 排序）。
     var queue: [AssistantItem] = []
@@ -241,10 +243,39 @@ final class AssistantStore {
         await restoreRun(model)
     }
 
+    /// 账号页 / 插件页「问 Agent」（第 22 轮，对齐 Web #118）：新建关联该账号的会话（插件页全局详情没有账号时按
+    /// 「单账号默认关联」规则），插件页再把插件名预填进输入栏。当前会话刚建好、还没消息且已是同一账号时直接复用。
+    func ask(_ request: AgentAskRequest, model: AppModel) async {
+        // 正在处理上一个写操作（例如切换会话）时稍等，避免这次点按被 createSession 的忙碌保护吞掉。
+        for _ in 0..<30 where busy { try? await Task.sleep(for: .milliseconds(100)) }
+        let reuse = AgentAskContext.canReuseCurrentSession(
+            requestedAccountID: request.accountID,
+            currentSessionID: sessionID,
+            currentAccountID: accountID,
+            hasMessages: !messages.isEmpty,
+            runActive: runActive,
+            channel: session?.assistantText("channel") ?? "",
+            status: session?.assistantText("status") ?? ""
+        )
+        var autoLinked = false
+        if !reuse {
+            guard let result = await createSession(model, accountID: request.accountID, announceAutoLink: false) else { return }
+            autoLinked = result
+        }
+        let linked = accountID
+        let name = linked.map { id in
+            (model.details[id] ?? model.accounts.first(where: { $0.id == id })).map { AccountPresentation.name($0) } ?? "#\(id)"
+        }
+        notice = AgentAskContext.notice(request: request, linkedAccountName: name, autoLinked: autoLinked)
+        composerPrefill = AgentAskContext.composerPrefill(pluginName: request.pluginName, pluginKey: request.pluginKey)
+    }
+
     /// 新建会话。第 20 轮：不再沿用当前会话的账号；只有 1 个账号时默认关联它（新服务器由服务器判断，
     /// 旧服务器由 App 按账号数代填），多账号保持「全局」。`accountID` 参数用于从某个账号的页面进入时带入该账号。
-    func createSession(_ model: AppModel, accountID requested: Int? = nil) async {
-        guard !busy else { return }
+    /// - Returns: 建好时返回是否因“只有 1 个账号”自动关联；失败或正忙返回 nil。
+    @discardableResult
+    func createSession(_ model: AppModel, accountID requested: Int? = nil, announceAutoLink: Bool = true) async -> Bool? {
+        guard !busy else { return nil }
         busy = true
         defer { busy = false }
         do {
@@ -257,12 +288,18 @@ final class AssistantStore {
             guard let id = created["id"]?.stringValue else { throw APIError.incompatibleResponse }
             await loadSessions(model)
             await select(id, model: model)
-            if AgentSessionAccount.wasAutoLinked(request: body, response: created),
-               let linked = created["account_id"]?.intValue {
+            // 旧服务器或界面测试数据的会话详情可能不带 account_id：以新建响应为准。
+            if accountID == nil { accountID = created["account_id"]?.intValue }
+            let autoLinked = AgentSessionAccount.wasAutoLinked(request: body, response: created)
+            if announceAutoLink, autoLinked, let linked = created["account_id"]?.intValue {
                 let name = model.accounts.first(where: { $0.id == linked }).map { AccountPresentation.name($0) } ?? "#\(linked)"
                 notice = "只有一个账号，新会话已自动关联「\(name)」；可在会话设置 › 账号上下文改回全局。"
             }
-        } catch { self.error = AssistantPresentation.error(error) }
+            return autoLinked
+        } catch {
+            self.error = AssistantPresentation.error(error)
+            return nil
+        }
     }
 
     func updateSession(_ body: JSONValue, model: AppModel) async {

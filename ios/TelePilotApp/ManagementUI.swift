@@ -299,3 +299,39 @@ struct ManagementDocumentView: View {
         catch { self.error = error.localizedDescription }
     }
 }
+
+/// 账号页 / 插件页「问 Agent」（第 22 轮，对齐 Web #118 的 `AskAgentButton`）：切到 Agent 标签页，新建关联当前账号的会话；
+/// 插件页再把插件名预填进输入栏。服务器关闭 AI 模块时不显示。
+struct AskAgentButton: View {
+    @Environment(AppModel.self) private var model
+    let accountID: Int?
+    let source: AgentAskSource
+    var pluginName: String? = nil
+    var pluginKey: String? = nil
+    var identifier = "askAgent"
+    /// 放在导航栏时只显示图标（系统工具栏样式），无障碍标签仍是「问 Agent」。
+    var inToolbar = false
+
+    var body: some View {
+        if model.canAskAgent {
+            if inToolbar {
+                Button("问 Agent", systemImage: "sparkles", action: ask)
+                    .accessibilityIdentifier(identifier)
+                    .accessibilityHint("打开 Agent 并新建会话，插件名会填进输入栏")
+            } else {
+                Button(action: ask) {
+                    Label("问 Agent", systemImage: "sparkles")
+                        .font(.subheadline.weight(.medium))
+                        .frame(minHeight: 32)
+                }
+                .buttonStyle(.bordered)
+                .accessibilityIdentifier(identifier)
+                .accessibilityHint("打开 Agent 并新建关联当前账号的会话")
+            }
+        }
+    }
+
+    private func ask() {
+        model.askAgent(AgentAskRequest(accountID: accountID, source: source, pluginName: pluginName, pluginKey: pluginKey))
+    }
+}
