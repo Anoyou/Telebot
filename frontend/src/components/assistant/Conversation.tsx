@@ -117,6 +117,8 @@ const ASSISTANT_SANITIZE_PLUGIN: [typeof rehypeSanitize, typeof ASSISTANT_SANITI
 /** Markdown + 安全 HTML：先解析原始 HTML，映射有限样式，再消毒。 */
 const ASSISTANT_REMARK_PLUGINS = [remarkGfm];
 const ASSISTANT_REHYPE_PLUGINS = [rehypeRaw, rehypeAssistantSafeStyles, ASSISTANT_SANITIZE_PLUGIN];
+/** Agent 回答的发送者名称（第 22 轮由「助手」改为产品名）。 */
+const ASSISTANT_SENDER_NAME = "TelePilot";
 
 export type LiveBubble = {
   id: string;
@@ -429,7 +431,14 @@ export function Conversation({
             className={cn("flex gap-2", isUser ? "justify-end" : "justify-start")}
           >
             {!isUser ? (
-              <div className="mt-1 grid h-7 w-7 shrink-0 self-start place-items-center rounded-full bg-muted">
+              <div
+                className="mt-1 grid h-7 w-7 shrink-0 self-start place-items-center rounded-full bg-muted"
+                // 第 22 轮：回答者名称统一为「TelePilot」（与 iOS 气泡上的名称一致）。
+                title={isTool ? "工具" : ASSISTANT_SENDER_NAME}
+                aria-label={isTool ? "工具" : ASSISTANT_SENDER_NAME}
+                role="img"
+                data-testid={isTool ? undefined : "assistant-sender"}
+              >
                 {isTool ? <Wrench className="h-3.5 w-3.5" /> : <Bot className="h-3.5 w-3.5" />}
               </div>
             ) : null}

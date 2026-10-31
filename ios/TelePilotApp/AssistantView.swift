@@ -572,7 +572,7 @@ private struct AssistantLiveReplyView: View {
             let hasText = live.hasText
             if status != nil || hasText || !live.reasoning.isEmpty {
                 VStack(alignment: .leading, spacing: 10) {
-                    Label("助手", systemImage: "sparkles").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                    Label(AssistantPresentation.senderName, systemImage: "sparkles").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
                     if let status, !hasText { statusRow(status, compact: false) }
                     if !live.reasoning.isEmpty {
                         DisclosureGroup("推理过程") { Text(AssistantRedaction.text(live.reasoning)).font(.footnote).foregroundStyle(.secondary).textSelection(.enabled).privacySensitive() }
