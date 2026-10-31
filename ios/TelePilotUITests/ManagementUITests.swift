@@ -550,25 +550,28 @@ final class ManagementUITests: XCTestCase {
         XCTAssertEqual(validUnit.label, "秒")
         XCTAssertGreaterThanOrEqual(validUnit.frame.minX, valid.frame.maxX - 1, "单位在值的右边")
 
-        // 空的可选数字项：灰色提示「可选」，不显示单位；填值后出现单位，标题不消失
+        // 空的可选数字项：灰色提示「可选」，不显示单位
         let daily = app.textFields["interaction.rule.dailyLimit"]
         reveal(daily, in: app)
         XCTAssertEqual(daily.placeholderValue, "可选")
         let dailyUnit = app.staticTexts["interaction.rule.dailyLimit.unit"]
         XCTAssertFalse(dailyUnit.exists, "空值不显示单位")
-        daily.tap()
-        daily.typeText("6")
-        XCTAssertTrue(dailyUnit.waitForExistence(timeout: 3))
-        XCTAssertEqual(dailyUnit.label, "次")
-        XCTAssertEqual(app.staticTexts["interaction.rule.dailyLimit.title"].label, "每用户每日上限")
 
-        // 多行项：标题在输入框上方，可选项标「可选」
+        // 多行项：标题在输入框上方，可选项标「可选」（先查这一项，数字键盘弹出后没有收起键，会挡住下面的行）
         let open = app.descendants(matching: .any)["interaction.rule.open"].firstMatch
         reveal(open, in: app)
         let openTitle = app.descendants(matching: .any)["interaction.rule.open.title"].firstMatch
         XCTAssertTrue(openTitle.exists)
         XCTAssertTrue(openTitle.label.contains("开启指令") && openTitle.label.contains("可选"), openTitle.label)
         XCTAssertLessThanOrEqual(openTitle.frame.maxY, open.frame.minY + 2, "多行项标题在输入框上方")
+
+        // 回到每日上限填值：出现单位，标题不消失
+        reveal(daily, in: app, up: false)
+        daily.tap()
+        daily.typeText("6")
+        XCTAssertTrue(dailyUnit.waitForExistence(timeout: 3))
+        XCTAssertEqual(dailyUnit.label, "次")
+        XCTAssertEqual(app.staticTexts["interaction.rule.dailyLimit.title"].label, "每用户每日上限")
 
         let screenshot = XCTAttachment(screenshot: app.screenshot())
         screenshot.name = "输入行标题与单位"
