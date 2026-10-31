@@ -24,7 +24,8 @@ struct InteractionCenterView: View {
     @State private var showAllRules = false
     /// 规则列表筛选（与 Web 规则列表「全部 / 启用 / 暂停」一致）。
     @State private var ruleFilter = "all"
-    @State private var confirmingClearNotify = false
+    /// 规则区底部「查询回复预览」是否展开（默认收起，省地方）。
+    @State private var showingQueryPreview = false
     @State private var serverValue: JSONValue?
     @State private var baseline = InteractionDraft()
     @State private var draft = InteractionDraft()
@@ -96,10 +97,7 @@ struct InteractionCenterView: View {
                 if let serverValue {
                     statusSection(serverValue)
                     switchSection(serverValue)
-                    trustedNotifySection
-                    if serverValue["has_transfer_bot_token"] != nil {
-                        testNotifySection(serverValue)
-                    }
+                    notifyBotsSection(serverValue)
                     rulesSection
                     advancedSection
                 } else if let loadError {
@@ -169,91 +167,17 @@ struct InteractionCenterView: View {
         }
     }
 
-    // MARK: 运行状态（只读，取服务器最近一次返回）
+    // MARK: 运行状态（第 21 轮：一行紧凑卡片，细节点进去看）
 
     private func statusSection(_ value: JSONValue) -> some View {
-        let enabled = value["enabled"]?.boolValue ?? false
-        let running = value["interaction_running"]?.boolValue ?? false
-        let hasToken = value["has_interaction_bot_token"]?.boolValue ?? false
-        let username = value["interaction_bot_username"]?.stringValue.flatMap { $0.isEmpty ? nil : $0 }
-        let lastError = value["interaction_last_error"]?.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let rules = value["rules"]?.arrayValue ?? []
-        let activeRules = rules.filter { $0["enabled"]?.boolValue ?? true }.count
-        let chats = Set(rules.flatMap { ($0["chat_ids"]?.arrayValue ?? []).compactMap(\.intValue) }).count
-        let dlq = value["polling_dlq_count"]?.intValue ?? 0
+        let status = InteractionRuntimeStatus(value)
         return Section {
-            statusRow("交互总闸", enabled ? "已启用" : "未启用", symbol: enabled ? "power.circle.fill" : "power.circle",
-                      tint: enabled ? .green : .secondary, id: "gate")
-            statusRow("交互 Bot", hasToken ? (username.map { "@\($0)" } ?? "已配置") : "待配置 Token",
-                      symbol: hasToken ? "checkmark.circle.fill" : "exclamationmark.triangle.fill",
-                      tint: hasToken ? .green : .orange, id: "token")
-            statusRow("监听状态", running ? "运行中" : (enabled ? "未运行" : "未启用"),
-                      symbol: running ? "checkmark.circle.fill" : (enabled ? "exclamationmark.triangle.fill" : "pause.circle"),
-                      tint: running ? .green : (enabled ? .orange : .secondary), id: "runtime")
-            statusRow("启用订阅", "\(activeRules)/\(rules.count) 条 · \(chats) 个群", symbol: "bubble.left.and.text.bubble.right",
-                      tint: .accentColor, id: "rules")
-            if let lastError, !lastError.isEmpty {
-                Label {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("最近运行有错误").font(.subheadline.weight(.semibold))
-                        Text(lastError).font(.footnote).foregroundStyle(.secondary).textSelection(.enabled)
-                    }
-                } icon: { Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.red) }
-                .accessibilityIdentifier("interaction.status.error")
-            }
-            if dlq > 0 {
-                statusRow("失败投递", "\(dlq) 条待处理", symbol: "tray.and.arrow.down", tint: .orange, id: "dlq")
-            }
-        } header: { Text("运行状态") } footer: {
-            Text("状态取自服务器最近一次读取或保存的结果；保存后交互 Bot 会按新配置自动重启。")
-        }
-    }
-
-    private func statusRow(_ title: String, _ value: String, symbol: String, tint: Color, id: String) -> some View {
-        LabeledContent {
-            Text(value).foregroundStyle(.secondary).multilineTextAlignment(.trailing)
-        } label: {
-            Label { Text(title) } icon: { Image(systemName: symbol).foregroundStyle(tint) }
-        }
-        .accessibilityElement(children: .combine)
-        .accessibilityIdentifier("interaction.status.\(id)")
-    }
-
-    private func membershipRow(_ item: JSONValue) -> some View {
-        let chatID = item["chat_id"]?.intValue ?? 0
-        let status = item["status"]?.stringValue ?? "unknown"
-        let title = peers.first(where: { $0.id == chatID })?.label ?? "会话 \(chatID)"
-        let state: (text: String, symbol: String, tint: Color)
-        switch status {
-        case "joined": state = ("已加入", "checkmark.circle.fill", .green)
-        case "not_joined": state = ("未加入", "exclamationmark.triangle.fill", .orange)
-        default: state = ("无法确认", "questionmark.circle", .secondary)
-        }
-        return VStack(alignment: .leading, spacing: 2) {
-            LabeledContent {
-                Label(state.text, systemImage: state.symbol).foregroundStyle(state.tint).labelStyle(.titleAndIcon)
-            } label: { Text(title).lineLimit(1) }
-            if let detail = item["detail"]?.stringValue, !detail.isEmpty {
-                Text(detail).font(.caption).foregroundStyle(.secondary)
-            }
-        }
-        .accessibilityElement(children: .combine)
-    }
-
-    /// 群成员状态（Web `BotMembershipList`）：交互 Bot「监听群成员状态」、测试 Bot「测试 Bot 群成员状态」。
-    /// 服务器缓存 5 分钟；没有数据时不显示。
-    @ViewBuilder
-    private func membershipGroup(_ title: String, _ memberships: [JSONValue], id: String) -> some View {
-        if !memberships.isEmpty {
-            DisclosureGroup {
-                ForEach(Array(memberships.enumerated()), id: \.offset) { _, item in
-                    membershipRow(item)
-                }
+            NavigationLink {
+                InteractionStatusDetailView(status: status)
             } label: {
-                let joined = memberships.filter { $0["status"]?.stringValue == "joined" }.count
-                Label("\(title) · \(joined)/\(memberships.count) 已加入", systemImage: "person.2")
-                    .accessibilityIdentifier(id)
+                InteractionStatusCard(status: status)
             }
+            .accessibilityIdentifier("interaction.statusCard")
         }
     }
 
@@ -281,78 +205,36 @@ struct InteractionCenterView: View {
                 .tint(.red)
                 .accessibilityIdentifier("interaction.clearToken")
             }
-            membershipGroup("监听群成员状态", value["interaction_chat_memberships"]?.arrayValue ?? [], id: "interaction.memberships")
+            InteractionMembershipGroup(title: "监听群成员状态", memberships: value["interaction_chat_memberships"]?.arrayValue ?? [], peers: peers, id: "interaction.memberships")
         } header: { Text("交互总闸与 Bot") } footer: {
             Text("总闸关闭时所有互动规则都不生效。交互 Bot 不能和管理 Bot 使用同一个 Bot；新 Token 只在保存时提交。点眼睛可查看已保存的 Token（服务器会记录这次查看），离开页面即隐藏，App 不保存。群成员状态服务器缓存 5 分钟。")
         }
     }
 
-    // MARK: 转账结果通知 Bot（Web「身份配置」右栏）
+    // MARK: 通知 Bot（第 21 轮收进二级页「通知 Bot 设置」）
 
-    private var trustedNotifySection: some View {
-        Section {
-            StackedTextField(title: "真实通知 Bot ID", text: $draft.trustedBotIDs, prompt: "每行一个数字 ID，不是 @ 用户名",
-                             keyboard: .numbersAndPunctuation, monospaced: true, identifier: "interaction.trustedBotIDs")
-        } header: { Text("真实转账结果通知 Bot") } footer: {
-            Text("填群里实际发送到账结果的 Bot ID（参考转账结果消息的发送者 ID），多个群用不同通知 Bot 时可以全部加入；保存时自动去重，测试模拟 Token 识别出的 Bot 会额外加入信任。启用转账触发的规则前必须至少有一个。")
-        }
-    }
-
-    private func testNotifySection(_ value: JSONValue) -> some View {
-        let hasTransferToken = value["has_transfer_bot_token"]?.boolValue ?? false
-        let botID = value["transfer_bot_id"]?.intValue
-        let selected = InteractionDraft.parseLines(draft.transferTestChatIDs).count
+    private func notifyBotsSection(_ value: JSONValue) -> some View {
+        let supportsTest = value["has_transfer_bot_token"] != nil
+        let summary = InteractionNotifyBotsView.summary(draft: draft, value: value)
+        let unsaved = InteractionNotifyBotsView.isDirty(draft, baseline)
         return Section {
-            SecretField(
-                title: "测试模拟通知 Bot Token",
-                text: $draft.newTransferToken,
-                configured: hasTransferToken && !draft.clearTransferToken,
-                reveal: accountID.map { SecretRevealTarget(kind: "transfer_bot_token", accountID: $0) },
-                placeholder: "测试模拟通知时填写",
-                identifier: "interaction.transferToken",
-                disabled: draft.clearTransferToken)
-            LabeledContent {
-                Text(botID.map(String.init) ?? "未识别").foregroundStyle(.secondary).monospacedDigit()
+            NavigationLink {
+                InteractionNotifyBotsView(draft: $draft, baseline: baseline, value: value, peers: peers, accountID: accountID)
             } label: {
-                Label("当前测试 Bot ID", systemImage: "number")
-            }
-            .accessibilityElement(children: .combine)
-            .accessibilityIdentifier("interaction.transferBotID")
-            if hasTransferToken {
-                Toggle(isOn: $draft.clearTransferToken) {
-                    Label("清除已保存的测试 Token", systemImage: "trash")
-                }
-                .tint(.red)
-                .accessibilityIdentifier("interaction.clearTransferToken")
-            }
-            if draft.supportsTransferTestChats {
-                NavigationLink {
-                    InteractionTestChatPicker(chatIDs: $draft.transferTestChatIDs, peers: peers)
-                } label: {
-                    Label {
-                        LabeledContent("模拟测试群") { Text(selected > 0 ? "\(selected) 个已选" : "未选择") }
-                    } icon: { Image(systemName: "checklist") }
-                }
-                .accessibilityIdentifier("interaction.testChats")
-            }
-            membershipGroup("测试 Bot 群成员状态", value["transfer_test_chat_memberships"]?.arrayValue ?? [],
-                            id: "interaction.testMemberships")
-            Button("清空通知 Bot", systemImage: "trash", role: .destructive) { confirmingClearNotify = true }
-                .disabled(draft.trustedBotIDs.isEmpty && draft.newTransferToken.isEmpty && (!hasTransferToken || draft.clearTransferToken))
-                .accessibilityIdentifier("interaction.clearNotify")
-                .confirmationDialog("清空转账结果通知 Bot？", isPresented: $confirmingClearNotify, titleVisibility: .visible) {
-                    Button("清空", role: .destructive) {
-                        draft.trustedBotIDs = ""
-                        draft.newTransferToken = ""
-                        draft.clearTransferToken = hasTransferToken
+                Label {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("通知 Bot 设置")
+                        Text(unsaved ? "\(summary) · 未保存" : summary)
+                            .font(.caption).foregroundStyle(unsaved ? AnyShapeStyle(.orange) : AnyShapeStyle(.secondary))
+                            .monospacedDigit()
+                            .lineLimit(2)
                     }
-                    Button("取消", role: .cancel) {}
-                } message: {
-                    Text("清空真实通知 Bot ID 和测试模拟 Token（模拟测试群保留），点右上角「保存」后生效。")
-                }
-        } header: { Text("测试模拟通知 Bot") } footer: {
-            let trust = botID.map { "系统会同时信任真实通知 Bot ID 和这个测试 Bot ID（\($0)）。" } ?? "没有测试模拟 Token 时，系统只监听群里真实出现的转账结果通知。"
-            Text("\(trust)只有明确选择的模拟测试群会响应 +金额、-金额模拟命令；留空不会启用任何测试群，真实转账规则群也不会自动启用测试 Bot。")
+                } icon: { Image(systemName: "bell.badge") }
+            }
+            .accessibilityIdentifier("interaction.notifyBots")
+        } footer: {
+            Text(supportsTest ? "真实转账结果通知 Bot 与测试模拟通知 Bot。启用转账触发的规则前，至少要填一个真实通知 Bot ID。"
+                              : "真实转账结果通知 Bot。启用转账触发的规则前，至少要填一个真实通知 Bot ID。")
         }
     }
 
@@ -397,6 +279,7 @@ struct InteractionCenterView: View {
             ForEach(visibleRuleIDs, id: \.self) { id in
                 if let binding = ruleBinding(id) { ruleRow(binding) }
             }
+            queryPreviewRows
             if draft.rules.count < 20 {
                 Button("添加规则", systemImage: "plus") {
                     var rule = InteractionRuleDraft.new(index: draft.rules.count)
@@ -415,16 +298,17 @@ struct InteractionCenterView: View {
         } header: {
             Text(focusKey != nil ? "启动「\(focusPluginName)」的规则" : "互动规则与玩法入口")
         } footer: {
-            Text("设置别人发什么关键词、在哪些群生效、启动哪个玩法；保存后交互 Bot 会自动监听并交给对应插件处理。左滑可停用或删除，长按可上移、下移或复制，至少保留一条规则。")
+            Text("设置别人发什么关键词、在哪些群生效、启动哪个玩法；保存后交互 Bot 会自动监听并交给对应插件处理。「查询里显示」是群成员发查询指令时这条玩法的样子（按「每个玩法的条目模板」）。左滑可停用或删除，长按可上移、下移或复制，至少保留一条规则。")
         }
     }
 
     private func ruleRow(_ binding: Binding<InteractionRuleDraft>) -> some View {
         let rule = binding.wrappedValue
         return NavigationLink {
-                    InteractionRuleEditor(rule: binding, entries: entries, peers: peers, accountID: accountID, features: features)
+                    InteractionRuleEditor(rule: binding, entries: entries, peers: peers, accountID: accountID, features: features,
+                                          query: queryContext)
                 } label: {
-                    InteractionRuleRow(rule: rule, entries: entries)
+                    InteractionRuleRow(rule: rule, entries: entries, queryLine: queryContext.itemLine(for: rule.id))
                 }
                 .accessibilityIdentifier("interaction.rule.\(rule.id)")
                 .swipeActions(edge: .trailing) {
@@ -458,6 +342,30 @@ struct InteractionCenterView: View {
                 }
     }
 
+    /// 玩法查询预览的上下文（当前草稿的规则与模板）。
+    private var queryContext: InteractionQueryContext { InteractionQueryContext(draft: draft, entries: entries) }
+
+    /// 规则区底部：群成员发查询指令时交互 Bot 的整条回复（按当前草稿，未保存也实时更新）。默认收起。
+    @ViewBuilder
+    private var queryPreviewRows: some View {
+        let context = queryContext
+        Button {
+            withAnimation { showingQueryPreview.toggle() }
+        } label: {
+            Label {
+                LabeledContent(showingQueryPreview ? "收起查询回复预览" : "查询回复预览") {
+                    Text(context.listedCount > 0 ? "列出 \(context.listedCount) 个玩法" : "暂无可列出的玩法")
+                }
+            } icon: { Image(systemName: showingQueryPreview ? "eye.slash" : "eye") }
+        }
+        .accessibilityIdentifier("interaction.queryPreview.toggle")
+        if showingQueryPreview {
+            TelegramChatPreview(model: TelegramMessagePreviewModel(template: context.full(), values: [:]), botName: "交互 Bot",
+                                prompt: context.prompt, identifier: "interaction.queryPreview")
+                .listRowInsets(EdgeInsets(top: 8, leading: 8, bottom: 8, trailing: 8))
+        }
+    }
+
     /// 上移／下移（与 Web 规则列表的上下箭头相同：和相邻规则交换位置；顺序决定旧版顶层字段镜像哪条启用规则）。
     private func moveRule(_ id: String, by offset: Int) {
         guard let index = draft.rules.firstIndex(where: { $0.id == id }) else { return }
@@ -481,7 +389,7 @@ struct InteractionCenterView: View {
     private var advancedSection: some View {
         Section {
             NavigationLink {
-                InteractionAdvancedView(draft: $draft)
+                InteractionAdvancedView(draft: $draft, entries: entries)
             } label: {
                 Label("查询指令与通知模板", systemImage: "slider.horizontal.3")
             }
@@ -567,6 +475,8 @@ struct InteractionCenterView: View {
 private struct InteractionRuleRow: View {
     let rule: InteractionRuleDraft
     let entries: [InteractionEntryOption]
+    /// 这条玩法在查询回复里的样子（条目模板渲染后的纯文本，一行）；不会被列出的规则为 nil。
+    var queryLine: String? = nil
 
     var body: some View {
         Label {
@@ -580,6 +490,10 @@ private struct InteractionRuleRow: View {
                         .foregroundStyle(rule.enabled ? Color.green : Color.secondary)
                 }
                 Text(rule.summary(entries: entries)).font(.footnote).foregroundStyle(.secondary).lineLimit(2)
+                if let queryLine {
+                    Text("查询里显示：\(queryLine)")
+                        .font(.caption).foregroundStyle(.tertiary).lineLimit(1).truncationMode(.tail)
+                }
             }
         } icon: {
             Image(systemName: rule.action == "module" ? "puzzlepiece.extension" : (rule.action == "math10" ? "function" : "bell.badge"))
@@ -596,6 +510,8 @@ struct InteractionRuleEditor: View {
     let peers: [InteractionPeer]
     var accountID: Int? = nil
     var features: [String: JSONValue] = [:]
+    /// 玩法查询（条目模板 + 回复模板）；用来预览这条玩法在查询回复里的样子。
+    var query: InteractionQueryContext? = nil
 
     private var effectiveTrigger: String { rule.action == "notice" ? "payment" : rule.triggerMode }
     private var selectedEntry: InteractionEntryOption? {
@@ -612,6 +528,7 @@ struct InteractionRuleEditor: View {
             if rule.action != "notice" { limitSection }
             commandSection
             replySection
+            querySection
         }
         .symbolRenderingMode(.hierarchical)
         .navigationTitle(rule.displayName)
@@ -709,6 +626,22 @@ struct InteractionRuleEditor: View {
                                         identifier: "interaction.rule.response")
         } header: { Text("命中回复") } footer: {
             Text("可用变量：{payer_name} 付款人、{receiver_name} 收款人、{amount} 金额、{规则名称}。")
+        }
+    }
+
+    /// 这条玩法在群成员查询时显示成什么样（第 21 轮）：用账号的「每个玩法的条目模板」按本规则当前填写的内容渲染。
+    @ViewBuilder
+    private var querySection: some View {
+        if let query, rule.action != "notice" {
+            Section {
+                TelegramChatPreview(model: TelegramMessagePreviewModel(template: query.single(rule), values: [:]), botName: "交互 Bot",
+                                    prompt: query.prompt, identifier: "interaction.rule.queryPreview")
+                    .listRowInsets(EdgeInsets(top: 8, leading: 8, bottom: 8, trailing: 8))
+            } header: { Text("在玩法查询里显示为") } footer: {
+                Text(rule.enabled
+                     ? "群成员发查询指令时，这条玩法按「每个玩法的条目模板」列出（模板在交互页「查询指令与通知模板」里改）；被管理指令临时关闭时不列出。"
+                     : "这条规则已停用，查询时不会列出；上面是启用后的样子。模板在交互页「查询指令与通知模板」里改。")
+            }
         }
     }
 
@@ -901,6 +834,7 @@ private struct InteractionPeerPicker: View {
 
 private struct InteractionAdvancedView: View {
     @Binding var draft: InteractionDraft
+    var entries: [InteractionEntryOption] = []
 
     var body: some View {
         Form {
@@ -913,8 +847,8 @@ private struct InteractionAdvancedView: View {
             } header: { Text("查询回复模板") } footer: { Text("{items} 是下面条目模板逐个渲染后的列表；{count} 可用数量、{closed_count} 已关闭数量、{chat_id} 群 ID。留空保持服务器当前值，预览用默认模板。") }
             Section {
                 TelegramTemplateInlineField(title: "每个玩法的条目模板", text: $draft.queryItemTemplate, spec: querySpec(response: false),
-                                            identifier: "interaction.query.item", previewInitiallyShown: false)
-            } header: { Text("每个玩法的条目模板") } footer: { Text("{index} 序号、{name} 规则名称、{trigger} 触发方式、{kind} 玩法类型、{limit} 限制摘要、{module_key} 插件 key。预览与上面的回复模板组合成整条消息。") }
+                                            identifier: "interaction.query.item")
+            } header: { Text("每个玩法的条目模板") } footer: { Text("{index} 序号、{name} 规则名称、{trigger} 触发方式、{kind} 玩法类型、{limit} 限制摘要、{module_key} 插件 key。预览用本账号当前启用的玩法规则逐条代入（没有时用两条示例玩法），与上面的回复模板组合成整条消息。") }
             Section {
                 field("没有可用玩法时回复", prompt: "留空保持服务器当前值", text: $draft.queryEmptyMessage, id: "interaction.query.empty")
             }
@@ -933,20 +867,25 @@ private struct InteractionAdvancedView: View {
         .navigationBarTitleDisplayMode(.inline)
     }
 
-    /// 玩法查询：回复模板与条目模板组合成一条消息（与 Web BotTab 的查询预览相同的示例玩法）。
+    /// 玩法查询：回复模板与条目模板组合成一条消息。第 21 轮起用本账号当前（草稿）的玩法规则逐条代入；
+    /// 一条可列出的规则都没有时，沿用 Web BotTab 的两条示例玩法。
     private func querySpec(response: Bool) -> TelegramTemplateSpec {
+        let context = InteractionQueryContext(draft: draft, entries: entries)
         let responseTemplate = draft.queryResponseTemplate
         let itemTemplate = draft.queryItemTemplate
-        var spec = TelegramTemplateSpec(botName: "交互 Bot", samples: ["count": "2", "closed_count": "0", "chat_id": "-1001234567890"])
-        spec.prompt = draft.queryCommands.split(whereSeparator: \.isNewline).first.map(String.init) ?? "。玩法"
+        let useRules = context.listedCount > 0
+        var spec = TelegramTemplateSpec(botName: "交互 Bot",
+                                        samples: ["count": useRules ? String(context.listedCount) : "2", "closed_count": "0",
+                                                  "chat_id": InteractionQueryPreview.sampleChatID])
+        spec.prompt = context.prompt
         if response {
             spec.samples["items"] = "（下方条目模板渲染的列表）"
-            spec.compose = { TelegramTemplateSamples.interactionQuery(response: $0, item: itemTemplate) }
+            spec.compose = { useRules ? context.full(response: $0) : TelegramTemplateSamples.interactionQuery(response: $0, item: itemTemplate) }
             spec.defaultTemplate = TelegramTemplateSamples.defaultQueryResponseTemplate
         } else {
-            spec.samples = ["index": "1", "name": "示例玩法", "trigger": "转账或关键词", "kind": "玩法 <code>example_game</code>",
-                            "limit": "限时 <code>600</code> 秒", "module_key": "example_game"]
-            spec.compose = { TelegramTemplateSamples.interactionQuery(response: responseTemplate, item: $0) }
+            spec.samples = context.firstItemValues ?? ["index": "1", "name": "示例玩法", "trigger": "转账或关键词", "kind": "玩法 <code>example_game</code>",
+                                                       "limit": "限时 <code>600</code> 秒", "module_key": "example_game"]
+            spec.compose = { useRules ? context.full(item: $0) : TelegramTemplateSamples.interactionQuery(response: responseTemplate, item: $0) }
             spec.defaultTemplate = TelegramTemplateSamples.defaultQueryItemTemplate
         }
         return spec
@@ -1265,6 +1204,33 @@ struct InteractionRuleDraft: Identifiable, Equatable {
         return parts.joined(separator: " · ")
     }
 
+    /// 预览用的服务器形状 JSON：能通过校验时与保存提交的完全相同；填写有误（如数字不合法）时退回按当前填写拼出的近似值，
+    /// 只用于玩法查询预览，不提交。
+    func previewJSON(index: Int, entries: [InteractionEntryOption]) -> JSONValue {
+        if let value = try? json(index: index, entries: entries) { return value }
+        var o = raw
+        func number(_ text: String) -> JSONValue {
+            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.isEmpty { return .null }
+            return Int(trimmed).map { JSONValue.integer(Int64($0)) } ?? .string(trimmed)
+        }
+        o["id"] = .string(id)
+        o["name"] = .string(displayName)
+        o["enabled"] = .bool(enabled)
+        o["action"] = .string(action)
+        o["trigger_mode"] = .string(action == "notice" ? "payment" : triggerMode)
+        o["module_start_keywords"] = .array(InteractionDraft.parseLines(moduleStartKeywords).map { JSONValue.string($0) })
+        o["module_key"] = .string(moduleKey)
+        o["module_action"] = .string(moduleAction)
+        o["chat_ids"] = .array(InteractionDraft.ints(chatIDs).map { JSONValue.integer(Int64($0)) })
+        o["valid_seconds"] = number(validSeconds)
+        o["user_cooldown_seconds"] = .string(cooldown)
+        o["daily_limit_per_user"] = number(dailyLimit)
+        o["math_prize"] = number(prize)
+        o["module_prize"] = action == "module" ? number(prize) : .null
+        return .object(o)
+    }
+
     /// 与 Web `ruleFromForm` 同一规则：以原始对象为底，只改写编辑过的字段。
     func json(index: Int, entries: [InteractionEntryOption]) throws -> JSONValue {
         var o = raw
@@ -1341,5 +1307,359 @@ struct InteractionRuleDraft: Identifiable, Equatable {
         let template = responseTemplate.trimmingCharacters(in: .whitespacesAndNewlines)
         o["response_template"] = .string(template.isEmpty ? "已收到 {payer_name} 给 {receiver_name} 的转账 {amount}，互动流程已准备就绪。" : template)
         return .object(o)
+    }
+}
+
+// MARK: - 通知 Bot 设置（第 21 轮：从交互页主列表收进二级页）
+
+/// 「真实转账结果通知 Bot」与「测试模拟通知 Bot」（Web BotTab「身份配置」右栏）。改的是交互页同一份草稿，
+/// 和规则编辑页一样回到交互页点右上角「保存」一次提交。
+struct InteractionNotifyBotsView: View {
+    @Binding var draft: InteractionDraft
+    let baseline: InteractionDraft
+    let value: JSONValue
+    let peers: [InteractionPeer]
+    let accountID: Int?
+    @State private var confirmingClearNotify = false
+
+    /// 交互页那一行上的状态摘要。
+    static func summary(draft: InteractionDraft, value: JSONValue) -> String {
+        let trusted = InteractionDraft.parseLines(draft.trustedBotIDs).count
+        var parts = [trusted > 0 ? "真实 \(trusted) 个" : "真实未填写"]
+        if value["has_transfer_bot_token"] != nil {
+            let saved = (value["has_transfer_bot_token"]?.boolValue ?? false) && !draft.clearTransferToken
+            let typed = !draft.newTransferToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            parts.append(saved || typed ? "测试 Bot 已配置" : "测试 Bot 未配置")
+            if draft.supportsTransferTestChats {
+                let chats = InteractionDraft.parseLines(draft.transferTestChatIDs).count
+                parts.append(chats > 0 ? "\(chats) 个测试群" : "未选测试群")
+            }
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    /// 这一页的字段有没有未保存的修改。
+    static func isDirty(_ draft: InteractionDraft, _ baseline: InteractionDraft) -> Bool {
+        draft.trustedBotIDs != baseline.trustedBotIDs || draft.newTransferToken != baseline.newTransferToken
+            || draft.clearTransferToken != baseline.clearTransferToken || draft.transferTestChatIDs != baseline.transferTestChatIDs
+    }
+
+    var body: some View {
+        List {
+            if Self.isDirty(draft, baseline) {
+                Section {
+                    Label("有未保存的修改：返回交互页点右上角「保存」后生效。", systemImage: "exclamationmark.circle")
+                        .font(.footnote).foregroundStyle(.orange)
+                        .accessibilityIdentifier("interaction.notifyBots.unsaved")
+                }
+            }
+            trustedNotifySection
+            if value["has_transfer_bot_token"] != nil {
+                testNotifySection(value)
+            }
+        }
+        .symbolRenderingMode(.hierarchical)
+        .navigationTitle("通知 Bot 设置")
+        .navigationBarTitleDisplayMode(.inline)
+        .accessibilityIdentifier("interaction.notifyBots.screen")
+    }
+
+    private var trustedNotifySection: some View {
+        Section {
+            StackedTextField(title: "真实通知 Bot ID", text: $draft.trustedBotIDs, prompt: "每行一个数字 ID，不是 @ 用户名",
+                             keyboard: .numbersAndPunctuation, monospaced: true, identifier: "interaction.trustedBotIDs")
+        } header: { Text("真实转账结果通知 Bot") } footer: {
+            Text("填群里实际发送到账结果的 Bot ID（参考转账结果消息的发送者 ID），多个群用不同通知 Bot 时可以全部加入；保存时自动去重，测试模拟 Token 识别出的 Bot 会额外加入信任。启用转账触发的规则前必须至少有一个。")
+        }
+    }
+
+    private func testNotifySection(_ value: JSONValue) -> some View {
+        let hasTransferToken = value["has_transfer_bot_token"]?.boolValue ?? false
+        let botID = value["transfer_bot_id"]?.intValue
+        let selected = InteractionDraft.parseLines(draft.transferTestChatIDs).count
+        return Section {
+            SecretField(
+                title: "测试模拟通知 Bot Token",
+                text: $draft.newTransferToken,
+                configured: hasTransferToken && !draft.clearTransferToken,
+                reveal: accountID.map { SecretRevealTarget(kind: "transfer_bot_token", accountID: $0) },
+                placeholder: "测试模拟通知时填写",
+                identifier: "interaction.transferToken",
+                disabled: draft.clearTransferToken)
+            LabeledContent {
+                Text(botID.map(String.init) ?? "未识别").foregroundStyle(.secondary).monospacedDigit()
+            } label: {
+                Label("当前测试 Bot ID", systemImage: "number")
+            }
+            .accessibilityElement(children: .combine)
+            .accessibilityIdentifier("interaction.transferBotID")
+            if hasTransferToken {
+                Toggle(isOn: $draft.clearTransferToken) {
+                    Label("清除已保存的测试 Token", systemImage: "trash")
+                }
+                .tint(.red)
+                .accessibilityIdentifier("interaction.clearTransferToken")
+            }
+            if draft.supportsTransferTestChats {
+                NavigationLink {
+                    InteractionTestChatPicker(chatIDs: $draft.transferTestChatIDs, peers: peers)
+                } label: {
+                    Label {
+                        LabeledContent("模拟测试群") { Text(selected > 0 ? "\(selected) 个已选" : "未选择") }
+                    } icon: { Image(systemName: "checklist") }
+                }
+                .accessibilityIdentifier("interaction.testChats")
+            }
+            InteractionMembershipGroup(title: "测试 Bot 群成员状态", memberships: value["transfer_test_chat_memberships"]?.arrayValue ?? [],
+                                       peers: peers, id: "interaction.testMemberships")
+            Button("清空通知 Bot", systemImage: "trash", role: .destructive) { confirmingClearNotify = true }
+                .disabled(draft.trustedBotIDs.isEmpty && draft.newTransferToken.isEmpty && (!hasTransferToken || draft.clearTransferToken))
+                .accessibilityIdentifier("interaction.clearNotify")
+                .confirmationDialog("清空转账结果通知 Bot？", isPresented: $confirmingClearNotify, titleVisibility: .visible) {
+                    Button("清空", role: .destructive) {
+                        draft.trustedBotIDs = ""
+                        draft.newTransferToken = ""
+                        draft.clearTransferToken = hasTransferToken
+                    }
+                    Button("取消", role: .cancel) {}
+                } message: {
+                    Text("清空真实通知 Bot ID 和测试模拟 Token（模拟测试群保留），点右上角「保存」后生效。")
+                }
+        } header: { Text("测试模拟通知 Bot") } footer: {
+            let trust = botID.map { "系统会同时信任真实通知 Bot ID 和这个测试 Bot ID（\($0)）。" } ?? "没有测试模拟 Token 时，系统只监听群里真实出现的转账结果通知。"
+            Text("\(trust)只有明确选择的模拟测试群会响应 +金额、-金额模拟命令；留空不会启用任何测试群，真实转账规则群也不会自动启用测试 Bot。")
+        }
+    }
+}
+
+/// 群成员状态（Web `BotMembershipList`）：交互 Bot「监听群成员状态」、测试 Bot「测试 Bot 群成员状态」。
+/// 服务器缓存 5 分钟；没有数据时不显示。
+private struct InteractionMembershipGroup: View {
+    let title: String
+    let memberships: [JSONValue]
+    let peers: [InteractionPeer]
+    let id: String
+
+    var body: some View {
+        if !memberships.isEmpty {
+            DisclosureGroup {
+                ForEach(Array(memberships.enumerated()), id: \.offset) { _, item in
+                    row(item)
+                }
+            } label: {
+                let joined = memberships.filter { $0["status"]?.stringValue == "joined" }.count
+                Label("\(title) · \(joined)/\(memberships.count) 已加入", systemImage: "person.2")
+                    .accessibilityIdentifier(id)
+            }
+        }
+    }
+
+    private func row(_ item: JSONValue) -> some View {
+        let chatID = item["chat_id"]?.intValue ?? 0
+        let status = item["status"]?.stringValue ?? "unknown"
+        let title = peers.first(where: { $0.id == chatID })?.label ?? "会话 \(chatID)"
+        let state: (text: String, symbol: String, tint: Color)
+        switch status {
+        case "joined": state = ("已加入", "checkmark.circle.fill", .green)
+        case "not_joined": state = ("未加入", "exclamationmark.triangle.fill", .orange)
+        default: state = ("无法确认", "questionmark.circle", .secondary)
+        }
+        return VStack(alignment: .leading, spacing: 2) {
+            LabeledContent {
+                Label(state.text, systemImage: state.symbol).foregroundStyle(state.tint).labelStyle(.titleAndIcon)
+            } label: { Text(title).lineLimit(1) }
+            if let detail = item["detail"]?.stringValue, !detail.isEmpty {
+                Text(detail).font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        .accessibilityElement(children: .combine)
+    }
+}
+
+// MARK: - 玩法查询预览上下文（第 21 轮）
+
+/// 用当前草稿的规则与模板预览「群成员发查询指令时交互 Bot 的回复」。渲染规则见 `TelePilotCore.InteractionQueryPreview`（移植服务器）。
+struct InteractionQueryContext {
+    let draft: InteractionDraft
+    let entries: [InteractionEntryOption]
+    let rules: [(id: String, json: JSONValue)]
+
+    init(draft: InteractionDraft, entries: [InteractionEntryOption]) {
+        self.draft = draft
+        self.entries = entries
+        rules = draft.rules.enumerated().map { (id: $0.element.id, json: $0.element.previewJSON(index: $0.offset, entries: entries)) }
+    }
+
+    /// 用户消息示例：第一条查询指令（没有时用服务器默认「。玩法」）。
+    var prompt: String {
+        draft.queryCommands.split(whereSeparator: \.isNewline).first.map { $0.trimmingCharacters(in: .whitespaces) } ?? "。玩法"
+    }
+
+    private var listed: [(id: String, json: JSONValue)] {
+        let kept = Set(InteractionQueryPreview.listedRules(rules.map { $0.json }).compactMap { $0["id"]?.stringValue })
+        return rules.filter { kept.contains($0.id) }
+    }
+
+    var listedCount: Int { listed.count }
+
+    func prizeDeclared(_ rule: JSONValue) -> Bool? {
+        guard rule["action"]?.stringValue == "module" else { return nil }
+        let key = rule["module_key"]?.stringValue ?? ""
+        let action = rule["module_action"]?.stringValue ?? ""
+        return entries.first { $0.featureKey == key && $0.entryKey == action }?.supportsPrize
+    }
+
+    /// 整条查询回复（HTML）。`response`／`item` 传入时代替草稿里的模板（编辑框实时内容）。
+    func full(response: String? = nil, item: String? = nil) -> String {
+        InteractionQueryPreview.compose(response: response ?? draft.queryResponseTemplate, item: item ?? draft.queryItemTemplate,
+                                        empty: draft.queryEmptyMessage, rules: rules.map { $0.json }, prizeDeclared: prizeDeclared)
+    }
+
+    /// 某条规则在查询回复里的那一项（纯文本，用在规则行上）；不会被列出时为 nil。
+    func itemLine(for ruleID: String) -> String? {
+        guard let index = listed.firstIndex(where: { $0.id == ruleID }) else { return nil }
+        let rule = listed[index].json
+        let html = InteractionQueryPreview.renderItem(template: draft.queryItemTemplate, rule: rule, index: index + 1,
+                                                      prizeDeclared: prizeDeclared(rule))
+        let text = TelegramHTML.parse(html).plainText.split(whereSeparator: \.isNewline).joined(separator: " · ")
+        return text.isEmpty ? nil : text
+    }
+
+    /// 只含这一条规则的查询回复（规则编辑页预览；停用的规则按启用后的样子显示）。
+    func single(_ rule: InteractionRuleDraft) -> String {
+        let index = draft.rules.firstIndex(where: { $0.id == rule.id }) ?? 0
+        var json = rule.previewJSON(index: index, entries: entries).objectValue ?? [:]
+        json["enabled"] = .bool(true)
+        return InteractionQueryPreview.compose(response: draft.queryResponseTemplate, item: draft.queryItemTemplate,
+                                               empty: draft.queryEmptyMessage, rules: [.object(json)], prizeDeclared: prizeDeclared)
+    }
+
+    /// 第一条可列出规则的变量值（条目模板完整编辑页的「示例值」）。
+    var firstItemValues: [String: String]? {
+        guard let first = listed.first?.json else { return nil }
+        return InteractionQueryPreview.itemValues(rule: first, index: 1, prizeDeclared: prizeDeclared(first))
+    }
+}
+
+// MARK: - 运行状态（第 21 轮：紧凑卡片 + 详情页）
+
+struct InteractionRuntimeStatus {
+    var enabled: Bool
+    var running: Bool
+    var hasToken: Bool
+    var username: String?
+    var lastError: String?
+    var totalRules: Int
+    var activeRules: Int
+    var chats: Int
+    var dlq: Int
+
+    init(_ value: JSONValue) {
+        enabled = value["enabled"]?.boolValue ?? false
+        running = value["interaction_running"]?.boolValue ?? false
+        hasToken = value["has_interaction_bot_token"]?.boolValue ?? false
+        username = value["interaction_bot_username"]?.stringValue.flatMap { $0.isEmpty ? nil : $0 }
+        let error = value["interaction_last_error"]?.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines)
+        lastError = (error?.isEmpty ?? true) ? nil : error
+        let rules = value["rules"]?.arrayValue ?? []
+        totalRules = rules.count
+        activeRules = rules.filter { $0["enabled"]?.boolValue ?? true }.count
+        chats = Set(rules.flatMap { ($0["chat_ids"]?.arrayValue ?? []).compactMap(\.intValue) }).count
+        dlq = value["polling_dlq_count"]?.intValue ?? 0
+    }
+
+    /// 一句话状态（卡片标题）。
+    var headline: String {
+        if !enabled { return "交互未启用" }
+        if !hasToken { return "交互 Bot 待配置" }
+        return running ? "交互运行中" : "交互未运行"
+    }
+
+    var tint: Color {
+        if lastError != nil && enabled { return .red }
+        if !enabled { return .secondary }
+        return running && hasToken ? .green : .orange
+    }
+
+    /// 关键数字：Bot · 启用规则 · 群数。
+    var numbers: String {
+        let bot = hasToken ? (username.map { "@\($0)" } ?? "Bot 已配置") : "未配置 Bot"
+        return "\(bot) · \(activeRules)/\(totalRules) 条规则启用 · \(chats) 个群"
+    }
+}
+
+/// 交互页顶部的一行运行状态：状态点 + 一句话 + 关键数字；有错误、失败投递时右侧小标记。
+private struct InteractionStatusCard: View {
+    let status: InteractionRuntimeStatus
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Circle().fill(status.tint).frame(width: 10, height: 10)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(status.headline).font(.subheadline.weight(.semibold))
+                Text(status.numbers).font(.caption).foregroundStyle(.secondary).monospacedDigit().lineLimit(1)
+                    .minimumScaleFactor(0.85)
+            }
+            Spacer(minLength: 4)
+            if status.lastError != nil {
+                Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.red).imageScale(.small)
+                    .accessibilityLabel("最近运行有错误")
+            }
+            if status.dlq > 0 {
+                Label("\(status.dlq)", systemImage: "tray.and.arrow.down")
+                    .labelStyle(.titleAndIcon).font(.caption.weight(.medium)).foregroundStyle(.orange)
+                    .accessibilityLabel("失败投递 \(status.dlq) 条")
+            }
+        }
+    }
+}
+
+/// 运行状态详情（原交互页「运行状态」分组的全部内容）。
+private struct InteractionStatusDetailView: View {
+    let status: InteractionRuntimeStatus
+
+    var body: some View {
+        List {
+            Section {
+                row("交互总闸", status.enabled ? "已启用" : "未启用", symbol: status.enabled ? "power.circle.fill" : "power.circle",
+                    tint: status.enabled ? .green : .secondary, id: "gate")
+                row("交互 Bot", status.hasToken ? (status.username.map { "@\($0)" } ?? "已配置") : "待配置 Token",
+                    symbol: status.hasToken ? "checkmark.circle.fill" : "exclamationmark.triangle.fill",
+                    tint: status.hasToken ? .green : .orange, id: "token")
+                row("监听状态", status.running ? "运行中" : (status.enabled ? "未运行" : "未启用"),
+                    symbol: status.running ? "checkmark.circle.fill" : (status.enabled ? "exclamationmark.triangle.fill" : "pause.circle"),
+                    tint: status.running ? .green : (status.enabled ? .orange : .secondary), id: "runtime")
+                row("启用订阅", "\(status.activeRules)/\(status.totalRules) 条 · \(status.chats) 个群", symbol: "bubble.left.and.text.bubble.right",
+                    tint: .accentColor, id: "rules")
+                if status.dlq > 0 {
+                    row("失败投递", "\(status.dlq) 条待处理", symbol: "tray.and.arrow.down", tint: .orange, id: "dlq")
+                }
+            } footer: {
+                Text("状态取自服务器最近一次读取或保存的结果；保存后交互 Bot 会按新配置自动重启。失败投递可在账号详情的「失败投递」里重试或丢弃。")
+            }
+            if let lastError = status.lastError {
+                Section {
+                    Label {
+                        Text(lastError).font(.footnote).foregroundStyle(.secondary).textSelection(.enabled)
+                    } icon: { Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.red) }
+                    .accessibilityIdentifier("interaction.status.error")
+                } header: { Text("最近运行有错误") }
+            }
+        }
+        .symbolRenderingMode(.hierarchical)
+        .navigationTitle("运行状态")
+        .navigationBarTitleDisplayMode(.inline)
+        .accessibilityIdentifier("interaction.statusDetail")
+    }
+
+    private func row(_ title: String, _ value: String, symbol: String, tint: Color, id: String) -> some View {
+        LabeledContent {
+            Text(value).foregroundStyle(.secondary).multilineTextAlignment(.trailing)
+        } label: {
+            Label { Text(title) } icon: { Image(systemName: symbol).foregroundStyle(tint) }
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("interaction.status.\(id)")
     }
 }
