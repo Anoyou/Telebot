@@ -129,6 +129,10 @@ struct OverviewView: View {
             }
             .accessibilityElement(children: .combine)
             .accessibilityIdentifier("overview.status")
+            // 第 22 轮：连不上时状态行下面是可展开的「诊断详情」（原因已写在状态行里），可复制发给维护者。
+            if let report = model.connectionReport, model.health == nil || model.showingSnapshot || model.healthError != nil {
+                ConnectionProblemView(report: report, showsReason: false)
+            }
         }
         .listSectionSpacing(.compact)
     }
@@ -151,11 +155,12 @@ struct OverviewView: View {
     /// 状态行下方最多一行说明；正常时不显示（全面检查在右上角「一键体检」）。
     private var statusNote: String? {
         if model.showingSnapshot {
-            let progress = model.isRefreshing ? "正在读取最新状态…" : "暂时无法连接服务器，下拉可重试。"
+            let progress = model.isRefreshing ? "正在读取最新状态…" : (model.connectionReport?.diagnosis.summary ?? "暂时无法连接服务器，下拉可重试。")
             return model.lastUpdated.map { "更新于 \($0.formatted(date: .abbreviated, time: .shortened))。\(progress)" } ?? progress
         }
         if model.healthError != nil {
-            return model.health == nil ? "请检查网络或服务器地址，然后下拉重试。" : "以下为上次读取结果，并非当前在线状态。"
+            if model.health == nil { return model.connectionReport?.diagnosis.summary ?? "请检查网络或服务器地址，然后下拉重试。" }
+            return "以下为上次读取结果，并非当前在线状态。"
         }
         if !signals.unavailable.isEmpty {
             return "暂时无法读取：\(signals.unavailable.joined(separator: "、"))。下拉可重试。"

@@ -88,6 +88,8 @@ final class AssistantStore {
     var busy = false
     var loading = false
     var streaming = false
+    /// 第 22 轮：进度流断线后正在自动重连（「已断开 x 秒，正在第 n 次重连」）；收到事件或任务结束后为 nil。
+    var streamReconnect: StreamReconnectStatus?
     var hasOlderMessages = true
     var unresolvedSend = false
     var includeArchived = false
@@ -233,6 +235,7 @@ final class AssistantStore {
         generation += 1
         streamTask?.cancel()
         streaming = false
+        streamReconnect = nil
         let keep = keepVisible && sessionID == id
         sessionID = id
         if !keep {
@@ -426,6 +429,7 @@ final class AssistantStore {
         accountID = nil
         live.clearText()
         streaming = false
+        streamReconnect = nil
         hasOlderMessages = false
         resetQueueState()
     }
@@ -675,7 +679,7 @@ final class AssistantStore {
         } catch { self.error = AssistantPresentation.error(error); await restoreRun(model) }
     }
 
-    func pauseSubscription() { subscriptionID = UUID(); streamTask?.cancel(); streaming = false }
+    func pauseSubscription() { subscriptionID = UUID(); streamTask?.cancel(); streaming = false; streamReconnect = nil }
 
     func attach(_ model: AppModel) {
         streamTask?.cancel()
@@ -688,10 +692,12 @@ final class AssistantStore {
         let token = generation
         subscriptionID = UUID()
         let subscription = subscriptionID
+        streamReconnect = nil
         streamTask = Task { [weak self] in
             guard let self else { return }
             streaming = true
-            defer { if token == generation && subscription == subscriptionID { streaming = false } }
+            defer { if token == generation && subscription == subscriptionID { streaming = false; streamReconnect = nil } }
+            var lastDrop: ConnectionDiagnosis?
             for attempt in 0..<4 {
                 guard !Task.isCancelled, token == generation, subscription == subscriptionID else { return }
                 do {
@@ -701,6 +707,13 @@ final class AssistantStore {
                     }
                 } catch {
                     if Task.isCancelled { return }
+                    // 第 22 轮：断线时显示「已断开 x 秒，正在第 n 次重连」与原因，直到重新收到事件。
+                    let diagnosis = ConnectionDiagnoser.diagnose(error)
+                    lastDrop = diagnosis ?? lastDrop
+                    if attempt < 3, token == generation, subscription == subscriptionID {
+                        if streamReconnect == nil { streamReconnect = StreamReconnectStatus(diagnosis: diagnosis) }
+                        else { streamReconnect?.failedAgain(diagnosis) }
+                    }
                 }
                 guard !Task.isCancelled, token == generation, subscription == subscriptionID else { return }
                 do {
@@ -727,7 +740,11 @@ final class AssistantStore {
                 } catch { if attempt == 3 { self.error = AssistantPresentation.error(error) } }
                 if attempt < 3 { try? await Task.sleep(for: .seconds(1 << attempt)) }
             }
-            if token == generation { notice = "进度连接已中断，任务仍在服务器执行。点击“恢复进度”重新订阅。" }
+            if token == generation {
+                streamReconnect = nil
+                let reason = lastDrop.map { "（\($0.title)）" } ?? ""
+                notice = "进度连接已中断\(reason)，任务仍在服务器执行。点击“恢复进度”重新订阅。"
+            }
         }
     }
 
@@ -843,6 +860,8 @@ final class AssistantStore {
 
     private func consume(_ event: JSONValue, generation token: Int, subscription: UUID) {
         guard token == generation, subscription == subscriptionID else { return }
+        // 收到任何事件（含心跳）= 已重新连上：断线提示消失。
+        if streamReconnect != nil { streamReconnect = nil }
         let type = event.assistantText("type")
         if type == "heartbeat" { return }
         if let seq = event["seq"]?.intValue {

@@ -58,6 +58,8 @@ final class AppModel {
     /// 值守全局提示（第 20 轮）：与 Web 一样只看 `active_profile == "safe_watch"`。
     var safeWatchActive: Bool { runtimeProfile?.active == "safe_watch" }
     private(set) var workspaceError: String?
+    /// 第 22 轮：连不上服务器时的一行原因 + 建议与诊断详情（概览状态行、登录页显示）；读到一次服务器数据后清除。
+    private(set) var connectionReport: ConnectionReport?
     var requestedRoute: AppRoute?
     /// 推送或其他入口要求 Agent 标签页打开的会话；由内嵌助手读取后清空。
     private(set) var assistantSessionRequest: String?
@@ -94,6 +96,9 @@ final class AppModel {
     @ObservationIgnored private var starting = false
     /// 是否使用概览本机快照；界面测试只在指定参数时启用，保证用例互不影响。
     @ObservationIgnored private var snapshotEnabled = true
+    /// 连续连接失败的轮数与第一次失败的时间（诊断详情）。
+    @ObservationIgnored private var connectionFailureStreak = 0
+    @ObservationIgnored private var connectionFirstFailureAt: Date?
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -161,11 +166,13 @@ final class AppModel {
                 resourcesError = text
                 accountsError = text
                 versionError = text
+                await reportConnectionFailure(error)
             } else {
                 phase = .signedOut
                 canRetrySession = true
                 noteLoginAccessBlock(error)
                 loginNotice = message(error)
+                await reportConnectionFailure(error)
             }
         }
     }
@@ -190,6 +197,7 @@ final class AppModel {
             else {
                 noteLoginAccessBlock(error)
                 loginNotice = message(error)
+                await reportConnectionFailure(error)
             }
         }
     }
@@ -319,7 +327,14 @@ final class AppModel {
             await expireSession()
             return
         }
-        if errors.count < parts.count { showingSnapshot = false }
+        if errors.count < parts.count {
+            showingSnapshot = false
+            clearConnectionProblem()
+        } else if let first = errors.first {
+            // 四项都读不到：多半是连接问题，给出一行原因 + 诊断详情。
+            await reportConnectionFailure(first)
+            guard token == generation else { return }
+        }
         if errors.isEmpty {
             lastUpdated = Date()
             saveSnapshot()
@@ -873,6 +888,9 @@ final class AppModel {
         agentAskRequest = nil
         isSyncingAfterAction = false
         workspaceError = nil
+        connectionReport = nil
+        connectionFailureStreak = 0
+        connectionFirstFailureAt = nil
         requestedRoute = nil
         user = nil
         health = nil
@@ -895,6 +913,32 @@ final class AppModel {
         mutatingAccounts = []
         actionMessages = [:]
         uncertainActions = []
+    }
+
+    /// 第 22 轮：把连接类错误整理成「原因 + 建议 + 诊断详情」，并记在 `connectionReport`（业务错误返回 nil）。
+    /// 诊断详情只在最近一次失败记录与这个错误一致时带上（并发请求时可能是别的请求）。
+    @discardableResult
+    func reportConnectionFailure(_ error: Error) async -> ConnectionReport? {
+        guard let diagnosis = ConnectionDiagnoser.diagnose(error), let service else { return nil }
+        let token = generation
+        let record = await service.lastConnectionFailure()
+        let connectedAt = await service.lastConnectedAt()
+        guard token == generation else { return nil }
+        connectionFailureStreak += 1
+        if connectionFirstFailureAt == nil { connectionFirstFailureAt = Date() }
+        let report = ConnectionReport(diagnosis: diagnosis, record: record.flatMap { $0.matches(error) ? $0 : nil },
+                                      serverURL: serverURL?.absoluteString, consecutiveFailures: connectionFailureStreak,
+                                      firstFailureAt: connectionFirstFailureAt, lastSuccessAt: connectedAt,
+                                      appVersion: AppInfo.versionLabel)
+        connectionReport = report
+        return report
+    }
+
+    private func clearConnectionProblem() {
+        guard connectionReport != nil || connectionFailureStreak > 0 else { return }
+        connectionReport = nil
+        connectionFailureStreak = 0
+        connectionFirstFailureAt = nil
     }
 
     private func message(_ error: Error) -> String {
