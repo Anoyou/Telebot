@@ -19,6 +19,7 @@ _IOS_TARGETS = {
     meta.IOS_SOFTWARE_UPDATE,
     meta.IOS_SUDO,
     meta.IOS_TOTP,
+    meta.IOS_PAYMENT_SOURCE,
 }
 
 
@@ -130,3 +131,16 @@ def test_ai_context_messages_points_to_ai_global_settings() -> None:
     assert any(loc["ios_target"] == meta.IOS_AI_GLOBAL for loc in item["also_in"])
     kill = meta.meta_for("kill_switch")
     assert kill is not None and kill["editable"] is False
+
+
+def test_payment_source_switch_editable_and_points_to_plugin_detail() -> None:
+    """第 22 轮：开关在 Web / iOS 都能改，并且能从服务器参数跳到转账通知插件详情。"""
+
+    item = meta.meta_for("log_retention.payment_source_plugin_authoritative")
+    assert item is not None
+    assert item["editable"] is True and item["read_only_reason"] is None
+    assert item["default"] is False
+    assert "随时可关" in item["description"]
+    routes = {loc["web_route"] for loc in item["also_in"]}
+    assert meta.WEB_PAYMENT_SOURCE_PLUGIN in routes
+    assert any(loc["ios_target"] == meta.IOS_PAYMENT_SOURCE for loc in item["also_in"])

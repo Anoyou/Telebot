@@ -12351,6 +12351,92 @@
         "title": "OperationalStatsTotalOut",
         "type": "object"
       },
+      "PaymentSourcePluginStatus": {
+        "properties": {
+          "active": {
+            "title": "Active",
+            "type": "boolean"
+          },
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
+          "inactive_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Inactive Reason"
+          },
+          "plugin_key": {
+            "title": "Plugin Key",
+            "type": "string"
+          },
+          "source_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Source Ids",
+            "type": "array"
+          },
+          "version": {
+            "default": "",
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "plugin_key",
+          "display_name",
+          "active"
+        ],
+        "title": "PaymentSourcePluginStatus",
+        "type": "object"
+      },
+      "PaymentSourceStatusResponse": {
+        "description": "「转账通知以插件结果为准」开关的当前状态（第 22 轮，插件详情与服务器参数页共用）。",
+        "properties": {
+          "authoritative": {
+            "title": "Authoritative",
+            "type": "boolean"
+          },
+          "effective": {
+            "enum": [
+              "plugin",
+              "legacy"
+            ],
+            "title": "Effective",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "setting_key": {
+            "title": "Setting Key",
+            "type": "string"
+          },
+          "sources": {
+            "items": {
+              "$ref": "#/components/schemas/PaymentSourcePluginStatus"
+            },
+            "title": "Sources",
+            "type": "array"
+          }
+        },
+        "required": [
+          "authoritative",
+          "effective",
+          "label",
+          "setting_key"
+        ],
+        "title": "PaymentSourceStatusResponse",
+        "type": "object"
+      },
       "PlatformCapabilitiesOut": {
         "properties": {
           "cache_ready": {
@@ -23151,7 +23237,7 @@
                 "type": "null"
               }
             ],
-            "description": "默认关闭：转账通知以系统自带的解析为准，插件只做对照。对照长期一致后才建议打开。",
+            "description": "关 = 以系统自带的旧解析为准，转账通知插件只做对照；开 = 以转账通知插件的结果为准，插件出错或超时自动回退旧解析。随时可关，30 秒内生效，不影响结算规则本身。",
             "title": "转账通知以插件结果为准 · payment_source_plugin_authoritative"
           },
           "rate_limit_event_retention_days": {
@@ -40950,6 +41036,81 @@
         "summary": "Test Notify Bot",
         "tags": [
           "notify-bots"
+        ]
+      }
+    },
+    "/api/payment-sources/status": {
+      "get": {
+        "description": "「转账通知以插件结果为准」开关当前状态 + 已安装的转账通知插件（只读）。\n\n生效与否完全以服务器当下配置为准；修改仍走 ``PATCH /api/system/settings`` 的\n``log_retention.payment_source_plugin_authoritative``（30 秒内生效）。旧服务器没有这个接口（404），\n客户端据此不显示插件详情里的开关区。",
+        "operationId": "get_payment_source_status_api_payment_sources_status_get",
+        "parameters": [
+          {
+            "in": "cookie",
+            "name": "auth_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Auth Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentSourceStatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "认证失败"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "服务器内部错误"
+          }
+        },
+        "security": [
+          {
+            "AuthCookie": []
+          }
+        ],
+        "summary": "Get Payment Source Status",
+        "tags": [
+          "plugins"
         ]
       }
     },

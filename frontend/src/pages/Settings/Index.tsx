@@ -1,5 +1,6 @@
 import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
+import { paymentSourcePluginRoute } from "@/lib/paymentSource";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowRight,
@@ -858,7 +859,12 @@ export function SettingsIndex() {
                 <LogToggleCard
                   label="转账通知以插件结果为准"
                   paramKey="payment_source_plugin_authoritative"
-                  description="默认关闭：以宿主旧解析器为准，转账通知插件只做对照（不一致记日志、Trace 与插件运行统计）。对照至少一个 beta 周期全部一致后再打开；插件出错或超时仍自动回退旧解析。"
+                  description="关 = 以系统自带的旧解析为准，转账通知插件只做对照；开 = 以插件读出的结果为准，插件出错或超时自动回退旧解析。随时可关，保存后 30 秒内生效。"
+                  link={
+                    paymentSourceKey
+                      ? { to: paymentSourcePluginRoute(paymentSourceKey), label: "去转账通知插件详情看对照数据" }
+                      : undefined
+                  }
                   checked={logRetention.payment_source_plugin_authoritative}
                   onCheckedChange={(checked) =>
                     setLogRetention((v) => ({ ...v, payment_source_plugin_authoritative: checked }))
@@ -1103,12 +1109,14 @@ function LogToggleCard({
   description,
   checked,
   onCheckedChange,
+  link,
 }: {
   label: string;
   paramKey?: string;
   description: string;
   checked: boolean;
   onCheckedChange: (checked: boolean) => void;
+  link?: { to: string; label: string };
 }) {
   return (
     <div className="flex min-h-36 flex-col rounded-md border border-border/70 bg-muted/20 p-3">
@@ -1117,6 +1125,15 @@ function LogToggleCard({
         {paramKey ? <ParamKey k={paramKey} /> : null}
       </Label>
       <p className="mt-2 text-xs leading-5 text-muted-foreground">{description}</p>
+      {link ? (
+        <Link
+          to={link.to}
+          className="mt-1 text-xs text-primary hover:underline"
+          data-testid={paramKey ? `log-toggle-link-${paramKey}` : undefined}
+        >
+          {link.label}
+        </Link>
+      ) : null}
       <div className="mt-auto flex justify-end pt-4">
         <Switch
           checked={checked}

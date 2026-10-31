@@ -79,6 +79,7 @@ import { queryKeys } from "@/lib/queryKeys";
 import { PluginWorkspaceHeader } from "@/pages/Plugins/WorkspaceHeader";
 import { PluginCardSlot } from "@/components/plugin/PluginCards";
 import { PluginPageEntries } from "@/components/plugin/PluginPages";
+import { PaymentSourceSwitchSection } from "@/components/plugin/PaymentSourceSwitch";
 
 import { getFeatureMatrix } from "@/api/features";
 import {
@@ -1648,9 +1649,17 @@ function RemoteInstallCard() {
 function InstalledPluginsSection() {
   const nav = useNavigate();
   const qc = useQueryClient();
-  const [expanded, setExpanded] = useState(false);
+  // 第 22 轮：`?detail=<插件 key>` 直接打开插件详情（服务器参数页「去转账通知插件详情」等跳转用）。
+  const [searchParams, setSearchParams] = useSearchParams();
+  const detailParam = searchParams.get("detail");
+  const [expanded, setExpanded] = useState(() => Boolean(detailParam));
   const [expandedAccountPlugin, setExpandedAccountPlugin] = useState<string | null>(null);
-  const [selectedDetailKey, setSelectedDetailKey] = useState<string | null>(null);
+  const [selectedDetailKey, setSelectedDetailKey] = useState<string | null>(detailParam);
+  useEffect(() => {
+    if (!detailParam) return;
+    setExpanded(true);
+    setSelectedDetailKey(detailParam);
+  }, [detailParam]);
   const matrixQ = useQuery({ queryKey: queryKeys.featureMatrix, queryFn: getFeatureMatrix });
   const overviewQ = useQuery({ queryKey: INSTALLED_OVERVIEW_QK, queryFn: listInstalledOverview });
   const reposQ = useQuery({ queryKey: PLUGIN_REPOS_QK, queryFn: fetchPluginRepos });
@@ -2219,7 +2228,13 @@ function InstalledPluginsSection() {
           repos={repos}
           open={selectedDetail !== null}
           onOpenChange={(open) => {
-            if (!open) setSelectedDetailKey(null);
+            if (open) return;
+            setSelectedDetailKey(null);
+            if (searchParams.has("detail")) {
+              const next = new URLSearchParams(searchParams);
+              next.delete("detail");
+              setSearchParams(next, { replace: true });
+            }
           }}
           onOpenTrace={(traceId) => {
             setSelectedDetailKey(null);
@@ -2456,6 +2471,8 @@ function PluginOverviewDetailDialog({
           </section>
 
           {/* plugin.overview：宿主「运行统计」卡（卡片 DSL 的第一个用户）+ 插件自己声明的卡片 */}
+          {/* 第 22 轮：转账通知插件的「转账通知以插件结果为准」开关（旧服务器 / 非转账通知插件不显示） */}
+          <PaymentSourceSwitchSection pluginKey={plugin.key} />
           <PluginCardSlot slot="plugin.overview" pluginKey={plugin.key} />
           <PluginPageEntries menu="plugin.detail" pluginKey={plugin.key} />
 

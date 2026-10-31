@@ -28,6 +28,7 @@ from ..db.models.ignored_peer import IgnoredPeer
 from ..db.models.plugin import InstalledPlugin
 from ..worker.plugins import plugin_ui
 from ..worker.plugins.host_read import HostReadError, normalize_resource_ref
+from . import plugin_funds_cards
 
 log = logging.getLogger(__name__)
 
@@ -247,6 +248,9 @@ async def list_cards(
         name = await _plugin_display_name(db, key)
         if slot == "plugin.overview" and plugin_key:
             out.append(_public_card(_host_stats_card(), key, name))
+            # 第 22 轮：资金类插件（转账通知解析 / 会发游戏币）多一张宿主只读卡，只在插件详情里。
+            for host_card in await plugin_funds_cards.host_cards_for(db, key):
+                out.append(_public_card(host_card, key, name))
         cards, problems = await plugin_cards(db, key)
         warnings.extend(f"{key}: {item}" for item in problems)
         for card in cards:
@@ -258,6 +262,11 @@ async def list_cards(
 async def find_card(db: AsyncSession, plugin_key: str, card_id: str) -> dict[str, Any]:
     if card_id == HOST_STATS_CARD_ID:
         return _host_stats_card()
+    if card_id in plugin_funds_cards.HOST_CARD_IDS:
+        card = next((item for item in await plugin_funds_cards.host_cards_for(db, plugin_key) if item["id"] == card_id), None)
+        if card is None:
+            raise PluginCardError(f"插件 {plugin_key} 不是资金类插件，没有卡片 {card_id}")
+        return card
     cards, _warnings = await plugin_cards(db, plugin_key)
     for card in cards:
         if card["id"] == card_id:
@@ -381,6 +390,10 @@ async def _read_resource(
     from ..worker.plugins import plugin_stats
 
     ref = normalize_resource_ref(ref)
+    if host_card and ref == "host.payment_source@1":
+        return await plugin_funds_cards.payment_source_card_data(db, plugin_key)
+    if host_card and ref == "host.funds@1":
+        return await plugin_funds_cards.funds_card_data(db, plugin_key)
     if ref == "plugin.stats@1":
         try:
             await plugin_stats.get_recorder().flush(get_redis())

@@ -9,6 +9,7 @@ from fastapi.responses import Response
 
 from ..deps import CurrentUser, DBSession
 from ..schemas.plugin_ui import (
+    PaymentSourceStatusResponse,
     PluginUIBridgeRequest,
     PluginUIBridgeResponse,
     PluginUICardActionResponse,
@@ -21,7 +22,7 @@ from ..schemas.plugin_ui import (
     PluginUIPageSession,
     PluginUIPageSessionRequest,
 )
-from ..services import plugin_ui_cards, plugin_ui_pages
+from ..services import plugin_funds_cards, plugin_ui_cards, plugin_ui_pages
 from ..worker.plugins import plugin_ui
 
 router = APIRouter(tags=["plugins"])
@@ -36,6 +37,18 @@ async def get_plugin_ui_contract(_user: CurrentUser) -> dict[str, Any]:
     """控件 / 卡片契约（schemas/plugin-ui-widgets.json）。客户端遇到不认识的控件时据此提示需要的 App 版本。"""
 
     return plugin_ui.load_contract()
+
+
+@router.get("/api/payment-sources/status", response_model=PaymentSourceStatusResponse)
+async def get_payment_source_status(db: DBSession, _user: CurrentUser) -> PaymentSourceStatusResponse:
+    """「转账通知以插件结果为准」开关当前状态 + 已安装的转账通知插件（只读）。
+
+    生效与否完全以服务器当下配置为准；修改仍走 ``PATCH /api/system/settings`` 的
+    ``log_retention.payment_source_plugin_authoritative``（30 秒内生效）。旧服务器没有这个接口（404），
+    客户端据此不显示插件详情里的开关区。
+    """
+
+    return PaymentSourceStatusResponse(**(await plugin_funds_cards.status(db)))
 
 
 @router.get("/api/plugin-ui/cards", response_model=PluginUICardsResponse)
