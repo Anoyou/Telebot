@@ -3310,7 +3310,7 @@ export interface paths {
         };
         /**
          * Get Plugin Capabilities
-         * @description 宿主能力注册表、Plugin API 版本、弃用登记、ctx.host.read 资源（含模型清单 ai.models@1）与中间件限制。
+         * @description 宿主能力注册表、Plugin API 版本、插件稳定契约版本（0.115.0+）、弃用登记、ctx.host.read 资源（含模型清单 ai.models@1）与中间件限制。
          */
         get: operations["get_plugin_capabilities_api_plugins_capabilities_get"];
         put?: never;
@@ -10028,6 +10028,16 @@ export interface components {
         PluginCapabilitiesResponse: {
             /** Capabilities */
             capabilities: components["schemas"]["PluginCapabilityOut"][];
+            /**
+             * Contract Baseline Plugin Api
+             * @description 契约冻结基线对应的 Plugin API 版本（契约 1.0 = 1.6），0.115.0+
+             */
+            contract_baseline_plugin_api?: string | null;
+            /**
+             * Contract Version
+             * @description 宿主承诺的插件稳定契约版本（如 1.0，见 docs/PLUGIN-CONTRACT.md），0.115.0+ / Plugin API 1.7+；旧服务器不返回该字段，客户端按缺省（契约之前）处理
+             */
+            contract_version?: string | null;
             /**
              * Core Middleware
              * @description 平台内置中间件，0.109.0+

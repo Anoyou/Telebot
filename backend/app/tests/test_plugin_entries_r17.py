@@ -355,7 +355,9 @@ def test_capability_registered() -> None:
     from app.worker.plugins.versioning import PLUGIN_API_VERSION
 
     item = caps_mod.CAPABILITY_INDEX["interaction.legacy_entry_keys"]
-    assert item.plugin_api == "1.6" == PLUGIN_API_VERSION
+    assert item.plugin_api == "1.6"
+    # Plugin API 只增：1.7（契约版本探测）起宿主版本继续递增，引入该能力的版本号保持 1.6
+    assert tuple(int(p) for p in PLUGIN_API_VERSION.split(".")) >= (1, 6)
     assert item.since == caps_mod._R17_RELEASE
 
 

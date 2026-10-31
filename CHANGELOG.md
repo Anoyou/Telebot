@@ -25,6 +25,16 @@
 
 ## [Unreleased]
 
+## [0.115.0-beta.2] - 2026-10-31 · patch（补丁预发布） · 插件契约版本可探测、Plugin API 1.0 冻结准备（兼容层全部保留）
+
+### 插件平台：契约版本可探测、Plugin API 1.0 冻结准备（兼容层全部保留）
+
+- 插件可读取宿主承诺的**插件稳定契约版本**：`ctx.capabilities.contract_version`（当前 `1.0`），能力名 `runtime.contract_version`；`GET /api/plugins/capabilities` 新增 `contract_version`、`contract_baseline_plugin_api`（契约 1.0 = Plugin API 1.6）。旧服务器没有该属性 / 字段，插件用 `getattr(..., None)` 回退。只读字段，不改变任何已有行为。
+- Plugin API 1.6 → **1.7**（只新增上面这一项）。已发布插件的 `plugin_api` 范围（`^1.0`、`>=1.3`、`^1.6` …）照旧成立；不抬任何插件的 `min_telepilot_version`；契约快照只有追加，冻结基线未改。
+- 新增 `docs/PLUGIN-API-1.0-PLAN.md`（草案，不冻结、不删除）：盘点当前对外接口（已进契约快照的部分与插件在用但未进快照的部分）、20 项兼容层清单（用途、官方插件库谁还依赖、保留理由）、离 1.0 冻结还差什么。按 10-31 决定，兼容层暂时全部保留，不标记“即将删除”。
+- 新增兼容层契约测试 `test_plugin_compat_layer.py`：每项兼容层至少一个守护测试；守护测试被删 / 改名或与计划文档不一致时 CI 失败；按旧插件写法直接调用宿主（旧能力属性、只实现 `on_interaction` 的插件、`min_telebot_version`、payload 管理员名单、兜底入口表、旧 `math10` 规则、旧配置改写、旧试运行协议、图片后端回退、`compact_tables` 等），断言结果不变。
+- 文档同步：PLUGIN-API-REFERENCE（版本门槛表、能力注册表、新节「契约版本探测」、弃用登记说明）、PLUGIN-CONTRACT、PLUGIN-DEV-GUIDE、PLUGIN-CHEATSHEET、README 索引。iOS 只同步 `contract.json`（OpenAPI 组件 schema 多了两个可选字段），App 无变化。
+
 ## [0.115.0-beta.1] - 2026-10-31 · minor（次版本预发布） · 服务器参数重构：中文名 + 英文原名 + 说明、明显可编辑、重复项排查
 
 ### 服务器参数重构与重复项排查（Web + iOS + 后端参数说明）
@@ -115,11 +125,9 @@
 
 - **iOS 0.24.1**：`TelegramMessagePreview.swift` 折叠引用（`<blockquote expandable>`）的「展开 / 收起」从引用框左下独占一行改为叠在内容右下角（`overlay(.bottomTrailing)`），控件文字改用 `Text` 插值（箭头 + 不换行空格 + 文字，不再用 `Label`，列表里 `Label` 给图标留整列宽导致间距过大）；最后一块是段落 / 标题时在末尾追加等宽透明占位，放得下与最后一行同行、放不下随文字折到新行，最后一块是列表 / 代码块时另起一行右对齐。代码块原来放在横向 `ScrollView` 里且 `fixedSize(horizontal: true, vertical: false)`，在表单行里纵向被压成一行、多行 `<pre>` 截成「…」；改为整块完整显示、按宽度自动换行（`fixedSize(horizontal: false, vertical: true)`，新标识 `<id>.code.text`），「复制」与链接提示同样改为图标 + 文字紧挨的 `Text`（`inlineIconText`）。预览气泡内强调色（引用竖条与底色、代码块语言名、链接、变量底色）改为 Telegram 名字蓝（`.tint(palette.name)` + 环境值 `telegramAccent`）。UI 测试 `testMessageTemplateLabLivePreviewRenderAndSend` 补断言：展开 / 收起都在引用框右下角且箭头与文字紧挨；`testInteractionTemplatesShowLivePreviewAndFullEditor` 补断言扣款通知代码块全文可见（多行高度、不超出代码框）且「复制」紧挨，夹具扣款通知模板改为真实默认的 `<pre><code>` 两行 + 一段需折行的长文字。不改服务器。
 
-
 ### iOS 0.24.0：交互页补齐「测试模拟通知 Bot」与转账结果通知 Bot 配置
 
 - **iOS 0.24.0**：对照 Web 账号 › Bot（`BotTab`「身份配置」右栏）补齐交互页（`InteractionCenterView`）：新增「真实转账结果通知 Bot」分组（`trusted_bot_ids`，从“高级”页搬来，`interaction.trustedBotIDs`）与「测试模拟通知 Bot」分组（服务器返回有 `has_transfer_bot_token` 时才显示）：`SecretField`「测试模拟通知 Bot Token」（`transfer_bot_token` / `clear_transfer_bot_token`，查看走 `/api/secrets/reveal?kind=transfer_bot_token`）、当前测试 Bot ID（`transfer_bot_id`）、模拟测试群（`transfer_test_chat_ids`，新页 `InteractionTestChatPicker`：会话白名单原生 Toggle 多选 + 手填 Chat ID + 不在白名单的 ID 单列移除，最多 20 个；旧服务器没有该字段时不显示也不提交）、测试 Bot 群成员状态（`transfer_test_chat_memberships`）、清空通知 Bot（确认后清空真实 ID 与测试 Token，点保存生效）。交互 Bot 入群情况改名「监听群成员状态」移入「交互总闸与 Bot」，`unknown` 显示「无法确认」。规则列表补「全部 / 启用 / 暂停」筛选与长按上移 / 下移 / 复制。仍是一次 `PUT /api/accounts/{id}/interaction-bot`，字段与 Web `buildInteractionPayload` 相同，不改服务器。UI 测试新增 `testInteractionTestNotifyBotSection`、`testInteractionTestNotifyBotHiddenOnOldServer`；`ios/DESIGN.md` 对照表补「交互页字段对照」。
-
 
 ## [0.113.0-beta.5] - 2026-10-30 · patch（补丁预发布） · 密钥 / 密码 / Token 输入框统一：按需查看已保存密钥（审计、no-store），iOS 0.23.0
 
@@ -552,7 +560,6 @@
 ### iOS
 
 - iOS 0.13.0：概览去掉「需要处理」，导航栏右上角新增「一键体检」（调用上述接口，结论、各项状态、原因与修复建议、可跳转处理入口）；助手输入栏改为原生 Liquid Glass 输入栏（多行输入框 + 工具栏：左下「+」附件、右下发送 / 停止、发送左侧模型选择），去掉上方模型胶囊；回答底部本轮详情改两行（供应商 · 模型 / 词元、工具调用、耗时）；全 App 分段切换统一为同一位置的系统分段控件，搜索栏改用系统 `UISearchTextField`，插件中心筛选改为原生菜单，模型多选改为系统开关；体检请求走长超时通道。
-
 
 ## [0.106.0-beta.8] - 2026-10-26 · patch（补丁预发布） · iOS 体验优化第四轮配套：插件展示顺序、助手会话摘要、模型能力标签汉化
 

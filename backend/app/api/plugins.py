@@ -19,7 +19,7 @@ from ..worker.ipc import CMD_RELOAD_PLUGIN, cmd_channel, make_cmd
 from ..worker.plugins import plugin_stats
 from ..worker.plugins.capabilities import capability_catalog
 from ..worker.plugins.deprecations import DEPRECATION_INDEX, deprecation_catalog
-from ..worker.plugins.versioning import PLUGIN_API_VERSION
+from ..worker.plugins.versioning import PLUGIN_API_VERSION, PLUGIN_CONTRACT_VERSION
 
 log = logging.getLogger(__name__)
 router = APIRouter(tags=["plugins"])
@@ -73,16 +73,19 @@ async def list_installed(
 
 @router.get("/api/plugins/capabilities", response_model=PluginCapabilitiesResponse)
 async def get_plugin_capabilities(_user: CurrentUser) -> PluginCapabilitiesResponse:
-    """宿主能力注册表、Plugin API 版本、弃用登记、ctx.host.read 资源（含模型清单 ai.models@1）与中间件限制。"""
+    """宿主能力注册表、Plugin API 版本、插件稳定契约版本（0.115.0+）、弃用登记、ctx.host.read 资源（含模型清单 ai.models@1）与中间件限制。"""
 
     from .. import __version__
     from ..services.render_profile import core_middleware_catalog
+    from ..worker.plugins.contract import CONTRACT_BASELINE_PLUGIN_API
     from ..worker.plugins.host_read import host_resource_catalog
     from ..worker.plugins.middleware import limits_catalog
 
     return PluginCapabilitiesResponse(
         host_version=str(__version__),
         plugin_api_version=PLUGIN_API_VERSION,
+        contract_version=PLUGIN_CONTRACT_VERSION,
+        contract_baseline_plugin_api=CONTRACT_BASELINE_PLUGIN_API,
         capabilities=capability_catalog(),
         deprecations=deprecation_catalog(),
         host_resources=host_resource_catalog(),

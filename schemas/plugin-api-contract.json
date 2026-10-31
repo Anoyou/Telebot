@@ -2,7 +2,7 @@
   "$comment": "TelePilot 插件稳定契约快照。由 scripts/export-plugin-contract.py 从运行时内省生成，不要手改；破坏性检查以 plugin-api-contract-1.0.frozen.json 为基线（docs/PLUGIN-CONTRACT.md）。",
   "contract_version": "1.0",
   "baseline_plugin_api": "1.6",
-  "plugin_api_version": "1.6",
+  "plugin_api_version": "1.7",
   "hooks": [
     {
       "name": "on_startup",
@@ -3679,6 +3679,10 @@
         ]
       },
       {
+        "name": "contract_version",
+        "kind": "property"
+      },
+      {
         "name": "has",
         "kind": "sync",
         "params": [
@@ -4143,6 +4147,16 @@
         "removed_in": null
       },
       {
+        "name": "runtime.contract_version",
+        "version": 1,
+        "since": "0.115.0-beta.2",
+        "plugin_api": "1.7",
+        "legacy_attr": null,
+        "facades": [],
+        "deprecated_in": null,
+        "removed_in": null
+      },
+      {
         "name": "middleware.outbound",
         "version": 1,
         "since": "0.109.0-beta.1",
@@ -4254,6 +4268,7 @@
         "rules.dry_run",
         "runtime.blocking_monitor",
         "runtime.capabilities",
+        "runtime.contract_version",
         "runtime.deprecations",
         "runtime.entry_policy",
         "runtime.hook_stats",
@@ -4299,6 +4314,7 @@
         "rules.dry_run",
         "runtime.blocking_monitor",
         "runtime.capabilities",
+        "runtime.contract_version",
         "runtime.deprecations",
         "runtime.entry_policy",
         "runtime.hook_stats",
@@ -4346,6 +4362,7 @@
         "rules.dry_run",
         "runtime.blocking_monitor",
         "runtime.capabilities",
+        "runtime.contract_version",
         "runtime.deprecations",
         "runtime.entry_policy",
         "runtime.hook_stats",
@@ -4393,6 +4410,7 @@
         "rules.dry_run",
         "runtime.blocking_monitor",
         "runtime.capabilities",
+        "runtime.contract_version",
         "runtime.deprecations",
         "runtime.entry_policy",
         "runtime.hook_stats",

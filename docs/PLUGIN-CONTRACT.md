@@ -7,6 +7,8 @@
 > - 冻结基线：**Plugin API 1.6** 时的接口面
 > - 机器可读快照：[`schemas/plugin-api-contract.json`](../schemas/plugin-api-contract.json)（当前）/ [`schemas/plugin-api-contract-1.0.frozen.json`](../schemas/plugin-api-contract-1.0.frozen.json)（冻结基线，永不修改）
 > - 详细 plugin.json Schema：[`schemas/plugin-contract.schema.json`](../schemas/plugin-contract.schema.json)
+> - 插件运行时探测：`ctx.capabilities.contract_version`（0.115.0-beta.2 / Plugin API 1.7 起；旧宿主为 `None`，见第 6 节）
+> - 冻结准备与兼容层清单（草案，不冻结、不删除）：[PLUGIN-API-1.0-PLAN.md](PLUGIN-API-1.0-PLAN.md)
 
 ## 1. 版本号：契约版本与 Plugin API 版本各管各的
 
@@ -14,9 +16,9 @@ TelePilot 有三种和插件相关的版本号：
 
 | 版本号 | 现在的值 | 谁在用 | 怎么变 |
 | --- | --- | --- | --- |
-| 宿主版本 `TELEPILOT_VERSION` | 0.112.x | 插件 `min_telepilot_version` | 每次发版 |
-| Plugin API 版本 `PLUGIN_API_VERSION` | **1.6** | 插件 `plugin.json` 的 `plugin_api` 范围、`ctx.capabilities.plugin_api` | 新增能力 MINOR + 1；破坏兼容才 MAJOR + 1 |
-| 插件契约版本 `PLUGIN_CONTRACT_VERSION` | **1.0** | 本文、契约快照、CI 契约检查 | 契约冻结时定；契约 1.x 内不变，只有发布不兼容的新契约才升到 2.0 |
+| 宿主版本 `TELEPILOT_VERSION` | 0.115.x | 插件 `min_telepilot_version` | 每次发版 |
+| Plugin API 版本 `PLUGIN_API_VERSION` | **1.7** | 插件 `plugin.json` 的 `plugin_api` 范围、`ctx.capabilities.plugin_api` | 新增能力 MINOR + 1；破坏兼容才 MAJOR + 1 |
+| 插件契约版本 `PLUGIN_CONTRACT_VERSION` | **1.0** | 本文、契约快照、CI 契约检查；插件读 `ctx.capabilities.contract_version`、HTTP 读 `GET /api/plugins/capabilities` 的 `contract_version`（0.115.0-beta.2+） | 契约冻结时定；契约 1.x 内不变，只有发布不兼容的新契约才升到 2.0 |
 
 **为什么不把 Plugin API “重置”成 1.0？** 已发布插件写的是 `"plugin_api": "^1.0"`、`">=1.3"`、`"^1.4"` 这类范围。若把宿主的 Plugin API 改回 1.0，声明 `>=1.3` 的插件会被判“宿主太旧”而拒绝加载。所以：
 
@@ -58,7 +60,7 @@ TelePilot 有三种和插件相关的版本号：
 
 ### 2.3 能力（`capabilities`）
 
-- 能力注册表 45 项：每项的名称、版本、`since`、`plugin_api`、旧属性名、适用 facade 都冻结。
+- 能力注册表（冻结基线 45 项，Plugin API 1.7 追加 `runtime.contract_version` 后当前 46 项）：每项的名称、版本、`since`、`plugin_api`、旧属性名、适用 facade 都冻结。
 - **`ctx.capabilities` 快照**（`ctx_capabilities_has`）：在“没有 messages / buffered / live / entry”四种上下文里 `has()` 为真的能力清单；以及每种 MessageOps 上为 `True` 的旧能力属性（`legacy_attrs_true`）。契约 1.x 内这些清单只增不减。
 
 ### 2.4 plugin.json（`manifest`）
@@ -101,7 +103,7 @@ TelePilot 有三种和插件相关的版本号：
 
 此外（不由 CI 判定，但同样承诺）：
 
-- **兼容层不删**：旧属性探测（`getattr(ctx.messages, "rich_table_compact", False)`）、`on_interaction` 迁移桥、`min_telebot_version`、兜底入口表（`app/plugin_compat.py`）、旧 `codex_image` 图片后端固定值等在契约 1.x 内保留；真正删除只会出现在契约 2.0，并且事先在弃用登记里公告至少一个 minor 宿主版本，且需项目负责人同意。
+- **兼容层不删**（完整清单、用途与保留理由见 [PLUGIN-API-1.0-PLAN.md](PLUGIN-API-1.0-PLAN.md) 第 3 节，守护测试 `test_plugin_compat_layer.py`）：旧属性探测（`getattr(ctx.messages, "rich_table_compact", False)`）、`on_interaction` 迁移桥、`min_telebot_version`、兜底入口表（`app/plugin_compat.py`）、旧 `codex_image` 图片后端固定值等在契约 1.x 内保留；真正删除只会出现在契约 2.0，并且事先在弃用登记里公告至少一个 minor 宿主版本，且需项目负责人同意。
 - 不借契约改动抬高任何插件的 `min_telepilot_version`，不改变群内可见行为或游戏币结算。
 
 ## 4. 测试与 CI
@@ -111,6 +113,7 @@ TelePilot 有三种和插件相关的版本号：
 | 契约快照最新 + 无破坏性改动 | `scripts/export-plugin-contract.py --check`；`backend/app/tests/test_plugin_api_contract.py` | 运行时内省结果与快照一致；冻结基线 ⊆ 当前；破坏检测器自测（21 类破坏、1 组允许的追加） |
 | manifest 校验 | 同上 | 示例 / 内置插件通过安装 Schema 与契约 Schema；13 类常见写错会被契约 Schema 指出；未知字段放行 |
 | `ctx.capabilities` 快照、钩子签名 | 同上 | 基线能力在同一 facade 下仍可探测；基类钩子与示例插件重写的钩子能按基线参数调用 |
+| 兼容层 | `backend/app/tests/test_plugin_compat_layer.py` | 20 项兼容层（C01–C20）每项至少一个守护测试；守护测试被删 / 改名或与 PLUGIN-API-1.0-PLAN.md 不一致时失败；按旧插件写法直接调用宿主，断言行为不变 |
 | golden | `backend/app/tests/test_plugin_golden.py` + `fixtures/plugin_golden/golden.json` | 10 个示例插件在宿主上的输出：安装解析、交互入口与 UI 声明整理、Event Bus / 交互入口 / 卡片 / 菜单钩子输出、中间件 outbound / inbound / stream_preview / delivered |
 | 插件库 | CI「插件 API 契约」job | 检出官方插件库 `Anoyou/telebot-plugins` main，跑 `scripts/check_host_compat.py`（宿主兼容检查），并用契约 Schema 校验全部 `plugin.json` |
 
@@ -138,3 +141,12 @@ python scripts/export-plugin-contract.py --validate-plugins /path/to/my-plugins
 ```
 
 想知道某个宿主提供什么，读 `schemas/plugin-api-contract.json`，或在运行时用 `ctx.capabilities.names()`、`GET /api/plugins/capabilities`。
+
+想知道宿主承诺的契约版本（0.115.0-beta.2 / Plugin API 1.7 起）：
+
+```python
+caps = getattr(ctx, "capabilities", None)
+contract = getattr(caps, "contract_version", None) if caps else None  # 旧宿主为 None
+```
+
+`None` 表示宿主早于契约版本探测（契约 1.0 本身自 0.112.0-beta.4 起承诺，只是那时还不能在运行时读到）；不要因此抬 `min_telepilot_version`，具体能力仍用 `caps.has(...)` 判断。

@@ -20,7 +20,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import Any
 
-from .versioning import PLUGIN_API_VERSION
+from .versioning import PLUGIN_API_VERSION, PLUGIN_CONTRACT_VERSION
 
 # MessageOps facade 种类（``_tp_facade_kind`` 类属性）：
 # - ``buffered``：纯缓冲（UserBot Event Bus 投递、测试）；动作随返回值交给平台执行，没有实时 apply；
@@ -82,6 +82,8 @@ _P4A_RELEASE = "0.112.0-beta.1"
 _P4B_RELEASE = "0.112.0-beta.2"
 # 第 17 轮（P4b 收尾：旧入口 key 声明 legacy_entry_keys）发布的宿主版本；合并时随版本号顺延。
 _R17_RELEASE = "0.112.0-beta.3"
+# 第 21 轮 P5：契约版本探测（Plugin API 1.7）。合并时随版本号顺延。
+_R21_RELEASE = "0.115.0-beta.2"
 
 _DOC = "docs/PLUGIN-API-REFERENCE.md"
 
@@ -366,6 +368,17 @@ CAPABILITIES += (
     ),
 )
 
+# ── P5 准备：契约版本探测（Plugin API 1.7）──
+CAPABILITIES += (
+    Capability(
+        name="runtime.contract_version",
+        since=_R21_RELEASE,
+        plugin_api="1.7",
+        summary="ctx.capabilities.contract_version 与 GET /api/plugins/capabilities 的 contract_version 给出宿主承诺的插件稳定契约版本（当前 1.0）；旧宿主没有该属性 / 字段，插件用 getattr(..., None) 回退，按契约 1.0 之前处理",
+        doc=f"{_DOC}#契约版本探测contract_version",
+    ),
+)
+
 # ── P2：消息管线中间件（Plugin API 1.2）──
 CAPABILITIES += (
     Capability(
@@ -485,6 +498,16 @@ class PluginCapabilities:
         return PLUGIN_API_VERSION
 
     @property
+    def contract_version(self) -> str:
+        """宿主承诺的插件稳定契约版本（Plugin API 1.7 / 0.115.0 起；当前 ``"1.0"``）。
+
+        旧宿主的 ``ctx.capabilities`` 没有这个属性，插件应写
+        ``getattr(ctx.capabilities, "contract_version", None)`` 并在 ``None`` 时回退。
+        """
+
+        return PLUGIN_CONTRACT_VERSION
+
+    @property
     def host_version(self) -> str:
         from ... import __version__
 
@@ -529,7 +552,10 @@ class PluginCapabilities:
         return isinstance(name, str) and self.has(name)
 
     def __repr__(self) -> str:  # pragma: no cover - 调试辅助
-        return f"PluginCapabilities(plugin_api={self.plugin_api!r}, facade={self._facade_kind()!r})"
+        return (
+            f"PluginCapabilities(plugin_api={self.plugin_api!r}, contract={self.contract_version!r}, "
+            f"facade={self._facade_kind()!r})"
+        )
 
 
 def capability_catalog(names: Iterable[str] | None = None) -> list[dict[str, Any]]:
