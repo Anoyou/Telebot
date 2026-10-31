@@ -11,6 +11,7 @@ import { Skeleton } from "@/components/ui/misc";
 import { PageShell } from "@/components/layout/PageScaffold";
 import { getPlatformCapabilities, getSystemSettings } from "@/api/system";
 import type { PlatformModuleKey } from "@/api/types";
+import { LEGACY_RUNTIME_TREE_ROUTES, RUNTIME_TREE_PATH, legacySettingsTreeRedirect } from "@/lib/runtimeTreeLinks";
 import {
   moduleLabel,
   resolveCapabilityGatePhase,
@@ -108,6 +109,14 @@ function AIProvidersRedirect() {
   }
   targetParams.delete("new");
   return <Navigate to={`/ai?${targetParams.toString()}`} replace />;
+}
+
+/** 服务器设置：旧书签里的运行树分页（?tab=tree 等）跳到插件页「运行树」（第 21 轮，设置里不再保留）。 */
+function SettingsRoute({ children }: { children: ReactNode }) {
+  const location = useLocation();
+  const redirect = legacySettingsTreeRedirect(location.search);
+  if (redirect) return <Navigate to={redirect} replace />;
+  return <>{children}</>;
 }
 
 /** 直达已关闭模块时保留 URL，显示暂停页而不是白屏。 */
@@ -362,9 +371,11 @@ export default function App() {
           <Route
             path="settings"
             element={
-              <Suspense fallback={<PageFallback />}>
-                <SettingsIndex />
-              </Suspense>
+              <SettingsRoute>
+                <Suspense fallback={<PageFallback />}>
+                  <SettingsIndex />
+                </Suspense>
+              </SettingsRoute>
             }
           />
           <Route
@@ -434,6 +445,9 @@ export default function App() {
             element={<Navigate to="/ai?tab=usage" replace />}
           />
           <Route path="ai/*" element={<Navigate to="/ai" replace />} />
+          {LEGACY_RUNTIME_TREE_ROUTES.map((path) => (
+            <Route key={path} path={path} element={<Navigate to={RUNTIME_TREE_PATH} replace />} />
+          ))}
           <Route path="plugins/templates" element={<RemovedOperationsRoute />} />
           <Route path="plugins/scheduler" element={<RemovedOperationsRoute />} />
           <Route path="plugins/auto-command-whitelist" element={<RemovedOperationsRoute />} />

@@ -197,6 +197,14 @@ struct ServerUpdateSheet: View {
     @State private var channelError: String?
     @State private var channelUncertain = false
     @State private var confirmingChannel = false
+    // 更新后等服务器恢复（第 21 轮）：任务完成或提交重启后自动轮询服务器版本，恢复后重新检查。
+    @State private var recovery: RecoveryState?
+    @State private var recoveryBaseline: ServerUpdateRecovery.Baseline?
+    @State private var recoveryStartedAt: Date?
+    @State private var recoveryToken = 0
+    /// 应用更新前的服务器版本与提交（等恢复时比对用，也写进本地收据，重新打开面板时还能比对）。
+    @State private var fromVersion: String?
+    @State private var fromRevision: String?
     // 自动检查
     @State private var savingAutoCheck = false
     @State private var autoCheckError: String?
@@ -225,7 +233,11 @@ struct ServerUpdateSheet: View {
     private var jobRunning: Bool { jobID != nil && jobStatus != "succeeded" && jobStatus != "failed" }
     private var jobFailed: Bool { jobStatus == "failed" }
     private var jobSucceeded: Bool { jobStatus == "succeeded" }
-    private var busy: Bool { applying || jobRunning }
+    private var recovering: Bool {
+        guard case .waiting = recovery else { return false }
+        return true
+    }
+    private var busy: Bool { applying || jobRunning || recovering }
 
     private var effectiveRemote: String? { text(check?["remote"]) ?? savedRemote }
     private var effectiveBranch: String? { text(check?["branch"]) ?? savedBranch }
@@ -255,7 +267,7 @@ struct ServerUpdateSheet: View {
             ScrollViewReader { proxy in
             List {
                 statusSection
-                if jobID != nil || applying || applyError != nil || applyResult != nil { progressSection }
+                if jobID != nil || applying || applyError != nil || applyResult != nil || recovery != nil { progressSection }
                 versionSection
                 changesSection
                 planSection
@@ -300,16 +312,38 @@ struct ServerUpdateSheet: View {
         }
         .task { await loadTargetOptions(remote: nil) }
         .task(id: JobPollKey(id: jobID, active: scenePhase == .active)) { await pollJob() }
+        .task(id: RecoveryKey(token: recoveryToken, active: scenePhase == .active)) { await waitForRecovery() }
         .accessibilityIdentifier("update.sheet")
     }
 
     private struct JobPollKey: Hashable { let id: String?; let active: Bool }
+    private struct RecoveryKey: Hashable { let token: Int; let active: Bool }
+
+    /// 更新后等服务器恢复的状态。
+    enum RecoveryState: Equatable {
+        /// 正在等：`attempts` 已读次数；`stillOld` 服务已响应但还是旧版本；`lastError` 最近一次读不到的原因。
+        case waiting(attempts: Int, stillOld: Bool, lastError: String?)
+        /// 已恢复：新版本号与提交。
+        case recovered(version: String, commit: String?)
+        /// 超时仍未恢复。
+        case timedOut
+    }
 
     // MARK: 结论
 
     @ViewBuilder private var statusSection: some View {
         Section {
-            if checking && check == nil && checkError == nil {
+            if recovering {
+                HStack(spacing: 10) {
+                    ProgressView()
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("正在等待服务器恢复").font(.headline)
+                        Text("更新已执行，服务重启后会自动刷新版本").font(.subheadline).foregroundStyle(.secondary)
+                    }
+                }
+                .accessibilityElement(children: .combine)
+                .accessibilityIdentifier("update.waitingServer")
+            } else if checking && check == nil && checkError == nil {
                 HStack(spacing: 10) { ProgressView(); Text("正在向服务器检查更新…").foregroundStyle(.secondary) }
             } else if let failure = checkFailure {
                 NoticeView(title: "检查更新失败", message: failure)
@@ -333,6 +367,9 @@ struct ServerUpdateSheet: View {
                 Label {
                     VStack(alignment: .leading, spacing: 3) {
                         Text("服务器已是最新版本").font(.headline)
+                        if let current = text(check?["current_version"]) ?? model.serverVersion?.version {
+                            Text("当前版本 \(current)").font(.subheadline.monospacedDigit()).foregroundStyle(.secondary)
+                        }
                         if let target { Text("与 \(target) 一致").font(.subheadline).foregroundStyle(.secondary) }
                     }
                 } icon: { Image(systemName: "checkmark.seal.fill").foregroundStyle(.green) }
@@ -566,7 +603,9 @@ struct ServerUpdateSheet: View {
                 }
             }
             if let result = applyResult, jobID == nil {
-                if result["success"]?.boolValue == true {
+                if result["success"]?.boolValue == true, recovery != nil {
+                    EmptyView()
+                } else if result["success"]?.boolValue == true {
                     NoticeView(title: text(result["plan_label"]) ?? "更新已执行",
                                message: text(result["summary"]) ?? text(result["plan_detail"]),
                                symbol: "checkmark.circle")
@@ -584,6 +623,7 @@ struct ServerUpdateSheet: View {
                 }
             }
             if let jobID { jobRows(jobID) }
+            if let recovery { recoveryRows(recovery) }
         } header: { Text("更新进度") }
         .id(Self.progressAnchor)
     }
@@ -593,28 +633,30 @@ struct ServerUpdateSheet: View {
     @ViewBuilder private func jobRows(_ id: String) -> some View {
         let progress = Double(min(100, max(0, job?["progress"]?.intValue ?? 0)))
         let phase = text(job?["phase"]) ?? (job == nil ? "正在读取任务进度" : ServerUpdateText.jobStatus(jobStatus))
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text(phase).font(.subheadline.weight(.semibold)).foregroundStyle(jobFailed ? Color.red : Color.primary)
-                Spacer()
-                Text("\(Int(progress))%").font(.footnote.monospacedDigit()).foregroundStyle(.secondary)
+        if recovery == nil {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text(phase).font(.subheadline.weight(.semibold)).foregroundStyle(jobFailed ? Color.red : Color.primary)
+                    Spacer()
+                    Text("\(Int(progress))%").font(.footnote.monospacedDigit()).foregroundStyle(.secondary)
+                }
+                ProgressView(value: progress, total: 100)
+                    .tint(jobFailed ? Color.red : Color.accentColor)
+                    .accessibilityLabel(phase)
+                    .accessibilityValue("\(Int(progress))%")
+                if let detail = text(job?["detail"]) { Text(detail).font(.footnote).foregroundStyle(.secondary) }
+                if let jobReadError, jobRunning {
+                    Label("更新期间服务暂时不可用，正在第 \(jobReadFailures) 次重新连接；任务仍在服务器后台执行。（\(jobReadError)）", systemImage: "wifi.exclamationmark")
+                        .font(.footnote).foregroundStyle(.secondary)
+                }
             }
-            ProgressView(value: progress, total: 100)
-                .tint(jobFailed ? Color.red : Color.accentColor)
-                .accessibilityLabel(phase)
-                .accessibilityValue("\(Int(progress))%")
-            if let detail = text(job?["detail"]) { Text(detail).font(.footnote).foregroundStyle(.secondary) }
-            if let jobReadError, jobRunning {
-                Label("更新期间服务暂时不可用，正在第 \(jobReadFailures) 次重新连接；任务仍在服务器后台执行。（\(jobReadError)）", systemImage: "wifi.exclamationmark")
-                    .font(.footnote).foregroundStyle(.secondary)
-            }
+            .padding(.vertical, 4)
+            .accessibilityElement(children: .combine)
+            .accessibilityIdentifier("update.progress")
         }
-        .padding(.vertical, 4)
-        .accessibilityElement(children: .combine)
-        .accessibilityIdentifier("update.progress")
         LabeledContent("任务", value: "\(id) · \(ServerUpdateText.jobStatus(jobReadError != nil && jobRunning ? "reconnecting" : jobStatus))")
             .font(.footnote)
-        if jobSucceeded {
+        if jobSucceeded && recovery == nil {
             NoticeView(title: "更新已完成",
                        message: [text(job?["summary"]), AppInfo.shortCommit(text(job?["new_commit"])).map { "已更新到 \($0)" }]
                         .compactMap { $0 }.joined(separator: "\n"),
@@ -661,12 +703,59 @@ struct ServerUpdateSheet: View {
             }
             .accessibilityIdentifier("update.logs")
         }
-        if !jobRunning {
+        if !jobRunning && recovery == nil {
             Button { Task { await finishTrackedJob() } } label: {
                 Label("关闭任务并重新检查", systemImage: "arrow.clockwise")
             }
             .disabled(checking)
             .accessibilityIdentifier("update.finishJob")
+        }
+    }
+
+    /// 更新后等服务器恢复：进行中、已恢复（新版本号）、超时（继续等待 / 重新检查）。
+    @ViewBuilder private func recoveryRows(_ state: RecoveryState) -> some View {
+        switch state {
+        case .waiting(let attempts, let stillOld, let lastError):
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 10) {
+                    ProgressView()
+                    Text(stillOld ? "服务器已响应，正在等新版本启动…" : "正在等待服务器重启恢复…")
+                        .font(.subheadline.weight(.semibold))
+                }
+                Text(attempts > 0 ? "已确认 \(attempts) 次，恢复后自动显示新版本并重新检查。最长等 \(Int(ServerUpdateRecovery.timeout / 60)) 分钟。"
+                                  : "更新已执行完毕，恢复后自动显示新版本并重新检查。")
+                    .font(.footnote).foregroundStyle(.secondary)
+                if let lastError, !stillOld {
+                    Text("重启期间暂时连不上是正常的（\(lastError)）").font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                }
+            }
+            .padding(.vertical, 4)
+            .accessibilityElement(children: .combine)
+            .accessibilityIdentifier("update.recovering")
+        case .recovered(let version, let commit):
+            NoticeView(title: "更新完成，服务器已恢复",
+                       message: "当前版本 \(version)" + (commit.map { "（提交 \($0)）" } ?? "") + "。" + (checking ? "正在重新检查…" : (hasUpdate ? "通道上还有更新的版本，可继续更新。" : "已是最新版本。")),
+                       symbol: "checkmark.circle")
+                .accessibilityIdentifier("update.applied")
+            Button { Task { await finishTrackedJob() } } label: {
+                Label("收起更新记录", systemImage: "checkmark")
+            }
+            .disabled(checking)
+            .accessibilityIdentifier("update.finishJob")
+        case .timedOut:
+            NoticeView(title: "服务器还没有恢复",
+                       message: "已等待 \(Int(ServerUpdateRecovery.timeout / 60)) 分钟仍读不到新版本。更新步骤已执行完，服务可能还在重启或拉取镜像；可以继续等待，或稍后重新检查。一直不恢复时，请在服务器上用 docker compose ps 查看容器状态。",
+                       symbol: "clock.badge.exclamationmark")
+                .accessibilityIdentifier("update.recoveryTimeout")
+            Button { restartRecovery() } label: {
+                Label("继续等待", systemImage: "hourglass")
+            }
+            .accessibilityIdentifier("update.keepWaiting")
+            Button { Task { await finishTrackedJob() } } label: {
+                Label("重新检查", systemImage: "arrow.clockwise")
+            }
+            .disabled(checking)
+            .accessibilityIdentifier("update.recheckAfterTimeout")
         }
     }
 
@@ -947,6 +1036,8 @@ struct ServerUpdateSheet: View {
         applyError = nil
         applyResult = nil
         defer { applying = false }
+        fromVersion = text(check?["current_version"]) ?? model.serverVersion?.version
+        fromRevision = text(check?["current_commit"]) ?? model.serverVersion?.revision
         if isRestartOnly {
             await restart()
             return
@@ -965,7 +1056,8 @@ struct ServerUpdateSheet: View {
                     persistReceipt(["job_id": .string(id)])
                 } else {
                     persistReceipt(["result": result])
-                    await model.refresh()
+                    // 没有后台任务（例如源码直接运行）：拉取后服务会重启，等它恢复再刷新。
+                    startRecovery(expectedCommit: text(result["new_commit"]))
                 }
             } else {
                 clearReceipt(keepingResult: true)
@@ -985,8 +1077,9 @@ struct ServerUpdateSheet: View {
         do {
             let result = try await model.request(path: "/api/system/restart", method: "POST")
             if result["success"]?.boolValue == true {
-                applyResult = ["success": true, "plan_label": "已提交重启", "summary": "服务器正在重启，稍候下拉重新检查确认新版本已生效。"]
+                applyResult = ["success": true, "plan_label": "已提交重启", "summary": "服务器正在重启，恢复后自动刷新版本。"]
                 persistReceipt(["result": applyResult ?? .null])
+                startRecovery(expectedCommit: nil)
             } else {
                 UserDefaults.standard.removeObject(forKey: receiptKey)
                 applyError = text(result["error"]) ?? "服务器拒绝了重启请求。"
@@ -1003,8 +1096,10 @@ struct ServerUpdateSheet: View {
 
     /// 轮询更新任务（只读）：读取失败视为服务重启中，继续等待；任务结束后停止并清除重复提交保护。
     private func pollJob() async {
-        guard let id = jobID, scenePhase == .active else { return }
+        guard let id = jobID, scenePhase == .active, recovery == nil else { return }
         let path = "/api/system/update-jobs/\(ManagementText.pathSegment(id))"
+        // 进度到 100% 但任务迟迟不结束（更新器自己在重启、交接中）：不再干等任务，改为直接确认服务器版本。
+        var fullSince: Date?
         while !Task.isCancelled, jobID == id {
             do {
                 let value = try await model.request(path: path)
@@ -1015,15 +1110,24 @@ struct ServerUpdateSheet: View {
                 jobReadFailures = 0
                 jobReadError = nil
                 if ["succeeded", "failed"].contains(text(value["status"]) ?? "") {
-                    UserDefaults.standard.removeObject(forKey: receiptKey)
-                    if text(value["status"]) == "succeeded" { await model.refresh() }
+                    if text(value["status"]) == "succeeded" {
+                        // 任务完成后服务通常还在重启：先等服务器恢复，再重新检查（收据在恢复后清除）。
+                        startRecovery(expectedCommit: text(value["new_commit"]) ?? text(check?["remote_commit"]))
+                    } else {
+                        UserDefaults.standard.removeObject(forKey: receiptKey)
+                    }
                     return
                 }
+                if (value["progress"]?.intValue ?? 0) >= 100 { fullSince = fullSince ?? Date() } else { fullSince = nil }
             } catch is CancellationError {
                 return
             } catch {
                 jobReadFailures += 1
                 jobReadError = (error as? JobReadError)?.message ?? error.localizedDescription
+            }
+            if let fullSince, Date().timeIntervalSince(fullSince) >= 15 {
+                startRecovery(expectedCommit: text(job?["new_commit"]) ?? text(check?["remote_commit"]))
+                return
             }
             let delay: Double = jobReadFailures == 0 ? 2 : min(10, 2 + Double(jobReadFailures) * 2)
             do { try await Task.sleep(for: .seconds(delay)) } catch { return }
@@ -1033,6 +1137,9 @@ struct ServerUpdateSheet: View {
     private struct JobReadError: Error { let message: String }
 
     private func finishTrackedJob() async {
+        recovery = nil
+        recoveryBaseline = nil
+        recoveryStartedAt = nil
         jobID = nil
         job = nil
         jobReadError = nil
@@ -1045,6 +1152,77 @@ struct ServerUpdateSheet: View {
         await runCheck()
     }
 
+    /// 开始等服务器恢复。基线是更新前的版本与提交（收据里也存了一份），目标提交知道就按提交比对。
+    private func startRecovery(expectedCommit: String?) {
+        if recoveryBaseline == nil {
+            recoveryBaseline = .init(version: fromVersion ?? text(check?["current_version"]),
+                                     revision: fromRevision ?? text(check?["current_commit"]),
+                                     expectedCommit: expectedCommit)
+        }
+        recovery = .waiting(attempts: 0, stillOld: false, lastError: nil)
+        recoveryStartedAt = Date()
+        recoveryToken += 1
+    }
+
+    private func restartRecovery() {
+        recovery = .waiting(attempts: 0, stillOld: false, lastError: nil)
+        recoveryStartedAt = Date()
+        recoveryToken += 1
+    }
+
+    /// 每 3 秒读一次服务器版本（只读、无鉴权）：对上新版本即恢复；超过 3 分钟提示超时，由用户选择继续等待或重新检查。
+    private func waitForRecovery() async {
+        guard case .waiting = recovery, scenePhase == .active, let baseline = recoveryBaseline else { return }
+        let started = recoveryStartedAt ?? Date()
+        var healthy = 0
+        var attempts = 0
+        while !Task.isCancelled {
+            guard case .waiting = recovery else { return }
+            // 先等一个间隔：刚提交时服务往往还没开始重启，立刻读到的仍是旧进程。
+            do { try await Task.sleep(for: .seconds(ServerUpdateRecovery.pollInterval)) } catch { return }
+            attempts += 1
+            do {
+                let version = try await model.probeServerVersion()
+                healthy += 1
+                switch ServerUpdateRecovery.verdict(baseline: baseline, observedVersion: version.version,
+                                                    observedRevision: version.revision, healthyCount: healthy) {
+                case .recovered:
+                    await finishRecovery(version)
+                    return
+                case .stillOld:
+                    recovery = .waiting(attempts: attempts, stillOld: true, lastError: nil)
+                case .waiting:
+                    recovery = .waiting(attempts: attempts, stillOld: false, lastError: nil)
+                }
+            } catch {
+                if Task.isCancelled { return }
+                healthy = 0
+                recovery = .waiting(attempts: attempts, stillOld: false, lastError: error.localizedDescription)
+            }
+            if Date().timeIntervalSince(started) >= ServerUpdateRecovery.timeout {
+                recovery = .timedOut
+                return
+            }
+        }
+    }
+
+    private func finishRecovery(_ version: ServerVersion) async {
+        recovery = .recovered(version: version.version, commit: AppInfo.shortCommit(version.revision))
+        // 任务停在 100% 没报完成就已恢复：按完成处理，解除按钮锁定。
+        if jobID != nil, jobRunning {
+            var object = job?.objectValue ?? [:]
+            object["status"] = "succeeded"
+            object["progress"] = 100
+            job = .object(object)
+        }
+        UserDefaults.standard.removeObject(forKey: receiptKey)
+        applyUncertain = false
+        applyError = nil
+        await model.refresh()
+        check = nil
+        await runCheck()
+    }
+
     private func clearReceipt(keepingResult: Bool = false) {
         UserDefaults.standard.removeObject(forKey: receiptKey)
         applyUncertain = false
@@ -1053,11 +1231,16 @@ struct ServerUpdateSheet: View {
     }
 
     private func persistReceipt(_ receipt: JSONValue) {
-        if let data = try? receipt.data() { UserDefaults.standard.set(data, forKey: receiptKey) }
+        var object = receipt.objectValue ?? [:]
+        if let fromVersion { object["from_version"] = .string(fromVersion) }
+        if let fromRevision { object["from_revision"] = .string(fromRevision) }
+        if let data = try? JSONValue.object(object).data() { UserDefaults.standard.set(data, forKey: receiptKey) }
     }
 
     private func restoreReceipt() {
         guard let data = UserDefaults.standard.data(forKey: receiptKey), let receipt = try? JSONValue(data: data) else { return }
+        fromVersion = fromVersion ?? text(receipt["from_version"])
+        fromRevision = fromRevision ?? text(receipt["from_revision"])
         if let id = text(receipt["job_id"]) {
             if jobID != id { jobID = id; job = nil }
         } else if let result = receipt["result"], result["success"]?.boolValue == true {

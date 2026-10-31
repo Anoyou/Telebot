@@ -23,6 +23,9 @@ actor FixtureService: AppServing {
     private var fixtureUpdateCheck: JSONValue = ["enabled": true, "interval_minutes": 1440]
     /// 更新任务界面测试：前几次读取返回执行中（带进度与日志），之后返回完成。
     private var fixtureUpdateJobReads = 0
+    /// 更新任务完成后服务器换成新版本（第 21 轮：等服务器恢复）：完成后的第一次版本读取模拟重启中失败，之后返回新版本。
+    private var fixtureServerUpdated = false
+    private var fixtureVersionReadsAfterUpdate = 0
     private var pluginGlobalEnabled: [String: Bool] = ["auto_reply": true, "content_assistant": true, "forward_guard": false]
     /// 插件商店界面测试：内容整理助手当前版本（更新后变为 2.2.0）与从仓库新装的插件。
     private var contentAssistantVersion = "2.1.0"
@@ -58,6 +61,13 @@ actor FixtureService: AppServing {
         self.offline = offline
         mutationUncertain = ProcessInfo.processInfo.arguments.contains("--ui-test-mutation-uncertain")
         refetchError = ProcessInfo.processInfo.arguments.contains("--ui-test-refetch-error")
+        // Dock 跟随服务器常用入口（第 21 轮）：`--ui-test-primary-nav=/accounts,/plugins` 模拟网页「界面偏好」设了常用入口。
+        if let flag = ProcessInfo.processInfo.arguments.first(where: { $0.hasPrefix("--ui-test-primary-nav=") }) {
+            let paths = flag.dropFirst("--ui-test-primary-nav=".count).split(separator: ",").map { JSONValue.string(String($0)) }
+            var settings = fixtureSettings.objectValue ?? [:]
+            settings["ui_preferences"] = ["primary_nav": .array(paths), "sidebar_order": [], "mobile_nav_order": []]
+            fixtureSettings = .object(settings)
+        }
         // 值守全局提示界面测试（第 20 轮）：启动时已在值守（与 apply 后的状态相同，可恢复生产）。
         if ProcessInfo.processInfo.arguments.contains("--ui-test-safe-watch") {
             runtimeSnapshot = (runtimeModules, runtimeForced)
@@ -131,6 +141,11 @@ actor FixtureService: AppServing {
 
     func version() async throws -> ServerVersion {
         try checkConnection()
+        if fixtureServerUpdated {
+            fixtureVersionReadsAfterUpdate += 1
+            if fixtureVersionReadsAfterUpdate == 1 { throw APIError.server(status: 502, code: nil) }
+            return ServerVersion(version: "0.105.0-beta.1", channel: "测试", revision: "9a8b7c6d5e4f3a2b")
+        }
         return ServerVersion(version: "界面测试版本", channel: "测试", revision: nil)
     }
 
@@ -597,13 +612,19 @@ actor FixtureService: AppServing {
         }
         if clean == "/api/system/update-status" || clean == "/api/system/update-check" {
             var status = fixtureUpdateCheck.objectValue ?? [:]
-            status["last_check"] = ["has_update": true, "can_check": true, "checked_at": "2026-10-24T08:00:00.123456+00:00"]
+            status["last_check"] = ["has_update": .bool(!fixtureServerUpdated), "can_check": true, "checked_at": "2026-10-24T08:00:00.123456+00:00"]
             return .object(status)
         }
         if clean == "/api/system/update-target-options" {
             return ["ok": true, "remotes": ["origin"], "branches": ["main", "Beta"], "remote": "origin"]
         }
         if clean == "/api/system/check-update", method == "POST" {
+            if fixtureServerUpdated {
+                return ["has_update": false, "can_check": true, "current_version": "0.105.0-beta.1", "target_version": "0.105.0-beta.1",
+                        "current_commit": "9a8b7c6d5e4f3a2b", "remote_commit": "9a8b7c6d5e4f3a2b", "ahead": 0,
+                        "remote": "origin", "branch": "Beta", "runtime_mode": "prod_container_with_updater", "action_required": "none",
+                        "can_apply": false]
+            }
             return ["has_update": true, "can_check": true, "current_version": "0.104.0-beta.1", "target_version": "0.105.0-beta.1",
                     "current_commit": "56246fd0a1b2c3d4", "remote_commit": "9a8b7c6d5e4f3a2b", "ahead": 2,
                     "remote": "origin", "branch": "Beta", "runtime_mode": "prod_container_with_updater", "action_required": "backend",
@@ -622,6 +643,7 @@ actor FixtureService: AppServing {
                         "detail": "正在拉取后端镜像", "logs": ["[updater] git fetch origin Beta", "[updater] 拉取镜像 telepilot-web"],
                         "step_timings": [["phase": "准备", "duration_ms": 1200]]]
             }
+            fixtureServerUpdated = true
             return ["ok": true, "job_id": "fixture-update", "status": "succeeded", "progress": 100, "phase": "完成", "summary": "更新任务已完成。",
                     "new_commit": "9a8b7c6d5e4f3a2b", "logs": ["[updater] git fetch origin Beta", "[updater] 完成"]]
         }

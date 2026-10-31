@@ -386,7 +386,7 @@ struct DispatchDebugView: View {
             Text("账号与会话")
         } footer: {
             if let account = model.accounts.first(where: { $0.id == currentAccountID }) {
-                Text("\(AccountPresentation.status(account.status)) · ID \(account.id)。会话来自该账号的会话白名单；选中会话或最近消息会自动填好 Chat ID 和会话类型。")
+                Text("\(AccountPresentation.status(account.status)) · ID \(account.id)。会话来自该账号的「允许会话」；选中会话或最近消息会自动填好 Chat ID 和会话类型。")
             }
         }
 

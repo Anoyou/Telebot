@@ -25,6 +25,20 @@
 
 ## [Unreleased]
 
+## [0.114.0-beta.2] - 2026-10-31 · patch（补丁预发布） · 检查更新后自动刷新、运行树残留清理、iOS 跟进 Web 命名与 Dock 跟随常用入口
+
+### 修复
+
+- 网页「检查更新」更新完不再停在 100% 进度条或「更新计划已执行」：更新任务完成（或进度到 100% 后迟迟不结束、源码运行时拉取后重启）时，弹窗自动进入「正在等待服务器恢复」，每 3 秒读一次 `GET /api/system/version`，对上新提交 / 新版本后自动重新检查，显示「更新完成，服务器已恢复到 X」、当前版本号与「已是最新」，并提供「刷新页面」加载新界面；3 分钟未恢复给出说明，可「继续等待」或「重新检查」。判断规则在 `frontend/src/lib/updateRecovery.ts`（与 iOS 一致，含测试）；后端无改动。
+
+### 调整
+
+- 运行树残留清理：组件从 `pages/Settings/PlatformTreeView.tsx` 挪到 `pages/Plugins/PlatformTreeView.tsx`；插件页支持 `?view=tree` 直达运行树；旧深链 `/settings?tab=tree`（及 runtime / runtime-tree / platform-tree / capability-tree）和 `/platform-tree`、`/runtime-tree`、`/runtime`、`/plugins/tree`、`/plugins/runtime` 都跳到 `/plugins?view=tree`（`frontend/src/lib/runtimeTreeLinks.ts`，含测试）。
+
+### iOS 0.29.0：服务器更新完自动刷新、Dock 跟随网页常用入口、插件与账号分组改名
+
+- iOS 更新面板同样自动等服务器恢复并显示新版本；Dock 本机没自定义时跟随 `ui_preferences.primary_nav`（取前 3 个，旧服务器保持原 Dock）；插件分段改「启用与配置 / 市场 / 已安装」，账号管理分组改「代理与登录设备 / 限流与风控 / 允许会话 / 管理 Bot」；服务器设置删除运行树跳转行。`ios/DESIGN.md` 对照表同步。
+
 ### iOS 0.28.0：交互页重排——通知 Bot 收进二级页、运行状态缩成一行、玩法条目模板接上消息预览
 
 - **iOS 0.28.0**（只改 iOS，不改服务器）：`InteractionCenterView` ①「真实转账结果通知 Bot」「测试模拟通知 Bot」两组移到二级页 `InteractionNotifyBotsView`（「通知 Bot 设置」，`interaction.notifyBots`），交互页一行显示摘要（真实 N 个 · 测试 Bot 已配置/未配置 · N 个测试群 · 未保存），二级页编辑同一份草稿，仍由交互页导航栏「保存」一次提交（字段与 Web `buildInteractionPayload` 不变）；旧服务器没有 `has_transfer_bot_token` 时二级页只有真实通知 Bot。②「运行状态」分组改为一行 `InteractionStatusCard`（状态点 + 一句话 + Bot · 启用规则 · 群数，错误 / 失败投递小标记，`interaction.statusCard`），细节移到 `InteractionStatusDetailView`（原 `interaction.status.*` 标识保留在详情页）。③「每个玩法的条目模板」接上 #112 原生 Telegram 预览：TelePilotCore 新增 `InteractionQueryPreview`，逐条移植服务器 `_render_interaction_rules_query` 的 `trigger` / `kind` / `limit` 标签（`html_text` 转义、入口未声明奖金时不显示模块奖金、只列启用的 module / math10 规则），用账号当前草稿规则代入；条目模板默认展开预览，规则行「查询里显示：…」、规则区底部「查询回复预览」、规则编辑页「在玩法查询里显示为」。Core 单测 `InteractionQueryPreviewTests` 期望值由服务器函数实际运行得出；UI 测试新增 `testInteractionStatusCardIsCompactAndOpensDetail`、`testInteractionQueryItemTemplatePreviewsEverywhere`，更新通知 Bot 与交互保存相关用例。

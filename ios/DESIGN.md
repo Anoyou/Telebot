@@ -81,6 +81,7 @@
 - 默认：概览 · 插件 · 交互。AI 在「更多 › 管理」。
 - 可选入口（一级 + 二级，顺序即补位顺序）：概览、插件、交互、AI、指令与任务、账号、日志、资金台账（`DockItem.customizable`）。三级入口（Webhook、命中调试、服务器设置、备份与维护）不可选。
 - 「App 设置 › 自定义 Dock」（`DockCustomizationView`，图标 `dock.rectangle`）：当前 Dock 预览（`dock.preview`）、已选入口行内「上移」`arrow.up`（`dock.moveUp.<项>`）与「移除」`minus.circle.fill`（`dock.remove.<项>`，至少保留一个）、其余入口「加入」`plus.circle.fill`（`dock.add.<项>`，放满 3 个时禁用并说明原因）、恢复默认（`dock.reset`）。自定义只存本机 `UserDefaults`（`telepilot.dock.slots`），不跨服务器区分。iPhone 底部不支持系统 `TabViewCustomization`（只在 iPad 侧边栏生效），所以用自己的设置页。
+- 跟随服务器常用入口（0.29.0）：Dock 来源优先级 = 本机自定义 > 服务器常用入口 > App 默认（`WorkspacePreferences.dockSource`，设置页「来源：…」行 `dock.source`）。服务器常用入口取自 `GET /api/system/settings` 的 `ui_preferences.primary_nav`（Web「设置 › 界面偏好 › 常用入口」，路由 `/overview` `/plugins` `/interaction` `/ai` `/operations` `/accounts` `/logs` `/ledger` 对应 Dock 入口），按顺序取前 3 个（Web 最多 4 个，iPhone 放不下第 4 个），按服务器地址缓存在本机（`telepilot.dock.serverPrimaryNav.<服务器>`），启动不等网络。在「自定义 Dock」里加入／移除／上移任一项即在当前看到的 Dock 上改动并成为本机自定义（`telepilot.dock.customized`）；「恢复跟随服务器常用入口」（服务器没有时叫「恢复默认（概览 · 插件 · 交互）」）取消本机自定义。旧服务器没有该字段、或列表为空（= Web 用默认）时不跟随，保持本机 / App 默认。0.29.0 之前存过且不是默认 Dock 的，升级后按本机自定义处理，不会被覆盖。iOS 只读，不回写服务器。
 - 模块开关联动：`AppModel.disabledModules` 取自 `GET /api/system/capabilities` 中 `desired_enabled == false` 的模块（读取失败或旧服务器没有接口时为空 = 全部显示，与 Web `capabilityEnabledMap` 缺省为开一致）。Dock 里模块关闭的格隐藏，由可选顺序里下一个不在 Dock、模块开着的入口补在原位置（默认 Dock 关掉交互时补上 AI），没有可补的就少一格（`DockLayout.effective`）。「更多」、全局搜索里同样隐藏：交互（interaction_bot）、资金台账（ledger）、Webhook（webhooks）、AI（ai）；命中调试（dispatch_debug）关闭时隐藏「日志 › 高级诊断」里的模拟消息路由／投递统计／路由诊断记录，以及日志消息详情里的「用命中调试复现」。
 - 「更多」分组：紧急停止 → 常用（被移出 Dock 的概览／插件／交互；全在 Dock 时不显示）→ 管理（账号、AI、指令与任务、资金台账、日志）→ 工具与设置（服务器设置、Webhook、命中调试、备份与维护）→ App（App 设置）。已在 Dock 的入口不重复列出。组内顺序与「关于／软件更新」的位置见下方「设置类页面排序」（0.21.0）。
 - 路由（推送、体检、概览快捷操作）：目标在 Dock 里就切到那一格（自选格各有自己的导航路径），否则进「更多」里对应页面。
@@ -97,16 +98,16 @@
 
 ## Web ↔ iOS 页面对照表
 
-以代码为准（Web：`frontend/src/components/layout/Sidebar.tsx` 的 `NAV` 与路由；iOS 0.28.0）。第 20 轮起 Web 遵守「导航名 = 页面标题」，统一叫法见下方「统一命名」。**Web 新增、移动或删除侧栏项／设置分页／独立页面时，必须在同一个 PR 里更新这张表，并写明 iOS 的处理方式（做／不做＋理由），见根目录 `AGENTS.md`。**
+以代码为准（Web：`frontend/src/components/layout/Sidebar.tsx` 的 `NAV` 与路由；iOS 0.29.0）。第 20 轮起 Web 遵守「导航名 = 页面标题」，统一叫法见下方「统一命名」。**Web 新增、移动或删除侧栏项／设置分页／独立页面时，必须在同一个 PR 里更新这张表，并写明 iOS 的处理方式（做／不做＋理由），见根目录 `AGENTS.md`。**
 
 | Web 页面（路由） | iOS 位置 | 状态 |
 | --- | --- | --- |
 | Web 侧栏结构（第 20 轮第二批）：顶部固定「Agent」行（红点 = 待确认数）→「常用」（默认 插件 · 交互 · 概览，用户可选 1–4 个）→「管理」（账号 · AI · 指令与任务 · 资金台账 · 日志）→「工具与设置」（Webhook · 命中调试 · 服务器设置，可折叠） | Dock（概览 · 插件 · 交互 · 更多 + Agent）+ 更多（管理 / 工具与设置 / App） | ✅ 分组一致；默认顺序两端保留差异（Web 插件打头、iOS 概览打头，round19 方案 2.3） |
-| 插件 `/plugins` 子分页「启用与配置」（第 20 轮第二批前叫「插件中心」） | Dock「插件」› 插件中心 | ⚠️ iOS 分段名待改为「启用与配置 / 市场 / 已安装」（后续 iOS 任务，round19 方案 3.2-4） |
+| 插件 `/plugins` 子分页「启用与配置」（第 20 轮第二批前叫「插件中心」） | Dock「插件」› 分段「启用与配置」（0.29.0 由「插件中心」改名；无障碍标识仍是 `plugins.center`） | ✅ 同名 |
 | 插件 · 运行模式卡（生产／值守，按钮「进入值守」「恢复生产」） | 插件 ›「运行」› 运行模式（0.19.0） | ✅ 对齐 |
 | 值守全局提示条（第 20 轮：值守中每页顶部黄色条 +「恢复生产」，与紧急停止红条同位置） | Dock 上方系统底部附件「值守中 · 恢复生产」，每个 Tab 都显示（0.25.0，见「值守全局提示」） | ✅ 对齐（位置按 iPhone 习惯放底部；Web 的「查看运行模式」链接不做，插件 ›「运行」本来就在 Dock） |
-| 插件 · 运行树 | 插件 ›「运行」（0.19.0） | ✅ 对齐 |
-| 插件「已安装」`/plugins/manage`（原「插件管理」）、「市场」`/plugins/market`（原「插件市场」），地址不变 | 插件 › 发现／已安装、插件市场 | ⚠️ iOS「发现」里的插件市场待提到分段（后续 iOS 任务） |
+| 插件 · 运行树（第 21 轮起只在插件页：`/plugins?view=tree` 直达；旧 `/settings?tab=` 为 tree／runtime／runtime-tree／platform-tree／capability-tree、`/platform-tree`、`/runtime-tree`、`/runtime`、`/plugins/tree`、`/plugins/runtime` 都跳到这里；组件 `pages/Plugins/PlatformTreeView.tsx`，原在 `pages/Settings/`） | 插件 ›「运行」（0.19.0）；0.29.0 删掉服务器设置里「运行树与运行模式（已移到 插件 › 运行）」跳转行；推送 `destination` 为 `runtime`／`runtime_tree`／`platform_tree` 时打开插件页 | ✅ 对齐（两端服务器设置里都不再有运行树） |
+| 插件「已安装」`/plugins/manage`（原「插件管理」）、「市场」`/plugins/market`（原「插件市场」），地址不变 | 插件 › 分段「市场」（0.29.0 由「发现」改名，插件市场入口在分段内）／「已安装」 | ✅ 同名 |
 | 消息模板实验室 `/plugins/message-template-lab` | 更多 › 指令与任务 › 模板预览与测试 › 消息模板实验室（原生，0.22.0） | ✅ 对齐（另有实时预览、格式检查、字数，见「Telegram 消息预览」） |
 | AI `/ai`（概览／供应商／用量）+ 存活检测 `/ai/liveness` | 更多 › 管理 › AI（可自选进 Dock） | ✅ 对齐 |
 | 待确认 `/assistant/inbox`（第 20 轮第二批起不再是侧栏一级：挂在侧栏 Agent 行、桌面小宠物、手机底栏 Agent 圆钮的红点上，Agent 页右上角「待确认」进入；地址不变） | Agent 角标 + 待确认页 | ✅ 对齐（两端都挂在 Agent 上） |
@@ -120,12 +121,12 @@
 | 命中调试 `/dispatch-debug`（第 20 轮起日志页顶栏、日志消息详情「用命中调试复现」、交互页也有入口；可用 `?account_id=&chat_id=&chat_type=&sender_id=&via=&text=` 预填） | 更多 › 工具与设置 › 命中调试（原生页，0.20.0）；日志 › 高级诊断里同一入口；日志消息详情「用命中调试复现」（`logs.detail.dispatchDebug`，0.25.0，`DispatchDebugPrefill` 规则同 Web `dispatchDebugHref`） | ✅ 对齐（交互页入口 iOS 不做：交互页规则编辑本身有命中回复预览，排查走日志） |
 | 日志 `/logs`（消息流／系统控制台／Agent 运行／运行事件） | 更多 › 管理 › 日志（0.25.0 前叫「日志与诊断」；可自选进 Dock） | ✅ 已对齐（0.20.0 补系统控制台、Agent 运行；0.25.0 同名） |
 | 账号 `/accounts`（第 20 轮第二批新增账号列表页，侧栏「管理」组；概览浮层 `/overview?accounts=1` 保留） | 更多 › 管理 › 账号（可自选进 Dock） | ✅ 对齐 |
-| 账号详情 `/accounts/:aid`（7 分页：概览 · 插件 · 自定义指令 · 管理 Bot · 限流与风控 · 代理与登录设备 · 允许会话；切换写回 `?tab=`，旧 `?tab=bot` 等继续可用）+ 新增向导 `/accounts/new` | 更多 › 管理 › 账号 › 详情 | ✅ 基本对齐（iOS 分组名后续按词表改：账号 Bot → 管理 Bot、会话白名单 → 允许会话） |
+| 账号详情 `/accounts/:aid`（7 分页：概览 · 插件 · 自定义指令 · 管理 Bot · 限流与风控 · 代理与登录设备 · 允许会话；切换写回 `?tab=`，旧 `?tab=bot` 等继续可用）+ 新增向导 `/accounts/new` | 更多 › 管理 › 账号 › 详情 › 资料、插件与自动化（0.29.0 分组：账号资料 · 代理与登录设备 · 自动化 · 限流与风控 · 允许会话 · 访客模式 · 管理 Bot · Webhook · 删除账号） | ✅ 分组同名（iOS 是一页长列表，不分页；原「账号 Bot」→「管理 Bot」、「会话白名单」→「允许会话」，限流项从「自动化」拆到「限流与风控」） |
 | 服务器设置 `/settings`（第 20 轮第二批起 6 分页：账号与安全 `account` · 平台与模块 `platform`（指令前缀、平台模块、时区、日志保留）· 连接与通知 `connections`（代理、登录设备、通知渠道）· 限流与风控 `security`（限流模板、风控与预算、紧急停止只读状态）· 备份与维护 `migration` · 界面偏好 `interface`；旧 `?tab=proxy-identity/proxy/device/rate/backup` 等自动映射） | 更多 › 工具与设置 › 服务器设置、备份与维护；App 设置（0.21.0 起顶部「关于」「软件更新」，服务器更新在「软件更新」） | ✅ 入口对齐；iOS 服务器设置内部分组暂不跟 Web 分页一一对应（iOS 是长列表，不需要分页） |
 | 紧急停止（顶栏按钮「紧急停止 / 解除紧急停止」= 唯一操作入口、开启时红色提示条「紧急停止已开启 · 解除」；服务器设置 › 限流与风控 只显示状态；第 20 轮前叫紧急停用／全局总闸） | 更多顶部「紧急停止」 | ✅ 同名 |
 | 能力开关联动导航（模块关了入口隐藏） | Dock、更多、全局搜索按 `/api/system/capabilities` 隐藏（0.18.0） | ✅ 对齐 |
 | 手机网页底栏（第 20 轮第二批：= 常用入口（默认 插件 · 交互 · 概览）+「更多」+ 右侧 Agent 圆钮；AI 移进「更多」；「更多」按「管理」「工具与设置」分组并补上使用指南 / GitHub；手机上去掉第二套汉堡抽屉，平板宽度保留） | Dock 概览 · 插件 · 交互 · 更多 + Agent | ✅ 结构一致 |
-| 界面偏好 `/settings?tab=interface`：常用入口（`ui_preferences.primary_nav`，1–4 个一级/二级入口，侧栏第一组与手机底栏共用）+ 「管理」「工具与设置」组内顺序（`sidebar_order`），跨设备 | App 设置 › 自定义 Dock（只存本机，可换入口，不读 Web 的 `ui_preferences`） | ⚠️ 不跨设备同步（后续可让 iOS 读 `primary_nav` 作默认，round19 方案 3.2-9） |
+| 界面偏好 `/settings?tab=interface`：常用入口（`ui_preferences.primary_nav`，1–4 个一级/二级入口，侧栏第一组与手机底栏共用）+ 「管理」「工具与设置」组内顺序（`sidebar_order`），跨设备 | Dock 读同一偏好（0.29.0）：本机没自定义时跟随 `primary_nav`（取前 3 个能放进 Dock 的入口，第 4 个放不下）；App 设置 › 自定义 Dock 里改动后为本机自定义，「恢复跟随服务器常用入口」取消；旧服务器没有该字段或列表为空时用本机 / App 默认。iOS 不回写服务器 | ✅ 默认跨设备一致；「管理」「工具与设置」组内顺序 iOS 不读（「更多」顺序固定，见「设置类页面排序」） |
 | 危险操作确认（第 20 轮第二批：Web 全部改用统一确认对话框，标题 + 后果说明 + 红色确认按钮，焦点默认在「取消」） | iOS 原生 `confirmationDialog` | ✅ 对齐 |
 
 ### 交互页字段对照（0.24.0，0.28.0 重排；Web 账号 › Bot `BotTab` 交互部分 ↔ iOS `InteractionCenterView`）
@@ -164,17 +165,18 @@ iOS 暂不做（理由）：规则搜索框（规则最多 20 条，手机上筛
 | 运行树 | 树状视图（能力分类）、能力与插件树、看树 | —（0.19.0 起插件 ›「运行」） |
 | 运行模式：生产 / 值守（「进入值守」「恢复生产」） | 平台运行模式、恢复值守前快照 | — |
 | 服务器设置 | 系统（侧栏）、平台能力设置 | — |
-| 插件 / 交互 / AI（页面标题） | 插件中心、交互中心、AI 中心 | —（0.25.0 清理残留「交互中心」文字；插件页子分页「插件中心」随第二批改） |
+| 插件 / 交互 / AI（页面标题） | 插件中心、交互中心、AI 中心 | —（0.25.0 清理残留「交互中心」文字；0.29.0 插件页子分页与「更多」里的模块名不再叫「插件中心」） |
 | Agent | 系统助手 | — |
 | 待确认 | 待确认收件箱 | — |
 | Webhook | 入站 Webhook | — |
 | Telegram 控制台（副标题） | 管理控制台 | — |
 | 日志 | 日志与诊断 | —（0.25.0 已改） |
 | 登录设备（Web 服务器设置 › 连接与通知、账号详情「代理与登录设备」；字段 机型 / 系统版本 / App 版本 / 语言代码） | 设备配置、设备伪装、设备伪装库、设备档案、设备标识模板、出口/伪装、代理与标识 | —（iOS 同一 PR 已改） |
-| 启用与配置 / 市场 / 已安装（插件页分段，第二批） | 插件中心（子分页）、插件市场（分段内）、插件管理 | 插件分段「插件中心 / 发现 / 已安装」→「启用与配置 / 市场 / 已安装」（后续 iOS 任务） |
-| 限流与风控（账号详情分页 & 服务器设置分页同名，第二批） | 风控基础、风控与限额 | 账号管理里的「限流」分组名（后续 iOS 任务） |
+| 启用与配置 / 市场 / 已安装（插件页分段，第二批） | 插件中心（子分页）、插件市场（分段内）、插件管理、发现 | —（iOS 0.29.0 已改） |
+| 限流与风控（账号详情分页 & 服务器设置分页同名，第二批） | 风控基础、风控与限额 | —（iOS 0.29.0 账号管理分组已改） |
+| 代理与登录设备 / 管理 Bot / 允许会话（账号详情分页） | 账号 Bot、会话白名单 | —（iOS 0.29.0 已改） |
 | 限流模板 | 频控模板 | — |
-| 常用入口（Web 侧栏第一组 + 手机底栏共用，第二批） | PWA 底栏、导航顺序 | iOS 自定义 Dock 可读同一偏好（后续） |
+| 常用入口（Web 侧栏第一组 + 手机底栏共用，第二批） | PWA 底栏、导航顺序 | —（iOS 0.29.0 起本机没自定义 Dock 时跟随） |
 | 账号与安全 / 平台与模块 / 连接与通知 / 限流与风控 / 备份与维护 / 界面偏好（服务器设置分页，第二批） | 用户与管理、能力与通知、代理与登录设备、风控与限额、备份与恢复 | —（iOS 服务器设置是长列表，不分页） |
 
 ## Telegram 消息预览（0.22.0）
@@ -213,11 +215,11 @@ Web 目前没有任何页面配置内联按钮；iOS 气泡已支持，服务器
 | 交互（0.16.0 起，当时叫交互中心；0.18.0 起在 Dock「交互」，页面标题「交互」） | 对齐 Web `/interaction`。账号 `person.crop.circle.badge.checkmark`（原生 `Picker(.menu)`，有未保存修改时禁用）、放弃修改 `arrow.uturn.backward`；运行状态（0.28.0 起首页一行小卡：状态点 + 错误 `exclamationmark.triangle.fill` + 失败投递 `tray.and.arrow.down`，详情页）：交互总闸 `power.circle.fill`／`power.circle`、交互 Bot 已配置 `checkmark.circle.fill`／待配置 `exclamationmark.triangle.fill`、监听运行中 `checkmark.circle.fill`／未运行 `exclamationmark.triangle.fill`／未启用 `pause.circle`、启用订阅 `bubble.left.and.text.bubble.right`、失败投递 `tray.and.arrow.down`；交互总闸 `power.circle`（Toggle）、交互 Bot Token `key`（`SecretField`，只在保存时提交）、清除 Token `trash`、监听群成员状态 `person.2`（可展开，0.24.0 前叫「Bot 入群情况」、在运行状态里）；通知 Bot 设置 `bell.badge`（0.28.0 二级页）：真实转账结果通知 Bot ID（多行文本，0.24.0 从高级页搬来）；测试模拟通知 Bot（0.24.0）：Token `key`、当前测试 Bot ID `number`、清除测试 Token `trash`、模拟测试群 `checklist`（多选页里不在白名单的 ID 用 `minus.circle.fill` 移除）、测试 Bot 群成员状态 `person.2`、清空通知 Bot `trash`（红色）；查询回复预览 `eye`／`eye.slash`（0.28.0）；规则筛选原生分段；规则长按菜单 上移 `arrow.up`／下移 `arrow.down`／复制 `doc.on.doc`；规则行：插件玩法 `puzzlepiece.extension`／算数题 `function`／只发通知 `bell.badge`，状态启用 `checkmark.circle.fill`／停用 `pause.circle`（文字＋图标），左滑停用／启用、删除 `trash`，添加规则 `plus`；规则编辑：命中后 `play.circle`、触发方式 `bolt.horizontal`、插件入口 `puzzlepiece.extension`、从会话白名单选择 `checklist`；高级 `slider.horizontal.3`。导航栏右上「保存」（`interaction.save`，没有修改时禁用）一次提交 `PUT /api/accounts/{id}/interaction-bot`，不自动重试，失败保留草稿 |
 | App 设置 | 关于 `info.circle`、软件更新 `arrow.down.circle`（0.21.0 起在最顶部一组）、外观 `circle.lefthalf.filled`、首页模块 `square.grid.2x2`、自定义 Dock `dock.rectangle`、Apple 推送 `bell.badge`、界面锁 `faceid`／`timer`、用户名 `person.crop.circle`、Cloudflare Access `lock.icloud`、更换服务器 `arrow.left.arrow.right.circle`、退出登录 `rectangle.portrait.and.arrow.right`（后两项单独在最底部一组）；排序见「设置类页面排序」 |
 | 关于 | App 版本 `iphone`、构建号 `hammer`、服务器版本 `shippingbox`、发布通道 `arrow.triangle.branch`、部署提交 `number`、GitHub `chevron.left.forwardslash.chevron.right`、更新日志 `list.bullet.clipboard`、使用指南 `book`、问题反馈 `exclamationmark.bubble`、开源许可 `doc.plaintext`、隐私 `hand.raised`（0.21.0 起不含更新按钮） |
-| 软件更新（0.21.0） | 服务器当前版本 `shippingbox`、发布通道 `arrow.triangle.branch`、可更新到 `sparkles`、检查服务器更新 `arrow.down.circle`（全 App 唯一更新入口）、App 当前版本 `iphone`、获取最新安装包 `arrow.down.app` |
-| 账号管理 | 编辑 `pencil`、重新登录 `person.badge.key`、复制配置 `doc.on.doc`、导出迁移 `square.and.arrow.up.on.square`、插件 `puzzlepiece.extension`、拟人化 `figure.walk`、限流 `gauge.with.dots.needle.33percent`、用量 `chart.bar`、覆盖规则 `slider.horizontal.below.rectangle`、直通顺序 `arrow.up.arrow.down`、会话白名单 `checklist`、最近会话 `bubble.left.and.bubble.right`、账号指令 `terminal`、Bot 用户 `person.2.badge.gearshape`、失败投递 `tray.and.arrow.down`、删除 `trash` |
+| 软件更新（0.21.0） | 服务器当前版本 `shippingbox`、发布通道 `arrow.triangle.branch`、可更新到 `sparkles`、检查服务器更新 `arrow.down.circle`（全 App 唯一更新入口）、App 当前版本 `iphone`、获取最新安装包 `arrow.down.app`；更新面板（0.29.0）任务完成后不再停在 100% 进度条：「正在等待服务器恢复」（`update.waitingServer`／`update.recovering`，每 3 秒读无鉴权 `GET /api/system/version`，规则见 `TelePilotCore/ServerUpdateRecovery.swift`，与 Web `lib/updateRecovery.ts` 一致）→ 恢复后「更新完成，服务器已恢复」`checkmark.circle`（`update.applied`，显示新版本号）并自动重新检查、「收起更新记录」`checkmark`；3 分钟未恢复 `clock.badge.exclamationmark`（`update.recoveryTimeout`）+「继续等待」`hourglass`／「重新检查」`arrow.clockwise` |
+| 账号管理 | 编辑 `pencil`、重新登录 `person.badge.key`、复制配置 `doc.on.doc`、导出迁移 `square.and.arrow.up.on.square`、更换代理与登录设备 `network`（0.29.0）、插件 `puzzlepiece.extension`、拟人化 `figure.walk`、限流 `gauge.with.dots.needle.33percent`、用量 `chart.bar`、覆盖规则 `slider.horizontal.below.rectangle`、直通顺序 `arrow.up.arrow.down`、允许会话 `checklist`（0.29.0 前叫会话白名单）、最近会话 `bubble.left.and.bubble.right`、账号指令 `terminal`、Bot 用户 `person.2.badge.gearshape`、失败投递 `tray.and.arrow.down`、删除 `trash` |
 | 指令与任务 | 指令模板 `text.badge.plus`、别名 `arrow.triangle.swap`、内置指令 `terminal`、消息模板实验室 `text.bubble`（0.22.0 替换原「模板变量与示例 / 预览消息模板 / 测试发送模板」三个原始表单）、测试发送 `paperplane` |
 | Telegram 消息预览（0.22.0） | 字数 `character.cursor.ibeam`（接近上限 `exclamationmark.triangle.fill` 橙、超出 `exclamationmark.octagon.fill` 红）、格式问题 警告 `exclamationmark.triangle.fill`／提示 `info.circle`、没有问题 `checkmark.circle.fill`、显示／收起预览 `eye`／`eye.slash`、展开编辑 `arrow.up.left.and.arrow.down.right`、代码块复制 `doc.on.doc`（复制后 `checkmark`）、折叠引用 展开 `chevron.down`／收起 `chevron.up`、details `chevron.right`／`chevron.down`、链接按钮 `arrow.up.right`、预览中点了链接 `link`、恢复原模板／默认示例值 `arrow.uturn.backward`、服务器渲染校验 `checkmark.shield` |
-| 服务器设置（0.15.0 由「系统设置」改名，模块图标 `server.rack`） | 能力开关 `switch.2`、运行树与运行模式 `point.3.filled.connected.trianglepath.dotted`（0.18.0 起只是一行跳转「已移到 插件 › 运行」，见下一行；原「能力与插件树」与「平台运行模式」原始文档已删除）、服务器参数 `slider.horizontal.3`、代理 `network`、登录设备 `iphone.gen3`（第 20 轮由「设备配置」改名）、通知 Bot `bell.badge`、Sudo `person.badge.shield.checkmark`、管理员密码 `key`、验证器 `lock.shield` |
+| 服务器设置（0.15.0 由「系统设置」改名，模块图标 `server.rack`） | 能力开关 `switch.2`（0.18.0 起「运行树与运行模式」只剩一行跳转，0.29.0 连跳转也删了，运行树只在插件 ›「运行」，见下一行）、服务器参数 `slider.horizontal.3`、代理 `network`、登录设备 `iphone.gen3`（第 20 轮由「设备配置」改名）、通知 Bot `bell.badge`、Sudo `person.badge.shield.checkmark`、管理员密码 `key`、验证器 `lock.shield` |
 | 运行树（0.18.0，插件页「插件 \| 运行」） | 对齐 Web 插件页「树状视图」+「运行模式」卡，三端统一叫「运行树」。插件中心第二行（账号选择下方）原生 `Picker(.segmented)`「插件 \| 运行」（`plugins.mode`），两种视图共用插件页的账号选择（`plugins.accountPicker`，含「全部账号」）。运行视图是 `List`：运行模式分组——当前模式 `dial.medium`（值守 `moon.zzz.fill`）、账号进程 `person.2`、紧急停止 `exclamationmark.octagon`（拉闸 `.fill` 红色）、观测盲区 `eye.slash`、进入值守… `moon.zzz`（先 dry-run 预演，`confirmationDialog` 挂在按钮上、列出将关闭的模块）、恢复生产 `arrow.uturn.backward.circle`（确认按钮「确认恢复生产」）；可选模块分组——每行左侧是可点区域（borderless 按钮：模块图标 AI `cpu`／交互 Bot `bubble.left.and.text.bubble.right`／入站 Webhook `point.3.connected.trianglepath.dotted`／资金台账 `book.closed`／命中调试 `scope` + 状态 运行中 `checkmark.circle.fill`／启动中 `arrow.triangle.2.circlepath`／停用中 `hourglass`／已暂停 `pause.circle`／失败 `xmark.octagon.fill`／已关闭 `minus.circle`（被强制关闭 `lock`）+「被 N 个插件需要」+ 锁定原因 `lock` + `chevron.right`，点按进模块详情列出需要它的插件），右侧系统 `Toggle`（确认框挂在 Toggle 上）；被任一账号的插件需要时不能关、值守中不能单独开；插件分组——直通（最先处理）`bolt.horizontal`、主通道 `arrow.down.forward.circle`、交互 Bot `bubble.left.and.text.bubble.right`，插件行启用 `checkmark.circle.fill`／未启用 `circle`、「靠…工作」、「+模块」、缺模块起不来与警告 `exclamationmark.triangle.fill`、运行异常 `exclamationmark.circle.fill`，点按进本账号插件配置；交互插件下一行「交互规则 ›」进交互页；底部「想看一条消息怎么走 → 命中调试」`scope`。旧服务器没有账号口径字段时客户端按 `/api/accounts/{id}/features` 回退计算 |
 | Apple 推送 | 系统通知权限 `hand.raised`、设备已注册 `iphone`、服务器 APNs `server.rack`、推送环境 `arrow.triangle.branch`、配置教程 `book`、GitHub 教程 `safari`、授权注册 `bell.badge`、测试通知 `paperplane`、注销 `bell.slash`、助手待确认 `checkmark.shield`、助手任务结果 `sparkles`、账号告警 `exclamationmark.triangle`、Auth Key `key`；检查状态：正常 `checkmark.circle.fill`、注意 `exclamationmark.triangle.fill`、未就绪 `xmark.circle.fill`、未知 `questionmark.circle` |
 | 备份与维护 | 导入导出 `externaldrive.badge.timemachine`、网络诊断 `stethoscope`、重启服务 `restart.circle`、紧急停止 `exclamationmark.octagon` |
