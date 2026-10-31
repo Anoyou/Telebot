@@ -42,6 +42,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from .. import compat_usage
+
 log = logging.getLogger(__name__)
 
 HOOK = "parse_payment_notice"
@@ -481,6 +483,8 @@ async def dual_parse(
     if sources is None:
         sources = await load_payment_sources()
     if not sources:
+        if legacy is not None:
+            compat_usage.hit("C20", None)
         return DualParseOutcome(result=legacy, legacy=legacy, verdict=VERDICT_NO_SOURCE, authoritative=authoritative)
 
     calls: list[SourceCall] = []
@@ -501,6 +505,8 @@ async def dual_parse(
     if primary is None:
         for call in calls:
             _record_stats(call, account_id=account_id, verdict=VERDICT_PLUGIN_FAILED)
+        if legacy is not None:
+            compat_usage.hit("C20", calls[0].key if calls else None)
         return DualParseOutcome(
             result=legacy,
             legacy=legacy,
@@ -521,6 +527,8 @@ async def dual_parse(
     result = dict(primary.result) if used_plugin and primary.result is not None else None
     if not used_plugin:
         result = legacy
+        if legacy is not None:
+            compat_usage.hit("C20", primary.key)
     return DualParseOutcome(
         result=result,
         legacy=legacy,

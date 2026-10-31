@@ -17,6 +17,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from . import compat_usage
+
 # ─────────────────────────────────────────────────────
 # 插件 key（只在本模块出现字面量）
 # ─────────────────────────────────────────────────────
@@ -61,25 +63,35 @@ def fallback_entry_keys(module_key: str | None) -> list[str]:
 
     if not module_key:
         return []
-    return sorted(
+    keys = sorted(
         entry_key
         for key, entry_key in (
             FALLBACK_CHAT_SESSION_MODULE_ENTRIES | FALLBACK_NO_PRIZE_MODULE_ENTRIES | FALLBACK_SOLO_OWNER_MODULE_ENTRIES
         )
         if key == module_key
     )
+    if keys:
+        compat_usage.hit("C08", module_key)
+    return keys
 
 
 def fallback_entry_session_scope(module_key: str | None, entry_key: str | None) -> str | None:
-    return "chat" if (module_key, entry_key) in FALLBACK_CHAT_SESSION_MODULE_ENTRIES else None
+    if (module_key, entry_key) in FALLBACK_CHAT_SESSION_MODULE_ENTRIES:
+        compat_usage.hit("C08", module_key)
+        return "chat"
+    return None
 
 
 def fallback_entry_participant_policy(module_key: str | None, entry_key: str | None) -> str | None:
-    return "solo_owner" if (module_key, entry_key) in FALLBACK_SOLO_OWNER_MODULE_ENTRIES else None
+    if (module_key, entry_key) in FALLBACK_SOLO_OWNER_MODULE_ENTRIES:
+        compat_usage.hit("C08", module_key)
+        return "solo_owner"
+    return None
 
 
 def fallback_entry_has_field(module_key: str | None, entry_key: str | None, field_name: str) -> bool | None:
     if field_name == "prize" and (module_key, entry_key) in FALLBACK_NO_PRIZE_MODULE_ENTRIES:
+        compat_usage.hit("C08", module_key)
         return False
     return None
 
@@ -126,6 +138,7 @@ def normalize_legacy_feature_config(plugin_key: str | None, config: dict[str, An
         try:
             if value in mapping:
                 normalized[field_name] = mapping[value]
+                compat_usage.hit("C10", plugin_key)
         except TypeError:
             continue
     return normalized
@@ -156,6 +169,7 @@ def legacy_secret_list_fields(plugin_key: str | None, schema: Any = None) -> dic
         isinstance(field, dict) and field.get("x-secret-list") for field in properties.values()
     ):
         return {}
+    compat_usage.hit("C11", plugin_key)
     return {key: dict(value) for key, value in specs.items()}
 
 
@@ -169,6 +183,7 @@ LEGACY_DRY_RUN_WITH_CHAT_TYPE: frozenset[str] = frozenset({AUTO_REPLY})
 
 
 def legacy_dry_run_args(plugin_key: str | None, config: dict[str, Any], sample: dict[str, Any]) -> tuple[Any, ...]:
+    compat_usage.hit("C12", plugin_key)
     message = sample.get("message") or ""
     chat_id = sample.get("chat_id")
     if str(plugin_key or "") in LEGACY_DRY_RUN_WITH_CHAT_TYPE:

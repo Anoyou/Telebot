@@ -79,6 +79,13 @@ class PluginCapabilitiesResponse(BaseModel):
     )
     core_middleware: list[PluginCoreMiddlewareOut] = Field(default_factory=list, description="平台内置中间件，0.109.0+")
     middleware_limits: PluginMiddlewareLimitsOut | None = Field(default=None, description="插件中间件的预算与限制，0.109.0+")
+    compat_usage: bool = Field(
+        default=False,
+        description=(
+            "宿主是否提供兼容层使用统计 GET /api/plugins/compat-usage（只读、仅管理员），0.115.0-beta.3+；"
+            "旧服务器不返回该字段（按 false 处理），客户端据此决定是否显示统计卡片"
+        ),
+    )
 
 
 class PluginHookStatOut(BaseModel):
@@ -137,3 +144,29 @@ class PluginHookStatsResponse(BaseModel):
     totals: PluginHookTotalsOut = Field(default_factory=PluginHookTotalsOut)
     deprecations: list[PluginDeprecationUsageOut] = Field(default_factory=list)
     retention_days: int = 7
+
+
+class PluginCompatUsagePluginOut(BaseModel):
+    plugin_key: str = Field(description="插件 key；'-' 表示与具体插件无关的宿主兜底（如没有转账来源插件时的内置解析）")
+    count: int = Field(description="累计命中次数")
+    first_at: float | None = Field(default=None, description="首次命中（Unix 秒）")
+    last_at: float | None = Field(default=None, description="最近一次命中（Unix 秒）")
+
+
+class PluginCompatUsageItemOut(BaseModel):
+    id: str = Field(description="兼容层编号 C01–C20（docs/PLUGIN-API-1.0-PLAN.md 第 3 节）")
+    name: str
+    trackable: bool = Field(description="False 表示这一项无法计数（如插件读取事件字段），计数恒为 0")
+    counts: str = Field(description="计数口径：什么时候 +1")
+    total: int = 0
+    plugin_count: int = 0
+    first_at: float | None = None
+    last_at: float | None = None
+    plugins: list[PluginCompatUsagePluginOut] = Field(default_factory=list)
+
+
+class PluginCompatUsageResponse(BaseModel):
+    available: bool = Field(default=True, description="False 表示统计暂时读不到（数据库表未就绪等）")
+    message: str | None = None
+    flush_interval_seconds: int = Field(description="各进程把内存计数写入数据库的最长间隔；刚发生的命中可能晚这么久才出现")
+    items: list[PluginCompatUsageItemOut] = Field(default_factory=list)

@@ -135,7 +135,39 @@ export const hostStatsCardDataFixture = (pluginKey: string) => ({
   },
 });
 
-const pluginCapabilitiesFixture = {
+export function pluginCompatUsageFixture() {
+  const now = Math.floor(Date.now() / 1000);
+  const item = (id: string, name: string, counts: string, plugins: { plugin_key: string; count: number; ago: number }[] = [], trackable = true) => {
+    const rows = plugins.map((row) => ({ plugin_key: row.plugin_key, count: row.count, first_at: now - 86_400 * 3, last_at: now - row.ago }));
+    return {
+      id, name, trackable, counts,
+      total: rows.reduce((sum, row) => sum + row.count, 0),
+      plugin_count: rows.length,
+      first_at: rows.length ? now - 86_400 * 3 : null,
+      last_at: rows.length ? Math.max(...rows.map((row) => row.last_at)) : null,
+      plugins: rows,
+    };
+  };
+  return {
+    available: true,
+    message: null,
+    flush_interval_seconds: 60,
+    items: [
+      item("C01", "ctx.messages 旧能力属性（rich_table_compact 等 6 个）", "无法计数：插件读的是类属性", [], false),
+      item("C02", "on_interaction 交互入口迁移桥", "交互入口改走插件的 on_interaction 时 +1", [
+        { plugin_key: "guess_number", count: 42, ago: 300 },
+        { plugin_key: "blackjack", count: 7, ago: 7200 },
+      ]),
+      item("C03", "min_telebot_version 旧字段", "加载插件时发现它只写了旧字段 +1"),
+      item("C15", "UserBot 旧分发 on_message（message_channels）", "消息经旧分发交给插件 on_message 时 +1", [
+        { plugin_key: "auto_reply", count: 1280, ago: 30 },
+      ]),
+      item("C20", "宿主内置转账通知解析器", "转账通知最终采用宿主内置解析结果时 +1", [{ plugin_key: "-", count: 3, ago: 600 }]),
+    ],
+  };
+}
+
+export const pluginCapabilitiesFixture = {
   host_version: APP_VERSION,
   plugin_api_version: "1.0",
   capabilities: [
@@ -618,6 +650,8 @@ function jsonResponse(pathname: string): unknown | undefined {
   if (pathname === "/api/plugin-repos" || pathname === "/api/plugin-repos/local/plugins") return [];
   if (pathname === "/api/plugins/installed-overview" || pathname === "/api/plugins/installed-packages") return [];
   if (pathname === "/api/plugins/capabilities") return pluginCapabilitiesFixture;
+  // 兼容层使用统计（0.115.0-beta.3，第 22 轮）：基线 capabilities 不带 compat_usage，卡片不显示；专项用例单独覆盖。
+  if (pathname === "/api/plugins/compat-usage") return pluginCompatUsageFixture();
   const pluginStatsMatch = pathname.match(/^\/api\/plugins\/([^/]+)\/stats$/);
   if (pluginStatsMatch) return pluginHookStatsFixture(decodeURIComponent(pluginStatsMatch[1]));
   if (pathname === "/api/remote-plugins") return [];

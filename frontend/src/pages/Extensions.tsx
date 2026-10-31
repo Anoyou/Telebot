@@ -76,6 +76,7 @@ import { getErrMsg } from "@/lib/api";
 import { splitPluginWarnings } from "@/lib/plugin-config-contract";
 import { isPlatformFeature } from "@/lib/plugin-modes";
 import { queryKeys } from "@/lib/queryKeys";
+import { CompatUsageCard } from "@/pages/Plugins/CompatUsageCard";
 import { PluginWorkspaceHeader } from "@/pages/Plugins/WorkspaceHeader";
 import { PluginCardSlot } from "@/components/plugin/PluginCards";
 import { PluginPageEntries } from "@/components/plugin/PluginPages";
@@ -733,6 +734,7 @@ function PluginsManagementTab() {
       <InstallToolsGroup />
       <RemoteInstallCard />
       <InstalledPluginsSection />
+      <CompatUsageCard />
     </div>
   );
 }

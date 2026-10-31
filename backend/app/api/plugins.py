@@ -13,7 +13,11 @@ from ..db.models.account import Account
 from ..db.models.feature import BUILTIN_FEATURES, AccountFeature, Feature
 from ..deps import CurrentUser, DBSession
 from ..redis_client import get_redis
-from ..schemas.plugin_runtime import PluginCapabilitiesResponse, PluginHookStatsResponse
+from ..schemas.plugin_runtime import (
+    PluginCapabilitiesResponse,
+    PluginCompatUsageResponse,
+    PluginHookStatsResponse,
+)
 from ..services import audit, feature_service, platform_capabilities
 from ..worker.ipc import CMD_RELOAD_PLUGIN, cmd_channel, make_cmd
 from ..worker.plugins import plugin_stats
@@ -91,7 +95,36 @@ async def get_plugin_capabilities(_user: CurrentUser) -> PluginCapabilitiesRespo
         host_resources=host_resource_catalog(),
         core_middleware=core_middleware_catalog(),
         middleware_limits=limits_catalog(),
+        compat_usage=True,
     )
+
+
+@router.get("/api/plugins/compat-usage", response_model=PluginCompatUsageResponse)
+async def get_plugin_compat_usage(db: DBSession, _user: CurrentUser) -> PluginCompatUsageResponse:
+    """兼容层使用统计（只读，仅登录的管理员）：每个兼容层（C01–C20）按插件累计的命中次数与最近使用时间。
+
+    只统计、不告警：插件作者和群用户看不到，也不影响任何兼容层的行为。各进程最多每分钟把计数写入数据库，
+    读取前先把主进程自己的增量写入。
+    """
+
+    from ..services import plugin_compat_usage
+
+    await plugin_compat_usage.flush_quietly()
+    interval = int(plugin_compat_usage.FLUSH_DELAY_SECONDS)
+    try:
+        items = await plugin_compat_usage.read_usage(db)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("读取兼容层使用统计失败: %s", type(exc).__name__)
+        await db.rollback()
+        from .. import compat_usage
+
+        return PluginCompatUsageResponse(
+            available=False,
+            message="兼容层使用统计暂时读不到（数据库表可能还没迁移），稍后再试。",
+            flush_interval_seconds=interval,
+            items=[{**item, "total": 0, "plugin_count": 0, "plugins": []} for item in compat_usage.catalog()],
+        )
+    return PluginCompatUsageResponse(flush_interval_seconds=interval, items=items)
 
 
 def _validated_plugin_key(key: str) -> str:

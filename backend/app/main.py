@@ -231,6 +231,13 @@ async def lifespan(app: FastAPI):
     if settings.auto_migrate_on_startup:
         await asyncio.to_thread(_run_alembic_upgrade)
     try:
+        # 兼容层使用统计（第 22 轮）：主进程命中计数定期写库（只计数，不影响任何兼容层行为）
+        from .services import plugin_compat_usage
+
+        plugin_compat_usage.enable_persistence()
+    except Exception:  # noqa: BLE001
+        logging.debug("开启兼容层使用统计写库失败", exc_info=True)
+    try:
         from .db.base import AsyncSessionLocal
 
         async with AsyncSessionLocal() as db:
@@ -448,6 +455,13 @@ async def lifespan(app: FastAPI):
             await event_trace.stop_trace_writer()
         except Exception:  # noqa: BLE001
             logging.exception("停止 Trace 后台写入器失败")
+        try:
+            from .services import plugin_compat_usage
+
+            await plugin_compat_usage.flush_quietly()
+            plugin_compat_usage.disable_persistence()
+        except Exception:  # noqa: BLE001
+            logging.debug("写入兼容层使用统计失败", exc_info=True)
         await runtime_profile_service.shutdown()
         for component in _RUNTIME_COMPONENTS:
             _RUNTIME_COMPONENTS[component] = None

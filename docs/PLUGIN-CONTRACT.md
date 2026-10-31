@@ -103,7 +103,7 @@ TelePilot 有三种和插件相关的版本号：
 
 此外（不由 CI 判定，但同样承诺）：
 
-- **兼容层不删**（完整清单、用途与保留理由见 [PLUGIN-API-1.0-PLAN.md](PLUGIN-API-1.0-PLAN.md) 第 3 节，守护测试 `test_plugin_compat_layer.py`）：旧属性探测（`getattr(ctx.messages, "rich_table_compact", False)`）、`on_interaction` 迁移桥、`min_telebot_version`、兜底入口表（`app/plugin_compat.py`）、旧 `codex_image` 图片后端固定值等在契约 1.x 内保留；真正删除只会出现在契约 2.0，并且事先在弃用登记里公告至少一个 minor 宿主版本，且需项目负责人同意。
+- **兼容层不删**（完整清单、用途与保留理由见 [PLUGIN-API-1.0-PLAN.md](PLUGIN-API-1.0-PLAN.md) 第 3 节，守护测试 `test_plugin_compat_layer.py`）：旧属性探测（`getattr(ctx.messages, "rich_table_compact", False)`）、`on_interaction` 迁移桥、`min_telebot_version`、兜底入口表（`app/plugin_compat.py`）、旧 `codex_image` 图片后端固定值等在契约 1.x 内保留；真正删除只会出现在契约 2.0，并且事先在弃用登记里公告至少一个 minor 宿主版本，且需项目负责人同意。去留以使用量为依据：0.115.0-beta.3 起宿主按「兼容项 × 插件」统计每个兼容层的使用次数（只计数、不告警，管理员可见，见 PLUGIN-API-1.0-PLAN.md 第 3.2 节）。
 - 不借契约改动抬高任何插件的 `min_telepilot_version`，不改变群内可见行为或游戏币结算。
 
 ## 4. 测试与 CI

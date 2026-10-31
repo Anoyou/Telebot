@@ -531,6 +531,12 @@ async def run_worker(account_id: int) -> None:
     """worker 主协程；返回即代表退出（supervisor 决定是否重启）。"""
     redis = get_redis()
     try:
+        from ..services import plugin_compat_usage
+
+        plugin_compat_usage.enable_persistence()
+    except Exception:  # noqa: BLE001
+        log.debug("开启兼容层使用统计写库失败", exc_info=True)
+    try:
         from .plugins.blocking_monitor import configure_loop
 
         configure_loop(asyncio.get_running_loop())
@@ -759,6 +765,12 @@ async def run_worker(account_id: int) -> None:
             await stop_trace_writer()
         except Exception:  # noqa: BLE001
             log.exception("worker shutdown 时停止 Trace 后台写入器失败 account_id=%s", account_id)
+        try:
+            from ..services import plugin_compat_usage
+
+            await plugin_compat_usage.flush_quietly()
+        except Exception:  # noqa: BLE001
+            log.debug("worker shutdown 时写入兼容层使用统计失败", exc_info=True)
         await _publish(redis, account_id, EVT_STATUS, status="stopped")
 
 

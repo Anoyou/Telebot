@@ -19,6 +19,7 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
+from ... import compat_usage
 from .plugin_stats import get_recorder
 
 log = logging.getLogger(__name__)
@@ -108,6 +109,8 @@ def note_deprecated(
     """记录一次弃用接口调用；返回本次是否写了 WARNING 日志。永不抛异常。"""
 
     try:
+        # 兼容层使用统计（第 22 轮）：只计数，不额外写日志
+        compat_usage.hit_deprecation(deprecation_id, plugin_key)
         item = DEPRECATION_INDEX.get(deprecation_id)
         if item is None:
             log.debug("未登记的弃用项 %s（plugin=%s）", deprecation_id, plugin_key)
