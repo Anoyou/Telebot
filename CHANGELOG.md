@@ -25,6 +25,11 @@
 
 ## [Unreleased]
 
+### iOS 0.35.0：Agent 回答平滑打字；App 里也能拨转账通知判定开关（只改 iOS，服务器版本不变）
+
+- Agent 回答改为客户端逐字平滑显示（`TelePilotCore.StreamingTextPacer` / `StreamingTextReveal`）：服务器仍约每 0.2 秒推一块，App 按帧逐字显示，速度随积压自适应，流结束后约 0.3 秒内追平；英文 / ASCII 串按整串出现（Token 不会逐字露出、脱敏照常）；最后一块很长时降帧，避免长回答卡顿；用户拖动对话、停止生成、离开页面时立即全部显示；系统「减弱动态效果」打开或界面测试中不做动画。
+- iOS 的「转账通知判定」从只读改为可拨（插件详情与「服务器参数 › 在别处修改」进入的同一页面）：二次确认弹窗文案与 Web `paymentSourceConfirmText` 一致，写入 Web `PaymentSourceSwitch.tsx` 用的同一个接口 `PATCH /api/system/settings`（`{"log_retention": {"payment_source_plugin_authoritative": …}}`），只提交一次、不自动重试，失败以服务器重新读取的状态为准并提示；默认值不变、不自动打开；旧服务器没有 `GET /api/payment-sources/status` 时整段不显示。服务器参数元数据里这一项仍是 `editable: false`（全部参数页不直接改，避免绕过确认），iOS 把它的只读说明换成指向「插件 › 转账通知判定」。详见 `ios/CHANGELOG.md`。
+
 ### iOS 0.34.1：修 iOS 界面测试偶发失败（App 使用无变化）
 
 - 翻了最近 80 次「iOS」工作流（188 个 UI 分片日志 + 27 个失败分片的录像），按用例统计首跑失败，逐条看录像定位根因，改测试为主：列表滚动改成没有惯性的受控拖动、两个方向都找、要求整行不被悬浮导航栏和 Dock 挡住；点按被吞时原地再点一次；输入前等输入框真正拿到键盘焦点；popover 收起的等待放到 10 秒（消失即返回）。

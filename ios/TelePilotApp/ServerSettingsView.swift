@@ -82,6 +82,9 @@ struct ServerParamMeta: Identifiable, Hashable {
         }
         editable = json["editable"]?.boolValue ?? true
         readOnlyReason = json["read_only_reason"]?.stringValue
+        // 第 23 轮：转账通知判定开关在 App「插件 › 转账通知判定」里可拨（带确认）；服务器元数据的只读原因仍写着
+        // “App 里只显示状态”（为 0.35.0 之前的 App 写的），这里换成指向那个页面的说明。全部参数页仍不直接改，避免绕过确认。
+        if key == PaymentSourceSwitchView.settingKey { readOnlyReason = PaymentSourceSwitchView.serverSettingsHint }
         alsoIn = (json["also_in"]?.arrayValue ?? []).compactMap { item in
             guard let label = item["label"]?.stringValue else { return nil }
             return ServerParamLocation(label: label, webRoute: item["web_route"]?.stringValue,
@@ -224,7 +227,7 @@ enum ServerParamCatalog {
         ServerParamMeta(key: "log_retention.payment_source_plugin_authoritative", label: "转账通知以插件结果为准",
                         detail: "关 = 以系统自带的旧解析为准，转账通知插件只做对照；开 = 以转账通知插件的结果为准，插件出错或超时自动回退旧解析。随时可关，30 秒内生效，不影响结算规则本身。",
                         kind: .bool, group: "trace", defaultValue: false, editable: false,
-                        readOnlyReason: "涉及转账通知判定，App 里只显示状态，请在 Web 修改。",
+                        readOnlyReason: PaymentSourceSwitchView.serverSettingsHint,
                         alsoIn: [platform], advanced: true),
         days("log_retention.llm_usage_retention_days", "AI 用量记录保留天数", "每次 AI 调用的用量记录保存多少天。", group: "retention",
              fallback: 30, alsoIn: [aiGlobal]),

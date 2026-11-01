@@ -66,8 +66,11 @@ extension AssistantMarkdown {
 /// 读取它，流式输出不再让整个对话页（消息列表、待处理气泡、输入栏）重新计算。
 ///
 /// - 写入去重：值没有变化时不写（Observation 不比较新旧值，写入即失效）。
-/// - 增量节流：`assistant_delta` 先追加到不参与观察的缓冲区，按约 12 Hz（80 ms）统一提交；距上次提交已超过间隔时
-///   立即提交（首个字不额外等待）。
+/// - 平滑打字（第 23 轮）：`assistant_delta` 先进 `TelePilotCore.StreamingTextReveal` 的积压，按帧（约 30 帧/秒，
+///   最后一块很长时约 12 帧/秒）逐字显示，速度随积压自适应（`StreamingTextPacer`），流结束后约 0.3 秒内追平；
+///   每帧把新显示的几个字拼到 `text` 后再走下面的增量解析，Markdown 结果与整段解析相同。
+///   用户滚动、停止生成、切走（`revealAll`）立即显示全部；系统「减弱动态效果」打开或界面测试中不做逐字动画，
+///   沿用原来约 12 Hz（80 ms）整块提交。
 /// - 增量解析：已闭合的块（`StreamingMarkdownBoundary`）脱敏、解析一次后缓存在 `stableBlocks`，每次提交只重新脱敏、
 ///   解析最后一块（`tailBlocks`）。
 @MainActor @Observable
@@ -89,20 +92,38 @@ final class AssistantLiveState {
     /// 最近一次调用的工具（tool_started 的 tool_description，没有时为 tool_name）。
     private(set) var progressTool = ""
 
+    /// 已显示的正文（= `reveal.received` 的前缀）。
     @ObservationIgnored private(set) var text = ""
     @ObservationIgnored private var pendingText = ""
     @ObservationIgnored private var pendingReasoning = ""
     @ObservationIgnored private var stableEnd = 0
     @ObservationIgnored private var flushTask: Task<Void, Never>?
     @ObservationIgnored private var lastCommit: ContinuousClock.Instant?
+    /// 第 23 轮：已收到 / 已显示与逐字节奏。
+    @ObservationIgnored private var reveal = StreamingTextReveal()
+    @ObservationIgnored private var revealTask: Task<Void, Never>?
+    @ObservationIgnored private var lastTick: ContinuousClock.Instant?
 
-    /// 提交间隔：约 12 Hz。
+    /// 提交间隔：约 12 Hz（不做逐字动画时）。
     static let interval: Duration = .milliseconds(80)
+    /// 界面测试中关闭逐字动画（直接显示全文），避免测试变慢变脆。
+    nonisolated static let pacingDisabledForTests = ProcessInfo.processInfo.arguments.contains("--ui-testing")
+
+    /// 这一刻是否做逐字动画：系统「减弱动态效果」打开或界面测试中直接显示。
+    private var pacingEnabled: Bool {
+        !Self.pacingDisabledForTests && !UIAccessibility.isReduceMotionEnabled
+    }
 
     func appendText(_ delta: String) {
         guard !delta.isEmpty else { return }
-        pendingText += delta
-        scheduleCommit()
+        reveal.append(delta)
+        if pacingEnabled {
+            startRevealLoop()
+        } else {
+            stopRevealLoop()
+            pendingText += reveal.revealAll()
+            scheduleCommit()
+        }
     }
 
     func appendReasoning(_ delta: String) {
@@ -111,9 +132,31 @@ final class AssistantLiveState {
         scheduleCommit()
     }
 
-    /// 最终回答（`assistant_message`）：整段替换，立即提交。
+    /// 最终回答（`assistant_message`）：是已显示内容的延续时接着逐字追平（约 0.3 秒内）；
+    /// 否则（服务器改写过，或不做动画）整段替换，立即提交。
     func replace(text value: String, reasoning newReasoning: String) {
+        if pacingEnabled, reveal.finish(final: value) {
+            flushTask?.cancel()
+            flushTask = nil
+            pendingReasoning = ""
+            // 刚从「不做动画」切过来时可能还有没提交的整块文字：先按原顺序接上。
+            if !pendingText.isEmpty {
+                text += pendingText
+                pendingText = ""
+                render()
+            }
+            if reasoning != newReasoning {
+                reasoning = newReasoning
+                revision &+= 1
+            }
+            startRevealLoop()
+            return
+        }
         cancelPending()
+        stopRevealLoop()
+        reveal.reset()
+        reveal.append(value)
+        _ = reveal.revealAll()
         text = value
         stableEnd = 0
         if !stableBlocks.isEmpty { stableBlocks = []; stableVersion += 1 }
@@ -124,6 +167,8 @@ final class AssistantLiveState {
     /// 清空正文与推理（进入工具阶段、任务结束、切换会话）。
     func clearText() {
         cancelPending()
+        stopRevealLoop()
+        reveal.reset()
         text = ""
         stableEnd = 0
         if !stableBlocks.isEmpty { stableBlocks = []; stableVersion += 1 }
@@ -145,11 +190,82 @@ final class AssistantLiveState {
         setProgress(tool: "")
     }
 
-    /// 把缓冲区立即提交（例如本轮结束读取消息前）。
+    /// 把缓冲区与积压立即全部显示（停止生成、用户滚动、离开页面）。
     func flush() {
+        revealAll()
+    }
+
+    /// 立即显示已收到的全部文字（第 23 轮：用户滚动、停止生成、切走时调用）。没有积压时什么也不做。
+    func revealAll() {
+        stopRevealLoop()
+        let rest = reveal.revealAll()
+        if !rest.isEmpty { pendingText += rest }
         flushTask?.cancel()
         flushTask = nil
         commit()
+    }
+
+    /// 进度流结束：不做动画时立即提交；做动画时剩下的文字约 0.3 秒内追平（推理立即提交）。
+    func finishStream() {
+        guard pacingEnabled else {
+            revealAll()
+            return
+        }
+        reveal.finish()
+        flushTask?.cancel()
+        flushTask = nil
+        commit()
+        if !reveal.isCaughtUp { startRevealLoop() }
+    }
+
+    // MARK: 逐字显示（第 23 轮）
+
+    private func startRevealLoop() {
+        guard revealTask == nil, !reveal.isCaughtUp else { return }
+        lastTick = nil
+        revealTask = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                guard let self else { return }
+                let caughtUp = self.revealStep()
+                if caughtUp {
+                    // 没被取消（取消方会自己清空并可能已换了新任务），这里收尾。
+                    if !Task.isCancelled { self.revealTask = nil }
+                    return
+                }
+                let tail = self.text.utf8.count - self.stableEnd
+                try? await Task.sleep(for: .milliseconds(Int(StreamingTextPacer.tickInterval(tailUTF8: tail) * 1000)))
+            }
+        }
+    }
+
+    private func stopRevealLoop() {
+        revealTask?.cancel()
+        revealTask = nil
+        lastTick = nil
+    }
+
+    /// 走一帧：按距上一帧的真实时间算这帧显示几个字，拼到正文后重新解析最后一块。返回是否已经追平。
+    private func revealStep() -> Bool {
+        let now = ContinuousClock.now
+        let elapsed = lastTick.map { Self.seconds(now - $0) } ?? StreamingTextPacer.tickInterval(tailUTF8: 0)
+        lastTick = now
+        let chunk = reveal.tick(elapsed: elapsed)
+        if !chunk.isEmpty {
+            // 「不做动画」时攒下、还没提交的整块文字在前（它们先显示），保证顺序与收到的一致。
+            if !pendingText.isEmpty {
+                text += pendingText
+                pendingText = ""
+            }
+            text += chunk
+            lastCommit = now
+            render()
+        }
+        return reveal.isCaughtUp
+    }
+
+    private static func seconds(_ duration: Duration) -> Double {
+        let parts = duration.components
+        return Double(parts.seconds) + Double(parts.attoseconds) / 1e18
     }
 
     private func scheduleCommit() {

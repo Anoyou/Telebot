@@ -732,7 +732,7 @@ final class WorkspaceUITests: XCTestCase {
         return element.waitForExistence(timeout: 3)
     }
 
-    /// 第 22 轮：转账通知插件详情显示「转账通知以插件结果为准」开关状态（只读）+ 大白话说明 + 只读「转账识别」卡片；
+    /// 第 22 轮：转账通知插件详情显示「转账通知以插件结果为准」开关状态 + 大白话说明 + 只读「转账识别」卡片；
     /// 旧服务器（没有状态接口与宿主卡）不显示、不报错。
     func testPaymentSourceSwitchAndReadonlyCard() {
         let app = launch(["--ui-test-payment-source"])
@@ -741,16 +741,15 @@ final class WorkspaceUITests: XCTestCase {
         XCTAssertTrue(reveal(pluginCard, in: app))
         pluginCard.tap()
 
-        let switchRow = app.descendants(matching: .any)["paymentSource.switch"].firstMatch
+        // 第 23 轮起是可拨的系统开关（默认关，不会自动打开）。
+        let switchRow = app.switches["paymentSource.switch"]
         XCTAssertTrue(switchRow.waitForExistence(timeout: 10))
-        XCTAssertTrue(switchRow.label.contains("关"), switchRow.label)
+        XCTAssertEqual(switchRow.value as? String, "0")
         let state = app.descendants(matching: .any)["paymentSource.state"].firstMatch
         XCTAssertTrue(state.label.contains("以旧解析为准"), state.label)
         let explanation = app.descendants(matching: .any)["paymentSource.explanation"].firstMatch
         XCTAssertTrue(reveal(explanation, in: app))
         XCTAssertTrue(explanation.label.contains("开：以这个插件读出的"), explanation.label)
-        // App 里没有可拨动的开关（只读）。
-        XCTAssertFalse(app.switches["转账通知以插件结果为准"].exists)
         // 只读统计卡片
         XCTAssertTrue(reveal(app.staticTexts["转账识别（只读）"], in: app))
         XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "17")).firstMatch.exists)
@@ -769,6 +768,77 @@ final class WorkspaceUITests: XCTestCase {
         XCTAssertFalse(old.staticTexts["转账识别（只读）"].exists)
         XCTAssertFalse(old.descendants(matching: .any)["plugin.uicard.failed"].firstMatch.exists)
         XCTAssertTrue(reveal(old.staticTexts["插件信息"], in: old), "旧服务器下插件详情其余内容照常显示")
+    }
+
+    /// 第 23 轮：打开转账通知插件详情里的开关（带确认）。
+    private func openPaymentSourceSwitch(_ app: XCUIApplication) -> XCUIElement {
+        app.tabBars.buttons["插件"].tap()
+        let pluginCard = app.buttons["plugin.card.payment-source-cn-transfer"]
+        XCTAssertTrue(reveal(pluginCard, in: app))
+        pluginCard.tap()
+        let toggle = app.switches["paymentSource.switch"]
+        XCTAssertTrue(toggle.waitForExistence(timeout: 10))
+        return toggle
+    }
+
+    /// 点开关本体（行右侧），不点标题文字。
+    private func flip(_ toggle: XCUIElement) {
+        toggle.coordinate(withNormalizedOffset: CGVector(dx: 0.92, dy: 0.5)).tap()
+    }
+
+    /// 第 23 轮：App 里也能拨「转账通知以插件结果为准」：拨动先弹确认（文案与 Web 一致），取消不改；
+    /// 确认后写入服务器并以服务器状态显示；再拨回去走「改回以旧解析为准？」。
+    func testPaymentSourceSwitchNeedsConfirmation() {
+        let app = launch(["--ui-test-payment-source"])
+        let toggle = openPaymentSourceSwitch(app)
+        XCTAssertEqual(toggle.value as? String, "0", "默认关，不自动打开")
+
+        // 取消：开关不变。
+        flip(toggle)
+        let onAlert = app.alerts["改为以插件结果为准？"]
+        XCTAssertTrue(onAlert.waitForExistence(timeout: 5), "拨动前应弹出确认")
+        XCTAssertTrue(onAlert.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "插件出错或超时会自动回退旧解析")).firstMatch.exists)
+        let screenshot = XCTAttachment(screenshot: app.screenshot())
+        screenshot.name = "转账通知判定 · 打开确认"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+        onAlert.buttons["取消"].tap()
+        XCTAssertFalse(onAlert.waitForExistence(timeout: 1))
+        XCTAssertEqual(toggle.value as? String, "0", "取消后不改")
+        XCTAssertTrue(app.descendants(matching: .any)["paymentSource.state"].firstMatch.label.contains("以旧解析为准"))
+
+        // 确认打开：写入服务器后显示「以插件为准」。
+        flip(toggle)
+        XCTAssertTrue(onAlert.waitForExistence(timeout: 5))
+        onAlert.buttons["打开"].tap()
+        expectation(for: NSPredicate(format: "value == %@", "1"), evaluatedWith: toggle)
+        waitForExpectations(timeout: 10)
+        let result = app.descendants(matching: .any)["paymentSource.result"].firstMatch
+        XCTAssertTrue(result.waitForExistence(timeout: 5))
+        XCTAssertTrue(result.label.contains("已改为以插件结果为准"), result.label)
+        XCTAssertTrue(app.descendants(matching: .any)["paymentSource.state"].firstMatch.label.contains("以插件为准"))
+
+        // 再拨回去：确认框换成「改回以旧解析为准？」。
+        flip(toggle)
+        let offAlert = app.alerts["改回以旧解析为准？"]
+        XCTAssertTrue(offAlert.waitForExistence(timeout: 5))
+        offAlert.buttons["关闭"].tap()
+        expectation(for: NSPredicate(format: "value == %@", "0"), evaluatedWith: toggle)
+        waitForExpectations(timeout: 10)
+    }
+
+    /// 第 23 轮：服务器拒绝修改时开关保持原样，并说明保存失败。
+    func testPaymentSourceSwitchRollsBackOnFailure() {
+        let app = launch(["--ui-test-payment-source", "--ui-test-payment-source-patch-fails"])
+        let toggle = openPaymentSourceSwitch(app)
+        flip(toggle)
+        let onAlert = app.alerts["改为以插件结果为准？"]
+        XCTAssertTrue(onAlert.waitForExistence(timeout: 5))
+        onAlert.buttons["打开"].tap()
+        let error = app.descendants(matching: .any)["paymentSource.error"].firstMatch
+        XCTAssertTrue(error.waitForExistence(timeout: 10))
+        XCTAssertTrue(error.label.contains("保存失败"), error.label)
+        XCTAssertEqual(toggle.value as? String, "0", "失败后开关回到服务器上的值")
     }
 
     /// 插件声明式 UI（iOS 0.14.0）：plugin.overview 原生卡片（宿主「运行统计」、插件卡、失败只影响本卡），
