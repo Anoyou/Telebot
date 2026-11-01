@@ -87,6 +87,17 @@ export const pluginHookStatsFixture = (pluginKey: string) => ({
 });
 
 // 插件原生卡片（Plugin API 1.3）：插件详情顶部的宿主「运行统计」卡，结构与后端 plugin_ui_cards._host_stats_card 一致。
+export const paymentSourceStatusFixture = (overrides: Record<string, unknown> = {}) => ({
+  authoritative: false,
+  effective: "legacy",
+  label: "以旧解析为准（插件只做对照）",
+  setting_key: "log_retention.payment_source_plugin_authoritative",
+  sources: [
+    { plugin_key: "payment-source-cn-transfer", display_name: "中文转账通知", version: "1.2.0", source_ids: ["cn-transfer"], active: true, inactive_reason: null },
+  ],
+  ...overrides,
+});
+
 export const hostStatsCardFixture = (pluginKey: string) => ({
   plugin_key: pluginKey,
   plugin_name: "示例插件",
@@ -652,6 +663,8 @@ function jsonResponse(pathname: string): unknown | undefined {
   if (pathname === "/api/plugins/capabilities") return pluginCapabilitiesFixture;
   // 兼容层使用统计（0.115.0-beta.3，第 22 轮）：基线 capabilities 不带 compat_usage，卡片不显示；专项用例单独覆盖。
   if (pathname === "/api/plugins/compat-usage") return pluginCompatUsageFixture();
+  // 转账通知判定开关状态（第 22 轮）：基线没有转账通知插件，插件详情不显示开关区；专项用例单独覆盖。
+  if (pathname === "/api/payment-sources/status") return paymentSourceStatusFixture({ sources: [] });
   const pluginStatsMatch = pathname.match(/^\/api\/plugins\/([^/]+)\/stats$/);
   if (pluginStatsMatch) return pluginHookStatsFixture(decodeURIComponent(pluginStatsMatch[1]));
   if (pathname === "/api/remote-plugins") return [];

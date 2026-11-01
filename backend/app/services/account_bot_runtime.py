@@ -66,6 +66,7 @@ from . import (
     command_service,
     feature_service,
     payment_notice_legacy,
+    payment_source_ledger,
     payment_sources,
     remote_plugin_service,
     runtime_profile_service,
@@ -3628,6 +3629,8 @@ async def _parse_incoming_transfer_notice_with_sources(
         log.warning("payment source dual parse failed, fallback to legacy parser", exc_info=True)
         return _parse_incoming_transfer_notice(incoming)
     await _report_payment_source_outcome(incoming, outcome, trace)
+    # 只读卡片用的识别记录（后台写 Redis，不影响结果与结算）。
+    payment_source_ledger.observe(outcome, meta)
     return outcome.result
 
 

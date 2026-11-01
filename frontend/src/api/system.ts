@@ -32,6 +32,7 @@ import type {
   SystemSettingsMeta,
   TemplateOut,
 } from "@/api/types";
+import type { PaymentSourceStatus } from "@/lib/paymentSource";
 
 // ===================== 版本号（0.4.2 加） =====================
 // 后端 GET /api/system/version 是 public 端点（无鉴权），用于前后端版本号对比。
@@ -203,6 +204,18 @@ export async function getSystemSettingsMeta(): Promise<SystemSettingsMeta | null
     throw error;
   }
 }
+/** 「转账通知以插件结果为准」开关当前状态（第 22 轮）。旧服务器没有该接口时返回 null，界面不显示开关区。 */
+export async function getPaymentSourceStatus(): Promise<PaymentSourceStatus | null> {
+  try {
+    const { data } = await api.get<PaymentSourceStatus>("/api/payment-sources/status");
+    return data;
+  } catch (error) {
+    const status = (error as { response?: { status?: number } } | null)?.response?.status;
+    if (status === 404 || status === 405) return null;
+    throw error;
+  }
+}
+
 export type SystemSettingsPatch = Partial<Omit<SystemSettings, "login_security" | "ui_preferences">> & {
   login_security?: Partial<NonNullable<SystemSettings["login_security"]>>;
   ui_preferences?: Partial<NonNullable<SystemSettings["ui_preferences"]>>;

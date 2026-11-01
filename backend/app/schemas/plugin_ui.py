@@ -121,3 +121,25 @@ class PluginUIMenuActionResponse(BaseModel):
     message: str | None = None
     refresh: bool = True
     data: Any = None
+
+
+class PaymentSourcePluginStatus(BaseModel):
+    plugin_key: str
+    display_name: str
+    version: str = ""
+    source_ids: list[str] = Field(default_factory=list)
+    # 此刻是否真正参与转账通知解析（已安装、全局启用、签名允许、正确导出解析函数）。
+    active: bool
+    inactive_reason: str | None = None
+
+
+class PaymentSourceStatusResponse(BaseModel):
+    """「转账通知以插件结果为准」开关的当前状态（第 22 轮，插件详情与服务器参数页共用）。"""
+
+    # 服务器配置里的开关值（log_retention.payment_source_plugin_authoritative）。
+    authoritative: bool
+    # 实际生效：plugin = 以插件结果为准；legacy = 以旧解析为准（开关关闭，或打开但没有可用插件）。
+    effective: Literal["plugin", "legacy"]
+    label: str
+    setting_key: str
+    sources: list[PaymentSourcePluginStatus] = Field(default_factory=list)
