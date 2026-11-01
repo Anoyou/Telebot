@@ -37,6 +37,8 @@ actor FixtureService: AppServing {
     private var marketOfficialAutoUpdate = false
     private var marketPinned: [String: String] = [:]
     private var marketConcurrency = 3
+    /// 内容整理助手当前所在通道（服务器 0.117.0 的稳定 / 测试通道）。
+    private var marketChannel = "stable"
     /// Cloudflare Access 界面测试：`--ui-test-cf-access` 时，没有任何 Access 凭证的登录会被 Access 拦截。
     private var accessConfig = CloudflareAccessConfig()
     private let accessRequired = ProcessInfo.processInfo.arguments.contains("--ui-test-cf-access")
@@ -1018,7 +1020,8 @@ actor FixtureService: AppServing {
         }
     }
 
-    static let storeTitles = ["weather_digest": "天气早报", "dice_party": "骰子派对", "hello_world": "示例：你好世界"]
+    static let marketBetaVersion = "2.3.0-beta.1"
+    static let storeTitles = ["weather_digest": "天气早报", "dice_party": "骰子派对", "hello_world": "示例：你好世界", "night_owl": "夜猫子打卡"]
 
     /// 一键体检（GET /api/system-agent/checkup）：一项异常、一项需关注，其余正常。
     static var checkupFixture: JSONValue {
@@ -1480,7 +1483,8 @@ actor FixtureService: AppServing {
         return nil
     }
 
-    /// 插件市场（/api/plugin-market/*）：`--ui-test-market-unsupported` 模拟旧服务器（404）。
+    /// 插件市场（/api/plugin-market/*）：`--ui-test-market-unsupported` 模拟旧服务器（404）；
+    /// `--ui-test-market-legacy` 模拟 0.113–0.116 服务器（目录没有 0.117.0 的详情与通道字段）。
     private func pluginMarketFixture(_ clean: String, method: String, body: JSONValue?) throws -> JSONValue? {
         guard clean.hasPrefix("/api/plugin-market/") else { return nil }
         if ProcessInfo.processInfo.arguments.contains("--ui-test-market-unsupported") {
@@ -1491,8 +1495,10 @@ actor FixtureService: AppServing {
                                    "pinned": .object(marketPinned.mapValues { JSONValue.string($0) })]
         switch (method, clean) {
         case ("GET", "/api/plugin-market/catalog"):
-            let updatable = contentAssistantVersion != "2.2.0"
-            func item(_ key: String, title: String, kind: String, icon: String, version: String, summary: String, installed: String?) -> JSONValue {
+            let channelTarget = marketChannel == "beta" ? Self.marketBetaVersion : "2.2.0"
+            let updatable = contentAssistantVersion != channelTarget
+            func item(_ key: String, title: String, kind: String, icon: String, version: String, summary: String, installed: String?,
+                      trust: String = "official", sourceID: String = "official", sourceName: String = "官方插件库") -> JSONValue {
                 var installedValue: JSONValue = .null
                 if let installed {
                     let fields: [String: JSONValue] = ["version": .string(installed), "enabled": .bool(true), "source": .string("repo"),
@@ -1500,7 +1506,7 @@ actor FixtureService: AppServing {
                     installedValue = .object(fields)
                 }
                 let pinned: JSONValue = marketPinned[key].map { JSONValue.string($0) } ?? .null
-                let hasUpdate = installed != nil && installed != version
+                let hasUpdate = key == "content_assistant" ? updatable : installed != nil && installed != version
                 var object: [String: JSONValue] = ["id": .string("official:" + key), "key": .string(key), "kind": .string(kind),
                                                    "icon": .string(icon), "summary": .string(summary), "version": .string(version)]
                 object["name"] = .object(["zh": .string(title), "en": .string(key)])
@@ -1513,9 +1519,9 @@ actor FixtureService: AppServing {
                 object["channels"] = .object(["stable": .string("main")])
                 object["path"] = .string(key)
                 object["repository"] = repoURL
-                object["trust"] = .string("official")
-                object["source_id"] = .string("official")
-                object["source_name"] = .string("官方插件库")
+                object["trust"] = .string(trust)
+                object["source_id"] = .string(sourceID)
+                object["source_name"] = .string(sourceName)
                 object["compatible"] = .bool(true)
                 object["incompatible_reason"] = .null
                 object["installed"] = installedValue
@@ -1523,14 +1529,48 @@ actor FixtureService: AppServing {
                 object["pinned_version"] = pinned
                 object["auto_update"] = .bool(marketOfficialAutoUpdate && marketPinned[key] == nil)
                 object["rollout"] = .null
+                // 0.117.0 起每个条目都有通道列表（至少稳定通道）。
+                object["available_channels"] = .array([.object(["name": "stable", "ref": "main", "version": .string(version)])])
+                object["channel"] = installed == nil ? JSONValue.null : JSONValue.string("stable")
+                object["update_version"] = hasUpdate ? JSONValue.string(version) : JSONValue.null
                 return .object(object)
             }
-            let items: [JSONValue] = [
-                item("content_assistant", title: "内容整理助手", kind: "interactive", icon: "🧠", version: "2.2.0",
-                     summary: "把群聊里的长消息整理成摘要，并交给 AI 回答追问。", installed: contentAssistantVersion),
+            var assistant = item("content_assistant", title: "内容整理助手", kind: "interactive", icon: "🧠", version: "2.2.0",
+                                 summary: "把群聊里的长消息整理成摘要，并交给 AI 回答追问。", installed: contentAssistantVersion).objectValue ?? [:]
+            assistant["description"] = "把群聊里刷屏的长消息整理成几行摘要，并且可以继续追问 AI。整理结果只发给你自己，不会打扰群里其他人。"
+            assistant["usage"] = "回复一条长消息发送 {prefix}tldr 得到摘要；发送 {prefix}ask 问题 追问。"
+            assistant["commands"] = .array([.string("tldr"), .string("ask")])
+            assistant["release_notes"] = "- 摘要支持引用原文链接\n- 追问时记住上一轮的上下文"
+            assistant["released_at"] = "2026-10-30"
+            assistant["homepage"] = "https://github.com/Anoyou/telebot-plugins/tree/main/content_assistant"
+            assistant["license"] = "MIT"
+            assistant["screenshots"] = .array([.string("https://example.invalid/telepilot/content-assistant-1.png")])
+            assistant["summary_i18n"] = .object(["zh": "把群聊里的长消息整理成摘要，并交给 AI 回答追问。", "en": "Summarize long chats and ask AI follow-ups."])
+            assistant["permissions"] = .array([.string("send_message"), .string("read_chat"), .string("ai_text"), .string("custom_scope")])
+            assistant["channels"] = .object(["stable": "main", "beta": "beta"])
+            assistant["channel_versions"] = .object(["stable": "2.2.0", "beta": .string(Self.marketBetaVersion)])
+            let stableChannel: JSONValue = ["name": "stable", "ref": "main", "version": "2.2.0"]
+            let betaChannel: JSONValue = ["name": "beta", "ref": "beta", "version": .string(Self.marketBetaVersion)]
+            assistant["available_channels"] = .array([stableChannel, betaChannel])
+            assistant["channel"] = .string(marketChannel)
+            assistant["update_version"] = updatable ? JSONValue.string(channelTarget) : JSONValue.null
+            var items: [JSONValue] = [
+                .object(assistant),
                 item("weather_digest", title: "天气早报", kind: "automation", icon: "⛅️", version: "1.0.0",
-                     summary: "每天早上把天气和出行提醒发到指定会话。", installed: storeInstalledPlugins.contains("weather_digest") ? "1.0.0" : nil)
+                     summary: "每天早上把天气和出行提醒发到指定会话。", installed: storeInstalledPlugins.contains("weather_digest") ? "1.0.0" : nil),
+                item("night_owl", title: "夜猫子打卡", kind: "utility", icon: "🦉", version: "0.3.0",
+                     summary: "深夜在群里打卡，统计谁最晚睡。", installed: storeInstalledPlugins.contains("night_owl") ? "0.3.0" : nil,
+                     trust: "unreviewed", sourceID: "src-night", sourceName: "社区来源（示例）")
             ]
+            if ProcessInfo.processInfo.arguments.contains("--ui-test-market-legacy") {
+                let added = ["description", "usage", "commands", "release_notes", "released_at", "homepage", "license", "icon_url",
+                             "screenshots", "summary_i18n", "channel_versions", "channel", "available_channels", "update_version"]
+                items = items.map { (value: JSONValue) -> JSONValue in
+                    var object = value.objectValue ?? [:]
+                    for field in added { object[field] = nil }
+                    return .object(object)
+                }
+            }
             var official: [String: JSONValue] = ["id": "official", "name": "官方插件库", "trust": "official", "enabled": true, "builtin": true]
             official["url"] = .string("https://raw.githubusercontent.com/Anoyou/telebot-plugins/main/registry.json")
             official["auto_update"] = .bool(marketOfficialAutoUpdate)
@@ -1548,7 +1588,12 @@ actor FixtureService: AppServing {
             rollout["deadline"] = .null
             rollout["finished_at"] = .string(Self.isoDate(hoursAgo: 3))
             rollout["reason"] = .string("熔断打开（3 次调用被熔断拦截）")
-            var catalog: [String: JSONValue] = ["server_version": "0.113.0-beta.1", "plugin_api": "1.6"]
+            var catalog: [String: JSONValue] = ["server_version": "0.117.0-beta.1", "plugin_api": "1.6"]
+            if ProcessInfo.processInfo.arguments.contains("--ui-test-market-legacy") {
+                catalog["server_version"] = "0.116.0-beta.2"
+            } else {
+                catalog["registry_refresh_hours"] = 6
+            }
             catalog["sources"] = .array(sources)
             catalog["items"] = .array(items)
             catalog["updates_available"] = .integer(updatable && !pinnedUpdate ? 1 : 0)
@@ -1565,6 +1610,22 @@ actor FixtureService: AppServing {
             var row: [String: JSONValue] = ["key": "content_assistant", "display_name": "内容整理助手", "to_version": "2.2.0", "status": "updated"]
             row["from_version"] = .string(from)
             row["message"] = .string("已更新")
+            row["health_check"] = .bool(true)
+            var result: [String: JSONValue] = ["total": 1, "updated": 1, "skipped": 0, "failed": 0]
+            result["concurrency"] = .integer(Int64(marketConcurrency))
+            result["items"] = .array([.object(row)])
+            return .object(result)
+        case ("POST", "/api/plugin-market/channel"):
+            let target = body?["channel"]?.stringValue ?? "stable"
+            let from = contentAssistantVersion
+            let to = target == "beta" ? Self.marketBetaVersion : "2.2.0"
+            marketChannel = target
+            contentAssistantVersion = to
+            contentAssistantUpdatedAt = Date()
+            var row: [String: JSONValue] = ["key": "content_assistant", "display_name": "内容整理助手", "status": "updated"]
+            row["from_version"] = .string(from)
+            row["to_version"] = .string(to)
+            row["message"] = .string("已切换通道")
             row["health_check"] = .bool(true)
             var result: [String: JSONValue] = ["total": 1, "updated": 1, "skipped": 0, "failed": 0]
             result["concurrency"] = .integer(Int64(marketConcurrency))

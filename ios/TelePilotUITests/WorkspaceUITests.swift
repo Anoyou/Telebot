@@ -66,6 +66,106 @@ final class WorkspaceUITests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["plugins.market.unsupported"].firstMatch.waitForExistence(timeout: 15))
     }
 
+    /// 第 25 轮（iOS 0.37.0 / 服务器 0.117.0）：分类标签带数量；详情页有完整简介、怎么用（指令 + 说明）、版本说明、权限大白话、
+    /// 兼容性、主页；插件有测试通道时可以切换，从测试切回稳定会提示降级。
+    func testPluginMarketDetailShowsStoreContentAndSwitchesChannel() {
+        let app = launch()
+        openPluginMarket(app)
+        let all = app.buttons["plugins.market.kind.all"]
+        XCTAssertTrue(all.waitForExistence(timeout: 15))
+        XCTAssertEqual(all.label, "全部，3 个")
+        XCTAssertTrue(app.buttons["plugins.market.kind.interactive"].exists)
+
+        let row = app.buttons["plugins.market.row.content_assistant"]
+        XCTAssertTrue(reveal(row, in: app))
+        row.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["plugins.market.detail.trustNote"].firstMatch.waitForExistence(timeout: 10))
+        let update = app.buttons["plugins.market.detail.update"]
+        XCTAssertTrue(update.exists)
+        XCTAssertEqual(update.label, "更新到 v2.2.0")
+        XCTAssertTrue(reveal(app.staticTexts["plugins.market.detail.description"], in: app))
+
+        let commands = app.staticTexts["plugins.market.detail.commands"]
+        XCTAssertTrue(reveal(commands, in: app))
+        XCTAssertTrue(commands.label.contains(",tldr"), commands.label)
+        let notes = app.descendants(matching: .any)["plugins.market.detail.releaseNotes"].firstMatch
+        XCTAssertTrue(reveal(notes, in: app))
+        let toBeta = app.buttons["plugins.market.detail.switch.beta"]
+        XCTAssertTrue(reveal(toBeta, in: app))
+        XCTAssertTrue(app.descendants(matching: .any)["plugins.market.detail.current.stable"].firstMatch.exists)
+        toBeta.tap()
+        let alert = app.alerts.firstMatch
+        XCTAssertTrue(alert.waitForExistence(timeout: 5))
+        XCTAssertFalse(alert.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "降级")).firstMatch.exists)
+        alert.buttons["切换"].tap()
+        XCTAssertTrue(app.descendants(matching: .any)["plugins.market.detail.current.beta"].firstMatch.waitForExistence(timeout: 15))
+
+        let toStable = app.buttons["plugins.market.detail.switch.stable"]
+        XCTAssertTrue(reveal(toStable, in: app))
+        toStable.tap()
+        XCTAssertTrue(alert.waitForExistence(timeout: 5))
+        XCTAssertTrue(alert.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "降级")).firstMatch.exists,
+                      "从测试版切回稳定版要提示降级")
+        alert.buttons["切换"].tap()
+        XCTAssertTrue(app.descendants(matching: .any)["plugins.market.detail.current.stable"].firstMatch.waitForExistence(timeout: 15))
+
+        let permission = app.descendants(matching: .any)["plugins.market.detail.permission.ai_text"].firstMatch
+        XCTAssertTrue(reveal(permission, in: app))
+        XCTAssertTrue(permission.label.contains("AI 额度"), permission.label)
+        XCTAssertTrue(reveal(app.descendants(matching: .any)["plugins.market.detail.compat"].firstMatch, in: app))
+        XCTAssertTrue(reveal(app.descendants(matching: .any)["plugins.market.detail.homepage"].firstMatch, in: app))
+    }
+
+    /// 第 25 轮：安装“未审核”来源的插件前二次确认；取消不安装，确认后才安装。分类标签只看「工具」。
+    func testPluginMarketUnreviewedInstallNeedsConfirmation() {
+        let app = launch()
+        openPluginMarket(app)
+        let utility = app.buttons["plugins.market.kind.utility"]
+        XCTAssertTrue(utility.waitForExistence(timeout: 15))
+        XCTAssertEqual(utility.label, "工具，1 个")
+        utility.tap()
+        let action = app.buttons["plugins.market.action.night_owl"]
+        XCTAssertTrue(reveal(action, in: app))
+        XCTAssertFalse(app.buttons["plugins.market.action.content_assistant"].exists, "分类标签只显示这一类")
+        XCTAssertEqual(action.label, "获取")
+        action.tap()
+        let alert = app.alerts.firstMatch
+        XCTAssertTrue(alert.waitForExistence(timeout: 5))
+        XCTAssertTrue(alert.label.contains("未审核"), alert.label)
+        alert.buttons["取消"].tap()
+        XCTAssertEqual(action.label, "获取")
+
+        action.tap()
+        XCTAssertTrue(alert.waitForExistence(timeout: 5))
+        alert.buttons["仍然安装"].tap()
+        let installed = NSPredicate(format: "label == %@", "最新")
+        expectation(for: installed, evaluatedWith: action)
+        waitForExpectations(timeout: 15)
+
+        app.buttons["plugins.market.row.night_owl"].tap()
+        let note = app.descendants(matching: .any)["plugins.market.detail.trustNote"].firstMatch
+        XCTAssertTrue(note.waitForExistence(timeout: 10))
+        XCTAssertTrue(note.label.contains("没有人审核过"), note.label)
+    }
+
+    /// 第 25 轮：0.113–0.116 服务器的目录没有详情与通道字段：详情页只显示已有内容，不显示通道和“怎么用”，更新照常可用。
+    func testPluginMarketDetailOnOldServerHidesNewSections() {
+        let app = launch(["--ui-test-market-legacy"])
+        openPluginMarket(app)
+        let row = app.buttons["plugins.market.row.content_assistant"]
+        XCTAssertTrue(row.waitForExistence(timeout: 15))
+        XCTAssertTrue(reveal(row, in: app))
+        row.tap()
+        let update = app.buttons["plugins.market.detail.update"]
+        XCTAssertTrue(update.waitForExistence(timeout: 10))
+        XCTAssertEqual(update.label, "更新到 v2.2.0")
+        let compat = app.descendants(matching: .any)["plugins.market.detail.compat"].firstMatch
+        XCTAssertTrue(reveal(compat, in: app))
+        XCTAssertFalse(app.staticTexts["plugins.market.detail.commands"].exists)
+        XCTAssertFalse(app.buttons["plugins.market.detail.switch.beta"].exists)
+        XCTAssertFalse(app.descendants(matching: .any)["plugins.market.detail.homepage"].firstMatch.exists)
+    }
+
     func testDockKeepsPrimarySectionsAndAgentEntry() {
         let app = launch()
         // 工作流「预热模拟器」也跑这个用例：通过 TEST_RUNNER_TELEPILOT_WARMUP_TIMEOUT 放宽首次冷启动的等待，
