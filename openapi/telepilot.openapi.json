@@ -14918,6 +14918,12 @@
             "title": "Plugin Api",
             "type": "string"
           },
+          "registry_refresh_hours": {
+            "default": 6,
+            "description": "服务器后台拉取各来源索引的间隔（小时）",
+            "title": "Registry Refresh Hours",
+            "type": "integer"
+          },
           "rollouts": {
             "items": {
               "$ref": "#/components/schemas/PluginMarketRollout"
@@ -14956,20 +14962,114 @@
         "title": "PluginMarketCatalog",
         "type": "object"
       },
-      "PluginMarketInstallBody": {
+      "PluginMarketChannel": {
         "properties": {
-          "default_enabled": {
-            "default": false,
-            "title": "Default Enabled",
-            "type": "boolean"
+          "name": {
+            "description": "通道名：stable（稳定）/ beta（测试）/ 其它索引自定义的名字",
+            "title": "Name",
+            "type": "string"
+          },
+          "ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "通道对应的 Git 分支",
+            "title": "Ref"
+          },
+          "version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "该通道当前版本；索引没写时为空（未知）",
+            "title": "Version"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "PluginMarketChannel",
+        "type": "object"
+      },
+      "PluginMarketChannelBody": {
+        "properties": {
+          "channel": {
+            "description": "要切换到的通道：stable / beta …",
+            "title": "Channel",
+            "type": "string"
           },
           "key": {
             "title": "Key",
             "type": "string"
           },
           "source_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "同一插件出现在多个来源时指定来源",
+            "title": "Source Id"
+          }
+        },
+        "required": [
+          "key",
+          "channel"
+        ],
+        "title": "PluginMarketChannelBody",
+        "type": "object"
+      },
+      "PluginMarketInstallBody": {
+        "properties": {
+          "channel": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "安装哪个通道（默认 stable）",
+            "title": "Channel"
+          },
+          "default_enabled": {
+            "default": false,
+            "title": "Default Enabled",
+            "type": "boolean"
+          },
+          "key": {
+            "description": "插件 key；也可写安装串 registry:<key>[@version|#channel]",
+            "title": "Key",
+            "type": "string"
+          },
+          "source_id": {
             "title": "Source Id",
             "type": "string"
+          },
+          "version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "期望的版本；必须等于该通道当前版本（市场不保存历史版本）",
+            "title": "Version"
           }
         },
         "required": [
@@ -15037,6 +15137,34 @@
             "title": "Auto Update",
             "type": "boolean"
           },
+          "available_channels": {
+            "description": "可选通道（稳定通道总在第一个）；字段缺失说明服务器早于 0.117.0",
+            "items": {
+              "$ref": "#/components/schemas/PluginMarketChannel"
+            },
+            "title": "Available Channels",
+            "type": "array"
+          },
+          "channel": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "已安装插件所在的通道；未安装或来自别的仓库时为空",
+            "title": "Channel"
+          },
+          "channel_versions": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "各通道当前版本",
+            "title": "Channel Versions",
+            "type": "object"
+          },
           "channels": {
             "additionalProperties": {
               "type": "string"
@@ -15044,9 +15172,41 @@
             "title": "Channels",
             "type": "object"
           },
+          "commands": {
+            "description": "指令名（不含前缀）",
+            "items": {
+              "type": "string"
+            },
+            "title": "Commands",
+            "type": "array"
+          },
           "compatible": {
             "title": "Compatible",
             "type": "boolean"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "完整简介",
+            "title": "Description"
+          },
+          "homepage": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "插件主页（https）",
+            "title": "Homepage"
           },
           "icon": {
             "anyOf": [
@@ -15058,6 +15218,18 @@
               }
             ],
             "title": "Icon"
+          },
+          "icon_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "图片图标（https）；没有时用 icon emoji",
+            "title": "Icon Url"
           },
           "id": {
             "description": "来源 id:插件 key",
@@ -15092,6 +15264,17 @@
           "kind": {
             "title": "Kind",
             "type": "string"
+          },
+          "license": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "License"
           },
           "min_telepilot_version": {
             "anyOf": [
@@ -15147,6 +15330,30 @@
             "title": "Reads",
             "type": "array"
           },
+          "release_notes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "最新版本说明（Markdown 列表）",
+            "title": "Release Notes"
+          },
+          "released_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "最新版本发布日期 YYYY-MM-DD",
+            "title": "Released At"
+          },
           "repository": {
             "title": "Repository",
             "type": "string"
@@ -15161,6 +15368,14 @@
               }
             ]
           },
+          "screenshots": {
+            "description": "截图（https 链接）",
+            "items": {
+              "type": "string"
+            },
+            "title": "Screenshots",
+            "type": "array"
+          },
           "source_id": {
             "title": "Source Id",
             "type": "string"
@@ -15173,6 +15388,14 @@
             "default": "",
             "title": "Summary",
             "type": "string"
+          },
+          "summary_i18n": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "多语言简介：zh / en …",
+            "title": "Summary I18N",
+            "type": "object"
           },
           "tags": {
             "items": {
@@ -15189,6 +15412,30 @@
             "default": false,
             "title": "Update Available",
             "type": "boolean"
+          },
+          "update_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "有更新时要更新到的版本（按所在通道）",
+            "title": "Update Version"
+          },
+          "usage": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "使用说明（可能含 {prefix} 指令前缀占位）",
+            "title": "Usage"
           },
           "version": {
             "title": "Version",
@@ -42024,6 +42271,104 @@
           }
         ],
         "summary": "Get Catalog",
+        "tags": [
+          "plugin-market"
+        ]
+      }
+    },
+    "/api/plugin-market/channel": {
+      "post": {
+        "description": "把已安装插件切到另一个通道（稳定 ↔ 测试）：与更新同一流程，进入健康观察窗口，不健康自动回滚。",
+        "operationId": "switch_channel_api_plugin_market_channel_post",
+        "parameters": [
+          {
+            "in": "cookie",
+            "name": "auth_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Auth Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PluginMarketChannelBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PluginMarketUpdateResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "认证失败"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "CSRF 校验失败或权限不足"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "服务器内部错误"
+          }
+        },
+        "security": [
+          {
+            "AuthCookie": [],
+            "CsrfCookie": [],
+            "CsrfHeader": [],
+            "RequestedWith": []
+          }
+        ],
+        "summary": "Switch Channel",
         "tags": [
           "plugin-market"
         ]

@@ -33,6 +33,19 @@
       "path": "ai-chat",
       "channels": {
         "stable": "main"
+      },
+      "summary_i18n": {
+        "zh": "调用 TelePilot AI Provider 的 AI-Chat 聊天与消息解释助手，支持私聊/群聊触发和短期上下文记忆。"
+      },
+      "usage": "发送 {prefix}{command} 文本直接调用 TelePilot AI Provider；回复消息后发送 {prefix}{command} 可解释或回答被回复内容。私聊可直接陪聊，群聊中 @当前账号 或回复当前账号消息时触发，并带短期上下文记忆。",
+      "commands": [
+        "ask"
+      ],
+      "release_notes": "- 配置页（纯 UI，TelePilot 0.110.0-beta.2+ 表单契约 2 的 `x-ui-visible-if`）：「命令使用解释模板」关掉时隐藏「命令解释模板」；「群聊 @/回复触发」关掉时隐藏「群聊生效群组」「引用触发消息回复」。只在开关被明确关掉时才隐藏，值保留不删；旧客户端忽略此声明、照常全部显示。回复内容与触发方式不变。",
+      "released_at": "2026-10-29",
+      "homepage": "https://github.com/Anoyou/telebot-plugins/tree/main/ai-chat",
+      "channel_versions": {
+        "stable": "0.1.15"
       }
     },
     {
@@ -68,6 +81,21 @@
       "path": "ai_redpacket",
       "channels": {
         "stable": "main"
+      },
+      "summary_i18n": {
+        "zh": "从网页生成 AI 三选一题库，并通过交互 Bot 答题、UserBot payout 发放整数红包。"
+      },
+      "usage": "配置页填写 URL、Provider 和模型后点击“生成/补齐题库”。命令：{prefix}{command} 按默认配置发红包；{prefix}{command} create 总金额 [题目数] [题库ID] 自定义创建；{prefix}{command} bank list 查看题库；{prefix}{command} list 查看红包；{prefix}{command} close 红包ID 关闭；{prefix}{command} reset [用户ID] 重置当前群进行中的红包轮次限制；{prefix}{command} reset all 重置当前群进行中的所有红包轮次限制；{prefix}{command}-7 查询本周排行榜；{prefix}{command} help 查看帮助。红包领完或到期后自动结算，每周日 10:00 默认发布上一完整周期周榜。管理员创建、重置或关闭红包成功后会自动删除原命令消息，失败时保留。重置结果由交互 Bot 发送并在 3 秒后删除；题目按预约时间计时，超时提示 5 秒后删除且不消耗次数。匿名管理员不能参与答题红包；非匿名管理员和普通成员可正常参与。未收到奖励时先以个人账号在群里发言，再点击“申请补发奖励”，平台会校验状态并避免重复发放。{prefix}{command} list 仅显示进行中红包的题目/金额领取进度和开题消息链接，并提供历史未到账奖励补发入口；原命令自动删除，列表回执保留。开题消息 ID 会写入本地数据库，list 与小时播报可稳定跳转；可选择 UserBot 或交互 Bot 置顶，手动结束或自动结算后取消置顶。普通群员可发送 /airp list 自助查询同一列表，其他斜杠子命令不会开放。答错后的新答案按钮有 2 秒服务端冷却，冷却期内连点不会消耗答题机会。红包最晚于创建日次日 08:30 到期；如前一日红包未领完，每日 08:00 会按群发送一次提醒。",
+      "commands": [
+        "airp",
+        "airp-7"
+      ],
+      "release_notes": "- 配置表单：管理指令名（`command`）、题库来源 URL（`question_source_url`）、默认红包份数（每份一题）（`default_questions`）、单题最低金额（`reward_min`）、单题最高金额（`reward_max`）已有默认值，从 `required` 中移除，不再被 App 标成「必填」；留空或不填时运行时仍按默认值处理，不改变任何业务逻辑。",
+      "released_at": "2026-10-26",
+      "homepage": "https://github.com/Anoyou/telebot-plugins/tree/main/ai_redpacket",
+      "license": "MIT",
+      "channel_versions": {
+        "stable": "0.1.44"
       }
     },
     {
@@ -100,6 +128,19 @@
       "path": "ais-byRBQ",
       "channels": {
         "stable": "main"
+      },
+      "summary_i18n": {
+        "zh": "AI 查询插件，支持联网搜索增强、参考网址追加、实体查询图片预览、API URL/base url 快速切换与备用模型重试"
+      },
+      "usage": "发送 {prefix}{command} 后按原 Pagermaid 玩法触发 AI 查询能力；可在配置页调整触发指令名并开启或关闭插件。命令只填写本体，不要包含系统前缀。事件订阅：账号主人或授权管理员通过 userbot 命令触发；输出通过平台 MessageOps 受控发送，并可在日志 Trace 中排查。",
+      "commands": [
+        "ais"
+      ],
+      "release_notes": "- 兼容性：`min_telepilot_version` 提高到 `0.72.0-beta.2`。`manifest.py` 向 `Manifest` 传入了 `requires_platform_capabilities`，该参数 TelePilot 0.72.0 起才支持，更早的版本导入插件时直接报 `TypeError`（宿主兼容性检查在 0.59.1 / 0.71.3 上实测）；提高后旧版本会在加载前给出“请先更新 TelePilot”的明确提示。功能无变化。",
+      "released_at": "2026-10-28",
+      "homepage": "https://github.com/Anoyou/telebot-plugins/tree/main/ais-byRBQ",
+      "channel_versions": {
+        "stable": "1.0.12"
       }
     },
     {
@@ -130,6 +171,16 @@
       "path": "auto_reply",
       "channels": {
         "stable": "main"
+      },
+      "summary_i18n": {
+        "zh": "按规则匹配关键词或正则后自动回复目标会话"
+      },
+      "usage": "自动回复通过规则触发：每条规则配置匹配范围、关键词或正则、回复模板和冷却限制。安装后到插件中心选择账号，再进入自动回复配置页新增规则。规则保存后会随账号 worker 热更新生效。",
+      "release_notes": "- 改用 TelePilot 通用规则页（0.110.0-beta.2+）：`config_schema` 声明 `x-ui-mode=rules`，每条规则的表单写在 `x-rule-schema`（匹配类型、作用范围、指定群只在选「指定群」时显示、模式、回复内容、冷却与上限、高级），列表摘要 `x-rule-summary`，试运行卡片 `x-dry-run`（样例消息 + 会话类型 + 会话 ID）。字段名与旧专属页写入的完全相同，存量规则无需迁移。\n- 新增 `dry_run_rule(config, sample)`：宿主新试运行协议，返回命中、渲染结果和逐步解释；旧宿主继续调用 `_dry_run_match`，两者结论一致。\n- `min_telepilot_version` 不变：旧宿主不认识这些声明，Web 继续用旧专属页，运行逻辑不受影响。",
+      "released_at": "2026-10-29",
+      "homepage": "https://github.com/Anoyou/telebot-plugins/tree/main/auto_reply",
+      "channel_versions": {
+        "stable": "1.1.0"
       }
     },
     {
@@ -160,6 +211,16 @@
       "path": "autorepeat",
       "channels": {
         "stable": "main"
+      },
+      "summary_i18n": {
+        "zh": "当群组中多名用户在指定时间内发送相同内容时自动复读"
+      },
+      "usage": "自动复读通过规则触发：每条规则绑定一个群组和复读条件。当指定时间窗口内有足够多不同用户发送完全相同文本时，账号会自动复读一次。规则只监听 incoming 文本消息，保存后立即生效。",
+      "release_notes": "- 通用规则页（TelePilot 0.110.0-beta.2+）：声明列表摘要 `x-rule-summary`（群组 / 时间窗口 / 人数）与试运行卡片 `x-dry-run`；新增 `dry_run_rule(config, sample)`。\n- `min_telepilot_version` 不变，旧宿主行为不变。",
+      "released_at": "2026-10-29",
+      "homepage": "https://github.com/Anoyou/telebot-plugins/tree/main/autorepeat",
+      "channel_versions": {
+        "stable": "1.1.0"
       }
     },
     {
@@ -191,6 +252,22 @@
       "path": "blackjack",
       "channels": {
         "stable": "main"
+      },
+      "summary_i18n": {
+        "zh": "经典21点纸牌游戏，群内庄家模式，支持要牌/停牌/加倍"
+      },
+      "usage": "管理员可发送 {prefix}{command} 下注金额开启 21 点；也可以在交互中心绑定关键词或付款触发，玩家后续通过按钮或“要牌/停牌/加倍”操作。普通回复继承 TelePilot 当前会话通道；赢牌发奖返回 `payout`，由 userbot 执行。事件订阅：管理员命令走 userbot；群内关键词、按钮和会话消息走 interaction_bot；付款确认来自 external_payment_notice/userbot。",
+      "commands": [
+        "bj",
+        "21点",
+        "blackjack"
+      ],
+      "release_notes": "- 入口 `start_blackjack` 增加 `entry_policy`（按用户会话、仅开局本人、有奖金），TelePilot 0.112.0-beta.2+ 按声明处理、不再查宿主兜底表；结果与原来完全相同，旧宿主忽略。游戏与派奖逻辑无变化。",
+      "released_at": "2026-10-29",
+      "homepage": "https://github.com/Anoyou/telebot-plugins/tree/main/blackjack",
+      "license": "MIT",
+      "channel_versions": {
+        "stable": "1.0.33"
       }
     },
     {
@@ -222,6 +299,17 @@
       "path": "bot_mute_guard",
       "channels": {
         "stable": "main"
+      },
+      "summary_i18n": {
+        "zh": "针对指定群组删除非白名单 @bot 提及、inline Bot 与 Bot 发言广告触发消息"
+      },
+      "usage": "配置目标群和白名单 Bot 后启用功能总开关；插件会监听 incoming 消息，按开关删除非白名单 @bot、inline Bot、Bot 发言或入群服务消息。建议先开启演练模式确认命中范围。事件订阅：监听 userbot 收到的群消息；命中规则后按配置删除、禁言、踢出或封禁，建议先用演练模式观察命中范围。",
+      "release_notes": "- 配置页（纯 UI，`x-ui-visible-if`）：「违规处理动作」选了仅删除 / 踢出 / 封禁时隐藏只对禁言生效的「禁言时长」；值保留不删，旧客户端照常显示。拦截与处理逻辑不变。",
+      "released_at": "2026-10-29",
+      "homepage": "https://github.com/Anoyou/telebot-plugins/tree/main/bot_mute_guard",
+      "license": "MIT",
+      "channel_versions": {
+        "stable": "1.1.14"
       }
     },
     {
@@ -252,6 +340,19 @@
       "path": "cai-byRBQ",
       "channels": {
         "stable": "main"
+      },
+      "summary_i18n": {
+        "zh": "# CAI - 自动点踩插件 自动点踩插件，支持多目标配置、冷却时间限制、标准表情和自定义表情。支..."
+      },
+      "usage": "发送 {prefix}{command} 触发原 Pagermaid 自动点踩相关能力；可在配置页调整触发指令名和启用状态。命令只填写本体，不要包含系统前缀。事件订阅：账号主人或授权管理员通过 userbot 命令触发；输出通过平台 MessageOps 受控发送，并可在日志 Trace 中排查。",
+      "commands": [
+        "cai"
+      ],
+      "release_notes": "- 兼容性：`min_telepilot_version` 提高到 `0.72.0-beta.2`。`manifest.py` 向 `Manifest` 传入了 `requires_platform_capabilities`，该参数 TelePilot 0.72.0 起才支持，更早的版本导入插件时直接报 `TypeError`（宿主兼容性检查在 0.59.1 / 0.71.3 上实测）；提高后旧版本会在加载前给出“请先更新 TelePilot”的明确提示。功能无变化。",
+      "released_at": "2026-10-28",
+      "homepage": "https://github.com/Anoyou/telebot-plugins/tree/main/cai-byRBQ",
+      "channel_versions": {
+        "stable": "1.0.11"
       }
     },
     {
@@ -283,6 +384,16 @@
       "path": "chatgpt_image",
       "channels": {
         "stable": "main"
+      },
+      "summary_i18n": {
+        "zh": "实验性：按 chatgpt2api 的核心思路在 Telegram 内完成 ChatGPT 图片生成、编辑与 token 池管理。"
+      },
+      "usage": "安装并配置 Token 池后，由账号主人或授权管理员使用命令触发：文生图命令生成图片，图片编辑命令在回复图片或最近图片上下文中编辑，管理命令查看模型、token 池和额度。该插件不自动订阅群内普通消息。",
+      "release_notes": "- Token 池改为通用声明：`tokens` 声明 `x-secret-list`（遮罩显示、按 id 保留原 token、加密保存），旧版多行 `token` 字段隐藏并在保存时并入列表；字段按指令 / Token 池 / 生成参数 / 风格模板 / 网络与轮询 / Token 健康 / 导入分组，CPA Secret Key 改为密码框。\n- 新增 `on_config_validate`（TelePilot 0.110.0+ 调用）：新填的整段 session JSON 自动提取 accessToken、去掉空条目与重复 token、默认张数不得超过单次最多张数。旧宿主仍由宿主内置兼容逻辑处理。\n- `min_telepilot_version` 不变。",
+      "released_at": "2026-10-29",
+      "homepage": "https://github.com/Anoyou/telebot-plugins/tree/main/chatgpt_image",
+      "channel_versions": {
+        "stable": "0.2.0"
       }
     },
     {
@@ -312,6 +423,22 @@
       "path": "chatter_challenge",
       "channels": {
         "stable": "main"
+      },
+      "summary_i18n": {
+        "zh": "设定聊天规则，违反者自动扣分，全程被动监听"
+      },
+      "usage": "管理员发送 {prefix}{command} 创建话痨挑战，插件按当前聊天内成员发言统计规则自动记录和结算；配置页可调整触发指令名。事件订阅：管理员通过 userbot 命令启动挑战，挑战期间监听群消息并记录违规；结果消息由平台受控通道发送。",
+      "commands": [
+        "chat",
+        "话痨",
+        "挑战"
+      ],
+      "release_notes": "- 兼容性：`min_telepilot_version` 提高到 `0.72.0-beta.2`。`manifest.py` 向 `Manifest` 传入了 `requires_platform_capabilities`，该参数 TelePilot 0.72.0 起才支持，更早的版本导入插件时直接报 `TypeError`（宿主兼容性检查在 0.59.1 / 0.71.3 上实测）；提高后旧版本会在加载前给出“请先更新 TelePilot”的明确提示。功能无变化。",
+      "released_at": "2026-10-28",
+      "homepage": "https://github.com/Anoyou/telebot-plugins/tree/main/chatter_challenge",
+      "license": "MIT",
+      "channel_versions": {
+        "stable": "1.0.12"
       }
     },
     {
@@ -323,7 +450,7 @@
       "kind": "utility",
       "icon": "🧰",
       "summary": "通过 Codex API 调用 GPT 图片生成模型，支持纯文生图和参考图生成",
-      "version": "1.2.1",
+      "version": "1.2.2",
       "author": "TelePilot Official",
       "min_telepilot_version": "0.72.0-beta.2",
       "plugin_api": null,
@@ -344,6 +471,16 @@
       "path": "codex_image",
       "channels": {
         "stable": "main"
+      },
+      "summary_i18n": {
+        "zh": "通过 Codex API 调用 GPT 图片生成模型，支持纯文生图和参考图生成"
+      },
+      "usage": "安装并配置 Codex Access Token 后，由账号主人或授权管理员使用命令触发图片生成；可回复图片作为参考图，普通交互结果由 userbot 回复或编辑。该插件不自动订阅群内普通消息。",
+      "release_notes": "- 元数据：`manifest.py` 的作者由 `TeleBoxOrg` 改为 `TelePilot Official`，与 `plugin.json` 一致（Plugin API 1.0 的 manifest 一致性检查不再提醒）。功能无变化。",
+      "released_at": "2026-11-01",
+      "homepage": "https://github.com/Anoyou/telebot-plugins/tree/main/codex_image",
+      "channel_versions": {
+        "stable": "1.2.2"
       }
     },
     {
@@ -355,7 +492,7 @@
       "kind": "interactive",
       "icon": "🎮",
       "summary": "群聊俄罗斯轮盘游戏。创建游戏后群成员转账加入，轮流对自己或他人开枪，最终存活者赢得奖池。",
-      "version": "1.0.16",
+      "version": "1.0.17",
       "author": "Anoyou",
       "min_telepilot_version": "0.72.0-beta.2",
       "plugin_api": null,
@@ -376,6 +513,22 @@
       "path": "dead_revolver",
       "channels": {
         "stable": "main"
+      },
+      "summary_i18n": {
+        "zh": "群聊俄罗斯轮盘游戏。创建游戏后群成员转账加入，轮流对自己或他人开枪，最终存活者赢得奖池。"
+      },
+      "usage": "管理员发送 {prefix}dr 门票金额创建死亡左轮大厅；玩家转账门槛金额自动报名，庄家发送配置的开局关键词开局。普通回复继承 TelePilot 当前会话通道；奖励和退款返回 `payout`，由 userbot 执行。事件订阅：管理员命令走 userbot；群内关键词、按钮和会话消息走 interaction_bot；付款确认来自 external_payment_notice/userbot，插件会二次校验收款人。",
+      "commands": [
+        "dr",
+        "dr_start",
+        "开始挑战"
+      ],
+      "release_notes": "- 元数据：`manifest.py` 的作者由占位值 `builtin` 改为 `Anoyou`，与 `plugin.json` 一致（Plugin API 1.0 的 manifest 一致性检查不再提醒）。玩法、游戏币结算与派奖无变化。",
+      "released_at": "2026-11-01",
+      "homepage": "https://github.com/Anoyou/telebot-plugins/tree/main/dead_revolver",
+      "license": "MIT",
+      "channel_versions": {
+        "stable": "1.0.17"
       }
     },
     {
@@ -406,6 +559,22 @@
       "path": "dice_battle",
       "channels": {
         "stable": "main"
+      },
+      "summary_i18n": {
+        "zh": "群内骰子对战，两人各掷骰子比点数，支持下注"
+      },
+      "usage": "管理员发送 {prefix}{command} 下注金额发起骰子对战；也可以在交互中心绑定关键词或付款触发，挑战者和对手按提示掷骰比大小。普通回复继承 TelePilot 当前会话通道；赢家奖励返回 `payout`，由 userbot 执行。事件订阅：管理员命令走 userbot；群内关键词、按钮和会话消息走 interaction_bot；付款确认来自 external_payment_notice/userbot。",
+      "commands": [
+        "dice",
+        "骰子",
+        "pk"
+      ],
+      "release_notes": "- 兼容性：`min_telepilot_version` 提高到 `0.72.0-beta.2`。`manifest.py` 向 `Manifest` 传入了 `requires_platform_capabilities`，该参数 TelePilot 0.72.0 起才支持，更早的版本导入插件时直接报 `TypeError`（宿主兼容性检查在 0.59.1 / 0.71.3 上实测）；提高后旧版本会在加载前给出“请先更新 TelePilot”的明确提示。功能无变化。",
+      "released_at": "2026-10-28",
+      "homepage": "https://github.com/Anoyou/telebot-plugins/tree/main/dice_battle",
+      "license": "MIT",
+      "channel_versions": {
+        "stable": "1.0.19"
       }
     },
     {
@@ -438,6 +607,22 @@
       "path": "dice_grid_hunt",
       "channels": {
         "stable": "main"
+      },
+      "summary_i18n": {
+        "zh": "发送九宫格骰子图片。公布唯一目标点数并让群内抢答格子赢奖励"
+      },
+      "usage": "管理员发送 {prefix}{command} 奖励金额开启九宫格骰子竞猜；群友回复 1-9 抢答，配置页可调整题面、进行中、答对、超时和奖励模板。普通回复继承 TelePilot 当前会话通道；答对发奖返回 `payout`，由 userbot 执行。事件订阅：管理员命令走 userbot；群内关键词、按钮和会话消息走 interaction_bot；付款确认来自 external_payment_notice/userbot。",
+      "commands": [
+        "dicegrid",
+        "九宫格",
+        "骰子竞猜"
+      ],
+      "release_notes": "- 入口 `start_dice_grid_hunt` 增加 `legacy_entry_keys`，把旧入口 key `answer_dice_grid_hunt` 的推断（按群会话）写进插件自己的声明。TelePilot 0.112.0-beta.3+ 按声明处理、不再查宿主为本插件写死的兜底入口表；结论与原来完全相同（旧启动词、奖金与派奖不变）。旧宿主（含 0.110.0-beta.2 / 0.112.0-beta.2）忽略该字段、照旧走兜底表。未写 `entry_policy`（0.112.0-beta.2 见到它会整表跳过兜底），`min_telepilot_version` 不变。",
+      "released_at": "2026-10-30",
+      "homepage": "https://github.com/Anoyou/telebot-plugins/tree/main/dice_grid_hunt",
+      "license": "MIT",
+      "channel_versions": {
+        "stable": "1.1.39"
       }
     },
     {
@@ -469,6 +654,16 @@
       "path": "game24",
       "channels": {
         "stable": "main"
+      },
+      "summary_i18n": {
+        "zh": "随机生成 24 点题目，群内竞速答题，第一名获得奖金"
+      },
+      "usage": "24 点游戏支持两种调度：管理员可发送命令直接由 userbot 启动；群友也可通过交互中心配置的关键词或付款触发。普通回复继承 TelePilot 当前会话通道；答对发奖返回 `payout`，由 userbot 执行；结算元数据返回 settlement 供 Trace 排查。",
+      "release_notes": "- 入口 `start_paid_game` 增加 `entry_policy`（按群会话、有奖金），并在 `ui.rule_editor` 里声明规则编辑器的启动词提示与说明。TelePilot 0.112.0-beta.2+ 按声明处理、不再查宿主兜底表；结果与原来完全相同。旧宿主忽略这两个字段。游戏与派奖逻辑无变化。",
+      "released_at": "2026-10-29",
+      "homepage": "https://github.com/Anoyou/telebot-plugins/tree/main/game24",
+      "channel_versions": {
+        "stable": "1.1.18"
       }
     },
     {
@@ -499,6 +694,20 @@
       "path": "get_reactions-byRBQ",
       "channels": {
         "stable": "main"
+      },
+      "summary_i18n": {
+        "zh": "表情获取辅助命令，用于测试环境是否支持自定义表情反应"
+      },
+      "usage": "发送 {prefix}{command} 按原 Pagermaid 方式读取或测试消息 reaction；可在配置页调整触发指令名和启用状态。需要 reaction 相关权限时请先确认账号能力。事件订阅：账号主人或授权管理员通过 userbot 命令触发；输出通过平台 MessageOps 受控发送，并可在日志 Trace 中排查。",
+      "commands": [
+        "get_reactions",
+        "test_react"
+      ],
+      "release_notes": "- 兼容性：`min_telepilot_version` 提高到 `0.72.0-beta.2`。`manifest.py` 向 `Manifest` 传入了 `requires_platform_capabilities`，该参数 TelePilot 0.72.0 起才支持，更早的版本导入插件时直接报 `TypeError`（宿主兼容性检查在 0.59.1 / 0.71.3 上实测）；提高后旧版本会在加载前给出“请先更新 TelePilot”的明确提示。功能无变化。",
+      "released_at": "2026-10-28",
+      "homepage": "https://github.com/Anoyou/telebot-plugins/tree/main/get_reactions-byRBQ",
+      "channel_versions": {
+        "stable": "1.0.10"
       }
     },
     {
@@ -531,6 +740,19 @@
       "path": "gi2-byRBQ",
       "channels": {
         "stable": "main"
+      },
+      "summary_i18n": {
+        "zh": "图片生成与改图插件，支持直接生图、回复图片改图、GI2 结果图原地继续编辑，并对高风险原图断流做诊断提示"
+      },
+      "usage": "发送 {prefix}{command} 按原 Pagermaid 方式触发图片生成/查询能力；可在配置页调整触发指令名和启用状态。外部请求失败时请检查插件日志和站点可用性。事件订阅：账号主人或授权管理员通过 userbot 命令触发；输出通过平台 MessageOps 受控发送，并可在日志 Trace 中排查。",
+      "commands": [
+        "gi2"
+      ],
+      "release_notes": "- 兼容性：`min_telepilot_version` 提高到 `0.72.0-beta.2`。`manifest.py` 向 `Manifest` 传入了 `requires_platform_capabilities`，该参数 TelePilot 0.72.0 起才支持，更早的版本导入插件时直接报 `TypeError`（宿主兼容性检查在 0.59.1 / 0.71.3 上实测）；提高后旧版本会在加载前给出“请先更新 TelePilot”的明确提示。功能无变化。",
+      "released_at": "2026-10-28",
+      "homepage": "https://github.com/Anoyou/telebot-plugins/tree/main/gi2-byRBQ",
+      "channel_versions": {
+        "stable": "1.0.11"
       }
     },
     {
@@ -561,6 +783,21 @@
       "path": "guess_number",
       "channels": {
         "stable": "main"
+      },
+      "summary_i18n": {
+        "zh": "群内猜数字游戏，系统随机一个数字，群友轮流猜，提示大了/小了"
+      },
+      "usage": "管理员发送 {prefix}{command} 奖励金额开启猜数字；群友在同一群内回复数字抢答，插件提示大了/小了并在答对、超时或关闭时结束会话。普通回复继承 TelePilot 当前会话通道；答对发奖返回 `payout`，由 userbot 执行。事件订阅：管理员命令走 userbot；群内关键词、按钮和会话消息走 interaction_bot；付款确认来自 external_payment_notice/userbot。",
+      "commands": [
+        "guess",
+        "猜数字"
+      ],
+      "release_notes": "- 入口 `start_guess_number` 增加 `legacy_entry_keys`，把旧入口 key `start_game` 的推断（按群会话）写进插件自己的声明。TelePilot 0.112.0-beta.3+ 按声明处理、不再查宿主为本插件写死的兜底入口表；结论与原来完全相同（旧启动词、奖金与派奖不变）。旧宿主（含 0.110.0-beta.2 / 0.112.0-beta.2）忽略该字段、照旧走兜底表。未写 `entry_policy`（0.112.0-beta.2 见到它会整表跳过兜底），`min_telepilot_version` 不变。",
+      "released_at": "2026-10-30",
+      "homepage": "https://github.com/Anoyou/telebot-plugins/tree/main/guess_number",
+      "license": "MIT",
+      "channel_versions": {
+        "stable": "1.0.22"
       }
     },
     {
@@ -591,6 +828,22 @@
       "path": "idiom_chain",
       "channels": {
         "stable": "main"
+      },
+      "summary_i18n": {
+        "zh": "群内成语接龙，第一个答对的获奖，支持禁词规则"
+      },
+      "usage": "管理员发送 {prefix}{command} 奖励金额开启成语接龙；群友按上一条成语尾字继续回复，禁词和超时时间可在配置页调整。普通回复继承 TelePilot 当前会话通道；每轮/终局奖励返回 `payout`，由 userbot 执行。事件订阅：管理员命令走 userbot；群内关键词、按钮和会话消息走 interaction_bot；付款确认来自 external_payment_notice/userbot。",
+      "commands": [
+        "cy",
+        "成语",
+        "成语接龙"
+      ],
+      "release_notes": "- 兼容性：`min_telepilot_version` 提高到 `0.72.0-beta.2`。`manifest.py` 向 `Manifest` 传入了 `requires_platform_capabilities`，该参数 TelePilot 0.72.0 起才支持，更早的版本导入插件时直接报 `TypeError`（宿主兼容性检查在 0.59.1 / 0.71.3 上实测）；提高后旧版本会在加载前给出“请先更新 TelePilot”的明确提示。功能无变化。",
+      "released_at": "2026-10-28",
+      "homepage": "https://github.com/Anoyou/telebot-plugins/tree/main/idiom_chain",
+      "license": "MIT",
+      "channel_versions": {
+        "stable": "1.0.20"
       }
     },
     {
@@ -627,6 +880,16 @@
       "path": "interaction-ai-chat",
       "channels": {
         "stable": "main"
+      },
+      "summary_i18n": {
+        "zh": "交互 Bot 被 @提及/回复（含访客模式）时调用 TelePilot 已配置的 AI Provider 回答，带按会话+用户的短期记忆、白名单与每日限额。"
+      },
+      "usage": "交互 Bot 被 @提及 或被回复时，调用 TelePilot 已配置的 AI Provider 回答触发者，并按“会话 + 用户”保存短期记忆。支持访客模式（Bot 未加入的群/私聊，Bot API 10.0 Guest Mode）、Bot 已加入的群里 @Bot/回复 Bot，以及与 Bot 私聊。收到提问先回一条“🤔”占位，答案出来后原地编辑为 Telegram 富文本；可选联网搜索与识图。发送“重置”清空自己的记忆。需要在 BotFather 为交互 Bot 开启 Guest Chat Mode 并关闭 Inline Mode。",
+      "release_notes": "- 「🔄 重试」「🔀 换模型重试」按钮（含模型列表、翻页、选择、取消）接入 TelePilot 0.108.0 的通用回调路由：平台支持 `messages.callback_routing` 时按钮写成 `{\"callback\": {\"data\": \"iac:…\"}}`，由平台签发 `cb1.` 按钮令牌，点击只投递回本插件（其它订阅了 callback_query 的插件不再收到这些点击，也不再受 64 字节限制），`payload.callback_data` 仍是原来的 `iac:…`，所以按钮文案、权限（提问者 / 管理员）、30 分钟过期与重放逻辑都不变。\n- 订阅不变（`all_allowed_chats` + `guest_all`），没有新增 `own_buttons` 订阅：平台对同一插件的多条订阅不去重，同一点击会被投递两次；旧平台又会把不认识的 `own_buttons` 当成 `all_allowed_chats`。\n- 兼容：旧平台（没有 `ctx.capabilities` 或能力探测为 False / 探测异常）照旧直接写 `callback_data`；升级前发出的旧按钮在新平台上照样能点。平台 Redis 不可用时按平台规则：发出时去掉按钮（仍可回复“重试”），点击提示“按钮暂时不可用”。`min_telepilot_version` 保持 0.105.0-beta.1。\n- 配置页（纯 UI，TelePilot 0.110.0-beta.2+ 表单契约 2 的 `x-ui-visible-if`）：「启用 PT 站点数据源」关掉时隐藏 14 个 PT 子项；「口令保护」关掉时隐藏三个口令参数；「允许使用者」为「所有人」时隐藏白名单用户 ID；「拦截可执行指令输出」关掉时隐藏加款诱导回复 / 额外拦截裸文本 / 指令中和前缀。只在开关被明确关掉时才隐藏，值保留不删；旧客户端忽略此声明、照常全部显示。\n- 新增保存校验 `on_config_validate`（TelePilot 0.110.0+）：PT 数据源未关闭时「站点地址」必须是 https://域名[:端口]，「站点 Wiki 地址」必须是 https://域名/docs，填错时配置页逐字段提示、拒绝保存（以前会保存成功、运行时静默不用）。旧平台不调用，行为不变。",
+      "released_at": "2026-10-29",
+      "homepage": "https://github.com/Anoyou/telebot-plugins/tree/main/interaction-ai-chat",
+      "channel_versions": {
+        "stable": "0.4.13"
       }
     },
     {
@@ -657,6 +920,19 @@
       "path": "jpm-byRBQ",
       "channels": {
         "stable": "main"
+      },
+      "summary_i18n": {
+        "zh": "关键词触发回复插件，支持多关键词、频率限制、锚点消息系统"
+      },
+      "usage": "发送 {prefix}{command} 按原 Pagermaid 方式触发贴纸自动回复能力；可在配置页调整触发指令名和启用状态。事件订阅：账号主人或授权管理员通过 userbot 命令触发；输出通过平台 MessageOps 受控发送，并可在日志 Trace 中排查。",
+      "commands": [
+        "jpm"
+      ],
+      "release_notes": "- 兼容性：`min_telepilot_version` 提高到 `0.72.0-beta.2`。`manifest.py` 向 `Manifest` 传入了 `requires_platform_capabilities`，该参数 TelePilot 0.72.0 起才支持，更早的版本导入插件时直接报 `TypeError`（宿主兼容性检查在 0.59.1 / 0.71.3 上实测）；提高后旧版本会在加载前给出“请先更新 TelePilot”的明确提示。功能无变化。",
+      "released_at": "2026-10-28",
+      "homepage": "https://github.com/Anoyou/telebot-plugins/tree/main/jpm-byRBQ",
+      "channel_versions": {
+        "stable": "1.0.11"
       }
     },
     {
@@ -689,6 +965,19 @@
       "path": "jpmai-byRBQ",
       "channels": {
         "stable": "main"
+      },
+      "summary_i18n": {
+        "zh": "AI 生成艳情文案插件，支持完整 chat/completions URL 兼容、非标准响应文本提取和连通性测试"
+      },
+      "usage": "发送 {prefix}{command} 按原 Pagermaid 方式触发关键词 AI 回复能力；可在配置页调整触发指令名和启用状态。事件订阅：账号主人或授权管理员通过 userbot 命令触发；输出通过平台 MessageOps 受控发送，并可在日志 Trace 中排查。",
+      "commands": [
+        "jpmai"
+      ],
+      "release_notes": "- 兼容性：`min_telepilot_version` 提高到 `0.72.0-beta.2`。`manifest.py` 向 `Manifest` 传入了 `requires_platform_capabilities`，该参数 TelePilot 0.72.0 起才支持，更早的版本导入插件时直接报 `TypeError`（宿主兼容性检查在 0.59.1 / 0.71.3 上实测）；提高后旧版本会在加载前给出“请先更新 TelePilot”的明确提示。功能无变化。",
+      "released_at": "2026-10-28",
+      "homepage": "https://github.com/Anoyou/telebot-plugins/tree/main/jpmai-byRBQ",
+      "channel_versions": {
+        "stable": "1.0.11"
       }
     },
     {
@@ -700,7 +989,7 @@
       "kind": "interactive",
       "icon": "🎮",
       "summary": "群内彩票玩法：下注、开奖、奖池滚存、历史与统计，支持高可配置模板与预览",
-      "version": "1.0.19",
+      "version": "1.0.20",
       "author": "Anoyou",
       "min_telepilot_version": "0.72.0-beta.2",
       "plugin_api": null,
@@ -720,6 +1009,20 @@
       "path": "lottery_plus",
       "channels": {
         "stable": "main"
+      },
+      "summary_i18n": {
+        "zh": "群内彩票玩法：下注、开奖、奖池滚存、历史与统计，支持高可配置模板与预览"
+      },
+      "usage": "管理员和群友可使用 {prefix}{command} 购买彩票、查询奖池、历史和统计；交互规则可接收付款通知自动下注，配置页可调整别名、开奖周期和消息模板。普通回复继承 TelePilot 当前会话通道；开奖派奖返回 `payout`，由 userbot 执行。事件订阅：管理员命令走 userbot；群内关键词、按钮和会话消息走 interaction_bot；付款确认来自 external_payment_notice/userbot。",
+      "commands": [
+        "lotto",
+        "彩票"
+      ],
+      "release_notes": "- 元数据：`manifest.py` 的简介改为与 `plugin.json` 相同的「群内彩票玩法：下注、开奖、奖池滚存、历史与统计，支持高可配置模板与预览」（Plugin API 1.0 的 manifest 一致性检查不再提醒）。玩法、游戏币结算与派奖无变化。",
+      "released_at": "2026-11-01",
+      "homepage": "https://github.com/Anoyou/telebot-plugins/tree/main/lottery_plus",
+      "channel_versions": {
+        "stable": "1.0.20"
       }
     },
     {
@@ -753,6 +1056,20 @@
       "path": "lucky_redpack",
       "channels": {
         "stable": "main"
+      },
+      "summary_i18n": {
+        "zh": "纯 UserBot 口令红包插件，支持多红包并行、红包代码管理和图片财富密码"
+      },
+      "usage": "管理员发送 {prefix}{command} 发财 88888 10 创建红包，同一聊天可并行多个红包；发送 {prefix}{command} img 发财 88888 10 可用图片显示财富密码；使用 {prefix}{command} list 查询红包列表，使用 {prefix}{command} off 红包代码关闭指定红包。群友发送财富密码领取，插件返回 `payout`，由平台 userbot 执行；财富密码每被领一次会随机刷新。本插件不使用裸直通。",
+      "commands": [
+        "rp"
+      ],
+      "release_notes": "- 兼容性：`min_telepilot_version` 提高到 `0.72.0-beta.2`。`manifest.py` 向 `Manifest` 传入了 `requires_platform_capabilities`，该参数 TelePilot 0.72.0 起才支持，更早的版本导入插件时直接报 `TypeError`（宿主兼容性检查在 0.59.1 / 0.71.3 上实测）；提高后旧版本会在加载前给出“请先更新 TelePilot”的明确提示。功能无变化。",
+      "released_at": "2026-10-28",
+      "homepage": "https://github.com/Anoyou/telebot-plugins/tree/main/lucky_redpack",
+      "license": "MIT",
+      "channel_versions": {
+        "stable": "1.4.14"
       }
     },
     {
@@ -784,6 +1101,19 @@
       "path": "luckydraw-byRBQ",
       "channels": {
         "stable": "main"
+      },
+      "summary_i18n": {
+        "zh": "# 自动抽奖插件 (LuckyDraw) 在指定群组中自动识别红包/抽奖活动并发送口令参与，支持机..."
+      },
+      "usage": "发送 {prefix}{command} 按原 Pagermaid 方式触发抽奖口令识别和中奖反馈；可在配置页调整触发指令名和启用状态。事件订阅：账号主人或授权管理员通过 userbot 命令触发；输出通过平台 MessageOps 受控发送，并可在日志 Trace 中排查。",
+      "commands": [
+        "ldraw"
+      ],
+      "release_notes": "- 兼容性：`min_telepilot_version` 提高到 `0.72.0-beta.2`。`manifest.py` 向 `Manifest` 传入了 `requires_platform_capabilities`，该参数 TelePilot 0.72.0 起才支持，更早的版本导入插件时直接报 `TypeError`（宿主兼容性检查在 0.59.1 / 0.71.3 上实测）；提高后旧版本会在加载前给出“请先更新 TelePilot”的明确提示。功能无变化。",
+      "released_at": "2026-10-28",
+      "homepage": "https://github.com/Anoyou/telebot-plugins/tree/main/luckydraw-byRBQ",
+      "channel_versions": {
+        "stable": "1.0.11"
       }
     },
     {
@@ -813,6 +1143,16 @@
       "path": "math10",
       "channels": {
         "stable": "main"
+      },
+      "summary_i18n": {
+        "zh": "由交互 Bot 开启一局 10 以内算数题，群内第一个答对者获得奖金"
+      },
+      "usage": "随机算数题主要由交互中心规则启动：群友通过关键词或付款触发后抢答。普通回复继承 TelePilot 当前会话通道；答对发奖返回 `payout`，由 userbot 执行；结算说明写入 settlement/Trace。",
+      "release_notes": "- 入口 `start_math_game` 增加 `legacy_entry_keys`，把旧入口 key `start_math10` 的推断（按群会话）写进插件自己的声明。TelePilot 0.112.0-beta.3+ 按声明处理、不再查宿主为本插件写死的兜底入口表；结论与原来完全相同（旧启动词、奖金与派奖不变）。旧宿主（含 0.110.0-beta.2 / 0.112.0-beta.2）忽略该字段、照旧走兜底表。未写 `entry_policy`（0.112.0-beta.2 见到它会整表跳过兜底），`min_telepilot_version` 不变。",
+      "released_at": "2026-10-30",
+      "homepage": "https://github.com/Anoyou/telebot-plugins/tree/main/math10",
+      "channel_versions": {
+        "stable": "1.0.15"
       }
     },
     {
@@ -843,6 +1183,19 @@
       "path": "mindreader_survival",
       "channels": {
         "stable": "main"
+      },
+      "summary_i18n": {
+        "zh": "多人读心生存赛游戏。玩家转账加入，通过读心（猜庄家答案）逐轮淘汰，最终存活者瓜分奖池。"
+      },
+      "usage": "管理员发送 {prefix}{command} 创建读心生存赛，玩家通过付款或关键词加入，每轮回复数字选择答案；最终存活者按规则瓜分奖池。普通回复继承 TelePilot 当前会话通道；结算结果返回 result/settlement，实际发奖类动作应由 payout/受控 userbot 链路执行。事件订阅：管理员命令走 userbot；群内关键词、按钮和会话消息走 interaction_bot；付款确认来自 external_payment_notice/userbot。",
+      "commands": [
+        "mind"
+      ],
+      "release_notes": "- 兼容性：`min_telepilot_version` 提高到 `0.72.0-beta.2`。`manifest.py` 向 `Manifest` 传入了 `requires_platform_capabilities`，该参数 TelePilot 0.72.0 起才支持，更早的版本导入插件时直接报 `TypeError`（宿主兼容性检查在 0.59.1 / 0.71.3 上实测）；提高后旧版本会在加载前给出“请先更新 TelePilot”的明确提示。功能无变化。",
+      "released_at": "2026-10-28",
+      "homepage": "https://github.com/Anoyou/telebot-plugins/tree/main/mindreader_survival",
+      "channel_versions": {
+        "stable": "1.1.14"
       }
     },
     {
@@ -869,6 +1222,16 @@
       "path": "payment-source-cn-transfer",
       "channels": {
         "stable": "main"
+      },
+      "summary_i18n": {
+        "zh": "交互 Bot 转账通知解析：识别中文转账 / 扣减通知的付款人、收款人与金额（payment_sources 扩展点）。"
+      },
+      "usage": "TelePilot 0.111.0 起的「转账通知解析」扩展点（payment_sources）官方实现：识别交互 Bot 收到的中文转账 / 扣减通知，例如“付款人：A / 收款人：B / 金额：100”或“A 转出 100 / B 收到 100”（也认 射出、转账、扣减 / 接收、收款）。解析规则是 TelePilot 宿主内置解析器的逐字迁移，结果完全一致。安装并启用后无需配置：宿主只在交互 Bot「可信转账 Bot」白名单通过后才调用本插件，本插件只返回付款人、收款人、金额，结算（规则匹配、幂等、补偿）仍由 TelePilot 执行。双跑对照期内默认仍以宿主旧解析为准，本插件结果只做对照，不一致会记日志、Trace 并显示在运行统计里；系统设置打开「转账通知以插件结果为准」后才改用本插件结果。旧版本 TelePilot 不认识这个扩展点，安装后不会调用，也没有副作用。",
+      "release_notes": "- 首个版本：TelePilot 0.111.0 新扩展点 `payment_sources` 的官方实现，导出 `parse_payment_notice(text, meta)`。\n- 解析规则从 TelePilot 宿主内置解析器逐字迁移（标签格式“付款人/收款人/金额”与简洁格式“转出|射出|转账|扣减 + 收到|接收|收款”，可选“付款人ID / 收款人ID”），用 419 条历史与模板样本做 golden 对比，结果 100% 一致；简洁格式额外返回金额后的单位（如“蝌蚪”），宿主只记录、不参与结算。\n- 只在宿主可信转账 Bot 白名单通过后被调用；不订阅任何事件、不发消息、没有配置项。旧版本 TelePilot 不认识该扩展点，安装后不会调用。",
+      "released_at": "2026-10-29",
+      "homepage": "https://github.com/Anoyou/telebot-plugins/tree/main/payment-source-cn-transfer",
+      "channel_versions": {
+        "stable": "1.0.0"
       }
     },
     {
@@ -901,6 +1264,20 @@
       "path": "pixivshow-byRBQ",
       "channels": {
         "stable": "main"
+      },
+      "summary_i18n": {
+        "zh": "Pixiv 美少女推图插件，支持普通图与 R18 图推送，R18 自动添加 Telegram 遮罩，可指定单次推送数量"
+      },
+      "usage": "发送 {prefix}{command} 按原 Pagermaid 方式拉取 Pixiv 图片或多图结果；可在配置页调整触发指令名和启用状态，R18 内容按原插件规则处理。事件订阅：账号主人或授权管理员通过 userbot 命令触发；输出通过平台 MessageOps 受控发送，并可在日志 Trace 中排查。",
+      "commands": [
+        "pixiv",
+        "pixivr18"
+      ],
+      "release_notes": "- 兼容性：`min_telepilot_version` 提高到 `0.72.0-beta.2`。`manifest.py` 向 `Manifest` 传入了 `requires_platform_capabilities`，该参数 TelePilot 0.72.0 起才支持，更早的版本导入插件时直接报 `TypeError`（宿主兼容性检查在 0.59.1 / 0.71.3 上实测）；提高后旧版本会在加载前给出“请先更新 TelePilot”的明确提示。功能无变化。",
+      "released_at": "2026-10-28",
+      "homepage": "https://github.com/Anoyou/telebot-plugins/tree/main/pixivshow-byRBQ",
+      "channel_versions": {
+        "stable": "1.0.10"
       }
     },
     {
@@ -931,6 +1308,22 @@
       "path": "poetry_blank",
       "channels": {
         "stable": "main"
+      },
+      "summary_i18n": {
+        "zh": "古诗词填空抢答，答对获奖"
+      },
+      "usage": "管理员发送 {prefix}{command} 奖励金额开启诗词填空，群友回复缺失字词抢答；插件按答对、超时或关闭返回结算结果。普通回复继承 TelePilot 当前会话通道；答对发奖返回 `payout`，由 userbot 执行。事件订阅：管理员命令走 userbot；群内关键词、按钮和会话消息走 interaction_bot；付款确认来自 external_payment_notice/userbot。",
+      "commands": [
+        "poetry",
+        "诗词",
+        "填空"
+      ],
+      "release_notes": "- 兼容性：`min_telepilot_version` 提高到 `0.72.0-beta.2`。`manifest.py` 向 `Manifest` 传入了 `requires_platform_capabilities`，该参数 TelePilot 0.72.0 起才支持，更早的版本导入插件时直接报 `TypeError`（宿主兼容性检查在 0.59.1 / 0.71.3 上实测）；提高后旧版本会在加载前给出“请先更新 TelePilot”的明确提示。功能无变化。",
+      "released_at": "2026-10-28",
+      "homepage": "https://github.com/Anoyou/telebot-plugins/tree/main/poetry_blank",
+      "license": "MIT",
+      "channel_versions": {
+        "stable": "1.0.20"
       }
     },
     {
@@ -960,6 +1353,17 @@
       "path": "private_chat_assistant",
       "channels": {
         "stable": "main"
+      },
+      "summary_i18n": {
+        "zh": "监听账号收到的私聊消息，并通过插件专用 Bot 向指定账号发送聚合提醒"
+      },
+      "usage": "在需要监听私聊的账号上安装并启用插件，填写本插件专用的 Telegram Bot Token 和通知接收 Chat ID。接收人必须先私聊该 Bot 并点击开始。插件只监听该账号收到的 incoming 私聊，不处理群聊或账号自己发出的消息；同一发送者在 60 秒窗口内的多条消息会合并为一条通知。运行问题可在插件日志与外部 HTTP 记录中排查。",
+      "release_notes": "- 新增保存校验 `on_config_validate`（TelePilot 0.110.0+）：「专用通知 Bot Token」填了但不是 @BotFather 给出的「数字:密钥」格式时，配置页提示并拒绝保存（以前保存成功后通知静默发不出去）。只检查格式、不联网；留空照旧不发通知。旧平台不调用，行为不变。",
+      "released_at": "2026-10-29",
+      "homepage": "https://github.com/Anoyou/telebot-plugins/tree/main/private_chat_assistant",
+      "license": "MIT",
+      "channel_versions": {
+        "stable": "0.1.5"
       }
     },
     {
@@ -990,6 +1394,21 @@
       "path": "pt_promote",
       "channels": {
         "stable": "main"
+      },
+      "summary_i18n": {
+        "zh": "在青娃PT置顶促销某个种子（消耗蝌蚪）"
+      },
+      "usage": "发送 {prefix}{command} 种子ID [促销参数] 触发青娃 PT 置顶促销；先在全局配置填站点 Cookie，再按示例设置 free/2x、时长、竞价和奖励参数。普通回复继承 TelePilot 当前会话通道，不再由插件硬编码 interaction_bot/userbot_reply；可在 Trace/action 记录中排查。事件订阅：管理员命令走 userbot；群内关键词和会话消息走 interaction_bot。",
+      "commands": [
+        "pt",
+        "促销",
+        "ptinfo"
+      ],
+      "release_notes": "- 入口 `promote_torrent` 增加 `entry_policy`（按用户会话、只通知、无奖金），TelePilot 0.112.0-beta.2+ 按声明处理、不再查宿主兜底表；结果与原来完全相同，旧宿主忽略。功能无变化。",
+      "released_at": "2026-10-29",
+      "homepage": "https://github.com/Anoyou/telebot-plugins/tree/main/pt_promote",
+      "channel_versions": {
+        "stable": "1.0.30"
       }
     },
     {
@@ -1024,6 +1443,20 @@
       "path": "quick_qa",
       "channels": {
         "stable": "main"
+      },
+      "summary_i18n": {
+        "zh": "支持 URL + AI 生成题库的转账报名三选一快问快答积分淘汰赛。"
+      },
+      "usage": "管理员在 TelePilot Web 配置页的题库管理里填入 URL，点击获取并整理为题库，确认列表后保存配置；游戏开局时由随机玩家按钮多选题库。门槛金额为 0 时玩家点击大厅里的“加入游戏”参与；付费局通过转账报名。结束后按每位玩家积分余额生成发奖列表，并通过 `payout.reply_to_user_id` 由 userbot 定位玩家近期发言后自动发奖。",
+      "commands": [
+        "quickqa"
+      ],
+      "release_notes": "- 兼容性：`min_telepilot_version` 提高到 `0.72.0-beta.2`。`manifest.py` 向 `Manifest` 传入了 `requires_platform_capabilities`，该参数 TelePilot 0.72.0 起才支持，更早的版本导入插件时直接报 `TypeError`（宿主兼容性检查在 0.59.1 / 0.71.3 上实测）；提高后旧版本会在加载前给出“请先更新 TelePilot”的明确提示。功能无变化。\n- `manifest.py` 的配置使用说明（`x-usage-guide`）与 `plugin.json` 不一致，统一为 `plugin.json` 的文案。",
+      "released_at": "2026-10-28",
+      "homepage": "https://github.com/Anoyou/telebot-plugins/tree/main/quick_qa",
+      "license": "MIT",
+      "channel_versions": {
+        "stable": "1.4.9"
       }
     },
     {
@@ -1053,6 +1486,21 @@
       "path": "random_benefit",
       "channels": {
         "stable": "main"
+      },
+      "summary_i18n": {
+        "zh": "监听指定群组发言，随机引用某条消息回复自定义福利语"
+      },
+      "usage": "从配置页的已允许会话选择器中选择要纳入随机福利作用范围的群组。选中群组默认监听普通群友发言，并按概率随机引用其中一条消息回复自定义福利语；当前账号自己的消息和 Bot 账号消息会被排除。账号主人或授权管理员可发送独立配置的开启、暂停和状态指令控制当前群组。为防刷屏，命中回复后会进入全群冷却和同一用户冷却，冷却秒数设为 0 可关闭。",
+      "commands": [
+        "福利开启",
+        "福利暂停",
+        "福利状态"
+      ],
+      "release_notes": "- 兼容性：`min_telepilot_version` 提高到 `0.72.0-beta.2`。`manifest.py` 向 `Manifest` 传入了 `requires_platform_capabilities`，该参数 TelePilot 0.72.0 起才支持，更早的版本导入插件时直接报 `TypeError`（宿主兼容性检查在 0.59.1 / 0.71.3 上实测）；提高后旧版本会在加载前给出“请先更新 TelePilot”的明确提示。功能无变化。\n- 补声明 `resolve_entity` 权限：判断发言者是否为 Bot 时需要读取用户实体，之前未声明会被 TelePilot 沙箱拒绝、只能退回消息字段判断。",
+      "released_at": "2026-10-28",
+      "homepage": "https://github.com/Anoyou/telebot-plugins/tree/main/random_benefit",
+      "channel_versions": {
+        "stable": "1.5.6"
       }
     },
     {
@@ -1085,6 +1533,19 @@
       "path": "redpack-byRBQ",
       "channels": {
         "stable": "main"
+      },
+      "summary_i18n": {
+        "zh": "口令红包插件，支持文字红包与图片数学题红包，并通过平台 payout 完成可审计派奖与结算"
+      },
+      "usage": "管理员发送 {prefix}{command} 口令 总额 个数创建文字或图片口令红包；群友直接发送正确口令领取。普通消息统一走 MessageOps，派奖必须先由平台 payout/ledger 成功审计才写入领取记录；UserBot 消息入口保留用于历史口令监听与实体读取。",
+      "commands": [
+        "redpack"
+      ],
+      "release_notes": "- 兼容性：`min_telepilot_version` 提高到 `0.72.0-beta.2`。`manifest.py` 向 `Manifest` 传入了 `requires_platform_capabilities`，该参数 TelePilot 0.72.0 起才支持，更早的版本导入插件时直接报 `TypeError`（宿主兼容性检查在 0.59.1 / 0.71.3 上实测）；提高后旧版本会在加载前给出“请先更新 TelePilot”的明确提示。功能无变化。",
+      "released_at": "2026-10-28",
+      "homepage": "https://github.com/Anoyou/telebot-plugins/tree/main/redpack-byRBQ",
+      "channel_versions": {
+        "stable": "1.1.31"
       }
     },
     {
@@ -1115,6 +1576,14 @@
       "path": "reply_anchor_test",
       "channels": {
         "stable": "main"
+      },
+      "summary_i18n": {
+        "zh": "测试近期发言回复和 TelePilot 安全公开姓名解析。"
+      },
+      "usage": "用于验证 TelePilot 的 payout 近期发言锚点搜索能力。账号本人或授权管理员在已允许群里发送 `{prefix}{command} 用户ID 金额`，插件返回 `payout`，由平台 userbot 在当前群搜索该用户最近一次发言并回复 `+金额`。示例：`{prefix}send 123456789 88`。目标用户必须在当前群近期发过言；找不到锚点时，平台会让本次动作失败并在日志里记录原因，不会退化成普通群消息。独立发送 `{prefix}name 用户ID`，或回复目标用户消息后发送 `{prefix}name`，可测试 TelePilot 实际解析出的安全公开姓名、匿名状态、标签和解析状态；该入口不发奖，也不搜索近期发言。支持在配置页编辑姓名解析结果模板。",
+      "homepage": "https://github.com/Anoyou/telebot-plugins/tree/main/reply_anchor_test",
+      "channel_versions": {
+        "stable": "0.2.6"
       }
     },
     {
@@ -1146,6 +1615,19 @@
       "path": "sar-byRBQ",
       "channels": {
         "stable": "main"
+      },
+      "summary_i18n": {
+        "zh": "# SAR - 贴纸自动回复插件 ## 功能描述 在指定群组中，当有人用贴纸回复你的消息时，自动..."
+      },
+      "usage": "发送 {prefix}{command} 按原 Pagermaid 方式触发贴纸自动回复；可在配置页调整触发指令名和启用状态。事件订阅：账号主人或授权管理员通过 userbot 命令触发；输出通过平台 MessageOps 受控发送，并可在日志 Trace 中排查。",
+      "commands": [
+        "sar"
+      ],
+      "release_notes": "- 兼容性：`min_telepilot_version` 提高到 `0.72.0-beta.2`。`manifest.py` 向 `Manifest` 传入了 `requires_platform_capabilities`，该参数 TelePilot 0.72.0 起才支持，更早的版本导入插件时直接报 `TypeError`（宿主兼容性检查在 0.59.1 / 0.71.3 上实测）；提高后旧版本会在加载前给出“请先更新 TelePilot”的明确提示。功能无变化。",
+      "released_at": "2026-10-28",
+      "homepage": "https://github.com/Anoyou/telebot-plugins/tree/main/sar-byRBQ",
+      "channel_versions": {
+        "stable": "1.0.11"
       }
     },
     {
@@ -1177,6 +1659,19 @@
       "path": "sfl-byRBQ",
       "channels": {
         "stable": "main"
+      },
+      "summary_i18n": {
+        "zh": "贴纸跟随插件，在特定群组中自动跟随发送特定贴纸"
+      },
+      "usage": "发送 {prefix}{command} 按原 Pagermaid 方式触发贴纸跟随或绑定能力；可在配置页调整触发指令名和启用状态。事件订阅：账号主人或授权管理员通过 userbot 命令触发；输出通过平台 MessageOps 受控发送，并可在日志 Trace 中排查。",
+      "commands": [
+        "sfl"
+      ],
+      "release_notes": "- 兼容性：`min_telepilot_version` 提高到 `0.72.0-beta.2`。`manifest.py` 向 `Manifest` 传入了 `requires_platform_capabilities`，该参数 TelePilot 0.72.0 起才支持，更早的版本导入插件时直接报 `TypeError`（宿主兼容性检查在 0.59.1 / 0.71.3 上实测）；提高后旧版本会在加载前给出“请先更新 TelePilot”的明确提示。功能无变化。",
+      "released_at": "2026-10-28",
+      "homepage": "https://github.com/Anoyou/telebot-plugins/tree/main/sfl-byRBQ",
+      "channel_versions": {
+        "stable": "1.0.11"
       }
     },
     {
@@ -1208,6 +1703,19 @@
       "path": "share_plugins-byRBQ",
       "channels": {
         "stable": "main"
+      },
+      "summary_i18n": {
+        "zh": "分享插件，将现有插件以文件形式分享，支持列表查看和序号选择"
+      },
+      "usage": "发送 {prefix}{command} 按原 Pagermaid 方式查看插件列表并按序号分享插件文件；可在配置页调整触发指令名和启用状态。事件订阅：账号主人或授权管理员通过 userbot 命令触发；输出通过平台 MessageOps 受控发送，并可在日志 Trace 中排查。",
+      "commands": [
+        "share_plugins"
+      ],
+      "release_notes": "- 兼容性：`min_telepilot_version` 提高到 `0.72.0-beta.2`。`manifest.py` 向 `Manifest` 传入了 `requires_platform_capabilities`，该参数 TelePilot 0.72.0 起才支持，更早的版本导入插件时直接报 `TypeError`（宿主兼容性检查在 0.59.1 / 0.71.3 上实测）；提高后旧版本会在加载前给出“请先更新 TelePilot”的明确提示。功能无变化。",
+      "released_at": "2026-10-28",
+      "homepage": "https://github.com/Anoyou/telebot-plugins/tree/main/share_plugins-byRBQ",
+      "channel_versions": {
+        "stable": "1.0.10"
       }
     },
     {
@@ -1241,6 +1749,21 @@
       "path": "sum",
       "channels": {
         "stable": "main"
+      },
+      "summary_i18n": {
+        "zh": "调用 TelePilot 已配置的 AI 总结群组消息，支持快捷总结与可配置定时任务"
+      },
+      "usage": "发送 {prefix}{command} 数量 总结最近群消息；也可配置快捷总结和定时任务。AI Provider、消息模板、词云和输出格式都可在配置页调整，并可通过插件预览查看摘要消息。事件订阅：账号主人或授权管理员通过 userbot 命令触发；快捷总结和定时总结由平台配置驱动。AI、词云和文件输出都通过平台受控能力执行。",
+      "commands": [
+        "sum",
+        "总结"
+      ],
+      "release_notes": "- 新增插件详情卡片「定时总结任务」（TelePilot 0.110.0+ 声明式卡片 `ui.cards`，slot `plugin.overview`）：一排数字（任务数 / 启用 / 出错）+ 任务表（ID、群、周期、推送到、上次运行、状态、备注或最近结果），Web 与 iOS 插件详情顶部直接可见，不用发指令就能看到任务是否在跑、最近有没有出错。\n- 卡片只读：`on_ui_card` 读取 worker 上次保存的 `summary_config.json`（含配置页任务），不创建文件、不改任务、不调用 AI；文件缺失或损坏时显示空表。\n- 兼容：旧平台不认识 `ui` 声明、不会调用 `on_ui_card`，总结与定时任务行为完全不变；`min_telepilot_version` 保持 0.72.0-beta.2。",
+      "released_at": "2026-10-29",
+      "homepage": "https://github.com/Anoyou/telebot-plugins/tree/main/sum",
+      "license": "MIT",
+      "channel_versions": {
+        "stable": "1.1.38"
       }
     },
     {
@@ -1252,7 +1775,7 @@
       "kind": "interactive",
       "icon": "🎮",
       "summary": "经典十点半纸牌游戏，支持多人对战、加倍、五小等规则",
-      "version": "0.4.22",
+      "version": "0.4.23",
       "author": "Anoyou",
       "min_telepilot_version": "0.72.0-beta.2",
       "plugin_api": null,
@@ -1272,6 +1795,17 @@
       "path": "ten_half",
       "channels": {
         "stable": "main"
+      },
+      "summary_i18n": {
+        "zh": "经典十点半纸牌游戏，支持多人对战、加倍、五小等规则"
+      },
+      "usage": "十点半只通过交互 Bot 关键词/规则开局；大厅、按钮、后台刷新、超时开局和结算公告固定由 interaction_bot 发送。当前规则为每人起手 1 张，庄家首牌暗牌，五小最大；“规则”按钮会弹窗展示精简规则。转账模式下普通玩家精确转账底注给账号 userbot 后，由平台 payment_confirmed 作为资金证据入局；无感模式下玩家点击开局消息按钮，由 userbot 回复玩家近期发言 -底注 完成扣款并入局，已有 2 张牌后加倍会再次扣除底注并补 1 张停牌。账号本人可在群内发送“10d模式”切换模式，也可在等待大厅发送“入局”免转账加入；这些普通消息由交互 Bot 通道处理，userbot 只负责收付款。庄家制结算下，闲家倍率奖金由庄家出，若倍率奖金毛额超过庄家已入局金额，会先向庄家补扣差额；刷屏费从赢家倍率奖金里抽取。结算发奖返回 `payout`，始终由 userbot 执行。",
+      "release_notes": "- 元数据：`manifest.py` 的简介标点改为与 `plugin.json` 相同的「经典十点半纸牌游戏，支持多人对战、加倍、五小等规则」（Plugin API 1.0 的 manifest 一致性检查不再提醒）。玩法、游戏币结算与派奖无变化。",
+      "released_at": "2026-11-01",
+      "homepage": "https://github.com/Anoyou/telebot-plugins/tree/main/ten_half",
+      "license": "MIT",
+      "channel_versions": {
+        "stable": "0.4.23"
       }
     },
     {
@@ -1303,6 +1837,20 @@
       "path": "todo_reminder",
       "channels": {
         "stable": "main"
+      },
+      "summary_i18n": {
+        "zh": "用自然语言创建单次或重复、可完成确认的 Telegram Todo 提醒。"
+      },
+      "usage": "发送 {prefix}todo 五分钟后提醒我喝水，或回复某人的消息发送 {prefix}todo 五分钟后提醒他喝水。简写 {prefix}todo 5 提醒喝水表示 5 分钟后开始，并在首次提醒后按配置间隔重复；没有数字简写时一律只提醒一次。提醒消息会说明如何回复“已完成”，完成后会发送可自动删除的确认反馈。直接提醒自己由 Interaction Bot 在当前会话 @自己，避免 UserBot 自己发消息无法产生通知。支持发送 {prefix}undo ID 取消提醒；ID 不带 # 并可点击复制。命令结果原地编辑，默认 30 秒后自动删除；提醒消息在完成或取消时清理。自然语言时间示例：五分钟后、半小时后、明天上午九点、2026-08-17 14:30，并提供列表指令。",
+      "commands": [
+        "todo",
+        "undo"
+      ],
+      "release_notes": "- 配置页（纯 UI，`x-ui-visible-if`）：「自动删除反馈消息」关掉时隐藏「反馈消息自动删除延迟」。\n- 新增保存校验 `on_config_validate`（TelePilot 0.110.0+）：「时区」填了不认识的名字时配置页提示并拒绝保存（以前会保存成功、运行时静默回退到 Asia/Shanghai）。旧平台不调用，提醒行为不变。",
+      "released_at": "2026-10-29",
+      "homepage": "https://github.com/Anoyou/telebot-plugins/tree/main/todo_reminder",
+      "channel_versions": {
+        "stable": "0.1.6"
       }
     }
   ]

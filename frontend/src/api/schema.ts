@@ -2821,6 +2821,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/plugin-market/channel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Switch Channel
+         * @description 把已安装插件切到另一个通道（稳定 ↔ 测试）：与更新同一流程，进入健康观察窗口，不健康自动回滚。
+         */
+        post: operations["switch_channel_api_plugin_market_channel_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/plugin-market/install": {
         parameters: {
             query?: never;
@@ -10888,6 +10908,12 @@ export interface components {
             items: components["schemas"]["PluginMarketItem"][];
             /** Plugin Api */
             plugin_api: string;
+            /**
+             * Registry Refresh Hours
+             * @description 服务器后台拉取各来源索引的间隔（小时）
+             * @default 6
+             */
+            registry_refresh_hours: number;
             /** Rollouts */
             rollouts?: components["schemas"]["PluginMarketRollout"][];
             /** Server Version */
@@ -10901,17 +10927,63 @@ export interface components {
              */
             updates_available: number;
         };
+        /** PluginMarketChannel */
+        PluginMarketChannel: {
+            /**
+             * Name
+             * @description 通道名：stable（稳定）/ beta（测试）/ 其它索引自定义的名字
+             */
+            name: string;
+            /**
+             * Ref
+             * @description 通道对应的 Git 分支
+             */
+            ref?: string | null;
+            /**
+             * Version
+             * @description 该通道当前版本；索引没写时为空（未知）
+             */
+            version?: string | null;
+        };
+        /** PluginMarketChannelBody */
+        PluginMarketChannelBody: {
+            /**
+             * Channel
+             * @description 要切换到的通道：stable / beta …
+             */
+            channel: string;
+            /** Key */
+            key: string;
+            /**
+             * Source Id
+             * @description 同一插件出现在多个来源时指定来源
+             */
+            source_id?: string | null;
+        };
         /** PluginMarketInstallBody */
         PluginMarketInstallBody: {
+            /**
+             * Channel
+             * @description 安装哪个通道（默认 stable）
+             */
+            channel?: string | null;
             /**
              * Default Enabled
              * @default false
              */
             default_enabled: boolean;
-            /** Key */
+            /**
+             * Key
+             * @description 插件 key；也可写安装串 registry:<key>[@version|#channel]
+             */
             key: string;
             /** Source Id */
             source_id: string;
+            /**
+             * Version
+             * @description 期望的版本；必须等于该通道当前版本（市场不保存历史版本）
+             */
+            version?: string | null;
         };
         /** PluginMarketInstalled */
         PluginMarketInstalled: {
@@ -10941,14 +11013,51 @@ export interface components {
              * @default false
              */
             auto_update: boolean;
+            /**
+             * Available Channels
+             * @description 可选通道（稳定通道总在第一个）；字段缺失说明服务器早于 0.117.0
+             */
+            available_channels?: components["schemas"]["PluginMarketChannel"][];
+            /**
+             * Channel
+             * @description 已安装插件所在的通道；未安装或来自别的仓库时为空
+             */
+            channel?: string | null;
+            /**
+             * Channel Versions
+             * @description 各通道当前版本
+             */
+            channel_versions?: {
+                [key: string]: string;
+            };
             /** Channels */
             channels?: {
                 [key: string]: string;
             };
+            /**
+             * Commands
+             * @description 指令名（不含前缀）
+             */
+            commands?: string[];
             /** Compatible */
             compatible: boolean;
+            /**
+             * Description
+             * @description 完整简介
+             */
+            description?: string | null;
+            /**
+             * Homepage
+             * @description 插件主页（https）
+             */
+            homepage?: string | null;
             /** Icon */
             icon?: string | null;
+            /**
+             * Icon Url
+             * @description 图片图标（https）；没有时用 icon emoji
+             */
+            icon_url?: string | null;
             /**
              * Id
              * @description 来源 id:插件 key
@@ -10961,6 +11070,8 @@ export interface components {
             key: string;
             /** Kind */
             kind: string;
+            /** License */
+            license?: string | null;
             /** Min Telepilot Version */
             min_telepilot_version?: string | null;
             name: components["schemas"]["PluginMarketName"];
@@ -10974,9 +11085,24 @@ export interface components {
             plugin_api?: string | null;
             /** Reads */
             reads?: string[];
+            /**
+             * Release Notes
+             * @description 最新版本说明（Markdown 列表）
+             */
+            release_notes?: string | null;
+            /**
+             * Released At
+             * @description 最新版本发布日期 YYYY-MM-DD
+             */
+            released_at?: string | null;
             /** Repository */
             repository: string;
             rollout?: components["schemas"]["PluginMarketRollout"] | null;
+            /**
+             * Screenshots
+             * @description 截图（https 链接）
+             */
+            screenshots?: string[];
             /** Source Id */
             source_id: string;
             /** Source Name */
@@ -10986,6 +11112,13 @@ export interface components {
              * @default
              */
             summary: string;
+            /**
+             * Summary I18N
+             * @description 多语言简介：zh / en …
+             */
+            summary_i18n?: {
+                [key: string]: string;
+            };
             /** Tags */
             tags?: string[];
             /** Trust */
@@ -10995,6 +11128,16 @@ export interface components {
              * @default false
              */
             update_available: boolean;
+            /**
+             * Update Version
+             * @description 有更新时要更新到的版本（按所在通道）
+             */
+            update_version?: string | null;
+            /**
+             * Usage
+             * @description 使用说明（可能含 {prefix} 指令前缀占位）
+             */
+            usage?: string | null;
             /** Version */
             version: string;
         };
@@ -24451,6 +24594,68 @@ export interface operations {
             };
             /** @description 认证失败 */
             401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description 服务器内部错误 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    switch_channel_api_plugin_market_channel_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: {
+                auth_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PluginMarketChannelBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginMarketUpdateResult"];
+                };
+            };
+            /** @description 认证失败 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description CSRF 校验失败或权限不足 */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };

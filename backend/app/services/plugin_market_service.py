@@ -32,6 +32,7 @@ import html
 import json
 import logging
 import os
+import re
 import shutil
 import tempfile
 import time
@@ -40,7 +41,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 import httpx
 from sqlalchemy import select
@@ -87,6 +88,8 @@ SETTINGS_KEY = "plugin_market_settings"
 ROLLOUT_KEY_PREFIX = "plugin_market_rollout:"
 
 REGISTRY_TTL_SECONDS = 6 * 3600
+# 后台定时拉取：每个已启用来源最多每 6 小时拉一次（与缓存有效期一致），不用等有人打开市场才刷新更新角标。
+REGISTRY_BACKGROUND_REFRESH_SECONDS = REGISTRY_TTL_SECONDS
 REGISTRY_ERROR_RETRY_SECONDS = 300
 REGISTRY_MAX_BYTES = 2 * 1024 * 1024
 REGISTRY_TIMEOUT_SECONDS = 15.0
@@ -103,6 +106,14 @@ HEALTH_MIN_CALLS = 10
 HEALTH_MIN_FAILURE_RATE = 0.3
 HEALTH_RATE_MULTIPLIER = 2.0
 HEALTH_RATE_DELTA = 0.2
+
+STABLE_CHANNEL = "stable"
+BETA_CHANNEL = "beta"
+# 目录版本 1.1 追加字段的长度上限（展示用，超出截断）。
+DESCRIPTION_MAX = 2000
+USAGE_MAX = 3000
+RELEASE_NOTES_MAX = 3000
+MAX_SCREENSHOTS = 8
 
 ROLLOUT_WATCHING = "watching"
 ROLLOUT_HEALTHY = "healthy"
@@ -427,6 +438,48 @@ def _optional_str(value: Any, *, limit: int = 64) -> str | None:
     return text[:limit] or None
 
 
+def _https_url(value: Any) -> str | None:
+    """只接受 https 链接（截图、图标、主页）；其它一律丢弃。"""
+
+    text = str(value or "").strip()
+    if not text or len(text) > 2048:
+        return None
+    parsed = urlparse(text)
+    if parsed.scheme != "https" or not parsed.netloc or parsed.username or parsed.password:
+        return None
+    return text
+
+
+def _additive_fields(raw: dict[str, Any], *, summary: str) -> dict[str, Any]:
+    """目录版本 1.1 追加字段（全部可选，缺失时给空值；旧索引没有这些字段也照常显示）。"""
+
+    i18n_raw = raw.get("summary_i18n") if isinstance(raw.get("summary_i18n"), dict) else {}
+    summary_i18n = {
+        str(lang)[:8]: str(text)[:400] for lang, text in i18n_raw.items() if isinstance(text, str) and text.strip()
+    }
+    summary_i18n.setdefault("zh", summary)
+    channel_versions_raw = raw.get("channel_versions") if isinstance(raw.get("channel_versions"), dict) else {}
+    screenshots_raw = raw.get("screenshots") if isinstance(raw.get("screenshots"), list) else []
+    screenshots = [url for url in (_https_url(item) for item in screenshots_raw) if url]
+    return {
+        "summary_i18n": summary_i18n,
+        "description": str(raw.get("description") or "")[:DESCRIPTION_MAX] or None,
+        "usage": str(raw.get("usage") or "")[:USAGE_MAX] or None,
+        "commands": _str_list(raw.get("commands"), limit=24),
+        "release_notes": str(raw.get("release_notes") or "")[:RELEASE_NOTES_MAX] or None,
+        "released_at": _optional_str(raw.get("released_at"), limit=32),
+        "homepage": _https_url(raw.get("homepage")),
+        "license": _optional_str(raw.get("license"), limit=40),
+        "icon_url": _https_url(raw.get("icon_url")),
+        "screenshots": screenshots[:MAX_SCREENSHOTS],
+        "channel_versions": {
+            str(name)[:32]: str(version)[:64]
+            for name, version in channel_versions_raw.items()
+            if isinstance(version, str) and version.strip()
+        },
+    }
+
+
 def parse_registry(data: Any, *, source: dict[str, Any]) -> tuple[list[dict[str, Any]], str | None]:
     """校验并规范 registry.json；不合法的条目跳过（只记 debug），整体格式错误抛 ValueError。"""
 
@@ -465,13 +518,14 @@ def parse_registry(data: Any, *, source: dict[str, Any]) -> tuple[list[dict[str,
         if ".." in path.split("/") or path.startswith("."):
             continue
         seen.add(key)
+        summary = str(raw.get("summary") or raw.get("description") or "")[:400]
         entries.append(
             {
                 "key": key,
                 "name": {"zh": name_zh[:80], "en": name_en[:80]},
                 "kind": kind if kind in KINDS else "utility",
                 "icon": str(raw.get("icon") or "")[:16] or None,
-                "summary": str(raw.get("summary") or raw.get("description") or "")[:400],
+                "summary": summary,
                 "version": version,
                 "author": str(raw.get("author") or "")[:80],
                 "min_telepilot_version": _optional_str(raw.get("min_telepilot_version")),
@@ -485,6 +539,7 @@ def parse_registry(data: Any, *, source: dict[str, Any]) -> tuple[list[dict[str,
                 "path": path,
                 "repository": repository,
                 "trust": lower_trust(source["trust"], normalize_trust(raw.get("trust"), default=top_trust)),
+                **_additive_fields(raw, summary=summary),
             }
         )
     return entries, top_repository
@@ -587,6 +642,74 @@ def _rollout_public(record: dict[str, Any] | None) -> dict[str, Any] | None:
     }
 
 
+_CHANNEL_REF_RE = re.compile(r"^[A-Za-z0-9._][A-Za-z0-9._/-]{0,127}$")
+
+
+def channel_url(entry: dict[str, Any], channel: str) -> str | None:
+    """通道对应的安装地址：稳定通道就是索引里的 ``repository``（与 0.113.0 起的安装记录一致）；
+    其它通道把分支写成 GitHub ``tree/<ref>`` 链接（宿主现有的分支安装格式）。非 GitHub 仓库只支持稳定通道。"""
+
+    repository = entry["repository"]
+    if channel == STABLE_CHANNEL:
+        return repository
+    ref = (entry.get("channels") or {}).get(channel)
+    if not ref or not _CHANNEL_REF_RE.match(ref) or ".." in ref.split("/"):
+        return None
+    try:
+        source = remote_svc.normalize_git_source_url(repository)
+    except remote_svc.RemotePluginError:
+        return None
+    parsed = urlparse(source.clone_url)
+    if parsed.hostname not in {"github.com", "www.github.com"}:
+        return None
+    stable_ref = source.ref or (entry.get("channels") or {}).get(STABLE_CHANNEL)
+    if ref == stable_ref:
+        return None  # 与稳定通道是同一个分支，不算单独的通道
+    path = parsed.path.strip("/")
+    if path.endswith(".git"):
+        path = path[:-4]
+    return f"https://github.com/{path}/tree/{quote(ref, safe='/')}"
+
+
+def available_channels(entry: dict[str, Any]) -> list[dict[str, Any]]:
+    """条目可选的通道（稳定通道永远在第一个）；``version`` 来自 ``channel_versions``，稳定通道缺省用 ``version``。"""
+
+    versions = entry.get("channel_versions") or {}
+    channels = entry.get("channels") or {}
+    out = [
+        {
+            "name": STABLE_CHANNEL,
+            "ref": channels.get(STABLE_CHANNEL),
+            "version": versions.get(STABLE_CHANNEL) or entry["version"],
+            "url": entry["repository"],
+        }
+    ]
+    for name in sorted(channels):
+        if name == STABLE_CHANNEL:
+            continue
+        url = channel_url(entry, name)
+        if url is None:
+            continue
+        out.append({"name": name, "ref": channels[name], "version": versions.get(name), "url": url})
+    return out
+
+
+def parse_install_spec(text: str) -> tuple[str, str | None, str | None]:
+    """解析安装串 ``[registry:]<key>[@version|#channel]`` → ``(key, version, channel)``。"""
+
+    raw = str(text or "").strip()
+    if raw.startswith("registry:"):
+        raw = raw[len("registry:"):]
+    version = channel = None
+    if "#" in raw:
+        raw, channel = raw.split("#", 1)
+        channel = channel.strip() or None
+    elif "@" in raw:
+        raw, version = raw.split("@", 1)
+        version = version.strip() or None
+    return raw.strip(), version, channel
+
+
 def _catalog_item(
     entry: dict[str, Any],
     source: dict[str, Any],
@@ -595,18 +718,26 @@ def _catalog_item(
     rollout: dict[str, Any] | None,
 ) -> dict[str, Any]:
     ok, reason = compatibility(entry)
+    channels = available_channels(entry)
     installed = None
+    installed_channel: str | None = None
+    update_version: str | None = None
     update_available = False
     if row is not None:
-        same_source = repo_svc._same_repo_source(row.source_url, entry["repository"])
+        current = next((ch for ch in channels if repo_svc._same_repo_source(row.source_url, ch["url"])), None)
+        installed_channel = current["name"] if current else None
         installed = {
             "version": row.version,
             "enabled": bool(row.enabled),
             "source": row.source,
             "source_url": row.source_url,
-            "same_source": same_source,
+            "same_source": current is not None,
         }
-        update_available = bool(same_source and ok and compare_versions(entry["version"], row.version) > 0)
+        if current is not None:
+            update_version = current["version"]
+            update_available = bool(
+                ok and update_version and compare_versions(update_version, row.version) > 0
+            )
     pinned_version = settings["pinned"].get(entry["key"])
     return {
         "id": f"{source['id']}:{entry['key']}",
@@ -614,15 +745,25 @@ def _catalog_item(
             "key", "name", "kind", "icon", "summary", "version", "author", "min_telepilot_version",
             "plugin_api", "permissions", "reads", "tags", "channels", "path", "repository", "trust",
         )},
+        **{key: entry.get(key) for key in (
+            "summary_i18n", "description", "usage", "commands", "release_notes", "released_at",
+            "homepage", "license", "icon_url", "screenshots", "channel_versions",
+        )},
         "source_id": source["id"],
         "source_name": source["name"],
         "compatible": ok,
         "incompatible_reason": reason,
         "installed": installed,
         "update_available": update_available,
+        "update_version": update_version if update_available else None,
+        "channel": installed_channel,
+        "available_channels": [{k: ch[k] for k in ("name", "ref", "version")} for ch in channels],
         "pinned_version": pinned_version,
         "auto_update": bool(
-            source.get("auto_update") and entry["trust"] == TRUST_OFFICIAL and not pinned_version
+            source.get("auto_update")
+            and entry["trust"] == TRUST_OFFICIAL
+            and not pinned_version
+            and installed_channel in (None, STABLE_CHANNEL)
         ),
         "rollout": _rollout_public(rollout),
     }
@@ -668,6 +809,7 @@ async def build_catalog(db: AsyncSession, *, refresh: bool = False) -> dict[str,
     return {
         "server_version": __version__,
         "plugin_api": PLUGIN_API_VERSION,
+        "registry_refresh_hours": REGISTRY_BACKGROUND_REFRESH_SECONDS // 3600,
         "sources": source_views,
         "items": items,
         "updates_available": len(update_keys),
@@ -700,6 +842,24 @@ async def _find_entry(source: dict[str, Any], key: str) -> dict[str, Any]:
     raise MarketError("PLUGIN_NOT_IN_MARKET", f"来源「{source['name']}」里没有插件 {key}", status=404)
 
 
+def _channel_or_error(entry: dict[str, Any], channel: str | None) -> dict[str, Any]:
+    name = (channel or STABLE_CHANNEL).strip() or STABLE_CHANNEL
+    for item in available_channels(entry):
+        if item["name"] == name:
+            return item
+    raise MarketError("CHANNEL_NOT_FOUND", f"插件 {entry['key']} 没有「{name}」通道", status=404)
+
+
+async def _repo_for_url(db: AsyncSession, entry: dict[str, Any], url: str, name: str) -> tuple[Any, str | None]:
+    """安装用的仓库对象（``url`` 写进安装记录）与凭证：凭证复用同仓库已保存的插件仓库（含私有凭证）。"""
+
+    base_row = await _repo_row_for(db, entry["repository"], name)
+    token = _repo_token(base_row)
+    if url == entry["repository"]:
+        return base_row, token
+    return SimpleNamespace(id=0, name=name, url=url, credential_enc=None), token
+
+
 async def install(
     db: AsyncSession,
     *,
@@ -707,7 +867,15 @@ async def install(
     key: str,
     default_enabled: bool = False,
     triggered_by_user_id: int | None = None,
+    channel: str | None = None,
+    version: str | None = None,
 ) -> remote_svc.RemotePluginView:
+    """从市场安装。``key`` 也可以写成安装串 ``registry:<key>[@version|#channel]``。"""
+
+    spec_key, spec_version, spec_channel = parse_install_spec(key)
+    key = spec_key
+    channel = channel or spec_channel
+    version = version or spec_version
     source = await get_source(db, source_id)
     if not source["enabled"]:
         raise MarketError("SOURCE_DISABLED", f"来源「{source['name']}」已停用")
@@ -715,10 +883,17 @@ async def install(
     ok, reason = compatibility(entry)
     if not ok:
         raise MarketError("PLUGIN_INCOMPATIBLE", reason or "与当前服务器不兼容", status=409)
-    repo_row = await _repo_row_for(db, entry["repository"], source["name"])
-    url = entry["repository"]
+    target = _channel_or_error(entry, channel)
+    if version and target["version"] and compare_versions(version, target["version"]) != 0:
+        raise MarketError(
+            "VERSION_NOT_AVAILABLE",
+            f"市场里只有 {key} 的当前版本 {target['version']}（{target['name']} 通道），不能安装指定的 {version}",
+            status=409,
+        )
+    url = target["url"]
+    repo_row, token = await _repo_for_url(db, entry, url, source["name"])
     async with repo_svc._repo_cache_lock(url):
-        repo_dir = await repo_svc._ensure_repo_cached_unlocked(url, force_refresh=True, token=_repo_token(repo_row))
+        repo_dir = await repo_svc._ensure_repo_cached_unlocked(url, force_refresh=True, token=token)
         return await repo_svc._install_plugin_from_cached_repo(
             db,
             repo_row,
@@ -739,6 +914,8 @@ class UpdateTarget:
     repo_url: str
     token: str | None = None
     to_version: str | None = None
+    # 切换通道：允许从同一仓库的另一个分支替换（版本可能更低），并照常进入健康观察窗口。
+    switch_channel: bool = False
 
 
 @dataclass(slots=True)
@@ -859,6 +1036,24 @@ def _feature_snapshot(feature: Feature | None) -> dict[str, Any] | None:
     }
 
 
+def _same_clone(left: str | None, right: str | None) -> bool:
+    """同一个 Git 仓库（不看分支）：切换通道时用。"""
+
+    if not left or not right:
+        return False
+    try:
+        left_url = remote_svc.normalize_git_source_url(left).clone_url
+        right_url = remote_svc.normalize_git_source_url(right).clone_url
+    except remote_svc.RemotePluginError:
+        return False
+
+    def _identity(value: str) -> str:
+        value = value.rstrip("/")
+        return value[:-4] if value.endswith(".git") else value
+
+    return _identity(left_url) == _identity(right_url)
+
+
 async def _apply_one(
     target: UpdateTarget,
     snapshot: Path,
@@ -877,15 +1072,24 @@ async def _apply_one(
                 return result
             result.display_name = str((installed.manifest_json or {}).get("display_name") or target.key)
             result.from_version = installed.version
-            if not repo_svc._same_repo_source(installed.source_url, target.repo_url):
+            if target.switch_channel:
+                if not _same_clone(installed.source_url, target.repo_url):
+                    result.status = "skipped"
+                    result.message = "已安装的插件来自别的仓库，不能切换通道"
+                    return result
+            elif not repo_svc._same_repo_source(installed.source_url, target.repo_url):
                 result.status = "skipped"
                 result.message = "已安装的插件来自别的仓库，没有替换"
                 return result
             meta = remote_svc._read_plugin_metadata(snapshot, fallback_name=target.key)
             result.to_version = meta.version
             order = compare_versions(meta.version, installed.version)
-            metadata_only = order == 0 and repo_svc._installed_plugin_metadata_needs_refresh(installed, meta)
-            if order < 0 or (order == 0 and not metadata_only):
+            metadata_only = (
+                not target.switch_channel
+                and order == 0
+                and repo_svc._installed_plugin_metadata_needs_refresh(installed, meta)
+            )
+            if not target.switch_channel and (order < 0 or (order == 0 and not metadata_only)):
                 result.status = "skipped"
                 result.message = "已经是最新版本"
                 return result
@@ -938,7 +1142,7 @@ async def _apply_one(
                 result.health_check = True
             await db.commit()
         result.status = "updated"
-        result.message = "已同步元数据" if metadata_only else "已更新"
+        result.message = "已同步元数据" if metadata_only else ("已切换通道" if target.switch_channel else "已更新")
         try:
             async with AsyncSessionLocal() as db:
                 await remote_svc.trigger_reload(db, target.key)
@@ -1048,8 +1252,14 @@ async def update_from_market(
         if repo_row is None:
             repo_row = await _repo_row_for(db, item["repository"], item["source_name"])
             repo_rows[item["repository"]] = repo_row
+        repo_url = channel_url(item, item.get("channel") or STABLE_CHANNEL) or item["repository"]
         targets.append(
-            UpdateTarget(key=key, repo_url=item["repository"], token=_repo_token(repo_row), to_version=item["version"])
+            UpdateTarget(
+                key=key,
+                repo_url=repo_url,
+                token=_repo_token(repo_row),
+                to_version=item.get("update_version") or item["version"],
+            )
         )
     await db.rollback()
     return await run_updates(
@@ -1059,6 +1269,56 @@ async def update_from_market(
         health_window_minutes=settings["health_window_minutes"],
         triggered_by_user_id=triggered_by_user_id,
         preset=preset,
+    )
+
+
+async def switch_channel(
+    db: AsyncSession,
+    *,
+    key: str,
+    channel: str,
+    source_id: str | None = None,
+    triggered_by_user_id: int | None = None,
+) -> UpdateRunResult:
+    """把已安装插件切到另一个通道（稳定 ↔ 测试）。走与更新相同的替换流程：保留旧版目录、健康观察窗口、
+    不健康自动回滚。从测试切回稳定可能是降级；插件数据目录不随版本变化。"""
+
+    catalog = await build_catalog(db)
+    candidates = [
+        item for item in catalog["items"]
+        if item["key"] == key and (source_id is None or item["source_id"] == source_id)
+    ]
+    item = next((c for c in candidates if (c.get("installed") or {}).get("same_source")), None)
+    if item is None:
+        if not candidates:
+            raise MarketError("PLUGIN_NOT_IN_MARKET", f"市场里没有插件 {key}", status=404)
+        if not any(c.get("installed") for c in candidates):
+            raise MarketError("PLUGIN_NOT_INSTALLED", f"插件 {key} 还没有安装", status=404)
+        raise MarketError("NOT_SAME_SOURCE", "已安装的版本来自别的仓库，不能在市场里切换通道", status=409)
+    if item["pinned_version"]:
+        raise MarketError("PLUGIN_PINNED", f"已固定在 {item['pinned_version']}，先取消固定再切换通道", status=409)
+    target = _channel_or_error(item, channel)
+    if item.get("channel") == target["name"]:
+        raise MarketError("ALREADY_ON_CHANNEL", f"已经在「{target['name']}」通道", status=409)
+    if not item["compatible"]:
+        raise MarketError("PLUGIN_INCOMPATIBLE", item.get("incompatible_reason") or "与当前服务器不兼容", status=409)
+    _row, token = await _repo_for_url(db, item, target["url"], item["source_name"])
+    settings = catalog["settings"]
+    await db.rollback()
+    return await run_updates(
+        [
+            UpdateTarget(
+                key=key,
+                repo_url=target["url"],
+                token=token,
+                to_version=target["version"],
+                switch_channel=True,
+            )
+        ],
+        concurrency=1,
+        trigger="channel",
+        health_window_minutes=settings["health_window_minutes"],
+        triggered_by_user_id=triggered_by_user_id,
     )
 
 
@@ -1429,6 +1689,8 @@ def auto_update_candidates(catalog: dict[str, Any], rollouts: dict[str, dict[str
             continue
         if item["trust"] != TRUST_OFFICIAL or item["pinned_version"]:
             continue
+        if (item.get("channel") or STABLE_CHANNEL) != STABLE_CHANNEL:
+            continue  # 测试通道只手动更新
         record = rollouts.get(item["key"]) or {}
         if record.get("status") == ROLLOUT_WATCHING:
             continue
@@ -1452,16 +1714,41 @@ async def auto_update_tick() -> UpdateRunResult | None:
         return await update_from_market(db, keys=keys, trigger="auto")
 
 
+async def registry_refresh_tick() -> int:
+    """后台定时拉取所有已启用来源的 registry.json（缓存未过期的来源不会重复下载）；返回来源数。
+
+    官方源拉取失败时照旧用随服务器打包的索引副本兜底；``TELEPILOT_PLUGIN_MARKET=off`` 时官方源不拉取。
+    """
+
+    async with AsyncSessionLocal() as db:
+        sources = [source for source in await list_sources(db) if source["enabled"] and source.get("url")]
+    for source in sources:
+        try:
+            await source_entries(source)
+        except Exception:  # noqa: BLE001
+            log.warning("插件市场来源 %s 定时拉取失败", source["id"], exc_info=True)
+    return len(sources)
+
+
 async def market_loop() -> None:
-    """后台：每 30 秒巡检健康窗口；按“远程插件检查更新”的周期执行官方源自动更新（默认关闭）。"""
+    """后台：每 30 秒巡检健康窗口；每 6 小时（最多）拉一次已启用来源的索引，让更新角标不用等打开市场；
+    按“远程插件检查更新”的周期执行官方源自动更新（默认关闭）。"""
 
     await asyncio.sleep(20)
     last_auto: datetime | None = None
+    last_registry: datetime | None = None
     while True:
         try:
             await check_rollouts()
         except Exception:  # noqa: BLE001
             log.warning("插件更新健康窗口巡检失败", exc_info=True)
+        now = _now()
+        if last_registry is None or (now - last_registry).total_seconds() >= REGISTRY_BACKGROUND_REFRESH_SECONDS:
+            last_registry = now
+            try:
+                await registry_refresh_tick()
+            except Exception:  # noqa: BLE001
+                log.warning("插件市场索引定时拉取失败", exc_info=True)
         try:
             enabled, interval = await remote_svc._load_update_check_setting()
             now = _now()
@@ -1492,11 +1779,16 @@ __all__ = [
     "load_rollouts",
     "load_settings",
     "market_loop",
+    "available_channels",
+    "channel_url",
+    "parse_install_spec",
     "parse_registry",
+    "registry_refresh_tick",
     "rollback",
     "run_updates",
     "save_settings",
     "set_pinned",
+    "switch_channel",
     "update_from_market",
     "update_repo_installed",
     "update_source",

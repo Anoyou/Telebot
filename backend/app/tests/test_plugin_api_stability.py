@@ -326,8 +326,35 @@ def test_builtin_registry_is_v1() -> None:
     data = json.loads(market.BUILTIN_REGISTRY_PATH.read_text(encoding="utf-8"))
     assert data["schema_version"] == stability.REGISTRY_SCHEMA_VERSION == market.REGISTRY_SCHEMA_VERSION == 1
     assert set(data) <= set(stability.REGISTRY_V1_TOP_FIELDS)
+    allowed = set(stability.REGISTRY_V1_ENTRY_FIELDS) | set(stability.REGISTRY_V1_ADDITIVE_ENTRY_FIELDS)
     for entry in data["plugins"]:
-        assert set(entry) <= set(stability.REGISTRY_V1_ENTRY_FIELDS), entry.get("key")
+        assert set(entry) <= allowed, entry.get("key")
+        assert isinstance(entry.get("summary"), str), entry.get("key")  # 旧服务器按字符串读 summary
+
+
+def test_registry_additive_fields_are_disjoint_and_read() -> None:
+    assert set(stability.REGISTRY_V1_ADDITIVE_ENTRY_FIELDS).isdisjoint(stability.REGISTRY_V1_ENTRY_FIELDS)
+    raw = {
+        "key": "demo",
+        "version": "1.0.0",
+        "summary": "s",
+        "summary_i18n": {"zh": "演示", "en": "Demo"},
+        "description": "d",
+        "usage": "u",
+        "commands": ["demo"],
+        "release_notes": "- n",
+        "released_at": "2026-11-01",
+        "homepage": "https://example.com/demo",
+        "license": "MIT",
+        "icon_url": "https://example.com/i.png",
+        "screenshots": ["https://example.com/s.png"],
+        "channel_versions": {"stable": "1.0.0"},
+    }
+    assert set(stability.REGISTRY_V1_ADDITIVE_ENTRY_FIELDS) <= set(raw)
+    data = {"schema_version": 1, "repository": "https://github.com/me/p.git", "plugins": [raw]}
+    entries, _ = market.parse_registry(data, source={"trust": "community"})
+    for field in stability.REGISTRY_V1_ADDITIVE_ENTRY_FIELDS:
+        assert entries[0][field], field
 
 
 # ── 版本号：只登记范围，不动契约版本与 Plugin API ───────
