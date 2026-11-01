@@ -235,6 +235,8 @@ struct AssistantView: View {
                 // 加载期间内容变高、视图暂时不在底部时仍保持贴底，随后由锚点或下方的补滚回到底部。
                 .onScrollPhaseChange { _, phase in
                     userScrolling = phase == .tracking || phase == .interacting || phase == .decelerating
+                    // 第 23 轮：用户一拖动就把正在逐字显示的回答立即全部显示，方便阅读。
+                    if phase == .tracking || phase == .interacting { store.live.revealAll() }
                 }
                 .onScrollGeometryChange(for: Bool.self) { geometry in
                     geometry.visibleRect.maxY >= geometry.contentSize.height - 80

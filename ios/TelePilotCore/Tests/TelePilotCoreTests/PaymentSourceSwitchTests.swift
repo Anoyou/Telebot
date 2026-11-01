@@ -43,4 +43,28 @@ final class PaymentSourceSwitchTests: XCTestCase {
         let view = try XCTUnwrap(PaymentSourceSwitchView.build(status(authoritative: false, effective: "legacy", active: true), pluginKey: nil))
         XCTAssertEqual(view.sources.map(\.pluginKey), ["payment-source-cn-transfer"])
     }
+
+    // 第 23 轮：App 里可拨，确认文案与 Web paymentSourceConfirmText 一致，写入只带这一个子键。
+    func testConfirmationMatchesWeb() {
+        let on = PaymentSourceSwitchView.confirmation(turningOn: true)
+        XCTAssertEqual(on.title, "改为以插件结果为准？")
+        XCTAssertEqual(on.confirmLabel, "打开")
+        XCTAssertTrue(on.message.contains("插件出错或超时会自动回退旧解析"))
+        let off = PaymentSourceSwitchView.confirmation(turningOn: false)
+        XCTAssertEqual(off.title, "改回以旧解析为准？")
+        XCTAssertEqual(off.confirmLabel, "关闭")
+        XCTAssertTrue(off.message.contains("插件只做对照"))
+    }
+
+    func testPatchBodyOnlyTouchesTheSwitch() {
+        XCTAssertEqual(PaymentSourceSwitchView.patchBody(enabled: true),
+                       .object(["log_retention": .object(["payment_source_plugin_authoritative": .bool(true)])]))
+        XCTAssertEqual(PaymentSourceSwitchView.patchBody(enabled: false)["log_retention"]?["payment_source_plugin_authoritative"]?.boolValue, false)
+    }
+
+    func testMessages() {
+        XCTAssertEqual(PaymentSourceSwitchView.successMessage(enabled: true), "已改为以插件结果为准，30 秒内生效")
+        XCTAssertEqual(PaymentSourceSwitchView.successMessage(enabled: false), "已改回以旧解析为准，30 秒内生效")
+        XCTAssertTrue(PaymentSourceSwitchView.failureMessage("网络错误").hasPrefix("保存失败：网络错误"))
+    }
 }

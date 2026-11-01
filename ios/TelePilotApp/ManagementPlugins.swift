@@ -2754,26 +2754,64 @@ private struct PluginSecretListEditor: View {
 
 // MARK: - 转账通知判定（第 22 轮）
 
-/// 「转账通知以插件结果为准」开关状态与大白话说明，作为 List 里的一个 Section 插入。
-/// 只读：App 不改这个开关（涉及转账通知判定，请在 Web 改）。读取 `GET /api/payment-sources/status`；
-/// 旧服务器没有该接口或读取失败时整段不显示、不报错。`pluginKey` 为 nil 时显示全部转账通知插件（服务器参数页跳转用）。
+/// 「转账通知以插件结果为准」开关与大白话说明，作为 List 里的一个 Section 插入。
+/// 读取 `GET /api/payment-sources/status`；旧服务器没有该接口或读取失败时整段不显示、不报错（也就不能拨）。
+/// 第 23 轮起可拨：拨动先弹系统确认框（文案与 Web 一致，取消不改），确认后写入 Web 同一个接口
+/// `PATCH /api/system/settings`，只提交一次、不自动重试；成功或失败都重新读取状态，以服务器为准（失败即回到原样并提示）。
+/// TelePilot 只有一个管理员账号，登录的就是管理员；接口本身需要登录。`pluginKey` 为 nil 时显示全部转账通知插件（服务器参数页跳转用）。
 struct PaymentSourceSwitchSection: View {
     var pluginKey: String?
     @Environment(AppModel.self) private var model
     @State private var view: PaymentSourceSwitchView?
     @State private var loaded = false
+    /// 等待确认的目标值（拨动后弹确认框；取消即清空，开关回到服务器值）。
+    @State private var confirmTarget: Bool?
+    @State private var saving = false
+    @State private var resultMessage: String?
+    @State private var errorMessage: String?
 
     var body: some View {
         if let view {
             Section {
-                LabeledContent("转账通知以插件结果为准") {
-                    Text(view.checked ? "开" : "关").foregroundStyle(view.checked ? Color.green : Color.secondary)
+                Toggle(isOn: Binding(
+                    get: { view.checked },
+                    set: { next in
+                        guard !saving, next != view.checked else { return }
+                        resultMessage = nil
+                        errorMessage = nil
+                        confirmTarget = next
+                    }
+                )) {
+                    HStack(spacing: 8) {
+                        Text("转账通知以插件结果为准")
+                        if saving { ProgressView().controlSize(.small) }
+                    }
                 }
-                .accessibilityElement(children: .combine)
+                .disabled(saving)
                 .accessibilityIdentifier("paymentSource.switch")
+                .alert(Text(confirmation?.title ?? ""), isPresented: Binding(
+                    get: { confirmTarget != nil },
+                    set: { if !$0 { confirmTarget = nil } }
+                ), presenting: confirmTarget) { next in
+                    Button("取消", role: .cancel) { confirmTarget = nil }
+                    Button(PaymentSourceSwitchView.confirmation(turningOn: next).confirmLabel) {
+                        confirmTarget = nil
+                        Task { await save(next) }
+                    }
+                } message: { next in
+                    Text(PaymentSourceSwitchView.confirmation(turningOn: next).message)
+                }
                 Label(view.stateLabel, systemImage: symbol(view.tone))
                     .foregroundStyle(color(view.tone))
                     .accessibilityIdentifier("paymentSource.state")
+                if let resultMessage {
+                    Label(resultMessage, systemImage: "checkmark.circle.fill").font(.footnote).foregroundStyle(.green)
+                        .accessibilityIdentifier("paymentSource.result")
+                }
+                if let errorMessage {
+                    Label(errorMessage, systemImage: "exclamationmark.triangle.fill").font(.footnote).foregroundStyle(.red)
+                        .accessibilityIdentifier("paymentSource.error")
+                }
                 if pluginKey == nil {
                     ForEach(view.sources, id: \.pluginKey) { source in
                         LabeledContent(source.displayName) {
@@ -2803,11 +2841,44 @@ struct PaymentSourceSwitchSection: View {
         }
     }
 
+    private var confirmation: PaymentSourceSwitchView.Confirmation? {
+        confirmTarget.map { PaymentSourceSwitchView.confirmation(turningOn: $0) }
+    }
+
     private func load() async {
         // 旧服务器 404 / 任何读取失败：不显示，不打扰。
         let status = try? await model.request(path: "/api/payment-sources/status")
         view = PaymentSourceSwitchView.build(status, pluginKey: pluginKey)
         loaded = true
+    }
+
+    /// 写入后重新读取；读取失败时保留原来显示的状态（不让整段消失）。
+    private func reload() async -> Bool {
+        guard let status = try? await model.request(path: "/api/payment-sources/status"),
+              let next = PaymentSourceSwitchView.build(status, pluginKey: pluginKey) else { return false }
+        view = next
+        return true
+    }
+
+    private func save(_ next: Bool) async {
+        guard !saving else { return }
+        saving = true
+        defer { saving = false }
+        resultMessage = nil
+        errorMessage = nil
+        do {
+            _ = try await model.request(path: "/api/system/settings", method: "PATCH", body: PaymentSourceSwitchView.patchBody(enabled: next))
+            let reloaded = await reload()
+            resultMessage = PaymentSourceSwitchView.successMessage(enabled: next)
+                + (reloaded ? "" : "（没能重新读取状态，请稍后刷新确认）")
+        } catch {
+            if (error as? APIError)?.isOutcomeUncertain == true {
+                errorMessage = PaymentSourceSwitchView.uncertainMessage
+            } else {
+                errorMessage = PaymentSourceSwitchView.failureMessage(error.localizedDescription)
+            }
+            _ = await reload()
+        }
     }
 
     private func symbol(_ tone: PaymentSourceSwitchView.Tone) -> String {

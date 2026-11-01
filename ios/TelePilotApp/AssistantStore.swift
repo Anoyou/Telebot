@@ -670,6 +670,8 @@ final class AssistantStore {
 
     func cancel(_ model: AppModel) async {
         guard let runID, !busy else { return }
+        // 第 23 轮：停止生成时已收到的文字立即全部显示。
+        live.revealAll()
         busy = true
         defer { busy = false }
         do {
@@ -679,7 +681,7 @@ final class AssistantStore {
         } catch { self.error = AssistantPresentation.error(error); await restoreRun(model) }
     }
 
-    func pauseSubscription() { subscriptionID = UUID(); streamTask?.cancel(); streaming = false; streamReconnect = nil }
+    func pauseSubscription() { live.revealAll(); subscriptionID = UUID(); streamTask?.cancel(); streaming = false; streamReconnect = nil }
 
     func attach(_ model: AppModel) {
         streamTask?.cancel()
@@ -717,7 +719,8 @@ final class AssistantStore {
                 }
                 guard !Task.isCancelled, token == generation, subscription == subscriptionID else { return }
                 do {
-                    live.flush()
+                    // 第 23 轮：剩下的文字约 0.3 秒内逐字追平（不做动画时立即全部显示）。
+                    live.finishStream()
                     let row = try await model.request(path: AssistantPresentation.root + "/runs/\(AssistantPresentation.path(runID))")
                     guard token == generation else { return }
                     activeRun = row

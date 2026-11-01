@@ -1,8 +1,10 @@
 import Foundation
 
 /// 第 22 轮：「转账通知以插件结果为准」开关（`log_retention.payment_source_plugin_authoritative`）的展示规则。
-/// 数据来自 `GET /api/payment-sources/status`（旧服务器没有该接口 → 不显示）；生效与否完全以服务器当下配置为准，
-/// App 只显示状态和说明，修改请在 Web。文案与 Web `frontend/src/lib/paymentSource.ts` 同一套。
+/// 数据来自 `GET /api/payment-sources/status`（旧服务器没有该接口 → 不显示）；生效与否完全以服务器当下配置为准。
+/// 第 23 轮起 App 里也能拨：先弹二次确认（文案与 Web `paymentSourceConfirmText` 一致），再写入 Web 同一个接口
+/// `PATCH /api/system/settings`（`{"log_retention": {"payment_source_plugin_authoritative": …}}`），不自动重试。
+/// 文案与 Web `frontend/src/lib/paymentSource.ts`、`PaymentSourceSwitch.tsx` 同一套。
 public struct PaymentSourceSwitchView: Equatable, Sendable {
     public enum Tone: String, Sendable { case neutral, success, warning }
 
@@ -26,7 +28,44 @@ public struct PaymentSourceSwitchView: Equatable, Sendable {
         "开：以这个插件读出的付款人、收款人和金额为准；旧格式认不出的可信 Bot 消息也交给插件判断。",
         "插件出错或超时会自动回退旧解析；随时可以关掉，30 秒内生效，结算规则本身不变。",
     ]
-    public static let editHint = "App 里只显示状态；要改请在 Web「服务器设置 › 平台与模块」或 Web 插件详情里改。转账金额是群内游戏币。"
+    public static let editHint = "拨动开关会先弹出确认，确认后才写入服务器；Web「服务器设置 › 平台与模块」和 Web 插件详情里也能改。转账金额是群内游戏币。"
+    /// 服务器参数页（全部参数）里这一行的只读说明：去专门页面拨，避免绕过确认。
+    public static let serverSettingsHint = "去「插件 › 转账通知判定」拨开关（会先弹确认），这里只显示状态。"
+
+    /// 二次确认弹窗的文案（与 Web `paymentSourceConfirmText` 逐字一致）。
+    public struct Confirmation: Equatable, Sendable {
+        public let title: String
+        public let message: String
+        public let confirmLabel: String
+    }
+
+    public static func confirmation(turningOn next: Bool) -> Confirmation {
+        next
+            ? Confirmation(title: "改为以插件结果为准？",
+                           message: "打开后转账通知以转账通知插件读出的结果为准（30 秒内生效）。插件出错或超时会自动回退旧解析，随时可以关掉。",
+                           confirmLabel: "打开")
+            : Confirmation(title: "改回以旧解析为准？",
+                           message: "关闭后转账通知以系统自带的旧解析为准，插件只做对照（30 秒内生效）。",
+                           confirmLabel: "关闭")
+    }
+
+    /// 写入请求体：只带这一个子键（与 Web 相同）。
+    public static func patchBody(enabled: Bool) -> JSONValue {
+        .object(["log_retention": .object(["payment_source_plugin_authoritative": .bool(enabled)])])
+    }
+
+    /// 成功提示（与 Web toast 一致）。
+    public static func successMessage(enabled: Bool) -> String {
+        enabled ? "已改为以插件结果为准，30 秒内生效" : "已改回以旧解析为准，30 秒内生效"
+    }
+
+    /// 失败提示：开关保持原样（以服务器为准）。
+    public static func failureMessage(_ reason: String) -> String {
+        "保存失败：\(reason)（开关没有改动，请刷新确认当前状态）"
+    }
+
+    /// 结果未知（超时、断网）：不自动重试，请刷新核对。
+    public static let uncertainMessage = "保存结果未知：网络中断，没有自动重试。请稍后刷新，确认服务器上的实际状态。"
 
     /// - Parameters:
     ///   - status: `GET /api/payment-sources/status` 的结果。

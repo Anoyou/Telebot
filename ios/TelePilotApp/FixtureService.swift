@@ -267,7 +267,8 @@ actor FixtureService: AppServing {
         // 第 22 轮：「转账通知以插件结果为准」开关状态。`--ui-test-old-server-payment-source` 模拟没有该接口的旧服务器（404）。
         if clean == "/api/payment-sources/status" {
             if Self.oldServerPaymentSource { throw APIError.server(status: 404, code: nil) }
-            return Self.paymentSourceStatus
+            // 第 23 轮：开关值取当前（可能被 App 改过的）服务器设置。
+            return Self.paymentSourceStatus(authoritative: fixtureSettings["log_retention"]?["payment_source_plugin_authoritative"]?.boolValue ?? false)
         }
         // `--ui-test-old-server-profile` 模拟没有运行模式接口的旧服务器（框架 404）：不显示值守全局提示。
         if clean.hasPrefix("/api/platform/profile"), ProcessInfo.processInfo.arguments.contains("--ui-test-old-server-profile") {
@@ -705,6 +706,10 @@ actor FixtureService: AppServing {
             return Self.settingsMeta
         }
         if clean == "/api/system/settings" {
+            // 第 23 轮：`--ui-test-payment-source-patch-fails` 模拟服务器拒绝修改转账通知判定开关（开关应保持原样并提示）。
+            if method == "PATCH", Self.paymentSourcePatchFails, body?["log_retention"]?["payment_source_plugin_authoritative"] != nil {
+                throw APIError.server(status: 400, code: "SETTING_REJECTED")
+            }
             if method == "PATCH", let patch = body?.objectValue {
                 var current = fixtureSettings.objectValue ?? [:]
                 for (key, value) in patch {
@@ -1040,12 +1045,15 @@ actor FixtureService: AppServing {
         "is_builtin": false, "signature_ok": true, "orphan": false, "permissions": []
     ]
 
-    static let paymentSourceStatus: JSONValue = [
-        "authoritative": false, "effective": "legacy", "label": "以旧解析为准（插件只做对照）",
+    static var paymentSourcePatchFails: Bool { ProcessInfo.processInfo.arguments.contains("--ui-test-payment-source-patch-fails") }
+
+    static func paymentSourceStatus(authoritative: Bool) -> JSONValue { [
+        "authoritative": .bool(authoritative), "effective": .string(authoritative ? "plugin" : "legacy"),
+        "label": .string(authoritative ? "以插件为准（生效中）" : "以旧解析为准（插件只做对照）"),
         "setting_key": "log_retention.payment_source_plugin_authoritative",
         "sources": [["plugin_key": "payment-source-cn-transfer", "display_name": "中文转账通知", "version": "1.2.0",
                      "source_ids": ["cn-transfer"], "active": true, "inactive_reason": nil]]
-    ]
+    ] }
 
     static let paymentSourceCard: JSONValue = [
         "plugin_key": "payment-source-cn-transfer", "plugin_name": "中文转账通知", "card_id": "_host.payment_source", "slot": "plugin.overview",
