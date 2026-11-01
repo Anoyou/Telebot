@@ -27,6 +27,9 @@ protocol AppServing: Sendable {
     func download(path: String, method: String, body: JSONValue?) async throws -> Data
     func upload(path: String, file: Data, filename: String, fields: [String: String]) async throws -> JSONValue
     func stream(path: String, onEvent: @escaping @Sendable (JSONValue) async -> Void) async throws
+    /// 第 22 轮：最近一次连接类失败的诊断记录（不含凭证）与最近一次连上服务器的时间，用于「诊断详情」。
+    func lastConnectionFailure() async -> ConnectionFailureRecord?
+    func lastConnectedAt() async -> Date?
 }
 
 /// 一次 App 内 Google 验证 Cloudflare Access 的过程。

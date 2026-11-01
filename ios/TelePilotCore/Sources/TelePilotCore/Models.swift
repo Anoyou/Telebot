@@ -133,7 +133,8 @@ public enum APIError: Error, LocalizedError, Sendable {
     case unauthorized
     case server(status: Int, code: String?)
     case incompatibleResponse
-    case network(outcomeUncertain: Bool)
+    /// 连不上服务器或连接中途断开。`cause` 是由 URLError 归类的原因（第 22 轮），旧代码只看 `outcomeUncertain`。
+    case network(outcomeUncertain: Bool, cause: NetworkFailureCause = .unknown)
     case mutationOutcomeUnknown(incompatibleResponse: Bool)
     case redirectRejected
     case secureStorage
@@ -164,7 +165,7 @@ public enum APIError: Error, LocalizedError, Sendable {
     }
     public var isOutcomeUncertain: Bool {
         switch self {
-        case .network(let uncertain): uncertain
+        case .network(let uncertain, _): uncertain
         case .mutationOutcomeUnknown: true
         default: false
         }
@@ -174,9 +175,15 @@ public enum APIError: Error, LocalizedError, Sendable {
         case .invalidServerURL: "请输入 HTTPS 服务器根地址，不要包含账号、路径、查询参数或片段。"
         case .unauthorized: "登录已失效或验证信息不正确，请重新登录。"
         case .incompatibleResponse: "服务器返回的数据与此 App 不兼容，请检查服务器与 App 更新。"
-        case .network(let uncertain): uncertain
-            ? "连接中断，操作结果尚未确认。请刷新账号状态，不要立即重复操作。"
-            : "无法连接服务器，请检查网络、地址和 HTTPS 证书后重试。"
+        case .network(let uncertain, let cause):
+            // 第 22 轮：说清原因（没网 / 域名 / 拒绝 / 超时 / 证书 / 中途断开）+ 怎么办；原因不明时保持旧文字。
+            if uncertain {
+                cause == .unknown
+                    ? "连接中断，操作结果尚未确认。请刷新账号状态，不要立即重复操作。"
+                    : ConnectionDiagnoser.network(cause).reason + "操作结果尚未确认，请先刷新核对，不要立即重复操作。"
+            } else {
+                ConnectionDiagnoser.network(cause).summary
+            }
         case .mutationOutcomeUnknown: "未能确认服务器操作结果。请刷新账号状态或打开 Web 管理台核实，不要立即重复操作。"
         case .redirectRejected: "服务器返回了重定向。为保护登录信息，请直接填写最终 HTTPS 地址。"
         case .secureStorage: "无法访问系统钥匙串，请解锁设备后重试。"
@@ -210,7 +217,13 @@ public enum APIError: Error, LocalizedError, Sendable {
             case "DIR_EXISTS": "服务器插件目录里已有同名目录但没有安装记录，请在 Web 管理台清理后重试。"
             case "KEY_CONFLICTS_BUILTIN", "BUILTIN_PLUGIN_CONFLICT": "该插件名与服务器内置插件冲突，不能由插件仓库安装或覆盖。"
             case "PLUGIN_CAPABILITY_FORCED_OFF": "插件需要的平台能力模块已被关闭，请先在系统设置的能力开关中开启后再启用插件。"
-            default: status == 429 ? "请求过于频繁，请稍后重试。" : "服务器拒绝了请求（HTTP \(status)），请在 Web 管理台检查详情。"
+            default:
+                // 第 22 轮：Cloudflare Tunnel 不在线、网关 502/503/504、接口不存在（服务器版本过旧）等给出原因与建议。
+                if status != 401, status != 429, let diagnosis = ConnectionDiagnoser.server(status: status, code: code) {
+                    diagnosis.summary
+                } else {
+                    status == 429 ? "请求过于频繁，请稍后重试。" : "服务器拒绝了请求（HTTP \(status)），请在 Web 管理台检查详情。"
+                }
             }
         }
     }

@@ -232,6 +232,16 @@ public actor TelePilotClient {
         try await transport.stream(path: path, onEvent: onEvent)
     }
 
+    /// 第 22 轮：最近一次连接类失败的诊断记录（目标地址、路径、尝试次数、耗时、底层错误码；不含任何凭证）。
+    public nonisolated func lastConnectionFailure() async -> ConnectionFailureRecord? {
+        await transport.connectionFailure()
+    }
+
+    /// 最近一次收到服务器响应的时间（诊断详情「上次连上」）。
+    public nonisolated func lastConnectedAt() async -> Date? {
+        await transport.lastConnectedAt()
+    }
+
     private func mutationSafely(_ operation: () async throws -> Void) async throws {
         do { try await safely(operation) }
         catch let error as APIError {

@@ -188,7 +188,8 @@ struct SecretField: View {
     static func isMissingEndpoint(_ error: Error) -> Bool {
         guard let apiError = error as? APIError, case .server(let status, let code) = apiError else { return false }
         // 新服务器的 404 一定带错误码（ACCOUNT_NOT_FOUND 等）；没有路由时是框架的 404 / 405。
-        return (status == 404 && (code == nil || code == "HTTP")) || status == 405
+        // 第 22 轮起 App 把框架默认的 404 / 405 正文合成为 `ROUTE_NOT_FOUND`。
+        return (status == 404 && (code == nil || code == "HTTP" || code == ConnectionEdgeDetector.routeNotFound)) || status == 405
     }
 }
 

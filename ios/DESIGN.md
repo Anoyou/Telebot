@@ -358,3 +358,11 @@ iPhone 和 iPad 使用系统安全区；支持横竖屏、长中文、辅助功�
 - Service Token（`CF-Access-Client-Id` / `CF-Access-Client-Secret`）是「高级」可选项，配置后优先使用。所有网络出口统一在 `SessionTransport` 注入 Access 凭证；凭证存钥匙串、按服务器隔离、不进日志与错误文案。
 - 识别 Access 拦截（3xx 指向 `*.cloudflareaccess.com` 或 `/cdn-cgi/access/`、Access 的 401/403 或登录页）并按凭证状态单独提示；登录页在 Access 区引导，已登录时弹出 Access 页面一键重新验证。不跟随任何重定向，其他重定向仍拒绝。
 - Access 拦截不清除 TelePilot 会话；写操作被拦截时结果是确定的“未执行”，不显示“结果未知”，也不自动重试或重放。验证后只做只读刷新。
+
+## 连接失败诊断（0.34.0，第 22 轮）
+
+- 原则：连不上或断线时**说原因 + 怎么办**，一句大白话，不写笼统的“连接失败”。分类只在 `TelePilotCore/ConnectionDiagnosis.swift`（`ConnectionDiagnoser`）：URLError 码（没网 / DNS / 拒绝 / 超时 / 证书 / 中途断开）、HTTP 状态与 Cloudflare 错误页（`CLOUDFLARE_1033` 等由 `SessionTransport` 合成 code）、框架默认 404（`ROUTE_NOT_FOUND` = 服务器版本过旧）、401、Access 拦截。带 TelePilot 业务错误码的（如 `WORKER_OFFLINE`、`OTP_INVALID`）不算连接问题，文字不变；原因不明时保持旧文字。`APIError.errorDescription` 直接用诊断文案，所以各页的错误提示自动变清楚，不需要逐页改。
+- 显示位置：概览状态行（`overview.status` 的说明行写原因 + 建议）下面一行「诊断详情」（`ConnectionProblemView`，`DisclosureGroup`）；登录页「未能完成登录」提示（标题换成原因短标题）下面同样一行。详情行标识 `connection.details.<id>`（target / request / attempts / elapsed / error / server / ray / at / since / lastSuccess / app），复制按钮 `connection.details.copy`（复制后变「已复制」）。
+- 隐私：诊断记录只存服务器根地址、去掉查询参数的路径、方法、次数、耗时、URLError 数字码、HTTP 状态、错误码、cf-ray 与 Server 头（各截断 40 个 ASCII 字符），从不保存请求头、Cookie、Token 或错误对象本身。
+- Agent 进度流断线：对话顶部 `StreamReconnectBanner`（`assistant.reconnect`）「已断开 x 秒，正在第 n 次重连」+ 原因 + “任务仍在服务器执行”；每秒刷新（`TimelineView`），收到任何事件（含心跳）即消失；重连次数用完时改为原有的「恢复进度」提示并带上原因短标题。
+- 新增连接出口（新的 URLSession、新的流）时：错误一律经 `SessionTransport` 归类并调用 `noteFailure` 记诊断记录，不要再把 URLError 直接折叠成无原因的 `.network`。

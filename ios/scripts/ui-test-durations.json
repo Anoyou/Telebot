@@ -18,6 +18,8 @@
   "AssistantUITests/testSessionModelRestoresPerSessionFromServer": 50,
   "AssistantUITests/testSkillsToolbarEntryOpensListAndDiffWraps": 66,
   "AssistantUITests/testTurnUsageShowsModelThenMetricsOnTwoLines": 16,
+  "ConnectionDiagnosticsUITests/testAgentStreamDropShowsReconnectingThenRecovers": 40,
+  "ConnectionDiagnosticsUITests/testTunnelOfflineShowsReasonAndCopyableDetails": 35,
   "DiagnosticsUITests/testDispatchDebugFillsFromRecentMessageAndReportsOfflineWorker": 50,
   "DiagnosticsUITests/testDispatchDebugShowsFourStagesWithReasons": 55,
   "DiagnosticsUITests/testLogMessageDetailHidesReproduceWhenDispatchDebugOff": 40,
