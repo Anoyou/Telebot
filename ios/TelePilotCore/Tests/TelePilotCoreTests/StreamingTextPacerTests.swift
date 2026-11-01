@@ -7,8 +7,10 @@ import Testing
 
     @Test func nothingToShowReturnsZero() {
         var pacer = StreamingTextPacer()
-        #expect(pacer.advance(backlog: 0, elapsed: frame, finished: false) == 0)
-        #expect(pacer.advance(backlog: 0, elapsed: frame, finished: true) == 0)
+        let step1 = pacer.advance(backlog: 0, elapsed: frame, finished: false)
+        #expect(step1 == 0)
+        let step2 = pacer.advance(backlog: 0, elapsed: frame, finished: true)
+        #expect(step2 == 0)
     }
 
     @Test func smallBacklogUsesMinimumRate() {
@@ -29,8 +31,10 @@ import Testing
 
     @Test func neverShowsMoreThanBacklog() {
         var pacer = StreamingTextPacer()
-        #expect(pacer.advance(backlog: 3, elapsed: 0.25, finished: false) == 3)
-        #expect(pacer.advance(backlog: 1, elapsed: 10, finished: false) == 1)
+        let step3 = pacer.advance(backlog: 3, elapsed: 0.25, finished: false)
+        #expect(step3 == 3)
+        let step4 = pacer.advance(backlog: 1, elapsed: 10, finished: false)
+        #expect(step4 == 1)
     }
 
     @Test func finishedCatchesUpWithinWindow() {
@@ -147,14 +151,16 @@ import Testing
         let rest = reveal.revealAll()
         #expect(first + rest == "第一段\n\n第二段很长很长很长")
         #expect(reveal.isCaughtUp)
-        #expect(reveal.revealAll().isEmpty)
+        let step5 = reveal.revealAll()
+        #expect(step5.isEmpty)
     }
 
     @Test func finishWithContinuationKeepsPacing() {
         var reveal = StreamingTextReveal()
         reveal.append("你好")
         let shown = reveal.tick(elapsed: frame)
-        #expect(reveal.finish(final: "你好，世界"))
+        let matched = reveal.finish(final: "你好，世界")
+        #expect(matched)
         #expect(reveal.finished)
         #expect(drain(&reveal, initial: shown) == "你好，世界")
     }
@@ -163,7 +169,8 @@ import Testing
         var reveal = StreamingTextReveal()
         reveal.append("草稿内容")
         _ = reveal.tick(elapsed: 0.2)
-        #expect(!reveal.finish(final: "完全不同的最终回答"))
+        let matchedDifferent = reveal.finish(final: "完全不同的最终回答")
+        #expect(!matchedDifferent)
         #expect(!reveal.finished)
     }
 
