@@ -273,7 +273,7 @@ struct LoginView: View {
 
     private func showAccessRequired(_ kind: CloudflareAccessCredentialKind) {
         accessResult = nil
-        withAnimation {
+        Motion.perform {
             accessNotice = APIError.cloudflareAccessRequired(kind).localizedDescription
         }
         focusedField = kind == .serviceToken ? .accessClientID : nil

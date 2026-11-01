@@ -704,6 +704,38 @@ final class ManagementUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["runtime.profile"].waitForExistence(timeout: 15))
     }
 
+    /// 第 24 轮：App 设置 › Agent ›「显示思考过程」（默认开），关掉后 Agent 回答上方不再有「思考了…」这一行。
+    func testShowReasoningSettingHidesThinkingRow() {
+        // 默认显示思考行由 AssistantUITests.testReasoningRowCollapsedAboveAnswerAndExpands 覆盖；
+        // 这里先在「App 设置」关掉开关，再进 Agent 确认思考行完全不显示（避免 Agent 收起/更多页滚动的偶发定位问题）。
+        let app = launch(["--ui-test-reasoning"])
+        // 「App 设置」在「更多」最后一组，List 懒加载：首屏放不下时它还不存在，不能先等它出现（CI 上等了 15 秒失败于此），
+        // 要先等首屏的「账号」行出现，再滑到「App 设置」（与 openAppSettingsEntry 相同）。
+        let settings = app.buttons["more.settings"]
+        XCTAssertTrue(app.buttons["more.accounts"].waitForExistence(timeout: 15))
+        reveal(settings, in: app)
+        XCTAssertTrue(settings.waitForExistence(timeout: 5))
+        waitUntilStill(settings)
+        settings.tap()
+        XCTAssertTrue(app.navigationBars["App 设置"].waitForExistence(timeout: 10))
+        // 「Agent › 显示思考过程」在设置页中部，同样可能要先滑到。
+        let toggle = app.switches["settings.showReasoning"]
+        reveal(toggle, in: app)
+        XCTAssertTrue(toggle.waitForExistence(timeout: 5))
+        XCTAssertEqual(toggle.value as? String, "1")
+        toggle.coordinate(withNormalizedOffset: CGVector(dx: 0.92, dy: 0.5)).tap()
+        expectation(for: NSPredicate(format: "value == %@", "0"), evaluatedWith: toggle)
+        waitForExpectations(timeout: 5)
+        // 滑动后 Dock 可能已缩小（.tabBarMinimizeBehavior(.onScrollDown)），只剩当前分页：往回滑让它展开再点 Agent。
+        let agent = app.tabBars.buttons["Agent"]
+        for _ in 0..<4 where !(agent.exists && agent.isHittable) { app.swipeDown() }
+        XCTAssertTrue(agent.waitForExistence(timeout: 10))
+        agent.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["assistant.composer"].firstMatch.waitForExistence(timeout: 15))
+        XCTAssertTrue(app.staticTexts["服务状态正常。这里是界面测试数据。"].waitForExistence(timeout: 15))
+        XCTAssertEqual(app.buttons.matching(identifier: "assistant.reasoning.toggle").count, 0, "关闭后完全不显示思考行")
+    }
+
     /// 0.21.0 按 iPhone「设置 › 通用」排序：
     /// - 「更多」：「工具与设置」为 服务器设置 → Webhook → 命中调试 → 备份与维护；最后一组 App 只有「App 设置」，不再有「关于与更新」。
     /// - 「App 设置」：最顶部一组「关于」「软件更新」（两页，标题 = 入口名），常用配置居中，「更换服务器／退出登录」单独在最底部一组。

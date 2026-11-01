@@ -268,7 +268,13 @@ actor FixtureService: AppServing {
         if clean == "/api/payment-sources/status" {
             if Self.oldServerPaymentSource { throw APIError.server(status: 404, code: nil) }
             // 第 23 轮：开关值取当前（可能被 App 改过的）服务器设置。
-            return Self.paymentSourceStatus(authoritative: fixtureSettings["log_retention"]?["payment_source_plugin_authoritative"]?.boolValue ?? false)
+            let status = Self.paymentSourceStatus(authoritative: fixtureSettings["log_retention"]?["payment_source_plugin_authoritative"]?.boolValue ?? false)
+            // 第 24 轮：`--ui-test-payment-source-unlisted` 模拟插件版本过旧（没声明转账通知解析），服务器来源列表里没有它。
+            if ProcessInfo.processInfo.arguments.contains("--ui-test-payment-source-unlisted"), var object = status.objectValue {
+                object["sources"] = []
+                return .object(object)
+            }
+            return status
         }
         // `--ui-test-old-server-profile` 模拟没有运行模式接口的旧服务器（框架 404）：不显示值守全局提示。
         if clean.hasPrefix("/api/platform/profile"), ProcessInfo.processInfo.arguments.contains("--ui-test-old-server-profile") {
@@ -347,6 +353,23 @@ actor FixtureService: AppServing {
         if clean.hasSuffix("/messages"), ProcessInfo.processInfo.arguments.contains("--ui-test-long-history") {
             let before = URLComponents(string: path)?.queryItems?.first { $0.name == "before_id" }?.value.flatMap(Int.init)
             return Self.longHistoryPage(before: before)
+        }
+        if clean.hasSuffix("/messages"), ProcessInfo.processInfo.arguments.contains("--ui-test-reasoning") {
+            // 第 24 轮：思考过程。第 1 条回答有服务器用时（96 秒 → 「思考了 1m 36s」），思考文字里有一个要脱敏的密码；
+            // 第 3 条回答有思考但没有用时（旧服务器 → 「思考过程」）；第 5 条回答没有思考（不显示思考行）。
+            return [
+                ["id": 1, "role": "assistant", "content": ["text": "服务状态正常。这里是界面测试数据。",
+                                                           "reasoning": "先读取账号列表，再核对插件状态。配置里写着 password=hunter2-secret，不能原样输出。"],
+                 "run_status": "completed",
+                 "usage": ["provider_name": "测试供应商", "model": "fixture-model", "run_id": "fixture-run-1", "schema_version": 2,
+                           "stage_timings": ["total_ms": 101_000, "first_token_ms": 97_000, "reasoning_ms": 96_000]]],
+                ["id": 2, "role": "user", "content": ["text": "再看一下日志。"], "run_status": "completed"],
+                ["id": 3, "role": "assistant", "content": ["text": "最近一小时没有错误。", "reasoning": "日志按时间倒序读取最近一小时。"],
+                 "run_status": "completed", "usage": ["provider_name": "测试供应商", "model": "fixture-model", "schema_version": 2]],
+                ["id": 4, "role": "user", "content": ["text": "谢谢。"], "run_status": "completed"],
+                ["id": 5, "role": "assistant", "content": ["text": "不客气。"], "run_status": "completed",
+                 "usage": ["provider_name": "测试供应商", "model": "fixture-model", "schema_version": 2]]
+            ]
         }
         if clean.hasSuffix("/messages") {
             return [["id": 1, "role": "assistant", "content": ["text": "服务状态正常。这里是界面测试数据。"], "run_status": "completed",

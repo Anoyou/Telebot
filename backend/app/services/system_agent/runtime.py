@@ -168,11 +168,28 @@ class SystemAgentRuntime:
             "total_ms": None,
         }
 
+        # 思考用时（第 24 轮）：模型输出推理增量的累计时长。第一段推理增量开窗，
+        # 正文增量、工具调用或本轮结束时收窗；多段（工具循环里多次思考）累加。
+        # 只在本轮真的有推理时写进 stage_timings.reasoning_ms，供客户端显示「思考了 1m 36s」。
+        reasoning_window: dict[str, float] = {"total": 0.0, "seen": 0.0}
+        reasoning_open: list[float] = []
+
+        def open_reasoning_window() -> None:
+            if not reasoning_open:
+                reasoning_open.append(time.perf_counter())
+
+        def close_reasoning_window() -> None:
+            if reasoning_open:
+                reasoning_window["total"] += max(0.0, time.perf_counter() - reasoning_open.pop())
+
         def elapsed_ms() -> int:
             return max(0, int((time.perf_counter() - turn_t0) * 1000))
 
         def finalize_stage_timings(*, ok: bool) -> dict[str, int | None]:
             stage_timings["total_ms"] = elapsed_ms()
+            close_reasoning_window()
+            if reasoning_window["seen"]:
+                stage_timings["reasoning_ms"] = max(0, int(reasoning_window["total"] * 1000))
             log.info(
                 "system agent stage_timings session=%s run_id=%s ok=%s "
                 "verify_ms=%s route_ms=%s first_token_ms=%s total_ms=%s",
@@ -734,6 +751,7 @@ class SystemAgentRuntime:
             raise ToolApprovalRequired(tuple(call for call in calls if call.name in requested_names))
 
         async def on_tool_start(call: ToolCall) -> None:
+            close_reasoning_window()
             spec = tool_specs_by_name.get(call.name)
             arguments_summary = summarize_tool_result(call.arguments, max_chars=800)
             await progress_queue.put(
@@ -766,6 +784,8 @@ class SystemAgentRuntime:
             )
 
         async def on_text_delta(delta: str) -> None:
+            if delta:
+                close_reasoning_window()
             safe_delta = streaming_redactor.push(delta)
             if not safe_delta:
                 return
@@ -779,6 +799,9 @@ class SystemAgentRuntime:
             )
 
         async def on_reasoning_delta(delta: str) -> None:
+            if delta:
+                reasoning_window["seen"] = 1.0
+                open_reasoning_window()
             safe_delta = reasoning_redactor.push(delta)
             if not safe_delta:
                 return
@@ -1574,6 +1597,13 @@ def _usage_payload(
                 cleaned[key] = max(0, int(raw))
             except (TypeError, ValueError):
                 cleaned[key] = None
+        # 思考用时（第 24 轮）只在本轮有推理时出现；旧客户端忽略未知键。
+        reasoning_raw = stage_timings.get("reasoning_ms")
+        if reasoning_raw is not None:
+            try:
+                cleaned["reasoning_ms"] = max(0, int(reasoning_raw))
+            except (TypeError, ValueError):
+                pass
         payload["stage_timings"] = cleaned
         if elapsed_ms is None and cleaned.get("total_ms") is not None:
             elapsed_ms = cleaned["total_ms"]

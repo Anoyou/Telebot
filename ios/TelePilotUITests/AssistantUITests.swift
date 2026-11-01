@@ -283,6 +283,67 @@ final class AssistantUITests: XCTestCase {
         XCTAssertTrue(model.isHittable)
     }
 
+    /// 第 24 轮：思考过程默认折叠在回答正文上方（参考 Codex）：有服务器用时显示「思考了 1m 36s」，没有用时显示「思考过程」，
+    /// 没有思考内容的回答不显示这一行；点开显示脱敏后的思考全文，再点收起。
+    func testReasoningRowCollapsedAboveAnswerAndExpands() {
+        let app = openAssistant(["--ui-test-reasoning"])
+        let answer = app.staticTexts["服务状态正常。这里是界面测试数据。"]
+        XCTAssertTrue(answer.waitForExistence(timeout: 10))
+        let toggles = app.buttons.matching(identifier: "assistant.reasoning.toggle")
+        let timed = toggles.matching(NSPredicate(format: "label == %@", "思考了 1m 36s")).firstMatch
+        XCTAssertTrue(timed.waitForExistence(timeout: 10))
+        XCTAssertTrue(toggles.matching(NSPredicate(format: "label == %@", "思考过程")).firstMatch.exists, "旧服务器没有用时：只写「思考过程」")
+        XCTAssertEqual(toggles.count, 2, "没有思考内容的回答不显示思考行")
+        // 第一条回答在会话最上面，首屏贴底时它已滚出屏幕上方，且贴底滚动／逐帧补上更早消息时内容还在移动
+        // （CI：两次读 frame 之间内容上移约 16pt，读到「思考行 maxY -64 > 正文 minY -69」的假重叠）。
+        // 先把对话滑到顶（顶部有边界，多滑不会过头），等停稳后再在同一时刻附近读两者的位置。
+        let conversation = app.scrollViews.firstMatch
+        for _ in 0..<3 where !(timed.isHittable && timed.frame.minY > 0) { conversation.swipeDown() }
+        let (timedFrame, answerFrame) = stableFrames(timed, answer)
+        XCTAssertGreaterThan(timedFrame.minY, 0, "思考行应已滑进屏幕：\(timedFrame)")
+        XCTAssertLessThan(timedFrame.midY, answerFrame.midY, "思考行在回答正文上方")
+        // 思考行的点按区域至少 44pt 高（文字上下各有留白），只要求它的起点在正文起点之上、文字中线在正文之上。
+        XCTAssertLessThan(timedFrame.minY, answerFrame.minY, "思考行从正文上方开始：\(timedFrame) / \(answerFrame)")
+        XCTAssertGreaterThanOrEqual(timedFrame.height, 44)
+        let text = app.staticTexts.matching(identifier: "assistant.reasoning.text").firstMatch
+        XCTAssertFalse(text.exists, "默认折叠")
+        XCTAssertEqual(timed.value as? String, "已折叠")
+        timed.tap()
+        XCTAssertTrue(text.waitForExistence(timeout: 5))
+        XCTAssertTrue(text.label.contains("先读取账号列表"), text.label)
+        XCTAssertFalse(text.label.contains("hunter2"), "思考文字同样脱敏：\(text.label)")
+        XCTAssertEqual(timed.value as? String, "已展开")
+        timed.tap()
+        XCTAssertTrue(waitUntilGone(text))
+    }
+
+    /// 第 24 轮：键盘上方统一的「收起」按钮（全 App 的输入框共用一条辅助工具栏）：点按收起键盘，草稿保留，
+    /// 输入栏与发送按钮仍在键盘工具栏上方、可点。
+    func testKeyboardDismissButtonHidesKeyboardAndKeepsDraft() {
+        let app = openAssistant(["--ui-test-keyboard-accessory"])
+        let composer = app.descendants(matching: .any)["assistant.composer"].firstMatch
+        composer.tap()
+        composer.typeText("草稿")
+        // 第 24 轮修正：「收起」改为 SwiftUI 原生键盘工具栏（Agent 输入栏自己挂），见 KeyboardDismissAccessory.swift。
+        let dismiss = app.buttons.matching(identifier: "keyboard.dismiss").firstMatch
+        XCTAssertTrue(dismiss.waitForExistence(timeout: 5))
+        XCTAssertEqual(app.buttons.matching(identifier: "keyboard.dismiss").count, 1, "键盘上方只有一个「收起」")
+        XCTAssertEqual(dismiss.label, "收起键盘")
+        // Agent 输入栏的「收起」在输入栏里（发送按钮左边），整条输入栏要在键盘上方、不被键盘挡住。
+        let keyboard = app.keyboards.firstMatch
+        XCTAssertTrue(keyboard.waitForExistence(timeout: 5))
+        XCTAssertTrue(dismiss.isHittable)
+        XCTAssertLessThanOrEqual(dismiss.frame.maxY, keyboard.frame.minY + 1, "收起按钮在键盘上方")
+        let send = app.buttons["assistant.send"]
+        XCTAssertTrue(send.isHittable)
+        XCTAssertTrue(send.isEnabled)
+        dismiss.tap()
+        XCTAssertTrue(waitUntilGone(dismiss))
+        XCTAssertTrue(waitUntilGone(app.keyboards.firstMatch))
+        XCTAssertTrue((composer.value as? String ?? "").contains("草稿"))
+        XCTAssertTrue(send.isHittable)
+    }
+
     /// 第九轮：键盘弹起时打开原生 popover。只记录键盘是否被收起（写进测试日志 R9-KEYBOARD，供 PR 说明），
     /// 并确认 popover 仍出现在模型按钮上方、选择后输入栏可继续输入。
     func testComposerPopoverWithKeyboard() {
@@ -306,6 +367,20 @@ final class AssistantUITests: XCTestCase {
         app.buttons["assistant.model.option.auto"].tap()
         XCTAssertTrue(waitUntilGone(modelPanel))
         XCTAssertTrue((composer.value as? String ?? "").contains("草稿"))
+    }
+
+    /// 等两个元素都停稳（连续两次读到的位置一致，最多约 3 秒），返回最后一次读到的位置。
+    /// 列表还在滚动时分开读两个元素的 frame 会读到不同时刻的位置，比较上下关系会出错。
+    private func stableFrames(_ first: XCUIElement, _ second: XCUIElement, timeout: TimeInterval = 3) -> (CGRect, CGRect) {
+        let deadline = Date().addingTimeInterval(timeout)
+        var last = (first.frame, second.frame)
+        while Date() < deadline {
+            Thread.sleep(forTimeInterval: 0.25)
+            let now = (first.frame, second.frame)
+            if now.0 == last.0 && now.1 == last.1 { return now }
+            last = now
+        }
+        return last
     }
 
     /// 点 popover 外（对话区域上部）收起 popover。

@@ -59,6 +59,8 @@
 		A64DAA1B112AE09D91535544 /* AIModelCapabilities.swift in Sources */ = {isa = PBXBuildFile; fileRef = 894E693573E9DB43663479A6 /* AIModelCapabilities.swift */; };
 		28F40F78E9A5280FDDE5C5E7 /* AssistantRendering.swift in Sources */ = {isa = PBXBuildFile; fileRef = 81B4EFB13E313EFD9C7463EA /* AssistantRendering.swift */; };
 		687E8642F34F062FCF178A06 /* InlineSearchField.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F7FF55894DC80A6469B4B9F /* InlineSearchField.swift */; };
+		B25737EC73C9EE7C0F72D10B /* MotionStyle.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6358F68D0B58F7808223443 /* MotionStyle.swift */; };
+		3CF4F3BDFC50C4DBE68B811A /* KeyboardDismissAccessory.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0E516F086A4816F1A9B8EFD7 /* KeyboardDismissAccessory.swift */; };
 		13FF356A0F8442933F56AC3C /* ServerUpdate.swift in Sources */ = {isa = PBXBuildFile; fileRef = C41FAA4E8F3EACA9A3B1B510 /* ServerUpdate.swift */; };
 		9592E80BE3FC7E63D347A748 /* ManagementForms.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8977F833837A79C464CFBA29 /* ManagementForms.swift */; };
 		98BE1FA3E101EA2808E885EB /* RedesignedWorkspaceUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 91EAA20EE5B3D74CA2166B91 /* RedesignedWorkspaceUITests.swift */; };
@@ -175,6 +177,8 @@
 		894E693573E9DB43663479A6 /* AIModelCapabilities.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIModelCapabilities.swift; sourceTree = "<group>"; };
 		81B4EFB13E313EFD9C7463EA /* AssistantRendering.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssistantRendering.swift; sourceTree = "<group>"; };
 		6F7FF55894DC80A6469B4B9F /* InlineSearchField.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InlineSearchField.swift; sourceTree = "<group>"; };
+		E6358F68D0B58F7808223443 /* MotionStyle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MotionStyle.swift; sourceTree = "<group>"; };
+		0E516F086A4816F1A9B8EFD7 /* KeyboardDismissAccessory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardDismissAccessory.swift; sourceTree = "<group>"; };
 		C41FAA4E8F3EACA9A3B1B510 /* ServerUpdate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerUpdate.swift; sourceTree = "<group>"; };
 		F98EB034681A1D9B4FEC79A1 /* VisualInspectionUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VisualInspectionUITests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -210,6 +214,8 @@
 				894E693573E9DB43663479A6 /* AIModelCapabilities.swift */,
 				81B4EFB13E313EFD9C7463EA /* AssistantRendering.swift */,
 				6F7FF55894DC80A6469B4B9F /* InlineSearchField.swift */,
+				E6358F68D0B58F7808223443 /* MotionStyle.swift */,
+				0E516F086A4816F1A9B8EFD7 /* KeyboardDismissAccessory.swift */,
 				C41FAA4E8F3EACA9A3B1B510 /* ServerUpdate.swift */,
 				6E0F9A0F4E22C151694ED4D0 /* AIUsage.swift */,
 				C08588E80EB829F8C5179276 /* AIWorkspace.swift */,
@@ -422,6 +428,8 @@
 				A64DAA1B112AE09D91535544 /* AIModelCapabilities.swift in Sources */,
 				28F40F78E9A5280FDDE5C5E7 /* AssistantRendering.swift in Sources */,
 				687E8642F34F062FCF178A06 /* InlineSearchField.swift in Sources */,
+				B25737EC73C9EE7C0F72D10B /* MotionStyle.swift in Sources */,
+				3CF4F3BDFC50C4DBE68B811A /* KeyboardDismissAccessory.swift in Sources */,
 				13FF356A0F8442933F56AC3C /* ServerUpdate.swift in Sources */,
 				23D1E37C1B00C5D9166FE9D5 /* AIUsage.swift in Sources */,
 				190715111E57BA57BC4B4B45 /* AIWorkspace.swift in Sources */,
@@ -570,7 +578,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
-				MARKETING_VERSION = 0.35.0;
+				MARKETING_VERSION = 0.36.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -659,7 +667,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
-				MARKETING_VERSION = 0.35.0;
+				MARKETING_VERSION = 0.36.0;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;

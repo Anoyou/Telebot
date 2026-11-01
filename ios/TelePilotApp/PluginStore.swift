@@ -1168,6 +1168,7 @@ struct PluginStoreDetailView: View {
     @State private var uninstallUncertain = false
     @State private var uninstallError: String?
     @State private var showFullDescription = false
+    @State private var paymentSourceRefresh = 0
 
     private var feature: JSONValue? { store.feature(key) }
     private var catalogEntry: PluginCatalogEntry? { entry ?? store.bestCatalogEntry(key) }
@@ -1194,6 +1195,10 @@ struct PluginStoreDetailView: View {
             descriptionSection
             permissionsSection
             if let feature { manageSection(feature) }
+            // 第 24 轮：转账通知插件的产品页也直接放「转账通知判定」（原来只在插件详情「概况」里，从这里进去找不到）。
+            if let feature, PaymentSourceSwitchView.isTransferPluginKey(key) || PaymentSourceSwitchView.declaresPaymentSource(feature) {
+                PaymentSourceSwitchSection(pluginKey: key, feature: feature, refreshToken: paymentSourceRefresh)
+            }
             informationSection
             if installed { dangerSection }
             if !installed && catalogEntry == nil {
@@ -1206,6 +1211,7 @@ struct PluginStoreDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .task { await store.loadInstalledNotes(key, model: model) }
         .refreshable {
+            paymentSourceRefresh += 1
             await store.load(model: model)
             await store.loadInstalledNotes(key, model: model, force: true)
             globalUncertain = false

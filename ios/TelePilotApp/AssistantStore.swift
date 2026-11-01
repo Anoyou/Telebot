@@ -83,6 +83,9 @@ final class AssistantStore {
     @ObservationIgnored var events: [JSONValue] = []
     /// 正在生成的回答与进度阶段（第十一轮拆出的独立 Observable，只有回答位置的视图读取）。
     let live = AssistantLiveState()
+    /// 第 24 轮：本机流式时计下的思考用时（按任务 ID）。旧服务器的历史消息没有 `stage_timings.reasoning_ms`，
+    /// 刚生成完的回答用它显示「思考了 …」；只在内存里，重开 App 后旧服务器的历史消息只显示「思考过程」。
+    private(set) var localReasoningSeconds: [String: Double] = [:]
     var notice: String?
     var error: String?
     var busy = false
@@ -874,6 +877,11 @@ final class AssistantStore {
         events.append(event)
         if events.count > 500 { events.removeFirst(events.count - 500) }
         trackProgress(event, type: type)
+        live.noteReasoningTiming(type: type, timestamp: event["ts"]?.stringValue)
+        if type == "assistant_message", let seconds = live.reasoningTimer.elapsed(now: Date()), seconds > 0 {
+            let run = event.assistantText("run_id").nilIfBlank ?? runID ?? ""
+            if !run.isEmpty, localReasoningSeconds[run] != seconds { localReasoningSeconds[run] = seconds }
+        }
         switch type {
         case "assistant_delta": live.appendText(event.assistantText("delta"))
         case "assistant_reasoning_delta", "reasoning_delta": live.appendReasoning(event.assistantText("delta"))

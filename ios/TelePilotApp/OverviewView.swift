@@ -127,6 +127,9 @@ struct OverviewView: View {
                         .accessibilityIdentifier("overview.syncing")
                 }
             }
+            // 第 24 轮：状态句切换（上次读取的状态 → 服务运行中、出现 / 消失说明行）淡变，不跳。
+            .motionAnimation(value: statusNote)
+            .motionAnimation(value: model.isSyncingAfterAction)
             .accessibilityElement(children: .combine)
             .accessibilityIdentifier("overview.status")
             // 第 22 轮：连不上时状态行下面是可展开的「诊断详情」（原因已写在状态行里），可复制发给维护者。

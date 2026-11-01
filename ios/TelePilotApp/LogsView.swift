@@ -798,6 +798,7 @@ struct LogDetailView: View {
                     OpsFormat.copyForDiagnosis(entry.diagnosisLines)
                     copied = true
                 } label: { Label(copied ? "已复制，可粘贴给助手或开发者" : "复制诊断信息", systemImage: copied ? "checkmark" : "doc.on.doc") }
+                .motionSymbolSwap(value: copied)
                 .accessibilityIdentifier("logs.detail.copy")
             } footer: { Text("复制内容已自动隐藏密码、Token 等敏感信息。") }
         }

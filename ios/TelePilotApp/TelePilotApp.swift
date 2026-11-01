@@ -104,7 +104,8 @@ private struct MainTabs: View {
         TabView(selection: $selected) {
             ForEach(dockItems) { item in
                 Tab(item.title, systemImage: item.symbol, value: item) {
-                    tabRoot(item)
+                    // 第 24 轮：键盘上方「收起」（每个分页根上挂一次，页面里的输入框共用）。
+                    tabRoot(item).keyboardDismissToolbar()
                 }
                 .badge(badge(item))
                 .accessibilityIdentifier("dock.\(item.rawValue)")
@@ -112,6 +113,7 @@ private struct MainTabs: View {
 
             Tab("更多", systemImage: DockItem.more.symbol, value: DockItem.more) {
                 NavigationStack(path: $morePath) { MoreView(path: $morePath) }
+                    .keyboardDismissToolbar()
             }
             .badge(model.serverUpdateAvailable ? Text("新") : nil)
             .accessibilityIdentifier("dock.more")
@@ -164,6 +166,7 @@ private struct MainTabs: View {
                 }
             }
             .id(route.id)
+            .keyboardDismissToolbar()
             .presentationDragIndicator(.visible)
         }
         .task {

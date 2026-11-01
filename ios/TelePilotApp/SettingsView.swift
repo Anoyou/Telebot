@@ -7,6 +7,7 @@ struct SettingsView: View {
     @Environment(AppLockModel.self) private var lock
     @State private var confirmation: Confirmation?
     @AppStorage(AppAppearance.storageKey) private var appearanceRaw = AppAppearance.system.rawValue
+    @AppStorage(AssistantReasoningPreference.key) private var showReasoning = true
     private enum Confirmation: String, Identifiable {
         case logout, server
         var id: String { rawValue }
@@ -58,6 +59,12 @@ struct SettingsView: View {
                     NavigationLink { PushSettingsView() } label: { Label("Apple 推送通知", systemImage: "bell.badge") }
                 }
                 Section {
+                    Toggle(isOn: $showReasoning) { Label("显示思考过程", systemImage: "brain") }
+                        .accessibilityIdentifier("settings.showReasoning")
+                } header: { Text("Agent") } footer: {
+                    Text("打开时，Agent 回答上方有一行「思考了 1m 36s」，点开可看模型的思考过程（默认折叠）；关闭后完全不显示。只保存在本机。")
+                }
+                Section {
                     Toggle(isOn: Binding(
                         get: { lock.isEnabled },
                         set: { enabled in Task { await lock.setEnabled(enabled) } }
@@ -78,6 +85,8 @@ struct SettingsView: View {
                 } header: { Text("界面锁") } footer: {
                     Text("开启后，离开 App 超过所选时间再返回，需要通过 Face ID、Touch ID 或设备密码解锁。App 不会在多任务切换器、截屏或录屏时遮挡内容。适当的宽限期便于切到 Telegram 查看验证码。此功能不删除服务器会话。")
                 }
+                // 第 24 轮：开关后「需要验证」行出现 / 消失跟随动效。
+                .motionAnimation(value: lock.isEnabled)
                 Section("当前连接") {
                     LabeledContent {
                         Text(model.user?.username ?? "未登录").textSelection(.enabled)

@@ -39,6 +39,7 @@ struct ConnectionProblemView: View {
                     Button(action: copy) {
                         Label(copied ? "已复制" : "复制诊断信息", systemImage: copied ? "checkmark" : "doc.on.doc")
                     }
+                    .motionSymbolSwap(value: copied)
                     .font(.caption)
                     .buttonStyle(.borderless)
                     .accessibilityIdentifier("connection.details.copy")

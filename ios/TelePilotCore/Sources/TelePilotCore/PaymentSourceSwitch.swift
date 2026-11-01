@@ -96,3 +96,77 @@ public struct PaymentSourceSwitchView: Equatable, Sendable {
         return ("已打开，但这个插件没在工作，仍按旧解析", .warning)
     }
 }
+
+// MARK: - 第 24 轮：找得到开关（可发现性）
+
+extension PaymentSourceSwitchView {
+    /// 插件详情里「转账通知判定」这一段该显示什么。
+    public enum Availability: Equatable, Sendable {
+        /// 服务器把这个插件列为转账通知来源：显示开关（原样）。
+        case available(PaymentSourceSwitchView)
+        /// 服务器支持，但这个插件不在来源列表里（插件版本过旧、没声明 `payment_sources`、刚装好还没刷新）：
+        /// 显示一行原因；`global` 是汇总状态（开关当前是开是关），读不到时为 nil。
+        case notParticipating(global: PaymentSourceSwitchView?)
+        /// 服务器没有状态接口（404，旧版本）：显示「需要服务器 0.116.0 以上才能设置」。
+        case serverTooOld
+        /// 读取失败（断网等）：显示原因，可下拉重试。
+        case unreadable(String)
+        /// 不是转账通知插件：整段不显示。
+        case hidden
+    }
+
+    /// 服务器在这个版本起能在 App 里设置（与用户说的版本一致，只用于文案）。
+    public static let minimumServerVersion = "0.116.0"
+
+    public static let serverTooOldMessage =
+        "需要服务器 \(minimumServerVersion) 以上才能设置「转账通知以插件结果为准」。到「App 设置 › 软件更新」更新服务器后再来。"
+
+    public static let notParticipatingMessage =
+        "这个插件没在参与转账通知解析：服务器没把它认作转账通知插件——通常是插件版本过旧（还没声明转账通知解析），到「插件 › 已安装」更新它；刚安装或刚更新的，下拉刷新再看。"
+
+    public static func unreadableMessage(_ reason: String) -> String {
+        "没能读取转账通知判定：\(reason)。下拉刷新重试。"
+    }
+
+    /// 插件 key 看起来是转账通知插件（官方插件 `payment-source-cn-transfer`，以及同一命名约定的其它解析插件）。
+    /// 只用于「服务器没列出它时要不要解释原因」，是否真的参与解析以服务器 `/api/payment-sources/status` 为准。
+    public static func isTransferPluginKey(_ key: String) -> Bool {
+        let lower = key.lowercased()
+        return lower.hasPrefix("payment-source") || lower.hasPrefix("payment_source")
+    }
+
+    /// 插件信息里声明了转账通知解析（`payment_sources` 非空，或 tags 含 `payment_source`）。字段缺失时为 false。
+    public static func declaresPaymentSource(_ feature: JSONValue?) -> Bool {
+        guard let feature else { return false }
+        for candidate in [feature, feature["manifest"] ?? .null, feature["manifest_json"] ?? .null] {
+            if let sources = candidate["payment_sources"]?.arrayValue, !sources.isEmpty { return true }
+            let tags = (candidate["tags"]?.arrayValue ?? []).compactMap(\.stringValue)
+            if tags.contains("payment_source") || tags.contains("payment-source") { return true }
+        }
+        return false
+    }
+
+    /// 搜索插件时「转账」「收款」「付款」「transfer」等词也能找到转账通知插件
+    /// （官方插件显示名是「转账通知解析（中文）」，「中文转账通知」只是它的解析来源名，直接搜搜不到）。
+    public static func matchesSearch(key: String, feature: JSONValue?, query: String) -> Bool {
+        let text = query.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !text.isEmpty, isTransferPluginKey(key) || declaresPaymentSource(feature) else { return false }
+        let words = ["转账", "收款", "付款", "扣款", "扣减", "到账", "transfer", "payment", "中文转账通知", "转账通知判定"]
+        return words.contains { text.contains($0) || ($0.contains(text) && text.count >= 2) }
+    }
+
+    /// - Parameters:
+    ///   - status: 读到的状态（失败时 nil）。
+    ///   - notFound: 读取返回 404（旧服务器没有这个接口）。
+    ///   - failure: 其它读取失败的原因（大白话）。
+    ///   - transferPlugin: 这个插件按 key 或插件信息判断是转账通知插件。
+    public static func availability(status: JSONValue?, notFound: Bool, failure: String?, pluginKey: String,
+                                    transferPlugin: Bool) -> Availability {
+        if let status, let view = build(status, pluginKey: pluginKey) { return .available(view) }
+        guard transferPlugin else { return .hidden }
+        if notFound { return .serverTooOld }
+        if let status, status.objectValue != nil { return .notParticipating(global: build(status, pluginKey: nil)) }
+        if let failure, !failure.isEmpty { return .unreadable(failure) }
+        return .hidden
+    }
+}

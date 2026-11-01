@@ -333,6 +333,27 @@ Web 目前没有任何页面配置内联按钮；iOS 气泡已支持，服务器
 
 iPhone 和 iPad 使用系统安全区；支持横竖屏、长中文、辅助功能字号、浅色与深色、减少透明度与减少动态效果。内容优先流动布局，按钮触控区域至少 44 点。
 
+## 动效（0.36.0，第 24 轮）
+
+统一入口 `TelePilotApp/MotionStyle.swift`（`Motion`、`.motionAnimation`、`.motionTransition`、`.motionNumeric`、`.motionSymbolSwap`）。新代码不要直接写 `withAnimation { … }` / `.animation(.default, …)`，改用这里的封装。
+
+- **克制、系统风格**：状态切换（开关、选中、提示条出现、复制成功）用 `Motion.snappy`（`.snappy` 0.25 秒）；展开折叠（思考过程、预览、详情）与滚动定位用 `Motion.smooth`（`.smooth` 0.3 秒）。不做弹跳、旋转入场、循环装饰动画；「正在思考 / 生成」的流光与脉冲是唯一的循环动画，只在进行中出现。
+- **出现 / 消失**：`.motionTransition(edge:)`，从所在边轻移 + 淡入（提示条从顶部，底部状态条从底部）。
+- **数字与图标**：概览数字 `.motionNumeric`（滚动式数字）；复制 → 对勾、状态图标换图 `.motionSymbolSwap`（SF Symbol `replace`）。
+- **减弱动态效果**（系统设置）：一律去掉位移、缩放和弹簧，只保留 0.2 秒淡变（`Motion.reducedFade`）；纯位移的改动（列表重排、滚动定位）直接跳到结果（`fadeOnly: false`）。视图里已有 `accessibilityReduceMotion` 环境值时传给 `Motion.perform(_:reduceMotion:)`，否则用读系统设置的重载。
+- **界面测试**（`--ui-testing`）：`Motion.disabledForTests` 为真，以上封装都不加动画（`.motionAnimation` / `.motionTransition` 连修饰符都不挂），避免 XCTest 等待界面空闲变慢变脆。
+- **不加动画的地方**：键盘弹出收起（系统负责）、导航推入推出与 sheet（系统负责）、流式正文逐字显示（`StreamingTextReveal` 自带规则）。
+- 新增页面或交互时按上面几条自查：有出现 / 消失、展开 / 折叠、数字或图标变化，就用对应封装；没有就不加。
+
+## 键盘收起（0.36.0，第 24 轮）
+
+- 全 App 的输入框（单行 `TextField`、多行 `TextField(axis: .vertical)`、`TextEditor`）弹出键盘时，键盘上方右侧「收起」（`keyboard.chevron.compact.down`，读屏「收起键盘」，标识 `keyboard.dismiss`）。
+- 实现是 SwiftUI 原生键盘工具栏 `ToolbarItemGroup(placement: .keyboard)`，封装为 `.keyboardDismissToolbar()`（`KeyboardDismissAccessory.swift`）：每个 Dock 分页（Agent 除外）、「更多」和根级 sheet 的根上各挂**一次**，页面里不要再各自挂（父子都挂会出现两个按钮）。Agent 分页不用键盘工具栏：输入栏有焦点时，发送按钮左边出现与「+」同款的圆形「收起键盘」按钮（`AssistantComposer(showsKeyboardDismiss:)`，同一标识 `keyboard.dismiss`，点按把输入栏焦点设为未聚焦）——键盘工具栏会和贴着键盘的输入栏叠在一起（CI 实测遮住输入栏底部约 20pt）。
+- 不用「监听开始编辑再设置 `inputAccessoryView`」的全局注入：SwiftUI 输入框的辅助视图由 SwiftUI 自己管理，外部设置无效（第 24 轮 CI 证实键盘上方什么都没有）。
+- 已经有自己键盘工具栏「完成」的：登录页（不在分页里）保留；Cloudflare Access 作为独立弹窗时保留「完成」，从「App 设置」推入时只用分页统一的「收起」。
+- 可滚动的输入页面加 `.scrollDismissesKeyboard(.interactively)`（Agent 对话列表、登录、Cloudflare Access），表单类长页面可用 `.immediately`。
+- 界面测试默认不挂这条工具栏（避免改变既有测试的点按位置），带 `--ui-test-keyboard-accessory` 时由专门用例验证。
+
 ## 后续扩展
 
 通用表单根据后端契约使用原生字段、枚举、对象和数组控件；动态插件遵守服务端 schema。复杂操作保留预览、确认、结果与失败恢复，页面不泄露实现日志。新增功能沿用同一套导航和确认规范。

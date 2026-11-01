@@ -34,6 +34,9 @@ struct AssistantComposer: View {
     @Bindable var store: AssistantStore
     @Bindable var panel: AssistantComposerPanelState
     var focused: FocusState<Bool>.Binding
+    /// 第 24 轮：键盘上方的「收起」按钮。Agent 分页（`embedded`）没有外层统一工具栏，由输入栏自己挂；
+    /// 从别处推入的会话页由所在分页／sheet 根上的 `.keyboardDismissToolbar()` 提供，这里不再重复。
+    var showsKeyboardDismiss = false
     @State private var draft = ""
     @State private var photos: [PhotosPickerItem] = []
     @State private var pickingPhotos = false
@@ -230,8 +233,30 @@ struct AssistantComposer: View {
                 Text("\(draft.count)/32000").font(.caption).monospacedDigit()
                     .foregroundStyle(draft.count > 32_000 ? .red : .secondary)
             }
+            if showsKeyboardDismiss && KeyboardDismiss.isEnabled && focused.wrappedValue {
+                keyboardDismissButton
+                    .transition(.opacity)
+            }
             if showsStop { stopButton } else { sendButton }
         }
+    }
+
+    /// 第 24 轮：输入栏有焦点时，发送按钮左边出现「收起键盘」圆形按钮（与「+」同款外观）。
+    /// 放在输入栏里而不是键盘工具栏：键盘工具栏会和贴着键盘的输入栏叠在一起（CI 实测遮住输入栏底部 20pt）。
+    private var keyboardDismissButton: some View {
+        Button { focused.wrappedValue = false } label: {
+            Image(systemName: "keyboard.chevron.compact.down")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(.primary)
+                .frame(width: 34, height: 34)
+                .background(Circle().fill(.fill.tertiary))
+                .frame(width: 44, height: 44)
+                .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .fixedSize()
+        .accessibilityLabel("收起键盘")
+        .accessibilityIdentifier(KeyboardDismiss.identifier)
     }
 
     /// 左下角「+」：点按弹出原生 popover（箭头指向「+」），只列出服务器真实支持的附件：图片，最多 4 张。

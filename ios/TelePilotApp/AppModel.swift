@@ -111,6 +111,8 @@ final class AppModel {
             AssistantHistoryCache.removeAll()
             // 第 22 轮：会话记住的模型（本机兜底）同样每次清空；`--ui-test-session-models-keep` 保留（验证重启后恢复）。
             if !ProcessInfo.processInfo.arguments.contains("--ui-test-session-models-keep") { AgentSessionModel.LocalStore.removeAll() }
+            // 第 24 轮：「显示思考过程」每次从默认（开）开始，上一个用例关掉它不影响后面的用例。
+            defaults.removeObject(forKey: AssistantReasoningPreference.key)
             // 概览快照只在快照用例里启用；第二次启动带 --ui-test-snapshot-reuse 保留第一次保存的快照。
             let arguments = ProcessInfo.processInfo.arguments
             snapshotEnabled = arguments.contains("--ui-test-snapshot")

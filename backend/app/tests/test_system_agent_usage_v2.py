@@ -82,6 +82,24 @@ def test_usage_payload_stage_timings_nulls_and_elapsed_override() -> None:
     assert payload["elapsed_ms"] == 99
 
 
+def test_usage_payload_keeps_reasoning_ms_when_present() -> None:
+    usage = ModelUsage(input_tokens=1, output_tokens=1, total_tokens=2)
+    payload = _usage_payload(
+        usage,
+        _provider(),  # type: ignore[arg-type]
+        "m1",
+        stage_timings={"verify_ms": 1, "route_ms": 2, "first_token_ms": 3, "total_ms": 9, "reasoning_ms": 96000},
+    )
+    assert payload["stage_timings"]["reasoning_ms"] == 96000
+    bad = _usage_payload(
+        usage,
+        _provider(),  # type: ignore[arg-type]
+        "m1",
+        stage_timings={"total_ms": 9, "reasoning_ms": "bad"},
+    )
+    assert "reasoning_ms" not in bad["stage_timings"]
+
+
 def test_normalize_model_selection() -> None:
     assert _normalize_model_selection(None) == {"mode": "auto"}
     assert _normalize_model_selection({"mode": "auto"}) == {"mode": "auto"}

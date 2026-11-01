@@ -91,6 +91,10 @@ final class AssistantLiveState {
     private(set) var progressType = ""
     /// 最近一次调用的工具（tool_started 的 tool_description，没有时为 tool_name）。
     private(set) var progressTool = ""
+    /// 第 24 轮：思考计时（只在开窗 / 收窗时写入；「正在思考… 12s」的秒数由视图按秒自己刷新）。
+    private(set) var reasoningTimer = ReasoningTimer()
+    /// 服务器时间与本机时间的差（取本轮观察到的最小值：重放的旧事件差值更大，不会拉偏）。
+    @ObservationIgnored private var clockOffset: Double?
 
     /// 已显示的正文（= `reveal.received` 的前缀）。
     @ObservationIgnored private(set) var text = ""
@@ -188,6 +192,40 @@ final class AssistantLiveState {
     func resetProgress() {
         setProgress(type: "")
         setProgress(tool: "")
+        resetReasoningTimer()
+    }
+
+    /// 第 24 轮：按事件推进思考计时。事件带服务器时间 `ts` 时按它算（重连后重放的事件也是真实时间），
+    /// 换算到本机时钟；没有时按收到的时间。
+    func noteReasoningTiming(type: String, timestamp: String?) {
+        let effect = ReasoningTimer.effect(of: type)
+        // 只在开窗 / 收窗的那一刻需要时间：已在思考时的推理增量、没在思考时的正文增量直接跳过（流式时每秒好几次）。
+        switch effect {
+        case .ignore: return
+        case .open where reasoningTimer.isThinking: return
+        case .close where !reasoningTimer.isThinking: return
+        default: break
+        }
+        let now = Date()
+        var date = now
+        if let timestamp, let server = ReasoningDuration.timestamp(timestamp) {
+            let offset = now.timeIntervalSince(server)
+            let best = min(clockOffset ?? offset, offset)
+            clockOffset = best
+            date = min(now, server.addingTimeInterval(best))
+        }
+        var next = reasoningTimer
+        switch effect {
+        case .open: next.reasoning(at: date)
+        case .close: next.stop(at: date)
+        case .ignore: return
+        }
+        if next != reasoningTimer { reasoningTimer = next }
+    }
+
+    func resetReasoningTimer() {
+        clockOffset = nil
+        if reasoningTimer != ReasoningTimer() { reasoningTimer = ReasoningTimer() }
     }
 
     /// 把缓冲区与积压立即全部显示（停止生成、用户滚动、离开页面）。
