@@ -446,3 +446,237 @@ async def test_market_routes_require_login() -> None:
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         response = await client.get("/api/plugin-market/catalog")
         assert response.status_code == 401
+
+
+# ── 0.117.0：详情字段、稳定 / 测试通道、后台定时拉取 ─────────────────
+
+BETA_URL = "https://github.com/Anoyou/telebot-plugins/tree/beta"
+
+
+def test_parse_registry_reads_detail_fields_and_drops_unsafe_urls() -> None:
+    source = {"id": "official", "name": "官方", "trust": "official"}
+    entries, _ = svc.parse_registry(
+        _registry(
+            _entry(
+                "alpha",
+                "1.0.0",
+                summary="简介",
+                summary_i18n={"en": "Intro"},
+                description="完整简介",
+                usage="发送 {prefix}alpha",
+                commands=["alpha", 3],
+                release_notes="- 新功能",
+                released_at="2026-11-01",
+                homepage="https://github.com/Anoyou/telebot-plugins/tree/main/alpha",
+                license="MIT",
+                icon_url="http://insecure.example/icon.png",
+                screenshots=["https://example.com/1.png", "javascript:alert(1)", "https://u:p@example.com/2.png"],
+                channel_versions={"stable": "1.0.0", "beta": "1.1.0-beta.1"},
+            ),
+            _entry("legacy", "1.0.0", summary="旧索引"),
+        ),
+        source=source,
+    )
+    alpha, legacy = entries
+    assert alpha["summary_i18n"] == {"en": "Intro", "zh": "简介"}
+    assert alpha["commands"] == ["alpha"]
+    assert alpha["icon_url"] is None  # 只收 https
+    assert alpha["screenshots"] == ["https://example.com/1.png"]
+    assert alpha["channel_versions"]["beta"] == "1.1.0-beta.1"
+    # 旧索引没有新字段：给空值，照常显示
+    assert legacy["description"] is None and legacy["screenshots"] == [] and legacy["summary_i18n"] == {"zh": "旧索引"}
+
+
+def test_channel_urls_and_install_spec() -> None:
+    entry = {
+        "key": "alpha",
+        "version": "1.0.0",
+        "repository": REPO_URL,
+        "channels": {"stable": "main", "beta": "beta", "same": "main", "bad": "../x", "nightly": "dev/next"},
+        "channel_versions": {"beta": "1.1.0-beta.1"},
+    }
+    assert svc.channel_url(entry, "stable") == REPO_URL
+    assert svc.channel_url(entry, "beta") == BETA_URL
+    assert svc.channel_url(entry, "same") is None  # 与稳定通道同一分支
+    assert svc.channel_url(entry, "bad") is None
+    assert svc.channel_url(entry, "missing") is None
+    names = [(ch["name"], ch["version"]) for ch in svc.available_channels(entry)]
+    assert names == [("stable", "1.0.0"), ("beta", "1.1.0-beta.1"), ("nightly", None)]
+    gitlab = {**entry, "repository": "https://gitlab.com/me/plugins.git"}
+    assert [ch["name"] for ch in svc.available_channels(gitlab)] == ["stable"]  # 非 GitHub 只有稳定通道
+    assert svc.parse_install_spec("registry:alpha#beta") == ("alpha", None, "beta")
+    assert svc.parse_install_spec("alpha@1.0.0") == ("alpha", "1.0.0", None)
+    assert svc.parse_install_spec(" alpha ") == ("alpha", None, None)
+
+
+async def test_catalog_tracks_installed_channel_and_beta_updates(factory, monkeypatch, tmp_path) -> None:
+    installed_root = tmp_path / "installed"
+    await _install_row(factory, installed_root, "alpha", "1.0.0")
+    await _install_row(factory, installed_root, "beta_user", "1.1.0-beta.1", source_url=BETA_URL)
+
+    async def _ok(_url):
+        channels = {"stable": "main", "beta": "beta"}
+        return _registry(
+            _entry("alpha", "1.0.0", channels=channels, channel_versions={"stable": "1.0.0", "beta": "1.1.0-beta.1"}),
+            _entry("beta_user", "1.0.0", channels=channels, channel_versions={"stable": "1.0.0", "beta": "1.1.0-beta.2"}),
+        )
+
+    monkeypatch.setattr(svc, "fetch_registry_json", _ok)
+    async with factory() as db:
+        catalog = await svc.build_catalog(db, refresh=True)
+    items = {item["key"]: item for item in catalog["items"]}
+    assert items["alpha"]["channel"] == "stable" and items["alpha"]["update_available"] is False
+    assert [ch["name"] for ch in items["alpha"]["available_channels"]] == ["stable", "beta"]
+    beta = items["beta_user"]
+    assert beta["channel"] == "beta" and beta["installed"]["same_source"] is True
+    assert beta["update_available"] is True and beta["update_version"] == "1.1.0-beta.2"
+    assert beta["auto_update"] is False  # 测试通道不自动更新
+    assert catalog["registry_refresh_hours"] == 6
+
+
+async def test_install_with_channel_and_version_check(factory, monkeypatch, tmp_path) -> None:
+    async def _ok(_url):
+        return _registry(
+            _entry("alpha", "1.0.0", channels={"stable": "main", "beta": "beta"}, channel_versions={"beta": "1.1.0"})
+        )
+
+    monkeypatch.setattr(svc, "fetch_registry_json", _ok)
+    calls: list[tuple[str, str]] = []
+
+    async def _ensure(url, *, force_refresh=False, token=None):  # noqa: ARG001
+        return tmp_path
+
+    async def _install(db, row, repo_dir, key, **_kw):  # noqa: ARG001
+        calls.append((row.url, key))
+        return "view"
+
+    monkeypatch.setattr(repo_svc, "_ensure_repo_cached_unlocked", _ensure)
+    monkeypatch.setattr(repo_svc, "_install_plugin_from_cached_repo", _install)
+    async with factory() as db:
+        assert await svc.install(db, source_id="official", key="registry:alpha#beta") == "view"
+        assert await svc.install(db, source_id="official", key="alpha", version="1.0.0") == "view"
+        with pytest.raises(svc.MarketError) as missing:
+            await svc.install(db, source_id="official", key="alpha", channel="nightly")
+        with pytest.raises(svc.MarketError) as old:
+            await svc.install(db, source_id="official", key="alpha@0.9.0")
+    assert calls == [(BETA_URL, "alpha"), (REPO_URL, "alpha")]
+    assert missing.value.code == "CHANNEL_NOT_FOUND"
+    assert old.value.code == "VERSION_NOT_AVAILABLE"
+
+
+async def test_switch_channel_replaces_with_health_window_and_back(factory, monkeypatch, tmp_path) -> None:
+    installed_root = tmp_path / "installed"
+    await _install_row(factory, installed_root, "alpha", "1.0.0")
+    stable_dir = tmp_path / "stable"
+    beta_dir = tmp_path / "beta"
+    _write_plugin(stable_dir, "alpha", "1.0.0", marker="stable")
+    _write_plugin(beta_dir, "alpha", "1.1.0-beta.1", marker="beta")
+    fetched: list[str] = []
+
+    async def _ensure(url, *, force_refresh=False, token=None):  # noqa: ARG001
+        fetched.append(url)
+        return beta_dir if url == BETA_URL else stable_dir
+
+    async def _ok(_url):
+        return _registry(
+            _entry("alpha", "1.0.0", channels={"stable": "main", "beta": "beta"},
+                   channel_versions={"stable": "1.0.0", "beta": "1.1.0-beta.1"})
+        )
+
+    async def _reload(_db, _name):
+        return None
+
+    monkeypatch.setattr(repo_svc, "_ensure_repo_cached_unlocked", _ensure)
+    monkeypatch.setattr(svc, "fetch_registry_json", _ok)
+    monkeypatch.setattr(remote_svc, "trigger_reload", _reload)
+
+    async with factory() as db:
+        run = await svc.switch_channel(db, key="alpha", channel="beta")
+    assert [(item.status, item.to_version, item.health_check) for item in run.items] == [("updated", "1.1.0-beta.1", True)]
+    assert run.items[0].message.startswith("已切换通道")
+    assert (installed_root / "alpha" / "plugin.py").read_text().startswith("# 1.1.0-beta.1")
+    async with factory() as db:
+        row = await db.get(InstalledPlugin, "alpha")
+        assert row.source_url == BETA_URL and row.version == "1.1.0-beta.1"
+        rollouts = await svc.load_rollouts(db)
+        assert rollouts["alpha"]["trigger"] == "channel" and rollouts["alpha"]["status"] == "watching"
+        catalog = await svc.build_catalog(db)
+        assert catalog["items"][0]["channel"] == "beta"
+        with pytest.raises(svc.MarketError) as same:
+            await svc.switch_channel(db, key="alpha", channel="beta")
+        assert same.value.code == "ALREADY_ON_CHANNEL"
+    await svc.accept_rollout("alpha")
+    # 切回稳定通道：版本更低也照样替换（降级），仍然进入健康观察
+    async with factory() as db:
+        back = await svc.switch_channel(db, key="alpha", channel="stable")
+    assert [(item.status, item.to_version) for item in back.items] == [("updated", "1.0.0")]
+    async with factory() as db:
+        row = await db.get(InstalledPlugin, "alpha")
+        assert row.source_url == REPO_URL and row.version == "1.0.0"
+    assert fetched == [BETA_URL, REPO_URL]
+
+
+async def test_switch_channel_refuses_pinned_and_foreign(factory, monkeypatch, tmp_path) -> None:
+    installed_root = tmp_path / "installed"
+    await _install_row(factory, installed_root, "alpha", "1.0.0")
+    await _install_row(factory, installed_root, "other", "1.0.0", source_url="https://github.com/someone/else.git")
+
+    async def _ok(_url):
+        channels = {"stable": "main", "beta": "beta"}
+        return _registry(_entry("alpha", "1.0.0", channels=channels), _entry("other", "1.0.0", channels=channels))
+
+    monkeypatch.setattr(svc, "fetch_registry_json", _ok)
+    async with factory() as db:
+        await svc.set_pinned(db, "alpha", pinned=True)
+        await db.commit()
+        with pytest.raises(svc.MarketError) as pinned:
+            await svc.switch_channel(db, key="alpha", channel="beta")
+        with pytest.raises(svc.MarketError) as foreign:
+            await svc.switch_channel(db, key="other", channel="beta")
+        with pytest.raises(svc.MarketError) as missing:
+            await svc.switch_channel(db, key="ghost", channel="beta")
+    assert pinned.value.code == "PLUGIN_PINNED"
+    assert foreign.value.code == "NOT_SAME_SOURCE"
+    assert missing.value.code == "PLUGIN_NOT_IN_MARKET"
+
+
+async def test_registry_refresh_tick_fetches_enabled_sources_once_per_ttl(factory, monkeypatch) -> None:
+    fetched: list[str] = []
+
+    async def _ok(url):
+        fetched.append(url)
+        return _registry(_entry("alpha", "1.0.0"))
+
+    monkeypatch.setattr(svc, "fetch_registry_json", _ok)
+    async with factory() as db:
+        await svc.add_source(db, url="https://example.com/registry.json", trust="community")
+        disabled = await svc.add_source(db, url="https://example.org/registry.json")
+        await svc.update_source(db, disabled["id"], {"enabled": False})
+        await db.commit()
+    assert await svc.registry_refresh_tick() == 2
+    assert sorted(fetched) == sorted([svc.OFFICIAL_REGISTRY_URL, "https://example.com/registry.json"])
+    await svc.registry_refresh_tick()  # 缓存 6 小时内有效，不重复下载
+    assert len(fetched) == 2
+
+
+async def test_registry_refresh_tick_respects_market_off(factory, monkeypatch) -> None:
+    monkeypatch.setenv(svc.MARKET_ENV, "off")
+    fetched: list[str] = []
+
+    async def _ok(url):
+        fetched.append(url)
+        return _registry()
+
+    monkeypatch.setattr(svc, "fetch_registry_json", _ok)
+    assert await svc.registry_refresh_tick() == 0
+    assert fetched == []
+
+
+def test_auto_update_skips_beta_channel() -> None:
+    base = {"update_available": True, "auto_update": True, "trust": "official", "pinned_version": None,
+            "version": "1.1.0", "source_id": "official"}
+    catalog = {
+        "sources": [{"id": "official", "auto_update": True}],
+        "items": [{**base, "key": "a", "channel": "stable"}, {**base, "key": "b", "channel": "beta"}],
+    }
+    assert [item["key"] for item in svc.auto_update_candidates(catalog, {})] == ["a"]

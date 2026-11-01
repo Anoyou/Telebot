@@ -230,6 +230,21 @@ REGISTRY_V1_ENTRY_FIELDS: tuple[str, ...] = (
     "repository",
     "trust",
 )
+# 目录版本 1.1 追加字段（0.117.0，插件市场详情页与稳定 / 测试通道）：全部可选，只增不减。旧宿主忽略这些字段；
+# 原 16 个字段（REGISTRY_V1_ENTRY_FIELDS）与 summary 的字符串类型不变。插件库 build_registry.py 有同一份清单。
+REGISTRY_V1_ADDITIVE_ENTRY_FIELDS: tuple[str, ...] = (
+    "summary_i18n",
+    "description",
+    "usage",
+    "commands",
+    "release_notes",
+    "released_at",
+    "homepage",
+    "license",
+    "icon_url",
+    "screenshots",
+    "channel_versions",
+)
 
 
 # ─────────────────────────────────────────────────────
@@ -339,6 +354,7 @@ def _registry() -> dict[str, Any]:
         "schema_version": market.REGISTRY_SCHEMA_VERSION,
         "top_fields": list(REGISTRY_V1_TOP_FIELDS),
         "entry_fields": list(REGISTRY_V1_ENTRY_FIELDS),
+        "additive_entry_fields": list(REGISTRY_V1_ADDITIVE_ENTRY_FIELDS),
         "kinds": list(market.KINDS),
         "trust_levels": list(market.TRUST_LEVELS),
     }
@@ -417,6 +433,7 @@ __all__ = [
     "PACKAGE_REQUIRED_FILES",
     "PACKAGE_SIGNATURE",
     "REGISTRY_SCHEMA_VERSION",
+    "REGISTRY_V1_ADDITIVE_ENTRY_FIELDS",
     "REGISTRY_V1_ENTRY_FIELDS",
     "REGISTRY_V1_TOP_FIELDS",
     "STABLE",

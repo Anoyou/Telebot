@@ -5511,6 +5511,19 @@
         "repository",
         "trust"
       ],
+      "additive_entry_fields": [
+        "summary_i18n",
+        "description",
+        "usage",
+        "commands",
+        "release_notes",
+        "released_at",
+        "homepage",
+        "license",
+        "icon_url",
+        "screenshots",
+        "channel_versions"
+      ],
       "kinds": [
         "interactive",
         "automation",

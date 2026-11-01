@@ -1,4 +1,4 @@
-"""插件市场 API（0.113.0）：浏览 / 搜索 / 安装 / 并发更新 / 来源管理 / 固定版本 / 健康窗口回滚。"""
+"""插件市场 API（0.113.0）：浏览 / 搜索 / 安装 / 并发更新 / 来源管理 / 固定版本 / 健康窗口回滚；0.117.0 加稳定 / 测试通道。"""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ from fastapi import APIRouter, HTTPException
 from ..deps import CurrentUser, DBSession
 from ..schemas.plugin_market import (
     PluginMarketCatalog,
+    PluginMarketChannelBody,
     PluginMarketInstallBody,
     PluginMarketPinBody,
     PluginMarketPinResult,
@@ -50,6 +51,8 @@ async def install_plugin(body: PluginMarketInstallBody, db: DBSession, user: Cur
             key=body.key,
             default_enabled=body.default_enabled,
             triggered_by_user_id=user.id,
+            channel=body.channel,
+            version=body.version,
         )
         await db.commit()
         await trigger_reload(db, view.name)
@@ -71,6 +74,19 @@ async def update_plugins(body: PluginMarketUpdateBody, db: DBSession, user: Curr
     """更新指定插件，或（不传 keys）一键更新全部有新版本且未固定的插件；并行执行，结果逐个返回。"""
 
     run = await svc.update_from_market(db, keys=body.keys, triggered_by_user_id=user.id)
+    return run.summary()
+
+
+@router.post("/channel", response_model=PluginMarketUpdateResult)
+async def switch_channel(body: PluginMarketChannelBody, db: DBSession, user: CurrentUser):
+    """把已安装插件切到另一个通道（稳定 ↔ 测试）：与更新同一流程，进入健康观察窗口，不健康自动回滚。"""
+
+    try:
+        run = await svc.switch_channel(
+            db, key=body.key, channel=body.channel, source_id=body.source_id, triggered_by_user_id=user.id
+        )
+    except svc.MarketError as exc:
+        raise _http(exc) from exc
     return run.summary()
 
 

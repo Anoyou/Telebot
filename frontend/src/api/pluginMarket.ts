@@ -12,6 +12,7 @@ export type PluginMarketUpdateResult = components["schemas"]["PluginMarketUpdate
 export type PluginMarketSourceCreate = components["schemas"]["PluginMarketSourceCreate"];
 export type PluginMarketSourcePatch = components["schemas"]["PluginMarketSourcePatch"];
 export type PluginMarketSettingsPatch = components["schemas"]["PluginMarketSettingsPatch"];
+export type PluginMarketChannel = components["schemas"]["PluginMarketChannel"];
 
 const BASE = "/api/plugin-market";
 // 安装 / 更新要克隆仓库并等待 worker 重载，多个插件并行时也可能超过默认超时。
@@ -29,6 +30,8 @@ export async function installFromMarket(body: {
   source_id: string;
   key: string;
   default_enabled?: boolean;
+  /** 服务器 0.117.0+：安装哪个通道；旧服务器忽略此字段（只装稳定版），所以只在选了非稳定通道时才传。 */
+  channel?: string | null;
 }): Promise<RemotePlugin> {
   const { data } = await api.post<RemotePlugin>(`${BASE}/install`, body, {
     timeout: MARKET_LONG_TIMEOUT_MS,
@@ -42,6 +45,18 @@ export async function updateFromMarket(keys?: string[]): Promise<PluginMarketUpd
     keys && keys.length ? { keys } : {},
     { timeout: MARKET_LONG_TIMEOUT_MS },
   );
+  return data;
+}
+
+/** 服务器 0.117.0+：把已安装插件切到另一个通道（稳定 ↔ 测试），结果形状与更新相同。 */
+export async function switchMarketChannel(body: {
+  key: string;
+  channel: string;
+  source_id?: string | null;
+}): Promise<PluginMarketUpdateResult> {
+  const { data } = await api.post<PluginMarketUpdateResult>(`${BASE}/channel`, body, {
+    timeout: MARKET_LONG_TIMEOUT_MS,
+  });
   return data;
 }
 
@@ -86,4 +101,17 @@ export async function acceptMarketRollout(key: string): Promise<PluginMarketRoll
   return data;
 }
 
-export { KIND_LABELS, TRUST_LABELS, filterMarketItems, marketUpdateCount } from "@/lib/pluginMarket";
+export {
+  KIND_LABELS,
+  TRUST_DESCRIPTIONS,
+  TRUST_LABELS,
+  channelLabel,
+  describePermission,
+  filterMarketItems,
+  hasMultipleChannels,
+  isChannelDowngrade,
+  kindCounts,
+  marketChannels,
+  marketUpdateCount,
+  renderUsage,
+} from "@/lib/pluginMarket";
