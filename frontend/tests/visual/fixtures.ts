@@ -256,6 +256,37 @@ export const pluginMarketItemFixture = (overrides: Record<string, unknown> = {})
   ...overrides,
 });
 
+// 服务器 0.117.0：目录条目的详情字段与稳定 / 测试通道（旧服务器没有这些字段，pluginMarketItemFixture 默认保持旧形状）。
+export const pluginMarketDetailFieldsFixture = {
+  channels: { stable: "main", beta: "beta" },
+  channel: "stable",
+  available_channels: [
+    { name: "stable", ref: "main", version: "1.1.18" },
+    { name: "beta", ref: "beta", version: "1.2.0-beta.1" },
+  ],
+  channel_versions: { stable: "1.1.18", beta: "1.2.0-beta.1" },
+  description: "随机生成 24 点题目，群内竞速答题，第一名获得奖金。",
+  usage: "发送 {prefix}24 开一局。",
+  commands: ["24"],
+  release_notes: "- 入口增加 entry_policy。",
+  released_at: "2026-10-29",
+  homepage: "https://github.com/Anoyou/telebot-plugins/tree/main/game24",
+  license: "MIT",
+  summary_i18n: { zh: "群内 24 点小游戏。", en: "24-point game." },
+  icon_url: null,
+  screenshots: [],
+};
+
+// POST /api/plugin-market/channel（0.117.0）的成功结果。
+export const pluginMarketChannelResultFixture = (key: string, from: string, to: string) => ({
+  concurrency: 1,
+  total: 1,
+  updated: 1,
+  skipped: 0,
+  failed: 0,
+  items: [{ key, display_name: key, from_version: from, to_version: to, status: "updated", message: "已切换通道", health_check: true }],
+});
+
 export const pluginMarketCatalogFixture = ({
   items,
   updates,

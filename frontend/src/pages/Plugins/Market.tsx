@@ -1,4 +1,5 @@
 // 插件市场（服务器 0.113.0+）：浏览、搜索、安装、更新角标、一键全部更新、来源管理、更新参数、健康窗口回滚。
+// 0.117.0+：分类标签、应用商店式详情（简介 / 截图或预览 / 版本说明 / 权限 / 兼容性 / 信任标识）、稳定 / 测试通道。
 //
 // 旧服务器没有 /api/plugin-market 接口时显示“请更新服务器”，插件仓库 / Git / ZIP / 本地导入仍在“插件管理”里可用。
 import { useMemo, useState } from "react";
@@ -38,9 +39,15 @@ import { Switch } from "@/components/ui/switch";
 import { EmptyState } from "@/components/feedback/EmptyState";
 import { getErrMsg } from "@/lib/api";
 import { formatDateTime } from "@/lib/utils";
+import { confirmDialog } from "@/components/ui/confirm-dialog";
 import {
   KIND_LABELS,
   TRUST_LABELS,
+  channelLabel,
+  isChannelDowngrade,
+  kindCounts,
+  marketChannels,
+  switchMarketChannel,
   acceptMarketRollout,
   addMarketSource,
   deleteMarketSource,
@@ -58,15 +65,10 @@ import {
   type PluginMarketUpdateResult,
 } from "@/api/pluginMarket";
 
+import { MarketDetailDialog, MarketIcon, trustTone } from "./MarketDetail";
 import { PluginWorkspaceHeader } from "./WorkspaceHeader";
 
 export const PLUGIN_MARKET_QUERY_KEY = ["plugin-market", "catalog"] as const;
-
-function trustTone(trust: string): "success" | "info" | "warn" {
-  if (trust === "official") return "success";
-  if (trust === "community") return "info";
-  return "warn";
-}
 
 function isMissingEndpoint(error: unknown): boolean {
   const status = (error as { response?: { status?: number } } | null)?.response?.status;
@@ -88,6 +90,7 @@ export function PluginsMarketPage() {
   const [onlyInstalled, setOnlyInstalled] = useState(false);
   const [updateResult, setUpdateResult] = useState<PluginMarketUpdateResult | null>(null);
   const [busyKey, setBusyKey] = useState<string | null>(null);
+  const [detailId, setDetailId] = useState<string | null>(null);
 
   const catalogQ = useQuery({
     queryKey: PLUGIN_MARKET_QUERY_KEY,
@@ -109,12 +112,18 @@ export function PluginsMarketPage() {
   });
 
   const installM = useMutation({
-    mutationFn: (item: PluginMarketItem) => {
+    mutationFn: ({ item, channel }: { item: PluginMarketItem; channel: string | null }) => {
       setBusyKey(item.id);
-      return installFromMarket({ source_id: item.source_id, key: item.key });
+      return installFromMarket({
+        source_id: item.source_id,
+        key: item.key,
+        ...(channel ? { channel } : {}),
+      });
     },
-    onSuccess: (_data, item) => {
-      toast.success(`已安装 ${item.name.zh}，到「启用与配置」按账号启用`);
+    onSuccess: (_data, { item, channel }) => {
+      toast.success(
+        `已安装 ${item.name.zh}${channel ? `（${channelLabel(channel)}）` : ""}，到「启用与配置」按账号启用`,
+      );
       void invalidate();
     },
     onError: (error) => toast.error(getErrMsg(error)),
@@ -135,6 +144,55 @@ export function PluginsMarketPage() {
     onError: (error) => toast.error(getErrMsg(error)),
     onSettled: () => setBusyKey(null),
   });
+
+  const channelM = useMutation({
+    mutationFn: ({ item, channel }: { item: PluginMarketItem; channel: string }) => {
+      setBusyKey(item.id);
+      return switchMarketChannel({ key: item.key, channel, source_id: item.source_id });
+    },
+    onSuccess: (result) => {
+      setUpdateResult(result);
+      if (result.failed) toast.warning("切换通道失败");
+      else if (result.updated) toast.success("已切换通道，进入健康观察");
+      void invalidate();
+    },
+    onError: (error) => toast.error(getErrMsg(error)),
+    onSettled: () => setBusyKey(null),
+  });
+
+  // 未审核插件安装前二次确认；其它档位直接安装。
+  const requestInstall = async (item: PluginMarketItem, channel: string | null) => {
+    if (item.trust === "unreviewed") {
+      const ok = await confirmDialog({
+        title: `安装未审核的插件「${item.name.zh}」？`,
+        description:
+          "没有人审核过这个插件的代码。它会在你的服务器里运行，并能使用它声明的权限（如发消息、访问外部网站）。只在你信任来源时安装。",
+        confirmLabel: "仍然安装",
+        tone: "danger",
+      });
+      if (!ok) return;
+    }
+    installM.mutate({ item, channel });
+  };
+
+  const requestSwitch = async (item: PluginMarketItem, channel: string) => {
+    const target = marketChannels(item).find((entry) => entry.name === channel);
+    const downgrade = isChannelDowngrade(item.installed?.version, target?.version);
+    const ok = await confirmDialog({
+      title: `把「${item.name.zh}」切换到${channelLabel(channel)}？`,
+      description: [
+        `将安装 ${channelLabel(channel)} ${target?.version ? `v${target.version}` : "的最新版本"}（当前 v${item.installed?.version ?? "?"}）。`,
+        downgrade ? "这是降级：插件的数据不会跟着回退，个别插件可能读不懂新版本写下的数据。" : "",
+        channel === "stable" ? "" : "测试版可能有问题，不会自动更新。",
+        "切换后同样会观察一段时间，出问题自动回滚。",
+      ]
+        .filter(Boolean)
+        .join("\n"),
+      confirmLabel: "切换",
+      tone: downgrade ? "danger" : "default",
+    });
+    if (ok) channelM.mutate({ item, channel });
+  };
 
   const pinM = useMutation({
     mutationFn: ({ key, pinned }: { key: string; pinned: boolean }) => setMarketPin(key, pinned),
@@ -167,9 +225,10 @@ export function PluginsMarketPage() {
     () => filterMarketItems(catalog?.items ?? [], { query, kind, onlyUpdates, onlyInstalled }),
     [catalog?.items, query, kind, onlyUpdates, onlyInstalled],
   );
-  const kinds = useMemo(
-    () => Array.from(new Set((catalog?.items ?? []).map((item) => item.kind))).sort(),
-    [catalog?.items],
+  const kinds = useMemo(() => kindCounts(catalog?.items ?? []), [catalog?.items]);
+  const detailItem = useMemo(
+    () => (catalog?.items ?? []).find((item) => item.id === detailId) ?? null,
+    [catalog?.items, detailId],
   );
   const watching = (catalog?.rollouts ?? []).filter((item) => item.status === "watching");
   const recentRollbacks = (catalog?.rollouts ?? []).filter(
@@ -239,24 +298,11 @@ export function PluginsMarketPage() {
               <Input
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
-                placeholder="搜索名称、简介、标签"
+                placeholder="搜索名称、简介、标签、指令"
                 className="pl-8"
                 data-testid="plugin-market-search"
               />
             </div>
-            <Select
-              value={kind}
-              onChange={(event) => setKind(event.target.value)}
-              className="sm:w-40"
-              data-testid="plugin-market-kind"
-            >
-              <option value="all">全部类型</option>
-              {kinds.map((value) => (
-                <option key={value} value={value}>
-                  {KIND_LABELS[value] ?? value}
-                </option>
-              ))}
-            </Select>
             <label className="flex items-center gap-2 text-sm">
               <Switch checked={onlyUpdates} onCheckedChange={setOnlyUpdates} data-testid="plugin-market-only-updates" />
               只看可更新
@@ -266,6 +312,24 @@ export function PluginsMarketPage() {
               只看已安装
             </label>
           </div>
+
+          {kinds.length > 1 && (
+            <div className="flex flex-wrap gap-1.5" role="group" aria-label="按分类筛选" data-testid="plugin-market-kinds">
+              {[{ kind: "all", count: catalog?.items.length ?? 0 }, ...kinds].map((entry) => (
+                <Button
+                  key={entry.kind}
+                  size="sm"
+                  variant={kind === entry.kind ? "default" : "outline"}
+                  aria-pressed={kind === entry.kind}
+                  onClick={() => setKind(entry.kind)}
+                  data-testid={`plugin-market-kind-${entry.kind}`}
+                >
+                  {entry.kind === "all" ? "全部" : (KIND_LABELS[entry.kind] ?? entry.kind)}
+                  <span className="text-xs opacity-70">{entry.count}</span>
+                </Button>
+              ))}
+            </div>
+          )}
 
           {watching.length > 0 && (
             <div className="space-y-2 rounded-lg border border-info/40 bg-info/5 p-3" data-testid="plugin-market-watching">
@@ -327,15 +391,29 @@ export function PluginsMarketPage() {
                   key={item.id}
                   item={item}
                   busy={busyKey === item.id || busyKey === item.key || busyKey === "__all__"}
-                  onInstall={() => installM.mutate(item)}
+                  onInstall={() => void requestInstall(item, null)}
                   onUpdate={() => updateM.mutate([item.key])}
                   onPin={(pinned) => pinM.mutate({ key: item.key, pinned })}
+                  onOpenDetail={() => setDetailId(item.id)}
                 />
               ))}
             </div>
           )}
         </CardContent>
       </Card>
+
+      <MarketDetailDialog
+        key={detailItem?.id ?? "none"}
+        item={detailItem}
+        open={detailItem !== null}
+        busy={detailItem !== null && (busyKey === detailItem.id || busyKey === detailItem.key || busyKey === "__all__")}
+        serverVersion={catalog?.server_version}
+        onOpenChange={(open) => !open && setDetailId(null)}
+        onInstall={(item, channel) => void requestInstall(item, channel)}
+        onUpdate={(item) => updateM.mutate([item.key])}
+        onPin={(item, pinned) => pinM.mutate({ key: item.key, pinned })}
+        onSwitchChannel={(item, channel) => void requestSwitch(item, channel)}
+      />
 
       {catalog && <MarketSourcesCard catalog={catalog} onChanged={invalidate} />}
       {catalog && <MarketSettingsCard catalog={catalog} onSaved={invalidate} />}
@@ -383,23 +461,30 @@ function MarketItemCard({
   onInstall,
   onUpdate,
   onPin,
+  onOpenDetail,
 }: {
   item: PluginMarketItem;
   busy: boolean;
   onInstall: () => void;
   onUpdate: () => void;
   onPin: (pinned: boolean) => void;
+  onOpenDetail: () => void;
 }) {
   const installed = item.installed;
   return (
     <div className="flex flex-col gap-2 rounded-lg border p-3" data-testid={`plugin-market-item-${item.key}`}>
       <div className="flex items-start gap-3">
-        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-muted text-xl" aria-hidden>
-          {item.icon || "🧩"}
-        </div>
+        <MarketIcon item={item} />
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-1.5">
-            <span className="truncate font-medium">{item.name.zh}</span>
+            <button
+              type="button"
+              className="truncate text-left font-medium hover:underline"
+              onClick={onOpenDetail}
+              data-testid={`plugin-market-open-${item.key}`}
+            >
+              {item.name.zh}
+            </button>
             <MetaBadge tone={trustTone(item.trust)}>{TRUST_LABELS[item.trust] ?? item.trust}</MetaBadge>
             {item.update_available && !item.pinned_version && (
               <MetaBadge tone="info" data-testid={`plugin-market-badge-${item.key}`}>
@@ -408,6 +493,7 @@ function MarketItemCard({
             )}
             {item.pinned_version && <MetaBadge tone="outline">已固定 {item.pinned_version}</MetaBadge>}
             {item.auto_update && installed && <MetaBadge tone="neutral">自动更新</MetaBadge>}
+            {item.channel && item.channel !== "stable" && <MetaBadge tone="warn">{channelLabel(item.channel)}</MetaBadge>}
           </div>
           <div className="text-xs text-muted-foreground">
             {KIND_LABELS[item.kind] ?? item.kind} · v{item.version}
@@ -444,11 +530,14 @@ function MarketItemCard({
             data-testid={`plugin-market-update-${item.key}`}
           >
             {busy ? <Spinner className="h-4 w-4" /> : <Download className="h-4 w-4" />}
-            更新到 v{item.version}
+            更新到 v{item.update_version || item.version}
           </Button>
         ) : (
           <MetaBadge tone="success">已是最新</MetaBadge>
         )}
+        <Button size="sm" variant="ghost" onClick={onOpenDetail} data-testid={`plugin-market-detail-open-${item.key}`}>
+          详情
+        </Button>
         {installed && installed.same_source && (
           <Button
             size="sm"

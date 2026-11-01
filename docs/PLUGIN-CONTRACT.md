@@ -95,7 +95,7 @@ TelePilot 有三种和插件相关的版本号：
 | AI 错误类型 | `stability.ai_errors` | `AIUnavailableError`、`AICapabilityError`、`AIResponseTruncated` 及“后两者继承 `AIUnavailableError`” | 错误提示文字 |
 | 插件包与签名 | `stability.remote_package` | 必需文件 `__init__.py` `manifest.py` `plugin.json` `plugin.py`；Ed25519 detached 签名（签整个 ZIP 字节，公钥 PEM） | — |
 | 入站 Webhook | `stability.webhook_envelope` | — | **实验**：信封 `webhook` / `hook_key` / `body` / `headers`，有真实用户后再转正 |
-| 插件市场索引 | `stability.registry` | `registry.json` **目录版本 1**（`schema_version: 1`）的顶层与条目字段、`kind` 与信任等级；以后改格式发目录版本 2，宿主两版都读 | — |
+| 插件市场索引 | `stability.registry` | `registry.json` **目录版本 1**（`schema_version: 1`）的顶层与条目字段、`kind` 与信任等级，以及 0.117.0 起的可选详情字段 `additive_entry_fields`；以后改格式发目录版本 2，宿主两版都读 | — |
 
 “实验”不等于不能用：照样能用，调整前会在 CHANGELOG / 弃用登记里提前公告；只是不在 1.x 的“只增不减”承诺里。
 
