@@ -34,6 +34,9 @@ struct AssistantComposer: View {
     @Bindable var store: AssistantStore
     @Bindable var panel: AssistantComposerPanelState
     var focused: FocusState<Bool>.Binding
+    /// 第 24 轮：键盘上方的「收起」按钮。Agent 分页（`embedded`）没有外层统一工具栏，由输入栏自己挂；
+    /// 从别处推入的会话页由所在分页／sheet 根上的 `.keyboardDismissToolbar()` 提供，这里不再重复。
+    var showsKeyboardDismiss = false
     @State private var draft = ""
     @State private var photos: [PhotosPickerItem] = []
     @State private var pickingPhotos = false
@@ -68,6 +71,14 @@ struct AssistantComposer: View {
                 .disabled(readOnlyReason != nil)
                 .padding(.horizontal, 16).padding(.top, 14).padding(.bottom, 4)
                 .accessibilityIdentifier("assistant.composer")
+                .toolbar {
+                    if showsKeyboardDismiss && KeyboardDismiss.isEnabled {
+                        ToolbarItemGroup(placement: .keyboard) {
+                            Spacer()
+                            KeyboardDismissButton { focused.wrappedValue = false }
+                        }
+                    }
+                }
             toolbarRow
                 .padding(.horizontal, 8).padding(.bottom, 6)
         }

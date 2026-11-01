@@ -280,7 +280,7 @@ struct AssistantView: View {
         }
         // 输入栏（「+」附件、模型选择用系统原生 popover 锚定在各自按钮上，第九轮）。
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            AssistantComposer(store: store, panel: composerPanel, focused: $composerFocused)
+            AssistantComposer(store: store, panel: composerPanel, focused: $composerFocused, showsKeyboardDismiss: embedded)
         }
         .onChange(of: store.sessionID) { _, _ in composerPanel.close() }
         .motionAnimation(value: store.error)

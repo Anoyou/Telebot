@@ -275,10 +275,14 @@ struct CloudflareAccessSettingsView: View {
                         .accessibilityIdentifier("cfAccess.close")
                 }
             }
-            ToolbarItemGroup(placement: .keyboard) {
-                Spacer()
-                Button("完成") { focusedField = nil }
-                    .accessibilityIdentifier("cfAccess.keyboardDone")
+            // 第 24 轮：从「App 设置」推入时，所在分页根上已有统一的键盘「收起」，这里不再叠一个「完成」；
+            // 作为独立弹窗（Access 过期自动弹出）时没有外层工具栏，仍用自己的「完成」。
+            if presentedAsSheet || !KeyboardDismiss.isEnabled {
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button("完成") { focusedField = nil }
+                        .accessibilityIdentifier("cfAccess.keyboardDone")
+                }
             }
         }
         .accessibilityIdentifier("cfAccess.screen")

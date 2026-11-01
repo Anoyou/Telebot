@@ -1,62 +1,63 @@
+import SwiftUI
 import UIKit
 
-/// 第 24 轮：全 App 统一的「收起键盘」——键盘上方一条工具栏，右侧「收起」按钮（`keyboard.chevron.compact.down`）。
+/// 第 24 轮：全 App 统一的「收起键盘」——键盘上方工具栏右侧「收起」按钮（`keyboard.chevron.compact.down`）。
 ///
-/// 为什么不用 SwiftUI 的 `.toolbar { ToolbarItemGroup(placement: .keyboard) }`：它要挂在每个页面（sheet 不继承），
-/// 父子页面都挂时按钮会重复出现，且在 TabView / NavigationStack 嵌套里偶有不显示。这里在 App 启动时监听系统的
-/// 「开始编辑」通知，给**还没有**辅助视图的输入框（`UITextField`，以及 SwiftUI 多行 `TextField(axis: .vertical)`、
-/// `TextEditor` 背后的 `UITextView`）挂上同一条工具栏，所有页面、sheet、Agent 输入栏一次覆盖。
+/// 实现用 SwiftUI 原生的键盘工具栏 `.toolbar { ToolbarItemGroup(placement: .keyboard) }`。
+/// 第一版在 App 启动时监听「开始编辑」通知、给输入框设置 `inputAccessoryView`，CI 界面测试证实对 SwiftUI 输入框无效：
+/// SwiftUI 的 `TextField` / `TextEditor` 背后的 UIKit 输入框由 SwiftUI 自己管理辅助视图（它就是用这个位置放键盘工具栏的），
+/// 外部设置会被忽略或覆盖，键盘上方什么也没有。所以改回系统支持的写法：
 ///
-/// - 已经有辅助视图的输入框不动：登录页、Cloudflare Access 自己的「完成」（SwiftUI 键盘工具栏）保持原样，不会出现两条栏。
-/// - 搜索栏（`UISearchTextField`）不挂：系统搜索栏有自己的「取消」。
-/// - 只读的 `UITextView`（「选择文本」面板）不会开始编辑，自然不挂。
-/// - 按钮无障碍标签「收起键盘」，标识 `keyboard.dismiss`；点按让当前输入框放弃焦点（SwiftUI 的 `FocusState` 同步变为未聚焦）。
+/// - 每个 Dock 分页（Agent 除外）和根级 sheet 的根上挂一次 `.keyboardDismissToolbar()`，页面里的输入框共用；
+/// - Agent 页的输入栏自己挂（`AssistantComposer`，只在输入栏有焦点时出现，点按直接把焦点状态设为未聚焦）；
+/// - 页面里已经有自己键盘工具栏「完成」的（登录页、Cloudflare Access 弹窗）不再叠加。
+/// - 按钮读屏「收起键盘」，标识 `keyboard.dismiss`；点按让当前输入框放弃焦点（SwiftUI 的 `FocusState` 同步变为未聚焦）。
 /// - 界面测试默认不挂（多出的 44pt 工具栏会挡住紧贴键盘的元素，影响既有测试的点按位置），
 ///   带 `--ui-test-keyboard-accessory` 启动时才挂，由专门的测试验证。
-@MainActor
-final class KeyboardDismissAccessory: NSObject {
-    static let shared = KeyboardDismissAccessory()
+enum KeyboardDismiss {
     static let identifier = "keyboard.dismiss"
 
-    private var installed = false
-
-    /// App 启动时调用一次。
-    func install() {
-        guard !installed else { return }
+    /// 是否显示「收起」按钮：正式使用总是显示；界面测试只在带 `--ui-test-keyboard-accessory` 时显示。
+    static let isEnabled: Bool = {
         let arguments = ProcessInfo.processInfo.arguments
-        if arguments.contains("--ui-testing") && !arguments.contains("--ui-test-keyboard-accessory") { return }
-        installed = true
-        let center = NotificationCenter.default
-        center.addObserver(self, selector: #selector(textFieldBegan(_:)), name: UITextField.textDidBeginEditingNotification, object: nil)
-        center.addObserver(self, selector: #selector(textViewBegan(_:)), name: UITextView.textDidBeginEditingNotification, object: nil)
-    }
+        return !arguments.contains("--ui-testing") || arguments.contains("--ui-test-keyboard-accessory")
+    }()
 
-    @objc private func textFieldBegan(_ note: Notification) {
-        guard let field = note.object as? UITextField, !(field is UISearchTextField), field.inputAccessoryView == nil else { return }
-        field.inputAccessoryView = makeBar()
-        field.reloadInputViews()
+    /// 让当前第一响应者（任何输入框）放弃焦点，键盘随之收起。
+    @MainActor static func resignCurrentResponder() {
+        _ = UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
     }
+}
 
-    @objc private func textViewBegan(_ note: Notification) {
-        guard let view = note.object as? UITextView, view.isEditable, view.inputAccessoryView == nil else { return }
-        view.inputAccessoryView = makeBar()
-        view.reloadInputViews()
+/// 键盘工具栏里的「收起」按钮本身（全 App 同一个外观与标识）。
+struct KeyboardDismissButton: View {
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Label("收起", systemImage: "keyboard.chevron.compact.down")
+        }
+        .accessibilityLabel("收起键盘")
+        .accessibilityIdentifier(KeyboardDismiss.identifier)
     }
+}
 
-    private func makeBar() -> UIToolbar {
-        let bar = UIToolbar(frame: CGRect(x: 0, y: 0, width: 320, height: 44))
-        bar.autoresizingMask = [.flexibleWidth]
-        let dismiss = UIBarButtonItem(title: "收起", image: UIImage(systemName: "keyboard.chevron.compact.down"),
-                                      primaryAction: UIAction { _ in
-                                          // 无论 SDK 把处理闭包标成什么隔离，点按总在主线程：显式回到主 actor（Swift 6 严格并发）。
-                                          MainActor.assumeIsolated {
-                                              _ = UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
-                                          }
-                                      })
-        dismiss.accessibilityLabel = "收起键盘"
-        dismiss.accessibilityIdentifier = Self.identifier
-        bar.items = [UIBarButtonItem(systemItem: .flexibleSpace), dismiss]
-        bar.sizeToFit()
-        return bar
+private struct KeyboardDismissToolbar: ViewModifier {
+    func body(content: Content) -> some View {
+        content.toolbar {
+            if KeyboardDismiss.isEnabled {
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    KeyboardDismissButton { KeyboardDismiss.resignCurrentResponder() }
+                }
+            }
+        }
+    }
+}
+
+extension View {
+    /// 给这一棵视图里的输入框挂上键盘上方的「收起」按钮。每个呈现层（Dock 分页、sheet）只在根上挂一次，避免重复。
+    func keyboardDismissToolbar() -> some View {
+        modifier(KeyboardDismissToolbar())
     }
 }

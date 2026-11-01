@@ -294,8 +294,16 @@ final class AssistantUITests: XCTestCase {
         XCTAssertTrue(timed.waitForExistence(timeout: 10))
         XCTAssertTrue(toggles.matching(NSPredicate(format: "label == %@", "思考过程")).firstMatch.exists, "旧服务器没有用时：只写「思考过程」")
         XCTAssertEqual(toggles.count, 2, "没有思考内容的回答不显示思考行")
-        XCTAssertLessThanOrEqual(timed.frame.maxY, answer.frame.minY + 1, "思考行在回答正文上方")
-        XCTAssertGreaterThanOrEqual(timed.frame.height, 44)
+        // 第一条回答在会话最上面，首屏贴底时它已滚出屏幕上方，且贴底滚动／逐帧补上更早消息时内容还在移动
+        // （CI：两次读 frame 之间内容上移约 16pt，读到「思考行 maxY -64 > 正文 minY -69」的假重叠）。
+        // 先把对话滑到顶（顶部有边界，多滑不会过头），等停稳后再在同一时刻附近读两者的位置。
+        let conversation = app.scrollViews.firstMatch
+        for _ in 0..<3 where !(timed.isHittable && timed.frame.minY > 0) { conversation.swipeDown() }
+        let (timedFrame, answerFrame) = stableFrames(timed, answer)
+        XCTAssertGreaterThan(timedFrame.minY, 0, "思考行应已滑进屏幕：\(timedFrame)")
+        XCTAssertLessThan(timedFrame.midY, answerFrame.midY, "思考行在回答正文上方")
+        XCTAssertLessThanOrEqual(timedFrame.maxY, answerFrame.minY + 2, "思考行与正文不重叠：\(timedFrame) / \(answerFrame)")
+        XCTAssertGreaterThanOrEqual(timedFrame.height, 44)
         let text = app.staticTexts.matching(identifier: "assistant.reasoning.text").firstMatch
         XCTAssertFalse(text.exists, "默认折叠")
         XCTAssertEqual(timed.value as? String, "已折叠")
@@ -315,8 +323,10 @@ final class AssistantUITests: XCTestCase {
         let composer = app.descendants(matching: .any)["assistant.composer"].firstMatch
         composer.tap()
         composer.typeText("草稿")
-        let dismiss = app.buttons["keyboard.dismiss"]
+        // 第 24 轮修正：「收起」改为 SwiftUI 原生键盘工具栏（Agent 输入栏自己挂），见 KeyboardDismissAccessory.swift。
+        let dismiss = app.buttons.matching(identifier: "keyboard.dismiss").firstMatch
         XCTAssertTrue(dismiss.waitForExistence(timeout: 5))
+        XCTAssertEqual(app.buttons.matching(identifier: "keyboard.dismiss").count, 1, "键盘上方只有一个「收起」")
         XCTAssertEqual(dismiss.label, "收起键盘")
         let bar = app.descendants(matching: .any)["assistant.composerBar"].firstMatch
         XCTAssertLessThanOrEqual(bar.frame.maxY, dismiss.frame.minY + 1, "输入栏在键盘工具栏上方")
@@ -353,6 +363,20 @@ final class AssistantUITests: XCTestCase {
         app.buttons["assistant.model.option.auto"].tap()
         XCTAssertTrue(waitUntilGone(modelPanel))
         XCTAssertTrue((composer.value as? String ?? "").contains("草稿"))
+    }
+
+    /// 等两个元素都停稳（连续两次读到的位置一致，最多约 3 秒），返回最后一次读到的位置。
+    /// 列表还在滚动时分开读两个元素的 frame 会读到不同时刻的位置，比较上下关系会出错。
+    private func stableFrames(_ first: XCUIElement, _ second: XCUIElement, timeout: TimeInterval = 3) -> (CGRect, CGRect) {
+        let deadline = Date().addingTimeInterval(timeout)
+        var last = (first.frame, second.frame)
+        while Date() < deadline {
+            Thread.sleep(forTimeInterval: 0.25)
+            let now = (first.frame, second.frame)
+            if now.0 == last.0 && now.1 == last.1 { return now }
+            last = now
+        }
+        return last
     }
 
     /// 点 popover 外（对话区域上部）收起 popover。
