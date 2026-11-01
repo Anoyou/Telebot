@@ -348,7 +348,7 @@ iPhone 和 iPad 使用系统安全区；支持横竖屏、长中文、辅助功�
 ## 键盘收起（0.36.0，第 24 轮）
 
 - 全 App 的输入框（单行 `TextField`、多行 `TextField(axis: .vertical)`、`TextEditor`）弹出键盘时，键盘上方右侧「收起」（`keyboard.chevron.compact.down`，读屏「收起键盘」，标识 `keyboard.dismiss`）。
-- 实现是 SwiftUI 原生键盘工具栏 `ToolbarItemGroup(placement: .keyboard)`，封装为 `.keyboardDismissToolbar()`（`KeyboardDismissAccessory.swift`）：每个 Dock 分页（Agent 除外）、「更多」和根级 sheet 的根上各挂**一次**，页面里不要再各自挂（父子都挂会出现两个按钮）。Agent 分页的输入栏自己挂（`AssistantComposer(showsKeyboardDismiss:)`，点按把输入栏焦点设为未聚焦）。
+- 实现是 SwiftUI 原生键盘工具栏 `ToolbarItemGroup(placement: .keyboard)`，封装为 `.keyboardDismissToolbar()`（`KeyboardDismissAccessory.swift`）：每个 Dock 分页（Agent 除外）、「更多」和根级 sheet 的根上各挂**一次**，页面里不要再各自挂（父子都挂会出现两个按钮）。Agent 分页不用键盘工具栏：输入栏有焦点时，发送按钮左边出现与「+」同款的圆形「收起键盘」按钮（`AssistantComposer(showsKeyboardDismiss:)`，同一标识 `keyboard.dismiss`，点按把输入栏焦点设为未聚焦）——键盘工具栏会和贴着键盘的输入栏叠在一起（CI 实测遮住输入栏底部约 20pt）。
 - 不用「监听开始编辑再设置 `inputAccessoryView`」的全局注入：SwiftUI 输入框的辅助视图由 SwiftUI 自己管理，外部设置无效（第 24 轮 CI 证实键盘上方什么都没有）。
 - 已经有自己键盘工具栏「完成」的：登录页（不在分页里）保留；Cloudflare Access 作为独立弹窗时保留「完成」，从「App 设置」推入时只用分页统一的「收起」。
 - 可滚动的输入页面加 `.scrollDismissesKeyboard(.interactively)`（Agent 对话列表、登录、Cloudflare Access），表单类长页面可用 `.immediately`。

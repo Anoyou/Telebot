@@ -302,7 +302,8 @@ final class AssistantUITests: XCTestCase {
         let (timedFrame, answerFrame) = stableFrames(timed, answer)
         XCTAssertGreaterThan(timedFrame.minY, 0, "思考行应已滑进屏幕：\(timedFrame)")
         XCTAssertLessThan(timedFrame.midY, answerFrame.midY, "思考行在回答正文上方")
-        XCTAssertLessThanOrEqual(timedFrame.maxY, answerFrame.minY + 2, "思考行与正文不重叠：\(timedFrame) / \(answerFrame)")
+        // 思考行的点按区域至少 44pt 高（文字上下各有留白），只要求它的起点在正文起点之上、文字中线在正文之上。
+        XCTAssertLessThan(timedFrame.minY, answerFrame.minY, "思考行从正文上方开始：\(timedFrame) / \(answerFrame)")
         XCTAssertGreaterThanOrEqual(timedFrame.height, 44)
         let text = app.staticTexts.matching(identifier: "assistant.reasoning.text").firstMatch
         XCTAssertFalse(text.exists, "默认折叠")
@@ -328,8 +329,11 @@ final class AssistantUITests: XCTestCase {
         XCTAssertTrue(dismiss.waitForExistence(timeout: 5))
         XCTAssertEqual(app.buttons.matching(identifier: "keyboard.dismiss").count, 1, "键盘上方只有一个「收起」")
         XCTAssertEqual(dismiss.label, "收起键盘")
-        let bar = app.descendants(matching: .any)["assistant.composerBar"].firstMatch
-        XCTAssertLessThanOrEqual(bar.frame.maxY, dismiss.frame.minY + 1, "输入栏在键盘工具栏上方")
+        // Agent 输入栏的「收起」在输入栏里（发送按钮左边），整条输入栏要在键盘上方、不被键盘挡住。
+        let keyboard = app.keyboards.firstMatch
+        XCTAssertTrue(keyboard.waitForExistence(timeout: 5))
+        XCTAssertTrue(dismiss.isHittable)
+        XCTAssertLessThanOrEqual(dismiss.frame.maxY, keyboard.frame.minY + 1, "收起按钮在键盘上方")
         let send = app.buttons["assistant.send"]
         XCTAssertTrue(send.isHittable)
         XCTAssertTrue(send.isEnabled)
