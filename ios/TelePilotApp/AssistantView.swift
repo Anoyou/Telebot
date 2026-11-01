@@ -382,6 +382,11 @@ private struct AssistantMessageView: View, Equatable {
     @State private var copied = false
     @State private var copyCount = 0
     @State private var confirmRegenerate = false
+
+    /// 复制后对勾停留时长：平时 1.5 秒；界面测试里放长到 15 秒（同 `AssistantCodeBlockView.copiedFeedback`）——
+    /// XCTest 点按后要先等界面空闲（长会话里实测 5 秒以上）才开始查找，短提示在查找前就已恢复，断言会落空。
+    nonisolated static let copiedFeedback: Duration =
+        ProcessInfo.processInfo.arguments.contains("--ui-testing") ? .seconds(15) : .seconds(1.5)
     @State private var selectingText = false
 
     var body: some View {
@@ -530,7 +535,7 @@ private struct AssistantMessageView: View, Equatable {
         copied = true
         let token = copyCount
         Task { @MainActor in
-            try? await Task.sleep(for: .seconds(1.5))
+            try? await Task.sleep(for: Self.copiedFeedback)
             if copyCount == token { copied = false }
         }
     }
@@ -565,6 +570,10 @@ private struct AssistantLiveReplyView: View {
     let approve: () -> Void
     let resume: () -> Void
     @State private var followScheduled = false
+    /// 界面测试专用：状态行依次显示过的阶段，作为 `assistant.live.status` 的无障碍值（「›」连接）。
+    /// 阶段约 1 秒一换，测试端逐次快照在负载高的模拟器上跟不上（第 22 轮偶发失败），改为由 App 记下来一次读出。
+    @State private var shownPhases: [String] = []
+    private static let recordsPhases = ProcessInfo.processInfo.arguments.contains("--ui-testing")
 
     var body: some View {
         let live = store.live
@@ -599,6 +608,13 @@ private struct AssistantLiveReplyView: View {
         }
         .onChange(of: live.revision) { _, _ in scheduleFollow() }
         .onChange(of: store.liveStatus?.text) { _, _ in follow() }
+        .onChange(of: store.liveStatus?.text, initial: true) { _, text in recordPhase(text) }
+    }
+
+    private func recordPhase(_ text: String?) {
+        guard Self.recordsPhases, let text, !text.isEmpty, shownPhases.last != text else { return }
+        shownPhases.append(text)
+        if shownPhases.count > 12 { shownPhases.removeFirst(shownPhases.count - 12) }
     }
 
     /// 节流跟随：一段时间内的多次提交只滚动一次（尾沿触发，保证最后一次提交后也会贴底）。
@@ -629,6 +645,7 @@ private struct AssistantLiveReplyView: View {
             // 朗读与界面测试读取的是同一段状态文字。
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(status.text)
+            .accessibilityValue(Self.recordsPhases ? shownPhases.joined(separator: " › ") : "")
             .accessibilityAddTraits(.updatesFrequently)
             .accessibilityIdentifier("assistant.live.status")
             if !compact {
