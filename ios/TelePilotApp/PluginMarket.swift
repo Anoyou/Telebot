@@ -5,6 +5,9 @@ import TelePilotCore
 // 浏览 / 搜索 / 安装 / 更新角标 / 一键全部更新（服务器并行执行，结果逐个显示）/ 固定版本 /
 // 健康观察期内回滚或确认 / 来源管理（官方源 + 自定义来源与信任等级、自动更新开关）/ 更新参数。
 // 旧服务器没有这些接口（404）时显示“请更新服务器”，其它插件功能照常可用。
+// 服务器 0.117.0 起（iOS 0.37.0）：分类标签带数量、详情页有完整简介 / 截图 / 怎么用 / 版本说明 / 权限大白话 / 兼容性 /
+// 主页与许可证、安装未审核插件前二次确认、稳定 / 测试通道（插件真有第二个通道时才显示）。这些字段在旧服务器的目录里没有，
+// 解析放在 TelePilotCore `PluginMarketDetails`，缺什么就不显示什么。
 // 写操作只在用户点按后执行一次；网络中断导致结果未知时提示下拉刷新确认，从不自动重试。
 
 enum PluginMarketText {
@@ -77,6 +80,11 @@ final class PluginMarketModel {
         rollouts.filter { ["rolled_back", "rollback_failed"].contains($0["status"]?.stringValue ?? "") }
     }
 
+    var serverVersion: String? { catalog?["server_version"]?.stringValue }
+    var kindCounts: [PluginMarketInfo.KindCount] {
+        PluginMarketInfo.kindCounts(items.compactMap { $0["kind"]?.stringValue })
+    }
+
     func item(id: String) -> JSONValue? { items.first { $0["id"]?.stringValue == id } }
 
     func load(model: AppModel, refresh: Bool = false) async {
@@ -112,13 +120,40 @@ final class PluginMarketModel {
         await load(model: model)
     }
 
-    func install(_ item: JSONValue, model: AppModel) async {
+    /// `channel` 只在选了非稳定通道时才发给服务器（旧服务器不认识这个字段）。
+    func install(_ item: JSONValue, channel: String? = nil, model: AppModel) async {
         let key = item["key"]?.stringValue ?? ""
         let title = item["name"]?["zh"]?.stringValue ?? key
-        await run(key, model: model, success: "已安装「\(title)」，到插件 ›「启用与配置」按账号启用。") {
-            _ = try await model.request(path: "/api/plugin-market/install", method: "POST",
-                                        body: ["source_id": item["source_id"] ?? .null, "key": .string(key)])
+        let picked = channel == "stable" ? nil : channel
+        let label = picked.map { "（\(PluginMarketInfo.channelLabel($0))）" } ?? ""
+        let body = PluginMarketInfo.installBody(sourceID: item["source_id"] ?? .null, key: key, channel: picked)
+        await run(key, model: model, success: "已安装「\(title)」\(label)，到插件 ›「启用与配置」按账号启用。") {
+            _ = try await model.request(path: "/api/plugin-market/install", method: "POST", body: body)
         }
+    }
+
+    /// 服务器 0.117.0+：把已安装插件切到另一个通道。与更新同一流程（保留旧版、健康观察、不健康自动回滚），结果形状与更新相同。
+    func switchChannel(_ item: JSONValue, to channel: String, model: AppModel) async {
+        guard busy == nil else { return }
+        let key = item["key"]?.stringValue ?? ""
+        busy = key
+        defer { busy = nil }
+        let body = PluginMarketInfo.channelBody(key: key, channel: channel, sourceID: item["source_id"]?.stringValue)
+        do {
+            let result = try await model.request(path: "/api/plugin-market/channel", method: "POST", body: body)
+            lastResult = result
+            if (result["failed"]?.intValue ?? 0) > 0 {
+                notice = "切换到\(PluginMarketInfo.channelLabel(channel))失败（原因见插件市场里的更新结果）。"
+                noticeIsProblem = true
+            } else {
+                notice = "已切换到\(PluginMarketInfo.channelLabel(channel))，正在观察新版本是否正常。"
+                noticeIsProblem = false
+            }
+        } catch {
+            notice = PluginMarketText.failure(error)
+            noticeIsProblem = true
+        }
+        await load(model: model)
     }
 
     /// keys 为 nil 时更新全部有新版本且未固定的插件；服务器按“同时更新数量”并行执行。
@@ -188,12 +223,32 @@ final class PluginMarketModel {
     }
 }
 
-/// 插件市场的图标：索引里的 emoji 图标放在圆角方块里；没有图标时退回插件商店的首字图标。
+/// 插件市场的图标：索引有 https 图片图标（服务器 0.117.0+ 的 `icon_url`）时用图片，加载中或失败退回 emoji；
+/// emoji 放在圆角方块里；都没有时退回插件商店的首字图标。
 private struct PluginMarketArtwork: View {
     let item: JSONValue
     var size: CGFloat = 52
 
     var body: some View {
+        let shape = RoundedRectangle(cornerRadius: size * 0.225, style: .continuous)
+        if let url = PluginMarketDetails.httpsURL(item["icon_url"]?.stringValue) {
+            AsyncImage(url: url) { phase in
+                Group {
+                    if let image = phase.image {
+                        image.resizable().scaledToFill().frame(width: size, height: size).clipShape(shape)
+                    } else {
+                        fallback
+                    }
+                }
+            }
+            .frame(width: size, height: size)
+            .accessibilityHidden(true)
+        } else {
+            fallback
+        }
+    }
+
+    @ViewBuilder private var fallback: some View {
         let key = item["key"]?.stringValue ?? ""
         let title = item["name"]?["zh"]?.stringValue ?? key
         if let icon = item["icon"]?.stringValue, !icon.isEmpty {
@@ -210,6 +265,35 @@ private struct PluginMarketArtwork: View {
     }
 }
 
+/// 分类标签（带数量）：像应用商店那样横向排列，选中的高亮。整块 44pt 高，方便点按。
+private struct PluginMarketKindChip: View {
+    let title: String
+    let count: Int
+    let selected: Bool
+    let identifier: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 4) {
+                Text(title)
+                Text("\(count)").monospacedDigit().opacity(0.75)
+            }
+            .font(.subheadline.weight(.semibold))
+            .padding(.horizontal, 14)
+            .frame(minHeight: 34)
+            .foregroundStyle(selected ? Color.white : Color.primary)
+            .background(selected ? Color.accentColor : Color(.tertiarySystemFill), in: Capsule())
+            .padding(.vertical, 5)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(title)，\(count) 个")
+        .accessibilityAddTraits(selected ? .isSelected : [])
+        .accessibilityIdentifier(identifier)
+    }
+}
+
 struct PluginMarketView: View {
     @Environment(AppModel.self) private var model
     @State private var market = PluginMarketModel()
@@ -219,20 +303,22 @@ struct PluginMarketView: View {
     @State private var onlyUpdates = false
     @State private var confirmUpdateAll = false
     @State private var detailID: String?
+    /// 待确认安装的未审核插件（列表里点「获取」时）。
+    @State private var pendingInstall: JSONValue?
 
-    private var kinds: [String] { Array(Set(market.items.compactMap { $0["kind"]?.stringValue })).sorted() }
     private var filtered: [JSONValue] {
-        let query = search.trimmingCharacters(in: .whitespaces)
-        return market.items.filter { item in
+        market.items.filter { item in
             if kind != "all" && item["kind"]?.stringValue != kind { return false }
             if onlyUpdates && !(item["update_available"]?.boolValue == true && item["pinned_version"]?.stringValue == nil) { return false }
-            guard !query.isEmpty else { return true }
-            var fields: [String] = []
-            for value in [item["key"], item["name"]?["zh"], item["name"]?["en"], item["summary"], item["author"]] {
-                if let text = value?.stringValue { fields.append(text) }
-            }
-            fields += (item["tags"]?.arrayValue ?? []).compactMap(\.stringValue)
-            return fields.contains { $0.localizedCaseInsensitiveContains(query) }
+            return PluginMarketInfo.matches(item, query: search)
+        }
+    }
+
+    private func requestInstall(_ item: JSONValue) {
+        if PluginMarketInfo.needsInstallConfirmation(trust: item["trust"]?.stringValue) {
+            pendingInstall = item
+        } else {
+            Task { await market.install(item, model: model) }
         }
     }
 
@@ -248,7 +334,7 @@ struct PluginMarketView: View {
                 content
             }
         }
-        .pageSearch(text: $search, isActive: $searching, prompt: "搜索名称、简介或标签", identifier: "plugins.market.search")
+        .pageSearch(text: $search, isActive: $searching, prompt: "搜索名称、简介、指令或标签", identifier: "plugins.market.search")
         .navigationTitle("插件市场")
         .navigationBarTitleDisplayMode(.inline)
         .refreshable { await market.load(model: model, refresh: true) }
@@ -262,7 +348,36 @@ struct PluginMarketView: View {
         } message: {
             Text("服务器会同时更新 \(market.concurrency) 个，单个失败不影响其它；更新后观察 \(market.healthWindow) 分钟，不健康会自动回滚。固定版本的插件会跳过。")
         }
+        .alert(pendingInstallTitle, isPresented: Binding(get: { pendingInstall != nil }, set: { if !$0 { pendingInstall = nil } })) {
+            Button("仍然安装", role: .destructive) {
+                if let item = pendingInstall { Task { await market.install(item, model: model) } }
+                pendingInstall = nil
+            }
+            Button("取消", role: .cancel) { pendingInstall = nil }
+        } message: {
+            Text(PluginMarketInfo.unreviewedInstallWarning)
+        }
         .accessibilityIdentifier("plugins.market.screen")
+    }
+
+    private var pendingInstallTitle: String {
+        let title = pendingInstall?["name"]?["zh"]?.stringValue ?? pendingInstall?["key"]?.stringValue ?? ""
+        return "安装未审核的插件「\(title)」？"
+    }
+
+    @ViewBuilder private var kindChips: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                PluginMarketKindChip(title: "全部", count: market.items.count, selected: kind == "all",
+                                     identifier: "plugins.market.kind.all") { kind = "all" }
+                ForEach(market.kindCounts) { entry in
+                    PluginMarketKindChip(title: PluginMarketText.kind(entry.kind), count: entry.count, selected: kind == entry.kind,
+                                         identifier: "plugins.market.kind." + entry.kind) { kind = entry.kind }
+                }
+            }
+        }
+        .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
+        .accessibilityIdentifier("plugins.market.kinds")
     }
 
     @ViewBuilder private var content: some View {
@@ -353,14 +468,7 @@ struct PluginMarketView: View {
             Section { PluginStoreSkeleton() } header: { Text("正在读取插件市场…") }
         } else if market.loaded {
             Section {
-                Picker(selection: $kind) {
-                    Text("全部类型").tag("all")
-                    ForEach(kinds, id: \.self) { Text(PluginMarketText.kind($0)).tag($0) }
-                } label: {
-                    Label("类型", systemImage: "line.3.horizontal.decrease.circle")
-                }
-                .pickerStyle(.menu)
-                .accessibilityIdentifier("plugins.market.kind")
+                if !market.items.isEmpty { kindChips }
                 Toggle("只看可更新", isOn: $onlyUpdates)
                     .accessibilityIdentifier("plugins.market.onlyUpdates")
             }
@@ -416,6 +524,11 @@ struct PluginMarketView: View {
                             Text(PluginMarketText.trust(item["trust"]?.stringValue))
                                 .font(.caption2.weight(.semibold))
                                 .foregroundStyle(PluginMarketText.trustColor(item["trust"]?.stringValue))
+                            if let channel = item["channel"]?.stringValue, channel != "stable" {
+                                Text(PluginMarketInfo.channelLabel(channel))
+                                    .font(.caption2.weight(.semibold))
+                                    .foregroundStyle(.orange)
+                            }
                         }
                         Text(item["summary"]?.stringValue ?? "").font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
                         Text(detail(item, installed: installed, pinned: pinned)).font(.caption).foregroundStyle(.secondary).lineLimit(1)
@@ -429,7 +542,7 @@ struct PluginMarketView: View {
             if installed == nil {
                 PluginCapsuleButton(title: "获取", prominent: true, running: market.busy == key, disabled: market.busy != nil || !compatible,
                                     identifier: "plugins.market.action." + key) {
-                    Task { await market.install(item, model: model) }
+                    requestInstall(item)
                 }
             } else if canUpdate {
                 PluginCapsuleButton(title: "更新", prominent: true, running: market.busy == key || market.busy == "__all__",
@@ -456,83 +569,398 @@ struct PluginMarketView: View {
 private struct PluginMarketDetailView: View {
     let market: PluginMarketModel
     let itemID: String
-    @Environment(AppModel.self) private var model
 
     var body: some View {
         if let item = market.item(id: itemID) {
-            let key = item["key"]?.stringValue ?? ""
-            let installed = item["installed"]?.objectValue
-            let pinned = item["pinned_version"]?.stringValue
-            List {
-                Section {
-                    HStack(spacing: 14) {
-                        PluginMarketArtwork(item: item, size: 72)
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(item["name"]?["zh"]?.stringValue ?? key).font(.title3.weight(.semibold))
-                            Text("\(PluginMarketText.kind(item["kind"]?.stringValue)) · \(PluginMarketText.trust(item["trust"]?.stringValue)) · \(item["source_name"]?.stringValue ?? "")")
-                                .font(.subheadline).foregroundStyle(.secondary)
-                        }
-                    }
-                    if let summary = item["summary"]?.stringValue, !summary.isEmpty {
-                        Text(summary).font(.body)
-                    }
-                    if let reason = item["incompatible_reason"]?.stringValue {
-                        Label(reason, systemImage: "exclamationmark.triangle").foregroundStyle(.orange)
-                    }
-                    if let notice = market.notice {
-                        Text(notice).font(.subheadline).foregroundStyle(market.noticeIsProblem ? Color.orange : Color.secondary)
-                    }
-                }
-                Section("版本") {
-                    LabeledContent("最新版本", value: item["version"]?.stringValue ?? "—")
-                    LabeledContent("已安装", value: installed?["version"]?.stringValue ?? "未安装")
-                    if let minimum = item["min_telepilot_version"]?.stringValue {
-                        LabeledContent("最低服务器版本", value: minimum)
-                    }
-                    if let api = item["plugin_api"]?.stringValue {
-                        LabeledContent("Plugin API", value: api)
-                    }
-                    if installed != nil, installed?["same_source"]?.boolValue == false {
-                        Text("已安装的版本来自别的仓库，这里不提示更新。").font(.caption).foregroundStyle(.secondary)
-                    }
-                }
-                let permissions = (item["permissions"]?.arrayValue ?? []).compactMap(\.stringValue)
-                if !permissions.isEmpty {
-                    Section("需要的权限") {
-                        ForEach(permissions, id: \.self) { Text($0).font(.callout.monospaced()) }
-                    }
-                }
-                Section {
-                    if installed == nil {
-                        Button("安装") { Task { await market.install(item, model: model) } }
-                            .disabled(market.busy != nil || item["compatible"]?.boolValue == false)
-                            .accessibilityIdentifier("plugins.market.detail.install")
-                    } else {
-                        if item["update_available"]?.boolValue == true && pinned == nil {
-                            Button("更新到 v\(item["version"]?.stringValue ?? "")") { Task { await market.update(keys: [key], model: model) } }
-                                .disabled(market.busy != nil)
-                                .accessibilityIdentifier("plugins.market.detail.update")
-                        }
-                        if installed?["same_source"]?.boolValue == true {
-                            Toggle(isOn: Binding(get: { pinned != nil }, set: { value in
-                                Task { await market.setPinned(key, pinned: value, model: model) }
-                            })) {
-                                Label(pinned.map { "固定在 \($0)" } ?? "固定版本", systemImage: pinned == nil ? "lock.open" : "lock")
-                            }
-                            .disabled(market.busy != nil)
-                            .accessibilityIdentifier("plugins.market.detail.pin")
-                        }
-                    }
-                } footer: {
-                    Text("固定版本后，“全部更新”和自动更新都会跳过这个插件。")
-                }
-            }
-            .navigationTitle(item["name"]?["zh"]?.stringValue ?? key)
-            .navigationBarTitleDisplayMode(.inline)
-            .accessibilityIdentifier("plugins.market.detail")
+            PluginMarketDetailContent(market: market, item: item)
         } else {
             ContentUnavailableView("插件已不在市场里", systemImage: "shippingbox", description: Text("返回后下拉刷新再试。"))
         }
+    }
+}
+
+/// 详情页（像应用商店）：头部与主操作、信任说明、简介、截图、怎么用（预览）、版本与更新说明、版本通道、权限大白话、
+/// 兼容性、更多信息（作者 / 许可证 / 来源 / 主页）、固定版本。旧服务器缺的字段对应区块不显示。
+private struct PluginMarketDetailContent: View {
+    let market: PluginMarketModel
+    let item: JSONValue
+    @Environment(AppModel.self) private var model
+    @State private var installChannel = "stable"
+    @State private var confirmInstall = false
+    @State private var switchTarget: PluginMarketChannel?
+
+    private var key: String { item["key"]?.stringValue ?? "" }
+    private var title: String { item["name"]?["zh"]?.stringValue ?? key }
+    private var trust: String? { item["trust"]?.stringValue }
+    private var installed: [String: JSONValue]? { item["installed"]?.objectValue }
+    private var sameSource: Bool { installed?["same_source"]?.boolValue == true }
+    private var pinned: String? { item["pinned_version"]?.stringValue }
+    private var compatible: Bool { item["compatible"]?.boolValue != false }
+    private var version: String { item["version"]?.stringValue ?? "?" }
+    private var details: PluginMarketDetails { PluginMarketDetails(item) }
+    /// 安装时要传给服务器的通道：只有插件真有多个通道、且选了非稳定通道时才传。
+    private var pickedChannel: String? {
+        details.hasMultipleChannels && installChannel != "stable" ? installChannel : nil
+    }
+
+    var body: some View {
+        let info = details
+        List {
+            headerSection(info)
+            descriptionSection(info)
+            if !info.screenshots.isEmpty { screenshotsSection(info) }
+            if info.hasUsagePreview { usageSection(info) }
+            versionSection(info)
+            if info.hasMultipleChannels { channelsSection(info) }
+            permissionsSection
+            compatibilitySection
+            moreSection(info)
+            if installed != nil && sameSource { pinSection }
+        }
+        .navigationTitle(title)
+        .navigationBarTitleDisplayMode(.inline)
+        .alert("安装未审核的插件「\(title)」？", isPresented: $confirmInstall) {
+            Button("仍然安装", role: .destructive) {
+                let channel = pickedChannel
+                Task { await market.install(item, channel: channel, model: model) }
+            }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text(PluginMarketInfo.unreviewedInstallWarning)
+        }
+        .alert(switchTitle, isPresented: Binding(get: { switchTarget != nil }, set: { if !$0 { switchTarget = nil } }),
+               presenting: switchTarget) { target in
+            Button("切换", role: isDowngrade(target) ? ButtonRole.destructive : nil) {
+                Task { await market.switchChannel(item, to: target.name, model: model) }
+                switchTarget = nil
+            }
+            Button("取消", role: .cancel) { switchTarget = nil }
+        } message: { target in
+            Text(switchMessage(target))
+        }
+        .accessibilityIdentifier("plugins.market.detail")
+    }
+
+    // MARK: 头部与主操作
+
+    @ViewBuilder private func headerSection(_ details: PluginMarketDetails) -> some View {
+        Section {
+            HStack(spacing: 14) {
+                PluginMarketArtwork(item: item, size: 72)
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 6) {
+                        Text(title).font(.title3.weight(.semibold))
+                        if let channel = details.channel, channel != "stable" {
+                            Text(PluginMarketInfo.channelLabel(channel))
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.orange)
+                        }
+                    }
+                    Text(headerLine).font(.subheadline).foregroundStyle(.secondary)
+                    Text(PluginMarketText.trust(trust))
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(PluginMarketText.trustColor(trust))
+                        .accessibilityIdentifier("plugins.market.detail.trust")
+                }
+            }
+            primaryAction(details)
+            if let notice = market.notice {
+                Text(notice).font(.subheadline).foregroundStyle(market.noticeIsProblem ? Color.orange : Color.secondary)
+                    .accessibilityIdentifier("plugins.market.detail.notice")
+            }
+            Label(PluginMarketInfo.trustDescription(trust),
+                  systemImage: trust == "official" ? "checkmark.shield" : "exclamationmark.shield")
+                .font(.footnote)
+                .foregroundStyle(trust == "official" || trust == "community" ? Color.secondary : Color.orange)
+                .accessibilityIdentifier("plugins.market.detail.trustNote")
+        }
+    }
+
+    private var headerLine: String {
+        var parts = [PluginMarketText.kind(item["kind"]?.stringValue), "v" + version]
+        if let author = item["author"]?.stringValue, !author.isEmpty { parts.append(author) }
+        return parts.joined(separator: " · ")
+    }
+
+    @ViewBuilder private func primaryAction(_ details: PluginMarketDetails) -> some View {
+        if installed == nil {
+            let channelSuffix = pickedChannel.map { "（\(PluginMarketInfo.channelLabel($0))）" } ?? ""
+            Button {
+                if PluginMarketInfo.needsInstallConfirmation(trust: trust) {
+                    confirmInstall = true
+                } else {
+                    let channel = pickedChannel
+                    Task { await market.install(item, channel: channel, model: model) }
+                }
+            } label: {
+                Label("安装" + channelSuffix, systemImage: "arrow.down.circle")
+            }
+            .disabled(market.busy != nil || !compatible)
+            .accessibilityIdentifier("plugins.market.detail.install")
+        } else if item["update_available"]?.boolValue == true && pinned == nil {
+            Button {
+                Task { await market.update(keys: [key], model: model) }
+            } label: {
+                Label("更新到 v\(details.updateVersion ?? version)", systemImage: "arrow.down.circle")
+            }
+            .disabled(market.busy != nil)
+            .accessibilityIdentifier("plugins.market.detail.update")
+        } else {
+            Label("已安装 v\(installed?["version"]?.stringValue ?? "?")" + (pinned == nil ? "，已是最新" : "，已固定版本"),
+                  systemImage: "checkmark.circle")
+                .foregroundStyle(.secondary)
+                .accessibilityIdentifier("plugins.market.detail.installed")
+        }
+        if market.busy == key {
+            ProgressView("正在处理…")
+        }
+    }
+
+    // MARK: 内容
+
+    @ViewBuilder private func descriptionSection(_ details: PluginMarketDetails) -> some View {
+        let text = details.description ?? item["summary"]?.stringValue ?? ""
+        if !text.isEmpty {
+            Section("简介") {
+                Text(text)
+                    .font(.body)
+                    .accessibilityIdentifier("plugins.market.detail.description")
+                if let english = details.summaryEnglish {
+                    Text(english).font(.footnote).foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder private func screenshotsSection(_ details: PluginMarketDetails) -> some View {
+        Section("截图") {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 10) {
+                    ForEach(Array(details.screenshots.enumerated()), id: \.offset) { index, url in
+                        Link(destination: url) {
+                            AsyncImage(url: url) { phase in
+                                Group {
+                                    if let image = phase.image {
+                                        image.resizable().scaledToFit()
+                                    } else {
+                                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                            .fill(Color(.tertiarySystemFill))
+                                            .frame(width: 140)
+                                            .overlay(Image(systemName: "photo").foregroundStyle(.secondary))
+                                    }
+                                }
+                            }
+                            .frame(maxWidth: 260)
+                            .frame(height: 220)
+                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        }
+                        .accessibilityLabel("\(title) 截图 \(index + 1)")
+                        .accessibilityIdentifier("plugins.market.detail.screenshot.\(index)")
+                    }
+                }
+                .padding(.vertical, 4)
+            }
+            .accessibilityIdentifier("plugins.market.detail.screenshots")
+        }
+    }
+
+    @ViewBuilder private func usageSection(_ details: PluginMarketDetails) -> some View {
+        Section {
+            if !details.commands.isEmpty {
+                Text(details.commands.map { "," + $0 }.joined(separator: "   "))
+                    .font(.callout.monospaced())
+                    .accessibilityIdentifier("plugins.market.detail.commands")
+            }
+            if let usage = details.usage {
+                Text(PluginMarketInfo.renderUsage(usage))
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("plugins.market.detail.usage")
+            }
+        } header: {
+            Text(details.screenshots.isEmpty ? "怎么用（预览）" : "怎么用")
+        } footer: {
+            Text("示例按默认指令前缀「,」显示，实际以账号设置为准。")
+        }
+    }
+
+    @ViewBuilder private func versionSection(_ details: PluginMarketDetails) -> some View {
+        Section("版本") {
+            LabeledContent("最新版本", value: version)
+            LabeledContent("已安装", value: installed?["version"]?.stringValue ?? "未安装")
+            if installed != nil, let channel = details.channel, details.hasMultipleChannels {
+                LabeledContent("当前通道", value: PluginMarketInfo.channelLabel(channel))
+            }
+            if let notes = details.releaseNotes {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("v\(version) 更新内容" + (details.releasedAt.map { "（\($0)）" } ?? ""))
+                        .font(.subheadline.weight(.semibold))
+                    Text(notes).font(.callout).foregroundStyle(.secondary)
+                }
+                .accessibilityElement(children: .combine)
+                .accessibilityIdentifier("plugins.market.detail.releaseNotes")
+            }
+        }
+    }
+
+    @ViewBuilder private func channelsSection(_ details: PluginMarketDetails) -> some View {
+        Section {
+            ForEach(details.channels) { channel in
+                channelRow(channel, details: details)
+            }
+            if installed != nil, pinned != nil {
+                Text("已固定版本，先取消固定才能切换通道。").font(.footnote).foregroundStyle(.secondary)
+            }
+        } header: {
+            Text("版本通道")
+        } footer: {
+            Text("稳定版适合日常使用；测试版能先用上新功能，但可能有问题，也不会自动更新。切换后同样会观察一段时间，出问题自动回滚。")
+        }
+    }
+
+    @ViewBuilder private func channelRow(_ channel: PluginMarketChannel, details: PluginMarketDetails) -> some View {
+        let versionText = channel.version.map { "v" + $0 } ?? "版本未知"
+        if installed != nil {
+            let current = details.channel == channel.name
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(PluginMarketInfo.channelLabel(channel.name))
+                    Text(versionText).font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 8)
+                if current {
+                    Text("当前").font(.caption.weight(.semibold)).foregroundStyle(.green)
+                        .accessibilityIdentifier("plugins.market.detail.current." + channel.name)
+                } else if sameSource {
+                    Button("切换") { switchTarget = channel }
+                        .buttonStyle(.bordered)
+                        .buttonBorderShape(.capsule)
+                        .disabled(market.busy != nil || pinned != nil || !compatible)
+                        .accessibilityIdentifier("plugins.market.detail.switch." + channel.name)
+                }
+            }
+        } else {
+            let selected = installChannel == channel.name
+            Button {
+                installChannel = channel.name
+            } label: {
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(PluginMarketInfo.channelLabel(channel.name)).foregroundStyle(.primary)
+                        Text(versionText).font(.caption).foregroundStyle(.secondary)
+                    }
+                    Spacer(minLength: 8)
+                    Image(systemName: selected ? "checkmark.circle.fill" : "circle")
+                        .foregroundStyle(selected ? Color.accentColor : Color.secondary)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityAddTraits(selected ? .isSelected : [])
+            .accessibilityIdentifier("plugins.market.detail.pick." + channel.name)
+        }
+    }
+
+    @ViewBuilder private var permissionsSection: some View {
+        let permissions = (item["permissions"]?.arrayValue ?? []).compactMap(\.stringValue)
+        if !permissions.isEmpty {
+            Section {
+                ForEach(permissions, id: \.self) { permission in
+                    VStack(alignment: .leading, spacing: 2) {
+                        if let plain = PluginMarketInfo.permissionDescription(permission) {
+                            Text(plain)
+                            Text(permission).font(.caption.monospaced()).foregroundStyle(.secondary)
+                        } else {
+                            Text(permission).font(.callout.monospaced())
+                        }
+                    }
+                    .accessibilityElement(children: .combine)
+                    .accessibilityIdentifier("plugins.market.detail.permission." + permission)
+                }
+            } header: {
+                Text("需要的权限")
+            } footer: {
+                Text("插件只能使用这里声明的权限。")
+            }
+        }
+    }
+
+    @ViewBuilder private var compatibilitySection: some View {
+        Section("兼容性") {
+            if compatible {
+                Label(compatibilityText, systemImage: "checkmark.seal")
+                    .accessibilityIdentifier("plugins.market.detail.compat")
+            } else {
+                Label(item["incompatible_reason"]?.stringValue ?? "与当前服务器不兼容", systemImage: "exclamationmark.triangle")
+                    .foregroundStyle(.orange)
+                    .accessibilityIdentifier("plugins.market.detail.compat")
+            }
+            if installed != nil, !sameSource {
+                Text("已安装的版本来自别的仓库，这里不提示更新，也不能切换通道。").font(.caption).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private var compatibilityText: String {
+        var text = "兼容当前服务器" + (market.serverVersion.map { "（\($0)）" } ?? "")
+        if let minimum = item["min_telepilot_version"]?.stringValue { text += "，最低需要 \(minimum)" }
+        if let api = item["plugin_api"]?.stringValue { text += "，Plugin API \(api)" }
+        return text + "。"
+    }
+
+    @ViewBuilder private func moreSection(_ details: PluginMarketDetails) -> some View {
+        Section("更多信息") {
+            if let author = item["author"]?.stringValue, !author.isEmpty {
+                LabeledContent("作者", value: author)
+            }
+            LabeledContent("来源", value: item["source_name"]?.stringValue ?? "—")
+            if let license = details.license {
+                LabeledContent("许可证", value: license)
+                    .accessibilityIdentifier("plugins.market.detail.license")
+            }
+            if let homepage = details.homepage {
+                Link(destination: homepage) {
+                    Label("插件主页", systemImage: "safari")
+                }
+                .accessibilityIdentifier("plugins.market.detail.homepage")
+            }
+        }
+    }
+
+    @ViewBuilder private var pinSection: some View {
+        Section {
+            Toggle(isOn: Binding(get: { pinned != nil }, set: { value in
+                Task { await market.setPinned(key, pinned: value, model: model) }
+            })) {
+                Label(pinned.map { "固定在 \($0)" } ?? "固定版本", systemImage: pinned == nil ? "lock.open" : "lock")
+            }
+            .disabled(market.busy != nil)
+            .accessibilityIdentifier("plugins.market.detail.pin")
+        } footer: {
+            Text("固定版本后，“全部更新”和自动更新都会跳过这个插件。安装或更新后会观察一段时间，出问题自动回滚到旧版本。")
+        }
+    }
+
+    // MARK: 切换通道确认
+
+    private var switchTitle: String {
+        "把「\(title)」切换到\(PluginMarketInfo.channelLabel(switchTarget?.name))？"
+    }
+
+    private func isDowngrade(_ target: PluginMarketChannel) -> Bool {
+        PluginMarketInfo.isChannelDowngrade(installed: installed?["version"]?.stringValue, target: target.version)
+    }
+
+    private func switchMessage(_ target: PluginMarketChannel) -> String {
+        let label = PluginMarketInfo.channelLabel(target.name)
+        var lines = ["将安装\(label) " + (target.version.map { "v" + $0 } ?? "的最新版本")
+                     + "（当前 v\(installed?["version"]?.stringValue ?? "?")）。"]
+        if isDowngrade(target) {
+            lines.append("这是降级：插件的数据不会跟着回退，个别插件可能读不懂新版本写下的数据。")
+        }
+        if target.name != "stable" { lines.append("测试版可能有问题，不会自动更新。") }
+        lines.append("切换后同样会观察一段时间，出问题自动回滚。")
+        return lines.joined(separator: "\n")
     }
 }
 
