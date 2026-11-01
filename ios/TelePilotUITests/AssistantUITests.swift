@@ -283,6 +283,53 @@ final class AssistantUITests: XCTestCase {
         XCTAssertTrue(model.isHittable)
     }
 
+    /// 第 24 轮：思考过程默认折叠在回答正文上方（参考 Codex）：有服务器用时显示「思考了 1m 36s」，没有用时显示「思考过程」，
+    /// 没有思考内容的回答不显示这一行；点开显示脱敏后的思考全文，再点收起。
+    func testReasoningRowCollapsedAboveAnswerAndExpands() {
+        let app = openAssistant(["--ui-test-reasoning"])
+        let answer = app.staticTexts["服务状态正常。这里是界面测试数据。"]
+        XCTAssertTrue(answer.waitForExistence(timeout: 10))
+        let toggles = app.buttons.matching(identifier: "assistant.reasoning.toggle")
+        let timed = toggles.matching(NSPredicate(format: "label == %@", "思考了 1m 36s")).firstMatch
+        XCTAssertTrue(timed.waitForExistence(timeout: 10))
+        XCTAssertTrue(toggles.matching(NSPredicate(format: "label == %@", "思考过程")).firstMatch.exists, "旧服务器没有用时：只写「思考过程」")
+        XCTAssertEqual(toggles.count, 2, "没有思考内容的回答不显示思考行")
+        XCTAssertLessThanOrEqual(timed.frame.maxY, answer.frame.minY + 1, "思考行在回答正文上方")
+        XCTAssertGreaterThanOrEqual(timed.frame.height, 44)
+        let text = app.staticTexts.matching(identifier: "assistant.reasoning.text").firstMatch
+        XCTAssertFalse(text.exists, "默认折叠")
+        XCTAssertEqual(timed.value as? String, "已折叠")
+        timed.tap()
+        XCTAssertTrue(text.waitForExistence(timeout: 5))
+        XCTAssertTrue(text.label.contains("先读取账号列表"), text.label)
+        XCTAssertFalse(text.label.contains("hunter2"), "思考文字同样脱敏：\(text.label)")
+        XCTAssertEqual(timed.value as? String, "已展开")
+        timed.tap()
+        XCTAssertTrue(waitUntilGone(text))
+    }
+
+    /// 第 24 轮：键盘上方统一的「收起」按钮（全 App 的输入框共用一条辅助工具栏）：点按收起键盘，草稿保留，
+    /// 输入栏与发送按钮仍在键盘工具栏上方、可点。
+    func testKeyboardDismissButtonHidesKeyboardAndKeepsDraft() {
+        let app = openAssistant(["--ui-test-keyboard-accessory"])
+        let composer = app.descendants(matching: .any)["assistant.composer"].firstMatch
+        composer.tap()
+        composer.typeText("草稿")
+        let dismiss = app.buttons["keyboard.dismiss"]
+        XCTAssertTrue(dismiss.waitForExistence(timeout: 5))
+        XCTAssertEqual(dismiss.label, "收起键盘")
+        let bar = app.descendants(matching: .any)["assistant.composerBar"].firstMatch
+        XCTAssertLessThanOrEqual(bar.frame.maxY, dismiss.frame.minY + 1, "输入栏在键盘工具栏上方")
+        let send = app.buttons["assistant.send"]
+        XCTAssertTrue(send.isHittable)
+        XCTAssertTrue(send.isEnabled)
+        dismiss.tap()
+        XCTAssertTrue(waitUntilGone(dismiss))
+        XCTAssertTrue(waitUntilGone(app.keyboards.firstMatch))
+        XCTAssertTrue((composer.value as? String ?? "").contains("草稿"))
+        XCTAssertTrue(send.isHittable)
+    }
+
     /// 第九轮：键盘弹起时打开原生 popover。只记录键盘是否被收起（写进测试日志 R9-KEYBOARD，供 PR 说明），
     /// 并确认 popover 仍出现在模型按钮上方、选择后输入栏可继续输入。
     func testComposerPopoverWithKeyboard() {

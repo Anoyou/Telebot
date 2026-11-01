@@ -181,6 +181,13 @@ private struct PluginCenterView: View {
     }
 
     private var selectedAccount: Account? { model.accounts.first { $0.id == selectedAccountID } }
+    /// 已安装的转账通知插件（按 key 或插件信息判断；是否真的参与解析以服务器为准，见「转账通知判定」页）。
+    private var transferPluginFeature: JSONValue? {
+        features.first { feature in
+            let key = feature["key"]?.stringValue ?? ""
+            return PaymentSourceSwitchView.isTransferPluginKey(key) || PaymentSourceSwitchView.declaresPaymentSource(feature)
+        }
+    }
     private var categories: [String] { Array(Set(features.compactMap { $0["category"]?.stringValue })).sorted() }
     private var filtered: [JSONValue] {
         orderedFeatures.filter { feature in
@@ -198,7 +205,9 @@ private struct PluginCenterView: View {
                 && (category == "all" || feature["category"]?.stringValue == category)
                 && (search.isEmpty || ManagementText.title(feature).localizedCaseInsensitiveContains(search)
                     || key.localizedCaseInsensitiveContains(search)
-                    || (feature["usage"]?.stringValue?.localizedCaseInsensitiveContains(search) ?? false))
+                    || (feature["usage"]?.stringValue?.localizedCaseInsensitiveContains(search) ?? false)
+                    // 第 24 轮：搜「转账」「中文转账通知」也能找到转账通知插件（显示名是「转账通知解析（中文）」）。
+                    || PaymentSourceSwitchView.matchesSearch(key: key, feature: feature, query: search))
         }
     }
     private var columns: [GridItem] {
@@ -221,6 +230,28 @@ private struct PluginCenterView: View {
                         filterMenu
                         Spacer()
                         Text("\(filtered.count) / \(features.count) 个插件").font(.footnote).foregroundStyle(.secondary).monospacedDigit()
+                    }
+                    // 第 24 轮：装了转账通知插件时，在列表上方给「转账通知判定」一个显眼的入口（原来只在插件详情「概况」里）。
+                    if fixedAccountID == nil, let transfer = transferPluginFeature {
+                        NavigationLink { PaymentSourceStatusPage() } label: {
+                            HStack(spacing: 10) {
+                                Image(systemName: "scalemass").foregroundStyle(.tint)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("转账通知判定").font(.subheadline.weight(.semibold))
+                                    Text("「\(ManagementText.title(transfer))」以插件结果为准的开关")
+                                        .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                                }
+                                Spacer(minLength: 0)
+                                Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary)
+                            }
+                            .padding(.horizontal, 12).padding(.vertical, 8)
+                            .frame(minHeight: 44)
+                            .background(Color(uiColor: .secondarySystemGroupedBackground), in: .rect(cornerRadius: 12, style: .continuous))
+                            .contentShape(.rect(cornerRadius: 12, style: .continuous))
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityElement(children: .combine)
+                        .accessibilityIdentifier("plugins.paymentSourceEntry")
                     }
                     if accountLoading { ProgressView().frame(maxWidth: .infinity, alignment: .leading) }
                     if let orderMessage {
@@ -359,7 +390,7 @@ private struct PluginCenterView: View {
         guard let from = keys.firstIndex(of: source), let to = keys.firstIndex(of: target), from != to else { return }
         keys.remove(at: from)
         keys.insert(source, at: to)
-        withAnimation(.snappy) { localOrder = keys }
+        Motion.perform(fadeOnly: false) { localOrder = keys }
         Task { await saveOrder(keys) }
     }
 
@@ -371,7 +402,7 @@ private struct PluginCenterView: View {
         var keys = orderedFeatures.compactMap { $0["key"]?.stringValue }
         guard let from = keys.firstIndex(of: key), let to = keys.firstIndex(of: visible[target]) else { return }
         keys.swapAt(from, to)
-        withAnimation(.snappy) { localOrder = keys }
+        Motion.perform(fadeOnly: false) { localOrder = keys }
         Task { await saveOrder(keys) }
     }
 
@@ -391,7 +422,7 @@ private struct PluginCenterView: View {
                 orderMessage = "未能确认排序是否已保存，下拉刷新查看实际顺序。"
             } else {
                 orderMessage = "排序未保存：\(error.localizedDescription)"
-                withAnimation(.snappy) { localOrder = nil }
+                Motion.perform(fadeOnly: false) { localOrder = nil }
             }
         }
     }
@@ -802,6 +833,8 @@ struct ManagementPluginDetailView: View {
     @State private var confirmGlobal = false
     @State private var globalMessage: String?
     @State private var globalError: String?
+    /// 第 24 轮：下拉刷新时让「转账通知判定」重新读取。
+    @State private var paymentSourceRefresh = 0
     private var key: String { feature["key"]?.stringValue ?? "" }
     private var segment: String { ManagementText.pathSegment(key) }
     private var isBuiltin: Bool { feature["is_builtin"]?.boolValue == true }
@@ -875,7 +908,11 @@ struct ManagementPluginDetailView: View {
             // 从交互规则「插件配置」跳来时没有带账号状态：补读一次，账号开关与运行状态才真实。
             if accountID != nil && currentAccountState == nil { await reloadAccountState() }
         }
-        .refreshable { await loadInstallRecord(); if accountID != nil { await reloadAccountState() } }
+        .refreshable {
+            paymentSourceRefresh += 1
+            await loadInstallRecord()
+            if accountID != nil { await reloadAccountState() }
+        }
     }
 
     // MARK: 账号开关（仅账号作用域）
@@ -945,7 +982,7 @@ struct ManagementPluginDetailView: View {
 
     @ViewBuilder private var overview: some View {
         // 第 22 轮：转账通知插件的「转账通知以插件结果为准」开关状态（只读；旧服务器 / 非转账通知插件不显示）。
-        PaymentSourceSwitchSection(pluginKey: key)
+        PaymentSourceSwitchSection(pluginKey: key, feature: feature, refreshToken: paymentSourceRefresh)
         // plugin.overview：宿主「运行统计」卡（卡片 DSL 的第一个用户）+ 插件自己声明的原生卡片；
         // 第 22 轮起资金类插件多一张宿主只读卡（转账识别 / 资金往来），旧服务器没有就不显示。
         PluginCardSections(slot: "plugin.overview", pluginKey: key, accountID: accountID)
@@ -2761,17 +2798,73 @@ private struct PluginSecretListEditor: View {
 /// TelePilot 只有一个管理员账号，登录的就是管理员；接口本身需要登录。`pluginKey` 为 nil 时显示全部转账通知插件（服务器参数页跳转用）。
 struct PaymentSourceSwitchSection: View {
     var pluginKey: String?
+    /// 第 24 轮：插件信息（判断是不是转账通知插件，服务器没列出它时才解释原因）。
+    var feature: JSONValue? = nil
+    /// 第 24 轮：所在页面下拉刷新时递增，重新读取状态。
+    var refreshToken: Int = 0
     @Environment(AppModel.self) private var model
     @State private var view: PaymentSourceSwitchView?
+    @State private var availability: PaymentSourceSwitchView.Availability = .hidden
     @State private var loaded = false
+    /// 已读取过的刷新令牌：`.task(id:)` 挂在多行内容上时 List 会给每一行各挂一份，同一令牌只读一次。
+    @State private var loadedToken: Int?
     /// 等待确认的目标值（拨动后弹确认框；取消即清空，开关回到服务器值）。
     @State private var confirmTarget: Bool?
     @State private var saving = false
     @State private var resultMessage: String?
     @State private var errorMessage: String?
 
+    /// 服务器没列出时要不要解释原因：汇总页（pluginKey 为 nil）总是解释；插件详情只对转账通知插件解释。
+    private var transferPlugin: Bool {
+        guard let pluginKey else { return true }
+        return PaymentSourceSwitchView.isTransferPluginKey(pluginKey) || PaymentSourceSwitchView.declaresPaymentSource(feature)
+    }
+
     var body: some View {
-        if let view {
+        content
+            .task(id: refreshToken) { await load() }
+    }
+
+    @ViewBuilder private var content: some View {
+        switch availability {
+        case .available:
+            if let view { switchSection(view) }
+        case .notParticipating(let global):
+            // 第 24 轮：服务器支持，但这个插件不在转账通知来源里——说明原因，而不是整段消失。
+            Section {
+                Label(PaymentSourceSwitchView.notParticipatingMessage, systemImage: "exclamationmark.triangle")
+                    .font(.footnote).foregroundStyle(.orange)
+                    .accessibilityIdentifier("paymentSource.notParticipating")
+                if let global {
+                    LabeledContent("当前判定") {
+                        Text(global.stateLabel).font(.footnote).multilineTextAlignment(.trailing)
+                    }
+                }
+                NavigationLink { PaymentSourceStatusPage() } label: {
+                    Label("查看全部转账通知插件", systemImage: "scalemass")
+                }
+                .accessibilityIdentifier("paymentSource.openSummary")
+            } header: { Text("转账通知判定") }
+        case .serverTooOld:
+            Section {
+                Label(PaymentSourceSwitchView.serverTooOldMessage, systemImage: "arrow.down.circle")
+                    .font(.footnote).foregroundStyle(.secondary)
+                    .accessibilityIdentifier("paymentSource.requiresServer")
+            } header: { Text("转账通知判定") }
+        case .unreadable(let reason):
+            Section {
+                Label(PaymentSourceSwitchView.unreadableMessage(reason), systemImage: "exclamationmark.triangle")
+                    .font(.footnote).foregroundStyle(.orange)
+                    .accessibilityIdentifier("paymentSource.unreadable")
+            } header: { Text("转账通知判定") }
+        case .hidden:
+            if !loaded {
+                Color.clear.frame(height: 1).listRowBackground(Color.clear).accessibilityHidden(true)
+            }
+        }
+    }
+
+    private func switchSection(_ view: PaymentSourceSwitchView) -> some View {
             Section {
                 Toggle(isOn: Binding(
                     get: { view.checked },
@@ -2803,14 +2896,18 @@ struct PaymentSourceSwitchSection: View {
                 }
                 Label(view.stateLabel, systemImage: symbol(view.tone))
                     .foregroundStyle(color(view.tone))
+                    .contentTransition(.opacity)
+                    .motionAnimation(value: view.stateLabel)
                     .accessibilityIdentifier("paymentSource.state")
                 if let resultMessage {
                     Label(resultMessage, systemImage: "checkmark.circle.fill").font(.footnote).foregroundStyle(.green)
                         .accessibilityIdentifier("paymentSource.result")
+                        .motionTransition()
                 }
                 if let errorMessage {
                     Label(errorMessage, systemImage: "exclamationmark.triangle.fill").font(.footnote).foregroundStyle(.red)
                         .accessibilityIdentifier("paymentSource.error")
+                        .motionTransition()
                 }
                 if pluginKey == nil {
                     ForEach(view.sources, id: \.pluginKey) { source in
@@ -2835,20 +2932,43 @@ struct PaymentSourceSwitchSection: View {
             } footer: {
                 Text(PaymentSourceSwitchView.editHint)
             }
-        } else if !loaded {
-            Color.clear.frame(height: 1).listRowBackground(Color.clear).accessibilityHidden(true)
-                .task { await load() }
-        }
+            .motionAnimation(value: resultMessage)
+            .motionAnimation(value: errorMessage)
     }
 
     private var confirmation: PaymentSourceSwitchView.Confirmation? {
         confirmTarget.map { PaymentSourceSwitchView.confirmation(turningOn: $0) }
     }
 
+    /// 第 24 轮：读不到时不再一律整段隐藏——转账通知插件说明原因（旧服务器 / 没参与解析 / 读取失败），其它插件仍不显示。
     private func load() async {
-        // 旧服务器 404 / 任何读取失败：不显示，不打扰。
-        let status = try? await model.request(path: "/api/payment-sources/status")
-        view = PaymentSourceSwitchView.build(status, pluginKey: pluginKey)
+        guard loadedToken != refreshToken else { return }
+        loadedToken = refreshToken
+        var status: JSONValue?
+        var notFound = false
+        var failure: String?
+        do {
+            status = try await model.request(path: "/api/payment-sources/status")
+        } catch {
+            if let api = error as? APIError, case .server(let code, _) = api, code == 404 { notFound = true }
+            else { failure = error.localizedDescription }
+        }
+        // 这一行滚出屏幕、任务被取消：不当成读取失败，下次出现时再读。
+        if Task.isCancelled {
+            loadedToken = nil
+            return
+        }
+        let next: PaymentSourceSwitchView.Availability
+        if pluginKey == nil {
+            if let status, let summary = PaymentSourceSwitchView.build(status, pluginKey: nil) { next = .available(summary) }
+            else if notFound { next = .serverTooOld }
+            else { next = .unreadable(failure ?? "服务器返回的内容无法识别") }
+        } else {
+            next = PaymentSourceSwitchView.availability(status: status, notFound: notFound, failure: failure,
+                                                        pluginKey: pluginKey ?? "", transferPlugin: transferPlugin)
+        }
+        if case .available(let built) = next { view = built } else { view = nil }
+        availability = next
         loaded = true
     }
 
@@ -2857,6 +2977,7 @@ struct PaymentSourceSwitchSection: View {
         guard let status = try? await model.request(path: "/api/payment-sources/status"),
               let next = PaymentSourceSwitchView.build(status, pluginKey: pluginKey) else { return false }
         view = next
+        availability = .available(next)
         return true
     }
 
@@ -2899,16 +3020,22 @@ struct PaymentSourceSwitchSection: View {
 }
 
 /// 服务器参数页「在别处修改 › 插件 › 转账通知判定」跳过来的独立页面。
+/// 第 24 轮起也是插件页「启用与配置」顶部「转账通知判定」入口的目标页。
 struct PaymentSourceStatusPage: View {
+    @State private var refreshToken = 0
+
     var body: some View {
         List {
-            PaymentSourceSwitchSection(pluginKey: nil)
+            PaymentSourceSwitchSection(pluginKey: nil, refreshToken: refreshToken)
             Section {
-                Text("没有显示内容时，说明服务器版本较旧或没有安装转账通知插件。").font(.footnote).foregroundStyle(.secondary)
+                Text("上面列出服务器认出的转账通知插件（官方插件在插件列表里叫「转账通知解析（中文）」）。一个都没有时，开关打开也仍按旧解析：到「插件 › 市场」安装或在「插件 › 已安装」更新它。")
+                    .font(.footnote).foregroundStyle(.secondary)
             }
         }
+        .refreshable { refreshToken += 1 }
         .navigationTitle("转账通知判定")
         .navigationBarTitleDisplayMode(.inline)
+        .accessibilityIdentifier("paymentSource.page")
     }
 }
 

@@ -415,7 +415,7 @@ struct AILivenessView: View {
             }
             .onChange(of: liveness.runID) { _, id in
                 guard id != nil else { return }
-                withAnimation { proxy.scrollTo("ai.liveness.progressAnchor", anchor: .top) }
+                Motion.perform(Motion.smooth, fadeOnly: false) { proxy.scrollTo("ai.liveness.progressAnchor", anchor: .top) }
             }
             .refreshable {
                 await workspace.refresh(model)

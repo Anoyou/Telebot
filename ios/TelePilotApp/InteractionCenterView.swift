@@ -67,7 +67,7 @@ struct InteractionCenterView: View {
             content
                 .onChange(of: resultToken) { _, _ in
                     // 结果显示在列表顶部：保存时多半停在下方的规则区，滚回顶部让结果可见。
-                    withAnimation { proxy.scrollTo("interaction.result", anchor: .top) }
+                    Motion.perform(fadeOnly: false) { proxy.scrollTo("interaction.result", anchor: .top) }
                 }
         }
     }
@@ -291,7 +291,8 @@ struct InteractionCenterView: View {
                         if let scope = entry.sessionScope { rule.moduleSessionScope = scope }
                         if let policy = entry.participantPolicy { rule.participantPolicy = policy }
                     }
-                    draft.rules.append(rule)
+                    // 第 24 轮：列表增删统一动效（减弱动态效果时只淡变）。
+                    Motion.perform { draft.rules.append(rule) }
                 }
                 .accessibilityIdentifier("interaction.addRule")
             }
@@ -314,7 +315,7 @@ struct InteractionCenterView: View {
                 .swipeActions(edge: .trailing) {
                     if draft.rules.count > 1 {
                         Button("删除", systemImage: "trash", role: .destructive) {
-                            draft.rules.removeAll { $0.id == rule.id }
+                            Motion.perform { draft.rules.removeAll { $0.id == rule.id } }
                         }
                     }
                     Button(rule.enabled ? "停用" : "启用", systemImage: rule.enabled ? "pause.circle" : "checkmark.circle") {
@@ -336,7 +337,7 @@ struct InteractionCenterView: View {
                     }
                     if draft.rules.count > 1 {
                         Button("删除", systemImage: "trash", role: .destructive) {
-                            draft.rules.removeAll { $0.id == rule.id }
+                            Motion.perform { draft.rules.removeAll { $0.id == rule.id } }
                         }
                     }
                 }
@@ -350,7 +351,7 @@ struct InteractionCenterView: View {
     private var queryPreviewRows: some View {
         let context = queryContext
         Button {
-            withAnimation { showingQueryPreview.toggle() }
+            Motion.perform(Motion.smooth) { showingQueryPreview.toggle() }
         } label: {
             Label {
                 LabeledContent(showingQueryPreview ? "收起查询回复预览" : "查询回复预览") {
@@ -371,7 +372,7 @@ struct InteractionCenterView: View {
         guard let index = draft.rules.firstIndex(where: { $0.id == id }) else { return }
         let target = index + offset
         guard draft.rules.indices.contains(target) else { return }
-        draft.rules.swapAt(index, target)
+        Motion.perform(fadeOnly: false) { draft.rules.swapAt(index, target) }
     }
 
     /// 复制规则（与 Web `copyInteractionRule` 相同：新 ID、名称加「副本」、插在原规则后面，玩法参数一并复制）。
@@ -381,7 +382,7 @@ struct InteractionCenterView: View {
         copy.id = "rule-\(Int(Date().timeIntervalSince1970 * 1000))-\(index + 2)"
         copy.raw["id"] = .string(copy.id)
         copy.name = "\(draft.rules[index].displayName) 副本"
-        draft.rules.insert(copy, at: index + 1)
+        Motion.perform { draft.rules.insert(copy, at: index + 1) }
     }
 
     // MARK: 高级

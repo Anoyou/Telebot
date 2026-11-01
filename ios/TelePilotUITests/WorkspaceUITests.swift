@@ -761,13 +761,38 @@ final class WorkspaceUITests: XCTestCase {
         let oldCard = old.buttons["plugin.card.payment-source-cn-transfer"]
         XCTAssertTrue(reveal(oldCard, in: old))
         oldCard.tap()
-        // 详情顶部：等读取结束后既没有开关区，也没有宿主卡或失败提示。
+        // 详情顶部：等读取结束后没有开关，也没有宿主卡或失败提示；第 24 轮起转账通知插件显示一行「需要服务器 0.116.0 以上」。
         XCTAssertTrue(old.navigationBars.firstMatch.waitForExistence(timeout: 10))
-        sleep(3)
+        let requires = old.descendants(matching: .any)["paymentSource.requiresServer"].firstMatch
+        XCTAssertTrue(requires.waitForExistence(timeout: 10))
+        XCTAssertTrue(requires.label.contains("0.116.0"), requires.label)
         XCTAssertFalse(old.descendants(matching: .any)["paymentSource.switch"].firstMatch.exists)
         XCTAssertFalse(old.staticTexts["转账识别（只读）"].exists)
         XCTAssertFalse(old.descendants(matching: .any)["plugin.uicard.failed"].firstMatch.exists)
         XCTAssertTrue(reveal(old.staticTexts["插件信息"], in: old), "旧服务器下插件详情其余内容照常显示")
+    }
+
+    /// 第 24 轮：转账通知开关找得到——插件页「启用与配置」顶部有「转账通知判定」入口；服务器没把插件列为来源
+    /// （插件版本过旧）时，插件详情说明原因而不是整段消失；搜「中文转账通知」也能找到这个插件。
+    func testPaymentSourceEntryAndUnlistedReason() {
+        let app = launch(["--ui-test-payment-source"])
+        app.tabBars.buttons["插件"].tap()
+        let entry = app.descendants(matching: .any)["plugins.paymentSourceEntry"].firstMatch
+        XCTAssertTrue(reveal(entry, in: app))
+        entry.tap()
+        XCTAssertTrue(app.switches["paymentSource.switch"].waitForExistence(timeout: 10), "入口进去就是开关")
+        app.terminate()
+
+        let unlisted = launch(["--ui-test-payment-source", "--ui-test-payment-source-unlisted"])
+        unlisted.tabBars.buttons["插件"].tap()
+        let card = unlisted.buttons["plugin.card.payment-source-cn-transfer"]
+        XCTAssertTrue(reveal(card, in: unlisted))
+        card.tap()
+        let reason = unlisted.descendants(matching: .any)["paymentSource.notParticipating"].firstMatch
+        XCTAssertTrue(reason.waitForExistence(timeout: 10))
+        XCTAssertTrue(reason.label.contains("没在参与转账通知解析"), reason.label)
+        XCTAssertFalse(unlisted.switches["paymentSource.switch"].exists)
+        XCTAssertTrue(unlisted.descendants(matching: .any)["paymentSource.openSummary"].firstMatch.exists)
     }
 
     /// 第 23 轮：打开转账通知插件详情里的开关（带确认）。

@@ -45,7 +45,8 @@ struct AssistantView: View {
                     Task { await store.select(id, model: model) }
                 }
                 .frame(minWidth: 240, idealWidth: 280, maxWidth: 320)
-                .transition(.move(edge: .leading))
+                // 第 24 轮：减弱动态效果时只淡入淡出，不从左侧滑入。
+                .transition(reduceMotion ? AnyTransition.opacity : AnyTransition.move(edge: .leading))
                 Divider()
             }
             NavigationStack {
@@ -139,9 +140,10 @@ struct AssistantView: View {
             if store.session?.assistantText("channel") == "bot" {
                 AssistantNotice(text: "这是 Telegram 会话，可以查看历史和任务；请在原 Telegram 对话中继续发送。")
             }
-            if let error = store.error { AssistantNotice(text: error, isError: true) { store.error = nil } }
-            if let notice = store.notice { AssistantNotice(text: notice) { store.notice = nil } }
-            if let reconnect = store.streamReconnect { StreamReconnectBanner(status: reconnect) }
+            // 第 24 轮：提示条出现 / 消失从顶部轻移 + 淡入（减弱动态效果时只淡入，界面测试中无动画）。
+            if let error = store.error { AssistantNotice(text: error, isError: true) { store.error = nil }.motionTransition() }
+            if let notice = store.notice { AssistantNotice(text: notice) { store.notice = nil }.motionTransition() }
+            if let reconnect = store.streamReconnect { StreamReconnectBanner(status: reconnect).motionTransition() }
             if store.unresolvedSend {
                 VStack(alignment: .leading, spacing: 8) {
                     Label("有一条发送尚未核实", systemImage: "exclamationmark.arrow.triangle.2.circlepath").font(.subheadline.weight(.medium))
@@ -187,7 +189,9 @@ struct AssistantView: View {
                                 // 编辑与重新生成只针对最新一轮（服务器 regenerate 接口的语义），任务执行中不提供。
                                 AssistantMessageView(item: item, rendered: entry.rendered, tools: entry.tools,
                                                      mayRegenerate: idle && item.id == latestAssistant?.id,
-                                                     mayEdit: idle && latestAssistant != nil && item.id == latestUser?.id) {
+                                                     mayEdit: idle && latestAssistant != nil && item.id == latestUser?.id,
+                                                     reasoningSeconds: item.text("role") == "assistant"
+                                                        ? ReasoningDuration.resolve(usage: item["usage"], local: store.localReasoningSeconds) : nil) {
                                     Task { await store.retry(item, model: model) }
                                 } regenerate: {
                                     // 行是 Equatable 视图，闭包可能是旧的：点按时再从 store 读取最新一轮。
@@ -250,7 +254,8 @@ struct AssistantView: View {
                     if old == nil {
                         scrollToBottomAfterLayout(proxy)
                     } else {
-                        withAnimation { proxy.scrollTo("assistant.bottom", anchor: .bottom) }
+                        // 第 24 轮：统一动效（减弱动态效果时直接跳到底部，界面测试中无动画）。
+                        Motion.perform(Motion.smooth, reduceMotion: reduceMotion, fadeOnly: false) { proxy.scrollTo("assistant.bottom", anchor: .bottom) }
                     }
                 }
                 // 第八轮：任务开始、出现新的待处理消息时滚到底部，让回答位置的状态行与待处理气泡可见。
@@ -278,6 +283,9 @@ struct AssistantView: View {
             AssistantComposer(store: store, panel: composerPanel, focused: $composerFocused)
         }
         .onChange(of: store.sessionID) { _, _ in composerPanel.close() }
+        .motionAnimation(value: store.error)
+        .motionAnimation(value: store.notice)
+        .motionAnimation(value: store.streamReconnect == nil)
         // Agent 页隐藏底部 Dock，把空间留给对话；用悬浮的最小化按钮返回。
         .toolbarVisibility(embedded ? .hidden : .automatic, for: .tabBar)
     }
@@ -342,7 +350,8 @@ struct AssistantView: View {
         .accessibilityHint("返回上一个页面。左右拖动可以把按钮移到另一侧。")
         .accessibilityAction(named: "移到另一侧") { minimizeOnLeading.toggle() }
         .accessibilityIdentifier("assistant.minimize")
-        .transition(.scale.combined(with: .opacity))
+        // 第 24 轮：减弱动态效果时只淡入淡出，不缩放。
+        .transition(reduceMotion ? AnyTransition.opacity : AnyTransition.scale.combined(with: .opacity))
     }
 
     private var latestUser: AssistantItem? { store.messages.last { $0.text("role") == "user" } }
@@ -368,6 +377,8 @@ private struct AssistantMessageView: View, Equatable {
     var tools: [AssistantItem] = []
     var mayRegenerate = false
     var mayEdit = false
+    /// 第 24 轮：思考用时（秒）。服务器 `usage.stage_timings.reasoning_ms` 优先，其次本机流式时记下的；都没有为 nil。
+    var reasoningSeconds: Double? = nil
     let retry: () -> Void
     let regenerate: () -> Void
     let edit: () -> Void
@@ -379,11 +390,13 @@ private struct AssistantMessageView: View, Equatable {
         // 预处理结果按 key（消息 ID + 内容哈希）比较，不逐个比较 AttributedString。
         lhs.item == rhs.item && lhs.rendered?.key == rhs.rendered?.key && lhs.tools == rhs.tools
             && lhs.mayRegenerate == rhs.mayRegenerate && lhs.mayEdit == rhs.mayEdit
+            && lhs.reasoningSeconds == rhs.reasoningSeconds
     }
 
     @State private var copied = false
     @State private var copyCount = 0
     @State private var confirmRegenerate = false
+    @AppStorage(AssistantReasoningPreference.key) private var showReasoning = true
 
     /// 复制后对勾停留时长：平时 1.5 秒；界面测试里放长到 15 秒（同 `AssistantCodeBlockView.copiedFeedback`）——
     /// XCTest 点按后要先等界面空闲（长会话里实测 5 秒以上）才开始查找，短提示在查找前就已恢复，断言会落空。
@@ -455,6 +468,13 @@ private struct AssistantMessageView: View, Equatable {
             let images = item["content"]?["images"]?.arrayValue ?? []
             if !images.isEmpty { AssistantImagesView(images: images, owner: item.id) }
         } else {
+            // 第 24 轮：思考过程放在回答正文上方，默认折叠（参考 Codex）。
+            if role == "assistant" && showReasoning {
+                let reasoning = rendered?.reasoning ?? AssistantRedaction.text(item["content"]?["reasoning"]?.stringValue ?? "")
+                if !reasoning.isEmpty {
+                    AssistantReasoningView(reasoning: reasoning, seconds: reasoningSeconds)
+                }
+            }
             if !text.isEmpty {
                 Group {
                     if role == "user" {
@@ -472,10 +492,6 @@ private struct AssistantMessageView: View, Equatable {
                         Button("选择文本", systemImage: "text.cursor") { selectingText = true }
                         ShareLink(item: text) { Label("分享", systemImage: "square.and.arrow.up") }
                     }
-            }
-            let reasoning = rendered?.reasoning ?? AssistantRedaction.text(item["content"]?["reasoning"]?.stringValue ?? "")
-            if !reasoning.isEmpty {
-                DisclosureGroup("推理过程") { Text(reasoning).font(.footnote).foregroundStyle(.secondary).textSelection(.enabled).privacySensitive() }
             }
             let images = item["content"]?["images"]?.arrayValue ?? item["content"]?["attachments"]?.arrayValue ?? []
             if !images.isEmpty { AssistantImagesView(images: images, owner: item.id) }
@@ -502,6 +518,8 @@ private struct AssistantMessageView: View, Equatable {
                 Button(isUser ? "复制消息" : "复制回复", systemImage: copied ? "checkmark" : "doc.on.doc") { copy() }
                     .accessibilityLabel(copied ? "已复制" : isUser ? "复制消息" : "复制回复")
                     .accessibilityIdentifier(isUser ? "assistant.message.copy" : "assistant.reply.copy")
+                    // 第 24 轮：复制 → 对勾用系统换图效果（减弱动态效果时系统自动降级为淡变）。
+                    .motionSymbolSwap(value: copied)
             }
             if !text.isEmpty {
                 // 第九轮：打开「选择文本」面板，可拖选任意片段（系统复制／查找／翻译菜单）。
@@ -575,6 +593,7 @@ private struct AssistantLiveReplyView: View {
     /// 界面测试专用：状态行依次显示过的阶段，作为 `assistant.live.status` 的无障碍值（「›」连接）。
     /// 阶段约 1 秒一换，测试端逐次快照在负载高的模拟器上跟不上（第 22 轮偶发失败），改为由 App 记下来一次读出。
     @State private var shownPhases: [String] = []
+    @AppStorage(AssistantReasoningPreference.key) private var showReasoning = true
     private static let recordsPhases = ProcessInfo.processInfo.arguments.contains("--ui-testing")
 
     var body: some View {
@@ -582,12 +601,17 @@ private struct AssistantLiveReplyView: View {
         Group {
             let status = store.liveStatus
             let hasText = live.hasText
-            if status != nil || hasText || !live.reasoning.isEmpty {
+            let showsReasoning = showReasoning && !live.reasoning.isEmpty
+            if status != nil || hasText || showsReasoning {
                 VStack(alignment: .leading, spacing: 10) {
                     Label(AssistantPresentation.senderName, systemImage: "sparkles").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-                    if let status, !hasText { statusRow(status, compact: false) }
-                    if !live.reasoning.isEmpty {
-                        DisclosureGroup("推理过程") { Text(AssistantRedaction.text(live.reasoning)).font(.footnote).foregroundStyle(.secondary).textSelection(.enabled).privacySensitive() }
+                    // 第 24 轮：正在思考时由思考行（「正在思考… 12s」+ 流光）代替「思考中…」状态行，不重复显示；
+                    // 进度订阅断开时仍显示状态行（带「恢复进度」）。
+                    if let status, !hasText, !(showsReasoning && live.reasoningTimer.isThinking && store.streaming) {
+                        statusRow(status, compact: false)
+                    }
+                    if showsReasoning {
+                        AssistantReasoningView(reasoning: live.reasoning, liveTimer: live.reasoningTimer, rawLive: true)
                     }
                     if hasText {
                         VStack(alignment: .leading, spacing: 10) {
@@ -714,6 +738,90 @@ struct AssistantShimmer: ViewModifier {
                     withAnimation(.linear(duration: 1.6).repeatForever(autoreverses: false)) { phase = 1 }
                 }
         }
+    }
+}
+
+
+// MARK: - 思考过程（第 24 轮，参考 Codex）
+
+/// 「显示思考过程」开关（App 设置 › Agent，默认开；关时完全不显示思考行）。
+enum AssistantReasoningPreference {
+    static let key = "telepilot.agent.showReasoning"
+}
+
+/// 回答正文上方一行灰色小字：思考中「正在思考… 12s」（流光），结束后「思考了 1m 36s ›」，不知道用时时「思考过程 ›」；
+/// 默认折叠，点按展开思考全文（左侧一条细线，脱敏后显示），再点收起。没有思考内容时调用方不放这一行。
+/// - `liveTimer` 非空：正在生成的回答，秒数按本机时钟每秒刷新；为空：历史消息，用 `seconds`（服务器值或本机记下的值）。
+/// - `rawLive` 为真时 `reasoning` 是未脱敏的流式原文，只在展开时才脱敏（折叠时不做任何处理）。
+struct AssistantReasoningView: View {
+    let reasoning: String
+    var seconds: Double? = nil
+    var liveTimer: ReasoningTimer? = nil
+    var rawLive = false
+    @State private var expanded = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private var thinking: Bool { liveTimer?.isThinking == true }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Button {
+                Motion.perform(Motion.smooth, reduceMotion: reduceMotion) { expanded.toggle() }
+            } label: {
+                header
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(thinking ? "正在思考" : ReasoningDuration.title(thinking: false, seconds: resolvedSeconds(now: Date())))
+            .accessibilityValue(expanded ? "已展开" : "已折叠")
+            .accessibilityHint(expanded ? "点按收起思考过程" : "点按展开思考过程")
+            .accessibilityIdentifier("assistant.reasoning.toggle")
+            if expanded {
+                Text(rawLive ? AssistantRedaction.text(reasoning) : reasoning)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+                    .privacySensitive()
+                    .padding(.leading, 12)
+                    .overlay(alignment: .leading) {
+                        Capsule().fill(.quaternary).frame(width: 2)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .accessibilityIdentifier("assistant.reasoning.text")
+                    .motionTransition(edge: .top)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func resolvedSeconds(now: Date) -> Double? {
+        if let liveTimer { return liveTimer.elapsed(now: now) ?? seconds }
+        return seconds
+    }
+
+    @ViewBuilder private var header: some View {
+        if thinking {
+            // 每秒刷新一次秒数（只重绘这一行）。
+            TimelineView(.periodic(from: .now, by: 1)) { context in
+                headerLabel(ReasoningDuration.title(thinking: true, seconds: resolvedSeconds(now: context.date)))
+                    .assistantShimmer()
+            }
+        } else {
+            headerLabel(ReasoningDuration.title(thinking: false, seconds: resolvedSeconds(now: Date())))
+        }
+    }
+
+    private func headerLabel(_ title: String) -> some View {
+        HStack(spacing: 4) {
+            Text(title).monospacedDigit()
+            Image(systemName: "chevron.right")
+                .imageScale(.small)
+                .rotationEffect(.degrees(expanded ? 90 : 0))
+        }
+        .font(.footnote)
+        .foregroundStyle(.secondary)
+        .lineLimit(1)
+        .frame(minHeight: 44, alignment: .leading)
+        .contentShape(.rect)
     }
 }
 
@@ -1520,6 +1628,7 @@ struct AssistantCodeBlockView: View {
                 .contentShape(.rect)
                 .accessibilityLabel(copied ? "已复制代码" : "复制代码")
                 .accessibilityIdentifier("assistant.code.copy")
+                .motionSymbolSwap(value: copied)
             }
             .padding(.leading, 12).padding(.trailing, 4)
             Divider()

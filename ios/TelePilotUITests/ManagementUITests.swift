@@ -704,6 +704,34 @@ final class ManagementUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["runtime.profile"].waitForExistence(timeout: 15))
     }
 
+    /// 第 24 轮：App 设置 › Agent ›「显示思考过程」（默认开），关掉后 Agent 回答上方不再有「思考了…」这一行。
+    func testShowReasoningSettingHidesThinkingRow() {
+        let app = launch(["--ui-test-reasoning"])
+        let agent = app.tabBars.buttons["Agent"]
+        agent.tap()
+        let toggles = app.buttons.matching(identifier: "assistant.reasoning.toggle")
+        XCTAssertTrue(toggles.firstMatch.waitForExistence(timeout: 15), "默认显示思考行")
+        let minimize = app.buttons["assistant.minimize"]
+        XCTAssertTrue(minimize.waitForExistence(timeout: 5))
+        minimize.tap()
+        let settings = app.buttons["more.settings"]
+        XCTAssertTrue(settings.waitForExistence(timeout: 10))
+        reveal(settings, in: app)
+        waitUntilStill(settings)
+        settings.tap()
+        XCTAssertTrue(app.navigationBars["App 设置"].waitForExistence(timeout: 10))
+        let toggle = app.switches["settings.showReasoning"]
+        XCTAssertTrue(toggle.waitForExistence(timeout: 5))
+        reveal(toggle, in: app)
+        XCTAssertEqual(toggle.value as? String, "1")
+        toggle.coordinate(withNormalizedOffset: CGVector(dx: 0.92, dy: 0.5)).tap()
+        expectation(for: NSPredicate(format: "value == %@", "0"), evaluatedWith: toggle)
+        waitForExpectations(timeout: 5)
+        agent.tap()
+        XCTAssertTrue(app.staticTexts["服务状态正常。这里是界面测试数据。"].waitForExistence(timeout: 15))
+        XCTAssertEqual(toggles.count, 0, "关闭后完全不显示思考行")
+    }
+
     /// 0.21.0 按 iPhone「设置 › 通用」排序：
     /// - 「更多」：「工具与设置」为 服务器设置 → Webhook → 命中调试 → 备份与维护；最后一组 App 只有「App 设置」，不再有「关于与更新」。
     /// - 「App 设置」：最顶部一组「关于」「软件更新」（两页，标题 = 入口名），常用配置居中，「更换服务器／退出登录」单独在最底部一组。

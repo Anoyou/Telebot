@@ -610,7 +610,7 @@ private struct TelegramBlockView: View {
         } else {
             text
                 .contentShape(Rectangle())
-                .onTapGesture { withAnimation(.easeOut(duration: 0.2)) { revealed.formUnion(hidden) } }
+                .onTapGesture { Motion.perform { revealed.formUnion(hidden) } }
                 .accessibilityAddTraits(.isButton)
                 .accessibilityHint("轻点显示隐藏的文字")
                 .accessibilityAction { revealed.formUnion(hidden) }
@@ -737,7 +737,7 @@ private struct TelegramBlockView: View {
     }
 
     private func toggle(_ id: Int) {
-        withAnimation(.easeInOut(duration: 0.2)) {
+        Motion.perform(Motion.smooth) {
             if expanded.contains(id) { expanded.remove(id) } else { expanded.insert(id) }
         }
     }
@@ -923,7 +923,7 @@ struct TelegramTemplateInlineField: View {
             }
             HStack {
                 Button(showsPreview ? "收起预览" : "显示预览", systemImage: showsPreview ? "eye.slash" : "eye") {
-                    withAnimation { previewToggled.toggle() }
+                    Motion.perform(Motion.smooth) { previewToggled.toggle() }
                 }
                 .accessibilityIdentifier("\(identifier).togglePreview")
                 Spacer()

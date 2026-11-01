@@ -279,11 +279,11 @@ struct ServerUpdateSheet: View {
             // 任务创建或提交失败后自动滚回进度分区，让用户（和 UI 测试）立刻看到进度或原因。
             .onChange(of: jobID) { _, id in
                 guard id != nil else { return }
-                withAnimation { proxy.scrollTo(Self.progressAnchor, anchor: .top) }
+                Motion.perform(Motion.smooth, fadeOnly: false) { proxy.scrollTo(Self.progressAnchor, anchor: .top) }
             }
             .onChange(of: applyError) { _, error in
                 guard error != nil else { return }
-                withAnimation { proxy.scrollTo(Self.progressAnchor, anchor: .top) }
+                Motion.perform(Motion.smooth, fadeOnly: false) { proxy.scrollTo(Self.progressAnchor, anchor: .top) }
             }
             }
             .symbolRenderingMode(.hierarchical)

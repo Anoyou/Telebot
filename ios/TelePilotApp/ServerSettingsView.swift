@@ -430,9 +430,10 @@ struct ServerSettingsView: View {
         }
         // 保存结果与未保存提示固定在底部（随键盘上移），不论滚到哪里、键盘是否弹出都看得到。
         .safeAreaInset(edge: .bottom, spacing: 0) { statusBar }
-        .animation(.default, value: saveMessage)
-        .animation(.default, value: saveError)
-        .animation(.default, value: dirty)
+        // 第 24 轮：统一动效（减弱动态效果时只淡变，界面测试中不加动画）。
+        .motionAnimation(value: saveMessage)
+        .motionAnimation(value: saveError)
+        .motionAnimation(value: dirty)
         .refreshable { if !dirty { await load() } }
         .task { if settings == nil { await load() } }
     }
@@ -605,7 +606,7 @@ struct ServerSettingsView: View {
             .overlay(alignment: .top) { Divider() }
             .accessibilityElement(children: .contain)
             .accessibilityIdentifier("serverSettings.statusBar")
-            .transition(.move(edge: .bottom).combined(with: .opacity))
+            .motionTransition(edge: .bottom)
         }
     }
 

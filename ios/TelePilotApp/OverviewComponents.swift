@@ -247,10 +247,13 @@ struct OverviewStatTileView: View {
                     .foregroundStyle(tile.status.valueColor)
                     .lineLimit(1)
                     .minimumScaleFactor(0.6)
+                    // 第 24 轮：数字变化时滚动式过渡（减弱动态效果时淡变）。
+                    .motionNumeric(value: tile.value)
                 Spacer(minLength: 0)
                 Image(systemName: tile.status.symbol)
                     .font(.caption2)
                     .foregroundStyle(tile.status.color)
+                    .motionSymbolSwap(value: tile.status.symbol)
                     .accessibilityHidden(true)
             }
             Text(tile.title)

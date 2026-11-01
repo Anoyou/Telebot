@@ -41,6 +41,8 @@ struct TelePilotApp: App {
                     .environment(model)
             }
             .task {
+                // 第 24 轮：所有输入框键盘上方统一的「收起」按钮（已有自己工具栏的输入框不动）。
+                KeyboardDismissAccessory.shared.install()
                 PushNotificationAppDelegate.manager = push
                 push.onRoute = { model.requestedRoute = $0 }
                 push.canRoute = { !lock.isObscured && scenePhase == .active }

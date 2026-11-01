@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 from datetime import UTC, datetime
 from types import SimpleNamespace
@@ -937,6 +938,91 @@ async def test_runtime_redacts_secret_added_by_steer_from_all_events(monkeypatch
     assistant = next(event for event in events if event["type"] == "assistant_message")
     assert assistant["content"] == "最终回显 [REDACTED]"
     assert assistant["reasoning"] == "思考回显 [REDACTED]"
+
+
+@pytest.mark.asyncio
+async def test_runtime_reports_reasoning_ms_only_when_model_reasoned(monkeypatch) -> None:
+    """第 24 轮：stage_timings.reasoning_ms = 推理增量开始到正文 / 工具开始的累计时长。"""
+    primary, fallback = _providers()
+    await _patch_runtime_config(monkeypatch, primary, fallback)
+
+    async def run(_model_call, request, _tools, *, callbacks, **_kwargs):  # noqa: ANN001
+        await callbacks.on_reasoning_delta("先想一想")
+        await asyncio.sleep(0.05)
+        await callbacks.on_tool_start(ToolCall(id="c1", name="scheduler.list", arguments={}))
+        await callbacks.on_tool_finish(
+            ToolCall(id="c1", name="scheduler.list", arguments={}),
+            ToolResult(call_id="c1", name="scheduler.list", content={"ok": True}),
+        )
+        # 工具期间不计入思考
+        await asyncio.sleep(0.05)
+        await callbacks.on_reasoning_delta("再想一下")
+        await asyncio.sleep(0.05)
+        await callbacks.on_text_delta("好的")
+        await asyncio.sleep(0.05)
+        return AgentResult(
+            text="好的",
+            reasoning_content="先想一想再想一下",
+            model=request.model,
+            messages=request.messages,
+            usage=ModelUsage(input_tokens=1, output_tokens=1),
+            steps=1,
+            tool_calls=1,
+            stop_reason=StopReason.COMPLETED,
+        )
+
+    monkeypatch.setattr(runtime_module, "run_agent", run)
+    events = [
+        event
+        async for event in SystemAgentRuntime(_registry()).stream_turn(
+            None,  # type: ignore[arg-type]
+            session=_session(),  # type: ignore[arg-type]
+            user_text="帮我看看定时任务",
+            role="admin",
+            channel="web",
+        )
+    ]
+    assistant = next(event for event in events if event["type"] == "assistant_message")
+    reasoning_ms = assistant["usage"]["stage_timings"]["reasoning_ms"]
+    total_ms = assistant["usage"]["stage_timings"]["total_ms"]
+    # 两段各约 50ms：至少 90ms，且明显少于包含工具与正文的总耗时
+    assert reasoning_ms >= 90
+    # 工具期间与正文之后的约 100ms 不计入
+    assert reasoning_ms <= total_ms - 90
+
+
+@pytest.mark.asyncio
+async def test_runtime_omits_reasoning_ms_without_reasoning(monkeypatch) -> None:
+    primary, fallback = _providers()
+    await _patch_runtime_config(monkeypatch, primary, fallback)
+
+    async def run(_model_call, request, _tools, *, callbacks, **_kwargs):  # noqa: ANN001
+        await callbacks.on_text_delta("好的")
+        return AgentResult(
+            text="好的",
+            model=request.model,
+            messages=request.messages,
+            usage=ModelUsage(input_tokens=1, output_tokens=1),
+            steps=1,
+            tool_calls=0,
+            stop_reason=StopReason.COMPLETED,
+        )
+
+    monkeypatch.setattr(runtime_module, "run_agent", run)
+    events = [
+        event
+        async for event in SystemAgentRuntime(_registry()).stream_turn(
+            None,  # type: ignore[arg-type]
+            session=_session(),  # type: ignore[arg-type]
+            user_text="你好",
+            role="admin",
+            channel="web",
+        )
+    ]
+    assistant = next(event for event in events if event["type"] == "assistant_message")
+    assert "reasoning_ms" not in assistant["usage"]["stage_timings"]
+    done = next(event for event in events if event["type"] == "done")
+    assert "reasoning_ms" not in done["stage_timings"]
 
 
 @pytest.mark.asyncio
