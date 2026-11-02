@@ -229,6 +229,13 @@ CAPABILITIES: tuple[Capability, ...] = (
         doc=f"{_DOC}#宿主只读查询ctxhostread",
     ),
     Capability(
+        name="host.read.chat.read_state@1",
+        since="0.118.0-beta.2",
+        plugin_api="1.1",
+        summary="当前账号允许会话的 dialog 已读进度（read_inbox_max_id），需 reads 声明与 read_chat 权限，只读",
+        doc=f"{_DOC}#宿主只读查询ctxhostread",
+    ),
+    Capability(
         name="host.read.plugin.stats@1",
         since=_P1_RELEASE,
         plugin_api="1.1",

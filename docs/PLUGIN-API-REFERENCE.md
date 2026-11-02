@@ -3130,10 +3130,20 @@ models = await ctx.host.read("ai.models@1", enabled_only=True)
 | `account.admins@1` | `{owner_user_ids: [...], admin_user_ids: [...]}` | 账号本人 + 授权 sudo 用户；代替 payload 的 `owner_user_ids` / `admin_user_ids` |
 | `ai.models@1` | `[{provider_id, provider_name, provider, model, enabled, default, tags}]` | 参数 `enabled_only`（默认 True）；需 `ai_text` / `ai_agent` 权限 |
 | `chat.allowed@1` | `{all: bool, chat_ids: [...]}` | 账号「允许会话」；`all=true` 表示未限制 |
+| `chat.read_state@1` | `{chat_id: int, read_inbox_max_id: int}` | 0.118.0-beta.2+；必填参数 `chat_id`（非零整数，不接受布尔值或字符串）；需 `read_chat` 权限，仅查询当前账号 UserBot 的允许会话 |
 | `plugin.stats@1` | 与 `GET /api/plugins/{key}/stats` 同结构 | 只含本插件、本账号 |
 
 - 未声明、未知资源、当前上下文不提供（例如没有 AI 权限读 `ai.models@1`）都抛 `HostReadError`（`PermissionError` 子类）；资源结构变化会发新版本号，旧版本继续可读。
 - 安装 / 更新时校验 `reads`，未知资源会被拒绝。
+
+查询已读进度需在 `plugin.json` 同时声明 `"reads": ["chat.read_state@1"]` 和 `"permissions": ["read_chat"]`，并先探测 `ctx.capabilities.has("host.read.chat.read_state@1")`：
+
+```python
+state = await ctx.host.read("chat.read_state@1", chat_id=-1001234567890)
+read_max_id = state["read_inbox_max_id"]
+```
+
+该资源复用账号「允许会话」范围：名单非空时只允许名单中的 Telegram chat id；空名单表示不限制。每次查询使用当前账号的 UserBot client，不接受 `account_id`、client 或其他额外参数，也不会切换到其他账号或 Bot client。查询只发送 `messages.getPeerDialogs` 读取 dialog 进度，不调用标记已读操作；返回值仅含上表两个整数，不含消息正文、密钥或 Telegram 原始对象。`read_inbox_max_id=0` 是有效进度；未连接、会话不存在 / 不可访问、Telegram 查询失败、无效响应、非法参数或超出允许范围均抛 `HostReadError`，失败不会伪装为进度 0。
 
 #### 钩子 Trace 与熔断
 

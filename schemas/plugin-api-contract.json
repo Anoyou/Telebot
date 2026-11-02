@@ -3967,6 +3967,16 @@
         "removed_in": null
       },
       {
+        "name": "host.read.chat.read_state@1",
+        "version": 1,
+        "since": "0.118.0-beta.2",
+        "plugin_api": "1.1",
+        "legacy_attr": null,
+        "facades": [],
+        "deprecated_in": null,
+        "removed_in": null
+      },
+      {
         "name": "host.read.plugin.stats@1",
         "version": 1,
         "since": "0.108.0-beta.1",
@@ -4254,6 +4264,7 @@
         "host.read.account.admins@1",
         "host.read.ai.models@1",
         "host.read.chat.allowed@1",
+        "host.read.chat.read_state@1",
         "host.read.plugin.stats@1",
         "interaction.entry_policy",
         "interaction.legacy_entry_keys",
@@ -4292,6 +4303,7 @@
         "host.read.account.admins@1",
         "host.read.ai.models@1",
         "host.read.chat.allowed@1",
+        "host.read.chat.read_state@1",
         "host.read.plugin.stats@1",
         "interaction.entry_policy",
         "interaction.legacy_entry_keys",
@@ -4338,6 +4350,7 @@
         "host.read.account.admins@1",
         "host.read.ai.models@1",
         "host.read.chat.allowed@1",
+        "host.read.chat.read_state@1",
         "host.read.plugin.stats@1",
         "interaction.entry_policy",
         "interaction.legacy_entry_keys",
@@ -4386,6 +4399,7 @@
         "host.read.account.admins@1",
         "host.read.ai.models@1",
         "host.read.chat.allowed@1",
+        "host.read.chat.read_state@1",
         "host.read.plugin.stats@1",
         "interaction.entry_policy",
         "interaction.legacy_entry_keys",
@@ -5089,6 +5103,7 @@
     "account.admins@1",
     "ai.models@1",
     "chat.allowed@1",
+    "chat.read_state@1",
     "plugin.stats@1"
   ],
   "deprecations": [

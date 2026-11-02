@@ -734,7 +734,7 @@ def _build_plugin_host(
 ) -> Any:
     """``ctx.host``：按 manifest ``reads`` 提供声明式只读宿主查询（0.108.0+）。"""
 
-    from .host_read import PluginHost, ai_model_metadata
+    from .host_read import PluginHost, ai_model_metadata, read_chat_state
 
     declared = list(getattr(manifest, "reads", None) or []) if manifest is not None else []
 
@@ -758,6 +758,14 @@ def _build_plugin_host(
         "chat.allowed@1": _allowed,
         "plugin.stats@1": _stats,
     }
+    if "read_chat" in (getattr(manifest, "permissions", None) or []):
+
+        async def _read_state(*, chat_id: Any = None) -> dict[str, int]:
+            return await read_chat_state(
+                client=state.client, allowed_chat_ids=state.ignored_peers, chat_id=chat_id,
+            )
+
+        resolvers["chat.read_state@1"] = _read_state
     if plugin_ai is not None:
 
         async def _models(*, enabled_only: bool = True) -> list[dict[str, Any]]:

@@ -79,6 +79,13 @@ HOST_RESOURCES: tuple[HostResource, ...] = (
         summary="账号「允许会话」：{all: bool, chat_ids: [...]}；all=true 表示未限制（全部会话）",
     ),
     HostResource(
+        name="chat.read_state",
+        version=1,
+        since="0.118.0-beta.2",
+        params=("chat_id",),
+        summary="当前账号允许会话的 Telegram dialog 已读进度（需 read_chat 权限）：{chat_id, read_inbox_max_id}；只读，不标记已读",
+    ),
+    HostResource(
         name="plugin.stats",
         version=1,
         since=_SINCE,
@@ -147,6 +154,38 @@ def validate_reads(values: Iterable[Any] | None) -> tuple[list[str], list[str]]:
 
 
 Resolver = Callable[..., Awaitable[Any]]
+
+
+async def read_chat_state(*, client: Any, allowed_chat_ids: set[int], chat_id: Any = None) -> dict[str, int]:
+    """仅查询绑定的 UserBot；允许名单为空沿用宿主的「允许全部」语义。"""
+
+    from telethon.tl.functions.messages import GetPeerDialogsRequest
+    from telethon.tl.types import InputDialogPeer
+    from telethon.utils import get_peer_id
+
+    if type(chat_id) is not int or chat_id == 0:
+        raise HostReadError("chat.read_state@1 的 chat_id 必须是非零整数")
+    if allowed_chat_ids and chat_id not in allowed_chat_ids:
+        raise HostReadError("chat.read_state@1 的 chat_id 不在当前账号允许会话范围内")
+    try:
+        if client is None or not client.is_connected():
+            raise HostReadError("chat.read_state@1 的当前账号 UserBot 未连接")
+        peer = await client.get_input_entity(chat_id)
+        if get_peer_id(peer) != chat_id:
+            raise HostReadError("chat.read_state@1 无法解析指定会话")
+        result = await client(GetPeerDialogsRequest(peers=[InputDialogPeer(peer=peer)]))
+        for dialog in result.dialogs:
+            if get_peer_id(dialog.peer) == chat_id:
+                max_id = dialog.read_inbox_max_id
+                if type(max_id) is not int or max_id < 0:
+                    raise HostReadError("chat.read_state@1 返回无效的已读进度")
+                return {"chat_id": chat_id, "read_inbox_max_id": max_id}
+    except HostReadError:
+        raise
+    except Exception:
+        # 不向插件透传 Telegram 异常、请求或响应，避免泄露正文与凭据。
+        raise HostReadError("chat.read_state@1 查询失败") from None
+    raise HostReadError("chat.read_state@1 的会话不存在或不可访问")
 
 
 class PluginHost:

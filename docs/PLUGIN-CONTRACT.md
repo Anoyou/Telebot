@@ -79,7 +79,7 @@ TelePilot 有三种和插件相关的版本号：
 | Event Bus | `events` | 事件来源、事件类型、订阅范围（含 `own_buttons` / `guest_all` / `inline_all`）、过滤键 |
 | 标准动作 | `actions` | `send_message` … `update_session` 共 20 种 |
 | 扩展点 | `extension_points` | `provides`（`ai.image_backend`）、`payment_sources`（钩子、1 秒时限、结算字段）、中间件阶段与时限 |
-| 只读宿主资源 | `host_read_resources` | `account.admins@1`、`ai.models@1`、`chat.allowed@1`、`plugin.stats@1` |
+| 只读宿主资源 | `host_read_resources` | `account.admins@1`、`ai.models@1`、`chat.allowed@1`、`chat.read_state@1`（0.118.0-beta.2+）、`plugin.stats@1` |
 | 弃用登记 | `deprecations` | 已登记弃用的接口 id（登记 ≠ 删除，见下） |
 
 ### 2.6 1.0 冻结范围：稳定 / 实验 / 高级（`stability`，第 22 轮）
