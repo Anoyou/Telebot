@@ -15,7 +15,7 @@ from app.worker.plugins.manifest import Manifest
 MANIFEST = Manifest(
     key=FEATURE_FORWARD,
     display_name="消息转发",
-    version="0.3.0",
+    version="0.2.0",
     author="builtin",
     description="按规则把 incoming 消息转发到指定 chat（4 种 mode + 风控接入 + FloodWait 兜底）",
     category="automation",
@@ -28,7 +28,7 @@ MANIFEST = Manifest(
     config_schema={
         "type": "object",
         "x-ui-mode": "rules",
-        "x-usage-guide": "消息转发通过规则触发：先新建规则，选择来源范围、匹配方式和目标 chat_id，再启用当前账号的功能总开关。它只处理 incoming 消息，本账号自己发送的消息不会被转发；规则保存后立即生效。可开启「仅转发未读消息」，默认等待 30 秒；等待期间已读或已读状态查询失败时跳过并记录日志。旧规则默认不启用，插件重载或进程重启不补发待转消息。",
+        "x-usage-guide": "消息转发通过规则触发：先新建规则，选择来源范围、匹配方式和目标 chat_id，再启用当前账号的功能总开关。它只处理 incoming 消息，本账号自己发送的消息不会被转发；规则保存后立即生效。",
         "additionalProperties": False,
         "required": ["target_chat_id", "mode"],
         "properties": {
@@ -47,15 +47,6 @@ MANIFEST = Manifest(
             },
             # include_media=False 时仅转纯文本，遇到含媒体消息直接跳过
             "include_media": {"type": "boolean"},
-            "only_unread": {
-                "type": "boolean", "title": "仅转发未读消息", "default": False,
-                "description": "开启后等待指定时间，只转发当前账号仍未读的消息；查询失败时跳过并记录日志。",
-            },
-            "unread_delay_seconds": {
-                "type": "integer", "title": "未读转发等待时间（秒）", "default": 30,
-                "minimum": 0, "maximum": 600,
-                "description": "仅在开启「仅转发未读消息」时生效，0 表示立即检查。等待期间已读则不转发。",
-            },
             # copy / quote 模式下可选的固定前缀
             "header": {"type": "string"},
         },

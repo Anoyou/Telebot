@@ -4,8 +4,6 @@
   - 四种源筛选：``all`` / ``peers``（chat_id 列表）/ ``keyword``（文本包含）/
     ``duplicate``（复读检测：统计不同用户发送相同文本的数量）
   - ``include_media`` 开关：False 时跳过含媒体的消息（仅文本）
-  - ``only_unread``：默认关闭；开启后由平台调度器等待 ``unread_delay_seconds``
-    （默认 30，0–600 秒），再按当前账号已读位置过滤；查询失败跳过并记录原因
   - 四种转发方式（``mode``）：
       * ``forward_native``  —— 原生转发，保留原作者署名（``message.forward_to``）
       * ``copy_text``       —— 仅复制文字内容，不显示原作者
@@ -30,8 +28,6 @@ rule.config 形如：
       "target_chat_id": -1001112223334,
       "mode": "forward_native" | "copy_text" | "quote" | "link_only",
       "include_media": true,
-      "only_unread": false,
-      "unread_delay_seconds": 30,
       "header": "[from team A]"
     }
 """
@@ -42,12 +38,9 @@ import asyncio
 import hashlib
 import time
 from collections import defaultdict
-from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from telethon import events
-from telethon.tl.functions.messages import GetPeerDialogsRequest
-from telethon.tl.types import InputDialogPeer
 
 # 模块化重构后统一用绝对 import，方便第三方插件解压到 data/plugins/installed/
 # 时也能复用同一套写法。
@@ -63,10 +56,6 @@ class ForwardPlugin(Plugin):
     display_name = "消息转发"
     owner_only = False
 
-    async def on_startup(self, ctx: PluginContext) -> None:
-        self._runtime_ctx = ctx
-        self._stopped = False
-
     async def on_message(
         self, ctx: PluginContext, event: events.NewMessage.Event
     ) -> None:
@@ -80,7 +69,7 @@ class ForwardPlugin(Plugin):
             return
 
         for rule in ctx.rules:
-            cfg: dict[str, Any] = dict(rule.config or {})
+            cfg: dict[str, Any] = rule.config or {}
             # 1) 源筛选
             if not _match_source(event, cfg):
                 continue
@@ -97,93 +86,43 @@ class ForwardPlugin(Plugin):
                     await ctx.log("warn", "[forward] 缺少 target_chat_id，跳过", rule_id=rule.id)
                 continue
 
-            # 延迟交给平台调度器，不能在有超时限制的 on_message 中 sleep。
-            if cfg.get("only_unread", False):
-                try:
-                    delay = min(600, max(0, int(cfg.get("unread_delay_seconds", 30))))
-                except (TypeError, ValueError):
-                    delay = 30
-                if delay:
-                    if ctx.scheduler is None:
-                        if ctx.log is not None:
-                            await ctx.log("warn", "[forward] 调度器不可用，跳过延迟转发", rule_id=rule.id)
-                        continue
-
-                    job_id = f"unread_{rule.id}_{event.chat_id}_{event.message.id}"
-                    async def callback(_job, _cfg=cfg, _target=target, _rule_id=rule.id, _job_id=job_id):
-                        try:
-                            # 保存规则会更新 startup ctx；旧目标、已停用或已删除规则不再补发。
-                            if not self._rule_is_current(ctx, _rule_id, _cfg):
-                                return
-                            await self._forward_with_retry(ctx, event, _cfg, _target, _rule_id)
-                        finally:
-                            ctx.scheduler.unregister(_job_id)
-
-                    ctx.scheduler.register(
-                        job_id,
-                        {"kind": "once", "fire_at": (
-                            datetime.now(UTC) + timedelta(seconds=delay)
-                        ).isoformat()},
-                        callback,
-                    )
-                    continue
-            await self._forward_with_retry(ctx, event, cfg, target, rule.id)
-
-    async def _forward_with_retry(
-        self, ctx: PluginContext, event: Any, cfg: dict[str, Any], target: int, rule_id: int
-    ) -> None:
-        """即时与调度发送共用同一条发送、重试路径。"""
-        # 真正发送 + FloodWait 自动重试一次
-        try:
-            await self._do_forward(ctx, event, cfg, target, rule_id)
-        except Exception as exc:  # noqa: BLE001
-            if _is_flood_wait(exc):
-                seconds = int(getattr(exc, "seconds", 0) or 0)
-                if ctx.log is not None:
-                    await ctx.log("warning", f"[forward] floodwait {seconds}s, sleep & retry once", rule_id=rule_id)
-                try:
-                    await ctx.engine.on_flood_wait("forward_message", exc)
-                except Exception:  # noqa: BLE001
-                    pass
-                await asyncio.sleep(min(seconds, 60))
-                try:
-                    await self._do_forward(ctx, event, cfg, target, rule_id)
-                except Exception as exc2:  # noqa: BLE001
+            # 4) 真正发送 + FloodWait 自动重试一次
+            try:
+                await self._do_forward(ctx, event, cfg, target)
+            except Exception as exc:  # noqa: BLE001
+                # FloodWait 单独处理：写 override + sleep + retry 一次
+                if _is_flood_wait(exc):
+                    seconds = int(getattr(exc, "seconds", 0) or 0)
                     if ctx.log is not None:
-                        await ctx.log("error", f"[forward] retry failed: {type(exc2).__name__}: {exc2}", rule_id=rule_id)
-            elif ctx.log is not None:
-                await ctx.log("error", f"[forward] failed: {type(exc).__name__}: {exc}", rule_id=rule_id)
-
-    async def on_shutdown(self, ctx: PluginContext) -> None:
-        self._stopped = True
-        if ctx.scheduler is not None:
-            ctx.scheduler.unregister_all()
-
-    def _rule_is_current(self, ctx: PluginContext, rule_id: int, cfg: dict[str, Any]) -> bool:
-        if getattr(self, "_stopped", False):
-            return False
-        current_ctx = getattr(self, "_runtime_ctx", ctx)
-        current = next((r for r in current_ctx.rules if r.id == rule_id), None)
-        return current is not None and current.enabled and (current.config or {}) == cfg
-
-    async def _is_unread(self, ctx: PluginContext, event: Any, target: int) -> bool:
-        """只读查询当前账号的已读位置，查询失败不能当作未读。"""
-        try:
-            peer = await event.get_input_chat()
-            # TraceClient 通过 __getattr__ 转发显式 __call__，不支持 client(request)。
-            result = await ctx.client.__call__(GetPeerDialogsRequest(peers=[InputDialogPeer(peer)]))
-            dialog = result.dialogs[0]
-            unread = int(event.message.id) > int(dialog.read_inbox_max_id)
-        except Exception as exc:  # noqa: BLE001
-            if ctx.log is not None:
-                await ctx.log("warn", "[forward] 已读状态查询失败，跳过转发",
-                              chat_id=event.chat_id, message_id=event.message.id,
-                              target_chat_id=target, error_type=type(exc).__name__)
-            return False
-        if not unread and ctx.log is not None:
-            await ctx.log("info", "[forward] 已读，跳过转发", chat_id=event.chat_id,
-                          message_id=event.message.id, target_chat_id=target)
-        return unread
+                        await ctx.log(
+                            "warning",
+                            f"[forward] floodwait {seconds}s, sleep & retry once",
+                            rule_id=rule.id,
+                        )
+                    # 把异常回灌给 engine（写 override + 标 floodwait 状态）
+                    try:
+                        await ctx.engine.on_flood_wait("forward_message", exc)
+                    except Exception:  # noqa: BLE001
+                        # engine 失败不影响 retry 流程
+                        pass
+                    await asyncio.sleep(min(seconds, 60))
+                    try:
+                        await self._do_forward(ctx, event, cfg, target)
+                    except Exception as exc2:  # noqa: BLE001
+                        if ctx.log is not None:
+                            await ctx.log(
+                                "error",
+                                f"[forward] retry failed: {type(exc2).__name__}: {exc2}",
+                                rule_id=rule.id,
+                            )
+                else:
+                    # 其它异常仅写日志，保证不影响后续规则
+                    if ctx.log is not None:
+                        await ctx.log(
+                            "error",
+                            f"[forward] failed: {type(exc).__name__}: {exc}",
+                            rule_id=rule.id,
+                        )
 
     async def _do_forward(
         self,
@@ -191,14 +130,8 @@ class ForwardPlugin(Plugin):
         event: events.NewMessage.Event,
         cfg: dict[str, Any],
         target: int,
-        rule_id: int,
     ) -> None:
         """实际执行一次转发：风控 acquire → 按 mode 走不同 send 路径。"""
-        if not self._rule_is_current(ctx, rule_id, cfg):
-            return
-        only_unread = cfg.get("only_unread", False)
-        if only_unread and not await self._is_unread(ctx, event, target):
-            return
         # ── 风控 acquire ──
         decision = await ctx.engine.acquire(
             ctx.account_id, "forward_message", peer_id=target
@@ -212,10 +145,6 @@ class ForwardPlugin(Plugin):
             return
         if decision.wait_seconds and decision.wait_seconds > 0:
             await asyncio.sleep(float(decision.wait_seconds))
-        if only_unread and not await self._is_unread(ctx, event, target):
-            return
-        if not self._rule_is_current(ctx, rule_id, cfg):
-            return
 
         mode = cfg.get("mode", "forward_native")
         header = cfg.get("header") or ""
@@ -237,10 +166,6 @@ class ForwardPlugin(Plugin):
             chat_label = public_entity_display_name(src, fallback_id=event.chat_id)
             body_text = event.message.text or "(no text)"
             body = f"{header}📨 来自 {chat_label}\n\n{body_text}"
-            if only_unread and not await self._is_unread(ctx, event, target):
-                return
-            if not self._rule_is_current(ctx, rule_id, cfg):
-                return
             await client.send_message(target, body)
         elif mode == "link_only":
             # 仅链接：公开超级群 / 频道生成 https://t.me/c/<bare>/<msg_id>；
@@ -519,7 +444,6 @@ def _dry_run_match(
 
     event = _FakeEvent(text, chat_id)
     kind = cfg.get("source_kind", "all")
-    unread_note = "；仅转发未读已开启，试运行无法判断真实已读状态，实际发送前会查询" if cfg.get("only_unread") else ""
 
     # duplicate 模式 dry-run 特殊处理
     if kind == "duplicate":
@@ -529,14 +453,14 @@ def _dry_run_match(
         threshold = int(cfg.get("duplicate_threshold") or 3)
         return (
             True,
-            f"[dry-run] 复读检测模式：实际运行时，当 {window}s 内 ≥{threshold} 个不同用户发送相同文本时触发转发，转发到 {target} (mode={mode})。同内容同群每天只触发一次。{unread_note}",
+            f"[dry-run] 复读检测模式：实际运行时，当 {window}s 内 ≥{threshold} 个不同用户发送相同文本时触发转发，转发到 {target} (mode={mode})。同内容同群每天只触发一次。",
         )
 
     if not _match_source(event, cfg):
         return False, None
     target = cfg.get("target_chat_id")
     mode = cfg.get("mode", "forward_native")
-    return True, f"would forward to {target} (mode={mode}){unread_note}"
+    return True, f"would forward to {target} (mode={mode})"
 
 
 PLUGIN_CLASS = ForwardPlugin
