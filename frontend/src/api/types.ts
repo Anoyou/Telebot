@@ -664,6 +664,10 @@ export interface ForwardRuleConfig {
   mode: ForwardMode;
   /** 默认 true；false 时跳过含媒体消息（仅文本通过） */
   include_media?: boolean;
+  /** 默认 false；开启后只转发 Telegram 判定仍未读的消息 */
+  only_unread?: boolean;
+  /** 仅 only_unread 开启时生效，默认 30 秒，范围 0–600 */
+  unread_delay_seconds?: number;
   /** copy / quote / link_only 模式下的固定前缀 */
   header?: string;
 }
