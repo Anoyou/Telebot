@@ -71,6 +71,7 @@ jobs:
       skip: ${{ steps.decide.outputs.skip }}
       tree: ${{ steps.decide.outputs.tree }}
       reason: ${{ steps.decide.outputs.reason }}
+      ui_skip: ${{ steps.decide.outputs.ui_skip }}
       durations: ${{ steps.durations.outputs.json }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -91,7 +92,7 @@ jobs:
           TREE=$(api "git/commits/$SHA" | jq -r .tree.sha)
           echo "被测提交 $SHA，文件树 $TREE"
           echo "tree=$TREE" >> "$GITHUB_OUTPUT"
-          SKIP=false; REASON="完整执行"
+          SKIP=false; UI_SKIP=false; REASON="完整执行"
           if [ "$EVENT" = "push" ]; then
             # 只认本仓库分支（非 fork）上「iOS」工作流成功结束的 run 留下的标记。
             for RUN in $(api "actions/artifacts?name=${GREEN_TREE_PREFIX}${TREE}&per_page=20" \
@@ -132,10 +133,21 @@ jobs:
                   REASON="服务器 OpenAPI 或插件 UI 契约变化影响 iOS 副本（需要同步 ios/ 副本），完整执行"
                 fi
               fi
+              # 第二十七轮：ios/ 里只改了由脚本生成的契约副本（openapi / contract / plugin-ui-widgets 三个 JSON），
+              # 且副本与源校验一致时，只编译与跑 Core 测试，跳过耗时的 UI 测试分片。
+              COPY_RE='^ios/TelePilotCore/Sources/TelePilotCore/(openapi|contract|plugin-ui-widgets)\.json$'
+              if [ "$SKIP" != "true" ] && [ -n "$IOS_FILES" ] && ! grep -qvE "$COPY_RE" <<<"$IOS_FILES"; then
+                if python3 ios/TelePilotCore/scripts/sync-openapi.py --check && python3 ios/TelePilotCore/scripts/sync-contract.py --check \
+                    && python3 scripts/sync-plugin-ui-widgets.py --check; then
+                  UI_SKIP=true
+                  REASON="ios/ 只改了自动生成的契约副本且与源一致，只编译与跑 Core 测试，跳过 UI 测试"
+                fi
+              fi
             fi
           fi
           echo "$REASON"
           echo "skip=$SKIP" >> "$GITHUB_OUTPUT"
+          echo "ui_skip=$UI_SKIP" >> "$GITHUB_OUTPUT"
           echo "reason=$REASON" >> "$GITHUB_OUTPUT"
 
       - name: 合并最近全绿 run 的 UI 用例耗时
@@ -307,7 +319,7 @@ jobs:
     # 第二十二轮：等编译 job 成功后才开始（不再与编译同时开始、持机空等产物）；编译失败或跳过时分片随之跳过。
     # 开始后模拟器在后台启动，同时下载并解包产物。
     needs: [plan, build]
-    if: needs.plan.outputs.skip != 'true'
+    if: needs.plan.outputs.skip != 'true' && needs.plan.outputs.ui_skip != 'true'
     runs-on: xcode-27
     timeout-minutes: 50
     strategy:
@@ -471,12 +483,18 @@ jobs:
           BUILD: ${{ needs.build.result }}
           VERIFY: ${{ needs.verify.result }}
           UI: ${{ needs.ui-tests.result }}
+          UI_SKIP: ${{ needs.plan.outputs.ui_skip }}
         run: |
           echo "判定=$PLAN 编译测试产物=$BUILD 校验与打包=$VERIFY UI 测试=$UI"
           if [ "$PLAN" = "success" ] && [ "$SKIP" = "true" ]; then
             echo "### 跳过重复测试" >> "$GITHUB_STEP_SUMMARY"
             echo "$REASON" | tee -a "$GITHUB_STEP_SUMMARY"
             exit 0
+          fi
+          if [ "$UI_SKIP" = "true" ] && [ "$UI" = "skipped" ]; then
+            echo "### 只编译，跳过 UI 测试" >> "$GITHUB_STEP_SUMMARY"
+            echo "$REASON" | tee -a "$GITHUB_STEP_SUMMARY"
+            UI=success
           fi
           if [ "$PLAN" != "success" ] || [ "$BUILD" != "success" ] || [ "$VERIFY" != "success" ] || [ "$UI" != "success" ]; then
             echo "::error::iOS 构建与测试未全部通过"
