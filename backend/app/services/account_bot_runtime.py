@@ -3180,6 +3180,16 @@ async def _handle_interaction_update(aid: int, token: str, update: dict[str, Any
     # 平台能力关闭后，即使遗留 polling task 仍在，也不再处理新更新。
     if not await _interaction_bot_capability_enabled():
         return
+    # AI 回复「inline 代发」（0.119.0）：带一次性令牌的 inline 查询 / 选中结果 / 占位按钮由中继处理，
+    # 不进交互规则与插件，也不受 inline_updates_enabled（插件 inline 投递开关）影响。
+    if incoming.inline_query_id or incoming.chosen_inline_result_id or incoming.callback_id:
+        from . import inline_ai_relay
+
+        try:
+            if await inline_ai_relay.handle_interaction_update(incoming):
+                return
+        except Exception:  # noqa: BLE001
+            log.warning("inline ai relay failed aid=%s", incoming.account_id, exc_info=True)
     flags = await _event_framework_flags()
     if (incoming.inline_query_id or incoming.chosen_inline_result_id) and not flags.get("inline_updates_enabled", True):
         return

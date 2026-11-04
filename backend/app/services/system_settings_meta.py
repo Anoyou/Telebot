@@ -125,6 +125,20 @@ SETTINGS_META: list[dict[str, Any]] = [
        also_in=[
            _loc("服务器设置 › 平台与模块", web=_WEB_PLATFORM, ios=IOS_AI_GLOBAL, ios_label="AI › AI 全局设置"),
        ]),
+    _p("ai_reply_style", "AI 回复方式",
+       "普通：直接把指令消息改成回答。inline 代发：借本账号的交互 Bot 发一条“你的名字 via @交互Bot”的消息，"
+       "再由交互 Bot 编辑成富文本答案（表格、引用等，非 Premium 也能用）。需要在 @BotFather 给交互 Bot 打开 "
+       "/setinline 和 /setinlinefeedback；群里禁止 inline、Bot 没开 inline 或超时会自动改用普通回复。",
+       "enum", "command", default="normal",
+       options=[
+           {"value": "normal", "label": "普通（默认）"},
+           {"value": "inline", "label": "inline 代发（交互 Bot 富文本）"},
+       ],
+       also_in=[_loc("服务器设置 › 平台与模块", web=_WEB_PLATFORM)]),
+    _p("ai_inline_delete_command", "inline 代发后删除指令消息",
+       "AI 回复方式为 inline 代发时，代发成功后删掉你发的那条 AI 指令消息，聊天里只留下答案。关掉则保留，答案回复在指令下面。",
+       "bool", "command", default=True,
+       also_in=[_loc("服务器设置 › 平台与模块", web=_WEB_PLATFORM)]),
     _p("command_echo_guard_previous_messages", "命令回声防误触",
        "群里有人原样复读一条指令时，往前看这么多条消息，避免被复读误触发。0 = 关闭。",
        "integer", "command", default=8, unit="条", minimum=0, maximum=50, zero_means="关闭",

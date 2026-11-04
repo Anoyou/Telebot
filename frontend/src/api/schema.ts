@@ -5311,6 +5311,11 @@ export interface components {
             /** Error */
             error?: string | null;
             /**
+             * Inline Feedback
+             * @description 仅交互 Bot：最近一次 AI inline 代发是否收到 chosen_inline_result。ok = inline 反馈已开启；missing = 等不到（多半没在 BotFather /setinlinefeedback 开启）；null = 还没用过。getMe 读不到这一项。
+             */
+            inline_feedback?: ("ok" | "missing") | null;
+            /**
              * Role
              * @enum {string}
              */
@@ -5320,7 +5325,10 @@ export interface components {
              * @description getMe.supports_guest_queries：是否已在 BotFather 开启访客模式（Guest Mode）；null 表示未知。
              */
             supports_guest_queries?: boolean | null;
-            /** Supports Inline Queries */
+            /**
+             * Supports Inline Queries
+             * @description getMe.supports_inline_queries：是否已在 BotFather 开启 inline 模式（/setinline）；null 表示未知。
+             */
             supports_inline_queries?: boolean | null;
             /** Username */
             username?: string | null;
@@ -14332,6 +14340,16 @@ export interface components {
              * @description 关掉后所有 AI 指令和插件里的 AI 调用都停用，配置保留。
              */
             ai_enabled?: boolean | null;
+            /**
+             * inline 代发后删除指令消息 · ai_inline_delete_command
+             * @description AI 回复方式为 inline 代发时，代发成功后删掉你发的那条 AI 指令消息，聊天里只留下答案。关掉则保留，答案回复在指令下面。
+             */
+            ai_inline_delete_command?: boolean | null;
+            /**
+             * AI 回复方式 · ai_reply_style
+             * @description 普通：直接把指令消息改成回答。inline 代发：借本账号的交互 Bot 发一条“你的名字 via @交互Bot”的消息，再由交互 Bot 编辑成富文本答案（表格、引用等，非 Premium 也能用）。需要在 @BotFather 给交互 Bot 打开 /setinline 和 /setinlinefeedback；群里禁止 inline、Bot 没开 inline 或超时会自动改用普通回复。
+             */
+            ai_reply_style?: ("normal" | "inline") | null;
             /** 服务器更新来源 · app_update_target */
             app_update_target?: components["schemas"]["_AppUpdateTargetPatch"] | null;
             /**

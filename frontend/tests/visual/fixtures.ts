@@ -621,7 +621,7 @@ function jsonResponse(pathname: string): unknown | undefined {
     profiles: [],
   };
   if (pathname === "/api/system/resource-dashboard") return emptyResourceDashboard;
-  if (pathname === "/api/system/settings") return { timezone: "Asia/Shanghai", login_security: {} };
+  if (pathname === "/api/system/settings") return { timezone: "Asia/Shanghai", ai_reply_style: "normal", ai_inline_delete_command: true, login_security: {} };
   if (pathname === "/api/system/settings/meta") return systemSettingsMetaFixture;
   if (pathname === "/api/system-agent/config") return {
     enabled: false, provider_id: null, model: null, fallback_provider_ids: [],

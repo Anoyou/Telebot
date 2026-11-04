@@ -6870,6 +6870,13 @@ class _LiveMessageOps:
             **kwargs,
         )
 
+    async def inline_via_bot(self, **kwargs: Any) -> dict[str, Any]:
+        """借本账号交互 Bot 的 inline 模式代发占位（能力 ``messages.inline_via_bot``，0.119.0）。"""
+
+        from ..inline_ai_reply import plugin_inline_via_bot
+
+        return await plugin_inline_via_bot(self._state.client, account_id=self._state.account_id, **kwargs)
+
     async def stream_edit(
         self,
         *,
@@ -6979,6 +6986,9 @@ class _InteractionEntryMessageOps(BufferedMessageOps):
 
     def stream_editor(self, **kwargs: Any) -> Any:
         return self._live.stream_editor(**kwargs)
+
+    async def inline_via_bot(self, **kwargs: Any) -> dict[str, Any]:
+        return await self._live.inline_via_bot(**kwargs)
 
     async def stream_edit(self, **kwargs: Any) -> dict[str, Any]:
         return await self._live.stream_edit(**kwargs)

@@ -390,8 +390,18 @@ class AccountBotCapabilityStatus(BaseModel):
         default=None,
         description="getMe.supports_guest_queries：是否已在 BotFather 开启访客模式（Guest Mode）；null 表示未知。",
     )
-    supports_inline_queries: bool | None = None
+    supports_inline_queries: bool | None = Field(
+        default=None,
+        description="getMe.supports_inline_queries：是否已在 BotFather 开启 inline 模式（/setinline）；null 表示未知。",
+    )
     can_read_all_group_messages: bool | None = None
+    inline_feedback: Literal["ok", "missing"] | None = Field(
+        default=None,
+        description=(
+            "仅交互 Bot：最近一次 AI inline 代发是否收到 chosen_inline_result。ok = inline 反馈已开启；"
+            "missing = 等不到（多半没在 BotFather /setinlinefeedback 开启）；null = 还没用过。getMe 读不到这一项。"
+        ),
+    )
     error: str | None = None
 
 

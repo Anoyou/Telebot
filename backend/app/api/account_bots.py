@@ -622,6 +622,10 @@ async def get_account_bot_capabilities(
     flags = await account_bot_runtime._event_framework_flags()  # noqa: SLF001
     management = await _bot_capability_status("management", management_token, refresh=refresh)
     interaction = await _bot_capability_status("interaction", interaction_token, refresh=refresh)
+    if interaction.configured:
+        from ..services import inline_ai_relay
+
+        interaction.inline_feedback = await inline_ai_relay.read_feedback_status(aid)  # type: ignore[assignment]
     return AccountBotCapabilitiesResponse(
         account_id=aid,
         guest_updates_enabled=bool(flags.get("guest_updates_enabled", True)),

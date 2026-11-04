@@ -19,7 +19,7 @@ import asyncio
 import os
 from datetime import datetime
 from datetime import time as dtime
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Query, status
 from pydantic import BaseModel, Field
@@ -650,6 +650,12 @@ async def get_system_settings(db: DBSession, _user: CurrentUser) -> dict[str, An
         ai_context_messages = max(0, min(20, int(ai_context_source)))
     except (TypeError, ValueError):
         ai_context_messages = 0
+    from ..services import inline_ai_relay
+
+    ai_reply_style = inline_ai_relay.normalize_reply_style(await _get_setting(db, "ai_reply_style", None))
+    ai_inline_delete_command = inline_ai_relay.normalize_delete_command(
+        await _get_setting(db, "ai_inline_delete_command", None)
+    )
     tz = str(tz_val.get("value", "")) if isinstance(tz_val, dict) else str(tz_val)
     llm_limits = llm_val if isinstance(llm_val, dict) else {}
     payout_limits = payout_val if isinstance(payout_val, dict) else {}
@@ -687,6 +693,8 @@ async def get_system_settings(db: DBSession, _user: CurrentUser) -> dict[str, An
         "ai_enabled": ai_enabled,
         "command_echo_guard_previous_messages": _normalize_command_echo_guard_limit(echo_guard_source),
         "ai_context_messages": ai_context_messages,
+        "ai_reply_style": ai_reply_style,
+        "ai_inline_delete_command": ai_inline_delete_command,
         "login_security": auth_login_security.login_security_config_to_dict(login_security),
         "llm_limits": {
             "per_minute": max(0, int(llm_limits.get("per_minute", 0) or 0)),
@@ -900,6 +908,8 @@ class _SettingsPatch(BaseModel):
     command_prefix_required: bool | None = _meta_field("command_prefix_required")
     command_echo_guard_previous_messages: int | None = _meta_field("command_echo_guard_previous_messages")
     ai_context_messages: int | None = _meta_field("ai_context_messages")
+    ai_reply_style: Literal["normal", "inline"] | None = _meta_field("ai_reply_style")
+    ai_inline_delete_command: bool | None = _meta_field("ai_inline_delete_command")
     login_security: _LoginSecurityPatch | None = Field(default=None, title=_meta_group_title("login_security"))
     remote_plugin_update_check: _RemotePluginUpdateCheckPatch | None = Field(default=None, title=_meta_group_title("remote_plugin_update_check"))
     app_update_target: _AppUpdateTargetPatch | None = Field(default=None, title=_meta_group_title("app_update_target"))
@@ -1104,6 +1114,13 @@ async def patch_system_settings(payload: _SettingsPatch, db: DBSession, user: Cu
             detail={"value": context_messages},
         )
         await _broadcast_reload()
+    if payload.ai_reply_style is not None:
+        await _set_setting(db, "ai_reply_style", {"value": payload.ai_reply_style})
+        await _audit(db, user.id, "set_ai_reply_style", target="system", detail={"value": payload.ai_reply_style})
+    if payload.ai_inline_delete_command is not None:
+        enabled = bool(payload.ai_inline_delete_command)
+        await _set_setting(db, "ai_inline_delete_command", {"enabled": enabled})
+        await _audit(db, user.id, "set_ai_inline_delete_command", target="system", detail={"enabled": enabled})
     if payload.llm_limits is not None:
         current = await _get_setting(db, "llm_limits", {})
         if not isinstance(current, dict):

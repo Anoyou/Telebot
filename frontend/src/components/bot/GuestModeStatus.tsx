@@ -85,11 +85,43 @@ export function GuestModeStatus({ aid, role }: { aid: number; role: GuestModeRol
       {runtimeDisabled ? (
         <p className="text-xs text-warning">服务器设置里的“访客消息（Guest Mode）”运行开关已关闭，当前不会处理访客消息。</p>
       ) : null}
+      {role === "interaction" && status?.configured && !status.error ? (
+        <InlineReplyDiagnostics status={status} />
+      ) : null}
       <p className="text-xs leading-5 text-muted-foreground">
         {status?.supports_guest_queries
           ? `${copy.label}可以在未加入的群聊或私聊里被 @提及（或被回复）时回复一次。${copy.usage}`
           : `开启方法：在 Telegram 打开 @BotFather 的 Mini App，进入这个 ${copy.label} 的设置并启用 “Guest Mode”，然后点“重新检测”。开启后：${copy.usage}`}
       </p>
+    </div>
+  );
+}
+
+/** AI 回复「inline 代发」需要的两项 BotFather 设置：inline 模式（getMe 可读）与 inline 反馈（按最近一次实际结果）。 */
+function InlineReplyDiagnostics({ status }: { status: AccountBotCapabilityStatus }) {
+  const inlineOn = status.supports_inline_queries;
+  const feedback = status.inline_feedback;
+  const inlineTone: VisualTone = inlineOn === true ? "success" : inlineOn === false ? "warn" : "neutral";
+  const inlineValue = inlineOn === true ? "已开启" : inlineOn === false ? "未开启" : "未知";
+  const feedbackTone: VisualTone = feedback === "ok" ? "success" : feedback === "missing" ? "warn" : "neutral";
+  const feedbackValue = feedback === "ok" ? "正常" : feedback === "missing" ? "未收到回执" : "还没用过";
+  return (
+    <div className="space-y-1.5 border-t border-border/50 pt-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <SignalPill tone={inlineTone} label="Inline 模式（AI inline 代发）" value={inlineValue} />
+        <SignalPill tone={feedbackTone} label="Inline 反馈" value={feedbackValue} />
+      </div>
+      {inlineOn === false || feedback === "missing" ? (
+        <p className="text-xs leading-5 text-warning">
+          {inlineOn === false
+            ? "AI 回复方式选了“inline 代发”时需要它：在 @BotFather 发送 /setinline，选这个交互 Bot，随便填一个占位提示语。"
+            : "最近一次 inline 代发没等到回执，已自动改用普通回复：在 @BotFather 发送 /setinlinefeedback，选这个交互 Bot，再选 Enabled。"}
+        </p>
+      ) : (
+        <p className="text-xs leading-5 text-muted-foreground">
+          只有服务器参数“AI 回复方式”选了“inline 代发”时才用到：需要在 @BotFather 用 /setinline 打开 inline 模式、用 /setinlinefeedback 打开 inline 反馈。
+        </p>
+      )}
     </div>
   );
 }

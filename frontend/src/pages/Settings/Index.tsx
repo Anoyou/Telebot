@@ -175,6 +175,8 @@ export function SettingsIndex() {
 
   const [prefix, setPrefix] = useState("");
   const [aiContextMessages, setAiContextMessages] = useState("0");
+  const [aiReplyStyle, setAiReplyStyle] = useState<"normal" | "inline">("normal");
+  const [aiInlineDeleteCommand, setAiInlineDeleteCommand] = useState(true);
   const [commandPrefixRequired, setCommandPrefixRequired] = useState(true);
   const [aiEnabled, setAiEnabled] = useState(true);
   const [timezone, setTimezone] = useState("Asia/Shanghai");
@@ -207,6 +209,8 @@ export function SettingsIndex() {
     if (settingsQ.data) {
       setPrefix(settingsQ.data.command_prefix ?? ",");
       setAiContextMessages(String(settingsQ.data.ai_context_messages ?? 0));
+      setAiReplyStyle(settingsQ.data.ai_reply_style === "inline" ? "inline" : "normal");
+      setAiInlineDeleteCommand(settingsQ.data.ai_inline_delete_command ?? true);
       setCommandPrefixRequired(settingsQ.data.command_prefix_required ?? true);
       setAiEnabled(settingsQ.data.ai_enabled ?? true);
       setTimezone(settingsQ.data.timezone ?? "Asia/Shanghai");
@@ -277,6 +281,18 @@ export function SettingsIndex() {
     onSuccess: (data) => {
       setAiContextMessages(String(data.ai_context_messages ?? 0));
       toast.success("AI 指令上下文条数已保存（worker 将热加载）");
+      qc.invalidateQueries({ queryKey: ["system", "settings"] });
+    },
+    onError: (err) => toast.error(getErrMsg(err)),
+  });
+
+  const saveAiReply = useMutation({
+    mutationFn: (patch: { ai_reply_style?: "normal" | "inline"; ai_inline_delete_command?: boolean }) =>
+      patchSystemSettings(patch),
+    onSuccess: (data) => {
+      setAiReplyStyle(data.ai_reply_style === "inline" ? "inline" : "normal");
+      setAiInlineDeleteCommand(data.ai_inline_delete_command ?? true);
+      toast.success("AI 回复方式已保存，下一条 AI 指令生效");
       qc.invalidateQueries({ queryKey: ["system", "settings"] });
     },
     onError: (err) => toast.error(getErrMsg(err)),
@@ -564,6 +580,42 @@ export function SettingsIndex() {
                   {!saveAiContextMessages.isPending ? <Save className="mr-2 h-4 w-4" /> : null}
                   保存
                 </Button>
+              </div>
+              <div className="mt-4 max-w-xl space-y-3 rounded-md border bg-muted/20 px-3 py-3">
+                <div className="space-y-1.5">
+                  <div>
+                    <Label htmlFor="ai-reply-style">AI 回复方式</Label>
+                    <ParamKey k="ai_reply_style" />
+                  </div>
+                  <Select
+                    id="ai-reply-style"
+                    value={aiReplyStyle}
+                    disabled={saveAiReply.isPending}
+                    onChange={(e) => {
+                      const next = e.target.value === "inline" ? "inline" : "normal";
+                      setAiReplyStyle(next);
+                      saveAiReply.mutate({ ai_reply_style: next });
+                    }}
+                  >
+                    <option value="normal">普通（直接把指令消息改成回答）</option>
+                    <option value="inline">inline 代发（交互 Bot 富文本）</option>
+                  </Select>
+                  <p className="text-xs leading-5 text-muted-foreground">
+                    inline 代发：你发 AI 指令后，会出现一条“你的名字 via @交互Bot”的消息，由交互 Bot 编辑成带表格的富文本答案，非 Premium 也能用。
+                    需要先在 @BotFather 给交互 Bot 执行 /setinline 和 /setinlinefeedback（选 Enabled）；群里禁止 inline、Bot 没开 inline 或等不到回执时，会自动改用普通回复。
+                  </p>
+                </div>
+                <div className="flex items-start justify-between gap-4">
+                  <div className="space-y-1">
+                    <div className="text-sm font-medium">inline 代发后删除指令消息<ParamKey k="ai_inline_delete_command" /></div>
+                    <p className="text-xs leading-5 text-muted-foreground">开启后聊天里只留下答案；关闭则保留你的指令，答案回复在它下面。</p>
+                  </div>
+                  <Switch
+                    checked={aiInlineDeleteCommand}
+                    disabled={saveAiReply.isPending || aiReplyStyle !== "inline"}
+                    onCheckedChange={(checked) => saveAiReply.mutate({ ai_inline_delete_command: checked })}
+                  />
+                </div>
               </div>
               <div className="mt-4 flex max-w-xl items-start justify-between gap-4 rounded-md border bg-muted/20 px-3 py-3">
                 <div className="space-y-1">

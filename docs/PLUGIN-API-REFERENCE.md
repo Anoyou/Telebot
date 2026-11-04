@@ -2888,6 +2888,7 @@ __all__ = ["PLUGIN_CLASS", "MANIFEST"]
 | 业务下沉（Plugin API 1.5）：`interaction.entry_policy`（`interaction_entries[].entry_policy`）、`provides.ai.image_backend`（`plugin.json` 的 `provides`）、`ui.rule_editor`（`ui.rule_editor` + 卡片 slot `interaction.rule_editor`） | 0.112.0-beta.2（旧宿主忽略这三项声明；顶层字段照写即可两边一致） |
 | 旧入口 key 声明（Plugin API 1.6）：`interaction.legacy_entry_keys`（`interaction_entries[].legacy_entry_keys`，见 [旧入口 key 声明](#旧入口-key-声明legacy_entry_keys)） | 0.112.0-beta.3（旧宿主忽略该字段、照旧走兜底入口表，结论相同；不要为它提高最低版本） |
 | 契约版本探测（Plugin API 1.7）：`runtime.contract_version`（`ctx.capabilities.contract_version`、`GET /api/plugins/capabilities` 的 `contract_version`，见 [契约版本探测](#契约版本探测contract_version)） | 0.115.0-beta.2（旧宿主没有该属性，用 `getattr(..., None)` 回退） |
+| AI 回复 inline 代发（Plugin API 1.8）：`messages.inline_via_bot`（`ctx.messages.inline_via_bot(...)`，见 [AI 回复 inline 代发](#ai-回复-inline-代发inline_via_bot)） | 0.119.0-beta.1（旧宿主没有该方法，用 `ctx.capabilities.has(...)` 探测后回退到原来的占位） |
 
 - 想兼容更旧的平台时不要提高最低版本，而是先探测再用，见下一节 [能力协商与 Plugin API 版本](#能力协商与-plugin-api-版本)。
 - 声明 `requires_platform_capabilities` 的 `manifest.py` 在 0.72 之前的平台上导入就会失败，因此现在所有新插件的最低版本至少是 `0.72.0-beta.2`。
@@ -2918,7 +2919,7 @@ else:  # 旧宿主：退回旧属性探测
 | `caps.version(name)` | 能力版本；不支持或当前 facade 不适用时为 `0` |
 | `caps.names()` / `caps.as_dict()` | 当前上下文支持的全部能力 |
 | `name in caps` | 等价于 `caps.has(name)` |
-| `caps.plugin_api` / `caps.host_version` | 宿主 Plugin API 版本（如 `1.7`）与 TelePilot 版本 |
+| `caps.plugin_api` / `caps.host_version` | 宿主 Plugin API 版本（如 `1.8`）与 TelePilot 版本 |
 | `caps.contract_version` | 宿主承诺的插件稳定契约版本（如 `1.0`）；0.115.0-beta.2 起，旧宿主没有该属性，用 `getattr(caps, "contract_version", None)` |
 
 - `messages.*` 能力与当前 `ctx.messages` facade 有关：同一插件在交互 Bot 入口（`entry`）、命令 / 后台任务（`live`）、UserBot Event Bus 投递（`buffered`）里拿到的 facade 不同。例如 `messages.live_inline_edit` 在 `buffered` facade 上为 `False`，因为那里只能缓冲动作、没有实时 apply。`runtime.*` / `manifest.*` 是宿主级能力，与 facade 无关。
@@ -2961,7 +2962,7 @@ else:  # 旧宿主：退回旧属性探测
 
 **Plugin API 版本（`plugin_api`）**
 
-- 宿主提供的 Plugin API 版本是 `MAJOR.MINOR`（当前 `1.7`；`1.0` = 0.107.0，`1.1` = 0.108.0 通用交互原语，`1.2` = 0.109.0 消息管线中间件，`1.3` = 0.110.0 声明式 UI，`1.4` = 0.112.0-beta.1 插件页面与菜单，`1.5` = 0.112.0-beta.2 业务下沉：`entry_policy` / `provides` / `ui.rule_editor`，`1.6` = 0.112.0-beta.3 旧入口 key 声明 `legacy_entry_keys`（稳定契约 1.0 的冻结基线），`1.7` = 0.115.0-beta.2 契约版本探测 `contract_version`；0.110.0-beta.2 的表单契约 2 / 通用规则页、0.111.0-beta.1 的转账通知解析扩展点 `payment_sources` 都是同一 MINOR 内的向后兼容新增，没有再升版本）：新增向后兼容的接口 / 能力只升 MINOR；删除或改变已有接口语义才升 MAJOR，并且要先在 [弃用登记](#弃用登记) 里公告至少一个 minor 宿主版本。
+- 宿主提供的 Plugin API 版本是 `MAJOR.MINOR`（当前 `1.8`；`1.0` = 0.107.0，`1.1` = 0.108.0 通用交互原语，`1.2` = 0.109.0 消息管线中间件，`1.3` = 0.110.0 声明式 UI，`1.4` = 0.112.0-beta.1 插件页面与菜单，`1.5` = 0.112.0-beta.2 业务下沉：`entry_policy` / `provides` / `ui.rule_editor`，`1.6` = 0.112.0-beta.3 旧入口 key 声明 `legacy_entry_keys`（稳定契约 1.0 的冻结基线），`1.7` = 0.115.0-beta.2 契约版本探测 `contract_version`，`1.8` = 0.119.0-beta.1 AI 回复 inline 代发 `inline_via_bot`；0.110.0-beta.2 的表单契约 2 / 通用规则页、0.111.0-beta.1 的转账通知解析扩展点 `payment_sources` 都是同一 MINOR 内的向后兼容新增，没有再升版本）：新增向后兼容的接口 / 能力只升 MINOR；删除或改变已有接口语义才升 MAJOR，并且要先在 [弃用登记](#弃用登记) 里公告至少一个 minor 宿主版本。
 - 插件可以在 `plugin.json` 里声明兼容范围，宿主在执行插件代码前校验，不满足时拒绝加载并说明原因：
 
 ```json
@@ -2971,6 +2972,33 @@ else:  # 旧宿主：退回旧属性探测
   支持 `"1"` / `"1.x"`（1.0 ≤ v < 2.0）、`"1.2"`（等同 `^1.2`）、`"^1.2"`、`"~1.2"`（1.2 ≤ v < 1.3）、`">=1.1"`、`">=1.0,<2"`（逗号或空格取交集）、`"*"`。写法无法识别时拒绝加载并提示示例。
 - **`plugin_api` 只写在 `plugin.json`，不要写进 `Manifest(...)`**：0.107 之前的宿主 `Manifest` 不认识这个参数，写进 `manifest.py` 会在旧宿主上导入失败；宿主加载时会自动把 `plugin.json` 里的值补到 Manifest 上。旧宿主会忽略 `plugin.json` 里的这个字段，所以它不能代替 `min_telepilot_version`。
 - 插件不声明 `plugin_api` 时视为兼容任意版本（与 0.107 之前一致）。
+
+### AI 回复 inline 代发（inline_via_bot）
+
+Plugin API 1.8，TelePilot 0.119.0-beta.1+，能力 `messages.inline_via_bot`（常驻 `ctx.messages` 与交互入口 facade；UserBot Event Bus 的缓冲 facade 没有）。
+
+非 Premium 账号的 UserBot 发不了 Rich Message，交互 Bot 可以。服务器参数「AI 回复方式」= `inline` 时，插件可以在**账号本人**触发 AI 指令后，借本账号绑定的交互 Bot 的 inline 模式发一条“用户名 via @交互Bot”的占位，拿到 `inline_message_id` 后用既有的 `edit_message(inline_message_id=…, rich_message=…)` 或 `ctx.messages.stream_editor(inline_message_id=…)` 编辑成富文本：
+
+```python
+caps = getattr(ctx, "capabilities", None)
+via = getattr(ctx.messages, "inline_via_bot", None)
+if via is not None and caps is not None and caps.has("messages.inline_via_bot"):
+    res = await via(
+        chat_id=chat_id,                 # Bot API 形式的会话 ID（超级群 -100…）
+        requester_user_id=sender_id,     # 触发者；不是账号本人时返回 reason="not_owner"
+        reply_to_message_id=reply_to,    # 可选：引用的消息
+        delete_message_id=trigger_id,    # 可选：成功后按「inline 代发后删除指令消息」删除触发消息
+        placeholder="🤔",                # 占位文本；parse_mode 默认 "html"
+    )
+    if res["ok"]:
+        inline_message_id = res["inline_message_id"]
+    # res["ok"] is False：什么都没发出，照原来的方式回复（reason 说明原因）
+```
+
+- 返回 `{"ok", "inline_message_id", "message_id", "deleted_message", "reason"}`；常见 `reason`：`style_normal`（设置为普通）、`not_owner`、`no_interaction_bot`、`bot_inline_disabled`（BotFather 没开 `/setinline`）、`chat_send_inline_forbidden`（群禁止 inline bot）、`chosen_inline_result_timeout`（8 秒内没收到回执，多半没开 `/setinlinefeedback`，已发的占位会被删掉）。
+- `respect_setting=False` 可忽略「AI 回复方式」设置；交互 Bot 事件的 message_id 只在超级群 / 频道与 UserBot 一致，普通群默认不引用、不删除（`same_message_ids=True` 可显式声明一致）。
+- 占位带一个“AI 生成中…”按钮（没有按钮 Telegram 不给 `inline_message_id`）；最终编辑时不传 `reply_markup` 即去掉按钮。
+- 旧宿主没有这个方法 / 能力：插件不要提高 `min_telepilot_version`，探测不到就走原来的占位。
 
 ### 契约版本探测（contract_version）
 

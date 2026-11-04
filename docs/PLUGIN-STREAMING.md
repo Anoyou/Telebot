@@ -22,7 +22,7 @@
 | 传入 | 模式 | 行为 |
 | --- | --- | --- |
 | `chat_id` + `message_id` | `edit` | 编辑已发出的占位（例如「🤔」） |
-| `inline_message_id` | `edit` | 编辑 inline 消息（访客模式的占位） |
+| `inline_message_id` | `edit` | 编辑 inline 消息（访客模式的占位，或 0.119.0 起 `ctx.messages.inline_via_bot` 代发的“用户名 via @Bot”占位，见 [AI 回复 inline 代发](PLUGIN-API-REFERENCE.md#ai-回复-inline-代发inline_via_bot)） |
 | 只有私聊 `chat_id`（> 0） | `draft` | Bot API 草稿流式显示；`finish()` 清空草稿并发送真实消息 |
 
 `mode="auto"`（默认）按上表自动选择；群聊没有占位时会抛 `ValueError`（群里不能用草稿）。

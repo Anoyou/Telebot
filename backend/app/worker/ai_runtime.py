@@ -1,6 +1,7 @@
 """AI runtime extracted from worker command dispatch."""
 from __future__ import annotations
 
+import contextvars
 import logging
 from dataclasses import dataclass
 from typing import Any
@@ -713,6 +714,7 @@ async def _render_and_deliver_text_result(
     replied_text: str | None,
     routing_note: str | None,
     self_msg: Any,
+    inline_handle: Any = None,
 ) -> None:
     from ..services.llm_format import DEFAULT_TEMPLATE, render_output
     from .command import _send_long_message, acquire_direct_userbot_action_rate_limit
@@ -765,6 +767,18 @@ async def _render_and_deliver_text_result(
         escape_format = None
 
     body = render_output(template, render_ctx, escape_format=escape_format)
+
+    if inline_handle is not None:
+        # inline 代发：交互 Bot 把占位编辑成 Rich Message。模板里的 HTML 标签原样保留（Rich Markdown
+        # 允许内嵌 HTML），回答保持 Markdown 以便表格转成原生表格；被拒时退回 HTML 正文，再退纯文本。
+        rich_markdown = render_output(template, render_ctx, escape_format=None)
+        html_body = body if output_format == "html" else None
+        plain_body = (
+            f"{result.text}\n\n— {model_display} · in {result.input_tokens} / out {result.output_tokens}"
+        )
+        used = await inline_handle.finish(markdown=rich_markdown, html=html_body, plain=plain_body)
+        log.info("[ai-inline] delivered account=%s format=%s", account_id, used)
+        return
 
     # parse_mode：telethon 1.36 sanitize_parse_mode 接受 md/markdown/htm/html
     # 我们这里用 'html' / 'md' / None（plain）
@@ -855,7 +869,103 @@ async def _render_and_deliver_text_result(
                 pass
 
 
+_INLINE_HANDLE: contextvars.ContextVar[Any] = contextvars.ContextVar("ai_inline_reply_handle", default=None)
+
+
+def _inline_reply_eligible(
+    *,
+    event: Any,
+    command_mode: str,
+    native_image_mode: bool,
+    has_self_image: bool,
+    has_self_audio: bool,
+) -> bool:
+    """inline 代发只用于账号本人发出的纯文本 chat / search 指令（不删带图 / 语音的指令消息）。"""
+
+    if command_mode not in {"chat", "search"} or native_image_mode:
+        return False
+    if has_self_image or has_self_audio:
+        return False
+    return bool(getattr(event, "out", False)) and getattr(event, "chat_id", None) is not None
+
+
+async def _maybe_start_inline_reply(
+    client: Any,
+    event: Any,
+    *,
+    ctx: Any,
+    account_id: int,
+    replied: Any,
+) -> Any:
+    """按「AI 回复方式」设置尝试 inline 代发；不可用时返回 ``None``（走普通回复，不重复发送）。"""
+
+    from ..services import inline_ai_relay
+    from .inline_ai_reply import start_inline_reply
+
+    pref = await inline_ai_relay.read_reply_preference()
+    if pref.get("style") != inline_ai_relay.REPLY_STYLE_INLINE:
+        return None
+    delete_command = bool(pref.get("delete_command", True))
+    replied_id = getattr(replied, "id", None) if replied is not None else None
+    if replied_id is not None:
+        reply_to = int(replied_id)
+    elif not delete_command:
+        reply_to = getattr(event, "id", None)
+    else:
+        reply_to = None
+    try:
+        handle, reason = await start_inline_reply(
+            client,
+            account_id=account_id,
+            owner_user_id=getattr(ctx, "self_tg_user_id", None) or getattr(event, "sender_id", None),
+            chat_id=event.chat_id,
+            reply_to_message_id=reply_to,
+        )
+    except Exception:  # noqa: BLE001
+        log.warning("[ai-inline] start failed account=%s; using normal reply", account_id, exc_info=True)
+        return None
+    if handle is None:
+        log.info("[ai-inline] fallback to normal reply account=%s reason=%s", account_id, reason)
+        return None
+    if delete_command:
+        try:
+            await event.delete()
+        except Exception:  # noqa: BLE001
+            log.debug("[ai-inline] delete command message failed", exc_info=True)
+    return handle
+
+
 async def invoke(
+    client,
+    event,
+    args,
+    tpl: dict[str, Any],
+    account_id: int,
+    triggered_by_account_id: int | None = None,
+) -> None:
+    """``,ai`` 入口；inline 代发启用时保证占位最终被编辑或删掉，不留下孤立的「思考中」。"""
+
+    token = _INLINE_HANDLE.set(None)
+    failed = False
+    try:
+        await _invoke_impl(client, event, args, tpl, account_id, triggered_by_account_id)
+    except BaseException:
+        failed = True
+        raise
+    finally:
+        handle = _INLINE_HANDLE.get()
+        _INLINE_HANDLE.reset(token)
+        if handle is not None and not handle.finalized:
+            try:
+                if failed:
+                    await handle.edit_text("✗ AI 回复中断，请稍后再试")
+                else:
+                    await handle.discard()
+            except Exception:  # noqa: BLE001
+                log.debug("[ai-inline] finalize failed", exc_info=True)
+
+
+async def _invoke_impl(
     client,
     event,
     args,
@@ -1223,10 +1333,24 @@ async def invoke(
 
     # 占位回显，避免用户以为没反应（注意：edit 失败也要继续，非致命）
     # 一律简化为 "思考中..."；具体路由决策最终在 footer 的 {routing_note} 里展示
-    try:
-        await event.edit("思考中...")
-    except Exception:  # noqa: BLE001
-        pass
+    inline_handle = None
+    if _inline_reply_eligible(
+        event=event,
+        command_mode=command_mode,
+        native_image_mode=native_image_mode,
+        has_self_image=has_self_image,
+        has_self_audio=has_self_audio,
+    ):
+        inline_handle = await _maybe_start_inline_reply(client, event, ctx=ctx, account_id=account_id, replied=replied)
+    if inline_handle is not None:
+        _INLINE_HANDLE.set(inline_handle)
+        # 之后的错误提示 / 最终答案都编辑 inline 代发消息（交互 Bot editMessageText）。
+        event = inline_handle.proxy(event)
+    else:
+        try:
+            await event.edit("思考中...")
+        except Exception:  # noqa: BLE001
+            pass
 
     # 使用 LLMProviderDTO 替代手搓 fake ORM row
     provider_dtos = _build_provider_dtos(
@@ -1356,4 +1480,5 @@ async def invoke(
         replied_text=replied_text,
         routing_note=routing_note,
         self_msg=self_msg,
+        inline_handle=inline_handle,
     )

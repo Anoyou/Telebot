@@ -1054,6 +1054,10 @@ export interface SystemSettings {
   command_echo_guard_previous_messages?: number;
   /** ,ai 携带的最近聊天消息条数；0 = 不带上下文 */
   ai_context_messages?: number;
+  /** AI 指令回复方式：normal = 直接编辑指令消息；inline = 借交互 Bot inline 代发富文本 */
+  ai_reply_style?: "normal" | "inline";
+  /** inline 代发成功后是否删除原指令消息；默认 true */
+  ai_inline_delete_command?: boolean;
   /** IANA 时区标识，如 "Asia/Shanghai"；默认 Asia/Shanghai */
   timezone?: string;
   remote_plugin_update_check?: {
