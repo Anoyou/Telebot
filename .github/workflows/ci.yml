@@ -222,8 +222,8 @@ jobs:
     name: 浏览器
     needs: change-scope
     if: needs.change-scope.outputs.browser == 'true'
-    # macos-15 标准托管机器近期排队后直接被取消，改用与 iOS 相同、可用的 xcode-27 macOS 机器。
-    runs-on: xcode-27
+    # macOS 机器近期排队拿不到（排队后直接被取消），而浏览器用例不做截图比对，改用 Ubuntu，也不再和 iOS 争 macOS 并发。
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
@@ -243,7 +243,7 @@ jobs:
 
       - name: Install pinned Playwright Chromium
         working-directory: frontend
-        run: pnpm exec playwright install chromium
+        run: pnpm exec playwright install --with-deps chromium
 
       - name: Run accessibility tests
         working-directory: frontend
