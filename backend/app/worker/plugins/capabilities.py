@@ -451,6 +451,18 @@ CAPABILITIES += (
     ),
 )
 
+# ── 0.119.0：AI 回复 inline 代发 ──
+CAPABILITIES += (
+    Capability(
+        name="messages.inline_via_bot",
+        since="0.119.0-beta.1",
+        plugin_api="1.8",
+        facades=frozenset({FACADE_LIVE, FACADE_ENTRY}),
+        summary="ctx.messages.inline_via_bot(chat_id=, requester_user_id=, …) 借本账号交互 Bot 的 inline 模式发一条“用户名 via @Bot”占位并返回 inline_message_id，之后用 edit_message(inline_message_id=…) / stream_editor 编辑成富文本；遵循服务器参数「AI 回复方式」，只接受账号本人触发，不可用时返回 ok=False 与原因（插件照旧回复）",
+        doc=f"{_DOC}#ai-回复-inline-代发inline_via_bot",
+    ),
+)
+
 CAPABILITY_INDEX: dict[str, Capability] = {item.name: item for item in CAPABILITIES}
 if len(CAPABILITY_INDEX) != len(CAPABILITIES):  # pragma: no cover - 注册表自检
     raise RuntimeError("插件能力注册表存在重名条目")
