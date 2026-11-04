@@ -25,6 +25,14 @@
 
 ## [Unreleased]
 
+## [0.119.0-beta.1] - 2026-11-04 · minor（次版本预发布） · AI 回复 inline 代发
+
+- 新增「AI 回复方式」：`普通`（默认，和以前一样直接把指令消息改成回答）/ `inline 代发`。选 inline 代发后，账号本人发 `,ai 问题` 时 UserBot 通过本账号绑定的交互 Bot 的 inline 模式（GetInlineBotResults + SendInlineBotResult，`hide_via=False`，引用被回复的消息）发出一条「用户名 via @交互Bot」的占位，再由交互 Bot 用 `editMessageText(inline_message_id, rich_message)` 编辑成富文本答案（表格沿用紧凑 + 边框 + 斑马纹，Rich 被拒退回 HTML、再退纯文本），非 Premium 账号也能看到原生表格。
+- inline 代发的安全与回退：查询携带一次性令牌（Redis，120 秒有效，只接受账号本人 user_id 发起，用过即作废），交互 Bot 返回带按钮的占位（`cache_time=0`、`is_personal`）；群里禁止 inline bot（`CHAT_SEND_INLINE_FORBIDDEN` 等）、交互 Bot 没开 inline 模式、8 秒内等不到 `chosen_inline_result` 时自动改用普通回复，已发出的占位会先删掉，不会重复发送。新增参数「inline 代发后删除指令消息」（默认开启）。
+- 两个参数在 Web「服务器设置 › 平台与模块 › 指令前缀」卡片与服务器参数页（指令组）可改，iOS 在「服务器参数 › 全部服务器参数 › 指令」按服务器元数据自动显示，无需更新 App。
+- 交互 Bot 的访客模式状态卡新增「Inline 模式」「Inline 反馈」两项诊断：inline 模式读 getMe，inline 反馈按最近一次代发是否收到回执显示，并提示在 @BotFather 用 `/setinline`、`/setinlinefeedback` 开启；`GET /api/accounts/{aid}/bot/capabilities` 的交互 Bot 新增 `inline_feedback` 字段。
+- 插件能力 `messages.inline_via_bot`（Plugin API 1.8）：`ctx.messages.inline_via_bot(chat_id=, requester_user_id=, …)` 让插件在账号本人触发时借交互 Bot 代发占位并拿到 `inline_message_id`，再用既有 `edit_message(inline_message_id=…)` / `stream_editor` 编辑；遵循「AI 回复方式」设置，不可用时返回 `ok=False` 与原因，旧插件行为不变。
+
 ## [0.118.0-beta.3] - 2026-11-04 · patch（补丁预发布） · 修复插件敏感配置保存校验失败
 
 - 修复修改插件开关时已保存的加密 Token 被直接交给 `on_config_validate` 校验、导致 Web 与 App 保存返回 HTTP 400 的问题；配置钩子及其上下文改用内存中的解密值，持久化继续加密，未修改的密钥保持原有信封。

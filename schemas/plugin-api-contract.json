@@ -2,7 +2,7 @@
   "$comment": "TelePilot 插件稳定契约快照。由 scripts/export-plugin-contract.py 从运行时内省生成，不要手改；破坏性检查以 plugin-api-contract-1.0.frozen.json 为基线（docs/PLUGIN-CONTRACT.md）。",
   "contract_version": "1.0",
   "baseline_plugin_api": "1.6",
-  "plugin_api_version": "1.7",
+  "plugin_api_version": "1.8",
   "hooks": [
     {
       "name": "on_startup",
@@ -1496,6 +1496,22 @@
         ]
       },
       {
+        "name": "inline_via_bot",
+        "kind": "async",
+        "params": [
+          {
+            "name": "self",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          },
+          {
+            "name": "kwargs",
+            "kind": "VAR_KEYWORD",
+            "has_default": false
+          }
+        ]
+      },
+      {
         "name": "payout",
         "kind": "async",
         "params": [
@@ -2069,6 +2085,22 @@
             "name": "bot_api_extra",
             "kind": "KEYWORD_ONLY",
             "has_default": true
+          }
+        ]
+      },
+      {
+        "name": "inline_via_bot",
+        "kind": "async",
+        "params": [
+          {
+            "name": "self",
+            "kind": "POSITIONAL_OR_KEYWORD",
+            "has_default": false
+          },
+          {
+            "name": "kwargs",
+            "kind": "VAR_KEYWORD",
+            "has_default": false
           }
         ]
       },
@@ -4249,6 +4281,19 @@
         "facades": [],
         "deprecated_in": null,
         "removed_in": null
+      },
+      {
+        "name": "messages.inline_via_bot",
+        "version": 1,
+        "since": "0.119.0-beta.1",
+        "plugin_api": "1.8",
+        "legacy_attr": null,
+        "facades": [
+          "entry",
+          "live"
+        ],
+        "deprecated_in": null,
+        "removed_in": null
       }
     ],
     "ctx_capabilities_has": {
@@ -4360,6 +4405,7 @@
         "messages.callback_routing",
         "messages.guest_reply_markup",
         "messages.inline_rich_edit",
+        "messages.inline_via_bot",
         "messages.live_inline_edit",
         "messages.render_profile",
         "messages.rich_table_compact",
@@ -4409,6 +4455,7 @@
         "messages.callback_routing",
         "messages.guest_reply_markup",
         "messages.inline_rich_edit",
+        "messages.inline_via_bot",
         "messages.live_inline_edit",
         "messages.render_profile",
         "messages.rich_table_compact",
