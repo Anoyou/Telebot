@@ -3404,6 +3404,8 @@ async def on_config_saved(self, ctx, config: dict, scope: str) -> None:
 - `scope` 为 `"account"` 或 `"global"`；`config` 已通过 JSON Schema 校验、已合并保留原密钥（明文只在内存里）。
 - `on_config_validate` 同步调用、超时 2 秒；超时或抛异常时**放行保存**（fail-open）并记入钩子运行统计。返回 `errors` 时保存接口返回 400（`code: CONFIG_VALIDATION_ERROR`，`detail.fields` 为逐字段原因），Web / iOS 配置页显示「字段: 原因」。
 - `on_config_saved` 在保存成功后后台调用、超时 10 秒，返回值与异常都不影响保存结果。
+- 两个钩子的 `config` 参数与 `ctx.config` 均为本作用域配置：宿主在调用前按 `config_schema` 严格解密保留的 `secret:v1:` 信封（包括嵌套敏感字段），插件不应把密文作为新 Token 校验。校验返回的规范化配置仍通过原保存链路加密落库，API 继续遮罩敏感字段。
+- 宿主无法解密敏感配置时拒绝保存前校验，并跳过保存后通知；这不改变插件钩子超时或抛异常时的 fail-open 行为。配置钩子异常统计只记录异常类型；返回的字段错误会脱敏已知配置凭据，插件也不得在错误、日志或非敏感字段中回显凭据。
 
 #### 声明式卡片（ui.cards）
 

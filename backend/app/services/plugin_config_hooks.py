@@ -29,6 +29,12 @@ from ..db.models.feature import Feature
 from ..db.models.plugin import InstalledPlugin
 from ..worker.plugins.base import Plugin
 from ..worker.plugins.plugin_ui import hook_timeout_seconds
+from .plugin_config_secrets import (
+    PluginConfigDecryptionError,
+    decrypt_config_secrets,
+    mask_config_secrets,
+    redact_exact_secrets,
+)
 
 log = logging.getLogger(__name__)
 
@@ -68,7 +74,7 @@ async def call_plugin_hook(
 
     started = time.monotonic()
     outcome = plugin_stats.OUTCOME_OK
-    error: BaseException | None = None
+    error: BaseException | str | None = None
     plugin = plugin_cls()
     try:
         return await asyncio.wait_for(
@@ -77,7 +83,8 @@ async def call_plugin_hook(
         )
     except Exception as exc:
         outcome = plugin_stats.classify_exception(exc)
-        error = exc
+        # 配置 hook 接触明文凭据，插件异常可能原样回显；统计只保留类型。
+        error = type(exc).__name__ if hook in {"on_config_validate", "on_config_saved"} else exc
         raise
     finally:
         plugin_stats.record_hook(
@@ -122,6 +129,24 @@ def _normalize_errors(raw: Any) -> dict[str, str]:
     return {}
 
 
+def _hook_secret_values(config: dict[str, Any], schema: dict[str, Any] | None) -> list[str]:
+    """沿现有遮罩结果收集原值，覆盖 schema 嵌套数组与加密信封。"""
+    values: list[str] = []
+
+    def collect(raw: Any, masked: Any) -> None:
+        if isinstance(raw, dict):
+            for key, value in raw.items():
+                collect(value, masked[str(key)])
+        elif isinstance(raw, list):
+            for value, mask in zip(raw, masked, strict=True):
+                collect(value, mask)
+        elif isinstance(raw, str) and raw and raw != masked:
+            values.append(raw)
+
+    collect(config, mask_config_secrets(config, schema=schema))
+    return values
+
+
 async def run_config_validate(
     db: AsyncSession,
     *,
@@ -139,11 +164,20 @@ async def run_config_validate(
         return ConfigValidateOutcome(config=plugin_compat.normalize_legacy_feature_config(feature.key, current))
     from .plugin_config_actions import build_main_process_context
 
+    schema = (feature.manifest or {}).get("config_schema")
+    try:
+        runtime_config = decrypt_config_secrets(current, schema=schema, strict=True)
+    except PluginConfigDecryptionError:
+        # 宿主解密错误不属于插件异常的 fail-open 契约，不能把信封当新凭据。
+        return ConfigValidateOutcome(
+            config=current, errors={"_": "敏感配置无法解密，请检查 MASTER_KEY 或重新填写凭据"}
+        )
+    known_secrets = _hook_secret_values(current, schema) + _hook_secret_values(runtime_config, schema)
     try:
         ctx = await build_main_process_context(
-            db, account=account, feature=feature, plugin_cls=plugin_cls, config=current, readonly_storage=True
+            db, account=account, feature=feature, plugin_cls=plugin_cls, config=runtime_config, readonly_storage=True
         )
-        result = await call_plugin_hook(plugin_cls, ctx, "on_config_validate", dict(current), scope, event_type=scope)
+        result = await call_plugin_hook(plugin_cls, ctx, "on_config_validate", dict(runtime_config), scope, event_type=scope)
     except Exception as exc:  # noqa: BLE001 - 校验钩子失败放行
         reason = "timeout" if isinstance(exc, TimeoutError) else type(exc).__name__
         log.warning("插件 %s on_config_validate 失败（%s），已放行保存", feature.key, reason)
@@ -153,10 +187,14 @@ async def run_config_validate(
     if not isinstance(result, Mapping):
         log.warning("插件 %s on_config_validate 返回值不是对象，已忽略", feature.key)
         return ConfigValidateOutcome(config=current, handled=True)
-    errors = _normalize_errors(result.get("errors"))
     next_config = result.get("config")
     if isinstance(next_config, Mapping):
         current = dict(next_config)
+        known_secrets.extend(_hook_secret_values(current, schema))
+    errors = {
+        redact_exact_secrets(key, known_secrets): redact_exact_secrets(message, known_secrets)
+        for key, message in _normalize_errors(result.get("errors")).items()
+    }
     return ConfigValidateOutcome(config=current, errors=errors, handled=True)
 
 
@@ -182,21 +220,28 @@ async def schedule_config_saved(
     from .plugin_config_actions import build_main_process_context
 
     try:
+        runtime_config = decrypt_config_secrets(
+            dict(config or {}), schema=(feature.manifest or {}).get("config_schema"), strict=True
+        )
+    except PluginConfigDecryptionError:
+        log.warning("插件 %s on_config_saved 跳过：敏感配置无法解密", feature.key)
+        return None
+    try:
         ctx = await build_main_process_context(
             db,
             account=account,
             feature=feature,
             plugin_cls=plugin_cls,
-            config=dict(config or {}),
+            config=runtime_config,
             readonly_storage=True,
         )
     except Exception:  # noqa: BLE001
-        log.debug("on_config_saved 上下文构造失败 plugin=%s", feature.key, exc_info=True)
+        log.debug("on_config_saved 上下文构造失败 plugin=%s", feature.key)
         return None
 
     async def _run() -> None:
         try:
-            await call_plugin_hook(plugin_cls, ctx, "on_config_saved", dict(config or {}), scope, event_type=scope)
+            await call_plugin_hook(plugin_cls, ctx, "on_config_saved", dict(runtime_config), scope, event_type=scope)
         except Exception as exc:  # noqa: BLE001 - 后台通知失败只记统计与日志
             log.warning("插件 %s on_config_saved 失败：%s", feature.key, type(exc).__name__)
 
